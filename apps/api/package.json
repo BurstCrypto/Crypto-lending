@@ -1,0 +1,93 @@
+{
+  "name": "@crypto-lending/api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Crypto Lending versioned NestJS API",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": "^22.13.0 || >=24.0.0"
+  },
+  "scripts": {
+    "build": "nest build",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "start": "nest start",
+    "start:dev": "nest start --watch",
+    "start:debug": "nest start --debug --watch",
+    "start:prod": "node dist/main.js",
+    "worker:outbox": "tsx src/infrastructure/outbox/outbox-worker.cli.ts",
+    "worker:outbox:prod": "node dist/infrastructure/outbox/outbox-worker.cli.js",
+    "lint": "eslint \"{src,test}/**/*.ts\" --max-warnings=0",
+    "lint:fix": "npm run lint -- --fix",
+    "test": "jest --runInBand",
+    "test:watch": "jest --watch",
+    "test:cov": "jest --coverage --runInBand",
+    "test:e2e": "jest --config ./test/jest-e2e.json --runInBand",
+    "test:integration": "jest --config ./test/infrastructure/jest.config.json --runInBand",
+    "openapi:generate": "ts-node src/openapi/generate-openapi.ts",
+    "db:migrate": "tsx src/infrastructure/database/migration.cli.ts up",
+    "db:rollback": "tsx src/infrastructure/database/migration.cli.ts down",
+    "db:status": "tsx src/infrastructure/database/migration.cli.ts status",
+    "db:migrate:prod": "node dist/infrastructure/database/migration.cli.js up",
+    "db:rollback:prod": "node dist/infrastructure/database/migration.cli.js down",
+    "db:status:prod": "node dist/infrastructure/database/migration.cli.js status",
+    "check": "npm run lint && npm run typecheck && npm run build && npm run test && npm run test:e2e && npm run openapi:generate"
+  },
+  "dependencies": {
+    "@aws-sdk/client-sqs": "^3.1113.0",
+    "@nestjs/common": "^11.2.1",
+    "@nestjs/core": "^11.2.1",
+    "@nestjs/platform-express": "^11.2.1",
+    "@nestjs/swagger": "^11.4.7",
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.14.2",
+    "dotenv": "^17.4.2",
+    "ioredis": "^6.0.0",
+    "pg": "^8.23.0",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@nestjs/cli": "^11.0.24",
+    "@nestjs/testing": "^11.2.1",
+    "@types/jest": "^29.5.14",
+    "@types/node": "^22.0.0",
+    "@types/pg": "^8.23.1",
+    "@types/supertest": "^7.0.0",
+    "eslint": "^10.0.0",
+    "jest": "^29.7.0",
+    "supertest": "^7.2.2",
+    "ts-jest": "^29.4.12",
+    "ts-node": "^10.9.2",
+    "tsx": "^4.23.12",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.67.0"
+  },
+  "jest": {
+    "moduleFileExtensions": [
+      "js",
+      "json",
+      "ts"
+    ],
+    "rootDir": "src",
+    "testRegex": ".*\\.spec\\.ts$",
+    "transform": {
+      "^.+\\.ts$": [
+        "ts-jest",
+        {
+          "tsconfig": "<rootDir>/../tsconfig.json"
+        }
+      ]
+    },
+    "collectCoverageFrom": [
+      "**/*.ts",
+      "!main.ts",
+      "!openapi/generate-openapi.ts"
+    ],
+    "coverageDirectory": "../coverage",
+    "setupFiles": [
+      "<rootDir>/../test/setup-env.ts"
+    ],
+    "testEnvironment": "node"
+  }
+}

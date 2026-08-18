@@ -1,0 +1,34 @@
+{
+  "name": "crypto-lending",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "npm@11.6.4",
+  "description": "Multi-wallet crypto lending platform",
+  "workspaces": [
+    "apps/*"
+  ],
+  "engines": {
+    "node": "^22.13.0 || >=24.0.0",
+    "npm": ">=11.0.0"
+  },
+  "scripts": {
+    "dev:web": "npm run dev --workspace @crypto-lending/web",
+    "dev:api": "npm run start:dev --workspace @crypto-lending/api",
+    "worker:outbox": "npm run worker:outbox --workspace @crypto-lending/api",
+    "worker:outbox:prod": "npm run worker:outbox:prod --workspace @crypto-lending/api",
+    "build": "npm run build --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "test:integration": "npm run test:integration --workspace @crypto-lending/api",
+    "openapi:generate": "npm run openapi:generate --workspace @crypto-lending/api",
+    "db:migrate": "npm run db:migrate --workspace @crypto-lending/api",
+    "db:rollback": "npm run db:rollback --workspace @crypto-lending/api",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "devDependencies": {
+    "prettier": "^3.9.6",
+    "typescript": "^5.9.3"
+  }
+}

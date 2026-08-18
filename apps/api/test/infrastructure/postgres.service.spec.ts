@@ -1,0 +1,93 @@
+import type { Pool, PoolClient, QueryResult, QueryResultRow } from 'pg';
+
+import { PostgresService } from '../../src/infrastructure/database/postgres.service';
+
+function result(rows: QueryResultRow[] = []): QueryResult {
+  return {
+    command: 'SELECT',
+    rowCount: rows.length,
+    oid: 0,
+    fields: [],
+    rows,
+  };
+}
+
+describe('PostgresService', () => {
+  function setup(): {
+    service: PostgresService;
+    query: jest.Mock<Promise<QueryResult>, [string, unknown[]?]>;
+    release: jest.Mock<void, []>;
+  } {
+    const query = jest.fn<Promise<QueryResult>, [string, unknown[]?]>();
+    query.mockResolvedValue(result());
+    const release = jest.fn<void, []>();
+    const client = { query, release } as unknown as PoolClient;
+    const pool = {
+      connect: jest.fn().mockResolvedValue(client),
+      query: jest.fn().mockResolvedValue(result()),
+      end: jest.fn().mockResolvedValue(undefined),
+    } as unknown as Pool;
+    return { service: new PostgresService(pool), query, release };
+  }
+
+  it('commits work and routes repository queries through the active client', async () => {
+    const { service, query, release } = setup();
+
+    const value = await service.withTransaction(async () => {
+      await service.query('INSERT INTO example(id) VALUES ($1)', ['one']);
+      return 'committed';
+    });
+
+    expect(value).toBe('committed');
+    expect(query.mock.calls.map(([sql]) => sql)).toEqual([
+      'BEGIN ISOLATION LEVEL READ COMMITTED READ WRITE',
+      'INSERT INTO example(id) VALUES ($1)',
+      'COMMIT',
+    ]);
+    expect(release).toHaveBeenCalledTimes(1);
+  });
+
+  it('rolls back and preserves the original application error', async () => {
+    const { service, query, release } = setup();
+    const failure = new Error('write rejected');
+
+    await expect(
+      service.withTransaction(async () => {
+        throw failure;
+      }),
+    ).rejects.toBe(failure);
+
+    expect(query.mock.calls.map(([sql]) => sql)).toEqual([
+      'BEGIN ISOLATION LEVEL READ COMMITTED READ WRITE',
+      'ROLLBACK',
+    ]);
+    expect(release).toHaveBeenCalledTimes(1);
+  });
+
+  it('retries a serializable transaction after SQLSTATE 40001', async () => {
+    const { service, query } = setup();
+    const serializationFailure = Object.assign(new Error('retry transaction'), {
+      code: '40001',
+    });
+    let attempt = 0;
+
+    const value = await service.withTransaction(
+      async () => {
+        attempt += 1;
+        if (attempt === 1) {
+          throw serializationFailure;
+        }
+        return 42;
+      },
+      { isolationLevel: 'serializable', maxRetries: 1, retryDelayMs: 0 },
+    );
+
+    expect(value).toBe(42);
+    expect(query.mock.calls.map(([sql]) => sql)).toEqual([
+      'BEGIN ISOLATION LEVEL SERIALIZABLE READ WRITE',
+      'ROLLBACK',
+      'BEGIN ISOLATION LEVEL SERIALIZABLE READ WRITE',
+      'COMMIT',
+    ]);
+  });
+});
