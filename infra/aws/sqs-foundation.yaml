@@ -1,0 +1,56 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Crypto Lending application job queue and dead-letter queue
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    AllowedPattern: '[a-z0-9-]+'
+  MaxReceiveCount:
+    Type: Number
+    Default: 3
+    MinValue: 1
+    MaxValue: 100
+
+Resources:
+  JobDeadLetterQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub 'crypto-lending-${EnvironmentName}-jobs-dlq'
+      KmsMasterKeyId: alias/aws/sqs
+      MessageRetentionPeriod: 1209600
+      RedriveAllowPolicy:
+        redrivePermission: byQueue
+        sourceQueueArns:
+          - !Sub 'arn:${AWS::Partition}:sqs:${AWS::Region}:${AWS::AccountId}:crypto-lending-${EnvironmentName}-jobs'
+      Tags:
+        - Key: application
+          Value: crypto-lending
+        - Key: environment
+          Value: !Ref EnvironmentName
+
+  JobQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub 'crypto-lending-${EnvironmentName}-jobs'
+      KmsMasterKeyId: alias/aws/sqs
+      MessageRetentionPeriod: 345600
+      ReceiveMessageWaitTimeSeconds: 10
+      VisibilityTimeout: 30
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt JobDeadLetterQueue.Arn
+        maxReceiveCount: !Ref MaxReceiveCount
+      Tags:
+        - Key: application
+          Value: crypto-lending
+        - Key: environment
+          Value: !Ref EnvironmentName
+
+Outputs:
+  JobQueueUrl:
+    Value: !Ref JobQueue
+  JobQueueArn:
+    Value: !GetAtt JobQueue.Arn
+  JobDeadLetterQueueUrl:
+    Value: !Ref JobDeadLetterQueue
+  JobDeadLetterQueueArn:
+    Value: !GetAtt JobDeadLetterQueue.Arn

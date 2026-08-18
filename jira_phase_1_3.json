@@ -1,0 +1,742 @@
+[
+  {
+    "local_id": "EP-FND",
+    "parent_local_id": null,
+    "issue_type": "Epic",
+    "summary": "Platform Foundation & Authentication",
+    "description": "**Business value:** Establishes a secure, repeatable base for every customer and financial feature.\n\n**Technical requirements:** Next.js and NestJS foundations; PostgreSQL, Redis, and SQS clients; AWS infrastructure as code; managed authentication; account profiles; server-enforced RBAC.\n\n**Acceptance criteria:**\n- Web and API services deploy reproducibly.\n- A user can register, authenticate, sign out, and manage a basic profile.\n- Protected APIs deny unauthorized roles.\n\n**Dependencies:** None.\n\n**Owner:** Platform, frontend, backend, infrastructure, security.",
+    "dependencies": [],
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-1", "platform-foundation"]
+  },
+  {
+    "local_id": "FND-001",
+    "parent_local_id": "EP-FND",
+    "issue_type": "Task",
+    "summary": "Scaffold web and API services",
+    "description": "**Business value:** Gives all teams a consistent application base.\n\n**Technical requirements:** Bootstrap Next.js and NestJS with strict TypeScript, lint/test scripts, a versioned API prefix, OpenAPI generation, and health/version endpoints.\n\n**Acceptance criteria:**\n- A clean checkout builds and tests both applications.\n- Health and version endpoints return 200 and OpenAPI is generated in CI.\n\n**Dependencies:** None.\n\n**Owner:** Platform/full-stack.",
+    "dependencies": [],
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-1", "platform-foundation"]
+  },
+  {
+    "local_id": "FND-002",
+    "parent_local_id": "EP-FND",
+    "issue_type": "Task",
+    "summary": "Establish persistence and job-state clients",
+    "description": "**Business value:** Enables durable data and reliable asynchronous processing.\n\n**Technical requirements:** Add PostgreSQL migrations and transaction support plus shared Redis and SQS clients with retry and dead-letter configuration.\n\n**Acceptance criteria:**\n- A blank database migrates successfully and rollback is tested outside production.\n- Redis and SQS health checks pass and a failed sample job reaches the dead-letter queue.\n\n**Dependencies:** `FND-001`.\n\n**Owner:** Backend/infrastructure.",
+    "dependencies": ["FND-001"],
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-1", "platform-foundation"]
+  },
+  {
+    "local_id": "FND-003",
+    "parent_local_id": "EP-FND",
+    "issue_type": "Task",
+    "summary": "Provision the AWS application baseline",
+    "description": "**Business value:** Makes environments repeatable and reviewable.\n\n**Technical requirements:** Versioned infrastructure as code for ECS/Fargate, RDS, ElastiCache, SQS, KMS, Secrets Manager, CloudWatch, private networking, and least-privilege service roles.\n\n**Acceptance criteria:**\n- A fresh non-production environment is created without manual resource setup.\n- IaC state and secrets are not committed, and deployed services report health.\n\n**Dependencies:** `FND-001`.\n\n**Owner:** Infrastructure/DevOps.",
+    "dependencies": ["FND-001"],
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-1", "platform-foundation", "aws"]
+  },
+  {
+    "local_id": "FND-004",
+    "parent_local_id": "EP-FND",
+    "issue_type": "Task",
+    "summary": "Add continuous integration and deployment",
+    "description": "**Business value:** Reduces regression and release risk.\n\n**Technical requirements:** Reproducible builds, unit/integration gates, migration validation, artifact versioning, controlled non-production deployment, and rollback.\n\n**Acceptance criteria:**\n- A passing change deploys to non-production and a failed check blocks deployment.\n- The prior versioned artifact can be redeployed.\n\n**Dependencies:** `FND-003`.\n\n**Owner:** Infrastructure/DevOps.",
+    "dependencies": ["FND-003"],
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-1", "platform-foundation", "cicd"]
+  },
+  {
+    "local_id": "FND-005",
+    "parent_local_id": "EP-FND",
+    "issue_type": "Story",
+    "summary": "Implement the account and profile domain",
+    "description": "**Business value:** Gives each customer a stable identity for wallets and financial records.\n\n**Technical requirements:** Immutable user ID; validated contact and declared-residency fields; audit timestamps; authenticated read/update API. Eligibility must default to `UNKNOWN` and is not inferred here.\n\n**Acceptance criteria:**\n- A user can read and update permitted profile fields.\n- Cross-user access and invalid country/contact values are rejected.\n\n**Dependencies:** `FND-002`.\n\n**Owner:** Backend/full-stack.",
+    "dependencies": ["FND-002"],
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-1", "platform-foundation", "accounts"]
+  },
+  {
+    "local_id": "FND-006",
+    "parent_local_id": "EP-FND",
+    "issue_type": "Story",
+    "summary": "Integrate authentication and secure sessions",
+    "description": "**Business value:** Protects customer accounts without building proprietary identity infrastructure.\n\n**Technical requirements:** Managed OIDC/OAuth integration, secure session cookies or equivalent mobile-safe flow, CSRF protection, token rotation, logout revocation, rate limits, and authentication audit hooks.\n\n**Acceptance criteria:**\n- Registration or login maps to one platform account.\n- Expired, revoked, replayed, or invalid sessions/callbacks are rejected.\n\n**Dependencies:** `FND-005`.\n\n**Owner:** Backend/security.",
+    "dependencies": ["FND-005"],
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-1", "platform-foundation", "authentication"]
+  },
+  {
+    "local_id": "FND-007",
+    "parent_local_id": "EP-FND",
+    "issue_type": "Story",
+    "summary": "Build authentication UI and route guards",
+    "description": "**Business value:** Lets customers enter and leave the product safely.\n\n**Technical requirements:** Accessible registration/login/logout UI, generic errors, session restoration, protected-route redirects, and no browser storage of bearer tokens when secure cookie sessions are used.\n\n**Acceptance criteria:**\n- A user can register, sign in, refresh an authenticated page, and sign out.\n- Unauthenticated access redirects safely and errors do not disclose account existence.\n\n**Dependencies:** `FND-006`.\n\n**Owner:** Frontend.",
+    "dependencies": ["FND-006"],
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-1", "platform-foundation", "authentication"]
+  },
+  {
+    "local_id": "FND-008",
+    "parent_local_id": "EP-FND",
+    "issue_type": "Task",
+    "summary": "Enforce application roles and permissions",
+    "description": "**Business value:** Prevents unauthorized access to customer and operational data.\n\n**Technical requirements:** Customer, support, operations, and administrator roles; deny-by-default server policies; permission test matrix; denied-attempt audit logging.\n\n**Acceptance criteria:**\n- Every protected API has an explicit authorization policy.\n- Customer credentials cannot reach operations APIs and denied attempts are logged.\n\n**Dependencies:** `FND-006`.\n\n**Owner:** Backend/security.",
+    "dependencies": ["FND-006"],
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-1", "platform-foundation", "authorization"]
+  },
+  {
+    "local_id": "EP-LED",
+    "parent_local_id": null,
+    "issue_type": "Epic",
+    "summary": "Internal Ledger Foundations",
+    "description": "**Business value:** Supplies the audit trail and consistency controls required before any value movement.\n\n**Technical requirements:** Exact-precision amounts, append-only journals, reversals instead of mutation, required transaction states, idempotent writes, and external correlation identifiers.\n\n**Acceptance criteria:**\n- Required movement and fee data can be recorded and queried.\n- Invalid transitions, journal mutation, and duplicate value writes are prevented.\n\n**Dependencies:** `EP-FND`.\n\n**Owner:** Ledger/backend, database, security.",
+    "dependencies": ["EP-FND"],
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-1", "internal-ledger"]
+  },
+  {
+    "local_id": "LED-001",
+    "parent_local_id": "EP-LED",
+    "issue_type": "Spike",
+    "summary": "Define the immutable ledger accounting model",
+    "description": "**Business value:** Prevents an accounting design that cannot support audit or reconciliation.\n\n**Technical requirements:** Decide account/journal structure, exact-unit rules, USD valuation snapshots, fee treatment, external references, and reversal semantics for direct, swap, bridge, failed, and reversed transactions.\n\n**Acceptance criteria:**\n- An approved ADR defines balanced examples for all required transaction outcomes.\n- Precision, debit/credit, and reversal rules are unambiguous.\n\n**Dependencies:** `FND-002`.\n\n**Owner:** Backend/ledger/finance controls.",
+    "dependencies": ["FND-002"],
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-1", "internal-ledger"]
+  },
+  {
+    "local_id": "LED-002",
+    "parent_local_id": "EP-LED",
+    "issue_type": "Task",
+    "summary": "Implement the append-only ledger schema",
+    "description": "**Business value:** Preserves trustworthy financial history.\n\n**Technical requirements:** Exact numeric/base-unit storage, account and journal tables, foreign keys, application-role immutability controls, and linked reversal entries.\n\n**Acceptance criteria:**\n- Balanced journals commit and unbalanced journals roll back.\n- Direct update/delete fails for the application role and reversals retain the original entry.\n\n**Dependencies:** `LED-001`.\n\n**Owner:** Backend/database.",
+    "dependencies": ["LED-001"],
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-1", "internal-ledger"]
+  },
+  {
+    "local_id": "LED-003",
+    "parent_local_id": "EP-LED",
+    "issue_type": "Task",
+    "summary": "Implement the transaction lifecycle state machine",
+    "description": "**Business value:** Prevents ambiguous or impossible financial states.\n\n**Technical requirements:** Enforce `CREATED`, `QUOTED`, `USER_APPROVED`, `SUBMITTED`, `PENDING`, `SETTLED`, `FAILED`, and `REVERSED` through an explicit transition table with actor, reason, and timestamp history.\n\n**Acceptance criteria:**\n- Allowed transitions succeed once.\n- Illegal transitions return a domain error without modifying state.\n\n**Dependencies:** `LED-002`.\n\n**Owner:** Backend/ledger.",
+    "dependencies": ["LED-002"],
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-1", "internal-ledger", "transaction-state"]
+  },
+  {
+    "local_id": "LED-004",
+    "parent_local_id": "EP-LED",
+    "issue_type": "Task",
+    "summary": "Add idempotent ledger writes and a transactional outbox",
+    "description": "**Business value:** Prevents duplicate value records and lost downstream events.\n\n**Technical requirements:** Scoped idempotency keys, request fingerprints, uniqueness constraints, and an outbox committed atomically with journals.\n\n**Acceptance criteria:**\n- Retrying identical input returns the original result and creates no second journal.\n- Reusing a key with different input conflicts, and outbox events exist only for committed journals.\n\n**Dependencies:** `LED-002`, `LED-003`.\n\n**Owner:** Backend/platform.",
+    "dependencies": ["LED-002","LED-003"],
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-1", "internal-ledger", "idempotency"]
+  },
+  {
+    "local_id": "LED-005",
+    "parent_local_id": "EP-LED",
+    "issue_type": "Story",
+    "summary": "Expose permissioned ledger audit queries",
+    "description": "**Business value:** Enables support, operations, and reconciliation to explain every movement.\n\n**Technical requirements:** Read-only filters by user, wallet, state, external ID, transaction hash, and time with cursor pagination and integrity metadata.\n\n**Acceptance criteria:**\n- Authorized operations users can trace a transaction to its journal and external references.\n- Customers can query only their own records and fixture totals reconcile exactly.\n\n**Dependencies:** `LED-004`, `FND-008`.\n\n**Owner:** Backend/ledger.",
+    "dependencies": ["LED-004","FND-008"],
+    "priority": "High",
+    "labels": ["crypto-lending-mvp", "phase-1", "internal-ledger", "audit"]
+  },
+  {
+    "local_id": "EP-OPS",
+    "parent_local_id": null,
+    "issue_type": "Epic",
+    "summary": "Admin & Operations Console Foundations",
+    "description": "**Business value:** Gives staff controlled visibility and ownership of financial exceptions.\n\n**Technical requirements:** Separate protected admin surface, audited access, read-only user and transaction views, and durable review cases.\n\n**Acceptance criteria:**\n- Authorized staff can locate users and transactions and manage review cases.\n- Customer accounts cannot access the console and sensitive activity is audited.\n\n**Dependencies:** `EP-FND`, `EP-LED`, `EP-SEC`.\n\n**Owner:** Operations tooling/full-stack/security.",
+    "dependencies": ["EP-FND","EP-LED","EP-SEC"],
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-1", "admin-operations"]
+  },
+  {
+    "local_id": "OPS-001",
+    "parent_local_id": "EP-OPS",
+    "issue_type": "Task",
+    "summary": "Secure and audit operations access",
+    "description": "**Business value:** Limits exposure of sensitive customer and financial data.\n\n**Technical requirements:** Operations/admin authorization, a separate route namespace, step-up-ready authentication, and immutable audit events containing actor, resource, action, and result.\n\n**Acceptance criteria:**\n- Customer and insufficient support roles are denied.\n- Each admin read or write produces an audit event.\n\n**Dependencies:** `FND-008`, `SEC-003`.\n\n**Owner:** Backend/security.",
+    "dependencies": ["FND-008","SEC-003"],
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-1", "admin-operations", "audit"]
+  },
+  {
+    "local_id": "OPS-002",
+    "parent_local_id": "EP-OPS",
+    "issue_type": "Story",
+    "summary": "Build the admin shell and user lookup",
+    "description": "**Business value:** Lets authorized staff locate customer context quickly.\n\n**Technical requirements:** Admin navigation, exact-ID and controlled contact search, pagination, masked sensitive fields, and read-only account/profile display.\n\n**Acceptance criteria:**\n- Authorized staff can find seeded users.\n- Unauthorized fields stay masked and every lookup is audited.\n\n**Dependencies:** `OPS-001`, `FND-005`.\n\n**Owner:** Frontend/backend.",
+    "dependencies": ["OPS-001","FND-005"],
+    "priority": "High",
+    "labels": ["crypto-lending-mvp", "phase-1", "admin-operations"]
+  },
+  {
+    "local_id": "OPS-003",
+    "parent_local_id": "EP-OPS",
+    "issue_type": "Story",
+    "summary": "Build the financial transaction explorer",
+    "description": "**Business value:** Enables investigation of pending and failed value movements.\n\n**Technical requirements:** Read-only API/UI for transaction state, journal entries, quote, fees, hashes, provider references, UTC timestamps, and correlation links.\n\n**Acceptance criteria:**\n- A seeded transaction is traceable end to end.\n- Filters are deterministic and displayed amounts match the ledger.\n\n**Dependencies:** `OPS-001`, `LED-005`.\n\n**Owner:** Full-stack/operations.",
+    "dependencies": ["OPS-001","LED-005"],
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-1", "admin-operations", "transactions"]
+  },
+  {
+    "local_id": "OPS-004",
+    "parent_local_id": "EP-OPS",
+    "issue_type": "Story",
+    "summary": "Create the manual-review case queue",
+    "description": "**Business value:** Ensures discrepancies and execution failures receive accountable review.\n\n**Technical requirements:** Case type, severity, source fingerprint, assignee, notes, `OPEN/IN_REVIEW/RESOLVED` states, and audited changes.\n\n**Acceptance criteria:**\n- A source event creates one assignable case and repeated events do not create duplicate open cases.\n- Resolution requires a note and is audited.\n\n**Dependencies:** `OPS-001`, `LED-003`.\n\n**Owner:** Backend/frontend/operations.",
+    "dependencies": ["OPS-001","LED-003"],
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-1", "admin-operations", "manual-review"]
+  },
+  {
+    "local_id": "EP-SEC",
+    "parent_local_id": null,
+    "issue_type": "Epic",
+    "summary": "Monitoring, Security & Incident Handling Foundations",
+    "description": "**Business value:** Makes financial behavior protected, detectable, and diagnosable.\n\n**Technical requirements:** Threat model, encryption and secrets controls, correlated redacted logs, metrics/traces, alert routing, incident runbooks, and boundary hardening.\n\n**Acceptance criteria:**\n- Critical services and financial events are observable without leaking secrets.\n- Representative service and security failures alert the correct owner with a runbook.\n\n**Dependencies:** `EP-FND`.\n\n**Owner:** Security, SRE, infrastructure, backend.",
+    "dependencies": ["EP-FND"],
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-1", "monitoring-security"]
+  },
+  {
+    "local_id": "SEC-001",
+    "parent_local_id": "EP-SEC",
+    "issue_type": "Spike",
+    "summary": "Complete the threat model and data classification",
+    "description": "**Business value:** Directs controls toward the highest financial risks.\n\n**Technical requirements:** Model trust boundaries, account/wallet/ledger/admin abuse cases, key and secret inventory, retention, and data classifications.\n\n**Acceptance criteria:**\n- Security approves the threat model and classification matrix.\n- Every high-risk threat has a named mitigation and owner.\n\n**Dependencies:** `FND-001`.\n\n**Owner:** Security/architecture.",
+    "dependencies": ["FND-001"],
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-1", "monitoring-security", "threat-model"]
+  },
+  {
+    "local_id": "SEC-002",
+    "parent_local_id": "EP-SEC",
+    "issue_type": "Task",
+    "summary": "Enforce secrets, encryption, and least privilege",
+    "description": "**Business value:** Reduces credential theft and data exposure.\n\n**Technical requirements:** Secrets Manager, KMS policy, TLS, encrypted AWS data services, scoped IAM roles, and no long-lived credentials in source or CI.\n\n**Acceptance criteria:**\n- Secret scanning finds no committed credentials and services start with injected secrets.\n- Access outside each service role's permissions is denied.\n\n**Dependencies:** `FND-003`, `SEC-001`.\n\n**Owner:** Security/infrastructure.",
+    "dependencies": ["FND-003","SEC-001"],
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-1", "monitoring-security", "secrets"]
+  },
+  {
+    "local_id": "SEC-003",
+    "parent_local_id": "EP-SEC",
+    "issue_type": "Task",
+    "summary": "Add structured correlated logging",
+    "description": "**Business value:** Makes customer and financial events traceable without exposing secrets.\n\n**Technical requirements:** JSON logs, request/intent/quote/transaction correlation, actor ID, UTC timestamps, an explicit redaction allowlist, and retention controls.\n\n**Acceptance criteria:**\n- One test request is traceable through API, job, and ledger event.\n- Private keys, tokens, full credentials, and raw signatures are absent.\n\n**Dependencies:** `FND-001`, `SEC-001`.\n\n**Owner:** Backend/SRE/security.",
+    "dependencies": ["FND-001","SEC-001"],
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-1", "monitoring-security", "logging"]
+  },
+  {
+    "local_id": "SEC-004",
+    "parent_local_id": "EP-SEC",
+    "issue_type": "Task",
+    "summary": "Instrument metrics, traces, and service dashboards",
+    "description": "**Business value:** Detects degradation before it becomes an unexplained customer loss.\n\n**Technical requirements:** Latency/error/saturation, queue/DLQ, trace propagation, quote/execution-state counters, and environment dashboards without high-cardinality customer data.\n\n**Acceptance criteria:**\n- A synthetic request appears in traces and dashboards.\n- A failed job increments the expected error and queue metrics.\n\n**Dependencies:** `SEC-003`.\n\n**Owner:** SRE/backend.",
+    "dependencies": ["SEC-003"],
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-1", "monitoring-security", "observability"]
+  },
+  {
+    "local_id": "SEC-005",
+    "parent_local_id": "EP-SEC",
+    "issue_type": "Task",
+    "summary": "Configure alerts and incident runbooks",
+    "description": "**Business value:** Shortens detection and recovery for financial incidents.\n\n**Technical requirements:** Alerts for authentication anomalies, service failure, DLQ growth, stuck financial states, and reconciliation discrepancies with severity, owner, and runbook.\n\n**Acceptance criteria:**\n- Test P0/P1 alerts reach the configured on-call destination.\n- Each alert links to a current runbook and records acknowledgement.\n\n**Dependencies:** `SEC-004`.\n\n**Owner:** SRE/security/operations.",
+    "dependencies": ["SEC-004"],
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-1", "monitoring-security", "incident-response"]
+  },
+  {
+    "local_id": "SEC-006",
+    "parent_local_id": "EP-SEC",
+    "issue_type": "Task",
+    "summary": "Harden web and API boundaries",
+    "description": "**Business value:** Reduces account and service abuse.\n\n**Technical requirements:** WAF/rate limits, payload limits, schema validation, security headers/CSP, CORS allowlist, and dependency/container scanning.\n\n**Acceptance criteria:**\n- Excess requests receive 429 and malformed input is rejected before domain handling.\n- Disallowed origins fail and critical scan findings block deployment.\n\n**Dependencies:** `FND-003`, `FND-006`.\n\n**Owner:** Security/backend/infrastructure.",
+    "dependencies": ["FND-003","FND-006"],
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-1", "monitoring-security", "api-security"]
+  },
+  {
+    "local_id": "EP-WAL",
+    "parent_local_id": null,
+    "issue_type": "Epic",
+    "summary": "Wallet Connection Framework",
+    "description": "**Business value:** Lets customers use fragmented capital while retaining control of independent wallets.\n\n**Technical requirements:** Phantom, MetaMask, Coinbase Wallet, and WalletConnect; ownership proof; simultaneous connections; safe account, chain, and disconnect handling; no private-key storage.\n\n**Acceptance criteria:**\n- One user can maintain at least two verified wallets simultaneously.\n- Reconnect and disconnect behavior is safe and the platform never requests seed phrases or private keys.\n\n**Dependencies:** `EP-FND`, `EP-SEC`.\n\n**Owner:** Wallet/frontend, backend, security.",
+    "dependencies": ["EP-FND","EP-SEC"],
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-2", "wallet-connectivity"]
+  },
+  {
+    "local_id": "WAL-001",
+    "parent_local_id": "EP-WAL",
+    "issue_type": "Spike",
+    "summary": "Validate target wallet SDK behavior",
+    "description": "**Business value:** Avoids incompatible connection and signing assumptions.\n\n**Technical requirements:** Test Phantom, MetaMask, Coinbase Wallet, and WalletConnect for EIP-1193/Solana behavior, account and chain events, session expiry, mobile deep links, and ownership-signature support.\n\n**Acceptance criteria:**\n- An approved compatibility matrix covers all four targets.\n- The ADR identifies SDK choices, limitations, and test-wallet coverage.\n\n**Dependencies:** `FND-001`.\n\n**Owner:** Wallet/frontend/security.",
+    "dependencies": ["FND-001"],
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-2", "wallet-connectivity"]
+  },
+  {
+    "local_id": "WAL-002",
+    "parent_local_id": "EP-WAL",
+    "issue_type": "Story",
+    "summary": "Register wallets with ownership proof",
+    "description": "**Business value:** Prevents users from attaching addresses they do not control.\n\n**Technical requirements:** Chain-qualified canonical address model, expiring one-time nonce, domain/user binding, EVM and Solana signature verification, and encrypted connection metadata.\n\n**Acceptance criteria:**\n- Valid EVM and Solana proofs register the expected wallet.\n- Replayed, expired, wrong-domain, and wrong-user proofs fail.\n\n**Dependencies:** `WAL-001`, `FND-006`, `SEC-002`.\n\n**Owner:** Backend/security.",
+    "dependencies": ["WAL-001","FND-006","SEC-002"],
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-2", "wallet-connectivity", "ownership-proof"]
+  },
+  {
+    "local_id": "WAL-003",
+    "parent_local_id": "EP-WAL",
+    "issue_type": "Story",
+    "summary": "Add MetaMask and Coinbase injected connectors",
+    "description": "**Business value:** Covers common EVM wallet funding sources.\n\n**Technical requirements:** EIP-1193 provider discovery, explicit provider selection, supported-network display, ownership-challenge handoff, and duplicate-connection prevention.\n\n**Acceptance criteria:**\n- MetaMask and Coinbase Wallet connect independently.\n- Selecting one never silently uses the other, and unsupported networks are not treated as supported funding.\n\n**Dependencies:** `WAL-002`.\n\n**Owner:** Frontend/wallet.",
+    "dependencies": ["WAL-002"],
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-2", "wallet-connectivity", "evm"]
+  },
+  {
+    "local_id": "WAL-004",
+    "parent_local_id": "EP-WAL",
+    "issue_type": "Story",
+    "summary": "Add the WalletConnect connector",
+    "description": "**Business value:** Broadens wallet access without many one-off integrations.\n\n**Technical requirements:** QR/deep-link connection, approved namespaces/chains, session lifecycle, expiry, rejection, and disconnect handling.\n\n**Acceptance criteria:**\n- A supported desktop or mobile WalletConnect wallet connects and proves ownership.\n- Expired or rejected sessions fail cleanly and disconnect preserves audit history.\n\n**Dependencies:** `WAL-002`.\n\n**Owner:** Frontend/wallet.",
+    "dependencies": ["WAL-002"],
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-2", "wallet-connectivity", "walletconnect"]
+  },
+  {
+    "local_id": "WAL-005",
+    "parent_local_id": "EP-WAL",
+    "issue_type": "Story",
+    "summary": "Add the Phantom Solana connector",
+    "description": "**Business value:** Enables required Solana stablecoin funding.\n\n**Technical requirements:** Phantom provider/deep-link support, SIWS-compatible proof or approved equivalent, canonical addresses, and cluster validation.\n\n**Acceptance criteria:**\n- Phantom connects on the supported Solana network and proves ownership.\n- Wrong-cluster and invalid-signature attempts fail.\n\n**Dependencies:** `WAL-002`.\n\n**Owner:** Frontend/wallet/security.",
+    "dependencies": ["WAL-002"],
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-2", "wallet-connectivity", "solana"]
+  },
+  {
+    "local_id": "WAL-006",
+    "parent_local_id": "EP-WAL",
+    "issue_type": "Story",
+    "summary": "Build multi-wallet management and lifecycle handling",
+    "description": "**Business value:** Makes independent funding sources understandable and prevents stale authorization.\n\n**Technical requirements:** Stable connection IDs, wallet labels, add/disconnect actions, simultaneous session state, and safe invalidation on account, chain, session, or disconnect events.\n\n**Acceptance criteria:**\n- Two different wallets remain visible after refresh.\n- Account change requires reverification and disconnect stops future indexing while preserving history.\n\n**Dependencies:** `WAL-003`, `WAL-004`, `WAL-005`.\n\n**Owner:** Frontend/backend.",
+    "dependencies": ["WAL-003","WAL-004","WAL-005"],
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-2", "wallet-connectivity", "multi-wallet"]
+  },
+  {
+    "local_id": "EP-IDX",
+    "parent_local_id": null,
+    "issue_type": "Epic",
+    "summary": "Multi-Wallet Asset Indexing",
+    "description": "**Business value:** Produces trustworthy source balances for aggregation and routing.\n\n**Technical requirements:** USDC, USDT, and PYUSD on Ethereum, Base, Arbitrum, and Solana; extensible registries; exact units; source block/slot; idempotent sync; freshness and reorg controls.\n\n**Acceptance criteria:**\n- Supported holdings retain wallet, chain, asset, amount, and freshness attribution.\n- Unsupported and counterfeit contracts are excluded.\n\n**Dependencies:** `EP-WAL`.\n\n**Owner:** Blockchain/backend/data infrastructure.",
+    "dependencies": ["EP-WAL"],
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-2", "asset-indexing"]
+  },
+  {
+    "local_id": "IDX-001",
+    "parent_local_id": "EP-IDX",
+    "issue_type": "Task",
+    "summary": "Create the supported chain and asset registry",
+    "description": "**Business value:** Prevents symbol spoofing and allows later assets to be configured safely.\n\n**Technical requirements:** Environment-aware network identifiers, verified stablecoin contracts/mints, decimals, activation state, and versioned changes for the four target chains.\n\n**Acceptance criteria:**\n- Only configured contracts/mints normalize to USDC, USDT, or PYUSD.\n- Duplicate, invalid, and wrong-network entries are rejected.\n\n**Dependencies:** `FND-002`.\n\n**Owner:** Backend/blockchain.",
+    "dependencies": ["FND-002"],
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-2", "asset-indexing", "asset-registry"]
+  },
+  {
+    "local_id": "IDX-002",
+    "parent_local_id": "EP-IDX",
+    "issue_type": "Spike",
+    "summary": "Select RPC and indexing providers",
+    "description": "**Business value:** Establishes reliable reads without building proprietary chain infrastructure.\n\n**Technical requirements:** Compare SLA, rate limits, reorg/finality support, polling/WebSocket behavior, cost, geographic availability, and fallback options per chain.\n\n**Acceptance criteria:**\n- An approved provider matrix names primary and fallback sources for all four chains.\n- Freshness, finality, reorg, and outage policies are documented.\n\n**Dependencies:** `IDX-001`.\n\n**Owner:** Blockchain/infrastructure.",
+    "dependencies": ["IDX-001"],
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-2", "asset-indexing", "rpc"]
+  },
+  {
+    "local_id": "IDX-003",
+    "parent_local_id": "EP-IDX",
+    "issue_type": "Story",
+    "summary": "Index EVM stablecoin balances",
+    "description": "**Business value:** Captures required Ethereum, Base, and Arbitrum funding sources.\n\n**Technical requirements:** Batched ERC-20 balance reads, exact integer units, source block, contract allowlist, and bounded retry/rate-limit behavior.\n\n**Acceptance criteria:**\n- Fixture balances match chain reads at the recorded block.\n- Zero balances and unsupported contracts are handled correctly, and retries do not duplicate positions.\n\n**Dependencies:** `IDX-001`, `IDX-002`, `WAL-003`.\n\n**Owner:** Blockchain/backend.",
+    "dependencies": ["IDX-001","IDX-002","WAL-003"],
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-2", "asset-indexing", "evm"]
+  },
+  {
+    "local_id": "IDX-004",
+    "parent_local_id": "EP-IDX",
+    "issue_type": "Story",
+    "summary": "Index Solana stablecoin balances",
+    "description": "**Business value:** Captures required Phantom/Solana funding sources.\n\n**Technical requirements:** SPL token-account parsing, mint allowlist, exact units, source slot, and closed/frozen-account handling.\n\n**Acceptance criteria:**\n- Multiple accounts for one allowed mint aggregate correctly.\n- Counterfeit mints are excluded and every result records the source slot.\n\n**Dependencies:** `IDX-001`, `IDX-002`, `WAL-005`.\n\n**Owner:** Blockchain/backend.",
+    "dependencies": ["IDX-001","IDX-002","WAL-005"],
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-2", "asset-indexing", "solana"]
+  },
+  {
+    "local_id": "IDX-005",
+    "parent_local_id": "EP-IDX",
+    "issue_type": "Task",
+    "summary": "Orchestrate balance sync and correctness recovery",
+    "description": "**Business value:** Keeps balances current without silently presenting invalid chain state.\n\n**Technical requirements:** SQS jobs, wallet/chain checkpoints, bounded retries/DLQ, confirmation thresholds, reorg rescan, freshness status, and metrics.\n\n**Acceptance criteria:**\n- Repeated jobs produce one current observation and a simulated reorg replaces affected unfinalized observations.\n- Provider failure marks data stale and alerts instead of zeroing balances.\n\n**Dependencies:** `IDX-003`, `IDX-004`, `SEC-004`, `SEC-005`.\n\n**Owner:** Backend/blockchain/SRE.",
+    "dependencies": ["IDX-003","IDX-004","SEC-004","SEC-005"],
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-2", "asset-indexing", "reorg-handling"]
+  },
+  {
+    "local_id": "EP-BAL",
+    "parent_local_id": null,
+    "issue_type": "Epic",
+    "summary": "Unified Balance & Buying Power",
+    "description": "**Business value:** Lets customers understand combined capital without choosing wallets or chains.\n\n**Technical requirements:** Exact source balances, stablecoin valuation, wallet/chain/asset breakdown, freshness, and a conservative route-cost adjustment interface.\n\n**Acceptance criteria:**\n- Totals reconcile to indexed sources.\n- Portfolio value and buying power are distinct, and stale or unsupported funds do not inflate buying power.\n\n**Dependencies:** `EP-IDX`.\n\n**Owner:** Backend, pricing/data, frontend.",
+    "dependencies": ["EP-IDX"],
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-2", "unified-balance"]
+  },
+  {
+    "local_id": "BAL-001",
+    "parent_local_id": "EP-BAL",
+    "issue_type": "Spike",
+    "summary": "Define stablecoin valuation and depeg policy",
+    "description": "**Business value:** Avoids treating every nominal stablecoin unit as exactly one dollar.\n\n**Technical requirements:** Select price sources and define timestamps, confidence/freshness, fallback order, depeg thresholds, and unavailable-price behavior for USDC, USDT, and PYUSD.\n\n**Acceptance criteria:**\n- An approved policy covers normal, stale, unavailable, and depeg examples.\n- Each example has a deterministic valuation result.\n\n**Dependencies:** `IDX-001`.\n\n**Owner:** Backend/data/risk.",
+    "dependencies": ["IDX-001"],
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-2", "unified-balance", "valuation"]
+  },
+  {
+    "local_id": "BAL-002",
+    "parent_local_id": "EP-BAL",
+    "issue_type": "Story",
+    "summary": "Build the unified balance and portfolio-value API",
+    "description": "**Business value:** Provides one accurate view of fragmented holdings.\n\n**Technical requirements:** Exact intermediate arithmetic, price snapshots, per-wallet/chain/asset totals, overall total, and as-of/freshness metadata.\n\n**Acceptance criteria:**\n- The epic's $11,000 example returns the same total and source breakdown.\n- Stale data is flagged and unsupported assets are excluded.\n\n**Dependencies:** `BAL-001`, `IDX-005`.\n\n**Owner:** Backend/data.",
+    "dependencies": ["BAL-001","IDX-005"],
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-2", "unified-balance", "portfolio-value"]
+  },
+  {
+    "local_id": "BAL-003",
+    "parent_local_id": "EP-BAL",
+    "issue_type": "Story",
+    "summary": "Calculate baseline available buying power",
+    "description": "**Business value:** Prevents portfolio value from being represented as fully spendable.\n\n**Technical requirements:** Exclude stale, unpriced, and unsupported amounts; accept liquidity, conversion, slippage, network, and routing adjustments through a pluggable interface; return deductions and unavailable reasons.\n\n**Acceptance criteria:**\n- Buying power never exceeds supported portfolio value.\n- Missing cost data reduces or marks buying power unavailable rather than assuming zero cost.\n\n**Dependencies:** `BAL-002`.\n\n**Owner:** Backend/routing analytics.",
+    "dependencies": ["BAL-002"],
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-2", "unified-balance", "buying-power"]
+  },
+  {
+    "local_id": "BAL-004",
+    "parent_local_id": "EP-BAL",
+    "issue_type": "Story",
+    "summary": "Display unified balance and buying-power breakdown",
+    "description": "**Business value:** Gives customers a simple total with transparent source attribution.\n\n**Technical requirements:** Distinct portfolio/buying-power labels, expandable wallet/chain/asset sources, as-of/stale state, masked addresses, accessible formatting, and error states.\n\n**Acceptance criteria:**\n- UI totals match the API and each wallet contribution is identifiable.\n- Stale or unavailable buying power is visibly explained.\n\n**Dependencies:** `BAL-002`, `BAL-003`, `WAL-006`.\n\n**Owner:** Frontend.",
+    "dependencies": ["BAL-002","BAL-003","WAL-006"],
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-2", "unified-balance", "frontend"]
+  },
+  {
+    "local_id": "EP-ROU",
+    "parent_local_id": null,
+    "issue_type": "Epic",
+    "summary": "Stablecoin Routing Engine",
+    "description": "**Business value:** Hides avoidable blockchain mechanics while selecting transparent, lower-complexity funding routes.\n\n**Technical requirements:** Approved third-party adapters only; canonical direct/swap/bridge quotes; deterministic scoring; expiry; fees, slippage, time, liquidity, and risk; no proprietary bridge or custody.\n\n**Acceptance criteria:**\n- The engine returns reproducible executable quotes and favors direct settlement over unnecessary transformations.\n- Failed, stale, or policy-blocked providers cannot produce executable routes.\n\n**Dependencies:** `EP-BAL`, `EP-LED`, `EP-SEC`.\n\n**Owner:** Routing backend/Python, blockchain integrations, risk.",
+    "dependencies": ["EP-BAL","EP-LED","EP-SEC"],
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-3", "stablecoin-routing"]
+  },
+  {
+    "local_id": "ROU-001",
+    "parent_local_id": "EP-ROU",
+    "issue_type": "Spike",
+    "summary": "Evaluate stablecoin swap and bridge providers",
+    "description": "**Business value:** Exposes partner constraints without building proprietary swap or bridge infrastructure.\n\n**Technical requirements:** Evaluate supported paths, APIs, liquidity, fees, slippage, finality, compliance restrictions, quote/execution IDs, webhooks, and failure/refund behavior.\n\n**Acceptance criteria:**\n- An approved matrix identifies primary/fallback providers and unsupported paths.\n- Security, compliance, operational risks, and required agreements are documented.\n\n**Dependencies:** `IDX-001`, `EXT-REG-PARTNER-APPROVAL`.\n\n**Owner:** Integrations/risk/legal liaison.",
+    "dependencies": ["IDX-001"],
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-3", "stablecoin-routing", "provider-spike"]
+  },
+  {
+    "local_id": "ROU-002",
+    "parent_local_id": "EP-ROU",
+    "issue_type": "Task",
+    "summary": "Define canonical route and quote contracts",
+    "description": "**Business value:** Decouples routing decisions from provider-specific APIs.\n\n**Technical requirements:** Model direct, same-token, same-chain swap, and cross-chain legs with source/destination, exact amounts, fees, slippage, time, risk, provider IDs, TTL, and error taxonomy.\n\n**Acceptance criteria:**\n- Schemas validate representative direct, swap, and bridge examples.\n- Provider-specific fields remain namespaced and quote IDs correlate to ledger records.\n\n**Dependencies:** `ROU-001`, `LED-001`, `BAL-003`.\n\n**Owner:** Backend/routing architecture.",
+    "dependencies": ["ROU-001","LED-001","BAL-003"],
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-3", "stablecoin-routing", "route-contract"]
+  },
+  {
+    "local_id": "ROU-003",
+    "parent_local_id": "EP-ROU",
+    "issue_type": "Story",
+    "summary": "Quote direct and same-chain funding routes",
+    "description": "**Business value:** Covers simple routes and avoids unnecessary bridging.\n\n**Technical requirements:** Direct-settlement and approved same-chain swap adapters with timeouts, circuit breakers, exact amounts, normalized fees/slippage, liquidity validation, and provider quote IDs.\n\n**Acceptance criteria:**\n- Direct settlement has no conversion leg and same-chain output matches the provider quote.\n- Timeout or insufficient liquidity returns a non-executable result.\n\n**Dependencies:** `ROU-002`.\n\n**Owner:** Routing/integrations.",
+    "dependencies": ["ROU-002"],
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-3", "stablecoin-routing", "same-chain"]
+  },
+  {
+    "local_id": "ROU-004",
+    "parent_local_id": "EP-ROU",
+    "issue_type": "Story",
+    "summary": "Quote approved cross-chain funding routes",
+    "description": "**Business value:** Makes fragmented cross-chain funds usable without operating a bridge.\n\n**Technical requirements:** Partner bridge/cross-chain adapters with source/destination finality, timing, bridge/gas costs, min/max, refund behavior, and allowlisted paths.\n\n**Acceptance criteria:**\n- Supported paths normalize correctly and unsupported or policy-blocked paths are rejected.\n- Responses identify the external bridge provider and never imply platform custody.\n\n**Dependencies:** `ROU-002`, `ROU-001`.\n\n**Owner:** Routing/blockchain integrations/risk.",
+    "dependencies": ["ROU-002","ROU-001"],
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-3", "stablecoin-routing", "cross-chain"]
+  },
+  {
+    "local_id": "ROU-005",
+    "parent_local_id": "EP-ROU",
+    "issue_type": "Story",
+    "summary": "Score and select funding routes",
+    "description": "**Business value:** Selects the best all-in route while discouraging needless transactions.\n\n**Technical requirements:** Deterministic versioned scoring for cost, complexity, time, liquidity, and risk; hard constraints; direct-to-cross-chain priority; tie-break and explanation fields.\n\n**Acceptance criteria:**\n- Fixed fixtures always select the same winner.\n- A complex route wins only when permitted and materially better, and excluded-risk routes never win.\n\n**Dependencies:** `ROU-003`, `ROU-004`.\n\n**Owner:** Python/routing/risk.",
+    "dependencies": ["ROU-003","ROU-004"],
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-3", "stablecoin-routing", "route-scoring"]
+  },
+  {
+    "local_id": "ROU-006",
+    "parent_local_id": "EP-ROU",
+    "issue_type": "Task",
+    "summary": "Manage quote lifecycle and route-adjusted buying power",
+    "description": "**Business value:** Keeps previews and buying-power estimates consistent with executable routing data.\n\n**Technical requirements:** Persist/cache quote fingerprint, TTL, provider/config version, stale invalidation, correlation IDs, and route-cost deductions exposed through the `BAL-003` interface.\n\n**Acceptance criteria:**\n- An unexpired quote is returned unchanged and an expired quote cannot execute.\n- Buying power itemizes route costs and degrades conservatively during provider outage.\n\n**Dependencies:** `ROU-005`, `BAL-003`, `LED-004`, `SEC-003`.\n\n**Owner:** Backend/routing.",
+    "dependencies": ["ROU-005","BAL-003","LED-004","SEC-003"],
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-3", "stablecoin-routing", "quote-lifecycle"]
+  },
+  {
+    "local_id": "EP-FEE",
+    "parent_local_id": null,
+    "issue_type": "Epic",
+    "summary": "Routing Fee Engine",
+    "description": "**Business value:** Delivers transparent pricing without hidden spread.\n\n**Technical requirements:** Versioned Free/Individual/Pro rates, zero platform fee for direct-compatible settlement, exact arithmetic, immutable snapshots, and separate pass-through network/DEX/bridge/provider costs.\n\n**Acceptance criteria:**\n- All tier examples calculate correctly and direct-compatible settlement returns zero platform routing fee.\n- Preview and ledger use the same immutable fee snapshot.\n\n**Dependencies:** `EP-ROU`, `EP-LED`.\n\n**Owner:** Backend/payments/finance controls.",
+    "dependencies": ["EP-ROU","EP-LED"],
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-3", "routing-fees"]
+  },
+  {
+    "local_id": "FEE-001",
+    "parent_local_id": "EP-FEE",
+    "issue_type": "Task",
+    "summary": "Define versioned routing-fee rules",
+    "description": "**Business value:** Makes fees predictable and auditable before subscription billing is implemented.\n\n**Technical requirements:** 0.20%, 0.12%, and 0.08% tier inputs; direct-compatible zero-fee rule; material-orchestration conditions; effective dates; currency/rounding rules; Free default.\n\n**Acceptance criteria:**\n- Approved fixtures cover direct, swap, bridge, and multi-leg routes.\n- A rule change creates a new version and does not alter old quotes.\n\n**Dependencies:** `ROU-002`.\n\n**Owner:** Backend/product finance.",
+    "dependencies": ["ROU-002"],
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-3", "routing-fees", "fee-rules"]
+  },
+  {
+    "local_id": "FEE-002",
+    "parent_local_id": "EP-FEE",
+    "issue_type": "Story",
+    "summary": "Calculate and itemize route fees",
+    "description": "**Business value:** Lets customers compare true cost without hidden spread.\n\n**Technical requirements:** Exact decimal arithmetic and separate platform, network, DEX, bridge, and provider categories with no markup concealed in pass-through amounts.\n\n**Acceptance criteria:**\n- Golden tests match all three subscription rates and direct-compatible routes return platform fee zero.\n- Displayed components sum exactly to total cost.\n\n**Dependencies:** `FEE-001`, `ROU-006`.\n\n**Owner:** Backend/finance controls.",
+    "dependencies": ["FEE-001","ROU-006"],
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-3", "routing-fees", "fee-calculation"]
+  },
+  {
+    "local_id": "FEE-003",
+    "parent_local_id": "EP-FEE",
+    "issue_type": "Task",
+    "summary": "Persist immutable fee snapshots in the ledger",
+    "description": "**Business value:** Allows later explanation and reconciliation of charged costs.\n\n**Technical requirements:** Link quote and transaction IDs to platform/network/provider fee fields and rule version; represent quoted-versus-settled changes through new adjustment or reversal records.\n\n**Acceptance criteria:**\n- An old quote retains its original fees after configuration changes.\n- Settled differences create new records and ledger totals match fee fixtures.\n\n**Dependencies:** `FEE-002`, `LED-002`, `LED-004`.\n\n**Owner:** Ledger/backend.",
+    "dependencies": ["FEE-002","LED-002","LED-004"],
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-3", "routing-fees", "internal-ledger"]
+  },
+  {
+    "local_id": "EP-PRE",
+    "parent_local_id": null,
+    "issue_type": "Epic",
+    "summary": "Transaction Preview & Confirmation",
+    "description": "**Business value:** Gives customers informed consent before wallet authorization or value movement.\n\n**Technical requirements:** Immutable expiring snapshot with funding sources, route, fees, total, slippage, and idempotent confirmation linked to ledger states.\n\n**Acceptance criteria:**\n- Customers see complete estimated terms before confirming.\n- Changed or expired terms require a new preview, and confirmation alone does not submit value.\n\n**Dependencies:** `EP-ROU`, `EP-FEE`, `EP-LED`.\n\n**Owner:** Backend/frontend/compliance UX.",
+    "dependencies": ["EP-ROU","EP-FEE","EP-LED"],
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-3", "transaction-preview"]
+  },
+  {
+    "local_id": "PRE-001",
+    "parent_local_id": "EP-PRE",
+    "issue_type": "Story",
+    "summary": "Build the immutable preview snapshot API",
+    "description": "**Business value:** Ensures the customer and executor refer to identical terms.\n\n**Technical requirements:** Exact investment/funding amounts, source wallets, selected route, fee components, total, quote/fee versions, expiry, slippage, assumptions, warnings, and authenticated ownership.\n\n**Acceptance criteria:**\n- Components sum exactly to the estimated total and another user cannot fetch the snapshot.\n- Later quote or fee changes cannot mutate an existing preview.\n\n**Dependencies:** `ROU-006`, `FEE-003`, `LED-003`.\n\n**Owner:** Backend.",
+    "dependencies": ["ROU-006","FEE-003","LED-003"],
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-3", "transaction-preview", "api"]
+  },
+  {
+    "local_id": "PRE-002",
+    "parent_local_id": "EP-PRE",
+    "issue_type": "Story",
+    "summary": "Build the transaction preview UI",
+    "description": "**Business value:** Presents transparent terms for customer consent.\n\n**Technical requirements:** Show action, funding by wallet, route/provider, separate platform/network/provider costs, total, expiry, slippage, and requote state with accessible controls.\n\n**Acceptance criteria:**\n- Displayed values exactly match the preview API and every fee/source is separately visible.\n- Confirmation disables when the preview expires.\n\n**Dependencies:** `PRE-001`.\n\n**Owner:** Frontend.",
+    "dependencies": ["PRE-001"],
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-3", "transaction-preview", "frontend"]
+  },
+  {
+    "local_id": "PRE-003",
+    "parent_local_id": "EP-PRE",
+    "issue_type": "Story",
+    "summary": "Capture idempotent confirmation and requote",
+    "description": "**Business value:** Prevents execution on stale or changed terms.\n\n**Technical requirements:** Authentication, idempotency key, actor/timestamp, slippage consent, atomic `QUOTED` to `USER_APPROVED` transition, and no submission side effect.\n\n**Acceptance criteria:**\n- Duplicate confirmation returns the same approval.\n- Expired or mismatched previews are rejected and ledger history identifies the approved snapshot and actor.\n\n**Dependencies:** `PRE-001`, `PRE-002`, `LED-003`, `LED-004`.\n\n**Owner:** Backend/frontend.",
+    "dependencies": ["PRE-001","PRE-002","LED-003","LED-004"],
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-3", "transaction-preview", "confirmation"]
+  },
+  {
+    "local_id": "EP-XWT",
+    "parent_local_id": null,
+    "issue_type": "Epic",
+    "summary": "Cross-Wallet Transaction Execution",
+    "description": "**Business value:** Enables a transaction to use multiple independent wallets without platform custody.\n\n**Technical requirements:** Deterministic allocation, wallet-specific authorization, all-source preflight, saga/sub-transactions, idempotent submission, retries, failure controls, ledger/log/monitoring integration.\n\n**Acceptance criteria:**\n- A transaction can use two wallets and every leg is traceable.\n- No submission begins until every required authorization and preflight passes; partial outcomes enter controlled recovery.\n- Production real-money execution remains disabled until reconciliation, Phase 4 eligibility/jurisdiction controls, and partner approval are complete.\n\n**Dependencies:** `EP-WAL`, `EP-PRE`, `EP-LED`, `EP-SEC`, `EXT-P4-KYC-ELIG`, `EXT-P4-JURISDICTION`, `EXT-REG-PARTNER-APPROVAL`.\n\n**Owner:** Execution backend, wallet frontend, blockchain integrations, SRE.",
+    "dependencies": ["EP-WAL","EP-PRE","EP-LED","EP-SEC"],
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-3", "cross-wallet-execution"]
+  },
+  {
+    "local_id": "XWT-001",
+    "parent_local_id": "EP-XWT",
+    "issue_type": "Story",
+    "summary": "Allocate funding across connected wallets",
+    "description": "**Business value:** Uses combined capital while minimizing signatures and route complexity.\n\n**Technical requirements:** Exact balance constraints, deterministic ordering, route-cost inputs, configurable gas reserve, no over-allocation, and source attribution.\n\n**Acceptance criteria:**\n- Requests allocate across one or multiple wallets without exceeding balances.\n- Insufficient funds returns an itemized shortfall and equivalent input produces the same plan.\n\n**Dependencies:** `ROU-005`, `BAL-003`, `WAL-006`.\n\n**Owner:** Backend/routing.",
+    "dependencies": ["ROU-005","BAL-003","WAL-006"],
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-3", "cross-wallet-execution", "funding-allocation"]
+  },
+  {
+    "local_id": "XWT-002",
+    "parent_local_id": "EP-XWT",
+    "issue_type": "Story",
+    "summary": "Generate wallet-specific authorization plans",
+    "description": "**Business value:** Lets customers retain control over every independent funding source.\n\n**Technical requirements:** Chain, account, nonce/blockhash, spend or transaction details, expiry, readable summary, preview binding, and replay protection per funding leg.\n\n**Acceptance criteria:**\n- Each request maps to one funding leg and the approved preview.\n- Altered wallet, amount, or route data invalidates authorization.\n\n**Dependencies:** `XWT-001`, `PRE-003`, `WAL-002`.\n\n**Owner:** Backend/blockchain/security.",
+    "dependencies": ["XWT-001","PRE-003","WAL-002"],
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-3", "cross-wallet-execution", "authorization"]
+  },
+  {
+    "local_id": "XWT-003",
+    "parent_local_id": "EP-XWT",
+    "issue_type": "Story",
+    "summary": "Build the multi-wallet signing coordinator UI",
+    "description": "**Business value:** Makes cross-wallet authorization understandable without hiding consent.\n\n**Technical requirements:** Explicit wallet-switch prompts, ordered signing requests, rejection/timeout handling, resumable pre-execution state, and no private-key material.\n\n**Acceptance criteria:**\n- A two-wallet plan requests both wallets distinctly.\n- Rejection of either prevents execution and accepted payloads are bound to the expected wallet and plan.\n\n**Dependencies:** `XWT-002`, `WAL-006`.\n\n**Owner:** Frontend/wallet.",
+    "dependencies": ["XWT-002","WAL-006"],
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-3", "cross-wallet-execution", "signing"]
+  },
+  {
+    "local_id": "XWT-004",
+    "parent_local_id": "EP-XWT",
+    "issue_type": "Task",
+    "summary": "Implement the execution saga and sub-transaction model",
+    "description": "**Business value:** Prevents a multi-leg action from becoming one untraceable status.\n\n**Technical requirements:** Parent intent and child legs, explicit dependencies and states, correlation IDs, outbox events, timeout/cancellation policy, and restart-safe persistence without claiming false atomicity.\n\n**Acceptance criteria:**\n- Every leg stores its own state, hash, and provider ID.\n- Downstream legs wait for prerequisites and a worker restart creates no duplicate leg.\n\n**Dependencies:** `XWT-002`, `LED-003`, `LED-004`, `ROU-002`.\n\n**Owner:** Backend/execution.",
+    "dependencies": ["XWT-002","LED-003","LED-004","ROU-002"],
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-3", "cross-wallet-execution", "saga"]
+  },
+  {
+    "local_id": "XWT-005",
+    "parent_local_id": "EP-XWT",
+    "issue_type": "Task",
+    "summary": "Submit route legs idempotently through approved adapters",
+    "description": "**Business value:** Reduces duplicate transfers and unsafe retries.\n\n**Technical requirements:** Signature/quote expiry checks, balance/gas preflight, adapter idempotency keys, bounded retry, circuit breaker, and persistence of provider/hash identifiers before acknowledgement.\n\n**Acceptance criteria:**\n- Duplicate jobs do not create duplicate submissions and failed preflight submits nothing.\n- Unknown timeout results are polled or reconciled instead of blindly resubmitted.\n\n**Dependencies:** `XWT-003`, `XWT-004`, `ROU-003`, `ROU-004`.\n\n**Owner:** Backend/blockchain integrations.",
+    "dependencies": ["XWT-003","XWT-004","ROU-003","ROU-004"],
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-3", "cross-wallet-execution", "idempotency"]
+  },
+  {
+    "local_id": "XWT-006",
+    "parent_local_id": "EP-XWT",
+    "issue_type": "Story",
+    "summary": "Control authorization and partial-execution failures",
+    "description": "**Business value:** Protects customers when one wallet or route leg fails.\n\n**Technical requirements:** All-signature/all-preflight barrier, stop-downstream rule, truthful failed/pending/reversed states, provider-supported compensation only, alert, and one manual-review case.\n\n**Acceptance criteria:**\n- Missing authorization causes zero submissions.\n- A simulated partial failure halts dependencies, preserves settled facts, alerts operations, and never labels an on-chain transfer reversed without a reversing transaction.\n\n**Dependencies:** `XWT-005`, `OPS-004`, `SEC-005`.\n\n**Owner:** Backend/ledger/operations.",
+    "dependencies": ["XWT-005","OPS-004","SEC-005"],
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-3", "cross-wallet-execution", "failure-handling"]
+  },
+  {
+    "local_id": "XWT-007",
+    "parent_local_id": "EP-XWT",
+    "issue_type": "Story",
+    "summary": "Expose transaction and leg execution status",
+    "description": "**Business value:** Prevents ambiguity during asynchronous settlement.\n\n**Technical requirements:** Permissioned status API/UI, parent and per-leg states, safe hash links, refresh or push updates, customer-safe failure guidance, and no internal-only error leakage.\n\n**Acceptance criteria:**\n- Pending, settled, failed, and partial-review fixtures render accurately and match the ledger.\n- A user cannot access another user's transaction.\n\n**Dependencies:** `XWT-004`, `XWT-006`, `LED-005`.\n\n**Owner:** Full-stack.",
+    "dependencies": ["XWT-004","XWT-006","LED-005"],
+    "priority": "High",
+    "labels": ["crypto-lending-mvp", "phase-3", "cross-wallet-execution", "transaction-status"]
+  },
+  {
+    "local_id": "EP-REC",
+    "parent_local_id": null,
+    "issue_type": "Epic",
+    "summary": "Reconciliation Engine",
+    "description": "**Business value:** Detects missing, duplicated, or mismatched value before it becomes an unexplained loss.\n\n**Technical requirements:** Continuous idempotent runs, checkpoints, source snapshots, deterministic matching/tolerances, wallet/chain/provider adapters, discrepancy cases/alerts, and replay.\n\n**Acceptance criteria:**\n- Stablecoin execution fixtures reconcile automatically.\n- Every material mismatch produces one durable discrepancy and operational alert, and reruns do not duplicate results.\n\n**Dependencies:** `EP-XWT`, `EP-LED`, `EP-OPS`, `EP-SEC`.\n\n**Owner:** Reconciliation/backend/data/operations/SRE.",
+    "dependencies": ["EP-XWT","EP-LED","EP-OPS","EP-SEC"],
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-3", "reconciliation"]
+  },
+  {
+    "local_id": "REC-001",
+    "parent_local_id": "EP-REC",
+    "issue_type": "Task",
+    "summary": "Define reconciliation records and the scheduled runner",
+    "description": "**Business value:** Supplies a consistent control framework for current and future providers.\n\n**Technical requirements:** Expected records, source snapshots, match results, checkpoints, exact amounts, tolerances, idempotent run keys, and a provider-adapter interface without implementing Phase 5 or 6 providers.\n\n**Acceptance criteria:**\n- The runner classifies matched, missing, duplicate, amount-mismatch, and state-mismatch fixtures.\n- Repeating a checkpoint does not duplicate results.\n\n**Dependencies:** `LED-002`, `XWT-004`.\n\n**Owner:** Backend/reconciliation.",
+    "dependencies": ["LED-002","XWT-004"],
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-3", "reconciliation", "reconciliation-runner"]
+  },
+  {
+    "local_id": "REC-002",
+    "parent_local_id": "EP-REC",
+    "issue_type": "Story",
+    "summary": "Reconcile ledger records with on-chain outcomes",
+    "description": "**Business value:** Verifies that stablecoin movements occurred as represented.\n\n**Technical requirements:** Hash/signature lookup, sender, recipient, asset, amount, chain, finality, resulting supported balance, source block/slot, and reorg-aware recheck.\n\n**Acceptance criteria:**\n- Correct fixtures match and wrong amount/address/asset or missing hash creates a distinct discrepancy.\n- A simulated reorg reopens affected results.\n\n**Dependencies:** `REC-001`, `IDX-005`, `XWT-005`.\n\n**Owner:** Blockchain/reconciliation.",
+    "dependencies": ["REC-001","IDX-005","XWT-005"],
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-3", "reconciliation", "on-chain"]
+  },
+  {
+    "local_id": "REC-003",
+    "parent_local_id": "EP-REC",
+    "issue_type": "Story",
+    "summary": "Reconcile swap and bridge provider outcomes",
+    "description": "**Business value:** Detects provider-side fee, amount, state, or identifier mismatches.\n\n**Technical requirements:** Normalize provider fetch/webhook data and compare quoted versus settled input, output, fees, provider ID, and final status with retryable unknown handling.\n\n**Acceptance criteria:**\n- Matching settlements close automatically and fee/output/status mismatches are classified.\n- An unavailable provider leaves the result retryable rather than falsely matched.\n\n**Dependencies:** `REC-001`, `ROU-006`, `XWT-005`.\n\n**Owner:** Integrations/reconciliation.",
+    "dependencies": ["REC-001","ROU-006","XWT-005"],
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-3", "reconciliation", "provider-reconciliation"]
+  },
+  {
+    "local_id": "REC-004",
+    "parent_local_id": "EP-REC",
+    "issue_type": "Story",
+    "summary": "Alert and case reconciliation discrepancies",
+    "description": "**Business value:** Ensures financial exceptions receive accountable investigation.\n\n**Technical requirements:** Deterministic discrepancy fingerprint, severity/routing rules, deduplication, linked operations case, alert/runbook, and audited resolution evidence.\n\n**Acceptance criteria:**\n- Each new material discrepancy creates one alert and one case.\n- Repeats update the same case and resolution requires retained evidence.\n\n**Dependencies:** `REC-002`, `REC-003`, `OPS-004`, `SEC-005`.\n\n**Owner:** Backend/operations/SRE.",
+    "dependencies": ["REC-002","REC-003","OPS-004","SEC-005"],
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-3", "reconciliation", "discrepancy-management"]
+  },
+  {
+    "local_id": "REC-005",
+    "parent_local_id": "EP-REC",
+    "issue_type": "Task",
+    "summary": "Add reconciliation replay and health visibility",
+    "description": "**Business value:** Enables safe recovery after provider outages or reconciliation defects.\n\n**Technical requirements:** Authorized date/source-scoped dry-run and replay, rate limits, idempotency, and dashboard metrics for last success, lag, errors, and unresolved discrepancies.\n\n**Acceptance criteria:**\n- Operations can dry-run and execute a bounded replay without mutating ledger history.\n- Repeated replay stays idempotent and health metrics match seeded run records.\n\n**Dependencies:** `REC-004`, `SEC-004`, `OPS-001`.\n\n**Owner:** Reconciliation/SRE/operations tooling.",
+    "dependencies": ["REC-004","SEC-004","OPS-001"],
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-3", "reconciliation", "operations"]
+  }
+]

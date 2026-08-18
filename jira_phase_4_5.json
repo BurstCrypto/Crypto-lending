@@ -1,0 +1,1566 @@
+[
+  {
+    "local_id": "P4-KYC-EPIC",
+    "parent_local_id": null,
+    "issue_type": "Epic",
+    "summary": "KYC & Eligibility Engine",
+    "description": "**Business value:** Enables compliant access to regulated products in supported international markets.\n\n**Technical requirements:** Use an adapter-based KYC integration, encrypted/minimized PII, versioned eligibility rules, fail-closed decisions, and immutable auditing.\n\n**Acceptance criteria:** A verified user receives deterministic provider/product eligibility; an ineligible user cannot receive or execute a trade; every decision is reconstructable.\n\n**Dependencies:** `FND-006`, `SEC-002`, `SEC-003`\n\n**Owner:** Compliance Product; Compliance Backend; Security; Web/Mobile",
+    "priority": "Highest",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-4",
+      "kyc-eligibility"
+    ],
+    "dependencies": [
+      "FND-006",
+      "SEC-002",
+      "SEC-003"
+    ]
+  },
+  {
+    "local_id": "P4-JUR-EPIC",
+    "parent_local_id": null,
+    "issue_type": "Epic",
+    "summary": "International Launch & Jurisdiction Controls",
+    "description": "**Business value:** Keeps the launch within approved international markets and excludes the United States.\n\n**Technical requirements:** Use versioned jurisdiction policy, trusted residency evidence, server-side product gates, approved disclosures, and monitoring.\n\n**Acceptance criteria:** U.S., unsupported, unknown, and conflicted users cannot access executable products; supported users can; the applied policy version and reason are logged.\n\n**Dependencies:** `P4-KYC-EPIC`, `SEC-003`\n\n**Owner:** Legal/Compliance; Compliance Backend; Security; Web/Mobile",
+    "priority": "Highest",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-4",
+      "jurisdiction-controls"
+    ],
+    "dependencies": [
+      "P4-KYC-EPIC",
+      "SEC-003"
+    ]
+  },
+  {
+    "local_id": "P5-INS-EPIC",
+    "parent_local_id": null,
+    "issue_type": "Epic",
+    "summary": "Tokenized Equity Instrument Model",
+    "description": "**Business value:** Enables company-level search and comparison without treating distinct tokenized securities as fungible.\n\n**Technical requirements:** Model canonical underlyings, provider-specific securities, full issuer/chain/contract/custody/redemption metadata, fungibility identity, and catalog provenance.\n\n**Acceptance criteria:** Multiple AAPL products group under Apple while retaining separate legal, token, venue, and settlement identities.\n\n**Dependencies:** `P4-KYC-EPIC`\n\n**Owner:** Securities Backend; Data; Compliance",
+    "priority": "Highest",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-5",
+      "instrument-model"
+    ],
+    "dependencies": [
+      "P4-KYC-EPIC"
+    ]
+  },
+  {
+    "local_id": "P5-PRV1-EPIC",
+    "parent_local_id": null,
+    "issue_type": "Epic",
+    "summary": "Tokenized Stock Provider — Provider 1",
+    "description": "**Business value:** Adds the first regulated production execution venue.\n\n**Technical requirements:** Select a provider, then implement secure catalog, quote/order, lifecycle, reconciliation, and operational adapters.\n\n**Acceptance criteria:** An eligible user can buy and sell through Provider 1; all fees, identifiers, states, and discrepancies are recorded.\n\n**Dependencies:** `P5-INS-EPIC`, `P4-KYC-EPIC`, `P4-JUR-EPIC`, `EP-LED`\n\n**Owner:** Partner Integrations; Securities Backend; Security; SRE",
+    "priority": "Highest",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-5",
+      "provider-1"
+    ],
+    "dependencies": [
+      "P5-INS-EPIC",
+      "P4-KYC-EPIC",
+      "P4-JUR-EPIC",
+      "EP-LED"
+    ]
+  },
+  {
+    "local_id": "P5-PRV2-EPIC",
+    "parent_local_id": null,
+    "issue_type": "Epic",
+    "summary": "Tokenized Stock Provider — Provider 2",
+    "description": "**Business value:** Meets the MVP requirement for two distinct production providers.\n\n**Technical requirements:** Integrate a second regulated provider through the same normalized contracts and transaction controls.\n\n**Acceptance criteria:** A second distinct provider passes production buy/sell, ledger, security, and reconciliation tests.\n\n**Dependencies:** `P5-INS-EPIC`, `P4-KYC-EPIC`, `P4-JUR-EPIC`, `EP-LED`\n\n**Owner:** Partner Integrations; Securities Backend; Security; SRE",
+    "priority": "Highest",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-5",
+      "provider-2"
+    ],
+    "dependencies": [
+      "P5-INS-EPIC",
+      "P4-KYC-EPIC",
+      "P4-JUR-EPIC",
+      "EP-LED"
+    ]
+  },
+  {
+    "local_id": "P5-PRV3-EPIC",
+    "parent_local_id": null,
+    "issue_type": "Epic",
+    "summary": "Tokenized Stock Provider — Provider 3",
+    "description": "**Business value:** Expands provider coverage and is targeted before full public launch.\n\n**Technical requirements:** Integrate a third regulated provider without provider-specific changes in downstream consumers.\n\n**Acceptance criteria:** Provider 3 passes the shared production contract and control suite; Provider 1 and 2 remain the MVP minimum.\n\n**Dependencies:** `P5-PRV1-EPIC`, `P5-PRV2-EPIC`, `P5-INS-EPIC`\n\n**Owner:** Partner Integrations; Securities Backend; Security; SRE",
+    "priority": "Medium",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-5",
+      "provider-3"
+    ],
+    "dependencies": [
+      "P5-PRV1-EPIC",
+      "P5-PRV2-EPIC",
+      "P5-INS-EPIC"
+    ]
+  },
+  {
+    "local_id": "P5-ROUTER-EPIC",
+    "parent_local_id": null,
+    "issue_type": "Epic",
+    "summary": "Equity Execution Router",
+    "description": "**Business value:** Finds the best eligible all-in executable route while hiding provider and settlement complexity.\n\n**Technical requirements:** Filter by eligibility, fan out executable quotes, calculate total cost, rank deterministically, bind confirmations, and correlate execution to the ledger.\n\n**Acceptance criteria:** With two production providers, stale and ineligible routes never execute and the lowest valid all-in route is selected reproducibly.\n\n**Dependencies:** `P5-PRV1-EPIC`, `P5-PRV2-EPIC`, `ROU-006`, `FEE-002`\n\n**Owner:** Execution Backend; Quant; Partner Integrations; SRE",
+    "priority": "Highest",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-5",
+      "equity-router"
+    ],
+    "dependencies": [
+      "P5-PRV1-EPIC",
+      "P5-PRV2-EPIC",
+      "ROU-006",
+      "FEE-002"
+    ]
+  },
+  {
+    "local_id": "P5-MDATA-EPIC",
+    "parent_local_id": null,
+    "issue_type": "Epic",
+    "summary": "Tokenized Equity Market Data",
+    "description": "**Business value:** Provides accurate tokenized-market data as primary and underlying-equity data only as reference.\n\n**Technical requirements:** Use licensed sources, normalized live/history schemas, explicit source typing, freshness controls, and data-quality monitoring.\n\n**Acceptance criteria:** Bid, ask, price, volume, candles, and market status are available; reference prices and premium/discount are distinctly labeled and never substituted for executable quotes.\n\n**Dependencies:** `P5-INS-EPIC`, `P5-PRV1-EPIC`, `P5-PRV2-EPIC`\n\n**Owner:** Market Data Backend; Data Engineering; Quant; SRE",
+    "priority": "High",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-5",
+      "market-data"
+    ],
+    "dependencies": [
+      "P5-INS-EPIC",
+      "P5-PRV1-EPIC",
+      "P5-PRV2-EPIC"
+    ]
+  },
+  {
+    "local_id": "P5-CHART-EPIC",
+    "parent_local_id": null,
+    "issue_type": "Epic",
+    "summary": "Stock Charts & Technicals",
+    "description": "**Business value:** Delivers the defined Free, Individual, and Pro analysis experiences.\n\n**Technical requirements:** Render tokenized candles and quotes, reference comparison, defined indicators, advanced interactions, and entitlement hooks.\n\n**Acceptance criteria:** Each tier receives only its defined capabilities and every chart identifies the correct source and freshness.\n\n**Dependencies:** `P5-MDATA-EPIC`\n\n**Owner:** Web/Mobile; Market Data Backend; Quant",
+    "priority": "High",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-5",
+      "stock-charts"
+    ],
+    "dependencies": [
+      "P5-MDATA-EPIC"
+    ]
+  },
+  {
+    "local_id": "P5-MKT-EPIC",
+    "parent_local_id": null,
+    "issue_type": "Epic",
+    "summary": "Execution Marketplace / Order Books",
+    "description": "**Business value:** Provides transparent provider comparison without presenting different securities as one book.\n\n**Technical requirements:** Build distinct-instrument comparison, fungibility guards, optional Level II/time-and-sales, and controlled limit orders.\n\n**Acceptance criteria:** Different issuer or token contracts remain separate; aggregation occurs only for the same verified fungible security.\n\n**Dependencies:** `P5-INS-EPIC`, `P5-ROUTER-EPIC`, `P5-MDATA-EPIC`\n\n**Owner:** Execution Backend; Market Data; Web/Mobile; Compliance",
+    "priority": "High",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-5",
+      "execution-marketplace"
+    ],
+    "dependencies": [
+      "P5-INS-EPIC",
+      "P5-ROUTER-EPIC",
+      "P5-MDATA-EPIC"
+    ]
+  },
+  {
+    "local_id": "P5-PORT-EPIC",
+    "parent_local_id": null,
+    "issue_type": "Epic",
+    "summary": "Portfolio & Estimated Liquidation Value",
+    "description": "**Business value:** Shows both displayed value and realistically realizable sell value.\n\n**Technical requirements:** Maintain reconciled positions, value them with tokenized data, request size-aware executable sell quotes, and itemize slippage and costs.\n\n**Acceptance criteria:** Settled positions appear accurately and estimated sell value uses executable liquidity rather than last-trade price alone.\n\n**Dependencies:** `EP-LED`, `EP-REC`, `P5-ROUTER-EPIC`, `P5-MDATA-EPIC`\n\n**Owner:** Portfolio Backend; Quant; Web/Mobile; Data/SRE",
+    "priority": "High",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-5",
+      "portfolio-liquidation"
+    ],
+    "dependencies": [
+      "EP-LED",
+      "EP-REC",
+      "P5-ROUTER-EPIC",
+      "P5-MDATA-EPIC"
+    ]
+  },
+  {
+    "local_id": "P4-KYC-01",
+    "parent_local_id": "P4-KYC-EPIC",
+    "issue_type": "Spike",
+    "summary": "Select KYC provider and integration approach",
+    "description": "**Business value:** Resolves regulatory, provider, and data-handling uncertainty before implementation.\n\n**Technical requirements:** Compare international coverage, residency/investor checks, SDK/API/webhooks, security, retention, manual review, SLA, and production access; produce a decision record and requirements map.\n\n**Acceptance criteria:** Compliance, Security, and Engineering approve one provider or document a no-go; sandbox and production prerequisites are explicit.\n\n**Dependencies:** `FND-006`\n\n**Owner:** Compliance Product; Legal; Security; Partner Backend",
+    "priority": "Highest",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-4",
+      "kyc-eligibility"
+    ],
+    "dependencies": [
+      "FND-006"
+    ]
+  },
+  {
+    "local_id": "P4-KYC-02",
+    "parent_local_id": "P4-KYC-EPIC",
+    "issue_type": "Task",
+    "summary": "Implement secure KYC subject and status model",
+    "description": "**Business value:** Creates a reliable eligibility input while minimizing sensitive data.\n\n**Technical requirements:** Persist encrypted provider references and normalized pending/review/verified/rejected/expired states; do not retain raw identity documents unless explicitly approved.\n\n**Acceptance criteria:** Unauthorized reads are denied; every state change records actor, source, time, and audit correlation; migration and state tests pass.\n\n**Dependencies:** `P4-KYC-01`, `SEC-002`, `SEC-003`\n\n**Owner:** Compliance Backend; Data; Security",
+    "priority": "Highest",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-4",
+      "kyc-eligibility"
+    ],
+    "dependencies": [
+      "P4-KYC-01",
+      "SEC-002",
+      "SEC-003"
+    ]
+  },
+  {
+    "local_id": "P4-KYC-03",
+    "parent_local_id": "P4-KYC-EPIC",
+    "issue_type": "Task",
+    "summary": "Integrate KYC verification sessions",
+    "description": "**Business value:** Lets users start and resume identity verification.\n\n**Technical requirements:** Implement the selected provider adapter plus idempotent create/resume APIs with server-held credentials, correlation IDs, bounded retries, and normalized errors.\n\n**Acceptance criteria:** Repeated identical requests return the same active session; sandbox success, timeout, and provider-rejection tests pass.\n\n**Dependencies:** `P4-KYC-01`, `P4-KYC-02`, `FND-006`\n\n**Owner:** Partner Backend; Compliance Backend; Security",
+    "priority": "Highest",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-4",
+      "kyc-eligibility"
+    ],
+    "dependencies": [
+      "P4-KYC-01",
+      "P4-KYC-02",
+      "FND-006"
+    ]
+  },
+  {
+    "local_id": "P4-KYC-04",
+    "parent_local_id": "P4-KYC-EPIC",
+    "issue_type": "Task",
+    "summary": "Process KYC lifecycle callbacks securely",
+    "description": "**Business value:** Keeps verification state current without trusting client assertions.\n\n**Technical requirements:** Verify webhook signatures, prevent replay, process idempotently, protect against out-of-order events, and dead-letter unrecoverable payloads.\n\n**Acceptance criteria:** Invalid signatures are rejected; duplicate callbacks make one mutation; late events cannot regress terminal state.\n\n**Dependencies:** `P4-KYC-02`, `P4-KYC-03`, `SEC-005`\n\n**Owner:** Compliance Backend; Platform; Security/SRE",
+    "priority": "Highest",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-4",
+      "kyc-eligibility"
+    ],
+    "dependencies": [
+      "P4-KYC-02",
+      "P4-KYC-03",
+      "SEC-005"
+    ]
+  },
+  {
+    "local_id": "P4-KYC-05",
+    "parent_local_id": "P4-KYC-EPIC",
+    "issue_type": "Story",
+    "summary": "Build KYC onboarding and status UI",
+    "description": "**Business value:** Reduces onboarding abandonment and gives users safe status guidance.\n\n**Technical requirements:** Provide start/resume flows and accessible normalized status/reason states on web/mobile; exclude sensitive provider payloads from client logs.\n\n**Acceptance criteria:** Users can start and resume verification; every normalized state renders correctly; the client cannot mark itself verified.\n\n**Dependencies:** `P4-KYC-03`, `P4-KYC-04`\n\n**Owner:** Web/Mobile; UX; Compliance Backend",
+    "priority": "High",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-4",
+      "kyc-eligibility"
+    ],
+    "dependencies": [
+      "P4-KYC-03",
+      "P4-KYC-04"
+    ]
+  },
+  {
+    "local_id": "P4-KYC-06",
+    "parent_local_id": "P4-KYC-EPIC",
+    "issue_type": "Task",
+    "summary": "Model versioned eligibility policies",
+    "description": "**Business value:** Allows access rules to evolve without code changes.\n\n**Technical requirements:** Represent country, KYC status, investor class, provider, product, effective dates, policy version, and stable reason codes; require maker/checker publication.\n\n**Acceptance criteria:** Automated cases cover provider-, product-, country-, and classification-specific rules; missing or unknown inputs fail closed.\n\n**Dependencies:** `P4-KYC-01`, `P4-JUR-01`\n\n**Owner:** Compliance Backend; Legal/Compliance; Data",
+    "priority": "Highest",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-4",
+      "kyc-eligibility"
+    ],
+    "dependencies": [
+      "P4-KYC-01",
+      "P4-JUR-01"
+    ]
+  },
+  {
+    "local_id": "P4-KYC-07",
+    "parent_local_id": "P4-KYC-EPIC",
+    "issue_type": "Task",
+    "summary": "Implement eligibility evaluation API",
+    "description": "**Business value:** Gives search and routing one authoritative eligibility decision.\n\n**Technical requirements:** Return deterministic decisions with policy version and reason codes; invalidate bounded caches when KYC, residency, classification, or policy changes.\n\n**Acceptance criteria:** Identical inputs/version return identical decisions; changed inputs invalidate prior results; missing data never returns eligible.\n\n**Dependencies:** `P4-KYC-06`, `P4-JUR-03`\n\n**Owner:** Compliance Backend; Platform",
+    "priority": "Highest",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-4",
+      "kyc-eligibility"
+    ],
+    "dependencies": [
+      "P4-KYC-06",
+      "P4-JUR-03"
+    ]
+  },
+  {
+    "local_id": "P4-KYC-08",
+    "parent_local_id": "P4-KYC-EPIC",
+    "issue_type": "Task",
+    "summary": "Enforce eligibility before quote and execution",
+    "description": "**Business value:** Prevents prohibited trading and client-side bypasses.\n\n**Technical requirements:** Apply server-side gates before executable quote presentation and again at confirmation; bind eligibility/policy version to the quote.\n\n**Acceptance criteria:** Ineligible instruments receive no executable quote; direct API bypass is denied; eligibility revoked after quote blocks confirmation.\n\n**Dependencies:** `P4-KYC-07`, `PRE-003`\n\n**Owner:** Compliance Backend; Execution Backend; Security",
+    "priority": "Highest",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-4",
+      "kyc-eligibility"
+    ],
+    "dependencies": [
+      "P4-KYC-07",
+      "PRE-003"
+    ]
+  },
+  {
+    "local_id": "P4-KYC-09",
+    "parent_local_id": "P4-KYC-EPIC",
+    "issue_type": "Task",
+    "summary": "Audit eligibility decisions and queue reviews",
+    "description": "**Business value:** Supports regulatory evidence and human exception handling.\n\n**Technical requirements:** Write redacted immutable decision inputs/results and emit one operations event for review-required cases.\n\n**Acceptance criteria:** An auditor can reconstruct a decision without raw documents; a review case appears exactly once in the operations queue.\n\n**Dependencies:** `P4-KYC-07`, `SEC-003`, `OPS-004`\n\n**Owner:** Compliance Backend; Admin Backend; Security",
+    "priority": "Highest",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-4",
+      "kyc-eligibility"
+    ],
+    "dependencies": [
+      "P4-KYC-07",
+      "SEC-003",
+      "OPS-004"
+    ]
+  },
+  {
+    "local_id": "P4-JUR-01",
+    "parent_local_id": "P4-JUR-EPIC",
+    "issue_type": "Spike",
+    "summary": "Approve launch-market policy matrix",
+    "description": "**Business value:** Prevents engineering from inventing legal availability rules.\n\n**Technical requirements:** Produce a signed-off matrix covering U.S. exclusion, residency basis, investor classes, provider/product restrictions, disclosures, and policy ownership.\n\n**Acceptance criteria:** Every launch provider/product/jurisdiction combination has an approved allow, deny, or review outcome and effective date.\n\n**Dependencies:** `P4-KYC-01`\n\n**Owner:** Legal/Compliance; Product",
+    "priority": "Highest",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-4",
+      "jurisdiction-controls"
+    ],
+    "dependencies": [
+      "P4-KYC-01"
+    ]
+  },
+  {
+    "local_id": "P4-JUR-02",
+    "parent_local_id": "P4-JUR-EPIC",
+    "issue_type": "Task",
+    "summary": "Implement versioned jurisdiction registry",
+    "description": "**Business value:** Makes market controls consistent, changeable, and auditable.\n\n**Technical requirements:** Store effective-dated market/provider/product availability with immutable published versions, maker/checker approval, and rollback.\n\n**Acceptance criteria:** Unpublished edits have no production effect; effective-date and rollback tests pass; requests can identify the applied version.\n\n**Dependencies:** `P4-JUR-01`, `SEC-003`\n\n**Owner:** Compliance Backend; Data; Admin Backend",
+    "priority": "Highest",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-4",
+      "jurisdiction-controls"
+    ],
+    "dependencies": [
+      "P4-JUR-01",
+      "SEC-003"
+    ]
+  },
+  {
+    "local_id": "P4-JUR-03",
+    "parent_local_id": "P4-JUR-EPIC",
+    "issue_type": "Task",
+    "summary": "Resolve trusted residency and conflicts",
+    "description": "**Business value:** Avoids treating spoofable client geography as authoritative.\n\n**Technical requirements:** Use verified KYC residency as authority; model unknown/conflict states and optional IP/device risk signals without silently overwriting KYC.\n\n**Acceptance criteria:** Known residency resolves deterministically; unknown/conflicted cases fail closed or enter review; conflicts are audited.\n\n**Dependencies:** `P4-KYC-04`, `P4-JUR-02`\n\n**Owner:** Compliance Backend; Security/Risk",
+    "priority": "Highest",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-4",
+      "jurisdiction-controls"
+    ],
+    "dependencies": [
+      "P4-KYC-04",
+      "P4-JUR-02"
+    ]
+  },
+  {
+    "local_id": "P4-JUR-04",
+    "parent_local_id": "P4-JUR-EPIC",
+    "issue_type": "Task",
+    "summary": "Enforce U.S. and unsupported-market access gates",
+    "description": "**Business value:** Keeps executable products inside the approved launch footprint.\n\n**Technical requirements:** Add central server authorization and pre-trade enforcement with default deny; do not rely on UI controls.\n\n**Acceptance criteria:** U.S., unknown, and blocked test users cannot quote or trade; approved users can; direct API calls cannot bypass the gate.\n\n**Dependencies:** `P4-JUR-02`, `P4-JUR-03`, `P4-KYC-08`\n\n**Owner:** Compliance Backend; Platform; Security",
+    "priority": "Highest",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-4",
+      "jurisdiction-controls"
+    ],
+    "dependencies": [
+      "P4-JUR-02",
+      "P4-JUR-03",
+      "P4-KYC-08"
+    ]
+  },
+  {
+    "local_id": "P4-JUR-05",
+    "parent_local_id": "P4-JUR-EPIC",
+    "issue_type": "Story",
+    "summary": "Display international availability outcomes",
+    "description": "**Business value:** Gives users clear, non-misleading access guidance.\n\n**Technical requirements:** Render localizable supported, unavailable, and review-required states with approved disclosures and no executable CTA for blocked users.\n\n**Acceptance criteria:** Every gate result maps to approved copy; blocked users cannot navigate to confirmation; sensitive rule details are not exposed.\n\n**Dependencies:** `P4-JUR-04`\n\n**Owner:** Web/Mobile; UX; Legal/Compliance",
+    "priority": "High",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-4",
+      "jurisdiction-controls"
+    ],
+    "dependencies": [
+      "P4-JUR-04"
+    ]
+  },
+  {
+    "local_id": "P4-JUR-06",
+    "parent_local_id": "P4-JUR-EPIC",
+    "issue_type": "Task",
+    "summary": "Monitor jurisdiction-control exceptions",
+    "description": "**Business value:** Enables rapid response to attempted bypasses and residency conflicts.\n\n**Technical requirements:** Publish redacted metrics by reason/policy version and alert on bypass attempts or signal conflicts with user/request correlation.\n\n**Acceptance criteria:** Synthetic bypass and conflict tests each generate one actionable alert; dashboards expose no raw PII.\n\n**Dependencies:** `P4-JUR-03`, `P4-JUR-04`, `SEC-005`\n\n**Owner:** Security/SRE; Compliance Operations",
+    "priority": "Highest",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-4",
+      "jurisdiction-controls"
+    ],
+    "dependencies": [
+      "P4-JUR-03",
+      "P4-JUR-04",
+      "SEC-005"
+    ]
+  },
+  {
+    "local_id": "P5-INS-01",
+    "parent_local_id": "P5-INS-EPIC",
+    "issue_type": "Task",
+    "summary": "Model canonical underlying equities",
+    "description": "**Business value:** Creates the company-level entity users search for.\n\n**Technical requirements:** Persist a stable internal ID, ticker, company/security name, reference identifiers, and lifecycle status.\n\n**Acceptance criteria:** AAPL and NVDA resolve by name/ticker to one canonical underlying; identifier collisions are rejected.\n\n**Dependencies:** None\n\n**Owner:** Securities Backend; Data",
+    "priority": "Highest",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-5",
+      "instrument-model"
+    ],
+    "dependencies": []
+  },
+  {
+    "local_id": "P5-INS-02",
+    "parent_local_id": "P5-INS-EPIC",
+    "issue_type": "Task",
+    "summary": "Model provider-specific tokenized instruments",
+    "description": "**Business value:** Preserves each security's legal and settlement identity.\n\n**Technical requirements:** Persist issuer, provider, token, chain, contract, venue, custody/redemption structure, settlement assets, and status.\n\n**Acceptance criteria:** Two AAPL products retain distinct IDs and metadata while referencing one underlying; required identity fields cannot be omitted.\n\n**Dependencies:** `P5-INS-01`\n\n**Owner:** Securities Backend; Compliance",
+    "priority": "Highest",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-5",
+      "instrument-model"
+    ],
+    "dependencies": [
+      "P5-INS-01"
+    ]
+  },
+  {
+    "local_id": "P5-INS-03",
+    "parent_local_id": "P5-INS-EPIC",
+    "issue_type": "Task",
+    "summary": "Implement fungibility identity rules",
+    "description": "**Business value:** Prevents false liquidity aggregation across distinct securities.\n\n**Technical requirements:** Build a conservative fungibility key using security/issuer and exact token, chain, and contract identity; default to non-fungible.\n\n**Acceptance criteria:** Different issuer or contract never shares a key; an explicitly verified same token traded at two venues may share one.\n\n**Dependencies:** `P5-INS-02`\n\n**Owner:** Securities Backend; Compliance; Market Data",
+    "priority": "Highest",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-5",
+      "instrument-model"
+    ],
+    "dependencies": [
+      "P5-INS-02"
+    ]
+  },
+  {
+    "local_id": "P5-INS-04",
+    "parent_local_id": "P5-INS-EPIC",
+    "issue_type": "Task",
+    "summary": "Build validated instrument catalog ingestion",
+    "description": "**Business value:** Allows provider catalogs to be loaded without corrupting security identity.\n\n**Technical requirements:** Implement idempotent provider-key upserts, schema validation, provenance, deactivate-not-delete, and quarantine for ambiguous mappings.\n\n**Acceptance criteria:** Replay creates no duplicate; invalid metadata is quarantined; updates preserve history and provenance.\n\n**Dependencies:** `P5-INS-02`, `P5-INS-03`, `SEC-003`\n\n**Owner:** Securities Backend; Data Engineering",
+    "priority": "Highest",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-5",
+      "instrument-model"
+    ],
+    "dependencies": [
+      "P5-INS-02",
+      "P5-INS-03",
+      "SEC-003"
+    ]
+  },
+  {
+    "local_id": "P5-INS-05",
+    "parent_local_id": "P5-INS-EPIC",
+    "issue_type": "Story",
+    "summary": "Build underlying-equity search API",
+    "description": "**Business value:** Matches how users search for companies rather than token issuers.\n\n**Technical requirements:** Support name/ticker search with pagination and eligibility-filter hooks while returning distinct instrument references.\n\n**Acceptance criteria:** “NVIDIA” and “NVDA” find one underlying; provider instruments remain separate; ineligible instruments can be excluded.\n\n**Dependencies:** `P5-INS-01`, `P5-INS-04`, `P4-KYC-07`\n\n**Owner:** Securities Backend; Search/Data",
+    "priority": "High",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-5",
+      "instrument-model"
+    ],
+    "dependencies": [
+      "P5-INS-01",
+      "P5-INS-04",
+      "P4-KYC-07"
+    ]
+  },
+  {
+    "local_id": "P5-PRV1-01",
+    "parent_local_id": "P5-PRV1-EPIC",
+    "issue_type": "Spike",
+    "summary": "Select and approve Provider 1",
+    "description": "**Business value:** Resolves partnership, regulatory, API, custody, and settlement uncertainty for the first production provider.\n\n**Technical requirements:** Assess Dinari, Ondo, xStocks/Backed or approved alternatives for partnership/API access, jurisdictions, liquidity, buy/sell and limit support, market data, custody, redemption, chains/stablecoins, reconciliation, SLA, and production readiness.\n\n**Acceptance criteria:** Product, Legal/Compliance, Security, and Engineering approve a provider distinct from earlier slots and document sandbox/production exit criteria, or record a no-go.\n\n**Dependencies:** `P4-KYC-01`, `P4-JUR-01`\n\n**Owner:** Partner Product; Legal/Compliance; Security; Integrations",
+    "priority": "Highest",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-5",
+      "provider-1"
+    ],
+    "dependencies": [
+      "P4-KYC-01",
+      "P4-JUR-01"
+    ]
+  },
+  {
+    "local_id": "P5-PRV1-02",
+    "parent_local_id": "P5-PRV1-EPIC",
+    "issue_type": "Task",
+    "summary": "Build secure Provider 1 API client",
+    "description": "**Business value:** Creates a safe, reusable provider boundary.\n\n**Technical requirements:** Implement server-side authentication, KMS/Secrets Manager storage, least privilege, timeouts, bounded retries, rate limits, circuit breaker, and correlation IDs.\n\n**Acceptance criteria:** Sandbox authentication succeeds; credentials never enter logs; timeout and rate-limit cases return normalized retryable/non-retryable errors.\n\n**Dependencies:** `P5-PRV1-01`, `SEC-002`\n\n**Owner:** Partner Integrations; Platform; Security",
+    "priority": "Highest",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-5",
+      "provider-1"
+    ],
+    "dependencies": [
+      "P5-PRV1-01",
+      "SEC-002"
+    ]
+  },
+  {
+    "local_id": "P5-PRV1-03",
+    "parent_local_id": "P5-PRV1-EPIC",
+    "issue_type": "Task",
+    "summary": "Map Provider 1 instrument catalog",
+    "description": "**Business value:** Makes this provider's securities searchable and comparable.\n\n**Technical requirements:** Synchronize provider instruments through the normalized catalog with provenance, idempotency, deactivate handling, and ambiguous-mapping quarantine.\n\n**Acceptance criteria:** Fixture catalog maps correctly; replay is idempotent; delisted entries deactivate without deleting history.\n\n**Dependencies:** `P5-PRV1-02`, `P5-INS-04`\n\n**Owner:** Partner Integrations; Securities Backend; Data",
+    "priority": "Highest",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-5",
+      "provider-1"
+    ],
+    "dependencies": [
+      "P5-PRV1-02",
+      "P5-INS-04"
+    ]
+  },
+  {
+    "local_id": "P5-PRV1-04",
+    "parent_local_id": "P5-PRV1-EPIC",
+    "issue_type": "Task",
+    "summary": "Integrate Provider 1 executable quotes and orders",
+    "description": "**Business value:** Enables regulated buy and sell execution without proprietary brokerage or custody.\n\n**Technical requirements:** Retrieve executable quotes and submit idempotent buy/sell orders through the normalized contract with explicit provider fees and settlement requirements; add no hidden spread.\n\n**Acceptance criteria:** Sandbox buy and sell succeed; duplicate submission creates one provider order; expired quote and provider rejection map correctly.\n\n**Dependencies:** `P5-PRV1-02`, `P5-ROUTER-01`, `P4-KYC-08`, `P4-JUR-04`\n\n**Owner:** Partner Integrations; Execution Backend",
+    "priority": "Highest",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-5",
+      "provider-1"
+    ],
+    "dependencies": [
+      "P5-PRV1-02",
+      "P5-ROUTER-01",
+      "P4-KYC-08",
+      "P4-JUR-04"
+    ]
+  },
+  {
+    "local_id": "P5-PRV1-05",
+    "parent_local_id": "P5-PRV1-EPIC",
+    "issue_type": "Task",
+    "summary": "Normalize Provider 1 transaction lifecycle",
+    "description": "**Business value:** Makes provider execution auditable and recoverable.\n\n**Technical requirements:** Verify events or poll safely, prevent replay, process idempotently, protect ordering, and map provider identifiers/hashes to CREATED through REVERSED ledger states.\n\n**Acceptance criteria:** Duplicate events create one transition; invalid signatures fail; every terminal provider status maps to SETTLED, FAILED, or REVERSED.\n\n**Dependencies:** `P5-PRV1-04`, `EP-LED`\n\n**Owner:** Partner Integrations; Ledger Backend; Security",
+    "priority": "Highest",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-5",
+      "provider-1"
+    ],
+    "dependencies": [
+      "P5-PRV1-04",
+      "EP-LED"
+    ]
+  },
+  {
+    "local_id": "P5-PRV1-06",
+    "parent_local_id": "P5-PRV1-EPIC",
+    "issue_type": "Task",
+    "summary": "Implement Provider 1 reconciliation adapter",
+    "description": "**Business value:** Detects missing or incorrect provider trades, positions, and fees.\n\n**Technical requirements:** Pull incremental source records with immutable snapshots and compare asset, amount, position, fee, and provider identifiers using approved tolerances.\n\n**Acceptance criteria:** Matching fixtures reconcile; missing trade, quantity mismatch, and fee mismatch each emit one actionable discrepancy.\n\n**Dependencies:** `P5-PRV1-05`, `EP-REC`\n\n**Owner:** Reconciliation Backend; Partner Integrations; Finance Operations",
+    "priority": "Highest",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-5",
+      "provider-1"
+    ],
+    "dependencies": [
+      "P5-PRV1-05",
+      "EP-REC"
+    ]
+  },
+  {
+    "local_id": "P5-PRV1-07",
+    "parent_local_id": "P5-PRV1-EPIC",
+    "issue_type": "Task",
+    "summary": "Certify Provider 1 for production",
+    "description": "**Business value:** Turns a sandbox adapter into a safely operable production venue.\n\n**Technical requirements:** Complete shared contract tests, least-privilege production credentials, kill switch, health alerts, runbook, rollback, and Compliance/Security/Ops sign-off.\n\n**Acceptance criteria:** End-to-end buy, sell, ledger, and reconciliation pass in the approved environment; a simulated outage trips controls and alerts.\n\n**Dependencies:** `P5-PRV1-03`, `P5-PRV1-06`, `SEC-005`, `P4-JUR-04`\n\n**Owner:** Partner Integrations; QA; Security; SRE; Compliance",
+    "priority": "Highest",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-5",
+      "provider-1"
+    ],
+    "dependencies": [
+      "P5-PRV1-03",
+      "P5-PRV1-06",
+      "SEC-005",
+      "P4-JUR-04"
+    ]
+  },
+  {
+    "local_id": "P5-PRV2-01",
+    "parent_local_id": "P5-PRV2-EPIC",
+    "issue_type": "Spike",
+    "summary": "Select and approve Provider 2",
+    "description": "**Business value:** Resolves partnership, regulatory, API, custody, and settlement uncertainty for the distinct second production provider.\n\n**Technical requirements:** Assess Dinari, Ondo, xStocks/Backed or approved alternatives for partnership/API access, jurisdictions, liquidity, buy/sell and limit support, market data, custody, redemption, chains/stablecoins, reconciliation, SLA, and production readiness.\n\n**Acceptance criteria:** Product, Legal/Compliance, Security, and Engineering approve a provider distinct from earlier slots and document sandbox/production exit criteria, or record a no-go.\n\n**Dependencies:** `P4-KYC-01`, `P4-JUR-01`, `P5-PRV1-01`\n\n**Owner:** Partner Product; Legal/Compliance; Security; Integrations",
+    "priority": "Highest",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-5",
+      "provider-2"
+    ],
+    "dependencies": [
+      "P4-KYC-01",
+      "P4-JUR-01",
+      "P5-PRV1-01"
+    ]
+  },
+  {
+    "local_id": "P5-PRV2-02",
+    "parent_local_id": "P5-PRV2-EPIC",
+    "issue_type": "Task",
+    "summary": "Build secure Provider 2 API client",
+    "description": "**Business value:** Creates a safe, reusable provider boundary.\n\n**Technical requirements:** Implement server-side authentication, KMS/Secrets Manager storage, least privilege, timeouts, bounded retries, rate limits, circuit breaker, and correlation IDs.\n\n**Acceptance criteria:** Sandbox authentication succeeds; credentials never enter logs; timeout and rate-limit cases return normalized retryable/non-retryable errors.\n\n**Dependencies:** `P5-PRV2-01`, `SEC-002`\n\n**Owner:** Partner Integrations; Platform; Security",
+    "priority": "Highest",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-5",
+      "provider-2"
+    ],
+    "dependencies": [
+      "P5-PRV2-01",
+      "SEC-002"
+    ]
+  },
+  {
+    "local_id": "P5-PRV2-03",
+    "parent_local_id": "P5-PRV2-EPIC",
+    "issue_type": "Task",
+    "summary": "Map Provider 2 instrument catalog",
+    "description": "**Business value:** Makes this provider's securities searchable and comparable.\n\n**Technical requirements:** Synchronize provider instruments through the normalized catalog with provenance, idempotency, deactivate handling, and ambiguous-mapping quarantine.\n\n**Acceptance criteria:** Fixture catalog maps correctly; replay is idempotent; delisted entries deactivate without deleting history.\n\n**Dependencies:** `P5-PRV2-02`, `P5-INS-04`\n\n**Owner:** Partner Integrations; Securities Backend; Data",
+    "priority": "Highest",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-5",
+      "provider-2"
+    ],
+    "dependencies": [
+      "P5-PRV2-02",
+      "P5-INS-04"
+    ]
+  },
+  {
+    "local_id": "P5-PRV2-04",
+    "parent_local_id": "P5-PRV2-EPIC",
+    "issue_type": "Task",
+    "summary": "Integrate Provider 2 executable quotes and orders",
+    "description": "**Business value:** Enables regulated buy and sell execution without proprietary brokerage or custody.\n\n**Technical requirements:** Retrieve executable quotes and submit idempotent buy/sell orders through the normalized contract with explicit provider fees and settlement requirements; add no hidden spread.\n\n**Acceptance criteria:** Sandbox buy and sell succeed; duplicate submission creates one provider order; expired quote and provider rejection map correctly.\n\n**Dependencies:** `P5-PRV2-02`, `P5-ROUTER-01`, `P4-KYC-08`, `P4-JUR-04`\n\n**Owner:** Partner Integrations; Execution Backend",
+    "priority": "Highest",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-5",
+      "provider-2"
+    ],
+    "dependencies": [
+      "P5-PRV2-02",
+      "P5-ROUTER-01",
+      "P4-KYC-08",
+      "P4-JUR-04"
+    ]
+  },
+  {
+    "local_id": "P5-PRV2-05",
+    "parent_local_id": "P5-PRV2-EPIC",
+    "issue_type": "Task",
+    "summary": "Normalize Provider 2 transaction lifecycle",
+    "description": "**Business value:** Makes provider execution auditable and recoverable.\n\n**Technical requirements:** Verify events or poll safely, prevent replay, process idempotently, protect ordering, and map provider identifiers/hashes to CREATED through REVERSED ledger states.\n\n**Acceptance criteria:** Duplicate events create one transition; invalid signatures fail; every terminal provider status maps to SETTLED, FAILED, or REVERSED.\n\n**Dependencies:** `P5-PRV2-04`, `EP-LED`\n\n**Owner:** Partner Integrations; Ledger Backend; Security",
+    "priority": "Highest",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-5",
+      "provider-2"
+    ],
+    "dependencies": [
+      "P5-PRV2-04",
+      "EP-LED"
+    ]
+  },
+  {
+    "local_id": "P5-PRV2-06",
+    "parent_local_id": "P5-PRV2-EPIC",
+    "issue_type": "Task",
+    "summary": "Implement Provider 2 reconciliation adapter",
+    "description": "**Business value:** Detects missing or incorrect provider trades, positions, and fees.\n\n**Technical requirements:** Pull incremental source records with immutable snapshots and compare asset, amount, position, fee, and provider identifiers using approved tolerances.\n\n**Acceptance criteria:** Matching fixtures reconcile; missing trade, quantity mismatch, and fee mismatch each emit one actionable discrepancy.\n\n**Dependencies:** `P5-PRV2-05`, `EP-REC`\n\n**Owner:** Reconciliation Backend; Partner Integrations; Finance Operations",
+    "priority": "Highest",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-5",
+      "provider-2"
+    ],
+    "dependencies": [
+      "P5-PRV2-05",
+      "EP-REC"
+    ]
+  },
+  {
+    "local_id": "P5-PRV2-07",
+    "parent_local_id": "P5-PRV2-EPIC",
+    "issue_type": "Task",
+    "summary": "Certify Provider 2 for production",
+    "description": "**Business value:** Turns a sandbox adapter into a safely operable production venue.\n\n**Technical requirements:** Complete shared contract tests, least-privilege production credentials, kill switch, health alerts, runbook, rollback, and Compliance/Security/Ops sign-off.\n\n**Acceptance criteria:** End-to-end buy, sell, ledger, and reconciliation pass in the approved environment; a simulated outage trips controls and alerts.\n\n**Dependencies:** `P5-PRV2-03`, `P5-PRV2-06`, `SEC-005`, `P4-JUR-04`\n\n**Owner:** Partner Integrations; QA; Security; SRE; Compliance",
+    "priority": "Highest",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-5",
+      "provider-2"
+    ],
+    "dependencies": [
+      "P5-PRV2-03",
+      "P5-PRV2-06",
+      "SEC-005",
+      "P4-JUR-04"
+    ]
+  },
+  {
+    "local_id": "P5-PRV3-01",
+    "parent_local_id": "P5-PRV3-EPIC",
+    "issue_type": "Spike",
+    "summary": "Select and approve Provider 3",
+    "description": "**Business value:** Resolves partnership, regulatory, API, custody, and settlement uncertainty for the distinct third provider targeted before public launch.\n\n**Technical requirements:** Assess Dinari, Ondo, xStocks/Backed or approved alternatives for partnership/API access, jurisdictions, liquidity, buy/sell and limit support, market data, custody, redemption, chains/stablecoins, reconciliation, SLA, and production readiness.\n\n**Acceptance criteria:** Product, Legal/Compliance, Security, and Engineering approve a provider distinct from earlier slots and document sandbox/production exit criteria, or record a no-go.\n\n**Dependencies:** `P5-PRV1-01`, `P5-PRV2-01`\n\n**Owner:** Partner Product; Legal/Compliance; Security; Integrations",
+    "priority": "Medium",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-5",
+      "provider-3"
+    ],
+    "dependencies": [
+      "P5-PRV1-01",
+      "P5-PRV2-01"
+    ]
+  },
+  {
+    "local_id": "P5-PRV3-02",
+    "parent_local_id": "P5-PRV3-EPIC",
+    "issue_type": "Task",
+    "summary": "Build secure Provider 3 API client",
+    "description": "**Business value:** Creates a safe, reusable provider boundary.\n\n**Technical requirements:** Implement server-side authentication, KMS/Secrets Manager storage, least privilege, timeouts, bounded retries, rate limits, circuit breaker, and correlation IDs.\n\n**Acceptance criteria:** Sandbox authentication succeeds; credentials never enter logs; timeout and rate-limit cases return normalized retryable/non-retryable errors.\n\n**Dependencies:** `P5-PRV3-01`, `SEC-002`\n\n**Owner:** Partner Integrations; Platform; Security",
+    "priority": "Medium",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-5",
+      "provider-3"
+    ],
+    "dependencies": [
+      "P5-PRV3-01",
+      "SEC-002"
+    ]
+  },
+  {
+    "local_id": "P5-PRV3-03",
+    "parent_local_id": "P5-PRV3-EPIC",
+    "issue_type": "Task",
+    "summary": "Map Provider 3 instrument catalog",
+    "description": "**Business value:** Makes this provider's securities searchable and comparable.\n\n**Technical requirements:** Synchronize provider instruments through the normalized catalog with provenance, idempotency, deactivate handling, and ambiguous-mapping quarantine.\n\n**Acceptance criteria:** Fixture catalog maps correctly; replay is idempotent; delisted entries deactivate without deleting history.\n\n**Dependencies:** `P5-PRV3-02`, `P5-INS-04`\n\n**Owner:** Partner Integrations; Securities Backend; Data",
+    "priority": "Medium",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-5",
+      "provider-3"
+    ],
+    "dependencies": [
+      "P5-PRV3-02",
+      "P5-INS-04"
+    ]
+  },
+  {
+    "local_id": "P5-PRV3-04",
+    "parent_local_id": "P5-PRV3-EPIC",
+    "issue_type": "Task",
+    "summary": "Integrate Provider 3 executable quotes and orders",
+    "description": "**Business value:** Enables regulated buy and sell execution without proprietary brokerage or custody.\n\n**Technical requirements:** Retrieve executable quotes and submit idempotent buy/sell orders through the normalized contract with explicit provider fees and settlement requirements; add no hidden spread.\n\n**Acceptance criteria:** Sandbox buy and sell succeed; duplicate submission creates one provider order; expired quote and provider rejection map correctly.\n\n**Dependencies:** `P5-PRV3-02`, `P5-ROUTER-01`, `P4-KYC-08`, `P4-JUR-04`\n\n**Owner:** Partner Integrations; Execution Backend",
+    "priority": "Medium",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-5",
+      "provider-3"
+    ],
+    "dependencies": [
+      "P5-PRV3-02",
+      "P5-ROUTER-01",
+      "P4-KYC-08",
+      "P4-JUR-04"
+    ]
+  },
+  {
+    "local_id": "P5-PRV3-05",
+    "parent_local_id": "P5-PRV3-EPIC",
+    "issue_type": "Task",
+    "summary": "Normalize Provider 3 transaction lifecycle",
+    "description": "**Business value:** Makes provider execution auditable and recoverable.\n\n**Technical requirements:** Verify events or poll safely, prevent replay, process idempotently, protect ordering, and map provider identifiers/hashes to CREATED through REVERSED ledger states.\n\n**Acceptance criteria:** Duplicate events create one transition; invalid signatures fail; every terminal provider status maps to SETTLED, FAILED, or REVERSED.\n\n**Dependencies:** `P5-PRV3-04`, `EP-LED`\n\n**Owner:** Partner Integrations; Ledger Backend; Security",
+    "priority": "Medium",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-5",
+      "provider-3"
+    ],
+    "dependencies": [
+      "P5-PRV3-04",
+      "EP-LED"
+    ]
+  },
+  {
+    "local_id": "P5-PRV3-06",
+    "parent_local_id": "P5-PRV3-EPIC",
+    "issue_type": "Task",
+    "summary": "Implement Provider 3 reconciliation adapter",
+    "description": "**Business value:** Detects missing or incorrect provider trades, positions, and fees.\n\n**Technical requirements:** Pull incremental source records with immutable snapshots and compare asset, amount, position, fee, and provider identifiers using approved tolerances.\n\n**Acceptance criteria:** Matching fixtures reconcile; missing trade, quantity mismatch, and fee mismatch each emit one actionable discrepancy.\n\n**Dependencies:** `P5-PRV3-05`, `EP-REC`\n\n**Owner:** Reconciliation Backend; Partner Integrations; Finance Operations",
+    "priority": "Medium",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-5",
+      "provider-3"
+    ],
+    "dependencies": [
+      "P5-PRV3-05",
+      "EP-REC"
+    ]
+  },
+  {
+    "local_id": "P5-PRV3-07",
+    "parent_local_id": "P5-PRV3-EPIC",
+    "issue_type": "Task",
+    "summary": "Certify Provider 3 for production",
+    "description": "**Business value:** Turns a sandbox adapter into a safely operable production venue.\n\n**Technical requirements:** Complete shared contract tests, least-privilege production credentials, kill switch, health alerts, runbook, rollback, and Compliance/Security/Ops sign-off.\n\n**Acceptance criteria:** End-to-end buy, sell, ledger, and reconciliation pass in the approved environment; a simulated outage trips controls and alerts.\n\n**Dependencies:** `P5-PRV3-03`, `P5-PRV3-06`, `SEC-005`, `P4-JUR-04`\n\n**Owner:** Partner Integrations; QA; Security; SRE; Compliance",
+    "priority": "Medium",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-5",
+      "provider-3"
+    ],
+    "dependencies": [
+      "P5-PRV3-03",
+      "P5-PRV3-06",
+      "SEC-005",
+      "P4-JUR-04"
+    ]
+  },
+  {
+    "local_id": "P5-ROUTER-01",
+    "parent_local_id": "P5-ROUTER-EPIC",
+    "issue_type": "Task",
+    "summary": "Define normalized equity quote and order contracts",
+    "description": "**Business value:** Keeps provider-specific behavior outside routing logic.\n\n**Technical requirements:** Define provider/instrument IDs, side, quantity/notional, executable price, depth, itemized fees, settlement asset/chain, expiry, and provider order ID.\n\n**Acceptance criteria:** Fixtures for at least two candidate providers validate; missing price, expiry, fee, or settlement data is rejected.\n\n**Dependencies:** `P5-INS-02`\n\n**Owner:** Execution Backend; Partner Integrations",
+    "priority": "Highest",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-5",
+      "equity-router"
+    ],
+    "dependencies": [
+      "P5-INS-02"
+    ]
+  },
+  {
+    "local_id": "P5-ROUTER-02",
+    "parent_local_id": "P5-ROUTER-EPIC",
+    "issue_type": "Task",
+    "summary": "Build eligible candidate and quote fan-out",
+    "description": "**Business value:** Compares only executable choices available to the user.\n\n**Technical requirements:** Filter by current eligibility before concurrent quote requests; enforce freshness, timeouts, circuit breakers, and partial-provider failure isolation.\n\n**Acceptance criteria:** Ineligible providers receive no request; one failed provider does not hide another valid quote; stale quotes are excluded.\n\n**Dependencies:** `P5-ROUTER-01`, `P4-KYC-07`, `P5-PRV1-04`, `P5-PRV2-04`\n\n**Owner:** Execution Backend; Compliance Backend; SRE",
+    "priority": "Highest",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-5",
+      "equity-router"
+    ],
+    "dependencies": [
+      "P5-ROUTER-01",
+      "P4-KYC-07",
+      "P5-PRV1-04",
+      "P5-PRV2-04"
+    ]
+  },
+  {
+    "local_id": "P5-ROUTER-03",
+    "parent_local_id": "P5-ROUTER-EPIC",
+    "issue_type": "Task",
+    "summary": "Calculate all-in equity route cost",
+    "description": "**Business value:** Enables honest comparison without hidden spreads.\n\n**Technical requirements:** Combine executable price with provider, settlement, funding conversion, network, and platform costs using precise decimal math and itemized output.\n\n**Acceptance criteria:** Golden fixtures reproduce expected totals; every cost is exposed; direct settlement receives no material-orchestration fee.\n\n**Dependencies:** `P5-ROUTER-02`, `ROU-006`, `FEE-002`\n\n**Owner:** Quant; Execution Backend; Finance",
+    "priority": "Highest",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-5",
+      "equity-router"
+    ],
+    "dependencies": [
+      "P5-ROUTER-02",
+      "ROU-006",
+      "FEE-002"
+    ]
+  },
+  {
+    "local_id": "P5-ROUTER-04",
+    "parent_local_id": "P5-ROUTER-EPIC",
+    "issue_type": "Task",
+    "summary": "Rank equity routes with deterministic risk rules",
+    "description": "**Business value:** Selects the best valid route predictably while excluding unsafe routes.\n\n**Technical requirements:** Rank by all-in cost, liquidity/depth, slippage, time, and approved route-risk limits with a deterministic tie-break.\n\n**Acceptance criteria:** Lowest valid all-in route wins in fixtures; hard-limit breaches remove a route; identical inputs produce the same result.\n\n**Dependencies:** `P5-ROUTER-03`\n\n**Owner:** Quant; Risk; Execution Backend",
+    "priority": "Highest",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-5",
+      "equity-router"
+    ],
+    "dependencies": [
+      "P5-ROUTER-03"
+    ]
+  },
+  {
+    "local_id": "P5-ROUTER-05",
+    "parent_local_id": "P5-ROUTER-EPIC",
+    "issue_type": "Task",
+    "summary": "Bind equity route quotes to confirmation",
+    "description": "**Business value:** Prevents stale, altered, or cross-user confirmation.\n\n**Technical requirements:** Persist an opaque quote ID bound to user, request, expiry, eligibility/policy snapshot, and idempotency key; require re-quote after expiry.\n\n**Acceptance criteria:** Another user or altered request cannot confirm; expired quotes fail; repeated confirmation cannot create duplicate execution.\n\n**Dependencies:** `P5-ROUTER-04`, `PRE-003`\n\n**Owner:** Execution Backend; Security",
+    "priority": "Highest",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-5",
+      "equity-router"
+    ],
+    "dependencies": [
+      "P5-ROUTER-04",
+      "PRE-003"
+    ]
+  },
+  {
+    "local_id": "P5-ROUTER-06",
+    "parent_local_id": "P5-ROUTER-EPIC",
+    "issue_type": "Task",
+    "summary": "Submit provider order only after funding succeeds",
+    "description": "**Business value:** Prevents unfunded or partially funded equity execution.\n\n**Technical requirements:** Wait for every required wallet funding leg, then submit exactly one chosen-provider order and correlate quote, funding, provider, and ledger IDs; never switch venues silently.\n\n**Acceptance criteria:** Any required funding failure prevents submission; success creates one correlated order; retry creates no duplicate.\n\n**Dependencies:** `P5-ROUTER-05`, `EP-XWT`, `EP-LED`, `P5-PRV1-05`, `P5-PRV2-05`\n\n**Owner:** Execution Backend; Ledger Backend; Partner Integrations",
+    "priority": "Highest",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-5",
+      "equity-router"
+    ],
+    "dependencies": [
+      "P5-ROUTER-05",
+      "EP-XWT",
+      "EP-LED",
+      "P5-PRV1-05",
+      "P5-PRV2-05"
+    ]
+  },
+  {
+    "local_id": "P5-ROUTER-07",
+    "parent_local_id": "P5-ROUTER-EPIC",
+    "issue_type": "Task",
+    "summary": "Audit and monitor equity routing decisions",
+    "description": "**Business value:** Supports best-execution review and rapid operations response.\n\n**Technical requirements:** Record redacted alternatives and rejection reasons with policy/quote correlation; emit latency, failure, expiry, and slippage metrics and alerts.\n\n**Acceptance criteria:** An operator can reconstruct a decision; no-route and expiry cases are distinguishable; synthetic anomalies trigger actionable alerts.\n\n**Dependencies:** `P5-ROUTER-04`, `P5-ROUTER-06`, `SEC-003`, `SEC-005`\n\n**Owner:** Execution Backend; Data; SRE; Compliance Operations",
+    "priority": "Highest",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-5",
+      "equity-router"
+    ],
+    "dependencies": [
+      "P5-ROUTER-04",
+      "P5-ROUTER-06",
+      "SEC-003",
+      "SEC-005"
+    ]
+  },
+  {
+    "local_id": "P5-MDATA-01",
+    "parent_local_id": "P5-MDATA-EPIC",
+    "issue_type": "Spike",
+    "summary": "Select and license market-data sources",
+    "description": "**Business value:** Prevents unsupported data use and identifies coverage gaps before implementation.\n\n**Technical requirements:** Assess tokenized and underlying sources for rights, API/feed access, latency, history, Level II, redistribution, symbol coverage, SLA, and cost; keep tokenized data primary.\n\n**Acceptance criteria:** Legal, Product, and Data approve sources and rights; every planned UI field has a named source or explicit unavailable state.\n\n**Dependencies:** `P5-PRV1-01`, `P5-PRV2-01`\n\n**Owner:** Market Data Product; Legal; Data Engineering",
+    "priority": "Highest",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-5",
+      "market-data"
+    ],
+    "dependencies": [
+      "P5-PRV1-01",
+      "P5-PRV2-01"
+    ]
+  },
+  {
+    "local_id": "P5-MDATA-02",
+    "parent_local_id": "P5-MDATA-EPIC",
+    "issue_type": "Task",
+    "summary": "Define normalized market-data schema",
+    "description": "**Business value:** Prevents underlying reference prices from being mistaken for executable token quotes.\n\n**Technical requirements:** Model source/type, instrument, bid/ask/last, volume, market status, timestamp, venue, currency, depth, and quality flags.\n\n**Acceptance criteria:** Tokenized and underlying records cannot be unlabeled or conflated; stale and out-of-order fixtures receive quality flags.\n\n**Dependencies:** `P5-MDATA-01`, `P5-INS-02`\n\n**Owner:** Market Data Backend; Data Architecture",
+    "priority": "Highest",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-5",
+      "market-data"
+    ],
+    "dependencies": [
+      "P5-MDATA-01",
+      "P5-INS-02"
+    ]
+  },
+  {
+    "local_id": "P5-MDATA-03",
+    "parent_local_id": "P5-MDATA-EPIC",
+    "issue_type": "Task",
+    "summary": "Ingest live tokenized data for Providers 1 and 2",
+    "description": "**Business value:** Meets the minimum production comparison requirement.\n\n**Technical requirements:** Connect both provider feeds with deduplication, sequence handling, reconnect/backoff, normalized source timestamps, and provider attribution.\n\n**Acceptance criteria:** Both sources populate their available bid/ask/last/volume/status fields; reconnect and replay do not duplicate or reorder publication.\n\n**Dependencies:** `P5-MDATA-02`, `P5-PRV1-02`, `P5-PRV2-02`\n\n**Owner:** Data Engineering; Partner Integrations; SRE",
+    "priority": "Highest",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-5",
+      "market-data"
+    ],
+    "dependencies": [
+      "P5-MDATA-02",
+      "P5-PRV1-02",
+      "P5-PRV2-02"
+    ]
+  },
+  {
+    "local_id": "P5-MDATA-04",
+    "parent_local_id": "P5-MDATA-EPIC",
+    "issue_type": "Task",
+    "summary": "Ingest live tokenized data for Provider 3",
+    "description": "**Business value:** Adds the public-launch target provider without consumer changes.\n\n**Technical requirements:** Implement Provider 3 through the same normalized feed contract and quality controls.\n\n**Acceptance criteria:** Provider 3 fixtures pass the shared contract suite; downstream consumers contain no Provider 3 special-case branch.\n\n**Dependencies:** `P5-MDATA-02`, `P5-PRV3-02`\n\n**Owner:** Data Engineering; Partner Integrations",
+    "priority": "Medium",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-5",
+      "market-data"
+    ],
+    "dependencies": [
+      "P5-MDATA-02",
+      "P5-PRV3-02"
+    ]
+  },
+  {
+    "local_id": "P5-MDATA-05",
+    "parent_local_id": "P5-MDATA-EPIC",
+    "issue_type": "Task",
+    "summary": "Store token trades and OHLCV history",
+    "description": "**Business value:** Powers historical charts and time-and-sales.\n\n**Technical requirements:** Persist immutable trade provenance and deterministic event-time candles with supported intervals, timezone/session metadata, late events, and corrections.\n\n**Acceptance criteria:** Known trades produce exact OHLCV; late/corrected events recompute affected candles; missing intervals remain explicit gaps.\n\n**Dependencies:** `P5-MDATA-03`\n\n**Owner:** Data Engineering; Market Data Backend",
+    "priority": "High",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-5",
+      "market-data"
+    ],
+    "dependencies": [
+      "P5-MDATA-03"
+    ]
+  },
+  {
+    "local_id": "P5-MDATA-06",
+    "parent_local_id": "P5-MDATA-EPIC",
+    "issue_type": "Task",
+    "summary": "Integrate underlying reference data and premium calculation",
+    "description": "**Business value:** Lets users assess divergence without altering execution price.\n\n**Technical requirements:** Map licensed underlying symbols, align time/currency, and calculate premium or discount with explicit stale/unavailable behavior.\n\n**Acceptance criteria:** Golden cases produce expected percentages; stale reference suppresses comparison; router quotes never substitute the underlying value.\n\n**Dependencies:** `P5-MDATA-01`, `P5-MDATA-02`, `P5-INS-01`\n\n**Owner:** Market Data Backend; Quant; Data Engineering",
+    "priority": "High",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-5",
+      "market-data"
+    ],
+    "dependencies": [
+      "P5-MDATA-01",
+      "P5-MDATA-02",
+      "P5-INS-01"
+    ]
+  },
+  {
+    "local_id": "P5-MDATA-07",
+    "parent_local_id": "P5-MDATA-EPIC",
+    "issue_type": "Task",
+    "summary": "Publish tokenized market-data APIs",
+    "description": "**Business value:** Gives clients a stable, source-aware read boundary.\n\n**Technical requirements:** Expose current quotes, candles, volume, and market status with authentication, range limits, caching, pagination, source, and freshness.\n\n**Acceptance criteria:** Contract tests return all Free fields; invalid ranges are rejected; every response identifies source and freshness.\n\n**Dependencies:** `P5-MDATA-03`, `P5-MDATA-05`, `P5-MDATA-06`\n\n**Owner:** Market Data Backend; Platform",
+    "priority": "High",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-5",
+      "market-data"
+    ],
+    "dependencies": [
+      "P5-MDATA-03",
+      "P5-MDATA-05",
+      "P5-MDATA-06"
+    ]
+  },
+  {
+    "local_id": "P5-MDATA-08",
+    "parent_local_id": "P5-MDATA-EPIC",
+    "issue_type": "Task",
+    "summary": "Monitor market-data quality and freshness",
+    "description": "**Business value:** Prevents misleading displays and unsafe routing inputs.\n\n**Technical requirements:** Detect stale, crossed, missing, or anomalous feeds; publish quality flags, dashboards, alerts, and a downstream stale-data kill switch.\n\n**Acceptance criteria:** Synthetic stale and crossed quotes are flagged and alerted; stale data is excluded from executable routing.\n\n**Dependencies:** `P5-MDATA-03`, `P5-MDATA-07`, `SEC-005`\n\n**Owner:** Data/SRE; Market Data Backend; Risk",
+    "priority": "Highest",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-5",
+      "market-data"
+    ],
+    "dependencies": [
+      "P5-MDATA-03",
+      "P5-MDATA-07",
+      "SEC-005"
+    ]
+  },
+  {
+    "local_id": "P5-CHART-01",
+    "parent_local_id": "P5-CHART-EPIC",
+    "issue_type": "Story",
+    "summary": "Build basic tokenized candlestick chart",
+    "description": "**Business value:** Delivers the Free historical chart experience.\n\n**Technical requirements:** Render selectable tokenized-price candles and volume on responsive web/mobile with loading, gap, and error states.\n\n**Acceptance criteria:** Known OHLCV fixtures render exact candles/volume; missing intervals show gaps rather than fabricated values.\n\n**Dependencies:** `P5-MDATA-05`, `P5-MDATA-07`\n\n**Owner:** Web/Mobile; UX",
+    "priority": "High",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-5",
+      "stock-charts"
+    ],
+    "dependencies": [
+      "P5-MDATA-05",
+      "P5-MDATA-07"
+    ]
+  },
+  {
+    "local_id": "P5-CHART-02",
+    "parent_local_id": "P5-CHART-EPIC",
+    "issue_type": "Story",
+    "summary": "Display token quote and market status",
+    "description": "**Business value:** Gives immediate tradable-market context.\n\n**Technical requirements:** Show token price, bid, ask, volume, market status, source, and freshness with accessible formatting and stale states.\n\n**Acceptance criteria:** UI matches API fixtures; stale/unavailable data cannot appear live; underlying reference is never substituted.\n\n**Dependencies:** `P5-MDATA-07`, `P5-MDATA-08`\n\n**Owner:** Web/Mobile; Market Data Backend",
+    "priority": "High",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-5",
+      "stock-charts"
+    ],
+    "dependencies": [
+      "P5-MDATA-07",
+      "P5-MDATA-08"
+    ]
+  },
+  {
+    "local_id": "P5-CHART-03",
+    "parent_local_id": "P5-CHART-EPIC",
+    "issue_type": "Story",
+    "summary": "Add token-versus-underlying comparison",
+    "description": "**Business value:** Provides Individual-level fair-value context.\n\n**Technical requirements:** Display the time-aligned underlying reference and premium/discount with separate legends, sources, and unavailable states.\n\n**Acceptance criteria:** Golden fixture shows the correct comparison; stale reference removes only the reference comparison, not the token chart.\n\n**Dependencies:** `P5-MDATA-06`, `P5-CHART-01`\n\n**Owner:** Web/Mobile; Quant",
+    "priority": "High",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-5",
+      "stock-charts"
+    ],
+    "dependencies": [
+      "P5-MDATA-06",
+      "P5-CHART-01"
+    ]
+  },
+  {
+    "local_id": "P5-CHART-04",
+    "parent_local_id": "P5-CHART-EPIC",
+    "issue_type": "Story",
+    "summary": "Add SMA and EMA indicators",
+    "description": "**Business value:** Supplies defined trend analysis.\n\n**Technical requirements:** Calculate and display configurable SMA and EMA with bounded periods, warm-up behavior, and shared precision fixtures.\n\n**Acceptance criteria:** Golden series matches expected SMA and EMA within tolerance; insufficient history is labeled.\n\n**Dependencies:** `P5-MDATA-05`, `P5-CHART-01`\n\n**Owner:** Quant; Web/Mobile",
+    "priority": "High",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-5",
+      "stock-charts"
+    ],
+    "dependencies": [
+      "P5-MDATA-05",
+      "P5-CHART-01"
+    ]
+  },
+  {
+    "local_id": "P5-CHART-05",
+    "parent_local_id": "P5-CHART-EPIC",
+    "issue_type": "Story",
+    "summary": "Add VWAP and RSI indicators",
+    "description": "**Business value:** Expands the defined analysis set.\n\n**Technical requirements:** Implement session-aware VWAP and a documented RSI convention with period validation and missing-volume handling.\n\n**Acceptance criteria:** Golden fixtures match expected values; VWAP is unavailable when required volume is missing; invalid periods fail validation.\n\n**Dependencies:** `P5-MDATA-05`, `P5-CHART-01`\n\n**Owner:** Quant; Web/Mobile",
+    "priority": "Medium",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-5",
+      "stock-charts"
+    ],
+    "dependencies": [
+      "P5-MDATA-05",
+      "P5-CHART-01"
+    ]
+  },
+  {
+    "local_id": "P5-CHART-06",
+    "parent_local_id": "P5-CHART-EPIC",
+    "issue_type": "Story",
+    "summary": "Add MACD indicator",
+    "description": "**Business value:** Completes the defined Pro indicator list.\n\n**Technical requirements:** Calculate and display MACD, signal, and histogram using documented EMA periods and warm-up rules.\n\n**Acceptance criteria:** Golden fixture matches all MACD components within tolerance; invalid configuration is rejected.\n\n**Dependencies:** `P5-CHART-04`\n\n**Owner:** Quant; Web/Mobile",
+    "priority": "Medium",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-5",
+      "stock-charts"
+    ],
+    "dependencies": [
+      "P5-CHART-04"
+    ]
+  },
+  {
+    "local_id": "P5-CHART-07",
+    "parent_local_id": "P5-CHART-EPIC",
+    "issue_type": "Story",
+    "summary": "Build advanced candlestick interactions",
+    "description": "**Business value:** Provides the defined Pro chart experience without adding out-of-scope institutional tooling.\n\n**Technical requirements:** Add range/zoom and indicator-overlay controls with accessible, performant rendering and locally persisted preferences.\n\n**Acceptance criteria:** Users can change range/zoom and toggle supported indicators; the largest supported dataset meets the agreed render budget.\n\n**Dependencies:** `P5-CHART-01`, `P5-CHART-04`, `P5-CHART-05`, `P5-CHART-06`\n\n**Owner:** Web/Mobile; UX",
+    "priority": "Medium",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-5",
+      "stock-charts"
+    ],
+    "dependencies": [
+      "P5-CHART-01",
+      "P5-CHART-04",
+      "P5-CHART-05",
+      "P5-CHART-06"
+    ]
+  },
+  {
+    "local_id": "P5-CHART-08",
+    "parent_local_id": "P5-CHART-EPIC",
+    "issue_type": "Task",
+    "summary": "Enforce chart capability entitlements",
+    "description": "**Business value:** Protects subscription value and licensed data.\n\n**Technical requirements:** Apply server-side and UI capability checks for Free, Individual, and Pro; default deny unknown entitlements.\n\n**Acceptance criteria:** Free cannot call paid comparison/indicator APIs; higher tiers receive only defined capabilities; direct API bypass fails.\n\n**Dependencies:** `P7-E22-STR01`, `P5-CHART-03`, `P5-CHART-07`\n\n**Owner:** Platform Backend; Web/Mobile; Billing",
+    "priority": "Medium",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-5",
+      "stock-charts"
+    ],
+    "dependencies": [
+      "P7-E22-STR01",
+      "P5-CHART-03",
+      "P5-CHART-07"
+    ]
+  },
+  {
+    "local_id": "P5-MKT-01",
+    "parent_local_id": "P5-MKT-EPIC",
+    "issue_type": "Task",
+    "summary": "Build eligible instrument comparison API",
+    "description": "**Business value:** Provides transparent comparison across distinct provider securities.\n\n**Technical requirements:** Return separate eligible instruments with buy/sell, spread, liquidity/depth, slippage, premium, provider/settlement/funding costs, redemption, and route total.\n\n**Acceptance criteria:** AAPL fixture returns one row per security; ineligible rows are not executable; route totals match the execution router.\n\n**Dependencies:** `P5-ROUTER-03`, `P5-INS-05`, `P4-KYC-07`\n\n**Owner:** Execution Backend; Quant",
+    "priority": "High",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-5",
+      "execution-marketplace"
+    ],
+    "dependencies": [
+      "P5-ROUTER-03",
+      "P5-INS-05",
+      "P4-KYC-07"
+    ]
+  },
+  {
+    "local_id": "P5-MKT-02",
+    "parent_local_id": "P5-MKT-EPIC",
+    "issue_type": "Story",
+    "summary": "Build execution marketplace comparison UI",
+    "description": "**Business value:** Explains provider choices without misleading users about fungibility.\n\n**Technical requirements:** Display issuer/provider/token identity, all-in costs, liquidity, settlement details, route selection, and unavailable reasons in separate rows.\n\n**Acceptance criteria:** Distinct AAPL products never render as one order book; selected route matches API; unavailable rows have no confirm action.\n\n**Dependencies:** `P5-MKT-01`\n\n**Owner:** Web/Mobile; UX; Compliance",
+    "priority": "High",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-5",
+      "execution-marketplace"
+    ],
+    "dependencies": [
+      "P5-MKT-01"
+    ]
+  },
+  {
+    "local_id": "P5-MKT-03",
+    "parent_local_id": "P5-MKT-EPIC",
+    "issue_type": "Task",
+    "summary": "Enforce order-book fungibility guard",
+    "description": "**Business value:** Prevents false consolidated liquidity.\n\n**Technical requirements:** Require the verified fungibility key before aggregation, retain venue provenance, and default to separate books.\n\n**Acceptance criteria:** Different issuer or contract books remain separate; the same verified token across venues may aggregate with venue attribution.\n\n**Dependencies:** `P5-INS-03`\n\n**Owner:** Market Data Backend; Securities Backend; Compliance",
+    "priority": "Highest",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-5",
+      "execution-marketplace"
+    ],
+    "dependencies": [
+      "P5-INS-03"
+    ]
+  },
+  {
+    "local_id": "P5-MKT-04",
+    "parent_local_id": "P5-MKT-EPIC",
+    "issue_type": "Task",
+    "summary": "Normalize Level II market depth",
+    "description": "**Business value:** Enables available Pro depth analysis without inventing liquidity.\n\n**Technical requirements:** Process provider snapshots/deltas with sequence validation, resync, normalized price levels, source, and freshness.\n\n**Acceptance criteria:** Fixtures reconstruct the expected book; a missing sequence triggers resync; unsupported instruments return unavailable.\n\n**Dependencies:** `P5-MDATA-02`, `P5-MKT-03`\n\n**Owner:** Market Data Backend; Data Engineering",
+    "priority": "Medium",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-5",
+      "execution-marketplace"
+    ],
+    "dependencies": [
+      "P5-MDATA-02",
+      "P5-MKT-03"
+    ]
+  },
+  {
+    "local_id": "P5-MKT-05",
+    "parent_local_id": "P5-MKT-EPIC",
+    "issue_type": "Story",
+    "summary": "Display order book, depth, and time & sales",
+    "description": "**Business value:** Delivers the defined Pro market microstructure views.\n\n**Technical requirements:** Render available depth and tokenized trade tape with source/freshness labels, venue attribution, and unavailable states.\n\n**Acceptance criteria:** UI matches depth/trade fixtures; stale sources are marked; different securities cannot be combined by client controls.\n\n**Dependencies:** `P5-MKT-04`, `P5-MDATA-05`\n\n**Owner:** Web/Mobile; Market Data Backend",
+    "priority": "Medium",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-5",
+      "execution-marketplace"
+    ],
+    "dependencies": [
+      "P5-MKT-04",
+      "P5-MDATA-05"
+    ]
+  },
+  {
+    "local_id": "P5-MKT-06",
+    "parent_local_id": "P5-MKT-EPIC",
+    "issue_type": "Story",
+    "summary": "Validate and preview equity limit orders",
+    "description": "**Business value:** Delivers defined limit-order capability safely.\n\n**Technical requirements:** Validate provider support, eligibility, price/tick, quantity/lot, buying power, expiry, and transparent fees; prohibit margin and leverage.\n\n**Acceptance criteria:** Invalid or unsupported orders are rejected; valid input creates a bound preview; insufficient buying power cannot confirm.\n\n**Dependencies:** `P5-ROUTER-02`, `PRE-003`, `BAL-003`\n\n**Owner:** Execution Backend; Web/Mobile; Compliance",
+    "priority": "High",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-5",
+      "execution-marketplace"
+    ],
+    "dependencies": [
+      "P5-ROUTER-02",
+      "PRE-003",
+      "BAL-003"
+    ]
+  },
+  {
+    "local_id": "P5-MKT-07",
+    "parent_local_id": "P5-MKT-EPIC",
+    "issue_type": "Task",
+    "summary": "Submit and manage limit-order lifecycle",
+    "description": "**Business value:** Lets users submit and cancel orders with auditable state.\n\n**Technical requirements:** Implement idempotent submit/cancel plus normalized pending, partial-fill, fill, cancel, and reject states linked to ledger and reconciliation.\n\n**Acceptance criteria:** Duplicate submit creates one order; cancel is idempotent; fills and rejection match provider and ledger records.\n\n**Dependencies:** `P5-MKT-06`, `P5-PRV1-04`, `P5-PRV1-05`, `P5-PRV2-04`, `P5-PRV2-05`, `EP-LED`, `EP-REC`\n\n**Owner:** Execution Backend; Partner Integrations; Ledger Backend",
+    "priority": "High",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-5",
+      "execution-marketplace"
+    ],
+    "dependencies": [
+      "P5-MKT-06",
+      "P5-PRV1-04",
+      "P5-PRV1-05",
+      "P5-PRV2-04",
+      "P5-PRV2-05",
+      "EP-LED",
+      "EP-REC"
+    ]
+  },
+  {
+    "local_id": "P5-MKT-08",
+    "parent_local_id": "P5-MKT-EPIC",
+    "issue_type": "Task",
+    "summary": "Enforce marketplace capability entitlements",
+    "description": "**Business value:** Protects paid execution and licensed data capabilities.\n\n**Technical requirements:** Gate limit orders, provider comparisons, Level II, depth, and time-and-sales at server and UI layers; default deny unknown entitlements.\n\n**Acceptance criteria:** Free cannot use limit orders or Pro views; Individual can use defined limit orders; only Pro can access Pro-only depth; API bypass fails.\n\n**Dependencies:** `P7-E22-STR01`, `P5-MKT-05`, `P5-MKT-07`\n\n**Owner:** Platform Backend; Web/Mobile; Billing",
+    "priority": "Medium",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-5",
+      "execution-marketplace"
+    ],
+    "dependencies": [
+      "P7-E22-STR01",
+      "P5-MKT-05",
+      "P5-MKT-07"
+    ]
+  },
+  {
+    "local_id": "P5-PORT-01",
+    "parent_local_id": "P5-PORT-EPIC",
+    "issue_type": "Task",
+    "summary": "Build normalized tokenized-position read model",
+    "description": "**Business value:** Creates an accurate portfolio without conflating distinct securities.\n\n**Technical requirements:** Represent quantity and location by provider instrument, wallet/custody location, underlying, cost provenance, and settlement state; permit group-by-underlying display only.\n\n**Acceptance criteria:** Two provider AAPL positions remain separate under one underlying; unsettled orders are not counted as settled holdings.\n\n**Dependencies:** `P5-INS-02`, `EP-LED`, `WAL-002`\n\n**Owner:** Portfolio Backend; Data",
+    "priority": "High",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-5",
+      "portfolio-liquidation"
+    ],
+    "dependencies": [
+      "P5-INS-02",
+      "EP-LED",
+      "WAL-002"
+    ]
+  },
+  {
+    "local_id": "P5-PORT-02",
+    "parent_local_id": "P5-PORT-EPIC",
+    "issue_type": "Task",
+    "summary": "Synchronize and reconcile portfolio positions",
+    "description": "**Business value:** Prevents stale, duplicated, or fabricated holdings.\n\n**Technical requirements:** Project settled ledger/provider/wallet events idempotently and compare against provider snapshots and indexed wallets with replay support.\n\n**Acceptance criteria:** Event replay produces the same position; duplicate settlement does not double-count; missing or mismatched positions create discrepancies.\n\n**Dependencies:** `P5-PORT-01`, `P5-PRV1-05`, `P5-PRV1-06`, `P5-PRV2-05`, `P5-PRV2-06`, `IDX-005`, `EP-REC`\n\n**Owner:** Portfolio Backend; Reconciliation; Data",
+    "priority": "Highest",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-5",
+      "portfolio-liquidation"
+    ],
+    "dependencies": [
+      "P5-PORT-01",
+      "P5-PRV1-05",
+      "P5-PRV1-06",
+      "P5-PRV2-05",
+      "P5-PRV2-06",
+      "IDX-005",
+      "EP-REC"
+    ]
+  },
+  {
+    "local_id": "P5-PORT-03",
+    "parent_local_id": "P5-PORT-EPIC",
+    "issue_type": "Task",
+    "summary": "Calculate tokenized-equity market value",
+    "description": "**Business value:** Gives users a consistent current portfolio value.\n\n**Technical requirements:** Apply a documented tokenized-market mark to quantity with precise currency handling, source/freshness, and unavailable state; never silently use the underlying reference.\n\n**Acceptance criteria:** Golden positions produce exact values; stale/missing token data is labeled; partial totals are explicitly marked.\n\n**Dependencies:** `P5-PORT-02`, `P5-MDATA-07`, `P5-MDATA-08`\n\n**Owner:** Portfolio Backend; Quant",
+    "priority": "High",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-5",
+      "portfolio-liquidation"
+    ],
+    "dependencies": [
+      "P5-PORT-02",
+      "P5-MDATA-07",
+      "P5-MDATA-08"
+    ]
+  },
+  {
+    "local_id": "P5-PORT-04",
+    "parent_local_id": "P5-PORT-EPIC",
+    "issue_type": "Task",
+    "summary": "Request size-aware executable sell estimates",
+    "description": "**Business value:** Bases liquidation value on realizable liquidity.\n\n**Technical requirements:** Fan out eligible sell quotes for the exact position size using depth/slippage and quote expiry; report partial or unavailable liquidity without submitting an order.\n\n**Acceptance criteria:** Thin-liquidity fixture returns less than last-price value; stale/ineligible quotes are excluded; no-liquidity returns unavailable.\n\n**Dependencies:** `P5-PORT-02`, `P5-ROUTER-02`, `P5-PRV1-04`, `P5-PRV2-04`\n\n**Owner:** Execution Backend; Portfolio Backend; Quant",
+    "priority": "High",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-5",
+      "portfolio-liquidation"
+    ],
+    "dependencies": [
+      "P5-PORT-02",
+      "P5-ROUTER-02",
+      "P5-PRV1-04",
+      "P5-PRV2-04"
+    ]
+  },
+  {
+    "local_id": "P5-PORT-05",
+    "parent_local_id": "P5-PORT-EPIC",
+    "issue_type": "Task",
+    "summary": "Calculate estimated liquidation value",
+    "description": "**Business value:** Shows the gap between display value and realizable proceeds.\n\n**Technical requirements:** Calculate estimated sell value from executable quotes and itemize expected slippage plus provider, network, conversion, and platform costs with expiry.\n\n**Acceptance criteria:** Golden fixture reconciles market value, slippage, costs, and estimated proceeds; every deduction is itemized; expired estimates are stale.\n\n**Dependencies:** `P5-PORT-03`, `P5-PORT-04`, `FEE-002`\n\n**Owner:** Portfolio Backend; Quant; Finance",
+    "priority": "High",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-5",
+      "portfolio-liquidation"
+    ],
+    "dependencies": [
+      "P5-PORT-03",
+      "P5-PORT-04",
+      "FEE-002"
+    ]
+  },
+  {
+    "local_id": "P5-PORT-06",
+    "parent_local_id": "P5-PORT-EPIC",
+    "issue_type": "Story",
+    "summary": "Display portfolio and liquidation estimates",
+    "description": "**Business value:** Gives users an understandable, honest portfolio view.\n\n**Technical requirements:** Render grouped underlyings with distinct provider instruments, market value, estimated sell value, cost/slippage detail, freshness, and partial/unavailable states.\n\n**Acceptance criteria:** A settled purchase appears after projection; UI matches APIs; distinct instruments remain visible; stale or unavailable estimates are clearly labeled.\n\n**Dependencies:** `P5-PORT-01`, `P5-PORT-03`, `P5-PORT-05`\n\n**Owner:** Web/Mobile; Portfolio Backend; UX",
+    "priority": "High",
+    "labels": [
+      "crypto-lending-mvp",
+      "phase-5",
+      "portfolio-liquidation"
+    ],
+    "dependencies": [
+      "P5-PORT-01",
+      "P5-PORT-03",
+      "P5-PORT-05"
+    ]
+  }
+]

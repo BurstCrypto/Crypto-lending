@@ -1,0 +1,2 @@
+export const POSTGRES_POOL = Symbol('POSTGRES_POOL');
+export const DATABASE_MIGRATIONS = Symbol('DATABASE_MIGRATIONS');

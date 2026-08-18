@@ -1,0 +1,204 @@
+{
+  "components": {
+    "schemas": {
+      "HealthResponseDto": {
+        "properties": {
+          "service": {
+            "example": "crypto-lending-api",
+            "type": "object"
+          },
+          "status": {
+            "enum": [
+              "ok"
+            ],
+            "example": "ok",
+            "type": "string"
+          }
+        },
+        "required": [
+          "service",
+          "status"
+        ],
+        "type": "object"
+      },
+      "InfrastructureHealthResponseDto": {
+        "properties": {
+          "checks": {
+            "$ref": "#/components/schemas/PublicDependencyChecksDto"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "degraded"
+            ],
+            "example": "ok",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "checks"
+        ],
+        "type": "object"
+      },
+      "PublicDependencyChecksDto": {
+        "properties": {
+          "postgres": {
+            "$ref": "#/components/schemas/PublicDependencyHealthCheckDto"
+          },
+          "redis": {
+            "$ref": "#/components/schemas/PublicDependencyHealthCheckDto"
+          },
+          "sqs": {
+            "$ref": "#/components/schemas/PublicDependencyHealthCheckDto"
+          }
+        },
+        "required": [
+          "postgres",
+          "redis",
+          "sqs"
+        ],
+        "type": "object"
+      },
+      "PublicDependencyHealthCheckDto": {
+        "properties": {
+          "latencyMs": {
+            "example": 2,
+            "minimum": 0,
+            "type": "number"
+          },
+          "status": {
+            "enum": [
+              "up",
+              "down"
+            ],
+            "example": "up",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "latencyMs"
+        ],
+        "type": "object"
+      },
+      "VersionResponseDto": {
+        "properties": {
+          "apiVersion": {
+            "example": "v1",
+            "type": "object"
+          },
+          "service": {
+            "example": "crypto-lending-api",
+            "type": "object"
+          },
+          "serviceVersion": {
+            "example": "0.1.0",
+            "type": "object"
+          }
+        },
+        "required": [
+          "apiVersion",
+          "service",
+          "serviceVersion"
+        ],
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "bearer": {
+        "bearerFormat": "JWT",
+        "description": "Managed identity access token",
+        "scheme": "bearer",
+        "type": "http"
+      }
+    }
+  },
+  "info": {
+    "contact": {},
+    "description": "Versioned API for the Crypto Lending platform.",
+    "title": "Crypto Lending API",
+    "version": "1.0.0"
+  },
+  "openapi": "3.0.0",
+  "paths": {
+    "/api/v1/health": {
+      "get": {
+        "operationId": "HealthController_getHealth",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponseDto"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "summary": "Report API process health",
+        "tags": [
+          "system"
+        ]
+      }
+    },
+    "/api/v1/health/dependencies": {
+      "get": {
+        "operationId": "InfrastructureHealthController_checkDependencies",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InfrastructureHealthResponseDto"
+                }
+              }
+            },
+            "description": "All required dependencies are reachable and correctly configured."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InfrastructureHealthResponseDto"
+                }
+              }
+            },
+            "description": "At least one required dependency is unavailable or misconfigured."
+          }
+        },
+        "summary": "Report required dependency readiness",
+        "tags": [
+          "system"
+        ]
+      }
+    },
+    "/api/v1/version": {
+      "get": {
+        "operationId": "VersionController_getVersion",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VersionResponseDto"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "summary": "Report API contract and service versions",
+        "tags": [
+          "system"
+        ]
+      }
+    }
+  },
+  "servers": [],
+  "tags": []
+}

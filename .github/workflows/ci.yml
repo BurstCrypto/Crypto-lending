@@ -1,0 +1,113 @@
+name: Foundation CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DATABASE_URL: postgresql://crypto_lending:local_only_password@127.0.0.1:5432/crypto_lending
+  TEST_DATABASE_URL: postgresql://crypto_lending:local_only_password@127.0.0.1:5432/crypto_lending
+  DATABASE_SSL_MODE: disable
+  REDIS_URL: redis://127.0.0.1:6379
+  REDIS_KEY_PREFIX: 'crypto-lending:ci:v1:'
+  AWS_REGION: us-east-1
+  AWS_ACCESS_KEY_ID: test
+  AWS_SECRET_ACCESS_KEY: test
+  SQS_ENDPOINT: http://127.0.0.1:4566
+  SQS_QUEUE_URL: http://127.0.0.1:4566/000000000000/crypto-lending-jobs
+  SQS_DEAD_LETTER_QUEUE_URL: http://127.0.0.1:4566/000000000000/crypto-lending-jobs-dlq
+  SQS_MAX_RECEIVE_COUNT: '3'
+  SQS_VISIBILITY_TIMEOUT_SECONDS: '5'
+  SQS_RETRY_BASE_DELAY_SECONDS: '1'
+  SQS_RETRY_MAX_DELAY_SECONDS: '1'
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Use the repository npm version
+        run: npm install --global npm@11.6.4
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check formatting
+        run: npm run format:check
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Type-check
+        run: npm run typecheck
+
+      - name: Run unit tests
+        run: npm test
+
+      - name: Run API end-to-end tests
+        run: npm run test:e2e --workspace @crypto-lending/api
+
+      - name: Build production applications
+        run: npm run build
+
+      - name: Generate and verify OpenAPI contract
+        run: |
+          npm run openapi:generate
+          git diff --exit-code -- apps/api/openapi.json
+
+      - name: Upload OpenAPI contract
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: crypto-lending-openapi
+          path: apps/api/openapi.json
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Start local dependencies
+        run: docker compose up --detach --build --wait --wait-timeout 120
+
+      - name: Verify migration commands
+        run: |
+          npm run db:migrate:prod --workspace @crypto-lending/api
+          npm run db:status:prod --workspace @crypto-lending/api
+          npm run db:rollback:prod --workspace @crypto-lending/api
+
+      - name: Run live infrastructure tests
+        env:
+          RUN_INFRASTRUCTURE_INTEGRATION: '1'
+        run: npm run test:integration
+
+      - name: Capture dependency logs
+        if: always()
+        run: docker compose logs --no-color > infrastructure.log
+
+      - name: Upload dependency logs on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: infrastructure-logs
+          path: infrastructure.log
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Stop local dependencies
+        if: always()
+        run: docker compose down --volumes

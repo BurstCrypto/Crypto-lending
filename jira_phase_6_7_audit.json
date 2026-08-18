@@ -1,0 +1,552 @@
+[
+  {
+    "local_id": "P6-E19",
+    "parent_local_id": null,
+    "dependencies": ["P4-KYC-EPIC", "P4-JUR-EPIC", "EP-BAL", "EP-SEC"],
+    "issue_type": "Epic",
+    "summary": "Smart Yield Discovery",
+    "description": "Normalize approved third-party yield opportunities for USDC and USDT, with PYUSD feature-flagged.\n\n**Business value:** Eligible international users can discover deployable yield without selecting protocols or chains.\n\n**Technical requirements:** FastAPI provider adapters, PostgreSQL/Redis-backed catalog, source provenance, freshness, and server-side eligibility filtering.\n\n**Acceptance criteria:**\n- At least one approved production strategy is discoverable.\n- Stale, unavailable, U.S.-restricted, or otherwise ineligible opportunities cannot be executed.\n\n**Dependencies:** `WS-02`, `WS-05`, `WS-26`, `WS-27`\n\n**Owner:** Yield Backend, Product, Risk/Compliance",
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-6", "smart-yield", "workstream-19"]
+  },
+  {
+    "local_id": "P6-E19-SPK01",
+    "parent_local_id": "P6-E19",
+    "dependencies": ["P4-KYC-EPIC", "P4-JUR-EPIC", "EP-SEC"],
+    "issue_type": "Spike",
+    "summary": "Select the MVP yield provider and production strategy",
+    "description": "Assess provider access and one viable production strategy.\n\n**Business value:** Prevents implementation against an unavailable or impermissible provider.\n\n**Technical requirements:** Compare supported assets/chains, API or contract access, deposit/exit and position semantics, custody responsibilities, jurisdiction rules, sandbox, SLA, finality, and reconciliation exports.\n\n**Acceptance criteria:**\n- Product, Compliance, Security, Partnerships, and Engineering approve one strategy or record a blocking gap.\n- The decision explicitly excludes U.S. access and proprietary lending infrastructure.\n\n**Dependencies:** `WS-02`, `WS-26`, `WS-27`\n\n**Owner:** Product, Partnerships, Compliance, Yield Backend",
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-6", "smart-yield", "spike"]
+  },
+  {
+    "local_id": "P6-E19-TSK01",
+    "parent_local_id": "P6-E19",
+    "dependencies": ["P6-E19-SPK01"],
+    "issue_type": "Task",
+    "summary": "Define normalized yield opportunity and provider adapter contracts",
+    "description": "Create one normalized opportunity schema and one discovery adapter interface.\n\n**Business value:** Additional approved providers can be added without redesigning Smart Yield.\n\n**Technical requirements:** Preserve provider/protocol, asset contract, chain, APY timestamp, TVL, utilization, exit liquidity, fees, limits, availability, and provenance with decimal-safe values.\n\n**Acceptance criteria:**\n- Contract tests normalize two differing provider fixtures without precision or provenance loss.\n- The schema and adapter interface are versioned.\n\n**Dependencies:** `P6-E19-SPK01`\n\n**Owner:** Yield Backend, Data Engineering",
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-6", "smart-yield", "backend"]
+  },
+  {
+    "local_id": "P6-E19-STR01",
+    "parent_local_id": "P6-E19",
+    "dependencies": ["P6-E19-SPK01", "P6-E19-TSK01", "EP-SEC"],
+    "issue_type": "Story",
+    "summary": "Ingest opportunities from the approved yield provider",
+    "description": "Implement the approved provider adapter and scheduled catalog ingestion.\n\n**Business value:** Supplies current opportunities for discovery and allocation.\n\n**Technical requirements:** Idempotent polling, retry/backoff, invalid-record quarantine, cache expiry, and persisted source timestamps.\n\n**Acceptance criteria:**\n- Repeated snapshots do not create duplicate observations.\n- Missed refreshes mark data stale and malformed records never enter the executable catalog.\n\n**Dependencies:** `P6-E19-SPK01`, `P6-E19-TSK01`, `WS-26`\n\n**Owner:** Yield Backend, Infrastructure",
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-6", "smart-yield", "provider-integration"]
+  },
+  {
+    "local_id": "P6-E19-STR02",
+    "parent_local_id": "P6-E19",
+    "dependencies": ["P6-E19-STR01", "P4-KYC-EPIC", "P4-JUR-EPIC"],
+    "issue_type": "Story",
+    "summary": "Expose an eligibility-filtered yield opportunity catalog",
+    "description": "Return only opportunities allowed for the user, asset, chain, and provider.\n\n**Business value:** Users see only products they can lawfully and technically use.\n\n**Technical requirements:** Enforce KYC, provider, product, and jurisdiction policy server-side; allowlist USDC/USDT; keep PYUSD behind configuration.\n\n**Acceptance criteria:**\n- U.S., failed-KYC, provider-ineligible, unsupported-asset, and stale cases return no executable opportunity.\n- Denials use stable, auditable reason codes.\n\n**Dependencies:** `P6-E19-STR01`, `WS-02`, `WS-27`\n\n**Owner:** Yield Backend, Eligibility Backend",
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-6", "smart-yield", "eligibility"]
+  },
+  {
+    "local_id": "P6-E19-STR03",
+    "parent_local_id": "P6-E19",
+    "dependencies": ["P6-E19-STR02", "P6-E20-STR03", "EP-FND"],
+    "issue_type": "Story",
+    "summary": "Build the Earn opportunity discovery view",
+    "description": "Show eligible opportunities with source, asset, chain, APY, costs, risk label, and freshness.\n\n**Business value:** Users can understand yield choices without protocol expertise.\n\n**Technical requirements:** Consume the filtered catalog and risk API; disable allocation for stale or unavailable entries.\n\n**Acceptance criteria:**\n- Displayed values match API fixtures and provider/freshness are visible.\n- Stale or unavailable entries have no enabled allocation action.\n\n**Dependencies:** `P6-E19-STR02`, `P6-E20-STR03`, `WS-01`\n\n**Owner:** Web/Mobile Frontend, Yield Backend",
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-6", "smart-yield", "frontend"]
+  },
+  {
+    "local_id": "P6-E19-TSK02",
+    "parent_local_id": "P6-E19",
+    "dependencies": ["P6-E19-STR01", "EP-SEC"],
+    "issue_type": "Task",
+    "summary": "Monitor yield opportunity feed health",
+    "description": "Add feed metrics, alerts, and a provider-outage runbook.\n\n**Business value:** Stale provider data cannot silently influence allocations.\n\n**Technical requirements:** Track refresh success, latency, freshness, rejected records, and provider errors with provider and correlation IDs.\n\n**Acceptance criteria:**\n- Synthetic stale and provider-error tests trigger the configured alert.\n- Recovery clears alerts and logs contain no credentials or unnecessary PII.\n\n**Dependencies:** `P6-E19-STR01`, `WS-26`\n\n**Owner:** SRE, Yield Backend",
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-6", "smart-yield", "monitoring"]
+  },
+  {
+    "local_id": "P6-E20",
+    "parent_local_id": null,
+    "dependencies": ["P6-E19", "EP-SEC"],
+    "issue_type": "Epic",
+    "summary": "Smart Yield Risk Engine",
+    "description": "Produce explainable, versioned risk assessments and Conservative/Balanced suitability.\n\n**Business value:** Strategy selection accounts for risk and liquidity instead of headline APY alone.\n\n**Technical requirements:** Python risk service, sourced observations, fail-closed stale-data policy, versioned scoring, and immutable evaluation history.\n\n**Acceptance criteria:**\n- Every executable strategy has a current score, reasons, policy classification, and version.\n- Missing or stale required risk data blocks new allocation plans.\n\n**Dependencies:** `P6-E19`, `WS-26`\n\n**Owner:** Risk Engineering, Product Risk",
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-6", "smart-yield", "workstream-20"]
+  },
+  {
+    "local_id": "P6-E20-SPK01",
+    "parent_local_id": "P6-E20",
+    "dependencies": ["P6-E19-SPK01", "EP-SEC"],
+    "issue_type": "Spike",
+    "summary": "Approve the MVP Smart Yield risk methodology",
+    "description": "Define risk data sources, scoring rubric, thresholds, and governance.\n\n**Business value:** Establishes a defensible basis for strategy suitability.\n\n**Technical requirements:** Cover APY history, liquidity, TVL, utilization, stablecoin, protocol, oracle, exit liquidity, and network/conversion/reallocation costs.\n\n**Acceptance criteria:**\n- Risk, Compliance, Product, and Engineering approve a versioned rubric.\n- The rubric maps each opportunity to Conservative, Balanced, or rejected.\n\n**Dependencies:** `P6-E19-SPK01`, `WS-26`\n\n**Owner:** Product Risk, Compliance, Risk Engineering",
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-6", "smart-yield", "spike", "risk"]
+  },
+  {
+    "local_id": "P6-E20-STR01",
+    "parent_local_id": "P6-E20",
+    "dependencies": ["P6-E20-SPK01", "P6-E19-TSK01"],
+    "issue_type": "Story",
+    "summary": "Store normalized Smart Yield risk observations",
+    "description": "Create a time-series observation model and provenance/freshness read interface.\n\n**Business value:** Makes risk scores reproducible and auditable.\n\n**Technical requirements:** Record observation time, source time, source ID, confidence, expiry, precision, and immutable historical snapshots.\n\n**Acceptance criteria:**\n- Every required rubric input is stored with provenance and freshness.\n- Historical snapshots reproduce approved score fixtures.\n\n**Dependencies:** `P6-E20-SPK01`, `P6-E19-TSK01`\n\n**Owner:** Risk Backend, Data Engineering",
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-6", "smart-yield", "risk", "backend"]
+  },
+  {
+    "local_id": "P6-E20-STR02",
+    "parent_local_id": "P6-E20",
+    "dependencies": ["P6-E20-SPK01", "P6-E20-STR01"],
+    "issue_type": "Story",
+    "summary": "Calculate versioned and explainable yield risk scores",
+    "description": "Implement deterministic scoring with component reason codes.\n\n**Business value:** Supports consistent suitability decisions and user disclosures.\n\n**Technical requirements:** Versioned configuration, missing/stale-input behavior, component scores, and immutable evaluation records.\n\n**Acceptance criteria:**\n- Golden fixtures return expected score components and reasons.\n- Identical inputs/version are deterministic and insufficient data fails closed.\n\n**Dependencies:** `P6-E20-SPK01`, `P6-E20-STR01`\n\n**Owner:** Risk Backend, QA",
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-6", "smart-yield", "risk-engine"]
+  },
+  {
+    "local_id": "P6-E20-STR03",
+    "parent_local_id": "P6-E20",
+    "dependencies": ["P6-E20-STR02", "P4-KYC-EPIC", "P4-JUR-EPIC"],
+    "issue_type": "Story",
+    "summary": "Classify Conservative and Balanced yield opportunities",
+    "description": "Apply configurable strategy policies to fresh, eligible scores.\n\n**Business value:** Converts risk analysis into understandable strategy choices.\n\n**Technical requirements:** Policy version, hard exclusions, liquidity constraints, and eligibility/freshness prerequisites.\n\n**Acceptance criteria:**\n- Boundary tests pass for both policies.\n- Rejected, stale, or ineligible opportunities cannot enter an allocation plan.\n\n**Dependencies:** `P6-E20-STR02`, `WS-02`, `WS-27`\n\n**Owner:** Risk Backend, Product Risk",
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-6", "smart-yield", "risk-policy"]
+  },
+  {
+    "local_id": "P6-E20-STR04",
+    "parent_local_id": "P6-E20",
+    "dependencies": ["P6-E20-STR02"],
+    "issue_type": "Story",
+    "summary": "Expose Smart Yield risk disclosures",
+    "description": "Return score reasons and render them in Earn.\n\n**Business value:** Users receive understandable risk context before allocating.\n\n**Technical requirements:** Stable reason codes; show provider, score version, material risks, and observation age without representing principal as guaranteed.\n\n**Acceptance criteria:**\n- UI disclosures match API fixtures.\n- Missing data is labeled and basic risk warnings are visible on every tier.\n\n**Dependencies:** `P6-E20-STR02`, `P6-E19-STR03`\n\n**Owner:** Frontend, Risk Backend, Product/Legal",
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-6", "smart-yield", "risk-disclosure"]
+  },
+  {
+    "local_id": "P6-E20-TSK01",
+    "parent_local_id": "P6-E20",
+    "dependencies": ["P6-E20-STR02", "P6-E19-TSK02", "EP-OPS"],
+    "issue_type": "Task",
+    "summary": "Alert on material Smart Yield risk deterioration",
+    "description": "Detect configured score/input threshold breaches and preserve the evaluated snapshot.\n\n**Business value:** Newly unsafe opportunities stop receiving new allocations.\n\n**Technical requirements:** Threshold configuration, deduplicated alerts, opportunity suppression, and immutable audit event.\n\n**Acceptance criteria:**\n- A test deterioration suppresses the opportunity and alerts Operations once.\n- Recovery requires a fresh qualifying evaluation.\n\n**Dependencies:** `P6-E20-STR02`, `P6-E19-TSK02`, `WS-25`\n\n**Owner:** Risk Backend, SRE, Operations",
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-6", "smart-yield", "risk", "monitoring"]
+  },
+  {
+    "local_id": "P6-E21",
+    "parent_local_id": null,
+    "dependencies": ["P6-E19", "P6-E20", "EP-ROU", "EP-XWT", "EP-LED", "EP-REC", "EP-PRE", "P5-PORT-EPIC"],
+    "issue_type": "Epic",
+    "summary": "Smart Yield Allocation and Rebalancing",
+    "description": "Support manual allocation, smart recommendations, confirmation-gated rebalancing, exits, positions, and Pro analytics.\n\n**Business value:** Users can deploy fragmented stablecoins to approved third-party strategies safely.\n\n**Technical requirements:** Reuse routing, preview, ledger, transaction-state, monitoring, and reconciliation controls; keep unattended beta rebalancing disabled.\n\n**Acceptance criteria:**\n- One production strategy supports allocation, position display, and withdrawal.\n- Every value movement is stateful, idempotent, logged, monitored, and reconciled.\n\n**Dependencies:** `P6-E19`, `P6-E20`, `WS-06`, `WS-07`, `WS-08`, `WS-09`, `WS-18`, `WS-24`\n\n**Owner:** Yield Backend, Execution Backend, Frontend, SRE",
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-6", "smart-yield", "workstream-21"]
+  },
+  {
+    "local_id": "P6-E21-STR01",
+    "parent_local_id": "P6-E21",
+    "dependencies": ["P6-E19-STR02", "P6-E20-STR03", "EP-BAL", "EP-ROU"],
+    "issue_type": "Story",
+    "summary": "Generate a net-benefit Smart Yield allocation plan",
+    "description": "Produce one allocation plan from eligible opportunities and wallet balances.\n\n**Business value:** Funding and strategy selection account for actual costs and risk.\n\n**Technical requirements:** Include risk policy, liquidity, route/network/conversion costs, source-wallet legs, expected net APY, expiry, and plan hash.\n\n**Acceptance criteria:**\n- Plan amounts balance exactly and direct routes win when net benefit is otherwise equal.\n- Stale or ineligible inputs produce no plan.\n\n**Dependencies:** `P6-E19-STR02`, `P6-E20-STR03`, `WS-05`, `WS-06`\n\n**Owner:** Yield Backend, Routing Backend",
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-6", "smart-yield", "allocation"]
+  },
+  {
+    "local_id": "P6-E21-STR02",
+    "parent_local_id": "P6-E21",
+    "dependencies": ["P6-E21-STR01", "EP-FEE", "EP-PRE"],
+    "issue_type": "Story",
+    "summary": "Preview and confirm a manual Earn allocation",
+    "description": "Render the allocation plan and bind user confirmation to it.\n\n**Business value:** Free users receive transparent manual Earn.\n\n**Technical requirements:** Show wallet sources, provider, expected APY, risk, slippage/cost tolerances, separate fees, expiry, and plan hash.\n\n**Acceptance criteria:**\n- Confirmation references the exact plan hash.\n- Expired or changed plans require a new preview and confirmation.\n\n**Dependencies:** `P6-E21-STR01`, `WS-23`, `WS-24`\n\n**Owner:** Frontend, Transaction Backend",
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-6", "smart-yield", "transaction-preview"]
+  },
+  {
+    "local_id": "P6-E21-TSK01",
+    "parent_local_id": "P6-E21",
+    "dependencies": ["EP-LED", "EP-SEC"],
+    "issue_type": "Task",
+    "summary": "Add state and idempotency controls for yield operations",
+    "description": "Implement canonical state transitions and idempotent commands for allocate, withdraw, and rebalance operations.\n\n**Business value:** Prevents duplicate real-money actions and creates a complete audit trail.\n\n**Technical requirements:** Use canonical transaction states, idempotency/correlation IDs, plan/quote references, and immutable ledger/audit transitions.\n\n**Acceptance criteria:**\n- Duplicate command tests create one provider/on-chain submission.\n- Invalid transitions fail and every transition records actor, time, reason, and ledger reference.\n\n**Dependencies:** `WS-08`, `WS-26`\n\n**Owner:** Execution Backend, Ledger Backend",
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-6", "smart-yield", "idempotency", "audit"]
+  },
+  {
+    "local_id": "P6-E21-STR03",
+    "parent_local_id": "P6-E21",
+    "dependencies": ["P6-E21-STR02", "P6-E21-TSK01", "EP-XWT"],
+    "issue_type": "Story",
+    "summary": "Execute a confirmed Smart Yield deposit",
+    "description": "Submit one approved plan through the provider or on-chain adapter.\n\n**Business value:** Completes the initial production Smart Yield strategy.\n\n**Technical requirements:** Wallet authorization, funding-leg settlement gate, adapter submission, provider/transaction identifiers, and finality handling.\n\n**Acceptance criteria:**\n- No deposit occurs until every required funding leg settles.\n- Retries submit once and success/failure reaches a supported terminal state.\n\n**Dependencies:** `P6-E21-STR02`, `P6-E21-TSK01`, `WS-07`\n\n**Owner:** Execution Backend, Yield Backend",
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-6", "smart-yield", "execution"]
+  },
+  {
+    "local_id": "P6-E21-STR04",
+    "parent_local_id": "P6-E21",
+    "dependencies": ["P6-E21-STR03", "EP-LED", "P5-PORT-EPIC"],
+    "issue_type": "Story",
+    "summary": "Index and display Smart Yield positions",
+    "description": "Build a normalized yield-position read model and include it in portfolio.\n\n**Business value:** Users can see principal, current value, and accrued yield.\n\n**Technical requirements:** Preserve provider/on-chain identifiers, asset/chain, principal, accrued amount, current APY, valuation time, and status.\n\n**Acceptance criteria:**\n- Settled deposits appear once and withdrawals update the position.\n- Stale valuations are visibly labeled.\n\n**Dependencies:** `P6-E21-STR03`, `WS-08`, `WS-18`\n\n**Owner:** Yield Backend, Portfolio Backend, Frontend",
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-6", "smart-yield", "portfolio"]
+  },
+  {
+    "local_id": "P6-E21-STR05",
+    "parent_local_id": "P6-E21",
+    "dependencies": ["P6-E21-STR04", "EP-ROU", "EP-PRE"],
+    "issue_type": "Story",
+    "summary": "Quote and preview a Smart Yield exit",
+    "description": "Calculate expected proceeds and display exit liquidity and costs.\n\n**Business value:** Users understand the amount they can actually withdraw.\n\n**Technical requirements:** Provider exit quote, route/network costs, slippage, quote expiry, and verified destination wallet.\n\n**Acceptance criteria:**\n- Preview separates proceeds from each cost.\n- Insufficient exit liquidity blocks confirmation and expired quotes cannot execute.\n\n**Dependencies:** `P6-E21-STR04`, `WS-06`, `WS-24`\n\n**Owner:** Yield Backend, Frontend",
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-6", "smart-yield", "withdrawal"]
+  },
+  {
+    "local_id": "P6-E21-STR06",
+    "parent_local_id": "P6-E21",
+    "dependencies": ["P6-E21-TSK01", "P6-E21-STR05"],
+    "issue_type": "Story",
+    "summary": "Execute a confirmed Smart Yield withdrawal",
+    "description": "Submit one idempotent exit and track its settlement.\n\n**Business value:** Smart Yield capital remains withdrawable.\n\n**Technical requirements:** Use yield state controls, provider/on-chain receipt, finality, ledger postings, and destination verification.\n\n**Acceptance criteria:**\n- Retry cannot double-withdraw.\n- Settled proceeds match the ledger within tolerance; failures expose a safe retry or manual-review state.\n\n**Dependencies:** `P6-E21-TSK01`, `P6-E21-STR05`\n\n**Owner:** Yield Backend, Ledger Backend",
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-6", "smart-yield", "withdrawal", "execution"]
+  },
+  {
+    "local_id": "P6-E21-STR07",
+    "parent_local_id": "P6-E21",
+    "dependencies": ["P6-E21-STR04", "P6-E20-STR03", "P7-E22-STR01"],
+    "issue_type": "Story",
+    "summary": "Generate Smart Yield rebalance recommendations",
+    "description": "Recommend moves only when risk, drift, and net benefit justify them.\n\n**Business value:** Delivers Individual smart allocation without silent fund movement.\n\n**Technical requirements:** Use current positions, strategy policy, costs, minimum-benefit threshold, reason codes, and recommendation expiry.\n\n**Acceptance criteria:**\n- Costs can suppress an otherwise higher-APY move.\n- No recommendation uses an ineligible or stale opportunity.\n\n**Dependencies:** `P6-E21-STR04`, `P6-E20-STR03`, `P7-E22-STR01`\n\n**Owner:** Yield Backend, Product Risk",
+    "priority": "High",
+    "labels": ["crypto-lending-mvp", "phase-6", "smart-yield", "rebalancing"]
+  },
+  {
+    "local_id": "P6-E21-STR08",
+    "parent_local_id": "P6-E21",
+    "dependencies": ["P6-E21-STR06", "P6-E21-STR07", "P7-E22-STR01", "EP-OPS"],
+    "issue_type": "Story",
+    "summary": "Execute a user-confirmed Smart Yield rebalance",
+    "description": "Convert one accepted recommendation into linked exit and allocation commands.\n\n**Business value:** Delivers controlled rebalancing while beta remains confirmation-gated.\n\n**Technical requirements:** Individual/Pro entitlement, recommendation hash/expiry, linked saga identifiers, and no unattended scheduler invocation.\n\n**Acceptance criteria:**\n- Free users are denied and every beta rebalance requires explicit confirmation.\n- Partial failures enter audited manual review and cannot duplicate either leg.\n\n**Dependencies:** `P6-E21-STR06`, `P6-E21-STR07`, `P7-E22-STR01`, `WS-25`\n\n**Owner:** Yield Backend, Execution Backend, Frontend",
+    "priority": "High",
+    "labels": ["crypto-lending-mvp", "phase-6", "smart-yield", "rebalancing", "execution"]
+  },
+  {
+    "local_id": "P6-E21-TSK02",
+    "parent_local_id": "P6-E21",
+    "dependencies": ["P6-E21-STR03", "P6-E21-STR06", "EP-REC", "EP-OPS", "EP-SEC"],
+    "issue_type": "Task",
+    "summary": "Reconcile and monitor Smart Yield operations",
+    "description": "Reconcile ledger/provider/on-chain/position values and alert on stuck or discrepant operations.\n\n**Business value:** Detects missing, duplicated, or incorrectly valued money movements.\n\n**Technical requirements:** Scheduled/on-demand checks, documented tolerances, aged-break queue, operation latency/failure metrics, and runbook.\n\n**Acceptance criteria:**\n- Seeded amount, status, and identifier discrepancies create one operational case.\n- Clean reruns are idempotent and resolution never edits historical ledger entries.\n\n**Dependencies:** `P6-E21-STR03`, `P6-E21-STR06`, `WS-09`, `WS-25`, `WS-26`\n\n**Owner:** Reconciliation Backend, SRE, Finance Operations",
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-6", "smart-yield", "reconciliation", "monitoring"]
+  },
+  {
+    "local_id": "P6-E21-STR09",
+    "parent_local_id": "P6-E21",
+    "dependencies": ["P6-E21-STR04", "P6-E20-STR01", "P7-E22-STR01"],
+    "issue_type": "Story",
+    "summary": "Provide Pro Smart Yield analytics",
+    "description": "Show net yield and allocation/risk history.\n\n**Business value:** Fulfills the defined Pro Smart Yield analytics entitlement.\n\n**Technical requirements:** Calculate yield net of provider/network/routing costs and retain historical APY/risk versions with server-side Pro gating.\n\n**Acceptance criteria:**\n- Golden fixtures calculate net yield correctly.\n- Free and Individual API access is denied and data gaps are labeled.\n\n**Dependencies:** `P6-E21-STR04`, `P6-E20-STR01`, `P7-E22-STR01`\n\n**Owner:** Analytics Backend, Frontend",
+    "priority": "High",
+    "labels": ["crypto-lending-mvp", "phase-6", "smart-yield", "pro", "analytics"]
+  },
+  {
+    "local_id": "P7-E22",
+    "parent_local_id": null,
+    "dependencies": ["EP-FND", "EP-FEE", "EP-OPS", "EP-SEC"],
+    "issue_type": "Epic",
+    "summary": "Subscription and Billing",
+    "description": "Manage Free, Individual, and Pro subscriptions and publish authoritative entitlements.\n\n**Business value:** Enables recurring revenue and tier-based product access.\n\n**Technical requirements:** Third-party billing, signed/idempotent webhooks, versioned entitlements, routing-tier integration, and billing reconciliation.\n\n**Acceptance criteria:**\n- $0, $9.99, and $29.99 plans are represented correctly.\n- 0.20%, 0.12%, and 0.08% routing tiers are enforced consistently.\n\n**Dependencies:** `WS-01`, `WS-23`, `WS-25`, `WS-26`\n\n**Owner:** Commercial Backend, Frontend, Finance Operations",
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-7", "subscription", "workstream-22"]
+  },
+  {
+    "local_id": "P7-E22-SPK01",
+    "parent_local_id": "P7-E22",
+    "dependencies": ["EP-SEC", "P4-JUR-EPIC"],
+    "issue_type": "Spike",
+    "summary": "Select the international subscription billing approach",
+    "description": "Evaluate billing provider, merchant/tax treatment, supported countries, refunds/disputes, and webhook behavior.\n\n**Business value:** Avoids launching an unusable international billing flow.\n\n**Technical requirements:** Cover payment methods, VAT/GST handling, data residency, sandbox, SLA, reconciliation export, and no fiat-account product.\n\n**Acceptance criteria:**\n- Finance, Legal, Security, and Engineering approve a provider and operating model.\n- The supported billing-country list is documented.\n\n**Dependencies:** `WS-26`, `WS-27`\n\n**Owner:** Product, Finance, Legal, Partnerships",
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-7", "subscription", "spike"]
+  },
+  {
+    "local_id": "P7-E22-TSK01",
+    "parent_local_id": "P7-E22",
+    "dependencies": ["P7-E22-SPK01"],
+    "issue_type": "Task",
+    "summary": "Define the subscription plan and entitlement catalog",
+    "description": "Create one versioned catalog for Free, Individual, Pro, and custom Enterprise.\n\n**Business value:** Prevents inconsistent feature gating across services.\n\n**Technical requirements:** Store price, routing rate, feature keys, effective dates, and grandfathering behavior; keep Enterprise overrides tenant-scoped.\n\n**Acceptance criteria:**\n- Catalog fixtures match all source-defined tier features and rates.\n- Overlapping effective versions are rejected.\n\n**Dependencies:** `P7-E22-SPK01`\n\n**Owner:** Commercial Backend, Product",
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-7", "subscription", "entitlements"]
+  },
+  {
+    "local_id": "P7-E22-STR01",
+    "parent_local_id": "P7-E22",
+    "dependencies": ["P7-E22-TSK01", "EP-FND", "EP-FEE"],
+    "issue_type": "Story",
+    "summary": "Enforce entitlements and publish the effective routing tier",
+    "description": "Add server-side feature enforcement and expose the effective fee tier to routing.\n\n**Business value:** Prevents client bypass and incorrect routing fees.\n\n**Technical requirements:** Default-Free behavior, authoritative lookup with safe cache, stable denial codes, and effective-plan audit event.\n\n**Acceptance criteria:**\n- Tier tests pass for Free, Individual, and Pro.\n- Disabled client calls still fail server-side and routing receives the same effective tier.\n\n**Dependencies:** `P7-E22-TSK01`, `WS-01`, `WS-23`\n\n**Owner:** Backend Platform, Routing Backend",
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-7", "subscription", "entitlements", "routing-fees"]
+  },
+  {
+    "local_id": "P7-E22-STR02",
+    "parent_local_id": "P7-E22",
+    "dependencies": ["P7-E22-SPK01", "P7-E22-TSK01", "EP-FND"],
+    "issue_type": "Story",
+    "summary": "Start an Individual or Pro subscription",
+    "description": "Create a hosted checkout and activate access only after verified provider confirmation.\n\n**Business value:** Enables self-service conversion to paid plans.\n\n**Technical requirements:** User/customer mapping, allowlisted price IDs, return URLs, pending state, and no platform card storage.\n\n**Acceptance criteria:**\n- Tampered price IDs are rejected and abandoned checkout grants nothing.\n- Confirmed checkout activates exactly one subscription.\n\n**Dependencies:** `P7-E22-SPK01`, `P7-E22-TSK01`, `WS-01`\n\n**Owner:** Commercial Backend, Frontend",
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-7", "subscription", "checkout"]
+  },
+  {
+    "local_id": "P7-E22-TSK02",
+    "parent_local_id": "P7-E22",
+    "dependencies": ["P7-E22-STR02", "EP-SEC"],
+    "issue_type": "Task",
+    "summary": "Process subscription lifecycle webhooks",
+    "description": "Verify and idempotently apply activation, renewal, payment-failure, cancellation, and plan-change events.\n\n**Business value:** Keeps feature access aligned with billing truth.\n\n**Technical requirements:** Signature/time-window validation, replay protection, provider event ID, out-of-order handling, and audit history.\n\n**Acceptance criteria:**\n- Duplicate events apply once and invalid signatures fail.\n- Out-of-order fixtures converge to the provider's current state.\n\n**Dependencies:** `P7-E22-STR02`, `WS-26`\n\n**Owner:** Commercial Backend, Security",
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-7", "subscription", "webhook", "idempotency"]
+  },
+  {
+    "local_id": "P7-E22-STR03",
+    "parent_local_id": "P7-E22",
+    "dependencies": ["P7-E22-TSK02"],
+    "issue_type": "Story",
+    "summary": "Let users change or cancel their subscription",
+    "description": "Provide lifecycle endpoints and a billing-settings view.\n\n**Business value:** Completes user subscription management.\n\n**Technical requirements:** Provider portal/API, effective-date and proration disclosure, current plan/status, and no Enterprise self-service pricing.\n\n**Acceptance criteria:**\n- Upgrade, downgrade, and cancel sandbox cases reach the expected effective plan.\n- UI reflects provider-confirmed rather than optimistic state.\n\n**Dependencies:** `P7-E22-TSK02`\n\n**Owner:** Commercial Backend, Frontend",
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-7", "subscription", "frontend"]
+  },
+  {
+    "local_id": "P7-E22-TSK03",
+    "parent_local_id": "P7-E22",
+    "dependencies": ["P7-E22-TSK02", "EP-OPS", "EP-SEC"],
+    "issue_type": "Task",
+    "summary": "Reconcile and monitor subscription entitlements",
+    "description": "Compare provider subscriptions with internal effective entitlements and alert on discrepancies.\n\n**Business value:** Prevents overcharging and incorrect product access.\n\n**Technical requirements:** Daily/on-demand job, aged-break queue, payment/webhook latency metrics, and Finance Operations runbook.\n\n**Acceptance criteria:**\n- Seeded missing, stale, and mismatched subscriptions create one case each.\n- Reruns do not duplicate cases and every resolution is audited.\n\n**Dependencies:** `P7-E22-TSK02`, `WS-25`, `WS-26`\n\n**Owner:** Commercial Backend, Finance Operations, SRE",
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-7", "subscription", "reconciliation", "monitoring"]
+  },
+  {
+    "local_id": "P7-E28",
+    "parent_local_id": null,
+    "dependencies": ["EP-FND", "P4-KYC-EPIC", "P4-JUR-EPIC", "EP-SEC", "P7-E22", "EP-BAL", "EP-ROU", "P5-ROUTER-EPIC", "P5-MDATA-EPIC", "P6-E21"],
+    "issue_type": "Epic",
+    "summary": "Enterprise API Foundation",
+    "description": "Provide tenant-isolated APIs for unified balance, routing, market data, execution, and yield plus foundation-level white labeling.\n\n**Business value:** Enables Enterprise integrations without duplicating domain logic.\n\n**Technical requirements:** API gateway, scoped credentials, custom limits, idempotency, webhooks, audit/SLA telemetry, and thin façades over controlled domain services.\n\n**Acceptance criteria:**\n- A sandbox tenant can call each API only within its granted scope.\n- Real-money calls inherit eligibility, preview, ledger, monitoring, and reconciliation controls.\n\n**Dependencies:** `WS-01`, `WS-02`, `WS-26`, `WS-27`, `P7-E22`, and applicable domain workstreams\n\n**Owner:** Platform/API Backend, Security, SRE, Enterprise Product",
+    "priority": "High",
+    "labels": ["crypto-lending-mvp", "phase-7", "enterprise-api", "workstream-28"]
+  },
+  {
+    "local_id": "P7-E28-SPK01",
+    "parent_local_id": "P7-E28",
+    "dependencies": ["P4-KYC-EPIC", "P4-JUR-EPIC", "EP-SEC", "P5-MDATA-EPIC"],
+    "issue_type": "Spike",
+    "summary": "Approve Enterprise API trust and regulatory boundaries",
+    "description": "Define tenant/user identity, delegated authorization, regulated-partner responsibilities, data redistribution, and white-label limits.\n\n**Business value:** Prevents Enterprise APIs from bypassing launch controls.\n\n**Technical requirements:** Document execution/yield/custody RACI, user consent, KYC linkage, market-data licensing, and SLA/support model.\n\n**Acceptance criteria:**\n- Legal, Compliance, Security, and Product approve an endpoint/scope matrix.\n- No U.S. access or proprietary regulated infrastructure is introduced.\n\n**Dependencies:** `WS-02`, `WS-26`, `WS-27`\n\n**Owner:** Enterprise Product, Legal, Compliance, Security",
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-7", "enterprise-api", "spike", "compliance"]
+  },
+  {
+    "local_id": "P7-E28-TSK01",
+    "parent_local_id": "P7-E28",
+    "dependencies": ["P7-E28-SPK01", "EP-FND", "EP-SEC"],
+    "issue_type": "Task",
+    "summary": "Create Enterprise tenants and scoped API credentials",
+    "description": "Store organizations and rotatable, least-privilege API clients.\n\n**Business value:** Establishes tenant isolation and controlled API access.\n\n**Technical requirements:** Hashed credentials, KMS-backed secrets, environment separation, scopes, expiry, status, and rotation/revocation audit.\n\n**Acceptance criteria:**\n- Revoked or expired credentials fail.\n- Cross-tenant access fails and key rotation follows the configured overlap window.\n\n**Dependencies:** `P7-E28-SPK01`, `WS-01`, `WS-26`\n\n**Owner:** Platform Backend, Security",
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-7", "enterprise-api", "authentication"]
+  },
+  {
+    "local_id": "P7-E28-TSK02",
+    "parent_local_id": "P7-E28",
+    "dependencies": ["P7-E28-TSK01", "EP-SEC"],
+    "issue_type": "Task",
+    "summary": "Enforce Enterprise API scopes and traffic limits",
+    "description": "Validate tenant scopes and apply standard or custom traffic limits.\n\n**Business value:** Protects tenant data and platform capacity.\n\n**Technical requirements:** Gateway policy, tenant/user context propagation, burst/sustained quotas, retry headers, and WAF integration.\n\n**Acceptance criteria:**\n- Missing scope returns 403 and cross-tenant resources are not disclosed.\n- Limit tests return 429 with retry metadata.\n\n**Dependencies:** `P7-E28-TSK01`, `WS-26`\n\n**Owner:** Infrastructure, Platform Backend",
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-7", "enterprise-api", "security", "rate-limiting"]
+  },
+  {
+    "local_id": "P7-E28-TSK03",
+    "parent_local_id": "P7-E28",
+    "dependencies": ["P7-E28-TSK02"],
+    "issue_type": "Task",
+    "summary": "Publish common Enterprise API and idempotency contracts",
+    "description": "Define one version/error contract and one command-idempotency contract.\n\n**Business value:** Gives integrators predictable behavior and safe retries.\n\n**Technical requirements:** OpenAPI, decimal/time formats, pagination, correlation IDs, idempotency conflicts, and deprecation policy.\n\n**Acceptance criteria:**\n- Contract linting passes.\n- Repeated command keys return the original result while the same key with a different payload returns conflict.\n\n**Dependencies:** `P7-E28-TSK02`\n\n**Owner:** API Platform, Developer Experience",
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "phase-7", "enterprise-api", "api-contract", "idempotency"]
+  },
+  {
+    "local_id": "P7-E28-STR01",
+    "parent_local_id": "P7-E28",
+    "dependencies": ["P7-E28-TSK03", "EP-BAL"],
+    "issue_type": "Story",
+    "summary": "Expose the Enterprise unified balance API",
+    "description": "Return tenant-authorized users' portfolio value and deployable buying power.\n\n**Business value:** Delivers the defined Enterprise unified-balance capability.\n\n**Technical requirements:** Delegate to the unified balance service; include as-of/freshness and wallet sources without leaking unrelated users.\n\n**Acceptance criteria:**\n- Values match the first-party balance API.\n- Stale sources are labeled and tenant/scope isolation tests pass.\n\n**Dependencies:** `P7-E28-TSK03`, `WS-05`\n\n**Owner:** API Backend, Balance Backend",
+    "priority": "High",
+    "labels": ["crypto-lending-mvp", "phase-7", "enterprise-api", "unified-balance-api"]
+  },
+  {
+    "local_id": "P7-E28-STR02",
+    "parent_local_id": "P7-E28",
+    "dependencies": ["P7-E28-TSK03", "EP-ROU", "P5-ROUTER-EPIC", "EP-FEE", "P4-KYC-EPIC"],
+    "issue_type": "Story",
+    "summary": "Expose the Enterprise routing quote API",
+    "description": "Return eligible, all-in stablecoin or equity routes without executing them.\n\n**Business value:** Enterprise clients can evaluate executable routes.\n\n**Technical requirements:** Delegate to stablecoin/equity routers; include expiry, funding legs, separate costs, eligibility, and fee tier.\n\n**Acceptance criteria:**\n- Ineligible users receive no quote and totals equal itemized components.\n- Expired quotes cannot be reused.\n\n**Dependencies:** `P7-E28-TSK03`, `WS-06`, `WS-14`, `WS-23`, `WS-02`\n\n**Owner:** API Backend, Routing Backend",
+    "priority": "High",
+    "labels": ["crypto-lending-mvp", "phase-7", "enterprise-api", "routing-api"]
+  },
+  {
+    "local_id": "P7-E28-STR03",
+    "parent_local_id": "P7-E28",
+    "dependencies": ["P7-E28-SPK01", "P7-E28-TSK03", "P5-MDATA-EPIC", "P5-MKT-EPIC"],
+    "issue_type": "Story",
+    "summary": "Expose the Enterprise tokenized market-data API",
+    "description": "Return tokenized data distinctly from underlying reference data.\n\n**Business value:** Enables approved Enterprise market-data integrations.\n\n**Technical requirements:** Include instrument/provider provenance, timestamps, entitlement/licensing, and premium/discount where permitted.\n\n**Acceptance criteria:**\n- Responses never combine non-fungible securities into one book.\n- Tokenized and underlying values have separate source and type fields.\n\n**Dependencies:** `P7-E28-SPK01`, `P7-E28-TSK03`, `WS-15`, `WS-17`\n\n**Owner:** API Backend, Market Data",
+    "priority": "High",
+    "labels": ["crypto-lending-mvp", "phase-7", "enterprise-api", "market-data-api"]
+  },
+  {
+    "local_id": "P7-E28-STR04",
+    "parent_local_id": "P7-E28",
+    "dependencies": ["P7-E28-TSK03", "EP-XWT", "EP-LED", "EP-REC", "EP-PRE", "P4-KYC-EPIC"],
+    "issue_type": "Story",
+    "summary": "Expose Enterprise execution submission and status APIs",
+    "description": "Submit one approved quote and retrieve its canonical state.\n\n**Business value:** Delivers Enterprise execution without bypassing first-party controls.\n\n**Technical requirements:** Delegated user consent, idempotency, quote binding, canonical states, ledger/provider IDs, and no custody implementation.\n\n**Acceptance criteria:**\n- Invalid or expired quotes cannot submit and duplicate keys create one order.\n- Status matches internal state and contains no secrets.\n\n**Dependencies:** `P7-E28-TSK03`, `WS-07`, `WS-08`, `WS-09`, `WS-24`, `WS-02`\n\n**Owner:** API Backend, Execution Backend",
+    "priority": "High",
+    "labels": ["crypto-lending-mvp", "phase-7", "enterprise-api", "execution-api"]
+  },
+  {
+    "local_id": "P7-E28-STR05",
+    "parent_local_id": "P7-E28",
+    "dependencies": ["P7-E28-TSK03", "P6-E19", "P6-E20", "P6-E21-STR04"],
+    "issue_type": "Story",
+    "summary": "Expose Enterprise yield discovery and position APIs",
+    "description": "Return eligible opportunities and the authorized user's yield positions.\n\n**Business value:** Provides safe Enterprise read access to Smart Yield.\n\n**Technical requirements:** Delegate to filtered catalog and position services; include freshness, risk version, provider provenance, and entitlement.\n\n**Acceptance criteria:**\n- U.S. and ineligible access is denied or returns no executable opportunity.\n- Values match first-party APIs and stale data is explicit.\n\n**Dependencies:** `P7-E28-TSK03`, `P6-E19`, `P6-E20`, `P6-E21-STR04`\n\n**Owner:** API Backend, Yield Backend",
+    "priority": "High",
+    "labels": ["crypto-lending-mvp", "phase-7", "enterprise-api", "yield-api"]
+  },
+  {
+    "local_id": "P7-E28-STR06",
+    "parent_local_id": "P7-E28",
+    "dependencies": ["P7-E28-TSK03", "P6-E21-STR02", "P6-E21-TSK01", "P6-E21-TSK02"],
+    "issue_type": "Story",
+    "summary": "Expose Enterprise yield allocation commands and status",
+    "description": "Submit one already-previewed yield plan and retrieve its operation state.\n\n**Business value:** Completes the defined Enterprise Yield API safely.\n\n**Technical requirements:** Delegated confirmation, plan hash/expiry, idempotency, canonical yield state, and ledger/reconciliation linkage.\n\n**Acceptance criteria:**\n- No unconfirmed plan executes and duplicate requests submit once.\n- Beta rebalancing continues to require explicit user confirmation.\n\n**Dependencies:** `P7-E28-TSK03`, `P6-E21-STR02`, `P6-E21-TSK01`, `P6-E21-TSK02`\n\n**Owner:** API Backend, Yield Backend",
+    "priority": "High",
+    "labels": ["crypto-lending-mvp", "phase-7", "enterprise-api", "yield-api", "execution"]
+  },
+  {
+    "local_id": "P7-E28-TSK04",
+    "parent_local_id": "P7-E28",
+    "dependencies": ["P7-E28-TSK03", "EP-SEC"],
+    "issue_type": "Task",
+    "summary": "Deliver signed and retryable Enterprise webhooks",
+    "description": "Notify tenants of execution and yield state changes.\n\n**Business value:** Supports reliable integrations without excessive polling.\n\n**Technical requirements:** Tenant secret, signature/timestamp, event ID, aggregate sequence, retry/backoff, dead-letter queue, and replay.\n\n**Acceptance criteria:**\n- Signature fixtures verify and endpoint failure retries.\n- Replay preserves the event ID and never recreates the financial action.\n\n**Dependencies:** `P7-E28-TSK03`, `WS-26`\n\n**Owner:** API Platform, SRE",
+    "priority": "High",
+    "labels": ["crypto-lending-mvp", "phase-7", "enterprise-api", "webhook"]
+  },
+  {
+    "local_id": "P7-E28-TSK05",
+    "parent_local_id": "P7-E28",
+    "dependencies": ["P7-E28-TSK01", "P7-E22", "EP-FEE", "EP-OPS"],
+    "issue_type": "Task",
+    "summary": "Configure Enterprise limits and negotiated routing fees",
+    "description": "Store custom usage/risk limits and negotiated routing-fee overrides.\n\n**Business value:** Supports Enterprise pricing and control requirements.\n\n**Technical requirements:** Effective dating, approval/audit, decimal precision, hard risk ceilings, and delegation of fee calculation to the routing fee engine.\n\n**Acceptance criteria:**\n- Overrides apply only to the intended tenant and effective period.\n- Unauthorized changes fail and quote/ledger show the same negotiated fee.\n\n**Dependencies:** `P7-E28-TSK01`, `P7-E22`, `WS-23`, `WS-25`\n\n**Owner:** Commercial Backend, Risk, Finance Operations",
+    "priority": "High",
+    "labels": ["crypto-lending-mvp", "phase-7", "enterprise-api", "commercial-controls"]
+  },
+  {
+    "local_id": "P7-E28-TSK06",
+    "parent_local_id": "P7-E28",
+    "dependencies": ["P7-E28-TSK02", "EP-OPS", "EP-SEC"],
+    "issue_type": "Task",
+    "summary": "Measure Enterprise SLAs and audit API access",
+    "description": "Add tenant-scoped SLA telemetry and access/change audit history.\n\n**Business value:** Supports the defined SLA offering and incident investigation.\n\n**Technical requirements:** Availability/latency/error metrics, correlation IDs, redacted request metadata, and immutable credential/config/admin events.\n\n**Acceptance criteria:**\n- Synthetic failure affects the correct SLA metric and alert.\n- Tenant reports follow the approved exclusion policy and logs contain no secrets.\n\n**Dependencies:** `P7-E28-TSK02`, `WS-25`, `WS-26`\n\n**Owner:** SRE, Security, API Platform",
+    "priority": "High",
+    "labels": ["crypto-lending-mvp", "phase-7", "enterprise-api", "sla", "audit"]
+  },
+  {
+    "local_id": "P7-E28-STR07",
+    "parent_local_id": "P7-E28",
+    "dependencies": ["P7-E28-TSK03", "P7-E28-TSK04"],
+    "issue_type": "Story",
+    "summary": "Provide Enterprise sandbox credentials and fixtures",
+    "description": "Supply isolated test clients and deterministic non-money scenarios.\n\n**Business value:** Enterprise integrations can certify safely before production.\n\n**Technical requirements:** Environment-separated credentials, test users/wallets, quote/order/yield fixtures, and webhook simulator.\n\n**Acceptance criteria:**\n- Sandbox credentials cannot address production resources.\n- Fixtures cover success, expiry, duplicate, denial, and failure states.\n\n**Dependencies:** `P7-E28-TSK03`, `P7-E28-TSK04`\n\n**Owner:** Developer Experience, QA, Infrastructure",
+    "priority": "High",
+    "labels": ["crypto-lending-mvp", "phase-7", "enterprise-api", "sandbox"]
+  },
+  {
+    "local_id": "P7-E28-STR08",
+    "parent_local_id": "P7-E28",
+    "dependencies": ["P7-E28-TSK01", "EP-SEC"],
+    "issue_type": "Story",
+    "summary": "Support tenant white-label branding configuration",
+    "description": "Store and apply tenant branding configuration only.\n\n**Business value:** Establishes the defined white-label foundation without bespoke trading products.\n\n**Technical requirements:** Tenant-scoped logo, colors, display name, and domain metadata with asset validation, safe defaults, and audit history.\n\n**Acceptance criteria:**\n- Branding never crosses tenants and invalid assets are rejected.\n- Missing configuration uses platform defaults.\n\n**Dependencies:** `P7-E28-TSK01`, `WS-26`\n\n**Owner:** Frontend Platform, API Backend",
+    "priority": "Medium",
+    "labels": ["crypto-lending-mvp", "phase-7", "enterprise-api", "white-label"]
+  },
+  {
+    "local_id": "XCT-INT-001",
+    "parent_local_id": "EP-FND",
+    "dependencies": [],
+    "issue_type": "Story",
+    "summary": "Define and validate canonical Send, Invest, and Earn intents",
+    "description": "Create a shared intent contract and server-side intent validation.\n\n**Business value:** Users specify the financial outcome while downstream services select wallet, asset, chain, and provider mechanics.\n\n**Technical requirements:** Versioned intent type, amount/instrument/destination fields, user and eligibility context, stable validation reasons, correlation ID, and no route mechanics required from the basic client.\n\n**Acceptance criteria:**\n- Valid Send, Invest, and Earn fixtures produce normalized intents.\n- Invalid, unauthorized, or unsupported intents fail before quote generation with auditable reason codes.\n\n**Dependencies:** None\n\n**Owner:** Platform Backend, Product Architecture",
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "cross-cutting", "intent-engine"]
+  },
+  {
+    "local_id": "XCT-SEND-001",
+    "parent_local_id": "EP-XWT",
+    "dependencies": ["XCT-INT-001", "EP-BAL", "EP-ROU", "EP-FEE", "EP-PRE"],
+    "issue_type": "Story",
+    "summary": "Preview and confirm a supported stablecoin Send intent",
+    "description": "Resolve one Send intent into funding legs and a transparent confirmation preview.\n\n**Business value:** Delivers the source-required Send capability without asking users to choose blockchain mechanics.\n\n**Technical requirements:** Supported destination validation, wallet/asset/chain allocation, quote expiry, slippage, and separate routing/network/bridge/DEX fees.\n\n**Acceptance criteria:**\n- Preview totals equal funding plus itemized costs and identify each source wallet.\n- Invalid destinations, insufficient buying power, unsupported assets, and expired quotes cannot be confirmed.\n\n**Dependencies:** `XCT-INT-001`, `EP-BAL`, `EP-ROU`, `EP-FEE`, `EP-PRE`\n\n**Owner:** Transaction Backend, Frontend",
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "cross-cutting", "send", "transaction-preview"]
+  },
+  {
+    "local_id": "XCT-SEND-002",
+    "parent_local_id": "EP-XWT",
+    "dependencies": ["XCT-SEND-001", "EP-XWT", "EP-LED", "EP-REC"],
+    "issue_type": "Story",
+    "summary": "Execute a confirmed stablecoin Send and expose its status",
+    "description": "Submit one confirmed Send route and surface its canonical transaction state.\n\n**Business value:** Users can send or withdraw supported assets and understand whether delivery settled or failed.\n\n**Technical requirements:** Reuse cross-wallet authorization gates, idempotency, canonical states, ledger postings, chain finality, failure recovery, and reconciliation.\n\n**Acceptance criteria:**\n- A duplicate command produces one transfer and no transfer starts before all required authorizations.\n- Settled and failed fixtures show the correct status, hashes, ledger entries, and reconciliation result.\n\n**Dependencies:** `XCT-SEND-001`, `EP-XWT`, `EP-LED`, `EP-REC`\n\n**Owner:** Cross-Wallet Execution Backend, Ledger/Reconciliation Backend, Frontend",
+    "priority": "Highest",
+    "labels": ["crypto-lending-mvp", "cross-cutting", "send", "execution"]
+  },
+  {
+    "local_id": "XCT-PRIV-001",
+    "parent_local_id": "EP-SEC",
+    "dependencies": ["P4-KYC-EPIC"],
+    "issue_type": "Task",
+    "summary": "Define privacy retention and data-subject request controls",
+    "description": "Establish the personal-data lifecycle and an auditable data-subject request procedure.\n\n**Business value:** Protects international users while preserving legally required financial and KYC records.\n\n**Technical requirements:** Classify KYC/profile/wallet/transaction data, define regional retention and legal holds, deletion/anonymization behavior, export/access procedure, authorization, and audit evidence.\n\n**Acceptance criteria:**\n- Legal, Security, and Compliance approve a retention matrix and DSAR runbook.\n- Test access/deletion requests never remove immutable financial records unlawfully and produce complete audit evidence.\n\n**Dependencies:** `P4-KYC-EPIC`\n\n**Owner:** Security, Privacy/Legal, Compliance, Data Platform",
+    "priority": "High",
+    "labels": ["crypto-lending-mvp", "cross-cutting", "privacy", "security"]
+  },
+  {
+    "local_id": "XCT-DR-001",
+    "parent_local_id": "EP-SEC",
+    "dependencies": ["EP-LED", "EP-REC", "EP-OPS"],
+    "issue_type": "Task",
+    "summary": "Exercise financial-data restore and transaction queue recovery",
+    "description": "Run a recovery exercise for durable financial data and in-flight transaction jobs.\n\n**Business value:** Demonstrates recovery without duplicate or missing money movements.\n\n**Technical requirements:** Approved RPO/RTO, encrypted backup restore, Redis/SQS replay procedure, idempotency preservation, reconciliation after restore, and incident runbook.\n\n**Acceptance criteria:**\n- A staged restore meets approved RPO/RTO and ledger invariants.\n- Replayed jobs do not duplicate submissions and post-restore reconciliation identifies every seeded discrepancy.\n\n**Dependencies:** `EP-LED`, `EP-REC`, `EP-OPS`\n\n**Owner:** SRE, Security, Ledger/Reconciliation Backend",
+    "priority": "High",
+    "labels": ["crypto-lending-mvp", "cross-cutting", "disaster-recovery", "security"]
+  }
+]
