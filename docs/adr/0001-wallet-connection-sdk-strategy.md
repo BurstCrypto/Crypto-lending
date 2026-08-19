@@ -23,6 +23,10 @@ after the real extension and mobile cases in the
 [manual validation runbook](../wallets/manual-validation-runbook.md) have been
 executed and the resulting evidence has been approved.
 
+The version-bound threat model, preliminary finding register, rollback drill,
+network-observation template, and independent decision record are in the
+[KAN-223 security review packet](../wallets/security-review/README.md).
+
 ## Decision
 
 ### Own the normalized connection model

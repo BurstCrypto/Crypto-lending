@@ -221,11 +221,16 @@ exercise those boundaries; do not conflate pairing/proposal expiry with
 
 KAN-55 validates that a wallet can produce and locally/reference-verify the
 expected proof shape. Atomic nonce consumption and authenticated API sessions
-belong to the authentication implementation ticket; mark C12's production path
-Blocked with that linked ticket until the endpoint exists rather than claiming
-it was exercised here.
+belong to KAN-56, **Register wallets with ownership proof**; mark C12's
+production path Blocked on KAN-56 until that endpoint exists rather than
+claiming it was exercised here.
 
 ## Exit and approval
+
+Security evidence must also complete the
+[KAN-223 security review packet](security-review/README.md), including the
+sanitized network inventory, storage/logout checks, rollback drill, finding
+classification, and independent decision.
 
 The restricted-local implementation can move to review when:
 
