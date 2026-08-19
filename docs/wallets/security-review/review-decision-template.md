@@ -20,7 +20,7 @@ implement the wallet adapters or validation harness.
 
 | Item                         | Value                                                            |
 | ---------------------------- | ---------------------------------------------------------------- |
-| Implementation commit        | e3186598feb1e481a1c1bea8b7817963830c5afa                         |
+| Implementation commit        | 01f7c63a2662734aaf581fd1c2641b85f459fd8b                         |
 | Package-lock SHA-256         | D723EC5710968AE94663CD2AE3CB107F11349281E3DC6DA580246B2BD71473B9 |
 | SPDX snapshot                | ../license-review/lock-review-snapshot.json                      |
 | Threat-model revision/commit | Pending                                                          |

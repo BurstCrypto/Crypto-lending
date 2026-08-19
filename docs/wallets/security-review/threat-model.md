@@ -6,7 +6,7 @@ disposition belong to the independent reviewer.
 ## Scope and security boundary
 
 The executable candidate is the isolated real-wallet harness under
-tools/wallet-lab at commit e3186598feb1e481a1c1bea8b7817963830c5afa and lock
+tools/wallet-lab at commit 01f7c63a2662734aaf581fd1c2641b85f459fd8b and lock
 SHA-256 D723EC5710968AE94663CD2AE3CB107F11349281E3DC6DA580246B2BD71473B9.
 It is an authenticated HTTPS loopback-only development server with no
 transaction action. It fails closed without a valid local certificate and

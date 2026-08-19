@@ -12,7 +12,7 @@ decision.
 
 | Item                        | Value                                                            |
 | --------------------------- | ---------------------------------------------------------------- |
-| Validation implementation   | commit e3186598feb1e481a1c1bea8b7817963830c5afa                  |
+| Validation implementation   | commit 01f7c63a2662734aaf581fd1c2641b85f459fd8b                  |
 | Isolated package lock       | tools/wallet-lab/package-lock.json                               |
 | Lock SHA-256                | D723EC5710968AE94663CD2AE3CB107F11349281E3DC6DA580246B2BD71473B9 |
 | Lock-derived SPDX           | ../license-review/wallet-lab-lock.spdx.json                      |
