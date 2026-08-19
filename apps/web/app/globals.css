@@ -258,6 +258,104 @@ footer p {
   margin: 0;
 }
 
+.wallet-lab-shell {
+  gap: 1.5rem;
+  padding-bottom: 4rem;
+}
+
+.wallet-lab-warning {
+  padding: clamp(1.5rem, 4vw, 3rem);
+  background: rgba(255, 207, 112, 0.08);
+  border: 1px solid rgba(255, 207, 112, 0.25);
+  border-radius: 1.25rem;
+}
+
+.wallet-lab-warning h1 {
+  max-width: 18ch;
+  font-size: clamp(2.25rem, 6vw, 4.5rem);
+}
+
+.wallet-lab-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.5rem;
+}
+
+.wallet-lab-grid h2 {
+  margin-top: 0;
+}
+
+.wallet-lab-grid label {
+  display: grid;
+  gap: 0.45rem;
+  margin: 1rem 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.wallet-lab-grid select,
+.wallet-lab-grid button {
+  min-height: 2.75rem;
+  padding: 0.65rem 0.8rem;
+  color: var(--text);
+  background: var(--surface-strong);
+  border: 1px solid var(--border);
+  border-radius: 0.65rem;
+  font: inherit;
+}
+
+.wallet-lab-grid button {
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.wallet-lab-grid button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.wallet-lab-grid button:focus-visible,
+.wallet-lab-grid select:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.wallet-lab-controls {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+  margin-top: 1.25rem;
+}
+
+.lab-result-ok,
+.lab-result-blocked,
+.lab-evidence-note {
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.lab-result-ok {
+  color: var(--accent-strong);
+}
+
+.lab-result-blocked {
+  color: var(--focus);
+}
+
+.wallet-lab-events {
+  max-height: 28rem;
+  margin: 1.25rem 0 0;
+  padding-left: 1.35rem;
+  overflow: auto;
+  color: var(--muted);
+  line-height: 1.65;
+}
+
+.wallet-lab-events code {
+  color: var(--text);
+}
+
 @media (max-width: 760px) {
   .foundation-label {
     display: none;
@@ -270,6 +368,14 @@ footer p {
 
   h1 {
     font-size: clamp(3rem, 15vw, 5rem);
+  }
+
+  .wallet-lab-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .wallet-lab-controls {
+    grid-template-columns: 1fr;
   }
 }
 

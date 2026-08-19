@@ -13,6 +13,10 @@
   },
   "scripts": {
     "dev:web": "npm run dev --workspace @crypto-lending/web",
+    "dev:wallet-lab": "npm --prefix tools/wallet-lab run dev",
+    "lint:wallet-lab": "npm --prefix tools/wallet-lab run lint",
+    "typecheck:wallet-lab": "npm --prefix tools/wallet-lab run typecheck",
+    "test:wallet-lab": "npm --prefix tools/wallet-lab run test",
     "dev:api": "npm run start:dev --workspace @crypto-lending/api",
     "worker:outbox": "npm run worker:outbox --workspace @crypto-lending/api",
     "worker:outbox:prod": "npm run worker:outbox:prod --workspace @crypto-lending/api",
