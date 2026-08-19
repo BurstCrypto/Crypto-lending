@@ -20,7 +20,7 @@ implement the wallet adapters or validation harness.
 
 | Item                         | Value                                                            |
 | ---------------------------- | ---------------------------------------------------------------- |
-| Implementation commit        | 871adad4a6671bc1ea58e91893977ead738734ae                         |
+| Implementation commit        | e3186598feb1e481a1c1bea8b7817963830c5afa                         |
 | Package-lock SHA-256         | D723EC5710968AE94663CD2AE3CB107F11349281E3DC6DA580246B2BD71473B9 |
 | SPDX snapshot                | ../license-review/lock-review-snapshot.json                      |
 | Threat-model revision/commit | Pending                                                          |
@@ -28,6 +28,7 @@ implement the wallet adapters or validation harness.
 | Mobile evidence              | Pending                                                          |
 | Network observation          | Pending                                                          |
 | Rollback drill               | Pending                                                          |
+| HTTPS/access smoke           | Pending                                                          |
 | Allowed environments         | Pending                                                          |
 
 ## Finding disposition

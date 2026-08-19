@@ -9,7 +9,7 @@ signatures, full addresses, device identifiers, or credentials.
 
 | Field                                        | Value                                                            |
 | -------------------------------------------- | ---------------------------------------------------------------- |
-| Candidate commit                             | 871adad4a6671bc1ea58e91893977ead738734ae                         |
+| Candidate commit                             | e3186598feb1e481a1c1bea8b7817963830c5afa                         |
 | Package-lock SHA-256                         | D723EC5710968AE94663CD2AE3CB107F11349281E3DC6DA580246B2BD71473B9 |
 | UTC start/end                                | Pending                                                          |
 | Tester                                       | Pending                                                          |
@@ -17,6 +17,7 @@ signatures, full addresses, device identifiers, or credentials.
 | OS/browser/version                           | Pending                                                          |
 | Wallets/versions                             | Pending                                                          |
 | Capture tool/version                         | Pending                                                          |
+| HTTPS trust/access-control preflight         | Not run / Pass / Fail                                            |
 | WalletConnect terms/project-origin preflight | Not run / Pass / Fail                                            |
 
 ## Observed destinations

@@ -12,12 +12,12 @@ decision.
 
 | Item                        | Value                                                            |
 | --------------------------- | ---------------------------------------------------------------- |
-| Validation implementation   | commit 871adad4a6671bc1ea58e91893977ead738734ae                  |
+| Validation implementation   | commit e3186598feb1e481a1c1bea8b7817963830c5afa                  |
 | Isolated package lock       | tools/wallet-lab/package-lock.json                               |
 | Lock SHA-256                | D723EC5710968AE94663CD2AE3CB107F11349281E3DC6DA580246B2BD71473B9 |
 | Lock-derived SPDX           | ../license-review/wallet-lab-lock.spdx.json                      |
 | SPDX snapshot               | ../license-review/lock-review-snapshot.json                      |
-| Allowed application origin  | http://127.0.0.1:4173 only                                       |
+| Allowed application origin  | authenticated https://127.0.0.1:4173 only                        |
 | Allowed networks            | Ethereum Sepolia, Base Sepolia, Solana devnet                    |
 | Public or hosted deployment | Not authorized                                                   |
 
@@ -25,6 +25,11 @@ The source commit above freezes the executable candidate. Documentation-only
 review commits do not change that candidate. Any executable, dependency, lock,
 environment-boundary, connector, RPC, relay, CSP, or evidence-schema change
 invalidates the decision and requires a new candidate identity.
+
+The candidate requires a locally trusted certificate and server-only access
+credentials before it will listen. Those operator-supplied values are outside
+the repository and must be inspected without copying the private key, password,
+Basic authorization value, or derived session cookie into review evidence.
 
 ## Packet contents
 

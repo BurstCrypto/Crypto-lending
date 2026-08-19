@@ -14,20 +14,26 @@ failure of the loopback/testnet boundary.
 
 1. Stop the local wallet-lab process.
 2. Set VITE_WALLET_LAB_ENABLED=false before any restart.
-3. Set VITE_WALLETCONNECT_TERMS_ACCEPTED=false and remove the local project-ID
+3. Remove or rotate WALLET_LAB_ACCESS_PASSWORD when access may have been
+   exposed. Remove the local certificate/key paths before restarting when the
+   HTTPS boundary or private key is suspect; follow the approved certificate
+   process.
+4. Set VITE_WALLETCONNECT_TERMS_ACCEPTED=false and remove the local project-ID
    value. Revoke or rotate the project ID in the vendor console when compromise
    or misuse is suspected.
-4. Disconnect/delete the test sessions in every wallet used during the run.
-5. Revoke the dapp's extension permissions and clear site/vendor storage from
+5. Disconnect/delete the test sessions in every wallet used during the run.
+6. Revoke the dapp's extension permissions and clear site/vendor storage from
    the dedicated browser profile. Never delete or reset a production wallet.
-6. Preserve only sanitized defect evidence; quarantine any accidental secret
+7. Preserve only sanitized defect evidence; quarantine any accidental secret
    capture and follow the incident process.
-7. Record the trigger, operator, UTC time, affected candidate, and follow-up Jira
+8. Record the trigger, operator, UTC time, affected candidate, and follow-up Jira
    ticket without copying sensitive values.
 
 ## Verification
 
-- Opening http://127.0.0.1:4173 fails after the process stops.
+- Opening https://127.0.0.1:4173 fails after the process stops.
+- Startup fails before listening when any mandatory certificate/key/access value
+  is absent or invalid; unauthorized HTTP/WSS access is rejected.
 - A restart with the lab flag false renders the closed gate and loads no wallet
   runtime.
 - WalletConnect is absent when its terms flag or project ID is absent/invalid.
@@ -45,6 +51,7 @@ failure of the loopback/testnet boundary.
 | UTC start/end                       | Pending               |
 | Process stop verified               | Pass / Fail / Not run |
 | Explicit-enable gate verified       | Pass / Fail / Not run |
+| HTTPS/access fail-close verified    | Pass / Fail / Not run |
 | WalletConnect gate verified         | Pass / Fail / Not run |
 | Session/permission cleanup verified | Pass / Fail / Not run |
 | Storage inspected before/after      | Pending               |
