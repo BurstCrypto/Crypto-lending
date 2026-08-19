@@ -26,11 +26,13 @@ body {
 }
 
 button,
+input,
 select {
   font: inherit;
 }
 
 button,
+input,
 select,
 .lab-card {
   border: 1px solid #263952;
@@ -49,6 +51,7 @@ button:hover:not(:disabled) {
 }
 
 button:focus-visible,
+input:focus-visible,
 select:focus-visible {
   outline: 3px solid #66d9ff;
   outline-offset: 2px;
@@ -170,12 +173,17 @@ label {
   font-size: 0.88rem;
 }
 
+input,
 select {
   width: 100%;
   border-radius: 0.65rem;
   padding: 0.7rem;
   color: #f3f7fd;
   background: #0c1a2d;
+}
+
+input::placeholder {
+  color: #7388a2;
 }
 
 .connection-facts {
@@ -247,6 +255,22 @@ select {
   margin-top: 1rem;
 }
 
+.evidence-metadata {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 1rem;
+  margin: 0 0 1rem;
+  border: 1px solid #263952;
+  border-radius: 0.75rem;
+  padding: 0.5rem 1rem 1rem;
+}
+
+.evidence-metadata legend {
+  padding: 0 0.4rem;
+  color: #c8d7e9;
+  font-weight: 700;
+}
+
 .evidence-list {
   display: grid;
   gap: 0.45rem;
@@ -282,6 +306,7 @@ footer {
     grid-template-columns: 1fr;
   }
 
+  .evidence-metadata,
   .evidence-list li {
     grid-template-columns: 1fr 1fr;
   }
@@ -294,6 +319,7 @@ footer {
   }
 
   .connection-facts,
+  .evidence-metadata,
   .evidence-list li {
     grid-template-columns: 1fr;
   }

@@ -21,7 +21,10 @@ export async function renderLiveWalletLab(root: Root): Promise<void> {
     <StrictMode>
       <WagmiProvider {...runtime.providerProps}>
         <QueryClientProvider client={queryClient}>
-          <WalletLabApp runtime={runtime} />
+          <WalletLabApp
+            runtime={runtime}
+            candidateCommit={import.meta.env.VITE_WALLET_LAB_CANDIDATE_COMMIT}
+          />
         </QueryClientProvider>
       </WagmiProvider>
     </StrictMode>,

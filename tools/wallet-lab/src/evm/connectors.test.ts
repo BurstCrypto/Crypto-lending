@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createEvmConnectors, type EvmConnectorFactories } from './connectors';
+import {
+  createEvmConnectors,
+  isApprovedEvmConnector,
+  type EvmConnectorFactories,
+} from './connectors';
 import { resolveEvmRuntimeSettings, type ReadyEvmRuntimeSettings } from './runtime-env';
 
 const baseEnvironment = {
@@ -24,15 +28,10 @@ function settings(projectId: string | undefined): ReadyEvmRuntimeSettings {
 
 function fakeFactories() {
   const markers = {
-    injected: (() => undefined) as never,
     coinbaseWallet: (() => undefined) as never,
     walletConnect: (() => undefined) as never,
   };
   const spies = {
-    injected: vi.fn((parameters: unknown) => {
-      void parameters;
-      return markers.injected;
-    }),
     coinbaseWallet: vi.fn((parameters: unknown) => {
       void parameters;
       return markers.coinbaseWallet;
@@ -43,7 +42,6 @@ function fakeFactories() {
     }),
   };
   const factories: EvmConnectorFactories = {
-    injected: spies.injected as unknown as EvmConnectorFactories['injected'],
     coinbaseWallet: spies.coinbaseWallet as unknown as EvmConnectorFactories['coinbaseWallet'],
     loadWalletConnect: vi.fn(
       async () =>
@@ -57,15 +55,14 @@ function fakeFactories() {
 }
 
 describe('createEvmConnectors', () => {
-  it('configures the injected, Coinbase, and WalletConnect factories', async () => {
+  it('configures the explicit Coinbase and WalletConnect factories', async () => {
     const { factories, markers, spies } = fakeFactories();
     const connectors = await createEvmConnectors(
       settings(baseEnvironment.VITE_WALLETCONNECT_PROJECT_ID),
       factories,
     );
 
-    expect(connectors).toEqual([markers.injected, markers.coinbaseWallet, markers.walletConnect]);
-    expect(spies.injected).toHaveBeenCalledWith({ shimDisconnect: true });
+    expect(connectors).toEqual([markers.coinbaseWallet, markers.walletConnect]);
     expect(spies.coinbaseWallet).toHaveBeenCalledWith(
       expect.objectContaining({ preference: { options: 'eoaOnly' } }),
     );
@@ -77,6 +74,7 @@ describe('createEvmConnectors', () => {
         optionalEvents: ['accountsChanged', 'chainChanged'],
         showQrModal: false,
         telemetryEnabled: false,
+        logger: 'silent',
         isNewChainsStale: true,
       }),
     );
@@ -94,8 +92,22 @@ describe('createEvmConnectors', () => {
     if (!result.enabled) throw new Error(`Expected a ready runtime, got ${result.reason}`);
     const connectors = await createEvmConnectors(result, factories);
 
-    expect(connectors).toEqual([markers.injected, markers.coinbaseWallet]);
+    expect(connectors).toEqual([markers.coinbaseWallet]);
     expect(spies.walletConnect).not.toHaveBeenCalled();
     expect(factories.loadWalletConnect).not.toHaveBeenCalled();
+  });
+});
+
+describe('isApprovedEvmConnector', () => {
+  it.each([
+    [{ id: 'io.metamask', type: 'injected' }, true],
+    [{ id: 'coinbaseWalletSDK', type: 'coinbaseWallet' }, true],
+    [{ id: 'walletConnect', type: 'walletConnect' }, true],
+    [{ id: 'injected', type: 'injected' }, false],
+    [{ id: 'com.coinbase.wallet', type: 'injected' }, false],
+    [{ id: 'baseAccount', type: 'coinbaseWallet' }, false],
+    [{ id: 'io.phantom', type: 'injected' }, false],
+  ])('classifies $id/$type', (connector, approved) => {
+    expect(isApprovedEvmConnector(connector as never)).toBe(approved);
   });
 });

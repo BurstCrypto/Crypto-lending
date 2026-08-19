@@ -33,27 +33,18 @@ describe('createEvmRuntime', () => {
       ssr: boolean;
       transports: Record<number, unknown>;
     };
-    const connectorMarkers = [
-      (() => undefined) as never,
-      (() => undefined) as never,
-      (() => undefined) as never,
-    ];
+    const connectorMarkers = [(() => undefined) as never, (() => undefined) as never];
     const connectorSpies = {
-      injected: vi.fn((parameters: unknown) => {
+      coinbaseWallet: vi.fn((parameters: unknown) => {
         void parameters;
         return connectorMarkers[0];
       }),
-      coinbaseWallet: vi.fn((parameters: unknown) => {
+      walletConnect: vi.fn((parameters: unknown) => {
         void parameters;
         return connectorMarkers[1];
       }),
-      walletConnect: vi.fn((parameters: unknown) => {
-        void parameters;
-        return connectorMarkers[2];
-      }),
     };
     const connectorFactories: EvmConnectorFactories = {
-      injected: connectorSpies.injected as unknown as EvmConnectorFactories['injected'],
       coinbaseWallet:
         connectorSpies.coinbaseWallet as unknown as EvmConnectorFactories['coinbaseWallet'],
       loadWalletConnect: vi.fn(

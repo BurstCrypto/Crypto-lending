@@ -8,6 +8,7 @@ const ALLOWED_EVENTS = new Set(['accountsChanged', 'chainChanged']);
 const MAX_SCOPE_ITEMS = 64;
 
 export type WalletConnectSessionRejection =
+  | 'ambiguous-account-selection'
   | 'invalid-session-scope'
   | 'missing-personal-sign'
   | 'selected-account-missing'
@@ -19,6 +20,9 @@ export type WalletConnectSessionInspection =
   | Readonly<{ accepted: true; canSwitchChain: boolean }>
   | Readonly<{ accepted: false; reason: WalletConnectSessionRejection }>;
 
+export type WalletConnectSessionLifecycleSignal =
+  'session-update' | 'session-delete' | 'session-expire';
+
 export type ExactWalletConnectConnector = Connector &
   Readonly<{ id: 'walletConnect'; type: 'walletConnect' }>;
 
@@ -28,6 +32,19 @@ type SessionScope = Readonly<{
   events: readonly string[];
   accounts: readonly string[];
 }>;
+
+type ProviderEventListener = (...payload: unknown[]) => void;
+
+type ProviderEventMethods = Readonly<{
+  on: (event: string, listener: ProviderEventListener) => unknown;
+  remove: (event: string, listener: ProviderEventListener) => unknown;
+}>;
+
+const WALLETCONNECT_SESSION_LIFECYCLE_EVENTS = [
+  ['session_update', 'session-update'],
+  ['session_delete', 'session-delete'],
+  ['session_expire', 'session-expire'],
+] as const satisfies readonly (readonly [string, WalletConnectSessionLifecycleSignal])[];
 
 function stringArray(value: unknown): readonly string[] | null {
   return Array.isArray(value) &&
@@ -61,12 +78,63 @@ function readScope(key: string, value: unknown): SessionScope | null {
   return { methods, events, accounts, chains: [...explicitChains, ...scopedChain] };
 }
 
+function providerEventMethods(provider: object): ProviderEventMethods | null {
+  try {
+    const on = Reflect.get(provider, 'on');
+    const off = Reflect.get(provider, 'off');
+    const removeListener = Reflect.get(provider, 'removeListener');
+    const remove = typeof off === 'function' ? off : removeListener;
+    if (typeof on !== 'function' || typeof remove !== 'function') return null;
+    return { on, remove } as ProviderEventMethods;
+  } catch {
+    return null;
+  }
+}
+
 function providerSupportsSessionUpdates(provider: object): boolean {
-  return (
-    typeof Reflect.get(provider, 'on') === 'function' &&
-    (typeof Reflect.get(provider, 'off') === 'function' ||
-      typeof Reflect.get(provider, 'removeListener') === 'function')
-  );
+  return providerEventMethods(provider) !== null;
+}
+
+function subscribeProviderEvents(
+  provider: object,
+  subscriptions: readonly (readonly [event: string, listener: ProviderEventListener])[],
+  deactivate: () => void = () => undefined,
+): (() => void) | null {
+  const methods = providerEventMethods(provider);
+  if (!methods) return null;
+
+  const attempted: (readonly [event: string, listener: ProviderEventListener])[] = [];
+  try {
+    for (const subscription of subscriptions) {
+      attempted.push(subscription);
+      methods.on.call(provider, ...subscription);
+    }
+  } catch {
+    deactivate();
+    for (const subscription of attempted) {
+      try {
+        methods.remove.call(provider, ...subscription);
+      } catch {
+        // Keep removing any other listeners after a provider cleanup error.
+      }
+    }
+    return null;
+  }
+
+  let active = true;
+  return () => {
+    if (!active) return;
+    active = false;
+    deactivate();
+    for (const subscription of subscriptions) {
+      try {
+        methods.remove.call(provider, ...subscription);
+      } catch {
+        // Listener removal is best effort. Deactivation prevents a retained
+        // provider callback from reporting another lifecycle signal.
+      }
+    }
+  };
 }
 
 /**
@@ -119,6 +187,7 @@ export function inspectWalletConnectSession(
     let selectedAccountFound = false;
     let selectedSigningFound = false;
     let selectedSwitchFound = false;
+    const approvedAddresses = new Set<string>();
 
     for (const scope of scopes) {
       const accountParts = scope.accounts.map((account) => account.split(':'));
@@ -134,6 +203,7 @@ export function inspectWalletConnectSession(
       }
       const accountChains = accountParts.map((parts) => `${parts[0]}:${parts[1]}`);
       const allScopeChains = new Set([...scope.chains, ...accountChains]);
+      for (const parts of accountParts) approvedAddresses.add((parts[2] ?? '').toLowerCase());
       if ([...allScopeChains].some((chain) => !ALLOWED_CHAINS.has(chain))) {
         return rejected('testnet-scope-missing');
       }
@@ -168,6 +238,7 @@ export function inspectWalletConnectSession(
     }
     if (!selectedAccountFound) return rejected('selected-account-missing');
     if (!selectedSigningFound) return rejected('missing-personal-sign');
+    if (approvedAddresses.size !== 1) return rejected('ambiguous-account-selection');
     return Object.freeze({ accepted: true, canSwitchChain: selectedSwitchFound });
   } catch {
     return rejected('invalid-session-scope');
@@ -178,35 +249,32 @@ export function subscribeWalletConnectSessionUpdates(
   provider: unknown,
   listener: () => void,
 ): (() => void) | null {
-  if (
-    typeof provider !== 'object' ||
-    provider === null ||
-    !providerSupportsSessionUpdates(provider)
-  ) {
-    return null;
-  }
-  try {
-    const on = Reflect.get(provider, 'on') as (event: string, callback: () => void) => unknown;
-    const off = Reflect.get(provider, 'off');
-    const removeListener = Reflect.get(provider, 'removeListener');
-    const remove = (typeof off === 'function' ? off : removeListener) as (
-      event: string,
-      callback: () => void,
-    ) => unknown;
-    on.call(provider, 'session_update', listener);
-    let active = true;
-    return () => {
-      if (!active) return;
-      active = false;
-      try {
-        remove.call(provider, 'session_update', listener);
-      } catch {
-        // Listener removal is best effort. The component also invalidates its
-        // guard generation before calling this closure, so a retained callback
-        // cannot restore an accepted signing state.
-      }
-    };
-  } catch {
-    return null;
-  }
+  if (typeof provider !== 'object' || provider === null) return null;
+  return subscribeProviderEvents(provider, [['session_update', listener]]);
+}
+
+/**
+ * Reports settled-session lifecycle changes without exposing provider payloads.
+ * Registration and cleanup failures are contained at the provider boundary;
+ * the returned cleanup function is safe to call more than once.
+ */
+export function subscribeWalletConnectSessionLifecycle(
+  provider: unknown,
+  listener: (signal: WalletConnectSessionLifecycleSignal) => void,
+): (() => void) | null {
+  if (typeof provider !== 'object' || provider === null) return null;
+
+  let active = true;
+  const subscriptions = WALLETCONNECT_SESSION_LIFECYCLE_EVENTS.map(
+    ([event, signal]) =>
+      [
+        event,
+        () => {
+          if (active) listener(signal);
+        },
+      ] as const,
+  );
+  return subscribeProviderEvents(provider, subscriptions, () => {
+    active = false;
+  });
 }

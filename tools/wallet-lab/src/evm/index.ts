@@ -4,7 +4,11 @@ export {
   isEvmTestnetChainId,
   type EvmTestnetChainId,
 } from './chains';
-export { createEvmConnectors, type EvmConnectorFactories } from './connectors';
+export {
+  createEvmConnectors,
+  isApprovedEvmConnector,
+  type EvmConnectorFactories,
+} from './connectors';
 export {
   subscribeWalletConnectDisplayUri,
   type WalletConnectDisplayUriSubscription,
@@ -19,8 +23,10 @@ export {
 export {
   inspectWalletConnectSession,
   isWalletConnectConnector,
+  subscribeWalletConnectSessionLifecycle,
   subscribeWalletConnectSessionUpdates,
   type WalletConnectSessionInspection,
+  type WalletConnectSessionLifecycleSignal,
   type WalletConnectSessionRejection,
 } from './walletconnect-session';
 export { isEvmOwnershipProofReady, type WalletConnectScopeStatus } from './proof-policy';

@@ -53,6 +53,10 @@ npm run dev:wallet-lab
 Open only `http://127.0.0.1:4173`. Do not pass a host override or place a proxy
 or tunnel in front of it.
 
+Before a frozen validation run, also set
+`VITE_WALLET_LAB_CANDIDATE_COMMIT` to the exact 40-character commit being
+tested. The field is public run metadata, not a credential.
+
 ## Connector behavior
 
 - MetaMask desktop uses the injected Wagmi connector with EIP-6963 discovery.
@@ -73,12 +77,14 @@ or tunnel in front of it.
   `personal_sign` and `wallet_switchEthereumChain`; its optional events are
   `accountsChanged` and `chainChanged`. It uses an application-owned QR surface,
   with the provider's default AppKit modal disabled. The harness inspects every
-  settled or restored session and every session update. Missing the selected
-  testnet/account or `personal_sign`, or approving any unrecognized method/event,
-  blocks and disconnects the session; omission of `wallet_switchEthereumChain`
-  leaves signing available but disables switching. `@reown/appkit@1.8.19` is
-  nevertheless a hard-installed provider dependency with its own custom
-  license; disabling the modal does not remove that package or its terms.
+  settled or restored session and every session update. Session deletion or
+  expiry immediately revokes signing and disconnects locally. Missing the
+  selected testnet/single account or `personal_sign`, or approving any
+  unrecognized method/event, blocks and disconnects the session; omission of
+  `wallet_switchEthereumChain` leaves signing available but disables switching.
+  `@reown/appkit@1.8.19` is nevertheless a hard-installed provider dependency
+  with its own custom license; disabling the modal does not remove that package
+  or its terms.
 - The current harness validates one EVM connector session at a time. Simultaneous
   independent MetaMask/Coinbase/WalletConnect sessions and their isolation
   behavior remain deferred to a future adapter/conformance implementation.
@@ -132,9 +138,14 @@ npm run test:wallet-lab
 npm audit --prefix tools/wallet-lab
 ```
 
-Evidence export is designed to contain outcome metadata rather than wallet
-secrets. Inspect every export before attaching it to Jira or GitHub. Follow the
-[manual validation runbook](../../docs/wallets/manual-validation-runbook.md).
+Evidence schema v2 contains the case/run identity, frozen commit and lock hash,
+environment/software versions, result, terms state, audit snapshot, and ordered
+sanitized events. Those events persist only under one dedicated
+`sessionStorage` key for same-tab reload recovery; the UI's **Clear run** action
+removes it, and closing the browser session clears it. No address, signature,
+pairing URI/topic, provider payload, or wallet secret belongs in that storage
+or export. Inspect every export before attaching it to Jira or GitHub. Follow
+the [manual validation runbook](../../docs/wallets/manual-validation-runbook.md).
 
 The lock applies a scoped `axios@1.18.0` override to the optional Base/CDP path
 under WalletConnect's hard-installed AppKit dependency:

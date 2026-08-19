@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { EVM_TESTNET_CHAIN_IDS } from './chains';
 import {
   inspectWalletConnectSession,
+  subscribeWalletConnectSessionLifecycle,
   subscribeWalletConnectSessionUpdates,
 } from './walletconnect-session';
 
@@ -112,6 +113,16 @@ describe('inspectWalletConnectSession', () => {
       provider({ accounts: ['eip155:11155111:0x1111111111111111111111111111111111111111'] }),
       'selected-account-missing',
     ],
+    [
+      'multiple wallet accounts',
+      provider({
+        accounts: [
+          'eip155:11155111:0xaabbccddeeff0011223344556677889900aabbcc',
+          'eip155:84532:0x1111111111111111111111111111111111111111',
+        ],
+      }),
+      'ambiguous-account-selection',
+    ],
     ['missing provider marker', { ...provider(), isWalletConnect: false }, 'invalid-session-scope'],
     ['missing session', {}, 'invalid-session-scope'],
   ])('blocks %s', (_label, candidate, reason) => {
@@ -150,5 +161,70 @@ describe('inspectWalletConnectSession', () => {
     const unsubscribe = subscribeWalletConnectSessionUpdates(candidate, vi.fn());
 
     expect(() => unsubscribe?.()).not.toThrow();
+  });
+
+  it('normalizes lifecycle signals without forwarding provider payloads', () => {
+    const listeners = new Map<string, (...payload: unknown[]) => void>();
+    const candidate = provider();
+    candidate.on.mockImplementation((event: string, listener: (...payload: unknown[]) => void) => {
+      listeners.set(event, listener);
+    });
+    candidate.off.mockImplementation((event: string, listener: (...payload: unknown[]) => void) => {
+      if (listeners.get(event) === listener) listeners.delete(event);
+    });
+    const listener = vi.fn();
+
+    const unsubscribe = subscribeWalletConnectSessionLifecycle(candidate, listener);
+
+    expect(unsubscribe).not.toBeNull();
+    listeners.get('session_update')?.({ topic: 'private-update-payload' });
+    listeners.get('session_delete')?.({ topic: 'private-delete-payload' });
+    listeners.get('session_expire')?.({ topic: 'private-expire-payload' });
+    expect(listener.mock.calls).toEqual([
+      ['session-update'],
+      ['session-delete'],
+      ['session-expire'],
+    ]);
+
+    unsubscribe?.();
+    unsubscribe?.();
+    expect(candidate.off).toHaveBeenCalledTimes(3);
+    expect(listeners).toHaveLength(0);
+  });
+
+  it('deactivates retained lifecycle callbacks before best-effort cleanup', () => {
+    const listeners: ((...payload: unknown[]) => void)[] = [];
+    const candidate = provider();
+    candidate.on.mockImplementation((_event: string, listener: (...payload: unknown[]) => void) => {
+      listeners.push(listener);
+    });
+    candidate.off.mockImplementation(() => {
+      throw new Error('provider removal failed');
+    });
+    const listener = vi.fn();
+    const unsubscribe = subscribeWalletConnectSessionLifecycle(candidate, listener);
+
+    expect(() => unsubscribe?.()).not.toThrow();
+    for (const retainedListener of listeners) retainedListener({ topic: 'must-not-escape' });
+    expect(listener).not.toHaveBeenCalled();
+    expect(candidate.off).toHaveBeenCalledTimes(3);
+  });
+
+  it('rolls back partial lifecycle registration without exposing provider errors', () => {
+    const candidate = provider();
+    candidate.on.mockImplementation((event: string) => {
+      if (event === 'session_delete') throw new Error('provider registration failed');
+    });
+    candidate.off.mockImplementation(() => {
+      throw new Error('provider rollback failed');
+    });
+
+    let unsubscribe: (() => void) | null | undefined;
+    expect(() => {
+      unsubscribe = subscribeWalletConnectSessionLifecycle(candidate, vi.fn());
+    }).not.toThrow();
+    expect(unsubscribe).toBeNull();
+    expect(candidate.off).toHaveBeenCalledWith('session_update', expect.any(Function));
+    expect(candidate.off).toHaveBeenCalledWith('session_delete', expect.any(Function));
   });
 });

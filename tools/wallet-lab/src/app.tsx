@@ -14,24 +14,39 @@ import {
 import {
   EVM_TESTNET_CHAIN_IDS,
   inspectWalletConnectSession,
+  isApprovedEvmConnector,
   isEvmOwnershipProofReady,
   isWalletConnectConnector,
   isEvmTestnetChainId,
-  subscribeWalletConnectSessionUpdates,
+  subscribeWalletConnectSessionLifecycle,
+  type WalletConnectSessionLifecycleSignal,
   type WalletConnectScopeStatus,
   type EvmRuntime,
   type EvmTestnetChainId,
 } from './evm';
 import {
+  LAB_ALLOWED_NETWORKS,
+  LAB_ENVIRONMENT_IDS,
+  LAB_RUN_RESULTS,
+  LAB_TERMS_ACKNOWLEDGEMENT_STATES,
   createLabEvidenceEvent,
-  exportLabEvidence,
+  exportLabEvidenceRun,
+  type LabAllowedNetwork,
   type LabChainId,
   type LabChainContext,
   type LabConnectorId,
+  type LabEnvironmentId,
   type LabEventKind,
   type LabEventOutcome,
   type LabEvidenceEvent,
+  type LabRunResult,
+  type LabTermsAcknowledgementState,
 } from './evidence';
+import {
+  clearLabEvidenceSession,
+  loadLabEvidenceSession,
+  saveLabEvidenceSession,
+} from './evidence-store';
 import { sanitizeEvmWalletError, shortenWalletAddress } from './presentation';
 import {
   createPhantomSolanaAdapterLifecycle,
@@ -60,7 +75,29 @@ interface EvmPanelProps extends LabPanelProps {
   runtime: EvmRuntime;
 }
 
+interface EvidenceRunFields {
+  caseId: string;
+  result: LabRunResult;
+  tester: string;
+  candidateCommit: string;
+  environmentId: LabEnvironmentId;
+  osName: string;
+  osVersion: string;
+  browserName: string;
+  browserVersion: string;
+  walletName: string;
+  walletVersion: string;
+  network: LabAllowedNetwork;
+  termsAcknowledgement: LabTermsAcknowledgementState;
+}
+
 type WalletConnectGuardResult = 'accepted' | 'blocked' | 'stale';
+
+const WALLET_LAB_LOCK_SHA256 = 'D723EC5710968AE94663CD2AE3CB107F11349281E3DC6DA580246B2BD71473B9';
+const WALLET_LAB_AUDIT_SNAPSHOT = Object.freeze({
+  reference: 'docs/wallets/license-review/lock-review-snapshot.json',
+  date: '2026-08-19',
+});
 
 const EVM_NETWORKS: readonly {
   chainId: EvmTestnetChainId;
@@ -80,7 +117,7 @@ const EVM_NETWORKS: readonly {
 ];
 
 function connectorIdForEvidence(connector: Connector | undefined): LabConnectorId {
-  if (!connector) return 'injected';
+  if (!connector || !isApprovedEvmConnector(connector)) return 'unapproved';
   if (isWalletConnectConnector(connector)) return 'walletconnect';
   if (connector.id === 'coinbaseWalletSDK' && connector.type === 'coinbaseWallet') {
     return 'coinbase';
@@ -88,7 +125,7 @@ function connectorIdForEvidence(connector: Connector | undefined): LabConnectorI
   // EIP-6963 metadata is self-reported and remains corroboration-only, but an
   // exact pair avoids attributing arbitrary names containing "MetaMask".
   if (connector.id === 'io.metamask' && connector.type === 'injected') return 'metamask';
-  return 'injected';
+  return 'unapproved';
 }
 
 function safeConnectorName(connector: Connector): string {
@@ -163,7 +200,7 @@ export function EvmPanel({ runtime, onEvidence }: EvmPanelProps) {
     promise: Promise<WalletConnectGuardResult>;
   } | null>(null);
   const targetNetwork = networkForChainId(targetChainId);
-  const connectors = connect.connectors;
+  const connectors = connect.connectors.filter(isApprovedEvmConnector);
   const selectedConnector = connectors.find(({ uid }) => uid === selectedConnectorUid);
   const observed = useRef<{
     address: string | undefined;
@@ -177,16 +214,34 @@ export function EvmPanel({ runtime, onEvidence }: EvmPanelProps) {
   }, [connectors, selectedConnector]);
 
   useEffect(() => {
-    const subscription = runtime.subscribeWalletConnectDisplayUri((uri) => setDisplayUri(uri));
+    const subscription = runtime.subscribeWalletConnectDisplayUri((uri) => {
+      setDisplayUri(uri);
+      onEvidence({
+        connectorId: 'walletconnect',
+        chainId: targetNetwork.caipId,
+        chainContext: 'requested',
+        kind: 'qr-display',
+        outcome: 'accepted',
+      });
+    });
     if (!subscription.available) return;
     return subscription.unsubscribe;
-  }, [runtime]);
+  }, [onEvidence, runtime, targetNetwork.caipId]);
 
   useEffect(() => {
     if (!displayUri) return;
-    const timeout = window.setTimeout(() => setDisplayUri(null), 5 * 60_000);
+    const timeout = window.setTimeout(() => {
+      setDisplayUri(null);
+      onEvidence({
+        connectorId: 'walletconnect',
+        chainId: targetNetwork.caipId,
+        chainContext: 'requested',
+        kind: 'pairing-expire',
+        outcome: 'cleared',
+      });
+    }, 5 * 60_000);
     return () => window.clearTimeout(timeout);
-  }, [displayUri]);
+  }, [displayUri, onEvidence, targetNetwork.caipId]);
 
   useEffect(
     () => () => {
@@ -247,6 +302,8 @@ export function EvmPanel({ runtime, onEvidence }: EvmPanelProps) {
     signMessage.isPending ||
     switchChain.isPending;
   const currentChainAllowed = isEvmTestnetChainId(connection.chainId);
+  const currentConnectorApproved =
+    connection.connector !== undefined && isApprovedEvmConnector(connection.connector);
   const currentWalletConnectIdentity =
     isWalletConnectConnector(connection.connector) &&
     currentChainAllowed &&
@@ -258,7 +315,7 @@ export function EvmPanel({ runtime, onEvidence }: EvmPanelProps) {
     (walletConnectScope === 'accepted' &&
       guardedWalletConnectIdentity === currentWalletConnectIdentity);
   const proofReady = isEvmOwnershipProofReady({
-    connected: connection.isConnected,
+    connected: connection.isConnected && currentConnectorApproved,
     currentChainId: connection.chainId,
     targetChainId,
     walletConnect: isWalletConnectConnector(connection.connector),
@@ -341,9 +398,33 @@ export function EvmPanel({ runtime, onEvidence }: EvmPanelProps) {
         });
       };
 
+      const handleSessionLifecycle = (signal: WalletConnectSessionLifecycleSignal) => {
+        if (signal === 'session-update') {
+          handleSessionUpdate();
+          return;
+        }
+        if (generation !== walletConnectGuardGeneration.current) return;
+        clearWalletConnectUpdateGuard();
+        blockWalletConnectScope();
+        setDisplayUri(null);
+        setFeedback(
+          signal === 'session-delete'
+            ? 'WalletConnect session was deleted; signing was revoked.'
+            : 'WalletConnect session expired; signing was revoked.',
+        );
+        onEvidence({
+          connectorId: 'walletconnect',
+          ...observedEvmChain(chainId),
+          kind: signal,
+          outcome: 'cleared',
+          accountObserved: true,
+        });
+        void disconnect.disconnectAsync({ connector }).catch(() => undefined);
+      };
+
       // Subscribe before inspecting so a scope expansion cannot land between
       // the initial validation and listener installation.
-      const unsubscribe = subscribeWalletConnectSessionUpdates(provider, handleSessionUpdate);
+      const unsubscribe = subscribeWalletConnectSessionLifecycle(provider, handleSessionLifecycle);
       if (!unsubscribe) {
         if (generation !== walletConnectGuardGeneration.current) return 'stale';
         blockWalletConnectScope();
@@ -413,6 +494,20 @@ export function EvmPanel({ runtime, onEvidence }: EvmPanelProps) {
     guardedWalletConnectIdentity,
   ]);
 
+  useEffect(() => {
+    const activeConnector = connection.connector;
+    if (!activeConnector || isApprovedEvmConnector(activeConnector)) return;
+    setFeedback('Blocked: this connector is not one of the approved wallet targets.');
+    onEvidence({
+      connectorId: 'unapproved',
+      ...observedEvmChain(connection.chainId),
+      kind: 'connect',
+      outcome: 'blocked',
+      accountObserved: Boolean(connection.address),
+    });
+    void disconnect.disconnectAsync({ connector: activeConnector }).catch(() => undefined);
+  }, [connection.address, connection.chainId, connection.connector, disconnect, onEvidence]);
+
   async function connectSelected() {
     if (!selectedConnector) return;
     const connectorId = connectorIdForEvidence(selectedConnector);
@@ -443,9 +538,14 @@ export function EvmPanel({ runtime, onEvidence }: EvmPanelProps) {
         });
         return;
       }
-      if (result.chainId !== targetChainId || result.accounts[0] === undefined) {
+      const selectedAccount = result.accounts.length === 1 ? result.accounts[0] : undefined;
+      if (result.chainId !== targetChainId || selectedAccount === undefined) {
         await disconnect.disconnectAsync({ connector: selectedConnector });
-        setFeedback('Blocked: the wallet did not return the selected testnet and account.');
+        setFeedback(
+          result.accounts.length > 1
+            ? 'Blocked: authorize exactly one test account instead of relying on account order.'
+            : 'Blocked: the wallet did not return the selected testnet and account.',
+        );
         onEvidence({
           connectorId,
           ...observedEvmChain(result.chainId),
@@ -458,7 +558,7 @@ export function EvmPanel({ runtime, onEvidence }: EvmPanelProps) {
         const guardResult = await guardWalletConnectSession(
           selectedConnector,
           targetChainId,
-          result.accounts[0],
+          selectedAccount,
         );
         if (guardResult === 'stale') {
           setFeedback('WalletConnect validation was superseded; signing remains gated.');
@@ -515,12 +615,14 @@ export function EvmPanel({ runtime, onEvidence }: EvmPanelProps) {
     setFeedback('Checking the selected wallet session…');
     try {
       const restored = await reconnect.reconnectAsync({ connectors: [selectedConnector] });
-      const invalid = restored.filter(({ chainId }) => !isEvmTestnetChainId(chainId));
+      const invalid = restored.filter(
+        ({ chainId, accounts }) => !isEvmTestnetChainId(chainId) || accounts.length !== 1,
+      );
       for (const item of invalid) {
         await disconnect.disconnectAsync({ connector: item.connector });
       }
       let accepted = restored.find(
-        ({ chainId, accounts }) => isEvmTestnetChainId(chainId) && accounts[0] !== undefined,
+        ({ chainId, accounts }) => isEvmTestnetChainId(chainId) && accounts.length === 1,
       );
       if (accepted && selectedIsWalletConnect) {
         const guardResult = await guardWalletConnectSession(
@@ -646,17 +748,28 @@ export function EvmPanel({ runtime, onEvidence }: EvmPanelProps) {
     const connectorId = connectorIdForEvidence(connection.connector);
     clearWalletConnectUpdateGuard();
     if (isWalletConnectConnector(connection.connector)) blockWalletConnectScope();
-    await disconnect.disconnectAsync({ connector: connection.connector });
-    setDisplayUri(null);
-    setFeedback(
-      'Disconnected. Vendor pairing state may remain; clear this dedicated browser profile after testing.',
-    );
-    onEvidence({
-      connectorId,
-      ...observedEvmChain(connection.chainId),
-      kind: 'disconnect',
-      outcome: 'cleared',
-    });
+    try {
+      await disconnect.disconnectAsync({ connector: connection.connector });
+      setDisplayUri(null);
+      setFeedback(
+        'Disconnected. Vendor pairing state may remain; clear this dedicated browser profile after testing.',
+      );
+      onEvidence({
+        connectorId,
+        ...observedEvmChain(connection.chainId),
+        kind: 'disconnect',
+        outcome: 'cleared',
+      });
+    } catch (error) {
+      setFeedback(sanitizeEvmWalletError(error).message);
+      onEvidence({
+        connectorId,
+        ...observedEvmChain(connection.chainId),
+        kind: 'disconnect',
+        outcome: 'blocked',
+        accountObserved: Boolean(connection.address),
+      });
+    }
   }
 
   return (
@@ -1020,15 +1133,83 @@ export function PhantomPanel({ onEvidence }: LabPanelProps) {
   );
 }
 
-function EvidencePanel({ events }: { events: readonly LabEvidenceEvent[] }) {
+function EvidencePanel({
+  events,
+  configuredCandidateCommit,
+  onClear,
+}: {
+  events: readonly LabEvidenceEvent[];
+  configuredCandidateCommit: string;
+  onClear(): void;
+}) {
+  const [fields, setFields] = useState<EvidenceRunFields>(() => ({
+    caseId: '',
+    result: 'blocked',
+    tester: '',
+    candidateCommit: configuredCandidateCommit,
+    environmentId: 'D1',
+    osName: '',
+    osVersion: '',
+    browserName: '',
+    browserVersion: '',
+    walletName: '',
+    walletVersion: '',
+    network: 'eip155:11155111',
+    termsAcknowledgement: 'not-accepted',
+  }));
+  const [feedback, setFeedback] = useState(
+    'Complete the run identity before exporting evidence schema v2.',
+  );
+
   function downloadEvidence() {
-    const blob = new Blob([exportLabEvidence(events)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = 'wallet-lab-sanitized-evidence.json';
-    anchor.click();
-    URL.revokeObjectURL(url);
+    const firstEvent = events[0];
+    const lastEvent = events.at(-1);
+    if (!firstEvent || !lastEvent) return;
+
+    try {
+      const completedAt = new Date(
+        Math.max(Date.now(), new Date(lastEvent.occurredAt).getTime()),
+      ).toISOString();
+      const runId = `run_${firstEvent.eventId.replace(/^evt_/u, '')}`;
+      const serialized = exportLabEvidenceRun({
+        runId,
+        caseId: fields.caseId.trim(),
+        result: fields.result,
+        tester: fields.tester.trim(),
+        candidateCommit: fields.candidateCommit.trim(),
+        lockSha256: WALLET_LAB_LOCK_SHA256,
+        environmentId: fields.environmentId,
+        os: { name: fields.osName.trim(), version: fields.osVersion.trim() },
+        browser: {
+          name: fields.browserName.trim(),
+          version: fields.browserVersion.trim(),
+        },
+        wallet: { name: fields.walletName.trim(), version: fields.walletVersion.trim() },
+        network: fields.network,
+        startedAt: firstEvent.occurredAt,
+        completedAt,
+        termsAcknowledgement: fields.termsAcknowledgement,
+        auditSnapshot: WALLET_LAB_AUDIT_SNAPSHOT,
+        events,
+      });
+      const blob = new Blob([serialized], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = `${fields.caseId.toLowerCase()}-${fields.environmentId.toLowerCase()}-${runId}.json`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+      setFeedback('Sanitized v2 evidence exported. Inspect it before attaching it anywhere.');
+    } catch {
+      setFeedback(
+        'Export blocked. Enter valid case, tester, commit, OS, browser, and wallet identities.',
+      );
+    }
+  }
+
+  function clearRun() {
+    onClear();
+    setFeedback('The sanitized session evidence for this tab was cleared.');
   }
 
   return (
@@ -1038,10 +1219,210 @@ function EvidencePanel({ events }: { events: readonly LabEvidenceEvent[] }) {
           <p className="eyebrow">No addresses, signatures, or pairing topics</p>
           <h2 id="evidence-title">Sanitized evidence ({events.length})</h2>
         </div>
-        <button type="button" onClick={downloadEvidence} disabled={events.length === 0}>
-          Export JSON
-        </button>
+        <div className="button-row">
+          <button type="button" onClick={downloadEvidence} disabled={events.length === 0}>
+            Export v2 JSON
+          </button>
+          <button type="button" onClick={clearRun} disabled={events.length === 0}>
+            Clear run
+          </button>
+        </div>
       </div>
+      <fieldset className="evidence-metadata">
+        <legend>Frozen run identity</legend>
+        <label>
+          Case ID
+          <input
+            value={fields.caseId}
+            onChange={(event) =>
+              setFields((current) => ({
+                ...current,
+                caseId: event.target.value.toUpperCase(),
+              }))
+            }
+            placeholder="C01"
+            autoComplete="off"
+            spellCheck={false}
+          />
+        </label>
+        <label>
+          Overall result
+          <select
+            value={fields.result}
+            onChange={(event) =>
+              setFields((current) => ({
+                ...current,
+                result: event.target.value as LabRunResult,
+              }))
+            }
+          >
+            {LAB_RUN_RESULTS.map((result) => (
+              <option key={result} value={result}>
+                {result}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Tester
+          <input
+            value={fields.tester}
+            onChange={(event) =>
+              setFields((current) => ({ ...current, tester: event.target.value }))
+            }
+            placeholder="Authorized tester"
+            autoComplete="off"
+          />
+        </label>
+        <label>
+          Full candidate commit
+          <input
+            value={fields.candidateCommit}
+            onChange={(event) =>
+              setFields((current) => ({
+                ...current,
+                candidateCommit: event.target.value,
+              }))
+            }
+            placeholder="40 hexadecimal characters"
+            autoComplete="off"
+            spellCheck={false}
+          />
+        </label>
+        <label>
+          Environment
+          <select
+            value={fields.environmentId}
+            onChange={(event) =>
+              setFields((current) => ({
+                ...current,
+                environmentId: event.target.value as LabEnvironmentId,
+              }))
+            }
+          >
+            {LAB_ENVIRONMENT_IDS.map((environmentId) => (
+              <option key={environmentId} value={environmentId}>
+                {environmentId}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Network
+          <select
+            value={fields.network}
+            onChange={(event) =>
+              setFields((current) => ({
+                ...current,
+                network: event.target.value as LabAllowedNetwork,
+              }))
+            }
+          >
+            {LAB_ALLOWED_NETWORKS.map((network) => (
+              <option key={network} value={network}>
+                {network}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          OS name
+          <input
+            value={fields.osName}
+            onChange={(event) =>
+              setFields((current) => ({ ...current, osName: event.target.value }))
+            }
+            placeholder="Windows"
+            autoComplete="off"
+          />
+        </label>
+        <label>
+          OS version
+          <input
+            value={fields.osVersion}
+            onChange={(event) =>
+              setFields((current) => ({ ...current, osVersion: event.target.value }))
+            }
+            placeholder="11 24H2"
+            autoComplete="off"
+          />
+        </label>
+        <label>
+          Browser name
+          <input
+            value={fields.browserName}
+            onChange={(event) =>
+              setFields((current) => ({ ...current, browserName: event.target.value }))
+            }
+            placeholder="Chrome"
+            autoComplete="off"
+          />
+        </label>
+        <label>
+          Browser version
+          <input
+            value={fields.browserVersion}
+            onChange={(event) =>
+              setFields((current) => ({
+                ...current,
+                browserVersion: event.target.value,
+              }))
+            }
+            placeholder="151.0.7922.138"
+            autoComplete="off"
+          />
+        </label>
+        <label>
+          Wallet name
+          <input
+            value={fields.walletName}
+            onChange={(event) =>
+              setFields((current) => ({ ...current, walletName: event.target.value }))
+            }
+            placeholder="MetaMask"
+            autoComplete="off"
+          />
+        </label>
+        <label>
+          Wallet version
+          <input
+            value={fields.walletVersion}
+            onChange={(event) =>
+              setFields((current) => ({
+                ...current,
+                walletVersion: event.target.value,
+              }))
+            }
+            placeholder="13.43.0"
+            autoComplete="off"
+          />
+        </label>
+        <label>
+          Vendor terms state
+          <select
+            value={fields.termsAcknowledgement}
+            onChange={(event) =>
+              setFields((current) => ({
+                ...current,
+                termsAcknowledgement: event.target.value as LabTermsAcknowledgementState,
+              }))
+            }
+          >
+            {LAB_TERMS_ACKNOWLEDGEMENT_STATES.map((state) => (
+              <option key={state} value={state}>
+                {state}
+              </option>
+            ))}
+          </select>
+        </label>
+      </fieldset>
+      <p className="feedback" role="status">
+        {feedback}
+      </p>
+      <p className="boundary-note">
+        Sanitized events persist only in this tab&apos;s session storage for reload recovery. Clear
+        the run after export; closing the tab also clears the browser session.
+      </p>
       <ol className="evidence-list">
         {events.map((event) => (
           <li key={event.eventId}>
@@ -1056,8 +1437,20 @@ function EvidencePanel({ events }: { events: readonly LabEvidenceEvent[] }) {
   );
 }
 
-export function WalletLabApp({ runtime }: { runtime: EvmRuntime }) {
-  const [events, setEvents] = useState<readonly LabEvidenceEvent[]>([]);
+export function WalletLabApp({
+  runtime,
+  candidateCommit = '',
+}: {
+  runtime: EvmRuntime;
+  candidateCommit?: string;
+}) {
+  const [events, setEvents] = useState<readonly LabEvidenceEvent[]>(() =>
+    loadLabEvidenceSession(window.sessionStorage),
+  );
+
+  useEffect(() => {
+    saveLabEvidenceSession(window.sessionStorage, events);
+  }, [events]);
 
   const recordEvidence = useMemo(
     () => (input: EvidenceInput) => {
@@ -1096,7 +1489,14 @@ export function WalletLabApp({ runtime }: { runtime: EvmRuntime }) {
         <EvmPanel runtime={runtime} onEvidence={recordEvidence} />
         <PhantomPanel onEvidence={recordEvidence} />
       </div>
-      <EvidencePanel events={events} />
+      <EvidencePanel
+        events={events}
+        configuredCandidateCommit={candidateCommit}
+        onClear={() => {
+          clearLabEvidenceSession(window.sessionStorage);
+          setEvents([]);
+        }}
+      />
 
       <footer>
         This harness proves compatibility only. It does not create a production authentication

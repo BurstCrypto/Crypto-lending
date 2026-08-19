@@ -1,24 +1,35 @@
 import type { CreateConnectorFn } from 'wagmi';
 import { coinbaseWallet } from '@wagmi/connectors/coinbaseWallet';
-import { injected } from '@wagmi/connectors/injected';
 import type { walletConnect, WalletConnectParameters } from '@wagmi/connectors/walletConnect';
+import type { Connector } from 'wagmi';
 
 import type { ReadyEvmRuntimeSettings } from './runtime-env';
 
 export type EvmConnectorFactories = Readonly<{
-  injected: typeof injected;
   coinbaseWallet: typeof coinbaseWallet;
   loadWalletConnect: () => Promise<typeof walletConnect>;
 }>;
 
 const connectorFactories: EvmConnectorFactories = Object.freeze({
-  injected,
   coinbaseWallet,
   async loadWalletConnect() {
     const module = await import('@wagmi/connectors/walletConnect');
     return module.walletConnect;
   },
 });
+
+/**
+ * The real-wallet lab exposes only the three approved EVM targets. Generic
+ * injected connectors and vendor-branded embedded/smart-account fallbacks stay
+ * hidden even when an extension advertises them through EIP-6963.
+ */
+export function isApprovedEvmConnector(connector: Pick<Connector, 'id' | 'type'>): boolean {
+  return (
+    (connector.id === 'io.metamask' && connector.type === 'injected') ||
+    (connector.id === 'coinbaseWalletSDK' && connector.type === 'coinbaseWallet') ||
+    (connector.id === 'walletConnect' && connector.type === 'walletConnect')
+  );
+}
 
 /**
  * Creates connector definitions only. It never calls connect, reconnect, or a
@@ -29,8 +40,6 @@ export async function createEvmConnectors(
   factories: EvmConnectorFactories = connectorFactories,
 ): Promise<readonly CreateConnectorFn[]> {
   const connectors: CreateConnectorFn[] = [
-    // EIP-6963 discovery is enabled on createConfig; this is its EIP-1193 fallback.
-    factories.injected({ shimDisconnect: true }),
     factories.coinbaseWallet({
       appName: settings.dapp.name,
       appLogoUrl: settings.dapp.iconUrl,
@@ -46,6 +55,7 @@ export async function createEvmConnectors(
     const walletConnectParameters: WalletConnectParameters & {
       methods: string[];
       events: string[];
+      logger: string;
       optionalMethods: string[];
       optionalEvents: string[];
     } = {
@@ -63,6 +73,9 @@ export async function createEvmConnectors(
       // The lab renders the emitted display_uri itself; no AppKit is required.
       showQrModal: false,
       telemetryEnabled: false,
+      // Provider error objects can contain session or pairing identifiers.
+      // The lab maps failures to fixed messages and must not emit vendor logs.
+      logger: 'silent',
       isNewChainsStale: true,
     };
 
