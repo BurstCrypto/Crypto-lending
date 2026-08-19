@@ -165,6 +165,29 @@ $env:RUN_INFRASTRUCTURE_INTEGRATION="1"
 npm run test:integration
 ```
 
+## AWS application baseline
+
+KAN-34's native CloudFormation baseline is defined in
+`infra/aws/application-baseline.yaml`. It models private Fargate application
+tasks, RDS, ElastiCache, SQS, KMS, Secrets Manager, CloudWatch, and the required
+networking without adding Terraform/CDK state or embedded credentials.
+
+Validate it entirely offline with:
+
+```powershell
+npm run infra:validate
+python -m pip install --requirement infra/aws/requirements-dev.txt
+python infra/aws/lint-cloudformation.py infra/aws/application-baseline.yaml infra/aws/sqs-foundation.yaml
+```
+
+These commands do not access AWS. The described services are billable if a
+stack is deployed, so the invocation guard defaults to local validation and
+blocks cloud actions without explicit profile, account, Region, and billing
+acknowledgement inputs. No AWS environment is activated by repository setup or
+CI. See [`docs/KAN-34.md`](docs/KAN-34.md) for the architecture, cost boundary,
+image/TLS prerequisites, and evidence required after any separately authorized
+deployment.
+
 The live test refuses non-loopback service URLs, creates isolated queues and a
 unique PostgreSQL schema, and removes only those test resources. See
 [`docs/KAN-33.md`](docs/KAN-33.md) for transaction, migration, and queue usage.
@@ -179,8 +202,8 @@ unique PostgreSQL schema, and removes only those test resources. See
 - `apps/api/src/infrastructure/outbox` owns durable job envelopes and
   transactional publication; `infrastructure/sqs` owns transport retries and
   SQS-managed dead-letter redrive.
-- `infra` contains local dependency initialization and the deployable SQS queue
-  topology.
+- `infra` contains local dependency initialization, the standalone SQS topology,
+  and KAN-34's guarded CloudFormation application baseline.
 
 These boundaries are intended to be extended by later domain modules. They do
 not embed lending business rules into infrastructure clients, which keeps future
