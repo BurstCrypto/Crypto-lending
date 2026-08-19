@@ -12,8 +12,18 @@ Fargate tasks, an Application Load Balancer, RDS, ElastiCache, interface VPC
 endpoints, Secrets Manager, KMS, and CloudWatch. Merely committing or locally
 linting the template does not create those resources.
 
-Do not run a cloud validation, change set, or deployment until all of the
-following are true:
+The planning estimate recorded on KAN-34 on 2026-08-19 assumes `us-east-1`,
+on-demand pricing, a 730-hour month, and no credits or taxes. It estimates
+`$118–$120/month` with application tasks stopped and the private interface
+endpoints enabled, approximately `$145–$155/month` with one web, API, and worker
+task running before variable usage, and `$175–$200/month` as a suggested
+low-volume development budget with headroom. A parked configuration with both
+tasks and interface endpoints disabled was estimated around `$45/month`.
+These figures are planning inputs only—not an approved budget, quote, spending
+cap, or deployment authorization—and must be refreshed for the approved account
+and Region before any cloud Plan.
+
+Do not create a change set or deploy until all of the following are true:
 
 1. a non-production AWS account, named CLI profile, expected 12-digit account
    ID, and Region have been approved;
@@ -27,7 +37,10 @@ following are true:
 5. an ACM certificate and the test DNS/access path are approved;
 6. the Region's AWS-managed S3 prefix-list ID has been independently verified
    for the private ECR-layer egress rule; and
-7. the operator has an explicit maintenance, migration, rollback, and cleanup
+7. KAN-229 has an approved, unexpired billing control record, independently
+   verified account-level notification controls, and a live guardrail stack
+   matching that record; and
+8. the operator has an explicit maintenance, migration, rollback, and cleanup
    window.
 
 The guarded invocation script performs no AWS call by default. Cloud actions
@@ -42,8 +55,9 @@ leave a `REVIEW_IN_PROGRESS` placeholder stack), but it does not execute the
 change set. CREATE plans force all service desired counts to zero. UPDATE plans
 carry forward existing optional values before applying explicit overrides, so a
 partial update cannot silently reset deletion protection, retention, or sizing.
-The immutable change-set description binds SHA-256 digests of both the template
-and the complete canonical parameter set; `Deploy` recomputes and verifies both.
+The immutable change-set description binds SHA-256 digests of the template, the
+complete canonical parameter set, the complete tag set, and the KAN-229 control
+record. `Deploy` recomputes and verifies each binding.
 
 ## Architecture
 
@@ -90,7 +104,7 @@ tool and lint both templates:
 
 ```powershell
 python -m pip install --requirement infra/aws/requirements-dev.txt
-python infra/aws/lint-cloudformation.py infra/aws/application-baseline.yaml infra/aws/sqs-foundation.yaml
+python infra/aws/lint-cloudformation.py infra/aws/application-baseline.yaml infra/aws/account-guardrails.yaml infra/aws/sqs-foundation.yaml
 ```
 
 These commands read repository files only. CI runs the same checks without AWS
@@ -100,6 +114,7 @@ Running the invocation script with no cloud action is also local-only:
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File infra/aws/invoke-application-baseline.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File infra/aws/invoke-account-guardrails.ps1
 ```
 
 On hosts with PowerShell 7, use `pwsh -NoProfile -File` with the same script
@@ -115,6 +130,12 @@ powershell.exe -NoProfile -Command "Get-Help ./infra/aws/invoke-application-base
 Do not copy a cloud command from this document as a deployment approval. The
 script intentionally requires the operator to provide the account-specific
 values and acknowledgement as explicit execution-time arguments.
+
+KAN-229's final record and live controls gate application `Plan` and `Deploy`.
+An explicitly authorized application `CloudValidate` remains syntax-only and
+does not create application resources, but it is still an AWS API call and is
+never run by the local default or CI. See [KAN-229](KAN-229.md) for the separate
+bootstrap, notification-delivery, independent-review, and retention evidence.
 
 ## Runtime configuration and secrets
 
