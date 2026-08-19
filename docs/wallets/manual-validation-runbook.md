@@ -57,6 +57,18 @@ must set `VITE_WALLETCONNECT_TERMS_ACCEPTED=true` and a valid 32-hex
 `VITE_WALLETCONNECT_PROJECT_ID`. If either value is absent/invalid, WalletConnect
 must remain unavailable while injected, Coinbase, and Phantom tests still run.
 
+### KAN-226 mobile groups
+
+KAN-226's M1/M2/M3 names map to the canonical environments as follows:
+
+- **M1:** D3 + P1 physical cross-device QR on iOS and Android;
+- **M2:** A1 Android mapped-loopback and S1 iOS Simulator smoke coverage; and
+- **M3:** H1 physical same-device coverage on a separately approved HTTPS
+  preview.
+
+See the [mobile execution plan](evidence/mobile-execution-plan.md) for entry
+criteria and the exact limitation labels. M2 never substitutes for M3.
+
 ## Evidence template
 
 Create a dated results document outside this runbook with one row per case:
@@ -231,6 +243,10 @@ Security evidence must also complete the
 [KAN-223 security review packet](security-review/README.md), including the
 sanitized network inventory, storage/logout checks, rollback drill, finding
 classification, and independent decision.
+
+The [desktop](evidence/desktop-execution-plan.md) and
+[mobile](evidence/mobile-execution-plan.md) result indexes must link every
+required evidence-schema-v2 run or its focused defect/approved exception.
 
 The restricted-local implementation can move to review when:
 
