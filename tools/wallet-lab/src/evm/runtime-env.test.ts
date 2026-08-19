@@ -28,18 +28,22 @@ function expectReady(
 
 describe('resolveEvmRuntimeSettings', () => {
   it('requires all global local-only gates', () => {
-    expect(resolveEvmRuntimeSettings({}, 'http://127.0.0.1:4173')).toMatchObject({
+    expect(resolveEvmRuntimeSettings({}, 'https://127.0.0.1:4173')).toMatchObject({
       enabled: false,
       reason: 'explicit-enable-required',
     });
     expect(
-      resolveEvmRuntimeSettings({ ...baseEnvironment, DEV: false }, 'http://127.0.0.1:4173'),
+      resolveEvmRuntimeSettings({ ...baseEnvironment, DEV: false }, 'https://127.0.0.1:4173'),
     ).toMatchObject({ enabled: false, reason: 'development-build-required' });
     expect(resolveEvmRuntimeSettings(baseEnvironment, 'https://wallet.example.com')).toMatchObject({
       enabled: false,
       reason: 'loopback-origin-required',
     });
     expect(resolveEvmRuntimeSettings(baseEnvironment, 'http://localhost:4173')).toMatchObject({
+      enabled: false,
+      reason: 'loopback-origin-required',
+    });
+    expect(resolveEvmRuntimeSettings(baseEnvironment, 'http://127.0.0.1:4173')).toMatchObject({
       enabled: false,
       reason: 'loopback-origin-required',
     });
@@ -50,17 +54,17 @@ describe('resolveEvmRuntimeSettings', () => {
     expect(
       resolveEvmRuntimeSettings(
         { ...baseEnvironment, VITE_SEPOLIA_RPC_URL: 'http://localhost:8545' },
-        'http://127.0.0.1:4173',
+        'https://127.0.0.1:4173',
       ),
     ).toMatchObject({ enabled: false, reason: 'sepolia-https-rpc-required' });
   });
 
   it('returns only the two testnet RPC mappings when ready', () => {
     const settings = expectReady(
-      resolveEvmRuntimeSettings(baseEnvironment, 'http://127.0.0.1:4173'),
+      resolveEvmRuntimeSettings(baseEnvironment, 'https://127.0.0.1:4173'),
     );
 
-    expect(settings.dapp.origin).toBe('http://127.0.0.1:4173');
+    expect(settings.dapp.origin).toBe('https://127.0.0.1:4173');
     expect(
       Object.keys(settings.rpcUrls)
         .map(Number)
@@ -79,19 +83,19 @@ describe('resolveEvmRuntimeSettings', () => {
     const termsNotAccepted = expectReady(
       resolveEvmRuntimeSettings(
         { ...baseEnvironment, VITE_WALLETCONNECT_TERMS_ACCEPTED: 'false' },
-        'http://127.0.0.1:4173',
+        'https://127.0.0.1:4173',
       ),
     );
     const missing = expectReady(
       resolveEvmRuntimeSettings(
         { ...baseEnvironment, VITE_WALLETCONNECT_PROJECT_ID: undefined },
-        'http://127.0.0.1:4173',
+        'https://127.0.0.1:4173',
       ),
     );
     const invalid = expectReady(
       resolveEvmRuntimeSettings(
         { ...baseEnvironment, VITE_WALLETCONNECT_PROJECT_ID: 'not-a-project-id' },
-        'http://127.0.0.1:4173',
+        'https://127.0.0.1:4173',
       ),
     );
 

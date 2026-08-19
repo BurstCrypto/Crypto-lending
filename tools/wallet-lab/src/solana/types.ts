@@ -1,8 +1,10 @@
 import type { Wallet, WalletAccount } from '@wallet-standard/base';
 
+import { WALLET_LAB_ORIGIN } from '../local-boundary';
+
 export const SOLANA_DEVNET_CHAIN = 'solana:devnet' as const;
 export const SOLANA_WALLET_LAB_DOMAIN = '127.0.0.1:4173' as const;
-export const SOLANA_WALLET_LAB_ORIGIN = 'http://127.0.0.1:4173' as const;
+export const SOLANA_WALLET_LAB_ORIGIN = WALLET_LAB_ORIGIN;
 
 export type SolanaOwnershipCapability = 'solana:signIn' | 'solana:signMessage' | null;
 

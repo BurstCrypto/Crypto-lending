@@ -1,3 +1,6 @@
+import { resolve } from 'node:path';
+
+import { resolveConfig } from 'vite';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -14,6 +17,29 @@ const SERVE_ENV = {
   isPreview: false,
 } as const;
 
+const CERTIFICATE_PATH = resolve(WALLET_LAB_ROOT, 'test-certificate.pem');
+const PRIVATE_KEY_PATH = resolve(WALLET_LAB_ROOT, 'test-private-key.pem');
+const CERTIFICATE_BYTES = Buffer.from('test-certificate');
+const PRIVATE_KEY_BYTES = Buffer.from('test-private-key');
+const SECURE_ENVIRONMENT = {
+  WALLET_LAB_ACCESS_PASSWORD: 'correct-horse-battery-staple-lab',
+  WALLET_LAB_ACCESS_USERNAME: 'wallet-lab-reviewer',
+  WALLET_LAB_HTTPS_CERT_PATH: CERTIFICATE_PATH,
+  WALLET_LAB_HTTPS_KEY_PATH: PRIVATE_KEY_PATH,
+} as const;
+const CONFIG_DEPENDENCIES = {
+  publicEnvironment: {},
+  secureEnvironment: SECURE_ENVIRONMENT,
+  secureAccess: {
+    readFile(path: string) {
+      if (path === CERTIFICATE_PATH) return CERTIFICATE_BYTES;
+      if (path === PRIVATE_KEY_PATH) return PRIVATE_KEY_BYTES;
+      throw new Error('unexpected test path');
+    },
+    validateTlsMaterial() {},
+  },
+} as const;
+
 describe('wallet lab Vite boundary', () => {
   it('allows only the two configured RPC origins while WalletConnect is gated off', () => {
     const sources = createConnectSources({
@@ -24,7 +50,7 @@ describe('wallet lab Vite boundary', () => {
 
     expect(sources).toEqual([
       "'self'",
-      'ws://127.0.0.1:4173',
+      'wss://127.0.0.1:4173',
       'https://sepolia.example.test',
       'https://base.example.test',
       'https://www.walletlink.org',
@@ -55,29 +81,76 @@ describe('wallet lab Vite boundary', () => {
   });
 
   it('pins the Vite root, filesystem, browser, and HMR boundaries', () => {
-    const config = createWalletLabViteConfig(SERVE_ENV);
+    const config = createWalletLabViteConfig(SERVE_ENV, CONFIG_DEPENDENCIES);
     expect(config.root).toBe(WALLET_LAB_ROOT);
     expect(config.envDir).toBe(WALLET_LAB_ROOT);
     expect(config.server.headers['Content-Security-Policy']).toContain("worker-src 'none'");
+    expect(config.server.headers['Cross-Origin-Opener-Policy']).toBe('same-origin');
+    expect(config.server.https).toMatchObject({
+      cert: CERTIFICATE_BYTES,
+      key: PRIVATE_KEY_BYTES,
+      minVersion: 'TLSv1.2',
+    });
+    expect(config.plugins.map((plugin) => plugin.name)).toEqual([
+      'wallet-lab-local-only-server-guard',
+      'wallet-lab-secure-access',
+    ]);
     expect(config.server).toMatchObject({
       host: '127.0.0.1',
       port: 4173,
       strictPort: true,
-      origin: 'http://127.0.0.1:4173',
+      origin: 'https://127.0.0.1:4173',
       allowedHosts: ['127.0.0.1'],
-      cors: { origin: 'http://127.0.0.1:4173' },
-      hmr: { host: '127.0.0.1', port: 4173, protocol: 'ws' },
+      cors: false,
+      ws: { host: '127.0.0.1', port: 4173, protocol: 'wss' },
       fs: { strict: true, allow: [WALLET_LAB_ROOT] },
     });
   });
 
+  it('resolves the Vite HMR transport to WSS on the authenticated HTTPS server', async () => {
+    const inlineConfig = createWalletLabViteConfig(SERVE_ENV, CONFIG_DEPENDENCIES);
+    const resolved = await resolveConfig({ ...inlineConfig, configFile: false }, 'serve', 'test');
+
+    expect(resolved.server.https).toBeTruthy();
+    expect(resolved.server.ws).toMatchObject({
+      host: '127.0.0.1',
+      port: 4173,
+      protocol: 'wss',
+    });
+  });
+
+  it('fails closed before server startup when secure access is not configured', () => {
+    expect(() =>
+      createWalletLabViteConfig(SERVE_ENV, {
+        publicEnvironment: {},
+        secureEnvironment: {},
+      }),
+    ).toThrow(/WALLET_LAB_HTTPS_CERT_PATH is required/u);
+  });
+
   it.each([
-    ['wildcard host', { host: '0.0.0.0', port: 4173, strictPort: true }],
-    ['wrong port', { host: '127.0.0.1', port: 5173, strictPort: true }],
-    ['non-strict port', { host: '127.0.0.1', port: 4173, strictPort: false }],
-  ])('rejects a resolved %s override', (_label, server) => {
+    ['wildcard host', { host: '0.0.0.0' }],
+    ['wrong port', { port: 5173 }],
+    ['non-strict port', { strictPort: false }],
+    ['HTTP origin', { origin: 'http://127.0.0.1:4173' }],
+    ['CORS enabled', { cors: true }],
+    ['wildcard allowed hosts', { allowedHosts: true }],
+    ['insecure HMR', { ws: { host: '127.0.0.1', port: 4173, protocol: 'ws' } }],
+  ])('rejects a resolved %s override', (_label, override) => {
+    const server = {
+      allowedHosts: ['127.0.0.1'],
+      cors: false,
+      host: '127.0.0.1',
+      https: { cert: CERTIFICATE_BYTES, key: PRIVATE_KEY_BYTES },
+      origin: 'https://127.0.0.1:4173',
+      port: 4173,
+      strictPort: true,
+      ws: { host: '127.0.0.1', port: 4173, protocol: 'wss' },
+      ...override,
+    };
+
     expect(() => assertWalletLabResolvedServer({ command: 'serve', server })).toThrow(
-      /must bind exactly/u,
+      /authenticated HTTPS exactly/u,
     );
   });
 });

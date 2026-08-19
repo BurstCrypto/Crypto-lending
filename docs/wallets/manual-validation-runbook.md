@@ -26,9 +26,11 @@ approved secured HTTPS preview and must not be reported as covered.
    never secured production funds.
 2. Never paste a seed phrase, private key, session topic, raw QR payload, access
    token, or unredacted signature into Jira, GitHub, screenshots, or logs.
-3. Keep the current dapp on `http://127.0.0.1:4173`. Do not bind to a LAN
-   interface, use a tunnel, or create a hosted preview. A later HTTPS preview
-   requires separate legal and security authorization.
+3. Keep the current dapp on authenticated `https://127.0.0.1:4173` with the
+   approved local certificate trust configured. Do not bypass a certificate
+   warning, bind to a LAN interface, use a tunnel, or create a hosted preview.
+   Any externally reachable HTTPS preview requires separate legal and security
+   authorization.
 4. Record wallet application/extension version, OS, browser, SDK lockfile
    version, network, UTC timestamp, and result for every run.
 5. Redact addresses unless a test-only address has been designated for public

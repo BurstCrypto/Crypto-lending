@@ -18,7 +18,7 @@ const baseEnvironment = {
 function settings(projectId: string | undefined): ReadyEvmRuntimeSettings {
   const result = resolveEvmRuntimeSettings(
     { ...baseEnvironment, VITE_WALLETCONNECT_PROJECT_ID: projectId },
-    'http://127.0.0.1:4173',
+    'https://127.0.0.1:4173',
   );
 
   if (!result.enabled) throw new Error(`Expected a ready runtime, got ${result.reason}`);
@@ -87,7 +87,7 @@ describe('createEvmConnectors', () => {
         ...baseEnvironment,
         VITE_WALLETCONNECT_TERMS_ACCEPTED: 'false',
       },
-      'http://127.0.0.1:4173',
+      'https://127.0.0.1:4173',
     );
     if (!result.enabled) throw new Error(`Expected a ready runtime, got ${result.reason}`);
     const connectors = await createEvmConnectors(result, factories);

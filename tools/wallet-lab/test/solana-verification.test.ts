@@ -55,7 +55,7 @@ function signInInput(address: string): DevnetSignInInput {
     domain: '127.0.0.1:4173',
     address,
     statement: 'Prove control of this devnet account.',
-    uri: 'http://127.0.0.1:4173/wallet-lab',
+    uri: 'https://127.0.0.1:4173/wallet-lab',
     version: '1',
     chainId: SOLANA_DEVNET_CHAIN,
     nonce: 'nonce12345678',
@@ -63,7 +63,7 @@ function signInInput(address: string): DevnetSignInInput {
     expirationTime: new Date(NOW + 5 * 60_000).toISOString(),
     notBefore: new Date(NOW - 1_000).toISOString(),
     requestId: 'request-solana-1',
-    resources: ['http://127.0.0.1:4173/wallet-lab/policy'],
+    resources: ['https://127.0.0.1:4173/wallet-lab/policy'],
   };
 }
 
@@ -115,7 +115,7 @@ describe('Solana ownership verification', () => {
       verifySolanaOwnership(
         {
           method: 'solana:signIn',
-          expectedOrigin: 'http://127.0.0.1:4173',
+          expectedOrigin: 'https://127.0.0.1:4173',
           input,
           result,
         },
@@ -136,7 +136,7 @@ describe('Solana ownership verification', () => {
     const result = await signInProof(input, keyPair, publicKey);
     const verify = (
       requestInput: DevnetSignInInput,
-      expectedOrigin = 'http://127.0.0.1:4173',
+      expectedOrigin = 'https://127.0.0.1:4173',
       now = NOW,
       proof = result,
     ) =>
@@ -154,7 +154,7 @@ describe('Solana ownership verification', () => {
       status: 'blocked',
       reason: 'message_mismatch',
     });
-    await expect(verify(input, 'http://127.0.0.1:4174')).resolves.toMatchObject({
+    await expect(verify(input, 'https://127.0.0.1:4174')).resolves.toMatchObject({
       status: 'blocked',
       reason: 'origin_mismatch',
     });
@@ -162,7 +162,7 @@ describe('Solana ownership verification', () => {
       verify({
         ...input,
         domain: 'localhost:4173',
-        uri: 'http://localhost:4173/wallet-lab',
+        uri: 'https://localhost:4173/wallet-lab',
       }),
     ).resolves.toMatchObject({ status: 'blocked', reason: 'origin_mismatch' });
     await expect(verify(input, undefined, NOW + 5 * 60_000)).resolves.toMatchObject({

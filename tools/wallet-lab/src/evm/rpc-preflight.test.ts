@@ -12,7 +12,7 @@ function settings(): ReadyEvmRuntimeSettings {
       VITE_SEPOLIA_RPC_URL: 'https://sepolia.example.test',
       VITE_BASE_SEPOLIA_RPC_URL: 'https://base.example.test',
     },
-    'http://127.0.0.1:4173',
+    'https://127.0.0.1:4173',
   );
   if (!result.enabled) throw new Error(`Expected ready settings: ${result.reason}`);
   return result;

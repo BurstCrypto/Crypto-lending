@@ -44,13 +44,16 @@ npm ci --prefix tools/wallet-lab
 Copy-Item tools/wallet-lab/.env.example tools/wallet-lab/.env.local
 ```
 
-Set `VITE_WALLET_LAB_ENABLED=true` in the ignored `.env.local`, then run:
+Complete the mandatory certificate, server-only credential, and local trust
+setup in [SECURE_ACCESS.md](SECURE_ACCESS.md). The real-package server fails
+closed until all four `WALLET_LAB_` values are valid. Then set
+`VITE_WALLET_LAB_ENABLED=true` in the ignored `.env.local` and run:
 
 ```powershell
 npm run dev:wallet-lab
 ```
 
-Open only `http://127.0.0.1:4173`. Do not pass a host override or place a proxy
+Open only `https://127.0.0.1:4173`. Do not pass a host override or place a proxy
 or tunnel in front of it.
 
 Before a frozen validation run, also set
@@ -121,6 +124,10 @@ shown by the desktop loopback page while the dapp stays on the desktop. Android
 can reach the host page through `adb reverse tcp:4173 tcp:4173`; an iOS Simulator
 may share host loopback when its environment supports that mapping. Record those
 as Android-mapped or simulator evidence, not as general mobile coverage.
+
+Mapped/simulator same-device testing must also trust the approved local CA in
+that isolated test environment. Never bypass a certificate warning or copy the
+server private key to a device.
 
 A physical iPhone cannot reach the host's loopback page. Physical-iOS Coinbase
 same-device handoff and Phantom Browse therefore cannot be tested under the

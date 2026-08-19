@@ -10,8 +10,8 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 4173 --strictPort",
     "lint": "eslint . --max-warnings=0",
-    "test": "vitest run",
-    "test:watch": "vitest",
+    "test": "vitest run --config vitest.config.ts",
+    "test:watch": "vitest --config vitest.config.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

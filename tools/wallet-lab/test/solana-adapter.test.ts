@@ -170,7 +170,7 @@ function signInInput(address: string): DevnetSignInInput {
     domain: '127.0.0.1:4173',
     address,
     statement: 'Prove control of this devnet account.',
-    uri: 'http://127.0.0.1:4173/wallet-lab',
+    uri: 'https://127.0.0.1:4173/wallet-lab',
     version: '1',
     chainId: SOLANA_DEVNET_CHAIN,
     nonce: 'nonce12345678',
@@ -430,7 +430,7 @@ describe('Phantom Solana Wallet Standard adapter', () => {
     const wrongOrigin = {
       ...signInInput(connection.address),
       domain: 'localhost:4173',
-      uri: 'http://localhost:4173/wallet-lab',
+      uri: 'https://localhost:4173/wallet-lab',
     };
 
     await expect(adapter.signIn(wrongOrigin)).rejects.toMatchObject({ code: 'invalid_request' });
