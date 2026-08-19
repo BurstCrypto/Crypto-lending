@@ -36,12 +36,20 @@ prove authority to bind an entity, replace counsel, determine a commercial tier,
 or authorize public use. Leaving it `false` then keeps WalletConnect inactive
 while the other connectors remain available.
 
-Two distinct hard-installed Reown packages use custom licenses:
+The direct/material review highlights two custom-licensed packages:
 
 - `@walletconnect/ethereum-provider@2.23.10` uses the WalletConnect Community
   License released 2025-08-20; and
 - its non-optional `@reown/appkit@1.8.19` dependency uses the Reown Community
   License released 2025-08-25.
+
+The lock-derived
+[`reconciliation/see-license-in-license-md.json`](reconciliation/see-license-in-license-md.json)
+expands that material view: 20 SPDX package records marked
+`SEE LICENSE IN LICENSE.md` resolve to 30 installed package directories and two
+distinct installed `LICENSE.md` hashes. This is a mechanical inventory, not a
+license classification or approval. Independent counsel/vendor disposition and
+full shipped-artifact reconciliation remain pending.
 
 The lab sets `showQrModal: false`, so it does not import/invoke the AppKit modal,
 but AppKit is still installed. That setting does not remove AppKit's acceptance,
@@ -75,6 +83,10 @@ extension, transport, operational, and vendor metadata may leave the machine.
   npm-generated SPDX 2.3 graph for the isolated lock: 475 packages and 1,243
   dependency relationships. Generation is complete; independent license and
   shipped-artifact reconciliation remains pending.
+- [`reconciliation/README.md`](reconciliation/README.md) describes the targeted
+  custom-license inventory. Its 20 selected SPDX records map to 30 installed
+  package directories and two exact license-file hashes; independent legal and
+  vendor disposition remains pending.
 - [`lock-review-snapshot.json`](lock-review-snapshot.json) binds the source
   commit, lock digest, SPDX digest, generator versions, package counts, and
   point-in-time audit result into one review handoff.
@@ -91,20 +103,21 @@ Recalculate and re-review after any package operation.
 
 ## Approval register
 
-| Decision                               | Status                                        | Evidence still required                                                                                                      |
-| -------------------------------------- | --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| Two-person loopback/testnet evaluation | **AUTHORIZED — RESTRICTED**                   | Continuous compliance with this packet                                                                                       |
-| Native `@metamask/connect-evm`         | **BLOCKED / NOT INSTALLED**                   | 2.1.1 forces Ethereum-mainnet permission and uses a custom license; any return needs a new technical/security/legal decision |
-| MetaMask injected EIP-6963             | **LOCAL EVALUATION ONLY**                     | Public extension/platform, branding, privacy, security, and product review                                                   |
-| WalletConnect/Reown local activation   | **CONDITIONALLY AUTHORIZED**                  | Literal terms flag, valid project ID, current terms, two-person/testnet/loopback boundary, expected $0 tier                  |
-| WalletConnect provider public use      | **PENDING**                                   | Written commercial classification, usage treatment, exact license/notices, branding/network terms, fees, and expiry          |
-| Hard-installed AppKit 1.8.19           | **LOCAL TERMS-GATED / PUBLIC PENDING**        | Separate exact Reown license/notice copy, branding/network terms, classification, and transitive review                      |
-| Coinbase 4.3.7 license                 | **OBSERVED / PUBLIC PENDING**                 | Exact tarball contains Apache-2.0; counsel still reviews notices, transitives, service behavior, and distribution            |
-| Coinbase telemetry/privacy             | **PENDING**                                   | No verified off control; network inventory and privacy/security approval required                                            |
-| Direct/material package inventory      | **RECORDED**                                  | Candidate JSON, direct/material SPDX, lock digest, third-party notice                                                        |
-| Complete lock-derived SBOM             | **GENERATED / RECONCILIATION PENDING**        | Independently reconcile all runtime/build transitives, license conclusions, and shipped artifacts                            |
-| Scoped Axios 1.18.0 override           | **CLEAN AUDIT SNAPSHOT / RE-REVIEW REQUIRED** | Revalidate every lock/config change and remove when upstream permits                                                         |
-| Public lending-product legal review    | **PENDING**                                   | Separate product-counsel disposition in the public-launch gate                                                               |
+| Decision                               | Status                                         | Evidence still required                                                                                                      |
+| -------------------------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| Two-person loopback/testnet evaluation | **AUTHORIZED — RESTRICTED**                    | Continuous compliance with this packet                                                                                       |
+| Native `@metamask/connect-evm`         | **BLOCKED / NOT INSTALLED**                    | 2.1.1 forces Ethereum-mainnet permission and uses a custom license; any return needs a new technical/security/legal decision |
+| MetaMask injected EIP-6963             | **LOCAL EVALUATION ONLY**                      | Public extension/platform, branding, privacy, security, and product review                                                   |
+| WalletConnect/Reown local activation   | **CONDITIONALLY AUTHORIZED**                   | Literal terms flag, valid project ID, current terms, two-person/testnet/loopback boundary, expected $0 tier                  |
+| WalletConnect provider public use      | **PENDING**                                    | Written commercial classification, usage treatment, exact license/notices, branding/network terms, fees, and expiry          |
+| Hard-installed AppKit 1.8.19           | **LOCAL TERMS-GATED / PUBLIC PENDING**         | Separate exact Reown license/notice copy, branding/network terms, classification, and transitive review                      |
+| Coinbase 4.3.7 license                 | **OBSERVED / PUBLIC PENDING**                  | Exact tarball contains Apache-2.0; counsel still reviews notices, transitives, service behavior, and distribution            |
+| Coinbase telemetry/privacy             | **PENDING**                                    | No verified off control; network inventory and privacy/security approval required                                            |
+| Direct/material package inventory      | **RECORDED**                                   | Candidate JSON, direct/material SPDX, lock digest, third-party notice                                                        |
+| Targeted custom-license inventory      | **MECHANICALLY RECONCILED / APPROVAL PENDING** | Independently classify both custom agreements, confirm vendor terms, and reconcile shipped artifacts                         |
+| Complete lock-derived SBOM             | **GENERATED / RECONCILIATION PENDING**         | Independently reconcile all runtime/build transitives, license conclusions, and shipped artifacts                            |
+| Scoped Axios 1.18.0 override           | **CLEAN AUDIT SNAPSHOT / RE-REVIEW REQUIRED**  | Revalidate every lock/config change and remove when upstream permits                                                         |
+| Public lending-product legal review    | **PENDING**                                    | Separate product-counsel disposition in the public-launch gate                                                               |
 
 ## Material findings
 

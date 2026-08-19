@@ -56,6 +56,10 @@ approval.
       not remove AppKit from the dependency tree or its obligations.
 - [x] A complete SPDX SBOM is generated from the isolated wallet-lab lock and
       bound to the lock/source digest in `lock-review-snapshot.json`.
+- [x] The 20 SPDX records marked `SEE LICENSE IN LICENSE.md` are mechanically
+      mapped to 30 exact installed package directories and two license-file
+      hashes in `reconciliation/see-license-in-license-md.json`. This inventory
+      is evidence for review, not a legal or vendor disposition.
 - [ ] Qualified counsel or an independent OSS reviewer reconciles that SBOM's
       licenses, notices, integrity data, and relationships against the exact
       shipped client and server artifacts. Generation alone is not approval.
