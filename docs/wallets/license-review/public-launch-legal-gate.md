@@ -54,9 +54,11 @@ approval.
       required copies/notices: WalletConnect Ethereum Provider 2.23.10 and its
       non-optional `@reown/appkit@1.8.19` dependency. `showQrModal: false` does
       not remove AppKit from the dependency tree or its obligations.
-- [ ] A complete SBOM is generated from the final lockfile and independently
-      reconciled against shipped client and server artifacts. The candidate SPDX
-      file in this packet is replaced or supplemented; it is not sufficient.
+- [x] A complete SPDX SBOM is generated from the isolated wallet-lab lock and
+      bound to the lock/source digest in `lock-review-snapshot.json`.
+- [ ] Qualified counsel or an independent OSS reviewer reconciles that SBOM's
+      licenses, notices, integrity data, and relationships against the exact
+      shipped client and server artifacts. Generation alone is not approval.
 - [ ] The scoped `axios@1.18.0` override is revalidated against the final tree and
       removed when upstream resolution permits. The current clean npm-audit
       snapshot is point-in-time evidence, not a zero-risk production disposition.

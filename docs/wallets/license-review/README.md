@@ -2,7 +2,7 @@
 
 Status: **TWO-PERSON LOCAL/TESTNET EVALUATION AUTHORIZED; PUBLIC USE BLOCKED**
 
-Snapshot date: 2026-08-18
+Snapshot date: 2026-08-19
 
 Coordinator: Trey
 Independent decision owner: qualified software/OSS licensing counsel
@@ -71,6 +71,13 @@ extension, transport, operational, and vendor metadata may leave the machine.
 - [`candidate.spdx.json`](candidate.spdx.json) is an SPDX 2.3 inventory of direct
   runtime packages plus material hard-installed AppKit. It is not a complete
   transitive SBOM despite its historical filename.
+- [`wallet-lab-lock.spdx.json`](wallet-lab-lock.spdx.json) is the complete
+  npm-generated SPDX 2.3 graph for the isolated lock: 475 packages and 1,243
+  dependency relationships. Generation is complete; independent license and
+  shipped-artifact reconciliation remains pending.
+- [`lock-review-snapshot.json`](lock-review-snapshot.json) binds the source
+  commit, lock digest, SPDX digest, generator versions, package counts, and
+  point-in-time audit result into one review handoff.
 - [`vendor-inquiries.md`](vendor-inquiries.md) contains Reown and Coinbase drafts;
   its MetaMask Connect request is archived because that package is excluded.
 - [`public-launch-legal-gate.md`](public-launch-legal-gate.md) blocks any public
@@ -95,7 +102,7 @@ Recalculate and re-review after any package operation.
 | Coinbase 4.3.7 license                 | **OBSERVED / PUBLIC PENDING**                 | Exact tarball contains Apache-2.0; counsel still reviews notices, transitives, service behavior, and distribution            |
 | Coinbase telemetry/privacy             | **PENDING**                                   | No verified off control; network inventory and privacy/security approval required                                            |
 | Direct/material package inventory      | **RECORDED**                                  | Candidate JSON, direct/material SPDX, lock digest, third-party notice                                                        |
-| Complete installed SBOM                | **PENDING**                                   | Independently reconcile all runtime/build transitives against shipped artifacts                                              |
+| Complete lock-derived SBOM             | **GENERATED / RECONCILIATION PENDING**        | Independently reconcile all runtime/build transitives, license conclusions, and shipped artifacts                            |
 | Scoped Axios 1.18.0 override           | **CLEAN AUDIT SNAPSHOT / RE-REVIEW REQUIRED** | Revalidate every lock/config change and remove when upstream permits                                                         |
 | Public lending-product legal review    | **PENDING**                                   | Separate product-counsel disposition in the public-launch gate                                                               |
 
@@ -135,7 +142,7 @@ build and treat metadata exposure as possible.
 ### Axios override and audit
 
 The lock scopes Axios to 1.18.0 for the optional AppKit Utils -> Base Account ->
-Coinbase CDP SDK path. On 2026-08-18,
+Coinbase CDP SDK path. On 2026-08-19,
 `npm audit --prefix tools/wallet-lab` reported zero known vulnerabilities for the
 exact lock. AppKit is hard-installed; the lab does not import AppKit/Base Account
 and sets `showQrModal: false`.
