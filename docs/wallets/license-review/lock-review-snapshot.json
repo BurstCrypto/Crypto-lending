@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "snapshot_date": "2026-08-19",
+  "source_commit": "871adad4a6671bc1ea58e91893977ead738734ae",
+  "scope": "tools/wallet-lab isolated package lock",
+  "generator": {
+    "node": "22.17.1",
+    "npm": "11.6.4",
+    "command": "npm --prefix tools/wallet-lab sbom --package-lock-only --sbom-format spdx"
+  },
+  "lockfile": {
+    "path": "tools/wallet-lab/package-lock.json",
+    "lockfile_version": 3,
+    "package_entries": 515,
+    "sha256": "D723EC5710968AE94663CD2AE3CB107F11349281E3DC6DA580246B2BD71473B9"
+  },
+  "spdx": {
+    "path": "docs/wallets/license-review/wallet-lab-lock.spdx.json",
+    "spdx_version": "SPDX-2.3",
+    "packages": 475,
+    "relationships": 1243,
+    "sha256": "01CE8055A2F2E60498B371A449A17063993A45273A7722A47C727862C932E17B"
+  },
+  "npm_audit": {
+    "command": "npm audit --prefix tools/wallet-lab --audit-level=high --json",
+    "observed_at": "2026-08-19",
+    "dependencies": 514,
+    "vulnerabilities": {
+      "info": 0,
+      "low": 0,
+      "moderate": 0,
+      "high": 0,
+      "critical": 0,
+      "total": 0
+    }
+  },
+  "disposition": {
+    "artifact_generation": "COMPLETE",
+    "independent_transitive_reconciliation": "PENDING",
+    "independent_legal_approval": "PENDING",
+    "public_use": "BLOCKED"
+  }
+}

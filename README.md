@@ -39,6 +39,104 @@ The default local endpoints are:
 - Swagger UI: `http://localhost:3001/api/v1/docs`
 - OpenAPI JSON: `http://localhost:3001/api/v1/docs-json`
 
+## Restricted wallet validation lab
+
+There are two deliberately separate wallet test surfaces:
+
+- KAN-224's disabled-by-default `/internal/wallet-lab` route in `apps/web` is a
+  mock-only boundary test. It does not load wallet packages or make wallet/RPC
+  calls.
+- `tools/wallet-lab` is the real-package compatibility harness. It is a private,
+  localhost-only Vite development application with its own package lock. It is
+  not an npm workspace, is not included by the root install/build, and cannot
+  produce a deployable build.
+
+The real harness is authorized only for a maximum of two project-authorized
+evaluators using dedicated test wallets on Ethereum Sepolia, Base Sepolia, and
+Solana devnet. It permits explicit connect, disconnect, testnet switching, and
+ownership-message signing. It does not expose a transaction action and is not
+approved for a public URL, external testers, mainnet, production accounts,
+customer data, or real assets.
+
+> **Pre-install acceptance warning:** The install command immediately below
+> downloads and installs `@walletconnect/ethereum-provider@2.23.10` and its hard
+> dependency `@reown/appkit@1.8.19`. Their locked licenses state that downloading
+> or installing constitutes acceptance of their terms. Anyone unable or
+> unauthorized to accept both exact licenses must not run the command or use the
+> real-package lab; use the mock route instead. The
+> `VITE_WALLETCONNECT_TERMS_ACCEPTED` flag gates runtime activation only and does
+> not prevent or undo install-time acceptance.
+
+Only after an authorized review and acceptance, run:
+
+```powershell
+npm ci --prefix tools/wallet-lab
+Copy-Item tools/wallet-lab/.env.example tools/wallet-lab/.env.local
+# In the ignored .env.local, set VITE_WALLET_LAB_ENABLED=true.
+npm run dev:wallet-lab
+```
+
+Open only `http://127.0.0.1:4173`. Do not override the host or expose it through
+a tunnel, LAN address, hosted preview, or proxy.
+
+MetaMask desktop is discovered through injected EIP-6963 providers. The native
+`@metamask/connect-evm` package is intentionally absent because the reviewed
+2.1.1 implementation adds Ethereum mainnet to its connection permission request,
+which violates this lab's testnet-only authorization. MetaMask Mobile may be
+tested only through the restricted WalletConnect path.
+
+After that authorized installation, WalletConnect remains unavailable unless
+`.env.local` contains both a valid
+32-character hexadecimal `VITE_WALLETCONNECT_PROJECT_ID` and the literal
+`VITE_WALLETCONNECT_TERMS_ACCEPTED=true`. The flag is an additional explicit
+runtime acknowledgement; it is not a substitute for the acceptance required
+before `npm ci` and is not public-launch legal approval. An already authorized
+installer may leave it `false` to keep WalletConnect inactive while testing the
+other connectors.
+
+The WalletConnect provider hard-installs `@reown/appkit@1.8.19` even though the
+lab disables and does not invoke its modal. The provider and AppKit have separate
+custom Reown licenses and notice/license-copy obligations; both remain
+public-launch gates.
+
+The Coinbase connector requests EOA-only mode. The selected SDK path does not
+provide a verified telemetry-off control, so every SDK, extension, transport, or
+vendor request must be treated as potentially observable. Do not use sensitive
+or production data. See
+[`tools/wallet-lab/README.md`](tools/wallet-lab/README.md) for the exact boundary,
+dependency override/audit status, and test procedure.
+
+To verify the isolated harness:
+
+```powershell
+npm run lint:wallet-lab
+npm run typecheck:wallet-lab
+npm run test:wallet-lab
+```
+
+The KAN-222 [license packet](docs/wallets/license-review/README.md) and
+[public-launch gate](docs/wallets/license-review/public-launch-legal-gate.md)
+remain open for every public, external-user, mainnet, or production use.
+
+### Mock route
+
+To run the mock route on loopback for an authorized internal test, set the
+following only in the ignored `apps/web/.env.local` file, then restart the web
+application:
+
+```text
+WALLET_LAB_ENABLED=true
+WALLET_LAB_ENVIRONMENT=local
+WALLET_LAB_BASIC_AUTH_USERNAME=<internal-reviewer>
+WALLET_LAB_BASIC_AUTH_PASSWORD=<at-least-16-random-characters>
+```
+
+The route fails closed when configuration is missing, requires Basic
+authentication, and sends no-store/no-index headers. The current authorization
+does not permit enabling its preview mode or exposing it publicly. Never enter or
+expose a seed phrase, private key, production wallet, pairing URI, session topic,
+provider object, raw signature, full address, or real funds.
+
 The liveness route reports whether the API process can serve requests. The
 readiness route verifies PostgreSQL connectivity and migration state, Redis,
 and both SQS queues; it returns 503 when a dependency is unavailable or the

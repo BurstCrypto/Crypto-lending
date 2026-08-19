@@ -1,0 +1,238 @@
+{
+  "schema_version": 2,
+  "snapshot_date": "2026-08-18",
+  "status": "installed-restricted-evaluation-public-not-approved",
+  "registry": "https://registry.npmjs.org/",
+  "scope": "Installed direct runtime dependencies of tools/wallet-lab, material hard-installed custom-licensed transitives, and deliberately excluded wallet candidates. The complete resolved tree is locked separately; this file is not a transitive SBOM.",
+  "isolated_lock": {
+    "package_json": "tools/wallet-lab/package.json",
+    "package_lock": "tools/wallet-lab/package-lock.json",
+    "lockfile_version": 3,
+    "package_entries_at_snapshot": 515,
+    "sha256": "D723EC5710968AE94663CD2AE3CB107F11349281E3DC6DA580246B2BD71473B9",
+    "npm_workspace": false,
+    "included_in_root_install_or_build": false,
+    "complete_transitive_license_sbom": false,
+    "digest_must_be_recomputed_after_package_operation": true
+  },
+  "restricted_evaluation_authorization": {
+    "authorized_by": "project owner explicit instruction",
+    "recorded_date": "2026-08-18",
+    "maximum_human_evaluators": 2,
+    "application_surface": "loopback-only",
+    "networks": ["Ethereum Sepolia", "Base Sepolia", "Solana devnet"],
+    "expected_vendor_tier": "$0",
+    "expected_vendor_tier_is_forecast_not_vendor_or_legal_approval": true,
+    "transactions_enabled": false,
+    "current_package_and_service_terms_only": true,
+    "prohibited_uses": [
+      "public-url",
+      "external-user",
+      "lan-or-tunnel",
+      "mainnet",
+      "production",
+      "paid-tier",
+      "customer-data",
+      "real-assets"
+    ],
+    "external_vendor_approval_for_public_use": "PENDING",
+    "independent_legal_approval_for_public_use": "PENDING"
+  },
+  "runtime_activation": {
+    "wallet_lab": {
+      "required_literal": "VITE_WALLET_LAB_ENABLED=true"
+    },
+    "walletconnect": {
+      "install_acceptance": "The exact locked WalletConnect provider and non-optional AppKit licenses state that download/install accepts their terms; an unable or unauthorized person must not run npm ci for this lab.",
+      "all_conditions_required": [
+        "VITE_WALLETCONNECT_TERMS_ACCEPTED=true",
+        "VITE_WALLETCONNECT_PROJECT_ID is exactly 32 hexadecimal characters"
+      ],
+      "terms_flag_meaning": "Additional restricted-local runtime-activation acknowledgement after an authorized install; it does not prevent or undo install-time acceptance and is not authority to bind an entity, legal advice, vendor classification, or public-use approval.",
+      "other_connectors_available_when_disabled": true
+    }
+  },
+  "security_snapshot": {
+    "command": "npm audit --prefix tools/wallet-lab",
+    "checked_at": "2026-08-18",
+    "vulnerability_records": {
+      "total": 0,
+      "moderate": 0,
+      "high": 0,
+      "critical": 0
+    },
+    "scoped_override_package": "axios",
+    "scoped_override_version": "1.18.0",
+    "installed_path": [
+      "@walletconnect/ethereum-provider@2.23.10",
+      "@reown/appkit@1.8.19",
+      "@reown/appkit-utils@1.8.19",
+      "optional @base-org/account@2.4.0",
+      "@coinbase/cdp-sdk@1.55.0",
+      "axios@1.18.0"
+    ],
+    "audit_result": "Zero known vulnerabilities for the exact lock at the snapshot.",
+    "current_reachability_assessment": "AppKit is hard-installed, but the lab does not import its modal or Base Account and uses showQrModal=false.",
+    "residual_risk": "A clean audit is point-in-time database evidence, not a claim of zero supply-chain/runtime risk or complete reachability.",
+    "required_action": "Re-run tests, audit, and license review after every override, lock, import, or connector-configuration change; remove the override when a reviewed upstream tree no longer needs it."
+  },
+  "direct_runtime_dependencies": [
+    {
+      "package": "@coinbase/wallet-sdk",
+      "version": "4.3.7",
+      "npm_integrity": "sha512-z6e5XDw6EF06RqkeyEa+qD0dZ2ZbLci99vx3zwDY//XO8X7166tqKJrR2XlQnzVmtcUuJtCd5fCvr9Cu6zzX7w==",
+      "declared_license": "Apache-2.0",
+      "exact_tarball_license_file_verified": true,
+      "installed": true,
+      "runtime_use": "EOA-only Coinbase connector",
+      "telemetry_control": "No verified telemetry-off control in the selected EOA path; network inventory and privacy/security review are required",
+      "public_approval": "PENDING"
+    },
+    {
+      "package": "@solana/wallet-standard-features",
+      "version": "1.4.0",
+      "npm_integrity": "sha512-f0tAdqwM2aL6CiFbIgt9h5zKFp+mgY/iNGwoxPMTj9VSTeQj7d1GGSmWhZw0XWoZ4N/1tnKTKmYFq+Dyq08jRw==",
+      "declared_license": "Apache-2.0",
+      "installed": true,
+      "runtime_use": "Solana Wallet Standard feature identifiers",
+      "public_approval": "PENDING"
+    },
+    {
+      "package": "@tanstack/react-query",
+      "version": "5.101.4",
+      "npm_integrity": "sha512-yRg2pfOCxIs4ZJW3XYYHU/WgtD04FHSnfHlpRT7h7pR77hwkdRG4wxbKe4aq6P0RvXUTBSQpQeadS1SUYUe+KA==",
+      "declared_license": "MIT",
+      "installed": true,
+      "runtime_use": "Wagmi React query state",
+      "public_approval": "PENDING"
+    },
+    {
+      "package": "@wagmi/connectors",
+      "version": "8.1.0",
+      "npm_integrity": "sha512-ASlHXq9NC4pp617lalZdlPuPnZUhFeWNEKQfm3ngVSQKd4S2is5XXG4v3EOAhcxdLjSk1AMfGXlHgk5tX2WCZg==",
+      "declared_license": "MIT",
+      "installed": true,
+      "runtime_use": "Injected, Coinbase, and WalletConnect connector factories",
+      "public_approval": "PENDING"
+    },
+    {
+      "package": "@wallet-standard/app",
+      "version": "1.1.1",
+      "npm_integrity": "sha512-WDGwoByhP5gwHH01r5EaLgQdLVkACPCdOMQhmhn8rsm10h/siSgTorShzBxrn0ExSPof+Lu+C3TfgqBrPa1xoQ==",
+      "declared_license": "Apache-2.0",
+      "installed": true,
+      "runtime_use": "Wallet Standard discovery",
+      "public_approval": "PENDING"
+    },
+    {
+      "package": "@wallet-standard/base",
+      "version": "1.1.1",
+      "npm_integrity": "sha512-gggIHTtxicF9XFMQ12DkfS6NAG92Ak795JeSA7f2whAQ6Y3AkMWWuCMxSZXG2NIPN42kEaZSNVjqMsJRaJRxMQ==",
+      "declared_license": "Apache-2.0",
+      "installed": true,
+      "runtime_use": "Wallet Standard base types",
+      "public_approval": "PENDING"
+    },
+    {
+      "package": "@wallet-standard/features",
+      "version": "1.1.1",
+      "npm_integrity": "sha512-aCWYmVeSCGViyEU5k7GMoW8zxE4Gs+C1s1Pp2XLesvSNlnZ4PMES9HUnTB3hl0b3RVj7C61yze3IWyrncqg4MA==",
+      "declared_license": "Apache-2.0",
+      "installed": true,
+      "runtime_use": "Wallet Standard connect, disconnect, events, and sign-message feature types",
+      "public_approval": "PENDING"
+    },
+    {
+      "package": "@walletconnect/ethereum-provider",
+      "version": "2.23.10",
+      "npm_integrity": "sha512-OpmTS2s+zrqK7cr8yfGu62tCv6Dsoe/TI1SFYQd2tKyAaBYjrKVzZPfqbRYesgbtNKcCn8KK5Y6PrKIK52U7RQ==",
+      "declared_license": "LicenseRef-WalletConnect-Community-2025-08-20",
+      "license_url": "https://github.com/WalletConnect/walletconnect-monorepo/blob/2d064b82a9e0b3f52b4e5cd778663b129440fade/providers/ethereum-provider/LICENSE.md",
+      "installed": true,
+      "runtime_use": "Terms-gated, scope-restricted WalletConnect QR/mobile transport",
+      "optional_methods": ["personal_sign", "wallet_switchEthereumChain"],
+      "optional_events": ["accountsChanged", "chainChanged"],
+      "runtime_activation": "Requires literal terms acknowledgement and valid project ID",
+      "public_approval": "PENDING-INDEPENDENT-COUNSEL-AND-VENDOR-CLASSIFICATION"
+    },
+    {
+      "package": "qrcode.react",
+      "version": "4.2.0",
+      "npm_integrity": "sha512-QpgqWi8rD9DsS9EP3z7BT+5lY5SFhsqGjpgW5DY/i3mK4M9DTBNz3ErMi8BWYEfI3L0d8GIbGmcdFAS1uIRGjA==",
+      "declared_license": "ISC",
+      "installed": true,
+      "runtime_use": "Application-owned WalletConnect QR rendering",
+      "public_approval": "PENDING"
+    },
+    {
+      "package": "react",
+      "version": "19.2.8",
+      "npm_integrity": "sha512-PWaYA1L/q9u2u7xYQi+Y3L3Yfnie7XyLeaJICV1MGD6LprsBxcAqGjYyr0eY3p+QdsA+x/Irkt4Qif8D63+Sbw==",
+      "declared_license": "MIT",
+      "installed": true,
+      "runtime_use": "Lab UI",
+      "public_approval": "PENDING"
+    },
+    {
+      "package": "react-dom",
+      "version": "19.2.8",
+      "npm_integrity": "sha512-rVprimfGBG3DR+Tq0IQG2DT5PxKth1WIGDmj5yPmlzr4YBe7uyE+Du4oVqTDXZSHGGGXRtTJEGSSePyQCMBglQ==",
+      "declared_license": "MIT",
+      "installed": true,
+      "runtime_use": "Lab UI rendering",
+      "public_approval": "PENDING"
+    },
+    {
+      "package": "viem",
+      "version": "2.55.18",
+      "npm_integrity": "sha512-7XJtcMueFo4dQz+VK5mhY3GV9lvQkyrMbM/P/IghE0d8oZ/xbhgMXdTpc+ra4ZtDOGsLKu+0/EOD7BetVmVBsw==",
+      "declared_license": "MIT",
+      "installed": true,
+      "runtime_use": "EVM chain/RPC/signature verification",
+      "public_approval": "PENDING"
+    },
+    {
+      "package": "wagmi",
+      "version": "3.7.6",
+      "npm_integrity": "sha512-Zm/ppGHV6GYX9by3ERs1KVcNqpMZ4Vdno48Avdz9U+3QCjC5iFatOwruA9IMOl8poL7n/pJGQOcR1xj8N5c69w==",
+      "declared_license": "MIT",
+      "installed": true,
+      "runtime_use": "EVM connection state and connector boundary",
+      "public_approval": "PENDING"
+    }
+  ],
+  "material_hard_installed_transitives": [
+    {
+      "package": "@reown/appkit",
+      "version": "1.8.19",
+      "npm_integrity": "sha512-wB+xatkRbOy0AY1cZxxtcKzzPk3l3CTFulDbaISLVmZI6ZnQrOFuLnYc285zGsC6DB4d6bmwYUh89zcMLa4PvQ==",
+      "declared_license": "LicenseRef-Reown-Community-2025-08-25",
+      "installed": true,
+      "relationship": "Non-optional dependency of @walletconnect/ethereum-provider@2.23.10",
+      "runtime_use": "Modal is not imported or invoked because showQrModal=false, but the package and its custom-license terms/notices remain installed and applicable",
+      "public_approval": "PENDING-INDEPENDENT-COUNSEL-AND-VENDOR-CLASSIFICATION"
+    }
+  ],
+  "excluded_candidates": [
+    {
+      "package": "@metamask/connect-evm",
+      "reviewed_version": "2.1.1",
+      "installed": false,
+      "resolved_lock_node": false,
+      "optional_peer_metadata_reference_in_lock": true,
+      "declared_license": "LicenseRef-MetaMask-Connect",
+      "reason": "Reviewed connection implementation appends Ethereum mainnet 0x1 to permission chain IDs, violating testnet-only authorization; custom license also remains unapproved.",
+      "replacement": "Injected EIP-6963 for MetaMask extension; separately gated restricted WalletConnect for MetaMask Mobile"
+    },
+    {
+      "packages": [
+        "@solana/kit",
+        "@solana/react",
+        "@solana/kit-plugin-wallet",
+        "@solana/kit-plugin-rpc"
+      ],
+      "installed": false,
+      "reason": "The restricted harness uses the smaller Wallet Standard packages directly; these heavier candidates were not selected."
+    }
+  ]
+}

@@ -3,6 +3,7 @@
 .jira.env
 .env.*
 !.env.example
+tools/wallet-lab/.certs/
 
 # JavaScript / TypeScript
 node_modules/

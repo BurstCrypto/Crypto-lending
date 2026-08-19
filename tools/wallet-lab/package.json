@@ -1,0 +1,50 @@
+{
+  "name": "@crypto-lending/wallet-lab",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Localhost-only testnet wallet compatibility harness",
+  "type": "module",
+  "engines": {
+    "node": "^22.13.0 || >=24.0.0"
+  },
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 4173 --strictPort",
+    "lint": "eslint . --max-warnings=0",
+    "test": "vitest run --config vitest.config.ts",
+    "test:watch": "vitest --config vitest.config.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@coinbase/wallet-sdk": "4.3.7",
+    "@solana/wallet-standard-features": "1.4.0",
+    "@tanstack/react-query": "5.101.4",
+    "@wagmi/connectors": "8.1.0",
+    "@wallet-standard/app": "1.1.1",
+    "@wallet-standard/base": "1.1.1",
+    "@wallet-standard/features": "1.1.1",
+    "@walletconnect/ethereum-provider": "2.23.10",
+    "qrcode.react": "4.2.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "viem": "2.55.18",
+    "wagmi": "3.7.6"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@testing-library/dom": "10.4.1",
+    "@testing-library/jest-dom": "7.0.1",
+    "@testing-library/react": "16.3.2",
+    "@types/node": "22.20.1",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.4",
+    "eslint": "10.0.0",
+    "jsdom": "26.1.0",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.67.0",
+    "vite": "8.2.1",
+    "vitest": "4.1.11"
+  },
+  "overrides": {
+    "axios": "1.18.0"
+  }
+}

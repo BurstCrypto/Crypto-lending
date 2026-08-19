@@ -1,0 +1,272 @@
+{
+  "spdxVersion": "SPDX-2.3",
+  "dataLicense": "CC0-1.0",
+  "SPDXID": "SPDXRef-DOCUMENT",
+  "name": "Crypto Lending restricted wallet lab direct and material-license lock snapshot",
+  "documentNamespace": "https://spdx.org/spdxdocs/crypto-lending-wallet-lab-direct-2026-08-18-4adf5054-2657-4c74-a320-a4fb0b4d9e5e",
+  "creationInfo": {
+    "created": "2026-08-18T00:00:00Z",
+    "creators": ["Tool: manual lockfile reconciliation", "Organization: Crypto Lending"],
+    "licenseListVersion": "3.26"
+  },
+  "documentComment": "INSTALLED DIRECT-RUNTIME PLUS MATERIAL CUSTOM-LICENSE INVENTORY ONLY. Despite the historical candidate.spdx.json filename, this describes direct runtime packages and hard-installed @reown/appkit@1.8.19 from tools/wallet-lab/package-lock.json at the snapshot. It omits development dependencies and the rest of the resolved transitive closure, so it is not a complete build or distribution SBOM. Lock SHA-256: D723EC5710968AE94663CD2AE3CB107F11349281E3DC6DA580246B2BD71473B9. The lab is authorized only for a maximum two-person, loopback-only, approved-testnet evaluation under current terms. Public, external-user, mainnet, production, paid-tier, and customer-data use remain prohibited. WalletConnect runtime activation additionally requires a literal terms acknowledgement and valid project ID. The excluded @metamask/connect-evm candidate is not described because it is not installed.",
+  "documentDescribes": [
+    "SPDXRef-Package-coinbase-wallet-sdk",
+    "SPDXRef-Package-solana-wallet-standard-features",
+    "SPDXRef-Package-tanstack-react-query",
+    "SPDXRef-Package-wagmi-connectors",
+    "SPDXRef-Package-wallet-standard-app",
+    "SPDXRef-Package-wallet-standard-base",
+    "SPDXRef-Package-wallet-standard-features",
+    "SPDXRef-Package-walletconnect-ethereum-provider",
+    "SPDXRef-Package-reown-appkit",
+    "SPDXRef-Package-qrcode-react",
+    "SPDXRef-Package-react",
+    "SPDXRef-Package-react-dom",
+    "SPDXRef-Package-viem",
+    "SPDXRef-Package-wagmi"
+  ],
+  "packages": [
+    {
+      "name": "@coinbase/wallet-sdk",
+      "SPDXID": "SPDXRef-Package-coinbase-wallet-sdk",
+      "versionInfo": "4.3.7",
+      "downloadLocation": "https://registry.npmjs.org/@coinbase/wallet-sdk/-/wallet-sdk-4.3.7.tgz",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "Apache-2.0",
+      "copyrightText": "NOASSERTION",
+      "comment": "Exact locked tarball integrity sha512-z6e5XDw6EF06RqkeyEa+qD0dZ2ZbLci99vx3zwDY//XO8X7166tqKJrR2XlQnzVmtcUuJtCd5fCvr9Cu6zzX7w==; installed tarball contains an Apache-2.0 LICENSE file.",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:npm/%40coinbase/wallet-sdk@4.3.7"
+        }
+      ]
+    },
+    {
+      "name": "@solana/wallet-standard-features",
+      "SPDXID": "SPDXRef-Package-solana-wallet-standard-features",
+      "versionInfo": "1.4.0",
+      "downloadLocation": "https://registry.npmjs.org/@solana/wallet-standard-features/-/wallet-standard-features-1.4.0.tgz",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "Apache-2.0",
+      "copyrightText": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:npm/%40solana/wallet-standard-features@1.4.0"
+        }
+      ]
+    },
+    {
+      "name": "@tanstack/react-query",
+      "SPDXID": "SPDXRef-Package-tanstack-react-query",
+      "versionInfo": "5.101.4",
+      "downloadLocation": "https://registry.npmjs.org/@tanstack/react-query/-/react-query-5.101.4.tgz",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "copyrightText": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:npm/%40tanstack/react-query@5.101.4"
+        }
+      ]
+    },
+    {
+      "name": "@wagmi/connectors",
+      "SPDXID": "SPDXRef-Package-wagmi-connectors",
+      "versionInfo": "8.1.0",
+      "downloadLocation": "https://registry.npmjs.org/@wagmi/connectors/-/connectors-8.1.0.tgz",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "copyrightText": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:npm/%40wagmi/connectors@8.1.0"
+        }
+      ]
+    },
+    {
+      "name": "@wallet-standard/app",
+      "SPDXID": "SPDXRef-Package-wallet-standard-app",
+      "versionInfo": "1.1.1",
+      "downloadLocation": "https://registry.npmjs.org/@wallet-standard/app/-/app-1.1.1.tgz",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "Apache-2.0",
+      "copyrightText": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:npm/%40wallet-standard/app@1.1.1"
+        }
+      ]
+    },
+    {
+      "name": "@wallet-standard/base",
+      "SPDXID": "SPDXRef-Package-wallet-standard-base",
+      "versionInfo": "1.1.1",
+      "downloadLocation": "https://registry.npmjs.org/@wallet-standard/base/-/base-1.1.1.tgz",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "Apache-2.0",
+      "copyrightText": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:npm/%40wallet-standard/base@1.1.1"
+        }
+      ]
+    },
+    {
+      "name": "@wallet-standard/features",
+      "SPDXID": "SPDXRef-Package-wallet-standard-features",
+      "versionInfo": "1.1.1",
+      "downloadLocation": "https://registry.npmjs.org/@wallet-standard/features/-/features-1.1.1.tgz",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "Apache-2.0",
+      "copyrightText": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:npm/%40wallet-standard/features@1.1.1"
+        }
+      ]
+    },
+    {
+      "name": "@walletconnect/ethereum-provider",
+      "SPDXID": "SPDXRef-Package-walletconnect-ethereum-provider",
+      "versionInfo": "2.23.10",
+      "downloadLocation": "https://registry.npmjs.org/@walletconnect/ethereum-provider/-/ethereum-provider-2.23.10.tgz",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "copyrightText": "NOASSERTION",
+      "comment": "Declares SEE LICENSE IN LICENSE.md. Exact locked package uses the WalletConnect Community License Agreement released 2025-08-20; counsel and Reown public-use classification remain pending. Runtime activation requires explicit current-terms acknowledgement and a valid project ID.",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:npm/%40walletconnect/ethereum-provider@2.23.10"
+        }
+      ]
+    },
+    {
+      "name": "@reown/appkit",
+      "SPDXID": "SPDXRef-Package-reown-appkit",
+      "versionInfo": "1.8.19",
+      "downloadLocation": "https://registry.npmjs.org/@reown/appkit/-/appkit-1.8.19.tgz",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "copyrightText": "NOASSERTION",
+      "comment": "Hard-installed non-optional dependency of @walletconnect/ethereum-provider@2.23.10. Declares SEE LICENSE IN LICENSE.md and uses the Reown Community License Agreement released 2025-08-25. showQrModal=false prevents modal use but does not remove the installed package or its terms and notice/license-copy obligations. Exact integrity sha512-wB+xatkRbOy0AY1cZxxtcKzzPk3l3CTFulDbaISLVmZI6ZnQrOFuLnYc285zGsC6DB4d6bmwYUh89zcMLa4PvQ==.",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:npm/%40reown/appkit@1.8.19"
+        }
+      ]
+    },
+    {
+      "name": "qrcode.react",
+      "SPDXID": "SPDXRef-Package-qrcode-react",
+      "versionInfo": "4.2.0",
+      "downloadLocation": "https://registry.npmjs.org/qrcode.react/-/qrcode.react-4.2.0.tgz",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "ISC",
+      "copyrightText": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:npm/qrcode.react@4.2.0"
+        }
+      ]
+    },
+    {
+      "name": "react",
+      "SPDXID": "SPDXRef-Package-react",
+      "versionInfo": "19.2.8",
+      "downloadLocation": "https://registry.npmjs.org/react/-/react-19.2.8.tgz",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "copyrightText": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:npm/react@19.2.8"
+        }
+      ]
+    },
+    {
+      "name": "react-dom",
+      "SPDXID": "SPDXRef-Package-react-dom",
+      "versionInfo": "19.2.8",
+      "downloadLocation": "https://registry.npmjs.org/react-dom/-/react-dom-19.2.8.tgz",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "copyrightText": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:npm/react-dom@19.2.8"
+        }
+      ]
+    },
+    {
+      "name": "viem",
+      "SPDXID": "SPDXRef-Package-viem",
+      "versionInfo": "2.55.18",
+      "downloadLocation": "https://registry.npmjs.org/viem/-/viem-2.55.18.tgz",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "copyrightText": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:npm/viem@2.55.18"
+        }
+      ]
+    },
+    {
+      "name": "wagmi",
+      "SPDXID": "SPDXRef-Package-wagmi",
+      "versionInfo": "3.7.6",
+      "downloadLocation": "https://registry.npmjs.org/wagmi/-/wagmi-3.7.6.tgz",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "copyrightText": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:npm/wagmi@3.7.6"
+        }
+      ]
+    }
+  ]
+}
