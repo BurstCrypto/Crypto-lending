@@ -42,8 +42,10 @@ variables are sent to the browser. Do not commit the populated environment
 file, certificate, private key, password, session cookie, or Basic
 `Authorization` value.
 
-Set `VITE_WALLET_LAB_ENABLED=true` only for an authorized run. The remaining
-public testnet and WalletConnect settings retain their separate gates.
+Set `VITE_WALLET_LAB_ENABLED=true` only for an authorized run, and set
+`VITE_WALLET_LAB_CANDIDATE_COMMIT` to the exact 40-character commit under test.
+The bootstrap remains closed without both values. The remaining public testnet
+and WalletConnect settings retain their separate gates.
 
 ## Start and authenticate
 

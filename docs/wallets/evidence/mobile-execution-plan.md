@@ -48,7 +48,7 @@ KAN-226 names M1, M2, and M3 without defining them. For this runbook they mean:
 
 Add one row only after a real-device artifact exists.
 
-| Case    | Group/environment | Device/OS | Wallet/version | Result  | UTC | v2 evidence | Defect/exception | Tester |
+| Case    | Group/environment | Device/OS | Wallet/version | Result  | UTC | v3 evidence | Defect/exception | Tester |
 | ------- | ----------------- | --------- | -------------- | ------- | --- | ----------- | ---------------- | ------ |
 | Pending | Pending           | Pending   | Pending        | Not run | —   | —           | —                | —      |
 

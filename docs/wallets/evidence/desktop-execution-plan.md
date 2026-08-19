@@ -29,16 +29,23 @@ is not execution evidence; re-record exact versions when each case runs.
 
 | Group                       | Required cases                                      | Exit                                                                                        |
 | --------------------------- | --------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| Common connection lifecycle | C01-C17 where applicable                            | Each case has one v2 result per target/environment                                          |
+| Common connection lifecycle | C01-C17 where applicable                            | Each case has one v3 result per target/environment                                          |
 | Concurrent independent EVM  | C18 and CB07                                        | Pass, or a focused owned defect/explicitly approved exception; deferral alone is not a Pass |
 | MetaMask extension          | MM01, MM04-MM06                                     | D1 result for discovery, account selection, permission removal, and errors                  |
 | Phantom extension           | PH01, PH03-PH07 where desktop-applicable            | D1 result; D2 absence recorded accurately                                                   |
 | Coinbase/Base extension     | CB01, CB05, CB06, CB08                              | D1 result plus sanitized network inventory                                                  |
 | WalletConnect clean browser | WC01, WC03-WC06, WC08-WC11 where desktop-applicable | D3 result; phone-scanned QR cases cross-link their M1 result                                |
 
+The candidate now implements one concurrent session per distinct approved EVM
+connector. C18 and CB07 must exercise MetaMask plus the explicit Coinbase
+connector in D1; a WalletConnect-plus-injected variant is additional coverage
+only after the separate WalletConnect clearance. Do not test or claim duplicate
+sessions for one connector, two WalletConnect sessions, or multiple selected
+accounts within one connector. No real concurrency result has been recorded.
+
 ## Reset between cases
 
-1. Export and inspect the current sanitized v2 run.
+1. Export and inspect the current sanitized v3 run.
 2. Disconnect/delete the test session in the wallet.
 3. Revoke the dapp's extension permission where the case requires a clean grant.
 4. Clear the dedicated profile's site/vendor storage when the case requires a
@@ -50,7 +57,7 @@ is not execution evidence; re-record exact versions when each case runs.
 
 Add one row only after a result artifact exists.
 
-| Case    | Environment | Wallet/version | Result  | UTC | v2 evidence | Defect/exception | Tester |
+| Case    | Environment | Wallet/version | Result  | UTC | v3 evidence | Defect/exception | Tester |
 | ------- | ----------- | -------------- | ------- | --- | ----------- | ---------------- | ------ |
 | Pending | Pending     | Pending        | Not run | —   | —           | —                | —      |
 

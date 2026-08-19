@@ -89,7 +89,17 @@ resolved versions and review release notes before upgrades.
 - Normalize restored Wagmi and vendor state through an application-owned
   persistence boundary. Multiple active EVM connections are supported by Wagmi's
   [`useConnections`](https://wagmi.sh/react/api/hooks/useConnections); lending
-  code must still reference the application's normalized connection ID.
+  code must still reference the application's normalized connection ID. The
+  UI treats provider registry rows as observations rather than authorization:
+  only a successful application-owned Connect or bulk Restore intent activates
+  a connector, and an authorization revision invalidates in-flight work when
+  account, chain, scope, lifecycle, or local authorization changes. The
+  restricted harness implements one active session per distinct approved
+  connector: MetaMask plus explicit Coinbase is the minimum pair, and a
+  separately cleared WalletConnect session can coexist with an injected
+  session. It intentionally excludes same-connector duplicate sessions, two
+  WalletConnect sessions, and multiple selected accounts within one connector.
+  Those narrower harness limits do not replace the product registry model.
 
 `window.ethereum` is a legacy fallback only when EIP-6963 discovery is
 unavailable. Provider access follows [EIP-1193](https://eips.ethereum.org/EIPS/eip-1193),
@@ -160,11 +170,14 @@ coercion nor unbounded vendor payloads are accepted as a wire format.
 
 ### Session lifecycle
 
-Adapters must make restoration explicit. UI state starts as `restoring`, not
-`disconnected`, until each SDK has completed its asynchronous restore attempt.
-The application responds to account, chain, session-update, session-expiry, and
-disconnect events by invalidating any address- or chain-bound authorization and
-requiring a fresh server challenge when appropriate.
+Adapters must make restoration explicit. The restricted harness starts
+disconnected and does not attempt restoration on mount. Its `restoring` state
+exists only after the operator clicks **Restore approved sessions**, which
+submits all approved connector candidates in one bulk operation while the live
+registry is empty. The application responds to account, chain, session-update,
+session-expiry, and disconnect events by invalidating any address- or
+chain-bound authorization and requiring a fresh server challenge when
+appropriate.
 
 Every adapter operation that signs or disconnects targets an explicit
 application connection ID. Approved chain/method/event scopes are part of the

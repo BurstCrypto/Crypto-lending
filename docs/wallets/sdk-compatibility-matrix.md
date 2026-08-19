@@ -250,6 +250,14 @@ runtime behavior remain **M** until the real-wallet matrix is signed.
 
 ## Cross-wallet release criteria
 
+The restricted harness implements one active session per distinct approved EVM
+connector. MetaMask plus the explicit Coinbase connector is the required
+minimum concurrency pair. A terms-cleared WalletConnect session may coexist
+with an injected session, but two WalletConnect sessions, same-connector
+duplicates, and multiple selected accounts within one connector are outside the
+implemented validation cardinality. Automated conformance coverage does not
+count as the pending C18/CB07 real-wallet result.
+
 - No provider is selected merely because it owns a global browser property.
 - Every connection is stored under a unique application connection ID and a
   chain-qualified account identity.

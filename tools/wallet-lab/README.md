@@ -56,9 +56,11 @@ npm run dev:wallet-lab
 Open only `https://127.0.0.1:4173`. Do not pass a host override or place a proxy
 or tunnel in front of it.
 
-Before a frozen validation run, also set
-`VITE_WALLET_LAB_CANDIDATE_COMMIT` to the exact 40-character commit being
-tested. The field is public run metadata, not a credential.
+Before a frozen validation run, set `VITE_WALLET_LAB_CANDIDATE_COMMIT` to the
+exact 40-character commit being tested. The bootstrap gate remains closed when
+it is missing or malformed, and same-tab evidence recovery is bound to that
+commit plus the reviewed lock hash. The field is public run metadata, not a
+credential.
 
 ## Connector behavior
 
@@ -88,9 +90,17 @@ tested. The field is public run metadata, not a credential.
   `@reown/appkit@1.8.19` is nevertheless a hard-installed provider dependency
   with its own custom license; disabling the modal does not remove that package
   or its terms.
-- The current harness validates one EVM connector session at a time. Simultaneous
-  independent MetaMask/Coinbase/WalletConnect sessions and their isolation
-  behavior remain deferred to a future adapter/conformance implementation.
+- The harness keeps one active session per distinct approved EVM connector. The
+  minimum concurrency case is MetaMask plus the explicit Coinbase connector;
+  after the separate terms and project-origin gate is cleared, WalletConnect can
+  remain active alongside either injected session. Account, chain, proof,
+  lifecycle, and disconnect handling stays scoped to the selected connector. A
+  connector becomes locally authorized only after the lab's explicit Connect or
+  Restore action succeeds; unsolicited provider rows are quarantined. This does
+  not support two WalletConnect sessions, duplicate sessions for the same
+  connector, or multiple selected accounts within one connector. Automated
+  conformance coverage exists, but C18/CB07 still require real-wallet evidence
+  before either case can be recorded as Passed.
 
 ### WalletConnect terms gate
 
@@ -145,14 +155,19 @@ npm run test:wallet-lab
 npm audit --prefix tools/wallet-lab
 ```
 
-Evidence schema v2 contains the case/run identity, frozen commit and lock hash,
-environment/software versions, result, terms state, audit snapshot, and ordered
-sanitized events. Those events persist only under one dedicated
-`sessionStorage` key for same-tab reload recovery; the UI's **Clear run** action
-removes it, and closing the browser session clears it. No address, signature,
-pairing URI/topic, provider payload, or wallet secret belongs in that storage
-or export. Inspect every export before attaching it to Jira or GitHub. Follow
-the [manual validation runbook](../../docs/wallets/manual-validation-runbook.md).
+Evidence run schema v3 contains the case/run identity, frozen commit and lock
+hash, environment/software versions, result, terms state, audit snapshot, a
+bounded connection/wallet/network roster, and ordered schema-v2 events bound to
+deterministic sanitized `conn_<connector>` IDs. Every event network must appear
+in its compatible connector roster row, and every wallet name and version must
+be entered explicitly. Those events persist only under one dedicated
+`sessionStorage` envelope bound to the candidate commit and reviewed lock hash;
+mismatched or unbound legacy values are discarded. The UI's **Clear run**
+action removes it, and closing the browser session clears it. No address,
+signature, pairing URI/topic, provider payload, or wallet secret belongs in
+that storage or export. Inspect every export before attaching it to Jira or
+GitHub. Follow the
+[manual validation runbook](../../docs/wallets/manual-validation-runbook.md).
 
 The lock applies a scoped `axios@1.18.0` override to the optional Base/CDP path
 under WalletConnect's hard-installed AppKit dependency:
