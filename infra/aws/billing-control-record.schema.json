@@ -1,0 +1,394 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://crypto-lending.invalid/schemas/billing-control-record.schema.json",
+  "title": "KAN-229 AWS billing control record",
+  "description": "Shape and local format constraints for an AWS billing-control approval record. Semantic validation and live AWS evidence remain separate gates.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "status",
+    "recordId",
+    "approvedAt",
+    "expiresAt",
+    "aws",
+    "environment",
+    "budget",
+    "authority",
+    "independentVerification",
+    "evidence"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "status": {
+      "$ref": "#/$defs/recordStatus"
+    },
+    "recordId": {
+      "$ref": "#/$defs/referenceOrSentinel"
+    },
+    "approvedAt": {
+      "$ref": "#/$defs/timestampOrSentinel"
+    },
+    "expiresAt": {
+      "$ref": "#/$defs/timestampOrSentinel"
+    },
+    "aws": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "accountId",
+        "accountAlias",
+        "approvedRoleArn",
+        "applicationRegion",
+        "controlRegion"
+      ],
+      "properties": {
+        "accountId": {
+          "anyOf": [{ "$ref": "#/$defs/sentinel" }, { "type": "string", "pattern": "^[0-9]{12}$" }]
+        },
+        "accountAlias": {
+          "anyOf": [
+            { "$ref": "#/$defs/sentinel" },
+            {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 63,
+              "pattern": "^[a-z0-9](?:[a-z0-9-]{1,61}[a-z0-9])?$"
+            }
+          ]
+        },
+        "approvedRoleArn": {
+          "anyOf": [
+            { "$ref": "#/$defs/sentinel" },
+            {
+              "type": "string",
+              "pattern": "^arn:(aws|aws-us-gov|aws-cn):iam::[0-9]{12}:role/[A-Za-z0-9+=,.@_/-]{1,512}$"
+            }
+          ]
+        },
+        "applicationRegion": {
+          "$ref": "#/$defs/regionOrSentinel"
+        },
+        "controlRegion": {
+          "$ref": "#/$defs/regionOrSentinel"
+        }
+      }
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "application", "owner", "financeOwner", "costCenter", "escalationRoute"],
+      "properties": {
+        "name": {
+          "anyOf": [
+            { "$ref": "#/$defs/sentinel" },
+            {
+              "type": "string",
+              "maxLength": 31,
+              "pattern": "^(dev|test|qa|sandbox|staging)(-[a-z0-9]+)*$"
+            }
+          ]
+        },
+        "application": {
+          "$ref": "#/$defs/tagValueOrSentinel"
+        },
+        "owner": {
+          "$ref": "#/$defs/roleAliasOrSentinel"
+        },
+        "financeOwner": {
+          "$ref": "#/$defs/roleAliasOrSentinel"
+        },
+        "costCenter": {
+          "$ref": "#/$defs/costCenterOrSentinel"
+        },
+        "escalationRoute": {
+          "$ref": "#/$defs/referenceOrSentinel"
+        }
+      }
+    },
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "currency",
+        "expectedMonthlyBaselineUsd",
+        "monthlyLimitUsd",
+        "warningPercent",
+        "criticalPercent",
+        "warningRecipient",
+        "criticalRecipient",
+        "exclusions",
+        "pricingAsOf",
+        "pricingExpiresAt",
+        "mechanism",
+        "anomalyMode",
+        "existingAnomalyMonitorArn",
+        "anomalyAbsoluteUsd",
+        "anomalyPercentage",
+        "feeDecision"
+      ],
+      "properties": {
+        "currency": {
+          "anyOf": [{ "$ref": "#/$defs/sentinel" }, { "const": "USD" }]
+        },
+        "expectedMonthlyBaselineUsd": {
+          "$ref": "#/$defs/moneyOrSentinel"
+        },
+        "monthlyLimitUsd": {
+          "$ref": "#/$defs/moneyOrSentinel"
+        },
+        "warningPercent": {
+          "$ref": "#/$defs/percentageOrSentinel"
+        },
+        "criticalPercent": {
+          "$ref": "#/$defs/percentageOrSentinel"
+        },
+        "warningRecipient": {
+          "$ref": "#/$defs/roleAliasOrSentinel"
+        },
+        "criticalRecipient": {
+          "$ref": "#/$defs/roleAliasOrSentinel"
+        },
+        "exclusions": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/exclusionOrSentinel"
+          }
+        },
+        "pricingAsOf": {
+          "$ref": "#/$defs/dateOrSentinel"
+        },
+        "pricingExpiresAt": {
+          "$ref": "#/$defs/dateOrSentinel"
+        },
+        "mechanism": {
+          "enum": [
+            "NOT_APPROVED",
+            "NOT_RUN",
+            "AWS_BUDGETS",
+            "AWS_BUDGETS_AND_COST_ANOMALY_DETECTION",
+            "EXTERNAL_CONTROL_WITH_REFERENCE"
+          ]
+        },
+        "anomalyMode": {
+          "enum": ["NOT_APPROVED", "NOT_RUN", "Disabled", "Create", "Existing"]
+        },
+        "existingAnomalyMonitorArn": {
+          "anyOf": [
+            { "$ref": "#/$defs/sentinel" },
+            { "const": "NOT_APPLICABLE" },
+            {
+              "type": "string",
+              "pattern": "^arn:aws:ce::[0-9]{12}:anomalymonitor/[A-Za-z0-9-]+$"
+            }
+          ]
+        },
+        "anomalyAbsoluteUsd": {
+          "$ref": "#/$defs/moneyOrSentinel"
+        },
+        "anomalyPercentage": {
+          "$ref": "#/$defs/anomalyPercentageOrSentinel"
+        },
+        "feeDecision": {
+          "enum": [
+            "NOT_APPROVED",
+            "NOT_RUN",
+            "NO_ADDITIONAL_CHARGE_CONFIRMED",
+            "FEE_APPROVED",
+            "REJECTED_DUE_TO_FEE"
+          ]
+        }
+      }
+    },
+    "authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["planApprovers", "deployApprovers", "retentionApprovers", "deletionApprovers"],
+      "properties": {
+        "planApprovers": {
+          "$ref": "#/$defs/approverList"
+        },
+        "deployApprovers": {
+          "$ref": "#/$defs/approverList"
+        },
+        "retentionApprovers": {
+          "$ref": "#/$defs/approverList"
+        },
+        "deletionApprovers": {
+          "$ref": "#/$defs/approverList"
+        }
+      }
+    },
+    "independentVerification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["verifier", "decision", "verifiedAt"],
+      "properties": {
+        "verifier": {
+          "$ref": "#/$defs/roleAliasOrSentinel"
+        },
+        "decision": {
+          "enum": ["NOT_APPROVED", "NOT_RUN", "APPROVED", "REJECTED", "EXPIRED"]
+        },
+        "verifiedAt": {
+          "$ref": "#/$defs/timestampOrSentinel"
+        }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "accountRegionRole",
+        "warningDelivery",
+        "criticalDelivery",
+        "anomalyDelivery",
+        "retainedResourceReview"
+      ],
+      "properties": {
+        "accountRegionRole": {
+          "$ref": "#/$defs/evidenceStatus"
+        },
+        "warningDelivery": {
+          "$ref": "#/$defs/evidenceStatus"
+        },
+        "criticalDelivery": {
+          "$ref": "#/$defs/evidenceStatus"
+        },
+        "anomalyDelivery": {
+          "$ref": "#/$defs/anomalyEvidenceStatus"
+        },
+        "retainedResourceReview": {
+          "$ref": "#/$defs/evidenceStatus"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "sentinel": {
+      "enum": ["NOT_APPROVED", "NOT_RUN"]
+    },
+    "recordStatus": {
+      "enum": ["NOT_APPROVED", "APPROVED", "REJECTED", "EXPIRED"]
+    },
+    "timestampOrSentinel": {
+      "anyOf": [{ "$ref": "#/$defs/sentinel" }, { "type": "string", "format": "date-time" }]
+    },
+    "dateOrSentinel": {
+      "anyOf": [{ "$ref": "#/$defs/sentinel" }, { "type": "string", "format": "date" }]
+    },
+    "regionOrSentinel": {
+      "anyOf": [
+        { "$ref": "#/$defs/sentinel" },
+        {
+          "type": "string",
+          "pattern": "^[a-z]{2}(?:-[a-z0-9]+)+-[0-9]+$"
+        }
+      ]
+    },
+    "tagValueOrSentinel": {
+      "anyOf": [
+        { "$ref": "#/$defs/sentinel" },
+        {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^(?!NOT_APPROVED$)(?!NOT_RUN$)[A-Za-z0-9._:/+=@-]+$"
+        }
+      ]
+    },
+    "roleAliasOrSentinel": {
+      "description": "A non-personal role or distribution-alias reference, never an email address.",
+      "anyOf": [
+        { "$ref": "#/$defs/sentinel" },
+        {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 64,
+          "pattern": "^(?!NOT_APPROVED$)(?!NOT_RUN$)[a-z][a-z0-9-]{1,62}[a-z0-9]$"
+        }
+      ]
+    },
+    "costCenterOrSentinel": {
+      "anyOf": [
+        { "$ref": "#/$defs/sentinel" },
+        {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 32,
+          "pattern": "^[A-Z][A-Z0-9-]{0,30}[A-Z0-9]$"
+        }
+      ]
+    },
+    "referenceOrSentinel": {
+      "anyOf": [
+        { "$ref": "#/$defs/sentinel" },
+        {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128,
+          "pattern": "^(?!NOT_APPROVED$)(?!NOT_RUN$)[A-Za-z0-9][A-Za-z0-9._:/-]*$"
+        }
+      ]
+    },
+    "moneyOrSentinel": {
+      "description": "A base-10 USD amount encoded as a string to avoid binary floating-point ambiguity.",
+      "anyOf": [
+        { "$ref": "#/$defs/sentinel" },
+        {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$"
+        }
+      ]
+    },
+    "percentageOrSentinel": {
+      "description": "A percentage encoded as a base-10 string. Cross-field ordering is enforced by the semantic validator.",
+      "anyOf": [
+        { "$ref": "#/$defs/sentinel" },
+        {
+          "type": "string",
+          "pattern": "^(100(?:\\.0{1,2})?|[1-9]?[0-9](?:\\.[0-9]{1,2})?)$"
+        }
+      ]
+    },
+    "anomalyPercentageOrSentinel": {
+      "description": "A whole percentage from 1 through 100000 encoded as a string.",
+      "anyOf": [
+        { "$ref": "#/$defs/sentinel" },
+        {
+          "type": "string",
+          "pattern": "^(?:[1-9][0-9]{0,4}|100000)$"
+        }
+      ]
+    },
+    "exclusionOrSentinel": {
+      "anyOf": [
+        { "$ref": "#/$defs/sentinel" },
+        {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 256,
+          "pattern": "^(?!NOT_APPROVED$)(?!NOT_RUN$)[^\\r\\n]+$"
+        }
+      ]
+    },
+    "approverList": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/roleAliasOrSentinel"
+      }
+    },
+    "evidenceStatus": {
+      "enum": ["NOT_RUN", "PASS", "FAIL", "BLOCKED"]
+    },
+    "anomalyEvidenceStatus": {
+      "enum": ["NOT_RUN", "NOT_APPLICABLE", "PASS", "FAIL", "BLOCKED"]
+    }
+  }
+}

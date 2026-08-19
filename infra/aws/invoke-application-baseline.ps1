@@ -6,8 +6,10 @@ Validates KAN-34 locally by default and guards every optional AWS-side action.
 LocalValidate is the default and performs filesystem-only policy validation.
 CloudValidate, Plan, and Deploy require an explicit named profile, account ID,
 Region, and AllowAwsApiCalls. Plan creates a named change set without executing
-it. Deploy verifies and executes that exact template-hash-bound change set only
-after an exact billable-resource acknowledgement.
+it. Plan and Deploy also require the independently approved KAN-229 billing
+control record and deployed guardrail stack. Deploy verifies and executes that
+exact template/parameter/tag/control-record-bound change set only after an exact
+billable-resource acknowledgement.
 
 .PARAMETER Action
 LocalValidate, CloudValidate, Plan, or Deploy. Defaults to LocalValidate.
@@ -18,6 +20,17 @@ names are rejected; application secrets must be generated in Secrets Manager.
 
 .PARAMETER AllowAwsApiCalls
 Explicit opt-in required before this script resolves credentials or calls AWS.
+
+.PARAMETER BillingControlRecordFile
+Git-ignored local JSON record whose identity, ownership, approval, expiry, and live
+notification evidence must pass final KAN-229 validation before Plan or Deploy.
+
+.PARAMETER GuardrailStackName
+Existing KAN-229 account-guardrail stack verified before an application change
+set is created or executed.
+
+.PARAMETER GuardrailControlRegion
+Approved Region containing the KAN-229 account-guardrail stack.
 
 .PARAMETER BillableAcknowledgement
 Exact case-sensitive text printed by a blocked Deploy attempt. Supplying it is
@@ -50,6 +63,12 @@ param(
 
     [string] $EnvironmentName,
 
+    [string] $BillingControlRecordFile,
+
+    [string] $GuardrailStackName,
+
+    [string] $GuardrailControlRegion,
+
     [string[]] $ParameterOverride = @(),
 
     [switch] $AllowAwsApiCalls,
@@ -65,6 +84,8 @@ if ([string]::IsNullOrWhiteSpace($TemplateFile)) {
 }
 
 $validatorPath = Join-Path $PSScriptRoot 'validate-application-baseline.mjs'
+$billingRecordValidatorPath = Join-Path $PSScriptRoot 'validate-billing-control-record.mjs'
+$accountGuardrailTemplatePath = Join-Path $PSScriptRoot 'account-guardrails.yaml'
 $resolvedTemplate = [System.IO.Path]::GetFullPath($TemplateFile)
 
 function Assert-RequiredValue {
@@ -104,8 +125,73 @@ function Invoke-AwsCommand {
     }
 }
 
+function ConvertTo-CanonicalTagText {
+    param(
+        [Parameter(Mandatory = $true)]
+        [System.Collections.IDictionary] $Tags
+    )
+
+    return ($Tags.GetEnumerator() | Sort-Object Key | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join "`n"
+}
+
+function ConvertFrom-ChangeSetTags {
+    param(
+        [AllowNull()]
+        [object[]] $Tags
+    )
+
+    $result = [ordered]@{}
+    foreach ($tag in @($Tags)) {
+        if ([string]::IsNullOrWhiteSpace([string] $tag.Key) -or $null -eq $tag.Value) {
+            throw 'The reviewed change set contains an incomplete stack tag.'
+        }
+        if ($result.Contains([string] $tag.Key)) {
+            throw "The reviewed change set contains duplicate stack tag '$($tag.Key)'."
+        }
+        $result[[string] $tag.Key] = [string] $tag.Value
+    }
+    return $result
+}
+
+function Get-StackOutputMap {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object] $Stack
+    )
+
+    $result = [ordered]@{}
+    foreach ($output in @($Stack.Outputs)) {
+        if (-not [string]::IsNullOrWhiteSpace([string] $output.OutputKey)) {
+            $result[[string] $output.OutputKey] = [string] $output.OutputValue
+        }
+    }
+    return $result
+}
+
+function Get-StackParameterMap {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object] $Stack
+    )
+
+    $result = [ordered]@{}
+    foreach ($parameter in @($Stack.Parameters)) {
+        if ([string]::IsNullOrWhiteSpace([string] $parameter.ParameterKey) -or $null -eq $parameter.ParameterValue) {
+            throw 'The guardrail stack contains an incomplete parameter.'
+        }
+        if ($result.Contains([string] $parameter.ParameterKey)) {
+            throw "The guardrail stack contains duplicate parameter '$($parameter.ParameterKey)'."
+        }
+        $result[[string] $parameter.ParameterKey] = [string] $parameter.ParameterValue
+    }
+    return $result
+}
+
 if (-not (Test-Path -LiteralPath $validatorPath -PathType Leaf)) {
     throw "Local policy validator was not found: $validatorPath"
+}
+if (-not (Test-Path -LiteralPath $billingRecordValidatorPath -PathType Leaf)) {
+    throw "Billing control record validator was not found: $billingRecordValidatorPath"
 }
 
 $nodeCommand = Get-Command node -ErrorAction SilentlyContinue
@@ -125,10 +211,6 @@ if ($Action -eq 'LocalValidate') {
     return
 }
 
-if (-not $AllowAwsApiCalls.IsPresent) {
-    throw "Action '$Action' is cloud-side. Re-run with -AllowAwsApiCalls after reviewing the selected account, profile, and region."
-}
-
 Assert-RequiredValue -Name 'Profile' -Value $Profile
 Assert-RequiredValue -Name 'AccountId' -Value $AccountId
 Assert-RequiredValue -Name 'Region' -Value $Region
@@ -141,6 +223,64 @@ if ($Region -notmatch '^[a-z]{2}(?:-gov)?-[a-z]+-\d$') {
 }
 if ($Profile -match '^default$') {
     throw "The implicit/default AWS profile is prohibited. Supply a named, non-default profile."
+}
+
+$controlRecord = $null
+$controlRecordSha256 = $null
+$controlConfigurationSha256 = $null
+$resolvedBillingControlRecord = $null
+$expectedGuardrailPolicyVersion = 'kan-229-v1'
+if ($Action -in @('Plan', 'Deploy')) {
+    Assert-RequiredValue -Name 'EnvironmentName' -Value $EnvironmentName
+    Assert-RequiredValue -Name 'BillingControlRecordFile' -Value $BillingControlRecordFile
+    Assert-RequiredValue -Name 'GuardrailStackName' -Value $GuardrailStackName
+    Assert-RequiredValue -Name 'GuardrailControlRegion' -Value $GuardrailControlRegion
+
+    if ($EnvironmentName.Length -gt 31 -or $EnvironmentName -notmatch '^(dev|test|qa|sandbox|staging)(-[a-z0-9]+)*$') {
+        throw 'EnvironmentName must be at most 31 characters and use the template non-production pattern: dev|test|qa|sandbox|staging with optional lowercase suffix segments.'
+    }
+    if ($GuardrailStackName -notmatch '^[A-Za-z][A-Za-z0-9-]{0,127}$') {
+        throw 'GuardrailStackName must be a valid explicit CloudFormation stack name.'
+    }
+    if ($GuardrailControlRegion -cne 'us-east-1') {
+        throw 'GuardrailControlRegion must be us-east-1 for the current KAN-229 account-control template.'
+    }
+    if (-not (Test-Path -LiteralPath $accountGuardrailTemplatePath -PathType Leaf)) {
+        throw "The reviewed KAN-229 account guardrail template was not found: $accountGuardrailTemplatePath"
+    }
+    $accountGuardrailTemplateSha256 = (Get-FileHash -LiteralPath $accountGuardrailTemplatePath -Algorithm SHA256).Hash.ToLowerInvariant()
+
+    $resolvedBillingControlRecord = [System.IO.Path]::GetFullPath($BillingControlRecordFile)
+    if (-not (Test-Path -LiteralPath $resolvedBillingControlRecord -PathType Leaf)) {
+        throw "BillingControlRecordFile was not found: $resolvedBillingControlRecord"
+    }
+    $recordValidationOutput = & $nodeCommand.Source @(
+        $billingRecordValidatorPath,
+        '--record', $resolvedBillingControlRecord,
+        '--mode', 'approved',
+        '--expected-account', $AccountId,
+        '--expected-application-region', $Region,
+        '--expected-control-region', $GuardrailControlRegion,
+        '--expected-environment', $EnvironmentName,
+        '--json'
+    )
+    if ($LASTEXITCODE -ne 0) {
+        throw 'The billing control record is not approved, current, identity-matched, and evidence-complete. No AWS calls were made.'
+    }
+    $recordValidation = ($recordValidationOutput | Out-String) | ConvertFrom-Json
+    if (-not $recordValidation.ok -or $recordValidation.awsCallsMade -ne 0) {
+        throw 'Billing control record validation did not produce a successful zero-AWS-call result.'
+    }
+    $controlRecordSha256 = [string] $recordValidation.canonicalSha256
+    $controlConfigurationSha256 = [string] $recordValidation.controlConfigurationSha256
+    if ($controlRecordSha256 -notmatch '^[a-f0-9]{64}$' -or $controlConfigurationSha256 -notmatch '^[a-f0-9]{64}$') {
+        throw 'Billing control record validation did not return valid canonical and configuration SHA-256 bindings.'
+    }
+    $controlRecord = (Get-Content -LiteralPath $resolvedBillingControlRecord -Raw) | ConvertFrom-Json
+}
+
+if (-not $AllowAwsApiCalls.IsPresent) {
+    throw "Action '$Action' is cloud-side. Re-run with -AllowAwsApiCalls after reviewing the selected account, profile, region, and billing controls."
 }
 
 $awsCommand = Get-Command aws -ErrorAction SilentlyContinue
@@ -162,16 +302,27 @@ $identityOutput = & $script:AwsExecutable @(
     'get-caller-identity',
     '--profile', $Profile,
     '--region', $Region,
-    '--query', 'Account',
-    '--output', 'text',
+    '--output', 'json',
     '--no-cli-pager'
 )
 if ($LASTEXITCODE -ne 0) {
     throw 'Unable to verify the explicitly named AWS profile.'
 }
-$actualAccountId = ($identityOutput | Out-String).Trim()
+$callerIdentity = ($identityOutput | Out-String) | ConvertFrom-Json
+$actualAccountId = [string] $callerIdentity.Account
 if ($actualAccountId -ne $AccountId) {
     throw "Named profile '$Profile' resolved to account '$actualAccountId', not the approved account '$AccountId'."
+}
+if ($Action -in @('Plan', 'Deploy')) {
+    $approvedRoleArn = [string] $controlRecord.aws.approvedRoleArn
+    $approvedRoleMatch = [regex]::Match($approvedRoleArn, '^arn:(?<partition>aws(?:-us-gov|-cn)?):iam::\d{12}:role/(?:.*/)?(?<roleName>[^/]+)$')
+    if (-not $approvedRoleMatch.Success) {
+        throw 'The validated billing control record contains an unusable approvedRoleArn.'
+    }
+    $expectedAssumedRolePrefix = "arn:$($approvedRoleMatch.Groups['partition'].Value):sts::$AccountId`:assumed-role/$($approvedRoleMatch.Groups['roleName'].Value)/"
+    if (-not ([string] $callerIdentity.Arn).StartsWith($expectedAssumedRolePrefix, [System.StringComparison]::Ordinal)) {
+        throw "Named profile '$Profile' did not assume the independently approved role '$approvedRoleArn'."
+    }
 }
 
 $templateUri = 'file://' + ($resolvedTemplate -replace '\\', '/')
@@ -188,6 +339,151 @@ if ($Action -eq 'CloudValidate') {
     return
 }
 
+# Application planning and execution are blocked until the independently
+# approved KAN-229 account guardrail stack is healthy and matches the reviewed
+# control record. This read occurs only after explicit cloud opt-in and STS
+# identity verification.
+$guardrailStackOutput = & $script:AwsExecutable @(
+    'cloudformation',
+    'describe-stacks',
+    '--stack-name', $GuardrailStackName,
+    '--profile', $Profile,
+    '--region', $GuardrailControlRegion,
+    '--output', 'json',
+    '--no-cli-pager'
+)
+if ($LASTEXITCODE -ne 0) {
+    throw "Unable to verify required KAN-229 guardrail stack '$GuardrailStackName'."
+}
+$guardrailStack = (($guardrailStackOutput | Out-String) | ConvertFrom-Json).Stacks | Select-Object -First 1
+if ($null -eq $guardrailStack) {
+    throw "Guardrail stack '$GuardrailStackName' was not returned."
+}
+if ($guardrailStack.StackStatus -notin @('CREATE_COMPLETE', 'UPDATE_COMPLETE')) {
+    throw "Guardrail stack '$GuardrailStackName' is not in an approved complete state (Status=$($guardrailStack.StackStatus))."
+}
+$expectedGuardrailStackTags = [ordered]@{
+    application = 'crypto-lending'
+    environment = $EnvironmentName
+    'control-scope' = 'account-billing'
+    owner = [string] $controlRecord.environment.owner
+    'finance-owner' = [string] $controlRecord.environment.financeOwner
+    'cost-center' = [string] $controlRecord.environment.costCenter
+    'managed-by' = 'cloudformation'
+    ticket = 'KAN-229'
+    'approval-record' = [string] $controlRecord.recordId
+    'control-configuration-sha256' = $controlConfigurationSha256
+}
+$actualGuardrailStackTags = ConvertFrom-ChangeSetTags -Tags $guardrailStack.Tags
+if ($actualGuardrailStackTags.Count -ne $expectedGuardrailStackTags.Count) {
+    throw "Guardrail stack '$GuardrailStackName' does not contain the exact approved KAN-229 tag set."
+}
+foreach ($expectedTag in $expectedGuardrailStackTags.GetEnumerator()) {
+    if (-not $actualGuardrailStackTags.Contains($expectedTag.Key) -or $actualGuardrailStackTags[$expectedTag.Key] -cne $expectedTag.Value) {
+        throw "Guardrail stack tag '$($expectedTag.Key)' does not match the final approved billing control record."
+    }
+}
+
+$guardrailTemplateOutput = & $script:AwsExecutable @(
+    'cloudformation',
+    'get-template',
+    '--stack-name', $GuardrailStackName,
+    '--template-stage', 'Original',
+    '--profile', $Profile,
+    '--region', $GuardrailControlRegion,
+    '--output', 'json',
+    '--no-cli-pager'
+)
+if ($LASTEXITCODE -ne 0) {
+    throw "Unable to retrieve the original template for guardrail stack '$GuardrailStackName'."
+}
+$guardrailTemplate = ($guardrailTemplateOutput | Out-String) | ConvertFrom-Json
+if ($null -eq $guardrailTemplate -or $guardrailTemplate.TemplateBody -isnot [string]) {
+    throw "CloudFormation did not return a string Original template body for guardrail stack '$GuardrailStackName'."
+}
+$deployedGuardrailTemplateSha256 = Get-TextSha256 -Value ([string] $guardrailTemplate.TemplateBody)
+if ($deployedGuardrailTemplateSha256 -cne $accountGuardrailTemplateSha256) {
+    throw "Guardrail stack '$GuardrailStackName' was not deployed from the reviewed local KAN-229 template."
+}
+$guardrailParameters = Get-StackParameterMap -Stack $guardrailStack
+$expectedGuardrailParameters = [ordered]@{
+    ApprovedAccountId = $AccountId
+    ApplicationRegion = $Region
+    ControlRegion = $GuardrailControlRegion
+    EnvironmentName = $EnvironmentName
+    EnvironmentOwner = [string] $controlRecord.environment.owner
+    FinanceOwner = [string] $controlRecord.environment.financeOwner
+    CostCenter = [string] $controlRecord.environment.costCenter
+    MonthlyBudgetUsd = [string] $controlRecord.budget.monthlyLimitUsd
+    WarningPercent = [string] $controlRecord.budget.warningPercent
+    CriticalPercent = [string] $controlRecord.budget.criticalPercent
+    AnomalyMode = [string] $controlRecord.budget.anomalyMode
+    ExistingAnomalyMonitorArn = $(if ($controlRecord.budget.existingAnomalyMonitorArn -eq 'NOT_APPLICABLE') { '' } else { [string] $controlRecord.budget.existingAnomalyMonitorArn })
+    AnomalyAbsoluteUsd = [string] $controlRecord.budget.anomalyAbsoluteUsd
+    AnomalyPercentage = [string] $controlRecord.budget.anomalyPercentage
+    ApprovalRecordId = [string] $controlRecord.recordId
+    ControlsAcknowledgement = 'I_ACKNOWLEDGE_ACCOUNT_LEVEL_COST_CONTROLS'
+}
+if ($guardrailParameters.Count -ne 18) {
+    throw "Guardrail stack '$GuardrailStackName' does not contain the exact 18-parameter KAN-229 configuration."
+}
+foreach ($expectedParameter in $expectedGuardrailParameters.GetEnumerator()) {
+    if (-not $guardrailParameters.Contains($expectedParameter.Key) -or $guardrailParameters[$expectedParameter.Key] -cne $expectedParameter.Value) {
+        throw "Guardrail stack parameter '$($expectedParameter.Key)' does not match the final approved billing control record."
+    }
+}
+foreach ($recipientMapping in @(
+        @{ Parameter = 'WarningEmail'; RecordValue = [string] $controlRecord.budget.warningRecipient },
+        @{ Parameter = 'CriticalEmail'; RecordValue = [string] $controlRecord.budget.criticalRecipient }
+    )) {
+    if (-not $guardrailParameters.Contains($recipientMapping.Parameter)) {
+        throw "Guardrail stack is missing protected recipient parameter '$($recipientMapping.Parameter)'."
+    }
+    $recipientAddress = [string] $guardrailParameters[$recipientMapping.Parameter]
+    $separator = $recipientAddress.LastIndexOf('@')
+    if ($separator -le 0 -or $recipientAddress.Substring(0, $separator) -cne $recipientMapping.RecordValue) {
+        throw "Guardrail stack recipient '$($recipientMapping.Parameter)' does not match the approved distribution-alias reference."
+    }
+}
+$guardrailOutputs = Get-StackOutputMap -Stack $guardrailStack
+$requiredGuardrailOutputs = [ordered]@{
+    PolicyVersion = $expectedGuardrailPolicyVersion
+    ApprovedAccountId = $AccountId
+    ApplicationRegion = $Region
+    ControlRegion = $GuardrailControlRegion
+    EnvironmentName = $EnvironmentName
+    EnvironmentOwner = [string] $controlRecord.environment.owner
+    FinanceOwner = [string] $controlRecord.environment.financeOwner
+    CostCenter = [string] $controlRecord.environment.costCenter
+    ApprovalRecordId = [string] $controlRecord.recordId
+    MonthlyBudgetUsd = [string] $controlRecord.budget.monthlyLimitUsd
+    WarningPercent = [string] $controlRecord.budget.warningPercent
+    CriticalPercent = [string] $controlRecord.budget.criticalPercent
+}
+foreach ($expectedOutput in $requiredGuardrailOutputs.GetEnumerator()) {
+    if (-not $guardrailOutputs.Contains($expectedOutput.Key)) {
+        throw "Guardrail stack '$GuardrailStackName' is missing required output '$($expectedOutput.Key)'."
+    }
+    if ($guardrailOutputs[$expectedOutput.Key] -cne $expectedOutput.Value) {
+        throw "Guardrail output '$($expectedOutput.Key)' does not match the approved billing control record."
+    }
+}
+if (-not $guardrailOutputs.Contains('MonthlyBudgetName') -or [string]::IsNullOrWhiteSpace($guardrailOutputs.MonthlyBudgetName)) {
+    throw "Guardrail stack '$GuardrailStackName' did not expose its active monthly budget identity."
+}
+if (-not $guardrailOutputs.Contains('AnomalyMode')) {
+    throw "Guardrail stack '$GuardrailStackName' is missing its anomaly-control decision."
+}
+if ($guardrailOutputs.AnomalyMode -cne [string] $controlRecord.budget.anomalyMode) {
+    throw 'The deployed anomaly mode does not match the final approved billing control record.'
+}
+if (
+    $controlRecord.budget.anomalyMode -eq 'Existing' -and
+    $guardrailOutputs.CostAnomalyMonitorArn -cne [string] $controlRecord.budget.existingAnomalyMonitorArn
+) {
+    throw 'The deployed existing anomaly monitor does not match the final approved billing control record.'
+}
+
 Assert-RequiredValue -Name 'StackName' -Value $StackName
 Assert-RequiredValue -Name 'ChangeSetName' -Value $ChangeSetName
 
@@ -196,6 +492,14 @@ if ($StackName -notmatch '^[A-Za-z][A-Za-z0-9-]{0,127}$') {
 }
 if ($ChangeSetName -notmatch '^[A-Za-z][A-Za-z0-9-]{0,127}$') {
     throw 'ChangeSetName must be an explicit CloudFormation-safe name.'
+}
+
+$partition = if ($Region -like 'cn-*') {
+    'aws-cn'
+} elseif ($Region -like 'us-gov-*') {
+    'aws-us-gov'
+} else {
+    'aws'
 }
 
 if ($Action -eq 'Plan') {
@@ -339,13 +643,6 @@ if ($Action -eq 'Plan') {
         }
     }
 
-    $partition = if ($Region -like 'cn-*') {
-        'aws-cn'
-    } elseif ($Region -like 'us-gov-*') {
-        'aws-us-gov'
-    } else {
-        'aws'
-    }
     $ecrDnsSuffix = if ($partition -eq 'aws-cn') { 'amazonaws.com.cn' } else { 'amazonaws.com' }
     $expectedEcrPrefix = "$AccountId.dkr.ecr.$Region.$ecrDnsSuffix/"
     foreach ($imageParameter in @('ApiImageUri', 'WebImageUri', 'WorkerImageUri')) {
@@ -359,13 +656,31 @@ if ($Action -eq 'Plan') {
         throw "AlbCertificateArn must reference ACM in the approved account and region: $expectedCertificatePrefix"
     }
 
+    $stackTags = [ordered]@{
+        application = 'crypto-lending'
+        environment = $EnvironmentName
+        owner = [string] $controlRecord.environment.owner
+        'finance-owner' = [string] $controlRecord.environment.financeOwner
+        'cost-center' = [string] $controlRecord.environment.costCenter
+        'control-record-sha256' = $controlRecordSha256
+        'billing-control-record' = [string] $controlRecord.recordId
+        'managed-by' = 'cloudformation'
+        ticket = 'KAN-34'
+    }
+    $canonicalTags = ConvertTo-CanonicalTagText -Tags $stackTags
+    $tagSha256 = Get-TextSha256 -Value $canonicalTags
+    $tagArguments = @()
+    foreach ($tag in $stackTags.GetEnumerator()) {
+        $tagArguments += "Key=$($tag.Key),Value=$($tag.Value)"
+    }
+
     $parameterArguments = @()
     foreach ($entry in $parameterMap.GetEnumerator()) {
         $parameterArguments += "ParameterKey=$($entry.Key),ParameterValue=$($entry.Value)"
     }
     $canonicalParameters = ($parameterMap.GetEnumerator() | Sort-Object Key | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join "`n"
     $parameterSha256 = Get-TextSha256 -Value $canonicalParameters
-    $expectedChangeSetDescription = "KAN-34 template-sha256=$templateSha256 parameters-sha256=$parameterSha256"
+    $expectedChangeSetDescription = "KAN-34 template-sha256=$templateSha256 parameters-sha256=$parameterSha256 tags-sha256=$tagSha256 control-record-sha256=$controlRecordSha256 guardrail-policy=$expectedGuardrailPolicyVersion"
 
     $planArguments = @(
         'cloudformation',
@@ -378,11 +693,8 @@ if ($Action -eq 'Plan') {
         '--parameters'
     ) + $parameterArguments + @(
         '--capabilities', 'CAPABILITY_IAM',
-        '--tags',
-        'Key=application,Value=crypto-lending',
-        "Key=environment,Value=$EnvironmentName",
-        'Key=managed-by,Value=cloudformation',
-        'Key=ticket,Value=KAN-34',
+        '--tags'
+    ) + $tagArguments + @(
         '--profile', $Profile,
         '--region', $Region,
         '--no-cli-pager'
@@ -414,6 +726,59 @@ if ($changeSet.StackName -ne $StackName -or $changeSet.ChangeSetName -ne $Change
 if ($changeSet.Status -ne 'CREATE_COMPLETE' -or $changeSet.ExecutionStatus -ne 'AVAILABLE') {
     throw "Change set '$ChangeSetName' is not executable (Status=$($changeSet.Status), ExecutionStatus=$($changeSet.ExecutionStatus))."
 }
+$changeSetId = [string] $changeSet.ChangeSetId
+$expectedChangeSetIdPattern = '^arn:' + [regex]::Escape($partition) + ':cloudformation:' + [regex]::Escape($Region) + ':' + [regex]::Escape($AccountId) + ':changeSet/' + [regex]::Escape($ChangeSetName) + '/[A-Za-z0-9-]+$'
+if ($changeSetId -notmatch $expectedChangeSetIdPattern) {
+    throw 'The reviewed change set did not return the expected immutable ARN for the approved account and Region.'
+}
+
+# The description is not template provenance: a manually created change set can
+# copy it. Retrieve the user-submitted body for this immutable change-set ARN and
+# hash the actual bytes before execution.
+$submittedTemplateOutput = & $script:AwsExecutable @(
+    'cloudformation',
+    'get-template',
+    '--stack-name', $StackName,
+    '--change-set-name', $changeSetId,
+    '--template-stage', 'Original',
+    '--profile', $Profile,
+    '--region', $Region,
+    '--output', 'json',
+    '--no-cli-pager'
+)
+if ($LASTEXITCODE -ne 0) {
+    throw "Unable to retrieve the original template for reviewed change set '$ChangeSetName'."
+}
+$submittedTemplate = ($submittedTemplateOutput | Out-String) | ConvertFrom-Json
+if ($null -eq $submittedTemplate -or $submittedTemplate.TemplateBody -isnot [string]) {
+    throw "CloudFormation did not return a string Original template body for change set '$ChangeSetName'."
+}
+$submittedTemplateSha256 = Get-TextSha256 -Value ([string] $submittedTemplate.TemplateBody)
+if ($submittedTemplateSha256 -cne $templateSha256) {
+    throw "The actual Original template submitted with change set '$ChangeSetName' does not match the reviewed local template. Re-plan and review it."
+}
+$expectedStackTags = [ordered]@{
+    application = 'crypto-lending'
+    environment = $EnvironmentName
+    owner = [string] $controlRecord.environment.owner
+    'finance-owner' = [string] $controlRecord.environment.financeOwner
+    'cost-center' = [string] $controlRecord.environment.costCenter
+    'control-record-sha256' = $controlRecordSha256
+    'billing-control-record' = [string] $controlRecord.recordId
+    'managed-by' = 'cloudformation'
+    ticket = 'KAN-34'
+}
+$changeSetTags = ConvertFrom-ChangeSetTags -Tags $changeSet.Tags
+if ($changeSetTags.Count -ne $expectedStackTags.Count) {
+    throw 'The reviewed change set does not contain the exact approved ownership and billing tag set.'
+}
+foreach ($expectedTag in $expectedStackTags.GetEnumerator()) {
+    if (-not $changeSetTags.Contains($expectedTag.Key) -or $changeSetTags[$expectedTag.Key] -cne $expectedTag.Value) {
+        throw "The reviewed change set tag '$($expectedTag.Key)' does not match the approved billing control record."
+    }
+}
+$canonicalTags = ConvertTo-CanonicalTagText -Tags $changeSetTags
+$tagSha256 = Get-TextSha256 -Value $canonicalTags
 $canonicalParameters = ($changeSet.Parameters | Sort-Object ParameterKey | ForEach-Object {
         if ($_.UsePreviousValue -or [string]::IsNullOrEmpty($_.ParameterKey) -or $null -eq $_.ParameterValue) {
             throw 'The reviewed change set contains a non-explicit parameter and cannot be executed by this guard.'
@@ -421,14 +786,17 @@ $canonicalParameters = ($changeSet.Parameters | Sort-Object ParameterKey | ForEa
         "$($_.ParameterKey)=$($_.ParameterValue)"
     }) -join "`n"
 $parameterSha256 = Get-TextSha256 -Value $canonicalParameters
-$expectedChangeSetDescription = "KAN-34 template-sha256=$templateSha256 parameters-sha256=$parameterSha256"
+$expectedChangeSetDescription = "KAN-34 template-sha256=$templateSha256 parameters-sha256=$parameterSha256 tags-sha256=$tagSha256 control-record-sha256=$controlRecordSha256 guardrail-policy=$expectedGuardrailPolicyVersion"
 if ($changeSet.Description -cne $expectedChangeSetDescription) {
-    throw "Change set '$ChangeSetName' is not bound to the current template and canonical parameter SHA-256 values. Re-plan and review it."
+    throw "Change set '$ChangeSetName' is not bound to the current template, parameters, tags, billing record, and guardrail policy. Re-plan and review it."
 }
 Write-Host "Reviewed template SHA-256: $templateSha256"
+Write-Host "Verified submitted template SHA-256: $submittedTemplateSha256"
 Write-Host "Reviewed parameter SHA-256: $parameterSha256"
+Write-Host "Reviewed tag SHA-256: $tagSha256"
+Write-Host "Reviewed billing control record SHA-256: $controlRecordSha256"
 
-$expectedAcknowledgement = "EXECUTE REVIEWED CHANGE SET $ChangeSetName FOR STACK $StackName; I ACKNOWLEDGE BILLABLE AWS RESOURCES IN ACCOUNT $AccountId REGION $Region USING PROFILE $Profile"
+$expectedAcknowledgement = "EXECUTE REVIEWED CHANGE SET $ChangeSetName FOR STACK $StackName USING BILLING CONTROL $controlRecordSha256; I ACKNOWLEDGE BILLABLE AWS RESOURCES IN ACCOUNT $AccountId REGION $Region USING PROFILE $Profile"
 if ($BillableAcknowledgement -cne $expectedAcknowledgement) {
     throw @"
 Deploy can create RDS, ElastiCache, load balancer, networking, logging, KMS, and other billable resources.
@@ -442,7 +810,7 @@ Invoke-AwsCommand -Arguments @(
     'cloudformation',
     'execute-change-set',
     '--stack-name', $StackName,
-    '--change-set-name', $ChangeSetName,
+    '--change-set-name', $changeSetId,
     '--client-request-token', ([guid]::NewGuid().ToString()),
     '--profile', $Profile,
     '--region', $Region,

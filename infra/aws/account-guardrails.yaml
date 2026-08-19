@@ -1,0 +1,353 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: KAN-229 account-level non-production cost notification guardrails.
+
+Metadata:
+  GuardrailContract:
+    Scope: Account-wide monthly cost; intentionally not filtered by resource tags.
+    Pricing: Notification-only AWS Budgets; no budget actions or reports.
+    CostBasis: Unblended, non-amortized; credits and refunds excluded.
+    AnomalyDetection: Disabled unless AnomalyMode is explicitly Create or Existing.
+    Retention: Budget retained on stack deletion; conditional anomaly controls deleted.
+    ExistingMonitorAccount: The invocation guard verifies the existing ARN account.
+    NotificationEvidence: CloudFormation configures routing but does not prove delivery.
+  cfn-lint:
+    config:
+      # Rules require a nonempty ARN whenever the Existing anomaly branch is active.
+      ignore_checks:
+        - W1030
+
+Parameters:
+  ApprovedAccountId:
+    Type: String
+    AllowedPattern: '^[0-9]{12}$'
+  ApplicationRegion:
+    Type: String
+    AllowedPattern: '^[a-z]{2}(?:-[a-z0-9]+)+-[0-9]+$'
+  ControlRegion:
+    Type: String
+    AllowedValues:
+      - us-east-1
+  EnvironmentName:
+    Type: String
+    MaxLength: 31
+    AllowedPattern: '^(dev|test|qa|sandbox|staging)(-[a-z0-9]+)*$'
+  EnvironmentOwner:
+    Type: String
+    MaxLength: 64
+    AllowedPattern: '^[a-z][a-z0-9-]{1,62}[a-z0-9]$'
+  FinanceOwner:
+    Type: String
+    MaxLength: 64
+    AllowedPattern: '^[a-z][a-z0-9-]{1,62}[a-z0-9]$'
+  CostCenter:
+    Type: String
+    MaxLength: 32
+    AllowedPattern: '^[A-Z][A-Z0-9-]{0,30}[A-Z0-9]$'
+  WarningEmail:
+    Type: String
+    Description: Approved warning distribution alias; do not use an individual mailbox.
+    MaxLength: 254
+    AllowedPattern: '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,63}$'
+  CriticalEmail:
+    Type: String
+    Description: Approved critical distribution alias; do not use an individual mailbox.
+    MaxLength: 254
+    AllowedPattern: '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,63}$'
+  MonthlyBudgetUsd:
+    Type: Number
+    MinValue: 1
+    MaxValue: 1000000
+  WarningPercent:
+    Type: Number
+    AllowedValues:
+      - 50
+      - 60
+      - 70
+  CriticalPercent:
+    Type: Number
+    AllowedValues:
+      - 80
+      - 90
+  AnomalyMode:
+    Type: String
+    Default: Disabled
+    AllowedValues:
+      - Disabled
+      - Create
+      - Existing
+  ExistingAnomalyMonitorArn:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|^arn:aws:ce::[0-9]{12}:anomalymonitor/[A-Za-z0-9-]+$'
+  AnomalyAbsoluteUsd:
+    Type: Number
+    MinValue: 1
+    MaxValue: 1000000
+  AnomalyPercentage:
+    Type: Number
+    MinValue: 1
+    MaxValue: 100000
+  ApprovalRecordId:
+    Type: String
+    MaxLength: 128
+    AllowedPattern: '^KAN-229[:#-][A-Za-z0-9][A-Za-z0-9._:/-]{2,119}$'
+  ControlsAcknowledgement:
+    Type: String
+    Default: NOT_AUTHORIZED
+    AllowedValues:
+      - NOT_AUTHORIZED
+      - I_ACKNOWLEDGE_ACCOUNT_LEVEL_COST_CONTROLS
+
+Rules:
+  ExplicitControlsAcknowledgementRequired:
+    Assertions:
+      - Assert: !Equals
+          - !Ref ControlsAcknowledgement
+          - I_ACKNOWLEDGE_ACCOUNT_LEVEL_COST_CONTROLS
+        AssertDescription: >-
+          Refusing account-level changes. Explicitly acknowledge the reviewed
+          budget and optional anomaly-notification configuration.
+  ApprovedAccountMustMatchTarget:
+    Assertions:
+      - Assert: !Equals [!Ref ApprovedAccountId, !Ref AWS::AccountId]
+        AssertDescription: ApprovedAccountId must match the target AWS account.
+  ControlRegionMustMatchTarget:
+    Assertions:
+      - Assert: !Equals [!Ref ControlRegion, !Ref AWS::Region]
+        AssertDescription: This account-level stack must be deployed in the approved control region.
+  NotificationAliasesMustBeDistinct:
+    Assertions:
+      - Assert: !Not [!Equals [!Ref WarningEmail, !Ref CriticalEmail]]
+        AssertDescription: WarningEmail and CriticalEmail must be distinct distribution aliases.
+  GovernanceOwnersMustBeDistinct:
+    Assertions:
+      - Assert: !Not [!Equals [!Ref EnvironmentOwner, !Ref FinanceOwner]]
+        AssertDescription: EnvironmentOwner and FinanceOwner must be distinct accountable roles.
+  GovernanceValuesMustBeConcrete:
+    Assertions:
+      - Assert: !Not
+          - !Contains
+            - [none, tbd, unknown, unset]
+            - !Ref EnvironmentOwner
+        AssertDescription: EnvironmentOwner must identify an approved owner.
+      - Assert: !Not
+          - !Contains
+            - [none, tbd, unknown, unset]
+            - !Ref FinanceOwner
+        AssertDescription: FinanceOwner must identify an approved owner.
+      - Assert: !Not
+          - !Contains
+            - [NONE, TBD, UNKNOWN, UNSET]
+            - !Ref CostCenter
+        AssertDescription: CostCenter must identify an approved cost center.
+  AnomalyModeMustHaveOneMonitorSource:
+    Assertions:
+      - Assert: !Or
+          - !And
+            - !Equals [!Ref AnomalyMode, Disabled]
+            - !Equals [!Ref ExistingAnomalyMonitorArn, '']
+          - !And
+            - !Equals [!Ref AnomalyMode, Create]
+            - !Equals [!Ref ExistingAnomalyMonitorArn, '']
+          - !And
+            - !Equals [!Ref AnomalyMode, Existing]
+            - !Not [!Equals [!Ref ExistingAnomalyMonitorArn, '']]
+        AssertDescription: >-
+          Existing requires an existing monitor ARN; Disabled and Create require
+          ExistingAnomalyMonitorArn to be empty.
+
+Conditions:
+  CreateAnomalyMonitor: !Equals [!Ref AnomalyMode, Create]
+  ConfigureAnomalySubscription: !Not [!Equals [!Ref AnomalyMode, Disabled]]
+
+Resources:
+  MonthlyCostBudget:
+    Type: AWS::Budgets::Budget
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Delete
+    Properties:
+      Budget:
+        BudgetLimit:
+          Amount: !Ref MonthlyBudgetUsd
+          Unit: USD
+        BudgetType: COST
+        TimeUnit: MONTHLY
+        CostTypes:
+          IncludeCredit: false
+          IncludeDiscount: true
+          IncludeOtherSubscription: true
+          IncludeRecurring: true
+          IncludeRefund: false
+          IncludeSubscription: true
+          IncludeSupport: true
+          IncludeTax: true
+          IncludeUpfront: true
+          UseAmortized: false
+          UseBlended: false
+      NotificationsWithSubscribers:
+        - Notification:
+            ComparisonOperator: GREATER_THAN
+            NotificationType: ACTUAL
+            Threshold: !Ref WarningPercent
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - Address: !Ref WarningEmail
+              SubscriptionType: EMAIL
+        - Notification:
+            ComparisonOperator: GREATER_THAN
+            NotificationType: FORECASTED
+            Threshold: !Ref CriticalPercent
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - Address: !Ref CriticalEmail
+              SubscriptionType: EMAIL
+        - Notification:
+            ComparisonOperator: GREATER_THAN
+            NotificationType: ACTUAL
+            Threshold: !Ref CriticalPercent
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - Address: !Ref CriticalEmail
+              SubscriptionType: EMAIL
+        - Notification:
+            ComparisonOperator: GREATER_THAN
+            NotificationType: ACTUAL
+            Threshold: 100
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - Address: !Ref CriticalEmail
+              SubscriptionType: EMAIL
+      ResourceTags:
+        - Key: application
+          Value: crypto-lending
+        - Key: environment
+          Value: !Ref EnvironmentName
+        - Key: control-scope
+          Value: account-billing
+        - Key: owner
+          Value: !Ref EnvironmentOwner
+        - Key: finance-owner
+          Value: !Ref FinanceOwner
+        - Key: cost-center
+          Value: !Ref CostCenter
+        - Key: managed-by
+          Value: cloudformation
+        - Key: ticket
+          Value: KAN-229
+        - Key: approval-record
+          Value: !Ref ApprovalRecordId
+
+  CostAnomalyMonitor:
+    Type: AWS::CE::AnomalyMonitor
+    Condition: CreateAnomalyMonitor
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      MonitorName: !Sub crypto-lending-${EnvironmentName}-services
+      MonitorType: DIMENSIONAL
+      MonitorDimension: SERVICE
+      ResourceTags:
+        - Key: application
+          Value: crypto-lending
+        - Key: environment
+          Value: !Ref EnvironmentName
+        - Key: control-scope
+          Value: account-billing
+        - Key: owner
+          Value: !Ref EnvironmentOwner
+        - Key: finance-owner
+          Value: !Ref FinanceOwner
+        - Key: cost-center
+          Value: !Ref CostCenter
+        - Key: managed-by
+          Value: cloudformation
+        - Key: ticket
+          Value: KAN-229
+        - Key: approval-record
+          Value: !Ref ApprovalRecordId
+
+  CostAnomalySubscription:
+    Type: AWS::CE::AnomalySubscription
+    Condition: ConfigureAnomalySubscription
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      SubscriptionName: !Sub crypto-lending-${EnvironmentName}-daily-anomalies
+      Frequency: DAILY
+      MonitorArnList:
+        - !If
+          - CreateAnomalyMonitor
+          - !Ref CostAnomalyMonitor
+          - !Ref ExistingAnomalyMonitorArn
+      Subscribers:
+        - Address: !Ref CriticalEmail
+          Type: EMAIL
+      ThresholdExpression: !Sub >-
+        {"And":[{"Dimensions":{"Key":"ANOMALY_TOTAL_IMPACT_ABSOLUTE",
+        "MatchOptions":["GREATER_THAN_OR_EQUAL"],"Values":["${AnomalyAbsoluteUsd}"]}},
+        {"Dimensions":{"Key":"ANOMALY_TOTAL_IMPACT_PERCENTAGE",
+        "MatchOptions":["GREATER_THAN_OR_EQUAL"],"Values":["${AnomalyPercentage}"]}}]}
+      ResourceTags:
+        - Key: application
+          Value: crypto-lending
+        - Key: environment
+          Value: !Ref EnvironmentName
+        - Key: control-scope
+          Value: account-billing
+        - Key: owner
+          Value: !Ref EnvironmentOwner
+        - Key: finance-owner
+          Value: !Ref FinanceOwner
+        - Key: cost-center
+          Value: !Ref CostCenter
+        - Key: managed-by
+          Value: cloudformation
+        - Key: ticket
+          Value: KAN-229
+        - Key: approval-record
+          Value: !Ref ApprovalRecordId
+
+Outputs:
+  PolicyVersion:
+    Value: kan-229-v1
+  ApprovedAccountId:
+    Value: !Ref ApprovedAccountId
+  ApplicationRegion:
+    Value: !Ref ApplicationRegion
+  ControlRegion:
+    Value: !Ref ControlRegion
+  EnvironmentName:
+    Value: !Ref EnvironmentName
+  EnvironmentOwner:
+    Value: !Ref EnvironmentOwner
+  FinanceOwner:
+    Value: !Ref FinanceOwner
+  CostCenter:
+    Value: !Ref CostCenter
+  ApprovalRecordId:
+    Value: !Ref ApprovalRecordId
+  MonthlyBudgetName:
+    Value: !Ref MonthlyCostBudget
+  MonthlyBudgetUsd:
+    Value: !Ref MonthlyBudgetUsd
+  WarningPercent:
+    Value: !Ref WarningPercent
+  CriticalPercent:
+    Value: !Ref CriticalPercent
+  AnomalyMode:
+    Value: !Ref AnomalyMode
+  CostAnomalyMonitorArn:
+    Value: !If
+      - ConfigureAnomalySubscription
+      - !If
+        - CreateAnomalyMonitor
+        - !Ref CostAnomalyMonitor
+        - !Ref ExistingAnomalyMonitorArn
+      - NOT_CONFIGURED
+  CostAnomalySubscriptionArn:
+    Value: !If
+      - ConfigureAnomalySubscription
+      - !Ref CostAnomalySubscription
+      - NOT_CONFIGURED
+  NotificationDeliveryEvidence:
+    Value: NOT_TESTED_BY_CLOUDFORMATION

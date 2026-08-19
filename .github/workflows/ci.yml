@@ -56,7 +56,10 @@ jobs:
       - name: Validate AWS infrastructure without cloud access
         run: |
           npm run infra:validate
-          python infra/aws/lint-cloudformation.py infra/aws/application-baseline.yaml infra/aws/sqs-foundation.yaml
+          npm run infra:test:guardrails
+          pwsh -NoProfile -File infra/aws/test-invoke-account-guardrails.ps1
+          pwsh -NoProfile -File infra/aws/test-invoke-application-baseline.ps1
+          python infra/aws/lint-cloudformation.py infra/aws/application-baseline.yaml infra/aws/account-guardrails.yaml infra/aws/sqs-foundation.yaml
 
       - name: Check formatting
         run: npm run format:check

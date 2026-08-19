@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "status": "NOT_APPROVED",
+  "recordId": "NOT_APPROVED",
+  "approvedAt": "NOT_RUN",
+  "expiresAt": "NOT_APPROVED",
+  "aws": {
+    "accountId": "NOT_APPROVED",
+    "accountAlias": "NOT_APPROVED",
+    "approvedRoleArn": "NOT_APPROVED",
+    "applicationRegion": "NOT_APPROVED",
+    "controlRegion": "NOT_APPROVED"
+  },
+  "environment": {
+    "name": "NOT_APPROVED",
+    "application": "NOT_APPROVED",
+    "owner": "NOT_APPROVED",
+    "financeOwner": "NOT_APPROVED",
+    "costCenter": "NOT_APPROVED",
+    "escalationRoute": "NOT_APPROVED"
+  },
+  "budget": {
+    "currency": "NOT_APPROVED",
+    "expectedMonthlyBaselineUsd": "NOT_APPROVED",
+    "monthlyLimitUsd": "NOT_APPROVED",
+    "warningPercent": "NOT_APPROVED",
+    "criticalPercent": "NOT_APPROVED",
+    "warningRecipient": "NOT_APPROVED",
+    "criticalRecipient": "NOT_APPROVED",
+    "exclusions": ["NOT_APPROVED"],
+    "pricingAsOf": "NOT_RUN",
+    "pricingExpiresAt": "NOT_APPROVED",
+    "mechanism": "NOT_APPROVED",
+    "anomalyMode": "NOT_APPROVED",
+    "existingAnomalyMonitorArn": "NOT_APPROVED",
+    "anomalyAbsoluteUsd": "NOT_APPROVED",
+    "anomalyPercentage": "NOT_APPROVED",
+    "feeDecision": "NOT_APPROVED"
+  },
+  "authority": {
+    "planApprovers": ["NOT_APPROVED"],
+    "deployApprovers": ["NOT_APPROVED"],
+    "retentionApprovers": ["NOT_APPROVED"],
+    "deletionApprovers": ["NOT_APPROVED"]
+  },
+  "independentVerification": {
+    "verifier": "NOT_APPROVED",
+    "decision": "NOT_APPROVED",
+    "verifiedAt": "NOT_RUN"
+  },
+  "evidence": {
+    "accountRegionRole": "NOT_RUN",
+    "warningDelivery": "NOT_RUN",
+    "criticalDelivery": "NOT_RUN",
+    "anomalyDelivery": "NOT_RUN",
+    "retainedResourceReview": "NOT_RUN"
+  }
+}
