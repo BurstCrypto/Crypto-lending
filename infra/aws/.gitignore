@@ -1,0 +1,23 @@
+# Generated infrastructure state and deployment artifacts must remain local.
+.terraform/
+*.tfstate
+*.tfstate.*
+cdk.out/
+.aws-sam/
+.serverless/
+.aws/
+packaged/
+change-sets/
+*.changeset.json
+*.outputs.local.json
+
+# Local parameter files and credential material must never be committed.
+parameters.local.json
+*.parameters.local.json
+*.secrets.json
+*.secrets.yaml
+*.secrets.yml
+*.pem
+*.key
+*.p12
+*.pfx

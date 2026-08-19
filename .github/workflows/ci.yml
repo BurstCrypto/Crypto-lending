@@ -50,6 +50,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Install pinned CloudFormation linter
+        run: python -m pip install --disable-pip-version-check --requirement infra/aws/requirements-dev.txt
+
+      - name: Validate AWS infrastructure without cloud access
+        run: |
+          npm run infra:validate
+          python infra/aws/lint-cloudformation.py infra/aws/application-baseline.yaml infra/aws/sqs-foundation.yaml
+
       - name: Check formatting
         run: npm run format:check
 

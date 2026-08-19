@@ -3,6 +3,8 @@ import Link from 'next/link';
 import { ServiceStatus } from '@/components/service-status';
 import { getApplicationEnvironment, getApplicationVersion } from '@/lib/application';
 
+export const dynamic = 'force-dynamic';
+
 export default function HomePage() {
   return (
     <main id="main-content" className="page-shell">
