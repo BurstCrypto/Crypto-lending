@@ -25,6 +25,7 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "test:integration": "npm run test:integration --workspace @crypto-lending/api",
+    "infra:validate": "node infra/aws/validate-application-baseline.mjs",
     "openapi:generate": "npm run openapi:generate --workspace @crypto-lending/api",
     "db:migrate": "npm run db:migrate --workspace @crypto-lending/api",
     "db:rollback": "npm run db:rollback --workspace @crypto-lending/api",
