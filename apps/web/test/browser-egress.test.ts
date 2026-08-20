@@ -3,7 +3,9 @@ import { describe, expect, it } from 'vitest';
 import nextConfig from '../next.config';
 import {
   buildBrowserEgressPolicy,
+  buildBrowserSecurityHeaders,
   buildRestrictedWalletLabPolicy,
+  buildRestrictedWalletLabSecurityHeaders,
 } from '../lib/security/browser-egress';
 
 describe('browser no-external-egress policy', () => {
@@ -36,13 +38,45 @@ describe('browser no-external-egress policy', () => {
     expect(policy).not.toContain('0.0.0.0');
   });
 
+  it('adds shared browser hardening and limits HSTS to production', () => {
+    const productionHeaders = Object.fromEntries(
+      buildBrowserSecurityHeaders('production').map(({ key, value }) => [key, value]),
+    );
+    const developmentHeaders = Object.fromEntries(
+      buildBrowserSecurityHeaders('development').map(({ key, value }) => [key, value]),
+    );
+
+    expect(productionHeaders).toMatchObject({
+      'Permissions-Policy': 'camera=(), geolocation=(), microphone=(), payment=(), usb=()',
+      'Referrer-Policy': 'no-referrer',
+      'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
+      'X-Content-Type-Options': 'nosniff',
+      'X-Frame-Options': 'DENY',
+    });
+    expect(developmentHeaders).not.toHaveProperty('Strict-Transport-Security');
+  });
+
+  it('preserves restricted wallet-lab cache and indexing protections', () => {
+    const headers = Object.fromEntries(
+      buildRestrictedWalletLabSecurityHeaders('development').map(({ key, value }) => [key, value]),
+    );
+
+    expect(headers).toMatchObject({
+      'Cache-Control': 'private, no-store, max-age=0',
+      'Content-Security-Policy': buildRestrictedWalletLabPolicy('development'),
+      'Permissions-Policy': 'camera=(), geolocation=(), microphone=(), payment=(), usb=()',
+      Pragma: 'no-cache',
+      'Referrer-Policy': 'no-referrer',
+      'X-Content-Type-Options': 'nosniff',
+      'X-Frame-Options': 'DENY',
+      'X-Robots-Tag': 'noindex, nofollow, noarchive',
+    });
+  });
+
   it('installs the generated connect policy on every web route', async () => {
     const entries = await nextConfig.headers();
     expect(entries).toHaveLength(1);
     expect(entries[0]?.source).toBe('/:path*');
-    expect(entries[0]?.headers).toContainEqual({
-      key: 'Content-Security-Policy',
-      value: buildBrowserEgressPolicy(process.env.NODE_ENV),
-    });
+    expect(entries[0]?.headers).toEqual(buildBrowserSecurityHeaders(process.env.NODE_ENV));
   });
 });

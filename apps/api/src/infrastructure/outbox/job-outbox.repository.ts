@@ -3,6 +3,7 @@ import type { QueryResultRow } from 'pg';
 
 import { PostgresService } from '../database/postgres.service';
 import { parseJobEnvelope, type JobEnvelope } from './job-envelope';
+import { serializeJobMessage } from './job-message-policy';
 
 export interface NewOutboxJob {
   destination: string;
@@ -30,6 +31,12 @@ export interface RecordOutboxFailureOptions {
   retryDelayMs: number;
 }
 
+export interface CleanupOutboxJobsOptions {
+  batchSize: number;
+  failedRetentionMs: number;
+  publishedRetentionMs: number;
+}
+
 export type OutboxFailureTransition = 'retry' | 'failed' | 'lease-lost';
 
 interface ClaimedOutboxRow extends QueryResultRow {
@@ -44,13 +51,17 @@ interface FailureRow extends QueryResultRow {
   status: 'pending' | 'failed';
 }
 
-function messageAttributes(value: unknown): Readonly<Record<string, string>> {
+// Existing rows may predate today's stricter SQS policy. Keep claim parsing
+// structural so one legacy poison row reaches dispatch failure handling instead
+// of rolling back and permanently blocking every newer row in the batch.
+function parseStoredMessageAttributes(value: unknown): Readonly<Record<string, string>> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error('Invalid outbox message attributes');
+    throw new Error('Invalid stored job message attributes');
   }
+
   const entries = Object.entries(value);
   if (entries.some(([, attributeValue]) => typeof attributeValue !== 'string')) {
-    throw new Error('Outbox message attributes must contain only strings');
+    throw new Error('Stored job message attributes must contain only strings');
   }
   return Object.fromEntries(entries) as Record<string, string>;
 }
@@ -82,6 +93,24 @@ function validateClaimOptions(options: ClaimOutboxJobsOptions): void {
   }
 }
 
+function validateCleanupOptions(options: CleanupOutboxJobsOptions): void {
+  if (
+    !Number.isSafeInteger(options.batchSize) ||
+    options.batchSize < 1 ||
+    options.batchSize > 1_000
+  ) {
+    throw new Error('Outbox cleanup batchSize must be an integer between 1 and 1000');
+  }
+  for (const [name, value] of [
+    ['failedRetentionMs', options.failedRetentionMs],
+    ['publishedRetentionMs', options.publishedRetentionMs],
+  ] as const) {
+    if (!Number.isSafeInteger(value) || value < 60_000 || value > 315_360_000_000) {
+      throw new Error(`Outbox cleanup ${name} must be an integer between 60000 and 315360000000`);
+    }
+  }
+}
+
 @Injectable()
 export class JobOutboxRepository {
   constructor(private readonly postgres: PostgresService) {}
@@ -94,14 +123,12 @@ export class JobOutboxRepository {
     let serializedEnvelope: string;
     let serializedAttributes: string;
     try {
-      serializedEnvelope = JSON.stringify(job.envelope);
-      serializedAttributes = JSON.stringify(messageAttributes(job.messageAttributes));
-      // JSON.stringify can silently omit undefined/function/symbol payloads.
-      // Round-tripping guarantees every persisted row remains dispatchable.
-      parseJobEnvelope(JSON.parse(serializedEnvelope) as unknown);
+      const serialized = serializeJobMessage(job.envelope, job.messageAttributes);
+      serializedEnvelope = serialized.body;
+      serializedAttributes = JSON.stringify(serialized.messageAttributes);
     } catch (error) {
       const reason = error instanceof Error ? error.message : 'invalid JSON';
-      throw new Error(`Outbox job must be JSON serializable: ${reason}`, {
+      throw new Error(`Invalid outbox job: ${reason}`, {
         cause: error,
       });
     }
@@ -146,7 +173,7 @@ export class JobOutboxRepository {
         id: row.id,
         destination: row.queue_name,
         envelope: parseJobEnvelope(row.payload),
-        messageAttributes: messageAttributes(row.message_attributes),
+        messageAttributes: parseStoredMessageAttributes(row.message_attributes),
         attempts: row.attempts,
       }));
     });
@@ -207,5 +234,53 @@ export class JobOutboxRepository {
       return 'lease-lost';
     }
     return status === 'failed' ? 'failed' : 'retry';
+  }
+
+  /**
+   * Deletes only terminal rows in a small lock-skipping batch. Pending rows,
+   * including legacy rows awaiting their terminal transition, are never
+   * retention candidates.
+   */
+  async deleteExpired(options: CleanupOutboxJobsOptions): Promise<number> {
+    validateCleanupOptions(options);
+    const result = await this.postgres.query(
+      `WITH published_expired AS (
+         SELECT id,
+                published_at + ($1::double precision * INTERVAL '1 millisecond') AS expires_at
+         FROM job_outbox
+         WHERE status = 'published'
+           AND published_at < statement_timestamp()
+             - ($1::double precision * INTERVAL '1 millisecond')
+         ORDER BY published_at, id
+         LIMIT $3
+         FOR UPDATE SKIP LOCKED
+       ), failed_expired AS (
+         SELECT id,
+                failed_at + ($2::double precision * INTERVAL '1 millisecond') AS expires_at
+         FROM job_outbox
+         WHERE status = 'failed'
+           AND failed_at < statement_timestamp()
+             - ($2::double precision * INTERVAL '1 millisecond')
+         ORDER BY failed_at, id
+         LIMIT $3
+         FOR UPDATE SKIP LOCKED
+       ), terminal_candidates AS (
+         SELECT id
+         FROM (
+           SELECT * FROM published_expired
+           UNION ALL
+           SELECT * FROM failed_expired
+         ) AS candidates
+         ORDER BY expires_at, id
+         LIMIT $3
+       )
+       DELETE FROM job_outbox AS outbox
+       USING terminal_candidates AS candidate
+       WHERE outbox.id = candidate.id
+         AND outbox.status IN ('published', 'failed')
+       RETURNING outbox.id`,
+      [options.publishedRetentionMs, options.failedRetentionMs, options.batchSize],
+    );
+    return result.rowCount ?? result.rows.length;
   }
 }

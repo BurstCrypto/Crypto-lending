@@ -1,0 +1,150 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: One-off PostgreSQL migration task; this template never creates an ECS service.
+
+Parameters:
+  BillingAcknowledgement:
+    Type: String
+    Default: NOT_AUTHORIZED
+    AllowedValues:
+      - NOT_AUTHORIZED
+      - I_ACKNOWLEDGE_THIS_CREATES_BILLABLE_AWS_RESOURCES
+  EnvironmentName:
+    Type: String
+    AllowedPattern: '^(dev|test|qa|sandbox|staging)(-[a-z0-9]+)*$'
+    MaxLength: 31
+  ApiImageUri:
+    Type: String
+    AllowedPattern: '^[0-9]{12}\.dkr\.ecr\.[a-z0-9-]+\.(amazonaws\.com|amazonaws\.com\.cn)/crypto-lending-[a-z0-9._/-]*@sha256:[a-f0-9]{64}$'
+  ApiImageRepositoryArn:
+    Type: String
+    AllowedPattern: '^arn:(aws|aws-us-gov|aws-cn):ecr:[a-z0-9-]+:[0-9]{12}:repository/crypto-lending-[a-z0-9._/-]+$'
+  RdsCaBundlePath:
+    Type: String
+    Default: /etc/ssl/certs/aws-rds-global-bundle.pem
+    AllowedPattern: '^/[A-Za-z0-9._/-]+$'
+  DatabaseEndpointAddress:
+    Type: String
+    AllowedPattern: '^[A-Za-z0-9.-]+$'
+  DatabaseEndpointPort:
+    Type: Number
+    Default: 5432
+    AllowedValues: [5432]
+  DatabaseName:
+    Type: String
+    AllowedPattern: '^[A-Za-z][A-Za-z0-9_]{0,62}$'
+  DatabaseMigrationCredentialsSecretArn:
+    Type: String
+    AllowedPattern: '^arn:(aws|aws-us-gov|aws-cn):secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:[A-Za-z0-9/_+=.@-]+$'
+  ApplicationDataKeyArn:
+    Type: String
+    AllowedPattern: '^arn:(aws|aws-us-gov|aws-cn):kms:[a-z0-9-]+:[0-9]{12}:key/[a-f0-9-]+$'
+
+Rules:
+  ExplicitBillingAcknowledgementRequired:
+    Assertions:
+      - Assert: !Equals
+          - !Ref BillingAcknowledgement
+          - I_ACKNOWLEDGE_THIS_CREATES_BILLABLE_AWS_RESOURCES
+        AssertDescription: Refusing migration task registration without billing acknowledgement.
+
+Resources:
+  MigrationTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ecs-tasks.amazonaws.com }
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals: { aws:SourceAccount: !Ref AWS::AccountId }
+              ArnLike:
+                {
+                  aws:SourceArn: !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:*',
+                }
+      Policies:
+        - PolicyName: PullMigrationImage
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: ecr:GetAuthorizationToken
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:BatchGetImage
+                  - ecr:GetDownloadUrlForLayer
+                Resource: !Ref ApiImageRepositoryArn
+        - PolicyName: WriteMigrationLogs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !Sub arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/crypto-lending/${EnvironmentName}/outbox-worker:*
+        - PolicyName: ReadMigrationSecret
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Ref DatabaseMigrationCredentialsSecretArn
+              - Effect: Allow
+                Action: kms:Decrypt
+                Resource: !Ref ApplicationDataKeyArn
+                Condition:
+                  StringEquals:
+                    kms:ViaService: !Sub secretsmanager.${AWS::Region}.${AWS::URLSuffix}
+
+  MigrationTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      ContainerDefinitions:
+        - Name: database-migration
+          Command: [node, dist/infrastructure/database/migration.cli.js, --production, up]
+          Essential: true
+          Image: !Ref ApiImageUri
+          Environment:
+            - { Name: NODE_ENV, Value: production }
+            - { Name: MIGRATION_DATABASE_HOST, Value: !Ref DatabaseEndpointAddress }
+            - { Name: MIGRATION_DATABASE_PORT, Value: !Ref DatabaseEndpointPort }
+            - { Name: MIGRATION_DATABASE_NAME, Value: !Ref DatabaseName }
+            - { Name: MIGRATION_DATABASE_LOCK_TIMEOUT_MS, Value: '10000' }
+            - { Name: MIGRATION_DATABASE_SSL_MODE, Value: verify-full }
+            - { Name: MIGRATION_DATABASE_STATEMENT_TIMEOUT_MS, Value: '3600000' }
+            - { Name: NODE_EXTRA_CA_CERTS, Value: !Ref RdsCaBundlePath }
+          Secrets:
+            - Name: MIGRATION_DATABASE_USERNAME
+              ValueFrom: !Sub '${DatabaseMigrationCredentialsSecretArn}:username::'
+            - Name: MIGRATION_DATABASE_PASSWORD
+              ValueFrom: !Sub '${DatabaseMigrationCredentialsSecretArn}:password::'
+          LinuxParameters:
+            Capabilities: { Drop: [ALL] }
+            InitProcessEnabled: true
+          ReadonlyRootFilesystem: true
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-create-group: 'false'
+              awslogs-group: !Sub /crypto-lending/${EnvironmentName}/outbox-worker
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: database-migration
+          StopTimeout: 30
+          User: '10001:10001'
+      Cpu: '256'
+      ExecutionRoleArn: !GetAtt MigrationTaskExecutionRole.Arn
+      Family: !Sub crypto-lending-${EnvironmentName}-database-migration
+      Memory: '512'
+      NetworkMode: awsvpc
+      RequiresCompatibilities: [FARGATE]
+      RuntimePlatform:
+        CpuArchitecture: X86_64
+        OperatingSystemFamily: LINUX
+
+Outputs:
+  MigrationTaskDefinitionArn:
+    Value: !Ref MigrationTaskDefinition
+  MigrationTaskExecutionRoleArn:
+    Value: !GetAtt MigrationTaskExecutionRole.Arn

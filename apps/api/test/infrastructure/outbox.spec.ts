@@ -1,4 +1,4 @@
-import type { SQSClient } from '@aws-sdk/client-sqs';
+import { SendMessageBatchCommand, type SQSClient } from '@aws-sdk/client-sqs';
 import type { Pool, PoolClient, QueryResult, QueryResultRow } from 'pg';
 
 import { PostgresService } from '../../src/infrastructure/database/postgres.service';
@@ -7,6 +7,10 @@ import {
   parseJobEnvelope,
   type JobEnvelope,
 } from '../../src/infrastructure/outbox/job-envelope';
+import {
+  MAX_CUSTOM_JOB_ATTRIBUTES,
+  MAX_JOB_MESSAGE_BYTES,
+} from '../../src/infrastructure/outbox/job-message-policy';
 import {
   JobOutboxRepository,
   type ClaimedOutboxJob,
@@ -21,7 +25,7 @@ import type {
 import { OutboxWorker } from '../../src/infrastructure/outbox/outbox-worker.service';
 import { TransactionalJobPublisher } from '../../src/infrastructure/outbox/transactional-job-publisher.service';
 import { SqsService } from '../../src/infrastructure/sqs/sqs.service';
-import { testInfrastructureConfig } from './fixtures';
+import { testInfrastructureConfig, testOutboxDispatcherOptions } from './fixtures';
 
 interface StoredJob {
   id: string;
@@ -31,8 +35,10 @@ interface StoredJob {
   status: 'pending' | 'published' | 'failed';
   attempts: number;
   availableAt: number;
+  failedAt?: number;
   lockedBy?: string;
   lockedUntil?: number;
+  publishedAt?: number;
 }
 
 function queryResult<Row extends QueryResultRow>(
@@ -67,6 +73,10 @@ class TransactionalOutboxHarness {
     return this.committed.find((job) => job.id === id);
   }
 
+  seed(job: StoredJob): void {
+    this.committed.push(structuredClone(job));
+  }
+
   private async query(text: string, values: unknown[] = []): Promise<QueryResult> {
     const normalized = text.replace(/\s+/g, ' ').trim();
     this.queries.push(normalized);
@@ -99,6 +109,45 @@ class TransactionalOutboxHarness {
         availableAt: this.now,
       });
       return queryResult([], 1);
+    }
+    if (normalized.startsWith('WITH published_expired AS')) {
+      const [rawPublishedRetentionMs, rawFailedRetentionMs, rawBatchSize] = values;
+      const publishedBefore = this.now - Number(rawPublishedRetentionMs);
+      const failedBefore = this.now - Number(rawFailedRetentionMs);
+      const target = this.transaction ?? this.committed;
+      const expiredIds = new Set(
+        target
+          .filter(
+            (job) =>
+              (job.status === 'published' &&
+                job.publishedAt !== undefined &&
+                job.publishedAt < publishedBefore) ||
+              (job.status === 'failed' &&
+                job.failedAt !== undefined &&
+                job.failedAt < failedBefore),
+          )
+          .sort(
+            (left, right) =>
+              (left.status === 'published'
+                ? (left.publishedAt ?? 0) + Number(rawPublishedRetentionMs)
+                : (left.failedAt ?? 0) + Number(rawFailedRetentionMs)) -
+                (right.status === 'published'
+                  ? (right.publishedAt ?? 0) + Number(rawPublishedRetentionMs)
+                  : (right.failedAt ?? 0) + Number(rawFailedRetentionMs)) ||
+              left.id.localeCompare(right.id),
+          )
+          .slice(0, Number(rawBatchSize))
+          .map((job) => job.id),
+      );
+      if (this.transaction) {
+        this.transaction = this.transaction.filter((job) => !expiredIds.has(job.id));
+      } else {
+        this.committed = this.committed.filter((job) => !expiredIds.has(job.id));
+      }
+      return queryResult(
+        [...expiredIds].map((id) => ({ id })),
+        expiredIds.size,
+      );
     }
     if (normalized.startsWith('WITH candidates AS')) {
       const [claimToken, rawBatchSize, rawLeaseMs, rawMaxAttempts] = values;
@@ -140,6 +189,8 @@ class TransactionalOutboxHarness {
         return queryResult([], 0);
       }
       job.status = 'published';
+      job.publishedAt = this.now;
+      delete job.failedAt;
       delete job.lockedBy;
       delete job.lockedUntil;
       return queryResult([], 1);
@@ -159,6 +210,9 @@ class TransactionalOutboxHarness {
       job.status = rawTerminal ? 'failed' : 'pending';
       if (!rawTerminal) {
         job.availableAt = this.now + Number(rawRetryDelay);
+        delete job.failedAt;
+      } else {
+        job.failedAt = this.now;
       }
       delete job.lockedBy;
       delete job.lockedUntil;
@@ -171,15 +225,7 @@ class TransactionalOutboxHarness {
 function dispatcherOptions(
   overrides: Partial<OutboxDispatcherOptions> = {},
 ): OutboxDispatcherOptions {
-  return {
-    batchSize: 10,
-    concurrency: 2,
-    leaseMs: 5_000,
-    maxAttempts: 3,
-    retryBaseDelayMs: 100,
-    retryMaxDelayMs: 1_000,
-    ...overrides,
-  };
+  return testOutboxDispatcherOptions(overrides);
 }
 
 async function enqueueCommitted(
@@ -199,6 +245,10 @@ async function enqueueCommitted(
 }
 
 describe('transactional job outbox', () => {
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
   it('rejects envelope identifiers and timestamps that cannot support deduplication', () => {
     expect(() => createJobEnvelope('sample', {}, { id: '  ' })).toThrow('Job id must be trimmed');
     expect(() => createJobEnvelope('sample', {}, { occurredAt: 'not-a-timestamp' })).toThrow(
@@ -261,8 +311,114 @@ describe('transactional job outbox', () => {
     });
     expect(transport.publish).toHaveBeenCalledWith(
       expect.objectContaining({ envelope: expect.objectContaining({ id: envelope.id }) }),
+      expect.anything(),
     );
     expect(harness.job(envelope.id)?.status).toBe('published');
+  });
+
+  it('maps partial SQS batch failures per row without letting legacy poison block valid jobs', async () => {
+    const harness = new TransactionalOutboxHarness();
+    harness.seed({
+      id: 'legacy-batch-poison',
+      destination: 'jobs',
+      envelope: {
+        id: 'legacy-batch-poison',
+        kind: 'account.updated',
+        version: 1,
+        occurredAt: '2026-08-18T00:00:00.000Z',
+        payload: {},
+      },
+      messageAttributes: { jobId: 'reserved-legacy-value' },
+      status: 'pending',
+      attempts: 0,
+      availableAt: 0,
+    });
+    const postgres = new PostgresService(harness.pool);
+    const repository = new JobOutboxRepository(postgres);
+    const publisher = new TransactionalJobPublisher(repository);
+    await enqueueCommitted(postgres, publisher, 'batch-success');
+    await enqueueCommitted(postgres, publisher, 'batch-failure');
+    const send = jest.fn().mockImplementation((command: unknown) => {
+      if (!(command instanceof SendMessageBatchCommand)) {
+        throw new Error('Expected SendMessageBatchCommand');
+      }
+      const [successful, failed] = command.input.Entries ?? [];
+      return Promise.resolve({
+        Successful: successful ? [{ Id: successful.Id, MessageId: 'sqs-success' }] : [],
+        Failed: failed
+          ? [{ Id: failed.Id, Code: 'InternalError', Message: 'retry this entry' }]
+          : [],
+      });
+    });
+    const transport = new SqsService(
+      { send, destroy: jest.fn() } as unknown as SQSClient,
+      testInfrastructureConfig(),
+    );
+    const dispatcher = new OutboxDispatcher(
+      repository,
+      transport,
+      dispatcherOptions({ maxAttempts: 1 }),
+    );
+
+    await expect(dispatcher.dispatchBatch()).resolves.toEqual({
+      claimed: 3,
+      published: 1,
+      retried: 0,
+      failed: 2,
+      leaseLost: 0,
+    });
+    expect(send).toHaveBeenCalledTimes(1);
+    expect((send.mock.calls[0]?.[0] as SendMessageBatchCommand).input.Entries).toHaveLength(2);
+    expect(harness.job('legacy-batch-poison')?.status).toBe('failed');
+    expect(harness.job('batch-success')?.status).toBe('published');
+    expect(harness.job('batch-failure')?.status).toBe('failed');
+  });
+
+  it('splits SQS batches before their aggregate payload exceeds one MiB', async () => {
+    const harness = new TransactionalOutboxHarness();
+    const postgres = new PostgresService(harness.pool);
+    const repository = new JobOutboxRepository(postgres);
+    const publisher = new TransactionalJobPublisher(repository);
+    for (const id of ['large-a', 'large-b']) {
+      await postgres.withTransaction(() =>
+        publisher.enqueue({
+          id,
+          kind: 'large.sample',
+          occurredAt: '2026-08-18T00:00:00.000Z',
+          payload: 'x'.repeat(600_000),
+        }),
+      );
+    }
+    const send = jest.fn().mockImplementation((command: unknown) => {
+      if (!(command instanceof SendMessageBatchCommand)) {
+        throw new Error('Expected SendMessageBatchCommand');
+      }
+      return Promise.resolve({
+        Successful: (command.input.Entries ?? []).map((entry) => ({
+          Id: entry.Id,
+          MessageId: `sqs-${entry.Id}`,
+        })),
+      });
+    });
+    const dispatcher = new OutboxDispatcher(
+      repository,
+      new SqsService(
+        { send, destroy: jest.fn() } as unknown as SQSClient,
+        testInfrastructureConfig(),
+      ),
+      dispatcherOptions(),
+    );
+
+    await expect(dispatcher.dispatchBatch()).resolves.toMatchObject({
+      claimed: 2,
+      published: 2,
+    });
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(
+      send.mock.calls.map(
+        ([command]) => (command as SendMessageBatchCommand).input.Entries?.length,
+      ),
+    ).toEqual([1, 1]);
   });
 
   it('rejects an undefined poison payload before inserting a row', async () => {
@@ -275,6 +431,130 @@ describe('transactional job outbox', () => {
       postgres.withTransaction(() => publisher.enqueue({ kind: 'poison', payload: undefined })),
     ).rejects.toThrow('JSON serializable');
     expect(harness.queries.some((sql) => sql.startsWith('INSERT'))).toBe(false);
+  });
+
+  it('rejects nested values that JSON would otherwise silently discard or coerce', async () => {
+    const harness = new TransactionalOutboxHarness();
+    const postgres = new PostgresService(harness.pool);
+    const repository = new JobOutboxRepository(postgres);
+    const publisher = new TransactionalJobPublisher(repository);
+
+    await expect(
+      postgres.withTransaction(() =>
+        publisher.enqueue({ kind: 'poison', payload: { nested: undefined } }),
+      ),
+    ).rejects.toThrow('unsupported JSON value');
+    await expect(
+      postgres.withTransaction(() =>
+        publisher.enqueue({ kind: 'poison', payload: { amount: Number.POSITIVE_INFINITY } }),
+      ),
+    ).rejects.toThrow('unsupported JSON value');
+    expect(harness.queries.some((sql) => sql.startsWith('INSERT'))).toBe(false);
+  });
+
+  it('rejects transport poison messages before inserting an outbox row', async () => {
+    const harness = new TransactionalOutboxHarness();
+    const postgres = new PostgresService(harness.pool);
+    const repository = new JobOutboxRepository(postgres);
+    const publisher = new TransactionalJobPublisher(repository);
+    const tooManyAttributes = Object.fromEntries(
+      Array.from({ length: MAX_CUSTOM_JOB_ATTRIBUTES + 1 }, (_, index) => [`key${index}`, 'value']),
+    );
+
+    await expect(
+      postgres.withTransaction(() =>
+        publisher.enqueue({ kind: 'poison', payload: {}, messageAttributes: tooManyAttributes }),
+      ),
+    ).rejects.toThrow('custom attributes');
+    await expect(
+      postgres.withTransaction(() =>
+        publisher.enqueue({
+          kind: 'poison',
+          payload: {},
+          messageAttributes: { jobId: 'shadowed-id' },
+        }),
+      ),
+    ).rejects.toThrow('reserved job message attribute');
+    await expect(
+      postgres.withTransaction(() =>
+        publisher.enqueue({ kind: 'poison', payload: 'x'.repeat(MAX_JOB_MESSAGE_BYTES) }),
+      ),
+    ).rejects.toThrow('cannot exceed');
+    await expect(
+      postgres.withTransaction(() =>
+        publisher.enqueue({ kind: 'poison', payload: {}, messageAttributes: { trace: '' } }),
+      ),
+    ).rejects.toThrow('characters SQS cannot accept');
+    await expect(
+      postgres.withTransaction(() =>
+        publisher.enqueue({ kind: 'poison', payload: {}, messageAttributes: { trace: '\0' } }),
+      ),
+    ).rejects.toThrow('characters SQS cannot accept');
+    await expect(
+      postgres.withTransaction(() => publisher.enqueue({ kind: 'poison', payload: '\uFFFE' })),
+    ).rejects.toThrow('characters SQS cannot accept');
+    await expect(
+      postgres.withTransaction(() => publisher.enqueue({ kind: 'poison\0', payload: {} })),
+    ).rejects.toThrow('characters SQS cannot accept');
+    await expect(
+      postgres.withTransaction(() =>
+        publisher.enqueue({ id: 'poison\0id', kind: 'poison', payload: {} }),
+      ),
+    ).rejects.toThrow('characters SQS cannot accept');
+    expect(harness.queries.filter((sql) => sql.startsWith('INSERT'))).toHaveLength(0);
+  });
+
+  it('retires a legacy poison row without blocking newer outbox delivery', async () => {
+    const harness = new TransactionalOutboxHarness();
+    harness.seed({
+      id: 'legacy-poison',
+      destination: 'jobs',
+      envelope: {
+        id: 'legacy-poison',
+        kind: 'account.updated',
+        version: 1,
+        occurredAt: '2026-08-18T00:00:00.000Z',
+        payload: {},
+      },
+      messageAttributes: { jobId: 'legacy-shadow-value' },
+      status: 'pending',
+      attempts: 0,
+      availableAt: 0,
+    });
+    const postgres = new PostgresService(harness.pool);
+    const repository = new JobOutboxRepository(postgres);
+    const publisher = new TransactionalJobPublisher(repository);
+    await enqueueCommitted(postgres, publisher, 'new-valid-job');
+    const client = {
+      send: jest.fn().mockImplementation((command: unknown) => {
+        if (!(command instanceof SendMessageBatchCommand)) {
+          throw new Error('Expected SendMessageBatchCommand');
+        }
+        return Promise.resolve({
+          Successful: (command.input.Entries ?? []).map((entry) => ({
+            Id: entry.Id,
+            MessageId: 'sqs-valid',
+          })),
+        });
+      }),
+      destroy: jest.fn(),
+    } as unknown as SQSClient;
+    const dispatcher = new OutboxDispatcher(
+      repository,
+      new SqsService(client, testInfrastructureConfig()),
+      dispatcherOptions({ maxAttempts: 1 }),
+    );
+
+    await expect(dispatcher.dispatchBatch()).resolves.toEqual({
+      claimed: 2,
+      published: 1,
+      retried: 0,
+      failed: 1,
+      leaseLost: 0,
+    });
+    expect(harness.job('legacy-poison')?.status).toBe('failed');
+    expect(harness.job('new-valid-job')?.status).toBe('published');
+    expect(client.send).toHaveBeenCalledTimes(1);
   });
 
   it('uses SKIP LOCKED leases and rejects a stale claimant after reclaim', async () => {
@@ -303,6 +583,73 @@ describe('transactional job outbox', () => {
     await expect(repository.markPublished('leased-job', 'claim-a')).resolves.toBe(false);
     await expect(repository.markPublished('leased-job', 'claim-b')).resolves.toBe(true);
     expect(harness.queries.some((sql) => sql.includes('FOR UPDATE SKIP LOCKED'))).toBe(true);
+  });
+
+  it('deletes terminal outbox history in bounded batches while preserving pending and fresh rows', async () => {
+    const harness = new TransactionalOutboxHarness();
+    harness.seed({
+      id: 'old-published',
+      destination: 'jobs',
+      envelope: createJobEnvelope('sample', {}, { id: 'old-published' }),
+      messageAttributes: {},
+      status: 'published',
+      attempts: 0,
+      availableAt: 0,
+      publishedAt: 50_000,
+    });
+    harness.seed({
+      id: 'old-failed',
+      destination: 'jobs',
+      envelope: createJobEnvelope('sample', {}, { id: 'old-failed' }),
+      messageAttributes: {},
+      status: 'failed',
+      attempts: 3,
+      availableAt: 0,
+      failedAt: 0,
+    });
+    harness.seed({
+      id: 'old-pending',
+      destination: 'jobs',
+      envelope: createJobEnvelope('sample', {}, { id: 'old-pending' }),
+      messageAttributes: {},
+      status: 'pending',
+      attempts: 0,
+      availableAt: 0,
+    });
+    harness.advance(120_001);
+    harness.seed({
+      id: 'fresh-published',
+      destination: 'jobs',
+      envelope: createJobEnvelope('sample', {}, { id: 'fresh-published' }),
+      messageAttributes: {},
+      status: 'published',
+      attempts: 0,
+      availableAt: harness.now,
+      publishedAt: harness.now,
+    });
+    const repository = new JobOutboxRepository(new PostgresService(harness.pool));
+    const cleanup = {
+      batchSize: 1,
+      failedRetentionMs: 120_000,
+      publishedRetentionMs: 60_000,
+    };
+
+    await expect(repository.deleteExpired(cleanup)).resolves.toBe(1);
+    expect(harness.job('old-published')).toBeUndefined();
+    expect(harness.job('old-failed')).toBeDefined();
+    await expect(repository.deleteExpired(cleanup)).resolves.toBe(1);
+    await expect(repository.deleteExpired(cleanup)).resolves.toBe(0);
+    expect(harness.job('old-published')).toBeUndefined();
+    expect(harness.job('old-failed')).toBeUndefined();
+    expect(harness.job('old-pending')).toBeDefined();
+    expect(harness.job('fresh-published')).toBeDefined();
+    expect(
+      harness.queries.some(
+        (sql) =>
+          sql.startsWith('WITH published_expired AS') &&
+          (sql.match(/FOR UPDATE SKIP LOCKED/g) ?? []).length === 2,
+      ),
+    ).toBe(true);
   });
 
   it('records an SQS failure as retry and then terminal failure at the limit', async () => {
@@ -334,6 +681,119 @@ describe('transactional job outbox', () => {
       status: 'failed',
       attempts: 2,
     });
+  });
+
+  it('aborts a stalled batch before its lease and settles every row for retry', async () => {
+    jest.useFakeTimers();
+    const harness = new TransactionalOutboxHarness();
+    const postgres = new PostgresService(harness.pool);
+    const repository = new JobOutboxRepository(postgres);
+    const publisher = new TransactionalJobPublisher(repository);
+    await enqueueCommitted(postgres, publisher, 'stalled-batch-a');
+    await enqueueCommitted(postgres, publisher, 'stalled-batch-b');
+    const transport: OutboxTransport = {
+      maxBatchSize: 10,
+      publish: jest.fn(),
+      publishBatch: jest.fn((_messages, abortSignal) => {
+        return new Promise((_resolve, reject) => {
+          const rejectAborted = (): void => reject(abortSignal?.reason);
+          if (abortSignal?.aborted) {
+            rejectAborted();
+          } else {
+            abortSignal?.addEventListener('abort', rejectAborted, { once: true });
+          }
+        });
+      }),
+    };
+    const dispatcher = new OutboxDispatcher(
+      repository,
+      transport,
+      dispatcherOptions({ leaseMs: 5_000, publishTimeoutMs: 100 }),
+    );
+
+    const dispatch = dispatcher.dispatchBatch();
+    await jest.advanceTimersByTimeAsync(100);
+
+    await expect(dispatch).resolves.toMatchObject({ claimed: 2, retried: 2 });
+    expect(harness.job('stalled-batch-a')).toMatchObject({ status: 'pending', attempts: 1 });
+    expect(harness.job('stalled-batch-b')).toMatchObject({ status: 'pending', attempts: 1 });
+  });
+
+  it('aborts an in-flight publish when the worker receives its shutdown signal', async () => {
+    const harness = new TransactionalOutboxHarness();
+    const postgres = new PostgresService(harness.pool);
+    const repository = new JobOutboxRepository(postgres);
+    const publisher = new TransactionalJobPublisher(repository);
+    await enqueueCommitted(postgres, publisher, 'shutdown-batch-a');
+    await enqueueCommitted(postgres, publisher, 'shutdown-batch-b');
+    const abortController = new AbortController();
+    const transport: OutboxTransport = {
+      maxBatchSize: 10,
+      publish: jest.fn(),
+      publishBatch: jest.fn((_messages, abortSignal) => {
+        abortController.abort();
+        return Promise.reject(abortSignal?.reason ?? new Error('worker stopped'));
+      }),
+    };
+    const dispatcher = new OutboxDispatcher(repository, transport, dispatcherOptions());
+    const worker = new OutboxWorker(dispatcher, dispatcherOptions());
+
+    await expect(worker.run(abortController.signal, 10)).resolves.toBeUndefined();
+
+    expect(transport.publishBatch).toHaveBeenCalledTimes(1);
+    expect(harness.job('shutdown-batch-a')).toMatchObject({ status: 'pending', attempts: 0 });
+    expect(harness.job('shutdown-batch-b')).toMatchObject({ status: 'pending', attempts: 0 });
+  });
+
+  it('settles confirmed batch successes when shutdown follows the SQS response', async () => {
+    const harness = new TransactionalOutboxHarness();
+    const postgres = new PostgresService(harness.pool);
+    const repository = new JobOutboxRepository(postgres);
+    const publisher = new TransactionalJobPublisher(repository);
+    await enqueueCommitted(postgres, publisher, 'confirmed-before-shutdown-a');
+    await enqueueCommitted(postgres, publisher, 'confirmed-before-shutdown-b');
+    const abortController = new AbortController();
+    const transport: OutboxTransport = {
+      maxBatchSize: 10,
+      publish: jest.fn(),
+      publishBatch: jest.fn(async (messages) => {
+        abortController.abort();
+        return messages.map(() => ({ status: 'published' as const, receipt: {} }));
+      }),
+    };
+    const dispatcher = new OutboxDispatcher(repository, transport, dispatcherOptions());
+
+    await expect(dispatcher.dispatchBatch(abortController.signal)).resolves.toEqual({
+      claimed: 2,
+      published: 2,
+      retried: 0,
+      failed: 0,
+      leaseLost: 0,
+    });
+    expect(harness.job('confirmed-before-shutdown-a')?.status).toBe('published');
+    expect(harness.job('confirmed-before-shutdown-b')?.status).toBe('published');
+  });
+
+  it('does not claim new rows after shutdown has already started', async () => {
+    const repository = {
+      claimBatch: jest.fn(),
+    } as unknown as JobOutboxRepository;
+    const dispatcher = new OutboxDispatcher(
+      repository,
+      { publish: jest.fn() },
+      dispatcherOptions(),
+    );
+    const abortController = new AbortController();
+    abortController.abort();
+
+    await expect(dispatcher.dispatchBatch(abortController.signal)).resolves.toEqual({
+      claimed: 0,
+      published: 0,
+      retried: 0,
+      failed: 0,
+      leaseLost: 0,
+    });
+    expect(repository.claimBatch).not.toHaveBeenCalled();
   });
 
   it('reuses the same job ID after publish succeeds but the DB mark loses its lease', async () => {
@@ -420,6 +880,7 @@ describe('transactional job outbox', () => {
   it('runs polling only when the dedicated worker entrypoint explicitly starts it', async () => {
     const abortController = new AbortController();
     const dispatcher = {
+      cleanupExpired: jest.fn().mockResolvedValue(0),
       dispatchBatch: jest.fn().mockImplementation(() => {
         abortController.abort();
         return Promise.resolve({
@@ -431,16 +892,47 @@ describe('transactional job outbox', () => {
         });
       }),
     } as unknown as OutboxDispatcher;
-    const worker = new OutboxWorker(dispatcher);
+    const worker = new OutboxWorker(dispatcher, dispatcherOptions());
 
     await expect(worker.run(abortController.signal, 10)).resolves.toBeUndefined();
     expect(dispatcher.dispatchBatch).toHaveBeenCalledTimes(1);
+  });
+
+  it('drains full retention batches without starving dispatch work', async () => {
+    const abortController = new AbortController();
+    const cleanupExpired = jest
+      .fn()
+      .mockResolvedValueOnce(2)
+      .mockImplementationOnce(() => {
+        abortController.abort();
+        return Promise.resolve(0);
+      });
+    const dispatcher = {
+      cleanupExpired,
+      dispatchBatch: jest.fn().mockResolvedValue({
+        claimed: 0,
+        published: 0,
+        retried: 0,
+        failed: 0,
+        leaseLost: 0,
+      }),
+    } as unknown as OutboxDispatcher;
+    const worker = new OutboxWorker(
+      dispatcher,
+      dispatcherOptions({ cleanupBatchSize: 2, cleanupIntervalMs: 10_000 }),
+    );
+
+    await worker.run(abortController.signal, 10);
+
+    expect(cleanupExpired).toHaveBeenCalledTimes(2);
+    expect(dispatcher.dispatchBatch).toHaveBeenCalledTimes(2);
   });
 
   it('removes abort listeners after repeated idle polling', async () => {
     const abortController = new AbortController();
     let passes = 0;
     const dispatcher = {
+      cleanupExpired: jest.fn().mockResolvedValue(0),
       dispatchBatch: jest.fn().mockImplementation(() => {
         passes += 1;
         if (passes === 12) {
@@ -457,7 +949,7 @@ describe('transactional job outbox', () => {
     } as unknown as OutboxDispatcher;
     const addListener = jest.spyOn(abortController.signal, 'addEventListener');
     const removeListener = jest.spyOn(abortController.signal, 'removeEventListener');
-    const worker = new OutboxWorker(dispatcher);
+    const worker = new OutboxWorker(dispatcher, dispatcherOptions());
 
     await worker.run(abortController.signal, 10);
 

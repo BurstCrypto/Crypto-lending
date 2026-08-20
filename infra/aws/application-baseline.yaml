@@ -1,13 +1,11 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: KAN-34 billable non-production application baseline.
+Description: KAN-34 billable app baseline.
 
 Parameters:
   BillingAcknowledgement:
     Type: String
     Default: NOT_AUTHORIZED
-    AllowedValues:
-      - NOT_AUTHORIZED
-      - I_ACKNOWLEDGE_THIS_CREATES_BILLABLE_AWS_RESOURCES
+    AllowedValues: [NOT_AUTHORIZED, I_ACKNOWLEDGE_THIS_CREATES_BILLABLE_AWS_RESOURCES]
 
   EnvironmentName:
     Type: String
@@ -89,10 +87,7 @@ Parameters:
   DatabaseInstanceClass:
     Type: String
     Default: db.t4g.micro
-    AllowedValues:
-      - db.t4g.micro
-      - db.t4g.small
-      - db.t4g.medium
+    AllowedValues: [db.t4g.micro, db.t4g.small, db.t4g.medium]
   DatabaseAllocatedStorageGiB:
     Type: Number
     Default: 20
@@ -104,28 +99,19 @@ Parameters:
   DatabaseDeletionProtection:
     Type: String
     Default: 'false'
-    AllowedValues:
-      - 'true'
-      - 'false'
+    AllowedValues: ['true', 'false']
   EnableDatabaseMultiAz:
     Type: String
     Default: 'false'
-    AllowedValues:
-      - 'true'
-      - 'false'
+    AllowedValues: ['true', 'false']
   RedisNodeType:
     Type: String
     Default: cache.t4g.micro
-    AllowedValues:
-      - cache.t4g.micro
-      - cache.t4g.small
-      - cache.t4g.medium
+    AllowedValues: [cache.t4g.micro, cache.t4g.small, cache.t4g.medium]
   EnableRedisReplica:
     Type: String
     Default: 'false'
-    AllowedValues:
-      - 'true'
-      - 'false'
+    AllowedValues: ['true', 'false']
   StatefulBackupRetentionDays:
     Type: Number
     Default: 1
@@ -146,33 +132,19 @@ Parameters:
   LogRetentionDays:
     Type: Number
     Default: 14
-    AllowedValues:
-      - 1
-      - 3
-      - 5
-      - 7
-      - 14
-      - 30
-      - 60
-      - 90
+    AllowedValues: [1, 3, 5, 7, 14, 30, 60, 90]
   EnableOperationalAlarms:
     Type: String
     Default: 'true'
-    AllowedValues:
-      - 'true'
-      - 'false'
+    AllowedValues: ['true', 'false']
   EnableOperationalDashboard:
     Type: String
     Default: 'false'
-    AllowedValues:
-      - 'true'
-      - 'false'
+    AllowedValues: ['true', 'false']
   EnableContainerInsights:
     Type: String
     Default: disabled
-    AllowedValues:
-      - enabled
-      - disabled
+    AllowedValues: [enabled, disabled]
 
 Rules:
   ExplicitBillingAcknowledgementRequired:
@@ -180,10 +152,7 @@ Rules:
       - Assert: !Equals
           - !Ref BillingAcknowledgement
           - I_ACKNOWLEDGE_THIS_CREATES_BILLABLE_AWS_RESOURCES
-        AssertDescription: >-
-          Refusing stack creation. Explicitly acknowledge that ALB, interface
-          endpoints, ECS, RDS, ElastiCache, KMS, SQS, Secrets Manager, and CloudWatch
-          resources are billable before deploying.
+        AssertDescription: Explicit billing acknowledgement is required before deployment.
   NoPrivateEgressRequiresStoppedServices:
     Assertions:
       - Assert: !Or
@@ -201,11 +170,11 @@ Rules:
             - !Equals
               - !Ref WorkerDesiredCount
               - 0
-        AssertDescription: PrivateEgressMode None requires every ECS desired count to be zero.
+        AssertDescription: None mode requires zero ECS desired counts.
   PublicIngressMustBeRestricted:
     Assertions:
       - Assert: !Not [!Equals [!Ref AllowedIngressIpv4Cidr, 0.0.0.0/0]]
-        AssertDescription: AllowedIngressIpv4Cidr must be narrower than the public internet.
+        AssertDescription: Public ingress must exclude 0.0.0.0/0.
 
 Conditions:
   UseVpcEndpoints: !Equals [!Ref PrivateEgressMode, VpcEndpoints]
@@ -702,7 +671,7 @@ Resources:
   DatabaseSubnetGroup:
     Type: AWS::RDS::DBSubnetGroup
     Properties:
-      DBSubnetGroupDescription: !Sub Private PostgreSQL subnets for ${EnvironmentName}
+      DBSubnetGroupDescription: !Sub PostgreSQL subnets for ${EnvironmentName}
       SubnetIds:
         - !Ref PrivateSubnetA
         - !Ref PrivateSubnetB
@@ -728,6 +697,17 @@ Resources:
         SecretStringTemplate: '{"username":"crypto_admin"}'
       KmsKeyId: !GetAtt ApplicationDataKey.Arn
 
+  DatabaseRuntimeSecret:
+    Type: AWS::SecretsManager::Secret
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      GenerateSecretString:
+        GenerateStringKey: password
+        PasswordLength: 48
+        SecretStringTemplate: '{"username":"crypto_runtime"}'
+      KmsKeyId: !GetAtt ApplicationDataKey.Arn
+
   RedisAuthSecret:
     Type: AWS::SecretsManager::Secret
     DeletionPolicy: Retain
@@ -744,7 +724,7 @@ Resources:
   DatabaseParameterGroup:
     Type: AWS::RDS::DBParameterGroup
     Properties:
-      Description: !Sub Crypto Lending ${EnvironmentName} PostgreSQL TLS policy
+      Description: !Sub ${EnvironmentName} PostgreSQL TLS policy
       Family: postgres16
       Parameters:
         rds.force_ssl: '1'
@@ -920,18 +900,18 @@ Resources:
                 Resource:
                   - !Sub ${ApiLogGroup.Arn}:*
                   - !Sub ${WorkerLogGroup.Arn}:*
-        - PolicyName: ReadApplicationRuntimeSecrets
+        - PolicyName: RuntimeSecrets
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
-              - Sid: ReadOnlyNamedSecrets
+              - Sid: NamedSecrets
                 Effect: Allow
                 Action:
                   - secretsmanager:GetSecretValue
                 Resource:
-                  - !Ref DatabaseCredentialsSecret
+                  - !Ref DatabaseRuntimeSecret
                   - !Ref RedisAuthSecret
-              - Sid: DecryptRuntimeSecrets
+              - Sid: DecryptSecrets
                 Effect: Allow
                 Action:
                   - kms:Decrypt
@@ -1096,7 +1076,7 @@ Resources:
     Properties:
       HealthCheckEnabled: true
       HealthCheckIntervalSeconds: 30
-      HealthCheckPath: /api/v1/health/dependencies
+      HealthCheckPath: /api/v1/internal/health/dependencies
       HealthCheckPort: traffic-port
       HealthCheckProtocol: HTTP
       HealthCheckTimeoutSeconds: 5
@@ -1119,7 +1099,6 @@ Resources:
         - Type: fixed-response
           FixedResponseConfig:
             ContentType: text/plain
-            MessageBody: Not found
             StatusCode: '404'
       LoadBalancerArn: !Ref ApplicationLoadBalancer
       Port: 80
@@ -1139,26 +1118,38 @@ Resources:
             StatusCode: HTTP_301
       Conditions:
         - Field: host-header
-          HostHeaderConfig:
-            Values: [!Ref ApplicationHostname]
+          HostHeaderConfig: { Values: [!Ref ApplicationHostname] }
       ListenerArn: !Ref HttpRedirectListener
       Priority: 5
 
   HttpsListener:
     Type: AWS::ElasticLoadBalancingV2::Listener
     Properties:
-      Certificates:
-        - CertificateArn: !Ref AlbCertificateArn
+      Certificates: [{ CertificateArn: !Ref AlbCertificateArn }]
       DefaultActions:
         - Type: fixed-response
           FixedResponseConfig:
             ContentType: text/plain
-            MessageBody: Not found
             StatusCode: '404'
       LoadBalancerArn: !Ref ApplicationLoadBalancer
       Port: 443
       Protocol: HTTPS
       SslPolicy: ELBSecurityPolicy-TLS13-1-2-2021-06
+
+  HttpsInternalApiDenyRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+        - Type: fixed-response
+          FixedResponseConfig: { ContentType: text/plain, StatusCode: '404' }
+      Conditions:
+        - Field: host-header
+          HostHeaderConfig: { Values: [!Ref ApplicationHostname] }
+        - Field: path-pattern
+          PathPatternConfig:
+            RegexValues: ['^/[aA][pP][iI]/[vV]1/[iI][nN][tT][eE][rR][nN][aA][lL]/.*$']
+      ListenerArn: !Ref HttpsListener
+      Priority: 5
 
   HttpsApiListenerRule:
     Type: AWS::ElasticLoadBalancingV2::ListenerRule
@@ -1168,12 +1159,9 @@ Resources:
           TargetGroupArn: !Ref ApiTargetGroup
       Conditions:
         - Field: host-header
-          HostHeaderConfig:
-            Values: [!Ref ApplicationHostname]
+          HostHeaderConfig: { Values: [!Ref ApplicationHostname] }
         - Field: path-pattern
-          PathPatternConfig:
-            Values:
-              - /api/v1/*
+          PathPatternConfig: { Values: [/api/v1/*] }
       ListenerArn: !Ref HttpsListener
       Priority: 10
 
@@ -1185,17 +1173,14 @@ Resources:
           TargetGroupArn: !Ref WebTargetGroup
       Conditions:
         - Field: host-header
-          HostHeaderConfig:
-            Values: [!Ref ApplicationHostname]
+          HostHeaderConfig: { Values: [!Ref ApplicationHostname] }
       ListenerArn: !Ref HttpsListener
       Priority: 20
 
   EcsCluster:
     Type: AWS::ECS::Cluster
     Properties:
-      CapacityProviders:
-        - FARGATE
-        - FARGATE_SPOT
+      CapacityProviders: [FARGATE, FARGATE_SPOT]
       ClusterName: !Sub crypto-lending-${EnvironmentName}
       ClusterSettings:
         - Name: containerInsights
@@ -1214,10 +1199,11 @@ Resources:
           Environment:
             - { Name: NODE_ENV, Value: production }
             - { Name: PORT, Value: '3001' }
-            - { Name: DATABASE_HOST, Value: !GetAtt Database.Endpoint.Address }
-            - { Name: DATABASE_PORT, Value: !GetAtt Database.Endpoint.Port }
-            - { Name: DATABASE_NAME, Value: !Ref DatabaseName }
-            - { Name: DATABASE_SSL_MODE, Value: verify-full }
+            - { Name: DATABASE_RUNTIME_HOST, Value: !GetAtt Database.Endpoint.Address }
+            - { Name: DATABASE_RUNTIME_PORT, Value: !GetAtt Database.Endpoint.Port }
+            - { Name: DATABASE_RUNTIME_NAME, Value: !Ref DatabaseName }
+            - { Name: DATABASE_RUNTIME_USERNAME, Value: crypto_runtime }
+            - { Name: DATABASE_RUNTIME_SSL_MODE, Value: verify-full }
             - { Name: NODE_EXTRA_CA_CERTS, Value: !Ref RdsCaBundlePath }
             - { Name: REDIS_HOST, Value: !GetAtt RedisReplicationGroup.PrimaryEndPoint.Address }
             - { Name: REDIS_PORT, Value: !GetAtt RedisReplicationGroup.PrimaryEndPoint.Port }
@@ -1229,8 +1215,8 @@ Resources:
             - { Name: SQS_MAX_RECEIVE_COUNT, Value: !Ref SqsMaxReceiveCount }
             - { Name: SQS_VISIBILITY_TIMEOUT_SECONDS, Value: !Ref SqsVisibilityTimeoutSeconds }
           Secrets:
-            - { Name: DATABASE_USERNAME, ValueFrom: !Sub '${DatabaseCredentialsSecret}:username::' }
-            - { Name: DATABASE_PASSWORD, ValueFrom: !Sub '${DatabaseCredentialsSecret}:password::' }
+            - Name: DATABASE_RUNTIME_PASSWORD
+              ValueFrom: !Sub '${DatabaseRuntimeSecret}:password::'
             - { Name: REDIS_AUTH_TOKEN, ValueFrom: !Sub '${RedisAuthSecret}:authToken::' }
           LinuxParameters:
             Capabilities: { Drop: [ALL] }
@@ -1243,10 +1229,7 @@ Resources:
               awslogs-group: !Ref ApiLogGroup
               awslogs-region: !Ref AWS::Region
               awslogs-stream-prefix: api
-          PortMappings:
-            - ContainerPort: 3001
-              Name: api-http
-              Protocol: tcp
+          PortMappings: [{ ContainerPort: 3001, Name: api-http, Protocol: tcp }]
           StopTimeout: 30
           User: '10001:10001'
       Cpu: '256'
@@ -1256,9 +1239,7 @@ Resources:
       NetworkMode: awsvpc
       RequiresCompatibilities:
         - FARGATE
-      RuntimePlatform:
-        CpuArchitecture: X86_64
-        OperatingSystemFamily: LINUX
+      RuntimePlatform: { CpuArchitecture: X86_64, OperatingSystemFamily: LINUX }
       TaskRoleArn: !GetAtt ApiTaskRole.Arn
 
   WebTaskDefinition:
@@ -1285,10 +1266,7 @@ Resources:
               awslogs-group: !Ref WebLogGroup
               awslogs-region: !Ref AWS::Region
               awslogs-stream-prefix: web
-          PortMappings:
-            - ContainerPort: 3000
-              Name: web-http
-              Protocol: tcp
+          PortMappings: [{ ContainerPort: 3000, Name: web-http, Protocol: tcp }]
           StopTimeout: 30
           User: '10001:10001'
       Cpu: '256'
@@ -1298,9 +1276,7 @@ Resources:
       NetworkMode: awsvpc
       RequiresCompatibilities:
         - FARGATE
-      RuntimePlatform:
-        CpuArchitecture: X86_64
-        OperatingSystemFamily: LINUX
+      RuntimePlatform: { CpuArchitecture: X86_64, OperatingSystemFamily: LINUX }
       TaskRoleArn: !GetAtt WebTaskRole.Arn
 
   WorkerTaskDefinition:
@@ -1308,9 +1284,7 @@ Resources:
     Properties:
       ContainerDefinitions:
         - Name: outbox-worker
-          Command:
-            - node
-            - dist/infrastructure/outbox/outbox-worker.cli.js
+          Command: [node, dist/infrastructure/outbox/outbox-worker.cli.js]
           Essential: true
           Image: !Ref WorkerImageUri
           HealthCheck:
@@ -1321,10 +1295,11 @@ Resources:
             Timeout: 10
           Environment:
             - { Name: NODE_ENV, Value: production }
-            - { Name: DATABASE_HOST, Value: !GetAtt Database.Endpoint.Address }
-            - { Name: DATABASE_PORT, Value: !GetAtt Database.Endpoint.Port }
-            - { Name: DATABASE_NAME, Value: !Ref DatabaseName }
-            - { Name: DATABASE_SSL_MODE, Value: verify-full }
+            - { Name: DATABASE_RUNTIME_HOST, Value: !GetAtt Database.Endpoint.Address }
+            - { Name: DATABASE_RUNTIME_PORT, Value: !GetAtt Database.Endpoint.Port }
+            - { Name: DATABASE_RUNTIME_NAME, Value: !Ref DatabaseName }
+            - { Name: DATABASE_RUNTIME_USERNAME, Value: crypto_runtime }
+            - { Name: DATABASE_RUNTIME_SSL_MODE, Value: verify-full }
             - { Name: NODE_EXTRA_CA_CERTS, Value: !Ref RdsCaBundlePath }
             - { Name: REDIS_HOST, Value: !GetAtt RedisReplicationGroup.PrimaryEndPoint.Address }
             - { Name: REDIS_PORT, Value: !GetAtt RedisReplicationGroup.PrimaryEndPoint.Port }
@@ -1336,8 +1311,8 @@ Resources:
             - { Name: SQS_MAX_RECEIVE_COUNT, Value: !Ref SqsMaxReceiveCount }
             - { Name: SQS_VISIBILITY_TIMEOUT_SECONDS, Value: !Ref SqsVisibilityTimeoutSeconds }
           Secrets:
-            - { Name: DATABASE_USERNAME, ValueFrom: !Sub '${DatabaseCredentialsSecret}:username::' }
-            - { Name: DATABASE_PASSWORD, ValueFrom: !Sub '${DatabaseCredentialsSecret}:password::' }
+            - Name: DATABASE_RUNTIME_PASSWORD
+              ValueFrom: !Sub '${DatabaseRuntimeSecret}:password::'
             - { Name: REDIS_AUTH_TOKEN, ValueFrom: !Sub '${RedisAuthSecret}:authToken::' }
           LinuxParameters:
             Capabilities: { Drop: [ALL] }
@@ -1359,14 +1334,13 @@ Resources:
       NetworkMode: awsvpc
       RequiresCompatibilities:
         - FARGATE
-      RuntimePlatform:
-        CpuArchitecture: X86_64
-        OperatingSystemFamily: LINUX
+      RuntimePlatform: { CpuArchitecture: X86_64, OperatingSystemFamily: LINUX }
       TaskRoleArn: !GetAtt WorkerTaskRole.Arn
 
   ApiService:
     Type: AWS::ECS::Service
     DependsOn:
+      - HttpsInternalApiDenyRule
       - HttpsApiListenerRule
     Properties:
       Cluster: !Ref EcsCluster
@@ -1600,6 +1574,8 @@ Outputs:
     Value: !GetAtt Database.Endpoint.Port
   DatabaseCredentialsSecretArn:
     Value: !Ref DatabaseCredentialsSecret
+  DatabaseRuntimeSecretArn:
+    Value: !Ref DatabaseRuntimeSecret
   RedisPrimaryEndpointAddress:
     Value: !GetAtt RedisReplicationGroup.PrimaryEndPoint.Address
   RedisPrimaryEndpointPort:

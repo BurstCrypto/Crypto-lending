@@ -1,20 +1,13 @@
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
 
-import { buildRestrictedWalletLabPolicy } from '@/lib/security/browser-egress';
+import { buildRestrictedWalletLabSecurityHeaders } from '@/lib/security/browser-egress';
 import { decideWalletLabAccess, readWalletLabAccessConfiguration } from '@/lib/wallets/lab/access';
 
-const SECURITY_HEADERS = {
-  'Cache-Control': 'private, no-store, max-age=0',
-  'Content-Security-Policy': buildRestrictedWalletLabPolicy(process.env.NODE_ENV),
-  Pragma: 'no-cache',
-  'Referrer-Policy': 'no-referrer',
-  'X-Content-Type-Options': 'nosniff',
-  'X-Robots-Tag': 'noindex, nofollow, noarchive',
-} as const;
+const SECURITY_HEADERS = buildRestrictedWalletLabSecurityHeaders(process.env.NODE_ENV);
 
 function applySecurityHeaders(response: NextResponse): NextResponse {
-  for (const [name, value] of Object.entries(SECURITY_HEADERS)) response.headers.set(name, value);
+  for (const { key, value } of SECURITY_HEADERS) response.headers.set(key, value);
   return response;
 }
 

@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { performance } from 'node:perf_hooks';
 
 import { Inject, Injectable, OnApplicationShutdown } from '@nestjs/common';
 import {
@@ -6,15 +7,20 @@ import {
   DeleteMessageCommand,
   GetQueueAttributesCommand,
   ReceiveMessageCommand,
+  SendMessageBatchCommand,
   SendMessageCommand,
+  type MessageAttributeValue,
+  type SendMessageBatchRequestEntry,
   type SQSClient,
 } from '@aws-sdk/client-sqs';
 
 import { INFRASTRUCTURE_CONFIG } from '../config/infrastructure-config.module';
 import type { InfrastructureConfig } from '../config/infrastructure.config';
 import { createJobEnvelope, parseJobEnvelope, type JobEnvelope } from '../outbox/job-envelope';
+import { MAX_JOB_MESSAGE_BYTES, serializeJobMessage } from '../outbox/job-message-policy';
 import type {
   OutboxTransport,
+  OutboxTransportBatchResult,
   OutboxTransportMessage,
   OutboxTransportReceipt,
 } from '../outbox/outbox-transport.port';
@@ -26,8 +32,96 @@ interface RedrivePolicy {
   maxReceiveCount?: string | number;
 }
 
+interface PreparedBatchEntry {
+  bytes: number;
+  messageIndex: number;
+  request: SendMessageBatchRequestEntry;
+}
+
+const SQS_MAX_BATCH_MESSAGES = 10;
+
+interface RequestAbortScope {
+  signal: AbortSignal;
+  close(): void;
+}
+
+function requestAbortScope(
+  suppliedSignal: AbortSignal | undefined,
+  timeoutMs: number,
+): RequestAbortScope {
+  const controller = new AbortController();
+  const timeout = setTimeout(
+    () => controller.abort(new Error(`SQS request timed out after ${timeoutMs}ms`)),
+    timeoutMs,
+  );
+  timeout.unref();
+  const onSuppliedAbort = (): void => controller.abort(suppliedSignal?.reason);
+  if (suppliedSignal?.aborted) {
+    onSuppliedAbort();
+  } else {
+    suppliedSignal?.addEventListener('abort', onSuppliedAbort, { once: true });
+  }
+  return {
+    signal: controller.signal,
+    close: () => {
+      if (!controller.signal.aborted) {
+        controller.abort(new Error('SQS request scope closed'));
+      }
+      clearTimeout(timeout);
+      suppliedSignal?.removeEventListener('abort', onSuppliedAbort);
+    },
+  };
+}
+
+function sqsMessageAttributes(
+  envelope: JobEnvelope,
+  customAttributes: Readonly<Record<string, string>>,
+): Record<string, MessageAttributeValue> {
+  return {
+    ...Object.fromEntries(
+      Object.entries(customAttributes).map(([name, value]) => [
+        name,
+        { DataType: 'String', StringValue: value },
+      ]),
+    ),
+    jobKind: { DataType: 'String', StringValue: envelope.kind },
+    jobVersion: { DataType: 'Number', StringValue: String(envelope.version) },
+    jobId: { DataType: 'String', StringValue: envelope.id },
+  };
+}
+
+function packSqsBatchEntries(entries: readonly PreparedBatchEntry[]): PreparedBatchEntry[][] {
+  const batches: PreparedBatchEntry[][] = [];
+  let batch: PreparedBatchEntry[] = [];
+  let batchBytes = 0;
+
+  for (const entry of entries) {
+    if (
+      batch.length > 0 &&
+      (batch.length === SQS_MAX_BATCH_MESSAGES || batchBytes + entry.bytes > MAX_JOB_MESSAGE_BYTES)
+    ) {
+      batches.push(batch);
+      batch = [];
+      batchBytes = 0;
+    }
+    batch.push(entry);
+    batchBytes += entry.bytes;
+  }
+  if (batch.length > 0) {
+    batches.push(batch);
+  }
+  return batches;
+}
+
+function batchEntryError(code: string | undefined, message: string | undefined): Error {
+  const detail = [code, message].filter(Boolean).join(': ');
+  return new Error(detail ? `SQS batch entry failed: ${detail}` : 'SQS batch entry failed');
+}
+
 @Injectable()
 export class SqsService implements OnApplicationShutdown, OutboxTransport {
+  readonly maxBatchSize = SQS_MAX_BATCH_MESSAGES;
+
   constructor(
     @Inject(SQS_CLIENT) private readonly client: SQSClient,
     @Inject(INFRASTRUCTURE_CONFIG)
@@ -43,73 +137,177 @@ export class SqsService implements OnApplicationShutdown, OutboxTransport {
       id: options.id ?? randomUUID(),
       ...(options.version === undefined ? {} : { version: options.version }),
     });
+    const serialized = serializeJobMessage(envelope, {});
 
-    await this.client.send(
-      new SendMessageCommand({
-        QueueUrl: this.config.sqs.queueUrl,
-        MessageBody: JSON.stringify(envelope),
-        MessageAttributes: {
-          jobKind: { DataType: 'String', StringValue: kind },
-          jobVersion: {
-            DataType: 'Number',
-            StringValue: String(envelope.version),
-          },
-        },
-        ...(options.delaySeconds === undefined ? {} : { DelaySeconds: options.delaySeconds }),
-      }),
-    );
+    const request = requestAbortScope(undefined, this.config.sqs.requestTimeoutMs);
+    try {
+      await this.client.send(
+        new SendMessageCommand({
+          QueueUrl: this.config.sqs.queueUrl,
+          MessageBody: serialized.body,
+          MessageAttributes: sqsMessageAttributes(envelope, serialized.messageAttributes),
+          ...(options.delaySeconds === undefined ? {} : { DelaySeconds: options.delaySeconds }),
+        }),
+        { abortSignal: request.signal },
+      );
+    } finally {
+      request.close();
+    }
     return envelope;
   }
 
-  async publish(message: OutboxTransportMessage): Promise<OutboxTransportReceipt> {
+  async publish(
+    message: OutboxTransportMessage,
+    abortSignal?: AbortSignal,
+  ): Promise<OutboxTransportReceipt> {
     if (message.destination !== 'jobs') {
       throw new Error(`Unsupported SQS job destination: ${message.destination}`);
     }
 
-    const customAttributes = Object.fromEntries(
-      Object.entries(message.messageAttributes).map(([name, value]) => [
-        name,
-        { DataType: 'String', StringValue: value },
-      ]),
-    );
-    const response = await this.client.send(
-      new SendMessageCommand({
-        QueueUrl: this.config.sqs.queueUrl,
-        MessageBody: JSON.stringify(message.envelope),
-        MessageAttributes: {
-          ...customAttributes,
-          jobKind: {
-            DataType: 'String',
-            StringValue: message.envelope.kind,
-          },
-          jobVersion: {
-            DataType: 'Number',
-            StringValue: String(message.envelope.version),
-          },
-          jobId: { DataType: 'String', StringValue: message.envelope.id },
-        },
-      }),
-    );
+    const request = requestAbortScope(abortSignal, this.config.sqs.requestTimeoutMs);
+    let response;
+    try {
+      const serialized = serializeJobMessage(message.envelope, message.messageAttributes);
+      response = await this.client.send(
+        new SendMessageCommand({
+          QueueUrl: this.config.sqs.queueUrl,
+          MessageBody: serialized.body,
+          MessageAttributes: sqsMessageAttributes(message.envelope, serialized.messageAttributes),
+        }),
+        { abortSignal: request.signal },
+      );
+    } finally {
+      request.close();
+    }
 
     return response.MessageId ? { transportMessageId: response.MessageId } : {};
+  }
+
+  async publishBatch(
+    messages: readonly OutboxTransportMessage[],
+    abortSignal?: AbortSignal,
+  ): Promise<readonly OutboxTransportBatchResult[]> {
+    if (messages.length > this.maxBatchSize) {
+      throw new Error(`SQS publishBatch accepts at most ${this.maxBatchSize} messages`);
+    }
+
+    const request = requestAbortScope(abortSignal, this.config.sqs.requestTimeoutMs);
+    try {
+      const results: Array<OutboxTransportBatchResult | undefined> = new Array(messages.length);
+      const prepared: PreparedBatchEntry[] = [];
+      for (const [messageIndex, message] of messages.entries()) {
+        try {
+          if (message.destination !== 'jobs') {
+            throw new Error(`Unsupported SQS job destination: ${message.destination}`);
+          }
+          const serialized = serializeJobMessage(message.envelope, message.messageAttributes);
+          prepared.push({
+            bytes: serialized.bytes,
+            messageIndex,
+            request: {
+              Id: `entry-${messageIndex}`,
+              MessageBody: serialized.body,
+              MessageAttributes: sqsMessageAttributes(
+                message.envelope,
+                serialized.messageAttributes,
+              ),
+            },
+          });
+        } catch (error) {
+          results[messageIndex] = { status: 'failed', error };
+        }
+      }
+
+      for (const batch of packSqsBatchEntries(prepared)) {
+        if (request.signal.aborted) {
+          const error = request.signal.reason ?? new Error('SQS batch publication was aborted');
+          for (const entry of batch) {
+            results[entry.messageIndex] = { status: 'failed', error };
+          }
+          continue;
+        }
+        let response;
+        try {
+          response = await this.client.send(
+            new SendMessageBatchCommand({
+              QueueUrl: this.config.sqs.queueUrl,
+              Entries: batch.map(({ request: entry }) => entry),
+            }),
+            { abortSignal: request.signal },
+          );
+        } catch (error) {
+          for (const entry of batch) {
+            results[entry.messageIndex] = { status: 'failed', error };
+          }
+          continue;
+        }
+
+        const successful = new Map((response.Successful ?? []).map((entry) => [entry.Id, entry]));
+        const failed = new Map((response.Failed ?? []).map((entry) => [entry.Id, entry]));
+        for (const entry of batch) {
+          const success = successful.get(entry.request.Id);
+          const failure = failed.get(entry.request.Id);
+          if (success && !failure) {
+            results[entry.messageIndex] = {
+              status: 'published',
+              receipt: success.MessageId ? { transportMessageId: success.MessageId } : {},
+            };
+          } else {
+            results[entry.messageIndex] = {
+              status: 'failed',
+              error: failure
+                ? batchEntryError(failure.Code, failure.Message)
+                : new Error('SQS batch response omitted an entry result'),
+            };
+          }
+        }
+      }
+
+      return results.map(
+        (result) =>
+          result ?? { status: 'failed', error: new Error('SQS batch entry was not sent') },
+      );
+    } finally {
+      request.close();
+    }
   }
 
   async receive(
     queueUrl = this.config.sqs.queueUrl,
     maxMessages = 1,
-    waitTimeSeconds = 0,
+    waitTimeSeconds = 10,
+    abortSignal?: AbortSignal,
   ): Promise<ReceivedQueueMessage[]> {
-    const response = await this.client.send(
-      new ReceiveMessageCommand({
-        QueueUrl: queueUrl,
-        MaxNumberOfMessages: maxMessages,
-        WaitTimeSeconds: waitTimeSeconds,
-        VisibilityTimeout: this.config.sqs.visibilityTimeoutSeconds,
-        MessageSystemAttributeNames: ['ApproximateReceiveCount'],
-        MessageAttributeNames: ['All'],
-      }),
-    );
+    if (!Number.isSafeInteger(maxMessages) || maxMessages < 1 || maxMessages > 10) {
+      throw new Error('SQS maxMessages must be an integer between 1 and 10');
+    }
+    if (!Number.isSafeInteger(waitTimeSeconds) || waitTimeSeconds < 0 || waitTimeSeconds > 20) {
+      throw new Error('SQS waitTimeSeconds must be an integer between 0 and 20');
+    }
 
+    // Capture before the network request so heartbeat timing conservatively
+    // includes response latency from the moment SQS could hide the message.
+    const receivedAtMonotonicMs = performance.now();
+    const request = requestAbortScope(
+      abortSignal,
+      Math.max(this.config.sqs.requestTimeoutMs, waitTimeSeconds * 1_000 + 5_000),
+    );
+    let response;
+    try {
+      response = await this.client.send(
+        new ReceiveMessageCommand({
+          QueueUrl: queueUrl,
+          MaxNumberOfMessages: maxMessages,
+          WaitTimeSeconds: waitTimeSeconds,
+          VisibilityTimeout: this.config.sqs.visibilityTimeoutSeconds,
+          MessageSystemAttributeNames: ['ApproximateReceiveCount'],
+          MessageAttributeNames: ['All'],
+        }),
+        { abortSignal: request.signal },
+      );
+    } finally {
+      request.close();
+    }
     return (response.Messages ?? []).flatMap((message) => {
       if (!message.MessageId || !message.ReceiptHandle || message.Body === undefined) {
         return [];
@@ -120,32 +318,57 @@ export class SqsService implements OnApplicationShutdown, OutboxTransport {
           receiptHandle: message.ReceiptHandle,
           body: message.Body,
           receiveCount: Number(message.Attributes?.ApproximateReceiveCount ?? '1'),
+          receivedAtMonotonicMs,
         },
       ];
     });
   }
 
-  async delete(message: ReceivedQueueMessage, queueUrl = this.config.sqs.queueUrl): Promise<void> {
-    await this.client.send(
-      new DeleteMessageCommand({
-        QueueUrl: queueUrl,
-        ReceiptHandle: message.receiptHandle,
-      }),
-    );
+  async delete(
+    message: ReceivedQueueMessage,
+    queueUrl = this.config.sqs.queueUrl,
+    abortSignal?: AbortSignal,
+  ): Promise<void> {
+    const request = requestAbortScope(abortSignal, this.config.sqs.requestTimeoutMs);
+    try {
+      await this.client.send(
+        new DeleteMessageCommand({
+          QueueUrl: queueUrl,
+          ReceiptHandle: message.receiptHandle,
+        }),
+        { abortSignal: request.signal },
+      );
+    } finally {
+      request.close();
+    }
   }
 
   async changeVisibility(
     message: ReceivedQueueMessage,
     visibilityTimeoutSeconds: number,
     queueUrl = this.config.sqs.queueUrl,
+    abortSignal?: AbortSignal,
   ): Promise<void> {
-    await this.client.send(
-      new ChangeMessageVisibilityCommand({
-        QueueUrl: queueUrl,
-        ReceiptHandle: message.receiptHandle,
-        VisibilityTimeout: visibilityTimeoutSeconds,
-      }),
-    );
+    if (
+      !Number.isSafeInteger(visibilityTimeoutSeconds) ||
+      visibilityTimeoutSeconds < 0 ||
+      visibilityTimeoutSeconds > 43_200
+    ) {
+      throw new Error('SQS visibilityTimeoutSeconds must be an integer between 0 and 43200');
+    }
+    const request = requestAbortScope(abortSignal, this.config.sqs.requestTimeoutMs);
+    try {
+      await this.client.send(
+        new ChangeMessageVisibilityCommand({
+          QueueUrl: queueUrl,
+          ReceiptHandle: message.receiptHandle,
+          VisibilityTimeout: visibilityTimeoutSeconds,
+        }),
+        { abortSignal: request.signal },
+      );
+    } finally {
+      request.close();
+    }
   }
 
   parseEnvelope<Payload = unknown>(body: string): JobEnvelope<Payload> {
@@ -153,21 +376,30 @@ export class SqsService implements OnApplicationShutdown, OutboxTransport {
   }
 
   /** Verifies access to both queues and validates the source redrive policy. */
-  async healthCheck(): Promise<void> {
-    const [source, deadLetter] = await Promise.all([
-      this.client.send(
-        new GetQueueAttributesCommand({
-          QueueUrl: this.config.sqs.queueUrl,
-          AttributeNames: ['QueueArn', 'RedrivePolicy'],
-        }),
-      ),
-      this.client.send(
-        new GetQueueAttributesCommand({
-          QueueUrl: this.config.sqs.deadLetterQueueUrl,
-          AttributeNames: ['QueueArn'],
-        }),
-      ),
-    ]);
+  async healthCheck(abortSignal?: AbortSignal): Promise<void> {
+    const request = requestAbortScope(abortSignal, this.config.sqs.requestTimeoutMs);
+    let source;
+    let deadLetter;
+    try {
+      [source, deadLetter] = await Promise.all([
+        this.client.send(
+          new GetQueueAttributesCommand({
+            QueueUrl: this.config.sqs.queueUrl,
+            AttributeNames: ['QueueArn', 'RedrivePolicy'],
+          }),
+          { abortSignal: request.signal },
+        ),
+        this.client.send(
+          new GetQueueAttributesCommand({
+            QueueUrl: this.config.sqs.deadLetterQueueUrl,
+            AttributeNames: ['QueueArn'],
+          }),
+          { abortSignal: request.signal },
+        ),
+      ]);
+    } finally {
+      request.close();
+    }
 
     const deadLetterArn = deadLetter.Attributes?.QueueArn;
     const rawPolicy = source.Attributes?.RedrivePolicy;

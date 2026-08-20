@@ -18,12 +18,22 @@ function settings(): ReadyEvmRuntimeSettings {
   return result;
 }
 
+function streamBody(value: string): ReadableStream<Uint8Array<ArrayBuffer>> {
+  const bytes = new TextEncoder().encode(value);
+  return new ReadableStream<Uint8Array<ArrayBuffer>>({
+    start(controller) {
+      controller.enqueue(bytes);
+      controller.close();
+    },
+  });
+}
+
 function response(result: unknown, overrides: Partial<Response> = {}): Response {
   return {
+    body: streamBody(JSON.stringify({ jsonrpc: '2.0', id: 1, result })),
     ok: true,
     redirected: false,
     headers: new Headers(),
-    text: vi.fn(async () => JSON.stringify({ jsonrpc: '2.0', id: 1, result })),
     ...overrides,
   } as unknown as Response;
 }
@@ -77,7 +87,7 @@ describe('preflightEvmTestnetRpcs', () => {
 
   it('blocks malformed JSON, network failures, and timeouts with one safe error code', async () => {
     const malformed = response('0xaa36a7', {
-      text: vi.fn(async () => '{not-json'),
+      body: streamBody('{not-json'),
     });
     const malformedFetch = vi
       .fn<typeof fetch>()
@@ -101,5 +111,44 @@ describe('preflightEvmTestnetRpcs', () => {
     await expect(
       preflightEvmTestnetRpcs(settings(), { fetch: timeoutFetch, timeoutMs: 1 }),
     ).rejects.toThrow('evm-rpc-preflight-failed');
+  });
+
+  it('cancels a chunked response as soon as it exceeds the byte limit', async () => {
+    const cancel = vi.fn();
+    const oversizedBody = new ReadableStream<Uint8Array<ArrayBuffer>>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(4_096));
+        controller.enqueue(new Uint8Array([1]));
+      },
+      cancel,
+    });
+    const fetchSpy = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(response('0xaa36a7', { body: oversizedBody }))
+      .mockResolvedValueOnce(response('0x14a34'));
+
+    await expect(
+      preflightEvmTestnetRpcs(settings(), { fetch: fetchSpy, timeoutMs: 100 }),
+    ).rejects.toThrow('evm-rpc-preflight-failed');
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
+  it('cancels a response rejected from its declared byte length', async () => {
+    const cancel = vi.fn();
+    const body = new ReadableStream<Uint8Array<ArrayBuffer>>({ cancel });
+    const fetchSpy = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        response('0xaa36a7', {
+          body,
+          headers: new Headers({ 'content-length': '4097' }),
+        }),
+      )
+      .mockResolvedValueOnce(response('0x14a34'));
+
+    await expect(
+      preflightEvmTestnetRpcs(settings(), { fetch: fetchSpy, timeoutMs: 100 }),
+    ).rejects.toThrow('evm-rpc-preflight-failed');
+    expect(cancel).toHaveBeenCalledOnce();
   });
 });

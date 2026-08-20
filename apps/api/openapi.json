@@ -159,6 +159,9 @@
             },
             "description": "All required dependencies are reachable and correctly configured."
           },
+          "429": {
+            "description": "This replica has exhausted its bounded readiness request budget."
+          },
           "503": {
             "content": {
               "application/json": {

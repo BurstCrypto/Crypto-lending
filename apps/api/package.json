@@ -27,9 +27,12 @@
     "db:migrate": "tsx src/infrastructure/database/migration.cli.ts up",
     "db:rollback": "tsx src/infrastructure/database/migration.cli.ts down",
     "db:status": "tsx src/infrastructure/database/migration.cli.ts status",
-    "db:migrate:prod": "node dist/infrastructure/database/migration.cli.js up",
-    "db:rollback:prod": "node dist/infrastructure/database/migration.cli.js down",
-    "db:status:prod": "node dist/infrastructure/database/migration.cli.js status",
+    "db:migrate:compiled": "node dist/infrastructure/database/migration.cli.js up",
+    "db:rollback:compiled": "node dist/infrastructure/database/migration.cli.js down",
+    "db:status:compiled": "node dist/infrastructure/database/migration.cli.js status",
+    "db:migrate:prod": "node dist/infrastructure/database/migration.cli.js --production up",
+    "db:rollback:prod": "node dist/infrastructure/database/migration.cli.js --production down",
+    "db:status:prod": "node dist/infrastructure/database/migration.cli.js --production status",
     "check": "npm run lint && npm run typecheck && npm run build && npm run test && npm run test:e2e && npm run openapi:generate"
   },
   "dependencies": {
@@ -41,6 +44,7 @@
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.2",
     "dotenv": "^17.4.2",
+    "helmet": "^8.3.0",
     "ioredis": "^6.0.0",
     "pg": "^8.23.0",
     "reflect-metadata": "^0.2.2",

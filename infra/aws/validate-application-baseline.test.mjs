@@ -5,9 +5,13 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
 
+import { validateSqsFoundationSource } from './validate-sqs-foundation.mjs';
+
 const validatorPath = join(import.meta.dirname, 'validate-application-baseline.mjs');
 const templatePath = join(import.meta.dirname, 'application-baseline.yaml');
 const templateSource = readFileSync(templatePath, 'utf8').replace(/\r\n/g, '\n');
+const sqsFoundationPath = join(import.meta.dirname, 'sqs-foundation.yaml');
+const sqsFoundationSource = readFileSync(sqsFoundationPath, 'utf8').replace(/\r\n/g, '\n');
 
 function runValidator(source = templateSource) {
   const directory = mkdtempSync(join(tmpdir(), 'kan-231-application-validator-'));
@@ -58,6 +62,37 @@ test('accepts the repository no-external-egress baseline and records the DNS res
   assert.equal(report.residualLimitations.length, 1);
   assert.match(report.residualLimitations[0], /port 53 to the VPC CIDR/);
   assert.match(report.residualLimitations[0], /cannot prove/);
+});
+
+test('standalone SQS foundation denies insecure transport to both queues', () => {
+  const report = validateSqsFoundationSource(sqsFoundationSource);
+  assert.equal(report.ok, true);
+  assert.deepEqual(report.errors, []);
+  assert.equal(report.awsCallsMade, 0);
+});
+
+test('standalone SQS validator rejects weakened or incomplete TLS queue policies', () => {
+  for (const [search, replacement] of [
+    ['            Effect: Deny', '            Effect: Allow'],
+    ["            Principal: '*'", '            Principal: { Service: ecs-tasks.amazonaws.com }'],
+    ['            Action: sqs:*', '            Action: sqs:SendMessage'],
+    ['              - !GetAtt JobDeadLetterQueue.Arn', '              - !GetAtt JobQueue.Arn'],
+    ["                aws:SecureTransport: 'false'", "                aws:SecureTransport: 'true'"],
+    [
+      "                aws:SecureTransport: 'false'",
+      "                aws:SecureTransport: 'false'\n              StringEquals:\n                aws:PrincipalArn: arn:aws:iam::000000000000:root",
+    ],
+  ]) {
+    const mutated = sqsFoundationSource.replace(search, replacement);
+    assert.notEqual(mutated, sqsFoundationSource, `Mutation did not replace ${search}.`);
+    const report = validateSqsFoundationSource(mutated);
+    assert.equal(report.ok, false);
+    assert.equal(report.awsCallsMade, 0);
+    assert(
+      report.errors.some((error) => /must deny all SQS actions/.test(error)),
+      report.errors.join('\n'),
+    );
+  }
 });
 
 test('rejects URI, UNC, and device template inputs before any filesystem access', () => {
@@ -388,9 +423,116 @@ test('rejects same-resource application egress mutations and any unreviewed prop
 
   assertRejected(
     mutate((source) =>
-      source.replace('Description: >', 'Description: >\n  Reviewed-boundary mutation.'),
+      source.replace(
+        'Description: KAN-34 billable app baseline.',
+        'Description: Reviewed-boundary mutation.',
+      ),
     ),
     /does not match the reviewed property-complete baseline/,
+  );
+});
+
+test('rejects crossing the runtime and migration database credential boundary', () => {
+  assertRejected(
+    mutate((source) =>
+      source.replace(
+        '                  - !Ref DatabaseRuntimeSecret',
+        '                  - !Ref DatabaseCredentialsSecret',
+      ),
+    ),
+    /BackendTaskExecutionRole must read the runtime database secret and must not read the migration\/admin secret/,
+  );
+
+  assertRejected(
+    mutate((source) =>
+      source.replace(
+        "ValueFrom: !Sub '${DatabaseRuntimeSecret}:password::'",
+        "ValueFrom: !Sub '${DatabaseCredentialsSecret}:password::'",
+      ),
+    ),
+    /must not reference the database migration\/admin secret/,
+  );
+
+  assertRejected(
+    mutate((source) =>
+      source.replace(
+        '- { Name: DATABASE_RUNTIME_HOST, Value: !GetAtt Database.Endpoint.Address }',
+        '- { Name: MIGRATION_DATABASE_HOST, Value: !GetAtt Database.Endpoint.Address }',
+      ),
+    ),
+    /must not receive migration\/admin database variables/,
+  );
+
+  assertRejected(
+    mutate((source) =>
+      source.replace(
+        '- { Name: DATABASE_RUNTIME_HOST, Value: !GetAtt Database.Endpoint.Address }',
+        '- { Name: DATABASE_HOST, Value: !GetAtt Database.Endpoint.Address }',
+      ),
+    ),
+    /must not receive legacy unscoped database variables/,
+  );
+
+  assertRejected(
+    mutate((source) =>
+      source.replace(
+        '${DatabaseCredentialsSecret}:SecretString:username',
+        '${DatabaseRuntimeSecret}:SecretString:username',
+      ),
+    ),
+    /must preserve DatabaseCredentialsSecret as its migration\/admin master credential/,
+  );
+});
+
+test('rejects weakening or ordering the internal readiness deny after the API forward', () => {
+  assertRejected(
+    mutate((source) =>
+      source.replace(
+        '      HealthCheckPath: /api/v1/internal/health/dependencies',
+        '      HealthCheckPath: /api/v1/health/dependencies',
+      ),
+    ),
+    /ApiTargetGroup must gate traffic on dependency and migration readiness/,
+  );
+
+  assertRejected(
+    mutate((source) =>
+      source.replace(
+        "RegexValues: ['^/[aA][pP][iI]/[vV]1/[iI][nN][tT][eE][rR][nN][aA][lL]/.*$']",
+        "RegexValues: ['^/api/v1/internal/.*$']",
+      ),
+    ),
+    /must case-insensitively reject the internal API prefix/,
+  );
+
+  assertRejected(
+    mutate((source) =>
+      source.replace(
+        '      Priority: 5\n\n  HttpsApiListenerRule:',
+        '      Priority: 15\n\n  HttpsApiListenerRule:',
+      ),
+    ),
+    /internal API prefix with fixed 404 at priority 5/,
+  );
+
+  assertRejected(
+    mutate((source) =>
+      source.replace(
+        '      Priority: 10\n\n  HttpsWebListenerRule:',
+        '      Priority: 4\n\n  HttpsWebListenerRule:',
+      ),
+    ),
+    /must forward the public API only after the internal deny rule/,
+  );
+
+  assertRejected(
+    mutate((source) =>
+      source.replace(
+        "          FixedResponseConfig: { ContentType: text/plain, StatusCode: '404' }",
+        '          TargetGroupArn: !Ref ApiTargetGroup',
+      ),
+    ),
+    /internal API prefix with fixed 404 at priority 5/,
   );
 });
 

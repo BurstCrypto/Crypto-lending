@@ -25,6 +25,49 @@ function expectedChainId(chainId: EvmTestnetChainId): string {
   return `0x${chainId.toString(16)}`;
 }
 
+async function readBoundedBody(response: Response): Promise<string> {
+  if (!response.body) throw new EvmRpcPreflightError();
+
+  const reader = response.body.getReader();
+  const bytes = new Uint8Array(MAX_RESPONSE_BYTES);
+  let complete = false;
+  let length = 0;
+
+  try {
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) {
+        complete = true;
+        break;
+      }
+      if (chunk.value.byteLength > MAX_RESPONSE_BYTES - length) {
+        throw new EvmRpcPreflightError();
+      }
+      bytes.set(chunk.value, length);
+      length += chunk.value.byteLength;
+    }
+  } finally {
+    if (!complete) {
+      try {
+        await reader.cancel();
+      } catch {
+        // The probe still fails closed when a remote stream rejects cancellation.
+      }
+    }
+    reader.releaseLock();
+  }
+
+  return new TextDecoder('utf-8', { fatal: true }).decode(bytes.subarray(0, length));
+}
+
+async function cancelBody(response: Response): Promise<void> {
+  try {
+    await response.body?.cancel();
+  } catch {
+    // Header and status checks still fail closed if stream cancellation fails.
+  }
+}
+
 async function probe(
   url: string,
   chainId: EvmTestnetChainId,
@@ -44,20 +87,21 @@ async function probe(
       referrerPolicy: 'no-referrer',
       signal: controller.signal,
     });
-    const declaredLength = Number(response.headers.get('content-length'));
+    const contentLength = response.headers.get('content-length');
+    const declaredLength = contentLength === null ? null : Number(contentLength);
     if (
       !response.ok ||
       response.redirected ||
-      (Number.isFinite(declaredLength) && declaredLength > MAX_RESPONSE_BYTES)
+      (declaredLength !== null &&
+        (!Number.isSafeInteger(declaredLength) ||
+          declaredLength < 0 ||
+          declaredLength > MAX_RESPONSE_BYTES))
     ) {
+      await cancelBody(response);
       throw new EvmRpcPreflightError();
     }
 
-    const body = await response.text();
-    if (new TextEncoder().encode(body).byteLength > MAX_RESPONSE_BYTES) {
-      throw new EvmRpcPreflightError();
-    }
-
+    const body = await readBoundedBody(response);
     const payload: unknown = JSON.parse(body);
     if (
       typeof payload !== 'object' ||

@@ -4,14 +4,24 @@ import { InfrastructureConfigModule } from './config/infrastructure-config.modul
 import { PostgresModule } from './database/postgres.module';
 import { InfrastructureHealthController } from './health/infrastructure-health.controller';
 import { InfrastructureHealthService } from './health/infrastructure-health.service';
+import { InternalInfrastructureHealthController } from './health/internal-infrastructure-health.controller';
+import { ReadinessAbuseLimiter } from './health/readiness-abuse-limiter';
+import { ReadinessAbuseInterceptor } from './health/readiness-abuse.interceptor';
 import { OutboxModule } from './outbox/outbox.module';
 import { RedisModule } from './redis/redis.module';
 import { SqsModule } from './sqs/sqs.module';
 
 @Module({
   imports: [InfrastructureConfigModule, PostgresModule, RedisModule, SqsModule, OutboxModule],
-  controllers: [InfrastructureHealthController],
-  providers: [InfrastructureHealthService],
+  controllers: [InfrastructureHealthController, InternalInfrastructureHealthController],
+  providers: [
+    InfrastructureHealthService,
+    ReadinessAbuseInterceptor,
+    {
+      provide: ReadinessAbuseLimiter,
+      useFactory: () => new ReadinessAbuseLimiter(),
+    },
+  ],
   exports: [PostgresModule, RedisModule, OutboxModule, InfrastructureHealthService],
 })
 export class InfrastructureModule {}

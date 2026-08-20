@@ -20,6 +20,7 @@ function result<Row extends QueryResultRow>(rows: Row[] = []): QueryResult<Row> 
 
 class InMemoryMigrationDatabase {
   readonly applied = new Map<string, StoredMigration>();
+  readonly indexes = new Map<string, string>();
   readonly queries: string[] = [];
   jobOutboxExists = false;
   migrationTableExists = false;
@@ -42,6 +43,31 @@ class InMemoryMigrationDatabase {
         this.jobOutboxExists = true;
       } else if (normalized.includes('DROP TABLE IF EXISTS job_outbox')) {
         this.jobOutboxExists = false;
+        this.indexes.clear();
+      } else if (normalized.startsWith('DROP INDEX CONCURRENTLY IF EXISTS')) {
+        const indexName = normalized.split(' ').at(-1);
+        if (indexName) this.indexes.delete(indexName);
+      } else if (normalized.startsWith('CREATE INDEX CONCURRENTLY')) {
+        const indexName = normalized.split(' ')[3];
+        if (indexName) this.indexes.set(indexName, normalized);
+      } else if (
+        normalized.startsWith('SELECT EXISTS') &&
+        normalized.includes('pg_catalog.pg_index')
+      ) {
+        const indexName = [...this.indexes.keys()].find((name) => normalized.includes(`'${name}'`));
+        const definition = indexName ? this.indexes.get(indexName) : undefined;
+        const expectedTimestamp = normalized.includes("= 'published_at'")
+          ? 'published_at'
+          : 'failed_at';
+        const expectedStatus = expectedTimestamp === 'published_at' ? 'published' : 'failed';
+        return result([
+          {
+            valid: Boolean(
+              definition?.includes(`ON job_outbox (${expectedTimestamp}, id)`) &&
+              definition.includes(`WHERE status = '${expectedStatus}'`),
+            ),
+          },
+        ]);
       } else if (normalized.startsWith('INSERT INTO schema_migrations')) {
         const [id, , migrationChecksum] = values;
         this.applied.set(String(id), {
@@ -74,18 +100,71 @@ describe('MigrationRunner', () => {
     const database = new InMemoryMigrationDatabase();
     const runner = new MigrationRunner(database.pool, DATABASE_MIGRATION_LIST);
 
-    await expect(runner.up()).resolves.toEqual(['0001']);
+    await expect(runner.up()).resolves.toEqual(['0001', '0002', '0003']);
     expect(database.jobOutboxExists).toBe(true);
     expect(database.applied.has('0001')).toBe(true);
+    expect(database.applied.has('0002')).toBe(true);
+    expect(database.applied.has('0003')).toBe(true);
+    expect(database.queries.filter((query) => query === 'BEGIN')).toHaveLength(1);
+    expect(
+      database.queries.filter((query) => query.startsWith('CREATE INDEX CONCURRENTLY')),
+    ).toHaveLength(2);
     await expect(runner.assertUpToDate()).resolves.toBeUndefined();
 
     await expect(runner.up()).resolves.toEqual([]);
-    await expect(runner.down()).resolves.toEqual(['0001']);
+    await expect(runner.down(3)).resolves.toEqual(['0003', '0002', '0001']);
     expect(database.jobOutboxExists).toBe(false);
     expect(database.applied.size).toBe(0);
     await expect(runner.assertUpToDate()).rejects.toThrow(
       'Database migration 0001 has not been applied',
     );
     expect(database.released).toBe(true);
+  });
+
+  it('detects missing non-transactional schema state and supports an explicit repair path', async () => {
+    const database = new InMemoryMigrationDatabase();
+    const runner = new MigrationRunner(database.pool, DATABASE_MIGRATION_LIST);
+    await runner.up();
+
+    database.indexes.delete('job_outbox_failed_retention_idx');
+    await expect(runner.assertUpToDate()).rejects.toThrow(
+      'Database migration 0003 schema verification failed',
+    );
+    await expect(runner.status()).rejects.toThrow(
+      'Database migration 0003 schema verification failed',
+    );
+    await expect(runner.up()).rejects.toThrow('Database migration 0003 schema verification failed');
+
+    await expect(runner.down()).resolves.toEqual(['0003']);
+    await expect(runner.up()).resolves.toEqual(['0003']);
+    expect(database.indexes.has('job_outbox_failed_retention_idx')).toBe(true);
+    await expect(runner.assertUpToDate()).resolves.toBeUndefined();
+  });
+
+  it('rejects a valid same-name retention index with the wrong definition', async () => {
+    const database = new InMemoryMigrationDatabase();
+    const runner = new MigrationRunner(database.pool, DATABASE_MIGRATION_LIST);
+    await runner.up();
+
+    database.indexes.set(
+      'job_outbox_published_retention_idx',
+      "CREATE INDEX CONCURRENTLY job_outbox_published_retention_idx ON job_outbox (id) WHERE status = 'published'",
+    );
+
+    await expect(runner.assertUpToDate()).rejects.toThrow(
+      'Database migration 0002 schema verification failed',
+    );
+  });
+
+  it('includes non-transactional execution policy in the immutable checksum', async () => {
+    const database = new InMemoryMigrationDatabase();
+    await new MigrationRunner(database.pool, DATABASE_MIGRATION_LIST).up();
+    const mutated = DATABASE_MIGRATION_LIST.map((migration) =>
+      migration.id === '0003' ? { ...migration, transactional: true } : migration,
+    );
+
+    await expect(new MigrationRunner(database.pool, mutated).up()).rejects.toThrow(
+      'Applied migration 0003 has changed',
+    );
   });
 });

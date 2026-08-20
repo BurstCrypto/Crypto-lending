@@ -22,6 +22,9 @@ import { SQS_CLIENT } from './sqs.tokens';
         new SQSClient({
           region: config.sqs.region,
           maxAttempts: config.sqs.sdkMaxAttempts,
+          // Never let a QueueUrl replace the configured client origin. This is
+          // defense in depth against credential-bearing requests to a bad URL.
+          useQueueUrlAsEndpoint: false,
           ...(config.sqs.endpoint
             ? {
                 endpoint: config.sqs.endpoint,

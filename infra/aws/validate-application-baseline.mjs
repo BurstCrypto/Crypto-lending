@@ -18,7 +18,7 @@ const noExternalEgressResidualLimitations = [
   'Task DNS security-group egress permits TCP and UDP port 53 to the VPC CIDR; this static control cannot prove that traffic reaches only the VPC Route 53 Resolver address.',
 ];
 const reviewedApplicationBaselineSha256 =
-  'd16901d2127eb9d152a7d990d163f622b4b20593876715e8db888097d04ccb55';
+  'd980e78101fbfa60418866a9fdb92b4dda9158e97ba44c1691dc148a13096d9c';
 const reviewedResourceTypesByLogicalId = new Map([
   ['ApplicationDataKey', 'AWS::KMS::Key'],
   ['ApplicationDataKeyAlias', 'AWS::KMS::Alias'],
@@ -73,6 +73,7 @@ const reviewedResourceTypesByLogicalId = new Map([
   ['DatabaseSubnetGroup', 'AWS::RDS::DBSubnetGroup'],
   ['RedisSubnetGroup', 'AWS::ElastiCache::SubnetGroup'],
   ['DatabaseCredentialsSecret', 'AWS::SecretsManager::Secret'],
+  ['DatabaseRuntimeSecret', 'AWS::SecretsManager::Secret'],
   ['RedisAuthSecret', 'AWS::SecretsManager::Secret'],
   ['DatabaseParameterGroup', 'AWS::RDS::DBParameterGroup'],
   ['Database', 'AWS::RDS::DBInstance'],
@@ -95,6 +96,7 @@ const reviewedResourceTypesByLogicalId = new Map([
   ['HttpRedirectListener', 'AWS::ElasticLoadBalancingV2::Listener'],
   ['HttpRedirectListenerRule', 'AWS::ElasticLoadBalancingV2::ListenerRule'],
   ['HttpsListener', 'AWS::ElasticLoadBalancingV2::Listener'],
+  ['HttpsInternalApiDenyRule', 'AWS::ElasticLoadBalancingV2::ListenerRule'],
   ['HttpsApiListenerRule', 'AWS::ElasticLoadBalancingV2::ListenerRule'],
   ['HttpsWebListenerRule', 'AWS::ElasticLoadBalancingV2::ListenerRule'],
   ['EcsCluster', 'AWS::ECS::Cluster'],
@@ -287,6 +289,32 @@ function requireExactInlineEnvironmentReference(
   if (nameMatches.length !== 1 || exactMatches.length !== 1) {
     errors.push(
       `${logicalId} must bind exactly one ${environmentName} environment value to !Ref ${referencedLogicalId}.`,
+    );
+  }
+}
+
+function requireExactInlineSecretReference(
+  block,
+  logicalId,
+  environmentName,
+  referencedLogicalId,
+  secretField,
+  errors,
+) {
+  const escapedName = environmentName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const escapedReference = referencedLogicalId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const escapedField = secretField.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const nameMatches = block.match(new RegExp(`\\bName:\\s*${escapedName}\\b`, 'g')) ?? [];
+  const exactMatches =
+    block.match(
+      new RegExp(
+        `\\bName:\\s*${escapedName},?[\\s\\S]{0,160}?\\bValueFrom:\\s*!Sub\\s+['"]\\$\\{${escapedReference}\\}:${escapedField}::['"]`,
+        'g',
+      ),
+    ) ?? [];
+  if (nameMatches.length !== 1 || exactMatches.length !== 1) {
+    errors.push(
+      `${logicalId} must bind exactly one ${environmentName} secret value to ${referencedLogicalId}:${secretField}.`,
     );
   }
 }
@@ -941,9 +969,9 @@ function validateTemplateShape(source, errors) {
     ['AWS::ElastiCache::ReplicationGroup', 1],
     ['AWS::ElastiCache::SubnetGroup', 1],
     ['AWS::KMS::Key', 2],
-    ['AWS::SecretsManager::Secret', 1],
+    ['AWS::SecretsManager::Secret', 3],
     ['AWS::Logs::LogGroup', 3],
-    ['AWS::IAM::Role', 4],
+    ['AWS::IAM::Role', 5],
     ['AWS::CloudWatch::Alarm', 1],
     ['AWS::CloudWatch::Dashboard', 1],
     ['AWS::SQS::Queue', 2],
@@ -1037,7 +1065,7 @@ function validateTemplateShape(source, errors) {
     errors.push('The API task must identify its current AWS RDS CA trust bundle path.');
   }
   if (
-    !/Name:\s*DATABASE_SSL_MODE\b[\s\S]{0,160}?Value:\s*['"]?verify-full['"]?/i.test(
+    !/Name:\s*DATABASE_RUNTIME_SSL_MODE\b[\s\S]{0,160}?Value:\s*['"]?verify-full['"]?/i.test(
       taskDefinitionSource,
     )
   ) {
@@ -1067,6 +1095,30 @@ function validateTemplateShape(source, errors) {
     ['ApiTaskDefinition', apiTaskDefinition],
     ['WorkerTaskDefinition', workerTaskDefinition],
   ]) {
+    if (/\bMIGRATION_DATABASE_[A-Z_]+\b/.test(block)) {
+      errors.push(`${logicalId} must not receive migration/admin database variables.`);
+    }
+    if (/\bDATABASE_(?:URL|HOST|PORT|NAME|USERNAME|PASSWORD|SSL_MODE)\b/.test(block)) {
+      errors.push(`${logicalId} must not receive legacy unscoped database variables.`);
+    }
+    if (/\bDatabaseCredentialsSecret\b/.test(block)) {
+      errors.push(`${logicalId} must not reference the database migration/admin secret.`);
+    }
+    const runtimeUsernameBindings =
+      block.match(
+        /^\s*-\s*\{\s*Name:\s*DATABASE_RUNTIME_USERNAME,\s*Value:\s*crypto_runtime\s*\}\s*$/gm,
+      ) ?? [];
+    if (runtimeUsernameBindings.length !== 1) {
+      errors.push(`${logicalId} must bind the reviewed non-secret runtime database username.`);
+    }
+    requireExactInlineSecretReference(
+      block,
+      logicalId,
+      'DATABASE_RUNTIME_PASSWORD',
+      'DatabaseRuntimeSecret',
+      'password',
+      errors,
+    );
     requireExactInlineEnvironmentReference(block, logicalId, 'SQS_QUEUE_URL', 'JobQueue', errors);
     requireExactInlineEnvironmentReference(
       block,
@@ -1076,13 +1128,23 @@ function validateTemplateShape(source, errors) {
       errors,
     );
   }
+  const backendTaskExecutionRole = resources.get('BackendTaskExecutionRole') ?? '';
+  if (
+    !/!Ref\s+DatabaseRuntimeSecret\b/.test(backendTaskExecutionRole) ||
+    /!Ref\s+DatabaseCredentialsSecret\b/.test(backendTaskExecutionRole) ||
+    /^\s+(?:Resource:\s*|-)['"]?\*['"]?\s*$/m.test(backendTaskExecutionRole)
+  ) {
+    errors.push(
+      'BackendTaskExecutionRole must read the runtime database secret and must not read the migration/admin secret.',
+    );
+  }
   const webTaskDefinition = resources.get('WebTaskDefinition') ?? '';
   if (/\bName:\s*SQS_(?:DEAD_LETTER_)?QUEUE_URL\b/.test(webTaskDefinition)) {
     errors.push('WebTaskDefinition must not receive an SQS queue destination.');
   }
 
   const apiTargetGroup = resources.get('ApiTargetGroup') ?? '';
-  if (!hasProperty(apiTargetGroup, 'HealthCheckPath', '/api/v1/health/dependencies')) {
+  if (!hasProperty(apiTargetGroup, 'HealthCheckPath', '/api/v1/internal/health/dependencies')) {
     errors.push('ApiTargetGroup must gate traffic on dependency and migration readiness.');
   }
 
@@ -1143,6 +1205,35 @@ function validateTemplateShape(source, errors) {
   if (!hasProperty(httpsListener, 'SslPolicy', 'ELBSecurityPolicy-TLS13-1-2-2021-06')) {
     errors.push('The HTTPS listener must use the reviewed TLS 1.2/1.3 policy.');
   }
+  const internalDenyPathRegex = '^/[aA][pP][iI]/[vV]1/[iI][nN][tT][eE][rR][nN][aA][lL]/.*$';
+  const internalDenyRule = resources.get('HttpsInternalApiDenyRule') ?? '';
+  if (
+    !/ListenerArn:\s*!Ref\s+HttpsListener/.test(internalDenyRule) ||
+    !hasProperty(internalDenyRule, 'Priority', '5') ||
+    !/Type:\s*fixed-response/.test(internalDenyRule) ||
+    !/StatusCode:\s*['"]?404['"]?/.test(internalDenyRule) ||
+    /Type:\s*forward|TargetGroupArn:/.test(internalDenyRule) ||
+    !/Field:\s*host-header/.test(internalDenyRule) ||
+    !/Field:\s*path-pattern/.test(internalDenyRule) ||
+    !/HostHeaderConfig:[\s\S]*!Ref\s+ApplicationHostname/.test(internalDenyRule) ||
+    !internalDenyRule.includes(`RegexValues: ['${internalDenyPathRegex}']`)
+  ) {
+    errors.push(
+      'HttpsInternalApiDenyRule must case-insensitively reject the internal API prefix with fixed 404 at priority 5.',
+    );
+  }
+  const httpsApiRule = resources.get('HttpsApiListenerRule') ?? '';
+  if (
+    !/ListenerArn:\s*!Ref\s+HttpsListener/.test(httpsApiRule) ||
+    !hasProperty(httpsApiRule, 'Priority', '10') ||
+    !/Type:\s*forward/.test(httpsApiRule) ||
+    !/TargetGroupArn:\s*!Ref\s+ApiTargetGroup/.test(httpsApiRule) ||
+    !httpsApiRule.includes('PathPatternConfig: { Values: [/api/v1/*] }')
+  ) {
+    errors.push(
+      'HttpsApiListenerRule must forward the public API only after the internal deny rule.',
+    );
+  }
   const httpListener = resources.get('HttpRedirectListener') ?? '';
   if (
     !/Type:\s*fixed-response/.test(httpListener) ||
@@ -1152,7 +1243,7 @@ function validateTemplateShape(source, errors) {
   }
   const listenerRules = entriesOf(inventory, 'AWS::ElasticLoadBalancingV2::ListenerRule');
   if (
-    listenerRules.length < 3 ||
+    listenerRules.length < 4 ||
     listenerRules.some(
       ({ block }) => !/HostHeaderConfig:[\s\S]*!Ref\s+ApplicationHostname/.test(block),
     )
@@ -1289,6 +1380,27 @@ function validateTemplateShape(source, errors) {
   const databaseUsername = databaseSecret.match(/"username":"([A-Za-z][A-Za-z0-9_]*)"/)?.[1];
   if (!databaseUsername || databaseUsername.length > 16) {
     errors.push('DatabaseCredentialsSecret username must satisfy the RDS 1-16 character limit.');
+  }
+  const runtimeDatabaseSecret = resources.get('DatabaseRuntimeSecret') ?? '';
+  const runtimeDatabaseUsername = runtimeDatabaseSecret.match(
+    /"username":"([A-Za-z][A-Za-z0-9_]*)"/,
+  )?.[1];
+  if (!runtimeDatabaseUsername || runtimeDatabaseUsername === databaseUsername) {
+    errors.push('DatabaseRuntimeSecret must define a distinct canonical PostgreSQL username.');
+  }
+  const database = resources.get('Database') ?? '';
+  if (
+    !/MasterUsername:\s*!Sub\s+'\{\{resolve:secretsmanager:\$\{DatabaseCredentialsSecret\}:SecretString:username\}\}'/.test(
+      database,
+    ) ||
+    !/MasterUserPassword:\s*!Sub\s+'\{\{resolve:secretsmanager:\$\{DatabaseCredentialsSecret\}:SecretString:password\}\}'/.test(
+      database,
+    ) ||
+    /DatabaseRuntimeCredentialsSecret/.test(database)
+  ) {
+    errors.push(
+      'Database must preserve DatabaseCredentialsSecret as its migration/admin master credential.',
+    );
   }
   requireProperties(
     entriesOf(inventory, 'AWS::Logs::LogGroup'),

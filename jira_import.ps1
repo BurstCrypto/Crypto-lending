@@ -12,6 +12,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+. (Join-Path $PSScriptRoot 'jira_http.ps1')
+
 if ([string]::IsNullOrWhiteSpace($EnvironmentPath)) {
     $EnvironmentPath = Join-Path $PSScriptRoot '.jira.env'
 }
@@ -44,7 +46,7 @@ function Invoke-Jira {
     )
 
     $parameters = @{
-        Uri = $script:JiraBase + $Path
+        Uri = New-JiraRequestUri -BaseUrl $script:JiraBase -Path $Path
         Headers = $script:JiraHeaders
         Method = $Method
     }
@@ -58,7 +60,7 @@ function Invoke-Jira {
 
     for ($attempt = 1; $attempt -le 6; $attempt++) {
         try {
-            return Invoke-RestMethod @parameters
+            return Invoke-JiraRestMethodNoRedirect -Parameters $parameters
         }
         catch {
             $status = if ($_.Exception.Response) { [int]$_.Exception.Response.StatusCode } else { 0 }
@@ -357,7 +359,7 @@ foreach ($required in @('JIRA_URL', 'JIRA_USERNAME', 'JIRA_API_TOKEN')) {
     }
 }
 
-$script:JiraBase = $jiraEnvironment['JIRA_URL'].TrimEnd('/')
+$script:JiraBase = ConvertTo-JiraBaseUrl -Value $jiraEnvironment['JIRA_URL']
 $credentialText = $jiraEnvironment['JIRA_USERNAME'] + ':' + $jiraEnvironment['JIRA_API_TOKEN']
 $encodedCredential = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes($credentialText))
 $script:JiraHeaders = @{ Authorization = 'Basic ' + $encodedCredential; Accept = 'application/json' }

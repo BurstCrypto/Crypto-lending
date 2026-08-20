@@ -1,21 +1,28 @@
 import 'reflect-metadata';
 import 'dotenv/config';
 
+import type { Server } from 'node:http';
+
 import { NestFactory } from '@nestjs/core';
 
 import { AppModule } from './app.module';
 import { configureApplication } from './application';
-import { DEFAULT_PORT } from './constants';
+import { applyHttpServerLimits, loadHttpServerOptions } from './server-options';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule);
   configureApplication(app);
   app.enableShutdownHooks();
 
-  const configuredPort = Number(process.env.PORT ?? DEFAULT_PORT);
-  const port = Number.isSafeInteger(configuredPort) ? configuredPort : DEFAULT_PORT;
+  const options = loadHttpServerOptions();
+  const server = app.getHttpServer() as Server;
+  applyHttpServerLimits(server, options);
 
-  await app.listen(port);
+  await app.listen(options.port, options.host);
 }
 
-void bootstrap();
+void bootstrap().catch((error: unknown) => {
+  const message = error instanceof Error ? error.message : 'Unknown startup error';
+  process.stderr.write(`API startup failed: ${message}\n`);
+  process.exitCode = 1;
+});
