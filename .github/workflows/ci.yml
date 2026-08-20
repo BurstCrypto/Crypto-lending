@@ -60,6 +60,7 @@ jobs:
           npm run infra:test:guardrails
           npm run infra:test:acm-dns
           pwsh -NoProfile -File infra/aws/test-invoke-acm-dns-local.ps1
+          npm run infra:test:egress
           pwsh -NoProfile -File infra/aws/test-invoke-account-readonly-preflight.ps1
           pwsh -NoProfile -File infra/aws/test-invoke-account-guardrails.ps1
           pwsh -NoProfile -File infra/aws/test-invoke-application-baseline.ps1

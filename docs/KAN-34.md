@@ -223,7 +223,10 @@ contract remains unproven until an artifact inspection and runtime smoke pass.
   relationship require target-account preflight and runtime evidence.
 - Tasks have no NAT or general internet egress. Blockchain RPCs, authentication,
   market/oracle data, and other public APIs require a separately reviewed egress
-  design; this baseline intentionally cannot reach them.
+  design; this baseline intentionally cannot reach them. [KAN-231](KAN-231.md)
+  preserves that state while KAN-37 and KAN-62 remain undecided and prohibits
+  selecting a paid egress path without separate architecture, security, and
+  cost approval.
 - `ApplicationVersion` is a reviewed runtime label, not cryptographic image
   provenance. Acceptance must verify all three image digests' build attestations
   or OCI source-revision labels against the recorded commit.

@@ -1,11 +1,12 @@
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
 
+import { buildRestrictedWalletLabPolicy } from '@/lib/security/browser-egress';
 import { decideWalletLabAccess, readWalletLabAccessConfiguration } from '@/lib/wallets/lab/access';
 
 const SECURITY_HEADERS = {
   'Cache-Control': 'private, no-store, max-age=0',
-  'Content-Security-Policy': "base-uri 'none'; frame-ancestors 'none'; object-src 'none'",
+  'Content-Security-Policy': buildRestrictedWalletLabPolicy(process.env.NODE_ENV),
   Pragma: 'no-cache',
   'Referrer-Policy': 'no-referrer',
   'X-Content-Type-Options': 'nosniff',

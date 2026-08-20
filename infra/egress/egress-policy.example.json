@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 1,
+  "status": "NOT_APPROVED",
+  "policyId": "NOT_APPROVED",
+  "currentMode": "NO_EXTERNAL_EGRESS",
+  "approvedAt": "NOT_RUN",
+  "acceptedAt": "NOT_RUN",
+  "expiresAt": "NOT_RUN",
+  "environment": {
+    "application": "crypto-lending",
+    "name": "NOT_APPROVED",
+    "accountId": "NOT_APPROVED",
+    "applicationRegion": "NOT_APPROVED",
+    "sourceRevision": "NOT_RUN"
+  },
+  "dependencies": {
+    "applicationBaseline": {
+      "ticket": "KAN-34",
+      "approvalStatus": "NOT_APPROVED",
+      "decisionReference": "NOT_RUN"
+    },
+    "authenticationSessions": {
+      "ticket": "KAN-37",
+      "approvalStatus": "NOT_APPROVED",
+      "decisionReference": "NOT_RUN"
+    },
+    "rpcIndexing": {
+      "ticket": "KAN-62",
+      "approvalStatus": "NOT_APPROVED",
+      "decisionReference": "NOT_RUN"
+    }
+  },
+  "architecture": {
+    "adrStatus": "NOT_APPROVED",
+    "decisionReference": "NOT_RUN",
+    "selectedControl": "NO_EXTERNAL_EGRESS",
+    "defaultAction": "DENY",
+    "dnsPolicy": "DENY_UNLISTED_AND_UNAPPROVED_PRIVATE_ADDRESSES",
+    "ecsBoundary": "PRIVATE_SUBNETS_NO_PUBLIC_IP_NO_DEFAULT_INTERNET_ROUTE",
+    "browserBoundary": "OUTSIDE_VPC_ENFORCE_WITH_CSP_AND_APPLICATION_ALLOWLIST",
+    "killSwitch": "DISABLE_ALL_EXTERNAL_EGRESS",
+    "estimatedMonthlyFixedCostUsd": "0.00",
+    "estimatedMonthlyVariableCostUsd": "0.00",
+    "monthlyVariableCostCeilingUsd": "0.00",
+    "costDecision": "NOT_APPROVED",
+    "activationAuthorization": "NOT_AUTHORIZED",
+    "financeApprovalReference": "NOT_RUN",
+    "billingControlRecordReference": "NOT_RUN",
+    "billingControlConfigurationSha256": "NOT_RUN",
+    "pricingAsOf": "NOT_RUN",
+    "pricingExpiresAt": "NOT_RUN"
+  },
+  "authority": {
+    "architectureApprovers": ["NOT_APPROVED"],
+    "securityApprovers": ["NOT_APPROVED"],
+    "privacyApprovers": ["NOT_APPROVED"],
+    "financeApprovers": ["NOT_APPROVED"],
+    "independentVerifier": "NOT_APPROVED",
+    "decision": "NOT_APPROVED",
+    "verifiedAt": "NOT_RUN",
+    "acceptanceVerifier": "NOT_APPROVED",
+    "acceptanceDecision": "NOT_RUN"
+  },
+  "destinations": [],
+  "evidence": {
+    "localPolicyValidation": "NOT_RUN",
+    "unlistedDestinationDenied": "NOT_RUN",
+    "allowedDestinationReached": "NOT_RUN",
+    "providerOutage": "NOT_RUN",
+    "dnsFailure": "NOT_RUN",
+    "tlsFailure": "NOT_RUN",
+    "logsRedacted": "NOT_RUN",
+    "killSwitch": "NOT_RUN",
+    "observedAtUtc": "NOT_RUN",
+    "evidenceIndexReference": "NOT_RUN",
+    "policyConfigurationSha256": "NOT_RUN"
+  }
+}

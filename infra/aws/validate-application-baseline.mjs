@@ -7,12 +7,110 @@
  * AWS SDK, invokes the AWS CLI, resolves credentials, or performs network I/O.
  */
 
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { lstatSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, extname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = resolve(scriptDirectory, '..', '..');
+const noExternalEgressResidualLimitations = [
+  'Task DNS security-group egress permits TCP and UDP port 53 to the VPC CIDR; this static control cannot prove that traffic reaches only the VPC Route 53 Resolver address.',
+];
+const reviewedApplicationBaselineSha256 =
+  'd16901d2127eb9d152a7d990d163f622b4b20593876715e8db888097d04ccb55';
+const reviewedResourceTypesByLogicalId = new Map([
+  ['ApplicationDataKey', 'AWS::KMS::Key'],
+  ['ApplicationDataKeyAlias', 'AWS::KMS::Alias'],
+  ['ApplicationLogsKey', 'AWS::KMS::Key'],
+  ['ApplicationLogsKeyAlias', 'AWS::KMS::Alias'],
+  ['Vpc', 'AWS::EC2::VPC'],
+  ['InternetGateway', 'AWS::EC2::InternetGateway'],
+  ['VpcGatewayAttachment', 'AWS::EC2::VPCGatewayAttachment'],
+  ['PublicSubnetA', 'AWS::EC2::Subnet'],
+  ['PublicSubnetB', 'AWS::EC2::Subnet'],
+  ['PrivateSubnetA', 'AWS::EC2::Subnet'],
+  ['PrivateSubnetB', 'AWS::EC2::Subnet'],
+  ['PublicRouteTable', 'AWS::EC2::RouteTable'],
+  ['PublicDefaultRoute', 'AWS::EC2::Route'],
+  ['PublicSubnetARouteTableAssociation', 'AWS::EC2::SubnetRouteTableAssociation'],
+  ['PublicSubnetBRouteTableAssociation', 'AWS::EC2::SubnetRouteTableAssociation'],
+  ['PrivateRouteTableA', 'AWS::EC2::RouteTable'],
+  ['PrivateRouteTableB', 'AWS::EC2::RouteTable'],
+  ['PrivateSubnetARouteTableAssociation', 'AWS::EC2::SubnetRouteTableAssociation'],
+  ['PrivateSubnetBRouteTableAssociation', 'AWS::EC2::SubnetRouteTableAssociation'],
+  ['LoadBalancerSecurityGroup', 'AWS::EC2::SecurityGroup'],
+  ['LoadBalancerHttpsIngress', 'AWS::EC2::SecurityGroupIngress'],
+  ['BackendTaskSecurityGroup', 'AWS::EC2::SecurityGroup'],
+  ['WebTaskSecurityGroup', 'AWS::EC2::SecurityGroup'],
+  ['LoadBalancerToWebEgress', 'AWS::EC2::SecurityGroupEgress'],
+  ['LoadBalancerToApiEgress', 'AWS::EC2::SecurityGroupEgress'],
+  ['LoadBalancerToWebIngress', 'AWS::EC2::SecurityGroupIngress'],
+  ['LoadBalancerToApiIngress', 'AWS::EC2::SecurityGroupIngress'],
+  ['DatabaseSecurityGroup', 'AWS::EC2::SecurityGroup'],
+  ['TaskToDatabaseEgress', 'AWS::EC2::SecurityGroupEgress'],
+  ['TaskToDatabaseIngress', 'AWS::EC2::SecurityGroupIngress'],
+  ['RedisSecurityGroup', 'AWS::EC2::SecurityGroup'],
+  ['TaskToRedisEgress', 'AWS::EC2::SecurityGroupEgress'],
+  ['TaskToRedisIngress', 'AWS::EC2::SecurityGroupIngress'],
+  ['BackendTaskDnsUdpEgress', 'AWS::EC2::SecurityGroupEgress'],
+  ['BackendTaskDnsTcpEgress', 'AWS::EC2::SecurityGroupEgress'],
+  ['InterfaceEndpointSecurityGroup', 'AWS::EC2::SecurityGroup'],
+  ['BackendTaskToInterfaceEndpointEgress', 'AWS::EC2::SecurityGroupEgress'],
+  ['BackendTaskToInterfaceEndpointIngress', 'AWS::EC2::SecurityGroupIngress'],
+  ['WebTaskDnsUdpEgress', 'AWS::EC2::SecurityGroupEgress'],
+  ['WebTaskDnsTcpEgress', 'AWS::EC2::SecurityGroupEgress'],
+  ['WebTaskToInterfaceEndpointEgress', 'AWS::EC2::SecurityGroupEgress'],
+  ['WebTaskToInterfaceEndpointIngress', 'AWS::EC2::SecurityGroupIngress'],
+  ['EcrApiEndpoint', 'AWS::EC2::VPCEndpoint'],
+  ['EcrDockerEndpoint', 'AWS::EC2::VPCEndpoint'],
+  ['CloudWatchLogsEndpoint', 'AWS::EC2::VPCEndpoint'],
+  ['SecretsManagerEndpoint', 'AWS::EC2::VPCEndpoint'],
+  ['SqsEndpoint', 'AWS::EC2::VPCEndpoint'],
+  ['S3GatewayEndpoint', 'AWS::EC2::VPCEndpoint'],
+  ['BackendTaskToS3Egress', 'AWS::EC2::SecurityGroupEgress'],
+  ['WebTaskToS3Egress', 'AWS::EC2::SecurityGroupEgress'],
+  ['DatabaseSubnetGroup', 'AWS::RDS::DBSubnetGroup'],
+  ['RedisSubnetGroup', 'AWS::ElastiCache::SubnetGroup'],
+  ['DatabaseCredentialsSecret', 'AWS::SecretsManager::Secret'],
+  ['RedisAuthSecret', 'AWS::SecretsManager::Secret'],
+  ['DatabaseParameterGroup', 'AWS::RDS::DBParameterGroup'],
+  ['Database', 'AWS::RDS::DBInstance'],
+  ['RedisReplicationGroup', 'AWS::ElastiCache::ReplicationGroup'],
+  ['JobDeadLetterQueue', 'AWS::SQS::Queue'],
+  ['JobQueue', 'AWS::SQS::Queue'],
+  ['JobQueueTlsPolicy', 'AWS::SQS::QueuePolicy'],
+  ['ApiLogGroup', 'AWS::Logs::LogGroup'],
+  ['WebLogGroup', 'AWS::Logs::LogGroup'],
+  ['WorkerLogGroup', 'AWS::Logs::LogGroup'],
+  ['ApplicationImagePullPolicy', 'AWS::IAM::ManagedPolicy'],
+  ['BackendTaskExecutionRole', 'AWS::IAM::Role'],
+  ['WebTaskExecutionRole', 'AWS::IAM::Role'],
+  ['ApiTaskRole', 'AWS::IAM::Role'],
+  ['WorkerTaskRole', 'AWS::IAM::Role'],
+  ['WebTaskRole', 'AWS::IAM::Role'],
+  ['ApplicationLoadBalancer', 'AWS::ElasticLoadBalancingV2::LoadBalancer'],
+  ['WebTargetGroup', 'AWS::ElasticLoadBalancingV2::TargetGroup'],
+  ['ApiTargetGroup', 'AWS::ElasticLoadBalancingV2::TargetGroup'],
+  ['HttpRedirectListener', 'AWS::ElasticLoadBalancingV2::Listener'],
+  ['HttpRedirectListenerRule', 'AWS::ElasticLoadBalancingV2::ListenerRule'],
+  ['HttpsListener', 'AWS::ElasticLoadBalancingV2::Listener'],
+  ['HttpsApiListenerRule', 'AWS::ElasticLoadBalancingV2::ListenerRule'],
+  ['HttpsWebListenerRule', 'AWS::ElasticLoadBalancingV2::ListenerRule'],
+  ['EcsCluster', 'AWS::ECS::Cluster'],
+  ['ApiTaskDefinition', 'AWS::ECS::TaskDefinition'],
+  ['WebTaskDefinition', 'AWS::ECS::TaskDefinition'],
+  ['WorkerTaskDefinition', 'AWS::ECS::TaskDefinition'],
+  ['ApiService', 'AWS::ECS::Service'],
+  ['WebService', 'AWS::ECS::Service'],
+  ['WorkerService', 'AWS::ECS::Service'],
+  ['ApiUnhealthyHostAlarm', 'AWS::CloudWatch::Alarm'],
+  ['DatabaseLowStorageAlarm', 'AWS::CloudWatch::Alarm'],
+  ['RedisEvictionsAlarm', 'AWS::CloudWatch::Alarm'],
+  ['JobQueueAgeAlarm', 'AWS::CloudWatch::Alarm'],
+  ['DeadLetterQueueNotEmptyAlarm', 'AWS::CloudWatch::Alarm'],
+  ['OperationalDashboard', 'AWS::CloudWatch::Dashboard'],
+]);
 
 function parseArguments(argv) {
   const options = {
@@ -32,6 +130,9 @@ function parseArguments(argv) {
       const value = argv[index + 1];
       if (!value || value.startsWith('--')) {
         throw new Error(`${argument} requires a path.`);
+      }
+      if (/^(?:\\\\[.?]\\|\\\\|\/\/)/.test(value) || /^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(value)) {
+        throw new Error(`${argument} requires a local filesystem path, not a URI or network path.`);
       }
 
       options.template = resolve(value);
@@ -62,12 +163,18 @@ function parseArguments(argv) {
 }
 
 function readRequiredFile(path, label, errors) {
-  if (!existsSync(path)) {
+  let info;
+  try {
+    info = lstatSync(path);
+  } catch {
     errors.push(`${label} does not exist: ${path}`);
     return '';
   }
 
-  const info = statSync(path);
+  if (info.isSymbolicLink()) {
+    errors.push(`${label} must be a regular local file, not a symbolic link: ${path}`);
+    return '';
+  }
   if (!info.isFile()) {
     errors.push(`${label} is not a file: ${path}`);
     return '';
@@ -151,6 +258,91 @@ function hasPropertyName(block, propertyName) {
   return new RegExp(`^\\s+${escapedName}:`, 'm').test(block);
 }
 
+function propertyValue(block, propertyName) {
+  const escapedName = propertyName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return block.match(new RegExp(`^\\s+${escapedName}:\\s*(.+?)\\s*(?:#.*)?$`, 'm'))?.[1];
+}
+
+function sha256(value) {
+  return createHash('sha256').update(value, 'utf8').digest('hex');
+}
+
+function requireExactInlineEnvironmentReference(
+  block,
+  logicalId,
+  environmentName,
+  referencedLogicalId,
+  errors,
+) {
+  const escapedName = environmentName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const escapedReference = referencedLogicalId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const nameMatches = block.match(new RegExp(`\\bName:\\s*${escapedName}\\b`, 'g')) ?? [];
+  const exactMatches =
+    block.match(
+      new RegExp(
+        `^\\s*-\\s*\\{\\s*Name:\\s*${escapedName},\\s*Value:\\s*!Ref\\s+${escapedReference}\\s*\\}\\s*$`,
+        'gm',
+      ),
+    ) ?? [];
+  if (nameMatches.length !== 1 || exactMatches.length !== 1) {
+    errors.push(
+      `${logicalId} must bind exactly one ${environmentName} environment value to !Ref ${referencedLogicalId}.`,
+    );
+  }
+}
+
+function nestedReferenceList(block, propertyName) {
+  const lines = block.split(/\r?\n/);
+  const propertyLines = lines
+    .map((line, index) => ({ index, line }))
+    .filter(({ line }) => line.trim() === `${propertyName}:`);
+  if (propertyLines.length !== 1) {
+    return undefined;
+  }
+
+  const { index, line } = propertyLines[0];
+  const propertyIndent = line.search(/\S/);
+  const references = [];
+  for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
+    const nestedLine = lines[cursor];
+    if (nestedLine.trim() === '') {
+      continue;
+    }
+    if (nestedLine.search(/\S/) <= propertyIndent) {
+      break;
+    }
+    const reference = nestedLine.trim().match(/^-\s+!Ref\s+([A-Za-z][A-Za-z0-9]*)$/)?.[1];
+    if (!reference) {
+      return undefined;
+    }
+    references.push(reference);
+  }
+  return references;
+}
+
+function requireExactLogicalIds(entries, expectedIds, label, errors) {
+  const expected = new Set(expectedIds);
+  const actual = new Set(entries.map(({ logicalId }) => logicalId));
+
+  for (const logicalId of expected) {
+    if (!actual.has(logicalId)) {
+      errors.push(`${label} is missing required resource ${logicalId}.`);
+    }
+  }
+  for (const logicalId of actual) {
+    if (!expected.has(logicalId)) {
+      errors.push(`${label} contains unapproved resource ${logicalId}.`);
+    }
+  }
+}
+
+function requireExactProperty(block, logicalId, propertyName, expectedValue, errors) {
+  const actualValue = propertyValue(block, propertyName);
+  if (actualValue !== expectedValue) {
+    errors.push(`${logicalId} requires ${propertyName} to equal ${expectedValue}.`);
+  }
+}
+
 function requireTypeCount(inventory, type, minimum, errors) {
   const count = entriesOf(inventory, type).length;
   if (count < minimum) {
@@ -173,7 +365,443 @@ function requireProperties(entries, rules, errors) {
   }
 }
 
+function validateNoExternalApplicationEgress(source, parameters, resources, inventory, errors) {
+  const privateEgressMode = parameters.get('PrivateEgressMode') ?? '';
+  const privateEgressAllowedValues = [
+    ...privateEgressMode.matchAll(/^\s{6}-\s*([A-Za-z0-9]+)\s*$/gm),
+  ].map((match) => match[1]);
+  if (
+    !hasProperty(privateEgressMode, 'Default', 'VpcEndpoints') ||
+    privateEgressAllowedValues.join('|') !== 'VpcEndpoints|None'
+  ) {
+    errors.push(
+      'PrivateEgressMode must expose exactly VpcEndpoints and None and must default to VpcEndpoints; internet egress modes are not approved.',
+    );
+  }
+  if (
+    !/^\s{2}UseVpcEndpoints:\s*!Equals \[!Ref PrivateEgressMode, VpcEndpoints\]\s*$/m.test(source)
+  ) {
+    errors.push('UseVpcEndpoints must be controlled only by PrivateEgressMode VpcEndpoints.');
+  }
+
+  if (/^\s*(?:["']?Transform["']?|["']?Fn::Transform["']?)\s*:/m.test(source)) {
+    errors.push(
+      'Application baseline transforms and macros are prohibited because static egress validation must inspect every resource directly.',
+    );
+  }
+  if (/^\s*<<\s*:|(?:^|[\s:[,{])[&*][A-Za-z0-9_-]+/m.test(source)) {
+    errors.push(
+      'Application baseline YAML anchors, aliases, and merge keys are prohibited because static egress validation must inspect the resolved resource graph.',
+    );
+  }
+  if (/^  ["'][A-Za-z][A-Za-z0-9]*["']\s*:/m.test(source)) {
+    errors.push(
+      'Application baseline logical IDs must use the canonical unquoted form required by the static resource inventory.',
+    );
+  }
+  for (const [logicalId, block] of resources) {
+    if (!/^\s{4}Type:\s*['"]?[^\s'"]+['"]?\s*(?:#.*)?$/m.test(block)) {
+      errors.push(`${logicalId} must declare one canonical, statically visible resource Type.`);
+    }
+  }
+  for (const [type, entries] of inventory) {
+    if (type.startsWith('Custom::') || type === 'AWS::CloudFormation::CustomResource') {
+      for (const { logicalId } of entries) {
+        errors.push(
+          `${logicalId} is a prohibited custom resource that could bypass egress policy.`,
+        );
+      }
+    }
+  }
+
+  const actualResourceTypesByLogicalId = new Map();
+  for (const [type, entries] of inventory) {
+    for (const { logicalId } of entries) {
+      actualResourceTypesByLogicalId.set(logicalId, type);
+    }
+  }
+  for (const [logicalId, expectedType] of reviewedResourceTypesByLogicalId) {
+    if (!resources.has(logicalId)) {
+      errors.push(`Reviewed resource graph is missing ${logicalId}.`);
+      continue;
+    }
+
+    const actualType = actualResourceTypesByLogicalId.get(logicalId);
+    if (actualType !== expectedType) {
+      errors.push(
+        `${logicalId} must retain reviewed resource type ${expectedType}; found ${actualType ?? 'no statically visible type'}.`,
+      );
+    }
+  }
+  for (const logicalId of resources.keys()) {
+    if (!reviewedResourceTypesByLogicalId.has(logicalId)) {
+      errors.push(`Reviewed resource graph contains unapproved resource ${logicalId}.`);
+    }
+  }
+
+  const prohibitedEgressTypes = new Set([
+    'AWS::AppRunner::Service',
+    'AWS::AutoScaling::AutoScalingGroup',
+    'AWS::Batch::ComputeEnvironment',
+    'AWS::CloudFormation::Stack',
+    'AWS::EC2::CarrierGateway',
+    'AWS::EC2::ClientVpnEndpoint',
+    'AWS::EC2::ClientVpnRoute',
+    'AWS::EC2::CustomerGateway',
+    'AWS::EC2::DHCPOptions',
+    'AWS::EC2::EgressOnlyInternetGateway',
+    'AWS::EC2::EIP',
+    'AWS::EC2::Instance',
+    'AWS::EC2::LaunchTemplate',
+    'AWS::EC2::LocalGatewayRoute',
+    'AWS::EC2::LocalGatewayRouteTableVPCAssociation',
+    'AWS::EC2::NatGateway',
+    'AWS::EC2::NetworkInterface',
+    'AWS::EC2::TransitGateway',
+    'AWS::EC2::TransitGatewayAttachment',
+    'AWS::EC2::TransitGatewayPeeringAttachment',
+    'AWS::EC2::TransitGatewayRoute',
+    'AWS::EC2::TransitGatewayRouteTable',
+    'AWS::EC2::TransitGatewayVpcAttachment',
+    'AWS::EC2::VPNConnection',
+    'AWS::EC2::VPNGateway',
+    'AWS::EC2::VPNGatewayRoutePropagation',
+    'AWS::EC2::VPCDHCPOptionsAssociation',
+    'AWS::EC2::VPCPeeringConnection',
+    'AWS::ElasticLoadBalancing::LoadBalancer',
+    'AWS::Lambda::Function',
+    'AWS::NetworkFirewall::Firewall',
+    'AWS::NetworkFirewall::FirewallPolicy',
+    'AWS::NetworkFirewall::LoggingConfiguration',
+    'AWS::NetworkFirewall::RuleGroup',
+    'AWS::Route53Resolver::FirewallDomainList',
+    'AWS::Route53Resolver::FirewallRuleGroup',
+    'AWS::Route53Resolver::FirewallRuleGroupAssociation',
+    'AWS::Route53Resolver::ResolverEndpoint',
+  ]);
+  for (const type of prohibitedEgressTypes) {
+    for (const { logicalId } of entriesOf(inventory, type)) {
+      errors.push(
+        `${logicalId} uses prohibited external-egress or proxy resource type ${type}; no such architecture has been approved.`,
+      );
+    }
+  }
+  const prohibitedEgressTypeFamilies = [
+    /^AWS::NetworkManager::/,
+    /^AWS::Route53Resolver::/,
+    /^AWS::VpcLattice::/,
+    /^AWS::EC2::(?:GatewayRouteTableAssociation|RouteServer|TransitGateway|VPNGatewayRoutePropagation)/,
+  ];
+  for (const [type, entries] of inventory) {
+    if (prohibitedEgressTypeFamilies.some((pattern) => pattern.test(type))) {
+      for (const { logicalId } of entries) {
+        errors.push(
+          `${logicalId} uses prohibited external-egress routing resource type ${type}; the reviewed baseline has no route propagation, Cloud WAN, route server, or VPC Lattice path.`,
+        );
+      }
+    }
+  }
+
+  const routes = entriesOf(inventory, 'AWS::EC2::Route');
+  requireExactLogicalIds(routes, ['PublicDefaultRoute'], 'Explicit route allowlist', errors);
+  const publicDefaultRoute = resources.get('PublicDefaultRoute') ?? '';
+  requireExactProperty(
+    publicDefaultRoute,
+    'PublicDefaultRoute',
+    'DestinationCidrBlock',
+    '0.0.0.0/0',
+    errors,
+  );
+  requireExactProperty(
+    publicDefaultRoute,
+    'PublicDefaultRoute',
+    'GatewayId',
+    '!Ref InternetGateway',
+    errors,
+  );
+  requireExactProperty(
+    publicDefaultRoute,
+    'PublicDefaultRoute',
+    'RouteTableId',
+    '!Ref PublicRouteTable',
+    errors,
+  );
+  if (
+    /(?:DestinationIpv6CidrBlock|NatGatewayId|TransitGatewayId|EgressOnlyInternetGatewayId|NetworkInterfaceId|VpcPeeringConnectionId|CarrierGatewayId|LocalGatewayId):/m.test(
+      publicDefaultRoute,
+    )
+  ) {
+    errors.push('PublicDefaultRoute contains an unapproved destination or egress target.');
+  }
+
+  const routeTables = entriesOf(inventory, 'AWS::EC2::RouteTable');
+  requireExactLogicalIds(
+    routeTables,
+    ['PublicRouteTable', 'PrivateRouteTableA', 'PrivateRouteTableB'],
+    'Route-table allowlist',
+    errors,
+  );
+  const routeTableAssociations = entriesOf(inventory, 'AWS::EC2::SubnetRouteTableAssociation');
+  requireExactLogicalIds(
+    routeTableAssociations,
+    [
+      'PublicSubnetARouteTableAssociation',
+      'PublicSubnetBRouteTableAssociation',
+      'PrivateSubnetARouteTableAssociation',
+      'PrivateSubnetBRouteTableAssociation',
+    ],
+    'Subnet route-table association allowlist',
+    errors,
+  );
+  const expectedAssociations = new Map([
+    ['PublicSubnetARouteTableAssociation', ['!Ref PublicSubnetA', '!Ref PublicRouteTable']],
+    ['PublicSubnetBRouteTableAssociation', ['!Ref PublicSubnetB', '!Ref PublicRouteTable']],
+    ['PrivateSubnetARouteTableAssociation', ['!Ref PrivateSubnetA', '!Ref PrivateRouteTableA']],
+    ['PrivateSubnetBRouteTableAssociation', ['!Ref PrivateSubnetB', '!Ref PrivateRouteTableB']],
+  ]);
+  for (const [logicalId, [subnetId, routeTableId]] of expectedAssociations) {
+    const block = resources.get(logicalId) ?? '';
+    requireExactProperty(block, logicalId, 'SubnetId', subnetId, errors);
+    requireExactProperty(block, logicalId, 'RouteTableId', routeTableId, errors);
+  }
+
+  requireExactLogicalIds(
+    entriesOf(inventory, 'AWS::EC2::InternetGateway'),
+    ['InternetGateway'],
+    'Internet-gateway allowlist',
+    errors,
+  );
+  requireExactLogicalIds(
+    entriesOf(inventory, 'AWS::EC2::VPCGatewayAttachment'),
+    ['VpcGatewayAttachment'],
+    'Internet-gateway attachment allowlist',
+    errors,
+  );
+  const internetGatewayAttachment = resources.get('VpcGatewayAttachment') ?? '';
+  requireExactProperty(
+    internetGatewayAttachment,
+    'VpcGatewayAttachment',
+    'InternetGatewayId',
+    '!Ref InternetGateway',
+    errors,
+  );
+  requireExactProperty(
+    internetGatewayAttachment,
+    'VpcGatewayAttachment',
+    'VpcId',
+    '!Ref Vpc',
+    errors,
+  );
+  if (hasPropertyName(internetGatewayAttachment, 'VpnGatewayId')) {
+    errors.push('VpcGatewayAttachment must not attach a VPN gateway.');
+  }
+
+  const endpoints = entriesOf(inventory, 'AWS::EC2::VPCEndpoint');
+  const expectedEndpoints = new Map([
+    ['EcrApiEndpoint', ['ecr.api', 'Interface']],
+    ['EcrDockerEndpoint', ['ecr.dkr', 'Interface']],
+    ['CloudWatchLogsEndpoint', ['logs', 'Interface']],
+    ['SecretsManagerEndpoint', ['secretsmanager', 'Interface']],
+    ['SqsEndpoint', ['sqs', 'Interface']],
+    ['S3GatewayEndpoint', ['s3', 'Gateway']],
+  ]);
+  requireExactLogicalIds(
+    endpoints,
+    [...expectedEndpoints.keys()],
+    'Private VPC endpoint allowlist',
+    errors,
+  );
+  for (const [logicalId, [service, endpointType]] of expectedEndpoints) {
+    const block = resources.get(logicalId) ?? '';
+    requireExactProperty(block, logicalId, 'Condition', 'UseVpcEndpoints', errors);
+    requireExactProperty(
+      block,
+      logicalId,
+      'ServiceName',
+      `!Sub com.amazonaws.\${AWS::Region}.${service}`,
+      errors,
+    );
+    requireExactProperty(block, logicalId, 'VpcEndpointType', endpointType, errors);
+    requireExactProperty(block, logicalId, 'VpcId', '!Ref Vpc', errors);
+
+    if (endpointType === 'Interface') {
+      requireExactProperty(block, logicalId, 'PrivateDnsEnabled', 'true', errors);
+      const subnetReferences = [
+        ...block.matchAll(/^\s+-\s*!Ref\s+((?:Public|Private)Subnet[A-Za-z0-9]*)\s*$/gm),
+      ].map((match) => match[1]);
+      if (subnetReferences.join('|') !== 'PrivateSubnetA|PrivateSubnetB') {
+        errors.push(`${logicalId} must use exactly PrivateSubnetA and PrivateSubnetB.`);
+      }
+      if ((block.match(/!Ref\s+InterfaceEndpointSecurityGroup\b/g) ?? []).length !== 1) {
+        errors.push(`${logicalId} must use exactly the interface endpoint security group.`);
+      }
+    }
+  }
+
+  const s3Endpoint = resources.get('S3GatewayEndpoint') ?? '';
+  const s3RouteTableReferences = [
+    ...s3Endpoint.matchAll(/^\s+-\s*!Ref\s+((?:Public|Private)RouteTable[A-Za-z0-9]*)\s*$/gm),
+  ].map((match) => match[1]);
+  if (s3RouteTableReferences.join('|') !== 'PrivateRouteTableA|PrivateRouteTableB') {
+    errors.push('S3GatewayEndpoint must attach only to both private route tables.');
+  }
+  if ((s3Endpoint.match(/^\s+-\s+Effect:/gm) ?? []).length !== 1) {
+    errors.push('S3GatewayEndpoint must contain exactly one endpoint-policy statement.');
+  }
+  if (!/^\s+-\s+Effect:\s*Allow\s*$/m.test(s3Endpoint)) {
+    errors.push('S3GatewayEndpoint endpoint policy must have Effect: Allow.');
+  }
+  requireExactProperty(s3Endpoint, 'S3GatewayEndpoint', 'Principal', "'*'", errors);
+  requireExactProperty(s3Endpoint, 'S3GatewayEndpoint', 'Action', 's3:GetObject', errors);
+  requireExactProperty(
+    s3Endpoint,
+    'S3GatewayEndpoint',
+    'Resource',
+    '!Sub arn:${AWS::Partition}:s3:::prod-${AWS::Region}-starport-layer-bucket/*',
+    errors,
+  );
+
+  const expectedSecurityGroupEgress = new Map([
+    [
+      'LoadBalancerToWebEgress',
+      ['DestinationSecurityGroupId', '!Ref WebTaskSecurityGroup', '3000', 'tcp', undefined],
+    ],
+    [
+      'LoadBalancerToApiEgress',
+      ['DestinationSecurityGroupId', '!Ref BackendTaskSecurityGroup', '3001', 'tcp', undefined],
+    ],
+    [
+      'TaskToDatabaseEgress',
+      ['DestinationSecurityGroupId', '!Ref DatabaseSecurityGroup', '5432', 'tcp', undefined],
+    ],
+    [
+      'TaskToRedisEgress',
+      ['DestinationSecurityGroupId', '!Ref RedisSecurityGroup', '6379', 'tcp', undefined],
+    ],
+    ['BackendTaskDnsUdpEgress', ['CidrIp', '!Ref VpcCidr', '53', 'udp', undefined]],
+    ['BackendTaskDnsTcpEgress', ['CidrIp', '!Ref VpcCidr', '53', 'tcp', undefined]],
+    [
+      'BackendTaskToInterfaceEndpointEgress',
+      [
+        'DestinationSecurityGroupId',
+        '!Ref InterfaceEndpointSecurityGroup',
+        '443',
+        'tcp',
+        'UseVpcEndpoints',
+      ],
+    ],
+    ['WebTaskDnsUdpEgress', ['CidrIp', '!Ref VpcCidr', '53', 'udp', undefined]],
+    ['WebTaskDnsTcpEgress', ['CidrIp', '!Ref VpcCidr', '53', 'tcp', undefined]],
+    [
+      'WebTaskToInterfaceEndpointEgress',
+      [
+        'DestinationSecurityGroupId',
+        '!Ref InterfaceEndpointSecurityGroup',
+        '443',
+        'tcp',
+        'UseVpcEndpoints',
+      ],
+    ],
+    [
+      'BackendTaskToS3Egress',
+      ['DestinationPrefixListId', '!Ref S3ManagedPrefixListId', '443', 'tcp', 'UseVpcEndpoints'],
+    ],
+    [
+      'WebTaskToS3Egress',
+      ['DestinationPrefixListId', '!Ref S3ManagedPrefixListId', '443', 'tcp', 'UseVpcEndpoints'],
+    ],
+  ]);
+  const securityGroupEgress = entriesOf(inventory, 'AWS::EC2::SecurityGroupEgress');
+  requireExactLogicalIds(
+    securityGroupEgress,
+    [...expectedSecurityGroupEgress.keys()],
+    'Security-group egress allowlist',
+    errors,
+  );
+  for (const [
+    logicalId,
+    [destinationProperty, destinationValue, port, protocol, condition],
+  ] of expectedSecurityGroupEgress) {
+    const block = resources.get(logicalId) ?? '';
+    const destinations = [
+      ...block.matchAll(
+        /^\s+(CidrIp|CidrIpv6|DestinationSecurityGroupId|DestinationPrefixListId):\s*(.+?)\s*$/gm,
+      ),
+    ];
+    if (
+      destinations.length !== 1 ||
+      destinations[0][1] !== destinationProperty ||
+      destinations[0][2] !== destinationValue
+    ) {
+      errors.push(
+        `${logicalId} must use only ${destinationProperty}: ${destinationValue} as its destination.`,
+      );
+    }
+    requireExactProperty(block, logicalId, 'FromPort', port, errors);
+    requireExactProperty(block, logicalId, 'ToPort', port, errors);
+    requireExactProperty(block, logicalId, 'IpProtocol', protocol, errors);
+    if (condition) {
+      requireExactProperty(block, logicalId, 'Condition', condition, errors);
+    } else if (hasPropertyName(block, 'Condition')) {
+      errors.push(`${logicalId} must not make its required scoped egress conditional.`);
+    }
+  }
+
+  requireExactLogicalIds(
+    entriesOf(inventory, 'AWS::ElasticLoadBalancingV2::LoadBalancer'),
+    ['ApplicationLoadBalancer'],
+    'Load-balancer allowlist',
+    errors,
+  );
+  requireExactLogicalIds(
+    entriesOf(inventory, 'AWS::ECS::TaskDefinition'),
+    ['ApiTaskDefinition', 'WebTaskDefinition', 'WorkerTaskDefinition'],
+    'Task-definition allowlist',
+    errors,
+  );
+  const services = entriesOf(inventory, 'AWS::ECS::Service');
+  requireExactLogicalIds(
+    services,
+    ['ApiService', 'WebService', 'WorkerService'],
+    'ECS service allowlist',
+    errors,
+  );
+  const expectedServiceSecurityGroups = new Map([
+    ['ApiService', 'BackendTaskSecurityGroup'],
+    ['WebService', 'WebTaskSecurityGroup'],
+    ['WorkerService', 'BackendTaskSecurityGroup'],
+  ]);
+  for (const { logicalId, block } of services) {
+    if (
+      !hasProperty(block, 'AssignPublicIp', 'DISABLED') ||
+      /!Ref\s+PublicSubnet[A-Za-z0-9]*\b/.test(block)
+    ) {
+      errors.push(`${logicalId} must disable public IPs and use only private subnets.`);
+    }
+    const subnetReferences = nestedReferenceList(block, 'Subnets');
+    if (subnetReferences?.join('|') !== 'PrivateSubnetA|PrivateSubnetB') {
+      errors.push(`${logicalId} must use exactly PrivateSubnetA and PrivateSubnetB.`);
+    }
+    const securityGroupReferences = nestedReferenceList(block, 'SecurityGroups');
+    const expectedSecurityGroup = expectedServiceSecurityGroups.get(logicalId);
+    if (
+      !expectedSecurityGroup ||
+      securityGroupReferences?.length !== 1 ||
+      securityGroupReferences[0] !== expectedSecurityGroup
+    ) {
+      errors.push(`${logicalId} must use only the reviewed ${expectedSecurityGroup} identity.`);
+    }
+  }
+}
+
 function validateTemplateShape(source, errors) {
+  const templateSha256 = sha256(source);
+  if (templateSha256 !== reviewedApplicationBaselineSha256) {
+    errors.push(
+      `Application template SHA-256 ${templateSha256} does not match the reviewed property-complete baseline ${reviewedApplicationBaselineSha256}.`,
+    );
+  }
+
   const templateBytes = Buffer.byteLength(source, 'utf8');
   if (templateBytes > 51200) {
     errors.push(
@@ -295,6 +923,8 @@ function validateTemplateShape(source, errors) {
     errors.push('Application template must contain a non-empty Resources section.');
     return;
   }
+
+  validateNoExternalApplicationEgress(source, parameters, resources, inventory, errors);
 
   const requiredTypes = new Map([
     ['AWS::EC2::VPC', 1],
@@ -432,6 +1062,24 @@ function validateTemplateShape(source, errors) {
   ) {
     errors.push('WorkerTaskDefinition must run the dependency-aware worker health command.');
   }
+  const apiTaskDefinition = resources.get('ApiTaskDefinition') ?? '';
+  for (const [logicalId, block] of [
+    ['ApiTaskDefinition', apiTaskDefinition],
+    ['WorkerTaskDefinition', workerTaskDefinition],
+  ]) {
+    requireExactInlineEnvironmentReference(block, logicalId, 'SQS_QUEUE_URL', 'JobQueue', errors);
+    requireExactInlineEnvironmentReference(
+      block,
+      logicalId,
+      'SQS_DEAD_LETTER_QUEUE_URL',
+      'JobDeadLetterQueue',
+      errors,
+    );
+  }
+  const webTaskDefinition = resources.get('WebTaskDefinition') ?? '';
+  if (/\bName:\s*SQS_(?:DEAD_LETTER_)?QUEUE_URL\b/.test(webTaskDefinition)) {
+    errors.push('WebTaskDefinition must not receive an SQS queue destination.');
+  }
 
   const apiTargetGroup = resources.get('ApiTargetGroup') ?? '';
   if (!hasProperty(apiTargetGroup, 'HealthCheckPath', '/api/v1/health/dependencies')) {
@@ -441,6 +1089,26 @@ function validateTemplateShape(source, errors) {
   const workerTaskRole = resources.get('WorkerTaskRole') ?? '';
   if (!/sqs:GetQueueAttributes/.test(workerTaskRole) || !/sqs:SendMessage/.test(workerTaskRole)) {
     errors.push('WorkerTaskRole must support exact queue readiness and publishing operations.');
+  }
+  const workerResourceValues = [...workerTaskRole.matchAll(/^\s+Resource:\s*(.+?)\s*$/gm)].map(
+    (match) => match[1],
+  );
+  const expectedWorkerResourceValues = [
+    '!GetAtt JobQueue.Arn',
+    '[!GetAtt JobQueue.Arn, !GetAtt JobDeadLetterQueue.Arn]',
+    '!GetAtt ApplicationDataKey.Arn',
+  ];
+  if (workerResourceValues.join('|') !== expectedWorkerResourceValues.join('|')) {
+    errors.push(
+      'WorkerTaskRole resources must bind exactly to JobQueue, JobDeadLetterQueue, and ApplicationDataKey.',
+    );
+  }
+  const apiTaskRole = resources.get('ApiTaskRole') ?? '';
+  const apiResourceValues = [...apiTaskRole.matchAll(/^\s+Resource:\s*(.+?)\s*$/gm)].map(
+    (match) => match[1],
+  );
+  if (apiResourceValues.join('|') !== '[!GetAtt JobQueue.Arn, !GetAtt JobDeadLetterQueue.Arn]') {
+    errors.push('ApiTaskRole resources must bind exactly to JobQueue and JobDeadLetterQueue.');
   }
 
   const privateSubnets = entriesOf(inventory, 'AWS::EC2::Subnet').filter(
@@ -950,7 +1618,10 @@ function main() {
     ok: errors.length === 0,
     awsCallsMade: 0,
     template: options.template,
+    templateSha256: applicationSource ? sha256(applicationSource) : undefined,
+    reviewedTemplateSha256: reviewedApplicationBaselineSha256,
     deploymentGuard: guardPath,
+    residualLimitations: noExternalEgressResidualLimitations,
     errors,
   };
 
@@ -962,6 +1633,7 @@ function main() {
         'KAN-34 local infrastructure policy validation passed.',
         `Application template: ${options.template}`,
         'AWS API calls made: 0',
+        `Known residual limitation: ${noExternalEgressResidualLimitations[0]}`,
         '',
       ].join('\n'),
     );
