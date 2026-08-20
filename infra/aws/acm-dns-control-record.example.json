@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 1,
+  "status": "NOT_APPROVED",
+  "recordId": "NOT_APPROVED",
+  "approvedAt": "NOT_APPROVED",
+  "expiresAt": "NOT_APPROVED",
+  "aws": {
+    "accountId": "NOT_APPROVED",
+    "region": "NOT_APPROVED",
+    "approvedRoleArn": "NOT_APPROVED"
+  },
+  "hostname": {
+    "applicationHostname": "NOT_APPROVED",
+    "parentDomain": "NOT_APPROVED",
+    "dnsProvider": "NOT_APPROVED",
+    "dnsZoneMode": "NOT_APPROVED",
+    "existingZoneReference": "NOT_APPROVED",
+    "ownershipReference": "NOT_APPROVED"
+  },
+  "certificate": {
+    "mode": "NOT_APPROVED",
+    "validationMethod": "NOT_APPROVED",
+    "certificateArn": "NOT_RUN",
+    "subjectAlternativeNames": ["NOT_RUN"],
+    "certificateStatus": "NOT_RUN",
+    "notAfterUtc": "NOT_RUN",
+    "sha256Fingerprint": "NOT_RUN",
+    "renewalOwner": "NOT_APPROVED",
+    "renewalMethod": "NOT_APPROVED",
+    "renewalWindowDays": "NOT_APPROVED"
+  },
+  "dnsChange": {
+    "recordType": "NOT_APPROVED",
+    "ttlSeconds": "NOT_APPROVED",
+    "applicationLoadBalancerArn": "NOT_RUN",
+    "targetLoadBalancerDnsName": "NOT_RUN",
+    "targetLoadBalancerCanonicalHostedZoneId": "NOT_RUN",
+    "previousRecordValue": "NOT_RUN",
+    "previousTtlSeconds": "NOT_RUN",
+    "rollbackDeadlineUtc": "NOT_RUN"
+  },
+  "costBoundary": {
+    "decision": "NOT_APPROVED",
+    "domainRegistration": "NOT_AUTHORIZED",
+    "hostedZoneCreation": "NOT_AUTHORIZED",
+    "exportableCertificate": "NOT_AUTHORIZED",
+    "privateCertificateAuthority": "NOT_AUTHORIZED",
+    "paidMonitoring": "NOT_AUTHORIZED",
+    "estimatedMonthlyIncrementUsd": "NOT_APPROVED",
+    "pricingAsOf": "NOT_APPROVED",
+    "pricingExpiresAt": "NOT_APPROVED",
+    "pricingSourceReference": "NOT_APPROVED"
+  },
+  "authority": {
+    "certificateRequestApprovers": ["NOT_APPROVED"],
+    "dnsChangeApprovers": ["NOT_APPROVED"],
+    "cutoverApprovers": ["NOT_APPROVED"],
+    "rollbackApprovers": ["NOT_APPROVED"]
+  },
+  "independentVerification": {
+    "verifier": "NOT_APPROVED",
+    "decision": "NOT_APPROVED",
+    "verifiedAt": "NOT_RUN"
+  },
+  "evidence": {
+    "hostnameOwnership": "NOT_RUN",
+    "certificateIssued": "NOT_RUN",
+    "dnsValidation": "NOT_RUN",
+    "dnsCutover": "NOT_RUN",
+    "tlsChainAndHostname": "NOT_RUN",
+    "httpRedirect": "NOT_RUN",
+    "unexpectedHostRejected": "NOT_RUN",
+    "expirationMonitoring": "NOT_RUN",
+    "rollbackDrill": "NOT_RUN",
+    "observedAtUtc": "NOT_RUN",
+    "evidenceIndexReference": "NOT_RUN"
+  }
+}

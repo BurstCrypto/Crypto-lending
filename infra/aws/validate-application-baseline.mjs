@@ -238,6 +238,18 @@ function validateTemplateShape(source, errors) {
     }
   }
 
+  const hostnameParameter = parameters.get('ApplicationHostname');
+  if (!hostnameParameter) {
+    errors.push('ApplicationHostname is required for exact host routing.');
+  } else {
+    if (hasPropertyName(hostnameParameter, 'Default')) {
+      errors.push('ApplicationHostname must be supplied explicitly.');
+    }
+    if (!/AllowedPattern:[^\n]*\{2,\}/.test(hostnameParameter)) {
+      errors.push('ApplicationHostname must require an exact non-production subdomain.');
+    }
+  }
+
   const ingressCidrParameter = parameters.get('AllowedIngressIpv4Cidr') ?? '';
   if (
     !/AllowedPattern:[^\n]*\/\(\?:\[1-9\]\|\[12\]\[0-9\]\|3\[0-2\]\)\$/.test(ingressCidrParameter)
@@ -314,6 +326,19 @@ function validateTemplateShape(source, errors) {
 
   if (entriesOf(inventory, 'AWS::EC2::NatGateway').length > 0) {
     errors.push('NAT gateways are prohibited; private tasks must use the required VPC endpoints.');
+  }
+  for (const forbiddenType of [
+    'AWS::Route53::',
+    'AWS::CertificateManager::',
+    'AWS::ACMPCA::',
+    'AWS::CloudFormation::CustomResource',
+    'Custom::',
+  ]) {
+    if (source.includes(`Type: ${forbiddenType}`)) {
+      errors.push(
+        `Application baseline must not provision external KAN-230 prerequisite type ${forbiddenType}.`,
+      );
+    }
   }
 
   for (const { logicalId, block } of entriesOf(inventory, 'AWS::EC2::SecurityGroup')) {
@@ -440,17 +465,6 @@ function validateTemplateShape(source, errors) {
   ) {
     errors.push('An HTTPS load-balancer listener with an explicit certificate is required.');
   }
-  if (
-    !listeners.some(
-      ({ block }) =>
-        hasProperty(block, 'Protocol', 'HTTP') &&
-        /Type:\s*redirect/i.test(block) &&
-        /RedirectConfig:/m.test(block),
-    )
-  ) {
-    errors.push('An HTTP listener that redirects to HTTPS is required.');
-  }
-
   const httpsListener = resources.get('HttpsListener') ?? '';
   if (
     !/Type:\s*fixed-response/.test(httpsListener) ||
@@ -458,14 +472,32 @@ function validateTemplateShape(source, errors) {
   ) {
     errors.push('The HTTPS listener must reject unmatched hostnames with a fixed 404 response.');
   }
+  if (!hasProperty(httpsListener, 'SslPolicy', 'ELBSecurityPolicy-TLS13-1-2-2021-06')) {
+    errors.push('The HTTPS listener must use the reviewed TLS 1.2/1.3 policy.');
+  }
+  const httpListener = resources.get('HttpRedirectListener') ?? '';
+  if (
+    !/Type:\s*fixed-response/.test(httpListener) ||
+    !hasProperty(httpListener, 'StatusCode', '404')
+  ) {
+    errors.push('The HTTP listener must reject unmatched hostnames with a fixed 404 response.');
+  }
   const listenerRules = entriesOf(inventory, 'AWS::ElasticLoadBalancingV2::ListenerRule');
   if (
-    listenerRules.length < 2 ||
+    listenerRules.length < 3 ||
     listenerRules.some(
       ({ block }) => !/HostHeaderConfig:[\s\S]*!Ref\s+ApplicationHostname/.test(block),
     )
   ) {
     errors.push('Every HTTPS forwarding rule must require the approved ApplicationHostname.');
+  }
+  const httpRedirectRule = resources.get('HttpRedirectListenerRule') ?? '';
+  if (
+    !/ListenerArn:\s*!Ref\s+HttpRedirectListener/.test(httpRedirectRule) ||
+    !/Type:\s*redirect/.test(httpRedirectRule) ||
+    !/HostHeaderConfig:[\s\S]*!Ref\s+ApplicationHostname/.test(httpRedirectRule)
+  ) {
+    errors.push('Only the approved hostname may receive an HTTP-to-HTTPS redirect.');
   }
 
   requireProperties(
@@ -679,6 +711,15 @@ function validateDeploymentGuard(source, errors) {
     '$submittedTemplateSha256',
     '$changeSetId',
     "'--change-set-name', $changeSetId",
+    "Assert-RequiredValue -Name 'AcmDnsControlRecordFile'",
+    "'validate-acm-dns-control-record.mjs'",
+    "'--mode', 'prerequisite'",
+    '$acmDnsValidation.externalCallsMade -ne 0',
+    '$acmDnsValidation.tlsConnectionsMade -ne 0',
+    '$acmDnsValidation.resourcesCreated -ne 0',
+    'acm-dns-record-sha256=',
+    '$parameterMap.AlbCertificateArn -cne [string] $acmDnsBinding.certificateArn',
+    '$parameterMap.ApplicationHostname -cne [string] $acmDnsBinding.applicationHostname',
   ];
   for (const fragment of requiredIdentityGuards) {
     if (!source.includes(fragment)) {
@@ -816,6 +857,9 @@ function validateLocalArtifactHygiene(errors) {
     '*.billing-controls.local.json',
     '*.pricing.local.json',
     '*.notification-evidence.local.json',
+    '*.acm-dns.local.json',
+    '*.acm-dns-plan.local.json',
+    '*.acm-dns-evidence.local.json',
     'cost-exports/',
     'parameters.local.json',
     '*.secrets.json',
@@ -859,6 +903,9 @@ function validateLocalArtifactHygiene(errors) {
       /\.billing-controls\.local\.json$/i.test(name) ||
       /\.pricing\.local\.json$/i.test(name) ||
       /\.notification-evidence\.local\.json$/i.test(name) ||
+      /\.acm-dns\.local\.json$/i.test(name) ||
+      /\.acm-dns-plan\.local\.json$/i.test(name) ||
+      /\.acm-dns-evidence\.local\.json$/i.test(name) ||
       /(?:^|\.)parameters\.local\.json$/i.test(name)
     ) {
       forbiddenPaths.push(path);

@@ -46,6 +46,12 @@ Do not create a change set or deploy until all of the following are true:
 8. the operator has an explicit maintenance, migration, rollback, and cleanup
    window.
 
+KAN-230 defines the provider-neutral approval and evidence record for item 5.
+Application Plan and Deploy require a current KAN-230 prerequisite record,
+validate it before AWS CLI discovery, and match its exact hostname and issued
+certificate ARN. See [KAN-230](KAN-230.md). DNS publication and live TLS evidence
+still occur only after a separately authorized load-balancer deployment.
+
 The guarded invocation script performs no AWS call by default. Cloud actions
 require explicit switches, a non-default named profile, the expected account
 and Region, and—when deploying—a generated typed acknowledgement. Those checks
@@ -68,7 +74,8 @@ record. `Deploy` recomputes and verifies each binding.
 
 - an internet-facing HTTPS load balancer terminates TLS in public subnets;
 - only the approved `ApplicationHostname` is forwarded; unmatched TLS hostnames
-  receive a fixed 404 response;
+  and unmatched plaintext hosts receive a fixed 404 response; only the approved
+  plaintext host is redirected to HTTPS;
 - web and API Fargate services plus the outbox worker run without public IPs in
   two private application subnets;
 - RDS PostgreSQL and ElastiCache run in the private subnets and accept traffic

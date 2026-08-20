@@ -179,12 +179,18 @@ Its constrained no-direct-service-fee inventory permissions are versioned in
 Explorer or write permissions and is never attached by CI or local validation.
 Live reads still require separate authorization because pre-existing account
 logging can have its own metered ingestion or delivery configuration.
+KAN-230's provider-neutral ACM/DNS record, validator, and non-executable plan
+renderer prepare a hostname and integrated public-certificate path without
+calling AWS or a DNS provider. They prohibit domain registration, new hosted
+zones, exportable/private certificates, and paid monitoring under the current
+policy.
 
 Validate it entirely offline with:
 
 ```powershell
 npm run infra:validate
 npm run infra:test:guardrails
+npm run infra:test:acm-dns
 python -m pip install --requirement infra/aws/requirements-dev.txt
 python infra/aws/lint-cloudformation.py infra/aws/application-baseline.yaml infra/aws/account-guardrails.yaml infra/aws/sqs-foundation.yaml
 ```
@@ -196,7 +202,9 @@ acknowledgement inputs. No AWS environment is activated by repository setup or
 CI. The account guardrail and application invocation scripts both default to
 filesystem-only validation. See [`docs/KAN-34.md`](docs/KAN-34.md) for the
 application architecture and [`docs/KAN-229.md`](docs/KAN-229.md) for the cost,
-authority, and independent-verification workflow.
+authority, and independent-verification workflow. See
+[`docs/KAN-230.md`](docs/KAN-230.md) for the local-only hostname, certificate,
+DNS, cutover, and rollback contract.
 
 The live test refuses non-loopback service URLs, creates isolated queues and a
 unique PostgreSQL schema, and removes only those test resources. See

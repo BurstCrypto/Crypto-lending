@@ -7,9 +7,9 @@ LocalValidate is the default and performs filesystem-only policy validation.
 CloudValidate, Plan, and Deploy require an explicit named profile, account ID,
 Region, and AllowAwsApiCalls. Plan creates a named change set without executing
 it. Plan and Deploy also require the independently approved KAN-229 billing
-control record and deployed guardrail stack. Deploy verifies and executes that
-exact template/parameter/tag/control-record-bound change set only after an exact
-billable-resource acknowledgement.
+control record, deployed guardrail stack, and KAN-230 certificate/DNS prerequisite
+record. Deploy verifies and executes that exact template/parameter/tag/control-
+record-bound change set only after an exact billable-resource acknowledgement.
 
 .PARAMETER Action
 LocalValidate, CloudValidate, Plan, or Deploy. Defaults to LocalValidate.
@@ -24,6 +24,10 @@ Explicit opt-in required before this script resolves credentials or calls AWS.
 .PARAMETER BillingControlRecordFile
 Git-ignored local JSON record whose identity, ownership, approval, expiry, and live
 notification evidence must pass final KAN-229 validation before Plan or Deploy.
+
+.PARAMETER AcmDnsControlRecordFile
+Git-ignored KAN-230 record whose approved hostname and issued ACM certificate
+must match the application parameters before Plan or Deploy.
 
 .PARAMETER GuardrailStackName
 Existing KAN-229 account-guardrail stack verified before an application change
@@ -65,6 +69,8 @@ param(
 
     [string] $BillingControlRecordFile,
 
+    [string] $AcmDnsControlRecordFile,
+
     [string] $GuardrailStackName,
 
     [string] $GuardrailControlRegion,
@@ -85,6 +91,7 @@ if ([string]::IsNullOrWhiteSpace($TemplateFile)) {
 
 $validatorPath = Join-Path $PSScriptRoot 'validate-application-baseline.mjs'
 $billingRecordValidatorPath = Join-Path $PSScriptRoot 'validate-billing-control-record.mjs'
+$acmDnsRecordValidatorPath = Join-Path $PSScriptRoot 'validate-acm-dns-control-record.mjs'
 $accountGuardrailTemplatePath = Join-Path $PSScriptRoot 'account-guardrails.yaml'
 $resolvedTemplate = [System.IO.Path]::GetFullPath($TemplateFile)
 
@@ -193,6 +200,9 @@ if (-not (Test-Path -LiteralPath $validatorPath -PathType Leaf)) {
 if (-not (Test-Path -LiteralPath $billingRecordValidatorPath -PathType Leaf)) {
     throw "Billing control record validator was not found: $billingRecordValidatorPath"
 }
+if (-not (Test-Path -LiteralPath $acmDnsRecordValidatorPath -PathType Leaf)) {
+    throw "ACM/DNS control record validator was not found: $acmDnsRecordValidatorPath"
+}
 
 $nodeCommand = Get-Command node -ErrorAction SilentlyContinue
 if ($null -eq $nodeCommand) {
@@ -229,10 +239,15 @@ $controlRecord = $null
 $controlRecordSha256 = $null
 $controlConfigurationSha256 = $null
 $resolvedBillingControlRecord = $null
+$acmDnsBinding = $null
+$acmDnsRecordSha256 = $null
+$acmDnsConfigurationSha256 = $null
+$resolvedAcmDnsControlRecord = $null
 $expectedGuardrailPolicyVersion = 'kan-229-v1'
 if ($Action -in @('Plan', 'Deploy')) {
     Assert-RequiredValue -Name 'EnvironmentName' -Value $EnvironmentName
     Assert-RequiredValue -Name 'BillingControlRecordFile' -Value $BillingControlRecordFile
+    Assert-RequiredValue -Name 'AcmDnsControlRecordFile' -Value $AcmDnsControlRecordFile
     Assert-RequiredValue -Name 'GuardrailStackName' -Value $GuardrailStackName
     Assert-RequiredValue -Name 'GuardrailControlRegion' -Value $GuardrailControlRegion
 
@@ -277,6 +292,47 @@ if ($Action -in @('Plan', 'Deploy')) {
         throw 'Billing control record validation did not return valid canonical and configuration SHA-256 bindings.'
     }
     $controlRecord = (Get-Content -LiteralPath $resolvedBillingControlRecord -Raw) | ConvertFrom-Json
+
+    $resolvedAcmDnsControlRecord = [System.IO.Path]::GetFullPath($AcmDnsControlRecordFile)
+    if (-not (Test-Path -LiteralPath $resolvedAcmDnsControlRecord -PathType Leaf)) {
+        throw "AcmDnsControlRecordFile was not found: $resolvedAcmDnsControlRecord"
+    }
+    $acmDnsValidationOutput = & $nodeCommand.Source @(
+        $acmDnsRecordValidatorPath,
+        '--record', $resolvedAcmDnsControlRecord,
+        '--mode', 'prerequisite',
+        '--expected-account', $AccountId,
+        '--expected-region', $Region,
+        '--json'
+    )
+    if ($LASTEXITCODE -ne 0) {
+        throw 'The KAN-230 ACM/DNS prerequisite is not approved, current, identity-matched, and certificate-issued. No AWS calls were made.'
+    }
+    $acmDnsValidation = ($acmDnsValidationOutput | Out-String) | ConvertFrom-Json
+    if (
+        -not $acmDnsValidation.ok -or
+        $acmDnsValidation.externalCallsMade -ne 0 -or
+        $acmDnsValidation.awsCallsMade -ne 0 -or
+        $acmDnsValidation.dnsQueriesMade -ne 0 -or
+        $acmDnsValidation.tlsConnectionsMade -ne 0 -or
+        $acmDnsValidation.providerCallsMade -ne 0 -or
+        $acmDnsValidation.resourcesCreated -ne 0
+    ) {
+        throw 'KAN-230 validation did not produce a successful zero-external-call result.'
+    }
+    $acmDnsRecordSha256 = [string] $acmDnsValidation.canonicalSha256
+    $acmDnsConfigurationSha256 = [string] $acmDnsValidation.configurationSha256
+    if ($acmDnsRecordSha256 -notmatch '^[a-f0-9]{64}$' -or $acmDnsConfigurationSha256 -notmatch '^[a-f0-9]{64}$') {
+        throw 'KAN-230 validation did not return valid record and configuration SHA-256 bindings.'
+    }
+    $acmDnsBinding = $acmDnsValidation.binding
+    if (
+        $null -eq $acmDnsBinding -or
+        [string] $acmDnsBinding.accountId -cne $AccountId -or
+        [string] $acmDnsBinding.region -cne $Region
+    ) {
+        throw 'KAN-230 validation did not return the expected account and Region binding.'
+    }
 }
 
 if (-not $AllowAwsApiCalls.IsPresent) {
@@ -655,6 +711,12 @@ if ($Action -eq 'Plan') {
     if (-not $parameterMap.AlbCertificateArn.StartsWith($expectedCertificatePrefix, [System.StringComparison]::Ordinal)) {
         throw "AlbCertificateArn must reference ACM in the approved account and region: $expectedCertificatePrefix"
     }
+    if ($parameterMap.AlbCertificateArn -cne [string] $acmDnsBinding.certificateArn) {
+        throw 'AlbCertificateArn does not match the validated KAN-230 certificate.'
+    }
+    if ($parameterMap.ApplicationHostname -cne [string] $acmDnsBinding.applicationHostname) {
+        throw 'ApplicationHostname does not match the validated KAN-230 hostname.'
+    }
 
     $stackTags = [ordered]@{
         application = 'crypto-lending'
@@ -664,6 +726,8 @@ if ($Action -eq 'Plan') {
         'cost-center' = [string] $controlRecord.environment.costCenter
         'control-record-sha256' = $controlRecordSha256
         'billing-control-record' = [string] $controlRecord.recordId
+        'acm-dns-control-record' = [string] $acmDnsBinding.recordId
+        'acm-dns-configuration-sha256' = $acmDnsConfigurationSha256
         'managed-by' = 'cloudformation'
         ticket = 'KAN-34'
     }
@@ -680,7 +744,7 @@ if ($Action -eq 'Plan') {
     }
     $canonicalParameters = ($parameterMap.GetEnumerator() | Sort-Object Key | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join "`n"
     $parameterSha256 = Get-TextSha256 -Value $canonicalParameters
-    $expectedChangeSetDescription = "KAN-34 template-sha256=$templateSha256 parameters-sha256=$parameterSha256 tags-sha256=$tagSha256 control-record-sha256=$controlRecordSha256 guardrail-policy=$expectedGuardrailPolicyVersion"
+    $expectedChangeSetDescription = "KAN-34 template-sha256=$templateSha256 parameters-sha256=$parameterSha256 tags-sha256=$tagSha256 control-record-sha256=$controlRecordSha256 acm-dns-record-sha256=$acmDnsRecordSha256 guardrail-policy=$expectedGuardrailPolicyVersion"
 
     $planArguments = @(
         'cloudformation',
@@ -765,6 +829,8 @@ $expectedStackTags = [ordered]@{
     'cost-center' = [string] $controlRecord.environment.costCenter
     'control-record-sha256' = $controlRecordSha256
     'billing-control-record' = [string] $controlRecord.recordId
+    'acm-dns-control-record' = [string] $acmDnsBinding.recordId
+    'acm-dns-configuration-sha256' = $acmDnsConfigurationSha256
     'managed-by' = 'cloudformation'
     ticket = 'KAN-34'
 }
@@ -786,7 +852,17 @@ $canonicalParameters = ($changeSet.Parameters | Sort-Object ParameterKey | ForEa
         "$($_.ParameterKey)=$($_.ParameterValue)"
     }) -join "`n"
 $parameterSha256 = Get-TextSha256 -Value $canonicalParameters
-$expectedChangeSetDescription = "KAN-34 template-sha256=$templateSha256 parameters-sha256=$parameterSha256 tags-sha256=$tagSha256 control-record-sha256=$controlRecordSha256 guardrail-policy=$expectedGuardrailPolicyVersion"
+$changeSetParameterMap = [ordered]@{}
+foreach ($parameter in @($changeSet.Parameters)) {
+    $changeSetParameterMap[[string] $parameter.ParameterKey] = [string] $parameter.ParameterValue
+}
+if (
+    $changeSetParameterMap.AlbCertificateArn -cne [string] $acmDnsBinding.certificateArn -or
+    $changeSetParameterMap.ApplicationHostname -cne [string] $acmDnsBinding.applicationHostname
+) {
+    throw 'The reviewed change set certificate or hostname does not match the validated KAN-230 record.'
+}
+$expectedChangeSetDescription = "KAN-34 template-sha256=$templateSha256 parameters-sha256=$parameterSha256 tags-sha256=$tagSha256 control-record-sha256=$controlRecordSha256 acm-dns-record-sha256=$acmDnsRecordSha256 guardrail-policy=$expectedGuardrailPolicyVersion"
 if ($changeSet.Description -cne $expectedChangeSetDescription) {
     throw "Change set '$ChangeSetName' is not bound to the current template, parameters, tags, billing record, and guardrail policy. Re-plan and review it."
 }
@@ -795,8 +871,9 @@ Write-Host "Verified submitted template SHA-256: $submittedTemplateSha256"
 Write-Host "Reviewed parameter SHA-256: $parameterSha256"
 Write-Host "Reviewed tag SHA-256: $tagSha256"
 Write-Host "Reviewed billing control record SHA-256: $controlRecordSha256"
+Write-Host "Reviewed ACM/DNS control record SHA-256: $acmDnsRecordSha256"
 
-$expectedAcknowledgement = "EXECUTE REVIEWED CHANGE SET $ChangeSetName FOR STACK $StackName USING BILLING CONTROL $controlRecordSha256; I ACKNOWLEDGE BILLABLE AWS RESOURCES IN ACCOUNT $AccountId REGION $Region USING PROFILE $Profile"
+$expectedAcknowledgement = "EXECUTE REVIEWED CHANGE SET $ChangeSetName FOR STACK $StackName USING BILLING CONTROL $controlRecordSha256 AND ACM DNS CONTROL $acmDnsRecordSha256; I ACKNOWLEDGE BILLABLE AWS RESOURCES IN ACCOUNT $AccountId REGION $Region USING PROFILE $Profile"
 if ($BillableAcknowledgement -cne $expectedAcknowledgement) {
     throw @"
 Deploy can create RDS, ElastiCache, load balancer, networking, logging, KMS, and other billable resources.
