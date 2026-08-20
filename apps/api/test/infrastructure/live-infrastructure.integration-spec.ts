@@ -47,21 +47,12 @@ describeWithInfrastructure('live docker-compose infrastructure', () => {
       process.env.DATABASE_URL ??
       'postgresql://crypto_lending:local_only_password@localhost:5432/crypto_lending';
     const config = loadInfrastructureConfig({
-      ...process.env,
-      DATABASE_HOST: undefined,
-      DATABASE_NAME: undefined,
-      DATABASE_PASSWORD: undefined,
-      DATABASE_PORT: undefined,
+      NODE_ENV: 'test',
       DATABASE_RUNTIME_URL: connectionString,
       DATABASE_RUNTIME_SSL_MODE: 'disable',
-      DATABASE_URL: undefined,
-      DATABASE_USERNAME: undefined,
-      DATABASE_SSL_MODE: undefined,
       REDIS_URL: process.env.REDIS_URL ?? 'redis://localhost:6379',
       REDIS_KEY_PREFIX: process.env.REDIS_KEY_PREFIX ?? 'crypto-lending:test:v1:',
       AWS_REGION: process.env.AWS_REGION ?? 'us-east-1',
-      AWS_ACCESS_KEY_ID: process.env.AWS_ACCESS_KEY_ID ?? 'test',
-      AWS_SECRET_ACCESS_KEY: process.env.AWS_SECRET_ACCESS_KEY ?? 'test',
       SQS_ENDPOINT: process.env.SQS_ENDPOINT ?? 'http://localhost:4566',
       SQS_QUEUE_URL:
         process.env.SQS_QUEUE_URL ?? 'http://localhost:4566/000000000000/crypto-lending-jobs',

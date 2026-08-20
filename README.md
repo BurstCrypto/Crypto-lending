@@ -151,6 +151,8 @@ npm run format:check
 npm run lint
 npm run typecheck
 npm test
+npm run security:scan:secrets
+npm run security:test:secrets
 npm run security:audit
 npm run security:test:jira
 npm run test:e2e --workspace @crypto-lending/api
@@ -189,6 +191,11 @@ renderer prepare a hostname and integrated public-certificate path without
 calling AWS or a DNS provider. They prohibit domain registration, new hosted
 zones, exportable/private certificates, and paid monitoring under the current
 policy.
+KAN-50 adds a history-aware committed-secret scanner and exact offline
+validation of ECS secret injection, IAM trust/capability matrices, KMS service
+constraints, and SQS encryption/redrive/TLS boundaries. Its local evidence and
+unresolved live controls are documented in [docs/KAN-50.md](docs/KAN-50.md); no
+validator result is represented as proof of a deployed account.
 
 Validate it entirely offline with:
 
@@ -197,6 +204,7 @@ npm run infra:validate
 npm run infra:test:guardrails
 npm run infra:test:acm-dns
 npm run infra:test:migrations
+npm run infra:test:sqs
 npm run infra:test:egress
 python -m pip install --requirement infra/aws/requirements-dev.txt
 python infra/aws/lint-cloudformation.py infra/aws/application-baseline.yaml infra/aws/database-migration-task.yaml infra/aws/account-guardrails.yaml infra/aws/sqs-foundation.yaml

@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { SQSClient } from '@aws-sdk/client-sqs';
+import { fromHttp } from '@aws-sdk/credential-provider-http';
 
 import {
   INFRASTRUCTURE_CONFIG,
@@ -12,29 +13,52 @@ import { SqsJobWorker } from './sqs-job.worker';
 import { SqsService } from './sqs.service';
 import { SQS_CLIENT } from './sqs.tokens';
 
+const LOCAL_SQS_CREDENTIALS = {
+  accessKeyId: 'local-emulator',
+  secretAccessKey: 'local-emulator',
+};
+
+export function createSqsClient(config: InfrastructureConfig): SQSClient {
+  const credentials = config.sqs.endpoint
+    ? LOCAL_SQS_CREDENTIALS
+    : config.sqs.credentialRelativeUri
+      ? fromHttp({
+          awsContainerCredentialsRelativeUri: config.sqs.credentialRelativeUri,
+          awsContainerCredentialsFullUri: '',
+          awsContainerAuthorizationToken: '',
+          awsContainerAuthorizationTokenFile: '',
+          maxRetries: 2,
+          timeout: 1_000,
+        })
+      : undefined;
+  return new SQSClient({
+    region: config.sqs.region,
+    maxAttempts: config.sqs.sdkMaxAttempts,
+    // Never let a QueueUrl replace the configured client origin. This is
+    // defense in depth against credential-bearing requests to a bad URL.
+    useQueueUrlAsEndpoint: false,
+    // Ignore AWS_ENDPOINT_URL*, shared-profile endpoint_url, and the matching
+    // SDK setting so ambient configuration cannot redirect signed requests.
+    ignoreConfiguredEndpointUrls: true,
+    ...(credentials ? { credentials } : {}),
+    ...(config.sqs.endpoint
+      ? {
+          endpoint: config.sqs.endpoint,
+          // A local emulator must never receive credentials inherited from a
+          // developer shell. Production omits this override and uses the ECS
+          // task-role provider chain.
+        }
+      : {}),
+  });
+}
+
 @Module({
   imports: [InfrastructureConfigModule],
   providers: [
     {
       provide: SQS_CLIENT,
       inject: [INFRASTRUCTURE_CONFIG],
-      useFactory: (config: InfrastructureConfig): SQSClient =>
-        new SQSClient({
-          region: config.sqs.region,
-          maxAttempts: config.sqs.sdkMaxAttempts,
-          // Never let a QueueUrl replace the configured client origin. This is
-          // defense in depth against credential-bearing requests to a bad URL.
-          useQueueUrlAsEndpoint: false,
-          ...(config.sqs.endpoint
-            ? {
-                endpoint: config.sqs.endpoint,
-                credentials: {
-                  accessKeyId: process.env.AWS_ACCESS_KEY_ID || 'test',
-                  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || 'test',
-                },
-              }
-            : {}),
-        }),
+      useFactory: createSqsClient,
     },
     SqsService,
     {

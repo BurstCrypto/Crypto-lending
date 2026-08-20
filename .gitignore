@@ -5,6 +5,33 @@
 !.env.example
 tools/wallet-lab/.certs/
 
+# Common credential stores and private key material
+.npmrc
+.netrc
+_netrc
+.aws/
+.docker/
+.kube/
+credentials
+credentials.json
+secrets.json
+secrets.yaml
+secrets.yml
+service-account*.json
+service_account*.json
+kubeconfig
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.tfvars
+*.tfvars.json
+*.secrets.json
+*.secrets.yaml
+*.secrets.yml
+
 # JavaScript / TypeScript
 node_modules/
 .next/

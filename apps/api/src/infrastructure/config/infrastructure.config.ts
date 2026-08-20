@@ -23,6 +23,7 @@ export interface RedisInfrastructureConfig {
 export interface SqsInfrastructureConfig {
   region: string;
   endpoint?: string;
+  credentialRelativeUri?: string;
   queueUrl: string;
   deadLetterQueueUrl: string;
   requestTimeoutMs: number;
@@ -65,6 +66,34 @@ function optional(env: NodeJS.ProcessEnv, name: string): string | undefined {
 
 function isProduction(env: NodeJS.ProcessEnv): boolean {
   return env.NODE_ENV?.trim().toLowerCase() === 'production';
+}
+
+const PRODUCTION_AWS_CREDENTIAL_OVERRIDES = [
+  'AWS_ACCESS_KEY_ID',
+  'AWS_SECRET_ACCESS_KEY',
+  'AWS_SESSION_TOKEN',
+  'AWS_PROFILE',
+  'AWS_SHARED_CREDENTIALS_FILE',
+  'AWS_CONFIG_FILE',
+  'AWS_ROLE_ARN',
+  'AWS_WEB_IDENTITY_TOKEN_FILE',
+  'AWS_CONTAINER_CREDENTIALS_FULL_URI',
+  'AWS_CONTAINER_AUTHORIZATION_TOKEN',
+  'AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE',
+  'AWS_ENDPOINT_URL',
+  'AWS_ENDPOINT_URL_SQS',
+  'AWS_IGNORE_CONFIGURED_ENDPOINT_URLS',
+] as const;
+
+function assertNoProductionAwsCredentialOverrides(env: NodeJS.ProcessEnv): void {
+  const configured = PRODUCTION_AWS_CREDENTIAL_OVERRIDES.filter(
+    (variableName) => env[variableName] !== undefined,
+  );
+  if (configured.length > 0) {
+    throw new Error(
+      `Production runtime must use the ECS task role; remove AWS credential overrides: ${configured.join(', ')}`,
+    );
+  }
 }
 
 function parseUrl(value: string, name: string): URL {
@@ -324,6 +353,38 @@ function productionSqsQueueUrl(value: string, name: string, region: string): str
   return parsedUrl.toString();
 }
 
+function localSqsEndpoint(value: string): string {
+  const parsedUrl = parseUrl(value, 'SQS_ENDPOINT');
+  const localHostnames = new Set(['127.0.0.1', '[::1]', '::1', 'localhost', 'localstack']);
+  if (
+    parsedUrl.protocol !== 'http:' ||
+    !localHostnames.has(parsedUrl.hostname.toLowerCase()) ||
+    parsedUrl.port !== '4566' ||
+    parsedUrl.username !== '' ||
+    parsedUrl.password !== '' ||
+    parsedUrl.pathname !== '/' ||
+    parsedUrl.search !== '' ||
+    parsedUrl.hash !== ''
+  ) {
+    throw new Error('SQS_ENDPOINT must be the canonical local SQS emulator endpoint on port 4566');
+  }
+  return parsedUrl.origin;
+}
+
+function productionEcsCredentialRelativeUri(env: NodeJS.ProcessEnv): string {
+  const value = env.AWS_CONTAINER_CREDENTIALS_RELATIVE_URI;
+  if (
+    value === undefined ||
+    value !== value.trim() ||
+    !/^\/v2\/credentials\/[A-Za-z0-9_-]{1,200}$/u.test(value)
+  ) {
+    throw new Error(
+      'Production runtime requires a canonical ECS-managed AWS_CONTAINER_CREDENTIALS_RELATIVE_URI',
+    );
+  }
+  return value;
+}
+
 function positiveInteger(
   env: NodeJS.ProcessEnv,
   name: string,
@@ -535,20 +596,26 @@ export function loadMigrationDatabaseConfig(
 export function loadInfrastructureConfig(
   env: NodeJS.ProcessEnv = process.env,
 ): InfrastructureConfig {
+  const production = isProduction(env);
+  if (production) {
+    assertNoProductionAwsCredentialOverrides(env);
+  }
   const region = env.AWS_REGION?.trim() || 'us-east-1';
   if (!/^[a-z0-9]+(?:-[a-z0-9]+){2,}$/u.test(region)) {
     throw new Error('AWS_REGION must be a canonical AWS region identifier');
   }
-  const endpoint = env.SQS_ENDPOINT?.trim();
-  if (isProduction(env) && endpoint) {
+  const rawEndpoint = env.SQS_ENDPOINT?.trim();
+  if (production && rawEndpoint) {
     throw new Error('SQS_ENDPOINT is not allowed in production');
   }
+  const endpoint = rawEndpoint ? localSqsEndpoint(rawEndpoint) : undefined;
+  const credentialRelativeUri = production ? productionEcsCredentialRelativeUri(env) : undefined;
   const rawQueueUrl = required(env, 'SQS_QUEUE_URL');
   const rawDeadLetterQueueUrl = required(env, 'SQS_DEAD_LETTER_QUEUE_URL');
-  const queueUrl = isProduction(env)
+  const queueUrl = production
     ? productionSqsQueueUrl(rawQueueUrl, 'SQS_QUEUE_URL', region)
     : rawQueueUrl;
-  const deadLetterQueueUrl = isProduction(env)
+  const deadLetterQueueUrl = production
     ? productionSqsQueueUrl(rawDeadLetterQueueUrl, 'SQS_DEAD_LETTER_QUEUE_URL', region)
     : rawDeadLetterQueueUrl;
   if (queueUrl === deadLetterQueueUrl) {
@@ -566,6 +633,7 @@ export function loadInfrastructureConfig(
     sqs: {
       region,
       ...(endpoint ? { endpoint } : {}),
+      ...(credentialRelativeUri ? { credentialRelativeUri } : {}),
       queueUrl,
       deadLetterQueueUrl,
       requestTimeoutMs: positiveInteger(env, 'SQS_REQUEST_TIMEOUT_MS', 15_000, 60_000),

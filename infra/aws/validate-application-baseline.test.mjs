@@ -40,6 +40,19 @@ function mutate(replace) {
   return result;
 }
 
+function mutateNthNodeEnvironment(occurrence, replacement) {
+  return mutate((source) => {
+    let seen = 0;
+    return source.replace(
+      /^\s*-\s*\{\s*Name:\s*NODE_ENV,\s*Value:\s*production\s*\}\s*$/gm,
+      (binding) => {
+        seen += 1;
+        return seen === occurrence ? replacement(binding) : binding;
+      },
+    );
+  });
+}
+
 function addResource(source, resource) {
   return source.replace(/^Resources:\s*$/m, `Resources:\n${resource}`);
 }
@@ -93,6 +106,41 @@ test('standalone SQS validator rejects weakened or incomplete TLS queue policies
       report.errors.join('\n'),
     );
   }
+});
+
+test('standalone SQS validator rejects missing encryption and bounded-redrive topology', () => {
+  for (const [search, replacement, message] of [
+    ['      KmsMasterKeyId: alias/aws/sqs\n', '', /exact AWS-KMS-encrypted, 14-day-retained/],
+    [
+      '        redrivePermission: byQueue',
+      '        redrivePermission: allowAll',
+      /single-source dead-letter queue topology/,
+    ],
+    [
+      '        maxReceiveCount: !Ref MaxReceiveCount',
+      '        maxReceiveCount: 1000',
+      /bounded-retry primary queue topology/,
+    ],
+  ]) {
+    const mutated = sqsFoundationSource.replace(search, replacement);
+    assert.notEqual(mutated, sqsFoundationSource, `Mutation did not replace ${search}.`);
+    const report = validateSqsFoundationSource(mutated);
+    assert.equal(report.ok, false);
+    assert.equal(report.awsCallsMade, 0);
+    assert(
+      report.errors.some((error) => message.test(error)),
+      report.errors.join('\n'),
+    );
+  }
+
+  const withoutJobQueue = sqsFoundationSource.replace(
+    /^  JobQueue:[\s\S]*?(?=^  JobQueueTlsPolicy:)/m,
+    '',
+  );
+  assert.notEqual(withoutJobQueue, sqsFoundationSource);
+  const report = validateSqsFoundationSource(withoutJobQueue);
+  assert.equal(report.ok, false);
+  assert(report.errors.some((error) => /topology is missing JobQueue/.test(error)));
 });
 
 test('rejects URI, UNC, and device template inputs before any filesystem access', () => {
@@ -482,6 +530,267 @@ test('rejects crossing the runtime and migration database credential boundary', 
     ),
     /must preserve DatabaseCredentialsSecret as its migration\/admin master credential/,
   );
+});
+
+test('rejects widening any ECS role trust policy', () => {
+  for (const [search, replacement] of [
+    ['Service: ecs-tasks.amazonaws.com', 'Service: lambda.amazonaws.com'],
+    [
+      'StringEquals: { aws:SourceAccount: !Ref AWS::AccountId }',
+      "StringEquals: { aws:SourceAccount: '999999999999' }",
+    ],
+    [
+      "aws:SourceArn: !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:*'",
+      "aws:SourceArn: '*'",
+    ],
+    ['Action: sts:AssumeRole', 'Action: sts:*'],
+  ]) {
+    assertRejected(
+      mutate((source) => source.replace(search, replacement)),
+      /single-account, regional ECS task trust policy with no additional principal or action/,
+    );
+  }
+});
+
+test('rejects widening execution-role and task-role capability matrices', () => {
+  assertRejected(
+    mutate((source) =>
+      source.replace(
+        '                  - !Ref RedisAuthSecret',
+        '                  - !Ref RedisAuthSecret\n                  - !Ref DatabaseCredentialsSecret',
+      ),
+    ),
+    /exact backend log-write and runtime-secret action\/resource matrix/,
+  );
+
+  assertRejected(
+    mutate((source) =>
+      source.replace(
+        'Action: [logs:CreateLogStream, logs:PutLogEvents]',
+        'Action: [logs:CreateLogStream, logs:PutLogEvents, secretsmanager:GetSecretValue]',
+      ),
+    ),
+    /web log-only execution policy with no secret or data-key access/,
+  );
+
+  assertRejected(
+    mutate((source) => source.replace('Action: sqs:GetQueueAttributes', 'Action: sqs:SendMessage')),
+    /read-only queue-readiness task policy with no publish, consume, secret, or key access/,
+  );
+
+  assertRejected(
+    mutate((source) =>
+      source.replace('Action: sqs:SendMessage', 'Action: [sqs:SendMessage, sqs:ReceiveMessage]'),
+    ),
+    /queue-publish\/readiness and SQS-only data-key task policy with no consume or secret access/,
+  );
+
+  assertRejected(
+    mutate((source) =>
+      source.replace(
+        '  ApplicationLoadBalancer:\n',
+        [
+          '      Policies:',
+          '        - PolicyName: UnexpectedWebAccess',
+          '          PolicyDocument:',
+          "            Version: '2012-10-17'",
+          '            Statement:',
+          '              - Effect: Allow',
+          '                Action: secretsmanager:GetSecretValue',
+          "                Resource: '*'",
+          '',
+          '  ApplicationLoadBalancer:',
+          '',
+        ].join('\n'),
+      ),
+    ),
+    /WebTaskRole must not declare Policies/,
+  );
+});
+
+test('rejects task-role remapping and secret injection outside the exact service boundary', () => {
+  assertRejected(
+    mutate((source) =>
+      source.replace(
+        '      TaskRoleArn: !GetAtt ApiTaskRole.Arn',
+        '      TaskRoleArn: !GetAtt WorkerTaskRole.Arn',
+      ),
+    ),
+    /ApiTaskDefinition requires TaskRoleArn to equal !GetAtt ApiTaskRole\.Arn/,
+  );
+
+  assertRejected(
+    mutate((source) =>
+      source.replace(
+        "{ Name: REDIS_AUTH_TOKEN, ValueFrom: !Sub '${RedisAuthSecret}:authToken::' }",
+        "{ Name: REDIS_AUTH_TOKEN, ValueFrom: !Sub '${DatabaseCredentialsSecret}:password::' }",
+      ),
+    ),
+    /exact runtime-database and Redis ECS secret injection with no migration\/admin secret/,
+  );
+
+  assertRejected(
+    mutate((source) =>
+      source.replace(
+        '            - { Name: NODE_ENV, Value: production }',
+        '            - { Name: NODE_ENV, Value: production }\n            - { Name: DATABASE_RUNTIME_PASSWORD, Value: plaintext-is-prohibited }',
+      ),
+    ),
+    /inject sensitive runtime values only through ECS Secrets/,
+  );
+
+  assertRejected(
+    mutate((source) =>
+      source.replace(
+        '            - { Name: APP_VERSION, Value: !Ref ApplicationVersion }',
+        [
+          '            - { Name: APP_VERSION, Value: !Ref ApplicationVersion }',
+          '          Secrets:',
+          '            - Name: DATABASE_RUNTIME_PASSWORD',
+          "              ValueFrom: !Sub '${DatabaseRuntimeSecret}:password::'",
+        ].join('\n'),
+      ),
+    ),
+    /WebTaskDefinition must not declare Secrets/,
+  );
+});
+
+test('requires exactly one production NODE_ENV binding in every application task', () => {
+  for (const [occurrence, logicalId, replacement] of [
+    [1, 'ApiTaskDefinition', () => '            - { Name: NODE_ENV, Value: development }'],
+    [2, 'WebTaskDefinition', () => ''],
+    [3, 'WorkerTaskDefinition', (binding) => `${binding}\n${binding}`],
+  ]) {
+    assertRejected(
+      mutateNthNodeEnvironment(occurrence, replacement),
+      new RegExp(`${logicalId} must bind exactly one canonical NODE_ENV=production`),
+    );
+  }
+});
+
+test('rejects authored AWS credential-provider environment variables in every task', () => {
+  const forbiddenNames = [
+    'AWS_ACCESS_KEY_ID',
+    'AWS_ACCESS_KEY',
+    'AWS_SECRET_ACCESS_KEY',
+    'AWS_SECRET_KEY',
+    'AWS_SESSION_TOKEN',
+    'AWS_SECURITY_TOKEN',
+    'AWS_PROFILE',
+    'AWS_DEFAULT_PROFILE',
+    'AWS_SHARED_CREDENTIALS_FILE',
+    'AWS_CREDENTIAL_FILE',
+    'AWS_CONFIG_FILE',
+    'AWS_SDK_LOAD_CONFIG',
+    'AWS_WEB_IDENTITY_TOKEN_FILE',
+    'AWS_ROLE_ARN',
+    'AWS_ROLE_SESSION_NAME',
+    'AWS_ENDPOINT_URL',
+    'AWS_ENDPOINT_URL_SQS',
+    'AWS_IGNORE_CONFIGURED_ENDPOINT_URLS',
+    'AWS_CONTAINER_CREDENTIALS_RELATIVE_URI',
+    'AWS_CONTAINER_CREDENTIALS_FULL_URI',
+    'AWS_CONTAINER_AUTHORIZATION_TOKEN',
+    'AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE',
+  ];
+  const logicalIds = ['ApiTaskDefinition', 'WebTaskDefinition', 'WorkerTaskDefinition'];
+  for (const [index, name] of forbiddenNames.entries()) {
+    const occurrence = (index % logicalIds.length) + 1;
+    assertRejected(
+      mutateNthNodeEnvironment(
+        occurrence,
+        (binding) => `${binding}\n            - { Name: ${name}, Value: prohibited }`,
+      ),
+      new RegExp(
+        `${logicalIds[occurrence - 1]} must not author AWS credential-provider Environment bindings;.*${name}`,
+      ),
+    );
+  }
+});
+
+test('rejects KMS principal, source, context, and ViaService policy widening', () => {
+  for (const [search, replacement, message] of [
+    [
+      '                aws:SourceAccount: !Ref AWS::AccountId',
+      "                aws:SourceAccount: '*'",
+      /exact source account and queue ARN scope/,
+    ],
+    [
+      '              Service: sqs.amazonaws.com',
+      "              AWS: '*'",
+      /SQS service key policy/,
+    ],
+    [
+      'kms:EncryptionContext:aws:logs:arn: !Sub arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/crypto-lending/${EnvironmentName}/*',
+      "kms:EncryptionContext:aws:logs:arn: '*'",
+      /environment-scoped encryption-context key policy/,
+    ],
+    [
+      'kms:ViaService: !Sub secretsmanager.${AWS::Region}.${AWS::URLSuffix}',
+      'kms:ViaService: !Sub sqs.${AWS::Region}.${AWS::URLSuffix}',
+      /Secrets Manager-only KMS decryption/,
+    ],
+    [
+      'kms:ViaService: !Sub sqs.${AWS::Region}.${AWS::URLSuffix}',
+      'kms:ViaService: !Sub secretsmanager.${AWS::Region}.${AWS::URLSuffix}',
+      /SQS-only data-key task policy/,
+    ],
+  ]) {
+    assertRejected(
+      mutate((source) => source.replace(search, replacement)),
+      message,
+    );
+  }
+});
+
+test('rejects durable-service encryption and queue-policy downgrades semantically', () => {
+  for (const [search, replacement, message] of [
+    [
+      '      TransitEncryptionMode: required',
+      '      TransitEncryptionMode: preferred',
+      /RedisReplicationGroup requires TransitEncryptionMode to equal required/,
+    ],
+    [
+      "      AuthToken: !Sub '{{resolve:secretsmanager:${RedisAuthSecret}:SecretString:authToken}}'",
+      '      AuthToken: plaintext-is-prohibited',
+      /RedisReplicationGroup requires AuthToken to equal/,
+    ],
+    [
+      '      KmsMasterKeyId: !GetAtt ApplicationDataKey.Arn',
+      '      KmsMasterKeyId: alias/aws/sqs',
+      /JobDeadLetterQueue requires KmsMasterKeyId to equal !GetAtt ApplicationDataKey\.Arn/,
+    ],
+    [
+      '        redrivePermission: byQueue',
+      '        redrivePermission: allowAll',
+      /single-source byQueue dead-letter redrive allow policy/,
+    ],
+    [
+      '        maxReceiveCount: !Ref SqsMaxReceiveCount',
+      '        maxReceiveCount: 1000',
+      /exact dead-letter target and bounded receive-count redrive policy/,
+    ],
+    [
+      "                aws:SecureTransport: 'false'",
+      "                aws:SecureTransport: 'true'",
+      /exact two-queue attachment and unconditional insecure-transport denial/,
+    ],
+    [
+      '      KmsDataKeyReusePeriodSeconds: 300',
+      '      KmsDataKeyReusePeriodSeconds: 86400',
+      /exact customer-key encryption, retention, name, and single-source dead-letter queue topology/,
+    ],
+    [
+      '      VisibilityTimeout: !Ref SqsVisibilityTimeoutSeconds',
+      '      VisibilityTimeout: 0',
+      /exact customer-key encryption, retention, long-poll, bounded-redrive, and visibility-timeout primary queue topology/,
+    ],
+  ]) {
+    assertRejected(
+      mutate((source) => source.replace(search, replacement)),
+      message,
+    );
+  }
 });
 
 test('rejects weakening or ordering the internal readiness deny after the API forward', () => {

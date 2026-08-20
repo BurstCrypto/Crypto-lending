@@ -46,12 +46,18 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
 
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
           cache: npm
+
+      - name: Scan repository history and index for secrets
+        run: node infra/security/validate-repository-secrets.mjs
 
       - name: Use the repository npm version
         run: npm install --global npm@11.6.4
@@ -68,6 +74,7 @@ jobs:
           npm run infra:test:guardrails
           npm run infra:test:acm-dns
           npm run infra:test:migrations
+          npm run infra:test:sqs
           pwsh -NoProfile -File infra/aws/test-invoke-acm-dns-local.ps1
           npm run infra:test:egress
           pwsh -NoProfile -File infra/aws/test-invoke-account-readonly-preflight.ps1
@@ -88,6 +95,7 @@ jobs:
         run: |
           npm test
           npm run security:test:jira
+          npm run security:test:secrets
 
       - name: Run API end-to-end tests
         run: npm run test:e2e --workspace @crypto-lending/api

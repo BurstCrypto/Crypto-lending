@@ -269,6 +269,103 @@ function sha256(value) {
   return createHash('sha256').update(value, 'utf8').digest('hex');
 }
 
+function indentedPropertyBlock(block, propertyName) {
+  const lines = block.split('\n');
+  const escapedName = propertyName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const matches = lines
+    .map((line, index) => ({ index, line }))
+    .filter(({ line }) => new RegExp(`^\\s+${escapedName}:\\s*$`).test(line));
+  if (matches.length !== 1) {
+    return undefined;
+  }
+
+  const { index, line } = matches[0];
+  const propertyIndent = line.search(/\S/);
+  const propertyLines = [line];
+  for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
+    const nestedLine = lines[cursor];
+    if (nestedLine.trim() !== '' && nestedLine.search(/\S/) <= propertyIndent) {
+      break;
+    }
+    propertyLines.push(nestedLine);
+  }
+  return propertyLines.join('\n').trimEnd();
+}
+
+function semanticYamlTokens(source) {
+  return source.replace(/^\s*-\s+/gm, '').replace(/[\s{},'"]/g, '');
+}
+
+function requireExactSemanticProperty(
+  block,
+  logicalId,
+  propertyName,
+  expectedSource,
+  expectation,
+  errors,
+) {
+  const actual = indentedPropertyBlock(block, propertyName);
+  if (!actual || semanticYamlTokens(actual) !== semanticYamlTokens(expectedSource)) {
+    errors.push(`${logicalId} must preserve ${expectation}.`);
+  }
+}
+
+function requireAbsentProperty(block, logicalId, propertyName, expectation, errors) {
+  if (hasPropertyName(block, propertyName)) {
+    errors.push(`${logicalId} must not declare ${propertyName}; ${expectation}.`);
+  }
+}
+
+function validateTaskEnvironmentCredentialBoundary(block, logicalId, errors) {
+  const environment = indentedPropertyBlock(block, 'Environment') ?? '';
+  const nodeEnvironmentNames = environment.match(/\bName:\s*NODE_ENV\b/g) ?? [];
+  const productionBindings =
+    environment.match(/^\s*-\s*\{\s*Name:\s*NODE_ENV,\s*Value:\s*production\s*\}\s*$/gm) ?? [];
+  if (nodeEnvironmentNames.length !== 1 || productionBindings.length !== 1) {
+    errors.push(
+      `${logicalId} must bind exactly one canonical NODE_ENV=production Environment value.`,
+    );
+  }
+
+  const forbiddenCredentialNames = new Set([
+    'AWS_ACCESS_KEY_ID',
+    'AWS_ACCESS_KEY',
+    'AWS_SECRET_ACCESS_KEY',
+    'AWS_SECRET_KEY',
+    'AWS_SESSION_TOKEN',
+    'AWS_SECURITY_TOKEN',
+    'AWS_PROFILE',
+    'AWS_DEFAULT_PROFILE',
+    'AWS_SHARED_CREDENTIALS_FILE',
+    'AWS_CREDENTIAL_FILE',
+    'AWS_CONFIG_FILE',
+    'AWS_SDK_LOAD_CONFIG',
+    'AWS_WEB_IDENTITY_TOKEN_FILE',
+    'AWS_ROLE_ARN',
+    'AWS_ROLE_SESSION_NAME',
+    'AWS_ENDPOINT_URL',
+    'AWS_ENDPOINT_URL_SQS',
+    'AWS_IGNORE_CONFIGURED_ENDPOINT_URLS',
+  ]);
+  const authoredCredentialNames = [
+    ...new Set(
+      [...environment.matchAll(/\bName:\s*([A-Z][A-Z0-9_]*)\b/g)]
+        .map((match) => match[1])
+        .filter(
+          (name) =>
+            forbiddenCredentialNames.has(name) ||
+            name.startsWith('AWS_CONTAINER_CREDENTIALS_') ||
+            name.startsWith('AWS_CONTAINER_AUTHORIZATION_'),
+        ),
+    ),
+  ].sort();
+  if (authoredCredentialNames.length > 0) {
+    errors.push(
+      `${logicalId} must not author AWS credential-provider Environment bindings; ECS supplies task-role credentials through its platform channel. Forbidden bindings: ${authoredCredentialNames.join(', ')}.`,
+    );
+  }
+}
+
 function requireExactInlineEnvironmentReference(
   block,
   logicalId,
@@ -822,6 +919,485 @@ function validateNoExternalApplicationEgress(source, parameters, resources, inve
   }
 }
 
+function validateEcsRoleSecurityBoundaries(resources, inventory, errors) {
+  const roleEntries = entriesOf(inventory, 'AWS::IAM::Role');
+  const expectedRoleIds = [
+    'BackendTaskExecutionRole',
+    'WebTaskExecutionRole',
+    'ApiTaskRole',
+    'WorkerTaskRole',
+    'WebTaskRole',
+  ];
+  requireExactLogicalIds(roleEntries, expectedRoleIds, 'ECS IAM role allowlist', errors);
+
+  const expectedTrustPolicy = [
+    'AssumeRolePolicyDocument:',
+    "  Version: '2012-10-17'",
+    '  Statement:',
+    '    - Effect: Allow',
+    '      Principal:',
+    '        Service: ecs-tasks.amazonaws.com',
+    '      Action: sts:AssumeRole',
+    '      Condition:',
+    '        StringEquals: { aws:SourceAccount: !Ref AWS::AccountId }',
+    '        ArnLike:',
+    "          aws:SourceArn: !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:*'",
+  ].join('\n');
+  for (const logicalId of expectedRoleIds) {
+    requireExactSemanticProperty(
+      resources.get(logicalId) ?? '',
+      logicalId,
+      'AssumeRolePolicyDocument',
+      expectedTrustPolicy,
+      'the single-account, regional ECS task trust policy with no additional principal or action',
+      errors,
+    );
+  }
+
+  const imagePullPolicy = resources.get('ApplicationImagePullPolicy') ?? '';
+  requireExactSemanticProperty(
+    imagePullPolicy,
+    'ApplicationImagePullPolicy',
+    'PolicyDocument',
+    [
+      'PolicyDocument:',
+      "  Version: '2012-10-17'",
+      '  Statement:',
+      '    - Effect: Allow',
+      '      Action: ecr:GetAuthorizationToken',
+      "      Resource: '*'",
+      '    - Effect: Allow',
+      '      Action:',
+      '        - ecr:BatchCheckLayerAvailability',
+      '        - ecr:BatchGetImage',
+      '        - ecr:GetDownloadUrlForLayer',
+      '      Resource: !Sub arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/crypto-lending-*',
+    ].join('\n'),
+    'the reviewed ECR token and repository-scoped image-pull action/resource matrix',
+    errors,
+  );
+
+  const executionManagedPolicies = [
+    'ManagedPolicyArns:',
+    '  - !Ref ApplicationImagePullPolicy',
+  ].join('\n');
+  for (const logicalId of ['BackendTaskExecutionRole', 'WebTaskExecutionRole']) {
+    requireExactSemanticProperty(
+      resources.get(logicalId) ?? '',
+      logicalId,
+      'ManagedPolicyArns',
+      executionManagedPolicies,
+      'the single reviewed application image-pull managed policy attachment',
+      errors,
+    );
+  }
+
+  requireExactSemanticProperty(
+    resources.get('BackendTaskExecutionRole') ?? '',
+    'BackendTaskExecutionRole',
+    'Policies',
+    [
+      'Policies:',
+      '  - PolicyName: WriteBackendLogs',
+      '    PolicyDocument:',
+      "      Version: '2012-10-17'",
+      '      Statement:',
+      '        - Effect: Allow',
+      '          Action:',
+      '            - logs:CreateLogStream',
+      '            - logs:PutLogEvents',
+      '          Resource:',
+      '            - !Sub ${ApiLogGroup.Arn}:*',
+      '            - !Sub ${WorkerLogGroup.Arn}:*',
+      '  - PolicyName: RuntimeSecrets',
+      '    PolicyDocument:',
+      "      Version: '2012-10-17'",
+      '      Statement:',
+      '        - Sid: NamedSecrets',
+      '          Effect: Allow',
+      '          Action:',
+      '            - secretsmanager:GetSecretValue',
+      '          Resource:',
+      '            - !Ref DatabaseRuntimeSecret',
+      '            - !Ref RedisAuthSecret',
+      '        - Sid: DecryptSecrets',
+      '          Effect: Allow',
+      '          Action:',
+      '            - kms:Decrypt',
+      '          Resource: !GetAtt ApplicationDataKey.Arn',
+      '          Condition:',
+      '            StringEquals:',
+      '              kms:ViaService: !Sub secretsmanager.${AWS::Region}.${AWS::URLSuffix}',
+    ].join('\n'),
+    'the exact backend log-write and runtime-secret action/resource matrix, including Secrets Manager-only KMS decryption',
+    errors,
+  );
+
+  requireExactSemanticProperty(
+    resources.get('WebTaskExecutionRole') ?? '',
+    'WebTaskExecutionRole',
+    'Policies',
+    [
+      'Policies:',
+      '  - PolicyName: WriteWebLogs',
+      '    PolicyDocument:',
+      "      Version: '2012-10-17'",
+      '      Statement:',
+      '        - Effect: Allow',
+      '          Action: [logs:CreateLogStream, logs:PutLogEvents]',
+      '          Resource: !Sub ${WebLogGroup.Arn}:*',
+    ].join('\n'),
+    'the web log-only execution policy with no secret or data-key access',
+    errors,
+  );
+
+  requireExactSemanticProperty(
+    resources.get('ApiTaskRole') ?? '',
+    'ApiTaskRole',
+    'Policies',
+    [
+      'Policies:',
+      '  - PolicyName: ApiJobQueueAccess',
+      '    PolicyDocument:',
+      "      Version: '2012-10-17'",
+      '      Statement:',
+      '        - Sid: InspectQueueRedriveConfiguration',
+      '          Effect: Allow',
+      '          Action: sqs:GetQueueAttributes',
+      '          Resource: [!GetAtt JobQueue.Arn, !GetAtt JobDeadLetterQueue.Arn]',
+    ].join('\n'),
+    'the read-only queue-readiness task policy with no publish, consume, secret, or key access',
+    errors,
+  );
+
+  requireExactSemanticProperty(
+    resources.get('WorkerTaskRole') ?? '',
+    'WorkerTaskRole',
+    'Policies',
+    [
+      'Policies:',
+      '  - PolicyName: OutboxPublishAccess',
+      '    PolicyDocument:',
+      "      Version: '2012-10-17'",
+      '      Statement:',
+      '        - Sid: PublishJobs',
+      '          Effect: Allow',
+      '          Action: sqs:SendMessage',
+      '          Resource: !GetAtt JobQueue.Arn',
+      '        - Sid: InspectQueueRedriveConfiguration',
+      '          Effect: Allow',
+      '          Action: sqs:GetQueueAttributes',
+      '          Resource: [!GetAtt JobQueue.Arn, !GetAtt JobDeadLetterQueue.Arn]',
+      '        - Sid: UseSqsEncryptionKey',
+      '          Effect: Allow',
+      '          Action:',
+      '            - kms:Decrypt',
+      '            - kms:GenerateDataKey',
+      '          Resource: !GetAtt ApplicationDataKey.Arn',
+      '          Condition:',
+      '            StringEquals:',
+      '              kms:ViaService: !Sub sqs.${AWS::Region}.${AWS::URLSuffix}',
+    ].join('\n'),
+    'the queue-publish/readiness and SQS-only data-key task policy with no consume or secret access',
+    errors,
+  );
+
+  for (const logicalId of ['ApiTaskRole', 'WorkerTaskRole', 'WebTaskRole']) {
+    requireAbsentProperty(
+      resources.get(logicalId) ?? '',
+      logicalId,
+      'ManagedPolicyArns',
+      'application task roles must not inherit managed permissions',
+      errors,
+    );
+  }
+  requireAbsentProperty(
+    resources.get('WebTaskRole') ?? '',
+    'WebTaskRole',
+    'Policies',
+    'the web application task role must remain permissionless',
+    errors,
+  );
+
+  const expectedTaskRoles = new Map([
+    ['ApiTaskDefinition', ['!GetAtt BackendTaskExecutionRole.Arn', '!GetAtt ApiTaskRole.Arn']],
+    ['WebTaskDefinition', ['!GetAtt WebTaskExecutionRole.Arn', '!GetAtt WebTaskRole.Arn']],
+    [
+      'WorkerTaskDefinition',
+      ['!GetAtt BackendTaskExecutionRole.Arn', '!GetAtt WorkerTaskRole.Arn'],
+    ],
+  ]);
+  for (const [logicalId, [executionRoleArn, taskRoleArn]] of expectedTaskRoles) {
+    const block = resources.get(logicalId) ?? '';
+    requireExactProperty(block, logicalId, 'ExecutionRoleArn', executionRoleArn, errors);
+    requireExactProperty(block, logicalId, 'TaskRoleArn', taskRoleArn, errors);
+    validateTaskEnvironmentCredentialBoundary(block, logicalId, errors);
+  }
+
+  const backendSecretBindings = [
+    'Secrets:',
+    '  - Name: DATABASE_RUNTIME_PASSWORD',
+    "    ValueFrom: !Sub '${DatabaseRuntimeSecret}:password::'",
+    "  - { Name: REDIS_AUTH_TOKEN, ValueFrom: !Sub '${RedisAuthSecret}:authToken::' }",
+  ].join('\n');
+  for (const logicalId of ['ApiTaskDefinition', 'WorkerTaskDefinition']) {
+    const block = resources.get(logicalId) ?? '';
+    requireExactSemanticProperty(
+      block,
+      logicalId,
+      'Secrets',
+      backendSecretBindings,
+      'exact runtime-database and Redis ECS secret injection with no migration/admin secret',
+      errors,
+    );
+    const environment = indentedPropertyBlock(block, 'Environment') ?? '';
+    if (
+      /\bName:\s*(?:DATABASE_RUNTIME_PASSWORD|REDIS_AUTH_TOKEN|MIGRATION_DATABASE_[A-Z_]+)\b/.test(
+        environment,
+      )
+    ) {
+      errors.push(
+        `${logicalId} must inject sensitive runtime values only through ECS Secrets, never plaintext Environment entries.`,
+      );
+    }
+  }
+
+  const webTaskDefinition = resources.get('WebTaskDefinition') ?? '';
+  requireAbsentProperty(
+    webTaskDefinition,
+    'WebTaskDefinition',
+    'Secrets',
+    'the web container has no approved secret dependency',
+    errors,
+  );
+  if (
+    /Database(?:Credentials|Runtime)Secret|RedisAuthSecret|\bValueFrom:/.test(webTaskDefinition)
+  ) {
+    errors.push('WebTaskDefinition must not reference any application secret or ECS secret value.');
+  }
+}
+
+function validateKmsAndEncryptedServiceBoundaries(resources, inventory, errors) {
+  requireExactSemanticProperty(
+    resources.get('ApplicationDataKey') ?? '',
+    'ApplicationDataKey',
+    'KeyPolicy',
+    [
+      'KeyPolicy:',
+      "  Version: '2012-10-17'",
+      '  Statement:',
+      '    - Sid: AccountAdministrationAndIamDelegation',
+      '      Effect: Allow',
+      '      Principal:',
+      '        AWS: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:root',
+      '      Action: kms:*',
+      "      Resource: '*'",
+      '    - Sid: SqsDataKeyUse',
+      '      Effect: Allow',
+      '      Principal:',
+      '        Service: sqs.amazonaws.com',
+      '      Action:',
+      '        - kms:Decrypt',
+      '        - kms:GenerateDataKey',
+      "      Resource: '*'",
+      '      Condition:',
+      '        StringEquals:',
+      '          aws:SourceAccount: !Ref AWS::AccountId',
+      '        ArnLike:',
+      '          aws:SourceArn: !Sub arn:${AWS::Partition}:sqs:${AWS::Region}:${AWS::AccountId}:crypto-lending-${EnvironmentName}-jobs*',
+    ].join('\n'),
+    'the reviewed account-delegation and SQS service key policy, including exact source account and queue ARN scope',
+    errors,
+  );
+
+  requireExactSemanticProperty(
+    resources.get('ApplicationLogsKey') ?? '',
+    'ApplicationLogsKey',
+    'KeyPolicy',
+    [
+      'KeyPolicy:',
+      "  Version: '2012-10-17'",
+      '  Statement:',
+      '    - Sid: AccountAdministrationAndIamDelegation',
+      '      Effect: Allow',
+      '      Principal:',
+      '        AWS: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:root',
+      '      Action: kms:*',
+      "      Resource: '*'",
+      '    - Sid: CloudWatchLogsEncryption',
+      '      Effect: Allow',
+      '      Principal:',
+      '        Service: !Sub logs.${AWS::Region}.${AWS::URLSuffix}',
+      '      Action:',
+      '        - kms:Encrypt*',
+      '        - kms:Decrypt*',
+      '        - kms:ReEncrypt*',
+      '        - kms:GenerateDataKey*',
+      '        - kms:Describe*',
+      "      Resource: '*'",
+      '      Condition:',
+      '        ArnLike:',
+      '          kms:EncryptionContext:aws:logs:arn: !Sub arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/crypto-lending/${EnvironmentName}/*',
+    ].join('\n'),
+    'the reviewed regional CloudWatch Logs principal and environment-scoped encryption-context key policy',
+    errors,
+  );
+
+  for (const logicalId of [
+    'DatabaseCredentialsSecret',
+    'DatabaseRuntimeSecret',
+    'RedisAuthSecret',
+  ]) {
+    requireExactProperty(
+      resources.get(logicalId) ?? '',
+      logicalId,
+      'KmsKeyId',
+      '!GetAtt ApplicationDataKey.Arn',
+      errors,
+    );
+  }
+  for (const logicalId of ['Database', 'RedisReplicationGroup', 'JobQueue', 'JobDeadLetterQueue']) {
+    requireExactProperty(
+      resources.get(logicalId) ?? '',
+      logicalId,
+      logicalId.startsWith('Job') ? 'KmsMasterKeyId' : 'KmsKeyId',
+      '!GetAtt ApplicationDataKey.Arn',
+      errors,
+    );
+  }
+  for (const logicalId of ['ApiLogGroup', 'WebLogGroup', 'WorkerLogGroup']) {
+    requireExactProperty(
+      resources.get(logicalId) ?? '',
+      logicalId,
+      'KmsKeyId',
+      '!GetAtt ApplicationLogsKey.Arn',
+      errors,
+    );
+  }
+
+  const redis = resources.get('RedisReplicationGroup') ?? '';
+  for (const [propertyName, expectedValue] of [
+    ['AtRestEncryptionEnabled', 'true'],
+    ['TransitEncryptionEnabled', 'true'],
+    ['TransitEncryptionMode', 'required'],
+  ]) {
+    requireExactProperty(redis, 'RedisReplicationGroup', propertyName, expectedValue, errors);
+  }
+  requireExactProperty(
+    redis,
+    'RedisReplicationGroup',
+    'AuthToken',
+    "!Sub '{{resolve:secretsmanager:${RedisAuthSecret}:SecretString:authToken}}'",
+    errors,
+  );
+  requireExactProperty(
+    resources.get('DatabaseParameterGroup') ?? '',
+    'DatabaseParameterGroup',
+    'rds.force_ssl',
+    "'1'",
+    errors,
+  );
+
+  requireExactLogicalIds(
+    entriesOf(inventory, 'AWS::SQS::Queue'),
+    ['JobDeadLetterQueue', 'JobQueue'],
+    'Encrypted application queue topology',
+    errors,
+  );
+  requireExactSemanticProperty(
+    resources.get('JobDeadLetterQueue') ?? '',
+    'JobDeadLetterQueue',
+    'Properties',
+    [
+      'Properties:',
+      '  KmsMasterKeyId: !GetAtt ApplicationDataKey.Arn',
+      '  KmsDataKeyReusePeriodSeconds: 300',
+      '  MessageRetentionPeriod: 1209600',
+      '  QueueName: !Sub crypto-lending-${EnvironmentName}-jobs-dlq',
+      '  RedriveAllowPolicy:',
+      '    redrivePermission: byQueue',
+      '    sourceQueueArns:',
+      '      - !Sub arn:${AWS::Partition}:sqs:${AWS::Region}:${AWS::AccountId}:crypto-lending-${EnvironmentName}-jobs',
+    ].join('\n'),
+    'the exact customer-key encryption, retention, name, and single-source dead-letter queue topology',
+    errors,
+  );
+  requireExactSemanticProperty(
+    resources.get('JobQueue') ?? '',
+    'JobQueue',
+    'Properties',
+    [
+      'Properties:',
+      '  KmsMasterKeyId: !GetAtt ApplicationDataKey.Arn',
+      '  KmsDataKeyReusePeriodSeconds: 300',
+      '  MessageRetentionPeriod: 345600',
+      '  QueueName: !Sub crypto-lending-${EnvironmentName}-jobs',
+      '  ReceiveMessageWaitTimeSeconds: 10',
+      '  RedrivePolicy:',
+      '    deadLetterTargetArn: !GetAtt JobDeadLetterQueue.Arn',
+      '    maxReceiveCount: !Ref SqsMaxReceiveCount',
+      '  VisibilityTimeout: !Ref SqsVisibilityTimeoutSeconds',
+    ].join('\n'),
+    'the exact customer-key encryption, retention, long-poll, bounded-redrive, and visibility-timeout primary queue topology',
+    errors,
+  );
+  requireExactSemanticProperty(
+    resources.get('JobDeadLetterQueue') ?? '',
+    'JobDeadLetterQueue',
+    'RedriveAllowPolicy',
+    [
+      'RedriveAllowPolicy:',
+      '  redrivePermission: byQueue',
+      '  sourceQueueArns:',
+      '    - !Sub arn:${AWS::Partition}:sqs:${AWS::Region}:${AWS::AccountId}:crypto-lending-${EnvironmentName}-jobs',
+    ].join('\n'),
+    'the single-source byQueue dead-letter redrive allow policy',
+    errors,
+  );
+  requireExactSemanticProperty(
+    resources.get('JobQueue') ?? '',
+    'JobQueue',
+    'RedrivePolicy',
+    [
+      'RedrivePolicy:',
+      '  deadLetterTargetArn: !GetAtt JobDeadLetterQueue.Arn',
+      '  maxReceiveCount: !Ref SqsMaxReceiveCount',
+    ].join('\n'),
+    'the exact dead-letter target and bounded receive-count redrive policy',
+    errors,
+  );
+  requireExactSemanticProperty(
+    resources.get('JobQueueTlsPolicy') ?? '',
+    'JobQueueTlsPolicy',
+    'Properties',
+    [
+      'Properties:',
+      '  Queues:',
+      '    - !Ref JobQueue',
+      '    - !Ref JobDeadLetterQueue',
+      '  PolicyDocument:',
+      "    Version: '2012-10-17'",
+      '    Statement:',
+      '      - Sid: DenyInsecureTransport',
+      '        Effect: Deny',
+      "        Principal: '*'",
+      '        Action: sqs:*',
+      '        Resource:',
+      '          - !GetAtt JobQueue.Arn',
+      '          - !GetAtt JobDeadLetterQueue.Arn',
+      '        Condition:',
+      '          Bool:',
+      "            aws:SecureTransport: 'false'",
+    ].join('\n'),
+    'the exact two-queue attachment and unconditional insecure-transport denial',
+    errors,
+  );
+  const tlsPolicyQueues = nestedReferenceList(resources.get('JobQueueTlsPolicy') ?? '', 'Queues');
+  if (tlsPolicyQueues?.join('|') !== 'JobQueue|JobDeadLetterQueue') {
+    errors.push('JobQueueTlsPolicy must attach to exactly JobQueue and JobDeadLetterQueue.');
+  }
+}
+
 function validateTemplateShape(source, errors) {
   const templateSha256 = sha256(source);
   if (templateSha256 !== reviewedApplicationBaselineSha256) {
@@ -953,6 +1529,8 @@ function validateTemplateShape(source, errors) {
   }
 
   validateNoExternalApplicationEgress(source, parameters, resources, inventory, errors);
+  validateEcsRoleSecurityBoundaries(resources, inventory, errors);
+  validateKmsAndEncryptedServiceBoundaries(resources, inventory, errors);
 
   const requiredTypes = new Map([
     ['AWS::EC2::VPC', 1],

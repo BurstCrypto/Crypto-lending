@@ -13,6 +13,8 @@ import { fileURLToPath } from 'node:url';
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const defaultTemplatePath = join(scriptDirectory, 'database-migration-task.yaml');
 const reviewedTemplateSha256 = '79584004f9c60f4ebee3ca06ba41dc9f18297b1e8ada694f12a92e157522daff';
+const migrationBindingResidualLimitation =
+  'DatabaseMigrationCredentialsSecretArn and ApplicationDataKeyArn are operator-supplied cross-stack inputs; local template validation proves scope after binding but cannot authenticate that they came from the intended application stack.';
 
 function sha256(value) {
   return createHash('sha256').update(value, 'utf8').digest('hex');
@@ -68,6 +70,70 @@ function exactCount(source, pattern) {
   return source.match(pattern)?.length ?? 0;
 }
 
+function topLevelBlocks(source, sectionName) {
+  const lines = source.replace(/\r\n/g, '\n').split('\n');
+  const sectionIndex = lines.findIndex((line) => line === `${sectionName}:`);
+  if (sectionIndex < 0) return new Map();
+
+  const blocks = new Map();
+  let currentName;
+  let currentLines = [];
+  const saveCurrent = () => {
+    if (currentName) blocks.set(currentName, currentLines.join('\n'));
+  };
+  for (let index = sectionIndex + 1; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (/^[A-Za-z][A-Za-z0-9]*:\s*$/.test(line)) break;
+    const start = line.match(/^  ([A-Za-z][A-Za-z0-9]*):\s*$/);
+    if (start) {
+      saveCurrent();
+      currentName = start[1];
+      currentLines = [line];
+    } else if (currentName) {
+      currentLines.push(line);
+    }
+  }
+  saveCurrent();
+  return blocks;
+}
+
+function indentedPropertyBlock(block, propertyName) {
+  const lines = block.replace(/\r\n/g, '\n').split('\n');
+  const escapedName = propertyName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const matches = lines
+    .map((line, index) => ({ index, line }))
+    .filter(({ line }) => new RegExp(`^\\s+${escapedName}:\\s*$`).test(line));
+  if (matches.length !== 1) return undefined;
+
+  const { index, line } = matches[0];
+  const propertyIndent = line.search(/\S/);
+  const propertyLines = [line];
+  for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
+    const nestedLine = lines[cursor];
+    if (nestedLine.trim() !== '' && nestedLine.search(/\S/) <= propertyIndent) break;
+    propertyLines.push(nestedLine);
+  }
+  return propertyLines.join('\n').trimEnd();
+}
+
+function semanticYamlTokens(source) {
+  return source.replace(/^\s*-\s+/gm, '').replace(/[\s{},'"]/g, '');
+}
+
+function requireExactSemanticProperty(
+  block,
+  logicalId,
+  propertyName,
+  expectedSource,
+  expectation,
+  errors,
+) {
+  const actual = indentedPropertyBlock(block, propertyName);
+  if (!actual || semanticYamlTokens(actual) !== semanticYamlTokens(expectedSource)) {
+    errors.push(`${logicalId} must preserve ${expectation}.`);
+  }
+}
+
 export function validateMigrationTaskTemplate(source) {
   const errors = [];
   const templateSha256 = sha256(source);
@@ -86,6 +152,7 @@ export function validateMigrationTaskTemplate(source) {
     ['MigrationTaskDefinition', 'AWS::ECS::TaskDefinition'],
   ]);
   const inventory = resourceInventory(source);
+  const resources = topLevelBlocks(source, 'Resources');
   if (
     inventory.length !== expectedResources.size ||
     inventory.some(({ logicalId, type }) => expectedResources.get(logicalId) !== type)
@@ -97,6 +164,106 @@ export function validateMigrationTaskTemplate(source) {
   if (/AWS::ECS::Service|\bDesiredCount\b|\bTaskRoleArn\b/.test(source)) {
     errors.push(
       'Migration task must remain one-off with no ECS service, DesiredCount, or task role.',
+    );
+  }
+
+  const role = resources.get('MigrationTaskExecutionRole') ?? '';
+  requireExactSemanticProperty(
+    role,
+    'MigrationTaskExecutionRole',
+    'AssumeRolePolicyDocument',
+    [
+      'AssumeRolePolicyDocument:',
+      "  Version: '2012-10-17'",
+      '  Statement:',
+      '    - Effect: Allow',
+      '      Principal: { Service: ecs-tasks.amazonaws.com }',
+      '      Action: sts:AssumeRole',
+      '      Condition:',
+      '        StringEquals: { aws:SourceAccount: !Ref AWS::AccountId }',
+      '        ArnLike:',
+      "          aws:SourceArn: !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:*'",
+    ].join('\n'),
+    'the single-account, regional ECS task trust policy with no additional principal or action',
+    errors,
+  );
+  requireExactSemanticProperty(
+    role,
+    'MigrationTaskExecutionRole',
+    'Policies',
+    [
+      'Policies:',
+      '  - PolicyName: PullMigrationImage',
+      '    PolicyDocument:',
+      "      Version: '2012-10-17'",
+      '      Statement:',
+      '        - Effect: Allow',
+      '          Action: ecr:GetAuthorizationToken',
+      "          Resource: '*'",
+      '        - Effect: Allow',
+      '          Action:',
+      '            - ecr:BatchCheckLayerAvailability',
+      '            - ecr:BatchGetImage',
+      '            - ecr:GetDownloadUrlForLayer',
+      '          Resource: !Ref ApiImageRepositoryArn',
+      '  - PolicyName: WriteMigrationLogs',
+      '    PolicyDocument:',
+      "      Version: '2012-10-17'",
+      '      Statement:',
+      '        - Effect: Allow',
+      '          Action: [logs:CreateLogStream, logs:PutLogEvents]',
+      '          Resource: !Sub arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/crypto-lending/${EnvironmentName}/outbox-worker:*',
+      '  - PolicyName: ReadMigrationSecret',
+      '    PolicyDocument:',
+      "      Version: '2012-10-17'",
+      '      Statement:',
+      '        - Effect: Allow',
+      '          Action: secretsmanager:GetSecretValue',
+      '          Resource: !Ref DatabaseMigrationCredentialsSecretArn',
+      '        - Effect: Allow',
+      '          Action: kms:Decrypt',
+      '          Resource: !Ref ApplicationDataKeyArn',
+      '          Condition:',
+      '            StringEquals:',
+      '              kms:ViaService: !Sub secretsmanager.${AWS::Region}.${AWS::URLSuffix}',
+    ].join('\n'),
+    'the exact image-pull, migration-log, admin-secret, and Secrets Manager-only KMS action/resource matrix',
+    errors,
+  );
+  if (/^\s+ManagedPolicyArns:\s*$/m.test(role)) {
+    errors.push(
+      'MigrationTaskExecutionRole must not attach managed policies outside its exact inline capability matrix.',
+    );
+  }
+
+  const task = resources.get('MigrationTaskDefinition') ?? '';
+  if (!/^\s+ExecutionRoleArn:\s*!GetAtt MigrationTaskExecutionRole\.Arn\s*$/m.test(task)) {
+    errors.push(
+      'MigrationTaskDefinition must use only MigrationTaskExecutionRole as its ECS execution role.',
+    );
+  }
+  requireExactSemanticProperty(
+    task,
+    'MigrationTaskDefinition',
+    'Secrets',
+    [
+      'Secrets:',
+      '  - Name: MIGRATION_DATABASE_USERNAME',
+      "    ValueFrom: !Sub '${DatabaseMigrationCredentialsSecretArn}:username::'",
+      '  - Name: MIGRATION_DATABASE_PASSWORD',
+      "    ValueFrom: !Sub '${DatabaseMigrationCredentialsSecretArn}:password::'",
+    ].join('\n'),
+    'the exact admin/migration username and password injection from the single migration-secret parameter',
+    errors,
+  );
+  const environment = indentedPropertyBlock(task, 'Environment') ?? '';
+  if (
+    /\bName:\s*(?:MIGRATION_DATABASE_(?:USERNAME|PASSWORD)|DATABASE_RUNTIME_[A-Z_]+|REDIS_AUTH_TOKEN)\b/.test(
+      environment,
+    )
+  ) {
+    errors.push(
+      'MigrationTaskDefinition must inject migration credentials only through ECS Secrets and must not receive runtime or Redis credentials.',
     );
   }
   if (/\bDATABASE_RUNTIME_[A-Z_]+\b|\bDatabaseRuntimeSecret\b/.test(source)) {
@@ -200,6 +367,7 @@ export function validateMigrationTaskTemplate(source) {
     awsCallsMade: 0,
     templateSha256,
     reviewedTemplateSha256,
+    residualLimitations: [migrationBindingResidualLimitation],
     errors,
   };
 }
@@ -214,7 +382,7 @@ function main() {
       process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
     } else if (report.ok) {
       process.stdout.write(
-        `Database migration task validation passed.\nTemplate: ${resolved}\nAWS API calls made: 0\n`,
+        `Database migration task validation passed.\nTemplate: ${resolved}\nAWS API calls made: 0\nKnown residual limitation: ${migrationBindingResidualLimitation}\n`,
       );
     } else {
       process.stderr.write(`${report.errors.join('\n')}\n`);

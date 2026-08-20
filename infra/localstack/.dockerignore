@@ -1,0 +1,7 @@
+# This context contains only the reviewed LocalStack image definition and init
+# hook. Deny everything else so ignored local files never reach a builder.
+*
+!.dockerignore
+!Dockerfile
+!init/
+!init/10-create-queues.sh

@@ -24,6 +24,11 @@ parameters.local.json
 *.secrets.json
 *.secrets.yaml
 *.secrets.yml
+secrets.json
+secrets.yaml
+secrets.yml
+*.tfvars
+*.tfvars.json
 *.pem
 *.key
 *.p12

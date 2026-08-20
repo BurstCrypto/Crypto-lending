@@ -22,6 +22,9 @@ function baseEnvironment(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
   const production = nodeEnvironment.trim().toLowerCase() === 'production';
   return {
     NODE_ENV: nodeEnvironment,
+    ...(production
+      ? { AWS_CONTAINER_CREDENTIALS_RELATIVE_URI: '/v2/credentials/test-task-role' }
+      : {}),
     DATABASE_RUNTIME_URL: `postgresql://${production ? 'crypto_runtime' : 'local'}:local@127.0.0.1:5432/crypto_lending`,
     DATABASE_RUNTIME_SSL_MODE: 'disable',
     ...(production ? { NODE_EXTRA_CA_CERTS: validCaPath } : {}),
@@ -508,6 +511,91 @@ describe('loadInfrastructureConfig', () => {
         }),
       ),
     ).toThrow('SQS_ENDPOINT is not allowed in production');
+  });
+
+  it.each([
+    'https://127.0.0.1:4566',
+    'http://127.0.0.1:4567',
+    'http://example.test:4566',
+    ['http://user:', 'password@127.0.0.1:4566'].join(''),
+    'http://127.0.0.1:4566/path',
+    'http://127.0.0.1:4566?option=true',
+  ])('rejects a non-canonical local SQS emulator endpoint: %s', (endpoint) => {
+    expect(() => loadInfrastructureConfig(baseEnvironment({ SQS_ENDPOINT: endpoint }))).toThrow(
+      'SQS_ENDPOINT must be the canonical local SQS emulator endpoint on port 4566',
+    );
+  });
+
+  it('accepts only the reviewed host and Compose local SQS emulator endpoints', () => {
+    expect(
+      loadInfrastructureConfig(baseEnvironment({ SQS_ENDPOINT: 'http://localhost:4566' })).sqs
+        .endpoint,
+    ).toBe('http://localhost:4566');
+    expect(
+      loadInfrastructureConfig(baseEnvironment({ SQS_ENDPOINT: 'http://localstack:4566' })).sqs
+        .endpoint,
+    ).toBe('http://localstack:4566');
+  });
+
+  it.each([
+    'AWS_ACCESS_KEY_ID',
+    'AWS_SECRET_ACCESS_KEY',
+    'AWS_SESSION_TOKEN',
+    'AWS_PROFILE',
+    'AWS_SHARED_CREDENTIALS_FILE',
+    'AWS_CONFIG_FILE',
+    'AWS_ROLE_ARN',
+    'AWS_WEB_IDENTITY_TOKEN_FILE',
+    'AWS_CONTAINER_CREDENTIALS_FULL_URI',
+    'AWS_CONTAINER_AUTHORIZATION_TOKEN',
+    'AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE',
+    'AWS_ENDPOINT_URL',
+    'AWS_ENDPOINT_URL_SQS',
+    'AWS_IGNORE_CONFIGURED_ENDPOINT_URLS',
+  ])('rejects the production AWS credential-chain override %s', (variableName) => {
+    expect(() =>
+      loadInfrastructureConfig(
+        baseEnvironment({
+          NODE_ENV: 'production',
+          DATABASE_RUNTIME_SSL_MODE: 'verify-full',
+          [variableName]: 'must-not-be-used',
+        }),
+      ),
+    ).toThrow('Production runtime must use the ECS task role');
+  });
+
+  it('allows only the ECS-managed relative credential URI in production', () => {
+    const config = loadInfrastructureConfig(
+      baseEnvironment({
+        NODE_ENV: 'production',
+        DATABASE_RUNTIME_SSL_MODE: 'verify-full',
+        AWS_CONTAINER_CREDENTIALS_RELATIVE_URI: '/v2/credentials/example',
+      }),
+    );
+
+    expect(config.sqs.credentialRelativeUri).toBe('/v2/credentials/example');
+    expect(config.sqs.endpoint).toBeUndefined();
+  });
+
+  it.each([
+    undefined,
+    '',
+    ' /v2/credentials/example',
+    '/v2/credentials/../metadata',
+    '/v2/credentials/example?redirect=http://attacker.example',
+    'http://169.254.170.2/v2/credentials/example',
+  ])('rejects a missing or non-canonical ECS credential relative URI: %s', (relativeUri) => {
+    expect(() =>
+      loadInfrastructureConfig(
+        baseEnvironment({
+          NODE_ENV: 'production',
+          DATABASE_RUNTIME_SSL_MODE: 'verify-full',
+          AWS_CONTAINER_CREDENTIALS_RELATIVE_URI: relativeUri,
+        }),
+      ),
+    ).toThrow(
+      'Production runtime requires a canonical ECS-managed AWS_CONTAINER_CREDENTIALS_RELATIVE_URI',
+    );
   });
 
   it('rejects plaintext or non-AWS queue URLs in production', () => {

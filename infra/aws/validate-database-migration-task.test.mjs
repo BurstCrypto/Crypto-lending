@@ -33,6 +33,9 @@ test('accepts the reviewed one-off migration task without AWS calls', () => {
   assert.equal(report.ok, true);
   assert.equal(report.awsCallsMade, 0);
   assert.deepEqual(report.errors, []);
+  assert.equal(report.residualLimitations.length, 1);
+  assert.match(report.residualLimitations[0], /operator-supplied cross-stack inputs/);
+  assert.match(report.residualLimitations[0], /cannot authenticate/);
 });
 
 test('rejects attaching the migration task to an ECS service', () => {
@@ -68,6 +71,102 @@ test('rejects wildcard migration-secret access', () => {
       "                Resource: '*'",
     ),
     /must read only the migration secret parameter/,
+  );
+});
+
+test('rejects widening the migration ECS trust policy', () => {
+  for (const [search, replacement] of [
+    ['Service: ecs-tasks.amazonaws.com', 'Service: lambda.amazonaws.com'],
+    [
+      'StringEquals: { aws:SourceAccount: !Ref AWS::AccountId }',
+      "StringEquals: { aws:SourceAccount: '999999999999' }",
+    ],
+    [
+      "aws:SourceArn: !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:*'",
+      "aws:SourceArn: '*'",
+    ],
+    ['Action: sts:AssumeRole', 'Action: sts:*'],
+  ]) {
+    assertRejected(
+      mutate(search, replacement),
+      /single-account, regional ECS task trust policy with no additional principal or action/,
+    );
+  }
+});
+
+test('rejects widening the migration execution-role capability matrix', () => {
+  for (const [search, replacement] of [
+    [
+      '                Resource: !Ref DatabaseMigrationCredentialsSecretArn',
+      [
+        '                Resource:',
+        '                  - !Ref DatabaseMigrationCredentialsSecretArn',
+        '                  - arn:aws:secretsmanager:us-west-2:000000000000:secret:runtime',
+      ].join('\n'),
+    ],
+    [
+      '                Action: secretsmanager:GetSecretValue',
+      '                Action: [secretsmanager:GetSecretValue, sqs:SendMessage]',
+    ],
+    [
+      'kms:ViaService: !Sub secretsmanager.${AWS::Region}.${AWS::URLSuffix}',
+      'kms:ViaService: !Sub sqs.${AWS::Region}.${AWS::URLSuffix}',
+    ],
+    [
+      'Resource: !Sub arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/crypto-lending/${EnvironmentName}/outbox-worker:*',
+      "Resource: '*'",
+    ],
+  ]) {
+    assertRejected(
+      mutate(search, replacement),
+      /exact image-pull, migration-log, admin-secret, and Secrets Manager-only KMS action\/resource matrix/,
+    );
+  }
+
+  assertRejected(
+    mutate(
+      '      Policies:\n',
+      '      ManagedPolicyArns:\n        - arn:aws:iam::aws:policy/AdministratorAccess\n      Policies:\n',
+    ),
+    /must not attach managed policies outside its exact inline capability matrix/,
+  );
+});
+
+test('rejects migration role remapping and cross-scope secret injection', () => {
+  assertRejected(
+    mutate(
+      'ExecutionRoleArn: !GetAtt MigrationTaskExecutionRole.Arn',
+      'ExecutionRoleArn: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/other-role',
+    ),
+    /must use only MigrationTaskExecutionRole as its ECS execution role/,
+  );
+
+  assertRejected(
+    mutate(
+      "ValueFrom: !Sub '${DatabaseMigrationCredentialsSecretArn}:username::'",
+      "ValueFrom: !Sub '${DatabaseMigrationCredentialsSecretArn}:password::'",
+    ),
+    /exact admin\/migration username and password injection/,
+  );
+
+  assertRejected(
+    mutate(
+      '            - { Name: NODE_ENV, Value: production }',
+      '            - { Name: NODE_ENV, Value: production }\n            - { Name: MIGRATION_DATABASE_PASSWORD, Value: plaintext-is-prohibited }',
+    ),
+    /inject migration credentials only through ECS Secrets/,
+  );
+
+  assertRejected(
+    mutate(
+      "              ValueFrom: !Sub '${DatabaseMigrationCredentialsSecretArn}:password::'",
+      [
+        "              ValueFrom: !Sub '${DatabaseMigrationCredentialsSecretArn}:password::'",
+        '            - Name: REDIS_AUTH_TOKEN',
+        "              ValueFrom: !Sub '${DatabaseMigrationCredentialsSecretArn}:authToken::'",
+      ].join('\n'),
+    ),
+    /exact admin\/migration username and password injection/,
   );
 });
 
