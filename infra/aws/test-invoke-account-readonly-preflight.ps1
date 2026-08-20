@@ -255,6 +255,8 @@ exit 9
             Json = $true
         }
         Assert-Condition $result.Succeeded $result.Output
+        $timestampMatch = [regex]::Match($result.Output, '"executedAtUtc"\s*:\s*"(?<value>[^"]+)"')
+        Assert-Condition $timestampMatch.Success 'Report does not contain a JSON execution timestamp string.'
         $report = $result.Output | ConvertFrom-Json
         $calls = @(Get-AwsCalls)
         Assert-Condition ($calls.Count -eq 7) "Expected seven approved reads, received $($calls.Count)."
@@ -274,7 +276,7 @@ exit 9
         Assert-Condition ($report.preflightScriptSha256 -ceq (Get-FileHash -Algorithm SHA256 -LiteralPath $preflightPath).Hash.ToLowerInvariant()) 'Report script hash differs from the exact invoked artifact.'
         Assert-Condition ($report.readonlyPolicySha256 -ceq (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $PSScriptRoot 'kan-229-readonly-preflight-policy.json')).Hash.ToLowerInvariant()) 'Report policy hash differs from the exact local artifact.'
         $executedAt = [DateTimeOffset]::MinValue
-        Assert-Condition ([DateTimeOffset]::TryParseExact([string] $report.executedAtUtc, 'o', [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::RoundtripKind, [ref] $executedAt)) 'Report UTC execution timestamp is not round-trip ISO 8601.'
+        Assert-Condition ([DateTimeOffset]::TryParseExact($timestampMatch.Groups['value'].Value, 'o', [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::RoundtripKind, [ref] $executedAt)) 'Report UTC execution timestamp is not round-trip ISO 8601.'
         Assert-Condition ($executedAt.Offset -eq [TimeSpan]::Zero) 'Report execution timestamp is not UTC.'
         Assert-Condition ($result.Output -notmatch 'example\.test') 'Report leaked a subscriber address.'
         Assert-Condition ($result.Output -notmatch '111122223333') 'Report leaked an account ID.'
