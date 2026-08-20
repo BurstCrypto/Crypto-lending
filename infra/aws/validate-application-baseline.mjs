@@ -674,6 +674,11 @@ function validateDeploymentGuard(source, errors) {
     "if ($ChangeSetType -eq 'CREATE')",
     "'ApiDesiredCount', 'WebDesiredCount', 'WorkerDesiredCount'",
     '$prefixLength -lt 1',
+    "'get-template'",
+    "'--template-stage', 'Original'",
+    '$submittedTemplateSha256',
+    '$changeSetId',
+    "'--change-set-name', $changeSetId",
   ];
   for (const fragment of requiredIdentityGuards) {
     if (!source.includes(fragment)) {
@@ -698,10 +703,15 @@ function validateDeploymentGuard(source, errors) {
   const acknowledgementIndex = source.indexOf(
     '$expectedAcknowledgement = "EXECUTE REVIEWED CHANGE SET',
   );
+  const templateRetrievalIndex = source.indexOf("'get-template'");
   const deployInvocationIndex = source.lastIndexOf("'execute-change-set'");
-  if (acknowledgementIndex < 0 || deployInvocationIndex < acknowledgementIndex) {
+  if (
+    templateRetrievalIndex < 0 ||
+    acknowledgementIndex < templateRetrievalIndex ||
+    deployInvocationIndex < acknowledgementIndex
+  ) {
     errors.push(
-      'Deployment guard must require the typed billable-resource acknowledgement before deployment.',
+      'Deployment guard must retrieve the actual submitted template, then require the typed billable-resource acknowledgement before deployment.',
     );
   }
 
@@ -713,10 +723,11 @@ function validateDeploymentGuard(source, errors) {
     !source.includes('Get-FileHash -LiteralPath $resolvedTemplate -Algorithm SHA256') ||
     !source.includes("'--description', $expectedChangeSetDescription") ||
     !source.includes('$changeSet.Description -cne $expectedChangeSetDescription') ||
-    !source.includes('Sort-Object ParameterKey')
+    !source.includes('Sort-Object ParameterKey') ||
+    !source.includes('$submittedTemplateSha256 -cne $templateSha256')
   ) {
     errors.push(
-      'Plan and Deploy must bind the reviewed change set to exact template and parameter SHA-256 values.',
+      'Plan and Deploy must bind the reviewed change set to exact template and parameter SHA-256 values and verify the submitted Original template.',
     );
   }
 }
@@ -802,6 +813,10 @@ function validateLocalArtifactHygiene(errors) {
     '.aws/',
     'change-sets/',
     '*.outputs.local.json',
+    '*.billing-controls.local.json',
+    '*.pricing.local.json',
+    '*.notification-evidence.local.json',
+    'cost-exports/',
     'parameters.local.json',
     '*.secrets.json',
     '*.pem',
@@ -820,6 +835,7 @@ function validateLocalArtifactHygiene(errors) {
     '.aws-sam',
     '.serverless',
     'change-sets',
+    'cost-exports',
   ]);
   const forbiddenExtensions = new Set(['.pem', '.key', '.p12', '.pfx']);
   const forbiddenPaths = [];
@@ -840,6 +856,9 @@ function validateLocalArtifactHygiene(errors) {
       /(?:^|\.)secrets\.(?:json|ya?ml)$/i.test(name) ||
       /\.changeset\.json$/i.test(name) ||
       /\.outputs\.local\.json$/i.test(name) ||
+      /\.billing-controls\.local\.json$/i.test(name) ||
+      /\.pricing\.local\.json$/i.test(name) ||
+      /\.notification-evidence\.local\.json$/i.test(name) ||
       /(?:^|\.)parameters\.local\.json$/i.test(name)
     ) {
       forbiddenPaths.push(path);

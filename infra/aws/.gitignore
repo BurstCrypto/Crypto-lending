@@ -10,6 +10,10 @@ packaged/
 change-sets/
 *.changeset.json
 *.outputs.local.json
+*.billing-controls.local.json
+*.pricing.local.json
+*.notification-evidence.local.json
+cost-exports/
 
 # Local parameter files and credential material must never be committed.
 parameters.local.json

@@ -165,28 +165,38 @@ $env:RUN_INFRASTRUCTURE_INTEGRATION="1"
 npm run test:integration
 ```
 
-## AWS application baseline
+## AWS application baseline and billing guardrails
 
 KAN-34's native CloudFormation baseline is defined in
 `infra/aws/application-baseline.yaml`. It models private Fargate application
 tasks, RDS, ElastiCache, SQS, KMS, Secrets Manager, CloudWatch, and the required
 networking without adding Terraform/CDK state or embedded credentials.
+KAN-229's separate `infra/aws/account-guardrails.yaml` defines the account-level
+budget and optional anomaly-notification prerequisites that must be approved and
+verified before an application change set can be created.
+Its constrained no-direct-service-fee inventory permissions are versioned in
+`infra/aws/kan-229-readonly-preflight-policy.json`; the policy contains no Cost
+Explorer or write permissions and is never attached by CI or local validation.
+Live reads still require separate authorization because pre-existing account
+logging can have its own metered ingestion or delivery configuration.
 
 Validate it entirely offline with:
 
 ```powershell
 npm run infra:validate
+npm run infra:test:guardrails
 python -m pip install --requirement infra/aws/requirements-dev.txt
-python infra/aws/lint-cloudformation.py infra/aws/application-baseline.yaml infra/aws/sqs-foundation.yaml
+python infra/aws/lint-cloudformation.py infra/aws/application-baseline.yaml infra/aws/account-guardrails.yaml infra/aws/sqs-foundation.yaml
 ```
 
 These commands do not access AWS. The described services are billable if a
 stack is deployed, so the invocation guard defaults to local validation and
 blocks cloud actions without explicit profile, account, Region, and billing
 acknowledgement inputs. No AWS environment is activated by repository setup or
-CI. See [`docs/KAN-34.md`](docs/KAN-34.md) for the architecture, cost boundary,
-image/TLS prerequisites, and evidence required after any separately authorized
-deployment.
+CI. The account guardrail and application invocation scripts both default to
+filesystem-only validation. See [`docs/KAN-34.md`](docs/KAN-34.md) for the
+application architecture and [`docs/KAN-229.md`](docs/KAN-229.md) for the cost,
+authority, and independent-verification workflow.
 
 The live test refuses non-loopback service URLs, creates isolated queues and a
 unique PostgreSQL schema, and removes only those test resources. See
@@ -203,7 +213,8 @@ unique PostgreSQL schema, and removes only those test resources. See
   transactional publication; `infrastructure/sqs` owns transport retries and
   SQS-managed dead-letter redrive.
 - `infra` contains local dependency initialization, the standalone SQS topology,
-  and KAN-34's guarded CloudFormation application baseline.
+  KAN-34's guarded CloudFormation application baseline, and KAN-229's separate
+  account billing controls.
 
 These boundaries are intended to be extended by later domain modules. They do
 not embed lending business rules into infrastructure clients, which keeps future

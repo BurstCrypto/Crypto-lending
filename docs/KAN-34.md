@@ -2,8 +2,10 @@
 
 KAN-34 defines a reproducible non-production AWS application environment in
 native CloudFormation. Repository work for this ticket is deliberately
-**zero-deploy**: no AWS account has been contacted and no cloud resource,
-subscription, trial, or billable API has been activated.
+**zero-deploy**: local validation makes zero AWS calls by default, and no KAN-34
+cloud resource, subscription, trial, change set, or paid service has been
+activated. KAN-229 documents the separately authorized account-identity reads
+that precede any KAN-34 Plan.
 
 ## Cost and authorization boundary
 
@@ -12,8 +14,19 @@ Fargate tasks, an Application Load Balancer, RDS, ElastiCache, interface VPC
 endpoints, Secrets Manager, KMS, and CloudWatch. Merely committing or locally
 linting the template does not create those resources.
 
-Do not run a cloud validation, change set, or deployment until all of the
-following are true:
+The public-price refresh recorded on 2026-08-19 assumes `us-west-2`, On-Demand
+pricing, a 730-hour month, and no credits, commitments, temporary Free Tier,
+tax, Support, Marketplace charges, refunds, or shared-account spend. Gross
+modeled subtotals are `$52.69/month` parked with tasks and interface endpoints
+off, `$125.69/month` for the template-default endpoint configuration with tasks
+stopped, and `$153.67/month` for one continuously running web, API, and worker
+task under the low-volume assumptions in KAN-229. The parked correction includes
+`$7.30/month` for two public IPv4 addresses used by the two-AZ ALB. These figures
+are planning inputs only—not an approved budget, quote, spending cap, or
+deployment authorization. Account-wide existing spend and headroom must be
+added by the finance owner before any cloud Plan.
+
+Do not create a change set or deploy until all of the following are true:
 
 1. a non-production AWS account, named CLI profile, expected 12-digit account
    ID, and Region have been approved;
@@ -27,7 +40,10 @@ following are true:
 5. an ACM certificate and the test DNS/access path are approved;
 6. the Region's AWS-managed S3 prefix-list ID has been independently verified
    for the private ECR-layer egress rule; and
-7. the operator has an explicit maintenance, migration, rollback, and cleanup
+7. KAN-229 has an approved, unexpired billing control record, independently
+   verified account-level notification controls, and a live guardrail stack
+   matching that record; and
+8. the operator has an explicit maintenance, migration, rollback, and cleanup
    window.
 
 The guarded invocation script performs no AWS call by default. Cloud actions
@@ -42,8 +58,9 @@ leave a `REVIEW_IN_PROGRESS` placeholder stack), but it does not execute the
 change set. CREATE plans force all service desired counts to zero. UPDATE plans
 carry forward existing optional values before applying explicit overrides, so a
 partial update cannot silently reset deletion protection, retention, or sizing.
-The immutable change-set description binds SHA-256 digests of both the template
-and the complete canonical parameter set; `Deploy` recomputes and verifies both.
+The immutable change-set description binds SHA-256 digests of the template, the
+complete canonical parameter set, the complete tag set, and the KAN-229 control
+record. `Deploy` recomputes and verifies each binding.
 
 ## Architecture
 
@@ -65,8 +82,9 @@ and the complete canonical parameter set; `Deploy` recomputes and verifies both.
   tasks as individual secret fields—never template parameters or outputs;
 - separate execution and task roles scope image/log/secret access and runtime
   queue permissions; and
-- bounded CloudWatch log groups, service/queue alarms, and a dashboard expose
-  infrastructure health without adding an alert destination.
+- bounded CloudWatch log groups and service/queue alarms expose infrastructure
+  health without adding an alert destination; the dashboard is optional and
+  off by default, and Container Insights is also disabled by default.
 
 The template accepts only digest-pinned application image URIs. Image building
 and publication belong to the controlled delivery work following FND-003; the
@@ -90,7 +108,7 @@ tool and lint both templates:
 
 ```powershell
 python -m pip install --requirement infra/aws/requirements-dev.txt
-python infra/aws/lint-cloudformation.py infra/aws/application-baseline.yaml infra/aws/sqs-foundation.yaml
+python infra/aws/lint-cloudformation.py infra/aws/application-baseline.yaml infra/aws/account-guardrails.yaml infra/aws/sqs-foundation.yaml
 ```
 
 These commands read repository files only. CI runs the same checks without AWS
@@ -100,6 +118,7 @@ Running the invocation script with no cloud action is also local-only:
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File infra/aws/invoke-application-baseline.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File infra/aws/invoke-account-guardrails.ps1
 ```
 
 On hosts with PowerShell 7, use `pwsh -NoProfile -File` with the same script
@@ -115,6 +134,12 @@ powershell.exe -NoProfile -Command "Get-Help ./infra/aws/invoke-application-base
 Do not copy a cloud command from this document as a deployment approval. The
 script intentionally requires the operator to provide the account-specific
 values and acknowledgement as explicit execution-time arguments.
+
+KAN-229's final record and live controls gate application `Plan` and `Deploy`.
+An explicitly authorized application `CloudValidate` remains syntax-only and
+does not create application resources, but it is still an AWS API call and is
+never run by the local default or CI. See [KAN-229](KAN-229.md) for the separate
+bootstrap, notification-delivery, independent-review, and retention evidence.
 
 ## Runtime configuration and secrets
 
