@@ -45,6 +45,26 @@ Resources:
         - Key: environment
           Value: !Ref EnvironmentName
 
+  JobQueueTlsPolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Ref JobQueue
+        - !Ref JobDeadLetterQueue
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: '*'
+            Action: sqs:*
+            Resource:
+              - !GetAtt JobQueue.Arn
+              - !GetAtt JobDeadLetterQueue.Arn
+            Condition:
+              Bool:
+                aws:SecureTransport: 'false'
+
 Outputs:
   JobQueueUrl:
     Value: !Ref JobQueue

@@ -1,6 +1,6 @@
 import type { NextConfig } from 'next';
 
-import { buildBrowserEgressPolicy } from './lib/security/browser-egress';
+import { buildBrowserSecurityHeaders } from './lib/security/browser-egress';
 
 const nextConfig = {
   output: 'standalone',
@@ -10,12 +10,7 @@ const nextConfig = {
     return [
       {
         source: '/:path*',
-        headers: [
-          {
-            key: 'Content-Security-Policy',
-            value: buildBrowserEgressPolicy(process.env.NODE_ENV),
-          },
-        ],
+        headers: buildBrowserSecurityHeaders(process.env.NODE_ENV),
       },
     ];
   },

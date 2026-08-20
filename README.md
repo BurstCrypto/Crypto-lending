@@ -32,12 +32,12 @@ npm run worker:outbox
 
 The default local endpoints are:
 
-- Web: `http://localhost:3000`
-- API liveness: `http://localhost:3001/api/v1/health`
-- Dependency readiness: `http://localhost:3001/api/v1/health/dependencies`
-- API version: `http://localhost:3001/api/v1/version`
-- Swagger UI: `http://localhost:3001/api/v1/docs`
-- OpenAPI JSON: `http://localhost:3001/api/v1/docs-json`
+- Web: `http://127.0.0.1:3000`
+- API liveness: `http://127.0.0.1:3001/api/v1/health`
+- Dependency readiness: `http://127.0.0.1:3001/api/v1/health/dependencies`
+- API version: `http://127.0.0.1:3001/api/v1/version`
+- Swagger UI: `http://127.0.0.1:3001/api/v1/docs`
+- OpenAPI JSON: `http://127.0.0.1:3001/api/v1/docs-json`
 
 ## Restricted wallet validation lab
 
@@ -76,7 +76,7 @@ Copy-Item tools/wallet-lab/.env.example tools/wallet-lab/.env.local
 npm run dev:wallet-lab
 ```
 
-Open only `http://127.0.0.1:4173`. Do not override the host or expose it through
+Open only `https://127.0.0.1:4173`. Do not override the host or expose it through
 a tunnel, LAN address, hosted preview, or proxy.
 
 MetaMask desktop is discovered through injected EIP-6963 providers. The native
@@ -151,6 +151,8 @@ npm run format:check
 npm run lint
 npm run typecheck
 npm test
+npm run security:audit
+npm run security:test:jira
 npm run test:e2e --workspace @crypto-lending/api
 npm run build
 npm run openapi:generate

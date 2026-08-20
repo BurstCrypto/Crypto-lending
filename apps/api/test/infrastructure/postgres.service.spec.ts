@@ -1,6 +1,8 @@
 import type { Pool, PoolClient, QueryResult, QueryResultRow } from 'pg';
 
+import { createPostgresPool } from '../../src/infrastructure/database/postgres.module';
 import { PostgresService } from '../../src/infrastructure/database/postgres.service';
+import { testInfrastructureConfig } from './fixtures';
 
 function result(rows: QueryResultRow[] = []): QueryResult {
   return {
@@ -13,6 +15,31 @@ function result(rows: QueryResultRow[] = []): QueryResult {
 }
 
 describe('PostgresService', () => {
+  it('applies bounded connection acquisition, idle, and lifetime settings to the pool', async () => {
+    const pool = createPostgresPool({
+      ...testInfrastructureConfig(),
+      database: {
+        connectionString: 'postgresql://unused',
+        connectionTimeoutMs: 2_500,
+        idleTimeoutMs: 45_000,
+        maxLifetimeSeconds: 900,
+        poolMax: 7,
+        statementTimeoutMs: 8_000,
+        ssl: false,
+      },
+    });
+
+    expect(pool.options).toMatchObject({
+      application_name: 'crypto-lending-api',
+      connectionTimeoutMillis: 2_500,
+      idleTimeoutMillis: 45_000,
+      max: 7,
+      maxLifetimeSeconds: 900,
+      statement_timeout: 8_000,
+    });
+    await pool.end();
+  });
+
   function setup(): {
     service: PostgresService;
     query: jest.Mock<Promise<QueryResult>, [string, unknown[]?]>;

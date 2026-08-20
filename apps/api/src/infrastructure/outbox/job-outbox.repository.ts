@@ -3,6 +3,7 @@ import type { QueryResultRow } from 'pg';
 
 import { PostgresService } from '../database/postgres.service';
 import { parseJobEnvelope, type JobEnvelope } from './job-envelope';
+import { serializeJobMessage } from './job-message-policy';
 
 export interface NewOutboxJob {
   destination: string;
@@ -44,13 +45,17 @@ interface FailureRow extends QueryResultRow {
   status: 'pending' | 'failed';
 }
 
-function messageAttributes(value: unknown): Readonly<Record<string, string>> {
+// Existing rows may predate today's stricter SQS policy. Keep claim parsing
+// structural so one legacy poison row reaches dispatch failure handling instead
+// of rolling back and permanently blocking every newer row in the batch.
+function parseStoredMessageAttributes(value: unknown): Readonly<Record<string, string>> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error('Invalid outbox message attributes');
+    throw new Error('Invalid stored job message attributes');
   }
+
   const entries = Object.entries(value);
   if (entries.some(([, attributeValue]) => typeof attributeValue !== 'string')) {
-    throw new Error('Outbox message attributes must contain only strings');
+    throw new Error('Stored job message attributes must contain only strings');
   }
   return Object.fromEntries(entries) as Record<string, string>;
 }
@@ -94,14 +99,12 @@ export class JobOutboxRepository {
     let serializedEnvelope: string;
     let serializedAttributes: string;
     try {
-      serializedEnvelope = JSON.stringify(job.envelope);
-      serializedAttributes = JSON.stringify(messageAttributes(job.messageAttributes));
-      // JSON.stringify can silently omit undefined/function/symbol payloads.
-      // Round-tripping guarantees every persisted row remains dispatchable.
-      parseJobEnvelope(JSON.parse(serializedEnvelope) as unknown);
+      const serialized = serializeJobMessage(job.envelope, job.messageAttributes);
+      serializedEnvelope = serialized.body;
+      serializedAttributes = JSON.stringify(serialized.messageAttributes);
     } catch (error) {
       const reason = error instanceof Error ? error.message : 'invalid JSON';
-      throw new Error(`Outbox job must be JSON serializable: ${reason}`, {
+      throw new Error(`Invalid outbox job: ${reason}`, {
         cause: error,
       });
     }
@@ -146,7 +149,7 @@ export class JobOutboxRepository {
         id: row.id,
         destination: row.queue_name,
         envelope: parseJobEnvelope(row.payload),
-        messageAttributes: messageAttributes(row.message_attributes),
+        messageAttributes: parseStoredMessageAttributes(row.message_attributes),
         attempts: row.attempts,
       }));
     });

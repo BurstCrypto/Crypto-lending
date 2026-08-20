@@ -6,6 +6,9 @@ export function testInfrastructureConfig(
   return {
     database: {
       connectionString: 'postgresql://unused',
+      connectionTimeoutMs: 100,
+      idleTimeoutMs: 1_000,
+      maxLifetimeSeconds: 60,
       poolMax: 1,
       statementTimeoutMs: 1_000,
       ssl: false,

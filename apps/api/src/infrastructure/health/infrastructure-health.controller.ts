@@ -1,4 +1,4 @@
-import { Controller, Get, HttpException, HttpStatus } from '@nestjs/common';
+import { Controller, Get, Header, HttpException, HttpStatus } from '@nestjs/common';
 import {
   ApiOkResponse,
   ApiOperation,
@@ -15,6 +15,7 @@ export class InfrastructureHealthController {
   constructor(private readonly health: InfrastructureHealthService) {}
 
   @Get('dependencies')
+  @Header('Cache-Control', 'no-store')
   @ApiOperation({ summary: 'Report required dependency readiness' })
   @ApiOkResponse({
     description: 'All required dependencies are reachable and correctly configured.',

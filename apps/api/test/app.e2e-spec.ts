@@ -24,10 +24,18 @@ describe('system endpoints (e2e)', () => {
   });
 
   it('serves health only under the versioned prefix', async () => {
-    await request(app.getHttpServer())
+    const response = await request(app.getHttpServer())
       .get('/api/v1/health')
       .expect(200)
       .expect({ service: SERVICE_NAME, status: 'ok' });
+
+    expect(response.headers).toMatchObject({
+      'cross-origin-resource-policy': 'same-origin',
+      'referrer-policy': 'no-referrer',
+      'x-content-type-options': 'nosniff',
+      'x-frame-options': 'SAMEORIGIN',
+    });
+    expect(response.headers).not.toHaveProperty('x-powered-by');
 
     await request(app.getHttpServer()).get('/health').expect(404);
   });

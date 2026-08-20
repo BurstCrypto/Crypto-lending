@@ -11,20 +11,26 @@ import { DATABASE_MIGRATION_LIST } from './migrations';
 import { PostgresService } from './postgres.service';
 import { DATABASE_MIGRATIONS, POSTGRES_POOL } from './postgres.tokens';
 
+export function createPostgresPool(config: InfrastructureConfig): Pool {
+  return new Pool({
+    connectionString: config.database.connectionString,
+    connectionTimeoutMillis: config.database.connectionTimeoutMs,
+    idleTimeoutMillis: config.database.idleTimeoutMs,
+    max: config.database.poolMax,
+    maxLifetimeSeconds: config.database.maxLifetimeSeconds,
+    statement_timeout: config.database.statementTimeoutMs,
+    application_name: 'crypto-lending-api',
+    ssl: config.database.ssl,
+  });
+}
+
 @Module({
   imports: [InfrastructureConfigModule],
   providers: [
     {
       provide: POSTGRES_POOL,
       inject: [INFRASTRUCTURE_CONFIG],
-      useFactory: (config: InfrastructureConfig): Pool =>
-        new Pool({
-          connectionString: config.database.connectionString,
-          max: config.database.poolMax,
-          statement_timeout: config.database.statementTimeoutMs,
-          application_name: 'crypto-lending-api',
-          ssl: config.database.ssl,
-        }),
+      useFactory: createPostgresPool,
     },
     {
       provide: DATABASE_MIGRATIONS,

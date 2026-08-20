@@ -4,6 +4,9 @@ import { createSecureContext } from 'node:tls';
 
 export interface DatabaseInfrastructureConfig {
   connectionString: string;
+  connectionTimeoutMs: number;
+  idleTimeoutMs: number;
+  maxLifetimeSeconds: number;
   poolMax: number;
   statementTimeoutMs: number;
   ssl: false | { rejectUnauthorized: boolean; ca?: string };
@@ -58,6 +61,51 @@ function optional(env: NodeJS.ProcessEnv, name: string): string | undefined {
   return value || undefined;
 }
 
+function isProduction(env: NodeJS.ProcessEnv): boolean {
+  return env.NODE_ENV?.trim().toLowerCase() === 'production';
+}
+
+function parseUrl(value: string, name: string): URL {
+  try {
+    return new URL(value);
+  } catch {
+    throw new Error(`${name} must be a valid URL`);
+  }
+}
+
+function productionDatabaseUrl(value: string): string {
+  const parsedUrl = parseUrl(value, 'DATABASE_URL');
+  if (!['postgres:', 'postgresql:'].includes(parsedUrl.protocol) || !parsedUrl.hostname) {
+    throw new Error('Production DATABASE_URL must use postgresql:// or postgres://');
+  }
+
+  const parameters = [...parsedUrl.searchParams.entries()];
+  const urlSslModes = parameters
+    .filter(([name]) => name.toLowerCase() === 'sslmode')
+    .map(([, urlSslMode]) => urlSslMode.toLowerCase());
+  if (urlSslModes.some((urlSslMode) => urlSslMode !== 'verify-full')) {
+    throw new Error('Production DATABASE_URL cannot override sslmode below verify-full');
+  }
+  const unsupportedParameter = parameters.find(([name]) => name.toLowerCase() !== 'sslmode');
+  if (unsupportedParameter) {
+    throw new Error(
+      `Production DATABASE_URL cannot contain connection parameter ${unsupportedParameter[0]}`,
+    );
+  }
+  if (value.includes('#')) {
+    throw new Error('Production DATABASE_URL must not contain a fragment');
+  }
+  if (parameters.length === 0 && value.includes('?')) {
+    throw new Error('Production DATABASE_URL must not contain an empty query delimiter');
+  }
+
+  // node-postgres parses connection-string parameters after explicit Pool
+  // options. Only a duplicate, verified sslmode is accepted and then all query
+  // text is removed so pool safety and observability settings stay authoritative.
+  parsedUrl.search = '';
+  return parsedUrl.toString();
+}
+
 function requiredPort(env: NodeJS.ProcessEnv, name: string): number {
   const raw = required(env, name);
   const parsed = Number(raw);
@@ -95,7 +143,7 @@ function databaseConnectionString(env: NodeJS.ProcessEnv): string {
         'Configure DATABASE_URL or the DATABASE_* connection components, but not both',
       );
     }
-    return directUrl;
+    return isProduction(env) ? productionDatabaseUrl(directUrl) : directUrl;
   }
 
   const hostname = serviceHostname(env, 'DATABASE_HOST');
@@ -120,13 +168,61 @@ function redisConnectionString(env: NodeJS.ProcessEnv): string {
     if (hasAny(env, REDIS_COMPONENT_NAMES)) {
       throw new Error('Configure REDIS_URL or the REDIS_* connection components, but not both');
     }
-    return directUrl;
+    const parsedUrl = parseUrl(directUrl, 'REDIS_URL');
+    if (!['redis:', 'rediss:'].includes(parsedUrl.protocol)) {
+      throw new Error('REDIS_URL must use redis:// or rediss://');
+    }
+    if (!parsedUrl.hostname) {
+      throw new Error('REDIS_URL must use an authority-form URL with a hostname');
+    }
+    if ([...parsedUrl.searchParams.keys()].some((name) => name.toLowerCase() === 'tls')) {
+      throw new Error('REDIS_URL cannot override TLS through query parameters');
+    }
+    if (isProduction(env) && parsedUrl.protocol !== 'rediss:') {
+      throw new Error('Production REDIS_URL must use rediss://');
+    }
+    if (isProduction(env) && (directUrl.includes('?') || directUrl.includes('#'))) {
+      throw new Error('Production REDIS_URL must not contain a query or fragment');
+    }
+    // ioredis detects rediss:// case-sensitively. URL serialization normalizes
+    // the protocol so a valid mixed-case input cannot silently disable TLS.
+    return parsedUrl.toString();
   }
 
   const hostname = serviceHostname(env, 'REDIS_HOST');
   const port = requiredPort(env, 'REDIS_PORT');
   const authToken = requiredSensitive(env, 'REDIS_AUTH_TOKEN');
   return `rediss://:${encodeURIComponent(authToken)}@${hostname}:${port}`;
+}
+
+function productionSqsQueueUrl(value: string, name: string, region: string): string {
+  const parsedUrl = parseUrl(value, name);
+  const awsSqsHostnames = new Set([
+    `sqs.${region}.amazonaws.com`,
+    `sqs.${region}.amazonaws.com.cn`,
+    `sqs.${region}.amazonaws.eu`,
+    `sqs.${region}.c2s.ic.gov`,
+    `sqs.${region}.sc2s.sgov.gov`,
+    `sqs.${region}.cloud.adc-e.uk`,
+    `sqs.${region}.csp.hci.ic.gov`,
+  ]);
+  const pathMatch = parsedUrl.pathname.match(
+    /^\/(\d{12})\/((?:[A-Za-z0-9_-]{1,80}|[A-Za-z0-9_-]{1,75}\.fifo))$/u,
+  );
+  if (
+    parsedUrl.protocol !== 'https:' ||
+    !awsSqsHostnames.has(parsedUrl.hostname) ||
+    (parsedUrl.port !== '' && parsedUrl.port !== '443') ||
+    parsedUrl.username !== '' ||
+    parsedUrl.password !== '' ||
+    value.includes('?') ||
+    value.includes('#') ||
+    !pathMatch
+  ) {
+    throw new Error(`${name} must be a canonical HTTPS SQS queue URL for AWS_REGION`);
+  }
+
+  return parsedUrl.toString();
 }
 
 function positiveInteger(
@@ -172,7 +268,8 @@ function loadCaBundle(path: string): string {
 
 function databaseSsl(env: NodeJS.ProcessEnv): false | { rejectUnauthorized: boolean; ca?: string } {
   const mode = (env.DATABASE_SSL_MODE ?? 'disable').toLowerCase();
-  const managedComponents = !optional(env, 'DATABASE_URL');
+  const directUrl = optional(env, 'DATABASE_URL');
+  const managedComponents = !directUrl;
   const caPath = optional(env, 'NODE_EXTRA_CA_CERTS');
   if (managedComponents) {
     if (mode !== 'verify-full') {
@@ -183,6 +280,12 @@ function databaseSsl(env: NodeJS.ProcessEnv): false | { rejectUnauthorized: bool
     if (!caPath) {
       throw new Error('Managed DATABASE_* connection components require NODE_EXTRA_CA_CERTS');
     }
+  }
+  if (isProduction(env) && directUrl) {
+    if (mode !== 'verify-full') {
+      throw new Error('Production DATABASE_URL requires DATABASE_SSL_MODE=verify-full');
+    }
+    productionDatabaseUrl(directUrl);
   }
   switch (mode) {
     case 'disable':
@@ -206,11 +309,32 @@ function databaseSsl(env: NodeJS.ProcessEnv): false | { rejectUnauthorized: bool
 export function loadInfrastructureConfig(
   env: NodeJS.ProcessEnv = process.env,
 ): InfrastructureConfig {
+  const region = env.AWS_REGION?.trim() || 'us-east-1';
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+){2,}$/u.test(region)) {
+    throw new Error('AWS_REGION must be a canonical AWS region identifier');
+  }
   const endpoint = env.SQS_ENDPOINT?.trim();
+  if (isProduction(env) && endpoint) {
+    throw new Error('SQS_ENDPOINT is not allowed in production');
+  }
+  const rawQueueUrl = required(env, 'SQS_QUEUE_URL');
+  const rawDeadLetterQueueUrl = required(env, 'SQS_DEAD_LETTER_QUEUE_URL');
+  const queueUrl = isProduction(env)
+    ? productionSqsQueueUrl(rawQueueUrl, 'SQS_QUEUE_URL', region)
+    : rawQueueUrl;
+  const deadLetterQueueUrl = isProduction(env)
+    ? productionSqsQueueUrl(rawDeadLetterQueueUrl, 'SQS_DEAD_LETTER_QUEUE_URL', region)
+    : rawDeadLetterQueueUrl;
+  if (queueUrl === deadLetterQueueUrl) {
+    throw new Error('SQS_QUEUE_URL and SQS_DEAD_LETTER_QUEUE_URL must be different');
+  }
 
   return {
     database: {
       connectionString: databaseConnectionString(env),
+      connectionTimeoutMs: positiveInteger(env, 'DATABASE_CONNECTION_TIMEOUT_MS', 5_000, 60_000),
+      idleTimeoutMs: positiveInteger(env, 'DATABASE_IDLE_TIMEOUT_MS', 30_000, 600_000),
+      maxLifetimeSeconds: positiveInteger(env, 'DATABASE_MAX_LIFETIME_SECONDS', 1_800, 86_400),
       poolMax: positiveInteger(env, 'DATABASE_POOL_MAX', 10, 100),
       statementTimeoutMs: positiveInteger(env, 'DATABASE_STATEMENT_TIMEOUT_MS', 15_000, 300_000),
       ssl: databaseSsl(env),
@@ -222,10 +346,10 @@ export function loadInfrastructureConfig(
       commandTimeoutMs: positiveInteger(env, 'REDIS_COMMAND_TIMEOUT_MS', 2_000, 60_000),
     },
     sqs: {
-      region: env.AWS_REGION?.trim() || 'us-east-1',
+      region,
       ...(endpoint ? { endpoint } : {}),
-      queueUrl: required(env, 'SQS_QUEUE_URL'),
-      deadLetterQueueUrl: required(env, 'SQS_DEAD_LETTER_QUEUE_URL'),
+      queueUrl,
+      deadLetterQueueUrl,
       sdkMaxAttempts: positiveInteger(env, 'SQS_SDK_MAX_ATTEMPTS', 3, 10),
       maxReceiveCount: positiveInteger(env, 'SQS_MAX_RECEIVE_COUNT', 3, 100),
       visibilityTimeoutSeconds: positiveInteger(env, 'SQS_VISIBILITY_TIMEOUT_SECONDS', 30, 43_200),

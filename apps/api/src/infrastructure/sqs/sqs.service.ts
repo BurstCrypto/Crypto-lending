@@ -13,6 +13,7 @@ import {
 import { INFRASTRUCTURE_CONFIG } from '../config/infrastructure-config.module';
 import type { InfrastructureConfig } from '../config/infrastructure.config';
 import { createJobEnvelope, parseJobEnvelope, type JobEnvelope } from '../outbox/job-envelope';
+import { serializeJobMessage } from '../outbox/job-message-policy';
 import type {
   OutboxTransport,
   OutboxTransportMessage,
@@ -43,17 +44,19 @@ export class SqsService implements OnApplicationShutdown, OutboxTransport {
       id: options.id ?? randomUUID(),
       ...(options.version === undefined ? {} : { version: options.version }),
     });
+    const serialized = serializeJobMessage(envelope, {});
 
     await this.client.send(
       new SendMessageCommand({
         QueueUrl: this.config.sqs.queueUrl,
-        MessageBody: JSON.stringify(envelope),
+        MessageBody: serialized.body,
         MessageAttributes: {
-          jobKind: { DataType: 'String', StringValue: kind },
+          jobKind: { DataType: 'String', StringValue: envelope.kind },
           jobVersion: {
             DataType: 'Number',
             StringValue: String(envelope.version),
           },
+          jobId: { DataType: 'String', StringValue: envelope.id },
         },
         ...(options.delaySeconds === undefined ? {} : { DelaySeconds: options.delaySeconds }),
       }),
@@ -66,8 +69,9 @@ export class SqsService implements OnApplicationShutdown, OutboxTransport {
       throw new Error(`Unsupported SQS job destination: ${message.destination}`);
     }
 
+    const serialized = serializeJobMessage(message.envelope, message.messageAttributes);
     const customAttributes = Object.fromEntries(
-      Object.entries(message.messageAttributes).map(([name, value]) => [
+      Object.entries(serialized.messageAttributes).map(([name, value]) => [
         name,
         { DataType: 'String', StringValue: value },
       ]),
@@ -75,7 +79,7 @@ export class SqsService implements OnApplicationShutdown, OutboxTransport {
     const response = await this.client.send(
       new SendMessageCommand({
         QueueUrl: this.config.sqs.queueUrl,
-        MessageBody: JSON.stringify(message.envelope),
+        MessageBody: serialized.body,
         MessageAttributes: {
           ...customAttributes,
           jobKind: {
@@ -97,8 +101,15 @@ export class SqsService implements OnApplicationShutdown, OutboxTransport {
   async receive(
     queueUrl = this.config.sqs.queueUrl,
     maxMessages = 1,
-    waitTimeSeconds = 0,
+    waitTimeSeconds = 10,
   ): Promise<ReceivedQueueMessage[]> {
+    if (!Number.isSafeInteger(maxMessages) || maxMessages < 1 || maxMessages > 10) {
+      throw new Error('SQS maxMessages must be an integer between 1 and 10');
+    }
+    if (!Number.isSafeInteger(waitTimeSeconds) || waitTimeSeconds < 0 || waitTimeSeconds > 20) {
+      throw new Error('SQS waitTimeSeconds must be an integer between 0 and 20');
+    }
+
     const response = await this.client.send(
       new ReceiveMessageCommand({
         QueueUrl: queueUrl,
@@ -153,19 +164,22 @@ export class SqsService implements OnApplicationShutdown, OutboxTransport {
   }
 
   /** Verifies access to both queues and validates the source redrive policy. */
-  async healthCheck(): Promise<void> {
+  async healthCheck(abortSignal?: AbortSignal): Promise<void> {
+    const requestOptions = abortSignal ? { abortSignal } : undefined;
     const [source, deadLetter] = await Promise.all([
       this.client.send(
         new GetQueueAttributesCommand({
           QueueUrl: this.config.sqs.queueUrl,
           AttributeNames: ['QueueArn', 'RedrivePolicy'],
         }),
+        requestOptions,
       ),
       this.client.send(
         new GetQueueAttributesCommand({
           QueueUrl: this.config.sqs.deadLetterQueueUrl,
           AttributeNames: ['QueueArn'],
         }),
+        requestOptions,
       ),
     ]);
 

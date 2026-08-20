@@ -8,6 +8,10 @@ import {
   type JobEnvelope,
 } from '../../src/infrastructure/outbox/job-envelope';
 import {
+  MAX_CUSTOM_JOB_ATTRIBUTES,
+  MAX_JOB_MESSAGE_BYTES,
+} from '../../src/infrastructure/outbox/job-message-policy';
+import {
   JobOutboxRepository,
   type ClaimedOutboxJob,
 } from '../../src/infrastructure/outbox/job-outbox.repository';
@@ -65,6 +69,10 @@ class TransactionalOutboxHarness {
 
   job(id: string): StoredJob | undefined {
     return this.committed.find((job) => job.id === id);
+  }
+
+  seed(job: StoredJob): void {
+    this.committed.push(structuredClone(job));
   }
 
   private async query(text: string, values: unknown[] = []): Promise<QueryResult> {
@@ -275,6 +283,120 @@ describe('transactional job outbox', () => {
       postgres.withTransaction(() => publisher.enqueue({ kind: 'poison', payload: undefined })),
     ).rejects.toThrow('JSON serializable');
     expect(harness.queries.some((sql) => sql.startsWith('INSERT'))).toBe(false);
+  });
+
+  it('rejects nested values that JSON would otherwise silently discard or coerce', async () => {
+    const harness = new TransactionalOutboxHarness();
+    const postgres = new PostgresService(harness.pool);
+    const repository = new JobOutboxRepository(postgres);
+    const publisher = new TransactionalJobPublisher(repository);
+
+    await expect(
+      postgres.withTransaction(() =>
+        publisher.enqueue({ kind: 'poison', payload: { nested: undefined } }),
+      ),
+    ).rejects.toThrow('unsupported JSON value');
+    await expect(
+      postgres.withTransaction(() =>
+        publisher.enqueue({ kind: 'poison', payload: { amount: Number.POSITIVE_INFINITY } }),
+      ),
+    ).rejects.toThrow('unsupported JSON value');
+    expect(harness.queries.some((sql) => sql.startsWith('INSERT'))).toBe(false);
+  });
+
+  it('rejects transport poison messages before inserting an outbox row', async () => {
+    const harness = new TransactionalOutboxHarness();
+    const postgres = new PostgresService(harness.pool);
+    const repository = new JobOutboxRepository(postgres);
+    const publisher = new TransactionalJobPublisher(repository);
+    const tooManyAttributes = Object.fromEntries(
+      Array.from({ length: MAX_CUSTOM_JOB_ATTRIBUTES + 1 }, (_, index) => [`key${index}`, 'value']),
+    );
+
+    await expect(
+      postgres.withTransaction(() =>
+        publisher.enqueue({ kind: 'poison', payload: {}, messageAttributes: tooManyAttributes }),
+      ),
+    ).rejects.toThrow('custom attributes');
+    await expect(
+      postgres.withTransaction(() =>
+        publisher.enqueue({
+          kind: 'poison',
+          payload: {},
+          messageAttributes: { jobId: 'shadowed-id' },
+        }),
+      ),
+    ).rejects.toThrow('reserved job message attribute');
+    await expect(
+      postgres.withTransaction(() =>
+        publisher.enqueue({ kind: 'poison', payload: 'x'.repeat(MAX_JOB_MESSAGE_BYTES) }),
+      ),
+    ).rejects.toThrow('cannot exceed');
+    await expect(
+      postgres.withTransaction(() =>
+        publisher.enqueue({ kind: 'poison', payload: {}, messageAttributes: { trace: '' } }),
+      ),
+    ).rejects.toThrow('characters SQS cannot accept');
+    await expect(
+      postgres.withTransaction(() =>
+        publisher.enqueue({ kind: 'poison', payload: {}, messageAttributes: { trace: '\0' } }),
+      ),
+    ).rejects.toThrow('characters SQS cannot accept');
+    await expect(
+      postgres.withTransaction(() => publisher.enqueue({ kind: 'poison', payload: '\uFFFE' })),
+    ).rejects.toThrow('characters SQS cannot accept');
+    await expect(
+      postgres.withTransaction(() => publisher.enqueue({ kind: 'poison\0', payload: {} })),
+    ).rejects.toThrow('characters SQS cannot accept');
+    await expect(
+      postgres.withTransaction(() =>
+        publisher.enqueue({ id: 'poison\0id', kind: 'poison', payload: {} }),
+      ),
+    ).rejects.toThrow('characters SQS cannot accept');
+    expect(harness.queries.filter((sql) => sql.startsWith('INSERT'))).toHaveLength(0);
+  });
+
+  it('retires a legacy poison row without blocking newer outbox delivery', async () => {
+    const harness = new TransactionalOutboxHarness();
+    harness.seed({
+      id: 'legacy-poison',
+      destination: 'jobs',
+      envelope: {
+        id: 'legacy-poison',
+        kind: 'account.updated',
+        version: 1,
+        occurredAt: '2026-08-18T00:00:00.000Z',
+        payload: {},
+      },
+      messageAttributes: { jobId: 'legacy-shadow-value' },
+      status: 'pending',
+      attempts: 0,
+      availableAt: 0,
+    });
+    const postgres = new PostgresService(harness.pool);
+    const repository = new JobOutboxRepository(postgres);
+    const publisher = new TransactionalJobPublisher(repository);
+    await enqueueCommitted(postgres, publisher, 'new-valid-job');
+    const client = {
+      send: jest.fn().mockResolvedValue({ MessageId: 'sqs-valid' }),
+      destroy: jest.fn(),
+    } as unknown as SQSClient;
+    const dispatcher = new OutboxDispatcher(
+      repository,
+      new SqsService(client, testInfrastructureConfig()),
+      dispatcherOptions({ maxAttempts: 1 }),
+    );
+
+    await expect(dispatcher.dispatchBatch()).resolves.toEqual({
+      claimed: 2,
+      published: 1,
+      retried: 0,
+      failed: 1,
+      leaseLost: 0,
+    });
+    expect(harness.job('legacy-poison')?.status).toBe('failed');
+    expect(harness.job('new-valid-job')?.status).toBe('published');
+    expect(client.send).toHaveBeenCalledTimes(1);
   });
 
   it('uses SKIP LOCKED leases and rejects a stale claimant after reclaim', async () => {

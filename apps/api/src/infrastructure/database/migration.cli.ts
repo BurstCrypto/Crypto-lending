@@ -10,7 +10,10 @@ async function main(): Promise<void> {
   const config = loadInfrastructureConfig();
   const pool = new Pool({
     connectionString: config.database.connectionString,
+    connectionTimeoutMillis: config.database.connectionTimeoutMs,
+    idleTimeoutMillis: config.database.idleTimeoutMs,
     max: 1,
+    maxLifetimeSeconds: config.database.maxLifetimeSeconds,
     statement_timeout: config.database.statementTimeoutMs,
     application_name: 'crypto-lending-migrations',
     ssl: config.database.ssl,

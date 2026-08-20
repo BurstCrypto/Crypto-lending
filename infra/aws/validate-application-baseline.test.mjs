@@ -5,9 +5,13 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
 
+import { validateSqsFoundationSource } from './validate-sqs-foundation.mjs';
+
 const validatorPath = join(import.meta.dirname, 'validate-application-baseline.mjs');
 const templatePath = join(import.meta.dirname, 'application-baseline.yaml');
 const templateSource = readFileSync(templatePath, 'utf8').replace(/\r\n/g, '\n');
+const sqsFoundationPath = join(import.meta.dirname, 'sqs-foundation.yaml');
+const sqsFoundationSource = readFileSync(sqsFoundationPath, 'utf8').replace(/\r\n/g, '\n');
 
 function runValidator(source = templateSource) {
   const directory = mkdtempSync(join(tmpdir(), 'kan-231-application-validator-'));
@@ -58,6 +62,37 @@ test('accepts the repository no-external-egress baseline and records the DNS res
   assert.equal(report.residualLimitations.length, 1);
   assert.match(report.residualLimitations[0], /port 53 to the VPC CIDR/);
   assert.match(report.residualLimitations[0], /cannot prove/);
+});
+
+test('standalone SQS foundation denies insecure transport to both queues', () => {
+  const report = validateSqsFoundationSource(sqsFoundationSource);
+  assert.equal(report.ok, true);
+  assert.deepEqual(report.errors, []);
+  assert.equal(report.awsCallsMade, 0);
+});
+
+test('standalone SQS validator rejects weakened or incomplete TLS queue policies', () => {
+  for (const [search, replacement] of [
+    ['            Effect: Deny', '            Effect: Allow'],
+    ["            Principal: '*'", '            Principal: { Service: ecs-tasks.amazonaws.com }'],
+    ['            Action: sqs:*', '            Action: sqs:SendMessage'],
+    ['              - !GetAtt JobDeadLetterQueue.Arn', '              - !GetAtt JobQueue.Arn'],
+    ["                aws:SecureTransport: 'false'", "                aws:SecureTransport: 'true'"],
+    [
+      "                aws:SecureTransport: 'false'",
+      "                aws:SecureTransport: 'false'\n              StringEquals:\n                aws:PrincipalArn: arn:aws:iam::000000000000:root",
+    ],
+  ]) {
+    const mutated = sqsFoundationSource.replace(search, replacement);
+    assert.notEqual(mutated, sqsFoundationSource, `Mutation did not replace ${search}.`);
+    const report = validateSqsFoundationSource(mutated);
+    assert.equal(report.ok, false);
+    assert.equal(report.awsCallsMade, 0);
+    assert(
+      report.errors.some((error) => /must deny all SQS actions/.test(error)),
+      report.errors.join('\n'),
+    );
+  }
 });
 
 test('rejects URI, UNC, and device template inputs before any filesystem access', () => {

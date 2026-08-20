@@ -2,6 +2,7 @@ import { Buffer } from 'node:buffer';
 
 import { describe, expect, it } from 'vitest';
 
+import webPackage from '../package.json';
 import { decideWalletLabAccess, readWalletLabAccessConfiguration } from '../lib/wallets/lab/access';
 
 const validLocalEnvironment = {
@@ -17,6 +18,10 @@ function authorization(username = 'reviewer', password = 'a-long-preview-only-pa
 }
 
 describe('wallet lab access gate', () => {
+  it('binds the development server to the IPv4 loopback interface', () => {
+    expect(webPackage.scripts.dev).toBe('next dev --hostname 127.0.0.1');
+  });
+
   it('fails closed when disabled or incompletely configured', () => {
     expect(
       decideWalletLabAccess({

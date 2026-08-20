@@ -19,6 +19,7 @@ interface StoredMessage {
 }
 
 class InMemoryRedriveSqs {
+  readonly receiveRequests: ReceiveMessageCommand['input'][] = [];
   private readonly source: StoredMessage[] = [];
   private readonly deadLetter: StoredMessage[] = [];
   private nextId = 1;
@@ -41,6 +42,7 @@ class InMemoryRedriveSqs {
     }
 
     if (command instanceof ReceiveMessageCommand) {
+      this.receiveRequests.push(command.input);
       const queue = command.input.QueueUrl === this.deadLetterUrl ? this.deadLetter : this.source;
 
       if (queue === this.source && queue[0]?.receiveCount === this.maxReceiveCount) {
@@ -157,5 +159,23 @@ describe('SQS retry and dead-letter flow', () => {
     const sqs = new SqsService(transport as unknown as SQSClient, config);
 
     await expect(sqs.healthCheck()).resolves.toBeUndefined();
+  });
+
+  it('uses bounded long polling by default and validates receive overrides', async () => {
+    const config = testInfrastructureConfig();
+    const transport = new InMemoryRedriveSqs(
+      config.sqs.queueUrl,
+      config.sqs.deadLetterQueueUrl,
+      config.sqs.maxReceiveCount,
+    );
+    const sqs = new SqsService(transport as unknown as SQSClient, config);
+
+    await expect(sqs.receive()).resolves.toEqual([]);
+    expect(transport.receiveRequests[0]).toMatchObject({
+      MaxNumberOfMessages: 1,
+      WaitTimeSeconds: 10,
+    });
+    await expect(sqs.receive(config.sqs.queueUrl, 11)).rejects.toThrow('maxMessages');
+    await expect(sqs.receive(config.sqs.queueUrl, 1, 21)).rejects.toThrow('waitTimeSeconds');
   });
 });

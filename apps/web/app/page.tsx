@@ -3,6 +3,8 @@ import Link from 'next/link';
 import { ServiceStatus } from '@/components/service-status';
 import { getApplicationEnvironment, getApplicationVersion } from '@/lib/application';
 
+// APP_ENV and APP_VERSION are injected when the production container starts,
+// so this page must not freeze build-host values into the image.
 export const dynamic = 'force-dynamic';
 
 export default function HomePage() {
