@@ -5,7 +5,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const EXPECTED_NODE_VERSION = '22.23.2';
 const WORKFLOW_FILE = 'ci.yml';
-const REVIEWED_WORKFLOW_SHA256 = '18c1c1c3f997bf2c8491dc6dab18e69c55e74083fbcaa162b09c73e94f91dfa6';
+const REVIEWED_WORKFLOW_SHA256 = '639d037332689bf86752ebde5658a3c0904df8e9d1e4ff1f8a4fbe88b77cfcb3';
 const ALLOWED_ACTIONS = new Map([
   ['actions/checkout', '3d3c42e5aac5ba805825da76410c181273ba90b1'],
   ['actions/setup-node', '820762786026740c76f36085b0efc47a31fe5020'],
@@ -229,10 +229,11 @@ export function validateWorkflowSource(source, { fileName = WORKFLOW_FILE } = {}
     [
       'node --test infra/ci/validate-workflows.test.mjs',
       'node infra/ci/validate-workflows.mjs',
-      'node --test scripts/containers/validate-container-artifacts.test.mjs',
       'node scripts/containers/validate-container-artifacts.mjs',
       'node infra/aws/validate-release-deployment-control-record.mjs --record infra/aws/release-deployment-control-record.example.json --mode example',
       'npm install --global npm@11.6.4 --ignore-scripts --no-audit --no-fund',
+      'test "$(npm --version)" = "11.6.4"',
+      'node --test scripts/containers/validate-container-artifacts.test.mjs',
       'npm ci --no-audit --no-fund',
     ],
     'Offline workflow policy and pinned tooling must run before dependency-based gates',
@@ -278,11 +279,13 @@ export function validateWorkflowSource(source, { fileName = WORKFLOW_FILE } = {}
   requireOrderedFragments(
     normalized,
     [
+      'npm run infra:validate',
+      'npm run infra:test:rehearsal',
       'node --test infra/aws/validate-release-deployment-control-record.test.mjs',
       'pwsh -NoProfile -File infra/aws/test-invoke-application-baseline.ps1',
       'npm run format:check',
     ],
-    'Release-record mutations and the mocked release-bound invocation guard must pass before application checks',
+    'Rehearsal/release mutations and the mocked release-bound invocation guard must pass before application checks',
     errors,
   );
 

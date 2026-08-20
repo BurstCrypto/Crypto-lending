@@ -118,6 +118,22 @@ test('requires lifecycle scripts to stay disabled while pinning the npm CLI', ()
   );
 });
 
+test('runs npm-dependent container mutation tests only after exact npm verification', () => {
+  const mutationStep = [
+    '      - name: Run container policy mutation tests',
+    '        run: node --test scripts/containers/validate-container-artifacts.test.mjs',
+  ].join('\n');
+  assert.ok(canonicalWorkflow.includes(mutationStep));
+  const movedBeforePinning = canonicalWorkflow
+    .replace(`${mutationStep}\n\n`, '')
+    .replace(
+      '      - name: Use the repository npm version',
+      `${mutationStep}\n\n      - name: Use the repository npm version`,
+    );
+
+  assertRejected(movedBeforePinning, /Offline workflow policy and pinned tooling/);
+});
+
 test('rejects secret and deployment-environment access', () => {
   assertRejected(
     mutate('    timeout-minutes: 30', '    environment: nonproduction\n    timeout-minutes: 30'),
@@ -173,7 +189,10 @@ test('requires ordered fail-closed migration verification', () => {
 
 test('requires every offline container and release-binding gate', () => {
   assertRejected(
-    mutate('          node --test scripts/containers/validate-container-artifacts.test.mjs\n', ''),
+    mutate(
+      '      - name: Run container policy mutation tests\n        run: node --test scripts/containers/validate-container-artifacts.test.mjs\n\n',
+      '',
+    ),
     /Offline workflow policy and pinned tooling/,
   );
   assertRejected(
@@ -188,11 +207,15 @@ test('requires every offline container and release-binding gate', () => {
     /Offline workflow policy and pinned tooling/,
   );
   assertRejected(
+    mutate('          npm run infra:test:rehearsal\n', ''),
+    /Rehearsal\/release mutations/,
+  );
+  assertRejected(
     mutate(
       '          node --test infra/aws/validate-release-deployment-control-record.test.mjs\n',
       '',
     ),
-    /Release-record mutations/,
+    /Rehearsal\/release mutations/,
   );
   assertRejected(
     mutate('          pwsh -NoProfile -File infra/aws/test-invoke-application-baseline.ps1\n', ''),

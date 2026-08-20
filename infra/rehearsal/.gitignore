@@ -1,0 +1,3 @@
+# Populated rehearsal and evidence files are operational artifacts, not source.
+*.local.json
+evidence/

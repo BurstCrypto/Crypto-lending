@@ -71,7 +71,6 @@ jobs:
         run: |
           node --test infra/ci/validate-workflows.test.mjs
           node infra/ci/validate-workflows.mjs
-          node --test scripts/containers/validate-container-artifacts.test.mjs
           node scripts/containers/validate-container-artifacts.mjs
           node infra/aws/validate-release-deployment-control-record.mjs --record infra/aws/release-deployment-control-record.example.json --mode example
 
@@ -83,6 +82,9 @@ jobs:
           node -e "const fs = require('node:fs'); const expected = fs.readFileSync('.node-version', 'utf8').trim(); if (process.version !== 'v' + expected) throw new Error('Expected Node.js ' + expected + ', received ' + process.version);"
           test "$(npm --version)" = "11.6.4"
 
+      - name: Run container policy mutation tests
+        run: node --test scripts/containers/validate-container-artifacts.test.mjs
+
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
 
@@ -92,6 +94,7 @@ jobs:
       - name: Validate AWS infrastructure without cloud access
         run: |
           npm run infra:validate
+          npm run infra:test:rehearsal
           npm run infra:test:guardrails
           npm run infra:test:acm-dns
           npm run infra:test:migrations

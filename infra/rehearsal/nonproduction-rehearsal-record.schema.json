@@ -1,0 +1,569 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://crypto-lending.invalid/schemas/nonproduction-rehearsal-record-v1.json",
+  "title": "KAN-234 nonproduction deployment and rollback rehearsal evidence",
+  "description": "A local validation contract for an inert example, a filesystem-only dry rehearsal, or evidence collected during a separately authorized live nonproduction rehearsal. Validation never authorizes or performs an external operation.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "artifactType",
+    "stage",
+    "overallResult",
+    "recordId",
+    "startedAt",
+    "completedAt",
+    "binding",
+    "executionBoundary",
+    "authority",
+    "steps",
+    "observations",
+    "findings"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "artifactType": { "const": "KAN_234_NONPRODUCTION_REHEARSAL_EVIDENCE" },
+    "stage": { "enum": ["EXAMPLE", "LOCAL_DRY_REHEARSAL", "LIVE_ACCEPTANCE"] },
+    "overallResult": { "$ref": "#/$defs/result" },
+    "recordId": { "$ref": "#/$defs/referenceOrNotRun" },
+    "startedAt": { "$ref": "#/$defs/instantOrNotRun" },
+    "completedAt": { "$ref": "#/$defs/instantOrNotRun" },
+    "binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ticket",
+        "environmentName",
+        "accountId",
+        "region",
+        "stackId",
+        "sourceRevision",
+        "priorSourceRevision",
+        "apiImageUri",
+        "webImageUri",
+        "workerImageUri",
+        "releaseControlRecordSha256",
+        "priorReleaseControlRecordSha256",
+        "applicationTemplateSha256",
+        "billingControlRecordSha256"
+      ],
+      "properties": {
+        "ticket": { "const": "KAN-234" },
+        "environmentName": {
+          "anyOf": [
+            { "const": "NOT_RUN" },
+            {
+              "type": "string",
+              "maxLength": 31,
+              "pattern": "^(?:dev|test|qa|sandbox|staging)(?:-[a-z0-9]+)*$"
+            }
+          ]
+        },
+        "accountId": {
+          "anyOf": [{ "const": "NOT_RUN" }, { "type": "string", "pattern": "^[0-9]{12}$" }]
+        },
+        "region": {
+          "anyOf": [
+            { "const": "NOT_RUN" },
+            { "type": "string", "pattern": "^[a-z]{2}(?:-gov)?-[a-z]+-[0-9]$" }
+          ]
+        },
+        "stackId": { "$ref": "#/$defs/awsArnOrNotRun" },
+        "sourceRevision": { "$ref": "#/$defs/commitOrNotRun" },
+        "priorSourceRevision": { "$ref": "#/$defs/commitOrNotRun" },
+        "apiImageUri": { "$ref": "#/$defs/imageUriOrNotRun" },
+        "webImageUri": { "$ref": "#/$defs/imageUriOrNotRun" },
+        "workerImageUri": { "$ref": "#/$defs/imageUriOrNotRun" },
+        "releaseControlRecordSha256": { "$ref": "#/$defs/sha256OrNotRun" },
+        "priorReleaseControlRecordSha256": { "$ref": "#/$defs/sha256OrNotRun" },
+        "applicationTemplateSha256": { "$ref": "#/$defs/sha256OrNotRun" },
+        "billingControlRecordSha256": { "$ref": "#/$defs/sha256OrNotRun" }
+      }
+    },
+    "executionBoundary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "cloudActions",
+        "networkActions",
+        "dnsChanges",
+        "registryWrites",
+        "hostedCiRuns",
+        "paidOperations"
+      ],
+      "properties": {
+        "mode": {
+          "enum": ["NOT_RUN", "FILESYSTEM_ONLY", "APPROVED_LIVE_NONPRODUCTION"]
+        },
+        "cloudActions": { "$ref": "#/$defs/boundaryDecision" },
+        "networkActions": { "$ref": "#/$defs/boundaryDecision" },
+        "dnsChanges": { "$ref": "#/$defs/boundaryDecision" },
+        "registryWrites": { "$ref": "#/$defs/boundaryDecision" },
+        "hostedCiRuns": { "$ref": "#/$defs/boundaryDecision" },
+        "paidOperations": { "$ref": "#/$defs/boundaryDecision" }
+      }
+    },
+    "authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "executionAuthorizationReference",
+        "costAuthorizationReference",
+        "operatorRole",
+        "independentVerifierRole",
+        "windowStartsAt",
+        "windowEndsAt"
+      ],
+      "properties": {
+        "executionAuthorizationReference": { "$ref": "#/$defs/referenceOrNotApproved" },
+        "costAuthorizationReference": { "$ref": "#/$defs/referenceOrNotApproved" },
+        "operatorRole": { "$ref": "#/$defs/roleAliasOrNotApproved" },
+        "independentVerifierRole": { "$ref": "#/$defs/roleAliasOrNotApproved" },
+        "windowStartsAt": { "$ref": "#/$defs/instantOrNotRun" },
+        "windowEndsAt": { "$ref": "#/$defs/instantOrNotRun" }
+      }
+    },
+    "steps": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "preflight",
+        "zeroCountCreate",
+        "dependencyReadiness",
+        "migrationAndVerify",
+        "serviceActivation",
+        "healthAndOutbox",
+        "rollback",
+        "postRollbackHealth",
+        "cleanupAndCostInventory"
+      ],
+      "properties": {
+        "preflight": { "$ref": "#/$defs/step" },
+        "zeroCountCreate": { "$ref": "#/$defs/step" },
+        "dependencyReadiness": { "$ref": "#/$defs/step" },
+        "migrationAndVerify": { "$ref": "#/$defs/step" },
+        "serviceActivation": { "$ref": "#/$defs/step" },
+        "healthAndOutbox": { "$ref": "#/$defs/step" },
+        "rollback": { "$ref": "#/$defs/step" },
+        "postRollbackHealth": { "$ref": "#/$defs/step" },
+        "cleanupAndCostInventory": { "$ref": "#/$defs/step" }
+      }
+    },
+    "observations": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "release",
+        "dependencies",
+        "runtime",
+        "healthBeforeRollback",
+        "healthAfterRollback",
+        "outbox",
+        "cleanup",
+        "costInventory"
+      ],
+      "properties": {
+        "release": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "zeroCountCreateChangeSetId",
+            "zeroCountCreateChangeSetArn",
+            "zeroCountCreateChangeSetType",
+            "zeroCountCreateResult",
+            "zeroDesiredCountsVerified",
+            "migrationTaskDefinitionSha256",
+            "migrationTaskDefinitionArn",
+            "migrationImageDigest",
+            "migrationApplyTaskExecutionId",
+            "migrationApplyTaskArn",
+            "migrationApplyCommand",
+            "migrationApplyExitCode",
+            "migrationApplyResult",
+            "migrationVerifyTaskExecutionId",
+            "migrationVerifyTaskArn",
+            "migrationVerifyCommand",
+            "migrationVerifyExitCode",
+            "migrationVerifyResult",
+            "serviceActivationChangeSetId",
+            "serviceActivationChangeSetArn",
+            "serviceActivationChangeSetType",
+            "serviceActivationResult",
+            "activatedApiDesiredCount",
+            "activatedWebDesiredCount",
+            "activatedWorkerDesiredCount",
+            "deployedSourceRevision",
+            "rollbackSourceRevision",
+            "priorArtifactManifestSha256",
+            "databaseCompatibility",
+            "rollbackDataIntegrityResult",
+            "rollbackResult"
+          ],
+          "properties": {
+            "zeroCountCreateChangeSetId": { "$ref": "#/$defs/referenceOrNotRun" },
+            "zeroCountCreateChangeSetArn": { "$ref": "#/$defs/awsArnOrNotRun" },
+            "zeroCountCreateChangeSetType": { "enum": ["NOT_RUN", "CREATE"] },
+            "zeroCountCreateResult": { "$ref": "#/$defs/result" },
+            "zeroDesiredCountsVerified": { "$ref": "#/$defs/result" },
+            "migrationTaskDefinitionSha256": { "$ref": "#/$defs/sha256OrNotRun" },
+            "migrationTaskDefinitionArn": { "$ref": "#/$defs/awsArnOrNotRun" },
+            "migrationImageDigest": { "$ref": "#/$defs/sha256OrNotRun" },
+            "migrationApplyTaskExecutionId": { "$ref": "#/$defs/referenceOrNotRun" },
+            "migrationApplyTaskArn": { "$ref": "#/$defs/awsArnOrNotRun" },
+            "migrationApplyCommand": {
+              "enum": [
+                "NOT_RUN",
+                "node dist/infrastructure/database/migration.cli.js --production up"
+              ]
+            },
+            "migrationApplyExitCode": {
+              "anyOf": [{ "const": "NOT_RUN" }, { "type": "integer", "minimum": 0, "maximum": 255 }]
+            },
+            "migrationApplyResult": { "$ref": "#/$defs/result" },
+            "migrationVerifyTaskExecutionId": { "$ref": "#/$defs/referenceOrNotRun" },
+            "migrationVerifyTaskArn": { "$ref": "#/$defs/awsArnOrNotRun" },
+            "migrationVerifyCommand": {
+              "enum": [
+                "NOT_RUN",
+                "node dist/infrastructure/database/migration.cli.js --production verify"
+              ]
+            },
+            "migrationVerifyExitCode": {
+              "anyOf": [{ "const": "NOT_RUN" }, { "type": "integer", "minimum": 0, "maximum": 255 }]
+            },
+            "migrationVerifyResult": { "$ref": "#/$defs/result" },
+            "serviceActivationChangeSetId": { "$ref": "#/$defs/referenceOrNotRun" },
+            "serviceActivationChangeSetArn": { "$ref": "#/$defs/awsArnOrNotRun" },
+            "serviceActivationChangeSetType": { "enum": ["NOT_RUN", "UPDATE"] },
+            "serviceActivationResult": { "$ref": "#/$defs/result" },
+            "activatedApiDesiredCount": { "$ref": "#/$defs/countOrNotRun" },
+            "activatedWebDesiredCount": { "$ref": "#/$defs/countOrNotRun" },
+            "activatedWorkerDesiredCount": { "$ref": "#/$defs/countOrNotRun" },
+            "deployedSourceRevision": { "$ref": "#/$defs/commitOrNotRun" },
+            "rollbackSourceRevision": { "$ref": "#/$defs/commitOrNotRun" },
+            "priorArtifactManifestSha256": { "$ref": "#/$defs/sha256OrNotRun" },
+            "databaseCompatibility": {
+              "enum": ["NOT_RUN", "NO_SCHEMA_CHANGE", "BACKWARD_COMPATIBLE"]
+            },
+            "rollbackDataIntegrityResult": { "$ref": "#/$defs/result" },
+            "rollbackResult": { "$ref": "#/$defs/result" }
+          }
+        },
+        "dependencies": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["database", "cache", "queue", "privateNetwork", "artifactAvailability"],
+          "properties": {
+            "database": { "$ref": "#/$defs/result" },
+            "cache": { "$ref": "#/$defs/result" },
+            "queue": { "$ref": "#/$defs/result" },
+            "privateNetwork": { "$ref": "#/$defs/result" },
+            "artifactAvailability": { "$ref": "#/$defs/result" }
+          }
+        },
+        "runtime": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiTaskDefinitionArn",
+            "webTaskDefinitionArn",
+            "workerTaskDefinitionArn",
+            "apiTaskArn",
+            "webTaskArn",
+            "workerTaskArn",
+            "applicationLoadBalancerArn",
+            "apiTargetGroupArn",
+            "webTargetGroupArn",
+            "apiTargetHealthId",
+            "webTargetHealthId",
+            "queueArn",
+            "queueKmsKeyArn",
+            "outboxMessageId",
+            "workerFailureInjectionId",
+            "workerReplacementTaskArn",
+            "workerRecoveryResult"
+          ],
+          "properties": {
+            "apiTaskDefinitionArn": { "$ref": "#/$defs/awsArnOrNotRun" },
+            "webTaskDefinitionArn": { "$ref": "#/$defs/awsArnOrNotRun" },
+            "workerTaskDefinitionArn": { "$ref": "#/$defs/awsArnOrNotRun" },
+            "apiTaskArn": { "$ref": "#/$defs/awsArnOrNotRun" },
+            "webTaskArn": { "$ref": "#/$defs/awsArnOrNotRun" },
+            "workerTaskArn": { "$ref": "#/$defs/awsArnOrNotRun" },
+            "applicationLoadBalancerArn": { "$ref": "#/$defs/awsArnOrNotRun" },
+            "apiTargetGroupArn": { "$ref": "#/$defs/awsArnOrNotRun" },
+            "webTargetGroupArn": { "$ref": "#/$defs/awsArnOrNotRun" },
+            "apiTargetHealthId": { "$ref": "#/$defs/referenceOrNotRun" },
+            "webTargetHealthId": { "$ref": "#/$defs/referenceOrNotRun" },
+            "queueArn": { "$ref": "#/$defs/awsArnOrNotRun" },
+            "queueKmsKeyArn": { "$ref": "#/$defs/awsArnOrNotRun" },
+            "outboxMessageId": {
+              "anyOf": [
+                { "const": "NOT_RUN" },
+                {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$"
+                }
+              ]
+            },
+            "workerFailureInjectionId": { "$ref": "#/$defs/referenceOrNotRun" },
+            "workerReplacementTaskArn": { "$ref": "#/$defs/awsArnOrNotRun" },
+            "workerRecoveryResult": { "$ref": "#/$defs/result" }
+          }
+        },
+        "healthBeforeRollback": { "$ref": "#/$defs/health" },
+        "healthAfterRollback": { "$ref": "#/$defs/health" },
+        "outbox": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "eventReference",
+            "enqueuedCount",
+            "publishedCount",
+            "markedPublishedCount",
+            "recoveredPendingCount",
+            "duplicatePublicationCount",
+            "duplicateSideEffectCount",
+            "deadLetterCount",
+            "maximumObservedLagSeconds",
+            "allowedMaximumLagSeconds"
+          ],
+          "properties": {
+            "eventReference": { "$ref": "#/$defs/referenceOrNotRun" },
+            "enqueuedCount": { "$ref": "#/$defs/countOrNotRun" },
+            "publishedCount": { "$ref": "#/$defs/countOrNotRun" },
+            "markedPublishedCount": { "$ref": "#/$defs/countOrNotRun" },
+            "recoveredPendingCount": { "$ref": "#/$defs/countOrNotRun" },
+            "duplicatePublicationCount": { "$ref": "#/$defs/countOrNotRun" },
+            "duplicateSideEffectCount": { "$ref": "#/$defs/countOrNotRun" },
+            "deadLetterCount": { "$ref": "#/$defs/countOrNotRun" },
+            "maximumObservedLagSeconds": { "$ref": "#/$defs/durationOrNotRun" },
+            "allowedMaximumLagSeconds": { "$ref": "#/$defs/durationOrNotRun" }
+          }
+        },
+        "cleanup": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "inventoryBeforeSha256",
+            "inventoryAfterSha256",
+            "temporaryResourcesCreated",
+            "temporaryResourcesRemoved",
+            "unexpectedResidualResourceCount",
+            "credentialArtifactsRemoved",
+            "retainedResources"
+          ],
+          "properties": {
+            "inventoryBeforeSha256": { "$ref": "#/$defs/sha256OrNotRun" },
+            "inventoryAfterSha256": { "$ref": "#/$defs/sha256OrNotRun" },
+            "temporaryResourcesCreated": { "$ref": "#/$defs/countOrNotRun" },
+            "temporaryResourcesRemoved": { "$ref": "#/$defs/countOrNotRun" },
+            "unexpectedResidualResourceCount": { "$ref": "#/$defs/countOrNotRun" },
+            "credentialArtifactsRemoved": { "$ref": "#/$defs/result" },
+            "retainedResources": {
+              "type": "array",
+              "maxItems": 64,
+              "items": { "$ref": "#/$defs/retainedResource" }
+            }
+          }
+        },
+        "costInventory": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "inventoryBeforeSha256",
+            "inventoryAfterCleanupSha256",
+            "maximumAuthorizedIncrementUsd",
+            "observedIncrementUsd",
+            "projectedRecurringIncrementUsd",
+            "unexpectedBillableResourceCount",
+            "result"
+          ],
+          "properties": {
+            "inventoryBeforeSha256": { "$ref": "#/$defs/sha256OrNotRun" },
+            "inventoryAfterCleanupSha256": { "$ref": "#/$defs/sha256OrNotRun" },
+            "maximumAuthorizedIncrementUsd": { "$ref": "#/$defs/moneyOrNotRun" },
+            "observedIncrementUsd": { "$ref": "#/$defs/moneyOrNotRun" },
+            "projectedRecurringIncrementUsd": { "$ref": "#/$defs/moneyOrNotRun" },
+            "unexpectedBillableResourceCount": { "$ref": "#/$defs/countOrNotRun" },
+            "result": { "$ref": "#/$defs/result" }
+          }
+        }
+      }
+    },
+    "findings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "blockerCount",
+        "unresolvedHighSeverityCount",
+        "acceptedRiskCount",
+        "ownerRole",
+        "expiresAt",
+        "evidenceReference",
+        "evidenceSha256"
+      ],
+      "properties": {
+        "blockerCount": { "$ref": "#/$defs/countOrNotRun" },
+        "unresolvedHighSeverityCount": { "$ref": "#/$defs/countOrNotRun" },
+        "acceptedRiskCount": { "$ref": "#/$defs/countOrNotRun" },
+        "ownerRole": { "$ref": "#/$defs/roleAliasOrNotApproved" },
+        "expiresAt": { "$ref": "#/$defs/instantOrNotRun" },
+        "evidenceReference": { "$ref": "#/$defs/referenceOrNotRun" },
+        "evidenceSha256": { "$ref": "#/$defs/sha256OrNotRun" }
+      }
+    }
+  },
+  "$defs": {
+    "reference": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/#-]*$"
+    },
+    "referenceOrNotRun": {
+      "anyOf": [{ "const": "NOT_RUN" }, { "$ref": "#/$defs/reference" }]
+    },
+    "referenceOrNotApproved": {
+      "anyOf": [{ "const": "NOT_APPROVED" }, { "$ref": "#/$defs/reference" }]
+    },
+    "sha256OrNotRun": {
+      "anyOf": [{ "const": "NOT_RUN" }, { "type": "string", "pattern": "^[a-f0-9]{64}$" }]
+    },
+    "awsArnOrNotRun": {
+      "anyOf": [
+        { "const": "NOT_RUN" },
+        {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 2048,
+          "pattern": "^arn:(?:aws|aws-us-gov|aws-cn):[a-z0-9-]+:[a-z0-9-]*:[0-9]{12}:.+$"
+        }
+      ]
+    },
+    "imageUriOrNotRun": {
+      "anyOf": [
+        { "const": "NOT_RUN" },
+        {
+          "type": "string",
+          "pattern": "^[0-9]{12}\\.dkr\\.ecr\\.[a-z0-9-]+\\.(?:amazonaws\\.com|amazonaws\\.com\\.cn)/crypto-lending-(?:api|web|worker)@sha256:[a-f0-9]{64}$"
+        }
+      ]
+    },
+    "commitOrNotRun": {
+      "anyOf": [{ "const": "NOT_RUN" }, { "type": "string", "pattern": "^[a-f0-9]{40}$" }]
+    },
+    "instant": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{1,3})?Z$"
+    },
+    "instantOrNotRun": {
+      "anyOf": [{ "const": "NOT_RUN" }, { "$ref": "#/$defs/instant" }]
+    },
+    "roleAlias": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{1,62}[a-z0-9]$"
+    },
+    "roleAliasOrNotApproved": {
+      "anyOf": [{ "const": "NOT_APPROVED" }, { "$ref": "#/$defs/roleAlias" }]
+    },
+    "result": { "enum": ["NOT_RUN", "DRY_PASS", "LIVE_PASS", "FAIL"] },
+    "boundaryDecision": {
+      "enum": ["NOT_RUN", "PROHIBITED_ZERO", "AUTHORIZED_EVIDENCED"]
+    },
+    "countOrNotRun": {
+      "anyOf": [{ "const": "NOT_RUN" }, { "type": "string", "pattern": "^(?:0|[1-9][0-9]{0,8})$" }]
+    },
+    "durationOrNotRun": {
+      "anyOf": [{ "const": "NOT_RUN" }, { "type": "string", "pattern": "^(?:0|[1-9][0-9]{0,5})$" }]
+    },
+    "moneyOrNotRun": {
+      "anyOf": [
+        { "const": "NOT_RUN" },
+        { "type": "string", "pattern": "^(?:0|[1-9][0-9]{0,5})\\.[0-9]{2}$" }
+      ]
+    },
+    "step": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sequence",
+        "scope",
+        "result",
+        "executionId",
+        "ownerRole",
+        "startedAt",
+        "completedAt",
+        "expiresAt",
+        "evidenceReference",
+        "evidenceSha256"
+      ],
+      "properties": {
+        "sequence": { "type": "integer", "minimum": 1, "maximum": 9 },
+        "scope": { "enum": ["NOT_RUN", "LOCAL_FIXTURE_ONLY", "LIVE_NONPRODUCTION"] },
+        "result": { "$ref": "#/$defs/result" },
+        "executionId": { "$ref": "#/$defs/referenceOrNotRun" },
+        "ownerRole": { "$ref": "#/$defs/roleAliasOrNotApproved" },
+        "startedAt": { "$ref": "#/$defs/instantOrNotRun" },
+        "completedAt": { "$ref": "#/$defs/instantOrNotRun" },
+        "expiresAt": { "$ref": "#/$defs/instantOrNotRun" },
+        "evidenceReference": { "$ref": "#/$defs/referenceOrNotRun" },
+        "evidenceSha256": { "$ref": "#/$defs/sha256OrNotRun" }
+      }
+    },
+    "health": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ecsApiService",
+        "ecsWebService",
+        "ecsWorkerService",
+        "applicationLoadBalancer",
+        "api",
+        "web",
+        "worker",
+        "privateNetwork"
+      ],
+      "properties": {
+        "ecsApiService": { "$ref": "#/$defs/result" },
+        "ecsWebService": { "$ref": "#/$defs/result" },
+        "ecsWorkerService": { "$ref": "#/$defs/result" },
+        "applicationLoadBalancer": { "$ref": "#/$defs/result" },
+        "api": { "$ref": "#/$defs/result" },
+        "web": { "$ref": "#/$defs/result" },
+        "worker": { "$ref": "#/$defs/result" },
+        "privateNetwork": { "$ref": "#/$defs/result" }
+      }
+    },
+    "retainedResource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "resourceArn",
+        "resourceType",
+        "ownerRole",
+        "expiresAt",
+        "projectedMonthlyCostUsd",
+        "evidenceSha256"
+      ],
+      "properties": {
+        "resourceArn": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 2048,
+          "pattern": "^arn:(?:aws|aws-us-gov|aws-cn):[a-z0-9-]+:[a-z0-9-]*:[0-9]{12}:.+$"
+        },
+        "resourceType": { "$ref": "#/$defs/reference" },
+        "ownerRole": { "$ref": "#/$defs/roleAlias" },
+        "expiresAt": { "$ref": "#/$defs/instant" },
+        "projectedMonthlyCostUsd": {
+          "type": "string",
+          "pattern": "^(?:0|[1-9][0-9]{0,5})\\.[0-9]{2}$"
+        },
+        "evidenceSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    }
+  }
+}

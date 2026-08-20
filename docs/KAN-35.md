@@ -54,9 +54,12 @@ step.
 
 ### Reproducible application artifacts
 
-The API/worker and web Dockerfiles use a literal digest-pinned Node.js base, the
-literal repository npm version, `npm ci`, and an exact deny-all build-context
-allowlist. Those toolchain inputs cannot be replaced with Docker build arguments.
+The API/worker and web Dockerfiles use a literal digest-pinned Node.js base and a
+byte-length- and SHA-256-pinned official npm tarball. `npm ci` disables scripts,
+audit, and funding calls; application compilation runs with BuildKit networking
+disabled. Clean builds use a Git-derived source context plus an exact deny-all
+`.dockerignore` allowlist, so ignored and untracked working-tree files cannot
+enter the build. Those toolchain inputs cannot be replaced with build arguments.
 Runtime images use UID:GID `10001:10001` and contain source-revision/version OCI
 labels. The backend image includes the official RDS global CA bundle with both
 an exact SHA-256 and byte-length assertion. The web build ID is the full source
@@ -64,19 +67,23 @@ revision, with a deterministic local-only fallback when no release revision is
 supplied.
 
 The local container harness parses the reviewed stage graph and final runtime
-instructions, rejects root/alternate users and command/entrypoint overrides, and
-validates the exact build-context rule set without Docker, registry credentials,
-or network access. Its optional build path requires a clean checkout and an
-explicit network-download acknowledgement, never pulls a base implicitly, and
-never pushes. Its optional smoke path starts the API and web images with no
-network, a read-only filesystem, all capabilities dropped,
-no-new-privileges, and the unprivileged runtime identity. It validates the
-worker image command, health check, identity, labels, and required files, but
-does not yet start the worker process.
+instructions, requires canonical hashes for both Dockerfiles, rejects
+root/alternate users and command/entrypoint overrides, and validates the exact
+build-context rule set without Docker, registry credentials, or network access.
+Its build path requires a clean checkout and an explicit network-download
+acknowledgement, never pulls a base implicitly, and never pushes. It validates
+ephemeral BuildKit provenance and npm production-dependency SBOMs. Standalone
+image checks require explicit descriptor digests rather than trusting mutable
+short tags and labels.
 
-Docker build and smoke execution are deliberately **NOT RUN** in this batch:
-building requires retrieving the exact npm packages and checksum-pinned RDS
-bundle, and there is no approved release publication or live environment.
+Local API, worker, and web builds and hardened smoke checks have now run. The
+integration path uses an internal-only Docker network and isolated local
+database, queues, and Redis prefix to apply and verify migrations, validate API
+dependency readiness, start the worker, run its health command, and require
+Docker health status `healthy`. All application containers retain a read-only
+filesystem, bounded `tmpfs`, dropped capabilities, `no-new-privileges`, PID
+limit, and the unprivileged runtime identity. Details and remaining publication
+gates are recorded in `docs/KAN-228.md`.
 
 ### Migration gate
 
@@ -186,8 +193,13 @@ evidence, a migration plan, deployment health evidence, rollback evidence, and
 cleanup. The runner-provided Python patch and `cfn-lint` transitive dependency
 closure are not yet hash-locked, so the CloudFormation-lint toolchain is not
 bit-for-bit reproducible. API/worker runtime source-version reporting, signed
-provenance, SBOM generation, immutable registry retention, and live image
-verification also remain open. The OpenAPI payload has internal and uploaded
+provenance, whole-image/OS SBOM generation, immutable registry retention,
+vulnerability disposition, and live image verification also remain open. Local
+BuildKit provenance and npm dependency SBOMs are unsigned and unpublished. The
+release-record schema does not yet structurally bind per-image provenance,
+dependency/OS SBOM, and vulnerability evidence or reject ambiguous duplicate
+JSON keys, so approved-mode deployment remains prohibited even if a record
+otherwise validates. The OpenAPI payload has internal and uploaded
 artifact digests, but those digests are not yet fields in the release record.
 KAN-54 remains the dependency for the broader vulnerability-scanning decision.
 Until then KAN-35 must not be represented as deployed or complete.

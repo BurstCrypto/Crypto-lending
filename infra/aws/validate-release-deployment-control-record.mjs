@@ -125,6 +125,7 @@ const STACK_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9-]{0,127}$/;
 const REFERENCE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/#-]{2,127}$/;
 const ROLE_ALIAS_PATTERN = /^[a-z][a-z0-9-]{1,62}[a-z0-9]$/;
 const INSTANT_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/;
+const MAX_APPROVAL_TTL_MS = 72 * 60 * 60 * 1000;
 const HOSTNAME_PATTERN =
   /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.){2,}[a-z](?:[a-z0-9-]{0,61}[a-z0-9])$/;
 const IMAGE_URI_PATTERN =
@@ -725,6 +726,9 @@ function validateApproved(record, options, errors) {
   if (approvedAt && expiresAt && approvedAt >= expiresAt) {
     errors.push('record.approvedAt must precede record.expiresAt.');
   }
+  if (approvedAt && expiresAt && expiresAt.getTime() - approvedAt.getTime() > MAX_APPROVAL_TTL_MS) {
+    errors.push('record approval validity must not exceed 72 hours.');
+  }
 
   if (!/^\d{12}$/.test(record.aws.accountId)) {
     errors.push('record.aws.accountId must contain exactly 12 digits.');
@@ -853,6 +857,12 @@ function validateApproved(record, options, errors) {
   );
   if (verifiedAt && verifiedAt > now) {
     errors.push('record.independentVerification.verifiedAt must not be in the future.');
+  }
+  if (verifiedAt && approvedAt && verifiedAt < approvedAt) {
+    errors.push('record.independentVerification.verifiedAt must not precede record.approvedAt.');
+  }
+  if (verifiedAt && expiresAt && verifiedAt >= expiresAt) {
+    errors.push('record.independentVerification.verifiedAt must precede record.expiresAt.');
   }
   const approvalRoles = new Set([
     ...(record.authority.deploymentApprovers ?? []),

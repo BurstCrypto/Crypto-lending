@@ -404,7 +404,7 @@ test('rollback loads, hashes, and validates the exact prior DEPLOY record', () =
 
 test('rollback matches every prior parameter except explicitly bound desired-count rollout knobs', () => {
   const prior = approvedRecord();
-  prior.expiresAt = '2026-08-20T11:00:00Z';
+  prior.expiresAt = '2026-08-20T11:30:00Z';
   const record = rollbackRecord(prior);
   record.expiresAt = '2026-08-21T12:00:00Z';
   record.parameters.ApiDesiredCount = '1';
@@ -455,6 +455,21 @@ test('rejects secret-shaped material and an approval that is expired or not inde
   expectRejected(
     (record) => (record.independentVerification.verifier = record.authority.deploymentApprovers[0]),
     /independent verifier must be distinct/,
+  );
+});
+
+test('bounds approval lifetime and keeps independent verification inside the approval window', () => {
+  expectRejected(
+    (record) => (record.expiresAt = '2026-08-23T11:00:01Z'),
+    /validity must not exceed 72 hours/,
+  );
+  expectRejected(
+    (record) => (record.independentVerification.verifiedAt = '2026-08-20T09:59:59Z'),
+    /verifiedAt must not precede record\.approvedAt/,
+  );
+  expectRejected(
+    (record) => (record.independentVerification.verifiedAt = record.expiresAt),
+    /verifiedAt must precede record\.expiresAt/,
   );
 });
 

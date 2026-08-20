@@ -2,19 +2,27 @@
  * Static KAN-35 container policy validation. This module reads only local files;
  * it never invokes Docker, Git, a package registry, a cloud CLI, or the network.
  */
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 export const CONTAINER_POLICY = Object.freeze({
+  backendDockerfileSha256: 'f81f2b49fb6a8c00edb4f0a8dc96870eab6176b0e2175e5fe6ad31b79e6e1b92',
+  localRunnerSha256: '8f25b797ff10b224e195918b1fe978ddc8ec1446cf334f7c00d70d65564fde9f',
   nodeImage: 'node:22-slim@sha256:f32b81066cde10a75dbac96646099533316d94bac4150c55da1636e1f0ffdc46',
   nodeVersion: '22.23.2',
+  npmTarballBytes: 2407857,
+  npmTarballPath: '/tmp/npm-11.6.4.tgz',
+  npmTarballSha256: '9c07edca12853cddbf4fed4e372485aa60c064f9bf3e4cd157a2db5518a1792b',
+  npmTarballUrl: 'https://registry.npmjs.org/npm/-/npm-11.6.4.tgz',
   npmVersion: '11.6.4',
   rdsBundleBytes: 165408,
   rdsBundlePath: '/etc/ssl/certs/aws-rds-global-bundle.pem',
   rdsBundleSha256: 'e5bb2084ccf45087bda1c9bffdea0eb15ee67f0b91646106e466714f9de3c7e3',
   rdsBundleUrl: 'https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem',
   runtimeUser: '10001:10001',
+  webDockerfileSha256: 'a355f81d02b8820a9d00bc9d66260c300a038d854db3d4db557fe733bdfb3ec7',
 });
 
 const moduleDirectory = dirname(fileURLToPath(import.meta.url));
@@ -48,6 +56,17 @@ export function loadContainerSources(root = repositoryRoot) {
 
 function requireText(source, expected, label, errors) {
   if (!source.includes(expected)) errors.push(`${label} must include: ${expected}`);
+}
+
+function canonicalSourceSha256(source) {
+  const canonical = `${source.replace(/\r\n?/gu, '\n').trimEnd()}\n`;
+  return createHash('sha256').update(canonical).digest('hex');
+}
+
+function validateReviewedSource(source, expectedSha256, label, errors) {
+  if (canonicalSourceSha256(source) !== expectedSha256) {
+    errors.push(`${label} must match the reviewed canonical SHA-256.`);
+  }
 }
 
 const REVIEWED_DOCKERIGNORE_RULES = Object.freeze([
@@ -168,16 +187,29 @@ function validateDockerfileCommon(source, label, errors) {
   requireText(source, `FROM ${CONTAINER_POLICY.nodeImage} AS npm-toolchain`, label, errors);
   requireText(
     source,
-    `npm install --global --ignore-scripts npm@${CONTAINER_POLICY.npmVersion}`,
+    `ADD --checksum=sha256:${CONTAINER_POLICY.npmTarballSha256} --chmod=0444 ${CONTAINER_POLICY.npmTarballUrl} ${CONTAINER_POLICY.npmTarballPath}`,
     label,
     errors,
   );
+  requireText(
+    source,
+    `test "$(wc -c < ${CONTAINER_POLICY.npmTarballPath})" -eq ${CONTAINER_POLICY.npmTarballBytes}`,
+    label,
+    errors,
+  );
+  requireText(
+    source,
+    `printf '%s  %s\\n' ${CONTAINER_POLICY.npmTarballSha256} ${CONTAINER_POLICY.npmTarballPath} | sha256sum --check --strict`,
+    label,
+    errors,
+  );
+  requireText(source, "require('/opt/npm/package.json').version", label, errors);
   requireText(source, `test "$(npm --version)" = ${CONTAINER_POLICY.npmVersion}`, label, errors);
   requireText(source, `USER ${CONTAINER_POLICY.runtimeUser}`, label, errors);
   requireText(source, 'org.opencontainers.image.revision="${SOURCE_REVISION}"', label, errors);
   requireText(source, 'org.opencontainers.image.version="${SOURCE_REVISION}"', label, errors);
   requireText(source, "grep -Eq '^[a-f0-9]{40}$'", label, errors);
-  requireText(source, 'npm ci --ignore-scripts', label, errors);
+  requireText(source, 'npm ci --ignore-scripts --no-audit --no-fund', label, errors);
   requireText(source, '--include-workspace-root=false', label, errors);
 
   if (/^\s*ARG\s+(?:NODE_IMAGE|NPM_VERSION)(?:\s|=|$)/imu.test(source)) {
@@ -188,7 +220,7 @@ function validateDockerfileCommon(source, label, errors) {
   if (/^\s*FROM\s+[^\n]*\$[{(]/imu.test(source)) {
     errors.push(`${label} FROM inputs must be literal and non-overrideable.`);
   }
-  if (/\bnpm\s+(?:install|i)\s+(?![^\n]*--global)/i.test(source)) {
+  if (/\bnpm\s+(?:install|i)\b/i.test(source)) {
     errors.push(`${label} dependency installation must use npm ci, not npm install.`);
   }
   if (/\b(?:latest|edge)\b/i.test(source)) {
@@ -216,6 +248,15 @@ function validateDockerfileCommon(source, label, errors) {
       `${label} must not contain a root or alternate USER instruction; runtime stages use only ${CONTAINER_POLICY.runtimeUser}.`,
     );
   }
+}
+
+function validateOfflineBuild(source, workspace, label, errors) {
+  requireText(
+    source,
+    `RUN --network=none npm run build --workspace @crypto-lending/${workspace}`,
+    label,
+    errors,
+  );
 }
 
 function validateDockerignore(source, errors) {
@@ -271,7 +312,21 @@ export function validateContainerSources(sources, initialErrors = []) {
     sources;
   const { packageLock, webDockerfile } = sources;
 
+  validateReviewedSource(
+    localRunner,
+    CONTAINER_POLICY.localRunnerSha256,
+    'local container runner',
+    errors,
+  );
+
   validateDockerfileCommon(backendDockerfile, 'apps/api/Dockerfile', errors);
+  validateOfflineBuild(backendDockerfile, 'api', 'apps/api/Dockerfile', errors);
+  validateReviewedSource(
+    backendDockerfile,
+    CONTAINER_POLICY.backendDockerfileSha256,
+    'apps/api/Dockerfile',
+    errors,
+  );
   const backendStages = parseDockerfileStages(backendDockerfile, 'apps/api/Dockerfile', errors);
   validateStageGraph(
     backendStages,
@@ -314,6 +369,12 @@ export function validateContainerSources(sources, initialErrors = []) {
   );
   requireText(
     backendDockerfile,
+    'install --directory --owner 0 --group 0 --mode 0755 /etc/ssl/certs',
+    'apps/api/Dockerfile',
+    errors,
+  );
+  requireText(
+    backendDockerfile,
     `ADD --checksum=sha256:${CONTAINER_POLICY.rdsBundleSha256} --chmod=0444 ${CONTAINER_POLICY.rdsBundleUrl} ${CONTAINER_POLICY.rdsBundlePath}`,
     'apps/api/Dockerfile',
     errors,
@@ -332,6 +393,13 @@ export function validateContainerSources(sources, initialErrors = []) {
   );
 
   validateDockerfileCommon(webDockerfile, 'apps/web/Dockerfile', errors);
+  validateOfflineBuild(webDockerfile, 'web', 'apps/web/Dockerfile', errors);
+  validateReviewedSource(
+    webDockerfile,
+    CONTAINER_POLICY.webDockerfileSha256,
+    'apps/web/Dockerfile',
+    errors,
+  );
   const webStages = parseDockerfileStages(webDockerfile, 'apps/web/Dockerfile', errors);
   validateStageGraph(
     webStages,
@@ -391,16 +459,25 @@ export function validateContainerSources(sources, initialErrors = []) {
   ]) {
     requireText(localRunner, secureSmokeValue, 'local container runner', errors);
   }
-  if (
-    /DATABASE_RUNTIME_SSL_MODE:\s*['"]disable['"]/u.test(localRunner) ||
-    /REDIS_URL:\s*['"]redis:\/\//u.test(localRunner) ||
-    /\bSQS_ENDPOINT:/u.test(localRunner)
+  const productionSmoke = localRunner.match(
+    /async function smokeServices\([\s\S]+?\n\}\n\nfunction requireHealthyLocalServices/u,
+  )?.[0];
+  if (!productionSmoke) {
+    errors.push('Local container runner must retain the reviewed production-mode smoke function.');
+  } else if (
+    /DATABASE_RUNTIME_SSL_MODE:\s*['"]disable['"]/u.test(productionSmoke) ||
+    /REDIS_URL:\s*['"]redis:\/\//u.test(productionSmoke) ||
+    /\bSQS_ENDPOINT:/u.test(productionSmoke)
   ) {
     errors.push(
       'Production-mode container smoke values must preserve TLS and canonical SQS policy.',
     );
   }
-  if (/['"](?:--push|push)['"]/u.test(localRunner) || /\b(?:aws|ecr)\b/iu.test(localRunner)) {
+  if (
+    /['"](?:--push|push)['"]/u.test(localRunner) ||
+    /['"]aws(?:\.exe)?['"]/iu.test(localRunner) ||
+    /\becr\b/iu.test(localRunner)
+  ) {
     errors.push('Local container runner must not contain registry-push, ECR, or AWS actions.');
   }
 

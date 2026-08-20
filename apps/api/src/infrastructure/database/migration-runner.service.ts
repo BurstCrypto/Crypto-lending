@@ -70,6 +70,7 @@ export class MigrationRunner {
     return this.withMigrationLock(async (client) => {
       await this.ensureMigrationTable(client);
       const applied = await this.appliedMigrations(client);
+      this.assertNoUnknownAppliedMigrations(applied);
       const appliedById = new Map(applied.map((migration) => [migration.id, migration]));
       const completed: string[] = [];
 
@@ -109,6 +110,7 @@ export class MigrationRunner {
     return this.withMigrationLock(async (client) => {
       await this.ensureMigrationTable(client);
       const applied = await this.appliedMigrations(client, true);
+      this.assertNoUnknownAppliedMigrations(applied);
       const byId = new Map(this.migrations.map((migration) => [migration.id, migration]));
       const rolledBack: string[] = [];
 
@@ -134,11 +136,10 @@ export class MigrationRunner {
   async status(): Promise<MigrationStatus[]> {
     return this.withMigrationLock(async (client) => {
       await this.ensureMigrationTable(client);
+      const appliedMigrations = await this.appliedMigrations(client);
+      this.assertNoUnknownAppliedMigrations(appliedMigrations);
       const applied = new Map(
-        (await this.appliedMigrations(client)).map((migration) => [
-          migration.id,
-          migration.checksum,
-        ]),
+        appliedMigrations.map((migration) => [migration.id, migration.checksum]),
       );
       for (const migration of this.migrations) {
         const appliedChecksum = applied.get(migration.id);
@@ -168,18 +169,11 @@ export class MigrationRunner {
         throw new Error('Database migrations have not been initialized');
       }
 
+      const appliedMigrations = await this.appliedMigrations(client);
+      this.assertNoUnknownAppliedMigrations(appliedMigrations);
       const appliedById = new Map(
-        (await this.appliedMigrations(client)).map((migration) => [
-          migration.id,
-          migration.checksum,
-        ]),
+        appliedMigrations.map((migration) => [migration.id, migration.checksum]),
       );
-      const expectedIds = new Set(this.migrations.map((migration) => migration.id));
-      for (const appliedId of appliedById.keys()) {
-        if (!expectedIds.has(appliedId)) {
-          throw new Error(`Database contains unknown applied migration ${appliedId}`);
-        }
-      }
       for (const migration of this.migrations) {
         const appliedChecksum = appliedById.get(migration.id);
         if (!appliedChecksum) {
@@ -192,6 +186,15 @@ export class MigrationRunner {
       }
     } finally {
       client.release();
+    }
+  }
+
+  private assertNoUnknownAppliedMigrations(applied: readonly AppliedMigration[]): void {
+    const expectedIds = new Set(this.migrations.map((migration) => migration.id));
+    for (const migration of applied) {
+      if (!expectedIds.has(migration.id)) {
+        throw new Error(`Database contains unknown applied migration ${migration.id}`);
+      }
     }
   }
 
