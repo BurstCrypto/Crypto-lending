@@ -16,6 +16,9 @@ change-sets/
 *.acm-dns.local.json
 *.acm-dns-plan.local.json
 *.acm-dns-evidence.local.json
+*.release-deployment-control.local.json
+*.release-build-evidence.local.json
+*.release-provenance.local.json
 cost-exports/
 
 # Local parameter files and credential material must never be committed.

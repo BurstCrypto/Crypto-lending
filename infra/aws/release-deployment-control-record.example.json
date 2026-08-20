@@ -1,0 +1,91 @@
+{
+  "schemaVersion": 2,
+  "artifactType": "KAN_35_RELEASE_DEPLOYMENT_CONTROL",
+  "status": "NOT_APPROVED",
+  "recordId": "NOT_APPROVED",
+  "approvedAt": "NOT_RUN",
+  "expiresAt": "NOT_APPROVED",
+  "action": "NOT_APPROVED",
+  "templateSha256": "NOT_APPROVED",
+  "aws": {
+    "accountId": "NOT_APPROVED",
+    "region": "NOT_APPROVED"
+  },
+  "target": {
+    "environmentName": "NOT_APPROVED",
+    "stackName": "NOT_APPROVED",
+    "changeSetName": "NOT_APPROVED",
+    "changeSetType": "NOT_APPROVED"
+  },
+  "artifact": {
+    "sourceRevision": "NOT_APPROVED",
+    "apiImageUri": "NOT_APPROVED",
+    "webImageUri": "NOT_APPROVED",
+    "workerImageUri": "NOT_APPROVED",
+    "buildEvidenceSha256": "NOT_APPROVED",
+    "provenanceReference": "NOT_APPROVED"
+  },
+  "parameters": {
+    "BillingAcknowledgement": "NOT_APPROVED",
+    "EnvironmentName": "NOT_APPROVED",
+    "ApplicationVersion": "NOT_APPROVED",
+    "ApiImageUri": "NOT_APPROVED",
+    "WebImageUri": "NOT_APPROVED",
+    "WorkerImageUri": "NOT_APPROVED",
+    "RdsCaBundlePath": "NOT_APPROVED",
+    "ApiDesiredCount": "NOT_APPROVED",
+    "WebDesiredCount": "NOT_APPROVED",
+    "WorkerDesiredCount": "NOT_APPROVED",
+    "VpcCidr": "NOT_APPROVED",
+    "PublicSubnetACidr": "NOT_APPROVED",
+    "PublicSubnetBCidr": "NOT_APPROVED",
+    "PrivateSubnetACidr": "NOT_APPROVED",
+    "PrivateSubnetBCidr": "NOT_APPROVED",
+    "PrivateEgressMode": "NOT_APPROVED",
+    "S3ManagedPrefixListId": "NOT_APPROVED",
+    "AllowedIngressIpv4Cidr": "NOT_APPROVED",
+    "AlbCertificateArn": "NOT_APPROVED",
+    "ApplicationHostname": "NOT_APPROVED",
+    "DatabaseName": "NOT_APPROVED",
+    "DatabaseInstanceClass": "NOT_APPROVED",
+    "DatabaseAllocatedStorageGiB": "NOT_APPROVED",
+    "PostgresEngineVersion": "NOT_APPROVED",
+    "DatabaseDeletionProtection": "NOT_APPROVED",
+    "EnableDatabaseMultiAz": "NOT_APPROVED",
+    "RedisNodeType": "NOT_APPROVED",
+    "EnableRedisReplica": "NOT_APPROVED",
+    "StatefulBackupRetentionDays": "NOT_APPROVED",
+    "SqsMaxReceiveCount": "NOT_APPROVED",
+    "SqsVisibilityTimeoutSeconds": "NOT_APPROVED",
+    "LogRetentionDays": "NOT_APPROVED",
+    "EnableOperationalAlarms": "NOT_APPROVED",
+    "EnableOperationalDashboard": "NOT_APPROVED",
+    "EnableContainerInsights": "NOT_APPROVED"
+  },
+  "gates": {
+    "continuousIntegration": "NOT_RUN",
+    "unitTests": "NOT_RUN",
+    "integrationTests": "NOT_RUN",
+    "migrationValidation": "NOT_RUN",
+    "reproducibleBuild": "NOT_RUN",
+    "artifactVersioning": "NOT_RUN",
+    "evidenceReference": "NOT_RUN"
+  },
+  "rollback": {
+    "intent": "NOT_APPROVED",
+    "fromApplicationVersion": "NOT_APPROVED",
+    "priorReleaseRecordSha256": "NOT_APPROVED",
+    "parameterDifferences": [],
+    "databaseCompatibility": "NOT_APPROVED",
+    "evidenceReference": "NOT_RUN"
+  },
+  "authority": {
+    "deploymentApprovers": ["NOT_APPROVED"],
+    "rollbackApprovers": ["NOT_APPROVED"]
+  },
+  "independentVerification": {
+    "verifier": "NOT_APPROVED",
+    "decision": "NOT_APPROVED",
+    "verifiedAt": "NOT_RUN"
+  }
+}

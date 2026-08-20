@@ -156,6 +156,17 @@ describe('MigrationRunner', () => {
     );
   });
 
+  it('rejects database state created by an unknown newer migration', async () => {
+    const database = new InMemoryMigrationDatabase();
+    const runner = new MigrationRunner(database.pool, DATABASE_MIGRATION_LIST);
+    await runner.up();
+    database.applied.set('9999', { id: '9999', checksum: 'f'.repeat(64) });
+
+    await expect(runner.assertUpToDate()).rejects.toThrow(
+      'Database contains unknown applied migration 9999',
+    );
+  });
+
   it('includes non-transactional execution policy in the immutable checksum', async () => {
     const database = new InMemoryMigrationDatabase();
     await new MigrationRunner(database.pool, DATABASE_MIGRATION_LIST).up();

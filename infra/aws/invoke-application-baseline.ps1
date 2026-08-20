@@ -1,15 +1,19 @@
 <#
 .SYNOPSIS
-Validates KAN-34 locally by default and guards every optional AWS-side action.
+Validates the KAN-34/KAN-35 application baseline locally by default and guards
+every optional AWS-side action.
 
 .DESCRIPTION
 LocalValidate is the default and performs filesystem-only policy validation.
 CloudValidate, Plan, and Deploy require an explicit named profile, account ID,
 Region, and AllowAwsApiCalls. Plan creates a named change set without executing
 it. Plan and Deploy also require the independently approved KAN-229 billing
-control record, deployed guardrail stack, and KAN-230 certificate/DNS prerequisite
-record. Deploy verifies and executes that exact template/parameter/tag/control-
-record-bound change set only after an exact billable-resource acknowledgement.
+  control record, deployed guardrail stack, and KAN-230 certificate/DNS prerequisite
+  record. They also require a KAN-35 release/deployment control record that binds
+  the complete parameter map to one source revision, digest-pinned artifact set,
+  target, change-set type, and optional prior-artifact rollback intent. Deploy
+  verifies and executes that exact template/parameter/tag/control-record-bound
+  change set only after an exact billable-resource acknowledgement.
 
 .PARAMETER Action
 LocalValidate, CloudValidate, Plan, or Deploy. Defaults to LocalValidate.
@@ -28,6 +32,20 @@ notification evidence must pass final KAN-229 validation before Plan or Deploy.
 .PARAMETER AcmDnsControlRecordFile
 Git-ignored KAN-230 record whose approved hostname and issued ACM certificate
 must match the application parameters before Plan or Deploy.
+
+.PARAMETER ReleaseControlRecordFile
+Git-ignored KAN-35 record whose passing gates, source revision, digest-pinned
+images, full parameter map, exact target, and rollback intent must match before
+Plan or Deploy.
+
+.PARAMETER PriorReleaseControlRecordFile
+Git-ignored historical KAN-35 DEPLOY record required for ROLLBACK. Its canonical
+digest, artifacts, and parameter map are verified locally before any AWS call.
+
+.PARAMETER ExpectedReleaseControlRecordSha256
+Lowercase canonical SHA-256 obtained through an independent review channel. It
+must match ReleaseControlRecordFile before Plan or Deploy; this comparison is
+not a digital signature or protected-environment approval by itself.
 
 .PARAMETER GuardrailStackName
 Existing KAN-229 account-guardrail stack verified before an application change
@@ -71,6 +89,12 @@ param(
 
     [string] $AcmDnsControlRecordFile,
 
+    [string] $ReleaseControlRecordFile,
+
+    [string] $PriorReleaseControlRecordFile,
+
+    [string] $ExpectedReleaseControlRecordSha256,
+
     [string] $GuardrailStackName,
 
     [string] $GuardrailControlRegion,
@@ -92,6 +116,7 @@ if ([string]::IsNullOrWhiteSpace($TemplateFile)) {
 $validatorPath = Join-Path $PSScriptRoot 'validate-application-baseline.mjs'
 $billingRecordValidatorPath = Join-Path $PSScriptRoot 'validate-billing-control-record.mjs'
 $acmDnsRecordValidatorPath = Join-Path $PSScriptRoot 'validate-acm-dns-control-record.mjs'
+$releaseRecordValidatorPath = Join-Path $PSScriptRoot 'validate-release-deployment-control-record.mjs'
 $accountGuardrailTemplatePath = Join-Path $PSScriptRoot 'account-guardrails.yaml'
 $resolvedTemplate = [System.IO.Path]::GetFullPath($TemplateFile)
 
@@ -160,6 +185,91 @@ function ConvertFrom-ChangeSetTags {
     return $result
 }
 
+function Get-OptionalPropertyValue {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object] $Object,
+
+        [Parameter(Mandatory = $true)]
+        [string] $Name
+    )
+
+    $property = $Object.PSObject.Properties[$Name]
+    if ($null -eq $property) {
+        return $null
+    }
+    return $property.Value
+}
+
+function Assert-SafeChangeSetExecutionContext {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object] $ChangeSet,
+
+        [Parameter(Mandatory = $true)]
+        [string] $ReviewedChangeSetType
+    )
+
+    $capabilities = @(Get-OptionalPropertyValue -Object $ChangeSet -Name 'Capabilities')
+    if ($capabilities.Count -ne 1 -or [string] $capabilities[0] -cne 'CAPABILITY_IAM') {
+        throw 'The reviewed change set must declare exactly the Plan-pinned CAPABILITY_IAM capability.'
+    }
+
+    if (@(Get-OptionalPropertyValue -Object $ChangeSet -Name 'NotificationARNs').Count -ne 0) {
+        throw 'The reviewed change set must not configure notification ARNs.'
+    }
+    if (@(Get-OptionalPropertyValue -Object $ChangeSet -Name 'ResourceTypes').Count -ne 0) {
+        throw 'The reviewed change set must not substitute ResourceTypes for the approved capability set.'
+    }
+
+    $rollbackConfiguration = Get-OptionalPropertyValue -Object $ChangeSet -Name 'RollbackConfiguration'
+    if ($null -ne $rollbackConfiguration) {
+        $rollbackProperties = @($rollbackConfiguration.PSObject.Properties)
+        $unexpectedRollbackProperties = @($rollbackProperties | Where-Object {
+                $_.Name -notin @('RollbackTriggers', 'MonitoringTimeInMinutes')
+            })
+        $rollbackTriggers = @(Get-OptionalPropertyValue -Object $rollbackConfiguration -Name 'RollbackTriggers')
+        $monitoringTime = Get-OptionalPropertyValue -Object $rollbackConfiguration -Name 'MonitoringTimeInMinutes'
+        if (
+            $unexpectedRollbackProperties.Count -ne 0 -or
+            $rollbackTriggers.Count -ne 0 -or
+            ($null -ne $monitoringTime -and [string] $monitoringTime -cne '0')
+        ) {
+            throw 'The reviewed change set must use an empty/default rollback configuration.'
+        }
+    }
+
+    foreach ($booleanField in @('IncludeNestedStacks', 'ImportExistingResources')) {
+        $value = Get-OptionalPropertyValue -Object $ChangeSet -Name $booleanField
+        if ($null -ne $value -and ($value -isnot [bool] -or $value)) {
+            throw "The reviewed change set must leave $booleanField false or absent."
+        }
+    }
+    foreach ($identifierField in @('ParentChangeSetId', 'RootChangeSetId')) {
+        $value = Get-OptionalPropertyValue -Object $ChangeSet -Name $identifierField
+        if (-not [string]::IsNullOrWhiteSpace([string] $value)) {
+            throw "The reviewed change set must not be a nested $identifierField execution context."
+        }
+    }
+
+    $onStackFailure = [string] (Get-OptionalPropertyValue -Object $ChangeSet -Name 'OnStackFailure')
+    if ($ReviewedChangeSetType -eq 'CREATE' -and $onStackFailure -cne 'ROLLBACK') {
+        throw 'The reviewed CREATE change set must explicitly use OnStackFailure ROLLBACK.'
+    }
+    if ($ReviewedChangeSetType -eq 'UPDATE' -and -not [string]::IsNullOrWhiteSpace($onStackFailure)) {
+        throw 'The reviewed UPDATE change set must not set OnStackFailure.'
+    }
+
+    $deploymentMode = Get-OptionalPropertyValue -Object $ChangeSet -Name 'DeploymentMode'
+    if ($null -ne $deploymentMode) {
+        throw 'The reviewed change set must not select a DeploymentMode.'
+    }
+    $deploymentConfig = Get-OptionalPropertyValue -Object $ChangeSet -Name 'DeploymentConfig'
+    if ($null -ne $deploymentConfig -and @($deploymentConfig.PSObject.Properties).Count -ne 0) {
+        throw 'The reviewed change set must leave DeploymentConfig absent or empty/default.'
+    }
+}
+
 function Get-StackOutputMap {
     param(
         [Parameter(Mandatory = $true)]
@@ -194,6 +304,61 @@ function Get-StackParameterMap {
     return $result
 }
 
+function ConvertFrom-JsonObjectMap {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object] $Value,
+
+        [Parameter(Mandatory = $true)]
+        [string] $Label
+    )
+
+    $result = [ordered]@{}
+    if ($null -eq $Value) {
+        throw "$Label was not returned."
+    }
+    foreach ($property in @($Value.PSObject.Properties)) {
+        if ([string]::IsNullOrWhiteSpace([string] $property.Name) -or $property.Value -isnot [string]) {
+            throw "$Label contains a missing, non-string, or invalid entry."
+        }
+        if ($result.Contains([string] $property.Name)) {
+            throw "$Label contains duplicate key '$($property.Name)'."
+        }
+        $result[[string] $property.Name] = [string] $property.Value
+    }
+    return $result
+}
+
+function Assert-ExactMap {
+    param(
+        [Parameter(Mandatory = $true)]
+        [System.Collections.IDictionary] $Actual,
+
+        [Parameter(Mandatory = $true)]
+        [System.Collections.IDictionary] $Expected,
+
+        [Parameter(Mandatory = $true)]
+        [string] $Label
+    )
+
+    if ($Actual.Count -ne $Expected.Count) {
+        throw "$Label contains $($Actual.Count) entries, but the approved KAN-35 record requires exactly $($Expected.Count)."
+    }
+    foreach ($entry in $Expected.GetEnumerator()) {
+        if (-not $Actual.Contains($entry.Key)) {
+            throw "$Label is missing approved key '$($entry.Key)'."
+        }
+        if ([string] $Actual[$entry.Key] -cne [string] $entry.Value) {
+            throw "$Label value '$($entry.Key)' does not match the approved KAN-35 release/deployment record."
+        }
+    }
+    foreach ($key in $Actual.Keys) {
+        if (-not $Expected.Contains($key)) {
+            throw "$Label contains unapproved key '$key'."
+        }
+    }
+}
+
 if (-not (Test-Path -LiteralPath $validatorPath -PathType Leaf)) {
     throw "Local policy validator was not found: $validatorPath"
 }
@@ -202,6 +367,9 @@ if (-not (Test-Path -LiteralPath $billingRecordValidatorPath -PathType Leaf)) {
 }
 if (-not (Test-Path -LiteralPath $acmDnsRecordValidatorPath -PathType Leaf)) {
     throw "ACM/DNS control record validator was not found: $acmDnsRecordValidatorPath"
+}
+if (-not (Test-Path -LiteralPath $releaseRecordValidatorPath -PathType Leaf)) {
+    throw "KAN-35 release/deployment control record validator was not found: $releaseRecordValidatorPath"
 }
 
 $nodeCommand = Get-Command node -ErrorAction SilentlyContinue
@@ -220,6 +388,12 @@ if ($Action -eq 'LocalValidate') {
     Write-Host 'Local validation completed. No AWS calls were made and no resources were created.'
     return
 }
+
+$templateInfo = Get-Item -LiteralPath $resolvedTemplate
+if ($templateInfo.Length -gt 51200) {
+    throw 'Template exceeds the 51,200-byte direct-upload limit. This guard will not stage templates in a paid S3 service.'
+}
+$templateSha256 = (Get-FileHash -LiteralPath $resolvedTemplate -Algorithm SHA256).Hash.ToLowerInvariant()
 
 Assert-RequiredValue -Name 'Profile' -Value $Profile
 Assert-RequiredValue -Name 'AccountId' -Value $AccountId
@@ -243,19 +417,42 @@ $acmDnsBinding = $null
 $acmDnsRecordSha256 = $null
 $acmDnsConfigurationSha256 = $null
 $resolvedAcmDnsControlRecord = $null
+$releaseRecordSha256 = $null
+$releaseRecordBinding = $null
+$releaseAction = $null
+$releaseRollback = $null
+$priorReleaseBinding = $null
+$expectedReleaseParameterMap = [ordered]@{}
+$resolvedReleaseControlRecord = $null
+$resolvedPriorReleaseControlRecord = $null
 $expectedGuardrailPolicyVersion = 'kan-229-v1'
 if ($Action -in @('Plan', 'Deploy')) {
     Assert-RequiredValue -Name 'EnvironmentName' -Value $EnvironmentName
     Assert-RequiredValue -Name 'BillingControlRecordFile' -Value $BillingControlRecordFile
     Assert-RequiredValue -Name 'AcmDnsControlRecordFile' -Value $AcmDnsControlRecordFile
+    Assert-RequiredValue -Name 'ReleaseControlRecordFile' -Value $ReleaseControlRecordFile
+    Assert-RequiredValue -Name 'ExpectedReleaseControlRecordSha256' -Value $ExpectedReleaseControlRecordSha256
     Assert-RequiredValue -Name 'GuardrailStackName' -Value $GuardrailStackName
     Assert-RequiredValue -Name 'GuardrailControlRegion' -Value $GuardrailControlRegion
+    Assert-RequiredValue -Name 'StackName' -Value $StackName
+    Assert-RequiredValue -Name 'ChangeSetName' -Value $ChangeSetName
+    Assert-RequiredValue -Name 'ChangeSetType' -Value $ChangeSetType
+
+    if ($ExpectedReleaseControlRecordSha256 -cnotmatch '^[a-f0-9]{64}$') {
+        throw 'ExpectedReleaseControlRecordSha256 must be an independently supplied lowercase SHA-256 digest.'
+    }
 
     if ($EnvironmentName.Length -gt 31 -or $EnvironmentName -notmatch '^(dev|test|qa|sandbox|staging)(-[a-z0-9]+)*$') {
         throw 'EnvironmentName must be at most 31 characters and use the template non-production pattern: dev|test|qa|sandbox|staging with optional lowercase suffix segments.'
     }
     if ($GuardrailStackName -notmatch '^[A-Za-z][A-Za-z0-9-]{0,127}$') {
         throw 'GuardrailStackName must be a valid explicit CloudFormation stack name.'
+    }
+    if ($StackName -notmatch '^[A-Za-z][A-Za-z0-9-]{0,127}$') {
+        throw 'StackName must be a valid explicit CloudFormation stack name.'
+    }
+    if ($ChangeSetName -notmatch '^[A-Za-z][A-Za-z0-9-]{0,127}$') {
+        throw 'ChangeSetName must be an explicit CloudFormation-safe name.'
     }
     if ($GuardrailControlRegion -cne 'us-east-1') {
         throw 'GuardrailControlRegion must be us-east-1 for the current KAN-229 account-control template.'
@@ -264,6 +461,80 @@ if ($Action -in @('Plan', 'Deploy')) {
         throw "The reviewed KAN-229 account guardrail template was not found: $accountGuardrailTemplatePath"
     }
     $accountGuardrailTemplateSha256 = (Get-FileHash -LiteralPath $accountGuardrailTemplatePath -Algorithm SHA256).Hash.ToLowerInvariant()
+
+    # Validate the complete KAN-35 release binding before credential discovery or
+    # any AWS call. The validator returns only reviewed strings and zero-call
+    # counters; the guard later compares every planned/described parameter.
+    $resolvedReleaseControlRecord = [System.IO.Path]::GetFullPath($ReleaseControlRecordFile)
+    if (-not (Test-Path -LiteralPath $resolvedReleaseControlRecord -PathType Leaf)) {
+        throw "ReleaseControlRecordFile was not found: $resolvedReleaseControlRecord"
+    }
+    $releaseValidationArguments = @(
+        $releaseRecordValidatorPath,
+        '--record', $resolvedReleaseControlRecord,
+        '--mode', 'approved',
+        '--expected-record-sha256', $ExpectedReleaseControlRecordSha256,
+        '--expected-account', $AccountId,
+        '--expected-region', $Region,
+        '--expected-environment', $EnvironmentName,
+        '--expected-stack', $StackName,
+        '--expected-change-set', $ChangeSetName,
+        '--expected-change-set-type', $ChangeSetType,
+        '--expected-template-sha256', $templateSha256,
+        '--json'
+    )
+    if (-not [string]::IsNullOrWhiteSpace($PriorReleaseControlRecordFile)) {
+        $resolvedPriorReleaseControlRecord = [System.IO.Path]::GetFullPath($PriorReleaseControlRecordFile)
+        if (-not (Test-Path -LiteralPath $resolvedPriorReleaseControlRecord -PathType Leaf)) {
+            throw "PriorReleaseControlRecordFile was not found: $resolvedPriorReleaseControlRecord"
+        }
+        $releaseValidationArguments += @('--prior-record', $resolvedPriorReleaseControlRecord)
+    }
+    $releaseValidationOutput = & $nodeCommand.Source @releaseValidationArguments
+    if ($LASTEXITCODE -ne 0) {
+        throw 'The KAN-35 release/deployment control record is not approved, current, gate-complete, and target-matched. No AWS calls were made.'
+    }
+    $releaseValidation = ($releaseValidationOutput | Out-String) | ConvertFrom-Json
+    if (
+        -not $releaseValidation.ok -or
+        $releaseValidation.externalCallsMade -ne 0 -or
+        $releaseValidation.awsCallsMade -ne 0 -or
+        $releaseValidation.registryCallsMade -ne 0 -or
+        $releaseValidation.resourcesCreated -ne 0
+    ) {
+        throw 'KAN-35 release/deployment validation did not produce a successful zero-external-call result.'
+    }
+    $releaseRecordSha256 = [string] $releaseValidation.canonicalSha256
+    $releaseRecordBinding = $releaseValidation.binding
+    if (
+        $releaseRecordSha256 -notmatch '^[a-f0-9]{64}$' -or
+        $releaseRecordSha256 -cne $ExpectedReleaseControlRecordSha256 -or
+        $null -eq $releaseRecordBinding
+    ) {
+        throw 'KAN-35 release/deployment validation did not return a valid canonical binding.'
+    }
+    $releaseAction = [string] $releaseRecordBinding.action
+    $releaseRollback = $releaseRecordBinding.rollback
+    $priorReleaseBinding = $releaseRecordBinding.priorRelease
+    if ($releaseAction -eq 'ROLLBACK') {
+        if (
+            $null -eq $priorReleaseBinding -or
+            [string] $priorReleaseBinding.canonicalSha256 -cne [string] $releaseRollback.priorReleaseRecordSha256
+        ) {
+            throw 'KAN-35 rollback validation did not return the exact prior DEPLOY record binding.'
+        }
+        foreach ($artifactName in @('sourceRevision', 'apiImageUri', 'webImageUri', 'workerImageUri', 'buildEvidenceSha256', 'provenanceReference')) {
+            if ([string] $releaseRecordBinding.artifact.$artifactName -cne [string] $priorReleaseBinding.artifact.$artifactName) {
+                throw "KAN-35 rollback artifact '$artifactName' does not match the prior DEPLOY record."
+            }
+        }
+    }
+    elseif ($null -ne $priorReleaseBinding) {
+        throw 'KAN-35 DEPLOY validation unexpectedly returned a prior release binding.'
+    }
+    $expectedReleaseParameterMap = ConvertFrom-JsonObjectMap `
+        -Value $releaseRecordBinding.parameters `
+        -Label 'Approved KAN-35 parameter map'
 
     $resolvedBillingControlRecord = [System.IO.Path]::GetFullPath($BillingControlRecordFile)
     if (-not (Test-Path -LiteralPath $resolvedBillingControlRecord -PathType Leaf)) {
@@ -344,12 +615,6 @@ if ($null -eq $awsCommand) {
     throw 'AWS CLI v2 is required for explicitly opted-in cloud actions.'
 }
 $script:AwsExecutable = $awsCommand.Source
-
-$templateInfo = Get-Item -LiteralPath $resolvedTemplate
-if ($templateInfo.Length -gt 51200) {
-    throw 'Template exceeds the 51,200-byte direct-upload limit. This guard will not stage templates in a paid S3 service.'
-}
-$templateSha256 = (Get-FileHash -LiteralPath $resolvedTemplate -Algorithm SHA256).Hash.ToLowerInvariant()
 
 # Verify the named profile before any CloudFormation API call. --profile and
 # --region are always supplied; ambient/default credentials are never selected.
@@ -658,15 +923,23 @@ if ($Action -eq 'Plan') {
         if ($null -eq $currentStack) {
             throw "Stack '$StackName' was not returned for UPDATE planning."
         }
-        $currentEnvironment = $currentStack.Parameters |
-            Where-Object ParameterKey -eq 'EnvironmentName' |
-            Select-Object -ExpandProperty ParameterValue -First 1
+        if ($currentStack.StackStatus -notin @('CREATE_COMPLETE', 'UPDATE_COMPLETE', 'UPDATE_ROLLBACK_COMPLETE')) {
+            throw "Stack '$StackName' is not in a stable state for UPDATE planning (Status=$($currentStack.StackStatus))."
+        }
+        $currentParameterMap = Get-StackParameterMap -Stack $currentStack
+        $currentEnvironment = $currentParameterMap.EnvironmentName
         if ($currentEnvironment -cne $EnvironmentName) {
             throw "EnvironmentName '$EnvironmentName' does not match the existing stack value '$currentEnvironment'. Create a separate stack for a different environment."
         }
-        foreach ($parameter in $currentStack.Parameters) {
-            if ($parameterDefaults.Contains($parameter.ParameterKey) -and -not $parameterMap.Contains($parameter.ParameterKey)) {
-                $parameterMap[$parameter.ParameterKey] = [string] $parameter.ParameterValue
+        if (
+            $releaseAction -eq 'ROLLBACK' -and
+            [string] $currentParameterMap.ApplicationVersion -cne [string] $releaseRollback.fromApplicationVersion
+        ) {
+            throw "Rollback intent expected current ApplicationVersion '$($releaseRollback.fromApplicationVersion)', but stack '$StackName' reports '$($currentParameterMap.ApplicationVersion)'. Re-plan from current state."
+        }
+        foreach ($parameter in $currentParameterMap.GetEnumerator()) {
+            if ($parameterDefaults.Contains($parameter.Key) -and -not $parameterMap.Contains($parameter.Key)) {
+                $parameterMap[$parameter.Key] = [string] $parameter.Value
             }
         }
     }
@@ -676,6 +949,11 @@ if ($Action -eq 'Plan') {
             $parameterMap[$entry.Key] = $entry.Value
         }
     }
+
+    Assert-ExactMap `
+        -Actual $parameterMap `
+        -Expected $expectedReleaseParameterMap `
+        -Label 'Planned CloudFormation parameter map'
 
     $cidrParts = $parameterMap.AllowedIngressIpv4Cidr.Split('/')
     $parsedAddress = $null
@@ -728,6 +1006,10 @@ if ($Action -eq 'Plan') {
         'billing-control-record' = [string] $controlRecord.recordId
         'acm-dns-control-record' = [string] $acmDnsBinding.recordId
         'acm-dns-configuration-sha256' = $acmDnsConfigurationSha256
+        'release-control-record' = [string] $releaseRecordBinding.recordId
+        'release-control-sha256' = $releaseRecordSha256
+        'release-action' = $releaseAction.ToLowerInvariant()
+        'source-revision' = [string] $releaseRecordBinding.artifact.sourceRevision
         'managed-by' = 'cloudformation'
         ticket = 'KAN-34'
     }
@@ -744,7 +1026,7 @@ if ($Action -eq 'Plan') {
     }
     $canonicalParameters = ($parameterMap.GetEnumerator() | Sort-Object Key | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join "`n"
     $parameterSha256 = Get-TextSha256 -Value $canonicalParameters
-    $expectedChangeSetDescription = "KAN-34 template-sha256=$templateSha256 parameters-sha256=$parameterSha256 tags-sha256=$tagSha256 control-record-sha256=$controlRecordSha256 acm-dns-record-sha256=$acmDnsRecordSha256 guardrail-policy=$expectedGuardrailPolicyVersion"
+    $expectedChangeSetDescription = "KAN-35 release-record-sha256=$releaseRecordSha256 release-action=$releaseAction source-revision=$($releaseRecordBinding.artifact.sourceRevision) prior-release-record-sha256=$($releaseRollback.priorReleaseRecordSha256) KAN-34 template-sha256=$templateSha256 parameters-sha256=$parameterSha256 tags-sha256=$tagSha256 control-record-sha256=$controlRecordSha256 acm-dns-record-sha256=$acmDnsRecordSha256 guardrail-policy=$expectedGuardrailPolicyVersion"
 
     $planArguments = @(
         'cloudformation',
@@ -763,9 +1045,12 @@ if ($Action -eq 'Plan') {
         '--region', $Region,
         '--no-cli-pager'
     )
+    if ($ChangeSetType -eq 'CREATE') {
+        $planArguments += @('--on-stack-failure', 'ROLLBACK')
+    }
 
     Invoke-AwsCommand -Arguments $planArguments
-    Write-Host "CloudFormation created change set '$ChangeSetName' for review but did not execute it."
+    Write-Host "CloudFormation created KAN-35 $releaseAction change set '$ChangeSetName' for review but did not execute it."
     Write-Host 'No application resources were activated by this command.'
     return
 }
@@ -787,6 +1072,9 @@ $changeSet = ($descriptionOutput | Out-String) | ConvertFrom-Json
 if ($changeSet.StackName -ne $StackName -or $changeSet.ChangeSetName -ne $ChangeSetName) {
     throw 'The described change set identity does not match the explicitly requested stack and change-set names.'
 }
+if ([string] $changeSet.ChangeSetType -cne $ChangeSetType) {
+    throw "The described change set type '$($changeSet.ChangeSetType)' does not match the approved type '$ChangeSetType'."
+}
 if ($changeSet.Status -ne 'CREATE_COMPLETE' -or $changeSet.ExecutionStatus -ne 'AVAILABLE') {
     throw "Change set '$ChangeSetName' is not executable (Status=$($changeSet.Status), ExecutionStatus=$($changeSet.ExecutionStatus))."
 }
@@ -795,10 +1083,45 @@ $expectedChangeSetIdPattern = '^arn:' + [regex]::Escape($partition) + ':cloudfor
 if ($changeSetId -notmatch $expectedChangeSetIdPattern) {
     throw 'The reviewed change set did not return the expected immutable ARN for the approved account and Region.'
 }
+Assert-SafeChangeSetExecutionContext -ChangeSet $changeSet -ReviewedChangeSetType $ChangeSetType
 
-# The description is not template provenance: a manually created change set can
-# copy it. Retrieve the user-submitted body for this immutable change-set ARN and
-# hash the actual bytes before execution.
+# DescribeChangeSet does not expose the CreateChangeSet RoleARN. CloudFormation
+# persists that role on the associated REVIEW_IN_PROGRESS or existing stack, so
+# this baseline rejects any stack RoleARN before execution.
+$targetStackOutput = & $script:AwsExecutable @(
+    'cloudformation',
+    'describe-stacks',
+    '--stack-name', $StackName,
+    '--profile', $Profile,
+    '--region', $Region,
+    '--output', 'json',
+    '--no-cli-pager'
+)
+if ($LASTEXITCODE -ne 0) {
+    throw "Unable to verify the associated stack execution role for change set '$ChangeSetName'."
+}
+$targetStack = (($targetStackOutput | Out-String) | ConvertFrom-Json).Stacks | Select-Object -First 1
+if ($null -eq $targetStack -or [string] $targetStack.StackName -cne $StackName) {
+    throw "CloudFormation did not return the explicitly targeted stack '$StackName'."
+}
+$targetStackStatus = [string] $targetStack.StackStatus
+if ($ChangeSetType -eq 'CREATE' -and $targetStackStatus -cne 'REVIEW_IN_PROGRESS') {
+    throw "CREATE execution requires the associated stack to remain REVIEW_IN_PROGRESS (Status=$targetStackStatus)."
+}
+if (
+    $ChangeSetType -eq 'UPDATE' -and
+    $targetStackStatus -notin @('CREATE_COMPLETE', 'UPDATE_COMPLETE', 'UPDATE_ROLLBACK_COMPLETE')
+) {
+    throw "UPDATE execution requires a stable associated stack (Status=$targetStackStatus)."
+}
+$targetStackRoleArn = [string] (Get-OptionalPropertyValue -Object $targetStack -Name 'RoleARN')
+if (-not [string]::IsNullOrWhiteSpace($targetStackRoleArn)) {
+    throw "The associated stack has an unapproved persisted service RoleARN '$targetStackRoleArn'. The current baseline requires no service role."
+}
+
+# The description is not provenance: a manually created change set can copy it.
+# Retrieve and hash the submitted template, then compare every described
+# parameter and tag to the independently approved KAN-35 record and controls.
 $submittedTemplateOutput = & $script:AwsExecutable @(
     'cloudformation',
     'get-template',
@@ -831,40 +1154,62 @@ $expectedStackTags = [ordered]@{
     'billing-control-record' = [string] $controlRecord.recordId
     'acm-dns-control-record' = [string] $acmDnsBinding.recordId
     'acm-dns-configuration-sha256' = $acmDnsConfigurationSha256
+    'release-control-record' = [string] $releaseRecordBinding.recordId
+    'release-control-sha256' = $releaseRecordSha256
+    'release-action' = $releaseAction.ToLowerInvariant()
+    'source-revision' = [string] $releaseRecordBinding.artifact.sourceRevision
     'managed-by' = 'cloudformation'
     ticket = 'KAN-34'
 }
 $changeSetTags = ConvertFrom-ChangeSetTags -Tags $changeSet.Tags
 if ($changeSetTags.Count -ne $expectedStackTags.Count) {
-    throw 'The reviewed change set does not contain the exact approved ownership and billing tag set.'
+    throw 'The reviewed change set does not contain the exact approved ownership, billing, and release tag set.'
 }
 foreach ($expectedTag in $expectedStackTags.GetEnumerator()) {
     if (-not $changeSetTags.Contains($expectedTag.Key) -or $changeSetTags[$expectedTag.Key] -cne $expectedTag.Value) {
-        throw "The reviewed change set tag '$($expectedTag.Key)' does not match the approved billing control record."
+        throw "The reviewed change set tag '$($expectedTag.Key)' does not match the approved billing and KAN-35 release records."
     }
 }
 $canonicalTags = ConvertTo-CanonicalTagText -Tags $changeSetTags
 $tagSha256 = Get-TextSha256 -Value $canonicalTags
-$canonicalParameters = ($changeSet.Parameters | Sort-Object ParameterKey | ForEach-Object {
-        if ($_.UsePreviousValue -or [string]::IsNullOrEmpty($_.ParameterKey) -or $null -eq $_.ParameterValue) {
-            throw 'The reviewed change set contains a non-explicit parameter and cannot be executed by this guard.'
-        }
-        "$($_.ParameterKey)=$($_.ParameterValue)"
-    }) -join "`n"
-$parameterSha256 = Get-TextSha256 -Value $canonicalParameters
 $changeSetParameterMap = [ordered]@{}
 foreach ($parameter in @($changeSet.Parameters)) {
-    $changeSetParameterMap[[string] $parameter.ParameterKey] = [string] $parameter.ParameterValue
+    if ($parameter.UsePreviousValue -or [string]::IsNullOrEmpty([string] $parameter.ParameterKey) -or $null -eq $parameter.ParameterValue) {
+        throw 'The reviewed change set contains a non-explicit parameter and cannot be executed by this guard.'
+    }
+    $parameterKey = [string] $parameter.ParameterKey
+    if ($changeSetParameterMap.Contains($parameterKey)) {
+        throw "The reviewed change set contains duplicate parameter '$parameterKey'."
+    }
+    $changeSetParameterMap[$parameterKey] = [string] $parameter.ParameterValue
 }
+Assert-ExactMap `
+    -Actual $changeSetParameterMap `
+    -Expected $expectedReleaseParameterMap `
+    -Label 'Reviewed change-set parameter map'
+$canonicalParameters = ($changeSetParameterMap.GetEnumerator() | Sort-Object Key | ForEach-Object {
+        "$($_.Key)=$($_.Value)"
+    }) -join "`n"
+$parameterSha256 = Get-TextSha256 -Value $canonicalParameters
 if (
     $changeSetParameterMap.AlbCertificateArn -cne [string] $acmDnsBinding.certificateArn -or
     $changeSetParameterMap.ApplicationHostname -cne [string] $acmDnsBinding.applicationHostname
 ) {
     throw 'The reviewed change set certificate or hostname does not match the validated KAN-230 record.'
 }
-$expectedChangeSetDescription = "KAN-34 template-sha256=$templateSha256 parameters-sha256=$parameterSha256 tags-sha256=$tagSha256 control-record-sha256=$controlRecordSha256 acm-dns-record-sha256=$acmDnsRecordSha256 guardrail-policy=$expectedGuardrailPolicyVersion"
+$expectedChangeSetDescription = "KAN-35 release-record-sha256=$releaseRecordSha256 release-action=$releaseAction source-revision=$($releaseRecordBinding.artifact.sourceRevision) prior-release-record-sha256=$($releaseRollback.priorReleaseRecordSha256) KAN-34 template-sha256=$templateSha256 parameters-sha256=$parameterSha256 tags-sha256=$tagSha256 control-record-sha256=$controlRecordSha256 acm-dns-record-sha256=$acmDnsRecordSha256 guardrail-policy=$expectedGuardrailPolicyVersion"
 if ($changeSet.Description -cne $expectedChangeSetDescription) {
-    throw "Change set '$ChangeSetName' is not bound to the current template, parameters, tags, billing record, and guardrail policy. Re-plan and review it."
+    throw "Change set '$ChangeSetName' is not bound to the current KAN-35 release, template, exact parameters, tags, billing record, ACM/DNS record, and guardrail policy. Re-plan and review it."
+}
+
+if ($releaseAction -eq 'ROLLBACK') {
+    $currentApplicationParameters = Get-StackParameterMap -Stack $targetStack
+    if ([string] $currentApplicationParameters.EnvironmentName -cne $EnvironmentName) {
+        throw 'The current stack environment does not match the approved rollback target.'
+    }
+    if ([string] $currentApplicationParameters.ApplicationVersion -cne [string] $releaseRollback.fromApplicationVersion) {
+        throw "Rollback intent expected current ApplicationVersion '$($releaseRollback.fromApplicationVersion)', but stack '$StackName' reports '$($currentApplicationParameters.ApplicationVersion)'. Re-plan from current state."
+    }
 }
 Write-Host "Reviewed template SHA-256: $templateSha256"
 Write-Host "Verified submitted template SHA-256: $submittedTemplateSha256"
@@ -872,8 +1217,14 @@ Write-Host "Reviewed parameter SHA-256: $parameterSha256"
 Write-Host "Reviewed tag SHA-256: $tagSha256"
 Write-Host "Reviewed billing control record SHA-256: $controlRecordSha256"
 Write-Host "Reviewed ACM/DNS control record SHA-256: $acmDnsRecordSha256"
+Write-Host "Reviewed KAN-35 release/deployment control record SHA-256: $releaseRecordSha256"
 
-$expectedAcknowledgement = "EXECUTE REVIEWED CHANGE SET $ChangeSetName FOR STACK $StackName USING BILLING CONTROL $controlRecordSha256 AND ACM DNS CONTROL $acmDnsRecordSha256; I ACKNOWLEDGE BILLABLE AWS RESOURCES IN ACCOUNT $AccountId REGION $Region USING PROFILE $Profile"
+$expectedAcknowledgement = if ($releaseAction -eq 'ROLLBACK') {
+    "EXECUTE REVIEWED ROLLBACK CHANGE SET $ChangeSetName FOR STACK $StackName FROM APPLICATION VERSION $($releaseRollback.fromApplicationVersion) TO PRIOR VERSION $($releaseRecordBinding.artifact.sourceRevision) USING INDEPENDENTLY EXPECTED RELEASE CONTROL DIGEST $ExpectedReleaseControlRecordSha256 AND PRIOR RELEASE RECORD $($releaseRollback.priorReleaseRecordSha256); I ACKNOWLEDGE BILLABLE AWS RESOURCES IN ACCOUNT $AccountId REGION $Region USING PROFILE $Profile"
+}
+else {
+    "EXECUTE REVIEWED DEPLOY CHANGE SET $ChangeSetName FOR STACK $StackName USING INDEPENDENTLY EXPECTED RELEASE CONTROL DIGEST $ExpectedReleaseControlRecordSha256, BILLING CONTROL $controlRecordSha256, AND ACM DNS CONTROL $acmDnsRecordSha256; I ACKNOWLEDGE BILLABLE AWS RESOURCES IN ACCOUNT $AccountId REGION $Region USING PROFILE $Profile"
+}
 if ($BillableAcknowledgement -cne $expectedAcknowledgement) {
     throw @"
 Deploy can create RDS, ElastiCache, load balancer, networking, logging, KMS, and other billable resources.
@@ -882,7 +1233,7 @@ $expectedAcknowledgement
 "@
 }
 
-Write-Warning "Executing reviewed change set '$ChangeSetName' can create billable AWS resources in account $AccountId ($Region)."
+Write-Warning "Executing reviewed KAN-35 $releaseAction change set '$ChangeSetName' can create or retain billable AWS resources in account $AccountId ($Region)."
 Invoke-AwsCommand -Arguments @(
     'cloudformation',
     'execute-change-set',

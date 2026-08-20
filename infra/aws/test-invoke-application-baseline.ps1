@@ -9,6 +9,7 @@ $applicationTemplatePath = Join-Path $PSScriptRoot 'application-baseline.yaml'
 $guardrailTemplatePath = Join-Path $PSScriptRoot 'account-guardrails.yaml'
 $recordValidatorPath = Join-Path $PSScriptRoot 'validate-billing-control-record.mjs'
 $acmDnsRecordValidatorPath = Join-Path $PSScriptRoot 'validate-acm-dns-control-record.mjs'
+$releaseRecordValidatorPath = Join-Path $PSScriptRoot 'validate-release-deployment-control-record.mjs'
 $temporaryRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("kan34-application-guard-test-" + [guid]::NewGuid().ToString('N'))
 $fakeAwsDirectory = Join-Path $temporaryRoot 'fake-aws'
 $markerPath = Join-Path $temporaryRoot 'aws-calls.log'
@@ -17,11 +18,16 @@ $guardrailStackResponsePath = Join-Path $temporaryRoot 'guardrail-stack.json'
 $guardrailTemplateResponsePath = Join-Path $temporaryRoot 'guardrail-template.json'
 $changeSetResponsePath = Join-Path $temporaryRoot 'change-set.json'
 $applicationTemplateResponsePath = Join-Path $temporaryRoot 'application-template.json'
+$applicationStackResponsePath = Join-Path $temporaryRoot 'application-stack.json'
 $approvedRecordPath = Join-Path $temporaryRoot 'approved-billing-control-record.json'
 $incompleteRecordPath = Join-Path $temporaryRoot 'incomplete-billing-control-record.json'
 $approvedAcmDnsRecordPath = Join-Path $temporaryRoot 'approved-acm-dns-bootstrap-record.json'
 $mismatchedAcmDnsRecordPath = Join-Path $temporaryRoot 'mismatched-acm-dns-bootstrap-record.json'
 $incompleteAcmDnsRecordPath = Join-Path $temporaryRoot 'incomplete-acm-dns-bootstrap-record.json'
+$approvedReleaseRecordPath = Join-Path $temporaryRoot 'approved-release-control-record.json'
+$incompleteReleaseRecordPath = Join-Path $temporaryRoot 'incomplete-release-control-record.json'
+$rollbackReleaseRecordPath = Join-Path $temporaryRoot 'rollback-release-control-record.json'
+$tamperedPriorReleaseRecordPath = Join-Path $temporaryRoot 'tampered-prior-release-control-record.json'
 $immutableChangeSetId = 'arn:aws:cloudformation:us-west-2:111122223333:changeSet/kan34-application-20260819/11111111-2222-3333-4444-555555555555'
 $originalEnvironment = @{
     PATH = $env:PATH
@@ -31,6 +37,7 @@ $originalEnvironment = @{
     FAKE_AWS_GUARDRAIL_TEMPLATE_RESPONSE = $env:FAKE_AWS_GUARDRAIL_TEMPLATE_RESPONSE
     FAKE_AWS_CHANGE_SET_RESPONSE = $env:FAKE_AWS_CHANGE_SET_RESPONSE
     FAKE_AWS_APPLICATION_TEMPLATE_RESPONSE = $env:FAKE_AWS_APPLICATION_TEMPLATE_RESPONSE
+    FAKE_AWS_APPLICATION_STACK_RESPONSE = $env:FAKE_AWS_APPLICATION_STACK_RESPONSE
 }
 $passed = 0
 
@@ -176,36 +183,93 @@ function Write-GuardrailStackResponse {
         })
 }
 
+function Write-ApplicationStackResponse {
+    param(
+        [string] $ApplicationVersion,
+        [string] $StackStatus = 'UPDATE_COMPLETE',
+        [AllowNull()]
+        [string] $RoleArn = $null
+    )
+
+    $parameterValues = Copy-ArgumentMap -Map $applicationParameterMap
+    $parameterValues.ApplicationVersion = $ApplicationVersion
+    $parameters = @($parameterValues.GetEnumerator() | ForEach-Object {
+            [ordered]@{ ParameterKey = [string] $_.Key; ParameterValue = [string] $_.Value }
+        })
+    $stack = [ordered]@{
+        StackName = 'crypto-lending-application-test'
+        StackStatus = $StackStatus
+        Parameters = $parameters
+    }
+    if ($null -ne $RoleArn) {
+        $stack.RoleARN = $RoleArn
+    }
+    Write-JsonFile -Path $applicationStackResponsePath -Value ([ordered]@{
+            Stacks = @(
+                $stack
+            )
+        }) -Depth 8
+}
+
 function Write-ChangeSetResponse {
-    $parameters = @($applicationParameterMap.GetEnumerator() | ForEach-Object {
+    param(
+        [System.Collections.IDictionary] $ParameterValues = $script:applicationParameterMap,
+        [System.Collections.IDictionary] $TagValues = $script:applicationStackTags,
+        [string] $DescriptionValue = $script:expectedChangeSetDescription,
+        [string] $TypeValue = 'CREATE',
+        [System.Collections.IDictionary] $ExecutionContextOverrides = @{},
+        [switch] $OmitOnStackFailure
+    )
+
+    $parameters = @($ParameterValues.GetEnumerator() | ForEach-Object {
             [ordered]@{
                 ParameterKey = [string] $_.Key
                 ParameterValue = [string] $_.Value
                 UsePreviousValue = $false
             }
         })
-    $tags = @($applicationStackTags.GetEnumerator() | ForEach-Object {
+    $tags = @($TagValues.GetEnumerator() | ForEach-Object {
             [ordered]@{ Key = [string] $_.Key; Value = [string] $_.Value }
         })
-    Write-JsonFile -Path $changeSetResponsePath -Value ([ordered]@{
-            StackName = 'crypto-lending-application-test'
-            ChangeSetName = 'kan34-application-20260819'
-            ChangeSetId = $immutableChangeSetId
-            ChangeSetType = 'CREATE'
-            Status = 'CREATE_COMPLETE'
-            ExecutionStatus = 'AVAILABLE'
-            Description = $expectedChangeSetDescription
-            Parameters = $parameters
-            Tags = $tags
-            Capabilities = @('CAPABILITY_IAM')
-            Changes = @()
-        })
+    $response = [ordered]@{
+        StackName = 'crypto-lending-application-test'
+        ChangeSetName = 'kan34-application-20260819'
+        ChangeSetId = $immutableChangeSetId
+        ChangeSetType = $TypeValue
+        Status = 'CREATE_COMPLETE'
+        ExecutionStatus = 'AVAILABLE'
+        Description = $DescriptionValue
+        Parameters = $parameters
+        Tags = $tags
+        Capabilities = @('CAPABILITY_IAM')
+        NotificationARNs = @()
+        RollbackConfiguration = [ordered]@{
+            RollbackTriggers = @()
+            MonitoringTimeInMinutes = 0
+        }
+        ResourceTypes = @()
+        IncludeNestedStacks = $false
+        ParentChangeSetId = $null
+        RootChangeSetId = $null
+        OnStackFailure = if ($TypeValue -eq 'CREATE') { 'ROLLBACK' } else { $null }
+        ImportExistingResources = $false
+        DeploymentMode = $null
+        DeploymentConfig = $null
+        Changes = @()
+    }
+    foreach ($override in $ExecutionContextOverrides.GetEnumerator()) {
+        $response[$override.Key] = $override.Value
+    }
+    if ($OmitOnStackFailure.IsPresent) {
+        $response.Remove('OnStackFailure')
+    }
+    Write-JsonFile -Path $changeSetResponsePath -Value $response
 }
 
 if (-not (Test-Path -LiteralPath $guardPath -PathType Leaf)) {
     throw "Application guard under test was not found: $guardPath"
 }
-foreach ($requiredFile in @($applicationTemplatePath, $guardrailTemplatePath, $recordValidatorPath, $acmDnsRecordValidatorPath)) {
+foreach ($requiredFile in @($applicationTemplatePath, $guardrailTemplatePath, $recordValidatorPath, $acmDnsRecordValidatorPath, $releaseRecordValidatorPath)) {
     if (-not (Test-Path -LiteralPath $requiredFile -PathType Leaf)) {
         throw "Required focused-test input was not found: $requiredFile"
     }
@@ -237,6 +301,14 @@ if ($service -eq 'sts' -and $operation -eq 'get-caller-identity') {
     Write-ResponseFile -Path $env:FAKE_AWS_IDENTITY_RESPONSE
 }
 if ($service -eq 'cloudformation' -and $operation -eq 'describe-stacks') {
+    $stackNameIndex = [Array]::IndexOf($AwsArguments, '--stack-name')
+    if (
+        $stackNameIndex -ge 0 -and
+        $stackNameIndex + 1 -lt $AwsArguments.Count -and
+        $AwsArguments[$stackNameIndex + 1] -eq 'crypto-lending-application-test'
+    ) {
+        Write-ResponseFile -Path $env:FAKE_AWS_APPLICATION_STACK_RESPONSE
+    }
     Write-ResponseFile -Path $env:FAKE_AWS_GUARDRAIL_STACK_RESPONSE
 }
 if ($service -eq 'cloudformation' -and $operation -eq 'get-template') {
@@ -249,6 +321,10 @@ if ($service -eq 'cloudformation' -and $operation -eq 'describe-change-set') {
     Write-ResponseFile -Path $env:FAKE_AWS_CHANGE_SET_RESPONSE
 }
 if ($service -eq 'cloudformation' -and $operation -eq 'execute-change-set') {
+    [Console]::Out.Write('{}')
+    exit 0
+}
+if ($service -eq 'cloudformation' -and $operation -eq 'create-change-set') {
     [Console]::Out.Write('{}')
     exit 0
 }
@@ -283,6 +359,7 @@ $env:FAKE_AWS_GUARDRAIL_STACK_RESPONSE = $guardrailStackResponsePath
 $env:FAKE_AWS_GUARDRAIL_TEMPLATE_RESPONSE = $guardrailTemplateResponsePath
 $env:FAKE_AWS_CHANGE_SET_RESPONSE = $changeSetResponsePath
 $env:FAKE_AWS_APPLICATION_TEMPLATE_RESPONSE = $applicationTemplateResponsePath
+$env:FAKE_AWS_APPLICATION_STACK_RESPONSE = $applicationStackResponsePath
 
 Write-JsonFile -Path $identityResponsePath -Value ([ordered]@{
         UserId = 'AROATEST:kan34-test'
@@ -586,6 +663,141 @@ $applicationParameterMap = [ordered]@{
     EnableOperationalDashboard = 'false'
     EnableContainerInsights = 'disabled'
 }
+$approvedReleaseRecord = [ordered]@{
+    schemaVersion = 2
+    artifactType = 'KAN_35_RELEASE_DEPLOYMENT_CONTROL'
+    status = 'APPROVED'
+    recordId = 'KAN-35:RELEASE:TEST-V1'
+    approvedAt = $utcNow.AddHours(-2).ToString('yyyy-MM-ddTHH:mm:ssZ', [System.Globalization.CultureInfo]::InvariantCulture)
+    expiresAt = $utcNow.AddDays(7).ToString('yyyy-MM-ddTHH:mm:ssZ', [System.Globalization.CultureInfo]::InvariantCulture)
+    action = 'DEPLOY'
+    templateSha256 = $applicationTemplateSha256
+    aws = [ordered]@{
+        accountId = '111122223333'
+        region = 'us-west-2'
+    }
+    target = [ordered]@{
+        environmentName = 'test-kan34'
+        stackName = 'crypto-lending-application-test'
+        changeSetName = 'kan34-application-20260819'
+        changeSetType = 'CREATE'
+    }
+    artifact = [ordered]@{
+        sourceRevision = ('a' * 40)
+        apiImageUri = $applicationParameterMap.ApiImageUri
+        webImageUri = $applicationParameterMap.WebImageUri
+        workerImageUri = $applicationParameterMap.WorkerImageUri
+        buildEvidenceSha256 = ('e' * 64)
+        provenanceReference = 'evidence:KAN-35/test-build-v1'
+    }
+    parameters = $applicationParameterMap
+    gates = [ordered]@{
+        continuousIntegration = 'PASS'
+        unitTests = 'PASS'
+        integrationTests = 'PASS'
+        migrationValidation = 'PASS'
+        reproducibleBuild = 'PASS'
+        artifactVersioning = 'PASS'
+        evidenceReference = 'evidence:KAN-35/test-gates-v1'
+    }
+    rollback = [ordered]@{
+        intent = 'NONE'
+        fromApplicationVersion = 'NOT_APPLICABLE'
+        priorReleaseRecordSha256 = 'NOT_APPLICABLE'
+        parameterDifferences = @()
+        databaseCompatibility = 'NOT_APPLICABLE'
+        evidenceReference = 'NOT_APPLICABLE'
+    }
+    authority = [ordered]@{
+        deploymentApprovers = @('release-owner', 'billing-finance-owner')
+        rollbackApprovers = @('incident-commander', 'database-owner')
+    }
+    independentVerification = [ordered]@{
+        verifier = 'independent-release-verifier'
+        decision = 'APPROVED'
+        verifiedAt = $utcNow.AddHours(-1).ToString('yyyy-MM-ddTHH:mm:ssZ', [System.Globalization.CultureInfo]::InvariantCulture)
+    }
+}
+Write-JsonFile -Path $approvedReleaseRecordPath -Value $approvedReleaseRecord -Depth 12
+$incompleteReleaseRecord = ($approvedReleaseRecord | ConvertTo-Json -Depth 12) | ConvertFrom-Json
+$incompleteReleaseRecord.gates.integrationTests = 'FAIL'
+Write-JsonFile -Path $incompleteReleaseRecordPath -Value $incompleteReleaseRecord -Depth 12
+
+$releaseValidationOutput = & $nodeCommand.Source @(
+    $releaseRecordValidatorPath,
+    '--record', $approvedReleaseRecordPath,
+    '--mode', 'approved',
+    '--expected-account', '111122223333',
+    '--expected-region', 'us-west-2',
+    '--expected-environment', 'test-kan34',
+    '--expected-stack', 'crypto-lending-application-test',
+    '--expected-change-set', 'kan34-application-20260819',
+    '--expected-change-set-type', 'CREATE',
+    '--expected-template-sha256', $applicationTemplateSha256,
+    '--json'
+)
+if ($LASTEXITCODE -ne 0) {
+    throw "Focused KAN-35 release fixture failed approved validation: $($releaseValidationOutput | Out-String)"
+}
+$releaseValidation = ($releaseValidationOutput | Out-String) | ConvertFrom-Json
+$releaseRecordSha256 = [string] $releaseValidation.canonicalSha256
+if (
+    -not $releaseValidation.ok -or
+    $releaseValidation.externalCallsMade -ne 0 -or
+    $releaseValidation.awsCallsMade -ne 0 -or
+    $releaseValidation.registryCallsMade -ne 0 -or
+    $releaseRecordSha256 -notmatch '^[a-f0-9]{64}$'
+) {
+    throw 'Focused KAN-35 release fixture did not produce a successful zero-external-call binding.'
+}
+$global:LASTEXITCODE = 0
+
+$rollbackReleaseRecord = ($approvedReleaseRecord | ConvertTo-Json -Depth 12) | ConvertFrom-Json
+$rollbackReleaseRecord.recordId = 'KAN-35:ROLLBACK:TEST-V1'
+$rollbackReleaseRecord.action = 'ROLLBACK'
+$rollbackReleaseRecord.target.changeSetType = 'UPDATE'
+$rollbackReleaseRecord.rollback.intent = 'REDEPLOY_PRIOR_VERSION'
+$rollbackReleaseRecord.rollback.fromApplicationVersion = ('9' * 40)
+$rollbackReleaseRecord.rollback.priorReleaseRecordSha256 = $releaseRecordSha256
+$rollbackReleaseRecord.rollback.parameterDifferences = @()
+$rollbackReleaseRecord.rollback.databaseCompatibility = 'NO_SCHEMA_CHANGE'
+$rollbackReleaseRecord.rollback.evidenceReference = 'evidence:KAN-35/test-rollback-v1'
+Write-JsonFile -Path $rollbackReleaseRecordPath -Value $rollbackReleaseRecord -Depth 12
+$rollbackValidationOutput = & $nodeCommand.Source @(
+    $releaseRecordValidatorPath,
+    '--record', $rollbackReleaseRecordPath,
+    '--prior-record', $approvedReleaseRecordPath,
+    '--mode', 'approved',
+    '--expected-account', '111122223333',
+    '--expected-region', 'us-west-2',
+    '--expected-environment', 'test-kan34',
+    '--expected-stack', 'crypto-lending-application-test',
+    '--expected-change-set', 'kan34-application-20260819',
+    '--expected-change-set-type', 'UPDATE',
+    '--expected-template-sha256', $applicationTemplateSha256,
+    '--json'
+)
+if ($LASTEXITCODE -ne 0) {
+    throw "Focused KAN-35 rollback fixture failed approved validation: $($rollbackValidationOutput | Out-String)"
+}
+$rollbackValidation = ($rollbackValidationOutput | Out-String) | ConvertFrom-Json
+$rollbackRecordSha256 = [string] $rollbackValidation.canonicalSha256
+if (
+    -not $rollbackValidation.ok -or
+    $rollbackValidation.externalCallsMade -ne 0 -or
+    $rollbackValidation.awsCallsMade -ne 0 -or
+    $rollbackRecordSha256 -notmatch '^[a-f0-9]{64}$'
+) {
+    throw 'Focused KAN-35 rollback fixture did not produce a successful zero-external-call binding.'
+}
+$global:LASTEXITCODE = 0
+
+$tamperedPriorReleaseRecord = ($approvedReleaseRecord | ConvertTo-Json -Depth 12) | ConvertFrom-Json
+$tamperedPriorReleaseRecord.artifact.provenanceReference = 'evidence:KAN-35/substituted-build-v1'
+Write-JsonFile -Path $tamperedPriorReleaseRecordPath -Value $tamperedPriorReleaseRecord -Depth 12
+
+Write-ApplicationStackResponse -ApplicationVersion $applicationParameterMap.ApplicationVersion -StackStatus 'REVIEW_IN_PROGRESS'
+
 $applicationStackTags = [ordered]@{
     application = 'crypto-lending'
     environment = 'test-kan34'
@@ -596,13 +808,24 @@ $applicationStackTags = [ordered]@{
     'billing-control-record' = 'KAN-229:THIRD-PARTY-FINAL-APPROVAL'
     'acm-dns-control-record' = 'KAN-230:ACM-DNS-BOOTSTRAP-APPROVAL'
     'acm-dns-configuration-sha256' = $acmDnsConfigurationSha256
+    'release-control-record' = 'KAN-35:RELEASE:TEST-V1'
+    'release-control-sha256' = $releaseRecordSha256
+    'release-action' = 'deploy'
+    'source-revision' = ('a' * 40)
     'managed-by' = 'cloudformation'
     ticket = 'KAN-34'
 }
 $parameterSha256 = Get-TextSha256 -Value (Get-CanonicalMapText -Map $applicationParameterMap)
 $tagSha256 = Get-TextSha256 -Value (Get-CanonicalMapText -Map $applicationStackTags)
-$expectedChangeSetDescription = "KAN-34 template-sha256=$applicationTemplateSha256 parameters-sha256=$parameterSha256 tags-sha256=$tagSha256 control-record-sha256=$controlRecordSha256 acm-dns-record-sha256=$acmDnsRecordSha256 guardrail-policy=kan-229-v1"
-$billableAcknowledgement = "EXECUTE REVIEWED CHANGE SET kan34-application-20260819 FOR STACK crypto-lending-application-test USING BILLING CONTROL $controlRecordSha256 AND ACM DNS CONTROL $acmDnsRecordSha256; I ACKNOWLEDGE BILLABLE AWS RESOURCES IN ACCOUNT 111122223333 REGION us-west-2 USING PROFILE kan34-test"
+$expectedChangeSetDescription = "KAN-35 release-record-sha256=$releaseRecordSha256 release-action=DEPLOY source-revision=$('a' * 40) prior-release-record-sha256=NOT_APPLICABLE KAN-34 template-sha256=$applicationTemplateSha256 parameters-sha256=$parameterSha256 tags-sha256=$tagSha256 control-record-sha256=$controlRecordSha256 acm-dns-record-sha256=$acmDnsRecordSha256 guardrail-policy=kan-229-v1"
+$billableAcknowledgement = "EXECUTE REVIEWED DEPLOY CHANGE SET kan34-application-20260819 FOR STACK crypto-lending-application-test USING INDEPENDENTLY EXPECTED RELEASE CONTROL DIGEST $releaseRecordSha256, BILLING CONTROL $controlRecordSha256, AND ACM DNS CONTROL $acmDnsRecordSha256; I ACKNOWLEDGE BILLABLE AWS RESOURCES IN ACCOUNT 111122223333 REGION us-west-2 USING PROFILE kan34-test"
+$rollbackStackTags = Copy-ArgumentMap -Map $applicationStackTags
+$rollbackStackTags['release-control-record'] = 'KAN-35:ROLLBACK:TEST-V1'
+$rollbackStackTags['release-control-sha256'] = $rollbackRecordSha256
+$rollbackStackTags['release-action'] = 'rollback'
+$rollbackTagSha256 = Get-TextSha256 -Value (Get-CanonicalMapText -Map $rollbackStackTags)
+$rollbackExpectedChangeSetDescription = "KAN-35 release-record-sha256=$rollbackRecordSha256 release-action=ROLLBACK source-revision=$('a' * 40) prior-release-record-sha256=$releaseRecordSha256 KAN-34 template-sha256=$applicationTemplateSha256 parameters-sha256=$parameterSha256 tags-sha256=$rollbackTagSha256 control-record-sha256=$controlRecordSha256 acm-dns-record-sha256=$acmDnsRecordSha256 guardrail-policy=kan-229-v1"
+$rollbackBillableAcknowledgement = "EXECUTE REVIEWED ROLLBACK CHANGE SET kan34-application-20260819 FOR STACK crypto-lending-application-test FROM APPLICATION VERSION $('9' * 40) TO PRIOR VERSION $('a' * 40) USING INDEPENDENTLY EXPECTED RELEASE CONTROL DIGEST $rollbackRecordSha256 AND PRIOR RELEASE RECORD $releaseRecordSha256; I ACKNOWLEDGE BILLABLE AWS RESOURCES IN ACCOUNT 111122223333 REGION us-west-2 USING PROFILE kan34-test"
 
 $baseArguments = @{
     Action = 'Deploy'
@@ -616,6 +839,8 @@ $baseArguments = @{
     EnvironmentName = 'test-kan34'
     BillingControlRecordFile = $approvedRecordPath
     AcmDnsControlRecordFile = $approvedAcmDnsRecordPath
+    ReleaseControlRecordFile = $approvedReleaseRecordPath
+    ExpectedReleaseControlRecordSha256 = $releaseRecordSha256
     GuardrailStackName = 'crypto-lending-account-guardrails-test'
     GuardrailControlRegion = 'us-east-1'
     AllowAwsApiCalls = $true
@@ -631,13 +856,69 @@ try {
         Assert-Condition ($result.Output -match 'No AWS calls were made') 'LocalValidate did not report its zero-call boundary.'
     }
 
+    Invoke-FocusedTest -Name 'KAN-35 release preflight rejects missing and failed-gate records before AWS' -Body {
+        Clear-AwsMarker
+        $missingArguments = Copy-ArgumentMap -Map $baseArguments
+        [void] $missingArguments.Remove('ReleaseControlRecordFile')
+        $missingResult = Invoke-Guard -Arguments $missingArguments
+        Assert-Condition (-not $missingResult.Succeeded) 'Deploy accepted a missing KAN-35 release record.'
+        Assert-Condition ($missingResult.Output -match 'ReleaseControlRecordFile must be supplied explicitly') 'Missing KAN-35 release record rejection did not identify the required record.'
+        Assert-Condition ((Get-AwsMarkerText) -eq '') 'Missing KAN-35 release record reached AWS discovery.'
+
+        Clear-AwsMarker
+        $failedArguments = Copy-ArgumentMap -Map $baseArguments
+        $failedArguments.ReleaseControlRecordFile = $incompleteReleaseRecordPath
+        $failedResult = Invoke-Guard -Arguments $failedArguments
+        Assert-Condition (-not $failedResult.Succeeded) 'Deploy accepted a failed KAN-35 integration gate.'
+        Assert-Condition ($failedResult.Output -match 'gate-complete') 'Failed KAN-35 gate rejection did not identify the release gate.'
+        Assert-Condition ((Get-AwsMarkerText) -eq '') 'Failed KAN-35 gate reached AWS discovery.'
+    }
+
+    Invoke-FocusedTest -Name 'KAN-35 preflight rejects unauthenticated active records and missing or substituted prior records before AWS' -Body {
+        Clear-AwsMarker
+        $missingDigestArguments = Copy-ArgumentMap -Map $baseArguments
+        [void] $missingDigestArguments.Remove('ExpectedReleaseControlRecordSha256')
+        $missingDigestResult = Invoke-Guard -Arguments $missingDigestArguments
+        Assert-Condition (-not $missingDigestResult.Succeeded) 'Deploy accepted a missing independently supplied release-record digest.'
+        Assert-Condition ($missingDigestResult.Output -match 'ExpectedReleaseControlRecordSha256 must be supplied explicitly') 'Missing expected release-record digest rejection was not explicit.'
+        Assert-Condition ((Get-AwsMarkerText) -eq '') 'Missing expected release-record digest reached AWS discovery.'
+
+        Clear-AwsMarker
+        $wrongDigestArguments = Copy-ArgumentMap -Map $baseArguments
+        $wrongDigestArguments.ExpectedReleaseControlRecordSha256 = ('0' * 64)
+        $wrongDigestResult = Invoke-Guard -Arguments $wrongDigestArguments
+        Assert-Condition (-not $wrongDigestResult.Succeeded) 'Deploy accepted a release record that did not match the independently supplied digest.'
+        Assert-Condition ($wrongDigestResult.Output -match 'release/deployment control record is not approved') 'Wrong expected release-record digest rejection did not fail the local release gate.'
+        Assert-Condition ((Get-AwsMarkerText) -eq '') 'Wrong expected release-record digest reached AWS discovery.'
+
+        $rollbackPreflightArguments = Copy-ArgumentMap -Map $baseArguments
+        $rollbackPreflightArguments.ChangeSetType = 'UPDATE'
+        $rollbackPreflightArguments.ReleaseControlRecordFile = $rollbackReleaseRecordPath
+        $rollbackPreflightArguments.ExpectedReleaseControlRecordSha256 = $rollbackRecordSha256
+        $rollbackPreflightArguments.BillableAcknowledgement = $rollbackBillableAcknowledgement
+
+        Clear-AwsMarker
+        $missingPriorResult = Invoke-Guard -Arguments $rollbackPreflightArguments
+        Assert-Condition (-not $missingPriorResult.Succeeded) 'Rollback accepted a missing prior DEPLOY control record.'
+        Assert-Condition ($missingPriorResult.Output -match 'release/deployment control record is not approved') 'Missing prior DEPLOY record rejection did not fail the local release gate.'
+        Assert-Condition ((Get-AwsMarkerText) -eq '') 'Missing prior DEPLOY record reached AWS discovery.'
+
+        Clear-AwsMarker
+        $substitutedPriorArguments = Copy-ArgumentMap -Map $rollbackPreflightArguments
+        $substitutedPriorArguments.PriorReleaseControlRecordFile = $tamperedPriorReleaseRecordPath
+        $substitutedPriorResult = Invoke-Guard -Arguments $substitutedPriorArguments
+        Assert-Condition (-not $substitutedPriorResult.Succeeded) 'Rollback accepted a substituted prior DEPLOY control record.'
+        Assert-Condition ($substitutedPriorResult.Output -match 'release/deployment control record is not approved') 'Substituted prior DEPLOY record rejection did not fail the local release gate.'
+        Assert-Condition ((Get-AwsMarkerText) -eq '') 'Substituted prior DEPLOY record reached AWS discovery.'
+    }
+
     Invoke-FocusedTest -Name 'final-record preflight rejects incomplete delivery evidence before AWS' -Body {
         Clear-AwsMarker
         $arguments = Copy-ArgumentMap -Map $baseArguments
         $arguments.BillingControlRecordFile = $incompleteRecordPath
         $result = Invoke-Guard -Arguments $arguments
         Assert-Condition (-not $result.Succeeded) 'Deploy accepted an evidence-incomplete final control record.'
-        Assert-Condition ($result.Output -match 'evidence-complete') 'Final-record rejection did not identify the approved evidence gate.'
+        Assert-Condition ($result.Output -match 'evidence-complete') "Final-record rejection did not identify the approved evidence gate: $($result.Output)"
         Assert-Condition ((Get-AwsMarkerText) -eq '') 'Incomplete final record reached AWS discovery.'
     }
 
@@ -665,6 +946,27 @@ try {
         Assert-Condition (-not $incompleteResult.Succeeded) 'Deploy accepted an evidence-incomplete KAN-230 bootstrap record.'
         Assert-Condition ($incompleteResult.Output -match 'KAN-230 ACM/DNS prerequisite') 'Incomplete KAN-230 record rejection did not identify the prerequisite.'
         Assert-Condition ((Get-AwsMarkerText) -eq '') 'Incomplete KAN-230 record reached AWS discovery.'
+    }
+
+    Invoke-FocusedTest -Name 'CREATE Plan pins OnStackFailure ROLLBACK without execution' -Body {
+        Clear-AwsMarker
+        Write-GuardrailStackResponse -ConfigurationSha256 $controlConfigurationSha256
+        Write-TemplateResponse -Path $guardrailTemplateResponsePath -TemplateBody $guardrailTemplateBody
+        $planArguments = Copy-ArgumentMap -Map $baseArguments
+        $planArguments.Action = 'Plan'
+        $planArguments.ParameterOverride = @($applicationParameterMap.GetEnumerator() | Where-Object {
+                $_.Key -ne 'EnvironmentName'
+            } | ForEach-Object {
+                "$($_.Key)=$($_.Value)"
+            })
+        [void] $planArguments.Remove('BillableAcknowledgement')
+        $result = Invoke-Guard -Arguments $planArguments
+        $marker = Get-AwsMarkerText
+        $createLines = @($marker -split "`r?`n" | Where-Object { $_ -match 'cloudformation create-change-set' })
+        Assert-Condition $result.Succeeded "CREATE Plan failed: $($result.Output)"
+        Assert-Condition ($createLines.Count -eq 1) 'CREATE Plan did not submit exactly one change set.'
+        Assert-Condition ($createLines[0] -match '--on-stack-failure ROLLBACK(?:\s|$)') 'CREATE Plan did not explicitly pin OnStackFailure ROLLBACK.'
+        Assert-Condition ($marker -notmatch 'execute-change-set') 'CREATE Plan executed a change set.'
     }
 
     Invoke-FocusedTest -Name 'guardrail preflight requires the stable control configuration hash tag' -Body {
@@ -711,6 +1013,116 @@ try {
         Assert-Condition ($marker -notmatch 'execute-change-set') 'Deploy executed after application template rejection.'
     }
 
+    Invoke-FocusedTest -Name 'Deploy rejects a self-resealed change set whose parameters differ from the KAN-35 record' -Body {
+        Clear-AwsMarker
+        Write-GuardrailStackResponse -ConfigurationSha256 $controlConfigurationSha256
+        Write-TemplateResponse -Path $guardrailTemplateResponsePath -TemplateBody $guardrailTemplateBody
+        Write-TemplateResponse -Path $applicationTemplateResponsePath -TemplateBody $applicationTemplateBody
+        $forgedParameters = Copy-ArgumentMap -Map $applicationParameterMap
+        $forgedParameters.ApiDesiredCount = '1'
+        $forgedParameterSha256 = Get-TextSha256 -Value (Get-CanonicalMapText -Map $forgedParameters)
+        $forgedDescription = $expectedChangeSetDescription.Replace(
+            "parameters-sha256=$parameterSha256",
+            "parameters-sha256=$forgedParameterSha256"
+        )
+        Write-ChangeSetResponse -ParameterValues $forgedParameters -DescriptionValue $forgedDescription
+        $result = Invoke-Guard -Arguments $baseArguments
+        $marker = Get-AwsMarkerText
+        Assert-Condition (-not $result.Succeeded) 'Deploy accepted a self-resealed change set with an unapproved desired count.'
+        Assert-Condition ($result.Output -match 'ApiDesiredCount.*does not match the approved KAN-35') 'Parameter mismatch did not identify the exact KAN-35 binding.'
+        Assert-Condition ($marker -match 'cloudformation describe-change-set') 'Self-resealed parameter test did not reach change-set verification.'
+        Assert-Condition ($marker -notmatch 'execute-change-set') 'Deploy executed a self-resealed parameter mismatch.'
+    }
+
+    Invoke-FocusedTest -Name 'Deploy rejects a change-set type that differs from the KAN-35 target' -Body {
+        Clear-AwsMarker
+        Write-GuardrailStackResponse -ConfigurationSha256 $controlConfigurationSha256
+        Write-TemplateResponse -Path $guardrailTemplateResponsePath -TemplateBody $guardrailTemplateBody
+        Write-TemplateResponse -Path $applicationTemplateResponsePath -TemplateBody $applicationTemplateBody
+        Write-ChangeSetResponse -TypeValue 'UPDATE'
+        $result = Invoke-Guard -Arguments $baseArguments
+        $marker = Get-AwsMarkerText
+        Assert-Condition (-not $result.Succeeded) 'Deploy accepted a change-set type that differed from the approved KAN-35 target.'
+        Assert-Condition ($result.Output -match 'change set type.*does not match the approved type') 'Change-set type mismatch was not identified.'
+        Assert-Condition ($marker -notmatch [regex]::Escape($immutableChangeSetId)) 'Deploy retrieved the application template after a change-set type mismatch.'
+        Assert-Condition ($marker -notmatch 'execute-change-set') 'Deploy executed after a change-set type mismatch.'
+    }
+
+    Invoke-FocusedTest -Name 'Deploy rejects every unreviewed observable change-set execution context' -Body {
+        $unsafeContexts = @(
+            [ordered]@{ Name = 'notification ARN'; Overrides = [ordered]@{ NotificationARNs = @('arn:aws:sns:us-west-2:111122223333:unapproved') }; Pattern = 'notification ARNs' },
+            [ordered]@{ Name = 'rollback trigger'; Overrides = [ordered]@{ RollbackConfiguration = [ordered]@{ RollbackTriggers = @([ordered]@{ Arn = 'arn:aws:cloudwatch:us-west-2:111122223333:alarm:unapproved'; Type = 'AWS::CloudWatch::Alarm' }); MonitoringTimeInMinutes = 5 } }; Pattern = 'rollback configuration' },
+            [ordered]@{ Name = 'capability drift'; Overrides = [ordered]@{ Capabilities = @('CAPABILITY_IAM', 'CAPABILITY_NAMED_IAM') }; Pattern = 'exactly.*CAPABILITY_IAM' },
+            [ordered]@{ Name = 'resource types'; Overrides = [ordered]@{ ResourceTypes = @('AWS::IAM::Role') }; Pattern = 'ResourceTypes' },
+            [ordered]@{ Name = 'nested stacks'; Overrides = [ordered]@{ IncludeNestedStacks = $true }; Pattern = 'IncludeNestedStacks' },
+            [ordered]@{ Name = 'parent change set'; Overrides = [ordered]@{ ParentChangeSetId = 'arn:aws:cloudformation:us-west-2:111122223333:changeSet/parent/id' }; Pattern = 'ParentChangeSetId' },
+            [ordered]@{ Name = 'root change set'; Overrides = [ordered]@{ RootChangeSetId = 'arn:aws:cloudformation:us-west-2:111122223333:changeSet/root/id' }; Pattern = 'RootChangeSetId' },
+            [ordered]@{ Name = 'missing CREATE failure policy'; Overrides = [ordered]@{}; OmitOnStackFailure = $true; Pattern = 'explicitly use OnStackFailure ROLLBACK' },
+            [ordered]@{ Name = 'DELETE failure override'; Overrides = [ordered]@{ OnStackFailure = 'DELETE' }; Pattern = 'explicitly use OnStackFailure ROLLBACK' },
+            [ordered]@{ Name = 'DO_NOTHING failure override'; Overrides = [ordered]@{ OnStackFailure = 'DO_NOTHING' }; Pattern = 'explicitly use OnStackFailure ROLLBACK' },
+            [ordered]@{ Name = 'resource import'; Overrides = [ordered]@{ ImportExistingResources = $true }; Pattern = 'ImportExistingResources' },
+            [ordered]@{ Name = 'deployment mode'; Overrides = [ordered]@{ DeploymentMode = [ordered]@{ Mode = 'REVERT_DRIFT' } }; Pattern = 'DeploymentMode' },
+            [ordered]@{ Name = 'deployment config'; Overrides = [ordered]@{ DeploymentConfig = [ordered]@{ FailureToleranceCount = 1 } }; Pattern = 'DeploymentConfig' }
+        )
+        foreach ($unsafeContext in $unsafeContexts) {
+            Clear-AwsMarker
+            Write-GuardrailStackResponse -ConfigurationSha256 $controlConfigurationSha256
+            Write-TemplateResponse -Path $guardrailTemplateResponsePath -TemplateBody $guardrailTemplateBody
+            Write-TemplateResponse -Path $applicationTemplateResponsePath -TemplateBody $applicationTemplateBody
+            Write-ApplicationStackResponse -ApplicationVersion $applicationParameterMap.ApplicationVersion -StackStatus 'REVIEW_IN_PROGRESS'
+            if ($unsafeContext.Contains('OmitOnStackFailure') -and $unsafeContext.OmitOnStackFailure) {
+                Write-ChangeSetResponse -ExecutionContextOverrides $unsafeContext.Overrides -OmitOnStackFailure
+            }
+            else {
+                Write-ChangeSetResponse -ExecutionContextOverrides $unsafeContext.Overrides
+            }
+            $result = Invoke-Guard -Arguments $baseArguments
+            $marker = Get-AwsMarkerText
+            Assert-Condition (-not $result.Succeeded) "Deploy accepted unreviewed $($unsafeContext.Name)."
+            Assert-Condition ($result.Output -match $unsafeContext.Pattern) "Unreviewed $($unsafeContext.Name) rejection was not explicit: $($result.Output)"
+            Assert-Condition ($marker -match 'cloudformation describe-change-set') "Unreviewed $($unsafeContext.Name) test did not reach change-set verification."
+            Assert-Condition ($marker -notmatch [regex]::Escape($immutableChangeSetId)) "Deploy retrieved the application template after rejecting unreviewed $($unsafeContext.Name)."
+            Assert-Condition ($marker -notmatch 'execute-change-set') "Deploy executed with unreviewed $($unsafeContext.Name)."
+        }
+    }
+
+    Invoke-FocusedTest -Name 'Deploy rejects persisted stack service roles for CREATE and UPDATE' -Body {
+        $unapprovedRoleArn = 'arn:aws:iam::111122223333:role/UnapprovedCloudFormationServiceRole'
+
+        Clear-AwsMarker
+        Write-GuardrailStackResponse -ConfigurationSha256 $controlConfigurationSha256
+        Write-TemplateResponse -Path $guardrailTemplateResponsePath -TemplateBody $guardrailTemplateBody
+        Write-TemplateResponse -Path $applicationTemplateResponsePath -TemplateBody $applicationTemplateBody
+        Write-ApplicationStackResponse -ApplicationVersion $applicationParameterMap.ApplicationVersion -StackStatus 'REVIEW_IN_PROGRESS' -RoleArn $unapprovedRoleArn
+        Write-ChangeSetResponse
+        $createResult = Invoke-Guard -Arguments $baseArguments
+        $createMarker = Get-AwsMarkerText
+        Assert-Condition (-not $createResult.Succeeded) 'CREATE Deploy accepted an associated REVIEW_IN_PROGRESS stack service role.'
+        Assert-Condition ($createResult.Output -match 'unapproved persisted service RoleARN') "CREATE service-role rejection was not explicit: $($createResult.Output)"
+        Assert-Condition ($createMarker -notmatch 'execute-change-set') 'CREATE Deploy executed with an unapproved stack service role.'
+
+        Clear-AwsMarker
+        Write-ApplicationStackResponse -ApplicationVersion ('9' * 40) -StackStatus 'UPDATE_COMPLETE' -RoleArn $unapprovedRoleArn
+        Write-ChangeSetResponse `
+            -ParameterValues $applicationParameterMap `
+            -TagValues $rollbackStackTags `
+            -DescriptionValue $rollbackExpectedChangeSetDescription `
+            -TypeValue 'UPDATE'
+        $updateArguments = Copy-ArgumentMap -Map $baseArguments
+        $updateArguments.ChangeSetType = 'UPDATE'
+        $updateArguments.ReleaseControlRecordFile = $rollbackReleaseRecordPath
+        $updateArguments.PriorReleaseControlRecordFile = $approvedReleaseRecordPath
+        $updateArguments.ExpectedReleaseControlRecordSha256 = $rollbackRecordSha256
+        $updateArguments.BillableAcknowledgement = $rollbackBillableAcknowledgement
+        $updateResult = Invoke-Guard -Arguments $updateArguments
+        $updateMarker = Get-AwsMarkerText
+        Assert-Condition (-not $updateResult.Succeeded) 'UPDATE Deploy accepted an associated stack service role.'
+        Assert-Condition ($updateResult.Output -match 'unapproved persisted service RoleARN') "UPDATE service-role rejection was not explicit: $($updateResult.Output)"
+        Assert-Condition ($updateMarker -notmatch 'execute-change-set') 'UPDATE Deploy executed with an unapproved stack service role.'
+
+        Write-ApplicationStackResponse -ApplicationVersion $applicationParameterMap.ApplicationVersion -StackStatus 'REVIEW_IN_PROGRESS'
+    }
+
     Invoke-FocusedTest -Name 'exact happy path executes only the immutable change-set ARN' -Body {
         Clear-AwsMarker
         Write-GuardrailStackResponse -ConfigurationSha256 $controlConfigurationSha256
@@ -729,7 +1141,58 @@ try {
         Assert-Condition ($marker -notmatch 'create-change-set') 'Deploy unexpectedly created a new change set.'
     }
 
-    Write-Host "All $passed focused KAN-34 application invocation-guard tests passed."
+    Invoke-FocusedTest -Name 'Rollback rejects stale from-version intent before execution' -Body {
+        Clear-AwsMarker
+        Write-GuardrailStackResponse -ConfigurationSha256 $controlConfigurationSha256
+        Write-TemplateResponse -Path $guardrailTemplateResponsePath -TemplateBody $guardrailTemplateBody
+        Write-TemplateResponse -Path $applicationTemplateResponsePath -TemplateBody $applicationTemplateBody
+        Write-ApplicationStackResponse -ApplicationVersion $applicationParameterMap.ApplicationVersion
+        Write-ChangeSetResponse `
+            -ParameterValues $applicationParameterMap `
+            -TagValues $rollbackStackTags `
+            -DescriptionValue $rollbackExpectedChangeSetDescription `
+            -TypeValue 'UPDATE'
+        $rollbackArguments = Copy-ArgumentMap -Map $baseArguments
+        $rollbackArguments.ChangeSetType = 'UPDATE'
+        $rollbackArguments.ReleaseControlRecordFile = $rollbackReleaseRecordPath
+        $rollbackArguments.PriorReleaseControlRecordFile = $approvedReleaseRecordPath
+        $rollbackArguments.ExpectedReleaseControlRecordSha256 = $rollbackRecordSha256
+        $rollbackArguments.BillableAcknowledgement = $rollbackBillableAcknowledgement
+        $result = Invoke-Guard -Arguments $rollbackArguments
+        $marker = Get-AwsMarkerText
+        Assert-Condition (-not $result.Succeeded) 'Rollback accepted a stale from-version intent.'
+        Assert-Condition ($result.Output -match 'Rollback intent expected current ApplicationVersion') 'Stale rollback did not identify the current-version mismatch.'
+        Assert-Condition ($marker -match 'cloudformation describe-stacks --stack-name crypto-lending-application-test') 'Rollback did not re-read current application stack state.'
+        Assert-Condition ($marker -notmatch 'execute-change-set') 'Rollback executed after a stale from-version mismatch.'
+    }
+
+    Invoke-FocusedTest -Name 'exact prior-artifact rollback executes only after current-version verification' -Body {
+        Clear-AwsMarker
+        Write-GuardrailStackResponse -ConfigurationSha256 $controlConfigurationSha256
+        Write-TemplateResponse -Path $guardrailTemplateResponsePath -TemplateBody $guardrailTemplateBody
+        Write-TemplateResponse -Path $applicationTemplateResponsePath -TemplateBody $applicationTemplateBody
+        Write-ApplicationStackResponse -ApplicationVersion ('9' * 40)
+        Write-ChangeSetResponse `
+            -ParameterValues $applicationParameterMap `
+            -TagValues $rollbackStackTags `
+            -DescriptionValue $rollbackExpectedChangeSetDescription `
+            -TypeValue 'UPDATE'
+        $rollbackArguments = Copy-ArgumentMap -Map $baseArguments
+        $rollbackArguments.ChangeSetType = 'UPDATE'
+        $rollbackArguments.ReleaseControlRecordFile = $rollbackReleaseRecordPath
+        $rollbackArguments.PriorReleaseControlRecordFile = $approvedReleaseRecordPath
+        $rollbackArguments.ExpectedReleaseControlRecordSha256 = $rollbackRecordSha256
+        $rollbackArguments.BillableAcknowledgement = $rollbackBillableAcknowledgement
+        $result = Invoke-Guard -Arguments $rollbackArguments
+        $marker = Get-AwsMarkerText
+        $executeLines = @($marker -split "`r?`n" | Where-Object { $_ -match 'cloudformation execute-change-set' })
+        Assert-Condition $result.Succeeded "Exact application rollback failed: $($result.Output)"
+        Assert-Condition ($marker -match 'cloudformation describe-stacks --stack-name crypto-lending-application-test') 'Rollback did not verify the current application version.'
+        Assert-Condition ($executeLines.Count -eq 1) 'Rollback did not invoke execute-change-set exactly once.'
+        Assert-Condition ($executeLines[0] -match [regex]::Escape($immutableChangeSetId)) 'Rollback did not execute the immutable change-set ARN.'
+    }
+
+    Write-Host "All $passed focused KAN-34/KAN-35 application invocation-guard tests passed."
 }
 finally {
     $env:PATH = $originalEnvironment.PATH
@@ -739,6 +1202,7 @@ finally {
     $env:FAKE_AWS_GUARDRAIL_TEMPLATE_RESPONSE = $originalEnvironment.FAKE_AWS_GUARDRAIL_TEMPLATE_RESPONSE
     $env:FAKE_AWS_CHANGE_SET_RESPONSE = $originalEnvironment.FAKE_AWS_CHANGE_SET_RESPONSE
     $env:FAKE_AWS_APPLICATION_TEMPLATE_RESPONSE = $originalEnvironment.FAKE_AWS_APPLICATION_TEMPLATE_RESPONSE
+    $env:FAKE_AWS_APPLICATION_STACK_RESPONSE = $originalEnvironment.FAKE_AWS_APPLICATION_STACK_RESPONSE
 
     $resolvedTemporaryRoot = [System.IO.Path]::GetFullPath($temporaryRoot)
     $resolvedSystemTemp = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath())

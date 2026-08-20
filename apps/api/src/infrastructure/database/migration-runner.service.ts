@@ -174,6 +174,12 @@ export class MigrationRunner {
           migration.checksum,
         ]),
       );
+      const expectedIds = new Set(this.migrations.map((migration) => migration.id));
+      for (const appliedId of appliedById.keys()) {
+        if (!expectedIds.has(appliedId)) {
+          throw new Error(`Database contains unknown applied migration ${appliedId}`);
+        }
+      }
       for (const migration of this.migrations) {
         const appliedChecksum = appliedById.get(migration.id);
         if (!appliedChecksum) {

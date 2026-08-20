@@ -1500,11 +1500,54 @@ function validateDeploymentGuard(source, errors) {
     'acm-dns-record-sha256=',
     '$parameterMap.AlbCertificateArn -cne [string] $acmDnsBinding.certificateArn',
     '$parameterMap.ApplicationHostname -cne [string] $acmDnsBinding.applicationHostname',
+    "Assert-RequiredValue -Name 'ReleaseControlRecordFile'",
+    "Assert-RequiredValue -Name 'ExpectedReleaseControlRecordSha256'",
+    "Assert-RequiredValue -Name 'ChangeSetType'",
+    "'validate-release-deployment-control-record.mjs'",
+    "'--expected-change-set-type', $ChangeSetType",
+    "'--expected-template-sha256', $templateSha256",
+    "'--expected-record-sha256', $ExpectedReleaseControlRecordSha256",
+    "@('--prior-record', $resolvedPriorReleaseControlRecord)",
+    '$releaseValidation.externalCallsMade -ne 0',
+    '$releaseValidation.registryCallsMade -ne 0',
+    '$releaseRecordSha256',
+    '$releaseRecordSha256 -cne $ExpectedReleaseControlRecordSha256',
+    '$priorReleaseBinding.canonicalSha256',
+    '$releaseRecordBinding.artifact.$artifactName -cne [string] $priorReleaseBinding.artifact.$artifactName',
+    '$expectedReleaseParameterMap',
+    "-Label 'Planned CloudFormation parameter map'",
+    "-Label 'Reviewed change-set parameter map'",
+    '$changeSet.ChangeSetType -cne $ChangeSetType',
+    "'release-control-sha256' = $releaseRecordSha256",
+    "'source-revision' = [string] $releaseRecordBinding.artifact.sourceRevision",
+    'prior-release-record-sha256=',
+    "$releaseAction -eq 'ROLLBACK'",
+    '$releaseRollback.fromApplicationVersion',
+    'USING INDEPENDENTLY EXPECTED RELEASE CONTROL DIGEST $ExpectedReleaseControlRecordSha256',
+    'Assert-SafeChangeSetExecutionContext -ChangeSet $changeSet',
+    "'Capabilities'",
+    "'CAPABILITY_IAM'",
+    "'NotificationARNs'",
+    "'RollbackConfiguration'",
+    "'IncludeNestedStacks', 'ImportExistingResources'",
+    "'ParentChangeSetId', 'RootChangeSetId'",
+    "'OnStackFailure'",
+    "$ReviewedChangeSetType -eq 'CREATE' -and $onStackFailure -cne 'ROLLBACK'",
+    "$ReviewedChangeSetType -eq 'UPDATE' -and -not [string]::IsNullOrWhiteSpace($onStackFailure)",
+    "@('--on-stack-failure', 'ROLLBACK')",
+    "'DeploymentMode'",
+    "'DeploymentConfig'",
+    "Get-OptionalPropertyValue -Object $targetStack -Name 'RoleARN'",
+    "$targetStackStatus -cne 'REVIEW_IN_PROGRESS'",
   ];
   for (const fragment of requiredIdentityGuards) {
     if (!source.includes(fragment)) {
       errors.push(`Deployment guard is missing required identity safeguard: ${fragment}`);
     }
+  }
+
+  if (/['"]--role-arn['"]/.test(source)) {
+    errors.push('The current baseline Plan must not submit a CloudFormation service RoleARN.');
   }
 
   if (
@@ -1517,12 +1560,27 @@ function validateDeploymentGuard(source, errors) {
     );
   }
 
+  const planBranchIndex = source.indexOf("if ($Action -eq 'Plan')");
+  const createFailurePolicyIndex = source.indexOf(
+    "$planArguments += @('--on-stack-failure', 'ROLLBACK')",
+  );
+  const planInvocationIndex = source.indexOf('Invoke-AwsCommand -Arguments $planArguments');
+  if (
+    planBranchIndex < 0 ||
+    createFailurePolicyIndex < planBranchIndex ||
+    planInvocationIndex < createFailurePolicyIndex
+  ) {
+    errors.push(
+      'CREATE Plan must explicitly pin OnStackFailure ROLLBACK before submitting the change set.',
+    );
+  }
+
   if (!source.includes("'describe-change-set'") || !source.includes("'execute-change-set'")) {
     errors.push('Deployment guard must describe and execute the exact reviewed change set.');
   }
 
   const acknowledgementIndex = source.indexOf(
-    '$expectedAcknowledgement = "EXECUTE REVIEWED CHANGE SET',
+    "$expectedAcknowledgement = if ($releaseAction -eq 'ROLLBACK')",
   );
   const templateRetrievalIndex = source.indexOf("'get-template'");
   const deployInvocationIndex = source.lastIndexOf("'execute-change-set'");
@@ -1544,11 +1602,30 @@ function validateDeploymentGuard(source, errors) {
     !source.includes('Get-FileHash -LiteralPath $resolvedTemplate -Algorithm SHA256') ||
     !source.includes("'--description', $expectedChangeSetDescription") ||
     !source.includes('$changeSet.Description -cne $expectedChangeSetDescription') ||
-    !source.includes('Sort-Object ParameterKey') ||
+    !source.includes('Sort-Object Key') ||
     !source.includes('$submittedTemplateSha256 -cne $templateSha256')
   ) {
     errors.push(
-      'Plan and Deploy must bind the reviewed change set to exact template and parameter SHA-256 values and verify the submitted Original template.',
+      'Plan and Deploy must bind the reviewed change set to the approved KAN-35 release, exact template and full parameter map, and verify the submitted Original template.',
+    );
+  }
+
+  const releaseDescriptionFragment =
+    'KAN-35 release-record-sha256=$releaseRecordSha256 release-action=$releaseAction source-revision=';
+  if (source.split(releaseDescriptionFragment).length - 1 !== 2) {
+    errors.push(
+      'Plan and Deploy must independently reconstruct the identical KAN-35 description binding.',
+    );
+  }
+
+  const releaseValidationIndex = source.indexOf('$releaseValidationOutput = & $nodeCommand.Source');
+  if (
+    releaseValidationIndex < localReturnIndex ||
+    releaseValidationIndex > optInIndex ||
+    releaseValidationIndex > awsDiscoveryIndex
+  ) {
+    errors.push(
+      'KAN-35 release validation must complete before cloud opt-in and AWS tooling discovery.',
     );
   }
 }
@@ -1640,6 +1717,9 @@ function validateLocalArtifactHygiene(errors) {
     '*.acm-dns.local.json',
     '*.acm-dns-plan.local.json',
     '*.acm-dns-evidence.local.json',
+    '*.release-deployment-control.local.json',
+    '*.release-build-evidence.local.json',
+    '*.release-provenance.local.json',
     'cost-exports/',
     'parameters.local.json',
     '*.secrets.json',
@@ -1686,6 +1766,9 @@ function validateLocalArtifactHygiene(errors) {
       /\.acm-dns\.local\.json$/i.test(name) ||
       /\.acm-dns-plan\.local\.json$/i.test(name) ||
       /\.acm-dns-evidence\.local\.json$/i.test(name) ||
+      /\.release-deployment-control\.local\.json$/i.test(name) ||
+      /\.release-build-evidence\.local\.json$/i.test(name) ||
+      /\.release-provenance\.local\.json$/i.test(name) ||
       /(?:^|\.)parameters\.local\.json$/i.test(name)
     ) {
       forbiddenPaths.push(path);

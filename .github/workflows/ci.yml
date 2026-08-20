@@ -2,6 +2,8 @@ name: Foundation CI
 
 on:
   push:
+    branches:
+      - main
   pull_request:
   workflow_dispatch:
 
@@ -9,13 +11,21 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 env:
+  CI: 'true'
   DO_NOT_TRACK: '1'
+  FORCE_COLOR: '0'
   NEXT_TELEMETRY_DISABLED: '1'
+  NPM_CONFIG_AUDIT: 'false'
+  NPM_CONFIG_FUND: 'false'
+  NPM_CONFIG_UPDATE_NOTIFIER: 'false'
+  PIP_DISABLE_PIP_VERSION_CHECK: '1'
+  PIP_NO_INPUT: '1'
   SCARF_ANALYTICS: 'false'
+  TZ: UTC
   DATABASE_RUNTIME_URL: postgresql://crypto_lending:local_only_password@127.0.0.1:5432/crypto_lending
   MIGRATION_DATABASE_URL: postgresql://crypto_lending:local_only_password@127.0.0.1:5432/crypto_lending
   TEST_DATABASE_URL: postgresql://crypto_lending:local_only_password@127.0.0.1:5432/crypto_lending
@@ -40,24 +50,41 @@ env:
 
 jobs:
   validate:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
 
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
 
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 22
+          node-version-file: .node-version
           cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Validate source policies offline
+        run: |
+          node --test infra/ci/validate-workflows.test.mjs
+          node infra/ci/validate-workflows.mjs
+          node --test scripts/containers/validate-container-artifacts.test.mjs
+          node scripts/containers/validate-container-artifacts.mjs
+          node infra/aws/validate-release-deployment-control-record.mjs --record infra/aws/release-deployment-control-record.example.json --mode example
 
       - name: Use the repository npm version
-        run: npm install --global npm@11.6.4
+        run: npm install --global npm@11.6.4 --ignore-scripts --no-audit --no-fund
+
+      - name: Verify pinned Node.js and npm versions
+        run: |
+          node -e "const fs = require('node:fs'); const expected = fs.readFileSync('.node-version', 'utf8').trim(); if (process.version !== 'v' + expected) throw new Error('Expected Node.js ' + expected + ', received ' + process.version);"
+          test "$(npm --version)" = "11.6.4"
 
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --no-audit --no-fund
 
       - name: Install pinned CloudFormation linter
         run: python -m pip install --disable-pip-version-check --requirement infra/aws/requirements-dev.txt
@@ -68,6 +95,7 @@ jobs:
           npm run infra:test:guardrails
           npm run infra:test:acm-dns
           npm run infra:test:migrations
+          node --test infra/aws/validate-release-deployment-control-record.test.mjs
           pwsh -NoProfile -File infra/aws/test-invoke-acm-dns-local.ps1
           npm run infra:test:egress
           pwsh -NoProfile -File infra/aws/test-invoke-account-readonly-preflight.ps1
@@ -100,22 +128,16 @@ jobs:
           npm run openapi:generate
           git diff --exit-code -- apps/api/openapi.json
 
-      - name: Upload OpenAPI contract
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: crypto-lending-openapi
-          path: apps/api/openapi.json
-          if-no-files-found: error
-          retention-days: 14
-
       - name: Start local dependencies
         run: docker compose up --detach --build --wait --wait-timeout 120
 
-      - name: Verify migration commands
+      - name: Verify compiled migration lifecycle
         run: |
           npm run db:migrate:compiled --workspace @crypto-lending/api
-          npm run db:status:compiled --workspace @crypto-lending/api
+          npm run db:verify:compiled --workspace @crypto-lending/api
           npm run db:rollback:compiled --workspace @crypto-lending/api
+          npm run db:migrate:compiled --workspace @crypto-lending/api
+          npm run db:verify:compiled --workspace @crypto-lending/api
 
       - name: Run live infrastructure tests
         env:
@@ -130,11 +152,40 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: infrastructure-logs
+          name: infrastructure-logs-${{ github.sha }}-${{ github.run_attempt }}
           path: infrastructure.log
           if-no-files-found: error
+          include-hidden-files: false
           retention-days: 7
 
       - name: Stop local dependencies
         if: always()
         run: docker compose down --volumes
+
+      - name: Prepare versioned OpenAPI artifact
+        run: |
+          mkdir -p .ci-artifacts/openapi
+          cp apps/api/openapi.json .ci-artifacts/openapi/openapi.json
+          cd .ci-artifacts/openapi
+          sha256sum openapi.json > SHA256SUMS
+          sha256sum --check SHA256SUMS
+
+      - name: Upload versioned OpenAPI artifact
+        id: upload_openapi
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: crypto-lending-openapi-${{ github.sha }}-${{ github.run_attempt }}
+          path: .ci-artifacts/openapi
+          if-no-files-found: error
+          include-hidden-files: false
+          retention-days: 14
+
+      - name: Verify uploaded artifact digest
+        env:
+          OPENAPI_ARTIFACT_DIGEST: ${{ steps.upload_openapi.outputs.artifact-digest }}
+        run: |
+          if [[ ! "$OPENAPI_ARTIFACT_DIGEST" =~ ^[a-f0-9]{64}$ ]]; then
+            echo "upload-artifact did not return a valid SHA-256 digest" >&2
+            exit 1
+          fi
+          echo "OpenAPI artifact SHA-256: $OPENAPI_ARTIFACT_DIGEST" >> "$GITHUB_STEP_SUMMARY"

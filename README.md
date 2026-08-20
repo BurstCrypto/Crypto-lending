@@ -156,6 +156,9 @@ npm run security:test:jira
 npm run test:e2e --workspace @crypto-lending/api
 npm run build
 npm run openapi:generate
+npm run ci:test:policy
+npm run ci:validate:policy
+npm run containers:check
 ```
 
 To exercise real migrations, Redis health, SQS health, retry behavior, and DLQ
@@ -214,6 +217,9 @@ authority, and independent-verification workflow. See
 DNS, cutover, and rollback contract. The Proposed egress design,
 dependency gates, and live-evidence boundary are in
 [`docs/KAN-231.md`](docs/KAN-231.md).
+KAN-35's zero-spend CI, artifact, release-binding, and rollback controls—and the
+live work that remains explicitly unrun—are documented in
+[`docs/KAN-35.md`](docs/KAN-35.md).
 
 Production API/worker tasks receive only `DATABASE_RUNTIME_*` credentials. The
 separate `infra/aws/database-migration-task.yaml` defines an operator-invoked,

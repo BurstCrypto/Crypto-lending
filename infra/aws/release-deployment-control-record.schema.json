@@ -1,0 +1,356 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://crypto-lending.invalid/schemas/release-deployment-control-record.schema.json",
+  "title": "KAN-35 release and non-production deployment control record",
+  "description": "A local, fail-closed approval record that binds a reviewed source revision and digest-pinned artifact set to one exact CloudFormation target and full parameter map. Validation does not sign artifacts, call AWS, publish images, or authorize spending by itself.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "artifactType",
+    "status",
+    "recordId",
+    "approvedAt",
+    "expiresAt",
+    "action",
+    "templateSha256",
+    "aws",
+    "target",
+    "artifact",
+    "parameters",
+    "gates",
+    "rollback",
+    "authority",
+    "independentVerification"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 2 },
+    "artifactType": { "const": "KAN_35_RELEASE_DEPLOYMENT_CONTROL" },
+    "status": { "enum": ["NOT_APPROVED", "APPROVED", "REJECTED", "EXPIRED"] },
+    "recordId": { "$ref": "#/$defs/referenceOrSentinel" },
+    "approvedAt": { "$ref": "#/$defs/instantOrSentinel" },
+    "expiresAt": { "$ref": "#/$defs/instantOrSentinel" },
+    "action": { "enum": ["NOT_APPROVED", "DEPLOY", "ROLLBACK"] },
+    "templateSha256": { "$ref": "#/$defs/sha256OrSentinel" },
+    "aws": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["accountId", "region"],
+      "properties": {
+        "accountId": {
+          "anyOf": [
+            { "$ref": "#/$defs/approvalSentinel" },
+            { "type": "string", "pattern": "^[0-9]{12}$" }
+          ]
+        },
+        "region": {
+          "anyOf": [
+            { "$ref": "#/$defs/approvalSentinel" },
+            { "type": "string", "pattern": "^[a-z]{2}(-gov)?-[a-z]+-[0-9]$" }
+          ]
+        }
+      }
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["environmentName", "stackName", "changeSetName", "changeSetType"],
+      "properties": {
+        "environmentName": {
+          "anyOf": [
+            { "$ref": "#/$defs/approvalSentinel" },
+            {
+              "type": "string",
+              "maxLength": 31,
+              "pattern": "^(dev|test|qa|sandbox|staging)(-[a-z0-9]+)*$"
+            }
+          ]
+        },
+        "stackName": { "$ref": "#/$defs/stackNameOrSentinel" },
+        "changeSetName": { "$ref": "#/$defs/stackNameOrSentinel" },
+        "changeSetType": { "enum": ["NOT_APPROVED", "CREATE", "UPDATE"] }
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sourceRevision",
+        "apiImageUri",
+        "webImageUri",
+        "workerImageUri",
+        "buildEvidenceSha256",
+        "provenanceReference"
+      ],
+      "properties": {
+        "sourceRevision": { "$ref": "#/$defs/commitOrSentinel" },
+        "apiImageUri": { "$ref": "#/$defs/apiImageUriOrSentinel" },
+        "webImageUri": { "$ref": "#/$defs/webImageUriOrSentinel" },
+        "workerImageUri": { "$ref": "#/$defs/workerImageUriOrSentinel" },
+        "buildEvidenceSha256": { "$ref": "#/$defs/sha256OrSentinel" },
+        "provenanceReference": { "$ref": "#/$defs/referenceOrSentinel" }
+      }
+    },
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "BillingAcknowledgement",
+        "EnvironmentName",
+        "ApplicationVersion",
+        "ApiImageUri",
+        "WebImageUri",
+        "WorkerImageUri",
+        "RdsCaBundlePath",
+        "ApiDesiredCount",
+        "WebDesiredCount",
+        "WorkerDesiredCount",
+        "VpcCidr",
+        "PublicSubnetACidr",
+        "PublicSubnetBCidr",
+        "PrivateSubnetACidr",
+        "PrivateSubnetBCidr",
+        "PrivateEgressMode",
+        "S3ManagedPrefixListId",
+        "AllowedIngressIpv4Cidr",
+        "AlbCertificateArn",
+        "ApplicationHostname",
+        "DatabaseName",
+        "DatabaseInstanceClass",
+        "DatabaseAllocatedStorageGiB",
+        "PostgresEngineVersion",
+        "DatabaseDeletionProtection",
+        "EnableDatabaseMultiAz",
+        "RedisNodeType",
+        "EnableRedisReplica",
+        "StatefulBackupRetentionDays",
+        "SqsMaxReceiveCount",
+        "SqsVisibilityTimeoutSeconds",
+        "LogRetentionDays",
+        "EnableOperationalAlarms",
+        "EnableOperationalDashboard",
+        "EnableContainerInsights"
+      ],
+      "properties": {
+        "BillingAcknowledgement": { "$ref": "#/$defs/parameterValue" },
+        "EnvironmentName": { "$ref": "#/$defs/parameterValue" },
+        "ApplicationVersion": { "$ref": "#/$defs/parameterValue" },
+        "ApiImageUri": { "$ref": "#/$defs/apiImageUriOrSentinel" },
+        "WebImageUri": { "$ref": "#/$defs/webImageUriOrSentinel" },
+        "WorkerImageUri": { "$ref": "#/$defs/workerImageUriOrSentinel" },
+        "RdsCaBundlePath": { "$ref": "#/$defs/parameterValue" },
+        "ApiDesiredCount": { "$ref": "#/$defs/parameterValue" },
+        "WebDesiredCount": { "$ref": "#/$defs/parameterValue" },
+        "WorkerDesiredCount": { "$ref": "#/$defs/parameterValue" },
+        "VpcCidr": { "$ref": "#/$defs/parameterValue" },
+        "PublicSubnetACidr": { "$ref": "#/$defs/parameterValue" },
+        "PublicSubnetBCidr": { "$ref": "#/$defs/parameterValue" },
+        "PrivateSubnetACidr": { "$ref": "#/$defs/parameterValue" },
+        "PrivateSubnetBCidr": { "$ref": "#/$defs/parameterValue" },
+        "PrivateEgressMode": { "$ref": "#/$defs/parameterValue" },
+        "S3ManagedPrefixListId": { "$ref": "#/$defs/parameterValue" },
+        "AllowedIngressIpv4Cidr": { "$ref": "#/$defs/parameterValue" },
+        "AlbCertificateArn": { "$ref": "#/$defs/parameterValue" },
+        "ApplicationHostname": { "$ref": "#/$defs/parameterValue" },
+        "DatabaseName": { "$ref": "#/$defs/parameterValue" },
+        "DatabaseInstanceClass": { "$ref": "#/$defs/parameterValue" },
+        "DatabaseAllocatedStorageGiB": { "$ref": "#/$defs/parameterValue" },
+        "PostgresEngineVersion": { "$ref": "#/$defs/parameterValue" },
+        "DatabaseDeletionProtection": { "$ref": "#/$defs/parameterValue" },
+        "EnableDatabaseMultiAz": { "$ref": "#/$defs/parameterValue" },
+        "RedisNodeType": { "$ref": "#/$defs/parameterValue" },
+        "EnableRedisReplica": { "$ref": "#/$defs/parameterValue" },
+        "StatefulBackupRetentionDays": { "$ref": "#/$defs/parameterValue" },
+        "SqsMaxReceiveCount": { "$ref": "#/$defs/parameterValue" },
+        "SqsVisibilityTimeoutSeconds": { "$ref": "#/$defs/parameterValue" },
+        "LogRetentionDays": { "$ref": "#/$defs/parameterValue" },
+        "EnableOperationalAlarms": { "$ref": "#/$defs/parameterValue" },
+        "EnableOperationalDashboard": { "$ref": "#/$defs/parameterValue" },
+        "EnableContainerInsights": { "$ref": "#/$defs/parameterValue" }
+      }
+    },
+    "gates": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "continuousIntegration",
+        "unitTests",
+        "integrationTests",
+        "migrationValidation",
+        "reproducibleBuild",
+        "artifactVersioning",
+        "evidenceReference"
+      ],
+      "properties": {
+        "continuousIntegration": { "$ref": "#/$defs/gateStatus" },
+        "unitTests": { "$ref": "#/$defs/gateStatus" },
+        "integrationTests": { "$ref": "#/$defs/gateStatus" },
+        "migrationValidation": { "$ref": "#/$defs/gateStatus" },
+        "reproducibleBuild": { "$ref": "#/$defs/gateStatus" },
+        "artifactVersioning": { "$ref": "#/$defs/gateStatus" },
+        "evidenceReference": { "$ref": "#/$defs/referenceOrSentinel" }
+      }
+    },
+    "rollback": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "intent",
+        "fromApplicationVersion",
+        "priorReleaseRecordSha256",
+        "parameterDifferences",
+        "databaseCompatibility",
+        "evidenceReference"
+      ],
+      "properties": {
+        "intent": { "enum": ["NOT_APPROVED", "NONE", "REDEPLOY_PRIOR_VERSION"] },
+        "fromApplicationVersion": {
+          "anyOf": [
+            { "$ref": "#/$defs/approvalSentinel" },
+            { "const": "NOT_APPLICABLE" },
+            { "type": "string", "pattern": "^[a-f0-9]{40}$" }
+          ]
+        },
+        "priorReleaseRecordSha256": {
+          "anyOf": [
+            { "$ref": "#/$defs/approvalSentinel" },
+            { "const": "NOT_APPLICABLE" },
+            { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+          ]
+        },
+        "parameterDifferences": {
+          "type": "array",
+          "maxItems": 3,
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["parameterName", "priorValue", "rollbackValue", "justification"],
+            "properties": {
+              "parameterName": {
+                "enum": ["ApiDesiredCount", "WebDesiredCount", "WorkerDesiredCount"]
+              },
+              "priorValue": { "$ref": "#/$defs/parameterValue" },
+              "rollbackValue": { "$ref": "#/$defs/parameterValue" },
+              "justification": { "const": "CURRENT_ROLLOUT_CAPACITY" }
+            }
+          }
+        },
+        "databaseCompatibility": {
+          "enum": [
+            "NOT_APPROVED",
+            "NOT_APPLICABLE",
+            "NO_SCHEMA_CHANGE",
+            "BACKWARD_COMPATIBLE_SCHEMA"
+          ]
+        },
+        "evidenceReference": {
+          "anyOf": [
+            { "$ref": "#/$defs/approvalSentinel" },
+            { "const": "NOT_APPLICABLE" },
+            { "$ref": "#/$defs/reference" }
+          ]
+        }
+      }
+    },
+    "authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["deploymentApprovers", "rollbackApprovers"],
+      "properties": {
+        "deploymentApprovers": { "$ref": "#/$defs/approverList" },
+        "rollbackApprovers": { "$ref": "#/$defs/approverList" }
+      }
+    },
+    "independentVerification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["verifier", "decision", "verifiedAt"],
+      "properties": {
+        "verifier": { "$ref": "#/$defs/roleAliasOrSentinel" },
+        "decision": { "enum": ["NOT_APPROVED", "APPROVED", "REJECTED", "EXPIRED"] },
+        "verifiedAt": { "$ref": "#/$defs/instantOrSentinel" }
+      }
+    }
+  },
+  "$defs": {
+    "approvalSentinel": { "enum": ["NOT_APPROVED", "NOT_RUN"] },
+    "instantOrSentinel": {
+      "anyOf": [
+        { "$ref": "#/$defs/approvalSentinel" },
+        {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,3})?Z$"
+        }
+      ]
+    },
+    "reference": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/#-]*$"
+    },
+    "referenceOrSentinel": {
+      "anyOf": [{ "$ref": "#/$defs/approvalSentinel" }, { "$ref": "#/$defs/reference" }]
+    },
+    "sha256OrSentinel": {
+      "anyOf": [
+        { "$ref": "#/$defs/approvalSentinel" },
+        { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      ]
+    },
+    "commitOrSentinel": {
+      "anyOf": [
+        { "$ref": "#/$defs/approvalSentinel" },
+        { "type": "string", "pattern": "^[a-f0-9]{40}$" }
+      ]
+    },
+    "stackNameOrSentinel": {
+      "anyOf": [
+        { "$ref": "#/$defs/approvalSentinel" },
+        { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9-]{0,127}$" }
+      ]
+    },
+    "apiImageUriOrSentinel": {
+      "anyOf": [
+        { "$ref": "#/$defs/approvalSentinel" },
+        {
+          "type": "string",
+          "pattern": "^[0-9]{12}\\.dkr\\.ecr\\.[a-z0-9-]+\\.(amazonaws\\.com|amazonaws\\.com\\.cn)/crypto-lending-api@sha256:[a-f0-9]{64}$"
+        }
+      ]
+    },
+    "webImageUriOrSentinel": {
+      "anyOf": [
+        { "$ref": "#/$defs/approvalSentinel" },
+        {
+          "type": "string",
+          "pattern": "^[0-9]{12}\\.dkr\\.ecr\\.[a-z0-9-]+\\.(amazonaws\\.com|amazonaws\\.com\\.cn)/crypto-lending-web@sha256:[a-f0-9]{64}$"
+        }
+      ]
+    },
+    "workerImageUriOrSentinel": {
+      "anyOf": [
+        { "$ref": "#/$defs/approvalSentinel" },
+        {
+          "type": "string",
+          "pattern": "^[0-9]{12}\\.dkr\\.ecr\\.[a-z0-9-]+\\.(amazonaws\\.com|amazonaws\\.com\\.cn)/crypto-lending-worker@sha256:[a-f0-9]{64}$"
+        }
+      ]
+    },
+    "parameterValue": { "type": "string", "minLength": 1, "maxLength": 1024 },
+    "gateStatus": { "enum": ["NOT_RUN", "PASS", "FAIL", "BLOCKED"] },
+    "roleAliasOrSentinel": {
+      "anyOf": [
+        { "$ref": "#/$defs/approvalSentinel" },
+        { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}[a-z0-9]$" }
+      ]
+    },
+    "approverList": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/roleAliasOrSentinel" }
+    }
+  }
+}
