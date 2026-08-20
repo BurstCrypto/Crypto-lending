@@ -16,6 +16,7 @@ export function createPostgresPool(config: InfrastructureConfig): Pool {
     connectionString: config.database.connectionString,
     connectionTimeoutMillis: config.database.connectionTimeoutMs,
     idleTimeoutMillis: config.database.idleTimeoutMs,
+    lock_timeout: config.database.lockTimeoutMs,
     max: config.database.poolMax,
     maxLifetimeSeconds: config.database.maxLifetimeSeconds,
     statement_timeout: config.database.statementTimeoutMs,

@@ -35,7 +35,7 @@ describeWithPostgres('PostgreSQL migration rollback integration', () => {
   it('applies up on a blank schema and removes its objects on down', async () => {
     const runner = new MigrationRunner(migrationPool, DATABASE_MIGRATION_LIST);
 
-    await expect(runner.up()).resolves.toEqual(['0001']);
+    await expect(runner.up()).resolves.toEqual(['0001', '0002', '0003']);
     const afterUp = await migrationPool.query<{ table_name: string }>(
       `SELECT table_name
        FROM information_schema.tables
@@ -43,8 +43,27 @@ describeWithPostgres('PostgreSQL migration rollback integration', () => {
       [schema],
     );
     expect(afterUp.rows).toEqual([{ table_name: 'job_outbox' }]);
+    const retentionIndexes = await migrationPool.query<{
+      index_name: string;
+      is_valid: boolean;
+    }>(
+      `SELECT index_class.relname AS index_name, index_state.indisvalid AS is_valid
+       FROM pg_catalog.pg_index AS index_state
+       INNER JOIN pg_catalog.pg_class AS index_class
+         ON index_class.oid = index_state.indexrelid
+       INNER JOIN pg_catalog.pg_namespace AS namespace
+         ON namespace.oid = index_class.relnamespace
+       WHERE namespace.nspname = $1
+         AND index_class.relname = ANY($2::text[])
+       ORDER BY index_class.relname`,
+      [schema, ['job_outbox_failed_retention_idx', 'job_outbox_published_retention_idx']],
+    );
+    expect(retentionIndexes.rows).toEqual([
+      { index_name: 'job_outbox_failed_retention_idx', is_valid: true },
+      { index_name: 'job_outbox_published_retention_idx', is_valid: true },
+    ]);
 
-    await expect(runner.down()).resolves.toEqual(['0001']);
+    await expect(runner.down(3)).resolves.toEqual(['0003', '0002', '0001']);
     const afterDown = await migrationPool.query<{ table_name: string }>(
       `SELECT table_name
        FROM information_schema.tables

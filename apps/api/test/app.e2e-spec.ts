@@ -5,6 +5,12 @@ import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { configureApplication } from '../src/application';
 import { API_VERSION, SERVICE_NAME, SERVICE_VERSION } from '../src/constants';
+import {
+  READINESS_ABUSE_LIMITS,
+  ReadinessAbuseLimiter,
+  type ReadinessRequestLease,
+} from '../src/infrastructure/health/readiness-abuse-limiter';
+import { InfrastructureHealthService } from '../src/infrastructure/health/infrastructure-health.service';
 
 describe('system endpoints (e2e)', () => {
   let app: INestApplication;
@@ -12,7 +18,19 @@ describe('system endpoints (e2e)', () => {
   beforeAll(async () => {
     const testingModule = await Test.createTestingModule({
       imports: [AppModule],
-    }).compile();
+    })
+      .overrideProvider(InfrastructureHealthService)
+      .useValue({
+        check: jest.fn().mockResolvedValue({
+          status: 'ok',
+          checks: {
+            postgres: { status: 'up', latencyMs: 1 },
+            redis: { status: 'up', latencyMs: 1 },
+            sqs: { status: 'up', latencyMs: 1 },
+          },
+        }),
+      })
+      .compile();
 
     app = testingModule.createNestApplication();
     configureApplication(app);
@@ -48,6 +66,62 @@ describe('system endpoints (e2e)', () => {
     });
   });
 
+  it('rejects dependency-readiness work above the replica concurrency cap', async () => {
+    const limiter = app.get(ReadinessAbuseLimiter);
+    const leases: ReadinessRequestLease[] = [];
+
+    try {
+      for (let index = 0; index < READINESS_ABUSE_LIMITS.maxConcurrentRequests; index += 1) {
+        const admission = limiter.tryAcquire();
+        expect(admission.admitted).toBe(true);
+        if (admission.admitted) leases.push(admission.lease);
+      }
+
+      const response = await request(app.getHttpServer())
+        .get('/api/v1/health/dependencies')
+        .expect(429);
+
+      expect(response.headers).toMatchObject({
+        'cache-control': 'no-store',
+        'retry-after': '1',
+      });
+      expect(response.body).toEqual({
+        error: 'Too Many Requests',
+        message: 'Readiness request limit exceeded',
+        statusCode: 429,
+      });
+    } finally {
+      leases.forEach((lease) => lease.release());
+    }
+  });
+
+  it('keeps the private readiness route independent of the public limiter', async () => {
+    const limiter = app.get(ReadinessAbuseLimiter);
+    const leases: ReadinessRequestLease[] = [];
+
+    try {
+      for (let index = 0; index < READINESS_ABUSE_LIMITS.maxConcurrentRequests; index += 1) {
+        const admission = limiter.tryAcquire();
+        expect(admission.admitted).toBe(true);
+        if (admission.admitted) leases.push(admission.lease);
+      }
+
+      await request(app.getHttpServer())
+        .get('/api/v1/internal/health/dependencies')
+        .expect(200)
+        .expect({
+          status: 'ok',
+          checks: {
+            postgres: { status: 'up', latencyMs: 1 },
+            redis: { status: 'up', latencyMs: 1 },
+            sqs: { status: 'up', latencyMs: 1 },
+          },
+        });
+    } finally {
+      leases.forEach((lease) => lease.release());
+    }
+  });
+
   it('publishes the generated OpenAPI contract', async () => {
     const response = await request(app.getHttpServer()).get('/api/v1/docs-json').expect(200);
 
@@ -55,10 +129,12 @@ describe('system endpoints (e2e)', () => {
     expect(response.body.paths).toHaveProperty('/api/v1/health');
     expect(response.body.paths).toHaveProperty('/api/v1/health/dependencies');
     expect(response.body.paths).toHaveProperty('/api/v1/version');
+    expect(response.body.paths).not.toHaveProperty('/api/v1/internal/health/dependencies');
     expect(
       response.body.paths['/api/v1/health/dependencies'].get.responses['503'].content[
         'application/json'
       ].schema.$ref,
     ).toBe('#/components/schemas/InfrastructureHealthResponseDto');
+    expect(response.body.paths['/api/v1/health/dependencies'].get.responses).toHaveProperty('429');
   });
 });

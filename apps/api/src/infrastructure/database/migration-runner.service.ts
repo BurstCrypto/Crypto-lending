@@ -23,14 +23,26 @@ interface MigrationTableLookup {
   table_name: string | null;
 }
 
+interface MigrationVerification {
+  valid: boolean;
+}
+
 function checksum(migration: DatabaseMigration): string {
-  return createHash('sha256')
+  const checksumSql = (sql: string | readonly string[]): string =>
+    typeof sql === 'string' ? sql : sql.join('\0statement\0');
+  const hash = createHash('sha256')
     .update(migration.id)
     .update('\0')
-    .update(migration.upSql)
+    .update(checksumSql(migration.upSql))
     .update('\0')
-    .update(migration.downSql)
-    .digest('hex');
+    .update(checksumSql(migration.downSql));
+  if (migration.transactional !== undefined) {
+    hash.update('\0transactional\0').update(String(migration.transactional));
+  }
+  if (migration.verifySql !== undefined) {
+    hash.update('\0verify\0').update(migration.verifySql);
+  }
+  return hash.digest('hex');
 }
 
 @Injectable()
@@ -44,6 +56,11 @@ export class MigrationRunner {
     for (const migration of migrations) {
       if (identifiers.has(migration.id)) {
         throw new Error(`Duplicate database migration id: ${migration.id}`);
+      }
+      if (migration.transactional === false && !migration.verifySql?.trim()) {
+        throw new Error(
+          `Non-transactional database migration ${migration.id} requires verification SQL`,
+        );
       }
       identifiers.add(migration.id);
     }
@@ -65,11 +82,13 @@ export class MigrationRunner {
               `Applied migration ${migration.id} has changed; create a new migration instead`,
             );
           }
+          await this.assertMigrationVerified(client, migration);
           continue;
         }
 
-        await this.inTransaction(client, async () => {
-          await client.query(migration.upSql);
+        await this.runMigration(client, migration, async () => {
+          await this.executeSql(client, migration.upSql);
+          await this.assertMigrationVerified(client, migration);
           await client.query(
             `INSERT INTO schema_migrations (id, description, checksum)
              VALUES ($1, $2, $3)`,
@@ -102,8 +121,8 @@ export class MigrationRunner {
           throw new Error(`Cannot roll back modified migration ${row.id}`);
         }
 
-        await this.inTransaction(client, async () => {
-          await client.query(migration.downSql);
+        await this.runMigration(client, migration, async () => {
+          await this.executeSql(client, migration.downSql);
           await client.query('DELETE FROM schema_migrations WHERE id = $1', [migration.id]);
         });
         rolledBack.push(migration.id);
@@ -115,9 +134,21 @@ export class MigrationRunner {
   async status(): Promise<MigrationStatus[]> {
     return this.withMigrationLock(async (client) => {
       await this.ensureMigrationTable(client);
-      const applied = new Set(
-        (await this.appliedMigrations(client)).map((migration) => migration.id),
+      const applied = new Map(
+        (await this.appliedMigrations(client)).map((migration) => [
+          migration.id,
+          migration.checksum,
+        ]),
       );
+      for (const migration of this.migrations) {
+        const appliedChecksum = applied.get(migration.id);
+        if (appliedChecksum && appliedChecksum !== checksum(migration)) {
+          throw new Error(`Database migration ${migration.id} checksum does not match`);
+        }
+        if (appliedChecksum) {
+          await this.assertMigrationVerified(client, migration);
+        }
+      }
       return this.migrations.map((migration) => ({
         id: migration.id,
         description: migration.description,
@@ -151,6 +182,7 @@ export class MigrationRunner {
         if (appliedChecksum !== checksum(migration)) {
           throw new Error(`Database migration ${migration.id} checksum does not match`);
         }
+        await this.assertMigrationVerified(client, migration);
       }
     } finally {
       client.release();
@@ -201,6 +233,38 @@ export class MigrationRunner {
     } catch (error) {
       await client.query('ROLLBACK');
       throw error;
+    }
+  }
+
+  private async runMigration(
+    client: PoolClient,
+    migration: DatabaseMigration,
+    work: () => Promise<void>,
+  ): Promise<void> {
+    if (migration.transactional === false) {
+      await work();
+      return;
+    }
+    await this.inTransaction(client, work);
+  }
+
+  private async executeSql(client: PoolClient, sql: string | readonly string[]): Promise<void> {
+    const statements = typeof sql === 'string' ? [sql] : sql;
+    for (const statement of statements) {
+      await client.query(statement);
+    }
+  }
+
+  private async assertMigrationVerified(
+    client: PoolClient,
+    migration: DatabaseMigration,
+  ): Promise<void> {
+    if (!migration.verifySql) {
+      return;
+    }
+    const result = await client.query<MigrationVerification>(migration.verifySql);
+    if (result.rows.length !== 1 || result.rows[0]?.valid !== true) {
+      throw new Error(`Database migration ${migration.id} schema verification failed`);
     }
   }
 }

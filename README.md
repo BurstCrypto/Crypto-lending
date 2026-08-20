@@ -162,7 +162,7 @@ To exercise real migrations, Redis health, SQS health, retry behavior, and DLQ
 redrive against the local Docker services:
 
 ```powershell
-$env:TEST_DATABASE_URL="postgresql://crypto_lending:local_only_password@127.0.0.1:5432/crypto_lending"
+$env:TEST_DATABASE_URL=$env:MIGRATION_DATABASE_URL
 $env:RUN_INFRASTRUCTURE_INTEGRATION="1"
 npm run test:integration
 ```
@@ -196,9 +196,10 @@ Validate it entirely offline with:
 npm run infra:validate
 npm run infra:test:guardrails
 npm run infra:test:acm-dns
+npm run infra:test:migrations
 npm run infra:test:egress
 python -m pip install --requirement infra/aws/requirements-dev.txt
-python infra/aws/lint-cloudformation.py infra/aws/application-baseline.yaml infra/aws/account-guardrails.yaml infra/aws/sqs-foundation.yaml
+python infra/aws/lint-cloudformation.py infra/aws/application-baseline.yaml infra/aws/database-migration-task.yaml infra/aws/account-guardrails.yaml infra/aws/sqs-foundation.yaml
 ```
 
 These commands do not access AWS. The described services are billable if a
@@ -213,6 +214,14 @@ authority, and independent-verification workflow. See
 DNS, cutover, and rollback contract. The Proposed egress design,
 dependency gates, and live-evidence boundary are in
 [`docs/KAN-231.md`](docs/KAN-231.md).
+
+Production API/worker tasks receive only `DATABASE_RUNTIME_*` credentials. The
+separate `infra/aws/database-migration-task.yaml` defines an operator-invoked,
+one-off task that receives only `MIGRATION_DATABASE_*`; it creates no ECS
+service and is never registered or run by repository setup or CI. The local
+Compose database intentionally retains one local-only account for developer
+compatibility. See KAN-34 for the required runtime-role bootstrap, migration
+order, billing gate, and residual deployment work.
 
 The live test refuses non-loopback service URLs, creates isolated queues and a
 unique PostgreSQL schema, and removes only those test resources. See

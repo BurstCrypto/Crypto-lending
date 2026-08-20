@@ -11,6 +11,7 @@ const RESERVED_ATTRIBUTE_NAMES = new Set(['jobid', 'jobkind', 'jobversion']);
 
 export interface SerializedJobMessage {
   body: string;
+  bytes: number;
   messageAttributes: Readonly<Record<string, string>>;
 }
 
@@ -126,5 +127,5 @@ export function serializeJobMessage(
     throw new Error(`Job message cannot exceed ${MAX_JOB_MESSAGE_BYTES} bytes`);
   }
 
-  return { body, messageAttributes: attributes };
+  return { body, bytes, messageAttributes: attributes };
 }

@@ -31,6 +31,12 @@ export interface RecordOutboxFailureOptions {
   retryDelayMs: number;
 }
 
+export interface CleanupOutboxJobsOptions {
+  batchSize: number;
+  failedRetentionMs: number;
+  publishedRetentionMs: number;
+}
+
 export type OutboxFailureTransition = 'retry' | 'failed' | 'lease-lost';
 
 interface ClaimedOutboxRow extends QueryResultRow {
@@ -84,6 +90,24 @@ function validateClaimOptions(options: ClaimOutboxJobsOptions): void {
     options.maxAttempts > 100
   ) {
     throw new Error('Outbox maxAttempts must be an integer between 1 and 100');
+  }
+}
+
+function validateCleanupOptions(options: CleanupOutboxJobsOptions): void {
+  if (
+    !Number.isSafeInteger(options.batchSize) ||
+    options.batchSize < 1 ||
+    options.batchSize > 1_000
+  ) {
+    throw new Error('Outbox cleanup batchSize must be an integer between 1 and 1000');
+  }
+  for (const [name, value] of [
+    ['failedRetentionMs', options.failedRetentionMs],
+    ['publishedRetentionMs', options.publishedRetentionMs],
+  ] as const) {
+    if (!Number.isSafeInteger(value) || value < 60_000 || value > 315_360_000_000) {
+      throw new Error(`Outbox cleanup ${name} must be an integer between 60000 and 315360000000`);
+    }
   }
 }
 
@@ -210,5 +234,53 @@ export class JobOutboxRepository {
       return 'lease-lost';
     }
     return status === 'failed' ? 'failed' : 'retry';
+  }
+
+  /**
+   * Deletes only terminal rows in a small lock-skipping batch. Pending rows,
+   * including legacy rows awaiting their terminal transition, are never
+   * retention candidates.
+   */
+  async deleteExpired(options: CleanupOutboxJobsOptions): Promise<number> {
+    validateCleanupOptions(options);
+    const result = await this.postgres.query(
+      `WITH published_expired AS (
+         SELECT id,
+                published_at + ($1::double precision * INTERVAL '1 millisecond') AS expires_at
+         FROM job_outbox
+         WHERE status = 'published'
+           AND published_at < statement_timestamp()
+             - ($1::double precision * INTERVAL '1 millisecond')
+         ORDER BY published_at, id
+         LIMIT $3
+         FOR UPDATE SKIP LOCKED
+       ), failed_expired AS (
+         SELECT id,
+                failed_at + ($2::double precision * INTERVAL '1 millisecond') AS expires_at
+         FROM job_outbox
+         WHERE status = 'failed'
+           AND failed_at < statement_timestamp()
+             - ($2::double precision * INTERVAL '1 millisecond')
+         ORDER BY failed_at, id
+         LIMIT $3
+         FOR UPDATE SKIP LOCKED
+       ), terminal_candidates AS (
+         SELECT id
+         FROM (
+           SELECT * FROM published_expired
+           UNION ALL
+           SELECT * FROM failed_expired
+         ) AS candidates
+         ORDER BY expires_at, id
+         LIMIT $3
+       )
+       DELETE FROM job_outbox AS outbox
+       USING terminal_candidates AS candidate
+       WHERE outbox.id = candidate.id
+         AND outbox.status IN ('published', 'failed')
+       RETURNING outbox.id`,
+      [options.publishedRetentionMs, options.failedRetentionMs, options.batchSize],
+    );
+    return result.rowCount ?? result.rows.length;
   }
 }

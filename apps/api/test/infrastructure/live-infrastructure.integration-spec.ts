@@ -20,6 +20,7 @@ import { TransactionalJobPublisher } from '../../src/infrastructure/outbox/trans
 import { RedisService } from '../../src/infrastructure/redis/redis.service';
 import { SqsJobWorker } from '../../src/infrastructure/sqs/sqs-job.worker';
 import { SqsService } from '../../src/infrastructure/sqs/sqs.service';
+import { testOutboxDispatcherOptions } from './fixtures';
 
 const runLiveIntegration = process.env.RUN_INFRASTRUCTURE_INTEGRATION === '1';
 const describeWithInfrastructure = runLiveIntegration ? describe : describe.skip;
@@ -41,11 +42,21 @@ describeWithInfrastructure('live docker-compose infrastructure', () => {
   it('is healthy, publishes a transactional outbox job, rolls back, and redrives a failed job', async () => {
     const connectionString =
       process.env.TEST_DATABASE_URL ??
+      process.env.MIGRATION_DATABASE_URL ??
+      process.env.DATABASE_RUNTIME_URL ??
       process.env.DATABASE_URL ??
       'postgresql://crypto_lending:local_only_password@localhost:5432/crypto_lending';
     const config = loadInfrastructureConfig({
       ...process.env,
-      DATABASE_URL: connectionString,
+      DATABASE_HOST: undefined,
+      DATABASE_NAME: undefined,
+      DATABASE_PASSWORD: undefined,
+      DATABASE_PORT: undefined,
+      DATABASE_RUNTIME_URL: connectionString,
+      DATABASE_RUNTIME_SSL_MODE: 'disable',
+      DATABASE_URL: undefined,
+      DATABASE_USERNAME: undefined,
+      DATABASE_SSL_MODE: undefined,
       REDIS_URL: process.env.REDIS_URL ?? 'redis://localhost:6379',
       REDIS_KEY_PREFIX: process.env.REDIS_KEY_PREFIX ?? 'crypto-lending:test:v1:',
       AWS_REGION: process.env.AWS_REGION ?? 'us-east-1',
@@ -62,7 +73,7 @@ describeWithInfrastructure('live docker-compose infrastructure', () => {
       SQS_RETRY_BASE_DELAY_SECONDS: '1',
       SQS_RETRY_MAX_DELAY_SECONDS: '1',
     });
-    requireLoopback(config.database.connectionString, 'DATABASE_URL');
+    requireLoopback(config.database.connectionString, 'DATABASE_RUNTIME_URL');
     requireLoopback(config.redis.url, 'REDIS_URL');
     requireLoopback(config.sqs.endpoint ?? '', 'SQS_ENDPOINT');
     requireLoopback(config.sqs.queueUrl, 'SQS_QUEUE_URL');
@@ -102,7 +113,7 @@ describeWithInfrastructure('live docker-compose infrastructure', () => {
       const migrations = new MigrationRunner(postgresPool, DATABASE_MIGRATION_LIST);
       const health = new InfrastructureHealthService(postgres, migrations, redis, sqs);
 
-      await expect(migrations.up()).resolves.toEqual(['0001']);
+      await expect(migrations.up()).resolves.toEqual(['0001', '0002', '0003']);
       await expect(health.check(5_000)).resolves.toMatchObject({ status: 'ok' });
 
       const testQueues = await createIsolatedTestQueues(sqsClient, config.sqs.maxReceiveCount);
@@ -120,14 +131,11 @@ describeWithInfrastructure('live docker-compose infrastructure', () => {
       const isolatedSqs = new SqsService(sqsClient, jobConfig);
       const outboxRepository = new JobOutboxRepository(postgres);
       const transactionalPublisher = new TransactionalJobPublisher(outboxRepository);
-      const outboxDispatcher = new OutboxDispatcher(outboxRepository, isolatedSqs, {
-        batchSize: 5,
-        concurrency: 2,
-        leaseMs: 5_000,
-        maxAttempts: 3,
-        retryBaseDelayMs: 100,
-        retryMaxDelayMs: 1_000,
-      });
+      const outboxDispatcher = new OutboxDispatcher(
+        outboxRepository,
+        isolatedSqs,
+        testOutboxDispatcherOptions({ batchSize: 5 }),
+      );
       const outboxEnvelope = await postgres.withTransaction(() =>
         transactionalPublisher.enqueue({
           id: `kan33-outbox-${randomUUID()}`,
@@ -156,7 +164,7 @@ describeWithInfrastructure('live docker-compose infrastructure', () => {
       }>('SELECT id, status FROM job_outbox WHERE id = $1', [outboxEnvelope.id]);
       expect(persistedOutbox.rows).toEqual([{ id: outboxEnvelope.id, status: 'published' }]);
 
-      await expect(migrations.down()).resolves.toEqual(['0001']);
+      await expect(migrations.down(3)).resolves.toEqual(['0003', '0002', '0001']);
       const rolledBack = await postgresPool.query<{ table_name: string }>(
         `SELECT table_name
          FROM information_schema.tables

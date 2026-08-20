@@ -1,25 +1,17 @@
 import 'dotenv/config';
 
-import { Pool } from 'pg';
-
-import { loadInfrastructureConfig } from '../config/infrastructure.config';
+import { loadMigrationDatabaseConfig } from '../config/infrastructure.config';
+import { enforceMigrationCliMode } from './migration-cli-mode';
+import { createMigrationPool } from './migration-pool';
 import { MigrationRunner } from './migration-runner.service';
 import { DATABASE_MIGRATION_LIST } from './migrations';
 
 async function main(): Promise<void> {
-  const config = loadInfrastructureConfig();
-  const pool = new Pool({
-    connectionString: config.database.connectionString,
-    connectionTimeoutMillis: config.database.connectionTimeoutMs,
-    idleTimeoutMillis: config.database.idleTimeoutMs,
-    max: 1,
-    maxLifetimeSeconds: config.database.maxLifetimeSeconds,
-    statement_timeout: config.database.statementTimeoutMs,
-    application_name: 'crypto-lending-migrations',
-    ssl: config.database.ssl,
-  });
+  const cliArguments = enforceMigrationCliMode(process.argv.slice(2), process.env);
+  const config = loadMigrationDatabaseConfig();
+  const pool = createMigrationPool(config);
   const runner = new MigrationRunner(pool, DATABASE_MIGRATION_LIST);
-  const [command = 'up', rawSteps = '1'] = process.argv.slice(2);
+  const [command = 'up', rawSteps = '1'] = cliArguments;
 
   try {
     if (command === 'up') {

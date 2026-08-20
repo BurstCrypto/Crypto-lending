@@ -13,7 +13,15 @@ import { serializeDeterministically } from './stable-json';
 async function generateOpenApi(): Promise<void> {
   // Contract generation constructs infrastructure providers but never connects.
   // Local-only defaults keep this command hermetic when CI has no service env.
-  process.env.DATABASE_URL ??= 'postgres://openapi:openapi@127.0.0.1:5432/openapi';
+  if (
+    !process.env.DATABASE_RUNTIME_URL &&
+    !process.env.DATABASE_RUNTIME_HOST &&
+    !process.env.DATABASE_URL &&
+    !process.env.DATABASE_HOST
+  ) {
+    process.env.DATABASE_RUNTIME_URL = 'postgres://openapi:openapi@127.0.0.1:5432/openapi';
+    process.env.DATABASE_RUNTIME_SSL_MODE = 'disable';
+  }
   process.env.REDIS_URL ??= 'redis://127.0.0.1:6379';
   process.env.REDIS_KEY_PREFIX ??= 'crypto-lending:openapi:v1:';
   process.env.SQS_QUEUE_URL ??= 'http://127.0.0.1:4566/000000000000/openapi-jobs';

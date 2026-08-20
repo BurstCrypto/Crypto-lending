@@ -1,5 +1,11 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { performance } from 'node:perf_hooks';
 
+import { Inject, Injectable, Logger } from '@nestjs/common';
+
+import {
+  OUTBOX_DISPATCHER_OPTIONS,
+  type OutboxDispatcherOptions,
+} from './outbox-dispatcher.options';
 import { OutboxDispatcher } from './outbox-dispatcher.service';
 
 function waitForNextPoll(milliseconds: number, signal: AbortSignal): Promise<void> {
@@ -30,7 +36,11 @@ export class OutboxWorker {
   private readonly logger = new Logger(OutboxWorker.name);
   private running = false;
 
-  constructor(private readonly dispatcher: OutboxDispatcher) {}
+  constructor(
+    private readonly dispatcher: OutboxDispatcher,
+    @Inject(OUTBOX_DISPATCHER_OPTIONS)
+    private readonly options: OutboxDispatcherOptions,
+  ) {}
 
   async run(signal: AbortSignal, pollIntervalMs = 1_000): Promise<void> {
     if (this.running) {
@@ -41,16 +51,40 @@ export class OutboxWorker {
     }
 
     this.running = true;
+    let nextCleanupAt = 0;
     try {
       while (!signal.aborted) {
+        let cleanupBacklog = false;
+        let claimedWork = false;
         try {
-          const summary = await this.dispatcher.dispatchBatch();
-          if (summary.claimed > 0) {
-            continue;
-          }
+          const summary = await this.dispatcher.dispatchBatch(signal);
+          claimedWork = summary.claimed > 0;
         } catch (error) {
           const message = error instanceof Error ? error.message : 'unknown error';
           this.logger.error(`Outbox dispatch pass failed: ${message}`);
+        }
+        if (signal.aborted) {
+          break;
+        }
+
+        if (performance.now() >= nextCleanupAt) {
+          try {
+            const deleted = await this.dispatcher.cleanupExpired();
+            cleanupBacklog = deleted >= this.options.cleanupBatchSize;
+            nextCleanupAt = cleanupBacklog
+              ? performance.now()
+              : performance.now() + this.options.cleanupIntervalMs;
+          } catch (error) {
+            const message = error instanceof Error ? error.message : 'unknown error';
+            this.logger.error(`Outbox retention cleanup failed: ${message}`);
+            nextCleanupAt = performance.now() + this.options.cleanupIntervalMs;
+          }
+        }
+        if (signal.aborted) {
+          break;
+        }
+        if (claimedWork || cleanupBacklog) {
+          continue;
         }
         await waitForNextPoll(pollIntervalMs, signal);
       }
