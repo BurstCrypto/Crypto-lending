@@ -1,0 +1,22 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ReadAccountAlias",
+      "Effect": "Allow",
+      "Action": "iam:ListAccountAliases",
+      "Resource": "*"
+    },
+    {
+      "Sid": "ReadNotificationOnlyBudgets",
+      "Effect": "Allow",
+      "Action": [
+        "aws-portal:ViewBilling",
+        "budgets:DescribeBudgetActionsForAccount",
+        "budgets:ListTagsForResource",
+        "budgets:ViewBudget"
+      ],
+      "Resource": "*"
+    }
+  ]
+}

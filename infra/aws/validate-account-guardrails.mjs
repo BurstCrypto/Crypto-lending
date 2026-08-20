@@ -11,7 +11,9 @@ function parseArguments(argv) {
     template: join(scriptDirectory, 'account-guardrails.yaml'),
     guard: join(scriptDirectory, 'invoke-account-guardrails.ps1'),
     applicationGuard: join(scriptDirectory, 'invoke-application-baseline.ps1'),
+    preflight: join(scriptDirectory, 'invoke-account-readonly-preflight.ps1'),
     record: join(scriptDirectory, 'billing-control-record.example.json'),
+    readonlyPolicy: join(scriptDirectory, 'kan-229-readonly-preflight-policy.json'),
     json: false,
   };
   for (let index = 0; index < argv.length; index += 1) {
@@ -24,7 +26,9 @@ function parseArguments(argv) {
       '--template': 'template',
       '--guard': 'guard',
       '--application-guard': 'applicationGuard',
+      '--preflight': 'preflight',
       '--record': 'record',
+      '--readonly-policy': 'readonlyPolicy',
     };
     const name = names[argument];
     if (!name) {
@@ -439,7 +443,167 @@ function validateApplicationGuard(source, errors) {
   );
 }
 
-export function validateAccountGuardrails({ template, guard, applicationGuard, record }) {
+function validateReadOnlyPreflightPolicy(source, errors) {
+  if (!source) {
+    return;
+  }
+  let policy;
+  try {
+    policy = JSON.parse(source);
+  } catch (error) {
+    errors.push(`KAN-229 read-only preflight policy is not valid JSON: ${error.message}`);
+    return;
+  }
+
+  const expectedPolicy = {
+    Version: '2012-10-17',
+    Statement: [
+      {
+        Sid: 'ReadAccountAlias',
+        Effect: 'Allow',
+        Action: 'iam:ListAccountAliases',
+        Resource: '*',
+      },
+      {
+        Sid: 'ReadNotificationOnlyBudgets',
+        Effect: 'Allow',
+        Action: [
+          'aws-portal:ViewBilling',
+          'budgets:DescribeBudgetActionsForAccount',
+          'budgets:ListTagsForResource',
+          'budgets:ViewBudget',
+        ],
+        Resource: '*',
+      },
+    ],
+  };
+  if (JSON.stringify(policy) !== JSON.stringify(expectedPolicy)) {
+    errors.push(
+      'KAN-229 read-only preflight policy must contain only the exact account-alias and notification-only budget read permissions; Cost Explorer and all write actions are forbidden.',
+    );
+  }
+}
+
+function validateReadOnlyPreflight(source, errors) {
+  if (!source) {
+    return;
+  }
+  const optInIndex = source.indexOf('if (-not $AllowAwsApiCalls.IsPresent)');
+  const awsDiscoveryIndex = source.indexOf('Get-Command aws');
+  if (optInIndex < 0 || awsDiscoveryIndex < optInIndex) {
+    errors.push('Read-only preflight must require explicit opt-in before AWS discovery.');
+  }
+  requireFragments(
+    source,
+    'Read-only preflight',
+    [
+      "'sts',",
+      "'get-caller-identity',",
+      "'iam',",
+      "'list-account-aliases',",
+      "'budgets',",
+      "'describe-budgets',",
+      "'describe-notifications-for-budget',",
+      "'describe-subscribers-for-notification',",
+      "'list-tags-for-resource',",
+      "'describe-budget-actions-for-account',",
+      "anomalyInventory = 'NOT_RUN_COST_UNVERIFIED'",
+      'costExplorerCallsMade = 0',
+      'mutatingAwsCallsMade = 0',
+      'paidServiceActivationsMade = 0',
+      "costBoundary = 'NO_DIRECT_SERVICE_API_FEE_IDENTIFIED;INDIRECT_ACCOUNT_LOGGING_COST_NOT_VERIFIED'",
+      '$operation -cnotin $script:AllowedAwsOperations',
+      'BillingViewArn',
+      'recordFileSha256',
+      'preflightScriptSha256',
+      'readonlyPolicySha256',
+      'awsCliInvocationsMade',
+      "awsApiRequestCount = 'UNKNOWN_CLI_PAGINATION_AND_RETRIES'",
+      'Assert-FullyPaginated',
+      "throw 'The AWS account alias does not exactly match the approved control record.'",
+    ],
+    errors,
+  );
+  if (/['"]ce['"]|get-anomal|create-|update-|delete-|execute-/i.test(source)) {
+    errors.push('Read-only preflight must not contain Cost Explorer or mutating AWS commands.');
+  }
+  if (/--(?:no-paginate|max-items|starting-token)\b/i.test(source)) {
+    errors.push('Read-only preflight must not contain an AWS CLI pagination-truncation option.');
+  }
+  if ((source.match(/'--page-size',\s*'100'/g) ?? []).length !== 4) {
+    errors.push(
+      'Read-only preflight must fully paginate each of its four paginated Budgets reads.',
+    );
+  }
+
+  const expectedCalls = [
+    'budgets:describe-budget-actions-for-account',
+    'budgets:describe-budgets',
+    'budgets:describe-notifications-for-budget',
+    'budgets:describe-subscribers-for-notification',
+    'budgets:list-tags-for-resource',
+    'iam:list-account-aliases',
+    'sts:get-caller-identity',
+  ];
+  const runtimeAllowlist = source.match(/\$script:AllowedAwsOperations\s*=\s*@\(([\s\S]*?)\r?\n\)/);
+  const runtimeOperations = runtimeAllowlist
+    ? [...runtimeAllowlist[1].matchAll(/'([^']+)'/g)].map((match) => match[1]).sort()
+    : [];
+  if (JSON.stringify(runtimeOperations) !== JSON.stringify(expectedCalls)) {
+    errors.push(
+      'Read-only preflight runtime allowlist must contain exactly the seven approved STS, IAM, and AWS Budgets operations.',
+    );
+  }
+  const actualCalls = [
+    ...source.matchAll(/Invoke-AwsJson\s+-Arguments\s+@\(\s*'([^']+)'\s*,\s*'([^']+)'/g),
+  ]
+    .map((match) => `${match[1]}:${match[2]}`)
+    .sort();
+  if (JSON.stringify(actualCalls) !== JSON.stringify(expectedCalls)) {
+    errors.push(
+      'Read-only preflight must contain exactly the seven approved STS, IAM, and AWS Budgets call sites.',
+    );
+  }
+  if ((source.match(/& \$script:AwsExecutable/g) ?? []).length !== 1) {
+    errors.push(
+      'Read-only preflight must route every AWS call through its single audited wrapper.',
+    );
+  }
+  const invocationOperatorCount = (source.match(/(?<!>)&(?=\s+|\()/g) ?? []).length;
+  if (
+    invocationOperatorCount !== 2 ||
+    !source.includes('$output = & $script:AwsExecutable @Arguments 2>&1') ||
+    !source.includes('$validatorOutput = @(& $nodeCommand.Source $validatorPath 2>&1)')
+  ) {
+    errors.push(
+      'Read-only preflight may invoke only the local Node validator and the single allowlisted AWS wrapper.',
+    );
+  }
+  if (/\b(?:Start-Process|Invoke-Expression|iex)\b|System\.Diagnostics\.Process/i.test(source)) {
+    errors.push(
+      'Read-only preflight must not contain an alternate process or expression launcher.',
+    );
+  }
+  if (/\$Arguments(?:\s*\[[^\]]+\])?\s*=|\$Arguments\.(?:SetValue|Clear)\s*\(/i.test(source)) {
+    errors.push('Read-only preflight must not reassign arguments after runtime authorization.');
+  }
+  if (
+    /^\s*aws(?:\.exe)?\s+/im.test(source) ||
+    /&\s*\(\s*Get-Command\s+aws\b/i.test(source) ||
+    /\b(?:cmd(?:\.exe)?|powershell(?:\.exe)?|pwsh)\b[^\r\n]*\baws\b/i.test(source)
+  ) {
+    errors.push('Read-only preflight must not contain a direct or indirect AWS CLI bypass path.');
+  }
+}
+
+export function validateAccountGuardrails({
+  template,
+  guard,
+  applicationGuard,
+  preflight,
+  record,
+  readonlyPolicy,
+}) {
   const errors = [];
   const templateSource = readRequiredFile(template, 'Account guardrail template', errors);
   const guardSource = readRequiredFile(guard, 'Account guardrail invocation guard', errors);
@@ -448,11 +612,19 @@ export function validateAccountGuardrails({ template, guard, applicationGuard, r
     'Application invocation guard',
     errors,
   );
+  const preflightSource = readRequiredFile(preflight, 'KAN-229 read-only preflight', errors);
   const recordSource = readRequiredFile(record, 'Billing control record example', errors);
+  const readonlyPolicySource = readRequiredFile(
+    readonlyPolicy,
+    'KAN-229 read-only preflight policy',
+    errors,
+  );
 
   validateTemplate(templateSource, template, errors);
   validateStandaloneGuard(guardSource, errors);
   validateApplicationGuard(applicationGuardSource, errors);
+  validateReadOnlyPreflight(preflightSource, errors);
+  validateReadOnlyPreflightPolicy(readonlyPolicySource, errors);
   if (recordSource) {
     try {
       const result = validateBillingControlRecord(JSON.parse(recordSource), { mode: 'example' });
@@ -478,7 +650,9 @@ function main() {
     template: options.template,
     guard: options.guard,
     applicationGuard: options.applicationGuard,
+    preflight: options.preflight,
     record: options.record,
+    readonlyPolicy: options.readonlyPolicy,
   };
   if (options.json) {
     process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);

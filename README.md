@@ -174,6 +174,11 @@ networking without adding Terraform/CDK state or embedded credentials.
 KAN-229's separate `infra/aws/account-guardrails.yaml` defines the account-level
 budget and optional anomaly-notification prerequisites that must be approved and
 verified before an application change set can be created.
+Its constrained no-direct-service-fee inventory permissions are versioned in
+`infra/aws/kan-229-readonly-preflight-policy.json`; the policy contains no Cost
+Explorer or write permissions and is never attached by CI or local validation.
+Live reads still require separate authorization because pre-existing account
+logging can have its own metered ingestion or delivery configuration.
 
 Validate it entirely offline with:
 

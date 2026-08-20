@@ -2,8 +2,10 @@
 
 KAN-34 defines a reproducible non-production AWS application environment in
 native CloudFormation. Repository work for this ticket is deliberately
-**zero-deploy**: no AWS account has been contacted and no cloud resource,
-subscription, trial, or billable API has been activated.
+**zero-deploy**: local validation makes zero AWS calls by default, and no KAN-34
+cloud resource, subscription, trial, change set, or paid service has been
+activated. KAN-229 documents the separately authorized account-identity reads
+that precede any KAN-34 Plan.
 
 ## Cost and authorization boundary
 
@@ -12,16 +14,17 @@ Fargate tasks, an Application Load Balancer, RDS, ElastiCache, interface VPC
 endpoints, Secrets Manager, KMS, and CloudWatch. Merely committing or locally
 linting the template does not create those resources.
 
-The planning estimate recorded on KAN-34 on 2026-08-19 assumes `us-east-1`,
-on-demand pricing, a 730-hour month, and no credits or taxes. It estimates
-`$118–$120/month` with application tasks stopped and the private interface
-endpoints enabled, approximately `$145–$155/month` with one web, API, and worker
-task running before variable usage, and `$175–$200/month` as a suggested
-low-volume development budget with headroom. A parked configuration with both
-tasks and interface endpoints disabled was estimated around `$45/month`.
-These figures are planning inputs only—not an approved budget, quote, spending
-cap, or deployment authorization—and must be refreshed for the approved account
-and Region before any cloud Plan.
+The public-price refresh recorded on 2026-08-19 assumes `us-west-2`, On-Demand
+pricing, a 730-hour month, and no credits, commitments, temporary Free Tier,
+tax, Support, Marketplace charges, refunds, or shared-account spend. Gross
+modeled subtotals are `$52.69/month` parked with tasks and interface endpoints
+off, `$125.69/month` for the template-default endpoint configuration with tasks
+stopped, and `$153.67/month` for one continuously running web, API, and worker
+task under the low-volume assumptions in KAN-229. The parked correction includes
+`$7.30/month` for two public IPv4 addresses used by the two-AZ ALB. These figures
+are planning inputs only—not an approved budget, quote, spending cap, or
+deployment authorization. Account-wide existing spend and headroom must be
+added by the finance owner before any cloud Plan.
 
 Do not create a change set or deploy until all of the following are true:
 
@@ -79,8 +82,9 @@ record. `Deploy` recomputes and verifies each binding.
   tasks as individual secret fields—never template parameters or outputs;
 - separate execution and task roles scope image/log/secret access and runtime
   queue permissions; and
-- bounded CloudWatch log groups, service/queue alarms, and a dashboard expose
-  infrastructure health without adding an alert destination.
+- bounded CloudWatch log groups and service/queue alarms expose infrastructure
+  health without adding an alert destination; the dashboard is optional and
+  off by default, and Container Insights is also disabled by default.
 
 The template accepts only digest-pinned application image URIs. Image building
 and publication belong to the controlled delivery work following FND-003; the
