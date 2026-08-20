@@ -80,7 +80,7 @@ Parameters:
     AllowedPattern: '^arn:[a-z0-9-]+:acm:[a-z0-9-]+:[0-9]{12}:certificate/[A-Za-z0-9-]+$'
   ApplicationHostname:
     Type: String
-    AllowedPattern: '^(?=.{1,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$'
+    AllowedPattern: '^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.){2,}[a-z](?:[a-z0-9-]{0,61}[a-z0-9])$'
 
   DatabaseName:
     Type: String
@@ -1116,14 +1116,33 @@ Resources:
     Type: AWS::ElasticLoadBalancingV2::Listener
     Properties:
       DefaultActions:
-        - Type: redirect
-          RedirectConfig:
-            Port: '443'
-            Protocol: HTTPS
-            StatusCode: HTTP_301
+        - Type: fixed-response
+          FixedResponseConfig:
+            ContentType: text/plain
+            MessageBody: Not found
+            StatusCode: '404'
       LoadBalancerArn: !Ref ApplicationLoadBalancer
       Port: 80
       Protocol: HTTP
+
+  HttpRedirectListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+        - Type: redirect
+          RedirectConfig:
+            Host: '#{host}'
+            Path: /#{path}
+            Port: '443'
+            Protocol: HTTPS
+            Query: '#{query}'
+            StatusCode: HTTP_301
+      Conditions:
+        - Field: host-header
+          HostHeaderConfig:
+            Values: [!Ref ApplicationHostname]
+      ListenerArn: !Ref HttpRedirectListener
+      Priority: 5
 
   HttpsListener:
     Type: AWS::ElasticLoadBalancingV2::Listener
@@ -1549,6 +1568,10 @@ Outputs:
     Value: !Sub https://${ApplicationHostname}
   LoadBalancerDnsName:
     Value: !GetAtt ApplicationLoadBalancer.DNSName
+  LoadBalancerArn:
+    Value: !Ref ApplicationLoadBalancer
+  LoadBalancerCanonicalHostedZoneId:
+    Value: !GetAtt ApplicationLoadBalancer.CanonicalHostedZoneID
   ApiProcessHealthUrl:
     Value: !Sub https://${ApplicationHostname}/api/v1/health
   ApiDependencyHealthUrl:

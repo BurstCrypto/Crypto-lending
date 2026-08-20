@@ -28,6 +28,7 @@ env:
   SQS_VISIBILITY_TIMEOUT_SECONDS: '5'
   SQS_RETRY_BASE_DELAY_SECONDS: '1'
   SQS_RETRY_MAX_DELAY_SECONDS: '1'
+  AWS_EC2_METADATA_DISABLED: 'true'
 
 jobs:
   validate:
@@ -57,6 +58,8 @@ jobs:
         run: |
           npm run infra:validate
           npm run infra:test:guardrails
+          npm run infra:test:acm-dns
+          pwsh -NoProfile -File infra/aws/test-invoke-acm-dns-local.ps1
           pwsh -NoProfile -File infra/aws/test-invoke-account-readonly-preflight.ps1
           pwsh -NoProfile -File infra/aws/test-invoke-account-guardrails.ps1
           pwsh -NoProfile -File infra/aws/test-invoke-application-baseline.ps1

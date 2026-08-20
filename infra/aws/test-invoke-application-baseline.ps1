@@ -8,6 +8,7 @@ $guardPath = Join-Path $PSScriptRoot 'invoke-application-baseline.ps1'
 $applicationTemplatePath = Join-Path $PSScriptRoot 'application-baseline.yaml'
 $guardrailTemplatePath = Join-Path $PSScriptRoot 'account-guardrails.yaml'
 $recordValidatorPath = Join-Path $PSScriptRoot 'validate-billing-control-record.mjs'
+$acmDnsRecordValidatorPath = Join-Path $PSScriptRoot 'validate-acm-dns-control-record.mjs'
 $temporaryRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("kan34-application-guard-test-" + [guid]::NewGuid().ToString('N'))
 $fakeAwsDirectory = Join-Path $temporaryRoot 'fake-aws'
 $markerPath = Join-Path $temporaryRoot 'aws-calls.log'
@@ -18,6 +19,9 @@ $changeSetResponsePath = Join-Path $temporaryRoot 'change-set.json'
 $applicationTemplateResponsePath = Join-Path $temporaryRoot 'application-template.json'
 $approvedRecordPath = Join-Path $temporaryRoot 'approved-billing-control-record.json'
 $incompleteRecordPath = Join-Path $temporaryRoot 'incomplete-billing-control-record.json'
+$approvedAcmDnsRecordPath = Join-Path $temporaryRoot 'approved-acm-dns-bootstrap-record.json'
+$mismatchedAcmDnsRecordPath = Join-Path $temporaryRoot 'mismatched-acm-dns-bootstrap-record.json'
+$incompleteAcmDnsRecordPath = Join-Path $temporaryRoot 'incomplete-acm-dns-bootstrap-record.json'
 $immutableChangeSetId = 'arn:aws:cloudformation:us-west-2:111122223333:changeSet/kan34-application-20260819/11111111-2222-3333-4444-555555555555'
 $originalEnvironment = @{
     PATH = $env:PATH
@@ -201,7 +205,7 @@ function Write-ChangeSetResponse {
 if (-not (Test-Path -LiteralPath $guardPath -PathType Leaf)) {
     throw "Application guard under test was not found: $guardPath"
 }
-foreach ($requiredFile in @($applicationTemplatePath, $guardrailTemplatePath, $recordValidatorPath)) {
+foreach ($requiredFile in @($applicationTemplatePath, $guardrailTemplatePath, $recordValidatorPath, $acmDnsRecordValidatorPath)) {
     if (-not (Test-Path -LiteralPath $requiredFile -PathType Leaf)) {
         throw "Required focused-test input was not found: $requiredFile"
     }
@@ -350,6 +354,92 @@ $incompleteRecord = ($approvedRecord | ConvertTo-Json -Depth 12) | ConvertFrom-J
 $incompleteRecord.evidence.criticalDelivery = 'NOT_RUN'
 Write-JsonFile -Path $incompleteRecordPath -Value $incompleteRecord
 
+$approvedAcmDnsRecord = [ordered]@{
+    schemaVersion = 1
+    status = 'APPROVED'
+    recordId = 'KAN-230:ACM-DNS-BOOTSTRAP-APPROVAL'
+    approvedAt = $utcNow.AddMinutes(-30).ToString('yyyy-MM-ddTHH:mm:ssZ', [System.Globalization.CultureInfo]::InvariantCulture)
+    expiresAt = $utcNow.AddDays(30).ToString('yyyy-MM-ddTHH:mm:ssZ', [System.Globalization.CultureInfo]::InvariantCulture)
+    aws = [ordered]@{
+        accountId = '111122223333'
+        region = 'us-west-2'
+        approvedRoleArn = 'arn:aws:iam::111122223333:role/Kan34ApplicationDeployRole'
+    }
+    hostname = [ordered]@{
+        applicationHostname = 'test.crypto-lending.invalid'
+        parentDomain = 'crypto-lending.invalid'
+        dnsProvider = 'provider:existing-authoritative-dns'
+        dnsZoneMode = 'EXISTING_EXTERNAL'
+        existingZoneReference = 'dns-zone:crypto-lending-invalid-existing'
+        ownershipReference = 'evidence:KAN-230/hostname-ownership'
+    }
+    certificate = [ordered]@{
+        mode = 'ACM_INTEGRATED_NON_EXPORTABLE'
+        validationMethod = 'DNS'
+        certificateArn = 'arn:aws:acm:us-west-2:111122223333:certificate/11111111-2222-3333-4444-555555555555'
+        subjectAlternativeNames = @('test.crypto-lending.invalid')
+        certificateStatus = 'ISSUED'
+        notAfterUtc = $utcNow.AddDays(365).ToString('yyyy-MM-ddTHH:mm:ssZ', [System.Globalization.CultureInfo]::InvariantCulture)
+        sha256Fingerprint = ('e' * 64)
+        renewalOwner = 'platform-operations'
+        renewalMethod = 'AWS_MANAGED'
+        renewalWindowDays = '45'
+    }
+    dnsChange = [ordered]@{
+        recordType = 'CNAME'
+        ttlSeconds = '300'
+        applicationLoadBalancerArn = 'NOT_RUN'
+        targetLoadBalancerDnsName = 'NOT_RUN'
+        targetLoadBalancerCanonicalHostedZoneId = 'NOT_RUN'
+        previousRecordValue = 'NOT_RUN'
+        previousTtlSeconds = 'NOT_RUN'
+        rollbackDeadlineUtc = 'NOT_RUN'
+    }
+    costBoundary = [ordered]@{
+        decision = 'NO_ADDITIONAL_CHARGE_CONFIRMED'
+        domainRegistration = 'NOT_AUTHORIZED'
+        hostedZoneCreation = 'NOT_AUTHORIZED'
+        exportableCertificate = 'NOT_AUTHORIZED'
+        privateCertificateAuthority = 'NOT_AUTHORIZED'
+        paidMonitoring = 'NOT_AUTHORIZED'
+        estimatedMonthlyIncrementUsd = '0.00'
+        pricingAsOf = $utcNow.ToString('yyyy-MM-dd', [System.Globalization.CultureInfo]::InvariantCulture)
+        pricingExpiresAt = $utcNow.AddDays(30).ToString('yyyy-MM-dd', [System.Globalization.CultureInfo]::InvariantCulture)
+        pricingSourceReference = 'aws-pricing:acm-integrated-and-existing-dns'
+    }
+    authority = [ordered]@{
+        certificateRequestApprovers = @('release-approver')
+        dnsChangeApprovers = @('dns-change-approver')
+        cutoverApprovers = @('release-approver', 'dns-change-approver')
+        rollbackApprovers = @('incident-commander')
+    }
+    independentVerification = [ordered]@{
+        verifier = 'external-security-reviewer'
+        decision = 'APPROVED'
+        verifiedAt = $utcNow.AddMinutes(-10).ToString('yyyy-MM-ddTHH:mm:ssZ', [System.Globalization.CultureInfo]::InvariantCulture)
+    }
+    evidence = [ordered]@{
+        hostnameOwnership = 'PASS'
+        certificateIssued = 'PASS'
+        dnsValidation = 'PASS'
+        dnsCutover = 'NOT_RUN'
+        tlsChainAndHostname = 'NOT_RUN'
+        httpRedirect = 'NOT_RUN'
+        unexpectedHostRejected = 'NOT_RUN'
+        expirationMonitoring = 'NOT_RUN'
+        rollbackDrill = 'NOT_RUN'
+        observedAtUtc = $utcNow.AddHours(-1).ToString('yyyy-MM-ddTHH:mm:ssZ', [System.Globalization.CultureInfo]::InvariantCulture)
+        evidenceIndexReference = 'evidence:KAN-230/bootstrap-v1'
+    }
+}
+Write-JsonFile -Path $approvedAcmDnsRecordPath -Value $approvedAcmDnsRecord
+$mismatchedAcmDnsRecord = ($approvedAcmDnsRecord | ConvertTo-Json -Depth 12) | ConvertFrom-Json
+$mismatchedAcmDnsRecord.aws.accountId = '999999999999'
+Write-JsonFile -Path $mismatchedAcmDnsRecordPath -Value $mismatchedAcmDnsRecord
+$incompleteAcmDnsRecord = ($approvedAcmDnsRecord | ConvertTo-Json -Depth 12) | ConvertFrom-Json
+$incompleteAcmDnsRecord.evidence.dnsValidation = 'NOT_RUN'
+Write-JsonFile -Path $incompleteAcmDnsRecordPath -Value $incompleteAcmDnsRecord
+
 $nodeCommand = Get-Command node -ErrorAction Stop
 $recordValidationOutput = & $nodeCommand.Source @(
     $recordValidatorPath,
@@ -369,6 +459,32 @@ $controlRecordSha256 = [string] $recordValidation.canonicalSha256
 $controlConfigurationSha256 = [string] $recordValidation.controlConfigurationSha256
 if ($controlRecordSha256 -notmatch '^[a-f0-9]{64}$' -or $controlConfigurationSha256 -notmatch '^[a-f0-9]{64}$') {
     throw 'Focused final-record fixture did not produce both required canonical hashes.'
+}
+$global:LASTEXITCODE = 0
+
+$acmDnsRecordValidationOutput = & $nodeCommand.Source @(
+    $acmDnsRecordValidatorPath,
+    '--record', $approvedAcmDnsRecordPath,
+    '--mode', 'bootstrap',
+    '--expected-account', '111122223333',
+    '--expected-region', 'us-west-2',
+    '--json'
+)
+if ($LASTEXITCODE -ne 0) {
+    throw "Focused KAN-230 fixture failed bootstrap validation: $($acmDnsRecordValidationOutput | Out-String)"
+}
+$acmDnsRecordValidation = ($acmDnsRecordValidationOutput | Out-String) | ConvertFrom-Json
+$acmDnsRecordSha256 = [string] $acmDnsRecordValidation.canonicalSha256
+$acmDnsConfigurationSha256 = [string] $acmDnsRecordValidation.configurationSha256
+if (
+    -not $acmDnsRecordValidation.ok -or
+    $acmDnsRecordValidation.awsCallsMade -ne 0 -or
+    $acmDnsRecordValidation.dnsQueriesMade -ne 0 -or
+    $acmDnsRecordValidation.providerCallsMade -ne 0 -or
+    $acmDnsRecordSha256 -notmatch '^[a-f0-9]{64}$' -or
+    $acmDnsConfigurationSha256 -notmatch '^[a-f0-9]{64}$'
+) {
+    throw 'Focused KAN-230 fixture did not produce a successful zero-external-call result with both required hashes.'
 }
 $global:LASTEXITCODE = 0
 
@@ -478,13 +594,15 @@ $applicationStackTags = [ordered]@{
     'cost-center' = 'CRYPTO-PLATFORM'
     'control-record-sha256' = $controlRecordSha256
     'billing-control-record' = 'KAN-229:THIRD-PARTY-FINAL-APPROVAL'
+    'acm-dns-control-record' = 'KAN-230:ACM-DNS-BOOTSTRAP-APPROVAL'
+    'acm-dns-configuration-sha256' = $acmDnsConfigurationSha256
     'managed-by' = 'cloudformation'
     ticket = 'KAN-34'
 }
 $parameterSha256 = Get-TextSha256 -Value (Get-CanonicalMapText -Map $applicationParameterMap)
 $tagSha256 = Get-TextSha256 -Value (Get-CanonicalMapText -Map $applicationStackTags)
-$expectedChangeSetDescription = "KAN-34 template-sha256=$applicationTemplateSha256 parameters-sha256=$parameterSha256 tags-sha256=$tagSha256 control-record-sha256=$controlRecordSha256 guardrail-policy=kan-229-v1"
-$billableAcknowledgement = "EXECUTE REVIEWED CHANGE SET kan34-application-20260819 FOR STACK crypto-lending-application-test USING BILLING CONTROL $controlRecordSha256; I ACKNOWLEDGE BILLABLE AWS RESOURCES IN ACCOUNT 111122223333 REGION us-west-2 USING PROFILE kan34-test"
+$expectedChangeSetDescription = "KAN-34 template-sha256=$applicationTemplateSha256 parameters-sha256=$parameterSha256 tags-sha256=$tagSha256 control-record-sha256=$controlRecordSha256 acm-dns-record-sha256=$acmDnsRecordSha256 guardrail-policy=kan-229-v1"
+$billableAcknowledgement = "EXECUTE REVIEWED CHANGE SET kan34-application-20260819 FOR STACK crypto-lending-application-test USING BILLING CONTROL $controlRecordSha256 AND ACM DNS CONTROL $acmDnsRecordSha256; I ACKNOWLEDGE BILLABLE AWS RESOURCES IN ACCOUNT 111122223333 REGION us-west-2 USING PROFILE kan34-test"
 
 $baseArguments = @{
     Action = 'Deploy'
@@ -497,6 +615,7 @@ $baseArguments = @{
     ChangeSetType = 'CREATE'
     EnvironmentName = 'test-kan34'
     BillingControlRecordFile = $approvedRecordPath
+    AcmDnsControlRecordFile = $approvedAcmDnsRecordPath
     GuardrailStackName = 'crypto-lending-account-guardrails-test'
     GuardrailControlRegion = 'us-east-1'
     AllowAwsApiCalls = $true
@@ -520,6 +639,32 @@ try {
         Assert-Condition (-not $result.Succeeded) 'Deploy accepted an evidence-incomplete final control record.'
         Assert-Condition ($result.Output -match 'evidence-complete') 'Final-record rejection did not identify the approved evidence gate.'
         Assert-Condition ((Get-AwsMarkerText) -eq '') 'Incomplete final record reached AWS discovery.'
+    }
+
+    Invoke-FocusedTest -Name 'KAN-230 preflight rejects missing, mismatched, and incomplete bootstrap records before AWS' -Body {
+        Clear-AwsMarker
+        $missingArguments = Copy-ArgumentMap -Map $baseArguments
+        [void] $missingArguments.Remove('AcmDnsControlRecordFile')
+        $missingResult = Invoke-Guard -Arguments $missingArguments
+        Assert-Condition (-not $missingResult.Succeeded) 'Deploy accepted a missing KAN-230 control record.'
+        Assert-Condition ($missingResult.Output -match 'AcmDnsControlRecordFile must be supplied explicitly') 'Missing KAN-230 record rejection did not identify the required prerequisite.'
+        Assert-Condition ((Get-AwsMarkerText) -eq '') 'Missing KAN-230 record reached AWS discovery.'
+
+        Clear-AwsMarker
+        $mismatchedArguments = Copy-ArgumentMap -Map $baseArguments
+        $mismatchedArguments.AcmDnsControlRecordFile = $mismatchedAcmDnsRecordPath
+        $mismatchedResult = Invoke-Guard -Arguments $mismatchedArguments
+        Assert-Condition (-not $mismatchedResult.Succeeded) 'Deploy accepted a KAN-230 record for the wrong account.'
+        Assert-Condition ($mismatchedResult.Output -match 'KAN-230 ACM/DNS prerequisite') 'Mismatched KAN-230 record rejection did not identify the prerequisite.'
+        Assert-Condition ((Get-AwsMarkerText) -eq '') 'Mismatched KAN-230 record reached AWS discovery.'
+
+        Clear-AwsMarker
+        $incompleteArguments = Copy-ArgumentMap -Map $baseArguments
+        $incompleteArguments.AcmDnsControlRecordFile = $incompleteAcmDnsRecordPath
+        $incompleteResult = Invoke-Guard -Arguments $incompleteArguments
+        Assert-Condition (-not $incompleteResult.Succeeded) 'Deploy accepted an evidence-incomplete KAN-230 bootstrap record.'
+        Assert-Condition ($incompleteResult.Output -match 'KAN-230 ACM/DNS prerequisite') 'Incomplete KAN-230 record rejection did not identify the prerequisite.'
+        Assert-Condition ((Get-AwsMarkerText) -eq '') 'Incomplete KAN-230 record reached AWS discovery.'
     }
 
     Invoke-FocusedTest -Name 'guardrail preflight requires the stable control configuration hash tag' -Body {

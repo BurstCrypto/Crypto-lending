@@ -13,6 +13,9 @@ change-sets/
 *.billing-controls.local.json
 *.pricing.local.json
 *.notification-evidence.local.json
+*.acm-dns.local.json
+*.acm-dns-plan.local.json
+*.acm-dns-evidence.local.json
 cost-exports/
 
 # Local parameter files and credential material must never be committed.
