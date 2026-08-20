@@ -1,0 +1,663 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://crypto-lending.invalid/schemas/egress-policy.schema.json",
+  "title": "KAN-231 controlled external-egress policy",
+  "description": "Local decision record for deny-by-default browser and ECS destination policy. Semantic approval gates are enforced by validate-egress-policy.mjs; this schema does not authorize deployment.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "status",
+    "policyId",
+    "currentMode",
+    "approvedAt",
+    "acceptedAt",
+    "expiresAt",
+    "environment",
+    "dependencies",
+    "architecture",
+    "authority",
+    "destinations",
+    "evidence"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "status": {
+      "enum": ["NOT_APPROVED", "PROPOSED", "APPROVED", "ACCEPTED", "REJECTED", "EXPIRED"]
+    },
+    "policyId": { "$ref": "#/$defs/referenceOrSentinel" },
+    "currentMode": { "enum": ["NO_EXTERNAL_EGRESS", "APPROVED_DESTINATIONS_ONLY"] },
+    "approvedAt": { "$ref": "#/$defs/timestampOrNotRun" },
+    "acceptedAt": { "$ref": "#/$defs/timestampOrNotRun" },
+    "expiresAt": { "$ref": "#/$defs/timestampOrNotRun" },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["application", "name", "accountId", "applicationRegion", "sourceRevision"],
+      "properties": {
+        "application": { "const": "crypto-lending" },
+        "name": { "$ref": "#/$defs/environmentOrSentinel" },
+        "accountId": {
+          "anyOf": [{ "const": "NOT_APPROVED" }, { "type": "string", "pattern": "^[0-9]{12}$" }]
+        },
+        "applicationRegion": {
+          "anyOf": [
+            { "const": "NOT_APPROVED" },
+            { "type": "string", "pattern": "^[a-z]{2}(?:-[a-z0-9]+)+-[0-9]+$" }
+          ]
+        },
+        "sourceRevision": {
+          "anyOf": [{ "const": "NOT_RUN" }, { "type": "string", "pattern": "^[a-f0-9]{40}$" }]
+        }
+      }
+    },
+    "dependencies": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["applicationBaseline", "authenticationSessions", "rpcIndexing"],
+      "properties": {
+        "applicationBaseline": { "$ref": "#/$defs/kan34Dependency" },
+        "authenticationSessions": { "$ref": "#/$defs/kan37Dependency" },
+        "rpcIndexing": { "$ref": "#/$defs/kan62Dependency" }
+      }
+    },
+    "architecture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "adrStatus",
+        "decisionReference",
+        "selectedControl",
+        "defaultAction",
+        "dnsPolicy",
+        "ecsBoundary",
+        "browserBoundary",
+        "killSwitch",
+        "estimatedMonthlyFixedCostUsd",
+        "estimatedMonthlyVariableCostUsd",
+        "monthlyVariableCostCeilingUsd",
+        "costDecision",
+        "activationAuthorization",
+        "financeApprovalReference",
+        "billingControlRecordReference",
+        "billingControlConfigurationSha256",
+        "pricingAsOf",
+        "pricingExpiresAt"
+      ],
+      "properties": {
+        "adrStatus": { "enum": ["NOT_APPROVED", "PROPOSED", "APPROVED"] },
+        "decisionReference": { "$ref": "#/$defs/referenceOrNotRun" },
+        "selectedControl": {
+          "enum": [
+            "NO_EXTERNAL_EGRESS",
+            "BROWSER_APPLICATION_CONTROLS_ONLY",
+            "PRIVATE_ENDPOINTS",
+            "EGRESS_PROXY_WITH_NAT",
+            "NETWORK_FIREWALL_WITH_NAT"
+          ]
+        },
+        "defaultAction": { "const": "DENY" },
+        "dnsPolicy": { "const": "DENY_UNLISTED_AND_UNAPPROVED_PRIVATE_ADDRESSES" },
+        "ecsBoundary": { "const": "PRIVATE_SUBNETS_NO_PUBLIC_IP_NO_DEFAULT_INTERNET_ROUTE" },
+        "browserBoundary": {
+          "const": "OUTSIDE_VPC_ENFORCE_WITH_CSP_AND_APPLICATION_ALLOWLIST"
+        },
+        "killSwitch": { "const": "DISABLE_ALL_EXTERNAL_EGRESS" },
+        "estimatedMonthlyFixedCostUsd": { "$ref": "#/$defs/money" },
+        "estimatedMonthlyVariableCostUsd": { "$ref": "#/$defs/money" },
+        "monthlyVariableCostCeilingUsd": { "$ref": "#/$defs/money" },
+        "costDecision": { "enum": ["NOT_APPROVED", "APPROVED"] },
+        "activationAuthorization": { "enum": ["NOT_AUTHORIZED", "APPROVED"] },
+        "financeApprovalReference": { "$ref": "#/$defs/referenceOrNotRun" },
+        "billingControlRecordReference": { "$ref": "#/$defs/referenceOrNotRun" },
+        "billingControlConfigurationSha256": {
+          "anyOf": [{ "const": "NOT_RUN" }, { "type": "string", "pattern": "^[a-f0-9]{64}$" }]
+        },
+        "pricingAsOf": { "$ref": "#/$defs/dateOrNotRun" },
+        "pricingExpiresAt": { "$ref": "#/$defs/dateOrNotRun" }
+      }
+    },
+    "authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "architectureApprovers",
+        "securityApprovers",
+        "privacyApprovers",
+        "financeApprovers",
+        "independentVerifier",
+        "decision",
+        "verifiedAt",
+        "acceptanceVerifier",
+        "acceptanceDecision"
+      ],
+      "properties": {
+        "architectureApprovers": { "$ref": "#/$defs/approverList" },
+        "securityApprovers": { "$ref": "#/$defs/approverList" },
+        "privacyApprovers": { "$ref": "#/$defs/approverList" },
+        "financeApprovers": { "$ref": "#/$defs/approverList" },
+        "independentVerifier": { "$ref": "#/$defs/roleAliasOrSentinel" },
+        "decision": { "enum": ["NOT_APPROVED", "PROPOSED", "APPROVED", "REJECTED"] },
+        "verifiedAt": { "$ref": "#/$defs/timestampOrNotRun" },
+        "acceptanceVerifier": { "$ref": "#/$defs/roleAliasOrSentinel" },
+        "acceptanceDecision": { "enum": ["NOT_RUN", "ACCEPTED", "REJECTED"] }
+      }
+    },
+    "destinations": {
+      "type": "array",
+      "maxItems": 64,
+      "items": { "$ref": "#/$defs/destination" }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "localPolicyValidation",
+        "unlistedDestinationDenied",
+        "allowedDestinationReached",
+        "providerOutage",
+        "dnsFailure",
+        "tlsFailure",
+        "logsRedacted",
+        "killSwitch",
+        "observedAtUtc",
+        "evidenceIndexReference",
+        "policyConfigurationSha256"
+      ],
+      "properties": {
+        "localPolicyValidation": { "$ref": "#/$defs/evidenceStatus" },
+        "unlistedDestinationDenied": { "$ref": "#/$defs/evidenceStatus" },
+        "allowedDestinationReached": { "$ref": "#/$defs/evidenceStatus" },
+        "providerOutage": { "$ref": "#/$defs/evidenceStatus" },
+        "dnsFailure": { "$ref": "#/$defs/evidenceStatus" },
+        "tlsFailure": { "$ref": "#/$defs/evidenceStatus" },
+        "logsRedacted": { "$ref": "#/$defs/evidenceStatus" },
+        "killSwitch": { "$ref": "#/$defs/evidenceStatus" },
+        "observedAtUtc": { "$ref": "#/$defs/timestampOrNotRun" },
+        "evidenceIndexReference": { "$ref": "#/$defs/referenceOrNotRun" },
+        "policyConfigurationSha256": {
+          "anyOf": [{ "const": "NOT_RUN" }, { "type": "string", "pattern": "^[a-f0-9]{64}$" }]
+        }
+      }
+    }
+  },
+  "$defs": {
+    "dependency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ticket", "approvalStatus", "decisionReference"],
+      "properties": {
+        "ticket": { "type": "string" },
+        "approvalStatus": { "enum": ["NOT_APPROVED", "APPROVED"] },
+        "decisionReference": { "$ref": "#/$defs/referenceOrNotRun" }
+      }
+    },
+    "kan34Dependency": {
+      "allOf": [
+        { "$ref": "#/$defs/dependency" },
+        { "type": "object", "properties": { "ticket": { "const": "KAN-34" } } }
+      ]
+    },
+    "kan37Dependency": {
+      "allOf": [
+        { "$ref": "#/$defs/dependency" },
+        { "type": "object", "properties": { "ticket": { "const": "KAN-37" } } }
+      ]
+    },
+    "kan62Dependency": {
+      "allOf": [
+        { "$ref": "#/$defs/dependency" },
+        { "type": "object", "properties": { "ticket": { "const": "KAN-62" } } }
+      ]
+    },
+    "destination": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "status",
+        "dependencyTicket",
+        "dependencyDecisionReference",
+        "service",
+        "serviceAccess",
+        "purpose",
+        "approvedApiScope",
+        "credentialReference",
+        "reviewExpiresAt",
+        "endpoint",
+        "owners",
+        "data",
+        "tls",
+        "dns",
+        "resilience",
+        "fallback",
+        "logging",
+        "monitoring",
+        "cost",
+        "killSwitch"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "status": { "enum": ["PROPOSED", "APPROVED"] },
+        "dependencyTicket": { "type": "string", "pattern": "^KAN-[1-9][0-9]*$" },
+        "dependencyDecisionReference": { "$ref": "#/$defs/referenceOrNotRun" },
+        "service": {
+          "enum": [
+            "IDENTITY",
+            "RPC",
+            "INDEXING",
+            "ORACLE",
+            "PRICING",
+            "WALLET_VENDOR",
+            "PARTNER_API"
+          ]
+        },
+        "serviceAccess": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "callerService",
+            "executionBoundary",
+            "identityReference",
+            "networkControlReference",
+            "serviceBorrowing"
+          ],
+          "properties": {
+            "callerService": {
+              "enum": ["web-browser", "web-server", "api", "outbox-worker", "migration-task"]
+            },
+            "executionBoundary": {
+              "enum": ["BROWSER_WEB", "ECS_WEB", "ECS_API", "ECS_WORKER", "ECS_MIGRATION"]
+            },
+            "identityReference": { "$ref": "#/$defs/referenceOrNotRun" },
+            "networkControlReference": { "$ref": "#/$defs/referenceOrNotRun" },
+            "serviceBorrowing": { "const": "PROHIBITED" }
+          }
+        },
+        "purpose": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 256,
+          "pattern": "^[^\\r\\n]+$"
+        },
+        "approvedApiScope": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z][A-Za-z0-9._:/-]*$"
+          }
+        },
+        "credentialReference": {
+          "anyOf": [
+            { "const": "NOT_APPLICABLE" },
+            { "const": "NOT_RUN" },
+            { "$ref": "#/$defs/reference" }
+          ]
+        },
+        "reviewExpiresAt": { "$ref": "#/$defs/timestampOrNotRun" },
+        "endpoint": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["scheme", "hostname", "port", "redirects"],
+          "properties": {
+            "scheme": { "enum": ["https", "wss"] },
+            "hostname": { "$ref": "#/$defs/hostname" },
+            "port": { "const": 443 },
+            "redirects": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["mode", "allowedHostnames", "forwardCredentials", "maxHops"],
+              "properties": {
+                "mode": { "enum": ["DENY_ALL", "EXACT_HOST_ALLOWLIST"] },
+                "allowedHostnames": {
+                  "type": "array",
+                  "maxItems": 3,
+                  "uniqueItems": true,
+                  "items": { "$ref": "#/$defs/hostname" }
+                },
+                "forwardCredentials": { "const": "NEVER" },
+                "maxHops": { "type": "integer", "minimum": 0, "maximum": 1 }
+              }
+            }
+          }
+        },
+        "owners": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["provider", "service", "availability", "security", "privacy", "finance"],
+          "properties": {
+            "provider": { "$ref": "#/$defs/reference" },
+            "service": { "$ref": "#/$defs/roleAlias" },
+            "availability": { "$ref": "#/$defs/roleAlias" },
+            "security": { "$ref": "#/$defs/roleAlias" },
+            "privacy": { "$ref": "#/$defs/roleAlias" },
+            "finance": { "$ref": "#/$defs/roleAlias" }
+          }
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["requestClassifications", "responseClassifications", "credentialTransport"],
+          "properties": {
+            "requestClassifications": { "$ref": "#/$defs/dataClassList" },
+            "responseClassifications": { "$ref": "#/$defs/dataClassList" },
+            "credentialTransport": {
+              "enum": [
+                "NONE",
+                "AUTHORIZATION_HEADER",
+                "X_API_KEY_HEADER",
+                "SIGNED_HEADERS",
+                "MUTUAL_TLS"
+              ]
+            }
+          }
+        },
+        "tls": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "minimumVersion",
+            "certificateValidation",
+            "hostnameVerification",
+            "sni",
+            "allowInvalidCertificates"
+          ],
+          "properties": {
+            "minimumVersion": { "enum": ["TLS1.2", "TLS1.3"] },
+            "certificateValidation": { "const": "SYSTEM_TRUST_STRICT" },
+            "hostnameVerification": { "const": "REQUIRED" },
+            "sni": { "const": "REQUIRED" },
+            "allowInvalidCertificates": { "const": false }
+          }
+        },
+        "dns": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["resolution", "privateAddressResponse", "failureMode", "hostnamePinning"],
+          "properties": {
+            "resolution": { "const": "SYSTEM_DNS" },
+            "privateAddressResponse": {
+              "enum": ["DENY", "ALLOW_APPROVED_PRIVATE_ENDPOINT_ONLY"]
+            },
+            "failureMode": { "const": "FAIL_CLOSED" },
+            "hostnamePinning": { "const": "DISABLED" }
+          }
+        },
+        "resilience": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "connectTimeoutMs",
+            "requestTimeoutMs",
+            "maxAttempts",
+            "retryBackoff",
+            "retryNonIdempotent",
+            "retryOn",
+            "circuitBreaker"
+          ],
+          "properties": {
+            "connectTimeoutMs": { "type": "integer", "minimum": 100, "maximum": 10000 },
+            "requestTimeoutMs": { "type": "integer", "minimum": 100, "maximum": 60000 },
+            "maxAttempts": { "type": "integer", "minimum": 1, "maximum": 5 },
+            "retryBackoff": { "const": "EXPONENTIAL_JITTER" },
+            "retryNonIdempotent": { "const": "NEVER" },
+            "retryOn": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": { "enum": ["CONNECT_TIMEOUT", "HTTP_429", "HTTP_502", "HTTP_503"] }
+            },
+            "circuitBreaker": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["failureThreshold", "openSeconds", "halfOpenRequests", "action"],
+              "properties": {
+                "failureThreshold": { "type": "integer", "minimum": 2, "maximum": 20 },
+                "openSeconds": { "type": "integer", "minimum": 5, "maximum": 900 },
+                "halfOpenRequests": { "type": "integer", "minimum": 1, "maximum": 5 },
+                "action": { "const": "FAIL_CLOSED" }
+              }
+            }
+          }
+        },
+        "fallback": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["behavior", "alternateDestinationId", "serviceBorrowing"],
+          "properties": {
+            "behavior": {
+              "enum": ["FAIL_CLOSED", "DEGRADE_WITHOUT_EXTERNAL_DATA", "USE_APPROVED_ALTERNATE"]
+            },
+            "alternateDestinationId": {
+              "anyOf": [{ "const": "NOT_APPLICABLE" }, { "$ref": "#/$defs/id" }]
+            },
+            "serviceBorrowing": { "const": "PROHIBITED" }
+          }
+        },
+        "logging": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "allowedMetadata",
+            "redactedHeaders",
+            "bodyLogging",
+            "queryLogging",
+            "secretFieldPolicy",
+            "retentionDays",
+            "alertOwner"
+          ],
+          "properties": {
+            "allowedMetadata": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "enum": [
+                  "destinationId",
+                  "outcome",
+                  "durationMs",
+                  "statusClass",
+                  "retryCount",
+                  "circuitState"
+                ]
+              }
+            },
+            "redactedHeaders": {
+              "type": "array",
+              "minItems": 5,
+              "uniqueItems": true,
+              "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,62}$" }
+            },
+            "bodyLogging": { "const": "DISABLED" },
+            "queryLogging": { "const": "DISABLED" },
+            "secretFieldPolicy": { "const": "DROP_AND_REDACT" },
+            "retentionDays": { "type": "integer", "minimum": 1, "maximum": 90 },
+            "alertOwner": { "$ref": "#/$defs/roleAliasOrSentinel" }
+          }
+        },
+        "monitoring": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "metricNames", "alertRules", "owner", "cost"],
+          "properties": {
+            "status": { "enum": ["PROPOSED", "APPROVED"] },
+            "metricNames": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 6,
+              "uniqueItems": true,
+              "items": { "$ref": "#/$defs/monitoringMetricName" }
+            },
+            "alertRules": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 12,
+              "items": { "$ref": "#/$defs/monitoringAlertRule" }
+            },
+            "owner": { "$ref": "#/$defs/roleAlias" },
+            "cost": { "$ref": "#/$defs/cost" }
+          }
+        },
+        "cost": {
+          "$ref": "#/$defs/cost"
+        },
+        "killSwitch": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["owner", "action", "activationReference", "lastTestedAt", "evidence"],
+          "properties": {
+            "owner": { "$ref": "#/$defs/roleAliasOrSentinel" },
+            "action": { "const": "DENY_DESTINATION" },
+            "activationReference": { "$ref": "#/$defs/referenceOrNotRun" },
+            "lastTestedAt": { "$ref": "#/$defs/timestampOrNotRun" },
+            "evidence": { "$ref": "#/$defs/evidenceStatus" }
+          }
+        }
+      }
+    },
+    "monitoringMetricName": {
+      "enum": [
+        "egress_request_total",
+        "egress_failure_total",
+        "egress_latency_ms",
+        "egress_denied_total",
+        "circuit_breaker_open",
+        "egress_kill_switch_active"
+      ]
+    },
+    "monitoringAlertRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "metricName",
+        "comparisonOperator",
+        "threshold",
+        "evaluationPeriods",
+        "periodSeconds",
+        "missingDataBehavior",
+        "alarmReference"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "metricName": { "$ref": "#/$defs/monitoringMetricName" },
+        "comparisonOperator": {
+          "enum": ["GREATER_THAN", "GREATER_THAN_OR_EQUAL", "LESS_THAN"]
+        },
+        "threshold": { "$ref": "#/$defs/money" },
+        "evaluationPeriods": { "type": "integer", "minimum": 1, "maximum": 10 },
+        "periodSeconds": { "enum": [60, 300, 900, 3600] },
+        "missingDataBehavior": { "enum": ["BREACHING", "NOT_BREACHING"] },
+        "alarmReference": { "$ref": "#/$defs/referenceOrNotRun" }
+      }
+    },
+    "cost": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "currency",
+        "estimatedMonthlyFixedUsd",
+        "estimatedMonthlyVariableUsd",
+        "monthlyVariableCeilingUsd",
+        "costDecision",
+        "activationAuthorization",
+        "financeApprovalReference",
+        "pricingAsOf",
+        "pricingExpiresAt"
+      ],
+      "properties": {
+        "currency": { "const": "USD" },
+        "estimatedMonthlyFixedUsd": { "$ref": "#/$defs/money" },
+        "estimatedMonthlyVariableUsd": { "$ref": "#/$defs/money" },
+        "monthlyVariableCeilingUsd": { "$ref": "#/$defs/money" },
+        "costDecision": { "enum": ["NOT_APPROVED", "APPROVED"] },
+        "activationAuthorization": { "enum": ["NOT_AUTHORIZED", "APPROVED"] },
+        "financeApprovalReference": { "$ref": "#/$defs/referenceOrNotRun" },
+        "pricingAsOf": { "$ref": "#/$defs/dateOrNotRun" },
+        "pricingExpiresAt": { "$ref": "#/$defs/dateOrNotRun" }
+      }
+    },
+    "environmentOrSentinel": {
+      "anyOf": [
+        { "const": "NOT_APPROVED" },
+        {
+          "type": "string",
+          "pattern": "^(dev|test|qa|sandbox|staging)(-[a-z0-9]+)*$",
+          "maxLength": 31
+        }
+      ]
+    },
+    "id": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 64,
+      "pattern": "^[a-z][a-z0-9-]{1,62}[a-z0-9]$"
+    },
+    "roleAlias": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 64,
+      "pattern": "^[a-z][a-z0-9-]{1,62}[a-z0-9]$"
+    },
+    "roleAliasOrSentinel": {
+      "anyOf": [{ "const": "NOT_APPROVED" }, { "$ref": "#/$defs/roleAlias" }]
+    },
+    "reference": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$"
+    },
+    "referenceOrSentinel": {
+      "anyOf": [{ "const": "NOT_APPROVED" }, { "$ref": "#/$defs/reference" }]
+    },
+    "referenceOrNotRun": {
+      "anyOf": [{ "const": "NOT_RUN" }, { "$ref": "#/$defs/reference" }]
+    },
+    "hostname": {
+      "type": "string",
+      "minLength": 4,
+      "maxLength": 253,
+      "pattern": "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$"
+    },
+    "dataClassList": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "NONE",
+          "PUBLIC_CHAIN_DATA",
+          "WALLET_ADDRESS",
+          "PSEUDONYMOUS_ACCOUNT_ID",
+          "AUTHENTICATION_ASSERTION",
+          "PERSONAL_DATA",
+          "PRICING_DATA"
+        ]
+      }
+    },
+    "money": {
+      "description": "A nonnegative bounded USD estimate encoded as a decimal string.",
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]{0,8})(\\.[0-9]{1,2})?$"
+    },
+    "dateOrNotRun": {
+      "anyOf": [{ "const": "NOT_RUN" }, { "type": "string", "format": "date" }]
+    },
+    "timestampOrNotRun": {
+      "anyOf": [{ "const": "NOT_RUN" }, { "type": "string", "format": "date-time" }]
+    },
+    "approverList": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/roleAliasOrSentinel" }
+    },
+    "evidenceStatus": { "enum": ["NOT_RUN", "PASS", "FAIL", "BLOCKED"] }
+  }
+}

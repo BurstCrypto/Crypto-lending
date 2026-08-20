@@ -165,7 +165,7 @@ $env:RUN_INFRASTRUCTURE_INTEGRATION="1"
 npm run test:integration
 ```
 
-## AWS application baseline and billing guardrails
+## AWS application baseline, billing guardrails, and egress controls
 
 KAN-34's native CloudFormation baseline is defined in
 `infra/aws/application-baseline.yaml`. It models private Fargate application
@@ -174,6 +174,9 @@ networking without adding Terraform/CDK state or embedded credentials.
 KAN-229's separate `infra/aws/account-guardrails.yaml` defines the account-level
 budget and optional anomaly-notification prerequisites that must be approved and
 verified before an application change set can be created.
+KAN-231's local egress policy package preserves deny-by-default server and
+browser behavior while RPC, identity, oracle, and vendor destinations remain
+unapproved. It adds no NAT, firewall, proxy, paid endpoint, or provider call.
 Its constrained no-direct-service-fee inventory permissions are versioned in
 `infra/aws/kan-229-readonly-preflight-policy.json`; the policy contains no Cost
 Explorer or write permissions and is never attached by CI or local validation.
@@ -191,6 +194,7 @@ Validate it entirely offline with:
 npm run infra:validate
 npm run infra:test:guardrails
 npm run infra:test:acm-dns
+npm run infra:test:egress
 python -m pip install --requirement infra/aws/requirements-dev.txt
 python infra/aws/lint-cloudformation.py infra/aws/application-baseline.yaml infra/aws/account-guardrails.yaml infra/aws/sqs-foundation.yaml
 ```
@@ -204,7 +208,9 @@ filesystem-only validation. See [`docs/KAN-34.md`](docs/KAN-34.md) for the
 application architecture and [`docs/KAN-229.md`](docs/KAN-229.md) for the cost,
 authority, and independent-verification workflow. See
 [`docs/KAN-230.md`](docs/KAN-230.md) for the local-only hostname, certificate,
-DNS, cutover, and rollback contract.
+DNS, cutover, and rollback contract. The Proposed egress design,
+dependency gates, and live-evidence boundary are in
+[`docs/KAN-231.md`](docs/KAN-231.md).
 
 The live test refuses non-loopback service URLs, creates isolated queues and a
 unique PostgreSQL schema, and removes only those test resources. See
@@ -222,7 +228,8 @@ unique PostgreSQL schema, and removes only those test resources. See
   SQS-managed dead-letter redrive.
 - `infra` contains local dependency initialization, the standalone SQS topology,
   KAN-34's guarded CloudFormation application baseline, and KAN-229's separate
-  account billing controls.
+  account billing controls. `infra/egress` contains KAN-231's inert destination
+  policy and filesystem-only validator; it contains no deployment action.
 
 These boundaries are intended to be extended by later domain modules. They do
 not embed lending business rules into infrastructure clients, which keeps future
