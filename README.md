@@ -231,6 +231,10 @@ unique PostgreSQL schema, and removes only those test resources. See
 
 - `apps/web` owns the browser-facing Next.js application.
 - `apps/api/src/system` owns process liveness, version, and API contract routes.
+- `apps/api/src/accounts` owns immutable platform account IDs, self-scoped
+  profile application rules, the fail-closed current-principal port, and the
+  PII-safe account persistence boundary. Real managed authentication is a
+  downstream KAN-37 adapter; see [`docs/KAN-36.md`](docs/KAN-36.md).
 - `apps/api/src/infrastructure/database` owns pooled queries, transaction
   propagation, and checksum-protected migrations.
 - `apps/api/src/infrastructure/redis` owns shared cache and job-state access.

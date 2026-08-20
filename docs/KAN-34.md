@@ -239,22 +239,37 @@ SELECT format('REVOKE ALL ON DATABASE %I FROM PUBLIC', :'database_name') \gexec
 SELECT format('GRANT CONNECT ON DATABASE %I TO %I', :'database_name', :'runtime_user') \gexec
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;
 SELECT format('GRANT USAGE ON SCHEMA public TO %I', :'runtime_user') \gexec
-SELECT format('GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO %I', :'runtime_user') \gexec
-SELECT format('GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO %I', :'runtime_user') \gexec
-SELECT format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO %I', :'migration_user', :'runtime_user') \gexec
-SELECT format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA public GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO %I', :'migration_user', :'runtime_user') \gexec
-SELECT format('REVOKE INSERT, UPDATE, DELETE ON TABLE public.schema_migrations FROM %I', :'runtime_user')
+SELECT format('REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM %I', :'runtime_user') \gexec
+SELECT format('REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public FROM %I', :'runtime_user') \gexec
+SELECT format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA public REVOKE ALL PRIVILEGES ON TABLES FROM %I', :'migration_user', :'runtime_user') \gexec
+SELECT format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA public REVOKE ALL PRIVILEGES ON SEQUENCES FROM %I', :'migration_user', :'runtime_user') \gexec
+SELECT format('GRANT SELECT ON TABLE public.schema_migrations TO %I', :'runtime_user')
 WHERE to_regclass('public.schema_migrations') IS NOT NULL \gexec
+SELECT format('GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.job_outbox TO %I', :'runtime_user')
+WHERE to_regclass('public.job_outbox') IS NOT NULL \gexec
+SELECT format('GRANT SELECT ON TABLE public.accounts TO %I', :'runtime_user')
+WHERE to_regclass('public.accounts') IS NOT NULL \gexec
+SELECT format('GRANT SELECT ON TABLE public.account_profiles TO %I', :'runtime_user')
+WHERE to_regclass('public.account_profiles') IS NOT NULL \gexec
+SELECT format('GRANT EXECUTE ON FUNCTION public.provision_account_profile(uuid, text, text, text, uuid, text) TO %I', :'runtime_user')
+WHERE to_regprocedure('public.provision_account_profile(uuid, text, text, text, uuid, text)') IS NOT NULL \gexec
+SELECT format('GRANT EXECUTE ON FUNCTION public.update_account_profile(uuid, integer, boolean, text, boolean, text, boolean, text, uuid, text) TO %I', :'runtime_user')
+WHERE to_regprocedure('public.update_account_profile(uuid, integer, boolean, text, boolean, text, boolean, text, uuid, text)') IS NOT NULL \gexec
 ```
 
 The authorized delivery sequence is: bootstrap/grant the runtime role; register
 the separately reviewed migration task using the baseline's migration secret;
 run it in the baseline cluster/private subnets/backend security group; wait for
-exit code zero; rerun the grant/revoke reconciliation so `schema_migrations`
-remains read-only; verify the runtime role cannot create/alter/drop schema
-objects or mutate migration history but can read `schema_migrations` and perform
-required outbox DML; then increase API/worker desired counts. Record task ARN and
-image digest, never secret values.
+exit code zero; rerun the fail-closed, object-specific grant/revoke reconciliation;
+run `npm run db:status:prod --workspace @crypto-lending/api` again so every
+applied migration's checksum and live schema are reverified; verify the runtime role cannot
+create/alter/drop schema objects, mutate migration history, write account/profile
+tables directly, or read/write profile audit rows, but can read
+`schema_migrations`, perform required outbox DML, read account profiles, and
+execute only the audited account write functions; then increase API/worker
+desired counts. Every future migration must grant only its own reviewed runtime
+operations—there are deliberately no broad default table or sequence grants.
+Record task ARN and image digest, never secret values.
 
 For that separately authorized registration, map
 `DatabaseCredentialsSecretArn` to

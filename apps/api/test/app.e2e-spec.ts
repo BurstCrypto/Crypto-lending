@@ -66,6 +66,24 @@ describe('system endpoints (e2e)', () => {
     });
   });
 
+  it('fails closed on account routes until a verified principal adapter is installed', async () => {
+    const response = await request(app.getHttpServer())
+      .get('/api/v1/accounts/me')
+      .set('X-User-ID', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa')
+      .expect(401);
+
+    expect(response.headers).toMatchObject({
+      'cache-control': 'private, no-store',
+      vary: 'Authorization',
+      'www-authenticate': 'Bearer',
+    });
+    expect(response.body).toEqual({
+      error: 'Unauthorized',
+      message: 'Authentication required',
+      statusCode: 401,
+    });
+  });
+
   it('rejects dependency-readiness work above the replica concurrency cap', async () => {
     const limiter = app.get(ReadinessAbuseLimiter);
     const leases: ReadinessRequestLease[] = [];
@@ -129,6 +147,7 @@ describe('system endpoints (e2e)', () => {
     expect(response.body.paths).toHaveProperty('/api/v1/health');
     expect(response.body.paths).toHaveProperty('/api/v1/health/dependencies');
     expect(response.body.paths).toHaveProperty('/api/v1/version');
+    expect(response.body.paths).toHaveProperty('/api/v1/accounts/me');
     expect(response.body.paths).not.toHaveProperty('/api/v1/internal/health/dependencies');
     expect(
       response.body.paths['/api/v1/health/dependencies'].get.responses['503'].content[

@@ -113,7 +113,7 @@ describeWithInfrastructure('live docker-compose infrastructure', () => {
       const migrations = new MigrationRunner(postgresPool, DATABASE_MIGRATION_LIST);
       const health = new InfrastructureHealthService(postgres, migrations, redis, sqs);
 
-      await expect(migrations.up()).resolves.toEqual(['0001', '0002', '0003']);
+      await expect(migrations.up()).resolves.toEqual(['0001', '0002', '0003', '0004']);
       await expect(health.check(5_000)).resolves.toMatchObject({ status: 'ok' });
 
       const testQueues = await createIsolatedTestQueues(sqsClient, config.sqs.maxReceiveCount);
@@ -164,7 +164,7 @@ describeWithInfrastructure('live docker-compose infrastructure', () => {
       }>('SELECT id, status FROM job_outbox WHERE id = $1', [outboxEnvelope.id]);
       expect(persistedOutbox.rows).toEqual([{ id: outboxEnvelope.id, status: 'published' }]);
 
-      await expect(migrations.down(3)).resolves.toEqual(['0003', '0002', '0001']);
+      await expect(migrations.down(4)).resolves.toEqual(['0004', '0003', '0002', '0001']);
       const rolledBack = await postgresPool.query<{ table_name: string }>(
         `SELECT table_name
          FROM information_schema.tables
