@@ -34,7 +34,7 @@ describeWithPostgres('PostgreSQL migration rollback integration', () => {
 
   it('applies up on a blank schema and removes its objects on down', async () => {
     const schemaBeforeLastErrorConstraint = DATABASE_TEST_SCHEMA_MIGRATION_LIST.filter(
-      ({ id }) => id !== '0006',
+      ({ id }) => id < '0006',
     );
     const preConstraintRunner = new MigrationRunner(migrationPool, schemaBeforeLastErrorConstraint);
     const runner = new MigrationRunner(migrationPool, DATABASE_TEST_SCHEMA_MIGRATION_LIST);
@@ -48,7 +48,7 @@ describeWithPostgres('PostgreSQL migration rollback integration', () => {
          ('historical-null', 'jobs', '{}'::jsonb, '{}'::jsonb, NULL)`,
     );
 
-    await expect(runner.up()).resolves.toEqual(['0006']);
+    await expect(runner.up()).resolves.toEqual(['0006', '0007']);
     const sanitizedLastErrors = await migrationPool.query<{
       id: string;
       last_error: string | null;
@@ -128,13 +128,13 @@ describeWithPostgres('PostgreSQL migration rollback integration', () => {
     await expect(runner.assertUpToDate()).rejects.toThrow(
       'Database migration 0006 schema verification failed',
     );
-    await expect(runner.down(1)).resolves.toEqual(['0006']);
+    await expect(runner.down(2)).resolves.toEqual(['0007', '0006']);
     await migrationPool.query(
       `UPDATE job_outbox
        SET last_error = 'legacy worker detail after rollback'
        WHERE id = 'historical-raw'`,
     );
-    await expect(runner.up()).resolves.toEqual(['0006']);
+    await expect(runner.up()).resolves.toEqual(['0006', '0007']);
     await expect(
       migrationPool.query<{ last_error: string }>(
         `SELECT last_error FROM job_outbox WHERE id = 'historical-raw'`,
@@ -143,7 +143,7 @@ describeWithPostgres('PostgreSQL migration rollback integration', () => {
       rows: [{ last_error: 'OUTBOX_TRANSPORT_FAILED' }],
     });
 
-    await expect(runner.down(5)).resolves.toEqual(['0006', '0004', '0003', '0002', '0001']);
+    await expect(runner.down(6)).resolves.toEqual(['0007', '0006', '0004', '0003', '0002', '0001']);
     const afterDown = await migrationPool.query<{ table_name: string }>(
       `SELECT table_name
        FROM information_schema.tables
@@ -151,6 +151,24 @@ describeWithPostgres('PostgreSQL migration rollback integration', () => {
       [schema],
     );
     expect(afterDown.rows).toEqual([]);
+
+    const ledgerObjectsAfterDown = await migrationPool.query<{
+      object_kind: string;
+      object_name: string;
+    }>(
+      `SELECT 'relation' AS object_kind, relation.relname AS object_name
+       FROM pg_catalog.pg_class AS relation
+       WHERE relation.relnamespace = pg_catalog.to_regnamespace($1)
+         AND pg_catalog.left(relation.relname, 7) = 'ledger_'
+       UNION ALL
+       SELECT 'function' AS object_kind, procedure.proname AS object_name
+       FROM pg_catalog.pg_proc AS procedure
+       WHERE procedure.pronamespace = pg_catalog.to_regnamespace($1)
+         AND pg_catalog.strpos(procedure.proname, 'ledger') > 0
+       ORDER BY object_kind, object_name`,
+      [schema],
+    );
+    expect(ledgerObjectsAfterDown.rows).toEqual([]);
 
     const accountObjectsAfterDown = await migrationPool.query<{
       object_kind: string;
@@ -182,11 +200,11 @@ describeWithPostgres('PostgreSQL migration rollback integration', () => {
 
     const migrationRecordsAfterDown = await migrationPool.query<{ id: string }>(
       'SELECT id FROM schema_migrations WHERE id = ANY($1::text[]) ORDER BY id',
-      [['0004', '0006']],
+      [['0004', '0006', '0007']],
     );
     expect(migrationRecordsAfterDown.rows).toEqual([]);
 
-    await expect(runner.up()).resolves.toEqual(['0001', '0002', '0003', '0004', '0006']);
+    await expect(runner.up()).resolves.toEqual(['0001', '0002', '0003', '0004', '0006', '0007']);
     await expect(runner.assertUpToDate()).resolves.toBeUndefined();
   });
 });

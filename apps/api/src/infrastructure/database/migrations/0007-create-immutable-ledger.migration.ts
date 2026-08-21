@@ -5918,12 +5918,15 @@ function createLedgerDownSql(names: DatabasePrincipalNames): readonly string[] {
   ];
 }
 
-function extendPrincipalVerifierForLedgerFunctions(
+function extendPrincipalVerifierForLedgerBoundary(
   names: DatabasePrincipalNames,
   principalVerifier: string,
 ): string {
   const legacy = literal(names.legacyRuntimeRole, 'legacyRuntimeRole');
   const api = literal(names.apiRuntimeRole, 'apiRuntimeRole');
+  // PostgreSQL makes a table's implicit row type effectively USAGE-capable.
+  // Exempt only the exact catalog-pinned ledger tables; every other current-schema type stays denied.
+  const ledgerTableLiterals = LEDGER_TABLES.map((table) => `'${table}'`).join(', ');
   const existingFunctionAllowance = `            OR (
               grantee.rolname = ${legacy}
               AND procedure.oid IN (
@@ -5949,7 +5952,98 @@ function extendPrincipalVerifierForLedgerFunctions(
               AND acl.privilege_type = 'EXECUTE'
               AND NOT acl.is_grantable
             )`;
-  return replaceExactlyOnce(principalVerifier, existingFunctionAllowance, ledgerFunctionAllowance);
+  const existingLoginTypeProbe = `          OR EXISTS (
+            SELECT 1 FROM pg_catalog.pg_type AS type_object
+            WHERE type_object.typnamespace = pg_catalog.to_regnamespace(pg_catalog.current_schema())
+              AND NOT EXISTS (
+                SELECT 1
+                FROM pg_catalog.pg_type AS element_type
+                WHERE element_type.typarray = type_object.oid
+              )
+              AND pg_catalog.has_type_privilege(login_role.oid, type_object.oid, 'USAGE')
+          )`;
+  const ledgerLoginTypeProbe = `          OR EXISTS (
+            SELECT 1 FROM pg_catalog.pg_type AS type_object
+            WHERE type_object.typnamespace = pg_catalog.to_regnamespace(pg_catalog.current_schema())
+              AND NOT EXISTS (
+                SELECT 1
+                FROM pg_catalog.pg_type AS element_type
+                WHERE element_type.typarray = type_object.oid
+              )
+              AND NOT EXISTS (
+                SELECT 1
+                FROM pg_catalog.pg_class AS ledger_row_table
+                WHERE ledger_row_table.oid = type_object.typrelid
+                  AND ledger_row_table.relnamespace =
+                    pg_catalog.to_regnamespace(pg_catalog.current_schema())
+                  AND ledger_row_table.relkind = 'r'
+                  AND ledger_row_table.relname IN (${ledgerTableLiterals})
+              )
+              AND pg_catalog.has_type_privilege(login_role.oid, type_object.oid, 'USAGE')
+          )`;
+  const existingAuditedTypeProbe = `    AND NOT EXISTS (
+      SELECT 1
+      FROM pg_catalog.pg_type AS type_object
+      CROSS JOIN pg_catalog.pg_roles AS audited_role
+      WHERE type_object.typnamespace = pg_catalog.to_regnamespace(pg_catalog.current_schema())
+        AND NOT EXISTS (
+          SELECT 1
+          FROM pg_catalog.pg_type AS element_type
+          WHERE element_type.typarray = type_object.oid
+        )
+        AND (
+          audited_role.rolname IN (
+            ${literal(names.migrationRole, 'migrationRole')}, ${legacy}, ${api}, ${literal(names.workerRuntimeRole, 'workerRuntimeRole')}
+          )
+          OR audited_role.rolname ~ ('^' || ${literal(names.apiLoginPrefix, 'apiLoginPrefix')} || '[a-z0-9]{1,32}$')
+          OR audited_role.rolname ~ ('^' || ${literal(names.workerLoginPrefix, 'workerLoginPrefix')} || '[a-z0-9]{1,32}$')
+        )
+        AND pg_catalog.has_type_privilege(audited_role.oid, type_object.oid, 'USAGE')
+    )`;
+  const ledgerAuditedTypeProbe = `    AND NOT EXISTS (
+      SELECT 1
+      FROM pg_catalog.pg_type AS type_object
+      CROSS JOIN pg_catalog.pg_roles AS audited_role
+      WHERE type_object.typnamespace = pg_catalog.to_regnamespace(pg_catalog.current_schema())
+        AND NOT EXISTS (
+          SELECT 1
+          FROM pg_catalog.pg_type AS element_type
+          WHERE element_type.typarray = type_object.oid
+        )
+        AND NOT EXISTS (
+          SELECT 1
+          FROM pg_catalog.pg_class AS ledger_row_table
+          WHERE ledger_row_table.oid = type_object.typrelid
+            AND ledger_row_table.relnamespace =
+              pg_catalog.to_regnamespace(pg_catalog.current_schema())
+            AND ledger_row_table.relkind = 'r'
+            AND ledger_row_table.relname IN (${ledgerTableLiterals})
+        )
+        AND (
+          audited_role.rolname IN (
+            ${literal(names.migrationRole, 'migrationRole')}, ${legacy}, ${api}, ${literal(names.workerRuntimeRole, 'workerRuntimeRole')}
+          )
+          OR audited_role.rolname ~ ('^' || ${literal(names.apiLoginPrefix, 'apiLoginPrefix')} || '[a-z0-9]{1,32}$')
+          OR audited_role.rolname ~ ('^' || ${literal(names.workerLoginPrefix, 'workerLoginPrefix')} || '[a-z0-9]{1,32}$')
+        )
+        AND pg_catalog.has_type_privilege(audited_role.oid, type_object.oid, 'USAGE')
+    )`;
+
+  const withLedgerFunctions = replaceExactlyOnce(
+    principalVerifier,
+    existingFunctionAllowance,
+    ledgerFunctionAllowance,
+  );
+  const withLedgerLoginRowTypes = replaceExactlyOnce(
+    withLedgerFunctions,
+    existingLoginTypeProbe,
+    ledgerLoginTypeProbe,
+  );
+  return replaceExactlyOnce(
+    withLedgerLoginRowTypes,
+    existingAuditedTypeProbe,
+    ledgerAuditedTypeProbe,
+  );
 }
 
 function createLedgerVerifierSql(
@@ -6581,7 +6675,7 @@ function createCumulativeLedgerVerifierSql(names: DatabasePrincipalNames): strin
   if (!principalMigration.verifySql) {
     throw new Error('Migration 0005 must expose verification SQL');
   }
-  const principalVerifier = extendPrincipalVerifierForLedgerFunctions(
+  const principalVerifier = extendPrincipalVerifierForLedgerBoundary(
     names,
     principalMigration.verifySql,
   );

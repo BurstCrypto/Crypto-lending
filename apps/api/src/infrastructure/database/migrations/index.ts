@@ -4,6 +4,10 @@ import { addJobOutboxFailedRetentionIndexMigration } from './0003-add-job-outbox
 import { createAccountsAndProfilesMigration } from './0004-create-accounts-and-profiles.migration';
 import { enforceDatabasePrincipalBoundariesMigration } from './0005-enforce-database-principal-boundaries.migration';
 import { constrainJobOutboxLastErrorMigration } from './0006-constrain-job-outbox-last-error.migration';
+import {
+  createImmutableLedgerMigrationV0007,
+  createImmutableLedgerTestSchemaMigrationV0007,
+} from './0007-create-immutable-ledger.migration';
 import type { DatabaseMigration } from './migration';
 
 /**
@@ -18,6 +22,7 @@ export const DATABASE_TEST_SCHEMA_MIGRATION_LIST: readonly DatabaseMigration[] =
   addJobOutboxFailedRetentionIndexMigration,
   createAccountsAndProfilesMigration,
   constrainJobOutboxLastErrorMigration,
+  createImmutableLedgerTestSchemaMigrationV0007,
 ]);
 
 export const DATABASE_MIGRATION_LIST: readonly DatabaseMigration[] = Object.freeze([
@@ -27,6 +32,7 @@ export const DATABASE_MIGRATION_LIST: readonly DatabaseMigration[] = Object.free
   createAccountsAndProfilesMigration,
   enforceDatabasePrincipalBoundariesMigration,
   constrainJobOutboxLastErrorMigration,
+  createImmutableLedgerMigrationV0007,
 ]);
 
 export type { DatabaseMigration } from './migration';
@@ -35,3 +41,8 @@ export {
   PRODUCTION_DATABASE_PRINCIPALS,
 } from './0005-enforce-database-principal-boundaries.migration';
 export type { DatabasePrincipalNames } from './0005-enforce-database-principal-boundaries.migration';
+export {
+  createImmutableLedgerMigration,
+  createImmutableLedgerMigrationV0007,
+  createImmutableLedgerTestSchemaMigrationV0007,
+} from './0007-create-immutable-ledger.migration';

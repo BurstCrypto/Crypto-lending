@@ -108,7 +108,17 @@ describeWithInfrastructure('live docker-compose infrastructure', () => {
       const migrations = new MigrationRunner(postgresPool, DATABASE_TEST_SCHEMA_MIGRATION_LIST);
       const health = new InfrastructureHealthService(postgres, migrations, redis, sqs);
 
-      await expect(migrations.up()).resolves.toEqual(['0001', '0002', '0003', '0004', '0006']);
+      await expect(migrations.up()).resolves.toEqual([
+        '0001',
+        '0002',
+        '0003',
+        '0004',
+        '0006',
+        '0007',
+      ]);
+      await expect(
+        postgresPool.query("SELECT to_regclass('ledger_journals') AS ledger_table"),
+      ).resolves.toMatchObject({ rows: [{ ledger_table: 'ledger_journals' }] });
       await expect(health.check(5_000)).resolves.toMatchObject({ status: 'ok' });
 
       const testQueues = await createIsolatedTestQueues(sqsClient, config.sqs.maxReceiveCount);
@@ -159,7 +169,14 @@ describeWithInfrastructure('live docker-compose infrastructure', () => {
       }>('SELECT id, status FROM job_outbox WHERE id = $1', [outboxEnvelope.id]);
       expect(persistedOutbox.rows).toEqual([{ id: outboxEnvelope.id, status: 'published' }]);
 
-      await expect(migrations.down(5)).resolves.toEqual(['0006', '0004', '0003', '0002', '0001']);
+      await expect(migrations.down(6)).resolves.toEqual([
+        '0007',
+        '0006',
+        '0004',
+        '0003',
+        '0002',
+        '0001',
+      ]);
       const rolledBack = await postgresPool.query<{ table_name: string }>(
         `SELECT table_name
          FROM information_schema.tables
@@ -167,6 +184,9 @@ describeWithInfrastructure('live docker-compose infrastructure', () => {
         [schema],
       );
       expect(rolledBack.rows).toEqual([]);
+      await expect(
+        postgresPool.query("SELECT to_regclass('ledger_journals') AS ledger_table"),
+      ).resolves.toMatchObject({ rows: [{ ledger_table: null }] });
 
       const worker = new SqsJobWorker(isolatedSqs, jobConfig);
       const sample = await isolatedSqs.sendJob(

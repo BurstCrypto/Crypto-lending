@@ -25,12 +25,14 @@ class InMemoryMigrationDatabase {
   accountSchemaExists = false;
   jobOutboxExists = false;
   jobOutboxLastErrorConstraintExists = false;
+  ledgerSchemaExists = false;
   migrationTableExists = false;
   oldVerifierValid = true;
   newVerifierValid = true;
   thirdVerifierValid = true;
   released = false;
   private transactionAppliedSnapshot: Map<string, StoredMigration> | undefined;
+  private transactionLedgerSchemaExistsSnapshot: boolean | undefined;
 
   readonly client = {
     query: async (text: string, values: readonly unknown[] = []): Promise<QueryResult> => {
@@ -39,8 +41,10 @@ class InMemoryMigrationDatabase {
 
       if (normalized === 'BEGIN') {
         this.transactionAppliedSnapshot = new Map(this.applied);
+        this.transactionLedgerSchemaExistsSnapshot = this.ledgerSchemaExists;
       } else if (normalized === 'COMMIT') {
         this.transactionAppliedSnapshot = undefined;
+        this.transactionLedgerSchemaExistsSnapshot = undefined;
       } else if (normalized === 'ROLLBACK') {
         if (this.transactionAppliedSnapshot) {
           this.applied.clear();
@@ -48,7 +52,11 @@ class InMemoryMigrationDatabase {
             this.applied.set(id, migration);
           }
         }
+        if (this.transactionLedgerSchemaExistsSnapshot !== undefined) {
+          this.ledgerSchemaExists = this.transactionLedgerSchemaExistsSnapshot;
+        }
         this.transactionAppliedSnapshot = undefined;
+        this.transactionLedgerSchemaExistsSnapshot = undefined;
       } else if (normalized.includes('CREATE TABLE IF NOT EXISTS schema_migrations')) {
         this.migrationTableExists = true;
       } else if (normalized.startsWith("SELECT to_regclass('schema_migrations')")) {
@@ -73,6 +81,10 @@ class InMemoryMigrationDatabase {
         this.accountSchemaExists = true;
       } else if (normalized.includes('DROP TABLE IF EXISTS account_profile_audit')) {
         this.accountSchemaExists = false;
+      } else if (normalized.includes('CREATE TABLE ledger_books (')) {
+        this.ledgerSchemaExists = true;
+      } else if (normalized === 'DROP TABLE ledger_books') {
+        this.ledgerSchemaExists = false;
       } else if (normalized.startsWith('DROP INDEX CONCURRENTLY IF EXISTS')) {
         const indexName = normalized.split(' ').at(-1);
         if (indexName) this.indexes.delete(indexName);
@@ -101,6 +113,15 @@ class InMemoryMigrationDatabase {
               definition?.includes(`ON job_outbox (${expectedTimestamp}, id)`) &&
               definition.includes(`WHERE status = '${expectedStatus}'`),
             ),
+          },
+        ]);
+      } else if (
+        normalized.startsWith('SELECT (principal.valid AND ledger.valid)') &&
+        normalized.includes('ledger_touching_constraints')
+      ) {
+        return result([
+          {
+            valid: this.accountSchemaExists && this.jobOutboxExists && this.ledgerSchemaExists,
           },
         ]);
       } else if (
@@ -159,7 +180,15 @@ describe('MigrationRunner', () => {
     const database = new InMemoryMigrationDatabase();
     const runner = new MigrationRunner(database.pool, DATABASE_MIGRATION_LIST);
 
-    await expect(runner.up()).resolves.toEqual(['0001', '0002', '0003', '0004', '0005', '0006']);
+    await expect(runner.up()).resolves.toEqual([
+      '0001',
+      '0002',
+      '0003',
+      '0004',
+      '0005',
+      '0006',
+      '0007',
+    ]);
     expect(database.jobOutboxExists).toBe(true);
     expect(database.applied.has('0001')).toBe(true);
     expect(database.applied.has('0002')).toBe(true);
@@ -167,18 +196,29 @@ describe('MigrationRunner', () => {
     expect(database.applied.has('0004')).toBe(true);
     expect(database.applied.has('0005')).toBe(true);
     expect(database.applied.has('0006')).toBe(true);
+    expect(database.applied.has('0007')).toBe(true);
     expect(database.accountSchemaExists).toBe(true);
+    expect(database.ledgerSchemaExists).toBe(true);
     expect(database.jobOutboxLastErrorConstraintExists).toBe(true);
-    expect(database.queries.filter((query) => query === 'BEGIN')).toHaveLength(4);
+    expect(database.queries.filter((query) => query === 'BEGIN')).toHaveLength(5);
     expect(
       database.queries.filter((query) => query.startsWith('CREATE INDEX CONCURRENTLY')),
     ).toHaveLength(2);
     await expect(runner.assertUpToDate()).resolves.toBeUndefined();
 
     await expect(runner.up()).resolves.toEqual([]);
-    await expect(runner.down(6)).resolves.toEqual(['0006', '0005', '0004', '0003', '0002', '0001']);
+    await expect(runner.down(7)).resolves.toEqual([
+      '0007',
+      '0006',
+      '0005',
+      '0004',
+      '0003',
+      '0002',
+      '0001',
+    ]);
     expect(database.jobOutboxExists).toBe(false);
     expect(database.accountSchemaExists).toBe(false);
+    expect(database.ledgerSchemaExists).toBe(false);
     expect(database.applied.size).toBe(0);
     await expect(runner.assertUpToDate()).rejects.toThrow(
       'Database migration 0001 has not been applied',
@@ -186,7 +226,7 @@ describe('MigrationRunner', () => {
     expect(database.released).toBe(true);
   });
 
-  it('detects missing non-transactional schema state and supports an explicit repair path', async () => {
+  it('requires drift repair before rolling back a cumulative verifier', async () => {
     const database = new InMemoryMigrationDatabase();
     const runner = new MigrationRunner(database.pool, DATABASE_MIGRATION_LIST);
     await runner.up();
@@ -200,8 +240,16 @@ describe('MigrationRunner', () => {
     );
     await expect(runner.up()).rejects.toThrow('Database migration 0003 schema verification failed');
 
-    await expect(runner.down(4)).resolves.toEqual(['0006', '0005', '0004', '0003']);
-    await expect(runner.up()).resolves.toEqual(['0003', '0004', '0005', '0006']);
+    await expect(runner.down(5)).rejects.toThrow(
+      'Database migration 0003 schema verification failed',
+    );
+    expect(database.ledgerSchemaExists).toBe(true);
+    database.indexes.set(
+      'job_outbox_failed_retention_idx',
+      "CREATE INDEX CONCURRENTLY job_outbox_failed_retention_idx ON job_outbox (failed_at, id) WHERE status = 'failed'",
+    );
+    await expect(runner.down(5)).resolves.toEqual(['0007', '0006', '0005', '0004', '0003']);
+    await expect(runner.up()).resolves.toEqual(['0003', '0004', '0005', '0006', '0007']);
     expect(database.indexes.has('job_outbox_failed_retention_idx')).toBe(true);
     await expect(runner.assertUpToDate()).resolves.toBeUndefined();
   });
