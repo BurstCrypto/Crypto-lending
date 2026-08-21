@@ -36,7 +36,7 @@ event-specific `outcome` where the catalog permits it:
 | `timestamp`     | Logger-generated canonical ISO 8601 UTC timestamp                 |
 | `level`         | Closed severity enum                                              |
 | `service`       | Fixed application identity                                        |
-| `workload`      | Closed executor enum                                               |
+| `workload`      | Closed executor enum                                              |
 | `event`         | Closed event-name enum                                            |
 | `correlationId` | Server-generated root correlation when the event has a causal hop |
 
@@ -140,6 +140,22 @@ context into one another.
 
 These rules also keep the hot path bounded: no request/body cloning, recursive
 scrubbing, or serialization of third-party error graphs is required.
+
+## Outbox error-code migration ordering
+
+Migration `0006` replaces historical free-form `job_outbox.last_error` values
+with `OUTBOX_TRANSPORT_FAILED` and then enforces the closed
+`OUTBOX_TRANSPORT_FAILED` / `OUTBOX_TRANSPORT_TIMEOUT` allowlist. Roll it out
+code-first: place the new worker build everywhere, stop and drain every old
+outbox worker that can still write raw dependency text, run the migration with
+the reviewed migration identity, and only then resume the new workers. This
+ordering prevents an in-flight old worker from failing its update when the new
+constraint takes effect.
+
+The migration is transactional and installs the constraint as `NOT VALID`
+before sanitizing and validating historical rows. Its rollback drops only the
+constraint; it deliberately cannot reconstruct prohibited historical error
+text after sanitization.
 
 ## Retention contract
 

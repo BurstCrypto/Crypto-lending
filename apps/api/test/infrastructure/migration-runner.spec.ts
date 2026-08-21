@@ -24,6 +24,7 @@ class InMemoryMigrationDatabase {
   readonly queries: string[] = [];
   accountSchemaExists = false;
   jobOutboxExists = false;
+  jobOutboxLastErrorConstraintExists = false;
   migrationTableExists = false;
   released = false;
 
@@ -44,7 +45,14 @@ class InMemoryMigrationDatabase {
         this.jobOutboxExists = true;
       } else if (normalized.includes('DROP TABLE IF EXISTS job_outbox')) {
         this.jobOutboxExists = false;
+        this.jobOutboxLastErrorConstraintExists = false;
         this.indexes.clear();
+      } else if (normalized.includes('ADD CONSTRAINT job_outbox_last_error_code_check')) {
+        this.jobOutboxLastErrorConstraintExists = true;
+      } else if (
+        normalized.includes('DROP CONSTRAINT IF EXISTS job_outbox_last_error_code_check')
+      ) {
+        this.jobOutboxLastErrorConstraintExists = false;
       } else if (normalized.includes('CREATE TABLE accounts (')) {
         this.accountSchemaExists = true;
       } else if (normalized.includes('DROP TABLE IF EXISTS account_profile_audit')) {
@@ -84,6 +92,16 @@ class InMemoryMigrationDatabase {
         return result([{ valid: this.accountSchemaExists && this.jobOutboxExists }]);
       } else if (
         normalized.startsWith('SELECT (') &&
+        normalized.includes('job_outbox_last_error_code_check') &&
+        normalized.includes('pg_catalog.pg_constraint')
+      ) {
+        return result([
+          {
+            valid: this.jobOutboxExists && this.jobOutboxLastErrorConstraintExists,
+          },
+        ]);
+      } else if (
+        normalized.startsWith('SELECT (') &&
         normalized.includes("to_regclass('account_profile_audit')")
       ) {
         return result([{ valid: this.accountSchemaExists }]);
@@ -119,22 +137,24 @@ describe('MigrationRunner', () => {
     const database = new InMemoryMigrationDatabase();
     const runner = new MigrationRunner(database.pool, DATABASE_MIGRATION_LIST);
 
-    await expect(runner.up()).resolves.toEqual(['0001', '0002', '0003', '0004', '0005']);
+    await expect(runner.up()).resolves.toEqual(['0001', '0002', '0003', '0004', '0005', '0006']);
     expect(database.jobOutboxExists).toBe(true);
     expect(database.applied.has('0001')).toBe(true);
     expect(database.applied.has('0002')).toBe(true);
     expect(database.applied.has('0003')).toBe(true);
     expect(database.applied.has('0004')).toBe(true);
     expect(database.applied.has('0005')).toBe(true);
+    expect(database.applied.has('0006')).toBe(true);
     expect(database.accountSchemaExists).toBe(true);
-    expect(database.queries.filter((query) => query === 'BEGIN')).toHaveLength(3);
+    expect(database.jobOutboxLastErrorConstraintExists).toBe(true);
+    expect(database.queries.filter((query) => query === 'BEGIN')).toHaveLength(4);
     expect(
       database.queries.filter((query) => query.startsWith('CREATE INDEX CONCURRENTLY')),
     ).toHaveLength(2);
     await expect(runner.assertUpToDate()).resolves.toBeUndefined();
 
     await expect(runner.up()).resolves.toEqual([]);
-    await expect(runner.down(5)).resolves.toEqual(['0005', '0004', '0003', '0002', '0001']);
+    await expect(runner.down(6)).resolves.toEqual(['0006', '0005', '0004', '0003', '0002', '0001']);
     expect(database.jobOutboxExists).toBe(false);
     expect(database.accountSchemaExists).toBe(false);
     expect(database.applied.size).toBe(0);
@@ -158,8 +178,8 @@ describe('MigrationRunner', () => {
     );
     await expect(runner.up()).rejects.toThrow('Database migration 0003 schema verification failed');
 
-    await expect(runner.down(3)).resolves.toEqual(['0005', '0004', '0003']);
-    await expect(runner.up()).resolves.toEqual(['0003', '0004', '0005']);
+    await expect(runner.down(4)).resolves.toEqual(['0006', '0005', '0004', '0003']);
+    await expect(runner.up()).resolves.toEqual(['0003', '0004', '0005', '0006']);
     expect(database.indexes.has('job_outbox_failed_retention_idx')).toBe(true);
     await expect(runner.assertUpToDate()).resolves.toBeUndefined();
   });

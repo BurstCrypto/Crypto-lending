@@ -209,6 +209,13 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
     const outsiderPassword = randomBytes(24).toString('hex');
     const createdRoles: string[] = [];
     const schemaMigrations = schemaMigrationsForIsolatedLegacyRole(names.legacyRuntimeRole);
+    const lastErrorConstraintMigration = schemaMigrations.find(({ id }) => id === '0006');
+    if (!lastErrorConstraintMigration) {
+      throw new Error('Schema migration list must include migration 0006');
+    }
+    const schemaMigrationsBeforePrincipalBoundary = schemaMigrations.filter(
+      ({ id }) => id !== '0006',
+    );
     const admin = new Pool({ connectionString: testDatabaseUrl as string, max: 1 });
     let legacyPool: Pool | undefined;
     let databaseAdmin: Pool | undefined;
@@ -336,7 +343,7 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
       });
       try {
         const legacyRunner = new MigrationRunner(databaseAdmin, schemaMigrations);
-        await expect(legacyRunner.up()).resolves.toEqual(['0001', '0002', '0003', '0004']);
+        await expect(legacyRunner.up()).resolves.toEqual(['0001', '0002', '0003', '0004', '0006']);
         await expect(legacyRunner.assertUpToDate()).resolves.toBeUndefined();
         await databaseAdmin.query("CREATE TYPE bootstrap_owned_enum AS ENUM ('safe')");
         await databaseAdmin.query(
@@ -456,7 +463,11 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
       const principalMigration = createDatabasePrincipalBoundaryMigration(names);
       if (!principalMigration.verifySql) throw new Error('Principal migration must be verifiable');
       const principalVerifySql = principalMigration.verifySql;
-      const migrations = [...schemaMigrations, principalMigration];
+      const migrations = [
+        ...schemaMigrationsBeforePrincipalBoundary,
+        principalMigration,
+        lastErrorConstraintMigration,
+      ];
       const runner = new MigrationRunner(migrationPool, migrations);
 
       await expect(
@@ -829,7 +840,7 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
         workerPool.query(
           `UPDATE job_outbox
            SET attempts = attempts + 1, status = 'failed', available_at = clock_timestamp(),
-               last_error = 'synthetic', failed_at = clock_timestamp(),
+               last_error = 'OUTBOX_TRANSPORT_FAILED', failed_at = clock_timestamp(),
                locked_by = NULL, locked_until = NULL
            WHERE id = 'kan232-job' AND status = 'pending'`,
         ),
@@ -884,7 +895,7 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
       const pendingMigrations = [
         ...migrations,
         {
-          id: '0006',
+          id: '0007',
           description: 'synthetic runtime migration denial',
           upSql: 'CREATE TABLE runtime_migration_escape(id integer)',
           downSql: 'DROP TABLE runtime_migration_escape',
@@ -900,12 +911,19 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
       await expect(
         migrationPool.query(
           `SELECT to_regclass('runtime_migration_escape') AS object,
-                  EXISTS (SELECT 1 FROM schema_migrations WHERE id = '0006') AS recorded`,
+                  EXISTS (SELECT 1 FROM schema_migrations WHERE id = '0007') AS recorded`,
         ),
       ).resolves.toMatchObject({ rows: [{ object: null, recorded: false }] });
 
-      await expect(runner.down(5)).resolves.toEqual(['0005', '0004', '0003', '0002', '0001']);
-      await expect(runner.up()).resolves.toEqual(['0001', '0002', '0003', '0004', '0005']);
+      await expect(runner.down(6)).resolves.toEqual([
+        '0006',
+        '0005',
+        '0004',
+        '0003',
+        '0002',
+        '0001',
+      ]);
+      await expect(runner.up()).resolves.toEqual(['0001', '0002', '0003', '0004', '0005', '0006']);
       await expect(
         new MigrationRunner(apiPool, migrations).assertUpToDate(),
       ).resolves.toBeUndefined();
@@ -924,7 +942,7 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
       await expect(
         apiNewPool.query('SELECT count(*)::integer AS count FROM schema_migrations'),
       ).resolves.toMatchObject({
-        rows: [{ count: 5 }],
+        rows: [{ count: 6 }],
       });
 
       const activeOldClient = await apiPool.connect();

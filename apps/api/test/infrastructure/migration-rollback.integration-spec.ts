@@ -33,9 +33,54 @@ describeWithPostgres('PostgreSQL migration rollback integration', () => {
   });
 
   it('applies up on a blank schema and removes its objects on down', async () => {
+    const schemaBeforeLastErrorConstraint = DATABASE_SCHEMA_MIGRATION_LIST.filter(
+      ({ id }) => id !== '0006',
+    );
+    const preConstraintRunner = new MigrationRunner(migrationPool, schemaBeforeLastErrorConstraint);
     const runner = new MigrationRunner(migrationPool, DATABASE_SCHEMA_MIGRATION_LIST);
 
-    await expect(runner.up()).resolves.toEqual(['0001', '0002', '0003', '0004']);
+    await expect(preConstraintRunner.up()).resolves.toEqual(['0001', '0002', '0003', '0004']);
+    await migrationPool.query(
+      `INSERT INTO job_outbox (id, queue_name, payload, message_attributes, last_error)
+       VALUES
+         ('historical-raw', 'jobs', '{}'::jsonb, '{}'::jsonb, 'provider rejected bearer test-secret'),
+         ('historical-allowed', 'jobs', '{}'::jsonb, '{}'::jsonb, 'OUTBOX_TRANSPORT_TIMEOUT'),
+         ('historical-null', 'jobs', '{}'::jsonb, '{}'::jsonb, NULL)`,
+    );
+
+    await expect(runner.up()).resolves.toEqual(['0006']);
+    const sanitizedLastErrors = await migrationPool.query<{
+      id: string;
+      last_error: string | null;
+    }>(
+      `SELECT id, last_error
+       FROM job_outbox
+       WHERE id LIKE 'historical-%'
+       ORDER BY id`,
+    );
+    expect(sanitizedLastErrors.rows).toEqual([
+      { id: 'historical-allowed', last_error: 'OUTBOX_TRANSPORT_TIMEOUT' },
+      { id: 'historical-null', last_error: null },
+      { id: 'historical-raw', last_error: 'OUTBOX_TRANSPORT_FAILED' },
+    ]);
+    await expect(
+      migrationPool.query(
+        `UPDATE job_outbox
+         SET last_error = 'credential-shaped-provider-detail'
+         WHERE id = 'historical-raw'`,
+      ),
+    ).rejects.toMatchObject({
+      code: '23514',
+      constraint: 'job_outbox_last_error_code_check',
+    });
+    await expect(
+      migrationPool.query(
+        `UPDATE job_outbox
+         SET last_error = 'OUTBOX_TRANSPORT_TIMEOUT'
+         WHERE id = 'historical-raw'`,
+      ),
+    ).resolves.toMatchObject({ rowCount: 1 });
+
     const afterUp = await migrationPool.query<{ table_name: string }>(
       `SELECT table_name
        FROM information_schema.tables
@@ -77,7 +122,28 @@ describeWithPostgres('PostgreSQL migration rollback integration', () => {
       { table_name: 'accounts' },
     ]);
 
-    await expect(runner.down(4)).resolves.toEqual(['0004', '0003', '0002', '0001']);
+    await migrationPool.query(
+      'ALTER TABLE job_outbox DROP CONSTRAINT job_outbox_last_error_code_check',
+    );
+    await expect(runner.assertUpToDate()).rejects.toThrow(
+      'Database migration 0006 schema verification failed',
+    );
+    await expect(runner.down(1)).resolves.toEqual(['0006']);
+    await migrationPool.query(
+      `UPDATE job_outbox
+       SET last_error = 'legacy worker detail after rollback'
+       WHERE id = 'historical-raw'`,
+    );
+    await expect(runner.up()).resolves.toEqual(['0006']);
+    await expect(
+      migrationPool.query<{ last_error: string }>(
+        `SELECT last_error FROM job_outbox WHERE id = 'historical-raw'`,
+      ),
+    ).resolves.toMatchObject({
+      rows: [{ last_error: 'OUTBOX_TRANSPORT_FAILED' }],
+    });
+
+    await expect(runner.down(5)).resolves.toEqual(['0006', '0004', '0003', '0002', '0001']);
     const afterDown = await migrationPool.query<{ table_name: string }>(
       `SELECT table_name
        FROM information_schema.tables
@@ -114,13 +180,13 @@ describeWithPostgres('PostgreSQL migration rollback integration', () => {
     );
     expect(accountObjectsAfterDown.rows).toEqual([]);
 
-    const migrationRecordAfterDown = await migrationPool.query<{ id: string }>(
-      'SELECT id FROM schema_migrations WHERE id = $1',
-      ['0004'],
+    const migrationRecordsAfterDown = await migrationPool.query<{ id: string }>(
+      'SELECT id FROM schema_migrations WHERE id = ANY($1::text[]) ORDER BY id',
+      [['0004', '0006']],
     );
-    expect(migrationRecordAfterDown.rows).toEqual([]);
+    expect(migrationRecordsAfterDown.rows).toEqual([]);
 
-    await expect(runner.up()).resolves.toEqual(['0001', '0002', '0003', '0004']);
+    await expect(runner.up()).resolves.toEqual(['0001', '0002', '0003', '0004', '0006']);
     await expect(runner.assertUpToDate()).resolves.toBeUndefined();
   });
 });
