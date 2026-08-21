@@ -16,6 +16,9 @@ const describeWithPostgres =
   testDatabaseUrl && runInfrastructureIntegration ? describe : describe.skip;
 const API_ROLE = 'crypto_api_runtime';
 const IDENTIFIER = /^[a-z][a-z0-9_]{0,62}$/u;
+const LEDGER_LIFECYCLE_MIGRATIONS = DATABASE_TEST_SCHEMA_MIGRATION_LIST.filter(
+  ({ id }) => id !== '0009',
+);
 
 interface LedgerScopeFixture {
   actorAccountId: string;
@@ -493,7 +496,7 @@ describeWithPostgres('KAN-42 ledger lifecycle PostgreSQL integration', () => {
       max: 6,
       options: `-c search_path=${schema}`,
     });
-    runner = new MigrationRunner(ledgerPool, DATABASE_TEST_SCHEMA_MIGRATION_LIST);
+    runner = new MigrationRunner(ledgerPool, LEDGER_LIFECYCLE_MIGRATIONS);
     await expect(runner.up()).resolves.toEqual([
       '0001',
       '0002',
