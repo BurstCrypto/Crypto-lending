@@ -1,7 +1,7 @@
 # KAN-42: Transaction lifecycle state machine
 
 KAN-42 is the LED-003 implementation boundary for parent and per-leg workflow
-history. The ticket is `In Progress`. The local implementation follows the
+history. The ticket is `In Review`. The local implementation follows the
 proposed model in ADR 0003 without treating that proposal or a Jira transition
 as accounting-policy approval.
 
@@ -13,9 +13,10 @@ transaction, contact a provider, or incur a provider charge.
 - KAN-41 supplies the immutable transaction, leg, and journal records and is
   currently `In Review`;
 - KAN-42 adds lifecycle and recovery history without changing those facts; and
-- KAN-42 continues to block KAN-43 until this local boundary is ready for review.
+- KAN-42 still blocks completion of KAN-43, but this reviewed local boundary is
+  ready for KAN-43 implementation to begin.
 
-KAN-42 may move to `In Review` after its application and PostgreSQL gates pass.
+KAN-42 moved to `In Review` after its application and PostgreSQL gates passed.
 It must not move to `Done` while ADR 0003 and the product/operations lifecycle
 decisions remain unapproved.
 
@@ -53,8 +54,8 @@ original journal.
 
 ## Recovery dimension
 
-Recovery is recorded independently so `FAILED` never means “no financial
-impact.” Its local state graph is:
+Recovery is recorded independently so `FAILED` never means "no financial
+impact." Its local state graph is:
 
 | From           | To            | Allowed reason      |
 | -------------- | ------------- | ------------------- |
@@ -100,8 +101,9 @@ These choices must be approved in ADR 0003 before the ticket can be `Done`.
 
 ## Local verification
 
-The KAN-42 handoff must run formatting, API lint/typecheck/build, unit and API
-end-to-end tests, and the marker-verified local PostgreSQL integration suite.
-The focused checks cover every allowed edge, rejected and stale transitions,
-concurrent duplicate commands, independent parent/leg state, separate recovery
-history, and atomic journal/lifecycle commit and rollback.
+The KAN-42 handoff passed repository formatting, API lint/typecheck/build, 410
+unit tests, 25 API end-to-end tests, and all 106 infrastructure tests. The
+marker-verified local PostgreSQL checks cover every allowed edge, rejected and
+stale transitions, concurrent duplicate commands, independent parent/leg
+state, separate recovery history, and atomic journal/lifecycle commit and
+rollback.

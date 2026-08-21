@@ -254,9 +254,11 @@ unique PostgreSQL schema, and removes only those test resources. See
   downstream KAN-37 adapter; see [`docs/KAN-36.md`](docs/KAN-36.md).
 - [`docs/adr/0003-immutable-ledger-accounting-model.md`](docs/adr/0003-immutable-ledger-accounting-model.md)
   defines KAN-40's proposed operational, multi-asset ledger contract. KAN-41
-  implements the local append-only schema and application boundary; lifecycle,
-  idempotent posting, and audit-query work remain in KAN-42 through KAN-44. See
-  [`docs/KAN-40.md`](docs/KAN-40.md) and [`docs/KAN-41.md`](docs/KAN-41.md).
+  implements the local append-only schema and application boundary, while
+  KAN-42 adds append-only transaction and leg lifecycle history. Idempotent
+  posting and audit-query work remain in KAN-43 and KAN-44. See
+  [`docs/KAN-40.md`](docs/KAN-40.md), [`docs/KAN-41.md`](docs/KAN-41.md), and
+  [`docs/KAN-42.md`](docs/KAN-42.md).
 - `apps/api/src/infrastructure/database` owns pooled queries, transaction
   propagation, and checksum-protected migrations.
 - `apps/api/src/infrastructure/redis` owns the API's health-only Redis boundary.
