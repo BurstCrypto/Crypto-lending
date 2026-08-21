@@ -169,8 +169,8 @@ export class PostgresLedgerRepository implements LedgerRepository {
         ],
       );
       return returnedJournalId(result.rows);
-    } catch {
-      throw new LedgerPersistenceError();
+    } catch (error) {
+      persistenceError(error);
     }
   }
 
@@ -200,8 +200,8 @@ export class PostgresLedgerRepository implements LedgerRepository {
         ],
       );
       return returnedJournalId(result.rows);
-    } catch {
-      throw new LedgerPersistenceError();
+    } catch (error) {
+      persistenceError(error);
     }
   }
 

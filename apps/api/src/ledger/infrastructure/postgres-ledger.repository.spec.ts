@@ -321,6 +321,27 @@ describe('PostgresLedgerRepository', () => {
     );
   });
 
+  it('maps a rejected posting lifecycle transition to the lifecycle domain error', async () => {
+    const { query, repository } = setup();
+    query.mockRejectedValue(Object.assign(new Error('transition rejected'), { code: 'L4201' }));
+
+    await expect(
+      repository.postJournal(postCommand(), createLedgerCapability('POST', POST_CAPABILITY_VALUE)),
+    ).rejects.toEqual(new LedgerLifecycleValidationError('ILLEGAL_LIFECYCLE_TRANSITION'));
+  });
+
+  it('maps a rejected reversal lifecycle transition to the lifecycle domain error', async () => {
+    const { query, repository } = setup();
+    query.mockRejectedValue(Object.assign(new Error('transition rejected'), { code: 'L4201' }));
+
+    await expect(
+      repository.reverseJournal(
+        reversalCommand(),
+        createLedgerCapability('REVERSE', REVERSAL_CAPABILITY_VALUE),
+      ),
+    ).rejects.toEqual(new LedgerLifecycleValidationError('ILLEGAL_LIFECYCLE_TRANSITION'));
+  });
+
   it('rejects an unexpected lifecycle result row', async () => {
     const { query, repository } = setup();
     query.mockResolvedValue(result([{ event_id: 'not-a-uuid' }]));
