@@ -1,0 +1,748 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Standalone child; deploy only through the independently validated parent composition.
+
+Parameters:
+  BillingAcknowledgement:
+    Type: String
+    Default: NOT_AUTHORIZED
+    AllowedValues: [NOT_AUTHORIZED, I_ACKNOWLEDGE_THIS_CREATES_BILLABLE_AWS_RESOURCES]
+  DeliveryArtifactSha256:
+    Type: String
+    AllowedPattern: '^[a-f0-9]{64}$'
+  DeliveryArtifactBindingSha256:
+    Type: String
+    AllowedPattern: '^[a-f0-9]{64}$'
+  EnvironmentName:
+    Type: String
+    MaxLength: 31
+    AllowedPattern: '^(dev|test|qa|sandbox|staging)(-[a-z0-9]+)*$'
+  DatabaseName:
+    Type: String
+    Default: crypto_lending
+    AllowedPattern: '^[a-z][a-z0-9_]{0,62}$'
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+  LoadBalancerSecurityGroupId:
+    Type: AWS::EC2::SecurityGroup::Id
+  DatabaseSecurityGroupId:
+    Type: AWS::EC2::SecurityGroup::Id
+  RedisSecurityGroupId:
+    Type: AWS::EC2::SecurityGroup::Id
+  PrivateEgressMode:
+    Type: String
+    Default: VpcEndpoints
+    AllowedValues: [VpcEndpoints, None]
+  InterfaceEndpointSecurityGroupId:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|^sg-(?:[a-f0-9]{8}|[a-f0-9]{17})$'
+  S3ManagedPrefixListId:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|^pl-[a-f0-9]+$'
+  ApplicationDataKeyArn:
+    Type: String
+    AllowedPattern: '^arn:[a-z0-9-]+:kms:[a-z0-9-]+:[0-9]{12}:key/[a-f0-9-]+$'
+  ApiLogGroupArn:
+    Type: String
+    AllowedPattern: '^arn:[a-z0-9-]+:logs:[a-z0-9-]+:[0-9]{12}:log-group:[A-Za-z0-9_./#-]+$'
+  WorkerLogGroupArn:
+    Type: String
+    AllowedPattern: '^arn:[a-z0-9-]+:logs:[a-z0-9-]+:[0-9]{12}:log-group:[A-Za-z0-9_./#-]+$'
+  ApiImageRepositoryArn:
+    Type: String
+    AllowedPattern: '^arn:[a-z0-9-]+:ecr:[a-z0-9-]+:[0-9]{12}:repository/crypto-lending-api$'
+  WorkerImageRepositoryArn:
+    Type: String
+    AllowedPattern: '^arn:[a-z0-9-]+:ecr:[a-z0-9-]+:[0-9]{12}:repository/crypto-lending-worker$'
+  ApiDatabaseCredentialPhase:
+    Type: String
+    Default: A_ONLY
+    AllowedValues: [A_ONLY, BOTH_USE_A, BOTH_USE_B, B_ONLY]
+  WorkerDatabaseCredentialPhase:
+    Type: String
+    Default: A_ONLY
+    AllowedValues: [A_ONLY, BOTH_USE_A, BOTH_USE_B, B_ONLY]
+  RedisCredentialPhase:
+    Type: String
+    Default: A_ONLY
+    AllowedValues: [A_ONLY, BOTH_USE_A, BOTH_USE_B, B_ONLY]
+  RedisOperatorMode:
+    Type: String
+    Default: DISABLED
+    AllowedValues: [DISABLED, ENABLED]
+
+Rules:
+  ExplicitBillingAcknowledgementRequired:
+    Assertions:
+      - Assert: !Equals
+          - !Ref BillingAcknowledgement
+          - I_ACKNOWLEDGE_THIS_CREATES_BILLABLE_AWS_RESOURCES
+        AssertDescription: Explicit billing acknowledgement is required before deployment.
+  PrivateEgressInputsMatchMode:
+    Assertions:
+      - Assert: !Or
+          - !And
+            - !Equals [!Ref PrivateEgressMode, VpcEndpoints]
+            - !Not [!Equals [!Ref InterfaceEndpointSecurityGroupId, '']]
+            - !Not [!Equals [!Ref S3ManagedPrefixListId, '']]
+          - !And
+            - !Equals [!Ref PrivateEgressMode, None]
+            - !Equals [!Ref InterfaceEndpointSecurityGroupId, '']
+            - !Equals [!Ref S3ManagedPrefixListId, '']
+        AssertDescription: VpcEndpoints requires exact endpoint identifiers; None requires both identifiers omitted.
+  RedisOperatorRequiresPrivateDeliveryPath:
+    Assertions:
+      - Assert: !Or
+          - !Equals [!Ref RedisOperatorMode, DISABLED]
+          - !Equals [!Ref PrivateEgressMode, VpcEndpoints]
+        AssertDescription: Redis operator mode requires the reviewed private ECR, logs, Secrets Manager, and S3 delivery path.
+
+Conditions:
+  CreateVpcEndpointRules: !Equals [!Ref PrivateEgressMode, VpcEndpoints]
+  ApiDatabaseAReadable: !Not [!Equals [!Ref ApiDatabaseCredentialPhase, B_ONLY]]
+  ApiDatabaseBReadable: !Not [!Equals [!Ref ApiDatabaseCredentialPhase, A_ONLY]]
+  UseApiDatabaseA: !Or
+    - !Equals [!Ref ApiDatabaseCredentialPhase, A_ONLY]
+    - !Equals [!Ref ApiDatabaseCredentialPhase, BOTH_USE_A]
+  WorkerDatabaseAReadable: !Not [!Equals [!Ref WorkerDatabaseCredentialPhase, B_ONLY]]
+  WorkerDatabaseBReadable: !Not [!Equals [!Ref WorkerDatabaseCredentialPhase, A_ONLY]]
+  UseWorkerDatabaseA: !Or
+    - !Equals [!Ref WorkerDatabaseCredentialPhase, A_ONLY]
+    - !Equals [!Ref WorkerDatabaseCredentialPhase, BOTH_USE_A]
+  RedisApiAEnabled: !Not [!Equals [!Ref RedisCredentialPhase, B_ONLY]]
+  RedisApiBEnabled: !Not [!Equals [!Ref RedisCredentialPhase, A_ONLY]]
+  RedisOperatorEnabled: !Equals [!Ref RedisOperatorMode, ENABLED]
+  RedisOperatorVpcEndpointRulesEnabled: !And
+    - !Equals [!Ref RedisOperatorMode, ENABLED]
+    - !Equals [!Ref PrivateEgressMode, VpcEndpoints]
+  UseRedisApiA: !Or
+    - !Equals [!Ref RedisCredentialPhase, A_ONLY]
+    - !Equals [!Ref RedisCredentialPhase, BOTH_USE_A]
+
+Resources:
+  ApiTaskSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub ${EnvironmentName} API tasks
+      VpcId: !Ref VpcId
+      SecurityGroupEgress: [{ CidrIp: 127.0.0.1/32, IpProtocol: '-1' }]
+
+  WorkerTaskSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub ${EnvironmentName} worker tasks
+      VpcId: !Ref VpcId
+      SecurityGroupEgress: [{ CidrIp: 127.0.0.1/32, IpProtocol: '-1' }]
+
+  LoadBalancerToApiEgress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      DestinationSecurityGroupId: !Ref ApiTaskSecurityGroup
+      FromPort: 3001
+      GroupId: !Ref LoadBalancerSecurityGroupId
+      IpProtocol: tcp
+      ToPort: 3001
+
+  LoadBalancerToApiIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      FromPort: 3001
+      GroupId: !Ref ApiTaskSecurityGroup
+      IpProtocol: tcp
+      SourceSecurityGroupId: !Ref LoadBalancerSecurityGroupId
+      ToPort: 3001
+
+  ApiTaskToDatabaseEgress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      DestinationSecurityGroupId: !Ref DatabaseSecurityGroupId
+      FromPort: 5432
+      GroupId: !Ref ApiTaskSecurityGroup
+      IpProtocol: tcp
+      ToPort: 5432
+
+  ApiTaskToDatabaseIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      FromPort: 5432
+      GroupId: !Ref DatabaseSecurityGroupId
+      IpProtocol: tcp
+      SourceSecurityGroupId: !Ref ApiTaskSecurityGroup
+      ToPort: 5432
+
+  WorkerTaskToDatabaseEgress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      DestinationSecurityGroupId: !Ref DatabaseSecurityGroupId
+      FromPort: 5432
+      GroupId: !Ref WorkerTaskSecurityGroup
+      IpProtocol: tcp
+      ToPort: 5432
+
+  WorkerTaskToDatabaseIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      FromPort: 5432
+      GroupId: !Ref DatabaseSecurityGroupId
+      IpProtocol: tcp
+      SourceSecurityGroupId: !Ref WorkerTaskSecurityGroup
+      ToPort: 5432
+
+  ApiTaskToRedisEgress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      DestinationSecurityGroupId: !Ref RedisSecurityGroupId
+      FromPort: 6379
+      GroupId: !Ref ApiTaskSecurityGroup
+      IpProtocol: tcp
+      ToPort: 6379
+
+  ApiTaskToRedisIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      FromPort: 6379
+      GroupId: !Ref RedisSecurityGroupId
+      IpProtocol: tcp
+      SourceSecurityGroupId: !Ref ApiTaskSecurityGroup
+      ToPort: 6379
+
+  RedisOperatorTaskSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Condition: RedisOperatorEnabled
+    Properties:
+      GroupDescription: !Sub ${EnvironmentName} one-off Redis revocation operator
+      VpcId: !Ref VpcId
+      SecurityGroupEgress: [{ CidrIp: 127.0.0.1/32, IpProtocol: '-1' }]
+
+  RedisOperatorToRedisEgress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Condition: RedisOperatorEnabled
+    Properties:
+      DestinationSecurityGroupId: !Ref RedisSecurityGroupId
+      FromPort: 6379
+      GroupId: !Ref RedisOperatorTaskSecurityGroup
+      IpProtocol: tcp
+      ToPort: 6379
+
+  RedisOperatorToRedisIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Condition: RedisOperatorEnabled
+    Properties:
+      FromPort: 6379
+      GroupId: !Ref RedisSecurityGroupId
+      IpProtocol: tcp
+      SourceSecurityGroupId: !Ref RedisOperatorTaskSecurityGroup
+      ToPort: 6379
+
+  RedisOperatorToInterfaceEndpointEgress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Condition: RedisOperatorVpcEndpointRulesEnabled
+    Metadata: { cfn-lint: { config: { ignore_checks: [W1030] } } }
+    Properties:
+      DestinationSecurityGroupId: !Ref InterfaceEndpointSecurityGroupId
+      FromPort: 443
+      GroupId: !Ref RedisOperatorTaskSecurityGroup
+      IpProtocol: tcp
+      ToPort: 443
+
+  RedisOperatorToInterfaceEndpointIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Condition: RedisOperatorVpcEndpointRulesEnabled
+    Metadata: { cfn-lint: { config: { ignore_checks: [W1030] } } }
+    Properties:
+      FromPort: 443
+      GroupId: !Ref InterfaceEndpointSecurityGroupId
+      IpProtocol: tcp
+      SourceSecurityGroupId: !Ref RedisOperatorTaskSecurityGroup
+      ToPort: 443
+
+  RedisOperatorToS3Egress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Condition: RedisOperatorVpcEndpointRulesEnabled
+    Properties:
+      DestinationPrefixListId: !Ref S3ManagedPrefixListId
+      FromPort: 443
+      GroupId: !Ref RedisOperatorTaskSecurityGroup
+      IpProtocol: tcp
+      ToPort: 443
+
+  ApiTaskToInterfaceEndpointEgress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Condition: CreateVpcEndpointRules
+    Metadata: { cfn-lint: { config: { ignore_checks: [W1030] } } }
+    Properties:
+      DestinationSecurityGroupId: !Ref InterfaceEndpointSecurityGroupId
+      FromPort: 443
+      GroupId: !Ref ApiTaskSecurityGroup
+      IpProtocol: tcp
+      ToPort: 443
+
+  ApiTaskToInterfaceEndpointIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Condition: CreateVpcEndpointRules
+    Metadata: { cfn-lint: { config: { ignore_checks: [W1030] } } }
+    Properties:
+      FromPort: 443
+      GroupId: !Ref InterfaceEndpointSecurityGroupId
+      IpProtocol: tcp
+      SourceSecurityGroupId: !Ref ApiTaskSecurityGroup
+      ToPort: 443
+
+  WorkerTaskToInterfaceEndpointEgress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Condition: CreateVpcEndpointRules
+    Metadata: { cfn-lint: { config: { ignore_checks: [W1030] } } }
+    Properties:
+      DestinationSecurityGroupId: !Ref InterfaceEndpointSecurityGroupId
+      FromPort: 443
+      GroupId: !Ref WorkerTaskSecurityGroup
+      IpProtocol: tcp
+      ToPort: 443
+
+  WorkerTaskToInterfaceEndpointIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Condition: CreateVpcEndpointRules
+    Metadata: { cfn-lint: { config: { ignore_checks: [W1030] } } }
+    Properties:
+      FromPort: 443
+      GroupId: !Ref InterfaceEndpointSecurityGroupId
+      IpProtocol: tcp
+      SourceSecurityGroupId: !Ref WorkerTaskSecurityGroup
+      ToPort: 443
+
+  ApiTaskToS3Egress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Condition: CreateVpcEndpointRules
+    Properties:
+      DestinationPrefixListId: !Ref S3ManagedPrefixListId
+      FromPort: 443
+      GroupId: !Ref ApiTaskSecurityGroup
+      IpProtocol: tcp
+      ToPort: 443
+
+  WorkerTaskToS3Egress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Condition: CreateVpcEndpointRules
+    Properties:
+      DestinationPrefixListId: !Ref S3ManagedPrefixListId
+      FromPort: 443
+      GroupId: !Ref WorkerTaskSecurityGroup
+      IpProtocol: tcp
+      ToPort: 443
+
+  ApiDatabaseCredentialASecret:
+    Type: AWS::SecretsManager::Secret
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      GenerateSecretString:
+        ExcludeCharacters: ',"/@'
+        GenerateStringKey: password
+        IncludeSpace: false
+        PasswordLength: 48
+        RequireEachIncludedType: true
+        SecretStringTemplate: !Sub '{"database":"${DatabaseName}","username":"crypto_api_login_a"}'
+      KmsKeyId: !Ref ApplicationDataKeyArn
+
+  ApiDatabaseCredentialBSecret:
+    Type: AWS::SecretsManager::Secret
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      GenerateSecretString:
+        ExcludeCharacters: ',"/@'
+        GenerateStringKey: password
+        IncludeSpace: false
+        PasswordLength: 48
+        RequireEachIncludedType: true
+        SecretStringTemplate: !Sub '{"database":"${DatabaseName}","username":"crypto_api_login_b"}'
+      KmsKeyId: !Ref ApplicationDataKeyArn
+
+  WorkerDatabaseCredentialASecret:
+    Type: AWS::SecretsManager::Secret
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      GenerateSecretString:
+        ExcludeCharacters: ',"/@'
+        GenerateStringKey: password
+        IncludeSpace: false
+        PasswordLength: 48
+        RequireEachIncludedType: true
+        SecretStringTemplate: !Sub '{"database":"${DatabaseName}","username":"crypto_worker_login_a"}'
+      KmsKeyId: !Ref ApplicationDataKeyArn
+
+  WorkerDatabaseCredentialBSecret:
+    Type: AWS::SecretsManager::Secret
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      GenerateSecretString:
+        ExcludeCharacters: ',"/@'
+        GenerateStringKey: password
+        IncludeSpace: false
+        PasswordLength: 48
+        RequireEachIncludedType: true
+        SecretStringTemplate: !Sub '{"database":"${DatabaseName}","username":"crypto_worker_login_b"}'
+      KmsKeyId: !Ref ApplicationDataKeyArn
+
+  MigrationDatabaseCredentialSecret:
+    Type: AWS::SecretsManager::Secret
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      GenerateSecretString:
+        ExcludeCharacters: ',"/@'
+        GenerateStringKey: password
+        IncludeSpace: false
+        PasswordLength: 48
+        RequireEachIncludedType: true
+        SecretStringTemplate: !Sub '{"database":"${DatabaseName}","username":"crypto_migration"}'
+      KmsKeyId: !Ref ApplicationDataKeyArn
+
+  RedisApiASecret:
+    Type: AWS::SecretsManager::Secret
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      GenerateSecretString:
+        ExcludeCharacters: ',"/@'
+        GenerateStringKey: password
+        IncludeSpace: false
+        PasswordLength: 48
+        RequireEachIncludedType: true
+        SecretStringTemplate: !Sub '{"username":"crypto_api_${EnvironmentName}_a"}'
+      KmsKeyId: !Ref ApplicationDataKeyArn
+
+  RedisApiBSecret:
+    Type: AWS::SecretsManager::Secret
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      GenerateSecretString:
+        ExcludeCharacters: ',"/@'
+        GenerateStringKey: password
+        IncludeSpace: false
+        PasswordLength: 48
+        RequireEachIncludedType: true
+        SecretStringTemplate: !Sub '{"username":"crypto_api_${EnvironmentName}_b"}'
+      KmsKeyId: !Ref ApplicationDataKeyArn
+
+  RedisOperatorSecret:
+    Type: AWS::SecretsManager::Secret
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      GenerateSecretString:
+        ExcludeCharacters: ',"/@'
+        GenerateStringKey: password
+        IncludeSpace: false
+        PasswordLength: 48
+        RequireEachIncludedType: true
+        SecretStringTemplate: !Sub '{"username":"crypto_operator_${EnvironmentName}"}'
+      KmsKeyId: !Ref ApplicationDataKeyArn
+
+  RedisDefaultUser:
+    Type: AWS::ElastiCache::User
+    Properties:
+      AccessString: 'off sanitize-payload resetkeys resetchannels -@all'
+      AuthenticationMode: { Type: no-password-required }
+      Engine: redis
+      UserId: !Sub cl-${EnvironmentName}-rd
+      UserName: default
+
+  RedisApiAUser:
+    Type: AWS::ElastiCache::User
+    Properties:
+      AccessString: !If
+        - RedisApiAEnabled
+        - 'on sanitize-payload resetkeys resetchannels -@all +ping +quit'
+        - 'off sanitize-payload resetkeys resetchannels -@all +ping +quit'
+      AuthenticationMode:
+        Passwords: [!Sub '{{resolve:secretsmanager:${RedisApiASecret}:SecretString:password}}']
+        Type: password
+      Engine: redis
+      UserId: !Sub cl-${EnvironmentName}-ra
+      UserName: !Sub crypto_api_${EnvironmentName}_a
+
+  RedisApiBUser:
+    Type: AWS::ElastiCache::User
+    Properties:
+      AccessString: !If
+        - RedisApiBEnabled
+        - 'on sanitize-payload resetkeys resetchannels -@all +ping +quit'
+        - 'off sanitize-payload resetkeys resetchannels -@all +ping +quit'
+      AuthenticationMode:
+        Passwords: [!Sub '{{resolve:secretsmanager:${RedisApiBSecret}:SecretString:password}}']
+        Type: password
+      Engine: redis
+      UserId: !Sub cl-${EnvironmentName}-rb
+      UserName: !Sub crypto_api_${EnvironmentName}_b
+
+  RedisOperatorUser:
+    Type: AWS::ElastiCache::User
+    Properties:
+      AccessString: !If
+        - RedisOperatorEnabled
+        - 'on sanitize-payload resetkeys resetchannels -@all +ping +quit +client|kill'
+        - 'off sanitize-payload resetkeys resetchannels -@all +ping +quit +client|kill'
+      AuthenticationMode:
+        Passwords: [!Sub '{{resolve:secretsmanager:${RedisOperatorSecret}:SecretString:password}}']
+        Type: password
+      Engine: redis
+      UserId: !Sub cl-${EnvironmentName}-ro
+      UserName: !Sub crypto_operator_${EnvironmentName}
+
+  RedisApiUserGroup:
+    Type: AWS::ElastiCache::UserGroup
+    Properties:
+      Engine: redis
+      UserGroupId: !Sub cl-${EnvironmentName}-api
+      UserIds:
+        - !Ref RedisDefaultUser
+        - !Ref RedisApiAUser
+        - !Ref RedisApiBUser
+        - !Ref RedisOperatorUser
+
+  ApiTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ecs-tasks.amazonaws.com }
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals: { aws:SourceAccount: !Ref AWS::AccountId }
+              ArnLike:
+                {
+                  aws:SourceArn: !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:*',
+                }
+      Policies:
+        - PolicyName: PullApiImage
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: RegistryAuthentication
+                Effect: Allow
+                Action: ecr:GetAuthorizationToken
+                Resource: '*'
+              - Sid: RepositoryImageRead
+                Effect: Allow
+                Action:
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:BatchGetImage
+                  - ecr:GetDownloadUrlForLayer
+                Resource: !Ref ApiImageRepositoryArn
+        - PolicyName: WriteApiLogs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !Sub '${ApiLogGroupArn}:*'
+        - PolicyName: ReadApiRuntimeSecrets
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: NamedSecrets
+                Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource:
+                  - !If
+                    - ApiDatabaseAReadable
+                    - !Ref ApiDatabaseCredentialASecret
+                    - !Ref AWS::NoValue
+                  - !If
+                    - ApiDatabaseBReadable
+                    - !Ref ApiDatabaseCredentialBSecret
+                    - !Ref AWS::NoValue
+                  - !If
+                    - RedisApiAEnabled
+                    - !Ref RedisApiASecret
+                    - !Ref AWS::NoValue
+                  - !If
+                    - RedisApiBEnabled
+                    - !Ref RedisApiBSecret
+                    - !Ref AWS::NoValue
+              - Sid: DecryptSecrets
+                Effect: Allow
+                Action: kms:Decrypt
+                Resource: !Ref ApplicationDataKeyArn
+                Condition:
+                  StringEquals:
+                    kms:ViaService: !Sub secretsmanager.${AWS::Region}.${AWS::URLSuffix}
+
+  WorkerTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ecs-tasks.amazonaws.com }
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals: { aws:SourceAccount: !Ref AWS::AccountId }
+              ArnLike:
+                {
+                  aws:SourceArn: !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:*',
+                }
+      Policies:
+        - PolicyName: PullWorkerImage
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: RegistryAuthentication
+                Effect: Allow
+                Action: ecr:GetAuthorizationToken
+                Resource: '*'
+              - Sid: RepositoryImageRead
+                Effect: Allow
+                Action:
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:BatchGetImage
+                  - ecr:GetDownloadUrlForLayer
+                Resource: !Ref WorkerImageRepositoryArn
+        - PolicyName: WriteWorkerLogs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !Sub '${WorkerLogGroupArn}:*'
+        - PolicyName: ReadWorkerRuntimeSecrets
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: NamedSecrets
+                Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource:
+                  - !If
+                    - WorkerDatabaseAReadable
+                    - !Ref WorkerDatabaseCredentialASecret
+                    - !Ref AWS::NoValue
+                  - !If
+                    - WorkerDatabaseBReadable
+                    - !Ref WorkerDatabaseCredentialBSecret
+                    - !Ref AWS::NoValue
+              - Sid: DecryptSecrets
+                Effect: Allow
+                Action: kms:Decrypt
+                Resource: !Ref ApplicationDataKeyArn
+                Condition:
+                  StringEquals:
+                    kms:ViaService: !Sub secretsmanager.${AWS::Region}.${AWS::URLSuffix}
+
+  RedisOperatorTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Condition: RedisOperatorEnabled
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ecs-tasks.amazonaws.com }
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals: { aws:SourceAccount: !Ref AWS::AccountId }
+              ArnLike:
+                {
+                  aws:SourceArn: !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:*',
+                }
+      Policies:
+        - PolicyName: PullRedisOperatorImage
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: RegistryAuthentication
+                Effect: Allow
+                Action: ecr:GetAuthorizationToken
+                Resource: '*'
+              - Sid: RepositoryImageRead
+                Effect: Allow
+                Action:
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:BatchGetImage
+                  - ecr:GetDownloadUrlForLayer
+                Resource: !Ref ApiImageRepositoryArn
+        - PolicyName: WriteRedisOperatorLogs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !Sub '${ApiLogGroupArn}:*'
+        - PolicyName: ReadRedisOperatorSecret
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: NamedSecret
+                Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Ref RedisOperatorSecret
+              - Sid: DecryptSecret
+                Effect: Allow
+                Action: kms:Decrypt
+                Resource: !Ref ApplicationDataKeyArn
+                Condition:
+                  StringEquals:
+                    kms:ViaService: !Sub secretsmanager.${AWS::Region}.${AWS::URLSuffix}
+
+Outputs:
+  DeliveryArtifactSha256:
+    Value: !Ref DeliveryArtifactSha256
+  DeliveryArtifactBindingSha256:
+    Value: !Ref DeliveryArtifactBindingSha256
+  ApiTaskExecutionRoleArn:
+    Value: !GetAtt ApiTaskExecutionRole.Arn
+  WorkerTaskExecutionRoleArn:
+    Value: !GetAtt WorkerTaskExecutionRole.Arn
+  ApiTaskSecurityGroupId:
+    Value: !Ref ApiTaskSecurityGroup
+  WorkerTaskSecurityGroupId:
+    Value: !Ref WorkerTaskSecurityGroup
+  ApiDatabaseActiveSecretArn:
+    Value: !If
+      - UseApiDatabaseA
+      - !Ref ApiDatabaseCredentialASecret
+      - !Ref ApiDatabaseCredentialBSecret
+  ApiDatabaseActiveUsername:
+    Value: !If [UseApiDatabaseA, crypto_api_login_a, crypto_api_login_b]
+  WorkerDatabaseActiveSecretArn:
+    Value: !If
+      - UseWorkerDatabaseA
+      - !Ref WorkerDatabaseCredentialASecret
+      - !Ref WorkerDatabaseCredentialBSecret
+  WorkerDatabaseActiveUsername:
+    Value: !If [UseWorkerDatabaseA, crypto_worker_login_a, crypto_worker_login_b]
+  MigrationDatabaseCredentialSecretArn:
+    Value: !Ref MigrationDatabaseCredentialSecret
+  RedisActiveSecretArn:
+    Value: !If [UseRedisApiA, !Ref RedisApiASecret, !Ref RedisApiBSecret]
+  RedisActiveUsername:
+    Value: !If
+      - UseRedisApiA
+      - !Sub crypto_api_${EnvironmentName}_a
+      - !Sub crypto_api_${EnvironmentName}_b
+  RedisApiUserGroupId:
+    Value: !Ref RedisApiUserGroup
+  RedisApiAUserId:
+    Value: !Ref RedisApiAUser
+  RedisApiBUserId:
+    Value: !Ref RedisApiBUser
+  RedisOperatorTaskExecutionRoleArn:
+    Condition: RedisOperatorEnabled
+    Value: !GetAtt RedisOperatorTaskExecutionRole.Arn
+  RedisOperatorTaskSecurityGroupId:
+    Condition: RedisOperatorEnabled
+    Value: !Ref RedisOperatorTaskSecurityGroup
+  RedisOperatorSecretArn:
+    Condition: RedisOperatorEnabled
+    Value: !Ref RedisOperatorSecret
+  RedisOperatorUsername:
+    Condition: RedisOperatorEnabled
+    Value: !Sub crypto_operator_${EnvironmentName}

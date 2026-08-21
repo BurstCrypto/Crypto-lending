@@ -3,10 +3,13 @@
 Validates KAN-34 locally by default and guards every optional AWS-side action.
 
 .DESCRIPTION
-LocalValidate is the default and performs filesystem-only policy validation.
+LocalValidate is the default and performs filesystem-only policy validation of
+both the parent application template and its workload-boundary child template.
 CloudValidate, Plan, and Deploy require an explicit named profile, account ID,
 Region, and AllowAwsApiCalls. Plan creates a named change set without executing
-it. Plan and Deploy also require the independently approved KAN-229 billing
+it, but its versioned S3 artifact reads can incur AWS request charges. The guard
+never uploads a template or creates an artifact bucket. Plan and Deploy also
+require the independently approved KAN-229 billing
 control record, deployed guardrail stack, and KAN-230 certificate/DNS prerequisite
 record. Deploy verifies and executes that exact template/parameter/tag/control-
 record-bound change set only after an exact billable-resource acknowledgement.
@@ -17,6 +20,20 @@ LocalValidate, CloudValidate, Plan, or Deploy. Defaults to LocalValidate.
 .PARAMETER ParameterOverride
 Non-secret CloudFormation parameters in Key=Value form. Secret-like parameter
 names are rejected; application secrets must be generated in Secrets Manager.
+The three workload-boundary delivery parameters are derived by this guard and
+must not be supplied as overrides.
+
+.PARAMETER WorkloadBoundariesTemplateFile
+Reviewed local workload-boundary child template. Its exact byte SHA-256 is bound
+to the versioned S3 object, parent parameters, tags, change-set description, and
+Deploy acknowledgement.
+
+.PARAMETER WorkloadBoundariesArtifactBucket
+Existing same-account, same-Region, versioning-enabled S3 bucket. This guard
+does not create, modify, or upload to the bucket.
+
+.PARAMETER WorkloadBoundariesArtifactVersionId
+Exact non-null S3 VersionId for the content-addressed child template object.
 
 .PARAMETER AllowAwsApiCalls
 Explicit opt-in required before this script resolves credentials or calls AWS.
@@ -52,6 +69,8 @@ param(
 
     [string] $TemplateFile,
 
+    [string] $WorkloadBoundariesTemplateFile,
+
     [string] $Profile,
 
     [string] $AccountId,
@@ -75,6 +94,10 @@ param(
 
     [string] $GuardrailControlRegion,
 
+    [string] $WorkloadBoundariesArtifactBucket,
+
+    [string] $WorkloadBoundariesArtifactVersionId,
+
     [string[]] $ParameterOverride = @(),
 
     [switch] $AllowAwsApiCalls,
@@ -88,12 +111,17 @@ $ErrorActionPreference = 'Stop'
 if ([string]::IsNullOrWhiteSpace($TemplateFile)) {
     $TemplateFile = Join-Path $PSScriptRoot 'application-baseline.yaml'
 }
+if ([string]::IsNullOrWhiteSpace($WorkloadBoundariesTemplateFile)) {
+    $WorkloadBoundariesTemplateFile = Join-Path $PSScriptRoot 'application-workload-boundaries.yaml'
+}
 
 $validatorPath = Join-Path $PSScriptRoot 'validate-application-baseline.mjs'
+$workloadBoundariesValidatorPath = Join-Path $PSScriptRoot 'validate-application-workload-boundaries.mjs'
 $billingRecordValidatorPath = Join-Path $PSScriptRoot 'validate-billing-control-record.mjs'
 $acmDnsRecordValidatorPath = Join-Path $PSScriptRoot 'validate-acm-dns-control-record.mjs'
 $accountGuardrailTemplatePath = Join-Path $PSScriptRoot 'account-guardrails.yaml'
 $resolvedTemplate = [System.IO.Path]::GetFullPath($TemplateFile)
+$resolvedWorkloadBoundariesTemplate = [System.IO.Path]::GetFullPath($WorkloadBoundariesTemplateFile)
 
 function Assert-RequiredValue {
     param(
@@ -147,7 +175,7 @@ function ConvertFrom-ChangeSetTags {
         [object[]] $Tags
     )
 
-    $result = [ordered]@{}
+    $result = [System.Collections.Specialized.OrderedDictionary]::new([System.StringComparer]::Ordinal)
     foreach ($tag in @($Tags)) {
         if ([string]::IsNullOrWhiteSpace([string] $tag.Key) -or $null -eq $tag.Value) {
             throw 'The reviewed change set contains an incomplete stack tag.'
@@ -194,8 +222,179 @@ function Get-StackParameterMap {
     return $result
 }
 
+function Get-OptionalPropertyValue {
+    param(
+        [AllowNull()]
+        [object] $InputObject,
+        [string] $Name
+    )
+
+    if ($null -eq $InputObject) {
+        return $null
+    }
+    $property = $InputObject.PSObject.Properties[$Name]
+    if ($null -eq $property) {
+        return $null
+    }
+    return $property.Value
+}
+
+function Assert-WorkloadBoundariesArtifact {
+    param(
+        [string] $Bucket,
+        [string] $Key,
+        [string] $VersionId,
+        [string] $ExpectedOwner,
+        [string] $ExpectedRegion,
+        [string] $ExpectedSha256,
+        [string] $ProfileName
+    )
+
+    $locationOutput = & $script:AwsExecutable @(
+        's3api',
+        'get-bucket-location',
+        '--bucket', $Bucket,
+        '--expected-bucket-owner', $ExpectedOwner,
+        '--profile', $ProfileName,
+        '--region', $ExpectedRegion,
+        '--output', 'json',
+        '--no-cli-pager'
+    )
+    if ($LASTEXITCODE -ne 0) {
+        throw "Unable to verify the workload-boundary artifact bucket '$Bucket' in the approved account."
+    }
+    $locationResponse = ($locationOutput | Out-String) | ConvertFrom-Json
+    if ($null -eq $locationResponse -or $null -eq $locationResponse.PSObject.Properties['LocationConstraint']) {
+        throw "S3 did not return a bucket LocationConstraint for '$Bucket'."
+    }
+    $locationConstraint = $locationResponse.PSObject.Properties['LocationConstraint'].Value
+    $actualBucketRegion = if ($null -eq $locationConstraint -or [string]::IsNullOrEmpty([string] $locationConstraint)) {
+        'us-east-1'
+    } elseif ([string] $locationConstraint -ceq 'EU') {
+        'eu-west-1'
+    } else {
+        [string] $locationConstraint
+    }
+    if ($actualBucketRegion -cne $ExpectedRegion) {
+        throw "Workload-boundary artifact bucket '$Bucket' is in '$actualBucketRegion', not approved Region '$ExpectedRegion'."
+    }
+
+    $versioningOutput = & $script:AwsExecutable @(
+        's3api',
+        'get-bucket-versioning',
+        '--bucket', $Bucket,
+        '--expected-bucket-owner', $ExpectedOwner,
+        '--profile', $ProfileName,
+        '--region', $ExpectedRegion,
+        '--output', 'json',
+        '--no-cli-pager'
+    )
+    if ($LASTEXITCODE -ne 0) {
+        throw "Unable to verify versioning for workload-boundary artifact bucket '$Bucket'."
+    }
+    $versioningResponse = ($versioningOutput | Out-String) | ConvertFrom-Json
+    if (([string] (Get-OptionalPropertyValue -InputObject $versioningResponse -Name 'Status')) -cne 'Enabled') {
+        throw "Workload-boundary artifact bucket '$Bucket' must have versioning Enabled."
+    }
+
+    $temporaryBase = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath())
+    $temporaryDirectory = Join-Path $temporaryBase ('kan34-workload-artifact-' + [guid]::NewGuid().ToString('N'))
+    [void] [System.IO.Directory]::CreateDirectory($temporaryDirectory)
+    $downloadPath = Join-Path $temporaryDirectory 'application-workload-boundaries.yaml'
+    try {
+        $getObjectOutput = & $script:AwsExecutable @(
+            's3api',
+            'get-object',
+            '--bucket', $Bucket,
+            '--key', $Key,
+            '--version-id', $VersionId,
+            '--expected-bucket-owner', $ExpectedOwner,
+            '--profile', $ProfileName,
+            '--region', $ExpectedRegion,
+            '--output', 'json',
+            '--no-cli-pager',
+            $downloadPath
+        )
+        if ($LASTEXITCODE -ne 0) {
+            throw 'Unable to retrieve the exact versioned workload-boundary artifact.'
+        }
+        if (-not (Test-Path -LiteralPath $downloadPath -PathType Leaf)) {
+            throw 'The exact versioned workload-boundary artifact was not downloaded.'
+        }
+
+        $getObjectResponse = ($getObjectOutput | Out-String) | ConvertFrom-Json
+        $returnedVersionId = [string] (Get-OptionalPropertyValue -InputObject $getObjectResponse -Name 'VersionId')
+        if ($returnedVersionId -cne $VersionId) {
+            throw 'S3 did not return the exact requested workload-boundary artifact VersionId.'
+        }
+        $downloadedSha256 = (Get-FileHash -LiteralPath $downloadPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($downloadedSha256 -cne $ExpectedSha256) {
+            throw "The exact versioned workload-boundary artifact does not match reviewed local bytes (Expected=$ExpectedSha256, Actual=$downloadedSha256)."
+        }
+    }
+    finally {
+        $resolvedTemporaryDirectory = [System.IO.Path]::GetFullPath($temporaryDirectory)
+        $safePrefix = $temporaryBase.TrimEnd(
+            [System.IO.Path]::DirectorySeparatorChar,
+            [System.IO.Path]::AltDirectorySeparatorChar
+        ) + [System.IO.Path]::DirectorySeparatorChar
+        if (
+            $resolvedTemporaryDirectory.StartsWith($safePrefix, [System.StringComparison]::OrdinalIgnoreCase) -and
+            ([System.IO.Path]::GetFileName($resolvedTemporaryDirectory) -like 'kan34-workload-artifact-*') -and
+            (Test-Path -LiteralPath $resolvedTemporaryDirectory -PathType Container)
+        ) {
+            Remove-Item -LiteralPath $resolvedTemporaryDirectory -Recurse -Force
+        }
+    }
+}
+
+function Assert-RegionalS3ManagedPrefixList {
+    param(
+        [string] $PrefixListId,
+        [string] $ExpectedRegion,
+        [string] $ProfileName
+    )
+
+    $prefixListOutput = & $script:AwsExecutable @(
+        'ec2',
+        'describe-managed-prefix-lists',
+        '--prefix-list-ids', $PrefixListId,
+        '--profile', $ProfileName,
+        '--region', $ExpectedRegion,
+        '--no-paginate',
+        '--output', 'json',
+        '--no-cli-pager'
+    )
+    if ($LASTEXITCODE -ne 0) {
+        throw "Unable to verify S3ManagedPrefixListId '$PrefixListId'."
+    }
+    $prefixListResponse = ($prefixListOutput | Out-String) | ConvertFrom-Json
+    $prefixListValue = Get-OptionalPropertyValue -InputObject $prefixListResponse -Name 'PrefixLists'
+    [object[]] $managedPrefixLists = @()
+    if ($null -ne $prefixListValue) {
+        $managedPrefixLists = @($prefixListValue)
+    }
+    if ($managedPrefixLists.Count -ne 1) {
+        throw "S3ManagedPrefixListId '$PrefixListId' must resolve to exactly one managed prefix list."
+    }
+    $prefixList = $managedPrefixLists[0]
+    $expectedName = "com.amazonaws.$ExpectedRegion.s3"
+    if (
+        [string] (Get-OptionalPropertyValue -InputObject $prefixList -Name 'PrefixListId') -cne $PrefixListId -or
+        [string] (Get-OptionalPropertyValue -InputObject $prefixList -Name 'PrefixListName') -cne $expectedName -or
+        [string] (Get-OptionalPropertyValue -InputObject $prefixList -Name 'OwnerId') -cne 'AWS' -or
+        [string] (Get-OptionalPropertyValue -InputObject $prefixList -Name 'State') -cne 'create-complete' -or
+        [string] (Get-OptionalPropertyValue -InputObject $prefixList -Name 'AddressFamily') -cne 'IPv4'
+    ) {
+        throw "S3ManagedPrefixListId '$PrefixListId' is not the exact AWS-owned, active IPv4 '$expectedName' prefix list."
+    }
+}
+
 if (-not (Test-Path -LiteralPath $validatorPath -PathType Leaf)) {
     throw "Local policy validator was not found: $validatorPath"
+}
+if (-not (Test-Path -LiteralPath $workloadBoundariesValidatorPath -PathType Leaf)) {
+    throw "Local workload-boundary policy validator was not found: $workloadBoundariesValidatorPath"
 }
 if (-not (Test-Path -LiteralPath $billingRecordValidatorPath -PathType Leaf)) {
     throw "Billing control record validator was not found: $billingRecordValidatorPath"
@@ -209,15 +408,53 @@ if ($null -eq $nodeCommand) {
     throw 'Node.js is required for local CloudFormation policy validation.'
 }
 
-# Every action starts with offline policy validation. This invocation has no AWS
-# imports, credential resolution, subprocesses, or network operations.
+# Every action starts with local Node.js policy validation before AWS tooling or
+# credentials are resolved. These validators perform no provider/network calls.
+$preValidationTemplateSha256 = (Get-FileHash -LiteralPath $resolvedTemplate -Algorithm SHA256).Hash.ToLowerInvariant()
+$preValidationChildSha256 = (Get-FileHash -LiteralPath $resolvedWorkloadBoundariesTemplate -Algorithm SHA256).Hash.ToLowerInvariant()
 & $nodeCommand.Source $validatorPath --template $resolvedTemplate
 if ($LASTEXITCODE -ne 0) {
     throw 'Local CloudFormation policy validation failed. No AWS calls were made.'
 }
+& $nodeCommand.Source $workloadBoundariesValidatorPath --template $resolvedWorkloadBoundariesTemplate
+if ($LASTEXITCODE -ne 0) {
+    throw 'Local workload-boundary policy validation failed. No AWS calls were made.'
+}
+$postValidationTemplateSha256 = (Get-FileHash -LiteralPath $resolvedTemplate -Algorithm SHA256).Hash.ToLowerInvariant()
+$postValidationChildSha256 = (Get-FileHash -LiteralPath $resolvedWorkloadBoundariesTemplate -Algorithm SHA256).Hash.ToLowerInvariant()
+if (
+    $postValidationTemplateSha256 -cne $preValidationTemplateSha256 -or
+    $postValidationChildSha256 -cne $preValidationChildSha256
+) {
+    throw 'A local template changed during offline policy validation. No AWS calls were made; retry from a stable reviewed worktree.'
+}
+
+$templateInfo = Get-Item -LiteralPath $resolvedTemplate
+if ($templateInfo.Length -gt 51200) {
+    throw 'Parent template exceeds the 51,200-byte direct-upload limit. This guard will not stage it in S3.'
+}
+$workloadBoundariesTemplateInfo = Get-Item -LiteralPath $resolvedWorkloadBoundariesTemplate
+if ($workloadBoundariesTemplateInfo.Length -gt 51200) {
+    throw 'Workload-boundary template exceeds the reviewed 51,200-byte limit.'
+}
+$templateSha256 = $postValidationTemplateSha256
+$workloadBoundariesTemplateSha256 = $postValidationChildSha256
+$parentTemplateSource = Get-Content -LiteralPath $resolvedTemplate -Raw
+$pinnedChildHashMatch = [regex]::Match(
+    $parentTemplateSource,
+    '(?m)^  WorkloadBoundariesTemplateSha256:\r?$\n    Type: String\r?$\n    AllowedValues: \[([a-f0-9]{64})\]\r?$'
+)
+$pinnedChildUrlFragment = "application-workload-boundaries-$workloadBoundariesTemplateSha256\.yaml"
+if (
+    -not $pinnedChildHashMatch.Success -or
+    $pinnedChildHashMatch.Groups[1].Value -cne $workloadBoundariesTemplateSha256 -or
+    $parentTemplateSource.IndexOf($pinnedChildUrlFragment, [System.StringComparison]::Ordinal) -lt 0
+) {
+    throw "Reviewed child SHA-256 $workloadBoundariesTemplateSha256 does not match the parent template's exact AllowedValue and content-addressed TemplateURL pin. No AWS calls were made."
+}
 
 if ($Action -eq 'LocalValidate') {
-    Write-Host 'Local validation completed. No AWS calls were made and no resources were created.'
+    Write-Host "Local parent and workload-boundary validation completed (Child SHA-256=$workloadBoundariesTemplateSha256). No AWS calls were made and no resources were created."
     return
 }
 
@@ -244,12 +481,17 @@ $acmDnsRecordSha256 = $null
 $acmDnsConfigurationSha256 = $null
 $resolvedAcmDnsControlRecord = $null
 $expectedGuardrailPolicyVersion = 'kan-229-v1'
+$workloadBoundariesArtifactKey = $null
+$workloadBoundariesArtifactBindingSha256 = $null
+$workloadBoundariesTemplateUrl = $null
 if ($Action -in @('Plan', 'Deploy')) {
     Assert-RequiredValue -Name 'EnvironmentName' -Value $EnvironmentName
     Assert-RequiredValue -Name 'BillingControlRecordFile' -Value $BillingControlRecordFile
     Assert-RequiredValue -Name 'AcmDnsControlRecordFile' -Value $AcmDnsControlRecordFile
     Assert-RequiredValue -Name 'GuardrailStackName' -Value $GuardrailStackName
     Assert-RequiredValue -Name 'GuardrailControlRegion' -Value $GuardrailControlRegion
+    Assert-RequiredValue -Name 'WorkloadBoundariesArtifactBucket' -Value $WorkloadBoundariesArtifactBucket
+    Assert-RequiredValue -Name 'WorkloadBoundariesArtifactVersionId' -Value $WorkloadBoundariesArtifactVersionId
 
     if ($EnvironmentName.Length -gt 31 -or $EnvironmentName -notmatch '^(dev|test|qa|sandbox|staging)(-[a-z0-9]+)*$') {
         throw 'EnvironmentName must be at most 31 characters and use the template non-production pattern: dev|test|qa|sandbox|staging with optional lowercase suffix segments.'
@@ -259,6 +501,25 @@ if ($Action -in @('Plan', 'Deploy')) {
     }
     if ($GuardrailControlRegion -cne 'us-east-1') {
         throw 'GuardrailControlRegion must be us-east-1 for the current KAN-229 account-control template.'
+    }
+    if ($WorkloadBoundariesArtifactBucket -notmatch '^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$') {
+        throw 'WorkloadBoundariesArtifactBucket must be one explicit DNS-compatible bucket name without dots.'
+    }
+    if (
+        $WorkloadBoundariesArtifactVersionId -ceq 'null' -or
+        $WorkloadBoundariesArtifactVersionId.Length -gt 1024 -or
+        $WorkloadBoundariesArtifactVersionId -match '[\x00-\x1f\x7f]'
+    ) {
+        throw 'WorkloadBoundariesArtifactVersionId must be an exact non-null printable S3 VersionId of at most 1,024 characters.'
+    }
+    $workloadBoundariesArtifactKey = "application-workload-boundaries-$workloadBoundariesTemplateSha256.yaml"
+    $artifactBindingText = "bucket=$WorkloadBoundariesArtifactBucket`nkey=$workloadBoundariesArtifactKey`nversion-id=$WorkloadBoundariesArtifactVersionId"
+    $workloadBoundariesArtifactBindingSha256 = Get-TextSha256 -Value $artifactBindingText
+    $artifactDnsSuffix = if ($Region -like 'cn-*') { 'amazonaws.com.cn' } else { 'amazonaws.com' }
+    $encodedArtifactVersionId = [System.Uri]::EscapeDataString($WorkloadBoundariesArtifactVersionId)
+    $workloadBoundariesTemplateUrl = "https://$WorkloadBoundariesArtifactBucket.s3.$Region.$artifactDnsSuffix/$workloadBoundariesArtifactKey`?versionId=$encodedArtifactVersionId"
+    if ($workloadBoundariesTemplateUrl.Length -gt 1024) {
+        throw "The constructed versioned workload-boundary TemplateURL exceeds CloudFormation's 1,024-character limit."
     }
     if (-not (Test-Path -LiteralPath $accountGuardrailTemplatePath -PathType Leaf)) {
         throw "The reviewed KAN-229 account guardrail template was not found: $accountGuardrailTemplatePath"
@@ -345,12 +606,6 @@ if ($null -eq $awsCommand) {
 }
 $script:AwsExecutable = $awsCommand.Source
 
-$templateInfo = Get-Item -LiteralPath $resolvedTemplate
-if ($templateInfo.Length -gt 51200) {
-    throw 'Template exceeds the 51,200-byte direct-upload limit. This guard will not stage templates in a paid S3 service.'
-}
-$templateSha256 = (Get-FileHash -LiteralPath $resolvedTemplate -Algorithm SHA256).Hash.ToLowerInvariant()
-
 # Verify the named profile before any CloudFormation API call. --profile and
 # --region are always supplied; ambient/default credentials are never selected.
 $identityOutput = & $script:AwsExecutable @(
@@ -382,6 +637,7 @@ if ($Action -in @('Plan', 'Deploy')) {
 }
 
 $templateUri = 'file://' + ($resolvedTemplate -replace '\\', '/')
+$workloadBoundariesTemplateUri = 'file://' + ($resolvedWorkloadBoundariesTemplate -replace '\\', '/')
 if ($Action -eq 'CloudValidate') {
     Invoke-AwsCommand -Arguments @(
         'cloudformation',
@@ -391,7 +647,15 @@ if ($Action -eq 'CloudValidate') {
         '--region', $Region,
         '--no-cli-pager'
     )
-    Write-Host 'AWS validated the template syntax. No stack or application resources were created.'
+    Invoke-AwsCommand -Arguments @(
+        'cloudformation',
+        'validate-template',
+        '--template-body', $workloadBoundariesTemplateUri,
+        '--profile', $Profile,
+        '--region', $Region,
+        '--no-cli-pager'
+    )
+    Write-Host 'AWS validated the parent and workload-boundary template syntax. No stack or application resources were created.'
     return
 }
 
@@ -558,7 +822,7 @@ $partition = if ($Region -like 'cn-*') {
     'aws'
 }
 
-if ($Action -eq 'Plan') {
+if ($Action -in @('Plan', 'Deploy')) {
     Assert-RequiredValue -Name 'ChangeSetType' -Value $ChangeSetType
     Assert-RequiredValue -Name 'EnvironmentName' -Value $EnvironmentName
     if ($EnvironmentName.Length -gt 31 -or $EnvironmentName -notmatch '^(dev|test|qa|sandbox|staging)(-[a-z0-9]+)*$') {
@@ -567,8 +831,16 @@ if ($Action -eq 'Plan') {
 
     $parameterMap = [ordered]@{
         EnvironmentName = $EnvironmentName
+        WorkloadBoundariesTemplateUrl = $workloadBoundariesTemplateUrl
+        WorkloadBoundariesTemplateSha256 = $workloadBoundariesTemplateSha256
+        WorkloadBoundariesArtifactBindingSha256 = $workloadBoundariesArtifactBindingSha256
     }
     $sensitiveParameterName = '(?i)(password|credential|accesskey|secret(?:value|string)?|token)'
+    $reviewedNonSecretControlParameters = @(
+        'ApiDatabaseCredentialPhase',
+        'WorkerDatabaseCredentialPhase',
+        'RedisCredentialPhase'
+    )
     foreach ($item in $ParameterOverride) {
         if ($item -notmatch '^([A-Za-z][A-Za-z0-9]*)=(.+)$') {
             throw "ParameterOverride '$item' must use the exact Key=Value form."
@@ -576,10 +848,15 @@ if ($Action -eq 'Plan') {
 
         $key = $Matches[1]
         $value = $Matches[2]
-        if ($key -eq 'EnvironmentName') {
-            throw 'EnvironmentName is a named argument and must not be repeated in ParameterOverride.'
+        if ($key -in @(
+                'EnvironmentName',
+                'WorkloadBoundariesTemplateUrl',
+                'WorkloadBoundariesTemplateSha256',
+                'WorkloadBoundariesArtifactBindingSha256'
+            )) {
+            throw "$key is derived by a named, locally verified input and must not be repeated in ParameterOverride."
         }
-        if ($key -match $sensitiveParameterName) {
+        if ($key -match $sensitiveParameterName -and $reviewedNonSecretControlParameters -cnotcontains $key) {
             throw "Secret-bearing override '$key' is prohibited. Generate and resolve secrets through Secrets Manager."
         }
         if ($parameterMap.Contains($key)) {
@@ -627,6 +904,10 @@ if ($Action -eq 'Plan') {
         EnableDatabaseMultiAz = 'false'
         RedisNodeType = 'cache.t4g.micro'
         EnableRedisReplica = 'false'
+        ApiDatabaseCredentialPhase = 'A_ONLY'
+        WorkerDatabaseCredentialPhase = 'A_ONLY'
+        RedisCredentialPhase = 'A_ONLY'
+        RedisOperatorMode = 'DISABLED'
         StatefulBackupRetentionDays = '1'
         SqsMaxReceiveCount = '3'
         SqsVisibilityTimeoutSeconds = '30'
@@ -635,7 +916,12 @@ if ($Action -eq 'Plan') {
         EnableOperationalDashboard = 'false'
         EnableContainerInsights = 'disabled'
     }
-    $allowedParameterNames = @('EnvironmentName') + $requiredParameters + @($parameterDefaults.Keys)
+    $deliveryParameterNames = @(
+        'WorkloadBoundariesTemplateUrl',
+        'WorkloadBoundariesTemplateSha256',
+        'WorkloadBoundariesArtifactBindingSha256'
+    )
+    $allowedParameterNames = @('EnvironmentName') + $deliveryParameterNames + $requiredParameters + @($parameterDefaults.Keys)
     foreach ($parameterName in $parameterMap.Keys) {
         if ($allowedParameterNames -cnotcontains $parameterName) {
             throw "ParameterOverride contains unknown template parameter '$parameterName'."
@@ -675,6 +961,15 @@ if ($Action -eq 'Plan') {
         if (-not $parameterMap.Contains($entry.Key)) {
             $parameterMap[$entry.Key] = $entry.Value
         }
+    }
+    $allowedCredentialPhases = @('A_ONLY', 'BOTH_USE_A', 'BOTH_USE_B', 'B_ONLY')
+    foreach ($phaseParameter in $reviewedNonSecretControlParameters) {
+        if ($allowedCredentialPhases -cnotcontains [string] $parameterMap[$phaseParameter]) {
+            throw "$phaseParameter must use exactly A_ONLY, BOTH_USE_A, BOTH_USE_B, or B_ONLY."
+        }
+    }
+    if (@('DISABLED', 'ENABLED') -cnotcontains [string] $parameterMap.RedisOperatorMode) {
+        throw 'RedisOperatorMode must use exactly DISABLED or ENABLED.'
     }
 
     $cidrParts = $parameterMap.AllowedIngressIpv4Cidr.Split('/')
@@ -728,6 +1023,8 @@ if ($Action -eq 'Plan') {
         'billing-control-record' = [string] $controlRecord.recordId
         'acm-dns-control-record' = [string] $acmDnsBinding.recordId
         'acm-dns-configuration-sha256' = $acmDnsConfigurationSha256
+        'workload-boundaries-sha256' = $workloadBoundariesTemplateSha256
+        'workload-boundaries-binding-sha256' = $workloadBoundariesArtifactBindingSha256
         'managed-by' = 'cloudformation'
         ticket = 'KAN-34'
     }
@@ -744,9 +1041,23 @@ if ($Action -eq 'Plan') {
     }
     $canonicalParameters = ($parameterMap.GetEnumerator() | Sort-Object Key | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join "`n"
     $parameterSha256 = Get-TextSha256 -Value $canonicalParameters
-    $expectedChangeSetDescription = "KAN-34 template-sha256=$templateSha256 parameters-sha256=$parameterSha256 tags-sha256=$tagSha256 control-record-sha256=$controlRecordSha256 acm-dns-record-sha256=$acmDnsRecordSha256 guardrail-policy=$expectedGuardrailPolicyVersion"
+    $expectedChangeSetDescription = "KAN-34 template-sha256=$templateSha256 child-template-sha256=$workloadBoundariesTemplateSha256 child-artifact-binding-sha256=$workloadBoundariesArtifactBindingSha256 parameters-sha256=$parameterSha256 tags-sha256=$tagSha256 control-record-sha256=$controlRecordSha256 acm-dns-record-sha256=$acmDnsRecordSha256 guardrail-policy=$expectedGuardrailPolicyVersion"
 
-    $planArguments = @(
+    if ($Action -eq 'Plan') {
+        Assert-RegionalS3ManagedPrefixList `
+            -PrefixListId ([string] $parameterMap.S3ManagedPrefixListId) `
+            -ExpectedRegion $Region `
+            -ProfileName $Profile
+        Assert-WorkloadBoundariesArtifact `
+            -Bucket $WorkloadBoundariesArtifactBucket `
+            -Key $workloadBoundariesArtifactKey `
+            -VersionId $WorkloadBoundariesArtifactVersionId `
+            -ExpectedOwner $AccountId `
+            -ExpectedRegion $Region `
+            -ExpectedSha256 $workloadBoundariesTemplateSha256 `
+            -ProfileName $Profile
+
+        $planArguments = @(
         'cloudformation',
         'create-change-set',
         '--template-body', $templateUri,
@@ -757,6 +1068,7 @@ if ($Action -eq 'Plan') {
         '--parameters'
     ) + $parameterArguments + @(
         '--capabilities', 'CAPABILITY_IAM',
+        '--include-nested-stacks',
         '--tags'
     ) + $tagArguments + @(
         '--profile', $Profile,
@@ -764,10 +1076,11 @@ if ($Action -eq 'Plan') {
         '--no-cli-pager'
     )
 
-    Invoke-AwsCommand -Arguments $planArguments
-    Write-Host "CloudFormation created change set '$ChangeSetName' for review but did not execute it."
-    Write-Host 'No application resources were activated by this command.'
-    return
+        Invoke-AwsCommand -Arguments $planArguments
+        Write-Host "CloudFormation created nested-aware change set '$ChangeSetName' for review but did not execute it."
+        Write-Host 'The guard read an existing versioned S3 artifact and did not upload or create one. No application resources were activated.'
+        return
+    }
 }
 
 $descriptionOutput = & $script:AwsExecutable @(
@@ -784,16 +1097,39 @@ if ($LASTEXITCODE -ne 0) {
     throw "Unable to describe reviewed change set '$ChangeSetName'."
 }
 $changeSet = ($descriptionOutput | Out-String) | ConvertFrom-Json
-if ($changeSet.StackName -ne $StackName -or $changeSet.ChangeSetName -ne $ChangeSetName) {
+if ($changeSet.StackName -cne $StackName -or $changeSet.ChangeSetName -cne $ChangeSetName) {
     throw 'The described change set identity does not match the explicitly requested stack and change-set names.'
 }
-if ($changeSet.Status -ne 'CREATE_COMPLETE' -or $changeSet.ExecutionStatus -ne 'AVAILABLE') {
+if ([string] (Get-OptionalPropertyValue -InputObject $changeSet -Name 'ChangeSetType') -cne $ChangeSetType) {
+    throw 'The described change-set type does not match the exact locally requested CREATE or UPDATE context.'
+}
+if ((Get-OptionalPropertyValue -InputObject $changeSet -Name 'IncludeNestedStacks') -ne $true) {
+    throw 'The reviewed change set was not created with nested-stack change visibility enabled.'
+}
+$changeSetCapabilities = @((Get-OptionalPropertyValue -InputObject $changeSet -Name 'Capabilities'))
+if ($changeSetCapabilities.Count -ne 1 -or [string] $changeSetCapabilities[0] -cne 'CAPABILITY_IAM') {
+    throw 'The reviewed change set must use exactly CAPABILITY_IAM and no additional capability.'
+}
+if ($changeSet.Status -cne 'CREATE_COMPLETE' -or $changeSet.ExecutionStatus -cne 'AVAILABLE') {
     throw "Change set '$ChangeSetName' is not executable (Status=$($changeSet.Status), ExecutionStatus=$($changeSet.ExecutionStatus))."
 }
 $changeSetId = [string] $changeSet.ChangeSetId
 $expectedChangeSetIdPattern = '^arn:' + [regex]::Escape($partition) + ':cloudformation:' + [regex]::Escape($Region) + ':' + [regex]::Escape($AccountId) + ':changeSet/' + [regex]::Escape($ChangeSetName) + '/[A-Za-z0-9-]+$'
 if ($changeSetId -notmatch $expectedChangeSetIdPattern) {
     throw 'The reviewed change set did not return the expected immutable ARN for the approved account and Region.'
+}
+$stackId = [string] (Get-OptionalPropertyValue -InputObject $changeSet -Name 'StackId')
+$expectedStackIdPattern = '^arn:' + [regex]::Escape($partition) + ':cloudformation:' + [regex]::Escape($Region) + ':' + [regex]::Escape($AccountId) + ':stack/' + [regex]::Escape($StackName) + '/[A-Za-z0-9-]+$'
+if ($stackId -notmatch $expectedStackIdPattern) {
+    throw 'The reviewed change set is not bound to the expected immutable stack ARN in the approved account and Region.'
+}
+$parentChangeSetId = [string] (Get-OptionalPropertyValue -InputObject $changeSet -Name 'ParentChangeSetId')
+if (-not [string]::IsNullOrEmpty($parentChangeSetId)) {
+    throw 'Deploy must target the root reviewed change set, not a child change set.'
+}
+$rootChangeSetId = [string] (Get-OptionalPropertyValue -InputObject $changeSet -Name 'RootChangeSetId')
+if (-not [string]::IsNullOrEmpty($rootChangeSetId) -and $rootChangeSetId -cne $changeSetId) {
+    throw 'The reviewed change set returned an unexpected root change-set identity.'
 }
 
 # The description is not template provenance: a manually created change set can
@@ -802,7 +1138,7 @@ if ($changeSetId -notmatch $expectedChangeSetIdPattern) {
 $submittedTemplateOutput = & $script:AwsExecutable @(
     'cloudformation',
     'get-template',
-    '--stack-name', $StackName,
+    '--stack-name', $stackId,
     '--change-set-name', $changeSetId,
     '--template-stage', 'Original',
     '--profile', $Profile,
@@ -821,19 +1157,7 @@ $submittedTemplateSha256 = Get-TextSha256 -Value ([string] $submittedTemplate.Te
 if ($submittedTemplateSha256 -cne $templateSha256) {
     throw "The actual Original template submitted with change set '$ChangeSetName' does not match the reviewed local template. Re-plan and review it."
 }
-$expectedStackTags = [ordered]@{
-    application = 'crypto-lending'
-    environment = $EnvironmentName
-    owner = [string] $controlRecord.environment.owner
-    'finance-owner' = [string] $controlRecord.environment.financeOwner
-    'cost-center' = [string] $controlRecord.environment.costCenter
-    'control-record-sha256' = $controlRecordSha256
-    'billing-control-record' = [string] $controlRecord.recordId
-    'acm-dns-control-record' = [string] $acmDnsBinding.recordId
-    'acm-dns-configuration-sha256' = $acmDnsConfigurationSha256
-    'managed-by' = 'cloudformation'
-    ticket = 'KAN-34'
-}
+$expectedStackTags = $stackTags
 $changeSetTags = ConvertFrom-ChangeSetTags -Tags $changeSet.Tags
 if ($changeSetTags.Count -ne $expectedStackTags.Count) {
     throw 'The reviewed change set does not contain the exact approved ownership and billing tag set.'
@@ -845,35 +1169,66 @@ foreach ($expectedTag in $expectedStackTags.GetEnumerator()) {
 }
 $canonicalTags = ConvertTo-CanonicalTagText -Tags $changeSetTags
 $tagSha256 = Get-TextSha256 -Value $canonicalTags
-$canonicalParameters = ($changeSet.Parameters | Sort-Object ParameterKey | ForEach-Object {
-        if ($_.UsePreviousValue -or [string]::IsNullOrEmpty($_.ParameterKey) -or $null -eq $_.ParameterValue) {
-            throw 'The reviewed change set contains a non-explicit parameter and cannot be executed by this guard.'
-        }
-        "$($_.ParameterKey)=$($_.ParameterValue)"
-    }) -join "`n"
-$parameterSha256 = Get-TextSha256 -Value $canonicalParameters
-$changeSetParameterMap = [ordered]@{}
+$changeSetParameterMap = [System.Collections.Specialized.OrderedDictionary]::new([System.StringComparer]::Ordinal)
 foreach ($parameter in @($changeSet.Parameters)) {
-    $changeSetParameterMap[[string] $parameter.ParameterKey] = [string] $parameter.ParameterValue
+    $parameterKey = [string] (Get-OptionalPropertyValue -InputObject $parameter -Name 'ParameterKey')
+    $parameterValue = Get-OptionalPropertyValue -InputObject $parameter -Name 'ParameterValue'
+    $usePreviousValue = Get-OptionalPropertyValue -InputObject $parameter -Name 'UsePreviousValue'
+    if ($usePreviousValue -eq $true -or [string]::IsNullOrEmpty($parameterKey) -or $null -eq $parameterValue) {
+        throw 'The reviewed change set contains a non-explicit parameter and cannot be executed by this guard.'
+    }
+    if ($changeSetParameterMap.Contains($parameterKey)) {
+        throw "The reviewed change set contains duplicate parameter '$parameterKey'."
+    }
+    $changeSetParameterMap[$parameterKey] = [string] $parameterValue
 }
-if (
-    $changeSetParameterMap.AlbCertificateArn -cne [string] $acmDnsBinding.certificateArn -or
-    $changeSetParameterMap.ApplicationHostname -cne [string] $acmDnsBinding.applicationHostname
-) {
-    throw 'The reviewed change set certificate or hostname does not match the validated KAN-230 record.'
+if ($changeSetParameterMap.Count -ne $parameterMap.Count) {
+    throw "The reviewed change set parameter count does not match the exact local Plan/Deploy contract (Expected=$($parameterMap.Count), Actual=$($changeSetParameterMap.Count))."
 }
-$expectedChangeSetDescription = "KAN-34 template-sha256=$templateSha256 parameters-sha256=$parameterSha256 tags-sha256=$tagSha256 control-record-sha256=$controlRecordSha256 acm-dns-record-sha256=$acmDnsRecordSha256 guardrail-policy=$expectedGuardrailPolicyVersion"
+foreach ($expectedParameter in $parameterMap.GetEnumerator()) {
+    if (-not $changeSetParameterMap.Contains($expectedParameter.Key)) {
+        throw "The reviewed change set is missing exact locally approved parameter '$($expectedParameter.Key)'."
+    }
+    if ($changeSetParameterMap[$expectedParameter.Key] -cne [string] $expectedParameter.Value) {
+        throw "The reviewed change set parameter '$($expectedParameter.Key)' does not match the exact locally approved value."
+    }
+}
+$reviewedCanonicalParameters = ($changeSetParameterMap.GetEnumerator() | Sort-Object Key | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join "`n"
+$reviewedParameterSha256 = Get-TextSha256 -Value $reviewedCanonicalParameters
+if ($reviewedParameterSha256 -cne $parameterSha256) {
+    throw 'The reviewed change set parameter SHA-256 does not match the exact locally constructed parameter map.'
+}
 if ($changeSet.Description -cne $expectedChangeSetDescription) {
     throw "Change set '$ChangeSetName' is not bound to the current template, parameters, tags, billing record, and guardrail policy. Re-plan and review it."
 }
+$currentLocalTemplateSha256 = (Get-FileHash -LiteralPath $resolvedTemplate -Algorithm SHA256).Hash.ToLowerInvariant()
+$currentLocalChildSha256 = (Get-FileHash -LiteralPath $resolvedWorkloadBoundariesTemplate -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($currentLocalTemplateSha256 -cne $templateSha256 -or $currentLocalChildSha256 -cne $workloadBoundariesTemplateSha256) {
+    throw 'A reviewed local template changed during Deploy verification. Re-run Plan and review a new change set.'
+}
+Assert-RegionalS3ManagedPrefixList `
+    -PrefixListId ([string] $parameterMap.S3ManagedPrefixListId) `
+    -ExpectedRegion $Region `
+    -ProfileName $Profile
+Assert-WorkloadBoundariesArtifact `
+    -Bucket $WorkloadBoundariesArtifactBucket `
+    -Key $workloadBoundariesArtifactKey `
+    -VersionId $WorkloadBoundariesArtifactVersionId `
+    -ExpectedOwner $AccountId `
+    -ExpectedRegion $Region `
+    -ExpectedSha256 $workloadBoundariesTemplateSha256 `
+    -ProfileName $Profile
+
 Write-Host "Reviewed template SHA-256: $templateSha256"
 Write-Host "Verified submitted template SHA-256: $submittedTemplateSha256"
+Write-Host "Verified workload-boundary template SHA-256: $workloadBoundariesTemplateSha256"
+Write-Host "Verified workload-boundary artifact binding SHA-256: $workloadBoundariesArtifactBindingSha256"
 Write-Host "Reviewed parameter SHA-256: $parameterSha256"
 Write-Host "Reviewed tag SHA-256: $tagSha256"
 Write-Host "Reviewed billing control record SHA-256: $controlRecordSha256"
 Write-Host "Reviewed ACM/DNS control record SHA-256: $acmDnsRecordSha256"
 
-$expectedAcknowledgement = "EXECUTE REVIEWED CHANGE SET $ChangeSetName FOR STACK $StackName USING BILLING CONTROL $controlRecordSha256 AND ACM DNS CONTROL $acmDnsRecordSha256; I ACKNOWLEDGE BILLABLE AWS RESOURCES IN ACCOUNT $AccountId REGION $Region USING PROFILE $Profile"
+$expectedAcknowledgement = "EXECUTE IMMUTABLE CHANGE SET $changeSetId FOR IMMUTABLE STACK $stackId WITH PARAMETERS $parameterSha256 CHILD TEMPLATE $workloadBoundariesTemplateSha256 ARTIFACT BINDING $workloadBoundariesArtifactBindingSha256 USING BILLING CONTROL $controlRecordSha256 AND ACM DNS CONTROL $acmDnsRecordSha256; I ACKNOWLEDGE BILLABLE AWS RESOURCES IN ACCOUNT $AccountId REGION $Region USING PROFILE $Profile"
 if ($BillableAcknowledgement -cne $expectedAcknowledgement) {
     throw @"
 Deploy can create RDS, ElastiCache, load balancer, networking, logging, KMS, and other billable resources.
@@ -886,7 +1241,7 @@ Write-Warning "Executing reviewed change set '$ChangeSetName' can create billabl
 Invoke-AwsCommand -Arguments @(
     'cloudformation',
     'execute-change-set',
-    '--stack-name', $StackName,
+    '--stack-name', $stackId,
     '--change-set-name', $changeSetId,
     '--client-request-token', ([guid]::NewGuid().ToString()),
     '--profile', $Profile,

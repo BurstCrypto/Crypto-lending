@@ -21,4 +21,24 @@ describe('createMigrationPool', () => {
     });
     await pool.end();
   });
+
+  it('applies the fixed schema-owner role in startup options and rejects arbitrary roles', async () => {
+    const base = {
+      connectionString: 'postgresql://unused',
+      connectionTimeoutMs: 5_000,
+      idleTimeoutMs: 30_000,
+      lockTimeoutMs: 10_000,
+      maxLifetimeSeconds: 1_800,
+      poolMax: 1,
+      statementTimeoutMs: 3_600_000,
+      ssl: false as const,
+    };
+    const pool = createMigrationPool({ ...base, sessionRole: 'crypto_schema_owner' });
+
+    expect(pool.options.options).toBe('-c role=crypto_schema_owner -c search_path=public,pg_temp');
+    await pool.end();
+    expect(() => createMigrationPool({ ...base, sessionRole: 'postgres' })).toThrow(
+      'Unsupported database migration session role',
+    );
+  });
 });

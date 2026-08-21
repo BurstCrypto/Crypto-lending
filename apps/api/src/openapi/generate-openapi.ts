@@ -22,8 +22,19 @@ async function generateOpenApi(): Promise<void> {
     process.env.DATABASE_RUNTIME_URL = 'postgres://openapi:openapi@127.0.0.1:5432/openapi';
     process.env.DATABASE_RUNTIME_SSL_MODE = 'disable';
   }
-  process.env.REDIS_URL ??= 'redis://127.0.0.1:6379';
-  process.env.REDIS_KEY_PREFIX ??= 'crypto-lending:openapi:v1:';
+  if (
+    !process.env.REDIS_URL &&
+    !process.env.REDIS_HOST &&
+    !process.env.REDIS_PORT &&
+    !process.env.REDIS_USERNAME &&
+    !process.env.REDIS_PASSWORD
+  ) {
+    process.env.REDIS_HOST = '127.0.0.1';
+    process.env.REDIS_PORT = '6379';
+    process.env.REDIS_TLS = 'false';
+    process.env.REDIS_USERNAME = 'crypto_api_a';
+    process.env.REDIS_PASSWORD = 'local-api-current';
+  }
   process.env.SQS_QUEUE_URL ??= 'http://127.0.0.1:4566/000000000000/openapi-jobs';
   process.env.SQS_DEAD_LETTER_QUEUE_URL ??= 'http://127.0.0.1:4566/000000000000/openapi-jobs-dlq';
 

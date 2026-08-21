@@ -5,7 +5,7 @@ import { Pool, type PoolClient } from 'pg';
 import { parseAccountId, type AccountId } from '../../src/accounts/domain/account-profile';
 import { PostgresAccountProfileRepository } from '../../src/accounts/infrastructure/postgres-account-profile.repository';
 import { MigrationRunner } from '../../src/infrastructure/database/migration-runner.service';
-import { DATABASE_MIGRATION_LIST } from '../../src/infrastructure/database/migrations';
+import { DATABASE_SCHEMA_MIGRATION_LIST } from '../../src/infrastructure/database/migrations';
 import { PostgresService } from '../../src/infrastructure/database/postgres.service';
 
 const testDatabaseUrl = process.env.TEST_DATABASE_URL;
@@ -57,7 +57,7 @@ describeWithPostgres('PostgreSQL account profile repository', () => {
        ) AS exists`,
     );
     if (!runtimeRole.rows[0]?.exists) {
-      await runtimeRoleLockClient.query('CREATE ROLE crypto_runtime NOLOGIN');
+      await runtimeRoleLockClient.query('CREATE ROLE crypto_runtime NOLOGIN NOINHERIT');
       runtimeRoleCreated = true;
     }
     await adminPool.query(`CREATE SCHEMA "${schema}"`);
@@ -66,7 +66,7 @@ describeWithPostgres('PostgreSQL account profile repository', () => {
       max: 5,
       options: `-c search_path=${schema}`,
     });
-    migrations = new MigrationRunner(pool, DATABASE_MIGRATION_LIST);
+    migrations = new MigrationRunner(pool, DATABASE_SCHEMA_MIGRATION_LIST);
     await migrations.up();
     repository = new PostgresAccountProfileRepository(new PostgresService(pool));
   });

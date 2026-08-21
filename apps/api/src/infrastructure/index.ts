@@ -26,4 +26,4 @@ export {
 /** Infrastructure worker entrypoint. Run separately from API replicas. */
 export { OutboxWorker } from './outbox/outbox-worker.service';
 export { RedisModule } from './redis/redis.module';
-export { RedisService, type RedisSetOptions } from './redis/redis.service';
+export { RedisService } from './redis/redis.service';

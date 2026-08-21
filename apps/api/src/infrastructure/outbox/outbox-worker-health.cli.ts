@@ -4,20 +4,22 @@ import 'reflect-metadata';
 import { Module } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 
-import { InfrastructureHealthService } from '../health/infrastructure-health.service';
-import { InfrastructureModule } from '../infrastructure.module';
-import { assertOutboxWorkerHealthy } from './outbox-worker-health';
+import { bindExecutableWorkload } from '../config/application-workload';
+import { PostgresModule } from '../database/postgres.module';
+import { SqsModule } from '../sqs/sqs.module';
+import { assertOutboxWorkerHealthy, OutboxWorkerHealthService } from './outbox-worker-health';
 
-@Module({ imports: [InfrastructureModule] })
+@Module({ imports: [PostgresModule, SqsModule], providers: [OutboxWorkerHealthService] })
 class OutboxWorkerHealthApplicationModule {}
 
 async function main(): Promise<void> {
+  bindExecutableWorkload(process.env, 'worker');
   const application = await NestFactory.createApplicationContext(
     OutboxWorkerHealthApplicationModule,
     { logger: false },
   );
   try {
-    await assertOutboxWorkerHealthy(application.get(InfrastructureHealthService));
+    await assertOutboxWorkerHealthy(application.get(OutboxWorkerHealthService));
   } finally {
     await application.close();
   }

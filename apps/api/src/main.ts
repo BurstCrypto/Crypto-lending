@@ -7,9 +7,11 @@ import { NestFactory } from '@nestjs/core';
 
 import { AppModule } from './app.module';
 import { configureApplication } from './application';
+import { bindExecutableWorkload } from './infrastructure/config/application-workload';
 import { applyHttpServerLimits, loadHttpServerOptions } from './server-options';
 
 async function bootstrap(): Promise<void> {
+  bindExecutableWorkload(process.env, 'api');
   const app = await NestFactory.create(AppModule);
   configureApplication(app);
   app.enableShutdownHooks();

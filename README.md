@@ -164,7 +164,12 @@ To exercise real migrations, Redis health, SQS health, retry behavior, and DLQ
 redrive against the local Docker services:
 
 ```powershell
-$env:TEST_DATABASE_URL=$env:MIGRATION_DATABASE_URL
+$env:APPLICATION_WORKLOAD="api"
+$env:DATABASE_RUNTIME_URL="postgresql://crypto_api_login_a:local_api_database_a@127.0.0.1:5432/crypto_lending"
+$env:DATABASE_RUNTIME_SSL_MODE="disable"
+$env:MIGRATION_DATABASE_URL="postgresql://crypto_migration:local_migration_only@127.0.0.1:5432/crypto_lending"
+$env:MIGRATION_DATABASE_SSL_MODE="disable"
+$env:TEST_DATABASE_URL="postgresql://crypto_admin:local_admin_only@127.0.0.1:5432/crypto_lending"
 $env:RUN_INFRASTRUCTURE_INTEGRATION="1"
 npm run test:integration
 ```
@@ -204,10 +209,11 @@ npm run infra:validate
 npm run infra:test:guardrails
 npm run infra:test:acm-dns
 npm run infra:test:migrations
+npm run infra:test:workload-boundaries
 npm run infra:test:sqs
 npm run infra:test:egress
 python -m pip install --requirement infra/aws/requirements-dev.txt
-python infra/aws/lint-cloudformation.py infra/aws/application-baseline.yaml infra/aws/database-migration-task.yaml infra/aws/account-guardrails.yaml infra/aws/sqs-foundation.yaml
+python infra/aws/lint-cloudformation.py infra/aws/application-baseline.yaml infra/aws/application-workload-boundaries.yaml infra/aws/database-migration-task.yaml infra/aws/account-guardrails.yaml infra/aws/sqs-foundation.yaml
 ```
 
 These commands do not access AWS. The described services are billable if a
@@ -223,13 +229,16 @@ DNS, cutover, and rollback contract. The Proposed egress design,
 dependency gates, and live-evidence boundary are in
 [`docs/KAN-231.md`](docs/KAN-231.md).
 
-Production API/worker tasks receive only `DATABASE_RUNTIME_*` credentials. The
-separate `infra/aws/database-migration-task.yaml` defines an operator-invoked,
-one-off task that receives only `MIGRATION_DATABASE_*`; it creates no ECS
-service and is never registered or run by repository setup or CI. The local
-Compose database intentionally retains one local-only account for developer
-compatibility. See KAN-34 for the required runtime-role bootstrap, migration
-order, billing gate, and residual deployment work.
+The runtime contract requires separate `DATABASE_RUNTIME_*` login slots for
+the API and worker; `APPLICATION_WORKLOAD` selects the matching stable
+capability role before the first query. The separate
+`infra/aws/database-migration-task.yaml` defines an operator-invoked, one-off
+task that receives only the `crypto_migration` `MIGRATION_DATABASE_*`
+credential. The RDS master/bootstrap credential is forbidden from all
+long-lived and migration task definitions. The local Compose database uses
+distinct, deliberately local-only fixtures for all three paths and retains the
+pre-KAN-232 volume under its old name rather than mutating it. See KAN-232 and
+KAN-34 for bootstrap order, rotation, billing gates, and residual live work.
 
 The live test refuses non-loopback service URLs, creates isolated queues and a
 unique PostgreSQL schema, and removes only those test resources. See
@@ -249,7 +258,9 @@ unique PostgreSQL schema, and removes only those test resources. See
   KAN-41 through KAN-44; see [`docs/KAN-40.md`](docs/KAN-40.md).
 - `apps/api/src/infrastructure/database` owns pooled queries, transaction
   propagation, and checksum-protected migrations.
-- `apps/api/src/infrastructure/redis` owns shared cache and job-state access.
+- `apps/api/src/infrastructure/redis` owns the API's health-only Redis boundary.
+  Redis key commands are not currently granted, and the outbox worker has no
+  Redis configuration or client dependency.
 - `apps/api/src/infrastructure/outbox` owns durable job envelopes and
   transactional publication; `infrastructure/sqs` owns transport retries and
   SQS-managed dead-letter redrive.

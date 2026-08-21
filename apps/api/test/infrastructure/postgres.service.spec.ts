@@ -42,6 +42,33 @@ describe('PostgresService', () => {
     await pool.end();
   });
 
+  it('binds production runtime capability roles through connection startup options', async () => {
+    const apiPool = createPostgresPool({
+      ...testInfrastructureConfig(),
+      workload: 'api',
+      database: {
+        ...testInfrastructureConfig().database,
+        connectionString: 'postgresql://unused',
+        sessionRole: 'crypto_api_runtime',
+      },
+    });
+    expect(apiPool.options.options).toBe(
+      '-c role=crypto_api_runtime -c search_path=public,pg_temp',
+    );
+    await apiPool.end();
+
+    expect(() =>
+      createPostgresPool({
+        ...testInfrastructureConfig(),
+        workload: 'worker',
+        database: {
+          ...testInfrastructureConfig().database,
+          sessionRole: 'crypto_api_runtime',
+        },
+      }),
+    ).toThrow('does not match worker workload');
+  });
+
   function setup(): {
     service: PostgresService;
     query: jest.Mock<Promise<QueryResult>, [string, unknown[]?]>;

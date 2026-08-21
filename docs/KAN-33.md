@@ -21,7 +21,8 @@ The module exposes:
 
 - `PostgresService` for transaction-aware queries and `withTransaction`;
 - `MigrationRunner` for programmatic migration control;
-- `RedisService` with an environment/version key namespace;
+- `RedisService` with a health-only `PING` boundary; key commands require a
+  separately reviewed future capability expansion;
 - `JOB_PUBLISHER` for transactionally enqueueing immutable job envelopes;
 - `OutboxWorker` as the explicit, separately deployed SQS dispatch process;
 - `InfrastructureHealthService` and `GET /api/v1/health/dependencies` when the
@@ -39,24 +40,29 @@ the migration scripts use `tsx`.
 
 No production connection has an implicit fallback. Runtime and migration
 credentials use different variable namespaces so an API/worker task cannot be
-started with migration/admin credentials by accident. The local example uses
-one Docker-only account for compatibility; production must use distinct roles.
-Set these variables before starting the API or migration CLI:
+started with migration/bootstrap credentials by accident. The local Compose
+fixture uses the same separated API and migration identity shape as the
+production contract. Set these variables before starting the API or migration
+CLI:
 
 ```dotenv
-DATABASE_RUNTIME_URL=postgresql://crypto_lending:local_only_password@localhost:5432/crypto_lending
+APPLICATION_WORKLOAD=api
+DATABASE_RUNTIME_URL=postgresql://crypto_api_login_a:local_api_database_a@localhost:5432/crypto_lending
 DATABASE_RUNTIME_SSL_MODE=disable
 DATABASE_LOCK_TIMEOUT_MS=5000
 DATABASE_POOL_MAX=10
 DATABASE_STATEMENT_TIMEOUT_MS=15000
 
-MIGRATION_DATABASE_URL=postgresql://crypto_lending:local_only_password@localhost:5432/crypto_lending
+MIGRATION_DATABASE_URL=postgresql://crypto_migration:local_migration_only@localhost:5432/crypto_lending
 MIGRATION_DATABASE_SSL_MODE=disable
 MIGRATION_DATABASE_LOCK_TIMEOUT_MS=10000
 MIGRATION_DATABASE_STATEMENT_TIMEOUT_MS=3600000
 
-REDIS_URL=redis://localhost:6379
-REDIS_KEY_PREFIX=crypto-lending:local:v1:
+REDIS_HOST=127.0.0.1
+REDIS_PORT=6379
+REDIS_TLS=false
+REDIS_USERNAME=crypto_api_a
+REDIS_PASSWORD=local-api-current
 REDIS_CONNECT_TIMEOUT_MS=5000
 REDIS_COMMAND_TIMEOUT_MS=2000
 
@@ -92,10 +98,16 @@ tasks require `MIGRATION_DATABASE_*`. Each scope rejects the other scope and the
 legacy unscoped `DATABASE_*` credentials. Both production paths require
 `verify-full` plus the reviewed `NODE_EXTRA_CA_CERTS` bundle. Unscoped
 `DATABASE_URL` remains only as a non-production compatibility fallback. The
-production loaders also enforce `crypto_runtime` for runtime and `crypto_admin`
-for migrations to catch a secret wired into the wrong namespace.
-Production direct `REDIS_URL` values must use `rediss://` and include a non-empty
-password; the managed component path continues to require `REDIS_AUTH_TOKEN`.
+production loaders enforce API/worker slot-prefixed login identities and select
+the matching stable `crypto_api_runtime` or `crypto_worker_runtime` session
+role. The one-off migration loader requires `crypto_migration`; it never accepts
+the `crypto_admin` bootstrap identity.
+
+Production direct `REDIS_URL` values must use `rediss://`, include a non-empty
+password, and carry the environment-bound API ACL username. The managed
+component path requires `REDIS_USERNAME` plus `REDIS_PASSWORD` and rejects the
+legacy `REDIS_AUTH_TOKEN`. Worker and migration processes reject every
+`REDIS_*` binding.
 
 Concurrent retention-index migrations use a one-hour statement timeout rather
 than the API's 15-second request-query limit, while a 10-second lock timeout

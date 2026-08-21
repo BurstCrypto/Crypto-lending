@@ -4,6 +4,7 @@ import 'reflect-metadata';
 import { Module } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 
+import { bindExecutableWorkload } from '../config/application-workload';
 import { OutboxModule } from './outbox.module';
 import { OutboxWorker } from './outbox-worker.service';
 
@@ -11,6 +12,7 @@ import { OutboxWorker } from './outbox-worker.service';
 class OutboxWorkerApplicationModule {}
 
 async function main(): Promise<void> {
+  bindExecutableWorkload(process.env, 'worker');
   const application = await NestFactory.createApplicationContext(OutboxWorkerApplicationModule);
   const worker = application.get(OutboxWorker);
   const abortController = new AbortController();

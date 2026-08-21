@@ -15,16 +15,26 @@ Parameters:
   ApplicationVersion:
     Type: String
     AllowedPattern: '^[a-f0-9]{40}$'
+  WorkloadBoundariesTemplateUrl:
+    Type: String
+    MaxLength: 1024
+    AllowedPattern: '^https://[a-z0-9][a-z0-9-]{1,61}[a-z0-9]\.s3\.[a-z0-9-]+\.(?:amazonaws\.com|amazonaws\.com\.cn)/application-workload-boundaries-93273bb3bf26f7d21702da2d4b155132db765ce3f123134341e2762ae521b3f9\.yaml\?versionId=[A-Za-z0-9._~%+-]+$'
+  WorkloadBoundariesTemplateSha256:
+    Type: String
+    AllowedValues: [93273bb3bf26f7d21702da2d4b155132db765ce3f123134341e2762ae521b3f9]
+  WorkloadBoundariesArtifactBindingSha256:
+    Type: String
+    AllowedPattern: '^[a-f0-9]{64}$'
 
   ApiImageUri:
     Type: String
-    AllowedPattern: '^[0-9]{12}\.dkr\.ecr\.[a-z0-9-]+\.(amazonaws\.com|amazonaws\.com\.cn)/crypto-lending-[a-z0-9._/-]*@sha256:[a-f0-9]{64}$'
+    AllowedPattern: '^[0-9]{12}\.dkr\.ecr\.[a-z0-9-]+\.(amazonaws\.com|amazonaws\.com\.cn)/crypto-lending-api@sha256:[a-f0-9]{64}$'
   WebImageUri:
     Type: String
-    AllowedPattern: '^[0-9]{12}\.dkr\.ecr\.[a-z0-9-]+\.(amazonaws\.com|amazonaws\.com\.cn)/crypto-lending-[a-z0-9._/-]*@sha256:[a-f0-9]{64}$'
+    AllowedPattern: '^[0-9]{12}\.dkr\.ecr\.[a-z0-9-]+\.(amazonaws\.com|amazonaws\.com\.cn)/crypto-lending-web@sha256:[a-f0-9]{64}$'
   WorkerImageUri:
     Type: String
-    AllowedPattern: '^[0-9]{12}\.dkr\.ecr\.[a-z0-9-]+\.(amazonaws\.com|amazonaws\.com\.cn)/crypto-lending-[a-z0-9._/-]*@sha256:[a-f0-9]{64}$'
+    AllowedPattern: '^[0-9]{12}\.dkr\.ecr\.[a-z0-9-]+\.(amazonaws\.com|amazonaws\.com\.cn)/crypto-lending-worker@sha256:[a-f0-9]{64}$'
   RdsCaBundlePath:
     Type: String
     Default: /etc/ssl/certs/aws-rds-global-bundle.pem
@@ -83,7 +93,7 @@ Parameters:
   DatabaseName:
     Type: String
     Default: crypto_lending
-    AllowedPattern: '^[A-Za-z][A-Za-z0-9_]{0,62}$'
+    AllowedPattern: '^[a-z][a-z0-9_]{0,62}$'
   DatabaseInstanceClass:
     Type: String
     Default: db.t4g.micro
@@ -112,6 +122,22 @@ Parameters:
     Type: String
     Default: 'false'
     AllowedValues: ['true', 'false']
+  ApiDatabaseCredentialPhase:
+    Type: String
+    Default: A_ONLY
+    AllowedValues: [A_ONLY, BOTH_USE_A, BOTH_USE_B, B_ONLY]
+  WorkerDatabaseCredentialPhase:
+    Type: String
+    Default: A_ONLY
+    AllowedValues: [A_ONLY, BOTH_USE_A, BOTH_USE_B, B_ONLY]
+  RedisCredentialPhase:
+    Type: String
+    Default: A_ONLY
+    AllowedValues: [A_ONLY, BOTH_USE_A, BOTH_USE_B, B_ONLY]
+  RedisOperatorMode:
+    Type: String
+    Default: DISABLED
+    AllowedValues: [DISABLED, ENABLED]
   StatefulBackupRetentionDays:
     Type: Number
     Default: 1
@@ -376,13 +402,6 @@ Resources:
       IpProtocol: tcp
       ToPort: 443
 
-  BackendTaskSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: API and worker tasks
-      VpcId: !Ref Vpc
-      SecurityGroupEgress: [{ CidrIp: 127.0.0.1/32, IpProtocol: '-1' }]
-
   WebTaskSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -399,15 +418,6 @@ Resources:
       IpProtocol: tcp
       ToPort: 3000
 
-  LoadBalancerToApiEgress:
-    Type: AWS::EC2::SecurityGroupEgress
-    Properties:
-      DestinationSecurityGroupId: !Ref BackendTaskSecurityGroup
-      FromPort: 3001
-      GroupId: !Ref LoadBalancerSecurityGroup
-      IpProtocol: tcp
-      ToPort: 3001
-
   LoadBalancerToWebIngress:
     Type: AWS::EC2::SecurityGroupIngress
     Properties:
@@ -417,39 +427,12 @@ Resources:
       SourceSecurityGroupId: !Ref LoadBalancerSecurityGroup
       ToPort: 3000
 
-  LoadBalancerToApiIngress:
-    Type: AWS::EC2::SecurityGroupIngress
-    Properties:
-      FromPort: 3001
-      GroupId: !Ref BackendTaskSecurityGroup
-      IpProtocol: tcp
-      SourceSecurityGroupId: !Ref LoadBalancerSecurityGroup
-      ToPort: 3001
-
   DatabaseSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
       GroupDescription: PostgreSQL ingress only from application tasks
       VpcId: !Ref Vpc
       SecurityGroupEgress: [{ CidrIp: 127.0.0.1/32, IpProtocol: '-1' }]
-
-  TaskToDatabaseEgress:
-    Type: AWS::EC2::SecurityGroupEgress
-    Properties:
-      DestinationSecurityGroupId: !Ref DatabaseSecurityGroup
-      FromPort: 5432
-      GroupId: !Ref BackendTaskSecurityGroup
-      IpProtocol: tcp
-      ToPort: 5432
-
-  TaskToDatabaseIngress:
-    Type: AWS::EC2::SecurityGroupIngress
-    Properties:
-      FromPort: 5432
-      GroupId: !Ref DatabaseSecurityGroup
-      IpProtocol: tcp
-      SourceSecurityGroupId: !Ref BackendTaskSecurityGroup
-      ToPort: 5432
 
   RedisSecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -458,42 +441,6 @@ Resources:
       VpcId: !Ref Vpc
       SecurityGroupEgress: [{ CidrIp: 127.0.0.1/32, IpProtocol: '-1' }]
 
-  TaskToRedisEgress:
-    Type: AWS::EC2::SecurityGroupEgress
-    Properties:
-      DestinationSecurityGroupId: !Ref RedisSecurityGroup
-      FromPort: 6379
-      GroupId: !Ref BackendTaskSecurityGroup
-      IpProtocol: tcp
-      ToPort: 6379
-
-  TaskToRedisIngress:
-    Type: AWS::EC2::SecurityGroupIngress
-    Properties:
-      FromPort: 6379
-      GroupId: !Ref RedisSecurityGroup
-      IpProtocol: tcp
-      SourceSecurityGroupId: !Ref BackendTaskSecurityGroup
-      ToPort: 6379
-
-  BackendTaskDnsUdpEgress:
-    Type: AWS::EC2::SecurityGroupEgress
-    Properties:
-      CidrIp: !Ref VpcCidr
-      FromPort: 53
-      GroupId: !Ref BackendTaskSecurityGroup
-      IpProtocol: udp
-      ToPort: 53
-
-  BackendTaskDnsTcpEgress:
-    Type: AWS::EC2::SecurityGroupEgress
-    Properties:
-      CidrIp: !Ref VpcCidr
-      FromPort: 53
-      GroupId: !Ref BackendTaskSecurityGroup
-      IpProtocol: tcp
-      ToPort: 53
-
   InterfaceEndpointSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Condition: UseVpcEndpoints
@@ -501,26 +448,6 @@ Resources:
       GroupDescription: AWS PrivateLink endpoints reachable only by application tasks
       VpcId: !Ref Vpc
       SecurityGroupEgress: [{ CidrIp: 127.0.0.1/32, IpProtocol: '-1' }]
-
-  BackendTaskToInterfaceEndpointEgress:
-    Type: AWS::EC2::SecurityGroupEgress
-    Condition: UseVpcEndpoints
-    Properties:
-      DestinationSecurityGroupId: !Ref InterfaceEndpointSecurityGroup
-      FromPort: 443
-      GroupId: !Ref BackendTaskSecurityGroup
-      IpProtocol: tcp
-      ToPort: 443
-
-  BackendTaskToInterfaceEndpointIngress:
-    Type: AWS::EC2::SecurityGroupIngress
-    Condition: UseVpcEndpoints
-    Properties:
-      FromPort: 443
-      GroupId: !Ref InterfaceEndpointSecurityGroup
-      IpProtocol: tcp
-      SourceSecurityGroupId: !Ref BackendTaskSecurityGroup
-      ToPort: 443
 
   WebTaskDnsUdpEgress:
     Type: AWS::EC2::SecurityGroupEgress
@@ -648,16 +575,6 @@ Resources:
       VpcEndpointType: Gateway
       VpcId: !Ref Vpc
 
-  BackendTaskToS3Egress:
-    Type: AWS::EC2::SecurityGroupEgress
-    Condition: UseVpcEndpoints
-    Properties:
-      DestinationPrefixListId: !Ref S3ManagedPrefixListId
-      FromPort: 443
-      GroupId: !Ref BackendTaskSecurityGroup
-      IpProtocol: tcp
-      ToPort: 443
-
   WebTaskToS3Egress:
     Type: AWS::EC2::SecurityGroupEgress
     Condition: UseVpcEndpoints
@@ -695,30 +612,6 @@ Resources:
         IncludeSpace: false
         PasswordLength: 48
         SecretStringTemplate: '{"username":"crypto_admin"}'
-      KmsKeyId: !GetAtt ApplicationDataKey.Arn
-
-  DatabaseRuntimeSecret:
-    Type: AWS::SecretsManager::Secret
-    DeletionPolicy: Retain
-    UpdateReplacePolicy: Retain
-    Properties:
-      GenerateSecretString:
-        GenerateStringKey: password
-        PasswordLength: 48
-        SecretStringTemplate: '{"username":"crypto_runtime"}'
-      KmsKeyId: !GetAtt ApplicationDataKey.Arn
-
-  RedisAuthSecret:
-    Type: AWS::SecretsManager::Secret
-    DeletionPolicy: Retain
-    UpdateReplacePolicy: Retain
-    Properties:
-      GenerateSecretString:
-        ExcludePunctuation: true
-        GenerateStringKey: authToken
-        IncludeSpace: false
-        PasswordLength: 48
-        SecretStringTemplate: '{"purpose":"redis-auth"}'
       KmsKeyId: !GetAtt ApplicationDataKey.Arn
 
   DatabaseParameterGroup:
@@ -767,7 +660,6 @@ Resources:
     UpdateReplacePolicy: Snapshot
     Properties:
       AtRestEncryptionEnabled: true
-      AuthToken: !Sub '{{resolve:secretsmanager:${RedisAuthSecret}:SecretString:authToken}}'
       AutomaticFailoverEnabled: !If [UseRedisReplica, true, false]
       AutoMinorVersionUpgrade: true
       CacheNodeType: !Ref RedisNodeType
@@ -787,6 +679,8 @@ Resources:
       SnapshotWindow: 06:00-07:00
       TransitEncryptionEnabled: true
       TransitEncryptionMode: required
+      UserGroupIds:
+        - !GetAtt WorkloadBoundaries.Outputs.RedisApiUserGroupId
 
   JobDeadLetterQueue:
     Type: AWS::SQS::Queue
@@ -854,6 +748,40 @@ Resources:
       LogGroupName: !Sub /crypto-lending/${EnvironmentName}/outbox-worker
       RetentionInDays: !Ref LogRetentionDays
 
+  WorkloadBoundaries:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Ref WorkloadBoundariesTemplateUrl
+      TimeoutInMinutes: 10
+      Parameters:
+        BillingAcknowledgement: !Ref BillingAcknowledgement
+        DeliveryArtifactSha256: !Ref WorkloadBoundariesTemplateSha256
+        DeliveryArtifactBindingSha256: !Ref WorkloadBoundariesArtifactBindingSha256
+        EnvironmentName: !Ref EnvironmentName
+        DatabaseName: !Ref DatabaseName
+        VpcId: !Ref Vpc
+        LoadBalancerSecurityGroupId: !Ref LoadBalancerSecurityGroup
+        DatabaseSecurityGroupId: !Ref DatabaseSecurityGroup
+        RedisSecurityGroupId: !Ref RedisSecurityGroup
+        PrivateEgressMode: !Ref PrivateEgressMode
+        InterfaceEndpointSecurityGroupId:
+          !If [UseVpcEndpoints, !Ref InterfaceEndpointSecurityGroup, '']
+        S3ManagedPrefixListId: !If [UseVpcEndpoints, !Ref S3ManagedPrefixListId, '']
+        ApplicationDataKeyArn: !GetAtt ApplicationDataKey.Arn
+        ApiLogGroupArn: !GetAtt ApiLogGroup.Arn
+        WorkerLogGroupArn: !GetAtt WorkerLogGroup.Arn
+        ApiImageRepositoryArn: !Sub arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/crypto-lending-api
+        WorkerImageRepositoryArn: !Sub arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/crypto-lending-worker
+        ApiDatabaseCredentialPhase: !Ref ApiDatabaseCredentialPhase
+        WorkerDatabaseCredentialPhase: !Ref WorkerDatabaseCredentialPhase
+        RedisCredentialPhase: !Ref RedisCredentialPhase
+        RedisOperatorMode: !Ref RedisOperatorMode
+      Tags:
+        - Key: WorkloadBoundariesTemplateSha256
+          Value: !Ref WorkloadBoundariesTemplateSha256
+        - Key: WorkloadBoundariesArtifactBindingSha256
+          Value: !Ref WorkloadBoundariesArtifactBindingSha256
+
   ApplicationImagePullPolicy:
     Type: AWS::IAM::ManagedPolicy
     Properties:
@@ -868,57 +796,7 @@ Resources:
               - ecr:BatchCheckLayerAvailability
               - ecr:BatchGetImage
               - ecr:GetDownloadUrlForLayer
-            Resource: !Sub arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/crypto-lending-*
-
-  BackendTaskExecutionRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: ecs-tasks.amazonaws.com
-            Action: sts:AssumeRole
-            Condition:
-              StringEquals: { aws:SourceAccount: !Ref AWS::AccountId }
-              ArnLike:
-                {
-                  aws:SourceArn: !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:*',
-                }
-      ManagedPolicyArns:
-        - !Ref ApplicationImagePullPolicy
-      Policies:
-        - PolicyName: WriteBackendLogs
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - logs:CreateLogStream
-                  - logs:PutLogEvents
-                Resource:
-                  - !Sub ${ApiLogGroup.Arn}:*
-                  - !Sub ${WorkerLogGroup.Arn}:*
-        - PolicyName: RuntimeSecrets
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Sid: NamedSecrets
-                Effect: Allow
-                Action:
-                  - secretsmanager:GetSecretValue
-                Resource:
-                  - !Ref DatabaseRuntimeSecret
-                  - !Ref RedisAuthSecret
-              - Sid: DecryptSecrets
-                Effect: Allow
-                Action:
-                  - kms:Decrypt
-                Resource: !GetAtt ApplicationDataKey.Arn
-                Condition:
-                  StringEquals:
-                    kms:ViaService: !Sub secretsmanager.${AWS::Region}.${AWS::URLSuffix}
+            Resource: !Sub arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/crypto-lending-web
 
   WebTaskExecutionRole:
     Type: AWS::IAM::Role
@@ -1198,17 +1076,25 @@ Resources:
           Image: !Ref ApiImageUri
           Environment:
             - { Name: NODE_ENV, Value: production }
+            - { Name: APP_ENV, Value: !Ref EnvironmentName }
+            - { Name: APPLICATION_WORKLOAD, Value: api }
             - { Name: PORT, Value: '3001' }
             - { Name: DATABASE_RUNTIME_HOST, Value: !GetAtt Database.Endpoint.Address }
             - { Name: DATABASE_RUNTIME_PORT, Value: !GetAtt Database.Endpoint.Port }
             - { Name: DATABASE_RUNTIME_NAME, Value: !Ref DatabaseName }
-            - { Name: DATABASE_RUNTIME_USERNAME, Value: crypto_runtime }
+            - {
+                Name: DATABASE_RUNTIME_USERNAME,
+                Value: !GetAtt WorkloadBoundaries.Outputs.ApiDatabaseActiveUsername,
+              }
             - { Name: DATABASE_RUNTIME_SSL_MODE, Value: verify-full }
             - { Name: NODE_EXTRA_CA_CERTS, Value: !Ref RdsCaBundlePath }
             - { Name: REDIS_HOST, Value: !GetAtt RedisReplicationGroup.PrimaryEndPoint.Address }
             - { Name: REDIS_PORT, Value: !GetAtt RedisReplicationGroup.PrimaryEndPoint.Port }
             - { Name: REDIS_TLS, Value: 'true' }
-            - { Name: REDIS_KEY_PREFIX, Value: !Sub 'crypto-lending:${EnvironmentName}:v1:' }
+            - {
+                Name: REDIS_USERNAME,
+                Value: !GetAtt WorkloadBoundaries.Outputs.RedisActiveUsername,
+              }
             - { Name: AWS_REGION, Value: !Ref AWS::Region }
             - { Name: SQS_QUEUE_URL, Value: !Ref JobQueue }
             - { Name: SQS_DEAD_LETTER_QUEUE_URL, Value: !Ref JobDeadLetterQueue }
@@ -1216,8 +1102,9 @@ Resources:
             - { Name: SQS_VISIBILITY_TIMEOUT_SECONDS, Value: !Ref SqsVisibilityTimeoutSeconds }
           Secrets:
             - Name: DATABASE_RUNTIME_PASSWORD
-              ValueFrom: !Sub '${DatabaseRuntimeSecret}:password::'
-            - { Name: REDIS_AUTH_TOKEN, ValueFrom: !Sub '${RedisAuthSecret}:authToken::' }
+              ValueFrom: !Sub '${WorkloadBoundaries.Outputs.ApiDatabaseActiveSecretArn}:password::'
+            - Name: REDIS_PASSWORD
+              ValueFrom: !Sub '${WorkloadBoundaries.Outputs.RedisActiveSecretArn}:password::'
           LinuxParameters:
             Capabilities: { Drop: [ALL] }
             InitProcessEnabled: true
@@ -1233,7 +1120,7 @@ Resources:
           StopTimeout: 30
           User: '10001:10001'
       Cpu: '256'
-      ExecutionRoleArn: !GetAtt BackendTaskExecutionRole.Arn
+      ExecutionRoleArn: !GetAtt WorkloadBoundaries.Outputs.ApiTaskExecutionRoleArn
       Family: !Sub crypto-lending-${EnvironmentName}-api
       Memory: '512'
       NetworkMode: awsvpc
@@ -1295,16 +1182,17 @@ Resources:
             Timeout: 10
           Environment:
             - { Name: NODE_ENV, Value: production }
+            - { Name: APP_ENV, Value: !Ref EnvironmentName }
+            - { Name: APPLICATION_WORKLOAD, Value: worker }
             - { Name: DATABASE_RUNTIME_HOST, Value: !GetAtt Database.Endpoint.Address }
             - { Name: DATABASE_RUNTIME_PORT, Value: !GetAtt Database.Endpoint.Port }
             - { Name: DATABASE_RUNTIME_NAME, Value: !Ref DatabaseName }
-            - { Name: DATABASE_RUNTIME_USERNAME, Value: crypto_runtime }
+            - {
+                Name: DATABASE_RUNTIME_USERNAME,
+                Value: !GetAtt WorkloadBoundaries.Outputs.WorkerDatabaseActiveUsername,
+              }
             - { Name: DATABASE_RUNTIME_SSL_MODE, Value: verify-full }
             - { Name: NODE_EXTRA_CA_CERTS, Value: !Ref RdsCaBundlePath }
-            - { Name: REDIS_HOST, Value: !GetAtt RedisReplicationGroup.PrimaryEndPoint.Address }
-            - { Name: REDIS_PORT, Value: !GetAtt RedisReplicationGroup.PrimaryEndPoint.Port }
-            - { Name: REDIS_TLS, Value: 'true' }
-            - { Name: REDIS_KEY_PREFIX, Value: !Sub 'crypto-lending:${EnvironmentName}:v1:' }
             - { Name: AWS_REGION, Value: !Ref AWS::Region }
             - { Name: SQS_QUEUE_URL, Value: !Ref JobQueue }
             - { Name: SQS_DEAD_LETTER_QUEUE_URL, Value: !Ref JobDeadLetterQueue }
@@ -1312,8 +1200,7 @@ Resources:
             - { Name: SQS_VISIBILITY_TIMEOUT_SECONDS, Value: !Ref SqsVisibilityTimeoutSeconds }
           Secrets:
             - Name: DATABASE_RUNTIME_PASSWORD
-              ValueFrom: !Sub '${DatabaseRuntimeSecret}:password::'
-            - { Name: REDIS_AUTH_TOKEN, ValueFrom: !Sub '${RedisAuthSecret}:authToken::' }
+              ValueFrom: !Sub '${WorkloadBoundaries.Outputs.WorkerDatabaseActiveSecretArn}:password::'
           LinuxParameters:
             Capabilities: { Drop: [ALL] }
             InitProcessEnabled: true
@@ -1328,7 +1215,7 @@ Resources:
           StopTimeout: 30
           User: '10001:10001'
       Cpu: '256'
-      ExecutionRoleArn: !GetAtt BackendTaskExecutionRole.Arn
+      ExecutionRoleArn: !GetAtt WorkloadBoundaries.Outputs.WorkerTaskExecutionRoleArn
       Family: !Sub crypto-lending-${EnvironmentName}-outbox-worker
       Memory: '512'
       NetworkMode: awsvpc
@@ -1363,7 +1250,7 @@ Resources:
         AwsvpcConfiguration:
           AssignPublicIp: DISABLED
           SecurityGroups:
-            - !Ref BackendTaskSecurityGroup
+            - !GetAtt WorkloadBoundaries.Outputs.ApiTaskSecurityGroupId
           Subnets:
             - !Ref PrivateSubnetA
             - !Ref PrivateSubnetB
@@ -1424,7 +1311,7 @@ Resources:
         AwsvpcConfiguration:
           AssignPublicIp: DISABLED
           SecurityGroups:
-            - !Ref BackendTaskSecurityGroup
+            - !GetAtt WorkloadBoundaries.Outputs.WorkerTaskSecurityGroupId
           Subnets:
             - !Ref PrivateSubnetA
             - !Ref PrivateSubnetB
@@ -1536,6 +1423,10 @@ Resources:
         "QueueName","${JobQueue.QueueName}"],[".",".",".","${JobDeadLetterQueue.QueueName}"]]}}]}
 
 Outputs:
+  WorkloadBoundariesTemplateSha256:
+    Value: !GetAtt WorkloadBoundaries.Outputs.DeliveryArtifactSha256
+  WorkloadBoundariesArtifactBindingSha256:
+    Value: !GetAtt WorkloadBoundaries.Outputs.DeliveryArtifactBindingSha256
   BillingNotice:
     Value: This stack contains billable AWS resources; review AWS Pricing before deployment.
   ApplicationUrl:
@@ -1560,8 +1451,10 @@ Outputs:
     Value: !GetAtt EcsCluster.Arn
   ApiTaskDefinitionArn:
     Value: !Ref ApiTaskDefinition
-  BackendTaskSecurityGroupId:
-    Value: !Ref BackendTaskSecurityGroup
+  ApiTaskSecurityGroupId:
+    Value: !GetAtt WorkloadBoundaries.Outputs.ApiTaskSecurityGroupId
+  WorkerTaskSecurityGroupId:
+    Value: !GetAtt WorkloadBoundaries.Outputs.WorkerTaskSecurityGroupId
   ApiServiceArn:
     Value: !Ref ApiService
   WebServiceArn:
@@ -1574,14 +1467,20 @@ Outputs:
     Value: !GetAtt Database.Endpoint.Port
   DatabaseCredentialsSecretArn:
     Value: !Ref DatabaseCredentialsSecret
-  DatabaseRuntimeSecretArn:
-    Value: !Ref DatabaseRuntimeSecret
+  ApiDatabaseActiveSecretArn:
+    Value: !GetAtt WorkloadBoundaries.Outputs.ApiDatabaseActiveSecretArn
+  WorkerDatabaseActiveSecretArn:
+    Value: !GetAtt WorkloadBoundaries.Outputs.WorkerDatabaseActiveSecretArn
+  MigrationDatabaseCredentialSecretArn:
+    Value: !GetAtt WorkloadBoundaries.Outputs.MigrationDatabaseCredentialSecretArn
   RedisPrimaryEndpointAddress:
     Value: !GetAtt RedisReplicationGroup.PrimaryEndPoint.Address
   RedisPrimaryEndpointPort:
     Value: !GetAtt RedisReplicationGroup.PrimaryEndPoint.Port
-  RedisAuthSecretArn:
-    Value: !Ref RedisAuthSecret
+  RedisActiveSecretArn:
+    Value: !GetAtt WorkloadBoundaries.Outputs.RedisActiveSecretArn
+  RedisApiUserGroupId:
+    Value: !GetAtt WorkloadBoundaries.Outputs.RedisApiUserGroupId
   JobQueueUrl:
     Value: !Ref JobQueue
   JobQueueArn:

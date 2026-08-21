@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { rootCertificates } from 'node:tls';
 
-import { loadInfrastructureConfig } from './infrastructure.config';
+import { loadInfrastructureConfig, loadMigrationDatabaseConfig } from './infrastructure.config';
 
 const temporaryDirectory = mkdtempSync(join(tmpdir(), 'kan-34-rds-ca-'));
 const validCaPath = join(temporaryDirectory, 'rds-ca.pem');
@@ -23,15 +23,18 @@ function baseEnvironment(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
   return {
     NODE_ENV: nodeEnvironment,
     ...(production
-      ? { AWS_CONTAINER_CREDENTIALS_RELATIVE_URI: '/v2/credentials/test-task-role' }
+      ? {
+          APP_ENV: 'test',
+          APPLICATION_WORKLOAD: 'api',
+          AWS_CONTAINER_CREDENTIALS_RELATIVE_URI: '/v2/credentials/test-task-role',
+        }
       : {}),
-    DATABASE_RUNTIME_URL: `postgresql://${production ? 'crypto_runtime' : 'local'}:local@127.0.0.1:5432/crypto_lending`,
+    DATABASE_RUNTIME_URL: `postgresql://${production ? 'crypto_api_login_a' : 'local'}:local@127.0.0.1:5432/crypto_lending`,
     DATABASE_RUNTIME_SSL_MODE: 'disable',
     ...(production ? { NODE_EXTRA_CA_CERTS: validCaPath } : {}),
     REDIS_URL: production
-      ? 'rediss://:not-exported@cache.internal.example:6379'
+      ? 'rediss://crypto_api_test_a:not-exported@cache.internal.example:6379'
       : 'redis://127.0.0.1:6379',
-    REDIS_KEY_PREFIX: 'crypto-lending:test:v1:',
     AWS_REGION: 'us-east-1',
     SQS_QUEUE_URL: production
       ? 'https://sqs.us-east-1.amazonaws.com/000000000000/crypto-lending-jobs'
@@ -52,8 +55,86 @@ describe('loadInfrastructureConfig', () => {
     expect(config.database.connectionString).toBe(
       'postgresql://local:local@127.0.0.1:5432/crypto_lending',
     );
-    expect(config.redis.url).toBe('redis://127.0.0.1:6379');
+    expect(config.database.sessionRole).toBe('crypto_api_runtime');
+    expect(config.redis?.url).toBe('redis://127.0.0.1:6379');
     expect(config.sqs.endpoint).toBe('http://127.0.0.1:4566');
+  });
+
+  it('requires one exact workload discriminator in production', () => {
+    expect(() =>
+      loadInfrastructureConfig(
+        baseEnvironment({ NODE_ENV: 'production', APPLICATION_WORKLOAD: undefined }),
+      ),
+    ).toThrow('Production runtime requires APPLICATION_WORKLOAD=api or worker');
+    expect(() =>
+      loadInfrastructureConfig(
+        baseEnvironment({ NODE_ENV: 'production', APPLICATION_WORKLOAD: 'api-worker' }),
+      ),
+    ).toThrow('APPLICATION_WORKLOAD must be exactly api or worker');
+  });
+
+  it('requires a canonical APP_ENV identity scope in production', () => {
+    expect(() =>
+      loadInfrastructureConfig(baseEnvironment({ NODE_ENV: 'production', APP_ENV: undefined })),
+    ).toThrow('Production runtime requires APP_ENV');
+    expect(() =>
+      loadInfrastructureConfig(baseEnvironment({ NODE_ENV: 'production', APP_ENV: 'Test West' })),
+    ).toThrow('APP_ENV must be a canonical reviewed environment name');
+  });
+
+  it('omits Redis entirely for a production worker identity', () => {
+    const config = loadInfrastructureConfig(
+      baseEnvironment({
+        NODE_ENV: 'production',
+        APPLICATION_WORKLOAD: 'worker',
+        DATABASE_RUNTIME_URL:
+          'postgresql://crypto_worker_login_a:local@127.0.0.1:5432/crypto_lending',
+        DATABASE_RUNTIME_SSL_MODE: 'verify-full',
+        REDIS_URL: undefined,
+      }),
+    );
+
+    expect(config.workload).toBe('worker');
+    expect(config.database.sessionRole).toBe('crypto_worker_runtime');
+    expect(config.redis).toBeUndefined();
+  });
+
+  it('rejects every Redis setting injected into a production worker', () => {
+    expect(() =>
+      loadInfrastructureConfig(
+        baseEnvironment({
+          NODE_ENV: 'production',
+          APPLICATION_WORKLOAD: 'worker',
+          DATABASE_RUNTIME_URL:
+            'postgresql://crypto_worker_login_a:local@127.0.0.1:5432/crypto_lending',
+          DATABASE_RUNTIME_SSL_MODE: 'verify-full',
+        }),
+      ),
+    ).toThrow('Production worker must not receive Redis configuration or credentials');
+  });
+
+  it('rejects unknown Redis aliases injected into a production worker', () => {
+    expect(() =>
+      loadInfrastructureConfig(
+        baseEnvironment({
+          NODE_ENV: 'production',
+          APPLICATION_WORKLOAD: 'worker',
+          DATABASE_RUNTIME_URL:
+            'postgresql://crypto_worker_login_a:local@127.0.0.1:5432/crypto_lending',
+          DATABASE_RUNTIME_SSL_MODE: 'verify-full',
+          REDIS_URL: undefined,
+          REDIS_OPERATOR_TOKEN: 'must-not-be-injected',
+        }),
+      ),
+    ).toThrow('Production worker must not receive Redis configuration or credentials');
+  });
+
+  it('rejects unknown Redis aliases injected into a production API', () => {
+    expect(() =>
+      loadInfrastructureConfig(
+        baseEnvironment({ NODE_ENV: 'production', REDIS_PASSWORD_BACKUP: 'must-not-be-injected' }),
+      ),
+    ).toThrow('Production API must not receive an unreviewed REDIS_* environment variable');
   });
 
   it('retains the legacy database URL only for local compatibility', () => {
@@ -62,7 +143,19 @@ describe('loadInfrastructureConfig', () => {
     env.DATABASE_SSL_MODE = 'disable';
     env.DATABASE_RUNTIME_SSL_MODE = undefined;
 
-    expect(loadInfrastructureConfig(env).database.connectionString).toBe(env.DATABASE_URL);
+    const database = loadInfrastructureConfig(env).database;
+    expect(database.connectionString).toBe(env.DATABASE_URL);
+    expect(database.sessionRole).toBeUndefined();
+  });
+
+  it('activates the schema-owner role for explicitly scoped local migrations', () => {
+    const migration = loadMigrationDatabaseConfig({
+      NODE_ENV: 'test',
+      MIGRATION_DATABASE_URL: 'postgresql://crypto_migration:local@127.0.0.1:5432/crypto_lending',
+      MIGRATION_DATABASE_SSL_MODE: 'disable',
+    });
+
+    expect(migration.sessionRole).toBe('crypto_schema_owner');
   });
 
   it('applies bounded PostgreSQL pool lifecycle defaults', () => {
@@ -134,7 +227,9 @@ describe('loadInfrastructureConfig', () => {
       REDIS_URL: undefined,
       REDIS_HOST: 'cache.internal.example',
       REDIS_PORT: '6379',
-      REDIS_AUTH_TOKEN: 'token with:/reserved@characters',
+      REDIS_TLS: 'true',
+      REDIS_USERNAME: 'local_api',
+      REDIS_PASSWORD: 'token with:/reserved@characters',
     });
 
     const config = loadInfrastructureConfig(env);
@@ -146,8 +241,8 @@ describe('loadInfrastructureConfig', () => {
       rejectUnauthorized: true,
       ca: validCa,
     });
-    expect(config.redis.url).toBe(
-      'rediss://:token%20with%3A%2Freserved%40characters@cache.internal.example:6379',
+    expect(config.redis?.url).toBe(
+      'rediss://local_api:token%20with%3A%2Freserved%40characters@cache.internal.example:6379',
     );
   });
 
@@ -159,7 +254,7 @@ describe('loadInfrastructureConfig', () => {
 
   it('rejects ambiguous Redis configuration', () => {
     expect(() =>
-      loadInfrastructureConfig(baseEnvironment({ REDIS_AUTH_TOKEN: 'not-exported' })),
+      loadInfrastructureConfig(baseEnvironment({ REDIS_PASSWORD: 'not-exported' })),
     ).toThrow('Configure REDIS_URL or the REDIS_* connection components, but not both');
   });
 
@@ -253,7 +348,7 @@ describe('loadInfrastructureConfig', () => {
           REDIS_URL: undefined,
           REDIS_HOST: 'cache.internal.example/path',
           REDIS_PORT: '70000',
-          REDIS_AUTH_TOKEN: 'not-exported',
+          REDIS_PASSWORD: 'not-exported',
         }),
       ),
     ).toThrow('REDIS_HOST must be a DNS hostname');
@@ -267,7 +362,7 @@ describe('loadInfrastructureConfig', () => {
           baseEnvironment({
             NODE_ENV: 'production',
             DATABASE_RUNTIME_SSL_MODE: databaseSslMode,
-            REDIS_URL: 'rediss://:not-exported@cache.internal.example:6379',
+            REDIS_URL: 'rediss://crypto_api_test_a:not-exported@cache.internal.example:6379',
           }),
         ),
       ).toThrow('Production DATABASE_RUNTIME_URL requires DATABASE_RUNTIME_SSL_MODE=verify-full');
@@ -307,7 +402,27 @@ describe('loadInfrastructureConfig', () => {
             'postgresql://migration:secret@db.internal.example:5432/crypto_lending',
         }),
       ),
-    ).toThrow('Production runtime must not receive MIGRATION_DATABASE_* connection variables');
+    ).toThrow('Production runtime must not receive any MIGRATION_DATABASE_* variable');
+  });
+
+  it('rejects unknown migration and privileged database aliases in production runtime', () => {
+    expect(() =>
+      loadInfrastructureConfig(
+        baseEnvironment({
+          NODE_ENV: 'production',
+          MIGRATION_DATABASE_PASSWORD_BACKUP: 'must-not-be-injected',
+        }),
+      ),
+    ).toThrow('Production runtime must not receive any MIGRATION_DATABASE_* variable');
+
+    expect(() =>
+      loadInfrastructureConfig(
+        baseEnvironment({
+          NODE_ENV: 'production',
+          DATABASE_MASTER_PASSWORD: 'must-not-be-injected',
+        }),
+      ),
+    ).toThrow('Production runtime must not receive database bootstrap, master, or admin variables');
   });
 
   it('rejects a migration/admin identity disguised as a production runtime URL', () => {
@@ -316,22 +431,22 @@ describe('loadInfrastructureConfig', () => {
         baseEnvironment({
           NODE_ENV: 'production',
           DATABASE_RUNTIME_URL:
-            'postgresql://crypto_admin:secret@db.internal.example:5432/crypto_lending',
+            'postgresql://crypto_worker_login_a:secret@db.internal.example:5432/crypto_lending',
           DATABASE_RUNTIME_SSL_MODE: 'verify-full',
         }),
       ),
-    ).toThrow('must contain the reviewed crypto_runtime username and a password');
+    ).toThrow('must contain the reviewed crypto_api_login_<rotation-id> username and a password');
 
     expect(() =>
       loadInfrastructureConfig(
         baseEnvironment({
           NODE_ENV: 'production',
           DATABASE_RUNTIME_URL:
-            'postgresql://crypto_runtime@db.internal.example:5432/crypto_lending',
+            'postgresql://crypto_api_login_a@db.internal.example:5432/crypto_lending',
           DATABASE_RUNTIME_SSL_MODE: 'verify-full',
         }),
       ),
-    ).toThrow('must contain the reviewed crypto_runtime username and a password');
+    ).toThrow('must contain the reviewed crypto_api_login_<rotation-id> username and a password');
   });
 
   it('requires the reviewed username for production runtime components', () => {
@@ -343,13 +458,13 @@ describe('loadInfrastructureConfig', () => {
           DATABASE_RUNTIME_HOST: 'db.internal.example',
           DATABASE_RUNTIME_PORT: '5432',
           DATABASE_RUNTIME_NAME: 'crypto_lending',
-          DATABASE_RUNTIME_USERNAME: 'crypto_admin',
+          DATABASE_RUNTIME_USERNAME: 'crypto_worker_login_a',
           DATABASE_RUNTIME_PASSWORD: 'secret',
           DATABASE_RUNTIME_SSL_MODE: 'verify-full',
           NODE_EXTRA_CA_CERTS: validCaPath,
         }),
       ),
-    ).toThrow('Production DATABASE_RUNTIME_USERNAME must equal crypto_runtime');
+    ).toThrow('Production DATABASE_RUNTIME_USERNAME must match crypto_api_login_<rotation-id>');
   });
 
   it('rejects a production DATABASE_RUNTIME_URL query that downgrades verified TLS', () => {
@@ -360,7 +475,7 @@ describe('loadInfrastructureConfig', () => {
           DATABASE_RUNTIME_URL:
             'postgresql://service:secret@db.internal.example:5432/crypto_lending?sslmode=verify-full&sslmode=require',
           DATABASE_RUNTIME_SSL_MODE: 'verify-full',
-          REDIS_URL: 'rediss://:not-exported@cache.internal.example:6379',
+          REDIS_URL: 'rediss://crypto_api_test_a:not-exported@cache.internal.example:6379',
         }),
       ),
     ).toThrow('Production DATABASE_RUNTIME_URL cannot override sslmode below verify-full');
@@ -374,7 +489,7 @@ describe('loadInfrastructureConfig', () => {
           DATABASE_RUNTIME_URL:
             'postgresql://service:secret@db.internal.example:5432/crypto_lending?ssl=0',
           DATABASE_RUNTIME_SSL_MODE: 'verify-full',
-          REDIS_URL: 'rediss://:not-exported@cache.internal.example:6379',
+          REDIS_URL: 'rediss://crypto_api_test_a:not-exported@cache.internal.example:6379',
         }),
       ),
     ).toThrow('Production DATABASE_RUNTIME_URL cannot contain connection parameter ssl');
@@ -434,7 +549,7 @@ describe('loadInfrastructureConfig', () => {
         baseEnvironment({
           NODE_ENV: 'production',
           DATABASE_RUNTIME_SSL_MODE: 'verify-full',
-          REDIS_URL: 'rediss://:not-exported@cache.internal.example:6379#',
+          REDIS_URL: 'rediss://crypto_api_test_a:not-exported@cache.internal.example:6379#',
         }),
       ),
     ).toThrow('Production REDIS_URL must not contain a query or fragment');
@@ -461,6 +576,149 @@ describe('loadInfrastructureConfig', () => {
     ).toThrow('Production REDIS_URL must use rediss://');
   });
 
+  it('rejects a global TLS verification override for the production API', () => {
+    expect(() =>
+      loadInfrastructureConfig(
+        baseEnvironment({
+          NODE_ENV: 'production',
+          DATABASE_RUNTIME_SSL_MODE: 'verify-full',
+          NODE_TLS_REJECT_UNAUTHORIZED: '0',
+        }),
+      ),
+    ).toThrow(
+      'Production processes must not set NODE_TLS_REJECT_UNAUTHORIZED; certificate verification is pinned',
+    );
+  });
+
+  it('rejects a global TLS verification override for the production worker', () => {
+    expect(() =>
+      loadInfrastructureConfig(
+        baseEnvironment({
+          NODE_ENV: 'production',
+          APPLICATION_WORKLOAD: 'worker',
+          DATABASE_RUNTIME_URL:
+            'postgresql://crypto_worker_login_a:secret@db.internal.example:5432/crypto_lending',
+          DATABASE_RUNTIME_SSL_MODE: 'verify-full',
+          NODE_TLS_REJECT_UNAUTHORIZED: '0',
+          REDIS_URL: undefined,
+        }),
+      ),
+    ).toThrow(
+      'Production processes must not set NODE_TLS_REJECT_UNAUTHORIZED; certificate verification is pinned',
+    );
+  });
+
+  it.each(['crypto_api_test_a', 'crypto_api_test_b'])(
+    'accepts the reviewed production API Redis rotation slot %s',
+    (username) => {
+      const config = loadInfrastructureConfig(
+        baseEnvironment({
+          NODE_ENV: 'production',
+          DATABASE_RUNTIME_SSL_MODE: 'verify-full',
+          REDIS_URL: `rediss://${username}:not-exported@cache.internal.example:6379`,
+        }),
+      );
+
+      expect(config.redis?.username).toBe(username);
+    },
+  );
+
+  it.each(['default', 'crypto_api_staging_a', 'crypto_worker_test_a', 'crypto_api_test_c'])(
+    'rejects the cross-scope or malformed production Redis username %s',
+    (username) => {
+      expect(() =>
+        loadInfrastructureConfig(
+          baseEnvironment({
+            NODE_ENV: 'production',
+            REDIS_URL: `rediss://${username}:not-exported@cache.internal.example:6379`,
+          }),
+        ),
+      ).toThrow('Production API Redis username must match the active APP_ENV slot');
+    },
+  );
+
+  it('requires TLS and a scoped username for managed production Redis components', () => {
+    const components = {
+      NODE_ENV: 'production',
+      DATABASE_RUNTIME_SSL_MODE: 'verify-full',
+      REDIS_URL: undefined,
+      REDIS_HOST: 'cache.internal.example',
+      REDIS_PORT: '6379',
+      REDIS_USERNAME: 'crypto_api_test_a',
+      REDIS_PASSWORD: 'not-exported',
+    };
+    expect(() => loadInfrastructureConfig(baseEnvironment(components))).toThrow(
+      'Production managed Redis components require REDIS_TLS=true',
+    );
+    expect(() =>
+      loadInfrastructureConfig(baseEnvironment({ ...components, REDIS_TLS: 'false' })),
+    ).toThrow('Production managed Redis components require REDIS_TLS=true');
+
+    const config = loadInfrastructureConfig(baseEnvironment({ ...components, REDIS_TLS: 'true' }));
+    expect(config.redis).toMatchObject({
+      username: 'crypto_api_test_a',
+      url: 'rediss://crypto_api_test_a:not-exported@cache.internal.example:6379',
+    });
+  });
+
+  it('pins managed production Redis components to the reviewed port', () => {
+    expect(() =>
+      loadInfrastructureConfig(
+        baseEnvironment({
+          NODE_ENV: 'production',
+          DATABASE_RUNTIME_SSL_MODE: 'verify-full',
+          REDIS_URL: undefined,
+          REDIS_HOST: 'cache.internal.example',
+          REDIS_PORT: '6380',
+          REDIS_TLS: 'true',
+          REDIS_USERNAME: 'crypto_api_test_a',
+          REDIS_PASSWORD: 'not-exported',
+        }),
+      ),
+    ).toThrow('Production managed Redis components must use the reviewed port 6379');
+  });
+
+  it('rejects the legacy shared Redis token variable in production', () => {
+    expect(() =>
+      loadInfrastructureConfig(
+        baseEnvironment({
+          NODE_ENV: 'production',
+          DATABASE_RUNTIME_SSL_MODE: 'verify-full',
+          REDIS_AUTH_TOKEN: 'not-exported',
+        }),
+      ),
+    ).toThrow('Production API must use REDIS_PASSWORD; REDIS_AUTH_TOKEN is forbidden');
+  });
+
+  it.each([
+    'rediss://crypto_api_test_a:not-exported@cache.internal.example',
+    'rediss://crypto_api_test_a:not-exported@cache.internal.example:6380',
+    'rediss://crypto_api_test_a:not-exported@cache.internal.example:6379/1',
+    'rediss://crypto_api_test_a:not-exported@cache.internal.example:6379/cache',
+  ])('rejects a noncanonical production Redis database or port: %s', (redisUrl) => {
+    expect(() =>
+      loadInfrastructureConfig(
+        baseEnvironment({
+          NODE_ENV: 'production',
+          DATABASE_RUNTIME_SSL_MODE: 'verify-full',
+          REDIS_URL: redisUrl,
+        }),
+      ),
+    ).toThrow('Production REDIS_URL must use database 0 and the reviewed port 6379');
+  });
+
+  it('rejects the obsolete key-prefix variable in production health-only Redis config', () => {
+    expect(() =>
+      loadInfrastructureConfig(
+        baseEnvironment({
+          NODE_ENV: 'production',
+          DATABASE_RUNTIME_SSL_MODE: 'verify-full',
+          REDIS_KEY_PREFIX: 'crypto-lending:test:api:v1:',
+        }),
+      ),
+    ).toThrow('Production API must not receive REDIS_KEY_PREFIX; Redis is health-only');
+  });
+
   it.each([
     'rediss://cache.internal.example:6379',
     'rediss://:@cache.internal.example:6379',
@@ -484,17 +742,19 @@ describe('loadInfrastructureConfig', () => {
       baseEnvironment({
         NODE_ENV: 'production',
         DATABASE_RUNTIME_SSL_MODE: 'verify-full',
-        REDIS_URL: 'REDISS://:not-exported@cache.internal.example:6379',
+        REDIS_URL: 'REDISS://crypto_api_test_a:not-exported@cache.internal.example:6379',
       }),
     );
-    expect(config.redis.url).toBe('rediss://:not-exported@cache.internal.example:6379');
+    expect(config.redis?.url).toBe(
+      'rediss://crypto_api_test_a:not-exported@cache.internal.example:6379',
+    );
 
     expect(() =>
       loadInfrastructureConfig(
         baseEnvironment({
           NODE_ENV: 'production',
           DATABASE_RUNTIME_SSL_MODE: 'verify-full',
-          REDIS_URL: 'rediss://:not-exported@cache.internal.example:6379?tls=',
+          REDIS_URL: 'rediss://crypto_api_test_a:not-exported@cache.internal.example:6379?tls=',
         }),
       ),
     ).toThrow('REDIS_URL cannot override TLS');
@@ -506,7 +766,7 @@ describe('loadInfrastructureConfig', () => {
         baseEnvironment({
           NODE_ENV: 'production',
           DATABASE_RUNTIME_SSL_MODE: 'verify-full',
-          REDIS_URL: 'rediss://:not-exported@cache.internal.example:6379',
+          REDIS_URL: 'rediss://crypto_api_test_a:not-exported@cache.internal.example:6379',
           SQS_ENDPOINT: 'https://sqs-proxy.internal.example',
         }),
       ),
@@ -657,15 +917,18 @@ describe('loadInfrastructureConfig', () => {
       baseEnvironment({
         NODE_ENV: 'production',
         DATABASE_RUNTIME_URL:
-          'postgresql://crypto_runtime:secret@db.internal.example:5432/crypto_lending?sslmode=verify-full',
+          'postgresql://crypto_api_login_blue:secret@db.internal.example:5432/crypto_lending?sslmode=verify-full',
         DATABASE_RUNTIME_SSL_MODE: 'verify-full',
-        REDIS_URL: 'REDISS://:not-exported@cache.internal.example:6379',
+        REDIS_URL: 'REDISS://crypto_api_test_a:not-exported@cache.internal.example:6379',
       }),
     );
 
     expect(config.database.ssl).toEqual({ rejectUnauthorized: true, ca: validCa });
+    expect(config.database.sessionRole).toBe('crypto_api_runtime');
     expect(config.database.connectionString).not.toContain('sslmode');
-    expect(config.redis.url).toBe('rediss://:not-exported@cache.internal.example:6379');
+    expect(config.redis?.url).toBe(
+      'rediss://crypto_api_test_a:not-exported@cache.internal.example:6379',
+    );
     expect(config.sqs.endpoint).toBeUndefined();
   });
 });

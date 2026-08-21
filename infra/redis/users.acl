@@ -1,0 +1,4 @@
+user default reset off sanitize-payload
+user crypto_api_a reset on sanitize-payload #1b2c3478d952713964d64eea3e8db66170e24ba4c69858e45cd7f4a84878949c resetkeys resetchannels -@all +ping +quit
+user crypto_api_b reset off sanitize-payload #f5dfc373b8b26f789bee1f219d19378322fb9d14cfe30db260c563524dd23572 resetkeys resetchannels -@all +ping +quit
+user local_acl_operator reset on sanitize-payload #277ac4d731803df4f3dee092d6580ff3df5364fe45bc8f4acd73ec14dc3726aa resetkeys resetchannels -@all +ping +quit +acl|setuser +acl|deluser +acl|getuser +acl|log +client|kill

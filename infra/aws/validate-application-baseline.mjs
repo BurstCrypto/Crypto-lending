@@ -15,10 +15,15 @@ import { fileURLToPath } from 'node:url';
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = resolve(scriptDirectory, '..', '..');
 const noExternalEgressResidualLimitations = [
-  'Task DNS security-group egress permits TCP and UDP port 53 to the VPC CIDR; this static control cannot prove that traffic reaches only the VPC Route 53 Resolver address.',
+  'Web-task DNS security-group egress permits TCP and UDP port 53 to the VPC CIDR; this static control cannot prove that traffic reaches only the VPC Route 53 Resolver address. API and worker boundaries rely on AmazonProvidedDNS, which is not filtered by security groups.',
+  'REDIS_OPERATOR_EXECUTION_ARTIFACT_UNRESOLVED: the nested child exposes conditional operator infrastructure, but this parent defines no reviewed revocation CLI or one-off ECS task. Exact CLIENT KILL targeting, task drain, denial evidence, and immediate operator disablement remain unresolved local-design and live authorization gates.',
+  'FIXED_SLOT_CREDENTIAL_REGENERATION_UNRESOLVED: the four enum values constrain each submitted phase but do not compare deployed state or enforce transition adjacency, and retained A/B secrets do not regenerate on a phase-only update. A-to-B-to-A would reuse the original A credential, so the composition can represent reviewed overlap/cutover phases but is neither an enforced workflow nor a repeatable rotation mechanism until inactive-slot regeneration, Redis-password/database-verifier installation, and current-state transition checks are reviewed.',
+  'FAILED_AUTH_MONITORING_UNRESOLVED: local ACL denial and redaction tests exist, but this parent has no validated ElastiCache failed-auth log or metric delivery, filter, alarm, and actionable evidence path.',
 ];
 const reviewedApplicationBaselineSha256 =
-  'd980e78101fbfa60418866a9fdb92b4dda9158e97ba44c1691dc148a13096d9c';
+  '0436cc3d5dc2e1d52f1c6041b97aa9497e4ba7f644eaf7cec810989e0c2796d6';
+const reviewedWorkloadBoundariesSha256 =
+  '93273bb3bf26f7d21702da2d4b155132db765ce3f123134341e2762ae521b3f9';
 const reviewedResourceTypesByLogicalId = new Map([
   ['ApplicationDataKey', 'AWS::KMS::Key'],
   ['ApplicationDataKeyAlias', 'AWS::KMS::Alias'],
@@ -41,23 +46,12 @@ const reviewedResourceTypesByLogicalId = new Map([
   ['PrivateSubnetBRouteTableAssociation', 'AWS::EC2::SubnetRouteTableAssociation'],
   ['LoadBalancerSecurityGroup', 'AWS::EC2::SecurityGroup'],
   ['LoadBalancerHttpsIngress', 'AWS::EC2::SecurityGroupIngress'],
-  ['BackendTaskSecurityGroup', 'AWS::EC2::SecurityGroup'],
   ['WebTaskSecurityGroup', 'AWS::EC2::SecurityGroup'],
   ['LoadBalancerToWebEgress', 'AWS::EC2::SecurityGroupEgress'],
-  ['LoadBalancerToApiEgress', 'AWS::EC2::SecurityGroupEgress'],
   ['LoadBalancerToWebIngress', 'AWS::EC2::SecurityGroupIngress'],
-  ['LoadBalancerToApiIngress', 'AWS::EC2::SecurityGroupIngress'],
   ['DatabaseSecurityGroup', 'AWS::EC2::SecurityGroup'],
-  ['TaskToDatabaseEgress', 'AWS::EC2::SecurityGroupEgress'],
-  ['TaskToDatabaseIngress', 'AWS::EC2::SecurityGroupIngress'],
   ['RedisSecurityGroup', 'AWS::EC2::SecurityGroup'],
-  ['TaskToRedisEgress', 'AWS::EC2::SecurityGroupEgress'],
-  ['TaskToRedisIngress', 'AWS::EC2::SecurityGroupIngress'],
-  ['BackendTaskDnsUdpEgress', 'AWS::EC2::SecurityGroupEgress'],
-  ['BackendTaskDnsTcpEgress', 'AWS::EC2::SecurityGroupEgress'],
   ['InterfaceEndpointSecurityGroup', 'AWS::EC2::SecurityGroup'],
-  ['BackendTaskToInterfaceEndpointEgress', 'AWS::EC2::SecurityGroupEgress'],
-  ['BackendTaskToInterfaceEndpointIngress', 'AWS::EC2::SecurityGroupIngress'],
   ['WebTaskDnsUdpEgress', 'AWS::EC2::SecurityGroupEgress'],
   ['WebTaskDnsTcpEgress', 'AWS::EC2::SecurityGroupEgress'],
   ['WebTaskToInterfaceEndpointEgress', 'AWS::EC2::SecurityGroupEgress'],
@@ -68,13 +62,10 @@ const reviewedResourceTypesByLogicalId = new Map([
   ['SecretsManagerEndpoint', 'AWS::EC2::VPCEndpoint'],
   ['SqsEndpoint', 'AWS::EC2::VPCEndpoint'],
   ['S3GatewayEndpoint', 'AWS::EC2::VPCEndpoint'],
-  ['BackendTaskToS3Egress', 'AWS::EC2::SecurityGroupEgress'],
   ['WebTaskToS3Egress', 'AWS::EC2::SecurityGroupEgress'],
   ['DatabaseSubnetGroup', 'AWS::RDS::DBSubnetGroup'],
   ['RedisSubnetGroup', 'AWS::ElastiCache::SubnetGroup'],
   ['DatabaseCredentialsSecret', 'AWS::SecretsManager::Secret'],
-  ['DatabaseRuntimeSecret', 'AWS::SecretsManager::Secret'],
-  ['RedisAuthSecret', 'AWS::SecretsManager::Secret'],
   ['DatabaseParameterGroup', 'AWS::RDS::DBParameterGroup'],
   ['Database', 'AWS::RDS::DBInstance'],
   ['RedisReplicationGroup', 'AWS::ElastiCache::ReplicationGroup'],
@@ -84,8 +75,8 @@ const reviewedResourceTypesByLogicalId = new Map([
   ['ApiLogGroup', 'AWS::Logs::LogGroup'],
   ['WebLogGroup', 'AWS::Logs::LogGroup'],
   ['WorkerLogGroup', 'AWS::Logs::LogGroup'],
+  ['WorkloadBoundaries', 'AWS::CloudFormation::Stack'],
   ['ApplicationImagePullPolicy', 'AWS::IAM::ManagedPolicy'],
-  ['BackendTaskExecutionRole', 'AWS::IAM::Role'],
   ['WebTaskExecutionRole', 'AWS::IAM::Role'],
   ['ApiTaskRole', 'AWS::IAM::Role'],
   ['WorkerTaskRole', 'AWS::IAM::Role'],
@@ -390,6 +381,30 @@ function requireExactInlineEnvironmentReference(
   }
 }
 
+function requireExactGetAttEnvironmentReference(
+  block,
+  logicalId,
+  environmentName,
+  referencedAttribute,
+  errors,
+) {
+  const escapedName = environmentName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const escapedReference = referencedAttribute.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const nameMatches = block.match(new RegExp(`\\bName:\\s*${escapedName}\\b`, 'g')) ?? [];
+  const exactMatches =
+    block.match(
+      new RegExp(
+        `\\bName:\\s*${escapedName},?[\\s\\S]{0,160}?\\bValue:\\s*!GetAtt\\s+${escapedReference}(?=\\s*[,}\\n])`,
+        'g',
+      ),
+    ) ?? [];
+  if (nameMatches.length !== 1 || exactMatches.length !== 1) {
+    errors.push(
+      `${logicalId} must bind exactly one ${environmentName} environment value to !GetAtt ${referencedAttribute}.`,
+    );
+  }
+}
+
 function requireExactInlineSecretReference(
   block,
   logicalId,
@@ -568,7 +583,6 @@ function validateNoExternalApplicationEgress(source, parameters, resources, inve
     'AWS::AppRunner::Service',
     'AWS::AutoScaling::AutoScalingGroup',
     'AWS::Batch::ComputeEnvironment',
-    'AWS::CloudFormation::Stack',
     'AWS::EC2::CarrierGateway',
     'AWS::EC2::ClientVpnEndpoint',
     'AWS::EC2::ClientVpnRoute',
@@ -791,30 +805,6 @@ function validateNoExternalApplicationEgress(source, parameters, resources, inve
       'LoadBalancerToWebEgress',
       ['DestinationSecurityGroupId', '!Ref WebTaskSecurityGroup', '3000', 'tcp', undefined],
     ],
-    [
-      'LoadBalancerToApiEgress',
-      ['DestinationSecurityGroupId', '!Ref BackendTaskSecurityGroup', '3001', 'tcp', undefined],
-    ],
-    [
-      'TaskToDatabaseEgress',
-      ['DestinationSecurityGroupId', '!Ref DatabaseSecurityGroup', '5432', 'tcp', undefined],
-    ],
-    [
-      'TaskToRedisEgress',
-      ['DestinationSecurityGroupId', '!Ref RedisSecurityGroup', '6379', 'tcp', undefined],
-    ],
-    ['BackendTaskDnsUdpEgress', ['CidrIp', '!Ref VpcCidr', '53', 'udp', undefined]],
-    ['BackendTaskDnsTcpEgress', ['CidrIp', '!Ref VpcCidr', '53', 'tcp', undefined]],
-    [
-      'BackendTaskToInterfaceEndpointEgress',
-      [
-        'DestinationSecurityGroupId',
-        '!Ref InterfaceEndpointSecurityGroup',
-        '443',
-        'tcp',
-        'UseVpcEndpoints',
-      ],
-    ],
     ['WebTaskDnsUdpEgress', ['CidrIp', '!Ref VpcCidr', '53', 'udp', undefined]],
     ['WebTaskDnsTcpEgress', ['CidrIp', '!Ref VpcCidr', '53', 'tcp', undefined]],
     [
@@ -826,10 +816,6 @@ function validateNoExternalApplicationEgress(source, parameters, resources, inve
         'tcp',
         'UseVpcEndpoints',
       ],
-    ],
-    [
-      'BackendTaskToS3Egress',
-      ['DestinationPrefixListId', '!Ref S3ManagedPrefixListId', '443', 'tcp', 'UseVpcEndpoints'],
     ],
     [
       'WebTaskToS3Egress',
@@ -892,9 +878,9 @@ function validateNoExternalApplicationEgress(source, parameters, resources, inve
     errors,
   );
   const expectedServiceSecurityGroups = new Map([
-    ['ApiService', 'BackendTaskSecurityGroup'],
-    ['WebService', 'WebTaskSecurityGroup'],
-    ['WorkerService', 'BackendTaskSecurityGroup'],
+    ['ApiService', '!GetAtt WorkloadBoundaries.Outputs.ApiTaskSecurityGroupId'],
+    ['WebService', '!Ref WebTaskSecurityGroup'],
+    ['WorkerService', '!GetAtt WorkloadBoundaries.Outputs.WorkerTaskSecurityGroupId'],
   ]);
   for (const { logicalId, block } of services) {
     if (
@@ -907,27 +893,173 @@ function validateNoExternalApplicationEgress(source, parameters, resources, inve
     if (subnetReferences?.join('|') !== 'PrivateSubnetA|PrivateSubnetB') {
       errors.push(`${logicalId} must use exactly PrivateSubnetA and PrivateSubnetB.`);
     }
-    const securityGroupReferences = nestedReferenceList(block, 'SecurityGroups');
     const expectedSecurityGroup = expectedServiceSecurityGroups.get(logicalId);
+    const securityGroups = indentedPropertyBlock(block, 'SecurityGroups');
+    const expectedSecurityGroups = `SecurityGroups:\n  - ${expectedSecurityGroup}`;
     if (
       !expectedSecurityGroup ||
-      securityGroupReferences?.length !== 1 ||
-      securityGroupReferences[0] !== expectedSecurityGroup
+      semanticYamlTokens(securityGroups ?? '') !== semanticYamlTokens(expectedSecurityGroups)
     ) {
       errors.push(`${logicalId} must use only the reviewed ${expectedSecurityGroup} identity.`);
     }
   }
 }
 
+function validateWorkloadBoundaryComposition(source, parameters, resources, inventory, errors) {
+  const templateUrl = parameters.get('WorkloadBoundariesTemplateUrl') ?? '';
+  const expectedTemplateUrlPattern = `^https://[a-z0-9][a-z0-9-]{1,61}[a-z0-9]\\.s3\\.[a-z0-9-]+\\.(?:amazonaws\\.com|amazonaws\\.com\\.cn)/application-workload-boundaries-${reviewedWorkloadBoundariesSha256}\\.yaml\\?versionId=[A-Za-z0-9._~%+-]+$`;
+  if (
+    !hasProperty(templateUrl, 'Type', 'String') ||
+    !hasProperty(templateUrl, 'MaxLength', '1024') ||
+    !hasProperty(templateUrl, 'AllowedPattern', expectedTemplateUrlPattern) ||
+    hasPropertyName(templateUrl, 'Default')
+  ) {
+    errors.push(
+      'WorkloadBoundariesTemplateUrl must be supplied explicitly as the reviewed SHA-256-named, versioned S3 object URL.',
+    );
+  }
+  const templateSha = parameters.get('WorkloadBoundariesTemplateSha256') ?? '';
+  if (
+    !hasProperty(templateSha, 'Type', 'String') ||
+    !hasProperty(templateSha, 'AllowedValues', `[${reviewedWorkloadBoundariesSha256}]`) ||
+    hasPropertyName(templateSha, 'Default')
+  ) {
+    errors.push('WorkloadBoundariesTemplateSha256 must be an explicit String without a default.');
+  }
+  const artifactBinding = parameters.get('WorkloadBoundariesArtifactBindingSha256') ?? '';
+  if (
+    !hasProperty(artifactBinding, 'Type', 'String') ||
+    !hasProperty(artifactBinding, 'AllowedPattern', '^[a-f0-9]{64}$') ||
+    hasPropertyName(artifactBinding, 'Default')
+  ) {
+    errors.push(
+      'WorkloadBoundariesArtifactBindingSha256 must be an explicit lowercase SHA-256 without a default.',
+    );
+  }
+
+  for (const name of [
+    'ApiDatabaseCredentialPhase',
+    'WorkerDatabaseCredentialPhase',
+    'RedisCredentialPhase',
+  ]) {
+    const block = parameters.get(name) ?? '';
+    if (
+      !hasProperty(block, 'Type', 'String') ||
+      !hasProperty(block, 'Default', 'A_ONLY') ||
+      !hasProperty(block, 'AllowedValues', '[A_ONLY, BOTH_USE_A, BOTH_USE_B, B_ONLY]')
+    ) {
+      errors.push(`${name} must be a String that defaults to the safe A_ONLY phase.`);
+    }
+  }
+  const operatorMode = parameters.get('RedisOperatorMode') ?? '';
+  if (
+    !hasProperty(operatorMode, 'Type', 'String') ||
+    !hasProperty(operatorMode, 'Default', 'DISABLED') ||
+    !hasProperty(operatorMode, 'AllowedValues', '[DISABLED, ENABLED]')
+  ) {
+    errors.push('RedisOperatorMode must be a String that defaults to DISABLED.');
+  }
+
+  requireExactLogicalIds(
+    entriesOf(inventory, 'AWS::CloudFormation::Stack'),
+    ['WorkloadBoundaries'],
+    'Nested-stack allowlist',
+    errors,
+  );
+  requireExactSemanticProperty(
+    resources.get('WorkloadBoundaries') ?? '',
+    'WorkloadBoundaries',
+    'Properties',
+    [
+      'Properties:',
+      '  TemplateURL: !Ref WorkloadBoundariesTemplateUrl',
+      '  TimeoutInMinutes: 10',
+      '  Parameters:',
+      '    BillingAcknowledgement: !Ref BillingAcknowledgement',
+      '    DeliveryArtifactSha256: !Ref WorkloadBoundariesTemplateSha256',
+      '    DeliveryArtifactBindingSha256: !Ref WorkloadBoundariesArtifactBindingSha256',
+      '    EnvironmentName: !Ref EnvironmentName',
+      '    DatabaseName: !Ref DatabaseName',
+      '    VpcId: !Ref Vpc',
+      '    LoadBalancerSecurityGroupId: !Ref LoadBalancerSecurityGroup',
+      '    DatabaseSecurityGroupId: !Ref DatabaseSecurityGroup',
+      '    RedisSecurityGroupId: !Ref RedisSecurityGroup',
+      '    PrivateEgressMode: !Ref PrivateEgressMode',
+      "    InterfaceEndpointSecurityGroupId: !If [UseVpcEndpoints, !Ref InterfaceEndpointSecurityGroup, '']",
+      "    S3ManagedPrefixListId: !If [UseVpcEndpoints, !Ref S3ManagedPrefixListId, '']",
+      '    ApplicationDataKeyArn: !GetAtt ApplicationDataKey.Arn',
+      '    ApiLogGroupArn: !GetAtt ApiLogGroup.Arn',
+      '    WorkerLogGroupArn: !GetAtt WorkerLogGroup.Arn',
+      '    ApiImageRepositoryArn: !Sub arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/crypto-lending-api',
+      '    WorkerImageRepositoryArn: !Sub arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/crypto-lending-worker',
+      '    ApiDatabaseCredentialPhase: !Ref ApiDatabaseCredentialPhase',
+      '    WorkerDatabaseCredentialPhase: !Ref WorkerDatabaseCredentialPhase',
+      '    RedisCredentialPhase: !Ref RedisCredentialPhase',
+      '    RedisOperatorMode: !Ref RedisOperatorMode',
+      '  Tags:',
+      '    - Key: WorkloadBoundariesTemplateSha256',
+      '      Value: !Ref WorkloadBoundariesTemplateSha256',
+      '    - Key: WorkloadBoundariesArtifactBindingSha256',
+      '      Value: !Ref WorkloadBoundariesArtifactBindingSha256',
+    ].join('\n'),
+    'the exact reviewed child input contract with no caller-selected role, policy, repository, key, or secret',
+    errors,
+  );
+
+  for (const legacyToken of [
+    'BackendTaskExecutionRole',
+    'BackendTaskSecurityGroup',
+    'DatabaseRuntimeSecret',
+    'RedisAuthSecret',
+    'REDIS_AUTH_TOKEN',
+    'REDIS_KEY_PREFIX',
+  ]) {
+    if (source.includes(legacyToken)) {
+      errors.push(
+        `Legacy shared boundary ${legacyToken} must be removed rather than composed alongside WorkloadBoundaries.`,
+      );
+    }
+  }
+
+  const outputs = topLevelBlocks(source, 'Outputs');
+  const expectedOutputs = new Map([
+    [
+      'WorkloadBoundariesTemplateSha256',
+      '!GetAtt WorkloadBoundaries.Outputs.DeliveryArtifactSha256',
+    ],
+    [
+      'WorkloadBoundariesArtifactBindingSha256',
+      '!GetAtt WorkloadBoundaries.Outputs.DeliveryArtifactBindingSha256',
+    ],
+    ['ApiTaskSecurityGroupId', '!GetAtt WorkloadBoundaries.Outputs.ApiTaskSecurityGroupId'],
+    ['WorkerTaskSecurityGroupId', '!GetAtt WorkloadBoundaries.Outputs.WorkerTaskSecurityGroupId'],
+    ['ApiDatabaseActiveSecretArn', '!GetAtt WorkloadBoundaries.Outputs.ApiDatabaseActiveSecretArn'],
+    [
+      'WorkerDatabaseActiveSecretArn',
+      '!GetAtt WorkloadBoundaries.Outputs.WorkerDatabaseActiveSecretArn',
+    ],
+    [
+      'MigrationDatabaseCredentialSecretArn',
+      '!GetAtt WorkloadBoundaries.Outputs.MigrationDatabaseCredentialSecretArn',
+    ],
+    ['RedisActiveSecretArn', '!GetAtt WorkloadBoundaries.Outputs.RedisActiveSecretArn'],
+    ['RedisApiUserGroupId', '!GetAtt WorkloadBoundaries.Outputs.RedisApiUserGroupId'],
+  ]);
+  for (const [name, value] of expectedOutputs) {
+    requireExactProperty(outputs.get(name) ?? '', name, 'Value', value, errors);
+  }
+  for (const name of outputs.keys()) {
+    if (/(?:Credential|Secret)(?:A|B)(?:Arn)?$|Api(?:A|B)Secret/.test(name)) {
+      errors.push(
+        `${name} must not expose a raw A/B credential slot around the active-phase contract.`,
+      );
+    }
+  }
+}
+
 function validateEcsRoleSecurityBoundaries(resources, inventory, errors) {
   const roleEntries = entriesOf(inventory, 'AWS::IAM::Role');
-  const expectedRoleIds = [
-    'BackendTaskExecutionRole',
-    'WebTaskExecutionRole',
-    'ApiTaskRole',
-    'WorkerTaskRole',
-    'WebTaskRole',
-  ];
+  const expectedRoleIds = ['WebTaskExecutionRole', 'ApiTaskRole', 'WorkerTaskRole', 'WebTaskRole'];
   requireExactLogicalIds(roleEntries, expectedRoleIds, 'ECS IAM role allowlist', errors);
 
   const expectedTrustPolicy = [
@@ -971,7 +1103,7 @@ function validateEcsRoleSecurityBoundaries(resources, inventory, errors) {
       '        - ecr:BatchCheckLayerAvailability',
       '        - ecr:BatchGetImage',
       '        - ecr:GetDownloadUrlForLayer',
-      '      Resource: !Sub arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/crypto-lending-*',
+      '      Resource: !Sub arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/crypto-lending-web',
     ].join('\n'),
     'the reviewed ECR token and repository-scoped image-pull action/resource matrix',
     errors,
@@ -981,7 +1113,7 @@ function validateEcsRoleSecurityBoundaries(resources, inventory, errors) {
     'ManagedPolicyArns:',
     '  - !Ref ApplicationImagePullPolicy',
   ].join('\n');
-  for (const logicalId of ['BackendTaskExecutionRole', 'WebTaskExecutionRole']) {
+  for (const logicalId of ['WebTaskExecutionRole']) {
     requireExactSemanticProperty(
       resources.get(logicalId) ?? '',
       logicalId,
@@ -991,47 +1123,6 @@ function validateEcsRoleSecurityBoundaries(resources, inventory, errors) {
       errors,
     );
   }
-
-  requireExactSemanticProperty(
-    resources.get('BackendTaskExecutionRole') ?? '',
-    'BackendTaskExecutionRole',
-    'Policies',
-    [
-      'Policies:',
-      '  - PolicyName: WriteBackendLogs',
-      '    PolicyDocument:',
-      "      Version: '2012-10-17'",
-      '      Statement:',
-      '        - Effect: Allow',
-      '          Action:',
-      '            - logs:CreateLogStream',
-      '            - logs:PutLogEvents',
-      '          Resource:',
-      '            - !Sub ${ApiLogGroup.Arn}:*',
-      '            - !Sub ${WorkerLogGroup.Arn}:*',
-      '  - PolicyName: RuntimeSecrets',
-      '    PolicyDocument:',
-      "      Version: '2012-10-17'",
-      '      Statement:',
-      '        - Sid: NamedSecrets',
-      '          Effect: Allow',
-      '          Action:',
-      '            - secretsmanager:GetSecretValue',
-      '          Resource:',
-      '            - !Ref DatabaseRuntimeSecret',
-      '            - !Ref RedisAuthSecret',
-      '        - Sid: DecryptSecrets',
-      '          Effect: Allow',
-      '          Action:',
-      '            - kms:Decrypt',
-      '          Resource: !GetAtt ApplicationDataKey.Arn',
-      '          Condition:',
-      '            StringEquals:',
-      '              kms:ViaService: !Sub secretsmanager.${AWS::Region}.${AWS::URLSuffix}',
-    ].join('\n'),
-    'the exact backend log-write and runtime-secret action/resource matrix, including Secrets Manager-only KMS decryption',
-    errors,
-  );
 
   requireExactSemanticProperty(
     resources.get('WebTaskExecutionRole') ?? '',
@@ -1120,11 +1211,17 @@ function validateEcsRoleSecurityBoundaries(resources, inventory, errors) {
   );
 
   const expectedTaskRoles = new Map([
-    ['ApiTaskDefinition', ['!GetAtt BackendTaskExecutionRole.Arn', '!GetAtt ApiTaskRole.Arn']],
+    [
+      'ApiTaskDefinition',
+      ['!GetAtt WorkloadBoundaries.Outputs.ApiTaskExecutionRoleArn', '!GetAtt ApiTaskRole.Arn'],
+    ],
     ['WebTaskDefinition', ['!GetAtt WebTaskExecutionRole.Arn', '!GetAtt WebTaskRole.Arn']],
     [
       'WorkerTaskDefinition',
-      ['!GetAtt BackendTaskExecutionRole.Arn', '!GetAtt WorkerTaskRole.Arn'],
+      [
+        '!GetAtt WorkloadBoundaries.Outputs.WorkerTaskExecutionRoleArn',
+        '!GetAtt WorkerTaskRole.Arn',
+      ],
     ],
   ]);
   for (const [logicalId, [executionRoleArn, taskRoleArn]] of expectedTaskRoles) {
@@ -1134,31 +1231,48 @@ function validateEcsRoleSecurityBoundaries(resources, inventory, errors) {
     validateTaskEnvironmentCredentialBoundary(block, logicalId, errors);
   }
 
-  const backendSecretBindings = [
-    'Secrets:',
-    '  - Name: DATABASE_RUNTIME_PASSWORD',
-    "    ValueFrom: !Sub '${DatabaseRuntimeSecret}:password::'",
-    "  - { Name: REDIS_AUTH_TOKEN, ValueFrom: !Sub '${RedisAuthSecret}:authToken::' }",
-  ].join('\n');
-  for (const logicalId of ['ApiTaskDefinition', 'WorkerTaskDefinition']) {
+  const workloadSecretBindings = new Map([
+    [
+      'ApiTaskDefinition',
+      [
+        'Secrets:',
+        '  - Name: DATABASE_RUNTIME_PASSWORD',
+        "    ValueFrom: !Sub '${WorkloadBoundaries.Outputs.ApiDatabaseActiveSecretArn}:password::'",
+        '  - Name: REDIS_PASSWORD',
+        "    ValueFrom: !Sub '${WorkloadBoundaries.Outputs.RedisActiveSecretArn}:password::'",
+      ].join('\n'),
+    ],
+    [
+      'WorkerTaskDefinition',
+      [
+        'Secrets:',
+        '  - Name: DATABASE_RUNTIME_PASSWORD',
+        "    ValueFrom: !Sub '${WorkloadBoundaries.Outputs.WorkerDatabaseActiveSecretArn}:password::'",
+      ].join('\n'),
+    ],
+  ]);
+  for (const [logicalId, expectedSecrets] of workloadSecretBindings) {
     const block = resources.get(logicalId) ?? '';
     requireExactSemanticProperty(
       block,
       logicalId,
       'Secrets',
-      backendSecretBindings,
-      'exact runtime-database and Redis ECS secret injection with no migration/admin secret',
+      expectedSecrets,
+      'its exact active workload-scoped ECS secret injection with no cross-workload or migration credential',
       errors,
     );
     const environment = indentedPropertyBlock(block, 'Environment') ?? '';
     if (
-      /\bName:\s*(?:DATABASE_RUNTIME_PASSWORD|REDIS_AUTH_TOKEN|MIGRATION_DATABASE_[A-Z_]+)\b/.test(
+      /\bName:\s*(?:DATABASE_RUNTIME_PASSWORD|REDIS_PASSWORD|REDIS_AUTH_TOKEN|MIGRATION_DATABASE_[A-Z_]+)\b/.test(
         environment,
       )
     ) {
       errors.push(
         `${logicalId} must inject sensitive runtime values only through ECS Secrets, never plaintext Environment entries.`,
       );
+    }
+    if (logicalId === 'WorkerTaskDefinition' && /\bREDIS_[A-Z0-9_]+\b/.test(block)) {
+      errors.push('WorkerTaskDefinition must not receive any Redis environment or secret binding.');
     }
   }
 
@@ -1171,7 +1285,9 @@ function validateEcsRoleSecurityBoundaries(resources, inventory, errors) {
     errors,
   );
   if (
-    /Database(?:Credentials|Runtime)Secret|RedisAuthSecret|\bValueFrom:/.test(webTaskDefinition)
+    /Database(?:Credentials|Runtime)Secret|RedisAuthSecret|WorkloadBoundaries\.Outputs\.(?:Api|Worker|Migration|Redis)|\bValueFrom:/.test(
+      webTaskDefinition,
+    )
   ) {
     errors.push('WebTaskDefinition must not reference any application secret or ECS secret value.');
   }
@@ -1243,11 +1359,7 @@ function validateKmsAndEncryptedServiceBoundaries(resources, inventory, errors) 
     errors,
   );
 
-  for (const logicalId of [
-    'DatabaseCredentialsSecret',
-    'DatabaseRuntimeSecret',
-    'RedisAuthSecret',
-  ]) {
+  for (const logicalId of ['DatabaseCredentialsSecret']) {
     requireExactProperty(
       resources.get(logicalId) ?? '',
       logicalId,
@@ -1283,11 +1395,19 @@ function validateKmsAndEncryptedServiceBoundaries(resources, inventory, errors) 
   ]) {
     requireExactProperty(redis, 'RedisReplicationGroup', propertyName, expectedValue, errors);
   }
-  requireExactProperty(
+  requireAbsentProperty(
     redis,
     'RedisReplicationGroup',
     'AuthToken',
-    "!Sub '{{resolve:secretsmanager:${RedisAuthSecret}:SecretString:authToken}}'",
+    'ACL user-group authentication replaces the legacy shared token',
+    errors,
+  );
+  requireExactSemanticProperty(
+    redis,
+    'RedisReplicationGroup',
+    'UserGroupIds',
+    'UserGroupIds:\n  - !GetAtt WorkloadBoundaries.Outputs.RedisApiUserGroupId',
+    'the exact API-only ACL user group from the reviewed workload-boundary child',
     errors,
   );
   requireExactProperty(
@@ -1420,7 +1540,7 @@ function validateTemplateShape(source, errors) {
   const parameters = topLevelBlocks(source, 'Parameters');
   const sensitiveParameterName = /(password|credential|accesskey|secret(?:value|string)?|token)/i;
   for (const [name, block] of parameters) {
-    if (!sensitiveParameterName.test(name)) {
+    if (!sensitiveParameterName.test(name) || /CredentialPhase$/.test(name)) {
       continue;
     }
 
@@ -1501,7 +1621,12 @@ function validateTemplateShape(source, errors) {
     }
   }
 
-  for (const name of ['ApiImageUri', 'WebImageUri', 'WorkerImageUri']) {
+  const imageRepositories = new Map([
+    ['ApiImageUri', 'crypto-lending-api'],
+    ['WebImageUri', 'crypto-lending-web'],
+    ['WorkerImageUri', 'crypto-lending-worker'],
+  ]);
+  for (const [name, repository] of imageRepositories) {
     const block = parameters.get(name);
     if (!block) {
       errors.push(`Immutable deployment parameter ${name} is required.`);
@@ -1509,17 +1634,20 @@ function validateTemplateShape(source, errors) {
     }
     const allowedPattern = block.match(/^\s+AllowedPattern:\s*['"]?(.+?)['"]?\s*$/m)?.[1] ?? '';
     if (
-      !allowedPattern.includes('ecr') ||
-      !allowedPattern.includes('@sha256:') ||
-      !allowedPattern.includes('{64}')
+      allowedPattern !==
+      `^[0-9]{12}\\.dkr\\.ecr\\.[a-z0-9-]+\\.(amazonaws\\.com|amazonaws\\.com\\.cn)/${repository}@sha256:[a-f0-9]{64}$`
     ) {
       errors.push(
-        `${name} must only accept a full ECR URI pinned to a 64-character sha256 digest.`,
+        `${name} must accept only the exact ${repository} ECR repository pinned to a 64-character sha256 digest.`,
       );
     }
     if (hasPropertyName(block, 'Default')) {
       errors.push(`${name} must be supplied explicitly and must not have a mutable default image.`);
     }
+  }
+  const databaseName = parameters.get('DatabaseName') ?? '';
+  if (!hasProperty(databaseName, 'AllowedPattern', '^[a-z][a-z0-9_]{0,62}$')) {
+    errors.push('DatabaseName must accept only canonical lowercase PostgreSQL identifiers.');
   }
 
   const { resources, inventory } = resourceInventory(source);
@@ -1529,6 +1657,7 @@ function validateTemplateShape(source, errors) {
   }
 
   validateNoExternalApplicationEgress(source, parameters, resources, inventory, errors);
+  validateWorkloadBoundaryComposition(source, parameters, resources, inventory, errors);
   validateEcsRoleSecurityBoundaries(resources, inventory, errors);
   validateKmsAndEncryptedServiceBoundaries(resources, inventory, errors);
 
@@ -1547,9 +1676,10 @@ function validateTemplateShape(source, errors) {
     ['AWS::ElastiCache::ReplicationGroup', 1],
     ['AWS::ElastiCache::SubnetGroup', 1],
     ['AWS::KMS::Key', 2],
-    ['AWS::SecretsManager::Secret', 3],
+    ['AWS::SecretsManager::Secret', 1],
     ['AWS::Logs::LogGroup', 3],
-    ['AWS::IAM::Role', 5],
+    ['AWS::IAM::Role', 4],
+    ['AWS::CloudFormation::Stack', 1],
     ['AWS::CloudWatch::Alarm', 1],
     ['AWS::CloudWatch::Dashboard', 1],
     ['AWS::SQS::Queue', 2],
@@ -1669,10 +1799,23 @@ function validateTemplateShape(source, errors) {
     errors.push('WorkerTaskDefinition must run the dependency-aware worker health command.');
   }
   const apiTaskDefinition = resources.get('ApiTaskDefinition') ?? '';
-  for (const [logicalId, block] of [
-    ['ApiTaskDefinition', apiTaskDefinition],
-    ['WorkerTaskDefinition', workerTaskDefinition],
-  ]) {
+  const workloadTaskContracts = [
+    [
+      'ApiTaskDefinition',
+      apiTaskDefinition,
+      'api',
+      'ApiDatabaseActiveUsername',
+      'ApiDatabaseActiveSecretArn',
+    ],
+    [
+      'WorkerTaskDefinition',
+      workerTaskDefinition,
+      'worker',
+      'WorkerDatabaseActiveUsername',
+      'WorkerDatabaseActiveSecretArn',
+    ],
+  ];
+  for (const [logicalId, block, workload, usernameOutput, secretOutput] of workloadTaskContracts) {
     if (/\bMIGRATION_DATABASE_[A-Z_]+\b/.test(block)) {
       errors.push(`${logicalId} must not receive migration/admin database variables.`);
     }
@@ -1682,21 +1825,39 @@ function validateTemplateShape(source, errors) {
     if (/\bDatabaseCredentialsSecret\b/.test(block)) {
       errors.push(`${logicalId} must not reference the database migration/admin secret.`);
     }
-    const runtimeUsernameBindings =
-      block.match(
-        /^\s*-\s*\{\s*Name:\s*DATABASE_RUNTIME_USERNAME,\s*Value:\s*crypto_runtime\s*\}\s*$/gm,
-      ) ?? [];
-    if (runtimeUsernameBindings.length !== 1) {
-      errors.push(`${logicalId} must bind the reviewed non-secret runtime database username.`);
+    const usernameBindingErrors = [];
+    requireExactGetAttEnvironmentReference(
+      block,
+      logicalId,
+      'DATABASE_RUNTIME_USERNAME',
+      `WorkloadBoundaries.Outputs.${usernameOutput}`,
+      usernameBindingErrors,
+    );
+    if (usernameBindingErrors.length > 0) {
+      errors.push(
+        `${logicalId} must bind the reviewed non-secret runtime database username exactly once to !GetAtt WorkloadBoundaries.Outputs.${usernameOutput}.`,
+      );
     }
     requireExactInlineSecretReference(
       block,
       logicalId,
       'DATABASE_RUNTIME_PASSWORD',
-      'DatabaseRuntimeSecret',
+      `WorkloadBoundaries.Outputs.${secretOutput}`,
       'password',
       errors,
     );
+    const environment = indentedPropertyBlock(block, 'Environment') ?? '';
+    const workloadBindings =
+      environment.match(
+        new RegExp(
+          `^\\s*-\\s*\\{\\s*Name:\\s*APPLICATION_WORKLOAD,\\s*Value:\\s*${workload}\\s*\\}\\s*$`,
+          'gm',
+        ),
+      ) ?? [];
+    if (workloadBindings.length !== 1) {
+      errors.push(`${logicalId} must bind exactly one APPLICATION_WORKLOAD=${workload}.`);
+    }
+    requireExactInlineEnvironmentReference(block, logicalId, 'APP_ENV', 'EnvironmentName', errors);
     requireExactInlineEnvironmentReference(block, logicalId, 'SQS_QUEUE_URL', 'JobQueue', errors);
     requireExactInlineEnvironmentReference(
       block,
@@ -1706,15 +1867,24 @@ function validateTemplateShape(source, errors) {
       errors,
     );
   }
-  const backendTaskExecutionRole = resources.get('BackendTaskExecutionRole') ?? '';
+  const redisBindingErrors = [];
+  requireExactGetAttEnvironmentReference(
+    apiTaskDefinition,
+    'ApiTaskDefinition',
+    'REDIS_USERNAME',
+    'WorkloadBoundaries.Outputs.RedisActiveUsername',
+    redisBindingErrors,
+  );
   if (
-    !/!Ref\s+DatabaseRuntimeSecret\b/.test(backendTaskExecutionRole) ||
-    /!Ref\s+DatabaseCredentialsSecret\b/.test(backendTaskExecutionRole) ||
-    /^\s+(?:Resource:\s*|-)['"]?\*['"]?\s*$/m.test(backendTaskExecutionRole)
+    redisBindingErrors.length > 0 ||
+    !/^\s*-\s*\{\s*Name:\s*REDIS_TLS,\s*Value:\s*['"]true['"]\s*\}\s*$/m.test(apiTaskDefinition)
   ) {
     errors.push(
-      'BackendTaskExecutionRole must read the runtime database secret and must not read the migration/admin secret.',
+      'ApiTaskDefinition must bind the active environment-scoped Redis ACL identity over TLS.',
     );
+  }
+  if (/\bREDIS_[A-Z0-9_]+\b/.test(workerTaskDefinition)) {
+    errors.push('WorkerTaskDefinition must remain a Redis nonconsumer with no REDIS_* bindings.');
   }
   const webTaskDefinition = resources.get('WebTaskDefinition') ?? '';
   if (/\bName:\s*SQS_(?:DEAD_LETTER_)?QUEUE_URL\b/.test(webTaskDefinition)) {
@@ -1959,13 +2129,6 @@ function validateTemplateShape(source, errors) {
   if (!databaseUsername || databaseUsername.length > 16) {
     errors.push('DatabaseCredentialsSecret username must satisfy the RDS 1-16 character limit.');
   }
-  const runtimeDatabaseSecret = resources.get('DatabaseRuntimeSecret') ?? '';
-  const runtimeDatabaseUsername = runtimeDatabaseSecret.match(
-    /"username":"([A-Za-z][A-Za-z0-9_]*)"/,
-  )?.[1];
-  if (!runtimeDatabaseUsername || runtimeDatabaseUsername === databaseUsername) {
-    errors.push('DatabaseRuntimeSecret must define a distinct canonical PostgreSQL username.');
-  }
   const database = resources.get('Database') ?? '';
   if (
     !/MasterUsername:\s*!Sub\s+'\{\{resolve:secretsmanager:\$\{DatabaseCredentialsSecret\}:SecretString:username\}\}'/.test(
@@ -1977,7 +2140,7 @@ function validateTemplateShape(source, errors) {
     /DatabaseRuntimeCredentialsSecret/.test(database)
   ) {
     errors.push(
-      'Database must preserve DatabaseCredentialsSecret as its migration/admin master credential.',
+      'Database must preserve DatabaseCredentialsSecret as its bootstrap master credential.',
     );
   }
   requireProperties(
@@ -2010,6 +2173,9 @@ function validateTemplateShape(source, errors) {
   for (const { logicalId, block } of databaseAndCacheSecurityGroups) {
     if (/(?:0\.0\.0\.0\/0|::\/0)/.test(block)) {
       errors.push(`${logicalId} must not expose database or cache ingress to the internet.`);
+    }
+    if (logicalId === 'DatabaseSecurityGroup' || logicalId === 'RedisSecurityGroup') {
+      continue;
     }
     const hasStandaloneSourceRule = standaloneIngressRules.some(
       ({ block: ingressBlock }) =>
@@ -2078,6 +2244,40 @@ function validateDeploymentGuard(source, errors) {
     'acm-dns-record-sha256=',
     '$parameterMap.AlbCertificateArn -cne [string] $acmDnsBinding.certificateArn',
     '$parameterMap.ApplicationHostname -cne [string] $acmDnsBinding.applicationHostname',
+    "'validate-application-workload-boundaries.mjs'",
+    'Get-FileHash -LiteralPath $resolvedWorkloadBoundariesTemplate -Algorithm SHA256',
+    "Assert-RequiredValue -Name 'WorkloadBoundariesArtifactBucket'",
+    "Assert-RequiredValue -Name 'WorkloadBoundariesArtifactVersionId'",
+    'Assert-RegionalS3ManagedPrefixList',
+    "'describe-managed-prefix-lists'",
+    "-Name 'OwnerId'",
+    "-cne 'AWS'",
+    'application-workload-boundaries-$workloadBoundariesTemplateSha256.yaml',
+    '$pinnedChildHashMatch.Groups[1].Value -cne $workloadBoundariesTemplateSha256',
+    "does not match the parent template's exact AllowedValue and content-addressed TemplateURL pin",
+    'bucket=$WorkloadBoundariesArtifactBucket',
+    "'get-bucket-location'",
+    "'get-bucket-versioning'",
+    "'get-object'",
+    "'--expected-bucket-owner', $ExpectedOwner",
+    "'--version-id', $VersionId",
+    "'--include-nested-stacks'",
+    'WorkloadBoundariesTemplateUrl = $workloadBoundariesTemplateUrl',
+    'WorkloadBoundariesTemplateSha256 = $workloadBoundariesTemplateSha256',
+    'WorkloadBoundariesArtifactBindingSha256 = $workloadBoundariesArtifactBindingSha256',
+    'child-template-sha256=',
+    'child-artifact-binding-sha256=',
+    "'workload-boundaries-sha256' = $workloadBoundariesTemplateSha256",
+    "'workload-boundaries-binding-sha256' = $workloadBoundariesArtifactBindingSha256",
+    '$changeSetParameterMap.Count -ne $parameterMap.Count',
+    '$reviewedParameterSha256 -cne $parameterSha256',
+    '$currentLocalChildSha256 -cne $workloadBoundariesTemplateSha256',
+    '$reviewedNonSecretControlParameters',
+    "$allowedCredentialPhases = @('A_ONLY', 'BOTH_USE_A', 'BOTH_USE_B', 'B_ONLY')",
+    'RedisOperatorMode must use exactly DISABLED or ENABLED.',
+    '$changeSetCapabilities.Count -ne 1',
+    '$parentChangeSetId',
+    '$stackId',
   ];
   for (const fragment of requiredIdentityGuards) {
     if (!source.includes(fragment)) {
@@ -2100,7 +2300,7 @@ function validateDeploymentGuard(source, errors) {
   }
 
   const acknowledgementIndex = source.indexOf(
-    '$expectedAcknowledgement = "EXECUTE REVIEWED CHANGE SET',
+    '$expectedAcknowledgement = "EXECUTE IMMUTABLE CHANGE SET',
   );
   const templateRetrievalIndex = source.indexOf("'get-template'");
   const deployInvocationIndex = source.lastIndexOf("'execute-change-set'");
@@ -2120,14 +2320,26 @@ function validateDeploymentGuard(source, errors) {
 
   if (
     !source.includes('Get-FileHash -LiteralPath $resolvedTemplate -Algorithm SHA256') ||
+    !source.includes(
+      'Get-FileHash -LiteralPath $resolvedWorkloadBoundariesTemplate -Algorithm SHA256',
+    ) ||
     !source.includes("'--description', $expectedChangeSetDescription") ||
     !source.includes('$changeSet.Description -cne $expectedChangeSetDescription') ||
-    !source.includes('Sort-Object ParameterKey') ||
-    !source.includes('$submittedTemplateSha256 -cne $templateSha256')
+    !source.includes('GetEnumerator() | Sort-Object Key') ||
+    !source.includes('$submittedTemplateSha256 -cne $templateSha256') ||
+    !source.includes('$reviewedParameterSha256 -cne $parameterSha256') ||
+    !source.includes('Assert-WorkloadBoundariesArtifact')
   ) {
     errors.push(
       'Plan and Deploy must bind the reviewed change set to exact template and parameter SHA-256 values and verify the submitted Original template.',
     );
+  }
+  for (const prohibitedArtifactMutation of ["'put-object'", "'create-bucket'", "'delete-object'"]) {
+    if (source.includes(prohibitedArtifactMutation)) {
+      errors.push(
+        `Deployment guard must remain read-only for the pre-staged workload-boundary artifact; found ${prohibitedArtifactMutation}.`,
+      );
+    }
   }
 }
 

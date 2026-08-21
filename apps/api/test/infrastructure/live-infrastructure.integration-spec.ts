@@ -6,17 +6,18 @@ import {
   GetQueueAttributesCommand,
   SQSClient,
 } from '@aws-sdk/client-sqs';
-import { Redis } from 'ioredis';
+import type { Redis } from 'ioredis';
 import { Pool } from 'pg';
 
 import { loadInfrastructureConfig } from '../../src/infrastructure/config/infrastructure.config';
 import { MigrationRunner } from '../../src/infrastructure/database/migration-runner.service';
-import { DATABASE_MIGRATION_LIST } from '../../src/infrastructure/database/migrations';
+import { DATABASE_SCHEMA_MIGRATION_LIST } from '../../src/infrastructure/database/migrations';
 import { PostgresService } from '../../src/infrastructure/database/postgres.service';
 import { InfrastructureHealthService } from '../../src/infrastructure/health/infrastructure-health.service';
 import { JobOutboxRepository } from '../../src/infrastructure/outbox/job-outbox.repository';
 import { OutboxDispatcher } from '../../src/infrastructure/outbox/outbox-dispatcher.service';
 import { TransactionalJobPublisher } from '../../src/infrastructure/outbox/transactional-job-publisher.service';
+import { createRedisClient } from '../../src/infrastructure/redis/redis.module';
 import { RedisService } from '../../src/infrastructure/redis/redis.service';
 import { SqsJobWorker } from '../../src/infrastructure/sqs/sqs-job.worker';
 import { SqsService } from '../../src/infrastructure/sqs/sqs.service';
@@ -45,13 +46,17 @@ describeWithInfrastructure('live docker-compose infrastructure', () => {
       process.env.MIGRATION_DATABASE_URL ??
       process.env.DATABASE_RUNTIME_URL ??
       process.env.DATABASE_URL ??
-      'postgresql://crypto_lending:local_only_password@localhost:5432/crypto_lending';
+      'postgresql://crypto_admin:local_admin_only@localhost:5432/crypto_lending';
     const config = loadInfrastructureConfig({
       NODE_ENV: 'test',
+      APPLICATION_WORKLOAD: 'api',
       DATABASE_RUNTIME_URL: connectionString,
       DATABASE_RUNTIME_SSL_MODE: 'disable',
-      REDIS_URL: process.env.REDIS_URL ?? 'redis://localhost:6379',
-      REDIS_KEY_PREFIX: process.env.REDIS_KEY_PREFIX ?? 'crypto-lending:test:v1:',
+      REDIS_HOST: process.env.REDIS_HOST ?? '127.0.0.1',
+      REDIS_PORT: process.env.REDIS_PORT ?? '6379',
+      REDIS_TLS: process.env.REDIS_TLS ?? 'false',
+      REDIS_USERNAME: process.env.REDIS_USERNAME ?? 'crypto_api_a',
+      REDIS_PASSWORD: process.env.REDIS_PASSWORD ?? 'local-api-current',
       AWS_REGION: process.env.AWS_REGION ?? 'us-east-1',
       SQS_ENDPOINT: process.env.SQS_ENDPOINT ?? 'http://localhost:4566',
       SQS_QUEUE_URL:
@@ -64,8 +69,12 @@ describeWithInfrastructure('live docker-compose infrastructure', () => {
       SQS_RETRY_BASE_DELAY_SECONDS: '1',
       SQS_RETRY_MAX_DELAY_SECONDS: '1',
     });
+    if (config.workload !== 'api' || !config.redis) {
+      throw new Error('Live infrastructure integration requires API Redis configuration');
+    }
+    const redisConfig = config.redis;
     requireLoopback(config.database.connectionString, 'DATABASE_RUNTIME_URL');
-    requireLoopback(config.redis.url, 'REDIS_URL');
+    requireLoopback(redisConfig.url, 'REDIS_URL');
     requireLoopback(config.sqs.endpoint ?? '', 'SQS_ENDPOINT');
     requireLoopback(config.sqs.queueUrl, 'SQS_QUEUE_URL');
     requireLoopback(config.sqs.deadLetterQueueUrl, 'SQS_DEAD_LETTER_QUEUE_URL');
@@ -85,12 +94,7 @@ describeWithInfrastructure('live docker-compose infrastructure', () => {
         max: 2,
         options: `-c search_path=${schema}`,
       });
-      redisClient = new Redis(config.redis.url, {
-        lazyConnect: true,
-        connectTimeout: config.redis.connectTimeoutMs,
-        commandTimeout: config.redis.commandTimeoutMs,
-        maxRetriesPerRequest: 1,
-      });
+      redisClient = createRedisClient(config);
       sqsClient = new SQSClient({
         region: config.sqs.region,
         ...(config.sqs.endpoint ? { endpoint: config.sqs.endpoint } : {}),
@@ -101,7 +105,7 @@ describeWithInfrastructure('live docker-compose infrastructure', () => {
       const postgres = new PostgresService(postgresPool);
       const redis = new RedisService(redisClient);
       const sqs = new SqsService(sqsClient, config);
-      const migrations = new MigrationRunner(postgresPool, DATABASE_MIGRATION_LIST);
+      const migrations = new MigrationRunner(postgresPool, DATABASE_SCHEMA_MIGRATION_LIST);
       const health = new InfrastructureHealthService(postgres, migrations, redis, sqs);
 
       await expect(migrations.up()).resolves.toEqual(['0001', '0002', '0003', '0004']);

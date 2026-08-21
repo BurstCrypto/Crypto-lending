@@ -5,6 +5,7 @@ export function testInfrastructureConfig(
   overrides: Partial<InfrastructureConfig['sqs']> = {},
 ): InfrastructureConfig {
   return {
+    workload: 'api',
     database: {
       connectionString: 'postgresql://unused',
       connectionTimeoutMs: 100,
@@ -17,7 +18,6 @@ export function testInfrastructureConfig(
     },
     redis: {
       url: 'redis://unused',
-      keyPrefix: 'crypto-lending:test:v1:',
       connectTimeoutMs: 100,
       commandTimeoutMs: 100,
     },

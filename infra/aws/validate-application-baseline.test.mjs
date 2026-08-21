@@ -10,6 +10,9 @@ import { validateSqsFoundationSource } from './validate-sqs-foundation.mjs';
 const validatorPath = join(import.meta.dirname, 'validate-application-baseline.mjs');
 const templatePath = join(import.meta.dirname, 'application-baseline.yaml');
 const templateSource = readFileSync(templatePath, 'utf8').replace(/\r\n/g, '\n');
+const validatorSource = readFileSync(validatorPath, 'utf8').replace(/\r\n/g, '\n');
+const deploymentGuardPath = join(import.meta.dirname, 'invoke-application-baseline.ps1');
+const deploymentGuardSource = readFileSync(deploymentGuardPath, 'utf8').replace(/\r\n/g, '\n');
 const sqsFoundationPath = join(import.meta.dirname, 'sqs-foundation.yaml');
 const sqsFoundationSource = readFileSync(sqsFoundationPath, 'utf8').replace(/\r\n/g, '\n');
 
@@ -72,9 +75,26 @@ test('accepts the repository no-external-egress baseline and records the DNS res
   assert.equal(status, 0);
   assert.equal(report.ok, true);
   assert.deepEqual(report.errors, []);
-  assert.equal(report.residualLimitations.length, 1);
+  assert.equal(report.residualLimitations.length, 4);
   assert.match(report.residualLimitations[0], /port 53 to the VPC CIDR/);
   assert.match(report.residualLimitations[0], /cannot prove/);
+  assert.match(report.residualLimitations[1], /REDIS_OPERATOR_EXECUTION_ARTIFACT_UNRESOLVED/);
+  assert.match(report.residualLimitations[2], /FIXED_SLOT_CREDENTIAL_REGENERATION_UNRESOLVED/);
+  assert.match(report.residualLimitations[3], /FAILED_AUTH_MONITORING_UNRESOLVED/);
+});
+
+test('pins immutable child bytes and the AWS-owned regional S3 delivery boundary', () => {
+  for (const fragment of [
+    'Assert-RegionalS3ManagedPrefixList',
+    "'describe-managed-prefix-lists'",
+    "-Name 'OwnerId'",
+    "-cne 'AWS'",
+    '$pinnedChildHashMatch.Groups[1].Value -cne $workloadBoundariesTemplateSha256',
+    "does not match the parent template's exact AllowedValue and content-addressed TemplateURL pin",
+  ]) {
+    assert.ok(deploymentGuardSource.includes(fragment), `Deployment guard is missing ${fragment}`);
+    assert.ok(validatorSource.includes(fragment), `Static guard contract is missing ${fragment}`);
+  }
 });
 
 test('standalone SQS foundation denies insecure transport to both queues', () => {
@@ -256,7 +276,10 @@ test('rejects an additional ECS task security group', () => {
       '          SecurityGroups:\n            - !Ref WebTaskSecurityGroup\n            - !Ref LoadBalancerSecurityGroup\n          Subnets:',
     ),
   );
-  assertRejected(source, /WebService must use only the reviewed WebTaskSecurityGroup identity/);
+  assertRejected(
+    source,
+    /WebService must use only the reviewed !Ref WebTaskSecurityGroup identity/,
+  );
 });
 
 test('rejects an additional ECS task subnet', () => {
@@ -480,25 +503,121 @@ test('rejects same-resource application egress mutations and any unreviewed prop
   );
 });
 
+test('pins the versioned child artifact, provenance, and exact nested input contract', () => {
+  assertRejected(
+    mutate((source) =>
+      source.replace(
+        'application-workload-boundaries-93273bb3bf26f7d21702da2d4b155132db765ce3f123134341e2762ae521b3f9',
+        `application-workload-boundaries-${'0'.repeat(64)}`,
+      ),
+    ),
+    /WorkloadBoundariesTemplateUrl must be supplied explicitly as the reviewed SHA-256-named, versioned S3 object URL/,
+  );
+  assertRejected(
+    mutate((source) =>
+      source.replace(
+        'AllowedValues: [93273bb3bf26f7d21702da2d4b155132db765ce3f123134341e2762ae521b3f9]',
+        `AllowedValues: [${'0'.repeat(64)}]`,
+      ),
+    ),
+    /WorkloadBoundariesTemplateSha256 must be an explicit String without a default/,
+  );
+  assertRejected(
+    mutate((source) =>
+      source.replace(
+        "  WorkloadBoundariesArtifactBindingSha256:\n    Type: String\n    AllowedPattern: '^[a-f0-9]{64}$'",
+        `  WorkloadBoundariesArtifactBindingSha256:\n    Type: String\n    Default: ${'0'.repeat(64)}\n    AllowedPattern: '^[a-f0-9]{64}$'`,
+      ),
+    ),
+    /WorkloadBoundariesArtifactBindingSha256 must be an explicit lowercase SHA-256/,
+  );
+  assertRejected(
+    mutate((source) =>
+      source.replace(
+        'DeliveryArtifactBindingSha256: !Ref WorkloadBoundariesArtifactBindingSha256',
+        'DeliveryArtifactBindingSha256: !Ref WorkloadBoundariesTemplateSha256',
+      ),
+    ),
+    /WorkloadBoundaries must preserve the exact reviewed child input contract/,
+  );
+  assertRejected(
+    mutate((source) =>
+      source.replace(
+        '          Value: !Ref WorkloadBoundariesArtifactBindingSha256',
+        '          Value: !Ref WorkloadBoundariesTemplateSha256',
+      ),
+    ),
+    /WorkloadBoundaries must preserve the exact reviewed child input contract/,
+  );
+});
+
+test('rejects legacy shared Redis composition and worker Redis drift', () => {
+  assertRejected(
+    mutate((source) =>
+      source.replace(
+        '      AtRestEncryptionEnabled: true',
+        "      AtRestEncryptionEnabled: true\n      AuthToken: '{{resolve:secretsmanager:legacy}}'",
+      ),
+    ),
+    /RedisReplicationGroup must not declare AuthToken/,
+  );
+  assertRejected(
+    mutate((source) =>
+      source.replace(
+        '            - { Name: APPLICATION_WORKLOAD, Value: worker }',
+        '            - { Name: APPLICATION_WORKLOAD, Value: worker }\n            - { Name: REDIS_OPERATOR_TOKEN, Value: prohibited }',
+      ),
+    ),
+    /WorkerTaskDefinition must not receive any Redis|must remain a Redis nonconsumer/,
+  );
+});
+
+test('binds executable identity and exact image repository per workload', () => {
+  assertRejected(
+    mutate((source) =>
+      source.replace(
+        '            - { Name: APPLICATION_WORKLOAD, Value: api }',
+        '            - { Name: APPLICATION_WORKLOAD, Value: worker }',
+      ),
+    ),
+    /ApiTaskDefinition must bind exactly one APPLICATION_WORKLOAD=api/,
+  );
+  assertRejected(
+    mutate((source) =>
+      source.replace(
+        '            - { Name: APP_ENV, Value: !Ref EnvironmentName }',
+        '            - { Name: APP_ENV, Value: staging }',
+      ),
+    ),
+    /ApiTaskDefinition must bind exactly one APP_ENV environment value to !Ref EnvironmentName/,
+  );
+  assertRejected(
+    mutate((source) =>
+      source.replace('/crypto-lending-worker@sha256:', '/crypto-lending-api@sha256:'),
+    ),
+    /WorkerImageUri must accept only the exact crypto-lending-worker ECR repository/,
+  );
+});
+
 test('rejects crossing the runtime and migration database credential boundary', () => {
   assertRejected(
     mutate((source) =>
       source.replace(
-        '                  - !Ref DatabaseRuntimeSecret',
-        '                  - !Ref DatabaseCredentialsSecret',
+        "ValueFrom: !Sub '${WorkloadBoundaries.Outputs.ApiDatabaseActiveSecretArn}:password::'",
+        "ValueFrom: !Sub '${WorkloadBoundaries.Outputs.MigrationDatabaseCredentialSecretArn}:password::'",
       ),
     ),
-    /BackendTaskExecutionRole must read the runtime database secret and must not read the migration\/admin secret/,
+    /ApiTaskDefinition must preserve its exact active workload-scoped ECS secret injection/,
   );
 
   assertRejected(
     mutate((source) =>
       source.replace(
-        "ValueFrom: !Sub '${DatabaseRuntimeSecret}:password::'",
-        "ValueFrom: !Sub '${DatabaseCredentialsSecret}:password::'",
+        '!GetAtt WorkloadBoundaries.Outputs.WorkerDatabaseActiveUsername',
+        '!GetAtt WorkloadBoundaries.Outputs.ApiDatabaseActiveUsername',
       ),
     ),
-    /must not reference the database migration\/admin secret/,
+    /WorkerTaskDefinition must bind the reviewed non-secret runtime database username/,
   );
 
   assertRejected(
@@ -525,10 +644,10 @@ test('rejects crossing the runtime and migration database credential boundary', 
     mutate((source) =>
       source.replace(
         '${DatabaseCredentialsSecret}:SecretString:username',
-        '${DatabaseRuntimeSecret}:SecretString:username',
+        '${WorkloadBoundaries.Outputs.MigrationDatabaseCredentialSecretArn}:SecretString:username',
       ),
     ),
-    /must preserve DatabaseCredentialsSecret as its migration\/admin master credential/,
+    /must preserve DatabaseCredentialsSecret as its bootstrap master credential/,
   );
 });
 
@@ -556,11 +675,11 @@ test('rejects widening execution-role and task-role capability matrices', () => 
   assertRejected(
     mutate((source) =>
       source.replace(
-        '                  - !Ref RedisAuthSecret',
-        '                  - !Ref RedisAuthSecret\n                  - !Ref DatabaseCredentialsSecret',
+        "ValueFrom: !Sub '${WorkloadBoundaries.Outputs.RedisActiveSecretArn}:password::'",
+        "ValueFrom: !Sub '${WorkloadBoundaries.Outputs.MigrationDatabaseCredentialSecretArn}:password::'",
       ),
     ),
-    /exact backend log-write and runtime-secret action\/resource matrix/,
+    /ApiTaskDefinition must preserve its exact active workload-scoped ECS secret injection/,
   );
 
   assertRejected(
@@ -622,11 +741,11 @@ test('rejects task-role remapping and secret injection outside the exact service
   assertRejected(
     mutate((source) =>
       source.replace(
-        "{ Name: REDIS_AUTH_TOKEN, ValueFrom: !Sub '${RedisAuthSecret}:authToken::' }",
-        "{ Name: REDIS_AUTH_TOKEN, ValueFrom: !Sub '${DatabaseCredentialsSecret}:password::' }",
+        "ValueFrom: !Sub '${WorkloadBoundaries.Outputs.RedisActiveSecretArn}:password::'",
+        "ValueFrom: !Sub '${WorkloadBoundaries.Outputs.ApiDatabaseActiveSecretArn}:password::'",
       ),
     ),
-    /exact runtime-database and Redis ECS secret injection with no migration\/admin secret/,
+    /ApiTaskDefinition must preserve its exact active workload-scoped ECS secret injection/,
   );
 
   assertRejected(
@@ -647,7 +766,7 @@ test('rejects task-role remapping and secret injection outside the exact service
           '            - { Name: APP_VERSION, Value: !Ref ApplicationVersion }',
           '          Secrets:',
           '            - Name: DATABASE_RUNTIME_PASSWORD',
-          "              ValueFrom: !Sub '${DatabaseRuntimeSecret}:password::'",
+          "              ValueFrom: !Sub '${WorkloadBoundaries.Outputs.ApiDatabaseActiveSecretArn}:password::'",
         ].join('\n'),
       ),
     ),
@@ -726,9 +845,9 @@ test('rejects KMS principal, source, context, and ViaService policy widening', (
       /environment-scoped encryption-context key policy/,
     ],
     [
-      'kms:ViaService: !Sub secretsmanager.${AWS::Region}.${AWS::URLSuffix}',
-      'kms:ViaService: !Sub sqs.${AWS::Region}.${AWS::URLSuffix}',
-      /Secrets Manager-only KMS decryption/,
+      'ApplicationDataKeyArn: !GetAtt ApplicationDataKey.Arn',
+      'ApplicationDataKeyArn: !GetAtt ApplicationLogsKey.Arn',
+      /exact reviewed child input contract/,
     ],
     [
       'kms:ViaService: !Sub sqs.${AWS::Region}.${AWS::URLSuffix}',
@@ -751,9 +870,9 @@ test('rejects durable-service encryption and queue-policy downgrades semanticall
       /RedisReplicationGroup requires TransitEncryptionMode to equal required/,
     ],
     [
-      "      AuthToken: !Sub '{{resolve:secretsmanager:${RedisAuthSecret}:SecretString:authToken}}'",
-      '      AuthToken: plaintext-is-prohibited',
-      /RedisReplicationGroup requires AuthToken to equal/,
+      '      UserGroupIds:\n        - !GetAtt WorkloadBoundaries.Outputs.RedisApiUserGroupId',
+      '      UserGroupIds:\n        - !Ref WebTaskSecurityGroup',
+      /exact API-only ACL user group/,
     ],
     [
       '      KmsMasterKeyId: !GetAtt ApplicationDataKey.Arn',

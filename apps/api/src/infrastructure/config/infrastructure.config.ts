@@ -2,6 +2,11 @@ import { X509Certificate } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { createSecureContext } from 'node:tls';
 
+import {
+  configuredRedisEnvironmentVariableNames,
+  hasRedisEnvironmentVariables,
+} from './redis-environment';
+
 export interface DatabaseInfrastructureConfig {
   connectionString: string;
   connectionTimeoutMs: number;
@@ -11,14 +16,17 @@ export interface DatabaseInfrastructureConfig {
   poolMax: number;
   statementTimeoutMs: number;
   ssl: false | { rejectUnauthorized: boolean; ca?: string };
+  sessionRole?: string;
 }
 
 export interface RedisInfrastructureConfig {
   url: string;
-  keyPrefix: string;
+  username?: string;
   connectTimeoutMs: number;
   commandTimeoutMs: number;
 }
+
+export type ApplicationWorkload = 'api' | 'worker';
 
 export interface SqsInfrastructureConfig {
   region: string;
@@ -35,8 +43,9 @@ export interface SqsInfrastructureConfig {
 }
 
 export interface InfrastructureConfig {
+  workload: ApplicationWorkload;
   database: DatabaseInfrastructureConfig;
-  redis: RedisInfrastructureConfig;
+  redis?: RedisInfrastructureConfig;
   sqs: SqsInfrastructureConfig;
 }
 
@@ -66,6 +75,42 @@ function optional(env: NodeJS.ProcessEnv, name: string): string | undefined {
 
 function isProduction(env: NodeJS.ProcessEnv): boolean {
   return env.NODE_ENV?.trim().toLowerCase() === 'production';
+}
+
+function assertNoProductionTlsVerificationOverride(env: NodeJS.ProcessEnv): void {
+  if (isProduction(env) && env.NODE_TLS_REJECT_UNAUTHORIZED !== undefined) {
+    throw new Error(
+      'Production processes must not set NODE_TLS_REJECT_UNAUTHORIZED; certificate verification is pinned',
+    );
+  }
+}
+
+function applicationWorkload(env: NodeJS.ProcessEnv): ApplicationWorkload {
+  const configured = env.APPLICATION_WORKLOAD;
+  if (configured === undefined || configured === '') {
+    if (isProduction(env)) {
+      throw new Error('Production runtime requires APPLICATION_WORKLOAD=api or worker');
+    }
+    return 'api';
+  }
+  if (configured !== 'api' && configured !== 'worker') {
+    throw new Error('APPLICATION_WORKLOAD must be exactly api or worker');
+  }
+  return configured;
+}
+
+function applicationEnvironment(env: NodeJS.ProcessEnv): string | undefined {
+  const configured = optional(env, 'APP_ENV');
+  if (configured === undefined) {
+    if (isProduction(env)) {
+      throw new Error('Production runtime requires APP_ENV');
+    }
+    return undefined;
+  }
+  if (!/^(?:dev|test|qa|sandbox|staging)(?:-[a-z0-9]+)*$/u.test(configured)) {
+    throw new Error('APP_ENV must be a canonical reviewed environment name');
+  }
+  return configured;
 }
 
 const PRODUCTION_AWS_CREDENTIAL_OVERRIDES = [
@@ -166,7 +211,8 @@ interface DatabaseConnectionVariables {
   username: string;
   password: string;
   sslMode: string;
-  expectedProductionUsername?: string;
+  expectedProductionUsernamePattern?: RegExp;
+  expectedProductionUsernameDescription?: string;
 }
 
 const LEGACY_DATABASE_VARIABLES: DatabaseConnectionVariables = {
@@ -187,7 +233,6 @@ const RUNTIME_DATABASE_VARIABLES: DatabaseConnectionVariables = {
   username: 'DATABASE_RUNTIME_USERNAME',
   password: 'DATABASE_RUNTIME_PASSWORD',
   sslMode: 'DATABASE_RUNTIME_SSL_MODE',
-  expectedProductionUsername: 'crypto_runtime',
 };
 
 const MIGRATION_DATABASE_VARIABLES: DatabaseConnectionVariables = {
@@ -198,8 +243,18 @@ const MIGRATION_DATABASE_VARIABLES: DatabaseConnectionVariables = {
   username: 'MIGRATION_DATABASE_USERNAME',
   password: 'MIGRATION_DATABASE_PASSWORD',
   sslMode: 'MIGRATION_DATABASE_SSL_MODE',
-  expectedProductionUsername: 'crypto_admin',
+  expectedProductionUsernamePattern: /^crypto_migration$/u,
+  expectedProductionUsernameDescription: 'crypto_migration',
 };
+
+function runtimeDatabaseVariables(workload: ApplicationWorkload): DatabaseConnectionVariables {
+  const loginPrefix = workload === 'api' ? 'crypto_api_login_' : 'crypto_worker_login_';
+  return {
+    ...RUNTIME_DATABASE_VARIABLES,
+    expectedProductionUsernamePattern: new RegExp(`^${loginPrefix}[a-z0-9]{1,32}$`, 'u'),
+    expectedProductionUsernameDescription: `${loginPrefix}<rotation-id>`,
+  };
+}
 
 function connectionVariableNames(variables: DatabaseConnectionVariables): readonly string[] {
   return [
@@ -236,16 +291,17 @@ function databaseConnectionString(
     }
     const normalizedUrl = productionDatabaseUrl(directUrl, variables.directUrl);
     const parsedUrl = new URL(normalizedUrl);
-    const expectedUsername = variables.expectedProductionUsername;
+    const expectedUsernamePattern = variables.expectedProductionUsernamePattern;
+    const expectedUsernameDescription = variables.expectedProductionUsernameDescription;
     let username: string;
     try {
       username = decodeURIComponent(parsedUrl.username);
     } catch {
       throw new Error(`Production ${variables.directUrl} username must use valid URL encoding`);
     }
-    if (!expectedUsername || username !== expectedUsername || !parsedUrl.password) {
+    if (!expectedUsernamePattern?.test(username) || !parsedUrl.password) {
       throw new Error(
-        `Production ${variables.directUrl} must contain the reviewed ${expectedUsername ?? 'scoped'} username and a password`,
+        `Production ${variables.directUrl} must contain the reviewed ${expectedUsernameDescription ?? 'scoped'} username and a password`,
       );
     }
     return normalizedUrl;
@@ -264,19 +320,111 @@ function databaseConnectionString(
   const password = requiredSensitive(env, variables.password);
   if (
     isProduction(env) &&
-    variables.expectedProductionUsername &&
-    username !== variables.expectedProductionUsername
+    variables.expectedProductionUsernamePattern &&
+    !variables.expectedProductionUsernamePattern.test(username)
   ) {
     throw new Error(
-      `Production ${variables.username} must equal ${variables.expectedProductionUsername}`,
+      `Production ${variables.username} must match ${variables.expectedProductionUsernameDescription ?? 'the reviewed scoped identity'}`,
     );
   }
   return `postgresql://${encodeURIComponent(username)}:${encodeURIComponent(password)}@${hostname}:${port}/${encodeURIComponent(database)}`;
 }
 
-const REDIS_COMPONENT_NAMES = ['REDIS_HOST', 'REDIS_PORT', 'REDIS_AUTH_TOKEN'] as const;
+const REDIS_COMPONENT_NAMES = [
+  'REDIS_HOST',
+  'REDIS_PORT',
+  'REDIS_TLS',
+  'REDIS_USERNAME',
+  'REDIS_PASSWORD',
+] as const;
 
-function redisConnectionString(env: NodeJS.ProcessEnv): string {
+const REDIS_ENVIRONMENT_VARIABLES = [
+  'REDIS_URL',
+  ...REDIS_COMPONENT_NAMES,
+  'REDIS_AUTH_TOKEN',
+  'REDIS_KEY_PREFIX',
+  'REDIS_CONNECT_TIMEOUT_MS',
+  'REDIS_COMMAND_TIMEOUT_MS',
+] as const;
+
+const REVIEWED_REDIS_ENVIRONMENT_VARIABLES = new Set<string>(REDIS_ENVIRONMENT_VARIABLES);
+const PRIVILEGED_DATABASE_ENVIRONMENT_VARIABLE =
+  /^(?:DATABASE|POSTGRES|RDS)_(?:ADMIN|BOOTSTRAP|MASTER)(?:_|$)/u;
+
+function configuredEnvironmentVariableNamesWithPrefix(
+  env: NodeJS.ProcessEnv,
+  prefix: string,
+): readonly string[] {
+  return Object.keys(env).filter(
+    (variableName) => variableName.startsWith(prefix) && env[variableName] !== undefined,
+  );
+}
+
+function hasPrivilegedDatabaseEnvironmentVariables(env: NodeJS.ProcessEnv): boolean {
+  return Object.keys(env).some(
+    (variableName) =>
+      PRIVILEGED_DATABASE_ENVIRONMENT_VARIABLE.test(variableName) &&
+      env[variableName] !== undefined,
+  );
+}
+
+function assertNoUnknownProductionRedisVariables(env: NodeJS.ProcessEnv): void {
+  const unknown = configuredRedisEnvironmentVariableNames(env).filter(
+    (variableName) => !REVIEWED_REDIS_ENVIRONMENT_VARIABLES.has(variableName),
+  );
+  if (unknown.length > 0) {
+    throw new Error('Production API must not receive an unreviewed REDIS_* environment variable');
+  }
+}
+
+function redisUsername(value: string, production: boolean, expectedEnvironment?: string): string {
+  let username: string;
+  try {
+    username = decodeURIComponent(value);
+  } catch {
+    throw new Error('REDIS_USERNAME must use valid URL encoding');
+  }
+  if (
+    production &&
+    (!expectedEnvironment ||
+      (username !== `crypto_api_${expectedEnvironment}_a` &&
+        username !== `crypto_api_${expectedEnvironment}_b`))
+  ) {
+    throw new Error('Production API Redis username must match the active APP_ENV slot');
+  }
+  if (username && !/^[A-Za-z][A-Za-z0-9_-]{0,63}$/u.test(username)) {
+    throw new Error('REDIS_USERNAME must be a canonical ACL username');
+  }
+  return username;
+}
+
+function redisTlsEnabled(env: NodeJS.ProcessEnv): boolean {
+  const value = optional(env, 'REDIS_TLS');
+  if (value === undefined) {
+    if (isProduction(env)) {
+      throw new Error('Production managed Redis components require REDIS_TLS=true');
+    }
+    return false;
+  }
+  if (value !== 'true' && value !== 'false') {
+    throw new Error('REDIS_TLS must be exactly true or false');
+  }
+  if (isProduction(env) && value !== 'true') {
+    throw new Error('Production managed Redis components require REDIS_TLS=true');
+  }
+  return value === 'true';
+}
+
+function redisConnection(
+  env: NodeJS.ProcessEnv,
+  expectedEnvironment?: string,
+): Pick<RedisInfrastructureConfig, 'url' | 'username'> {
+  if (isProduction(env) && env.REDIS_AUTH_TOKEN !== undefined) {
+    throw new Error('Production API must use REDIS_PASSWORD; REDIS_AUTH_TOKEN is forbidden');
+  }
+  if (isProduction(env) && env.REDIS_KEY_PREFIX !== undefined) {
+    throw new Error('Production API must not receive REDIS_KEY_PREFIX; Redis is health-only');
+  }
   const directUrl = optional(env, 'REDIS_URL');
   if (directUrl) {
     if (isProduction(env) && /[\0\r\n]/u.test(directUrl)) {
@@ -302,6 +450,9 @@ function redisConnectionString(env: NodeJS.ProcessEnv): string {
       throw new Error('Production REDIS_URL must not contain a query or fragment');
     }
     if (isProduction(env)) {
+      if ((parsedUrl.pathname !== '' && parsedUrl.pathname !== '/') || parsedUrl.port !== '6379') {
+        throw new Error('Production REDIS_URL must use database 0 and the reviewed port 6379');
+      }
       let password: string;
       try {
         password = decodeURIComponent(parsedUrl.password);
@@ -311,16 +462,31 @@ function redisConnectionString(env: NodeJS.ProcessEnv): string {
       if (!password.trim() || /[\0\r\n]/u.test(password)) {
         throw new Error('Production REDIS_URL must include a non-empty, valid password');
       }
+      const username = redisUsername(parsedUrl.username, true, expectedEnvironment);
+      return { url: parsedUrl.toString(), username };
     }
     // ioredis detects rediss:// case-sensitively. URL serialization normalizes
     // the protocol so a valid mixed-case input cannot silently disable TLS.
-    return parsedUrl.toString();
+    const username = redisUsername(parsedUrl.username, false, expectedEnvironment);
+    return { url: parsedUrl.toString(), ...(username ? { username } : {}) };
   }
 
   const hostname = serviceHostname(env, 'REDIS_HOST');
   const port = requiredPort(env, 'REDIS_PORT');
-  const authToken = requiredSensitive(env, 'REDIS_AUTH_TOKEN');
-  return `rediss://:${encodeURIComponent(authToken)}@${hostname}:${port}`;
+  if (isProduction(env) && port !== 6379) {
+    throw new Error('Production managed Redis components must use the reviewed port 6379');
+  }
+  const username = redisUsername(
+    required(env, 'REDIS_USERNAME'),
+    isProduction(env),
+    expectedEnvironment,
+  );
+  const password = requiredSensitive(env, 'REDIS_PASSWORD');
+  const protocol = redisTlsEnabled(env) ? 'rediss' : 'redis';
+  return {
+    url: `${protocol}://${encodeURIComponent(username)}:${encodeURIComponent(password)}@${hostname}:${port}`,
+    username,
+  };
 }
 
 function productionSqsQueueUrl(value: string, name: string, region: string): string {
@@ -475,6 +641,7 @@ function databaseSettings(
   env: NodeJS.ProcessEnv,
   variables: DatabaseConnectionVariables,
   tuningPrefix: 'DATABASE' | 'MIGRATION_DATABASE',
+  sessionRole?: string,
 ): DatabaseInfrastructureConfig {
   const migration = tuningPrefix === 'MIGRATION_DATABASE';
   return {
@@ -501,6 +668,7 @@ function databaseSettings(
       migration ? 43_200_000 : 300_000,
     ),
     ssl: databaseSsl(env, variables),
+    ...(sessionRole ? { sessionRole } : {}),
   };
 }
 
@@ -514,22 +682,33 @@ function assertNoConfiguredVariables(
   }
 }
 
-function runtimeDatabaseSettings(env: NodeJS.ProcessEnv): DatabaseInfrastructureConfig {
+function runtimeDatabaseSettings(
+  env: NodeJS.ProcessEnv,
+  workload: ApplicationWorkload,
+): DatabaseInfrastructureConfig {
   const scopedConfigured = hasAny(env, connectionVariableNames(RUNTIME_DATABASE_VARIABLES));
   const legacyConfigured = hasAny(env, connectionVariableNames(LEGACY_DATABASE_VARIABLES));
 
   if (isProduction(env)) {
-    assertNoConfiguredVariables(
-      env,
-      MIGRATION_DATABASE_VARIABLES,
-      'Production runtime must not receive MIGRATION_DATABASE_* connection variables',
-    );
+    if (configuredEnvironmentVariableNamesWithPrefix(env, 'MIGRATION_DATABASE_').length > 0) {
+      throw new Error('Production runtime must not receive any MIGRATION_DATABASE_* variable');
+    }
+    if (hasPrivilegedDatabaseEnvironmentVariables(env)) {
+      throw new Error(
+        'Production runtime must not receive database bootstrap, master, or admin variables',
+      );
+    }
     assertNoConfiguredVariables(
       env,
       LEGACY_DATABASE_VARIABLES,
       'Production runtime requires DATABASE_RUNTIME_* connection variables; legacy DATABASE_* credentials are not allowed',
     );
-    return databaseSettings(env, RUNTIME_DATABASE_VARIABLES, 'DATABASE');
+    return databaseSettings(
+      env,
+      runtimeDatabaseVariables(workload),
+      'DATABASE',
+      workload === 'api' ? 'crypto_api_runtime' : 'crypto_worker_runtime',
+    );
   }
 
   if (scopedConfigured && legacyConfigured) {
@@ -539,8 +718,13 @@ function runtimeDatabaseSettings(env: NodeJS.ProcessEnv): DatabaseInfrastructure
   }
   return databaseSettings(
     env,
-    scopedConfigured ? RUNTIME_DATABASE_VARIABLES : LEGACY_DATABASE_VARIABLES,
+    scopedConfigured ? runtimeDatabaseVariables(workload) : LEGACY_DATABASE_VARIABLES,
     'DATABASE',
+    scopedConfigured
+      ? workload === 'api'
+        ? 'crypto_api_runtime'
+        : 'crypto_worker_runtime'
+      : undefined,
   );
 }
 
@@ -555,26 +739,50 @@ export function loadMigrationDatabaseConfig(
   const migrationConfigured = hasAny(env, connectionVariableNames(MIGRATION_DATABASE_VARIABLES));
 
   if (isProduction(env)) {
-    assertNoConfiguredVariables(
-      env,
-      RUNTIME_DATABASE_VARIABLES,
-      'Production migration tasks must not receive DATABASE_RUNTIME_* connection variables',
-    );
+    assertNoProductionTlsVerificationOverride(env);
+    if (env.APPLICATION_WORKLOAD !== undefined) {
+      throw new Error('Production migration tasks must not receive APPLICATION_WORKLOAD');
+    }
+    if (hasRedisEnvironmentVariables(env)) {
+      throw new Error(
+        'Production migration tasks must not receive Redis configuration or credentials',
+      );
+    }
+    if (configuredEnvironmentVariableNamesWithPrefix(env, 'DATABASE_RUNTIME_').length > 0) {
+      throw new Error(
+        'Production migration tasks must not receive any DATABASE_RUNTIME_* variable',
+      );
+    }
+    if (hasPrivilegedDatabaseEnvironmentVariables(env)) {
+      throw new Error(
+        'Production migration tasks must not receive database bootstrap, master, or admin variables',
+      );
+    }
     assertNoConfiguredVariables(
       env,
       LEGACY_DATABASE_VARIABLES,
       'Production migration tasks require MIGRATION_DATABASE_* connection variables; legacy DATABASE_* credentials are not allowed',
     );
-    return databaseSettings(env, MIGRATION_DATABASE_VARIABLES, 'MIGRATION_DATABASE');
+    return databaseSettings(
+      env,
+      MIGRATION_DATABASE_VARIABLES,
+      'MIGRATION_DATABASE',
+      'crypto_schema_owner',
+    );
   }
 
   if (migrationConfigured) {
-    return databaseSettings(env, MIGRATION_DATABASE_VARIABLES, 'MIGRATION_DATABASE');
+    return databaseSettings(
+      env,
+      MIGRATION_DATABASE_VARIABLES,
+      'MIGRATION_DATABASE',
+      'crypto_schema_owner',
+    );
   }
 
   // Compatibility for existing local-only environments. Production never
   // reaches this path, and checked-in examples/CI set MIGRATION_DATABASE_URL.
-  const runtime = runtimeDatabaseSettings(env);
+  const runtime = runtimeDatabaseSettings(env, applicationWorkload(env));
   return {
     ...runtime,
     lockTimeoutMs: positiveInteger(env, 'MIGRATION_DATABASE_LOCK_TIMEOUT_MS', 10_000, 300_000),
@@ -597,8 +805,15 @@ export function loadInfrastructureConfig(
   env: NodeJS.ProcessEnv = process.env,
 ): InfrastructureConfig {
   const production = isProduction(env);
+  const workload = applicationWorkload(env);
+  const environment = applicationEnvironment(env);
   if (production) {
+    assertNoProductionTlsVerificationOverride(env);
     assertNoProductionAwsCredentialOverrides(env);
+    if (workload === 'worker' && hasRedisEnvironmentVariables(env)) {
+      throw new Error('Production worker must not receive Redis configuration or credentials');
+    }
+    if (workload === 'api') assertNoUnknownProductionRedisVariables(env);
   }
   const region = env.AWS_REGION?.trim() || 'us-east-1';
   if (!/^[a-z0-9]+(?:-[a-z0-9]+){2,}$/u.test(region)) {
@@ -622,14 +837,21 @@ export function loadInfrastructureConfig(
     throw new Error('SQS_QUEUE_URL and SQS_DEAD_LETTER_QUEUE_URL must be different');
   }
 
+  const redisConnectionSettings =
+    workload === 'api' ? redisConnection(env, environment) : undefined;
+
   return {
-    database: runtimeDatabaseSettings(env),
-    redis: {
-      url: redisConnectionString(env),
-      keyPrefix: required(env, 'REDIS_KEY_PREFIX'),
-      connectTimeoutMs: positiveInteger(env, 'REDIS_CONNECT_TIMEOUT_MS', 5_000, 60_000),
-      commandTimeoutMs: positiveInteger(env, 'REDIS_COMMAND_TIMEOUT_MS', 2_000, 60_000),
-    },
+    workload,
+    database: runtimeDatabaseSettings(env, workload),
+    ...(redisConnectionSettings
+      ? {
+          redis: {
+            ...redisConnectionSettings,
+            connectTimeoutMs: positiveInteger(env, 'REDIS_CONNECT_TIMEOUT_MS', 5_000, 60_000),
+            commandTimeoutMs: positiveInteger(env, 'REDIS_COMMAND_TIMEOUT_MS', 2_000, 60_000),
+          },
+        }
+      : {}),
     sqs: {
       region,
       ...(endpoint ? { endpoint } : {}),

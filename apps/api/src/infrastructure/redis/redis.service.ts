@@ -3,60 +3,58 @@ import type { Redis } from 'ioredis';
 
 import { REDIS_CLIENT } from './redis.tokens';
 
-export interface RedisSetOptions {
-  ttlSeconds?: number;
-  onlyIfAbsent?: boolean;
+export type RedisFailureKind =
+  | 'authentication rejected'
+  | 'operation not permitted'
+  | 'operation timed out'
+  | 'service unavailable'
+  | 'operation failed';
+
+export class RedisOperationError extends Error {
+  constructor(
+    operation: string,
+    readonly kind: RedisFailureKind,
+  ) {
+    super(`Redis ${operation} failed: ${kind}`);
+    this.name = 'RedisOperationError';
+  }
+}
+
+function redisFailureKind(error: unknown): RedisFailureKind {
+  const message = error instanceof Error ? error.message : '';
+  if (/WRONGPASS|NOAUTH|AUTH failed|invalid username-password/iu.test(message)) {
+    return 'authentication rejected';
+  }
+  if (/NOPERM|permission/iu.test(message)) {
+    return 'operation not permitted';
+  }
+  if (/timeout|timed out|ETIMEDOUT/iu.test(message)) {
+    return 'operation timed out';
+  }
+  if (/ECONN|EHOST|ENET|socket|connection|stream/iu.test(message)) {
+    return 'service unavailable';
+  }
+  return 'operation failed';
 }
 
 @Injectable()
 export class RedisService implements OnApplicationShutdown {
   constructor(@Inject(REDIS_CLIENT) private readonly client: Redis) {}
 
-  async get(key: string): Promise<string | null> {
-    return this.client.get(key);
-  }
-
-  async set(key: string, value: string, options: RedisSetOptions = {}): Promise<boolean> {
-    if (options.ttlSeconds !== undefined) {
-      if (!Number.isInteger(options.ttlSeconds) || options.ttlSeconds < 1) {
-        throw new Error('Redis ttlSeconds must be a positive integer');
-      }
-      const result = options.onlyIfAbsent
-        ? await this.client.set(key, value, 'EX', options.ttlSeconds, 'NX')
-        : await this.client.set(key, value, 'EX', options.ttlSeconds);
-      return result === 'OK';
-    }
-
-    const result = options.onlyIfAbsent
-      ? await this.client.set(key, value, 'NX')
-      : await this.client.set(key, value);
-    return result === 'OK';
-  }
-
-  async getJson<T>(key: string): Promise<T | null> {
-    const value = await this.get(key);
-    return value === null ? null : (JSON.parse(value) as T);
-  }
-
-  async setJson<T>(key: string, value: T, options: RedisSetOptions = {}): Promise<boolean> {
-    return this.set(key, JSON.stringify(value), options);
-  }
-
-  async delete(...keys: string[]): Promise<number> {
-    return keys.length === 0 ? 0 : this.client.del(...keys);
-  }
-
   async healthCheck(): Promise<void> {
-    const response = await this.client.ping();
+    let response: string;
+    try {
+      response = await this.client.ping();
+    } catch (error) {
+      throw new RedisOperationError('PING', redisFailureKind(error));
+    }
     if (response !== 'PONG') {
-      throw new Error('Redis PING returned an unexpected response');
+      throw new RedisOperationError('PING', 'operation failed');
     }
   }
 
   async onApplicationShutdown(): Promise<void> {
-    if (this.client.status === 'end') {
-      return;
-    }
+    if (this.client.status === 'end') return;
     try {
       await this.client.quit();
     } catch {

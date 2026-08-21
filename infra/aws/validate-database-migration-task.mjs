@@ -12,9 +12,9 @@ import { fileURLToPath } from 'node:url';
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const defaultTemplatePath = join(scriptDirectory, 'database-migration-task.yaml');
-const reviewedTemplateSha256 = '79584004f9c60f4ebee3ca06ba41dc9f18297b1e8ada694f12a92e157522daff';
+const reviewedTemplateSha256 = 'cef4abf377f9af4b824daf4b7bfbbd7f508b6a72df20ea7cfdd52f570219f1ce';
 const migrationBindingResidualLimitation =
-  'DatabaseMigrationCredentialsSecretArn and ApplicationDataKeyArn are operator-supplied cross-stack inputs; local template validation proves scope after binding but cannot authenticate that they came from the intended application stack.';
+  'DatabaseMigrationCredentialsSecretArn and ApplicationDataKeyArn are operator-supplied cross-stack inputs; local validation cannot authenticate their origin. The secret must be the separately scoped crypto_migration credential and must never be the RDS master/bootstrap DatabaseCredentialsSecret.';
 
 function sha256(value) {
   return createHash('sha256').update(value, 'utf8').digest('hex');
@@ -147,6 +147,19 @@ export function validateMigrationTaskTemplate(source) {
     errors.push(`Migration task template is ${templateBytes} bytes; direct upload allows 51200.`);
   }
 
+  const parameters = topLevelBlocks(source, 'Parameters');
+  const databaseName = parameters.get('DatabaseName') ?? '';
+  if (
+    semanticYamlTokens(databaseName) !==
+    semanticYamlTokens(
+      ['DatabaseName:', '  Type: String', "  AllowedPattern: '^[a-z][a-z0-9_]{0,62}$'"].join('\n'),
+    )
+  ) {
+    errors.push(
+      'DatabaseName must use the canonical lowercase PostgreSQL identifier contract required by the principal bootstrap.',
+    );
+  }
+
   const expectedResources = new Map([
     ['MigrationTaskExecutionRole', 'AWS::IAM::Role'],
     ['MigrationTaskDefinition', 'AWS::ECS::TaskDefinition'],
@@ -227,7 +240,7 @@ export function validateMigrationTaskTemplate(source) {
       '            StringEquals:',
       '              kms:ViaService: !Sub secretsmanager.${AWS::Region}.${AWS::URLSuffix}',
     ].join('\n'),
-    'the exact image-pull, migration-log, admin-secret, and Secrets Manager-only KMS action/resource matrix',
+    'the exact image-pull, migration-log, migration-secret, and Secrets Manager-only KMS action/resource matrix',
     errors,
   );
   if (/^\s+ManagedPolicyArns:\s*$/m.test(role)) {
@@ -253,17 +266,17 @@ export function validateMigrationTaskTemplate(source) {
       '  - Name: MIGRATION_DATABASE_PASSWORD',
       "    ValueFrom: !Sub '${DatabaseMigrationCredentialsSecretArn}:password::'",
     ].join('\n'),
-    'the exact admin/migration username and password injection from the single migration-secret parameter',
+    'the exact migration-only username and password injection from the single migration-secret parameter',
     errors,
   );
   const environment = indentedPropertyBlock(task, 'Environment') ?? '';
   if (
-    /\bName:\s*(?:MIGRATION_DATABASE_(?:USERNAME|PASSWORD)|DATABASE_RUNTIME_[A-Z_]+|REDIS_AUTH_TOKEN)\b/.test(
+    /\bName:\s*(?:MIGRATION_DATABASE_(?:USERNAME|PASSWORD)|DATABASE_RUNTIME_[A-Z_]+|REDIS_(?:URL|HOST|PORT|TLS|USERNAME|PASSWORD|AUTH_TOKEN|KEY_PREFIX|CONNECT_TIMEOUT_MS|COMMAND_TIMEOUT_MS)|APPLICATION_WORKLOAD|NODE_TLS_REJECT_UNAUTHORIZED)\b/.test(
       environment,
     )
   ) {
     errors.push(
-      'MigrationTaskDefinition must inject migration credentials only through ECS Secrets and must not receive runtime or Redis credentials.',
+      'MigrationTaskDefinition must inject migration credentials only through ECS Secrets and must not receive runtime, Redis, workload, or process-wide TLS overrides.',
     );
   }
   if (/\bDATABASE_RUNTIME_[A-Z_]+\b|\bDatabaseRuntimeSecret\b/.test(source)) {

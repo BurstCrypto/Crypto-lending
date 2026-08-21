@@ -86,12 +86,15 @@ record. `Deploy` recomputes and verifies each binding.
   gateway;
 - the job queue and DLQ retain the established bounded-redrive topology;
 - customer-managed KMS keys protect durable data, queues, secrets, and logs;
-- the existing RDS master secret is reserved for migrations, while a distinct
-  runtime secret supplies the API and worker's non-administrative PostgreSQL
-  password; Redis credentials remain separate;
-- API/worker execution IAM can read the runtime and Redis secrets but not the
-  migration/admin secret. The standalone migration task can read only the
-  migration/admin secret; and
+- the RDS master secret is reserved for bootstrap and emergency ownership
+  recovery only. KAN-232 requires separate migration-only, API, and worker
+  PostgreSQL credentials; the current baseline has not yet been rewired to that
+  replacement contract;
+- KAN-232/KAN-233 require split API/worker execution IAM: API may read only its
+  database and selected Redis ACL credential, worker only its database
+  credential, and the one-off migration task only the migration credential.
+  The existing shared execution role is a deployment blocker, not an approved
+  exception; and
 - bounded CloudWatch log groups and service/queue alarms expose infrastructure
   health without adding an alert destination; the dashboard is optional and
   off by default, and Container Insights is also disabled by default.
@@ -154,24 +157,33 @@ bootstrap, notification-delivery, independent-review, and retention evidence.
 
 ## Runtime configuration and secrets
 
-Managed API and worker tasks receive only `DATABASE_RUNTIME_*`; the one-off
-migration task receives only `MIGRATION_DATABASE_*`. Each production loader
-rejects the opposite credential scope and all legacy unscoped `DATABASE_*`
-credentials. The migration CLI loads PostgreSQL configuration directly and no
-longer requires Redis or SQS settings. Both production paths construct escaped
-connection URLs in memory and require `verify-full` plus an explicit
-`NODE_EXTRA_CA_CERTS` bundle. The process parses that PEM bundle before opening
-the pool and fails closed when it is absent, unreadable, or invalid. Production
-also enforces the reviewed `crypto_runtime` and `crypto_admin` role names, so a
-credential cannot cross the boundary merely by being placed in the other
-scope's variable. Production Redis configuration likewise requires client
-authentication: managed components require `REDIS_AUTH_TOKEN`, and a direct
-`REDIS_URL` must be `rediss://` with a non-empty password.
+The production runtime contract has four database authorities: the RDS
+master/bootstrap identity, a one-off `crypto_migration` login, an API A/B login,
+and a worker A/B login. API and worker receive only their own
+`DATABASE_RUNTIME_*` values and select the matching stable capability through
+`APPLICATION_WORKLOAD`; the migration task receives only
+`MIGRATION_DATABASE_*`. Every production loader rejects the opposite credential
+prefixes and all legacy unscoped `DATABASE_*` credentials. The bootstrap/master
+credential is never an application or migration-task input.
 
-The local `.env.example` uses both scoped URL names. Both URLs deliberately point
-to the same Docker-only account so existing local volumes remain compatible;
-the unscoped `DATABASE_URL` fallback is accepted only outside production. This
-local convenience is not a production privilege model.
+All production PostgreSQL paths require `verify-full` plus an explicit
+`NODE_EXTRA_CA_CERTS` bundle. The process parses that PEM bundle before opening
+the pool and fails closed when it is absent, unreadable, or invalid. The
+connection startup packet selects the reviewed capability role before the first
+application query.
+
+Only the API consumes Redis, and its current inventory is health-only `PING`.
+It authenticates as an environment-bound `crypto_api_<APP_ENV>_a` or
+`crypto_api_<APP_ENV>_b` ACL slot over verified TLS. The worker and migration
+task reject every `REDIS_*` variable.
+The legacy `REDIS_AUTH_TOKEN`, anonymous/default access, key commands, and a
+worker Redis network path are not part of the replacement contract.
+
+The local `.env.example` and Compose service use distinct, deliberate local
+fixtures for the bootstrap owner, migration, API, worker, and Redis identities.
+The previous PostgreSQL volume is preserved under its old name rather than
+being reconciled in place. The unscoped `DATABASE_URL` fallback remains a
+non-production compatibility path only.
 
 CloudFormation state remains in the AWS CloudFormation service if an authorized
 deployment eventually occurs; there is no local state file. Generated secrets
@@ -196,7 +208,8 @@ After a separately approved deployment, acceptance evidence must record:
 - HTTP 200 and `status: ok` from `/api/v1/health/dependencies` after migrations,
   proving PostgreSQL, Redis, SQS, and migration readiness;
 - worker container health `HEALTHY`; its internal probe checks PostgreSQL,
-  migration checksums, Redis, and the SQS/DLQ redrive relationship;
+  migration checksums, and the SQS/DLQ redrive relationship without constructing
+  a Redis client;
 - a controlled outbox publish smoke proving the worker can send through the
   encrypted queue path (a healthy empty poll does not prove `SendMessage`);
 - confirmation that database/cache endpoints and application tasks have no
@@ -214,71 +227,36 @@ role. Registering that separate template and running the resulting Fargate task
 are cloud actions with their own billing acknowledgement and require separate
 authorization.
 
-The application stack deliberately cannot create a PostgreSQL-native login.
-After an authorized zero-count CREATE, an operator must retrieve the generated
-`DatabaseRuntimeSecret`, connect using the existing `DatabaseCredentialsSecret`
-master/migration identity, and create or update the least-privilege runtime role.
-The following reviewed `psql` body uses `\password` so the cleartext secret is
-not placed in SQL text or shell history; values still must come from the approved
-stack and must never be copied into Git, logs, or evidence:
+CloudFormation cannot safely create or synchronize PostgreSQL-native logins.
+`infra/postgres/bootstrap-principals.sql` is therefore the only reviewed role,
+ownership, membership, and grant reconciliation body. It accepts identifiers,
+not passwords. An authorized secret workflow must provision and successfully
+authenticate the exact restricted migration/API/worker LOGIN slots first; the
+RDS master then runs the bootstrap artifact while all application and legacy
+sessions are drained. See [KAN-232](KAN-232.md) for its preflight,
+migration-safe compatibility capability, A/B rotation, rollback, and denial
+contract. The former broad single-runtime procedure is intentionally removed.
 
-```sql
-\set ON_ERROR_STOP on
-\set migration_user crypto_admin
-\set runtime_user crypto_runtime
-\prompt 'Database name: ' database_name
+The authorized delivery sequence is: verify and retrieve the exact
+content-addressed child from an existing versioned same-account/Region S3
+bucket (no guard path creates or uploads it); create the stack at zero desired
+count; provision the restricted LOGIN slots from their scoped secrets; drain old
+sessions; run the exact bootstrap artifact as the bootstrap owner; register and
+run the separately reviewed migration task with only the `crypto_migration`
+secret; wait for exit code zero; run
+`npm run db:status:prod --workspace @crypto-lending/api`; exercise positive and
+negative capability probes for both API and worker; then raise desired counts.
+Every future migration must preserve the exact role boundary and may not add
+broad table, sequence, function, type, schema, or default grants. Evidence
+records identifiers and redacted outcomes, never secret values.
 
-SELECT format('CREATE ROLE %I', :'runtime_user')
-WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'runtime_user') \gexec
-SELECT format(
-  'ALTER ROLE %I WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS',
-  :'runtime_user'
-) \gexec
-\password crypto_runtime
-SELECT format('REVOKE ALL ON DATABASE %I FROM PUBLIC', :'database_name') \gexec
-SELECT format('GRANT CONNECT ON DATABASE %I TO %I', :'database_name', :'runtime_user') \gexec
-REVOKE CREATE ON SCHEMA public FROM PUBLIC;
-SELECT format('GRANT USAGE ON SCHEMA public TO %I', :'runtime_user') \gexec
-SELECT format('REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM %I', :'runtime_user') \gexec
-SELECT format('REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public FROM %I', :'runtime_user') \gexec
-SELECT format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA public REVOKE ALL PRIVILEGES ON TABLES FROM %I', :'migration_user', :'runtime_user') \gexec
-SELECT format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA public REVOKE ALL PRIVILEGES ON SEQUENCES FROM %I', :'migration_user', :'runtime_user') \gexec
-SELECT format('GRANT SELECT ON TABLE public.schema_migrations TO %I', :'runtime_user')
-WHERE to_regclass('public.schema_migrations') IS NOT NULL \gexec
-SELECT format('GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.job_outbox TO %I', :'runtime_user')
-WHERE to_regclass('public.job_outbox') IS NOT NULL \gexec
-SELECT format('GRANT SELECT ON TABLE public.accounts TO %I', :'runtime_user')
-WHERE to_regclass('public.accounts') IS NOT NULL \gexec
-SELECT format('GRANT SELECT ON TABLE public.account_profiles TO %I', :'runtime_user')
-WHERE to_regclass('public.account_profiles') IS NOT NULL \gexec
-SELECT format('GRANT EXECUTE ON FUNCTION public.provision_account_profile(uuid, text, text, text, uuid, text) TO %I', :'runtime_user')
-WHERE to_regprocedure('public.provision_account_profile(uuid, text, text, text, uuid, text)') IS NOT NULL \gexec
-SELECT format('GRANT EXECUTE ON FUNCTION public.update_account_profile(uuid, integer, boolean, text, boolean, text, boolean, text, uuid, text) TO %I', :'runtime_user')
-WHERE to_regprocedure('public.update_account_profile(uuid, integer, boolean, text, boolean, text, boolean, text, uuid, text)') IS NOT NULL \gexec
-```
-
-The authorized delivery sequence is: bootstrap/grant the runtime role; register
-the separately reviewed migration task using the baseline's migration secret;
-run it in the baseline cluster/private subnets/backend security group; wait for
-exit code zero; rerun the fail-closed, object-specific grant/revoke reconciliation;
-run `npm run db:status:prod --workspace @crypto-lending/api` again so every
-applied migration's checksum and live schema are reverified; verify the runtime role cannot
-create/alter/drop schema objects, mutate migration history, write account/profile
-tables directly, or read/write profile audit rows, but can read
-`schema_migrations`, perform required outbox DML, read account profiles, and
-execute only the audited account write functions; then increase API/worker
-desired counts. Every future migration must grant only its own reviewed runtime
-operations—there are deliberately no broad default table or sequence grants.
-Record task ARN and image digest, never secret values.
-
-For that separately authorized registration, map
-`DatabaseCredentialsSecretArn` to
-`DatabaseMigrationCredentialsSecretArn`; reuse the exact environment, database
-endpoint/name, RDS CA path, digest-pinned API image, repository ARN, and
-`ApplicationDataKey` ARN from the reviewed application stack. The migration
-task intentionally reuses the existing outbox-worker log group. Static
-validation cannot resolve these cross-stack values, so an independent reviewer
-must verify the complete parameter set before its change set is executed.
+The migration task's `DatabaseMigrationCredentialsSecretArn` must resolve to
+the exact `crypto_migration` secret. Binding the RDS master/bootstrap
+`DatabaseCredentialsSecretArn` is forbidden. Reuse the reviewed environment,
+database endpoint/name, RDS CA path, digest-pinned API image, repository ARN,
+and `ApplicationDataKey` ARN. Static validation cannot authenticate those
+cross-stack identities, so an independent reviewer must verify the complete
+parameter set before a change set is executed.
 
 ## Non-production limitations
 
@@ -287,16 +265,27 @@ must verify the complete parameter set before its change set is executed.
   deploy both stacks or attempt an unreviewed resource import.
 - Physical names make this a one-stack-per-`EnvironmentName` baseline. A second
   stack for the same environment will collide rather than create a hidden copy.
-- PostgreSQL role creation/grants and secret-to-role password synchronization
+- PostgreSQL LOGIN provisioning and secret-to-role password synchronization
   remain explicit operator steps because CloudFormation cannot safely manage
-  database-native principals. Rotation must update the runtime role and secret
-  in one reviewed maintenance window; automated rotation is not implemented.
+  database-native credentials. Capability roles and grants are reconciled by
+  the reviewed bootstrap artifact; live A/B cutover remains an authorized
+  maintenance procedure.
 - Static validation cannot prove that the migration-task parameters were mapped
   to the intended application-stack outputs or that runtime privilege denial is
   effective. Those checks remain mandatory deployment evidence before raising
   desired counts.
-- API and worker share one Redis authentication token. Before production,
-  evaluate service-specific ElastiCache ACL users and automated rotation.
+- The parent now replaces the obsolete shared Redis token, backend execution
+  role, and backend security group with the content-addressed workload-boundary
+  child. Staging the exact versioned child object and invoking the guarded
+  nested-stack plan/deploy remain separately authorized actions with possible
+  storage/request/resource cost.
+- The fixed database/Redis A/B secret resources support a controlled overlap
+  and cutover but do not regenerate an inactive slot. A repeat A-to-B-to-A cycle
+  would reuse the retained A value until a reviewed regeneration and verifier/
+  password installation artifact exists.
+- The conditional Redis operator infrastructure has no reviewed production CLI
+  or one-off task definition, and managed failed-authentication monitoring is
+  not yet defined. Both remain local-design and live-evidence gates.
 - PostgreSQL minor and Redis 7.1 availability, VPC endpoint availability,
   service quotas, the S3 prefix-list ID, image startup behavior, and the ACM/DNS
   relationship require target-account preflight and runtime evidence.

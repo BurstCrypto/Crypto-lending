@@ -16,16 +16,20 @@ env:
   DO_NOT_TRACK: '1'
   NEXT_TELEMETRY_DISABLED: '1'
   SCARF_ANALYTICS: 'false'
-  DATABASE_RUNTIME_URL: postgresql://crypto_lending:local_only_password@127.0.0.1:5432/crypto_lending
-  MIGRATION_DATABASE_URL: postgresql://crypto_lending:local_only_password@127.0.0.1:5432/crypto_lending
-  TEST_DATABASE_URL: postgresql://crypto_lending:local_only_password@127.0.0.1:5432/crypto_lending
+  APPLICATION_WORKLOAD: api
+  DATABASE_RUNTIME_URL: postgresql://crypto_api_login_a:local_api_database_a@127.0.0.1:5432/crypto_lending
+  MIGRATION_DATABASE_URL: postgresql://crypto_migration:local_migration_only@127.0.0.1:5432/crypto_lending
+  TEST_DATABASE_URL: postgresql://crypto_admin:local_admin_only@127.0.0.1:5432/crypto_lending
   DATABASE_RUNTIME_SSL_MODE: disable
   DATABASE_LOCK_TIMEOUT_MS: '5000'
   MIGRATION_DATABASE_SSL_MODE: disable
   MIGRATION_DATABASE_LOCK_TIMEOUT_MS: '10000'
   MIGRATION_DATABASE_STATEMENT_TIMEOUT_MS: '3600000'
-  REDIS_URL: redis://127.0.0.1:6379
-  REDIS_KEY_PREFIX: 'crypto-lending:ci:v1:'
+  REDIS_HOST: 127.0.0.1
+  REDIS_PORT: '6379'
+  REDIS_TLS: 'false'
+  REDIS_USERNAME: crypto_api_a
+  REDIS_PASSWORD: local-api-current
   AWS_REGION: us-east-1
   AWS_ACCESS_KEY_ID: test
   AWS_SECRET_ACCESS_KEY: test
@@ -74,13 +78,15 @@ jobs:
           npm run infra:test:guardrails
           npm run infra:test:acm-dns
           npm run infra:test:migrations
+          npm run infra:test:workload-boundaries
           npm run infra:test:sqs
+          npm run infra:test:redis-acl
           pwsh -NoProfile -File infra/aws/test-invoke-acm-dns-local.ps1
           npm run infra:test:egress
           pwsh -NoProfile -File infra/aws/test-invoke-account-readonly-preflight.ps1
           pwsh -NoProfile -File infra/aws/test-invoke-account-guardrails.ps1
           pwsh -NoProfile -File infra/aws/test-invoke-application-baseline.ps1
-          python infra/aws/lint-cloudformation.py infra/aws/application-baseline.yaml infra/aws/database-migration-task.yaml infra/aws/account-guardrails.yaml infra/aws/sqs-foundation.yaml
+          python infra/aws/lint-cloudformation.py infra/aws/application-baseline.yaml infra/aws/application-workload-boundaries.yaml infra/aws/database-migration-task.yaml infra/aws/account-guardrails.yaml infra/aws/sqs-foundation.yaml
 
       - name: Check formatting
         run: npm run format:check
@@ -124,6 +130,8 @@ jobs:
           npm run db:migrate:compiled --workspace @crypto-lending/api
           npm run db:status:compiled --workspace @crypto-lending/api
           npm run db:rollback:compiled --workspace @crypto-lending/api
+          npm run db:migrate:compiled --workspace @crypto-lending/api
+          npm run db:status:compiled --workspace @crypto-lending/api
 
       - name: Run live infrastructure tests
         env:

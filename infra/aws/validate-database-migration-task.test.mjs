@@ -119,7 +119,7 @@ test('rejects widening the migration execution-role capability matrix', () => {
   ]) {
     assertRejected(
       mutate(search, replacement),
-      /exact image-pull, migration-log, admin-secret, and Secrets Manager-only KMS action\/resource matrix/,
+      /exact image-pull, migration-log, migration-secret, and Secrets Manager-only KMS action\/resource matrix/,
     );
   }
 
@@ -146,7 +146,7 @@ test('rejects migration role remapping and cross-scope secret injection', () => 
       "ValueFrom: !Sub '${DatabaseMigrationCredentialsSecretArn}:username::'",
       "ValueFrom: !Sub '${DatabaseMigrationCredentialsSecretArn}:password::'",
     ),
-    /exact admin\/migration username and password injection/,
+    /exact migration-only username and password injection/,
   );
 
   assertRejected(
@@ -166,8 +166,25 @@ test('rejects migration role remapping and cross-scope secret injection', () => 
         "              ValueFrom: !Sub '${DatabaseMigrationCredentialsSecretArn}:authToken::'",
       ].join('\n'),
     ),
-    /exact admin\/migration username and password injection/,
+    /exact migration-only username and password injection/,
   );
+
+  for (const variableName of [
+    'REDIS_URL',
+    'REDIS_HOST',
+    'REDIS_USERNAME',
+    'REDIS_PASSWORD',
+    'APPLICATION_WORKLOAD',
+    'NODE_TLS_REJECT_UNAUTHORIZED',
+  ]) {
+    assertRejected(
+      mutate(
+        '            - { Name: NODE_ENV, Value: production }',
+        `            - { Name: NODE_ENV, Value: production }\n            - { Name: ${variableName}, Value: prohibited }`,
+      ),
+      /must not receive runtime, Redis, workload, or process-wide TLS overrides/,
+    );
+  }
 });
 
 test('rejects a migration task that does not explicitly run up', () => {
@@ -187,6 +204,16 @@ test('rejects weakening verified database TLS', () => {
       '{ Name: MIGRATION_DATABASE_SSL_MODE, Value: require }',
     ),
     /missing reviewed hardening/,
+  );
+});
+
+test('rejects database names outside the canonical lowercase principal-bootstrap contract', () => {
+  assertRejected(
+    mutate(
+      "AllowedPattern: '^[a-z][a-z0-9_]{0,62}$'",
+      "AllowedPattern: '^[A-Za-z][A-Za-z0-9_]{0,62}$'",
+    ),
+    /canonical lowercase PostgreSQL identifier contract/,
   );
 });
 

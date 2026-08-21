@@ -75,6 +75,15 @@ class InMemoryMigrationDatabase {
         ]);
       } else if (
         normalized.startsWith('SELECT (') &&
+        normalized.includes('job_outbox_schema_owner_all') &&
+        normalized.includes('pg_catalog.pg_auth_members')
+      ) {
+        // This harness tests MigrationRunner control flow, not PostgreSQL ACL
+        // semantics. The dedicated Docker principal suite executes 0005's
+        // verifier against a real catalog and mutates every security boundary.
+        return result([{ valid: this.accountSchemaExists && this.jobOutboxExists }]);
+      } else if (
+        normalized.startsWith('SELECT (') &&
         normalized.includes("to_regclass('account_profile_audit')")
       ) {
         return result([{ valid: this.accountSchemaExists }]);
@@ -110,21 +119,22 @@ describe('MigrationRunner', () => {
     const database = new InMemoryMigrationDatabase();
     const runner = new MigrationRunner(database.pool, DATABASE_MIGRATION_LIST);
 
-    await expect(runner.up()).resolves.toEqual(['0001', '0002', '0003', '0004']);
+    await expect(runner.up()).resolves.toEqual(['0001', '0002', '0003', '0004', '0005']);
     expect(database.jobOutboxExists).toBe(true);
     expect(database.applied.has('0001')).toBe(true);
     expect(database.applied.has('0002')).toBe(true);
     expect(database.applied.has('0003')).toBe(true);
     expect(database.applied.has('0004')).toBe(true);
+    expect(database.applied.has('0005')).toBe(true);
     expect(database.accountSchemaExists).toBe(true);
-    expect(database.queries.filter((query) => query === 'BEGIN')).toHaveLength(2);
+    expect(database.queries.filter((query) => query === 'BEGIN')).toHaveLength(3);
     expect(
       database.queries.filter((query) => query.startsWith('CREATE INDEX CONCURRENTLY')),
     ).toHaveLength(2);
     await expect(runner.assertUpToDate()).resolves.toBeUndefined();
 
     await expect(runner.up()).resolves.toEqual([]);
-    await expect(runner.down(4)).resolves.toEqual(['0004', '0003', '0002', '0001']);
+    await expect(runner.down(5)).resolves.toEqual(['0005', '0004', '0003', '0002', '0001']);
     expect(database.jobOutboxExists).toBe(false);
     expect(database.accountSchemaExists).toBe(false);
     expect(database.applied.size).toBe(0);
@@ -148,8 +158,8 @@ describe('MigrationRunner', () => {
     );
     await expect(runner.up()).rejects.toThrow('Database migration 0003 schema verification failed');
 
-    await expect(runner.down(2)).resolves.toEqual(['0004', '0003']);
-    await expect(runner.up()).resolves.toEqual(['0003', '0004']);
+    await expect(runner.down(3)).resolves.toEqual(['0005', '0004', '0003']);
+    await expect(runner.up()).resolves.toEqual(['0003', '0004', '0005']);
     expect(database.indexes.has('job_outbox_failed_retention_idx')).toBe(true);
     await expect(runner.assertUpToDate()).resolves.toBeUndefined();
   });
