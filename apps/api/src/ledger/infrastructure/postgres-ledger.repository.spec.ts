@@ -1,7 +1,15 @@
 import type { QueryResult, QueryResultRow } from 'pg';
 
 import type { PostgresService } from '../../infrastructure/database/postgres.service';
+import { loggingContext } from '../../infrastructure/logging';
+import type { JobPublisherPort } from '../../infrastructure/outbox/job-publisher.port';
 import { createLedgerCapability } from '../application/ledger-capability-resolver.port';
+import {
+  createPostLedgerIdempotencyContext,
+  createReverseLedgerIdempotencyContext,
+  LedgerIdempotencyError,
+  type LedgerIdempotencyContext,
+} from '../domain/idempotency';
 import {
   normalizePostLedgerJournalCommand,
   normalizeReverseLedgerJournalCommand,
@@ -30,6 +38,8 @@ const ids = {
   journal: '00000000-0000-4000-8000-00000000000a',
   reversalJournal: '00000000-0000-4000-8000-00000000000b',
   lifecycleEvent: '00000000-0000-4000-8000-00000000000c',
+  command: '00000000-0000-4000-8000-00000000000d',
+  outbox: '00000000-0000-4000-8000-00000000000e',
 } as const;
 
 const POST_CAPABILITY_VALUE = '00'.repeat(32);
@@ -82,6 +92,14 @@ function reversalCommand(): ReverseLedgerJournalCommand {
   });
 }
 
+function postIdempotency(): LedgerIdempotencyContext {
+  return createPostLedgerIdempotencyContext('post-key', ids.actor, postCommand());
+}
+
+function reversalIdempotency(): LedgerIdempotencyContext {
+  return createReverseLedgerIdempotencyContext('reverse-key', ids.actor, reversalCommand());
+}
+
 function lifecycleCommand(legId: string | null = ids.leg): LedgerLifecycleTransitionCommand {
   return normalizeLedgerLifecycleTransitionCommand({
     actorAccountId: ids.actor,
@@ -108,22 +126,126 @@ function recoveryCommand(): LedgerRecoveryTransitionCommand {
   });
 }
 
-function setup(): { query: jest.Mock; repository: PostgresLedgerRepository } {
+function setup(): {
+  query: jest.Mock;
+  withTransaction: jest.Mock;
+  publisher: jest.Mocked<JobPublisherPort>;
+  repository: PostgresLedgerRepository;
+} {
   const query = jest.fn();
-  const postgres = { query } as unknown as PostgresService;
-  return { query, repository: new PostgresLedgerRepository(postgres) };
+  const withTransaction = jest.fn(async (work: () => Promise<unknown>) => work());
+  const postgres = { query, withTransaction } as unknown as PostgresService;
+  const publisher = {
+    enqueue: jest.fn(async (request: { id?: string }) => ({ id: request.id })),
+  } as unknown as jest.Mocked<JobPublisherPort>;
+  return {
+    query,
+    withTransaction,
+    publisher,
+    repository: new PostgresLedgerRepository(postgres, publisher),
+  };
+}
+
+function mockClaimedWrite(query: jest.Mock, journalId: string): void {
+  query
+    .mockResolvedValueOnce(
+      result([
+        {
+          command_id: ids.command,
+          journal_id: null,
+          outbox_id: ids.outbox,
+          outcome: 'CLAIMED',
+        },
+      ]),
+    )
+    .mockResolvedValueOnce(result([{ journal_id: journalId }]))
+    .mockResolvedValueOnce(result([{ journal_id: journalId }]));
 }
 
 describe('PostgresLedgerRepository', () => {
-  it('posts only through the fixed function with a bound purpose-scoped capability', async () => {
+  it('resolves an absent or identical committed idempotency result through the fixed function', async () => {
     const { query, repository } = setup();
-    query.mockResolvedValue(result([{ journal_id: ids.journal }]));
-    const capability = createLedgerCapability('POST', POST_CAPABILITY_VALUE);
+    const idempotency = postIdempotency();
+    query
+      .mockResolvedValueOnce(result([]))
+      .mockResolvedValueOnce(result([{ journal_id: ids.journal }]));
 
-    await expect(repository.postJournal(postCommand(), capability)).resolves.toBe(ids.journal);
+    await expect(repository.resolveIdempotency(idempotency)).resolves.toBeNull();
+    await expect(repository.resolveIdempotency(idempotency)).resolves.toBe(ids.journal);
+
+    const [sql, values] = query.mock.calls[0] as [string, unknown[]];
+    expect(sql).toContain('public.resolve_ledger_command_idempotency(');
+    expect(values).toEqual([
+      ids.actor,
+      'POST_JOURNAL',
+      1,
+      idempotency.keyDigest,
+      1,
+      idempotency.requestFingerprint,
+    ]);
+  });
+
+  it('returns a concurrent replay from claim before revealing or consuming a capability', async () => {
+    const { query, publisher, repository } = setup();
+    query.mockResolvedValue(
+      result([
+        {
+          command_id: ids.command,
+          journal_id: ids.journal,
+          outbox_id: ids.outbox,
+          outcome: 'REPLAYED',
+        },
+      ]),
+    );
+
+    await expect(
+      repository.postJournal(postCommand(), Object.freeze({}) as never, postIdempotency()),
+    ).resolves.toBe(ids.journal);
 
     expect(query).toHaveBeenCalledTimes(1);
-    const [sql, values] = query.mock.calls[0] as [string, unknown[]];
+    expect(publisher.enqueue).not.toHaveBeenCalled();
+  });
+
+  it('maps an idempotency fingerprint mismatch to the fixed domain conflict', async () => {
+    const { query, repository } = setup();
+    query.mockRejectedValue(Object.assign(new Error('private mismatch detail'), { code: 'L4301' }));
+
+    await expect(repository.resolveIdempotency(postIdempotency())).rejects.toEqual(
+      new LedgerIdempotencyError('IDEMPOTENCY_CONFLICT'),
+    );
+  });
+
+  it('posts only through the fixed function with a bound purpose-scoped capability', async () => {
+    const { query, withTransaction, publisher, repository } = setup();
+    mockClaimedWrite(query, ids.journal);
+    const capability = createLedgerCapability('POST', POST_CAPABILITY_VALUE);
+    const idempotency = postIdempotency();
+    publisher.enqueue.mockImplementationOnce(async (request: { id?: string }) => {
+      expect(loggingContext.current()).toEqual({
+        correlationId: ids.correlation,
+        initiatorActorId: ids.actor,
+        ledgerEventId: ids.journal,
+      });
+      return { id: request.id } as never;
+    });
+
+    await expect(repository.postJournal(postCommand(), capability, idempotency)).resolves.toBe(
+      ids.journal,
+    );
+
+    expect(withTransaction).toHaveBeenCalledTimes(1);
+    expect(query).toHaveBeenCalledTimes(3);
+    const [claimSql, claimValues] = query.mock.calls[0] as [string, unknown[]];
+    expect(claimSql).toContain('public.claim_ledger_command_idempotency(');
+    expect(claimValues).toEqual([
+      ids.actor,
+      'POST_JOURNAL',
+      1,
+      idempotency.keyDigest,
+      1,
+      idempotency.requestFingerprint,
+    ]);
+    const [sql, values] = query.mock.calls[1] as [string, unknown[]];
     expect(sql).toContain('public.post_ledger_journal_with_lifecycle(');
     expect(sql).toContain('$1::text');
     expect(sql).toContain('$2::uuid');
@@ -148,12 +270,56 @@ describe('PostgresLedgerRepository', () => {
     expect(values[9]).toBe(
       `[{"accountId":"${ids.debitAccount}","assetRevisionId":"${ids.asset}","side":"DEBIT","amountAtomic":"9007199254740993"},{"accountId":"${ids.creditAccount}","assetRevisionId":"${ids.asset}","side":"CREDIT","amountAtomic":"9007199254740993"}]`,
     );
+    expect(publisher.enqueue).toHaveBeenCalledWith({
+      id: ids.outbox,
+      kind: 'ledger.journal-committed',
+      version: 1,
+      payload: { journalId: ids.journal, operation: 'POST_JOURNAL' },
+      ledgerLink: { commandId: ids.command, journalId: ids.journal },
+    });
+    const [completeSql, completeValues] = query.mock.calls[2] as [string, unknown[]];
+    expect(completeSql).toContain('public.complete_ledger_command_idempotency(');
+    expect(completeValues).toEqual([ids.command, ids.journal, ids.outbox]);
+    const queryOrder = query.mock.invocationCallOrder;
+    const publishOrder = publisher.enqueue.mock.invocationCallOrder[0];
+    expect(queryOrder[1]).toBeLessThan(publishOrder as number);
+    expect(publishOrder).toBeLessThan(queryOrder[2] as number);
     expect(JSON.stringify(capability)).not.toContain(POST_CAPABILITY_VALUE);
+    expect(JSON.stringify(publisher.enqueue.mock.calls)).not.toContain('post-key');
+  });
+
+  it('does not complete a claimed command when the transactional outbox enqueue fails', async () => {
+    const { query, withTransaction, publisher, repository } = setup();
+    query
+      .mockResolvedValueOnce(
+        result([
+          {
+            command_id: ids.command,
+            journal_id: null,
+            outbox_id: ids.outbox,
+            outcome: 'CLAIMED',
+          },
+        ]),
+      )
+      .mockResolvedValueOnce(result([{ journal_id: ids.journal }]));
+    publisher.enqueue.mockRejectedValue(new Error('outbox unavailable'));
+
+    await expect(
+      repository.postJournal(
+        postCommand(),
+        createLedgerCapability('POST', POST_CAPABILITY_VALUE),
+        postIdempotency(),
+      ),
+    ).rejects.toEqual(new LedgerPersistenceError());
+
+    expect(withTransaction).toHaveBeenCalledTimes(1);
+    expect(query).toHaveBeenCalledTimes(2);
+    expect(publisher.enqueue).toHaveBeenCalledTimes(1);
   });
 
   it('emits exact canonical posting bytes despite hostile prototype toJSON hooks', async () => {
     const { query, repository } = setup();
-    query.mockResolvedValue(result([{ journal_id: ids.journal }]));
+    mockClaimedWrite(query, ids.journal);
     const objectDescriptor = Object.getOwnPropertyDescriptor(Object.prototype, 'toJSON');
     const arrayDescriptor = Object.getOwnPropertyDescriptor(Array.prototype, 'toJSON');
     const objectToJson = jest.fn(() => ({ attacker: 'rewritten-object' }));
@@ -171,6 +337,7 @@ describe('PostgresLedgerRepository', () => {
       await repository.postJournal(
         postCommand(),
         createLedgerCapability('POST', POST_CAPABILITY_VALUE),
+        postIdempotency(),
       );
     } finally {
       if (objectDescriptor) Object.defineProperty(Object.prototype, 'toJSON', objectDescriptor);
@@ -179,7 +346,7 @@ describe('PostgresLedgerRepository', () => {
       else delete (Array.prototype as { toJSON?: unknown }).toJSON;
     }
 
-    const values = query.mock.calls[0]?.[1] as unknown[];
+    const values = query.mock.calls[1]?.[1] as unknown[];
     expect(values[9]).toBe(
       `[{"accountId":"${ids.debitAccount}","assetRevisionId":"${ids.asset}","side":"DEBIT","amountAtomic":"9007199254740993"},{"accountId":"${ids.creditAccount}","assetRevisionId":"${ids.asset}","side":"CREDIT","amountAtomic":"9007199254740993"}]`,
     );
@@ -189,7 +356,7 @@ describe('PostgresLedgerRepository', () => {
 
   it('projects only approved fields and preserves repeated-line multiplicity', async () => {
     const { query, repository } = setup();
-    query.mockResolvedValue(result([{ journal_id: ids.journal }]));
+    mockClaimedWrite(query, ids.journal);
     const base = postCommand();
     const command = normalizePostLedgerJournalCommand({
       ...base,
@@ -200,9 +367,13 @@ describe('PostgresLedgerRepository', () => {
       ],
     });
 
-    await repository.postJournal(command, createLedgerCapability('POST', POST_CAPABILITY_VALUE));
+    await repository.postJournal(
+      command,
+      createLedgerCapability('POST', POST_CAPABILITY_VALUE),
+      createPostLedgerIdempotencyContext('post-key', ids.actor, command),
+    );
 
-    const values = query.mock.calls[0]?.[1] as unknown[];
+    const values = query.mock.calls[1]?.[1] as unknown[];
     expect(JSON.parse(values[9] as string)).toEqual([
       {
         accountId: ids.debitAccount,
@@ -227,14 +398,14 @@ describe('PostgresLedgerRepository', () => {
 
   it('creates a reversal only through the separate capability domain and fixed function', async () => {
     const { query, repository } = setup();
-    query.mockResolvedValue(result([{ journal_id: ids.reversalJournal }]));
+    mockClaimedWrite(query, ids.reversalJournal);
     const capability = createLedgerCapability('REVERSE', REVERSAL_CAPABILITY_VALUE);
 
-    await expect(repository.reverseJournal(reversalCommand(), capability)).resolves.toBe(
-      ids.reversalJournal,
-    );
+    await expect(
+      repository.reverseJournal(reversalCommand(), capability, reversalIdempotency()),
+    ).resolves.toBe(ids.reversalJournal);
 
-    const [sql, values] = query.mock.calls[0] as [string, unknown[]];
+    const [sql, values] = query.mock.calls[1] as [string, unknown[]];
     expect(sql).toContain('public.reverse_ledger_journal_with_lifecycle(');
     expect(sql).toContain('$1::text');
     expect(sql).toContain('$2::uuid');
@@ -326,7 +497,11 @@ describe('PostgresLedgerRepository', () => {
     query.mockRejectedValue(Object.assign(new Error('transition rejected'), { code: 'L4201' }));
 
     await expect(
-      repository.postJournal(postCommand(), createLedgerCapability('POST', POST_CAPABILITY_VALUE)),
+      repository.postJournal(
+        postCommand(),
+        createLedgerCapability('POST', POST_CAPABILITY_VALUE),
+        postIdempotency(),
+      ),
     ).rejects.toEqual(new LedgerLifecycleValidationError('ILLEGAL_LIFECYCLE_TRANSITION'));
   });
 
@@ -338,6 +513,7 @@ describe('PostgresLedgerRepository', () => {
       repository.reverseJournal(
         reversalCommand(),
         createLedgerCapability('REVERSE', REVERSAL_CAPABILITY_VALUE),
+        reversalIdempotency(),
       ),
     ).rejects.toEqual(new LedgerLifecycleValidationError('ILLEGAL_LIFECYCLE_TRANSITION'));
   });
@@ -358,10 +534,25 @@ describe('PostgresLedgerRepository', () => {
     { rows: [{ journal_id: ids.journal, extra: 'unsafe' }] },
   ])('fails closed on an unexpected result row %#', async ({ rows }) => {
     const { query, repository } = setup();
-    query.mockResolvedValue(result(rows));
+    query
+      .mockResolvedValueOnce(
+        result([
+          {
+            command_id: ids.command,
+            journal_id: null,
+            outbox_id: ids.outbox,
+            outcome: 'CLAIMED',
+          },
+        ]),
+      )
+      .mockResolvedValueOnce(result(rows));
 
     await expect(
-      repository.postJournal(postCommand(), createLedgerCapability('POST', POST_CAPABILITY_VALUE)),
+      repository.postJournal(
+        postCommand(),
+        createLedgerCapability('POST', POST_CAPABILITY_VALUE),
+        postIdempotency(),
+      ),
     ).rejects.toEqual(new LedgerPersistenceError());
   });
 
@@ -378,20 +569,42 @@ describe('PostgresLedgerRepository', () => {
       repository.postJournal(
         unsafeCommand as unknown as PostLedgerJournalCommand,
         createLedgerCapability('POST', POST_CAPABILITY_VALUE),
+        postIdempotency(),
       ),
     ).rejects.toEqual(new LedgerPersistenceError());
     expect(commandGetter).not.toHaveBeenCalled();
 
+    query.mockResolvedValueOnce(
+      result([
+        {
+          command_id: ids.command,
+          journal_id: null,
+          outbox_id: ids.outbox,
+          outcome: 'CLAIMED',
+        },
+      ]),
+    );
     await expect(
       repository.postJournal(
         postCommand(),
         createLedgerCapability('REVERSE', REVERSAL_CAPABILITY_VALUE) as never,
+        postIdempotency(),
       ),
     ).rejects.toEqual(new LedgerPersistenceError());
-    await expect(repository.postJournal(postCommand(), Object.freeze({}) as never)).rejects.toEqual(
-      new LedgerPersistenceError(),
+    query.mockResolvedValueOnce(
+      result([
+        {
+          command_id: ids.command,
+          journal_id: null,
+          outbox_id: ids.outbox,
+          outcome: 'CLAIMED',
+        },
+      ]),
     );
-    expect(query).not.toHaveBeenCalled();
+    await expect(
+      repository.postJournal(postCommand(), Object.freeze({}) as never, postIdempotency()),
+    ).rejects.toEqual(new LedgerPersistenceError());
+    expect(query).toHaveBeenCalledTimes(2);
   });
 
   it('rejects accessor-bearing result rows without invoking them', async () => {
@@ -402,7 +615,11 @@ describe('PostgresLedgerRepository', () => {
     query.mockResolvedValue(result([row]));
 
     await expect(
-      repository.postJournal(postCommand(), createLedgerCapability('POST', POST_CAPABILITY_VALUE)),
+      repository.postJournal(
+        postCommand(),
+        createLedgerCapability('POST', POST_CAPABILITY_VALUE),
+        postIdempotency(),
+      ),
     ).rejects.toEqual(new LedgerPersistenceError());
     expect(rowGetter).not.toHaveBeenCalled();
   });
@@ -422,6 +639,7 @@ describe('PostgresLedgerRepository', () => {
       await repository.postJournal(
         postCommand(),
         createLedgerCapability('POST', POST_CAPABILITY_VALUE),
+        postIdempotency(),
       );
     } catch (error) {
       thrown = error;

@@ -15,6 +15,10 @@ import {
   type ReverseLedgerJournalInput,
 } from '../domain/ledger';
 import {
+  createPostLedgerIdempotencyContext,
+  createReverseLedgerIdempotencyContext,
+} from '../domain/idempotency';
+import {
   normalizeLedgerLifecycleTransitionCommand,
   normalizeLedgerLifecycleTransitionInput,
   normalizeLedgerRecoveryTransitionCommand,
@@ -71,9 +75,19 @@ export class LedgerService {
     private readonly capabilityResolver: LedgerCapabilityResolver,
   ) {}
 
-  async postJournal(input: PostLedgerJournalInput): Promise<LedgerJournalId> {
+  async postJournal(
+    input: PostLedgerJournalInput,
+    idempotencyKey: string,
+  ): Promise<LedgerJournalId> {
     const journal = normalizePostLedgerJournalInput(input);
     const context = await resolveLedgerContext(this.actorResolver);
+    const idempotency = createPostLedgerIdempotencyContext(
+      idempotencyKey,
+      context.actorAccountId,
+      journal,
+    );
+    const replay = await this.repository.resolveIdempotency(idempotency);
+    if (replay) return replay;
     let capability;
     try {
       capability = await this.capabilityResolver.resolvePosting(
@@ -94,12 +108,22 @@ export class LedgerService {
       correlationId: context.correlationId,
       ...journal,
     });
-    return this.repository.postJournal(command, capability);
+    return this.repository.postJournal(command, capability, idempotency);
   }
 
-  async reverseJournal(input: ReverseLedgerJournalInput): Promise<LedgerJournalId> {
+  async reverseJournal(
+    input: ReverseLedgerJournalInput,
+    idempotencyKey: string,
+  ): Promise<LedgerJournalId> {
     const reversal = normalizeReverseLedgerJournalInput(input);
     const context = await resolveLedgerContext(this.actorResolver);
+    const idempotency = createReverseLedgerIdempotencyContext(
+      idempotencyKey,
+      context.actorAccountId,
+      reversal,
+    );
+    const replay = await this.repository.resolveIdempotency(idempotency);
+    if (replay) return replay;
     let capability;
     try {
       capability = await this.capabilityResolver.resolveReversal(
@@ -117,7 +141,7 @@ export class LedgerService {
       correlationId: context.correlationId,
       ...reversal,
     });
-    return this.repository.reverseJournal(command, capability);
+    return this.repository.reverseJournal(command, capability, idempotency);
   }
 
   async transitionLifecycle(input: LedgerLifecycleTransitionInput): Promise<void> {

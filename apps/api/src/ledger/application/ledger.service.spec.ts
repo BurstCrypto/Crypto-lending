@@ -7,6 +7,7 @@ import {
   type ReverseLedgerJournalCommand,
   type ReverseLedgerJournalInput,
 } from '../domain/ledger';
+import { LedgerIdempotencyError, type LedgerIdempotencyContext } from '../domain/idempotency';
 import type { LedgerActorResolver } from './ledger-actor-resolver.port';
 import type {
   LedgerLifecycleTransitionCommand,
@@ -42,6 +43,8 @@ const ids = {
 
 const POST_CAPABILITY_VALUE = '00'.repeat(32);
 const REVERSAL_CAPABILITY_VALUE = '11'.repeat(32);
+const POST_IDEMPOTENCY_KEY = 'post-command-key';
+const REVERSAL_IDEMPOTENCY_KEY = 'reverse-command-key';
 
 const postInput: PostLedgerJournalInput = {
   bookId: ids.book,
@@ -94,13 +97,17 @@ const recoveryInput: LedgerRecoveryTransitionInput = {
 
 function repositoryStub(): jest.Mocked<LedgerRepository> {
   return {
+    resolveIdempotency: jest.fn<
+      ReturnType<LedgerRepository['resolveIdempotency']>,
+      [LedgerIdempotencyContext]
+    >(async () => null),
     postJournal: jest.fn<
       ReturnType<LedgerRepository['postJournal']>,
-      [PostLedgerJournalCommand, LedgerPostingCapability]
+      [PostLedgerJournalCommand, LedgerPostingCapability, LedgerIdempotencyContext]
     >(async () => parseLedgerJournalId(ids.postedJournal)),
     reverseJournal: jest.fn<
       ReturnType<LedgerRepository['reverseJournal']>,
-      [ReverseLedgerJournalCommand, LedgerReversalCapability]
+      [ReverseLedgerJournalCommand, LedgerReversalCapability, LedgerIdempotencyContext]
     >(async () => parseLedgerJournalId(ids.reversalJournal)),
     transitionLifecycle: jest.fn<
       ReturnType<LedgerRepository['transitionLifecycle']>,
@@ -158,7 +165,7 @@ describe('LedgerService', () => {
 
     const journalId = await loggingContext.run(
       { correlationId: ids.correlation, initiatorActorId: ids.actor },
-      () => service.postJournal(postInput),
+      () => service.postJournal(postInput, POST_IDEMPOTENCY_KEY),
     );
 
     expect(journalId).toBe(ids.postedJournal);
@@ -172,7 +179,7 @@ describe('LedgerService', () => {
       reason: 'CHAIN_FINALITY_CONFIRMED',
     });
     expect(repository.postJournal).toHaveBeenCalledTimes(1);
-    const [command, capability] = repository.postJournal.mock.calls[0] ?? [];
+    const [command, capability, idempotency] = repository.postJournal.mock.calls[0] ?? [];
     expect(command).toEqual({
       correlationId: ids.correlation,
       bookId: ids.book,
@@ -185,8 +192,52 @@ describe('LedgerService', () => {
       postings: postInput.postings,
     });
     expect(Object.isFrozen(command)).toBe(true);
+    expect(repository.resolveIdempotency).toHaveBeenCalledWith(idempotency);
+    expect(idempotency).toEqual({
+      actorAccountId: ids.actor,
+      operation: 'POST_JOURNAL',
+      contractVersion: 1,
+      keyDigest: expect.stringMatching(/^[0-9a-f]{64}$/u),
+      fingerprintVersion: 1,
+      requestFingerprint: expect.stringMatching(/^[0-9a-f]{64}$/u),
+    });
+    expect(Object.isFrozen(idempotency)).toBe(true);
     expect(JSON.stringify(capability)).toBe('{}');
-    expect(JSON.stringify([command, capability])).not.toContain(POST_CAPABILITY_VALUE);
+    expect(JSON.stringify([command, capability, idempotency])).not.toContain(POST_CAPABILITY_VALUE);
+    expect(JSON.stringify([command, capability, idempotency])).not.toContain(POST_IDEMPOTENCY_KEY);
+  });
+
+  it('returns an identical committed replay before resolving a one-use capability', async () => {
+    const repository = repositoryStub();
+    repository.resolveIdempotency.mockResolvedValue(parseLedgerJournalId(ids.postedJournal));
+    const { service, capabilityResolver } = serviceWith(repository);
+
+    await expect(
+      loggingContext.run({ correlationId: ids.correlation, initiatorActorId: ids.actor }, () =>
+        service.postJournal(postInput, POST_IDEMPOTENCY_KEY),
+      ),
+    ).resolves.toBe(ids.postedJournal);
+
+    expect(repository.resolveIdempotency).toHaveBeenCalledTimes(1);
+    expect(capabilityResolver.resolvePosting).not.toHaveBeenCalled();
+    expect(repository.postJournal).not.toHaveBeenCalled();
+  });
+
+  it('propagates a fixed idempotency conflict before capability resolution', async () => {
+    const repository = repositoryStub();
+    repository.resolveIdempotency.mockRejectedValue(
+      new LedgerIdempotencyError('IDEMPOTENCY_CONFLICT'),
+    );
+    const { service, capabilityResolver } = serviceWith(repository);
+
+    await expect(
+      loggingContext.run({ correlationId: ids.correlation, initiatorActorId: ids.actor }, () =>
+        service.postJournal(postInput, POST_IDEMPOTENCY_KEY),
+      ),
+    ).rejects.toEqual(new LedgerIdempotencyError('IDEMPOTENCY_CONFLICT'));
+
+    expect(capabilityResolver.resolvePosting).not.toHaveBeenCalled();
+    expect(repository.postJournal).not.toHaveBeenCalled();
   });
 
   it('never accepts actor, correlation, or capability overrides in the payload', async () => {
@@ -200,7 +251,7 @@ describe('LedgerService', () => {
 
     await expect(
       loggingContext.run({ correlationId: ids.correlation, initiatorActorId: ids.actor }, () =>
-        service.postJournal(forged),
+        service.postJournal(forged, POST_IDEMPOTENCY_KEY),
       ),
     ).rejects.toMatchObject({ code: 'INVALID_LEDGER_JOURNAL' });
     expect(capabilityResolver.resolvePosting).not.toHaveBeenCalled();
@@ -209,19 +260,19 @@ describe('LedgerService', () => {
 
   it('fails closed without resolver-backed actor, UUID context, or capability', async () => {
     const base = serviceWith();
-    await expect(base.service.postJournal(postInput)).rejects.toBeInstanceOf(
+    await expect(base.service.postJournal(postInput, POST_IDEMPOTENCY_KEY)).rejects.toBeInstanceOf(
       LedgerCommandContextError,
     );
     await expect(
       loggingContext.run({ correlationId: `legacy:${'a'.repeat(64)}` }, () =>
-        base.service.postJournal(postInput),
+        base.service.postJournal(postInput, POST_IDEMPOTENCY_KEY),
       ),
     ).rejects.toBeInstanceOf(LedgerCommandContextError);
 
     const missingActor = serviceWith(repositoryStub(), actorResolverStub(null));
     await expect(
       loggingContext.run({ correlationId: ids.correlation }, () =>
-        missingActor.service.postJournal(postInput),
+        missingActor.service.postJournal(postInput, POST_IDEMPOTENCY_KEY),
       ),
     ).rejects.toBeInstanceOf(LedgerCommandContextError);
 
@@ -234,7 +285,7 @@ describe('LedgerService', () => {
     );
     await expect(
       loggingContext.run({ correlationId: ids.correlation, initiatorActorId: ids.actor }, () =>
-        missingCapability.service.postJournal(postInput),
+        missingCapability.service.postJournal(postInput, POST_IDEMPOTENCY_KEY),
       ),
     ).rejects.toBeInstanceOf(LedgerCommandContextError);
     expect(missingCapability.repository.postJournal).not.toHaveBeenCalled();
@@ -255,7 +306,7 @@ describe('LedgerService', () => {
     try {
       await loggingContext.run(
         { correlationId: ids.correlation, initiatorActorId: ids.actor },
-        () => service.postJournal(postInput),
+        () => service.postJournal(postInput, POST_IDEMPOTENCY_KEY),
       );
     } catch (error) {
       thrown = error;
@@ -272,7 +323,7 @@ describe('LedgerService', () => {
 
     await expect(
       loggingContext.run({ correlationId: ids.correlation, initiatorActorId: ids.otherActor }, () =>
-        service.postJournal(postInput),
+        service.postJournal(postInput, POST_IDEMPOTENCY_KEY),
       ),
     ).rejects.toBeInstanceOf(LedgerCommandContextError);
 
@@ -285,7 +336,7 @@ describe('LedgerService', () => {
 
     const reversalJournalId = await loggingContext.run(
       { correlationId: ids.correlation, initiatorActorId: ids.actor },
-      () => service.reverseJournal(reversalInput),
+      () => service.reverseJournal(reversalInput, REVERSAL_IDEMPOTENCY_KEY),
     );
 
     expect(reversalJournalId).toBe(ids.reversalJournal);
@@ -303,6 +354,12 @@ describe('LedgerService', () => {
         observedAt: '2026-08-21T12:01:01.000Z',
       },
       expect.any(Object),
+      expect.objectContaining({
+        actorAccountId: ids.actor,
+        operation: 'REVERSE_JOURNAL',
+        contractVersion: 1,
+        fingerprintVersion: 1,
+      }),
     );
 
     const forged = {
@@ -314,7 +371,7 @@ describe('LedgerService', () => {
     } as unknown as ReverseLedgerJournalInput;
     await expect(
       loggingContext.run({ correlationId: ids.correlation, initiatorActorId: ids.actor }, () =>
-        service.reverseJournal(forged),
+        service.reverseJournal(forged, REVERSAL_IDEMPOTENCY_KEY),
       ),
     ).rejects.toMatchObject({ code: 'INVALID_LEDGER_JOURNAL' });
     expect(repository.reverseJournal).toHaveBeenCalledTimes(1);
