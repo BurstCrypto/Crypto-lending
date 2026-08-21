@@ -12,6 +12,10 @@ import {
   createLedgerLifecycleMigrationV0008,
   createLedgerLifecycleTestSchemaMigrationV0008,
 } from './0008-create-ledger-lifecycle.migration';
+import {
+  createLedgerCommandIdempotencyMigrationV0009,
+  createLedgerCommandIdempotencyTestSchemaMigrationV0009,
+} from './0009-create-ledger-command-idempotency.migration';
 import type { DatabaseMigration } from './migration';
 
 /**
@@ -28,6 +32,7 @@ export const DATABASE_TEST_SCHEMA_MIGRATION_LIST: readonly DatabaseMigration[] =
   constrainJobOutboxLastErrorMigration,
   createImmutableLedgerTestSchemaMigrationV0007,
   createLedgerLifecycleTestSchemaMigrationV0008,
+  createLedgerCommandIdempotencyTestSchemaMigrationV0009,
 ]);
 
 export const DATABASE_MIGRATION_LIST: readonly DatabaseMigration[] = Object.freeze([
@@ -39,6 +44,7 @@ export const DATABASE_MIGRATION_LIST: readonly DatabaseMigration[] = Object.free
   constrainJobOutboxLastErrorMigration,
   createImmutableLedgerMigrationV0007,
   createLedgerLifecycleMigrationV0008,
+  createLedgerCommandIdempotencyMigrationV0009,
 ]);
 
 export type { DatabaseMigration } from './migration';
@@ -57,3 +63,8 @@ export {
   createLedgerLifecycleMigrationV0008,
   createLedgerLifecycleTestSchemaMigrationV0008,
 } from './0008-create-ledger-lifecycle.migration';
+export {
+  createLedgerCommandIdempotencyMigration,
+  createLedgerCommandIdempotencyMigrationV0009,
+  createLedgerCommandIdempotencyTestSchemaMigrationV0009,
+} from './0009-create-ledger-command-idempotency.migration';

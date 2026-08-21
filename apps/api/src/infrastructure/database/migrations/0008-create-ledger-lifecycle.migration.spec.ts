@@ -42,6 +42,7 @@ describe('createLedgerLifecycleMigration', () => {
       '0006',
       '0007',
       '0008',
+      '0009',
     ]);
     expect(DATABASE_TEST_SCHEMA_MIGRATION_LIST.map(({ id }) => id)).toEqual([
       '0001',
@@ -51,9 +52,10 @@ describe('createLedgerLifecycleMigration', () => {
       '0006',
       '0007',
       '0008',
+      '0009',
     ]);
-    expect(DATABASE_MIGRATION_LIST.at(-1)).toBe(createLedgerLifecycleMigrationV0008);
-    expect(DATABASE_TEST_SCHEMA_MIGRATION_LIST.at(-1)).toBe(
+    expect(DATABASE_MIGRATION_LIST.at(-2)).toBe(createLedgerLifecycleMigrationV0008);
+    expect(DATABASE_TEST_SCHEMA_MIGRATION_LIST.at(-2)).toBe(
       createLedgerLifecycleTestSchemaMigrationV0008,
     );
   });
