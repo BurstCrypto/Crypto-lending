@@ -9,6 +9,8 @@ import type { AccountProfileRepository } from './account-profile.repository.port
 import { AccountProfileService } from './account-profile.service';
 
 const accountId = parseAccountId('123e4567-e89b-42d3-a456-426614174000');
+const PROVISION_REQUEST_ID = '00000000-0000-4000-8000-000000000001';
+const UPDATE_REQUEST_ID = '00000000-0000-4000-8000-000000000002';
 const profile: AccountProfile = {
   accountId,
   contactEmail: 'trey@example.com',
@@ -57,7 +59,7 @@ describe('AccountProfileService', () => {
       accountId,
     };
 
-    await loggingContext.run({ correlationId: 'request:profile-provision' }, () =>
+    await loggingContext.run({ correlationId: PROVISION_REQUEST_ID }, () =>
       service.provisionAccount(input),
     );
 
@@ -75,7 +77,7 @@ describe('AccountProfileService', () => {
     });
     expect(auditContext).toEqual({
       actorAccountId: createInput.accountId,
-      correlationId: 'request:profile-provision',
+      correlationId: PROVISION_REQUEST_ID,
     });
   });
 
@@ -100,13 +102,13 @@ describe('AccountProfileService', () => {
     const update: UpdateAccountProfileInput = { contactPhone: '+13035550123' };
 
     await expect(
-      loggingContext.run({ correlationId: 'request:profile-update' }, () =>
+      loggingContext.run({ correlationId: UPDATE_REQUEST_ID }, () =>
         service.updateSelf(accountId, 1, update),
       ),
     ).resolves.toEqual(nextProfile);
     expect(repository.update).toHaveBeenCalledWith(accountId, 1, update, {
       actorAccountId: accountId,
-      correlationId: 'request:profile-update',
+      correlationId: UPDATE_REQUEST_ID,
     });
   });
 });

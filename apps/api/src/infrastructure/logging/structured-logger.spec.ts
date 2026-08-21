@@ -11,6 +11,10 @@ import {
   type StructuredLogRecord,
 } from './structured-logger';
 
+const REQUEST_ID = '00000000-0000-4000-8000-000000000001';
+const ACTOR_ID = '00000000-0000-4000-8000-000000000002';
+const INTENT_ID = '00000000-0000-4000-8000-000000000003';
+
 function parse(line: string): StructuredLogRecord {
   return JSON.parse(line) as StructuredLogRecord;
 }
@@ -31,10 +35,10 @@ describe('StructuredLogger', () => {
 
     context.run(
       {
-        correlationId: 'request:one',
-        requestId: 'request:one',
-        initiatorActorId: 'actor:verified',
-        intentId: 'intent:1',
+        correlationId: REQUEST_ID,
+        requestId: REQUEST_ID,
+        initiatorActorId: ACTOR_ID,
+        intentId: INTENT_ID,
       },
       () =>
         logger.emit(LOG_EVENTS.httpRequestCompleted, 'info', {
@@ -55,15 +59,15 @@ describe('StructuredLogger', () => {
       service: 'crypto-lending',
       workload: 'api',
       environment: 'staging-blue',
-      correlationId: 'request:one',
-      requestId: 'request:one',
+      correlationId: REQUEST_ID,
+      requestId: REQUEST_ID,
       method: 'GET',
       route: '/api/v1/accounts/me',
       statusCode: 200,
       durationMs: 12.346,
       outcome: 'success',
-      initiatorActorId: 'actor:verified',
-      intentId: 'intent:1',
+      initiatorActorId: ACTOR_ID,
+      intentId: INTENT_ID,
     });
     expect(Buffer.byteLength(lines[0] ?? '')).toBeLessThanOrEqual(4_096);
   });
@@ -146,6 +150,61 @@ describe('StructuredLogger', () => {
 
     expect(() => badClock.emit(LOG_EVENTS.applicationStarted, 'info')).not.toThrow();
     expect(() => badSink.emit(LOG_EVENTS.applicationStarted, 'info')).not.toThrow();
+
+    const throwingCode = Object.defineProperty({}, 'code', {
+      get: () => {
+        throw new Error('credential getter must not escape');
+      },
+    });
+    const throwingField = Object.defineProperty({}, 'outcome', {
+      get: () => {
+        throw new Error('field getter must not escape');
+      },
+    }) as SafeLogFields;
+    expect(() => safeErrorCode(throwingCode)).not.toThrow();
+    expect(safeErrorCode(throwingCode)).toBe('UNEXPECTED_ERROR');
+    expect(() =>
+      badSink.emitFatal(LOG_EVENTS.applicationStartFailed, throwingCode, throwingField),
+    ).not.toThrow();
+  });
+
+  it('drops huge durations and token-shaped identifiers rather than serializing null or secrets', () => {
+    const lines: string[] = [];
+    const logger = new StructuredLogger({ sink: (line) => lines.push(line) });
+    logger.emit(LOG_EVENTS.jobProcessed, 'info', {
+      durationMs: 1e308,
+      jobId: 'eyJhbGciOiJIUzI1NiJ9.payload.signature',
+      messageId: 'ghp_SECRET_MATERIAL',
+      jobKind: 'ghp_SECRET_MATERIAL',
+      outcome: 'success',
+    });
+
+    expect(lines).toHaveLength(1);
+    expect(parse(lines[0] ?? '')).not.toHaveProperty('durationMs');
+    expect(parse(lines[0] ?? '')).not.toHaveProperty('jobId');
+    expect(parse(lines[0] ?? '')).not.toHaveProperty('messageId');
+    expect(parse(lines[0] ?? '')).not.toHaveProperty('jobKind');
+    expect(lines[0]).not.toContain('SECRET_MATERIAL');
+    expect(lines[0]).not.toContain(':null');
+  });
+
+  it('is not replaceable through Object.prototype.toJSON pollution', () => {
+    const lines: string[] = [];
+    const logger = new StructuredLogger({ sink: (line) => lines.push(line) });
+    const polluted = Object.prototype as { toJSON?: () => unknown };
+    polluted.toJSON = () => ({ authorization: 'Bearer ObjectPrototypeCANARY' });
+    try {
+      logger.emit(LOG_EVENTS.applicationStarted, 'info', { outcome: 'success' });
+    } finally {
+      delete polluted.toJSON;
+    }
+
+    expect(lines).toHaveLength(1);
+    expect(parse(lines[0] ?? '')).toMatchObject({
+      event: LOG_EVENTS.applicationStarted,
+      outcome: 'success',
+    });
+    expect(lines[0]).not.toContain('ObjectPrototypeCANARY');
   });
 
   it('keeps the default test sink silent while an explicit sink remains capturable', () => {

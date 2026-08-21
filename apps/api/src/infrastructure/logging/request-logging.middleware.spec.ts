@@ -7,6 +7,8 @@ import {
 } from './request-logging.middleware';
 import { StructuredLogger, type StructuredLogRecord } from './structured-logger';
 
+const VERIFIED_ACTOR_ID = '00000000-0000-4000-8000-000000000001';
+
 class TestResponse extends EventEmitter {
   readonly headers = new Map<string, string>();
   statusCode = 200;
@@ -43,7 +45,7 @@ describe('request logging middleware', () => {
       const active = loggingContext.requireCurrent();
       expect(active.requestId).toMatch(/^[0-9a-f-]{36}$/u);
       expect(active.requestId).not.toBe('attacker-controlled');
-      loggingContext.bindActorId('actor:verified');
+      loggingContext.bindActorId(VERIFIED_ACTOR_ID);
       response.statusCode = 200;
       response.writableFinished = true;
       response.emit('finish');
@@ -57,7 +59,7 @@ describe('request logging middleware', () => {
       route: '/api/v1/accounts/me',
       statusCode: 200,
       outcome: 'success',
-      initiatorActorId: 'actor:verified',
+      initiatorActorId: VERIFIED_ACTOR_ID,
     });
     expect(output[0]?.requestId).toBe(response.headers.get(REQUEST_ID_RESPONSE_HEADER));
     expect(output[0]?.correlationId).toBe(output[0]?.requestId);

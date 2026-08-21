@@ -11,6 +11,7 @@ import {
 import { requireCurrentPrincipal } from './current-principal.decorator';
 
 const ACCOUNT_ID = parseAccountId('0f27af0b-48b2-4f1b-b3d4-cd531a0b4458');
+const REQUEST_ID = '00000000-0000-4000-8000-000000000001';
 
 function httpContext(
   request: unknown,
@@ -47,14 +48,14 @@ describe('AccountAuthGuard', () => {
   it('binds only the verified principal as the correlated initiating actor', async () => {
     const guard = new AccountAuthGuard({ resolve: () => ({ accountId: ACCOUNT_ID }) });
 
-    await loggingContext.run({ correlationId: 'request:authenticated' }, async () => {
+    await loggingContext.run({ correlationId: REQUEST_ID }, async () => {
       await expect(
         guard.canActivate(
           httpContext({ headers: { 'x-account-id': 'attacker-controlled-actor' } }),
         ),
       ).resolves.toBe(true);
       expect(loggingContext.requireCurrent()).toEqual({
-        correlationId: 'request:authenticated',
+        correlationId: REQUEST_ID,
         initiatorActorId: ACCOUNT_ID,
       });
     });

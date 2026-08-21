@@ -2,7 +2,11 @@ import { Buffer } from 'node:buffer';
 
 import type { LoggerService } from '@nestjs/common';
 
-import { loggingContext, type LoggingContext } from './logging-context';
+import {
+  isSafeLogReference,
+  loggingContext,
+  type LoggingContext,
+} from './logging-context';
 
 export const LOG_EVENTS = Object.freeze({
   applicationStarted: 'application.started',
@@ -87,7 +91,9 @@ export interface StructuredLoggerOptions {
 }
 
 const MAX_SERIALIZED_LOG_BYTES = 4_096;
-const SAFE_IDENTIFIER_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
+const DATE_TO_ISO_STRING = Date.prototype.toISOString;
+const JSON_STRINGIFY = JSON.stringify;
+const SAFE_JOB_KIND_PATTERN = /^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/u;
 const SAFE_ROUTE_PATTERN = /^\/[A-Za-z0-9_./:*-]{0,255}$/u;
 const SAFE_METHODS = new Set([
   'CONNECT',
@@ -117,6 +123,28 @@ const SAFE_COMPONENTS = new Set([
   'InstanceLoader',
   'RoutesResolver',
   'RouterExplorer',
+]);
+const SAFE_JOB_KINDS = new Set(['account.updated']);
+const SAFE_FIELD_KEYS = new Set<keyof SafeLogFields>([
+  'component',
+  'method',
+  'route',
+  'statusCode',
+  'durationMs',
+  'outcome',
+  'errorCode',
+  'jobId',
+  'jobKind',
+  'messageId',
+  'receiveCount',
+  'retryCount',
+  'retryDelayMs',
+  'claimed',
+  'published',
+  'retried',
+  'failed',
+  'leaseLost',
+  'deleted',
 ]);
 const SAFE_ERROR_CODES = new Set([
   'ABORT_ERR',
@@ -257,8 +285,24 @@ function safeWorkload(value: string | undefined): string {
   return SAFE_WORKLOADS.has(normalized) ? normalized : 'unknown';
 }
 
-function safeIdentifier(value: unknown): string | undefined {
-  return typeof value === 'string' && SAFE_IDENTIFIER_PATTERN.test(value) ? value : undefined;
+function ownDataFields(value: unknown): Readonly<Record<string, unknown>> | undefined {
+  try {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) return undefined;
+    const descriptors = Object.getOwnPropertyDescriptors(value);
+    const projected = Object.create(null) as Record<string, unknown>;
+    for (const key of Reflect.ownKeys(descriptors)) {
+      if (typeof key !== 'string') return undefined;
+      if (!SAFE_FIELD_KEYS.has(key as keyof SafeLogFields)) continue;
+      const descriptor = descriptors[key];
+      if (!descriptor || !('value' in descriptor)) return undefined;
+      projected[key] = descriptor.value;
+    }
+    return projected;
+  } catch {
+    return undefined;
+  }
 }
 
 function safeInteger(value: unknown, maximum = Number.MAX_SAFE_INTEGER): number | undefined {
@@ -268,38 +312,80 @@ function safeInteger(value: unknown, maximum = Number.MAX_SAFE_INTEGER): number 
 }
 
 function safeDuration(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value) && value >= 0
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 604_800_000
     ? Math.round(value * 1_000) / 1_000
     : undefined;
 }
 
 function projectFields(event: StructuredLogEvent, fields: SafeLogFields): SafeLogFields {
   const permitted = EVENT_FIELD_KEYS[event];
-  const projected: Record<string, string | number> = {};
-  if (permitted.has('component') && fields.component && SAFE_COMPONENTS.has(fields.component)) {
-    projected.component = fields.component;
+  const source = ownDataFields(fields);
+  if (!source) return {};
+  const projected = Object.create(null) as Record<string, string | number>;
+  if (
+    permitted.has('component') &&
+    typeof source.component === 'string' &&
+    SAFE_COMPONENTS.has(source.component)
+  ) {
+    projected.component = source.component;
   }
-  if (permitted.has('method') && fields.method && SAFE_METHODS.has(fields.method)) {
-    projected.method = fields.method;
+  if (
+    permitted.has('method') &&
+    typeof source.method === 'string' &&
+    SAFE_METHODS.has(source.method)
+  ) {
+    projected.method = source.method;
   }
-  if (permitted.has('route') && fields.route && SAFE_ROUTE_PATTERN.test(fields.route)) {
-    projected.route = fields.route;
+  if (
+    permitted.has('route') &&
+    typeof source.route === 'string' &&
+    SAFE_ROUTE_PATTERN.test(source.route)
+  ) {
+    projected.route = source.route;
   }
-  const statusCode = safeInteger(fields.statusCode, 599);
+  const statusCode = safeInteger(source.statusCode, 599);
   if (permitted.has('statusCode') && statusCode !== undefined && statusCode >= 100) {
     projected.statusCode = statusCode;
   }
-  const durationMs = safeDuration(fields.durationMs);
+  const durationMs = safeDuration(source.durationMs);
   if (permitted.has('durationMs') && durationMs !== undefined) projected.durationMs = durationMs;
-  if (permitted.has('outcome') && fields.outcome && SAFE_OUTCOMES.has(fields.outcome)) {
-    projected.outcome = fields.outcome;
+  if (
+    permitted.has('outcome') &&
+    typeof source.outcome === 'string' &&
+    SAFE_OUTCOMES.has(source.outcome as StructuredLogOutcome)
+  ) {
+    projected.outcome = source.outcome;
   }
-  if (permitted.has('errorCode') && fields.errorCode && SAFE_ERROR_CODES.has(fields.errorCode)) {
-    projected.errorCode = fields.errorCode;
+  if (
+    permitted.has('errorCode') &&
+    typeof source.errorCode === 'string' &&
+    SAFE_ERROR_CODES.has(source.errorCode)
+  ) {
+    projected.errorCode = source.errorCode;
   }
-  for (const name of ['jobId', 'jobKind', 'messageId'] as const) {
-    const value = safeIdentifier(fields[name]);
-    if (permitted.has(name) && value) projected[name] = value;
+  const jobId = source.jobId;
+  if (
+    permitted.has('jobId') &&
+    isSafeLogReference(jobId) &&
+    jobId.startsWith('job:')
+  ) {
+    projected.jobId = jobId;
+  }
+  const messageId = source.messageId;
+  if (
+    permitted.has('messageId') &&
+    isSafeLogReference(messageId) &&
+    messageId.startsWith('message:')
+  ) {
+    projected.messageId = messageId;
+  }
+  if (
+    permitted.has('jobKind') &&
+    typeof source.jobKind === 'string' &&
+    SAFE_JOB_KIND_PATTERN.test(source.jobKind) &&
+    SAFE_JOB_KINDS.has(source.jobKind)
+  ) {
+    projected.jobKind = source.jobKind;
   }
   for (const [name, maximum] of [
     ['receiveCount', 1_000],
@@ -312,7 +398,7 @@ function projectFields(event: StructuredLogEvent, fields: SafeLogFields): SafeLo
     ['leaseLost', 10_000],
     ['deleted', 100_000],
   ] as const) {
-    const value = safeInteger(fields[name], maximum);
+    const value = safeInteger(source[name], maximum);
     if (permitted.has(name) && value !== undefined) projected[name] = value;
   }
   return projected;
@@ -327,12 +413,19 @@ function safeFrameworkComponent(optionalParams: readonly unknown[]): string {
 }
 
 export function safeErrorCode(error: unknown): string {
-  if (error instanceof TypeError) return 'TYPE_ERROR';
-  if (error instanceof RangeError) return 'RANGE_ERROR';
-  if (error instanceof SyntaxError) return 'SYNTAX_ERROR';
-  if (error && typeof error === 'object' && 'code' in error) {
-    const code = (error as { readonly code?: unknown }).code;
-    if (typeof code === 'string' && SAFE_ERROR_CODES.has(code)) return code;
+  try {
+    if (error instanceof TypeError) return 'TYPE_ERROR';
+    if (error instanceof RangeError) return 'RANGE_ERROR';
+    if (error instanceof SyntaxError) return 'SYNTAX_ERROR';
+    if (error && typeof error === 'object') {
+      const descriptor = Object.getOwnPropertyDescriptor(error, 'code');
+      if (descriptor && 'value' in descriptor) {
+        const code = descriptor.value;
+        if (typeof code === 'string' && SAFE_ERROR_CODES.has(code)) return code;
+      }
+    }
+  } catch {
+    return 'UNEXPECTED_ERROR';
   }
   return 'UNEXPECTED_ERROR';
 }
@@ -359,33 +452,40 @@ export class StructuredLogger implements LoggerService {
     try {
       if (!SAFE_EVENTS.has(event) || !SAFE_LEVELS.has(level)) return;
       const context = this.context.current();
-      const coreRecord = {
-        schemaVersion: 1 as const,
-        timestamp: this.clock().toISOString(),
-        level,
-        event,
-        service: 'crypto-lending',
-        workload: safeWorkload(this.environment.APPLICATION_WORKLOAD),
-        environment: safeRuntimeName(
-          this.environment.APP_ENV ?? this.environment.NODE_ENV,
-          'unknown',
-        ),
-        ...(context?.correlationId ? { correlationId: context.correlationId } : {}),
-        ...(context?.requestId ? { requestId: context.requestId } : {}),
-      };
-      const record: StructuredLogRecord = {
-        ...coreRecord,
-        ...projectFields(event, fields),
-        ...(context?.initiatorActorId ? { initiatorActorId: context.initiatorActorId } : {}),
-        ...(context?.jobId ? { jobId: context.jobId } : {}),
-        ...(context?.intentId ? { intentId: context.intentId } : {}),
-        ...(context?.quoteId ? { quoteId: context.quoteId } : {}),
-        ...(context?.transactionId ? { transactionId: context.transactionId } : {}),
-        ...(context?.ledgerEventId ? { ledgerEventId: context.ledgerEventId } : {}),
-      };
-      let line = JSON.stringify(record);
+      const coreRecord = Object.create(null) as Record<string, unknown>;
+      coreRecord.schemaVersion = 1;
+      coreRecord.timestamp = DATE_TO_ISO_STRING.call(this.clock());
+      coreRecord.level = level;
+      coreRecord.event = event;
+      coreRecord.service = 'crypto-lending';
+      coreRecord.workload = safeWorkload(this.environment.APPLICATION_WORKLOAD);
+      coreRecord.environment = safeRuntimeName(
+        this.environment.APP_ENV ?? this.environment.NODE_ENV,
+        'unknown',
+      );
+      if (context?.correlationId) coreRecord.correlationId = context.correlationId;
+      if (context?.requestId) coreRecord.requestId = context.requestId;
+      const record = Object.assign(Object.create(null), coreRecord, projectFields(event, fields)) as
+        unknown as StructuredLogRecord;
+      if (context?.initiatorActorId) {
+        (record as unknown as Record<string, unknown>).initiatorActorId = context.initiatorActorId;
+      }
+      if (context?.jobId) (record as unknown as Record<string, unknown>).jobId = context.jobId;
+      if (context?.intentId) {
+        (record as unknown as Record<string, unknown>).intentId = context.intentId;
+      }
+      if (context?.quoteId) {
+        (record as unknown as Record<string, unknown>).quoteId = context.quoteId;
+      }
+      if (context?.transactionId) {
+        (record as unknown as Record<string, unknown>).transactionId = context.transactionId;
+      }
+      if (context?.ledgerEventId) {
+        (record as unknown as Record<string, unknown>).ledgerEventId = context.ledgerEventId;
+      }
+      let line = JSON_STRINGIFY(record);
       if (Buffer.byteLength(line) > MAX_SERIALIZED_LOG_BYTES) {
-        line = JSON.stringify(coreRecord);
+        line = JSON_STRINGIFY(coreRecord);
       }
       if (Buffer.byteLength(line) <= MAX_SERIALIZED_LOG_BYTES) this.sink(line, level);
     } catch {
@@ -394,7 +494,12 @@ export class StructuredLogger implements LoggerService {
   }
 
   emitFatal(event: StructuredLogEvent, error: unknown, fields: SafeLogFields = {}): void {
-    this.emit(event, 'fatal', { ...fields, errorCode: safeErrorCode(error) });
+    try {
+      const safeFields = ownDataFields(fields);
+      this.emit(event, 'fatal', { ...(safeFields ?? {}), errorCode: safeErrorCode(error) });
+    } catch {
+      // Fatal diagnostics must not replace the original application failure.
+    }
   }
 
   log(_message: unknown, ...optionalParams: unknown[]): void {

@@ -9,15 +9,17 @@ import {
 import type { Pool, PoolClient, QueryResult, QueryResultRow } from 'pg';
 
 import { PostgresService } from '../../src/infrastructure/database/postgres.service';
-import { loggingContext } from '../../src/infrastructure/logging';
+import { createSafeLogReference, loggingContext } from '../../src/infrastructure/logging';
 import {
   createJobEnvelope,
   parseJobEnvelope,
+  type JobCorrelationContext,
   type JobEnvelope,
 } from '../../src/infrastructure/outbox/job-envelope';
 import {
   MAX_CUSTOM_JOB_ATTRIBUTES,
   MAX_JOB_MESSAGE_BYTES,
+  serializeJobMessage,
 } from '../../src/infrastructure/outbox/job-message-policy';
 import {
   JobOutboxRepository,
@@ -36,10 +38,37 @@ import { SqsJobWorker } from '../../src/infrastructure/sqs/sqs-job.worker';
 import { SqsService } from '../../src/infrastructure/sqs/sqs.service';
 import { testInfrastructureConfig, testOutboxDispatcherOptions } from './fixtures';
 
+function testUuid(index: number): string {
+  return `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`;
+}
+
+function testCorrelation(offset: number): Readonly<JobCorrelationContext> {
+  const correlationId = testUuid(offset);
+  return Object.freeze({
+    correlationId,
+    requestId: correlationId,
+    initiatorActorId: testUuid(offset + 1),
+    intentId: testUuid(offset + 2),
+    quoteId: testUuid(offset + 3),
+    transactionId: testUuid(offset + 4),
+    ledgerEventId: testUuid(offset + 5),
+  });
+}
+
+const DEFAULT_CORRELATION = testCorrelation(10);
+
+function cloneJson<Value>(value: Value): Value {
+  return JSON.parse(JSON.stringify(value)) as Value;
+}
+
+type StoredJobEnvelope = Omit<JobEnvelope, 'correlation'> & {
+  readonly correlation?: JobCorrelationContext;
+};
+
 interface StoredJob {
   id: string;
   destination: string;
-  envelope: JobEnvelope;
+  envelope: StoredJobEnvelope;
   messageAttributes: Readonly<Record<string, string>>;
   status: 'pending' | 'published' | 'failed';
   attempts: number;
@@ -84,7 +113,7 @@ class TransactionalOutboxHarness {
   }
 
   seed(job: StoredJob): void {
-    this.committed.push(structuredClone(job));
+    this.committed.push(cloneJson(job));
   }
 
   private async query(text: string, values: unknown[] = []): Promise<QueryResult> {
@@ -92,7 +121,7 @@ class TransactionalOutboxHarness {
     this.queries.push(normalized);
 
     if (normalized.startsWith('BEGIN')) {
-      this.transaction = structuredClone(this.committed);
+      this.transaction = cloneJson(this.committed);
       return queryResult();
     }
     if (normalized === 'COMMIT') {
@@ -251,15 +280,7 @@ async function enqueueCommitted(
       kind: 'account.updated',
       occurredAt: '2026-08-18T00:00:00.000Z',
       payload: { accountId: 'acct-1' },
-      correlation: {
-        correlationId: 'corr-1',
-        requestId: 'request-1',
-        initiatorActorId: 'actor-1',
-        intentId: 'intent-1',
-        quoteId: 'quote-1',
-        transactionId: 'transaction-1',
-        ledgerEventId: 'ledger-event-1',
-      },
+      correlation: DEFAULT_CORRELATION,
     }),
   );
 }
@@ -286,16 +307,13 @@ describe('transactional job outbox', () => {
   });
 
   it('inherits and durably projects only the active correlation context', () => {
+    const activeCorrelation = testCorrelation(20);
+    const parentJobId = createSafeLogReference('job', 'unrelated-parent-job');
+    if (!parentJobId) throw new Error('Expected a diagnostic job reference');
     const envelope = loggingContext.run(
       {
-        correlationId: 'corr-active',
-        requestId: 'request-active',
-        initiatorActorId: 'actor-active',
-        jobId: 'unrelated-parent-job',
-        intentId: 'intent-active',
-        quoteId: 'quote-active',
-        transactionId: 'transaction-active',
-        ledgerEventId: 'ledger-event-active',
+        ...activeCorrelation,
+        jobId: parentJobId,
       },
       () =>
         createJobEnvelope(
@@ -308,17 +326,26 @@ describe('transactional job outbox', () => {
         ),
     );
 
-    expect(envelope.correlation).toEqual({
-      correlationId: 'corr-active',
-      requestId: 'request-active',
-      initiatorActorId: 'actor-active',
-      intentId: 'intent-active',
-      quoteId: 'quote-active',
-      transactionId: 'transaction-active',
-      ledgerEventId: 'ledger-event-active',
-    });
+    expect(envelope.correlation).toEqual(activeCorrelation);
     expect(envelope.correlation).not.toHaveProperty('jobId');
     expect(parseJobEnvelope(JSON.parse(JSON.stringify(envelope)))).toEqual(envelope);
+    expect(Object.isFrozen(envelope)).toBe(true);
+  });
+
+  it('keeps active correlation authoritative and preserves it for child jobs', () => {
+    const activeCorrelation = testCorrelation(70);
+    const parentJobId = createSafeLogReference('job', 'parent-job');
+    if (!parentJobId) throw new Error('Expected a diagnostic job reference');
+
+    loggingContext.run({ ...activeCorrelation, jobId: parentJobId }, () => {
+      const child = createJobEnvelope('account.updated', {}, { id: 'child-job' });
+      expect(child.correlation).toEqual(activeCorrelation);
+      expect(() =>
+        createJobEnvelope('account.updated', {}, {
+          correlation: testCorrelation(80),
+        }),
+      ).toThrow('must match the active logging context');
+    });
   });
 
   it('gives legacy envelopes a deterministic correlation without copying their opaque ID', () => {
@@ -331,7 +358,7 @@ describe('transactional job outbox', () => {
     };
 
     const first = parseJobEnvelope(legacy);
-    const second = parseJobEnvelope(structuredClone(legacy));
+    const second = parseJobEnvelope(cloneJson(legacy));
     expect(first.correlation).toEqual(second.correlation);
     expect(first.correlation.correlationId).toMatch(/^legacy:[a-f0-9]{64}$/u);
     expect(first.correlation.correlationId).not.toContain(legacy.id);
@@ -350,10 +377,81 @@ describe('transactional job outbox', () => {
         ...base,
         correlation: { correlationId: 'corr-safe', authorization: 'Bearer do-not-store' },
       }),
-    ).toThrow('Invalid job correlation context');
+    ).toThrow('Invalid job envelope');
     expect(() =>
       parseJobEnvelope({ ...base, correlation: { correlationId: 'corr\nforged' } }),
+    ).toThrow('Invalid job envelope');
+    expect(() =>
+      createJobEnvelope('account.updated', {}, {
+        correlation: null as unknown as JobCorrelationContext,
+      }),
     ).toThrow('Invalid job correlation context');
+  });
+
+  it('does not inherit envelope options or metadata through prototypes and accessors', () => {
+    const polluted = Object.prototype as { correlation?: JobCorrelationContext };
+    polluted.correlation = testCorrelation(90);
+    let inheritedReads = 0;
+    const inherited = Object.create({
+      constructor: Object,
+      get correlationId() {
+        inheritedReads += 1;
+        return testUuid(100);
+      },
+    });
+    try {
+      const envelope = createJobEnvelope('account.updated', {});
+      expect(envelope.correlation).not.toEqual(polluted.correlation);
+      expect(() =>
+        parseJobEnvelope({
+          id: 'inherited-correlation',
+          kind: 'account.updated',
+          version: 1,
+          occurredAt: '2026-08-18T00:00:00.000Z',
+          correlation: inherited,
+          payload: {},
+        }),
+      ).toThrow('Invalid job envelope');
+      expect(inheritedReads).toBe(0);
+    } finally {
+      delete polluted.correlation;
+    }
+  });
+
+  it('serializes a canonical data clone without honoring inherited or payload toJSON hooks', () => {
+    const envelope = createJobEnvelope(
+      'account.updated',
+      { accountId: 'safe-account-alias' },
+      { id: 'original-job', correlation: DEFAULT_CORRELATION },
+    );
+    const polluted = Object.prototype as { toJSON?: () => unknown };
+    polluted.toJSON = () => ({
+      id: 'BearerTokenCANARY',
+      kind: 'account.updated',
+      version: 1,
+      occurredAt: '2026-08-18T00:00:00.000Z',
+      correlation: testCorrelation(110),
+      payload: {},
+    });
+    try {
+      const serialized = serializeJobMessage(envelope, {});
+      expect(parseJobEnvelope(JSON.parse(serialized.body))).toMatchObject({
+        id: 'original-job',
+        payload: { accountId: 'safe-account-alias' },
+      });
+      expect(serialized.body).not.toContain('BearerTokenCANARY');
+    } finally {
+      delete polluted.toJSON;
+    }
+
+    expect(() =>
+      serializeJobMessage(
+        createJobEnvelope('account.updated', {
+          toJSON: () => ({ authorization: 'Bearer payload-canary' }),
+        }),
+        {},
+      ),
+    ).toThrow('supported JSON data');
   });
 
   it('rolls enqueue back atomically and leaves nothing to publish', async () => {
@@ -404,15 +502,7 @@ describe('transactional job outbox', () => {
       expect.objectContaining({
         envelope: expect.objectContaining({
           id: envelope.id,
-          correlation: {
-            correlationId: 'corr-1',
-            requestId: 'request-1',
-            initiatorActorId: 'actor-1',
-            intentId: 'intent-1',
-            quoteId: 'quote-1',
-            transactionId: 'transaction-1',
-            ledgerEventId: 'ledger-event-1',
-          },
+          correlation: DEFAULT_CORRELATION,
         }),
       }),
       expect.anything(),
@@ -475,26 +565,7 @@ describe('transactional job outbox', () => {
     });
     const sqs = new SqsService({ send, destroy: jest.fn() } as unknown as SQSClient, config);
     const dispatcher = new OutboxDispatcher(repository, sqs, dispatcherOptions());
-    const contexts = [
-      {
-        correlationId: 'corr-flow-a',
-        requestId: 'request-flow-a',
-        initiatorActorId: 'actor-flow-a',
-        intentId: 'intent-flow-a',
-        quoteId: 'quote-flow-a',
-        transactionId: 'transaction-flow-a',
-        ledgerEventId: 'ledger-event-flow-a',
-      },
-      {
-        correlationId: 'corr-flow-b',
-        requestId: 'request-flow-b',
-        initiatorActorId: 'actor-flow-b',
-        intentId: 'intent-flow-b',
-        quoteId: 'quote-flow-b',
-        transactionId: 'transaction-flow-b',
-        ledgerEventId: 'ledger-event-flow-b',
-      },
-    ] as const;
+    const contexts = [testCorrelation(30), testCorrelation(40)] as const;
 
     for (const [index, context] of contexts.entries()) {
       await loggingContext.run(context, async () => {
@@ -555,7 +626,10 @@ describe('transactional job outbox', () => {
       new Map(
         contexts.map((context, index) => [
           `correlated-flow-${index + 1}`,
-          { ...context, jobId: `correlated-flow-${index + 1}` },
+          {
+            ...context,
+            jobId: createSafeLogReference('job', `correlated-flow-${index + 1}`),
+          },
         ]),
       ),
     );
@@ -572,7 +646,6 @@ describe('transactional job outbox', () => {
         kind: 'account.updated',
         version: 1,
         occurredAt: '2026-08-18T00:00:00.000Z',
-        correlation: { correlationId: 'corr-legacy-batch-poison' },
         payload: {},
       },
       messageAttributes: { jobId: 'reserved-legacy-value' },
@@ -676,7 +749,7 @@ describe('transactional job outbox', () => {
 
     await expect(
       postgres.withTransaction(() => publisher.enqueue({ kind: 'poison', payload: undefined })),
-    ).rejects.toThrow('JSON serializable');
+    ).rejects.toThrow('supported JSON data');
     expect(harness.queries.some((sql) => sql.startsWith('INSERT'))).toBe(false);
   });
 
@@ -690,12 +763,12 @@ describe('transactional job outbox', () => {
       postgres.withTransaction(() =>
         publisher.enqueue({ kind: 'poison', payload: { nested: undefined } }),
       ),
-    ).rejects.toThrow('unsupported JSON value');
+    ).rejects.toThrow('supported JSON data');
     await expect(
       postgres.withTransaction(() =>
         publisher.enqueue({ kind: 'poison', payload: { amount: Number.POSITIVE_INFINITY } }),
       ),
-    ).rejects.toThrow('unsupported JSON value');
+    ).rejects.toThrow('supported JSON data');
     expect(harness.queries.some((sql) => sql.startsWith('INSERT'))).toBe(false);
   });
 
@@ -770,7 +843,6 @@ describe('transactional job outbox', () => {
         kind: 'account.updated',
         version: 1,
         occurredAt: '2026-08-18T00:00:00.000Z',
-        correlation: { correlationId: 'corr-legacy-poison' },
         payload: {},
       },
       messageAttributes: { jobId: 'legacy-shadow-value' },
@@ -1071,7 +1143,7 @@ describe('transactional job outbox', () => {
       kind: 'sample',
       version: 1,
       occurredAt: '2026-08-18T00:00:00.000Z',
-      correlation: { correlationId: 'corr-dedupe-id' },
+      correlation: { correlationId: testUuid(50) },
       payload: {},
     };
     const claimed: ClaimedOutboxJob = {
@@ -1114,7 +1186,7 @@ describe('transactional job outbox', () => {
         kind: 'sample',
         version: 1,
         occurredAt: '2026-08-18T00:00:00.000Z',
-        correlation: { correlationId: `corr-concurrency-${id}` },
+        correlation: { correlationId: testUuid(60 + Number(id)) },
         payload: {},
       },
       messageAttributes: {},

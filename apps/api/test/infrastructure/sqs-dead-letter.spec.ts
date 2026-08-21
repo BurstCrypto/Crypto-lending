@@ -9,10 +9,15 @@ import {
   type SQSClient,
 } from '@aws-sdk/client-sqs';
 
-import { loggingContext } from '../../src/infrastructure/logging';
+import { createSafeLogReference, loggingContext } from '../../src/infrastructure/logging';
+import { parseJobEnvelope } from '../../src/infrastructure/outbox/job-envelope';
 import { SqsJobWorker } from '../../src/infrastructure/sqs/sqs-job.worker';
 import { SqsService } from '../../src/infrastructure/sqs/sqs.service';
 import { testInfrastructureConfig } from './fixtures';
+
+function testUuid(index: number): string {
+  return `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`;
+}
 
 interface StoredMessage {
   id: string;
@@ -130,14 +135,15 @@ describe('SQS retry and dead-letter flow', () => {
     );
     const sqs = new SqsService(transport as unknown as SQSClient, config);
     const worker = new SqsJobWorker(sqs, config);
+    const correlationId = testUuid(1);
     const correlation = {
-      correlationId: 'corr-sqs-flow',
-      requestId: 'request-sqs-flow',
-      initiatorActorId: 'actor-sqs-flow',
-      intentId: 'intent-sqs-flow',
-      quoteId: 'quote-sqs-flow',
-      transactionId: 'transaction-sqs-flow',
-      ledgerEventId: 'ledger-event-sqs-flow',
+      correlationId,
+      requestId: correlationId,
+      initiatorActorId: testUuid(2),
+      intentId: testUuid(3),
+      quoteId: testUuid(4),
+      transactionId: testUuid(5),
+      ledgerEventId: testUuid(6),
     };
     const sample = await sqs.sendJob(
       'sample.always-fails',
@@ -186,7 +192,10 @@ describe('SQS retry and dead-letter flow', () => {
       correlation,
     );
     expect(observedContexts).toEqual(
-      Array.from({ length: 3 }, () => ({ ...correlation, jobId: sample.id })),
+      Array.from({ length: 3 }, () => ({
+        ...correlation,
+        jobId: createSafeLogReference('job', sample.id),
+      })),
     );
     expect(
       JSON.stringify({ observedContexts, firstAttempt, secondAttempt, terminalAttempt }),
@@ -299,7 +308,7 @@ describe('SQS retry and dead-letter flow', () => {
           kind: 'sample.publish',
           version: 1,
           occurredAt: '2026-08-20T00:00:00.000Z',
-          correlation: { correlationId: 'corr-bounded-sqs-request' },
+          correlation: { correlationId: testUuid(20) },
           payload: {},
         },
         messageAttributes: {},
@@ -427,7 +436,9 @@ describe('SQS retry and dead-letter flow', () => {
     });
     const sqs = {
       receive: jest.fn().mockResolvedValue([message]),
-      parseEnvelope: jest.fn().mockImplementation((body: string) => JSON.parse(body)),
+      parseEnvelope: jest
+        .fn()
+        .mockImplementation((body: string) => parseJobEnvelope(JSON.parse(body) as unknown)),
       changeVisibility: jest.fn().mockResolvedValue(undefined),
       delete: jest.fn().mockResolvedValue(undefined),
     } as unknown as SqsService;
@@ -484,7 +495,9 @@ describe('SQS retry and dead-letter flow', () => {
       .mockResolvedValueOnce(undefined);
     const sqs = {
       receive: jest.fn().mockResolvedValue([message]),
-      parseEnvelope: jest.fn().mockImplementation((body: string) => JSON.parse(body)),
+      parseEnvelope: jest
+        .fn()
+        .mockImplementation((body: string) => parseJobEnvelope(JSON.parse(body) as unknown)),
       changeVisibility,
       delete: jest.fn().mockResolvedValue(undefined),
     } as unknown as SqsService;
@@ -535,7 +548,9 @@ describe('SQS retry and dead-letter flow', () => {
     const changeVisibility = jest.fn().mockResolvedValue(undefined);
     const sqs = {
       receive: jest.fn().mockResolvedValue([message]),
-      parseEnvelope: jest.fn().mockImplementation((body: string) => JSON.parse(body)),
+      parseEnvelope: jest
+        .fn()
+        .mockImplementation((body: string) => parseJobEnvelope(JSON.parse(body) as unknown)),
       changeVisibility,
       delete: jest.fn().mockResolvedValue(undefined),
     } as unknown as SqsService;
@@ -592,7 +607,9 @@ describe('SQS retry and dead-letter flow', () => {
       .mockResolvedValueOnce(undefined);
     const sqs = {
       receive: jest.fn().mockResolvedValue([message]),
-      parseEnvelope: jest.fn().mockImplementation((body: string) => JSON.parse(body)),
+      parseEnvelope: jest
+        .fn()
+        .mockImplementation((body: string) => parseJobEnvelope(JSON.parse(body) as unknown)),
       changeVisibility,
       delete: jest.fn().mockResolvedValue(undefined),
     } as unknown as SqsService;
@@ -638,7 +655,9 @@ describe('SQS retry and dead-letter flow', () => {
     });
     const sqs = {
       receive: jest.fn().mockResolvedValue([message]),
-      parseEnvelope: jest.fn().mockImplementation((body: string) => JSON.parse(body)),
+      parseEnvelope: jest
+        .fn()
+        .mockImplementation((body: string) => parseJobEnvelope(JSON.parse(body) as unknown)),
       changeVisibility: jest.fn().mockResolvedValue(undefined),
       delete: jest.fn().mockResolvedValue(undefined),
     } as unknown as SqsService;
@@ -676,7 +695,9 @@ describe('SQS retry and dead-letter flow', () => {
     };
     const sqs = {
       receive: jest.fn().mockResolvedValue([message]),
-      parseEnvelope: jest.fn().mockImplementation((body: string) => JSON.parse(body)),
+      parseEnvelope: jest
+        .fn()
+        .mockImplementation((body: string) => parseJobEnvelope(JSON.parse(body) as unknown)),
       changeVisibility: jest.fn().mockResolvedValue(undefined),
       delete: jest.fn().mockResolvedValue(undefined),
     } as unknown as SqsService;
@@ -714,7 +735,9 @@ describe('SQS retry and dead-letter flow', () => {
     };
     const sqs = {
       receive: jest.fn().mockResolvedValue([message]),
-      parseEnvelope: jest.fn().mockImplementation((body: string) => JSON.parse(body)),
+      parseEnvelope: jest
+        .fn()
+        .mockImplementation((body: string) => parseJobEnvelope(JSON.parse(body) as unknown)),
       changeVisibility: jest.fn().mockResolvedValue(undefined),
       delete: jest.fn(
         (_message, _queue, signal: AbortSignal) =>
@@ -755,7 +778,9 @@ describe('SQS retry and dead-letter flow', () => {
     const handler = jest.fn().mockResolvedValue(undefined);
     const sqs = {
       receive: jest.fn().mockResolvedValue([message]),
-      parseEnvelope: jest.fn().mockImplementation((body: string) => JSON.parse(body)),
+      parseEnvelope: jest
+        .fn()
+        .mockImplementation((body: string) => parseJobEnvelope(JSON.parse(body) as unknown)),
       changeVisibility: jest.fn().mockResolvedValue(undefined),
       delete: jest.fn().mockResolvedValue(undefined),
     } as unknown as SqsService;

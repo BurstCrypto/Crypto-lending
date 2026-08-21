@@ -3,7 +3,12 @@ import { randomUUID } from 'node:crypto';
 
 import { Inject, Injectable } from '@nestjs/common';
 
-import { LOG_EVENTS, loggingContext, structuredLogger } from '../logging';
+import {
+  createSafeLogReference,
+  LOG_EVENTS,
+  loggingContext,
+  structuredLogger,
+} from '../logging';
 import {
   JobOutboxRepository,
   type ClaimedOutboxJob,
@@ -30,10 +35,27 @@ export interface OutboxDispatchSummary {
 
 class OutboxTransportTimeoutError extends Error {}
 
+function diagnosticJobFields(job: ClaimedOutboxJob): {
+  readonly jobId?: string;
+  readonly jobKind: string;
+} {
+  const jobId = createSafeLogReference('job', job.id);
+  return { ...(jobId ? { jobId } : {}), jobKind: job.envelope.kind };
+}
+
+function diagnosticMessageField(messageId: string | undefined): { readonly messageId?: string } {
+  const safeMessageId = createSafeLogReference('message', messageId);
+  return safeMessageId ? { messageId: safeMessageId } : {};
+}
+
 function failureCode(error: unknown): OutboxFailureCode {
-  return error instanceof OutboxTransportTimeoutError
-    ? 'OUTBOX_TRANSPORT_TIMEOUT'
-    : 'OUTBOX_TRANSPORT_FAILED';
+  try {
+    return error instanceof OutboxTransportTimeoutError
+      ? 'OUTBOX_TRANSPORT_TIMEOUT'
+      : 'OUTBOX_TRANSPORT_FAILED';
+  } catch {
+    return 'OUTBOX_TRANSPORT_FAILED';
+  }
 }
 
 @Injectable()
@@ -193,8 +215,9 @@ export class OutboxDispatcher {
     summary: OutboxDispatchSummary,
     shutdownSignal?: AbortSignal,
   ): Promise<void> {
+    const diagnosticJobId = createSafeLogReference('job', job.id);
     return loggingContext.run(
-      { ...job.envelope.correlation, jobId: job.id },
+      { ...job.envelope.correlation, ...(diagnosticJobId ? { jobId: diagnosticJobId } : {}) },
       async (): Promise<void> => {
         if (shutdownSignal?.aborted) {
           summary.leaseLost += 1;
@@ -268,25 +291,24 @@ export class OutboxDispatcher {
     summary: OutboxDispatchSummary,
     receipt: OutboxTransportReceipt = {},
   ): Promise<void> {
+    const diagnosticJobId = createSafeLogReference('job', job.id);
     return loggingContext.run(
-      { ...job.envelope.correlation, jobId: job.id },
+      { ...job.envelope.correlation, ...(diagnosticJobId ? { jobId: diagnosticJobId } : {}) },
       async (): Promise<void> => {
         const marked = await this.repository.markPublished(job.id, claimToken);
         if (marked) {
           summary.published += 1;
           structuredLogger.emit(LOG_EVENTS.jobPublished, 'info', {
             outcome: 'success',
-            jobId: job.id,
-            jobKind: job.envelope.kind,
-            ...(receipt.transportMessageId ? { messageId: receipt.transportMessageId } : {}),
+            ...diagnosticJobFields(job),
+            ...diagnosticMessageField(receipt.transportMessageId),
           });
         } else {
           summary.leaseLost += 1;
           structuredLogger.emit(LOG_EVENTS.jobPublishFailed, 'warn', {
             outcome: 'failure',
             errorCode: 'OUTBOX_LEASE_LOST',
-            jobId: job.id,
-            jobKind: job.envelope.kind,
+            ...diagnosticJobFields(job),
           });
         }
       },
@@ -299,8 +321,9 @@ export class OutboxDispatcher {
     error: unknown,
     summary: OutboxDispatchSummary,
   ): Promise<void> {
+    const diagnosticJobId = createSafeLogReference('job', job.id);
     return loggingContext.run(
-      { ...job.envelope.correlation, jobId: job.id },
+      { ...job.envelope.correlation, ...(diagnosticJobId ? { jobId: diagnosticJobId } : {}) },
       async (): Promise<void> => {
         const nextAttempt = job.attempts + 1;
         const terminal = nextAttempt >= this.options.maxAttempts;
@@ -325,8 +348,7 @@ export class OutboxDispatcher {
         structuredLogger.emit(LOG_EVENTS.jobPublishFailed, terminal ? 'error' : 'warn', {
           outcome: transition === 'retry' ? 'retry' : 'failure',
           errorCode: transition === 'lease-lost' ? 'OUTBOX_LEASE_LOST' : code,
-          jobId: job.id,
-          jobKind: job.envelope.kind,
+          ...diagnosticJobFields(job),
           retryCount: nextAttempt,
           retryDelayMs,
         });

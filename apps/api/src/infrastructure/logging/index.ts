@@ -1,5 +1,10 @@
 export {
+  createSafeLogReference,
+  createSafeLegacyCorrelationId,
   createRootLogContext,
+  isCanonicalUuidV4,
+  isSafeCorrelationId,
+  isSafeLogReference,
   LoggingContext,
   loggingContext,
   type LogContextExtension,

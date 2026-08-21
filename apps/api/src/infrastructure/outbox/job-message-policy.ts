@@ -8,6 +8,10 @@ export const MAX_JOB_MESSAGE_BYTES = 1_048_576;
 export const MAX_CUSTOM_JOB_ATTRIBUTES = 6;
 
 const RESERVED_ATTRIBUTE_NAMES = new Set(['correlationid', 'jobid', 'jobkind', 'jobversion']);
+const JSON_STRINGIFY = JSON.stringify;
+const JSON_PARSE = JSON.parse;
+const MAX_JSON_DEPTH = 64;
+const MAX_JSON_NODES = 100_000;
 
 export interface SerializedJobMessage {
   body: string;
@@ -65,7 +69,19 @@ export function parseJobMessageAttributes(value: unknown): Readonly<Record<strin
     throw new Error('Job message attributes must be a plain object');
   }
 
-  const entries = Object.entries(value);
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  const keys = Reflect.ownKeys(descriptors);
+  if (keys.some((key) => typeof key !== 'string')) {
+    throw new Error('Invalid job message attributes');
+  }
+  const entries: [string, string][] = [];
+  for (const name of keys as string[]) {
+    const descriptor = Object.hasOwn(descriptors, name) ? descriptors[name] : undefined;
+    if (!descriptor || !('value' in descriptor) || typeof descriptor.value !== 'string') {
+      throw new Error('Job message attributes must contain only string data properties');
+    }
+    entries.push([name, descriptor.value]);
+  }
   if (entries.length > MAX_CUSTOM_JOB_ATTRIBUTES) {
     throw new Error(`Job messages support at most ${MAX_CUSTOM_JOB_ATTRIBUTES} custom attributes`);
   }
@@ -73,13 +89,86 @@ export function parseJobMessageAttributes(value: unknown): Readonly<Record<strin
     if (!isValidAttributeName(name)) {
       throw new Error('Invalid or reserved job message attribute name');
     }
-    if (typeof attributeValue !== 'string') {
-      throw new Error('Job message attributes must contain only strings');
-    }
     assertSqsText(attributeValue, 'Job message attribute value', false);
   }
 
-  return Object.fromEntries(entries) as Record<string, string>;
+  const parsed = Object.create(null) as Record<string, string>;
+  for (const [name, attributeValue] of entries) parsed[name] = attributeValue;
+  return Object.freeze(parsed);
+}
+
+interface JsonCloneState {
+  nodes: number;
+  readonly seen: WeakSet<object>;
+}
+
+function cloneSupportedJson(value: unknown, state: JsonCloneState, depth = 0): unknown {
+  state.nodes += 1;
+  if (state.nodes > MAX_JSON_NODES || depth > MAX_JSON_DEPTH) {
+    throw new TypeError('Job JSON exceeds structural limits');
+  }
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) throw new TypeError('Job JSON contains a non-finite number');
+    return value;
+  }
+  if (typeof value !== 'object') throw new TypeError('Job JSON contains an unsupported value');
+  if (state.seen.has(value)) throw new TypeError('Job JSON contains a cycle');
+  state.seen.add(value);
+  try {
+    const descriptors = Object.getOwnPropertyDescriptors(value);
+    if (Array.isArray(value)) {
+      const prototype = Object.getPrototypeOf(value);
+      if (prototype !== Array.prototype && prototype !== null) {
+        throw new TypeError('Job JSON arrays must use the built-in prototype');
+      }
+      const lengthDescriptor = Object.hasOwn(descriptors, 'length') ? descriptors.length : undefined;
+      const length = lengthDescriptor && 'value' in lengthDescriptor ? lengthDescriptor.value : -1;
+      if (!Number.isSafeInteger(length) || length < 0) {
+        throw new TypeError('Job JSON array length is invalid');
+      }
+      const keys = Reflect.ownKeys(descriptors);
+      if (
+        keys.some(
+          (key) =>
+            typeof key !== 'string' ||
+            (key !== 'length' && !/^(?:0|[1-9][0-9]*)$/u.test(key)),
+        ) ||
+        keys.length !== length + 1
+      ) {
+        throw new TypeError('Job JSON arrays must be dense and contain no custom properties');
+      }
+      const cloned: unknown[] = [];
+      Object.setPrototypeOf(cloned, null);
+      for (let index = 0; index < length; index += 1) {
+        const descriptor = Object.hasOwn(descriptors, String(index))
+          ? descriptors[String(index)]
+          : undefined;
+        if (!descriptor || !('value' in descriptor) || !descriptor.enumerable) {
+          throw new TypeError('Job JSON arrays must contain enumerable data properties');
+        }
+        cloned[index] = cloneSupportedJson(descriptor.value, state, depth + 1);
+      }
+      return cloned;
+    }
+
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) {
+      throw new TypeError('Job JSON objects must be plain records');
+    }
+    const cloned = Object.create(null) as Record<string, unknown>;
+    for (const key of Reflect.ownKeys(descriptors)) {
+      if (typeof key !== 'string') throw new TypeError('Job JSON cannot contain symbol keys');
+      const descriptor = Object.hasOwn(descriptors, key) ? descriptors[key] : undefined;
+      if (!descriptor || !('value' in descriptor) || !descriptor.enumerable) {
+        throw new TypeError('Job JSON objects must contain enumerable data properties');
+      }
+      cloned[key] = cloneSupportedJson(descriptor.value, state, depth + 1);
+    }
+    return cloned;
+  } finally {
+    state.seen.delete(value);
+  }
 }
 
 function attributeBytes(name: string, dataType: 'Number' | 'String', value: string): number {
@@ -91,36 +180,34 @@ export function serializeJobMessage(
   messageAttributes: unknown,
 ): SerializedJobMessage {
   const attributes = parseJobMessageAttributes(messageAttributes);
+  const normalizedEnvelope = parseJobEnvelope(envelope);
   let body: string;
   try {
-    const serialized = JSON.stringify(envelope, (_key, value: unknown) => {
-      if (
-        value === undefined ||
-        typeof value === 'function' ||
-        typeof value === 'symbol' ||
-        (typeof value === 'number' && !Number.isFinite(value))
-      ) {
-        throw new TypeError('unsupported JSON value');
-      }
-      return value;
+    const safeEnvelope = cloneSupportedJson(normalizedEnvelope, {
+      nodes: 0,
+      seen: new WeakSet(),
     });
+    const serialized = JSON_STRINGIFY(safeEnvelope);
     if (serialized === undefined) throw new Error('envelope is not JSON serializable');
-    parseJobEnvelope(JSON.parse(serialized) as unknown);
+    parseJobEnvelope(JSON_PARSE(serialized) as unknown);
     body = serialized;
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : 'invalid JSON';
-    throw new Error(`Job message must be JSON serializable: ${reason}`, { cause: error });
+  } catch {
+    throw new Error('Job message must contain only supported JSON data');
   }
 
   assertSqsText(body, 'Job message body', false);
-  assertSqsText(envelope.id, 'Job ID', false);
-  assertSqsText(envelope.kind, 'Job kind', false);
+  assertSqsText(normalizedEnvelope.id, 'Job ID', false);
+  assertSqsText(normalizedEnvelope.kind, 'Job kind', false);
 
   let bytes = Buffer.byteLength(body);
-  bytes += attributeBytes('jobKind', 'String', envelope.kind);
-  bytes += attributeBytes('jobVersion', 'Number', String(envelope.version));
-  bytes += attributeBytes('jobId', 'String', envelope.id);
-  bytes += attributeBytes('correlationId', 'String', envelope.correlation.correlationId);
+  bytes += attributeBytes('jobKind', 'String', normalizedEnvelope.kind);
+  bytes += attributeBytes('jobVersion', 'Number', String(normalizedEnvelope.version));
+  bytes += attributeBytes('jobId', 'String', normalizedEnvelope.id);
+  bytes += attributeBytes(
+    'correlationId',
+    'String',
+    normalizedEnvelope.correlation.correlationId,
+  );
   for (const [name, value] of Object.entries(attributes)) {
     bytes += attributeBytes(name, 'String', value);
   }

@@ -1,6 +1,12 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 
-import { loggingContext, type LogCorrelationContext } from '../logging';
+import {
+  createSafeLegacyCorrelationId,
+  isCanonicalUuidV4,
+  isSafeCorrelationId,
+  loggingContext,
+  type LogCorrelationContext,
+} from '../logging';
 
 /**
  * Safe, durable identifiers that connect an asynchronous job to the operation
@@ -28,8 +34,6 @@ export interface CreateJobEnvelopeOptions {
 
 const MAX_JOB_ID_LENGTH = 128;
 const MAX_JOB_KIND_LENGTH = 128;
-const MAX_CORRELATION_ID_LENGTH = 128;
-const CORRELATION_IDENTIFIER_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/u;
 const CORRELATION_KEYS = new Set([
   'correlationId',
   'requestId',
@@ -39,6 +43,7 @@ const CORRELATION_KEYS = new Set([
   'transactionId',
   'ledgerEventId',
 ]);
+const JOB_OPTION_KEYS = new Set(['id', 'version', 'occurredAt', 'correlation']);
 
 function isValidOpaqueId(value: unknown): value is string {
   return (
@@ -66,71 +71,76 @@ function isCanonicalIsoTimestamp(value: unknown): value is string {
   return Number.isFinite(milliseconds) && new Date(milliseconds).toISOString() === value;
 }
 
-function isValidCorrelationIdentifier(value: unknown): value is string {
-  return (
-    typeof value === 'string' &&
-    value.length >= 1 &&
-    value.length <= MAX_CORRELATION_ID_LENGTH &&
-    CORRELATION_IDENTIFIER_PATTERN.test(value)
-  );
-}
-
 function parseCorrelationContext(value: unknown): JobCorrelationContext {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error('Invalid job correlation context');
-  }
-  const prototype = Object.getPrototypeOf(value);
-  const prototypeConstructor =
-    prototype === null
-      ? undefined
-      : Object.getOwnPropertyDescriptor(prototype, 'constructor')?.value;
-  if (
-    prototype !== null &&
-    (typeof prototypeConstructor !== 'function' || prototypeConstructor.name !== 'Object')
-  ) {
-    throw new Error('Invalid job correlation context');
-  }
-  const record = value as Record<string, unknown>;
-  const ownKeys = Reflect.ownKeys(record);
-  const descriptors = Object.getOwnPropertyDescriptors(record);
-  if (
-    ownKeys.some((key) => typeof key !== 'string' || !CORRELATION_KEYS.has(key)) ||
-    Object.values(descriptors).some(
-      (descriptor) => descriptor.get !== undefined || descriptor.set !== undefined,
-    ) ||
-    !isValidCorrelationIdentifier(record.correlationId)
-  ) {
-    throw new Error('Invalid job correlation context');
-  }
-  for (const key of [
-    'requestId',
-    'initiatorActorId',
-    'intentId',
-    'quoteId',
-    'transactionId',
-    'ledgerEventId',
-  ] as const) {
-    const identifier = record[key];
-    if (identifier !== undefined && !isValidCorrelationIdentifier(identifier)) {
+  try {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
       throw new Error('Invalid job correlation context');
     }
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) {
+      throw new Error('Invalid job correlation context');
+    }
+    const descriptors = Object.getOwnPropertyDescriptors(value);
+    const ownKeys = Reflect.ownKeys(descriptors);
+    if (ownKeys.some((key) => typeof key !== 'string' || !CORRELATION_KEYS.has(key))) {
+      throw new Error('Invalid job correlation context');
+    }
+    const correlationDescriptor = Object.hasOwn(descriptors, 'correlationId')
+      ? descriptors.correlationId
+      : undefined;
+    if (
+      !correlationDescriptor ||
+      !('value' in correlationDescriptor) ||
+      !isSafeCorrelationId(correlationDescriptor.value)
+    ) {
+      throw new Error('Invalid job correlation context');
+    }
+    const correlationId = correlationDescriptor.value;
+    const optional = Object.create(null) as Record<string, string>;
+    for (const key of [
+      'requestId',
+      'initiatorActorId',
+      'intentId',
+      'quoteId',
+      'transactionId',
+      'ledgerEventId',
+    ] as const) {
+      const descriptor = Object.hasOwn(descriptors, key) ? descriptors[key] : undefined;
+      if (!descriptor) continue;
+      if (!('value' in descriptor) || !isCanonicalUuidV4(descriptor.value)) {
+        throw new Error('Invalid job correlation context');
+      }
+      optional[key] = descriptor.value;
+    }
+    if (optional.requestId !== undefined && optional.requestId !== correlationId) {
+      throw new Error('Invalid job correlation context');
+    }
+    if (
+      correlationId.startsWith('legacy:') &&
+      Object.keys(optional).length > 0
+    ) {
+      throw new Error('Invalid job correlation context');
+    }
+    const parsed = Object.create(null) as {
+      correlationId: string;
+    } & Partial<JobCorrelationContext>;
+    parsed.correlationId = correlationId;
+    for (const key of CORRELATION_KEYS) {
+      if (key === 'correlationId') continue;
+      const optionalValue = optional[key];
+      if (optionalValue !== undefined) {
+        Object.defineProperty(parsed, key, {
+          value: optionalValue,
+          enumerable: true,
+          configurable: false,
+          writable: false,
+        });
+      }
+    }
+    return Object.freeze(parsed);
+  } catch {
+    throw new Error('Invalid job correlation context');
   }
-
-  return Object.freeze({
-    correlationId: record.correlationId,
-    ...(record.requestId === undefined ? {} : { requestId: record.requestId as string }),
-    ...(record.initiatorActorId === undefined
-      ? {}
-      : { initiatorActorId: record.initiatorActorId as string }),
-    ...(record.intentId === undefined ? {} : { intentId: record.intentId as string }),
-    ...(record.quoteId === undefined ? {} : { quoteId: record.quoteId as string }),
-    ...(record.transactionId === undefined
-      ? {}
-      : { transactionId: record.transactionId as string }),
-    ...(record.ledgerEventId === undefined
-      ? {}
-      : { ledgerEventId: record.ledgerEventId as string }),
-  });
 }
 
 /**
@@ -139,25 +149,74 @@ function parseCorrelationContext(value: unknown): JobCorrelationContext {
  * sensitive or log-hostile legacy identifier into the correlation field.
  */
 function legacyCorrelationContext(jobId: string): JobCorrelationContext {
-  const digest = createHash('sha256')
-    .update('crypto-lending:legacy-job:')
-    .update(jobId)
-    .digest('hex');
-  return Object.freeze({ correlationId: `legacy:${digest}` });
+  const correlationId = createSafeLegacyCorrelationId('job', jobId);
+  if (!correlationId) throw new Error('Invalid legacy job identifier');
+  const context = Object.create(null) as { correlationId: string };
+  context.correlationId = correlationId;
+  return Object.freeze(context);
+}
+
+function correlationContextsEqual(
+  left: JobCorrelationContext,
+  right: JobCorrelationContext,
+): boolean {
+  return [...CORRELATION_KEYS].every(
+    (key) => left[key as keyof JobCorrelationContext] === right[key as keyof JobCorrelationContext],
+  );
 }
 
 function activeJobCorrelationContext(): JobCorrelationContext | undefined {
   const active = loggingContext.current();
   if (!active) return undefined;
-  return {
-    correlationId: active.correlationId,
-    ...(active.requestId ? { requestId: active.requestId } : {}),
-    ...(active.initiatorActorId ? { initiatorActorId: active.initiatorActorId } : {}),
-    ...(active.intentId ? { intentId: active.intentId } : {}),
-    ...(active.quoteId ? { quoteId: active.quoteId } : {}),
-    ...(active.transactionId ? { transactionId: active.transactionId } : {}),
-    ...(active.ledgerEventId ? { ledgerEventId: active.ledgerEventId } : {}),
-  };
+  const projected = Object.create(null) as Record<string, string>;
+  for (const key of CORRELATION_KEYS) {
+    const value = active[key as keyof LogCorrelationContext];
+    if (value !== undefined) projected[key] = value;
+  }
+  return parseCorrelationContext(projected);
+}
+
+function parseCreateOptions(value: CreateJobEnvelopeOptions): Readonly<CreateJobEnvelopeOptions> {
+  try {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      throw new Error('Invalid job envelope options');
+    }
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) {
+      throw new Error('Invalid job envelope options');
+    }
+    const descriptors = Object.getOwnPropertyDescriptors(value);
+    if (
+      Reflect.ownKeys(descriptors).some(
+        (key) => typeof key !== 'string' || !JOB_OPTION_KEYS.has(key),
+      ) ||
+      Object.values(descriptors).some((descriptor) => !('value' in descriptor))
+    ) {
+      throw new Error('Invalid job envelope options');
+    }
+    const parsed = Object.create(null) as {
+      id?: string;
+      version?: number;
+      occurredAt?: string;
+      correlation?: JobCorrelationContext;
+    };
+    for (const key of JOB_OPTION_KEYS) {
+      if (!Object.hasOwn(descriptors, key)) continue;
+      const descriptor = descriptors[key];
+      if (!descriptor || !('value' in descriptor)) {
+        throw new Error('Invalid job envelope options');
+      }
+      Object.defineProperty(parsed, key, {
+        value: descriptor.value,
+        enumerable: true,
+        configurable: false,
+        writable: false,
+      });
+    }
+    return Object.freeze(parsed);
+  } catch {
+    throw new Error('Invalid job envelope options');
+  }
 }
 
 export function createJobEnvelope<Payload>(
@@ -165,6 +224,7 @@ export function createJobEnvelope<Payload>(
   payload: Payload,
   options: CreateJobEnvelopeOptions = {},
 ): JobEnvelope<Payload> {
+  const parsedOptions = parseCreateOptions(options);
   const normalizedKind = kind.trim();
   if (!normalizedKind) {
     throw new Error('Job kind cannot be empty');
@@ -172,73 +232,113 @@ export function createJobEnvelope<Payload>(
   if (normalizedKind.length > MAX_JOB_KIND_LENGTH) {
     throw new Error(`Job kind cannot exceed ${MAX_JOB_KIND_LENGTH} characters`);
   }
-  const version = options.version ?? 1;
+  const version = parsedOptions.version === undefined ? 1 : parsedOptions.version;
   if (!Number.isSafeInteger(version) || version < 1) {
     throw new Error('Job version must be a positive integer');
   }
 
-  const id = options.id ?? randomUUID();
+  const id = parsedOptions.id === undefined ? randomUUID() : parsedOptions.id;
   if (!isValidOpaqueId(id)) {
     throw new Error(
       `Job id must be trimmed and contain between 1 and ${MAX_JOB_ID_LENGTH} characters`,
     );
   }
-  const occurredAt = options.occurredAt ?? new Date().toISOString();
+  const occurredAt =
+    parsedOptions.occurredAt === undefined ? new Date().toISOString() : parsedOptions.occurredAt;
   if (!isCanonicalIsoTimestamp(occurredAt)) {
     throw new Error('Job occurredAt must be a canonical ISO-8601 UTC timestamp');
   }
   const inheritedCorrelation = activeJobCorrelationContext();
-  const correlation = parseCorrelationContext(
-    options.correlation ?? inheritedCorrelation ?? { correlationId: randomUUID() },
-  );
+  let correlation: JobCorrelationContext;
+  if (inheritedCorrelation) {
+    correlation = parseCorrelationContext(inheritedCorrelation);
+    if (parsedOptions.correlation !== undefined) {
+      const explicitCorrelation = parseCorrelationContext(parsedOptions.correlation);
+      if (!correlationContextsEqual(correlation, explicitCorrelation)) {
+        throw new Error('Explicit job correlation must match the active logging context');
+      }
+    }
+  } else {
+    correlation = parseCorrelationContext(
+      parsedOptions.correlation === undefined
+        ? { correlationId: randomUUID() }
+        : parsedOptions.correlation,
+    );
+  }
 
-  return {
+  return Object.freeze({
     id,
     kind: normalizedKind,
     version,
     occurredAt,
     correlation,
     payload,
-  };
+  });
 }
 
 export function parseJobEnvelope<Payload = unknown>(value: unknown): JobEnvelope<Payload> {
-  if (
-    !value ||
-    typeof value !== 'object' ||
-    !('id' in value) ||
-    !isValidOpaqueId(value.id) ||
-    !('kind' in value) ||
-    !isValidKind(value.kind) ||
-    !('version' in value) ||
-    typeof value.version !== 'number' ||
-    !Number.isSafeInteger(value.version) ||
-    value.version < 1 ||
-    !('occurredAt' in value) ||
-    !isCanonicalIsoTimestamp(value.occurredAt) ||
-    !('payload' in value)
-  ) {
+  try {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      throw new Error('Invalid job envelope');
+    }
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) {
+      throw new Error('Invalid job envelope');
+    }
+    const descriptors = Object.getOwnPropertyDescriptors(value);
+    const idDescriptor = Object.hasOwn(descriptors, 'id') ? descriptors.id : undefined;
+    const kindDescriptor = Object.hasOwn(descriptors, 'kind') ? descriptors.kind : undefined;
+    const versionDescriptor = Object.hasOwn(descriptors, 'version')
+      ? descriptors.version
+      : undefined;
+    const occurredAtDescriptor = Object.hasOwn(descriptors, 'occurredAt')
+      ? descriptors.occurredAt
+      : undefined;
+    const payloadDescriptor = Object.hasOwn(descriptors, 'payload')
+      ? descriptors.payload
+      : undefined;
+    const correlationDescriptor = Object.hasOwn(descriptors, 'correlation')
+      ? descriptors.correlation
+      : undefined;
+    const id = idDescriptor && 'value' in idDescriptor ? idDescriptor.value : undefined;
+    const kind = kindDescriptor && 'value' in kindDescriptor ? kindDescriptor.value : undefined;
+    const version =
+      versionDescriptor && 'value' in versionDescriptor ? versionDescriptor.value : undefined;
+    const occurredAt =
+      occurredAtDescriptor && 'value' in occurredAtDescriptor
+        ? occurredAtDescriptor.value
+        : undefined;
+    if (
+      !isValidOpaqueId(id) ||
+      !isValidKind(kind) ||
+      typeof version !== 'number' ||
+      !Number.isSafeInteger(version) ||
+      version < 1 ||
+      !isCanonicalIsoTimestamp(occurredAt) ||
+      !payloadDescriptor ||
+      !('value' in payloadDescriptor)
+    ) {
+      throw new Error('Invalid job envelope');
+    }
+    const correlationValue =
+      correlationDescriptor && 'value' in correlationDescriptor
+        ? correlationDescriptor.value
+        : undefined;
+    if (correlationDescriptor && !('value' in correlationDescriptor)) {
+      throw new Error('Invalid job envelope');
+    }
+    return Object.freeze({
+      id,
+      kind,
+      version,
+      occurredAt,
+      correlation:
+        correlationValue === undefined
+          ? legacyCorrelationContext(id)
+          : parseCorrelationContext(correlationValue),
+      payload: payloadDescriptor.value as Payload,
+    });
+  } catch {
     throw new Error('Invalid job envelope');
   }
-
-  const envelope = value as {
-    id: string;
-    kind: string;
-    version: number;
-    occurredAt: string;
-    correlation?: unknown;
-    payload: Payload;
-  };
-
-  return {
-    id: envelope.id,
-    kind: envelope.kind,
-    version: envelope.version,
-    occurredAt: envelope.occurredAt,
-    correlation:
-      envelope.correlation === undefined
-        ? legacyCorrelationContext(envelope.id)
-        : parseCorrelationContext(envelope.correlation),
-    payload: envelope.payload,
-  };
 }

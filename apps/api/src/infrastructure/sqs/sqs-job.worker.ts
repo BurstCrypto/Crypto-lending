@@ -1,10 +1,18 @@
 import { performance } from 'node:perf_hooks';
+import { randomUUID } from 'node:crypto';
 
 import { Inject, Injectable } from '@nestjs/common';
 
 import { INFRASTRUCTURE_CONFIG } from '../config/infrastructure-config.module';
 import type { InfrastructureConfig } from '../config/infrastructure.config';
-import { LOG_EVENTS, loggingContext, structuredLogger } from '../logging';
+import {
+  createSafeLegacyCorrelationId,
+  createSafeLogReference,
+  LOG_EVENTS,
+  loggingContext,
+  structuredLogger,
+  type SafeLogFields,
+} from '../logging';
 import { SqsService } from './sqs.service';
 import type {
   JobEnvelope,
@@ -28,11 +36,26 @@ class JobProcessingFailure extends Error {
   }
 }
 
+function diagnosticJobFields(job: JobEnvelope | undefined): SafeLogFields {
+  if (!job) return {};
+  const jobId = createSafeLogReference('job', job.id);
+  return { ...(jobId ? { jobId } : {}), jobKind: job.kind };
+}
+
+function diagnosticMessageField(messageId: string): SafeLogFields {
+  const safeMessageId = createSafeLogReference('message', messageId);
+  return safeMessageId ? { messageId: safeMessageId } : {};
+}
+
 function processingErrorCode(error: unknown): JobProcessingErrorCode {
-  if (error instanceof ReceiptOwnershipExpiredError) {
-    return 'SQS_RECEIPT_OWNERSHIP_EXPIRED';
+  try {
+    if (error instanceof ReceiptOwnershipExpiredError) {
+      return 'SQS_RECEIPT_OWNERSHIP_EXPIRED';
+    }
+    return error instanceof JobProcessingFailure ? error.code : 'JOB_PROCESSING_FAILED';
+  } catch {
+    return 'JOB_PROCESSING_FAILED';
   }
-  return error instanceof JobProcessingFailure ? error.code : 'JOB_PROCESSING_FAILED';
 }
 
 interface VisibilityHeartbeat {
@@ -219,15 +242,23 @@ export class SqsJobWorker {
     try {
       job = this.sqs.parseEnvelope<Payload>(message.body);
     } catch {
-      return this.handleFailure(
-        message,
-        undefined,
-        new JobProcessingFailure('JOB_ENVELOPE_INVALID'),
+      return loggingContext.run(
+        {
+          correlationId:
+            createSafeLegacyCorrelationId('message', message.messageId) ?? randomUUID(),
+        },
+        () =>
+          this.handleFailure(
+            message,
+            undefined,
+            new JobProcessingFailure('JOB_ENVELOPE_INVALID'),
+          ),
       );
     }
 
+    const diagnosticJobId = createSafeLogReference('job', job.id);
     return loggingContext.run(
-      { ...job.correlation, jobId: job.id },
+      { ...job.correlation, ...(diagnosticJobId ? { jobId: diagnosticJobId } : {}) },
       async (): Promise<JobProcessingResult> => {
         try {
           const heartbeat = startVisibilityHeartbeat(
@@ -272,9 +303,8 @@ export class SqsJobWorker {
           }
           structuredLogger.emit(LOG_EVENTS.jobProcessed, 'info', {
             outcome: 'success',
-            messageId: message.messageId,
-            jobId: job.id,
-            jobKind: job.kind,
+            ...diagnosticMessageField(message.messageId),
+            ...diagnosticJobFields(job),
             receiveCount: message.receiveCount,
           });
           return { status: 'completed', messageId: message.messageId, jobId: job.id };
@@ -295,8 +325,8 @@ export class SqsJobWorker {
       structuredLogger.emit(LOG_EVENTS.jobOwnershipLost, 'error', {
         outcome: 'failure',
         errorCode,
-        messageId: message.messageId,
-        ...(job ? { jobId: job.id, jobKind: job.kind } : {}),
+        ...diagnosticMessageField(message.messageId),
+        ...diagnosticJobFields(job),
         receiveCount: message.receiveCount,
       });
       return {
@@ -327,8 +357,8 @@ export class SqsJobWorker {
       structuredLogger.emit(LOG_EVENTS.jobOwnershipLost, 'error', {
         outcome: 'failure',
         errorCode: 'SQS_VISIBILITY_UPDATE_FAILED',
-        messageId: message.messageId,
-        ...(job ? { jobId: job.id, jobKind: job.kind } : {}),
+        ...diagnosticMessageField(message.messageId),
+        ...diagnosticJobFields(job),
         receiveCount: message.receiveCount,
       });
       return {
@@ -346,8 +376,8 @@ export class SqsJobWorker {
       {
         outcome: exhausted ? 'failure' : 'retry',
         errorCode,
-        messageId: message.messageId,
-        ...(job ? { jobId: job.id, jobKind: job.kind } : {}),
+        ...diagnosticMessageField(message.messageId),
+        ...diagnosticJobFields(job),
         receiveCount: message.receiveCount,
         retryDelayMs: retryDelaySeconds * 1_000,
       },
