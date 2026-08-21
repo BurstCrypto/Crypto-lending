@@ -11,7 +11,7 @@ import { Pool } from 'pg';
 
 import { loadInfrastructureConfig } from '../../src/infrastructure/config/infrastructure.config';
 import { MigrationRunner } from '../../src/infrastructure/database/migration-runner.service';
-import { DATABASE_SCHEMA_MIGRATION_LIST } from '../../src/infrastructure/database/migrations';
+import { DATABASE_TEST_SCHEMA_MIGRATION_LIST } from '../../src/infrastructure/database/migrations';
 import { PostgresService } from '../../src/infrastructure/database/postgres.service';
 import { InfrastructureHealthService } from '../../src/infrastructure/health/infrastructure-health.service';
 import { JobOutboxRepository } from '../../src/infrastructure/outbox/job-outbox.repository';
@@ -105,7 +105,7 @@ describeWithInfrastructure('live docker-compose infrastructure', () => {
       const postgres = new PostgresService(postgresPool);
       const redis = new RedisService(redisClient);
       const sqs = new SqsService(sqsClient, config);
-      const migrations = new MigrationRunner(postgresPool, DATABASE_SCHEMA_MIGRATION_LIST);
+      const migrations = new MigrationRunner(postgresPool, DATABASE_TEST_SCHEMA_MIGRATION_LIST);
       const health = new InfrastructureHealthService(postgres, migrations, redis, sqs);
 
       await expect(migrations.up()).resolves.toEqual(['0001', '0002', '0003', '0004', '0006']);

@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 
 import { MigrationRunner } from '../../src/infrastructure/database/migration-runner.service';
-import { DATABASE_SCHEMA_MIGRATION_LIST } from '../../src/infrastructure/database/migrations';
+import { DATABASE_TEST_SCHEMA_MIGRATION_LIST } from '../../src/infrastructure/database/migrations';
 
 const testDatabaseUrl = process.env.TEST_DATABASE_URL;
 const describeWithPostgres = testDatabaseUrl ? describe : describe.skip;
@@ -33,11 +33,11 @@ describeWithPostgres('PostgreSQL migration rollback integration', () => {
   });
 
   it('applies up on a blank schema and removes its objects on down', async () => {
-    const schemaBeforeLastErrorConstraint = DATABASE_SCHEMA_MIGRATION_LIST.filter(
+    const schemaBeforeLastErrorConstraint = DATABASE_TEST_SCHEMA_MIGRATION_LIST.filter(
       ({ id }) => id !== '0006',
     );
     const preConstraintRunner = new MigrationRunner(migrationPool, schemaBeforeLastErrorConstraint);
-    const runner = new MigrationRunner(migrationPool, DATABASE_SCHEMA_MIGRATION_LIST);
+    const runner = new MigrationRunner(migrationPool, DATABASE_TEST_SCHEMA_MIGRATION_LIST);
 
     await expect(preConstraintRunner.up()).resolves.toEqual(['0001', '0002', '0003', '0004']);
     await migrationPool.query(

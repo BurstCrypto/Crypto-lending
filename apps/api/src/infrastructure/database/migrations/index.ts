@@ -6,7 +6,13 @@ import { enforceDatabasePrincipalBoundariesMigration } from './0005-enforce-data
 import { constrainJobOutboxLastErrorMigration } from './0006-constrain-job-outbox-last-error.migration';
 import type { DatabaseMigration } from './migration';
 
-export const DATABASE_SCHEMA_MIGRATION_LIST: readonly DatabaseMigration[] = Object.freeze([
+/**
+ * NEVER FOR DEPLOYMENT. This owner-privileged fixture intentionally omits the
+ * production principal-boundary migration so isolated database tests can
+ * create disposable schemas. Production modules and CLIs must inject only
+ * DATABASE_MIGRATION_LIST.
+ */
+export const DATABASE_TEST_SCHEMA_MIGRATION_LIST: readonly DatabaseMigration[] = Object.freeze([
   createJobOutboxMigration,
   addJobOutboxPublishedRetentionIndexMigration,
   addJobOutboxFailedRetentionIndexMigration,

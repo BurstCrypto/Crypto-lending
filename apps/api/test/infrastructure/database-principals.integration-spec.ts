@@ -9,7 +9,7 @@ import { MigrationRunner } from '../../src/infrastructure/database/migration-run
 import { createMigrationPool } from '../../src/infrastructure/database/migration-pool';
 import {
   createDatabasePrincipalBoundaryMigration,
-  DATABASE_SCHEMA_MIGRATION_LIST,
+  DATABASE_TEST_SCHEMA_MIGRATION_LIST,
   type DatabaseMigration,
   type DatabasePrincipalNames,
 } from '../../src/infrastructure/database/migrations';
@@ -57,7 +57,7 @@ function schemaMigrationsForIsolatedLegacyRole(
   // Migration 0004 is immutable in production. Its role literal is replaced
   // only inside this isolated test database so the suite never mutates the
   // cluster-global canonical crypto_runtime compatibility bridge.
-  return DATABASE_SCHEMA_MIGRATION_LIST.map((migration) =>
+  return DATABASE_TEST_SCHEMA_MIGRATION_LIST.map((migration) =>
     migration.id === '0004'
       ? {
           ...migration,

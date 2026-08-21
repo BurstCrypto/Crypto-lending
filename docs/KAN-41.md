@@ -101,9 +101,10 @@ properties:
 - atomic recognition evidence and one explicit AVAILABLE or UNAVAILABLE
   valuation snapshot for every posted asset;
 - exact payer and recipient lines plus immutable fee metadata for ACTUAL_FEE;
-- reversals that copy every original line, valuation, fee, and relation exactly
-  once with sides swapped, keep the original immutable, use a separately
-  approved capability, and cannot reverse a reversal;
+- reversals that copy every original line and the immutable recognition-base
+  valuations, fees, and relations exactly once with sides swapped, keep the
+  original immutable, use a separately approved capability, and cannot reverse
+  a reversal;
 - append-only mutation and truncate rejection under direct SQL, trigger
   disabling attempts, rollback, and concurrent transactions; and
 - owner-only tables/helpers, no PUBLIC or worker access, and API `EXECUTE` only
@@ -132,6 +133,11 @@ provisioning, valuation-source, recognition, custody, or statutory policy while
 ADR 0003 remains proposed. The local database must fail closed without a sealed,
 pre-authorized plan and capability. A later reviewed boundary must provision
 those artifacts before the module can be enabled in a deployed application.
+
+ADR 0003 permits append-only valuation BACKFILL records after recognition but
+does not yet approve how a later backfill changes reversal or reporting policy.
+KAN-41 preserves the original recognition snapshot as the reversal base and
+records later backfills without silently rewriting that policy decision.
 
 The ledger module therefore has no permissive default actor or capability
 provider. Wiring one merely to make dependency injection succeed would erase

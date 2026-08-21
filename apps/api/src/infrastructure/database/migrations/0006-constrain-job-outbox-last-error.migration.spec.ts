@@ -1,5 +1,8 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
 import { constrainJobOutboxLastErrorMigration } from './0006-constrain-job-outbox-last-error.migration';
-import { DATABASE_MIGRATION_LIST, DATABASE_SCHEMA_MIGRATION_LIST } from './index';
+import { DATABASE_MIGRATION_LIST, DATABASE_TEST_SCHEMA_MIGRATION_LIST } from './index';
 
 describe('constrainJobOutboxLastErrorMigration', () => {
   it('keeps the production migration order monotonic while retaining the schema-only fixture', () => {
@@ -11,7 +14,7 @@ describe('constrainJobOutboxLastErrorMigration', () => {
       '0005',
       '0006',
     ]);
-    expect(DATABASE_SCHEMA_MIGRATION_LIST.map(({ id }) => id)).toEqual([
+    expect(DATABASE_TEST_SCHEMA_MIGRATION_LIST.map(({ id }) => id)).toEqual([
       '0001',
       '0002',
       '0003',
@@ -19,7 +22,15 @@ describe('constrainJobOutboxLastErrorMigration', () => {
       '0006',
     ]);
     expect(Object.isFrozen(DATABASE_MIGRATION_LIST)).toBe(true);
-    expect(Object.isFrozen(DATABASE_SCHEMA_MIGRATION_LIST)).toBe(true);
+    expect(Object.isFrozen(DATABASE_TEST_SCHEMA_MIGRATION_LIST)).toBe(true);
+  });
+
+  it('keeps the test-only fixture out of production module and CLI wiring', () => {
+    for (const relativePath of ['../postgres.module.ts', '../migration.cli.ts']) {
+      const source = readFileSync(resolve(__dirname, relativePath), 'utf8');
+      expect(source).toContain("import { DATABASE_MIGRATION_LIST } from './migrations';");
+      expect(source).not.toContain('DATABASE_TEST_SCHEMA_MIGRATION_LIST');
+    }
   });
 
   it('constrains new writes before sanitizing and validating historical rows', () => {
