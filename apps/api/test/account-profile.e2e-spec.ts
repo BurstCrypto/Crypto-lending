@@ -21,6 +21,7 @@ import {
 } from '../src/accounts/domain/account-profile';
 import { AppModule } from '../src/app.module';
 import { configureApplication } from '../src/application';
+import { StructuredLogger, type StructuredLogRecord } from '../src/infrastructure/logging';
 
 const ACCOUNT_A = parseAccountId('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
 const ACCOUNT_B = parseAccountId('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb');
@@ -40,6 +41,7 @@ function profile(accountId: AccountId, email: string): AccountProfile {
 }
 
 class InMemoryAccountProfileRepository implements AccountProfileRepository {
+  readonly auditContexts: AccountProfileAuditContext[] = [];
   readonly profiles = new Map<AccountId, AccountProfile>([
     [ACCOUNT_A, profile(ACCOUNT_A, 'alpha@example.com')],
     [ACCOUNT_B, profile(ACCOUNT_B, 'bravo@example.com')],
@@ -67,10 +69,10 @@ class InMemoryAccountProfileRepository implements AccountProfileRepository {
     input: UpdateAccountProfileInput,
     auditContext: AccountProfileAuditContext,
   ): Promise<AccountProfileUpdateResult> {
-    void auditContext;
     const current = this.profiles.get(accountId);
     if (!current) return Promise.resolve({ status: 'not-found' });
     if (current.version !== expectedVersion) return Promise.resolve({ status: 'stale' });
+    this.auditContexts.push(auditContext);
 
     const updated: AccountProfile = {
       ...current,
@@ -102,9 +104,11 @@ const resolver: CurrentPrincipalResolver = {
 describe('account profile (e2e)', () => {
   let app: INestApplication;
   let repository: InMemoryAccountProfileRepository;
+  let loggingLines: string[];
 
   beforeAll(async () => {
     repository = new InMemoryAccountProfileRepository();
+    loggingLines = [];
     const testingModule = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(CURRENT_PRINCIPAL_RESOLVER)
       .useValue(resolver)
@@ -113,7 +117,12 @@ describe('account profile (e2e)', () => {
       .compile();
 
     app = testingModule.createNestApplication();
-    configureApplication(app);
+    configureApplication(app, {
+      requestLogger: new StructuredLogger({
+        environment: { APPLICATION_WORKLOAD: 'api', NODE_ENV: 'test' },
+        sink: (line) => loggingLines.push(line),
+      }),
+    });
     await app.init();
   });
 
@@ -206,6 +215,8 @@ describe('account profile (e2e)', () => {
 
   it('updates only permitted fields and leaves the other account unchanged', async () => {
     const beforeB = repository.profiles.get(ACCOUNT_B);
+    repository.auditContexts.length = 0;
+    loggingLines.length = 0;
     const response = await request(app.getHttpServer())
       .patch('/api/v1/accounts/me')
       .set('Authorization', 'Bearer test-token-a')
@@ -228,6 +239,22 @@ describe('account profile (e2e)', () => {
       updatedAt: '2026-08-20T16:00:01.000Z',
     });
     expect(repository.profiles.get(ACCOUNT_B)).toEqual(beforeB);
+    const completion = loggingLines
+      .map((line) => JSON.parse(line) as StructuredLogRecord)
+      .find((record) => record.event === 'http.request.completed');
+    expect(repository.auditContexts).toEqual([
+      expect.objectContaining({
+        actorAccountId: ACCOUNT_A,
+        correlationId: response.headers['x-request-id'],
+      }),
+    ]);
+    expect(completion).toMatchObject({
+      correlationId: response.headers['x-request-id'],
+      requestId: response.headers['x-request-id'],
+      initiatorActorId: ACCOUNT_A,
+      statusCode: 200,
+      outcome: 'success',
+    });
   });
 
   it.each([

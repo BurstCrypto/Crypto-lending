@@ -4,20 +4,36 @@ import { Inject, Injectable } from '@nestjs/common';
 
 import { INFRASTRUCTURE_CONFIG } from '../config/infrastructure-config.module';
 import type { InfrastructureConfig } from '../config/infrastructure.config';
+import { LOG_EVENTS, loggingContext, structuredLogger } from '../logging';
 import { SqsService } from './sqs.service';
-import type { JobEnvelope, JobProcessingResult, ReceivedQueueMessage } from './sqs.types';
+import type {
+  JobEnvelope,
+  JobProcessingErrorCode,
+  JobProcessingResult,
+  ReceivedQueueMessage,
+} from './sqs.types';
 
 export type JobHandler<Payload = unknown> = (job: JobEnvelope<Payload>) => Promise<void>;
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : 'Job handler failed';
-}
 
 const MAX_RECEIPT_LIFETIME_MS = 12 * 60 * 60 * 1_000;
 const RECEIPT_LIFETIME_SAFETY_MS = 5_000;
 const MAX_VISIBILITY_REQUEST_MS = 5_000;
 
 class ReceiptOwnershipExpiredError extends Error {}
+
+class JobProcessingFailure extends Error {
+  constructor(readonly code: JobProcessingErrorCode) {
+    super(code);
+    this.name = 'JobProcessingFailure';
+  }
+}
+
+function processingErrorCode(error: unknown): JobProcessingErrorCode {
+  if (error instanceof ReceiptOwnershipExpiredError) {
+    return 'SQS_RECEIPT_OWNERSHIP_EXPIRED';
+  }
+  return error instanceof JobProcessingFailure ? error.code : 'JOB_PROCESSING_FAILED';
+}
 
 interface VisibilityHeartbeat {
   ready(): Promise<{ status: 'healthy' } | { status: 'failed'; error: unknown }>;
@@ -199,90 +215,150 @@ export class SqsJobWorker {
       return { status: 'idle' };
     }
 
-    let job: JobEnvelope<Payload> | undefined;
+    let job: JobEnvelope<Payload>;
     try {
       job = this.sqs.parseEnvelope<Payload>(message.body);
-      const heartbeat = startVisibilityHeartbeat(
-        this.sqs,
+    } catch {
+      return this.handleFailure(
         message,
-        this.config.sqs.visibilityTimeoutSeconds,
+        undefined,
+        new JobProcessingFailure('JOB_ENVELOPE_INVALID'),
       );
-      const heartbeatReady = await heartbeat.ready();
-      if (heartbeatReady.status === 'failed') {
-        if (heartbeatReady.error instanceof ReceiptOwnershipExpiredError) {
-          throw heartbeatReady.error;
-        }
-        throw new Error('SQS visibility heartbeat failed', { cause: heartbeatReady.error });
-      }
-      let processingError: unknown;
-      let processingFailed = false;
-      try {
-        await handler(job);
-      } catch (error) {
-        processingFailed = true;
-        processingError = error;
-      }
-      const heartbeatResult = await heartbeat.stop();
-      if (
-        heartbeatResult.status === 'failed' &&
-        heartbeatResult.error instanceof ReceiptOwnershipExpiredError
-      ) {
-        throw heartbeatResult.error;
-      }
-      if (processingFailed) {
-        throw processingError;
-      }
-      if (heartbeatResult.status === 'failed') {
-        throw new Error('SQS visibility heartbeat failed', { cause: heartbeatResult.error });
-      }
-      await deleteWithDeadline(
-        this.sqs,
-        message,
-        visibilityRequestTimeoutMs(this.config.sqs.visibilityTimeoutSeconds),
-      );
-      return { status: 'completed', messageId: message.messageId, jobId: job.id };
-    } catch (error) {
-      if (error instanceof ReceiptOwnershipExpiredError) {
-        return {
-          status: 'ownership-lost',
-          messageId: message.messageId,
-          ...(job ? { jobId: job.id } : {}),
-          receiveCount: message.receiveCount,
-          error: errorMessage(error),
-        };
-      }
-      const exhausted = message.receiveCount >= this.config.sqs.maxReceiveCount;
-      const retryDelaySeconds = exhausted
-        ? 0
-        : Math.min(
-            this.config.sqs.retryBaseDelaySeconds * 2 ** (message.receiveCount - 1),
-            this.config.sqs.retryMaxDelaySeconds,
-          );
+    }
 
-      try {
-        await changeVisibilityWithDeadline(
-          this.sqs,
-          message,
-          retryDelaySeconds,
-          visibilityRequestTimeoutMs(this.config.sqs.visibilityTimeoutSeconds),
-        );
-      } catch (visibilityError) {
-        return {
-          status: 'ownership-lost',
-          messageId: message.messageId,
-          ...(job ? { jobId: job.id } : {}),
-          receiveCount: message.receiveCount,
-          error: `${errorMessage(error)}; visibility update failed: ${errorMessage(visibilityError)}`,
-        };
-      }
+    return loggingContext.run(
+      { ...job.correlation, jobId: job.id },
+      async (): Promise<JobProcessingResult> => {
+        try {
+          const heartbeat = startVisibilityHeartbeat(
+            this.sqs,
+            message,
+            this.config.sqs.visibilityTimeoutSeconds,
+          );
+          const heartbeatReady = await heartbeat.ready();
+          if (heartbeatReady.status === 'failed') {
+            if (heartbeatReady.error instanceof ReceiptOwnershipExpiredError) {
+              throw heartbeatReady.error;
+            }
+            throw new JobProcessingFailure('SQS_VISIBILITY_HEARTBEAT_FAILED');
+          }
+          let processingFailed = false;
+          try {
+            await handler(job);
+          } catch {
+            processingFailed = true;
+          }
+          const heartbeatResult = await heartbeat.stop();
+          if (
+            heartbeatResult.status === 'failed' &&
+            heartbeatResult.error instanceof ReceiptOwnershipExpiredError
+          ) {
+            throw heartbeatResult.error;
+          }
+          if (processingFailed) {
+            throw new JobProcessingFailure('JOB_HANDLER_FAILED');
+          }
+          if (heartbeatResult.status === 'failed') {
+            throw new JobProcessingFailure('SQS_VISIBILITY_HEARTBEAT_FAILED');
+          }
+          try {
+            await deleteWithDeadline(
+              this.sqs,
+              message,
+              visibilityRequestTimeoutMs(this.config.sqs.visibilityTimeoutSeconds),
+            );
+          } catch {
+            throw new JobProcessingFailure('SQS_DELETE_FAILED');
+          }
+          structuredLogger.emit(LOG_EVENTS.jobProcessed, 'info', {
+            outcome: 'success',
+            messageId: message.messageId,
+            jobId: job.id,
+            jobKind: job.kind,
+            receiveCount: message.receiveCount,
+          });
+          return { status: 'completed', messageId: message.messageId, jobId: job.id };
+        } catch (error) {
+          return this.handleFailure(message, job, error);
+        }
+      },
+    );
+  }
+
+  private async handleFailure(
+    message: ReceivedQueueMessage,
+    job: JobEnvelope | undefined,
+    error: unknown,
+  ): Promise<JobProcessingResult> {
+    const errorCode = processingErrorCode(error);
+    if (error instanceof ReceiptOwnershipExpiredError) {
+      structuredLogger.emit(LOG_EVENTS.jobOwnershipLost, 'error', {
+        outcome: 'failure',
+        errorCode,
+        messageId: message.messageId,
+        ...(job ? { jobId: job.id, jobKind: job.kind } : {}),
+        receiveCount: message.receiveCount,
+      });
       return {
-        status: exhausted ? 'awaiting-dead-letter' : 'retry-scheduled',
+        status: 'ownership-lost',
         messageId: message.messageId,
         ...(job ? { jobId: job.id } : {}),
         receiveCount: message.receiveCount,
-        retryDelaySeconds,
-        error: errorMessage(error),
+        errorCode,
       };
     }
+
+    const exhausted = message.receiveCount >= this.config.sqs.maxReceiveCount;
+    const retryDelaySeconds = exhausted
+      ? 0
+      : Math.min(
+          this.config.sqs.retryBaseDelaySeconds * 2 ** (message.receiveCount - 1),
+          this.config.sqs.retryMaxDelaySeconds,
+        );
+
+    try {
+      await changeVisibilityWithDeadline(
+        this.sqs,
+        message,
+        retryDelaySeconds,
+        visibilityRequestTimeoutMs(this.config.sqs.visibilityTimeoutSeconds),
+      );
+    } catch {
+      structuredLogger.emit(LOG_EVENTS.jobOwnershipLost, 'error', {
+        outcome: 'failure',
+        errorCode: 'SQS_VISIBILITY_UPDATE_FAILED',
+        messageId: message.messageId,
+        ...(job ? { jobId: job.id, jobKind: job.kind } : {}),
+        receiveCount: message.receiveCount,
+      });
+      return {
+        status: 'ownership-lost',
+        messageId: message.messageId,
+        ...(job ? { jobId: job.id } : {}),
+        receiveCount: message.receiveCount,
+        errorCode: 'SQS_VISIBILITY_UPDATE_FAILED',
+      };
+    }
+
+    structuredLogger.emit(
+      exhausted ? LOG_EVENTS.jobAwaitingDeadLetter : LOG_EVENTS.jobRetryScheduled,
+      exhausted ? 'error' : 'warn',
+      {
+        outcome: exhausted ? 'failure' : 'retry',
+        errorCode,
+        messageId: message.messageId,
+        ...(job ? { jobId: job.id, jobKind: job.kind } : {}),
+        receiveCount: message.receiveCount,
+        retryDelayMs: retryDelaySeconds * 1_000,
+      },
+    );
+    return {
+      status: exhausted ? 'awaiting-dead-letter' : 'retry-scheduled',
+      messageId: message.messageId,
+      ...(job ? { jobId: job.id } : {}),
+      receiveCount: message.receiveCount,
+      retryDelaySeconds,
+      errorCode,
+    };
   }
 }

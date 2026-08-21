@@ -1,5 +1,5 @@
 import 'reflect-metadata';
-import 'dotenv/config';
+import '../infrastructure/config/load-dotenv';
 
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
@@ -8,6 +8,7 @@ import { NestFactory } from '@nestjs/core';
 
 import { AppModule } from '../app.module';
 import { configureApplication } from '../application';
+import { LOG_EVENTS, structuredLogger } from '../infrastructure/logging';
 import { serializeDeterministically } from './stable-json';
 
 async function generateOpenApi(): Promise<void> {
@@ -52,7 +53,6 @@ async function generateOpenApi(): Promise<void> {
 }
 
 void generateOpenApi().catch((error: unknown) => {
-  const message = error instanceof Error ? (error.stack ?? error.message) : String(error);
-  console.error(`OpenAPI generation failed: ${message}`);
+  structuredLogger.emitFatal(LOG_EVENTS.openApiFailed, error, { outcome: 'failure' });
   process.exitCode = 1;
 });

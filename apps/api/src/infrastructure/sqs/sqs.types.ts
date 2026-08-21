@@ -1,4 +1,6 @@
-export type { JobEnvelope } from '../outbox/job-envelope';
+import type { JobCorrelationContext } from '../outbox/job-envelope';
+
+export type { JobCorrelationContext, JobEnvelope } from '../outbox/job-envelope';
 
 export interface ReceivedQueueMessage {
   messageId: string;
@@ -13,7 +15,17 @@ export interface SendJobOptions {
   id?: string;
   version?: number;
   delaySeconds?: number;
+  correlation?: JobCorrelationContext;
 }
+
+export type JobProcessingErrorCode =
+  | 'JOB_ENVELOPE_INVALID'
+  | 'JOB_HANDLER_FAILED'
+  | 'JOB_PROCESSING_FAILED'
+  | 'SQS_DELETE_FAILED'
+  | 'SQS_RECEIPT_OWNERSHIP_EXPIRED'
+  | 'SQS_VISIBILITY_HEARTBEAT_FAILED'
+  | 'SQS_VISIBILITY_UPDATE_FAILED';
 
 export type JobProcessingResult =
   | { status: 'idle' }
@@ -23,7 +35,7 @@ export type JobProcessingResult =
       messageId: string;
       jobId?: string;
       receiveCount: number;
-      error: string;
+      errorCode: JobProcessingErrorCode;
     }
   | {
       status: 'retry-scheduled' | 'awaiting-dead-letter';
@@ -31,5 +43,5 @@ export type JobProcessingResult =
       jobId?: string;
       receiveCount: number;
       retryDelaySeconds: number;
-      error: string;
+      errorCode: JobProcessingErrorCode;
     };

@@ -1,7 +1,8 @@
 import { performance } from 'node:perf_hooks';
 
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 
+import { LOG_EVENTS, structuredLogger } from '../logging';
 import {
   OUTBOX_DISPATCHER_OPTIONS,
   type OutboxDispatcherOptions,
@@ -33,7 +34,6 @@ function waitForNextPoll(milliseconds: number, signal: AbortSignal): Promise<voi
  */
 @Injectable()
 export class OutboxWorker {
-  private readonly logger = new Logger(OutboxWorker.name);
   private running = false;
 
   constructor(
@@ -52,16 +52,30 @@ export class OutboxWorker {
 
     this.running = true;
     let nextCleanupAt = 0;
+    let dispatchFailureReported = false;
+    let cleanupFailureReported = false;
     try {
       while (!signal.aborted) {
         let cleanupBacklog = false;
         let claimedWork = false;
         try {
           const summary = await this.dispatcher.dispatchBatch(signal);
+          dispatchFailureReported = false;
           claimedWork = summary.claimed > 0;
-        } catch (error) {
-          const message = error instanceof Error ? error.message : 'unknown error';
-          this.logger.error(`Outbox dispatch pass failed: ${message}`);
+          if (claimedWork) {
+            structuredLogger.emit(LOG_EVENTS.outboxDispatchCompleted, 'info', {
+              outcome: 'success',
+              ...summary,
+            });
+          }
+        } catch {
+          if (!dispatchFailureReported) {
+            structuredLogger.emit(LOG_EVENTS.outboxDispatchFailed, 'error', {
+              outcome: 'failure',
+              errorCode: 'OUTBOX_DISPATCH_PASS_FAILED',
+            });
+            dispatchFailureReported = true;
+          }
         }
         if (signal.aborted) {
           break;
@@ -70,13 +84,25 @@ export class OutboxWorker {
         if (performance.now() >= nextCleanupAt) {
           try {
             const deleted = await this.dispatcher.cleanupExpired();
+            cleanupFailureReported = false;
             cleanupBacklog = deleted >= this.options.cleanupBatchSize;
+            if (deleted > 0) {
+              structuredLogger.emit(LOG_EVENTS.outboxCleanupCompleted, 'info', {
+                outcome: 'success',
+                deleted,
+              });
+            }
             nextCleanupAt = cleanupBacklog
               ? performance.now()
               : performance.now() + this.options.cleanupIntervalMs;
-          } catch (error) {
-            const message = error instanceof Error ? error.message : 'unknown error';
-            this.logger.error(`Outbox retention cleanup failed: ${message}`);
+          } catch {
+            if (!cleanupFailureReported) {
+              structuredLogger.emit(LOG_EVENTS.outboxCleanupFailed, 'error', {
+                outcome: 'failure',
+                errorCode: 'OUTBOX_CLEANUP_FAILED',
+              });
+              cleanupFailureReported = true;
+            }
             nextCleanupAt = performance.now() + this.options.cleanupIntervalMs;
           }
         }

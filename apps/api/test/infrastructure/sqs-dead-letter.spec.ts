@@ -9,6 +9,7 @@ import {
   type SQSClient,
 } from '@aws-sdk/client-sqs';
 
+import { loggingContext } from '../../src/infrastructure/logging';
 import { SqsJobWorker } from '../../src/infrastructure/sqs/sqs-job.worker';
 import { SqsService } from '../../src/infrastructure/sqs/sqs.service';
 import { testInfrastructureConfig } from './fixtures';
@@ -22,6 +23,7 @@ interface StoredMessage {
 
 class InMemoryRedriveSqs {
   readonly receiveRequests: ReceiveMessageCommand['input'][] = [];
+  readonly sentRequests: SendMessageCommand['input'][] = [];
   private readonly source: StoredMessage[] = [];
   private readonly deadLetter: StoredMessage[] = [];
   private nextId = 1;
@@ -34,6 +36,7 @@ class InMemoryRedriveSqs {
 
   async send(command: unknown): Promise<unknown> {
     if (command instanceof SendMessageCommand) {
+      this.sentRequests.push(command.input);
       const body = command.input.MessageBody;
       if (!body) {
         throw new Error('MessageBody is required');
@@ -127,25 +130,46 @@ describe('SQS retry and dead-letter flow', () => {
     );
     const sqs = new SqsService(transport as unknown as SQSClient, config);
     const worker = new SqsJobWorker(sqs, config);
-    const sample = await sqs.sendJob('sample.always-fails', { accountId: 'acct-1' });
-    const failingHandler = jest
-      .fn<Promise<void>, [unknown]>()
-      .mockRejectedValue(new Error('sample failure'));
+    const correlation = {
+      correlationId: 'corr-sqs-flow',
+      requestId: 'request-sqs-flow',
+      initiatorActorId: 'actor-sqs-flow',
+      intentId: 'intent-sqs-flow',
+      quoteId: 'quote-sqs-flow',
+      transactionId: 'transaction-sqs-flow',
+      ledgerEventId: 'ledger-event-sqs-flow',
+    };
+    const sample = await sqs.sendJob(
+      'sample.always-fails',
+      { accountId: 'acct-1' },
+      { correlation },
+    );
+    const observedContexts: unknown[] = [];
+    const failingHandler = jest.fn<Promise<void>, [unknown]>().mockImplementation(() => {
+      observedContexts.push(loggingContext.current());
+      return Promise.reject(new Error('Bearer raw-handler-secret'));
+    });
 
-    await expect(worker.processOne(failingHandler)).resolves.toMatchObject({
+    const firstAttempt = await worker.processOne(failingHandler);
+    expect(firstAttempt).toMatchObject({
       status: 'retry-scheduled',
       receiveCount: 1,
       retryDelaySeconds: 1,
+      errorCode: 'JOB_HANDLER_FAILED',
     });
-    await expect(worker.processOne(failingHandler)).resolves.toMatchObject({
+    const secondAttempt = await worker.processOne(failingHandler);
+    expect(secondAttempt).toMatchObject({
       status: 'retry-scheduled',
       receiveCount: 2,
       retryDelaySeconds: 2,
+      errorCode: 'JOB_HANDLER_FAILED',
     });
-    await expect(worker.processOne(failingHandler)).resolves.toMatchObject({
+    const terminalAttempt = await worker.processOne(failingHandler);
+    expect(terminalAttempt).toMatchObject({
       status: 'awaiting-dead-letter',
       receiveCount: 3,
       retryDelaySeconds: 0,
+      errorCode: 'JOB_HANDLER_FAILED',
     });
 
     // The next source receive is where SQS evaluates and performs redrive.
@@ -154,6 +178,19 @@ describe('SQS retry and dead-letter flow', () => {
     expect(deadLetters).toHaveLength(1);
     expect(sqs.parseEnvelope(deadLetters[0]?.body ?? '').id).toBe(sample.id);
     expect(failingHandler).toHaveBeenCalledTimes(3);
+    expect(transport.sentRequests[0]?.MessageAttributes?.correlationId).toEqual({
+      DataType: 'String',
+      StringValue: correlation.correlationId,
+    });
+    expect(sqs.parseEnvelope(transport.sentRequests[0]?.MessageBody ?? '').correlation).toEqual(
+      correlation,
+    );
+    expect(observedContexts).toEqual(
+      Array.from({ length: 3 }, () => ({ ...correlation, jobId: sample.id })),
+    );
+    expect(
+      JSON.stringify({ observedContexts, firstAttempt, secondAttempt, terminalAttempt }),
+    ).not.toContain('raw-handler-secret');
   });
 
   it('checks both queue URLs and their redrive relationship', async () => {
@@ -262,6 +299,7 @@ describe('SQS retry and dead-letter flow', () => {
           kind: 'sample.publish',
           version: 1,
           occurredAt: '2026-08-20T00:00:00.000Z',
+          correlation: { correlationId: 'corr-bounded-sqs-request' },
           payload: {},
         },
         messageAttributes: {},
@@ -462,7 +500,7 @@ describe('SQS retry and dead-letter flow', () => {
     await expect(processing).resolves.toMatchObject({
       status: 'retry-scheduled',
       jobId: 'job-heartbeat-failure',
-      error: 'SQS visibility heartbeat failed',
+      errorCode: 'SQS_VISIBILITY_HEARTBEAT_FAILED',
     });
     expect(changeVisibility.mock.calls.map(([, seconds]) => seconds)).toEqual([30, 1]);
     expect(sqs.delete).not.toHaveBeenCalled();
@@ -568,7 +606,7 @@ describe('SQS retry and dead-letter flow', () => {
     releaseHandler();
     await expect(processing).resolves.toMatchObject({
       status: 'retry-scheduled',
-      error: 'SQS visibility heartbeat failed',
+      errorCode: 'SQS_VISIBILITY_HEARTBEAT_FAILED',
     });
     expect(changeVisibility).toHaveBeenCalledTimes(2);
     expect(jest.getTimerCount()).toBe(0);
@@ -652,7 +690,7 @@ describe('SQS retry and dead-letter flow', () => {
 
     expect(result).toMatchObject({
       status: 'ownership-lost',
-      error: expect.stringContaining('completion could be confirmed'),
+      errorCode: 'SQS_RECEIPT_OWNERSHIP_EXPIRED',
     });
     expect(sqs.changeVisibility).not.toHaveBeenCalled();
     expect(sqs.delete).not.toHaveBeenCalled();
@@ -693,7 +731,7 @@ describe('SQS retry and dead-letter flow', () => {
 
     await expect(processing).resolves.toMatchObject({
       status: 'retry-scheduled',
-      error: 'delete aborted',
+      errorCode: 'SQS_DELETE_FAILED',
     });
     expect(sqs.changeVisibility).toHaveBeenCalledTimes(1);
   });
@@ -726,7 +764,7 @@ describe('SQS retry and dead-letter flow', () => {
     await jest.advanceTimersByTimeAsync(1);
     await expect(processing).resolves.toMatchObject({
       status: 'ownership-lost',
-      error: expect.stringContaining('maximum 12-hour processing window'),
+      errorCode: 'SQS_RECEIPT_OWNERSHIP_EXPIRED',
     });
     expect(handler).not.toHaveBeenCalled();
     expect(sqs.changeVisibility).not.toHaveBeenCalled();

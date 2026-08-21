@@ -301,6 +301,12 @@ function requireExactSemanticProperty(
   }
 }
 
+function requireExactSemanticBlock(block, logicalId, expectedSource, expectation, errors) {
+  if (!block || semanticYamlTokens(block) !== semanticYamlTokens(expectedSource)) {
+    errors.push(`${logicalId} must preserve ${expectation}.`);
+  }
+}
+
 function requireAbsentProperty(block, logicalId, propertyName, expectation, errors) {
   if (hasPropertyName(block, propertyName)) {
     errors.push(`${logicalId} must not declare ${propertyName}; ${expectation}.`);
@@ -1385,6 +1391,13 @@ function validateKmsAndEncryptedServiceBoundaries(resources, inventory, errors) 
       '!GetAtt ApplicationLogsKey.Arn',
       errors,
     );
+    requireExactProperty(
+      resources.get(logicalId) ?? '',
+      logicalId,
+      'RetentionInDays',
+      '!Ref LogRetentionDays',
+      errors,
+    );
   }
 
   const redis = resources.get('RedisReplicationGroup') ?? '';
@@ -1538,6 +1551,18 @@ function validateTemplateShape(source, errors) {
   }
 
   const parameters = topLevelBlocks(source, 'Parameters');
+  requireExactSemanticBlock(
+    parameters.get('LogRetentionDays') ?? '',
+    'LogRetentionDays',
+    [
+      'LogRetentionDays:',
+      '  Type: Number',
+      '  Default: 14',
+      '  AllowedValues: [1, 3, 5, 7, 14, 30, 60, 90]',
+    ].join('\n'),
+    'the exact Number type, 14-day default, and reviewed bounded values 1, 3, 5, 7, 14, 30, 60, and 90',
+    errors,
+  );
   const sensitiveParameterName = /(password|credential|accesskey|secret(?:value|string)?|token)/i;
   for (const [name, block] of parameters) {
     if (!sensitiveParameterName.test(name) || /CredentialPhase$/.test(name)) {

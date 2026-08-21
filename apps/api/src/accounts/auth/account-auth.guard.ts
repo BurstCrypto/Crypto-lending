@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 
 import { parseAccountId } from '../domain/account-profile';
+import { loggingContext } from '../../infrastructure/logging';
 import {
   bindCurrentPrincipal,
   clearCurrentPrincipal,
@@ -64,8 +65,10 @@ export class AccountAuthGuard implements CanActivate {
         accountId: parseAccountId(resolved.accountId),
       });
       bindCurrentPrincipal(request, principal);
+      loggingContext.bindActorId(principal.accountId);
     } catch {
       clearCurrentPrincipal(request);
+      loggingContext.clearActorId();
       setAuthenticationFailureHeaders(http.getResponse<unknown>());
       throw authenticationRequired();
     }

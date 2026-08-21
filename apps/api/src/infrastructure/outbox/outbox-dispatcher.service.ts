@@ -3,7 +3,12 @@ import { randomUUID } from 'node:crypto';
 
 import { Inject, Injectable } from '@nestjs/common';
 
-import { JobOutboxRepository, type ClaimedOutboxJob } from './job-outbox.repository';
+import { LOG_EVENTS, loggingContext, structuredLogger } from '../logging';
+import {
+  JobOutboxRepository,
+  type ClaimedOutboxJob,
+  type OutboxFailureCode,
+} from './job-outbox.repository';
 import {
   OUTBOX_DISPATCHER_OPTIONS,
   type OutboxDispatcherOptions,
@@ -12,6 +17,7 @@ import {
   OUTBOX_TRANSPORT,
   type OutboxTransport,
   type OutboxTransportBatchResult,
+  type OutboxTransportReceipt,
 } from './outbox-transport.port';
 
 export interface OutboxDispatchSummary {
@@ -22,8 +28,12 @@ export interface OutboxDispatchSummary {
   leaseLost: number;
 }
 
-function failureMessage(error: unknown): string {
-  return error instanceof Error ? error.message : 'Outbox transport failed';
+class OutboxTransportTimeoutError extends Error {}
+
+function failureCode(error: unknown): OutboxFailureCode {
+  return error instanceof OutboxTransportTimeoutError
+    ? 'OUTBOX_TRANSPORT_TIMEOUT'
+    : 'OUTBOX_TRANSPORT_FAILED';
 }
 
 @Injectable()
@@ -152,7 +162,7 @@ export class OutboxDispatcher {
       await Promise.all(
         jobs.map(async (job, index) => {
           if (results[index]?.status === 'published') {
-            await this.markTransportPublished(job, claimToken, summary);
+            await this.markTransportPublished(job, claimToken, summary, results[index].receipt);
           } else {
             summary.leaseLost += 1;
           }
@@ -164,7 +174,7 @@ export class OutboxDispatcher {
       jobs.map(async (job, index) => {
         const result = results[index];
         if (result?.status === 'published') {
-          await this.markTransportPublished(job, claimToken, summary);
+          await this.markTransportPublished(job, claimToken, summary, result.receipt);
         } else {
           await this.recordTransportFailure(
             job,
@@ -183,33 +193,39 @@ export class OutboxDispatcher {
     summary: OutboxDispatchSummary,
     shutdownSignal?: AbortSignal,
   ): Promise<void> {
-    if (shutdownSignal?.aborted) {
-      summary.leaseLost += 1;
-      return;
-    }
-    try {
-      await this.withTransportDeadline(
-        (abortSignal) =>
-          this.transport.publish(
-            {
-              destination: job.destination,
-              envelope: job.envelope,
-              messageAttributes: job.messageAttributes,
-            },
-            abortSignal,
-          ),
-        shutdownSignal,
-      );
-    } catch (error) {
-      if (shutdownSignal?.aborted) {
-        summary.leaseLost += 1;
-        return;
-      }
-      await this.recordTransportFailure(job, claimToken, error, summary);
-      return;
-    }
+    return loggingContext.run(
+      { ...job.envelope.correlation, jobId: job.id },
+      async (): Promise<void> => {
+        if (shutdownSignal?.aborted) {
+          summary.leaseLost += 1;
+          return;
+        }
+        let receipt: OutboxTransportReceipt;
+        try {
+          receipt = await this.withTransportDeadline(
+            (abortSignal) =>
+              this.transport.publish(
+                {
+                  destination: job.destination,
+                  envelope: job.envelope,
+                  messageAttributes: job.messageAttributes,
+                },
+                abortSignal,
+              ),
+            shutdownSignal,
+          );
+        } catch (error) {
+          if (shutdownSignal?.aborted) {
+            summary.leaseLost += 1;
+            return;
+          }
+          await this.recordTransportFailure(job, claimToken, error, summary);
+          return;
+        }
 
-    await this.markTransportPublished(job, claimToken, summary);
+        await this.markTransportPublished(job, claimToken, summary, receipt);
+      },
+    );
   }
 
   private async withTransportDeadline<T>(
@@ -218,7 +234,7 @@ export class OutboxDispatcher {
   ): Promise<T> {
     const controller = new AbortController();
     let timedOut = false;
-    const timeoutError = new Error(
+    const timeoutError = new OutboxTransportTimeoutError(
       `Outbox transport timed out after ${this.options.publishTimeoutMs}ms`,
     );
     const timeout = setTimeout(() => {
@@ -250,13 +266,31 @@ export class OutboxDispatcher {
     job: ClaimedOutboxJob,
     claimToken: string,
     summary: OutboxDispatchSummary,
+    receipt: OutboxTransportReceipt = {},
   ): Promise<void> {
-    const marked = await this.repository.markPublished(job.id, claimToken);
-    if (marked) {
-      summary.published += 1;
-    } else {
-      summary.leaseLost += 1;
-    }
+    return loggingContext.run(
+      { ...job.envelope.correlation, jobId: job.id },
+      async (): Promise<void> => {
+        const marked = await this.repository.markPublished(job.id, claimToken);
+        if (marked) {
+          summary.published += 1;
+          structuredLogger.emit(LOG_EVENTS.jobPublished, 'info', {
+            outcome: 'success',
+            jobId: job.id,
+            jobKind: job.envelope.kind,
+            ...(receipt.transportMessageId ? { messageId: receipt.transportMessageId } : {}),
+          });
+        } else {
+          summary.leaseLost += 1;
+          structuredLogger.emit(LOG_EVENTS.jobPublishFailed, 'warn', {
+            outcome: 'failure',
+            errorCode: 'OUTBOX_LEASE_LOST',
+            jobId: job.id,
+            jobKind: job.envelope.kind,
+          });
+        }
+      },
+    );
   }
 
   private async recordTransportFailure(
@@ -265,23 +299,38 @@ export class OutboxDispatcher {
     error: unknown,
     summary: OutboxDispatchSummary,
   ): Promise<void> {
-    const nextAttempt = job.attempts + 1;
-    const terminal = nextAttempt >= this.options.maxAttempts;
-    const retryDelayMs = terminal
-      ? 0
-      : Math.min(this.options.retryBaseDelayMs * 2 ** job.attempts, this.options.retryMaxDelayMs);
-    const transition = await this.repository.recordFailure(
-      job.id,
-      claimToken,
-      failureMessage(error),
-      { terminal, retryDelayMs },
+    return loggingContext.run(
+      { ...job.envelope.correlation, jobId: job.id },
+      async (): Promise<void> => {
+        const nextAttempt = job.attempts + 1;
+        const terminal = nextAttempt >= this.options.maxAttempts;
+        const retryDelayMs = terminal
+          ? 0
+          : Math.min(
+              this.options.retryBaseDelayMs * 2 ** job.attempts,
+              this.options.retryMaxDelayMs,
+            );
+        const code = failureCode(error);
+        const transition = await this.repository.recordFailure(job.id, claimToken, code, {
+          terminal,
+          retryDelayMs,
+        });
+        if (transition === 'retry') {
+          summary.retried += 1;
+        } else if (transition === 'failed') {
+          summary.failed += 1;
+        } else {
+          summary.leaseLost += 1;
+        }
+        structuredLogger.emit(LOG_EVENTS.jobPublishFailed, terminal ? 'error' : 'warn', {
+          outcome: transition === 'retry' ? 'retry' : 'failure',
+          errorCode: transition === 'lease-lost' ? 'OUTBOX_LEASE_LOST' : code,
+          jobId: job.id,
+          jobKind: job.envelope.kind,
+          retryCount: nextAttempt,
+          retryDelayMs,
+        });
+      },
     );
-    if (transition === 'retry') {
-      summary.retried += 1;
-    } else if (transition === 'failed') {
-      summary.failed += 1;
-    } else {
-      summary.leaseLost += 1;
-    }
   }
 }

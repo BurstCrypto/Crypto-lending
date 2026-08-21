@@ -31,6 +31,13 @@ export interface RecordOutboxFailureOptions {
   retryDelayMs: number;
 }
 
+export type OutboxFailureCode = 'OUTBOX_TRANSPORT_FAILED' | 'OUTBOX_TRANSPORT_TIMEOUT';
+
+const OUTBOX_FAILURE_CODES = new Set<OutboxFailureCode>([
+  'OUTBOX_TRANSPORT_FAILED',
+  'OUTBOX_TRANSPORT_TIMEOUT',
+]);
+
 export interface CleanupOutboxJobsOptions {
   batchSize: number;
   failedRetentionMs: number;
@@ -199,7 +206,7 @@ export class JobOutboxRepository {
   async recordFailure(
     id: string,
     dispatcherId: string,
-    error: string,
+    errorCode: OutboxFailureCode,
     options: RecordOutboxFailureOptions,
   ): Promise<OutboxFailureTransition> {
     if (
@@ -208,6 +215,9 @@ export class JobOutboxRepository {
       options.retryDelayMs > 900_000
     ) {
       throw new Error('Outbox retryDelayMs must be an integer between 0 and 900000');
+    }
+    if (!OUTBOX_FAILURE_CODES.has(errorCode)) {
+      throw new Error('Outbox failure code is not allowlisted');
     }
 
     const result = await this.postgres.query<FailureRow>(
@@ -226,7 +236,7 @@ export class JobOutboxRepository {
          AND status = 'pending'
          AND locked_by = $2
        RETURNING status`,
-      [id, dispatcherId, error.slice(0, 2_000), options.terminal, options.retryDelayMs],
+      [id, dispatcherId, errorCode, options.terminal, options.retryDelayMs],
     );
 
     const status = result.rows[0]?.status;

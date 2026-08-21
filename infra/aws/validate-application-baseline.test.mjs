@@ -83,6 +83,42 @@ test('accepts the repository no-external-egress baseline and records the DNS res
   assert.match(report.residualLimitations[3], /FAILED_AUTH_MONITORING_UNRESOLVED/);
 });
 
+test('rejects mutations to the exact bounded log-retention parameter contract', () => {
+  for (const [search, replacement] of [
+    ['  LogRetentionDays:\n    Type: Number', '  LogRetentionDays:\n    Type: String'],
+    ['    Default: 14\n    AllowedValues:', '    Default: 30\n    AllowedValues:'],
+    [
+      '    AllowedValues: [1, 3, 5, 7, 14, 30, 60, 90]',
+      '    AllowedValues: [1, 3, 5, 7, 14, 30, 60, 90, 365]',
+    ],
+  ]) {
+    assertRejected(
+      mutate((source) => source.replace(search, replacement)),
+      /LogRetentionDays must preserve the exact Number type, 14-day default, and reviewed bounded values 1, 3, 5, 7, 14, 30, 60, and 90/,
+    );
+  }
+});
+
+test('rejects every application log group that escapes the reviewed retention parameter', () => {
+  for (const [logicalId, nextLogicalId] of [
+    ['ApiLogGroup', 'WebLogGroup'],
+    ['WebLogGroup', 'WorkerLogGroup'],
+    ['WorkerLogGroup', 'WorkloadBoundaries'],
+  ]) {
+    assertRejected(
+      mutate((source) =>
+        source.replace(
+          new RegExp(
+            `(  ${logicalId}:[\\s\\S]*?RetentionInDays:) !Ref LogRetentionDays(?=\\n\\n  ${nextLogicalId}:)`,
+          ),
+          '$1 365',
+        ),
+      ),
+      new RegExp(`${logicalId} requires RetentionInDays to equal !Ref LogRetentionDays`),
+    );
+  }
+});
+
 test('pins immutable child bytes and the AWS-owned regional S3 delivery boundary', () => {
   for (const fragment of [
     'Assert-RegionalS3ManagedPrefixList',

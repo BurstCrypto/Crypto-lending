@@ -1,4 +1,4 @@
-import type { JobEnvelope } from './job-envelope';
+import type { JobCorrelationContext, JobEnvelope } from './job-envelope';
 
 export const JOB_PUBLISHER = Symbol('JOB_PUBLISHER');
 
@@ -10,6 +10,7 @@ export interface EnqueueJobRequest<Payload> {
   id?: string;
   version?: number;
   occurredAt?: string;
+  correlation?: JobCorrelationContext;
   destination?: JobDestination;
   messageAttributes?: Readonly<Record<string, string>>;
 }

@@ -1,5 +1,5 @@
 import 'reflect-metadata';
-import 'dotenv/config';
+import './infrastructure/config/load-dotenv';
 
 import type { Server } from 'node:http';
 
@@ -8,11 +8,12 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { configureApplication } from './application';
 import { bindExecutableWorkload } from './infrastructure/config/application-workload';
+import { LOG_EVENTS, structuredLogger } from './infrastructure/logging';
 import { applyHttpServerLimits, loadHttpServerOptions } from './server-options';
 
 async function bootstrap(): Promise<void> {
   bindExecutableWorkload(process.env, 'api');
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, { logger: structuredLogger });
   configureApplication(app);
   app.enableShutdownHooks();
 
@@ -21,10 +22,10 @@ async function bootstrap(): Promise<void> {
   applyHttpServerLimits(server, options);
 
   await app.listen(options.port, options.host);
+  structuredLogger.emit(LOG_EVENTS.applicationStarted, 'info', { outcome: 'success' });
 }
 
 void bootstrap().catch((error: unknown) => {
-  const message = error instanceof Error ? error.message : 'Unknown startup error';
-  process.stderr.write(`API startup failed: ${message}\n`);
+  structuredLogger.emitFatal(LOG_EVENTS.applicationStartFailed, error, { outcome: 'failure' });
   process.exitCode = 1;
 });

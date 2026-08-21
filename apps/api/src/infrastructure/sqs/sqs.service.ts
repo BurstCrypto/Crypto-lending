@@ -87,6 +87,7 @@ function sqsMessageAttributes(
     jobKind: { DataType: 'String', StringValue: envelope.kind },
     jobVersion: { DataType: 'Number', StringValue: String(envelope.version) },
     jobId: { DataType: 'String', StringValue: envelope.id },
+    correlationId: { DataType: 'String', StringValue: envelope.correlation.correlationId },
   };
 }
 
@@ -136,6 +137,7 @@ export class SqsService implements OnApplicationShutdown, OutboxTransport {
     const envelope = createJobEnvelope(kind, payload, {
       id: options.id ?? randomUUID(),
       ...(options.version === undefined ? {} : { version: options.version }),
+      ...(options.correlation ? { correlation: options.correlation } : {}),
     });
     const serialized = serializeJobMessage(envelope, {});
 

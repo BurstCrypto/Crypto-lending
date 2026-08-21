@@ -1,7 +1,15 @@
-import { SendMessageBatchCommand, type SQSClient } from '@aws-sdk/client-sqs';
+import {
+  ChangeMessageVisibilityCommand,
+  DeleteMessageCommand,
+  ReceiveMessageCommand,
+  SendMessageBatchCommand,
+  type MessageAttributeValue,
+  type SQSClient,
+} from '@aws-sdk/client-sqs';
 import type { Pool, PoolClient, QueryResult, QueryResultRow } from 'pg';
 
 import { PostgresService } from '../../src/infrastructure/database/postgres.service';
+import { loggingContext } from '../../src/infrastructure/logging';
 import {
   createJobEnvelope,
   parseJobEnvelope,
@@ -24,6 +32,7 @@ import type {
 } from '../../src/infrastructure/outbox/outbox-transport.port';
 import { OutboxWorker } from '../../src/infrastructure/outbox/outbox-worker.service';
 import { TransactionalJobPublisher } from '../../src/infrastructure/outbox/transactional-job-publisher.service';
+import { SqsJobWorker } from '../../src/infrastructure/sqs/sqs-job.worker';
 import { SqsService } from '../../src/infrastructure/sqs/sqs.service';
 import { testInfrastructureConfig, testOutboxDispatcherOptions } from './fixtures';
 
@@ -36,6 +45,7 @@ interface StoredJob {
   attempts: number;
   availableAt: number;
   failedAt?: number;
+  lastError?: string;
   lockedBy?: string;
   lockedUntil?: number;
   publishedAt?: number;
@@ -190,13 +200,14 @@ class TransactionalOutboxHarness {
       }
       job.status = 'published';
       job.publishedAt = this.now;
+      delete job.lastError;
       delete job.failedAt;
       delete job.lockedBy;
       delete job.lockedUntil;
       return queryResult([], 1);
     }
     if (normalized.includes('SET attempts = attempts + 1')) {
-      const [id, claimToken, , rawTerminal, rawRetryDelay] = values;
+      const [id, claimToken, errorCode, rawTerminal, rawRetryDelay] = values;
       const job = this.committed.find(
         (candidate) =>
           candidate.id === id &&
@@ -207,6 +218,7 @@ class TransactionalOutboxHarness {
         return queryResult();
       }
       job.attempts += 1;
+      job.lastError = String(errorCode);
       job.status = rawTerminal ? 'failed' : 'pending';
       if (!rawTerminal) {
         job.availableAt = this.now + Number(rawRetryDelay);
@@ -239,7 +251,15 @@ async function enqueueCommitted(
       kind: 'account.updated',
       occurredAt: '2026-08-18T00:00:00.000Z',
       payload: { accountId: 'acct-1' },
-      messageAttributes: { correlationId: 'corr-1' },
+      correlation: {
+        correlationId: 'corr-1',
+        requestId: 'request-1',
+        initiatorActorId: 'actor-1',
+        intentId: 'intent-1',
+        quoteId: 'quote-1',
+        transactionId: 'transaction-1',
+        ledgerEventId: 'ledger-event-1',
+      },
     }),
   );
 }
@@ -263,6 +283,77 @@ describe('transactional job outbox', () => {
         payload: {},
       }),
     ).toThrow('Invalid job envelope');
+  });
+
+  it('inherits and durably projects only the active correlation context', () => {
+    const envelope = loggingContext.run(
+      {
+        correlationId: 'corr-active',
+        requestId: 'request-active',
+        initiatorActorId: 'actor-active',
+        jobId: 'unrelated-parent-job',
+        intentId: 'intent-active',
+        quoteId: 'quote-active',
+        transactionId: 'transaction-active',
+        ledgerEventId: 'ledger-event-active',
+      },
+      () =>
+        createJobEnvelope(
+          'sample.correlated',
+          {},
+          {
+            id: 'correlated-job',
+            occurredAt: '2026-08-21T00:00:00.000Z',
+          },
+        ),
+    );
+
+    expect(envelope.correlation).toEqual({
+      correlationId: 'corr-active',
+      requestId: 'request-active',
+      initiatorActorId: 'actor-active',
+      intentId: 'intent-active',
+      quoteId: 'quote-active',
+      transactionId: 'transaction-active',
+      ledgerEventId: 'ledger-event-active',
+    });
+    expect(envelope.correlation).not.toHaveProperty('jobId');
+    expect(parseJobEnvelope(JSON.parse(JSON.stringify(envelope)))).toEqual(envelope);
+  });
+
+  it('gives legacy envelopes a deterministic correlation without copying their opaque ID', () => {
+    const legacy = {
+      id: 'private-key-shaped-legacy-job',
+      kind: 'sample.legacy',
+      version: 1,
+      occurredAt: '2026-08-18T00:00:00.000Z',
+      payload: {},
+    };
+
+    const first = parseJobEnvelope(legacy);
+    const second = parseJobEnvelope(structuredClone(legacy));
+    expect(first.correlation).toEqual(second.correlation);
+    expect(first.correlation.correlationId).toMatch(/^legacy:[a-f0-9]{64}$/u);
+    expect(first.correlation.correlationId).not.toContain(legacy.id);
+  });
+
+  it('rejects unknown or unsafe correlation metadata instead of serializing it', () => {
+    const base = {
+      id: 'unsafe-correlation-job',
+      kind: 'sample.invalid-correlation',
+      version: 1,
+      occurredAt: '2026-08-18T00:00:00.000Z',
+      payload: {},
+    };
+    expect(() =>
+      parseJobEnvelope({
+        ...base,
+        correlation: { correlationId: 'corr-safe', authorization: 'Bearer do-not-store' },
+      }),
+    ).toThrow('Invalid job correlation context');
+    expect(() =>
+      parseJobEnvelope({ ...base, correlation: { correlationId: 'corr\nforged' } }),
+    ).toThrow('Invalid job correlation context');
   });
 
   it('rolls enqueue back atomically and leaves nothing to publish', async () => {
@@ -310,10 +401,165 @@ describe('transactional job outbox', () => {
       leaseLost: 0,
     });
     expect(transport.publish).toHaveBeenCalledWith(
-      expect.objectContaining({ envelope: expect.objectContaining({ id: envelope.id }) }),
+      expect.objectContaining({
+        envelope: expect.objectContaining({
+          id: envelope.id,
+          correlation: {
+            correlationId: 'corr-1',
+            requestId: 'request-1',
+            initiatorActorId: 'actor-1',
+            intentId: 'intent-1',
+            quoteId: 'quote-1',
+            transactionId: 'transaction-1',
+            ledgerEventId: 'ledger-event-1',
+          },
+        }),
+      }),
       expect.anything(),
     );
     expect(harness.job(envelope.id)?.status).toBe('published');
+  });
+
+  it('preserves two isolated request contexts through outbox, SQS, and concurrent workers', async () => {
+    const harness = new TransactionalOutboxHarness();
+    const postgres = new PostgresService(harness.pool);
+    const repository = new JobOutboxRepository(postgres);
+    const publisher = new TransactionalJobPublisher(repository);
+    const config = testInfrastructureConfig();
+    const wireMessages: Array<{
+      body: string;
+      messageAttributes: Record<string, MessageAttributeValue>;
+      messageId: string;
+      receiptHandle: string;
+    }> = [];
+    const publishedWireMessages: typeof wireMessages = [];
+    const send = jest.fn(async (command: unknown): Promise<unknown> => {
+      if (command instanceof SendMessageBatchCommand) {
+        const successful = (command.input.Entries ?? []).map((entry, index) => {
+          const messageId = `wire-message-${index + 1}`;
+          const message = {
+            body: entry.MessageBody ?? '',
+            messageAttributes: entry.MessageAttributes ?? {},
+            messageId,
+            receiptHandle: `${messageId}-receipt`,
+          };
+          wireMessages.push(message);
+          publishedWireMessages.push(message);
+          return { Id: entry.Id, MessageId: messageId };
+        });
+        return { Successful: successful, Failed: [] };
+      }
+      if (command instanceof ReceiveMessageCommand) {
+        const message = wireMessages.shift();
+        return message
+          ? {
+              Messages: [
+                {
+                  MessageId: message.messageId,
+                  ReceiptHandle: message.receiptHandle,
+                  Body: message.body,
+                  Attributes: { ApproximateReceiveCount: '1' },
+                  MessageAttributes: message.messageAttributes,
+                },
+              ],
+            }
+          : { Messages: [] };
+      }
+      if (
+        command instanceof ChangeMessageVisibilityCommand ||
+        command instanceof DeleteMessageCommand
+      ) {
+        return {};
+      }
+      throw new Error(`Unexpected local SQS command: ${String(command)}`);
+    });
+    const sqs = new SqsService({ send, destroy: jest.fn() } as unknown as SQSClient, config);
+    const dispatcher = new OutboxDispatcher(repository, sqs, dispatcherOptions());
+    const contexts = [
+      {
+        correlationId: 'corr-flow-a',
+        requestId: 'request-flow-a',
+        initiatorActorId: 'actor-flow-a',
+        intentId: 'intent-flow-a',
+        quoteId: 'quote-flow-a',
+        transactionId: 'transaction-flow-a',
+        ledgerEventId: 'ledger-event-flow-a',
+      },
+      {
+        correlationId: 'corr-flow-b',
+        requestId: 'request-flow-b',
+        initiatorActorId: 'actor-flow-b',
+        intentId: 'intent-flow-b',
+        quoteId: 'quote-flow-b',
+        transactionId: 'transaction-flow-b',
+        ledgerEventId: 'ledger-event-flow-b',
+      },
+    ] as const;
+
+    for (const [index, context] of contexts.entries()) {
+      await loggingContext.run(context, async () => {
+        await Promise.resolve();
+        await postgres.withTransaction(() =>
+          publisher.enqueue({
+            id: `correlated-flow-${index + 1}`,
+            kind: 'account.updated',
+            occurredAt: '2026-08-21T00:00:00.000Z',
+            payload: { accountId: `acct-${index + 1}` },
+          }),
+        );
+      });
+    }
+
+    await expect(dispatcher.dispatchBatch()).resolves.toMatchObject({
+      claimed: 2,
+      published: 2,
+    });
+    expect(publishedWireMessages).toHaveLength(2);
+    for (const [index, context] of contexts.entries()) {
+      const jobId = `correlated-flow-${index + 1}`;
+      expect(harness.job(jobId)?.envelope.correlation).toEqual(context);
+      const wireMessage = publishedWireMessages.find(
+        ({ body }) => sqs.parseEnvelope(body).id === jobId,
+      );
+      expect(wireMessage).toBeDefined();
+      expect(sqs.parseEnvelope(wireMessage?.body ?? '').correlation).toEqual(context);
+      expect(wireMessage?.messageAttributes.correlationId).toEqual({
+        DataType: 'String',
+        StringValue: context.correlationId,
+      });
+    }
+
+    const observedContexts = new Map<string, unknown>();
+    let concurrentHandlers = 0;
+    let releaseHandlers = (): void => undefined;
+    const bothHandlersStarted = new Promise<void>((resolve) => {
+      releaseHandlers = resolve;
+    });
+    const handler = jest.fn(async (job: JobEnvelope): Promise<void> => {
+      observedContexts.set(job.id, loggingContext.current());
+      concurrentHandlers += 1;
+      if (concurrentHandlers === 2) releaseHandlers();
+      await bothHandlersStarted;
+    });
+    const worker = new SqsJobWorker(sqs, config);
+
+    await expect(
+      Promise.all([worker.processOne(handler), worker.processOne(handler)]),
+    ).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ status: 'completed', jobId: 'correlated-flow-1' }),
+        expect.objectContaining({ status: 'completed', jobId: 'correlated-flow-2' }),
+      ]),
+    );
+    expect(observedContexts).toEqual(
+      new Map(
+        contexts.map((context, index) => [
+          `correlated-flow-${index + 1}`,
+          { ...context, jobId: `correlated-flow-${index + 1}` },
+        ]),
+      ),
+    );
+    expect(loggingContext.current()).toBeUndefined();
   });
 
   it('maps partial SQS batch failures per row without letting legacy poison block valid jobs', async () => {
@@ -326,6 +572,7 @@ describe('transactional job outbox', () => {
         kind: 'account.updated',
         version: 1,
         occurredAt: '2026-08-18T00:00:00.000Z',
+        correlation: { correlationId: 'corr-legacy-batch-poison' },
         payload: {},
       },
       messageAttributes: { jobId: 'reserved-legacy-value' },
@@ -477,6 +724,15 @@ describe('transactional job outbox', () => {
     ).rejects.toThrow('reserved job message attribute');
     await expect(
       postgres.withTransaction(() =>
+        publisher.enqueue({
+          kind: 'poison',
+          payload: {},
+          messageAttributes: { correlationId: 'shadowed-correlation' },
+        }),
+      ),
+    ).rejects.toThrow('reserved job message attribute');
+    await expect(
+      postgres.withTransaction(() =>
         publisher.enqueue({ kind: 'poison', payload: 'x'.repeat(MAX_JOB_MESSAGE_BYTES) }),
       ),
     ).rejects.toThrow('cannot exceed');
@@ -514,6 +770,7 @@ describe('transactional job outbox', () => {
         kind: 'account.updated',
         version: 1,
         occurredAt: '2026-08-18T00:00:00.000Z',
+        correlation: { correlationId: 'corr-legacy-poison' },
         payload: {},
       },
       messageAttributes: { jobId: 'legacy-shadow-value' },
@@ -658,8 +915,9 @@ describe('transactional job outbox', () => {
     const repository = new JobOutboxRepository(postgres);
     const publisher = new TransactionalJobPublisher(repository);
     await enqueueCommitted(postgres, publisher, 'failing-job');
+    const secret = 'Bearer raw-provider-secret-must-not-persist';
     const sqsClient = {
-      send: jest.fn().mockRejectedValue(new Error('SQS unavailable')),
+      send: jest.fn().mockRejectedValue(new Error(secret)),
       destroy: jest.fn(),
     } as unknown as SQSClient;
     const sqsTransport = new SqsService(sqsClient, testInfrastructureConfig());
@@ -674,13 +932,16 @@ describe('transactional job outbox', () => {
       status: 'pending',
       attempts: 1,
       availableAt: 100,
+      lastError: 'OUTBOX_TRANSPORT_FAILED',
     });
     harness.advance(100);
     await expect(dispatcher.dispatchBatch()).resolves.toMatchObject({ failed: 1 });
     expect(harness.job('failing-job')).toMatchObject({
       status: 'failed',
       attempts: 2,
+      lastError: 'OUTBOX_TRANSPORT_FAILED',
     });
+    expect(JSON.stringify(harness.job('failing-job'))).not.toContain(secret);
   });
 
   it('aborts a stalled batch before its lease and settles every row for retry', async () => {
@@ -715,8 +976,16 @@ describe('transactional job outbox', () => {
     await jest.advanceTimersByTimeAsync(100);
 
     await expect(dispatch).resolves.toMatchObject({ claimed: 2, retried: 2 });
-    expect(harness.job('stalled-batch-a')).toMatchObject({ status: 'pending', attempts: 1 });
-    expect(harness.job('stalled-batch-b')).toMatchObject({ status: 'pending', attempts: 1 });
+    expect(harness.job('stalled-batch-a')).toMatchObject({
+      status: 'pending',
+      attempts: 1,
+      lastError: 'OUTBOX_TRANSPORT_TIMEOUT',
+    });
+    expect(harness.job('stalled-batch-b')).toMatchObject({
+      status: 'pending',
+      attempts: 1,
+      lastError: 'OUTBOX_TRANSPORT_TIMEOUT',
+    });
   });
 
   it('aborts an in-flight publish when the worker receives its shutdown signal', async () => {
@@ -802,6 +1071,7 @@ describe('transactional job outbox', () => {
       kind: 'sample',
       version: 1,
       occurredAt: '2026-08-18T00:00:00.000Z',
+      correlation: { correlationId: 'corr-dedupe-id' },
       payload: {},
     };
     const claimed: ClaimedOutboxJob = {
@@ -844,6 +1114,7 @@ describe('transactional job outbox', () => {
         kind: 'sample',
         version: 1,
         occurredAt: '2026-08-18T00:00:00.000Z',
+        correlation: { correlationId: `corr-concurrency-${id}` },
         payload: {},
       },
       messageAttributes: {},

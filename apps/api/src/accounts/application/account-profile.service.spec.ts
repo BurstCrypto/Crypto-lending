@@ -1,5 +1,6 @@
 import type { AccountProfile, UpdateAccountProfileInput } from '../domain/account-profile';
 import { isAccountId, parseAccountId } from '../domain/account-profile';
+import { loggingContext } from '../../infrastructure/logging';
 import {
   AccountProfileNotFoundError,
   AccountProfileVersionConflictError,
@@ -56,7 +57,9 @@ describe('AccountProfileService', () => {
       accountId,
     };
 
-    await service.provisionAccount(input);
+    await loggingContext.run({ correlationId: 'request:profile-provision' }, () =>
+      service.provisionAccount(input),
+    );
 
     expect(repository.provisionForAccount).toHaveBeenCalledTimes(1);
     const call = repository.provisionForAccount.mock.calls[0];
@@ -72,7 +75,7 @@ describe('AccountProfileService', () => {
     });
     expect(auditContext).toEqual({
       actorAccountId: createInput.accountId,
-      correlationId: expect.any(String),
+      correlationId: 'request:profile-provision',
     });
   });
 
@@ -96,12 +99,14 @@ describe('AccountProfileService', () => {
     const service = new AccountProfileService(repository);
     const update: UpdateAccountProfileInput = { contactPhone: '+13035550123' };
 
-    await expect(service.updateSelf(accountId, 1, update)).resolves.toEqual(nextProfile);
-    expect(repository.update).toHaveBeenCalledWith(
-      accountId,
-      1,
-      update,
-      expect.objectContaining({ actorAccountId: accountId, correlationId: expect.any(String) }),
-    );
+    await expect(
+      loggingContext.run({ correlationId: 'request:profile-update' }, () =>
+        service.updateSelf(accountId, 1, update),
+      ),
+    ).resolves.toEqual(nextProfile);
+    expect(repository.update).toHaveBeenCalledWith(accountId, 1, update, {
+      actorAccountId: accountId,
+      correlationId: 'request:profile-update',
+    });
   });
 });

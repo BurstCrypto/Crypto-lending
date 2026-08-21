@@ -3,11 +3,11 @@ import { Buffer } from 'node:buffer';
 import { parseJobEnvelope, type JobEnvelope } from './job-envelope';
 
 // SQS currently accepts at most 1 MiB including message-attribute names, types,
-// and values. Three attributes are reserved for the stable job metadata.
+// and values. Four attributes are reserved for stable job/correlation metadata.
 export const MAX_JOB_MESSAGE_BYTES = 1_048_576;
-export const MAX_CUSTOM_JOB_ATTRIBUTES = 7;
+export const MAX_CUSTOM_JOB_ATTRIBUTES = 6;
 
-const RESERVED_ATTRIBUTE_NAMES = new Set(['jobid', 'jobkind', 'jobversion']);
+const RESERVED_ATTRIBUTE_NAMES = new Set(['correlationid', 'jobid', 'jobkind', 'jobversion']);
 
 export interface SerializedJobMessage {
   body: string;
@@ -120,6 +120,7 @@ export function serializeJobMessage(
   bytes += attributeBytes('jobKind', 'String', envelope.kind);
   bytes += attributeBytes('jobVersion', 'Number', String(envelope.version));
   bytes += attributeBytes('jobId', 'String', envelope.id);
+  bytes += attributeBytes('correlationId', 'String', envelope.correlation.correlationId);
   for (const [name, value] of Object.entries(attributes)) {
     bytes += attributeBytes(name, 'String', value);
   }

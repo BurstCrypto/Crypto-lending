@@ -1,6 +1,7 @@
-import 'dotenv/config';
+import '../config/load-dotenv';
 
 import { loadMigrationDatabaseConfig } from '../config/infrastructure.config';
+import { LOG_EVENTS, structuredLogger } from '../logging';
 import { enforceMigrationCliMode } from './migration-cli-mode';
 import { createMigrationPool } from './migration-pool';
 import { MigrationRunner } from './migration-runner.service';
@@ -40,7 +41,6 @@ async function main(): Promise<void> {
 }
 
 void main().catch((error: unknown) => {
-  const message = error instanceof Error ? error.message : String(error);
-  process.stderr.write(`Migration failed: ${message}\n`);
+  structuredLogger.emitFatal(LOG_EVENTS.migrationFailed, error, { outcome: 'failure' });
   process.exitCode = 1;
 });

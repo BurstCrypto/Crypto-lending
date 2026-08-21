@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 
 import { Inject, Injectable } from '@nestjs/common';
 
+import { loggingContext } from '../../infrastructure/logging';
 import {
   parseAccountId,
   type AccountId,
@@ -45,7 +46,7 @@ export class AccountProfileService {
       },
       {
         actorAccountId: accountId,
-        correlationId: randomUUID(),
+        correlationId: this.correlationId(),
       },
     );
   }
@@ -57,7 +58,7 @@ export class AccountProfileService {
   ): Promise<AccountProfile> {
     const result = await this.repository.update(accountId, expectedVersion, input, {
       actorAccountId: accountId,
-      correlationId: randomUUID(),
+      correlationId: this.correlationId(),
     });
 
     if (result.status === 'not-found') {
@@ -67,5 +68,9 @@ export class AccountProfileService {
       throw new AccountProfileVersionConflictError();
     }
     return result.profile;
+  }
+
+  private correlationId(): string {
+    return loggingContext.current()?.correlationId ?? randomUUID();
   }
 }

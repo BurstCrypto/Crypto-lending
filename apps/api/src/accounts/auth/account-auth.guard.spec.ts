@@ -1,6 +1,7 @@
 import { HttpStatus, type ExecutionContext, UnauthorizedException } from '@nestjs/common';
 
 import { parseAccountId, type AccountId } from '../domain/account-profile';
+import { loggingContext } from '../../infrastructure/logging';
 import { AccountAuthGuard } from './account-auth.guard';
 import {
   DENY_ALL_CURRENT_PRINCIPAL_RESOLVER,
@@ -41,6 +42,22 @@ describe('AccountAuthGuard', () => {
     expect(principal).toEqual({ accountId: ACCOUNT_ID });
     expect(Object.isFrozen(principal)).toBe(true);
     expect(requireCurrentPrincipal(httpContext(request))).toBe(principal);
+  });
+
+  it('binds only the verified principal as the correlated initiating actor', async () => {
+    const guard = new AccountAuthGuard({ resolve: () => ({ accountId: ACCOUNT_ID }) });
+
+    await loggingContext.run({ correlationId: 'request:authenticated' }, async () => {
+      await expect(
+        guard.canActivate(
+          httpContext({ headers: { 'x-account-id': 'attacker-controlled-actor' } }),
+        ),
+      ).resolves.toBe(true);
+      expect(loggingContext.requireCurrent()).toEqual({
+        correlationId: 'request:authenticated',
+        initiatorActorId: ACCOUNT_ID,
+      });
+    });
   });
 
   it.each([

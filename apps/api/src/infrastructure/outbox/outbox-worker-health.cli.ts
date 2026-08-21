@@ -1,4 +1,4 @@
-import 'dotenv/config';
+import '../config/load-dotenv';
 import 'reflect-metadata';
 
 import { Module } from '@nestjs/common';
@@ -6,6 +6,7 @@ import { NestFactory } from '@nestjs/core';
 
 import { bindExecutableWorkload } from '../config/application-workload';
 import { PostgresModule } from '../database/postgres.module';
+import { LOG_EVENTS, structuredLogger } from '../logging';
 import { SqsModule } from '../sqs/sqs.module';
 import { assertOutboxWorkerHealthy, OutboxWorkerHealthService } from './outbox-worker-health';
 
@@ -25,8 +26,10 @@ async function main(): Promise<void> {
   }
 }
 
-void main().catch((error: unknown) => {
-  const message = error instanceof Error ? error.message : String(error);
-  process.stderr.write(`Outbox worker health check failed: ${message}\n`);
+void main().catch(() => {
+  structuredLogger.emit(LOG_EVENTS.workerHealthFailed, 'fatal', {
+    outcome: 'failure',
+    errorCode: 'OUTBOX_WORKER_HEALTH_FAILED',
+  });
   process.exitCode = 1;
 });
