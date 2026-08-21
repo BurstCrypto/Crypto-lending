@@ -48,7 +48,7 @@ describeWithPostgres('PostgreSQL migration rollback integration', () => {
          ('historical-null', 'jobs', '{}'::jsonb, '{}'::jsonb, NULL)`,
     );
 
-    await expect(runner.up()).resolves.toEqual(['0006', '0007']);
+    await expect(runner.up()).resolves.toEqual(['0006', '0007', '0008']);
     const sanitizedLastErrors = await migrationPool.query<{
       id: string;
       last_error: string | null;
@@ -128,13 +128,22 @@ describeWithPostgres('PostgreSQL migration rollback integration', () => {
     await expect(runner.assertUpToDate()).rejects.toThrow(
       'Database migration 0006 schema verification failed',
     );
-    await expect(runner.down(2)).resolves.toEqual(['0007', '0006']);
+    await migrationPool.query(
+      `ALTER TABLE job_outbox
+       ADD CONSTRAINT job_outbox_last_error_code_check
+       CHECK (
+         last_error IS NULL
+         OR last_error IN ('OUTBOX_TRANSPORT_FAILED', 'OUTBOX_TRANSPORT_TIMEOUT')
+       )`,
+    );
+    await expect(runner.assertUpToDate()).resolves.toBeUndefined();
+    await expect(runner.down(3)).resolves.toEqual(['0008', '0007', '0006']);
     await migrationPool.query(
       `UPDATE job_outbox
        SET last_error = 'legacy worker detail after rollback'
        WHERE id = 'historical-raw'`,
     );
-    await expect(runner.up()).resolves.toEqual(['0006', '0007']);
+    await expect(runner.up()).resolves.toEqual(['0006', '0007', '0008']);
     await expect(
       migrationPool.query<{ last_error: string }>(
         `SELECT last_error FROM job_outbox WHERE id = 'historical-raw'`,
@@ -143,7 +152,15 @@ describeWithPostgres('PostgreSQL migration rollback integration', () => {
       rows: [{ last_error: 'OUTBOX_TRANSPORT_FAILED' }],
     });
 
-    await expect(runner.down(6)).resolves.toEqual(['0007', '0006', '0004', '0003', '0002', '0001']);
+    await expect(runner.down(7)).resolves.toEqual([
+      '0008',
+      '0007',
+      '0006',
+      '0004',
+      '0003',
+      '0002',
+      '0001',
+    ]);
     const afterDown = await migrationPool.query<{ table_name: string }>(
       `SELECT table_name
        FROM information_schema.tables
@@ -200,11 +217,19 @@ describeWithPostgres('PostgreSQL migration rollback integration', () => {
 
     const migrationRecordsAfterDown = await migrationPool.query<{ id: string }>(
       'SELECT id FROM schema_migrations WHERE id = ANY($1::text[]) ORDER BY id',
-      [['0004', '0006', '0007']],
+      [['0004', '0006', '0007', '0008']],
     );
     expect(migrationRecordsAfterDown.rows).toEqual([]);
 
-    await expect(runner.up()).resolves.toEqual(['0001', '0002', '0003', '0004', '0006', '0007']);
+    await expect(runner.up()).resolves.toEqual([
+      '0001',
+      '0002',
+      '0003',
+      '0004',
+      '0006',
+      '0007',
+      '0008',
+    ]);
     await expect(runner.assertUpToDate()).resolves.toBeUndefined();
   });
 });

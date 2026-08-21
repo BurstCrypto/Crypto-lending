@@ -17,6 +17,9 @@ const describeWithPostgres =
 const API_ROLE = 'crypto_api_runtime';
 const WORKER_ROLE = 'crypto_worker_runtime';
 const IDENTIFIER = /^[a-z][a-z0-9_]{0,62}$/u;
+const IMMUTABLE_LEDGER_MIGRATIONS = DATABASE_TEST_SCHEMA_MIGRATION_LIST.filter(
+  ({ id }) => id !== '0008',
+);
 
 interface PostingFixture {
   actorAccountId: string;
@@ -424,7 +427,7 @@ describeWithPostgres('KAN-41 immutable ledger PostgreSQL integration', () => {
       max: 6,
       options: `-c search_path=${schema}`,
     });
-    runner = new MigrationRunner(ledgerPool, DATABASE_TEST_SCHEMA_MIGRATION_LIST);
+    runner = new MigrationRunner(ledgerPool, IMMUTABLE_LEDGER_MIGRATIONS);
     await expect(runner.up()).resolves.toEqual(['0001', '0002', '0003', '0004', '0006', '0007']);
     await adminPool.query(
       `GRANT USAGE ON SCHEMA ${quoteIdentifier(schema)} TO ${quoteIdentifier(API_ROLE)}, ${quoteIdentifier(WORKER_ROLE)}`,

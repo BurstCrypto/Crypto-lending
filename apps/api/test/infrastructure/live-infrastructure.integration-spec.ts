@@ -115,6 +115,7 @@ describeWithInfrastructure('live docker-compose infrastructure', () => {
         '0004',
         '0006',
         '0007',
+        '0008',
       ]);
       await expect(
         postgresPool.query("SELECT to_regclass('ledger_journals') AS ledger_table"),
@@ -169,7 +170,8 @@ describeWithInfrastructure('live docker-compose infrastructure', () => {
       }>('SELECT id, status FROM job_outbox WHERE id = $1', [outboxEnvelope.id]);
       expect(persistedOutbox.rows).toEqual([{ id: outboxEnvelope.id, status: 'published' }]);
 
-      await expect(migrations.down(6)).resolves.toEqual([
+      await expect(migrations.down(7)).resolves.toEqual([
+        '0008',
         '0007',
         '0006',
         '0004',
