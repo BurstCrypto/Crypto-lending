@@ -22,10 +22,13 @@ free.
 
 ## Structured event contract
 
-Application-owned operational output must be one bounded JSON object per line.
-The logger generates its own canonical UTC timestamp and accepts a
-discriminated, event-specific field allowlist rather than an arbitrary object
-plus a recursive scrubber.
+The API, outbox worker, migration CLI, worker-health CLI, and OpenAPI generator
+covered by this branch emit application-owned operational output as one
+bounded JSON object per line. The logger generates its own canonical UTC
+timestamp and accepts a discriminated, event-specific field allowlist rather
+than an arbitrary object plus a recursive scrubber. The Next.js web runtime is
+an explicit remaining boundary; this branch does not claim that framework's
+stdout and fatal paths are structured or scrubbed.
 
 Every event has these fields; domain and request events also carry an
 event-specific `outcome` where the catalog permits it:
@@ -64,7 +67,8 @@ The field allowlist is the primary control. Pattern-based detection is defense
 in depth and must never be the only reason a value is considered safe.
 
 The following values are absent, not partially masked, prefixed, hashed, or
-copied into a `redacted` field:
+copied into a `redacted` field. Hashing a prohibited value does not make it
+safe to log:
 
 - bearer, refresh, ID, session, CSRF, basic-auth, and container-credential
   tokens;
@@ -90,6 +94,13 @@ come from the verified principal, never from a request body, query, wallet
 address, or caller-supplied actor header. Stable route IDs and destination
 aliases replace raw URLs. Closed error codes replace raw dependency messages.
 
+The only application-generated hashes admitted to logs are domain-separated
+diagnostic pseudonyms for internal job and transport-message identifiers. New
+producers must treat those identifiers as non-secret operational IDs. The
+legacy compatibility path cannot prove the provenance of historical opaque
+IDs; its hashes prevent raw output but are not a claim that sensitive or
+low-entropy legacy input becomes safe through SHA-256.
+
 ## Actor and correlation rules
 
 The API generates a new request ID and root correlation ID at ingress and may
@@ -101,11 +112,13 @@ log token claims or credentials.
 
 Durable jobs carry a validated correlation context outside their arbitrary
 payload. The context identifies the original account or service initiator, the
-causing request or job, and any validated internal financial IDs. A worker logs
-itself as the executor and the carried principal as the initiator; it must not
-represent the customer as the process that executed background work. Invalid
-or legacy envelopes are reported with a safe classification and transport
-message ID only, never their body or attributes.
+root/original request when present, and any validated internal financial IDs.
+A child job retains that root but does not relabel its parent's diagnostic
+`jobId` as its own. A worker logs itself as the executor and the carried
+principal as the initiator; it must not represent the customer as the process
+that executed background work. Invalid or legacy envelopes use safe
+classifications and domain-separated hashed job/message references, never raw
+IDs, bodies, or attributes.
 
 Carried correlation and initiator fields are diagnostic metadata only. A
 worker must never use them for authentication, authorization, ownership, or a
@@ -123,9 +136,10 @@ context into one another.
 - Identifiers are bounded and matched against explicit ASCII grammars.
 - The logger constructs base fields itself, so caller data cannot override
   timestamp, level, service, event, or outcome through object spread.
-- Serialization occurs exactly once and appends exactly one physical newline;
-  carriage returns, line feeds, terminal escapes, NUL, and Unicode line
-  separators cannot create a second event.
+- Each accepted record emits at most one physical JSON line. An oversized
+  record may require one bounded second serialization of its application-owned
+  core fields, but carriage returns, line feeds, terminal escapes, NUL, and
+  Unicode line separators cannot create a second emitted event.
 - Arbitrary objects, prototypes, getters, `toJSON`, circular structures, and
   unsupported scalar types never reach the serializer.
 - Each event has a fixed 4,096-byte ceiling. An oversized event falls back to
@@ -133,8 +147,11 @@ context into one another.
   serializing the rejected data.
 - Normal request logging is limited to one completion event plus meaningful
   domain or security transitions. Poll-idle and successful readiness loops do
-  not create unbounded volume. Security failures must be rate-aware so an
-  unauthenticated caller cannot create an uncontrolled ingestion-cost stream.
+  not create unbounded volume. Each API process admits at most 60 anonymous
+  rejected or aborted request records per 60-second window and emits one
+  bounded suppression record when that budget is exhausted. Verified-actor
+  failures are not sampled. An attacker can consume the shared anonymous
+  budget, so edge-level controls and deployed alert evidence remain live gates.
 - Logging and serialization failures must not change a financial or customer
   operation's result.
 
@@ -145,17 +162,39 @@ scrubbing, or serialization of third-party error graphs is required.
 
 Migration `0006` replaces historical free-form `job_outbox.last_error` values
 with `OUTBOX_TRANSPORT_FAILED` and then enforces the closed
-`OUTBOX_TRANSPORT_FAILED` / `OUTBOX_TRANSPORT_TIMEOUT` allowlist. Roll it out
-code-first: place the new worker build everywhere, stop and drain every old
-outbox worker that can still write raw dependency text, run the migration with
-the reviewed migration identity, and only then resume the new workers. This
-ordering prevents an in-flight old worker from failing its update when the new
-constraint takes effect.
+`OUTBOX_TRANSPORT_FAILED` / `OUTBOX_TRANSPORT_TIMEOUT` allowlist. This is a
+drain-first compatibility migration, not an ordinary rolling migration: make
+the new worker image available, scale old outbox workers to zero, wait for
+in-flight work and leases to drain, run the migration with the reviewed
+migration identity, and only then deploy/start the new workers. Old API tasks
+may remain because they do not write `last_error`. This ordering prevents an
+in-flight old worker from failing its update when the new constraint takes
+effect; an old worker must not be restarted after `0006` commits.
 
 The migration is transactional and installs the constraint as `NOT VALID`
 before sanitizing and validating historical rows. Its rollback drops only the
 constraint; it deliberately cannot reconstruct prohibited historical error
 text after sanitization.
+
+The migration CLI now emits structured JSON records instead of the prior
+human-readable `Applied migrations`, `Rolled back migrations`, and status
+lines. No repository script parses that legacy text, but external/operator
+scripts must migrate to the versioned JSON event contract before adopting this
+build.
+
+Other exported compatibility changes require coordinated consumers:
+`JobEnvelope.correlation` is required for new TypeScript producers (the wire
+parser still normalizes correlation-less legacy envelopes), failure variants
+of `JobProcessingResult` expose `errorCode` instead of `error`, and one SQS
+attribute is now reserved for correlation so the custom-attribute maximum is
+six rather than seven. No in-repository caller relies on the superseded forms;
+external or independently deployed callers must be inventoried before rollout.
+Producer payload generics are not yet constrained to a `JsonValue` type, but
+runtime projection now rejects `Date`, class instances, custom `toJSON`, and
+accessor-backed values instead of allowing JSON conversion. Independently
+deployed producers must validate that boundary as part of the same rollout
+preflight; cycles, sparse arrays, non-finite values, and unsupported scalars
+were already rejected by the prior serializer.
 
 ## Retention contract
 
@@ -201,12 +240,16 @@ npm run test:integration --workspace @crypto-lending/api
 ```
 
 Application logging changes additionally require the API unit and end-to-end
-tests. Current cases inject run-time canaries through headers, query strings,
-bodies, errors, nested causes, transport failures, job payloads, and job
-attributes. Captured output remains parseable single-line JSON and contains
-none of those canaries. Parallel request/job tests prove context isolation. A
-repository-wide source-policy gate and the broader wallet/provider canary
-corpus remain required before the ticket can be accepted.
+tests. Current captured-output cases cover HTTP headers, queries and bodies,
+logger error/accessor/prototype failures, correlation isolation, and bounded
+anonymous rejection volume. Job tests separately prove that raw transport and
+handler errors are absent from durable state and processing results, while
+correlation survives outbox/SQS serialization and concurrent handlers.
+Captured worker-output cases also prove that payload, attribute, transport,
+and handler canaries are absent from the emitted JSON. A source-policy gate
+rejects direct application-owned console/stdout/stderr and Nest logger sinks in
+the covered API executables. The broader wallet/provider/domain corpus and
+unexercised error paths remain required before the ticket can be accepted.
 
 All focused retention validation is local filesystem and child-process work.
 It reports zero AWS calls and performs no Docker, network, registry, provider,
@@ -218,11 +261,20 @@ KAN-51 must not be represented as fully accepted from this local retention
 evidence. The following remain explicit gates:
 
 - complete application-owned structured logging and adversarial leak evidence
-  for every API and worker error path;
+  for every API, worker, and web-runtime error path;
 - one real request traced through the API, committed outbox job, worker, and
   immutable ledger event with a single root correlation;
-- intent, quote, transaction, and journal correlation using their actual
+- intent, quote, transaction, and `ledgerEventId` correlation using their actual
   domain types rather than synthetic stand-ins;
+- a rollout preflight for legacy job identifiers and the custom-attribute
+  reservation change (`MAX_CUSTOM_JOB_ATTRIBUTES` is now six), including
+  pending rows with seven attributes, a custom `correlationId` collision, or
+  insufficient size headroom for normalized body/attribute correlation, plus
+  payloads deeper than 64 levels or larger than 100,000 JSON nodes; and
+  evidence that no old producer emits those superseded shapes;
+- a decision on enriching normalized `legacy:*` jobs with newly resolved
+  actor/domain identifiers; the current fail-closed context deliberately
+  forbids that future chaining path;
 - security review of actor-ID classification, log access, and incident-query
   procedures; and
 - an explicitly authorized non-production exercise proving deployed task

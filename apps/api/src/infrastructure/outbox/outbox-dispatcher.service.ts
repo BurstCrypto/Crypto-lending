@@ -3,12 +3,7 @@ import { randomUUID } from 'node:crypto';
 
 import { Inject, Injectable } from '@nestjs/common';
 
-import {
-  createSafeLogReference,
-  LOG_EVENTS,
-  loggingContext,
-  structuredLogger,
-} from '../logging';
+import { createSafeLogReference, LOG_EVENTS, loggingContext, structuredLogger } from '../logging';
 import {
   JobOutboxRepository,
   type ClaimedOutboxJob,
