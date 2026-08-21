@@ -253,9 +253,10 @@ unique PostgreSQL schema, and removes only those test resources. See
   PII-safe account persistence boundary. Real managed authentication is a
   downstream KAN-37 adapter; see [`docs/KAN-36.md`](docs/KAN-36.md).
 - [`docs/adr/0003-immutable-ledger-accounting-model.md`](docs/adr/0003-immutable-ledger-accounting-model.md)
-  defines KAN-40's proposed operational, multi-asset ledger contract. Schema,
-  lifecycle, idempotent posting, and audit-query implementation remain in
-  KAN-41 through KAN-44; see [`docs/KAN-40.md`](docs/KAN-40.md).
+  defines KAN-40's proposed operational, multi-asset ledger contract. KAN-41
+  implements the local append-only schema and application boundary; lifecycle,
+  idempotent posting, and audit-query work remain in KAN-42 through KAN-44. See
+  [`docs/KAN-40.md`](docs/KAN-40.md) and [`docs/KAN-41.md`](docs/KAN-41.md).
 - `apps/api/src/infrastructure/database` owns pooled queries, transaction
   propagation, and checksum-protected migrations.
 - `apps/api/src/infrastructure/redis` owns the API's health-only Redis boundary.

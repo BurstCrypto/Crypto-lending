@@ -1,10 +1,10 @@
 # KAN-41: Append-only ledger schema
 
 KAN-41 is the LED-002 implementation boundary for the proposed operational
-memorandum ledger in ADR 0003. The ticket is `In Progress`. This document
-records the implemented application contract and the database controls that
-must be green before the ticket can move to `In Review`; it is not approval of
-the accounting policy and does not move the proposed ADR to `Accepted`.
+memorandum ledger in ADR 0003. The local implementation is ready for `In Review`.
+This document records the implemented application contract and database
+controls; it is not approval of the accounting policy and does not move the
+proposed ADR to `Accepted`.
 
 This work is local-only. It does not create a cloud resource, send an asset,
 query a chain or pricing provider, publish an image, invoke hosted CI, or incur
@@ -19,10 +19,10 @@ The Jira dependency chain is intentionally serial:
 - KAN-42 also blocks KAN-43; and
 - KAN-43 blocks KAN-51's real API-to-job-to-ledger correlation evidence.
 
-KAN-41 therefore stays `In Progress` until its local database and application
-gates pass. KAN-42 and KAN-43 stay `To Do` until their prerequisites are ready.
-Local completion may move KAN-41 to `In Review`, but not to `Done`, while the
-ADR's finance, risk, custody, lifecycle, and recognition approvals remain open.
+KAN-41 moves to `In Review` after its local database and application gates pass.
+KAN-42 may then begin its local implementation, while KAN-43 stays `To Do` until
+KAN-42 is ready. KAN-41 does not move to `Done` while the ADR's finance, risk,
+custody, lifecycle, and recognition approvals remain open.
 
 ## Implemented application boundary
 
@@ -82,8 +82,7 @@ with the same generic result.
 
 ## Required database invariants
 
-Migration `0007` is not releasable until PostgreSQL itself proves all of these
-properties:
+Migration `0007` implements and locally verifies these properties:
 
 - immutable books, asset revisions, accounts, transactions, legs, posting
   plans, journals, lines, valuation snapshots, fee components, typed external
