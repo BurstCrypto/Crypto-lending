@@ -1,7 +1,7 @@
 # KAN-43: Idempotent ledger writes and transactional outbox
 
 KAN-43 is the LED-004 local implementation boundary. The ticket is `In
-Progress`. It composes the KAN-41 immutable journal and KAN-42 lifecycle event
+Review`. It composes the KAN-41 immutable journal and KAN-42 lifecycle event
 with one durable idempotency result and one record in the existing PostgreSQL
 outbox.
 
@@ -15,9 +15,9 @@ submit an external transaction, or introduce a second delivery system.
 - both tickets block KAN-43; and
 - KAN-43 blocks KAN-51's real API-to-job-to-ledger trace.
 
-KAN-43 may move to `In Review` after its application and PostgreSQL gates pass.
-It must not move to `Done` while ADR 0003 and the retention, provider, and
-operations decisions listed below remain unapproved.
+KAN-43 has moved to `In Review` after its application and PostgreSQL gates
+passed. It must not move to `Done` while ADR 0003 and the retention, provider,
+and operations decisions listed below remain unapproved.
 
 ## Idempotency contract v1
 
@@ -102,9 +102,13 @@ ledger command identities or results.
 
 ## Local verification
 
-The final handoff must run repository formatting, API lint/typecheck/build,
-unit and API end-to-end tests, and the marker-verified local PostgreSQL
-integration suite. Focused checks must cover identical sequential and concurrent
-replay, changed-input conflict, failure rollback at each composition boundary,
+The review handoff passed repository formatting, API lint/typecheck/build, 43
+unit suites with 439 tests, and 3 API end-to-end suites with 25 tests. The local
+PostgreSQL checks passed all 18 immutable-ledger, lifecycle, and idempotency
+integration tests, all 8 migration-runner tests, and the rollback,
+custom-principal, and live-infrastructure suites.
+
+Focused coverage includes identical sequential and concurrent replay,
+changed-input conflict, failure rollback across the composition boundary,
 exactly one outbox event per committed journal, generic outbox compatibility,
 provider identity uniqueness, verifier drift, and clean empty rollback.
