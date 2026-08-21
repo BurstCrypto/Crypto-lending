@@ -4,6 +4,11 @@ import type { QueryResultRow } from 'pg';
 import { PostgresService } from '../../infrastructure/database/postgres.service';
 import type { LedgerRepository } from '../application/ledger.repository.port';
 import {
+  revealLedgerCapability,
+  type LedgerPostingCapability,
+  type LedgerReversalCapability,
+} from '../application/ledger-capability-resolver.port';
+import {
   normalizePostLedgerJournalCommand,
   normalizeReverseLedgerJournalCommand,
   parseLedgerJournalId,
@@ -42,10 +47,7 @@ function serializeProjectedPostings(postings: readonly LedgerPosting[]): string 
   return serialized;
 }
 
-function returnedJournalId(
-  rows: readonly JournalIdRow[],
-  expected: LedgerJournalId,
-): LedgerJournalId {
+function returnedJournalId(rows: readonly JournalIdRow[]): LedgerJournalId {
   if (!Array.isArray(rows) || rows.length !== 1) {
     throw new LedgerPersistenceError();
   }
@@ -69,38 +71,36 @@ function returnedJournalId(
   ) {
     throw new LedgerPersistenceError();
   }
-  const journalId = parseLedgerJournalId(journalIdDescriptor.value);
-  if (journalId !== expected) {
-    throw new LedgerPersistenceError();
-  }
-  return journalId;
+  return parseLedgerJournalId(journalIdDescriptor.value);
 }
 
 @Injectable()
 export class PostgresLedgerRepository implements LedgerRepository {
   constructor(private readonly postgres: PostgresService) {}
 
-  async postJournal(command: PostLedgerJournalCommand): Promise<LedgerJournalId> {
+  async postJournal(
+    command: PostLedgerJournalCommand,
+    capability: LedgerPostingCapability,
+  ): Promise<LedgerJournalId> {
     try {
       const normalized = normalizePostLedgerJournalCommand(command);
+      const capabilityValue = revealLedgerCapability(capability, 'POST');
       const serializedPostings = serializeProjectedPostings(normalized.postings);
       const result = await this.postgres.query<JournalIdRow>(
         `SELECT public.post_ledger_journal(
-           $1::uuid,
+           $1::text,
            $2::uuid,
            $3::uuid,
            $4::uuid,
-           $5::uuid,
-           $6::text,
+           $5::text,
+           $6::timestamptz,
            $7::timestamptz,
-           $8::timestamptz,
-           $9::text,
-           $10::uuid,
-           $11::text
+           $8::text,
+           $9::uuid,
+           $10::text
          ) AS journal_id`,
         [
-          normalized.actorAccountId,
-          normalized.journalId,
+          capabilityValue,
           normalized.bookId,
           normalized.transactionId,
           normalized.legId,
@@ -112,38 +112,38 @@ export class PostgresLedgerRepository implements LedgerRepository {
           serializedPostings,
         ],
       );
-      return returnedJournalId(result.rows, normalized.journalId);
+      return returnedJournalId(result.rows);
     } catch {
       throw new LedgerPersistenceError();
     }
   }
 
-  async reverseJournal(command: ReverseLedgerJournalCommand): Promise<LedgerJournalId> {
+  async reverseJournal(
+    command: ReverseLedgerJournalCommand,
+    capability: LedgerReversalCapability,
+  ): Promise<LedgerJournalId> {
     try {
       const normalized = normalizeReverseLedgerJournalCommand(command);
+      const capabilityValue = revealLedgerCapability(capability, 'REVERSE');
       const result = await this.postgres.query<JournalIdRow>(
         `SELECT public.reverse_ledger_journal(
-           $1::uuid,
+           $1::text,
            $2::uuid,
-           $3::uuid,
-           $4::text,
-           $5::text,
-           $6::timestamptz,
-           $7::timestamptz,
-           $8::uuid
+           $3::text,
+           $4::timestamptz,
+           $5::timestamptz,
+           $6::uuid
          ) AS journal_id`,
         [
-          normalized.actorAccountId,
-          normalized.reversalJournalId,
+          capabilityValue,
           normalized.originalJournalId,
           normalized.reason,
-          normalized.approvalReference,
           normalized.effectiveAt,
           normalized.observedAt,
           normalized.correlationId,
         ],
       );
-      return returnedJournalId(result.rows, normalized.reversalJournalId);
+      return returnedJournalId(result.rows);
     } catch {
       throw new LedgerPersistenceError();
     }

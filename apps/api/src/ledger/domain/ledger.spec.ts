@@ -26,7 +26,6 @@ const ids = {
   accountD: '00000000-0000-4000-8000-000000000009',
   journal: '00000000-0000-4000-8000-00000000000a',
   correlation: '00000000-0000-4000-8000-00000000000b',
-  approval: '00000000-0000-4000-8000-00000000000c',
 } as const;
 
 function postInput(overrides: Record<string, unknown> = {}): Record<string, unknown> {
@@ -60,7 +59,6 @@ function reversalInput(overrides: Record<string, unknown> = {}): Record<string, 
   return {
     originalJournalId: ids.journal,
     reason: 'RECOGNITION_INVALIDATED',
-    approvalReference: ids.approval,
     effectiveAt: new Date('2026-08-21T12:01:00.000Z'),
     observedAt: new Date('2026-08-21T12:01:01.000Z'),
     ...overrides,
@@ -411,7 +409,6 @@ describe('ledger domain', () => {
     expect(normalizeReverseLedgerJournalInput(reversalInput())).toEqual({
       originalJournalId: ids.journal,
       reason: 'RECOGNITION_INVALIDATED',
-      approvalReference: ids.approval,
       effectiveAt: '2026-08-21T12:01:00.000Z',
       observedAt: '2026-08-21T12:01:01.000Z',
     });
@@ -420,17 +417,13 @@ describe('ledger domain', () => {
     );
   });
 
-  it('rejects malformed reversal approval evidence and timestamp ordering', () => {
-    for (const approvalReference of [
-      '',
-      'approval:KAN-41/reversal-1',
-      '00000000-0000-7000-8000-00000000000c',
-      ids.approval.toUpperCase(),
-    ]) {
-      expect(() =>
-        normalizeReverseLedgerJournalInput(reversalInput({ approvalReference })),
-      ).toThrow(new LedgerValidationError('INVALID_APPROVAL_REFERENCE'));
-    }
+  it('rejects caller-supplied reversal approval data and timestamp ordering', () => {
+    expect(() =>
+      normalizeReverseLedgerJournalInput({
+        ...reversalInput(),
+        approvalReference: '00000000-0000-4000-8000-00000000000c',
+      }),
+    ).toThrow(new LedgerValidationError('INVALID_LEDGER_JOURNAL'));
     expect(() =>
       normalizeReverseLedgerJournalInput(
         reversalInput({

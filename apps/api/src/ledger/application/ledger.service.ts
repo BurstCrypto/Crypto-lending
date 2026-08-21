@@ -1,5 +1,3 @@
-import { randomUUID } from 'node:crypto';
-
 import { Inject, Injectable } from '@nestjs/common';
 
 import { loggingContext } from '../../infrastructure/logging';
@@ -10,7 +8,6 @@ import {
   normalizeReverseLedgerJournalInput,
   parseLedgerActorAccountId,
   parseLedgerCorrelationId,
-  parseLedgerJournalId,
   type LedgerActorAccountId,
   type LedgerCorrelationId,
   type LedgerJournalId,
@@ -18,6 +15,10 @@ import {
   type ReverseLedgerJournalInput,
 } from '../domain/ledger';
 import { LEDGER_ACTOR_RESOLVER, type LedgerActorResolver } from './ledger-actor-resolver.port';
+import {
+  LEDGER_CAPABILITY_RESOLVER,
+  type LedgerCapabilityResolver,
+} from './ledger-capability-resolver.port';
 import { LEDGER_REPOSITORY, type LedgerRepository } from './ledger.repository.port';
 
 export type LedgerCommandContextCode = 'LEDGER_COMMAND_CONTEXT_REQUIRED';
@@ -58,29 +59,56 @@ export class LedgerService {
   constructor(
     @Inject(LEDGER_REPOSITORY) private readonly repository: LedgerRepository,
     @Inject(LEDGER_ACTOR_RESOLVER) private readonly actorResolver: LedgerActorResolver,
+    @Inject(LEDGER_CAPABILITY_RESOLVER)
+    private readonly capabilityResolver: LedgerCapabilityResolver,
   ) {}
 
   async postJournal(input: PostLedgerJournalInput): Promise<LedgerJournalId> {
     const journal = normalizePostLedgerJournalInput(input);
     const context = await resolveLedgerContext(this.actorResolver);
-    const journalId = parseLedgerJournalId(randomUUID());
+    let capability;
+    try {
+      capability = await this.capabilityResolver.resolvePosting(
+        Object.freeze({
+          actorAccountId: context.actorAccountId,
+          bookId: journal.bookId,
+          transactionId: journal.transactionId,
+          legId: journal.legId,
+          economicEventType: journal.economicEventType,
+          reason: journal.reason,
+        }),
+      );
+      if (!capability) throw new LedgerCommandContextError();
+    } catch {
+      throw new LedgerCommandContextError();
+    }
     const command = normalizePostLedgerJournalCommand({
-      ...context,
-      journalId,
+      correlationId: context.correlationId,
       ...journal,
     });
-    return this.repository.postJournal(command);
+    return this.repository.postJournal(command, capability);
   }
 
   async reverseJournal(input: ReverseLedgerJournalInput): Promise<LedgerJournalId> {
     const reversal = normalizeReverseLedgerJournalInput(input);
     const context = await resolveLedgerContext(this.actorResolver);
-    const reversalJournalId = parseLedgerJournalId(randomUUID());
+    let capability;
+    try {
+      capability = await this.capabilityResolver.resolveReversal(
+        Object.freeze({
+          actorAccountId: context.actorAccountId,
+          originalJournalId: reversal.originalJournalId,
+          reason: reversal.reason,
+        }),
+      );
+      if (!capability) throw new LedgerCommandContextError();
+    } catch {
+      throw new LedgerCommandContextError();
+    }
     const command = normalizeReverseLedgerJournalCommand({
-      ...context,
-      reversalJournalId,
+      correlationId: context.correlationId,
       ...reversal,
     });
-    return this.repository.reverseJournal(command);
+    return this.repository.reverseJournal(command, capability);
   }
 }

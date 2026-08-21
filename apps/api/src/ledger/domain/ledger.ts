@@ -34,7 +34,6 @@ declare const ledgerJournalIdBrand: unique symbol;
 declare const ledgerCorrelationIdBrand: unique symbol;
 declare const atomicAmountBrand: unique symbol;
 declare const ledgerTimestampBrand: unique symbol;
-declare const ledgerApprovalReferenceIdBrand: unique symbol;
 declare const ledgerActorAccountIdBrand: unique symbol;
 
 export type LedgerBookId = string & { readonly [ledgerBookIdBrand]: 'LedgerBookId' };
@@ -55,9 +54,6 @@ export type PostLedgerReasonCode = (typeof POST_LEDGER_REASON_CODES)[number];
 export type ReversalLedgerReasonCode = (typeof REVERSAL_LEDGER_REASON_CODES)[number];
 export type AtomicAmount = string & { readonly [atomicAmountBrand]: 'AtomicAmount' };
 export type LedgerTimestamp = string & { readonly [ledgerTimestampBrand]: 'LedgerTimestamp' };
-export type LedgerApprovalReferenceId = string & {
-  readonly [ledgerApprovalReferenceIdBrand]: 'LedgerApprovalReferenceId';
-};
 export type LedgerActorAccountId = string & {
   readonly [ledgerActorAccountIdBrand]: 'LedgerActorAccountId';
 };
@@ -68,7 +64,6 @@ export type LedgerValidationCode =
   | 'INVALID_ATOMIC_AMOUNT'
   | 'INVALID_ECONOMIC_EVENT_TYPE'
   | 'INVALID_REASON'
-  | 'INVALID_APPROVAL_REFERENCE'
   | 'INVALID_LEDGER_TIMESTAMP'
   | 'INVALID_LEDGER_POSTING'
   | 'INVALID_LEDGER_JOURNAL'
@@ -118,7 +113,6 @@ export interface ValidatedPostLedgerJournal {
 export interface ReverseLedgerJournalInput {
   readonly originalJournalId: string;
   readonly reason: string;
-  readonly approvalReference: string;
   readonly effectiveAt: Date;
   readonly observedAt: Date;
 }
@@ -126,20 +120,15 @@ export interface ReverseLedgerJournalInput {
 export interface ValidatedReverseLedgerJournal {
   readonly originalJournalId: LedgerJournalId;
   readonly reason: ReversalLedgerReasonCode;
-  readonly approvalReference: LedgerApprovalReferenceId;
   readonly effectiveAt: LedgerTimestamp;
   readonly observedAt: LedgerTimestamp;
 }
 
 export interface PostLedgerJournalCommand extends ValidatedPostLedgerJournal {
-  readonly actorAccountId: LedgerActorAccountId;
-  readonly journalId: LedgerJournalId;
   readonly correlationId: LedgerCorrelationId;
 }
 
 export interface ReverseLedgerJournalCommand extends ValidatedReverseLedgerJournal {
-  readonly actorAccountId: LedgerActorAccountId;
-  readonly reversalJournalId: LedgerJournalId;
   readonly correlationId: LedgerCorrelationId;
 }
 
@@ -306,14 +295,6 @@ function parseReversalLedgerReason(value: unknown): ReversalLedgerReasonCode {
   return value as ReversalLedgerReasonCode;
 }
 
-export function parseApprovalReference(value: unknown): LedgerApprovalReferenceId {
-  try {
-    return parseUuid<LedgerApprovalReferenceId>(value);
-  } catch {
-    return validationError('INVALID_APPROVAL_REFERENCE');
-  }
-}
-
 function parseLedgerTimestamp(value: unknown): LedgerTimestamp {
   try {
     if (!(value instanceof Date) || Object.getPrototypeOf(value) !== Date.prototype) {
@@ -417,7 +398,7 @@ export function normalizePostLedgerJournalInput(value: unknown): ValidatedPostLe
 export function normalizeReverseLedgerJournalInput(value: unknown): ValidatedReverseLedgerJournal {
   const record = ownDataRecord(
     value,
-    ['originalJournalId', 'reason', 'approvalReference', 'effectiveAt', 'observedAt'],
+    ['originalJournalId', 'reason', 'effectiveAt', 'observedAt'],
     'INVALID_LEDGER_JOURNAL',
   );
   const effectiveAt = parseLedgerTimestamp(record.effectiveAt);
@@ -428,7 +409,6 @@ export function normalizeReverseLedgerJournalInput(value: unknown): ValidatedRev
   return Object.freeze({
     originalJournalId: parseLedgerJournalId(record.originalJournalId),
     reason: parseReversalLedgerReason(record.reason),
-    approvalReference: parseApprovalReference(record.approvalReference),
     effectiveAt,
     observedAt,
   });
@@ -438,8 +418,6 @@ export function normalizePostLedgerJournalCommand(value: unknown): PostLedgerJou
   const record = ownDataRecord(
     value,
     [
-      'actorAccountId',
-      'journalId',
       'correlationId',
       'bookId',
       'transactionId',
@@ -463,8 +441,6 @@ export function normalizePostLedgerJournalCommand(value: unknown): PostLedgerJou
     postings: record.postings,
   });
   return Object.freeze({
-    actorAccountId: parseLedgerActorAccountId(record.actorAccountId),
-    journalId: parseLedgerJournalId(record.journalId),
     correlationId: parseLedgerCorrelationId(record.correlationId),
     ...journal,
   });
@@ -473,32 +449,16 @@ export function normalizePostLedgerJournalCommand(value: unknown): PostLedgerJou
 export function normalizeReverseLedgerJournalCommand(value: unknown): ReverseLedgerJournalCommand {
   const record = ownDataRecord(
     value,
-    [
-      'actorAccountId',
-      'reversalJournalId',
-      'correlationId',
-      'originalJournalId',
-      'reason',
-      'approvalReference',
-      'effectiveAt',
-      'observedAt',
-    ],
+    ['correlationId', 'originalJournalId', 'reason', 'effectiveAt', 'observedAt'],
     'INVALID_LEDGER_JOURNAL',
   );
   const reversal = normalizeReverseLedgerJournalInput({
     originalJournalId: record.originalJournalId,
     reason: record.reason,
-    approvalReference: record.approvalReference,
     effectiveAt: timestampInput(record.effectiveAt),
     observedAt: timestampInput(record.observedAt),
   });
-  const reversalJournalId = parseLedgerJournalId(record.reversalJournalId);
-  if (reversalJournalId === reversal.originalJournalId) {
-    return validationError('INVALID_LEDGER_JOURNAL');
-  }
   return Object.freeze({
-    actorAccountId: parseLedgerActorAccountId(record.actorAccountId),
-    reversalJournalId,
     correlationId: parseLedgerCorrelationId(record.correlationId),
     ...reversal,
   });
