@@ -26,14 +26,30 @@ class InMemoryMigrationDatabase {
   jobOutboxExists = false;
   jobOutboxLastErrorConstraintExists = false;
   migrationTableExists = false;
+  oldVerifierValid = true;
+  newVerifierValid = true;
+  thirdVerifierValid = true;
   released = false;
+  private transactionAppliedSnapshot: Map<string, StoredMigration> | undefined;
 
   readonly client = {
     query: async (text: string, values: readonly unknown[] = []): Promise<QueryResult> => {
       const normalized = text.replace(/\s+/g, ' ').trim();
       this.queries.push(normalized);
 
-      if (normalized.includes('CREATE TABLE IF NOT EXISTS schema_migrations')) {
+      if (normalized === 'BEGIN') {
+        this.transactionAppliedSnapshot = new Map(this.applied);
+      } else if (normalized === 'COMMIT') {
+        this.transactionAppliedSnapshot = undefined;
+      } else if (normalized === 'ROLLBACK') {
+        if (this.transactionAppliedSnapshot) {
+          this.applied.clear();
+          for (const [id, migration] of this.transactionAppliedSnapshot) {
+            this.applied.set(id, migration);
+          }
+        }
+        this.transactionAppliedSnapshot = undefined;
+      } else if (normalized.includes('CREATE TABLE IF NOT EXISTS schema_migrations')) {
         this.migrationTableExists = true;
       } else if (normalized.startsWith("SELECT to_regclass('schema_migrations')")) {
         return result([
@@ -63,6 +79,12 @@ class InMemoryMigrationDatabase {
       } else if (normalized.startsWith('CREATE INDEX CONCURRENTLY')) {
         const indexName = normalized.split(' ')[3];
         if (indexName) this.indexes.set(indexName, normalized);
+      } else if (normalized === "SELECT 'old-verifier' AS verifier") {
+        return result([{ valid: this.oldVerifierValid }]);
+      } else if (normalized === "SELECT 'new-verifier' AS verifier") {
+        return result([{ valid: this.newVerifierValid }]);
+      } else if (normalized === "SELECT 'third-verifier' AS verifier") {
+        return result([{ valid: this.thirdVerifierValid }]);
       } else if (
         normalized.startsWith('SELECT EXISTS') &&
         normalized.includes('pg_catalog.pg_index')
@@ -209,5 +231,196 @@ describe('MigrationRunner', () => {
     await expect(new MigrationRunner(database.pool, mutated).up()).rejects.toThrow(
       'Applied migration 0003 has changed',
     );
+  });
+
+  it('uses an applied checksum-valid cumulative verifier instead of its superseded verifier', async () => {
+    const database = new InMemoryMigrationDatabase();
+    const migrations = [
+      {
+        id: '1000',
+        description: 'old exact allowlist',
+        upSql: 'SELECT 1000',
+        downSql: 'SELECT -1000',
+        verifySql: "SELECT 'old-verifier' AS verifier",
+      },
+      {
+        id: '1001',
+        description: 'cumulative exact allowlist',
+        upSql: 'SELECT 1001',
+        downSql: 'SELECT -1001',
+        verifySql: "SELECT 'new-verifier' AS verifier",
+        supersedesVerificationOf: ['1000'],
+      },
+    ] as const;
+    const runner = new MigrationRunner(database.pool, migrations);
+
+    const freshInvalidDatabase = new InMemoryMigrationDatabase();
+    freshInvalidDatabase.oldVerifierValid = false;
+    await expect(new MigrationRunner(freshInvalidDatabase.pool, migrations).up()).rejects.toThrow(
+      'Database migration 1000 schema verification failed',
+    );
+    expect(freshInvalidDatabase.applied.has('1001')).toBe(false);
+
+    await expect(runner.up()).resolves.toEqual(['1000', '1001']);
+    database.oldVerifierValid = false;
+    await expect(runner.assertUpToDate()).resolves.toBeUndefined();
+    await expect(runner.status()).resolves.toEqual([
+      { id: '1000', description: 'old exact allowlist', applied: true },
+      { id: '1001', description: 'cumulative exact allowlist', applied: true },
+    ]);
+
+    database.newVerifierValid = false;
+    await expect(runner.assertUpToDate()).rejects.toThrow(
+      'Database migration 1001 schema verification failed',
+    );
+
+    database.newVerifierValid = true;
+    await expect(runner.down(1)).rejects.toThrow(
+      'Database migration 1000 schema verification failed',
+    );
+    expect(database.applied.has('1001')).toBe(true);
+    database.oldVerifierValid = true;
+    await expect(runner.down(1)).resolves.toEqual(['1001']);
+    expect(database.applied.has('1001')).toBe(false);
+  });
+
+  it('checks supersession metadata in the immutable checksum', async () => {
+    const database = new InMemoryMigrationDatabase();
+    const migrations = [
+      {
+        id: '1000',
+        description: 'first verifier',
+        upSql: 'SELECT 1000',
+        downSql: 'SELECT -1000',
+        verifySql: "SELECT 'old-verifier' AS verifier",
+      },
+      {
+        id: '1001',
+        description: 'second verifier',
+        upSql: 'SELECT 1001',
+        downSql: 'SELECT -1001',
+        verifySql: "SELECT 'old-verifier' AS verifier",
+      },
+      {
+        id: '1002',
+        description: 'cumulative verifier',
+        upSql: 'SELECT 1002',
+        downSql: 'SELECT -1002',
+        verifySql: "SELECT 'new-verifier' AS verifier",
+        supersedesVerificationOf: ['1000'],
+      },
+    ] as const;
+    await new MigrationRunner(database.pool, migrations).up();
+    const mutated = migrations.map((migration) =>
+      migration.id === '1002'
+        ? { ...migration, supersedesVerificationOf: ['1001'] as const }
+        : migration,
+    );
+
+    await expect(new MigrationRunner(database.pool, mutated).up()).rejects.toThrow(
+      'Applied migration 1002 has changed',
+    );
+    database.oldVerifierValid = false;
+    await expect(new MigrationRunner(database.pool, mutated).up()).rejects.toThrow(
+      'Database migration 1000 schema verification failed',
+    );
+  });
+
+  it('rejects invalid or ambiguous verifier supersession declarations', () => {
+    const database = new InMemoryMigrationDatabase();
+    const base = {
+      description: 'synthetic verifier',
+      upSql: 'SELECT 1',
+      downSql: 'SELECT -1',
+      verifySql: "SELECT 'old-verifier' AS verifier",
+    };
+
+    expect(
+      () =>
+        new MigrationRunner(database.pool, [
+          { id: '1000', ...base },
+          { id: '1001', ...base, supersedesVerificationOf: ['1002'] },
+          { id: '1002', ...base },
+        ]),
+    ).toThrow('can only supersede an earlier configured verifier');
+    expect(
+      () =>
+        new MigrationRunner(database.pool, [
+          { id: '1000', ...base },
+          { id: '1001', ...base, supersedesVerificationOf: [] },
+        ]),
+    ).toThrow('must have verification SQL to supersede a verifier');
+    expect(
+      () =>
+        new MigrationRunner(database.pool, [
+          { id: '1000', ...base },
+          { id: '1001', ...base, supersedesVerificationOf: ['1000'] },
+          { id: '1002', ...base, supersedesVerificationOf: ['1000'] },
+        ]),
+    ).toThrow('is superseded more than once');
+    expect(
+      () =>
+        new MigrationRunner(database.pool, [
+          { id: '1000', description: 'no verifier', upSql: 'SELECT 1', downSql: 'SELECT -1' },
+          { id: '1001', ...base, supersedesVerificationOf: ['1000'] },
+        ]),
+    ).toThrow('without verification SQL');
+    expect(
+      () =>
+        new MigrationRunner(database.pool, [
+          { id: '1000', ...base },
+          {
+            id: '1001',
+            ...base,
+            transactional: false,
+            supersedesVerificationOf: ['1000'],
+          },
+        ]),
+    ).toThrow('must be transactional to supersede a verifier');
+  });
+
+  it('removes rolled-back superseders from multi-step verifier selection', async () => {
+    const database = new InMemoryMigrationDatabase();
+    const migrations = [
+      {
+        id: '1000',
+        description: 'base verifier',
+        upSql: 'SELECT 1000',
+        downSql: 'SELECT -1000',
+        verifySql: "SELECT 'old-verifier' AS verifier",
+      },
+      {
+        id: '1001',
+        description: 'middle cumulative verifier',
+        upSql: 'SELECT 1001',
+        downSql: 'SELECT -1001',
+        verifySql: "SELECT 'new-verifier' AS verifier",
+        supersedesVerificationOf: ['1000'],
+      },
+      {
+        id: '1002',
+        description: 'latest cumulative verifier',
+        upSql: 'SELECT 1002',
+        downSql: 'SELECT -1002',
+        verifySql: "SELECT 'third-verifier' AS verifier",
+        supersedesVerificationOf: ['1001'],
+      },
+    ] as const;
+    const runner = new MigrationRunner(database.pool, migrations);
+    await expect(runner.up()).resolves.toEqual(['1000', '1001', '1002']);
+
+    await expect(runner.down(2)).resolves.toEqual(['1002', '1001']);
+    expect(database.applied.has('1002')).toBe(false);
+    expect(database.applied.has('1001')).toBe(false);
+    expect(database.applied.has('1000')).toBe(true);
+    expect(
+      database.queries.filter((query) => query === "SELECT 'third-verifier' AS verifier"),
+    ).toHaveLength(1);
+    expect(
+      database.queries.filter((query) => query === "SELECT 'new-verifier' AS verifier"),
+    ).toHaveLength(2);
+    expect(
+      database.queries.filter((query) => query === "SELECT 'old-verifier' AS verifier"),
+    ).toHaveLength(2);
   });
 });

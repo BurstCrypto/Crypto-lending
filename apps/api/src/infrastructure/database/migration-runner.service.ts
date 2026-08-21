@@ -42,6 +42,11 @@ function checksum(migration: DatabaseMigration): string {
   if (migration.verifySql !== undefined) {
     hash.update('\0verify\0').update(migration.verifySql);
   }
+  if (migration.supersedesVerificationOf !== undefined) {
+    hash
+      .update('\0supersedes-verification-of\0')
+      .update(migration.supersedesVerificationOf.join('\0'));
+  }
   return hash.digest('hex');
 }
 
@@ -64,6 +69,44 @@ export class MigrationRunner {
       }
       identifiers.add(migration.id);
     }
+
+    const migrationIndexById = new Map(
+      migrations.map((migration, migrationIndex) => [migration.id, migrationIndex]),
+    );
+    const supersededIdentifiers = new Set<string>();
+    for (const [migrationIndex, migration] of migrations.entries()) {
+      const superseded = migration.supersedesVerificationOf;
+      if (superseded === undefined) continue;
+      if (migration.transactional === false) {
+        throw new Error(
+          `Database migration ${migration.id} must be transactional to supersede a verifier`,
+        );
+      }
+      if (superseded.length === 0 || !migration.verifySql?.trim()) {
+        throw new Error(
+          `Database migration ${migration.id} must have verification SQL to supersede a verifier`,
+        );
+      }
+      for (const supersededId of superseded) {
+        const supersededIndex = migrationIndexById.get(supersededId);
+        if (supersededIndex === undefined || supersededIndex >= migrationIndex) {
+          throw new Error(
+            `Database migration ${migration.id} can only supersede an earlier configured verifier`,
+          );
+        }
+        if (!migrations[supersededIndex]?.verifySql?.trim()) {
+          throw new Error(
+            `Database migration ${migration.id} cannot supersede migration ${supersededId} without verification SQL`,
+          );
+        }
+        if (supersededIdentifiers.has(supersededId)) {
+          throw new Error(
+            `Database migration verifier ${supersededId} is superseded more than once`,
+          );
+        }
+        supersededIdentifiers.add(supersededId);
+      }
+    }
   }
 
   async up(): Promise<string[]> {
@@ -71,6 +114,7 @@ export class MigrationRunner {
       await this.ensureMigrationTable(client);
       const applied = await this.appliedMigrations(client);
       const appliedById = new Map(applied.map((migration) => [migration.id, migration]));
+      const supersededVerificationIds = this.supersededVerificationIds(appliedById);
       const completed: string[] = [];
 
       for (const migration of this.migrations) {
@@ -82,7 +126,9 @@ export class MigrationRunner {
               `Applied migration ${migration.id} has changed; create a new migration instead`,
             );
           }
-          await this.assertMigrationVerified(client, migration);
+          if (!supersededVerificationIds.has(migration.id)) {
+            await this.assertMigrationVerified(client, migration);
+          }
           continue;
         }
 
@@ -109,6 +155,9 @@ export class MigrationRunner {
     return this.withMigrationLock(async (client) => {
       await this.ensureMigrationTable(client);
       const applied = await this.appliedMigrations(client, true);
+      const remainingApplied = new Map(
+        applied.map((appliedMigration) => [appliedMigration.id, appliedMigration]),
+      );
       const byId = new Map(this.migrations.map((migration) => [migration.id, migration]));
       const rolledBack: string[] = [];
 
@@ -124,7 +173,21 @@ export class MigrationRunner {
         await this.runMigration(client, migration, async () => {
           await this.executeSql(client, migration.downSql);
           await client.query('DELETE FROM schema_migrations WHERE id = $1', [migration.id]);
+          if (migration.supersedesVerificationOf !== undefined) {
+            const appliedAfterRollback = new Map(remainingApplied);
+            appliedAfterRollback.delete(migration.id);
+            const stillSuperseded = this.supersededVerificationIds(appliedAfterRollback);
+            for (const remainingMigration of this.migrations) {
+              if (
+                appliedAfterRollback.has(remainingMigration.id) &&
+                !stillSuperseded.has(remainingMigration.id)
+              ) {
+                await this.assertMigrationVerified(client, remainingMigration);
+              }
+            }
+          }
         });
+        remainingApplied.delete(migration.id);
         rolledBack.push(migration.id);
       }
       return rolledBack;
@@ -145,7 +208,10 @@ export class MigrationRunner {
         if (appliedChecksum && appliedChecksum !== checksum(migration)) {
           throw new Error(`Database migration ${migration.id} checksum does not match`);
         }
-        if (appliedChecksum) {
+      }
+      const supersededVerificationIds = this.supersededVerificationIds(applied);
+      for (const migration of this.migrations) {
+        if (applied.has(migration.id) && !supersededVerificationIds.has(migration.id)) {
           await this.assertMigrationVerified(client, migration);
         }
       }
@@ -182,7 +248,12 @@ export class MigrationRunner {
         if (appliedChecksum !== checksum(migration)) {
           throw new Error(`Database migration ${migration.id} checksum does not match`);
         }
-        await this.assertMigrationVerified(client, migration);
+      }
+      const supersededVerificationIds = this.supersededVerificationIds(appliedById);
+      for (const migration of this.migrations) {
+        if (!supersededVerificationIds.has(migration.id)) {
+          await this.assertMigrationVerified(client, migration);
+        }
       }
     } finally {
       client.release();
@@ -266,5 +337,20 @@ export class MigrationRunner {
     if (result.rows.length !== 1 || result.rows[0]?.valid !== true) {
       throw new Error(`Database migration ${migration.id} schema verification failed`);
     }
+  }
+
+  private supersededVerificationIds(
+    appliedById: ReadonlyMap<string, AppliedMigration | string>,
+  ): ReadonlySet<string> {
+    const superseded = new Set<string>();
+    for (const migration of this.migrations) {
+      const applied = appliedById.get(migration.id);
+      const appliedChecksum = typeof applied === 'string' ? applied : applied?.checksum;
+      if (appliedChecksum !== checksum(migration)) continue;
+      for (const supersededId of migration.supersedesVerificationOf ?? []) {
+        superseded.add(supersededId);
+      }
+    }
+    return superseded;
   }
 }
