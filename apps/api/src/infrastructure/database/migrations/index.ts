@@ -8,6 +8,10 @@ import {
   createImmutableLedgerMigrationV0007,
   createImmutableLedgerTestSchemaMigrationV0007,
 } from './0007-create-immutable-ledger.migration';
+import {
+  createLedgerLifecycleMigrationV0008,
+  createLedgerLifecycleTestSchemaMigrationV0008,
+} from './0008-create-ledger-lifecycle.migration';
 import type { DatabaseMigration } from './migration';
 
 /**
@@ -23,6 +27,7 @@ export const DATABASE_TEST_SCHEMA_MIGRATION_LIST: readonly DatabaseMigration[] =
   createAccountsAndProfilesMigration,
   constrainJobOutboxLastErrorMigration,
   createImmutableLedgerTestSchemaMigrationV0007,
+  createLedgerLifecycleTestSchemaMigrationV0008,
 ]);
 
 export const DATABASE_MIGRATION_LIST: readonly DatabaseMigration[] = Object.freeze([
@@ -33,6 +38,7 @@ export const DATABASE_MIGRATION_LIST: readonly DatabaseMigration[] = Object.free
   enforceDatabasePrincipalBoundariesMigration,
   constrainJobOutboxLastErrorMigration,
   createImmutableLedgerMigrationV0007,
+  createLedgerLifecycleMigrationV0008,
 ]);
 
 export type { DatabaseMigration } from './migration';
@@ -46,3 +52,8 @@ export {
   createImmutableLedgerMigrationV0007,
   createImmutableLedgerTestSchemaMigrationV0007,
 } from './0007-create-immutable-ledger.migration';
+export {
+  createLedgerLifecycleMigration,
+  createLedgerLifecycleMigrationV0008,
+  createLedgerLifecycleTestSchemaMigrationV0008,
+} from './0008-create-ledger-lifecycle.migration';

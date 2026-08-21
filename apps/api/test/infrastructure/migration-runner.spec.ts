@@ -188,6 +188,7 @@ describe('MigrationRunner', () => {
       '0005',
       '0006',
       '0007',
+      '0008',
     ]);
     expect(database.jobOutboxExists).toBe(true);
     expect(database.applied.has('0001')).toBe(true);
@@ -197,17 +198,19 @@ describe('MigrationRunner', () => {
     expect(database.applied.has('0005')).toBe(true);
     expect(database.applied.has('0006')).toBe(true);
     expect(database.applied.has('0007')).toBe(true);
+    expect(database.applied.has('0008')).toBe(true);
     expect(database.accountSchemaExists).toBe(true);
     expect(database.ledgerSchemaExists).toBe(true);
     expect(database.jobOutboxLastErrorConstraintExists).toBe(true);
-    expect(database.queries.filter((query) => query === 'BEGIN')).toHaveLength(5);
+    expect(database.queries.filter((query) => query === 'BEGIN')).toHaveLength(6);
     expect(
       database.queries.filter((query) => query.startsWith('CREATE INDEX CONCURRENTLY')),
     ).toHaveLength(2);
     await expect(runner.assertUpToDate()).resolves.toBeUndefined();
 
     await expect(runner.up()).resolves.toEqual([]);
-    await expect(runner.down(7)).resolves.toEqual([
+    await expect(runner.down(8)).resolves.toEqual([
+      '0008',
       '0007',
       '0006',
       '0005',
@@ -240,7 +243,7 @@ describe('MigrationRunner', () => {
     );
     await expect(runner.up()).rejects.toThrow('Database migration 0003 schema verification failed');
 
-    await expect(runner.down(5)).rejects.toThrow(
+    await expect(runner.down(6)).rejects.toThrow(
       'Database migration 0003 schema verification failed',
     );
     expect(database.ledgerSchemaExists).toBe(true);
@@ -248,8 +251,8 @@ describe('MigrationRunner', () => {
       'job_outbox_failed_retention_idx',
       "CREATE INDEX CONCURRENTLY job_outbox_failed_retention_idx ON job_outbox (failed_at, id) WHERE status = 'failed'",
     );
-    await expect(runner.down(5)).resolves.toEqual(['0007', '0006', '0005', '0004', '0003']);
-    await expect(runner.up()).resolves.toEqual(['0003', '0004', '0005', '0006', '0007']);
+    await expect(runner.down(6)).resolves.toEqual(['0008', '0007', '0006', '0005', '0004', '0003']);
+    await expect(runner.up()).resolves.toEqual(['0003', '0004', '0005', '0006', '0007', '0008']);
     expect(database.indexes.has('job_outbox_failed_retention_idx')).toBe(true);
     await expect(runner.assertUpToDate()).resolves.toBeUndefined();
   });
