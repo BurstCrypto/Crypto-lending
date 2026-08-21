@@ -2,11 +2,7 @@ import { Buffer } from 'node:buffer';
 
 import type { LoggerService } from '@nestjs/common';
 
-import {
-  isSafeLogReference,
-  loggingContext,
-  type LoggingContext,
-} from './logging-context';
+import { isSafeLogReference, loggingContext, type LoggingContext } from './logging-context';
 
 export const LOG_EVENTS = Object.freeze({
   applicationStarted: 'application.started',
@@ -17,6 +13,7 @@ export const LOG_EVENTS = Object.freeze({
   frameworkError: 'framework.error',
   httpRequestCompleted: 'http.request.completed',
   httpRequestAborted: 'http.request.aborted',
+  httpAnonymousRejectionsSuppressed: 'http.anonymous_rejections.suppressed',
   outboxDispatchCompleted: 'outbox.dispatch.completed',
   outboxDispatchFailed: 'outbox.dispatch.failed',
   outboxCleanupCompleted: 'outbox.cleanup.completed',
@@ -35,6 +32,7 @@ export const LOG_EVENTS = Object.freeze({
   migrationFailed: 'migration.failed',
   openApiGenerated: 'openapi.generated',
   openApiFailed: 'openapi.failed',
+  processFatal: 'process.fatal',
 } as const);
 
 export type StructuredLogEvent = (typeof LOG_EVENTS)[keyof typeof LOG_EVENTS];
@@ -62,6 +60,10 @@ export interface SafeLogFields {
   readonly failed?: number;
   readonly leaseLost?: number;
   readonly deleted?: number;
+  readonly migrationCommand?: 'up' | 'down' | 'status';
+  readonly migrationId?: string;
+  readonly migrationState?: 'up' | 'down';
+  readonly changed?: number;
 }
 
 export interface StructuredLogRecord extends SafeLogFields {
@@ -88,12 +90,14 @@ export interface StructuredLoggerOptions {
   readonly context?: LoggingContext;
   readonly environment?: NodeJS.ProcessEnv;
   readonly sink?: StructuredLogSink;
+  readonly workload?: 'api' | 'worker' | 'migration' | 'openapi' | 'unknown';
 }
 
 const MAX_SERIALIZED_LOG_BYTES = 4_096;
 const DATE_TO_ISO_STRING = Date.prototype.toISOString;
 const JSON_STRINGIFY = JSON.stringify;
 const SAFE_JOB_KIND_PATTERN = /^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/u;
+const SAFE_MIGRATION_ID_PATTERN = /^[0-9]{4}$/u;
 const SAFE_ROUTE_PATTERN = /^\/[A-Za-z0-9_./:*-]{0,255}$/u;
 const SAFE_METHODS = new Set([
   'CONNECT',
@@ -145,6 +149,10 @@ const SAFE_FIELD_KEYS = new Set<keyof SafeLogFields>([
   'failed',
   'leaseLost',
   'deleted',
+  'migrationCommand',
+  'migrationId',
+  'migrationState',
+  'changed',
 ]);
 const SAFE_ERROR_CODES = new Set([
   'ABORT_ERR',
@@ -203,6 +211,7 @@ const EVENT_FIELD_KEYS: Readonly<Record<StructuredLogEvent, ReadonlySet<keyof Sa
     'durationMs',
     'outcome',
   ]),
+  [LOG_EVENTS.httpAnonymousRejectionsSuppressed]: new Set(['outcome']),
   [LOG_EVENTS.outboxDispatchCompleted]: new Set([
     'claimed',
     'published',
@@ -262,10 +271,18 @@ const EVENT_FIELD_KEYS: Readonly<Record<StructuredLogEvent, ReadonlySet<keyof Sa
   [LOG_EVENTS.workerStartFailed]: new Set(['errorCode', 'outcome']),
   [LOG_EVENTS.workerStopped]: new Set(['outcome']),
   [LOG_EVENTS.workerHealthFailed]: new Set(['errorCode', 'outcome']),
-  [LOG_EVENTS.migrationCompleted]: new Set(['durationMs', 'outcome']),
+  [LOG_EVENTS.migrationCompleted]: new Set([
+    'durationMs',
+    'outcome',
+    'migrationCommand',
+    'migrationId',
+    'migrationState',
+    'changed',
+  ]),
   [LOG_EVENTS.migrationFailed]: new Set(['errorCode', 'outcome']),
   [LOG_EVENTS.openApiGenerated]: new Set(['durationMs', 'outcome']),
   [LOG_EVENTS.openApiFailed]: new Set(['errorCode', 'outcome']),
+  [LOG_EVENTS.processFatal]: new Set(['errorCode', 'outcome']),
 };
 const SAFE_EVENTS = new Set<StructuredLogEvent>(Object.values(LOG_EVENTS));
 
@@ -364,11 +381,7 @@ function projectFields(event: StructuredLogEvent, fields: SafeLogFields): SafeLo
     projected.errorCode = source.errorCode;
   }
   const jobId = source.jobId;
-  if (
-    permitted.has('jobId') &&
-    isSafeLogReference(jobId) &&
-    jobId.startsWith('job:')
-  ) {
+  if (permitted.has('jobId') && isSafeLogReference(jobId) && jobId.startsWith('job:')) {
     projected.jobId = jobId;
   }
   const messageId = source.messageId;
@@ -397,9 +410,31 @@ function projectFields(event: StructuredLogEvent, fields: SafeLogFields): SafeLo
     ['failed', 10_000],
     ['leaseLost', 10_000],
     ['deleted', 100_000],
+    ['changed', 10_000],
   ] as const) {
     const value = safeInteger(source[name], maximum);
     if (permitted.has(name) && value !== undefined) projected[name] = value;
+  }
+  if (
+    permitted.has('migrationCommand') &&
+    (source.migrationCommand === 'up' ||
+      source.migrationCommand === 'down' ||
+      source.migrationCommand === 'status')
+  ) {
+    projected.migrationCommand = source.migrationCommand;
+  }
+  if (
+    permitted.has('migrationId') &&
+    typeof source.migrationId === 'string' &&
+    SAFE_MIGRATION_ID_PATTERN.test(source.migrationId)
+  ) {
+    projected.migrationId = source.migrationId;
+  }
+  if (
+    permitted.has('migrationState') &&
+    (source.migrationState === 'up' || source.migrationState === 'down')
+  ) {
+    projected.migrationState = source.migrationState;
   }
   return projected;
 }
@@ -436,11 +471,13 @@ export class StructuredLogger implements LoggerService {
   private readonly context: LoggingContext;
   private readonly environment: NodeJS.ProcessEnv;
   private readonly sink: StructuredLogSink;
+  private readonly trustedWorkload: StructuredLoggerOptions['workload'];
 
   constructor(options: StructuredLoggerOptions = {}) {
     this.clock = options.clock ?? (() => new Date());
     this.context = options.context ?? loggingContext;
     this.environment = options.environment ?? process.env;
+    this.trustedWorkload = options.workload;
     this.sink =
       options.sink ??
       (safeRuntimeName(this.environment.NODE_ENV, 'unknown') === 'test'
@@ -458,15 +495,20 @@ export class StructuredLogger implements LoggerService {
       coreRecord.level = level;
       coreRecord.event = event;
       coreRecord.service = 'crypto-lending';
-      coreRecord.workload = safeWorkload(this.environment.APPLICATION_WORKLOAD);
+      coreRecord.workload = safeWorkload(
+        this.trustedWorkload ?? this.environment.APPLICATION_WORKLOAD,
+      );
       coreRecord.environment = safeRuntimeName(
         this.environment.APP_ENV ?? this.environment.NODE_ENV,
         'unknown',
       );
       if (context?.correlationId) coreRecord.correlationId = context.correlationId;
       if (context?.requestId) coreRecord.requestId = context.requestId;
-      const record = Object.assign(Object.create(null), coreRecord, projectFields(event, fields)) as
-        unknown as StructuredLogRecord;
+      const record = Object.assign(
+        Object.create(null),
+        coreRecord,
+        projectFields(event, fields),
+      ) as unknown as StructuredLogRecord;
       if (context?.initiatorActorId) {
         (record as unknown as Record<string, unknown>).initiatorActorId = context.initiatorActorId;
       }

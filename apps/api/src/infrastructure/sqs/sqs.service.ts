@@ -137,7 +137,7 @@ export class SqsService implements OnApplicationShutdown, OutboxTransport {
     const envelope = createJobEnvelope(kind, payload, {
       id: options.id ?? randomUUID(),
       ...(options.version === undefined ? {} : { version: options.version }),
-      ...(options.correlation ? { correlation: options.correlation } : {}),
+      ...(options.correlation === undefined ? {} : { correlation: options.correlation }),
     });
     const serialized = serializeJobMessage(envelope, {});
 

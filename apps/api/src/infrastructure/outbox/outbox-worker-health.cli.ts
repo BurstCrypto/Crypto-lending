@@ -6,7 +6,7 @@ import { NestFactory } from '@nestjs/core';
 
 import { bindExecutableWorkload } from '../config/application-workload';
 import { PostgresModule } from '../database/postgres.module';
-import { LOG_EVENTS, structuredLogger } from '../logging';
+import { installFatalProcessBoundary, LOG_EVENTS, structuredLogger } from '../logging';
 import { SqsModule } from '../sqs/sqs.module';
 import { assertOutboxWorkerHealthy, OutboxWorkerHealthService } from './outbox-worker-health';
 
@@ -15,6 +15,7 @@ class OutboxWorkerHealthApplicationModule {}
 
 async function main(): Promise<void> {
   bindExecutableWorkload(process.env, 'worker');
+  installFatalProcessBoundary(structuredLogger);
   const application = await NestFactory.createApplicationContext(
     OutboxWorkerHealthApplicationModule,
     { logger: false },

@@ -115,10 +115,7 @@ function parseCorrelationContext(value: unknown): JobCorrelationContext {
     if (optional.requestId !== undefined && optional.requestId !== correlationId) {
       throw new Error('Invalid job correlation context');
     }
-    if (
-      correlationId.startsWith('legacy:') &&
-      Object.keys(optional).length > 0
-    ) {
+    if (correlationId.startsWith('legacy:') && Object.keys(optional).length > 0) {
       throw new Error('Invalid job correlation context');
     }
     const parsed = Object.create(null) as {
@@ -333,7 +330,7 @@ export function parseJobEnvelope<Payload = unknown>(value: unknown): JobEnvelope
       version,
       occurredAt,
       correlation:
-        correlationValue === undefined
+        correlationDescriptor === undefined
           ? legacyCorrelationContext(id)
           : parseCorrelationContext(correlationValue),
       payload: payloadDescriptor.value as Payload,

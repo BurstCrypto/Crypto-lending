@@ -222,4 +222,38 @@ describe('StructuredLogger', () => {
       stderr.mockRestore();
     }
   });
+
+  it('resolves late-bound executable workload unless a trusted override is supplied', () => {
+    const environment: NodeJS.ProcessEnv = { NODE_ENV: 'test' };
+    const dynamicLines: string[] = [];
+    const dynamic = new StructuredLogger({
+      environment,
+      sink: (line) => dynamicLines.push(line),
+    });
+    environment.APPLICATION_WORKLOAD = 'api';
+    dynamic.emit(LOG_EVENTS.applicationStarted, 'info', { outcome: 'success' });
+
+    const explicitLines: string[] = [];
+    const explicit = new StructuredLogger({
+      environment: { APPLICATION_WORKLOAD: 'api', NODE_ENV: 'test' },
+      workload: 'migration',
+      sink: (line) => explicitLines.push(line),
+    });
+    explicit.emit(LOG_EVENTS.migrationCompleted, 'info', {
+      migrationCommand: 'status',
+      migrationId: '0005',
+      migrationState: 'up',
+      changed: 5,
+      outcome: 'success',
+    });
+
+    expect(parse(dynamicLines[0] ?? '')).toMatchObject({ workload: 'api' });
+    expect(parse(explicitLines[0] ?? '')).toMatchObject({
+      workload: 'migration',
+      migrationCommand: 'status',
+      migrationId: '0005',
+      migrationState: 'up',
+      changed: 5,
+    });
+  });
 });

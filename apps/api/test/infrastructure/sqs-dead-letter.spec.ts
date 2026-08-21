@@ -9,8 +9,17 @@ import {
   type SQSClient,
 } from '@aws-sdk/client-sqs';
 
-import { createSafeLogReference, loggingContext } from '../../src/infrastructure/logging';
-import { parseJobEnvelope } from '../../src/infrastructure/outbox/job-envelope';
+import {
+  createSafeLogReference,
+  loggingContext,
+  structuredLogger,
+  StructuredLogger,
+  type StructuredLogRecord,
+} from '../../src/infrastructure/logging';
+import {
+  parseJobEnvelope,
+  type JobCorrelationContext,
+} from '../../src/infrastructure/outbox/job-envelope';
 import { SqsJobWorker } from '../../src/infrastructure/sqs/sqs-job.worker';
 import { SqsService } from '../../src/infrastructure/sqs/sqs.service';
 import { testInfrastructureConfig } from './fixtures';
@@ -145,9 +154,19 @@ describe('SQS retry and dead-letter flow', () => {
       transactionId: testUuid(5),
       ledgerEventId: testUuid(6),
     };
+    const payloadCanary = 'private-worker-payload-canary';
+    const lines: string[] = [];
+    const captureLogger = new StructuredLogger({
+      workload: 'worker',
+      environment: { NODE_ENV: 'test' },
+      sink: (line) => lines.push(line),
+    });
+    jest
+      .spyOn(structuredLogger, 'emit')
+      .mockImplementation((event, level, fields) => captureLogger.emit(event, level, fields));
     const sample = await sqs.sendJob(
-      'sample.always-fails',
-      { accountId: 'acct-1' },
+      'account.updated',
+      { privateValue: payloadCanary },
       { correlation },
     );
     const observedContexts: unknown[] = [];
@@ -182,6 +201,8 @@ describe('SQS retry and dead-letter flow', () => {
     await expect(sqs.receive()).resolves.toEqual([]);
     const deadLetters = await sqs.receive(config.sqs.deadLetterQueueUrl);
     expect(deadLetters).toHaveLength(1);
+    const deadLetterMessageId = deadLetters[0]?.messageId;
+    if (!deadLetterMessageId) throw new Error('Expected a dead-letter message ID');
     expect(sqs.parseEnvelope(deadLetters[0]?.body ?? '').id).toBe(sample.id);
     expect(failingHandler).toHaveBeenCalledTimes(3);
     expect(transport.sentRequests[0]?.MessageAttributes?.correlationId).toEqual({
@@ -200,6 +221,51 @@ describe('SQS retry and dead-letter flow', () => {
     expect(
       JSON.stringify({ observedContexts, firstAttempt, secondAttempt, terminalAttempt }),
     ).not.toContain('raw-handler-secret');
+    const records = lines.map((line) => JSON.parse(line) as StructuredLogRecord);
+    expect(records).toHaveLength(3);
+    expect(records.map(({ event }) => event)).toEqual([
+      'job.retry_scheduled',
+      'job.retry_scheduled',
+      'job.awaiting_dead_letter',
+    ]);
+    for (const record of records) {
+      expect(record).toMatchObject({
+        workload: 'worker',
+        correlationId,
+        initiatorActorId: correlation.initiatorActorId,
+        jobId: createSafeLogReference('job', sample.id),
+        jobKind: 'account.updated',
+        messageId: createSafeLogReference('message', deadLetterMessageId),
+        errorCode: 'JOB_HANDLER_FAILED',
+      });
+    }
+    for (const prohibited of [
+      payloadCanary,
+      'raw-handler-secret',
+      sample.id,
+      deadLetterMessageId,
+    ]) {
+      expect(lines.join('\n')).not.toContain(prohibited);
+    }
+  });
+
+  it('rejects an explicit null correlation before sending an SQS job', async () => {
+    const send = jest.fn();
+    const sqs = new SqsService(
+      { send, destroy: jest.fn() } as unknown as SQSClient,
+      testInfrastructureConfig(),
+    );
+
+    await expect(
+      sqs.sendJob(
+        'account.updated',
+        {},
+        {
+          correlation: null as unknown as JobCorrelationContext,
+        },
+      ),
+    ).rejects.toThrow('Invalid job correlation context');
+    expect(send).not.toHaveBeenCalled();
   });
 
   it('checks both queue URLs and their redrive relationship', async () => {
@@ -519,6 +585,50 @@ describe('SQS retry and dead-letter flow', () => {
     expect(sqs.delete).not.toHaveBeenCalled();
     expect(jest.getTimerCount()).toBe(0);
     jest.useRealTimers();
+  });
+
+  it('classifies a hostile proxy heartbeat error without letting instanceof escape', async () => {
+    const config = testInfrastructureConfig();
+    const hostileError = new Proxy(Object.create(null) as object, {
+      getPrototypeOf: () => {
+        throw hostileError;
+      },
+    });
+    const message = {
+      messageId: 'message-hostile-heartbeat-error',
+      receiptHandle: 'receipt-hostile-heartbeat-error',
+      body: JSON.stringify({
+        id: 'job-hostile-heartbeat-error',
+        kind: 'account.updated',
+        version: 1,
+        occurredAt: '2026-08-20T00:00:00.000Z',
+        payload: {},
+      }),
+      receiveCount: 1,
+      receivedAtMonotonicMs: performance.now() - 20_000,
+    };
+    const changeVisibility = jest
+      .fn()
+      .mockRejectedValueOnce(hostileError)
+      .mockResolvedValueOnce(undefined);
+    const sqs = {
+      receive: jest.fn().mockResolvedValue([message]),
+      parseEnvelope: jest
+        .fn()
+        .mockImplementation((body: string) => parseJobEnvelope(JSON.parse(body) as unknown)),
+      changeVisibility,
+      delete: jest.fn().mockResolvedValue(undefined),
+    } as unknown as SqsService;
+    const handler = jest.fn().mockResolvedValue(undefined);
+
+    await expect(new SqsJobWorker(sqs, config).processOne(handler)).resolves.toMatchObject({
+      status: 'retry-scheduled',
+      jobId: 'job-hostile-heartbeat-error',
+      errorCode: 'SQS_VISIBILITY_HEARTBEAT_FAILED',
+    });
+    expect(handler).not.toHaveBeenCalled();
+    expect(changeVisibility).toHaveBeenCalledTimes(2);
+    expect(sqs.delete).not.toHaveBeenCalled();
   });
 
   it('subtracts elapsed handling time from the first monotonic heartbeat deadline', async () => {

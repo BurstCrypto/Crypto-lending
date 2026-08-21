@@ -13,7 +13,7 @@ export class TransactionalJobPublisher implements JobPublisherPort {
       ...(request.id ? { id: request.id } : {}),
       ...(request.version === undefined ? {} : { version: request.version }),
       ...(request.occurredAt ? { occurredAt: request.occurredAt } : {}),
-      ...(request.correlation ? { correlation: request.correlation } : {}),
+      ...(request.correlation === undefined ? {} : { correlation: request.correlation }),
     });
 
     await this.repository.insert({

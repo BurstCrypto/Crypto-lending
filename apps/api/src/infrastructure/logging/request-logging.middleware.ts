@@ -32,11 +32,47 @@ export type RequestLoggingMiddleware = (
   next: () => void,
 ) => void;
 
+export interface RequestLoggingOptions {
+  readonly anonymousRejectionLimit?: number;
+  readonly anonymousRejectionWindowMs?: number;
+  readonly monotonicNow?: () => number;
+}
+
 const QUIET_HEALTH_PATHS = new Set([
   '/api/v1/health',
   '/api/v1/health/dependencies',
   '/api/v1/internal/health/dependencies',
 ]);
+const DEFAULT_ANONYMOUS_REJECTION_LIMIT = 60;
+const DEFAULT_ANONYMOUS_REJECTION_WINDOW_MS = 60_000;
+
+class FixedWindowBudget {
+  private windowStartedAt: number;
+  private accepted = 0;
+
+  constructor(
+    private readonly limit: number,
+    private readonly windowMs: number,
+    private readonly now: () => number,
+  ) {
+    this.windowStartedAt = now();
+  }
+
+  take(): { readonly allowed: boolean; readonly firstSuppressed: boolean } {
+    const current = this.now();
+    if (current - this.windowStartedAt >= this.windowMs || current < this.windowStartedAt) {
+      this.windowStartedAt = current;
+      this.accepted = 0;
+    }
+    if (this.accepted >= this.limit) {
+      const firstSuppressed = this.accepted === this.limit;
+      this.accepted = this.limit + 1;
+      return { allowed: false, firstSuppressed };
+    }
+    this.accepted += 1;
+    return { allowed: true, firstSuppressed: false };
+  }
+}
 
 function methodOf(request: LoggingHttpRequest): string | undefined {
   return typeof request.method === 'string' ? request.method.toUpperCase() : undefined;
@@ -68,7 +104,40 @@ function completion(statusCode: number): {
 
 export function createRequestLoggingMiddleware(
   logger: StructuredLogger = structuredLogger,
+  options: RequestLoggingOptions = {},
 ): RequestLoggingMiddleware {
+  const anonymousRejectionLimit =
+    options.anonymousRejectionLimit ?? DEFAULT_ANONYMOUS_REJECTION_LIMIT;
+  const anonymousRejectionWindowMs =
+    options.anonymousRejectionWindowMs ?? DEFAULT_ANONYMOUS_REJECTION_WINDOW_MS;
+  if (
+    !Number.isSafeInteger(anonymousRejectionLimit) ||
+    anonymousRejectionLimit < 1 ||
+    anonymousRejectionLimit > 10_000 ||
+    !Number.isSafeInteger(anonymousRejectionWindowMs) ||
+    anonymousRejectionWindowMs < 1_000 ||
+    anonymousRejectionWindowMs > 3_600_000
+  ) {
+    throw new TypeError('Invalid anonymous request-log budget');
+  }
+  const monotonicNow = options.monotonicNow ?? (() => performance.now());
+  const anonymousRejectionBudget = new FixedWindowBudget(
+    anonymousRejectionLimit,
+    anonymousRejectionWindowMs,
+    monotonicNow,
+  );
+
+  const allowAnonymousRejectionRecord = (): boolean => {
+    if (loggingContext.current()?.initiatorActorId) return true;
+    const decision = anonymousRejectionBudget.take();
+    if (decision.firstSuppressed) {
+      logger.emit(LOG_EVENTS.httpAnonymousRejectionsSuppressed, 'warn', {
+        outcome: 'rejected',
+      });
+    }
+    return decision.allowed;
+  };
+
   return (request, response, next): void => {
     const rootContext = createRootLogContext();
     const startedAt = performance.now();
@@ -89,15 +158,22 @@ export function createRequestLoggingMiddleware(
         if (rawPathIsQuietHealth(request) && response.statusCode < 400) return;
         const result = completion(response.statusCode);
         const method = methodOf(request);
-        restoreContext(() =>
+        restoreContext(() => {
+          if (
+            response.statusCode >= 400 &&
+            response.statusCode < 500 &&
+            !allowAnonymousRejectionRecord()
+          ) {
+            return;
+          }
           logger.emit(LOG_EVENTS.httpRequestCompleted, result.level, {
             ...(method ? { method } : {}),
             route: routeTemplate(request),
             statusCode: response.statusCode,
             durationMs: performance.now() - startedAt,
             outcome: result.outcome,
-          }),
-        );
+          });
+        });
       };
 
       const close = (): void => {
@@ -106,15 +182,16 @@ export function createRequestLoggingMiddleware(
         response.removeListener('finish', finish);
         response.removeListener('close', close);
         const method = methodOf(request);
-        restoreContext(() =>
+        restoreContext(() => {
+          if (!allowAnonymousRejectionRecord()) return;
           logger.emit(LOG_EVENTS.httpRequestAborted, 'warn', {
             ...(method ? { method } : {}),
             route: routeTemplate(request),
             statusCode: 499,
             durationMs: performance.now() - startedAt,
             outcome: 'aborted',
-          }),
-        );
+          });
+        });
       };
 
       response.once('finish', finish);

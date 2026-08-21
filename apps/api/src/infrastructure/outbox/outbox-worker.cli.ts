@@ -5,15 +5,19 @@ import { Module } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 
 import { bindExecutableWorkload } from '../config/application-workload';
-import { LOG_EVENTS, structuredLogger } from '../logging';
+import { installFatalProcessBoundary, LOG_EVENTS, structuredLogger } from '../logging';
 import { OutboxModule } from './outbox.module';
-import { OutboxWorker } from './outbox-worker.service';
+import { OutboxWorker, validateOutboxPollIntervalMs } from './outbox-worker.service';
 
 @Module({ imports: [OutboxModule] })
 class OutboxWorkerApplicationModule {}
 
 async function main(): Promise<void> {
   bindExecutableWorkload(process.env, 'worker');
+  installFatalProcessBoundary(structuredLogger);
+  const pollIntervalMs = validateOutboxPollIntervalMs(
+    Number(process.env.OUTBOX_POLL_INTERVAL_MS ?? '1000'),
+  );
   const application = await NestFactory.createApplicationContext(OutboxWorkerApplicationModule, {
     bufferLogs: true,
   });
@@ -23,16 +27,19 @@ async function main(): Promise<void> {
   const stop = (): void => abortController.abort();
   process.once('SIGINT', stop);
   process.once('SIGTERM', stop);
+  let ranNormally = false;
 
   try {
     structuredLogger.emit(LOG_EVENTS.workerStarted, 'info', { outcome: 'success' });
-    const pollIntervalMs = Number(process.env.OUTBOX_POLL_INTERVAL_MS ?? '1000');
     await worker.run(abortController.signal, pollIntervalMs);
+    ranNormally = true;
   } finally {
     process.removeListener('SIGINT', stop);
     process.removeListener('SIGTERM', stop);
     await application.close();
-    structuredLogger.emit(LOG_EVENTS.workerStopped, 'info', { outcome: 'success' });
+    if (ranNormally) {
+      structuredLogger.emit(LOG_EVENTS.workerStopped, 'info', { outcome: 'success' });
+    }
   }
 }
 

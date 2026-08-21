@@ -74,9 +74,9 @@ describe('LoggingContext', () => {
       expect(() => context.bindActorId(indexedUuid(5))).toThrow(
         'Logging context actor cannot be rebound',
       );
-      expect(() =>
-        context.runWith({ requestId: indexedUuid(6) }, () => undefined),
-      ).toThrow('Logging context requestId cannot be replaced');
+      expect(() => context.runWith({ requestId: indexedUuid(6) }, () => undefined)).toThrow(
+        'Logging context requestId cannot be replaced',
+      );
     });
   });
 

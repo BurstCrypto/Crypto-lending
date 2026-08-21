@@ -36,6 +36,14 @@ class JobProcessingFailure extends Error {
   }
 }
 
+function isReceiptOwnershipExpired(error: unknown): boolean {
+  try {
+    return error instanceof ReceiptOwnershipExpiredError;
+  } catch {
+    return false;
+  }
+}
+
 function diagnosticJobFields(job: JobEnvelope | undefined): SafeLogFields {
   if (!job) return {};
   const jobId = createSafeLogReference('job', job.id);
@@ -49,7 +57,7 @@ function diagnosticMessageField(messageId: string): SafeLogFields {
 
 function processingErrorCode(error: unknown): JobProcessingErrorCode {
   try {
-    if (error instanceof ReceiptOwnershipExpiredError) {
+    if (isReceiptOwnershipExpired(error)) {
       return 'SQS_RECEIPT_OWNERSHIP_EXPIRED';
     }
     return error instanceof JobProcessingFailure ? error.code : 'JOB_PROCESSING_FAILED';
@@ -248,11 +256,7 @@ export class SqsJobWorker {
             createSafeLegacyCorrelationId('message', message.messageId) ?? randomUUID(),
         },
         () =>
-          this.handleFailure(
-            message,
-            undefined,
-            new JobProcessingFailure('JOB_ENVELOPE_INVALID'),
-          ),
+          this.handleFailure(message, undefined, new JobProcessingFailure('JOB_ENVELOPE_INVALID')),
       );
     }
 
@@ -268,7 +272,7 @@ export class SqsJobWorker {
           );
           const heartbeatReady = await heartbeat.ready();
           if (heartbeatReady.status === 'failed') {
-            if (heartbeatReady.error instanceof ReceiptOwnershipExpiredError) {
+            if (isReceiptOwnershipExpired(heartbeatReady.error)) {
               throw heartbeatReady.error;
             }
             throw new JobProcessingFailure('SQS_VISIBILITY_HEARTBEAT_FAILED');
@@ -282,7 +286,7 @@ export class SqsJobWorker {
           const heartbeatResult = await heartbeat.stop();
           if (
             heartbeatResult.status === 'failed' &&
-            heartbeatResult.error instanceof ReceiptOwnershipExpiredError
+            isReceiptOwnershipExpired(heartbeatResult.error)
           ) {
             throw heartbeatResult.error;
           }
@@ -321,7 +325,7 @@ export class SqsJobWorker {
     error: unknown,
   ): Promise<JobProcessingResult> {
     const errorCode = processingErrorCode(error);
-    if (error instanceof ReceiptOwnershipExpiredError) {
+    if (isReceiptOwnershipExpired(error)) {
       structuredLogger.emit(LOG_EVENTS.jobOwnershipLost, 'error', {
         outcome: 'failure',
         errorCode,

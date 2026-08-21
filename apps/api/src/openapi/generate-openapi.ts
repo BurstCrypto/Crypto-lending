@@ -3,15 +3,24 @@ import '../infrastructure/config/load-dotenv';
 
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
+import { performance } from 'node:perf_hooks';
 
 import { NestFactory } from '@nestjs/core';
 
 import { AppModule } from '../app.module';
 import { configureApplication } from '../application';
-import { LOG_EVENTS, structuredLogger } from '../infrastructure/logging';
+import {
+  installFatalProcessBoundary,
+  LOG_EVENTS,
+  StructuredLogger,
+} from '../infrastructure/logging';
 import { serializeDeterministically } from './stable-json';
 
+const openApiLogger = new StructuredLogger({ workload: 'openapi' });
+
 async function generateOpenApi(): Promise<void> {
+  installFatalProcessBoundary(openApiLogger);
+  const startedAt = performance.now();
   // Contract generation constructs infrastructure providers but never connects.
   // Local-only defaults keep this command hermetic when CI has no service env.
   if (
@@ -50,9 +59,13 @@ async function generateOpenApi(): Promise<void> {
   } finally {
     await app.close();
   }
+  openApiLogger.emit(LOG_EVENTS.openApiGenerated, 'info', {
+    durationMs: performance.now() - startedAt,
+    outcome: 'success',
+  });
 }
 
 void generateOpenApi().catch((error: unknown) => {
-  structuredLogger.emitFatal(LOG_EVENTS.openApiFailed, error, { outcome: 'failure' });
+  openApiLogger.emitFatal(LOG_EVENTS.openApiFailed, error, { outcome: 'failure' });
   process.exitCode = 1;
 });

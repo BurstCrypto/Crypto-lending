@@ -3,20 +3,27 @@ import { resolve } from 'node:path';
 
 describe('CLI entrypoint failure logging', () => {
   it.each([
-    ['migration', '../infrastructure/database/migration.cli.ts', 'migrationFailed'],
-    ['OpenAPI', 'generate-openapi.ts', 'openApiFailed'],
+    [
+      'migration',
+      '../infrastructure/database/migration.cli.ts',
+      'migrationFailed',
+      'migrationLogger',
+    ],
+    ['OpenAPI', 'generate-openapi.ts', 'openApiFailed', 'openApiLogger'],
   ])(
     'routes %s failures through the structured fatal logger without reading exception text',
-    (_name, relativePath, eventName) => {
+    (_name, relativePath, eventName, loggerName) => {
       const source = readFileSync(resolve(__dirname, relativePath), 'utf8');
 
       expect(source).toContain(
-        `structuredLogger.emitFatal(LOG_EVENTS.${eventName}, error, { outcome: 'failure' })`,
+        `${loggerName}.emitFatal(LOG_EVENTS.${eventName}, error, { outcome: 'failure' })`,
       );
+      expect(source).toContain(`installFatalProcessBoundary(${loggerName})`);
       expect(source).not.toMatch(/\berror\.(?:message|stack)\b/u);
       expect(source).not.toMatch(/\bString\(error\)/u);
       expect(source).not.toMatch(/\bconsole\.error\b/u);
       expect(source).not.toMatch(/process\.stderr\.write/u);
+      expect(source).not.toMatch(/process\.stdout\.write/u);
     },
   );
 

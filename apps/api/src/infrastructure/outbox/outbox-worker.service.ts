@@ -28,6 +28,13 @@ function waitForNextPoll(milliseconds: number, signal: AbortSignal): Promise<voi
   });
 }
 
+export function validateOutboxPollIntervalMs(value: number): number {
+  if (!Number.isSafeInteger(value) || value < 10 || value > 60_000) {
+    throw new Error('Outbox pollIntervalMs must be between 10 and 60000');
+  }
+  return value;
+}
+
 /**
  * Explicit entrypoint for a separately deployed outbox worker process. Importing
  * InfrastructureModule into an API replica does not start this polling loop.
@@ -46,9 +53,7 @@ export class OutboxWorker {
     if (this.running) {
       throw new Error('Outbox worker is already running');
     }
-    if (!Number.isSafeInteger(pollIntervalMs) || pollIntervalMs < 10 || pollIntervalMs > 60_000) {
-      throw new Error('Outbox pollIntervalMs must be between 10 and 60000');
-    }
+    pollIntervalMs = validateOutboxPollIntervalMs(pollIntervalMs);
 
     this.running = true;
     let nextCleanupAt = 0;

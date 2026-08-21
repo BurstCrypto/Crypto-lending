@@ -1,8 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash, randomUUID } from 'node:crypto';
 
-const UUID_V4_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const LEGACY_CORRELATION_PATTERN = /^legacy:[a-f0-9]{64}$/u;
 const LOG_REFERENCE_PATTERN = /^(?:job|message):[a-f0-9]{64}$/u;
 const MAX_OPAQUE_REFERENCE_INPUT_LENGTH = 4_096;
@@ -48,8 +47,10 @@ export function isCanonicalUuidV4(value: unknown): value is string {
 }
 
 export function isSafeCorrelationId(value: unknown): value is string {
-  return isCanonicalUuidV4(value) ||
-    (typeof value === 'string' && LEGACY_CORRELATION_PATTERN.test(value));
+  return (
+    isCanonicalUuidV4(value) ||
+    (typeof value === 'string' && LEGACY_CORRELATION_PATTERN.test(value))
+  );
 }
 
 export function isSafeLogReference(value: unknown): value is string {
@@ -131,10 +132,7 @@ function contextDescriptors(value: unknown): PropertyDescriptorMap {
   }
 }
 
-function dataValue(
-  descriptors: PropertyDescriptorMap,
-  name: keyof LogCorrelationContext,
-): unknown {
+function dataValue(descriptors: PropertyDescriptorMap, name: keyof LogCorrelationContext): unknown {
   const descriptor = Object.hasOwn(descriptors, name) ? descriptors[name] : undefined;
   if (!descriptor) return undefined;
   if (!('value' in descriptor)) {

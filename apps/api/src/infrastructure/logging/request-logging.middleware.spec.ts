@@ -137,4 +137,77 @@ describe('request logging middleware', () => {
     });
     expect(lines.join('\n')).not.toContain('private-value');
   });
+
+  it('bounds anonymous rejection logs per window without suppressing verified actors', () => {
+    const lines: string[] = [];
+    let now = 1_000;
+    const middleware = createRequestLoggingMiddleware(
+      new StructuredLogger({ sink: (line) => lines.push(line) }),
+      {
+        anonymousRejectionLimit: 3,
+        anonymousRejectionWindowMs: 1_000,
+        monotonicNow: () => now,
+      },
+    );
+
+    for (let index = 0; index < 100; index += 1) {
+      const response = new TestResponse();
+      response.statusCode = 401;
+      response.writableFinished = true;
+      middleware({ method: 'GET', originalUrl: `/missing?attempt=${index}` }, response, () =>
+        response.emit('finish'),
+      );
+    }
+    expect(lines).toHaveLength(4);
+    expect(records(lines).at(-1)).toMatchObject({
+      event: 'http.anonymous_rejections.suppressed',
+      outcome: 'rejected',
+    });
+
+    now += 1_000;
+    const resetResponse = new TestResponse();
+    resetResponse.statusCode = 404;
+    resetResponse.writableFinished = true;
+    middleware({ method: 'GET', originalUrl: '/missing' }, resetResponse, () =>
+      resetResponse.emit('finish'),
+    );
+    expect(lines).toHaveLength(5);
+
+    for (let index = 0; index < 5; index += 1) {
+      const response = new TestResponse();
+      response.statusCode = 403;
+      response.writableFinished = true;
+      middleware({ method: 'GET', originalUrl: '/protected' }, response, () => {
+        loggingContext.bindActorId(VERIFIED_ACTOR_ID);
+        response.emit('finish');
+      });
+    }
+    expect(lines).toHaveLength(10);
+    expect(lines.join('\n')).not.toMatch(/attempt=|missing|protected/u);
+  });
+
+  it('applies the same anonymous budget to aborted requests', () => {
+    const lines: string[] = [];
+    const middleware = createRequestLoggingMiddleware(
+      new StructuredLogger({ sink: (line) => lines.push(line) }),
+      {
+        anonymousRejectionLimit: 2,
+        anonymousRejectionWindowMs: 1_000,
+        monotonicNow: () => 1_000,
+      },
+    );
+
+    for (let index = 0; index < 100; index += 1) {
+      const response = new TestResponse();
+      middleware({ method: 'GET', originalUrl: `/abort?secret=${index}` }, response, () =>
+        response.emit('close'),
+      );
+    }
+
+    expect(records(lines).filter(({ event }) => event === 'http.request.aborted')).toHaveLength(2);
+    expect(
+      records(lines).filter(({ event }) => event === 'http.anonymous_rejections.suppressed'),
+    ).toHaveLength(1);
+    expect(lines.join('\n')).not.toMatch(/secret=|abort\?/u);
+  });
 });

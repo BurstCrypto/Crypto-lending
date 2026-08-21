@@ -9,7 +9,13 @@ import {
 import type { Pool, PoolClient, QueryResult, QueryResultRow } from 'pg';
 
 import { PostgresService } from '../../src/infrastructure/database/postgres.service';
-import { createSafeLogReference, loggingContext } from '../../src/infrastructure/logging';
+import {
+  createSafeLogReference,
+  loggingContext,
+  structuredLogger,
+  StructuredLogger,
+  type StructuredLogRecord,
+} from '../../src/infrastructure/logging';
 import {
   createJobEnvelope,
   parseJobEnvelope,
@@ -288,6 +294,7 @@ async function enqueueCommitted(
 describe('transactional job outbox', () => {
   afterEach(() => {
     jest.useRealTimers();
+    jest.restoreAllMocks();
   });
 
   it('rejects envelope identifiers and timestamps that cannot support deduplication', () => {
@@ -341,9 +348,13 @@ describe('transactional job outbox', () => {
       const child = createJobEnvelope('account.updated', {}, { id: 'child-job' });
       expect(child.correlation).toEqual(activeCorrelation);
       expect(() =>
-        createJobEnvelope('account.updated', {}, {
-          correlation: testCorrelation(80),
-        }),
+        createJobEnvelope(
+          'account.updated',
+          {},
+          {
+            correlation: testCorrelation(80),
+          },
+        ),
       ).toThrow('must match the active logging context');
     });
   });
@@ -381,11 +392,35 @@ describe('transactional job outbox', () => {
     expect(() =>
       parseJobEnvelope({ ...base, correlation: { correlationId: 'corr\nforged' } }),
     ).toThrow('Invalid job envelope');
+    expect(() => parseJobEnvelope({ ...base, correlation: undefined })).toThrow(
+      'Invalid job envelope',
+    );
     expect(() =>
-      createJobEnvelope('account.updated', {}, {
-        correlation: null as unknown as JobCorrelationContext,
-      }),
+      createJobEnvelope(
+        'account.updated',
+        {},
+        {
+          correlation: null as unknown as JobCorrelationContext,
+        },
+      ),
     ).toThrow('Invalid job correlation context');
+  });
+
+  it('rejects an explicit null correlation at the transactional publisher boundary', async () => {
+    const harness = new TransactionalOutboxHarness();
+    const postgres = new PostgresService(harness.pool);
+    const publisher = new TransactionalJobPublisher(new JobOutboxRepository(postgres));
+
+    await expect(
+      postgres.withTransaction(() =>
+        publisher.enqueue({
+          kind: 'account.updated',
+          payload: {},
+          correlation: null as unknown as JobCorrelationContext,
+        }),
+      ),
+    ).rejects.toThrow('Invalid job correlation context');
+    expect(harness.queries.some((sql) => sql.startsWith('INSERT'))).toBe(false);
   });
 
   it('does not inherit envelope options or metadata through prototypes and accessors', () => {
@@ -452,6 +487,29 @@ describe('transactional job outbox', () => {
         {},
       ),
     ).toThrow('supported JSON data');
+  });
+
+  it('stops projection once the aggregate message byte budget is exhausted', () => {
+    let laterValueReads = 0;
+    const laterValue = new Proxy(Object.create(null) as object, {
+      getPrototypeOf: () => {
+        laterValueReads += 1;
+        throw new Error('projection continued after the byte budget was exhausted');
+      },
+    });
+    const envelope = createJobEnvelope(
+      'account.updated',
+      {
+        oversized: 'x'.repeat(MAX_JOB_MESSAGE_BYTES),
+        laterValue,
+      },
+      { correlation: DEFAULT_CORRELATION },
+    );
+
+    expect(() => serializeJobMessage(envelope, {})).toThrow(
+      `Job message cannot exceed ${MAX_JOB_MESSAGE_BYTES} bytes`,
+    );
+    expect(laterValueReads).toBe(0);
   });
 
   it('rolls enqueue back atomically and leaves nothing to publish', async () => {
@@ -811,6 +869,15 @@ describe('transactional job outbox', () => {
     ).rejects.toThrow('cannot exceed');
     await expect(
       postgres.withTransaction(() =>
+        publisher.enqueue({
+          kind: 'poison',
+          payload: {},
+          messageAttributes: { trace: 'x'.repeat(MAX_JOB_MESSAGE_BYTES) },
+        }),
+      ),
+    ).rejects.toThrow('cannot exceed');
+    await expect(
+      postgres.withTransaction(() =>
         publisher.enqueue({ kind: 'poison', payload: {}, messageAttributes: { trace: '' } }),
       ),
     ).rejects.toThrow('characters SQS cannot accept');
@@ -986,8 +1053,28 @@ describe('transactional job outbox', () => {
     const postgres = new PostgresService(harness.pool);
     const repository = new JobOutboxRepository(postgres);
     const publisher = new TransactionalJobPublisher(repository);
-    await enqueueCommitted(postgres, publisher, 'failing-job');
+    const payloadCanary = 'private-outbox-payload-canary';
+    const attributeCanary = 'private-outbox-attribute-canary';
+    await postgres.withTransaction(() =>
+      publisher.enqueue({
+        id: 'failing-job',
+        kind: 'account.updated',
+        occurredAt: '2026-08-18T00:00:00.000Z',
+        payload: { privateValue: payloadCanary },
+        correlation: DEFAULT_CORRELATION,
+        messageAttributes: { diagnostic: attributeCanary },
+      }),
+    );
     const secret = 'Bearer raw-provider-secret-must-not-persist';
+    const lines: string[] = [];
+    const captureLogger = new StructuredLogger({
+      workload: 'worker',
+      environment: { NODE_ENV: 'test' },
+      sink: (line) => lines.push(line),
+    });
+    jest
+      .spyOn(structuredLogger, 'emit')
+      .mockImplementation((event, level, fields) => captureLogger.emit(event, level, fields));
     const sqsClient = {
       send: jest.fn().mockRejectedValue(new Error(secret)),
       destroy: jest.fn(),
@@ -1014,6 +1101,28 @@ describe('transactional job outbox', () => {
       lastError: 'OUTBOX_TRANSPORT_FAILED',
     });
     expect(JSON.stringify(harness.job('failing-job'))).not.toContain(secret);
+    const records = lines.map((line) => JSON.parse(line) as StructuredLogRecord);
+    expect(records).toHaveLength(2);
+    expect(records).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          event: 'job.publish_failed',
+          workload: 'worker',
+          correlationId: DEFAULT_CORRELATION.correlationId,
+          jobId: createSafeLogReference('job', 'failing-job'),
+          jobKind: 'account.updated',
+          errorCode: 'OUTBOX_TRANSPORT_FAILED',
+        }),
+      ]),
+    );
+    expect(lines.join('\n')).not.toMatch(
+      new RegExp(
+        [secret, payloadCanary, attributeCanary, 'failing-job']
+          .map((value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+          .join('|'),
+        'u',
+      ),
+    );
   });
 
   it('aborts a stalled batch before its lease and settles every row for retry', async () => {

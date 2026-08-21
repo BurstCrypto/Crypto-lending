@@ -1,4 +1,9 @@
 export {
+  createFatalProcessHandler,
+  installFatalProcessBoundary,
+  type FatalProcessExit,
+} from './fatal-process-boundary';
+export {
   createSafeLogReference,
   createSafeLegacyCorrelationId,
   createRootLogContext,
@@ -14,6 +19,7 @@ export {
   createRequestLoggingMiddleware,
   requestLoggingMiddleware,
   REQUEST_ID_RESPONSE_HEADER,
+  type RequestLoggingOptions,
   type RequestLoggingMiddleware,
 } from './request-logging.middleware';
 export {
