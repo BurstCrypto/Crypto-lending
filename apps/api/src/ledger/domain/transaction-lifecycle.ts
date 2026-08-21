@@ -113,6 +113,7 @@ const LIFECYCLE_RULES: readonly LifecycleRule[] = Object.freeze([
     reasons: lifecycleReasons('PREFLIGHT_FAILED', 'USER_REJECTED'),
   },
   { from: 'SUBMITTED', to: 'PENDING', reasons: lifecycleReasons('OUTCOME_PENDING') },
+  { from: 'SUBMITTED', to: 'SETTLED', reasons: lifecycleReasons('SETTLEMENT_RECORDED') },
   { from: 'SUBMITTED', to: 'FAILED', reasons: lifecycleReasons('PROVIDER_REJECTED') },
   { from: 'PENDING', to: 'SETTLED', reasons: lifecycleReasons('SETTLEMENT_RECORDED') },
   {

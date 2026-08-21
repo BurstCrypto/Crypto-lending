@@ -14,6 +14,14 @@ import {
   type PostLedgerJournalInput,
   type ReverseLedgerJournalInput,
 } from '../domain/ledger';
+import {
+  normalizeLedgerLifecycleTransitionCommand,
+  normalizeLedgerLifecycleTransitionInput,
+  normalizeLedgerRecoveryTransitionCommand,
+  normalizeLedgerRecoveryTransitionInput,
+  type LedgerLifecycleTransitionInput,
+  type LedgerRecoveryTransitionInput,
+} from '../domain/transaction-lifecycle';
 import { LEDGER_ACTOR_RESOLVER, type LedgerActorResolver } from './ledger-actor-resolver.port';
 import {
   LEDGER_CAPABILITY_RESOLVER,
@@ -110,5 +118,27 @@ export class LedgerService {
       ...reversal,
     });
     return this.repository.reverseJournal(command, capability);
+  }
+
+  async transitionLifecycle(input: LedgerLifecycleTransitionInput): Promise<void> {
+    const transition = normalizeLedgerLifecycleTransitionInput(input);
+    const context = await resolveLedgerContext(this.actorResolver);
+    const command = normalizeLedgerLifecycleTransitionCommand({
+      actorAccountId: context.actorAccountId,
+      correlationId: context.correlationId,
+      ...transition,
+    });
+    await this.repository.transitionLifecycle(command);
+  }
+
+  async transitionRecovery(input: LedgerRecoveryTransitionInput): Promise<void> {
+    const transition = normalizeLedgerRecoveryTransitionInput(input);
+    const context = await resolveLedgerContext(this.actorResolver);
+    const command = normalizeLedgerRecoveryTransitionCommand({
+      actorAccountId: context.actorAccountId,
+      correlationId: context.correlationId,
+      ...transition,
+    });
+    await this.repository.transitionRecovery(command);
   }
 }

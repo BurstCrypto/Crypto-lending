@@ -8,6 +8,12 @@ import {
   type ReverseLedgerJournalInput,
 } from '../domain/ledger';
 import type { LedgerActorResolver } from './ledger-actor-resolver.port';
+import type {
+  LedgerLifecycleTransitionCommand,
+  LedgerLifecycleTransitionInput,
+  LedgerRecoveryTransitionCommand,
+  LedgerRecoveryTransitionInput,
+} from '../domain/transaction-lifecycle';
 import {
   createLedgerCapability,
   type LedgerPostingCapability,
@@ -68,6 +74,24 @@ const reversalInput: ReverseLedgerJournalInput = {
   observedAt: new Date('2026-08-21T12:01:01.000Z'),
 };
 
+const lifecycleInput: LedgerLifecycleTransitionInput = {
+  transactionId: ids.transaction,
+  legId: ids.leg,
+  expectedState: 'SUBMITTED',
+  nextState: 'PENDING',
+  reason: 'OUTCOME_PENDING',
+  effectiveAt: new Date('2026-08-21T12:02:00.000Z'),
+};
+
+const recoveryInput: LedgerRecoveryTransitionInput = {
+  transactionId: ids.transaction,
+  legId: null,
+  expectedRecoveryState: 'NOT_REQUIRED',
+  nextRecoveryState: 'REQUIRED',
+  reason: 'RECOVERY_REQUIRED',
+  effectiveAt: new Date('2026-08-21T12:03:00.000Z'),
+};
+
 function repositoryStub(): jest.Mocked<LedgerRepository> {
   return {
     postJournal: jest.fn<
@@ -78,6 +102,14 @@ function repositoryStub(): jest.Mocked<LedgerRepository> {
       ReturnType<LedgerRepository['reverseJournal']>,
       [ReverseLedgerJournalCommand, LedgerReversalCapability]
     >(async () => parseLedgerJournalId(ids.reversalJournal)),
+    transitionLifecycle: jest.fn<
+      ReturnType<LedgerRepository['transitionLifecycle']>,
+      [LedgerLifecycleTransitionCommand]
+    >(async () => undefined),
+    transitionRecovery: jest.fn<
+      ReturnType<LedgerRepository['transitionRecovery']>,
+      [LedgerRecoveryTransitionCommand]
+    >(async () => undefined),
   };
 }
 
@@ -286,5 +318,60 @@ describe('LedgerService', () => {
       ),
     ).rejects.toMatchObject({ code: 'INVALID_LEDGER_JOURNAL' });
     expect(repository.reverseJournal).toHaveBeenCalledTimes(1);
+  });
+
+  it('records a validated leg lifecycle transition with resolved context', async () => {
+    const { service, repository } = serviceWith();
+
+    await loggingContext.run({ correlationId: ids.correlation, initiatorActorId: ids.actor }, () =>
+      service.transitionLifecycle(lifecycleInput),
+    );
+
+    expect(repository.transitionLifecycle).toHaveBeenCalledWith({
+      actorAccountId: ids.actor,
+      correlationId: ids.correlation,
+      transactionId: ids.transaction,
+      legId: ids.leg,
+      expectedState: 'SUBMITTED',
+      nextState: 'PENDING',
+      reason: 'OUTCOME_PENDING',
+      effectiveAt: '2026-08-21T12:02:00.000Z',
+    });
+    expect(Object.isFrozen(repository.transitionLifecycle.mock.calls[0]?.[0])).toBe(true);
+  });
+
+  it('records recovery independently from workflow state', async () => {
+    const { service, repository } = serviceWith();
+
+    await loggingContext.run({ correlationId: ids.correlation, initiatorActorId: ids.actor }, () =>
+      service.transitionRecovery(recoveryInput),
+    );
+
+    expect(repository.transitionRecovery).toHaveBeenCalledWith({
+      actorAccountId: ids.actor,
+      correlationId: ids.correlation,
+      transactionId: ids.transaction,
+      legId: null,
+      expectedRecoveryState: 'NOT_REQUIRED',
+      nextRecoveryState: 'REQUIRED',
+      reason: 'RECOVERY_REQUIRED',
+      effectiveAt: '2026-08-21T12:03:00.000Z',
+    });
+    expect(repository.transitionLifecycle).not.toHaveBeenCalled();
+  });
+
+  it('rejects an illegal transition without invoking persistence', async () => {
+    const { service, repository } = serviceWith();
+
+    await expect(
+      loggingContext.run({ correlationId: ids.correlation, initiatorActorId: ids.actor }, () =>
+        service.transitionLifecycle({
+          ...lifecycleInput,
+          expectedState: 'PENDING',
+          nextState: 'PENDING',
+        }),
+      ),
+    ).rejects.toMatchObject({ code: 'ILLEGAL_LIFECYCLE_TRANSITION' });
+    expect(repository.transitionLifecycle).not.toHaveBeenCalled();
   });
 });

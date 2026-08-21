@@ -8,9 +8,17 @@ import {
   type PostLedgerJournalCommand,
   type ReverseLedgerJournalCommand,
 } from '../domain/ledger';
+import {
+  LedgerLifecycleValidationError,
+  normalizeLedgerLifecycleTransitionCommand,
+  normalizeLedgerRecoveryTransitionCommand,
+  type LedgerLifecycleTransitionCommand,
+  type LedgerRecoveryTransitionCommand,
+} from '../domain/transaction-lifecycle';
 import { LedgerPersistenceError, PostgresLedgerRepository } from './postgres-ledger.repository';
 
 const ids = {
+  actor: '00000000-0000-4000-8000-000000000001',
   correlation: '00000000-0000-4000-8000-000000000002',
   book: '00000000-0000-4000-8000-000000000003',
   transaction: '00000000-0000-4000-8000-000000000004',
@@ -21,6 +29,7 @@ const ids = {
   originalJournal: '00000000-0000-4000-8000-000000000009',
   journal: '00000000-0000-4000-8000-00000000000a',
   reversalJournal: '00000000-0000-4000-8000-00000000000b',
+  lifecycleEvent: '00000000-0000-4000-8000-00000000000c',
 } as const;
 
 const POST_CAPABILITY_VALUE = '00'.repeat(32);
@@ -73,6 +82,32 @@ function reversalCommand(): ReverseLedgerJournalCommand {
   });
 }
 
+function lifecycleCommand(legId: string | null = ids.leg): LedgerLifecycleTransitionCommand {
+  return normalizeLedgerLifecycleTransitionCommand({
+    actorAccountId: ids.actor,
+    correlationId: ids.correlation,
+    transactionId: ids.transaction,
+    legId,
+    expectedState: 'SUBMITTED',
+    nextState: 'PENDING',
+    reason: 'OUTCOME_PENDING',
+    effectiveAt: '2026-08-21T12:02:00.000Z',
+  });
+}
+
+function recoveryCommand(): LedgerRecoveryTransitionCommand {
+  return normalizeLedgerRecoveryTransitionCommand({
+    actorAccountId: ids.actor,
+    correlationId: ids.correlation,
+    transactionId: ids.transaction,
+    legId: null,
+    expectedRecoveryState: 'NOT_REQUIRED',
+    nextRecoveryState: 'REQUIRED',
+    reason: 'RECOVERY_REQUIRED',
+    effectiveAt: '2026-08-21T12:03:00.000Z',
+  });
+}
+
 function setup(): { query: jest.Mock; repository: PostgresLedgerRepository } {
   const query = jest.fn();
   const postgres = { query } as unknown as PostgresService;
@@ -89,7 +124,7 @@ describe('PostgresLedgerRepository', () => {
 
     expect(query).toHaveBeenCalledTimes(1);
     const [sql, values] = query.mock.calls[0] as [string, unknown[]];
-    expect(sql).toContain('public.post_ledger_journal(');
+    expect(sql).toContain('public.post_ledger_journal_with_lifecycle(');
     expect(sql).toContain('$1::text');
     expect(sql).toContain('$2::uuid');
     expect(sql).toContain('$5::text');
@@ -200,7 +235,7 @@ describe('PostgresLedgerRepository', () => {
     );
 
     const [sql, values] = query.mock.calls[0] as [string, unknown[]];
-    expect(sql).toContain('public.reverse_ledger_journal(');
+    expect(sql).toContain('public.reverse_ledger_journal_with_lifecycle(');
     expect(sql).toContain('$1::text');
     expect(sql).toContain('$2::uuid');
     expect(sql).toContain('$3::text');
@@ -216,6 +251,83 @@ describe('PostgresLedgerRepository', () => {
       '2026-08-21T12:01:01.000Z',
       ids.correlation,
     ]);
+  });
+
+  it.each([
+    {
+      command: lifecycleCommand(null),
+      functionName: 'transition_ledger_transaction_state',
+      values: [
+        ids.actor,
+        ids.transaction,
+        'SUBMITTED',
+        'PENDING',
+        'OUTCOME_PENDING',
+        '2026-08-21T12:02:00.000Z',
+        ids.correlation,
+      ],
+    },
+    {
+      command: lifecycleCommand(),
+      functionName: 'transition_ledger_leg_state',
+      values: [
+        ids.actor,
+        ids.transaction,
+        ids.leg,
+        'SUBMITTED',
+        'PENDING',
+        'OUTCOME_PENDING',
+        '2026-08-21T12:02:00.000Z',
+        ids.correlation,
+      ],
+    },
+  ])('records lifecycle through $functionName', async ({ command, functionName, values }) => {
+    const { query, repository } = setup();
+    query.mockResolvedValue(result([{ event_id: ids.lifecycleEvent }]));
+
+    await expect(repository.transitionLifecycle(command)).resolves.toBeUndefined();
+
+    const [sql, boundValues] = query.mock.calls[0] as [string, unknown[]];
+    expect(sql).toContain(`public.${functionName}(`);
+    expect(boundValues).toEqual(values);
+  });
+
+  it('records recovery independently through its fixed function', async () => {
+    const { query, repository } = setup();
+    query.mockResolvedValue(result([{ event_id: ids.lifecycleEvent }]));
+
+    await expect(repository.transitionRecovery(recoveryCommand())).resolves.toBeUndefined();
+
+    const [sql, values] = query.mock.calls[0] as [string, unknown[]];
+    expect(sql).toContain('public.transition_ledger_recovery_state(');
+    expect(values).toEqual([
+      ids.actor,
+      ids.transaction,
+      null,
+      'NOT_REQUIRED',
+      'REQUIRED',
+      'RECOVERY_REQUIRED',
+      '2026-08-21T12:03:00.000Z',
+      ids.correlation,
+    ]);
+  });
+
+  it('maps a rejected persisted transition to the lifecycle domain error', async () => {
+    const { query, repository } = setup();
+    query.mockRejectedValue(Object.assign(new Error('transition rejected'), { code: 'L4201' }));
+
+    await expect(repository.transitionLifecycle(lifecycleCommand())).rejects.toEqual(
+      new LedgerLifecycleValidationError('ILLEGAL_LIFECYCLE_TRANSITION'),
+    );
+  });
+
+  it('rejects an unexpected lifecycle result row', async () => {
+    const { query, repository } = setup();
+    query.mockResolvedValue(result([{ event_id: 'not-a-uuid' }]));
+
+    await expect(repository.transitionLifecycle(lifecycleCommand())).rejects.toEqual(
+      new LedgerPersistenceError(),
+    );
   });
 
   it.each([
