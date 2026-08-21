@@ -4,6 +4,11 @@ export const JOB_PUBLISHER = Symbol('JOB_PUBLISHER');
 
 export type JobDestination = 'jobs';
 
+export interface LedgerOutboxLink {
+  readonly commandId: string;
+  readonly journalId: string;
+}
+
 export interface EnqueueJobRequest<Payload> {
   kind: string;
   payload: Payload;
@@ -13,6 +18,7 @@ export interface EnqueueJobRequest<Payload> {
   correlation?: JobCorrelationContext;
   destination?: JobDestination;
   messageAttributes?: Readonly<Record<string, string>>;
+  ledgerLink?: LedgerOutboxLink;
 }
 
 /**

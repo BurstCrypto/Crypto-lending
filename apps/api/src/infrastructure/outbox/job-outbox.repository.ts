@@ -2,13 +2,16 @@ import { Injectable } from '@nestjs/common';
 import type { QueryResultRow } from 'pg';
 
 import { PostgresService } from '../database/postgres.service';
+import { isCanonicalUuidV4 } from '../logging';
 import { parseJobEnvelope, type JobEnvelope } from './job-envelope';
 import { serializeJobMessage } from './job-message-policy';
+import type { LedgerOutboxLink } from './job-publisher.port';
 
 export interface NewOutboxJob {
   destination: string;
   envelope: JobEnvelope;
   messageAttributes: Readonly<Record<string, string>>;
+  ledgerLink?: LedgerOutboxLink;
 }
 
 export interface ClaimOutboxJobsOptions {
@@ -56,6 +59,39 @@ interface ClaimedOutboxRow extends QueryResultRow {
 
 interface FailureRow extends QueryResultRow {
   status: 'pending' | 'failed';
+}
+
+function parseLedgerOutboxLink(value: unknown): Readonly<LedgerOutboxLink> | undefined {
+  if (value === undefined) return undefined;
+  try {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      throw new Error('Invalid ledger outbox link');
+    }
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) {
+      throw new Error('Invalid ledger outbox link');
+    }
+    const descriptors = Object.getOwnPropertyDescriptors(value);
+    if (
+      Reflect.ownKeys(descriptors).length !== 2 ||
+      !Object.hasOwn(descriptors, 'commandId') ||
+      !Object.hasOwn(descriptors, 'journalId')
+    ) {
+      throw new Error('Invalid ledger outbox link');
+    }
+    const commandDescriptor = descriptors.commandId;
+    const journalDescriptor = descriptors.journalId;
+    const commandId =
+      commandDescriptor && 'value' in commandDescriptor ? commandDescriptor.value : undefined;
+    const journalId =
+      journalDescriptor && 'value' in journalDescriptor ? journalDescriptor.value : undefined;
+    if (!isCanonicalUuidV4(commandId) || !isCanonicalUuidV4(journalId)) {
+      throw new Error('Invalid ledger outbox link');
+    }
+    return Object.freeze({ commandId, journalId });
+  } catch {
+    throw new Error('Invalid ledger outbox link');
+  }
 }
 
 // Existing rows may predate today's stricter SQS policy. Keep claim parsing
@@ -129,7 +165,20 @@ export class JobOutboxRepository {
 
     let serializedEnvelope: string;
     let serializedAttributes: string;
+    let ledgerLink: Readonly<LedgerOutboxLink> | undefined;
     try {
+      const jobDescriptors = Object.getOwnPropertyDescriptors(job);
+      const ledgerLinkDescriptor = Object.hasOwn(jobDescriptors, 'ledgerLink')
+        ? jobDescriptors.ledgerLink
+        : undefined;
+      if (ledgerLinkDescriptor && !('value' in ledgerLinkDescriptor)) {
+        throw new Error('Invalid ledger outbox link');
+      }
+      ledgerLink = parseLedgerOutboxLink(
+        ledgerLinkDescriptor && 'value' in ledgerLinkDescriptor
+          ? ledgerLinkDescriptor.value
+          : undefined,
+      );
       const serialized = serializeJobMessage(job.envelope, job.messageAttributes);
       serializedEnvelope = serialized.body;
       serializedAttributes = JSON.stringify(serialized.messageAttributes);
@@ -141,9 +190,18 @@ export class JobOutboxRepository {
     }
 
     await this.postgres.query(
-      `INSERT INTO job_outbox (id, queue_name, payload, message_attributes)
-       VALUES ($1, $2, $3::jsonb, $4::jsonb)`,
-      [job.envelope.id, job.destination, serializedEnvelope, serializedAttributes],
+      `INSERT INTO job_outbox (
+         id, queue_name, payload, message_attributes,
+         ledger_command_id, ledger_journal_id
+       ) VALUES ($1, $2, $3::jsonb, $4::jsonb, $5::uuid, $6::uuid)`,
+      [
+        job.envelope.id,
+        job.destination,
+        serializedEnvelope,
+        serializedAttributes,
+        ledgerLink?.commandId ?? null,
+        ledgerLink?.journalId ?? null,
+      ],
     );
   }
 

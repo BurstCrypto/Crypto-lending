@@ -9,6 +9,14 @@ export class TransactionalJobPublisher implements JobPublisherPort {
   constructor(private readonly repository: JobOutboxRepository) {}
 
   async enqueue<Payload>(request: EnqueueJobRequest<Payload>): Promise<JobEnvelope<Payload>> {
+    const ledgerLinkDescriptor = Object.getOwnPropertyDescriptor(request, 'ledgerLink');
+    if (ledgerLinkDescriptor && !('value' in ledgerLinkDescriptor)) {
+      throw new Error('Invalid ledger outbox link');
+    }
+    const ledgerLink =
+      ledgerLinkDescriptor && 'value' in ledgerLinkDescriptor
+        ? ledgerLinkDescriptor.value
+        : undefined;
     const envelope = createJobEnvelope(request.kind, request.payload, {
       ...(request.id ? { id: request.id } : {}),
       ...(request.version === undefined ? {} : { version: request.version }),
@@ -20,6 +28,7 @@ export class TransactionalJobPublisher implements JobPublisherPort {
       destination: request.destination ?? 'jobs',
       envelope,
       messageAttributes: request.messageAttributes ?? {},
+      ...(ledgerLink === undefined ? {} : { ledgerLink }),
     });
     return envelope;
   }
