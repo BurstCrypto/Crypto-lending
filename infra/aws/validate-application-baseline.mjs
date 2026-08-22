@@ -21,7 +21,7 @@ const noExternalEgressResidualLimitations = [
   'FAILED_AUTH_MONITORING_UNRESOLVED: local ACL denial and redaction tests exist, but this parent has no validated ElastiCache failed-auth log or metric delivery, filter, alarm, and actionable evidence path.',
 ];
 const reviewedApplicationBaselineSha256 =
-  '0436cc3d5dc2e1d52f1c6041b97aa9497e4ba7f644eaf7cec810989e0c2796d6';
+  'b587421b616803792178513b164ab13dbbc2050d17efd9129d85b1cb300b7167';
 const reviewedWorkloadBoundariesSha256 =
   '93273bb3bf26f7d21702da2d4b155132db765ce3f123134341e2762ae521b3f9';
 const reviewedResourceTypesByLogicalId = new Map([
@@ -258,6 +258,59 @@ function propertyValue(block, propertyName) {
 
 function sha256(value) {
   return createHash('sha256').update(value, 'utf8').digest('hex');
+}
+
+function parseFoldedSubJson(block, logicalId, propertyName, errors) {
+  const lines = block.split('\n');
+  const escapedName = propertyName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const headers = lines
+    .map((line, index) => ({ index, line }))
+    .filter(({ line }) => new RegExp(`^\\s+${escapedName}:\\s*!Sub\\s+>-\\s*$`).test(line));
+  if (headers.length !== 1) {
+    errors.push(`${logicalId} must define exactly one ${propertyName}: !Sub >- JSON contract.`);
+    return undefined;
+  }
+
+  const { index, line } = headers[0];
+  const propertyIndent = line.search(/\S/);
+  const valueLines = [];
+  for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
+    const nestedLine = lines[cursor];
+    if (nestedLine.trim() !== '' && nestedLine.search(/\S/) <= propertyIndent) break;
+    valueLines.push(nestedLine.trim());
+  }
+  const value = valueLines.join(' ').trim();
+  if (!value) {
+    errors.push(`${logicalId}.${propertyName} must contain a non-empty JSON object.`);
+    return undefined;
+  }
+
+  try {
+    const parsed = JSON.parse(value);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      errors.push(`${logicalId}.${propertyName} must decode to one JSON object.`);
+      return undefined;
+    }
+    return parsed;
+  } catch {
+    errors.push(`${logicalId}.${propertyName} must contain valid folded JSON.`);
+    return undefined;
+  }
+}
+
+function sameJson(left, right) {
+  const canonicalize = (value) => {
+    if (Array.isArray(value)) return value.map(canonicalize);
+    if (value && typeof value === 'object') {
+      return Object.fromEntries(
+        Object.keys(value)
+          .sort()
+          .map((key) => [key, canonicalize(value[key])]),
+      );
+    }
+    return value;
+  };
+  return JSON.stringify(canonicalize(left)) === JSON.stringify(canonicalize(right));
 }
 
 function indentedPropertyBlock(block, propertyName) {
@@ -1531,6 +1584,228 @@ function validateKmsAndEncryptedServiceBoundaries(resources, inventory, errors) 
   }
 }
 
+function validateOperationalDashboard(source, parameters, resources, errors) {
+  requireExactSemanticBlock(
+    parameters.get('EnableOperationalDashboard') ?? '',
+    'EnableOperationalDashboard',
+    [
+      'EnableOperationalDashboard:',
+      '  Type: String',
+      "  Default: 'false'",
+      "  AllowedValues: ['true', 'false']",
+    ].join('\n'),
+    'the exact opt-in String contract with a false default and closed true/false values',
+    errors,
+  );
+
+  const dashboardConditions =
+    source.match(
+      /^  CreateOperationalDashboard: !Equals \[!Ref EnableOperationalDashboard, 'true'\]\s*$/gm,
+    ) ?? [];
+  if (dashboardConditions.length !== 1) {
+    errors.push(
+      'CreateOperationalDashboard must preserve the exact opt-in condition bound only to EnableOperationalDashboard=true.',
+    );
+  }
+
+  const block = resources.get('OperationalDashboard') ?? '';
+  if (!hasProperty(block, 'Condition', 'CreateOperationalDashboard')) {
+    errors.push(
+      'OperationalDashboard must remain disabled unless CreateOperationalDashboard is true.',
+    );
+  }
+  if (!hasProperty(block, 'DashboardName', '!Sub crypto-lending-${EnvironmentName}')) {
+    errors.push(
+      'OperationalDashboard must retain its environment-scoped crypto-lending dashboard name.',
+    );
+  }
+
+  const dashboard = parseFoldedSubJson(block, 'OperationalDashboard', 'DashboardBody', errors);
+  if (!dashboard) return;
+  if (Object.keys(dashboard).length !== 1 || !Array.isArray(dashboard.widgets)) {
+    errors.push('OperationalDashboard must contain only one JSON widgets array.');
+    return;
+  }
+  if (dashboard.widgets.length !== 6) {
+    errors.push(
+      'OperationalDashboard must contain exactly three native metric widgets and three bounded log-query widgets.',
+    );
+  }
+
+  const widgetsByTitle = new Map();
+  for (const widget of dashboard.widgets) {
+    const title = widget?.properties?.title;
+    if (typeof title !== 'string' || widgetsByTitle.has(title)) {
+      errors.push('OperationalDashboard widgets must have six unique reviewed titles.');
+      continue;
+    }
+    widgetsByTitle.set(title, widget);
+  }
+
+  const requiredWidgets = [
+    [
+      'API latency and request outcomes',
+      {
+        type: 'metric',
+        properties: {
+          title: 'API latency and request outcomes',
+          region: '${AWS::Region}',
+          stat: 'Sum',
+          metrics: [
+            [
+              'AWS/ApplicationELB',
+              'RequestCount',
+              'LoadBalancer',
+              '${ApplicationLoadBalancer.LoadBalancerFullName}',
+              'TargetGroup',
+              '${ApiTargetGroup.TargetGroupFullName}',
+            ],
+            ['.', 'HTTPCode_Target_4XX_Count', '.', '.', '.', '.'],
+            ['.', 'HTTPCode_Target_5XX_Count', '.', '.', '.', '.'],
+            ['.', 'TargetResponseTime', '.', '.', '.', '.', { stat: 'p95' }],
+          ],
+        },
+      },
+      'the exact low-cardinality native ALB request, target 4xx/5xx, and p95 latency contract',
+    ],
+    [
+      'ECS CPU/memory saturation',
+      {
+        type: 'metric',
+        properties: {
+          title: 'ECS CPU/memory saturation',
+          region: '${AWS::Region}',
+          stat: 'Average',
+          metrics: [
+            [
+              'AWS/ECS',
+              'CPUUtilization',
+              'ClusterName',
+              '${EcsCluster}',
+              'ServiceName',
+              '${ApiService.Name}',
+            ],
+            ['.', 'MemoryUtilization', '.', '.', '.', '.'],
+            ['.', 'CPUUtilization', '.', '.', '.', '${WebService.Name}'],
+            ['.', 'MemoryUtilization', '.', '.', '.', '.'],
+            ['.', 'CPUUtilization', '.', '.', '.', '${WorkerService.Name}'],
+            ['.', 'MemoryUtilization', '.', '.', '.', '.'],
+          ],
+        },
+      },
+      'the exact native ECS CPU and memory saturation contract for API, web, and worker',
+    ],
+    [
+      'Queue backlog, age, and DLQ depth',
+      {
+        type: 'metric',
+        properties: {
+          title: 'Queue backlog, age, and DLQ depth',
+          region: '${AWS::Region}',
+          stat: 'Maximum',
+          metrics: [
+            ['AWS/SQS', 'ApproximateNumberOfMessagesVisible', 'QueueName', '${JobQueue.QueueName}'],
+            ['.', 'ApproximateAgeOfOldestMessage', '.', '.'],
+            ['.', 'ApproximateNumberOfMessagesVisible', '.', '${JobDeadLetterQueue.QueueName}'],
+          ],
+        },
+      },
+      'the exact native source-queue backlog/age and dead-letter-queue depth contract',
+    ],
+    [
+      'Correlation traces',
+      {
+        type: 'log',
+        width: 24,
+        properties: {
+          title: 'Correlation traces',
+          region: '${AWS::Region}',
+          view: 'table',
+          query: [
+            `SOURCE logGroups(namePrefix: ['/crypto-lending/\${EnvironmentName}/'])`,
+            'fields @timestamp, correlationId, traceId, spanId, parentSpanId, spanName, durationMs, outcome',
+            "filter event = 'trace.span.completed'",
+            'limit 100',
+          ].join(' | '),
+        },
+      },
+      'the exact bounded trace query and trace.span.completed event contract',
+    ],
+    [
+      'Job failure and redrive',
+      {
+        type: 'log',
+        properties: {
+          title: 'Job failure and redrive',
+          region: '${AWS::Region}',
+          view: 'table',
+          query: [
+            "SOURCE '${WorkerLogGroup}'",
+            'fields @timestamp, event, jobKind, errorCode, outcome',
+            "filter event in ['job.publish_failed','job.retry_scheduled','job.awaiting_dead_letter','job.ownership_lost','outbox.dispatch.failed']",
+            'limit 100',
+          ].join(' | '),
+        },
+      },
+      'the exact bounded job-failure query and closed structured-event set',
+    ],
+    [
+      'Lifecycle state/reason counts',
+      {
+        type: 'log',
+        properties: {
+          title: 'Lifecycle state/reason counts',
+          region: '${AWS::Region}',
+          view: 'table',
+          query: [
+            "SOURCE '${ApiLogGroup}'",
+            "filter event = 'ledger.lifecycle.transitioned'",
+            'stats count(*) as transitions by lifecycleScope, state, reason',
+            'limit 100',
+          ].join(' | '),
+        },
+      },
+      'the exact lifecycle transition query grouped only by closed scope, state, and reason fields',
+    ],
+  ];
+
+  for (const [title, expected, expectation] of requiredWidgets) {
+    if (!sameJson(widgetsByTitle.get(title), expected)) {
+      errors.push(`OperationalDashboard must preserve ${expectation}.`);
+    }
+  }
+
+  const metricSource = JSON.stringify(
+    dashboard.widgets.filter((widget) => widget?.type === 'metric'),
+  );
+  if (
+    /(?:correlationId|traceId|spanId|requestId|jobId|messageId|actorId|accountId|wallet|intentId|quoteId|transactionId|ledgerEventId)/i.test(
+      metricSource,
+    )
+  ) {
+    errors.push(
+      'OperationalDashboard native metric dimensions must exclude high-cardinality customer and trace identifiers.',
+    );
+  }
+
+  const logQueries = dashboard.widgets
+    .filter((widget) => widget?.type === 'log')
+    .map((widget) => widget?.properties?.query)
+    .filter((query) => typeof query === 'string');
+  if (
+    logQueries.length !== 3 ||
+    logQueries.some((query) =>
+      /(?:@message|headers?|payload|requestBody|responseBody|queryString|authorization|cookie|token|secret|password|privateKey|seedPhrase|initiatorActorId|accountId|wallet|intentId|quoteId|transactionId|ledgerEventId|jobId|messageId|ipAddress|userAgent)/i.test(
+        query,
+      ),
+    )
+  ) {
+    errors.push(
+      'OperationalDashboard log queries must use only reviewed structured fields and must never expose raw messages, headers, payloads, secrets, PII, or customer/domain identifiers.',
+    );
+  }
+}
+
 function validateTemplateShape(source, errors) {
   const templateSha256 = sha256(source);
   if (templateSha256 !== reviewedApplicationBaselineSha256) {
@@ -1685,6 +1960,7 @@ function validateTemplateShape(source, errors) {
   validateWorkloadBoundaryComposition(source, parameters, resources, inventory, errors);
   validateEcsRoleSecurityBoundaries(resources, inventory, errors);
   validateKmsAndEncryptedServiceBoundaries(resources, inventory, errors);
+  validateOperationalDashboard(source, parameters, resources, errors);
 
   const requiredTypes = new Map([
     ['AWS::EC2::VPC', 1],

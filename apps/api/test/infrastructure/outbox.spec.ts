@@ -1102,8 +1102,9 @@ describe('transactional job outbox', () => {
     });
     expect(JSON.stringify(harness.job('failing-job'))).not.toContain(secret);
     const records = lines.map((line) => JSON.parse(line) as StructuredLogRecord);
-    expect(records).toHaveLength(2);
-    expect(records).toEqual(
+    const failureRecords = records.filter(({ event }) => event === 'job.publish_failed');
+    expect(failureRecords).toHaveLength(2);
+    expect(failureRecords).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           event: 'job.publish_failed',

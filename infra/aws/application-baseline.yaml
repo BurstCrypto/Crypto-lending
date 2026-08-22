@@ -1413,14 +1413,7 @@ Resources:
     Properties:
       DashboardName: !Sub crypto-lending-${EnvironmentName}
       DashboardBody: !Sub >-
-        {"widgets":[{"type":"metric","width":12,"height":6,"properties":{"title":"ECS CPU",
-        "region":"${AWS::Region}","period":60,"stat":"Average","metrics":[["AWS/ECS",
-        "CPUUtilization","ClusterName","${EcsCluster}","ServiceName","${ApiService.Name}"],
-        [".",".",".",".",".","${WebService.Name}"],[".",".",".",".",".",
-        "${WorkerService.Name}"]]}},{"type":"metric","width":12,"height":6,
-        "properties":{"title":"Queue backlog","region":"${AWS::Region}","period":60,
-        "stat":"Maximum","metrics":[["AWS/SQS","ApproximateNumberOfMessagesVisible",
-        "QueueName","${JobQueue.QueueName}"],[".",".",".","${JobDeadLetterQueue.QueueName}"]]}}]}
+        {"widgets":[{"type":"metric","properties":{"title":"API latency and request outcomes","region":"${AWS::Region}","stat":"Sum","metrics":[["AWS/ApplicationELB","RequestCount","LoadBalancer","${ApplicationLoadBalancer.LoadBalancerFullName}","TargetGroup","${ApiTargetGroup.TargetGroupFullName}"],[".","HTTPCode_Target_4XX_Count",".",".",".","."],[".","HTTPCode_Target_5XX_Count",".",".",".","."],[".","TargetResponseTime",".",".",".",".",{"stat":"p95"}]]}},{"type":"metric","properties":{"title":"ECS CPU/memory saturation","region":"${AWS::Region}","stat":"Average","metrics":[["AWS/ECS","CPUUtilization","ClusterName","${EcsCluster}","ServiceName","${ApiService.Name}"],[".","MemoryUtilization",".",".",".","."],[".","CPUUtilization",".",".",".","${WebService.Name}"],[".","MemoryUtilization",".",".",".","."],[".","CPUUtilization",".",".",".","${WorkerService.Name}"],[".","MemoryUtilization",".",".",".","."]]}},{"type":"metric","properties":{"title":"Queue backlog, age, and DLQ depth","region":"${AWS::Region}","stat":"Maximum","metrics":[["AWS/SQS","ApproximateNumberOfMessagesVisible","QueueName","${JobQueue.QueueName}"],[".","ApproximateAgeOfOldestMessage",".","."],[".","ApproximateNumberOfMessagesVisible",".","${JobDeadLetterQueue.QueueName}"]]}},{"type":"log","width":24,"properties":{"title":"Correlation traces","region":"${AWS::Region}","view":"table","query":"SOURCE logGroups(namePrefix: ['/crypto-lending/${EnvironmentName}/']) | fields @timestamp, correlationId, traceId, spanId, parentSpanId, spanName, durationMs, outcome | filter event = 'trace.span.completed' | limit 100"}},{"type":"log","properties":{"title":"Job failure and redrive","region":"${AWS::Region}","view":"table","query":"SOURCE '${WorkerLogGroup}' | fields @timestamp, event, jobKind, errorCode, outcome | filter event in ['job.publish_failed','job.retry_scheduled','job.awaiting_dead_letter','job.ownership_lost','outbox.dispatch.failed'] | limit 100"}},{"type":"log","properties":{"title":"Lifecycle state/reason counts","region":"${AWS::Region}","view":"table","query":"SOURCE '${ApiLogGroup}' | filter event = 'ledger.lifecycle.transitioned' | stats count(*) as transitions by lifecycleScope, state, reason | limit 100"}}]}
 
 Outputs:
   WorkloadBoundariesTemplateSha256:

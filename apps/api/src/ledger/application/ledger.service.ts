@@ -1,6 +1,14 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 
-import { loggingContext } from '../../infrastructure/logging';
+import { loggingContext } from '../../infrastructure/logging/logging-context';
+import { LOG_EVENTS, structuredLogger } from '../../infrastructure/logging/structured-logger';
+import {
+  applicationObservability,
+  OBSERVABILITY_PORT,
+  type ObservabilityPort,
+  type ObservabilityQuoteState,
+  type ObservabilitySpanHandle,
+} from '../../infrastructure/observability';
 import {
   normalizePostLedgerJournalCommand,
   normalizePostLedgerJournalInput,
@@ -25,6 +33,7 @@ import {
   normalizeLedgerRecoveryTransitionInput,
   type LedgerLifecycleTransitionInput,
   type LedgerRecoveryTransitionInput,
+  type ValidatedLedgerLifecycleTransition,
 } from '../domain/transaction-lifecycle';
 import { LEDGER_ACTOR_RESOLVER, type LedgerActorResolver } from './ledger-actor-resolver.port';
 import {
@@ -66,6 +75,54 @@ async function resolveLedgerContext(actorResolver: LedgerActorResolver): Promise
   }
 }
 
+function quoteStateForTransition(
+  transition: ValidatedLedgerLifecycleTransition,
+): ObservabilityQuoteState | undefined {
+  switch (transition.reason) {
+    case 'INTENT_CREATED':
+      return 'CREATED';
+    case 'QUOTE_CREATED':
+      return 'AVAILABLE';
+    case 'USER_APPROVAL_RECORDED':
+      return 'SELECTED';
+    case 'QUOTE_EXPIRED':
+      return 'EXPIRED';
+    case 'USER_REJECTED':
+      return 'REJECTED';
+    case 'PREFLIGHT_FAILED':
+      return 'FAILED';
+    case 'SUBMISSION_RECORDED':
+    case 'OUTCOME_PENDING':
+    case 'SETTLEMENT_RECORDED':
+    case 'PROVIDER_REJECTED':
+    case 'TERMINAL_FAILURE_CONFIRMED':
+    case 'FULL_REVERSAL_RECORDED':
+      return undefined;
+  }
+}
+
+function startDiagnosticSpan(
+  observability: ObservabilityPort,
+): ObservabilitySpanHandle | undefined {
+  try {
+    return observability.startSpan({
+      name: 'execution.transition',
+      kind: 'internal',
+      synthetic: false,
+    });
+  } catch {
+    return undefined;
+  }
+}
+
+function recordDiagnostic(work: () => unknown): void {
+  try {
+    work();
+  } catch {
+    // A telemetry adapter must never change a financial transition.
+  }
+}
+
 @Injectable()
 export class LedgerService {
   constructor(
@@ -73,6 +130,9 @@ export class LedgerService {
     @Inject(LEDGER_ACTOR_RESOLVER) private readonly actorResolver: LedgerActorResolver,
     @Inject(LEDGER_CAPABILITY_RESOLVER)
     private readonly capabilityResolver: LedgerCapabilityResolver,
+    @Optional()
+    @Inject(OBSERVABILITY_PORT)
+    private readonly observability: ObservabilityPort = applicationObservability,
   ) {}
 
   async postJournal(
@@ -154,7 +214,26 @@ export class LedgerService {
       correlationId: context.correlationId,
       ...transition,
     });
-    await this.repository.transitionLifecycle(command);
+    const span = startDiagnosticSpan(this.observability);
+    try {
+      await this.repository.transitionLifecycle(command);
+    } catch (error) {
+      recordDiagnostic(() => span?.end('failure'));
+      throw error;
+    }
+    recordDiagnostic(() => span?.end('success'));
+    recordDiagnostic(() =>
+      this.observability.recordExecutionState({ state: transition.nextState }),
+    );
+    const quoteState = quoteStateForTransition(transition);
+    if (quoteState) {
+      recordDiagnostic(() => this.observability.recordQuoteState({ state: quoteState }));
+    }
+    structuredLogger.emit(LOG_EVENTS.ledgerLifecycleTransitioned, 'info', {
+      lifecycleScope: transition.legId ? 'leg' : 'transaction',
+      state: transition.nextState,
+      reason: transition.reason,
+    });
   }
 
   async transitionRecovery(input: LedgerRecoveryTransitionInput): Promise<void> {

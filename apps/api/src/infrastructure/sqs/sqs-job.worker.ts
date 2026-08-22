@@ -1,7 +1,7 @@
 import { performance } from 'node:perf_hooks';
 import { randomUUID } from 'node:crypto';
 
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 
 import { INFRASTRUCTURE_CONFIG } from '../config/infrastructure-config.module';
 import type { InfrastructureConfig } from '../config/infrastructure.config';
@@ -13,6 +13,12 @@ import {
   structuredLogger,
   type SafeLogFields,
 } from '../logging';
+import {
+  applicationObservability,
+  OBSERVABILITY_PORT,
+  type ObservabilityJobErrorClass,
+  type ObservabilityPort,
+} from '../observability';
 import { SqsService } from './sqs.service';
 import type {
   JobEnvelope,
@@ -64,6 +70,49 @@ function processingErrorCode(error: unknown): JobProcessingErrorCode {
   } catch {
     return 'JOB_PROCESSING_FAILED';
   }
+}
+
+function observabilityErrorClass(code: JobProcessingErrorCode): ObservabilityJobErrorClass {
+  switch (code) {
+    case 'JOB_ENVELOPE_INVALID':
+      return 'validation';
+    case 'SQS_RECEIPT_OWNERSHIP_EXPIRED':
+      return 'ownership_lost';
+    case 'SQS_DELETE_FAILED':
+    case 'SQS_VISIBILITY_HEARTBEAT_FAILED':
+    case 'SQS_VISIBILITY_UPDATE_FAILED':
+      return 'dependency';
+    case 'JOB_HANDLER_FAILED':
+    case 'JOB_PROCESSING_FAILED':
+      return 'internal';
+  }
+}
+
+function recordDiagnostic(work: () => unknown): void {
+  try {
+    work();
+  } catch {
+    // Telemetry adapters must never change queue or handler behavior.
+  }
+}
+
+function runWithDiagnosticSpan<T>(
+  span: { runAsync(work: () => Promise<T>): Promise<T> } | undefined,
+  operation: () => Promise<T>,
+): Promise<T> {
+  let operationPromise: Promise<T> | undefined;
+  const runOnce = (): Promise<T> => {
+    operationPromise ??= Promise.resolve().then(operation);
+    return operationPromise;
+  };
+  if (span) {
+    try {
+      void Promise.resolve(span.runAsync(runOnce)).catch(() => undefined);
+    } catch {
+      // Fall through to the same cached business operation.
+    }
+  }
+  return operationPromise ?? runOnce();
 }
 
 interface VisibilityHeartbeat {
@@ -230,10 +279,15 @@ function startVisibilityHeartbeat(
 
 @Injectable()
 export class SqsJobWorker {
+  private inFlightJobs = 0;
+
   constructor(
     private readonly sqs: SqsService,
     @Inject(INFRASTRUCTURE_CONFIG)
     private readonly config: InfrastructureConfig,
+    @Optional()
+    @Inject(OBSERVABILITY_PORT)
+    private readonly observability: ObservabilityPort = applicationObservability,
   ) {}
 
   /**
@@ -246,6 +300,34 @@ export class SqsJobWorker {
       return { status: 'idle' };
     }
 
+    this.inFlightJobs += 1;
+    recordDiagnostic(() =>
+      this.observability.recordWorkerSaturation({
+        worker: 'job_consumer',
+        inFlight: this.inFlightJobs,
+      }),
+    );
+    recordDiagnostic(() =>
+      this.observability.recordQueueEvent({ queue: 'jobs', event: 'received' }),
+    );
+
+    try {
+      return await this.processReceivedMessage(message, handler);
+    } finally {
+      this.inFlightJobs = Math.max(0, this.inFlightJobs - 1);
+      recordDiagnostic(() =>
+        this.observability.recordWorkerSaturation({
+          worker: 'job_consumer',
+          inFlight: this.inFlightJobs,
+        }),
+      );
+    }
+  }
+
+  private async processReceivedMessage<Payload>(
+    message: ReceivedQueueMessage,
+    handler: JobHandler<Payload>,
+  ): Promise<JobProcessingResult> {
     let job: JobEnvelope<Payload>;
     try {
       job = this.sqs.parseEnvelope<Payload>(message.body);
@@ -264,56 +346,80 @@ export class SqsJobWorker {
     return loggingContext.run(
       { ...job.correlation, ...(diagnosticJobId ? { jobId: diagnosticJobId } : {}) },
       async (): Promise<JobProcessingResult> => {
+        let span;
         try {
-          const heartbeat = startVisibilityHeartbeat(
-            this.sqs,
-            message,
-            this.config.sqs.visibilityTimeoutSeconds,
-          );
-          const heartbeatReady = await heartbeat.ready();
-          if (heartbeatReady.status === 'failed') {
-            if (isReceiptOwnershipExpired(heartbeatReady.error)) {
-              throw heartbeatReady.error;
-            }
-            throw new JobProcessingFailure('SQS_VISIBILITY_HEARTBEAT_FAILED');
-          }
-          let processingFailed = false;
+          span = this.observability.startSpan({
+            name: 'queue.process',
+            kind: 'consumer',
+            synthetic: false,
+          });
+        } catch {
+          span = undefined;
+        }
+        const process = async (): Promise<JobProcessingResult> => {
           try {
-            await handler(job);
-          } catch {
-            processingFailed = true;
-          }
-          const heartbeatResult = await heartbeat.stop();
-          if (
-            heartbeatResult.status === 'failed' &&
-            isReceiptOwnershipExpired(heartbeatResult.error)
-          ) {
-            throw heartbeatResult.error;
-          }
-          if (processingFailed) {
-            throw new JobProcessingFailure('JOB_HANDLER_FAILED');
-          }
-          if (heartbeatResult.status === 'failed') {
-            throw new JobProcessingFailure('SQS_VISIBILITY_HEARTBEAT_FAILED');
-          }
-          try {
-            await deleteWithDeadline(
+            const heartbeat = startVisibilityHeartbeat(
               this.sqs,
               message,
-              visibilityRequestTimeoutMs(this.config.sqs.visibilityTimeoutSeconds),
+              this.config.sqs.visibilityTimeoutSeconds,
             );
-          } catch {
-            throw new JobProcessingFailure('SQS_DELETE_FAILED');
+            const heartbeatReady = await heartbeat.ready();
+            if (heartbeatReady.status === 'failed') {
+              if (isReceiptOwnershipExpired(heartbeatReady.error)) {
+                throw heartbeatReady.error;
+              }
+              throw new JobProcessingFailure('SQS_VISIBILITY_HEARTBEAT_FAILED');
+            }
+            let processingFailed = false;
+            try {
+              await handler(job);
+            } catch {
+              processingFailed = true;
+            }
+            const heartbeatResult = await heartbeat.stop();
+            if (
+              heartbeatResult.status === 'failed' &&
+              isReceiptOwnershipExpired(heartbeatResult.error)
+            ) {
+              throw heartbeatResult.error;
+            }
+            if (processingFailed) {
+              throw new JobProcessingFailure('JOB_HANDLER_FAILED');
+            }
+            if (heartbeatResult.status === 'failed') {
+              throw new JobProcessingFailure('SQS_VISIBILITY_HEARTBEAT_FAILED');
+            }
+            try {
+              await deleteWithDeadline(
+                this.sqs,
+                message,
+                visibilityRequestTimeoutMs(this.config.sqs.visibilityTimeoutSeconds),
+              );
+            } catch {
+              throw new JobProcessingFailure('SQS_DELETE_FAILED');
+            }
+            structuredLogger.emit(LOG_EVENTS.jobProcessed, 'info', {
+              outcome: 'success',
+              ...diagnosticMessageField(message.messageId),
+              ...diagnosticJobFields(job),
+              receiveCount: message.receiveCount,
+            });
+            recordDiagnostic(() =>
+              this.observability.recordQueueEvent({ queue: 'jobs', event: 'completed' }),
+            );
+            return { status: 'completed', messageId: message.messageId, jobId: job.id };
+          } catch (error) {
+            return this.handleFailure(message, job, error);
           }
-          structuredLogger.emit(LOG_EVENTS.jobProcessed, 'info', {
-            outcome: 'success',
-            ...diagnosticMessageField(message.messageId),
-            ...diagnosticJobFields(job),
-            receiveCount: message.receiveCount,
-          });
-          return { status: 'completed', messageId: message.messageId, jobId: job.id };
+        };
+
+        try {
+          const result = await runWithDiagnosticSpan<JobProcessingResult>(span, process);
+          recordDiagnostic(() => span?.end(result.status === 'completed' ? 'success' : 'failure'));
+          return result;
         } catch (error) {
-          return this.handleFailure(message, job, error);
+          recordDiagnostic(() => span?.end('failure'));
+          throw error;
         }
       },
     );
@@ -326,6 +432,13 @@ export class SqsJobWorker {
   ): Promise<JobProcessingResult> {
     const errorCode = processingErrorCode(error);
     if (isReceiptOwnershipExpired(error)) {
+      recordDiagnostic(() =>
+        this.observability.recordJobFailure({
+          queue: 'jobs',
+          disposition: 'ownership_lost',
+          errorClass: observabilityErrorClass(errorCode),
+        }),
+      );
       structuredLogger.emit(LOG_EVENTS.jobOwnershipLost, 'error', {
         outcome: 'failure',
         errorCode,
@@ -358,6 +471,13 @@ export class SqsJobWorker {
         visibilityRequestTimeoutMs(this.config.sqs.visibilityTimeoutSeconds),
       );
     } catch {
+      recordDiagnostic(() =>
+        this.observability.recordJobFailure({
+          queue: 'jobs',
+          disposition: 'ownership_lost',
+          errorClass: 'dependency',
+        }),
+      );
       structuredLogger.emit(LOG_EVENTS.jobOwnershipLost, 'error', {
         outcome: 'failure',
         errorCode: 'SQS_VISIBILITY_UPDATE_FAILED',
@@ -374,6 +494,13 @@ export class SqsJobWorker {
       };
     }
 
+    recordDiagnostic(() =>
+      this.observability.recordJobFailure({
+        queue: 'jobs',
+        disposition: exhausted ? 'awaiting_dead_letter' : 'retry_scheduled',
+        errorClass: observabilityErrorClass(errorCode),
+      }),
+    );
     structuredLogger.emit(
       exhausted ? LOG_EVENTS.jobAwaitingDeadLetter : LOG_EVENTS.jobRetryScheduled,
       exhausted ? 'error' : 'warn',

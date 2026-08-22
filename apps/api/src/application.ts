@@ -8,10 +8,15 @@ import {
   structuredLogger,
   type StructuredLogger,
 } from './infrastructure/logging';
+import { applicationObservability } from './infrastructure/observability/structured-observability';
+import type { ObservabilityPort } from './infrastructure/observability/observability';
 import { setupOpenApi } from './openapi/openapi';
 
 export interface ApplicationConfigurationOptions {
+  readonly observability?: ObservabilityPort;
   readonly requestLogger?: StructuredLogger;
+  /** Trusted bootstrap/test marker. Request headers cannot enable synthetic telemetry. */
+  readonly syntheticRequest?: boolean;
 }
 
 /** Applies the production HTTP contract to both the real server and test apps. */
@@ -21,7 +26,12 @@ export function configureApplication(
 ): OpenAPIObject {
   const production = process.env.NODE_ENV?.trim().toLowerCase() === 'production';
 
-  app.use(createRequestLoggingMiddleware(options.requestLogger ?? structuredLogger));
+  app.use(
+    createRequestLoggingMiddleware(options.requestLogger ?? structuredLogger, {
+      observability: options.observability ?? applicationObservability,
+      syntheticRequest: options.syntheticRequest === true,
+    }),
+  );
   app.use(
     helmet({
       // Swagger's local-only UI requires inline bootstrap code. Production

@@ -271,6 +271,11 @@ gate.
   registry version and fingerprint. Connector/RPC provenance remains gated to
   the later IDX provider and indexing work documented in
   [`docs/KAN-61.md`](docs/KAN-61.md).
+- `apps/api/src/infrastructure/observability` owns KAN-52's provider-neutral,
+  low-cardinality metrics and server-authoritative correlation-linked spans.
+  The optional environment dashboard remains disabled by default; local
+  evidence and the separate deployed/cost gate are documented in
+  [`docs/KAN-52.md`](docs/KAN-52.md).
 - [`docs/adr/0003-immutable-ledger-accounting-model.md`](docs/adr/0003-immutable-ledger-accounting-model.md)
   defines KAN-40's proposed operational, multi-asset ledger contract. KAN-41
   implements the local append-only schema and application boundary, while

@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events';
 
+import { InProcessObservability, type ObservabilityPort } from '../observability/observability';
 import { loggingContext } from './logging-context';
 import {
   createRequestLoggingMiddleware,
@@ -26,16 +27,30 @@ function records(lines: readonly string[]): StructuredLogRecord[] {
 describe('request logging middleware', () => {
   it('uses an authoritative ID and records completion with only a verified initiator', () => {
     const lines: string[] = [];
+    let now = 0;
+    const observability = new InProcessObservability({
+      monotonicNow: () => now,
+      wallClock: () => new Date('2026-08-22T12:00:00.000Z'),
+    });
     const logger = new StructuredLogger({
       environment: { APPLICATION_WORKLOAD: 'api', NODE_ENV: 'test' },
       sink: (line) => lines.push(line),
     });
-    const middleware = createRequestLoggingMiddleware(logger);
+    const middleware = createRequestLoggingMiddleware(logger, {
+      monotonicNow: () => now,
+      observability,
+      syntheticRequest: true,
+    });
     const request = {
       baseUrl: '',
-      headers: { 'x-request-id': 'attacker-controlled' },
+      headers: {
+        traceparent: '00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01',
+        tracestate: 'attacker=customer-secret',
+        'x-crypto-synthetic': 'false',
+        'x-request-id': 'attacker-controlled',
+      },
       method: 'patch',
-      originalUrl: '/api/v1/accounts/me?token=must-not-escape',
+      originalUrl: '/api/v1/accounts/me?token=must-not-escape&customer=customer-secret',
       route: { path: '/api/v1/accounts/me' },
       body: { password: 'must-not-escape' },
     };
@@ -46,6 +61,23 @@ describe('request logging middleware', () => {
       expect(active.requestId).toMatch(/^[0-9a-f-]{36}$/u);
       expect(active.requestId).not.toBe('attacker-controlled');
       loggingContext.bindActorId(VERIFIED_ACTOR_ID);
+      expect(observability.currentTraceContext()).toEqual(
+        expect.objectContaining({
+          traceId: expect.stringMatching(/^[0-9a-f]{32}$/u),
+          rootSpanId: expect.stringMatching(/^[0-9a-f]{16}$/u),
+          spanId: expect.stringMatching(/^[0-9a-f]{16}$/u),
+          synthetic: true,
+        }),
+      );
+      expect(
+        observability
+          .dashboardSnapshot()
+          .gauges.find(({ name }) => name === 'http_active_requests'),
+      ).toMatchObject({
+        labels: { operation: 'account_profile', synthetic: 'true' },
+        value: 1,
+      });
+      now = 12;
       response.statusCode = 200;
       response.writableFinished = true;
       response.emit('finish');
@@ -64,12 +96,56 @@ describe('request logging middleware', () => {
     expect(output[0]?.requestId).toBe(response.headers.get(REQUEST_ID_RESPONSE_HEADER));
     expect(output[0]?.correlationId).toBe(output[0]?.requestId);
     expect(lines.join('\n')).not.toMatch(/attacker-controlled|token=|password|must-not-escape/u);
+
+    const snapshot = observability.dashboardSnapshot();
+    expect(snapshot.counters).toContainEqual({
+      name: 'http_requests_total',
+      labels: {
+        operation: 'account_profile',
+        method: 'PATCH',
+        outcome: 'success',
+        synthetic: 'true',
+      },
+      value: 1,
+    });
+    expect(snapshot.gauges).toContainEqual({
+      name: 'http_active_requests',
+      labels: { operation: 'account_profile', synthetic: 'true' },
+      value: 0,
+    });
+    expect(snapshot.histograms).toEqual([
+      expect.objectContaining({
+        name: 'http_request_duration_ms',
+        labels: { operation: 'account_profile', method: 'PATCH', synthetic: 'true' },
+        count: 1,
+        sum: 12,
+      }),
+    ]);
+    expect(snapshot.completedSpans).toEqual([
+      expect.objectContaining({
+        eventName: 'trace.span.completed',
+        traceId: expect.stringMatching(/^[0-9a-f]{32}$/u),
+        rootSpanId: expect.stringMatching(/^[0-9a-f]{16}$/u),
+        spanId: expect.stringMatching(/^[0-9a-f]{16}$/u),
+        correlationId: response.headers.get(REQUEST_ID_RESPONSE_HEADER),
+        name: 'http.request',
+        kind: 'server',
+        outcome: 'success',
+        synthetic: true,
+        durationMs: 12,
+      }),
+    ]);
+    expect(snapshot.completedSpans[0]).not.toHaveProperty('parentSpanId');
+    expect(JSON.stringify(snapshot)).not.toMatch(
+      /aaaaaaaa|bbbbbbbb|attacker|customer-secret|must-not-escape|token=/u,
+    );
   });
 
   it('suppresses successful health noise but records health failure', () => {
     const lines: string[] = [];
+    const observability = new InProcessObservability();
     const logger = new StructuredLogger({ sink: (line) => lines.push(line) });
-    const middleware = createRequestLoggingMiddleware(logger);
+    const middleware = createRequestLoggingMiddleware(logger, { observability });
 
     const healthy = new TestResponse();
     healthy.writableFinished = true;
@@ -104,12 +180,43 @@ describe('request logging middleware', () => {
         outcome: 'failure',
       }),
     ]);
+    const snapshot = observability.dashboardSnapshot();
+    expect(snapshot.counters.filter(({ name }) => name === 'http_requests_total')).toEqual([
+      expect.objectContaining({
+        labels: {
+          operation: 'health',
+          method: 'GET',
+          outcome: 'failure',
+          synthetic: 'false',
+        },
+        value: 1,
+      }),
+      expect.objectContaining({
+        labels: {
+          operation: 'health',
+          method: 'GET',
+          outcome: 'success',
+          synthetic: 'false',
+        },
+        value: 1,
+      }),
+    ]);
+    expect(snapshot.completedSpans).toEqual([
+      expect.objectContaining({ name: 'http.request', outcome: 'failure' }),
+    ]);
+    expect(snapshot.gauges).toContainEqual({
+      name: 'http_active_requests',
+      labels: { operation: 'health', synthetic: 'false' },
+      value: 0,
+    });
   });
 
   it('records an aborted request exactly once with a canonical route template', () => {
     const lines: string[] = [];
+    const observability = new InProcessObservability();
     const middleware = createRequestLoggingMiddleware(
       new StructuredLogger({ sink: (line) => lines.push(line) }),
+      { observability },
     );
     const response = new TestResponse();
 
@@ -136,6 +243,109 @@ describe('request logging middleware', () => {
       outcome: 'aborted',
     });
     expect(lines.join('\n')).not.toContain('private-value');
+    const snapshot = observability.dashboardSnapshot();
+    expect(snapshot.counters).toEqual([
+      expect.objectContaining({
+        name: 'http_request_errors_total',
+        labels: { operation: 'unknown', outcome: 'aborted', synthetic: 'false' },
+        value: 1,
+      }),
+      expect.objectContaining({
+        name: 'http_requests_total',
+        labels: {
+          operation: 'unknown',
+          method: 'GET',
+          outcome: 'aborted',
+          synthetic: 'false',
+        },
+        value: 1,
+      }),
+    ]);
+    expect(snapshot.completedSpans).toEqual([
+      expect.objectContaining({ name: 'http.request', outcome: 'aborted' }),
+    ]);
+  });
+
+  it('balances saturation across concurrent requests of the same closed operation', () => {
+    const observability = new InProcessObservability();
+    const middleware = createRequestLoggingMiddleware(new StructuredLogger({ sink: () => {} }), {
+      observability,
+    });
+    const first = new TestResponse();
+    const second = new TestResponse();
+    const request = { method: 'POST', originalUrl: '/api/v1/quotes' };
+
+    middleware(request, first, () => undefined);
+    middleware(request, second, () => undefined);
+    expect(observability.dashboardSnapshot().gauges).toContainEqual({
+      name: 'http_active_requests',
+      labels: { operation: 'quote', synthetic: 'false' },
+      value: 2,
+    });
+
+    first.writableFinished = true;
+    first.emit('finish');
+    expect(observability.dashboardSnapshot().gauges).toContainEqual({
+      name: 'http_active_requests',
+      labels: { operation: 'quote', synthetic: 'false' },
+      value: 1,
+    });
+
+    second.writableFinished = true;
+    second.emit('close');
+    expect(observability.dashboardSnapshot().gauges).toContainEqual({
+      name: 'http_active_requests',
+      labels: { operation: 'quote', synthetic: 'false' },
+      value: 0,
+    });
+    expect(
+      observability
+        .dashboardSnapshot()
+        .counters.filter(({ name }) => name === 'http_requests_total'),
+    ).toEqual([expect.objectContaining({ value: 2 })]);
+  });
+
+  it('isolates recorder and span-runner failures from request behavior', () => {
+    const lines: string[] = [];
+    const observability = {
+      recordRequest: jest.fn(() => {
+        throw new Error('diagnostic failure');
+      }),
+      recordRequestSaturation: jest.fn(() => {
+        throw new Error('diagnostic failure');
+      }),
+      startSpan: jest.fn(() => ({
+        run: () => {
+          throw new Error('diagnostic failure');
+        },
+        runAsync: jest.fn(),
+        discard: jest.fn(() => {
+          throw new Error('diagnostic failure');
+        }),
+        end: () => {
+          throw new Error('diagnostic failure');
+        },
+      })),
+    } as unknown as ObservabilityPort;
+    const middleware = createRequestLoggingMiddleware(
+      new StructuredLogger({ sink: (line) => lines.push(line) }),
+      { observability },
+    );
+    const response = new TestResponse();
+    response.writableFinished = true;
+    let calls = 0;
+
+    expect(() =>
+      middleware({ method: 'GET', originalUrl: '/api/v1/version' }, response, () => {
+        calls += 1;
+        response.emit('finish');
+      }),
+    ).not.toThrow();
+
+    expect(calls).toBe(1);
+    expect(records(lines)).toEqual([
+      expect.objectContaining({ event: 'http.request.completed', outcome: 'success' }),
+    ]);
   });
 
   it('bounds anonymous rejection logs per window without suppressing verified actors', () => {

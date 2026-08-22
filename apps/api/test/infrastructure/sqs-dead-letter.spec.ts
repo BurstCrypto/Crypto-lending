@@ -20,6 +20,7 @@ import {
   parseJobEnvelope,
   type JobCorrelationContext,
 } from '../../src/infrastructure/outbox/job-envelope';
+import { InProcessObservability } from '../../src/infrastructure/observability';
 import { SqsJobWorker } from '../../src/infrastructure/sqs/sqs-job.worker';
 import { SqsService } from '../../src/infrastructure/sqs/sqs.service';
 import { testInfrastructureConfig } from './fixtures';
@@ -143,7 +144,8 @@ describe('SQS retry and dead-letter flow', () => {
       config.sqs.maxReceiveCount,
     );
     const sqs = new SqsService(transport as unknown as SQSClient, config);
-    const worker = new SqsJobWorker(sqs, config);
+    const observability = new InProcessObservability();
+    const worker = new SqsJobWorker(sqs, config, observability);
     const correlationId = testUuid(1);
     const correlation = {
       correlationId,
@@ -196,6 +198,54 @@ describe('SQS retry and dead-letter flow', () => {
       retryDelaySeconds: 0,
       errorCode: 'JOB_HANDLER_FAILED',
     });
+
+    const telemetry = observability.dashboardSnapshot();
+    expect(telemetry.counters).toEqual(
+      expect.arrayContaining([
+        {
+          name: 'job_errors_total',
+          labels: { queue: 'jobs', error_class: 'internal' },
+          value: 3,
+        },
+        {
+          name: 'queue_events_total',
+          labels: { queue: 'jobs', event: 'received' },
+          value: 3,
+        },
+        {
+          name: 'queue_events_total',
+          labels: { queue: 'jobs', event: 'retry_scheduled' },
+          value: 2,
+        },
+        {
+          name: 'queue_events_total',
+          labels: { queue: 'jobs', event: 'awaiting_dead_letter' },
+          value: 1,
+        },
+      ]),
+    );
+    expect(telemetry.gauges).toEqual(
+      expect.arrayContaining([
+        { name: 'worker_in_flight', labels: { worker: 'job_consumer' }, value: 0 },
+      ]),
+    );
+    expect(
+      telemetry.gauges.find(
+        ({ name, labels }) =>
+          name === 'worker_saturation_ratio' && labels.worker === 'job_consumer',
+      ),
+    ).toBeUndefined();
+    expect(telemetry.completedSpans).toHaveLength(3);
+    expect(new Set(telemetry.completedSpans.map(({ traceId }) => traceId)).size).toBe(1);
+    for (const span of telemetry.completedSpans) {
+      expect(span).toMatchObject({
+        name: 'queue.process',
+        kind: 'consumer',
+        outcome: 'failure',
+        correlationId,
+        parentSpanId: span.rootSpanId,
+      });
+    }
 
     // The next source receive is where SQS evaluates and performs redrive.
     await expect(sqs.receive()).resolves.toEqual([]);
