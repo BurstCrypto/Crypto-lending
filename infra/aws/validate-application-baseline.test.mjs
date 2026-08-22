@@ -83,6 +83,124 @@ test('accepts the repository no-external-egress baseline and records the DNS res
   assert.match(report.residualLimitations[3], /FAILED_AUTH_MONITORING_UNRESOLVED/);
 });
 
+test('keeps the environment dashboard opt-in and behind the existing billing gate', () => {
+  assertRejected(
+    mutate((source) =>
+      source.replace(
+        "  EnableOperationalDashboard:\n    Type: String\n    Default: 'false'",
+        "  EnableOperationalDashboard:\n    Type: String\n    Default: 'true'",
+      ),
+    ),
+    /EnableOperationalDashboard must preserve the exact opt-in String contract with a false default/,
+  );
+  assertRejected(
+    mutate((source) =>
+      source.replace(
+        "CreateOperationalDashboard: !Equals [!Ref EnableOperationalDashboard, 'true']",
+        "CreateOperationalDashboard: !Equals [!Ref EnableOperationalAlarms, 'true']",
+      ),
+    ),
+    /CreateOperationalDashboard must preserve the exact opt-in condition/,
+  );
+  assertRejected(
+    mutate((source) =>
+      source.replace(
+        '    Condition: CreateOperationalDashboard\n    Properties:\n      DashboardName:',
+        '    Condition: CreateOperationalAlarms\n    Properties:\n      DashboardName:',
+      ),
+    ),
+    /OperationalDashboard must remain disabled unless CreateOperationalDashboard is true/,
+  );
+});
+
+test('pins low-cardinality native API, ECS, source-queue, and DLQ dashboard metrics', () => {
+  for (const [search, replacement, message] of [
+    [
+      '"TargetResponseTime",".",".",".",".",{"stat":"p95"}',
+      '"TargetResponseTime",".",".",".",".",{"stat":"Average"}',
+      /native ALB request, target 4xx\/5xx, and p95 latency contract/,
+    ],
+    [
+      '"${ApiService.Name}"],[".","MemoryUtilization"',
+      '"${WebService.Name}"],[".","MemoryUtilization"',
+      /native ECS CPU and memory saturation contract for API, web, and worker/,
+    ],
+    [
+      '"${JobDeadLetterQueue.QueueName}"]]}',
+      '"${JobQueue.QueueName}"]]}',
+      /source-queue backlog\/age and dead-letter-queue depth contract/,
+    ],
+  ]) {
+    assertRejected(
+      mutate((source) => source.replace(search, replacement)),
+      message,
+    );
+  }
+
+  assertRejected(
+    mutate((source) =>
+      source.replace(
+        '"RequestCount","LoadBalancer"',
+        '"RequestCount","correlationId","${EnvironmentName}","LoadBalancer"',
+      ),
+    ),
+    /native metric dimensions must exclude high-cardinality customer and trace identifiers/,
+  );
+});
+
+test('pins bounded allowlisted trace, job-failure, and lifecycle log queries', () => {
+  for (const [search, replacement, message] of [
+    [
+      "SOURCE logGroups(namePrefix: ['/crypto-lending/${EnvironmentName}/'])",
+      "SOURCE 'logGroups(namePrefix: ['/crypto-lending/${EnvironmentName}/'])",
+      /bounded trace query and trace\.span\.completed event contract/,
+    ],
+    [
+      "filter event = 'trace.span.completed' | limit 100",
+      "filter event = 'trace.span.started' | limit 100",
+      /bounded trace query and trace\.span\.completed event contract/,
+    ],
+    [
+      "'job.awaiting_dead_letter'",
+      "'job.processed'",
+      /bounded job-failure query and closed structured-event set/,
+    ],
+    [
+      'by lifecycleScope, state, reason',
+      'by lifecycleScope, state, transactionId',
+      /lifecycle transition query grouped only by closed scope, state, and reason fields/,
+    ],
+  ]) {
+    assertRejected(
+      mutate((source) => source.replace(search, replacement)),
+      message,
+    );
+  }
+
+  assertRejected(
+    mutate((source) =>
+      source.replace(
+        'fields @timestamp, correlationId, traceId',
+        'fields @timestamp, @message, correlationId, traceId',
+      ),
+    ),
+    /log queries must use only reviewed structured fields and must never expose raw messages/,
+  );
+});
+
+test('rejects malformed or expanded operational dashboard JSON', () => {
+  assertRejected(
+    mutate((source) => source.replace('{"widgets":[', '{widgets:[')),
+    /OperationalDashboard\.DashboardBody must contain valid folded JSON/,
+  );
+  assertRejected(
+    mutate((source) =>
+      source.replace('{"widgets":[', '{"unreviewed":{"customerId":"forbidden"},"widgets":['),
+    ),
+    /OperationalDashboard must contain only one JSON widgets array/,
+  );
+});
+
 test('rejects mutations to the exact bounded log-retention parameter contract', () => {
   for (const [search, replacement] of [
     ['  LogRetentionDays:\n    Type: Number', '  LogRetentionDays:\n    Type: String'],

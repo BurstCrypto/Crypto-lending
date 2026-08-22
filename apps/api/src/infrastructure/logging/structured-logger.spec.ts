@@ -92,6 +92,177 @@ describe('StructuredLogger', () => {
     expect(parse(lines[1] ?? '')).not.toHaveProperty('jobKind');
   });
 
+  it('emits only canonical completed spans and closed ledger lifecycle transitions', () => {
+    const lines: string[] = [];
+    const logger = new StructuredLogger({ sink: (line) => lines.push(line) });
+
+    logger.emit(LOG_EVENTS.traceSpanCompleted, 'info', {
+      traceId: '0123456789abcdef0123456789abcdef',
+      spanId: '0123456789abcdef',
+      parentSpanId: 'fedcba9876543210',
+      spanName: 'http.request',
+      durationMs: 12.34567,
+      outcome: 'success',
+      errorCode: 'HTTP_SERVER_ERROR',
+    });
+    logger.emit(LOG_EVENTS.traceSpanCompleted, 'error', {
+      traceId: 'fedcba9876543210fedcba9876543210',
+      spanId: 'fedcba9876543210',
+      spanName: 'queue.process',
+      durationMs: 25,
+      outcome: 'failure',
+      errorCode: 'JOB_HANDLER_FAILED',
+    });
+    logger.emit(LOG_EVENTS.ledgerLifecycleTransitioned, 'info', {
+      lifecycleScope: 'leg',
+      state: 'QUOTED',
+      reason: 'QUOTE_CREATED',
+    });
+
+    expect(lines.map(parse)).toEqual([
+      expect.objectContaining({
+        event: 'trace.span.completed',
+        traceId: '0123456789abcdef0123456789abcdef',
+        spanId: '0123456789abcdef',
+        parentSpanId: 'fedcba9876543210',
+        spanName: 'http.request',
+        durationMs: 12.346,
+        outcome: 'success',
+      }),
+      expect.objectContaining({
+        event: 'trace.span.completed',
+        traceId: 'fedcba9876543210fedcba9876543210',
+        spanId: 'fedcba9876543210',
+        spanName: 'queue.process',
+        durationMs: 25,
+        outcome: 'failure',
+        errorCode: 'JOB_HANDLER_FAILED',
+      }),
+      expect.objectContaining({
+        event: 'ledger.lifecycle.transitioned',
+        lifecycleScope: 'leg',
+        state: 'QUOTED',
+        reason: 'QUOTE_CREATED',
+      }),
+    ]);
+    expect(parse(lines[0] ?? '')).not.toHaveProperty('errorCode');
+  });
+
+  it('keeps high-cardinality domain context out of trace events', () => {
+    const lines: string[] = [];
+    const context = new LoggingContext();
+    const logger = new StructuredLogger({ context, sink: (line) => lines.push(line) });
+
+    context.run(
+      {
+        correlationId: REQUEST_ID,
+        requestId: REQUEST_ID,
+        initiatorActorId: ACTOR_ID,
+        jobId: `job:${'a'.repeat(64)}`,
+        intentId: INTENT_ID,
+        quoteId: '00000000-0000-4000-8000-000000000004',
+        transactionId: '00000000-0000-4000-8000-000000000005',
+        ledgerEventId: '00000000-0000-4000-8000-000000000006',
+      },
+      () =>
+        logger.emit(LOG_EVENTS.traceSpanCompleted, 'info', {
+          traceId: '0123456789abcdef0123456789abcdef',
+          spanId: '0123456789abcdef',
+          spanName: 'queue.process',
+          durationMs: 1,
+          outcome: 'success',
+        }),
+    );
+
+    expect(parse(lines[0] ?? '')).toMatchObject({
+      event: 'trace.span.completed',
+      correlationId: REQUEST_ID,
+    });
+    for (const field of [
+      'requestId',
+      'initiatorActorId',
+      'jobId',
+      'intentId',
+      'quoteId',
+      'transactionId',
+      'ledgerEventId',
+    ]) {
+      expect(parse(lines[0] ?? '')).not.toHaveProperty(field);
+    }
+  });
+
+  it('drops malformed or semantically inconsistent trace and lifecycle records', () => {
+    const lines: string[] = [];
+    const logger = new StructuredLogger({ sink: (line) => lines.push(line) });
+
+    for (const fields of [
+      {
+        traceId: 'ABCDEF0123456789ABCDEF0123456789',
+        spanId: '0123456789abcdef',
+        spanName: 'http.request',
+        durationMs: 1,
+        outcome: 'success',
+      },
+      {
+        traceId: '00000000000000000000000000000000',
+        spanId: '0123456789abcdef',
+        spanName: 'http.request',
+        durationMs: 1,
+        outcome: 'success',
+      },
+      {
+        traceId: '0123456789abcdef0123456789abcdef',
+        spanId: '0000000000000000',
+        spanName: 'http.request',
+        durationMs: 1,
+        outcome: 'success',
+      },
+      {
+        traceId: '0123456789abcdef0123456789abcdef',
+        spanId: '0123456789abcdef',
+        spanName: 'attacker.request',
+        durationMs: 1,
+        outcome: 'success',
+      },
+      {
+        traceId: '0123456789abcdef0123456789abcdef',
+        spanId: '0123456789abcdef',
+        spanName: 'http.request',
+        durationMs: 1,
+        outcome: 'failure',
+        errorCode: 'Bearer-secret',
+      },
+      {
+        traceId: '0123456789abcdef0123456789abcdef',
+        spanId: '0123456789abcdef',
+        parentSpanId: 'ABCDEF0123456789',
+        spanName: 'http.request',
+        durationMs: 1,
+        outcome: 'success',
+      },
+      {
+        traceId: '0123456789abcdef0123456789abcdef',
+        spanId: '0123456789abcdef',
+        parentSpanId: '0123456789abcdef',
+        spanName: 'http.request',
+        durationMs: 1,
+        outcome: 'success',
+      },
+    ]) {
+      logger.emit(LOG_EVENTS.traceSpanCompleted, 'error', fields as SafeLogFields);
+    }
+    for (const fields of [
+      { lifecycleScope: 'wallet', state: 'QUOTED', reason: 'QUOTE_CREATED' },
+      { lifecycleScope: 'leg', state: 'SECRET_STATE', reason: 'QUOTE_CREATED' },
+      { lifecycleScope: 'leg', state: 'QUOTED', reason: 'SECRET_REASON' },
+      { lifecycleScope: 'leg', state: 'SETTLED', reason: 'QUOTE_CREATED' },
+    ]) {
+      logger.emit(LOG_EVENTS.ledgerLifecycleTransitioned, 'info', fields as SafeLogFields);
+    }
+
+    expect(lines).toEqual([]);
+  });
+
   it('drops unknown, secret-bearing, invalid, and event-inappropriate fields', () => {
     const lines: string[] = [];
     const logger = new StructuredLogger({

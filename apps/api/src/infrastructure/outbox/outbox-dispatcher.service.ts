@@ -1,9 +1,16 @@
 import { hostname } from 'node:os';
 import { randomUUID } from 'node:crypto';
 
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 
 import { createSafeLogReference, LOG_EVENTS, loggingContext, structuredLogger } from '../logging';
+import {
+  applicationObservability,
+  OBSERVABILITY_PORT,
+  type ObservabilityJobErrorClass,
+  type ObservabilityPort,
+  type ObservabilitySpanHandle,
+} from '../observability';
 import {
   JobOutboxRepository,
   type ClaimedOutboxJob,
@@ -30,6 +37,36 @@ export interface OutboxDispatchSummary {
 
 class OutboxTransportTimeoutError extends Error {}
 
+function recordDiagnostic(work: () => unknown): void {
+  try {
+    work();
+  } catch {
+    // Telemetry must never change outbox delivery or persistence behavior.
+  }
+}
+
+function runWithDiagnosticSpan<T>(
+  span: ObservabilitySpanHandle | undefined,
+  operation: () => Promise<T>,
+): Promise<T> {
+  let operationPromise: Promise<T> | undefined;
+  const runOnce = (): Promise<T> => {
+    operationPromise ??= Promise.resolve().then(operation);
+    return operationPromise;
+  };
+  if (span) {
+    try {
+      // The trusted in-process adapter invokes runOnce synchronously inside its
+      // context. We never await the diagnostic runner itself: a faulty adapter
+      // cannot skip, repeat, or stall publication.
+      void Promise.resolve(span.runAsync(runOnce)).catch(() => undefined);
+    } catch {
+      // Fall through to the same cached business operation.
+    }
+  }
+  return operationPromise ?? runOnce();
+}
+
 function diagnosticJobFields(job: ClaimedOutboxJob): {
   readonly jobId?: string;
   readonly jobKind: string;
@@ -53,15 +90,23 @@ function failureCode(error: unknown): OutboxFailureCode {
   }
 }
 
+function observabilityErrorClass(code: OutboxFailureCode): ObservabilityJobErrorClass {
+  return code === 'OUTBOX_TRANSPORT_TIMEOUT' ? 'timeout' : 'dependency';
+}
+
 @Injectable()
 export class OutboxDispatcher {
   private readonly dispatcherInstanceId = `${hostname()}:${process.pid}:${randomUUID()}`;
+  private inFlightDispatchers = 0;
 
   constructor(
     private readonly repository: JobOutboxRepository,
     @Inject(OUTBOX_TRANSPORT) private readonly transport: OutboxTransport,
     @Inject(OUTBOX_DISPATCHER_OPTIONS)
     private readonly options: OutboxDispatcherOptions,
+    @Optional()
+    @Inject(OBSERVABILITY_PORT)
+    private readonly observability: ObservabilityPort = applicationObservability,
   ) {}
 
   async cleanupExpired(): Promise<number> {
@@ -112,12 +157,17 @@ export class OutboxDispatcher {
     const workers = Array.from(
       { length: Math.min(this.options.concurrency, batches.length) },
       async () => {
-        while (cursor < batches.length) {
-          const batch = batches[cursor];
-          cursor += 1;
-          if (batch) {
-            await this.dispatchMany(batch, claimToken, summary, shutdownSignal);
+        this.changeWorkerInFlight(1);
+        try {
+          while (cursor < batches.length) {
+            const batch = batches[cursor];
+            cursor += 1;
+            if (batch) {
+              await this.dispatchMany(batch, claimToken, summary, shutdownSignal);
+            }
           }
+        } finally {
+          this.changeWorkerInFlight(-1);
         }
       },
     );
@@ -142,6 +192,7 @@ export class OutboxDispatcher {
       return;
     }
 
+    const spans = jobs.map((job) => this.startPublishSpan(job));
     let results: readonly OutboxTransportBatchResult[];
     try {
       results = await this.withTransportDeadline(
@@ -160,6 +211,7 @@ export class OutboxDispatcher {
         throw new Error('Outbox transport returned an invalid batch result count');
       }
     } catch (error) {
+      for (const span of spans) this.completePublish(span, 'failure');
       if (shutdownSignal?.aborted) {
         summary.leaseLost += jobs.length;
         return;
@@ -179,8 +231,10 @@ export class OutboxDispatcher {
       await Promise.all(
         jobs.map(async (job, index) => {
           if (results[index]?.status === 'published') {
+            this.completePublish(spans[index], 'success');
             await this.markTransportPublished(job, claimToken, summary, results[index].receipt);
           } else {
+            this.completePublish(spans[index], 'failure');
             summary.leaseLost += 1;
           }
         }),
@@ -191,8 +245,10 @@ export class OutboxDispatcher {
       jobs.map(async (job, index) => {
         const result = results[index];
         if (result?.status === 'published') {
+          this.completePublish(spans[index], 'success');
           await this.markTransportPublished(job, claimToken, summary, result.receipt);
         } else {
+          this.completePublish(spans[index], 'failure');
           await this.recordTransportFailure(
             job,
             claimToken,
@@ -218,21 +274,25 @@ export class OutboxDispatcher {
           summary.leaseLost += 1;
           return;
         }
+        const span = this.startPublishSpan(job);
         let receipt: OutboxTransportReceipt;
         try {
-          receipt = await this.withTransportDeadline(
-            (abortSignal) =>
-              this.transport.publish(
-                {
-                  destination: job.destination,
-                  envelope: job.envelope,
-                  messageAttributes: job.messageAttributes,
-                },
-                abortSignal,
-              ),
-            shutdownSignal,
+          receipt = await runWithDiagnosticSpan(span, () =>
+            this.withTransportDeadline(
+              (abortSignal) =>
+                this.transport.publish(
+                  {
+                    destination: job.destination,
+                    envelope: job.envelope,
+                    messageAttributes: job.messageAttributes,
+                  },
+                  abortSignal,
+                ),
+              shutdownSignal,
+            ),
           );
         } catch (error) {
+          this.completePublish(span, 'failure');
           if (shutdownSignal?.aborted) {
             summary.leaseLost += 1;
             return;
@@ -241,6 +301,7 @@ export class OutboxDispatcher {
           return;
         }
 
+        this.completePublish(span, 'success');
         await this.markTransportPublished(job, claimToken, summary, receipt);
       },
     );
@@ -320,6 +381,7 @@ export class OutboxDispatcher {
     return loggingContext.run(
       { ...job.envelope.correlation, ...(diagnosticJobId ? { jobId: diagnosticJobId } : {}) },
       async (): Promise<void> => {
+        const code = failureCode(error);
         const nextAttempt = job.attempts + 1;
         const terminal = nextAttempt >= this.options.maxAttempts;
         const retryDelayMs = terminal
@@ -328,7 +390,6 @@ export class OutboxDispatcher {
               this.options.retryBaseDelayMs * 2 ** job.attempts,
               this.options.retryMaxDelayMs,
             );
-        const code = failureCode(error);
         const transition = await this.repository.recordFailure(job.id, claimToken, code, {
           terminal,
           retryDelayMs,
@@ -340,6 +401,19 @@ export class OutboxDispatcher {
         } else {
           summary.leaseLost += 1;
         }
+        recordDiagnostic(() =>
+          this.observability.recordJobFailure({
+            queue: 'outbox',
+            disposition:
+              transition === 'retry'
+                ? 'retry_scheduled'
+                : transition === 'failed'
+                  ? 'failed'
+                  : 'ownership_lost',
+            errorClass:
+              transition === 'lease-lost' ? 'ownership_lost' : observabilityErrorClass(code),
+          }),
+        );
         structuredLogger.emit(LOG_EVENTS.jobPublishFailed, terminal ? 'error' : 'warn', {
           outcome: transition === 'retry' ? 'retry' : 'failure',
           errorCode: transition === 'lease-lost' ? 'OUTBOX_LEASE_LOST' : code,
@@ -348,6 +422,47 @@ export class OutboxDispatcher {
           retryDelayMs,
         });
       },
+    );
+  }
+
+  private startPublishSpan(job: ClaimedOutboxJob): ObservabilitySpanHandle | undefined {
+    const diagnosticJobId = createSafeLogReference('job', job.id);
+    return loggingContext.run(
+      { ...job.envelope.correlation, ...(diagnosticJobId ? { jobId: diagnosticJobId } : {}) },
+      (): ObservabilitySpanHandle | undefined => {
+        try {
+          return this.observability.startSpan({
+            name: 'queue.publish',
+            kind: 'producer',
+            synthetic: false,
+          });
+        } catch {
+          return undefined;
+        }
+      },
+    );
+  }
+
+  private completePublish(
+    span: ObservabilitySpanHandle | undefined,
+    outcome: 'success' | 'failure',
+  ): void {
+    recordDiagnostic(() => span?.end(outcome));
+    if (outcome === 'success') {
+      recordDiagnostic(() =>
+        this.observability.recordQueueEvent({ queue: 'outbox', event: 'published' }),
+      );
+    }
+  }
+
+  private changeWorkerInFlight(delta: 1 | -1): void {
+    this.inFlightDispatchers = Math.max(0, this.inFlightDispatchers + delta);
+    recordDiagnostic(() =>
+      this.observability.recordWorkerSaturation({
+        worker: 'outbox_dispatcher',
+        inFlight: this.inFlightDispatchers,
+        capacity: this.options.concurrency,
+      }),
     );
   }
 }

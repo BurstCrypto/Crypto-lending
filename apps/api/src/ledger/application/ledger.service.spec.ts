@@ -1,4 +1,5 @@
 import { loggingContext } from '../../infrastructure/logging';
+import { InProcessObservability } from '../../infrastructure/observability';
 import {
   parseLedgerActorAccountId,
   parseLedgerJournalId,
@@ -145,17 +146,20 @@ function serviceWith(
   repository = repositoryStub(),
   actorResolver = actorResolverStub(),
   capabilityResolver = capabilityResolverStub(),
+  observability = new InProcessObservability(),
 ): {
   service: LedgerService;
   repository: jest.Mocked<LedgerRepository>;
   actorResolver: jest.Mocked<LedgerActorResolver>;
   capabilityResolver: jest.Mocked<LedgerCapabilityResolver>;
+  observability: InProcessObservability;
 } {
   return {
-    service: new LedgerService(repository, actorResolver, capabilityResolver),
+    service: new LedgerService(repository, actorResolver, capabilityResolver, observability),
     repository,
     actorResolver,
     capabilityResolver,
+    observability,
   };
 }
 
@@ -388,7 +392,7 @@ describe('LedgerService', () => {
   });
 
   it('records a validated leg lifecycle transition with resolved context', async () => {
-    const { service, repository } = serviceWith();
+    const { service, repository, observability } = serviceWith();
 
     await loggingContext.run({ correlationId: ids.correlation, initiatorActorId: ids.actor }, () =>
       service.transitionLifecycle(lifecycleInput),
@@ -405,6 +409,41 @@ describe('LedgerService', () => {
       effectiveAt: '2026-08-21T12:02:00.000Z',
     });
     expect(Object.isFrozen(repository.transitionLifecycle.mock.calls[0]?.[0])).toBe(true);
+    expect(observability.dashboardSnapshot().counters).toContainEqual({
+      name: 'execution_state_total',
+      labels: { state: 'PENDING' },
+      value: 1,
+    });
+    expect(observability.dashboardSnapshot().completedSpans).toEqual([
+      expect.objectContaining({
+        name: 'execution.transition',
+        kind: 'internal',
+        outcome: 'success',
+        correlationId: ids.correlation,
+      }),
+    ]);
+  });
+
+  it('maps persisted quote transitions to bounded quote and execution counters only', async () => {
+    const { service, observability } = serviceWith();
+
+    await loggingContext.run({ correlationId: ids.correlation, initiatorActorId: ids.actor }, () =>
+      service.transitionLifecycle({
+        ...lifecycleInput,
+        expectedState: 'CREATED',
+        nextState: 'QUOTED',
+        reason: 'QUOTE_CREATED',
+      }),
+    );
+
+    expect(observability.dashboardSnapshot().counters).toEqual(
+      expect.arrayContaining([
+        { name: 'execution_state_total', labels: { state: 'QUOTED' }, value: 1 },
+        { name: 'quote_state_total', labels: { state: 'AVAILABLE' }, value: 1 },
+      ]),
+    );
+    expect(JSON.stringify(observability.dashboardSnapshot())).not.toContain(ids.transaction);
+    expect(JSON.stringify(observability.dashboardSnapshot())).not.toContain(ids.actor);
   });
 
   it('records recovery independently from workflow state', async () => {
@@ -440,5 +479,20 @@ describe('LedgerService', () => {
       ),
     ).rejects.toMatchObject({ code: 'ILLEGAL_LIFECYCLE_TRANSITION' });
     expect(repository.transitionLifecycle).not.toHaveBeenCalled();
+  });
+
+  it('does not count a lifecycle transition rejected by persistence', async () => {
+    const repository = repositoryStub();
+    repository.transitionLifecycle.mockRejectedValue(new Error('persistence unavailable'));
+    const { service, observability } = serviceWith(repository);
+
+    await expect(
+      loggingContext.run({ correlationId: ids.correlation, initiatorActorId: ids.actor }, () =>
+        service.transitionLifecycle(lifecycleInput),
+      ),
+    ).rejects.toThrow('persistence unavailable');
+
+    expect(observability.dashboardSnapshot().counters).toEqual([]);
+    expect(observability.dashboardSnapshot().completedSpans[0]?.outcome).toBe('failure');
   });
 });

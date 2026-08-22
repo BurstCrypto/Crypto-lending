@@ -14,6 +14,8 @@ export const LOG_EVENTS = Object.freeze({
   httpRequestCompleted: 'http.request.completed',
   httpRequestAborted: 'http.request.aborted',
   httpAnonymousRejectionsSuppressed: 'http.anonymous_rejections.suppressed',
+  traceSpanCompleted: 'trace.span.completed',
+  ledgerLifecycleTransitioned: 'ledger.lifecycle.transitioned',
   outboxDispatchCompleted: 'outbox.dispatch.completed',
   outboxDispatchFailed: 'outbox.dispatch.failed',
   outboxCleanupCompleted: 'outbox.cleanup.completed',
@@ -39,6 +41,36 @@ export type StructuredLogEvent = (typeof LOG_EVENTS)[keyof typeof LOG_EVENTS];
 export type StructuredLogLevel = 'debug' | 'info' | 'warn' | 'error' | 'fatal';
 export type StructuredLogOutcome =
   'success' | 'failure' | 'rejected' | 'aborted' | 'retry' | 'idle';
+export type StructuredSpanName =
+  | 'http.request'
+  | 'quote.create'
+  | 'execution.transition'
+  | 'queue.publish'
+  | 'queue.process'
+  | 'synthetic.request';
+export type StructuredLedgerLifecycleScope = 'transaction' | 'leg';
+export type StructuredLedgerLifecycleState =
+  | 'CREATED'
+  | 'QUOTED'
+  | 'USER_APPROVED'
+  | 'SUBMITTED'
+  | 'PENDING'
+  | 'SETTLED'
+  | 'FAILED'
+  | 'REVERSED';
+export type StructuredLedgerLifecycleReason =
+  | 'INTENT_CREATED'
+  | 'QUOTE_CREATED'
+  | 'USER_APPROVAL_RECORDED'
+  | 'SUBMISSION_RECORDED'
+  | 'OUTCOME_PENDING'
+  | 'SETTLEMENT_RECORDED'
+  | 'PREFLIGHT_FAILED'
+  | 'USER_REJECTED'
+  | 'QUOTE_EXPIRED'
+  | 'PROVIDER_REJECTED'
+  | 'TERMINAL_FAILURE_CONFIRMED'
+  | 'FULL_REVERSAL_RECORDED';
 
 export interface SafeLogFields {
   readonly component?: string;
@@ -64,6 +96,13 @@ export interface SafeLogFields {
   readonly migrationId?: string;
   readonly migrationState?: 'up' | 'down';
   readonly changed?: number;
+  readonly traceId?: string;
+  readonly spanId?: string;
+  readonly parentSpanId?: string;
+  readonly spanName?: StructuredSpanName;
+  readonly lifecycleScope?: StructuredLedgerLifecycleScope;
+  readonly state?: StructuredLedgerLifecycleState;
+  readonly reason?: StructuredLedgerLifecycleReason;
 }
 
 export interface StructuredLogRecord extends SafeLogFields {
@@ -99,6 +138,8 @@ const JSON_STRINGIFY = JSON.stringify;
 const SAFE_JOB_KIND_PATTERN = /^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/u;
 const SAFE_MIGRATION_ID_PATTERN = /^[0-9]{4}$/u;
 const SAFE_ROUTE_PATTERN = /^\/[A-Za-z0-9_./:*-]{0,255}$/u;
+const SAFE_TRACE_ID_PATTERN = /^[0-9a-f]{32}$/u;
+const SAFE_SPAN_ID_PATTERN = /^[0-9a-f]{16}$/u;
 const SAFE_METHODS = new Set([
   'CONNECT',
   'DELETE',
@@ -129,6 +170,39 @@ const SAFE_COMPONENTS = new Set([
   'RouterExplorer',
 ]);
 const SAFE_JOB_KINDS = new Set(['account.updated', 'ledger.journal-committed']);
+const SAFE_SPAN_NAMES = new Set<StructuredSpanName>([
+  'http.request',
+  'quote.create',
+  'execution.transition',
+  'queue.publish',
+  'queue.process',
+  'synthetic.request',
+]);
+const SAFE_LIFECYCLE_SCOPES = new Set<StructuredLedgerLifecycleScope>(['transaction', 'leg']);
+const SAFE_LIFECYCLE_STATES = new Set<StructuredLedgerLifecycleState>([
+  'CREATED',
+  'QUOTED',
+  'USER_APPROVED',
+  'SUBMITTED',
+  'PENDING',
+  'SETTLED',
+  'FAILED',
+  'REVERSED',
+]);
+const SAFE_LIFECYCLE_REASONS = new Set<StructuredLedgerLifecycleReason>([
+  'INTENT_CREATED',
+  'QUOTE_CREATED',
+  'USER_APPROVAL_RECORDED',
+  'SUBMISSION_RECORDED',
+  'OUTCOME_PENDING',
+  'SETTLEMENT_RECORDED',
+  'PREFLIGHT_FAILED',
+  'USER_REJECTED',
+  'QUOTE_EXPIRED',
+  'PROVIDER_REJECTED',
+  'TERMINAL_FAILURE_CONFIRMED',
+  'FULL_REVERSAL_RECORDED',
+]);
 const SAFE_FIELD_KEYS = new Set<keyof SafeLogFields>([
   'component',
   'method',
@@ -153,6 +227,13 @@ const SAFE_FIELD_KEYS = new Set<keyof SafeLogFields>([
   'migrationId',
   'migrationState',
   'changed',
+  'traceId',
+  'spanId',
+  'parentSpanId',
+  'spanName',
+  'lifecycleScope',
+  'state',
+  'reason',
 ]);
 const SAFE_ERROR_CODES = new Set([
   'ABORT_ERR',
@@ -162,6 +243,8 @@ const SAFE_ERROR_CODES = new Set([
   'ECONNREFUSED',
   'ECONNRESET',
   'ETIMEDOUT',
+  'HTTP_REQUEST_ABORTED',
+  'HTTP_SERVER_ERROR',
   'JOB_ENVELOPE_INVALID',
   'JOB_HANDLER_FAILED',
   'JOB_PROCESSING_FAILED',
@@ -212,6 +295,16 @@ const EVENT_FIELD_KEYS: Readonly<Record<StructuredLogEvent, ReadonlySet<keyof Sa
     'outcome',
   ]),
   [LOG_EVENTS.httpAnonymousRejectionsSuppressed]: new Set(['outcome']),
+  [LOG_EVENTS.traceSpanCompleted]: new Set([
+    'traceId',
+    'spanId',
+    'parentSpanId',
+    'spanName',
+    'durationMs',
+    'outcome',
+    'errorCode',
+  ]),
+  [LOG_EVENTS.ledgerLifecycleTransitioned]: new Set(['lifecycleScope', 'state', 'reason']),
   [LOG_EVENTS.outboxDispatchCompleted]: new Set([
     'claimed',
     'published',
@@ -334,6 +427,68 @@ function safeDuration(value: unknown): number | undefined {
     : undefined;
 }
 
+function safeDiagnosticHexId(
+  value: unknown,
+  pattern: RegExp,
+  zeroValue: string,
+): string | undefined {
+  return typeof value === 'string' && pattern.test(value) && value !== zeroValue
+    ? value
+    : undefined;
+}
+
+const LIFECYCLE_REASON_TARGETS: Readonly<
+  Record<StructuredLedgerLifecycleReason, StructuredLedgerLifecycleState>
+> = Object.freeze({
+  INTENT_CREATED: 'CREATED',
+  QUOTE_CREATED: 'QUOTED',
+  USER_APPROVAL_RECORDED: 'USER_APPROVED',
+  SUBMISSION_RECORDED: 'SUBMITTED',
+  OUTCOME_PENDING: 'PENDING',
+  SETTLEMENT_RECORDED: 'SETTLED',
+  PREFLIGHT_FAILED: 'FAILED',
+  USER_REJECTED: 'FAILED',
+  QUOTE_EXPIRED: 'FAILED',
+  PROVIDER_REJECTED: 'FAILED',
+  TERMINAL_FAILURE_CONFIRMED: 'FAILED',
+  FULL_REVERSAL_RECORDED: 'REVERSED',
+});
+
+function hasRequiredEventFields(event: StructuredLogEvent, fields: SafeLogFields): boolean {
+  if (event === LOG_EVENTS.traceSpanCompleted) {
+    return Boolean(
+      fields.traceId &&
+      fields.spanId &&
+      fields.spanName &&
+      fields.durationMs !== undefined &&
+      (fields.outcome === 'success' ||
+        ((fields.outcome === 'failure' || fields.outcome === 'aborted') &&
+          fields.errorCode !== undefined)),
+    );
+  }
+  if (event === LOG_EVENTS.ledgerLifecycleTransitioned) {
+    return Boolean(
+      fields.lifecycleScope &&
+      fields.state &&
+      fields.reason &&
+      LIFECYCLE_REASON_TARGETS[fields.reason] === fields.state,
+    );
+  }
+  return true;
+}
+
+function hasValidOptionalEventFields(event: StructuredLogEvent, fields: SafeLogFields): boolean {
+  if (event !== LOG_EVENTS.traceSpanCompleted) return true;
+  const source = ownDataFields(fields);
+  if (!source || !Object.hasOwn(source, 'parentSpanId')) return source !== undefined;
+  const parentSpanId = safeDiagnosticHexId(
+    source.parentSpanId,
+    SAFE_SPAN_ID_PATTERN,
+    '0'.repeat(16),
+  );
+  return parentSpanId !== undefined && parentSpanId !== source.spanId;
+}
+
 function projectFields(event: StructuredLogEvent, fields: SafeLogFields): SafeLogFields {
   const permitted = EVENT_FIELD_KEYS[event];
   const source = ownDataFields(fields);
@@ -436,6 +591,56 @@ function projectFields(event: StructuredLogEvent, fields: SafeLogFields): SafeLo
   ) {
     projected.migrationState = source.migrationState;
   }
+  const traceId = safeDiagnosticHexId(source.traceId, SAFE_TRACE_ID_PATTERN, '0'.repeat(32));
+  if (permitted.has('traceId') && traceId !== undefined) projected.traceId = traceId;
+  const spanId = safeDiagnosticHexId(source.spanId, SAFE_SPAN_ID_PATTERN, '0'.repeat(16));
+  if (permitted.has('spanId') && spanId !== undefined) projected.spanId = spanId;
+  const parentSpanId = safeDiagnosticHexId(
+    source.parentSpanId,
+    SAFE_SPAN_ID_PATTERN,
+    '0'.repeat(16),
+  );
+  if (permitted.has('parentSpanId') && parentSpanId !== undefined && parentSpanId !== spanId) {
+    projected.parentSpanId = parentSpanId;
+  }
+  if (
+    permitted.has('spanName') &&
+    typeof source.spanName === 'string' &&
+    SAFE_SPAN_NAMES.has(source.spanName as StructuredSpanName)
+  ) {
+    projected.spanName = source.spanName;
+  }
+  if (
+    permitted.has('lifecycleScope') &&
+    typeof source.lifecycleScope === 'string' &&
+    SAFE_LIFECYCLE_SCOPES.has(source.lifecycleScope as StructuredLedgerLifecycleScope)
+  ) {
+    projected.lifecycleScope = source.lifecycleScope;
+  }
+  if (
+    permitted.has('state') &&
+    typeof source.state === 'string' &&
+    SAFE_LIFECYCLE_STATES.has(source.state as StructuredLedgerLifecycleState)
+  ) {
+    projected.state = source.state;
+  }
+  if (
+    permitted.has('reason') &&
+    typeof source.reason === 'string' &&
+    SAFE_LIFECYCLE_REASONS.has(source.reason as StructuredLedgerLifecycleReason)
+  ) {
+    projected.reason = source.reason;
+  }
+  if (event === LOG_EVENTS.traceSpanCompleted) {
+    if (
+      projected.outcome !== 'success' &&
+      projected.outcome !== 'failure' &&
+      projected.outcome !== 'aborted'
+    ) {
+      delete projected.outcome;
+    }
+    if (projected.outcome === 'success') delete projected.errorCode;
+  }
   return projected;
 }
 
@@ -488,6 +693,7 @@ export class StructuredLogger implements LoggerService {
   emit(event: StructuredLogEvent, level: StructuredLogLevel, fields: SafeLogFields = {}): void {
     try {
       if (!SAFE_EVENTS.has(event) || !SAFE_LEVELS.has(level)) return;
+      if (!hasValidOptionalEventFields(event, fields)) return;
       const context = this.context.current();
       const coreRecord = Object.create(null) as Record<string, unknown>;
       coreRecord.schemaVersion = 1;
@@ -503,26 +709,31 @@ export class StructuredLogger implements LoggerService {
         'unknown',
       );
       if (context?.correlationId) coreRecord.correlationId = context.correlationId;
-      if (context?.requestId) coreRecord.requestId = context.requestId;
+      const traceEvent = event === LOG_EVENTS.traceSpanCompleted;
+      if (context?.requestId && !traceEvent) coreRecord.requestId = context.requestId;
+      const projectedFields = projectFields(event, fields);
+      if (!hasRequiredEventFields(event, projectedFields)) return;
       const record = Object.assign(
         Object.create(null),
         coreRecord,
-        projectFields(event, fields),
+        projectedFields,
       ) as unknown as StructuredLogRecord;
-      if (context?.initiatorActorId) {
+      if (context?.initiatorActorId && !traceEvent) {
         (record as unknown as Record<string, unknown>).initiatorActorId = context.initiatorActorId;
       }
-      if (context?.jobId) (record as unknown as Record<string, unknown>).jobId = context.jobId;
-      if (context?.intentId) {
+      if (context?.jobId && !traceEvent) {
+        (record as unknown as Record<string, unknown>).jobId = context.jobId;
+      }
+      if (context?.intentId && !traceEvent) {
         (record as unknown as Record<string, unknown>).intentId = context.intentId;
       }
-      if (context?.quoteId) {
+      if (context?.quoteId && !traceEvent) {
         (record as unknown as Record<string, unknown>).quoteId = context.quoteId;
       }
-      if (context?.transactionId) {
+      if (context?.transactionId && !traceEvent) {
         (record as unknown as Record<string, unknown>).transactionId = context.transactionId;
       }
-      if (context?.ledgerEventId) {
+      if (context?.ledgerEventId && !traceEvent) {
         (record as unknown as Record<string, unknown>).ledgerEventId = context.ledgerEventId;
       }
       let line = JSON_STRINGIFY(record);
