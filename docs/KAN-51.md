@@ -131,6 +131,13 @@ execution identifier is a downstream requirement rather than evidence claimed
 by this branch. Concurrent requests and jobs must not leak actor or correlation
 context into one another.
 
+The KAN-43 journal path now carries its validated ledger transaction ID while
+the repository atomically creates `ledger.journal-committed` and adds the
+committed journal ID as `ledgerEventId`. That reviewed job kind is in the closed
+logging catalog, so dispatch and worker records retain the request root, verified
+actor, transaction, and journal identifiers without opening the logger to
+arbitrary job names.
+
 ## Log-injection and availability rules
 
 - Identifiers are bounded and matched against explicit ASCII grammars.
@@ -251,6 +258,34 @@ rejects direct application-owned console/stdout/stderr and Nest logger sinks in
 the covered API executables. The broader wallet/provider/domain corpus and
 unexercised error paths remain required before the ticket can be accepted.
 
+The KAN-51 trace case in `ledger-idempotency.integration-spec.ts` adds the
+literal local evidence that was previously blocked on KAN-43. It sends a real
+Nest HTTP request through `AccountAuthGuard`, using a test-only exact-token
+principal resolver; the controller exists only in the test module and is not a
+production ledger endpoint. The case posts through `LedgerService` and
+`PostgresLedgerRepository`, verifies the immutable journal and atomic outbox row
+in an isolated UUID-named local database, publishes the durable envelope through
+an isolated LocalStack SQS queue, and lets `SqsJobWorker` handle it. The API log,
+database journal, outbox envelope, dispatch log, handler context, and worker log
+must all contain one server-generated root; the latter hops also contain the
+verified actor plus actual ledger transaction and journal IDs. Private-key,
+bearer-token, full-credential, raw-signature, idempotency-key, and ledger
+capability canaries must be absent from every captured JSON line.
+
+The focused literal trace command is loopback-only and requires the repository's
+local principal fixture plus LocalStack:
+
+```powershell
+$env:TEST_DATABASE_URL = '<loopback local-principal fixture URL>'
+$env:RUN_INFRASTRUCTURE_INTEGRATION = '1'
+$env:SQS_ENDPOINT = 'http://127.0.0.1:4566'
+npx jest --config apps/api/test/infrastructure/jest.config.json --runInBand --runTestsByPath apps/api/test/infrastructure/ledger-idempotency.integration-spec.ts -t "traces one API request"
+```
+
+Before mutation, the test rejects a non-loopback database or SQS endpoint and
+requires the Compose-installed database marker. It creates and deletes only its
+exact generated schema, database, and SQS queues. It does not call AWS.
+
 All focused retention validation is local filesystem and child-process work.
 It reports zero AWS calls and performs no Docker, network, registry, provider,
 or hosted-CI action.
@@ -262,10 +297,9 @@ evidence. The following remain explicit gates:
 
 - complete application-owned structured logging and adversarial leak evidence
   for every API, worker, and web-runtime error path;
-- one real request traced through the API, committed outbox job, worker, and
-  immutable ledger event with a single root correlation;
-- intent, quote, transaction, and `ledgerEventId` correlation using their actual
-  domain types rather than synthetic stand-ins;
+- intent and quote correlation using their actual future domain types rather
+  than synthetic stand-ins; transaction and `ledgerEventId` now use KAN-43's
+  real ledger types in the local trace;
 - a rollout preflight for legacy job identifiers and the custom-attribute
   reservation change (`MAX_CUSTOM_JOB_ATTRIBUTES` is now six), including
   pending rows with seven attributes, a custom `correlationId` collision, or
@@ -281,8 +315,8 @@ evidence. The following remain explicit gates:
   delivery, KMS encryption, effective 14-day retention, access denial, search,
   and deletion behavior without exposing a prohibited value.
 
-The true ledger hop and its trace test are blocked on KAN-41, KAN-42, and KAN-43
-implementing the ledger schema, transaction lifecycle, and transactional
-outbox composition. A mock logger call, fabricated ledger event, template,
-local queue, branch merge, or Jira transition cannot satisfy that criterion.
-No live retention proof was attempted in this local batch.
+KAN-41, KAN-42, and KAN-43 now supply the real local ledger, lifecycle, and
+transactional-outbox hop used by the guarded trace test. That evidence does not
+substitute for the separately authorized deployed delivery, access-control,
+retention, and incident-query gates above. No live retention proof was attempted
+in this local batch.

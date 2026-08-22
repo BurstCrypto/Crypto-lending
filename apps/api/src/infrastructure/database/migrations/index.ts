@@ -16,6 +16,10 @@ import {
   createLedgerCommandIdempotencyMigrationV0009,
   createLedgerCommandIdempotencyTestSchemaMigrationV0009,
 } from './0009-create-ledger-command-idempotency.migration';
+import {
+  createAuthenticationSessionsMigrationV0010,
+  createAuthenticationSessionsTestSchemaMigrationV0010,
+} from './0010-create-authentication-sessions.migration';
 import type { DatabaseMigration } from './migration';
 
 /**
@@ -33,6 +37,7 @@ export const DATABASE_TEST_SCHEMA_MIGRATION_LIST: readonly DatabaseMigration[] =
   createImmutableLedgerTestSchemaMigrationV0007,
   createLedgerLifecycleTestSchemaMigrationV0008,
   createLedgerCommandIdempotencyTestSchemaMigrationV0009,
+  createAuthenticationSessionsTestSchemaMigrationV0010,
 ]);
 
 export const DATABASE_MIGRATION_LIST: readonly DatabaseMigration[] = Object.freeze([
@@ -45,6 +50,7 @@ export const DATABASE_MIGRATION_LIST: readonly DatabaseMigration[] = Object.free
   createImmutableLedgerMigrationV0007,
   createLedgerLifecycleMigrationV0008,
   createLedgerCommandIdempotencyMigrationV0009,
+  createAuthenticationSessionsMigrationV0010,
 ]);
 
 export type { DatabaseMigration } from './migration';
@@ -68,3 +74,8 @@ export {
   createLedgerCommandIdempotencyMigrationV0009,
   createLedgerCommandIdempotencyTestSchemaMigrationV0009,
 } from './0009-create-ledger-command-idempotency.migration';
+export {
+  createAuthenticationSessionsMigration,
+  createAuthenticationSessionsMigrationV0010,
+  createAuthenticationSessionsTestSchemaMigrationV0010,
+} from './0010-create-authentication-sessions.migration';

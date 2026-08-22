@@ -1,13 +1,47 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 
+import {
+  CreateQueueCommand,
+  DeleteQueueCommand,
+  GetQueueAttributesCommand,
+  SQSClient,
+} from '@aws-sdk/client-sqs';
+import { Controller, Post, UseGuards, type INestApplication } from '@nestjs/common';
+import { Test } from '@nestjs/testing';
 import type { PoolClient, QueryResult, QueryResultRow } from 'pg';
 import { Pool } from 'pg';
+import request from 'supertest';
 
+import { AccountAuthGuard } from '../../src/accounts/auth/account-auth.guard';
+import type { CurrentPrincipal as AuthenticatedPrincipal } from '../../src/accounts/auth/current-principal';
+import { CURRENT_PRINCIPAL_RESOLVER } from '../../src/accounts/auth/current-principal';
+import { CurrentPrincipal } from '../../src/accounts/auth/current-principal.decorator';
+import { parseAccountId } from '../../src/accounts/domain/account-profile';
+import { configureApplication } from '../../src/application';
 import { MigrationRunner } from '../../src/infrastructure/database/migration-runner.service';
 import {
   createLedgerCommandIdempotencyTestSchemaMigrationV0009,
   DATABASE_TEST_SCHEMA_MIGRATION_LIST,
 } from '../../src/infrastructure/database/migrations';
+import { PostgresService } from '../../src/infrastructure/database/postgres.service';
+import {
+  createSafeLogReference,
+  loggingContext,
+  structuredLogger,
+  StructuredLogger,
+  type StructuredLogRecord,
+} from '../../src/infrastructure/logging';
+import { parseJobEnvelope, type JobEnvelope } from '../../src/infrastructure/outbox/job-envelope';
+import { JobOutboxRepository } from '../../src/infrastructure/outbox/job-outbox.repository';
+import { OutboxDispatcher } from '../../src/infrastructure/outbox/outbox-dispatcher.service';
+import { TransactionalJobPublisher } from '../../src/infrastructure/outbox/transactional-job-publisher.service';
+import { SqsJobWorker } from '../../src/infrastructure/sqs/sqs-job.worker';
+import { SqsService } from '../../src/infrastructure/sqs/sqs.service';
+import { LedgerService } from '../../src/ledger/application/ledger.service';
+import { createLedgerCapability } from '../../src/ledger/application/ledger-capability-resolver.port';
+import { parseLedgerActorAccountId } from '../../src/ledger/domain/ledger';
+import { PostgresLedgerRepository } from '../../src/ledger/infrastructure/postgres-ledger.repository';
+import { testInfrastructureConfig, testOutboxDispatcherOptions } from './fixtures';
 import { assertLocalPrincipalFixture } from './local-principal-fixture-guard';
 
 const testDatabaseUrl = process.env.TEST_DATABASE_URL;
@@ -16,6 +50,9 @@ const describeWithPostgres =
   testDatabaseUrl && runInfrastructureIntegration ? describe : describe.skip;
 const API_ROLE = 'crypto_api_runtime';
 const IDENTIFIER = /^[a-z][a-z0-9_]{0,62}$/u;
+const LEDGER_IDEMPOTENCY_MIGRATIONS = DATABASE_TEST_SCHEMA_MIGRATION_LIST.filter(
+  ({ id }) => id !== '0010',
+);
 
 interface PostingFixture {
   actorAccountId: string;
@@ -38,16 +75,87 @@ interface CommandResult {
   outcome: 'CLAIMED' | 'REPLAYED';
 }
 
+interface CorrelationTraceResponse {
+  readonly journalId: string;
+}
+
+let handleCorrelationTraceRequest:
+  ((principal: AuthenticatedPrincipal) => Promise<CorrelationTraceResponse>) | undefined;
+
+@UseGuards(AccountAuthGuard)
+@Controller('test/kan51-ledger-trace')
+class Kan51LedgerTraceController {
+  @Post()
+  async execute(
+    @CurrentPrincipal() principal: AuthenticatedPrincipal,
+  ): Promise<CorrelationTraceResponse> {
+    if (!handleCorrelationTraceRequest) {
+      throw new Error('KAN-51 trace fixture is unavailable');
+    }
+    return handleCorrelationTraceRequest(principal);
+  }
+}
+
 function quoteIdentifier(value: string): string {
   if (!IDENTIFIER.test(value)) throw new Error(`Unsafe test identifier: ${value}`);
   return `"${value}"`;
 }
 
-function requireLoopback(rawUrl: string): void {
+function requireLoopback(rawUrl: string, resource = 'PostgreSQL'): void {
   const hostname = new URL(rawUrl).hostname.toLowerCase();
   if (!['localhost', '127.0.0.1', '[::1]', '::1'].includes(hostname)) {
-    throw new Error('KAN-43 idempotency integration test requires a loopback PostgreSQL fixture');
+    throw new Error(`Ledger integration test requires a loopback ${resource} fixture`);
   }
+}
+
+async function createKan51TestQueues(
+  client: SQSClient,
+  maxReceiveCount: number,
+): Promise<{ queueUrl: string; deadLetterQueueUrl: string }> {
+  const suffix = randomUUID().replaceAll('-', '').slice(0, 16);
+  const deadLetter = await client.send(
+    new CreateQueueCommand({
+      QueueName: `kan51-${suffix}-dlq`,
+      Attributes: { MessageRetentionPeriod: '300' },
+    }),
+  );
+  if (!deadLetter.QueueUrl) {
+    throw new Error('LocalStack did not return the KAN-51 test DLQ URL');
+  }
+
+  const attributes = await client.send(
+    new GetQueueAttributesCommand({
+      QueueUrl: deadLetter.QueueUrl,
+      AttributeNames: ['QueueArn'],
+    }),
+  );
+  const deadLetterArn = attributes.Attributes?.QueueArn;
+  if (!deadLetterArn) {
+    throw new Error('LocalStack did not return the KAN-51 test DLQ ARN');
+  }
+
+  const source = await client.send(
+    new CreateQueueCommand({
+      QueueName: `kan51-${suffix}-jobs`,
+      Attributes: {
+        VisibilityTimeout: '5',
+        ReceiveMessageWaitTimeSeconds: '0',
+        RedrivePolicy: JSON.stringify({
+          deadLetterTargetArn: deadLetterArn,
+          maxReceiveCount: String(maxReceiveCount),
+        }),
+      },
+    }),
+  );
+  if (!source.QueueUrl) {
+    await client.send(new DeleteQueueCommand({ QueueUrl: deadLetter.QueueUrl }));
+    throw new Error('LocalStack did not return the KAN-51 test source queue URL');
+  }
+
+  return {
+    queueUrl: source.QueueUrl,
+    deadLetterQueueUrl: deadLetter.QueueUrl,
+  };
 }
 
 async function queryAsRole<Row extends QueryResultRow>(
@@ -435,7 +543,7 @@ describeWithPostgres('KAN-43 ledger command idempotency PostgreSQL integration',
       max: 6,
       options: `-c search_path=${schema}`,
     });
-    runner = new MigrationRunner(ledgerPool, DATABASE_TEST_SCHEMA_MIGRATION_LIST);
+    runner = new MigrationRunner(ledgerPool, LEDGER_IDEMPOTENCY_MIGRATIONS);
     await expect(runner.up()).resolves.toEqual([
       '0001',
       '0002',
@@ -468,6 +576,309 @@ describeWithPostgres('KAN-43 ledger command idempotency PostgreSQL integration',
     await expect(
       ledgerPool.query(createLedgerCommandIdempotencyTestSchemaMigrationV0009.verifySql!),
     ).resolves.toMatchObject({ rows: [{ valid: true }] });
+  });
+
+  it('traces one API request through its committed ledger event, outbox job, and worker', async () => {
+    const privateKeyCanary = ['-----BEGIN PRIVATE', 'KEY-----KAN51-canary'].join(' ');
+    const tokenCanary = ['Bearer', 'KAN51-token-canary'].join(' ');
+    const credentialCanary = [
+      'postgresql://kan51-user',
+      'kan51-password@private.invalid/database',
+    ].join(':');
+    const signatureCanary = '0xKAN51-raw-signature-canary';
+    const idempotencyCanary = 'KAN51-idempotency-token-canary';
+    const apiLines: string[] = [];
+    const workerLines: string[] = [];
+    const apiLogger = new StructuredLogger({
+      workload: 'api',
+      environment: { NODE_ENV: 'test' },
+      sink: (line) => apiLines.push(line),
+    });
+    const workerLogger = new StructuredLogger({
+      workload: 'worker',
+      environment: { NODE_ENV: 'test' },
+      sink: (line) => workerLines.push(line),
+    });
+    const structuredEmit = jest
+      .spyOn(structuredLogger, 'emit')
+      .mockImplementation((event, level, fields) => workerLogger.emit(event, level, fields));
+    const sqsEndpoint = process.env.SQS_ENDPOINT ?? 'http://127.0.0.1:4566';
+    requireLoopback(sqsEndpoint, 'SQS');
+    const sqsClient = new SQSClient({
+      endpoint: sqsEndpoint,
+      region: process.env.AWS_REGION ?? 'us-east-1',
+      credentials: { accessKeyId: 'test', secretAccessKey: 'test' },
+      maxAttempts: 1,
+    });
+    let app: INestApplication | undefined;
+    let queueUrl: string | undefined;
+    let deadLetterQueueUrl: string | undefined;
+    const traceDatabase = `kan51_${randomUUID().replaceAll('-', '')}`;
+    let traceDatabaseCreated = false;
+    let tracePool: Pool | undefined;
+
+    try {
+      await adminPool.query(`CREATE DATABASE ${quoteIdentifier(traceDatabase)}`);
+      traceDatabaseCreated = true;
+      const traceDatabaseUrl = new URL(testDatabaseUrl as string);
+      traceDatabaseUrl.pathname = `/${traceDatabase}`;
+      const activeTracePool = new Pool({
+        connectionString: traceDatabaseUrl.toString(),
+        max: 6,
+      });
+      tracePool = activeTracePool;
+      const traceMigrations = new MigrationRunner(activeTracePool, LEDGER_IDEMPOTENCY_MIGRATIONS);
+      await expect(traceMigrations.up()).resolves.toEqual([
+        '0001',
+        '0002',
+        '0003',
+        '0004',
+        '0006',
+        '0007',
+        '0008',
+        '0009',
+      ]);
+      const client = await activeTracePool.connect();
+      const fixture = await provisionPostingPlan(client);
+      client.release();
+      await advanceLegToSubmitted(activeTracePool, fixture);
+
+      const queues = await createKan51TestQueues(sqsClient, 3);
+      queueUrl = queues.queueUrl;
+      deadLetterQueueUrl = queues.deadLetterQueueUrl;
+      const jobConfig = testInfrastructureConfig({
+        endpoint: sqsEndpoint,
+        queueUrl,
+        deadLetterQueueUrl,
+        requestTimeoutMs: 5_000,
+        visibilityTimeoutSeconds: 5,
+      });
+      const postgres = new PostgresService(activeTracePool);
+      const outboxRepository = new JobOutboxRepository(postgres);
+      const publisher = new TransactionalJobPublisher(outboxRepository);
+      const ledgerRepository = new PostgresLedgerRepository(postgres, publisher);
+      handleCorrelationTraceRequest = async (principal) => {
+        const actorAccountId = parseLedgerActorAccountId(principal.accountId);
+        const ledger = new LedgerService(
+          ledgerRepository,
+          { resolve: async () => actorAccountId },
+          {
+            resolvePosting: async () => createLedgerCapability('POST', fixture.postToken),
+            resolveReversal: async () => null,
+          },
+        );
+        const journalId = await ledger.postJournal(
+          {
+            bookId: fixture.bookId,
+            transactionId: fixture.transactionId,
+            legId: fixture.legId,
+            economicEventType: 'SETTLEMENT',
+            effectiveAt: fixture.effectiveAt,
+            observedAt: fixture.observedAt,
+            reason: 'CHAIN_FINALITY_CONFIRMED',
+            postings: [
+              {
+                accountId: fixture.sourceAccountId,
+                assetRevisionId: fixture.assetRevisionId,
+                side: 'CREDIT',
+                amountAtomic: '100',
+              },
+              {
+                accountId: fixture.destinationAccountId,
+                assetRevisionId: fixture.assetRevisionId,
+                side: 'DEBIT',
+                amountAtomic: '100',
+              },
+            ],
+          },
+          idempotencyCanary,
+        );
+        return { journalId };
+      };
+
+      const testingModule = await Test.createTestingModule({
+        controllers: [Kan51LedgerTraceController],
+        providers: [
+          AccountAuthGuard,
+          {
+            provide: CURRENT_PRINCIPAL_RESOLVER,
+            useValue: {
+              resolve: (requestValue: unknown) => {
+                const authorization = (requestValue as { headers?: { authorization?: unknown } })
+                  .headers?.authorization;
+                return authorization === tokenCanary
+                  ? { accountId: parseAccountId(fixture.actorAccountId) }
+                  : null;
+              },
+            },
+          },
+        ],
+      }).compile();
+      app = testingModule.createNestApplication();
+      configureApplication(app, { requestLogger: apiLogger });
+      await app.init();
+
+      const response = await request(app.getHttpServer())
+        .post('/api/v1/test/kan51-ledger-trace')
+        .query({ accessToken: tokenCanary })
+        .set('Authorization', tokenCanary)
+        .set('X-Account-Id', randomUUID())
+        .set('X-Provider-Credential', credentialCanary)
+        .set('X-Wallet-Signature', signatureCanary)
+        .send({ privateKey: privateKeyCanary })
+        .expect(201);
+      const requestId = response.headers['x-request-id'];
+      const journalId = (response.body as CorrelationTraceResponse).journalId;
+      expect(requestId).toMatch(/^[0-9a-f-]{36}$/u);
+      expect(journalId).toMatch(/^[0-9a-f-]{36}$/u);
+
+      const apiRecords = apiLines.map((line) => JSON.parse(line) as StructuredLogRecord);
+      expect(apiRecords).toHaveLength(1);
+      expect(apiRecords[0]).toMatchObject({
+        event: 'http.request.completed',
+        workload: 'api',
+        correlationId: requestId,
+        requestId,
+        initiatorActorId: fixture.actorAccountId,
+        method: 'POST',
+        statusCode: 201,
+        outcome: 'success',
+      });
+
+      const trace = await activeTracePool.query<{
+        correlation_id: string;
+        journal_id: string;
+        outbox_id: string;
+        payload: unknown;
+        status: string;
+        transaction_id: string;
+      }>(
+        `SELECT journal.journal_id,
+                journal.transaction_id,
+                journal.correlation_id,
+                outbox.id AS outbox_id,
+                outbox.payload,
+                outbox.status
+         FROM ledger_journals AS journal
+         INNER JOIN job_outbox AS outbox
+           ON outbox.ledger_journal_id = journal.journal_id
+         WHERE journal.journal_id = $1`,
+        [journalId],
+      );
+      expect(trace.rows).toHaveLength(1);
+      const traceRow = trace.rows[0];
+      expect(traceRow).toMatchObject({
+        journal_id: journalId,
+        transaction_id: fixture.transactionId,
+        correlation_id: requestId,
+        status: 'pending',
+      });
+      const envelope = parseJobEnvelope(traceRow?.payload);
+      expect(envelope).toMatchObject({
+        id: traceRow?.outbox_id,
+        kind: 'ledger.journal-committed',
+        version: 1,
+        correlation: {
+          correlationId: requestId,
+          requestId,
+          initiatorActorId: fixture.actorAccountId,
+          transactionId: fixture.transactionId,
+          ledgerEventId: journalId,
+        },
+        payload: { journalId, operation: 'POST_JOURNAL' },
+      });
+
+      const sqs = new SqsService(sqsClient, jobConfig);
+      const dispatcher = new OutboxDispatcher(
+        outboxRepository,
+        sqs,
+        testOutboxDispatcherOptions({ batchSize: 1, concurrency: 1 }),
+      );
+      await expect(dispatcher.dispatchBatch()).resolves.toEqual({
+        claimed: 1,
+        published: 1,
+        retried: 0,
+        failed: 0,
+        leaseLost: 0,
+      });
+
+      let handlerContext: unknown;
+      let handledJob: JobEnvelope | undefined;
+      const worker = new SqsJobWorker(sqs, jobConfig);
+      await expect(
+        worker.processOne(async (job) => {
+          handlerContext = loggingContext.current();
+          handledJob = job;
+        }),
+      ).resolves.toMatchObject({
+        status: 'completed',
+        jobId: traceRow?.outbox_id,
+      });
+      expect(handledJob).toEqual(envelope);
+      expect(handlerContext).toMatchObject({
+        correlationId: requestId,
+        requestId,
+        initiatorActorId: fixture.actorAccountId,
+        transactionId: fixture.transactionId,
+        ledgerEventId: journalId,
+        jobId: createSafeLogReference('job', traceRow?.outbox_id),
+      });
+
+      const workerRecords = workerLines.map((line) => JSON.parse(line) as StructuredLogRecord);
+      for (const event of ['job.published', 'job.processed']) {
+        expect(workerRecords).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              event,
+              workload: 'worker',
+              correlationId: requestId,
+              requestId,
+              initiatorActorId: fixture.actorAccountId,
+              transactionId: fixture.transactionId,
+              ledgerEventId: journalId,
+              jobId: createSafeLogReference('job', traceRow?.outbox_id),
+              jobKind: 'ledger.journal-committed',
+              outcome: 'success',
+            }),
+          ]),
+        );
+      }
+      for (const record of [...apiRecords, ...workerRecords]) {
+        expect(new Date(record.timestamp).toISOString()).toBe(record.timestamp);
+      }
+
+      const capturedOutput = [...apiLines, ...workerLines, JSON.stringify(traceRow?.payload)].join(
+        '\n',
+      );
+      for (const prohibited of [
+        privateKeyCanary,
+        tokenCanary,
+        credentialCanary,
+        signatureCanary,
+        idempotencyCanary,
+        fixture.postToken,
+      ]) {
+        expect(capturedOutput).not.toContain(prohibited);
+      }
+      expect(workerLines.join('\n')).not.toContain(traceRow?.outbox_id);
+    } finally {
+      handleCorrelationTraceRequest = undefined;
+      structuredEmit.mockRestore();
+      if (app) await app.close();
+      if (queueUrl) {
+        await sqsClient.send(new DeleteQueueCommand({ QueueUrl: queueUrl })).catch(() => undefined);
+      }
+      if (deadLetterQueueUrl) {
+        await sqsClient
+          .send(new DeleteQueueCommand({ QueueUrl: deadLetterQueueUrl }))
+          .catch(() => undefined);
+      }
+      if (tracePool) await tracePool.end();
+      if (traceDatabaseCreated) {
+        await adminPool.query(`DROP DATABASE ${quoteIdentifier(traceDatabase)}`);
+      }
+      sqsClient.destroy();
+    }
   });
 
   it('does not allow a claim header to commit without its journal and outbox result', async () => {

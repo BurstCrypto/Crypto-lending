@@ -250,8 +250,12 @@ unique PostgreSQL schema, and removes only those test resources. See
 - `apps/api/src/system` owns process liveness, version, and API contract routes.
 - `apps/api/src/accounts` owns immutable platform account IDs, self-scoped
   profile application rules, the fail-closed current-principal port, and the
-  PII-safe account persistence boundary. Real managed authentication is a
-  downstream KAN-37 adapter; see [`docs/KAN-36.md`](docs/KAN-36.md).
+  PII-safe account persistence boundary.
+- `apps/api/src/authentication` owns KAN-37's provider-neutral OIDC/PKCE,
+  browser-bound callback, secure cookie session, CSRF, rotation, revocation,
+  identity mapping, and abuse-control boundaries. The local implementation is
+  documented in [`docs/KAN-37.md`](docs/KAN-37.md); managed-provider selection,
+  egress, deployment, and live acceptance remain gated.
 - [`docs/adr/0003-immutable-ledger-accounting-model.md`](docs/adr/0003-immutable-ledger-accounting-model.md)
   defines KAN-40's proposed operational, multi-asset ledger contract. KAN-41
   implements the local append-only schema and application boundary, while
