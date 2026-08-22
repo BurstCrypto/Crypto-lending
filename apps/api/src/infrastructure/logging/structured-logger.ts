@@ -128,7 +128,7 @@ const SAFE_COMPONENTS = new Set([
   'RoutesResolver',
   'RouterExplorer',
 ]);
-const SAFE_JOB_KINDS = new Set(['account.updated']);
+const SAFE_JOB_KINDS = new Set(['account.updated', 'ledger.journal-committed']);
 const SAFE_FIELD_KEYS = new Set<keyof SafeLogFields>([
   'component',
   'method',

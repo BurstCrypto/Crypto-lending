@@ -162,6 +162,11 @@ function serviceWith(
 describe('LedgerService', () => {
   it('posts through a trusted actor and non-serializable scoped capability', async () => {
     const { service, repository, actorResolver, capabilityResolver } = serviceWith();
+    let persistenceContext: unknown;
+    repository.postJournal.mockImplementation(async () => {
+      persistenceContext = loggingContext.current();
+      return parseLedgerJournalId(ids.postedJournal);
+    });
 
     const journalId = await loggingContext.run(
       { correlationId: ids.correlation, initiatorActorId: ids.actor },
@@ -179,6 +184,11 @@ describe('LedgerService', () => {
       reason: 'CHAIN_FINALITY_CONFIRMED',
     });
     expect(repository.postJournal).toHaveBeenCalledTimes(1);
+    expect(persistenceContext).toMatchObject({
+      correlationId: ids.correlation,
+      initiatorActorId: ids.actor,
+      transactionId: ids.transaction,
+    });
     const [command, capability, idempotency] = repository.postJournal.mock.calls[0] ?? [];
     expect(command).toEqual({
       correlationId: ids.correlation,

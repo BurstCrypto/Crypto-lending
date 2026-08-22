@@ -13,7 +13,8 @@ submit an external transaction, or introduce a second delivery system.
 - KAN-41 supplies immutable ledger journals and is `In Review`;
 - KAN-42 supplies lifecycle composition and is `In Review`;
 - both tickets block KAN-43; and
-- KAN-43 blocks KAN-51's real API-to-job-to-ledger trace.
+- KAN-43 supplies the real ledger/outbox hop now exercised by KAN-51's guarded
+  local API-to-job-to-ledger trace.
 
 KAN-43 has moved to `In Review` after its application and PostgreSQL gates
 passed. It must not move to `Done` while ADR 0003 and the retention, provider,

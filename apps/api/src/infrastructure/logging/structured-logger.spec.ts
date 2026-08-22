@@ -72,6 +72,26 @@ describe('StructuredLogger', () => {
     expect(Buffer.byteLength(lines[0] ?? '')).toBeLessThanOrEqual(4_096);
   });
 
+  it('admits the committed-ledger job kind without opening the job-kind catalog', () => {
+    const lines: string[] = [];
+    const logger = new StructuredLogger({ sink: (line) => lines.push(line) });
+
+    logger.emit(LOG_EVENTS.jobProcessed, 'info', {
+      jobKind: 'ledger.journal-committed',
+      outcome: 'success',
+    });
+    logger.emit(LOG_EVENTS.jobProcessed, 'info', {
+      jobKind: 'ledger.unreviewed-operation',
+      outcome: 'success',
+    });
+
+    expect(parse(lines[0] ?? '')).toMatchObject({
+      event: 'job.processed',
+      jobKind: 'ledger.journal-committed',
+    });
+    expect(parse(lines[1] ?? '')).not.toHaveProperty('jobKind');
+  });
+
   it('drops unknown, secret-bearing, invalid, and event-inappropriate fields', () => {
     const lines: string[] = [];
     const logger = new StructuredLogger({

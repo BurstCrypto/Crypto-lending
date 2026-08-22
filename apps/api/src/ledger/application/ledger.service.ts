@@ -108,7 +108,9 @@ export class LedgerService {
       correlationId: context.correlationId,
       ...journal,
     });
-    return this.repository.postJournal(command, capability, idempotency);
+    return loggingContext.runWith({ transactionId: journal.transactionId }, () =>
+      this.repository.postJournal(command, capability, idempotency),
+    );
   }
 
   async reverseJournal(
