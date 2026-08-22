@@ -1,0 +1,1492 @@
+{
+  "schemaVersion": 1,
+  "ticket": "KAN-227",
+  "sourceDecision": "KAN-55",
+  "status": "PENDING_EXTERNAL_REVIEW",
+  "preparedAt": "2026-08-22T00:00:00.000Z",
+  "candidate": {
+    "executableCommit": "a0fc8527172cd29743c5d6475cf6264bbd6bde05",
+    "executableScope": "tools/wallet-lab",
+    "executableTree": "58ba5e657d4584e60ce2db41aecf6d7a265d4351",
+    "packetPreparationBaseCommit": "d0408a2d9727b434734a4add52598a5886832e61",
+    "packageManifestPath": "tools/wallet-lab/package.json",
+    "packageManifestSha256": "E778E4C862E919FE4BD3081EB61076E9EAB1C7144E6197DDE5A97FC35C554F06",
+    "packageLockPath": "tools/wallet-lab/package-lock.json",
+    "packageLockSha256": "D723EC5710968AE94663CD2AE3CB107F11349281E3DC6DA580246B2BD71473B9"
+  },
+  "supportingArtifacts": [
+    {
+      "id": "ADR",
+      "path": "docs/adr/0001-wallet-connection-sdk-strategy.md",
+      "sha256": "4887F17AF74FBF10FD5B6BF1524965D9C3F1A1E57006BAB92982C38022B340B1"
+    },
+    {
+      "id": "KAN_227_PACKET",
+      "path": "docs/wallets/KAN-227.md",
+      "sha256": "6FE689E5AEB0D64496D337020B6D454651F379A7DE3A71950ED9A056C8749E53"
+    },
+    {
+      "id": "COMPATIBILITY_MATRIX",
+      "path": "docs/wallets/sdk-compatibility-matrix.md",
+      "sha256": "DF84794F73A72A9292AB1E9448CD58DF39B910726F767DDEAFC18739BE3A3C40"
+    },
+    {
+      "id": "MANUAL_RUNBOOK",
+      "path": "docs/wallets/manual-validation-runbook.md",
+      "sha256": "EEA827CFBBAF918C1F817C76FBE4BD81B5050DFCDFA3C182FECE2C087D0AF2E8"
+    },
+    {
+      "id": "EVIDENCE_INDEX",
+      "path": "docs/wallets/evidence/README.md",
+      "sha256": "47E971BAD6E4646ADFE2CBCD4C39E20CF0F5565FCCC9379DF85A88298F944983"
+    },
+    {
+      "id": "DESKTOP_PLAN",
+      "path": "docs/wallets/evidence/desktop-execution-plan.md",
+      "sha256": "F8D9FA9E1CB9E4120BF25DC666B597A20EEDD77595DF076B68FA6BC41F945BC9"
+    },
+    {
+      "id": "MOBILE_PLAN",
+      "path": "docs/wallets/evidence/mobile-execution-plan.md",
+      "sha256": "5E8C2948ED8EA5902F5A93561E1C6408CBAF442A2CE93CB50A90DD1C7CD9D999"
+    },
+    {
+      "id": "SECURITY_PACKET",
+      "path": "docs/wallets/security-review/README.md",
+      "sha256": "367D7FE2DA712D26F111A7928A859E8B0904572E5FA46F55BBCCFA8C18FF1F5A"
+    },
+    {
+      "id": "THREAT_MODEL",
+      "path": "docs/wallets/security-review/threat-model.md",
+      "sha256": "50382AB5A6DB12102CF9DCD43AC72365700906BBBC72BE269580C62FCC2240F2"
+    },
+    {
+      "id": "SECURITY_DECISION_TEMPLATE",
+      "path": "docs/wallets/security-review/review-decision-template.md",
+      "sha256": "A3872CEC5F18A332BEABD978E004BD646CB5B25BF17F6E9095A797A787EA4D4B"
+    },
+    {
+      "id": "NETWORK_OBSERVATION_TEMPLATE",
+      "path": "docs/wallets/security-review/network-observation-template.md",
+      "sha256": "62A2C477DC9776E7F67C680B509F79C6CB4426D4EF20228A46973CF21563D112"
+    },
+    {
+      "id": "ROLLBACK_RUNBOOK",
+      "path": "docs/wallets/security-review/rollback-runbook.md",
+      "sha256": "C3604AD185FF34885E1FA9E92598A2228C36FB986E1BD2FC99F79E14736BB5E9"
+    },
+    {
+      "id": "LICENSE_PACKET",
+      "path": "docs/wallets/license-review/README.md",
+      "sha256": "2C97909C0966242B8D698789F78E5850A3DDCBE7235135C344E7C279128899F5"
+    },
+    {
+      "id": "LEGAL_GATE",
+      "path": "docs/wallets/license-review/public-launch-legal-gate.md",
+      "sha256": "7DEE6AFD968CBC04C068DDE83FFDB34E01EF9F50BDF903A86D440649AB7EA72A"
+    },
+    {
+      "id": "LOCK_REVIEW_SNAPSHOT",
+      "path": "docs/wallets/license-review/lock-review-snapshot.json",
+      "sha256": "4E039D568A7711F4495E582E076D62FC56987682B940E0EEB16BCB23F0FA0AF9"
+    },
+    {
+      "id": "CANDIDATE_DEPENDENCIES",
+      "path": "docs/wallets/license-review/candidate-dependencies.json",
+      "sha256": "CDFA73D511BB4B8207FF663A39FF730F36944ADDEDEF54CB9373337712F37AD7"
+    },
+    {
+      "id": "CANDIDATE_SPDX",
+      "path": "docs/wallets/license-review/candidate.spdx.json",
+      "sha256": "D15292C0D70AE39FBE5D3B4854C1CC159F806A157A16FC9CAF7F026305C64539"
+    },
+    {
+      "id": "FULL_LOCK_SPDX",
+      "path": "docs/wallets/license-review/wallet-lab-lock.spdx.json",
+      "sha256": "01CE8055A2F2E60498B371A449A17063993A45273A7722A47C727862C932E17B"
+    },
+    {
+      "id": "LICENSE_RECONCILIATION_README",
+      "path": "docs/wallets/license-review/reconciliation/README.md",
+      "sha256": "D735895D3809162EC1284800345CC85F1ECF09836980E1740D23F9BEBF0A3252"
+    },
+    {
+      "id": "LICENSE_RECONCILIATION",
+      "path": "docs/wallets/license-review/reconciliation/see-license-in-license-md.json",
+      "sha256": "932922A5224A74795BC6930CD291E9F46D70FDBABBDA2CB234E28A10EADC24F9"
+    },
+    {
+      "id": "VENDOR_INQUIRIES",
+      "path": "docs/wallets/license-review/vendor-inquiries.md",
+      "sha256": "E0638E512C3EE727D322FD4B5E0BE70BEBE7971C510A99DBCD791284DE60215D"
+    },
+    {
+      "id": "THIRD_PARTY_NOTICES",
+      "path": "tools/wallet-lab/THIRD_PARTY_NOTICES.md",
+      "sha256": "9260279615F525C7F0FC489F81A1B97322D01E29AB7BA34651C5FFDB42E85291"
+    }
+  ],
+  "supportingArtifactSetSha256": "E6440775CEBB011F6F2EC734860AF2CF91AFEED71B75E013D7D9129283AF39E3",
+  "versions": {
+    "dependencies": {
+      "@coinbase/wallet-sdk": "4.3.7",
+      "@solana/wallet-standard-features": "1.4.0",
+      "@tanstack/react-query": "5.101.4",
+      "@wagmi/connectors": "8.1.0",
+      "@wallet-standard/app": "1.1.1",
+      "@wallet-standard/base": "1.1.1",
+      "@wallet-standard/features": "1.1.1",
+      "@walletconnect/ethereum-provider": "2.23.10",
+      "qrcode.react": "4.2.0",
+      "react": "19.2.8",
+      "react-dom": "19.2.8",
+      "viem": "2.55.18",
+      "wagmi": "3.7.6"
+    },
+    "devDependencies": {
+      "@eslint/js": "10.0.1",
+      "@testing-library/dom": "10.4.1",
+      "@testing-library/jest-dom": "7.0.1",
+      "@testing-library/react": "16.3.2",
+      "@types/node": "22.20.1",
+      "@types/react": "19.2.18",
+      "@types/react-dom": "19.2.4",
+      "eslint": "10.0.0",
+      "jsdom": "26.1.0",
+      "typescript": "5.9.3",
+      "typescript-eslint": "8.67.0",
+      "vite": "8.2.1",
+      "vitest": "4.1.11"
+    },
+    "overrides": {
+      "axios": "1.18.0"
+    }
+  },
+  "limitations": [
+    {
+      "id": "REAL_WALLET_RESULTS_ABSENT",
+      "status": "OPEN",
+      "ownerTickets": ["KAN-225", "KAN-226"],
+      "summary": "No authorized real-wallet or real-device result has been recorded.",
+      "evidenceArtifactIds": ["EVIDENCE_INDEX", "DESKTOP_PLAN", "MOBILE_PLAN"]
+    },
+    {
+      "id": "PHYSICAL_HTTPS_M3_UNAUTHORIZED",
+      "status": "OPEN",
+      "ownerTickets": ["KAN-226"],
+      "summary": "Physical same-device HTTPS testing remains prohibited until separate approval.",
+      "evidenceArtifactIds": ["MOBILE_PLAN", "MANUAL_RUNBOOK"]
+    },
+    {
+      "id": "WALLETCONNECT_LEGAL_TERMS_PENDING",
+      "status": "OPEN",
+      "ownerTickets": ["KAN-222"],
+      "summary": "WalletConnect and Reown evaluation terms and public-use licensing remain unapproved.",
+      "evidenceArtifactIds": ["LICENSE_PACKET", "LEGAL_GATE"]
+    },
+    {
+      "id": "INDEPENDENT_SECURITY_REVIEW_PENDING",
+      "status": "OPEN",
+      "ownerTickets": ["KAN-223"],
+      "summary": "The coordinator packet has not received an independent AppSec disposition.",
+      "evidenceArtifactIds": ["SECURITY_PACKET", "SECURITY_DECISION_TEMPLATE"]
+    },
+    {
+      "id": "PRODUCTION_OWNERSHIP_PROOF_DEFERRED",
+      "status": "OPEN",
+      "ownerTickets": ["KAN-56"],
+      "summary": "The lab validates proof shape but does not implement server-issued atomic ownership proof.",
+      "evidenceArtifactIds": ["ADR", "MANUAL_RUNBOOK"]
+    },
+    {
+      "id": "LIMITED_CONCURRENT_SESSION_CARDINALITY",
+      "status": "OPEN",
+      "ownerTickets": ["KAN-55"],
+      "summary": "The harness supports distinct connectors, not duplicate sessions within one connector.",
+      "evidenceArtifactIds": ["ADR", "DESKTOP_PLAN"]
+    },
+    {
+      "id": "COINBASE_TELEMETRY_UNVERIFIED",
+      "status": "OPEN",
+      "ownerTickets": ["KAN-223"],
+      "summary": "Coinbase runtime network and telemetry behavior has not been independently observed.",
+      "evidenceArtifactIds": ["COMPATIBILITY_MATRIX", "NETWORK_OBSERVATION_TEMPLATE"]
+    },
+    {
+      "id": "EVIDENCE_EXPORTS_UNSIGNED",
+      "status": "OPEN",
+      "ownerTickets": ["KAN-223"],
+      "summary": "Sanitized evidence is structurally validated but not cryptographically signed.",
+      "evidenceArtifactIds": ["THREAT_MODEL", "SECURITY_PACKET"]
+    },
+    {
+      "id": "MOBILE_PLATFORM_DIVERSITY_UNPROVEN",
+      "status": "OPEN",
+      "ownerTickets": ["KAN-226"],
+      "summary": "P1 and H1 still require physical iOS and Android coverage, with WalletConnect A and B using distinct applications on opposite operating systems.",
+      "evidenceArtifactIds": ["MOBILE_PLAN", "MANUAL_RUNBOOK"]
+    }
+  ],
+  "requiredResults": [
+    {
+      "id": "DESKTOP_COMMON_METAMASK_D1",
+      "gate": "DESKTOP",
+      "target": "METAMASK",
+      "environments": ["D1"],
+      "caseIds": [
+        "C01",
+        "C02",
+        "C03",
+        "C04",
+        "C05",
+        "C06",
+        "C07",
+        "C08",
+        "C09",
+        "C10",
+        "C11",
+        "C12",
+        "C13",
+        "C14",
+        "C16",
+        "C17"
+      ],
+      "ownerTicket": "KAN-225",
+      "status": "PENDING",
+      "evidenceFiles": [],
+      "resolution": null
+    },
+    {
+      "id": "DESKTOP_COMMON_METAMASK_D2",
+      "gate": "DESKTOP",
+      "target": "METAMASK",
+      "environments": ["D2"],
+      "caseIds": [
+        "C01",
+        "C02",
+        "C03",
+        "C04",
+        "C05",
+        "C06",
+        "C07",
+        "C08",
+        "C09",
+        "C10",
+        "C11",
+        "C12",
+        "C13",
+        "C14",
+        "C16",
+        "C17"
+      ],
+      "ownerTicket": "KAN-225",
+      "status": "PENDING",
+      "evidenceFiles": [],
+      "resolution": null
+    },
+    {
+      "id": "DESKTOP_COMMON_PHANTOM_D1",
+      "gate": "DESKTOP",
+      "target": "PHANTOM",
+      "environments": ["D1"],
+      "caseIds": [
+        "C01",
+        "C02",
+        "C03",
+        "C04",
+        "C05",
+        "C06",
+        "C07",
+        "C10",
+        "C11",
+        "C12",
+        "C13",
+        "C14",
+        "C16",
+        "C17"
+      ],
+      "ownerTicket": "KAN-225",
+      "status": "PENDING",
+      "evidenceFiles": [],
+      "resolution": null
+    },
+    {
+      "id": "DESKTOP_COMMON_COINBASE_D1",
+      "gate": "DESKTOP",
+      "target": "COINBASE_WALLET",
+      "environments": ["D1"],
+      "caseIds": [
+        "C01",
+        "C02",
+        "C03",
+        "C04",
+        "C05",
+        "C06",
+        "C07",
+        "C08",
+        "C09",
+        "C10",
+        "C11",
+        "C12",
+        "C13",
+        "C14",
+        "C16",
+        "C17"
+      ],
+      "ownerTicket": "KAN-225",
+      "status": "PENDING",
+      "evidenceFiles": [],
+      "resolution": null
+    },
+    {
+      "id": "DESKTOP_COMMON_WALLETCONNECT_D3",
+      "gate": "DESKTOP",
+      "target": "WALLETCONNECT",
+      "environments": ["D3"],
+      "caseIds": [
+        "C01",
+        "C02",
+        "C03",
+        "C04",
+        "C05",
+        "C06",
+        "C07",
+        "C08",
+        "C09",
+        "C10",
+        "C11",
+        "C12",
+        "C13",
+        "C14",
+        "C15",
+        "C16",
+        "C17"
+      ],
+      "ownerTicket": "KAN-225",
+      "status": "PENDING",
+      "evidenceFiles": [],
+      "resolution": null
+    },
+    {
+      "id": "DESKTOP_CONCURRENT_EVM_D1",
+      "gate": "DESKTOP",
+      "target": "CROSS_WALLET",
+      "environments": ["D1"],
+      "caseIds": ["C18", "CB07"],
+      "ownerTicket": "KAN-225",
+      "status": "PENDING",
+      "evidenceFiles": [],
+      "resolution": null
+    },
+    {
+      "id": "DESKTOP_METAMASK_D1",
+      "gate": "DESKTOP",
+      "target": "METAMASK",
+      "environments": ["D1"],
+      "caseIds": ["MM01", "MM04", "MM05", "MM06"],
+      "ownerTicket": "KAN-225",
+      "status": "PENDING",
+      "evidenceFiles": [],
+      "resolution": null
+    },
+    {
+      "id": "DESKTOP_PHANTOM_D1",
+      "gate": "DESKTOP",
+      "target": "PHANTOM",
+      "environments": ["D1"],
+      "caseIds": ["PH01", "PH03", "PH04", "PH05", "PH06", "PH07"],
+      "ownerTicket": "KAN-225",
+      "status": "PENDING",
+      "evidenceFiles": [],
+      "resolution": null
+    },
+    {
+      "id": "DESKTOP_PHANTOM_D2_ABSENCE",
+      "gate": "DESKTOP",
+      "target": "PHANTOM",
+      "environments": ["D2"],
+      "caseIds": ["PHANTOM_FIREFOX_ABSENCE"],
+      "ownerTicket": "KAN-225",
+      "status": "PENDING",
+      "evidenceFiles": [],
+      "resolution": null
+    },
+    {
+      "id": "DESKTOP_COINBASE_D1",
+      "gate": "DESKTOP",
+      "target": "COINBASE_WALLET",
+      "environments": ["D1"],
+      "caseIds": ["CB01", "CB05", "CB06", "CB08"],
+      "ownerTicket": "KAN-225",
+      "status": "PENDING",
+      "evidenceFiles": [],
+      "resolution": null
+    },
+    {
+      "id": "DESKTOP_WALLETCONNECT_D3",
+      "gate": "DESKTOP",
+      "target": "WALLETCONNECT",
+      "environments": ["D3"],
+      "caseIds": [
+        "WC01",
+        "WC03a",
+        "WC03b",
+        "WC04",
+        "WC05",
+        "WC06",
+        "WC08a",
+        "WC08b",
+        "WC09",
+        "WC10",
+        "WC11"
+      ],
+      "ownerTicket": "KAN-225",
+      "status": "PENDING",
+      "evidenceFiles": [],
+      "resolution": null
+    },
+    {
+      "id": "MOBILE_M1_METAMASK",
+      "gate": "MOBILE",
+      "target": "METAMASK",
+      "environments": ["P1"],
+      "caseIds": ["MM02", "MM04", "WC01", "WC03a", "WC04", "WC06", "WC09", "WC10"],
+      "ownerTicket": "KAN-226",
+      "status": "PENDING",
+      "evidenceFiles": [],
+      "resolution": null
+    },
+    {
+      "id": "MOBILE_M1_PHANTOM",
+      "gate": "MOBILE",
+      "target": "PHANTOM",
+      "environments": ["P1"],
+      "caseIds": ["WC01", "WC03a", "WC04", "WC06", "WC09", "WC10"],
+      "ownerTicket": "KAN-226",
+      "status": "PENDING",
+      "evidenceFiles": [],
+      "resolution": null
+    },
+    {
+      "id": "MOBILE_M1_COINBASE",
+      "gate": "MOBILE",
+      "target": "COINBASE_WALLET",
+      "environments": ["P1"],
+      "caseIds": ["CB04"],
+      "ownerTicket": "KAN-226",
+      "status": "PENDING",
+      "evidenceFiles": [],
+      "resolution": null
+    },
+    {
+      "id": "MOBILE_M1_WALLETCONNECT_A",
+      "gate": "MOBILE",
+      "target": "WALLETCONNECT_A",
+      "environments": ["P1"],
+      "caseIds": ["WC01", "WC03a", "WC04", "WC06", "WC09", "WC10"],
+      "ownerTicket": "KAN-226",
+      "status": "PENDING",
+      "evidenceFiles": [],
+      "resolution": null
+    },
+    {
+      "id": "MOBILE_M1_WALLETCONNECT_B",
+      "gate": "MOBILE",
+      "target": "WALLETCONNECT_B",
+      "environments": ["P1"],
+      "caseIds": ["WC01", "WC03a", "WC04", "WC06", "WC09", "WC10"],
+      "ownerTicket": "KAN-226",
+      "status": "PENDING",
+      "evidenceFiles": [],
+      "resolution": null
+    },
+    {
+      "id": "MOBILE_M2_METAMASK_A1",
+      "gate": "MOBILE",
+      "target": "METAMASK",
+      "environments": ["A1"],
+      "caseIds": ["MM03", "WC02"],
+      "ownerTicket": "KAN-226",
+      "status": "PENDING",
+      "evidenceFiles": [],
+      "resolution": null
+    },
+    {
+      "id": "MOBILE_M2_METAMASK_S1",
+      "gate": "MOBILE",
+      "target": "METAMASK",
+      "environments": ["S1"],
+      "caseIds": ["MM03", "WC02"],
+      "ownerTicket": "KAN-226",
+      "status": "PENDING",
+      "evidenceFiles": [],
+      "resolution": null
+    },
+    {
+      "id": "MOBILE_M2_PHANTOM_A1",
+      "gate": "MOBILE",
+      "target": "PHANTOM",
+      "environments": ["A1"],
+      "caseIds": ["PH02", "PH04", "PH06", "PH08"],
+      "ownerTicket": "KAN-226",
+      "status": "PENDING",
+      "evidenceFiles": [],
+      "resolution": null
+    },
+    {
+      "id": "MOBILE_M2_PHANTOM_S1",
+      "gate": "MOBILE",
+      "target": "PHANTOM",
+      "environments": ["S1"],
+      "caseIds": ["PHANTOM_S1_SMOKE_OR_ABSENCE"],
+      "ownerTicket": "KAN-226",
+      "status": "PENDING",
+      "evidenceFiles": [],
+      "resolution": null
+    },
+    {
+      "id": "MOBILE_M2_COINBASE_A1",
+      "gate": "MOBILE",
+      "target": "COINBASE_WALLET",
+      "environments": ["A1"],
+      "caseIds": ["CB02", "CB03", "CB05", "CB06", "CB08"],
+      "ownerTicket": "KAN-226",
+      "status": "PENDING",
+      "evidenceFiles": [],
+      "resolution": null
+    },
+    {
+      "id": "MOBILE_M2_COINBASE_S1",
+      "gate": "MOBILE",
+      "target": "COINBASE_WALLET",
+      "environments": ["S1"],
+      "caseIds": ["CB02", "CB03"],
+      "ownerTicket": "KAN-226",
+      "status": "PENDING",
+      "evidenceFiles": [],
+      "resolution": null
+    },
+    {
+      "id": "MOBILE_M2_WALLETCONNECT_A_A1",
+      "gate": "MOBILE",
+      "target": "WALLETCONNECT_A",
+      "environments": ["A1"],
+      "caseIds": ["WC02", "WC03a", "WC04", "WC07"],
+      "ownerTicket": "KAN-226",
+      "status": "PENDING",
+      "evidenceFiles": [],
+      "resolution": null
+    },
+    {
+      "id": "MOBILE_M2_WALLETCONNECT_A_S1",
+      "gate": "MOBILE",
+      "target": "WALLETCONNECT_A",
+      "environments": ["S1"],
+      "caseIds": ["WC02"],
+      "ownerTicket": "KAN-226",
+      "status": "PENDING",
+      "evidenceFiles": [],
+      "resolution": null
+    },
+    {
+      "id": "MOBILE_M2_WALLETCONNECT_B_A1",
+      "gate": "MOBILE",
+      "target": "WALLETCONNECT_B",
+      "environments": ["A1"],
+      "caseIds": ["WC02", "WC03a", "WC04", "WC07"],
+      "ownerTicket": "KAN-226",
+      "status": "PENDING",
+      "evidenceFiles": [],
+      "resolution": null
+    },
+    {
+      "id": "MOBILE_M2_WALLETCONNECT_B_S1",
+      "gate": "MOBILE",
+      "target": "WALLETCONNECT_B",
+      "environments": ["S1"],
+      "caseIds": ["WC02"],
+      "ownerTicket": "KAN-226",
+      "status": "PENDING",
+      "evidenceFiles": [],
+      "resolution": null
+    },
+    {
+      "id": "MOBILE_M3_METAMASK",
+      "gate": "MOBILE",
+      "target": "METAMASK",
+      "environments": ["H1"],
+      "caseIds": ["MM03", "WC12"],
+      "ownerTicket": "KAN-226",
+      "status": "PENDING",
+      "evidenceFiles": [],
+      "resolution": null
+    },
+    {
+      "id": "MOBILE_M3_PHANTOM",
+      "gate": "MOBILE",
+      "target": "PHANTOM",
+      "environments": ["H1"],
+      "caseIds": ["PH02", "PH08"],
+      "ownerTicket": "KAN-226",
+      "status": "PENDING",
+      "evidenceFiles": [],
+      "resolution": null
+    },
+    {
+      "id": "MOBILE_M3_COINBASE",
+      "gate": "MOBILE",
+      "target": "COINBASE_WALLET",
+      "environments": ["H1"],
+      "caseIds": ["CB02", "CB03", "CB08"],
+      "ownerTicket": "KAN-226",
+      "status": "PENDING",
+      "evidenceFiles": [],
+      "resolution": null
+    },
+    {
+      "id": "MOBILE_M3_WALLETCONNECT_A",
+      "gate": "MOBILE",
+      "target": "WALLETCONNECT_A",
+      "environments": ["H1"],
+      "caseIds": ["WC02", "WC12"],
+      "ownerTicket": "KAN-226",
+      "status": "PENDING",
+      "evidenceFiles": [],
+      "resolution": null
+    },
+    {
+      "id": "MOBILE_M3_WALLETCONNECT_B",
+      "gate": "MOBILE",
+      "target": "WALLETCONNECT_B",
+      "environments": ["H1"],
+      "caseIds": ["WC02", "WC12"],
+      "ownerTicket": "KAN-226",
+      "status": "PENDING",
+      "evidenceFiles": [],
+      "resolution": null
+    },
+    {
+      "id": "MOBILE_COMMON_M1_METAMASK",
+      "gate": "MOBILE",
+      "target": "METAMASK",
+      "environments": ["P1"],
+      "caseIds": [
+        "C01",
+        "C02",
+        "C03",
+        "C04",
+        "C05",
+        "C06",
+        "C07",
+        "C08",
+        "C09",
+        "C10",
+        "C11",
+        "C12",
+        "C13",
+        "C14",
+        "C15",
+        "C16",
+        "C17"
+      ],
+      "ownerTicket": "KAN-226",
+      "status": "PENDING",
+      "evidenceFiles": [],
+      "resolution": null
+    },
+    {
+      "id": "MOBILE_COMMON_M1_PHANTOM",
+      "gate": "MOBILE",
+      "target": "PHANTOM",
+      "environments": ["P1"],
+      "caseIds": [
+        "C01",
+        "C02",
+        "C03",
+        "C04",
+        "C05",
+        "C06",
+        "C07",
+        "C08",
+        "C09",
+        "C10",
+        "C11",
+        "C12",
+        "C13",
+        "C14",
+        "C15",
+        "C16",
+        "C17"
+      ],
+      "ownerTicket": "KAN-226",
+      "status": "PENDING",
+      "evidenceFiles": [],
+      "resolution": null
+    },
+    {
+      "id": "MOBILE_COMMON_M1_COINBASE",
+      "gate": "MOBILE",
+      "target": "COINBASE_WALLET",
+      "environments": ["P1"],
+      "caseIds": [
+        "C01",
+        "C02",
+        "C03",
+        "C04",
+        "C05",
+        "C06",
+        "C07",
+        "C08",
+        "C09",
+        "C10",
+        "C11",
+        "C12",
+        "C13",
+        "C14",
+        "C16",
+        "C17"
+      ],
+      "ownerTicket": "KAN-226",
+      "status": "PENDING",
+      "evidenceFiles": [],
+      "resolution": null
+    },
+    {
+      "id": "MOBILE_COMMON_M1_WALLETCONNECT_A",
+      "gate": "MOBILE",
+      "target": "WALLETCONNECT_A",
+      "environments": ["P1"],
+      "caseIds": [
+        "C01",
+        "C02",
+        "C03",
+        "C04",
+        "C05",
+        "C06",
+        "C07",
+        "C08",
+        "C09",
+        "C10",
+        "C11",
+        "C12",
+        "C13",
+        "C14",
+        "C15",
+        "C16",
+        "C17"
+      ],
+      "ownerTicket": "KAN-226",
+      "status": "PENDING",
+      "evidenceFiles": [],
+      "resolution": null
+    },
+    {
+      "id": "MOBILE_COMMON_M1_WALLETCONNECT_B",
+      "gate": "MOBILE",
+      "target": "WALLETCONNECT_B",
+      "environments": ["P1"],
+      "caseIds": [
+        "C01",
+        "C02",
+        "C03",
+        "C04",
+        "C05",
+        "C06",
+        "C07",
+        "C08",
+        "C09",
+        "C10",
+        "C11",
+        "C12",
+        "C13",
+        "C14",
+        "C15",
+        "C16",
+        "C17"
+      ],
+      "ownerTicket": "KAN-226",
+      "status": "PENDING",
+      "evidenceFiles": [],
+      "resolution": null
+    },
+    {
+      "id": "MOBILE_COMMON_M2_METAMASK_A1",
+      "gate": "MOBILE",
+      "target": "METAMASK",
+      "environments": ["A1"],
+      "caseIds": [
+        "C01",
+        "C02",
+        "C03",
+        "C04",
+        "C05",
+        "C06",
+        "C07",
+        "C08",
+        "C09",
+        "C10",
+        "C11",
+        "C12",
+        "C13",
+        "C14",
+        "C15",
+        "C16",
+        "C17"
+      ],
+      "ownerTicket": "KAN-226",
+      "status": "PENDING",
+      "evidenceFiles": [],
+      "resolution": null
+    },
+    {
+      "id": "MOBILE_COMMON_M2_METAMASK_S1",
+      "gate": "MOBILE",
+      "target": "METAMASK",
+      "environments": ["S1"],
+      "caseIds": [
+        "C01",
+        "C02",
+        "C03",
+        "C04",
+        "C05",
+        "C06",
+        "C07",
+        "C08",
+        "C09",
+        "C10",
+        "C11",
+        "C12",
+        "C13",
+        "C14",
+        "C15",
+        "C16",
+        "C17"
+      ],
+      "ownerTicket": "KAN-226",
+      "status": "PENDING",
+      "evidenceFiles": [],
+      "resolution": null
+    },
+    {
+      "id": "MOBILE_COMMON_M2_PHANTOM_A1",
+      "gate": "MOBILE",
+      "target": "PHANTOM",
+      "environments": ["A1"],
+      "caseIds": [
+        "C01",
+        "C02",
+        "C03",
+        "C04",
+        "C05",
+        "C06",
+        "C07",
+        "C10",
+        "C11",
+        "C12",
+        "C13",
+        "C14",
+        "C16",
+        "C17"
+      ],
+      "ownerTicket": "KAN-226",
+      "status": "PENDING",
+      "evidenceFiles": [],
+      "resolution": null
+    },
+    {
+      "id": "MOBILE_COMMON_M2_COINBASE_A1",
+      "gate": "MOBILE",
+      "target": "COINBASE_WALLET",
+      "environments": ["A1"],
+      "caseIds": [
+        "C01",
+        "C02",
+        "C03",
+        "C04",
+        "C05",
+        "C06",
+        "C07",
+        "C08",
+        "C09",
+        "C10",
+        "C11",
+        "C12",
+        "C13",
+        "C14",
+        "C16",
+        "C17"
+      ],
+      "ownerTicket": "KAN-226",
+      "status": "PENDING",
+      "evidenceFiles": [],
+      "resolution": null
+    },
+    {
+      "id": "MOBILE_COMMON_M2_COINBASE_S1",
+      "gate": "MOBILE",
+      "target": "COINBASE_WALLET",
+      "environments": ["S1"],
+      "caseIds": [
+        "C01",
+        "C02",
+        "C03",
+        "C04",
+        "C05",
+        "C06",
+        "C07",
+        "C08",
+        "C09",
+        "C10",
+        "C11",
+        "C12",
+        "C13",
+        "C14",
+        "C16",
+        "C17"
+      ],
+      "ownerTicket": "KAN-226",
+      "status": "PENDING",
+      "evidenceFiles": [],
+      "resolution": null
+    },
+    {
+      "id": "MOBILE_COMMON_M2_WALLETCONNECT_A_A1",
+      "gate": "MOBILE",
+      "target": "WALLETCONNECT_A",
+      "environments": ["A1"],
+      "caseIds": [
+        "C01",
+        "C02",
+        "C03",
+        "C04",
+        "C05",
+        "C06",
+        "C07",
+        "C08",
+        "C09",
+        "C10",
+        "C11",
+        "C12",
+        "C13",
+        "C14",
+        "C15",
+        "C16",
+        "C17"
+      ],
+      "ownerTicket": "KAN-226",
+      "status": "PENDING",
+      "evidenceFiles": [],
+      "resolution": null
+    },
+    {
+      "id": "MOBILE_COMMON_M2_WALLETCONNECT_A_S1",
+      "gate": "MOBILE",
+      "target": "WALLETCONNECT_A",
+      "environments": ["S1"],
+      "caseIds": [
+        "C01",
+        "C02",
+        "C03",
+        "C04",
+        "C05",
+        "C06",
+        "C07",
+        "C08",
+        "C09",
+        "C10",
+        "C11",
+        "C12",
+        "C13",
+        "C14",
+        "C15",
+        "C16",
+        "C17"
+      ],
+      "ownerTicket": "KAN-226",
+      "status": "PENDING",
+      "evidenceFiles": [],
+      "resolution": null
+    },
+    {
+      "id": "MOBILE_COMMON_M2_WALLETCONNECT_B_A1",
+      "gate": "MOBILE",
+      "target": "WALLETCONNECT_B",
+      "environments": ["A1"],
+      "caseIds": [
+        "C01",
+        "C02",
+        "C03",
+        "C04",
+        "C05",
+        "C06",
+        "C07",
+        "C08",
+        "C09",
+        "C10",
+        "C11",
+        "C12",
+        "C13",
+        "C14",
+        "C15",
+        "C16",
+        "C17"
+      ],
+      "ownerTicket": "KAN-226",
+      "status": "PENDING",
+      "evidenceFiles": [],
+      "resolution": null
+    },
+    {
+      "id": "MOBILE_COMMON_M2_WALLETCONNECT_B_S1",
+      "gate": "MOBILE",
+      "target": "WALLETCONNECT_B",
+      "environments": ["S1"],
+      "caseIds": [
+        "C01",
+        "C02",
+        "C03",
+        "C04",
+        "C05",
+        "C06",
+        "C07",
+        "C08",
+        "C09",
+        "C10",
+        "C11",
+        "C12",
+        "C13",
+        "C14",
+        "C15",
+        "C16",
+        "C17"
+      ],
+      "ownerTicket": "KAN-226",
+      "status": "PENDING",
+      "evidenceFiles": [],
+      "resolution": null
+    },
+    {
+      "id": "MOBILE_COMMON_M3_METAMASK",
+      "gate": "MOBILE",
+      "target": "METAMASK",
+      "environments": ["H1"],
+      "caseIds": [
+        "C01",
+        "C02",
+        "C03",
+        "C04",
+        "C05",
+        "C06",
+        "C07",
+        "C08",
+        "C09",
+        "C10",
+        "C11",
+        "C12",
+        "C13",
+        "C14",
+        "C15",
+        "C16",
+        "C17"
+      ],
+      "ownerTicket": "KAN-226",
+      "status": "PENDING",
+      "evidenceFiles": [],
+      "resolution": null
+    },
+    {
+      "id": "MOBILE_COMMON_M3_PHANTOM",
+      "gate": "MOBILE",
+      "target": "PHANTOM",
+      "environments": ["H1"],
+      "caseIds": [
+        "C01",
+        "C02",
+        "C03",
+        "C04",
+        "C05",
+        "C06",
+        "C07",
+        "C10",
+        "C11",
+        "C12",
+        "C13",
+        "C14",
+        "C16",
+        "C17"
+      ],
+      "ownerTicket": "KAN-226",
+      "status": "PENDING",
+      "evidenceFiles": [],
+      "resolution": null
+    },
+    {
+      "id": "MOBILE_COMMON_M3_COINBASE",
+      "gate": "MOBILE",
+      "target": "COINBASE_WALLET",
+      "environments": ["H1"],
+      "caseIds": [
+        "C01",
+        "C02",
+        "C03",
+        "C04",
+        "C05",
+        "C06",
+        "C07",
+        "C08",
+        "C09",
+        "C10",
+        "C11",
+        "C12",
+        "C13",
+        "C14",
+        "C16",
+        "C17"
+      ],
+      "ownerTicket": "KAN-226",
+      "status": "PENDING",
+      "evidenceFiles": [],
+      "resolution": null
+    },
+    {
+      "id": "MOBILE_COMMON_M3_WALLETCONNECT_A",
+      "gate": "MOBILE",
+      "target": "WALLETCONNECT_A",
+      "environments": ["H1"],
+      "caseIds": [
+        "C01",
+        "C02",
+        "C03",
+        "C04",
+        "C05",
+        "C06",
+        "C07",
+        "C08",
+        "C09",
+        "C10",
+        "C11",
+        "C12",
+        "C13",
+        "C14",
+        "C15",
+        "C16",
+        "C17"
+      ],
+      "ownerTicket": "KAN-226",
+      "status": "PENDING",
+      "evidenceFiles": [],
+      "resolution": null
+    },
+    {
+      "id": "MOBILE_COMMON_M3_WALLETCONNECT_B",
+      "gate": "MOBILE",
+      "target": "WALLETCONNECT_B",
+      "environments": ["H1"],
+      "caseIds": [
+        "C01",
+        "C02",
+        "C03",
+        "C04",
+        "C05",
+        "C06",
+        "C07",
+        "C08",
+        "C09",
+        "C10",
+        "C11",
+        "C12",
+        "C13",
+        "C14",
+        "C15",
+        "C16",
+        "C17"
+      ],
+      "ownerTicket": "KAN-226",
+      "status": "PENDING",
+      "evidenceFiles": [],
+      "resolution": null
+    }
+  ],
+  "securityFindings": [
+    {
+      "id": "SEC-001",
+      "ownerTicket": "KAN-223",
+      "status": "PENDING_CLASSIFICATION",
+      "severity": null,
+      "disposition": null,
+      "evidenceFiles": [],
+      "resolution": null
+    },
+    {
+      "id": "SEC-002",
+      "ownerTicket": "KAN-223",
+      "status": "PENDING_CLASSIFICATION",
+      "severity": null,
+      "disposition": null,
+      "evidenceFiles": [],
+      "resolution": null
+    },
+    {
+      "id": "SEC-003",
+      "ownerTicket": "KAN-223",
+      "status": "PENDING_CLASSIFICATION",
+      "severity": null,
+      "disposition": null,
+      "evidenceFiles": [],
+      "resolution": null
+    },
+    {
+      "id": "SEC-004",
+      "ownerTicket": "KAN-223",
+      "status": "PENDING_CLASSIFICATION",
+      "severity": null,
+      "disposition": null,
+      "evidenceFiles": [],
+      "resolution": null
+    },
+    {
+      "id": "SEC-005",
+      "ownerTicket": "KAN-223",
+      "status": "PENDING_CLASSIFICATION",
+      "severity": null,
+      "disposition": null,
+      "evidenceFiles": [],
+      "resolution": null
+    },
+    {
+      "id": "SEC-006",
+      "ownerTicket": "KAN-223",
+      "status": "PENDING_CLASSIFICATION",
+      "severity": null,
+      "disposition": null,
+      "evidenceFiles": [],
+      "resolution": null
+    },
+    {
+      "id": "SEC-007",
+      "ownerTicket": "KAN-223",
+      "status": "PENDING_CLASSIFICATION",
+      "severity": null,
+      "disposition": null,
+      "evidenceFiles": [],
+      "resolution": null
+    },
+    {
+      "id": "SEC-008",
+      "ownerTicket": "KAN-223",
+      "status": "PENDING_CLASSIFICATION",
+      "severity": null,
+      "disposition": null,
+      "evidenceFiles": [],
+      "resolution": null
+    },
+    {
+      "id": "SEC-009",
+      "ownerTicket": "KAN-223",
+      "status": "PENDING_CLASSIFICATION",
+      "severity": null,
+      "disposition": null,
+      "evidenceFiles": [],
+      "resolution": null
+    },
+    {
+      "id": "SEC-010",
+      "ownerTicket": "KAN-223",
+      "status": "PENDING_CLASSIFICATION",
+      "severity": null,
+      "disposition": null,
+      "evidenceFiles": [],
+      "resolution": null
+    },
+    {
+      "id": "SEC-011",
+      "ownerTicket": "KAN-223",
+      "status": "PENDING_CLASSIFICATION",
+      "severity": null,
+      "disposition": null,
+      "evidenceFiles": [],
+      "resolution": null
+    },
+    {
+      "id": "SEC-012",
+      "ownerTicket": "KAN-223",
+      "status": "PENDING_CLASSIFICATION",
+      "severity": null,
+      "disposition": null,
+      "evidenceFiles": [],
+      "resolution": null
+    },
+    {
+      "id": "SEC-013",
+      "ownerTicket": "KAN-223",
+      "status": "PENDING_CLASSIFICATION",
+      "severity": null,
+      "disposition": null,
+      "evidenceFiles": [],
+      "resolution": null
+    }
+  ],
+  "executionGates": [
+    {
+      "id": "DESKTOP",
+      "ownerTicket": "KAN-225",
+      "status": "PENDING",
+      "evidenceFiles": []
+    },
+    {
+      "id": "MOBILE",
+      "ownerTicket": "KAN-226",
+      "status": "PENDING",
+      "evidenceFiles": []
+    }
+  ],
+  "decisions": [
+    {
+      "id": "SECURITY",
+      "ownerTicket": "KAN-223",
+      "status": "PENDING",
+      "scopeBinding": {
+        "executableCommit": "a0fc8527172cd29743c5d6475cf6264bbd6bde05",
+        "executableTree": "58ba5e657d4584e60ce2db41aecf6d7a265d4351",
+        "packageManifestSha256": "E778E4C862E919FE4BD3081EB61076E9EAB1C7144E6197DDE5A97FC35C554F06",
+        "packageLockSha256": "D723EC5710968AE94663CD2AE3CB107F11349281E3DC6DA580246B2BD71473B9",
+        "supportingArtifactSetSha256": "E6440775CEBB011F6F2EC734860AF2CF91AFEED71B75E013D7D9129283AF39E3"
+      },
+      "reviewer": null,
+      "decidedAt": null,
+      "expiresAt": null,
+      "result": null,
+      "conditions": [],
+      "evidenceFiles": []
+    },
+    {
+      "id": "LEGAL_OSS",
+      "ownerTicket": "KAN-222",
+      "status": "PENDING",
+      "scopeBinding": {
+        "executableCommit": "a0fc8527172cd29743c5d6475cf6264bbd6bde05",
+        "executableTree": "58ba5e657d4584e60ce2db41aecf6d7a265d4351",
+        "packageManifestSha256": "E778E4C862E919FE4BD3081EB61076E9EAB1C7144E6197DDE5A97FC35C554F06",
+        "packageLockSha256": "D723EC5710968AE94663CD2AE3CB107F11349281E3DC6DA580246B2BD71473B9",
+        "supportingArtifactSetSha256": "E6440775CEBB011F6F2EC734860AF2CF91AFEED71B75E013D7D9129283AF39E3"
+      },
+      "reviewer": null,
+      "decidedAt": null,
+      "expiresAt": null,
+      "result": null,
+      "conditions": [],
+      "evidenceFiles": []
+    },
+    {
+      "id": "PRIVACY",
+      "ownerTicket": "KAN-223",
+      "status": "PENDING",
+      "scopeBinding": {
+        "executableCommit": "a0fc8527172cd29743c5d6475cf6264bbd6bde05",
+        "executableTree": "58ba5e657d4584e60ce2db41aecf6d7a265d4351",
+        "packageManifestSha256": "E778E4C862E919FE4BD3081EB61076E9EAB1C7144E6197DDE5A97FC35C554F06",
+        "packageLockSha256": "D723EC5710968AE94663CD2AE3CB107F11349281E3DC6DA580246B2BD71473B9",
+        "supportingArtifactSetSha256": "E6440775CEBB011F6F2EC734860AF2CF91AFEED71B75E013D7D9129283AF39E3"
+      },
+      "reviewer": null,
+      "decidedAt": null,
+      "expiresAt": null,
+      "result": null,
+      "conditions": [],
+      "evidenceFiles": []
+    }
+  ],
+  "signoffs": [
+    {
+      "id": "ENGINEERING",
+      "ownerTicket": "KAN-227",
+      "status": "PENDING",
+      "scopeBinding": {
+        "executableCommit": "a0fc8527172cd29743c5d6475cf6264bbd6bde05",
+        "executableTree": "58ba5e657d4584e60ce2db41aecf6d7a265d4351",
+        "packageManifestSha256": "E778E4C862E919FE4BD3081EB61076E9EAB1C7144E6197DDE5A97FC35C554F06",
+        "packageLockSha256": "D723EC5710968AE94663CD2AE3CB107F11349281E3DC6DA580246B2BD71473B9",
+        "supportingArtifactSetSha256": "E6440775CEBB011F6F2EC734860AF2CF91AFEED71B75E013D7D9129283AF39E3"
+      },
+      "signer": null,
+      "signedAt": null,
+      "expiresAt": null,
+      "result": null,
+      "conditions": [],
+      "evidenceFiles": []
+    },
+    {
+      "id": "SECURITY",
+      "ownerTicket": "KAN-227",
+      "status": "PENDING",
+      "scopeBinding": {
+        "executableCommit": "a0fc8527172cd29743c5d6475cf6264bbd6bde05",
+        "executableTree": "58ba5e657d4584e60ce2db41aecf6d7a265d4351",
+        "packageManifestSha256": "E778E4C862E919FE4BD3081EB61076E9EAB1C7144E6197DDE5A97FC35C554F06",
+        "packageLockSha256": "D723EC5710968AE94663CD2AE3CB107F11349281E3DC6DA580246B2BD71473B9",
+        "supportingArtifactSetSha256": "E6440775CEBB011F6F2EC734860AF2CF91AFEED71B75E013D7D9129283AF39E3"
+      },
+      "signer": null,
+      "signedAt": null,
+      "expiresAt": null,
+      "result": null,
+      "conditions": [],
+      "evidenceFiles": []
+    },
+    {
+      "id": "PRODUCT",
+      "ownerTicket": "KAN-227",
+      "status": "PENDING",
+      "scopeBinding": {
+        "executableCommit": "a0fc8527172cd29743c5d6475cf6264bbd6bde05",
+        "executableTree": "58ba5e657d4584e60ce2db41aecf6d7a265d4351",
+        "packageManifestSha256": "E778E4C862E919FE4BD3081EB61076E9EAB1C7144E6197DDE5A97FC35C554F06",
+        "packageLockSha256": "D723EC5710968AE94663CD2AE3CB107F11349281E3DC6DA580246B2BD71473B9",
+        "supportingArtifactSetSha256": "E6440775CEBB011F6F2EC734860AF2CF91AFEED71B75E013D7D9129283AF39E3"
+      },
+      "signer": null,
+      "signedAt": null,
+      "expiresAt": null,
+      "result": null,
+      "conditions": [],
+      "evidenceFiles": []
+    },
+    {
+      "id": "RELEASE",
+      "ownerTicket": "KAN-227",
+      "status": "PENDING",
+      "scopeBinding": {
+        "executableCommit": "a0fc8527172cd29743c5d6475cf6264bbd6bde05",
+        "executableTree": "58ba5e657d4584e60ce2db41aecf6d7a265d4351",
+        "packageManifestSha256": "E778E4C862E919FE4BD3081EB61076E9EAB1C7144E6197DDE5A97FC35C554F06",
+        "packageLockSha256": "D723EC5710968AE94663CD2AE3CB107F11349281E3DC6DA580246B2BD71473B9",
+        "supportingArtifactSetSha256": "E6440775CEBB011F6F2EC734860AF2CF91AFEED71B75E013D7D9129283AF39E3"
+      },
+      "signer": null,
+      "signedAt": null,
+      "expiresAt": null,
+      "result": null,
+      "conditions": [],
+      "evidenceFiles": []
+    }
+  ],
+  "reReviewTriggers": [
+    "EXECUTABLE_CHANGE",
+    "DEPENDENCY_OR_LOCK_CHANGE",
+    "LICENSE_OR_TERMS_CHANGE",
+    "CONNECTOR_CHAIN_OR_ORIGIN_CHANGE",
+    "CSP_RPC_RELAY_CHANGE",
+    "EVIDENCE_SCHEMA_CHANGE",
+    "AUTHENTICATION_BOUNDARY_CHANGE",
+    "PUBLIC_OR_HOSTED_DEPLOYMENT",
+    "TELEMETRY_OR_STORAGE_CHANGE",
+    "SECURITY_INCIDENT",
+    "DECISION_EXPIRY"
+  ],
+  "externalReviewBinding": {
+    "status": "PENDING",
+    "attestedCommit": null,
+    "attestedTree": null,
+    "registerSha256": null
+  }
+}

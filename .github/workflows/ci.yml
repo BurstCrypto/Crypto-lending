@@ -103,6 +103,7 @@ jobs:
           npm run security:test:jira
           npm run security:test:secrets
           npm run security:test:threat-model
+          npm run security:test:wallet-review
 
       - name: Run API end-to-end tests
         run: npm run test:e2e --workspace @crypto-lending/api

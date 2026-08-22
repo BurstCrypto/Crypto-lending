@@ -1,6 +1,14 @@
 # KAN-225 desktop execution plan
 
-Execution status: **NOT STARTED — FROZEN LAB AND CLEARANCE REQUIRED**
+Execution status: **NOT STARTED - NO REAL-WALLET RESULT EXISTS**
+
+- Execution owner: KAN-225.
+- Candidate-freeze owner: KAN-224.
+- Consolidated status: [KAN-227](../KAN-227.md).
+
+The detected software below is readiness information only. Every desktop case
+remains `NOT_RUN`; no Pass, Fail, Blocked execution result, approved exception,
+tester, UTC interval, or schema-v3 artifact is recorded.
 
 ## Entry criteria
 
@@ -24,6 +32,18 @@ is not execution evidence; re-record exact versions when each case runs.
 | D1 Chromium multi-extension | Partial           | Chrome 151.0.7922.138; MetaMask 13.43.0.0; Phantom 26.25.0; Coinbase 3.143.0 | Create a dedicated profile, verify exact enabled extension IDs/versions, and use disposable test wallets          |
 | D2 Firefox                  | Blocked           | Firefox not installed                                                        | Install a supported current Firefox and applicable extensions; document Phantom's official absence                |
 | D3 clean browser / QR       | Blocked           | Edge 151.0.4129.93 is available                                              | Create a no-extension profile; obtain KAN-222 clearance and authorized WalletConnect project/origin configuration |
+
+## Current NOT_RUN gates
+
+| Gate                                       | Current state                                                                                    | Owner / decision ticket |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------ | ----------------------- |
+| Exact executable candidate                 | Replacement `a0fc852...` / tree `58ba5e6...` is prepared but has not been verified in a real run | KAN-224                 |
+| Evaluation-use and WalletConnect clearance | Required before gated WalletConnect execution                                                    | KAN-222                 |
+| D1 dedicated profiles and test wallets     | Detected installations only; no authorized human run                                             | KAN-225                 |
+| D2 Firefox coverage                        | Firefox and required supported extensions were not installed on 2026-08-19                       | KAN-225                 |
+| D3 clean-browser QR coverage               | Authorized WalletConnect project/origin configuration is absent                                  | KAN-225 / KAN-222       |
+
+These are entry blockers, not executed failures or approved exceptions.
 
 ## Required coverage
 
@@ -59,7 +79,7 @@ Add one row only after a result artifact exists.
 
 | Case    | Environment | Wallet/version | Result  | UTC | v3 evidence | Defect/exception | Tester |
 | ------- | ----------- | -------------- | ------- | --- | ----------- | ---------------- | ------ |
-| Pending | Pending     | Pending        | Not run | —   | —           | —                | —      |
+| Pending | Pending     | Pending        | Not run | N/A | N/A         | N/A              | N/A    |
 
 KAN-225 remains In Progress until all required rows are Pass, Fail/Blocked with
 a focused defect, or covered by an explicitly approved documented exception.
