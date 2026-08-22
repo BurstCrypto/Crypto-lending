@@ -84,6 +84,7 @@ jobs:
           pwsh -NoProfile -File infra/aws/test-invoke-acm-dns-local.ps1
           npm run infra:test:egress
           npm run infra:test:providers
+          npm run infra:test:valuation
           pwsh -NoProfile -File infra/aws/test-invoke-account-readonly-preflight.ps1
           pwsh -NoProfile -File infra/aws/test-invoke-account-guardrails.ps1
           pwsh -NoProfile -File infra/aws/test-invoke-application-baseline.ps1

@@ -283,6 +283,14 @@ gate.
   and
   [fail-closed observation policy](apps/api/src/blockchain/domain/chain-observation-policy.ts)
   define the inactive local enforcement contract.
+- KAN-66 proposes Pyth Core as the primary USD stablecoin price source and
+  Chainlink Data Feeds as a fallback/cross-check for exact KAN-61 mainnet USDC,
+  USDT, and PYUSD identities. Its integer-only policy caps upside at one dollar,
+  preserves downside, rejects stale/conflicting data, and remains blocked from
+  runtime or financial use pending KAN-252 and KAN-231. See the
+  [human decision packet](docs/KAN-66.md),
+  [machine record](docs/valuation/kan-66-stablecoin-valuation-decision.json),
+  and [SHA-256 sidecar](docs/valuation/kan-66-stablecoin-valuation-decision.sha256).
 - `apps/api/src/infrastructure/observability` owns KAN-52's provider-neutral,
   low-cardinality metrics and server-authoritative correlation-linked spans.
   The optional environment dashboard remains disabled by default; local

@@ -1,0 +1,1545 @@
+{
+  "schemaVersion": 1,
+  "ticket": "KAN-66",
+  "specification": "BAL-001",
+  "decisionReference": "jira:KAN-66/stablecoin-valuation-decision-v1",
+  "asOfDate": "2026-08-22",
+  "localStatus": "READY_FOR_INDEPENDENT_REVIEW",
+  "externalStatus": "PENDING_EXTERNAL_APPROVAL",
+  "selection": {
+    "architecture": "DUAL_ORACLE_CANDIDATE_CONSERVATIVE_USD_VALUATION",
+    "primaryProvider": "PYTH_CORE",
+    "primaryRole": "PRIMARY",
+    "primaryStatus": "PROPOSED",
+    "fallbackProvider": "CHAINLINK_DATA_FEEDS",
+    "fallbackRole": "FALLBACK_AND_CROSS_CHECK",
+    "fallbackStatus": "PROPOSED",
+    "independenceStatus": "INDEPENDENT_ORACLE_NETWORKS_UNDERLYING_VENUE_OVERLAP_UNVERIFIED",
+    "runtimeStatus": "NOT_APPROVED",
+    "financialUseStatus": "NOT_APPROVED",
+    "onchainWriteStatus": "OUT_OF_SCOPE_PROHIBITED",
+    "nominalPegStatus": "NEVER_ASSUMED"
+  },
+  "approvalBoundary": {
+    "approved": false,
+    "riskPolicyApproval": null,
+    "legalTermsApproval": null,
+    "financePlanApproval": null,
+    "approvedGitCommit": null,
+    "approvedGitTree": null,
+    "approvedDecisionPacketSha256": null,
+    "approvedRegistryFingerprintSha256": null,
+    "providerAccount": null,
+    "plan": null,
+    "apiEndpointHostnames": [],
+    "rpcEndpointHostnames": [],
+    "chainlinkContractAddresses": [],
+    "credentialReferences": [],
+    "regions": [],
+    "sla": null,
+    "monthlyCostUsd": null,
+    "egressDestinations": [],
+    "runtimeActivation": null,
+    "manualRiskClear": null,
+    "prohibitedUntilGatesPass": [
+      "CREATE_PROVIDER_ACCOUNT",
+      "START_PROVIDER_TRIAL",
+      "SELECT_PROVIDER_PLAN",
+      "ADD_PAYMENT_METHOD",
+      "CREATE_API_OR_RPC_ENDPOINT",
+      "ISSUE_API_OR_RPC_CREDENTIAL",
+      "OPEN_PROVIDER_CONNECTION",
+      "SEND_PRICE_OR_RPC_REQUEST",
+      "SUBMIT_ONCHAIN_PRICE_UPDATE",
+      "AUTHORIZE_EXTERNAL_EGRESS",
+      "ACTIVATE_RUNTIME_VALUATION",
+      "AUTHORIZE_FINANCIAL_USE"
+    ]
+  },
+  "gates": [
+    {
+      "ticket": "KAN-252",
+      "kind": "EXTERNAL_POLICY_PROVIDER_AND_LIVE_VALIDATION",
+      "status": "PENDING_EXTERNAL_APPROVAL",
+      "blocks": "ANY_VALUATION_SOURCE_POLICY_OR_FINANCIAL_APPROVAL",
+      "requiredEvidence": [
+        "INDEPENDENT_RISK_FINANCE_LEGAL_SECURITY_PRIVACY_AND_ARCHITECTURE_DECISIONS",
+        "APPROVED_EXACT_PROVIDER_PRODUCTS_ACCOUNTS_PLANS_TERMS_AND_COST_CAPS",
+        "APPROVED_EXACT_FEED_IDS_CONTRACTS_HOSTNAMES_AND_CREDENTIAL_REFERENCES",
+        "MERGED_GIT_COMMIT_TREE_PACKET_SHA256_AND_KAN_61_FINGERPRINT_BINDING",
+        "LIVE_PRICE_TIMESTAMP_CONFIDENCE_FRESHNESS_AND_FEED_IDENTITY_PROOF",
+        "PINNED_IDENTITIES_DURABLE_UNIQUE_UPDATE_ID_AND_SEQUENCE_TIMESTAMP_CHECKPOINT",
+        "MEASURED_RATE_LIMIT_LATENCY_AVAILABILITY_AND_COST_BEHAVIOR",
+        "NORMAL_STALE_UNAVAILABLE_DEPEG_CONFLICT_FALLBACK_AND_RECOVERY_EXERCISES",
+        "DURABLE_ASSET_BOUND_DEPEG_LATCH_AND_AUTHENTICATED_MANUAL_CLEAR_RECORDS",
+        "UNDERLYING_SOURCE_OVERLAP_AND_FALLBACK_INDEPENDENCE_ANALYSIS",
+        "REDACTION_RETENTION_RESIDENCY_SUBPROCESSOR_INCIDENT_AND_TERMINATION_EVIDENCE"
+      ],
+      "scopeBoundary": "DOES_NOT_AUTHORIZE_ACCOUNT_CREATION_NETWORK_EGRESS_OR_SPEND"
+    },
+    {
+      "ticket": "KAN-231",
+      "kind": "EXACT_HOST_EXTERNAL_EGRESS",
+      "status": "PENDING_EXTERNAL_APPROVAL",
+      "blocks": "ANY_RUNTIME_PROVIDER_CONNECTION",
+      "requiredEvidence": [
+        "KAN_252_APPROVED_EXACT_API_AND_RPC_HOSTNAMES",
+        "CALLER_PROTOCOL_METHOD_AND_ENVIRONMENT_SCOPED_DESTINATION_POLICY",
+        "TLS_DNS_DENY_BY_DEFAULT_AND_KILL_SWITCH_EVIDENCE",
+        "CURRENT_KAN_229_COST_CONTROL_BINDING"
+      ],
+      "scopeBoundary": "CANNOT_APPROVE_PROVIDER_TERMS_PRICE_SEMANTICS_RISK_POLICY_OR_FINANCIAL_USE"
+    }
+  ],
+  "sourcePolicy": {
+    "quoteCurrency": "USD",
+    "registryBinding": {
+      "version": 1,
+      "environment": "MAINNET",
+      "fingerprintSha256": "5058b141479f114c1e5f87ed8798fbb7a7ffcce7b502aa7e0794dc53ca1f767d",
+      "status": "REQUIRED_EXACT_BINDING",
+      "testnetStatus": "OUT_OF_SCOPE_NONFINANCIAL_NO_VALUATION"
+    },
+    "providerOrder": ["PYTH_CORE", "CHAINLINK_DATA_FEEDS"],
+    "providers": [
+      {
+        "provider": "PYTH_CORE",
+        "role": "PRIMARY",
+        "product": "PYTH_CORE_SIGNED_PRICE_FEEDS",
+        "transport": "AUTHENTICATED_HERMES_HTTPS_READ",
+        "network": "PYTHNET_ATTESTED_OFFCHAIN",
+        "priceField": "price",
+        "timestampField": "publish_time",
+        "sequenceRule": "CANONICAL_PROVIDER_UPDATE_IDENTIFIER_PLUS_PUBLISH_TIME",
+        "sequenceRuleStatus": "PENDING_KAN_252_NOT_SAFE_TO_INFER_FROM_PUBLISH_TIME",
+        "durableCheckpointRequired": true,
+        "confidence": {
+          "kind": "PUBLISHED_ABSOLUTE_USD",
+          "field": "conf",
+          "lowerBoundRule": "MAX_PRICE_MINUS_ABSOLUTE_CONFIDENCE_ZERO"
+        },
+        "eligibility": "PROPOSED_PENDING_KAN_252_AND_KAN_231",
+        "endpointStatus": "NOT_SELECTED",
+        "credentialStatus": "NOT_ISSUED",
+        "liveValidationStatus": "NOT_RUN"
+      },
+      {
+        "provider": "CHAINLINK_DATA_FEEDS",
+        "role": "FALLBACK_AND_CROSS_CHECK",
+        "product": "ETHEREUM_MAINNET_STANDARD_DATA_FEEDS",
+        "transport": "STANDARD_ETH_CALL_VIA_KAN_62_RPC",
+        "network": "eip155:1",
+        "priceField": "latestRoundData.answer",
+        "timestampField": "latestRoundData.updatedAt",
+        "sequenceRule": "LATEST_ROUND_DATA_ROUND_ID_AND_UPDATED_AT",
+        "sequenceRuleStatus": "PENDING_KAN_252_LIVE_MONOTONICITY_AND_PROXY_LIFECYCLE_PROOF",
+        "durableCheckpointRequired": true,
+        "confidence": {
+          "kind": "NOT_PUBLISHED",
+          "field": null,
+          "lowerBoundRule": "PRICE_ONLY_DO_NOT_INVENT_CONFIDENCE"
+        },
+        "eligibility": "PROPOSED_PENDING_KAN_252_KAN_231_EXACT_CONTRACT_AND_ABSOLUTE_FRESHNESS_PROOF",
+        "endpointStatus": "NOT_SELECTED",
+        "credentialStatus": "NOT_ISSUED",
+        "liveValidationStatus": "NOT_RUN"
+      }
+    ],
+    "valuation": {
+      "availableRateRule": "MINIMUM_ELIGIBLE_CONSERVATIVE_LOWER_BOUND_CAPPED_AT_ONE_USD",
+      "pythLowerBoundRule": "MAX_PRICE_MINUS_ABSOLUTE_CONFIDENCE_ZERO",
+      "chainlinkLowerBoundRule": "PRICE_WITH_NO_INVENTED_CONFIDENCE",
+      "upsideCapUsdMantissa": "100000000",
+      "upsideCapUsdScale": 8,
+      "downsideFloorUsd": null,
+      "nominalOneDollarAssumption": "PROHIBITED",
+      "arithmetic": "INTEGER_ONLY_ROUND_HALF_EVEN",
+      "valueScale": 18
+    },
+    "freshness": {
+      "ageRule": "EVALUATED_AT_MINUS_SOURCE_PRICED_AT",
+      "providerHeartbeatCanExtendRiskFreshness": false,
+      "futureTimestamp": "UNAVAILABLE",
+      "nonMonotonicTimestamp": "UNAVAILABLE",
+      "missingTimestamp": "UNAVAILABLE",
+      "trustedLastAcceptedCheckpointRequired": true,
+      "inRequestOrderingAloneSufficient": false,
+      "checkpointScope": "REGISTRY_FINGERPRINT_ASSET_SOURCE",
+      "checkpointFields": "SEQUENCE_PRICED_AT_OBSERVED_AT_UPDATE_ID",
+      "checkpointDurability": "ATOMIC_PERSISTED_ACROSS_PROCESS_RESTART",
+      "historicalUpdateIdUniqueness": "PENDING_KAN_252_DURABLE_UNIQUE_REGISTRY_FINGERPRINT_ASSET_SOURCE_UPDATE_ID_CONSTRAINT",
+      "staleObservationEligibleForValuation": false,
+      "unavailableObservationEligibleForValuation": false
+    },
+    "confidence": {
+      "highClassPermitted": false,
+      "mediumRule": "TWO_CURRENT_SOURCES_DIVERGENCE_AT_MOST_25_BPS_AND_PYTH_CONFIDENCE_AT_MOST_25_BPS",
+      "lowRule": "ONE_CURRENT_SOURCE_OR_DIVERGENCE_ABOVE_25_BPS_AT_OR_BELOW_50_BPS_OR_PYTH_CONFIDENCE_ABOVE_25_BPS_AT_OR_BELOW_50_BPS",
+      "unusableRule": "NO_ELIGIBLE_SOURCE_OR_MALFORMED_SOURCE_OR_PYTH_CONFIDENCE_ABOVE_50_BPS"
+    },
+    "agreement": {
+      "comparisonRule": "ABSOLUTE_DIFFERENCE_BETWEEN_CENTRAL_PRICES_IN_PEG_BPS",
+      "corroboratedRule": "DIVERGENCE_0_TO_25_BPS",
+      "softDisagreementRule": "DIVERGENCE_ABOVE_25_BPS_AT_OR_BELOW_50_BPS",
+      "sourceConflictRule": "DIVERGENCE_ABOVE_50_BPS",
+      "sourceConflictValuation": "UNAVAILABLE_NULL_FREEZE",
+      "sourceConflictEvidence": "RETAIN_BOTH_OBSERVATIONS",
+      "sourceConflictDownsideAlarm": "OUTSIDE_POLICY_IF_EITHER_ELIGIBLE_LOWER_BOUND_IS_AT_LEAST_200_BPS_BELOW_PEG"
+    },
+    "depeg": {
+      "classificationInput": "AVAILABLE_CONSERVATIVE_RATE_AFTER_UPSIDE_CAP",
+      "normalRule": "DOWNSIDE_0_TO_50_BPS",
+      "watchRule": "DOWNSIDE_ABOVE_50_BPS_BELOW_200_BPS",
+      "depeggedRule": "DOWNSIDE_AT_LEAST_200_BPS",
+      "sourceConflictRule": "INDETERMINATE_UNLESS_OUTSIDE_POLICY_DOWNSIDE_ALARM",
+      "newFinancialIncreaseDuringWatch": "BLOCKED",
+      "newFinancialIncreaseDuringDepeg": "BLOCKED",
+      "settledExactAssetJournalDuringUnavailable": "RECORD_UNAVAILABLE_AND_ALLOW_LATER_APPEND_ONLY_BACKFILL"
+    },
+    "recovery": {
+      "automaticRepeg": false,
+      "requiredDistinctObservations": 4,
+      "requiredMinimumSpanSeconds": 1800,
+      "requiredSourceAgreement": "CORROBORATED",
+      "requiredFreshness": "CURRENT",
+      "requiredMaximumDownsideBps": 25,
+      "requiredMaximumPythConfidenceBps": 25,
+      "sampleEvaluatedAtMustBeStrictlyMonotonic": true,
+      "sourceSequenceMustStrictlyIncrease": true,
+      "sourceUpdateIdMustBeUniqueAcrossWindow": true,
+      "sourceTimestampsMustBeNonRegressing": true,
+      "depegLatchReferenceShape": "EXACT_KAN_61_ASSET_64_LOWER_HEX_LATCH_ID_CANONICAL_LATCHED_AT",
+      "trustedRecoveryEvaluatedAtRequired": true,
+      "allEvidenceAtOrAfterLatch": true,
+      "allLatchEvidenceAndClearTimesAtOrBeforeEvaluation": true,
+      "manualRiskClearRequired": true,
+      "manualRiskClearReferenceShape": "EXACT_KAN_61_ASSET_DISTINCT_64_LOWER_HEX_CLEAR_ID_MATCHING_LATCH_ID_CANONICAL_CLEARED_AT",
+      "manualRiskClearMustFollowFinalSample": true,
+      "durableLatchClearPersistenceAuthentication": "PENDING_KAN_252_DURABLE_UNIQUE_LATCH_AND_CLEAR_IDS_AUTHENTICATED_RISK_CLEAR",
+      "statusWhenAutomatedPredicatesFail": "RECOVERY_PENDING",
+      "statusWhenPredicatesPassWithoutManualClear": "MANUAL_RISK_CLEAR_REQUIRED",
+      "statusAfterManualClear": "RECOVERY_CANDIDATE_CLEARED",
+      "candidateClearAuthorizesFinancialUse": false
+    },
+    "unavailableBehavior": {
+      "newQuote": "REJECT",
+      "newRiskIncrease": "BLOCK",
+      "buyingPowerIncrease": "BLOCK",
+      "existingDisplay": "SHOW_LAST_GOOD_AS_STALE_WITH_TIMESTAMP_NEVER_AS_CURRENT",
+      "settledMovement": "JOURNAL_EXACT_ASSET_WITH_UNAVAILABLE_VALUATION",
+      "backfill": "APPEND_ONLY_REFERENCE_ORIGINAL_UNAVAILABLE_SNAPSHOT"
+    },
+    "financialAuthorization": {
+      "localStatus": "ALWAYS_BLOCKED_PENDING_EXTERNAL_GATES",
+      "singleSourceFutureUse": "REPORTING_ONLY_NO_INCREASE",
+      "softDisagreementFutureUse": "REPORTING_ONLY_NO_INCREASE",
+      "sourceConflictFutureUse": "BLOCK_AND_FREEZE",
+      "futureIncreaseRequires": [
+        "KAN_252_APPROVED",
+        "KAN_231_EXACT_HOST_EGRESS_APPROVED",
+        "EXACT_MAINNET_REGISTRY_BINDING_VALIDATED",
+        "TWO_CURRENT_VALID_SOURCES",
+        "MEDIUM_CORROBORATED_CONFIDENCE",
+        "NORMAL_DEPEG_CLASS",
+        "NO_RECOVERY_LATCH",
+        "MANUAL_RISK_CLEAR_IF_PREVIOUSLY_DEPEGGED"
+      ]
+    }
+  },
+  "thresholds": {
+    "rateScale": 8,
+    "valueScale": 18,
+    "currentMaxAgeSeconds": 60,
+    "staleMaxAgeSeconds": 300,
+    "pythMaximumConfidenceBps": 50,
+    "dualSourceMediumMaximumDivergenceBps": 25,
+    "dualSourceMaximumUsableDivergenceBps": 50,
+    "normalMaximumDownsideBps": 50,
+    "depeggedMinimumDownsideBps": 200,
+    "repegMaximumDownsideBps": 25,
+    "repegMaximumPythConfidenceBps": 25,
+    "repegRequiredDistinctObservations": 4,
+    "repegMinimumSpanSeconds": 1800
+  },
+  "assetMatrix": [
+    {
+      "asset": "USDC",
+      "quote": "USD",
+      "registryVersion": 1,
+      "pythFeedSymbol": "Crypto.USDC/USD",
+      "pythStableFeedId": "eaa020c61cc479712813461ce153894a96a6c00b21ed0cfc2798d1f9a9e9c94a",
+      "chainlinkNetwork": "eip155:1",
+      "chainlinkEnsSelector": "usdc-usd.data.eth",
+      "chainlinkContractAddress": null,
+      "chainlinkDocumentedDeviationBps": 25,
+      "chainlinkHeartbeatSeconds": null,
+      "chainlinkHeartbeatStatus": "PENDING_KAN_252",
+      "coverageStatus": "DOCUMENTED_CANDIDATES_NOT_LIVE_VALIDATED"
+    },
+    {
+      "asset": "USDT",
+      "quote": "USD",
+      "registryVersion": 1,
+      "pythFeedSymbol": "Crypto.USDT/USD",
+      "pythStableFeedId": "2b89b9dc8fdf9f34709a5b106b472f0f39bb6ca9ce04b0fd7f2e971688e2e53b",
+      "chainlinkNetwork": "eip155:1",
+      "chainlinkEnsSelector": "usdt-usd.data.eth",
+      "chainlinkContractAddress": null,
+      "chainlinkDocumentedDeviationBps": 25,
+      "chainlinkHeartbeatSeconds": null,
+      "chainlinkHeartbeatStatus": "PENDING_KAN_252",
+      "coverageStatus": "DOCUMENTED_CANDIDATES_NOT_LIVE_VALIDATED"
+    },
+    {
+      "asset": "PYUSD",
+      "quote": "USD",
+      "registryVersion": 1,
+      "pythFeedSymbol": "Crypto.PYUSD/USD",
+      "pythStableFeedId": "c1da1b73d7f01e7ddd54b3766cf7fcd644395ad14f70aa706ec5384c59e76692",
+      "chainlinkNetwork": "eip155:1",
+      "chainlinkEnsSelector": "pyusd-usd.data.eth",
+      "chainlinkContractAddress": null,
+      "chainlinkDocumentedDeviationBps": 30,
+      "chainlinkHeartbeatSeconds": null,
+      "chainlinkHeartbeatStatus": "PENDING_KAN_252",
+      "coverageStatus": "DOCUMENTED_CANDIDATES_NOT_LIVE_VALIDATED"
+    }
+  ],
+  "deterministicExamples": [
+    {
+      "id": "NORMAL_DUAL_SOURCE",
+      "asset": "USDC",
+      "amountAtomic": "10000000",
+      "assetDecimals": 6,
+      "input": {
+        "recoveryEvaluatedAt": "2026-08-22T12:00:00.000Z",
+        "depegLatch": null,
+        "manualRiskClear": null,
+        "observations": [
+          {
+            "provider": "PYTH_CORE",
+            "freshness": "CURRENT",
+            "ageSeconds": 10,
+            "monotonic": true,
+            "priceMantissa": "100000000",
+            "priceScale": 8,
+            "confidence": {
+              "kind": "PUBLISHED_ABSOLUTE_USD",
+              "mantissa": "10000",
+              "scale": 8
+            }
+          },
+          {
+            "provider": "CHAINLINK_DATA_FEEDS",
+            "freshness": "CURRENT",
+            "ageSeconds": 20,
+            "monotonic": true,
+            "priceMantissa": "99980000",
+            "priceScale": 8,
+            "confidence": {
+              "kind": "NOT_PUBLISHED",
+              "mantissa": null,
+              "scale": null
+            }
+          }
+        ],
+        "recoveryObservations": []
+      },
+      "result": {
+        "availability": "AVAILABLE",
+        "selection": "CONSERVATIVE_MINIMUM",
+        "selectedSourceId": "CHAINLINK_DATA_FEEDS",
+        "sourceAgreement": "CORROBORATED",
+        "confidenceClass": "MEDIUM",
+        "freshnessClass": "CURRENT",
+        "usdRateMantissa": "99980000",
+        "usdRateScale": 8,
+        "usdValueMantissa": "9998000000000000000",
+        "usdValueScale": 18,
+        "depegClass": "WITHIN_POLICY",
+        "downsideBand": "NORMAL",
+        "recoveryStatus": "NOT_APPLICABLE",
+        "reportingUse": "CONSERVATIVE_REPORTING_ONLY",
+        "mayIncreaseBuyingPower": false,
+        "mayAuthorizeFinancialUse": false
+      }
+    },
+    {
+      "id": "UPSIDE_CAP_DUAL_SOURCE",
+      "asset": "USDT",
+      "amountAtomic": "10000000",
+      "assetDecimals": 6,
+      "input": {
+        "recoveryEvaluatedAt": "2026-08-22T12:00:00.000Z",
+        "depegLatch": null,
+        "manualRiskClear": null,
+        "observations": [
+          {
+            "provider": "PYTH_CORE",
+            "freshness": "CURRENT",
+            "ageSeconds": 5,
+            "monotonic": true,
+            "priceMantissa": "100300000",
+            "priceScale": 8,
+            "confidence": {
+              "kind": "PUBLISHED_ABSOLUTE_USD",
+              "mantissa": "10000",
+              "scale": 8
+            }
+          },
+          {
+            "provider": "CHAINLINK_DATA_FEEDS",
+            "freshness": "CURRENT",
+            "ageSeconds": 15,
+            "monotonic": true,
+            "priceMantissa": "100280000",
+            "priceScale": 8,
+            "confidence": {
+              "kind": "NOT_PUBLISHED",
+              "mantissa": null,
+              "scale": null
+            }
+          }
+        ],
+        "recoveryObservations": []
+      },
+      "result": {
+        "availability": "AVAILABLE",
+        "selection": "CONSERVATIVE_MINIMUM",
+        "selectedSourceId": "CHAINLINK_DATA_FEEDS",
+        "sourceAgreement": "CORROBORATED",
+        "confidenceClass": "MEDIUM",
+        "freshnessClass": "CURRENT",
+        "usdRateMantissa": "100000000",
+        "usdRateScale": 8,
+        "usdValueMantissa": "10000000000000000000",
+        "usdValueScale": 18,
+        "depegClass": "WITHIN_POLICY",
+        "downsideBand": "NORMAL",
+        "recoveryStatus": "NOT_APPLICABLE",
+        "reportingUse": "CONSERVATIVE_REPORTING_ONLY",
+        "mayIncreaseBuyingPower": false,
+        "mayAuthorizeFinancialUse": false
+      }
+    },
+    {
+      "id": "SOFT_DISAGREEMENT_WATCH",
+      "asset": "PYUSD",
+      "amountAtomic": "10000000",
+      "assetDecimals": 6,
+      "input": {
+        "recoveryEvaluatedAt": "2026-08-22T12:00:00.000Z",
+        "depegLatch": null,
+        "manualRiskClear": null,
+        "observations": [
+          {
+            "provider": "PYTH_CORE",
+            "freshness": "CURRENT",
+            "ageSeconds": 8,
+            "monotonic": true,
+            "priceMantissa": "99600000",
+            "priceScale": 8,
+            "confidence": {
+              "kind": "PUBLISHED_ABSOLUTE_USD",
+              "mantissa": "20000",
+              "scale": 8
+            }
+          },
+          {
+            "provider": "CHAINLINK_DATA_FEEDS",
+            "freshness": "CURRENT",
+            "ageSeconds": 30,
+            "monotonic": true,
+            "priceMantissa": "99150000",
+            "priceScale": 8,
+            "confidence": {
+              "kind": "NOT_PUBLISHED",
+              "mantissa": null,
+              "scale": null
+            }
+          }
+        ],
+        "recoveryObservations": []
+      },
+      "result": {
+        "availability": "AVAILABLE",
+        "selection": "CONSERVATIVE_MINIMUM",
+        "selectedSourceId": "CHAINLINK_DATA_FEEDS",
+        "sourceAgreement": "SOFT_DISAGREEMENT",
+        "confidenceClass": "LOW",
+        "freshnessClass": "CURRENT",
+        "usdRateMantissa": "99150000",
+        "usdRateScale": 8,
+        "usdValueMantissa": "9915000000000000000",
+        "usdValueScale": 18,
+        "depegClass": "WITHIN_POLICY",
+        "downsideBand": "WATCH",
+        "recoveryStatus": "NOT_APPLICABLE",
+        "reportingUse": "CONSERVATIVE_REPORTING_ONLY",
+        "mayIncreaseBuyingPower": false,
+        "mayAuthorizeFinancialUse": false
+      }
+    },
+    {
+      "id": "CORROBORATED_DEPEG",
+      "asset": "USDC",
+      "amountAtomic": "10000000",
+      "assetDecimals": 6,
+      "input": {
+        "recoveryEvaluatedAt": "2026-08-22T12:00:00.000Z",
+        "depegLatch": null,
+        "manualRiskClear": null,
+        "observations": [
+          {
+            "provider": "PYTH_CORE",
+            "freshness": "CURRENT",
+            "ageSeconds": 4,
+            "monotonic": true,
+            "priceMantissa": "97500000",
+            "priceScale": 8,
+            "confidence": {
+              "kind": "PUBLISHED_ABSOLUTE_USD",
+              "mantissa": "20000",
+              "scale": 8
+            }
+          },
+          {
+            "provider": "CHAINLINK_DATA_FEEDS",
+            "freshness": "CURRENT",
+            "ageSeconds": 12,
+            "monotonic": true,
+            "priceMantissa": "97490000",
+            "priceScale": 8,
+            "confidence": {
+              "kind": "NOT_PUBLISHED",
+              "mantissa": null,
+              "scale": null
+            }
+          }
+        ],
+        "recoveryObservations": []
+      },
+      "result": {
+        "availability": "AVAILABLE",
+        "selection": "CONSERVATIVE_MINIMUM",
+        "selectedSourceId": "PYTH_CORE",
+        "sourceAgreement": "CORROBORATED",
+        "confidenceClass": "MEDIUM",
+        "freshnessClass": "CURRENT",
+        "usdRateMantissa": "97480000",
+        "usdRateScale": 8,
+        "usdValueMantissa": "9748000000000000000",
+        "usdValueScale": 18,
+        "depegClass": "OUTSIDE_POLICY",
+        "downsideBand": "DEPEGGED",
+        "recoveryStatus": "RECOVERY_PENDING",
+        "reportingUse": "CONSERVATIVE_REPORTING_ONLY",
+        "mayIncreaseBuyingPower": false,
+        "mayAuthorizeFinancialUse": false
+      }
+    },
+    {
+      "id": "PYTH_PRIMARY_ONLY",
+      "asset": "USDT",
+      "amountAtomic": "10000000",
+      "assetDecimals": 6,
+      "input": {
+        "recoveryEvaluatedAt": "2026-08-22T12:00:00.000Z",
+        "depegLatch": null,
+        "manualRiskClear": null,
+        "observations": [
+          {
+            "provider": "PYTH_CORE",
+            "freshness": "CURRENT",
+            "ageSeconds": 10,
+            "monotonic": true,
+            "priceMantissa": "99860000",
+            "priceScale": 8,
+            "confidence": {
+              "kind": "PUBLISHED_ABSOLUTE_USD",
+              "mantissa": "10000",
+              "scale": 8
+            }
+          },
+          {
+            "provider": "CHAINLINK_DATA_FEEDS",
+            "freshness": "STALE",
+            "ageSeconds": 61,
+            "monotonic": true,
+            "priceMantissa": "99870000",
+            "priceScale": 8,
+            "confidence": {
+              "kind": "NOT_PUBLISHED",
+              "mantissa": null,
+              "scale": null
+            }
+          }
+        ],
+        "recoveryObservations": []
+      },
+      "result": {
+        "availability": "AVAILABLE",
+        "selection": "PRIMARY",
+        "selectedSourceId": "PYTH_CORE",
+        "sourceAgreement": "SINGLE_SOURCE",
+        "confidenceClass": "LOW",
+        "freshnessClass": "CURRENT",
+        "usdRateMantissa": "99850000",
+        "usdRateScale": 8,
+        "usdValueMantissa": "9985000000000000000",
+        "usdValueScale": 18,
+        "depegClass": "WITHIN_POLICY",
+        "downsideBand": "NORMAL",
+        "recoveryStatus": "NOT_APPLICABLE",
+        "reportingUse": "CONSERVATIVE_REPORTING_ONLY",
+        "mayIncreaseBuyingPower": false,
+        "mayAuthorizeFinancialUse": false
+      }
+    },
+    {
+      "id": "CHAINLINK_FALLBACK_ONLY",
+      "asset": "PYUSD",
+      "amountAtomic": "10000000",
+      "assetDecimals": 6,
+      "input": {
+        "recoveryEvaluatedAt": "2026-08-22T12:00:00.000Z",
+        "depegLatch": null,
+        "manualRiskClear": null,
+        "observations": [
+          {
+            "provider": "PYTH_CORE",
+            "freshness": "UNAVAILABLE",
+            "ageSeconds": 301,
+            "monotonic": true,
+            "priceMantissa": "99750000",
+            "priceScale": 8,
+            "confidence": {
+              "kind": "PUBLISHED_ABSOLUTE_USD",
+              "mantissa": "10000",
+              "scale": 8
+            }
+          },
+          {
+            "provider": "CHAINLINK_DATA_FEEDS",
+            "freshness": "CURRENT",
+            "ageSeconds": 40,
+            "monotonic": true,
+            "priceMantissa": "99700000",
+            "priceScale": 8,
+            "confidence": {
+              "kind": "NOT_PUBLISHED",
+              "mantissa": null,
+              "scale": null
+            }
+          }
+        ],
+        "recoveryObservations": []
+      },
+      "result": {
+        "availability": "AVAILABLE",
+        "selection": "FALLBACK",
+        "selectedSourceId": "CHAINLINK_DATA_FEEDS",
+        "sourceAgreement": "SINGLE_SOURCE",
+        "confidenceClass": "LOW",
+        "freshnessClass": "CURRENT",
+        "usdRateMantissa": "99700000",
+        "usdRateScale": 8,
+        "usdValueMantissa": "9970000000000000000",
+        "usdValueScale": 18,
+        "depegClass": "WITHIN_POLICY",
+        "downsideBand": "NORMAL",
+        "recoveryStatus": "NOT_APPLICABLE",
+        "reportingUse": "CONSERVATIVE_REPORTING_ONLY",
+        "mayIncreaseBuyingPower": false,
+        "mayAuthorizeFinancialUse": false
+      }
+    },
+    {
+      "id": "SOURCE_CONFLICT_DOWNSIDE_ALARM",
+      "asset": "USDC",
+      "amountAtomic": "10000000",
+      "assetDecimals": 6,
+      "input": {
+        "recoveryEvaluatedAt": "2026-08-22T12:00:00.000Z",
+        "depegLatch": null,
+        "manualRiskClear": null,
+        "observations": [
+          {
+            "provider": "PYTH_CORE",
+            "freshness": "CURRENT",
+            "ageSeconds": 5,
+            "monotonic": true,
+            "priceMantissa": "100000000",
+            "priceScale": 8,
+            "confidence": {
+              "kind": "PUBLISHED_ABSOLUTE_USD",
+              "mantissa": "10000",
+              "scale": 8
+            }
+          },
+          {
+            "provider": "CHAINLINK_DATA_FEEDS",
+            "freshness": "CURRENT",
+            "ageSeconds": 10,
+            "monotonic": true,
+            "priceMantissa": "97000000",
+            "priceScale": 8,
+            "confidence": {
+              "kind": "NOT_PUBLISHED",
+              "mantissa": null,
+              "scale": null
+            }
+          }
+        ],
+        "recoveryObservations": []
+      },
+      "result": {
+        "availability": "UNAVAILABLE",
+        "selection": "NONE",
+        "selectedSourceId": null,
+        "sourceAgreement": "CONFLICT",
+        "confidenceClass": "UNAVAILABLE",
+        "freshnessClass": "UNAVAILABLE",
+        "usdRateMantissa": null,
+        "usdRateScale": null,
+        "usdValueMantissa": null,
+        "usdValueScale": 18,
+        "depegClass": "OUTSIDE_POLICY",
+        "downsideBand": "DEPEGGED",
+        "recoveryStatus": "RECOVERY_PENDING",
+        "reportingUse": "BLOCKED",
+        "mayIncreaseBuyingPower": false,
+        "mayAuthorizeFinancialUse": false
+      }
+    },
+    {
+      "id": "NO_CURRENT_SOURCE",
+      "asset": "USDT",
+      "amountAtomic": "10000000",
+      "assetDecimals": 6,
+      "input": {
+        "recoveryEvaluatedAt": "2026-08-22T12:00:00.000Z",
+        "depegLatch": null,
+        "manualRiskClear": null,
+        "observations": [
+          {
+            "provider": "PYTH_CORE",
+            "freshness": "STALE",
+            "ageSeconds": 61,
+            "monotonic": true,
+            "priceMantissa": "99900000",
+            "priceScale": 8,
+            "confidence": {
+              "kind": "PUBLISHED_ABSOLUTE_USD",
+              "mantissa": "10000",
+              "scale": 8
+            }
+          },
+          {
+            "provider": "CHAINLINK_DATA_FEEDS",
+            "freshness": "UNAVAILABLE",
+            "ageSeconds": 301,
+            "monotonic": true,
+            "priceMantissa": "99900000",
+            "priceScale": 8,
+            "confidence": {
+              "kind": "NOT_PUBLISHED",
+              "mantissa": null,
+              "scale": null
+            }
+          }
+        ],
+        "recoveryObservations": []
+      },
+      "result": {
+        "availability": "UNAVAILABLE",
+        "selection": "NONE",
+        "selectedSourceId": null,
+        "sourceAgreement": "NOT_AVAILABLE",
+        "confidenceClass": "UNAVAILABLE",
+        "freshnessClass": "UNAVAILABLE",
+        "usdRateMantissa": null,
+        "usdRateScale": null,
+        "usdValueMantissa": null,
+        "usdValueScale": 18,
+        "depegClass": "NOT_ASSESSED",
+        "downsideBand": "NOT_ASSESSED",
+        "recoveryStatus": "NOT_APPLICABLE",
+        "reportingUse": "BLOCKED",
+        "mayIncreaseBuyingPower": false,
+        "mayAuthorizeFinancialUse": false
+      }
+    },
+    {
+      "id": "REPEG_OBSERVATIONS_MANUAL_CLEAR_MISSING",
+      "asset": "PYUSD",
+      "amountAtomic": "10000000",
+      "assetDecimals": 6,
+      "input": {
+        "recoveryEvaluatedAt": "2026-08-22T10:30:00.000Z",
+        "depegLatch": {
+          "latchId": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "latchedAt": "2026-08-22T09:59:00.000Z"
+        },
+        "manualRiskClear": null,
+        "observations": [
+          {
+            "provider": "PYTH_CORE",
+            "freshness": "CURRENT",
+            "ageSeconds": 3,
+            "monotonic": true,
+            "priceMantissa": "99990000",
+            "priceScale": 8,
+            "confidence": {
+              "kind": "PUBLISHED_ABSOLUTE_USD",
+              "mantissa": "5000",
+              "scale": 8
+            }
+          },
+          {
+            "provider": "CHAINLINK_DATA_FEEDS",
+            "freshness": "CURRENT",
+            "ageSeconds": 10,
+            "monotonic": true,
+            "priceMantissa": "99980000",
+            "priceScale": 8,
+            "confidence": {
+              "kind": "NOT_PUBLISHED",
+              "mantissa": null,
+              "scale": null
+            }
+          }
+        ],
+        "recoveryObservations": [
+          {
+            "id": "RECOVERY_1",
+            "elapsedFromFirstSeconds": 0,
+            "dualSource": true,
+            "sourceAgreement": "CORROBORATED",
+            "maximumDownsideBps": 2,
+            "pythConfidenceBps": 1,
+            "wasCurrent": true,
+            "monotonic": true
+          },
+          {
+            "id": "RECOVERY_2",
+            "elapsedFromFirstSeconds": 600,
+            "dualSource": true,
+            "sourceAgreement": "CORROBORATED",
+            "maximumDownsideBps": 2,
+            "pythConfidenceBps": 1,
+            "wasCurrent": true,
+            "monotonic": true
+          },
+          {
+            "id": "RECOVERY_3",
+            "elapsedFromFirstSeconds": 1200,
+            "dualSource": true,
+            "sourceAgreement": "CORROBORATED",
+            "maximumDownsideBps": 2,
+            "pythConfidenceBps": 1,
+            "wasCurrent": true,
+            "monotonic": true
+          },
+          {
+            "id": "RECOVERY_4",
+            "elapsedFromFirstSeconds": 1800,
+            "dualSource": true,
+            "sourceAgreement": "CORROBORATED",
+            "maximumDownsideBps": 2,
+            "pythConfidenceBps": 1,
+            "wasCurrent": true,
+            "monotonic": true
+          }
+        ]
+      },
+      "result": {
+        "availability": "AVAILABLE",
+        "selection": "CONSERVATIVE_MINIMUM",
+        "selectedSourceId": "CHAINLINK_DATA_FEEDS",
+        "sourceAgreement": "CORROBORATED",
+        "confidenceClass": "MEDIUM",
+        "freshnessClass": "CURRENT",
+        "usdRateMantissa": "99980000",
+        "usdRateScale": 8,
+        "usdValueMantissa": "9998000000000000000",
+        "usdValueScale": 18,
+        "depegClass": "WITHIN_POLICY",
+        "downsideBand": "NORMAL",
+        "recoveryStatus": "MANUAL_RISK_CLEAR_REQUIRED",
+        "reportingUse": "CONSERVATIVE_REPORTING_ONLY",
+        "mayIncreaseBuyingPower": false,
+        "mayAuthorizeFinancialUse": false
+      }
+    },
+    {
+      "id": "BOUNDARY_25_BPS_EXACT",
+      "asset": "USDC",
+      "amountAtomic": "10000000",
+      "assetDecimals": 6,
+      "input": {
+        "recoveryEvaluatedAt": "2026-08-22T12:00:00.000Z",
+        "depegLatch": null,
+        "manualRiskClear": null,
+        "observations": [
+          {
+            "provider": "PYTH_CORE",
+            "freshness": "CURRENT",
+            "ageSeconds": 1,
+            "monotonic": true,
+            "priceMantissa": "100000000",
+            "priceScale": 8,
+            "confidence": {
+              "kind": "PUBLISHED_ABSOLUTE_USD",
+              "mantissa": "250000",
+              "scale": 8
+            }
+          },
+          {
+            "provider": "CHAINLINK_DATA_FEEDS",
+            "freshness": "CURRENT",
+            "ageSeconds": 2,
+            "monotonic": true,
+            "priceMantissa": "99750000",
+            "priceScale": 8,
+            "confidence": {
+              "kind": "NOT_PUBLISHED",
+              "mantissa": null,
+              "scale": null
+            }
+          }
+        ],
+        "recoveryObservations": []
+      },
+      "result": {
+        "availability": "AVAILABLE",
+        "selection": "CONSERVATIVE_MINIMUM",
+        "selectedSourceId": "PYTH_CORE",
+        "sourceAgreement": "CORROBORATED",
+        "confidenceClass": "MEDIUM",
+        "freshnessClass": "CURRENT",
+        "usdRateMantissa": "99750000",
+        "usdRateScale": 8,
+        "usdValueMantissa": "9975000000000000000",
+        "usdValueScale": 18,
+        "depegClass": "WITHIN_POLICY",
+        "downsideBand": "NORMAL",
+        "recoveryStatus": "NOT_APPLICABLE",
+        "reportingUse": "CONSERVATIVE_REPORTING_ONLY",
+        "mayIncreaseBuyingPower": false,
+        "mayAuthorizeFinancialUse": false
+      }
+    },
+    {
+      "id": "BOUNDARY_25_BPS_ONE_RATE_UNIT_OVER",
+      "asset": "USDC",
+      "amountAtomic": "10000000",
+      "assetDecimals": 6,
+      "input": {
+        "recoveryEvaluatedAt": "2026-08-22T12:00:00.000Z",
+        "depegLatch": null,
+        "manualRiskClear": null,
+        "observations": [
+          {
+            "provider": "PYTH_CORE",
+            "freshness": "CURRENT",
+            "ageSeconds": 1,
+            "monotonic": true,
+            "priceMantissa": "100000000",
+            "priceScale": 8,
+            "confidence": {
+              "kind": "PUBLISHED_ABSOLUTE_USD",
+              "mantissa": "250001",
+              "scale": 8
+            }
+          },
+          {
+            "provider": "CHAINLINK_DATA_FEEDS",
+            "freshness": "CURRENT",
+            "ageSeconds": 2,
+            "monotonic": true,
+            "priceMantissa": "99749999",
+            "priceScale": 8,
+            "confidence": {
+              "kind": "NOT_PUBLISHED",
+              "mantissa": null,
+              "scale": null
+            }
+          }
+        ],
+        "recoveryObservations": []
+      },
+      "result": {
+        "availability": "AVAILABLE",
+        "selection": "CONSERVATIVE_MINIMUM",
+        "selectedSourceId": "PYTH_CORE",
+        "sourceAgreement": "SOFT_DISAGREEMENT",
+        "confidenceClass": "LOW",
+        "freshnessClass": "CURRENT",
+        "usdRateMantissa": "99749999",
+        "usdRateScale": 8,
+        "usdValueMantissa": "9974999900000000000",
+        "usdValueScale": 18,
+        "depegClass": "WITHIN_POLICY",
+        "downsideBand": "NORMAL",
+        "recoveryStatus": "NOT_APPLICABLE",
+        "reportingUse": "CONSERVATIVE_REPORTING_ONLY",
+        "mayIncreaseBuyingPower": false,
+        "mayAuthorizeFinancialUse": false
+      }
+    },
+    {
+      "id": "BOUNDARY_50_BPS_EXACT",
+      "asset": "USDT",
+      "amountAtomic": "10000000",
+      "assetDecimals": 6,
+      "input": {
+        "recoveryEvaluatedAt": "2026-08-22T12:00:00.000Z",
+        "depegLatch": null,
+        "manualRiskClear": null,
+        "observations": [
+          {
+            "provider": "PYTH_CORE",
+            "freshness": "CURRENT",
+            "ageSeconds": 1,
+            "monotonic": true,
+            "priceMantissa": "100000000",
+            "priceScale": 8,
+            "confidence": {
+              "kind": "PUBLISHED_ABSOLUTE_USD",
+              "mantissa": "500000",
+              "scale": 8
+            }
+          },
+          {
+            "provider": "CHAINLINK_DATA_FEEDS",
+            "freshness": "CURRENT",
+            "ageSeconds": 2,
+            "monotonic": true,
+            "priceMantissa": "99500000",
+            "priceScale": 8,
+            "confidence": {
+              "kind": "NOT_PUBLISHED",
+              "mantissa": null,
+              "scale": null
+            }
+          }
+        ],
+        "recoveryObservations": []
+      },
+      "result": {
+        "availability": "AVAILABLE",
+        "selection": "CONSERVATIVE_MINIMUM",
+        "selectedSourceId": "PYTH_CORE",
+        "sourceAgreement": "SOFT_DISAGREEMENT",
+        "confidenceClass": "LOW",
+        "freshnessClass": "CURRENT",
+        "usdRateMantissa": "99500000",
+        "usdRateScale": 8,
+        "usdValueMantissa": "9950000000000000000",
+        "usdValueScale": 18,
+        "depegClass": "WITHIN_POLICY",
+        "downsideBand": "NORMAL",
+        "recoveryStatus": "NOT_APPLICABLE",
+        "reportingUse": "CONSERVATIVE_REPORTING_ONLY",
+        "mayIncreaseBuyingPower": false,
+        "mayAuthorizeFinancialUse": false
+      }
+    },
+    {
+      "id": "DIVERGENCE_50_BPS_ONE_RATE_UNIT_OVER",
+      "asset": "USDT",
+      "amountAtomic": "10000000",
+      "assetDecimals": 6,
+      "input": {
+        "recoveryEvaluatedAt": "2026-08-22T12:00:00.000Z",
+        "depegLatch": null,
+        "manualRiskClear": null,
+        "observations": [
+          {
+            "provider": "PYTH_CORE",
+            "freshness": "CURRENT",
+            "ageSeconds": 1,
+            "monotonic": true,
+            "priceMantissa": "100000000",
+            "priceScale": 8,
+            "confidence": {
+              "kind": "PUBLISHED_ABSOLUTE_USD",
+              "mantissa": "0",
+              "scale": 8
+            }
+          },
+          {
+            "provider": "CHAINLINK_DATA_FEEDS",
+            "freshness": "CURRENT",
+            "ageSeconds": 2,
+            "monotonic": true,
+            "priceMantissa": "99499999",
+            "priceScale": 8,
+            "confidence": {
+              "kind": "NOT_PUBLISHED",
+              "mantissa": null,
+              "scale": null
+            }
+          }
+        ],
+        "recoveryObservations": []
+      },
+      "result": {
+        "availability": "UNAVAILABLE",
+        "selection": "NONE",
+        "selectedSourceId": null,
+        "sourceAgreement": "CONFLICT",
+        "confidenceClass": "UNAVAILABLE",
+        "freshnessClass": "UNAVAILABLE",
+        "usdRateMantissa": null,
+        "usdRateScale": null,
+        "usdValueMantissa": null,
+        "usdValueScale": 18,
+        "depegClass": "NOT_ASSESSED",
+        "downsideBand": "NOT_ASSESSED",
+        "recoveryStatus": "NOT_APPLICABLE",
+        "reportingUse": "BLOCKED",
+        "mayIncreaseBuyingPower": false,
+        "mayAuthorizeFinancialUse": false
+      }
+    },
+    {
+      "id": "CONFIDENCE_50_BPS_ONE_RATE_UNIT_OVER",
+      "asset": "PYUSD",
+      "amountAtomic": "10000000",
+      "assetDecimals": 6,
+      "input": {
+        "recoveryEvaluatedAt": "2026-08-22T12:00:00.000Z",
+        "depegLatch": null,
+        "manualRiskClear": null,
+        "observations": [
+          {
+            "provider": "PYTH_CORE",
+            "freshness": "CURRENT",
+            "ageSeconds": 1,
+            "monotonic": true,
+            "priceMantissa": "100000000",
+            "priceScale": 8,
+            "confidence": {
+              "kind": "PUBLISHED_ABSOLUTE_USD",
+              "mantissa": "500001",
+              "scale": 8
+            }
+          },
+          {
+            "provider": "CHAINLINK_DATA_FEEDS",
+            "freshness": "CURRENT",
+            "ageSeconds": 2,
+            "monotonic": true,
+            "priceMantissa": "99499999",
+            "priceScale": 8,
+            "confidence": {
+              "kind": "NOT_PUBLISHED",
+              "mantissa": null,
+              "scale": null
+            }
+          }
+        ],
+        "recoveryObservations": []
+      },
+      "result": {
+        "availability": "AVAILABLE",
+        "selection": "FALLBACK",
+        "selectedSourceId": "CHAINLINK_DATA_FEEDS",
+        "sourceAgreement": "SINGLE_SOURCE",
+        "confidenceClass": "LOW",
+        "freshnessClass": "CURRENT",
+        "usdRateMantissa": "99499999",
+        "usdRateScale": 8,
+        "usdValueMantissa": "9949999900000000000",
+        "usdValueScale": 18,
+        "depegClass": "WITHIN_POLICY",
+        "downsideBand": "WATCH",
+        "recoveryStatus": "NOT_APPLICABLE",
+        "reportingUse": "CONSERVATIVE_REPORTING_ONLY",
+        "mayIncreaseBuyingPower": false,
+        "mayAuthorizeFinancialUse": false
+      }
+    },
+    {
+      "id": "DOWNSIDE_200_BPS_ONE_RATE_UNIT_BELOW",
+      "asset": "USDC",
+      "amountAtomic": "10000000",
+      "assetDecimals": 6,
+      "input": {
+        "recoveryEvaluatedAt": "2026-08-22T12:00:00.000Z",
+        "depegLatch": null,
+        "manualRiskClear": null,
+        "observations": [
+          {
+            "provider": "PYTH_CORE",
+            "freshness": "CURRENT",
+            "ageSeconds": 1,
+            "monotonic": true,
+            "priceMantissa": "98000001",
+            "priceScale": 8,
+            "confidence": {
+              "kind": "PUBLISHED_ABSOLUTE_USD",
+              "mantissa": "0",
+              "scale": 8
+            }
+          },
+          {
+            "provider": "CHAINLINK_DATA_FEEDS",
+            "freshness": "CURRENT",
+            "ageSeconds": 2,
+            "monotonic": true,
+            "priceMantissa": "98000001",
+            "priceScale": 8,
+            "confidence": {
+              "kind": "NOT_PUBLISHED",
+              "mantissa": null,
+              "scale": null
+            }
+          }
+        ],
+        "recoveryObservations": []
+      },
+      "result": {
+        "availability": "AVAILABLE",
+        "selection": "CONSERVATIVE_MINIMUM",
+        "selectedSourceId": "PYTH_CORE",
+        "sourceAgreement": "CORROBORATED",
+        "confidenceClass": "MEDIUM",
+        "freshnessClass": "CURRENT",
+        "usdRateMantissa": "98000001",
+        "usdRateScale": 8,
+        "usdValueMantissa": "9800000100000000000",
+        "usdValueScale": 18,
+        "depegClass": "WITHIN_POLICY",
+        "downsideBand": "WATCH",
+        "recoveryStatus": "NOT_APPLICABLE",
+        "reportingUse": "CONSERVATIVE_REPORTING_ONLY",
+        "mayIncreaseBuyingPower": false,
+        "mayAuthorizeFinancialUse": false
+      }
+    },
+    {
+      "id": "DOWNSIDE_200_BPS_EXACT",
+      "asset": "USDT",
+      "amountAtomic": "10000000",
+      "assetDecimals": 6,
+      "input": {
+        "recoveryEvaluatedAt": "2026-08-22T12:00:00.000Z",
+        "depegLatch": null,
+        "manualRiskClear": null,
+        "observations": [
+          {
+            "provider": "PYTH_CORE",
+            "freshness": "CURRENT",
+            "ageSeconds": 1,
+            "monotonic": true,
+            "priceMantissa": "98000000",
+            "priceScale": 8,
+            "confidence": {
+              "kind": "PUBLISHED_ABSOLUTE_USD",
+              "mantissa": "0",
+              "scale": 8
+            }
+          },
+          {
+            "provider": "CHAINLINK_DATA_FEEDS",
+            "freshness": "CURRENT",
+            "ageSeconds": 2,
+            "monotonic": true,
+            "priceMantissa": "98000000",
+            "priceScale": 8,
+            "confidence": {
+              "kind": "NOT_PUBLISHED",
+              "mantissa": null,
+              "scale": null
+            }
+          }
+        ],
+        "recoveryObservations": []
+      },
+      "result": {
+        "availability": "AVAILABLE",
+        "selection": "CONSERVATIVE_MINIMUM",
+        "selectedSourceId": "PYTH_CORE",
+        "sourceAgreement": "CORROBORATED",
+        "confidenceClass": "MEDIUM",
+        "freshnessClass": "CURRENT",
+        "usdRateMantissa": "98000000",
+        "usdRateScale": 8,
+        "usdValueMantissa": "9800000000000000000",
+        "usdValueScale": 18,
+        "depegClass": "OUTSIDE_POLICY",
+        "downsideBand": "DEPEGGED",
+        "recoveryStatus": "RECOVERY_PENDING",
+        "reportingUse": "CONSERVATIVE_REPORTING_ONLY",
+        "mayIncreaseBuyingPower": false,
+        "mayAuthorizeFinancialUse": false
+      }
+    },
+    {
+      "id": "DOWNSIDE_200_BPS_ONE_RATE_UNIT_OVER",
+      "asset": "PYUSD",
+      "amountAtomic": "10000000",
+      "assetDecimals": 6,
+      "input": {
+        "recoveryEvaluatedAt": "2026-08-22T12:00:00.000Z",
+        "depegLatch": null,
+        "manualRiskClear": null,
+        "observations": [
+          {
+            "provider": "PYTH_CORE",
+            "freshness": "CURRENT",
+            "ageSeconds": 1,
+            "monotonic": true,
+            "priceMantissa": "97999999",
+            "priceScale": 8,
+            "confidence": {
+              "kind": "PUBLISHED_ABSOLUTE_USD",
+              "mantissa": "0",
+              "scale": 8
+            }
+          },
+          {
+            "provider": "CHAINLINK_DATA_FEEDS",
+            "freshness": "CURRENT",
+            "ageSeconds": 2,
+            "monotonic": true,
+            "priceMantissa": "97999999",
+            "priceScale": 8,
+            "confidence": {
+              "kind": "NOT_PUBLISHED",
+              "mantissa": null,
+              "scale": null
+            }
+          }
+        ],
+        "recoveryObservations": []
+      },
+      "result": {
+        "availability": "AVAILABLE",
+        "selection": "CONSERVATIVE_MINIMUM",
+        "selectedSourceId": "PYTH_CORE",
+        "sourceAgreement": "CORROBORATED",
+        "confidenceClass": "MEDIUM",
+        "freshnessClass": "CURRENT",
+        "usdRateMantissa": "97999999",
+        "usdRateScale": 8,
+        "usdValueMantissa": "9799999900000000000",
+        "usdValueScale": 18,
+        "depegClass": "OUTSIDE_POLICY",
+        "downsideBand": "DEPEGGED",
+        "recoveryStatus": "RECOVERY_PENDING",
+        "reportingUse": "CONSERVATIVE_REPORTING_ONLY",
+        "mayIncreaseBuyingPower": false,
+        "mayAuthorizeFinancialUse": false
+      }
+    }
+  ],
+  "sourceResearch": [
+    {
+      "provider": "PYTH_CORE",
+      "role": "PRIMARY",
+      "coverage": "USDC_USD_USDT_USD_AND_PYUSD_USD_STABLE_FEED_IDS_DOCUMENTED",
+      "timestampSemantics": "PUBLISH_TIME_UNIX_SECONDS",
+      "confidenceSemantics": "ABSOLUTE_CONFIDENCE_INTERVAL_WITH_SAME_EXPONENT_AS_PRICE",
+      "delivery": "SIGNED_PRICE_UPDATE_OVER_AUTHENTICATED_HERMES_HTTPS",
+      "documentedRateLimit": "10_REQUESTS_PER_10_SECONDS_PER_IP_IN_LEGACY_PUBLIC_HERMES_DOCUMENTATION",
+      "documentedSla": null,
+      "costStatus": "SUBSCRIPTION_REQUIRED_STARTING_PRICE_DOCUMENTED_EXACT_PLAN_NOT_APPROVED",
+      "termsStatus": "PENDING_LEGAL_REVIEW",
+      "liveStatus": "NOT_TESTED"
+    },
+    {
+      "provider": "CHAINLINK_DATA_FEEDS",
+      "role": "FALLBACK_AND_CROSS_CHECK",
+      "coverage": "ETHEREUM_MAINNET_STANDARD_USDC_USD_USDT_USD_AND_PYUSD_USD_FEEDS_DOCUMENTED",
+      "timestampSemantics": "AGGREGATOR_V3_LATEST_ROUND_DATA_UPDATED_AT",
+      "confidenceSemantics": "NO_NATIVE_CONFIDENCE_INTERVAL_DO_NOT_INVENT",
+      "delivery": "READ_ONLY_ETH_CALL_TO_STANDARD_AGGREGATOR_V3_VIA_SEPARATELY_APPROVED_RPC",
+      "documentedRateLimit": null,
+      "documentedSla": null,
+      "costStatus": "NO_DIRECT_PER_READ_CHAINLINK_PRICE_DOCUMENTED_RPC_COST_AND_TERMS_SEPARATE",
+      "termsStatus": "PENDING_LEGAL_REVIEW",
+      "liveStatus": "NOT_TESTED"
+    }
+  ],
+  "commercialResearch": [
+    {
+      "provider": "PYTH_CORE",
+      "documentedStartingMonthlyUsd": 500,
+      "documentedStartingPriceSourceDate": "2026-05-26",
+      "selectedPlan": null,
+      "approvedMonthlyUsd": null,
+      "accountCreated": false,
+      "trialStarted": false,
+      "paymentMethodAdded": false,
+      "note": "The provider announcement says Price Feeds API plans start at 500 USD per month; current exact plan, allowance, overage, SLA, tax, cancellation, and license terms remain unverified and unapproved."
+    },
+    {
+      "provider": "CHAINLINK_DATA_FEEDS",
+      "documentedStartingMonthlyUsd": null,
+      "documentedStartingPriceSourceDate": null,
+      "selectedPlan": null,
+      "approvedMonthlyUsd": null,
+      "accountCreated": false,
+      "trialStarted": false,
+      "paymentMethodAdded": false,
+      "note": "Standard onchain feeds are described as a community resource, but RPC transport, provider plan, API usage rights, support, SLA, and total cost require separate approval. No zero-cost production claim is made."
+    }
+  ],
+  "sourceEvidence": [
+    {
+      "id": "PYTH_CORE_OVERVIEW",
+      "provider": "PYTH_CORE",
+      "topic": "COVERAGE_AND_UPDATE_MODEL",
+      "url": "https://docs.pyth.network/price-feeds/core",
+      "observedFact": "Pyth Core documents first-party aggregated price feeds, a 400 millisecond update model, and push and pull delivery across more than 100 blockchains.",
+      "reviewedOn": "2026-08-22"
+    },
+    {
+      "id": "PYTH_CORE_FEED_IDS",
+      "provider": "PYTH_CORE",
+      "topic": "EXACT_FEED_IDENTIFIERS",
+      "url": "https://docs.pyth.network/price-feeds/core/price-feeds/price-feed-ids",
+      "observedFact": "The official catalog documents distinct stable Pyth Core feed identifiers for Crypto.USDC/USD, Crypto.USDT/USD, and Crypto.PYUSD/USD.",
+      "reviewedOn": "2026-08-22"
+    },
+    {
+      "id": "PYTH_CORE_FETCH",
+      "provider": "PYTH_CORE",
+      "topic": "TRANSPORT_AND_AUTHENTICATION",
+      "url": "https://docs.pyth.network/price-feeds/core/fetch-price-updates",
+      "observedFact": "The fetch guide documents Hermes REST, streaming, and SDK delivery, bearer-token authentication, and latest updates keyed by exact feed ID.",
+      "reviewedOn": "2026-08-22"
+    },
+    {
+      "id": "PYTH_CORE_RATE_LIMITS",
+      "provider": "PYTH_CORE",
+      "topic": "RATE_LIMITS",
+      "url": "https://docs.pyth.network/price-feeds/core/rate-limits",
+      "observedFact": "The published Hermes and Benchmarks limit is 10 requests per 10 seconds per IP, with a 60-second 429 penalty after exceeding it; exact authenticated-plan limits remain unverified.",
+      "reviewedOn": "2026-08-22"
+    },
+    {
+      "id": "PYTH_CORE_PRICE_STRUCTURE",
+      "provider": "PYTH_CORE",
+      "topic": "PRICE_TIMESTAMP_AND_CONFIDENCE",
+      "url": "https://docs.pyth.network/price-feeds/core/how-pyth-works/hermes",
+      "observedFact": "The documented response shape includes integer price, absolute conf, exponent, and publish_time fields; this packet never fetched a live response.",
+      "reviewedOn": "2026-08-22"
+    },
+    {
+      "id": "PYTH_CORE_SUBSCRIPTION",
+      "provider": "PYTH_CORE",
+      "topic": "COMMERCIAL_MODEL",
+      "url": "https://www.pyth.network/blog/the-pyth-core-upgrade",
+      "observedFact": "The provider announced that Price Feeds API access requires a subscription and that plans start at 500 USD per month; exact current terms and allowances require KAN-252 review.",
+      "reviewedOn": "2026-08-22"
+    },
+    {
+      "id": "PYTH_CORE_FEES",
+      "provider": "PYTH_CORE",
+      "topic": "ONCHAIN_UPDATE_FEES",
+      "url": "https://docs.pyth.network/price-feeds/core/current-fees",
+      "observedFact": "Pyth separately documents native-token fees for onchain price updates; onchain writes and their fees are prohibited and out of scope for this decision.",
+      "reviewedOn": "2026-08-22"
+    },
+    {
+      "id": "PYTH_CORE_DISCLAIMER",
+      "provider": "PYTH_CORE",
+      "topic": "RISK_AND_AVAILABILITY",
+      "url": "https://www.pyth.network/legal/disclaimer-for-pyth-network-price-feeds",
+      "observedFact": "The price-feed disclaimer provides the service as-is and as-available, disclaims continuity and accuracy guarantees, and places stale checks, circuit breakers, monitoring, and testing on users.",
+      "reviewedOn": "2026-08-22"
+    },
+    {
+      "id": "PYTH_TERMS",
+      "provider": "PYTH_CORE",
+      "topic": "LEGAL_REVIEW",
+      "url": "https://www.pyth.network/legal/terms-conditions",
+      "observedFact": "The website terms restrict automated extraction and unauthorized API access and do not establish production API data rights for this project; exact subscription terms require Legal approval.",
+      "reviewedOn": "2026-08-22"
+    },
+    {
+      "id": "CHAINLINK_EVM_READ",
+      "provider": "CHAINLINK_DATA_FEEDS",
+      "topic": "METHOD_AND_FIELDS",
+      "url": "https://docs.chain.link/data-feeds/using-data-feeds",
+      "observedFact": "Chainlink documents read-only AggregatorV3 latestRoundData access, including answer and updatedAt, through an RPC endpoint; the response has no native confidence interval.",
+      "reviewedOn": "2026-08-22"
+    },
+    {
+      "id": "CHAINLINK_USDC_ETHEREUM",
+      "provider": "CHAINLINK_DATA_FEEDS",
+      "topic": "USDC_USD_COVERAGE",
+      "url": "https://data.chain.link/feeds/ethereum/mainnet/usdc-usd",
+      "observedFact": "The official catalog documents the Ethereum mainnet standard USDC/USD feed and a 0.25 percent deviation trigger; exact contract and heartbeat remain pending live validation.",
+      "reviewedOn": "2026-08-22"
+    },
+    {
+      "id": "CHAINLINK_USDT_ETHEREUM",
+      "provider": "CHAINLINK_DATA_FEEDS",
+      "topic": "USDT_USD_COVERAGE",
+      "url": "https://data.chain.link/feeds/ethereum/mainnet/usdt-usd",
+      "observedFact": "The official catalog documents the Ethereum mainnet standard USDT/USD feed and a 0.25 percent deviation trigger; exact contract and heartbeat remain pending live validation.",
+      "reviewedOn": "2026-08-22"
+    },
+    {
+      "id": "CHAINLINK_PYUSD_ETHEREUM",
+      "provider": "CHAINLINK_DATA_FEEDS",
+      "topic": "PYUSD_USD_COVERAGE",
+      "url": "https://data.chain.link/feeds/ethereum/mainnet/pyusd-usd",
+      "observedFact": "The official catalog documents the Ethereum mainnet standard PYUSD/USD feed and a 0.3 percent deviation trigger; exact contract and heartbeat remain pending live validation.",
+      "reviewedOn": "2026-08-22"
+    },
+    {
+      "id": "CHAINLINK_DATA_MODEL",
+      "provider": "CHAINLINK_DATA_FEEDS",
+      "topic": "AGGREGATION_AND_INDEPENDENCE",
+      "url": "https://chain.link/data-feeds",
+      "observedFact": "Chainlink describes aggregation across premium data providers and independent oracle nodes; overlap with Pyth publishers or underlying venues was not quantified.",
+      "reviewedOn": "2026-08-22"
+    },
+    {
+      "id": "CHAINLINK_DEVELOPER_RESPONSIBILITY",
+      "provider": "CHAINLINK_DATA_FEEDS",
+      "topic": "RISK_AND_DEPRECATION",
+      "url": "https://docs.chain.link/data-feeds/selecting-data-feeds",
+      "observedFact": "Chainlink requires consumers to understand feed market, provider, and contract risks, monitor shutdown or deprecation, implement circuit breakers, and treat stablecoin exchange-rate feeds as market prices rather than guaranteed one-dollar values.",
+      "reviewedOn": "2026-08-22"
+    }
+  ],
+  "undocumentedOrUnverified": [
+    "CURRENT_PYTH_CORE_PLAN_CONTRACT_ALLOWANCE_OVERAGE_RATE_LIMIT_SLA_TAX_AND_CANCELLATION_TERMS",
+    "CURRENT_PYTH_CORE_CUTOVER_DATE_AND_POST_CUTOVER_ENDPOINT_BEHAVIOR",
+    "MERGED_GIT_COMMIT_TREE_AND_EXTERNAL_APPROVAL_PACKET_BINDING",
+    "PYTH_PRODUCTION_API_LICENSE_DISPLAY_NONDISPLAY_STORAGE_DERIVATIVE_AND_REDISTRIBUTION_RIGHTS",
+    "EXACT_PYTH_API_HOSTNAMES_REGIONS_RESIDENCY_RETENTION_SUBPROCESSORS_AND_CREDENTIAL_CUSTODY",
+    "EXACT_CHAINLINK_ETHEREUM_CONTRACT_ADDRESSES_PROXY_IMPLEMENTATIONS_DECIMALS_AND_LIVE_IDENTITY",
+    "EXACT_CHAINLINK_USDC_USDT_AND_PYUSD_HEARTBEATS_AND_CURRENT_UPDATE_BEHAVIOR",
+    "EXACT_PROVIDER_SEQUENCE_SEMANTICS_DURABLE_UNIQUE_UPDATE_ID_HISTORY_AND_LAST_ACCEPTED_WATERMARK",
+    "CHAINLINK_DATA_FEED_USE_TERMS_SUPPORT_SLA_DEPRECATION_NOTICE_AND_TOTAL_RPC_COST",
+    "EXACT_KAN_62_RPC_HOSTNAMES_PLAN_ARCHIVE_METHOD_AND_ETH_CALL_BEHAVIOR",
+    "UNDERLYING_PYTH_AND_CHAINLINK_PUBLISHER_DATA_PROVIDER_AND_VENUE_OVERLAP",
+    "LIVE_60_SECOND_FRESHNESS_50_BPS_CONFIDENCE_AND_FALLBACK_FEASIBILITY_FOR_ALL_THREE_ASSETS",
+    "RISK_FINANCE_ACCOUNTING_LEGAL_SECURITY_PRIVACY_AND_AVAILABILITY_APPROVALS",
+    "NORMAL_WATCH_DEPEG_CONFLICT_UNAVAILABLE_RECOVERY_DURABLE_LATCH_AND_MANUAL_CLEAR_LIVE_EVIDENCE"
+  ],
+  "zeroCostEvidence": {
+    "providerAccountsCreated": 0,
+    "providerTrialsStarted": 0,
+    "paymentMethodsAdded": 0,
+    "apiCredentialsIssued": 0,
+    "rpcCredentialsIssued": 0,
+    "providerConnectionsOpened": 0,
+    "marketDataRequestsSent": 0,
+    "rpcRequestsSent": 0,
+    "onchainTransactionsSent": 0,
+    "externalEgressRulesOpened": 0,
+    "cloudResourcesCreated": 0,
+    "costIncurredUsd": "0.00",
+    "liveValidation": "NOT_RUN"
+  }
+}
