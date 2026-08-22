@@ -1,5 +1,10 @@
 import {
+  ASSET_REGISTRY_ENVIRONMENTS,
   MAINNET_SUPPORTED_ASSET_REGISTRY,
+  REGISTRY_ACTIVATION_STATES,
+  SUPPORTED_ASSET_REGISTRY_TEST_HOOKS,
+  SUPPORTED_CHAINS,
+  SUPPORTED_STABLECOINS,
   TESTNET_SUPPORTED_ASSET_REGISTRY,
   SupportedAssetRegistryValidationError,
   createSupportedAssetRegistrySnapshot,
@@ -46,6 +51,8 @@ function expectValidationCode(work: () => unknown, code: string): void {
 }
 
 describe('supported stablecoin registry', () => {
+  const mainnetRegistry = MAINNET_SUPPORTED_ASSET_REGISTRY;
+  const testnetRegistry = TESTNET_SUPPORTED_ASSET_REGISTRY;
   const mainnet = MAINNET_SUPPORTED_ASSET_REGISTRY.latest;
   const testnet = TESTNET_SUPPORTED_ASSET_REGISTRY.latest;
 
@@ -65,9 +72,129 @@ describe('supported stablecoin registry', () => {
       ['SOLANA', 'solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1'],
     ]);
     expect(Object.isFrozen(mainnet)).toBe(true);
+    expect(Object.isFrozen(mainnetRegistry)).toBe(true);
+    expect(Object.isFrozen(mainnetRegistry.versions)).toBe(true);
     expect(Object.isFrozen(mainnet.networks)).toBe(true);
+    expect(mainnet.networks.every(Object.isFrozen)).toBe(true);
     expect(Object.isFrozen(mainnet.assets)).toBe(true);
     expect(mainnet.assets.every(Object.isFrozen)).toBe(true);
+  });
+
+  it('runtime-freezes public vocabularies and pins canonical snapshot fingerprints', () => {
+    for (const vocabulary of [
+      SUPPORTED_CHAINS,
+      SUPPORTED_STABLECOINS,
+      ASSET_REGISTRY_ENVIRONMENTS,
+      REGISTRY_ACTIVATION_STATES,
+    ]) {
+      expect(Object.isFrozen(vocabulary)).toBe(true);
+      expect(Reflect.set(vocabulary, 0, 'MUTATED')).toBe(false);
+    }
+    expect(SUPPORTED_CHAINS[0]).toBe('ETHEREUM');
+    expect([mainnet.fingerprintSha256, testnet.fingerprintSha256]).toEqual([
+      '5058b141479f114c1e5f87ed8798fbb7a7ffcce7b502aa7e0794dc53ca1f767d',
+      '89c158de188fcde7d01642aadef226f3c93724bfe5b53a7f3fcce096180d5ca7',
+    ]);
+    expect(mainnet.fingerprintSha256).toMatch(/^[0-9a-f]{64}$/u);
+    const mainnetDefinition = snapshotDefinition(mainnet);
+    const reordered = createSupportedAssetRegistrySnapshot({
+      ...mainnetDefinition,
+      networks: [...mainnetDefinition.networks].reverse(),
+      assets: [...mainnetDefinition.assets].reverse(),
+    });
+    expect(reordered.fingerprintSha256).toBe(mainnet.fingerprintSha256);
+  });
+
+  it('allows cross-version identity and network candidates without allowing identity relabels', () => {
+    const catalogNetworks = [mainnet, testnet].flatMap((snapshot) =>
+      snapshot.networks.map(({ environment, chain, networkId, displayName, identityKind }) => ({
+        environment,
+        chain,
+        networkId,
+        displayName,
+        identityKind,
+      })),
+    );
+    const catalogIdentities = [mainnet, testnet].flatMap((snapshot) =>
+      snapshot.assets.map(
+        ({ stablecoin, issuer, chain, networkId, identity, decimals, verificationSource }) => ({
+          environment: snapshot.environment,
+          stablecoin,
+          issuer,
+          chain,
+          networkId,
+          identity,
+          decimals,
+          verificationSource,
+        }),
+      ),
+    );
+    const ethereumUsdc = catalogIdentities.find(
+      ({ environment, stablecoin, chain }) =>
+        environment === 'MAINNET' && stablecoin === 'USDC' && chain === 'ETHEREUM',
+    )!;
+    const replacementEthereumUsdc = {
+      ...ethereumUsdc,
+      identity: '0x1111111111111111111111111111111111111111',
+    };
+    const futureEthereumNetwork = {
+      environment: 'MAINNET' as const,
+      chain: 'ETHEREUM' as const,
+      networkId: 'eip155:999999',
+      displayName: 'Future Ethereum Network',
+      identityKind: 'EVM_CONTRACT' as const,
+    };
+
+    expect(() =>
+      SUPPORTED_ASSET_REGISTRY_TEST_HOOKS.validateCatalog(
+        [...catalogNetworks, futureEthereumNetwork],
+        [...catalogIdentities, replacementEthereumUsdc],
+      ),
+    ).not.toThrow();
+    expectValidationCode(
+      () =>
+        SUPPORTED_ASSET_REGISTRY_TEST_HOOKS.validateCatalog(catalogNetworks, [
+          ...catalogIdentities,
+          ethereumUsdc,
+        ]),
+      'DUPLICATE_ASSET',
+    );
+    expectValidationCode(
+      () =>
+        SUPPORTED_ASSET_REGISTRY_TEST_HOOKS.validateCatalog(catalogNetworks, [
+          ...catalogIdentities,
+          {
+            ...ethereumUsdc,
+            stablecoin: 'USDT',
+            issuer: 'TETHER',
+            verificationSource: 'https://tether.to/en/supported-protocols/',
+          },
+        ]),
+      'DUPLICATE_ASSET',
+    );
+    expectValidationCode(
+      () =>
+        SUPPORTED_ASSET_REGISTRY_TEST_HOOKS.validateCatalog(
+          [...catalogNetworks, catalogNetworks[0]!],
+          catalogIdentities,
+        ),
+      'DUPLICATE_NETWORK',
+    );
+    expectValidationCode(
+      () =>
+        SUPPORTED_ASSET_REGISTRY_TEST_HOOKS.validateCatalog(
+          [
+            ...catalogNetworks,
+            {
+              ...catalogNetworks[0]!,
+              chain: 'BASE',
+              displayName: 'Invalid remapped network',
+            },
+          ],
+          catalogIdentities,
+        ),
+      'DUPLICATE_NETWORK',
+    );
   });
 
   it('contains only issuer-verified mainnet identities with exact decimals', () => {
@@ -173,23 +300,28 @@ describe('supported stablecoin registry', () => {
     expect(testnet.assets.every(({ decimals }) => decimals === 6)).toBe(true);
     expect(testnet.assets.filter(({ stablecoin }) => stablecoin === 'USDT')).toHaveLength(0);
     expect(
-      testnet.normalizeAsset('eip155:11155111', '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238')
-        ?.stablecoin,
+      testnetRegistry.normalizeAsset(
+        'eip155:11155111',
+        '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238',
+      )?.stablecoin,
     ).toBe('USDC');
     expect(
-      testnet.normalizeAsset(
+      testnetRegistry.normalizeAsset(
         'solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1',
         'CXk2AMBfi3TwaEL2468s6zP8xq9NxTXjp9gjMgzeUynM',
       )?.stablecoin,
     ).toBe('PYUSD');
     expect(
-      testnet.normalizeAsset('eip155:11155111', '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48'),
+      testnetRegistry.normalizeAsset(
+        'eip155:11155111',
+        '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48',
+      ),
     ).toBeUndefined();
   });
 
   it('normalizes only a configured active network-qualified identity', () => {
     expect(
-      mainnet.normalizeAsset('eip155:1', '0xA0b86991c6218b36c1D19D4A2E9eB0cE3606eB48'),
+      mainnetRegistry.normalizeAsset('eip155:1', '0xA0b86991c6218b36c1D19D4A2E9eB0cE3606eB48'),
     ).toMatchObject({
       stablecoin: 'USDC',
       issuer: 'CIRCLE',
@@ -199,28 +331,48 @@ describe('supported stablecoin registry', () => {
       registryVersion: 1,
     });
     expect(
-      mainnet.normalizeAsset('eip155:8453', '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48'),
+      mainnetRegistry.normalizeAsset('eip155:8453', '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48'),
     ).toBeUndefined();
     expect(
-      mainnet.normalizeAsset('eip155:1', '0x0000000000000000000000000000000000000001'),
+      mainnetRegistry.normalizeAsset('eip155:1', '0x0000000000000000000000000000000000000001'),
     ).toBeUndefined();
-    expect(mainnet.normalizeAsset('eip155:1', 'USDC')).toBeUndefined();
-    expect(mainnet.normalizeAsset('eip155:999', mainnet.assets[0]!.identity)).toBeUndefined();
+    expect(mainnetRegistry.normalizeAsset('eip155:1', 'USDC')).toBeUndefined();
+    expect(
+      mainnetRegistry.normalizeAsset('eip155:999', mainnet.assets[0]!.identity),
+    ).toBeUndefined();
+    const solanaUsdc = mainnet.assets.find(
+      ({ stablecoin, chain }) => stablecoin === 'USDC' && chain === 'SOLANA',
+    )!;
+    expect(
+      mainnetRegistry.normalizeAsset(solanaUsdc.networkId, solanaUsdc.identity.toLowerCase()),
+    ).toBeUndefined();
+    expect(
+      mainnetRegistry.normalizeAsset(
+        solanaUsdc.networkId,
+        '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
+      ),
+    ).toBeUndefined();
   });
 
   it('retains configured inactive identity metadata without normalizing it as supported', () => {
     const definition = snapshotDefinition(mainnet);
     const firstAsset = definition.assets[0]!;
-    const inactive = createSupportedAssetRegistrySnapshot({
-      ...definition,
-      assets: [{ ...firstAsset, activationState: 'INACTIVE' }, ...definition.assets.slice(1)],
-    });
+    const inactiveRegistry = createVersionedSupportedAssetRegistry([
+      {
+        ...definition,
+        assets: [{ ...firstAsset, activationState: 'INACTIVE' }, ...definition.assets.slice(1)],
+      },
+    ]);
+    const inactive = inactiveRegistry.latest;
 
     expect(inactive.identifyAsset(firstAsset.networkId, firstAsset.identity)).toMatchObject({
       stablecoin: 'USDC',
       activationState: 'INACTIVE',
     });
-    expect(inactive.normalizeAsset(firstAsset.networkId, firstAsset.identity)).toBeUndefined();
+    expect(
+      inactiveRegistry.normalizeAsset(firstAsset.networkId, firstAsset.identity),
+    ).toBeUndefined();
+    expect('normalizeAsset' in inactive).toBe(false);
   });
 
   it('rejects duplicate networks and duplicate asset identities', () => {
@@ -237,7 +389,13 @@ describe('supported stablecoin registry', () => {
       () =>
         createSupportedAssetRegistrySnapshot({
           ...definition,
-          assets: [...definition.assets, definition.assets[0]!],
+          assets: [
+            ...definition.assets,
+            {
+              ...definition.assets[0]!,
+              identity: `0x${definition.assets[0]!.identity.slice(2).toUpperCase()}`,
+            },
+          ],
         }),
       'DUPLICATE_ASSET',
     );
@@ -255,6 +413,17 @@ describe('supported stablecoin registry', () => {
         createSupportedAssetRegistrySnapshot({
           ...definition,
           assets: replaceFirst({ ...ethereumUsdc, identity: 'USDC' }),
+        }),
+      'INVALID_IDENTITY',
+    );
+    expectValidationCode(
+      () =>
+        createSupportedAssetRegistrySnapshot({
+          ...definition,
+          assets: replaceFirst({
+            ...ethereumUsdc,
+            identity: '0x0000000000000000000000000000000000000000',
+          }),
         }),
       'INVALID_IDENTITY',
     );
@@ -366,6 +535,27 @@ describe('supported stablecoin registry', () => {
         }),
       'ACTIVE_ASSET_ON_INACTIVE_NETWORK',
     );
+
+    const inactiveNetworkRegistry = createVersionedSupportedAssetRegistry([
+      {
+        ...definition,
+        networks: [ethereumNetwork, ...definition.networks.slice(1)],
+        assets: definition.assets.map((asset) =>
+          asset.chain === 'ETHEREUM' ? { ...asset, activationState: 'INACTIVE' as const } : asset,
+        ),
+      },
+    ]);
+    const ethereumUsdc = definition.assets[0]!;
+    expect(
+      inactiveNetworkRegistry.identifyAssetAtVersion(
+        1,
+        ethereumUsdc.networkId,
+        ethereumUsdc.identity,
+      ),
+    ).toMatchObject({ activationState: 'INACTIVE' });
+    expect(
+      inactiveNetworkRegistry.normalizeAsset(ethereumUsdc.networkId, ethereumUsdc.identity),
+    ).toBeUndefined();
   });
 
   it('requires an explicit contiguous immutable version history per environment', () => {
@@ -393,13 +583,20 @@ describe('supported stablecoin registry', () => {
       ],
     };
     const history = createVersionedSupportedAssetRegistry([mainnetDefinition, versionTwo]);
+    const firstAsset = mainnetDefinition.assets[0]!;
     expect(history.versions).toEqual([1, 2]);
     expect(history.atVersion(1)?.assets[0]?.activationState).toBe('ACTIVE');
     expect(history.latest.assets[0]?.activationState).toBe('INACTIVE');
-    expect(supportedAssetRegistryForEnvironment('MAINNET')).toBe(mainnet);
-    expect(supportedAssetRegistryForEnvironment('TESTNET', 1)).toBe(testnet);
+    expect(history.latest.fingerprintSha256).not.toBe(history.atVersion(1)?.fingerprintSha256);
+    expect(
+      history.identifyAssetAtVersion(1, firstAsset.networkId, firstAsset.identity),
+    ).toMatchObject({ activationState: 'ACTIVE', registryVersion: 1 });
+    expect(history.normalizeAsset(firstAsset.networkId, firstAsset.identity)).toBeUndefined();
+    expect('normalizeAsset' in history.atVersion(1)!).toBe(false);
+    expect(supportedAssetRegistryForEnvironment('MAINNET')).toBe(mainnetRegistry);
+    expect(supportedAssetRegistryForEnvironment('TESTNET')).toBe(testnetRegistry);
     expectValidationCode(
-      () => supportedAssetRegistryForEnvironment('MAINNET', 2),
+      () => mainnetRegistry.identifyAssetAtVersion(2, firstAsset.networkId, firstAsset.identity),
       'UNKNOWN_REGISTRY_VERSION',
     );
   });
