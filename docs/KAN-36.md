@@ -12,10 +12,11 @@ The public API is self-scoped:
 - `PATCH /api/v1/accounts/me`
 
 Neither operation accepts an account identifier in the path, query, or request
-body. The account ID comes only from the `CurrentPrincipalResolver` port. Its
-runtime adapter denies every request until KAN-37 supplies verified managed-OIDC
-token validation and issuer/subject-to-platform-account mapping. There is no
-development identity header or unsigned-token fallback in production code.
+body. The account ID comes only from the `CurrentPrincipalResolver` port.
+KAN-37 now supplies the local verified OIDC issuer/subject mapping and secure
+cookie-session adapter; it remains deny-all unless the complete OIDC runtime
+configuration is explicitly enabled. There is no development identity header
+or unsigned-token fallback in production code.
 
 The trusted provisioning application use case generates the platform account ID
 with the operating system's cryptographic UUIDv4 generator. It is opaque,
@@ -62,8 +63,8 @@ residency, bearer tokens, request bodies, and database diagnostics are excluded.
 Audit rows are append-only at the database boundary.
 
 Account responses and errors use `Cache-Control: private, no-store` and vary on
-`Authorization`. Responses explicitly project permitted fields and never expose
-provider subjects or internal credentials.
+`Cookie, Origin`. Responses explicitly project permitted fields and never
+expose provider subjects or internal credentials.
 
 ## Persistence boundary
 

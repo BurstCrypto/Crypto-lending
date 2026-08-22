@@ -139,7 +139,7 @@ describe('account profile (e2e)', () => {
 
     expect(response.headers).toMatchObject({
       'cache-control': 'private, no-store',
-      'www-authenticate': 'Bearer',
+      vary: 'Cookie, Origin',
     });
     expect(JSON.stringify(response.body)).not.toContain(ACCOUNT_A);
     expect(JSON.stringify(response.body)).not.toContain(ACCOUNT_B);
@@ -156,7 +156,7 @@ describe('account profile (e2e)', () => {
     expect(response.headers).toMatchObject({
       'cache-control': 'private, no-store',
       etag: `"account-profile:${ACCOUNT_A}:1"`,
-      vary: 'Authorization',
+      vary: 'Cookie, Origin',
     });
     expect(response.body).toEqual({
       accountId: ACCOUNT_A,
@@ -178,7 +178,7 @@ describe('account profile (e2e)', () => {
 
     expect(response.headers).toMatchObject({
       'cache-control': 'private, no-store',
-      vary: 'Authorization',
+      vary: 'Cookie, Origin',
     });
     expect(JSON.stringify(response.body)).not.toContain(ACCOUNT_UNMAPPED);
   });
@@ -191,7 +191,7 @@ describe('account profile (e2e)', () => {
       .expect(428);
     expect(missing.headers).toMatchObject({
       'cache-control': 'private, no-store',
-      vary: 'Authorization',
+      vary: 'Cookie, Origin',
     });
 
     for (const value of [
@@ -208,7 +208,7 @@ describe('account profile (e2e)', () => {
         .expect(412);
       expect(stale.headers).toMatchObject({
         'cache-control': 'private, no-store',
-        vary: 'Authorization',
+        vary: 'Cookie, Origin',
       });
     }
   });
@@ -312,8 +312,8 @@ describe('account profile (e2e)', () => {
     const response = await request(app.getHttpServer()).get('/api/v1/docs-json').expect(200);
     const path = response.body.paths['/api/v1/accounts/me'];
 
-    expect(path.get.security).toEqual([{ bearer: [] }]);
-    expect(path.patch.security).toEqual([{ bearer: [] }]);
+    expect(path.get.security).toEqual([{ sessionCookie: [] }]);
+    expect(path.patch.security).toEqual([{ sessionCookie: [] }]);
     expect(path.patch.responses).toEqual(
       expect.objectContaining({
         '200': expect.any(Object),

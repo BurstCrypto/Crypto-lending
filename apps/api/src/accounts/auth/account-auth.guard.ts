@@ -1,6 +1,7 @@
 import {
   CanActivate,
   ExecutionContext,
+  HttpException,
   HttpStatus,
   Inject,
   Injectable,
@@ -8,6 +9,10 @@ import {
 } from '@nestjs/common';
 
 import { parseAccountId } from '../domain/account-profile';
+import {
+  AuthenticationRateLimitedError,
+  AuthenticationUnavailableError,
+} from '../../authentication/application/authentication.errors';
 import { loggingContext } from '../../infrastructure/logging';
 import {
   bindCurrentPrincipal,
@@ -29,7 +34,7 @@ function authenticationRequired(): UnauthorizedException {
   });
 }
 
-function setAuthenticationFailureHeaders(response: unknown): void {
+function setAuthenticationFailureHeaders(response: unknown, retryAfterSeconds?: number): void {
   if (
     typeof response === 'object' &&
     response !== null &&
@@ -37,9 +42,11 @@ function setAuthenticationFailureHeaders(response: unknown): void {
     typeof response.setHeader === 'function'
   ) {
     const writer = response as HeaderWriter;
-    writer.setHeader('WWW-Authenticate', 'Bearer');
     writer.setHeader('Cache-Control', 'private, no-store');
-    writer.setHeader('Vary', 'Authorization');
+    writer.setHeader('Vary', 'Cookie, Origin');
+    if (retryAfterSeconds !== undefined) {
+      writer.setHeader('Retry-After', String(retryAfterSeconds));
+    }
   }
 }
 
@@ -66,9 +73,17 @@ export class AccountAuthGuard implements CanActivate {
       });
       bindCurrentPrincipal(request, principal);
       loggingContext.bindActorId(principal.accountId);
-    } catch {
+    } catch (error) {
       clearCurrentPrincipal(request);
       loggingContext.clearActorId();
+      if (error instanceof AuthenticationRateLimitedError) {
+        setAuthenticationFailureHeaders(http.getResponse<unknown>(), error.retryAfterSeconds);
+        throw new HttpException('Authentication request rejected', HttpStatus.TOO_MANY_REQUESTS);
+      }
+      if (error instanceof AuthenticationUnavailableError) {
+        setAuthenticationFailureHeaders(http.getResponse<unknown>(), 1);
+        throw new HttpException('Authentication unavailable', HttpStatus.SERVICE_UNAVAILABLE);
+      }
       setAuthenticationFailureHeaders(http.getResponse<unknown>());
       throw authenticationRequired();
     }

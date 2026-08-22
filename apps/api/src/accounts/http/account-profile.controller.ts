@@ -13,13 +13,13 @@ import {
 } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
-  ApiBearerAuth,
   ApiBody,
   ApiHeader,
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
   ApiResponse,
+  ApiSecurity,
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
@@ -46,7 +46,7 @@ interface ProfileHttpResponse {
 }
 
 @ApiTags('accounts')
-@ApiBearerAuth('bearer')
+@ApiSecurity('sessionCookie')
 @UseGuards(AccountAuthGuard)
 @UseInterceptors(AccountProfilePrivacyInterceptor, AccountProfileBodyShapeInterceptor)
 @Controller('accounts')

@@ -71,7 +71,7 @@ describe('AccountAuthGuard', () => {
       },
     },
   ] satisfies CurrentPrincipalResolver[])(
-    'fails closed with generic bearer semantics',
+    'fails closed with generic cookie-session semantics',
     async (resolver) => {
       const headers: Record<string, string> = {};
       const guard = new AccountAuthGuard(resolver);
@@ -95,8 +95,7 @@ describe('AccountAuthGuard', () => {
       );
       expect(headers).toEqual({
         'Cache-Control': 'private, no-store',
-        Vary: 'Authorization',
-        'WWW-Authenticate': 'Bearer',
+        Vary: 'Cookie, Origin',
       });
     },
   );

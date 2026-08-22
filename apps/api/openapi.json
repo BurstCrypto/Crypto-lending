@@ -397,6 +397,36 @@
         ],
         "type": "object"
       },
+      "StartRegistrationDto": {
+        "properties": {
+          "contactEmail": {
+            "example": "trey@example.com",
+            "maxLength": 254,
+            "type": "string"
+          },
+          "contactPhone": {
+            "example": "+13035550123",
+            "nullable": true,
+            "type": "object"
+          },
+          "declaredResidencyCountryCode": {
+            "example": "US",
+            "maxLength": 2,
+            "minLength": 2,
+            "type": "string"
+          },
+          "returnPath": {
+            "default": "/",
+            "example": "/",
+            "type": "string"
+          }
+        },
+        "required": [
+          "contactEmail",
+          "declaredResidencyCountryCode"
+        ],
+        "type": "object"
+      },
       "VersionResponseDto": {
         "properties": {
           "apiVersion": {
@@ -421,11 +451,11 @@
       }
     },
     "securitySchemes": {
-      "bearer": {
-        "bearerFormat": "JWT",
-        "description": "Managed identity access token",
-        "scheme": "bearer",
-        "type": "http"
+      "sessionCookie": {
+        "description": "Opaque host-only secure session cookie",
+        "in": "cookie",
+        "name": "__Host-cl_session",
+        "type": "apiKey"
       }
     }
   },
@@ -469,7 +499,7 @@
         },
         "security": [
           {
-            "bearer": []
+            "sessionCookie": []
           }
         ],
         "summary": "Read the authenticated account profile",
@@ -818,12 +848,106 @@
         },
         "security": [
           {
-            "bearer": []
+            "sessionCookie": []
           }
         ],
         "summary": "Update permitted fields on the authenticated account profile",
         "tags": [
           "accounts"
+        ]
+      }
+    },
+    "/api/v1/auth/callback": {
+      "get": {
+        "operationId": "AuthenticationController_callback",
+        "parameters": [],
+        "responses": {
+          "303": {
+            "description": "Issue a secure local session and redirect locally"
+          }
+        },
+        "summary": "Consume a one-use browser-bound OIDC callback",
+        "tags": [
+          "authentication"
+        ]
+      }
+    },
+    "/api/v1/auth/login": {
+      "get": {
+        "operationId": "AuthenticationController_login",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "returnTo",
+            "required": false,
+            "schema": {
+              "example": "/"
+            }
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "Redirect to the configured identity provider"
+          }
+        },
+        "summary": "Start managed OIDC login with PKCE",
+        "tags": [
+          "authentication"
+        ]
+      }
+    },
+    "/api/v1/auth/logout": {
+      "post": {
+        "operationId": "AuthenticationController_logout",
+        "parameters": [],
+        "responses": {
+          "204": {
+            "description": "Session revoked or already absent"
+          }
+        },
+        "summary": "Revoke the current local session family",
+        "tags": [
+          "authentication"
+        ]
+      }
+    },
+    "/api/v1/auth/registration": {
+      "post": {
+        "operationId": "AuthenticationController_registration",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartRegistrationDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "303": {
+            "description": "Redirect to the configured identity provider"
+          }
+        },
+        "summary": "Start atomic account registration through managed OIDC",
+        "tags": [
+          "authentication"
+        ]
+      }
+    },
+    "/api/v1/auth/session/rotate": {
+      "post": {
+        "operationId": "AuthenticationController_rotate",
+        "parameters": [],
+        "responses": {
+          "204": {
+            "description": "Session credential rotated"
+          }
+        },
+        "summary": "Rotate the current cookie session credential",
+        "tags": [
+          "authentication"
         ]
       }
     },

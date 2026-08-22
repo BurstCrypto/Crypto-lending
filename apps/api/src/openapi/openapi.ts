@@ -8,14 +8,14 @@ export function createOpenApiDocument(app: INestApplication): OpenAPIObject {
     .setTitle('Crypto Lending API')
     .setDescription('Versioned API for the Crypto Lending platform.')
     .setVersion(API_CONTRACT_VERSION)
-    .addBearerAuth(
+    .addApiKey(
       {
-        bearerFormat: 'JWT',
-        description: 'Managed identity access token',
-        scheme: 'bearer',
-        type: 'http',
+        description: 'Opaque host-only secure session cookie',
+        in: 'cookie',
+        name: '__Host-cl_session',
+        type: 'apiKey',
       },
-      'bearer',
+      'sessionCookie',
     )
     .build();
 

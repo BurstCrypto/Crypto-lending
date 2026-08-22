@@ -74,8 +74,7 @@ describe('system endpoints (e2e)', () => {
 
     expect(response.headers).toMatchObject({
       'cache-control': 'private, no-store',
-      vary: 'Authorization',
-      'www-authenticate': 'Bearer',
+      vary: 'Cookie, Origin',
     });
     expect(response.body).toEqual({
       error: 'Unauthorized',
