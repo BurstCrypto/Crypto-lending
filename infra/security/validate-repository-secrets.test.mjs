@@ -409,6 +409,7 @@ test('accepts exact reviewed dummy fixtures, dotenv examples, and digest context
         "const credentialRelativeUri = '/v2/credentials/task-role';",
         "const credentialsFilePath = '/run/credentials/task-role';",
         "const reviewed = 'https://user:token@team.atlassian.net';",
+        "const reviewedQuickNodeNegativeFixture = 'https://user@www.quicknode.com/docs';",
         "const workerLocal = 'postgresql://crypto_worker_login_a:local@127.0.0.1:5432/crypto_lending';",
         "const workerProduction = 'postgresql://crypto_worker_login_a:secret@db.internal.example:5432/crypto_lending';",
         "const missingApiCredentialUrl = 'postgresql://crypto_api_login_a:@db.internal.example:5432/crypto_lending';",
@@ -431,6 +432,30 @@ test('accepts exact reviewed dummy fixtures, dotenv examples, and digest context
     assert.equal(result.status, 0, result.stdout || result.stderr);
     assert.equal(result.stdout, '');
     assert.equal(result.stderr, '');
+  } finally {
+    rmSync(repository, { force: true, recursive: true });
+  }
+});
+
+test('keeps reviewed dummy URL credentials exact to protocol, user, password, and host', () => {
+  const repository = createRepository();
+  const wrongUser = ['https://', 'operator', '@www.quicknode.com/docs'].join('');
+  const wrongHost = ['https://user@', 'api.quicknode.com/docs'].join('');
+  try {
+    write(repository, 'near-miss-url-fixtures.txt', `${wrongUser}\n${wrongHost}\n`);
+    runGit(repository, 'add', 'near-miss-url-fixtures.txt');
+
+    const result = runScanner(repository);
+
+    assertFinding(result, 'url.embedded-credentials', 'index');
+    assert.equal(
+      result.stdout
+        .trim()
+        .split('\n')
+        .filter((line) => line.startsWith('rule=url.embedded-credentials\t')).length,
+      2,
+    );
+    assertRedacted(result, wrongUser, wrongHost);
   } finally {
     rmSync(repository, { force: true, recursive: true });
   }

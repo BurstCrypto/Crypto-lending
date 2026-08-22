@@ -109,6 +109,7 @@ const REVIEWED_DUMMY_URL_CREDENTIALS = new Set([
   'https|user|secret|evidence.example.test',
   'https|user|token|team.atlassian.net',
   'https|user||example.test',
+  'https|user||www.quicknode.com',
 ]);
 
 const PROVIDER_RULES = Object.freeze([
