@@ -1,0 +1,770 @@
+{
+  "schemaVersion": 1,
+  "ticket": "KAN-62",
+  "decisionReference": "jira:KAN-62/provider-decision-v1",
+  "asOfDate": "2026-08-22",
+  "localStatus": "READY_FOR_INDEPENDENT_REVIEW",
+  "externalStatus": "PENDING_EXTERNAL_APPROVAL",
+  "selection": {
+    "architecture": "PROVIDER_NEUTRAL_STANDARD_PROTOCOL_RPC",
+    "primaryProvider": "ALCHEMY",
+    "primaryStatus": "PROPOSED",
+    "fallbackProvider": "QUICKNODE",
+    "fallbackStatus": "PROPOSED",
+    "fallbackIndependence": "INDEPENDENT_PROVIDER_PENDING_LIVE_PROOF",
+    "runtimeStatus": "NOT_APPROVED",
+    "managedProductsStatus": "OUT_OF_SCOPE_NOT_APPROVED",
+    "transactionBroadcastStatus": "OUT_OF_SCOPE_NOT_APPROVED"
+  },
+  "approvalBoundary": {
+    "approved": false,
+    "plan": null,
+    "account": null,
+    "endpointHostnames": [],
+    "credentialReferences": [],
+    "regions": [],
+    "sla": null,
+    "monthlyCostUsd": null,
+    "egressDestinations": [],
+    "runtimeActivation": null,
+    "prohibitedUntilGatesPass": [
+      "CREATE_PROVIDER_ACCOUNT",
+      "START_TRIAL",
+      "SELECT_PLAN",
+      "ADD_PAYMENT_METHOD",
+      "CREATE_ENDPOINT",
+      "ISSUE_API_KEY",
+      "OPEN_PROVIDER_CONNECTION",
+      "SEND_RPC_REQUEST",
+      "AUTHORIZE_EGRESS",
+      "ACTIVATE_RUNTIME_FAILOVER"
+    ]
+  },
+  "gates": [
+    {
+      "ticket": "KAN-251",
+      "kind": "EXTERNAL_APPROVAL_AND_LIVE_VALIDATION",
+      "status": "PENDING_EXTERNAL_APPROVAL",
+      "blocks": "ANY_PROVIDER_OR_RUNTIME_APPROVAL",
+      "requiredEvidence": [
+        "INDEPENDENT_ARCHITECTURE_SECURITY_PRIVACY_LEGAL_AND_FINANCE_DECISIONS",
+        "APPROVED_ACCOUNT_AND_PLAN_WITH_BILLING_CAPS",
+        "EXACT_ENDPOINT_HOSTNAMES_AND_CREDENTIAL_REFERENCES",
+        "METHOD_TRANSPORT_ARCHIVE_AND_CHAIN_IDENTITY_PARITY",
+        "MEASURED_THROUGHPUT_LATENCY_COST_AND_RATE_LIMIT_BEHAVIOR",
+        "REORG_FINALITY_DISCONNECT_OUTAGE_AND_FALLBACK_EXERCISES",
+        "LOG_REDACTION_RETENTION_RESIDENCY_AND_INCIDENT_RESPONSE REVIEW"
+      ],
+      "scopeBoundary": "DOES_NOT_AUTHORIZE_NETWORK_EGRESS"
+    },
+    {
+      "ticket": "KAN-231",
+      "kind": "EXACT_HOST_EGRESS",
+      "status": "PENDING_EXTERNAL_APPROVAL",
+      "blocks": "ANY_RUNTIME_CONNECTION",
+      "requiredEvidence": [
+        "KAN_251_APPROVED_EXACT_HOSTNAMES",
+        "CALLER_AND_PROTOCOL_SCOPED_DESTINATION_POLICY",
+        "TLS_DNS_DENY_BY_DEFAULT_AND_KILL_SWITCH_EVIDENCE",
+        "CURRENT_KAN_229_COST_CONTROL_BINDING"
+      ],
+      "scopeBoundary": "CANNOT_APPROVE_PROVIDER_COMMERCIAL_OR_DATA_SEMANTICS"
+    }
+  ],
+  "capabilityBoundary": {
+    "proposed": [
+      "STANDARD_HTTPS_JSON_RPC_READS",
+      "STANDARD_WSS_JSON_RPC_SUBSCRIPTIONS",
+      "STANDARD_PROTOCOL_HISTORICAL_BACKFILL"
+    ],
+    "excluded": [
+      "ALCHEMY_DATA_APIS",
+      "ALCHEMY_NOTIFY_AND_SMART_WEBSOCKET_ENHANCEMENTS",
+      "ALCHEMY_FLASHBLOCKS",
+      "ALCHEMY_SOLANA_ACCOUNT_ARCHIVE_EXTENSION",
+      "ALCHEMY_YELLOWSTONE_GRPC",
+      "QUICKNODE_STREAMS",
+      "QUICKNODE_WEBHOOKS",
+      "QUICKNODE_FUNCTIONS",
+      "QUICKNODE_ADD_ONS",
+      "QUICKNODE_YELLOWSTONE_GRPC",
+      "VENDOR_TRACE_DEBUG_OR_ENHANCED_NAMESPACES",
+      "TRANSACTION_BROADCAST_OR_AUTOMATIC_RESUBMISSION"
+    ],
+    "forbiddenMethodPrefixes": ["alchemy_", "arbtrace_", "debug_", "metis_", "qn_", "trace_"],
+    "transportAuthority": {
+      "webSocketRole": "HINT_AND_LOW_LATENCY_ONLY",
+      "httpsRole": "AUTHORITATIVE_BOUNDED_REPLAY_POLL_AND_FINALITY_RECONCILIATION",
+      "webSocketOnlyFinancialAdvance": false,
+      "gapPolicy": "STOP_ADVANCE_AND_COMPLETE_IDEMPOTENT_HTTPS_BACKFILL_BEFORE_RESUME"
+    },
+    "automaticTransactionResubmission": "PROHIBITED",
+    "failClosedOnUnsupportedCapability": true
+  },
+  "methodProfiles": [
+    {
+      "id": "EVM_STANDARD_READ_V1",
+      "protocol": "ETHEREUM_JSON_RPC",
+      "requiredTransports": ["HTTPS_JSON_RPC", "WSS_JSON_RPC"],
+      "httpMethods": [
+        "eth_blockNumber",
+        "eth_call",
+        "eth_chainId",
+        "eth_getBalance",
+        "eth_getBlockByHash",
+        "eth_getBlockByNumber",
+        "eth_getCode",
+        "eth_getLogs",
+        "eth_getTransactionByHash",
+        "eth_getTransactionReceipt"
+      ],
+      "webSocketSubscriptions": ["logs", "newHeads"],
+      "writeMethods": [],
+      "failClosedIfMissing": true
+    },
+    {
+      "id": "SOLANA_STANDARD_READ_V1",
+      "protocol": "SOLANA_JSON_RPC",
+      "requiredTransports": ["HTTPS_JSON_RPC", "WSS_JSON_RPC"],
+      "httpMethods": [
+        "getAccountInfo",
+        "getBlock",
+        "getBlockHeight",
+        "getGenesisHash",
+        "getHealth",
+        "getLatestBlockhash",
+        "getMultipleAccounts",
+        "getSignatureStatuses",
+        "getSignaturesForAddress",
+        "getSlot",
+        "getTokenAccountBalance",
+        "getTokenAccountsByOwner",
+        "getTransaction",
+        "getVersion"
+      ],
+      "webSocketSubscriptions": [
+        "accountSubscribe",
+        "logsSubscribe",
+        "programSubscribe",
+        "rootSubscribe",
+        "signatureSubscribe",
+        "slotSubscribe"
+      ],
+      "writeMethods": [],
+      "failClosedIfMissing": true
+    }
+  ],
+  "chainPolicies": [
+    {
+      "chain": "ETHEREUM",
+      "freshness": {
+        "currentAtOrBelowSeconds": 60,
+        "staleAboveSeconds": 60,
+        "staleThroughSeconds": 900,
+        "unavailableAboveSeconds": 900,
+        "finalityStallSeconds": 1800
+      },
+      "finality": {
+        "provisionalSignal": "LATEST_HEAD",
+        "canonicalSignal": "SAFE_TAG_PENDING_PROVIDER_LIVE_PROOF",
+        "financialSignal": "FINALIZED_TAG_PENDING_EXTERNAL_APPROVAL_AND_INDEPENDENT_AGREEMENT",
+        "testnetIsSlaEvidence": false
+      },
+      "reorg": {
+        "lineage": "PERSIST_BLOCK_HASH_PARENT_HASH_AND_HEIGHT",
+        "provisionalLogs": "REMOVED_TRUE_OR_HASH_DIVERGENCE_TRIGGERS_ROLLBACK",
+        "recovery": "ROLL_BACK_TO_COMMON_ANCESTOR_THEN_IDEMPOTENT_HTTP_REPLAY",
+        "unknownAncestor": "FAIL_CLOSED"
+      },
+      "outage": {
+        "webSocketGap": "STOP_ADVANCE_MARK_STALE_RECONNECT_WITH_BOUNDED_BACKOFF_THEN_HTTP_BACKFILL",
+        "rpcFailure": "RETRY_IDEMPOTENT_READS_WITH_BOUNDED_EXPONENTIAL_BACKOFF_AND_JITTER",
+        "statusPage": "INFORMATIONAL_NOT_AN_ORACLE",
+        "automaticProductionFailover": "NOT_APPROVED"
+      },
+      "fallback": {
+        "provider": "QUICKNODE",
+        "identityCheck": "EXACT_ETH_CHAIN_ID_BEFORE_ACCEPTING_DATA",
+        "parity": "PENDING_KAN_251_LIVE_VALIDATION",
+        "activation": "PENDING_KAN_251_AND_KAN_231"
+      }
+    },
+    {
+      "chain": "BASE",
+      "freshness": {
+        "currentAtOrBelowSeconds": 30,
+        "staleAboveSeconds": 30,
+        "staleThroughSeconds": 300,
+        "unavailableAboveSeconds": 300,
+        "finalityStallSeconds": 2700
+      },
+      "finality": {
+        "provisionalSignal": "SEQUENCER_HEAD",
+        "canonicalSignal": "SAFE_TAG_PENDING_PROVIDER_LIVE_PROOF",
+        "financialSignal": "FINALIZED_TAG_AND_L1_SETTLEMENT_PENDING_EXTERNAL_APPROVAL_AND_INDEPENDENT_AGREEMENT",
+        "testnetIsSlaEvidence": false
+      },
+      "reorg": {
+        "lineage": "PERSIST_L2_BLOCK_HASH_PARENT_HASH_HEIGHT_AND_L1_ORIGIN_WHEN_STANDARD_RESPONSE_EXPOSES_IT",
+        "provisionalLogs": "REMOVED_TRUE_OR_HASH_DIVERGENCE_TRIGGERS_ROLLBACK",
+        "recovery": "ROLL_BACK_TO_COMMON_ANCESTOR_THEN_IDEMPOTENT_HTTP_REPLAY",
+        "unknownAncestor": "FAIL_CLOSED"
+      },
+      "outage": {
+        "webSocketGap": "STOP_ADVANCE_MARK_STALE_RECONNECT_WITH_BOUNDED_BACKOFF_THEN_HTTP_BACKFILL",
+        "rpcFailure": "RETRY_IDEMPOTENT_READS_WITH_BOUNDED_EXPONENTIAL_BACKOFF_AND_JITTER",
+        "statusPage": "INFORMATIONAL_NOT_AN_ORACLE",
+        "automaticProductionFailover": "NOT_APPROVED"
+      },
+      "fallback": {
+        "provider": "QUICKNODE",
+        "identityCheck": "EXACT_ETH_CHAIN_ID_BEFORE_ACCEPTING_DATA",
+        "parity": "PENDING_KAN_251_LIVE_VALIDATION",
+        "activation": "PENDING_KAN_251_AND_KAN_231"
+      }
+    },
+    {
+      "chain": "ARBITRUM",
+      "freshness": {
+        "currentAtOrBelowSeconds": 30,
+        "staleAboveSeconds": 30,
+        "staleThroughSeconds": 300,
+        "unavailableAboveSeconds": 300,
+        "finalityStallSeconds": 2700
+      },
+      "finality": {
+        "provisionalSignal": "SEQUENCER_HEAD",
+        "canonicalSignal": "BLOCKED_PENDING_LIVE_PROOF",
+        "financialSignal": "BLOCKED_PENDING_LIVE_PROOF",
+        "testnetIsSlaEvidence": false
+      },
+      "reorg": {
+        "lineage": "PERSIST_L2_BLOCK_HASH_PARENT_HASH_HEIGHT_AND_L1_ORIGIN_WHEN_STANDARD_RESPONSE_EXPOSES_IT",
+        "provisionalLogs": "REMOVED_TRUE_OR_HASH_DIVERGENCE_TRIGGERS_ROLLBACK",
+        "recovery": "ROLL_BACK_TO_COMMON_ANCESTOR_THEN_IDEMPOTENT_HTTP_REPLAY",
+        "unknownAncestor": "FAIL_CLOSED"
+      },
+      "outage": {
+        "webSocketGap": "STOP_ADVANCE_MARK_STALE_RECONNECT_WITH_BOUNDED_BACKOFF_THEN_HTTP_BACKFILL",
+        "rpcFailure": "RETRY_IDEMPOTENT_READS_WITH_BOUNDED_EXPONENTIAL_BACKOFF_AND_JITTER",
+        "statusPage": "INFORMATIONAL_NOT_AN_ORACLE",
+        "automaticProductionFailover": "NOT_APPROVED"
+      },
+      "fallback": {
+        "provider": "QUICKNODE",
+        "identityCheck": "EXACT_ETH_CHAIN_ID_BEFORE_ACCEPTING_DATA",
+        "parity": "PENDING_KAN_251_LIVE_VALIDATION",
+        "activation": "PENDING_KAN_251_AND_KAN_231"
+      }
+    },
+    {
+      "chain": "SOLANA",
+      "freshness": {
+        "currentAtOrBelowSeconds": 15,
+        "staleAboveSeconds": 15,
+        "staleThroughSeconds": 120,
+        "unavailableAboveSeconds": 120,
+        "finalityStallSeconds": 90
+      },
+      "finality": {
+        "provisionalSignal": "PROCESSED_COMMITMENT_DISPLAY_ONLY",
+        "canonicalSignal": "CONFIRMED_COMMITMENT_PENDING_PROVIDER_LIVE_PROOF",
+        "financialSignal": "FINALIZED_COMMITMENT_PENDING_EXTERNAL_APPROVAL_AND_INDEPENDENT_AGREEMENT",
+        "testnetIsSlaEvidence": false
+      },
+      "reorg": {
+        "lineage": "PERSIST_SLOT_PARENT_AND_COMMITMENT_WITH_ROOT_CHECKPOINT",
+        "provisionalLogs": "NON_ROOTED_FORK_OR_SIGNATURE_STATUS_DIVERGENCE_TRIGGERS_ROLLBACK",
+        "recovery": "DROP_ORPHANED_PROVISIONAL_SLOTS_THEN_IDEMPOTENT_HTTP_REPLAY_FROM_ROOT",
+        "unknownAncestor": "FAIL_CLOSED"
+      },
+      "outage": {
+        "webSocketGap": "STOP_ADVANCE_MARK_STALE_RECONNECT_WITH_BOUNDED_BACKOFF_THEN_HTTP_BACKFILL",
+        "rpcFailure": "RETRY_IDEMPOTENT_READS_WITH_BOUNDED_EXPONENTIAL_BACKOFF_AND_JITTER",
+        "statusPage": "INFORMATIONAL_NOT_AN_ORACLE",
+        "automaticProductionFailover": "NOT_APPROVED"
+      },
+      "fallback": {
+        "provider": "QUICKNODE",
+        "identityCheck": "EXACT_GET_GENESIS_HASH_BEFORE_ACCEPTING_DATA",
+        "parity": "PENDING_KAN_251_LIVE_VALIDATION",
+        "activation": "PENDING_KAN_251_AND_KAN_231"
+      }
+    }
+  ],
+  "networks": [
+    {
+      "networkId": "eip155:1",
+      "chain": "ETHEREUM",
+      "environment": "MAINNET",
+      "providerNetworkName": "Ethereum Mainnet",
+      "methodProfileId": "EVM_STANDARD_READ_V1",
+      "requiredTransports": ["HTTPS_JSON_RPC", "WSS_JSON_RPC"],
+      "identityMethod": "eth_chainId",
+      "expectedIdentity": "0x1",
+      "caipReferenceDerivation": "HEX_CHAIN_ID_TO_DECIMAL_CAIP_REFERENCE",
+      "primarySupport": "DOCUMENTED_PENDING_LIVE_VALIDATION",
+      "fallbackSupport": "DOCUMENTED_PENDING_LIVE_VALIDATION",
+      "primaryArchive": "GENERAL_FULL_ARCHIVE_PLAN_CLAIM_PENDING_LIVE_VALIDATION",
+      "fallbackArchive": "DOCUMENTED_YES_NO_PRUNING_PENDING_LIVE_VALIDATION",
+      "historyParity": "REQUIRED_PENDING_KAN_251",
+      "status": "PROPOSED"
+    },
+    {
+      "networkId": "eip155:8453",
+      "chain": "BASE",
+      "environment": "MAINNET",
+      "providerNetworkName": "Base Mainnet",
+      "methodProfileId": "EVM_STANDARD_READ_V1",
+      "requiredTransports": ["HTTPS_JSON_RPC", "WSS_JSON_RPC"],
+      "identityMethod": "eth_chainId",
+      "expectedIdentity": "0x2105",
+      "caipReferenceDerivation": "HEX_CHAIN_ID_TO_DECIMAL_CAIP_REFERENCE",
+      "primarySupport": "DOCUMENTED_PENDING_LIVE_VALIDATION",
+      "fallbackSupport": "DOCUMENTED_PENDING_LIVE_VALIDATION",
+      "primaryArchive": "GENERAL_FULL_ARCHIVE_PLAN_CLAIM_PENDING_LIVE_VALIDATION",
+      "fallbackArchive": "DOCUMENTED_YES_NO_PRUNING_PENDING_LIVE_VALIDATION",
+      "historyParity": "REQUIRED_PENDING_KAN_251",
+      "status": "PROPOSED"
+    },
+    {
+      "networkId": "eip155:42161",
+      "chain": "ARBITRUM",
+      "environment": "MAINNET",
+      "providerNetworkName": "Arbitrum Mainnet",
+      "methodProfileId": "EVM_STANDARD_READ_V1",
+      "requiredTransports": ["HTTPS_JSON_RPC", "WSS_JSON_RPC"],
+      "identityMethod": "eth_chainId",
+      "expectedIdentity": "0xa4b1",
+      "caipReferenceDerivation": "HEX_CHAIN_ID_TO_DECIMAL_CAIP_REFERENCE",
+      "primarySupport": "DOCUMENTED_PENDING_LIVE_VALIDATION",
+      "fallbackSupport": "DOCUMENTED_PENDING_LIVE_VALIDATION",
+      "primaryArchive": "GENERAL_FULL_ARCHIVE_PLAN_CLAIM_PENDING_LIVE_VALIDATION",
+      "fallbackArchive": "DOCUMENTED_YES_NO_PRUNING_PENDING_LIVE_VALIDATION",
+      "historyParity": "REQUIRED_PENDING_KAN_251",
+      "status": "PROPOSED"
+    },
+    {
+      "networkId": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+      "chain": "SOLANA",
+      "environment": "MAINNET",
+      "providerNetworkName": "Solana Mainnet-beta",
+      "methodProfileId": "SOLANA_STANDARD_READ_V1",
+      "requiredTransports": ["HTTPS_JSON_RPC", "WSS_JSON_RPC"],
+      "identityMethod": "getGenesisHash",
+      "expectedIdentity": "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d",
+      "caipReferenceDerivation": "FIRST_32_BASE58_CHARACTERS",
+      "primarySupport": "DOCUMENTED_PENDING_LIVE_VALIDATION",
+      "fallbackSupport": "DOCUMENTED_PENDING_LIVE_VALIDATION",
+      "primaryArchive": "GENERAL_FULL_ARCHIVE_PLAN_CLAIM_PENDING_LIVE_VALIDATION",
+      "fallbackArchive": "DOCUMENTED_YES_NO_PRUNING_PENDING_LIVE_VALIDATION",
+      "historyParity": "REQUIRED_PENDING_KAN_251",
+      "status": "PROPOSED"
+    },
+    {
+      "networkId": "eip155:11155111",
+      "chain": "ETHEREUM",
+      "environment": "TESTNET",
+      "providerNetworkName": "Ethereum Sepolia",
+      "methodProfileId": "EVM_STANDARD_READ_V1",
+      "requiredTransports": ["HTTPS_JSON_RPC", "WSS_JSON_RPC"],
+      "identityMethod": "eth_chainId",
+      "expectedIdentity": "0xaa36a7",
+      "caipReferenceDerivation": "HEX_CHAIN_ID_TO_DECIMAL_CAIP_REFERENCE",
+      "primarySupport": "DOCUMENTED_PENDING_LIVE_VALIDATION",
+      "fallbackSupport": "DOCUMENTED_PENDING_LIVE_VALIDATION",
+      "primaryArchive": "GENERAL_FULL_ARCHIVE_PLAN_CLAIM_PENDING_LIVE_VALIDATION",
+      "fallbackArchive": "DOCUMENTED_YES_NO_PRUNING_PENDING_LIVE_VALIDATION",
+      "historyParity": "BEST_EFFORT_TESTNET_PENDING_KAN_251",
+      "status": "PROPOSED"
+    },
+    {
+      "networkId": "eip155:84532",
+      "chain": "BASE",
+      "environment": "TESTNET",
+      "providerNetworkName": "Base Sepolia",
+      "methodProfileId": "EVM_STANDARD_READ_V1",
+      "requiredTransports": ["HTTPS_JSON_RPC", "WSS_JSON_RPC"],
+      "identityMethod": "eth_chainId",
+      "expectedIdentity": "0x14a34",
+      "caipReferenceDerivation": "HEX_CHAIN_ID_TO_DECIMAL_CAIP_REFERENCE",
+      "primarySupport": "DOCUMENTED_PENDING_LIVE_VALIDATION",
+      "fallbackSupport": "DOCUMENTED_PENDING_LIVE_VALIDATION",
+      "primaryArchive": "GENERAL_FULL_ARCHIVE_PLAN_CLAIM_PENDING_LIVE_VALIDATION",
+      "fallbackArchive": "DOCUMENTED_YES_NO_PRUNING_PENDING_LIVE_VALIDATION",
+      "historyParity": "BEST_EFFORT_TESTNET_PENDING_KAN_251",
+      "status": "PROPOSED"
+    },
+    {
+      "networkId": "eip155:421614",
+      "chain": "ARBITRUM",
+      "environment": "TESTNET",
+      "providerNetworkName": "Arbitrum Sepolia",
+      "methodProfileId": "EVM_STANDARD_READ_V1",
+      "requiredTransports": ["HTTPS_JSON_RPC", "WSS_JSON_RPC"],
+      "identityMethod": "eth_chainId",
+      "expectedIdentity": "0x66eee",
+      "caipReferenceDerivation": "HEX_CHAIN_ID_TO_DECIMAL_CAIP_REFERENCE",
+      "primarySupport": "DOCUMENTED_PENDING_LIVE_VALIDATION",
+      "fallbackSupport": "DOCUMENTED_PENDING_LIVE_VALIDATION",
+      "primaryArchive": "GENERAL_FULL_ARCHIVE_PLAN_CLAIM_PENDING_LIVE_VALIDATION",
+      "fallbackArchive": "DOCUMENTED_YES_NO_PRUNING_PENDING_LIVE_VALIDATION",
+      "historyParity": "BEST_EFFORT_TESTNET_PENDING_KAN_251",
+      "status": "PROPOSED"
+    },
+    {
+      "networkId": "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1",
+      "chain": "SOLANA",
+      "environment": "TESTNET",
+      "providerNetworkName": "Solana Devnet",
+      "methodProfileId": "SOLANA_STANDARD_READ_V1",
+      "requiredTransports": ["HTTPS_JSON_RPC", "WSS_JSON_RPC"],
+      "identityMethod": "getGenesisHash",
+      "expectedIdentity": "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
+      "caipReferenceDerivation": "FIRST_32_BASE58_CHARACTERS",
+      "primarySupport": "DOCUMENTED_PENDING_LIVE_VALIDATION",
+      "fallbackSupport": "DOCUMENTED_PENDING_LIVE_VALIDATION",
+      "primaryArchive": "GENERAL_FULL_ARCHIVE_PLAN_CLAIM_PENDING_LIVE_VALIDATION",
+      "fallbackArchive": "DOCUMENTED_PRUNED_6578505_SLOTS_PENDING_LIVE_VALIDATION",
+      "historyParity": "NOT_DOCUMENTED_REQUIRES_BOUNDED_BACKFILL_TEST",
+      "status": "PROPOSED"
+    }
+  ],
+  "providerResearch": [
+    {
+      "provider": "ALCHEMY",
+      "proposedRole": "PRIMARY",
+      "selectionStatus": "PROPOSED",
+      "transportClaim": "HTTPS_AND_WSS_DOCUMENTED_FOR_ALL_EIGHT_NETWORKS",
+      "archiveClaim": "PRICING_DOCUMENTS_FULL_ARCHIVE_ON_ALL_PLANS_NETWORK_PARITY_REQUIRES_LIVE_VALIDATION",
+      "rateModel": "COMPUTE_UNITS_AND_COMPUTE_UNITS_PER_SECOND",
+      "publishedFreeOffer": "30M_CU_PER_MONTH_500_CU_PER_SECOND_ABOUT_25_RPS_FIVE_APPS",
+      "publishedPaidMinimum": "PAY_AS_YOU_GO_0_45_USD_PER_MILLION_CU_FIRST_300M_THEN_0_40_USD_PER_MILLION_CU_NO_UPFRONT_COMMITMENT",
+      "publishedSla": "CUSTOM_SLA_ENTERPRISE_ONLY;_LEGAL_SERVICE_COMMITMENT_TEMPLATE_STATES_99_9_PERCENT_WHEN_AN_ORDER_FORM_BUYS_SERVICE_LEVELS",
+      "geographicBehavior": "SHARED_TRAFFIC_MARKETING_DESCRIBES_NEAREST_HEALTHY_EDGE_NODE_AND_REGION_REROUTING;_REGION_PINNING_REQUIRES_A_SEPARATELY_PRICED_DEDICATED_CLUSTER",
+      "securityAndRetention": "TLS_SECURITY_CONTROLS_AND_PEN_TESTS_CLAIMED;_REQUEST_PAYLOADS_AND_RESPONSES_ARE_VISIBLE_IN_REQUEST_LOGS_FOR_UP_TO_10_DAYS",
+      "approvedPlan": null,
+      "approvedSla": null,
+      "approvedRegion": null,
+      "approvedCostUsd": null
+    },
+    {
+      "provider": "QUICKNODE",
+      "proposedRole": "INDEPENDENT_FALLBACK",
+      "selectionStatus": "PROPOSED",
+      "transportClaim": "HTTPS_AND_WSS_DOCUMENTED_FOR_ALL_EIGHT_NETWORKS",
+      "archiveClaim": "EVM_MAIN_AND_TEST_AND_SOLANA_MAINNET_DOCUMENTED_ARCHIVE_NO_PRUNING;_SOLANA_DEVNET_DOCUMENTED_NO_ARCHIVE_AND_6578505_SLOT_PRUNING",
+      "rateModel": "API_CREDITS_BY_CHAIN_AND_METHOD_PLUS_REQUESTS_PER_SECOND",
+      "publishedFreeOffer": "ONE_MONTH_FREE_TRIAL_10M_CREDITS_15_RPS_NO_OVERAGE_NO_CARD",
+      "publishedPaidMinimum": "BUILD_ADVERTISED_34_USD_PER_MONTH_BILLED_ANNUALLY_OR_49_USD_MONTHLY_80M_CREDITS_50_RPS_AND_0_62_USD_PER_ADDITIONAL_MILLION_CREDITS;_0_43_USD_PER_MILLION_IS_THE_ADVERTISED_EFFECTIVE_INCLUDED_RATE",
+      "publishedSla": "BUILD_ACCELERATE_AND_SCALE_LIST_SUPPORT_RESPONSE_SLAS_NOT_UPTIME;_CONTRACTUAL_99_99_PERCENT_UPTIME_IS_ENTERPRISE_ORDER_SPECIFIC",
+      "geographicBehavior": "GLOBAL_MULTI_PROVIDER_NETWORK_USES_SOURCE_IP_GEOLOCATION_AND_DYNAMIC_DNS_TO_NEAREST_EDGE;_EXACT_LOCATIONS_CHANGE_AND_ARE_NOT_DISCLOSED",
+      "securityAndRetention": "SOC_1_TYPE_2_SOC_2_TYPE_2_AND_ISO_27001_CLAIMED;_ENTERPRISE_ENDPOINT_LOGS_ADVERTISE_UP_TO_14_DAYS;_PRIVACY_POLICY_SAYS_PERSONAL_INFORMATION_GENERALLY_SEVEN_YEARS",
+      "approvedPlan": null,
+      "approvedSla": null,
+      "approvedRegion": null,
+      "approvedCostUsd": null
+    }
+  ],
+  "commercialResearch": {
+    "observedOn": "2026-08-22",
+    "evidenceMaxAgeDays": 30,
+    "recheckRequiredBeforeApproval": true,
+    "currency": "USD",
+    "taxesEgressBandwidthAddOnsAndSupportFeesIncluded": false,
+    "forecastApproved": false,
+    "pricingApproved": false,
+    "ambiguities": [
+      "ALCHEMY_PRICING_DOC_CONFLICTS_BETWEEN_500_AND_1000_FREE_CUPS",
+      "ALCHEMY_THROUGHPUT_DOC_SAYS_ACCOUNT_LEVEL_WHILE_PRICING_DOC_SAYS_PER_APPLICATION",
+      "ALCHEMY_METHOD_MIX_WEBSOCKET_BYTES_ARCHIVE_DEPTH_AND_RETRY_VOLUME_NOT_MEASURED",
+      "QUICKNODE_FREE_IS_A_ONE_MONTH_TRIAL_NOT_A_PERMANENT_PRODUCTION_TIER",
+      "QUICKNODE_ADVERTISED_BUILD_DISCOUNT_AND_MONTHLY_CHECKOUT_TOTAL_REQUIRE_ACCOUNT_CONFIRMATION",
+      "QUICKNODE_METHOD_CREDIT_MULTIPLIERS_WEBSOCKET_VOLUME_ARCHIVE_DEPTH_AND_OVERAGE_CONTROLS_NOT_MEASURED",
+      "BOTH_PROVIDERS_REQUIRE_CONTRACT_REVIEW_FOR_UPTIME_SERVICE_CREDITS_AND_EXCLUSIONS",
+      "TAX_DATA_EGRESS_SUPPORT_ADD_ON_AND_CURRENCY_TERMS_ARE_NOT_APPROVED"
+    ]
+  },
+  "sourceEvidence": [
+    {
+      "id": "ALCHEMY_CHAIN_SUPPORT",
+      "provider": "ALCHEMY",
+      "topic": "NETWORKS_AND_HTTPS",
+      "url": "https://www.alchemy.com/docs/reference/node-supported-chains",
+      "observedFact": "Lists Ethereum mainnet and Sepolia, Base mainnet and Sepolia, Arbitrum mainnet and Sepolia, and Solana mainnet and Devnet Chain API networks."
+    },
+    {
+      "id": "ALCHEMY_FEATURE_SUPPORT",
+      "provider": "ALCHEMY",
+      "topic": "CHAIN_FEATURES",
+      "url": "https://www.alchemy.com/docs/reference/feature-support-by-chain",
+      "observedFact": "Documents chain-dependent Node API and WebSocket feature support; exact method parity remains a live gate."
+    },
+    {
+      "id": "ALCHEMY_ETHEREUM_RPC",
+      "provider": "ALCHEMY",
+      "topic": "ETHEREUM_TRANSPORT_AND_ARCHIVE",
+      "url": "https://www.alchemy.com/rpc/ethereum",
+      "observedFact": "Publishes Ethereum mainnet private HTTPS and WSS access and advertises archive data; Sepolia is an available network."
+    },
+    {
+      "id": "ALCHEMY_BASE_RPC",
+      "provider": "ALCHEMY",
+      "topic": "BASE_TRANSPORT_AND_ARCHIVE",
+      "url": "https://www.alchemy.com/rpc/base",
+      "observedFact": "Publishes Base mainnet private HTTPS and WSS access and advertises archive data; Sepolia is an available network."
+    },
+    {
+      "id": "ALCHEMY_ARBITRUM_RPC",
+      "provider": "ALCHEMY",
+      "topic": "ARBITRUM_TRANSPORT_AND_ARCHIVE",
+      "url": "https://www.alchemy.com/rpc/arbitrum",
+      "observedFact": "Publishes Arbitrum mainnet private HTTPS and WSS access and advertises archive data; Sepolia is an available network."
+    },
+    {
+      "id": "ALCHEMY_SOLANA_RPC",
+      "provider": "ALCHEMY",
+      "topic": "SOLANA_TRANSPORT_AND_ARCHIVE",
+      "url": "https://www.alchemy.com/rpc/solana",
+      "observedFact": "Publishes Solana mainnet private HTTPS and WSS access and advertises archive data; Devnet is an available network."
+    },
+    {
+      "id": "ALCHEMY_SUBSCRIPTIONS",
+      "provider": "ALCHEMY",
+      "topic": "WEBSOCKET_SUBSCRIPTIONS",
+      "url": "https://www.alchemy.com/docs/reference/subscription-api",
+      "observedFact": "Documents WebSocket subscription behavior and limits for EVM Chain APIs."
+    },
+    {
+      "id": "ALCHEMY_SOLANA_SUBSCRIPTIONS",
+      "provider": "ALCHEMY",
+      "topic": "SOLANA_WEBSOCKET_SUBSCRIPTIONS",
+      "url": "https://www.alchemy.com/docs/reference/solana-subscription-api-endpoints",
+      "observedFact": "Documents standard Solana WebSocket subscription methods."
+    },
+    {
+      "id": "ALCHEMY_PRICING",
+      "provider": "ALCHEMY",
+      "topic": "PRICING_AND_PLANS",
+      "url": "https://www.alchemy.com/pricing",
+      "observedFact": "Advertises Free, pay-as-you-go, and Enterprise plan quantities; no plan was selected."
+    },
+    {
+      "id": "ALCHEMY_PRICING_DOCS",
+      "provider": "ALCHEMY",
+      "topic": "PRICING_FEATURES_AND_AMBIGUITY",
+      "url": "https://www.alchemy.com/docs/reference/pricing-plans",
+      "observedFact": "Documents CUs, CUPS, archive access, and Enterprise-only custom SLAs, but contains a conflicting Free CUPS figure."
+    },
+    {
+      "id": "ALCHEMY_COMPUTE_COSTS",
+      "provider": "ALCHEMY",
+      "topic": "METHOD_AND_WEBSOCKET_METERING",
+      "url": "https://www.alchemy.com/docs/reference/compute-unit-costs",
+      "observedFact": "Assigns method-specific CUs and meters WebSocket traffic by response bytes."
+    },
+    {
+      "id": "ALCHEMY_THROUGHPUT",
+      "provider": "ALCHEMY",
+      "topic": "RATE_LIMITS",
+      "url": "https://www.alchemy.com/docs/reference/throughput",
+      "observedFact": "Documents account-level rolling throughput and HTTP or WebSocket 429 behavior."
+    },
+    {
+      "id": "ALCHEMY_SLA",
+      "provider": "ALCHEMY",
+      "topic": "SERVICE_LEVEL_TERMS",
+      "url": "https://legal.alchemy.com/",
+      "observedFact": "Published service commitment language applies only when service levels are bought in an Order Form and excludes test environments and underlying-chain failures."
+    },
+    {
+      "id": "ALCHEMY_ROUTING",
+      "provider": "ALCHEMY",
+      "topic": "GEOGRAPHY_AND_FAILOVER",
+      "url": "https://www.alchemy.com/blog/cortex-router-fastest-healthy-node",
+      "observedFact": "Describes nearest healthy edge routing and node or region rerouting for shared traffic as a product claim, not an approved SLA."
+    },
+    {
+      "id": "ALCHEMY_STATUS",
+      "provider": "ALCHEMY",
+      "topic": "OUTAGES",
+      "url": "https://status.alchemy.com/",
+      "observedFact": "Publishes chain and regional components, incidents, and subscription channels; status remains informational."
+    },
+    {
+      "id": "ALCHEMY_REQUEST_LOGS",
+      "provider": "ALCHEMY",
+      "topic": "LOG_CONTENT_AND_RETENTION",
+      "url": "https://www.alchemy.com/docs/alchemy-request-logs",
+      "observedFact": "Says request payloads and responses are dashboard-visible and logs are available for up to 10 days."
+    },
+    {
+      "id": "ALCHEMY_SECURITY",
+      "provider": "ALCHEMY",
+      "topic": "SECURITY",
+      "url": "https://www.alchemy.com/security",
+      "observedFact": "Publishes transport, DDoS, testing, and security-program claims; detailed Trust Center evidence requires access and review."
+    },
+    {
+      "id": "ALCHEMY_DATA_APIS",
+      "provider": "ALCHEMY",
+      "topic": "MANAGED_INDEXING_EXCLUSION",
+      "url": "https://www.alchemy.com/docs/data",
+      "observedFact": "Describes managed indexed and enriched data products that this decision explicitly excludes from runtime scope."
+    },
+    {
+      "id": "QUICKNODE_ETHEREUM_RPC",
+      "provider": "QUICKNODE",
+      "topic": "ETHEREUM_NETWORK_TRANSPORT_AND_ARCHIVE",
+      "url": "https://www.quicknode.com/docs/ethereum",
+      "observedFact": "Documents Ethereum mainnet and Sepolia with HTTP, WSS, archive yes, and no pruning."
+    },
+    {
+      "id": "QUICKNODE_BASE_RPC",
+      "provider": "QUICKNODE",
+      "topic": "BASE_NETWORK_TRANSPORT_AND_ARCHIVE",
+      "url": "https://www.quicknode.com/docs/base",
+      "observedFact": "Documents Base mainnet and Sepolia with HTTP, WSS, archive yes, and no pruning."
+    },
+    {
+      "id": "QUICKNODE_ARBITRUM_RPC",
+      "provider": "QUICKNODE",
+      "topic": "ARBITRUM_NETWORK_TRANSPORT_AND_ARCHIVE",
+      "url": "https://www.quicknode.com/docs/arbitrum",
+      "observedFact": "Documents Arbitrum mainnet and Sepolia with HTTP, WSS, archive yes, and no pruning."
+    },
+    {
+      "id": "QUICKNODE_SOLANA_RPC",
+      "provider": "QUICKNODE",
+      "topic": "SOLANA_NETWORK_TRANSPORT_AND_ARCHIVE",
+      "url": "https://www.quicknode.com/docs/solana",
+      "observedFact": "Documents Solana mainnet-beta and Devnet with HTTP and WSS; mainnet has archive with no pruning while Devnet is not archive and is pruned at 6578505 slots."
+    },
+    {
+      "id": "QUICKNODE_ARCHIVE_MATRIX",
+      "provider": "QUICKNODE",
+      "topic": "ARCHIVE_AND_PRUNING",
+      "url": "https://www.quicknode.com/docs/platform/supported-chains-node-types",
+      "observedFact": "Publishes the cross-chain archive and pruning matrix used for the candidate fallback claims."
+    },
+    {
+      "id": "QUICKNODE_PRICING",
+      "provider": "QUICKNODE",
+      "topic": "PRICING_RATE_LIMITS_AND_SLA",
+      "url": "https://www.quicknode.com/pricing",
+      "observedFact": "Advertises the one-month Free trial and paid plan credits, RPS, support response targets, and Enterprise contractual uptime; no plan was selected."
+    },
+    {
+      "id": "QUICKNODE_API_CREDITS",
+      "provider": "QUICKNODE",
+      "topic": "METERING",
+      "url": "https://www.quicknode.com/api-credits",
+      "observedFact": "Documents chain and method multipliers: the listed standard EVM chains use 20 credits and Solana uses 30 before method exceptions."
+    },
+    {
+      "id": "QUICKNODE_GEOGRAPHY",
+      "provider": "QUICKNODE",
+      "topic": "GEOGRAPHY_AND_ROUTING",
+      "url": "https://support.quicknode.com/articles/5948433326-where-are-quicknode-servers-located",
+      "observedFact": "Says source-IP geolocation and dynamic DNS route to a nearest edge on a multi-provider global network and exact locations may change."
+    },
+    {
+      "id": "QUICKNODE_STATUS",
+      "provider": "QUICKNODE",
+      "topic": "OUTAGES",
+      "url": "https://status.quicknode.com/",
+      "observedFact": "Publishes component incidents and email or SMS subscriptions; status remains informational."
+    },
+    {
+      "id": "QUICKNODE_SECURITY",
+      "provider": "QUICKNODE",
+      "topic": "SECURITY",
+      "url": "https://www.quicknode.com/security",
+      "observedFact": "Claims SOC 1 Type 2, SOC 2 Type 2, ISO 27001, AES-256 at rest, TLS in transit, DDoS controls, testing, redundancy, and BCP or DR."
+    },
+    {
+      "id": "QUICKNODE_PRIVACY",
+      "provider": "QUICKNODE",
+      "topic": "PRIVACY_AND_RETENTION",
+      "url": "https://www.quicknode.com/privacy",
+      "observedFact": "Says personal information is generally retained for seven years; RPC payload classification, residency, and deletion terms require contract review."
+    },
+    {
+      "id": "QUICKNODE_TERMS",
+      "provider": "QUICKNODE",
+      "topic": "COMMERCIAL_AND_WARRANTY_TERMS",
+      "url": "https://www.quicknode.com/terms",
+      "observedFact": "Provides usage, overage, rate-limit, as-is, availability, and geographic restriction terms; an Enterprise Order Form would require separate review."
+    },
+    {
+      "id": "PROTOCOL_ETHEREUM_JSON_RPC_FINALITY",
+      "provider": "PROTOCOL",
+      "topic": "ETHEREUM_METHODS_AND_FINALITY_TAGS",
+      "url": "https://ethereum.org/developers/docs/apis/json-rpc/",
+      "observedFact": "Defines standard Ethereum JSON-RPC methods and distinguishes latest proposed, safe, and finalized block tags."
+    },
+    {
+      "id": "PROTOCOL_BASE_FINALITY",
+      "provider": "PROTOCOL",
+      "topic": "BASE_FINALITY_AND_L1_SETTLEMENT",
+      "url": "https://docs.base.org/base-chain/network-information/transaction-finality",
+      "observedFact": "Describes sequencer inclusion, L1 batch inclusion, L1 batch finality, reorg considerations, and separate withdrawal finality."
+    },
+    {
+      "id": "PROTOCOL_ARBITRUM_FINALITY_REORGS",
+      "provider": "PROTOCOL",
+      "topic": "ARBITRUM_FINALITY_REORG_AND_INDEXER_POLICY",
+      "url": "https://docs.arbitrum.io/how-arbitrum-works/reference/finality-and-reorgs",
+      "observedFact": "Defines latest, safe, and finalized confirmation levels; requires hash and parentHash continuity plus common-ancestor rewind; recommends finalized for financial credit. Candidate provider parity remains blocked pending live proof."
+    },
+    {
+      "id": "PROTOCOL_SOLANA_RPC_COMMITMENT",
+      "provider": "PROTOCOL",
+      "topic": "SOLANA_METHODS_AND_COMMITMENT",
+      "url": "https://solana.com/docs/rpc",
+      "observedFact": "Defines HTTP and WebSocket RPC and distinguishes processed, confirmed, and finalized commitment levels."
+    },
+    {
+      "id": "PROTOCOL_SOLANA_KNOWN_GENESIS_HASHES",
+      "provider": "PROTOCOL",
+      "topic": "SOLANA_FULL_CLUSTER_IDENTITY",
+      "url": "https://github.com/solana-labs/solana/blob/master/sdk/src/genesis_config.rs",
+      "observedFact": "Pins the known full mainnet-beta and Devnet genesis hashes; the KAN-61 CAIP reference is the first 32 base58 characters, while connector identity validation requires the entire returned hash."
+    },
+    {
+      "id": "STANDARD_SOLANA_CAIP2_DERIVATION",
+      "provider": "STANDARD",
+      "topic": "SOLANA_CAIP_REFERENCE_DERIVATION",
+      "url": "https://namespaces.chainagnostic.org/solana/caip2",
+      "observedFact": "Defines a Solana CAIP-2 reference as the first 32 characters of the full 44-character base58 genesis hash and publishes the mainnet-beta and Devnet examples used by KAN-61."
+    }
+  ],
+  "undocumentedOrUnverified": [
+    "EXACT_PRIMARY_AND_FALLBACK_ENDPOINT_HOSTNAMES",
+    "ACCOUNT_OR_PROJECT_BOUND_RATE_LIMITS_FOR_THE_REQUIRED_METHOD_MIX",
+    "WSS_CONNECTION_SUBSCRIPTION_MESSAGE_AND_BYTE_LIMITS_FOR_EACH_NETWORK",
+    "ARCHIVE_START_HEIGHT_OR_SLOT_AND_HISTORICAL_METHOD_PARITY_FOR_EACH_NETWORK",
+    "ETHEREUM_BASE_AND_ARBITRUM_SAFE_FINALIZED_TAG_SEMANTICS_ACROSS_BOTH_PROVIDERS",
+    "BASE_AND_ARBITRUM_L1_ORIGIN_SETTLEMENT_AND_SEQUENCER_OUTAGE_BEHAVIOR",
+    "SOLANA_COMMITMENT_ROOT_REORG_AND_SKIPPED_SLOT_PARITY_ACROSS_BOTH_PROVIDERS",
+    "CROSS_PROVIDER_HEAD_SKEW_DUPLICATE_LOG_ORDERING_AND_FAILBACK_BEHAVIOR",
+    "EXACT_DATA_RESIDENCY_SUBPROCESSORS_RPC_PAYLOAD_CLASSIFICATION_AND_DELETION",
+    "SIGNED_SLA_SERVICE_CREDITS_EXCLUSIONS_SUPPORT_AND_INCIDENT_ESCALATION",
+    "MONTHLY_REQUEST_WEBSOCKET_RETRY_ARCHIVE_EGRESS_TAX_AND_SUPPORT_COST",
+    "INDEPENDENCE_OF_CLOUD_NETWORK_DNS_AND_UPSTREAM_NODE_FAILURE_DOMAINS"
+  ],
+  "zeroCostEvidence": {
+    "method": "OFFICIAL_DOCUMENTATION_ONLY_LOCAL_FILE_AUTHORING",
+    "providerAccountsCreated": 0,
+    "trialsStarted": 0,
+    "paymentMethodsAdded": 0,
+    "providerEndpointsCreated": 0,
+    "apiKeysIssued": 0,
+    "rpcRequestsSent": 0,
+    "webSocketConnectionsOpened": 0,
+    "cloudResourcesCreated": 0,
+    "paidServicesActivated": 0,
+    "costIncurredUsd": "0.00",
+    "liveEvidenceStatus": "NOT_RUN_PENDING_AUTHORIZATION"
+  }
+}

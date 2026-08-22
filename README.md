@@ -271,6 +271,18 @@ gate.
   registry version and fingerprint. Connector/RPC provenance remains gated to
   the later IDX provider and indexing work documented in
   [`docs/KAN-61.md`](docs/KAN-61.md).
+- KAN-62 proposes Alchemy as primary and QuickNode as a distinct-provider
+  fallback candidate for provider-neutral, standard-protocol, read-only RPC
+  across all eight KAN-61 networks; failure-domain independence remains pending
+  live proof. It approves no provider, plan, account, endpoint, credential,
+  Region, SLA, cost, runtime, or egress. See the
+  [human decision packet](docs/KAN-62.md),
+  [machine record](docs/rpc-indexing/kan-62-provider-decision.json), and
+  [SHA-256 sidecar](docs/rpc-indexing/kan-62-provider-decision.sha256). The
+  [provider-neutral source ADR](docs/adr/0004-rpc-indexing-source-strategy.md)
+  and
+  [fail-closed observation policy](apps/api/src/blockchain/domain/chain-observation-policy.ts)
+  define the inactive local enforcement contract.
 - `apps/api/src/infrastructure/observability` owns KAN-52's provider-neutral,
   low-cardinality metrics and server-authoritative correlation-linked spans.
   The optional environment dashboard remains disabled by default; local
