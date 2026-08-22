@@ -1,6 +1,6 @@
 # ADR 0001: Wallet connection SDK strategy
 
-- Status: Proposed; restricted local harness implemented, interactive and public approvals pending
+- Status: Proposed; restricted local harness implemented, real-wallet execution not run, interactive and public approvals pending
 - Date: 2026-08-18
 - Jira: KAN-55
 - Decision owners: Wallet platform and security
@@ -22,6 +22,11 @@ This ADR records a proposed implementation direction. It becomes Accepted only
 after the real extension and mobile cases in the
 [manual validation runbook](../wallets/manual-validation-runbook.md) have been
 executed and the resulting evidence has been approved.
+
+The [KAN-227 consolidation packet](../wallets/KAN-227.md) is the authoritative
+cross-ticket view of KAN-225 desktop and KAN-226 mobile execution status. A
+`NOT_RUN`, blocked, or deferred row is not a Pass, and consolidation does not
+replace execution or independent approval.
 
 The version-bound threat model, preliminary finding register, rollback drill,
 network-observation template, and independent decision record are in the

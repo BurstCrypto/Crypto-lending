@@ -18,18 +18,25 @@ implement the wallet adapters or validation harness.
 
 ## Exact reviewed scope
 
-| Item                         | Value                                                            |
-| ---------------------------- | ---------------------------------------------------------------- |
-| Implementation commit        | 01f7c63a2662734aaf581fd1c2641b85f459fd8b                         |
-| Package-lock SHA-256         | D723EC5710968AE94663CD2AE3CB107F11349281E3DC6DA580246B2BD71473B9 |
-| SPDX snapshot                | ../license-review/lock-review-snapshot.json                      |
-| Threat-model revision/commit | Pending                                                          |
-| Desktop evidence             | Pending                                                          |
-| Mobile evidence              | Pending                                                          |
-| Network observation          | Pending                                                          |
-| Rollback drill               | Pending                                                          |
-| HTTPS/access smoke           | Pending                                                          |
-| Allowed environments         | Pending                                                          |
+| Item                          | Value                                                            |
+| ----------------------------- | ---------------------------------------------------------------- |
+| Packet-preparation base       | d0408a2d9727b434734a4add52598a5886832e61                         |
+| Frozen wallet executable      | a0fc8527172cd29743c5d6475cf6264bbd6bde05                         |
+| `tools/wallet-lab` Git tree   | 58ba5e657d4584e60ce2db41aecf6d7a265d4351                         |
+| Package-lock SHA-256          | D723EC5710968AE94663CD2AE3CB107F11349281E3DC6DA580246B2BD71473B9 |
+| Package manifest SHA-256      | E778E4C862E919FE4BD3081EB61076E9EAB1C7144E6197DDE5A97FC35C554F06 |
+| SPDX snapshot                 | ../license-review/lock-review-snapshot.json                      |
+| KAN-227 consolidated register | ../review/kan-227-consolidated-review.json                       |
+| Final review-packet commit    | Pending                                                          |
+| Final review-packet tree      | Pending                                                          |
+| Final register SHA-256        | Pending                                                          |
+| Threat-model revision/commit  | Pending                                                          |
+| Desktop evidence              | Pending                                                          |
+| Mobile evidence               | Pending                                                          |
+| Network observation           | Pending                                                          |
+| Rollback drill                | Pending                                                          |
+| HTTPS/access smoke            | Pending                                                          |
+| Allowed environments          | Pending                                                          |
 
 ## Finding disposition
 
@@ -59,4 +66,7 @@ telemetry/storage behavior change, security incident, or decision expiry.
 State Approved, Conditional, or Rejected; the exact permitted environments and
 actions; prohibited use; open accepted risks; conditions; expiry; and required
 re-review. Name and date the reviewer. A Jira comment from the implementer is
-not an independent decision.
+not an independent decision. Mirror the final signed disposition and its exact
+scope binding in a future evidence-ingestion schema for the KAN-227 register.
+The current schema-v1 register is pending-only, and a `Pending` row must never
+be inferred as approval from this template.

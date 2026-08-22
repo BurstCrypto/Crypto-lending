@@ -1,22 +1,32 @@
 # KAN-222 wallet SDK license packet
 
-Status: **TWO-PERSON LOCAL/TESTNET EVALUATION AUTHORIZED; PUBLIC USE BLOCKED**
+Status: **RESTRICTED EVALUATION BOUNDARY RECORDED; INDEPENDENT LEGAL DECISION PENDING; PUBLIC USE BLOCKED**
 
 Snapshot date: 2026-08-19
+
+Consolidation audit date: 2026-08-22
 
 Coordinator: Trey
 Independent decision owner: qualified software/OSS licensing counsel
 
-This packet records the isolated `tools/wallet-lab` lock and deliberately
-excluded candidates. The project owner authorized at most two project-authorized
-people to evaluate it on a loopback-only application using dedicated test wallets
-and Ethereum Sepolia, Base Sepolia, or Solana devnet under current package and
-service terms. Expected vendor cost is $0.
+This packet records the isolated `tools/wallet-lab` lock, deliberately excluded
+candidates, and a coordinator assertion that a project-owner instruction limited
+evaluation to at most two project-authorized people on a loopback-only
+application using dedicated test wallets and Ethereum Sepolia, Base Sepolia, or
+Solana devnet under current package and service terms. Expected vendor cost is
+$0.
 
-That is an internal operational authorization and forecast, not legal advice,
-vendor classification, or permission for public, external-user, LAN/tunnel,
-mainnet, production, paid-tier, customer-data, or real-asset use. The harness has
-no transaction action and is excluded from root installs and product builds.
+The human [KAN-227 consolidation packet](../KAN-227.md) and its
+[machine-readable decision register](../review/kan-227-consolidated-review.json)
+are the cross-packet status records. No named independent legal/OSS signer,
+decision date, validity window, or public-use approval is present yet, so this
+coordinator record must not be presented as counsel or vendor sign-off.
+
+That is a coordinator-recorded operational boundary and forecast, not a named,
+dated legal decision, vendor classification, or permission for public,
+external-user, LAN/tunnel, mainnet, production, paid-tier, customer-data, or
+real-asset use. The harness has no transaction action and is excluded from root
+installs and product builds.
 
 ## WalletConnect/Reown activation
 
@@ -101,23 +111,37 @@ The final snapshot lock is lockfile version 3 with 515 package entries. SHA-256:
 `D723EC5710968AE94663CD2AE3CB107F11349281E3DC6DA580246B2BD71473B9`.
 Recalculate and re-review after any package operation.
 
-## Approval register
+`lock-review-snapshot.json` retains source commit
+`871adad4a6671bc1ea58e91893977ead738734ae`, the base at which that mechanical
+lock/SBOM snapshot was generated. It is not the current frozen wallet executable
+or an approval binding. KAN-227 separately binds the unchanged lock and evidence
+artifacts to executable commit `a0fc8527172cd29743c5d6475cf6264bbd6bde05`
+and wallet-lab Git tree `58ba5e657d4584e60ce2db41aecf6d7a265d4351`.
 
-| Decision                               | Status                                         | Evidence still required                                                                                                      |
-| -------------------------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| Two-person loopback/testnet evaluation | **AUTHORIZED — RESTRICTED**                    | Continuous compliance with this packet                                                                                       |
-| Native `@metamask/connect-evm`         | **BLOCKED / NOT INSTALLED**                    | 2.1.1 forces Ethereum-mainnet permission and uses a custom license; any return needs a new technical/security/legal decision |
-| MetaMask injected EIP-6963             | **LOCAL EVALUATION ONLY**                      | Public extension/platform, branding, privacy, security, and product review                                                   |
-| WalletConnect/Reown local activation   | **CONDITIONALLY AUTHORIZED**                   | Literal terms flag, valid project ID, current terms, two-person/testnet/loopback boundary, expected $0 tier                  |
-| WalletConnect provider public use      | **PENDING**                                    | Written commercial classification, usage treatment, exact license/notices, branding/network terms, fees, and expiry          |
-| Hard-installed AppKit 1.8.19           | **LOCAL TERMS-GATED / PUBLIC PENDING**         | Separate exact Reown license/notice copy, branding/network terms, classification, and transitive review                      |
-| Coinbase 4.3.7 license                 | **OBSERVED / PUBLIC PENDING**                  | Exact tarball contains Apache-2.0; counsel still reviews notices, transitives, service behavior, and distribution            |
-| Coinbase telemetry/privacy             | **PENDING**                                    | No verified off control; network inventory and privacy/security approval required                                            |
-| Direct/material package inventory      | **RECORDED**                                   | Candidate JSON, direct/material SPDX, lock digest, third-party notice                                                        |
-| Targeted custom-license inventory      | **MECHANICALLY RECONCILED / APPROVAL PENDING** | Independently classify both custom agreements, confirm vendor terms, and reconcile shipped artifacts                         |
-| Complete lock-derived SBOM             | **GENERATED / RECONCILIATION PENDING**         | Independently reconcile all runtime/build transitives, license conclusions, and shipped artifacts                            |
-| Scoped Axios 1.18.0 override           | **CLEAN AUDIT SNAPSHOT / RE-REVIEW REQUIRED**  | Revalidate every lock/config change and remove when upstream permits                                                         |
-| Public lending-product legal review    | **PENDING**                                    | Separate product-counsel disposition in the public-launch gate                                                               |
+## Decision status register
+
+| Decision                               | Status                                         | Evidence still required                                                                                                                           |
+| -------------------------------------- | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Two-person loopback/testnet evaluation | **COORDINATOR-RECORDED RESTRICTED BOUNDARY**   | Named authority, decision date, allowed actions, validity window, and continuous compliance                                                       |
+| Native `@metamask/connect-evm`         | **BLOCKED / NOT INSTALLED**                    | 2.1.1 forces Ethereum-mainnet permission and uses a custom license; any return needs a new technical/security/legal decision                      |
+| MetaMask injected EIP-6963             | **LOCAL EVALUATION ONLY**                      | Public extension/platform, branding, privacy, security, and product review                                                                        |
+| WalletConnect/Reown local activation   | **TERMS-GATED; INDEPENDENT AUTHORITY PENDING** | Literal terms flag, valid project ID, current terms, named accepting authority, two-person/testnet/loopback boundary, expected $0 tier            |
+| WalletConnect provider public use      | **PENDING**                                    | Written commercial classification, usage treatment, exact license/notices, branding/network terms, fees, and expiry                               |
+| Hard-installed AppKit 1.8.19           | **LOCAL TERMS-GATED / PUBLIC PENDING**         | Separate exact Reown license/notice copy, branding/network terms, classification, and transitive review                                           |
+| Coinbase 4.3.7 license                 | **OBSERVED / PUBLIC PENDING**                  | Exact tarball contains Apache-2.0; counsel still reviews notices, transitives, service behavior, and distribution                                 |
+| Coinbase telemetry/privacy             | **PENDING**                                    | No verified off control; network inventory and privacy/security approval required                                                                 |
+| Direct/material package inventory      | **RECORDED**                                   | Candidate JSON, direct/material SPDX, lock digest, third-party notice                                                                             |
+| Targeted custom-license inventory      | **MECHANICALLY RECONCILED / APPROVAL PENDING** | Independently classify both custom agreements, confirm vendor terms, and reconcile shipped artifacts                                              |
+| Complete lock-derived SBOM             | **GENERATED / RECONCILIATION PENDING**         | Independently reconcile all runtime/build transitives, license conclusions, and shipped artifacts                                                 |
+| Scoped Axios 1.18.0 override           | **CLEAN AUDIT SNAPSHOT / RE-REVIEW REQUIRED**  | Revalidate every lock/config change and remove when upstream permits                                                                              |
+| Public lending-product legal review    | **PENDING**                                    | Separate product-counsel disposition in the public-launch gate                                                                                    |
+| KAN-227 consolidated disposition       | **PENDING EXTERNAL REVIEW**                    | Exact candidate binding plus named Security, Legal/OSS, Privacy, Engineering, Product, and Release decisions/sign-offs and live-evidence outcomes |
+
+These rows are a coordinator status inventory, not signatures. Only an exact,
+dated, scoped decision with an accountable signer and expiry/re-review triggers
+may support an approved or conditional disposition in a future
+evidence-ingestion schema for the KAN-227 register. The current schema-v1
+register remains pending-only.
 
 ## Material findings
 

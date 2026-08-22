@@ -1,8 +1,9 @@
 # Wallet SDK compatibility matrix
 
 - Jira: KAN-55
-- Status: Proposed; restricted local harness implemented, interactive/public approval pending
+- Status: Proposed; restricted local harness implemented; KAN-227 independent decisions and interactive/public approval pending
 - Research snapshot: 2026-08-18
+- Consolidation audit: 2026-08-22
 - Target networks: Ethereum Sepolia, Base Sepolia, and Solana devnet
 
 ## Evidence legend
@@ -16,7 +17,11 @@
 
 No row is approved solely from documentation or mocks. The dated results sheet
 from the [manual validation runbook](manual-validation-runbook.md) is the
-approval record.
+execution record. Security, legal/OSS, engineering, product, privacy, and
+live-evidence dispositions are consolidated in the
+[KAN-227 packet](KAN-227.md) and its
+[machine-readable decision register](review/kan-227-consolidated-review.json);
+every row remains pending until the required independent records exist.
 
 ## Decision summary
 
@@ -274,13 +279,20 @@ count as the pending C18/CB07 real-wallet result.
 - Desktop QR, Android `adb reverse`, and iOS Simulator results are labeled as
   such and never counted as physical-iOS same-device/Phantom Browse coverage.
 
-## Approval record
+## Required decision record
+
+No row below is an approval. Each result requires an exact candidate binding,
+named accountable signer, decision date, conditions, validity/expiry, and
+re-review triggers in KAN-227.
 
 | Role        | Name    | Date | Result  | Evidence location |
 | ----------- | ------- | ---- | ------- | ----------------- |
-| Engineering | Pending | —    | Pending | —                 |
-| Security    | Pending | —    | Pending | —                 |
-| Product     | Pending | —    | Pending | —                 |
+| Engineering | Pending | N/A  | Pending | N/A               |
+| Security    | Pending | N/A  | Pending | N/A               |
+| Product     | Pending | N/A  | Pending | N/A               |
+| Legal/OSS   | Pending | N/A  | Pending | N/A               |
+| Privacy     | Pending | N/A  | Pending | N/A               |
+| Release     | Pending | N/A  | Pending | N/A               |
 
 This matrix remains Proposed until those approvals are recorded after live
 execution.

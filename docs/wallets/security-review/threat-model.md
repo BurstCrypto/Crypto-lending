@@ -6,8 +6,13 @@ disposition belong to the independent reviewer.
 ## Scope and security boundary
 
 The executable candidate is the isolated real-wallet harness under
-tools/wallet-lab at commit 01f7c63a2662734aaf581fd1c2641b85f459fd8b and lock
-SHA-256 D723EC5710968AE94663CD2AE3CB107F11349281E3DC6DA580246B2BD71473B9.
+`tools/wallet-lab` at commit
+`a0fc8527172cd29743c5d6475cf6264bbd6bde05`, Git tree
+`58ba5e657d4584e60ce2db41aecf6d7a265d4351`, and package-lock SHA-256
+`D723EC5710968AE94663CD2AE3CB107F11349281E3DC6DA580246B2BD71473B9`.
+The packet-preparation base, `d0408a2d9727b434734a4add52598a5886832e61`,
+contains that identical wallet-lab tree; it does not represent another runtime
+change and is not the eventual independent-review packet binding.
 It is an authenticated HTTPS loopback-only development server with no
 transaction action. It fails closed without a valid local certificate and
 server-only access credentials and may use dedicated test wallets on Sepolia,

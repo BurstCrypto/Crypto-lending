@@ -2,6 +2,11 @@
 
 Gate status: **OPEN — PUBLIC ACCESS IS NOT APPROVED**
 
+The human [KAN-227 consolidation packet](../KAN-227.md) and its
+[machine-readable decision register](../review/kan-227-consolidated-review.json)
+remain pending until the required independent signers, dates, validity windows,
+conditions, and exact candidate bindings are recorded.
+
 For this gate, public access includes an open test environment, public beta,
 unrestricted preview, production launch, or any environment where a person who
 is not an authorized tester can connect a wallet. Calling an environment
@@ -13,12 +18,15 @@ entities, jurisdictions, contracts, product flows, and launch date.
 
 ## Restricted evaluation carve-out
 
-The project owner has authorized a maximum of two project-authorized people to
-evaluate the exact isolated wallet-lab lock on a loopback-only application
-connected only to approved testnets under the current package and service terms.
+The coordinator packet records a project-owner instruction limiting evaluation
+to a maximum of two project-authorized people using the exact isolated wallet-lab
+lock on a loopback-only application connected only to approved testnets under
+the current package and service terms. The repository does not contain a named,
+dated, independently signed legal decision or validity window for that instruction.
 The harness has no transaction action and is excluded from root installs and
-product builds. The expected vendor tier is $0. This is an internal operational
-authorization and forecast, not a vendor classification or legal approval.
+product builds. The expected vendor tier is $0. This is a coordinator-recorded
+operational boundary and forecast, not a vendor classification or legal
+approval.
 
 WalletConnect is unavailable in that carve-out unless the evaluator explicitly
 sets `VITE_WALLETCONNECT_TERMS_ACCEPTED=true` and supplies a valid project ID.
@@ -38,6 +46,10 @@ approval.
 
 ## Wallet and software conditions
 
+- [ ] KAN-227 records exact candidate and artifact bindings plus named Security,
+      Legal/OSS, Privacy, Engineering, Product, and Release decisions/sign-offs,
+      live-evidence outcomes, decision dates, expiry/validity windows, conditions,
+      and re-review triggers.
 - [ ] Qualified software/OSS counsel approves the exact final direct and
       transitive lock, licenses, integrity/provenance evidence, allowed environments,
       notices, commercial conditions, decision expiry, and re-review triggers.
