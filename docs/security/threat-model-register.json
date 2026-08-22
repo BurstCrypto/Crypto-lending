@@ -1,0 +1,996 @@
+{
+  "schemaVersion": 1,
+  "ticket": "KAN-49",
+  "modelVersion": "2026-08-22",
+  "localStatus": "READY_FOR_INDEPENDENT_REVIEW",
+  "scope": "Crypto Lending repository application, wallet-validation, data-plane, operator, and supply-chain boundaries",
+  "independentApproval": {
+    "ticket": "KAN-235",
+    "status": "PENDING",
+    "selfApprovalForbidden": true,
+    "requiredDecision": ["APPROVED", "CONDITIONAL", "REJECTED"],
+    "requiredBinding": ["gitCommitSha", "gitTreeSha", "registerSha256"]
+  },
+  "classificationLevels": [
+    {
+      "name": "PUBLIC",
+      "rank": 0,
+      "handling": "May be intentionally disclosed, but integrity and provenance controls still apply."
+    },
+    {
+      "name": "INTERNAL",
+      "rank": 1,
+      "handling": "Limited to personnel and systems with an operational need; never assume public disclosure is harmless."
+    },
+    {
+      "name": "CONFIDENTIAL",
+      "rank": 2,
+      "handling": "Need-to-know access, encrypted transport and storage, bounded retention, and no unrestricted exports."
+    },
+    {
+      "name": "RESTRICTED",
+      "rank": 3,
+      "handling": "Customer, authentication, wallet, financial, or security-sensitive data with least-privilege access and explicit lifecycle approval."
+    },
+    {
+      "name": "PROHIBITED",
+      "rank": 4,
+      "handling": "Must never enter application persistence, logs, analytics, source control, Jira, or review evidence."
+    }
+  ],
+  "trustBoundaries": [
+    {
+      "id": "TB-01",
+      "name": "Public client to edge",
+      "source": "Untrusted browser or API client",
+      "destination": "HTTPS load balancer and web/API routes",
+      "data": ["HTTP requests", "cookies", "registration profile input"],
+      "evidence": [
+        "infra/aws/application-baseline.yaml",
+        "apps/api/src/authentication/http/authentication.controller.ts"
+      ]
+    },
+    {
+      "id": "TB-02",
+      "name": "Edge to application workloads",
+      "source": "Load balancer security group",
+      "destination": "API and web tasks",
+      "data": ["forwarded HTTP requests", "source-address metadata"],
+      "evidence": [
+        "infra/aws/application-workload-boundaries.yaml",
+        "apps/api/src/authentication/http/authentication-client-address.ts"
+      ]
+    },
+    {
+      "id": "TB-03",
+      "name": "API to state stores",
+      "source": "API runtime principal",
+      "destination": "PostgreSQL and health-only Redis boundary",
+      "data": ["profiles", "authentication state", "audit events", "financial commands"],
+      "evidence": [
+        "apps/api/src/infrastructure/database/migrations/0005-enforce-database-principal-boundaries.migration.ts",
+        "docs/KAN-233.md"
+      ]
+    },
+    {
+      "id": "TB-04",
+      "name": "Transactional outbox to worker",
+      "source": "Outbox-dispatcher workload reading PostgreSQL",
+      "destination": "SQS and DLQ; a future business consumer is not wired",
+      "data": ["immutable job envelope", "correlation metadata", "bounded failure codes"],
+      "evidence": ["docs/KAN-33.md", "docs/KAN-51.md"]
+    },
+    {
+      "id": "TB-05",
+      "name": "Application to managed identity provider",
+      "source": "Authentication service only if exact identity egress is later approved; currently disabled",
+      "destination": "Future pinned OIDC issuer, authorization, token, and JWKS endpoints",
+      "data": ["authorization code", "PKCE verifier", "ID token", "provider availability"],
+      "evidence": ["docs/KAN-37.md", "docs/adr/0002-controlled-external-egress.md"]
+    },
+    {
+      "id": "TB-06",
+      "name": "Browser to wallet and chain providers",
+      "source": "Restricted wallet-validation browser",
+      "destination": "Injected wallets, mobile wallets, relays, and testnet RPCs",
+      "data": ["wallet address", "pairing URI", "proof message", "signature", "chain metadata"],
+      "evidence": [
+        "docs/wallets/security-review/threat-model.md",
+        "tools/wallet-lab/SECURE_ACCESS.md"
+      ]
+    },
+    {
+      "id": "TB-07",
+      "name": "API to immutable ledger capability boundary",
+      "source": "Authenticated API domain service",
+      "destination": "Owner-controlled PostgreSQL ledger functions",
+      "data": ["sealed posting plan", "capability digest", "journal", "outbox event"],
+      "evidence": ["docs/KAN-41.md", "docs/KAN-43.md"]
+    },
+    {
+      "id": "TB-08",
+      "name": "Operator and cloud control plane",
+      "source": "Named release, security, migration, and operations roles",
+      "destination": "Infrastructure templates, secrets, KMS, database migration task, and deployment controls",
+      "data": ["deployment parameters", "secret references", "audit records", "resource changes"],
+      "evidence": ["docs/KAN-34.md", "docs/KAN-50.md", "docs/KAN-229.md"]
+    },
+    {
+      "id": "TB-09",
+      "name": "Repository and dependency supply chain",
+      "source": "Developers, package registries, GitHub, and build tooling",
+      "destination": "Source, lockfiles, images, workflows, and review artifacts",
+      "data": ["source code", "dependency metadata", "build output", "review evidence"],
+      "evidence": [
+        ".github/workflows/ci.yml",
+        "infra/security/validate-repository-secrets.mjs",
+        "docs/wallets/license-review/README.md"
+      ]
+    },
+    {
+      "id": "TB-10",
+      "name": "Chain observation to application indexing",
+      "source": "Future chain connector with immutable network configuration",
+      "destination": "Supported-asset normalization and future observation store",
+      "data": ["network identity", "contract or mint", "block and transaction observations"],
+      "evidence": ["docs/KAN-61.md"]
+    },
+    {
+      "id": "TB-11",
+      "name": "Customer and staff principals to future administrator surface",
+      "source": "Untrusted customer credential or authenticated support, operations, or administrator user",
+      "destination": "Separate administrator API namespace and case tooling, which are not implemented",
+      "data": [
+        "customer lookup selectors",
+        "masked profile and financial summaries",
+        "role and purpose",
+        "case history and operator actions"
+      ],
+      "evidence": ["apps/api/src/app.module.ts", "apps/api/src/accounts/auth/current-principal.ts"]
+    }
+  ],
+  "dataAssets": [
+    {
+      "id": "DATA-001",
+      "name": "Account profile contact and residency data",
+      "classification": "RESTRICTED",
+      "cia": { "confidentiality": "HIGH", "integrity": "HIGH", "availability": "MEDIUM" },
+      "stores": [
+        "Encrypted short-lived pre-authentication browser cookie during registration",
+        "PostgreSQL account_profiles"
+      ],
+      "retention": "PRE_AUTH_COOKIE_TTL; PROFILE_POLICY_PENDING_NO_AUTOMATIC_DELETE",
+      "logging": "NEVER",
+      "owner": "Privacy and Backend",
+      "evidence": [
+        "apps/api/src/authentication/domain/authentication.ts",
+        "apps/api/src/authentication/infrastructure/crypto/authentication-crypto.ts",
+        "apps/api/src/infrastructure/database/migrations/0004-create-accounts-and-profiles.migration.ts",
+        "apps/api/src/accounts/http/account-profile-privacy.interceptor.ts"
+      ]
+    },
+    {
+      "id": "DATA-002",
+      "name": "OIDC identity mapping and subject digest",
+      "classification": "RESTRICTED",
+      "cia": { "confidentiality": "HIGH", "integrity": "HIGH", "availability": "HIGH" },
+      "stores": ["PostgreSQL authentication_oidc_identities"],
+      "retention": "POLICY_PENDING_IDENTITY_MAPPING_RETAINED",
+      "logging": "NEVER_RAW_ISSUER_SUBJECT_OR_DIGEST",
+      "owner": "Identity and Security",
+      "evidence": [
+        "apps/api/src/infrastructure/database/migrations/0010-create-authentication-sessions.migration.ts",
+        "docs/KAN-37.md"
+      ]
+    },
+    {
+      "id": "DATA-003",
+      "name": "Authentication attempts, sessions, CSRF state, and replay evidence",
+      "classification": "RESTRICTED",
+      "cia": { "confidentiality": "HIGH", "integrity": "HIGH", "availability": "HIGH" },
+      "stores": [
+        "Browser host-only cookies",
+        "PostgreSQL authentication tables as versioned digests"
+      ],
+      "retention": "RAW_VALUES_EXPIRE_BY_TTL; DIGEST_AND_REPLAY_RETENTION_POLICY_PENDING",
+      "logging": "NEVER",
+      "owner": "Identity and Security",
+      "evidence": [
+        "apps/api/src/authentication/http/authentication-cookies.ts",
+        "apps/api/src/infrastructure/database/migrations/0010-create-authentication-sessions.migration.ts"
+      ]
+    },
+    {
+      "id": "DATA-004",
+      "name": "Wallet seed phrases, private keys, and production signing credentials",
+      "classification": "PROHIBITED",
+      "cia": { "confidentiality": "HIGH", "integrity": "HIGH", "availability": "HIGH" },
+      "stores": [],
+      "retention": "NEVER_COLLECT",
+      "logging": "NEVER",
+      "owner": "Wallet and Security",
+      "evidence": ["README.md", "docs/wallets/evidence/README.md"]
+    },
+    {
+      "id": "DATA-005",
+      "name": "Wallet addresses, public keys, pairing state, proof messages, and signatures",
+      "classification": "RESTRICTED",
+      "cia": { "confidentiality": "HIGH", "integrity": "HIGH", "availability": "MEDIUM" },
+      "stores": [
+        "Restricted browser memory and vendor-managed wallet storage",
+        "Sanitized wallet-lab evidence only"
+      ],
+      "retention": "RAW_PROOF_MEMORY_ONLY; SANITIZED_EVIDENCE_SESSION_OR_REVIEW_BOUND",
+      "logging": "NEVER_RAW",
+      "owner": "Wallet and Privacy",
+      "evidence": [
+        "docs/wallets/security-review/threat-model.md",
+        "tools/wallet-lab/src/evidence.ts"
+      ]
+    },
+    {
+      "id": "DATA-006",
+      "name": "Ledger plans, journals, postings, balances, fees, and valuations",
+      "classification": "RESTRICTED",
+      "cia": { "confidentiality": "HIGH", "integrity": "HIGH", "availability": "HIGH" },
+      "stores": ["Append-only PostgreSQL ledger tables"],
+      "retention": "FINANCIAL_RETENTION_POLICY_PENDING_NO_DELETION_PATH",
+      "logging": "NO_AMOUNTS_BALANCES_OR_POSTINGS",
+      "owner": "Ledger, Finance, and Security",
+      "evidence": [
+        "apps/api/src/infrastructure/database/migrations/0007-create-immutable-ledger.migration.ts",
+        "docs/adr/0003-immutable-ledger-accounting-model.md"
+      ]
+    },
+    {
+      "id": "DATA-007",
+      "name": "Ledger capability and idempotency material",
+      "classification": "RESTRICTED",
+      "cia": { "confidentiality": "HIGH", "integrity": "HIGH", "availability": "HIGH" },
+      "stores": ["Purpose-separated digests and immutable results in PostgreSQL"],
+      "retention": "RAW_CAPABILITY_NEVER_PERSISTED; DIGEST_AND_RESULT_POLICY_PENDING",
+      "logging": "NEVER_RAW",
+      "owner": "Ledger and Security",
+      "evidence": ["docs/KAN-41.md", "docs/KAN-43.md"]
+    },
+    {
+      "id": "DATA-008",
+      "name": "Account, authentication, and financial audit records",
+      "classification": "RESTRICTED",
+      "cia": { "confidentiality": "HIGH", "integrity": "HIGH", "availability": "HIGH" },
+      "stores": ["Append-only PostgreSQL audit and ledger tables"],
+      "retention": "LEGAL_FINANCIAL_RETENTION_POLICY_PENDING",
+      "logging": "REFERENCES_ONLY_UNDER_EVENT_ALLOWLIST",
+      "owner": "Security, Privacy, Finance, and Records",
+      "evidence": [
+        "apps/api/src/infrastructure/database/migrations/0004-create-accounts-and-profiles.migration.ts",
+        "apps/api/src/infrastructure/database/migrations/0007-create-immutable-ledger.migration.ts",
+        "apps/api/src/infrastructure/database/migrations/0008-create-ledger-lifecycle.migration.ts",
+        "apps/api/src/infrastructure/database/migrations/0010-create-authentication-sessions.migration.ts"
+      ]
+    },
+    {
+      "id": "DATA-009",
+      "name": "Structured operational logs and correlation identifiers",
+      "classification": "RESTRICTED",
+      "cia": { "confidentiality": "MEDIUM", "integrity": "HIGH", "availability": "MEDIUM" },
+      "stores": ["Designed CloudWatch API, web, and worker log groups"],
+      "retention": "14_DAYS_DEFAULT_ALLOWED_1_3_5_7_14_30_60_90",
+      "logging": "API_AND_WORKER_ALLOWLISTED_FIELDS_ONLY; WEB_FRAMEWORK_ERROR_PATH_PENDING",
+      "owner": "SRE and Security",
+      "evidence": ["docs/KAN-51.md", "infra/aws/application-baseline.yaml"]
+    },
+    {
+      "id": "DATA-010",
+      "name": "Transactional outbox envelopes and failure state",
+      "classification": "RESTRICTED",
+      "cia": { "confidentiality": "MEDIUM", "integrity": "HIGH", "availability": "HIGH" },
+      "stores": ["PostgreSQL job_outbox"],
+      "retention": "PUBLISHED_7_DAYS_DEFAULT; FAILED_30_DAYS_DEFAULT; PENDING_NO_EXPIRY_POLICY_PENDING",
+      "logging": "NO_PAYLOAD_OR_RAW_TRANSPORT_ERROR",
+      "owner": "Backend and SRE",
+      "evidence": [
+        "apps/api/src/infrastructure/outbox/outbox-dispatcher.options.ts",
+        "apps/api/src/infrastructure/outbox/job-outbox.repository.ts",
+        "docs/KAN-51.md"
+      ]
+    },
+    {
+      "id": "DATA-011",
+      "name": "SQS work messages and dead-letter records",
+      "classification": "RESTRICTED",
+      "cia": { "confidentiality": "MEDIUM", "integrity": "HIGH", "availability": "HIGH" },
+      "stores": ["SQS source queue", "SQS dead-letter queue"],
+      "retention": "SOURCE_4_DAYS; DEAD_LETTER_14_DAYS",
+      "logging": "NO_BODY_ATTRIBUTES_RECEIPT_HANDLE_OR_QUEUE_URL",
+      "owner": "SRE and Backend",
+      "evidence": ["infra/aws/sqs-foundation.yaml", "docs/KAN-33.md"]
+    },
+    {
+      "id": "DATA-012",
+      "name": "Rate-limit source pseudonyms and counters",
+      "classification": "RESTRICTED",
+      "cia": { "confidentiality": "HIGH", "integrity": "HIGH", "availability": "MEDIUM" },
+      "stores": ["PostgreSQL authentication_rate_limit_buckets as keyed digests"],
+      "retention": "CLEANUP_INDEX_PRESENT; DELETION_SCHEDULE_POLICY_PENDING",
+      "logging": "NO_RAW_IP_OR_DIGEST",
+      "owner": "Identity, Privacy, and SRE",
+      "evidence": [
+        "apps/api/src/infrastructure/database/migrations/0010-create-authentication-sessions.migration.ts",
+        "apps/api/src/authentication/http/authentication-client-address.ts"
+      ]
+    },
+    {
+      "id": "DATA-013",
+      "name": "Unauthorized copies of runtime credentials and cryptographic key material in business persistence, logs, or review evidence",
+      "classification": "PROHIBITED",
+      "cia": { "confidentiality": "HIGH", "integrity": "HIGH", "availability": "HIGH" },
+      "stores": [],
+      "retention": "NEVER_COLLECT",
+      "logging": "NEVER",
+      "owner": "Security and SRE",
+      "evidence": ["docs/KAN-50.md", "infra/security/validate-repository-secrets.mjs"]
+    },
+    {
+      "id": "DATA-014",
+      "name": "Supported chain, contract, mint, source, version, and fingerprint metadata",
+      "classification": "PUBLIC",
+      "cia": { "confidentiality": "LOW", "integrity": "HIGH", "availability": "HIGH" },
+      "stores": ["Version-controlled immutable registry snapshots"],
+      "retention": "APPEND_ONLY_VERSION_HISTORY",
+      "logging": "VERSION_AND_FINGERPRINT_ALLOWED; OBSERVED_WALLET_IDENTITY_NOT_ALLOWED",
+      "owner": "Blockchain and Security",
+      "evidence": ["docs/KAN-61.md", "apps/api/src/blockchain/domain/supported-asset-registry.ts"]
+    },
+    {
+      "id": "DATA-015",
+      "name": "Source, dependency, build, and review evidence",
+      "classification": "INTERNAL",
+      "cia": { "confidentiality": "MEDIUM", "integrity": "HIGH", "availability": "MEDIUM" },
+      "stores": ["Git repository", "Short-lived review artifacts"],
+      "retention": "VERSION_HISTORY; GENERATED_ARTIFACT_RETENTION_EXPLICIT_PER_WORKFLOW",
+      "logging": "NO_CREDENTIALS_CUSTOMER_DATA_OR_PRIVATE_PATHS",
+      "owner": "Release and Security",
+      "evidence": [".github/workflows/ci.yml", "docs/KAN-50.md"]
+    },
+    {
+      "id": "DATA-016",
+      "name": "Billing, deployment, and cleanup control records",
+      "classification": "INTERNAL",
+      "cia": { "confidentiality": "MEDIUM", "integrity": "HIGH", "availability": "MEDIUM" },
+      "stores": ["Reviewed repository records and operator evidence"],
+      "retention": "DECISION_AND_EXPIRY_BOUND; NO_SECRET_OR_PII_CONTENT",
+      "logging": "BOUNDED_IDENTIFIERS_AND_OUTCOMES_ONLY",
+      "owner": "Release, Finance, and SRE",
+      "evidence": ["docs/KAN-229.md", "infra/aws/billing-control-record.schema.json"]
+    }
+  ],
+  "secretInventory": [
+    {
+      "id": "KEY-001",
+      "name": "OIDC client authentication credential",
+      "classification": "RESTRICTED",
+      "consumers": ["API authentication workload"],
+      "injection": "Explicit runtime configuration from a separately authorized managed secret",
+      "storage": "Sensitive in-memory wrapper; never a usable repository default",
+      "rotation": "Provider-coordinated overlap and task replacement required",
+      "owner": "Identity and SRE",
+      "evidence": [
+        "apps/api/src/authentication/infrastructure/config/authentication.config.ts",
+        "docs/KAN-37.md"
+      ]
+    },
+    {
+      "id": "KEY-002",
+      "name": "OIDC identity HMAC key",
+      "classification": "RESTRICTED",
+      "consumers": ["API authentication workload"],
+      "injection": "Explicit runtime configuration from a separately authorized managed secret",
+      "storage": "Memory only; database stores versioned subject digests",
+      "rotation": "Blocked until a reviewed dual-read and rehash migration exists",
+      "owner": "Identity and Security",
+      "evidence": ["docs/KAN-37.md"]
+    },
+    {
+      "id": "KEY-003",
+      "name": "Pre-authentication seal, session, and CSRF keys",
+      "classification": "RESTRICTED",
+      "consumers": ["API authentication workload"],
+      "injection": "Explicit runtime configuration with key identifiers",
+      "storage": "Memory only; PostgreSQL stores keyed digests",
+      "rotation": "Requires reviewed overlap, replay, and revocation semantics",
+      "owner": "Identity and Security",
+      "evidence": [
+        "apps/api/src/authentication/infrastructure/crypto/authentication-crypto.ts",
+        "docs/KAN-37.md"
+      ]
+    },
+    {
+      "id": "KEY-004",
+      "name": "API, worker, and migration database credentials",
+      "classification": "RESTRICTED",
+      "consumers": ["API", "outbox worker", "migration task"],
+      "injection": "Workload-specific managed secret references with separate database LOGIN roles",
+      "storage": "Designed Secrets Manager resources; never source control or logs",
+      "rotation": "Inactive-slot installation, authentication, task replacement, and old-slot denial",
+      "owner": "Database and SRE",
+      "evidence": ["docs/KAN-50.md", "infra/aws/database-migration-task.yaml"]
+    },
+    {
+      "id": "KEY-005",
+      "name": "Redis ACL credentials",
+      "classification": "RESTRICTED",
+      "consumers": ["API health boundary", "future reviewed operator"],
+      "injection": "API-only managed secret reference; worker and migration reject Redis configuration",
+      "storage": "Designed managed secret plus Redis ACL digest; no plaintext repository value",
+      "rotation": "Inactive-slot regeneration and old-slot revocation procedure remains a deployment gate",
+      "owner": "SRE and Security",
+      "evidence": ["docs/KAN-233.md", "infra/redis/users.acl"]
+    },
+    {
+      "id": "KEY-006",
+      "name": "AWS workload credentials and KMS key authority",
+      "classification": "RESTRICTED",
+      "consumers": ["ECS task roles", "migration execution role", "deployment operators"],
+      "injection": "Ephemeral task-role credentials; KMS permissions constrained by service and resource",
+      "storage": "No static AWS keys in application configuration or CI",
+      "rotation": "Platform-managed credentials; KMS lifecycle requires explicit retention and deletion approval",
+      "owner": "Cloud Security and SRE",
+      "evidence": [
+        "infra/aws/application-workload-boundaries.yaml",
+        "infra/egress/validate-no-cloud-ci.test.mjs"
+      ]
+    },
+    {
+      "id": "KEY-007",
+      "name": "TLS private keys",
+      "classification": "RESTRICTED",
+      "consumers": [
+        "Managed edge certificate service",
+        "restricted local wallet-validation server"
+      ],
+      "injection": "Managed certificate service or absolute operator-provided local path",
+      "storage": "Managed certificate-provider custody, or an ignored operator-restricted local PEM loaded into wallet-server memory; never committed or retained in evidence",
+      "rotation": "Managed certificate renewal or explicit local test-certificate replacement",
+      "owner": "SRE and Wallet Test Lead",
+      "evidence": ["docs/KAN-230.md", "tools/wallet-lab/SECURE_ACCESS.md"]
+    },
+    {
+      "id": "KEY-008",
+      "name": "Wallet-validation access credential",
+      "classification": "RESTRICTED",
+      "consumers": ["Restricted loopback wallet-validation server"],
+      "injection": "Server-only operator environment",
+      "storage": "Ignored operator environment and wallet-server memory; only a derived host-only session cookie reaches the browser",
+      "rotation": "Replace before each authorized execution and close the isolated browser profile",
+      "owner": "Wallet Test Lead",
+      "evidence": ["tools/wallet-lab/SECURE_ACCESS.md", "tools/wallet-lab/server/secure-access.ts"]
+    },
+    {
+      "id": "KEY-009",
+      "name": "RDS bootstrap or master database credential",
+      "classification": "RESTRICTED",
+      "consumers": ["Separately authorized database bootstrap operator only"],
+      "injection": "Managed database credential boundary; explicitly forbidden from API, worker, web, and migration tasks",
+      "storage": "Designed retained Secrets Manager resource and database verifier; never application configuration, logs, or review evidence",
+      "rotation": "Separately authorized database bootstrap rotation with runtime-login continuity and old-credential denial evidence",
+      "owner": "Database and SRE",
+      "evidence": ["docs/KAN-34.md", "docs/KAN-50.md"]
+    },
+    {
+      "id": "KEY-010",
+      "name": "Ledger capability and raw idempotency bearer material",
+      "classification": "RESTRICTED",
+      "consumers": ["Trusted future capability issuer", "Ledger application boundary"],
+      "injection": "Purpose-specific 256-bit capability and caller-supplied idempotency value cross only the fixed ledger command boundary",
+      "storage": "Raw values are transient process and PostgreSQL parameter material; only purpose-separated capability and idempotency digests persist",
+      "rotation": "Capability is one-use and expires; issuer custody, revocation, entropy policy, and idempotency lifecycle require independent review",
+      "owner": "Ledger and Security",
+      "evidence": ["docs/KAN-41.md", "docs/KAN-43.md"]
+    },
+    {
+      "id": "KEY-011",
+      "name": "Jira API credential",
+      "classification": "RESTRICTED",
+      "consumers": ["Named local Jira operator scripts"],
+      "injection": "Ignored operator-local Jira environment file or process environment",
+      "storage": "Atlassian custody and ignored local operator storage; never repository, logs, ticket content, or review artifacts",
+      "rotation": "Revoke and replace through Atlassian after exposure, operator change, or policy expiry",
+      "owner": "Release and Security",
+      "evidence": [".jira.env.example", "README.md"]
+    },
+    {
+      "id": "KEY-012",
+      "name": "Ephemeral GitHub Actions repository token",
+      "classification": "RESTRICTED",
+      "consumers": ["GitHub-hosted workflow checkout and repository read boundary"],
+      "injection": "GitHub-managed per-job token with workflow-level contents read permission",
+      "storage": "GitHub runner memory only; checkout persistence is disabled and no provider or cloud credential is configured",
+      "rotation": "GitHub-managed per-job issuance and expiry; repository permissions and workflow changes require review",
+      "owner": "Release and Security",
+      "evidence": [".github/workflows/ci.yml"]
+    }
+  ],
+  "threats": [
+    {
+      "id": "THR-ACCOUNT-001",
+      "domain": "ACCOUNT",
+      "stride": ["SPOOFING", "ELEVATION_OF_PRIVILEGE"],
+      "scenario": "An attacker swaps an OIDC callback, replays state, or links an identity by mutable profile data to take over another account.",
+      "risk": "HIGH",
+      "boundaryIds": ["TB-01", "TB-05"],
+      "assetIds": ["DATA-001", "DATA-002", "DATA-003"],
+      "response": "MITIGATE",
+      "mitigations": [
+        "Authorization Code plus PKCE, nonce, state, and a distinct browser-binding cookie",
+        "One-use atomic login attempts and exact case-sensitive issuer plus subject-digest identity mapping",
+        "Profile email is never an identity-linking key"
+      ],
+      "owner": "Identity and Backend",
+      "status": "MITIGATED_LOCAL",
+      "evidence": ["docs/KAN-37.md", "apps/api/test/authentication.e2e-spec.ts"],
+      "residualRisk": "Managed-provider behavior, recovery policy, MFA, and independent verification are not proven locally.",
+      "followUp": "KAN-235 independent verification and managed-provider acceptance"
+    },
+    {
+      "id": "THR-ACCOUNT-002",
+      "domain": "ACCOUNT",
+      "stride": ["SPOOFING", "INFORMATION_DISCLOSURE", "DENIAL_OF_SERVICE"],
+      "scenario": "A stolen, replayed, cross-site, or ambiguously parsed session credential is used to impersonate a customer or force repeated login.",
+      "risk": "HIGH",
+      "boundaryIds": ["TB-01", "TB-03"],
+      "assetIds": ["DATA-003", "DATA-012"],
+      "response": "MITIGATE",
+      "mitigations": [
+        "Host-only Secure HttpOnly cookies, exact Origin and session-bound CSRF validation",
+        "Hashed server-side credentials, dedicated rotation endpoint, predecessor replay detection, and family revocation",
+        "Trusted single-proxy source-address policy and fixed-window rate limits"
+      ],
+      "owner": "Identity and Security",
+      "status": "MITIGATED_LOCAL",
+      "evidence": ["docs/KAN-37.md"],
+      "residualRisk": "Deployed proxy ranges, edge controls, and distributed abuse behavior require environment evidence.",
+      "followUp": "KAN-235 deployment and abuse review"
+    },
+    {
+      "id": "THR-ACCOUNT-003",
+      "domain": "ACCOUNT",
+      "stride": ["INFORMATION_DISCLOSURE", "ELEVATION_OF_PRIVILEGE"],
+      "scenario": "A customer reads or updates another account profile, or private profile fields leak through cache, logs, or error responses.",
+      "risk": "HIGH",
+      "boundaryIds": ["TB-01", "TB-03"],
+      "assetIds": ["DATA-001", "DATA-008", "DATA-009"],
+      "response": "MITIGATE",
+      "mitigations": [
+        "Verified current-principal ownership rather than request-selected account identifiers",
+        "Self-only profile service and privacy interceptor",
+        "Structured logging field allowlist excludes contact and residency data"
+      ],
+      "owner": "Accounts and Privacy",
+      "status": "MITIGATED_LOCAL",
+      "evidence": ["docs/KAN-36.md", "docs/KAN-51.md"],
+      "residualRisk": "Independent authorization, cache, and privacy review has not been performed against a deployed candidate.",
+      "followUp": "KAN-235 independent BOLA and response-cache review"
+    },
+    {
+      "id": "THR-ACCOUNT-004",
+      "domain": "ACCOUNT",
+      "stride": ["TAMPERING", "DENIAL_OF_SERVICE"],
+      "scenario": "Rotating identity or cookie cryptographic material without overlap reinterprets identities, invalidates sessions, or permits duplicate accounts.",
+      "risk": "HIGH",
+      "boundaryIds": ["TB-03", "TB-08"],
+      "assetIds": ["DATA-002", "DATA-003"],
+      "response": "MITIGATE",
+      "mitigations": [
+        "Current digest schema version is pinned and key material is operationally immutable",
+        "Any rotation requires a reviewed dual-read, rehash, overlap, and revocation migration"
+      ],
+      "owner": "Identity, Database, and Security",
+      "status": "OPEN_EXTERNAL",
+      "evidence": ["docs/KAN-37.md"],
+      "residualRisk": "No safe identity-digest or session-key rotation mechanism exists; current key material must remain immutable.",
+      "followUp": "Identity key-ring and rotation design before production rotation"
+    },
+    {
+      "id": "THR-WALLET-001",
+      "domain": "WALLET",
+      "stride": ["SPOOFING", "TAMPERING"],
+      "scenario": "A malicious wallet or provider spoofs brand, account, chain, network, or session scope and is treated as trusted ownership evidence.",
+      "risk": "HIGH",
+      "boundaryIds": ["TB-06", "TB-10"],
+      "assetIds": ["DATA-005", "DATA-014"],
+      "response": "MITIGATE",
+      "mitigations": [
+        "Explicit connector choice, chain-qualified accounts, testnet allowlists, and fail-closed scope validation",
+        "Supported assets normalize only through exact environment, network ID, and contract or mint identity",
+        "Provider metadata is never an authentication signal"
+      ],
+      "owner": "Wallet, Blockchain, and Security",
+      "status": "MITIGATED_LOCAL",
+      "evidence": ["docs/wallets/security-review/threat-model.md", "docs/KAN-61.md"],
+      "residualRisk": "Real-wallet behavior and trusted connector chain attestation remain unverified.",
+      "followUp": "KAN-223 independent wallet review and future connector chain attestation"
+    },
+    {
+      "id": "THR-WALLET-002",
+      "domain": "WALLET",
+      "stride": ["SPOOFING", "REPUDIATION"],
+      "scenario": "A stale, cross-origin, cross-chain, or replayed wallet signature is accepted as a production login or transaction authorization.",
+      "risk": "HIGH",
+      "boundaryIds": ["TB-01", "TB-06"],
+      "assetIds": ["DATA-003", "DATA-005"],
+      "response": "ELIMINATE",
+      "mitigations": [
+        "Wallet lab proofs never create an application session or transaction action",
+        "Production enablement requires server-issued one-use domain, origin, chain, account, intent, and expiry binding"
+      ],
+      "owner": "Wallet and Identity",
+      "status": "OPEN_FOLLOW_UP",
+      "evidence": ["docs/wallets/security-review/threat-model.md"],
+      "residualRisk": "The production server challenge and atomic replay boundary do not exist, so wallet login must remain disabled.",
+      "followUp": "KAN-56 production wallet challenge boundary"
+    },
+    {
+      "id": "THR-WALLET-003",
+      "domain": "WALLET",
+      "stride": ["INFORMATION_DISCLOSURE"],
+      "scenario": "A seed phrase, private key, pairing URI, raw signature, wallet address, or provider telemetry enters logs, evidence, source control, or a third party.",
+      "risk": "HIGH",
+      "boundaryIds": ["TB-06", "TB-09"],
+      "assetIds": ["DATA-004", "DATA-005", "DATA-009", "DATA-015"],
+      "response": "MITIGATE",
+      "mitigations": [
+        "Private keys and seed phrases are prohibited from collection",
+        "Raw wallet proof material is memory-only and evidence export is schema-restricted",
+        "Repository history scanner and structured logging policy reject secret and wallet-proof material"
+      ],
+      "owner": "Wallet, Privacy, and Security",
+      "status": "MITIGATED_LOCAL",
+      "evidence": ["docs/wallets/evidence/README.md", "docs/KAN-51.md", "docs/KAN-50.md"],
+      "residualRisk": "Vendor telemetry, browser storage, manual exports, and real-wallet network evidence require independent review.",
+      "followUp": "KAN-223/KAN-235 network, privacy, and evidence review"
+    },
+    {
+      "id": "THR-LEDGER-001",
+      "domain": "LEDGER",
+      "stride": ["TAMPERING", "ELEVATION_OF_PRIVILEGE"],
+      "scenario": "An unauthorized caller posts, reverses, mutates, truncates, or directly edits financial records.",
+      "risk": "HIGH",
+      "boundaryIds": ["TB-03", "TB-07"],
+      "assetIds": ["DATA-006", "DATA-007", "DATA-008"],
+      "response": "MITIGATE",
+      "mitigations": [
+        "Purpose-bound one-use capability digests authorize sealed plans",
+        "Owner-only append-only tables and fixed SECURITY DEFINER functions",
+        "API receives exact EXECUTE grants and worker receives no ledger table access"
+      ],
+      "owner": "Ledger, Database, and Security",
+      "status": "MITIGATED_LOCAL",
+      "evidence": ["docs/KAN-41.md", "docs/adr/0003-immutable-ledger-accounting-model.md"],
+      "residualRisk": "Database-owner and break-glass access can bypass application controls and has no deployed independent evidence.",
+      "followUp": "KAN-235 privilege and mutation review"
+    },
+    {
+      "id": "THR-LEDGER-002",
+      "domain": "LEDGER",
+      "stride": ["TAMPERING", "REPUDIATION"],
+      "scenario": "Retries or concurrent requests create duplicate journals, contradictory lifecycle events, or an outbox message without its financial result.",
+      "risk": "HIGH",
+      "boundaryIds": ["TB-04", "TB-07"],
+      "assetIds": ["DATA-006", "DATA-007", "DATA-010", "DATA-011"],
+      "response": "MITIGATE",
+      "mitigations": [
+        "Immutable idempotency identity and result",
+        "Journal, lifecycle event, command result, and outbox enqueue commit atomically",
+        "Outbox rows use immutable job IDs; any future side-effecting consumer must persist deduplication before enablement"
+      ],
+      "owner": "Ledger and Backend",
+      "status": "MITIGATED_LOCAL",
+      "evidence": ["docs/KAN-43.md", "docs/KAN-51.md"],
+      "residualRisk": "Provider-side idempotency, ambiguous outcomes, and reconciliation are outside the current local database boundary.",
+      "followUp": "Provider submission and reconciliation adapter review"
+    },
+    {
+      "id": "THR-LEDGER-003",
+      "domain": "LEDGER",
+      "stride": ["TAMPERING", "INFORMATION_DISCLOSURE"],
+      "scenario": "A spoofed token, wrong chain label, stale price, or nominal one-dollar assumption creates an incorrect financial valuation.",
+      "risk": "HIGH",
+      "boundaryIds": ["TB-07", "TB-10"],
+      "assetIds": ["DATA-006", "DATA-014"],
+      "response": "MITIGATE",
+      "mitigations": [
+        "Issuer-reviewed stablecoin identity registry rejects wrong network and unconfigured contracts or mints",
+        "Ledger requires explicit valuation availability and immutable recognition evidence",
+        "New observations cannot select an older registry snapshot"
+      ],
+      "owner": "Blockchain, Ledger, and Risk",
+      "status": "OPEN_FOLLOW_UP",
+      "evidence": ["docs/KAN-61.md", "docs/KAN-41.md"],
+      "residualRisk": "Trusted observation provenance, price freshness, confidence, fallback, and depeg policy are not implemented.",
+      "followUp": "KAN-62 trusted chain sources and KAN-66 deterministic valuation/depeg policy"
+    },
+    {
+      "id": "THR-LEDGER-004",
+      "domain": "LEDGER",
+      "stride": ["TAMPERING", "DENIAL_OF_SERVICE", "REPUDIATION"],
+      "scenario": "A chain reorganization, provider outage, ambiguous submission, or delayed observation is represented as final or resubmitted unsafely.",
+      "risk": "HIGH",
+      "boundaryIds": ["TB-04", "TB-10"],
+      "assetIds": ["DATA-006", "DATA-010", "DATA-011", "DATA-014"],
+      "response": "MITIGATE",
+      "mitigations": [
+        "No production provider submission or indexing path is enabled yet",
+        "Future provider adapter must retain explicit finality, reorg, unknown-outcome, and reconciliation state"
+      ],
+      "owner": "Blockchain, Ledger, and SRE",
+      "status": "OPEN_FOLLOW_UP",
+      "evidence": ["docs/KAN-43.md", "docs/KAN-61.md"],
+      "residualRisk": "No provider, finality, reorganization, or reconciliation path exists; production chain processing must remain disabled.",
+      "followUp": "KAN-62 and subsequent IDX/transaction-provider tickets"
+    },
+    {
+      "id": "THR-ADMIN-001",
+      "domain": "ADMIN",
+      "stride": ["ELEVATION_OF_PRIVILEGE", "TAMPERING"],
+      "scenario": "An operator, workload, or migration principal gains wildcard cloud, secret, KMS, database, Redis, or financial capability.",
+      "risk": "HIGH",
+      "boundaryIds": ["TB-03", "TB-07", "TB-08"],
+      "assetIds": ["DATA-001", "DATA-003", "DATA-006", "DATA-013", "DATA-016"],
+      "response": "MITIGATE",
+      "mitigations": [
+        "Workload-specific IAM, secret, network, database, and Redis matrices",
+        "Separate migration identity and deny-by-default application database grants",
+        "Static mutation validators reject wildcard and cross-scope permissions"
+      ],
+      "owner": "Cloud Security, Database, and SRE",
+      "status": "OPEN_EXTERNAL",
+      "evidence": ["docs/KAN-50.md", "infra/aws/validate-application-workload-boundaries.mjs"],
+      "residualRisk": "Static policies do not prove live IAM, secret, database, or break-glass behavior.",
+      "followUp": "KAN-235 and separately authorized deployed IAM/secret-rotation validation"
+    },
+    {
+      "id": "THR-ADMIN-002",
+      "domain": "ADMIN",
+      "stride": ["TAMPERING", "DENIAL_OF_SERVICE"],
+      "scenario": "An unreviewed deployment or cleanup exposes a public service, destroys protected state, retains billable resources, or incurs unauthorized spend.",
+      "risk": "HIGH",
+      "boundaryIds": ["TB-08"],
+      "assetIds": ["DATA-006", "DATA-008", "DATA-013", "DATA-016"],
+      "response": "MITIGATE",
+      "mitigations": [
+        "Local-first plan/validate boundaries and zero desired count for fresh plans",
+        "Separate billing, deployment, retention, and deletion authorities",
+        "No cloud mutation in default validation or CI"
+      ],
+      "owner": "Release, Finance, and SRE",
+      "status": "MITIGATED_LOCAL",
+      "evidence": ["docs/KAN-229.md", "docs/KAN-34.md"],
+      "residualRisk": "Commercial approval, operator separation, retention choices, and cleanup must be enforced for any actual deployment.",
+      "followUp": "Explicit commercial and deployment authorization before any cloud action"
+    },
+    {
+      "id": "THR-ADMIN-003",
+      "domain": "ADMIN",
+      "stride": ["REPUDIATION", "INFORMATION_DISCLOSURE"],
+      "scenario": "An administrator performs a sensitive action without durable attribution, or incident queries expose customer, credential, wallet, or financial data.",
+      "risk": "HIGH",
+      "boundaryIds": ["TB-08"],
+      "assetIds": ["DATA-008", "DATA-009", "DATA-013"],
+      "response": "MITIGATE",
+      "mitigations": [
+        "Append-only domain audit records and structured correlation identifiers",
+        "Event-specific log allowlists and default 14-day operational-log retention",
+        "Admin product routes are not implemented or exposed"
+      ],
+      "owner": "Security and SRE",
+      "status": "OPEN_EXTERNAL",
+      "evidence": ["docs/KAN-51.md", "apps/api/src/app.module.ts"],
+      "residualRisk": "Administrative RBAC, masking, audit-query access, and deployed log-access evidence are not implemented.",
+      "followUp": "KAN-235/KAN-249 deployed access, query, and retention verification plus future admin RBAC"
+    },
+    {
+      "id": "THR-ADMIN-004",
+      "domain": "ADMIN",
+      "stride": ["SPOOFING", "ELEVATION_OF_PRIVILEGE"],
+      "scenario": "A customer credential, forged staff role, or insufficiently authenticated support user reaches an administrator-only route or action.",
+      "risk": "HIGH",
+      "boundaryIds": ["TB-01", "TB-11"],
+      "assetIds": ["DATA-001", "DATA-003", "DATA-006", "DATA-008"],
+      "response": "ELIMINATE",
+      "mitigations": [
+        "No administrator module, controller, role, or route is currently wired into the application",
+        "A future separate namespace must use server-owned role assignment, deny-by-default authorization, step-up readiness, and immutable allow-and-deny audit"
+      ],
+      "owner": "Backend and Security",
+      "status": "OPEN_FOLLOW_UP",
+      "evidence": ["apps/api/src/app.module.ts", "apps/api/src/accounts/auth/current-principal.ts"],
+      "residualRisk": "Deny-by-absence prevents current exposure but does not supply the required staff identity, role, step-up, or authorization design.",
+      "followUp": "FND-008 and OPS-001 administrator authentication and authorization boundary before any route is exposed"
+    },
+    {
+      "id": "THR-ADMIN-005",
+      "domain": "ADMIN",
+      "stride": ["INFORMATION_DISCLOSURE", "DENIAL_OF_SERVICE", "REPUDIATION"],
+      "scenario": "A malicious or compromised staff user enumerates customers, performs unrestricted contact lookup, exports bulk PII or financial data, or bypasses masking and purpose audit.",
+      "risk": "HIGH",
+      "boundaryIds": ["TB-03", "TB-11"],
+      "assetIds": ["DATA-001", "DATA-006", "DATA-008", "DATA-009"],
+      "response": "ELIMINATE",
+      "mitigations": [
+        "No product administrator search, bulk export, or customer financial query surface exists",
+        "Future lookup must use exact identifiers or controlled contact search, bounded pagination and rate limits, field masking, purpose and role checks, and immutable query audit"
+      ],
+      "owner": "Backend, Privacy, and Security",
+      "status": "OPEN_FOLLOW_UP",
+      "evidence": ["apps/api/src/app.module.ts", "jira_phase_1_3.json"],
+      "residualRisk": "No implemented staff-query policy, masking contract, privacy approval, or immutable administrator lookup audit exists.",
+      "followUp": "FND-008, OPS-002, OPS-003, and KAN-44 controlled support and financial query boundaries"
+    },
+    {
+      "id": "THR-ADMIN-006",
+      "domain": "ADMIN",
+      "stride": ["TAMPERING", "REPUDIATION", "ELEVATION_OF_PRIVILEGE"],
+      "scenario": "An operator edits or deletes case history, performs an unapproved financial correction, or uses administrator tooling to bypass immutable ledger reversal controls.",
+      "risk": "HIGH",
+      "boundaryIds": ["TB-07", "TB-11"],
+      "assetIds": ["DATA-006", "DATA-008"],
+      "response": "ELIMINATE",
+      "mitigations": [
+        "No product case-management or financial override surface exists",
+        "The ledger exposes immutable lifecycle facts and exact reversal boundaries rather than mutable administrator corrections",
+        "Future cases require deduplicated identity, assignment and state history, mandatory resolution evidence, separation of duties, and immutable action audit"
+      ],
+      "owner": "Backend, Ledger, and Security",
+      "status": "OPEN_FOLLOW_UP",
+      "evidence": ["docs/KAN-41.md", "jira_phase_1_3.json"],
+      "residualRisk": "The case workflow, maker-checker policy, administrator audit, and controlled financial-recovery path are not implemented.",
+      "followUp": "OPS-004 case lifecycle and reviewed ledger reversal or recovery integration"
+    },
+    {
+      "id": "THR-SECRETS-001",
+      "domain": "SECRETS",
+      "stride": ["INFORMATION_DISCLOSURE", "ELEVATION_OF_PRIVILEGE"],
+      "scenario": "A credential, private key, seed phrase, connection string, raw token, or signature enters Git history, application logs, build output, or review evidence.",
+      "risk": "HIGH",
+      "boundaryIds": ["TB-04", "TB-06", "TB-08", "TB-09"],
+      "assetIds": ["DATA-004", "DATA-005", "DATA-009", "DATA-013", "DATA-015"],
+      "response": "MITIGATE",
+      "mitigations": [
+        "History-aware repository secret scanner and mutation tests",
+        "API and worker application-owned structured logging source policy and field allowlists",
+        "Workload-specific managed secret references; no cloud, provider, or runtime credentials in CI, and the ephemeral GitHub token is read-only and not persisted"
+      ],
+      "owner": "Security, SRE, and Release",
+      "status": "OPEN_FOLLOW_UP",
+      "evidence": ["docs/KAN-50.md", "docs/KAN-51.md"],
+      "residualRisk": "Web/framework error paths, ignored local files, runtime memory, external systems, and deployed logs remain outside the complete local source-policy boundary.",
+      "followUp": "KAN-51 web and framework error-path coverage plus KAN-235 deployed runtime and reviewer evidence inspection"
+    },
+    {
+      "id": "THR-SECRETS-002",
+      "domain": "SECRETS",
+      "stride": ["TAMPERING", "DENIAL_OF_SERVICE", "ELEVATION_OF_PRIVILEGE"],
+      "scenario": "Secret rotation reuses a retained slot, leaves old credentials valid, breaks identity mapping, or gives one workload another workload's secret.",
+      "risk": "HIGH",
+      "boundaryIds": ["TB-03", "TB-08"],
+      "assetIds": ["DATA-002", "DATA-003", "DATA-013"],
+      "response": "MITIGATE",
+      "mitigations": [
+        "Fixed workload-to-secret capability matrices and separate database roles",
+        "Rotation procedures require inactive-slot regeneration, replacement, and old-slot denial",
+        "Identity digest key is not rotated until a rehash/key-ring migration exists"
+      ],
+      "owner": "Security, Identity, Database, and SRE",
+      "status": "OPEN_EXTERNAL",
+      "evidence": ["docs/KAN-50.md", "docs/KAN-37.md", "docs/KAN-233.md"],
+      "residualRisk": "Deployed revocation evidence and a compatible authentication key ring are absent.",
+      "followUp": "Separately authorized deployed rotation exercise and identity key-ring design"
+    },
+    {
+      "id": "THR-SECRETS-003",
+      "domain": "SECRETS",
+      "stride": ["INFORMATION_DISCLOSURE", "REPUDIATION"],
+      "scenario": "A future job producer copies credentials, contact data, wallet proof, financial values, or unrestricted provider payloads into the generic PostgreSQL outbox and SQS or DLQ retention path.",
+      "risk": "HIGH",
+      "boundaryIds": ["TB-04"],
+      "assetIds": ["DATA-001", "DATA-005", "DATA-006", "DATA-010", "DATA-011", "DATA-013"],
+      "response": "ELIMINATE",
+      "mitigations": [
+        "The only current ledger.journal-committed producer emits an exact identifier-and-operation payload with closed correlation metadata",
+        "Generic message parsing enforces bounded shape and size but is not treated as data classification or redaction",
+        "Every future job kind is blocked from enablement until it has an explicit payload data-class allowlist, retention review, and leak test"
+      ],
+      "owner": "Backend, Privacy, and Security",
+      "status": "OPEN_FOLLOW_UP",
+      "evidence": [
+        "apps/api/src/infrastructure/outbox/job-message-policy.ts",
+        "apps/api/src/ledger/infrastructure/postgres-ledger.repository.ts",
+        "docs/KAN-33.md"
+      ],
+      "residualRisk": "The generic infrastructure cannot prevent a newly authored producer from persisting sensitive values without a kind-specific review gate.",
+      "followUp": "Require a kind-specific payload classification schema and retention approval before any new outbox producer is enabled"
+    },
+    {
+      "id": "THR-SUPPLY-001",
+      "domain": "SUPPLY_CHAIN",
+      "stride": ["TAMPERING", "ELEVATION_OF_PRIVILEGE"],
+      "scenario": "A compromised dependency, package lifecycle script, action, image, or lockfile injects code or exfiltrates credentials.",
+      "risk": "HIGH",
+      "boundaryIds": ["TB-09"],
+      "assetIds": ["DATA-013", "DATA-015"],
+      "response": "MITIGATE",
+      "mitigations": [
+        "Committed lockfiles, isolated wallet-lab lock, pinned GitHub actions, and dependency/license evidence",
+        "No repository or CI cloud secrets and no cloud mutation in CI",
+        "History-aware secret scan executes before dependency installation"
+      ],
+      "owner": "Release, OSS, and Security",
+      "status": "OPEN_EXTERNAL",
+      "evidence": [
+        ".github/workflows/ci.yml",
+        "docs/wallets/license-review/README.md",
+        "docs/KAN-50.md"
+      ],
+      "residualRisk": "Independent dependency, container, lifecycle-script, and runtime behavior review is pending.",
+      "followUp": "KAN-235 independent dependency/image review and release-candidate binding"
+    },
+    {
+      "id": "THR-SUPPLY-002",
+      "domain": "SUPPLY_CHAIN",
+      "stride": ["REPUDIATION", "TAMPERING"],
+      "scenario": "Review or deployment evidence is attributed to a different source, lockfile, image, template, parameter set, or environment.",
+      "risk": "HIGH",
+      "boundaryIds": ["TB-08", "TB-09"],
+      "assetIds": ["DATA-015", "DATA-016"],
+      "response": "MITIGATE",
+      "mitigations": [
+        "Evidence templates bind commits, lock hashes, template hashes, parameters, environment, and validity windows",
+        "Independent review ticket requires exact candidate and reviewer attribution"
+      ],
+      "owner": "Release and Security",
+      "status": "OPEN_EXTERNAL",
+      "evidence": ["docs/KAN-229.md", "docs/wallets/security-review/review-decision-template.md"],
+      "residualRisk": "Signed provenance, release attestation, and a reviewer decision bound to the final candidate are absent.",
+      "followUp": "KAN-235 exact release-candidate independent decision"
+    },
+    {
+      "id": "THR-AVAILABILITY-001",
+      "domain": "AVAILABILITY",
+      "stride": ["DENIAL_OF_SERVICE", "REPUDIATION"],
+      "scenario": "Poison jobs, transport errors, retry storms, or an unobserved DLQ backlog delay or lose customer-visible processing.",
+      "risk": "HIGH",
+      "boundaryIds": ["TB-04"],
+      "assetIds": ["DATA-010", "DATA-011"],
+      "response": "MITIGATE",
+      "mitigations": [
+        "Bounded batch sizes, leases, heartbeats, retries, visibility delay, redrive, and encrypted DLQ",
+        "At-least-once processing keeps failed messages available for retry and deduplication"
+      ],
+      "owner": "SRE and Backend",
+      "status": "OPEN_FOLLOW_UP",
+      "evidence": ["docs/KAN-33.md", "infra/aws/sqs-foundation.yaml"],
+      "residualRisk": "Queue, retry, failure, and DLQ metrics and dashboard evidence are not implemented.",
+      "followUp": "KAN-52 queue, failure, and DLQ metrics plus dashboard evidence"
+    },
+    {
+      "id": "THR-AVAILABILITY-002",
+      "domain": "AVAILABILITY",
+      "stride": ["DENIAL_OF_SERVICE"],
+      "scenario": "Authentication abuse, expensive malformed input, log flooding, or a shared proxy identity exhausts application or monitoring capacity.",
+      "risk": "HIGH",
+      "boundaryIds": ["TB-01", "TB-02", "TB-03"],
+      "assetIds": ["DATA-003", "DATA-009", "DATA-012"],
+      "response": "MITIGATE",
+      "mitigations": [
+        "Bounded parsers, body limits, fixed-window auth rate limits, trusted proxy configuration, and generic failures",
+        "Bounded structured events and anonymous rejection suppression"
+      ],
+      "owner": "SRE, Identity, and Backend",
+      "status": "OPEN_EXTERNAL",
+      "evidence": ["docs/KAN-37.md", "docs/KAN-51.md"],
+      "residualRisk": "Deployed saturation, edge behavior, and distributed rate-limit effectiveness are unproven.",
+      "followUp": "KAN-52 saturation telemetry and KAN-235 deployed edge/load review"
+    }
+  ]
+}

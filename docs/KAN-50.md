@@ -17,8 +17,8 @@ deployed.
 KAN-50 depends on:
 
 - KAN-34 / FND-003, whose application baseline is in review; and
-- KAN-49 / SEC-001, whose threat-model and classification approval is still to
-  do.
+- KAN-49 / SEC-001, whose repository-wide threat-model packet is ready for
+  review while independent Security approval remains pending under KAN-235.
 
 The KAN-50 subtasks are deliberately separated:
 
@@ -195,7 +195,7 @@ custom policy checks can be billable.
 KAN-50 stays `In Progress` after this local batch. The following work is not
 complete:
 
-- KAN-49 threat-model/data-classification approval;
+- KAN-49's independent KAN-235 threat-model/data-classification approval;
 - independently authorized staging and retrieval of the exact versioned nested
   template artifact;
 - database secret-to-LOGIN SCRAM installation/authentication and repeatable
