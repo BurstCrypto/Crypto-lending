@@ -1,3 +1,13 @@
+export { BlockchainModule } from './blockchain.module';
+export {
+  SupportedAssetNormalizationError,
+  SupportedAssetNormalizationService,
+  type HistoricalAssetIdentification,
+  type HistoricalAssetIdentity,
+  type IngressAssetIdentity,
+  type SupportedAssetMetadata,
+  type SupportedAssetNormalizationErrorCode,
+} from './application/supported-asset-normalization.service';
 export {
   ASSET_REGISTRY_ENVIRONMENTS,
   MAINNET_SUPPORTED_ASSET_REGISTRY,

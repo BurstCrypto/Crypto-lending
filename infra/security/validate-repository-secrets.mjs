@@ -459,6 +459,24 @@ function isHighEntropySecret(name, value) {
   return entropy >= 3.8 && (characterClassCount(candidate) >= 2 || entropy >= 4.5);
 }
 
+function entriesAreSourceCode(entries) {
+  return entries.every((entry) => /\.(?:[cm]?[jt]sx?)$/iu.test(entry.path));
+}
+
+function isSourceCodeReference(value, entries) {
+  return (
+    entriesAreSourceCode(entries) &&
+    /^[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)+$/u.test(value.trim())
+  );
+}
+
+function isSymbolicTernaryPair(line, match, entries) {
+  if (!entriesAreSourceCode(entries) || !/\?\s*$/u.test(line.slice(0, match.index))) {
+    return false;
+  }
+  return [match[1], match[3]].every((value) => /^[A-Z][A-Z0-9_]{2,}$/u.test(value));
+}
+
 function assignmentNameComponents(name) {
   return name
     .replace(/([a-z0-9])([A-Z])/gu, '$1_$2')
@@ -641,7 +659,11 @@ function scanLine(line, lineNumber, blob, entries) {
 
   QUOTED_SECRET_ASSIGNMENT_PATTERN.lastIndex = 0;
   for (const match of line.matchAll(QUOTED_SECRET_ASSIGNMENT_PATTERN)) {
-    if (isSecretAssignmentName(match[1]) && isHighEntropySecret(match[1], match[3])) {
+    if (
+      !isSymbolicTernaryPair(line, match, entries) &&
+      isSecretAssignmentName(match[1]) &&
+      isHighEntropySecret(match[1], match[3])
+    ) {
       matches.push({ rule: 'assignment.high-entropy-secret', value: match[3] });
     }
   }
@@ -649,6 +671,7 @@ function scanLine(line, lineNumber, blob, entries) {
   if (
     unquoted &&
     isSecretAssignmentName(unquoted[1]) &&
+    !isSourceCodeReference(unquoted[2], entries) &&
     isHighEntropySecret(unquoted[1], unquoted[2])
   ) {
     matches.push({ rule: 'assignment.high-entropy-secret', value: unquoted[2] });

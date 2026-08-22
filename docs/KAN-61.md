@@ -13,11 +13,25 @@ and contract or mint identity. EVM contract identities are normalized to
 lowercase bytes; Solana mint identities remain case-sensitive base58 public
 keys.
 
-Each immutable snapshot has a positive contiguous version. A later change must
-append a complete version rather than edit or reinterpret a prior version. The
-snapshot records network and asset activation independently. `identifyAsset`
-can describe a configured inactive identity for historical processing, while
-`normalizeAsset` returns only an active asset on an active network.
+Each immutable snapshot has a positive contiguous version and a canonical
+SHA-256 fingerprint over its complete network, asset, issuer, precision,
+activation, and provenance descriptors. A later change must append a complete
+version rather than edit or reinterpret a prior version. Version 1 asset
+manifests pin their financial and provenance descriptors independently from the
+reviewed-candidate catalog, while the committed golden fingerprints bind each
+complete snapshot. A later catalog metadata change therefore cannot silently
+rewrite historical meaning.
+
+Current-ingress normalization is deliberately available only on the versioned
+registry and always uses its latest snapshot. Historical reads require an exact
+persisted version and use identification-only semantics; a caller-selected old
+version cannot reactivate a retired asset for a new observation or route. The
+snapshot records network and asset activation independently.
+
+The committed version-1 fingerprints are:
+
+- Mainnet: `5058b141479f114c1e5f87ed8798fbb7a7ffcce7b502aa7e0794dc53ca1f767d`
+- Testnet: `89c158de188fcde7d01642aadef226f3c93724bfe5b53a7f3fcce096180d5ca7`
 
 Construction fails closed for:
 
@@ -61,7 +75,7 @@ allowlist in a new registry version, lookup returns no normalized asset.
 
 ## Verification sources
 
-The version 1 identities were checked against primary sources on 2026-08-21:
+The version 1 identities were rechecked against primary sources on 2026-08-22:
 
 - [Circle USDC contract addresses](https://developers.circle.com/stablecoins/usdc-contract-addresses)
   for all mainnet and testnet USDC contracts and mints;
@@ -78,6 +92,14 @@ provenance, not runtime oracles; application execution never fetches them.
 
 ## Integration boundary
 
+`BlockchainModule` exposes one `SupportedAssetNormalizationService` to the API.
+`normalizeIngressAsset` accepts an environment-qualified network identity but
+no registry version, and returns only the latest active registry match. Its
+result retains the selected registry version and snapshot fingerprint.
+`identifyHistoricalAsset` requires an exact recorded version, returns
+historical metadata without making a current-support decision, and separately
+reports whether the same identity remains supported by the latest snapshot.
+
 This slice intentionally does not add a PostgreSQL migration. FND-002 provides
 the migration and transaction foundation, but the existing `ledger_assets`
 table is an accounting identity store and has no registry activation or source
@@ -91,10 +113,18 @@ Likewise, selecting `MAINNET` or `TESTNET` is an explicit caller decision. No
 default infers a value-bearing network from `NODE_ENV`, `APP_ENV`, a wallet
 symbol, or a provider response.
 
+The registry proves that a supplied network ID and identity form an approved
+pair; it cannot prove which chain produced an observation. IDX-002/IDX-003 and
+IDX-004 must derive the network from immutable connector configuration and
+verify EVM `eth_chainId` or the Solana genesis hash at connector startup. A
+request, wallet ticker, token metadata response, or arbitrary provider payload
+must never be allowed to label its own trusted network.
+
 ## Local verification
 
 ```powershell
 npm test --workspace @crypto-lending/api -- --runInBand src/blockchain/domain/supported-asset-registry.spec.ts
+npm test --workspace @crypto-lending/api -- --runInBand src/blockchain/application/supported-asset-normalization.service.spec.ts
 npm run lint --workspace @crypto-lending/api
 npm run typecheck --workspace @crypto-lending/api
 npm run build --workspace @crypto-lending/api

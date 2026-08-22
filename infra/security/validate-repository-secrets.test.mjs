@@ -165,6 +165,40 @@ test('detects exact secret assignment names in quoted and unquoted forms', () =>
   }
 });
 
+test('ignores source-code references and symbolic ternary branches but detects literal secrets', () => {
+  const repository = createRepository();
+  const sentinel = ['zQ7vN2', 'pL9xR4', 'mT8kW3', 'cF6sH1', 'yU5aD0'].join('');
+  try {
+    write(
+      repository,
+      'authentication.ts',
+      [
+        "const outcome = response.status === 400 ? 'OIDC_TOKEN_EXCHANGE_REJECTED' : 'OIDC_TOKEN_SERVICE_UNAVAILABLE';",
+        'const rotated = {',
+        '  credentialId: input.successorCredentialId,',
+        '};',
+        `const token = '${sentinel}';`,
+        '',
+      ].join('\n'),
+    );
+    runGit(repository, 'add', 'authentication.ts');
+
+    const result = runScanner(repository);
+
+    assertFinding(result, 'assignment.high-entropy-secret', 'index');
+    assert.equal(
+      result.stdout
+        .trim()
+        .split('\n')
+        .filter((line) => line.startsWith('rule=assignment.high-entropy-secret\t')).length,
+      1,
+    );
+    assertRedacted(result, sentinel);
+  } finally {
+    rmSync(repository, { force: true, recursive: true });
+  }
+});
+
 test('redacts credential-bearing paths and safely encodes every control character', () => {
   const repository = createRepository();
   const sentinel = ['gh', 'p_', 'Path5Sentinel7Material9Value2Token4'].join('');

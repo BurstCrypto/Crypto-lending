@@ -256,6 +256,12 @@ unique PostgreSQL schema, and removes only those test resources. See
   identity mapping, and abuse-control boundaries. The local implementation is
   documented in [`docs/KAN-37.md`](docs/KAN-37.md); managed-provider selection,
   egress, deployment, and live acceptance remain gated.
+- `apps/api/src/blockchain` owns KAN-61's issuer-verified, environment-qualified
+  chain and stablecoin registry. New observations normalize only against the
+  latest immutable snapshot, while trusted historical reads retain their exact
+  registry version and fingerprint. Connector/RPC provenance remains gated to
+  the later IDX provider and indexing work documented in
+  [`docs/KAN-61.md`](docs/KAN-61.md).
 - [`docs/adr/0003-immutable-ledger-accounting-model.md`](docs/adr/0003-immutable-ledger-accounting-model.md)
   defines KAN-40's proposed operational, multi-asset ledger contract. KAN-41
   implements the local append-only schema and application boundary, while
