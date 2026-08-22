@@ -20,8 +20,11 @@ The application does not yet have an approved destination inventory:
 
 - KAN-34 is the root application-baseline dependency and the inert policy
   example does not claim that it has an approved live decision;
-- KAN-37, **Integrate authentication and secure sessions**, is `To Do`;
-- KAN-62, **Select RPC and indexing providers**, is `To Do`; and
+- KAN-37, **Integrate authentication and secure sessions**, has a local
+  provider-neutral implementation in review but no managed identity selection;
+- KAN-62, **Select RPC and indexing providers**, has a local Alchemy-primary /
+  QuickNode-fallback proposal pending KAN-251 independent approval and live
+  validation; and
 - no hostname, redirect target, provider contract, data flow, credential
   transport, or availability requirement has been approved for KAN-231.
 
