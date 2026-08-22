@@ -153,6 +153,8 @@ npm run typecheck
 npm test
 npm run security:scan:secrets
 npm run security:test:secrets
+npm run security:validate:threat-model
+npm run security:test:threat-model
 npm run security:audit
 npm run security:test:jira
 npm run test:e2e --workspace @crypto-lending/api
@@ -245,6 +247,13 @@ unique PostgreSQL schema, and removes only those test resources. See
 [`docs/KAN-33.md`](docs/KAN-33.md) for transaction, migration, and queue usage.
 
 ## Architecture boundaries
+
+KAN-49's repository-wide threat register, data classification, retention
+inventory, key inventory, and High-risk owner/mitigation map are documented in
+[`docs/security/threat-model.md`](docs/security/threat-model.md) and validated
+against a content-bound SHA-256 sidecar. The packet is ready for independent
+review, not locally approved; KAN-235 remains the independent Security decision
+gate.
 
 - `apps/web` owns the browser-facing Next.js application.
 - `apps/api/src/system` owns process liveness, version, and API contract routes.
