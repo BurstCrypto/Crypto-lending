@@ -50,7 +50,8 @@
     "jose": "6.2.9",
     "pg": "^8.23.0",
     "reflect-metadata": "^0.2.2",
-    "rxjs": "^7.8.2"
+    "rxjs": "^7.8.2",
+    "viem": "2.55.18"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

@@ -17,11 +17,12 @@ identity-provider, chain-provider, or cloud boundary is enabled by this packet.
 ## Scope and method
 
 The model covers customer account and authentication flows, the restricted
-wallet-validation lab, supported-chain normalization, immutable ledger and
-outbox processing, future administrator surfaces, secrets and infrastructure,
-and repository/dependency provenance. It uses STRIDE as a prompt, then records
-risk, response, implemented mitigations, residual risk, accountable repository
-roles, evidence, and an explicit follow-up for every threat.
+wallet-validation lab, the disabled-by-default local wallet-registration
+boundary, supported-chain normalization, immutable ledger and outbox
+processing, future administrator surfaces, secrets and infrastructure, and
+repository/dependency provenance. It uses STRIDE as a prompt, then records risk,
+response, implemented mitigations, residual risk, accountable repository roles,
+evidence, and an explicit follow-up for every threat.
 
 The review must be repeated when a new public or administrator route, managed
 identity provider, wallet connector, chain/RPC provider, financial operation,
@@ -69,8 +70,9 @@ fail-closed distinctions are:
   and future chain observations are untrusted;
 - an account actor exists only after verified authentication, and account
   routes are self-scoped rather than request-selected;
-- wallet connection or signature is not an application login or transaction
-  authorization;
+- a verified wallet proof can establish only the authenticated account's
+  chain-qualified registration ownership; wallet connection or signature is
+  never an application login or transaction authorization;
 - supported-asset identity proves an allowlisted `(network, contract/mint)`
   pair, not that a connector really observed that network;
 - financial mutation crosses a purpose-bound database capability and immutable
@@ -90,12 +92,22 @@ fail-closed distinctions are:
 | `RESTRICTED`   | Customer, authentication, wallet, financial, audit, or secret metadata | Strongest application access controls, explicit lifecycle approval, no ordinary logs or unrestricted exports. |
 | `PROHIBITED`   | Unauthorized copies of raw authority-granting secret material          | Never collect in business persistence, logs, analytics, source control, Jira, or review evidence.             |
 
-The register maps 16 data assets to CIA impact, storage, logging treatment,
+The register maps 17 data assets to CIA impact, storage, logging treatment,
 retention state, owner, and code evidence. Important examples are:
 
-- account contact/residency, OIDC mapping, authentication state, wallet public
-  identity/proof material, rate-limit pseudonyms, immutable financial records,
-  and domain audit records are `RESTRICTED`;
+- account contact/residency, OIDC mapping, authentication state, ephemeral
+  wallet proof material, durable encrypted wallet identity, rate-limit
+  pseudonyms, immutable financial records, and domain audit records are
+  `RESTRICTED`;
+- raw nonce, signed-message, and signature values exist only in the restricted
+  browser, wallet, or API verification process; application-held plaintext
+  address/public-key and pairing state are session-bound, while vendor-managed
+  retention remains unverified; challenge persistence contains versioned keyed
+  digests and an AES-256-GCM sealed binding record while pending, never the raw
+  nonce, signed message, or signature;
+- durable registration stores the chain-qualified canonical address and
+  server-authored metadata as versioned AES-256-GCM ciphertext, plus a
+  purpose-separated versioned address digest used to enforce active ownership;
 - actor-bearing structured operational logs, outbox records, and queue/DLQ
   messages are `RESTRICTED`; the current `ledger.journal-committed` payload and
   logging allowlists exclude contact data, wallet proof, credentials, amounts,
@@ -115,18 +127,20 @@ boundary.
 Validity expiry is not data deletion. The following table records what the
 repository can prove and which decisions remain blocking.
 
-| Store or class                                                          | Current local contract                                                                                                                                                            | Pending policy or evidence                                                                                                                 |
-| ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| Raw credentials, tokens, wallet seeds/private keys, ledger capabilities | No copies in business persistence, logs, or review evidence; approved managed/provider/wallet custody or transient runtime only; persist purpose-separated digests where required | Rotation, revocation, overlap, compromise response, and secure-destruction procedures require approval and deployed evidence.              |
-| Account profile and identity records                                    | Stored in PostgreSQL with self-scoped access; raw PII excluded from operational logs                                                                                              | Deletion/DSAR, legal hold, archival, verification-state, and durable audit-retention periods are unapproved.                               |
-| Authentication attempts, sessions, credentials, rate buckets, and audit | Raw browser values have TTL; database stores digests and replay tombstones                                                                                                        | No purge/archive schedule exists for expired attempts, mappings, families, credentials, buckets, or audit rows.                            |
-| Ledger, lifecycle, idempotency, and external evidence                   | Append-only and intentionally has no general deletion path                                                                                                                        | Finance, Legal, Risk, Privacy, and Records must approve authoritative retention, archive, legal hold, close, and tamper-evidence policy.   |
-| Published/terminal outbox rows                                          | Seven-day published and thirty-day failed defaults                                                                                                                                | Pending rows can remain indefinitely; future job kinds need a data-class allowlist before publication.                                     |
-| SQS source queue and DLQ                                                | Four-day source and fourteen-day DLQ retention                                                                                                                                    | Deployed encryption, access, redrive, deletion, and incident-query evidence is absent.                                                     |
-| Structured operational logs                                             | Fourteen-day default, with a closed 1–90 day configured set                                                                                                                       | Deployed delivery, KMS, access denial, search, export, and deletion evidence is absent; logs are never a financial/audit system of record. |
-| RDS/Redis snapshots, managed secrets, and KMS keys                      | Templates retain protected state pending separately authorized deletion                                                                                                           | Legal/business retention, deletion authority, key retirement, and cleanup evidence are unapproved.                                         |
-| Wallet-lab evidence                                                     | Sanitized session storage or manual export, bound to a reviewed candidate                                                                                                         | Vendor-managed storage/telemetry, downloaded-file deletion, and reviewer evidence retention are not enforced.                              |
-| Build and review artifacts                                              | Workflow-specific bounded artifact retention and Git history                                                                                                                      | Final provenance/signing policy, reviewer access, and evidence retention require approval.                                                 |
+| Store or class                                                          | Current local contract                                                                                                                                                                                                                                                                                                             | Pending policy or evidence                                                                                                                 |
+| ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| Raw credentials, tokens, wallet seeds/private keys, ledger capabilities | No copies in business persistence, logs, or review evidence; approved managed/provider/wallet custody or transient runtime only; persist purpose-separated digests where required                                                                                                                                                  | Rotation, revocation, overlap, compromise response, and secure-destruction procedures require approval and deployed evidence.              |
+| Account profile and identity records                                    | Stored in PostgreSQL with self-scoped access; raw PII excluded from operational logs                                                                                                                                                                                                                                               | Deletion/DSAR, legal hold, archival, verification-state, and durable audit-retention periods are unapproved.                               |
+| Authentication attempts, sessions, credentials, rate buckets, and audit | Raw browser values have TTL; database stores digests and replay tombstones                                                                                                                                                                                                                                                         | No purge/archive schedule exists for expired attempts, mappings, families, credentials, buckets, or audit rows.                            |
+| Ledger, lifecycle, idempotency, and external evidence                   | Append-only and intentionally has no general deletion path                                                                                                                                                                                                                                                                         | Finance, Legal, Risk, Privacy, and Records must approve authoritative retention, archive, legal hold, close, and tamper-evidence policy.   |
+| Published/terminal outbox rows                                          | Seven-day published and thirty-day failed defaults                                                                                                                                                                                                                                                                                 | Pending rows can remain indefinitely; future job kinds need a data-class allowlist before publication.                                     |
+| SQS source queue and DLQ                                                | Four-day source and fourteen-day DLQ retention                                                                                                                                                                                                                                                                                     | Deployed encryption, access, redrive, deletion, and incident-query evidence is absent.                                                     |
+| Structured operational logs                                             | Fourteen-day default, with a closed 1–90 day configured set                                                                                                                                                                                                                                                                        | Deployed delivery, KMS, access denial, search, export, and deletion evidence is absent; logs are never a financial/audit system of record. |
+| RDS/Redis snapshots, managed secrets, and KMS keys                      | Templates retain protected state pending separately authorized deletion                                                                                                                                                                                                                                                            | Legal/business retention, deletion authority, key retirement, and cleanup evidence are unapproved.                                         |
+| Wallet-lab evidence                                                     | Sanitized session storage or manual export, bound to a reviewed candidate                                                                                                                                                                                                                                                          | Vendor-managed storage/telemetry, downloaded-file deletion, and reviewer evidence retention are not enforced.                              |
+| Wallet ownership challenge material                                     | Raw nonce, signed message, and signature are process-memory only; application plaintext address/public-key and pairing state are session-bound; PostgreSQL keeps keyed digests and a sealed binding record while pending, then row-locks, terminalizes, audits, and crypto-shreds the record when an expired challenge is prepared | Vendor retention, digest/replay-tombstone purge, deployed atomicity, incident retention, and key-overlap policy remain unapproved.         |
+| Registered wallet identity and metadata                                 | Canonical address and server-authored metadata are AES-256-GCM encrypted with row-bound AAD; a versioned keyed digest enforces active identity uniqueness                                                                                                                                                                          | Revocation/deletion, legal hold, archive, decrypt access, re-encryption, and privacy retention remain unapproved.                          |
+| Build and review artifacts                                              | Workflow-specific bounded artifact retention and Git history                                                                                                                                                                                                                                                                       | Final provenance/signing policy, reviewer access, and evidence retention require approval.                                                 |
 
 Any implementation that deletes immutable financial or security evidence, or
 retains customer data indefinitely, needs an explicit approved policy rather
@@ -140,29 +154,36 @@ session, and CSRF keys; workload and migration database credentials; Redis ACL
 passwords; AWS task credentials and KMS authority; TLS private keys; the
 restricted wallet-lab access credential; the separate RDS bootstrap/master
 credential; ledger capability and raw idempotency material; the local Jira API
-credential; and the ephemeral read-only GitHub Actions token.
+credential; the ephemeral read-only GitHub Actions token; and three
+purpose-distinct wallet-registration classes for canonical-identity HMAC,
+challenge HMAC, and challenge-binding/address/metadata AES-256-GCM protection.
 
 Every inventory row records consumers, injection boundary, storage form,
 rotation requirement, accountable role, and repository evidence. The main open
-items are production injection for the OIDC/authentication keys, a compatible
-identity/session key ring and rehash migration, live A/B credential rotation
-and old-slot denial, and independent inspection that runtime/log/review paths
-contain no usable values.
+items are production injection for the OIDC/authentication and wallet keys; a
+compatible authentication key ring; a dual-digest wallet-identity migration;
+challenge-HMAC overlap across unexpired and replay state; an additive wallet
+decrypt key ring with authenticated reseal/rollback; live A/B credential
+rotation and old-slot denial; and independent inspection that runtime, log, and
+review paths contain no usable values. Wallet registration is disabled by
+default. Local tests generate non-production 32-byte fixtures in process; they
+do not establish managed custody. KAN-50 custody and KAN-235 independent review
+remain production gates.
 
 ## High-risk register summary
 
 The canonical register's High-risk rows each have at least one
 mitigation, owner, residual-risk statement, evidence path, and follow-up.
 
-| Domain       | Local posture                                                                                              | Required next decision                                                                                                                                            |
-| ------------ | ---------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Account      | OIDC/PKCE, exact identity mapping, self-scope, cookies/CSRF/replay/rate limits are locally enforced        | Managed provider, MFA/recovery/logout, key rotation, deployed proxy/edge behavior, privacy and independent authorization review.                                  |
-| Wallet       | Restricted lab and exact registry identity fail closed; wallet proof grants no production authority        | Independent real-wallet/privacy review, trusted chain attestation, and KAN-56 one-use production challenge.                                                       |
-| Ledger       | Append-only balanced journal, capabilities, lifecycle, idempotency, and atomic outbox are locally enforced | Privileged tamper evidence, provider/finality/reorg/reconciliation, trusted observations, and valuation/depeg policy.                                             |
-| Admin        | No product-admin surface is exposed; static cloud/database capability boundaries exist                     | FND-008/OPS authorization, lookup/masking, case integrity, immutable admin audit, break-glass, live IAM/database evidence, and explicit commercial authorization. |
-| Secrets      | History-aware source scanner, API/worker log allowlists, and workload-specific static boundaries           | Web/framework error-path coverage, runtime evidence, production auth-key injection/key ring, live rotation/revocation, and full-hop transport review.             |
-| Supply chain | Lockfiles, pinned actions, local validation, and candidate-bound evidence patterns                         | Independent dependency/image review and final-candidate provenance/attestation.                                                                                   |
-| Availability | Bounded queue, parser, logging, rate-limit, retry, and DLQ primitives                                      | KAN-52 metrics/dashboard evidence plus deployed edge, load, and distributed-limit review.                                                                         |
+| Domain       | Local posture                                                                                                                                                            | Required next decision                                                                                                                                                       |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Account      | OIDC/PKCE, exact identity mapping, self-scope, cookies/CSRF/replay/rate limits are locally enforced                                                                      | Managed provider, MFA/recovery/logout, key rotation, deployed proxy/edge behavior, privacy and independent authorization review.                                             |
+| Wallet       | Exact registry identity and a one-use, account/domain/network-bound EVM or Solana proof locally protect registration; the proof grants no login or transaction authority | Independent real-wallet/privacy review, deployed concurrency and key custody, trusted chain attestation, contract-wallet RPC policy, and separate login/transaction designs. |
+| Ledger       | Append-only balanced journal, capabilities, lifecycle, idempotency, and atomic outbox are locally enforced                                                               | Privileged tamper evidence, provider/finality/reorg/reconciliation, trusted observations, and valuation/depeg policy.                                                        |
+| Admin        | No product-admin surface is exposed; static cloud/database capability boundaries exist                                                                                   | FND-008/OPS authorization, lookup/masking, case integrity, immutable admin audit, break-glass, live IAM/database evidence, and explicit commercial authorization.            |
+| Secrets      | History-aware source scanner, API/worker log allowlists, and workload-specific static boundaries                                                                         | Web/framework error-path coverage, runtime evidence, production auth-key injection/key ring, live rotation/revocation, and full-hop transport review.                        |
+| Supply chain | Lockfiles, pinned actions, local validation, and candidate-bound evidence patterns                                                                                       | Independent dependency/image review and final-candidate provenance/attestation.                                                                                              |
+| Availability | Bounded queue, parser, logging, rate-limit, retry, and DLQ primitives                                                                                                    | KAN-52 metrics/dashboard evidence plus deployed edge, load, and distributed-limit review.                                                                                    |
 
 `MITIGATED_LOCAL` means a repository control and local test exist. It does not
 mean the residual risk is accepted. `OPEN_FOLLOW_UP` means a named engineering

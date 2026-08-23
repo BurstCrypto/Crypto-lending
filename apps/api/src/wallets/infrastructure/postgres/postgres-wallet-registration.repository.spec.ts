@@ -1,0 +1,210 @@
+import { randomBytes, randomUUID } from 'node:crypto';
+
+import type { QueryResult } from 'pg';
+
+import { parseAccountId } from '../../../accounts/domain/account-profile';
+import type { PostgresService } from '../../../infrastructure/database/postgres.service';
+import type {
+  BeginWalletOwnershipChallengeRequest,
+  WalletRegistrationRepositoryPort,
+} from '../../application/ports/wallet-registration-repository.port';
+import { WalletRegistrationRateLimitedError } from '../../application/wallet-registration.errors';
+import { parseWalletChallengeId } from '../../domain/wallet-ownership-proof';
+import {
+  createWalletRegistrationKey,
+  digestWalletChallengeValue,
+  digestWalletIdentity,
+  sealWalletRegistrationValue,
+} from '../crypto/wallet-registration-crypto';
+import {
+  PostgresWalletRegistrationRepository,
+  WalletRegistrationPersistenceError,
+} from './postgres-wallet-registration.repository';
+
+const NOW = new Date('2026-08-22T17:00:00.000Z');
+const EXPIRES = new Date('2026-08-22T17:05:00.000Z');
+const ACCOUNT_ID = parseAccountId(randomUUID());
+const CHALLENGE_ID = parseWalletChallengeId(randomUUID());
+const CORRELATION_ID = randomUUID();
+const ADDRESS = '0xde709f2102306220921060314715629080e2fb77';
+const NETWORK = 'eip155:11155111' as const;
+
+function result<Row>(rows: readonly Row[]): QueryResult<Row & Record<string, unknown>> {
+  return {
+    command: 'SELECT',
+    rowCount: rows.length,
+    oid: 0,
+    fields: [],
+    rows: rows as (Row & Record<string, unknown>)[],
+  };
+}
+
+function beginRequest(): BeginWalletOwnershipChallengeRequest {
+  const identityKey = createWalletRegistrationKey(
+    'identity-hmac',
+    1,
+    randomBytes(32).toString('base64url'),
+  );
+  const challengeKey = createWalletRegistrationKey(
+    'challenge-hmac',
+    1,
+    randomBytes(32).toString('base64url'),
+  );
+  const sealKey = createWalletRegistrationKey(
+    'metadata-seal',
+    1,
+    randomBytes(32).toString('base64url'),
+  );
+  const addressDigest = digestWalletIdentity(identityKey, NETWORK, ADDRESS);
+  return {
+    challengeId: CHALLENGE_ID,
+    accountId: ACCOUNT_ID,
+    proofScheme: 'EVM_ERC4361_ERC191',
+    chainId: NETWORK,
+    addressDigest,
+    domainDigest: digestWalletChallengeValue('domain', challengeKey, 'https://app.example.test'),
+    messageDigest: digestWalletChallengeValue('message', challengeKey, 'message'),
+    nonceDigest: digestWalletChallengeValue('nonce', challengeKey, 'nonce'),
+    challengePayload: sealWalletRegistrationValue(
+      sealKey,
+      {
+        field: 'challenge',
+        challengeId: CHALLENGE_ID,
+        accountId: ACCOUNT_ID,
+        networkId: NETWORK,
+        addressDigest,
+      },
+      '{"safe":"payload"}',
+    ),
+    registry: {
+      environment: 'TESTNET',
+      version: 1,
+      fingerprintSha256: '89c158de188fcde7d01642aadef226f3c93724bfe5b53a7f3fcce096180d5ca7',
+    },
+    issuedAt: NOW,
+    expiresAt: EXPIRES,
+    correlationId: CORRELATION_ID,
+  };
+}
+
+function repositoryWith(query: jest.Mock): WalletRegistrationRepositoryPort {
+  return new PostgresWalletRegistrationRepository({ query } as unknown as PostgresService);
+}
+
+describe('PostgresWalletRegistrationRepository', () => {
+  it('maps an encrypted challenge to the exact fixed SQL boundary', async () => {
+    const query = jest
+      .fn()
+      .mockResolvedValue(result([{ challenge_id: CHALLENGE_ID, expires_at: EXPIRES }]));
+    const repository = repositoryWith(query);
+    const request = beginRequest();
+
+    await expect(repository.beginChallenge(request)).resolves.toEqual({
+      challengeId: CHALLENGE_ID,
+      expiresAt: EXPIRES,
+    });
+    const [sql, parameters] = query.mock.calls[0] as [string, unknown[]];
+    expect(sql).toContain('begin_wallet_ownership_challenge(');
+    expect(parameters).toHaveLength(23);
+    expect(parameters).toContain('eip155');
+    expect(parameters).toContain('11155111');
+    expect(JSON.stringify(parameters)).not.toContain(ADDRESS);
+    expect(parameters.filter(Buffer.isBuffer)).toHaveLength(7);
+  });
+
+  it('restores only complete READY rows and passes the correlation to expiry preparation', async () => {
+    const request = beginRequest();
+    const payload = Buffer.from(request.challengePayload.ciphertext, 'base64url');
+    const query = jest.fn().mockResolvedValue(
+      result([
+        {
+          prepare_outcome: 'READY',
+          prepared_account_id: ACCOUNT_ID,
+          prepared_proof_scheme: request.proofScheme,
+          prepared_chain_namespace: 'eip155',
+          prepared_chain_reference: '11155111',
+          prepared_registry_environment: request.registry.environment,
+          prepared_registry_version: request.registry.version,
+          prepared_registry_fingerprint_sha256: request.registry.fingerprintSha256,
+          prepared_challenge_payload_key_version: request.challengePayload.keyVersion,
+          prepared_challenge_payload_ciphertext: payload,
+          prepared_challenge_payload_iv: Buffer.from(request.challengePayload.iv, 'base64url'),
+          prepared_challenge_payload_auth_tag: Buffer.from(
+            request.challengePayload.authTag,
+            'base64url',
+          ),
+          prepared_address_digest_version: request.addressDigest.version,
+          prepared_address_digest: Buffer.from(request.addressDigest.value, 'hex'),
+          prepared_domain_digest_version: request.domainDigest.version,
+          prepared_domain_digest: Buffer.from(request.domainDigest.value, 'hex'),
+          prepared_message_digest_version: request.messageDigest.version,
+          prepared_message_digest: Buffer.from(request.messageDigest.value, 'hex'),
+          prepared_nonce_digest_version: request.nonceDigest.version,
+          prepared_nonce_digest: Buffer.from(request.nonceDigest.value, 'hex'),
+          prepared_issued_at: NOW,
+          prepared_expires_at: EXPIRES,
+        },
+      ]),
+    );
+    const repository = repositoryWith(query);
+
+    await expect(
+      repository.prepareChallenge({
+        challengeId: CHALLENGE_ID,
+        accountId: ACCOUNT_ID,
+        correlationId: CORRELATION_ID,
+      }),
+    ).resolves.toMatchObject({
+      status: 'pending',
+      chainId: NETWORK,
+      registry: request.registry,
+      challengePayload: request.challengePayload,
+    });
+    expect(query.mock.calls[0]?.[1]).toEqual([CHALLENGE_ID, ACCOUNT_ID, CORRELATION_ID]);
+  });
+
+  it('rejects metadata leaks on non-ready outcomes and forged completion results', async () => {
+    const leaked = jest.fn().mockResolvedValue(
+      result([
+        {
+          prepare_outcome: 'INVALID',
+          prepared_account_id: ACCOUNT_ID,
+          prepared_proof_scheme: null,
+          prepared_chain_namespace: null,
+          prepared_chain_reference: null,
+          prepared_registry_environment: null,
+          prepared_registry_version: null,
+          prepared_registry_fingerprint_sha256: null,
+          prepared_challenge_payload_key_version: null,
+          prepared_challenge_payload_ciphertext: null,
+          prepared_challenge_payload_iv: null,
+          prepared_challenge_payload_auth_tag: null,
+          prepared_address_digest_version: null,
+          prepared_address_digest: null,
+          prepared_domain_digest_version: null,
+          prepared_domain_digest: null,
+          prepared_message_digest_version: null,
+          prepared_message_digest: null,
+          prepared_nonce_digest_version: null,
+          prepared_nonce_digest: null,
+          prepared_issued_at: null,
+          prepared_expires_at: null,
+        },
+      ]),
+    );
+    await expect(
+      repositoryWith(leaked).prepareChallenge({
+        challengeId: CHALLENGE_ID,
+        accountId: ACCOUNT_ID,
+        correlationId: CORRELATION_ID,
+      }),
+    ).rejects.toBeInstanceOf(WalletRegistrationPersistenceError);
+  });
+
+  it('maps pending-challenge exhaustion to a bounded application rate-limit error', async () => {
+    const query = jest.fn().mockRejectedValue({ code: '54000' });
+    await expect(repositoryWith(query).beginChallenge(beginRequest())).rejects.toEqual(
+      new WalletRegistrationRateLimitedError(60),
+    );
+  });
+});

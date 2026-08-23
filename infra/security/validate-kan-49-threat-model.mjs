@@ -103,10 +103,10 @@ const REQUIRED_BOUNDARY_IDS = new Set(
   Array.from({ length: 11 }, (_, index) => `TB-${String(index + 1).padStart(2, '0')}`),
 );
 const REQUIRED_DATA_IDS = new Set(
-  Array.from({ length: 16 }, (_, index) => `DATA-${String(index + 1).padStart(3, '0')}`),
+  Array.from({ length: 17 }, (_, index) => `DATA-${String(index + 1).padStart(3, '0')}`),
 );
 const REQUIRED_SECRET_IDS = new Set(
-  Array.from({ length: 12 }, (_, index) => `KEY-${String(index + 1).padStart(3, '0')}`),
+  Array.from({ length: 15 }, (_, index) => `KEY-${String(index + 1).padStart(3, '0')}`),
 );
 const REQUIRED_THREAT_IDS = new Set([
   'THR-ACCOUNT-001',

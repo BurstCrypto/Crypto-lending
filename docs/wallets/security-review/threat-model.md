@@ -123,10 +123,14 @@ message and that the candidate can perform local/reference verification. It must
 not issue an authenticated API session or describe restored transport state as
 login. The current lab creates its nonce/message in the browser solely to
 exercise the proof shape; that client-generated value is not a production
-challenge. KAN-56 must provide a server-issued, single-use nonce,
-domain/origin/chain/user binding, expiry, replay prevention, signature
-verification, and atomic nonce consumption before any authenticated API session
-is created.
+challenge. KAN-56 adds a separate, disabled-by-default authenticated API
+registration boundary with a server-issued single-use nonce, exact
+domain/origin/URI/network/address/user/operation binding, expiry, EVM or Solana
+signature verification, and atomic terminal challenge handling. That proof can
+register the wallet only; it must never create an authenticated session or
+authorize a transaction. This local registration boundary does not satisfy the
+lab's pending real-wallet, vendor, privacy, network, or independent-review
+evidence.
 
 ## Required rollback and kill switches
 
