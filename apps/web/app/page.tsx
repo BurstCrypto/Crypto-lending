@@ -17,7 +17,12 @@ export default function HomePage() {
           </span>
           <span>Crypto Lending</span>
         </Link>
-        <p className="foundation-label">Platform foundation</p>
+        <nav className="site-navigation" aria-label="Account">
+          <Link href="/login">Sign in</Link>
+          <Link className="navigation-action" href="/register">
+            Create account
+          </Link>
+        </nav>
       </header>
 
       <div className="hero-grid">
@@ -25,9 +30,17 @@ export default function HomePage() {
           <p className="eyebrow">Lending infrastructure</p>
           <h1 id="page-title">Built for a clearer way to borrow and lend.</h1>
           <p className="hero-copy">
-            The web foundation is running. Secure account, collateral, and lending experiences will
-            land here as the platform grows.
+            A secure account foundation for the next generation of digital-asset lending—designed to
+            make every step understandable before you commit.
           </p>
+          <div className="hero-actions">
+            <Link className="primary-action" href="/register">
+              Create your account <span aria-hidden="true">↗</span>
+            </Link>
+            <Link className="secondary-action" href="/login">
+              Sign in
+            </Link>
+          </div>
         </section>
 
         <ServiceStatus

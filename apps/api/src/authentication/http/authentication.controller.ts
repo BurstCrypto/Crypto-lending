@@ -12,7 +12,9 @@ import {
 } from '@nestjs/common';
 import {
   ApiBody,
+  ApiConsumes,
   ApiNoContentResponse,
+  ApiOkResponse,
   ApiOperation,
   ApiQuery,
   ApiResponse,
@@ -44,6 +46,7 @@ import { AuthenticationClientAddressResolver } from './authentication-client-add
 import { parseAuthenticationCallback } from './authentication-callback';
 import { canonicalHttpsOrigin } from './authentication-origin';
 import { StartRegistrationDto } from './dto/start-registration.dto';
+import { AuthenticationStartResponseDto } from './dto/authentication-start-response.dto';
 
 interface AuthenticationControllerRequest extends AuthenticationHttpRequest {
   readonly originalUrl?: unknown;
@@ -54,12 +57,15 @@ interface AuthenticationControllerRequest extends AuthenticationHttpRequest {
 interface AuthenticationControllerResponse {
   setHeader(name: string, value: string | readonly string[]): void;
   status(code: number): this;
+  json(body: unknown): void;
   end(): void;
 }
 
 const TRANSACTION_COOKIE_OPTIONS = Object.freeze({ httpOnly: true, sameSite: 'Lax' as const });
 const SESSION_COOKIE_OPTIONS = Object.freeze({ httpOnly: true, sameSite: 'Lax' as const });
 const CSRF_COOKIE_OPTIONS = Object.freeze({ httpOnly: false, sameSite: 'Strict' as const });
+const GENERIC_AUTHENTICATION_ERROR_PATH = '/login?error=authentication';
+const HTTP_QUALITY_VALUE = /^(?:0(?:\.\d{0,3})?|1(?:\.0{0,3})?)$/u;
 
 function secondsUntil(expiry: Date): number {
   return Math.max(1, Math.floor((expiry.getTime() - Date.now()) / 1_000));
@@ -79,6 +85,10 @@ export class AuthenticationController {
   @ApiOperation({ summary: 'Start managed OIDC login with PKCE' })
   @ApiQuery({ name: 'returnTo', required: false, example: '/' })
   @ApiResponse({ status: 302, description: 'Redirect to the configured identity provider' })
+  @ApiOkResponse({
+    type: AuthenticationStartResponseDto,
+    description: 'Authorization URL when the request explicitly accepts application/json',
+  })
   async login(
     @Query('returnTo') returnTo: string | undefined,
     @Req() request: AuthenticationControllerRequest,
@@ -102,6 +112,12 @@ export class AuthenticationController {
           },
         ),
       );
+      if (this.acceptsJson(request)) {
+        response
+          .status(HttpStatus.OK)
+          .json(new AuthenticationStartResponseDto(started.authorizationUrl));
+        return;
+      }
       this.redirect(response, HttpStatus.FOUND, started.authorizationUrl);
     } catch (error) {
       this.throwHttp(error, response);
@@ -110,8 +126,13 @@ export class AuthenticationController {
 
   @Post('registration')
   @ApiOperation({ summary: 'Start atomic account registration through managed OIDC' })
+  @ApiConsumes('application/json', 'application/x-www-form-urlencoded')
   @ApiBody({ type: StartRegistrationDto })
   @ApiResponse({ status: 303, description: 'Redirect to the configured identity provider' })
+  @ApiOkResponse({
+    type: AuthenticationStartResponseDto,
+    description: 'Authorization URL when the request explicitly accepts application/json',
+  })
   async registration(
     @Body() body: StartRegistrationDto,
     @Req() request: AuthenticationControllerRequest,
@@ -119,8 +140,7 @@ export class AuthenticationController {
   ): Promise<void> {
     this.privateResponse(response);
     try {
-      const expectedOrigin = canonicalHttpsOrigin(this.enabledConfig().publicOrigin);
-      if (request.headers?.origin !== expectedOrigin) throw new AuthenticationRejectedError();
+      this.assertTrustedUnsafeOrigin(request);
       const started = await this.authentication.start({
         flow: 'registration',
         returnPath: body.returnPath ?? '/',
@@ -142,6 +162,12 @@ export class AuthenticationController {
           },
         ),
       );
+      if (this.acceptsJson(request)) {
+        response
+          .status(HttpStatus.OK)
+          .json(new AuthenticationStartResponseDto(started.authorizationUrl));
+        return;
+      }
       this.redirect(response, HttpStatus.SEE_OTHER, started.authorizationUrl);
     } catch (error) {
       this.throwHttp(error, response);
@@ -150,7 +176,11 @@ export class AuthenticationController {
 
   @Get('callback')
   @ApiOperation({ summary: 'Consume a one-use browser-bound OIDC callback' })
-  @ApiResponse({ status: 303, description: 'Issue a secure local session and redirect locally' })
+  @ApiResponse({
+    status: 303,
+    description:
+      'Redirect locally after issuing a secure session or after a fixed generic browser failure',
+  })
   async callback(
     @Req() request: AuthenticationControllerRequest,
     @Res() response: AuthenticationControllerResponse,
@@ -199,6 +229,18 @@ export class AuthenticationController {
           ),
         );
       }
+      if (this.acceptsHtml(request)) {
+        if (error instanceof AuthenticationRateLimitedError) {
+          response.setHeader('Retry-After', String(error.retryAfterSeconds));
+        } else if (
+          error instanceof AuthenticationUnavailableError ||
+          error instanceof ClaimedAuthenticationUnavailableError
+        ) {
+          response.setHeader('Retry-After', '1');
+        }
+        this.redirect(response, HttpStatus.SEE_OTHER, GENERIC_AUTHENTICATION_ERROR_PATH);
+        return;
+      }
       this.throwHttp(error, response);
     }
   }
@@ -211,7 +253,10 @@ export class AuthenticationController {
     @Res() response: AuthenticationControllerResponse,
   ): Promise<void> {
     this.privateResponse(response);
+    let trustedOrigin = false;
     try {
+      this.assertTrustedUnsafeOrigin(request);
+      trustedOrigin = true;
       const rotated = await this.authentication.rotate(
         request,
         this.clientAddresses.resolve(request),
@@ -229,7 +274,7 @@ export class AuthenticationController {
       ]);
       response.status(HttpStatus.NO_CONTENT).end();
     } catch (error) {
-      if (error instanceof AuthenticationRejectedError) {
+      if (trustedOrigin && error instanceof AuthenticationRejectedError) {
         response.setHeader('Set-Cookie', this.clearSessionCookies());
       }
       this.throwHttp(error, response);
@@ -244,7 +289,10 @@ export class AuthenticationController {
     @Res() response: AuthenticationControllerResponse,
   ): Promise<void> {
     this.privateResponse(response);
+    let trustedOrigin = false;
     try {
+      this.assertTrustedUnsafeOrigin(request);
+      trustedOrigin = true;
       await this.authentication.logout(request);
     } catch (error) {
       if (
@@ -253,7 +301,9 @@ export class AuthenticationController {
       ) {
         this.throwHttp(error, response);
       }
-      if (!(error instanceof AuthenticationRejectedError)) this.throwHttp(error, response);
+      if (!(error instanceof AuthenticationRejectedError) || !trustedOrigin) {
+        this.throwHttp(error, response);
+      }
     }
     response.setHeader('Set-Cookie', this.clearSessionCookies());
     response.status(HttpStatus.NO_CONTENT).end();
@@ -271,9 +321,38 @@ export class AuthenticationController {
     return this.config;
   }
 
+  private assertTrustedUnsafeOrigin(request: AuthenticationControllerRequest): void {
+    const expectedOrigin = canonicalHttpsOrigin(this.enabledConfig().publicOrigin);
+    if (request.headers?.origin !== expectedOrigin) throw new AuthenticationRejectedError();
+  }
+
   private privateResponse(response: AuthenticationControllerResponse): void {
     response.setHeader('Cache-Control', 'private, no-store');
-    response.setHeader('Vary', 'Cookie, Origin');
+    response.setHeader('Vary', 'Cookie, Origin, Accept');
+  }
+
+  private acceptsJson(request: AuthenticationControllerRequest): boolean {
+    return request.headers?.accept === 'application/json';
+  }
+
+  private acceptsHtml(request: AuthenticationControllerRequest): boolean {
+    const accept = request.headers?.accept;
+    if (typeof accept !== 'string' || accept.length > 2_048) return false;
+    return accept.split(',').some((entry) => {
+      const [mediaType, ...parameters] = entry.split(';');
+      if (mediaType?.trim().toLowerCase() !== 'text/html') return false;
+
+      let quality: number | null = null;
+      for (const parameter of parameters) {
+        const separator = parameter.indexOf('=');
+        if (separator < 0 || parameter.slice(0, separator).trim().toLowerCase() !== 'q') continue;
+        if (quality !== null) return false;
+        const value = parameter.slice(separator + 1).trim();
+        if (!HTTP_QUALITY_VALUE.test(value)) return false;
+        quality = Number(value);
+      }
+      return quality === null || quality > 0;
+    });
   }
 
   private redirect(
