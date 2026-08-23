@@ -2,6 +2,11 @@ import type { NextConfig } from 'next';
 
 import { buildBrowserSecurityHeaders } from './lib/security/browser-egress';
 
+const ACCOUNT_SHELL_HEADERS = [
+  { key: 'Cache-Control', value: 'private, no-store, max-age=0' },
+  { key: 'X-Robots-Tag', value: 'noindex, nofollow, noarchive' },
+];
+
 const nextConfig = {
   output: 'standalone',
   poweredByHeader: false,
@@ -11,6 +16,10 @@ const nextConfig = {
       {
         source: '/:path*',
         headers: buildBrowserSecurityHeaders(process.env.NODE_ENV),
+      },
+      {
+        source: '/account/:path*',
+        headers: ACCOUNT_SHELL_HEADERS,
       },
     ];
   },

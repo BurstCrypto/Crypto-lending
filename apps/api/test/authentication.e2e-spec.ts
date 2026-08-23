@@ -289,6 +289,67 @@ describe('authentication HTTP boundary (e2e)', () => {
     expect(repository.revokeSession).toHaveBeenCalledTimes(1);
   });
 
+  it('returns authorization URLs to explicit JSON clients without exposing the transaction cookie', async () => {
+    const login = await request(app.getHttpServer())
+      .get('/api/v1/auth/login?returnTo=%2Faccount')
+      .set('Accept', 'application/json')
+      .expect(200);
+    expect(login.body).toEqual({ authorizationUrl: expect.stringMatching(/^https:\/\//u) });
+    expect(login.headers.location).toBeUndefined();
+    expect(login.headers.vary).toBe('Cookie, Origin, Accept');
+    expect(login.headers['cache-control']).toBe('private, no-store');
+    expect(JSON.stringify(login.body)).not.toContain(AUTHENTICATION_COOKIE_NAMES.transaction);
+    expect(setCookies(login)).toEqual([
+      expect.stringContaining(`${AUTHENTICATION_COOKIE_NAMES.transaction}=`),
+    ]);
+
+    const registration = await request(app.getHttpServer())
+      .post('/api/v1/auth/registration')
+      .set('Accept', 'application/json')
+      .set('Origin', CONFIG.publicOrigin)
+      .send({
+        contactEmail: 'new@example.com',
+        declaredResidencyCountryCode: 'US',
+        returnPath: '/account',
+      })
+      .expect(200);
+    expect(registration.body).toEqual({ authorizationUrl: expect.stringMatching(/^https:\/\//u) });
+    expect(registration.headers.location).toBeUndefined();
+    expect(JSON.stringify(registration.body)).not.toContain('new@example.com');
+  });
+
+  it('keeps a progressively enhanced URL-encoded registration navigation compatible', async () => {
+    const response = await request(app.getHttpServer())
+      .post('/api/v1/auth/registration')
+      .set('Origin', CONFIG.publicOrigin)
+      .type('form')
+      .send({
+        contactEmail: 'form@example.com',
+        contactPhone: '',
+        declaredResidencyCountryCode: 'us',
+        returnPath: '/account',
+      })
+      .expect(303);
+    expect(response.headers.location).toMatch(/^https:\/\//u);
+    expect(setCookies(response)).toEqual([
+      expect.stringContaining(`${AUTHENTICATION_COOKIE_NAMES.transaction}=`),
+    ]);
+  });
+
+  it('rejects non-ASCII residency input instead of normalizing it into another country', async () => {
+    await request(app.getHttpServer())
+      .post('/api/v1/auth/registration')
+      .set('Origin', CONFIG.publicOrigin)
+      .send({
+        contactEmail: 'form@example.com',
+        declaredResidencyCountryCode: 'ß',
+        returnPath: '/account',
+      })
+      .expect(400);
+
+    expect(repository.beginTransaction).not.toHaveBeenCalled();
+  });
+
   it('rejects a callback state mismatch before claiming the transaction and clears it', async () => {
     const started = await request(app.getHttpServer())
       .get('/api/v1/auth/login?returnTo=%2F')
@@ -306,6 +367,30 @@ describe('authentication HTTP boundary (e2e)', () => {
       expect.stringContaining(`${AUTHENTICATION_COOKIE_NAMES.transaction}=`),
     ]);
     expect(setCookies(rejected)[0]).toContain('Max-Age=0');
+  });
+
+  it('returns browser callback failures to one fixed generic authentication screen', async () => {
+    const started = await request(app.getHttpServer()).get('/api/v1/auth/login').expect(302);
+    const transactionHeader = setCookies(started).find((header) =>
+      header.startsWith(`${AUTHENTICATION_COOKIE_NAMES.transaction}=`),
+    );
+
+    const rejected = await request(app.getHttpServer())
+      .get(`/api/v1/auth/callback?code=fixture-code&state=${'A'.repeat(43)}`)
+      .set('Accept', 'text/html,application/xhtml+xml')
+      .set('Cookie', cookiePair(transactionHeader as string))
+      .expect(303);
+    expect(rejected.headers.location).toBe('/login?error=authentication');
+    expect(repository.claimTransaction).not.toHaveBeenCalled();
+    expect(setCookies(rejected)[0]).toContain('Max-Age=0');
+  });
+
+  it('retains the API error contract when a caller explicitly refuses HTML', async () => {
+    await request(app.getHttpServer())
+      .get(`/api/v1/auth/callback?code=fixture-code&state=${'A'.repeat(43)}`)
+      .set('Accept', 'application/json, text/html;q=0')
+      .expect(401)
+      .expect('Content-Type', /json/u);
   });
 
   it('returns a bounded 429 without beginning an OIDC transaction when rate limited', async () => {
@@ -352,5 +437,25 @@ describe('authentication HTTP boundary (e2e)', () => {
     expect(setCookies(response)).toHaveLength(2);
     expect(setCookies(response).every((header) => header.includes('Max-Age=0'))).toBe(true);
     expect(repository.rotateSession).not.toHaveBeenCalled();
+  });
+
+  it('rejects untrusted unsafe origins without clearing or resolving session cookies', async () => {
+    const credentialId = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+    const session = `${AUTHENTICATION_COOKIE_NAMES.session}=${credentialId}.${'A'.repeat(43)}`;
+    const csrf = 'B'.repeat(43);
+
+    for (const endpoint of ['/api/v1/auth/session/rotate', '/api/v1/auth/logout']) {
+      const response = await request(app.getHttpServer())
+        .post(endpoint)
+        .set('Origin', 'https://attacker.invalid')
+        .set('X-CSRF-Token', csrf)
+        .set('Cookie', `${session}; ${AUTHENTICATION_COOKIE_NAMES.csrf}=${csrf}`)
+        .expect(401);
+      expect(setCookies(response)).toEqual([]);
+    }
+
+    expect(repository.resolveSession).not.toHaveBeenCalled();
+    expect(repository.rotateSession).not.toHaveBeenCalled();
+    expect(repository.revokeSession).not.toHaveBeenCalled();
   });
 });

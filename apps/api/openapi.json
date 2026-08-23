@@ -316,6 +316,20 @@
         ],
         "type": "object"
       },
+      "AuthenticationStartResponseDto": {
+        "properties": {
+          "authorizationUrl": {
+            "description": "Managed identity-provider authorization URL for an immediate top-level navigation",
+            "example": "https://identity.example/authorize?client_id=crypto-lending",
+            "format": "uri",
+            "type": "string"
+          }
+        },
+        "required": [
+          "authorizationUrl"
+        ],
+        "type": "object"
+      },
       "HealthResponseDto": {
         "properties": {
           "service": {
@@ -407,7 +421,7 @@
           "contactPhone": {
             "example": "+13035550123",
             "nullable": true,
-            "type": "object"
+            "type": "string"
           },
           "declaredResidencyCountryCode": {
             "example": "US",
@@ -863,7 +877,7 @@
         "parameters": [],
         "responses": {
           "303": {
-            "description": "Issue a secure local session and redirect locally"
+            "description": "Redirect locally after issuing a secure session or after a fixed generic browser failure"
           }
         },
         "summary": "Consume a one-use browser-bound OIDC callback",
@@ -886,6 +900,16 @@
           }
         ],
         "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationStartResponseDto"
+                }
+              }
+            },
+            "description": "Authorization URL when the request explicitly accepts application/json"
+          },
           "302": {
             "description": "Redirect to the configured identity provider"
           }
@@ -921,11 +945,26 @@
               "schema": {
                 "$ref": "#/components/schemas/StartRegistrationDto"
               }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/StartRegistrationDto"
+              }
             }
           },
           "required": true
         },
         "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationStartResponseDto"
+                }
+              }
+            },
+            "description": "Authorization URL when the request explicitly accepts application/json"
+          },
           "303": {
             "description": "Redirect to the configured identity provider"
           }

@@ -270,6 +270,11 @@ gate.
   identity mapping, and abuse-control boundaries. The local implementation is
   documented in [`docs/KAN-37.md`](docs/KAN-37.md); managed-provider selection,
   egress, deployment, and live acceptance remain gated.
+- `apps/web/app/login`, `register`, and `account` own KAN-38's accessible
+  cookie-session UI, strict local return paths, protected loading shell, live
+  profile restoration, and CSRF-bound logout. The local contract and remaining
+  provider/HTTPS browser gates are documented in
+  [`docs/KAN-38.md`](docs/KAN-38.md).
 - `apps/api/src/blockchain` owns KAN-61's issuer-verified, environment-qualified
   chain and stablecoin registry. New observations normalize only against the
   latest immutable snapshot, while trusted historical reads retain their exact
