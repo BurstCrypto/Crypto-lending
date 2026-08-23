@@ -24,6 +24,6 @@ import { PostgresModule } from '../infrastructure/database/postgres.module';
       useExisting: PostgresAccountProfileRepository,
     },
   ],
-  exports: [AccountProfileService],
+  exports: [AccountAuthGuard, AccountProfileService],
 })
 export class AccountsModule {}

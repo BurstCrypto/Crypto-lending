@@ -28,6 +28,7 @@ class InMemoryMigrationDatabase {
   jobOutboxLastErrorConstraintExists = false;
   ledgerIdempotencySchemaExists = false;
   ledgerSchemaExists = false;
+  walletRegistrationSchemaExists = false;
   migrationTableExists = false;
   oldVerifierValid = true;
   newVerifierValid = true;
@@ -37,6 +38,7 @@ class InMemoryMigrationDatabase {
   private transactionAuthenticationSchemaExistsSnapshot: boolean | undefined;
   private transactionLedgerSchemaExistsSnapshot: boolean | undefined;
   private transactionLedgerIdempotencySchemaExistsSnapshot: boolean | undefined;
+  private transactionWalletRegistrationSchemaExistsSnapshot: boolean | undefined;
 
   readonly client = {
     query: async (text: string, values: readonly unknown[] = []): Promise<QueryResult> => {
@@ -48,11 +50,14 @@ class InMemoryMigrationDatabase {
         this.transactionAuthenticationSchemaExistsSnapshot = this.authenticationSchemaExists;
         this.transactionLedgerSchemaExistsSnapshot = this.ledgerSchemaExists;
         this.transactionLedgerIdempotencySchemaExistsSnapshot = this.ledgerIdempotencySchemaExists;
+        this.transactionWalletRegistrationSchemaExistsSnapshot =
+          this.walletRegistrationSchemaExists;
       } else if (normalized === 'COMMIT') {
         this.transactionAppliedSnapshot = undefined;
         this.transactionAuthenticationSchemaExistsSnapshot = undefined;
         this.transactionLedgerSchemaExistsSnapshot = undefined;
         this.transactionLedgerIdempotencySchemaExistsSnapshot = undefined;
+        this.transactionWalletRegistrationSchemaExistsSnapshot = undefined;
       } else if (normalized === 'ROLLBACK') {
         if (this.transactionAppliedSnapshot) {
           this.applied.clear();
@@ -70,10 +75,15 @@ class InMemoryMigrationDatabase {
         if (this.transactionAuthenticationSchemaExistsSnapshot !== undefined) {
           this.authenticationSchemaExists = this.transactionAuthenticationSchemaExistsSnapshot;
         }
+        if (this.transactionWalletRegistrationSchemaExistsSnapshot !== undefined) {
+          this.walletRegistrationSchemaExists =
+            this.transactionWalletRegistrationSchemaExistsSnapshot;
+        }
         this.transactionAppliedSnapshot = undefined;
         this.transactionAuthenticationSchemaExistsSnapshot = undefined;
         this.transactionLedgerSchemaExistsSnapshot = undefined;
         this.transactionLedgerIdempotencySchemaExistsSnapshot = undefined;
+        this.transactionWalletRegistrationSchemaExistsSnapshot = undefined;
       } else if (normalized.includes('CREATE TABLE IF NOT EXISTS schema_migrations')) {
         this.migrationTableExists = true;
       } else if (normalized.startsWith("SELECT to_regclass('schema_migrations')")) {
@@ -104,6 +114,10 @@ class InMemoryMigrationDatabase {
         this.ledgerIdempotencySchemaExists = true;
       } else if (normalized.includes('CREATE TABLE authentication_oidc_identities (')) {
         this.authenticationSchemaExists = true;
+      } else if (normalized.includes('CREATE TABLE wallet_ownership_challenges (')) {
+        this.walletRegistrationSchemaExists = true;
+      } else if (normalized === 'DROP TABLE wallet_ownership_challenges') {
+        this.walletRegistrationSchemaExists = false;
       } else if (normalized === 'DROP TABLE authentication_oidc_identities') {
         this.authenticationSchemaExists = false;
       } else if (normalized === 'DROP TABLE ledger_command_idempotency') {
@@ -138,6 +152,21 @@ class InMemoryMigrationDatabase {
               definition?.includes(`ON job_outbox (${expectedTimestamp}, id)`) &&
               definition.includes(`WHERE status = '${expectedStatus}'`),
             ),
+          },
+        ]);
+      } else if (
+        normalized.startsWith('SELECT (prior.valid AND wallet_registration.valid)') &&
+        normalized.includes('registered_wallets_one_active_identity')
+      ) {
+        return result([
+          {
+            valid:
+              this.accountSchemaExists &&
+              this.jobOutboxExists &&
+              this.ledgerSchemaExists &&
+              this.ledgerIdempotencySchemaExists &&
+              this.authenticationSchemaExists &&
+              this.walletRegistrationSchemaExists,
           },
         ]);
       } else if (
@@ -243,6 +272,7 @@ describe('MigrationRunner', () => {
       '0008',
       '0009',
       '0010',
+      '0011',
     ]);
     expect(database.jobOutboxExists).toBe(true);
     expect(database.applied.has('0001')).toBe(true);
@@ -255,19 +285,22 @@ describe('MigrationRunner', () => {
     expect(database.applied.has('0008')).toBe(true);
     expect(database.applied.has('0009')).toBe(true);
     expect(database.applied.has('0010')).toBe(true);
+    expect(database.applied.has('0011')).toBe(true);
     expect(database.accountSchemaExists).toBe(true);
     expect(database.ledgerSchemaExists).toBe(true);
     expect(database.jobOutboxLastErrorConstraintExists).toBe(true);
     expect(database.ledgerIdempotencySchemaExists).toBe(true);
     expect(database.authenticationSchemaExists).toBe(true);
-    expect(database.queries.filter((query) => query === 'BEGIN')).toHaveLength(8);
+    expect(database.walletRegistrationSchemaExists).toBe(true);
+    expect(database.queries.filter((query) => query === 'BEGIN')).toHaveLength(9);
     expect(
       database.queries.filter((query) => query.startsWith('CREATE INDEX CONCURRENTLY')),
     ).toHaveLength(2);
     await expect(runner.assertUpToDate()).resolves.toBeUndefined();
 
     await expect(runner.up()).resolves.toEqual([]);
-    await expect(runner.down(10)).resolves.toEqual([
+    await expect(runner.down(11)).resolves.toEqual([
+      '0011',
       '0010',
       '0009',
       '0008',
@@ -284,6 +317,7 @@ describe('MigrationRunner', () => {
     expect(database.ledgerSchemaExists).toBe(false);
     expect(database.ledgerIdempotencySchemaExists).toBe(false);
     expect(database.authenticationSchemaExists).toBe(false);
+    expect(database.walletRegistrationSchemaExists).toBe(false);
     expect(database.applied.size).toBe(0);
     await expect(runner.assertUpToDate()).rejects.toThrow(
       'Database migration 0001 has not been applied',
@@ -305,7 +339,7 @@ describe('MigrationRunner', () => {
     );
     await expect(runner.up()).rejects.toThrow('Database migration 0003 schema verification failed');
 
-    await expect(runner.down(8)).rejects.toThrow(
+    await expect(runner.down(9)).rejects.toThrow(
       'Database migration 0003 schema verification failed',
     );
     expect(database.ledgerSchemaExists).toBe(true);
@@ -313,7 +347,8 @@ describe('MigrationRunner', () => {
       'job_outbox_failed_retention_idx',
       "CREATE INDEX CONCURRENTLY job_outbox_failed_retention_idx ON job_outbox (failed_at, id) WHERE status = 'failed'",
     );
-    await expect(runner.down(8)).resolves.toEqual([
+    await expect(runner.down(9)).resolves.toEqual([
+      '0011',
       '0010',
       '0009',
       '0008',
@@ -332,6 +367,7 @@ describe('MigrationRunner', () => {
       '0008',
       '0009',
       '0010',
+      '0011',
     ]);
     expect(database.indexes.has('job_outbox_failed_retention_idx')).toBe(true);
     await expect(runner.assertUpToDate()).resolves.toBeUndefined();

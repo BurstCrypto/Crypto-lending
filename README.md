@@ -118,6 +118,11 @@ The KAN-222 [license packet](docs/wallets/license-review/README.md) and
 [public-launch gate](docs/wallets/license-review/public-launch-legal-gate.md)
 remain open for every public, external-user, mainnet, or production use.
 
+KAN-56's [wallet ownership registration boundary](docs/KAN-56.md) adds local,
+authenticated EVM EOA and Solana Ed25519 ownership verification with atomic
+replay prevention and encrypted durable wallet identity. It remains disabled by
+default and makes no wallet, RPC, provider, or cloud call.
+
 ### Mock route
 
 To run the mock route on loopback for an authorized internal test, set the

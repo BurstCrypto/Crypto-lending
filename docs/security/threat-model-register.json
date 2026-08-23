@@ -66,9 +66,16 @@
       "name": "API to state stores",
       "source": "API runtime principal",
       "destination": "PostgreSQL and health-only Redis boundary",
-      "data": ["profiles", "authentication state", "audit events", "financial commands"],
+      "data": [
+        "profiles",
+        "authentication state",
+        "encrypted wallet registrations and challenge digests",
+        "audit events",
+        "financial commands"
+      ],
       "evidence": [
         "apps/api/src/infrastructure/database/migrations/0005-enforce-database-principal-boundaries.migration.ts",
+        "apps/api/src/infrastructure/database/migrations/0011-create-wallet-ownership-registration.migration.ts",
         "docs/KAN-233.md"
       ]
     },
@@ -213,17 +220,19 @@
     },
     {
       "id": "DATA-005",
-      "name": "Wallet addresses, public keys, pairing state, proof messages, and signatures",
+      "name": "Ephemeral wallet ownership-proof and pairing material",
       "classification": "RESTRICTED",
       "cia": { "confidentiality": "HIGH", "integrity": "HIGH", "availability": "MEDIUM" },
       "stores": [
-        "Restricted browser memory and vendor-managed wallet storage",
+        "Restricted browser, wallet, and API process memory while a challenge is issued and verified",
+        "Vendor-managed wallet connection state outside application persistence",
         "Sanitized wallet-lab evidence only"
       ],
-      "retention": "RAW_PROOF_MEMORY_ONLY; SANITIZED_EVIDENCE_SESSION_OR_REVIEW_BOUND",
-      "logging": "NEVER_RAW",
+      "retention": "RAW_NONCE_MESSAGE_AND_SIGNATURE_MEMORY_ONLY; APPLICATION_ADDRESS_PUBLIC_KEY_AND_PAIRING_SESSION_BOUND; VENDOR_CONNECTION_RETENTION_POLICY_PENDING; SANITIZED_EVIDENCE_SESSION_OR_REVIEW_BOUND",
+      "logging": "NEVER_RAW_ADDRESS_PUBLIC_KEY_PAIRING_NONCE_MESSAGE_SIGNATURE_OR_DIGEST",
       "owner": "Wallet and Privacy",
       "evidence": [
+        "apps/api/src/wallets/domain/wallet-ownership-proof.ts",
         "docs/wallets/security-review/threat-model.md",
         "tools/wallet-lab/src/evidence.ts"
       ]
@@ -363,6 +372,25 @@
       "logging": "BOUNDED_IDENTIFIERS_AND_OUTCOMES_ONLY",
       "owner": "Release, Finance, and SRE",
       "evidence": ["docs/KAN-229.md", "infra/aws/billing-control-record.schema.json"]
+    },
+    {
+      "id": "DATA-017",
+      "name": "Registered chain-qualified wallet identity and bounded connection metadata",
+      "classification": "RESTRICTED",
+      "cia": { "confidentiality": "HIGH", "integrity": "HIGH", "availability": "HIGH" },
+      "stores": [
+        "PostgreSQL registered_wallets stores the canonical address and server-authored metadata only as versioned AES-256-GCM ciphertext plus a versioned keyed address digest for active-identity uniqueness",
+        "PostgreSQL wallet_ownership_challenges stores account, proof-scheme, chain, registry, lifecycle, versioned keyed address, domain, message, and nonce digests, plus an AES-256-GCM sealed challenge-binding record while pending; it never stores a raw nonce, signed message, or signature",
+        "PostgreSQL wallet_registration_audit_events stores bounded identifiers, outcomes, and reason codes without raw proof material"
+      ],
+      "retention": "REGISTERED_IDENTITY_REVOCABLE_NO_DELETE_PATH_POLICY_PENDING; PENDING_CHALLENGE_VALID_60_TO_600_SECONDS; PREPARED_EXPIRED_CHALLENGE_ATOMICALLY_TERMINALIZED_AUDITED_AND_CRYPTO_SHREDDED; CHALLENGE_DIGEST_REPLAY_TOMBSTONE_AND_AUDIT_RETENTION_POLICY_PENDING",
+      "logging": "NO_RAW_ADDRESS_PUBLIC_KEY_PAIRING_NONCE_MESSAGE_SIGNATURE_OR_DIGEST; BOUNDED_IDENTIFIERS_OUTCOMES_AND_REASON_CODES_ONLY",
+      "owner": "Wallet, Privacy, and Security",
+      "evidence": [
+        "apps/api/src/infrastructure/database/migrations/0011-create-wallet-ownership-registration.migration.ts",
+        "apps/api/src/wallets/domain/wallet-identity.ts",
+        "apps/api/src/wallets/infrastructure/crypto/wallet-registration-crypto.ts"
+      ]
     }
   ],
   "secretInventory": [
@@ -509,6 +537,52 @@
       "rotation": "GitHub-managed per-job issuance and expiry; repository permissions and workflow changes require review",
       "owner": "Release and Security",
       "evidence": [".github/workflows/ci.yml"]
+    },
+    {
+      "id": "KEY-013",
+      "name": "Wallet registration canonical-identity HMAC key",
+      "classification": "RESTRICTED",
+      "consumers": ["API wallet-registration workload"],
+      "injection": "Registration is disabled by default; enablement requires an explicit versioned environment value from future separately authorized custody, while local tests create non-production 32-byte base64url fixtures in process only",
+      "storage": "Opaque API process-memory wrapper backed by a WeakMap; PostgreSQL stores only the version and purpose-separated keyed canonical-address digest",
+      "rotation": "Operationally immutable until a reviewed dual-digest read/write, uniqueness-conflict, backfill, cutover, rollback, and old-version retirement migration exists; KAN-50 custody and KAN-235 independent review remain production gates",
+      "owner": "Wallet, Database, and Security",
+      "evidence": [
+        "apps/api/src/wallets/infrastructure/config/wallet-registration.config.ts",
+        "apps/api/src/wallets/infrastructure/crypto/wallet-registration-crypto.ts",
+        "docs/KAN-50.md"
+      ]
+    },
+    {
+      "id": "KEY-014",
+      "name": "Wallet ownership-challenge HMAC key",
+      "classification": "RESTRICTED",
+      "consumers": ["API wallet-registration workload"],
+      "injection": "Registration is disabled by default; enablement requires a purpose-distinct versioned environment value from future separately authorized custody, while local tests create non-production 32-byte base64url fixtures in process only",
+      "storage": "Opaque API process-memory wrapper backed by a WeakMap; PostgreSQL stores only versioned account-binding, domain, message, nonce, and rate-limit digests",
+      "rotation": "The local runtime has one active version, so replacement is blocked until a reviewed overlap covers every unexpired challenge and replay tombstone; KAN-50 custody and KAN-235 independent review remain production gates",
+      "owner": "Wallet, Identity, and Security",
+      "evidence": [
+        "apps/api/src/wallets/infrastructure/config/wallet-registration.config.ts",
+        "apps/api/src/wallets/infrastructure/crypto/wallet-registration-crypto.ts",
+        "docs/KAN-50.md"
+      ]
+    },
+    {
+      "id": "KEY-015",
+      "name": "Wallet registration challenge-binding, address, and metadata AES-256-GCM keys",
+      "classification": "RESTRICTED",
+      "consumers": ["API wallet-registration workload"],
+      "injection": "Registration is disabled by default; enablement requires an explicit versioned environment value from future separately authorized custody, while local tests create non-production 32-byte base64url fixtures in process only",
+      "storage": "Opaque API process-memory wrapper backed by a WeakMap; PostgreSQL stores versioned ciphertext, random IV, and authentication tag bound to the challenge or wallet row, account, network, address digest, and field through authenticated additional data",
+      "rotation": "The local runtime has one active decrypt version, so production rotation requires an additive decrypt key ring, active-write version, authenticated reseal migration, rollback, and old-key retirement; KAN-50 custody and KAN-235 independent review remain gates",
+      "owner": "Wallet, Privacy, and Security",
+      "evidence": [
+        "apps/api/src/infrastructure/database/migrations/0011-create-wallet-ownership-registration.migration.ts",
+        "apps/api/src/wallets/infrastructure/config/wallet-registration.config.ts",
+        "apps/api/src/wallets/infrastructure/crypto/wallet-registration-crypto.ts",
+        "docs/KAN-50.md"
+      ]
     }
   ],
   "threats": [
@@ -598,7 +672,7 @@
       "scenario": "A malicious wallet or provider spoofs brand, account, chain, network, or session scope and is treated as trusted ownership evidence.",
       "risk": "HIGH",
       "boundaryIds": ["TB-06", "TB-10"],
-      "assetIds": ["DATA-005", "DATA-014"],
+      "assetIds": ["DATA-005", "DATA-014", "DATA-017"],
       "response": "MITIGATE",
       "mitigations": [
         "Explicit connector choice, chain-qualified accounts, testnet allowlists, and fail-closed scope validation",
@@ -615,20 +689,26 @@
       "id": "THR-WALLET-002",
       "domain": "WALLET",
       "stride": ["SPOOFING", "REPUDIATION"],
-      "scenario": "A stale, cross-origin, cross-chain, or replayed wallet signature is accepted as a production login or transaction authorization.",
+      "scenario": "A stale, wrong-user, cross-origin, cross-network, or replayed wallet proof attaches an address to the wrong account, or a registration proof is later treated as login or transaction authority.",
       "risk": "HIGH",
-      "boundaryIds": ["TB-01", "TB-06"],
-      "assetIds": ["DATA-003", "DATA-005"],
-      "response": "ELIMINATE",
+      "boundaryIds": ["TB-01", "TB-03", "TB-06"],
+      "assetIds": ["DATA-003", "DATA-005", "DATA-017"],
+      "response": "MITIGATE",
       "mitigations": [
-        "Wallet lab proofs never create an application session or transaction action",
-        "Production enablement requires server-issued one-use domain, origin, chain, account, intent, and expiry binding"
+        "The server issues a short-lived CSPRNG challenge bound to the authenticated account, exact origin and URI, operation, registry network, chain-qualified canonical address, and one-use challenge identifier",
+        "EVM ERC-4361 and ERC-191 or Solana SIWS and Ed25519 verification checks the exact message, nonce, address, network, domain, user binding, and expiry before registration",
+        "Owner-scoped database functions retain keyed challenge digests and an AES-GCM sealed binding record rather than raw nonce, signed message, or signature; row-locked expiry and other terminal updates destroy the sealed record, audit the outcome, consume success once, record replay or rejection outcomes, and enforce one active account owner for each network-qualified address digest",
+        "A verified proof establishes registration ownership only: it neither creates an authentication session nor authorizes a financial transaction, and contract-wallet verification fails closed without a separately approved RPC verifier"
       ],
       "owner": "Wallet and Identity",
-      "status": "OPEN_FOLLOW_UP",
-      "evidence": ["docs/wallets/security-review/threat-model.md"],
-      "residualRisk": "The production server challenge and atomic replay boundary do not exist, so wallet login must remain disabled.",
-      "followUp": "KAN-56 production wallet challenge boundary"
+      "status": "MITIGATED_LOCAL",
+      "evidence": [
+        "apps/api/src/infrastructure/database/migrations/0011-create-wallet-ownership-registration.migration.ts",
+        "apps/api/src/wallets/domain/wallet-ownership-proof.ts",
+        "docs/wallets/security-review/threat-model.md"
+      ],
+      "residualRisk": "The local proof and persistence boundary covers wallet registration only; real-wallet behavior, deployed database concurrency, production key custody, contract-wallet RPC verification, privacy retention, and independent review remain unproven, and no login or transaction authority is granted.",
+      "followUp": "KAN-223/KAN-235 independent wallet, privacy, key-custody, and deployed-concurrency review; any wallet login, contract-wallet RPC, or transaction authorization needs a distinct approved design"
     },
     {
       "id": "THR-WALLET-003",
@@ -637,7 +717,7 @@
       "scenario": "A seed phrase, private key, pairing URI, raw signature, wallet address, or provider telemetry enters logs, evidence, source control, or a third party.",
       "risk": "HIGH",
       "boundaryIds": ["TB-06", "TB-09"],
-      "assetIds": ["DATA-004", "DATA-005", "DATA-009", "DATA-015"],
+      "assetIds": ["DATA-004", "DATA-005", "DATA-009", "DATA-015", "DATA-017"],
       "response": "MITIGATE",
       "mitigations": [
         "Private keys and seed phrases are prohibited from collection",
@@ -874,18 +954,25 @@
       "scenario": "Secret rotation reuses a retained slot, leaves old credentials valid, breaks identity mapping, or gives one workload another workload's secret.",
       "risk": "HIGH",
       "boundaryIds": ["TB-03", "TB-08"],
-      "assetIds": ["DATA-002", "DATA-003", "DATA-013"],
+      "assetIds": ["DATA-002", "DATA-003", "DATA-013", "DATA-017"],
       "response": "MITIGATE",
       "mitigations": [
         "Fixed workload-to-secret capability matrices and separate database roles",
         "Rotation procedures require inactive-slot regeneration, replacement, and old-slot denial",
-        "Identity digest key is not rotated until a rehash/key-ring migration exists"
+        "Authentication and wallet identity digest keys are not rotated until compatible rehash or dual-digest migrations exist",
+        "Wallet challenge-key overlap and address or metadata decrypt-key-ring semantics are explicit production gates rather than locally inferred rotation claims"
       ],
       "owner": "Security, Identity, Database, and SRE",
       "status": "OPEN_EXTERNAL",
-      "evidence": ["docs/KAN-50.md", "docs/KAN-37.md", "docs/KAN-233.md"],
-      "residualRisk": "Deployed revocation evidence and a compatible authentication key ring are absent.",
-      "followUp": "Separately authorized deployed rotation exercise and identity key-ring design"
+      "evidence": [
+        "docs/KAN-50.md",
+        "docs/KAN-37.md",
+        "docs/KAN-233.md",
+        "apps/api/src/wallets/infrastructure/config/wallet-registration.config.ts",
+        "apps/api/src/wallets/infrastructure/crypto/wallet-registration-crypto.ts"
+      ],
+      "residualRisk": "Deployed revocation evidence, compatible authentication and wallet identity migrations, challenge-key overlap, and a wallet metadata decrypt key ring are absent.",
+      "followUp": "KAN-50/KAN-235 custody and rotation review, separately authorized deployed rotation evidence, and reviewed authentication plus wallet key-ring migrations"
     },
     {
       "id": "THR-SECRETS-003",

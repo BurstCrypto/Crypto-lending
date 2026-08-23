@@ -50,7 +50,7 @@ describeWithPostgres('PostgreSQL migration rollback integration', () => {
          ('historical-null', 'jobs', '{}'::jsonb, '{}'::jsonb, NULL)`,
     );
 
-    await expect(runner.up()).resolves.toEqual(['0006', '0007', '0008', '0009', '0010']);
+    await expect(runner.up()).resolves.toEqual(['0006', '0007', '0008', '0009', '0010', '0011']);
     const sanitizedLastErrors = await migrationPool.query<{
       id: string;
       last_error: string | null;
@@ -139,13 +139,13 @@ describeWithPostgres('PostgreSQL migration rollback integration', () => {
        )`,
     );
     await expect(runner.assertUpToDate()).resolves.toBeUndefined();
-    await expect(runner.down(5)).resolves.toEqual(['0010', '0009', '0008', '0007', '0006']);
+    await expect(runner.down(6)).resolves.toEqual(['0011', '0010', '0009', '0008', '0007', '0006']);
     await migrationPool.query(
       `UPDATE job_outbox
        SET last_error = 'legacy worker detail after rollback'
        WHERE id = 'historical-raw'`,
     );
-    await expect(runner.up()).resolves.toEqual(['0006', '0007', '0008', '0009', '0010']);
+    await expect(runner.up()).resolves.toEqual(['0006', '0007', '0008', '0009', '0010', '0011']);
     await expect(
       migrationPool.query<{ last_error: string }>(
         `SELECT last_error FROM job_outbox WHERE id = 'historical-raw'`,
@@ -154,7 +154,8 @@ describeWithPostgres('PostgreSQL migration rollback integration', () => {
       rows: [{ last_error: 'OUTBOX_TRANSPORT_FAILED' }],
     });
 
-    await expect(runner.down(9)).resolves.toEqual([
+    await expect(runner.down(10)).resolves.toEqual([
+      '0011',
       '0010',
       '0009',
       '0008',
@@ -209,6 +210,30 @@ describeWithPostgres('PostgreSQL migration rollback integration', () => {
     );
     expect(authenticationObjectsAfterDown.rows).toEqual([]);
 
+    const walletObjectsAfterDown = await migrationPool.query<{
+      object_kind: string;
+      object_name: string;
+    }>(
+      `SELECT 'relation' AS object_kind, relation.relname AS object_name
+       FROM pg_catalog.pg_class AS relation
+       WHERE relation.relnamespace = pg_catalog.to_regnamespace($1)
+         AND (
+           relation.relname LIKE 'wallet\\_%' ESCAPE '\\'
+           OR relation.relname = 'registered_wallets'
+         )
+       UNION ALL
+       SELECT 'function' AS object_kind, procedure.proname AS object_name
+       FROM pg_catalog.pg_proc AS procedure
+       WHERE procedure.pronamespace = pg_catalog.to_regnamespace($1)
+         AND (
+           pg_catalog.strpos(procedure.proname, 'wallet') > 0
+           OR pg_catalog.strpos(procedure.proname, 'registered_wallet') > 0
+         )
+       ORDER BY object_kind, object_name`,
+      [schema],
+    );
+    expect(walletObjectsAfterDown.rows).toEqual([]);
+
     const accountObjectsAfterDown = await migrationPool.query<{
       object_kind: string;
       object_name: string;
@@ -239,7 +264,7 @@ describeWithPostgres('PostgreSQL migration rollback integration', () => {
 
     const migrationRecordsAfterDown = await migrationPool.query<{ id: string }>(
       'SELECT id FROM schema_migrations WHERE id = ANY($1::text[]) ORDER BY id',
-      [['0004', '0006', '0007', '0008', '0009', '0010']],
+      [['0004', '0006', '0007', '0008', '0009', '0010', '0011']],
     );
     expect(migrationRecordsAfterDown.rows).toEqual([]);
 
@@ -253,6 +278,7 @@ describeWithPostgres('PostgreSQL migration rollback integration', () => {
       '0008',
       '0009',
       '0010',
+      '0011',
     ]);
     await expect(runner.assertUpToDate()).resolves.toBeUndefined();
   });

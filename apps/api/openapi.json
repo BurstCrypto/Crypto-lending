@@ -1029,6 +1029,179 @@
           "system"
         ]
       }
+    },
+    "/api/v1/wallets/ownership-challenges": {
+      "post": {
+        "operationId": "WalletRegistrationController_issueChallenge",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "address": {
+                    "maxLength": 128,
+                    "type": "string"
+                  },
+                  "chainId": {
+                    "maxLength": 96,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "chainId",
+                  "address"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Exact server-authored signing challenge"
+          },
+          "400": {
+            "description": "Unsupported or malformed wallet identity"
+          },
+          "401": {
+            "description": "Missing or invalid authenticated session"
+          },
+          "429": {
+            "description": "The account has reached its bounded pending-challenge budget"
+          },
+          "503": {
+            "description": "Wallet registration is disabled or unavailable"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Issue a one-use, account-bound wallet ownership challenge",
+        "tags": [
+          "wallets"
+        ]
+      }
+    },
+    "/api/v1/wallets/ownership-proofs": {
+      "post": {
+        "operationId": "WalletRegistrationController_submitProof",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "challengeId": {
+                        "format": "uuid",
+                        "type": "string"
+                      },
+                      "kind": {
+                        "enum": [
+                          "EVM_EIP191_EOA"
+                        ],
+                        "type": "string"
+                      },
+                      "message": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "signature": {
+                        "maxLength": 132,
+                        "minLength": 132,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "challengeId",
+                      "message",
+                      "signature"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "address": {
+                        "maxLength": 44,
+                        "type": "string"
+                      },
+                      "challengeId": {
+                        "format": "uuid",
+                        "type": "string"
+                      },
+                      "kind": {
+                        "enum": [
+                          "SOLANA_ED25519"
+                        ],
+                        "type": "string"
+                      },
+                      "publicKey": {
+                        "maxLength": 43,
+                        "minLength": 43,
+                        "type": "string"
+                      },
+                      "signature": {
+                        "maxLength": 86,
+                        "minLength": 86,
+                        "type": "string"
+                      },
+                      "signedMessage": {
+                        "maxLength": 5462,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "challengeId",
+                      "address",
+                      "publicKey",
+                      "signedMessage",
+                      "signature"
+                    ],
+                    "type": "object"
+                  }
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Wallet was already registered to this account"
+          },
+          "201": {
+            "description": "Wallet ownership verified and registered"
+          },
+          "401": {
+            "description": "Ownership proof rejected"
+          },
+          "409": {
+            "description": "Wallet is registered to another account"
+          },
+          "503": {
+            "description": "Wallet registration is unavailable"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Verify and atomically register a wallet ownership proof",
+        "tags": [
+          "wallets"
+        ]
+      }
     }
   },
   "servers": [],

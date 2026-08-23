@@ -175,12 +175,53 @@ test('retains every reviewed baseline identifier', () => {
   record.threats = record.threats.filter(({ id }) => id.endsWith('-001'));
 
   const errors = errorsFor(record);
-  for (const id of ['TB-11', 'DATA-016', 'KEY-012', 'THR-ADMIN-006']) {
+  for (const id of ['TB-11', 'DATA-017', 'KEY-015', 'THR-ADMIN-006']) {
     assert(
       errors.some((error) => error.includes(id)),
       `missing baseline ${id} error`,
     );
   }
+});
+
+test('keeps wallet proof data separate from durable registration identity and keys', () => {
+  const record = canonicalRecord();
+  const ephemeralProof = record.dataAssets.find(({ id }) => id === 'DATA-005');
+  const durableIdentity = record.dataAssets.find(({ id }) => id === 'DATA-017');
+  const walletKeys = record.secretInventory.filter(({ id }) =>
+    ['KEY-013', 'KEY-014', 'KEY-015'].includes(id),
+  );
+
+  assert.match(ephemeralProof.name, /Ephemeral wallet ownership-proof/u);
+  assert.match(ephemeralProof.retention, /MEMORY_ONLY/u);
+  assert(durableIdentity.stores.some((store) => store.includes('AES-256-GCM ciphertext')));
+  assert(durableIdentity.stores.some((store) => store.includes('keyed address digest')));
+  assert.match(
+    durableIdentity.retention,
+    /PREPARED_EXPIRED_CHALLENGE_ATOMICALLY_TERMINALIZED_AUDITED_AND_CRYPTO_SHREDDED/u,
+  );
+  assert.doesNotMatch(durableIdentity.retention, /EXPIRY_PURGE_POLICY_PENDING/u);
+  assert.equal(walletKeys.length, 3);
+  assert(walletKeys.every(({ injection }) => injection.includes('disabled by default')));
+  assert(walletKeys.every(({ injection }) => injection.includes('local tests')));
+  assert(walletKeys.every(({ storage }) => storage.includes('process-memory')));
+  assert(walletKeys.every(({ rotation }) => rotation.includes('KAN-235')));
+});
+
+test('limits the locally mitigated wallet proof boundary to registration', () => {
+  const record = canonicalRecord();
+  const threat = record.threats.find(({ id }) => id === 'THR-WALLET-002');
+
+  assert.equal(threat.response, 'MITIGATE');
+  assert.equal(threat.status, 'MITIGATED_LOCAL');
+  assert(threat.assetIds.includes('DATA-005'));
+  assert(threat.assetIds.includes('DATA-017'));
+  assert(threat.boundaryIds.includes('TB-03'));
+  assert(
+    threat.mitigations.some((mitigation) => mitigation.includes('registration ownership only')),
+  );
+  assert.match(threat.residualRisk, /covers wallet registration only/u);
+  assert.match(threat.residualRisk, /no login or transaction authority/u);
+  assert.equal(record.independentApproval.status, 'PENDING');
 });
 
 test('enforces exact classification ranks and handling text', () => {
