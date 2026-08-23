@@ -62,7 +62,7 @@
   "devDependencies": {
     "ajv": "8.20.0",
     "prettier": "^3.9.6",
-    "typescript": "^5.9.3"
+    "typescript": "^7.0.2"
   },
   "scarfSettings": {
     "enabled": false
