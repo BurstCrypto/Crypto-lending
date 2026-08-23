@@ -136,8 +136,10 @@ fixture is committed.
 
 ## Honest remaining gates
 
-- KAN-38 must add the product UI/HTTP translation between the frozen WAL-001
-  wallet adapter and these endpoints, including exact CAIP-2 to Wallet Standard
+- KAN-38 supplies the prerequisite authenticated account UI and cookie-session
+  lifecycle only. KAN-57, KAN-58, and KAN-59 own the product EVM,
+  WalletConnect, and Solana connectors and their translation between the frozen
+  WAL-001 adapter and these endpoints, including exact CAIP-2 to Wallet Standard
   Solana alias mapping. There is no product wallet UI today.
 - Structured Wallet Standard `solana:signIn`, ERC-1271/6492 contract wallets,
   and any RPC-backed verification need separately approved designs and live

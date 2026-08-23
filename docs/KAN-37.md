@@ -20,6 +20,15 @@ The API exposes these versioned boundaries:
 - `POST /api/v1/auth/session/rotate` rotates the current local credential.
 - `POST /api/v1/auth/logout` revokes the local session family.
 
+KAN-38 adds a backward-compatible browser representation to the two start
+routes. Requests that explicitly send `Accept: application/json` receive only
+the pinned `authorizationUrl` with the same opaque transaction cookie instead
+of an HTTP redirect; ordinary navigations retain the redirect contract. These
+responses remain `private, no-store` and vary by `Cookie`, `Origin`, and
+`Accept`. HTML callback failures return to one fixed generic local login error
+screen without exposing provider, identity, state, or account-existence detail;
+non-browser API callers retain the generic `401`/`429`/`503` contract.
+
 Login never creates an unknown identity. Registration is the only creation
 flow. Its successful callback atomically creates exactly one opaque platform
 account, account profile, profile audit record, exact issuer/subject mapping,
