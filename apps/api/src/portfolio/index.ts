@@ -1,0 +1,40 @@
+export {
+  PORTFOLIO_CLOCK,
+  PortfolioService,
+  SYSTEM_PORTFOLIO_CLOCK,
+  type PortfolioClock,
+  type ReadUnifiedPortfolioRequest,
+} from './application/portfolio.service';
+export { PortfolioUnavailableError } from './application/portfolio.errors';
+export {
+  PORTFOLIO_BALANCE_READER,
+  type IndexedBalanceFreshness,
+  type IndexedPortfolioBalanceObservation,
+  type IndexedPortfolioBalanceSnapshot,
+  type PortfolioBalanceReader,
+  type ReadPortfolioBalancesRequest,
+} from './application/ports/portfolio-balance-reader.port';
+export {
+  PORTFOLIO_PRICE_EVIDENCE_READER,
+  type PortfolioPriceEvidenceReader,
+  type PortfolioPriceEvidenceSnapshot,
+  type ReadPortfolioPriceEvidenceRequest,
+} from './application/ports/portfolio-price-evidence-reader.port';
+export {
+  PORTFOLIO_USD_SCALE,
+  UNIFIED_PORTFOLIO_SCHEMA_VERSION,
+  type ExactAssetAmount,
+  type ExactUsdAmount,
+  type ExcludedPortfolioSource,
+  type PortfolioAggregate,
+  type PortfolioAssetReference,
+  type PortfolioAssetTotal,
+  type PortfolioChainTotal,
+  type PortfolioCompleteness,
+  type PortfolioFreshness,
+  type PortfolioSourceBreakdown,
+  type PortfolioValuationSnapshot,
+  type PortfolioWalletTotal,
+  type UnifiedPortfolio,
+} from './domain/unified-portfolio';
+export { PortfolioModule } from './portfolio.module';
