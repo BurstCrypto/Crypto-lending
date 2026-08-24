@@ -1,3 +1,4 @@
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 
@@ -16,9 +17,18 @@ import {
 } from './processes.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
+const apiRoot = resolve(root, 'apps', 'api');
+const webRoot = resolve(root, 'apps', 'web');
+const require = createRequire(import.meta.url);
+const nestCli = require.resolve('@nestjs/cli/bin/nest.js');
+const nextCli = require.resolve('next/dist/bin/next');
+const tsxCli = require.resolve('tsx/cli');
+// Next can otherwise download an SWC fallback on first use. Prove the locked,
+// installed native compiler is usable before touching Docker.
+require('next/dist/build/swc').getBindingsSync();
 const environments = createLocalDemoEnvironments();
 
-runChecked('npm', ['run', 'demo:local:preflight'], {
+runChecked(process.execPath, [tsxCli, 'tools/local-demo/configuration-preflight.ts'], {
   cwd: root,
   env: environments.identity,
   label: 'Local application configuration preflight',
@@ -27,7 +37,7 @@ runChecked('npm', ['run', 'demo:local:preflight'], {
 const dockerEndpoint = runChecked(
   'docker',
   ['context', 'inspect', '--format', '{{json .Endpoints.docker.Host}}'],
-  { cwd: root, env: environments.identity, capture: true, label: 'Docker context inspection' },
+  { cwd: root, env: environments.docker, capture: true, label: 'Docker context inspection' },
 );
 let parsedDockerEndpoint;
 try {
@@ -40,7 +50,7 @@ assertLocalDockerEndpoint(parsedDockerEndpoint);
 for (const imageName of LOCAL_DEMO_REQUIRED_DOCKER_IMAGES) {
   runChecked('docker', ['image', 'inspect', '--format', '{{.Id}}', imageName], {
     cwd: root,
-    env: environments.identity,
+    env: environments.docker,
     capture: true,
     label: 'Required cached Docker image inspection',
   });
@@ -48,17 +58,17 @@ for (const imageName of LOCAL_DEMO_REQUIRED_DOCKER_IMAGES) {
 
 runChecked('docker', localStackBuildArguments(), {
   cwd: root,
-  env: environments.identity,
+  env: environments.docker,
   label: 'Offline LocalStack image build',
 });
 
 runChecked('docker', composeArguments('up'), {
   cwd: root,
-  env: environments.identity,
+  env: environments.docker,
   label: 'Local dependency startup',
 });
-runChecked('npm', ['run', 'db:migrate', '--workspace', '@crypto-lending/api'], {
-  cwd: root,
+runChecked(process.execPath, [tsxCli, 'src/infrastructure/database/migration.cli.ts', 'up'], {
+  cwd: apiRoot,
   env: environments.migration,
   label: 'Local database migration',
 });
@@ -68,16 +78,16 @@ const children = [
     cwd: root,
     env: environments.identity,
   }),
-  spawnOwned('npm', ['run', 'start:dev', '--workspace', '@crypto-lending/api'], {
-    cwd: root,
+  spawnOwned(process.execPath, [nestCli, 'start', '--watch'], {
+    cwd: apiRoot,
     env: environments.api,
   }),
-  spawnOwned('npm', ['run', 'dev', '--workspace', '@crypto-lending/web'], {
-    cwd: root,
+  spawnOwned(process.execPath, [nextCli, 'dev', '--hostname', '127.0.0.1'], {
+    cwd: webRoot,
     env: environments.web,
   }),
-  spawnOwned('npm', ['run', 'worker:outbox', '--workspace', '@crypto-lending/api'], {
-    cwd: root,
+  spawnOwned(process.execPath, [tsxCli, 'src/infrastructure/outbox/outbox-worker.cli.ts'], {
+    cwd: apiRoot,
     env: environments.worker,
   }),
 ];

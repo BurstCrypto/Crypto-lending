@@ -1,6 +1,10 @@
 import { randomBytes } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 
 export const LOCAL_DEMO_COMPOSE_PROJECT = 'crypto-lending-local-demo';
+export const LOCAL_DEMO_OWNERSHIP_LABEL = 'com.crypto-lending.local-demo.owner';
+export const LOCAL_DEMO_OWNERSHIP_VALUE = 'kan-253';
+export const LOCAL_DEMO_DOCKER_CONFIG = fileURLToPath(new URL('./docker-config', import.meta.url));
 export const LOCAL_DEMO_API_ORIGIN = 'http://127.0.0.1:3001';
 export const LOCAL_DEMO_WEB_ORIGIN = 'http://127.0.0.1:3000';
 export const LOCAL_DEMO_LOCALSTACK_IMAGE = 'crypto-lending-local-demo-localstack:kan-253';
@@ -60,6 +64,7 @@ function infrastructureEnvironment(databaseCredentials, workload) {
   return {
     NODE_ENV: 'development',
     APP_ENV: 'dev-local-demo',
+    LOCAL_DEMO_MODE: 'enabled',
     APPLICATION_WORKLOAD: workload,
     DATABASE_RUNTIME_URL: loopbackDatabaseUrl(databaseCredentials),
     DATABASE_RUNTIME_SSL_MODE: 'disable',
@@ -139,6 +144,7 @@ export function createLocalDemoEnvironments(options = {}) {
   const migration = {
     ...inherited,
     NODE_ENV: 'development',
+    LOCAL_DEMO_MODE: 'enabled',
     MIGRATION_DATABASE_URL: loopbackDatabaseUrl({
       username: 'crypto_migration',
       password: 'local_migration_only',
@@ -153,11 +159,20 @@ export function createLocalDemoEnvironments(options = {}) {
     LOCAL_DEMO_MODE: 'enabled',
     LOCAL_DEMO_API_ORIGIN,
     AUTH_PUBLIC_ORIGIN: LOCAL_DEMO_WEB_ORIGIN,
+    NEXT_DISABLE_SWC_WASM: '1',
+    NEXT_TELEMETRY_DISABLED: '1',
   };
   const identity = { ...inherited, NODE_ENV: 'development' };
+  const docker = {
+    ...inherited,
+    COMPOSE_DISABLE_ENV_FILE: '1',
+    DOCKER_CONFIG: LOCAL_DEMO_DOCKER_CONFIG,
+    DOCKER_CONTEXT: 'default',
+  };
 
   return Object.freeze({
     api: Object.freeze(api),
+    docker: Object.freeze(docker),
     identity: Object.freeze(identity),
     migration: Object.freeze(migration),
     web: Object.freeze(web),
@@ -166,11 +181,14 @@ export function createLocalDemoEnvironments(options = {}) {
 }
 
 export function assertLocalDockerEndpoint(value) {
-  if (
-    typeof value !== 'string' ||
-    (!value.startsWith('npipe://') && !value.startsWith('unix://')) ||
-    /[\0\r\n]/u.test(value)
-  ) {
+  const canonicalNamedPipe =
+    value === 'npipe:////./pipe/docker_engine' ||
+    value === 'npipe:////./pipe/dockerDesktopLinuxEngine';
+  const canonicalUnixSocket =
+    typeof value === 'string' &&
+    (/^unix:\/\/(?:\/var\/run\/docker\.sock|\/run\/docker\.sock)$/u.test(value) ||
+      /^unix:\/\/\/run\/user\/[1-9][0-9]*\/docker\.sock$/u.test(value));
+  if (!canonicalNamedPipe && !canonicalUnixSocket) {
     throw new Error('Local demo requires a local Docker engine endpoint');
   }
   return value;

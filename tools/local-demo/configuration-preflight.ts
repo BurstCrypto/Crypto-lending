@@ -1,3 +1,6 @@
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { loadAuthenticationConfig } from '../../apps/api/src/authentication/infrastructure/config/authentication.config';
 import {
   loadInfrastructureConfig,
@@ -10,7 +13,11 @@ import { loadWalletRegistrationConfig } from '../../apps/api/src/wallets/infrast
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore -- tools/local-demo is outside the application TypeScript projects.
 import { createLocalDemoEnvironments } from './environment.mjs';
+// @ts-ignore -- tools/local-demo is outside the application TypeScript projects.
+import { assertLocalDemoHasNoAmbientEnvironmentFiles } from './safety-preflight.mjs';
 
+const root = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
+assertLocalDemoHasNoAmbientEnvironmentFiles(root);
 const environments = createLocalDemoEnvironments();
 
 loadInfrastructureConfig(environments.api);

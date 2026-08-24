@@ -20,14 +20,25 @@ evidence. Every screen displays a synthetic-data banner while the mode is on.
   accepts no bearer or client credential.
 - Child processes receive allowlisted operating-system variables instead of the
   caller's cloud, proxy, database, or vendor environment.
-- Docker startup first proves the active engine uses a local `npipe://` or
-  `unix://` transport. TCP, SSH, and HTTPS Docker endpoints are rejected.
-- Compose uses the fixed `crypto-lending-local-demo` project. Teardown can remove
-  only that project's containers and volumes.
+- Preflight refuses ignored root, API, or web environment files that could be
+  loaded after sanitization. Installed CLIs run directly rather than through
+  npm lifecycle configuration, API dotenv loading is bypassed in guarded demo
+  mode, and Next telemetry is disabled.
+- Docker commands use a checked-in empty client configuration, force the
+  built-in `default` context, and accept only reviewed local Docker Desktop,
+  system, or rootless socket paths. User registry credentials, client proxy
+  injection, TCP, SSH, HTTPS, and arbitrary local forwarding sockets are
+  excluded.
+- Compose uses an explicit checked-in interpolation file and the fixed
+  `crypto-lending-local-demo` project. Every container, volume, and network also
+  carries a KAN-253 ownership marker; teardown refuses the operation if any
+  project resource lacks that marker.
 - Startup inspects all three digest-pinned base images before Compose runs. The
   LocalStack wrapper is built with network disabled and pulling disabled, then
   Compose uses both `--pull never` and `--no-build`. A missing image fails the
   run instead of contacting a registry.
+- Startup also proves the locked native Next compiler is installed and loadable;
+  its downloadable WebAssembly fallback is disabled.
 - AWS metadata discovery is disabled and the SDK is pinned to the loopback
   LocalStack endpoint with non-credential local fixture values.
 
@@ -39,6 +50,10 @@ signature, wallet address, credential, customer record, or real asset.
 Prerequisites are the repository's locked npm dependencies plus locally cached
 Docker images for PostgreSQL, Redis, and the checked-in LocalStack image. The
 harness deliberately fails instead of pulling a missing image.
+
+Move any ignored `.env`/`.env.local` files reported by preflight aside before
+running this harness. Their ordinary local-development values are deliberately
+not composed into the synthetic demo.
 
 From the repository root:
 
@@ -68,12 +83,14 @@ them. The demo-owned dependency containers remain available for a quick restart.
 5. Refresh the protected account page and then sign out. Cookie rotation, CSRF,
    account isolation, and logout revocation remain active.
 
-The wallet, balance, portfolio, and buying-power stages are added by KAN-57–69.
-They must consume injected synthetic adapters and never reinterpret this harness
-as approval to contact a wallet relay, RPC/indexing provider, oracle, or cloud
-service.
+This branch's current click-through ends on the protected account page; it does
+not yet compose a wallet, balance, portfolio, or buying-power screen. Those
+stages live on separate KAN-57 through KAN-69 ticket branches until they are
+merged. Any later composition must consume injected synthetic adapters and must
+not reinterpret this harness as approval to contact a wallet relay,
+RPC/indexing provider, oracle, or cloud service.
 
-## Verify without starting services
+## Verify without starting Docker or application services
 
 ```powershell
 npm run test:local-demo
@@ -81,7 +98,8 @@ npm test --workspace @crypto-lending/api -- --runInBand src/authentication/infra
 npm test --workspace @crypto-lending/web -- test/local-demo-config.test.tsx test/browser-egress.test.ts
 ```
 
-These checks use only in-process loopback servers and deterministic fakes.
+The identity tests use an ephemeral in-process loopback HTTP server; the other
+checks use deterministic fakes. None contacts an external endpoint.
 
 ## Teardown
 
@@ -92,6 +110,8 @@ containers and volumes:
 npm run demo:local:teardown
 ```
 
-The teardown refuses remote Docker endpoints and addresses only the fixed
-`crypto-lending-local-demo` Compose project. It does not remove the repository's
-ordinary development volume or any other Docker project.
+The teardown refuses unreviewed Docker endpoints, inventories the fixed
+`crypto-lending-local-demo` project, and verifies the KAN-253 ownership marker
+before issuing Compose down. It does not remove the repository's ordinary
+development volume or another Docker project. An older or colliding project
+without the marker fails closed and must be reviewed manually.

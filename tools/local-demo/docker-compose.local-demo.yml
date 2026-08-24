@@ -1,3 +1,24 @@
 services:
+  postgres:
+    labels:
+      com.crypto-lending.local-demo.owner: kan-253
+  redis:
+    labels:
+      com.crypto-lending.local-demo.owner: kan-253
   localstack:
     image: crypto-lending-local-demo-localstack:kan-253
+    labels:
+      com.crypto-lending.local-demo.owner: kan-253
+
+volumes:
+  postgres-principals-data:
+    labels:
+      com.crypto-lending.local-demo.owner: kan-253
+  redis-data:
+    labels:
+      com.crypto-lending.local-demo.owner: kan-253
+
+networks:
+  default:
+    labels:
+      com.crypto-lending.local-demo.owner: kan-253
