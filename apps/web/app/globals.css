@@ -48,6 +48,21 @@ a:focus-visible {
   outline-offset: 4px;
 }
 
+.local-demo-banner {
+  position: sticky;
+  top: 0;
+  z-index: 9;
+  padding: 0.55rem 1rem;
+  color: #261a00;
+  background: var(--focus);
+  border-bottom: 1px solid rgba(38, 26, 0, 0.35);
+  font-size: 0.75rem;
+  font-weight: 850;
+  letter-spacing: 0.035em;
+  text-align: center;
+  text-transform: uppercase;
+}
+
 .skip-link {
   position: fixed;
   top: 0.75rem;

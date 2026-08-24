@@ -38,6 +38,7 @@ function encodedKey(byte: number): string {
 
 const CONFIG: RuntimeAuthenticationConfig = Object.freeze({
   mode: 'oidc',
+  localDemo: false,
   providerKey: PROVIDER_KEY,
   issuer: ISSUER,
   authorizationEndpoint: `${ISSUER}/authorize`,
