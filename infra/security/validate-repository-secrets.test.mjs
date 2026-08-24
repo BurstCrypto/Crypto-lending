@@ -199,6 +199,41 @@ test('ignores source-code references and symbolic ternary branches but detects l
   }
 });
 
+test('allows only an exact reviewed public protocol identifier', () => {
+  const repository = createRepository();
+  const publicIdentifier = 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb';
+  const nearbySecret = ['TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuE', 'a'].join('');
+  try {
+    write(
+      repository,
+      'protocol-identifiers.ts',
+      [
+        'const programs = {',
+        `  TOKEN_2022: '${publicIdentifier}',`,
+        `  API_TOKEN: '${publicIdentifier}',`,
+        `  SECONDARY_TOKEN: '${nearbySecret}',`,
+        '};',
+        '',
+      ].join('\n'),
+    );
+    runGit(repository, 'add', 'protocol-identifiers.ts');
+
+    const result = runScanner(repository);
+
+    assertFinding(result, 'assignment.high-entropy-secret', 'index');
+    assert.equal(
+      result.stdout
+        .trim()
+        .split('\n')
+        .filter((line) => line.startsWith('rule=assignment.high-entropy-secret\t')).length,
+      2,
+    );
+    assertRedacted(result, publicIdentifier, nearbySecret);
+  } finally {
+    rmSync(repository, { force: true, recursive: true });
+  }
+});
+
 test('redacts credential-bearing paths and safely encodes every control character', () => {
   const repository = createRepository();
   const sentinel = ['gh', 'p_', 'Path5Sentinel7Material9Value2Token4'].join('');
