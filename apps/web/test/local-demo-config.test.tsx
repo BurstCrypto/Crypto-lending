@@ -6,7 +6,7 @@ import {
   buildLocalDemoRewrites,
   loadLocalDemoWebConfig,
   LocalDemoWebConfigurationError,
-} from '../lib/local-demo/config.server';
+} from '../lib/local-demo/config-server';
 
 function enabledEnvironment(): NodeJS.ProcessEnv {
   return {

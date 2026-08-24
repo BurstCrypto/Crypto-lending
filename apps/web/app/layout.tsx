@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 
 import { LocalDemoBanner } from '@/components/local-demo-banner';
-import { loadLocalDemoWebConfig } from '@/lib/local-demo/config.server';
+import { loadLocalDemoWebConfig } from '@/lib/local-demo/config-server';
 
 import './globals.css';
 

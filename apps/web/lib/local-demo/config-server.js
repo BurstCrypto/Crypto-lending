@@ -1,28 +1,17 @@
 const LOCAL_DEMO_API_ORIGIN = 'http://127.0.0.1:3001';
 const LOCAL_DEMO_PUBLIC_ORIGIN = 'http://127.0.0.1:3000';
 
-export interface DisabledLocalDemoWebConfig {
-  readonly enabled: false;
-}
-
-export interface EnabledLocalDemoWebConfig {
-  readonly enabled: true;
-  readonly apiOrigin: typeof LOCAL_DEMO_API_ORIGIN;
-  readonly publicOrigin: typeof LOCAL_DEMO_PUBLIC_ORIGIN;
-}
-
-export type LocalDemoWebConfig = DisabledLocalDemoWebConfig | EnabledLocalDemoWebConfig;
-
 export class LocalDemoWebConfigurationError extends Error {
-  readonly code = 'LOCAL_DEMO_WEB_CONFIGURATION_ERROR' as const;
+  code = 'LOCAL_DEMO_WEB_CONFIGURATION_ERROR';
 
-  constructor(readonly field: string) {
+  constructor(field) {
     super(`Invalid local demo web configuration: ${field}`);
     this.name = 'LocalDemoWebConfigurationError';
+    this.field = field;
   }
 }
 
-function fail(field: string): never {
+function fail(field) {
   throw new LocalDemoWebConfigurationError(field);
 }
 
@@ -31,9 +20,7 @@ function fail(field: string): never {
  * loopback origins. That keeps an opt-in developer flag from becoming a
  * general-purpose server-side request proxy.
  */
-export function loadLocalDemoWebConfig(
-  environment: Readonly<NodeJS.ProcessEnv> = process.env,
-): LocalDemoWebConfig {
+export function loadLocalDemoWebConfig(environment = process.env) {
   const mode = environment.LOCAL_DEMO_MODE;
   if (mode === undefined || mode === 'disabled') {
     if (environment.LOCAL_DEMO_API_ORIGIN !== undefined) {
@@ -59,7 +46,7 @@ export function loadLocalDemoWebConfig(
   });
 }
 
-export function buildLocalDemoRewrites(config: LocalDemoWebConfig) {
+export function buildLocalDemoRewrites(config) {
   if (!config.enabled) return [];
   return [
     {
