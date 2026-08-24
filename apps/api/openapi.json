@@ -1047,6 +1047,835 @@
         ]
       }
     },
+    "/api/v1/portfolio": {
+      "get": {
+        "operationId": "PortfolioController_read",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "asOf": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "assetTotals": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "completeness": {
+                            "enum": [
+                              "COMPLETE",
+                              "PARTIAL",
+                              "UNAVAILABLE"
+                            ],
+                            "type": "string"
+                          },
+                          "freshnessClass": {
+                            "enum": [
+                              "CURRENT",
+                              "STALE",
+                              "UNAVAILABLE"
+                            ],
+                            "type": "string"
+                          },
+                          "includedSourceCount": {
+                            "maximum": 512,
+                            "minimum": 0,
+                            "type": "integer"
+                          },
+                          "sourceCount": {
+                            "maximum": 512,
+                            "minimum": 0,
+                            "type": "integer"
+                          },
+                          "stablecoin": {
+                            "enum": [
+                              "USDC",
+                              "USDT",
+                              "PYUSD"
+                            ],
+                            "type": "string"
+                          },
+                          "usdValue": {
+                            "additionalProperties": false,
+                            "nullable": true,
+                            "properties": {
+                              "currency": {
+                                "enum": [
+                                  "USD"
+                                ],
+                                "type": "string"
+                              },
+                              "decimal": {
+                                "pattern": "^(0|[1-9][0-9]*)\\.[0-9]{18}$",
+                                "type": "string"
+                              },
+                              "mantissa": {
+                                "pattern": "^(0|[1-9][0-9]*)$",
+                                "type": "string"
+                              },
+                              "scale": {
+                                "enum": [
+                                  18
+                                ],
+                                "type": "integer"
+                              }
+                            },
+                            "required": [
+                              "currency",
+                              "mantissa",
+                              "scale",
+                              "decimal"
+                            ],
+                            "type": "object"
+                          }
+                        },
+                        "required": [
+                          "stablecoin",
+                          "usdValue",
+                          "freshnessClass",
+                          "completeness",
+                          "sourceCount",
+                          "includedSourceCount"
+                        ],
+                        "type": "object"
+                      },
+                      "maxItems": 3,
+                      "type": "array"
+                    },
+                    "balanceSnapshot": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "capturedAt": {
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        "freshnessClass": {
+                          "enum": [
+                            "CURRENT",
+                            "STALE"
+                          ],
+                          "type": "string"
+                        },
+                        "snapshotId": {
+                          "maxLength": 128,
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "snapshotId",
+                        "capturedAt",
+                        "freshnessClass"
+                      ],
+                      "type": "object"
+                    },
+                    "chainTotals": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "completeness": {
+                            "enum": [
+                              "COMPLETE",
+                              "PARTIAL",
+                              "UNAVAILABLE"
+                            ],
+                            "type": "string"
+                          },
+                          "freshnessClass": {
+                            "enum": [
+                              "CURRENT",
+                              "STALE",
+                              "UNAVAILABLE"
+                            ],
+                            "type": "string"
+                          },
+                          "includedSourceCount": {
+                            "maximum": 512,
+                            "minimum": 0,
+                            "type": "integer"
+                          },
+                          "networkId": {
+                            "maxLength": 96,
+                            "type": "string"
+                          },
+                          "sourceCount": {
+                            "maximum": 512,
+                            "minimum": 0,
+                            "type": "integer"
+                          },
+                          "usdValue": {
+                            "additionalProperties": false,
+                            "nullable": true,
+                            "properties": {
+                              "currency": {
+                                "enum": [
+                                  "USD"
+                                ],
+                                "type": "string"
+                              },
+                              "decimal": {
+                                "pattern": "^(0|[1-9][0-9]*)\\.[0-9]{18}$",
+                                "type": "string"
+                              },
+                              "mantissa": {
+                                "pattern": "^(0|[1-9][0-9]*)$",
+                                "type": "string"
+                              },
+                              "scale": {
+                                "enum": [
+                                  18
+                                ],
+                                "type": "integer"
+                              }
+                            },
+                            "required": [
+                              "currency",
+                              "mantissa",
+                              "scale",
+                              "decimal"
+                            ],
+                            "type": "object"
+                          }
+                        },
+                        "required": [
+                          "networkId",
+                          "usdValue",
+                          "freshnessClass",
+                          "completeness",
+                          "sourceCount",
+                          "includedSourceCount"
+                        ],
+                        "type": "object"
+                      },
+                      "maxItems": 512,
+                      "type": "array"
+                    },
+                    "excludedSources": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "amountAtomic": {
+                            "pattern": "^(0|[1-9][0-9]{0,77})$",
+                            "type": "string"
+                          },
+                          "assetIdentity": {
+                            "maxLength": 64,
+                            "type": "string"
+                          },
+                          "balanceFreshnessClass": {
+                            "enum": [
+                              "CURRENT",
+                              "STALE"
+                            ],
+                            "type": "string"
+                          },
+                          "balanceObservedAt": {
+                            "format": "date-time",
+                            "type": "string"
+                          },
+                          "includedInOverallTotal": {
+                            "enum": [
+                              false
+                            ],
+                            "type": "boolean"
+                          },
+                          "networkId": {
+                            "maxLength": 96,
+                            "type": "string"
+                          },
+                          "observationId": {
+                            "format": "uuid",
+                            "type": "string"
+                          },
+                          "reason": {
+                            "enum": [
+                              "UNSUPPORTED_ASSET"
+                            ],
+                            "type": "string"
+                          },
+                          "walletId": {
+                            "format": "uuid",
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "observationId",
+                          "walletId",
+                          "networkId",
+                          "assetIdentity",
+                          "amountAtomic",
+                          "balanceObservedAt",
+                          "balanceFreshnessClass",
+                          "reason",
+                          "includedInOverallTotal"
+                        ],
+                        "type": "object"
+                      },
+                      "maxItems": 512,
+                      "type": "array"
+                    },
+                    "mayAuthorizeFinancialUse": {
+                      "enum": [
+                        false
+                      ],
+                      "type": "boolean"
+                    },
+                    "mayIncreaseBuyingPower": {
+                      "enum": [
+                        false
+                      ],
+                      "type": "boolean"
+                    },
+                    "oldestBalanceObservedAt": {
+                      "format": "date-time",
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "overallTotal": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "completeness": {
+                          "enum": [
+                            "COMPLETE",
+                            "PARTIAL",
+                            "UNAVAILABLE"
+                          ],
+                          "type": "string"
+                        },
+                        "freshnessClass": {
+                          "enum": [
+                            "CURRENT",
+                            "STALE",
+                            "UNAVAILABLE"
+                          ],
+                          "type": "string"
+                        },
+                        "includedSourceCount": {
+                          "maximum": 512,
+                          "minimum": 0,
+                          "type": "integer"
+                        },
+                        "sourceCount": {
+                          "maximum": 512,
+                          "minimum": 0,
+                          "type": "integer"
+                        },
+                        "usdValue": {
+                          "additionalProperties": false,
+                          "nullable": true,
+                          "properties": {
+                            "currency": {
+                              "enum": [
+                                "USD"
+                              ],
+                              "type": "string"
+                            },
+                            "decimal": {
+                              "pattern": "^(0|[1-9][0-9]*)\\.[0-9]{18}$",
+                              "type": "string"
+                            },
+                            "mantissa": {
+                              "pattern": "^(0|[1-9][0-9]*)$",
+                              "type": "string"
+                            },
+                            "scale": {
+                              "enum": [
+                                18
+                              ],
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "currency",
+                            "mantissa",
+                            "scale",
+                            "decimal"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "usdValue",
+                        "freshnessClass",
+                        "completeness",
+                        "sourceCount",
+                        "includedSourceCount"
+                      ],
+                      "type": "object"
+                    },
+                    "reportingUse": {
+                      "enum": [
+                        "CONSERVATIVE_REPORTING_ONLY"
+                      ],
+                      "type": "string"
+                    },
+                    "schemaVersion": {
+                      "enum": [
+                        1
+                      ],
+                      "type": "integer"
+                    },
+                    "sources": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "asset": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "decimals": {
+                                "maximum": 36,
+                                "minimum": 0,
+                                "type": "integer"
+                              },
+                              "identity": {
+                                "maxLength": 64,
+                                "type": "string"
+                              },
+                              "networkId": {
+                                "maxLength": 96,
+                                "type": "string"
+                              },
+                              "registryEnvironment": {
+                                "enum": [
+                                  "MAINNET"
+                                ],
+                                "type": "string"
+                              },
+                              "registryFingerprintSha256": {
+                                "pattern": "^[0-9a-f]{64}$",
+                                "type": "string"
+                              },
+                              "registryVersion": {
+                                "enum": [
+                                  1
+                                ],
+                                "type": "integer"
+                              },
+                              "stablecoin": {
+                                "enum": [
+                                  "USDC",
+                                  "USDT",
+                                  "PYUSD"
+                                ],
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "registryEnvironment",
+                              "registryVersion",
+                              "registryFingerprintSha256",
+                              "stablecoin",
+                              "networkId",
+                              "identity",
+                              "decimals"
+                            ],
+                            "type": "object"
+                          },
+                          "balance": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "atomic": {
+                                "pattern": "^(0|[1-9][0-9]{0,77})$",
+                                "type": "string"
+                              },
+                              "decimal": {
+                                "pattern": "^(0|[1-9][0-9]*)(?:\\.[0-9]+)?$",
+                                "type": "string"
+                              },
+                              "decimals": {
+                                "maximum": 36,
+                                "minimum": 0,
+                                "type": "integer"
+                              }
+                            },
+                            "required": [
+                              "atomic",
+                              "decimals",
+                              "decimal"
+                            ],
+                            "type": "object"
+                          },
+                          "balanceFreshnessClass": {
+                            "enum": [
+                              "CURRENT",
+                              "STALE"
+                            ],
+                            "type": "string"
+                          },
+                          "balanceObservedAt": {
+                            "format": "date-time",
+                            "type": "string"
+                          },
+                          "freshnessClass": {
+                            "enum": [
+                              "CURRENT",
+                              "STALE",
+                              "UNAVAILABLE"
+                            ],
+                            "type": "string"
+                          },
+                          "includedInOverallTotal": {
+                            "type": "boolean"
+                          },
+                          "networkId": {
+                            "maxLength": 96,
+                            "type": "string"
+                          },
+                          "observationId": {
+                            "format": "uuid",
+                            "type": "string"
+                          },
+                          "usdValue": {
+                            "additionalProperties": false,
+                            "nullable": true,
+                            "properties": {
+                              "currency": {
+                                "enum": [
+                                  "USD"
+                                ],
+                                "type": "string"
+                              },
+                              "decimal": {
+                                "pattern": "^(0|[1-9][0-9]*)\\.[0-9]{18}$",
+                                "type": "string"
+                              },
+                              "mantissa": {
+                                "pattern": "^(0|[1-9][0-9]*)$",
+                                "type": "string"
+                              },
+                              "scale": {
+                                "enum": [
+                                  18
+                                ],
+                                "type": "integer"
+                              }
+                            },
+                            "required": [
+                              "currency",
+                              "mantissa",
+                              "scale",
+                              "decimal"
+                            ],
+                            "type": "object"
+                          },
+                          "valuation": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "availability": {
+                                "enum": [
+                                  "AVAILABLE",
+                                  "UNAVAILABLE"
+                                ],
+                                "type": "string"
+                              },
+                              "confidenceClass": {
+                                "enum": [
+                                  "MEDIUM",
+                                  "LOW",
+                                  "UNAVAILABLE"
+                                ],
+                                "type": "string"
+                              },
+                              "depegClass": {
+                                "enum": [
+                                  "NOT_ASSESSED",
+                                  "WITHIN_POLICY",
+                                  "OUTSIDE_POLICY"
+                                ],
+                                "type": "string"
+                              },
+                              "downsideBand": {
+                                "enum": [
+                                  "NORMAL",
+                                  "WATCH",
+                                  "DEPEGGED",
+                                  "NOT_ASSESSED"
+                                ],
+                                "type": "string"
+                              },
+                              "freshnessClass": {
+                                "enum": [
+                                  "CURRENT",
+                                  "STALE",
+                                  "UNAVAILABLE"
+                                ],
+                                "type": "string"
+                              },
+                              "mayAuthorizeFinancialUse": {
+                                "enum": [
+                                  false
+                                ],
+                                "type": "boolean"
+                              },
+                              "mayIncreaseBuyingPower": {
+                                "enum": [
+                                  false
+                                ],
+                                "type": "boolean"
+                              },
+                              "observedAt": {
+                                "format": "date-time",
+                                "nullable": true,
+                                "type": "string"
+                              },
+                              "policyApprovalState": {
+                                "enum": [
+                                  "PENDING_EXTERNAL_APPROVAL"
+                                ],
+                                "type": "string"
+                              },
+                              "policyVersion": {
+                                "enum": [
+                                  1
+                                ],
+                                "type": "integer"
+                              },
+                              "priceSnapshotId": {
+                                "maxLength": 128,
+                                "nullable": true,
+                                "type": "string"
+                              },
+                              "pricedAt": {
+                                "format": "date-time",
+                                "nullable": true,
+                                "type": "string"
+                              },
+                              "reasons": {
+                                "items": {
+                                  "type": "string"
+                                },
+                                "maxItems": 16,
+                                "type": "array"
+                              },
+                              "reportingUse": {
+                                "enum": [
+                                  "CONSERVATIVE_REPORTING_ONLY",
+                                  "BLOCKED"
+                                ],
+                                "type": "string"
+                              },
+                              "selectedSourceId": {
+                                "enum": [
+                                  "PYTH_CORE",
+                                  "CHAINLINK_DATA_FEEDS"
+                                ],
+                                "nullable": true,
+                                "type": "string"
+                              },
+                              "selectedSourceReference": {
+                                "maxLength": 192,
+                                "nullable": true,
+                                "type": "string"
+                              },
+                              "selectedSourceSequence": {
+                                "maxLength": 78,
+                                "nullable": true,
+                                "type": "string"
+                              },
+                              "selection": {
+                                "enum": [
+                                  "PRIMARY",
+                                  "FALLBACK",
+                                  "CONSERVATIVE_MINIMUM",
+                                  "NONE"
+                                ],
+                                "type": "string"
+                              },
+                              "sourceAgreement": {
+                                "enum": [
+                                  "CORROBORATED",
+                                  "SOFT_DISAGREEMENT",
+                                  "CONFLICT",
+                                  "SINGLE_SOURCE",
+                                  "NOT_AVAILABLE"
+                                ],
+                                "type": "string"
+                              },
+                              "usdRateMantissa": {
+                                "nullable": true,
+                                "pattern": "^(0|[1-9][0-9]*)$",
+                                "type": "string"
+                              },
+                              "usdRateScale": {
+                                "maximum": 36,
+                                "minimum": 0,
+                                "nullable": true,
+                                "type": "integer"
+                              }
+                            },
+                            "required": [
+                              "priceSnapshotId",
+                              "policyVersion",
+                              "policyApprovalState",
+                              "availability",
+                              "selection",
+                              "selectedSourceId",
+                              "selectedSourceReference",
+                              "selectedSourceSequence",
+                              "pricedAt",
+                              "observedAt",
+                              "usdRateMantissa",
+                              "usdRateScale",
+                              "freshnessClass",
+                              "confidenceClass",
+                              "depegClass",
+                              "downsideBand",
+                              "sourceAgreement",
+                              "reasons",
+                              "reportingUse",
+                              "mayIncreaseBuyingPower",
+                              "mayAuthorizeFinancialUse"
+                            ],
+                            "type": "object"
+                          },
+                          "walletId": {
+                            "format": "uuid",
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "observationId",
+                          "walletId",
+                          "networkId",
+                          "asset",
+                          "balance",
+                          "balanceObservedAt",
+                          "balanceFreshnessClass",
+                          "freshnessClass",
+                          "includedInOverallTotal",
+                          "usdValue",
+                          "valuation"
+                        ],
+                        "type": "object"
+                      },
+                      "maxItems": 512,
+                      "type": "array"
+                    },
+                    "walletTotals": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "completeness": {
+                            "enum": [
+                              "COMPLETE",
+                              "PARTIAL",
+                              "UNAVAILABLE"
+                            ],
+                            "type": "string"
+                          },
+                          "freshnessClass": {
+                            "enum": [
+                              "CURRENT",
+                              "STALE",
+                              "UNAVAILABLE"
+                            ],
+                            "type": "string"
+                          },
+                          "includedSourceCount": {
+                            "maximum": 512,
+                            "minimum": 0,
+                            "type": "integer"
+                          },
+                          "sourceCount": {
+                            "maximum": 512,
+                            "minimum": 0,
+                            "type": "integer"
+                          },
+                          "usdValue": {
+                            "additionalProperties": false,
+                            "nullable": true,
+                            "properties": {
+                              "currency": {
+                                "enum": [
+                                  "USD"
+                                ],
+                                "type": "string"
+                              },
+                              "decimal": {
+                                "pattern": "^(0|[1-9][0-9]*)\\.[0-9]{18}$",
+                                "type": "string"
+                              },
+                              "mantissa": {
+                                "pattern": "^(0|[1-9][0-9]*)$",
+                                "type": "string"
+                              },
+                              "scale": {
+                                "enum": [
+                                  18
+                                ],
+                                "type": "integer"
+                              }
+                            },
+                            "required": [
+                              "currency",
+                              "mantissa",
+                              "scale",
+                              "decimal"
+                            ],
+                            "type": "object"
+                          },
+                          "walletId": {
+                            "format": "uuid",
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "walletId",
+                          "usdValue",
+                          "freshnessClass",
+                          "completeness",
+                          "sourceCount",
+                          "includedSourceCount"
+                        ],
+                        "type": "object"
+                      },
+                      "maxItems": 512,
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "schemaVersion",
+                    "asOf",
+                    "balanceSnapshot",
+                    "oldestBalanceObservedAt",
+                    "overallTotal",
+                    "walletTotals",
+                    "chainTotals",
+                    "assetTotals",
+                    "sources",
+                    "excludedSources",
+                    "reportingUse",
+                    "mayIncreaseBuyingPower",
+                    "mayAuthorizeFinancialUse"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Exact reporting-only USD value with source and freshness attribution"
+          },
+          "401": {
+            "description": "Missing or invalid authenticated session"
+          },
+          "503": {
+            "description": "Portfolio source data is unavailable"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Read the authenticated account unified portfolio value",
+        "tags": [
+          "portfolio"
+        ]
+      }
+    },
     "/api/v1/version": {
       "get": {
         "operationId": "VersionController_getVersion",
