@@ -29,19 +29,34 @@ function fail(code: PortfolioBalanceSnapshotValidationCode): never {
 }
 
 function dataRecord(value: unknown, expectedKeys: readonly string[]): Record<string, unknown> {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+  try {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+      return fail('INVALID_SNAPSHOT');
+    }
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) {
+      return fail('INVALID_SNAPSHOT');
+    }
+    const descriptors = Object.getOwnPropertyDescriptors(value) as unknown as PropertyDescriptorMap;
+    const actualKeys = Reflect.ownKeys(descriptors);
+    if (
+      actualKeys.length !== expectedKeys.length ||
+      actualKeys.some((key) => typeof key !== 'string' || !expectedKeys.includes(key))
+    ) {
+      return fail('INVALID_SNAPSHOT');
+    }
+    const record = Object.create(null) as Record<string, unknown>;
+    for (const key of expectedKeys) {
+      const descriptor = descriptors[key];
+      if (!descriptor || !('value' in descriptor) || descriptor.enumerable !== true) {
+        return fail('INVALID_SNAPSHOT');
+      }
+      record[key] = descriptor.value;
+    }
+    return record;
+  } catch {
     return fail('INVALID_SNAPSHOT');
   }
-  const record = value as Record<string, unknown>;
-  const actualKeys = Object.keys(record);
-  if (
-    actualKeys.length !== expectedKeys.length ||
-    expectedKeys.some((key) => !Object.hasOwn(record, key)) ||
-    actualKeys.some((key) => !expectedKeys.includes(key))
-  ) {
-    return fail('INVALID_SNAPSHOT');
-  }
-  return record;
 }
 
 function canonicalTimestamp(value: unknown): string {

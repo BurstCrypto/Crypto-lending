@@ -68,6 +68,28 @@ describe('indexed portfolio balance snapshot', () => {
     ).toThrow('portfolio balance snapshot is invalid');
   });
 
+  it('rejects accessors, symbols, and non-plain records at the reader boundary', () => {
+    const accessorSnapshot = { ...snapshot() } as Record<string, unknown>;
+    Object.defineProperty(accessorSnapshot, 'freshnessClass', {
+      enumerable: true,
+      get: () => 'CURRENT',
+    });
+    const symbolSnapshot = { ...snapshot(), [Symbol('hidden')]: 'must-not-pass' };
+    const first = snapshot().observations[0];
+    if (!first) throw new Error('fixture missing');
+    const nonPlainObservation = Object.assign(Object.create({ inherited: true }), first);
+
+    for (const candidate of [
+      accessorSnapshot,
+      symbolSnapshot,
+      { ...snapshot(), observations: [nonPlainObservation] },
+    ]) {
+      expect(() => parseIndexedPortfolioBalanceSnapshot(candidate, EVALUATED_AT)).toThrow(
+        'portfolio balance snapshot is invalid',
+      );
+    }
+  });
+
   it('rejects duplicate observation IDs and duplicate wallet/chain/asset sources', () => {
     const first = snapshot().observations[0];
     if (!first) throw new Error('fixture missing');
