@@ -437,6 +437,21 @@ describe('BalanceSyncOrchestrator', () => {
       name: 'wrong finalized anchor',
       value: recoveryCandidate({ replay: { ...recoveryCandidate().replay, fromPosition: '98' } }),
     },
+    {
+      name: 'malformed recovery result',
+      value: { unexpected: true },
+    },
+    {
+      name: 'accessor-backed replay proof',
+      value: (() => {
+        const replay = { ...recoveryCandidate().replay } as Record<string, unknown>;
+        Object.defineProperty(replay, 'complete', {
+          enumerable: true,
+          get: () => true,
+        });
+        return { ...recoveryCandidate(), replay };
+      })(),
+    },
   ])('retains last good data and retries a $name', async ({ value }) => {
     const original = checkpoint();
     const test = harness({
@@ -737,6 +752,13 @@ describe('BalanceSyncOrchestrator', () => {
     );
     expect(read).not.toHaveBeenCalled();
 
+    const falseCurrentWithoutObservation = checkpoint(null);
+    const missingObservationTest = harness({ initial: falseCurrentWithoutObservation, read });
+    await expect(missingObservationTest.orchestrator.process(job())).rejects.toEqual(
+      new BalanceSyncOrchestratorError('INVALID_BALANCE_SYNC_CHECKPOINT'),
+    );
+    expect(read).not.toHaveBeenCalled();
+
     const accessorCheckpoint = { ...checkpoint() } as Record<string, unknown>;
     Object.defineProperty(accessorCheckpoint, 'currentObservation', {
       enumerable: true,
@@ -747,6 +769,29 @@ describe('BalanceSyncOrchestrator', () => {
       new BalanceSyncOrchestratorError('INVALID_BALANCE_SYNC_CHECKPOINT'),
     );
     expect(read).not.toHaveBeenCalled();
+
+    for (const lastFinalizedSource of [
+      {
+        ...finalizedSource(),
+        hash: BLOCK_100_B,
+      },
+      {
+        ...finalizedSource(),
+        position: '100',
+        hash: BLOCK_100_B,
+        parentHash: BLOCK_99,
+      },
+    ]) {
+      const divergentCheckpoint = {
+        ...checkpoint(),
+        lastFinalizedSource,
+      };
+      const divergentTest = harness({ initial: divergentCheckpoint, read });
+      await expect(divergentTest.orchestrator.process(job())).rejects.toEqual(
+        new BalanceSyncOrchestratorError('INVALID_BALANCE_SYNC_CHECKPOINT'),
+      );
+      expect(read).not.toHaveBeenCalled();
+    }
   });
 
   it('maps checkpoint and job-port failures to fixed local error codes', async () => {

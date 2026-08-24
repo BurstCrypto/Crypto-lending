@@ -303,7 +303,7 @@ export class BalanceSyncOrchestrator {
     } catch {
       throw new BalanceSyncIndexerFailure('REORG_RECOVERY_FAILED');
     }
-    const record = exactRecord(value, [
+    const record = exactRecoveryRecord(value, [
       'walletId',
       'networkId',
       'tier',
@@ -322,7 +322,7 @@ export class BalanceSyncOrchestrator {
       request,
       now.milliseconds,
     );
-    const replay = exactRecord(record.replay, [
+    const replay = exactRecoveryRecord(record.replay, [
       'fromPosition',
       'throughPosition',
       'readUnits',
@@ -824,6 +824,9 @@ function validateCheckpoint(
     }
     currentObservation = normalizedObservation;
   }
+  if (currentObservation === null && freshness !== 'UNAVAILABLE') {
+    throw new TypeError('checkpoint without a last-good observation must be unavailable');
+  }
   let lastFinalizedSource: BalanceSyncSourcePoint | null = null;
   if (record.lastFinalizedSource !== null) {
     const financial = balanceSyncTierThreshold(scope.networkId, 'FINANCIAL');
@@ -847,6 +850,19 @@ function validateCheckpoint(
       BigInt(lastFinalizedSource.position) > BigInt(currentObservation.source.position)
     ) {
       throw new TypeError('finalized source is ahead of current observation');
+    }
+    if (currentObservation) {
+      const finalizedPosition = BigInt(lastFinalizedSource.position);
+      const currentPosition = BigInt(currentObservation.source.position);
+      if (
+        (finalizedPosition === currentPosition &&
+          (lastFinalizedSource.hash !== currentObservation.source.hash ||
+            lastFinalizedSource.parentHash !== currentObservation.source.parentHash)) ||
+        (currentPosition === finalizedPosition + 1n &&
+          currentObservation.source.parentHash !== lastFinalizedSource.hash)
+      ) {
+        throw new TypeError('current observation diverges from finalized source');
+      }
     }
   }
   return Object.freeze({
@@ -957,6 +973,14 @@ function exactRecord(value: unknown, keys: readonly string[]): Record<string, un
     record[key] = descriptor.value;
   }
   return record;
+}
+
+function exactRecoveryRecord(value: unknown, keys: readonly string[]): Record<string, unknown> {
+  try {
+    return exactRecord(value, keys);
+  } catch {
+    throw new BalanceSyncIndexerFailure('REORG_RECOVERY_FAILED');
+  }
 }
 
 function exactArray(value: unknown, maximumLength: number): readonly unknown[] {
