@@ -403,6 +403,7 @@ class DefaultPhantomSolanaAdapter implements WalletAdapter {
   private readonly getProvider: () => unknown;
   private readonly createConnectionId: () => string;
   private readonly listeners = new Set<(event: WalletEvent) => void>();
+  private readonly issuedConnectionIds = new Set<string>();
   private connection: WalletConnection | null = null;
   private provider: ProviderAccess | null = null;
   private detachProviderListeners: (() => void) | null = null;
@@ -491,6 +492,9 @@ class DefaultPhantomSolanaAdapter implements WalletAdapter {
       throwIfAborted(signal);
       const address = addressFromConnectionResult(result, access, this.chainId);
       const connectionId = validateConnectionId(this.createConnectionId());
+      if (this.issuedConnectionIds.has(connectionId)) {
+        throw new PhantomSolanaAdapterError('PROVIDER_INVALID');
+      }
       const connection = freezeConnection(
         connectionId,
         this.chainId,
@@ -506,6 +510,7 @@ class DefaultPhantomSolanaAdapter implements WalletAdapter {
         throw new PhantomSolanaAdapterError('PROVIDER_DISCONNECTED');
       }
       this.detachProviderListeners = detach;
+      this.issuedConnectionIds.add(connectionId);
       return connection;
     } catch (error) {
       if (this.provider === access) this.clearLocalConnection();
@@ -517,17 +522,18 @@ class DefaultPhantomSolanaAdapter implements WalletAdapter {
   private bindProviderListeners(access: ProviderAccess): () => void {
     const accountChanged: ProviderListener = (value) => this.handleAccountChanged(access, value);
     const disconnected: ProviderListener = (value) => this.handleProviderDisconnect(access, value);
-    let accountAttached = false;
     try {
       Reflect.apply(access.on, access.raw, ['accountChanged', accountChanged]);
-      accountAttached = true;
       Reflect.apply(access.on, access.raw, ['disconnect', disconnected]);
     } catch {
-      if (accountAttached) {
+      for (const [event, listener] of [
+        ['accountChanged', accountChanged],
+        ['disconnect', disconnected],
+      ] as const) {
         try {
-          Reflect.apply(access.off, access.raw, ['accountChanged', accountChanged]);
+          Reflect.apply(access.off, access.raw, [event, listener]);
         } catch {
-          // Exact cleanup is best effort after an untrusted provider violates its event contract.
+          // Cleanup remains best effort after an untrusted provider violates its event contract.
         }
       }
       throw new PhantomSolanaAdapterError('PROVIDER_INVALID');

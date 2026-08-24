@@ -245,6 +245,22 @@ describe('Phantom Solana adapter', () => {
     expect(provider.listenerCount('disconnect')).toBe(0);
   });
 
+  it('attempts exact cleanup when an event registration throws after attaching', async () => {
+    const provider = fakeProvider();
+    const originalOn = provider.on.getMockImplementation();
+    if (originalOn === undefined) throw new Error('expected provider event fake');
+    provider.on.mockImplementation((event, listener) => {
+      originalOn(event, listener);
+      if (event === 'disconnect') throw new Error('provider event registration failed');
+    });
+
+    await expect(adapter(provider).connect()).rejects.toMatchObject({ code: 'PROVIDER_INVALID' });
+    expect(provider.off).toHaveBeenCalledTimes(2);
+    expect(provider.listenerCount('accountChanged')).toBe(0);
+    expect(provider.listenerCount('disconnect')).toBe(0);
+    expect(provider.disconnect).toHaveBeenCalledTimes(1);
+  });
+
   it('restores only through a trusted non-interactive provider attempt', async () => {
     const provider = fakeProvider();
     const wallet = adapter(provider);
@@ -381,6 +397,17 @@ describe('Phantom Solana adapter', () => {
         connectorId: 'phantom',
       },
     ]);
+  });
+
+  it('never reuses an application connection ID after disconnect', async () => {
+    const provider = fakeProvider();
+    const wallet = adapter(provider, 'phantom:reused-id');
+    const connection = await wallet.connect();
+    await wallet.disconnect(connection.connectionId);
+
+    await expect(wallet.connect()).rejects.toMatchObject({ code: 'PROVIDER_INVALID' });
+    expect(provider.connect).toHaveBeenCalledTimes(2);
+    expect(provider.disconnect).toHaveBeenCalledTimes(2);
   });
 
   it('handles provider disconnect without exposing provider-controlled details', async () => {
