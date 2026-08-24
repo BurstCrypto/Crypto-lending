@@ -371,6 +371,14 @@ function decodeBase58(address: string): Uint8Array | null {
   return decoded;
 }
 
+export function solanaPublicKeyBytesForAddress(address: string): Uint8Array {
+  const decoded = decodeBase58(address);
+  if (decoded === null || decoded.byteLength !== 32 || decoded.every((byte) => byte === 0)) {
+    throw new TypeError('Solana address must encode a nonzero 32-byte public key');
+  }
+  return decoded;
+}
+
 function isCanonicalUtcDateTime(value: string): boolean {
   if (!CANONICAL_UTC_DATE_TIME_PATTERN.test(value)) {
     return false;
