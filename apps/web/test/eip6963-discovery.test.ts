@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import { InjectedEvmConnectorRegistry } from '@/lib/wallets/eip1193/adapter';
 import {
   EIP6963_ANNOUNCE_PROVIDER,
   EIP6963_REQUEST_PROVIDER,
@@ -83,6 +84,16 @@ describe('Eip6963ProviderDiscovery', () => {
     expect(discovery.select('selection-metamask')?.provider).toBe(metamask);
     expect(discovery.select('selection-coinbase')?.provider).toBe(coinbase);
     expect('provider' in discovery.list()[0]!).toBe(false);
+
+    const registry = new InjectedEvmConnectorRegistry(discovery, () => 'connection-1');
+    const selectedMetaMask = registry.select('selection-metamask');
+    expect(registry.select('selection-metamask')).toBe(selectedMetaMask);
+    expect(registry.select('selection-coinbase')).not.toBe(selectedMetaMask);
+    expect(selectedMetaMask.connectorId).toBe('metamask');
+    expect(metamask.on).toHaveBeenCalledTimes(3);
+    registry.release('selection-metamask');
+    expect(metamask.removeListener).toHaveBeenCalledTimes(3);
+    registry.dispose();
   });
 
   it('ignores unknown, malformed, duplicate UUID, and duplicate provider announcements', () => {
