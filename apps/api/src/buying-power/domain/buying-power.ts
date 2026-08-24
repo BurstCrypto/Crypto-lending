@@ -24,6 +24,7 @@ export type BuyingPowerFreshness = 'CURRENT' | 'STALE' | 'UNAVAILABLE';
 export type BuyingPowerValuationUse = 'CONSERVATIVE_REPORTING_ONLY' | 'BLOCKED';
 
 export type BuyingPowerUnavailableReason =
+  | 'NO_ELIGIBLE_CONTRIBUTIONS'
   | 'UNSUPPORTED_ASSET'
   | 'UNPRICED_ASSET'
   | 'STALE_DATA'
@@ -86,6 +87,7 @@ export interface BuyingPowerContributionResult {
   readonly availability: 'AVAILABLE' | 'UNAVAILABLE';
   readonly unavailableReasons: readonly BuyingPowerUnavailableReason[];
   readonly asOf: string;
+  readonly adjustmentQuoteId: string | null;
   readonly adjustmentQuotedAt: string | null;
   readonly adjustmentValidUntil: string | null;
 }

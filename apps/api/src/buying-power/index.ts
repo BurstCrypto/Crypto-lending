@@ -19,3 +19,14 @@ export {
   type BuyingPowerValidationCode,
   type BuyingPowerValuationUse,
 } from './domain/buying-power';
+export {
+  BuyingPowerCalculationError,
+  BuyingPowerCalculator,
+  type BuyingPowerCalculationErrorCode,
+} from './application/buying-power-calculator';
+export type {
+  BuyingPowerAdjustmentPort,
+  BuyingPowerAdjustmentRequest,
+  BuyingPowerAdjustmentUnavailableReason,
+  BuyingPowerClockPort,
+} from './application/ports/buying-power-adjustment.ports';
