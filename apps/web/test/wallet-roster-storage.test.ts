@@ -8,6 +8,9 @@ import {
   type WalletRosterKeyValueStorage,
   type WalletRosterSnapshot,
 } from '../lib/wallets/wallet-roster-storage';
+import { KAN61_SOLANA_CAIP_CHAIN_IDS } from '../lib/wallets/wallet-chain-identity';
+
+const SOLANA_ADDRESS = '7YttLkHDoNj9wyDur5EYBDauN5QJUJpz94QRtWQyFrA8';
 
 class FakeStorage implements WalletRosterKeyValueStorage {
   readonly values = new Map<string, string>();
@@ -54,8 +57,8 @@ function snapshot(): WalletRosterSnapshot {
         namespace: 'solana',
         label: 'Operations wallet',
         selectedAccount: {
-          chainId: 'solana:devnet',
-          address: '1111\u20261111',
+          chainId: KAN61_SOLANA_CAIP_CHAIN_IDS.devnet,
+          address: '7Ytt\u2026FrA8',
         },
         status: 'disconnected',
         lifecycleRevision: 4,
@@ -88,12 +91,12 @@ describe('wallet roster storage', () => {
       address: '0xABCDEFabcdefabcdefabcdefabcdefabcdefABCD',
     };
     const solanaAccount = {
-      chainId: 'solana:devnet' as const,
-      address: '11111111111111111111111111111111',
+      chainId: KAN61_SOLANA_CAIP_CHAIN_IDS.devnet,
+      address: SOLANA_ADDRESS,
     };
 
     expect(walletAddressHint(evmAccount)).toBe('0xabcd\u2026abcd');
-    expect(walletAddressHint(solanaAccount)).toBe('1111\u20261111');
+    expect(walletAddressHint(solanaAccount)).toBe('7Ytt\u2026FrA8');
     expect(evmAccount.address).toBe('0xABCDEFabcdefabcdefabcdefabcdefabcdefABCD');
   });
 

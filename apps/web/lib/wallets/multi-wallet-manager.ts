@@ -1,7 +1,6 @@
 import {
   assertOwnershipChallengeTargetsConnection,
   assertOwnershipSignatureMatchesChallenge,
-  assertWalletConnection,
   type OwnershipChallenge,
   type OwnershipSignature,
   type UnsubscribeWalletListener,
@@ -10,6 +9,7 @@ import {
   type WalletConnection,
   type WalletEvent,
 } from './wallet-adapter';
+import { assertLifecycleWalletConnection } from './wallet-chain-identity';
 import {
   MAX_WALLET_ROSTER_ENTRIES,
   walletAddressHint,
@@ -288,7 +288,7 @@ export class MultiWalletManager {
       const candidate = await adapter.connect(
         options.signal === undefined ? undefined : { signal: options.signal },
       );
-      assertWalletConnection(candidate, adapter.namespace, adapter.connectorId);
+      assertLifecycleWalletConnection(candidate, adapter.namespace, adapter.connectorId);
       if (candidate.restored) throw new WalletLifecycleError('invalid-wallet-state');
       connection = cloneConnection(candidate);
       this.assertOperationMayComplete(options.signal);
@@ -325,7 +325,7 @@ export class MultiWalletManager {
         this.disconnectUnrestoredEntries(connectorId);
         return null;
       }
-      assertWalletConnection(candidate, adapter.namespace, adapter.connectorId);
+      assertLifecycleWalletConnection(candidate, adapter.namespace, adapter.connectorId);
       if (!candidate.restored) throw new WalletLifecycleError('invalid-wallet-state');
       connection = cloneConnection(candidate);
       this.assertOperationMayComplete(options.signal);
@@ -611,7 +611,7 @@ export class MultiWalletManager {
     connection: WalletConnection,
     transition: 'account-changed' | 'chain-changed' | 'session-updated',
   ): void {
-    assertWalletConnection(connection, adapter.namespace, adapter.connectorId);
+    assertLifecycleWalletConnection(connection, adapter.namespace, adapter.connectorId);
     const current = this.entries.get(connection.connectionId);
     if (current === undefined || !this.liveConnections.has(connection.connectionId)) return;
     if (current.connectorId !== adapter.connectorId || current.namespace !== adapter.namespace) {

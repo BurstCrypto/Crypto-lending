@@ -1,9 +1,12 @@
 import {
-  assertWalletAccount,
   type ChainId,
   type WalletAccount,
   type WalletNamespace,
 } from './wallet-adapter';
+import {
+  assertLifecycleWalletAccount,
+  isCanonicalLifecycleChainId,
+} from './wallet-chain-identity';
 
 export const WALLET_ROSTER_STORAGE_KEY = 'crypto-lending.wallet-roster.v1';
 
@@ -12,7 +15,6 @@ export const MAX_WALLET_ROSTER_ENTRIES = 32;
 const MAX_ROSTER_JSON_LENGTH = 32_768;
 const MAX_IDENTIFIER_LENGTH = 256;
 const MAX_LABEL_LENGTH = 64;
-const SAFE_CHAIN_ID = /^(?:eip155:(?:0|[1-9][0-9]*)|solana:(?:mainnet|devnet|testnet))$/u;
 const CANONICAL_UTC_DATE_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
 const FORBIDDEN_TEXT = /[\p{Cc}\p{Cf}\p{Cs}]/u;
 const EVM_ADDRESS_HINT = /^0x[0-9a-f]{4}\u2026[0-9a-f]{4}$/u;
@@ -155,7 +157,7 @@ function parseAccountHint(value: unknown, namespace: WalletNamespace): WalletAcc
   assertSafeText(value.chainId, 'wallet roster chainId', MAX_IDENTIFIER_LENGTH);
   assertSafeText(value.address, 'wallet roster address hint', MAX_IDENTIFIER_LENGTH);
 
-  if (!SAFE_CHAIN_ID.test(value.chainId) || !value.chainId.startsWith(`${namespace}:`)) {
+  if (!isCanonicalLifecycleChainId(value.chainId, namespace)) {
     throw new TypeError('wallet roster chainId is unsupported');
   }
   const validAddressHint =
@@ -281,7 +283,8 @@ export function parseWalletRosterSnapshot(value: unknown): WalletRosterSnapshot 
 }
 
 export function walletAddressHint(account: WalletAccount): string {
-  assertWalletAccount(account);
+  const namespace: WalletNamespace = account.chainId.startsWith('eip155:') ? 'eip155' : 'solana';
+  assertLifecycleWalletAccount(account, namespace);
   if (account.chainId.startsWith('eip155:')) {
     const normalized = account.address.toLowerCase();
     return `${normalized.slice(0, 6)}\u2026${normalized.slice(-4)}`;

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { MultiWalletManager, WalletLifecycleError } from '../lib/wallets/multi-wallet-manager';
+import { KAN61_SOLANA_CAIP_CHAIN_IDS } from '../lib/wallets/wallet-chain-identity';
 import type {
   OwnershipChallenge,
   OwnershipSignature,
@@ -20,6 +21,7 @@ import {
 const ADDRESS_A = '0x1111111111111111111111111111111111111111';
 const ADDRESS_B = '0x2222222222222222222222222222222222222222';
 const ADDRESS_C = '0x3333333333333333333333333333333333333333';
+const SOLANA_ADDRESS = '7YttLkHDoNj9wyDur5EYBDauN5QJUJpz94QRtWQyFrA8';
 
 function evmConnection(
   connectorId: string,
@@ -51,8 +53,8 @@ function solanaConnection(
   restored = false,
 ): WalletConnection {
   const account = {
-    chainId: 'solana:devnet' as const,
-    address: '11111111111111111111111111111111',
+    chainId: KAN61_SOLANA_CAIP_CHAIN_IDS.devnet,
+    address: SOLANA_ADDRESS,
   };
   return {
     connectionId,
@@ -272,28 +274,57 @@ describe('multi-wallet manager', () => {
     });
   });
 
-  it('uses the same lifecycle boundary for a normalized Solana connection', async () => {
+  it('connects, persists, and explicitly restores one canonical Solana wallet', async () => {
+    const store = new MemoryRosterStore();
+    const now = clock();
     const phantom = new FakeWalletAdapter('phantom', 'solana');
     phantom.connectResult = solanaConnection('phantom', 'connection-phantom');
-    const wallets = manager([phantom]);
+    const wallets = manager([phantom], store, now);
 
     const connected = await wallets.connect('phantom', { label: 'Solana wallet' });
     expect(connected).toMatchObject({
       namespace: 'solana',
       selectedAccount: {
-        chainId: 'solana:devnet',
-        address: '1111\u20261111',
+        chainId: KAN61_SOLANA_CAIP_CHAIN_IDS.devnet,
+        address: '7Ytt\u2026FrA8',
       },
       status: 'reverification-required',
       indexingEnabled: false,
     });
     const target = wallets.getVerificationTarget(connected.connectionId);
     expect(target.account).toEqual({
-      chainId: 'solana:devnet',
-      address: '11111111111111111111111111111111',
+      chainId: KAN61_SOLANA_CAIP_CHAIN_IDS.devnet,
+      address: SOLANA_ADDRESS,
     });
     wallets.acceptOwnershipVerification(connected.connectionId, target.lifecycleRevision);
     expect(wallets.getState().entries[0]?.indexingEnabled).toBe(true);
+
+    expect(store.snapshot?.entries[0]?.selectedAccount).toEqual({
+      chainId: KAN61_SOLANA_CAIP_CHAIN_IDS.devnet,
+      address: '7Ytt\u2026FrA8',
+    });
+    wallets.dispose();
+
+    phantom.restoreResult = solanaConnection('phantom', 'connection-phantom', true);
+    const refreshed = manager([phantom], store, now);
+    expect(refreshed.getState().entries[0]).toMatchObject({
+      connectionId: 'connection-phantom',
+      label: 'Solana wallet',
+      status: 'restore-required',
+      live: false,
+      indexingEnabled: false,
+      selectedAccount: { chainId: KAN61_SOLANA_CAIP_CHAIN_IDS.devnet },
+    });
+
+    const restored = await refreshed.restore('phantom');
+    expect(restored).toMatchObject({
+      connectionId: 'connection-phantom',
+      label: 'Solana wallet',
+      status: 'reverification-required',
+      live: true,
+      indexingEnabled: false,
+      selectedAccount: { chainId: KAN61_SOLANA_CAIP_CHAIN_IDS.devnet },
+    });
   });
 
   it('invalidates verification revisions on account, chain, and session changes', async () => {
