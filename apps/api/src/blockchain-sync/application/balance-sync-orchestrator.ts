@@ -132,7 +132,7 @@ export class BalanceSyncOrchestrator {
     }
 
     try {
-      if (job.payload.cause === 'MANUAL_RECOVERY') {
+      if (job.payload.cause === 'MANUAL_RECOVERY' || job.payload.rescanFromPosition !== null) {
         const recovery = await this.recoverFromReorg(job, scope, checkpoint, now);
         await this.commitRecovery(scope, checkpoint, recovery, now.canonical);
         this.recordMetric({

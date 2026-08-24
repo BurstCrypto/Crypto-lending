@@ -379,7 +379,7 @@ function parseBalanceSyncPayload(value: unknown): BalanceSyncJobPayload {
       ? null
       : normalizeBalanceSyncPosition(record.rescanFromPosition);
   if (
-    (record.cause === 'SCHEDULED' && record.attempt !== 1) ||
+    (record.cause === 'SCHEDULED' && (record.attempt !== 1 || rescanFromPosition !== null)) ||
     (record.cause === 'RETRY' && record.attempt < 2) ||
     (record.cause === 'MANUAL_RECOVERY' && rescanFromPosition === null)
   ) {

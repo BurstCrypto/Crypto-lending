@@ -86,6 +86,7 @@ describe('balance sync domain', () => {
     { overrides: { accountId: 'not-a-uuid' }, mutate: undefined },
     { overrides: { attempt: 2 }, mutate: undefined },
     { overrides: { cause: 'RETRY' as const }, mutate: undefined },
+    { overrides: { rescanFromPosition: '99' }, mutate: undefined },
     {
       overrides: {},
       mutate: (value: Record<string, unknown>): void => {
