@@ -187,7 +187,9 @@ function normalizeProvider(value: unknown): ProviderAccess {
  * `window.solana`, rejects iframes/insecure contexts, and returns no vendor
  * object unless the complete bounded adapter surface is present.
  */
-export function discoverInjectedPhantomSolanaProvider(windowValue: unknown): PhantomSolanaProvider | null {
+export function discoverInjectedPhantomSolanaProvider(
+  windowValue: unknown,
+): PhantomSolanaProvider | null {
   if (!isObject(windowValue)) return null;
   const secure = tryRead(windowValue, 'isSecureContext');
   const self = tryRead(windowValue, 'self');
@@ -211,7 +213,10 @@ function readProviderErrorCode(value: unknown): string | number | undefined {
   return undefined;
 }
 
-function providerFailure(value: unknown, fallback: PhantomSolanaAdapterErrorCode): PhantomSolanaAdapterError {
+function providerFailure(
+  value: unknown,
+  fallback: PhantomSolanaAdapterErrorCode,
+): PhantomSolanaAdapterError {
   if (value instanceof PhantomSolanaAdapterError) return value;
   const code = readProviderErrorCode(value);
   if (code === 4001 || code === '4001' || code === 'USER_REJECTED') {
@@ -285,10 +290,7 @@ function validatePublicKeyBytes(address: string, value: unknown): void {
   if (!bytesEqual(actual, expected)) throw new PhantomSolanaAdapterError('ACCOUNT_INVALID');
 }
 
-function validateClusterClaim(
-  value: unknown,
-  expectedCaip: SupportedSolanaCaipChainId,
-): void {
+function validateClusterClaim(value: unknown, expectedCaip: SupportedSolanaCaipChainId): void {
   if (value === undefined) return;
   const expectedWalletChain = solanaWalletStandardChainForCaip(expectedCaip);
   const values = Array.isArray(value) ? value : [value];
@@ -300,10 +302,7 @@ function validateClusterClaim(
   }
 }
 
-function addressFromAccountCandidate(
-  value: unknown,
-  chainId: SupportedSolanaCaipChainId,
-): string {
+function addressFromAccountCandidate(value: unknown, chainId: SupportedSolanaCaipChainId): string {
   if (!isObject(value)) return addressFromPublicKey(value, chainId);
   validateClusterClaim(readProviderValue(value, 'chains'), chainId);
   validateClusterClaim(readProviderValue(value, 'chainId'), chainId);
@@ -341,7 +340,8 @@ function addressFromConnectionResult(
     return addressFromAccountCandidate(accounts[0], chainId);
   }
 
-  const publicKey = readProviderValue(result, 'publicKey') ?? readProviderValue(provider.raw, 'publicKey');
+  const publicKey =
+    readProviderValue(result, 'publicKey') ?? readProviderValue(provider.raw, 'publicKey');
   return addressFromPublicKey(publicKey, chainId);
 }
 
@@ -413,7 +413,10 @@ class DefaultPhantomSolanaAdapter implements WalletAdapter {
     if (typeof options.getProvider !== 'function') {
       throw new PhantomSolanaAdapterError('PROVIDER_INVALID');
     }
-    if (options.createConnectionId !== undefined && typeof options.createConnectionId !== 'function') {
+    if (
+      options.createConnectionId !== undefined &&
+      typeof options.createConnectionId !== 'function'
+    ) {
       throw new PhantomSolanaAdapterError('PROVIDER_INVALID');
     }
     this.chainId = options.chainId;
@@ -438,7 +441,10 @@ class DefaultPhantomSolanaAdapter implements WalletAdapter {
     return result;
   }
 
-  private open(restored: boolean, signal: AbortSignal | undefined): Promise<WalletConnection | null> {
+  private open(
+    restored: boolean,
+    signal: AbortSignal | undefined,
+  ): Promise<WalletConnection | null> {
     if (this.openPending !== null) return this.openPending;
     const operation = this.performOpen(restored, signal);
     this.openPending = operation;
@@ -472,7 +478,10 @@ class DefaultPhantomSolanaAdapter implements WalletAdapter {
       ]);
     } catch (error) {
       const failure = providerFailure(error, 'PROVIDER_FAILURE');
-      if (restored && (failure.code === 'USER_REJECTED' || failure.code === 'PROVIDER_DISCONNECTED')) {
+      if (
+        restored &&
+        (failure.code === 'USER_REJECTED' || failure.code === 'PROVIDER_DISCONNECTED')
+      ) {
         return null;
       }
       throw failure;
@@ -489,12 +498,17 @@ class DefaultPhantomSolanaAdapter implements WalletAdapter {
         restored,
         access.signIn !== undefined,
       );
-      const detach = this.bindProviderListeners(access);
       this.provider = access;
-      this.detachProviderListeners = detach;
       this.connection = connection;
+      const detach = this.bindProviderListeners(access);
+      if (this.provider !== access || this.connection !== connection) {
+        detach();
+        throw new PhantomSolanaAdapterError('PROVIDER_DISCONNECTED');
+      }
+      this.detachProviderListeners = detach;
       return connection;
     } catch (error) {
+      if (this.provider === access) this.clearLocalConnection();
       await this.bestEffortDisconnect(access);
       throw providerFailure(error, 'ACCOUNT_INVALID');
     }
@@ -645,11 +659,7 @@ class DefaultPhantomSolanaAdapter implements WalletAdapter {
   ): Promise<OwnershipSignature> {
     const connection = this.connection;
     const access = this.provider;
-    if (
-      connection === null ||
-      access === null ||
-      connection.connectionId !== connectionId
-    ) {
+    if (connection === null || access === null || connection.connectionId !== connectionId) {
       throw new PhantomSolanaAdapterError('CONNECTION_NOT_FOUND');
     }
     assertOwnershipChallengeTargetsConnection(challenge, connection);
@@ -662,6 +672,7 @@ class DefaultPhantomSolanaAdapter implements WalletAdapter {
       } catch (error) {
         throw providerFailure(error, 'PROVIDER_FAILURE');
       }
+      this.assertConnectionRevision(connection, access);
       if (!isObject(result)) throw new PhantomSolanaAdapterError('SIGNATURE_INVALID');
       const signerAddress = addressFromPublicKey(
         readProviderValue(result, 'publicKey'),
@@ -693,6 +704,7 @@ class DefaultPhantomSolanaAdapter implements WalletAdapter {
     } catch (error) {
       throw providerFailure(error, 'PROVIDER_FAILURE');
     }
+    this.assertConnectionRevision(connection, access);
     const candidate = Array.isArray(result) && result.length === 1 ? result[0] : result;
     if (!isObject(candidate)) throw new PhantomSolanaAdapterError('SIGNATURE_INVALID');
     const account = readProviderValue(candidate, 'account');
@@ -716,6 +728,12 @@ class DefaultPhantomSolanaAdapter implements WalletAdapter {
     });
     assertOwnershipSignatureMatchesChallenge(signature, challenge);
     return signature;
+  }
+
+  private assertConnectionRevision(connection: WalletConnection, access: ProviderAccess): void {
+    if (this.connection !== connection || this.provider !== access) {
+      throw new PhantomSolanaAdapterError('CONNECTION_NOT_FOUND');
+    }
   }
 
   subscribe(listener: (event: WalletEvent) => void): () => void {
@@ -748,8 +766,6 @@ class DefaultPhantomSolanaAdapter implements WalletAdapter {
   }
 }
 
-export function createPhantomSolanaAdapter(
-  options: PhantomSolanaAdapterOptions,
-): WalletAdapter {
+export function createPhantomSolanaAdapter(options: PhantomSolanaAdapterOptions): WalletAdapter {
   return new DefaultPhantomSolanaAdapter(options);
 }

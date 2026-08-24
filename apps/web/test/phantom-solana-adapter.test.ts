@@ -229,6 +229,22 @@ describe('Phantom Solana adapter', () => {
     expect(provider.connect).toHaveBeenCalledTimes(1);
   });
 
+  it('does not resurrect a connection if the provider disconnects while listeners bind', async () => {
+    const provider = fakeProvider();
+    const originalOn = provider.on.getMockImplementation();
+    if (originalOn === undefined) throw new Error('expected provider event fake');
+    provider.on.mockImplementation((event, listener) => {
+      originalOn(event, listener);
+      if (event === 'disconnect') listener({ code: 4900 });
+    });
+    const wallet = adapter(provider);
+
+    await expect(wallet.connect()).rejects.toMatchObject({ code: 'PROVIDER_DISCONNECTED' });
+    expect(provider.disconnect).toHaveBeenCalledTimes(1);
+    expect(provider.listenerCount('accountChanged')).toBe(0);
+    expect(provider.listenerCount('disconnect')).toBe(0);
+  });
+
   it('restores only through a trusted non-interactive provider attempt', async () => {
     const provider = fakeProvider();
     const wallet = adapter(provider);
@@ -314,9 +330,9 @@ describe('Phantom Solana adapter', () => {
     });
     expect(provider.listenerCount('accountChanged')).toBe(0);
     expect(provider.listenerCount('disconnect')).toBe(0);
-    await expect(wallet.signOwnershipChallenge(connection.connectionId, messageChallenge())).rejects.toMatchObject(
-      { code: 'CONNECTION_NOT_FOUND' },
-    );
+    await expect(
+      wallet.signOwnershipChallenge(connection.connectionId, messageChallenge()),
+    ).rejects.toMatchObject({ code: 'CONNECTION_NOT_FOUND' });
   });
 
   it('fails closed and emits a redacted disconnect for an invalid account event', async () => {
@@ -494,6 +510,26 @@ describe('Phantom Solana adapter', () => {
     await expect(
       wallet.signOwnershipChallenge(connection.connectionId, messageChallenge()),
     ).rejects.toMatchObject({ code: 'SIGNATURE_INVALID' });
+  });
+
+  it('discards an in-flight signature after the selected account changes', async () => {
+    const provider = fakeProvider();
+    const pending = deferred<{
+      publicKey: ReturnType<typeof publicKey>;
+      signature: Uint8Array<ArrayBuffer>;
+    }>();
+    provider.signMessage.mockImplementation(async () => pending.promise);
+    const wallet = adapter(provider);
+    const connection = await wallet.connect();
+
+    const signing = wallet.signOwnershipChallenge(connection.connectionId, messageChallenge());
+    provider.emit('accountChanged', publicKey(ADDRESS_B));
+    pending.resolve({
+      publicKey: publicKey(ADDRESS_A),
+      signature: new Uint8Array(64).fill(1),
+    });
+
+    await expect(signing).rejects.toMatchObject({ code: 'CONNECTION_NOT_FOUND' });
   });
 
   it('never reads or retains provider error messages, causes, or payloads', async () => {

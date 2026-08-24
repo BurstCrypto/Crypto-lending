@@ -21,8 +21,7 @@ export const SOLANA_WALLET_STANDARD_CHAINS = {
 export type WalletNamespace = (typeof WALLET_NAMESPACES)[number];
 export type ChainId = `${WalletNamespace}:${string}`;
 export type SupportedSolanaCluster = keyof typeof SOLANA_CAIP_CHAIN_IDS;
-export type SupportedSolanaCaipChainId =
-  (typeof SOLANA_CAIP_CHAIN_IDS)[SupportedSolanaCluster];
+export type SupportedSolanaCaipChainId = (typeof SOLANA_CAIP_CHAIN_IDS)[SupportedSolanaCluster];
 export type SolanaWalletStandardChain =
   (typeof SOLANA_WALLET_STANDARD_CHAINS)[SupportedSolanaCluster];
 
@@ -34,9 +33,7 @@ const SOLANA_CAIP_TO_WALLET_STANDARD = new Map<
   [SOLANA_CAIP_CHAIN_IDS.devnet, SOLANA_WALLET_STANDARD_CHAINS.devnet],
 ]);
 
-export function solanaWalletStandardChainForCaip(
-  chainId: ChainId,
-): SolanaWalletStandardChain {
+export function solanaWalletStandardChainForCaip(chainId: ChainId): SolanaWalletStandardChain {
   const chain = SOLANA_CAIP_TO_WALLET_STANDARD.get(chainId as SupportedSolanaCaipChainId);
   if (chain === undefined) {
     throw new TypeError('Solana chain ID is not in the supported CAIP allowlist');
