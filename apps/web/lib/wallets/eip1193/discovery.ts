@@ -1,4 +1,4 @@
-import type { EvmNetworkDefinition } from './networks';
+import { createSupportedEvmNetworks, type EvmNetworkDefinition } from './networks';
 import { isEip1193Provider, type Eip1193Provider } from './provider';
 
 export const EIP6963_ANNOUNCE_PROVIDER = 'eip6963:announceProvider';
@@ -175,7 +175,7 @@ export class Eip6963ProviderDiscovery {
           ? null
           : window
         : options.target;
-    this.#supportedNetworks = options.supportedNetworks;
+    this.#supportedNetworks = createSupportedEvmNetworks(options.supportedNetworks);
     this.#createSelectionId = options.createSelectionId ?? defaultSelectionId;
     this.#createRequestEvent = options.createRequestEvent ?? defaultRequestEvent;
   }
