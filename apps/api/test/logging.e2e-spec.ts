@@ -1,4 +1,4 @@
-import { Body, Controller, Post, type INestApplication } from '@nestjs/common';
+import { Controller, Post, type INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 
@@ -15,7 +15,7 @@ import {
 @Controller('logging-boundary-fixture')
 class LoggingBoundaryFixtureController {
   @Post('failure')
-  fail(@Body() _body: unknown): never {
+  fail(): never {
     throw adversarialProviderError();
   }
 }
