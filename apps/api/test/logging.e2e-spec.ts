@@ -21,6 +21,8 @@ class LoggingBoundaryFixtureController {
 }
 
 describe('correlated HTTP logging (e2e)', () => {
+  const spoofedIntentId = '00000000-0000-4000-8000-000000000091';
+  const spoofedQuoteId = '00000000-0000-4000-8000-000000000092';
   let app: INestApplication;
   let lines: string[];
   let observability: InProcessObservability;
@@ -58,6 +60,8 @@ describe('correlated HTTP logging (e2e)', () => {
       .set('Tracestate', 'attacker=customer-secret')
       .set('X-Crypto-Synthetic', 'false')
       .set('X-Request-Id', 'attacker-request-id')
+      .set('X-Intent-Id', spoofedIntentId)
+      .set('X-Quote-Id', spoofedQuoteId)
       .expect(200);
 
     const output = lines.map((line) => JSON.parse(line) as StructuredLogRecord);
@@ -74,7 +78,10 @@ describe('correlated HTTP logging (e2e)', () => {
       correlationId: response.headers['x-request-id'],
     });
     expect(lines.join('\n')).not.toMatch(
-      /query-secret|header-secret|attacker-request-id|authorization|token=/iu,
+      new RegExp(
+        `query-secret|header-secret|attacker-request-id|${spoofedIntentId}|${spoofedQuoteId}|authorization|token=`,
+        'iu',
+      ),
     );
 
     const snapshot = observability.dashboardSnapshot();
@@ -119,7 +126,10 @@ describe('correlated HTTP logging (e2e)', () => {
     expect(snapshot.completedSpans[0]?.spanId).toBe(snapshot.completedSpans[0]?.rootSpanId);
     expect(snapshot.completedSpans[0]).not.toHaveProperty('parentSpanId');
     expect(JSON.stringify(snapshot)).not.toMatch(
-      /aaaaaaaa|bbbbbbbb|attacker|customer-secret|query-secret|header-secret|token=/iu,
+      new RegExp(
+        `aaaaaaaa|bbbbbbbb|attacker|customer-secret|query-secret|header-secret|${spoofedIntentId}|${spoofedQuoteId}|token=`,
+        'iu',
+      ),
     );
   });
 

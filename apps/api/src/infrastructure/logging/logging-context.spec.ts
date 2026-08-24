@@ -9,6 +9,8 @@ import {
 const ROOT_ID = '00000000-0000-4000-8000-000000000001';
 const REQUEST_ID = ROOT_ID;
 const ACTOR_ID = '00000000-0000-4000-8000-000000000003';
+const INTENT_ID = '00000000-0000-4000-8000-000000000004';
+const QUOTE_ID = '00000000-0000-4000-8000-000000000005';
 
 function indexedUuid(index: number): string {
   return `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`;
@@ -107,6 +109,28 @@ describe('LoggingContext', () => {
         'Legacy correlation contexts cannot carry optional identifiers',
       );
       expect(context.requireCurrent()).toEqual({ correlationId: legacyCorrelationId });
+    });
+  });
+
+  it('rejects malformed intent and quote identifiers before extending correlation', () => {
+    const context = new LoggingContext();
+
+    context.run({ correlationId: ROOT_ID }, () => {
+      expect(() => context.runWith({ intentId: 'client-intent' }, () => undefined)).toThrow(
+        'intentId must use its canonical diagnostic identifier format',
+      );
+      expect(() => context.runWith({ quoteId: 'client-quote' }, () => undefined)).toThrow(
+        'quoteId must use its canonical diagnostic identifier format',
+      );
+      expect(context.requireCurrent()).toEqual({ correlationId: ROOT_ID });
+
+      context.runWith({ intentId: INTENT_ID, quoteId: QUOTE_ID }, () => {
+        expect(context.requireCurrent()).toEqual({
+          correlationId: ROOT_ID,
+          intentId: INTENT_ID,
+          quoteId: QUOTE_ID,
+        });
+      });
     });
   });
 
