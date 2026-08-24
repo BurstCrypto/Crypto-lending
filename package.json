@@ -20,6 +20,7 @@
     "dev:api": "npm run start:dev --workspace @crypto-lending/api",
     "worker:outbox": "npm run worker:outbox --workspace @crypto-lending/api",
     "worker:outbox:prod": "npm run worker:outbox:prod --workspace @crypto-lending/api",
+    "outbox:preflight:envelope": "tsx scripts/job-envelope-rollout-preflight.ts",
     "build": "npm run build --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
