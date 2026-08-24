@@ -671,6 +671,22 @@ describe('BalanceSyncOrchestrator', () => {
           source: source('100', BLOCK_100_A.toUpperCase().replace('0X', '0x'), BLOCK_100_A),
         }),
     },
+    {
+      name: 'accessor-backed source record',
+      mutate: () => {
+        const accessorSource = { ...candidate().source } as Record<string, unknown>;
+        Object.defineProperty(accessorSource, 'hash', {
+          enumerable: true,
+          get: () => BLOCK_100_A,
+        });
+        return candidate({ source: accessorSource as never });
+      },
+    },
+    {
+      name: 'symbol-bearing position record',
+      mutate: () =>
+        candidate({ positions: [{ ...position(), [Symbol('hidden')]: 'must-not-pass' }] }),
+    },
   ])('dead-letters $name as invalid provider data without zeroing', async ({ mutate }) => {
     const original = checkpoint();
     const test = harness({ initial: original, read: async () => mutate() });
@@ -717,6 +733,17 @@ describe('BalanceSyncOrchestrator', () => {
     const test = harness({ initial: invalid, read });
 
     await expect(test.orchestrator.process(job())).rejects.toEqual(
+      new BalanceSyncOrchestratorError('INVALID_BALANCE_SYNC_CHECKPOINT'),
+    );
+    expect(read).not.toHaveBeenCalled();
+
+    const accessorCheckpoint = { ...checkpoint() } as Record<string, unknown>;
+    Object.defineProperty(accessorCheckpoint, 'currentObservation', {
+      enumerable: true,
+      get: () => checkpoint().currentObservation,
+    });
+    const accessorTest = harness({ initial: accessorCheckpoint as never, read });
+    await expect(accessorTest.orchestrator.process(job())).rejects.toEqual(
       new BalanceSyncOrchestratorError('INVALID_BALANCE_SYNC_CHECKPOINT'),
     );
     expect(read).not.toHaveBeenCalled();

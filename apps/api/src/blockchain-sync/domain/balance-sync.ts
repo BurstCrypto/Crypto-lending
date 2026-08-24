@@ -78,10 +78,11 @@ export class BalanceSyncIndexerFailure extends Error {
     super(code);
     this.name = 'BalanceSyncIndexerFailure';
     if (
-      options.retryAfterSeconds !== undefined &&
-      (!Number.isSafeInteger(options.retryAfterSeconds) || options.retryAfterSeconds < 0)
+      !isBalanceSyncIndexerFailureCode(code) ||
+      (options.retryAfterSeconds !== undefined &&
+        (!Number.isSafeInteger(options.retryAfterSeconds) || options.retryAfterSeconds < 0))
     ) {
-      throw new TypeError('retryAfterSeconds must be a non-negative safe integer');
+      throw new TypeError('invalid balance sync indexer failure');
     }
     this.retryAfterSeconds = options.retryAfterSeconds;
   }
@@ -404,21 +405,47 @@ function deadLetter(
 }
 
 function exactRecord(value: unknown, keys: readonly string[]): Record<string, unknown> {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+  try {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+      throw new Error('expected record');
+    }
+    const prototype = Object.getPrototypeOf(value) as unknown;
+    if (prototype !== Object.prototype && prototype !== null) {
+      throw new Error('expected data record');
+    }
+    const descriptors = Object.getOwnPropertyDescriptors(value) as unknown as PropertyDescriptorMap;
+    const ownKeys = Reflect.ownKeys(descriptors);
+    if (
+      ownKeys.length !== keys.length ||
+      ownKeys.some((key) => typeof key !== 'string' || !keys.includes(key))
+    ) {
+      throw new Error('unexpected record shape');
+    }
+    const record = Object.create(null) as Record<string, unknown>;
+    for (const key of keys) {
+      const descriptor = descriptors[key];
+      if (!descriptor || !('value' in descriptor) || descriptor.enumerable !== true) {
+        throw new Error('expected enumerable data property');
+      }
+      record[key] = descriptor.value;
+    }
+    return record;
+  } catch {
     throw new BalanceSyncDomainError('INVALID_BALANCE_SYNC_JOB');
   }
-  const prototype = Object.getPrototypeOf(value) as unknown;
-  if (prototype !== Object.prototype && prototype !== null) {
-    throw new BalanceSyncDomainError('INVALID_BALANCE_SYNC_JOB');
-  }
-  const ownKeys = Object.keys(value);
-  if (
-    ownKeys.length !== keys.length ||
-    keys.some((key) => !Object.prototype.hasOwnProperty.call(value, key))
-  ) {
-    throw new BalanceSyncDomainError('INVALID_BALANCE_SYNC_JOB');
-  }
-  return value as Record<string, unknown>;
+}
+
+function isBalanceSyncIndexerFailureCode(
+  value: unknown,
+): value is Exclude<BalanceSyncFailureCode, 'UNCLASSIFIED_FAILURE'> {
+  return [
+    'RATE_LIMITED',
+    'PROVIDER_TIMEOUT',
+    'PROVIDER_UNAVAILABLE',
+    'PROVIDER_INVALID_DATA',
+    'PERMANENT_PROVIDER_FAILURE',
+    'REORG_RECOVERY_FAILED',
+  ].includes(value as Exclude<BalanceSyncFailureCode, 'UNCLASSIFIED_FAILURE'>);
 }
 
 function digest(domain: string, ...parts: readonly string[]): string {

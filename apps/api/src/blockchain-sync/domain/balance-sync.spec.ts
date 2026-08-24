@@ -105,6 +105,25 @@ describe('balance sync domain', () => {
     ).toThrow(new BalanceSyncDomainError('INVALID_BALANCE_SYNC_JOB'));
   });
 
+  it('rejects accessor-backed and symbol-bearing job payloads before identity use', () => {
+    const accessorPayload = { ...payload() } as Record<string, unknown>;
+    Object.defineProperty(accessorPayload, 'accountId', {
+      enumerable: true,
+      get: () => ids.account,
+    });
+    const symbolPayload = { ...payload(), [Symbol('hidden')]: ids.wallet };
+
+    for (const candidate of [accessorPayload, symbolPayload]) {
+      expect(() =>
+        createDeterministicBalanceSyncJobEnvelope(candidate as never, {
+          id: ids.job,
+          occurredAt,
+          correlation: { correlationId: ids.correlation },
+        }),
+      ).toThrow(new BalanceSyncDomainError('INVALID_BALANCE_SYNC_JOB'));
+    }
+  });
+
   it('uses the bounded three-attempt retry and DLQ policy', () => {
     expect(decideBalanceSyncFailureDisposition('PROVIDER_TIMEOUT', 1)).toEqual({
       action: 'RETRY',
@@ -141,6 +160,7 @@ describe('balance sync domain', () => {
       code: 'RATE_LIMITED',
       retryAfterSeconds: 10,
     });
+    expect(() => new BalanceSyncIndexerFailure('NOT_A_FAILURE' as never)).toThrow(TypeError);
   });
 
   it.each([

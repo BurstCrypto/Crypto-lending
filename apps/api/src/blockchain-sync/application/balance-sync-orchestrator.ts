@@ -258,7 +258,7 @@ export class BalanceSyncOrchestrator {
     scope: BalanceSyncScope,
     nowMs: number,
   ): Promise<BalanceSyncCheckpoint | null> {
-    let value: BalanceSyncCheckpoint | null;
+    let value: unknown;
     try {
       value = await this.checkpoints.load(scope);
     } catch {
@@ -551,16 +551,14 @@ function normalizeCandidate(
       nowMs,
       true,
     );
-    if (
-      !Array.isArray(record.positions) ||
-      record.positions.length > BALANCE_SYNC_POLICY.maximumPositionsPerObservation
-    ) {
-      throw new Error('invalid positions');
-    }
+    const candidatePositions = exactArray(
+      record.positions,
+      BALANCE_SYNC_POLICY.maximumPositionsPerObservation,
+    );
     const policy = chainObservationPolicyForNetwork(request.networkId);
     if (!policy) throw new Error('unsupported network');
     const registry = supportedAssetRegistryForEnvironment(policy.environment);
-    const positions = record.positions.map((candidatePosition) => {
+    const positions = candidatePositions.map((candidatePosition) => {
       const positionRecord = exactRecord(candidatePosition, [
         'positionId',
         'stablecoin',
@@ -723,40 +721,96 @@ function blockReference(source: BalanceSyncSourcePoint): Readonly<{
 }
 
 function validateCheckpoint(
-  value: BalanceSyncCheckpoint | null,
+  value: unknown,
   scope: BalanceSyncScope,
   nowMs: number,
 ): BalanceSyncCheckpoint | null {
   if (value === null) return null;
+  const record = exactRecord(value, [
+    'revision',
+    'scope',
+    'currentObservation',
+    'lastFinalizedSource',
+    'freshness',
+    'staleSince',
+    'lastFailureCode',
+  ]);
+  const checkpointScope = exactRecord(record.scope, ['accountId', 'walletId', 'networkId']);
+  const revision = record.revision;
+  const freshness = record.freshness;
+  const staleSince = record.staleSince;
+  const lastFailureCode = record.lastFailureCode;
   if (
-    !Number.isSafeInteger(value.revision) ||
-    value.revision < 0 ||
-    !sameScope(value.scope, scope) ||
-    !['CURRENT', 'STALE', 'UNAVAILABLE', 'QUARANTINED'].includes(value.freshness) ||
-    (value.staleSince !== null &&
-      (!isCanonicalTimestamp(value.staleSince) || Date.parse(value.staleSince) > nowMs)) ||
-    (value.freshness === 'CURRENT'
-      ? value.staleSince !== null || value.lastFailureCode !== null
-      : value.staleSince === null || value.lastFailureCode === null) ||
-    (value.lastFailureCode !== null && !isFailureCode(value.lastFailureCode))
+    typeof revision !== 'number' ||
+    !Number.isSafeInteger(revision) ||
+    revision < 0 ||
+    typeof checkpointScope.accountId !== 'string' ||
+    typeof checkpointScope.walletId !== 'string' ||
+    typeof checkpointScope.networkId !== 'string' ||
+    !sameScope(
+      {
+        accountId: checkpointScope.accountId,
+        walletId: checkpointScope.walletId,
+        networkId: checkpointScope.networkId as BalanceSyncScope['networkId'],
+      },
+      scope,
+    ) ||
+    (freshness !== 'CURRENT' &&
+      freshness !== 'STALE' &&
+      freshness !== 'UNAVAILABLE' &&
+      freshness !== 'QUARANTINED') ||
+    (staleSince !== null &&
+      (typeof staleSince !== 'string' ||
+        !isCanonicalTimestamp(staleSince) ||
+        Date.parse(staleSince) > nowMs)) ||
+    (freshness === 'CURRENT'
+      ? staleSince !== null || lastFailureCode !== null
+      : staleSince === null || lastFailureCode === null) ||
+    (lastFailureCode !== null && !isFailureCode(lastFailureCode))
   ) {
     throw new TypeError('invalid checkpoint');
   }
-  if (value.currentObservation) {
-    const observation = value.currentObservation;
+  let currentObservation: BalanceSyncObservation | null = null;
+  if (record.currentObservation !== null) {
+    const observation = exactRecord(record.currentObservation, [
+      'observationId',
+      'accountId',
+      'walletId',
+      'networkId',
+      'tier',
+      'source',
+      'headAdvancedAt',
+      'positions',
+    ]);
+    if (
+      typeof observation.observationId !== 'string' ||
+      typeof observation.accountId !== 'string' ||
+      typeof observation.walletId !== 'string' ||
+      typeof observation.networkId !== 'string' ||
+      typeof observation.tier !== 'string'
+    ) {
+      throw new TypeError('invalid current observation');
+    }
     const threshold = balanceSyncTierThreshold(scope.networkId, observation.tier);
     if (!threshold?.locallyExecutable) throw new TypeError('invalid observation tier');
     const headAdvancedAt = parseTimestamp(observation.headAdvancedAt);
     if (headAdvancedAt.milliseconds > nowMs) throw new TypeError('future current observation');
+    const source = exactRecord(observation.source, [
+      'position',
+      'hash',
+      'parentHash',
+      'selector',
+      'retrievedAt',
+    ]);
     const candidate = normalizeCandidate(
       {
         walletId: observation.walletId,
         networkId: observation.networkId,
         tier: observation.tier,
-        source: { ...observation.source, identityValidated: true },
+        source: { ...source, identityValidated: true },
         positions: observation.positions,
       },
-      { ...scope, tier: observation.tier, selector: threshold.selector },
+      { ...scope, tier: threshold.tier, selector: threshold.selector },
       nowMs,
     );
     const normalizedObservation = createObservation(scope, candidate, headAdvancedAt.canonical);
@@ -768,25 +822,42 @@ function validateCheckpoint(
     ) {
       throw new TypeError('invalid current observation');
     }
+    currentObservation = normalizedObservation;
   }
-  if (value.lastFinalizedSource) {
+  let lastFinalizedSource: BalanceSyncSourcePoint | null = null;
+  if (record.lastFinalizedSource !== null) {
     const financial = balanceSyncTierThreshold(scope.networkId, 'FINANCIAL');
     if (!financial) throw new TypeError('missing financial threshold');
-    parseSourcePoint(
-      { ...value.lastFinalizedSource, identityValidated: true },
+    const finalized = exactRecord(record.lastFinalizedSource, [
+      'position',
+      'hash',
+      'parentHash',
+      'selector',
+      'retrievedAt',
+    ]);
+    lastFinalizedSource = parseSourcePoint(
+      { ...finalized, identityValidated: true },
       scope.networkId,
       financial.selector,
       nowMs,
       true,
     );
     if (
-      value.currentObservation &&
-      BigInt(value.lastFinalizedSource.position) > BigInt(value.currentObservation.source.position)
+      currentObservation &&
+      BigInt(lastFinalizedSource.position) > BigInt(currentObservation.source.position)
     ) {
       throw new TypeError('finalized source is ahead of current observation');
     }
   }
-  return value;
+  return Object.freeze({
+    revision,
+    scope,
+    currentObservation,
+    lastFinalizedSource,
+    freshness,
+    staleSince,
+    lastFailureCode,
+  });
 }
 
 function isFailureCode(value: unknown): value is BalanceSyncFailureCode {
@@ -805,10 +876,21 @@ function failureFrom(error: unknown): Readonly<{
   code: BalanceSyncFailureCode;
   retryAfterSeconds?: number;
 }> {
-  if (error instanceof BalanceSyncIndexerFailure) {
-    return error.retryAfterSeconds === undefined
-      ? Object.freeze({ code: error.code })
-      : Object.freeze({ code: error.code, retryAfterSeconds: error.retryAfterSeconds });
+  try {
+    if (error instanceof BalanceSyncIndexerFailure && isFailureCode(error.code)) {
+      const retryAfterSeconds = error.retryAfterSeconds;
+      if (
+        retryAfterSeconds !== undefined &&
+        (!Number.isSafeInteger(retryAfterSeconds) || retryAfterSeconds < 0)
+      ) {
+        return Object.freeze({ code: 'UNCLASSIFIED_FAILURE' });
+      }
+      return retryAfterSeconds === undefined
+        ? Object.freeze({ code: error.code })
+        : Object.freeze({ code: error.code, retryAfterSeconds });
+    }
+  } catch {
+    return Object.freeze({ code: 'UNCLASSIFIED_FAILURE' });
   }
   if (error instanceof BalanceSyncOrchestratorError) throw error;
   return Object.freeze({ code: 'UNCLASSIFIED_FAILURE' });
@@ -858,14 +940,55 @@ function exactRecord(value: unknown, keys: readonly string[]): Record<string, un
   if (prototype !== Object.prototype && prototype !== null) {
     throw new TypeError('expected data record');
   }
-  const ownKeys = Object.keys(value);
+  const descriptors = Object.getOwnPropertyDescriptors(value) as unknown as PropertyDescriptorMap;
+  const ownKeys = Reflect.ownKeys(descriptors);
   if (
     ownKeys.length !== keys.length ||
-    keys.some((key) => !Object.prototype.hasOwnProperty.call(value, key))
+    ownKeys.some((key) => typeof key !== 'string' || !keys.includes(key))
   ) {
     throw new TypeError('unexpected record shape');
   }
-  return value as Record<string, unknown>;
+  const record = Object.create(null) as Record<string, unknown>;
+  for (const key of keys) {
+    const descriptor = descriptors[key];
+    if (!descriptor || !('value' in descriptor) || descriptor.enumerable !== true) {
+      throw new TypeError('expected enumerable data property');
+    }
+    record[key] = descriptor.value;
+  }
+  return record;
+}
+
+function exactArray(value: unknown, maximumLength: number): readonly unknown[] {
+  if (!Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype) {
+    throw new TypeError('expected data array');
+  }
+  const descriptors = Object.getOwnPropertyDescriptors(value) as unknown as PropertyDescriptorMap;
+  const lengthDescriptor = descriptors.length;
+  if (
+    !lengthDescriptor ||
+    !('value' in lengthDescriptor) ||
+    typeof lengthDescriptor.value !== 'number' ||
+    !Number.isSafeInteger(lengthDescriptor.value) ||
+    lengthDescriptor.value < 0 ||
+    lengthDescriptor.value > maximumLength
+  ) {
+    throw new TypeError('invalid data array length');
+  }
+  const length = lengthDescriptor.value;
+  const ownKeys = Reflect.ownKeys(descriptors);
+  if (ownKeys.length !== length + 1) {
+    throw new TypeError('unexpected data array shape');
+  }
+  const result: unknown[] = [];
+  for (let index = 0; index < length; index += 1) {
+    const descriptor = descriptors[String(index)];
+    if (!descriptor || !('value' in descriptor) || descriptor.enumerable !== true) {
+      throw new TypeError('invalid data array element');
+    }
+    result.push(descriptor.value);
+  }
+  return Object.freeze(result);
 }
 
 function sameScope(left: BalanceSyncScope, right: BalanceSyncScope): boolean {
