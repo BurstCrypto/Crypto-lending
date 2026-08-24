@@ -128,9 +128,7 @@ describe('wallet roster storage', () => {
           ],
         }),
       ).toThrow('wallet roster chainId is unsupported');
-      expect(() => walletAddressHint({ chainId, address: SOLANA_ADDRESS })).toThrow(
-        'canonical KAN-61 identity',
-      );
+      expect(() => walletAddressHint({ chainId, address: SOLANA_ADDRESS })).toThrow(TypeError);
     }
   });
 

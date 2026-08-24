@@ -27,12 +27,10 @@ Solana lifecycle state accepts only KAN-61's canonical CAIP-2 references:
 aliases such as `solana:mainnet`, `solana:devnet`, and `solana:testnet` are
 rejected before a connection or roster row becomes application state.
 
-This branch remains directly based on main, whose WAL-001 validator predates
-those KAN-61 references. The isolated compatibility boundary validates a
-private translated view only when that older validator is present; it never
-returns or persists an alias. With KAN-59's canonical validator present, it
-uses that shared boundary directly. Final branch integration should consolidate
-the duplicate checked-in Solana catalog and rerun the combined wallet suites.
+The isolated ticket branch remains directly based on main and therefore carries
+a compatibility boundary for the older WAL-001 shape. The local integration
+branch removes that fallback and reads KAN-59's shared canonical catalog and
+validator directly. No lifecycle path returns or persists a legacy alias.
 
 The intended UI/controller operations are:
 
