@@ -168,7 +168,7 @@ class InMemoryMigrationDatabase {
         ]);
       } else if (
         normalized.startsWith('SELECT (prior.valid AND yield_operation.valid)') &&
-        normalized.includes('yield_operation_commands_outbox_fk')
+        normalized.includes('yield_operation_commands_scope_unique')
       ) {
         return result([
           {

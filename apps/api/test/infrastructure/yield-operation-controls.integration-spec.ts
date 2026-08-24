@@ -4,10 +4,12 @@ import type { PoolClient, QueryResultRow } from 'pg';
 import { Pool } from 'pg';
 
 import { MigrationRunner } from '../../src/infrastructure/database/migration-runner.service';
+import { PostgresService } from '../../src/infrastructure/database/postgres.service';
 import {
   createYieldOperationControlsTestSchemaMigrationV0012,
   DATABASE_TEST_SCHEMA_MIGRATION_LIST,
 } from '../../src/infrastructure/database/migrations';
+import { JobOutboxRepository } from '../../src/infrastructure/outbox/job-outbox.repository';
 import { assertLocalPrincipalFixture } from './local-principal-fixture-guard';
 
 const testDatabaseUrl = process.env.TEST_DATABASE_URL;
@@ -328,6 +330,63 @@ describeWithPostgres('KAN-186 yield operation PostgreSQL controls', () => {
       {
         command_id: committed.command_id,
         transition_event_id: committed.transition_event_id,
+        current_state: 'SUBMITTED',
+        outcome: 'REPLAYED',
+      },
+    );
+
+    await operationPool.query(
+      `UPDATE job_outbox
+       SET status = 'published',
+           published_at = clock_timestamp() - INTERVAL '2 minutes',
+           failed_at = NULL,
+           locked_by = NULL,
+           locked_until = NULL
+       WHERE id = $1::text`,
+      [committed.submission_id],
+    );
+    const unrelatedOutboxId = randomUUID();
+    await operationPool.query(
+      `INSERT INTO job_outbox (
+         id, queue_name, payload, message_attributes, status, published_at
+       ) VALUES (
+         $1::text, 'jobs', $2::jsonb, '{}'::jsonb, 'published',
+         clock_timestamp() - INTERVAL '2 minutes'
+       )`,
+      [
+        unrelatedOutboxId,
+        JSON.stringify({
+          id: unrelatedOutboxId,
+          kind: 'test.unrelated-retention-candidate',
+        }),
+      ],
+    );
+    const outboxRepository = new JobOutboxRepository(new PostgresService(operationPool));
+    await expect(
+      outboxRepository.deleteExpired({
+        batchSize: 2,
+        failedRetentionMs: 60_000,
+        publishedRetentionMs: 60_000,
+      }),
+    ).resolves.toBe(2);
+    await expect(
+      operationPool.query(
+        `SELECT
+           (SELECT count(*)::integer FROM yield_operation_commands
+            WHERE command_id = $1::uuid) AS command_count,
+           (SELECT count(*)::integer FROM yield_operation_submissions
+            WHERE command_id = $1::uuid) AS submission_count,
+           (SELECT count(*)::integer FROM job_outbox
+            WHERE id IN ($2::text, $3::text)) AS outbox_count`,
+        [committed.command_id, committed.submission_id, unrelatedOutboxId],
+      ),
+    ).resolves.toMatchObject({
+      rows: [{ command_count: 1, submission_count: 1, outbox_count: 0 }],
+    });
+    await expect(transitionOperation(operationPool, fixture, submitRequest)).resolves.toMatchObject(
+      {
+        command_id: committed.command_id,
+        submission_id: committed.submission_id,
         current_state: 'SUBMITTED',
         outcome: 'REPLAYED',
       },

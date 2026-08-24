@@ -77,6 +77,7 @@ describe('createYieldOperationControlsMigration', () => {
 
   it('makes submit and its single outbox request one deferred atomic unit', () => {
     const sql = joinedSql(createYieldOperationControlsMigrationV0012.upSql);
+    const verifier = createYieldOperationControlsMigrationV0012.verifySql ?? '';
 
     expect(sql).toContain('yield_operation_submissions_operation_unique');
     expect(sql).toContain('yield_operation_submissions_command_unique');
@@ -85,6 +86,10 @@ describe('createYieldOperationControlsMigration', () => {
     expect(sql).toContain('yield submission command must atomically enqueue one outbox job');
     expect(sql).toContain("requested_next_state = 'SUBMITTED'");
     expect(sql).toContain("'PROVIDER_OR_CHAIN_ADAPTER'");
+    expect(sql).not.toContain('yield_operation_commands_outbox_fk');
+    expect(sql).not.toContain('yield_operation_submissions_outbox_fk');
+    expect(verifier).toContain("pg_catalog.current_schema(), 'job_outbox'");
+    expect(verifier).toContain("constraint_state.contype = 'f'");
   });
 
   it('keeps audit/idempotency/submission rows append-only and grants only boundary functions', () => {
@@ -105,6 +110,8 @@ describe('createYieldOperationControlsMigration', () => {
     expect(sql).toContain('yield operation audit records are append-only');
     expect(sql).toContain('ENABLE ALWAYS TRIGGER yield_operation_transition_append_only_row');
     expect(sql).toContain('ENABLE ALWAYS TRIGGER yield_operation_command_complete_insert');
+    expect(sql).toContain("'ALTER FUNCTION %I.%s SET search_path TO pg_catalog, %I, pg_temp'");
+    expect(sql).not.toContain('function_identity NOT IN');
     expect(sql).not.toMatch(/GRANT (?:SELECT|INSERT|UPDATE|DELETE) ON TABLE/u);
     expect(sql).not.toMatch(/GRANT EXECUTE[^;]+TO "yield_worker"/u);
   });
@@ -117,7 +124,10 @@ describe('createYieldOperationControlsMigration', () => {
     expect(canonical).toContain('complete_wallet_registration');
     expect(canonical).toContain('yield_operation_row_table');
     expect(canonical).toContain('transition_yield_operation');
-    expect(canonical).toContain('yield_operation_commands_outbox_fk');
+    expect(canonical).toContain("pg_catalog.current_schema(), 'job_outbox'");
+    expect(canonical).not.toContain('yield_operation_commands_outbox_fk');
+    expect(canonical).toContain('FROM yield_functions AS function_state');
+    expect(canonical).toContain('WHERE NOT function_state.prosecdef');
     expect(isolated).toContain('prior.valid AND yield_operation.valid');
     expect(isolated).not.toContain('yield_operation_row_table');
   });

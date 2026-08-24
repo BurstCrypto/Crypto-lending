@@ -201,9 +201,6 @@ function createYieldOperationTablesSql(): string {
         outbox_id IS NULL OR outbox_id ~
           '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
       ),
-      CONSTRAINT yield_operation_commands_outbox_fk FOREIGN KEY (outbox_id)
-        REFERENCES job_outbox (id) ON UPDATE RESTRICT ON DELETE RESTRICT
-        DEFERRABLE INITIALLY DEFERRED,
       CONSTRAINT yield_operation_commands_recorded_at_check CHECK (isfinite(recorded_at)),
       CONSTRAINT yield_operation_commands_scope_unique UNIQUE (
         actor_account_id, command_kind, contract_version, key_digest
@@ -246,9 +243,6 @@ function createYieldOperationTablesSql(): string {
       CONSTRAINT yield_operation_submissions_command_fk FOREIGN KEY (command_id)
         REFERENCES yield_operation_commands (command_id)
         ON UPDATE RESTRICT ON DELETE RESTRICT,
-      CONSTRAINT yield_operation_submissions_outbox_fk FOREIGN KEY (outbox_id)
-        REFERENCES job_outbox (id) ON UPDATE RESTRICT ON DELETE RESTRICT
-        DEFERRABLE INITIALLY DEFERRED,
       CONSTRAINT yield_operation_submissions_target_check CHECK (
         submission_target = 'PROVIDER_OR_CHAIN_ADAPTER'
       ),
@@ -925,18 +919,12 @@ function createYieldOperationTriggersAndAclSql(names: DatabasePrincipalNames): s
         ${functionIdentities}
       ]
       LOOP
-        IF function_identity NOT IN (
-          'reject_yield_operation_audit_mutation()',
-          'enforce_yield_operation_identity_immutability()',
-          'validate_yield_operation_command_completion()'
-        ) THEN
-          EXECUTE pg_catalog.format(
-            'ALTER FUNCTION %I.%s SET search_path TO pg_catalog, %I, pg_temp',
-            migration_schema,
-            function_identity,
-            migration_schema
-          );
-        END IF;
+        EXECUTE pg_catalog.format(
+          'ALTER FUNCTION %I.%s SET search_path TO pg_catalog, %I, pg_temp',
+          migration_schema,
+          function_identity,
+          migration_schema
+        );
       END LOOP;
     END;
     $set_yield_operation_function_paths$;
@@ -1146,9 +1134,7 @@ function createYieldOperationVerifierSql(
         'yield_transition_event_initial_shape_check',
         'yield_transition_event_journal_shape_check',
         'yield_operation_commands_scope_unique',
-        'yield_operation_commands_outbox_fk',
         'yield_operation_command_results_event_unique',
-        'yield_operation_submissions_outbox_fk',
         'yield_operation_submissions_operation_unique'
       ]::text[]) AS expected(constraint_name)
       WHERE NOT EXISTS (
@@ -1160,16 +1146,29 @@ function createYieldOperationVerifierSql(
           AND constraint_state.convalidated
       )
     )
-    AND (SELECT pg_catalog.count(*) = 2
+    AND NOT EXISTS (
+      -- Outbox rows have bounded operational retention. Yield audit records
+      -- keep the immutable ID after cleanup, so reverse FKs are prohibited.
+      SELECT 1
       FROM pg_catalog.pg_constraint AS constraint_state
-      WHERE constraint_state.connamespace =
-          pg_catalog.to_regnamespace(pg_catalog.current_schema())
-        AND constraint_state.conname IN (
-          'yield_operation_commands_outbox_fk',
-          'yield_operation_submissions_outbox_fk'
+      WHERE constraint_state.contype = 'f'
+        AND constraint_state.conrelid IN (
+          SELECT table_state.oid FROM yield_tables AS table_state
         )
-        AND constraint_state.condeferrable
-        AND constraint_state.condeferred)
+        AND constraint_state.confrelid = pg_catalog.to_regclass(
+          pg_catalog.format(
+            '%I.%I', pg_catalog.current_schema(), 'job_outbox'
+          )
+        )
+    )
+    AND NOT EXISTS (
+      SELECT 1
+      FROM yield_functions AS function_state
+      WHERE NOT function_state.prosecdef
+        OR function_state.proconfig IS DISTINCT FROM ARRAY[
+          'search_path=pg_catalog, ' || pg_catalog.current_schema() || ', pg_temp'
+        ]::text[]
+    )
     AND NOT EXISTS (
       SELECT 1
       FROM yield_functions AS function_state
