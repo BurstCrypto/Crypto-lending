@@ -23,6 +23,10 @@ import {
 import { InProcessObservability } from '../../src/infrastructure/observability';
 import { SqsJobWorker } from '../../src/infrastructure/sqs/sqs-job.worker';
 import { SqsService } from '../../src/infrastructure/sqs/sqs.service';
+import {
+  adversarialProviderError,
+  LOGGING_PROHIBITED_VALUES,
+} from '../fixtures/logging-adversarial.fixture';
 import { testInfrastructureConfig } from './fixtures';
 
 function testUuid(index: number): string {
@@ -174,7 +178,7 @@ describe('SQS retry and dead-letter flow', () => {
     const observedContexts: unknown[] = [];
     const failingHandler = jest.fn<Promise<void>, [unknown]>().mockImplementation(() => {
       observedContexts.push(loggingContext.current());
-      return Promise.reject(new Error('Bearer raw-handler-secret'));
+      return Promise.reject(adversarialProviderError());
     });
 
     const firstAttempt = await worker.processOne(failingHandler);
@@ -268,9 +272,11 @@ describe('SQS retry and dead-letter flow', () => {
         jobId: createSafeLogReference('job', sample.id),
       })),
     );
-    expect(
-      JSON.stringify({ observedContexts, firstAttempt, secondAttempt, terminalAttempt }),
-    ).not.toContain('raw-handler-secret');
+    for (const prohibited of LOGGING_PROHIBITED_VALUES) {
+      expect(
+        JSON.stringify({ observedContexts, firstAttempt, secondAttempt, terminalAttempt }),
+      ).not.toContain(prohibited);
+    }
     const records = lines.map((line) => JSON.parse(line) as StructuredLogRecord);
     expect(records).toHaveLength(3);
     expect(records.map(({ event }) => event)).toEqual([
@@ -290,8 +296,8 @@ describe('SQS retry and dead-letter flow', () => {
       });
     }
     for (const prohibited of [
+      ...LOGGING_PROHIBITED_VALUES,
       payloadCanary,
-      'raw-handler-secret',
       sample.id,
       deadLetterMessageId,
     ]) {

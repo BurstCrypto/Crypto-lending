@@ -1,4 +1,4 @@
-import type { INestApplication } from '@nestjs/common';
+import { Body, Controller, Post, type INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 
@@ -6,6 +6,19 @@ import { AppModule } from '../src/app.module';
 import { configureApplication } from '../src/application';
 import { StructuredLogger, type StructuredLogRecord } from '../src/infrastructure/logging';
 import { InProcessObservability } from '../src/infrastructure/observability/observability';
+import {
+  adversarialProviderError,
+  LOGGING_PROHIBITED_VALUES,
+  LOGGING_SECRET_CANARIES,
+} from './fixtures/logging-adversarial.fixture';
+
+@Controller('logging-boundary-fixture')
+class LoggingBoundaryFixtureController {
+  @Post('failure')
+  fail(@Body() _body: unknown): never {
+    throw adversarialProviderError();
+  }
+}
 
 describe('correlated HTTP logging (e2e)', () => {
   let app: INestApplication;
@@ -15,17 +28,22 @@ describe('correlated HTTP logging (e2e)', () => {
   beforeEach(async () => {
     lines = [];
     observability = new InProcessObservability();
-    const module = await Test.createTestingModule({ imports: [AppModule] }).compile();
+    const module = await Test.createTestingModule({
+      imports: [AppModule],
+      controllers: [LoggingBoundaryFixtureController],
+    }).compile();
     app = module.createNestApplication();
+    const logger = new StructuredLogger({
+      environment: { APPLICATION_WORKLOAD: 'api', NODE_ENV: 'test' },
+      sink: (line) => lines.push(line),
+    });
     configureApplication(app, {
       observability,
-      requestLogger: new StructuredLogger({
-        environment: { APPLICATION_WORKLOAD: 'api', NODE_ENV: 'test' },
-        sink: (line) => lines.push(line),
-      }),
+      requestLogger: logger,
       syntheticRequest: true,
     });
     await app.init();
+    app.useLogger(logger);
   });
 
   afterEach(async () => {
@@ -148,5 +166,72 @@ describe('correlated HTTP logging (e2e)', () => {
     expect(snapshot.completedSpans).toEqual([
       expect.objectContaining({ name: 'http.request', synthetic: true }),
     ]);
+  });
+
+  it('projects an unhandled API/provider error through approved structured fields only', async () => {
+    const response = await request(app.getHttpServer())
+      .post(
+        `/api/v1/logging-boundary-fixture/failure?idempotency=${encodeURIComponent(
+          LOGGING_SECRET_CANARIES.idempotencyToken,
+        )}`,
+      )
+      .set('Authorization', LOGGING_SECRET_CANARIES.bearerToken)
+      .set('X-Ledger-Capability', LOGGING_SECRET_CANARIES.capabilityToken)
+      .set('X-Provider-Credentials', LOGGING_SECRET_CANARIES.credentials)
+      .set('X-Wallet-Signature', LOGGING_SECRET_CANARIES.rawSignature)
+      .send({
+        privateKey: LOGGING_SECRET_CANARIES.privateKey,
+        providerResponse: LOGGING_SECRET_CANARIES.providerPayload,
+      })
+      .expect(500);
+
+    expect(response.body).toEqual({
+      statusCode: 500,
+      message: 'Internal server error',
+    });
+    const output = lines.map((line) => JSON.parse(line) as StructuredLogRecord);
+    expect(output).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          event: 'framework.error',
+          workload: 'api',
+          errorCode: 'UNEXPECTED_ERROR',
+        }),
+        expect.objectContaining({
+          event: 'http.request.completed',
+          workload: 'api',
+          method: 'POST',
+          route: '/api/v1/logging-boundary-fixture/failure',
+          statusCode: 500,
+          outcome: 'failure',
+        }),
+      ]),
+    );
+    for (const record of output) {
+      expect(new Date(record.timestamp).toISOString()).toBe(record.timestamp);
+      const allowedFields = new Set([
+        'schemaVersion',
+        'timestamp',
+        'level',
+        'event',
+        'service',
+        'workload',
+        'environment',
+        'correlationId',
+        'requestId',
+        'component',
+        'errorCode',
+        'method',
+        'route',
+        'statusCode',
+        'durationMs',
+        'outcome',
+      ]);
+      expect(Object.keys(record).filter((field) => !allowedFields.has(field))).toEqual([]);
+    }
+    const captured = `${JSON.stringify(response.body)}\n${lines.join('\n')}`;
+    for (const prohibited of LOGGING_PROHIBITED_VALUES) {
+      expect(captured).not.toContain(prohibited);
+    }
   });
 });

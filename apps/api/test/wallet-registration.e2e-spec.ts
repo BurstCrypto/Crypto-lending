@@ -19,6 +19,11 @@ import { WalletRegistrationService } from '../src/wallets/application/wallet-reg
 import { WalletRegistrationController } from '../src/wallets/http/wallet-registration.controller';
 import { WalletRegistrationPrivacyInterceptor } from '../src/wallets/http/wallet-registration-privacy.interceptor';
 import { StructuredLogger } from '../src/infrastructure/logging';
+import {
+  adversarialProviderError,
+  LOGGING_PROHIBITED_VALUES,
+  LOGGING_SECRET_CANARIES,
+} from './fixtures/logging-adversarial.fixture';
 
 const ACCOUNT_ID = parseAccountId('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
 const CHALLENGE_ID = '11111111-1111-4111-8111-111111111111';
@@ -58,10 +63,12 @@ function expectPrivate(response: request.Response): void {
 
 describe('wallet registration HTTP boundary (e2e)', () => {
   let app: INestApplication;
+  let lines: string[];
   let resolver: { resolve: jest.Mock };
   let wallets: { issueChallenge: jest.Mock; submitProof: jest.Mock };
 
   beforeAll(async () => {
+    lines = [];
     resolver = {
       resolve: jest.fn(async (value: unknown) =>
         hasBoundBrowserSession(value) ? { accountId: ACCOUNT_ID } : null,
@@ -85,16 +92,19 @@ describe('wallet registration HTTP boundary (e2e)', () => {
     }).compile();
 
     app = module.createNestApplication();
+    const logger = new StructuredLogger({
+      environment: { APPLICATION_WORKLOAD: 'api', NODE_ENV: 'test' },
+      sink: (line) => lines.push(line),
+    });
     configureApplication(app, {
-      requestLogger: new StructuredLogger({
-        environment: { APPLICATION_WORKLOAD: 'api', NODE_ENV: 'test' },
-        sink: () => undefined,
-      }),
+      requestLogger: logger,
     });
     await app.init();
+    app.useLogger(logger);
   });
 
   beforeEach(() => {
+    lines = [];
     jest.clearAllMocks();
     resolver.resolve.mockImplementation(async (value: unknown) =>
       hasBoundBrowserSession(value) ? { accountId: ACCOUNT_ID } : null,
@@ -340,5 +350,58 @@ describe('wallet registration HTTP boundary (e2e)', () => {
     expect(JSON.stringify(response.body)).not.toContain(ACCOUNT_ID);
     expect(JSON.stringify(response.body)).not.toContain(EVM_ADDRESS);
     expectPrivate(response);
+  });
+
+  it('keeps raw proof material and provider error graphs out of mapped and unhandled logs', async () => {
+    const domainError = Object.assign(new WalletRegistrationRejectedError(), {
+      cause: adversarialProviderError(),
+      capability: LOGGING_SECRET_CANARIES.capabilityToken,
+      idempotencyKey: LOGGING_SECRET_CANARIES.idempotencyToken,
+    });
+    wallets.submitProof.mockRejectedValueOnce(domainError);
+
+    const rejected = await authenticate(
+      request(app.getHttpServer())
+        .post('/api/v1/wallets/ownership-proofs')
+        .set('Authorization', LOGGING_SECRET_CANARIES.bearerToken)
+        .set('X-Provider-Credentials', LOGGING_SECRET_CANARIES.credentials),
+    )
+      .send({
+        kind: 'EVM_EIP191_EOA',
+        challengeId: CHALLENGE_ID,
+        message: LOGGING_SECRET_CANARIES.privateKey,
+        signature: LOGGING_SECRET_CANARIES.rawSignature,
+      })
+      .expect(401);
+    expect(rejected.body.message).toBe('Wallet ownership proof rejected');
+    expect(lines.map((line) => JSON.parse(line) as { event: string; outcome?: string })).toEqual([
+      expect.objectContaining({ event: 'http.request.completed', outcome: 'rejected' }),
+    ]);
+    const domainLines = [...lines];
+
+    lines = [];
+    wallets.issueChallenge.mockRejectedValueOnce(adversarialProviderError());
+    const unavailable = await authenticate(
+      request(app.getHttpServer())
+        .post('/api/v1/wallets/ownership-challenges')
+        .set('Authorization', LOGGING_SECRET_CANARIES.bearerToken)
+        .set('X-Idempotency-Key', LOGGING_SECRET_CANARIES.idempotencyToken),
+    )
+      .send({ chainId: 'eip155:11155111', address: EVM_ADDRESS })
+      .expect(500);
+    expect(unavailable.body).toEqual({ statusCode: 500, message: 'Internal server error' });
+    expect(lines.map((line) => JSON.parse(line) as { event: string })).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ event: 'framework.error' }),
+        expect.objectContaining({ event: 'http.request.completed' }),
+      ]),
+    );
+
+    const captured = `${JSON.stringify(rejected.body)}\n${JSON.stringify(
+      unavailable.body,
+    )}\n${domainLines.join('\n')}\n${lines.join('\n')}`;
+    for (const prohibited of LOGGING_PROHIBITED_VALUES) {
+      expect(captured).not.toContain(prohibited);
+    }
   });
 });
