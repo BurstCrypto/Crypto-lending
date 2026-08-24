@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
 import { MAX_JOB_MESSAGE_BYTES } from './job-message-policy';
 import { runJobEnvelopeRolloutPreflight } from './job-envelope-rollout-preflight';
 
@@ -39,6 +42,16 @@ function attributes(count: number): Record<string, string> {
 }
 
 describe('job envelope rollout preflight', () => {
+  it('binds the operator snapshot to the production outbox relation', () => {
+    const source = readFileSync(
+      resolve(__dirname, '../../../../../scripts/sql/kan-246-pending-envelope-snapshot.sql'),
+      'utf8',
+    );
+
+    expect(source).toMatch(/\bFROM public\.job_outbox\b/u);
+    expect(source).not.toMatch(/\bFROM\s+job_outbox\b/u);
+  });
+
   it('deterministically inventories compatible current and legacy rows', () => {
     const report = runJobEnvelopeRolloutPreflight([
       row('z-current', envelope({ journalId: 'journal-1' })),

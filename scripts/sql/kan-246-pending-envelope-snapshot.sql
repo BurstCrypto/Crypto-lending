@@ -3,7 +3,7 @@
 -- drained. The statement does not lock, update, normalize, or delete rows.
 WITH pending_rows AS (
   SELECT id, queue_name, payload, message_attributes
-  FROM job_outbox
+  FROM public.job_outbox
   WHERE status = 'pending'
 )
 SELECT jsonb_build_object(
