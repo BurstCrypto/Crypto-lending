@@ -67,7 +67,7 @@ attempt fails. Restore uses only noninteractive `eth_accounts` and
 
 The adapter:
 
-- generates application-owned connection IDs and never reuses the prior ID;
+- generates application-owned connection IDs and never reuses any previously issued ID;
 - treats the provider's first authorized account as the provider-designated
   active account, while keeping every normalized account explicit and
   chain-qualified;

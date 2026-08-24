@@ -406,4 +406,23 @@ describe('InjectedEip1193WalletAdapter invalidation and cleanup', () => {
       provider.request.mock.calls.some(([request]) => request.method.includes('disconnect')),
     ).toBe(false);
   });
+
+  it('never reuses an older application connection identity', async () => {
+    const provider = new FakeProvider();
+    const connectionIds = ['connection-a', 'connection-b', 'connection-a'];
+    const wallet = new InjectedEip1193WalletAdapter({
+      selection: { descriptor: descriptor(), provider },
+      createConnectionId: () => connectionIds.shift() ?? 'connection-fallback',
+    });
+
+    const first = await wallet.connect();
+    await wallet.disconnect(first.connectionId);
+    const second = await wallet.connect();
+    await wallet.disconnect(second.connectionId);
+
+    await expect(wallet.connect()).rejects.toMatchObject({
+      code: INJECTED_EVM_ERROR_CODES.providerFailure,
+    });
+    expect(wallet.currentConnection()).toBeNull();
+  });
 });

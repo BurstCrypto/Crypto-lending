@@ -203,6 +203,7 @@ export class InjectedEip1193WalletAdapter implements WalletAdapter {
   readonly #now: () => Date;
   readonly #listeners = new Set<(event: WalletEvent) => void>();
   readonly #consumedChallengeIds: string[] = [];
+  readonly #issuedConnectionIds = new Set<string>();
   #connection: WalletConnection | null = null;
   #lastConnectionId: string | null = null;
   #connectPromise: Promise<WalletConnection> | undefined;
@@ -442,7 +443,7 @@ export class InjectedEip1193WalletAdapter implements WalletAdapter {
     } catch {
       fail(INJECTED_EVM_ERROR_CODES.providerFailure);
     }
-    if (!CONNECTION_ID.test(connectionId) || connectionId === this.#lastConnectionId) {
+    if (!CONNECTION_ID.test(connectionId) || this.#issuedConnectionIds.has(connectionId)) {
       fail(INJECTED_EVM_ERROR_CODES.providerFailure);
     }
     const connection = this.#connectionFor(
@@ -451,6 +452,7 @@ export class InjectedEip1193WalletAdapter implements WalletAdapter {
       snapshot.addresses,
       restored,
     );
+    this.#issuedConnectionIds.add(connectionId);
     this.#connection = connection;
     this.#lastConnectionId = connectionId;
     return connection;
