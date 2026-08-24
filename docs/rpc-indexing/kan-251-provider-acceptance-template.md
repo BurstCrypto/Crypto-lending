@@ -51,13 +51,18 @@ Complete separately for proposed primary Alchemy and fallback QuickNode.
 | SLA/support/escalation/credits                     | `NOT_RUN`        | `NOT_RUN`        |
 | DPA, subprocessors, residency/Regions              | `NOT_RUN`        | `NOT_RUN`        |
 | Request/log/metadata retention and deletion        | `NOT_RUN`        | `NOT_RUN`        |
-| Exact HTTPS/WSS endpoint hostnames                 | `NOT_RUN`        | `NOT_RUN`        |
+| Safe HTTPS/WSS endpoint/configuration aliases      | `NOT_RUN`        | `NOT_RUN`        |
+| Controlled KAN-231 exact-host reference / SHA-256  | `NOT_RUN`        | `NOT_RUN`        |
 | Credential reference/custodian/rotation/revocation | `NOT_RUN`        | `NOT_RUN`        |
 | Availability/failure-domain evidence               | `NOT_RUN`        | `NOT_RUN`        |
 | Termination, export, deletion, and cleanup terms   | `NOT_RUN`        | `NOT_RUN`        |
 
-Record only safe aliases for credentials/endpoints in general evidence. Exact
-hosts belong in the access-controlled KAN-231 record; secrets never belong here.
+Record only safe endpoint aliases and credential references in this general
+evidence packet. Exact hosts belong only in the access-controlled KAN-231
+record. Each provider's KAN-251 row must reference that record and its SHA-256
+so an authorized verifier can prove the alias maps to the approved host without
+copying it here. Raw or credential-bearing endpoint URLs and secrets never
+belong in this packet.
 
 ## Test-network matrix
 
@@ -70,9 +75,10 @@ Run every row against both providers only after authorization.
 | Arbitrum Sepolia | `eth_chainId = 0x66eee`                                          | `NOT_RUN`               | `NOT_RUN`                 |
 | Solana Devnet    | Full genesis hash `EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG` | `NOT_RUN`               | `NOT_RUN`                 |
 
-For each provider/network record UTC interval, endpoint/config alias, method
-profile version, request count, byte estimate, evidence SHA-256, observed cost,
-and cleanup/disposition. Testnet results are not mainnet SLA or archive proof.
+For each provider/network record UTC interval, endpoint/config alias, controlled
+KAN-231 exact-host record reference and digest, method-profile version, request
+count, byte estimate, evidence SHA-256, observed cost, and cleanup/disposition.
+Testnet results are not mainnet SLA or archive proof.
 
 ## Capability and boundary tests
 
@@ -126,5 +132,6 @@ wallet, transaction, endpoint, or credential identifiers in metric dimensions.
 
 Final acceptance requires current approvals, both-provider/eight-endpoint
 coverage, no unresolved high/critical finding, fail-closed evidence, completed
-cleanup/cost accounting, exact digest binding, and an independent decision.
-Nothing in this template approves production or mainnet writes.
+cleanup/cost accounting, exact KAN-62 and controlled KAN-231 digest bindings,
+and an independent decision. Nothing in this template approves production or
+mainnet writes.
