@@ -8,8 +8,41 @@
 
 export const WALLET_NAMESPACES = ['eip155', 'solana'] as const;
 
+export const SOLANA_CAIP_CHAIN_IDS = {
+  mainnet: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp',
+  devnet: 'solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1',
+} as const;
+
+export const SOLANA_WALLET_STANDARD_CHAINS = {
+  mainnet: 'solana:mainnet',
+  devnet: 'solana:devnet',
+} as const;
+
 export type WalletNamespace = (typeof WALLET_NAMESPACES)[number];
 export type ChainId = `${WalletNamespace}:${string}`;
+export type SupportedSolanaCluster = keyof typeof SOLANA_CAIP_CHAIN_IDS;
+export type SupportedSolanaCaipChainId =
+  (typeof SOLANA_CAIP_CHAIN_IDS)[SupportedSolanaCluster];
+export type SolanaWalletStandardChain =
+  (typeof SOLANA_WALLET_STANDARD_CHAINS)[SupportedSolanaCluster];
+
+const SOLANA_CAIP_TO_WALLET_STANDARD = new Map<
+  SupportedSolanaCaipChainId,
+  SolanaWalletStandardChain
+>([
+  [SOLANA_CAIP_CHAIN_IDS.mainnet, SOLANA_WALLET_STANDARD_CHAINS.mainnet],
+  [SOLANA_CAIP_CHAIN_IDS.devnet, SOLANA_WALLET_STANDARD_CHAINS.devnet],
+]);
+
+export function solanaWalletStandardChainForCaip(
+  chainId: ChainId,
+): SolanaWalletStandardChain {
+  const chain = SOLANA_CAIP_TO_WALLET_STANDARD.get(chainId as SupportedSolanaCaipChainId);
+  if (chain === undefined) {
+    throw new TypeError('Solana chain ID is not in the supported CAIP allowlist');
+  }
+  return chain;
+}
 
 export interface WalletAccount {
   readonly chainId: ChainId;
@@ -72,7 +105,8 @@ export interface SiwsSignInInput {
   readonly statement?: string;
   readonly uri: string;
   readonly version: '1';
-  readonly chainId: 'solana:mainnet' | 'solana:devnet' | 'solana:testnet';
+  /** Wallet Standard alias corresponding to the challenge's canonical CAIP ID. */
+  readonly chainId: SolanaWalletStandardChain;
   readonly nonce: string;
   readonly issuedAt: string;
   readonly expirationTime: string;
@@ -160,6 +194,19 @@ export interface SiwsSignInOwnershipSignatureWire extends OwnershipSignatureWire
 export type OwnershipSignatureWire =
   SiweOwnershipSignatureWire | SiwsMessageOwnershipSignatureWire | SiwsSignInOwnershipSignatureWire;
 
+/** Exact KAN-56 `POST /ownership-proofs` Solana body. */
+export interface SolanaEd25519OwnershipProofWire {
+  readonly kind: 'SOLANA_ED25519';
+  readonly challengeId: string;
+  readonly address: string;
+  /** Canonical unpadded base64url. */
+  readonly publicKey: string;
+  /** Canonical unpadded base64url. */
+  readonly signedMessage: string;
+  /** Canonical unpadded base64url. */
+  readonly signature: string;
+}
+
 export interface WalletProviderError {
   readonly code: string | number;
   readonly message: string;
@@ -218,7 +265,7 @@ export interface WalletAdapter {
   subscribe(listener: (event: WalletEvent) => void): UnsubscribeWalletListener;
 }
 
-const CHAIN_ID_PATTERN = /^(?:eip155:(?:0|[1-9][0-9]*)|solana:(?:mainnet|devnet|testnet))$/;
+const EVM_CHAIN_ID_PATTERN = /^eip155:(?:0|[1-9][0-9]*)$/;
 const EVM_ADDRESS_PATTERN = /^0x[0-9a-fA-F]{40}$/;
 const SOLANA_ADDRESS_PATTERN = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const NONCE_PATTERN = /^[a-zA-Z0-9]{8,64}$/;
@@ -271,11 +318,19 @@ function namespaceOf(chainId: string): WalletNamespace {
   return chainId.slice(0, chainId.indexOf(':')) as WalletNamespace;
 }
 
+function isSupportedChainId(chainId: string): chainId is ChainId {
+  return (
+    EVM_CHAIN_ID_PATTERN.test(chainId) ||
+    SOLANA_CAIP_TO_WALLET_STANDARD.has(chainId as SupportedSolanaCaipChainId)
+  );
+}
+
 function assertAddress(address: string, namespace: WalletNamespace): void {
+  const solanaPublicKey = namespace === 'solana' ? decodeBase58(address) : null;
   const valid =
     namespace === 'eip155'
       ? EVM_ADDRESS_PATTERN.test(address)
-      : decodeBase58(address)?.byteLength === 32;
+      : solanaPublicKey?.byteLength === 32 && solanaPublicKey.some((byte) => byte !== 0);
 
   if (!valid) {
     throw new TypeError(`wallet account address is invalid for ${namespace}`);
@@ -332,7 +387,7 @@ export function assertWalletAccount(
   assertBoundedString(value.chainId, 'wallet account chainId');
   assertBoundedString(value.address, 'wallet account address', MAX_ADDRESS_LENGTH);
 
-  if (!CHAIN_ID_PATTERN.test(value.chainId)) {
+  if (!isSupportedChainId(value.chainId)) {
     throw new TypeError('wallet account chainId must be a supported chain-qualified ID');
   }
 
@@ -361,7 +416,7 @@ function assertWalletScope(
 ): asserts value is WalletScope {
   assertRecord(value, 'wallet scope');
   assertBoundedString(value.chainId, 'wallet scope chainId');
-  if (!CHAIN_ID_PATTERN.test(value.chainId)) {
+  if (!isSupportedChainId(value.chainId)) {
     throw new TypeError('wallet scope chainId must be a supported chain-qualified ID');
   }
   if (expectedNamespace !== undefined && namespaceOf(value.chainId) !== expectedNamespace) {
@@ -456,7 +511,7 @@ export function assertOwnershipChallenge(value: unknown): asserts value is Owner
     throw new TypeError('ownership challenge format is unsupported');
   }
 
-  if (!CHAIN_ID_PATTERN.test(value.chainId)) {
+  if (!isSupportedChainId(value.chainId)) {
     throw new TypeError('ownership challenge chainId must be a supported chain-qualified ID');
   }
 
@@ -513,8 +568,8 @@ function assertSiwsSignInInput(
   if (value.version !== '1') {
     throw new TypeError('SIWS sign-in version must be 1');
   }
-  if (value.chainId !== challenge.chainId) {
-    throw new TypeError('SIWS sign-in chainId must match the challenge');
+  if (value.chainId !== solanaWalletStandardChainForCaip(challenge.chainId)) {
+    throw new TypeError('SIWS sign-in chainId must match the challenge CAIP cluster');
   }
   if (value.address !== challenge.address) {
     throw new TypeError('SIWS sign-in address must match the challenge');
@@ -776,5 +831,32 @@ export function toOwnershipSignatureWire(signature: OwnershipSignature): Ownersh
       address: signature.account.address,
       publicKey: walletBytesToBase64Url(signature.account.publicKey),
     },
+  };
+}
+
+/**
+ * Translates the exact canonical-message SIWS result to KAN-56's provider-neutral
+ * Ed25519 proof body. Structured `solana:signIn` remains fail-closed until the
+ * server challenge/verification boundary supports wallet-constructed messages.
+ */
+export function toSolanaEd25519OwnershipProofWire(
+  signature: unknown,
+  challenge: SiwsMessageOwnershipChallenge,
+): SolanaEd25519OwnershipProofWire {
+  assertOwnershipSignatureMatchesChallenge(signature, challenge);
+  if (signature.format !== 'siws-message') {
+    throw new TypeError('KAN-56 accepts only canonical-message SIWS proofs');
+  }
+  const publicKey = decodeBase58(signature.address);
+  if (publicKey === null || publicKey.byteLength !== 32) {
+    throw new TypeError('SIWS address must decode to a 32-byte public key');
+  }
+  return {
+    kind: 'SOLANA_ED25519',
+    challengeId: signature.challengeId,
+    address: signature.address,
+    publicKey: walletBytesToBase64Url(publicKey),
+    signedMessage: walletBytesToBase64Url(signature.signedMessage),
+    signature: walletBytesToBase64Url(signature.signature),
   };
 }
