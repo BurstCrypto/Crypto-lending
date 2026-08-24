@@ -1,4 +1,10 @@
 export {
+  BalanceSyncOrchestrator,
+  BalanceSyncOrchestratorError,
+  type BalanceSyncOrchestratorErrorCode,
+  type BalanceSyncProcessingResult,
+} from './application/balance-sync-orchestrator';
+export {
   BALANCE_SYNC_JOB_KIND,
   BALANCE_SYNC_JOB_VERSION,
   BALANCE_SYNC_PAYLOAD_VERSION,
@@ -24,3 +30,20 @@ export {
   type BalanceSyncTierThreshold,
   type CreateDeterministicBalanceSyncJobOptions,
 } from './domain/balance-sync';
+export {
+  type BalanceIndexerCandidate,
+  type BalanceIndexerReadRequest,
+  type BalanceIndexerRescanRequest,
+  type BalanceIndexerRescanResult,
+  type BalanceIndexerSourceCandidate,
+  type BalanceSyncAlert,
+  type BalanceSyncCheckpoint,
+  type BalanceSyncCheckpointPort,
+  type BalanceSyncClockPort,
+  type BalanceSyncIndexerPort,
+  type BalanceSyncJobPort,
+  type BalanceSyncMetricEvent,
+  type BalanceSyncMetricsPort,
+  type BalanceSyncScope,
+  type BalanceSyncSuccessMode,
+} from './application/ports/balance-sync.ports';
