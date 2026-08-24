@@ -1065,6 +1065,18 @@ h1 {
   font-weight: 750;
 }
 
+.portfolio-inputs-unavailable {
+  padding: 0.35rem 0.55rem;
+  color: #ffdda0;
+  background: rgba(255, 207, 112, 0.08);
+  border: 1px solid rgba(255, 207, 112, 0.3);
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 .portfolio-chain-list {
   display: grid;
   gap: 0.65rem;

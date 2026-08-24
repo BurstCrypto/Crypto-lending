@@ -90,9 +90,11 @@ describe('UnifiedBalanceView', () => {
 
     const card = screen.getByText('Available buying power').closest('article');
     expect(within(card!).getByText('Unavailable')).toHaveAttribute('role', 'status');
+    expect(within(card!).getByText('Inputs unavailable')).toBeInTheDocument();
     expect(screen.getByText('Why buying power is unavailable')).toBeInTheDocument();
     expect(screen.getAllByText(/will not assume that moving funds is free/)).not.toHaveLength(0);
     expect(within(card!).queryByText('$0.00')).not.toBeInTheDocument();
+    expect(screen.getByText('Required cost inputs')).toBeInTheDocument();
     expect(screen.getByText('Cost unavailable')).toBeInTheDocument();
   });
 

@@ -298,11 +298,17 @@ function UnavailableView({ reason }: { reason: 'NO_SUPPORTED_BALANCES' | 'INCOMP
   );
 }
 
-function BuyingPowerDeductions({ deductions }: { deductions: readonly BuyingPowerDeduction[] }) {
+function BuyingPowerDeductions({
+  deductions,
+  unavailable,
+}: {
+  deductions: readonly BuyingPowerDeduction[];
+  unavailable: boolean;
+}) {
   if (deductions.length === 0) return null;
   return (
     <details className="portfolio-deductions" open>
-      <summary>Why buying power is lower</summary>
+      <summary>{unavailable ? 'Required cost inputs' : 'Why buying power is lower'}</summary>
       <ul>
         {deductions.map((deduction) => (
           <li key={deduction.code}>
@@ -365,7 +371,11 @@ function ReadyView({ snapshot }: { snapshot: UnifiedBalanceApiResponse }) {
             <p id="buying-power-label" className="portfolio-total-label">
               Available buying power
             </p>
-            <FreshnessBadge freshness={snapshot.buyingPower.freshness} />
+            {snapshot.buyingPower.status === 'AVAILABLE' ? (
+              <FreshnessBadge freshness={snapshot.buyingPower.freshness} />
+            ) : (
+              <span className="portfolio-inputs-unavailable">Inputs unavailable</span>
+            )}
           </div>
           {snapshot.buyingPower.status === 'AVAILABLE' &&
           snapshot.buyingPower.amountUsdMinor !== null ? (
@@ -379,8 +389,9 @@ function ReadyView({ snapshot }: { snapshot: UnifiedBalanceApiResponse }) {
             </p>
           )}
           <p className="portfolio-total-help">
-            Conservative amount after stale funds and known liquidity, conversion, slippage,
-            network, and routing deductions.
+            {snapshot.buyingPower.status === 'AVAILABLE'
+              ? 'Conservative amount after stale funds and known liquidity, conversion, slippage, network, and routing deductions.'
+              : 'No amount is shown until every required pricing, liquidity, network, and route-cost input is available.'}
           </p>
         </article>
       </div>
@@ -400,7 +411,10 @@ function ReadyView({ snapshot }: { snapshot: UnifiedBalanceApiResponse }) {
         </div>
       )}
 
-      <BuyingPowerDeductions deductions={snapshot.buyingPower.deductions} />
+      <BuyingPowerDeductions
+        deductions={snapshot.buyingPower.deductions}
+        unavailable={snapshot.buyingPower.status === 'UNAVAILABLE'}
+      />
 
       <section className="portfolio-sources" aria-labelledby="portfolio-sources-title">
         <div className="portfolio-section-heading">

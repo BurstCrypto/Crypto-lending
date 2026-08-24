@@ -92,6 +92,19 @@ describe('unified balance API boundary', () => {
     wallets(duplicateWallet).push(structuredClone(firstWallet(duplicateWallet)));
     expect(() => parseUnifiedBalanceResponse(duplicateWallet)).toThrow(UnifiedBalanceResponseError);
 
+    const duplicateAssetIdentity = clonePayload();
+    const solanaWallet = wallets(duplicateAssetIdentity)[1] as Record<string, unknown>;
+    const solanaChains = solanaWallet.chains as Array<Record<string, unknown>>;
+    const solanaAssets = (solanaChains[0] as Record<string, unknown>).assets as Array<
+      Record<string, unknown>
+    >;
+    (solanaAssets[1] as Record<string, unknown>).assetIdentity = (
+      solanaAssets[0] as Record<string, unknown>
+    ).assetIdentity;
+    expect(() => parseUnifiedBalanceResponse(duplicateAssetIdentity)).toThrow(
+      UnifiedBalanceResponseError,
+    );
+
     const wrongNamespace = clonePayload();
     const wallet = firstWallet(wrongNamespace);
     const chains = wallet.chains as Array<Record<string, unknown>>;
@@ -174,6 +187,6 @@ describe('unified balance API boundary', () => {
     expect(maskPortfolioAddress('7YttLkHDoNj9wyDur5EYBDauN5QJUJpz94QRtWQyFrA8', 'SOLANA')).toBe(
       '7Ytt…FrA8',
     );
-    expect(addressEnding('7YttLkHDoNj9wyDur5EYBDauN5QJUJpz94QRtWQyFrA8', 'SOLANA')).toBe('FRA8');
+    expect(addressEnding('7YttLkHDoNj9wyDur5EYBDauN5QJUJpz94QRtWQyFrA8', 'SOLANA')).toBe('FrA8');
   });
 });

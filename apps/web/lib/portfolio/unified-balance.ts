@@ -348,8 +348,12 @@ function parseChain(
   ) {
     return fail();
   }
-  const assetKeys = new Set(assets.map((asset) => `${asset.stablecoin}\0${asset.assetIdentity}`));
-  if (assetKeys.size !== assets.length) return fail();
+  if (
+    new Set(assets.map(({ assetIdentity }) => assetIdentity)).size !== assets.length ||
+    new Set(assets.map(({ stablecoin }) => stablecoin)).size !== assets.length
+  ) {
+    return fail();
+  }
   if (buyingPowerStatus === 'AVAILABLE') {
     if (
       buyingPowerUsdMinor === null ||
@@ -566,5 +570,5 @@ export function maskPortfolioAddress(address: string, namespace: WalletNamespace
 
 export function addressEnding(address: string, namespace: WalletNamespace): string {
   const canonical = canonicalAddress(address, namespace);
-  return canonical.slice(-4).toUpperCase();
+  return canonical.slice(-4);
 }
