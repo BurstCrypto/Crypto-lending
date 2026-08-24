@@ -39,6 +39,23 @@ The default local endpoints are:
 - Swagger UI: `http://127.0.0.1:3001/api/v1/docs`
 - OpenAPI JSON: `http://127.0.0.1:3001/api/v1/docs-json`
 
+## Synthetic local product demo
+
+KAN-253 adds a guarded, loopback-only composition for exercising the real web,
+API, database, session, and worker boundaries without a managed identity
+provider, wallet relay, RPC/indexing provider, oracle, cloud resource, vendor
+account, trial, or paid service.
+
+```powershell
+npm run demo:local
+```
+
+The launcher refuses production mode, non-loopback application origins, remote
+Docker transports, ambient cloud/vendor configuration, and missing locally
+cached images. The UI is permanently marked as synthetic while enabled. See the
+[local demo runbook](tools/local-demo/README.md) for the click-through flow,
+limitations, verification, and isolated teardown.
+
 ## Restricted wallet validation lab
 
 There are two deliberately separate wallet test surfaces:
