@@ -58,7 +58,8 @@ stale or tampered client catalog cannot register an unsupported identity.
 
 ## Connection and invalidation controls
 
-Interactive connect validates the permission response, then reads a coherent
+Interactive connect validates the current chain before opening an account
+permission prompt, validates the permission response, then reads a coherent
 `eth_chainId` / `eth_accounts` / `eth_chainId` snapshot. If the account returned
 by the permission gesture is silently replaced before the stable snapshot, the
 attempt fails. Restore uses only noninteractive `eth_accounts` and
@@ -76,7 +77,7 @@ The adapter:
 - invalidates on unsupported/malformed chain changes and provider disconnect;
 - compares account and chain state immediately before and after signing, so an
   in-flight event or a silently changed provider snapshot cannot return an
-  accepted proof; and
+  accepted proof and invalidates the stale normalized connection; and
 - removes the exact three EIP-1193 listeners on adapter disposal.
 
 Injected providers do not have a standard EIP-1193 disconnect request. Product

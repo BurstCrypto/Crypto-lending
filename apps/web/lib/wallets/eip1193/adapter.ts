@@ -75,6 +75,13 @@ const RECOVERABLE_CODES = new Set<InjectedEvmErrorCode>([
   INJECTED_EVM_ERROR_CODES.unsupportedNetwork,
   INJECTED_EVM_ERROR_CODES.userRejected,
 ]);
+const INVALIDATING_OPERATION_ERRORS = new Set<InjectedEvmErrorCode>([
+  INJECTED_EVM_ERROR_CODES.connectionChanged,
+  INJECTED_EVM_ERROR_CODES.malformedResponse,
+  INJECTED_EVM_ERROR_CODES.providerDisconnected,
+  INJECTED_EVM_ERROR_CODES.unauthorized,
+  INJECTED_EVM_ERROR_CODES.unsupportedNetwork,
+]);
 
 const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/u;
 const EVM_SIGNATURE = /^0x[0-9a-fA-F]{130}$/u;
@@ -368,6 +375,9 @@ export class InjectedEip1193WalletAdapter implements WalletAdapter {
         address: challenge.address.toLowerCase(),
         signature,
       });
+    } catch (error) {
+      this.#invalidateForOperationError(connection, error);
+      throw error;
     } finally {
       this.#signing = false;
     }
@@ -402,6 +412,7 @@ export class InjectedEip1193WalletAdapter implements WalletAdapter {
 
   async #connect(signal: AbortSignal | undefined): Promise<WalletConnection> {
     this.#checkAbort(signal);
+    await this.#requireSupportedCurrentNetwork(signal);
     const requestedAccounts = await this.#request({ method: 'eth_requestAccounts' }, signal);
     const requestedAddresses = parseAccounts(requestedAccounts, false);
     const snapshot = await this.#readStableSnapshot(false, signal);
@@ -512,6 +523,16 @@ export class InjectedEip1193WalletAdapter implements WalletAdapter {
     }
   }
 
+  async #requireSupportedCurrentNetwork(signal: AbortSignal | undefined): Promise<void> {
+    const providerChainId = await this.#request({ method: 'eth_chainId' }, signal);
+    if (parseEip1193ChainId(providerChainId) === null) {
+      fail(INJECTED_EVM_ERROR_CODES.malformedResponse);
+    }
+    if (findSupportedEvmNetwork(providerChainId, this.descriptor.supportedNetworks) === null) {
+      fail(INJECTED_EVM_ERROR_CODES.unsupportedNetwork);
+    }
+  }
+
   #snapshotMatchesConnection(snapshot: ProviderSnapshot, connection: WalletConnection): boolean {
     return (
       snapshot.network.chainId === connection.selectedAccount.chainId &&
@@ -527,6 +548,19 @@ export class InjectedEip1193WalletAdapter implements WalletAdapter {
     if (this.#consumedChallengeIds.length > MAX_RECORDED_CHALLENGES) {
       this.#consumedChallengeIds.shift();
     }
+  }
+
+  #invalidateForOperationError(connection: WalletConnection, error: unknown): void {
+    if (
+      !(error instanceof InjectedEvmWalletError) ||
+      !INVALIDATING_OPERATION_ERRORS.has(error.code) ||
+      this.#connection?.connectionId !== connection.connectionId
+    ) {
+      return;
+    }
+    this.#revision += 1;
+    this.#connection = null;
+    this.#emitDisconnect(connection.connectionId, error.code);
   }
 
   #checkAbort(signal: AbortSignal | undefined): void {

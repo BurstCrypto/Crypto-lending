@@ -152,6 +152,11 @@ describe('InjectedEip1193WalletAdapter connection state', () => {
       code: INJECTED_EVM_ERROR_CODES.unsupportedNetwork,
       message: 'Injected wallet network is unsupported',
     });
+    expect(
+      unsupportedProvider.request.mock.calls.some(
+        ([request]) => request.method === 'eth_requestAccounts',
+      ),
+    ).toBe(false);
   });
 
   it('rejects a second operation while one permission request is pending', async () => {
@@ -267,6 +272,29 @@ describe('InjectedEip1193WalletAdapter ownership signing', () => {
       wallet.signOwnershipChallenge(connection.connectionId, challenge()),
     ).rejects.toMatchObject({ code: INJECTED_EVM_ERROR_CODES.connectionChanged });
     expect(wallet.currentConnection()).toBeNull();
+  });
+
+  it('invalidates silent account drift detected after signing', async () => {
+    const provider = new FakeProvider();
+    const wallet = adapter(provider);
+    const connection = await wallet.connect();
+    const events: WalletEvent[] = [];
+    wallet.subscribe((event) => events.push(event));
+    provider.handlers.set('personal_sign', async () => {
+      provider.accounts = [SECOND_ADDRESS];
+      return SIGNATURE;
+    });
+
+    await expect(
+      wallet.signOwnershipChallenge(connection.connectionId, challenge()),
+    ).rejects.toMatchObject({ code: INJECTED_EVM_ERROR_CODES.connectionChanged });
+    expect(wallet.currentConnection()).toBeNull();
+    expect(events).toEqual([
+      expect.objectContaining({
+        type: 'disconnect',
+        error: expect.objectContaining({ code: INJECTED_EVM_ERROR_CODES.connectionChanged }),
+      }),
+    ]);
   });
 
   it('maps provider rejection to fixed redacted errors', async () => {
