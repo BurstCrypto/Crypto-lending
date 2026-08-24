@@ -82,13 +82,15 @@ them. The demo-owned dependency containers remain available for a quick restart.
    KAN-37 repository and controller boundaries.
 5. Refresh the protected account page and then sign out. Cookie rotation, CSRF,
    account isolation, and logout revocation remain active.
+6. Return to the home page and select **Portfolio preview**, or open
+   `http://127.0.0.1:3000/portfolio` directly, to review the unified balance and
+   buying-power presentation.
 
-This branch's current click-through ends on the protected account page; it does
-not yet compose a wallet, balance, portfolio, or buying-power screen. Those
-stages live on separate KAN-57 through KAN-69 ticket branches until they are
-merged. Any later composition must consume injected synthetic adapters and must
-not reinterpret this harness as approval to contact a wallet relay,
-RPC/indexing provider, oracle, or cloud service.
+The portfolio preview uses an embedded deterministic fixture. It is not derived
+from the authenticated account, a connected wallet, a live API, an RPC/indexing
+provider, a quote, or available credit. The production adapters remain fail
+closed until separately reviewed and configured; this harness is not approval
+to contact a wallet relay, RPC/indexing provider, oracle, or cloud service.
 
 ## Verify without starting Docker or application services
 
