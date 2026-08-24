@@ -213,7 +213,9 @@ complete:
 - deployed secret rotation followed by forced task replacement and old-secret
   denial; and
 - independently reviewed security logs and redaction evidence coordinated with
-  KAN-51.
+  KAN-51. KAN-248's local classification/access/query packet remains
+  `NOT_EFFECTIVE` while KAN-220 and Security/Privacy/Operations decisions are
+  pending; it grants no deployed log access.
 
 None of these gates may be marked `PASS` from a template, local emulator,
 mocked response, Jira transition, or branch merge.
