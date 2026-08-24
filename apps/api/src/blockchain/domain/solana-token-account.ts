@@ -4,7 +4,7 @@ const SOLANA_PUBLIC_KEY_BYTES = 32;
 const SPL_TOKEN_ACCOUNT_BYTES = 165;
 const TOKEN_2022_ACCOUNT_TYPE_OFFSET = SPL_TOKEN_ACCOUNT_BYTES;
 const TOKEN_2022_ACCOUNT_TYPE = 2;
-const MAX_TOKEN_2022_ACCOUNT_BYTES = 4_096;
+export const MAX_SOLANA_TOKEN_ACCOUNT_BYTES = 4_096;
 
 export const SOLANA_TOKEN_PROGRAM_IDS = Object.freeze({
   LEGACY: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',
@@ -48,7 +48,7 @@ export interface ParseSolanaTokenAccountInput {
 }
 
 function isUint8Array(value: unknown): value is Uint8Array {
-  return Object.prototype.toString.call(value) === '[object Uint8Array]';
+  return ArrayBuffer.isView(value) && value instanceof Uint8Array;
 }
 
 function isZero(bytes: Uint8Array): boolean {
@@ -135,7 +135,7 @@ function validateLayout(data: Uint8Array, tokenProgramId: SolanaTokenProgramId):
     return;
   }
 
-  if (data.length < SPL_TOKEN_ACCOUNT_BYTES || data.length > MAX_TOKEN_2022_ACCOUNT_BYTES) {
+  if (data.length < SPL_TOKEN_ACCOUNT_BYTES || data.length > MAX_SOLANA_TOKEN_ACCOUNT_BYTES) {
     throw new SolanaTokenAccountValidationError('INVALID_ACCOUNT_LENGTH');
   }
   if (data.length === SPL_TOKEN_ACCOUNT_BYTES) return;

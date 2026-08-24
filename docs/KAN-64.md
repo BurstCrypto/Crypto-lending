@@ -37,8 +37,10 @@ indexer then:
 
 Legacy Token accounts must use the canonical 165-byte layout. Token-2022
 accounts may use that base layout or bounded extension bytes; an extended
-account must carry the Token-2022 account discriminator. Parsed source bytes
-are copied before use so an adapter cannot mutate a result after validation.
+account must carry the Token-2022 account discriminator. Only real bounded
+`Uint8Array` values are accepted; spoofed array-like objects are rejected before
+copying. Parsed source bytes are copied before use so an adapter cannot mutate a
+result after validation.
 
 ## Closed, frozen, counterfeit, and zero semantics
 
@@ -96,8 +98,10 @@ canonical runtime can be enabled, all of the following remain required:
   financial approval are outside this indexer's authority.
 
 Until those gates pass, only deterministic local `PROVISIONAL` fixture results
-are demonstrated. An injected canonical-capability value defines the future
-handoff contract but no such live capability has been issued or wired.
+are demonstrated. Canonical evidence is opaque request data and must be accepted
+by a trusted composition-root verifier before any confirmed read begins. A
+caller-supplied boolean or look-alike JSON object cannot self-authorize the tier;
+no live verifier or capability has been issued or wired.
 
 ## Local verification
 

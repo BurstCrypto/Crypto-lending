@@ -128,6 +128,17 @@ describe('Solana token account parsing', () => {
         }),
       'INVALID_ACCOUNT_STATE',
     );
+    expectValidationCode(
+      () =>
+        parseSolanaTokenAccount({
+          data: {
+            length: 165,
+            [Symbol.toStringTag]: 'Uint8Array',
+          } as unknown as Uint8Array,
+          tokenProgramId: SOLANA_TOKEN_PROGRAM_IDS.LEGACY,
+        }),
+      'INVALID_ACCOUNT_DATA',
+    );
   });
 
   it('rejects malformed Token-2022 discriminators and oversized extension payloads', () => {

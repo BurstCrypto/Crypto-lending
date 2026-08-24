@@ -14,6 +14,7 @@ import {
 import {
   normalizeSolanaPublicKey,
   parseSolanaTokenAccount,
+  MAX_SOLANA_TOKEN_ACCOUNT_BYTES,
   SOLANA_TOKEN_PROGRAM_IDS,
   SolanaTokenAccountValidationError,
   type SolanaTokenProgramId,
@@ -24,6 +25,10 @@ import type {
   SolanaDepositSourceRequestContext,
   SolanaTokenAccountsByOwnerRequest,
 } from './ports/solana-deposit-source.port';
+import type {
+  SolanaCanonicalReadCapabilityContext,
+  SolanaCanonicalReadCapabilityVerifierPort,
+} from './ports/solana-canonical-read-capability.port';
 
 const MAX_SLOT = 18_446_744_073_709_551_615n;
 const MAX_READ_UNITS = CHAIN_OBSERVATION_RESILIENCE_POLICY.recovery.maxReadUnitsPerJob;
@@ -53,18 +58,14 @@ export class SolanaDepositIndexerError extends Error {
   }
 }
 
-export interface SolanaCanonicalReadCapability {
-  readonly networkId: ChainObservationNetworkId;
-  readonly confirmedTokenAccountReadsValidated: true;
-}
-
 export interface SolanaDepositIndexRequest {
   readonly environment: AssetRegistryEnvironment;
   readonly networkId: string;
   readonly ownerAddress: string;
   readonly tier: SolanaDepositIndexTier;
   readonly minContextSlot?: bigint;
-  readonly canonicalReadCapability?: SolanaCanonicalReadCapability;
+  /** Opaque evidence interpreted only by the trusted injected verifier. */
+  readonly canonicalReadCapability?: unknown;
   readonly signal?: AbortSignal;
 }
 
@@ -126,6 +127,10 @@ function isRecord(value: unknown): value is Record<PropertyKey, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+function isSourceByteArray(value: unknown): value is Uint8Array {
+  return ArrayBuffer.isView(value) && value instanceof Uint8Array;
+}
+
 function ownValue(record: Record<PropertyKey, unknown>, key: string): unknown {
   const descriptor = Object.getOwnPropertyDescriptor(record, key);
   if (descriptor === undefined || !('value' in descriptor)) {
@@ -163,7 +168,10 @@ function parseAccount(
     throw error;
   }
 
-  if (dataValue !== null && Object.prototype.toString.call(dataValue) !== '[object Uint8Array]') {
+  if (
+    dataValue !== null &&
+    (!isSourceByteArray(dataValue) || dataValue.byteLength > MAX_SOLANA_TOKEN_ACCOUNT_BYTES)
+  ) {
     throw new SolanaDepositIndexerError('INVALID_SOURCE_RESPONSE');
   }
   return Object.freeze({
@@ -235,7 +243,10 @@ function emptyBalance(): MutableBalance {
 }
 
 export class SolanaDepositIndexerService {
-  constructor(private readonly source: SolanaDepositSourcePort) {}
+  constructor(
+    private readonly source: SolanaDepositSourcePort,
+    private readonly canonicalCapabilities?: SolanaCanonicalReadCapabilityVerifierPort,
+  ) {}
 
   async index(request: SolanaDepositIndexRequest): Promise<SolanaDepositIndexResult> {
     const policy = chainObservationPolicyForNetwork(request.networkId);
@@ -265,8 +276,14 @@ export class SolanaDepositIndexerService {
     }
     if (
       request.tier === 'CANONICAL' &&
-      (request.canonicalReadCapability?.networkId !== request.networkId ||
-        request.canonicalReadCapability.confirmedTokenAccountReadsValidated !== true)
+      !this.canonicalReadCapabilityIsValid(
+        request.canonicalReadCapability,
+        Object.freeze({
+          environment: request.environment,
+          networkId: policy.networkId,
+          commitment: 'confirmed',
+        }),
+      )
     ) {
       throw new SolanaDepositIndexerError('LIVE_CAPABILITY_PROOF_REQUIRED');
     }
@@ -391,6 +408,18 @@ export class SolanaDepositIndexerService {
       return await read();
     } catch {
       throw new SolanaDepositIndexerError('SOURCE_READ_FAILED');
+    }
+  }
+
+  private canonicalReadCapabilityIsValid(
+    capability: unknown,
+    context: SolanaCanonicalReadCapabilityContext,
+  ): boolean {
+    if (capability === undefined || this.canonicalCapabilities === undefined) return false;
+    try {
+      return this.canonicalCapabilities.verify(capability, context) === true;
+    } catch {
+      return false;
     }
   }
 

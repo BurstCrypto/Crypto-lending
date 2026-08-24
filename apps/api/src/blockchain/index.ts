@@ -12,13 +12,16 @@ export {
   SolanaDepositIndexerError,
   SolanaDepositIndexerService,
   type IndexedSolanaStablecoinBalance,
-  type SolanaCanonicalReadCapability,
   type SolanaDepositExclusionCounts,
   type SolanaDepositIndexerErrorCode,
   type SolanaDepositIndexRequest,
   type SolanaDepositIndexResult,
   type SolanaDepositIndexTier,
 } from './application/solana-deposit-indexer.service';
+export type {
+  SolanaCanonicalReadCapabilityContext,
+  SolanaCanonicalReadCapabilityVerifierPort,
+} from './application/ports/solana-canonical-read-capability.port';
 export {
   type NormalizedSolanaTokenAccountsByOwnerSourceResult,
   type NormalizedSolanaTokenAccountSourceValue,
@@ -54,6 +57,7 @@ export {
   type VersionedSupportedAssetRegistry,
 } from './domain/supported-asset-registry';
 export {
+  MAX_SOLANA_TOKEN_ACCOUNT_BYTES,
   SOLANA_TOKEN_PROGRAM_IDS,
   SolanaTokenAccountValidationError,
   decodeSolanaPublicKey,

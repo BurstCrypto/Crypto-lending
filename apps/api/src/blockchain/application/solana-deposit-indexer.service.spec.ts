@@ -3,6 +3,10 @@ import type {
   SolanaDepositSourceRequestContext,
   SolanaTokenAccountsByOwnerRequest,
 } from './ports/solana-deposit-source.port';
+import type {
+  SolanaCanonicalReadCapabilityContext,
+  SolanaCanonicalReadCapabilityVerifierPort,
+} from './ports/solana-canonical-read-capability.port';
 import {
   SolanaDepositIndexerError,
   SolanaDepositIndexerService,
@@ -248,13 +252,40 @@ describe('SolanaDepositIndexerService', () => {
     );
     expect(source.calls).toHaveLength(0);
 
-    const result = await service.index(
+    await expectIndexError(
+      service.index(
+        indexRequest({
+          tier: 'CANONICAL',
+          canonicalReadCapability: {
+            networkId: MAINNET_NETWORK,
+            confirmedTokenAccountReadsValidated: true,
+          },
+        }),
+      ),
+      'LIVE_CAPABILITY_PROOF_REQUIRED',
+    );
+    expect(source.calls).toHaveLength(0);
+
+    const opaqueCapability = Object.freeze({ proofId: 'local-fixture-capability' });
+    const verifier: jest.Mocked<SolanaCanonicalReadCapabilityVerifierPort> = {
+      verify: jest.fn(
+        (capability: unknown, context: SolanaCanonicalReadCapabilityContext): boolean =>
+          capability === opaqueCapability && context.networkId === MAINNET_NETWORK,
+      ),
+    };
+    const verifiedService = new SolanaDepositIndexerService(source, verifier);
+    await expectIndexError(
+      verifiedService.index(
+        indexRequest({ tier: 'CANONICAL', canonicalReadCapability: { ...opaqueCapability } }),
+      ),
+      'LIVE_CAPABILITY_PROOF_REQUIRED',
+    );
+    expect(source.calls).toHaveLength(0);
+
+    const result = await verifiedService.index(
       indexRequest({
         tier: 'CANONICAL',
-        canonicalReadCapability: {
-          networkId: MAINNET_NETWORK,
-          confirmedTokenAccountReadsValidated: true,
-        },
+        canonicalReadCapability: opaqueCapability,
       }),
     );
     expect(result.authority).toBe('CANONICAL_INDEXING');
@@ -265,6 +296,30 @@ describe('SolanaDepositIndexerService', () => {
           call.method !== 'getTokenAccountsByOwner' || call.request.commitment === 'confirmed',
       ),
     ).toBe(true);
+    expect(verifier.verify).toHaveBeenLastCalledWith(opaqueCapability, {
+      environment: 'MAINNET',
+      networkId: MAINNET_NETWORK,
+      commitment: 'confirmed',
+    });
+    expect(Object.isFrozen(verifier.verify.mock.calls.at(-1)?.[1])).toBe(true);
+  });
+
+  it('fails canonical reads closed when the trusted capability verifier fails', async () => {
+    const source = new FakeSolanaDepositSource();
+    const verifier: SolanaCanonicalReadCapabilityVerifierPort = {
+      verify: () => {
+        throw new Error('private verifier detail');
+      },
+    };
+
+    const error = await expectIndexError(
+      new SolanaDepositIndexerService(source, verifier).index(
+        indexRequest({ tier: 'CANONICAL', canonicalReadCapability: Symbol('opaque') }),
+      ),
+      'LIVE_CAPABILITY_PROOF_REQUIRED',
+    );
+    expect(source.calls).toEqual([]);
+    expect(error.message).not.toContain('private verifier detail');
   });
 
   it('rejects financial use, unsupported networks, environment crossover, invalid owners, and slots', async () => {
@@ -417,6 +472,40 @@ describe('SolanaDepositIndexerService', () => {
       'INVALID_SOURCE_RESPONSE',
     );
     expect(error.message).not.toContain('provider-secret');
+
+    const spoofedBytes = {
+      length: 165,
+      [Symbol.toStringTag]: 'Uint8Array',
+    };
+    source.responses[SOLANA_TOKEN_PROGRAM_IDS.LEGACY] = sourceResponse(
+      SOLANA_TOKEN_PROGRAM_IDS.LEGACY,
+      [
+        Object.freeze({
+          address: ACCOUNT_ADDRESSES[0],
+          programId: SOLANA_TOKEN_PROGRAM_IDS.LEGACY,
+          data: spoofedBytes,
+        }),
+      ],
+    );
+    await expectIndexError(
+      new SolanaDepositIndexerService(source).index(indexRequest()),
+      'INVALID_SOURCE_RESPONSE',
+    );
+
+    source.responses[SOLANA_TOKEN_PROGRAM_IDS.LEGACY] = sourceResponse(
+      SOLANA_TOKEN_PROGRAM_IDS.LEGACY,
+      [
+        Object.freeze({
+          address: ACCOUNT_ADDRESSES[0],
+          programId: SOLANA_TOKEN_PROGRAM_IDS.LEGACY,
+          data: new Uint8Array(4_097),
+        }),
+      ],
+    );
+    await expectIndexError(
+      new SolanaDepositIndexerService(source).index(indexRequest()),
+      'INVALID_SOURCE_RESPONSE',
+    );
   });
 
   it('enforces the KAN-62 per-job read-unit ceiling across both token programs', async () => {
