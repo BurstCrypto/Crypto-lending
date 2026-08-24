@@ -22,6 +22,7 @@
 | Gate                                                         | Reference        | Approver       | Approved/expires (UTC) | State     |
 | ------------------------------------------------------------ | ---------------- | -------------- | ---------------------- | --------- |
 | Telemetry backend and exact plan                             | `NOT_APPROVED`   | `NOT_ASSIGNED` | `NOT_RUN` / `NOT_RUN`  | `BLOCKED` |
+| Effective KAN-248 logging-governance decision                | `NOT_APPROVED`   | `NOT_ASSIGNED` | `NOT_RUN` / `NOT_RUN`  | `BLOCKED` |
 | Named non-production environment                             | `NOT_AUTHORIZED` | `NOT_ASSIGNED` | `NOT_RUN` / `NOT_RUN`  | `BLOCKED` |
 | Deployment                                                   | `NOT_AUTHORIZED` | `NOT_ASSIGNED` | `NOT_RUN` / `NOT_RUN`  | `BLOCKED` |
 | Telemetry ingestion/query/dashboard/alarm actions            | `NOT_AUTHORIZED` | `NOT_ASSIGNED` | `NOT_RUN` / `NOT_RUN`  | `BLOCKED` |
@@ -38,6 +39,9 @@ approved ceiling, warning/stop thresholds, billing monitor, and kill owner.
 | ----------------------------------------- | --------- |
 | Git commit/tree SHA                       | `NOT_RUN` |
 | KAN-52 parent commit                      | `NOT_RUN` |
+| KAN-248 merged commit/tree SHA            | `NOT_RUN` |
+| KAN-248 governance-packet SHA-256         | `NOT_RUN` |
+| KAN-248 logger-contract SHA-256           | `NOT_RUN` |
 | API/web/worker image digests              | `NOT_RUN` |
 | Infrastructure template SHA-256           | `NOT_RUN` |
 | Telemetry configuration/dashboard SHA-256 | `NOT_RUN` |
@@ -49,6 +53,11 @@ approved ceiling, warning/stop thresholds, billing monitor, and kill owner.
 
 Use approved aliases and hashes. Do not record credentials, raw resource
 policies, URLs with secrets, customer identifiers, or full account numbers.
+The KAN-248 decision must be independently approved and effective, and its
+conditions must be satisfied and unexpired. Until all three exact KAN-248
+bindings above match that decision, leave every managed-log query, log access,
+log retention, and log audit result `NOT_RUN`; the overall decision cannot be
+`ACCEPTED`.
 
 ## Synthetic request trace
 
@@ -58,7 +67,7 @@ policies, URLs with secrets, customer identifiers, or full account numbers.
 | Server root        | Response carries a server-generated request/correlation ID that differs from spoofed input | `NOT_RUN`        | `NOT_RUN` |
 | Deployed API trace | Exact root finds the API server span in the approved backend                               | `NOT_RUN`        | `NOT_RUN` |
 | Cross-hop trace    | Applicable outbox/worker/domain records retain the same root                               | `NOT_RUN`        | `NOT_RUN` |
-| Dashboard lookup   | Approved panel/query locates only the synthetic trace with minimum filters                 | `NOT_RUN`        | `NOT_RUN` |
+| Dashboard lookup   | KAN-248-approved panel/query locates only the synthetic trace with minimum filters         | `NOT_RUN`        | `NOT_RUN` |
 | Redaction          | Synthetic prohibited-data canaries are absent without hashing/masking                      | `NOT_RUN`        | `NOT_RUN` |
 
 Record query hash, exact bounded UTC range, projected fields, result count, and
@@ -101,11 +110,11 @@ those bindings is illustrative, not acceptance evidence.
 | Authorized reader can access the approved environment only                                      | `NOT_RUN`        | `NOT_RUN` |
 | Unauthorized and cross-environment readers receive explicit denial                              | `NOT_RUN`        | `NOT_RUN` |
 | Reader cannot change dashboard, alarms, retention, KMS, or telemetry policy                     | `NOT_RUN`        | `NOT_RUN` |
-| Effective retention equals the approved value                                                   | `NOT_RUN`        | `NOT_RUN` |
+| Effective log retention equals the exact KAN-248-approved value                                 | `NOT_RUN`        | `NOT_RUN` |
 | Metric dimensions remain in the KAN-52 closed low-cardinality vocabulary                        | `NOT_RUN`        | `NOT_RUN` |
 | Request/actor/wallet/job/message/intent/quote/transaction IDs never become metric labels        | `NOT_RUN`        | `NOT_RUN` |
 | Headers, payloads, contact data, credentials, signatures, and raw provider errors remain absent | `NOT_RUN`        | `NOT_RUN` |
-| Query and access actions are audited and attributable                                           | `NOT_RUN`        | `NOT_RUN` |
+| Log query and access actions satisfy KAN-248 audit requirements and are attributable            | `NOT_RUN`        | `NOT_RUN` |
 
 ## Findings, cleanup, and cost
 
@@ -122,6 +131,8 @@ those bindings is illustrative, not acceptance evidence.
 | Baseline configuration restored and kill switches verified                                    | `NOT_ASSIGNED` | `NOT_RUN`          | `NOT_RUN` |
 | Observed cost, unbilled estimate, retention/cleanup tail, and final recheck recorded          | `NOT_ASSIGNED` | `NOT_RUN`          | `NOT_RUN` |
 
-Acceptance requires all mandatory checks to pass, approvals to remain current,
-cleanup/cost to be complete, and an independent verifier to bind the decision to
-the exact revision and evidence index. Otherwise KAN-250 remains open.
+Acceptance requires all mandatory checks to pass, the effective KAN-248 merged
+revision, packet digest, and logger-contract digest to match the independent
+decision, every approval to remain current, cleanup/cost to be complete, and an
+independent verifier to bind the decision to the exact revision and evidence
+index. Otherwise KAN-250 remains open.
