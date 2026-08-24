@@ -123,6 +123,11 @@ const EVM_ADDRESS = /^0x[0-9a-f]{40}$/u;
 const REGISTRY_FINGERPRINT = /^[0-9a-f]{64}$/u;
 const NONCE = /^[a-zA-Z0-9]{8,64}$/u;
 const CANONICAL_DATE_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
+const OWNERSHIP_STATEMENT =
+  'Verify this wallet for Crypto Lending. This proof does not authorize login, transactions, transfers, or loans.';
+const POLICY_RESOURCE = '- urn:crypto-lending:wallet-ownership:v1';
+const SUBJECT_RESOURCE = /^- urn:crypto-lending:wallet-subject-binding:hmac-sha-256:[0-9a-f]{64}$/u;
+const OPERATION_RESOURCE = '- urn:crypto-lending:wallet-operation:register-wallet';
 
 function fail(
   code: WalletOwnershipHandoffErrorCode = WALLET_OWNERSHIP_HANDOFF_ERROR_CODES.unavailable,
@@ -231,11 +236,32 @@ function parseChallenge(
   }
 
   const lines = record.message.split('\n');
-  if (lines[1]?.toLowerCase() !== record.address) fail();
+  if (
+    lines.length !== 17 ||
+    lines[1]?.toLowerCase() !== record.address ||
+    lines[2] !== '' ||
+    lines[3] !== OWNERSHIP_STATEMENT ||
+    lines[4] !== '' ||
+    lines[13] !== 'Resources:' ||
+    lines[14] !== POLICY_RESOURCE ||
+    typeof lines[15] !== 'string' ||
+    !SUBJECT_RESOURCE.test(lines[15]) ||
+    lines[16] !== OPERATION_RESOURCE
+  ) {
+    fail();
+  }
   if (exactMessageLine(lines, 'Chain ID: ') !== expected.chainId.slice('eip155:'.length)) fail();
   if (exactMessageLine(lines, 'Version: ') !== '1') fail();
   if (exactMessageLine(lines, 'Expiration Time: ') !== record.expiresAt) fail();
   if (exactMessageLine(lines, 'Request ID: ') !== record.challengeId) fail();
+  const issuedAt = exactMessageLine(lines, 'Issued At: ');
+  if (
+    !canonicalDateTime(issuedAt) ||
+    exactMessageLine(lines, 'Not Before: ') !== issuedAt ||
+    Date.parse(issuedAt) >= Date.parse(record.expiresAt)
+  ) {
+    fail();
+  }
   const nonce = exactMessageLine(lines, 'Nonce: ');
   if (!NONCE.test(nonce)) fail();
 

@@ -16,10 +16,7 @@ import {
   type IssuedEvmOwnershipChallenge,
   type RegisteredEvmWalletResult,
 } from '@/lib/wallets/eip1193/ownership';
-import type {
-  Eip1193Provider,
-  Eip1193RequestArguments,
-} from '@/lib/wallets/eip1193/provider';
+import type { Eip1193Provider, Eip1193RequestArguments } from '@/lib/wallets/eip1193/provider';
 
 const ORIGIN = 'https://app.example.test';
 const ADDRESS = '0x1111111111111111111111111111111111111111';
@@ -36,7 +33,7 @@ function message(overrides: { requestId?: string; nonce?: string } = {}): string
   return (
     `app.example.test wants you to sign in with your Ethereum account:\n` +
     `${ADDRESS}\n\n` +
-    `Prove control of this wallet without authorizing a transaction.\n\n` +
+    `Verify this wallet for Crypto Lending. This proof does not authorize login, transactions, transfers, or loans.\n\n` +
     `URI: ${ORIGIN}/\n` +
     `Version: 1\n` +
     `Chain ID: 11155111\n` +
@@ -46,7 +43,9 @@ function message(overrides: { requestId?: string; nonce?: string } = {}): string
     `Not Before: 2026-08-24T12:00:00.000Z\n` +
     `Request ID: ${overrides.requestId ?? CHALLENGE_ID}\n` +
     `Resources:\n` +
-    `- urn:crypto-lending:wallet-ownership-policy:v1`
+    `- urn:crypto-lending:wallet-ownership:v1\n` +
+    `- urn:crypto-lending:wallet-subject-binding:hmac-sha-256:${'cd'.repeat(32)}\n` +
+    `- urn:crypto-lending:wallet-operation:register-wallet`
   );
 }
 
@@ -179,6 +178,10 @@ describe('HttpEvmWalletOwnershipClient', () => {
 
   it.each([
     ['wrong request binding', { message: message({ requestId: ACCOUNT_ID }) }],
+    [
+      'unexpected signing statement',
+      { message: message().replace('does not authorize login', 'authorizes login') },
+    ],
     ['wrong environment', { registryEnvironment: 'MAINNET' }],
     ['wrong account', { address: '0x2222222222222222222222222222222222222222' }],
     ['noncanonical signature context', { registryFingerprintSha256: FINGERPRINT.toUpperCase() }],
