@@ -1,5 +1,23 @@
 export { BlockchainModule } from './blockchain.module';
 export {
+  EvmStablecoinBalanceIndexer,
+  EvmStablecoinBalanceIndexerError,
+  type EvmStablecoinBalanceIndexerConfig,
+  type EvmStablecoinBalanceIndexerErrorCode,
+  type IndexEvmStablecoinBalancesInput,
+} from './application/evm-stablecoin-balance-indexer';
+export {
+  EvmBalanceReadFailure,
+  type EvmBalanceReadFailureCode,
+  type EvmBalanceRetrySchedulerPort,
+  type EvmBalanceSnapshotWriteDisposition,
+  type EvmChainIdentityReadRequest,
+  type EvmSourceBlockReadRequest,
+  type EvmStablecoinBalanceReaderPort,
+  type EvmStablecoinPositionStorePort,
+  type EvmTokenBalanceBatchReadRequest,
+} from './application/ports/evm-stablecoin-balance-indexer.ports';
+export {
   EvmStablecoinPositionValidationError,
   createEvmBalanceObservationId,
   createEvmBalanceSnapshotId,
