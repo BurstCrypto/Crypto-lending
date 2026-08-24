@@ -1,4 +1,5 @@
 import {
+  createSafeLegacyCorrelationId,
   createSafeLogReference,
   createRootLogContext,
   LoggingContext,
@@ -91,6 +92,22 @@ describe('LoggingContext', () => {
       'correlationId must use its canonical diagnostic identifier format',
     );
     expect(context.bindActorId(ACTOR_ID)).toBe(false);
+  });
+
+  it('keeps normalized legacy roots fail-closed to actor and domain enrichment', () => {
+    const context = new LoggingContext();
+    const legacyCorrelationId = createSafeLegacyCorrelationId('job', 'legacy-job-1');
+    if (!legacyCorrelationId) throw new Error('Expected a normalized legacy correlation');
+
+    context.run({ correlationId: legacyCorrelationId }, () => {
+      expect(() => context.bindActorId(ACTOR_ID)).toThrow(
+        'Legacy correlation contexts cannot bind an initiating actor',
+      );
+      expect(() => context.runWith({ intentId: indexedUuid(7) }, () => undefined)).toThrow(
+        'Legacy correlation contexts cannot carry optional identifiers',
+      );
+      expect(context.requireCurrent()).toEqual({ correlationId: legacyCorrelationId });
+    });
   });
 
   it('rejects accessors and ignores prototype pollution without forging an actor', () => {
