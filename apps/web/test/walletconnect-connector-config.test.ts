@@ -78,7 +78,9 @@ describe('local WalletConnect configuration', () => {
 
   it('rejects wrong-namespace chains, duplicate capabilities, and unsafe links', () => {
     expect(() =>
-      parseWalletConnectLocalConfiguration(configuration({ approvedChains: ['solana:devnet'] })),
+      parseWalletConnectLocalConfiguration(
+        configuration({ approvedChains: ['solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1'] }),
+      ),
     ).toThrow('configuration is invalid');
     expect(() =>
       parseWalletConnectLocalConfiguration(
@@ -124,6 +126,25 @@ describe('local WalletConnect configuration', () => {
         }),
       ),
     ).toThrow('configuration is invalid');
+  });
+
+  it('accepts only canonical KAN-61 Solana CAIP IDs', () => {
+    expect(
+      parseWalletConnectLocalConfiguration(
+        configuration({
+          namespace: 'solana',
+          approvedChains: ['solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1'],
+        }),
+      ).approvedChains,
+    ).toEqual(['solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1']);
+
+    for (const alias of ['solana:mainnet', 'solana:devnet', 'solana:testnet']) {
+      expect(() =>
+        parseWalletConnectLocalConfiguration(
+          configuration({ namespace: 'solana', approvedChains: [alias as never] }),
+        ),
+      ).toThrow('configuration is invalid');
+    }
   });
 
   it('builds QR and allowlisted HTTPS deep links without altering the pairing URI', () => {

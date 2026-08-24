@@ -31,7 +31,8 @@ const MAX_PAIRING_TIMEOUT_MS = 5 * 60 * 1_000;
 const MAX_SESSION_LIFETIME_MS = 30 * 24 * 60 * 60 * 1_000;
 const IDENTIFIER_PATTERN = /^[A-Za-z][A-Za-z0-9._:-]{0,127}$/u;
 const EVM_CHAIN_PATTERN = /^eip155:(?:0|[1-9][0-9]*)$/u;
-const SOLANA_CHAIN_PATTERN = /^solana:(?:mainnet|devnet|testnet)$/u;
+const SOLANA_CHAIN_PATTERN =
+  /^solana:(?:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp|EtWTRABZaYq6iMfeYKouRu166VU2xqa1)$/u;
 const PAIRING_URI_PATTERN = /^wc:[A-Za-z0-9._~-]{1,256}@2\?[^\s#]+$/u;
 
 export interface WalletConnectDeepLinkConfiguration {
@@ -706,6 +707,7 @@ export class LocalWalletConnectConnector implements WalletConnectAdapter {
   private readonly now: () => number;
   private readonly createConnectionId: () => string;
   private readonly listeners = new Set<(event: WalletEvent) => void>();
+  private readonly issuedConnectionIds = new Set<string>();
   private phase: InternalWalletConnectPhase = Object.freeze({ phase: 'idle' });
   private active: ActiveWalletConnectSession | null = null;
   private transport: WalletConnectTransport | null = null;
@@ -825,6 +827,10 @@ export class LocalWalletConnectConnector implements WalletConnectAdapter {
         options.signal,
       );
       const active = this.normalizeSession(session, false);
+      if (options.signal?.aborted === true) {
+        await this.disconnectTransportQuietly(active.topic);
+        throw new WalletConnectConnectorError('ABORTED');
+      }
       this.activate(active);
       return active.connection;
     } catch (error) {
@@ -855,12 +861,16 @@ export class LocalWalletConnectConnector implements WalletConnectAdapter {
       throw normalizeFailure(error);
     }
     try {
-      this.assertNotAborted(options.signal);
       if (session === null) {
+        this.assertNotAborted(options.signal);
         this.phase = Object.freeze({ phase: 'idle' });
         return null;
       }
       const active = this.normalizeSession(session, true);
+      if (options.signal?.aborted === true) {
+        await this.disconnectTransportQuietly(active.topic);
+        throw new WalletConnectConnectorError('ABORTED');
+      }
       this.activate(active);
       return active.connection;
     } catch (error) {
@@ -911,6 +921,9 @@ export class LocalWalletConnectConnector implements WalletConnectAdapter {
       signature = await transport.signOwnershipChallenge(active.topic, challenge);
     } catch (error) {
       throw normalizeFailure(error);
+    }
+    if (this.active !== active) {
+      throw new WalletConnectConnectorError('CONNECTION_NOT_FOUND');
     }
     return normalizeOwnershipSignature(signature, challenge);
   }
@@ -1064,7 +1077,8 @@ export class LocalWalletConnectConnector implements WalletConnectAdapter {
       typeof connectionId !== 'string' ||
       connectionId.length === 0 ||
       connectionId.length > 256 ||
-      !/^[A-Za-z0-9._~-]+$/u.test(connectionId)
+      !/^[A-Za-z0-9._~-]+$/u.test(connectionId) ||
+      (existingConnectionId === undefined && this.issuedConnectionIds.has(connectionId))
     ) {
       throw new WalletConnectConnectorError('CONFIGURATION_INVALID');
     }
@@ -1086,11 +1100,28 @@ export class LocalWalletConnectConnector implements WalletConnectAdapter {
   }
 
   private activate(active: ActiveWalletConnectSession): void {
+    const delay = Math.max(0, active.expiresAtMs - this.currentTime());
     this.clearSessionTimer();
+    this.issuedConnectionIds.add(active.connection.connectionId);
     this.active = active;
     this.phase = Object.freeze({ phase: 'connected' });
-    const delay = Math.max(0, active.expiresAtMs - this.currentTime());
-    this.sessionExpiryTimer = setTimeout(() => this.expireActive(active.topic), delay);
+    this.scheduleSessionExpiry(active, delay);
+  }
+
+  private scheduleSessionExpiry(active: ActiveWalletConnectSession, remainingMs: number): void {
+    const maximumTimerDelayMs = 2_147_483_647;
+    this.sessionExpiryTimer = setTimeout(
+      () => {
+        if (this.active !== active) return;
+        const remaining = active.expiresAtMs - this.currentTime();
+        if (remaining <= 0) {
+          this.expireActive(active.topic);
+          return;
+        }
+        this.scheduleSessionExpiry(active, remaining);
+      },
+      Math.min(remainingMs, maximumTimerDelayMs),
+    );
   }
 
   private deactivate(topic: string): ActiveWalletConnectSession | null {
@@ -1126,6 +1157,7 @@ export class LocalWalletConnectConnector implements WalletConnectAdapter {
         error: fixedProviderError('SESSION_EXPIRED', false),
       }),
     );
+    void this.disconnectTransportQuietly(topic);
   }
 
   private invalidateActive(topic: string): void {
@@ -1193,6 +1225,7 @@ export class LocalWalletConnectConnector implements WalletConnectAdapter {
             connection: null,
           }),
         );
+        void this.disconnectTransportQuietly(topic);
       }
       return;
     }

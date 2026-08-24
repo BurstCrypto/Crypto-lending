@@ -439,6 +439,7 @@ describe('local WalletConnect connector lifecycle', () => {
       },
     ]);
     expect(empty.connector.getState()).toEqual({ phase: 'idle' });
+    expect(empty.transport.disconnectTopics).toEqual(['session-topic-1']);
 
     const disconnected = await connectFixture();
     const disconnectEvents: WalletEvent[] = [];
@@ -462,6 +463,45 @@ describe('local WalletConnect connector lifecycle', () => {
       }),
     ]);
     expect(expired.connector.getState()).toEqual({ phase: 'idle' });
+    expect(expired.transport.disconnectTopics).toEqual(['session-topic-1']);
+  });
+
+  it('caps long expiry timers and reschedules until the exact session expiry', async () => {
+    const maximumTimerDelayMs = 2_147_483_647;
+    const lifetimeMs = 30 * 24 * 60 * 60 * 1_000;
+    const timeoutSpy = vi.spyOn(globalThis, 'setTimeout');
+    const connected = await connectFixture(session({ expiresAtMs: NOW + lifetimeMs }));
+
+    expect(timeoutSpy).toHaveBeenCalledWith(expect.any(Function), maximumTimerDelayMs);
+    await vi.advanceTimersByTimeAsync(maximumTimerDelayMs);
+    expect(connected.connector.getState()).toMatchObject({ phase: 'connected' });
+
+    await vi.advanceTimersByTimeAsync(lifetimeMs - maximumTimerDelayMs + 1);
+    expect(connected.connector.getState()).toEqual({ phase: 'idle' });
+    expect(connected.transport.disconnectTopics).toEqual(['session-topic-1']);
+  });
+
+  it('never reuses an application connection ID across sessions', async () => {
+    const transport = new FakeTransport();
+    const connector = createLocalWalletConnectConnector(configuration(), {
+      factory: new FakeFactory(transport),
+      pairingPresenter: new EphemeralPresenter(),
+      now: () => Date.now(),
+      createConnectionId: () => 'connection-fixed',
+    });
+
+    const first = connector.connect();
+    await flushMicrotasks();
+    transport.pairing.resolve(session());
+    const firstConnection = await first;
+    await connector.disconnect(firstConnection.connectionId);
+
+    transport.pairing = deferred<WalletConnectSessionCandidate>();
+    const second = connector.connect();
+    await flushMicrotasks();
+    transport.pairing.resolve(session({ topic: 'session-topic-2' }));
+    await expect(second).rejects.toMatchObject({ code: 'CONFIGURATION_INVALID' });
+    expect(connector.getState()).toEqual({ phase: 'idle' });
   });
 
   it('invalidates an adversarial session update with no raw values in the event', async () => {
@@ -538,6 +578,42 @@ describe('local WalletConnect connector lifecycle', () => {
     await expect(
       connector.signOwnershipChallenge(connection.connectionId, issuedChallenge),
     ).rejects.toMatchObject({ code: 'OWNERSHIP_INVALID' });
+  });
+
+  it('discards a signing result that arrives after the session disconnects', async () => {
+    const { connector, transport, connection } = await connectFixture();
+    const issuedChallenge = challenge(connection);
+    const signature = deferred<unknown>();
+    transport.signature = signature.promise;
+
+    const signing = connector.signOwnershipChallenge(connection.connectionId, issuedChallenge);
+    await flushMicrotasks();
+    transport.emit({ type: 'disconnect', topic: 'session-topic-1' });
+    signature.resolve({
+      format: 'siwe',
+      challengeId: issuedChallenge.id,
+      chainId: issuedChallenge.chainId,
+      address: issuedChallenge.address,
+      signature: '0xstale-signature',
+    });
+
+    await expect(signing).rejects.toMatchObject({ code: 'CONNECTION_NOT_FOUND' });
+  });
+
+  it('disconnects an approved restoration that resolves after caller abort', async () => {
+    const testFixture = fixture();
+    const restoration = deferred<WalletConnectSessionCandidate>();
+    testFixture.transport.restore = vi.fn(async () => restoration.promise);
+    const controller = new AbortController();
+
+    const restoring = testFixture.connector.restore({ signal: controller.signal });
+    await flushMicrotasks();
+    controller.abort();
+    restoration.resolve(session());
+
+    await expect(restoring).rejects.toMatchObject({ code: 'ABORTED' });
+    expect(testFixture.transport.disconnectTopics).toEqual(['session-topic-1']);
+    expect(testFixture.connector.getState()).toEqual({ phase: 'idle' });
   });
 
   it('rejects a challenge for a non-selected account before invoking transport', async () => {

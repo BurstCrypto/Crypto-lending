@@ -32,10 +32,12 @@ implements the existing `WalletAdapter` contract with:
   copying of the normalized signature result.
 
 The adapter supports either one configured `eip155` or one configured `solana`
-namespace. It rejects a mixed or unexpected namespace. A session may approve a
-subset of the configured chain allowlist, but it may not add another chain or
-capability. Methods and events must exactly match the requested closed sets.
-The selected account is mandatory and is never inferred from `accounts[0]`.
+namespace. Solana configuration accepts only KAN-61's canonical mainnet-beta
+and devnet CAIP-2 IDs, never the Wallet Standard aliases. It rejects a mixed or
+unexpected namespace. A session may approve a subset of the configured chain
+allowlist, but it may not add another chain or capability. Methods and events
+must exactly match the requested closed sets. The selected account is mandatory
+and is never inferred from `accounts[0]`.
 
 ## Fail-closed configuration
 
