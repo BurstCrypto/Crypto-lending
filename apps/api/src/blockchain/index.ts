@@ -1,5 +1,47 @@
 export { BlockchainModule } from './blockchain.module';
 export {
+  EvmStablecoinBalanceIndexer,
+  EvmStablecoinBalanceIndexerError,
+  type EvmStablecoinBalanceIndexerConfig,
+  type EvmStablecoinBalanceIndexerErrorCode,
+  type IndexEvmStablecoinBalancesInput,
+} from './application/evm-stablecoin-balance-indexer';
+export {
+  EvmBalanceReadFailure,
+  type EvmBalanceReadFailureCode,
+  type EvmBalanceRetrySchedulerPort,
+  type EvmBalanceSnapshotWriteDisposition,
+  type EvmChainIdentityReadRequest,
+  type EvmSourceBlockReadRequest,
+  type EvmStablecoinBalanceReaderPort,
+  type EvmStablecoinPositionStorePort,
+  type EvmTokenBalanceBatchReadRequest,
+} from './application/ports/evm-stablecoin-balance-indexer.ports';
+export {
+  EvmStablecoinPositionValidationError,
+  createEvmBalanceObservationId,
+  createEvmBalanceSnapshotId,
+  createEvmStablecoinPositionId,
+  normalizeEvmAddress,
+  normalizeEvmAtomicBalance,
+  normalizeEvmBlockHash,
+  normalizeEvmBlockNumber,
+  type EvmAddress,
+  type EvmAtomicBalance,
+  type EvmBalanceObservationId,
+  type EvmBalanceSnapshotId,
+  type EvmBlockHash,
+  type EvmBlockNumber,
+  type EvmChain,
+  type EvmNetworkId,
+  type EvmSourceBlock,
+  type EvmStablecoinBalanceSnapshot,
+  type EvmStablecoinPosition,
+  type EvmStablecoinPositionId,
+  type EvmStablecoinPositionIdentityInput,
+  type EvmStablecoinPositionValidationCode,
+} from './domain/evm-stablecoin-position';
+export {
   SupportedAssetNormalizationError,
   SupportedAssetNormalizationService,
   type HistoricalAssetIdentification,
