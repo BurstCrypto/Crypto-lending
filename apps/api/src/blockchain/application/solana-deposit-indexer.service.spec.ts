@@ -74,9 +74,7 @@ class FakeSolanaDepositSource implements SolanaDepositSourcePort {
   genesisHash: unknown = MAINNET_GENESIS;
   responses: Record<SolanaTokenProgramId, unknown> = {
     [SOLANA_TOKEN_PROGRAM_IDS.LEGACY]: sourceResponse(SOLANA_TOKEN_PROGRAM_IDS.LEGACY),
-    [SOLANA_TOKEN_PROGRAM_IDS.TOKEN_2022]: sourceResponse(
-      SOLANA_TOKEN_PROGRAM_IDS.TOKEN_2022,
-    ),
+    [SOLANA_TOKEN_PROGRAM_IDS.TOKEN_2022]: sourceResponse(SOLANA_TOKEN_PROGRAM_IDS.TOKEN_2022),
   };
   readonly calls: Array<
     | Readonly<{ method: 'getGenesisHash'; context: SolanaDepositSourceRequestContext }>
@@ -160,9 +158,7 @@ describe('SolanaDepositIndexerService', () => {
     );
     const signal = new AbortController().signal;
 
-    const result = await new SolanaDepositIndexerService(source).index(
-      indexRequest({ signal }),
-    );
+    const result = await new SolanaDepositIndexerService(source).index(indexRequest({ signal }));
 
     expect(result).toMatchObject({
       completeness: 'COMPLETE',
@@ -174,8 +170,7 @@ describe('SolanaDepositIndexerService', () => {
       ownerAddress: OWNER,
       sourceSlot: 900n,
       registryVersion: 1,
-      registryFingerprintSha256:
-        '5058b141479f114c1e5f87ed8798fbb7a7ffcce7b502aa7e0794dc53ca1f767d',
+      registryFingerprintSha256: '5058b141479f114c1e5f87ed8798fbb7a7ffcce7b502aa7e0794dc53ca1f767d',
       sourceAccountCount: 6,
       exclusions: {
         closedAccounts: 1,

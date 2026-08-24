@@ -177,7 +177,10 @@ describe('Solana token account parsing', () => {
 
   it('round-trips canonical public keys and rejects zero, invalid, and non-32-byte keys', () => {
     expect(normalizeSolanaPublicKey(OWNER)).toBe(OWNER);
-    expectValidationCode(() => decodeSolanaPublicKey('11111111111111111111111111111111'), 'INVALID_PUBLIC_KEY');
+    expectValidationCode(
+      () => decodeSolanaPublicKey('11111111111111111111111111111111'),
+      'INVALID_PUBLIC_KEY',
+    );
     expectValidationCode(() => decodeSolanaPublicKey('0'.repeat(32)), 'INVALID_PUBLIC_KEY');
     expectValidationCode(() => decodeSolanaPublicKey('2'.repeat(32)), 'INVALID_PUBLIC_KEY');
   });

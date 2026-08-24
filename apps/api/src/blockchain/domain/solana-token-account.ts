@@ -172,14 +172,20 @@ export function parseSolanaTokenAccount(
   validateCOption(data, 129, 32);
 
   const owner = readPublicKey(data, 32);
-  if (input.expectedOwner !== undefined && owner !== normalizeSolanaPublicKey(input.expectedOwner)) {
+  if (
+    input.expectedOwner !== undefined &&
+    owner !== normalizeSolanaPublicKey(input.expectedOwner)
+  ) {
     throw new SolanaTokenAccountValidationError('OWNER_MISMATCH');
   }
 
   return Object.freeze({
     mint: readPublicKey(data, 0),
     owner,
-    amountBaseUnits: new DataView(data.buffer, data.byteOffset, data.byteLength).getBigUint64(64, true),
+    amountBaseUnits: new DataView(data.buffer, data.byteOffset, data.byteLength).getBigUint64(
+      64,
+      true,
+    ),
     state: parseState(data[108]),
     tokenProgramId,
   });

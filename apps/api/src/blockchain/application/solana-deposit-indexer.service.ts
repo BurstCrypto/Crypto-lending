@@ -187,7 +187,9 @@ function parseSourceResponse(
   }
   return Object.freeze({
     contextSlot,
-    accounts: Object.freeze(accountsValue.map((account) => parseAccount(account, expectedProgramId))),
+    accounts: Object.freeze(
+      accountsValue.map((account) => parseAccount(account, expectedProgramId)),
+    ),
   });
 }
 
