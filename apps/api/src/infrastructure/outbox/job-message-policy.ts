@@ -6,12 +6,20 @@ import { parseJobEnvelope, type JobEnvelope } from './job-envelope';
 // and values. Four attributes are reserved for stable job/correlation metadata.
 export const MAX_JOB_MESSAGE_BYTES = 1_048_576;
 export const MAX_CUSTOM_JOB_ATTRIBUTES = 6;
+export const MAX_JOB_JSON_DEPTH = 64;
+export const MAX_JOB_JSON_NODES = 100_000;
+export const RESERVED_JOB_MESSAGE_ATTRIBUTE_NAMES = Object.freeze([
+  'correlationId',
+  'jobId',
+  'jobKind',
+  'jobVersion',
+] as const);
 
-const RESERVED_ATTRIBUTE_NAMES = new Set(['correlationid', 'jobid', 'jobkind', 'jobversion']);
+const RESERVED_ATTRIBUTE_NAMES = new Set(
+  RESERVED_JOB_MESSAGE_ATTRIBUTE_NAMES.map((name) => name.toLowerCase()),
+);
 const JSON_STRINGIFY = JSON.stringify;
 const JSON_PARSE = JSON.parse;
-const MAX_JSON_DEPTH = 64;
-const MAX_JSON_NODES = 100_000;
 const MESSAGE_TOO_LARGE = Symbol('MESSAGE_TOO_LARGE');
 
 export interface SerializedJobMessage {
@@ -191,7 +199,7 @@ function addJsonStringBytes(value: string, budget: MessageByteBudget): void {
 
 function cloneSupportedJson(value: unknown, state: JsonCloneState, depth = 0): unknown {
   state.nodes += 1;
-  if (state.nodes > MAX_JSON_NODES || depth > MAX_JSON_DEPTH) {
+  if (state.nodes > MAX_JOB_JSON_NODES || depth > MAX_JOB_JSON_DEPTH) {
     throw new TypeError('Job JSON exceeds structural limits');
   }
   if (value === null) {
