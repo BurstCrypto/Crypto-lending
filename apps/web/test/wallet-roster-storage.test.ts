@@ -100,6 +100,40 @@ describe('wallet roster storage', () => {
     expect(evmAccount.address).toBe('0xABCDEFabcdefabcdefabcdefabcdefabcdefABCD');
   });
 
+  it('accepts both KAN-61 Solana identities and rejects every legacy alias', () => {
+    const valid = snapshot();
+    for (const chainId of Object.values(KAN61_SOLANA_CAIP_CHAIN_IDS)) {
+      expect(
+        parseWalletRosterSnapshot({
+          ...valid,
+          entries: [
+            {
+              ...valid.entries[1],
+              selectedAccount: { ...valid.entries[1]?.selectedAccount, chainId },
+            },
+          ],
+        }).entries[0]?.selectedAccount.chainId,
+      ).toBe(chainId);
+    }
+
+    for (const chainId of ['solana:mainnet', 'solana:devnet', 'solana:testnet'] as const) {
+      expect(() =>
+        parseWalletRosterSnapshot({
+          ...valid,
+          entries: [
+            {
+              ...valid.entries[1],
+              selectedAccount: { ...valid.entries[1]?.selectedAccount, chainId },
+            },
+          ],
+        }),
+      ).toThrow('wallet roster chainId is unsupported');
+      expect(() => walletAddressHint({ chainId, address: SOLANA_ADDRESS })).toThrow(
+        'canonical KAN-61 identity',
+      );
+    }
+  });
+
   it('rejects unredacted addresses, unknown fields, duplicates, and inconsistent disconnects', () => {
     const valid = snapshot();
     expect(() =>

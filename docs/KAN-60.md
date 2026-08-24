@@ -21,6 +21,19 @@ instances and a `WalletRosterStore`. Construction only validates the adapters,
 loads the redacted roster, and subscribes exactly once to each adapter. It never
 calls `connect()` or `restore()`.
 
+Solana lifecycle state accepts only KAN-61's canonical CAIP-2 references:
+`solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp` for mainnet and
+`solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1` for devnet. Friendly Wallet Standard
+aliases such as `solana:mainnet`, `solana:devnet`, and `solana:testnet` are
+rejected before a connection or roster row becomes application state.
+
+This branch remains directly based on main, whose WAL-001 validator predates
+those KAN-61 references. The isolated compatibility boundary validates a
+private translated view only when that older validator is present; it never
+returns or persists an alias. With KAN-59's canonical validator present, it
+uses that shared boundary directly. Final branch integration should consolidate
+the duplicate checked-in Solana catalog and rerun the combined wallet suites.
+
 The intended UI/controller operations are:
 
 | Operation                                              | Behavior                                                                                                                                                                       |
@@ -97,7 +110,8 @@ The fake-only tests demonstrate:
   disposal/recreation, with no automatic connector call;
 - explicit restoration retains both stable IDs and labels while requiring new
   proof;
-- the same lifecycle boundary accepts a normalized Solana devnet connection;
+- the same lifecycle boundary connects, persists, and explicitly restores a
+  normalized Solana devnet connection under its canonical KAN-61 identity;
 - account, chain, session, disconnect, expiry, and malformed-event paths stop
   indexing without mutating an unrelated wallet;
 - same-connector, same-account, and stable-ID duplicates fail closed;

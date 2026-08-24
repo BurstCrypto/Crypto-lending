@@ -51,9 +51,10 @@ function solanaConnection(
   connectorId: string,
   connectionId: string,
   restored = false,
+  chainId: `solana:${string}` = KAN61_SOLANA_CAIP_CHAIN_IDS.devnet,
 ): WalletConnection {
   const account = {
-    chainId: KAN61_SOLANA_CAIP_CHAIN_IDS.devnet,
+    chainId,
     address: SOLANA_ADDRESS,
   };
   return {
@@ -325,6 +326,33 @@ describe('multi-wallet manager', () => {
       indexingEnabled: false,
       selectedAccount: { chainId: KAN61_SOLANA_CAIP_CHAIN_IDS.devnet },
     });
+  });
+
+  it('rejects legacy Solana aliases from both connect and restore', async () => {
+    const store = new MemoryRosterStore();
+    const phantom = new FakeWalletAdapter('phantom', 'solana');
+    phantom.connectResult = solanaConnection(
+      'phantom',
+      'connection-legacy-connect',
+      false,
+      'solana:devnet',
+    );
+    phantom.restoreResult = solanaConnection(
+      'phantom',
+      'connection-legacy-restore',
+      true,
+      'solana:mainnet',
+    );
+    const wallets = manager([phantom], store);
+
+    await expect(wallets.connect('phantom')).rejects.toMatchObject({
+      code: 'provider-operation-failed',
+    });
+    await expect(wallets.restore('phantom')).rejects.toMatchObject({
+      code: 'provider-operation-failed',
+    });
+    expect(wallets.getState().entries).toEqual([]);
+    expect(store.snapshot).toBeNull();
   });
 
   it('invalidates verification revisions on account, chain, and session changes', async () => {
