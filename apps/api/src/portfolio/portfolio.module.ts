@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 
 import { AccountsModule } from '../accounts/accounts.module';
+import { AuthenticationModule } from '../authentication/authentication.module';
 import {
   PORTFOLIO_CLOCK,
   PortfolioService,
@@ -16,7 +17,7 @@ import {
 } from './infrastructure/unavailable-portfolio-readers';
 
 @Module({
-  imports: [AccountsModule],
+  imports: [AccountsModule, AuthenticationModule],
   controllers: [PortfolioController],
   providers: [
     PortfolioService,
