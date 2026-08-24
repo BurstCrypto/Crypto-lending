@@ -22,13 +22,14 @@ free.
 
 ## Structured event contract
 
-The API, outbox worker, migration CLI, worker-health CLI, and OpenAPI generator
-covered by this branch emit application-owned operational output as one
-bounded JSON object per line. The logger generates its own canonical UTC
-timestamp and accepts a discriminated, event-specific field allowlist rather
-than an arbitrary object plus a recursive scrubber. The Next.js web runtime is
-an explicit remaining boundary; this branch does not claim that framework's
-stdout and fatal paths are structured or scrubbed.
+The API, outbox worker, migration CLI, worker-health CLI, OpenAPI generator, and
+KAN-245 Next.js Node.js instrumentation emit application-owned operational
+output as one bounded JSON object per line. Each logger generates its own
+canonical UTC timestamp and accepts a discriminated, event-specific field
+allowlist rather than an arbitrary object plus a recursive scrubber. Next.js
+framework-owned build/start diagnostics are outside the application event
+catalog; application-owned web request and fatal failures use the same fixed
+schema metadata and closed-projection rules.
 
 Every event has these fields; domain and request events also carry an
 event-specific `outcome` where the catalog permits it:
@@ -253,10 +254,12 @@ anonymous rejection volume. Job tests separately prove that raw transport and
 handler errors are absent from durable state and processing results, while
 correlation survives outbox/SQS serialization and concurrent handlers.
 Captured worker-output cases also prove that payload, attribute, transport,
-and handler canaries are absent from the emitted JSON. A source-policy gate
-rejects direct application-owned console/stdout/stderr and Nest logger sinks in
-the covered API executables. The broader wallet/provider/domain corpus and
-unexercised error paths remain required before the ticket can be accepted.
+and handler canaries are absent from the emitted JSON. KAN-245 extends this
+corpus through unhandled API/provider failures, mapped wallet/domain failures,
+outbox transport failures, SQS handler retries/dead-letter handling, and
+Next.js request/fatal boundaries. Source-policy gates reject direct
+application-owned console/stdout/stderr and Nest logger sinks across API and
+web runtime sources and prevent an unreviewed Edge-runtime escape.
 
 The KAN-51 trace case in `ledger-idempotency.integration-spec.ts` adds the
 literal local evidence that was previously blocked on KAN-43. It sends a real
@@ -295,8 +298,9 @@ or hosted-CI action.
 KAN-51 must not be represented as fully accepted from this local retention
 evidence. The following remain explicit gates:
 
-- complete application-owned structured logging and adversarial leak evidence
-  for every API, worker, and web-runtime error path;
+- deployed/runtime-version validation that framework-owned diagnostics and any
+  future executable or Edge route remain outside application-owned sinks or
+  receive an equivalent reviewed structured boundary;
 - intent and quote correlation using their actual future domain types rather
   than synthetic stand-ins; transaction and `ledgerEventId` now use KAN-43's
   real ledger types in the local trace;

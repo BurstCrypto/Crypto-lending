@@ -274,7 +274,13 @@ describe('SQS retry and dead-letter flow', () => {
     );
     for (const prohibited of LOGGING_PROHIBITED_VALUES) {
       expect(
-        JSON.stringify({ observedContexts, firstAttempt, secondAttempt, terminalAttempt }),
+        JSON.stringify({
+          observedContexts,
+          firstAttempt,
+          secondAttempt,
+          terminalAttempt,
+          telemetry,
+        }),
       ).not.toContain(prohibited);
     }
     const records = lines.map((line) => JSON.parse(line) as StructuredLogRecord);

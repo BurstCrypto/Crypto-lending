@@ -229,7 +229,9 @@ describe('correlated HTTP logging (e2e)', () => {
       ]);
       expect(Object.keys(record).filter((field) => !allowedFields.has(field))).toEqual([]);
     }
-    const captured = `${JSON.stringify(response.body)}\n${lines.join('\n')}`;
+    const captured = `${JSON.stringify(response.body)}\n${JSON.stringify(
+      observability.dashboardSnapshot(),
+    )}\n${lines.join('\n')}`;
     for (const prohibited of LOGGING_PROHIBITED_VALUES) {
       expect(captured).not.toContain(prohibited);
     }
