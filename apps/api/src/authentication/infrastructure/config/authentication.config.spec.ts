@@ -58,6 +58,7 @@ describe('authentication configuration', () => {
     expect(config.mode).toBe('oidc');
     if (config.mode !== 'oidc') throw new Error('Expected OIDC configuration');
     expect(config).toMatchObject({
+      localDemo: false,
       providerKey: 'primary',
       issuer: 'https://identity.example.test/tenant',
       signingAlgorithm: 'RS256',
@@ -123,6 +124,83 @@ describe('authentication configuration', () => {
 
     environment.NODE_ENV = 'production';
     expect(() => loadAuthenticationConfig(environment)).toThrow(AuthenticationConfigurationError);
+  });
+
+  it('accepts the one exact loopback demo composition only behind the explicit guard', () => {
+    const environment = oidcEnvironment();
+    Object.assign(environment, {
+      NODE_ENV: 'development',
+      API_HOST: '127.0.0.1',
+      LOCAL_DEMO_MODE: 'enabled',
+      OIDC_PROVIDER_KEY: 'local_demo',
+      OIDC_ISSUER_URL: 'http://127.0.0.1:3400/local-demo',
+      OIDC_AUTHORIZATION_ENDPOINT: 'http://127.0.0.1:3400/authorize',
+      OIDC_TOKEN_ENDPOINT: 'http://127.0.0.1:3400/token',
+      OIDC_JWKS_URI: 'http://127.0.0.1:3400/jwks.json',
+      OIDC_CLIENT_ID: 'crypto-lending-local-demo',
+      OIDC_AUDIENCE: 'crypto-lending-local-demo',
+      OIDC_TOKEN_AUTH_METHOD: 'none',
+      AUTH_PUBLIC_ORIGIN: 'http://127.0.0.1:3000',
+      OIDC_REDIRECT_URI: 'http://127.0.0.1:3000/api/v1/auth/callback',
+    });
+    delete environment.OIDC_CLIENT_SECRET;
+
+    expect(loadAuthenticationConfig(environment)).toMatchObject({
+      mode: 'oidc',
+      localDemo: true,
+      providerKey: 'local_demo',
+      publicOrigin: 'http://127.0.0.1:3000',
+    });
+  });
+
+  it.each([
+    ['NODE_ENV', 'production'],
+    ['API_HOST', '0.0.0.0'],
+    ['AUTH_MODE', 'disabled'],
+    ['OIDC_PROVIDER_KEY', 'primary'],
+    ['OIDC_ISSUER_URL', 'http://localhost:3400/local-demo'],
+    ['OIDC_AUTHORIZATION_ENDPOINT', 'https://127.0.0.1:3400/authorize'],
+    ['OIDC_TOKEN_ENDPOINT', 'http://127.0.0.1:3401/token'],
+    ['OIDC_JWKS_URI', 'http://127.0.0.1:3400/other.json'],
+    ['OIDC_CLIENT_ID', 'another-client'],
+    ['OIDC_AUDIENCE', 'another-audience'],
+    ['OIDC_TOKEN_AUTH_METHOD', 'client_secret_basic'],
+    ['AUTH_PUBLIC_ORIGIN', 'http://localhost:3000'],
+    ['OIDC_REDIRECT_URI', 'http://127.0.0.1:3000/api/v1/other'],
+  ])('rejects local demo configuration drift in %s', (field, value) => {
+    const environment = oidcEnvironment();
+    Object.assign(environment, {
+      NODE_ENV: 'development',
+      API_HOST: '127.0.0.1',
+      LOCAL_DEMO_MODE: 'enabled',
+      OIDC_PROVIDER_KEY: 'local_demo',
+      OIDC_ISSUER_URL: 'http://127.0.0.1:3400/local-demo',
+      OIDC_AUTHORIZATION_ENDPOINT: 'http://127.0.0.1:3400/authorize',
+      OIDC_TOKEN_ENDPOINT: 'http://127.0.0.1:3400/token',
+      OIDC_JWKS_URI: 'http://127.0.0.1:3400/jwks.json',
+      OIDC_CLIENT_ID: 'crypto-lending-local-demo',
+      OIDC_AUDIENCE: 'crypto-lending-local-demo',
+      OIDC_TOKEN_AUTH_METHOD: 'none',
+      AUTH_PUBLIC_ORIGIN: 'http://127.0.0.1:3000',
+      OIDC_REDIRECT_URI: 'http://127.0.0.1:3000/api/v1/auth/callback',
+    });
+    delete environment.OIDC_CLIENT_SECRET;
+    environment[field] = value;
+    if (field === 'OIDC_TOKEN_AUTH_METHOD') {
+      environment.OIDC_CLIENT_SECRET = 'local-demo-must-not-use-a-secret';
+    }
+    expect(() => loadAuthenticationConfig(environment)).toThrow(AuthenticationConfigurationError);
+  });
+
+  it('rejects malformed local demo modes even when authentication is otherwise disabled', () => {
+    expect(() =>
+      loadAuthenticationConfig({
+        NODE_ENV: 'development',
+        API_HOST: '127.0.0.1',
+        AUTH_MODE: 'disabled',
+        LOCAL_DEMO_MODE: 'true',
+      }),
+    ).toThrow(AuthenticationConfigurationError);
   });
 
   it('requires distinct key identifiers and material and ordered session TTLs', () => {
