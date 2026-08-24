@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "rows": [
+    {
+      "id": "00000000-0000-4000-8000-000000000010",
+      "queueName": "jobs",
+      "payload": {
+        "id": "00000000-0000-4000-8000-000000000010",
+        "kind": "ledger.journal-committed",
+        "version": 1,
+        "occurredAt": "2026-08-21T20:00:00.000Z",
+        "correlation": {
+          "correlationId": "00000000-0000-4000-8000-000000000001"
+        },
+        "payload": {
+          "journalId": "00000000-0000-4000-8000-000000000011"
+        }
+      },
+      "messageAttributes": {}
+    },
+    {
+      "id": "legacy-seven-attributes",
+      "queueName": "jobs",
+      "payload": {
+        "id": "legacy-seven-attributes",
+        "kind": "legacy.sample",
+        "version": 1,
+        "occurredAt": "2026-08-21T20:00:00.000Z",
+        "payload": {}
+      },
+      "messageAttributes": {
+        "custom.0": "zero",
+        "custom.1": "one",
+        "custom.2": "two",
+        "custom.3": "three",
+        "custom.4": "four",
+        "custom.5": "five",
+        "custom.6": "six"
+      }
+    },
+    {
+      "id": "legacy-correlation-collision",
+      "queueName": "jobs",
+      "payload": {
+        "id": "legacy-correlation-collision",
+        "kind": "legacy.sample",
+        "version": 1,
+        "occurredAt": "2026-08-21T20:00:00.000Z",
+        "payload": {}
+      },
+      "messageAttributes": {
+        "CorrelationId": "caller-controlled-root"
+      }
+    }
+  ]
+}
