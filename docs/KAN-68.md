@@ -15,8 +15,9 @@ loan, transfer, route, or other financial action.
 
 ## Calculation contract
 
-The calculator accepts at most 128 normalized contributions. Every contribution
-is bound to an opaque contribution, wallet, network, and asset ID; an exact
+The calculator accepts at most 512 normalized contributions, matching KAN-67's
+closed balance-snapshot bound. Every contribution is bound to an opaque
+contribution, wallet, network, and asset ID; an exact
 non-negative USD mantissa at scale 18 (or explicit `null`); upstream freshness;
 valuation-use state; and a canonical source timestamp. Duplicate contribution
 IDs, future source timestamps, extra fields, accessors, noncanonical numbers,

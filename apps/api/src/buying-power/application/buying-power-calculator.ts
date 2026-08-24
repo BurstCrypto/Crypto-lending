@@ -23,7 +23,9 @@ import type {
   BuyingPowerClockPort,
 } from './ports/buying-power-adjustment.ports';
 
-const MAX_CONTRIBUTIONS = 128;
+// Match BAL-002's closed 512-observation snapshot bound so every valid KAN-67
+// source can be mapped one-for-one without widening either trust boundary.
+const MAX_CONTRIBUTIONS = 512;
 const MAX_IDENTIFIER_LENGTH = 256;
 const SAFE_IDENTIFIER = /^[\x21-\x7e]+$/u;
 const CANONICAL_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;

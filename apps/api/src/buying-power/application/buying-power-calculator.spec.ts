@@ -342,6 +342,32 @@ describe('BuyingPowerCalculator', () => {
     expect(adjustments.requests).toEqual([]);
   });
 
+  it("accepts KAN-67's 512-source bound and rejects one source above it", async () => {
+    const adjustments = new FakeAdjustmentPort();
+    const atBound = Array.from({ length: 512 }, (_, index) =>
+      contribution(`source-${index}`, 1, { freshness: 'STALE' }),
+    );
+
+    const result = await calculator(adjustments).calculate(request(atBound));
+
+    expect(result).toMatchObject({
+      supportedPortfolioValueMantissa: usd(512),
+      eligibleGrossValueMantissa: '0',
+      availableBuyingPowerUsdMantissa: '0',
+      availability: 'UNAVAILABLE',
+      unavailableReasons: ['STALE_DATA'],
+    });
+    expect(result.contributions).toHaveLength(512);
+    expect(adjustments.requests).toEqual([]);
+
+    await expect(
+      calculator(adjustments).calculate(
+        request([...atBound, contribution('source-512', 1, { freshness: 'STALE' })]),
+      ),
+    ).rejects.toEqual(new BuyingPowerCalculationError('INVALID_REQUEST'));
+    expect(adjustments.requests).toEqual([]);
+  });
+
   it('fails closed when the trusted clock is malformed or unavailable', async () => {
     for (const now of [
       () => 'not-a-time',
