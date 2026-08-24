@@ -117,12 +117,15 @@ export function parseIndexedPortfolioBalanceSnapshot(
   evaluatedAtInput: unknown,
 ): IndexedPortfolioBalanceSnapshot {
   const evaluatedAt = canonicalTimestamp(evaluatedAtInput);
-  const record = dataRecord(value, ['snapshotId', 'capturedAt', 'observations']);
+  const record = dataRecord(value, ['snapshotId', 'capturedAt', 'freshnessClass', 'observations']);
   if (typeof record.snapshotId !== 'string' || !SAFE_SNAPSHOT_ID.test(record.snapshotId)) {
     return fail('INVALID_SNAPSHOT');
   }
   const capturedAt = canonicalTimestamp(record.capturedAt);
   if (capturedAt > evaluatedAt) return fail('INVALID_SNAPSHOT');
+  if (record.freshnessClass !== 'CURRENT' && record.freshnessClass !== 'STALE') {
+    return fail('INVALID_SNAPSHOT');
+  }
   if (
     !Array.isArray(record.observations) ||
     record.observations.length > MAX_BALANCE_OBSERVATIONS
@@ -130,7 +133,12 @@ export function parseIndexedPortfolioBalanceSnapshot(
     return fail('INVALID_SNAPSHOT');
   }
 
-  const observations = record.observations.map(parseObservation);
+  const observations = record.observations.map((observation) => {
+    const parsed = parseObservation(observation);
+    return record.freshnessClass === 'STALE' && parsed.freshnessClass === 'CURRENT'
+      ? { ...parsed, freshnessClass: 'STALE' as const }
+      : parsed;
+  });
   const observationIds = new Set<string>();
   const balanceSources = new Set<string>();
   for (const observation of observations) {
@@ -147,6 +155,7 @@ export function parseIndexedPortfolioBalanceSnapshot(
   return {
     snapshotId: record.snapshotId,
     capturedAt,
+    freshnessClass: record.freshnessClass,
     observations,
   };
 }

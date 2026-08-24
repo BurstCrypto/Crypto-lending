@@ -10,6 +10,7 @@ function snapshot(): IndexedPortfolioBalanceSnapshot {
   return {
     snapshotId: 'idx5-snapshot-42',
     capturedAt: '2026-08-24T17:59:59.000Z',
+    freshnessClass: 'CURRENT',
     observations: [
       {
         observationId: '11111111-1111-4111-8111-111111111111',
@@ -136,5 +137,17 @@ describe('indexed portfolio balance snapshot', () => {
     mutable.amountAtomic = '9999999999';
 
     expect(parsed.observations[0]?.amountAtomic).toBe('5000000000');
+  });
+
+  it('downgrades every row when the account snapshot itself is stale', () => {
+    const parsed = parseIndexedPortfolioBalanceSnapshot(
+      { ...snapshot(), freshnessClass: 'STALE' },
+      EVALUATED_AT,
+    );
+
+    expect(parsed.freshnessClass).toBe('STALE');
+    expect(parsed.observations.every(({ freshnessClass }) => freshnessClass === 'STALE')).toBe(
+      true,
+    );
   });
 });

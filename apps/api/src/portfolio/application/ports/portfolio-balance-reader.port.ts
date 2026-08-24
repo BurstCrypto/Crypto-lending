@@ -21,6 +21,7 @@ export interface IndexedPortfolioBalanceObservation {
 export interface IndexedPortfolioBalanceSnapshot {
   readonly snapshotId: string;
   readonly capturedAt: string;
+  readonly freshnessClass: IndexedBalanceFreshness;
   readonly observations: readonly IndexedPortfolioBalanceObservation[];
 }
 
