@@ -291,6 +291,9 @@ export class EvmStablecoinBalanceIndexer {
           this.config.retryBaseDelayMs * 2 ** (attempt - 1),
           this.config.retryMaxDelayMs,
         );
+        if (error.retryAfterMs !== undefined && error.retryAfterMs > this.config.retryMaxDelayMs) {
+          throw indexerError('RATE_LIMIT_DELAY_EXCEEDS_BOUND');
+        }
         let jitterMs: number;
         try {
           jitterMs = this.retryScheduler.nextJitterMs(maximumJitterMs);
@@ -299,9 +302,6 @@ export class EvmStablecoinBalanceIndexer {
         }
         if (!Number.isSafeInteger(jitterMs) || jitterMs < 0 || jitterMs > maximumJitterMs) {
           throw indexerError('INVALID_RETRY_JITTER');
-        }
-        if (error.retryAfterMs !== undefined && error.retryAfterMs > this.config.retryMaxDelayMs) {
-          throw indexerError('RATE_LIMIT_DELAY_EXCEEDS_BOUND');
         }
         const delayMs = Math.max(jitterMs, error.retryAfterMs ?? 0);
         try {
