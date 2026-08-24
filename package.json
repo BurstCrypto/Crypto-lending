@@ -14,6 +14,8 @@
   "scripts": {
     "dev:web": "npm run dev --workspace @crypto-lending/web",
     "dev:local-demo:idp": "node tools/local-demo/identity-provider.mjs",
+    "demo:local": "node tools/local-demo/start.mjs",
+    "demo:local:teardown": "node tools/local-demo/teardown.mjs",
     "dev:wallet-lab": "npm --prefix tools/wallet-lab run dev",
     "lint:wallet-lab": "npm --prefix tools/wallet-lab run lint",
     "typecheck:wallet-lab": "npm --prefix tools/wallet-lab run typecheck",

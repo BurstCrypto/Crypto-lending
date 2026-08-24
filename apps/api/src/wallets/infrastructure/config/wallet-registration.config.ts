@@ -147,6 +147,15 @@ export function loadWalletRegistrationConfig(
   }
 
   if (environment.AUTH_MODE !== 'oidc') return fail('AUTH_MODE');
+  const localDemo = environment.LOCAL_DEMO_MODE === 'enabled';
+  if (
+    localDemo &&
+    ((environment.NODE_ENV !== 'development' && environment.NODE_ENV !== 'test') ||
+      environment.API_HOST !== '127.0.0.1' ||
+      environment.AUTH_PUBLIC_ORIGIN !== 'http://127.0.0.1:3000')
+  ) {
+    return fail('LOCAL_DEMO_MODE');
+  }
 
   const identityHmacKey = walletKey(
     environment,
@@ -180,7 +189,7 @@ export function loadWalletRegistrationConfig(
     mode: 'enabled',
     publicOrigin: exactPublicOrigin(
       required(environment, 'AUTH_PUBLIC_ORIGIN'),
-      environment.NODE_ENV === 'test',
+      environment.NODE_ENV === 'test' || localDemo,
     ),
     registryEnvironment: registryEnvironment(
       required(environment, 'WALLET_REGISTRATION_REGISTRY_ENVIRONMENT'),

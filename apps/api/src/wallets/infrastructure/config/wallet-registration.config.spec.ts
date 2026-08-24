@@ -43,6 +43,30 @@ describe('wallet registration configuration', () => {
     expect(config.metadataSealKey).toEqual({ purpose: 'metadata-seal', version: 1 });
   });
 
+  it('permits the exact development loopback origin only in guarded local demo mode', () => {
+    const environment = enabledEnvironment();
+    Object.assign(environment, {
+      NODE_ENV: 'development',
+      API_HOST: '127.0.0.1',
+      LOCAL_DEMO_MODE: 'enabled',
+    });
+    expect(loadWalletRegistrationConfig(environment)).toMatchObject({
+      mode: 'enabled',
+      publicOrigin: 'http://127.0.0.1:3000',
+    });
+
+    for (const [name, value] of [
+      ['NODE_ENV', 'production'],
+      ['API_HOST', '0.0.0.0'],
+      ['AUTH_PUBLIC_ORIGIN', 'http://localhost:3000'],
+    ] as const) {
+      const invalid = { ...environment, [name]: value };
+      expect(() => loadWalletRegistrationConfig(invalid)).toThrow(
+        WalletRegistrationConfigurationError,
+      );
+    }
+  });
+
   it('requires HTTPS outside tests and only permits an exact loopback HTTP test origin', () => {
     const production = enabledEnvironment();
     production.NODE_ENV = 'production';
