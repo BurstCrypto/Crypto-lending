@@ -44,6 +44,7 @@ function configuration(
 ): WalletConnectLocalConfiguration {
   return {
     mode: 'deterministic-local',
+    runtimeEnvironment: 'test',
     transportBoundary: WALLETCONNECT_LOCAL_TRANSPORT_BOUNDARY,
     connectorId: 'walletconnect',
     namespace: 'eip155',
@@ -575,5 +576,110 @@ describe('local WalletConnect connector lifecycle', () => {
     connected.connector.subscribe((event) => observed.push(event));
     connected.transport.emit({ type: 'sessionExpired', topic: 'session-topic-1' });
     expect(observed).toHaveLength(1);
+  });
+
+  it('rejects raw provider attempts and malformed pairing values before presentation', async () => {
+    for (const candidate of [
+      {
+        pairingUri: PAIRING_URI,
+        expiresAtMs: NOW + 30_000,
+        approval: Promise.resolve(session()),
+        cancel: async () => undefined,
+        rawProvider: { projectId: 'must-not-cross-boundary' },
+      },
+      {
+        pairingUri: `https://relay.example/${PAIRING_URI}`,
+        expiresAtMs: NOW + 30_000,
+        approval: Promise.resolve(session()),
+        cancel: async () => undefined,
+      },
+    ]) {
+      const testFixture = fixture();
+      testFixture.transport.connect = vi.fn(async () => candidate as never);
+
+      let captured: unknown;
+      try {
+        await testFixture.connector.connect();
+      } catch (error) {
+        captured = error;
+      }
+      expect(captured).toMatchObject({ code: 'PAIRING_INVALID' });
+      expect(String(captured)).not.toContain(PAIRING_URI);
+      expect(testFixture.presenter.shown).toEqual([]);
+      expect(testFixture.connector.getState()).toEqual({ phase: 'idle' });
+    }
+  });
+
+  it('rejects missing or expanded dependency configuration before invoking a factory', () => {
+    const transport = new FakeTransport();
+    const factory = new FakeFactory(transport);
+    const presenter = new EphemeralPresenter();
+
+    expect(() => createLocalWalletConnectConnector(configuration(), undefined as never)).toThrow(
+      'configuration is invalid',
+    );
+    expect(() =>
+      createLocalWalletConnectConnector(configuration(), {
+        factory,
+        pairingPresenter: presenter,
+        projectId: 'not-authorized',
+      } as never),
+    ).toThrow('configuration is invalid');
+    expect(factory.creates).toBe(0);
+  });
+
+  it('contains factory failures without copying a raw error or cause', async () => {
+    const presenter = new EphemeralPresenter();
+    const connector = createLocalWalletConnectConnector(configuration(), {
+      factory: {
+        boundary: WALLETCONNECT_LOCAL_TRANSPORT_BOUNDARY,
+        create: async () => {
+          throw new Error(`factory failed ${PAIRING_URI}`);
+        },
+      },
+      pairingPresenter: presenter,
+      now: () => NOW,
+    });
+
+    let captured: unknown;
+    try {
+      await connector.connect();
+    } catch (error) {
+      captured = error;
+    }
+    expect(captured).toMatchObject({ code: 'TRANSPORT_UNAVAILABLE' });
+    expect(captured).not.toHaveProperty('cause');
+    expect(String(captured)).not.toContain(PAIRING_URI);
+    expect(connector.getState()).toEqual({ phase: 'idle' });
+  });
+
+  it('rejects signature accessors and provider metadata without reading or returning them', async () => {
+    const { connector, transport, connection } = await connectFixture();
+    const issuedChallenge = challenge(connection);
+    let getterReads = 0;
+    transport.signature = Object.defineProperty({}, 'format', {
+      enumerable: true,
+      get: () => {
+        getterReads += 1;
+        return 'siwe';
+      },
+    });
+
+    await expect(
+      connector.signOwnershipChallenge(connection.connectionId, issuedChallenge),
+    ).rejects.toMatchObject({ code: 'OWNERSHIP_INVALID' });
+    expect(getterReads).toBe(0);
+
+    transport.signature = {
+      format: 'siwe',
+      challengeId: issuedChallenge.id,
+      chainId: issuedChallenge.chainId,
+      address: issuedChallenge.address,
+      signature: '0xdeterministic-signature',
+      providerResponse: `private ${PAIRING_URI}`,
+    };
+    await expect(
+      connector.signOwnershipChallenge(connection.connectionId, issuedChallenge),
+    ).rejects.toMatchObject({ code: 'OWNERSHIP_INVALID' });
   });
 });

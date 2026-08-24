@@ -13,6 +13,7 @@ const pairingUri = `wc:pairing-topic@2?symKey=${'a'.repeat(64)}&relay-protocol=i
 function configuration(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     mode: 'deterministic-local',
+    runtimeEnvironment: 'test',
     transportBoundary: WALLETCONNECT_LOCAL_TRANSPORT_BOUNDARY,
     connectorId: 'walletconnect',
     namespace: 'eip155',
@@ -37,6 +38,7 @@ describe('local WalletConnect configuration', () => {
 
     expect(parsed).toMatchObject({
       mode: 'deterministic-local',
+      runtimeEnvironment: 'test',
       connectorId: 'walletconnect',
       namespace: 'eip155',
       pairingTimeoutMs: 60_000,
@@ -49,6 +51,7 @@ describe('local WalletConnect configuration', () => {
   it('rejects disabled, vendor, relay, credential, and accessor configuration', () => {
     for (const invalid of [
       configuration({ mode: 'disabled' }),
+      configuration({ runtimeEnvironment: 'production' }),
       configuration({ transportBoundary: 'VENDOR_SDK' }),
       { ...configuration(), projectId: 'external-project' },
       { ...configuration(), relayUrl: 'https://relay.example' },
@@ -80,6 +83,19 @@ describe('local WalletConnect configuration', () => {
     expect(() =>
       parseWalletConnectLocalConfiguration(
         configuration({ requiredMethods: ['personal_sign', 'personal_sign'] }),
+      ),
+    ).toThrow('configuration is invalid');
+    expect(() =>
+      parseWalletConnectLocalConfiguration(
+        configuration({
+          deepLinks: [
+            {
+              walletId: 'live-host',
+              baseUrl: 'https://wallet.vendor.com/connect',
+              pairingUriParameter: 'uri',
+            },
+          ],
+        }),
       ),
     ).toThrow('configuration is invalid');
     expect(() =>

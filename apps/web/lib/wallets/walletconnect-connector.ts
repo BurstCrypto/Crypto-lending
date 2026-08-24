@@ -43,6 +43,7 @@ export interface WalletConnectDeepLinkConfiguration {
 
 export interface WalletConnectLocalConfiguration {
   readonly mode: 'deterministic-local';
+  readonly runtimeEnvironment: 'local' | 'test';
   readonly transportBoundary: typeof WALLETCONNECT_LOCAL_TRANSPORT_BOUNDARY;
   readonly connectorId: typeof CONNECTOR_ID;
   readonly namespace: WalletNamespace;
@@ -286,6 +287,15 @@ function parseDeepLink(value: unknown): WalletConnectDeepLinkConfiguration {
   ) {
     throw new WalletConnectConnectorError('CONFIGURATION_INVALID');
   }
+  const hostname = parsed.hostname.toLowerCase();
+  if (
+    hostname !== 'localhost' &&
+    hostname !== '127.0.0.1' &&
+    !hostname.endsWith('.example') &&
+    !hostname.endsWith('.invalid')
+  ) {
+    throw new WalletConnectConnectorError('CONFIGURATION_INVALID');
+  }
 
   return Object.freeze({ walletId, baseUrl: parsed.toString(), pairingUriParameter });
 }
@@ -298,6 +308,7 @@ export function parseWalletConnectLocalConfiguration(
   }
   assertExactKeys(value, [
     'mode',
+    'runtimeEnvironment',
     'transportBoundary',
     'connectorId',
     'namespace',
@@ -309,12 +320,14 @@ export function parseWalletConnectLocalConfiguration(
   ]);
 
   const mode = ownDataValue(value, 'mode');
+  const runtimeEnvironment = ownDataValue(value, 'runtimeEnvironment');
   const transportBoundary = ownDataValue(value, 'transportBoundary');
   const connectorId = ownDataValue(value, 'connectorId');
   const namespace = ownDataValue(value, 'namespace');
   const pairingTimeoutMs = ownDataValue(value, 'pairingTimeoutMs');
   if (
     mode !== 'deterministic-local' ||
+    (runtimeEnvironment !== 'local' && runtimeEnvironment !== 'test') ||
     transportBoundary !== WALLETCONNECT_LOCAL_TRANSPORT_BOUNDARY ||
     connectorId !== CONNECTOR_ID ||
     (namespace !== 'eip155' && namespace !== 'solana') ||
@@ -352,6 +365,7 @@ export function parseWalletConnectLocalConfiguration(
 
   return Object.freeze({
     mode,
+    runtimeEnvironment,
     transportBoundary,
     connectorId,
     namespace,
@@ -560,18 +574,126 @@ function normalizeFailure(error: unknown): WalletConnectConnectorError {
 
 function validateAttempt(value: unknown): asserts value is WalletConnectPairingAttempt {
   if (!isRecord(value)) throw new WalletConnectConnectorError('PAIRING_INVALID');
+  const actualKeys = Object.keys(value).sort();
+  const expectedKeys = ['pairingUri', 'expiresAtMs', 'approval', 'cancel'].sort();
+  if (
+    actualKeys.length !== expectedKeys.length ||
+    actualKeys.some((key, index) => key !== expectedKeys[index])
+  ) {
+    throw new WalletConnectConnectorError('PAIRING_INVALID');
+  }
   const pairingUri = ownDataValue(value, 'pairingUri', 'PAIRING_INVALID');
   const expiresAtMs = ownDataValue(value, 'expiresAtMs', 'PAIRING_INVALID');
   const approval = ownDataValue(value, 'approval', 'PAIRING_INVALID');
+  const cancel = ownDataValue(value, 'cancel', 'PAIRING_INVALID');
   assertPairingUri(pairingUri);
   if (
     !Number.isSafeInteger(expiresAtMs) ||
     typeof expiresAtMs !== 'number' ||
     typeof (approval as { then?: unknown } | null)?.then !== 'function' ||
-    typeof value.cancel !== 'function'
+    typeof cancel !== 'function'
   ) {
     throw new WalletConnectConnectorError('PAIRING_INVALID');
   }
+}
+
+function signatureDataValue(record: Record<string, unknown>, key: string): unknown {
+  const descriptor = Object.getOwnPropertyDescriptor(record, key);
+  if (descriptor === undefined || !('value' in descriptor)) {
+    throw new WalletConnectConnectorError('OWNERSHIP_INVALID');
+  }
+  return descriptor.value;
+}
+
+function assertSignatureKeys(
+  record: Record<string, unknown>,
+  required: readonly string[],
+  optional: readonly string[] = [],
+): void {
+  const keys = Object.keys(record);
+  if (
+    required.some((key) => !keys.includes(key)) ||
+    keys.some((key) => !required.includes(key) && !optional.includes(key))
+  ) {
+    throw new WalletConnectConnectorError('OWNERSHIP_INVALID');
+  }
+}
+
+function copyWalletBytes(value: unknown): Uint8Array {
+  const isUint8Array =
+    ArrayBuffer.isView(value) &&
+    Object.prototype.toString.call(value) === '[object Uint8Array]' &&
+    (value as Uint8Array).BYTES_PER_ELEMENT === 1;
+  if (!isUint8Array) throw new WalletConnectConnectorError('OWNERSHIP_INVALID');
+  return Uint8Array.from(value as Uint8Array);
+}
+
+function normalizeOwnershipSignature(
+  value: unknown,
+  challenge: OwnershipChallenge,
+): OwnershipSignature {
+  if (!isRecord(value)) throw new WalletConnectConnectorError('OWNERSHIP_INVALID');
+  const format = signatureDataValue(value, 'format');
+  const commonKeys = ['format', 'challengeId', 'chainId', 'address'];
+  const common = {
+    challengeId: signatureDataValue(value, 'challengeId'),
+    chainId: signatureDataValue(value, 'chainId'),
+    address: signatureDataValue(value, 'address'),
+  };
+
+  let candidate: OwnershipSignature;
+  if (format === 'siwe') {
+    assertSignatureKeys(value, [...commonKeys, 'signature']);
+    candidate = Object.freeze({
+      format,
+      ...common,
+      signature: signatureDataValue(value, 'signature'),
+    }) as OwnershipSignature;
+  } else if (format === 'siws-message') {
+    assertSignatureKeys(value, [...commonKeys, 'signedMessage', 'signature'], ['signatureType']);
+    const signatureType = Object.hasOwn(value, 'signatureType')
+      ? { signatureType: signatureDataValue(value, 'signatureType') }
+      : {};
+    candidate = Object.freeze({
+      format,
+      ...common,
+      signedMessage: copyWalletBytes(signatureDataValue(value, 'signedMessage')),
+      signature: copyWalletBytes(signatureDataValue(value, 'signature')),
+      ...signatureType,
+    }) as OwnershipSignature;
+  } else if (format === 'siws-sign-in') {
+    assertSignatureKeys(
+      value,
+      [...commonKeys, 'account', 'signedMessage', 'signature'],
+      ['signatureType'],
+    );
+    const account = signatureDataValue(value, 'account');
+    if (!isRecord(account)) throw new WalletConnectConnectorError('OWNERSHIP_INVALID');
+    assertSignatureKeys(account, ['address', 'publicKey']);
+    const signatureType = Object.hasOwn(value, 'signatureType')
+      ? { signatureType: signatureDataValue(value, 'signatureType') }
+      : {};
+    candidate = Object.freeze({
+      format,
+      ...common,
+      account: Object.freeze({
+        address: signatureDataValue(account, 'address'),
+        publicKey: copyWalletBytes(signatureDataValue(account, 'publicKey')),
+      }),
+      signedMessage: copyWalletBytes(signatureDataValue(value, 'signedMessage')),
+      signature: copyWalletBytes(signatureDataValue(value, 'signature')),
+      ...signatureType,
+    }) as OwnershipSignature;
+  } else {
+    throw new WalletConnectConnectorError('OWNERSHIP_INVALID');
+  }
+
+  try {
+    assertOwnershipSignatureMatchesChallenge(candidate, challenge);
+  } catch {
+    throw new WalletConnectConnectorError('OWNERSHIP_INVALID');
+  }
+  return candidate;
 }
 
 export class LocalWalletConnectConnector implements WalletConnectAdapter {
@@ -592,22 +714,42 @@ export class LocalWalletConnectConnector implements WalletConnectAdapter {
 
   constructor(configuration: unknown, dependencies: WalletConnectConnectorDependencies) {
     this.configuration = parseWalletConnectLocalConfiguration(configuration);
-    assertLocalWalletConnectFactory(dependencies.factory);
+    if (!isRecord(dependencies)) {
+      throw new WalletConnectConnectorError('CONFIGURATION_INVALID');
+    }
+    const dependencyKeys = Object.keys(dependencies);
     if (
-      !isRecord(dependencies.pairingPresenter) ||
-      typeof dependencies.pairingPresenter.show !== 'function' ||
-      typeof dependencies.pairingPresenter.clear !== 'function' ||
-      (dependencies.now !== undefined && typeof dependencies.now !== 'function') ||
-      (dependencies.createConnectionId !== undefined &&
-        typeof dependencies.createConnectionId !== 'function')
+      dependencyKeys.some(
+        (key) =>
+          key !== 'factory' &&
+          key !== 'pairingPresenter' &&
+          key !== 'now' &&
+          key !== 'createConnectionId',
+      )
     ) {
       throw new WalletConnectConnectorError('CONFIGURATION_INVALID');
     }
-    this.factory = dependencies.factory;
-    this.pairingPresenter = dependencies.pairingPresenter;
-    this.now = dependencies.now ?? Date.now;
+    const factory = ownDataValue(dependencies, 'factory');
+    const pairingPresenter = ownDataValue(dependencies, 'pairingPresenter');
+    const now = Object.hasOwn(dependencies, 'now') ? ownDataValue(dependencies, 'now') : undefined;
+    const createConnectionId = Object.hasOwn(dependencies, 'createConnectionId')
+      ? ownDataValue(dependencies, 'createConnectionId')
+      : undefined;
+    assertLocalWalletConnectFactory(factory as WalletConnectTransportFactory);
+    if (
+      !isRecord(pairingPresenter) ||
+      typeof pairingPresenter.show !== 'function' ||
+      typeof pairingPresenter.clear !== 'function' ||
+      (now !== undefined && typeof now !== 'function') ||
+      (createConnectionId !== undefined && typeof createConnectionId !== 'function')
+    ) {
+      throw new WalletConnectConnectorError('CONFIGURATION_INVALID');
+    }
+    this.factory = factory as WalletConnectTransportFactory;
+    this.pairingPresenter = pairingPresenter as unknown as WalletConnectPairingPresenter;
+    this.now = (now as (() => number) | undefined) ?? Date.now;
     this.createConnectionId =
-      dependencies.createConnectionId ?? (() => globalThis.crypto.randomUUID());
+      (createConnectionId as (() => string) | undefined) ?? (() => globalThis.crypto.randomUUID());
     this.namespace = this.configuration.namespace;
   }
 
@@ -764,18 +906,13 @@ export class LocalWalletConnectConnector implements WalletConnectAdapter {
     }
     assertOwnershipChallengeTargetsConnection(challenge, active.connection);
     const transport = await this.getTransport();
-    let signature: OwnershipSignature;
+    let signature: unknown;
     try {
       signature = await transport.signOwnershipChallenge(active.topic, challenge);
     } catch (error) {
       throw normalizeFailure(error);
     }
-    try {
-      assertOwnershipSignatureMatchesChallenge(signature, challenge);
-    } catch {
-      throw new WalletConnectConnectorError('OWNERSHIP_INVALID');
-    }
-    return signature;
+    return normalizeOwnershipSignature(signature, challenge);
   }
 
   subscribe(listener: (event: WalletEvent) => void): () => void {
