@@ -270,6 +270,8 @@ describe('PostgresYieldOperationRepository', () => {
       [],
       [{ ...row('SUBMITTED'), current_state: 'PENDING' }],
       [{ ...row('SUBMITTED'), submission_id: null }],
+      [{ ...row('SUBMITTED'), command_id: 'not-a-command-id' }],
+      [{ ...row('SUBMITTED'), ledger_transaction_id: 'not-a-ledger-id' }],
       [{ ...row('SUBMITTED'), provider_secret: 'must-not-pass' }],
     ] as QueryResultRow[][]) {
       const { query, repository } = setup();

@@ -487,7 +487,7 @@ function createYieldOperationHelperFunctionsSql(): string {
         command_state.command_id,
         operation_state.operation_id,
         operation_state.operation_type,
-        operation_state.current_state,
+        transition_state.next_state AS current_state,
         operation_state.ledger_transaction_id,
         operation_state.plan_reference_id,
         operation_state.quote_reference_id,

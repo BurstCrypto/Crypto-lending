@@ -7,7 +7,11 @@ import {
   JOB_PUBLISHER,
   type JobPublisherPort,
 } from '../../infrastructure/outbox/job-publisher.port';
-import { parseLedgerActorAccountId, parseLedgerCorrelationId } from '../../ledger/domain/ledger';
+import {
+  parseLedgerActorAccountId,
+  parseLedgerCorrelationId,
+  parseLedgerTransactionId,
+} from '../../ledger/domain/ledger';
 import { LedgerLifecycleValidationError } from '../../ledger/domain/transaction-lifecycle';
 import type { YieldOperationRepository } from '../application/yield-operation.repository.port';
 import {
@@ -164,6 +168,7 @@ function returnedResult(rows: readonly YieldOperationResultRow[]): YieldOperatio
   const submission = read('submission_id');
   if (
     typeof commandId !== 'string' ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(commandId) ||
     (previousState !== null && typeof previousState !== 'string') ||
     typeof currentState !== 'string' ||
     typeof nextState !== 'string' ||
@@ -207,6 +212,7 @@ function returnedResult(rows: readonly YieldOperationResultRow[]): YieldOperatio
   }
   const actorAccountId = parseLedgerActorAccountId(read('actor_account_id'));
   const correlationId = parseLedgerCorrelationId(read('correlation_id'));
+  const canonicalLedgerTransactionId = parseLedgerTransactionId(ledgerTransactionId);
   const transitionRecord: YieldOperationTransitionRecord = Object.freeze({
     eventId: parseYieldTransitionEventId(read('transition_event_id')),
     operationId,
@@ -220,7 +226,7 @@ function returnedResult(rows: readonly YieldOperationResultRow[]): YieldOperatio
     ledgerTransactionId:
       'ledgerTransactionId' in transition
         ? transition.ledgerTransactionId
-        : (ledgerTransactionId as YieldOperationTransitionRecord['ledgerTransactionId']),
+        : canonicalLedgerTransactionId,
     ledgerJournalId: 'ledgerJournalId' in transition ? transition.ledgerJournalId : null,
   });
 

@@ -64,6 +64,17 @@ describe('createYieldOperationControlsMigration', () => {
     expect(sql).not.toMatch(/\n\s+idempotency_key\s+text/iu);
   });
 
+  it('replays the immutable command snapshot after later operation progress', () => {
+    const sql = joinedSql(createYieldOperationControlsMigrationV0012.upSql);
+    const resultProjection = sql.slice(
+      sql.indexOf('CREATE FUNCTION yield_operation_command_result'),
+      sql.indexOf('CREATE FUNCTION create_yield_operation'),
+    );
+
+    expect(resultProjection).toContain('transition_state.next_state AS current_state');
+    expect(resultProjection).not.toContain('operation_state.current_state');
+  });
+
   it('makes submit and its single outbox request one deferred atomic unit', () => {
     const sql = joinedSql(createYieldOperationControlsMigrationV0012.upSql);
 
