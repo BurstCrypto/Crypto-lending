@@ -219,8 +219,16 @@ function canonicalDate(value: unknown): Date {
   }
 }
 
-function dateFromTimestamp(value: LedgerTimestamp): Date {
-  return new Date(value);
+function timestampInput(value: unknown): Date {
+  try {
+    if (typeof value !== 'string') return invalid('INVALID_YIELD_OPERATION_INPUT');
+    const parsed = new Date(value);
+    if (parsed.toISOString() !== value) return invalid('INVALID_YIELD_OPERATION_INPUT');
+    return parsed;
+  } catch (error) {
+    if (error instanceof YieldOperationValidationError) throw error;
+    return invalid('INVALID_YIELD_OPERATION_INPUT');
+  }
 }
 
 function parseJournalReference(
@@ -282,7 +290,7 @@ export function normalizeCreateYieldOperationCommand(value: unknown): CreateYiel
     ledgerTransactionId: record.ledgerTransactionId,
     planReferenceId: record.planReferenceId,
     quoteReferenceId: record.quoteReferenceId,
-    effectiveAt: canonicalDate(record.effectiveAt),
+    effectiveAt: timestampInput(record.effectiveAt),
   });
   return Object.freeze({
     actorAccountId: parseLedgerActorAccountId(record.actorAccountId),
@@ -342,7 +350,7 @@ export function normalizeTransitionYieldOperationCommand(
     expectedState: record.expectedState,
     nextState: record.nextState,
     reason: record.reason,
-    effectiveAt: canonicalDate(record.effectiveAt),
+    effectiveAt: timestampInput(record.effectiveAt),
     ledgerJournalId: record.ledgerJournalId,
   });
   return Object.freeze({
@@ -361,7 +369,7 @@ export function createYieldOperationCommand(
     actorAccountId,
     correlationId,
     ...operation,
-    effectiveAt: dateFromTimestamp(operation.effectiveAt),
+    effectiveAt: operation.effectiveAt,
   });
 }
 
@@ -374,6 +382,6 @@ export function createTransitionYieldOperationCommand(
     actorAccountId,
     correlationId,
     ...transition,
-    effectiveAt: dateFromTimestamp(transition.effectiveAt),
+    effectiveAt: transition.effectiveAt,
   });
 }

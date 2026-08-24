@@ -18,7 +18,7 @@ const API_ROLE = 'crypto_api_runtime';
 const WORKER_ROLE = 'crypto_worker_runtime';
 const IDENTIFIER = /^[a-z][a-z0-9_]{0,62}$/u;
 const IMMUTABLE_LEDGER_MIGRATIONS = DATABASE_TEST_SCHEMA_MIGRATION_LIST.filter(
-  ({ id }) => id !== '0008' && id !== '0009' && id !== '0010' && id !== '0011',
+  ({ id }) => id !== '0008' && id !== '0009' && id !== '0010' && id !== '0011' && id !== '0012',
 );
 
 interface PostingFixture {

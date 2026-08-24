@@ -14,6 +14,7 @@ import {
   createLedgerCommandIdempotencyMigration,
   createLedgerLifecycleMigration,
   createWalletOwnershipRegistrationMigration,
+  createYieldOperationControlsMigration,
   DATABASE_TEST_SCHEMA_MIGRATION_LIST,
   type DatabaseMigration,
   type DatabasePrincipalNames,
@@ -63,7 +64,13 @@ function schemaMigrationsForIsolatedLegacyRole(
   // only inside this isolated test database so the suite never mutates the
   // cluster-global canonical crypto_runtime compatibility bridge.
   return DATABASE_TEST_SCHEMA_MIGRATION_LIST.filter(
-    ({ id }) => id !== '0007' && id !== '0008' && id !== '0009' && id !== '0010' && id !== '0011',
+    ({ id }) =>
+      id !== '0007' &&
+      id !== '0008' &&
+      id !== '0009' &&
+      id !== '0010' &&
+      id !== '0011' &&
+      id !== '0012',
   ).map((migration) =>
     migration.id === '0004'
       ? {
@@ -473,6 +480,7 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
       const idempotencyMigration = createLedgerCommandIdempotencyMigration(names);
       const authenticationMigration = createAuthenticationSessionsMigration(names);
       const walletRegistrationMigration = createWalletOwnershipRegistrationMigration(names);
+      const yieldOperationMigration = createYieldOperationControlsMigration(names);
       if (!principalMigration.verifySql) throw new Error('Principal migration must be verifiable');
       if (!ledgerMigration.verifySql) throw new Error('Ledger migration must be verifiable');
       if (!lifecycleMigration.verifySql) {
@@ -487,7 +495,10 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
       if (!walletRegistrationMigration.verifySql) {
         throw new Error('Wallet registration migration must be verifiable');
       }
-      const cumulativeVerifySql = walletRegistrationMigration.verifySql;
+      if (!yieldOperationMigration.verifySql) {
+        throw new Error('Yield operation migration must be verifiable');
+      }
+      const cumulativeVerifySql = yieldOperationMigration.verifySql;
       const migrations = [
         ...schemaMigrationsBeforePrincipalBoundary,
         principalMigration,
@@ -497,6 +508,7 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
         idempotencyMigration,
         authenticationMigration,
         walletRegistrationMigration,
+        yieldOperationMigration,
       ];
       const runner = new MigrationRunner(migrationPool, migrations);
 
@@ -513,7 +525,15 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
           },
         ],
       });
-      await expect(runner.up()).resolves.toEqual(['0005', '0007', '0008', '0009', '0010', '0011']);
+      await expect(runner.up()).resolves.toEqual([
+        '0005',
+        '0007',
+        '0008',
+        '0009',
+        '0010',
+        '0011',
+        '0012',
+      ]);
       await expect(runner.assertUpToDate()).resolves.toBeUndefined();
 
       await admin.query(
@@ -543,7 +563,7 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
           `REVOKE CONNECT ON DATABASE ${quoteIdentifier(database)} FROM ${quoteIdentifier(names.schemaOwnerRole)}`,
         );
         await expect(runner.assertUpToDate()).rejects.toThrow(
-          'Database migration 0011 schema verification failed',
+          'Database migration 0012 schema verification failed',
         );
       } finally {
         await terminateExactSessions(names.schemaOwnerRole);
@@ -844,7 +864,7 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
 
       await migrationPool.query('GRANT USAGE ON TYPE future_default_enum TO PUBLIC');
       await expect(apiRunner.assertUpToDate()).rejects.toThrow(
-        'Database migration 0011 schema verification failed',
+        'Database migration 0012 schema verification failed',
       );
       await migrationPool.query('REVOKE USAGE ON TYPE future_default_enum FROM PUBLIC');
       await expect(apiRunner.assertUpToDate()).resolves.toBeUndefined();
@@ -854,7 +874,7 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
       );
       try {
         await expect(apiRunner.assertUpToDate()).rejects.toThrow(
-          'Database migration 0011 schema verification failed',
+          'Database migration 0012 schema verification failed',
         );
       } finally {
         await migrationPool.query('DROP TABLE future_non_ledger_row_type_probe');
@@ -865,7 +885,7 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
         `GRANT SELECT (book_id) ON TABLE ledger_books TO ${quoteIdentifier(names.apiRuntimeRole)}`,
       );
       await expect(apiRunner.assertUpToDate()).rejects.toThrow(
-        'Database migration 0011 schema verification failed',
+        'Database migration 0012 schema verification failed',
       );
       await migrationPool.query(
         `REVOKE SELECT (book_id) ON TABLE ledger_books FROM ${quoteIdentifier(names.apiRuntimeRole)}`,
@@ -877,7 +897,7 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
          TO ${quoteIdentifier(names.apiRuntimeRole)}`,
       );
       await expect(apiRunner.assertUpToDate()).rejects.toThrow(
-        'Database migration 0011 schema verification failed',
+        'Database migration 0012 schema verification failed',
       );
       await migrationPool.query(
         `REVOKE EXECUTE ON FUNCTION compute_ledger_posting_plan_digest(uuid)
@@ -889,7 +909,7 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
         'GRANT USAGE, SELECT, UPDATE ON SEQUENCE future_default_sequence TO PUBLIC',
       );
       await expect(apiRunner.assertUpToDate()).rejects.toThrow(
-        'Database migration 0011 schema verification failed',
+        'Database migration 0012 schema verification failed',
       );
       await migrationPool.query(
         'REVOKE USAGE, SELECT, UPDATE ON SEQUENCE future_default_sequence FROM PUBLIC',
@@ -898,7 +918,7 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
 
       await migrationPool.query('GRANT INSERT (id) ON TABLE job_outbox TO PUBLIC');
       await expect(apiRunner.assertUpToDate()).rejects.toThrow(
-        'Database migration 0011 schema verification failed',
+        'Database migration 0012 schema verification failed',
       );
       await migrationPool.query('REVOKE INSERT (id) ON TABLE job_outbox FROM PUBLIC');
       await expect(apiRunner.assertUpToDate()).resolves.toBeUndefined();
@@ -913,7 +933,7 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
         `GRANT UPDATE ON TABLE accounts TO ${quoteIdentifier(names.apiRuntimeRole)}`,
       );
       await expect(apiRunner.assertUpToDate()).rejects.toThrow(
-        'Database migration 0011 schema verification failed',
+        'Database migration 0012 schema verification failed',
       );
       await migrationPool.query(
         `REVOKE UPDATE ON TABLE accounts FROM ${quoteIdentifier(names.apiRuntimeRole)}`,
@@ -933,7 +953,7 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
 
       await migrationPool.query('ALTER POLICY job_outbox_worker_delete ON job_outbox USING (true)');
       await expect(workerRunner.assertUpToDate()).rejects.toThrow(
-        'Database migration 0011 schema verification failed',
+        'Database migration 0012 schema verification failed',
       );
       await migrationPool.query(
         "ALTER POLICY job_outbox_worker_delete ON job_outbox USING (status IN ('published', 'failed'))",
@@ -945,7 +965,7 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
          WITH ADMIN FALSE, INHERIT FALSE, SET FALSE`,
       );
       await expect(apiRunner.assertUpToDate()).rejects.toThrow(
-        'Database migration 0011 schema verification failed',
+        'Database migration 0012 schema verification failed',
       );
       await admin.query(
         `REVOKE ${quoteIdentifier(outsider)} FROM ${quoteIdentifier(names.legacyRuntimeRole)}`,
@@ -1110,7 +1130,7 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
       const pendingMigrations = [
         ...migrations,
         {
-          id: '0012',
+          id: '0013',
           description: 'synthetic runtime migration denial',
           upSql: 'CREATE TABLE runtime_migration_escape(id integer)',
           downSql: 'DROP TABLE runtime_migration_escape',
@@ -1126,11 +1146,12 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
       await expect(
         migrationPool.query(
           `SELECT to_regclass('runtime_migration_escape') AS object,
-                  EXISTS (SELECT 1 FROM schema_migrations WHERE id = '0012') AS recorded`,
+                  EXISTS (SELECT 1 FROM schema_migrations WHERE id = '0013') AS recorded`,
         ),
       ).resolves.toMatchObject({ rows: [{ object: null, recorded: false }] });
 
-      await expect(runner.down(11)).resolves.toEqual([
+      await expect(runner.down(12)).resolves.toEqual([
+        '0012',
         '0011',
         '0010',
         '0009',
@@ -1155,6 +1176,7 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
         '0009',
         '0010',
         '0011',
+        '0012',
       ]);
       await expect(
         new MigrationRunner(apiPool, migrations).assertUpToDate(),
@@ -1174,7 +1196,7 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
       await expect(
         apiNewPool.query('SELECT count(*)::integer AS count FROM schema_migrations'),
       ).resolves.toMatchObject({
-        rows: [{ count: 11 }],
+        rows: [{ count: 12 }],
       });
 
       const activeOldClient = await apiPool.connect();
