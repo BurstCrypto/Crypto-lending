@@ -20,6 +20,8 @@
 | KAN-61 registry fingerprint SHA-256        | `5058b141479f114c1e5f87ed8798fbb7a7ffcce7b502aa7e0794dc53ca1f767d` |
 | Observed KAN-61 registry fingerprint       | `NOT_RUN`                                                          |
 | Adapter/policy/configuration SHA-256       | `NOT_RUN`                                                          |
+| Deterministic validation harness SHA-256   | `NOT_RUN`                                                          |
+| Fixture/capture manifest SHA-256           | `NOT_RUN`                                                          |
 | Environment/account alias/Region           | `NOT_RUN`                                                          |
 | Exercise start/end (UTC)                   | `NOT_RUN` / `NOT_RUN`                                              |
 | Decision                                   | `NOT_RUN` (`ACCEPT`, `CONDITIONAL`, or `REJECT`)                   |
@@ -113,29 +115,46 @@ separation of duties, evidence retention, customer-impact decision, kill switch,
 and maximum time to acknowledge each depeg, conflict, stale, and unavailable
 state.
 
-## Authorized live-exercise matrix
+## Authorized evidence matrix
 
-Run all rows for USDC, USDT, and PYUSD against the exact approved sources. Use
-bounded requests and pre-approved stop/cost thresholds. Captured real values are
-evidence, never fixtures or expected future prices.
+Evidence has two non-interchangeable modes:
 
-| Scenario                           | Required result                                                              | USDC      | USDT      | PYUSD     |
-| ---------------------------------- | ---------------------------------------------------------------------------- | --------- | --------- | --------- |
-| Normal/corroborated                | Identity current; integer result; provenance; no upside above USD 1          | `NOT_RUN` | `NOT_RUN` | `NOT_RUN` |
-| Pyth confidence boundary           | Exact 50 bps usable; above 50 bps unavailable                                | `NOT_RUN` | `NOT_RUN` | `NOT_RUN` |
-| 60-second freshness boundary       | Exact boundary current; later observation stale                              | `NOT_RUN` | `NOT_RUN` | `NOT_RUN` |
-| Stale primary/current fallback     | Low-confidence reporting only; no new financial increase                     | `NOT_RUN` | `NOT_RUN` | `NOT_RUN` |
-| Both stale/unavailable             | Null valuation; reject/block; timestamped last-good display only             | `NOT_RUN` | `NOT_RUN` | `NOT_RUN` |
-| Source disagreement 25/50 bps      | Class changes at exact boundaries without silent source choice               | `NOT_RUN` | `NOT_RUN` | `NOT_RUN` |
-| Source conflict above 50 bps       | Freeze/null; preserve both; trigger downside alarm when applicable           | `NOT_RUN` | `NOT_RUN` | `NOT_RUN` |
-| Downside 50/200 bps                | Normal/watch/depegged transition occurs at exact boundaries                  | `NOT_RUN` | `NOT_RUN` | `NOT_RUN` |
-| Durable depeg latch                | Atomic asset-bound unique latch survives restart and concurrent evaluation   | `NOT_RUN` | `NOT_RUN` | `NOT_RUN` |
-| Repeg candidate                    | Four unique monotonic samples span 1,800 seconds; no automatic clear         | `NOT_RUN` | `NOT_RUN` | `NOT_RUN` |
-| Authenticated manual clear         | Distinct clear ID binds latch, follows final sample, is auditable and atomic | `NOT_RUN` | `NOT_RUN` | `NOT_RUN` |
-| Duplicate/replayed update          | Durable uniqueness rejects replay without changing accepted checkpoint       | `NOT_RUN` | `NOT_RUN` | `NOT_RUN` |
-| Nonmonotonic/future timestamp      | Observation unavailable; no checkpoint or financial-state advance            | `NOT_RUN` | `NOT_RUN` | `NOT_RUN` |
-| Primary outage/fallback/recovery   | Bounded fallback, explicit low confidence, reconciled failback               | `NOT_RUN` | `NOT_RUN` | `NOT_RUN` |
-| Rate limit/timeout/invalid payload | Bounded retry/backoff; fail closed; no secret/raw payload leakage            | `NOT_RUN` | `NOT_RUN` | `NOT_RUN` |
+- `BOUNDED_LIVE_READ` verifies approved source identity and naturally occurring
+  normal-path behavior using a pre-approved request, time, and cost envelope. It
+  must not wait for, manufacture, or claim exact market/failure thresholds.
+- `LOCAL_DETERMINISTIC` runs the digest-bound policy harness against explicitly
+  synthetic source-shaped fixtures or an independently authenticated immutable
+  capture replay. It makes no provider request. Synthetic/replayed observations
+  must be labeled as such and can never be represented as current live prices.
+
+Provider manipulation, oracle/publisher influence, request flooding, deliberate
+quota exhaustion, waiting for a depeg, and traffic intended to force a timeout,
+429, stale value, divergence, or outage are prohibited. A naturally observed
+live anomaly may be retained under the approved evidence policy, but acceptance
+cannot depend on one occurring.
+
+| Scenario                           | Evidence mode                                          | Required result                                                               | USDC      | USDT      | PYUSD     |
+| ---------------------------------- | ------------------------------------------------------ | ----------------------------------------------------------------------------- | --------- | --------- | --------- |
+| Exact source identity/current read | `BOUNDED_LIVE_READ`                                    | Approved identity, source time/update ID, provenance, redaction, bounded cost | `NOT_RUN` | `NOT_RUN` | `NOT_RUN` |
+| Naturally observed normal path     | `BOUNDED_LIVE_READ`                                    | Integer result and provenance; no upside above USD 1                          | `NOT_RUN` | `NOT_RUN` | `NOT_RUN` |
+| Pyth confidence boundary           | `LOCAL_DETERMINISTIC`                                  | Exact 50 bps usable; above 50 bps unavailable                                 | `NOT_RUN` | `NOT_RUN` | `NOT_RUN` |
+| 60-second freshness boundary       | `LOCAL_DETERMINISTIC`                                  | Exact boundary current; later observation stale                               | `NOT_RUN` | `NOT_RUN` | `NOT_RUN` |
+| Stale primary/current fallback     | `LOCAL_DETERMINISTIC`                                  | Low-confidence reporting only; no new financial increase                      | `NOT_RUN` | `NOT_RUN` | `NOT_RUN` |
+| Both stale/unavailable             | `LOCAL_DETERMINISTIC`                                  | Null valuation; reject/block; timestamped last-good display only              | `NOT_RUN` | `NOT_RUN` | `NOT_RUN` |
+| Source disagreement 25/50 bps      | `LOCAL_DETERMINISTIC`                                  | Class changes at exact boundaries without silent source choice                | `NOT_RUN` | `NOT_RUN` | `NOT_RUN` |
+| Source conflict above 50 bps       | `LOCAL_DETERMINISTIC`                                  | Freeze/null; preserve both; trigger downside alarm when applicable            | `NOT_RUN` | `NOT_RUN` | `NOT_RUN` |
+| Downside 50/200 bps                | `LOCAL_DETERMINISTIC`                                  | Normal/watch/depegged transition occurs at exact boundaries                   | `NOT_RUN` | `NOT_RUN` | `NOT_RUN` |
+| Durable depeg latch                | `LOCAL_DETERMINISTIC`                                  | Atomic asset-bound unique latch survives restart and concurrent evaluation    | `NOT_RUN` | `NOT_RUN` | `NOT_RUN` |
+| Repeg candidate                    | `LOCAL_DETERMINISTIC`                                  | Four unique monotonic samples span 1,800 seconds; no automatic clear          | `NOT_RUN` | `NOT_RUN` | `NOT_RUN` |
+| Authenticated manual clear         | `LOCAL_DETERMINISTIC`                                  | Distinct clear ID binds latch, follows final sample, is auditable and atomic  | `NOT_RUN` | `NOT_RUN` | `NOT_RUN` |
+| Duplicate/replayed update          | `LOCAL_DETERMINISTIC`                                  | Durable uniqueness rejects replay without changing accepted checkpoint        | `NOT_RUN` | `NOT_RUN` | `NOT_RUN` |
+| Nonmonotonic/future timestamp      | `LOCAL_DETERMINISTIC`                                  | Observation unavailable; no checkpoint or financial-state advance             | `NOT_RUN` | `NOT_RUN` | `NOT_RUN` |
+| Primary outage/fallback/recovery   | `LOCAL_DETERMINISTIC` or natural authenticated capture | Bounded fallback, explicit low confidence, reconciled failback                | `NOT_RUN` | `NOT_RUN` | `NOT_RUN` |
+| Rate limit/timeout/invalid payload | `LOCAL_DETERMINISTIC` or natural authenticated capture | Bounded retry/backoff; fail closed; no secret/raw payload leakage             | `NOT_RUN` | `NOT_RUN` | `NOT_RUN` |
+
+For every row, record mode, harness and input/capture digest, exact policy and
+adapter revision, UTC interval, result/evidence digest, reviewer, and whether
+the input was synthetic, replayed, or naturally observed live data.
 
 ## Security, privacy, operations, and cost evidence
 
