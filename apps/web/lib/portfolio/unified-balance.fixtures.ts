@@ -1,0 +1,160 @@
+import type { UnifiedBalanceApiResponse } from './unified-balance';
+
+export const UNIFIED_BALANCE_DEMO_PAYLOAD = {
+  schemaVersion: 1,
+  snapshotId: 'portfolio-demo-2026-08-24T18:30:00Z',
+  asOf: '2026-08-24T18:30:00.000Z',
+  freshness: 'STALE',
+  portfolioValueUsdMinor: '1100000',
+  buyingPower: {
+    status: 'AVAILABLE',
+    amountUsdMinor: '750000',
+    freshness: 'STALE',
+    deductions: [
+      { code: 'STALE_OR_UNPRICED_BALANCE', amountUsdMinor: '200000' },
+      { code: 'LIQUIDITY', amountUsdMinor: '65000' },
+      { code: 'CONVERSION', amountUsdMinor: '25000' },
+      { code: 'SLIPPAGE', amountUsdMinor: '20000' },
+      { code: 'NETWORK', amountUsdMinor: '25000' },
+      { code: 'ROUTING', amountUsdMinor: '15000' },
+    ],
+    reasons: ['STALE_BALANCE_EXCLUDED'],
+  },
+  wallets: [
+    {
+      walletId: '5f640a87-9e21-4a95-8ec4-1a68b4a9237c',
+      label: 'Primary EVM wallet',
+      namespace: 'EVM',
+      address: '0x71c7656ec7ab88b098defb751b7401b5f6d8976f',
+      portfolioValueUsdMinor: '700000',
+      buyingPowerUsdMinor: '450000',
+      chains: [
+        {
+          networkId: 'eip155:1',
+          portfolioValueUsdMinor: '500000',
+          buyingPowerUsdMinor: '450000',
+          assets: [
+            {
+              stablecoin: 'USDC',
+              assetIdentity: '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48',
+              amountAtomic: '5000000000',
+              decimals: 6,
+              portfolioValueUsdMinor: '500000',
+              buyingPowerUsdMinor: '450000',
+              buyingPowerAvailability: 'INCLUDED',
+              buyingPowerReason: null,
+              observedAt: '2026-08-24T18:29:45.000Z',
+              freshness: 'CURRENT',
+            },
+          ],
+        },
+        {
+          networkId: 'eip155:42161',
+          portfolioValueUsdMinor: '200000',
+          buyingPowerUsdMinor: '0',
+          assets: [
+            {
+              stablecoin: 'PYUSD',
+              assetIdentity: '0x46850ad61c2b7d64d08c9c754f45254596696984',
+              amountAtomic: '2000000000',
+              decimals: 6,
+              portfolioValueUsdMinor: '200000',
+              buyingPowerUsdMinor: '0',
+              buyingPowerAvailability: 'EXCLUDED',
+              buyingPowerReason: 'STALE_BALANCE_EXCLUDED',
+              observedAt: '2026-08-24T18:00:00.000Z',
+              freshness: 'STALE',
+            },
+          ],
+        },
+      ],
+    },
+    {
+      walletId: '975d3cb7-768b-46fb-85de-e408d1191360',
+      label: 'Solana savings wallet',
+      namespace: 'SOLANA',
+      address: '7YttLkHDoNj9wyDur5EYBDauN5QJUJpz94QRtWQyFrA8',
+      portfolioValueUsdMinor: '400000',
+      buyingPowerUsdMinor: '300000',
+      chains: [
+        {
+          networkId: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp',
+          portfolioValueUsdMinor: '400000',
+          buyingPowerUsdMinor: '300000',
+          assets: [
+            {
+              stablecoin: 'USDT',
+              assetIdentity: 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB',
+              amountAtomic: '3000000000',
+              decimals: 6,
+              portfolioValueUsdMinor: '300000',
+              buyingPowerUsdMinor: '260000',
+              buyingPowerAvailability: 'INCLUDED',
+              buyingPowerReason: null,
+              observedAt: '2026-08-24T18:29:50.000Z',
+              freshness: 'CURRENT',
+            },
+            {
+              stablecoin: 'USDC',
+              assetIdentity: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+              amountAtomic: '1000000000',
+              decimals: 6,
+              portfolioValueUsdMinor: '100000',
+              buyingPowerUsdMinor: '40000',
+              buyingPowerAvailability: 'INCLUDED',
+              buyingPowerReason: null,
+              observedAt: '2026-08-24T18:29:50.000Z',
+              freshness: 'CURRENT',
+            },
+          ],
+        },
+      ],
+    },
+  ],
+} as const satisfies UnifiedBalanceApiResponse;
+
+export const UNAVAILABLE_BUYING_POWER_DEMO_PAYLOAD = {
+  schemaVersion: 1,
+  snapshotId: 'portfolio-unavailable-demo',
+  asOf: '2026-08-24T18:30:00.000Z',
+  freshness: 'CURRENT',
+  portfolioValueUsdMinor: '500000',
+  buyingPower: {
+    status: 'UNAVAILABLE',
+    amountUsdMinor: null,
+    freshness: 'CURRENT',
+    deductions: [{ code: 'ROUTING', amountUsdMinor: null }],
+    reasons: ['ROUTE_COST_UNAVAILABLE'],
+  },
+  wallets: [
+    {
+      walletId: '5f640a87-9e21-4a95-8ec4-1a68b4a9237c',
+      label: 'Primary EVM wallet',
+      namespace: 'EVM',
+      address: '0x71c7656ec7ab88b098defb751b7401b5f6d8976f',
+      portfolioValueUsdMinor: '500000',
+      buyingPowerUsdMinor: null,
+      chains: [
+        {
+          networkId: 'eip155:1',
+          portfolioValueUsdMinor: '500000',
+          buyingPowerUsdMinor: null,
+          assets: [
+            {
+              stablecoin: 'USDC',
+              assetIdentity: '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48',
+              amountAtomic: '5000000000',
+              decimals: 6,
+              portfolioValueUsdMinor: '500000',
+              buyingPowerUsdMinor: null,
+              buyingPowerAvailability: 'UNAVAILABLE',
+              buyingPowerReason: 'ROUTE_COST_UNAVAILABLE',
+              observedAt: '2026-08-24T18:29:45.000Z',
+              freshness: 'CURRENT',
+            },
+          ],
+        },
+      ],
+    },
+  ],
+} as const satisfies UnifiedBalanceApiResponse;
