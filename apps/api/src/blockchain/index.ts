@@ -51,6 +51,28 @@ export {
   type SupportedAssetNormalizationErrorCode,
 } from './application/supported-asset-normalization.service';
 export {
+  SolanaDepositIndexerError,
+  SolanaDepositIndexerService,
+  type IndexedSolanaStablecoinBalance,
+  type SolanaDepositExclusionCounts,
+  type SolanaDepositIndexerErrorCode,
+  type SolanaDepositIndexRequest,
+  type SolanaDepositIndexResult,
+  type SolanaDepositIndexTier,
+} from './application/solana-deposit-indexer.service';
+export type {
+  SolanaCanonicalReadCapabilityContext,
+  SolanaCanonicalReadCapabilityVerifierPort,
+} from './application/ports/solana-canonical-read-capability.port';
+export {
+  type NormalizedSolanaTokenAccountsByOwnerSourceResult,
+  type NormalizedSolanaTokenAccountSourceValue,
+  type SolanaDepositCommitment,
+  type SolanaDepositSourcePort,
+  type SolanaDepositSourceRequestContext,
+  type SolanaTokenAccountsByOwnerRequest,
+} from './application/ports/solana-deposit-source.port';
+export {
   ASSET_REGISTRY_ENVIRONMENTS,
   MAINNET_SUPPORTED_ASSET_REGISTRY,
   REGISTRY_ACTIVATION_STATES,
@@ -76,6 +98,19 @@ export {
   type SupportedStablecoinAsset,
   type VersionedSupportedAssetRegistry,
 } from './domain/supported-asset-registry';
+export {
+  MAX_SOLANA_TOKEN_ACCOUNT_BYTES,
+  SOLANA_TOKEN_PROGRAM_IDS,
+  SolanaTokenAccountValidationError,
+  decodeSolanaPublicKey,
+  normalizeSolanaPublicKey,
+  parseSolanaTokenAccount,
+  type ParsedSolanaTokenAccount,
+  type ParseSolanaTokenAccountInput,
+  type SolanaTokenAccountState,
+  type SolanaTokenAccountValidationCode,
+  type SolanaTokenProgramId,
+} from './domain/solana-token-account';
 export {
   CHAIN_OBSERVATION_NETWORK_POLICIES,
   CHAIN_OBSERVATION_POLICY_VERSION,
