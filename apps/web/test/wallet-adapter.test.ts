@@ -6,7 +6,11 @@ import {
   assertOwnershipSignatureMatchesChallenge,
   assertWalletConnection,
   base64UrlToWalletBytes,
+  SOLANA_CAIP_CHAIN_IDS,
+  SOLANA_WALLET_STANDARD_CHAINS,
+  solanaWalletStandardChainForCaip,
   toOwnershipSignatureWire,
+  toSolanaEd25519OwnershipProofWire,
   walletBytesToBase64Url,
   type SiweOwnershipChallenge,
   type WalletConnection,
@@ -22,6 +26,8 @@ const accountB = {
   chainId: 'eip155:84532',
   address: '0x0000000000000000000000000000000000000002',
 } as const;
+
+const solanaAddress = '11111111111111111111111111111112';
 
 function connection(overrides: Partial<WalletConnection> = {}): WalletConnection {
   return {
@@ -104,8 +110,11 @@ describe('wallet adapter contract', () => {
     expect(() =>
       assertWalletConnection(
         connection({
-          accounts: [{ chainId: 'solana:devnet', address: 'SolanaTestAddress' }],
-          selectedAccount: { chainId: 'solana:devnet', address: 'SolanaTestAddress' },
+          accounts: [{ chainId: SOLANA_CAIP_CHAIN_IDS.devnet, address: 'SolanaTestAddress' }],
+          selectedAccount: {
+            chainId: SOLANA_CAIP_CHAIN_IDS.devnet,
+            address: 'SolanaTestAddress',
+          },
         }),
         'eip155',
       ),
@@ -147,16 +156,16 @@ describe('wallet adapter contract', () => {
       assertWalletConnection(
         {
           ...connection(),
-          accounts: [{ chainId: 'solana:devnet', address: '11111111111111111111111111111111' }],
+          accounts: [{ chainId: SOLANA_CAIP_CHAIN_IDS.devnet, address: solanaAddress }],
           approvedScopes: [
             {
-              chainId: 'solana:devnet',
+              chainId: SOLANA_CAIP_CHAIN_IDS.devnet,
               methods: ['solana:signIn'],
               events: ['accountChanged'],
             },
           ],
           selectedAccount: {
-            chainId: 'solana:devnet',
+            chainId: SOLANA_CAIP_CHAIN_IDS.devnet,
             address: '1111111111111111111111111111111O',
           },
         },
@@ -169,15 +178,18 @@ describe('wallet adapter contract', () => {
       assertWalletConnection(
         {
           ...connection(),
-          accounts: [{ chainId: 'solana:devnet', address: wrongLengthBase58 }],
+          accounts: [{ chainId: SOLANA_CAIP_CHAIN_IDS.devnet, address: wrongLengthBase58 }],
           approvedScopes: [
             {
-              chainId: 'solana:devnet',
+              chainId: SOLANA_CAIP_CHAIN_IDS.devnet,
               methods: ['solana:signIn'],
               events: ['accountChanged'],
             },
           ],
-          selectedAccount: { chainId: 'solana:devnet', address: wrongLengthBase58 },
+          selectedAccount: {
+            chainId: SOLANA_CAIP_CHAIN_IDS.devnet,
+            address: wrongLengthBase58,
+          },
         },
         'solana',
       ),
@@ -311,16 +323,16 @@ describe('wallet adapter contract', () => {
     const issuedChallenge = {
       id: 'challenge-solana-1',
       format: 'siws-sign-in' as const,
-      chainId: 'solana:devnet' as const,
-      address: '11111111111111111111111111111111',
+      chainId: SOLANA_CAIP_CHAIN_IDS.devnet,
+      address: solanaAddress,
       nonce: 'solana123456',
       expiresAt: '2026-08-18T18:05:00.000Z',
       input: {
         domain: 'example.test',
-        address: '11111111111111111111111111111111',
+        address: solanaAddress,
         uri: 'https://example.test',
         version: '1' as const,
-        chainId: 'solana:devnet' as const,
+        chainId: SOLANA_WALLET_STANDARD_CHAINS.devnet,
         nonce: 'solana123456',
         issuedAt: '2026-08-18T18:00:00.000Z',
         expirationTime: '2026-08-18T18:05:00.000Z',
@@ -334,7 +346,7 @@ describe('wallet adapter contract', () => {
       address: issuedChallenge.address,
       account: {
         address: issuedChallenge.address,
-        publicKey: new Uint8Array(32),
+        publicKey: new Uint8Array([...new Uint8Array(31), 1]),
       },
       signedMessage: new TextEncoder().encode('wallet-constructed SIWS message'),
       signature: new Uint8Array(64).fill(2),
@@ -397,7 +409,7 @@ describe('wallet adapter contract', () => {
       format: 'siws-sign-in',
       account: {
         address: issuedChallenge.address,
-        publicKey: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+        publicKey: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAE',
       },
     });
     if (wire.format !== 'siws-sign-in') {
@@ -414,5 +426,66 @@ describe('wallet adapter contract', () => {
     expect(base64UrlToWalletBytes(encoded)).toEqual(bytes);
     expect(() => base64UrlToWalletBytes('not+base64')).toThrow('malformed');
     expect(() => base64UrlToWalletBytes(encoded, 5)).toThrow('1-5 bytes');
+  });
+
+  it('maps only canonical KAN-61 Solana CAIP IDs to Wallet Standard clusters', () => {
+    expect(solanaWalletStandardChainForCaip(SOLANA_CAIP_CHAIN_IDS.mainnet)).toBe(
+      SOLANA_WALLET_STANDARD_CHAINS.mainnet,
+    );
+    expect(solanaWalletStandardChainForCaip(SOLANA_CAIP_CHAIN_IDS.devnet)).toBe(
+      SOLANA_WALLET_STANDARD_CHAINS.devnet,
+    );
+    expect(() => solanaWalletStandardChainForCaip('solana:devnet')).toThrow(
+      'supported CAIP allowlist',
+    );
+    expect(() =>
+      assertWalletConnection(
+        {
+          connectionId: 'wrong-cluster',
+          connectorId: 'phantom',
+          accounts: [{ chainId: 'solana:devnet', address: solanaAddress }],
+          approvedScopes: [],
+          selectedAccount: { chainId: 'solana:devnet', address: solanaAddress },
+          restored: false,
+        },
+        'solana',
+      ),
+    ).toThrow('supported chain-qualified ID');
+  });
+
+  it('translates canonical-message SIWS into the exact KAN-56 proof body', () => {
+    const issuedChallenge = {
+      id: 'challenge-solana-message',
+      format: 'siws-message' as const,
+      chainId: SOLANA_CAIP_CHAIN_IDS.devnet,
+      address: solanaAddress,
+      nonce: 'solana123456',
+      expiresAt: '2026-08-18T18:05:00.000Z',
+      message: 'exact server-issued SIWS message',
+    };
+    const signedMessage = new TextEncoder().encode(issuedChallenge.message);
+    const signature = new Uint8Array(64).fill(7);
+
+    expect(
+      toSolanaEd25519OwnershipProofWire(
+        {
+          format: 'siws-message',
+          challengeId: issuedChallenge.id,
+          chainId: issuedChallenge.chainId,
+          address: issuedChallenge.address,
+          signedMessage,
+          signature,
+          signatureType: 'ed25519',
+        },
+        issuedChallenge,
+      ),
+    ).toEqual({
+      kind: 'SOLANA_ED25519',
+      challengeId: issuedChallenge.id,
+      address: issuedChallenge.address,
+      publicKey: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAE',
+      signedMessage: walletBytesToBase64Url(signedMessage),
+      signature: walletBytesToBase64Url(signature),
+    });
   });
 });

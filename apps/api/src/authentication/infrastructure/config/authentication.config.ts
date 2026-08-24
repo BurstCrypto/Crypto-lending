@@ -17,6 +17,7 @@ export interface DisabledAuthenticationConfig {
 
 export interface OidcAuthenticationConfig {
   readonly mode: 'oidc';
+  readonly localDemo: boolean;
   readonly providerKey: OidcProviderKey;
   readonly issuer: string;
   readonly authorizationEndpoint: string;
@@ -89,6 +90,18 @@ export class AuthenticationConfigurationError extends Error {
 
 function fail(field: string): never {
   throw new AuthenticationConfigurationError(field);
+}
+
+function localDemoEnabled(environment: Readonly<NodeJS.ProcessEnv>): boolean {
+  const mode = environment.LOCAL_DEMO_MODE;
+  if (mode === undefined || mode === 'disabled') return false;
+  if (mode !== 'enabled') return fail('LOCAL_DEMO_MODE');
+  if (environment.NODE_ENV !== 'development' && environment.NODE_ENV !== 'test') {
+    return fail('NODE_ENV');
+  }
+  if (environment.API_HOST !== '127.0.0.1') return fail('API_HOST');
+  if (environment.AUTH_MODE !== 'oidc') return fail('AUTH_MODE');
+  return true;
 }
 
 function required(environment: Readonly<NodeJS.ProcessEnv>, name: string): string {
@@ -208,6 +221,7 @@ function authenticationKey<
 export function loadAuthenticationConfig(
   environment: Readonly<NodeJS.ProcessEnv> = process.env,
 ): AuthenticationConfig {
+  const localDemo = localDemoEnabled(environment);
   const configuredMode = environment.AUTH_MODE;
   const mode = configuredMode === undefined ? 'disabled' : configuredMode;
   if (mode !== 'disabled' && mode !== 'oidc') return fail('AUTH_MODE');
@@ -218,6 +232,7 @@ export function loadAuthenticationConfig(
   }
 
   const testRuntime = environment.NODE_ENV === 'test';
+  const allowProviderLoopbackHttp = testRuntime || localDemo;
   const providerKeyText = required(environment, 'OIDC_PROVIDER_KEY');
   let providerKey: OidcProviderKey;
   try {
@@ -228,29 +243,29 @@ export function loadAuthenticationConfig(
   const issuer = exactUrl(required(environment, 'OIDC_ISSUER_URL'), 'OIDC_ISSUER_URL', {
     allowPath: true,
     allowBareOrigin: true,
-    testRuntime: false,
+    testRuntime: localDemo,
   });
   const authorizationEndpoint = exactUrl(
     required(environment, 'OIDC_AUTHORIZATION_ENDPOINT'),
     'OIDC_AUTHORIZATION_ENDPOINT',
-    { allowPath: true, testRuntime },
+    { allowPath: true, testRuntime: allowProviderLoopbackHttp },
   );
   const tokenEndpoint = exactUrl(
     required(environment, 'OIDC_TOKEN_ENDPOINT'),
     'OIDC_TOKEN_ENDPOINT',
-    { allowPath: true, testRuntime },
+    { allowPath: true, testRuntime: allowProviderLoopbackHttp },
   );
   const jwksUri = exactUrl(required(environment, 'OIDC_JWKS_URI'), 'OIDC_JWKS_URI', {
     allowPath: true,
-    testRuntime,
+    testRuntime: allowProviderLoopbackHttp,
   });
   const publicOrigin = exactUrl(required(environment, 'AUTH_PUBLIC_ORIGIN'), 'AUTH_PUBLIC_ORIGIN', {
     originOnly: true,
-    testRuntime: false,
+    testRuntime: localDemo,
   });
   const redirectUri = exactUrl(required(environment, 'OIDC_REDIRECT_URI'), 'OIDC_REDIRECT_URI', {
     allowPath: true,
-    testRuntime: false,
+    testRuntime: localDemo,
   });
   const parsedRedirect = new URL(redirectUri);
   if (
@@ -278,6 +293,38 @@ export function loadAuthenticationConfig(
     }
   } else if (configuredClientSecret !== undefined) {
     return fail('OIDC_CLIENT_SECRET');
+  }
+
+  if (localDemo) {
+    const expected = {
+      providerKey: 'local_demo',
+      issuer: 'http://127.0.0.1:3400/local-demo',
+      authorizationEndpoint: 'http://127.0.0.1:3400/authorize',
+      tokenEndpoint: 'http://127.0.0.1:3400/token',
+      jwksUri: 'http://127.0.0.1:3400/jwks.json',
+      clientId: 'crypto-lending-local-demo',
+      audience: 'crypto-lending-local-demo',
+      publicOrigin: 'http://127.0.0.1:3000',
+      redirectUri: 'http://127.0.0.1:3000/api/v1/auth/callback',
+    } as const;
+    const mismatched = Object.entries(expected).find(
+      ([name, expectedValue]) =>
+        ({
+          providerKey,
+          issuer,
+          authorizationEndpoint,
+          tokenEndpoint,
+          jwksUri,
+          clientId,
+          audience,
+          publicOrigin,
+          redirectUri,
+        })[name as keyof typeof expected] !== expectedValue,
+    );
+    if (mismatched) return fail(mismatched[0]);
+    if (tokenEndpointAuthenticationMethod !== 'none') {
+      return fail('OIDC_TOKEN_AUTH_METHOD');
+    }
   }
 
   const httpTimeoutMs = boundedInteger(environment, 'OIDC_HTTP_TIMEOUT_MS', 100, 30_000);
@@ -345,6 +392,7 @@ export function loadAuthenticationConfig(
 
   return Object.freeze({
     mode: 'oidc',
+    localDemo,
     providerKey,
     issuer,
     authorizationEndpoint,

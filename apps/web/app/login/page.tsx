@@ -11,7 +11,7 @@ interface LoginPageProps {
   }>;
 }
 
-export default async function LoginPage({ searchParams }: LoginPageProps = {}) {
+export default async function LoginPage({ searchParams }: LoginPageProps) {
   const parameters = searchParams ? await searchParams : {};
   const returnPath = safeAccountReturnPathOrDefault(parameters.returnTo);
   const callbackFailed = parameters.error === 'authentication';

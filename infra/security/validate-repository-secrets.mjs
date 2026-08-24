@@ -64,6 +64,12 @@ const REVIEWED_DUMMY_VALUES = new Set([
   'wc:pairing-topic@2?symKey=do-not-leak',
 ]);
 
+// Exact public protocol identifiers can contain secret-like words and entropy.
+// Bind each value to its reviewed field name so it cannot excuse a credential.
+const REVIEWED_PUBLIC_IDENTIFIER_ASSIGNMENTS = new Map([
+  ['TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb', new Set(['TOKEN_2022'])],
+]);
+
 // These tuples are deliberately narrow: protocol, decoded username, decoded
 // password, and host must all match a reviewed local or negative-test fixture.
 const REVIEWED_DUMMY_URL_CREDENTIALS = new Set([
@@ -452,10 +458,20 @@ function isDigestContext(name, value) {
   );
 }
 
+function isReviewedPublicIdentifierAssignment(name, value) {
+  return REVIEWED_PUBLIC_IDENTIFIER_ASSIGNMENTS.get(value)?.has(name) === true;
+}
+
 function isHighEntropySecret(name, value) {
   const candidate = value.trim();
   if (candidate.length < 20 || candidate.length > 512) return false;
-  if (isReviewedPlaceholder(candidate) || isDigestContext(name, candidate)) return false;
+  if (
+    isReviewedPublicIdentifierAssignment(name, candidate) ||
+    isReviewedPlaceholder(candidate) ||
+    isDigestContext(name, candidate)
+  ) {
+    return false;
+  }
   const entropy = shannonEntropy(candidate);
   return entropy >= 3.8 && (characterClassCount(candidate) >= 2 || entropy >= 4.5);
 }

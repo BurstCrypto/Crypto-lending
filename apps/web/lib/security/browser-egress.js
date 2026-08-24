@@ -7,12 +7,7 @@ const BASE_RESOURCE_POLICY =
 const PERMISSIONS_POLICY = 'camera=(), geolocation=(), microphone=(), payment=(), usb=()';
 const STRICT_TRANSPORT_SECURITY = 'max-age=31536000; includeSubDomains';
 
-export interface BrowserSecurityHeader {
-  key: string;
-  value: string;
-}
-
-export function buildBrowserEgressPolicy(runtime: string | undefined): string {
+export function buildBrowserEgressPolicy(runtime) {
   const localRuntime = runtime === 'development' || runtime === 'test';
   const connectPolicy = localRuntime ? LOCAL_DEVELOPMENT_CONNECT_POLICY : PRODUCTION_CONNECT_POLICY;
   const scriptPolicy = localRuntime ? LOCAL_DEVELOPMENT_SCRIPT_POLICY : PRODUCTION_SCRIPT_POLICY;
@@ -20,12 +15,12 @@ export function buildBrowserEgressPolicy(runtime: string | undefined): string {
   return `${connectPolicy}; ${scriptPolicy}; ${BASE_RESOURCE_POLICY}`;
 }
 
-export function buildRestrictedWalletLabPolicy(runtime: string | undefined): string {
+export function buildRestrictedWalletLabPolicy(runtime) {
   return buildBrowserEgressPolicy(runtime);
 }
 
-export function buildBrowserSecurityHeaders(runtime: string | undefined): BrowserSecurityHeader[] {
-  const headers: BrowserSecurityHeader[] = [
+export function buildBrowserSecurityHeaders(runtime) {
+  const headers = [
     {
       key: 'Content-Security-Policy',
       value: buildBrowserEgressPolicy(runtime),
@@ -58,9 +53,7 @@ export function buildBrowserSecurityHeaders(runtime: string | undefined): Browse
   return headers;
 }
 
-export function buildRestrictedWalletLabSecurityHeaders(
-  runtime: string | undefined,
-): BrowserSecurityHeader[] {
+export function buildRestrictedWalletLabSecurityHeaders(runtime) {
   return [
     { key: 'Cache-Control', value: 'private, no-store, max-age=0' },
     ...buildBrowserSecurityHeaders(runtime),
