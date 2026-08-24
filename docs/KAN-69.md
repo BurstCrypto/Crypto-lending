@@ -26,8 +26,8 @@ The boundary accepts only:
 - schema version 1, one safe snapshot ID, and canonical UTC timestamps;
 - exact non-negative USD cents and token atomic amounts serialized as decimal
   strings, with no floating-point conversion;
-- the reviewed EVM and Solana networks, canonical addresses, USDC/USDT/PYUSD,
-  and six-decimal token quantities;
+- the reviewed EVM and Solana networks, exact KAN-61 network/stablecoin/asset
+  identity pairs, and six-decimal token quantities;
 - fixed freshness, deduction, exclusion, and unavailable reason codes; and
 - bounded wallet, chain, asset, deduction, and reason arrays made only of plain
   data properties.
@@ -39,6 +39,12 @@ deduction total that does not reconcile. An unavailable buying-power response
 must use `null` plus at least one fixed reason; it cannot substitute zero.
 Accepted data is copied into deeply frozen view objects. Validation failures
 produce one generic error and do not retain provider-authored text.
+
+A stale source cannot be marked as included or contribute a positive buying
+power amount. It must remain visibly attributed with a zero contribution and a
+fixed stale-exclusion reason. The response-level freshness and reason codes
+must agree with that source state, so the stale-data notice cannot contradict
+the amount shown.
 
 The fixture demonstrates a reconciled $11,000.00 portfolio and $7,500.00 of
 available buying power. A stale $2,000.00 holding remains visible in portfolio
@@ -68,7 +74,9 @@ the application stylesheet.
 ## Required wiring gate
 
 The `/portfolio` page is intentionally labeled `Sample data` and must not be
-presented as an authenticated live account screen. Replacing the fixture
+presented as an authenticated live account screen. Its metadata is also
+`noindex, nofollow`, so an accidentally hosted preview is not offered to search
+engines as a live account page. Replacing the fixture
 requires a separately reviewed integration change that:
 
 1. merges or maps the final KAN-67 portfolio DTO and KAN-68 buying-power DTO to
@@ -86,6 +94,21 @@ requires a separately reviewed integration change that:
    reason taxonomy, wallet/chain/asset reconciliation, and snapshot limits; and
 6. removes or converts the public sample route only after product, privacy,
    security, and authentication review.
+
+KAN-67 and KAN-68 are compatible only through that explicit composed mapper;
+neither current branch can be passed directly to this browser boundary.
+KAN-67 emits exact scale-18 USD mantissas, registry evidence, source records,
+and wallet IDs but not WAL-006 labels or addresses. KAN-68 also uses scale 18,
+has `AVAILABLE` / `PARTIAL` / `UNAVAILABLE` outcomes, five cost-deduction
+fields, and a broader unavailable-reason taxonomy. The mapper must define a
+reviewed, non-upward scale-18-to-cent conversion, join wallet presentation data
+only from the authenticated WAL-006 roster, conservatively map KAN-68
+`PARTIAL` to this boundary's `UNAVAILABLE` state unless a later versioned UI
+contract represents partial amounts explicitly, preserve every unavailable
+reason, and reconcile the stale/unpriced difference separately from KAN-68's
+five route-cost deductions. It must also retain both backend `false`
+authorization gates; rendering an estimate never turns it into financial
+authority.
 
 Until that integration passes, this branch proves only deterministic local UI
 behavior. It does not prove live balance accuracy, price freshness, routing

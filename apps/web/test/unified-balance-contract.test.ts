@@ -105,6 +105,19 @@ describe('unified balance API boundary', () => {
       UnifiedBalanceResponseError,
     );
 
+    const unknownStablecoinIdentity = clonePayload();
+    firstAsset(unknownStablecoinIdentity).assetIdentity =
+      '0x1111111111111111111111111111111111111111';
+    expect(() => parseUnifiedBalanceResponse(unknownStablecoinIdentity)).toThrow(
+      UnifiedBalanceResponseError,
+    );
+
+    const mislabeledStablecoinIdentity = clonePayload();
+    firstAsset(mislabeledStablecoinIdentity).stablecoin = 'USDT';
+    expect(() => parseUnifiedBalanceResponse(mislabeledStablecoinIdentity)).toThrow(
+      UnifiedBalanceResponseError,
+    );
+
     const wrongNamespace = clonePayload();
     const wallet = firstWallet(wrongNamespace);
     const chains = wallet.chains as Array<Record<string, unknown>>;
@@ -137,6 +150,35 @@ describe('unified balance API boundary', () => {
     const falseZero = clonePayload(UNAVAILABLE_BUYING_POWER_DEMO_PAYLOAD);
     (falseZero.buyingPower as Record<string, unknown>).amountUsdMinor = '0';
     expect(() => parseUnifiedBalanceResponse(falseZero)).toThrow(UnifiedBalanceResponseError);
+
+    const staleIncluded = clonePayload();
+    const staleWallet = wallets(staleIncluded)[0] as Record<string, unknown>;
+    const staleChains = staleWallet.chains as Array<Record<string, unknown>>;
+    const staleChain = staleChains[1] as Record<string, unknown>;
+    const staleAssets = staleChain.assets as Array<Record<string, unknown>>;
+    const staleAsset = staleAssets[0] as Record<string, unknown>;
+    staleAsset.buyingPowerUsdMinor = '200000';
+    staleAsset.buyingPowerAvailability = 'INCLUDED';
+    staleAsset.buyingPowerReason = null;
+    staleChain.buyingPowerUsdMinor = '200000';
+    staleWallet.buyingPowerUsdMinor = '650000';
+    const staleBuyingPower = staleIncluded.buyingPower as Record<string, unknown>;
+    staleBuyingPower.amountUsdMinor = '950000';
+    const staleDeductions = staleBuyingPower.deductions as Array<Record<string, unknown>>;
+    (staleDeductions[0] as Record<string, unknown>).amountUsdMinor = '0';
+    expect(() => parseUnifiedBalanceResponse(staleIncluded)).toThrow(UnifiedBalanceResponseError);
+
+    const hiddenBuyingPowerStaleness = clonePayload();
+    (hiddenBuyingPowerStaleness.buyingPower as Record<string, unknown>).freshness = 'CURRENT';
+    expect(() => parseUnifiedBalanceResponse(hiddenBuyingPowerStaleness)).toThrow(
+      UnifiedBalanceResponseError,
+    );
+
+    const unexplainedBuyingPowerStaleness = clonePayload(UNAVAILABLE_BUYING_POWER_DEMO_PAYLOAD);
+    (unexplainedBuyingPowerStaleness.buyingPower as Record<string, unknown>).freshness = 'STALE';
+    expect(() => parseUnifiedBalanceResponse(unexplainedBuyingPowerStaleness)).toThrow(
+      UnifiedBalanceResponseError,
+    );
   });
 
   it('rejects extra fields and accessors without invoking or exposing them', () => {
@@ -180,6 +222,11 @@ describe('unified balance API boundary', () => {
       visible: '$1.25',
       accessible: '1 US dollar and 25 cents',
       decimal: '1.25',
+    });
+    expect(formatUsdMinor('1')).toEqual({
+      visible: '$0.01',
+      accessible: '0 US dollars and 1 cent',
+      decimal: '0.01',
     });
     expect(maskPortfolioAddress('0x71c7656ec7ab88b098defb751b7401b5f6d8976f', 'EVM')).toBe(
       '0x71c7…976f',

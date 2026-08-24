@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import PortfolioPage from '@/app/portfolio/page';
+import PortfolioPage, { metadata } from '@/app/portfolio/page';
 import {
   UnifiedBalanceView,
   type UnifiedBalanceViewState,
@@ -82,6 +82,8 @@ describe('UnifiedBalanceView', () => {
     expect(rendered.container.innerHTML).not.toContain(
       '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48',
     );
+    expect(rendered.container.innerHTML).not.toContain('5f640a87-9e21-4a95-8ec4-1a68b4a9237c');
+    expect(rendered.container.innerHTML).not.toContain('portfolio-demo-2026-08-24T18:30:00Z');
   });
 
   it('explains unavailable buying power instead of presenting a false zero', () => {
@@ -144,5 +146,9 @@ describe('PortfolioPage', () => {
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(
       'Your capital, clearly attributed.',
     );
+    expect(metadata).toMatchObject({
+      title: 'Sample portfolio preview',
+      robots: { index: false, follow: false },
+    });
   });
 });

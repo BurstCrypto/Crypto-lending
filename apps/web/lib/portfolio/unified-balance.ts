@@ -57,6 +57,48 @@ export type BuyingPowerDeductionCode = (typeof BUYING_POWER_DEDUCTION_CODES)[num
 export type BuyingPowerReasonCode = (typeof BUYING_POWER_REASON_CODES)[number];
 export type AssetBuyingPowerAvailability = 'INCLUDED' | 'EXCLUDED' | 'UNAVAILABLE';
 
+/**
+ * Browser-side projection of the KAN-61 registry identities accepted by the
+ * KAN-67 portfolio contract. A syntactically valid address must never acquire
+ * a trusted stablecoin label merely because a response says that it does.
+ */
+export const PORTFOLIO_ASSET_IDENTITIES = Object.freeze({
+  'eip155:1': Object.freeze({
+    USDC: '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48',
+    USDT: '0xdac17f958d2ee523a2206206994597c13d831ec7',
+    PYUSD: '0x6c3ea9036406852006290770bedfcaba0e23a0e8',
+  }),
+  'eip155:8453': Object.freeze({
+    USDC: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
+  }),
+  'eip155:42161': Object.freeze({
+    USDC: '0xaf88d065e77c8cc2239327c5edb3a432268e5831',
+    PYUSD: '0x46850ad61c2b7d64d08c9c754f45254596696984',
+  }),
+  'eip155:11155111': Object.freeze({
+    USDC: '0x1c7d4b196cb0c7b01d743fbc6116a902379c7238',
+    PYUSD: '0xcac524bca292aaade2df8a05cc58f0a65b1b3bb9',
+  }),
+  'eip155:84532': Object.freeze({
+    USDC: '0x036cbd53842c5426634e7929541ec2318f3dcf7e',
+  }),
+  'eip155:421614': Object.freeze({
+    USDC: '0x75faf114eafb1bdbe2f0316df893fd58ce46aa4d',
+    PYUSD: '0x637a1259c6afd7e3adf63993ca7e58bb438ab1b1',
+  }),
+  'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp': Object.freeze({
+    USDC: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+    USDT: 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB',
+    PYUSD: '2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo',
+  }),
+  'solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1': Object.freeze({
+    USDC: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
+    PYUSD: 'CXk2AMBfi3TwaEL2468s6zP8xq9NxTXjp9gjMgzeUynM',
+  }),
+} as const satisfies Readonly<
+  Record<PortfolioNetworkId, Partial<Record<StablecoinSymbol, string>>>
+>);
+
 export interface UnifiedBalanceAssetContribution {
   readonly stablecoin: StablecoinSymbol;
   readonly assetIdentity: string;
@@ -240,9 +282,22 @@ function canonicalAddress(value: unknown, namespace: WalletNamespace): string {
   return value;
 }
 
+function canonicalAssetIdentity(
+  value: unknown,
+  networkId: PortfolioNetworkId,
+  stablecoin: StablecoinSymbol,
+): string {
+  const namespace = PORTFOLIO_NETWORKS[networkId].namespace;
+  const identity = canonicalAddress(value, namespace);
+  const registeredIdentities: Partial<Record<StablecoinSymbol, string>> =
+    PORTFOLIO_ASSET_IDENTITIES[networkId];
+  if (registeredIdentities[stablecoin] !== identity) return fail();
+  return identity;
+}
+
 function parseAsset(
   value: unknown,
-  namespace: WalletNamespace,
+  networkId: PortfolioNetworkId,
   buyingPowerStatus: BuyingPowerStatus,
   asOf: string,
 ): UnifiedBalanceAssetContribution {
@@ -259,7 +314,7 @@ function parseAsset(
     'freshness',
   ]);
   const stablecoin = oneOf(record.stablecoin, ['USDC', 'USDT', 'PYUSD'] as const);
-  const assetIdentity = canonicalAddress(record.assetIdentity, namespace);
+  const assetIdentity = canonicalAssetIdentity(record.assetIdentity, networkId, stablecoin);
   if (typeof record.amountAtomic !== 'string' || !ATOMIC_AMOUNT.test(record.amountAtomic)) {
     return fail();
   }
@@ -296,6 +351,16 @@ function parseAsset(
   ) {
     return fail();
   }
+  if (
+    freshness === 'STALE' &&
+    (buyingPowerAvailability === 'INCLUDED' ||
+      buyingPowerReason !== 'STALE_BALANCE_EXCLUDED' ||
+      (buyingPowerStatus === 'AVAILABLE' &&
+        (buyingPowerAvailability !== 'EXCLUDED' || buyingPowerUsdMinor !== '0')))
+  ) {
+    return fail();
+  }
+  if (freshness === 'CURRENT' && buyingPowerReason === 'STALE_BALANCE_EXCLUDED') return fail();
 
   return Object.freeze({
     stablecoin,
@@ -339,7 +404,7 @@ function parseChain(
   const buyingPowerUsdMinor = nullableUsdMinor(record.buyingPowerUsdMinor);
   const assets = Object.freeze(
     boundedArray(record.assets, MAX_ASSETS_PER_CHAIN, 1).map((asset) =>
-      parseAsset(asset, namespace, buyingPowerStatus, asOf),
+      parseAsset(asset, networkId, buyingPowerStatus, asOf),
     ),
   );
   if (
@@ -497,6 +562,16 @@ function parseResponse(value: unknown): UnifiedBalanceApiResponse {
     wallet.chains.some((chain) => chain.assets.some((asset) => asset.freshness === 'STALE')),
   );
   if ((containsStaleSource ? 'STALE' : 'CURRENT') !== freshness) return fail();
+  const reportsStaleBalance = buyingPower.reasons.includes('STALE_BALANCE_EXCLUDED');
+  const reportsStaleInput = buyingPower.reasons.includes('BUYING_POWER_INPUT_STALE');
+  if (
+    reportsStaleBalance !== containsStaleSource ||
+    (buyingPower.freshness === 'STALE'
+      ? !reportsStaleBalance && !reportsStaleInput
+      : reportsStaleBalance || reportsStaleInput)
+  ) {
+    return fail();
+  }
 
   if (buyingPower.status === 'AVAILABLE') {
     const amount = buyingPower.amountUsdMinor;
@@ -551,12 +626,13 @@ export function formatUsdMinor(amountUsdMinor: string): FormattedUsdAmount {
     maximumFractionDigits: 0,
     useGrouping: true,
   }).format(dollars);
+  const centsValue = BigInt(cents);
   return Object.freeze({
     visible: `$${groupedDollars}.${cents}`,
     accessible:
       cents === '00'
         ? `${groupedDollars} US ${dollars === 1n ? 'dollar' : 'dollars'}`
-        : `${groupedDollars} US ${dollars === 1n ? 'dollar' : 'dollars'} and ${cents} cents`,
+        : `${groupedDollars} US ${dollars === 1n ? 'dollar' : 'dollars'} and ${centsValue} ${centsValue === 1n ? 'cent' : 'cents'}`,
     decimal: `${dollars}.${cents}`,
   });
 }

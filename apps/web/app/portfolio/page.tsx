@@ -6,8 +6,9 @@ import { UNIFIED_BALANCE_DEMO_PAYLOAD } from '@/lib/portfolio/unified-balance.fi
 import { parseUnifiedBalanceResponse } from '@/lib/portfolio/unified-balance';
 
 export const metadata: Metadata = {
-  title: 'Portfolio preview',
+  title: 'Sample portfolio preview',
   description: 'A local preview of unified portfolio value and available buying power.',
+  robots: { index: false, follow: false },
 };
 
 const DEMO_SNAPSHOT = parseUnifiedBalanceResponse(UNIFIED_BALANCE_DEMO_PAYLOAD);

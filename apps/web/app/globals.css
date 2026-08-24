@@ -850,6 +850,7 @@ h1 {
   font-weight: 620;
   letter-spacing: -0.055em;
   line-height: 0.95;
+  overflow-wrap: anywhere;
 }
 
 .portfolio-total-unavailable {
@@ -891,11 +892,15 @@ h1 {
   font-weight: 800;
 }
 
-.portfolio-deductions > summary:focus-visible,
+.portfolio-deductions > summary:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 4px;
+}
+
 .portfolio-wallet-source > summary:focus-visible,
 .portfolio-chain-source > summary:focus-visible {
   outline: 3px solid var(--focus);
-  outline-offset: 4px;
+  outline-offset: -3px;
 }
 
 .portfolio-deductions ul {
@@ -1025,6 +1030,7 @@ h1 {
 .portfolio-source-summary-name,
 .portfolio-source-summary-values {
   display: grid;
+  min-width: 0;
   gap: 0.45rem;
 }
 
@@ -1047,6 +1053,7 @@ h1 {
 .portfolio-source-summary-values {
   justify-items: end;
   font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
   text-align: right;
 }
 
@@ -1157,6 +1164,7 @@ h1 {
   font-size: 0.78rem;
   font-variant-numeric: tabular-nums;
   font-weight: 740;
+  overflow-wrap: anywhere;
 }
 
 .portfolio-observed-at {
