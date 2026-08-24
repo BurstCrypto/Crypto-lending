@@ -284,12 +284,14 @@ export class MultiWalletManager {
 
     let connection: WalletConnection | undefined;
     try {
+      this.assertOperationMayComplete(options.signal);
       const candidate = await adapter.connect(
         options.signal === undefined ? undefined : { signal: options.signal },
       );
       assertWalletConnection(candidate, adapter.namespace, adapter.connectorId);
       if (candidate.restored) throw new WalletLifecycleError('invalid-wallet-state');
       connection = cloneConnection(candidate);
+      this.assertOperationMayComplete(options.signal);
       return this.activateConnection(adapter, connection, 'connected', options.label);
     } catch (error) {
       if (connection !== undefined) {
@@ -314,16 +316,19 @@ export class MultiWalletManager {
 
     let connection: WalletConnection | undefined;
     try {
+      this.assertOperationMayComplete(options.signal);
       const candidate = await adapter.restore(
         options.signal === undefined ? undefined : { signal: options.signal },
       );
       if (candidate === null) {
+        this.assertOperationMayComplete(options.signal);
         this.disconnectUnrestoredEntries(connectorId);
         return null;
       }
       assertWalletConnection(candidate, adapter.namespace, adapter.connectorId);
       if (!candidate.restored) throw new WalletLifecycleError('invalid-wallet-state');
       connection = cloneConnection(candidate);
+      this.assertOperationMayComplete(options.signal);
       return this.activateConnection(adapter, connection, 'restored', options.label);
     } catch (error) {
       if (connection !== undefined) {
@@ -786,6 +791,11 @@ export class MultiWalletManager {
     }
     this.busyConnectors.add(connectorId);
     return adapter;
+  }
+
+  private assertOperationMayComplete(signal?: AbortSignal): void {
+    if (this.disposed) throw new WalletLifecycleError('manager-disposed');
+    if (signal?.aborted) throw new WalletLifecycleError('operation-aborted');
   }
 
   private async bestEffortProviderDisconnect(

@@ -121,6 +121,8 @@ class FakeWalletAdapter implements WalletAdapter {
   restoreResult: WalletConnection | null = null;
   disconnectFailure: Error | null = null;
   signResult: OwnershipSignature = siweSignature();
+  connectImplementation: ((options?: WalletConnectOptions) => Promise<WalletConnection>) | null =
+    null;
   signImplementation:
     ((connectionId: string, challenge: OwnershipChallenge) => Promise<OwnershipSignature>) | null =
     null;
@@ -136,7 +138,7 @@ class FakeWalletAdapter implements WalletAdapter {
 
   async connect(options?: WalletConnectOptions): Promise<WalletConnection> {
     this.connectCalls.push(options);
-    return this.connectResult;
+    return this.connectImplementation?.(options) ?? this.connectResult;
   }
 
   async restore(options?: WalletRestoreOptions): Promise<WalletConnection | null> {
@@ -537,5 +539,56 @@ describe('multi-wallet manager', () => {
       live: false,
       indexingEnabled: false,
     });
+  });
+
+  it.each([
+    {
+      expectedCode: 'manager-disposed',
+      endOperation: (wallets: MultiWalletManager): void => {
+        wallets.dispose();
+      },
+    },
+    {
+      expectedCode: 'operation-aborted',
+      endOperation: (_wallets: MultiWalletManager, controller: AbortController): void => {
+        controller.abort();
+      },
+    },
+  ] as const)(
+    'cleans up a connector that resolves after $expectedCode',
+    async ({ expectedCode, endOperation }) => {
+      const store = new MemoryRosterStore();
+      const metamask = new FakeWalletAdapter('metamask', 'eip155');
+      let completeConnect: ((connection: WalletConnection) => void) | undefined;
+      metamask.connectImplementation = () =>
+        new Promise((resolve) => {
+          completeConnect = resolve;
+        });
+      const wallets = manager([metamask], store);
+      const controller = new AbortController();
+
+      const connecting = wallets.connect('metamask', { signal: controller.signal });
+      endOperation(wallets, controller);
+      completeConnect?.(metamask.connectResult);
+
+      await expect(connecting).rejects.toMatchObject({ code: expectedCode });
+      expect(metamask.disconnectCalls).toEqual(['connection-metamask']);
+      expect(store.snapshot).toBeNull();
+      expect(wallets.getState().entries).toEqual([]);
+    },
+  );
+
+  it('does not invoke a connector for an operation that is already aborted', async () => {
+    const metamask = new FakeWalletAdapter('metamask', 'eip155');
+    const wallets = manager([metamask]);
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(wallets.connect('metamask', { signal: controller.signal })).rejects.toMatchObject({
+      code: 'operation-aborted',
+    });
+    expect(metamask.connectCalls).toEqual([]);
+    expect(metamask.disconnectCalls).toEqual([]);
+    expect(wallets.getState().entries).toEqual([]);
   });
 });

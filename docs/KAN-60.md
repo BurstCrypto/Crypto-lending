@@ -104,6 +104,8 @@ The fake-only tests demonstrate:
 - disconnect stops indexing before an awaited provider failure and retains the
   historical row;
 - an in-flight proof becomes stale after a lifecycle event; and
+- a connector that resolves after abort or manager disposal is cleaned up and
+  cannot reactivate or persist a late wallet session; and
 - persistence failure disables indexing globally while raw provider errors,
   addresses, transport IDs, challenges, and signatures remain absent from the
   roster.
