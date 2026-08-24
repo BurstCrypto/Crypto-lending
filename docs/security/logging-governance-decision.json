@@ -1,0 +1,527 @@
+{
+  "schemaVersion": 1,
+  "ticket": "KAN-248",
+  "policyVersion": "0.1.0-draft",
+  "localStatus": "DRAFT_PENDING_EXTERNAL_APPROVAL",
+  "effectiveStatus": "NOT_EFFECTIVE",
+  "scope": "Application-owned structured operational logs and their correlation metadata; this packet does not govern or replace authoritative account audit, ledger, accounting, or legal records.",
+  "dependencyGate": {
+    "ticket": "KAN-220",
+    "observedStatus": "TO_DO",
+    "requiredStatus": "DONE_WITH_REVIEWED_OUTPUT",
+    "status": "BLOCKED",
+    "reason": "KAN-220 must supply its reviewed prerequisite before this draft can receive an effective decision."
+  },
+  "approvalGate": {
+    "status": "PENDING",
+    "selfApprovalForbidden": true,
+    "allowedDecisions": ["APPROVED", "CONDITIONAL", "REJECTED"],
+    "requiredBindings": [
+      "mergedGitCommitSha",
+      "mergedGitTreeSha",
+      "packetSha256",
+      "loggerContractSha256"
+    ],
+    "reviewers": [
+      {
+        "role": "Security",
+        "status": "PENDING",
+        "decisionReference": null,
+        "decidedAt": null,
+        "requiredDecision": "Classify the identifier set and approve least-privilege, audit, break-glass, and incident-response controls."
+      },
+      {
+        "role": "Privacy",
+        "status": "PENDING",
+        "decisionReference": null,
+        "decidedAt": null,
+        "requiredDecision": "Approve purpose limitation, actor lookup, evidence handling, deletion, data-subject handling, and legal-hold interaction."
+      },
+      {
+        "role": "Operations",
+        "status": "PENDING",
+        "decisionReference": null,
+        "decidedAt": null,
+        "requiredDecision": "Approve operability of environment separation, access lifecycle, query limits, audit capture, retention, and break-glass revocation."
+      }
+    ]
+  },
+  "classificationBasis": {
+    "recordClassification": "RESTRICTED",
+    "reason": "Even independently non-secret diagnostic identifiers become linkable customer, security, or financial metadata when joined across events.",
+    "prohibitedInputs": [
+      "credentials or authentication material",
+      "raw request, response, header, query, path, or message content",
+      "contact, residency, IP, user-agent, wallet, signature, nonce, or provider payload data",
+      "raw idempotency keys, chain transaction hashes, amounts, balances, postings, SQL, exceptions, or environment values"
+    ],
+    "evidence": [
+      "docs/KAN-49.md",
+      "docs/KAN-50.md",
+      "docs/KAN-51.md",
+      "docs/KAN-52.md",
+      "docs/security/threat-model-register.json"
+    ]
+  },
+  "actorIdentities": [
+    {
+      "name": "initiatorActorId",
+      "classification": "RESTRICTED",
+      "meaning": "Verified internal account UUID for the principal that initiated the causal work.",
+      "provenance": "Authentication principal resolver only; never caller headers, bodies, queries, wallet addresses, or token claims.",
+      "authority": "DIAGNOSTIC_ONLY",
+      "restrictions": "May correlate an approved incident case; must never authenticate, authorize, establish tenancy, or make a financial decision."
+    },
+    {
+      "name": "service-and-workload-executor",
+      "classification": "INTERNAL",
+      "meaning": "Fixed service name plus closed runtime workload identifies the software executor, not a person or customer.",
+      "provenance": "Logger construction and trusted runtime configuration.",
+      "authority": "DIAGNOSTIC_ONLY",
+      "restrictions": "Must not be relabeled as the initiating customer and does not prove the deployed task identity."
+    },
+    {
+      "name": "durableAuditActor",
+      "classification": "RESTRICTED",
+      "meaning": "Authoritative actor captured by append-only account or ledger audit records outside the log store.",
+      "provenance": "Trusted database write boundary.",
+      "authority": "AUTHORITATIVE_RECORD_OUTSIDE_LOGS",
+      "restrictions": "Operational logs may carry only the allowlisted reference and may never replace, amend, delete, or satisfy retention for the durable audit record."
+    }
+  ],
+  "correlationFields": [
+    {
+      "name": "correlationId",
+      "classification": "RESTRICTED",
+      "source": "Server-generated canonical UUIDv4 root, or a legacy namespace-separated SHA-256 diagnostic value for a normalized legacy envelope.",
+      "format": "UUID_V4_OR_LEGACY_SHA256",
+      "runtimeState": "IMPLEMENTED",
+      "emission": "Any catalog event emitted while a causal context is active, including trace.span.completed.",
+      "allowedUse": "Follow one causal chain across API, outbox, queue, worker, and ledger events.",
+      "authority": "DIAGNOSTIC_ONLY"
+    },
+    {
+      "name": "requestId",
+      "classification": "RESTRICTED",
+      "source": "Server-generated ingress UUIDv4 equal to the root correlationId.",
+      "format": "UUID_V4",
+      "runtimeState": "IMPLEMENTED",
+      "emission": "Context-bearing catalog events except trace.span.completed.",
+      "allowedUse": "Locate the server-generated request returned to a caller and pivot to its root correlation.",
+      "authority": "DIAGNOSTIC_ONLY"
+    },
+    {
+      "name": "initiatorActorId",
+      "classification": "RESTRICTED",
+      "source": "Verified internal account principal bound after authentication.",
+      "format": "UUID_V4",
+      "runtimeState": "IMPLEMENTED",
+      "emission": "Context-bearing catalog events except trace.span.completed; absent for anonymous or failed authentication.",
+      "allowedUse": "Security- or Privacy-approved investigation of activity attributed to one internal account.",
+      "authority": "DIAGNOSTIC_ONLY"
+    },
+    {
+      "name": "jobId",
+      "classification": "RESTRICTED",
+      "source": "Domain-separated SHA-256 diagnostic projection of an internal job identifier.",
+      "format": "JOB_SHA256_REFERENCE",
+      "runtimeState": "IMPLEMENTED",
+      "emission": "Validated context-bearing events except trace.span.completed, and the exact job catalog events that permit jobId.",
+      "allowedUse": "Follow one normalized durable job without disclosing its raw transport identifier.",
+      "authority": "DIAGNOSTIC_ONLY"
+    },
+    {
+      "name": "messageId",
+      "classification": "RESTRICTED",
+      "source": "Domain-separated SHA-256 diagnostic projection of a transport message identifier.",
+      "format": "MESSAGE_SHA256_REFERENCE",
+      "runtimeState": "IMPLEMENTED",
+      "emission": "Only job.published, job.processed, job.retry_scheduled, job.awaiting_dead_letter, and job.ownership_lost.",
+      "allowedUse": "Distinguish transport attempts and redeliveries without exposing the raw provider identifier.",
+      "authority": "DIAGNOSTIC_ONLY"
+    },
+    {
+      "name": "intentId",
+      "classification": "RESTRICTED",
+      "source": "Validated internal intent UUID when a real domain producer exists.",
+      "format": "UUID_V4",
+      "runtimeState": "ALLOWLISTED_NOT_RUNTIME_PROVEN",
+      "emission": "Context-bearing catalog events except trace.span.completed.",
+      "allowedUse": "Follow an approved internal intent workflow after its domain contract and privacy purpose are reviewed.",
+      "authority": "DIAGNOSTIC_ONLY"
+    },
+    {
+      "name": "quoteId",
+      "classification": "RESTRICTED",
+      "source": "Validated internal quote UUID when a real domain producer exists.",
+      "format": "UUID_V4",
+      "runtimeState": "ALLOWLISTED_NOT_RUNTIME_PROVEN",
+      "emission": "Context-bearing catalog events except trace.span.completed.",
+      "allowedUse": "Follow an approved internal quote workflow after its domain contract and privacy purpose are reviewed.",
+      "authority": "DIAGNOSTIC_ONLY"
+    },
+    {
+      "name": "transactionId",
+      "classification": "RESTRICTED",
+      "source": "Validated internal ledger transaction UUID.",
+      "format": "UUID_V4",
+      "runtimeState": "IMPLEMENTED",
+      "emission": "Context-bearing catalog events except trace.span.completed.",
+      "allowedUse": "Pivot from an operational incident to the separately authorized authoritative ledger query.",
+      "authority": "DIAGNOSTIC_REFERENCE_TO_IMMUTABLE_RECORD"
+    },
+    {
+      "name": "ledgerEventId",
+      "classification": "RESTRICTED",
+      "source": "Validated committed ledger journal/event UUID.",
+      "format": "UUID_V4",
+      "runtimeState": "IMPLEMENTED",
+      "emission": "Context-bearing catalog events except trace.span.completed.",
+      "allowedUse": "Pivot from an operational incident to the separately authorized immutable journal or event record.",
+      "authority": "DIAGNOSTIC_REFERENCE_TO_IMMUTABLE_RECORD"
+    },
+    {
+      "name": "traceId",
+      "classification": "RESTRICTED",
+      "source": "Domain-separated SHA-256 projection of the server-authoritative root correlation.",
+      "format": "NONZERO_32_HEX",
+      "runtimeState": "IMPLEMENTED",
+      "emission": "Only trace.span.completed.",
+      "allowedUse": "Assemble the bounded application trace graph for an approved incident.",
+      "authority": "DIAGNOSTIC_ONLY"
+    },
+    {
+      "name": "spanId",
+      "classification": "RESTRICTED",
+      "source": "Random nonzero application span identifier.",
+      "format": "NONZERO_16_HEX",
+      "runtimeState": "IMPLEMENTED",
+      "emission": "Only trace.span.completed.",
+      "allowedUse": "Identify one bounded span inside an approved trace reconstruction.",
+      "authority": "DIAGNOSTIC_ONLY"
+    },
+    {
+      "name": "parentSpanId",
+      "classification": "RESTRICTED",
+      "source": "Validated nonzero parent application span identifier distinct from spanId.",
+      "format": "NONZERO_16_HEX",
+      "runtimeState": "IMPLEMENTED",
+      "emission": "Optional and only on trace.span.completed.",
+      "allowedUse": "Reconstruct parent-child relationships inside an approved trace.",
+      "authority": "DIAGNOSTIC_ONLY"
+    }
+  ],
+  "accessControl": {
+    "default": "DENY",
+    "environmentSeparation": [
+      "Development, test, staging, and production use distinct log groups, encryption keys, reader roles, and evidence locations.",
+      "A grant names one environment and exact service log groups; wildcard groups, cross-environment readers, and developer production inheritance are forbidden.",
+      "Production query access uses workforce identity with phishing-resistant MFA, short sessions, and no shared identities; implementation evidence remains pending.",
+      "Application runtime roles can append only to their own environment and workload log group and cannot read, query, export, change retention, or delete."
+    ],
+    "matrix": [
+      {
+        "role": "application-log-writer",
+        "environments": ["assigned-runtime-environment"],
+        "standingAccess": "WRITE_ONLY",
+        "permissions": ["APPEND_ALLOWLISTED_EVENTS_TO_OWN_WORKLOAD_GROUP"],
+        "explicitDenials": ["READ", "QUERY", "EXPORT", "RETENTION_ADMIN", "DELETE", "LEGAL_HOLD"]
+      },
+      {
+        "role": "developer",
+        "environments": ["local", "development"],
+        "standingAccess": "NON_PRODUCTION_ONLY",
+        "permissions": [
+          "READ_ASSIGNED_NON_PRODUCTION_GROUPS",
+          "BOUNDED_QUERY_WITH_CASE_OR_CHANGE_REFERENCE"
+        ],
+        "explicitDenials": [
+          "PRODUCTION_READ",
+          "CROSS_ENVIRONMENT_QUERY",
+          "EXPORT",
+          "RETENTION_ADMIN",
+          "DELETE",
+          "LEGAL_HOLD"
+        ]
+      },
+      {
+        "role": "on-call-operator",
+        "environments": ["assigned-incident-environment"],
+        "standingAccess": "TIME_BOUND_INCIDENT_QUERY",
+        "permissions": ["READ_EXACT_ASSIGNED_GROUPS", "RUN_APPROVED_BOUNDED_QUERY"],
+        "explicitDenials": [
+          "BULK_EXPORT",
+          "RETENTION_ADMIN",
+          "DELETE",
+          "LEGAL_HOLD",
+          "CROSS_ENVIRONMENT_QUERY"
+        ]
+      },
+      {
+        "role": "security-incident-responder",
+        "environments": ["case-authorized-environment"],
+        "standingAccess": "TIME_BOUND_CASE_ACCESS",
+        "permissions": [
+          "READ_EXACT_CASE_GROUPS",
+          "RUN_APPROVED_BOUNDED_QUERY",
+          "REQUEST_RESTRICTED_EVIDENCE_EXPORT"
+        ],
+        "explicitDenials": [
+          "UNAPPROVED_EXPORT",
+          "RETENTION_ADMIN",
+          "DELETE",
+          "CROSS_ENVIRONMENT_QUERY"
+        ]
+      },
+      {
+        "role": "privacy-responder",
+        "environments": ["case-authorized-environment"],
+        "standingAccess": "TIME_BOUND_CASE_ACCESS",
+        "permissions": [
+          "AUTHORIZE_ACTOR_LOOKUP",
+          "REVIEW_MINIMIZED_CASE_EVIDENCE",
+          "DIRECT_DATA_SUBJECT_HANDLING"
+        ],
+        "explicitDenials": [
+          "GENERAL_OPERATIONS_QUERY",
+          "UNAPPROVED_EXPORT",
+          "RETENTION_ADMIN",
+          "DELETE",
+          "CROSS_ENVIRONMENT_QUERY"
+        ]
+      },
+      {
+        "role": "log-configuration-administrator",
+        "environments": ["assigned-administration-environment"],
+        "standingAccess": "CHANGE_CONTROL_ONLY",
+        "permissions": [
+          "CONFIGURE_EXACT_LOG_GROUP",
+          "SET_APPROVED_RETENTION",
+          "EXECUTE_APPROVED_DELETION"
+        ],
+        "explicitDenials": [
+          "ROUTINE_CONTENT_READ",
+          "ROUTINE_QUERY",
+          "SELF_APPROVED_RETENTION_CHANGE",
+          "SELF_APPROVED_DELETE"
+        ]
+      },
+      {
+        "role": "records-legal-hold-custodian",
+        "environments": ["approved-evidence-store"],
+        "standingAccess": "CASE_AND_SCHEDULE_BOUND",
+        "permissions": [
+          "ACCEPT_APPROVED_MINIMIZED_EXPORT",
+          "APPLY_OR_RELEASE_APPROVED_HOLD",
+          "ENFORCE_CASE_RETENTION"
+        ],
+        "explicitDenials": ["GENERAL_LOG_QUERY", "SOURCE_LOG_MUTATION", "FINANCIAL_RECORD_MUTATION"]
+      },
+      {
+        "role": "access-auditor",
+        "environments": ["administrative-audit-store"],
+        "standingAccess": "READ_AUDIT_METADATA_ONLY",
+        "permissions": ["REVIEW_ACCESS_AND_QUERY_AUDIT_METADATA"],
+        "explicitDenials": [
+          "APPLICATION_LOG_CONTENT",
+          "QUERY_EXECUTION",
+          "EXPORT",
+          "RETENTION_ADMIN",
+          "DELETE"
+        ]
+      },
+      {
+        "role": "break-glass-responder",
+        "environments": ["declared-severity-one-environment"],
+        "standingAccess": "NONE",
+        "permissions": ["TEMPORARY_READ_EXACT_GROUPS", "TEMPORARY_BOUNDED_QUERY"],
+        "explicitDenials": [
+          "DELETE",
+          "RETENTION_ADMIN",
+          "LEGAL_HOLD",
+          "EXPORT_WITHOUT_SEPARATE_APPROVAL",
+          "CROSS_ENVIRONMENT_QUERY"
+        ]
+      }
+    ],
+    "auditRequirements": [
+      "Record grant, denial, query, export request, retention change, deletion, hold, release, break-glass activation, and revocation in an access-controlled administrative audit store separate from application logs.",
+      "Capture workforce principal, assumed role, case or change reference, environment, exact groups, UTC range, projected fields, query-template identifier, one-way parameter fingerprint, result count and bytes, timestamps, outcome, and approving roles without copying raw result values into the audit event.",
+      "Deny query execution when the administrative audit record cannot be created, except the declared break-glass procedure; break-glass must spool tamper-evident local metadata for later ingestion.",
+      "The application log writer must have no capability to alter the administrative access audit trail."
+    ],
+    "breakGlass": {
+      "trigger": "Declared severity-one incident where delay creates material customer, security, or financial harm and the normal incident role is unavailable or insufficient.",
+      "authorization": "Incident commander plus Security approver before activation when feasible; otherwise one authorized commander with mandatory retrospective Security and Privacy review.",
+      "maximumMinutes": 60,
+      "scope": "One workforce principal, one environment, exact log groups, read and bounded query only.",
+      "controls": [
+        "Phishing-resistant MFA and a fresh short-lived session.",
+        "No shared account, persistent key, wildcard group, silent export, deletion, retention change, or hold action.",
+        "Notify Security and Operations at activation; record all queries and results metadata.",
+        "Revoke automatically at expiry or incident handoff, whichever occurs first.",
+        "Complete access and privacy review within one business day and track every exception to closure."
+      ]
+    }
+  },
+  "retentionAndDeletion": {
+    "standardApplicationLogDays": 14,
+    "templateAllowedDays": [1, 3, 5, 7, 14, 30, 60, 90],
+    "rule": "Fourteen days is the proposed standard for managed application log groups. Any other allowlisted value requires a pre-deployment, environment-specific exception with purpose, cost, privacy, owner, and expiry review.",
+    "localEvidence": "Test-captured output is process- or test-artifact-bound, contains synthetic identifiers only, and is deleted under the local test artifact lifecycle rather than uploaded.",
+    "normalDeletion": "Backend expiry deletes application log events after the approved period. Manual deletion is forbidden except an approved contamination, legal, or platform-response procedure executed by the configuration administrator and independently audited.",
+    "dataSubjectHandling": "Privacy determines whether an internal actor lookup is lawful and responsive. Search and evidence must be minimized; deletion must not be promised where a legal duty, hold, or authoritative financial-record rule applies.",
+    "legalHold": {
+      "implementationStatus": "PENDING_APPROVED_EVIDENCE_STORE_AND_PROCEDURE",
+      "rule": "Do not silently extend a whole log group or disable expiry. Export only the case-minimum result set to an approved restricted evidence store, record source groups and UTC bounds, compute an integrity digest, apply a case schedule, and keep source expiry unchanged unless Legal, Privacy, Security, Records, and Operations approve an explicit time-bound exception.",
+      "release": "The Records custodian releases the case hold under documented Legal authority, records disposition evidence, and leaves authoritative financial/audit schedules unchanged."
+    },
+    "immutableFinancialRecordBoundary": [
+      "Application logs are diagnostic copies and never the book of record, an account audit record, proof of authorization, or a substitute for ledger retention.",
+      "A transactionId or ledgerEventId is only a pivot to a separately authorized authoritative query; log content cannot establish balance, amount, posting, finality, ownership, or approval.",
+      "Log expiry, deletion, contamination response, export, hold, or hold release must never update, erase, rewrite, truncate, or relax append-only controls on account audit, journal, posting, lifecycle, outbox, reconciliation, or approval records.",
+      "Financial corrections remain append-only reversal or compensation records under ledger policy; a log record may not be used to mutate history."
+    ]
+  },
+  "incidentQueryPolicy": {
+    "authorizedUseCases": [
+      {
+        "id": "INCIDENT_CAUSAL_TRACE",
+        "purpose": "Trace one reported request or causal workflow to diagnose an active incident.",
+        "primarySelectors": ["correlationId", "requestId", "jobId", "messageId", "traceId"]
+      },
+      {
+        "id": "SECURITY_ACCOUNT_ACTIVITY",
+        "purpose": "Investigate suspected account compromise, authorization failure, or abuse under a Security case and Privacy-approved purpose.",
+        "primarySelectors": ["initiatorActorId", "correlationId", "requestId"]
+      },
+      {
+        "id": "FINANCIAL_WORKFLOW_DIAGNOSIS",
+        "purpose": "Locate operational failures around a known immutable financial record without treating logs as financial evidence.",
+        "primarySelectors": ["transactionId", "ledgerEventId", "correlationId"]
+      },
+      {
+        "id": "BOUNDED_SERVICE_TRIAGE",
+        "purpose": "Identify a service-wide operational failure when no correlation identifier is yet known.",
+        "primarySelectors": ["event", "errorCode", "service", "workload"]
+      },
+      {
+        "id": "LEGAL_PRIVACY_CASE",
+        "purpose": "Collect a minimized result set under documented Legal or Privacy authority and an approved evidence-handling plan.",
+        "primarySelectors": ["initiatorActorId", "correlationId", "transactionId", "ledgerEventId"]
+      }
+    ],
+    "prohibitedUses": [
+      "Curiosity, employee performance review, marketing, product analytics, customer segmentation, or bulk behavior profiling.",
+      "Discovery by raw wallet address, contact detail, IP address, token claim, request content, amount, balance, posting, chain hash, provider payload, or other prohibited field.",
+      "Unbounded scans, cross-environment joins, unrestricted exports, or searching for credentials and then copying a discovered value.",
+      "Authentication, authorization, tenancy, balance calculation, accounting, transaction finality, or any financial decision based on log content."
+    ],
+    "minimumFilters": {
+      "requiredForEveryQuery": [
+        "caseOrChangeReference",
+        "authorizedUseCaseId",
+        "environment",
+        "exactLogGroups",
+        "utcStartInclusive",
+        "utcEndExclusive",
+        "eventAllowlist",
+        "projectedFieldAllowlist",
+        "primarySelectorOrApprovedAggregateTemplate"
+      ],
+      "initialWindowMinutes": 120,
+      "aggregateDiscoveryWindowMinutes": 15,
+      "maximumWindowHoursWithoutEscalation": 24,
+      "defaultProjection": [
+        "timestamp",
+        "event",
+        "level",
+        "service",
+        "workload",
+        "environment",
+        "correlationId",
+        "requestId",
+        "outcome",
+        "errorCode"
+      ],
+      "actorProjectionRule": "initiatorActorId is excluded by default and may be selected or searched only for SECURITY_ACCOUNT_ACTIVITY or LEGAL_PRIVACY_CASE with a documented Privacy purpose.",
+      "financialProjectionRule": "transactionId and ledgerEventId may be selected only for FINANCIAL_WORKFLOW_DIAGNOSIS or LEGAL_PRIVACY_CASE and only as pivots to an authorized source-of-record query."
+    },
+    "evidenceHandling": [
+      "Inspect in the approved query interface; do not paste results or restricted identifiers into Jira, chat, email, source control, terminal history, or ordinary screenshots.",
+      "Export only when the use case requires evidence and a second authorized role approves the exact fields, rows, destination, retention, and custodian.",
+      "Use a restricted case identifier for filenames; encrypt in transit and at rest; record byte count and SHA-256; never include credentials or prohibited content in the evidence manifest.",
+      "Redact nonessential identifiers from reports, preserve original evidence only in the approved store, and record access, transfer, hold, and disposition.",
+      "If prohibited material appears, stop querying and copying, preserve only safe metadata, notify Security and Privacy, contain the producer or sink, and use the separate incident process."
+    ],
+    "escalation": [
+      "Obtain Security and Privacy approval before actor-based lookup, scope beyond the initial bounds, cross-service expansion not linked by a root correlation, or evidence export.",
+      "Obtain Operations approval before a query exceeds twenty-four hours, accesses another environment, or materially increases scanned volume or cost.",
+      "Escalate any suspected financial discrepancy to the Ledger, Finance, and Records owners for an authoritative database audit; do not broaden log authority.",
+      "Use break-glass only for its declared trigger and revoke it at expiry; it cannot authorize deletion, retention changes, financial mutation, or an otherwise prohibited search."
+    ]
+  },
+  "ownershipAndReview": {
+    "owners": [
+      {
+        "control": "classification, access model, security incident use, and break-glass",
+        "accountable": "Security",
+        "operators": ["Security", "Operations"]
+      },
+      {
+        "control": "purpose limitation, actor lookup, data-subject handling, evidence minimization, and privacy incidents",
+        "accountable": "Privacy",
+        "operators": ["Privacy", "Security"]
+      },
+      {
+        "control": "log groups, identity lifecycle, environment separation, retention execution, query tooling, and audit collection",
+        "accountable": "Operations",
+        "operators": ["Operations", "SRE"]
+      },
+      {
+        "control": "financial-record boundary, legal hold, evidence schedule, and disposition",
+        "accountable": "Records",
+        "operators": ["Records", "Legal", "Finance"]
+      }
+    ],
+    "cadence": [
+      "Operations reviews production and non-production access membership at least quarterly; Security and Privacy attest or remediate the review.",
+      "Security samples query, denial, export, and break-glass audit records monthly; Privacy joins when actor lookup or customer evidence occurred.",
+      "Operations verifies retention, deletion, environment separation, and audit delivery at least quarterly in an explicitly authorized environment.",
+      "Security, Privacy, Operations, Records, and Finance review this policy at least annually and after every material incident or exception."
+    ],
+    "exceptionRequirements": [
+      "Name the control, business and incident purpose, exact fields, environment, groups, principals, start, expiry, compensating controls, cost bound, evidence destination, and accountable owner.",
+      "Obtain Security, Privacy, and Operations decisions before activation; add Legal, Records, and Finance when retention, hold, or financial evidence is affected.",
+      "Expire automatically in at most thirty days unless a shorter access or break-glass bound applies; renewal is a new review.",
+      "Never authorize a prohibited input, shared identity, logs as financial authority, or mutation/deletion of immutable financial records."
+    ],
+    "reReviewTriggers": [
+      "Any new or renamed structured event, correlation field, actor source, identifier format, event-field mapping, logger schema version, or legacy enrichment path.",
+      "Any new log sink, query backend, exporter, dashboard, alert, subprocessor, Region, encryption key, environment topology, or cross-account access path.",
+      "Any change to retention, deletion, backup, legal hold, data-subject process, cost model, or evidence destination.",
+      "Any authentication, authorization, tenancy, ledger, outbox, reconciliation, or financial-record change that alters identifier meaning or authority.",
+      "Any leak, unauthorized query, failed audit capture, break-glass use, material access-review finding, or regulatory/contractual change.",
+      "Resolution or material change of KAN-220, KAN-49, KAN-50, KAN-51, or KAN-52."
+    ]
+  },
+  "localEvidence": [
+    "apps/api/src/infrastructure/logging/logging-context.ts",
+    "apps/api/src/infrastructure/logging/structured-logger.ts",
+    "apps/api/src/infrastructure/logging/structured-logger.spec.ts",
+    "apps/api/src/infrastructure/logging/logging-source-policy.spec.ts",
+    "apps/api/test/logging.e2e-spec.ts",
+    "infra/aws/application-baseline.yaml",
+    "infra/aws/validate-application-baseline.mjs",
+    "docs/adr/0003-immutable-ledger-accounting-model.md"
+  ],
+  "unresolvedGates": [
+    "KAN-220 is still TO_DO and must complete with reviewed prerequisite output.",
+    "Security has not approved actor and identifier classification, access, audit, query, or break-glass controls.",
+    "Privacy has not approved purpose limitation, actor lookup, data-subject handling, evidence minimization, deletion, or legal-hold interaction.",
+    "Operations has not approved or implemented environment-separated roles, administrative audit capture, retention/deletion procedures, query templates, break-glass activation, or revocation.",
+    "Legal, Records, and Finance have not approved the legal-hold/evidence schedule or confirmed the immutable financial-record boundary for this use.",
+    "No merged-commit, tree, packet, or logger-contract hashes are bound to an independent decision.",
+    "No authorized non-production exercise proves effective delivery, encryption, access denial, query auditability, expiry, deletion, hold, or break-glass behavior."
+  ]
+}
