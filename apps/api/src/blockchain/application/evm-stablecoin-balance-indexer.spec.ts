@@ -446,6 +446,9 @@ describe('EvmStablecoinBalanceIndexer', () => {
   it.each([
     new EvmBalanceReadFailure('PERMANENT_FAILURE'),
     new Error('unclassified adapter failure'),
+    Object.defineProperty(new EvmBalanceReadFailure('TIMEOUT'), 'code', {
+      value: 'UNKNOWN_FAILURE',
+    }),
   ])('does not retry a permanent or unclassified provider failure %#', async (failure) => {
     const harness = createHarness();
     harness.reader.readTokenBalances.mockRejectedValue(failure);
@@ -551,6 +554,7 @@ describe('EvmStablecoinBalanceIndexer', () => {
   });
 
   it('validates Retry-After at the adapter error boundary', () => {
+    expect(() => new EvmBalanceReadFailure('UNKNOWN_FAILURE' as never)).toThrow(TypeError);
     expect(() => new EvmBalanceReadFailure('RATE_LIMITED', { retryAfterMs: -1 })).toThrow(
       TypeError,
     );

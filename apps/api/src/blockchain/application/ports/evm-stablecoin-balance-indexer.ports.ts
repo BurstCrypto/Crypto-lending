@@ -18,6 +18,14 @@ export class EvmBalanceReadFailure extends Error {
     super(code);
     this.name = 'EvmBalanceReadFailure';
     if (
+      code !== 'RATE_LIMITED' &&
+      code !== 'TIMEOUT' &&
+      code !== 'TEMPORARY_UNAVAILABLE' &&
+      code !== 'PERMANENT_FAILURE'
+    ) {
+      throw new TypeError('code must be a recognized EVM balance read failure code');
+    }
+    if (
       options.retryAfterMs !== undefined &&
       (!Number.isSafeInteger(options.retryAfterMs) || options.retryAfterMs < 0)
     ) {

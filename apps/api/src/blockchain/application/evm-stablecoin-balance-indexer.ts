@@ -280,7 +280,10 @@ export class EvmStablecoinBalanceIndexer {
       try {
         return await operation();
       } catch (error) {
-        if (!(error instanceof EvmBalanceReadFailure) || error.code === 'PERMANENT_FAILURE') {
+        if (
+          !(error instanceof EvmBalanceReadFailure) ||
+          !isRetryableBalanceReadFailureCode(error.code)
+        ) {
           throw indexerError('PROVIDER_READ_FAILED');
         }
         if (attempt === this.config.maxAttempts) {
@@ -472,6 +475,12 @@ function integerBetween(value: unknown, minimum: number, maximum: number): value
   return (
     Number.isSafeInteger(value) && (value as number) >= minimum && (value as number) <= maximum
   );
+}
+
+function isRetryableBalanceReadFailureCode(
+  code: EvmBalanceReadFailure['code'],
+): code is Exclude<EvmBalanceReadFailure['code'], 'PERMANENT_FAILURE'> {
+  return code === 'RATE_LIMITED' || code === 'TIMEOUT' || code === 'TEMPORARY_UNAVAILABLE';
 }
 
 function indexerError(

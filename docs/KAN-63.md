@@ -64,8 +64,9 @@ separate reviewed persistence decision.
 
 ## Retry and rate-limit behavior
 
-Only typed `RATE_LIMITED`, `TIMEOUT`, and `TEMPORARY_UNAVAILABLE` read failures
-are retryable. Permanent and unknown failures are not retried. The maximum is
+Only runtime-validated `RATE_LIMITED`, `TIMEOUT`, and `TEMPORARY_UNAVAILABLE`
+read failures are retryable. Permanent, unknown, and malformed typed failures
+are not retried. The maximum is
 three attempts, inherited from `CHAIN_OBSERVATION_RESILIENCE_POLICY` and not
 configurable above that bound.
 
