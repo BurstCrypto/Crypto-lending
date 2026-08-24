@@ -24,7 +24,10 @@ evidence. Every screen displays a synthetic-data banner while the mode is on.
   `unix://` transport. TCP, SSH, and HTTPS Docker endpoints are rejected.
 - Compose uses the fixed `crypto-lending-local-demo` project. Teardown can remove
   only that project's containers and volumes.
-- Compose uses `--pull never`; the command cannot download a missing image.
+- Startup inspects all three digest-pinned base images before Compose runs. The
+  LocalStack wrapper is built with network disabled and pulling disabled, then
+  Compose uses both `--pull never` and `--no-build`. A missing image fails the
+  run instead of contacting a registry.
 - AWS metadata discovery is disabled and the SDK is pinned to the loopback
   LocalStack endpoint with non-credential local fixture values.
 

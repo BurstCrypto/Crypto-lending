@@ -1,6 +1,6 @@
 import { spawn, spawnSync } from 'node:child_process';
 
-import { LOCAL_DEMO_COMPOSE_PROJECT } from './environment.mjs';
+import { LOCAL_DEMO_COMPOSE_PROJECT, LOCAL_DEMO_LOCALSTACK_IMAGE } from './environment.mjs';
 
 export function executable(name) {
   return process.platform === 'win32' && name === 'npm' ? 'npm.cmd' : name;
@@ -35,6 +35,10 @@ export function composeArguments(action) {
     'compose',
     '--project-directory',
     '.',
+    '--file',
+    'docker-compose.yml',
+    '--file',
+    'tools/local-demo/docker-compose.local-demo.yml',
     '--project-name',
     LOCAL_DEMO_COMPOSE_PROJECT,
   ];
@@ -46,6 +50,7 @@ export function composeArguments(action) {
       '--wait',
       '--pull',
       'never',
+      '--no-build',
       'postgres',
       'redis',
       'localstack',
@@ -55,4 +60,18 @@ export function composeArguments(action) {
     return [...prefix, 'down', '--volumes', '--remove-orphans'];
   }
   throw new Error('Unknown local demo compose action');
+}
+
+export function localStackBuildArguments() {
+  return [
+    'build',
+    '--pull=false',
+    '--network',
+    'none',
+    '--tag',
+    LOCAL_DEMO_LOCALSTACK_IMAGE,
+    '--file',
+    'infra/localstack/Dockerfile',
+    'infra/localstack',
+  ];
 }

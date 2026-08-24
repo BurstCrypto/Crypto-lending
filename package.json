@@ -14,6 +14,7 @@
   "scripts": {
     "dev:web": "npm run dev --workspace @crypto-lending/web",
     "dev:local-demo:idp": "node tools/local-demo/identity-provider.mjs",
+    "demo:local:preflight": "tsx tools/local-demo/configuration-preflight.ts",
     "demo:local": "node tools/local-demo/start.mjs",
     "demo:local:teardown": "node tools/local-demo/teardown.mjs",
     "dev:wallet-lab": "npm --prefix tools/wallet-lab run dev",
@@ -28,7 +29,7 @@
     "lint": "npm run lint --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
-    "test:local-demo": "node --test tools/local-demo/*.test.mjs",
+    "test:local-demo": "node --test tools/local-demo/*.test.mjs && npm run demo:local:preflight",
     "test:integration": "npm run test:integration --workspace @crypto-lending/api",
     "infra:validate": "npm run security:scan:secrets && npm run security:validate:threat-model && npm run security:validate:logging-governance && npm run security:validate:wallet-review && npm run infra:validate:application && npm run infra:validate:workload-boundaries && npm run infra:validate:migrations && npm run infra:validate:guardrails && npm run infra:validate:acm-dns && npm run infra:validate:sqs && npm run infra:validate:redis-acl && npm run infra:validate:egress && npm run infra:validate:providers && npm run infra:validate:valuation",
     "infra:validate:application": "node infra/aws/validate-application-baseline.mjs",

@@ -6,10 +6,12 @@ import {
   createLocalDemoEnvironments,
   LOCAL_DEMO_API_ORIGIN,
   LOCAL_DEMO_COMPOSE_PROJECT,
+  LOCAL_DEMO_LOCALSTACK_IMAGE,
+  LOCAL_DEMO_REQUIRED_DOCKER_IMAGES,
   LOCAL_DEMO_WEB_ORIGIN,
   safeLocalProcessEnvironment,
 } from './environment.mjs';
-import { composeArguments } from './processes.mjs';
+import { composeArguments, localStackBuildArguments } from './processes.mjs';
 
 function deterministicRandom(length) {
   deterministicRandom.value = (deterministicRandom.value ?? 0) + 1;
@@ -41,17 +43,18 @@ describe('local demo process configuration', () => {
     assert.equal(environments.api.OIDC_TOKEN_AUTH_METHOD, 'none');
     assert.equal(environments.api.WALLET_REGISTRATION_REGISTRY_ENVIRONMENT, 'TESTNET');
     assert.equal(environments.api.AWS_EC2_METADATA_DISABLED, 'true');
-    assert.equal(environments.api.DATABASE_RUNTIME_HOST, '127.0.0.1');
-    assert.equal(environments.api.DATABASE_RUNTIME_USERNAME, 'crypto_api_login_a');
-    assert.equal(environments.api.DATABASE_RUNTIME_URL, undefined);
+    const apiDatabase = new URL(environments.api.DATABASE_RUNTIME_URL);
+    const workerDatabase = new URL(environments.worker.DATABASE_RUNTIME_URL);
+    const migrationDatabase = new URL(environments.migration.MIGRATION_DATABASE_URL);
+    assert.equal(apiDatabase.hostname, '127.0.0.1');
+    assert.equal(apiDatabase.username, 'crypto_api_login_a');
     assert.equal(environments.api.AWS_PROFILE, undefined);
     assert.equal(environments.web.DATABASE_RUNTIME_URL, undefined);
-    assert.equal(environments.worker.DATABASE_RUNTIME_USERNAME, 'crypto_worker_login_a');
+    assert.equal(workerDatabase.username, 'crypto_worker_login_a');
     assert.equal(environments.worker.REDIS_PASSWORD, undefined);
     assert.equal(environments.worker.AUTH_SESSION_HMAC_KEY, undefined);
-    assert.equal(environments.migration.MIGRATION_DATABASE_HOST, '127.0.0.1');
-    assert.equal(environments.migration.MIGRATION_DATABASE_USERNAME, 'crypto_migration');
-    assert.equal(environments.migration.MIGRATION_DATABASE_URL, undefined);
+    assert.equal(migrationDatabase.hostname, '127.0.0.1');
+    assert.equal(migrationDatabase.username, 'crypto_migration');
     assert.equal(environments.migration.DATABASE_RUNTIME_URL, undefined);
     assert.equal(environments.migration.AWS_ACCESS_KEY_ID, undefined);
     const apiKeys = [
@@ -88,5 +91,18 @@ describe('local demo process configuration', () => {
     assert.equal(LOCAL_DEMO_COMPOSE_PROJECT, 'crypto-lending-local-demo');
     assert.deepEqual(composeArguments('down').slice(-3), ['down', '--volumes', '--remove-orphans']);
     assert.ok(composeArguments('up').includes('never'));
+    assert.ok(composeArguments('up').includes('--no-build'));
+    assert.equal(LOCAL_DEMO_REQUIRED_DOCKER_IMAGES.length, 3);
+    assert.deepEqual(localStackBuildArguments(), [
+      'build',
+      '--pull=false',
+      '--network',
+      'none',
+      '--tag',
+      LOCAL_DEMO_LOCALSTACK_IMAGE,
+      '--file',
+      'infra/localstack/Dockerfile',
+      'infra/localstack',
+    ]);
   });
 });

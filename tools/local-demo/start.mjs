@@ -5,12 +5,24 @@ import {
   assertLocalDockerEndpoint,
   createLocalDemoEnvironments,
   LOCAL_DEMO_API_ORIGIN,
+  LOCAL_DEMO_REQUIRED_DOCKER_IMAGES,
   LOCAL_DEMO_WEB_ORIGIN,
 } from './environment.mjs';
-import { composeArguments, runChecked, spawnOwned } from './processes.mjs';
+import {
+  composeArguments,
+  localStackBuildArguments,
+  runChecked,
+  spawnOwned,
+} from './processes.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const environments = createLocalDemoEnvironments();
+
+runChecked('npm', ['run', 'demo:local:preflight'], {
+  cwd: root,
+  env: environments.identity,
+  label: 'Local application configuration preflight',
+});
 
 const dockerEndpoint = runChecked(
   'docker',
@@ -24,6 +36,21 @@ try {
   throw new Error('Docker context inspection returned an invalid endpoint');
 }
 assertLocalDockerEndpoint(parsedDockerEndpoint);
+
+for (const imageName of LOCAL_DEMO_REQUIRED_DOCKER_IMAGES) {
+  runChecked('docker', ['image', 'inspect', '--format', '{{.Id}}', imageName], {
+    cwd: root,
+    env: environments.identity,
+    capture: true,
+    label: 'Required cached Docker image inspection',
+  });
+}
+
+runChecked('docker', localStackBuildArguments(), {
+  cwd: root,
+  env: environments.identity,
+  label: 'Offline LocalStack image build',
+});
 
 runChecked('docker', composeArguments('up'), {
   cwd: root,

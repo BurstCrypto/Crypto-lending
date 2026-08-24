@@ -1,0 +1,3 @@
+services:
+  localstack:
+    image: crypto-lending-local-demo-localstack:kan-253

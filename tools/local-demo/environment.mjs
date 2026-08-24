@@ -3,6 +3,12 @@ import { randomBytes } from 'node:crypto';
 export const LOCAL_DEMO_COMPOSE_PROJECT = 'crypto-lending-local-demo';
 export const LOCAL_DEMO_API_ORIGIN = 'http://127.0.0.1:3001';
 export const LOCAL_DEMO_WEB_ORIGIN = 'http://127.0.0.1:3000';
+export const LOCAL_DEMO_LOCALSTACK_IMAGE = 'crypto-lending-local-demo-localstack:kan-253';
+export const LOCAL_DEMO_REQUIRED_DOCKER_IMAGES = Object.freeze([
+  'postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685',
+  'redis:7-alpine@sha256:e7723ff73d963f5cc6d9c4643ea3d989527a402a319239054e9472a7fb9219a2',
+  'localstack/localstack:4@sha256:3ebc37595918b8accb852f8048fef2aff047d465167edd655528065b07bc364a',
+]);
 
 const SAFE_INHERITED_NAMES = new Set([
   'APPDATA',
@@ -43,16 +49,19 @@ export function safeLocalProcessEnvironment(source = process.env) {
   return safe;
 }
 
+function loopbackDatabaseUrl(databaseCredentials) {
+  const url = new URL('postgresql://127.0.0.1:5432/crypto_lending');
+  url.username = databaseCredentials.username;
+  url.password = databaseCredentials.password;
+  return url.toString();
+}
+
 function infrastructureEnvironment(databaseCredentials, workload) {
   return {
     NODE_ENV: 'development',
     APP_ENV: 'dev-local-demo',
     APPLICATION_WORKLOAD: workload,
-    DATABASE_RUNTIME_HOST: '127.0.0.1',
-    DATABASE_RUNTIME_PORT: '5432',
-    DATABASE_RUNTIME_NAME: 'crypto_lending',
-    DATABASE_RUNTIME_USERNAME: databaseCredentials.username,
-    DATABASE_RUNTIME_PASSWORD: databaseCredentials.password,
+    DATABASE_RUNTIME_URL: loopbackDatabaseUrl(databaseCredentials),
     DATABASE_RUNTIME_SSL_MODE: 'disable',
     AWS_REGION: 'us-east-1',
     AWS_ACCESS_KEY_ID: 'test',
@@ -130,11 +139,10 @@ export function createLocalDemoEnvironments(options = {}) {
   const migration = {
     ...inherited,
     NODE_ENV: 'development',
-    MIGRATION_DATABASE_HOST: '127.0.0.1',
-    MIGRATION_DATABASE_PORT: '5432',
-    MIGRATION_DATABASE_NAME: 'crypto_lending',
-    MIGRATION_DATABASE_USERNAME: 'crypto_migration',
-    MIGRATION_DATABASE_PASSWORD: 'local_migration_only',
+    MIGRATION_DATABASE_URL: loopbackDatabaseUrl({
+      username: 'crypto_migration',
+      password: 'local_migration_only',
+    }),
     MIGRATION_DATABASE_SSL_MODE: 'disable',
   };
   const web = {
