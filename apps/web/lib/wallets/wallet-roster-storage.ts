@@ -1,12 +1,5 @@
-import {
-  type ChainId,
-  type WalletAccount,
-  type WalletNamespace,
-} from './wallet-adapter';
-import {
-  assertLifecycleWalletAccount,
-  isCanonicalLifecycleChainId,
-} from './wallet-chain-identity';
+import type { ChainId, WalletAccount, WalletNamespace } from './wallet-adapter';
+import { assertLifecycleWalletAccount, isCanonicalLifecycleChainId } from './wallet-chain-identity';
 
 export const WALLET_ROSTER_STORAGE_KEY = 'crypto-lending.wallet-roster.v1';
 
