@@ -74,7 +74,7 @@ export interface IndexedSolanaStablecoinBalance {
   readonly mintAddress: string;
   readonly decimals: number;
   readonly amountBaseUnits: bigint;
-  readonly availableAmountBaseUnits: bigint;
+  readonly activeAmountBaseUnits: bigint;
   readonly frozenAmountBaseUnits: bigint;
   readonly activeTokenAccountCount: number;
   readonly frozenTokenAccountCount: number;
@@ -116,7 +116,7 @@ interface ParsedSourceResponse {
 
 interface MutableBalance {
   amountBaseUnits: bigint;
-  availableAmountBaseUnits: bigint;
+  activeAmountBaseUnits: bigint;
   frozenAmountBaseUnits: bigint;
   activeTokenAccountCount: number;
   frozenTokenAccountCount: number;
@@ -227,7 +227,7 @@ function makeTokenAccountRequest(
 function emptyBalance(): MutableBalance {
   return {
     amountBaseUnits: 0n,
-    availableAmountBaseUnits: 0n,
+    activeAmountBaseUnits: 0n,
     frozenAmountBaseUnits: 0n,
     activeTokenAccountCount: 0,
     frozenTokenAccountCount: 0,
@@ -355,7 +355,7 @@ export class SolanaDepositIndexerService {
       if (balance === undefined) throw new SolanaDepositIndexerError('INVALID_SOURCE_RESPONSE');
       balance.amountBaseUnits += parsed.amountBaseUnits;
       if (parsed.state === 'ACTIVE') {
-        balance.availableAmountBaseUnits += parsed.amountBaseUnits;
+        balance.activeAmountBaseUnits += parsed.amountBaseUnits;
         balance.activeTokenAccountCount += 1;
       } else {
         balance.frozenAmountBaseUnits += parsed.amountBaseUnits;
@@ -419,7 +419,7 @@ export class SolanaDepositIndexerService {
       mintAddress: asset.identity,
       decimals: asset.decimals,
       amountBaseUnits: balance.amountBaseUnits,
-      availableAmountBaseUnits: balance.availableAmountBaseUnits,
+      activeAmountBaseUnits: balance.activeAmountBaseUnits,
       frozenAmountBaseUnits: balance.frozenAmountBaseUnits,
       activeTokenAccountCount: balance.activeTokenAccountCount,
       frozenTokenAccountCount: balance.frozenTokenAccountCount,

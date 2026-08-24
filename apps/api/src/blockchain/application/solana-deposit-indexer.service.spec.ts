@@ -189,7 +189,7 @@ describe('SolanaDepositIndexerService', () => {
         stablecoin: 'USDC',
         mintAddress: USDC_MINT,
         amountBaseUnits: 9_007_199_254_741_000n,
-        availableAmountBaseUnits: 9_007_199_254_741_000n,
+        activeAmountBaseUnits: 9_007_199_254_741_000n,
         frozenAmountBaseUnits: 0n,
         activeTokenAccountCount: 2,
         frozenTokenAccountCount: 0,
@@ -198,7 +198,7 @@ describe('SolanaDepositIndexerService', () => {
       expect.objectContaining({
         stablecoin: 'USDT',
         amountBaseUnits: 30n,
-        availableAmountBaseUnits: 0n,
+        activeAmountBaseUnits: 0n,
         frozenAmountBaseUnits: 30n,
         activeTokenAccountCount: 0,
         frozenTokenAccountCount: 1,
@@ -207,7 +207,7 @@ describe('SolanaDepositIndexerService', () => {
       expect.objectContaining({
         stablecoin: 'PYUSD',
         amountBaseUnits: 0n,
-        availableAmountBaseUnits: 0n,
+        activeAmountBaseUnits: 0n,
         sourceSlot: 900n,
       }),
     ]);
@@ -370,6 +370,21 @@ describe('SolanaDepositIndexerService', () => {
       SOLANA_TOKEN_PROGRAM_IDS.LEGACY,
       [accountFixture({ address: ACCOUNT_ADDRESSES[0], owner: OTHER_OWNER })],
     );
+    await expectIndexError(
+      new SolanaDepositIndexerService(source).index(indexRequest()),
+      'INVALID_SOURCE_RESPONSE',
+    );
+
+    source.responses[SOLANA_TOKEN_PROGRAM_IDS.LEGACY] = {
+      contextSlot: 900n,
+      accounts: [
+        {
+          address: ACCOUNT_ADDRESSES[0],
+          programId: SOLANA_TOKEN_PROGRAM_IDS.TOKEN_2022,
+          data: null,
+        },
+      ],
+    };
     await expectIndexError(
       new SolanaDepositIndexerService(source).index(indexRequest()),
       'INVALID_SOURCE_RESPONSE',

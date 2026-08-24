@@ -45,7 +45,8 @@ are copied before use so an adapter cannot mutate a result after validation.
 - Multiple initialized accounts for one allowed mint sum in exact base units.
 - A frozen account remains visible in `amountBaseUnits` and
   `frozenAmountBaseUnits`, but contributes nothing to
-  `availableAmountBaseUnits`.
+  `activeAmountBaseUnits`. `active` describes SPL account state; it is not a
+  claim that extensions, delegates, or downstream policy permit spending.
 - A normalized `data: null` account is counted as closed and excluded; it is
   never interpreted as a zero balance.
 - An uninitialized account is counted and excluded.

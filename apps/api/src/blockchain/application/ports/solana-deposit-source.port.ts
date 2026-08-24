@@ -15,6 +15,7 @@ export interface SolanaTokenAccountsByOwnerRequest extends SolanaDepositSourceRe
 
 export interface NormalizedSolanaTokenAccountSourceValue {
   readonly address: string;
+  /** Must be copied from the returned account owner, not echoed from the request filter. */
   readonly programId: string;
   /** Null is an explicit closed-account observation, never a zero balance. */
   readonly data: Uint8Array | null;
