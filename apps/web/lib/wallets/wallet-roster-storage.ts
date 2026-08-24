@@ -217,8 +217,8 @@ function parseEntry(value: unknown): PersistedWalletRosterEntry {
   if (isDisconnected !== (disconnectedAt !== undefined)) {
     throw new TypeError('wallet roster disconnected state must include its timestamp');
   }
-  if (disconnectedAt !== undefined && disconnectedAt !== value.updatedAt) {
-    throw new TypeError('wallet roster disconnect timestamp must match its update timestamp');
+  if (disconnectedAt !== undefined && Date.parse(disconnectedAt) > Date.parse(value.updatedAt)) {
+    throw new TypeError('wallet roster disconnect timestamp must not follow its update timestamp');
   }
 
   const validTransitionByStatus: Readonly<

@@ -357,6 +357,30 @@ describe('multi-wallet manager', () => {
     expect(wallets.getState().entries).toHaveLength(1);
   });
 
+  it('allows a retained disconnected wallet to be relabeled without reactivating it', async () => {
+    const store = new MemoryRosterStore();
+    const metamask = new FakeWalletAdapter('metamask', 'eip155');
+    const wallets = manager([metamask], store);
+    const connected = await wallets.connect('metamask', { label: 'Old label' });
+    await wallets.disconnect(connected.connectionId);
+    const disconnectedAt = wallets.getState().entries[0]?.disconnectedAt;
+
+    const renamed = wallets.renameWallet(connected.connectionId, 'Archived treasury');
+
+    expect(renamed).toMatchObject({
+      label: 'Archived treasury',
+      status: 'disconnected',
+      live: false,
+      indexingEnabled: false,
+      disconnectedAt,
+    });
+    expect(store.read()?.entries[0]).toMatchObject({
+      label: 'Archived treasury',
+      status: 'disconnected',
+      disconnectedAt,
+    });
+  });
+
   it('preserves an expired session as history and never stores provider errors', async () => {
     const store = new MemoryRosterStore();
     const metamask = new FakeWalletAdapter('metamask', 'eip155');
