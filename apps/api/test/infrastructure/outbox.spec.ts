@@ -42,6 +42,10 @@ import { OutboxWorker } from '../../src/infrastructure/outbox/outbox-worker.serv
 import { TransactionalJobPublisher } from '../../src/infrastructure/outbox/transactional-job-publisher.service';
 import { SqsJobWorker } from '../../src/infrastructure/sqs/sqs-job.worker';
 import { SqsService } from '../../src/infrastructure/sqs/sqs.service';
+import {
+  adversarialProviderError,
+  LOGGING_PROHIBITED_VALUES,
+} from '../fixtures/logging-adversarial.fixture';
 import { testInfrastructureConfig, testOutboxDispatcherOptions } from './fixtures';
 
 function testUuid(index: number): string {
@@ -1065,7 +1069,6 @@ describe('transactional job outbox', () => {
         messageAttributes: { diagnostic: attributeCanary },
       }),
     );
-    const secret = 'Bearer raw-provider-secret-must-not-persist';
     const lines: string[] = [];
     const captureLogger = new StructuredLogger({
       workload: 'worker',
@@ -1076,7 +1079,7 @@ describe('transactional job outbox', () => {
       .spyOn(structuredLogger, 'emit')
       .mockImplementation((event, level, fields) => captureLogger.emit(event, level, fields));
     const sqsClient = {
-      send: jest.fn().mockRejectedValue(new Error(secret)),
+      send: jest.fn().mockRejectedValue(adversarialProviderError()),
       destroy: jest.fn(),
     } as unknown as SQSClient;
     const sqsTransport = new SqsService(sqsClient, testInfrastructureConfig());
@@ -1100,7 +1103,9 @@ describe('transactional job outbox', () => {
       attempts: 2,
       lastError: 'OUTBOX_TRANSPORT_FAILED',
     });
-    expect(JSON.stringify(harness.job('failing-job'))).not.toContain(secret);
+    for (const prohibited of LOGGING_PROHIBITED_VALUES) {
+      expect(JSON.stringify(harness.job('failing-job'))).not.toContain(prohibited);
+    }
     const records = lines.map((line) => JSON.parse(line) as StructuredLogRecord);
     const failureRecords = records.filter(({ event }) => event === 'job.publish_failed');
     expect(failureRecords).toHaveLength(2);
@@ -1118,7 +1123,7 @@ describe('transactional job outbox', () => {
     );
     expect(lines.join('\n')).not.toMatch(
       new RegExp(
-        [secret, payloadCanary, attributeCanary, 'failing-job']
+        [...LOGGING_PROHIBITED_VALUES, payloadCanary, attributeCanary, 'failing-job']
           .map((value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
           .join('|'),
         'u',

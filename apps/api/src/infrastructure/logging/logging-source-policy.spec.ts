@@ -4,9 +4,18 @@ import { join, relative, resolve } from 'node:path';
 function runtimeTypescriptFiles(directory: string): string[] {
   const files: string[] = [];
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    if (entry.isDirectory() && ['.next', 'coverage', 'node_modules', 'test'].includes(entry.name)) {
+      continue;
+    }
     const path = join(directory, entry.name);
     if (entry.isDirectory()) files.push(...runtimeTypescriptFiles(path));
-    if (entry.isFile() && entry.name.endsWith('.ts') && !entry.name.endsWith('.spec.ts')) {
+    if (
+      entry.isFile() &&
+      (entry.name.endsWith('.ts') || entry.name.endsWith('.tsx')) &&
+      !entry.name.endsWith('.spec.ts') &&
+      !entry.name.endsWith('.test.ts') &&
+      !entry.name.endsWith('.test.tsx')
+    ) {
       files.push(path);
     }
   }
@@ -15,6 +24,8 @@ function runtimeTypescriptFiles(directory: string): string[] {
 
 describe('application logging source policy', () => {
   const sourceRoot = resolve(__dirname, '../..');
+  const repositoryRoot = resolve(sourceRoot, '../../..');
+  const webRoot = resolve(repositoryRoot, 'apps/web');
 
   it('rejects free-form runtime output, Nest Logger, and noisy dotenv imports', () => {
     const violations: string[] = [];
@@ -25,11 +36,13 @@ describe('application logging source policy', () => {
       /['"]dotenv\/config['"]/u,
     ];
 
-    for (const file of runtimeTypescriptFiles(sourceRoot)) {
-      const source = readFileSync(file, 'utf8');
-      for (const pattern of forbidden) {
-        if (pattern.test(source)) {
-          violations.push(`${relative(sourceRoot, file)} matched ${String(pattern)}`);
+    for (const root of [sourceRoot, webRoot]) {
+      for (const file of runtimeTypescriptFiles(root)) {
+        const source = readFileSync(file, 'utf8');
+        for (const pattern of forbidden) {
+          if (pattern.test(source)) {
+            violations.push(`${relative(repositoryRoot, file)} matched ${String(pattern)}`);
+          }
         }
       }
     }
@@ -48,5 +61,9 @@ describe('application logging source policy', () => {
       const source = readFileSync(resolve(sourceRoot, relativePath), 'utf8');
       expect(source).toContain('installFatalProcessBoundary(');
     }
+
+    const webInstrumentation = readFileSync(resolve(webRoot, 'instrumentation.ts'), 'utf8');
+    expect(webInstrumentation).toContain('registerWebNodeRuntime()');
+    expect(webInstrumentation).toContain('recordWebRequestFailure(error, request, context)');
   });
 });
