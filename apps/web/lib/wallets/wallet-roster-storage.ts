@@ -8,7 +8,7 @@ import {
 export const WALLET_ROSTER_STORAGE_KEY = 'crypto-lending.wallet-roster.v1';
 
 const WALLET_ROSTER_VERSION = 1 as const;
-const MAX_ROSTER_ENTRIES = 32;
+export const MAX_WALLET_ROSTER_ENTRIES = 32;
 const MAX_ROSTER_JSON_LENGTH = 32_768;
 const MAX_IDENTIFIER_LENGTH = 256;
 const MAX_LABEL_LENGTH = 64;
@@ -36,6 +36,7 @@ export const WALLET_LIFECYCLE_TRANSITIONS = [
   'session-updated',
   'disconnected',
   'session-expired',
+  'ownership-verified',
   'page-reloaded',
   'provider-state-invalid',
 ] as const;
@@ -216,6 +217,28 @@ function parseEntry(value: unknown): PersistedWalletRosterEntry {
   if (isDisconnected !== (disconnectedAt !== undefined)) {
     throw new TypeError('wallet roster disconnected state must include its timestamp');
   }
+  if (disconnectedAt !== undefined && disconnectedAt !== value.updatedAt) {
+    throw new TypeError('wallet roster disconnect timestamp must match its update timestamp');
+  }
+
+  const validTransitionByStatus: Readonly<
+    Record<WalletLifecycleStatus, readonly WalletLifecycleTransition[]>
+  > = {
+    'restore-required': ['page-reloaded'],
+    'reverification-required': [
+      'connected',
+      'restored',
+      'account-changed',
+      'chain-changed',
+      'session-updated',
+    ],
+    verified: ['ownership-verified'],
+    disconnected: ['disconnected', 'provider-state-invalid'],
+    'session-expired': ['session-expired'],
+  };
+  if (!validTransitionByStatus[value.status].includes(value.lastTransition)) {
+    throw new TypeError('wallet roster status and transition are inconsistent');
+  }
 
   return {
     connectionId: value.connectionId,
@@ -238,8 +261,8 @@ export function parseWalletRosterSnapshot(value: unknown): WalletRosterSnapshot 
   if (value.version !== WALLET_ROSTER_VERSION) {
     throw new TypeError('wallet roster version is unsupported');
   }
-  if (!Array.isArray(value.entries) || value.entries.length > MAX_ROSTER_ENTRIES) {
-    throw new TypeError(`wallet roster must contain at most ${MAX_ROSTER_ENTRIES} entries`);
+  if (!Array.isArray(value.entries) || value.entries.length > MAX_WALLET_ROSTER_ENTRIES) {
+    throw new TypeError(`wallet roster must contain at most ${MAX_WALLET_ROSTER_ENTRIES} entries`);
   }
 
   const entries = value.entries.map(parseEntry);
