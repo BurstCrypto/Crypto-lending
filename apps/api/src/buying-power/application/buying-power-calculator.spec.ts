@@ -329,7 +329,7 @@ describe('BuyingPowerCalculator', () => {
 
   it('rejects aggregate overflow before invoking an adjustment source', async () => {
     const adjustments = new FakeAdjustmentPort();
-    const maximum = '9'.repeat(96);
+    const maximum = '9'.repeat(100);
 
     await expect(
       calculator(adjustments).calculate(

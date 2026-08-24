@@ -15,7 +15,7 @@ describe('buying-power exact USD arithmetic', () => {
     expect(addBuyingPowerUsdMantissas([first, second])).toBe('11000000000000000000000');
   });
 
-  it.each(['', '-1', '+1', '01', '1.0', '1e18', 1, null, '9'.repeat(97)])(
+  it.each(['', '-1', '+1', '01', '1.0', '1e18', 1, null, '9'.repeat(101)])(
     'rejects a non-canonical or over-bound mantissa %#',
     (value) => {
       expect(() => normalizeBuyingPowerUsdMantissa(value)).toThrow(
@@ -25,7 +25,7 @@ describe('buying-power exact USD arithmetic', () => {
   );
 
   it('rejects an aggregate that exceeds the bounded exact representation', () => {
-    const maximum = normalizeBuyingPowerUsdMantissa('9'.repeat(96));
+    const maximum = normalizeBuyingPowerUsdMantissa('9'.repeat(100));
 
     expect(() => addBuyingPowerUsdMantissas([maximum, maximum])).toThrow(
       new BuyingPowerValidationError('NUMERIC_LIMIT_EXCEEDED'),

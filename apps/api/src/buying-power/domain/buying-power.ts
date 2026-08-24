@@ -1,5 +1,5 @@
 const CANONICAL_UNSIGNED_INTEGER = /^(?:0|[1-9][0-9]*)$/u;
-const MAX_USD_MANTISSA_DIGITS = 96;
+const MAX_USD_MANTISSA_DIGITS = 100;
 
 declare const buyingPowerUsdMantissaBrand: unique symbol;
 
