@@ -309,8 +309,10 @@ evidence. The following remain explicit gates:
 - a decision on enriching normalized `legacy:*` jobs with newly resolved
   actor/domain identifiers; the current fail-closed context deliberately
   forbids that future chaining path;
-- security review of actor-ID classification, log access, and incident-query
-  procedures; and
+- effective security/privacy/operations review of actor-ID classification, log
+  access, and incident-query procedures. KAN-248 now supplies a fingerprinted
+  local draft and runbook, but it remains `NOT_EFFECTIVE` because KAN-220 and
+  every required independent decision are pending; and
 - an explicitly authorized non-production exercise proving deployed task
   delivery, KMS encryption, effective 14-day retention, access denial, search,
   and deletion behavior without exposing a prohibited value.

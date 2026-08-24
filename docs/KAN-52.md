@@ -156,5 +156,8 @@ KAN-250 must remain open until an authorized reviewer binds an exact commit and
 template revision to an approved backend/cost ceiling, deployed synthetic trace
 lookup, actual queue-to-DLQ redrive, rendered environment panels, telemetry
 access/retention/redaction/cardinality evidence, teardown, and final cost
-record. KAN-52 may enter review on the local evidence above; it must not be
-represented as deployed or fully accepted while KAN-250 remains open.
+record. KAN-248's logging-access and incident-query packet is also only a
+`NOT_EFFECTIVE` draft while KAN-220 and Security/Privacy/Operations decisions
+remain pending; it does not authorize trace queries or evidence export. KAN-52
+may enter review on the local evidence above; it must not be represented as
+deployed or fully accepted while KAN-250 remains open.

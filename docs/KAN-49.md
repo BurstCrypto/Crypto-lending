@@ -85,7 +85,9 @@ The register deliberately keeps these unresolved controls visible:
 - customer/authentication/financial/audit retention, deletion, archival, DSAR,
   and legal-hold policy;
 - deployed IAM, secret rotation, log access/retention, full-hop TLS, edge/load,
-  and queue/dashboard evidence; and
+  and queue/dashboard evidence; KAN-248 now supplies only a versioned
+  `NOT_EFFECTIVE` logging-governance draft while KAN-220 and independent
+  Security/Privacy/Operations decisions remain pending; and
 - independent dependency/image and exact-release provenance review.
 
 No provider, cloud, wallet, hosted workflow, paid review, or other billable
