@@ -8,7 +8,7 @@ interface RegisterPageProps {
   readonly searchParams?: Promise<{ readonly returnTo?: string | readonly string[] }>;
 }
 
-export default async function RegisterPage({ searchParams }: RegisterPageProps = {}) {
+export default async function RegisterPage({ searchParams }: RegisterPageProps) {
   const parameters = searchParams ? await searchParams : {};
   const returnPath = safeAccountReturnPathOrDefault(parameters.returnTo);
 
