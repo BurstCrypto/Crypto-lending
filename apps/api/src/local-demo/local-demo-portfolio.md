@@ -16,13 +16,22 @@ provide a production fallback.
    metrics, and checkpoints.
 5. Project the current observations into the KAN-67 snapshot contract, use KAN-66 with two fixed,
    accepted $1 price observations, and aggregate with `buildUnifiedPortfolio`.
-6. Invoke the real KAN-68 `BuyingPowerCalculator`. Its injected deterministic adjustment deducts
-   one percent, split explicitly across liquidity, conversion, slippage, network, and routing.
+6. Invoke the real KAN-68 `BuyingPowerCalculator`. Its idle-view adjustment explicitly reports
+   zero route costs, so supported, current, priced capital remains available in full while the
+   calculator continues to exclude stale, unsupported, unpriced, or blocked contributions. The
+   idle web response omits deductions entirely; fees appear only in a requested allocation preview.
 7. Floor scale-18 USD mantissas to integer cents and return the exact KAN-69 web response shape.
 
 With one connected wallet in each namespace, the stable fixtures contain $7,000 EVM USDC and
-$4,000 Solana USDC. The resulting portfolio is $11,000, deductions are $110, and local-demo buying
-power is $10,890. A single connected namespace receives only its proportional fixture total.
+$4,000 Solana USDC. The resulting portfolio and idle buying power are both $11,000. A single
+connected namespace receives only its proportional fixture total.
+
+`POST /api/v1/local-demo/allocation-preview` accepts one closed preset identifier and projects that
+eligible capital across three deterministic buckets. Only non-reserve capital receives a one
+percent synthetic estimate, split across liquidity, conversion, slippage, network, and routing in
+the established 50/10/10/10/20 proportions. Integer-cent largest-remainder apportionment makes
+allocations and itemized estimates sum exactly. The preview creates no operation or transaction and
+has no provider, network, or persistence dependency.
 
 ## Trust and I/O boundaries
 

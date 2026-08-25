@@ -4,11 +4,28 @@ import { of } from 'rxjs';
 import {
   LocalDemoBodyError,
   LocalDemoPrivacyInterceptor,
+  parseLocalDemoAllocationPreviewBody,
   parseLocalDemoConnectBody,
   parseLocalDemoDisconnectBody,
 } from './local-demo-http';
 
 describe('local demo HTTP boundary', () => {
+  it.each(['MORE_LIQUID', 'BALANCED', 'MORE_YIELD'] as const)(
+    'accepts only the %s allocation preset identifier',
+    (presetId) => {
+      expect(parseLocalDemoAllocationPreviewBody({ presetId })).toEqual({ presetId });
+    },
+  );
+
+  it.each([
+    {},
+    { presetId: 'CUSTOM' },
+    { presetId: 'BALANCED', amountUsdMinor: '1' },
+    Object.assign(Object.create({ presetId: 'BALANCED' }), {}),
+  ])('rejects malformed or caller-authored allocation preview input', (body) => {
+    expect(() => parseLocalDemoAllocationPreviewBody(body)).toThrow(LocalDemoBodyError);
+  });
+
   it.each(['EVM', 'SOLANA'] as const)('accepts the allowlisted %s candidate', (namespace) => {
     expect(parseLocalDemoConnectBody({ namespace })).toEqual({ namespace });
   });
