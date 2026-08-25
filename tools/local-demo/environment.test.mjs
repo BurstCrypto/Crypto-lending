@@ -248,6 +248,10 @@ describe('local demo process configuration', () => {
     );
     assert.match(
       launcher,
+      /\[nextCli, 'dev', '--webpack', '--hostname', '127\.0\.0\.1'\]/u,
+    );
+    assert.match(
+      launcher,
       /require\('next\/dist\/build\/swc'\)\.transformSync\('const localDemoCompilerProbe = true;', \{\}\)/u,
     );
     assert.match(dotenvLoader, /process\.env\.LOCAL_DEMO_MODE !== 'enabled'/u);

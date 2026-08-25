@@ -86,7 +86,9 @@ const children = [
     cwd: apiRoot,
     env: environments.api,
   }),
-  spawnOwned(process.execPath, [nextCli, 'dev', '--hostname', '127.0.0.1'], {
+  // Webpack can resolve the shared node_modules directory used by Git worktrees;
+  // Turbopack intentionally refuses files outside its detected worktree root.
+  spawnOwned(process.execPath, [nextCli, 'dev', '--webpack', '--hostname', '127.0.0.1'], {
     cwd: webRoot,
     env: environments.web,
   }),
