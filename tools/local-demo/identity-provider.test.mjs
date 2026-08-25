@@ -63,6 +63,10 @@ describe('local demo identity provider', () => {
     const selector = await fetch(authorizationUrl(origin, challenge), { redirect: 'manual' });
     assert.equal(selector.status, 200);
     assert.equal(selector.headers.get('cache-control'), 'no-store');
+    assert.match(
+      selector.headers.get('content-security-policy'),
+      /form-action 'self' http:\/\/127\.0\.0\.1:3000/u,
+    );
     assert.match(await selector.text(), /Synthetic loopback-only identity/u);
 
     const authorization = await fetch(authorizationUrl(origin, challenge, 'primary'), {

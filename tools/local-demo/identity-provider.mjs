@@ -194,7 +194,7 @@ export function createLocalDemoIdentityProvider(options = {}) {
             200,
             {
               'Content-Security-Policy':
-                "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+                "default-src 'none'; style-src 'unsafe-inline'; form-action 'self' http://127.0.0.1:3000; base-uri 'none'; frame-ancestors 'none'",
               'Content-Type': 'text/html; charset=utf-8',
             },
             identitySelectionHtml(input),
