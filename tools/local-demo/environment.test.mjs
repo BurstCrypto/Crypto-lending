@@ -204,6 +204,15 @@ describe('local demo process configuration', () => {
       JSON.parse(readFileSync(new URL('./docker-config/config.json', import.meta.url), 'utf8')),
       { auths: {}, proxies: {} },
     );
+    const localStackDockerfile = readFileSync(
+      new URL('../../infra/localstack/Dockerfile', import.meta.url),
+      'utf8',
+    );
+    assert.doesNotMatch(localStackDockerfile, /COPY\s+--chmod=/u);
+    assert.match(
+      localStackDockerfile,
+      /RUN chmod 0755 \/etc\/localstack\/init\/ready\.d\/10-create-queues\.sh/u,
+    );
   });
 
   it('runs installed CLIs directly and prevents API dotenv reload in demo mode', () => {
