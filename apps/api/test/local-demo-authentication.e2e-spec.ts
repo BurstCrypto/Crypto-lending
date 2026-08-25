@@ -354,7 +354,7 @@ describe('local demo authentication boundary (e2e)', () => {
     });
     expect(portfolio.body).toMatchObject({
       portfolioValueUsdMinor: '700000',
-      buyingPower: { status: 'AVAILABLE', amountUsdMinor: '693000' },
+      buyingPower: { status: 'AVAILABLE', amountUsdMinor: '700000', deductions: [] },
       use: 'LOCAL_DEMO_ESTIMATE_ONLY',
       mayAuthorizeFinancialAction: false,
     });
@@ -387,6 +387,65 @@ describe('local demo authentication boundary (e2e)', () => {
     });
     expect(updated.body.snapshotId).not.toBe(portfolio.body.snapshotId);
     expect(localEvm.seedWalletBalances).toHaveBeenCalledTimes(1);
+  });
+
+  it('requires the authenticated CSRF proof and returns only a synthetic allocation estimate', async () => {
+    await request(app.getHttpServer())
+      .post('/api/v1/local-demo/allocation-preview')
+      .set('Origin', LOCAL_ORIGIN)
+      .set('Cookie', cookie)
+      .send({ presetId: 'BALANCED' })
+      .expect(401);
+
+    const preview = await request(app.getHttpServer())
+      .post('/api/v1/local-demo/allocation-preview')
+      .set('Origin', LOCAL_ORIGIN)
+      .set('X-CSRF-Token', csrf)
+      .set('Cookie', cookie)
+      .send({ presetId: 'BALANCED' })
+      .expect(200);
+
+    expect(preview.headers).toMatchObject({
+      'cache-control': 'private, no-store, max-age=0',
+      vary: 'Cookie, Origin',
+      'x-crypto-lending-demo-mode': 'synthetic-local',
+    });
+    expect(preview.body).toMatchObject({
+      use: 'LOCAL_DEMO_ESTIMATE_ONLY',
+      mayAuthorizeFinancialAction: false,
+      preset: { id: 'BALANCED', label: 'Balanced blend' },
+      grossCapitalUsdMinor: '700000',
+      allocations: [
+        {
+          bucket: 'LIQUID_RESERVE',
+          percentageBasisPoints: 3000,
+          amountUsdMinor: '210000',
+        },
+        {
+          bucket: 'CONSERVATIVE_YIELD',
+          percentageBasisPoints: 4500,
+          amountUsdMinor: '315000',
+        },
+        {
+          bucket: 'BALANCED_YIELD',
+          percentageBasisPoints: 2500,
+          amountUsdMinor: '175000',
+        },
+      ],
+      deductions: [
+        { code: 'LIQUIDITY', amountUsdMinor: '2450' },
+        { code: 'CONVERSION', amountUsdMinor: '490' },
+        { code: 'SLIPPAGE', amountUsdMinor: '490' },
+        { code: 'NETWORK', amountUsdMinor: '490' },
+        { code: 'ROUTING', amountUsdMinor: '980' },
+      ],
+      totalFeesUsdMinor: '4900',
+      netPlannedCapitalUsdMinor: '695100',
+      asOf: '2026-08-24T18:30:00.000Z',
+    });
+    expect(repository.resolveSession).toHaveBeenLastCalledWith(
+      expect.objectContaining({ csrf: expect.objectContaining({ required: true }) }),
+    );
   });
 
   it('rejects aliases and wrong ports before wallet mutation', async () => {

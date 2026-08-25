@@ -3,6 +3,7 @@ import { Module } from '@nestjs/common';
 import { AccountsModule } from '../accounts/accounts.module';
 import { AuthenticationModule } from '../authentication/authentication.module';
 import { WalletsModule } from '../wallets/wallets.module';
+import { LocalDemoAllocationService } from './local-demo-allocation.service';
 import { LocalDemoPrivacyInterceptor } from './local-demo-http';
 import { LOCAL_EVM_CHAIN_RUNTIME, LoopbackLocalEvmChainRuntime } from './local-evm-chain.runtime';
 import { LocalDemoPortfolioService } from './local-demo-portfolio.service';
@@ -26,6 +27,7 @@ import { LocalDemoController } from './local-demo.controller';
     },
     LocalDemoWalletService,
     LocalDemoPortfolioService,
+    LocalDemoAllocationService,
     LocalDemoPrivacyInterceptor,
   ],
 })

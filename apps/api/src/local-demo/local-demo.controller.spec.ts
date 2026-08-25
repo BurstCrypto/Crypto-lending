@@ -11,6 +11,10 @@ import type { CurrentPrincipal } from '../accounts/auth/current-principal';
 import { parseAccountId, type AccountId } from '../accounts/domain/account-profile';
 import { loggingContext } from '../infrastructure/logging';
 import type { JobCorrelationContext } from '../infrastructure/outbox/job-envelope';
+import type {
+  LocalDemoAllocationPreviewResponse,
+  LocalDemoAllocationService,
+} from './local-demo-allocation.service';
 import type { LocalDemoRuntimeConfig } from './local-demo-runtime.config';
 import type {
   LocalDemoWalletConnection,
@@ -61,16 +65,60 @@ const PORTFOLIO = Object.freeze({
   portfolioValueUsdMinor: '1100000',
 });
 
+const ALLOCATION_PREVIEW: LocalDemoAllocationPreviewResponse = Object.freeze({
+  use: 'LOCAL_DEMO_ESTIMATE_ONLY',
+  mayAuthorizeFinancialAction: false,
+  preset: Object.freeze({
+    id: 'BALANCED',
+    label: 'Balanced blend',
+    description: 'Split capital between ready access and diversified synthetic yield.',
+  }),
+  grossCapitalUsdMinor: '1100000',
+  allocations: Object.freeze([
+    Object.freeze({
+      bucket: 'LIQUID_RESERVE',
+      label: 'Liquid reserve',
+      percentageBasisPoints: 3_000,
+      amountUsdMinor: '330000',
+    }),
+    Object.freeze({
+      bucket: 'CONSERVATIVE_YIELD',
+      label: 'Conservative yield',
+      percentageBasisPoints: 4_500,
+      amountUsdMinor: '495000',
+    }),
+    Object.freeze({
+      bucket: 'BALANCED_YIELD',
+      label: 'Balanced yield',
+      percentageBasisPoints: 2_500,
+      amountUsdMinor: '275000',
+    }),
+  ]),
+  deductions: Object.freeze([
+    Object.freeze({ code: 'LIQUIDITY', amountUsdMinor: '3850' }),
+    Object.freeze({ code: 'CONVERSION', amountUsdMinor: '770' }),
+    Object.freeze({ code: 'SLIPPAGE', amountUsdMinor: '770' }),
+    Object.freeze({ code: 'NETWORK', amountUsdMinor: '770' }),
+    Object.freeze({ code: 'ROUTING', amountUsdMinor: '1540' }),
+  ]),
+  totalFeesUsdMinor: '7700',
+  netPlannedCapitalUsdMinor: '1092300',
+  asOf: '2026-08-24T18:30:00.000Z',
+});
+
 type WalletBoundary = Pick<LocalDemoWalletService, 'connect' | 'disconnect' | 'list' | 'reset'>;
 
 interface PortfolioBoundary {
   read(accountId: AccountId, correlation: JobCorrelationContext): Promise<unknown>;
 }
 
+type AllocationBoundary = Pick<LocalDemoAllocationService, 'preview'>;
+
 interface ControllerFixture {
   readonly controller: LocalDemoController;
   readonly wallets: jest.Mocked<WalletBoundary>;
   readonly portfolio: jest.Mocked<PortfolioBoundary>;
+  readonly allocations: jest.Mocked<AllocationBoundary>;
 }
 
 interface ResponseFixture {
@@ -104,10 +152,24 @@ function controllerFixture(config: LocalDemoRuntimeConfig = ENABLED_CONFIG): Con
       return PORTFOLIO;
     }),
   };
+  const allocations: jest.Mocked<AllocationBoundary> = {
+    preview: jest.fn(async (accountId, correlation, presetId) => {
+      void accountId;
+      void correlation;
+      void presetId;
+      return ALLOCATION_PREVIEW;
+    }),
+  };
   return {
-    controller: new LocalDemoController(wallets as never, portfolio as never, config),
+    controller: new LocalDemoController(
+      wallets as never,
+      portfolio as never,
+      allocations as never,
+      config,
+    ),
     wallets,
     portfolio,
+    allocations,
   };
 }
 
@@ -180,6 +242,15 @@ describe('LocalDemoController', () => {
     expect(Reflect.getMetadata(METHOD_METADATA, prototype.readPortfolio)).toBe(RequestMethod.GET);
     expect(Reflect.getMetadata(PATH_METADATA, prototype.readPortfolio)).toBe('portfolio');
     expect(Reflect.getMetadata(HTTP_CODE_METADATA, prototype.readPortfolio)).toBe(HttpStatus.OK);
+    expect(Reflect.getMetadata(METHOD_METADATA, prototype.previewAllocation)).toBe(
+      RequestMethod.POST,
+    );
+    expect(Reflect.getMetadata(PATH_METADATA, prototype.previewAllocation)).toBe(
+      'allocation-preview',
+    );
+    expect(Reflect.getMetadata(HTTP_CODE_METADATA, prototype.previewAllocation)).toBe(
+      HttpStatus.OK,
+    );
   });
 
   it('returns only the authenticated account wallet catalog', () => {
@@ -314,6 +385,54 @@ describe('LocalDemoController', () => {
     expect(fixture.portfolio.read).not.toHaveBeenCalledWith(ACCOUNT_A, expect.anything());
   });
 
+  it('previews only an allowlisted preset for the principal account and active correlation', async () => {
+    const fixture = controllerFixture();
+    const response = responseFixture();
+
+    const result = await loggingContext.run(AUTHENTICATED_REQUEST_CORRELATION_B, () =>
+      fixture.controller.previewAllocation(
+        principal(ACCOUNT_B),
+        { presetId: 'BALANCED' },
+        response.response,
+      ),
+    );
+
+    expect(result).toBe(ALLOCATION_PREVIEW);
+    expect(fixture.allocations.preview).toHaveBeenCalledWith(
+      ACCOUNT_B,
+      AUTHENTICATED_REQUEST_CORRELATION_B,
+      'BALANCED',
+    );
+    expect(fixture.allocations.preview).not.toHaveBeenCalledWith(
+      ACCOUNT_A,
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
+  it('rejects caller-authored allocation amounts and unsupported presets before previewing', async () => {
+    const bodies: readonly unknown[] = [
+      {},
+      { presetId: 'CUSTOM' },
+      { presetId: 'BALANCED', amountUsdMinor: '1100000' },
+      { presetId: 'MORE_YIELD', accountId: ACCOUNT_B },
+    ];
+
+    for (const body of bodies) {
+      const fixture = controllerFixture();
+      const response = responseFixture();
+      const error = await captureRejected(() =>
+        loggingContext.run(AUTHENTICATED_REQUEST_CORRELATION_B, () =>
+          fixture.controller.previewAllocation(principal(ACCOUNT_B), body, response.response),
+        ),
+      );
+      expect(error).toBeInstanceOf(BadRequestException);
+      expect((error as BadRequestException).getStatus()).toBe(HttpStatus.BAD_REQUEST);
+      expect(fixture.allocations.preview).not.toHaveBeenCalled();
+      expect(response.response.setHeader).not.toHaveBeenCalled();
+    }
+  });
+
   it('uses one generic redacted 503 contract for every dependency failure', async () => {
     const list = controllerFixture();
     const listResponse = responseFixture();
@@ -368,6 +487,22 @@ describe('LocalDemoController', () => {
       ),
       portfolioResponse,
     );
+
+    const allocation = controllerFixture();
+    const allocationResponse = responseFixture();
+    allocation.allocations.preview.mockRejectedValueOnce(new Error(SECRET_CANARY));
+    expectUnavailable(
+      await captureRejected(() =>
+        loggingContext.run(AUTHENTICATED_REQUEST_CORRELATION_B, () =>
+          allocation.controller.previewAllocation(
+            principal(ACCOUNT_B),
+            { presetId: 'BALANCED' },
+            allocationResponse.response,
+          ),
+        ),
+      ),
+      allocationResponse,
+    );
   });
 
   it('maps a missing correlation context to the same generic 503 without calling a service', async () => {
@@ -394,6 +529,20 @@ describe('LocalDemoController', () => {
       portfolioResponse,
     );
     expect(portfolio.portfolio.read).not.toHaveBeenCalled();
+
+    const allocation = controllerFixture();
+    const allocationResponse = responseFixture();
+    expectUnavailable(
+      await captureRejected(() =>
+        allocation.controller.previewAllocation(
+          principal(ACCOUNT_A),
+          { presetId: 'BALANCED' },
+          allocationResponse.response,
+        ),
+      ),
+      allocationResponse,
+    );
+    expect(allocation.allocations.preview).not.toHaveBeenCalled();
   });
 
   it('returns a generic 404 and performs no work while the runtime is disabled', async () => {
@@ -419,8 +568,21 @@ describe('LocalDemoController', () => {
     const portfolioError = await captureRejected(() =>
       fixture.controller.readPortfolio(principal(ACCOUNT_A), responseFixture().response),
     );
+    const allocationError = await captureRejected(() =>
+      fixture.controller.previewAllocation(
+        principal(ACCOUNT_A),
+        { presetId: 'BALANCED' },
+        responseFixture().response,
+      ),
+    );
 
-    for (const error of [listError, disconnectError, connectError, portfolioError]) {
+    for (const error of [
+      listError,
+      disconnectError,
+      connectError,
+      portfolioError,
+      allocationError,
+    ]) {
       expect(error).toBeInstanceOf(NotFoundException);
       expect((error as NotFoundException).getStatus()).toBe(HttpStatus.NOT_FOUND);
       expect(JSON.stringify((error as NotFoundException).getResponse())).toContain('Not found');
@@ -432,5 +594,6 @@ describe('LocalDemoController', () => {
     expect(fixture.wallets.connect).not.toHaveBeenCalled();
     expect(fixture.wallets.disconnect).not.toHaveBeenCalled();
     expect(fixture.portfolio.read).not.toHaveBeenCalled();
+    expect(fixture.allocations.preview).not.toHaveBeenCalled();
   });
 });

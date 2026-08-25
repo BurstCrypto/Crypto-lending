@@ -7,6 +7,13 @@ import {
 import type { SchemaObject } from '@nestjs/swagger';
 import type { Observable } from 'rxjs';
 
+import {
+  LOCAL_DEMO_ALLOCATION_BUCKETS,
+  LOCAL_DEMO_ALLOCATION_DEDUCTION_CODES,
+  LOCAL_DEMO_ALLOCATION_PRESET_IDS,
+  type LocalDemoAllocationPresetId,
+} from './local-demo-allocation.service';
+
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 
 export type LocalDemoWalletNamespace = 'EVM' | 'SOLANA';
@@ -64,6 +71,16 @@ export function parseLocalDemoDisconnectBody(value: unknown): Readonly<{ connect
   return Object.freeze({ connectionId: record.connectionId });
 }
 
+export function parseLocalDemoAllocationPreviewBody(
+  value: unknown,
+): Readonly<{ presetId: LocalDemoAllocationPresetId }> {
+  const record = exactRecord(value, ['presetId']);
+  if (!LOCAL_DEMO_ALLOCATION_PRESET_IDS.includes(record.presetId as LocalDemoAllocationPresetId)) {
+    return fail();
+  }
+  return Object.freeze({ presetId: record.presetId as LocalDemoAllocationPresetId });
+}
+
 interface HeaderWriter {
   setHeader(name: string, value: string): void;
 }
@@ -94,6 +111,79 @@ export const LOCAL_DEMO_DISCONNECT_BODY_SCHEMA: SchemaObject = Object.freeze({
   required: ['connectionId'],
   properties: {
     connectionId: { type: 'string', format: 'uuid' },
+  },
+});
+
+export const LOCAL_DEMO_ALLOCATION_PREVIEW_BODY_SCHEMA: SchemaObject = Object.freeze({
+  type: 'object',
+  additionalProperties: false,
+  required: ['presetId'],
+  properties: {
+    presetId: { type: 'string', enum: [...LOCAL_DEMO_ALLOCATION_PRESET_IDS] },
+  },
+});
+
+export const LOCAL_DEMO_ALLOCATION_PREVIEW_RESPONSE_SCHEMA: SchemaObject = Object.freeze({
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'use',
+    'mayAuthorizeFinancialAction',
+    'preset',
+    'grossCapitalUsdMinor',
+    'allocations',
+    'deductions',
+    'totalFeesUsdMinor',
+    'netPlannedCapitalUsdMinor',
+    'asOf',
+  ],
+  properties: {
+    use: { type: 'string', enum: ['LOCAL_DEMO_ESTIMATE_ONLY'] },
+    mayAuthorizeFinancialAction: { type: 'boolean', enum: [false] },
+    preset: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['id', 'label', 'description'],
+      properties: {
+        id: { type: 'string', enum: [...LOCAL_DEMO_ALLOCATION_PRESET_IDS] },
+        label: { type: 'string' },
+        description: { type: 'string' },
+      },
+    },
+    grossCapitalUsdMinor: { type: 'string', pattern: '^(?:0|[1-9][0-9]*)$' },
+    allocations: {
+      type: 'array',
+      minItems: 3,
+      maxItems: 3,
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['bucket', 'label', 'percentageBasisPoints', 'amountUsdMinor'],
+        properties: {
+          bucket: { type: 'string', enum: [...LOCAL_DEMO_ALLOCATION_BUCKETS] },
+          label: { type: 'string' },
+          percentageBasisPoints: { type: 'integer', minimum: 0, maximum: 10_000 },
+          amountUsdMinor: { type: 'string', pattern: '^(?:0|[1-9][0-9]*)$' },
+        },
+      },
+    },
+    deductions: {
+      type: 'array',
+      minItems: 5,
+      maxItems: 5,
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['code', 'amountUsdMinor'],
+        properties: {
+          code: { type: 'string', enum: [...LOCAL_DEMO_ALLOCATION_DEDUCTION_CODES] },
+          amountUsdMinor: { type: 'string', pattern: '^(?:0|[1-9][0-9]*)$' },
+        },
+      },
+    },
+    totalFeesUsdMinor: { type: 'string', pattern: '^(?:0|[1-9][0-9]*)$' },
+    netPlannedCapitalUsdMinor: { type: 'string', pattern: '^(?:0|[1-9][0-9]*)$' },
+    asOf: { type: 'string', format: 'date-time' },
   },
 });
 

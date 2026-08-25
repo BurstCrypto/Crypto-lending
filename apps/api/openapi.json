@@ -1047,6 +1047,202 @@
         ]
       }
     },
+    "/api/v1/local-demo/allocation-preview": {
+      "post": {
+        "operationId": "LocalDemoController_previewAllocation",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "presetId": {
+                    "enum": [
+                      "MORE_LIQUID",
+                      "BALANCED",
+                      "MORE_YIELD"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "presetId"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "allocations": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "amountUsdMinor": {
+                            "pattern": "^(?:0|[1-9][0-9]*)$",
+                            "type": "string"
+                          },
+                          "bucket": {
+                            "enum": [
+                              "LIQUID_RESERVE",
+                              "CONSERVATIVE_YIELD",
+                              "BALANCED_YIELD"
+                            ],
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "percentageBasisPoints": {
+                            "maximum": 10000,
+                            "minimum": 0,
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "bucket",
+                          "label",
+                          "percentageBasisPoints",
+                          "amountUsdMinor"
+                        ],
+                        "type": "object"
+                      },
+                      "maxItems": 3,
+                      "minItems": 3,
+                      "type": "array"
+                    },
+                    "asOf": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "deductions": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "amountUsdMinor": {
+                            "pattern": "^(?:0|[1-9][0-9]*)$",
+                            "type": "string"
+                          },
+                          "code": {
+                            "enum": [
+                              "LIQUIDITY",
+                              "CONVERSION",
+                              "SLIPPAGE",
+                              "NETWORK",
+                              "ROUTING"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "code",
+                          "amountUsdMinor"
+                        ],
+                        "type": "object"
+                      },
+                      "maxItems": 5,
+                      "minItems": 5,
+                      "type": "array"
+                    },
+                    "grossCapitalUsdMinor": {
+                      "pattern": "^(?:0|[1-9][0-9]*)$",
+                      "type": "string"
+                    },
+                    "mayAuthorizeFinancialAction": {
+                      "enum": [
+                        false
+                      ],
+                      "type": "boolean"
+                    },
+                    "netPlannedCapitalUsdMinor": {
+                      "pattern": "^(?:0|[1-9][0-9]*)$",
+                      "type": "string"
+                    },
+                    "preset": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "description": {
+                          "type": "string"
+                        },
+                        "id": {
+                          "enum": [
+                            "MORE_LIQUID",
+                            "BALANCED",
+                            "MORE_YIELD"
+                          ],
+                          "type": "string"
+                        },
+                        "label": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "label",
+                        "description"
+                      ],
+                      "type": "object"
+                    },
+                    "totalFeesUsdMinor": {
+                      "pattern": "^(?:0|[1-9][0-9]*)$",
+                      "type": "string"
+                    },
+                    "use": {
+                      "enum": [
+                        "LOCAL_DEMO_ESTIMATE_ONLY"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "use",
+                    "mayAuthorizeFinancialAction",
+                    "preset",
+                    "grossCapitalUsdMinor",
+                    "allocations",
+                    "deductions",
+                    "totalFeesUsdMinor",
+                    "netPlannedCapitalUsdMinor",
+                    "asOf"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Exact-cent, non-authorizing allocation and fee estimate"
+          },
+          "400": {
+            "description": "Body is malformed or contains unsupported fields"
+          },
+          "401": {
+            "description": "Missing session, origin, or CSRF proof"
+          },
+          "404": {
+            "description": "Synthetic local demo runtime is disabled"
+          },
+          "503": {
+            "description": "A complete synthetic snapshot is unavailable"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Preview one synthetic allocation without authorizing an action",
+        "tags": [
+          "local-demo"
+        ]
+      }
+    },
     "/api/v1/local-demo/portfolio": {
       "get": {
         "operationId": "LocalDemoController_readPortfolio",

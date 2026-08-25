@@ -184,19 +184,16 @@ function assertConnectionProjections(wallets: readonly LocalDemoWalletConnection
   }
 }
 
-class DeterministicLocalDemoAdjustment implements BuyingPowerAdjustmentPort {
+/**
+ * The portfolio view reports idle, eligible capital before a route has been
+ * selected. Cost estimates belong to an allocation preview, so this adapter
+ * explicitly supplies zero for every required adjustment category. Eligibility
+ * exclusions still come from BuyingPowerCalculator before this boundary.
+ */
+class DeterministicLocalDemoIdleAdjustment implements BuyingPowerAdjustmentPort {
   async evaluate(request: BuyingPowerAdjustmentRequest): Promise<unknown> {
     const gross = BigInt(request.grossUsdValueMantissa);
     if (gross % SCALE_18_PER_USD_CENT !== 0n) throw new TypeError('non-cent demo valuation');
-    const grossCents = gross / SCALE_18_PER_USD_CENT;
-    const totalCents = grossCents / 100n;
-    const liquidityCents = totalCents / 2n;
-    const conversionCents = totalCents / 10n;
-    const slippageCents = totalCents / 10n;
-    const networkCents = totalCents / 10n;
-    const routingCents =
-      totalCents - liquidityCents - conversionCents - slippageCents - networkCents;
-    const scale = (cents: bigint): string => (cents * SCALE_18_PER_USD_CENT).toString();
 
     return Object.freeze({
       status: 'AVAILABLE',
@@ -205,11 +202,11 @@ class DeterministicLocalDemoAdjustment implements BuyingPowerAdjustmentPort {
       quotedAt: QUOTE_TIME,
       validUntil: QUOTE_EXPIRY,
       deductions: Object.freeze({
-        liquidity: scale(liquidityCents),
-        conversion: scale(conversionCents),
-        slippage: scale(slippageCents),
-        network: scale(networkCents),
-        routing: scale(routingCents),
+        liquidity: '0',
+        conversion: '0',
+        slippage: '0',
+        network: '0',
+        routing: '0',
       }),
     });
   }
@@ -403,7 +400,7 @@ function priceEvidence(
 }
 
 async function calculateBuyingPower(unified: UnifiedPortfolio): Promise<BuyingPowerResult> {
-  const result = await new BuyingPowerCalculator(new DeterministicLocalDemoAdjustment(), {
+  const result = await new BuyingPowerCalculator(new DeterministicLocalDemoIdleAdjustment(), {
     now: () => LOCAL_DEMO_PORTFOLIO_AS_OF,
   }).calculate({
     portfolioSnapshotId: unified.balanceSnapshot.snapshotId,
@@ -498,13 +495,7 @@ function projectWebResponse(
       status: 'AVAILABLE',
       amountUsdMinor: totalBuyingPowerMinor,
       freshness: 'CURRENT',
-      deductions: Object.freeze([
-        deduction('LIQUIDITY', buyingPower.totalDeductions.liquidity),
-        deduction('CONVERSION', buyingPower.totalDeductions.conversion),
-        deduction('SLIPPAGE', buyingPower.totalDeductions.slippage),
-        deduction('NETWORK', buyingPower.totalDeductions.network),
-        deduction('ROUTING', buyingPower.totalDeductions.routing),
-      ]),
+      deductions: Object.freeze([]),
       reasons: Object.freeze([]),
     }),
     wallets: Object.freeze(wallets),
@@ -557,13 +548,6 @@ function requiredContribution(
   const contribution = contributions.get(source.observationId);
   if (contribution === undefined) throw new TypeError('missing demo buying power contribution');
   return contribution;
-}
-
-function deduction(
-  code: LocalDemoBuyingPowerDeductionCode,
-  mantissa: string,
-): Readonly<{ code: LocalDemoBuyingPowerDeductionCode; amountUsdMinor: string }> {
-  return Object.freeze({ code, amountUsdMinor: usdMinor(mantissa) });
 }
 
 function usdMinor(scale18Mantissa: string): string {

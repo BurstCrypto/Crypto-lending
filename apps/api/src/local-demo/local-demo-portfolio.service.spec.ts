@@ -168,29 +168,21 @@ describe('LocalDemoPortfolioService', () => {
         mayAuthorizeFinancialAction: false,
         buyingPower: {
           status: 'AVAILABLE',
-          amountUsdMinor: '1089000',
+          amountUsdMinor: '1100000',
           freshness: 'CURRENT',
           reasons: [],
-          deductions: [
-            { code: 'LIQUIDITY', amountUsdMinor: '5500' },
-            { code: 'CONVERSION', amountUsdMinor: '1100' },
-            { code: 'SLIPPAGE', amountUsdMinor: '1100' },
-            { code: 'NETWORK', amountUsdMinor: '1100' },
-            { code: 'ROUTING', amountUsdMinor: '2200' },
-          ],
+          deductions: [],
         },
       });
-      expect(
-        result.buyingPower.deductions.every(({ amountUsdMinor }) => BigInt(amountUsdMinor) > 0n),
-      ).toBe(true);
+      expect(result.buyingPower.deductions).toEqual([]);
       expect(result.wallets).toHaveLength(2);
       expect(result.wallets.map(({ portfolioValueUsdMinor }) => portfolioValueUsdMinor)).toEqual([
         '700000',
         '400000',
       ]);
       expect(result.wallets.map(({ buyingPowerUsdMinor }) => buyingPowerUsdMinor)).toEqual([
-        '693000',
-        '396000',
+        '700000',
+        '400000',
       ]);
       expect(
         result.wallets.flatMap(({ chains }) => chains).map(({ networkId }) => networkId),
@@ -306,8 +298,8 @@ describe('LocalDemoPortfolioService', () => {
   });
 
   it.each([
-    ['EVM', ACCOUNT_A_WALLETS.slice(0, 1), '700000', '693000'],
-    ['SOLANA', ACCOUNT_A_WALLETS.slice(1), '400000', '396000'],
+    ['EVM', ACCOUNT_A_WALLETS.slice(0, 1), '700000', '700000'],
+    ['SOLANA', ACCOUNT_A_WALLETS.slice(1), '400000', '400000'],
   ] as const)(
     'returns a proportional %s-only portfolio',
     async (_namespace, wallets, portfolioMinor, buyingPowerMinor) => {

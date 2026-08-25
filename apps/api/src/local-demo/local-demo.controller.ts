@@ -34,14 +34,21 @@ import { CurrentPrincipal } from '../accounts/auth/current-principal.decorator';
 import { loggingContext } from '../infrastructure/logging';
 import { currentJobCorrelationContext } from '../infrastructure/outbox/job-envelope';
 import {
+  LOCAL_DEMO_ALLOCATION_PREVIEW_BODY_SCHEMA,
+  LOCAL_DEMO_ALLOCATION_PREVIEW_RESPONSE_SCHEMA,
   LOCAL_DEMO_CONNECT_BODY_SCHEMA,
   LOCAL_DEMO_DISCONNECT_BODY_SCHEMA,
   LOCAL_DEMO_WALLET_CONNECTION_SCHEMA,
   LocalDemoBodyError,
   LocalDemoPrivacyInterceptor,
+  parseLocalDemoAllocationPreviewBody,
   parseLocalDemoConnectBody,
   parseLocalDemoDisconnectBody,
 } from './local-demo-http';
+import {
+  LocalDemoAllocationService,
+  type LocalDemoAllocationPreviewResponse,
+} from './local-demo-allocation.service';
 import { LocalDemoPortfolioService } from './local-demo-portfolio.service';
 import {
   LOCAL_DEMO_RUNTIME_CONFIG,
@@ -84,6 +91,7 @@ export class LocalDemoController {
   constructor(
     private readonly wallets: LocalDemoWalletService,
     private readonly portfolio: LocalDemoPortfolioService,
+    private readonly allocations: LocalDemoAllocationService,
     @Inject(LOCAL_DEMO_RUNTIME_CONFIG) private readonly config: LocalDemoRuntimeConfig,
   ) {}
 
@@ -188,6 +196,39 @@ export class LocalDemoController {
       const correlation = currentJobCorrelationContext();
       if (correlation === undefined) throw new Error('Missing local demo correlation context');
       return await this.portfolio.read(principal.accountId, correlation);
+    } catch {
+      return unavailable(response);
+    }
+  }
+
+  @Post('allocation-preview')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Preview one synthetic allocation without authorizing an action' })
+  @ApiBody({ schema: LOCAL_DEMO_ALLOCATION_PREVIEW_BODY_SCHEMA })
+  @ApiOkResponse({
+    description: 'Exact-cent, non-authorizing allocation and fee estimate',
+    schema: LOCAL_DEMO_ALLOCATION_PREVIEW_RESPONSE_SCHEMA,
+  })
+  @ApiBadRequestResponse({ description: 'Body is malformed or contains unsupported fields' })
+  @ApiUnauthorizedResponse({ description: 'Missing session, origin, or CSRF proof' })
+  @ApiNotFoundResponse({ description: 'Synthetic local demo runtime is disabled' })
+  @ApiResponse({ status: 503, description: 'A complete synthetic snapshot is unavailable' })
+  async previewAllocation(
+    @CurrentPrincipal() principal: AuthenticatedPrincipal,
+    @Body() body: unknown,
+    @Res({ passthrough: true }) response: HeaderWriter,
+  ): Promise<LocalDemoAllocationPreviewResponse> {
+    this.assertEnabled();
+    let presetId: ReturnType<typeof parseLocalDemoAllocationPreviewBody>['presetId'];
+    try {
+      presetId = parseLocalDemoAllocationPreviewBody(body).presetId;
+    } catch (error) {
+      return badBody(error);
+    }
+    try {
+      const correlation = currentJobCorrelationContext();
+      if (correlation === undefined) throw new Error('Missing local demo correlation context');
+      return await this.allocations.preview(principal.accountId, correlation, presetId);
     } catch {
       return unavailable(response);
     }
