@@ -1,4 +1,9 @@
-import { Injectable, type CallHandler, type ExecutionContext, type NestInterceptor } from '@nestjs/common';
+import {
+  Injectable,
+  type CallHandler,
+  type ExecutionContext,
+  type NestInterceptor,
+} from '@nestjs/common';
 import type { SchemaObject } from '@nestjs/swagger';
 import type { Observable } from 'rxjs';
 
@@ -51,9 +56,7 @@ export function parseLocalDemoConnectBody(
   return Object.freeze({ namespace: record.namespace });
 }
 
-export function parseLocalDemoDisconnectBody(
-  value: unknown,
-): Readonly<{ connectionId: string }> {
+export function parseLocalDemoDisconnectBody(value: unknown): Readonly<{ connectionId: string }> {
   const record = exactRecord(value, ['connectionId']);
   if (typeof record.connectionId !== 'string' || !UUID_V4.test(record.connectionId)) {
     return fail();

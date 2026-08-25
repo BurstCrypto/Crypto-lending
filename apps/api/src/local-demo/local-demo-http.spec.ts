@@ -42,9 +42,6 @@ describe('local demo HTTP boundary', () => {
 
     expect(setHeader).toHaveBeenCalledWith('Cache-Control', 'private, no-store, max-age=0');
     expect(setHeader).toHaveBeenCalledWith('Vary', 'Cookie, Origin');
-    expect(setHeader).toHaveBeenCalledWith(
-      'X-Crypto-Lending-Demo-Mode',
-      'synthetic-local',
-    );
+    expect(setHeader).toHaveBeenCalledWith('X-Crypto-Lending-Demo-Mode', 'synthetic-local');
   });
 });

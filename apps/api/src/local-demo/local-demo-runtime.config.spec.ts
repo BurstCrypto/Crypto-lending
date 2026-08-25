@@ -49,7 +49,7 @@ describe('local demo runtime configuration', () => {
     );
   });
 
-  it.each(['HTTPS_PROXY', 'EVM_RPC_URL', 'SOLANA_RPC_URL', 'WALLETCONNECT_PROJECT_ID']) (
+  it.each(['HTTPS_PROXY', 'EVM_RPC_URL', 'SOLANA_RPC_URL', 'WALLETCONNECT_PROJECT_ID'])(
     'rejects external configuration through %s',
     (field) => {
       const environment = enabledEnvironment();
