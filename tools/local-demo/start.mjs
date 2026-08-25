@@ -25,7 +25,7 @@ const nextCli = require.resolve('next/dist/bin/next');
 const tsxCli = require.resolve('tsx/cli');
 // Next can otherwise download an SWC fallback on first use. Prove the locked,
 // installed native compiler is usable before touching Docker.
-require('next/dist/build/swc').getBindingsSync();
+require('next/dist/build/swc').transformSync('const localDemoCompilerProbe = true;', {});
 const environments = createLocalDemoEnvironments();
 
 runChecked(process.execPath, [tsxCli, 'tools/local-demo/configuration-preflight.ts'], {

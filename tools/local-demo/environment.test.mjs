@@ -214,7 +214,10 @@ describe('local demo process configuration', () => {
     );
     assert.doesNotMatch(launcher, /(?:runChecked|spawnOwned)\('npm'/u);
     assert.match(launcher, /require\.resolve\('next\/dist\/bin\/next'\)/u);
-    assert.match(launcher, /require\('next\/dist\/build\/swc'\)\.getBindingsSync\(\)/u);
+    assert.match(
+      launcher,
+      /require\('next\/dist\/build\/swc'\)\.transformSync\('const localDemoCompilerProbe = true;', \{\}\)/u,
+    );
     assert.match(dotenvLoader, /process\.env\.LOCAL_DEMO_MODE !== 'enabled'/u);
   });
 });
