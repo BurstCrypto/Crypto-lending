@@ -24,6 +24,10 @@ evidence. Every screen displays a synthetic-data banner while the mode is on.
   readable across application restarts while the demo-owned database volume
   exists. Transaction, session, CSRF, wallet-challenge, and identity-provider
   signing keys remain ephemeral; restarting requires a fresh browser login.
+  The stable fixture keys are publicly derivable from this source and provide
+  continuity, not confidentiality evidence. Changing their derivation labels,
+  key IDs, or wallet-key versions requires a demo-owned volume teardown unless
+  a corresponding multi-key migration is implemented.
 - Child processes receive allowlisted operating-system variables instead of the
   caller's cloud, proxy, database, or vendor environment.
 - Preflight refuses ignored root, API, or web environment files that could be

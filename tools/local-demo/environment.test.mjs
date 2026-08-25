@@ -52,7 +52,13 @@ describe('local demo process configuration', () => {
     deterministicRandom.value = 0;
     const environments = createLocalDemoEnvironments({
       randomBytes: deterministicRandom,
-      sourceEnvironment: { PATH: 'bin', AWS_PROFILE: 'forbidden' },
+      sourceEnvironment: {
+        PATH: 'bin',
+        AWS_PROFILE: 'forbidden',
+        AUTH_IDENTITY_HMAC_KEY: 'forbidden',
+        WALLET_IDENTITY_HMAC_KEY: 'forbidden',
+        WALLET_METADATA_SEAL_KEY: 'forbidden',
+      },
     });
     const restartedEnvironments = createLocalDemoEnvironments({
       randomBytes: deterministicRandom,
@@ -120,6 +126,7 @@ describe('local demo process configuration', () => {
       'WALLET_METADATA_SEAL_KEY',
     ]) {
       assert.equal(environments.api[name], restartedEnvironments.api[name]);
+      assert.notEqual(environments.api[name], 'forbidden');
     }
     for (const name of [
       'AUTH_PREAUTH_SEAL_KEY',
