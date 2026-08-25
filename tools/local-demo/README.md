@@ -143,10 +143,14 @@ them. The demo-owned dependency containers remain available for a quick restart.
    both fixture wallets connected, each is `$11,000.00`; no hypothetical route
    fee is deducted before an action is chosen. Inspect the source wallet, chain,
    asset, freshness, and masked-address details.
-9. Choose **More liquid**, **Balanced blend**, or **More yield**. Only this
-   explicit choice requests an allocation preview. Review the exact bucket
-   amounts, separately itemized synthetic fees, and net planned capital. Change
-   blends to see the estimate recalculate without moving funds.
+9. Compare the fixed illustrative APYs on **More liquid**, **Balanced blend**,
+   and **More yield**, then choose a blend. Only this explicit choice requests
+   an allocation preview or reveals fee-derived timing. Review the exact bucket
+   amounts and APYs, separately itemized synthetic fees, net planned capital,
+   projected annual growth, and the first whole day when projected yield exceeds
+   entry fees by at least one cent. Change blends to see the 365-day
+   straight-line estimate recalculate without moving funds. These rates are
+   synthetic demo assumptions, not live or guaranteed returns.
 10. Confirm the page still states **No transaction was created**. Refresh the
     browser to exercise wallet and session restoration. Disconnect a wallet to
     remove its contribution.
