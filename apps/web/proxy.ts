@@ -22,8 +22,8 @@ function applyAccountShellHeaders(response: NextResponse): NextResponse {
   return response;
 }
 
-function isAccountShellPath(pathname: string): boolean {
-  return pathname === '/account' || pathname.startsWith('/account/');
+function isProtectedShellPath(pathname: string): boolean {
+  return pathname === '/portfolio' || pathname === '/account' || pathname.startsWith('/account/');
 }
 
 function authenticationConfigurationUnavailable(): NextResponse {
@@ -36,7 +36,7 @@ function authenticationConfigurationUnavailable(): NextResponse {
 }
 
 export function proxy(request: NextRequest) {
-  if (isAccountShellPath(request.nextUrl.pathname)) {
+  if (isProtectedShellPath(request.nextUrl.pathname)) {
     const decision = decideProtectedAccountShell({
       cookieHeader: request.headers.get('cookie'),
       requestUrl: request.nextUrl,
@@ -78,5 +78,5 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/internal/wallet-lab/:path*', '/account/:path*'],
+  matcher: ['/internal/wallet-lab/:path*', '/account/:path*', '/portfolio'],
 };

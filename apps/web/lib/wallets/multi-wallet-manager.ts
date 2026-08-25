@@ -7,6 +7,7 @@ import {
   type WalletAccount,
   type WalletAdapter,
   type WalletConnection,
+  type WalletDisconnectOptions,
   type WalletEvent,
 } from './wallet-adapter';
 import { assertLifecycleWalletConnection } from './wallet-chain-identity';
@@ -341,9 +342,10 @@ export class MultiWalletManager {
     }
   }
 
-  async disconnect(connectionId: string): Promise<void> {
+  async disconnect(connectionId: string, options: WalletDisconnectOptions = {}): Promise<void> {
     this.requireAvailable();
     assertSafeText(connectionId, MAX_IDENTIFIER_LENGTH);
+    this.assertOperationMayComplete(options.signal);
     const entry = this.entries.get(connectionId);
     if (entry === undefined) throw new WalletLifecycleError('wallet-unavailable');
     if (entry.status === 'disconnected' || entry.status === 'session-expired') return;
@@ -359,9 +361,13 @@ export class MultiWalletManager {
 
     if (wasLive && adapter !== undefined) {
       try {
-        await adapter.disconnect(connectionId);
-      } catch {
-        throw new WalletLifecycleError('provider-operation-failed');
+        await adapter.disconnect(
+          connectionId,
+          options.signal === undefined ? undefined : { signal: options.signal },
+        );
+        this.assertOperationMayComplete(options.signal);
+      } catch (error) {
+        throw lifecycleError(error, options.signal);
       }
     }
     if (persistenceError !== undefined) throw persistenceError;

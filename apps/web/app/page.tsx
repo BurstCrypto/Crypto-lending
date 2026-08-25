@@ -18,7 +18,7 @@ export default function HomePage() {
           <span>Crypto Lending</span>
         </Link>
         <nav className="site-navigation" aria-label="Account">
-          <Link href="/portfolio">Portfolio preview</Link>
+          <Link href="/portfolio">Portfolio</Link>
           <Link href="/login">Sign in</Link>
           <Link className="navigation-action" href="/register">
             Create account

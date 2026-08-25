@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import type { LocalDemoApiClient, LocalDemoWalletProjection } from '../lib/local-demo/local-demo-client';
+import type {
+  LocalDemoApiClient,
+  LocalDemoWalletProjection,
+} from '../lib/local-demo/local-demo-client';
 import {
   LOCAL_DEMO_CONNECTOR_IDS,
   LocalDemoWalletAdapter,
@@ -63,13 +66,60 @@ describe('LocalDemoWalletAdapter', () => {
 
     await expect(adapter.restore()).resolves.toMatchObject({ restored: true });
     await adapter.disconnect(EVM_WALLET.connectionId);
-    expect(disconnectWallet).toHaveBeenCalledWith(EVM_WALLET.connectionId);
+    expect(disconnectWallet).toHaveBeenCalledWith(EVM_WALLET.connectionId, undefined);
     await expect(adapter.restore()).resolves.toBeNull();
   });
 
+  it('threads cancellation to the same-origin disconnect request and retains uncertain state', async () => {
+    const disconnectWallet = vi.fn(
+      async (_connectionId: string, signal?: AbortSignal): Promise<void> =>
+        new Promise((_resolve, reject) => {
+          if (signal?.aborted === true) {
+            reject(new DOMException('Request aborted', 'AbortError'));
+            return;
+          }
+          signal?.addEventListener(
+            'abort',
+            () => reject(new DOMException('Request aborted', 'AbortError')),
+            { once: true },
+          );
+        }),
+    );
+    const adapter = new LocalDemoWalletAdapter(
+      'EVM',
+      client({ disconnectWallet } as Partial<LocalDemoApiClient>),
+      EVM_WALLET,
+    );
+    const controller = new AbortController();
+
+    const pending = adapter.disconnect(EVM_WALLET.connectionId, { signal: controller.signal });
+    expect(disconnectWallet).toHaveBeenCalledWith(EVM_WALLET.connectionId, controller.signal);
+    controller.abort();
+
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+    await expect(adapter.restore()).resolves.toBeNull();
+  });
+
+  it('does not revoke or call the API for a pre-aborted disconnect', async () => {
+    const disconnectWallet = vi.fn(async () => undefined);
+    const adapter = new LocalDemoWalletAdapter(
+      'EVM',
+      client({ disconnectWallet } as Partial<LocalDemoApiClient>),
+      EVM_WALLET,
+    );
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      adapter.disconnect(EVM_WALLET.connectionId, { signal: controller.signal }),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+    expect(disconnectWallet).not.toHaveBeenCalled();
+    await expect(adapter.restore()).resolves.toMatchObject({ restored: true });
+  });
+
   it('rejects a projection for the other namespace before it becomes adapter state', () => {
-    expect(
-      () => new LocalDemoWalletAdapter('SOLANA', client(), EVM_WALLET),
-    ).toThrow(LocalDemoWalletAdapterError);
+    expect(() => new LocalDemoWalletAdapter('SOLANA', client(), EVM_WALLET)).toThrow(
+      LocalDemoWalletAdapterError,
+    );
   });
 });

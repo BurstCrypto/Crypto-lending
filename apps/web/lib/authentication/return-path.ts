@@ -1,5 +1,6 @@
 const MAX_RETURN_PATH_LENGTH = 512;
 const ACCOUNT_PATH = '/account';
+const PORTFOLIO_PATH = '/portfolio';
 const FORBIDDEN_ENCODED_PATH_CHARACTER = /%(?:25)*(?:2f|5c)/iu;
 const FORBIDDEN_ENCODED_CONTROL = /%(?:25)*(?:0[0-9a-f]|1[0-9a-f]|7f)/iu;
 const LOOP_QUERY_KEYS = new Set([
@@ -55,7 +56,7 @@ function assertDecodedLayersSafe(value: string): void {
 }
 
 /**
- * Accepts only the protected account route family. This deliberately cannot be
+ * Accepts only the protected account route family or exact portfolio screen. This cannot be
  * reused as an arbitrary local redirect validator.
  */
 export function parseSafeAccountReturnPath(value: unknown): string {
@@ -87,7 +88,9 @@ export function parseSafeAccountReturnPath(value: unknown): string {
     parsed.username !== '' ||
     parsed.password !== '' ||
     parsed.hash !== '' ||
-    (parsed.pathname !== ACCOUNT_PATH && !parsed.pathname.startsWith(`${ACCOUNT_PATH}/`))
+    (parsed.pathname !== PORTFOLIO_PATH &&
+      parsed.pathname !== ACCOUNT_PATH &&
+      !parsed.pathname.startsWith(`${ACCOUNT_PATH}/`))
   ) {
     reject();
   }

@@ -710,6 +710,163 @@ h1 {
   text-transform: uppercase;
 }
 
+.local-demo-wallet-panel {
+  display: grid;
+  gap: 1.5rem;
+  margin-block: 2rem;
+  padding: clamp(1.35rem, 4vw, 2.5rem);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 1.25rem;
+  box-shadow: var(--shadow);
+}
+
+.local-demo-wallet-heading,
+.portfolio-refresh-row,
+.local-demo-wallet-roster li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.local-demo-wallet-heading h1 {
+  max-width: 19ch;
+  margin: 0.35rem 0 0;
+  font-size: clamp(2rem, 5vw, 3.65rem);
+  line-height: 1.02;
+}
+
+.local-demo-proof-badge {
+  padding: 0.5rem 0.75rem;
+  color: var(--accent-strong);
+  background: rgba(112, 225, 179, 0.08);
+  border: 1px solid rgba(112, 225, 179, 0.25);
+  border-radius: 999px;
+  font-size: 0.74rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.local-demo-financial-notice {
+  margin: 0;
+}
+
+.local-demo-wallet-choices {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.8rem;
+}
+
+.local-demo-wallet-choices button,
+.local-demo-wallet-roster button,
+.portfolio-secondary-action,
+.account-portfolio-link {
+  min-height: 2.75rem;
+  padding: 0.7rem 0.9rem;
+  color: var(--text);
+  background: var(--surface-strong);
+  border: 1px solid var(--border);
+  border-radius: 0.7rem;
+  font: inherit;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.local-demo-wallet-choices button {
+  display: grid;
+  gap: 0.3rem;
+  min-height: 5rem;
+  text-align: left;
+}
+
+.local-demo-wallet-choices small,
+.local-demo-wallet-roster small,
+.local-demo-wallet-roster span,
+.portfolio-refresh-row p,
+.local-demo-wallet-empty {
+  color: var(--muted);
+}
+
+.local-demo-wallet-choices button:disabled,
+.local-demo-wallet-roster button:disabled,
+.portfolio-secondary-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.local-demo-wallet-choices button:focus-visible,
+.local-demo-wallet-roster button:focus-visible,
+.portfolio-secondary-action:focus-visible,
+.account-portfolio-link:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.local-demo-wallet-roster {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.local-demo-wallet-roster li {
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 0.85rem;
+}
+
+.local-demo-wallet-roster li > div {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.local-demo-wallet-roster code {
+  color: var(--text);
+}
+
+.local-demo-wallet-error {
+  margin: 0;
+  padding: 0.85rem 1rem;
+  color: #ffd4ca;
+  background: rgba(255, 147, 122, 0.08);
+  border: 1px solid rgba(255, 147, 122, 0.28);
+  border-radius: 0.75rem;
+  line-height: 1.55;
+}
+
+.portfolio-refresh-row {
+  margin-block: 2rem 0;
+}
+
+.portfolio-refresh-row p {
+  margin: 0;
+}
+
+.portfolio-secondary-action {
+  white-space: nowrap;
+}
+
+.portfolio-experience-unavailable {
+  display: grid;
+  justify-items: center;
+  padding-bottom: 4rem;
+}
+
+.portfolio-experience-unavailable .portfolio-state-card {
+  width: 100%;
+  margin-bottom: 1rem;
+}
+
+.account-portfolio-link {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 0.75rem;
+  text-decoration: none;
+}
+
 .unified-balance {
   display: grid;
   gap: 1.5rem;
@@ -1401,6 +1558,21 @@ footer p {
   .portfolio-preview-notice {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .local-demo-wallet-heading,
+  .portfolio-refresh-row,
+  .local-demo-wallet-roster li {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .local-demo-wallet-choices {
+    grid-template-columns: 1fr;
+  }
+
+  .local-demo-proof-badge {
+    align-self: flex-start;
   }
 
   .portfolio-heading {

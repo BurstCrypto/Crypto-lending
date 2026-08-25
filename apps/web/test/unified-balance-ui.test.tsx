@@ -135,19 +135,17 @@ describe('UnifiedBalanceView', () => {
 });
 
 describe('PortfolioPage', () => {
-  it('provides a discoverable, unambiguous local fixture preview', () => {
+  it('renders an authenticated dynamic shell without embedding the old fixture', () => {
     render(<PortfolioPage />);
 
-    expect(screen.getByLabelText('Local preview notice')).toHaveTextContent('Sample data');
-    expect(
-      screen.getByText(/not live wallet data, a quote, or available credit/),
-    ).toBeInTheDocument();
+    expect(screen.queryByText('Sample data')).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Crypto Lending home' })).toHaveAttribute('href', '/');
+    expect(screen.getByRole('link', { name: 'Account' })).toHaveAttribute('href', '/account');
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(
-      'Your capital, clearly attributed.',
+      'Portfolio value is unavailable',
     );
     expect(metadata).toMatchObject({
-      title: 'Sample portfolio preview',
+      title: 'Portfolio',
       robots: { index: false, follow: false },
     });
   });

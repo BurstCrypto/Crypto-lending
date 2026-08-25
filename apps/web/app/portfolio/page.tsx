@@ -1,19 +1,19 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 
-import { UnifiedBalanceView } from '@/components/portfolio/unified-balance-view';
-import { UNIFIED_BALANCE_DEMO_PAYLOAD } from '@/lib/portfolio/unified-balance.fixtures';
-import { parseUnifiedBalanceResponse } from '@/lib/portfolio/unified-balance';
+import { LocalDemoPortfolio } from '@/components/portfolio/local-demo-portfolio';
+import { loadLocalDemoWebConfig } from '@/lib/local-demo/config-server';
 
 export const metadata: Metadata = {
-  title: 'Sample portfolio preview',
-  description: 'A local preview of unified portfolio value and available buying power.',
+  title: 'Portfolio',
+  description: 'Authenticated synthetic wallet and portfolio demonstration.',
   robots: { index: false, follow: false },
 };
 
-const DEMO_SNAPSHOT = parseUnifiedBalanceResponse(UNIFIED_BALANCE_DEMO_PAYLOAD);
+export const dynamic = 'force-dynamic';
 
 export default function PortfolioPage() {
+  const localDemo = loadLocalDemoWebConfig();
   return (
     <main id="main-content" className="page-shell portfolio-page-shell">
       <header className="site-header">
@@ -23,23 +23,18 @@ export default function PortfolioPage() {
           </span>
           <span>Crypto Lending</span>
         </Link>
-        <nav className="site-navigation" aria-label="Portfolio preview">
+        <nav className="site-navigation" aria-label="Portfolio">
           <Link href="/">Home</Link>
-          <Link className="navigation-action" href="/register">
-            Create account
+          <Link className="navigation-action" href="/account">
+            Account
           </Link>
         </nav>
       </header>
 
-      <aside className="portfolio-preview-notice" aria-label="Local preview notice">
-        <span className="portfolio-preview-badge">Sample data</span>
-        <p>Deterministic local preview - not live wallet data, a quote, or available credit.</p>
-      </aside>
-
-      <UnifiedBalanceView state={{ status: 'READY', snapshot: DEMO_SNAPSHOT }} />
+      <LocalDemoPortfolio enabled={localDemo.enabled} />
 
       <footer>
-        <p>Crypto Lending portfolio preview</p>
+        <p>Crypto Lending synthetic local portfolio</p>
       </footer>
     </main>
   );

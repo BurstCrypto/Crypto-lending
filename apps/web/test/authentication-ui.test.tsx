@@ -36,6 +36,7 @@ import { AccountSession } from '../components/authentication/account-session';
 import { LoginForm } from '../components/authentication/login-form';
 import { RegistrationForm } from '../components/authentication/registration-form';
 import { AuthenticationUnauthenticatedError, type AccountProfile } from '../lib/authentication';
+import { localDemoWalletRosterKey } from '../lib/local-demo/wallet-roster';
 
 const PROFILE: AccountProfile = Object.freeze({
   accountId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
@@ -69,7 +70,10 @@ describe('authentication UI', () => {
     authenticationMocks.logout.mockResolvedValue(undefined);
   });
 
-  afterEach(() => cleanup());
+  afterEach(() => {
+    cleanup();
+    window.sessionStorage.clear();
+  });
 
   it('starts login through the JSON boundary and performs a top-level navigation', async () => {
     render(<LoginForm returnPath="/account?tab=security" />);
@@ -367,7 +371,10 @@ describe('verified account session UI', () => {
     authenticationMocks.logout.mockResolvedValue(undefined);
   });
 
-  afterEach(() => cleanup());
+  afterEach(() => {
+    cleanup();
+    window.sessionStorage.clear();
+  });
 
   it('renders no profile until restoration succeeds, then shows only the verified response', async () => {
     let resolveProfile: ((profile: typeof PROFILE) => void) | undefined;
@@ -389,6 +396,11 @@ describe('verified account session UI', () => {
   });
 
   it('replace-redirects an unauthenticated restoration to the local login UI', async () => {
+    const firstRosterKey = localDemoWalletRosterKey(PROFILE.accountId);
+    const secondRosterKey = localDemoWalletRosterKey('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb');
+    window.sessionStorage.setItem(firstRosterKey, JSON.stringify({ version: 1, entries: [] }));
+    window.sessionStorage.setItem(secondRosterKey, JSON.stringify({ version: 1, entries: [] }));
+    window.sessionStorage.setItem('unrelated.preference', 'preserve-me');
     authenticationMocks.restore.mockRejectedValueOnce(new AuthenticationUnauthenticatedError());
     navigationMocks.replace.mockImplementationOnce(() => {
       expect(screen.queryByText(PROFILE.contactEmail)).not.toBeInTheDocument();
@@ -399,6 +411,9 @@ describe('verified account session UI', () => {
       expect(navigationMocks.replace).toHaveBeenCalledWith('/login?returnTo=%2Faccount'),
     );
     expect(screen.queryByText(PROFILE.contactEmail)).not.toBeInTheDocument();
+    expect(window.sessionStorage.getItem(firstRosterKey)).toBeNull();
+    expect(window.sessionStorage.getItem(secondRosterKey)).toBeNull();
+    expect(window.sessionStorage.getItem('unrelated.preference')).toBe('preserve-me');
   });
 
   it('keeps profile data hidden on an unavailable restore and supports an explicit retry', async () => {
@@ -419,6 +434,8 @@ describe('verified account session UI', () => {
 
   it('clears protected profile output before replace-redirecting after confirmed logout', async () => {
     authenticationMocks.restore.mockResolvedValueOnce(PROFILE);
+    const rosterKey = localDemoWalletRosterKey(PROFILE.accountId);
+    window.sessionStorage.setItem(rosterKey, JSON.stringify({ version: 1, entries: [] }));
     navigationMocks.replace.mockImplementationOnce(() => {
       expect(screen.queryByText(PROFILE.contactEmail)).not.toBeInTheDocument();
     });
@@ -429,6 +446,7 @@ describe('verified account session UI', () => {
 
     await waitFor(() => expect(navigationMocks.replace).toHaveBeenCalledWith('/login'));
     expect(screen.queryByText(PROFILE.contactEmail)).not.toBeInTheDocument();
+    expect(window.sessionStorage.getItem(rosterKey)).toBeNull();
     expect(screen.getByText('Leaving your protected account…')).toBeInTheDocument();
   });
 
@@ -499,5 +517,25 @@ describe('verified account session UI', () => {
     refreshed.resolve({ ...PROFILE, contactEmail: 'refreshed@example.com' });
     expect(await screen.findByText('refreshed@example.com')).toBeInTheDocument();
     expect(authenticationMocks.restore).toHaveBeenCalledTimes(2);
+  });
+
+  it('clears the known account roster when persisted-page session revalidation signs out', async () => {
+    authenticationMocks.restore
+      .mockResolvedValueOnce(PROFILE)
+      .mockRejectedValueOnce(new AuthenticationUnauthenticatedError());
+    const rosterKey = localDemoWalletRosterKey(PROFILE.accountId);
+    window.sessionStorage.setItem(rosterKey, JSON.stringify({ version: 1, entries: [] }));
+    render(<AccountSession />);
+    expect(await screen.findByText(PROFILE.contactEmail)).toBeInTheDocument();
+
+    const pageShow = new Event('pageshow');
+    Object.defineProperty(pageShow, 'persisted', { value: true });
+    window.dispatchEvent(pageShow);
+
+    await waitFor(() =>
+      expect(navigationMocks.replace).toHaveBeenCalledWith('/login?returnTo=%2Faccount'),
+    );
+    expect(window.sessionStorage.getItem(rosterKey)).toBeNull();
+    expect(screen.queryByText(PROFILE.contactEmail)).not.toBeInTheDocument();
   });
 });

@@ -76,6 +76,10 @@ export interface WalletRestoreOptions {
   readonly signal?: AbortSignal;
 }
 
+export interface WalletDisconnectOptions {
+  readonly signal?: AbortSignal;
+}
+
 interface OwnershipChallengeBase {
   readonly id: string;
   readonly chainId: ChainId;
@@ -250,7 +254,7 @@ export interface WalletAdapter {
   restore(options?: WalletRestoreOptions): Promise<WalletConnection | null>;
 
   /** Disconnects exactly one application-owned connection. */
-  disconnect(connectionId: string): Promise<void>;
+  disconnect(connectionId: string, options?: WalletDisconnectOptions): Promise<void>;
 
   /** Signs only the exact challenge previously issued by the API. */
   signOwnershipChallenge(

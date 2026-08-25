@@ -5,6 +5,7 @@ import type {
   WalletAdapter,
   WalletConnectOptions,
   WalletConnection,
+  WalletDisconnectOptions,
   WalletEvent,
   WalletNamespace,
   WalletRestoreOptions,
@@ -42,7 +43,11 @@ function walletConnection(
     connectorId,
     accounts: Object.freeze([account]),
     approvedScopes: Object.freeze([
-      Object.freeze({ chainId: projection.chainId, methods: Object.freeze([]), events: Object.freeze([]) }),
+      Object.freeze({
+        chainId: projection.chainId,
+        methods: Object.freeze([]),
+        events: Object.freeze([]),
+      }),
     ]),
     selectedAccount: account,
     restored,
@@ -74,7 +79,8 @@ export class LocalDemoWalletAdapter implements WalletAdapter {
 
   async connect(options?: WalletConnectOptions): Promise<WalletConnection> {
     throwIfAborted(options?.signal);
-    if (this.#projection !== null) return walletConnection(this.#projection, this.connectorId, false);
+    if (this.#projection !== null)
+      return walletConnection(this.#projection, this.connectorId, false);
     const projection = await this.client.registerWallet(this.demoNamespace, options?.signal);
     throwIfAborted(options?.signal);
     this.#projection = projection;
@@ -88,12 +94,15 @@ export class LocalDemoWalletAdapter implements WalletAdapter {
       : walletConnection(this.#projection, this.connectorId, true);
   }
 
-  async disconnect(connectionId: string): Promise<void> {
+  async disconnect(connectionId: string, options?: WalletDisconnectOptions): Promise<void> {
+    throwIfAborted(options?.signal);
     if (this.#projection === null || this.#projection.connectionId !== connectionId) {
       throw new LocalDemoWalletAdapterError();
     }
-    await this.client.disconnectWallet(connectionId);
+    // DELETE cancellation is commit-ambiguous. Revoke local reuse before the request starts.
     this.#projection = null;
+    await this.client.disconnectWallet(connectionId, options?.signal);
+    throwIfAborted(options?.signal);
   }
 
   signOwnershipChallenge(

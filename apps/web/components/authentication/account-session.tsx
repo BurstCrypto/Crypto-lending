@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 
 import {
@@ -8,6 +9,7 @@ import {
   restoreAuthenticationSession,
   type AccountProfile,
 } from '@/lib/authentication';
+import { clearBrowserLocalDemoWalletRoster } from '@/lib/local-demo/wallet-roster';
 
 import { replaceBrowserLocation } from './browser-navigation';
 import { AuthenticationError } from './authentication-error';
@@ -26,6 +28,10 @@ function countryName(countryCode: string): string {
   }
 }
 
+function clearCurrentWalletRoster(accountId: string | null): void {
+  clearBrowserLocalDemoWalletRoster(accountId);
+}
+
 export function AccountSession() {
   const [session, setSession] = useState<AccountSessionState>({ status: 'checking' });
   const [retryRevision, setRetryRevision] = useState(0);
@@ -35,6 +41,7 @@ export function AccountSession() {
   const logoutPendingReference = useRef(false);
   const logoutRequestReference = useRef<AbortController | null>(null);
   const logoutGeneration = useRef(0);
+  const accountIdReference = useRef<string | null>(null);
 
   useEffect(
     () => () => {
@@ -53,10 +60,15 @@ export function AccountSession() {
 
     void restoreAuthenticationSession({ signal: abortController.signal })
       .then((profile) => {
-        if (!abortController.signal.aborted) setSession({ status: 'authenticated', profile });
+        if (!abortController.signal.aborted) {
+          accountIdReference.current = profile.accountId;
+          setSession({ status: 'authenticated', profile });
+        }
       })
       .catch((error: unknown) => {
         if (abortController.signal.aborted) return;
+        clearCurrentWalletRoster(accountIdReference.current);
+        accountIdReference.current = null;
         if (error instanceof AuthenticationUnauthenticatedError) {
           setSession({
             status: 'signed-out',
@@ -101,6 +113,8 @@ export function AccountSession() {
 
   async function logout(): Promise<void> {
     if (logoutPendingReference.current || session.status !== 'authenticated') return;
+    clearCurrentWalletRoster(session.profile.accountId);
+    accountIdReference.current = null;
     logoutPendingReference.current = true;
     logoutRequestReference.current?.abort();
     const abortController = new AbortController();
@@ -198,6 +212,10 @@ export function AccountSession() {
         We could not confirm that you were signed out. Your protected session may still be active;
         please try again.
       </AuthenticationError>
+
+      <Link className="account-portfolio-link" href="/portfolio">
+        Open synthetic portfolio
+      </Link>
 
       <button
         className="account-logout"

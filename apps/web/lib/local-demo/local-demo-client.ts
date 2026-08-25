@@ -21,10 +21,7 @@ const MAX_REGISTERED_WALLETS = 2;
 
 export type LocalDemoWalletNamespace = 'EVM' | 'SOLANA';
 export type LocalDemoApiErrorCode =
-  | 'CONFLICT'
-  | 'INVALID_RESPONSE'
-  | 'UNAUTHENTICATED'
-  | 'UNAVAILABLE';
+  'CONFLICT' | 'INVALID_RESPONSE' | 'UNAUTHENTICATED' | 'UNAVAILABLE';
 
 export class LocalDemoApiError extends Error {
   constructor(
@@ -125,7 +122,12 @@ function parseProjection(value: unknown): LocalDemoWalletProjection {
   if (!Object.hasOwn(PORTFOLIO_NETWORKS, chainId)) return fail();
   const network = PORTFOLIO_NETWORKS[chainId as keyof typeof PORTFOLIO_NETWORKS];
   if (network.namespace !== record.namespace) return fail();
-  if (!CANONICAL_TIMESTAMP.test(registeredAt) || new Date(registeredAt).toISOString() !== registeredAt) {
+  const registeredDate = new Date(registeredAt);
+  if (
+    !CANONICAL_TIMESTAMP.test(registeredAt) ||
+    !Number.isFinite(registeredDate.getTime()) ||
+    registeredDate.toISOString() !== registeredAt
+  ) {
     return fail();
   }
   const adapterNamespace = record.namespace === 'EVM' ? 'eip155' : 'solana';
@@ -155,7 +157,9 @@ export function parseLocalDemoWallets(value: unknown): readonly LocalDemoWalletP
       Reflect.ownKeys(descriptors).some(
         (key) => typeof key !== 'string' || !expectedKeys.includes(key),
       ) ||
-      expectedKeys.some((key) => !Object.hasOwn(descriptors, key) || !('value' in descriptors[key]!))
+      expectedKeys.some(
+        (key) => !Object.hasOwn(descriptors, key) || !('value' in descriptors[key]!),
+      )
     ) {
       return fail();
     }
@@ -164,7 +168,8 @@ export function parseLocalDemoWallets(value: unknown): readonly LocalDemoWalletP
       new Set(wallets.map(({ connectionId }) => connectionId)).size !== wallets.length ||
       new Set(wallets.map(({ walletId }) => walletId)).size !== wallets.length ||
       new Set(wallets.map(({ namespace }) => namespace)).size !== wallets.length ||
-      new Set(wallets.map(({ chainId, address }) => `${chainId}\0${address}`)).size !== wallets.length
+      new Set(wallets.map(({ chainId, address }) => `${chainId}\0${address}`)).size !==
+        wallets.length
     ) {
       return fail();
     }
@@ -224,14 +229,10 @@ export class LocalDemoApiClient {
     namespace: LocalDemoWalletNamespace,
     signal?: AbortSignal,
   ): Promise<LocalDemoWalletProjection> {
-    const response = await this.#unsafeRequest(
-      'POST',
-      JSON.stringify({ namespace }),
-      signal,
-    );
+    const response = await this.#unsafeRequest('POST', JSON.stringify({ namespace }), signal);
     if (response.status === 401) return fail('UNAUTHENTICATED');
     if (response.status === 409) return fail('CONFLICT');
-    if (response.status !== 200 && response.status !== 201) {
+    if (response.status !== 201) {
       return fail('UNAVAILABLE', retryAfterSeconds(response));
     }
     const projection = parseProjection(await this.#json(response));
@@ -241,11 +242,7 @@ export class LocalDemoApiClient {
 
   async disconnectWallet(connectionId: string, signal?: AbortSignal): Promise<void> {
     if (!UUID_V4.test(connectionId)) return fail();
-    const response = await this.#unsafeRequest(
-      'DELETE',
-      JSON.stringify({ connectionId }),
-      signal,
-    );
+    const response = await this.#unsafeRequest('DELETE', JSON.stringify({ connectionId }), signal);
     if (response.status === 401) return fail('UNAUTHENTICATED');
     if (response.status !== 204) return fail('UNAVAILABLE', retryAfterSeconds(response));
   }
@@ -292,7 +289,11 @@ export class LocalDemoApiClient {
     );
   }
 
-  async #request(path: string, init: RequestInit, signal: AbortSignal | undefined): Promise<Response> {
+  async #request(
+    path: string,
+    init: RequestInit,
+    signal: AbortSignal | undefined,
+  ): Promise<Response> {
     try {
       return await this.#fetch(path, init);
     } catch (error) {
@@ -312,6 +313,7 @@ export class LocalDemoApiClient {
 
 export function isLocalDemoUnauthenticated(error: unknown): boolean {
   return (
-    error instanceof LocalDemoApiError && error.code === 'UNAUTHENTICATED'
-  ) || error instanceof AuthenticationUnauthenticatedError;
+    (error instanceof LocalDemoApiError && error.code === 'UNAUTHENTICATED') ||
+    error instanceof AuthenticationUnauthenticatedError
+  );
 }

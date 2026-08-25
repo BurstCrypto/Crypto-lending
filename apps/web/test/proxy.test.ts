@@ -35,7 +35,26 @@ beforeEach(() => {
 
 describe('web request proxy', () => {
   it('matches the original restricted lab and the protected account shell only', () => {
-    expect(config.matcher).toEqual(['/internal/wallet-lab/:path*', '/account/:path*']);
+    expect(config.matcher).toEqual([
+      '/internal/wallet-lab/:path*',
+      '/account/:path*',
+      '/portfolio',
+    ]);
+  });
+
+  it('protects the portfolio shell with the same cookie hint and return path', () => {
+    const redirect = proxy(accountRequest('/portfolio'));
+    expect(redirect.status).toBe(307);
+    expect(new URL(redirect.headers.get('location') as string).searchParams.get('returnTo')).toBe(
+      '/portfolio',
+    );
+    expectAccountPrivacyHeaders(redirect);
+
+    const shell = proxy(
+      accountRequest('/portfolio', `${AUTHENTICATION_SESSION_COOKIE_NAME}=${VALID_SESSION}`),
+    );
+    expect(shell.status).toBe(200);
+    expectAccountPrivacyHeaders(shell);
   });
 
   it('redirects a missing account-session hint temporarily and preserves the safe query', () => {

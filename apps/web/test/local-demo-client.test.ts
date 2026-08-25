@@ -106,6 +106,46 @@ describe('local demo same-origin API client', () => {
     expect(requestFetch).not.toHaveBeenCalled();
   });
 
+  it('fails closed when wallet registration does not return the contracted 201 status', async () => {
+    const client = new LocalDemoApiClient({
+      cookieHeader: `__Host-cl_csrf=${CSRF}`,
+      fetch: vi.fn(async () => json(EVM_WALLET, 200)),
+    });
+
+    await expect(client.registerWallet('EVM')).rejects.toMatchObject({
+      code: 'UNAVAILABLE',
+    });
+  });
+
+  it('threads disconnect cancellation to fetch without translating the abort', async () => {
+    const requestFetch = vi.fn(
+      async (_path: RequestInfo | URL, init?: RequestInit): Promise<Response> =>
+        new Promise((_resolve, reject) => {
+          const signal = init?.signal;
+          if (signal?.aborted === true) {
+            reject(new DOMException('Request aborted', 'AbortError'));
+            return;
+          }
+          signal?.addEventListener(
+            'abort',
+            () => reject(new DOMException('Request aborted', 'AbortError')),
+            { once: true },
+          );
+        }),
+    );
+    const client = new LocalDemoApiClient({
+      cookieHeader: `__Host-cl_csrf=${CSRF}`,
+      fetch: requestFetch,
+    });
+    const controller = new AbortController();
+
+    const pending = client.disconnectWallet(EVM_WALLET.connectionId, controller.signal);
+    expect(requestFetch.mock.calls[0]?.[1]?.signal).toBe(controller.signal);
+    controller.abort();
+
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+  });
+
   it('maps authentication and malformed data to fixed errors without retaining response detail', async () => {
     const unauthenticated = new LocalDemoApiClient({
       fetch: vi.fn(async () => json({ unsafe: 'session detail' }, 401)),
@@ -135,9 +175,9 @@ describe('local demo same-origin API client', () => {
         },
       ]),
     ).toThrow(LocalDemoApiError);
-    expect(() =>
-      parseLocalDemoWallets([{ ...SOLANA_WALLET, chainId: 'eip155:11155111' }]),
-    ).toThrow(LocalDemoApiError);
+    expect(() => parseLocalDemoWallets([{ ...SOLANA_WALLET, chainId: 'eip155:11155111' }])).toThrow(
+      LocalDemoApiError,
+    );
   });
 
   it('accepts only paired, non-authorizing local-demo portfolio controls', async () => {

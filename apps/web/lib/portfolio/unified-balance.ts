@@ -544,11 +544,7 @@ function parseResponse(value: unknown): UnifiedBalanceApiResponse {
   try {
     record = exactDataRecord(value, baseKeys);
   } catch {
-    record = exactDataRecord(value, [
-      ...baseKeys,
-      'use',
-      'mayAuthorizeFinancialAction',
-    ]);
+    record = exactDataRecord(value, [...baseKeys, 'use', 'mayAuthorizeFinancialAction']);
     hasDemoControls = true;
   }
   if (

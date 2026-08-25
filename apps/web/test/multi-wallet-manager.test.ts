@@ -8,6 +8,7 @@ import type {
   WalletAdapter,
   WalletConnectOptions,
   WalletConnection,
+  WalletDisconnectOptions,
   WalletEvent,
   WalletNamespace,
   WalletRestoreOptions,
@@ -118,11 +119,13 @@ class FakeWalletAdapter implements WalletAdapter {
   readonly connectCalls: (WalletConnectOptions | undefined)[] = [];
   readonly restoreCalls: (WalletRestoreOptions | undefined)[] = [];
   readonly disconnectCalls: string[] = [];
+  readonly disconnectOptions: (WalletDisconnectOptions | undefined)[] = [];
   readonly signCalls: { readonly connectionId: string; readonly challenge: OwnershipChallenge }[] =
     [];
   connectResult: WalletConnection;
   restoreResult: WalletConnection | null = null;
   disconnectFailure: Error | null = null;
+  disconnectImplementation: ((options?: WalletDisconnectOptions) => Promise<void>) | null = null;
   signResult: OwnershipSignature = siweSignature();
   connectImplementation: ((options?: WalletConnectOptions) => Promise<WalletConnection>) | null =
     null;
@@ -149,9 +152,11 @@ class FakeWalletAdapter implements WalletAdapter {
     return this.restoreResult;
   }
 
-  async disconnect(connectionId: string): Promise<void> {
+  async disconnect(connectionId: string, options?: WalletDisconnectOptions): Promise<void> {
     this.disconnectCalls.push(connectionId);
+    this.disconnectOptions.push(options);
     if (this.disconnectFailure !== null) throw this.disconnectFailure;
+    await this.disconnectImplementation?.(options);
   }
 
   async signOwnershipChallenge(
@@ -416,6 +421,57 @@ describe('multi-wallet manager', () => {
     );
     await expect(disconnecting).rejects.not.toThrow('secret provider rejection details');
     expect(wallets.getState().entries).toHaveLength(1);
+  });
+
+  it('leaves verified state untouched when disconnect is already cancelled', async () => {
+    const metamask = new FakeWalletAdapter('metamask', 'eip155');
+    const wallets = manager([metamask]);
+    const connected = await wallets.connect('metamask');
+    wallets.acceptOwnershipVerification(connected.connectionId, connected.lifecycleRevision);
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      wallets.disconnect(connected.connectionId, { signal: controller.signal }),
+    ).rejects.toEqual(new WalletLifecycleError('operation-aborted'));
+    expect(metamask.disconnectCalls).toEqual([]);
+    expect(wallets.getState().entries[0]).toMatchObject({
+      status: 'verified',
+      live: true,
+      indexingEnabled: true,
+    });
+  });
+
+  it('threads in-flight cancellation while keeping disconnect fail-closed', async () => {
+    const metamask = new FakeWalletAdapter('metamask', 'eip155');
+    metamask.disconnectImplementation = async (options) =>
+      new Promise((_resolve, reject) => {
+        options?.signal?.addEventListener(
+          'abort',
+          () => reject(new DOMException('Request aborted', 'AbortError')),
+          { once: true },
+        );
+      });
+    const wallets = manager([metamask]);
+    const connected = await wallets.connect('metamask');
+    wallets.acceptOwnershipVerification(connected.connectionId, connected.lifecycleRevision);
+    const controller = new AbortController();
+
+    const pending = wallets.disconnect(connected.connectionId, { signal: controller.signal });
+    expect(metamask.disconnectOptions).toEqual([{ signal: controller.signal }]);
+    expect(wallets.getState().entries[0]).toMatchObject({
+      status: 'disconnected',
+      live: false,
+      indexingEnabled: false,
+    });
+    controller.abort();
+
+    await expect(pending).rejects.toEqual(new WalletLifecycleError('operation-aborted'));
+    expect(wallets.getState().entries[0]).toMatchObject({
+      status: 'disconnected',
+      live: false,
+      indexingEnabled: false,
+    });
   });
 
   it('allows a retained disconnected wallet to be relabeled without reactivating it', async () => {

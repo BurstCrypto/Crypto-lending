@@ -22,9 +22,6 @@ describe('HomePage', () => {
       'href',
       '/api/version',
     );
-    expect(screen.getByRole('link', { name: 'Portfolio preview' })).toHaveAttribute(
-      'href',
-      '/portfolio',
-    );
+    expect(screen.getByRole('link', { name: 'Portfolio' })).toHaveAttribute('href', '/portfolio');
   });
 });

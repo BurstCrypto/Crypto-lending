@@ -75,11 +75,18 @@ describe('browser no-external-egress policy', () => {
 
   it('installs the generated connect policy on every web route', async () => {
     const entries = await nextConfig.headers();
-    expect(entries).toHaveLength(2);
+    expect(entries).toHaveLength(3);
     expect(entries[0]?.source).toBe('/:path*');
     expect(entries[0]?.headers).toEqual(buildBrowserSecurityHeaders(process.env.NODE_ENV));
     expect(entries[1]).toEqual({
       source: '/account/:path*',
+      headers: [
+        { key: 'Cache-Control', value: 'private, no-store, max-age=0' },
+        { key: 'X-Robots-Tag', value: 'noindex, nofollow, noarchive' },
+      ],
+    });
+    expect(entries[2]).toEqual({
+      source: '/portfolio',
       headers: [
         { key: 'Cache-Control', value: 'private, no-store, max-age=0' },
         { key: 'X-Robots-Tag', value: 'noindex, nofollow, noarchive' },

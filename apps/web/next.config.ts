@@ -26,6 +26,10 @@ const nextConfig = {
         source: '/account/:path*',
         headers: ACCOUNT_SHELL_HEADERS,
       },
+      {
+        source: '/portfolio',
+        headers: ACCOUNT_SHELL_HEADERS,
+      },
       ...(localDemo.enabled
         ? [
             {
