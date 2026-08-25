@@ -3,8 +3,10 @@ import { BuyingPowerCalculator } from '../buying-power/application/buying-power-
 import { EvmStablecoinBalanceIndexer } from '../blockchain/application/evm-stablecoin-balance-indexer';
 import { SolanaDepositIndexerService } from '../blockchain/application/solana-deposit-indexer.service';
 import { BalanceSyncOrchestrator } from '../blockchain-sync/application/balance-sync-orchestrator';
-import { LocalDemoPortfolioService } from './local-demo-portfolio.service';
-import type { LocalDemoPortfolioUnavailableError } from './local-demo-portfolio.service';
+import {
+  LocalDemoPortfolioService,
+  LocalDemoPortfolioUnavailableError,
+} from './local-demo-portfolio.service';
 import type {
   LocalDemoWalletConnection,
   LocalDemoWalletService,
@@ -96,6 +98,9 @@ describe('LocalDemoPortfolioService', () => {
           ],
         },
       });
+      expect(
+        result.buyingPower.deductions.every(({ amountUsdMinor }) => BigInt(amountUsdMinor) > 0n),
+      ).toBe(true);
       expect(result.wallets).toHaveLength(2);
       expect(result.wallets.map(({ portfolioValueUsdMinor }) => portfolioValueUsdMinor)).toEqual([
         '700000',
@@ -178,5 +183,15 @@ describe('LocalDemoPortfolioService', () => {
       name: 'LocalDemoPortfolioUnavailableError',
       code: 'LOCAL_DEMO_PORTFOLIO_UNAVAILABLE',
     } satisfies Partial<LocalDemoPortfolioUnavailableError>);
+  });
+
+  it('fails closed when the wallet boundary returns malformed projection metadata', async () => {
+    const malformed = Object.freeze([
+      Object.freeze({ ...ACCOUNT_A_WALLETS[0]!, label: ' invalid label ' }),
+    ]);
+    const service = serviceWith(new Map([[ACCOUNT_A, malformed]]));
+    await expect(service.read(ACCOUNT_A, CORRELATION_A)).rejects.toBeInstanceOf(
+      LocalDemoPortfolioUnavailableError,
+    );
   });
 });
