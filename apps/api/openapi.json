@@ -1047,6 +1047,265 @@
         ]
       }
     },
+    "/api/v1/local-demo/portfolio": {
+      "get": {
+        "operationId": "LocalDemoController_readPortfolio",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Closed KAN-69 presentation payload composed through KAN-63 through KAN-68"
+          },
+          "401": {
+            "description": "Missing or invalid authenticated session"
+          },
+          "404": {
+            "description": "Synthetic local demo runtime is disabled"
+          },
+          "503": {
+            "description": "A complete synthetic snapshot is unavailable"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Read the authenticated synthetic demo portfolio and buying power",
+        "tags": [
+          "local-demo"
+        ]
+      }
+    },
+    "/api/v1/local-demo/wallets": {
+      "delete": {
+        "operationId": "LocalDemoController_disconnectWallet",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "connectionId": {
+                    "format": "uuid",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "connectionId"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "The account-scoped connection is no longer active"
+          },
+          "400": {
+            "description": "Body is malformed"
+          },
+          "401": {
+            "description": "Missing or invalid authenticated session"
+          },
+          "404": {
+            "description": "Synthetic local demo runtime is disabled"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Disconnect one synthetic wallet from the authenticated demo account",
+        "tags": [
+          "local-demo"
+        ]
+      },
+      "get": {
+        "operationId": "LocalDemoController_listWallets",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "address": {
+                        "maxLength": 44,
+                        "type": "string"
+                      },
+                      "chainId": {
+                        "maxLength": 96,
+                        "type": "string"
+                      },
+                      "connectionId": {
+                        "format": "uuid",
+                        "type": "string"
+                      },
+                      "label": {
+                        "maxLength": 64,
+                        "type": "string"
+                      },
+                      "namespace": {
+                        "enum": [
+                          "EVM",
+                          "SOLANA"
+                        ],
+                        "type": "string"
+                      },
+                      "registeredAt": {
+                        "format": "date-time",
+                        "type": "string"
+                      },
+                      "walletId": {
+                        "format": "uuid",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "connectionId",
+                      "walletId",
+                      "label",
+                      "namespace",
+                      "chainId",
+                      "address",
+                      "registeredAt"
+                    ],
+                    "type": "object"
+                  },
+                  "maxItems": 2,
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Account-scoped synthetic wallet projections"
+          },
+          "401": {
+            "description": "Missing or invalid authenticated session"
+          },
+          "404": {
+            "description": "Synthetic local demo runtime is disabled"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "List synthetic wallets proven for the authenticated demo account",
+        "tags": [
+          "local-demo"
+        ]
+      },
+      "post": {
+        "operationId": "LocalDemoController_connectWallet",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "namespace": {
+                    "enum": [
+                      "EVM",
+                      "SOLANA"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "namespace"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "address": {
+                      "maxLength": 44,
+                      "type": "string"
+                    },
+                    "chainId": {
+                      "maxLength": 96,
+                      "type": "string"
+                    },
+                    "connectionId": {
+                      "format": "uuid",
+                      "type": "string"
+                    },
+                    "label": {
+                      "maxLength": 64,
+                      "type": "string"
+                    },
+                    "namespace": {
+                      "enum": [
+                        "EVM",
+                        "SOLANA"
+                      ],
+                      "type": "string"
+                    },
+                    "registeredAt": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "walletId": {
+                      "format": "uuid",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "connectionId",
+                    "walletId",
+                    "label",
+                    "namespace",
+                    "chainId",
+                    "address",
+                    "registeredAt"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The server-completed proof produced an account-scoped wallet projection"
+          },
+          "400": {
+            "description": "Body is malformed or contains wallet material"
+          },
+          "401": {
+            "description": "Missing or invalid authenticated session"
+          },
+          "404": {
+            "description": "Synthetic local demo runtime is disabled"
+          },
+          "503": {
+            "description": "Synthetic proof or persistence is unavailable"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Create and prove one allowlisted synthetic demo wallet",
+        "tags": [
+          "local-demo"
+        ]
+      }
+    },
     "/api/v1/portfolio": {
       "get": {
         "operationId": "PortfolioController_read",
