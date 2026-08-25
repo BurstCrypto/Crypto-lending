@@ -880,7 +880,7 @@ h1 {
 .local-demo-allocation-choices > button {
   display: grid;
   min-width: 0;
-  min-height: 15rem;
+  min-height: 19rem;
   padding: 1.15rem;
   color: var(--text);
   background: rgba(7, 22, 16, 0.72);
@@ -943,6 +943,30 @@ h1 {
   line-height: 1.55;
 }
 
+.local-demo-allocation-choice-apy {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-top: 1rem;
+  padding: 0.7rem 0.75rem;
+  color: var(--accent-strong);
+  background: rgba(112, 225, 179, 0.07);
+  border: 1px solid rgba(112, 225, 179, 0.19);
+  border-radius: 0.65rem;
+}
+
+.local-demo-allocation-choice-apy small {
+  color: #b9cec5;
+}
+
+.local-demo-allocation-choice-apy data {
+  font-size: 1.05rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
 .local-demo-allocation-mix {
   display: grid;
   align-self: end;
@@ -965,6 +989,21 @@ h1 {
 
 .local-demo-allocation-mix strong {
   font-variant-numeric: tabular-nums;
+}
+
+.local-demo-allocation-choice-metrics {
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 0.55rem;
+  white-space: nowrap;
+}
+
+.local-demo-allocation-choice-metrics data {
+  color: var(--accent-strong);
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 750;
 }
 
 .local-demo-allocation-error {
@@ -1028,6 +1067,106 @@ h1 {
   text-align: right;
 }
 
+.local-demo-allocation-yield-projection {
+  display: grid;
+  gap: 1rem;
+  padding: clamp(1.15rem, 3vw, 1.65rem);
+  background:
+    radial-gradient(circle at 8% 0, rgba(112, 225, 179, 0.13), transparent 17rem),
+    rgba(7, 26, 18, 0.78);
+  border: 1px solid rgba(112, 225, 179, 0.3);
+  border-radius: 1rem;
+}
+
+.local-demo-allocation-yield-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.local-demo-allocation-yield-heading h4 {
+  margin: 0.3rem 0 0;
+  font-size: 1.15rem;
+}
+
+.local-demo-allocation-yield-heading > p {
+  margin: 0;
+  padding: 0.35rem 0.55rem;
+  color: #ffdda0;
+  background: rgba(255, 207, 112, 0.08);
+  border: 1px solid rgba(255, 207, 112, 0.25);
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.local-demo-allocation-yield-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.7rem;
+  margin: 0;
+}
+
+.local-demo-allocation-yield-metrics > div {
+  display: grid;
+  align-content: space-between;
+  min-width: 0;
+  min-height: 7rem;
+  gap: 1rem;
+  padding: 0.9rem;
+  background: rgba(5, 18, 13, 0.65);
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+}
+
+.local-demo-allocation-yield-metrics .local-demo-allocation-yield-primary {
+  border-color: rgba(112, 225, 179, 0.36);
+}
+
+.local-demo-allocation-yield-metrics dt {
+  color: var(--muted);
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+
+.local-demo-allocation-yield-metrics dd {
+  margin: 0;
+  color: var(--text);
+  font-size: clamp(1.15rem, 2.5vw, 1.65rem);
+  font-variant-numeric: tabular-nums;
+  font-weight: 820;
+  letter-spacing: -0.025em;
+  line-height: 1.1;
+  overflow-wrap: anywhere;
+}
+
+.local-demo-allocation-yield-primary dd {
+  color: var(--accent-strong);
+}
+
+.local-demo-allocation-yield-metrics dd small {
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 650;
+  letter-spacing: 0;
+}
+
+.local-demo-allocation-projection-unavailable {
+  color: #ffdda0;
+}
+
+.local-demo-allocation-yield-method {
+  max-width: 82ch;
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.76rem;
+  line-height: 1.55;
+}
+
 .local-demo-allocation-results {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1069,11 +1208,24 @@ h1 {
   gap: 0.18rem;
 }
 
+.local-demo-allocation-result-values {
+  display: grid;
+  justify-items: end;
+  gap: 0.2rem;
+  text-align: right;
+}
+
+.local-demo-allocation-result-values data:first-child {
+  color: var(--accent-strong);
+  font-size: 0.72rem;
+}
+
 .local-demo-allocation-result-list small {
   color: var(--muted);
 }
 
 .local-demo-allocation-result-list data,
+.local-demo-allocation-yield-metrics data,
 .local-demo-allocation-reconciliation data {
   font-variant-numeric: tabular-nums;
   font-weight: 800;
@@ -1819,6 +1971,22 @@ footer p {
   color: var(--text);
 }
 
+@media (max-width: 1040px) {
+  .local-demo-allocation-yield-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .local-demo-allocation-mix > span {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 0.3rem;
+  }
+
+  .local-demo-allocation-choice-metrics {
+    justify-content: flex-start;
+  }
+}
+
 @media (max-width: 760px) {
   .site-header {
     padding: 1.25rem 0;
@@ -1848,6 +2016,7 @@ footer p {
   .local-demo-wallet-heading,
   .local-demo-allocation-heading,
   .local-demo-allocation-preview-heading,
+  .local-demo-allocation-yield-heading,
   .portfolio-refresh-row,
   .local-demo-wallet-roster li {
     align-items: stretch;
@@ -1859,7 +2028,8 @@ footer p {
   }
 
   .local-demo-allocation-choices,
-  .local-demo-allocation-results {
+  .local-demo-allocation-results,
+  .local-demo-allocation-yield-metrics {
     grid-template-columns: 1fr;
   }
 
@@ -1876,11 +2046,24 @@ footer p {
     text-align: left;
   }
 
+  .local-demo-allocation-yield-heading > p {
+    align-self: flex-start;
+  }
+
+  .local-demo-allocation-choice-metrics {
+    flex-wrap: wrap;
+  }
+
   .local-demo-allocation-result-list li,
   .local-demo-allocation-reconciliation > div {
     align-items: flex-start;
     flex-direction: column;
     gap: 0.35rem;
+  }
+
+  .local-demo-allocation-result-values {
+    justify-items: start;
+    text-align: left;
   }
 
   .local-demo-proof-badge {

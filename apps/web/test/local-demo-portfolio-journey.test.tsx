@@ -68,18 +68,21 @@ const MORE_LIQUID_PREVIEW: LocalDemoAllocationPreview = Object.freeze({
       bucket: 'LIQUID_RESERVE',
       label: 'Liquid reserve',
       percentageBasisPoints: 6000,
+      apyBasisPoints: 0,
       amountUsdMinor: '660000',
     }),
     Object.freeze({
       bucket: 'CONSERVATIVE_YIELD',
       label: 'Conservative yield',
       percentageBasisPoints: 3000,
+      apyBasisPoints: 400,
       amountUsdMinor: '330000',
     }),
     Object.freeze({
       bucket: 'BALANCED_YIELD',
       label: 'Balanced yield',
       percentageBasisPoints: 1000,
+      apyBasisPoints: 600,
       amountUsdMinor: '110000',
     }),
   ]),
@@ -92,6 +95,14 @@ const MORE_LIQUID_PREVIEW: LocalDemoAllocationPreview = Object.freeze({
   ]),
   totalFeesUsdMinor: '4400',
   netPlannedCapitalUsdMinor: '1095600',
+  yieldProjection: Object.freeze({
+    source: 'SYNTHETIC_FIXED_DEMO_RATES',
+    calculationMethod: 'SIMPLE_DAILY_APY_PRORATION_ON_NET_CAPITAL',
+    effectiveApyBasisPoints: 180,
+    projectedAnnualYieldUsdMinor: '19720',
+    projectedAnnualNetGrowthUsdMinor: '15320',
+    breakEven: Object.freeze({ status: 'AVAILABLE', firstNetPositiveDay: 82 }),
+  }),
   asOf: '2026-08-24T18:30:00.000Z',
 });
 
@@ -225,7 +236,7 @@ describe('authenticated local demo portfolio journey', () => {
     expect(restoredHarness.readPortfolio).toHaveBeenCalledTimes(1);
   });
 
-  it('offers allocation blends only after the portfolio is ready and previews fees on selection', async () => {
+  it('offers APY blends only when ready and defers fee and timing details until selection', async () => {
     const harness = fakeClient();
     experience(harness);
 
@@ -235,10 +246,21 @@ describe('authenticated local demo portfolio journey', () => {
     ).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /EVM test wallet/u }));
+    const allocationHeading = await screen.findByRole('heading', {
+      name: 'Choose how to allocate your capital.',
+    });
+    const allocationPlanner = allocationHeading.closest('section');
+    expect(allocationPlanner).not.toBeNull();
     expect(
-      await screen.findByRole('heading', { name: 'Choose how to allocate your capital.' }),
-    ).toBeInTheDocument();
-    expect(screen.queryByText('Estimated fees for this blend')).not.toBeInTheDocument();
+      within(allocationPlanner!).getByLabelText('1.80 percent estimated annual percentage yield'),
+    ).toHaveTextContent('1.80% APY');
+    expect(
+      within(allocationPlanner!).queryByText('Estimated fees for this blend'),
+    ).not.toBeInTheDocument();
+    expect(
+      within(allocationPlanner!).queryByText('First net-positive day'),
+    ).not.toBeInTheDocument();
+    expect(allocationPlanner).not.toHaveTextContent('$');
 
     fireEvent.click(screen.getByRole('button', { name: /More liquid/u }));
     expect(
@@ -252,6 +274,21 @@ describe('authenticated local demo portfolio journey', () => {
     );
     expect(screen.getByLabelText('44 US dollars estimated fee')).toHaveTextContent('-$44.00');
     expect(screen.getByLabelText('10,956 US dollars')).toHaveTextContent('$10,956.00');
+    const yieldProjection = screen
+      .getByRole('heading', { name: 'Synthetic yield projection' })
+      .closest('section');
+    expect(
+      within(yieldProjection!).getByLabelText('1.80 percent estimated annual percentage yield'),
+    ).toHaveTextContent('1.80% APY');
+    expect(
+      within(yieldProjection!).getByLabelText('197 US dollars and 20 cents'),
+    ).toHaveTextContent('$197.20');
+    expect(
+      within(yieldProjection!).getByLabelText('82 days until estimated net-positive'),
+    ).toHaveTextContent('Day 82');
+    expect(
+      within(yieldProjection!).getByLabelText('153 US dollars and 20 cents'),
+    ).toHaveTextContent('$153.20');
   });
 
   it('isolates persisted roster metadata and capacity across authenticated account changes', async () => {

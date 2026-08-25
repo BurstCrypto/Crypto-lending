@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { isAbortFailure } from '@/lib/authentication/http';
 import {
   isLocalDemoUnauthenticated,
+  LOCAL_DEMO_ALLOCATION_BUCKET_APY_BASIS_POINTS,
   LOCAL_DEMO_ALLOCATION_PRESETS,
   type LocalDemoAllocationDeductionCode,
   type LocalDemoAllocationPresetId,
@@ -62,6 +63,85 @@ function percentage(basisPoints: number): string {
   return fraction === 0 ? `${whole}%` : `${whole}.${fraction.toString().padStart(2, '0')}%`;
 }
 
+function Apy({ basisPoints }: { basisPoints: number }) {
+  const decimal = `${Math.floor(basisPoints / 100)}.${(basisPoints % 100)
+    .toString()
+    .padStart(2, '0')}`;
+  return (
+    <data value={decimal} aria-label={`${decimal} percent estimated annual percentage yield`}>
+      <span aria-hidden="true">{decimal}% APY</span>
+    </data>
+  );
+}
+
+function BreakEvenValue({ preview }: { preview: LocalDemoAllocationPreview }) {
+  const breakEven = preview.yieldProjection.breakEven;
+  if (breakEven.status === 'NOT_APPLICABLE') {
+    return <span className="local-demo-allocation-projection-unavailable">Not applicable</span>;
+  }
+  if (breakEven.status === 'UNAVAILABLE' || breakEven.firstNetPositiveDay === null) {
+    return <span className="local-demo-allocation-projection-unavailable">Unavailable</span>;
+  }
+  const day = breakEven.firstNetPositiveDay;
+  return (
+    <data
+      value={day}
+      aria-label={`${day} ${day === 1 ? 'day' : 'days'} until estimated net-positive`}
+    >
+      <span aria-hidden="true">
+        Day {day} <small>({day === 1 ? '1 day' : `${day} days`})</small>
+      </span>
+    </data>
+  );
+}
+
+function YieldProjection({ preview }: { preview: LocalDemoAllocationPreview }) {
+  return (
+    <section
+      className="local-demo-allocation-yield-projection"
+      aria-labelledby="local-demo-allocation-yield-title"
+    >
+      <div className="local-demo-allocation-yield-heading">
+        <div>
+          <p className="eyebrow">Fixed demo rates</p>
+          <h4 id="local-demo-allocation-yield-title">Synthetic yield projection</h4>
+        </div>
+        <p>Non-guaranteed estimate</p>
+      </div>
+      <dl className="local-demo-allocation-yield-metrics">
+        <div className="local-demo-allocation-yield-primary">
+          <dt>Effective blended APY</dt>
+          <dd>
+            <Apy basisPoints={preview.yieldProjection.effectiveApyBasisPoints} />
+          </dd>
+        </div>
+        <div>
+          <dt>Projected annual yield</dt>
+          <dd>
+            <Money amountUsdMinor={preview.yieldProjection.projectedAnnualYieldUsdMinor} />
+          </dd>
+        </div>
+        <div>
+          <dt>First net-positive day</dt>
+          <dd>
+            <BreakEvenValue preview={preview} />
+          </dd>
+        </div>
+        <div>
+          <dt>One-year growth after entry fees</dt>
+          <dd>
+            <Money amountUsdMinor={preview.yieldProjection.projectedAnnualNetGrowthUsdMinor} />
+          </dd>
+        </div>
+      </dl>
+      <p className="local-demo-allocation-yield-method">
+        Uses simple daily APY proration on net planned capital over 365 days. Rates are fixed,
+        synthetic demo inputs and are not a promise of returns.
+      </p>
+    </section>
+  );
+}
+
 function AllocationPreview({ preview }: { preview: LocalDemoAllocationPreview }) {
   return (
     <section
@@ -72,7 +152,8 @@ function AllocationPreview({ preview }: { preview: LocalDemoAllocationPreview })
         <span>Preview only</span>
         <p>
           <strong>No transaction was created.</strong> This estimate cannot authorize a transfer,
-          investment, loan, or any other financial action.
+          investment, loan, or any other financial action. APY and timing use fixed synthetic demo
+          rates and are not guaranteed.
         </p>
       </div>
 
@@ -88,6 +169,8 @@ function AllocationPreview({ preview }: { preview: LocalDemoAllocationPreview })
         </p>
       </div>
 
+      <YieldProjection preview={preview} />
+
       <div className="local-demo-allocation-results">
         <section aria-labelledby="local-demo-allocation-amounts-title">
           <h4 id="local-demo-allocation-amounts-title">Allocation amounts</h4>
@@ -98,7 +181,10 @@ function AllocationPreview({ preview }: { preview: LocalDemoAllocationPreview })
                   <strong>{allocation.label}</strong>
                   <small>{percentage(allocation.percentageBasisPoints)} of gross capital</small>
                 </span>
-                <Money amountUsdMinor={allocation.amountUsdMinor} />
+                <span className="local-demo-allocation-result-values">
+                  <Apy basisPoints={allocation.apyBasisPoints} />
+                  <Money amountUsdMinor={allocation.amountUsdMinor} />
+                </span>
               </li>
             ))}
           </ul>
@@ -200,8 +286,9 @@ export function LocalDemoAllocationPlanner({
         <span className="local-demo-proof-badge">Estimate only</span>
       </div>
       <p className="local-demo-allocation-intro">
-        Your full available capital remains unchanged. Select a blend to see its exact synthetic
-        allocation and estimated fees before deciding what to do.
+        Compare fixed synthetic APYs while your full available capital remains unchanged. Fee
+        amounts and net-positive timing appear only after you select a blend. These demo rates are
+        not guaranteed returns.
       </p>
 
       <div className="local-demo-allocation-choices" role="group" aria-label="Allocation blends">
@@ -221,11 +308,24 @@ export function LocalDemoAllocationPlanner({
               </small>
             </span>
             <span className="local-demo-allocation-choice-description">{preset.description}</span>
+            <span className="local-demo-allocation-choice-apy">
+              <small>Effective blended demo APY</small>
+              <Apy basisPoints={preset.effectiveApyBasisPoints} />
+            </span>
             <span className="local-demo-allocation-mix" aria-label={`${preset.label} allocation`}>
               {Object.entries(preset.percentages).map(([bucket, basisPoints]) => (
                 <span key={bucket}>
                   <small>{BUCKET_LABELS[bucket as keyof typeof BUCKET_LABELS]}</small>
-                  <strong>{percentage(basisPoints)}</strong>
+                  <span className="local-demo-allocation-choice-metrics">
+                    <strong>{percentage(basisPoints)} allocated</strong>
+                    <Apy
+                      basisPoints={
+                        LOCAL_DEMO_ALLOCATION_BUCKET_APY_BASIS_POINTS[
+                          bucket as keyof typeof LOCAL_DEMO_ALLOCATION_BUCKET_APY_BASIS_POINTS
+                        ]
+                      }
+                    />
+                  </span>
                 </span>
               ))}
             </span>
@@ -234,7 +334,13 @@ export function LocalDemoAllocationPlanner({
       </div>
 
       <span className="visually-hidden" role="status" aria-live="polite">
-        {pendingPreset === null ? '' : 'Calculating allocation preview.'}
+        {pendingPreset !== null
+          ? 'Calculating allocation preview.'
+          : preview?.yieldProjection.breakEven.status === 'AVAILABLE'
+            ? `${preview.preset.label} preview ready. Estimated first net-positive day ${preview.yieldProjection.breakEven.firstNetPositiveDay}.`
+            : preview === null
+              ? ''
+              : `${preview.preset.label} preview ready. Net-positive timing is ${preview.yieldProjection.breakEven.status === 'NOT_APPLICABLE' ? 'not applicable' : 'unavailable'}.`}
       </span>
       {error ? (
         <p className="local-demo-allocation-error" role="alert">

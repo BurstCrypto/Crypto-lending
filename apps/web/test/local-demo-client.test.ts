@@ -53,18 +53,21 @@ const ALLOCATION_PREVIEW = Object.freeze({
       bucket: 'LIQUID_RESERVE',
       label: 'Liquid reserve',
       percentageBasisPoints: 3000,
+      apyBasisPoints: 0,
       amountUsdMinor: '330000',
     }),
     Object.freeze({
       bucket: 'CONSERVATIVE_YIELD',
       label: 'Conservative yield',
       percentageBasisPoints: 4500,
+      apyBasisPoints: 400,
       amountUsdMinor: '495000',
     }),
     Object.freeze({
       bucket: 'BALANCED_YIELD',
       label: 'Balanced yield',
       percentageBasisPoints: 2500,
+      apyBasisPoints: 600,
       amountUsdMinor: '275000',
     }),
   ]),
@@ -77,8 +80,39 @@ const ALLOCATION_PREVIEW = Object.freeze({
   ]),
   totalFeesUsdMinor: '7700',
   netPlannedCapitalUsdMinor: '1092300',
+  yieldProjection: Object.freeze({
+    source: 'SYNTHETIC_FIXED_DEMO_RATES',
+    calculationMethod: 'SIMPLE_DAILY_APY_PRORATION_ON_NET_CAPITAL',
+    effectiveApyBasisPoints: 330,
+    projectedAnnualYieldUsdMinor: '36045',
+    projectedAnnualNetGrowthUsdMinor: '28345',
+    breakEven: Object.freeze({ status: 'AVAILABLE', firstNetPositiveDay: 78 }),
+  }),
   asOf: '2026-08-24T18:30:00.000Z',
 });
+function zeroFeeAllocationPreview(): unknown {
+  const allocationAmounts = ['30', '45', '25'] as const;
+  return {
+    ...ALLOCATION_PREVIEW,
+    grossCapitalUsdMinor: '100',
+    allocations: ALLOCATION_PREVIEW.allocations.map((allocation, index) => ({
+      ...allocation,
+      amountUsdMinor: allocationAmounts[index],
+    })),
+    deductions: ALLOCATION_PREVIEW.deductions.map((deduction) => ({
+      ...deduction,
+      amountUsdMinor: '0',
+    })),
+    totalFeesUsdMinor: '0',
+    netPlannedCapitalUsdMinor: '100',
+    yieldProjection: {
+      ...ALLOCATION_PREVIEW.yieldProjection,
+      projectedAnnualYieldUsdMinor: '3',
+      projectedAnnualNetGrowthUsdMinor: '3',
+      breakEven: { status: 'NOT_APPLICABLE', firstNetPositiveDay: null },
+    },
+  };
+}
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -239,6 +273,54 @@ describe('local demo same-origin API client', () => {
     await expect(client.previewAllocation('MORE_LIQUID')).rejects.toMatchObject({
       code: 'INVALID_RESPONSE',
     });
+  });
+
+  it('recomputes fixed APY, annual growth, and break-even timing with integer arithmetic', () => {
+    const forgedPoolApy = {
+      ...structuredClone(ALLOCATION_PREVIEW),
+      allocations: ALLOCATION_PREVIEW.allocations.map((allocation, index) => ({
+        ...allocation,
+        ...(index === 1 ? { apyBasisPoints: 401 } : {}),
+      })),
+    };
+    expect(() => parseLocalDemoAllocationPreview(forgedPoolApy)).toThrow(LocalDemoApiError);
+
+    const forgedAnnualProjection = {
+      ...structuredClone(ALLOCATION_PREVIEW),
+      yieldProjection: {
+        ...ALLOCATION_PREVIEW.yieldProjection,
+        projectedAnnualYieldUsdMinor: '36046',
+        projectedAnnualNetGrowthUsdMinor: '28346',
+      },
+    };
+    expect(() => parseLocalDemoAllocationPreview(forgedAnnualProjection)).toThrow(
+      LocalDemoApiError,
+    );
+
+    const forgedBreakEven = {
+      ...structuredClone(ALLOCATION_PREVIEW),
+      yieldProjection: {
+        ...ALLOCATION_PREVIEW.yieldProjection,
+        breakEven: { status: 'AVAILABLE', firstNetPositiveDay: 77 },
+      },
+    };
+    expect(() => parseLocalDemoAllocationPreview(forgedBreakEven)).toThrow(LocalDemoApiError);
+  });
+
+  it('accepts no-fee timing as not applicable and rejects an alternate forged status', () => {
+    const noFee = zeroFeeAllocationPreview();
+    expect(parseLocalDemoAllocationPreview(noFee)).toMatchObject({
+      totalFeesUsdMinor: '0',
+      yieldProjection: {
+        breakEven: { status: 'NOT_APPLICABLE', firstNetPositiveDay: null },
+      },
+    });
+
+    const unavailable = structuredClone(noFee) as {
+      yieldProjection: { breakEven: { status: string; firstNetPositiveDay: number | null } };
+    };
+    unavailable.yieldProjection.breakEven.status = 'UNAVAILABLE';
+    expect(() => parseLocalDemoAllocationPreview(unavailable)).toThrow(LocalDemoApiError);
   });
 
   it('fails closed when wallet registration does not return the contracted 201 status', async () => {
