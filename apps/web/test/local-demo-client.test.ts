@@ -45,6 +45,31 @@ function json(body: unknown, status = 200): Response {
 }
 
 describe('local demo same-origin API client', () => {
+  it('invokes the default browser fetch with its required global receiver', async () => {
+    const browserFetch = vi.fn(function (
+      this: typeof globalThis,
+      _input: RequestInfo | URL,
+      _init?: RequestInit,
+    ): Promise<Response> {
+      void _input;
+      void _init;
+      if (this !== globalThis) throw new TypeError('Illegal invocation');
+      return Promise.resolve(json([]));
+    });
+    vi.stubGlobal('fetch', browserFetch);
+
+    try {
+      const client = new LocalDemoApiClient();
+      await expect(client.listWallets()).resolves.toEqual([]);
+      expect(browserFetch).toHaveBeenCalledWith(
+        LOCAL_DEMO_WALLETS_PATH,
+        expect.objectContaining({ method: 'GET', credentials: 'same-origin' }),
+      );
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('lists, registers, disconnects, and reads a bounded portfolio through fixed relative paths', async () => {
     const requestFetch = vi
       .fn<typeof fetch>()

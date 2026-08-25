@@ -211,7 +211,9 @@ export class LocalDemoApiClient {
 
   constructor(options: LocalDemoApiClientOptions = {}) {
     this.#cookieHeader = options.cookieHeader ?? browserCookieHeader;
-    this.#fetch = options.fetch ?? globalThis.fetch;
+    this.#fetch =
+      options.fetch ??
+      ((input: RequestInfo | URL, init?: RequestInit) => globalThis.fetch(input, init));
   }
 
   async listWallets(signal?: AbortSignal): Promise<readonly LocalDemoWalletProjection[]> {
