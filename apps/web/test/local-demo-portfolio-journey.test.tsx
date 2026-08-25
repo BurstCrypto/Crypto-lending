@@ -6,6 +6,7 @@ import type { AccountProfile } from '../lib/authentication';
 import {
   LocalDemoApiClient,
   LocalDemoApiError,
+  type LocalDemoAllocationPreview,
   type LocalDemoWalletNamespace,
   type LocalDemoWalletProjection,
 } from '../lib/local-demo/local-demo-client';
@@ -53,10 +54,52 @@ const PROJECTIONS: Readonly<Record<LocalDemoWalletNamespace, LocalDemoWalletProj
 
 const PORTFOLIO = LOCAL_DEMO_CHAIN_PORTFOLIO_PAYLOAD;
 
+const MORE_LIQUID_PREVIEW: LocalDemoAllocationPreview = Object.freeze({
+  use: 'LOCAL_DEMO_ESTIMATE_ONLY',
+  mayAuthorizeFinancialAction: false,
+  preset: Object.freeze({
+    id: 'MORE_LIQUID',
+    label: 'More liquid',
+    description: 'Keep most capital readily available while adding a smaller yield allocation.',
+  }),
+  grossCapitalUsdMinor: '1100000',
+  allocations: Object.freeze([
+    Object.freeze({
+      bucket: 'LIQUID_RESERVE',
+      label: 'Liquid reserve',
+      percentageBasisPoints: 6000,
+      amountUsdMinor: '660000',
+    }),
+    Object.freeze({
+      bucket: 'CONSERVATIVE_YIELD',
+      label: 'Conservative yield',
+      percentageBasisPoints: 3000,
+      amountUsdMinor: '330000',
+    }),
+    Object.freeze({
+      bucket: 'BALANCED_YIELD',
+      label: 'Balanced yield',
+      percentageBasisPoints: 1000,
+      amountUsdMinor: '110000',
+    }),
+  ]),
+  deductions: Object.freeze([
+    Object.freeze({ code: 'LIQUIDITY', amountUsdMinor: '2200' }),
+    Object.freeze({ code: 'CONVERSION', amountUsdMinor: '440' }),
+    Object.freeze({ code: 'SLIPPAGE', amountUsdMinor: '440' }),
+    Object.freeze({ code: 'NETWORK', amountUsdMinor: '440' }),
+    Object.freeze({ code: 'ROUTING', amountUsdMinor: '880' }),
+  ]),
+  totalFeesUsdMinor: '4400',
+  netPlannedCapitalUsdMinor: '1095600',
+  asOf: '2026-08-24T18:30:00.000Z',
+});
+
 interface FakeClientHarness {
   readonly client: LocalDemoApiClient;
   readonly disconnectWallet: ReturnType<typeof vi.fn>;
   readonly listWallets: ReturnType<typeof vi.fn>;
+  readonly previewAllocation: ReturnType<typeof vi.fn>;
   readonly readPortfolio: ReturnType<typeof vi.fn>;
   readonly registerWallet: ReturnType<typeof vi.fn>;
   readonly registered: LocalDemoWalletProjection[];
@@ -78,15 +121,18 @@ function fakeClient(initial: readonly LocalDemoWalletProjection[] = []): FakeCli
     if (index >= 0) registered.splice(index, 1);
   });
   const readPortfolio = vi.fn(async () => PORTFOLIO);
+  const previewAllocation = vi.fn(async () => MORE_LIQUID_PREVIEW);
   return {
     client: {
       listWallets,
       registerWallet,
       disconnectWallet,
       readPortfolio,
+      previewAllocation,
     } as unknown as LocalDemoApiClient,
     disconnectWallet,
     listWallets,
+    previewAllocation,
     readPortfolio,
     registerWallet,
     registered,
@@ -177,6 +223,35 @@ describe('authenticated local demo portfolio journey', () => {
     expect(restoredHarness.listWallets).toHaveBeenCalledTimes(1);
     expect(restoredHarness.registerWallet).not.toHaveBeenCalled();
     expect(restoredHarness.readPortfolio).toHaveBeenCalledTimes(1);
+  });
+
+  it('offers allocation blends only after the portfolio is ready and previews fees on selection', async () => {
+    const harness = fakeClient();
+    experience(harness);
+
+    await screen.findByText('No synthetic wallets are connected yet.');
+    expect(
+      screen.queryByRole('heading', { name: 'Choose how to allocate your capital.' }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /EVM test wallet/u }));
+    expect(
+      await screen.findByRole('heading', { name: 'Choose how to allocate your capital.' }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('Estimated fees for this blend')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /More liquid/u }));
+    expect(
+      await screen.findByRole('heading', { name: 'Estimated fees for this blend' }),
+    ).toBeInTheDocument();
+    expect(harness.previewAllocation).toHaveBeenCalledWith('MORE_LIQUID', expect.any(AbortSignal));
+    expect(screen.getByText('No transaction was created.')).toBeInTheDocument();
+    const reconciliation = screen.getByText('Full available capital').closest('dl');
+    expect(within(reconciliation!).getByLabelText('11,000 US dollars')).toHaveTextContent(
+      '$11,000.00',
+    );
+    expect(screen.getByLabelText('44 US dollars estimated fee')).toHaveTextContent('-$44.00');
+    expect(screen.getByLabelText('10,956 US dollars')).toHaveTextContent('$10,956.00');
   });
 
   it('isolates persisted roster metadata and capacity across authenticated account changes', async () => {

@@ -1,10 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import {
+  LOCAL_DEMO_ALLOCATION_PREVIEW_PATH,
   LocalDemoApiClient,
   LocalDemoApiError,
   LOCAL_DEMO_PORTFOLIO_PATH,
   LOCAL_DEMO_WALLETS_PATH,
+  parseLocalDemoAllocationPreview,
   parseLocalDemoWallets,
 } from '../lib/local-demo/local-demo-client';
 import {
@@ -37,6 +39,46 @@ const SOLANA_WALLET = Object.freeze({
   registeredAt: '2026-08-24T18:00:00.000Z',
 });
 
+const ALLOCATION_PREVIEW = Object.freeze({
+  use: 'LOCAL_DEMO_ESTIMATE_ONLY',
+  mayAuthorizeFinancialAction: false,
+  preset: Object.freeze({
+    id: 'BALANCED',
+    label: 'Balanced blend',
+    description: 'Split capital between ready access and diversified synthetic yield.',
+  }),
+  grossCapitalUsdMinor: '1100000',
+  allocations: Object.freeze([
+    Object.freeze({
+      bucket: 'LIQUID_RESERVE',
+      label: 'Liquid reserve',
+      percentageBasisPoints: 3000,
+      amountUsdMinor: '330000',
+    }),
+    Object.freeze({
+      bucket: 'CONSERVATIVE_YIELD',
+      label: 'Conservative yield',
+      percentageBasisPoints: 4500,
+      amountUsdMinor: '495000',
+    }),
+    Object.freeze({
+      bucket: 'BALANCED_YIELD',
+      label: 'Balanced yield',
+      percentageBasisPoints: 2500,
+      amountUsdMinor: '275000',
+    }),
+  ]),
+  deductions: Object.freeze([
+    Object.freeze({ code: 'LIQUIDITY', amountUsdMinor: '3850' }),
+    Object.freeze({ code: 'CONVERSION', amountUsdMinor: '770' }),
+    Object.freeze({ code: 'SLIPPAGE', amountUsdMinor: '770' }),
+    Object.freeze({ code: 'NETWORK', amountUsdMinor: '770' }),
+    Object.freeze({ code: 'ROUTING', amountUsdMinor: '1540' }),
+  ]),
+  totalFeesUsdMinor: '7700',
+  netPlannedCapitalUsdMinor: '1092300',
+  asOf: '2026-08-24T18:30:00.000Z',
+});
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -135,7 +177,68 @@ describe('local demo same-origin API client', () => {
     await expect(client.disconnectWallet(SOLANA_WALLET.connectionId)).rejects.toMatchObject({
       code: 'UNAUTHENTICATED',
     });
+    await expect(client.previewAllocation('BALANCED')).rejects.toMatchObject({
+      code: 'UNAUTHENTICATED',
+    });
     expect(requestFetch).not.toHaveBeenCalled();
+  });
+
+  it('previews one closed allocation preset through a fixed CSRF-protected relative path', async () => {
+    const requestFetch = vi.fn<typeof fetch>().mockResolvedValueOnce(json(ALLOCATION_PREVIEW));
+    const client = new LocalDemoApiClient({
+      cookieHeader: `__Host-cl_csrf=${CSRF}`,
+      fetch: requestFetch,
+    });
+
+    await expect(client.previewAllocation('BALANCED')).resolves.toEqual(ALLOCATION_PREVIEW);
+    expect(requestFetch).toHaveBeenCalledWith(
+      LOCAL_DEMO_ALLOCATION_PREVIEW_PATH,
+      expect.objectContaining({
+        method: 'POST',
+        credentials: 'same-origin',
+        cache: 'no-store',
+        redirect: 'error',
+        body: JSON.stringify({ presetId: 'BALANCED' }),
+        headers: expect.objectContaining({
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': CSRF,
+        }),
+      }),
+    );
+  });
+
+  it('rejects allocation previews with untrusted labels, arithmetic, or a different preset', async () => {
+    expect(() =>
+      parseLocalDemoAllocationPreview({
+        ...structuredClone(ALLOCATION_PREVIEW),
+        preset: { ...ALLOCATION_PREVIEW.preset, label: 'Unsafe server label' },
+      }),
+    ).toThrow(LocalDemoApiError);
+    expect(() =>
+      parseLocalDemoAllocationPreview({
+        ...structuredClone(ALLOCATION_PREVIEW),
+        netPlannedCapitalUsdMinor: '1092301',
+      }),
+    ).toThrow(LocalDemoApiError);
+    const internallyReconciledButForgedFees = structuredClone(ALLOCATION_PREVIEW) as unknown as {
+      deductions: Array<{ amountUsdMinor: string }>;
+      totalFeesUsdMinor: string;
+      netPlannedCapitalUsdMinor: string;
+    };
+    internallyReconciledButForgedFees.deductions[0]!.amountUsdMinor = '3851';
+    internallyReconciledButForgedFees.totalFeesUsdMinor = '7701';
+    internallyReconciledButForgedFees.netPlannedCapitalUsdMinor = '1092299';
+    expect(() => parseLocalDemoAllocationPreview(internallyReconciledButForgedFees)).toThrow(
+      LocalDemoApiError,
+    );
+
+    const client = new LocalDemoApiClient({
+      cookieHeader: `__Host-cl_csrf=${CSRF}`,
+      fetch: vi.fn(async () => json(ALLOCATION_PREVIEW)),
+    });
+    await expect(client.previewAllocation('MORE_LIQUID')).rejects.toMatchObject({
+      code: 'INVALID_RESPONSE',
+    });
   });
 
   it('fails closed when wallet registration does not return the contracted 201 status', async () => {

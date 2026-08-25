@@ -1,3 +1,5 @@
+import type { ReactNode } from 'react';
+
 import {
   addressEnding,
   formatUsdMinor,
@@ -54,6 +56,7 @@ export type UnifiedBalanceViewState =
 
 export interface UnifiedBalanceViewProps {
   readonly state: UnifiedBalanceViewState;
+  readonly readyContent?: ReactNode;
 }
 
 function Money({ amountUsdMinor, className }: { amountUsdMinor: string; className?: string }) {
@@ -321,8 +324,21 @@ function BuyingPowerDeductions({
   );
 }
 
-function ReadyView({ snapshot }: { snapshot: UnifiedBalanceApiResponse }) {
+function ReadyView({
+  snapshot,
+  readyContent,
+}: {
+  snapshot: UnifiedBalanceApiResponse;
+  readyContent?: ReactNode;
+}) {
   const formattedAsOf = `${AS_OF_FORMATTER.format(new Date(snapshot.asOf))} UTC`;
+  const showsFullLocalDemoCapital =
+    snapshot.use === 'LOCAL_DEMO_ESTIMATE_ONLY' &&
+    snapshot.mayAuthorizeFinancialAction === false &&
+    snapshot.freshness === 'CURRENT' &&
+    snapshot.buyingPower.status === 'AVAILABLE' &&
+    snapshot.buyingPower.freshness === 'CURRENT' &&
+    snapshot.buyingPower.amountUsdMinor === snapshot.portfolioValueUsdMinor;
   return (
     <section className="unified-balance" aria-labelledby="portfolio-title">
       <header className="portfolio-heading">
@@ -390,11 +406,15 @@ function ReadyView({ snapshot }: { snapshot: UnifiedBalanceApiResponse }) {
           )}
           <p className="portfolio-total-help">
             {snapshot.buyingPower.status === 'AVAILABLE'
-              ? 'Conservative amount after stale funds and known liquidity, conversion, slippage, network, and routing deductions.'
+              ? showsFullLocalDemoCapital
+                ? 'Full supported capital available before any allocation choice. Estimated fees appear only after you preview a blend.'
+                : 'Conservative amount after stale funds and known liquidity, conversion, slippage, network, and routing deductions.'
               : 'No amount is shown until every required pricing, liquidity, network, and route-cost input is available.'}
           </p>
         </article>
       </div>
+
+      {readyContent}
 
       {snapshot.buyingPower.reasons.length === 0 ? null : (
         <div className="portfolio-explanations" aria-labelledby="buying-power-explanations-title">
@@ -411,10 +431,12 @@ function ReadyView({ snapshot }: { snapshot: UnifiedBalanceApiResponse }) {
         </div>
       )}
 
-      <BuyingPowerDeductions
-        deductions={snapshot.buyingPower.deductions}
-        unavailable={snapshot.buyingPower.status === 'UNAVAILABLE'}
-      />
+      {showsFullLocalDemoCapital ? null : (
+        <BuyingPowerDeductions
+          deductions={snapshot.buyingPower.deductions}
+          unavailable={snapshot.buyingPower.status === 'UNAVAILABLE'}
+        />
+      )}
 
       <section className="portfolio-sources" aria-labelledby="portfolio-sources-title">
         <div className="portfolio-section-heading">
@@ -438,9 +460,9 @@ function ReadyView({ snapshot }: { snapshot: UnifiedBalanceApiResponse }) {
   );
 }
 
-export function UnifiedBalanceView({ state }: UnifiedBalanceViewProps) {
+export function UnifiedBalanceView({ state, readyContent }: UnifiedBalanceViewProps) {
   if (state.status === 'LOADING') return <LoadingView />;
   if (state.status === 'ERROR') return <ErrorView />;
   if (state.status === 'UNAVAILABLE') return <UnavailableView reason={state.reason} />;
-  return <ReadyView snapshot={state.snapshot} />;
+  return <ReadyView snapshot={state.snapshot} readyContent={readyContent} />;
 }

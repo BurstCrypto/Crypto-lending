@@ -1,3 +1,5 @@
+import type { ReactNode } from 'react';
+
 import {
   addressEnding,
   formatUsdMinor,
@@ -44,6 +46,7 @@ export type LocalDemoUnifiedBalanceViewState =
 
 interface LocalDemoUnifiedBalanceViewProps {
   readonly state: LocalDemoUnifiedBalanceViewState;
+  readonly readyContent?: ReactNode;
 }
 
 function Money({ amountUsdMinor, className }: { amountUsdMinor: string; className?: string }) {
@@ -249,7 +252,13 @@ function BuyingPowerDeductions({ deductions }: { deductions: readonly BuyingPowe
   );
 }
 
-function ReadyView({ snapshot }: { snapshot: LocalDemoBalanceApiResponse }) {
+function ReadyView({
+  snapshot,
+  readyContent,
+}: {
+  snapshot: LocalDemoBalanceApiResponse;
+  readyContent?: ReactNode;
+}) {
   return (
     <section className="unified-balance" aria-labelledby="portfolio-title">
       <header className="portfolio-heading">
@@ -303,12 +312,13 @@ function ReadyView({ snapshot }: { snapshot: LocalDemoBalanceApiResponse }) {
             />
           )}
           <p className="portfolio-total-help">
-            Synthetic estimate only; it cannot authorize a financial action.
+            Full supported capital available before any allocation choice. Estimated fees appear
+            only after you preview a blend.
           </p>
         </article>
       </div>
 
-      <BuyingPowerDeductions deductions={snapshot.buyingPower.deductions} />
+      {readyContent}
 
       <section className="portfolio-sources" aria-labelledby="portfolio-sources-title">
         <div className="portfolio-section-heading">
@@ -328,7 +338,10 @@ function ReadyView({ snapshot }: { snapshot: LocalDemoBalanceApiResponse }) {
   );
 }
 
-export function LocalDemoUnifiedBalanceView({ state }: LocalDemoUnifiedBalanceViewProps) {
+export function LocalDemoUnifiedBalanceView({
+  state,
+  readyContent,
+}: LocalDemoUnifiedBalanceViewProps) {
   if (state.status !== 'READY') return <UnifiedBalanceView state={state} />;
-  return <ReadyView snapshot={state.snapshot} />;
+  return <ReadyView snapshot={state.snapshot} readyContent={readyContent} />;
 }
