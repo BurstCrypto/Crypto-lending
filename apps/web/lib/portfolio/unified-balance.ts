@@ -150,6 +150,9 @@ export interface UnifiedBalanceApiResponse {
   readonly portfolioValueUsdMinor: string;
   readonly buyingPower: UnifiedBuyingPower;
   readonly wallets: readonly UnifiedBalanceWalletContribution[];
+  /** Present only on the explicitly synthetic local-demo response. */
+  readonly use?: 'LOCAL_DEMO_ESTIMATE_ONLY';
+  readonly mayAuthorizeFinancialAction?: false;
 }
 
 export class UnifiedBalanceResponseError extends Error {
@@ -527,7 +530,7 @@ function parseBuyingPower(value: unknown): UnifiedBuyingPower {
 }
 
 function parseResponse(value: unknown): UnifiedBalanceApiResponse {
-  const record = exactDataRecord(value, [
+  const baseKeys = [
     'schemaVersion',
     'snapshotId',
     'asOf',
@@ -535,7 +538,25 @@ function parseResponse(value: unknown): UnifiedBalanceApiResponse {
     'portfolioValueUsdMinor',
     'buyingPower',
     'wallets',
-  ]);
+  ] as const;
+  let record: Record<string, unknown>;
+  let hasDemoControls = false;
+  try {
+    record = exactDataRecord(value, baseKeys);
+  } catch {
+    record = exactDataRecord(value, [
+      ...baseKeys,
+      'use',
+      'mayAuthorizeFinancialAction',
+    ]);
+    hasDemoControls = true;
+  }
+  if (
+    hasDemoControls &&
+    (record.use !== 'LOCAL_DEMO_ESTIMATE_ONLY' || record.mayAuthorizeFinancialAction !== false)
+  ) {
+    return fail();
+  }
   if (record.schemaVersion !== 1) return fail();
   if (typeof record.snapshotId !== 'string' || !SAFE_SNAPSHOT_ID.test(record.snapshotId)) {
     return fail();
@@ -601,6 +622,12 @@ function parseResponse(value: unknown): UnifiedBalanceApiResponse {
     portfolioValueUsdMinor,
     buyingPower,
     wallets,
+    ...(hasDemoControls
+      ? {
+          use: 'LOCAL_DEMO_ESTIMATE_ONLY' as const,
+          mayAuthorizeFinancialAction: false as const,
+        }
+      : {}),
   });
 }
 
