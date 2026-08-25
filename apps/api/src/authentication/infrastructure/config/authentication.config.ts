@@ -298,7 +298,7 @@ export function loadAuthenticationConfig(
   if (localDemo) {
     const expected = {
       providerKey: 'local_demo',
-      issuer: 'http://127.0.0.1:3400/local-demo',
+      issuer: 'https://127.0.0.1:3400/local-demo',
       authorizationEndpoint: 'http://127.0.0.1:3400/authorize',
       tokenEndpoint: 'http://127.0.0.1:3400/token',
       jwksUri: 'http://127.0.0.1:3400/jwks.json',

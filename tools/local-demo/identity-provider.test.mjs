@@ -145,6 +145,7 @@ describe('local demo identity provider', () => {
   });
 
   it('pins the executable listener to one loopback host and port', () => {
+    assert.equal(LOCAL_DEMO_ISSUER, 'https://127.0.0.1:3400/local-demo');
     assert.doesNotThrow(() =>
       assertPinnedLocalDemoIdentityBinding(LOCAL_DEMO_IDENTITY_HOST, LOCAL_DEMO_IDENTITY_PORT),
     );

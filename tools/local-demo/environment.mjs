@@ -92,7 +92,7 @@ export function createLocalDemoEnvironments(options = {}) {
     LOCAL_DEMO_MODE: 'enabled',
     AUTH_MODE: 'oidc',
     OIDC_PROVIDER_KEY: 'local_demo',
-    OIDC_ISSUER_URL: 'http://127.0.0.1:3400/local-demo',
+    OIDC_ISSUER_URL: 'https://127.0.0.1:3400/local-demo',
     OIDC_AUTHORIZATION_ENDPOINT: 'http://127.0.0.1:3400/authorize',
     OIDC_TOKEN_ENDPOINT: 'http://127.0.0.1:3400/token',
     OIDC_JWKS_URI: 'http://127.0.0.1:3400/jwks.json',

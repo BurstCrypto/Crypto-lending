@@ -5,7 +5,10 @@ import { fileURLToPath } from 'node:url';
 export const LOCAL_DEMO_IDENTITY_HOST = '127.0.0.1';
 export const LOCAL_DEMO_IDENTITY_PORT = 3400;
 export const LOCAL_DEMO_IDENTITY_ORIGIN = `http://${LOCAL_DEMO_IDENTITY_HOST}:${LOCAL_DEMO_IDENTITY_PORT}`;
-export const LOCAL_DEMO_ISSUER = `${LOCAL_DEMO_IDENTITY_ORIGIN}/local-demo`;
+// The issuer is an identity namespace, not a network endpoint. Keep it HTTPS so
+// synthetic identities satisfy the same persisted issuer invariant as real OIDC
+// identities while the executable demo endpoints remain pinned to HTTP loopback.
+export const LOCAL_DEMO_ISSUER = `https://${LOCAL_DEMO_IDENTITY_HOST}:${LOCAL_DEMO_IDENTITY_PORT}/local-demo`;
 export const LOCAL_DEMO_CLIENT_ID = 'crypto-lending-local-demo';
 export const LOCAL_DEMO_REDIRECT_URI = 'http://127.0.0.1:3000/api/v1/auth/callback';
 

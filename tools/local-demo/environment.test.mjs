@@ -59,6 +59,8 @@ describe('local demo process configuration', () => {
     assert.equal(environments.api.API_HOST, '127.0.0.1');
     assert.equal(environments.api.APP_ENV, 'dev-local-demo');
     assert.equal(environments.api.LOCAL_DEMO_MODE, 'enabled');
+    assert.equal(environments.api.OIDC_ISSUER_URL, 'https://127.0.0.1:3400/local-demo');
+    assert.equal(environments.api.OIDC_AUTHORIZATION_ENDPOINT, 'http://127.0.0.1:3400/authorize');
     assert.equal(environments.api.OIDC_TOKEN_AUTH_METHOD, 'none');
     assert.equal(environments.api.WALLET_REGISTRATION_REGISTRY_ENVIRONMENT, 'TESTNET');
     for (const forbidden of [
