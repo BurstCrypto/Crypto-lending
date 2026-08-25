@@ -44,7 +44,7 @@ import {
 } from './authentication-cookies';
 import { AuthenticationClientAddressResolver } from './authentication-client-address';
 import { parseAuthenticationCallback } from './authentication-callback';
-import { canonicalHttpsOrigin } from './authentication-origin';
+import { canonicalAuthenticationOrigin } from './authentication-origin';
 import { StartRegistrationDto } from './dto/start-registration.dto';
 import { AuthenticationStartResponseDto } from './dto/authentication-start-response.dto';
 
@@ -322,7 +322,10 @@ export class AuthenticationController {
   }
 
   private assertTrustedUnsafeOrigin(request: AuthenticationControllerRequest): void {
-    const expectedOrigin = canonicalHttpsOrigin(this.enabledConfig().publicOrigin);
+    const config = this.enabledConfig();
+    const expectedOrigin = canonicalAuthenticationOrigin(config.publicOrigin, {
+      localDemo: config.localDemo,
+    });
     if (request.headers?.origin !== expectedOrigin) throw new AuthenticationRejectedError();
   }
 

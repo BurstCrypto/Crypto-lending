@@ -6,6 +6,7 @@ import {
 
 const CSRF_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/u;
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+const LOCAL_DEMO_HTTP_ORIGIN = 'http://127.0.0.1:3000';
 
 export class AuthenticationCsrfError extends Error {
   constructor() {
@@ -29,7 +30,10 @@ function singleHeader(value: unknown): string | undefined {
   return value;
 }
 
-export function canonicalHttpsOrigin(value: string): string {
+export function canonicalAuthenticationOrigin(
+  value: string,
+  options: { readonly localDemo?: boolean } = {},
+): string {
   if (value.length > 2048 || containsControlCharacter(value)) {
     throw new AuthenticationCsrfError();
   }
@@ -39,8 +43,11 @@ export function canonicalHttpsOrigin(value: string): string {
   } catch {
     throw new AuthenticationCsrfError();
   }
+  const permittedProtocol =
+    parsed.protocol === 'https:' ||
+    (options.localDemo === true && value === LOCAL_DEMO_HTTP_ORIGIN);
   if (
-    parsed.protocol !== 'https:' ||
+    !permittedProtocol ||
     parsed.username !== '' ||
     parsed.password !== '' ||
     parsed.pathname !== '/' ||
@@ -53,6 +60,10 @@ export function canonicalHttpsOrigin(value: string): string {
   return parsed.origin;
 }
 
+export function canonicalHttpsOrigin(value: string): string {
+  return canonicalAuthenticationOrigin(value);
+}
+
 /** Returns the session-bound CSRF value for unsafe methods and null for safe methods. */
 export function requireAuthenticationCsrf(input: {
   readonly method: unknown;
@@ -60,12 +71,15 @@ export function requireAuthenticationCsrf(input: {
   readonly csrfHeader: unknown;
   readonly cookieHeader: unknown;
   readonly expectedOrigin: string;
+  readonly localDemo?: boolean;
 }): string | null {
   if (typeof input.method !== 'string') throw new AuthenticationCsrfError();
   const method = input.method.toUpperCase();
   if (SAFE_METHODS.has(method)) return null;
 
-  const expectedOrigin = canonicalHttpsOrigin(input.expectedOrigin);
+  const expectedOrigin = canonicalAuthenticationOrigin(input.expectedOrigin, {
+    localDemo: input.localDemo === true,
+  });
   const origin = singleHeader(input.originHeader);
   const csrfHeader = singleHeader(input.csrfHeader);
   let csrfCookie: string | null;

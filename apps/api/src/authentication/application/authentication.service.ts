@@ -401,6 +401,7 @@ export class AuthenticationService {
         csrfHeader: requestHeader(request, 'x-csrf-token'),
         cookieHeader: requestHeader(request, 'cookie'),
         expectedOrigin: config.publicOrigin,
+        localDemo: config.localDemo,
       });
     } catch {
       return null;
@@ -515,6 +516,7 @@ export class AuthenticationService {
         csrfHeader: requestHeader(request, 'x-csrf-token'),
         cookieHeader: requestHeader(request, 'cookie'),
         expectedOrigin: config.publicOrigin,
+        localDemo: config.localDemo,
       });
       if (csrfToken === null) throw new AuthenticationRejectedError();
       return Object.freeze({

@@ -24,6 +24,28 @@ const FORBIDDEN_EXTERNAL_CONFIGURATION = Object.freeze([
   'PRICE_PROVIDER_URL',
 ] as const);
 
+const REQUIRED_LOCAL_INFRASTRUCTURE = Object.freeze({
+  APPLICATION_WORKLOAD: 'api',
+  DATABASE_RUNTIME_URL:
+    'postgresql://crypto_api_login_a:local_api_database_a@127.0.0.1:5432/crypto_lending',
+  DATABASE_RUNTIME_SSL_MODE: 'disable',
+  REDIS_HOST: '127.0.0.1',
+  REDIS_PORT: '6379',
+  REDIS_TLS: 'false',
+  REDIS_USERNAME: 'crypto_api_a',
+  REDIS_PASSWORD: 'local-api-current',
+  AWS_REGION: 'us-east-1',
+  AWS_ACCESS_KEY_ID: 'test',
+  AWS_SECRET_ACCESS_KEY: 'test',
+  AWS_EC2_METADATA_DISABLED: 'true',
+  SQS_ENDPOINT: 'http://127.0.0.1:4566',
+  SQS_QUEUE_URL: 'http://127.0.0.1:4566/000000000000/crypto-lending-jobs',
+  SQS_DEAD_LETTER_QUEUE_URL: 'http://127.0.0.1:4566/000000000000/crypto-lending-jobs-dlq',
+} as const);
+
+const REVIEWED_INFRASTRUCTURE_NAMES = new Set(Object.keys(REQUIRED_LOCAL_INFRASTRUCTURE));
+const INFRASTRUCTURE_PREFIXES = Object.freeze(['AWS_', 'DATABASE_', 'REDIS_', 'SQS_']);
+
 export class LocalDemoRuntimeConfigurationError extends Error {
   readonly code = 'LOCAL_DEMO_RUNTIME_CONFIGURATION_ERROR' as const;
 
@@ -35,6 +57,22 @@ export class LocalDemoRuntimeConfigurationError extends Error {
 
 function fail(field: string): never {
   throw new LocalDemoRuntimeConfigurationError(field);
+}
+
+function assertExactLocalInfrastructure(environment: Readonly<NodeJS.ProcessEnv>): void {
+  const mismatched = Object.entries(REQUIRED_LOCAL_INFRASTRUCTURE).find(
+    ([name, value]) => environment[name] !== value,
+  );
+  if (mismatched) return fail(mismatched[0]);
+
+  const unreviewed = Object.keys(environment).find((name) => {
+    const canonicalName = name.toUpperCase();
+    return (
+      INFRASTRUCTURE_PREFIXES.some((prefix) => canonicalName.startsWith(prefix)) &&
+      !REVIEWED_INFRASTRUCTURE_NAMES.has(canonicalName)
+    );
+  });
+  if (unreviewed) return fail(unreviewed);
 }
 
 function exactDisabledMode(environment: Readonly<NodeJS.ProcessEnv>): LocalDemoRuntimeConfig {
@@ -72,10 +110,11 @@ export function loadLocalDemoRuntimeConfig(
   if (environment.WALLET_REGISTRATION_REGISTRY_ENVIRONMENT !== 'TESTNET') {
     return fail('WALLET_REGISTRATION_REGISTRY_ENVIRONMENT');
   }
-  const unexpected = FORBIDDEN_EXTERNAL_CONFIGURATION.find(
-    (name) => environment[name] !== undefined,
+  const unexpected = FORBIDDEN_EXTERNAL_CONFIGURATION.find((name) =>
+    Object.keys(environment).some((configuredName) => configuredName.toUpperCase() === name),
   );
   if (unexpected !== undefined) return fail(unexpected);
+  assertExactLocalInfrastructure(environment);
 
   return Object.freeze({
     mode: 'enabled',
