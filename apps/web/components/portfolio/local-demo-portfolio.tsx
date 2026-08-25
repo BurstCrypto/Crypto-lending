@@ -36,6 +36,7 @@ import {
 } from '@/lib/wallets/wallet-roster-storage';
 
 import { UnifiedBalanceView, type UnifiedBalanceViewState } from './unified-balance-view';
+import { LocalDemoAllocationPlanner } from './local-demo-allocation-planner';
 
 const PORTFOLIO_LOGIN_PATH = '/login?returnTo=%2Fportfolio';
 const EMPTY_WALLET_STATE: MultiWalletState = Object.freeze({
@@ -104,6 +105,7 @@ export function LocalDemoPortfolio({ enabled, dependencies }: LocalDemoPortfolio
   const [phase, setPhase] = useState<ExperiencePhase>(enabled ? 'CHECKING' : 'UNAVAILABLE');
   const [wallets, setWallets] = useState<MultiWalletState>(EMPTY_WALLET_STATE);
   const [portfolio, setPortfolio] = useState<UnifiedBalanceViewState>({ status: 'LOADING' });
+  const [allocationClient, setAllocationClient] = useState<LocalDemoApiClient | null>(null);
   const [walletError, setWalletError] = useState<string | null>(null);
   const [pendingOperation, setPendingOperation] = useState<string | null>(null);
   const [bootstrapRevision, setBootstrapRevision] = useState(0);
@@ -125,6 +127,7 @@ export function LocalDemoPortfolio({ enabled, dependencies }: LocalDemoPortfolio
     managerReference.current?.dispose();
     managerReference.current = null;
     clientReference.current = null;
+    setAllocationClient(null);
     adaptersReference.current = new Map();
     setWallets(EMPTY_WALLET_STATE);
     setWalletError(null);
@@ -229,6 +232,7 @@ export function LocalDemoPortfolio({ enabled, dependencies }: LocalDemoPortfolio
         });
         managerReference.current = manager;
         clientReference.current = client;
+        setAllocationClient(client);
         adaptersReference.current = adapters;
         setWallets(manager.getState());
 
@@ -300,6 +304,7 @@ export function LocalDemoPortfolio({ enabled, dependencies }: LocalDemoPortfolio
       managerReference.current?.dispose();
       managerReference.current = null;
       clientReference.current = null;
+      setAllocationClient(null);
       adaptersReference.current = new Map();
       setWallets(EMPTY_WALLET_STATE);
       setWalletError(null);
@@ -524,7 +529,18 @@ export function LocalDemoPortfolio({ enabled, dependencies }: LocalDemoPortfolio
           {pendingOperation === 'refresh' ? 'Refreshing...' : 'Refresh portfolio'}
         </button>
       </div>
-      <UnifiedBalanceView state={portfolio} />
+      <UnifiedBalanceView
+        state={portfolio}
+        readyContent={
+          portfolio.status === 'READY' && allocationClient !== null ? (
+            <LocalDemoAllocationPlanner
+              key={portfolio.snapshot.snapshotId}
+              client={allocationClient}
+              onUnauthenticated={requireSignIn}
+            />
+          ) : null
+        }
+      />
     </>
   );
 }

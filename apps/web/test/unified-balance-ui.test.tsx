@@ -17,6 +17,37 @@ const READY_STATE = Object.freeze({
   snapshot: parseUnifiedBalanceResponse(UNIFIED_BALANCE_DEMO_PAYLOAD),
 } as const satisfies UnifiedBalanceViewState);
 
+function grossLocalDemoPayload(): unknown {
+  return {
+    ...UNIFIED_BALANCE_DEMO_PAYLOAD,
+    freshness: 'CURRENT',
+    buyingPower: {
+      status: 'AVAILABLE',
+      amountUsdMinor: UNIFIED_BALANCE_DEMO_PAYLOAD.portfolioValueUsdMinor,
+      freshness: 'CURRENT',
+      deductions: [],
+      reasons: [],
+    },
+    wallets: UNIFIED_BALANCE_DEMO_PAYLOAD.wallets.map((wallet) => ({
+      ...wallet,
+      buyingPowerUsdMinor: wallet.portfolioValueUsdMinor,
+      chains: wallet.chains.map((chain) => ({
+        ...chain,
+        buyingPowerUsdMinor: chain.portfolioValueUsdMinor,
+        assets: chain.assets.map((asset) => ({
+          ...asset,
+          buyingPowerUsdMinor: asset.portfolioValueUsdMinor,
+          buyingPowerAvailability: 'INCLUDED',
+          buyingPowerReason: null,
+          freshness: 'CURRENT',
+        })),
+      })),
+    })),
+    use: 'LOCAL_DEMO_ESTIMATE_ONLY',
+    mayAuthorizeFinancialAction: false,
+  };
+}
+
 afterEach(() => cleanup());
 
 describe('UnifiedBalanceView', () => {
@@ -50,6 +81,21 @@ describe('UnifiedBalanceView', () => {
       '2026-08-24T18:30:00.000Z',
     );
     expect(screen.getByText('Buying-power notes')).toBeInTheDocument();
+  });
+
+  it('shows full idle local-demo capital and defers fee details until allocation preview', () => {
+    const snapshot = parseUnifiedBalanceResponse(grossLocalDemoPayload());
+    render(<UnifiedBalanceView state={{ status: 'READY', snapshot }} />);
+
+    const buyingPowerCard = screen.getByText('Available buying power').closest('article');
+    expect(within(buyingPowerCard!).getByLabelText('11,000 US dollars')).toHaveTextContent(
+      '$11,000.00',
+    );
+    expect(
+      within(buyingPowerCard!).getByText(/Full supported capital available before any allocation/u),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('Why buying power is lower')).not.toBeInTheDocument();
+    expect(screen.queryByText('Estimated slippage')).not.toBeInTheDocument();
   });
 
   it('expands wallet and chain attribution while keeping addresses masked', () => {
