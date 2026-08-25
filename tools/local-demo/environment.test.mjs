@@ -295,6 +295,8 @@ describe('local demo process configuration', () => {
     assert.doesNotMatch(launcher, /(?:runChecked|spawnOwned)\('npm'/u);
     assert.match(launcher, /require\.resolve\('next\/dist\/bin\/next'\)/u);
     assert.match(launcher, /require\.resolve\('ts-node\/dist\/bin\.js'\)/u);
+    assert.match(launcher, /\[nestCli, 'start'\]/u);
+    assert.doesNotMatch(launcher, /\[nestCli, 'start', '--watch'\]/u);
     assert.match(launcher, /\[tsNodeCli, 'src\/infrastructure\/outbox\/outbox-worker\.cli\.ts'\]/u);
     assert.match(launcher, /\[nextCli, 'dev', '--webpack', '--hostname', '127\.0\.0\.1'\]/u);
     assert.match(

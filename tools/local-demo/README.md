@@ -123,6 +123,11 @@ local migration principal, and launches:
 Application processes remain attached to the terminal. Press `Ctrl+C` to stop
 them. The demo-owned dependency containers remain available for a quick restart.
 
+The API is compiled once per harness start instead of running in watch mode.
+This keeps its authenticated in-memory demo state available while Next writes
+development artifacts. Web changes still hot reload; restart the attached
+harness to pick up API source changes.
+
 ## Current click-through flow
 
 1. Open `http://127.0.0.1:3000/register`.
