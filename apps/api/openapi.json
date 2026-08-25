@@ -1090,6 +1090,11 @@
                             "pattern": "^(?:0|[1-9][0-9]*)$",
                             "type": "string"
                           },
+                          "apyBasisPoints": {
+                            "maximum": 10000,
+                            "minimum": 0,
+                            "type": "integer"
+                          },
                           "bucket": {
                             "enum": [
                               "LIQUID_RESERVE",
@@ -1111,6 +1116,7 @@
                           "bucket",
                           "label",
                           "percentageBasisPoints",
+                          "apyBasisPoints",
                           "amountUsdMinor"
                         ],
                         "type": "object"
@@ -1200,6 +1206,68 @@
                         "LOCAL_DEMO_ESTIMATE_ONLY"
                       ],
                       "type": "string"
+                    },
+                    "yieldProjection": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "breakEven": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "firstNetPositiveDay": {
+                              "minimum": 1,
+                              "nullable": true,
+                              "type": "integer"
+                            },
+                            "status": {
+                              "enum": [
+                                "AVAILABLE",
+                                "NOT_APPLICABLE",
+                                "UNAVAILABLE"
+                              ],
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "status",
+                            "firstNetPositiveDay"
+                          ],
+                          "type": "object"
+                        },
+                        "calculationMethod": {
+                          "enum": [
+                            "SIMPLE_DAILY_APY_PRORATION_ON_NET_CAPITAL"
+                          ],
+                          "type": "string"
+                        },
+                        "effectiveApyBasisPoints": {
+                          "maximum": 10000,
+                          "minimum": 0,
+                          "type": "integer"
+                        },
+                        "projectedAnnualNetGrowthUsdMinor": {
+                          "pattern": "^(?:0|[1-9][0-9]*)$",
+                          "type": "string"
+                        },
+                        "projectedAnnualYieldUsdMinor": {
+                          "pattern": "^(?:0|[1-9][0-9]*)$",
+                          "type": "string"
+                        },
+                        "source": {
+                          "enum": [
+                            "SYNTHETIC_FIXED_DEMO_RATES"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "source",
+                        "calculationMethod",
+                        "effectiveApyBasisPoints",
+                        "projectedAnnualYieldUsdMinor",
+                        "projectedAnnualNetGrowthUsdMinor",
+                        "breakEven"
+                      ],
+                      "type": "object"
                     }
                   },
                   "required": [
@@ -1211,6 +1279,7 @@
                     "deductions",
                     "totalFeesUsdMinor",
                     "netPlannedCapitalUsdMinor",
+                    "yieldProjection",
                     "asOf"
                   ],
                   "type": "object"

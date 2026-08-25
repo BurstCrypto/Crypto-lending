@@ -79,18 +79,21 @@ const ALLOCATION_PREVIEW: LocalDemoAllocationPreviewResponse = Object.freeze({
       bucket: 'LIQUID_RESERVE',
       label: 'Liquid reserve',
       percentageBasisPoints: 3_000,
+      apyBasisPoints: 0,
       amountUsdMinor: '330000',
     }),
     Object.freeze({
       bucket: 'CONSERVATIVE_YIELD',
       label: 'Conservative yield',
       percentageBasisPoints: 4_500,
+      apyBasisPoints: 400,
       amountUsdMinor: '495000',
     }),
     Object.freeze({
       bucket: 'BALANCED_YIELD',
       label: 'Balanced yield',
       percentageBasisPoints: 2_500,
+      apyBasisPoints: 600,
       amountUsdMinor: '275000',
     }),
   ]),
@@ -103,6 +106,14 @@ const ALLOCATION_PREVIEW: LocalDemoAllocationPreviewResponse = Object.freeze({
   ]),
   totalFeesUsdMinor: '7700',
   netPlannedCapitalUsdMinor: '1092300',
+  yieldProjection: Object.freeze({
+    source: 'SYNTHETIC_FIXED_DEMO_RATES',
+    calculationMethod: 'SIMPLE_DAILY_APY_PRORATION_ON_NET_CAPITAL',
+    effectiveApyBasisPoints: 330,
+    projectedAnnualYieldUsdMinor: '36045',
+    projectedAnnualNetGrowthUsdMinor: '28345',
+    breakEven: Object.freeze({ status: 'AVAILABLE', firstNetPositiveDay: 78 }),
+  }),
   asOf: '2026-08-24T18:30:00.000Z',
 });
 

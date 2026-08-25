@@ -11,6 +11,8 @@ import {
   LOCAL_DEMO_ALLOCATION_BUCKETS,
   LOCAL_DEMO_ALLOCATION_DEDUCTION_CODES,
   LOCAL_DEMO_ALLOCATION_PRESET_IDS,
+  LOCAL_DEMO_YIELD_CALCULATION_METHOD,
+  LOCAL_DEMO_YIELD_PROJECTION_SOURCE,
   type LocalDemoAllocationPresetId,
 } from './local-demo-allocation.service';
 
@@ -135,6 +137,7 @@ export const LOCAL_DEMO_ALLOCATION_PREVIEW_RESPONSE_SCHEMA: SchemaObject = Objec
     'deductions',
     'totalFeesUsdMinor',
     'netPlannedCapitalUsdMinor',
+    'yieldProjection',
     'asOf',
   ],
   properties: {
@@ -158,11 +161,12 @@ export const LOCAL_DEMO_ALLOCATION_PREVIEW_RESPONSE_SCHEMA: SchemaObject = Objec
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['bucket', 'label', 'percentageBasisPoints', 'amountUsdMinor'],
+        required: ['bucket', 'label', 'percentageBasisPoints', 'apyBasisPoints', 'amountUsdMinor'],
         properties: {
           bucket: { type: 'string', enum: [...LOCAL_DEMO_ALLOCATION_BUCKETS] },
           label: { type: 'string' },
           percentageBasisPoints: { type: 'integer', minimum: 0, maximum: 10_000 },
+          apyBasisPoints: { type: 'integer', minimum: 0, maximum: 10_000 },
           amountUsdMinor: { type: 'string', pattern: '^(?:0|[1-9][0-9]*)$' },
         },
       },
@@ -183,6 +187,50 @@ export const LOCAL_DEMO_ALLOCATION_PREVIEW_RESPONSE_SCHEMA: SchemaObject = Objec
     },
     totalFeesUsdMinor: { type: 'string', pattern: '^(?:0|[1-9][0-9]*)$' },
     netPlannedCapitalUsdMinor: { type: 'string', pattern: '^(?:0|[1-9][0-9]*)$' },
+    yieldProjection: {
+      type: 'object',
+      additionalProperties: false,
+      required: [
+        'source',
+        'calculationMethod',
+        'effectiveApyBasisPoints',
+        'projectedAnnualYieldUsdMinor',
+        'projectedAnnualNetGrowthUsdMinor',
+        'breakEven',
+      ],
+      properties: {
+        source: { type: 'string', enum: [LOCAL_DEMO_YIELD_PROJECTION_SOURCE] },
+        calculationMethod: {
+          type: 'string',
+          enum: [LOCAL_DEMO_YIELD_CALCULATION_METHOD],
+        },
+        effectiveApyBasisPoints: { type: 'integer', minimum: 0, maximum: 10_000 },
+        projectedAnnualYieldUsdMinor: {
+          type: 'string',
+          pattern: '^(?:0|[1-9][0-9]*)$',
+        },
+        projectedAnnualNetGrowthUsdMinor: {
+          type: 'string',
+          pattern: '^(?:0|[1-9][0-9]*)$',
+        },
+        breakEven: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['status', 'firstNetPositiveDay'],
+          properties: {
+            status: {
+              type: 'string',
+              enum: ['AVAILABLE', 'NOT_APPLICABLE', 'UNAVAILABLE'],
+            },
+            firstNetPositiveDay: {
+              type: 'integer',
+              minimum: 1,
+              nullable: true,
+            },
+          },
+        },
+      },
+    },
     asOf: { type: 'string', format: 'date-time' },
   },
 });

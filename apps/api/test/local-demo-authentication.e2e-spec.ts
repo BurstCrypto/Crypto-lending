@@ -419,16 +419,19 @@ describe('local demo authentication boundary (e2e)', () => {
         {
           bucket: 'LIQUID_RESERVE',
           percentageBasisPoints: 3000,
+          apyBasisPoints: 0,
           amountUsdMinor: '210000',
         },
         {
           bucket: 'CONSERVATIVE_YIELD',
           percentageBasisPoints: 4500,
+          apyBasisPoints: 400,
           amountUsdMinor: '315000',
         },
         {
           bucket: 'BALANCED_YIELD',
           percentageBasisPoints: 2500,
+          apyBasisPoints: 600,
           amountUsdMinor: '175000',
         },
       ],
@@ -441,6 +444,14 @@ describe('local demo authentication boundary (e2e)', () => {
       ],
       totalFeesUsdMinor: '4900',
       netPlannedCapitalUsdMinor: '695100',
+      yieldProjection: {
+        source: 'SYNTHETIC_FIXED_DEMO_RATES',
+        calculationMethod: 'SIMPLE_DAILY_APY_PRORATION_ON_NET_CAPITAL',
+        effectiveApyBasisPoints: 330,
+        projectedAnnualYieldUsdMinor: '22938',
+        projectedAnnualNetGrowthUsdMinor: '18038',
+        breakEven: { status: 'AVAILABLE', firstNetPositiveDay: 78 },
+      },
       asOf: '2026-08-24T18:30:00.000Z',
     });
     expect(repository.resolveSession).toHaveBeenLastCalledWith(

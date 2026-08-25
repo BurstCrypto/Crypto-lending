@@ -33,6 +33,14 @@ the established 50/10/10/10/20 proportions. Integer-cent largest-remainder appor
 allocations and itemized estimates sum exactly. The preview creates no operation or transaction and
 has no provider, network, or persistence dependency.
 
+The preview also labels fixed synthetic demo APYs of 0% for liquid reserve, 4% for conservative
+yield, and 6% for balanced yield. Each preset's effective APY is weighted from its target
+percentages (1.80%, 3.30%, or 4.40%). Projected annual yield floors
+`net planned capital * effective APY` to whole cents, and projected annual net growth subtracts the
+one-time fee estimate. Break-even uses simple 365-day APY proration on net capital and returns the
+first whole day whose floored accrued cents exceed fees. These are illustrative fixed-rate
+projections, not sourced opportunities, quotes, promises, or financial authorizations.
+
 ## Trust and I/O boundaries
 
 - The EVM reader is an injected port restricted to `http://127.0.0.1:18545`; it verifies the LOCAL

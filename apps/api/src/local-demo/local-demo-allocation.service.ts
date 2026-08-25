@@ -20,6 +20,20 @@ export const LOCAL_DEMO_ALLOCATION_BUCKETS = Object.freeze([
 
 export type LocalDemoAllocationBucket = (typeof LOCAL_DEMO_ALLOCATION_BUCKETS)[number];
 
+export const LOCAL_DEMO_ALLOCATION_APY_BASIS_POINTS: Readonly<
+  Record<LocalDemoAllocationBucket, number>
+> = Object.freeze({
+  LIQUID_RESERVE: 0,
+  CONSERVATIVE_YIELD: 400,
+  BALANCED_YIELD: 600,
+});
+
+export const LOCAL_DEMO_YIELD_PROJECTION_SOURCE = 'SYNTHETIC_FIXED_DEMO_RATES' as const;
+export const LOCAL_DEMO_YIELD_CALCULATION_METHOD =
+  'SIMPLE_DAILY_APY_PRORATION_ON_NET_CAPITAL' as const;
+
+export type LocalDemoBreakEvenStatus = 'AVAILABLE' | 'NOT_APPLICABLE' | 'UNAVAILABLE';
+
 export const LOCAL_DEMO_ALLOCATION_DEDUCTION_CODES = Object.freeze([
   'LIQUIDITY',
   'CONVERSION',
@@ -100,6 +114,7 @@ export interface LocalDemoAllocationPreviewResponse {
     bucket: LocalDemoAllocationBucket;
     label: string;
     percentageBasisPoints: number;
+    apyBasisPoints: number;
     amountUsdMinor: string;
   }>[];
   readonly deductions: readonly Readonly<{
@@ -108,6 +123,17 @@ export interface LocalDemoAllocationPreviewResponse {
   }>[];
   readonly totalFeesUsdMinor: string;
   readonly netPlannedCapitalUsdMinor: string;
+  readonly yieldProjection: Readonly<{
+    source: typeof LOCAL_DEMO_YIELD_PROJECTION_SOURCE;
+    calculationMethod: typeof LOCAL_DEMO_YIELD_CALCULATION_METHOD;
+    effectiveApyBasisPoints: number;
+    projectedAnnualYieldUsdMinor: string;
+    projectedAnnualNetGrowthUsdMinor: string;
+    breakEven: Readonly<{
+      status: LocalDemoBreakEvenStatus;
+      firstNetPositiveDay: number | null;
+    }>;
+  }>;
   readonly asOf: string;
 }
 
@@ -137,6 +163,7 @@ export class LocalDemoAllocationService {
         bucket,
         label: BUCKET_LABELS[bucket],
         percentageBasisPoints: preset.percentageBasisPoints[bucket],
+        apyBasisPoints: LOCAL_DEMO_ALLOCATION_APY_BASIS_POINTS[bucket],
         amountUsdMinor: requiredAmount(allocationAmounts, index).toString(),
       }),
     );
@@ -155,6 +182,14 @@ export class LocalDemoAllocationService {
         amountUsdMinor: requiredAmount(deductionAmounts, index).toString(),
       }),
     );
+    const netPlannedCapital = grossCapital - totalFees;
+    const effectiveApyBasisPoints = calculateEffectiveApyBasisPoints(preset);
+    const annualYieldNumerator = netPlannedCapital * BigInt(effectiveApyBasisPoints);
+    const projectedAnnualYield = annualYieldNumerator / 10_000n;
+    const projectedAnnualNetGrowth = projectedAnnualYield - totalFees;
+    if (projectedAnnualNetGrowth < 0n) {
+      throw new TypeError('negative local demo annual net growth');
+    }
 
     return Object.freeze({
       use: 'LOCAL_DEMO_ESTIMATE_ONLY',
@@ -168,10 +203,58 @@ export class LocalDemoAllocationService {
       allocations: Object.freeze(allocations),
       deductions: Object.freeze(deductions),
       totalFeesUsdMinor: totalFees.toString(),
-      netPlannedCapitalUsdMinor: (grossCapital - totalFees).toString(),
+      netPlannedCapitalUsdMinor: netPlannedCapital.toString(),
+      yieldProjection: Object.freeze({
+        source: LOCAL_DEMO_YIELD_PROJECTION_SOURCE,
+        calculationMethod: LOCAL_DEMO_YIELD_CALCULATION_METHOD,
+        effectiveApyBasisPoints,
+        projectedAnnualYieldUsdMinor: projectedAnnualYield.toString(),
+        projectedAnnualNetGrowthUsdMinor: projectedAnnualNetGrowth.toString(),
+        breakEven: projectBreakEven(totalFees, annualYieldNumerator),
+      }),
       asOf: portfolio.asOf,
     });
   }
+}
+
+function calculateEffectiveApyBasisPoints(preset: AllocationPresetDefinition): number {
+  const weightedBasisPoints = LOCAL_DEMO_ALLOCATION_BUCKETS.reduce(
+    (total, bucket) =>
+      total +
+      BigInt(preset.percentageBasisPoints[bucket]) *
+        BigInt(LOCAL_DEMO_ALLOCATION_APY_BASIS_POINTS[bucket]),
+    0n,
+  );
+  if (weightedBasisPoints % 10_000n !== 0n) {
+    throw new TypeError('non-integral local demo effective APY');
+  }
+  const result = weightedBasisPoints / 10_000n;
+  if (result > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new TypeError('local demo effective APY exceeds numeric limits');
+  }
+  return Number(result);
+}
+
+function projectBreakEven(
+  totalFees: bigint,
+  annualYieldNumerator: bigint,
+): LocalDemoAllocationPreviewResponse['yieldProjection']['breakEven'] {
+  if (totalFees === 0n) {
+    return Object.freeze({ status: 'NOT_APPLICABLE', firstNetPositiveDay: null });
+  }
+  if (annualYieldNumerator === 0n) {
+    return Object.freeze({ status: 'UNAVAILABLE', firstNetPositiveDay: null });
+  }
+  const firstDay = ceilDivide((totalFees + 1n) * 10_000n * 365n, annualYieldNumerator);
+  if (firstDay < 1n || firstDay > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new TypeError('local demo break-even day exceeds numeric limits');
+  }
+  return Object.freeze({ status: 'AVAILABLE', firstNetPositiveDay: Number(firstDay) });
+}
+
+function ceilDivide(dividend: bigint, divisor: bigint): bigint {
+  if (dividend < 0n || divisor <= 0n) throw new TypeError('invalid local demo division');
+  return (dividend + divisor - 1n) / divisor;
 }
 
 /**
