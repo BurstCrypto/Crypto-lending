@@ -2,8 +2,9 @@
 
 This harness composes the real web, API, database migrations, session flow, and
 outbox worker entirely on loopback. It supplies an ephemeral OIDC fixture so a
-developer can exercise registration, login, protected-session restoration, and
-logout without creating an identity-provider account or credential.
+developer can exercise registration, login, protected-session restoration,
+synthetic wallet ownership, unified balances, buying power, and logout without
+creating an identity-provider, wallet-relay, RPC, oracle, or cloud account.
 
 The harness is not production, provider, security-review, or external-acceptance
 evidence. Every screen displays a synthetic-data banner while the mode is on.
@@ -41,6 +42,17 @@ evidence. Every screen displays a synthetic-data banner while the mode is on.
   its downloadable WebAssembly fallback is disabled.
 - AWS metadata discovery is disabled and the SDK is pinned to the loopback
   LocalStack endpoint with non-credential local fixture values.
+- The API independently requires the harness's exact loopback PostgreSQL,
+  Redis, and SQS endpoints and its fixed non-production fixture identities.
+  Alternate infrastructure, AWS credential, metadata, proxy, RPC, relay, and
+  provider variables make demo startup fail before it can listen.
+- The demo wallet API accepts only the `EVM` and `SOLANA` fixture selectors. It
+  creates an ephemeral server-side key, signs only the fresh KAN-56 challenge,
+  submits that proof through the real registration service, and never returns a
+  private key, challenge, signature, or general-purpose signing capability.
+- Portfolio reads use deterministic, in-memory MAINNET-shaped observations.
+  They exercise the KAN-63 through KAN-68 domain classes but are not statements
+  about either proven testnet address, any live chain, or available credit.
 
 Do not enter a real email address, phone number, seed phrase, private key,
 signature, wallet address, credential, customer record, or real asset.
@@ -82,22 +94,45 @@ them. The demo-owned dependency containers remain available for a quick restart.
    KAN-37 repository and controller boundaries.
 5. Refresh the protected account page and then sign out. Cookie rotation, CSRF,
    account isolation, and logout revocation remain active.
-6. Return to the home page and select **Portfolio preview**, or open
-   `http://127.0.0.1:3000/portfolio` directly, to review the unified balance and
-   buying-power presentation.
+6. Open `http://127.0.0.1:3000/portfolio`. The page first restores the same
+   authenticated account; an expired or missing session returns to login.
+7. Select **EVM test wallet**, **Solana test wallet**, or both. The local API
+   completes a real one-use KAN-56 ownership proof with an ephemeral synthetic
+   signer, then the existing multi-wallet lifecycle marks only that accepted
+   connection as eligible for indexing.
+8. Review the account-scoped portfolio value, conservative buying-power
+   estimate, non-zero deduction breakdown, source wallet, chain, asset,
+   freshness, and masked addresses. Refresh the browser to exercise wallet and
+   session restoration. Disconnect a wallet to remove its contribution.
 
-The portfolio preview uses an embedded deterministic fixture. It is not derived
-from the authenticated account, a connected wallet, a live API, an RPC/indexing
-provider, a quote, or available credit. The production adapters remain fail
-closed until separately reviewed and configured; this harness is not approval
-to contact a wallet relay, RPC/indexing provider, oracle, or cloud service.
+The portfolio is not embedded in the page and is not live chain data. The
+authenticated same-origin API composes deterministic source fixtures through
+the real EVM/Solana indexers, balance-sync orchestrator, valuation policy,
+unified portfolio aggregation, and buying-power calculator. Production adapters
+remain fail closed until separately reviewed and configured; this harness is
+not approval to contact a wallet relay, RPC/indexing provider, oracle, or cloud
+service.
+
+To reset only the current account's demo wallets, disconnect both entries in the
+portfolio page. Restarting the attached API process clears every ephemeral
+signer and deterministic connection projection. The normal teardown command
+still removes only KAN-253-owned dependency resources.
+
+Disconnect removes the wallet from the active synthetic portfolio; the real
+KAN-56 registration record remains in the local demo database until the owned
+database volume is removed by teardown.
+
+Browser roster hints are scoped by authenticated account and cleared on logout
+or session loss; they contain no key, signature, challenge, or full address.
 
 ## Verify without starting Docker or application services
 
 ```powershell
 npm run test:local-demo
-npm test --workspace @crypto-lending/api -- --runInBand src/authentication/infrastructure/config/authentication.config.spec.ts src/wallets/infrastructure/config/wallet-registration.config.spec.ts
-npm test --workspace @crypto-lending/web -- test/local-demo-config.test.tsx test/browser-egress.test.ts
+npm test --workspace @crypto-lending/api -- --runInBand src/local-demo
+npm run test:e2e --workspace @crypto-lending/api
+npm test --workspace @crypto-lending/web -- test/local-demo-config.test.tsx test/local-demo-client.test.ts test/local-demo-wallet-adapter.test.ts test/local-demo-portfolio-journey.test.tsx test/browser-egress.test.ts
+npm run security:scan:secrets
 ```
 
 The identity tests use an ephemeral in-process loopback HTTP server; the other
