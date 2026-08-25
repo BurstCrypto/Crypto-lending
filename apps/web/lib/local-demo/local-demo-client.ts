@@ -21,11 +21,18 @@ const FORBIDDEN_TEXT = /[\p{Cc}\p{Cf}\p{Cs}\p{Zl}\p{Zp}]/u;
 const USD_MINOR = /^(?:0|[1-9][0-9]{0,17})$/u;
 const MAX_REGISTERED_WALLETS = 2;
 
+export const LOCAL_DEMO_ALLOCATION_BUCKET_APY_BASIS_POINTS = Object.freeze({
+  LIQUID_RESERVE: 0,
+  CONSERVATIVE_YIELD: 400,
+  BALANCED_YIELD: 600,
+} as const);
+
 export const LOCAL_DEMO_ALLOCATION_PRESETS = Object.freeze([
   Object.freeze({
     id: 'MORE_LIQUID',
     label: 'More liquid',
     description: 'Keep most capital readily available while adding a smaller yield allocation.',
+    effectiveApyBasisPoints: 180,
     percentages: Object.freeze({
       LIQUID_RESERVE: 6000,
       CONSERVATIVE_YIELD: 3000,
@@ -36,6 +43,7 @@ export const LOCAL_DEMO_ALLOCATION_PRESETS = Object.freeze([
     id: 'BALANCED',
     label: 'Balanced blend',
     description: 'Split capital between ready access and diversified synthetic yield.',
+    effectiveApyBasisPoints: 330,
     percentages: Object.freeze({
       LIQUID_RESERVE: 3000,
       CONSERVATIVE_YIELD: 4500,
@@ -46,6 +54,7 @@ export const LOCAL_DEMO_ALLOCATION_PRESETS = Object.freeze([
     id: 'MORE_YIELD',
     label: 'More yield',
     description: 'Put more capital toward synthetic yield while retaining a liquid reserve.',
+    effectiveApyBasisPoints: 440,
     percentages: Object.freeze({
       LIQUID_RESERVE: 1500,
       CONSERVATIVE_YIELD: 3500,
@@ -99,6 +108,7 @@ export interface LocalDemoAllocationPreview {
     label: string;
     percentageBasisPoints: number;
     amountUsdMinor: string;
+    apyBasisPoints: number;
   }>[];
   readonly deductions: readonly Readonly<{
     code: LocalDemoAllocationDeductionCode;
@@ -106,6 +116,17 @@ export interface LocalDemoAllocationPreview {
   }>[];
   readonly totalFeesUsdMinor: string;
   readonly netPlannedCapitalUsdMinor: string;
+  readonly yieldProjection: Readonly<{
+    source: 'SYNTHETIC_FIXED_DEMO_RATES';
+    calculationMethod: 'SIMPLE_DAILY_APY_PRORATION_ON_NET_CAPITAL';
+    effectiveApyBasisPoints: number;
+    projectedAnnualYieldUsdMinor: string;
+    projectedAnnualNetGrowthUsdMinor: string;
+    breakEven: Readonly<{
+      status: 'AVAILABLE' | 'NOT_APPLICABLE' | 'UNAVAILABLE';
+      firstNetPositiveDay: number | null;
+    }>;
+  }>;
   readonly asOf: string;
 }
 
@@ -290,6 +311,7 @@ export function parseLocalDemoAllocationPreview(value: unknown): LocalDemoAlloca
       'deductions',
       'totalFeesUsdMinor',
       'netPlannedCapitalUsdMinor',
+      'yieldProjection',
       'asOf',
     ]);
     if (record.use !== 'LOCAL_DEMO_ESTIMATE_ONLY' || record.mayAuthorizeFinancialAction !== false) {
@@ -323,12 +345,15 @@ export function parseLocalDemoAllocationPreview(value: unknown): LocalDemoAlloca
           'label',
           'percentageBasisPoints',
           'amountUsdMinor',
+          'apyBasisPoints',
         ]);
         const bucket = allocationBucket(allocation.bucket);
         const percentageBasisPoints = presetDefinition.percentages[bucket];
+        const apyBasisPoints = LOCAL_DEMO_ALLOCATION_BUCKET_APY_BASIS_POINTS[bucket];
         if (
           allocation.label !== ALLOCATION_BUCKET_LABELS[bucket] ||
-          allocation.percentageBasisPoints !== percentageBasisPoints
+          allocation.percentageBasisPoints !== percentageBasisPoints ||
+          allocation.apyBasisPoints !== apyBasisPoints
         ) {
           return fail();
         }
@@ -342,6 +367,7 @@ export function parseLocalDemoAllocationPreview(value: unknown): LocalDemoAlloca
           label: ALLOCATION_BUCKET_LABELS[bucket],
           percentageBasisPoints,
           amountUsdMinor,
+          apyBasisPoints,
         });
       }),
     );
@@ -396,6 +422,94 @@ export function parseLocalDemoAllocationPreview(value: unknown): LocalDemoAlloca
       return fail();
     }
 
+    const derivedEffectiveApyNumerator = ALLOCATION_BUCKETS.reduce(
+      (total, bucket) =>
+        total +
+        BigInt(presetDefinition.percentages[bucket]) *
+          BigInt(LOCAL_DEMO_ALLOCATION_BUCKET_APY_BASIS_POINTS[bucket]),
+      0n,
+    );
+    if (
+      derivedEffectiveApyNumerator % 10_000n !== 0n ||
+      derivedEffectiveApyNumerator / 10_000n !== BigInt(presetDefinition.effectiveApyBasisPoints)
+    ) {
+      return fail();
+    }
+    const yieldRecord = ownDataRecord(record.yieldProjection, [
+      'source',
+      'calculationMethod',
+      'effectiveApyBasisPoints',
+      'projectedAnnualYieldUsdMinor',
+      'projectedAnnualNetGrowthUsdMinor',
+      'breakEven',
+    ]);
+    if (
+      yieldRecord.source !== 'SYNTHETIC_FIXED_DEMO_RATES' ||
+      yieldRecord.calculationMethod !== 'SIMPLE_DAILY_APY_PRORATION_ON_NET_CAPITAL' ||
+      yieldRecord.effectiveApyBasisPoints !== presetDefinition.effectiveApyBasisPoints
+    ) {
+      return fail();
+    }
+    const netPlannedCapital = BigInt(netPlannedCapitalUsdMinor);
+    const effectiveApyBasisPoints = presetDefinition.effectiveApyBasisPoints;
+    const projectedAnnualYield = (netPlannedCapital * BigInt(effectiveApyBasisPoints)) / 10_000n;
+    const projectedAnnualYieldUsdMinor = canonicalUsdMinor(
+      yieldRecord.projectedAnnualYieldUsdMinor,
+    );
+    if (
+      BigInt(projectedAnnualYieldUsdMinor) !== projectedAnnualYield ||
+      projectedAnnualYield < totalFees
+    ) {
+      return fail();
+    }
+    const projectedAnnualNetGrowthUsdMinor = canonicalUsdMinor(
+      yieldRecord.projectedAnnualNetGrowthUsdMinor,
+    );
+    if (BigInt(projectedAnnualNetGrowthUsdMinor) !== projectedAnnualYield - totalFees) {
+      return fail();
+    }
+
+    const breakEvenRecord = ownDataRecord(yieldRecord.breakEven, ['status', 'firstNetPositiveDay']);
+    const dailyYieldDenominator = netPlannedCapital * BigInt(effectiveApyBasisPoints);
+    if (totalFees === 0n) {
+      if (
+        breakEvenRecord.status !== 'NOT_APPLICABLE' ||
+        breakEvenRecord.firstNetPositiveDay !== null
+      ) {
+        return fail();
+      }
+    } else if (dailyYieldDenominator === 0n) {
+      if (
+        breakEvenRecord.status !== 'UNAVAILABLE' ||
+        breakEvenRecord.firstNetPositiveDay !== null
+      ) {
+        return fail();
+      }
+    } else {
+      const numerator = (totalFees + 1n) * 10_000n * 365n;
+      const firstNetPositiveDay = (numerator + dailyYieldDenominator - 1n) / dailyYieldDenominator;
+      if (
+        firstNetPositiveDay > BigInt(Number.MAX_SAFE_INTEGER) ||
+        breakEvenRecord.status !== 'AVAILABLE' ||
+        typeof breakEvenRecord.firstNetPositiveDay !== 'number' ||
+        !Number.isSafeInteger(breakEvenRecord.firstNetPositiveDay) ||
+        breakEvenRecord.firstNetPositiveDay !== Number(firstNetPositiveDay)
+      ) {
+        return fail();
+      }
+    }
+    const yieldProjection = Object.freeze({
+      source: 'SYNTHETIC_FIXED_DEMO_RATES' as const,
+      calculationMethod: 'SIMPLE_DAILY_APY_PRORATION_ON_NET_CAPITAL' as const,
+      effectiveApyBasisPoints,
+      projectedAnnualYieldUsdMinor,
+      projectedAnnualNetGrowthUsdMinor,
+      breakEven: Object.freeze({
+        status: breakEvenRecord.status as 'AVAILABLE' | 'NOT_APPLICABLE' | 'UNAVAILABLE',
+        firstNetPositiveDay: breakEvenRecord.firstNetPositiveDay as number | null,
+      }),
+    });
+
     return Object.freeze({
       use: 'LOCAL_DEMO_ESTIMATE_ONLY',
       mayAuthorizeFinancialAction: false,
@@ -405,6 +519,7 @@ export function parseLocalDemoAllocationPreview(value: unknown): LocalDemoAlloca
       deductions,
       totalFeesUsdMinor,
       netPlannedCapitalUsdMinor,
+      yieldProjection,
       asOf: canonicalTimestamp(record.asOf),
     });
   } catch (error) {
