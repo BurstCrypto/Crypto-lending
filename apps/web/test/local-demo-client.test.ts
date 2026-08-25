@@ -90,7 +90,7 @@ const ALLOCATION_PREVIEW = Object.freeze({
   }),
   asOf: '2026-08-24T18:30:00.000Z',
 });
-function zeroFeeAllocationPreview(): unknown {
+function positiveYieldZeroFeeAllocationPreview(): unknown {
   const allocationAmounts = ['30', '45', '25'] as const;
   return {
     ...ALLOCATION_PREVIEW,
@@ -109,6 +109,29 @@ function zeroFeeAllocationPreview(): unknown {
       ...ALLOCATION_PREVIEW.yieldProjection,
       projectedAnnualYieldUsdMinor: '3',
       projectedAnnualNetGrowthUsdMinor: '3',
+      breakEven: { status: 'AVAILABLE', firstNetPositiveDay: 111 },
+    },
+  };
+}
+
+function zeroCapitalAllocationPreview(): unknown {
+  return {
+    ...ALLOCATION_PREVIEW,
+    grossCapitalUsdMinor: '0',
+    allocations: ALLOCATION_PREVIEW.allocations.map((allocation) => ({
+      ...allocation,
+      amountUsdMinor: '0',
+    })),
+    deductions: ALLOCATION_PREVIEW.deductions.map((deduction) => ({
+      ...deduction,
+      amountUsdMinor: '0',
+    })),
+    totalFeesUsdMinor: '0',
+    netPlannedCapitalUsdMinor: '0',
+    yieldProjection: {
+      ...ALLOCATION_PREVIEW.yieldProjection,
+      projectedAnnualYieldUsdMinor: '0',
+      projectedAnnualNetGrowthUsdMinor: '0',
       breakEven: { status: 'NOT_APPLICABLE', firstNetPositiveDay: null },
     },
   };
@@ -307,16 +330,33 @@ describe('local demo same-origin API client', () => {
     expect(() => parseLocalDemoAllocationPreview(forgedBreakEven)).toThrow(LocalDemoApiError);
   });
 
-  it('accepts no-fee timing as not applicable and rejects an alternate forged status', () => {
-    const noFee = zeroFeeAllocationPreview();
-    expect(parseLocalDemoAllocationPreview(noFee)).toMatchObject({
+  it('uses the exact positive-yield day with no fees and reserves not-applicable for zero yield', () => {
+    const positiveYieldNoFee = positiveYieldZeroFeeAllocationPreview();
+    expect(parseLocalDemoAllocationPreview(positiveYieldNoFee)).toMatchObject({
+      totalFeesUsdMinor: '0',
+      yieldProjection: {
+        projectedAnnualYieldUsdMinor: '3',
+        breakEven: { status: 'AVAILABLE', firstNetPositiveDay: 111 },
+      },
+    });
+
+    const forgedNotApplicable = structuredClone(positiveYieldNoFee) as {
+      yieldProjection: { breakEven: { status: string; firstNetPositiveDay: number | null } };
+    };
+    forgedNotApplicable.yieldProjection.breakEven = {
+      status: 'NOT_APPLICABLE',
+      firstNetPositiveDay: null,
+    };
+    expect(() => parseLocalDemoAllocationPreview(forgedNotApplicable)).toThrow(LocalDemoApiError);
+
+    expect(parseLocalDemoAllocationPreview(zeroCapitalAllocationPreview())).toMatchObject({
       totalFeesUsdMinor: '0',
       yieldProjection: {
         breakEven: { status: 'NOT_APPLICABLE', firstNetPositiveDay: null },
       },
     });
 
-    const unavailable = structuredClone(noFee) as {
+    const unavailable = structuredClone(zeroCapitalAllocationPreview()) as {
       yieldProjection: { breakEven: { status: string; firstNetPositiveDay: number | null } };
     };
     unavailable.yieldProjection.breakEven.status = 'UNAVAILABLE';

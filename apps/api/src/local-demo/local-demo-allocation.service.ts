@@ -225,9 +225,6 @@ function calculateEffectiveApyBasisPoints(preset: AllocationPresetDefinition): n
         BigInt(LOCAL_DEMO_ALLOCATION_APY_BASIS_POINTS[bucket]),
     0n,
   );
-  if (weightedBasisPoints % 10_000n !== 0n) {
-    throw new TypeError('non-integral local demo effective APY');
-  }
   const result = weightedBasisPoints / 10_000n;
   if (result > BigInt(Number.MAX_SAFE_INTEGER)) {
     throw new TypeError('local demo effective APY exceeds numeric limits');
@@ -239,17 +236,16 @@ function projectBreakEven(
   totalFees: bigint,
   annualYieldNumerator: bigint,
 ): LocalDemoAllocationPreviewResponse['yieldProjection']['breakEven'] {
-  if (totalFees === 0n) {
-    return Object.freeze({ status: 'NOT_APPLICABLE', firstNetPositiveDay: null });
+  if (annualYieldNumerator > 0n) {
+    const firstDay = ceilDivide((totalFees + 1n) * 10_000n * 365n, annualYieldNumerator);
+    if (firstDay < 1n || firstDay > BigInt(Number.MAX_SAFE_INTEGER)) {
+      throw new TypeError('local demo break-even day exceeds numeric limits');
+    }
+    return Object.freeze({ status: 'AVAILABLE', firstNetPositiveDay: Number(firstDay) });
   }
-  if (annualYieldNumerator === 0n) {
-    return Object.freeze({ status: 'UNAVAILABLE', firstNetPositiveDay: null });
-  }
-  const firstDay = ceilDivide((totalFees + 1n) * 10_000n * 365n, annualYieldNumerator);
-  if (firstDay < 1n || firstDay > BigInt(Number.MAX_SAFE_INTEGER)) {
-    throw new TypeError('local demo break-even day exceeds numeric limits');
-  }
-  return Object.freeze({ status: 'AVAILABLE', firstNetPositiveDay: Number(firstDay) });
+  return totalFees === 0n
+    ? Object.freeze({ status: 'NOT_APPLICABLE', firstNetPositiveDay: null })
+    : Object.freeze({ status: 'UNAVAILABLE', firstNetPositiveDay: null });
 }
 
 function ceilDivide(dividend: bigint, divisor: bigint): bigint {

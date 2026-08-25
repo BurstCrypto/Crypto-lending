@@ -34,12 +34,14 @@ allocations and itemized estimates sum exactly. The preview creates no operation
 has no provider, network, or persistence dependency.
 
 The preview also labels fixed synthetic demo APYs of 0% for liquid reserve, 4% for conservative
-yield, and 6% for balanced yield. Each preset's effective APY is weighted from its target
-percentages (1.80%, 3.30%, or 4.40%). Projected annual yield floors
+yield, and 6% for balanced yield. Each preset's effective APY floors its target-weighted bucket
+rates to whole basis points (1.80%, 3.30%, or 4.40%). Projected annual yield floors
 `net planned capital * effective APY` to whole cents, and projected annual net growth subtracts the
 one-time fee estimate. Break-even uses simple 365-day APY proration on net capital and returns the
-first whole day whose floored accrued cents exceed fees. These are illustrative fixed-rate
-projections, not sourced opportunities, quotes, promises, or financial authorizations.
+first whole day whose floored accrued cents exceed fees. When fees are zero, that is the first day
+one projected cent is visible; zero projected yield and zero fees have no applicable break-even
+day. These are illustrative fixed-rate projections, not sourced opportunities, quotes, promises,
+or financial authorizations.
 
 ## Trust and I/O boundaries
 

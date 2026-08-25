@@ -214,7 +214,7 @@ describe('LocalDemoAllocationService', () => {
     );
   });
 
-  it('marks break-even not applicable when the exact-cent fee estimate is zero', async () => {
+  it('returns the first visible-cent day when fees are zero but projected yield is positive', async () => {
     const { service } = fixture('100');
 
     const result = await service.preview(ACCOUNT_ID, CORRELATION, 'BALANCED');
@@ -224,6 +224,20 @@ describe('LocalDemoAllocationService', () => {
       effectiveApyBasisPoints: 330,
       projectedAnnualYieldUsdMinor: '3',
       projectedAnnualNetGrowthUsdMinor: '3',
+      breakEven: { status: 'AVAILABLE', firstNetPositiveDay: 111 },
+    });
+  });
+
+  it('marks break-even not applicable when neither fees nor projected yield exist', async () => {
+    const { service } = fixture('0');
+
+    const result = await service.preview(ACCOUNT_ID, CORRELATION, 'BALANCED');
+
+    expect(result.totalFeesUsdMinor).toBe('0');
+    expect(result.yieldProjection).toMatchObject({
+      effectiveApyBasisPoints: 330,
+      projectedAnnualYieldUsdMinor: '0',
+      projectedAnnualNetGrowthUsdMinor: '0',
       breakEven: { status: 'NOT_APPLICABLE', firstNetPositiveDay: null },
     });
   });

@@ -434,8 +434,8 @@ export function parseLocalDemoAllocationPreview(value: unknown): LocalDemoAlloca
       0n,
     );
     if (
-      derivedEffectiveApyNumerator % 10_000n !== 0n ||
-      derivedEffectiveApyNumerator / 10_000n !== BigInt(presetDefinition.effectiveApyBasisPoints)
+      derivedEffectiveApyNumerator / 10_000n !==
+      BigInt(presetDefinition.effectiveApyBasisPoints)
     ) {
       return fail();
     }
@@ -475,21 +475,7 @@ export function parseLocalDemoAllocationPreview(value: unknown): LocalDemoAlloca
 
     const breakEvenRecord = ownDataRecord(yieldRecord.breakEven, ['status', 'firstNetPositiveDay']);
     const dailyYieldDenominator = netPlannedCapital * BigInt(effectiveApyBasisPoints);
-    if (totalFees === 0n) {
-      if (
-        breakEvenRecord.status !== 'NOT_APPLICABLE' ||
-        breakEvenRecord.firstNetPositiveDay !== null
-      ) {
-        return fail();
-      }
-    } else if (dailyYieldDenominator === 0n) {
-      if (
-        breakEvenRecord.status !== 'UNAVAILABLE' ||
-        breakEvenRecord.firstNetPositiveDay !== null
-      ) {
-        return fail();
-      }
-    } else {
+    if (dailyYieldDenominator > 0n) {
       const numerator = (totalFees + 1n) * 10_000n * 365n;
       const firstNetPositiveDay = (numerator + dailyYieldDenominator - 1n) / dailyYieldDenominator;
       if (
@@ -498,6 +484,20 @@ export function parseLocalDemoAllocationPreview(value: unknown): LocalDemoAlloca
         typeof breakEvenRecord.firstNetPositiveDay !== 'number' ||
         !Number.isSafeInteger(breakEvenRecord.firstNetPositiveDay) ||
         breakEvenRecord.firstNetPositiveDay !== Number(firstNetPositiveDay)
+      ) {
+        return fail();
+      }
+    } else if (totalFees === 0n) {
+      if (
+        breakEvenRecord.status !== 'NOT_APPLICABLE' ||
+        breakEvenRecord.firstNetPositiveDay !== null
+      ) {
+        return fail();
+      }
+    } else {
+      if (
+        breakEvenRecord.status !== 'UNAVAILABLE' ||
+        breakEvenRecord.firstNetPositiveDay !== null
       ) {
         return fail();
       }
