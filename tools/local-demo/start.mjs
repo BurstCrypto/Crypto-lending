@@ -122,9 +122,8 @@ const children = [
     cwd: root,
     env: environments.identity,
   }),
-  // Keep the demo API on one compiled process. Nest watch mode can observe
-  // sibling Next development artifacts in a shared Windows worktree; its child
-  // restart briefly drops the API and clears the in-memory demo wallet roster.
+  // Keep the demo API on one compiled process. A Nest watch restart briefly
+  // drops the listener and clears the authenticated in-memory demo wallet roster.
   spawnOwned(process.execPath, [nestCli, 'start'], {
     cwd: apiRoot,
     env: apiEnvironment,
