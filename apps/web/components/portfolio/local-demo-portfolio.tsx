@@ -35,7 +35,10 @@ import {
   type WalletRosterKeyValueStorage,
 } from '@/lib/wallets/wallet-roster-storage';
 
-import { UnifiedBalanceView, type UnifiedBalanceViewState } from './unified-balance-view';
+import {
+  LocalDemoUnifiedBalanceView,
+  type LocalDemoUnifiedBalanceViewState,
+} from './local-demo-unified-balance-view';
 
 const PORTFOLIO_LOGIN_PATH = '/login?returnTo=%2Fportfolio';
 const EMPTY_WALLET_STATE: MultiWalletState = Object.freeze({
@@ -103,7 +106,9 @@ export function LocalDemoPortfolio({ enabled, dependencies }: LocalDemoPortfolio
   const configured = useMemo(() => dependenciesFor(dependencies), [dependencies]);
   const [phase, setPhase] = useState<ExperiencePhase>(enabled ? 'CHECKING' : 'UNAVAILABLE');
   const [wallets, setWallets] = useState<MultiWalletState>(EMPTY_WALLET_STATE);
-  const [portfolio, setPortfolio] = useState<UnifiedBalanceViewState>({ status: 'LOADING' });
+  const [portfolio, setPortfolio] = useState<LocalDemoUnifiedBalanceViewState>({
+    status: 'LOADING',
+  });
   const [walletError, setWalletError] = useState<string | null>(null);
   const [pendingOperation, setPendingOperation] = useState<string | null>(null);
   const [bootstrapRevision, setBootstrapRevision] = useState(0);
@@ -410,17 +415,21 @@ export function LocalDemoPortfolio({ enabled, dependencies }: LocalDemoPortfolio
   }
 
   if (!enabled) {
-    return <UnifiedBalanceView state={{ status: 'UNAVAILABLE', reason: 'INCOMPLETE_SNAPSHOT' }} />;
+    return (
+      <LocalDemoUnifiedBalanceView
+        state={{ status: 'UNAVAILABLE', reason: 'INCOMPLETE_SNAPSHOT' }}
+      />
+    );
   }
 
   if (phase === 'CHECKING' || phase === 'SIGNED_OUT') {
-    return <UnifiedBalanceView state={{ status: 'LOADING' }} />;
+    return <LocalDemoUnifiedBalanceView state={{ status: 'LOADING' }} />;
   }
 
   if (phase === 'UNAVAILABLE') {
     return (
       <div className="portfolio-experience-unavailable">
-        <UnifiedBalanceView state={{ status: 'ERROR' }} />
+        <LocalDemoUnifiedBalanceView state={{ status: 'ERROR' }} />
         <button
           className="portfolio-secondary-action"
           type="button"
@@ -450,11 +459,11 @@ export function LocalDemoPortfolio({ enabled, dependencies }: LocalDemoPortfolio
         <div className="portfolio-notice local-demo-financial-notice" role="note">
           <span aria-hidden="true">i</span>
           <p>
-            These loopback-only wallets and balances are synthetic. The ownership proof is completed
-            by the local API and{' '}
-            <strong>cannot authorize a loan, transfer, quote, or transaction.</strong>{' '}
-            Mainnet-shaped balance fixtures are presentation data, not observations of the proven
-            testnet connector cluster.
+            These loopback-only wallets are synthetic. The ownership proof is completed by the local
+            API and <strong>cannot authorize a loan, transfer, quote, or transaction.</strong> EVM
+            balances are observations from the loopback-only LOCAL EVM chain (31337). Solana
+            balances and all price and valuation inputs remain deterministic fixtures; none of this
+            is public-chain or validator evidence.
           </p>
         </div>
 
@@ -524,7 +533,7 @@ export function LocalDemoPortfolio({ enabled, dependencies }: LocalDemoPortfolio
           {pendingOperation === 'refresh' ? 'Refreshing...' : 'Refresh portfolio'}
         </button>
       </div>
-      <UnifiedBalanceView state={portfolio} />
+      <LocalDemoUnifiedBalanceView state={portfolio} />
     </>
   );
 }

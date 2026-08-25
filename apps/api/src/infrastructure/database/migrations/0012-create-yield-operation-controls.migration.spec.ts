@@ -1,11 +1,32 @@
+import { createHash } from 'node:crypto';
+
 import {
   createYieldOperationControlsMigration,
   createYieldOperationControlsMigrationV0012,
   createYieldOperationControlsTestSchemaMigrationV0012,
 } from './0012-create-yield-operation-controls.migration';
+import type { DatabaseMigration } from './migration';
 
 const joinedSql = (value: string | readonly string[]): string =>
   typeof value === 'string' ? value : value.join('\n');
+
+function migrationChecksum(migration: DatabaseMigration): string {
+  const sql = (value: string | readonly string[]): string =>
+    typeof value === 'string' ? value : value.join('\0statement\0');
+  const hash = createHash('sha256')
+    .update(migration.id)
+    .update('\0')
+    .update(sql(migration.upSql))
+    .update('\0')
+    .update(sql(migration.downSql));
+  if (migration.verifySql !== undefined) hash.update('\0verify\0').update(migration.verifySql);
+  if (migration.supersedesVerificationOf !== undefined) {
+    hash
+      .update('\0supersedes-verification-of\0')
+      .update(migration.supersedesVerificationOf.join('\0'));
+  }
+  return hash.digest('hex');
+}
 
 describe('createYieldOperationControlsMigration', () => {
   it('publishes matching production and isolated DDL with cumulative verification', () => {
@@ -18,6 +39,9 @@ describe('createYieldOperationControlsMigration', () => {
     expect(canonical.downSql).toEqual(isolated.downSql);
     expect(canonical.verifySql).not.toEqual(isolated.verifySql);
     expect(canonical.supersedesVerificationOf).toEqual(['0011']);
+    expect(migrationChecksum(canonical)).toBe(
+      '8b67642a0b8855d32ff74ca602fdaf85751c7065bd80348acaad76ae3fe4832d',
+    );
   });
 
   it('binds every immutable audit event to actor, time, reason, and ledger references', () => {
@@ -129,15 +153,23 @@ describe('createYieldOperationControlsMigration', () => {
     expect(canonical).toContain('FROM yield_functions AS function_state');
     expect(canonical).toContain('WHERE NOT function_state.prosecdef');
     expect(canonical).toContain('SELECT object_count = 398 FROM constraint_catalog');
-    expect(canonical).toContain(
-      'SELECT object_count = 360 FROM internal_fk_trigger_catalog',
+    expect(canonical).toContain('SELECT object_count = 360 FROM internal_fk_trigger_catalog');
+    expect(canonical).toContain('f5f2a36b42302d1e4b2997b751a90083878ce19478d92fbeebe5cf78d71a3c19');
+    expect(canonical).not.toContain(
+      'f5f2a36f52302d1e4b2997b751a90083878ce19478d92fbeebe5cf78d71a3c19',
     );
     expect(canonical).not.toContain('SELECT object_count = 395 FROM constraint_catalog');
-    expect(canonical).not.toContain(
-      'SELECT object_count = 348 FROM internal_fk_trigger_catalog',
-    );
+    expect(canonical).not.toContain('SELECT object_count = 348 FROM internal_fk_trigger_catalog');
     expect(isolated).toContain('prior.valid AND yield_operation.valid');
     expect(isolated).not.toContain('yield_operation_row_table');
+    expect(isolated).toContain('SELECT object_count = 398 FROM constraint_catalog');
+    expect(isolated).toContain('SELECT object_count = 360 FROM internal_fk_trigger_catalog');
+    expect(isolated).toContain('f5f2a36b42302d1e4b2997b751a90083878ce19478d92fbeebe5cf78d71a3c19');
+    expect(isolated).not.toContain(
+      'f5f2a36f52302d1e4b2997b751a90083878ce19478d92fbeebe5cf78d71a3c19',
+    );
+    expect(isolated).not.toContain('SELECT object_count = 395 FROM constraint_catalog');
+    expect(isolated).not.toContain('SELECT object_count = 348 FROM internal_fk_trigger_catalog');
   });
 
   it('refuses destructive rollback once financial operation evidence exists', () => {

@@ -13,7 +13,13 @@ import {
 } from './processes.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
-const environment = createLocalDemoEnvironments().docker;
+const environments = createLocalDemoEnvironments();
+const environment = environments.docker;
+runChecked(process.execPath, ['tools/local-evm/teardown.mjs'], {
+  cwd: root,
+  env: environments.identity,
+  label: 'Local EVM teardown',
+});
 const rawEndpoint = runChecked(
   'docker',
   ['context', 'inspect', '--format', '{{json .Endpoints.docker.Host}}'],

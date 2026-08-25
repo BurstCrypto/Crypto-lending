@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 
 import type { AssetRegistryEnvironment, SupportedStablecoin } from './supported-asset-registry';
+import type { LocalEvmDevelopmentEnvironment } from './local-evm-development';
 
 const EVM_ADDRESS_PATTERN = /^0x[0-9a-fA-F]{40}$/u;
 const EVM_BLOCK_HASH_PATTERN = /^0x[0-9a-fA-F]{64}$/u;
@@ -34,6 +35,7 @@ export type EvmBalanceSnapshotId = string & {
 
 export type EvmChain = 'ETHEREUM' | 'BASE' | 'ARBITRUM';
 export type EvmNetworkId = `eip155:${string}`;
+export type EvmStablecoinEnvironment = AssetRegistryEnvironment | LocalEvmDevelopmentEnvironment;
 
 export type EvmStablecoinPositionValidationCode =
   | 'INVALID_EVM_ADDRESS'
@@ -58,7 +60,7 @@ export interface EvmSourceBlock {
 export interface EvmStablecoinPosition {
   readonly positionId: EvmStablecoinPositionId;
   readonly observationId: EvmBalanceObservationId;
-  readonly environment: AssetRegistryEnvironment;
+  readonly environment: EvmStablecoinEnvironment;
   readonly chain: EvmChain;
   readonly networkId: EvmNetworkId;
   readonly walletAddress: EvmAddress;
@@ -75,7 +77,7 @@ export interface EvmStablecoinPosition {
 
 export interface EvmStablecoinBalanceSnapshot {
   readonly snapshotId: EvmBalanceSnapshotId;
-  readonly environment: AssetRegistryEnvironment;
+  readonly environment: EvmStablecoinEnvironment;
   readonly networkId: EvmNetworkId;
   readonly walletAddress: EvmAddress;
   readonly sourceBlock: EvmSourceBlock;
@@ -85,7 +87,7 @@ export interface EvmStablecoinBalanceSnapshot {
 }
 
 export interface EvmStablecoinPositionIdentityInput {
-  readonly environment: AssetRegistryEnvironment;
+  readonly environment: EvmStablecoinEnvironment;
   readonly networkId: EvmNetworkId;
   readonly walletAddress: EvmAddress;
   readonly contractAddress: EvmAddress;
@@ -156,7 +158,7 @@ export function createEvmBalanceObservationId(
 }
 
 export function createEvmBalanceSnapshotId(
-  environment: AssetRegistryEnvironment,
+  environment: EvmStablecoinEnvironment,
   networkId: EvmNetworkId,
   walletAddress: EvmAddress,
   sourceBlock: EvmSourceBlock,

@@ -6,9 +6,7 @@ import {
 } from '../blockchain/application/evm-stablecoin-balance-indexer';
 import type {
   EvmBalanceRetrySchedulerPort,
-  EvmStablecoinBalanceReaderPort,
   EvmStablecoinPositionStorePort,
-  EvmTokenBalanceBatchReadRequest,
 } from '../blockchain/application/ports/evm-stablecoin-balance-indexer.ports';
 import type {
   SolanaDepositSourcePort,
@@ -20,6 +18,7 @@ import {
   chainObservationPolicyForNetwork,
   type ChainObservationNetworkId,
 } from '../blockchain/domain/chain-observation-policy';
+import { LOCAL_EVM_DEVELOPMENT_MANIFEST } from '../blockchain/domain/local-evm-development';
 import {
   MAINNET_SUPPORTED_ASSET_REGISTRY,
   type SupportedStablecoinAsset,
@@ -54,6 +53,7 @@ import {
   type BalanceSyncObservation,
 } from '../blockchain-sync/domain/balance-sync';
 import type { JobCorrelationContext } from '../infrastructure/outbox/job-envelope';
+import type { LocalEvmChainRuntimePort } from './local-evm-chain.runtime';
 
 export const LOCAL_DEMO_PORTFOLIO_AS_OF = '2026-08-24T18:30:00.000Z';
 const LOCAL_DEMO_RETRIEVED_AT = '2026-08-24T18:29:55.000Z';
@@ -62,7 +62,6 @@ const LOCAL_DEMO_EVM_TOTAL_CENTS = 700_000n;
 const LOCAL_DEMO_SOLANA_TOTAL_CENTS = 400_000n;
 const ATOMIC_UNITS_PER_CENT = 10_000n;
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
-const MAINNET_EVM_NETWORKS = new Set(['eip155:1', 'eip155:8453', 'eip155:42161']);
 const BASE58_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
 
 export interface LocalDemoChainWallet {
@@ -89,11 +88,33 @@ export class LocalDemoChainPipelineError extends Error {
 
 /**
  * Request-local composition of the real KAN-63, KAN-64, and KAN-65 classes.
- * Every injected source is deterministic memory data; this type owns no
- * socket, timer, queue, database, provider, or process-global state.
+ * EVM observations come from the injected, keyless loopback development chain;
+ * Solana remains a deterministic memory fixture until a separate local runtime
+ * is approved.
  */
 export class LocalDemoChainPipeline {
+  private readonly initializedEvmWallets = new Set<string>();
+  private synchronizationQueue: Promise<void> = Promise.resolve();
+  private initializedNodeInstanceId: string | null = null;
+
+  constructor(private readonly localEvm: LocalEvmChainRuntimePort) {}
+
   async synchronize(
+    accountId: string,
+    correlation: JobCorrelationContext,
+    inputWallets: readonly LocalDemoChainWallet[],
+  ): Promise<readonly BalanceSyncObservation[]> {
+    const operation = this.synchronizationQueue.then(() =>
+      this.synchronizeWithinNodeInstance(accountId, correlation, inputWallets),
+    );
+    this.synchronizationQueue = operation.then(
+      () => undefined,
+      () => undefined,
+    );
+    return await operation;
+  }
+
+  private async synchronizeWithinNodeInstance(
     accountId: string,
     correlation: JobCorrelationContext,
     inputWallets: readonly LocalDemoChainWallet[],
@@ -107,10 +128,35 @@ export class LocalDemoChainPipeline {
         throw new TypeError('invalid local demo synchronization scope');
       }
       const fixtures = buildFixtureWallets(accountId, inputWallets);
+      const evmFixtures = fixtures.filter((fixture) => fixture.namespace === 'EVM');
+      const nodeInstanceId =
+        evmFixtures.length === 0
+          ? null
+          : localEvmNodeInstanceId(await this.localEvm.readNodeInstanceId());
+      if (
+        nodeInstanceId !== null &&
+        this.initializedNodeInstanceId !== null &&
+        nodeInstanceId !== this.initializedNodeInstanceId
+      ) {
+        this.invalidateEvmInitialization();
+      }
+      const pendingEvmFixtures = evmFixtures.filter(
+        (fixture) => !this.initializedEvmWallets.has(fixture.address),
+      );
+      if (pendingEvmFixtures.length > 0) {
+        await this.localEvm.seedWalletBalances(
+          pendingEvmFixtures.map((fixture) =>
+            Object.freeze({
+              walletAddress: fixture.address,
+              balanceAtomic: fixture.amountAtomic,
+            }),
+          ),
+        );
+      }
       const checkpoints = new RequestLocalCheckpointPort();
       const jobs = new RequestLocalJobPort();
       const metrics = new RequestLocalMetricsPort();
-      const indexer = new LocalDemoBalanceSyncIndexer(fixtures);
+      const indexer = new LocalDemoBalanceSyncIndexer(fixtures, this.localEvm);
       const clock: BalanceSyncClockPort = {
         now: () => new Date(LOCAL_DEMO_PORTFOLIO_AS_OF),
       };
@@ -148,20 +194,48 @@ export class LocalDemoChainPipeline {
       }
 
       if (jobs.dispositionCount !== 0) throw new LocalDemoChainPipelineError();
+      if (nodeInstanceId !== null) {
+        const postSynchronizationNodeInstanceId = localEvmNodeInstanceId(
+          await this.localEvm.readNodeInstanceId(),
+        );
+        if (postSynchronizationNodeInstanceId !== nodeInstanceId) {
+          throw new LocalDemoChainPipelineError();
+        }
+        for (const fixture of pendingEvmFixtures) {
+          this.initializedEvmWallets.add(fixture.address);
+        }
+        this.initializedNodeInstanceId = nodeInstanceId;
+      }
       return Object.freeze(
         observations.sort((left, right) => left.walletId.localeCompare(right.walletId)),
       );
     } catch (error) {
+      this.invalidateEvmInitialization();
       if (error instanceof LocalDemoChainPipelineError) throw error;
       throw new LocalDemoChainPipelineError();
     }
   }
+
+  private invalidateEvmInitialization(): void {
+    this.initializedEvmWallets.clear();
+    this.initializedNodeInstanceId = null;
+  }
+}
+
+function localEvmNodeInstanceId(value: unknown): string {
+  if (typeof value !== 'string' || !/^[0-9a-f]{32}$/u.test(value)) {
+    throw new TypeError('invalid local EVM node instance');
+  }
+  return value;
 }
 
 class LocalDemoBalanceSyncIndexer implements BalanceSyncIndexerPort {
   private readonly fixtures: ReadonlyMap<string, FixtureWallet>;
 
-  constructor(fixtures: readonly FixtureWallet[]) {
+  constructor(
+    fixtures: readonly FixtureWallet[],
+    private readonly localEvm: LocalEvmChainRuntimePort,
+  ) {
     this.fixtures = new Map(
       fixtures.map(
         (fixture) =>
@@ -202,15 +276,14 @@ class LocalDemoBalanceSyncIndexer implements BalanceSyncIndexerPort {
   }
 
   private async readEvm(fixture: FixtureWallet): Promise<unknown> {
-    const reader = new LocalDemoEvmBalanceReader(fixture);
     const config: EvmStablecoinBalanceIndexerConfig = Object.freeze({
-      environment: 'MAINNET',
+      environment: 'LOCAL',
       networkId: fixture.chainId,
       maxAttempts: 1,
     });
     const indexer = new EvmStablecoinBalanceIndexer(
       config,
-      reader,
+      this.localEvm,
       new RequestLocalEvmPositionStore(),
       NO_WAIT_RETRY_SCHEDULER,
     );
@@ -279,74 +352,6 @@ class LocalDemoBalanceSyncIndexer implements BalanceSyncIndexerPort {
               amountAtomic: balance.amountBaseUnits.toString(),
             }),
           ),
-      ),
-    });
-  }
-}
-
-class LocalDemoEvmBalanceReader implements EvmStablecoinBalanceReaderPort {
-  private readonly sourceBlock: Readonly<{
-    number: string;
-    hash: `0x${string}`;
-    parentHash: `0x${string}`;
-  }>;
-
-  constructor(private readonly fixture: FixtureWallet) {
-    const blockNumber = (20_765_432n + BigInt(fixture.ordinal)).toString();
-    this.sourceBlock = Object.freeze({
-      number: blockNumber,
-      hash: `0x${digest('local-demo-evm-head-v1', fixture.chainId, blockNumber)}`,
-      parentHash: `0x${digest('local-demo-evm-parent-v1', fixture.chainId, blockNumber)}`,
-    });
-  }
-
-  async readChainIdentity(
-    request: Parameters<EvmStablecoinBalanceReaderPort['readChainIdentity']>[0],
-  ): Promise<unknown> {
-    if (request.expectedNetworkId !== this.fixture.chainId) {
-      throw new TypeError('unexpected local demo EVM network');
-    }
-    const expected = chainObservationPolicyForNetwork(this.fixture.chainId)?.identityProbe
-      .expectedResult;
-    if (expected === undefined) throw new TypeError('missing EVM chain identity');
-    return expected;
-  }
-
-  async readSourceBlock(
-    request: Parameters<EvmStablecoinBalanceReaderPort['readSourceBlock']>[0],
-  ): Promise<unknown> {
-    if (request.expectedNetworkId !== this.fixture.chainId || request.selector !== 'latest') {
-      throw new TypeError('unexpected local demo EVM block request');
-    }
-    return this.sourceBlock;
-  }
-
-  async readTokenBalances(request: EvmTokenBalanceBatchReadRequest): Promise<unknown> {
-    if (
-      request.expectedNetworkId !== this.fixture.chainId ||
-      request.walletAddress !== this.fixture.address ||
-      request.sourceBlock.number !== this.sourceBlock.number ||
-      request.sourceBlock.hash !== this.sourceBlock.hash
-    ) {
-      throw new TypeError('unexpected local demo EVM balance request');
-    }
-    return Object.freeze({
-      sourceBlockNumber: this.sourceBlock.number,
-      sourceBlockHash: this.sourceBlock.hash,
-      balances: Object.freeze(
-        request.contractAddresses.map((contractAddress) => {
-          const asset = MAINNET_SUPPORTED_ASSET_REGISTRY.normalizeAsset(
-            this.fixture.chainId,
-            contractAddress,
-          );
-          if (asset?.identityKind !== 'EVM_CONTRACT') {
-            throw new TypeError('unsupported local demo EVM contract');
-          }
-          return Object.freeze({
-            contractAddress,
-            balanceAtomic: asset.stablecoin === 'USDC' ? this.fixture.amountAtomic : '0',
-          });
-        }),
       ),
     });
   }
@@ -569,7 +574,10 @@ function buildFixtureWallets(
 function assertWallet(wallet: LocalDemoChainWallet): void {
   if (!UUID_V4.test(wallet.walletId)) throw new TypeError('invalid local demo wallet id');
   if (wallet.namespace === 'EVM') {
-    if (!MAINNET_EVM_NETWORKS.has(wallet.chainId) || !/^0x[0-9a-f]{40}$/u.test(wallet.address)) {
+    if (
+      wallet.chainId !== LOCAL_EVM_DEVELOPMENT_MANIFEST.networkId ||
+      !/^0x[0-9a-f]{40}$/u.test(wallet.address)
+    ) {
       throw new TypeError('invalid local demo EVM wallet');
     }
     return;

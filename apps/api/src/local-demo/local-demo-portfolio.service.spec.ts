@@ -1,6 +1,8 @@
 import { parseAccountId, type AccountId } from '../accounts/domain/account-profile';
 import { BuyingPowerCalculator } from '../buying-power/application/buying-power-calculator';
 import { EvmStablecoinBalanceIndexer } from '../blockchain/application/evm-stablecoin-balance-indexer';
+import type { EvmTokenBalanceBatchReadRequest } from '../blockchain/application/ports/evm-stablecoin-balance-indexer.ports';
+import { LOCAL_EVM_DEVELOPMENT_MANIFEST } from '../blockchain/domain/local-evm-development';
 import { SolanaDepositIndexerService } from '../blockchain/application/solana-deposit-indexer.service';
 import { BalanceSyncOrchestrator } from '../blockchain-sync/application/balance-sync-orchestrator';
 import { loggingContext } from '../infrastructure/logging';
@@ -9,6 +11,7 @@ import {
   LocalDemoPortfolioService,
   LocalDemoPortfolioUnavailableError,
 } from './local-demo-portfolio.service';
+import type { LocalEvmChainRuntimePort, LocalEvmWalletSeed } from './local-evm-chain.runtime';
 import type {
   LocalDemoWalletConnection,
   LocalDemoWalletService,
@@ -67,7 +70,71 @@ function serviceWith(
   const wallets = {
     list: jest.fn((accountId: AccountId) => walletsByAccount.get(accountId) ?? Object.freeze([])),
   } as unknown as LocalDemoWalletService;
-  return new LocalDemoPortfolioService(wallets);
+  return new LocalDemoPortfolioService(wallets, new DeterministicLocalEvmRuntime());
+}
+
+class DeterministicLocalEvmRuntime implements LocalEvmChainRuntimePort {
+  private readonly balances = new Map<string, string>();
+  private blockNumber = 0;
+  private nodeGeneration = 1;
+  seedCount = 0;
+  resetAfterNextSeed = false;
+  resetDuringNextBalanceRead = false;
+
+  async readNodeInstanceId(): Promise<string> {
+    return this.nodeGeneration.toString(16).padStart(32, '0');
+  }
+
+  async seedWalletBalances(seeds: readonly LocalEvmWalletSeed[]): Promise<void> {
+    for (const seed of seeds) this.balances.set(seed.walletAddress, seed.balanceAtomic);
+    this.blockNumber += Math.max(1, seeds.length);
+    this.seedCount += 1;
+    if (this.resetAfterNextSeed) {
+      this.resetAfterNextSeed = false;
+      this.reset(this.blockNumber);
+    }
+  }
+
+  reset(blockNumber: number = this.blockNumber): void {
+    this.balances.clear();
+    this.blockNumber = blockNumber;
+    this.nodeGeneration += 1;
+  }
+
+  async readChainIdentity(): Promise<unknown> {
+    return LOCAL_EVM_DEVELOPMENT_MANIFEST.chainIdHex;
+  }
+
+  async readSourceBlock(): Promise<unknown> {
+    const hash = this.blockNumber.toString(16).padStart(64, '0');
+    const parent = Math.max(0, this.blockNumber - 1)
+      .toString(16)
+      .padStart(64, '0');
+    return Object.freeze({
+      number: this.blockNumber.toString(),
+      hash: `0x${hash}`,
+      parentHash: `0x${parent}`,
+    });
+  }
+
+  async readTokenBalances(request: EvmTokenBalanceBatchReadRequest): Promise<unknown> {
+    if (this.resetDuringNextBalanceRead) {
+      this.resetDuringNextBalanceRead = false;
+      this.reset(this.blockNumber);
+    }
+    return Object.freeze({
+      sourceBlockNumber: request.sourceBlock.number,
+      sourceBlockHash: request.sourceBlock.hash,
+      balances: Object.freeze(
+        request.contractAddresses.map((contractAddress) =>
+          Object.freeze({
+            contractAddress,
+            balanceAtomic: this.balances.get(request.walletAddress) ?? '0',
+          }),
+        ),
+      ),
+    });
+  }
 }
 
 describe('LocalDemoPortfolioService', () => {
@@ -127,7 +194,7 @@ describe('LocalDemoPortfolioService', () => {
       ]);
       expect(
         result.wallets.flatMap(({ chains }) => chains).map(({ networkId }) => networkId),
-      ).toEqual(['eip155:1', 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp']);
+      ).toEqual(['eip155:31337', 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp']);
       const assets = result.wallets.flatMap(({ chains }) =>
         chains.flatMap(({ assets: chainAssets }) => chainAssets),
       );
@@ -150,6 +217,70 @@ describe('LocalDemoPortfolioService', () => {
     const first = await service.read(ACCOUNT_A, JOB_CORRELATION_A);
     const second = await service.read(ACCOUNT_A, JOB_CORRELATION_A);
     expect(second).toEqual(first);
+  });
+
+  it.each([
+    ['equal-height', (height: number) => height],
+    ['greater-height', (height: number) => height + 100],
+  ] as const)(
+    'reinitializes balances after an owned %s fresh node generation',
+    async (_case, resetHeight) => {
+      const runtime = new DeterministicLocalEvmRuntime();
+      const wallets = {
+        list: jest.fn(() => ACCOUNT_A_WALLETS.slice(0, 1)),
+      } as unknown as LocalDemoWalletService;
+      const service = new LocalDemoPortfolioService(wallets, runtime);
+
+      const first = await service.read(ACCOUNT_A, JOB_CORRELATION_A);
+      const currentHeight = Number(
+        ((await runtime.readSourceBlock()) as Readonly<{ number: string }>).number,
+      );
+      runtime.reset(resetHeight(currentHeight));
+      const afterReset = await service.read(ACCOUNT_A, JOB_CORRELATION_A);
+
+      expect(first.portfolioValueUsdMinor).toBe('700000');
+      expect(afterReset.portfolioValueUsdMinor).toBe('700000');
+      expect(runtime.seedCount).toBe(2);
+    },
+  );
+
+  it('does not commit a tentative wallet cache when the node resets after seeding', async () => {
+    const runtime = new DeterministicLocalEvmRuntime();
+    runtime.resetAfterNextSeed = true;
+    const wallets = {
+      list: jest.fn(() => ACCOUNT_A_WALLETS.slice(0, 1)),
+    } as unknown as LocalDemoWalletService;
+    const service = new LocalDemoPortfolioService(wallets, runtime);
+
+    await expect(service.read(ACCOUNT_A, JOB_CORRELATION_A)).rejects.toBeInstanceOf(
+      LocalDemoPortfolioUnavailableError,
+    );
+    expect(runtime.seedCount).toBe(1);
+
+    const recovered = await service.read(ACCOUNT_A, JOB_CORRELATION_A);
+    expect(recovered.portfolioValueUsdMinor).toBe('700000');
+    expect(runtime.seedCount).toBe(2);
+  });
+
+  it('invalidates a committed wallet cache when the node resets during a balance read', async () => {
+    const runtime = new DeterministicLocalEvmRuntime();
+    const wallets = {
+      list: jest.fn(() => ACCOUNT_A_WALLETS.slice(0, 1)),
+    } as unknown as LocalDemoWalletService;
+    const service = new LocalDemoPortfolioService(wallets, runtime);
+
+    await expect(service.read(ACCOUNT_A, JOB_CORRELATION_A)).resolves.toMatchObject({
+      portfolioValueUsdMinor: '700000',
+    });
+    runtime.resetDuringNextBalanceRead = true;
+    await expect(service.read(ACCOUNT_A, JOB_CORRELATION_A)).rejects.toBeInstanceOf(
+      LocalDemoPortfolioUnavailableError,
+    );
+    expect(runtime.seedCount).toBe(1);
+
+    const recovered = await service.read(ACCOUNT_A, JOB_CORRELATION_A);
+    expect(recovered.portfolioValueUsdMinor).toBe('700000');
+    expect(runtime.seedCount).toBe(2);
   });
 
   it('keeps wallet identifiers and addresses isolated by account', async () => {

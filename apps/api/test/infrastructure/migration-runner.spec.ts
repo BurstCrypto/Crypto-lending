@@ -28,6 +28,7 @@ class InMemoryMigrationDatabase {
   jobOutboxLastErrorConstraintExists = false;
   ledgerIdempotencySchemaExists = false;
   ledgerSchemaExists = false;
+  ledgerFeeAdjustmentIntegrityRepaired = false;
   walletRegistrationSchemaExists = false;
   yieldOperationSchemaExists = false;
   migrationTableExists = false;
@@ -38,6 +39,7 @@ class InMemoryMigrationDatabase {
   private transactionAppliedSnapshot: Map<string, StoredMigration> | undefined;
   private transactionAuthenticationSchemaExistsSnapshot: boolean | undefined;
   private transactionLedgerSchemaExistsSnapshot: boolean | undefined;
+  private transactionLedgerFeeAdjustmentIntegrityRepairedSnapshot: boolean | undefined;
   private transactionLedgerIdempotencySchemaExistsSnapshot: boolean | undefined;
   private transactionWalletRegistrationSchemaExistsSnapshot: boolean | undefined;
   private transactionYieldOperationSchemaExistsSnapshot: boolean | undefined;
@@ -51,6 +53,8 @@ class InMemoryMigrationDatabase {
         this.transactionAppliedSnapshot = new Map(this.applied);
         this.transactionAuthenticationSchemaExistsSnapshot = this.authenticationSchemaExists;
         this.transactionLedgerSchemaExistsSnapshot = this.ledgerSchemaExists;
+        this.transactionLedgerFeeAdjustmentIntegrityRepairedSnapshot =
+          this.ledgerFeeAdjustmentIntegrityRepaired;
         this.transactionLedgerIdempotencySchemaExistsSnapshot = this.ledgerIdempotencySchemaExists;
         this.transactionWalletRegistrationSchemaExistsSnapshot =
           this.walletRegistrationSchemaExists;
@@ -59,6 +63,7 @@ class InMemoryMigrationDatabase {
         this.transactionAppliedSnapshot = undefined;
         this.transactionAuthenticationSchemaExistsSnapshot = undefined;
         this.transactionLedgerSchemaExistsSnapshot = undefined;
+        this.transactionLedgerFeeAdjustmentIntegrityRepairedSnapshot = undefined;
         this.transactionLedgerIdempotencySchemaExistsSnapshot = undefined;
         this.transactionWalletRegistrationSchemaExistsSnapshot = undefined;
         this.transactionYieldOperationSchemaExistsSnapshot = undefined;
@@ -71,6 +76,10 @@ class InMemoryMigrationDatabase {
         }
         if (this.transactionLedgerSchemaExistsSnapshot !== undefined) {
           this.ledgerSchemaExists = this.transactionLedgerSchemaExistsSnapshot;
+        }
+        if (this.transactionLedgerFeeAdjustmentIntegrityRepairedSnapshot !== undefined) {
+          this.ledgerFeeAdjustmentIntegrityRepaired =
+            this.transactionLedgerFeeAdjustmentIntegrityRepairedSnapshot;
         }
         if (this.transactionLedgerIdempotencySchemaExistsSnapshot !== undefined) {
           this.ledgerIdempotencySchemaExists =
@@ -89,6 +98,7 @@ class InMemoryMigrationDatabase {
         this.transactionAppliedSnapshot = undefined;
         this.transactionAuthenticationSchemaExistsSnapshot = undefined;
         this.transactionLedgerSchemaExistsSnapshot = undefined;
+        this.transactionLedgerFeeAdjustmentIntegrityRepairedSnapshot = undefined;
         this.transactionLedgerIdempotencySchemaExistsSnapshot = undefined;
         this.transactionWalletRegistrationSchemaExistsSnapshot = undefined;
         this.transactionYieldOperationSchemaExistsSnapshot = undefined;
@@ -126,6 +136,18 @@ class InMemoryMigrationDatabase {
         this.walletRegistrationSchemaExists = true;
       } else if (normalized.includes('CREATE TABLE yield_operations (')) {
         this.yieldOperationSchemaExists = true;
+      } else if (
+        normalized.includes('repair_ledger_fee_adjustment_integrity') &&
+        normalized.includes("$expected$AND component.stage = 'ACTUAL'$expected$")
+      ) {
+        this.ledgerFeeAdjustmentIntegrityRepaired = true;
+      } else if (
+        normalized.includes('repair_ledger_fee_adjustment_integrity') &&
+        normalized.includes(
+          "$expected$AND component.stage = CASE WHEN target_event_type = 'ADJUSTMENT'",
+        )
+      ) {
+        this.ledgerFeeAdjustmentIntegrityRepaired = false;
       } else if (normalized === 'DROP TABLE yield_operations') {
         this.yieldOperationSchemaExists = false;
       } else if (normalized === 'DROP TABLE wallet_ownership_challenges') {
@@ -164,6 +186,23 @@ class InMemoryMigrationDatabase {
               definition?.includes(`ON job_outbox (${expectedTimestamp}, id)`) &&
               definition.includes(`WHERE status = '${expectedStatus}'`),
             ),
+          },
+        ]);
+      } else if (
+        normalized.startsWith('SELECT (prior.valid AND repair.valid)') &&
+        normalized.includes("function_state.proname = 'assert_ledger_journal_integrity'")
+      ) {
+        return result([
+          {
+            valid:
+              this.accountSchemaExists &&
+              this.jobOutboxExists &&
+              this.ledgerSchemaExists &&
+              this.ledgerIdempotencySchemaExists &&
+              this.authenticationSchemaExists &&
+              this.walletRegistrationSchemaExists &&
+              this.yieldOperationSchemaExists &&
+              this.ledgerFeeAdjustmentIntegrityRepaired,
           },
         ]);
       } else if (
@@ -302,6 +341,7 @@ describe('MigrationRunner', () => {
       '0010',
       '0011',
       '0012',
+      '0013',
     ]);
     expect(database.jobOutboxExists).toBe(true);
     expect(database.applied.has('0001')).toBe(true);
@@ -316,6 +356,7 @@ describe('MigrationRunner', () => {
     expect(database.applied.has('0010')).toBe(true);
     expect(database.applied.has('0011')).toBe(true);
     expect(database.applied.has('0012')).toBe(true);
+    expect(database.applied.has('0013')).toBe(true);
     expect(database.accountSchemaExists).toBe(true);
     expect(database.ledgerSchemaExists).toBe(true);
     expect(database.jobOutboxLastErrorConstraintExists).toBe(true);
@@ -323,14 +364,16 @@ describe('MigrationRunner', () => {
     expect(database.authenticationSchemaExists).toBe(true);
     expect(database.walletRegistrationSchemaExists).toBe(true);
     expect(database.yieldOperationSchemaExists).toBe(true);
-    expect(database.queries.filter((query) => query === 'BEGIN')).toHaveLength(10);
+    expect(database.ledgerFeeAdjustmentIntegrityRepaired).toBe(true);
+    expect(database.queries.filter((query) => query === 'BEGIN')).toHaveLength(11);
     expect(
       database.queries.filter((query) => query.startsWith('CREATE INDEX CONCURRENTLY')),
     ).toHaveLength(2);
     await expect(runner.assertUpToDate()).resolves.toBeUndefined();
 
     await expect(runner.up()).resolves.toEqual([]);
-    await expect(runner.down(12)).resolves.toEqual([
+    await expect(runner.down(13)).resolves.toEqual([
+      '0013',
       '0012',
       '0011',
       '0010',
@@ -351,6 +394,7 @@ describe('MigrationRunner', () => {
     expect(database.authenticationSchemaExists).toBe(false);
     expect(database.walletRegistrationSchemaExists).toBe(false);
     expect(database.yieldOperationSchemaExists).toBe(false);
+    expect(database.ledgerFeeAdjustmentIntegrityRepaired).toBe(false);
     expect(database.applied.size).toBe(0);
     await expect(runner.assertUpToDate()).rejects.toThrow(
       'Database migration 0001 has not been applied',
@@ -372,7 +416,7 @@ describe('MigrationRunner', () => {
     );
     await expect(runner.up()).rejects.toThrow('Database migration 0003 schema verification failed');
 
-    await expect(runner.down(10)).rejects.toThrow(
+    await expect(runner.down(11)).rejects.toThrow(
       'Database migration 0003 schema verification failed',
     );
     expect(database.ledgerSchemaExists).toBe(true);
@@ -380,7 +424,8 @@ describe('MigrationRunner', () => {
       'job_outbox_failed_retention_idx',
       "CREATE INDEX CONCURRENTLY job_outbox_failed_retention_idx ON job_outbox (failed_at, id) WHERE status = 'failed'",
     );
-    await expect(runner.down(10)).resolves.toEqual([
+    await expect(runner.down(11)).resolves.toEqual([
+      '0013',
       '0012',
       '0011',
       '0010',
@@ -403,6 +448,7 @@ describe('MigrationRunner', () => {
       '0010',
       '0011',
       '0012',
+      '0013',
     ]);
     expect(database.indexes.has('job_outbox_failed_retention_idx')).toBe(true);
     await expect(runner.assertUpToDate()).resolves.toBeUndefined();

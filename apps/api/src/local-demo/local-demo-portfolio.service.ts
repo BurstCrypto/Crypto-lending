@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 
 import type { AccountId } from '../accounts/domain/account-profile';
 import { BuyingPowerCalculator } from '../buying-power/application/buying-power-calculator';
@@ -11,15 +11,19 @@ import type {
 import type { BuyingPowerResult } from '../buying-power/domain/buying-power';
 import {
   MAINNET_SUPPORTED_ASSET_REGISTRY,
+  type SupportedStablecoinAsset,
   type SupportedStablecoin,
 } from '../blockchain/domain/supported-asset-registry';
+import {
+  LOCAL_EVM_DEVELOPMENT_MANIFEST,
+  normalizeLocalEvmDevelopmentAsset,
+} from '../blockchain/domain/local-evm-development';
 import type { BalanceSyncObservation } from '../blockchain-sync/domain/balance-sync';
 import type { IndexedPortfolioBalanceObservation } from '../portfolio/application/ports/portfolio-balance-reader.port';
 import { parseIndexedPortfolioBalanceSnapshot } from '../portfolio/domain/portfolio-balance-snapshot';
 import type { JobCorrelationContext } from '../infrastructure/outbox/job-envelope';
 import {
   buildUnifiedPortfolio,
-  type PortfolioAssetReference,
   type PortfolioSourceBreakdown,
   type UnifiedPortfolio,
   type ValuedPortfolioBalance,
@@ -36,12 +40,12 @@ import {
   LocalDemoChainPipeline,
   type LocalDemoChainWallet,
 } from './local-demo-chain.runtime';
+import { LOCAL_EVM_CHAIN_RUNTIME, type LocalEvmChainRuntimePort } from './local-evm-chain.runtime';
 import {
   LocalDemoWalletService,
   type LocalDemoWalletConnection,
 } from './local-demo-wallet.service';
 
-const MAINNET_EVM_NETWORK = 'eip155:1';
 const MAINNET_SOLANA_NETWORK = 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp';
 const PRICE_TIME = '2026-08-24T18:29:50.000Z';
 const QUOTE_TIME = '2026-08-24T18:29:59.000Z';
@@ -117,12 +121,19 @@ export class LocalDemoPortfolioUnavailableError extends Error {
 
 /**
  * Local-only composition root for KAN-63 through KAN-68. Connected wallet
- * ownership is preserved while balances deliberately come from deterministic
- * MAINNET-shaped fixtures; no injected port can perform global I/O.
+ * ownership is preserved while EVM balances come from the fixed loopback LOCAL
+ * chain and Solana/valuation inputs remain deterministic fixtures.
  */
 @Injectable()
 export class LocalDemoPortfolioService {
-  constructor(private readonly walletService: LocalDemoWalletService) {}
+  private readonly chainPipeline: LocalDemoChainPipeline;
+
+  constructor(
+    private readonly walletService: LocalDemoWalletService,
+    @Inject(LOCAL_EVM_CHAIN_RUNTIME) localEvm: LocalEvmChainRuntimePort,
+  ) {
+    this.chainPipeline = new LocalDemoChainPipeline(localEvm);
+  }
 
   async read(
     accountId: AccountId,
@@ -133,8 +144,8 @@ export class LocalDemoPortfolioService {
       if (wallets.length === 0) throw new LocalDemoPortfolioUnavailableError();
       assertConnectionProjections(wallets);
 
-      const chainWallets = wallets.map(toMainnetChainWallet);
-      const chainObservations = await new LocalDemoChainPipeline().synchronize(
+      const chainWallets = wallets.map(toDemoChainWallet);
+      const chainObservations = await this.chainPipeline.synchronize(
         accountId,
         correlation,
         chainWallets,
@@ -204,13 +215,16 @@ class DeterministicLocalDemoAdjustment implements BuyingPowerAdjustmentPort {
   }
 }
 
-function toMainnetChainWallet(wallet: LocalDemoWalletConnection): LocalDemoChainWallet {
+function toDemoChainWallet(wallet: LocalDemoWalletConnection): LocalDemoChainWallet {
   return Object.freeze({
     walletId: wallet.walletId,
     namespace: wallet.namespace,
-    // The proven address is retained. Testnet connector clusters are not used
-    // as a source of truth for the explicitly MAINNET-shaped local fixture.
-    chainId: wallet.namespace === 'EVM' ? MAINNET_EVM_NETWORK : MAINNET_SOLANA_NETWORK,
+    // The proven testnet wallet address is retained while its EVM balance is
+    // observed only on the explicit keyless LOCAL chain identity.
+    chainId:
+      wallet.namespace === 'EVM'
+        ? LOCAL_EVM_DEVELOPMENT_MANIFEST.networkId
+        : MAINNET_SOLANA_NETWORK,
     address: wallet.namespace === 'EVM' ? wallet.address.toLowerCase() : wallet.address,
   });
 }
@@ -245,7 +259,14 @@ function projectBalanceSnapshot(
   projected.sort((left, right) => left.walletId.localeCompare(right.walletId));
   return parseIndexedPortfolioBalanceSnapshot(
     {
-      snapshotId: `local-demo-balances:${digest(accountId).slice(0, 32)}`,
+      snapshotId: `local-demo-balances:${digest(
+        'local-demo-balance-snapshot-v2',
+        accountId,
+        ...projected.flatMap((observation) => [
+          observation.observationId,
+          observation.amountAtomic,
+        ]),
+      ).slice(0, 32)}`,
       capturedAt: LOCAL_DEMO_PORTFOLIO_AS_OF,
       freshnessClass: 'CURRENT',
       observations: projected,
@@ -257,33 +278,22 @@ function projectBalanceSnapshot(
 function valueAndAggregate(
   snapshot: ReturnType<typeof parseIndexedPortfolioBalanceSnapshot>,
 ): UnifiedPortfolio {
-  const registry = MAINNET_SUPPORTED_ASSET_REGISTRY.latest;
-  if (registry.environment !== 'MAINNET' || registry.version !== 1) {
+  const mainnetRegistry = MAINNET_SUPPORTED_ASSET_REGISTRY.latest;
+  if (mainnetRegistry.environment !== 'MAINNET' || mainnetRegistry.version !== 1) {
     throw new TypeError('invalid demo asset registry');
   }
   const valuedBalances: ValuedPortfolioBalance[] = snapshot.observations.map((observation) => {
-    const registryAsset = MAINNET_SUPPORTED_ASSET_REGISTRY.normalizeAsset(
-      observation.networkId,
-      observation.assetIdentity,
-    );
+    const registryAsset = portfolioRegistryAsset(observation.networkId, observation.assetIdentity);
     if (registryAsset === undefined || registryAsset.decimals !== 6) {
       throw new TypeError('unsupported demo asset');
     }
-    const reference: PortfolioAssetReference & StablecoinValuationAssetReference = Object.freeze({
-      registryEnvironment: 'MAINNET',
-      registryVersion: 1,
-      registryFingerprintSha256: registry.fingerprintSha256,
-      stablecoin: registryAsset.stablecoin,
-      networkId: registryAsset.networkId,
-      identity: registryAsset.identity,
-      decimals: registryAsset.decimals,
-    });
+    const valuationReference = mainnetValuationReference(registryAsset);
     const valuation = evaluateStablecoinValuation({
-      asset: reference,
+      asset: valuationReference,
       amountAtomic: observation.amountAtomic,
       evaluatedAt: LOCAL_DEMO_PORTFOLIO_AS_OF,
       sourceWatermarks: STABLECOIN_VALUATION_FIRST_USE_WATERMARKS,
-      observations: priceEvidence(reference),
+      observations: priceEvidence(valuationReference),
     });
     if (valuation.availability !== 'AVAILABLE' || valuation.usdValueMantissa === null) {
       throw new TypeError('demo valuation unavailable');
@@ -291,7 +301,9 @@ function valueAndAggregate(
     return Object.freeze({
       observation,
       registryAsset,
-      asset: reference,
+      // The shared portfolio/valuation contract remains MAINNET-only. This
+      // isolated demo adapter projects the local asset identity at its edge.
+      asset: valuationReference,
       priceSnapshotId: `local-demo-price:${registryAsset.stablecoin}:${digest(
         registryAsset.networkId,
       ).slice(0, 16)}`,
@@ -315,6 +327,42 @@ function valueAndAggregate(
     throw new TypeError('incomplete demo aggregation');
   }
   return unified;
+}
+
+function portfolioRegistryAsset(
+  networkId: string,
+  identity: string,
+): SupportedStablecoinAsset | undefined {
+  return networkId === LOCAL_EVM_DEVELOPMENT_MANIFEST.networkId
+    ? normalizeLocalEvmDevelopmentAsset(networkId, identity)
+    : MAINNET_SUPPORTED_ASSET_REGISTRY.normalizeAsset(networkId, identity);
+}
+
+function mainnetValuationReference(
+  registryAsset: SupportedStablecoinAsset,
+): StablecoinValuationAssetReference {
+  const registry = MAINNET_SUPPORTED_ASSET_REGISTRY.latest;
+  const asset =
+    MAINNET_SUPPORTED_ASSET_REGISTRY.normalizeAsset(
+      registryAsset.networkId,
+      registryAsset.identity,
+    ) ??
+    registry.assets.find(
+      (candidate) =>
+        candidate.stablecoin === registryAsset.stablecoin &&
+        candidate.networkId === 'eip155:1' &&
+        candidate.activationState === 'ACTIVE',
+    );
+  if (asset === undefined) throw new TypeError('missing local demo valuation proxy');
+  return Object.freeze({
+    registryEnvironment: 'MAINNET',
+    registryVersion: 1,
+    registryFingerprintSha256: registry.fingerprintSha256,
+    stablecoin: asset.stablecoin,
+    networkId: asset.networkId,
+    identity: asset.identity,
+    decimals: asset.decimals,
+  });
 }
 
 function priceEvidence(
@@ -363,7 +411,7 @@ async function calculateBuyingPower(unified: UnifiedPortfolio): Promise<BuyingPo
       contributionId: source.observationId,
       walletId: source.walletId,
       networkId: source.networkId,
-      assetId: `${source.networkId}:${source.asset.identity}`,
+      assetId: `${source.networkId}:${portfolioAssetIdentity(source)}`,
       supported: source.includedInOverallTotal,
       freshness: source.freshnessClass,
       valuationUse: source.valuation.reportingUse,
@@ -479,7 +527,7 @@ function projectAsset(
   }
   return Object.freeze({
     stablecoin: source.asset.stablecoin,
-    assetIdentity: source.asset.identity,
+    assetIdentity: portfolioAssetIdentity(source),
     amountAtomic: source.balance.atomic,
     decimals: 6,
     portfolioValueUsdMinor: usdMinor(source.usdValue.mantissa),
@@ -489,6 +537,17 @@ function projectAsset(
     observedAt: source.balanceObservedAt,
     freshness: 'CURRENT',
   });
+}
+
+function portfolioAssetIdentity(source: PortfolioSourceBreakdown): string {
+  if (source.networkId !== LOCAL_EVM_DEVELOPMENT_MANIFEST.networkId) {
+    return source.asset.identity;
+  }
+  const asset = LOCAL_EVM_DEVELOPMENT_MANIFEST.assets.find(
+    (candidate) => candidate.stablecoin === source.asset.stablecoin,
+  );
+  if (asset === undefined) throw new TypeError('missing local demo asset identity');
+  return asset.contractAddress;
 }
 
 function requiredContribution(

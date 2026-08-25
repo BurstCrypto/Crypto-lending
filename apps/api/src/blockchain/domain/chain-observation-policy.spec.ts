@@ -19,6 +19,7 @@ import {
 
 const EXPECTED_NETWORKS = [
   'eip155:1',
+  'eip155:31337',
   'eip155:11155111',
   'eip155:8453',
   'eip155:84532',
@@ -73,8 +74,27 @@ describe('chain observation policy', () => {
       [...EXPECTED_NETWORKS].sort(),
     );
     expect(new Set(CHAIN_OBSERVATION_NETWORK_POLICIES.map(({ networkId }) => networkId)).size).toBe(
-      8,
+      9,
     );
+  });
+
+  it('keeps the explicit LOCAL_EVM_HARDHAT identity display-only', () => {
+    const local = chainObservationPolicyForNetwork('eip155:31337');
+    expect(local).toMatchObject({
+      environment: 'LOCAL',
+      networkId: 'eip155:31337',
+      identityProbe: { kind: 'EVM_CHAIN_ID', expectedResult: '0x7a69' },
+      registryFingerprintSha256: '3584658754837a75ca0bcb727035c38e382db89641e55311f57f862dee3278dc',
+    });
+    expect(isExpectedChainIdentity('eip155:31337', '0x7a69')).toBe(true);
+    expect(isExpectedChainIdentity('eip155:31337', '0xaa36a7')).toBe(false);
+    expect(observationTierRule('eip155:31337', 'PROVISIONAL')).toMatchObject({
+      state: 'ALLOWED',
+      authority: 'DISPLAY_ONLY',
+    });
+    expect(observationTierRule('eip155:31337', 'FINANCIAL')).toMatchObject({
+      state: 'BLOCKED_PENDING_LIVE_PROOF',
+    });
   });
 
   it('allows only read/confirmation methods and treats WebSocket notifications as hints', () => {

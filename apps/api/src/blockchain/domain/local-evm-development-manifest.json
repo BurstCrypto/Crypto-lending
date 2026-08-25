@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "runtimeIdentity": "LOCAL_EVM_HARDHAT",
+  "engine": "hardhat-edr-simulated",
+  "networkId": "eip155:31337",
+  "chainIdDecimal": 31337,
+  "chainIdHex": "0x7a69",
+  "initialDate": "2026-08-25T00:00:00.000Z",
+  "rpc": {
+    "url": "http://127.0.0.1:18545",
+    "host": "127.0.0.1",
+    "port": 18545
+  },
+  "accounts": "NONE",
+  "mockStablecoinRuntimeBytecode": "0x60003560e01c806370a08231146028578063313ce56714607c5763e30443bc1460425760006000fd5b600435600052600060205260406000205460005260206000f35b3373000000000000000000000000000000000000c0de1460625760006000fd5b602435600435600052600060205260406000205560006000f35b600660005260206000f3",
+  "registryVersion": 1,
+  "registryFingerprintSha256": "3584658754837a75ca0bcb727035c38e382db89641e55311f57f862dee3278dc",
+  "assets": [
+    {
+      "stablecoin": "USDC",
+      "issuer": "CIRCLE",
+      "chain": "ETHEREUM",
+      "contractAddress": "0x0000000000000000000000000000000000000101",
+      "decimals": 6,
+      "activationState": "ACTIVE"
+    }
+  ]
+}

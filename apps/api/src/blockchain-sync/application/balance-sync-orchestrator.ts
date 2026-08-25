@@ -5,6 +5,7 @@ import {
   type ChainContinuityAction,
   type ChainObservationFreshnessDecision,
 } from '../../blockchain/domain/chain-observation-policy';
+import { normalizeLocalEvmDevelopmentAsset } from '../../blockchain/domain/local-evm-development';
 import { supportedAssetRegistryForEnvironment } from '../../blockchain/domain/supported-asset-registry';
 import {
   BALANCE_SYNC_POLICY,
@@ -557,7 +558,10 @@ function normalizeCandidate(
     );
     const policy = chainObservationPolicyForNetwork(request.networkId);
     if (!policy) throw new Error('unsupported network');
-    const registry = supportedAssetRegistryForEnvironment(policy.environment);
+    const normalizeAsset =
+      policy.environment === 'LOCAL'
+        ? normalizeLocalEvmDevelopmentAsset
+        : supportedAssetRegistryForEnvironment(policy.environment).normalizeAsset;
     const positions = candidatePositions.map((candidatePosition) => {
       const positionRecord = exactRecord(candidatePosition, [
         'positionId',
@@ -573,7 +577,7 @@ function normalizeCandidate(
       ) {
         throw new Error('invalid position');
       }
-      const asset = registry.normalizeAsset(request.networkId, positionRecord.assetIdentity);
+      const asset = normalizeAsset(request.networkId, positionRecord.assetIdentity);
       if (
         !asset ||
         asset.identity !== positionRecord.assetIdentity ||

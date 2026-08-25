@@ -18,11 +18,16 @@ import {
   type EvmNetworkId,
   type EvmSourceBlock,
   type EvmStablecoinBalanceSnapshot,
+  type EvmStablecoinEnvironment,
   type EvmStablecoinPosition,
 } from '../domain/evm-stablecoin-position';
 import {
+  LOCAL_EVM_DEVELOPMENT_ASSETS,
+  LOCAL_EVM_DEVELOPMENT_MANIFEST,
+  normalizeLocalEvmDevelopmentAsset,
+} from '../domain/local-evm-development';
+import {
   supportedAssetRegistryForEnvironment,
-  type AssetRegistryEnvironment,
   type SupportedStablecoinAsset,
 } from '../domain/supported-asset-registry';
 import {
@@ -67,7 +72,7 @@ export class EvmStablecoinBalanceIndexerError extends Error {
 }
 
 export interface EvmStablecoinBalanceIndexerConfig {
-  readonly environment: AssetRegistryEnvironment;
+  readonly environment: EvmStablecoinEnvironment;
   readonly networkId: string;
   readonly maxBatchSize?: number;
   readonly maxAttempts?: number;
@@ -82,7 +87,7 @@ export interface IndexEvmStablecoinBalancesInput {
 }
 
 interface ValidatedIndexerConfig {
-  readonly environment: AssetRegistryEnvironment;
+  readonly environment: EvmStablecoinEnvironment;
   readonly chain: EvmChain;
   readonly networkId: EvmNetworkId;
   readonly maxBatchSize: number;
@@ -179,8 +184,8 @@ export class EvmStablecoinBalanceIndexer {
   private selectAssets(
     contractAddresses: readonly string[] | undefined,
   ): SupportedStablecoinAsset[] {
-    const registry = supportedAssetRegistryForEnvironment(this.config.environment);
-    const allNetworkAssets = registry.latest.assets
+    const catalog = assetCatalogForEnvironment(this.config.environment);
+    const allNetworkAssets = catalog.assets
       .filter(
         (asset) =>
           asset.networkId === this.config.networkId &&
@@ -207,7 +212,7 @@ export class EvmStablecoinBalanceIndexer {
       if (seen.has(contractAddress)) throw indexerError('DUPLICATE_CONTRACT');
       seen.add(contractAddress);
 
-      const asset = registry.normalizeAsset(this.config.networkId, contractAddress);
+      const asset = catalog.normalizeAsset(this.config.networkId, contractAddress);
       if (!asset || asset.identityKind !== 'EVM_CONTRACT') {
         throw indexerError('UNSUPPORTED_CONTRACT');
       }
@@ -319,18 +324,24 @@ export class EvmStablecoinBalanceIndexer {
 }
 
 function validateConfig(input: EvmStablecoinBalanceIndexerConfig): ValidatedIndexerConfig {
-  let registry: ReturnType<typeof supportedAssetRegistryForEnvironment>;
+  let catalog: EvmAssetCatalog;
   try {
-    registry = supportedAssetRegistryForEnvironment(input.environment);
+    catalog = assetCatalogForEnvironment(input.environment);
   } catch {
     throw indexerError('INVALID_INDEXER_CONFIGURATION');
   }
-  const network = registry.latest.networks.find(({ networkId }) => networkId === input.networkId);
   const policy = chainObservationPolicyForNetwork(input.networkId);
+  const activeNetwork =
+    input.environment === 'LOCAL'
+      ? input.networkId === LOCAL_EVM_DEVELOPMENT_MANIFEST.networkId
+      : supportedAssetRegistryForEnvironment(input.environment).latest.networks.some(
+          (network) =>
+            network.networkId === input.networkId &&
+            network.activationState === 'ACTIVE' &&
+            network.identityKind === 'EVM_CONTRACT',
+        );
   if (
-    !network ||
-    network.activationState !== 'ACTIVE' ||
-    network.identityKind !== 'EVM_CONTRACT' ||
+    !activeNetwork ||
     !policy ||
     policy.environment !== input.environment ||
     policy.chain === 'SOLANA' ||
@@ -340,8 +351,8 @@ function validateConfig(input: EvmStablecoinBalanceIndexerConfig): ValidatedInde
     throw indexerError('UNSUPPORTED_EVM_NETWORK');
   }
   if (
-    policy.registryVersion !== registry.latest.version ||
-    policy.registryFingerprintSha256 !== registry.latest.fingerprintSha256
+    policy.registryVersion !== catalog.version ||
+    policy.registryFingerprintSha256 !== catalog.fingerprintSha256
   ) {
     throw indexerError('REGISTRY_BINDING_MISMATCH');
   }
@@ -375,8 +386,34 @@ function validateConfig(input: EvmStablecoinBalanceIndexerConfig): ValidatedInde
     maxAttempts,
     retryBaseDelayMs,
     retryMaxDelayMs,
-    registryVersion: registry.latest.version,
-    registryFingerprintSha256: registry.latest.fingerprintSha256,
+    registryVersion: catalog.version,
+    registryFingerprintSha256: catalog.fingerprintSha256,
+  });
+}
+
+interface EvmAssetCatalog {
+  readonly version: number;
+  readonly fingerprintSha256: string;
+  readonly assets: readonly SupportedStablecoinAsset[];
+  normalizeAsset(networkId: string, identity: string): SupportedStablecoinAsset | undefined;
+}
+
+function assetCatalogForEnvironment(environment: EvmStablecoinEnvironment): EvmAssetCatalog {
+  if (environment === 'LOCAL') {
+    return Object.freeze({
+      version: LOCAL_EVM_DEVELOPMENT_MANIFEST.registryVersion,
+      fingerprintSha256: LOCAL_EVM_DEVELOPMENT_MANIFEST.registryFingerprintSha256,
+      assets: LOCAL_EVM_DEVELOPMENT_ASSETS,
+      normalizeAsset: normalizeLocalEvmDevelopmentAsset,
+    });
+  }
+  const registry = supportedAssetRegistryForEnvironment(environment);
+  return Object.freeze({
+    version: registry.latest.version,
+    fingerprintSha256: registry.latest.fingerprintSha256,
+    assets: registry.latest.assets,
+    normalizeAsset: (networkId: string, identity: string) =>
+      registry.normalizeAsset(networkId, identity),
   });
 }
 

@@ -59,9 +59,36 @@ evidence. Every screen displays a synthetic-data banner while the mode is on.
   creates an ephemeral server-side key, signs only the fresh KAN-56 challenge,
   submits that proof through the real registration service, and never returns a
   private key, challenge, signature, or general-purpose signing capability.
-- Portfolio reads use deterministic, in-memory MAINNET-shaped observations.
-  They exercise the KAN-63 through KAN-68 domain classes but are not statements
-  about either proven testnet address, any live chain, or available credit.
+- EVM portfolio reads use the fixed `LOCAL_EVM_HARDHAT` chain at
+  `http://127.0.0.1:18545`. The keyless chain executes the real mock-USDC
+  `balanceOf` call and produces local blocks; it cannot target a public RPC.
+  Solana balances and all price evidence remain deterministic in-memory
+  fixtures. The result is not evidence about a public chain or available
+  credit.
+- The chain supervisor exposes only the authenticated control endpoint
+  `http://127.0.0.1:18546/control`. The launcher injects its new per-launch
+  identity and capability into the API child as
+  `LOCAL_EVM_CONTROL_LAUNCH_ID` and `LOCAL_EVM_CONTROL_CAPABILITY`; neither
+  value is logged or stored in checked-in configuration. Signed control
+  responses carry a random per-child instance identity so an API cache cannot
+  confuse a replacement child with the prior generation by PID or height.
+- API balance initialization uses nonce-bound HMAC control requests. Balance
+  reads verify the exact mock-USDC bytecode at the pinned block tag before and
+  after `eth_call`, then recheck the same block. Each mutation is a sender-gated,
+  zero-fee mined local transaction, and the runtime proves the prior pinned
+  block hash, code, and balance remain immutable.
+- The ignored ownership record's PIDs are diagnostic only. External lifecycle
+  commands never signal them; only the supervisor stops or restarts its Hardhat
+  child through the `ChildProcess` handle it created. Reset replaces the entire
+  child and does not use EVM snapshot metadata. Matching unowned or ambiguous
+  RPC/control endpoints fail closed.
+- The Hardhat child requires an operating-system IPC tether to its supervisor,
+  so abrupt supervisor death closes the child. Graceful shutdown closes control
+  admission, drains admitted commands, then stops the final current child.
+- The browser accepts `eip155:31337` and mock USDC only through an isolated
+  local-demo response adapter and renderer. Wallet roster projections remain
+  Sepolia/Solana devnet, and shared production network/asset allowlists are not
+  widened.
 
 Do not enter a real email address, phone number, seed phrase, private key,
 signature, wallet address, credential, customer record, or real asset.
@@ -88,6 +115,9 @@ local migration principal, and launches:
 - web: `http://127.0.0.1:3000`
 - API health: `http://127.0.0.1:3001/api/v1/health`
 - synthetic identity: `http://127.0.0.1:3400/health`
+- local EVM: `http://127.0.0.1:18545` (`eip155:31337`)
+- local EVM control: `http://127.0.0.1:18546/control` (authenticated; not a
+  browser API)
 - local outbox worker
 
 Application processes remain attached to the terminal. Press `Ctrl+C` to stop
@@ -114,13 +144,14 @@ them. The demo-owned dependency containers remain available for a quick restart.
    freshness, and masked addresses. Refresh the browser to exercise wallet and
    session restoration. Disconnect a wallet to remove its contribution.
 
-The portfolio is not embedded in the page and is not live chain data. The
-authenticated same-origin API composes deterministic source fixtures through
-the real EVM/Solana indexers, balance-sync orchestrator, valuation policy,
-unified portfolio aggregation, and buying-power calculator. Production adapters
-remain fail closed until separately reviewed and configured; this harness is
-not approval to contact a wallet relay, RPC/indexing provider, oracle, or cloud
-service.
+The portfolio is not embedded in the page. Its EVM balance is read from the
+real loopback development chain; Solana balance and valuation inputs remain
+fixtures. The authenticated same-origin API composes them through the real
+EVM/Solana indexers, balance-sync orchestrator, valuation policy, unified
+portfolio aggregation, and buying-power calculator. Production adapters remain
+fail closed until separately reviewed and configured; this harness is not
+approval to contact a wallet relay, public RPC/indexing provider, oracle, or
+cloud service.
 
 To reset only the current account's demo wallets, disconnect both entries in the
 portfolio page. Restarting the attached API process clears every ephemeral
@@ -138,14 +169,16 @@ or session loss; they contain no key, signature, challenge, or full address.
 
 ```powershell
 npm run test:local-demo
+npm run test:local-evm
 npm test --workspace @crypto-lending/api -- --runInBand src/local-demo
 npm run test:e2e --workspace @crypto-lending/api
 npm test --workspace @crypto-lending/web -- test/local-demo-config.test.tsx test/local-demo-client.test.ts test/local-demo-wallet-adapter.test.ts test/local-demo-portfolio-journey.test.tsx test/browser-egress.test.ts
 npm run security:scan:secrets
 ```
 
-The identity tests use an ephemeral in-process loopback HTTP server; the other
-checks use deterministic fakes. None contacts an external endpoint.
+The identity tests use an ephemeral in-process loopback HTTP server, most
+application checks use deterministic fakes, and `test:local-evm` starts the real
+loopback Hardhat runtime. None contacts an external endpoint.
 
 ## Teardown
 
@@ -156,8 +189,11 @@ containers and volumes:
 npm run demo:local:teardown
 ```
 
-The teardown refuses unreviewed Docker endpoints, inventories the fixed
-`crypto-lending-local-demo` project, and verifies the KAN-253 ownership marker
-before issuing Compose down. It does not remove the repository's ordinary
-development volume or another Docker project. An older or colliding project
-without the marker fails closed and must be reviewed manually.
+The teardown first sends an authenticated `STOP` command for a chain whose
+ownership record is marked `LOCAL_DEMO`; the supervisor alone stops its Hardhat
+child through the retained process handle. It then refuses unreviewed Docker
+endpoints, inventories the fixed `crypto-lending-local-demo` project, and
+verifies the KAN-253 ownership marker before issuing Compose down. It does not
+remove the repository's ordinary development volume or another Docker project.
+An older or colliding project without the marker, or an ambiguous local EVM
+endpoint, fails closed and must be reviewed manually.

@@ -35,6 +35,12 @@ const ENABLED_CONFIG: LocalDemoRuntimeConfig = Object.freeze({
   mode: 'enabled',
   apiHost: '127.0.0.1',
   publicOrigin: 'http://127.0.0.1:3000',
+  localEvmRpcUrl: 'http://127.0.0.1:18545',
+  localEvmControl: Object.freeze({
+    url: 'http://127.0.0.1:18546/control',
+    launchId: '0123456789abcdef0123456789abcdef',
+    capability: '1111111111111111111111111111111111111111111111111111111111111111',
+  }),
 });
 
 const DISABLED_CONFIG: LocalDemoRuntimeConfig = Object.freeze({ mode: 'disabled' });

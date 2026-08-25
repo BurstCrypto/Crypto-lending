@@ -18,6 +18,8 @@ import {
 import { parseOidcProviderKey } from '../src/authentication/domain/authentication';
 import { AUTHENTICATION_COOKIE_NAMES } from '../src/authentication/http/authentication-cookies';
 import { formatAuthenticationSessionCookie } from '../src/authentication/http/authentication-session-cookie';
+import type { EvmTokenBalanceBatchReadRequest } from '../src/blockchain/application/ports/evm-stablecoin-balance-indexer.ports';
+import { LOCAL_EVM_DEVELOPMENT_MANIFEST } from '../src/blockchain/domain/local-evm-development';
 import {
   AUTHENTICATION_CONFIG,
   type RuntimeAuthenticationConfig,
@@ -28,6 +30,11 @@ import {
 } from '../src/authentication/infrastructure/crypto/authentication-crypto';
 import { StructuredLogger } from '../src/infrastructure/logging';
 import { LocalDemoModule } from '../src/local-demo/local-demo.module';
+import {
+  LOCAL_EVM_CHAIN_RUNTIME,
+  type LocalEvmChainRuntimePort,
+  type LocalEvmWalletSeed,
+} from '../src/local-demo/local-evm-chain.runtime';
 import { LOCAL_DEMO_RUNTIME_CONFIG } from '../src/local-demo/local-demo-runtime.config';
 import {
   type LocalDemoWalletConnection,
@@ -37,6 +44,54 @@ import {
 const LOCAL_ORIGIN = 'http://127.0.0.1:3000';
 const ACCOUNT_ID = parseAccountId('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
 const CREDENTIAL_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+
+class E2eLocalEvmRuntime implements LocalEvmChainRuntimePort {
+  private balance = '0';
+  private blockNumber = 0;
+  private readonly nodeInstanceId = '11111111111111111111111111111111';
+  readonly seedWalletBalances = jest.fn(
+    async (seeds: readonly LocalEvmWalletSeed[]): Promise<void> => {
+      this.balance = seeds[0]?.balanceAtomic ?? '0';
+      this.blockNumber += 1;
+    },
+  );
+
+  mutateBalance(balanceAtomic: string): void {
+    this.balance = balanceAtomic;
+    this.blockNumber += 1;
+  }
+
+  async readNodeInstanceId(): Promise<string> {
+    return this.nodeInstanceId;
+  }
+
+  async readChainIdentity(): Promise<unknown> {
+    return LOCAL_EVM_DEVELOPMENT_MANIFEST.chainIdHex;
+  }
+
+  async readSourceBlock(): Promise<unknown> {
+    const current = this.blockNumber.toString(16).padStart(64, '0');
+    const parent = Math.max(0, this.blockNumber - 1)
+      .toString(16)
+      .padStart(64, '0');
+    return {
+      number: this.blockNumber.toString(),
+      hash: `0x${current}`,
+      parentHash: `0x${parent}`,
+    };
+  }
+
+  async readTokenBalances(request: EvmTokenBalanceBatchReadRequest): Promise<unknown> {
+    return {
+      sourceBlockNumber: request.sourceBlock.number,
+      sourceBlockHash: request.sourceBlock.hash,
+      balances: request.contractAddresses.map((contractAddress) => ({
+        contractAddress,
+        balanceAtomic: this.balance,
+      })),
+    };
+  }
+}
 
 function encodedKey(byte: number): string {
   return Buffer.alloc(32, byte).toString('base64url');
@@ -74,6 +129,7 @@ const CONFIG: RuntimeAuthenticationConfig = Object.freeze({
 describe('local demo authentication boundary (e2e)', () => {
   let app: INestApplication;
   let repository: jest.Mocked<AuthenticationRepositoryPort>;
+  let localEvm: E2eLocalEvmRuntime;
   let wallets: {
     connect: jest.Mock<Promise<LocalDemoWalletConnection>, [unknown]>;
     disconnect: jest.Mock<void, [unknown, unknown]>;
@@ -163,6 +219,7 @@ describe('local demo authentication boundary (e2e)', () => {
         throw new Error('not exercised');
       }),
     };
+    localEvm = new E2eLocalEvmRuntime();
     const module = await Test.createTestingModule({ imports: [LocalDemoModule] })
       .overrideProvider(AUTHENTICATION_CONFIG)
       .useValue(CONFIG)
@@ -173,7 +230,19 @@ describe('local demo authentication boundary (e2e)', () => {
       .overrideProvider(OIDC_CLIENT)
       .useValue(oidc)
       .overrideProvider(LOCAL_DEMO_RUNTIME_CONFIG)
-      .useValue({ mode: 'enabled', apiHost: '127.0.0.1', publicOrigin: LOCAL_ORIGIN })
+      .useValue({
+        mode: 'enabled',
+        apiHost: '127.0.0.1',
+        publicOrigin: LOCAL_ORIGIN,
+        localEvmRpcUrl: 'http://127.0.0.1:18545',
+        localEvmControl: {
+          url: 'http://127.0.0.1:18546/control',
+          launchId: '0123456789abcdef0123456789abcdef',
+          capability: '1111111111111111111111111111111111111111111111111111111111111111',
+        },
+      })
+      .overrideProvider(LOCAL_EVM_CHAIN_RUNTIME)
+      .useValue(localEvm)
       .overrideProvider(LocalDemoWalletService)
       .useValue(wallets)
       .compile();
@@ -291,6 +360,33 @@ describe('local demo authentication boundary (e2e)', () => {
     });
     expect(portfolio.body.wallets).toHaveLength(1);
     expect(wallets.list).toHaveBeenCalledWith(ACCOUNT_ID);
+
+    localEvm.mutateBalance('1234500000');
+    const updated = await request(app.getHttpServer())
+      .get('/api/v1/local-demo/portfolio')
+      .set('Cookie', cookie)
+      .expect(200);
+    expect(updated.body).toMatchObject({
+      portfolioValueUsdMinor: '123450',
+      mayAuthorizeFinancialAction: false,
+      wallets: [
+        {
+          chains: [
+            {
+              networkId: LOCAL_EVM_DEVELOPMENT_MANIFEST.networkId,
+              assets: [
+                {
+                  assetIdentity: LOCAL_EVM_DEVELOPMENT_MANIFEST.assets[0]?.contractAddress,
+                  amountAtomic: '1234500000',
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    expect(updated.body.snapshotId).not.toBe(portfolio.body.snapshotId);
+    expect(localEvm.seedWalletBalances).toHaveBeenCalledTimes(1);
   });
 
   it('rejects aliases and wrong ports before wallet mutation', async () => {

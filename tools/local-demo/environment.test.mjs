@@ -15,6 +15,7 @@ import {
   LOCAL_DEMO_REQUIRED_DOCKER_IMAGES,
   LOCAL_DEMO_WEB_ORIGIN,
   safeLocalProcessEnvironment,
+  withLocalEvmControlCredentials,
 } from './environment.mjs';
 import {
   assertLocalDemoResourceOwnership,
@@ -69,6 +70,9 @@ describe('local demo process configuration', () => {
     assert.equal(environments.api.API_HOST, '127.0.0.1');
     assert.equal(environments.api.APP_ENV, 'dev-local-demo');
     assert.equal(environments.api.LOCAL_DEMO_MODE, 'enabled');
+    assert.match(environments.api.LOCAL_EVM_CONTROL_LAUNCH_ID, /^[0-9a-f]{32}$/u);
+    assert.match(environments.api.LOCAL_EVM_CONTROL_CAPABILITY, /^[0-9a-f]{64}$/u);
+    assert.equal(environments.identity.LOCAL_EVM_CONTROL_CAPABILITY, undefined);
     assert.equal(environments.api.OIDC_ISSUER_URL, 'https://127.0.0.1:3400/local-demo');
     assert.equal(environments.api.OIDC_AUTHORIZATION_ENDPOINT, 'http://127.0.0.1:3400/authorize');
     assert.equal(environments.api.OIDC_TOKEN_AUTH_METHOD, 'none');
@@ -136,6 +140,27 @@ describe('local demo process configuration', () => {
     ]) {
       assert.notEqual(environments.api[name], restartedEnvironments.api[name]);
     }
+  });
+
+  it('injects only a live local EVM owner capability into the API environment', () => {
+    const api = withLocalEvmControlCredentials(
+      { API_HOST: '127.0.0.1' },
+      {
+        launchId: '1'.repeat(32),
+        controlCapability: '2'.repeat(64),
+      },
+    );
+    assert.deepEqual(api, {
+      API_HOST: '127.0.0.1',
+      LOCAL_EVM_CONTROL_LAUNCH_ID: '1'.repeat(32),
+      LOCAL_EVM_CONTROL_CAPABILITY: '2'.repeat(64),
+    });
+    assert.throws(() =>
+      withLocalEvmControlCredentials(
+        {},
+        { launchId: 'invalid', controlCapability: '2'.repeat(64) },
+      ),
+    );
   });
 
   it('accepts only local Docker transports and a fixed demo-owned compose project', () => {

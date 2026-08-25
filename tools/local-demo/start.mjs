@@ -8,6 +8,7 @@ import {
   LOCAL_DEMO_API_ORIGIN,
   LOCAL_DEMO_REQUIRED_DOCKER_IMAGES,
   LOCAL_DEMO_WEB_ORIGIN,
+  withLocalEvmControlCredentials,
 } from './environment.mjs';
 import {
   composeArguments,
@@ -16,6 +17,10 @@ import {
   runChecked,
   spawnOwned,
 } from './processes.mjs';
+import { waitForLocalEvm } from '../local-evm/json-rpc.mjs';
+import { LOCAL_EVM_MANIFEST } from '../local-evm/manifest.mjs';
+import { sendLocalEvmControlCommand } from '../local-evm/control-channel.mjs';
+import { readLocalEvmControlRecord } from '../local-evm/runtime-state.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const apiRoot = resolve(root, 'apps', 'api');
@@ -77,14 +82,49 @@ runChecked(process.execPath, [tsxCli, 'src/infrastructure/database/migration.cli
   label: 'Local database migration',
 });
 
+const localEvm = spawnOwned(process.execPath, ['tools/local-evm/start.mjs'], {
+  cwd: root,
+  env: environments.identity,
+});
+let localEvmOwnership;
+try {
+  await waitForLocalEvm();
+  const ownershipDeadline = Date.now() + 5_000;
+  while (Date.now() < ownershipDeadline && localEvm.exitCode === null) {
+    try {
+      const candidate = readLocalEvmControlRecord();
+      if (candidate?.state === 'RUNNING') {
+        await sendLocalEvmControlCommand(candidate, 'STATUS');
+        localEvmOwnership = candidate;
+        break;
+      }
+    } catch {
+      // The owner publishes its final authenticated record atomically.
+    }
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 25));
+  }
+  if (
+    localEvmOwnership?.ownerPid !== localEvm.pid ||
+    localEvmOwnership?.purpose !== 'LOCAL_DEMO' ||
+    localEvm.exitCode !== null
+  ) {
+    throw new Error('Local demo refused a local EVM process it does not own');
+  }
+} catch (error) {
+  if (localEvm.exitCode === null) localEvm.kill('SIGTERM');
+  throw error;
+}
+const apiEnvironment = withLocalEvmControlCredentials(environments.api, localEvmOwnership);
+
 const children = [
+  localEvm,
   spawnOwned(process.execPath, ['tools/local-demo/identity-provider.mjs'], {
     cwd: root,
     env: environments.identity,
   }),
   spawnOwned(process.execPath, [nestCli, 'start', '--watch'], {
     cwd: apiRoot,
-    env: environments.api,
+    env: apiEnvironment,
   }),
   // Webpack can resolve the shared node_modules directory used by Git worktrees;
   // Turbopack intentionally refuses files outside its detected worktree root.
@@ -103,10 +143,21 @@ let stopping = false;
 function stop(exitCode) {
   if (stopping) return;
   stopping = true;
-  for (const child of children) {
+  for (const child of children.slice(1)) {
     if (child.exitCode === null) child.kill('SIGTERM');
   }
-  setTimeout(() => process.exit(exitCode), 250).unref();
+  let finalExitCode = exitCode;
+  try {
+    runChecked(process.execPath, ['tools/local-evm/teardown.mjs'], {
+      cwd: root,
+      env: environments.identity,
+      capture: true,
+      label: 'Local EVM teardown',
+    });
+  } catch {
+    finalExitCode = 1;
+  }
+  setTimeout(() => process.exit(finalExitCode), 250).unref();
 }
 
 for (const child of children) {
@@ -124,7 +175,8 @@ process.stdout.write(
     'Synthetic local demo processes are starting.',
     `Web: ${LOCAL_DEMO_WEB_ORIGIN}`,
     `API: ${LOCAL_DEMO_API_ORIGIN}/api/v1/health`,
-    'No wallet relay, RPC, oracle, cloud, or vendor endpoint is configured.',
+    `EVM: ${LOCAL_EVM_MANIFEST.runtimeIdentity} (${LOCAL_EVM_MANIFEST.networkId}) at ${LOCAL_EVM_MANIFEST.rpc.url}`,
+    'No public RPC, wallet relay, oracle, cloud, or vendor endpoint is configured.',
     'Press Ctrl+C to stop application processes; run npm run demo:local:teardown to remove demo-owned containers and volumes.',
     '',
   ].join('\n'),

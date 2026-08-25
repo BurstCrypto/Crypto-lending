@@ -56,6 +56,38 @@ cached images. The UI is permanently marked as synthetic while enabled. See the
 [local demo runbook](tools/local-demo/README.md) for the click-through flow,
 limitations, verification, and isolated teardown.
 
+### Local EVM chain
+
+KAN-256 adds a pinned, keyless Hardhat EDR development chain at the fixed LOCAL
+identity `eip155:31337`, RPC `http://127.0.0.1:18545`, and authenticated control
+endpoint `http://127.0.0.1:18546/control`. The synthetic demo starts it
+automatically; it can also be exercised independently:
+
+```powershell
+npm run local-evm:start
+npm run local-evm:reset
+npm run test:local-evm
+npm run local-evm:teardown
+```
+
+The chain has no configured accounts. A keyless synthetic controller submits
+zero-fee mined fixture transactions, so it needs no signing key, faucet, real
+gas, provider, or public network. It backs real EVM `eth_call` balance indexing
+and local portfolio synchronization, but it is not a decentralized/PoS
+validator or public testnet. Each launch uses a new random capability and
+HMAC-authenticated loopback control. External commands never signal the
+diagnostic PIDs in the ignored ownership record; the supervisor alone restarts
+or stops its Hardhat child through its retained process handle. Reset starts a
+fresh child without snapshot metadata. Each child gets a random authenticated
+instance identity, and every balance change is a mined local transaction that
+preserves previously pinned state. The Hardhat child also requires a private
+operating-system IPC tether to that supervisor, so an abruptly terminated
+supervisor cannot leave the RPC child listening. The browser accepts the LOCAL
+chain and mock-USDC tuple only through an isolated local-demo parser and
+renderer; shared production network and asset allowlists remain unchanged. See
+the [local EVM runbook](tools/local-evm/README.md) and
+[KAN-256 evidence](docs/KAN-256.md).
+
 ## Restricted wallet validation lab
 
 There are two deliberately separate wallet test surfaces:

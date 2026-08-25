@@ -10,7 +10,7 @@ import {
   type LocalDemoWalletProjection,
 } from '../lib/local-demo/local-demo-client';
 import { localDemoWalletRosterKey } from '../lib/local-demo/wallet-roster';
-import { UNIFIED_BALANCE_DEMO_PAYLOAD } from '../lib/portfolio/unified-balance.fixtures';
+import { LOCAL_DEMO_CHAIN_PORTFOLIO_PAYLOAD } from './local-demo-portfolio.fixtures';
 
 const PROFILE: AccountProfile = Object.freeze({
   accountId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
@@ -51,11 +51,7 @@ const PROJECTIONS: Readonly<Record<LocalDemoWalletNamespace, LocalDemoWalletProj
     }),
   });
 
-const PORTFOLIO = Object.freeze({
-  ...UNIFIED_BALANCE_DEMO_PAYLOAD,
-  use: 'LOCAL_DEMO_ESTIMATE_ONLY' as const,
-  mayAuthorizeFinancialAction: false as const,
-});
+const PORTFOLIO = LOCAL_DEMO_CHAIN_PORTFOLIO_PAYLOAD;
 
 interface FakeClientHarness {
   readonly client: LocalDemoApiClient;
@@ -130,7 +126,7 @@ describe('authenticated local demo portfolio journey', () => {
     expect(harness.readPortfolio).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole('button', { name: /EVM test wallet/u }));
-    const evmLabel = await screen.findByText('Synthetic EVM wallet');
+    const evmLabel = await screen.findByText('Synthetic EVM wallet', { selector: 'strong' });
     const evmRow = evmLabel.closest('li');
     expect(evmRow).not.toBeNull();
     expect(within(evmRow!).getByText(/0x1111/u)).toBeInTheDocument();
@@ -141,14 +137,28 @@ describe('authenticated local demo portfolio journey', () => {
     ).not.toContain(PROJECTIONS.EVM.address);
 
     fireEvent.click(screen.getByRole('button', { name: /Solana test wallet/u }));
-    expect(await screen.findByText('Synthetic Solana wallet')).toBeInTheDocument();
+    expect(
+      await screen.findByText('Synthetic Solana wallet', { selector: 'strong' }),
+    ).toBeInTheDocument();
     expect(harness.registerWallet).toHaveBeenNthCalledWith(1, 'EVM', expect.any(AbortSignal));
     expect(harness.registerWallet).toHaveBeenNthCalledWith(2, 'SOLANA', expect.any(AbortSignal));
     expect(harness.readPortfolio).toHaveBeenCalledTimes(2);
     expect(
       screen.getByRole('heading', { name: 'Your capital, clearly attributed.' }),
     ).toBeInTheDocument();
-    expect(screen.getByText(/Mainnet-shaped balance fixtures/u)).toBeInTheDocument();
+    expect(
+      screen.getByText(/EVM balances are observations from the loopback-only LOCAL/u),
+    ).toBeInTheDocument();
+    const sources = screen.getByRole('heading', { name: 'Balance sources' }).closest('section');
+    expect(sources).not.toBeNull();
+    expect(within(sources!).getByText('LOCAL EVM (chain 31337)')).toBeInTheDocument();
+    expect(within(sources!).getByText('Address ending in 0101')).toBeInTheDocument();
+    expect(document.body.textContent).toContain(
+      'Solana balances and all price and valuation inputs',
+    );
+    expect(document.body.textContent).toContain(
+      'none of this is public-chain or validator evidence',
+    );
   });
 
   it('restores registered server projections after a same-tab refresh without another proof POST', async () => {
@@ -156,12 +166,14 @@ describe('authenticated local demo portfolio journey', () => {
     const first = experience(firstHarness);
     await screen.findByText('No synthetic wallets are connected yet.');
     fireEvent.click(screen.getByRole('button', { name: /EVM test wallet/u }));
-    await screen.findByText('Synthetic EVM wallet');
+    await screen.findByText('Synthetic EVM wallet', { selector: 'strong' });
     first.unmount();
 
     const restoredHarness = fakeClient([PROJECTIONS.EVM]);
     experience(restoredHarness);
-    expect(await screen.findByText('Synthetic EVM wallet')).toBeInTheDocument();
+    expect(
+      await screen.findByText('Synthetic EVM wallet', { selector: 'strong' }),
+    ).toBeInTheDocument();
     expect(restoredHarness.listWallets).toHaveBeenCalledTimes(1);
     expect(restoredHarness.registerWallet).not.toHaveBeenCalled();
     expect(restoredHarness.readPortfolio).toHaveBeenCalledTimes(1);
@@ -172,7 +184,7 @@ describe('authenticated local demo portfolio journey', () => {
     const first = experience(firstHarness);
     await screen.findByText('No synthetic wallets are connected yet.');
     fireEvent.click(screen.getByRole('button', { name: /EVM test wallet/u }));
-    await screen.findByText('Synthetic EVM wallet');
+    await screen.findByText('Synthetic EVM wallet', { selector: 'strong' });
     const firstRosterKey = localDemoWalletRosterKey(PROFILE.accountId);
     const firstRoster = window.sessionStorage.getItem(firstRosterKey);
     expect(firstRoster).not.toBeNull();
@@ -181,11 +193,15 @@ describe('authenticated local demo portfolio journey', () => {
     const secondHarness = fakeClient();
     experience(secondHarness, { restoreSession: async () => SECOND_PROFILE });
     expect(await screen.findByText('No synthetic wallets are connected yet.')).toBeInTheDocument();
-    expect(screen.queryByText('Synthetic EVM wallet')).not.toBeInTheDocument();
+    expect(
+      screen.queryByText('Synthetic EVM wallet', { selector: 'strong' }),
+    ).not.toBeInTheDocument();
     expect(secondHarness.readPortfolio).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole('button', { name: /Solana test wallet/u }));
-    expect(await screen.findByText('Synthetic Solana wallet')).toBeInTheDocument();
+    expect(
+      await screen.findByText('Synthetic Solana wallet', { selector: 'strong' }),
+    ).toBeInTheDocument();
     expect(window.sessionStorage.getItem(firstRosterKey)).toBe(firstRoster);
     expect(
       window.sessionStorage.getItem(localDemoWalletRosterKey(SECOND_PROFILE.accountId)),
@@ -195,11 +211,15 @@ describe('authenticated local demo portfolio journey', () => {
   it('disconnects through the server and returns to explicit unavailable state after the last wallet', async () => {
     const harness = fakeClient([PROJECTIONS.EVM]);
     experience(harness);
-    const label = await screen.findByText('Synthetic EVM wallet');
+    const label = await screen.findByText('Synthetic EVM wallet', { selector: 'strong' });
     const row = label.closest('li');
     fireEvent.click(within(row!).getByRole('button', { name: 'Disconnect' }));
 
-    await waitFor(() => expect(screen.queryByText('Synthetic EVM wallet')).not.toBeInTheDocument());
+    await waitFor(() =>
+      expect(
+        screen.queryByText('Synthetic EVM wallet', { selector: 'strong' }),
+      ).not.toBeInTheDocument(),
+    );
     expect(harness.disconnectWallet).toHaveBeenCalledWith(
       PROJECTIONS.EVM.connectionId,
       expect.any(AbortSignal),
@@ -229,7 +249,7 @@ describe('authenticated local demo portfolio journey', () => {
         }),
     );
     const rendered = experience(harness, { restoreSession });
-    const label = await screen.findByText('Synthetic EVM wallet');
+    const label = await screen.findByText('Synthetic EVM wallet', { selector: 'strong' });
     fireEvent.click(within(label.closest('li')!).getByRole('button', { name: 'Disconnect' }));
     await waitFor(() => expect(harness.disconnectWallet).toHaveBeenCalledTimes(1));
     const signal = harness.disconnectWallet.mock.calls[0]?.[1] as AbortSignal;
@@ -252,7 +272,9 @@ describe('authenticated local demo portfolio journey', () => {
     await waitFor(() => expect(navigate).toHaveBeenCalledWith('/login?returnTo=%2Fportfolio'));
     expect(harness.listWallets).toHaveBeenCalledTimes(1);
     expect(window.sessionStorage.getItem(rosterKey)).toBeNull();
-    expect(screen.queryByText('Synthetic EVM wallet')).not.toBeInTheDocument();
+    expect(
+      screen.queryByText('Synthetic EVM wallet', { selector: 'strong' }),
+    ).not.toBeInTheDocument();
   });
 
   it('shows request failure instead of a false zero while retaining a retry control', async () => {

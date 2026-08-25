@@ -45,6 +45,27 @@ function key(random) {
   return random(32).toString('base64url');
 }
 
+function localEvmControlCredentials(value, random) {
+  const credentials = value ?? {
+    launchId: random(16).toString('hex'),
+    capability: random(32).toString('hex'),
+  };
+  if (
+    typeof credentials !== 'object' ||
+    credentials === null ||
+    typeof credentials.launchId !== 'string' ||
+    !/^[0-9a-f]{32}$/u.test(credentials.launchId) ||
+    typeof credentials.capability !== 'string' ||
+    !/^[0-9a-f]{64}$/u.test(credentials.capability)
+  ) {
+    throw new TypeError('Invalid local EVM control credentials');
+  }
+  return Object.freeze({
+    launchId: credentials.launchId,
+    capability: credentials.capability,
+  });
+}
+
 function persistedSyntheticKey(purpose) {
   // These are domain-separated fixture values, not production secrets. They
   // must remain stable while the demo-owned database volume persists so an
@@ -91,6 +112,7 @@ function infrastructureEnvironment(databaseCredentials, workload) {
 export function createLocalDemoEnvironments(options = {}) {
   const random = options.randomBytes ?? randomBytes;
   const inherited = safeLocalProcessEnvironment(options.sourceEnvironment ?? process.env);
+  const localEvmControl = localEvmControlCredentials(options.localEvmControl, random);
   const api = {
     ...inherited,
     ...infrastructureEnvironment(
@@ -138,6 +160,9 @@ export function createLocalDemoEnvironments(options = {}) {
     WALLET_CHALLENGE_HMAC_KEY: key(random),
     WALLET_METADATA_SEAL_KEY_VERSION: '1',
     WALLET_METADATA_SEAL_KEY: persistedSyntheticKey('wallet-metadata-seal'),
+    LOCAL_EVM_RPC_URL: 'http://127.0.0.1:18545',
+    LOCAL_EVM_CONTROL_LAUNCH_ID: localEvmControl.launchId,
+    LOCAL_EVM_CONTROL_CAPABILITY: localEvmControl.capability,
     REDIS_HOST: '127.0.0.1',
     REDIS_PORT: '6379',
     REDIS_TLS: 'false',
@@ -172,7 +197,11 @@ export function createLocalDemoEnvironments(options = {}) {
     NEXT_DISABLE_SWC_WASM: '1',
     NEXT_TELEMETRY_DISABLED: '1',
   };
-  const identity = { ...inherited, NODE_ENV: 'development' };
+  const identity = {
+    ...inherited,
+    NODE_ENV: 'development',
+    LOCAL_EVM_LAUNCH_OWNER: 'LOCAL_DEMO_KAN_253',
+  };
   const docker = {
     ...inherited,
     COMPOSE_DISABLE_ENV_FILE: '1',
@@ -187,6 +216,21 @@ export function createLocalDemoEnvironments(options = {}) {
     migration: Object.freeze(migration),
     web: Object.freeze(web),
     worker: Object.freeze(worker),
+  });
+}
+
+export function withLocalEvmControlCredentials(environment, record) {
+  const credentials = localEvmControlCredentials(
+    {
+      launchId: record?.launchId,
+      capability: record?.controlCapability,
+    },
+    randomBytes,
+  );
+  return Object.freeze({
+    ...environment,
+    LOCAL_EVM_CONTROL_LAUNCH_ID: credentials.launchId,
+    LOCAL_EVM_CONTROL_CAPABILITY: credentials.capability,
   });
 }
 

@@ -6,7 +6,17 @@ export type LocalDemoRuntimeConfig =
       mode: 'enabled';
       apiHost: '127.0.0.1';
       publicOrigin: 'http://127.0.0.1:3000';
+      localEvmRpcUrl: 'http://127.0.0.1:18545';
+      localEvmControl: Readonly<{
+        url: 'http://127.0.0.1:18546/control';
+        launchId: string;
+        capability: string;
+      }>;
     }>;
+
+const LOCAL_EVM_CONTROL_URL = 'http://127.0.0.1:18546/control' as const;
+const LOWERCASE_HEX_128 = /^[0-9a-f]{32}$/u;
+const LOWERCASE_HEX_256 = /^[0-9a-f]{64}$/u;
 
 const FORBIDDEN_EXTERNAL_CONFIGURATION = Object.freeze([
   'ALL_PROXY',
@@ -41,10 +51,21 @@ const REQUIRED_LOCAL_INFRASTRUCTURE = Object.freeze({
   SQS_ENDPOINT: 'http://127.0.0.1:4566',
   SQS_QUEUE_URL: 'http://127.0.0.1:4566/000000000000/crypto-lending-jobs',
   SQS_DEAD_LETTER_QUEUE_URL: 'http://127.0.0.1:4566/000000000000/crypto-lending-jobs-dlq',
+  LOCAL_EVM_RPC_URL: 'http://127.0.0.1:18545',
 } as const);
 
-const REVIEWED_INFRASTRUCTURE_NAMES = new Set(Object.keys(REQUIRED_LOCAL_INFRASTRUCTURE));
-const INFRASTRUCTURE_PREFIXES = Object.freeze(['AWS_', 'DATABASE_', 'REDIS_', 'SQS_']);
+const REVIEWED_INFRASTRUCTURE_NAMES = new Set([
+  ...Object.keys(REQUIRED_LOCAL_INFRASTRUCTURE),
+  'LOCAL_EVM_CONTROL_LAUNCH_ID',
+  'LOCAL_EVM_CONTROL_CAPABILITY',
+]);
+const INFRASTRUCTURE_PREFIXES = Object.freeze([
+  'AWS_',
+  'DATABASE_',
+  'REDIS_',
+  'SQS_',
+  'LOCAL_EVM_',
+]);
 
 export class LocalDemoRuntimeConfigurationError extends Error {
   readonly code = 'LOCAL_DEMO_RUNTIME_CONFIGURATION_ERROR' as const;
@@ -115,10 +136,24 @@ export function loadLocalDemoRuntimeConfig(
   );
   if (unexpected !== undefined) return fail(unexpected);
   assertExactLocalInfrastructure(environment);
+  const launchId = environment.LOCAL_EVM_CONTROL_LAUNCH_ID;
+  if (typeof launchId !== 'string' || !LOWERCASE_HEX_128.test(launchId)) {
+    return fail('LOCAL_EVM_CONTROL_LAUNCH_ID');
+  }
+  const capability = environment.LOCAL_EVM_CONTROL_CAPABILITY;
+  if (typeof capability !== 'string' || !LOWERCASE_HEX_256.test(capability)) {
+    return fail('LOCAL_EVM_CONTROL_CAPABILITY');
+  }
 
   return Object.freeze({
     mode: 'enabled',
     apiHost: '127.0.0.1',
     publicOrigin: 'http://127.0.0.1:3000',
+    localEvmRpcUrl: 'http://127.0.0.1:18545',
+    localEvmControl: Object.freeze({
+      url: LOCAL_EVM_CONTROL_URL,
+      launchId,
+      capability,
+    }),
   });
 }

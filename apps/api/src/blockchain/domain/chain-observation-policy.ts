@@ -5,6 +5,7 @@ import {
   type SupportedChain,
   type VersionedSupportedAssetRegistry,
 } from './supported-asset-registry';
+import { LOCAL_EVM_DEVELOPMENT_MANIFEST } from './local-evm-development';
 
 export const CHAIN_OBSERVATION_POLICY_VERSION = 1 as const;
 export const CHAIN_OBSERVATION_TIERS = Object.freeze([
@@ -16,6 +17,7 @@ export const CHAIN_OBSERVATION_TIERS = Object.freeze([
 export type ChainObservationTier = (typeof CHAIN_OBSERVATION_TIERS)[number];
 export type ChainObservationNetworkId =
   | 'eip155:1'
+  | 'eip155:31337'
   | 'eip155:11155111'
   | 'eip155:8453'
   | 'eip155:84532'
@@ -23,6 +25,8 @@ export type ChainObservationNetworkId =
   | 'eip155:421614'
   | 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp'
   | 'solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1';
+
+export type ChainObservationEnvironment = AssetRegistryEnvironment | 'LOCAL';
 
 export type ChainObservationMethod =
   | 'eth_blockNumber'
@@ -97,7 +101,7 @@ export interface ChainObservationTierRule {
 
 export interface ChainObservationNetworkPolicy {
   readonly chain: SupportedChain;
-  readonly environment: AssetRegistryEnvironment;
+  readonly environment: ChainObservationEnvironment;
   readonly networkId: ChainObservationNetworkId;
   readonly registryVersion: 1;
   readonly registryFingerprintSha256: string;
@@ -204,6 +208,12 @@ const ARBITRUM_TIER_RULES = deepFreeze([
   tier('FINANCIAL', 'finalized', 'BLOCKED_PENDING_LIVE_PROOF', 'FINANCIAL_AND_LEDGER'),
 ] as const);
 
+const LOCAL_EVM_TIER_RULES = deepFreeze([
+  tier('PROVISIONAL', 'latest', 'ALLOWED', 'DISPLAY_ONLY'),
+  tier('CANONICAL', 'safe', 'BLOCKED_PENDING_LIVE_PROOF', 'CANONICAL_INDEXING'),
+  tier('FINANCIAL', 'finalized', 'BLOCKED_PENDING_LIVE_PROOF', 'FINANCIAL_AND_LEDGER'),
+] as const);
+
 const SOLANA_TIER_RULES = deepFreeze([
   tier('PROVISIONAL', 'processed', 'ALLOWED', 'DISPLAY_ONLY'),
   tier('CANONICAL', 'confirmed', 'REQUIRES_LIVE_PROOF', 'CANONICAL_INDEXING'),
@@ -247,6 +257,7 @@ export const CHAIN_OBSERVATION_RESILIENCE_POLICY = deepFreeze({
 
 export const CHAIN_OBSERVATION_NETWORK_POLICIES = deepFreeze([
   evmPolicy('ETHEREUM', 'MAINNET', 'eip155:1', '0x1', 60_000, 900_000, 1_800_000),
+  evmPolicy('ETHEREUM', 'LOCAL', 'eip155:31337', '0x7a69', 60_000, 300_000, 300_000),
   evmPolicy('ETHEREUM', 'TESTNET', 'eip155:11155111', '0xaa36a7', 60_000, 900_000, 1_800_000),
   evmPolicy('BASE', 'MAINNET', 'eip155:8453', '0x2105', 30_000, 300_000, 2_700_000),
   evmPolicy('BASE', 'TESTNET', 'eip155:84532', '0x14a34', 30_000, 300_000, 2_700_000),
@@ -635,22 +646,31 @@ function tier(
 
 function evmPolicy(
   chain: Exclude<SupportedChain, 'SOLANA'>,
-  environment: AssetRegistryEnvironment,
+  environment: ChainObservationEnvironment,
   networkId: ChainObservationNetworkId,
   expectedChainId: string,
   currentWithinMs: number,
   unavailableAfterMs: number,
   finalityStallAfterMs: number,
 ): ChainObservationNetworkPolicy {
+  const registryFingerprintSha256 =
+    environment === 'LOCAL'
+      ? LOCAL_EVM_DEVELOPMENT_MANIFEST.registryFingerprintSha256
+      : CHAIN_OBSERVATION_REGISTRY_BINDINGS[environment].fingerprintSha256;
   return {
     chain,
     environment,
     networkId,
     registryVersion: 1,
-    registryFingerprintSha256: CHAIN_OBSERVATION_REGISTRY_BINDINGS[environment].fingerprintSha256,
+    registryFingerprintSha256,
     identityProbe: { kind: 'EVM_CHAIN_ID', method: 'eth_chainId', expectedResult: expectedChainId },
     allowedMethods: EVM_ALLOWED_METHODS,
-    tiers: chain === 'ARBITRUM' ? ARBITRUM_TIER_RULES : EVM_TIER_RULES,
+    tiers:
+      environment === 'LOCAL'
+        ? LOCAL_EVM_TIER_RULES
+        : chain === 'ARBITRUM'
+          ? ARBITRUM_TIER_RULES
+          : EVM_TIER_RULES,
     freshness: { currentWithinMs, unavailableAfterMs },
     finality: {
       stallAfterMs: finalityStallAfterMs,

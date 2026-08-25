@@ -29,6 +29,10 @@ function enabledEnvironment(): NodeJS.ProcessEnv {
     SQS_ENDPOINT: 'http://127.0.0.1:4566',
     SQS_QUEUE_URL: 'http://127.0.0.1:4566/000000000000/crypto-lending-jobs',
     SQS_DEAD_LETTER_QUEUE_URL: 'http://127.0.0.1:4566/000000000000/crypto-lending-jobs-dlq',
+    LOCAL_EVM_RPC_URL: 'http://127.0.0.1:18545',
+    LOCAL_EVM_CONTROL_LAUNCH_ID: '0123456789abcdef0123456789abcdef',
+    LOCAL_EVM_CONTROL_CAPABILITY:
+      '1111111111111111111111111111111111111111111111111111111111111111',
   };
 }
 
@@ -45,6 +49,12 @@ describe('local demo runtime configuration', () => {
       mode: 'enabled',
       apiHost: '127.0.0.1',
       publicOrigin: 'http://127.0.0.1:3000',
+      localEvmRpcUrl: 'http://127.0.0.1:18545',
+      localEvmControl: {
+        url: 'http://127.0.0.1:18546/control',
+        launchId: '0123456789abcdef0123456789abcdef',
+        capability: '1111111111111111111111111111111111111111111111111111111111111111',
+      },
     });
   });
 
@@ -56,6 +66,9 @@ describe('local demo runtime configuration', () => {
     ['AUTH_MODE', 'disabled'],
     ['WALLET_REGISTRATION_MODE', 'disabled'],
     ['WALLET_REGISTRATION_REGISTRY_ENVIRONMENT', 'MAINNET'],
+    ['LOCAL_EVM_RPC_URL', 'http://localhost:18545'],
+    ['LOCAL_EVM_CONTROL_LAUNCH_ID', '0123456789ABCDEF0123456789ABCDEF'],
+    ['LOCAL_EVM_CONTROL_CAPABILITY', '11'],
     ['LOCAL_DEMO_MODE', 'true'],
   ])('rejects drift in %s', (field, value) => {
     const environment = enabledEnvironment();
@@ -108,6 +121,9 @@ describe('local demo runtime configuration', () => {
     'aws_region',
     'AWS_ENDPOINT_URL_SQS',
     'SQS_REQUEST_TIMEOUT_MS',
+    'LOCAL_EVM_URL',
+    'LOCAL_EVM_CONTROL_URL',
+    'local_evm_rpc_url',
   ])('rejects unreviewed infrastructure variable %s', (field) => {
     const environment = enabledEnvironment();
     environment[field] = 'unexpected';

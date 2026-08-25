@@ -4,12 +4,12 @@ import {
   type AuthenticationFetch,
 } from '@/lib/authentication';
 import { isAbortFailure, readBoundedJson, retryAfterSeconds } from '@/lib/authentication/http';
-import {
-  PORTFOLIO_NETWORKS,
-  parseUnifiedBalanceResponse,
-  type UnifiedBalanceApiResponse,
-} from '@/lib/portfolio/unified-balance';
 import { assertWalletAccount, type ChainId } from '@/lib/wallets/wallet-adapter';
+
+import {
+  parseLocalDemoPortfolioResponse,
+  type LocalDemoBalanceApiResponse,
+} from './local-demo-portfolio-response';
 
 export const LOCAL_DEMO_WALLETS_PATH = '/api/v1/local-demo/wallets';
 export const LOCAL_DEMO_PORTFOLIO_PATH = '/api/v1/local-demo/portfolio';
@@ -18,6 +18,10 @@ const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f
 const CANONICAL_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
 const FORBIDDEN_TEXT = /[\p{Cc}\p{Cf}\p{Cs}\p{Zl}\p{Zp}]/u;
 const MAX_REGISTERED_WALLETS = 2;
+const LOCAL_DEMO_CONNECTOR_NETWORKS = Object.freeze({
+  EVM: 'eip155:11155111',
+  SOLANA: 'solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1',
+} as const);
 
 export type LocalDemoWalletNamespace = 'EVM' | 'SOLANA';
 export type LocalDemoApiErrorCode =
@@ -119,9 +123,7 @@ function parseProjection(value: unknown): LocalDemoWalletProjection {
     return fail();
   }
   if (record.namespace !== 'EVM' && record.namespace !== 'SOLANA') return fail();
-  if (!Object.hasOwn(PORTFOLIO_NETWORKS, chainId)) return fail();
-  const network = PORTFOLIO_NETWORKS[chainId as keyof typeof PORTFOLIO_NETWORKS];
-  if (network.namespace !== record.namespace) return fail();
+  if (chainId !== LOCAL_DEMO_CONNECTOR_NETWORKS[record.namespace]) return fail();
   const registeredDate = new Date(registeredAt);
   if (
     !CANONICAL_TIMESTAMP.test(registeredAt) ||
@@ -249,7 +251,7 @@ export class LocalDemoApiClient {
     if (response.status !== 204) return fail('UNAVAILABLE', retryAfterSeconds(response));
   }
 
-  async readPortfolio(signal?: AbortSignal): Promise<UnifiedBalanceApiResponse> {
+  async readPortfolio(signal?: AbortSignal): Promise<LocalDemoBalanceApiResponse> {
     const response = await this.#request(
       LOCAL_DEMO_PORTFOLIO_PATH,
       requestInit('GET', signal),
@@ -258,14 +260,7 @@ export class LocalDemoApiClient {
     if (response.status === 401) return fail('UNAUTHENTICATED');
     if (response.status !== 200) return fail('UNAVAILABLE', retryAfterSeconds(response));
     try {
-      const portfolio = parseUnifiedBalanceResponse(await this.#json(response));
-      if (
-        portfolio.use !== 'LOCAL_DEMO_ESTIMATE_ONLY' ||
-        portfolio.mayAuthorizeFinancialAction !== false
-      ) {
-        return fail();
-      }
-      return portfolio;
+      return parseLocalDemoPortfolioResponse(await this.#json(response));
     } catch {
       return fail();
     }

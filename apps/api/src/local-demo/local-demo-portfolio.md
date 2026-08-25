@@ -7,11 +7,11 @@ provide a production fallback.
 ## Data path
 
 1. Read the account-scoped, ownership-proven projections from `LocalDemoWalletService`.
-2. Retain each proven address and map the connector's Sepolia/devnet cluster to a synthetic
-   MAINNET-shaped fixture network (`eip155:1` or Solana mainnet). This is fixture metadata only; no
-   chain or provider is contacted.
-3. Invoke the real KAN-63 EVM indexer or KAN-64 Solana indexer with request-local fixture source
-   ports. Only the funded USDC position crosses the adapter boundary.
+2. Retain each proven address. Map EVM to the explicit keyless LOCAL identity `eip155:31337`; keep
+   Solana on its deterministic mainnet-shaped fixture identity.
+3. Invoke the real KAN-63 EVM indexer against the fixed loopback Hardhat chain and KAN-64 Solana
+   indexer against its request-local fixture source. Only the funded USDC position crosses either
+   adapter boundary.
 4. Pass each result through a real KAN-65 `BalanceSyncOrchestrator` backed by request-local jobs,
    metrics, and checkpoints.
 5. Project the current observations into the KAN-67 snapshot contract, use KAN-66 with two fixed,
@@ -26,18 +26,25 @@ power is $10,890. A single connected namespace receives only its proportional fi
 
 ## Trust and I/O boundaries
 
-- All fixture readers, retry scheduling, checkpoint storage, jobs, metrics, price evidence, clocks,
-  and adjustment quotes are request-local deterministic objects.
-- The pipeline has no RPC, HTTP, database, queue, timer, wallet-provider, or process-global port.
+- The EVM reader is an injected port restricted to `http://127.0.0.1:18545`; it verifies the LOCAL
+  chain ID, exact contract bytecode, pinned block identity, and `balanceOf` result. It cannot target
+  a public provider. Solana, retry scheduling, checkpoints, jobs, metrics, price evidence, clocks,
+  and adjustment quotes remain request-local deterministic objects.
+- Each EVM wallet is initialized once for an authenticated local-child instance. Later local-chain
+  mutations remain visible to synchronization; a new instance identity invalidates the cache and
+  reinitializes the deterministic balance even if its height equals or exceeds the prior child.
 - Account, correlation, wallet, cluster, address, timestamp, label, registry identity, valuation,
   sync freshness, and aggregate invariants fail closed to `LocalDemoPortfolioUnavailableError`.
 - Empty wallet catalogs fail with the same typed unavailable error; they never fabricate an owner.
 - The response carries `use: LOCAL_DEMO_ESTIMATE_ONLY` and
-  `mayAuthorizeFinancialAction: false`, matching the optional controls accepted by the KAN-69 web
-  parser.
+  `mayAuthorizeFinancialAction: false`. An isolated local-demo web adapter accepts exactly the
+  LOCAL EVM/mock-USDC tuple, validates the remaining accounting and freshness invariants through
+  the unchanged shared KAN-69 parser, and renders the LOCAL attribution without widening shared
+  production network or asset allowlists.
 
 ## Honest integration gate
 
-This pipeline proves deterministic local composition only. It is not evidence of live wallet,
-provider, RPC, price-feed, route, liquidity, or production persistence integration, and its output
-must never authorize a financial action.
+This pipeline proves deterministic local composition and real local EVM reads only. It is not
+evidence of a public wallet/provider, consensus validator, production RPC, price feed, route,
+liquidity, Solana chain, or production persistence integration, and its output must never authorize
+a financial action.

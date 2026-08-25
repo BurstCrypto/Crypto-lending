@@ -6,7 +6,7 @@ import { Pool } from 'pg';
 import { MigrationRunner } from '../../src/infrastructure/database/migration-runner.service';
 import { PostgresService } from '../../src/infrastructure/database/postgres.service';
 import {
-  createYieldOperationControlsTestSchemaMigrationV0012,
+  createLedgerFeeAdjustmentIntegrityTestSchemaMigrationV0013,
   DATABASE_TEST_SCHEMA_MIGRATION_LIST,
 } from '../../src/infrastructure/database/migrations';
 import { JobOutboxRepository } from '../../src/infrastructure/outbox/job-outbox.repository';
@@ -211,6 +211,7 @@ describeWithPostgres('KAN-186 yield operation PostgreSQL controls', () => {
       '0010',
       '0011',
       '0012',
+      '0013',
     ]);
   });
 
@@ -488,7 +489,7 @@ describeWithPostgres('KAN-186 yield operation PostgreSQL controls', () => {
     ).rejects.toMatchObject({ code: '55000' });
     await expect(runner.assertUpToDate()).resolves.toBeUndefined();
     await expect(
-      operationPool.query(createYieldOperationControlsTestSchemaMigrationV0012.verifySql!),
+      operationPool.query(createLedgerFeeAdjustmentIntegrityTestSchemaMigrationV0013.verifySql!),
     ).resolves.toMatchObject({ rows: [{ valid: true }] });
   });
 });

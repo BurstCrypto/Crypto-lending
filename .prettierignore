@@ -4,6 +4,8 @@ dist
 coverage
 apps/api/openapi.json
 apps/web/next-env.d.ts
+.local-validation/
+.worktrees/
 jira_phase_*.json
 jira_*.ps1
 unified_multi_wallet_tokenized_investment_mvp_epic.md

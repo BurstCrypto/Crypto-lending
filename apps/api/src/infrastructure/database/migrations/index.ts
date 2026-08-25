@@ -28,6 +28,10 @@ import {
   createYieldOperationControlsMigrationV0012,
   createYieldOperationControlsTestSchemaMigrationV0012,
 } from './0012-create-yield-operation-controls.migration';
+import {
+  createLedgerFeeAdjustmentIntegrityMigrationV0013,
+  createLedgerFeeAdjustmentIntegrityTestSchemaMigrationV0013,
+} from './0013-repair-ledger-fee-adjustment-integrity.migration';
 import type { DatabaseMigration } from './migration';
 
 /**
@@ -48,6 +52,7 @@ export const DATABASE_TEST_SCHEMA_MIGRATION_LIST: readonly DatabaseMigration[] =
   createAuthenticationSessionsTestSchemaMigrationV0010,
   createWalletOwnershipRegistrationTestSchemaMigrationV0011,
   createYieldOperationControlsTestSchemaMigrationV0012,
+  createLedgerFeeAdjustmentIntegrityTestSchemaMigrationV0013,
 ]);
 
 export const DATABASE_MIGRATION_LIST: readonly DatabaseMigration[] = Object.freeze([
@@ -63,6 +68,7 @@ export const DATABASE_MIGRATION_LIST: readonly DatabaseMigration[] = Object.free
   createAuthenticationSessionsMigrationV0010,
   createWalletOwnershipRegistrationMigrationV0011,
   createYieldOperationControlsMigrationV0012,
+  createLedgerFeeAdjustmentIntegrityMigrationV0013,
 ]);
 
 export type { DatabaseMigration } from './migration';
@@ -101,3 +107,8 @@ export {
   createYieldOperationControlsMigrationV0012,
   createYieldOperationControlsTestSchemaMigrationV0012,
 } from './0012-create-yield-operation-controls.migration';
+export {
+  createLedgerFeeAdjustmentIntegrityMigration,
+  createLedgerFeeAdjustmentIntegrityMigrationV0013,
+  createLedgerFeeAdjustmentIntegrityTestSchemaMigrationV0013,
+} from './0013-repair-ledger-fee-adjustment-integrity.migration';

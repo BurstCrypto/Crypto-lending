@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { UNIFIED_BALANCE_DEMO_PAYLOAD } from '../lib/portfolio/unified-balance.fixtures';
 import {
   LocalDemoApiClient,
   LocalDemoApiError,
@@ -8,6 +7,13 @@ import {
   LOCAL_DEMO_WALLETS_PATH,
   parseLocalDemoWallets,
 } from '../lib/local-demo/local-demo-client';
+import {
+  LOCAL_DEMO_EVM_NETWORK_ID,
+  LOCAL_DEMO_EVM_USDC_ASSET_IDENTITY,
+  parseLocalDemoPortfolioResponse,
+} from '../lib/local-demo/local-demo-portfolio-response';
+import { parseUnifiedBalanceResponse } from '../lib/portfolio/unified-balance';
+import { LOCAL_DEMO_CHAIN_PORTFOLIO_PAYLOAD } from './local-demo-portfolio.fixtures';
 
 const CSRF = 'A'.repeat(43);
 
@@ -29,12 +35,6 @@ const SOLANA_WALLET = Object.freeze({
   chainId: 'solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1',
   address: '7YttLkHDoNj9wyDur5EYBDauN5QJUJpz94QRtWQyFrA8',
   registeredAt: '2026-08-24T18:00:00.000Z',
-});
-
-const LOCAL_DEMO_PORTFOLIO = Object.freeze({
-  ...UNIFIED_BALANCE_DEMO_PAYLOAD,
-  use: 'LOCAL_DEMO_ESTIMATE_ONLY',
-  mayAuthorizeFinancialAction: false,
 });
 
 function json(body: unknown, status = 200): Response {
@@ -76,7 +76,7 @@ describe('local demo same-origin API client', () => {
       .mockResolvedValueOnce(json([EVM_WALLET, SOLANA_WALLET]))
       .mockResolvedValueOnce(json(EVM_WALLET, 201))
       .mockResolvedValueOnce(new Response(null, { status: 204 }))
-      .mockResolvedValueOnce(json(LOCAL_DEMO_PORTFOLIO));
+      .mockResolvedValueOnce(json(LOCAL_DEMO_CHAIN_PORTFOLIO_PAYLOAD));
     const client = new LocalDemoApiClient({
       cookieHeader: `__Host-cl_csrf=${CSRF}`,
       fetch: requestFetch,
@@ -85,9 +85,16 @@ describe('local demo same-origin API client', () => {
     await expect(client.listWallets()).resolves.toHaveLength(2);
     await expect(client.registerWallet('EVM')).resolves.toEqual(EVM_WALLET);
     await expect(client.disconnectWallet(EVM_WALLET.connectionId)).resolves.toBeUndefined();
-    await expect(client.readPortfolio()).resolves.toMatchObject({
+    const portfolio = await client.readPortfolio();
+    expect(portfolio).toMatchObject({
       portfolioValueUsdMinor: '1100000',
-      buyingPower: { amountUsdMinor: '750000' },
+      buyingPower: { amountUsdMinor: '1089000' },
+    });
+    expect(portfolio.wallets[0]?.chains[0]).toMatchObject({
+      networkId: LOCAL_DEMO_EVM_NETWORK_ID,
+    });
+    expect(portfolio.wallets[0]?.chains[0]?.assets[0]).toMatchObject({
+      assetIdentity: LOCAL_DEMO_EVM_USDC_ASSET_IDENTITY,
     });
 
     expect(requestFetch.mock.calls.map(([path]) => path)).toEqual([
@@ -203,15 +210,38 @@ describe('local demo same-origin API client', () => {
     expect(() => parseLocalDemoWallets([{ ...SOLANA_WALLET, chainId: 'eip155:11155111' }])).toThrow(
       LocalDemoApiError,
     );
+    expect(() => parseLocalDemoWallets([{ ...EVM_WALLET, chainId: 'eip155:31338' }])).toThrow(
+      LocalDemoApiError,
+    );
+    expect(() =>
+      parseLocalDemoWallets([{ ...EVM_WALLET, chainId: LOCAL_DEMO_EVM_NETWORK_ID }]),
+    ).toThrow(LocalDemoApiError);
+    expect(() => parseLocalDemoWallets([{ ...EVM_WALLET, chainId: 'eip155:1' }])).toThrow(
+      LocalDemoApiError,
+    );
+    expect(() =>
+      parseLocalDemoWallets([
+        { ...SOLANA_WALLET, chainId: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp' },
+      ]),
+    ).toThrow(LocalDemoApiError);
   });
 
-  it('accepts only paired, non-authorizing local-demo portfolio controls', async () => {
-    const controlled = structuredClone(LOCAL_DEMO_PORTFOLIO);
+  it('accepts the exact LOCAL chain and asset only at the guarded local-demo boundary', async () => {
+    const controlled = structuredClone(LOCAL_DEMO_CHAIN_PORTFOLIO_PAYLOAD);
     const client = new LocalDemoApiClient({ fetch: vi.fn(async () => json(controlled)) });
-    await expect(client.readPortfolio()).resolves.toMatchObject({
+    const portfolio = await client.readPortfolio();
+    expect(portfolio).toMatchObject({
       use: 'LOCAL_DEMO_ESTIMATE_ONLY',
       mayAuthorizeFinancialAction: false,
     });
+    expect(portfolio.wallets[0]?.chains[0]).toMatchObject({
+      networkId: LOCAL_DEMO_EVM_NETWORK_ID,
+    });
+    expect(portfolio.wallets[0]?.chains[0]?.assets[0]).toMatchObject({
+      assetIdentity: LOCAL_DEMO_EVM_USDC_ASSET_IDENTITY,
+    });
+    expect(() => parseUnifiedBalanceResponse(controlled)).toThrow();
+    expect(() => parseLocalDemoPortfolioResponse(controlled)).not.toThrow();
 
     const unsafeClient = new LocalDemoApiClient({
       fetch: vi.fn(async () => json({ ...controlled, mayAuthorizeFinancialAction: true })),
@@ -220,11 +250,57 @@ describe('local demo same-origin API client', () => {
       code: 'INVALID_RESPONSE',
     });
 
-    const unmarkedClient = new LocalDemoApiClient({
-      fetch: vi.fn(async () => json(UNIFIED_BALANCE_DEMO_PAYLOAD)),
-    });
+    const unmarked = structuredClone(controlled);
+    Reflect.deleteProperty(unmarked, 'use');
+    Reflect.deleteProperty(unmarked, 'mayAuthorizeFinancialAction');
+    const unmarkedClient = new LocalDemoApiClient({ fetch: vi.fn(async () => json(unmarked)) });
     await expect(unmarkedClient.readPortfolio()).rejects.toMatchObject({
       code: 'INVALID_RESPONSE',
     });
+  });
+
+  it.each([
+    ['network drift', { networkId: 'eip155:31338' }],
+    ['asset drift', { assetIdentity: '0x0000000000000000000000000000000000000102' }],
+    [
+      'production identity substituted on LOCAL',
+      { assetIdentity: '0x1c7d4b196cb0c7b01d743fbc6116a902379c7238' },
+    ],
+    [
+      'production EVM source substituted',
+      {
+        networkId: 'eip155:11155111',
+        assetIdentity: '0x1c7d4b196cb0c7b01d743fbc6116a902379c7238',
+      },
+    ],
+  ] as const)('fails closed on LOCAL portfolio %s', async (_case, drift) => {
+    const payload = structuredClone(LOCAL_DEMO_CHAIN_PORTFOLIO_PAYLOAD);
+    const localWallet = payload.wallets[0]!;
+    const localChain = localWallet.chains[0]!;
+    const localAsset = localChain.assets[0]!;
+    const driftedPayload = {
+      ...payload,
+      wallets: [
+        {
+          ...localWallet,
+          chains: [
+            {
+              ...localChain,
+              ...('networkId' in drift ? { networkId: drift.networkId } : {}),
+              assets: [
+                {
+                  ...localAsset,
+                  ...('assetIdentity' in drift ? { assetIdentity: drift.assetIdentity } : {}),
+                },
+              ],
+            },
+          ],
+        },
+        ...payload.wallets.slice(1),
+      ],
+    };
+    const client = new LocalDemoApiClient({ fetch: vi.fn(async () => json(driftedPayload)) });
+
+    await expect(client.readPortfolio()).rejects.toMatchObject({ code: 'INVALID_RESPONSE' });
   });
 });

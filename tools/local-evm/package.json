@@ -1,0 +1,5 @@
+{
+  "name": "@crypto-lending/local-evm-runtime",
+  "private": true,
+  "type": "module"
+}
