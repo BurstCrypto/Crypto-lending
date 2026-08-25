@@ -23,6 +23,7 @@ const webRoot = resolve(root, 'apps', 'web');
 const require = createRequire(import.meta.url);
 const nestCli = require.resolve('@nestjs/cli/bin/nest.js');
 const nextCli = require.resolve('next/dist/bin/next');
+const tsNodeCli = require.resolve('ts-node/dist/bin.js');
 const tsxCli = require.resolve('tsx/cli');
 // Next can otherwise download an SWC fallback on first use. Prove the locked,
 // installed native compiler is usable before touching Docker.
@@ -89,7 +90,8 @@ const children = [
     cwd: webRoot,
     env: environments.web,
   }),
-  spawnOwned(process.execPath, [tsxCli, 'src/infrastructure/outbox/outbox-worker.cli.ts'], {
+  // ts-node preserves Nest's decorator metadata; tsx intentionally does not.
+  spawnOwned(process.execPath, [tsNodeCli, 'src/infrastructure/outbox/outbox-worker.cli.ts'], {
     cwd: apiRoot,
     env: environments.worker,
   }),

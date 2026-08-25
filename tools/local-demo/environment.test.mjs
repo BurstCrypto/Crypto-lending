@@ -241,6 +241,11 @@ describe('local demo process configuration', () => {
     );
     assert.doesNotMatch(launcher, /(?:runChecked|spawnOwned)\('npm'/u);
     assert.match(launcher, /require\.resolve\('next\/dist\/bin\/next'\)/u);
+    assert.match(launcher, /require\.resolve\('ts-node\/dist\/bin\.js'\)/u);
+    assert.match(
+      launcher,
+      /\[tsNodeCli, 'src\/infrastructure\/outbox\/outbox-worker\.cli\.ts'\]/u,
+    );
     assert.match(
       launcher,
       /require\('next\/dist\/build\/swc'\)\.transformSync\('const localDemoCompilerProbe = true;', \{\}\)/u,
