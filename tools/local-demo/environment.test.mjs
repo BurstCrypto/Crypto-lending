@@ -48,9 +48,13 @@ describe('local demo process configuration', () => {
     assert.deepEqual(safe, { PATH: 'bin', SystemRoot: 'windows' });
   });
 
-  it('builds separated least-privilege environments with distinct ephemeral key material', () => {
+  it('builds separated least-privilege environments with correctly scoped key lifetimes', () => {
     deterministicRandom.value = 0;
     const environments = createLocalDemoEnvironments({
+      randomBytes: deterministicRandom,
+      sourceEnvironment: { PATH: 'bin', AWS_PROFILE: 'forbidden' },
+    });
+    const restartedEnvironments = createLocalDemoEnvironments({
       randomBytes: deterministicRandom,
       sourceEnvironment: { PATH: 'bin', AWS_PROFILE: 'forbidden' },
     });
@@ -110,6 +114,21 @@ describe('local demo process configuration', () => {
     ];
     assert.equal(new Set(apiKeys).size, apiKeys.length);
     assert.ok(apiKeys.every((value) => /^[A-Za-z0-9_-]{43}$/u.test(value)));
+    for (const name of [
+      'AUTH_IDENTITY_HMAC_KEY',
+      'WALLET_IDENTITY_HMAC_KEY',
+      'WALLET_METADATA_SEAL_KEY',
+    ]) {
+      assert.equal(environments.api[name], restartedEnvironments.api[name]);
+    }
+    for (const name of [
+      'AUTH_PREAUTH_SEAL_KEY',
+      'AUTH_SESSION_HMAC_KEY',
+      'AUTH_CSRF_HMAC_KEY',
+      'WALLET_CHALLENGE_HMAC_KEY',
+    ]) {
+      assert.notEqual(environments.api[name], restartedEnvironments.api[name]);
+    }
   });
 
   it('accepts only local Docker transports and a fixed demo-owned compose project', () => {
@@ -244,14 +263,8 @@ describe('local demo process configuration', () => {
     assert.doesNotMatch(launcher, /(?:runChecked|spawnOwned)\('npm'/u);
     assert.match(launcher, /require\.resolve\('next\/dist\/bin\/next'\)/u);
     assert.match(launcher, /require\.resolve\('ts-node\/dist\/bin\.js'\)/u);
-    assert.match(
-      launcher,
-      /\[tsNodeCli, 'src\/infrastructure\/outbox\/outbox-worker\.cli\.ts'\]/u,
-    );
-    assert.match(
-      launcher,
-      /\[nextCli, 'dev', '--webpack', '--hostname', '127\.0\.0\.1'\]/u,
-    );
+    assert.match(launcher, /\[tsNodeCli, 'src\/infrastructure\/outbox\/outbox-worker\.cli\.ts'\]/u);
+    assert.match(launcher, /\[nextCli, 'dev', '--webpack', '--hostname', '127\.0\.0\.1'\]/u);
     assert.match(
       launcher,
       /require\('next\/dist\/build\/swc'\)\.transformSync\('const localDemoCompilerProbe = true;', \{\}\)/u,

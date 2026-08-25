@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 export const LOCAL_DEMO_COMPOSE_PROJECT = 'crypto-lending-local-demo';
@@ -43,6 +43,16 @@ const SAFE_INHERITED_NAMES = new Set([
 
 function key(random) {
   return random(32).toString('base64url');
+}
+
+function persistedSyntheticKey(purpose) {
+  // These are domain-separated fixture values, not production secrets. They
+  // must remain stable while the demo-owned database volume persists so an
+  // identity or wallet registered before an application restart stays usable.
+  return createHash('sha256')
+    .update('crypto-lending:synthetic-local-demo:persisted-key:v1\0', 'utf8')
+    .update(purpose, 'utf8')
+    .digest('base64url');
 }
 
 export function safeLocalProcessEnvironment(source = process.env) {
@@ -114,7 +124,7 @@ export function createLocalDemoEnvironments(options = {}) {
     AUTH_PREAUTH_SEAL_KEY_ID: 'demo_seal_v1',
     AUTH_PREAUTH_SEAL_KEY: key(random),
     AUTH_IDENTITY_HMAC_KEY_ID: 'demo_identity_v1',
-    AUTH_IDENTITY_HMAC_KEY: key(random),
+    AUTH_IDENTITY_HMAC_KEY: persistedSyntheticKey('authentication-identity-hmac'),
     AUTH_SESSION_HMAC_KEY_ID: 'demo_session_v1',
     AUTH_SESSION_HMAC_KEY: key(random),
     AUTH_CSRF_HMAC_KEY_ID: 'demo_csrf_v1',
@@ -123,11 +133,11 @@ export function createLocalDemoEnvironments(options = {}) {
     WALLET_REGISTRATION_REGISTRY_ENVIRONMENT: 'TESTNET',
     WALLET_REGISTRATION_CHALLENGE_TTL_SECONDS: '300',
     WALLET_IDENTITY_HMAC_KEY_VERSION: '1',
-    WALLET_IDENTITY_HMAC_KEY: key(random),
+    WALLET_IDENTITY_HMAC_KEY: persistedSyntheticKey('wallet-identity-hmac'),
     WALLET_CHALLENGE_HMAC_KEY_VERSION: '1',
     WALLET_CHALLENGE_HMAC_KEY: key(random),
     WALLET_METADATA_SEAL_KEY_VERSION: '1',
-    WALLET_METADATA_SEAL_KEY: key(random),
+    WALLET_METADATA_SEAL_KEY: persistedSyntheticKey('wallet-metadata-seal'),
     REDIS_HOST: '127.0.0.1',
     REDIS_PORT: '6379',
     REDIS_TLS: 'false',

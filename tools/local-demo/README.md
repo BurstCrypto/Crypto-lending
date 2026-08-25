@@ -19,6 +19,11 @@ evidence. Every screen displays a synthetic-data banner while the mode is on.
 - The fixture identity provider listens only on `127.0.0.1:3400`, uses an
   ephemeral ES256 key, stores one-use authorization-code digests in memory, and
   accepts no bearer or client credential.
+- Authentication identity lookup, wallet identity lookup, and sealed wallet
+  metadata use distinct deterministic fixture keys so registrations remain
+  readable across application restarts while the demo-owned database volume
+  exists. Transaction, session, CSRF, wallet-challenge, and identity-provider
+  signing keys remain ephemeral; restarting requires a fresh browser login.
 - Child processes receive allowlisted operating-system variables instead of the
   caller's cloud, proxy, database, or vendor environment.
 - Preflight refuses ignored root, API, or web environment files that could be
