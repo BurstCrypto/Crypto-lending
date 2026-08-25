@@ -75,14 +75,17 @@ describe('local demo process configuration', () => {
     const workerDatabase = new URL(environments.worker.DATABASE_RUNTIME_URL);
     const migrationDatabase = new URL(environments.migration.MIGRATION_DATABASE_URL);
     assert.equal(apiDatabase.hostname, '127.0.0.1');
+    assert.equal(apiDatabase.port, '55433');
     assert.equal(apiDatabase.username, 'crypto_api_login_a');
     assert.equal(environments.api.AWS_PROFILE, undefined);
     assert.equal(environments.web.DATABASE_RUNTIME_URL, undefined);
     assert.equal(workerDatabase.username, 'crypto_worker_login_a');
+    assert.equal(workerDatabase.port, '55433');
     assert.equal(environments.worker.REDIS_PASSWORD, undefined);
     assert.equal(environments.worker.AUTH_SESSION_HMAC_KEY, undefined);
     assert.equal(environments.worker.LOCAL_DEMO_MODE, 'enabled');
     assert.equal(migrationDatabase.hostname, '127.0.0.1');
+    assert.equal(migrationDatabase.port, '55433');
     assert.equal(migrationDatabase.username, 'crypto_migration');
     assert.equal(environments.migration.DATABASE_RUNTIME_URL, undefined);
     assert.equal(environments.migration.AWS_ACCESS_KEY_ID, undefined);

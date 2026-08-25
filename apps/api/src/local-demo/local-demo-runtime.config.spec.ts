@@ -15,7 +15,7 @@ function enabledEnvironment(): NodeJS.ProcessEnv {
     WALLET_REGISTRATION_REGISTRY_ENVIRONMENT: 'TESTNET',
     APPLICATION_WORKLOAD: 'api',
     DATABASE_RUNTIME_URL:
-      'postgresql://crypto_api_login_a:local_api_database_a@127.0.0.1:5432/crypto_lending',
+      'postgresql://crypto_api_login_a:local_api_database_a@127.0.0.1:55433/crypto_lending',
     DATABASE_RUNTIME_SSL_MODE: 'disable',
     REDIS_HOST: '127.0.0.1',
     REDIS_PORT: '6379',

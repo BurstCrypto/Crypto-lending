@@ -54,7 +54,7 @@ export function safeLocalProcessEnvironment(source = process.env) {
 }
 
 function loopbackDatabaseUrl(databaseCredentials) {
-  const url = new URL('postgresql://127.0.0.1:5432/crypto_lending');
+  const url = new URL('postgresql://127.0.0.1:55433/crypto_lending');
   url.username = databaseCredentials.username;
   url.password = databaseCredentials.password;
   return url.toString();
