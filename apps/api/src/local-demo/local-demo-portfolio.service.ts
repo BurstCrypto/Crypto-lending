@@ -16,6 +16,7 @@ import {
 import type { BalanceSyncObservation } from '../blockchain-sync/domain/balance-sync';
 import type { IndexedPortfolioBalanceObservation } from '../portfolio/application/ports/portfolio-balance-reader.port';
 import { parseIndexedPortfolioBalanceSnapshot } from '../portfolio/domain/portfolio-balance-snapshot';
+import type { JobCorrelationContext } from '../infrastructure/outbox/job-envelope';
 import {
   buildUnifiedPortfolio,
   type PortfolioAssetReference,
@@ -123,7 +124,10 @@ export class LocalDemoPortfolioUnavailableError extends Error {
 export class LocalDemoPortfolioService {
   constructor(private readonly walletService: LocalDemoWalletService) {}
 
-  async read(accountId: AccountId, correlationId: string): Promise<LocalDemoPortfolioResponse> {
+  async read(
+    accountId: AccountId,
+    correlation: JobCorrelationContext,
+  ): Promise<LocalDemoPortfolioResponse> {
     try {
       const wallets = this.walletService.list(accountId);
       if (wallets.length === 0) throw new LocalDemoPortfolioUnavailableError();
@@ -132,7 +136,7 @@ export class LocalDemoPortfolioService {
       const chainWallets = wallets.map(toMainnetChainWallet);
       const chainObservations = await new LocalDemoChainPipeline().synchronize(
         accountId,
-        correlationId,
+        correlation,
         chainWallets,
       );
       const balanceSnapshot = projectBalanceSnapshot(accountId, chainObservations);

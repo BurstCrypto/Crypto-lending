@@ -10,6 +10,7 @@ import { HTTP_CODE_METADATA, METHOD_METADATA, PATH_METADATA } from '@nestjs/comm
 import type { CurrentPrincipal } from '../accounts/auth/current-principal';
 import { parseAccountId, type AccountId } from '../accounts/domain/account-profile';
 import { loggingContext } from '../infrastructure/logging';
+import type { JobCorrelationContext } from '../infrastructure/outbox/job-envelope';
 import type { LocalDemoRuntimeConfig } from './local-demo-runtime.config';
 import type {
   LocalDemoWalletConnection,
@@ -21,6 +22,11 @@ const ACCOUNT_A = parseAccountId('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
 const ACCOUNT_B = parseAccountId('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb');
 const CORRELATION_A = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 const CORRELATION_B = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+const AUTHENTICATED_REQUEST_CORRELATION_B: JobCorrelationContext = Object.freeze({
+  correlationId: CORRELATION_B,
+  requestId: CORRELATION_B,
+  initiatorActorId: ACCOUNT_B,
+});
 const CONNECTION_ID = '11111111-1111-4111-8111-111111111111';
 const WALLET_ID = '22222222-2222-4222-8222-222222222222';
 const SECRET_CANARY = 'private-key-signature-challenge-canary';
@@ -52,7 +58,7 @@ const PORTFOLIO = Object.freeze({
 type WalletBoundary = Pick<LocalDemoWalletService, 'connect' | 'disconnect' | 'list' | 'reset'>;
 
 interface PortfolioBoundary {
-  read(accountId: AccountId, correlationId: string): Promise<unknown>;
+  read(accountId: AccountId, correlation: JobCorrelationContext): Promise<unknown>;
 }
 
 interface ControllerFixture {
@@ -290,12 +296,15 @@ describe('LocalDemoController', () => {
     const fixture = controllerFixture();
     const response = responseFixture();
 
-    const result = await loggingContext.run({ correlationId: CORRELATION_B }, () =>
+    const result = await loggingContext.run(AUTHENTICATED_REQUEST_CORRELATION_B, () =>
       fixture.controller.readPortfolio(principal(ACCOUNT_B), response.response),
     );
 
     expect(result).toBe(PORTFOLIO);
-    expect(fixture.portfolio.read).toHaveBeenCalledWith(ACCOUNT_B, CORRELATION_B);
+    expect(fixture.portfolio.read).toHaveBeenCalledWith(
+      ACCOUNT_B,
+      AUTHENTICATED_REQUEST_CORRELATION_B,
+    );
     expect(fixture.portfolio.read).not.toHaveBeenCalledWith(ACCOUNT_A, expect.anything());
   });
 

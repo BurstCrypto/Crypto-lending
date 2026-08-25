@@ -162,7 +162,8 @@ function correlationContextsEqual(
   );
 }
 
-function activeJobCorrelationContext(): JobCorrelationContext | undefined {
+/** Projects the active logging context onto the exact metadata allowed in a job envelope. */
+export function currentJobCorrelationContext(): JobCorrelationContext | undefined {
   const active = loggingContext.current();
   if (!active) return undefined;
   const projected = Object.create(null) as Record<string, string>;
@@ -245,7 +246,7 @@ export function createJobEnvelope<Payload>(
   if (!isCanonicalIsoTimestamp(occurredAt)) {
     throw new Error('Job occurredAt must be a canonical ISO-8601 UTC timestamp');
   }
-  const inheritedCorrelation = activeJobCorrelationContext();
+  const inheritedCorrelation = currentJobCorrelationContext();
   let correlation: JobCorrelationContext;
   if (inheritedCorrelation) {
     correlation = parseCorrelationContext(inheritedCorrelation);

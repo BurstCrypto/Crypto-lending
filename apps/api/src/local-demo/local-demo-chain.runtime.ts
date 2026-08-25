@@ -53,6 +53,7 @@ import {
   createDeterministicBalanceSyncJobEnvelope,
   type BalanceSyncObservation,
 } from '../blockchain-sync/domain/balance-sync';
+import type { JobCorrelationContext } from '../infrastructure/outbox/job-envelope';
 
 export const LOCAL_DEMO_PORTFOLIO_AS_OF = '2026-08-24T18:30:00.000Z';
 const LOCAL_DEMO_RETRIEVED_AT = '2026-08-24T18:29:55.000Z';
@@ -94,11 +95,15 @@ export class LocalDemoChainPipelineError extends Error {
 export class LocalDemoChainPipeline {
   async synchronize(
     accountId: string,
-    correlationId: string,
+    correlation: JobCorrelationContext,
     inputWallets: readonly LocalDemoChainWallet[],
   ): Promise<readonly BalanceSyncObservation[]> {
     try {
-      if (!UUID_V4.test(accountId) || !UUID_V4.test(correlationId) || inputWallets.length === 0) {
+      if (
+        !UUID_V4.test(accountId) ||
+        !UUID_V4.test(correlation.correlationId) ||
+        inputWallets.length === 0
+      ) {
         throw new TypeError('invalid local demo synchronization scope');
       }
       const fixtures = buildFixtureWallets(accountId, inputWallets);
@@ -128,7 +133,7 @@ export class LocalDemoChainPipeline {
           Object.freeze({
             id: `local-demo-sync:${digest(accountId, fixture.walletId, fixture.chainId)}`,
             occurredAt: LOCAL_DEMO_RETRIEVED_AT,
-            correlation: Object.freeze({ correlationId }),
+            correlation,
           }),
         );
         const outcome: BalanceSyncProcessingResult = await orchestrator.process(job);

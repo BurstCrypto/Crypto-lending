@@ -272,6 +272,27 @@ describe('local demo authentication boundary (e2e)', () => {
     expect(wallets.disconnect).toHaveBeenCalledWith(ACCOUNT_ID, connection.connectionId);
   });
 
+  it('builds the portfolio with the complete authenticated request correlation', async () => {
+    const portfolio = await request(app.getHttpServer())
+      .get('/api/v1/local-demo/portfolio')
+      .set('Cookie', cookie)
+      .expect(200);
+
+    expect(portfolio.headers).toMatchObject({
+      'cache-control': 'private, no-store, max-age=0',
+      vary: 'Cookie, Origin',
+      'x-crypto-lending-demo-mode': 'synthetic-local',
+    });
+    expect(portfolio.body).toMatchObject({
+      portfolioValueUsdMinor: '700000',
+      buyingPower: { status: 'AVAILABLE', amountUsdMinor: '693000' },
+      use: 'LOCAL_DEMO_ESTIMATE_ONLY',
+      mayAuthorizeFinancialAction: false,
+    });
+    expect(portfolio.body.wallets).toHaveLength(1);
+    expect(wallets.list).toHaveBeenCalledWith(ACCOUNT_ID);
+  });
+
   it('rejects aliases and wrong ports before wallet mutation', async () => {
     for (const origin of ['http://localhost:3000', 'http://127.0.0.1:3001']) {
       await request(app.getHttpServer())

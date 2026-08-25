@@ -32,6 +32,7 @@ import { AccountAuthGuard } from '../accounts/auth/account-auth.guard';
 import type { CurrentPrincipal as AuthenticatedPrincipal } from '../accounts/auth/current-principal';
 import { CurrentPrincipal } from '../accounts/auth/current-principal.decorator';
 import { loggingContext } from '../infrastructure/logging';
+import { currentJobCorrelationContext } from '../infrastructure/outbox/job-envelope';
 import {
   LOCAL_DEMO_CONNECT_BODY_SCHEMA,
   LOCAL_DEMO_DISCONNECT_BODY_SCHEMA,
@@ -184,10 +185,9 @@ export class LocalDemoController {
   ): Promise<unknown> {
     this.assertEnabled();
     try {
-      return await this.portfolio.read(
-        principal.accountId,
-        loggingContext.requireCurrent().correlationId,
-      );
+      const correlation = currentJobCorrelationContext();
+      if (correlation === undefined) throw new Error('Missing local demo correlation context');
+      return await this.portfolio.read(principal.accountId, correlation);
     } catch {
       return unavailable(response);
     }

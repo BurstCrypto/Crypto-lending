@@ -3,6 +3,8 @@ import { BuyingPowerCalculator } from '../buying-power/application/buying-power-
 import { EvmStablecoinBalanceIndexer } from '../blockchain/application/evm-stablecoin-balance-indexer';
 import { SolanaDepositIndexerService } from '../blockchain/application/solana-deposit-indexer.service';
 import { BalanceSyncOrchestrator } from '../blockchain-sync/application/balance-sync-orchestrator';
+import { loggingContext } from '../infrastructure/logging';
+import type { JobCorrelationContext } from '../infrastructure/outbox/job-envelope';
 import {
   LocalDemoPortfolioService,
   LocalDemoPortfolioUnavailableError,
@@ -16,6 +18,17 @@ const ACCOUNT_A = parseAccountId('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
 const ACCOUNT_B = parseAccountId('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb');
 const CORRELATION_A = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 const CORRELATION_B = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+const JOB_CORRELATION_A: JobCorrelationContext = Object.freeze({
+  correlationId: CORRELATION_A,
+});
+const JOB_CORRELATION_B: JobCorrelationContext = Object.freeze({
+  correlationId: CORRELATION_B,
+});
+const AUTHENTICATED_REQUEST_CORRELATION_A: JobCorrelationContext = Object.freeze({
+  correlationId: CORRELATION_A,
+  requestId: CORRELATION_A,
+  initiatorActorId: ACCOUNT_A,
+});
 
 const WALLET_A_EVM = '11111111-1111-4111-8111-111111111111';
 const WALLET_A_SOLANA = '22222222-2222-4222-8222-222222222222';
@@ -68,9 +81,11 @@ describe('LocalDemoPortfolioService', () => {
     });
 
     try {
-      const result = await serviceWith(new Map([[ACCOUNT_A, ACCOUNT_A_WALLETS]])).read(
-        ACCOUNT_A,
-        CORRELATION_A,
+      const result = await loggingContext.run(AUTHENTICATED_REQUEST_CORRELATION_A, () =>
+        serviceWith(new Map([[ACCOUNT_A, ACCOUNT_A_WALLETS]])).read(
+          ACCOUNT_A,
+          AUTHENTICATED_REQUEST_CORRELATION_A,
+        ),
       );
 
       expect(evm).toHaveBeenCalledTimes(1);
@@ -132,8 +147,8 @@ describe('LocalDemoPortfolioService', () => {
 
   it('is byte-for-byte repeatable for the same account-owned wallet projection', async () => {
     const service = serviceWith(new Map([[ACCOUNT_A, ACCOUNT_A_WALLETS]]));
-    const first = await service.read(ACCOUNT_A, CORRELATION_A);
-    const second = await service.read(ACCOUNT_A, CORRELATION_A);
+    const first = await service.read(ACCOUNT_A, JOB_CORRELATION_A);
+    const second = await service.read(ACCOUNT_A, JOB_CORRELATION_A);
     expect(second).toEqual(first);
   });
 
@@ -144,8 +159,8 @@ describe('LocalDemoPortfolioService', () => {
         [ACCOUNT_B, ACCOUNT_B_WALLETS],
       ]),
     );
-    const accountA = await service.read(ACCOUNT_A, CORRELATION_A);
-    const accountB = await service.read(ACCOUNT_B, CORRELATION_B);
+    const accountA = await service.read(ACCOUNT_A, JOB_CORRELATION_A);
+    const accountB = await service.read(ACCOUNT_B, JOB_CORRELATION_B);
 
     expect(accountA.wallets.map(({ walletId }) => walletId)).toEqual([
       WALLET_A_EVM,
@@ -167,7 +182,7 @@ describe('LocalDemoPortfolioService', () => {
     async (_namespace, wallets, portfolioMinor, buyingPowerMinor) => {
       const result = await serviceWith(new Map([[ACCOUNT_A, wallets]])).read(
         ACCOUNT_A,
-        CORRELATION_A,
+        JOB_CORRELATION_A,
       );
       expect(result).toMatchObject({
         portfolioValueUsdMinor: portfolioMinor,
@@ -179,7 +194,7 @@ describe('LocalDemoPortfolioService', () => {
 
   it('returns a typed unavailable error when no proven wallet is connected', async () => {
     const service = serviceWith(new Map());
-    await expect(service.read(ACCOUNT_A, CORRELATION_A)).rejects.toMatchObject({
+    await expect(service.read(ACCOUNT_A, JOB_CORRELATION_A)).rejects.toMatchObject({
       name: 'LocalDemoPortfolioUnavailableError',
       code: 'LOCAL_DEMO_PORTFOLIO_UNAVAILABLE',
     } satisfies Partial<LocalDemoPortfolioUnavailableError>);
@@ -190,7 +205,7 @@ describe('LocalDemoPortfolioService', () => {
       Object.freeze({ ...ACCOUNT_A_WALLETS[0]!, label: ' invalid label ' }),
     ]);
     const service = serviceWith(new Map([[ACCOUNT_A, malformed]]));
-    await expect(service.read(ACCOUNT_A, CORRELATION_A)).rejects.toBeInstanceOf(
+    await expect(service.read(ACCOUNT_A, JOB_CORRELATION_A)).rejects.toBeInstanceOf(
       LocalDemoPortfolioUnavailableError,
     );
   });
