@@ -1032,7 +1032,31 @@ ${auditedTypePrivilegeAnchor}`;
 
   let verifier = replaceExactlyOnce(priorVerifier, walletAllowance, yieldAllowance);
   verifier = replaceExactlyOnce(verifier, loginTypePrivilegeAnchor, loginTypePrivilegeReplacement);
-  return replaceExactlyOnce(verifier, auditedTypePrivilegeAnchor, auditedTypePrivilegeReplacement);
+  verifier = replaceExactlyOnce(verifier, auditedTypePrivilegeAnchor, auditedTypePrivilegeReplacement);
+
+  // The three yield-to-ledger foreign keys are deliberately included in the
+  // cumulative ledger catalog. Each FK adds one touching constraint and four
+  // PostgreSQL-owned enforcement triggers across the child and parent tables.
+  const ledgerCatalogReplacements = [
+    ['SELECT object_count = 395 FROM constraint_catalog', 'SELECT object_count = 398 FROM constraint_catalog'],
+    [
+      'f1dc6b99d451f1c03312b892837a733a5776f7b0ee9b9a1bcd0db0ce787a417e',
+      '9c7de8437cd535aaedab9697db5b684b01fc0a8a65ecf000e1c76064608be2b5',
+    ],
+    [
+      'SELECT object_count = 348 FROM internal_fk_trigger_catalog',
+      'SELECT object_count = 360 FROM internal_fk_trigger_catalog',
+    ],
+    [
+      'a02223eacacc746c393c044217ba644764e0041446644270fcd9f02c12de8146',
+      'f5f2a36b42302d1e4b2997b751a90083878ce19478d92fbeebe5cf78d71a3c19',
+    ],
+  ] as const;
+  for (const [oldValue, newValue] of ledgerCatalogReplacements) {
+    verifier = replaceExactlyOnce(verifier, oldValue, newValue);
+  }
+
+  return verifier;
 }
 
 function createYieldOperationVerifierSql(

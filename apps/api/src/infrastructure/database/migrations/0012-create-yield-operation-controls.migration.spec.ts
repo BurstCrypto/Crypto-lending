@@ -128,6 +128,14 @@ describe('createYieldOperationControlsMigration', () => {
     expect(canonical).not.toContain('yield_operation_commands_outbox_fk');
     expect(canonical).toContain('FROM yield_functions AS function_state');
     expect(canonical).toContain('WHERE NOT function_state.prosecdef');
+    expect(canonical).toContain('SELECT object_count = 398 FROM constraint_catalog');
+    expect(canonical).toContain(
+      'SELECT object_count = 360 FROM internal_fk_trigger_catalog',
+    );
+    expect(canonical).not.toContain('SELECT object_count = 395 FROM constraint_catalog');
+    expect(canonical).not.toContain(
+      'SELECT object_count = 348 FROM internal_fk_trigger_catalog',
+    );
     expect(isolated).toContain('prior.valid AND yield_operation.valid');
     expect(isolated).not.toContain('yield_operation_row_table');
   });
