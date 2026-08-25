@@ -445,6 +445,8 @@ test('accepts exact reviewed dummy fixtures, dotenv examples, and digest context
         "const credentialsFilePath = '/run/credentials/task-role';",
         "const reviewed = 'https://user:token@team.atlassian.net';",
         "const reviewedQuickNodeNegativeFixture = 'https://user@www.quicknode.com/docs';",
+        "const SECRET_CANARY = 'private-key-signature-challenge-canary';",
+        "const localDemoRemoteNegativeFixture = 'postgresql://demo:demo@database.example/crypto_lending';",
         "const workerLocal = 'postgresql://crypto_worker_login_a:local@127.0.0.1:5432/crypto_lending';",
         "const workerProduction = 'postgresql://crypto_worker_login_a:secret@db.internal.example:5432/crypto_lending';",
         "const missingApiCredentialUrl = 'postgresql://crypto_api_login_a:@db.internal.example:5432/crypto_lending';",
@@ -476,8 +478,15 @@ test('keeps reviewed dummy URL credentials exact to protocol, user, password, an
   const repository = createRepository();
   const wrongUser = ['https://', 'operator', '@www.quicknode.com/docs'].join('');
   const wrongHost = ['https://user@', 'api.quicknode.com/docs'].join('');
+  const wrongDemoPassword = ['postgresql://demo:', 'different', '@database.example/db'].join('');
+  const wrongDemoHost = ['postgresql', '://demo:demo@', 'database.example.test', '/db'].join('');
+  const wrongCanary = ['private-key-signature-challenge-canary', '-different'].join('');
   try {
-    write(repository, 'near-miss-url-fixtures.txt', `${wrongUser}\n${wrongHost}\n`);
+    write(
+      repository,
+      'near-miss-url-fixtures.txt',
+      `${wrongUser}\n${wrongHost}\n${wrongDemoPassword}\n${wrongDemoHost}\nSECRET_CANARY=${wrongCanary}\n`,
+    );
     runGit(repository, 'add', 'near-miss-url-fixtures.txt');
 
     const result = runScanner(repository);
@@ -488,9 +497,10 @@ test('keeps reviewed dummy URL credentials exact to protocol, user, password, an
         .trim()
         .split('\n')
         .filter((line) => line.startsWith('rule=url.embedded-credentials\t')).length,
-      2,
+      4,
     );
-    assertRedacted(result, wrongUser, wrongHost);
+    assertFinding(result, 'assignment.high-entropy-secret', 'index');
+    assertRedacted(result, wrongUser, wrongHost, wrongDemoPassword, wrongDemoHost, wrongCanary);
   } finally {
     rmSync(repository, { force: true, recursive: true });
   }
