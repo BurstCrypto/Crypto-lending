@@ -22,6 +22,7 @@ import {
   localDemoResourceQueries,
   localStackBuildArguments,
   parseLocalDemoResourceIdentifiers,
+  resolveComposeInvocation,
   resourceLabelInspectionArguments,
 } from './processes.mjs';
 import {
@@ -136,12 +137,26 @@ describe('local demo process configuration', () => {
     }
     assert.equal(LOCAL_DEMO_COMPOSE_PROJECT, 'crypto-lending-local-demo');
     assert.deepEqual(composeArguments('down').slice(-3), ['down', '--volumes', '--remove-orphans']);
-    assert.deepEqual(composeArguments('up').slice(3, 5), [
+    assert.deepEqual(composeArguments('up').slice(2, 4), [
       '--env-file',
       'tools/local-demo/compose.safe.env',
     ]);
     assert.ok(composeArguments('up').includes('never'));
     assert.ok(composeArguments('up').includes('--no-build'));
+    const probes = [];
+    const compose = resolveComposeInvocation({
+      cwd: '.',
+      env: {},
+      spawnSyncImpl(command, args) {
+        probes.push([command, args]);
+        return { status: command === 'docker-compose' ? 0 : 1 };
+      },
+    });
+    assert.deepEqual(probes, [
+      ['docker', ['compose', 'version']],
+      ['docker-compose', ['version']],
+    ]);
+    assert.deepEqual(compose, { command: 'docker-compose', prefix: [] });
     assert.equal(LOCAL_DEMO_REQUIRED_DOCKER_IMAGES.length, 3);
     assert.deepEqual(localStackBuildArguments(), [
       'build',

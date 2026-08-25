@@ -7,6 +7,7 @@ import {
   composeArguments,
   localDemoResourceQueries,
   parseLocalDemoResourceIdentifiers,
+  resolveComposeInvocation,
   resourceLabelInspectionArguments,
   runChecked,
 } from './processes.mjs';
@@ -25,6 +26,7 @@ try {
   throw new Error('Docker context inspection returned an invalid endpoint');
 }
 assertLocalDockerEndpoint(endpoint);
+const compose = resolveComposeInvocation({ cwd: root, env: environment });
 for (const query of localDemoResourceQueries()) {
   const rawIdentifiers = runChecked('docker', query.list, {
     cwd: root,
@@ -42,7 +44,7 @@ for (const query of localDemoResourceQueries()) {
     assertLocalDemoResourceOwnership(rawLabels);
   }
 }
-runChecked('docker', composeArguments('down'), {
+runChecked(compose.command, [...compose.prefix, ...composeArguments('down')], {
   cwd: root,
   env: environment,
   label: 'Local demo teardown',

@@ -12,6 +12,7 @@ import {
 import {
   composeArguments,
   localStackBuildArguments,
+  resolveComposeInvocation,
   runChecked,
   spawnOwned,
 } from './processes.mjs';
@@ -47,6 +48,8 @@ try {
 }
 assertLocalDockerEndpoint(parsedDockerEndpoint);
 
+const compose = resolveComposeInvocation({ cwd: root, env: environments.docker });
+
 for (const imageName of LOCAL_DEMO_REQUIRED_DOCKER_IMAGES) {
   runChecked('docker', ['image', 'inspect', '--format', '{{.Id}}', imageName], {
     cwd: root,
@@ -62,7 +65,7 @@ runChecked('docker', localStackBuildArguments(), {
   label: 'Offline LocalStack image build',
 });
 
-runChecked('docker', composeArguments('up'), {
+runChecked(compose.command, [...compose.prefix, ...composeArguments('up')], {
   cwd: root,
   env: environments.docker,
   label: 'Local dependency startup',

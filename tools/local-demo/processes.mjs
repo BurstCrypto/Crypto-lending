@@ -35,9 +35,29 @@ export function spawnOwned(command, args, options) {
   });
 }
 
+export function resolveComposeInvocation(options) {
+  const candidates = [
+    { command: 'docker', prefix: ['compose'] },
+    { command: 'docker-compose', prefix: [] },
+  ];
+  const spawnSyncImpl = options.spawnSyncImpl ?? spawnSync;
+
+  for (const candidate of candidates) {
+    const result = spawnSyncImpl(executable(candidate.command), [...candidate.prefix, 'version'], {
+      cwd: options.cwd,
+      env: options.env,
+      encoding: 'utf8',
+      stdio: 'ignore',
+      windowsHide: true,
+    });
+    if (!result.error && result.status === 0) return candidate;
+  }
+
+  throw new Error('No installed Docker Compose command is available');
+}
+
 export function composeArguments(action) {
   const prefix = [
-    'compose',
     '--project-directory',
     '.',
     '--env-file',
