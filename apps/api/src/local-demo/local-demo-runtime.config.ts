@@ -69,7 +69,7 @@ function assertExactLocalInfrastructure(environment: Readonly<NodeJS.ProcessEnv>
     const canonicalName = name.toUpperCase();
     return (
       INFRASTRUCTURE_PREFIXES.some((prefix) => canonicalName.startsWith(prefix)) &&
-      !REVIEWED_INFRASTRUCTURE_NAMES.has(canonicalName)
+      (name !== canonicalName || !REVIEWED_INFRASTRUCTURE_NAMES.has(canonicalName))
     );
   });
   if (unreviewed) return fail(unreviewed);

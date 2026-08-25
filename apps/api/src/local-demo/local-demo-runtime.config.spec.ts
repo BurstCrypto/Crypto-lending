@@ -105,6 +105,7 @@ describe('local demo runtime configuration', () => {
     'DATABASE_URL',
     'REDIS_URL',
     'AWS_PROFILE',
+    'aws_region',
     'AWS_ENDPOINT_URL_SQS',
     'SQS_REQUEST_TIMEOUT_MS',
   ])('rejects unreviewed infrastructure variable %s', (field) => {
