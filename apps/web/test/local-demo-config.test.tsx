@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 import { LOCAL_DEMO_BANNER_TEXT, LocalDemoBanner } from '../components/local-demo-banner';
 import {
+  buildLocalDemoRedirects,
   buildLocalDemoRewrites,
   loadLocalDemoWebConfig,
   LocalDemoWebConfigurationError,
@@ -41,6 +42,18 @@ describe('local demo web configuration', () => {
         destination: 'http://127.0.0.1:3001/api/v1/:path*',
       },
     ]);
+    expect(buildLocalDemoRedirects(config)).toEqual([
+      {
+        source: '/:path*',
+        has: [{ type: 'host', value: 'localhost' }],
+        destination: 'http://127.0.0.1:3000/:path*',
+        permanent: false,
+      },
+    ]);
+  });
+
+  it('does not install a host redirect outside the explicit local demo', () => {
+    expect(buildLocalDemoRedirects(loadLocalDemoWebConfig({ NODE_ENV: 'production' }))).toEqual([]);
   });
 
   it.each([

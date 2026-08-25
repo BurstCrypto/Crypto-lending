@@ -24,3 +24,10 @@ export function loadLocalDemoWebConfig(
 export function buildLocalDemoRewrites(
   config: LocalDemoWebConfig,
 ): Array<{ source: string; destination: string }>;
+
+export function buildLocalDemoRedirects(config: LocalDemoWebConfig): Array<{
+  source: string;
+  has: Array<{ type: 'host'; value: string }>;
+  destination: string;
+  permanent: false;
+}>;

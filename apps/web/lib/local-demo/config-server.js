@@ -55,3 +55,15 @@ export function buildLocalDemoRewrites(config) {
     },
   ];
 }
+
+export function buildLocalDemoRedirects(config) {
+  if (!config.enabled) return [];
+  return [
+    {
+      source: '/:path*',
+      has: [{ type: 'host', value: 'localhost' }],
+      destination: `${config.publicOrigin}/:path*`,
+      permanent: false,
+    },
+  ];
+}

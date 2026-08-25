@@ -1,6 +1,10 @@
 import type { NextConfig } from 'next';
 
-import { buildLocalDemoRewrites, loadLocalDemoWebConfig } from './lib/local-demo/config-server.js';
+import {
+  buildLocalDemoRedirects,
+  buildLocalDemoRewrites,
+  loadLocalDemoWebConfig,
+} from './lib/local-demo/config-server.js';
 import { buildBrowserSecurityHeaders } from './lib/security/browser-egress.js';
 
 const ACCOUNT_SHELL_HEADERS = [
@@ -12,6 +16,9 @@ const nextConfig = {
   output: 'standalone',
   poweredByHeader: false,
   reactStrictMode: true,
+  async redirects() {
+    return buildLocalDemoRedirects(loadLocalDemoWebConfig());
+  },
   async rewrites() {
     return buildLocalDemoRewrites(loadLocalDemoWebConfig());
   },
