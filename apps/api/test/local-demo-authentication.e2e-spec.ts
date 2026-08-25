@@ -101,42 +101,59 @@ describe('local demo authentication boundary (e2e)', () => {
         expiresAt: new Date(Date.now() + 300_000),
       })),
       claimTransaction: jest.fn(
-        async (_input: Parameters<AuthenticationRepositoryPort['claimTransaction']>[0]) => ({
-          status: 'invalid' as const,
-        }),
+        async (input: Parameters<AuthenticationRepositoryPort['claimTransaction']>[0]) => {
+          void input;
+          return { status: 'invalid' as const };
+        },
       ),
       rejectClaimedTransaction: jest.fn(
-        async (
-          _input: Parameters<AuthenticationRepositoryPort['rejectClaimedTransaction']>[0],
-        ) => ({ status: 'invalid' as const }),
+        async (input: Parameters<AuthenticationRepositoryPort['rejectClaimedTransaction']>[0]) => {
+          void input;
+          return { status: 'invalid' as const };
+        },
       ),
       completeLogin: jest.fn(
-        async (_input: Parameters<AuthenticationRepositoryPort['completeLogin']>[0]) => ({
-          status: 'rejected' as const,
-        }),
+        async (input: Parameters<AuthenticationRepositoryPort['completeLogin']>[0]) => {
+          void input;
+          return { status: 'rejected' as const };
+        },
       ),
       resolveSession: jest.fn(
-        async (_input: Parameters<AuthenticationRepositoryPort['resolveSession']>[0]) => ({
-          status: 'authenticated' as const,
-          accountId: ACCOUNT_ID,
-          sessionFamilyId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
-        }),
+        async (input: Parameters<AuthenticationRepositoryPort['resolveSession']>[0]) => {
+          void input;
+          return {
+            status: 'authenticated' as const,
+            accountId: ACCOUNT_ID,
+            sessionFamilyId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+          };
+        },
       ),
       rotateSession: jest.fn(
-        async (_input: Parameters<AuthenticationRepositoryPort['rotateSession']>[0]) => ({
-          status: 'invalid' as const,
-        }),
+        async (input: Parameters<AuthenticationRepositoryPort['rotateSession']>[0]) => {
+          void input;
+          return { status: 'invalid' as const };
+        },
       ),
       revokeSession: jest.fn(
-        async (_input: Parameters<AuthenticationRepositoryPort['revokeSession']>[0]) => ({
-          status: 'revoked' as const,
-        }),
+        async (input: Parameters<AuthenticationRepositoryPort['revokeSession']>[0]) => {
+          void input;
+          return { status: 'revoked' as const };
+        },
       ),
     };
     wallets = {
-      connect: jest.fn(async (_input: unknown) => connection),
-      disconnect: jest.fn((_accountId: unknown, _connectionId: unknown) => undefined),
-      list: jest.fn((_accountId: unknown) => [connection]),
+      connect: jest.fn(async (input: unknown) => {
+        void input;
+        return connection;
+      }),
+      disconnect: jest.fn((accountId: unknown, connectionId: unknown) => {
+        void accountId;
+        void connectionId;
+      }),
+      list: jest.fn((accountId: unknown) => {
+        void accountId;
+        return [connection];
+      }),
     };
     const oidc: OidcClientPort = {
       createAuthorizationUrl(input) {
