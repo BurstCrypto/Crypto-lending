@@ -147,6 +147,8 @@ describe('system endpoints (e2e)', () => {
     expect(response.body.paths).toHaveProperty('/api/v1/health/dependencies');
     expect(response.body.paths).toHaveProperty('/api/v1/version');
     expect(response.body.paths).toHaveProperty('/api/v1/accounts/me');
+    expect(response.body.paths).toHaveProperty('/api/v1/local-demo/wallets');
+    expect(response.body.paths).toHaveProperty('/api/v1/local-demo/portfolio');
     expect(response.body.paths).not.toHaveProperty('/api/v1/internal/health/dependencies');
     expect(
       response.body.paths['/api/v1/health/dependencies'].get.responses['503'].content[

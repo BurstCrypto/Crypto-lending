@@ -217,8 +217,8 @@ describe('local demo authentication boundary (e2e)', () => {
     expect(repository.beginTransaction).toHaveBeenCalledTimes(1);
   });
 
-  it('passes the real account guard and CSRF boundary for wallet mutation on loopback HTTP', async () => {
-    await request(app.getHttpServer())
+  it('passes the real guard, CSRF, and privacy boundaries for wallet mutations', async () => {
+    const connected = await request(app.getHttpServer())
       .post('/api/v1/local-demo/wallets')
       .set('Origin', LOCAL_ORIGIN)
       .set('X-CSRF-Token', csrf)
@@ -227,12 +227,32 @@ describe('local demo authentication boundary (e2e)', () => {
       .expect(201)
       .expect(connection);
 
+    expect(connected.headers).toMatchObject({
+      'cache-control': 'private, no-store, max-age=0',
+      vary: 'Cookie, Origin',
+      'x-crypto-lending-demo-mode': 'synthetic-local',
+    });
+
     expect(repository.resolveSession).toHaveBeenCalledWith(
       expect.objectContaining({ csrf: expect.objectContaining({ required: true }) }),
     );
     expect(wallets.connect).toHaveBeenCalledWith(
       expect.objectContaining({ accountId: ACCOUNT_ID, namespace: 'EVM' }),
     );
+
+    const disconnected = await request(app.getHttpServer())
+      .delete('/api/v1/local-demo/wallets')
+      .set('Origin', LOCAL_ORIGIN)
+      .set('X-CSRF-Token', csrf)
+      .set('Cookie', cookie)
+      .send({ connectionId: connection.connectionId })
+      .expect(204);
+    expect(disconnected.headers).toMatchObject({
+      'cache-control': 'private, no-store, max-age=0',
+      vary: 'Cookie, Origin',
+      'x-crypto-lending-demo-mode': 'synthetic-local',
+    });
+    expect(wallets.disconnect).toHaveBeenCalledWith(ACCOUNT_ID, connection.connectionId);
   });
 
   it('rejects aliases and wrong ports before wallet mutation', async () => {
