@@ -109,10 +109,17 @@ them. The demo-owned dependency containers remain available for a quick restart.
    completes a real one-use KAN-56 ownership proof with an ephemeral synthetic
    signer, then the existing multi-wallet lifecycle marks only that accepted
    connection as eligible for indexing.
-8. Review the account-scoped portfolio value, conservative buying-power
-   estimate, non-zero deduction breakdown, source wallet, chain, asset,
-   freshness, and masked addresses. Refresh the browser to exercise wallet and
-   session restoration. Disconnect a wallet to remove its contribution.
+8. Review the account-scoped portfolio value and available buying power. With
+   both fixture wallets connected, each is `$11,000.00`; no hypothetical route
+   fee is deducted before an action is chosen. Inspect the source wallet, chain,
+   asset, freshness, and masked-address details.
+9. Choose **More liquid**, **Balanced blend**, or **More yield**. Only this
+   explicit choice requests an allocation preview. Review the exact bucket
+   amounts, separately itemized synthetic fees, and net planned capital. Change
+   blends to see the estimate recalculate without moving funds.
+10. Confirm the page still states **No transaction was created**. Refresh the
+    browser to exercise wallet and session restoration. Disconnect a wallet to
+    remove its contribution.
 
 The portfolio is not embedded in the page and is not live chain data. The
 authenticated same-origin API composes deterministic source fixtures through
@@ -140,7 +147,7 @@ or session loss; they contain no key, signature, challenge, or full address.
 npm run test:local-demo
 npm test --workspace @crypto-lending/api -- --runInBand src/local-demo
 npm run test:e2e --workspace @crypto-lending/api
-npm test --workspace @crypto-lending/web -- test/local-demo-config.test.tsx test/local-demo-client.test.ts test/local-demo-wallet-adapter.test.ts test/local-demo-portfolio-journey.test.tsx test/browser-egress.test.ts
+npm test --workspace @crypto-lending/web -- test/local-demo-config.test.tsx test/local-demo-client.test.ts test/local-demo-allocation-planner.test.tsx test/local-demo-wallet-adapter.test.ts test/local-demo-portfolio-journey.test.tsx test/browser-egress.test.ts
 npm run security:scan:secrets
 ```
 
