@@ -56,9 +56,19 @@ describe('local demo process configuration', () => {
     assert.equal(environments.web.LOCAL_DEMO_API_ORIGIN, LOCAL_DEMO_API_ORIGIN);
     assert.equal(environments.web.AUTH_PUBLIC_ORIGIN, LOCAL_DEMO_WEB_ORIGIN);
     assert.equal(environments.api.API_HOST, '127.0.0.1');
+    assert.equal(environments.api.APP_ENV, 'dev-local-demo');
     assert.equal(environments.api.LOCAL_DEMO_MODE, 'enabled');
     assert.equal(environments.api.OIDC_TOKEN_AUTH_METHOD, 'none');
     assert.equal(environments.api.WALLET_REGISTRATION_REGISTRY_ENVIRONMENT, 'TESTNET');
+    for (const forbidden of [
+      'HTTP_PROXY',
+      'HTTPS_PROXY',
+      'EVM_RPC_URL',
+      'SOLANA_RPC_URL',
+      'WALLETCONNECT_PROJECT_ID',
+    ]) {
+      assert.equal(environments.api[forbidden], undefined);
+    }
     assert.equal(environments.api.AWS_EC2_METADATA_DISABLED, 'true');
     const apiDatabase = new URL(environments.api.DATABASE_RUNTIME_URL);
     const workerDatabase = new URL(environments.worker.DATABASE_RUNTIME_URL);
