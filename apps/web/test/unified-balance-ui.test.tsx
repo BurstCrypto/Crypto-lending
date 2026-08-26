@@ -83,7 +83,7 @@ describe('UnifiedBalanceView', () => {
     expect(screen.getByText('Buying-power notes')).toBeInTheDocument();
   });
 
-  it('shows full idle local-demo capital and defers fee details until allocation preview', () => {
+  it('shows full idle local-demo capital and defers cost treatment until allocation preview', () => {
     const snapshot = parseUnifiedBalanceResponse(grossLocalDemoPayload());
     render(<UnifiedBalanceView state={{ status: 'READY', snapshot }} />);
 

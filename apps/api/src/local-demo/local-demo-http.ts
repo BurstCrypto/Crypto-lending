@@ -8,10 +8,9 @@ import type { SchemaObject } from '@nestjs/swagger';
 import type { Observable } from 'rxjs';
 
 import {
-  LOCAL_DEMO_ALLOCATION_DEDUCTION_CODES,
   LOCAL_DEMO_ALLOCATION_SELECTION_KINDS,
   LOCAL_DEMO_ALLOCATION_PRESET_IDS,
-  LOCAL_DEMO_FEE_ESTIMATE_SOURCE,
+  LOCAL_DEMO_EXECUTION_COST_TREATMENT,
   LOCAL_DEMO_MAX_LIQUID_RESERVE_BASIS_POINTS,
   LOCAL_DEMO_YIELD_CALCULATION_METHOD,
   LOCAL_DEMO_YIELD_PROJECTION_SOURCE,
@@ -603,10 +602,8 @@ export const LOCAL_DEMO_ALLOCATION_PREVIEW_RESPONSE_SCHEMA: SchemaObject = Objec
     'catalog',
     'grossCapitalUsdMinor',
     'allocations',
-    'deductions',
-    'feeEstimateSource',
-    'totalFeesUsdMinor',
-    'netPlannedCapitalUsdMinor',
+    'executionCost',
+    'capitalIncludedInProjectionUsdMinor',
     'yieldProjection',
     'asOf',
   ],
@@ -693,23 +690,20 @@ export const LOCAL_DEMO_ALLOCATION_PREVIEW_RESPONSE_SCHEMA: SchemaObject = Objec
         },
       },
     },
-    deductions: {
-      type: 'array',
-      minItems: 5,
-      maxItems: 5,
-      items: {
-        type: 'object',
-        additionalProperties: false,
-        required: ['code', 'amountUsdMinor'],
-        properties: {
-          code: { type: 'string', enum: [...LOCAL_DEMO_ALLOCATION_DEDUCTION_CODES] },
-          amountUsdMinor: { type: 'string', pattern: '^(?:0|[1-9][0-9]*)$' },
-        },
+    executionCost: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['treatment', 'modeledLocalAmountUsdMinor', 'publicExecutionCostStatus'],
+      properties: {
+        treatment: { type: 'string', enum: [LOCAL_DEMO_EXECUTION_COST_TREATMENT] },
+        modeledLocalAmountUsdMinor: { type: 'string', enum: ['0'] },
+        publicExecutionCostStatus: { type: 'string', enum: ['UNQUOTED'] },
       },
     },
-    feeEstimateSource: { type: 'string', enum: [LOCAL_DEMO_FEE_ESTIMATE_SOURCE] },
-    totalFeesUsdMinor: { type: 'string', pattern: '^(?:0|[1-9][0-9]*)$' },
-    netPlannedCapitalUsdMinor: { type: 'string', pattern: '^(?:0|[1-9][0-9]*)$' },
+    capitalIncludedInProjectionUsdMinor: {
+      type: 'string',
+      pattern: '^(?:0|[1-9][0-9]*)$',
+    },
     yieldProjection: {
       type: 'object',
       additionalProperties: false,
@@ -718,8 +712,6 @@ export const LOCAL_DEMO_ALLOCATION_PREVIEW_RESPONSE_SCHEMA: SchemaObject = Objec
         'calculationMethod',
         'effectiveApyBasisPoints',
         'projectedAnnualYieldUsdMinor',
-        'projectedAnnualNetGrowthUsdMinor',
-        'breakEven',
       ],
       properties: {
         source: { type: 'string', enum: [LOCAL_DEMO_YIELD_PROJECTION_SOURCE] },
@@ -731,26 +723,6 @@ export const LOCAL_DEMO_ALLOCATION_PREVIEW_RESPONSE_SCHEMA: SchemaObject = Objec
         projectedAnnualYieldUsdMinor: {
           type: 'string',
           pattern: '^(?:0|[1-9][0-9]*)$',
-        },
-        projectedAnnualNetGrowthUsdMinor: {
-          type: 'string',
-          pattern: '^(?:0|[1-9][0-9]*)$',
-        },
-        breakEven: {
-          type: 'object',
-          additionalProperties: false,
-          required: ['status', 'firstNetPositiveDay'],
-          properties: {
-            status: {
-              type: 'string',
-              enum: ['AVAILABLE', 'NOT_APPLICABLE', 'UNAVAILABLE'],
-            },
-            firstNetPositiveDay: {
-              type: 'integer',
-              minimum: 1,
-              nullable: true,
-            },
-          },
         },
       },
     },

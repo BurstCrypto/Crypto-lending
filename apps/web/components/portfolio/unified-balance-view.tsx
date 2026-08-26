@@ -407,7 +407,7 @@ function ReadyView({
           <p className="portfolio-total-help">
             {snapshot.buyingPower.status === 'AVAILABLE'
               ? showsFullLocalDemoCapital
-                ? 'Full supported capital available before any allocation choice. Estimated fees appear only after you preview a blend.'
+                ? 'Full supported capital available before any allocation choice. Execution-cost treatment appears only after you preview a blend.'
                 : 'Conservative amount after stale funds and known liquidity, conversion, slippage, network, and routing deductions.'
               : 'No amount is shown until every required pricing, liquidity, network, and route-cost input is available.'}
           </p>

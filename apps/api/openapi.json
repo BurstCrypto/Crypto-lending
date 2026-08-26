@@ -1653,6 +1653,10 @@
                       "format": "date-time",
                       "type": "string"
                     },
+                    "capitalIncludedInProjectionUsdMinor": {
+                      "pattern": "^(?:0|[1-9][0-9]*)$",
+                      "type": "string"
+                    },
                     "catalog": {
                       "additionalProperties": false,
                       "properties": {
@@ -1717,40 +1721,34 @@
                       ],
                       "type": "object"
                     },
-                    "deductions": {
-                      "items": {
-                        "additionalProperties": false,
-                        "properties": {
-                          "amountUsdMinor": {
-                            "pattern": "^(?:0|[1-9][0-9]*)$",
-                            "type": "string"
-                          },
-                          "code": {
-                            "enum": [
-                              "LIQUIDITY",
-                              "CONVERSION",
-                              "SLIPPAGE",
-                              "NETWORK",
-                              "ROUTING"
-                            ],
-                            "type": "string"
-                          }
+                    "executionCost": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "modeledLocalAmountUsdMinor": {
+                          "enum": [
+                            "0"
+                          ],
+                          "type": "string"
                         },
-                        "required": [
-                          "code",
-                          "amountUsdMinor"
-                        ],
-                        "type": "object"
+                        "publicExecutionCostStatus": {
+                          "enum": [
+                            "UNQUOTED"
+                          ],
+                          "type": "string"
+                        },
+                        "treatment": {
+                          "enum": [
+                            "LOCAL_DEMO_ZERO_NO_EXECUTION"
+                          ],
+                          "type": "string"
+                        }
                       },
-                      "maxItems": 5,
-                      "minItems": 5,
-                      "type": "array"
-                    },
-                    "feeEstimateSource": {
-                      "enum": [
-                        "LOCAL_DEMO_ACTION_COST_ASSUMPTION"
+                      "required": [
+                        "treatment",
+                        "modeledLocalAmountUsdMinor",
+                        "publicExecutionCostStatus"
                       ],
-                      "type": "string"
+                      "type": "object"
                     },
                     "grossCapitalUsdMinor": {
                       "pattern": "^(?:0|[1-9][0-9]*)$",
@@ -1761,10 +1759,6 @@
                         false
                       ],
                       "type": "boolean"
-                    },
-                    "netPlannedCapitalUsdMinor": {
-                      "pattern": "^(?:0|[1-9][0-9]*)$",
-                      "type": "string"
                     },
                     "selection": {
                       "additionalProperties": false,
@@ -1879,10 +1873,6 @@
                       ],
                       "type": "object"
                     },
-                    "totalFeesUsdMinor": {
-                      "pattern": "^(?:0|[1-9][0-9]*)$",
-                      "type": "string"
-                    },
                     "use": {
                       "enum": [
                         "LOCAL_DEMO_ESTIMATE_ONLY"
@@ -1892,32 +1882,9 @@
                     "yieldProjection": {
                       "additionalProperties": false,
                       "properties": {
-                        "breakEven": {
-                          "additionalProperties": false,
-                          "properties": {
-                            "firstNetPositiveDay": {
-                              "minimum": 1,
-                              "nullable": true,
-                              "type": "integer"
-                            },
-                            "status": {
-                              "enum": [
-                                "AVAILABLE",
-                                "NOT_APPLICABLE",
-                                "UNAVAILABLE"
-                              ],
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "status",
-                            "firstNetPositiveDay"
-                          ],
-                          "type": "object"
-                        },
                         "calculationMethod": {
                           "enum": [
-                            "SIMPLE_DAILY_APY_PRORATION_ON_NET_CAPITAL"
+                            "POSITION_WEIGHTED_EXACT_BASE_APY"
                           ],
                           "type": "string"
                         },
@@ -1925,10 +1892,6 @@
                           "maximum": 10000,
                           "minimum": 0,
                           "type": "integer"
-                        },
-                        "projectedAnnualNetGrowthUsdMinor": {
-                          "pattern": "^(?:0|[1-9][0-9]*)$",
-                          "type": "string"
                         },
                         "projectedAnnualYieldUsdMinor": {
                           "pattern": "^(?:0|[1-9][0-9]*)$",
@@ -1945,9 +1908,7 @@
                         "source",
                         "calculationMethod",
                         "effectiveApyBasisPoints",
-                        "projectedAnnualYieldUsdMinor",
-                        "projectedAnnualNetGrowthUsdMinor",
-                        "breakEven"
+                        "projectedAnnualYieldUsdMinor"
                       ],
                       "type": "object"
                     }
@@ -1959,10 +1920,8 @@
                     "catalog",
                     "grossCapitalUsdMinor",
                     "allocations",
-                    "deductions",
-                    "feeEstimateSource",
-                    "totalFeesUsdMinor",
-                    "netPlannedCapitalUsdMinor",
+                    "executionCost",
+                    "capitalIncludedInProjectionUsdMinor",
                     "yieldProjection",
                     "asOf"
                   ],

@@ -157,12 +157,15 @@ restart the attached harness to pick up API source changes.
    separate from reward APR and reported provider fees. Market presence means
    provider-listed only; deposit and withdrawal availability are not verified.
    Choose **More liquid**, **Balanced blend**, or **More yield**. Only this
-   explicit preset choice requests an allocation preview or reveals local
-   action-cost amounts and fee-derived timing. Review the selected markets,
-   exact allocation amounts, net planned capital, base-only projected annual
-   growth, and the first whole day when projected yield exceeds the local cost
-   assumption. The provider values are a point-in-time snapshot, not live or
-   guaranteed returns; rewards are disclosed but excluded from projection.
+   explicit preset choice requests an allocation preview or reveals its
+   execution-cost treatment. Review the selected markets, evenly divided
+   investable cents, full capital included in the projection, exact
+   position-level base-yield estimate, and the Day 1 projection assumption when
+   at least one whole annual cent is projected. Smaller results are labeled below
+   display precision. The non-executing local simulation models $0 cost; public
+   network, routing, conversion, and slippage costs are unquoted and excluded.
+   Provider values are a point-in-time snapshot, not live or guaranteed returns;
+   rewards are disclosed but excluded from projection.
 10. Confirm the page states **No user-authorized financial transaction was
     created**. Refresh the browser to exercise wallet and session restoration.
     Disconnect a wallet to remove its contribution.

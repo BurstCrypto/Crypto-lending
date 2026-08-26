@@ -228,20 +228,18 @@ describe('local demo same-origin API client', () => {
     expect(() =>
       parseLocalDemoAllocationPreview({
         ...structuredClone(BALANCED_PREVIEW),
-        netPlannedCapitalUsdMinor: '1092301',
+        capitalIncludedInProjectionUsdMinor: '1099999',
       }),
     ).toThrow(TypeError);
-    const internallyReconciledButForgedFees = structuredClone(BALANCED_PREVIEW) as unknown as {
-      deductions: Array<{ amountUsdMinor: string }>;
-      totalFeesUsdMinor: string;
-      netPlannedCapitalUsdMinor: string;
+    const forgedExecutionCost = structuredClone(BALANCED_PREVIEW) as unknown as {
+      executionCost: {
+        modeledLocalAmountUsdMinor: string;
+        publicExecutionCostStatus: string;
+      };
     };
-    internallyReconciledButForgedFees.deductions[0]!.amountUsdMinor = '3851';
-    internallyReconciledButForgedFees.totalFeesUsdMinor = '7701';
-    internallyReconciledButForgedFees.netPlannedCapitalUsdMinor = '1092299';
-    expect(() => parseLocalDemoAllocationPreview(internallyReconciledButForgedFees)).toThrow(
-      TypeError,
-    );
+    forgedExecutionCost.executionCost.modeledLocalAmountUsdMinor = '1';
+    forgedExecutionCost.executionCost.publicExecutionCostStatus = 'QUOTED';
+    expect(() => parseLocalDemoAllocationPreview(forgedExecutionCost)).toThrow(TypeError);
 
     const client = new LocalDemoApiClient({
       cookieHeader: `__Host-cl_csrf=${CSRF}`,
@@ -254,7 +252,7 @@ describe('local demo same-origin API client', () => {
     });
   });
 
-  it('recomputes snapshot APY, annual growth, and break-even timing with integer arithmetic', () => {
+  it('recomputes exact position yield and rejects invented local costs or recovery timing', () => {
     const forgedPoolApy = {
       ...structuredClone(BALANCED_PREVIEW),
       allocations: BALANCED_PREVIEW.allocations.map((allocation, index) => ({
@@ -268,20 +266,19 @@ describe('local demo same-origin API client', () => {
       ...structuredClone(BALANCED_PREVIEW),
       yieldProjection: {
         ...BALANCED_PREVIEW.yieldProjection,
-        projectedAnnualYieldUsdMinor: '35828',
-        projectedAnnualNetGrowthUsdMinor: '28128',
+        projectedAnnualYieldUsdMinor: '36133',
       },
     };
     expect(() => parseLocalDemoAllocationPreview(forgedAnnualProjection)).toThrow(TypeError);
 
-    const forgedBreakEven = {
+    const legacyBreakEven = {
       ...structuredClone(BALANCED_PREVIEW),
       yieldProjection: {
         ...BALANCED_PREVIEW.yieldProjection,
         breakEven: { status: 'AVAILABLE', firstNetPositiveDay: 78 },
       },
     };
-    expect(() => parseLocalDemoAllocationPreview(forgedBreakEven)).toThrow(TypeError);
+    expect(() => parseLocalDemoAllocationPreview(legacyBreakEven)).toThrow(TypeError);
 
     const shiftedAllocationAmounts = structuredClone(BALANCED_PREVIEW) as unknown as {
       allocations: Array<{ amountUsdMinor: string }>;

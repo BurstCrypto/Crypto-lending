@@ -188,7 +188,7 @@ describe('authenticated local demo portfolio journey', () => {
     expect(restoredHarness.readPortfolio).toHaveBeenCalledTimes(1);
   });
 
-  it('offers provider snapshot blends only when ready and defers fee details until selection', async () => {
+  it('offers provider snapshot blends only when ready and defers cost treatment until selection', async () => {
     const harness = fakeClient();
     experience(harness);
 
@@ -214,12 +214,11 @@ describe('authenticated local demo portfolio journey', () => {
       ).length,
     ).toBeGreaterThan(0);
     expect(
-      within(allocationPlanner!).queryByText('Local action-cost assumptions'),
+      within(allocationPlanner!).queryByText('Execution cost treatment'),
     ).not.toBeInTheDocument();
     expect(
-      within(allocationPlanner!).queryByText('First net-positive day'),
+      within(allocationPlanner!).queryByText('Projection assumes yield from'),
     ).not.toBeInTheDocument();
-    expect(allocationPlanner!.querySelector('[aria-label$="estimated fee"]')).toBeNull();
     expect(screen.queryByText('Why buying power is lower')).not.toBeInTheDocument();
     const buyingPowerCard = screen.getByText('Available buying power').closest('article');
     expect(within(buyingPowerCard!).getByLabelText('11,000 US dollars')).toHaveTextContent(
@@ -227,9 +226,8 @@ describe('authenticated local demo portfolio journey', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: /More liquid/u }));
-    expect(
-      await screen.findByRole('heading', { name: 'Local action-cost assumptions' }),
-    ).toBeInTheDocument();
+    const costHeading = await screen.findByRole('heading', { name: 'Execution cost treatment' });
+    expect(costHeading).toBeInTheDocument();
     expect(harness.previewAllocation).toHaveBeenCalledWith(
       { kind: 'PRESET', presetId: 'MORE_LIQUID' },
       expect.any(AbortSignal),
@@ -238,26 +236,25 @@ describe('authenticated local demo portfolio journey', () => {
       screen.getByText('No user-authorized financial transaction was created.'),
     ).toBeInTheDocument();
     const reconciliation = screen.getByText('Full available capital').closest('dl');
-    expect(within(reconciliation!).getByLabelText('11,000 US dollars')).toHaveTextContent(
-      '$11,000.00',
-    );
-    expect(screen.getByLabelText('44 US dollars estimated fee')).toHaveTextContent('-$44.00');
-    expect(screen.getByLabelText('10,956 US dollars')).toHaveTextContent('$10,956.00');
+    expect(within(reconciliation!).getAllByLabelText('11,000 US dollars')).toHaveLength(2);
+    expect(
+      within(costHeading.closest('section')!).getByLabelText('0 US dollars'),
+    ).toHaveTextContent('$0.00');
+    expect(screen.getByText('Capital included in projection')).toBeInTheDocument();
     const yieldProjection = screen
-      .getByRole('heading', { name: 'Snapshot yield projection' })
+      .getByRole('heading', { name: 'Illustrative yield projection' })
       .closest('section');
     expect(
       within(yieldProjection!).getByLabelText('1.87 percent base annual percentage yield'),
     ).toHaveTextContent('1.87%');
     expect(
-      within(yieldProjection!).getByLabelText('204 US dollars and 87 cents'),
-    ).toHaveTextContent('$204.87');
+      within(yieldProjection!).getByLabelText('206 US dollars and 46 cents'),
+    ).toHaveTextContent('$206.46');
     expect(
-      within(yieldProjection!).getByLabelText('79 days until estimated net-positive'),
-    ).toHaveTextContent('Day 79');
-    expect(
-      within(yieldProjection!).getByLabelText('160 US dollars and 87 cents'),
-    ).toHaveTextContent('$160.87');
+      within(yieldProjection!).getByLabelText('Projection assumes base yield from day 1'),
+    ).toHaveTextContent('Day 1');
+    expect(within(yieldProjection!).getByText('Not quoted')).toBeInTheDocument();
+    expect(within(yieldProjection!).queryByText('Day 79')).not.toBeInTheDocument();
   });
 
   it('isolates persisted roster metadata and capacity across authenticated account changes', async () => {

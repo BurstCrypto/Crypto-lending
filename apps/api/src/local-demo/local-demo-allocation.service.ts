@@ -33,22 +33,8 @@ export type LocalDemoAllocationSelection =
     }>;
 
 export const LOCAL_DEMO_YIELD_PROJECTION_SOURCE = 'MORPHO_PUBLIC_API_SNAPSHOT' as const;
-export const LOCAL_DEMO_YIELD_CALCULATION_METHOD =
-  'SIMPLE_DAILY_APY_PRORATION_ON_NET_CAPITAL' as const;
-export const LOCAL_DEMO_FEE_ESTIMATE_SOURCE = 'LOCAL_DEMO_ACTION_COST_ASSUMPTION' as const;
-
-export type LocalDemoBreakEvenStatus = 'AVAILABLE' | 'NOT_APPLICABLE' | 'UNAVAILABLE';
-
-export const LOCAL_DEMO_ALLOCATION_DEDUCTION_CODES = Object.freeze([
-  'LIQUIDITY',
-  'CONVERSION',
-  'SLIPPAGE',
-  'NETWORK',
-  'ROUTING',
-] as const);
-
-export type LocalDemoAllocationDeductionCode =
-  (typeof LOCAL_DEMO_ALLOCATION_DEDUCTION_CODES)[number];
+export const LOCAL_DEMO_YIELD_CALCULATION_METHOD = 'POSITION_WEIGHTED_EXACT_BASE_APY' as const;
+export const LOCAL_DEMO_EXECUTION_COST_TREATMENT = 'LOCAL_DEMO_ZERO_NO_EXECUTION' as const;
 
 interface AllocationPresetDefinition {
   readonly id: LocalDemoAllocationPresetId;
@@ -77,15 +63,6 @@ const PRESETS: Readonly<Record<LocalDemoAllocationPresetId, AllocationPresetDefi
       description: 'Keep 15% readily available and divide the remainder across snapshot markets.',
       liquidReserveBasisPoints: 1_500,
     }),
-  });
-
-const DEDUCTION_BASIS_POINTS: Readonly<Record<LocalDemoAllocationDeductionCode, number>> =
-  Object.freeze({
-    LIQUIDITY: 5_000,
-    CONVERSION: 1_000,
-    SLIPPAGE: 1_000,
-    NETWORK: 1_000,
-    ROUTING: 2_000,
   });
 
 export interface LocalDemoAllocationPreviewResponse {
@@ -121,23 +98,17 @@ export interface LocalDemoAllocationPreviewResponse {
     amountUsdMinor: string;
     opportunity: LocalDemoYieldOpportunitySummary | null;
   }>[];
-  readonly deductions: readonly Readonly<{
-    code: LocalDemoAllocationDeductionCode;
-    amountUsdMinor: string;
-  }>[];
-  readonly feeEstimateSource: typeof LOCAL_DEMO_FEE_ESTIMATE_SOURCE;
-  readonly totalFeesUsdMinor: string;
-  readonly netPlannedCapitalUsdMinor: string;
+  readonly executionCost: Readonly<{
+    treatment: typeof LOCAL_DEMO_EXECUTION_COST_TREATMENT;
+    modeledLocalAmountUsdMinor: '0';
+    publicExecutionCostStatus: 'UNQUOTED';
+  }>;
+  readonly capitalIncludedInProjectionUsdMinor: string;
   readonly yieldProjection: Readonly<{
     source: typeof LOCAL_DEMO_YIELD_PROJECTION_SOURCE;
     calculationMethod: typeof LOCAL_DEMO_YIELD_CALCULATION_METHOD;
     effectiveApyBasisPoints: number;
     projectedAnnualYieldUsdMinor: string;
-    projectedAnnualNetGrowthUsdMinor: string;
-    breakEven: Readonly<{
-      status: LocalDemoBreakEvenStatus;
-      firstNetPositiveDay: number | null;
-    }>;
   }>;
   readonly asOf: string;
 }
@@ -168,11 +139,17 @@ export class LocalDemoAllocationService {
       10_000 - selection.liquidReserveBasisPoints,
       opportunities.length,
     );
-    const percentageBasisPoints = Object.freeze([
+    const [liquidReserveCapital, nonReserveCapital] = distribute(grossCapital, [
       selection.liquidReserveBasisPoints,
-      ...yieldWeights,
+      10_000 - selection.liquidReserveBasisPoints,
     ]);
-    const allocationAmounts = distribute(grossCapital, percentageBasisPoints);
+    if (liquidReserveCapital === undefined || nonReserveCapital === undefined) {
+      throw new TypeError('missing local demo capital bucket');
+    }
+    const allocationAmounts = Object.freeze([
+      liquidReserveCapital,
+      ...divideAmountEvenly(nonReserveCapital, opportunities.length),
+    ]);
     const allocations: LocalDemoAllocationPreviewResponse['allocations'] = Object.freeze([
       Object.freeze({
         bucket: 'LIQUID_RESERVE' as const,
@@ -198,30 +175,12 @@ export class LocalDemoAllocationService {
       ),
     ]);
 
-    const nonReserveCapital = allocationAmounts
-      .slice(1)
-      .reduce((total, amount) => total + amount, 0n);
-    const totalFees = nonReserveCapital / 100n;
-    const deductionAmounts = distribute(
-      totalFees,
-      LOCAL_DEMO_ALLOCATION_DEDUCTION_CODES.map((code) => DEDUCTION_BASIS_POINTS[code]),
+    // This preview creates no route or transaction, so it must not fabricate a
+    // production execution quote. Public execution costs remain unquoted.
+    const { effectiveApyBasisPoints, projectedAnnualYield } = calculateYieldProjection(
+      allocations,
+      grossCapital,
     );
-    const deductions = Object.freeze(
-      LOCAL_DEMO_ALLOCATION_DEDUCTION_CODES.map((code, index) =>
-        Object.freeze({
-          code,
-          amountUsdMinor: requiredAmount(deductionAmounts, index).toString(),
-        }),
-      ),
-    );
-    const netPlannedCapital = grossCapital - totalFees;
-    const effectiveApyBasisPoints = calculateEffectiveApyBasisPoints(allocations);
-    const annualYieldNumerator = netPlannedCapital * BigInt(effectiveApyBasisPoints);
-    const projectedAnnualYield = annualYieldNumerator / 10_000n;
-    const projectedAnnualNetGrowth = projectedAnnualYield - totalFees;
-    if (projectedAnnualNetGrowth < 0n) {
-      throw new TypeError('negative local demo annual net growth');
-    }
 
     return Object.freeze({
       use: 'LOCAL_DEMO_ESTIMATE_ONLY',
@@ -240,17 +199,17 @@ export class LocalDemoAllocationService {
       }),
       grossCapitalUsdMinor: grossCapital.toString(),
       allocations,
-      deductions,
-      feeEstimateSource: LOCAL_DEMO_FEE_ESTIMATE_SOURCE,
-      totalFeesUsdMinor: totalFees.toString(),
-      netPlannedCapitalUsdMinor: netPlannedCapital.toString(),
+      executionCost: Object.freeze({
+        treatment: LOCAL_DEMO_EXECUTION_COST_TREATMENT,
+        modeledLocalAmountUsdMinor: '0',
+        publicExecutionCostStatus: 'UNQUOTED',
+      }),
+      capitalIncludedInProjectionUsdMinor: grossCapital.toString(),
       yieldProjection: Object.freeze({
         source: LOCAL_DEMO_YIELD_PROJECTION_SOURCE,
         calculationMethod: LOCAL_DEMO_YIELD_CALCULATION_METHOD,
         effectiveApyBasisPoints,
         projectedAnnualYieldUsdMinor: projectedAnnualYield.toString(),
-        projectedAnnualNetGrowthUsdMinor: projectedAnnualNetGrowth.toString(),
-        breakEven: projectBreakEven(totalFees, annualYieldNumerator),
       }),
       asOf: portfolio.asOf,
     });
@@ -314,40 +273,46 @@ function divideEvenly(total: number, count: number): readonly number[] {
   );
 }
 
-function calculateEffectiveApyBasisPoints(
+function calculateYieldProjection(
   allocations: LocalDemoAllocationPreviewResponse['allocations'],
-): number {
-  const weightedBasisPoints = allocations.reduce(
-    (total, allocation) =>
-      total + BigInt(allocation.percentageBasisPoints) * BigInt(allocation.baseApyBasisPoints),
-    0n,
+  grossCapital: bigint,
+): Readonly<{ effectiveApyBasisPoints: number; projectedAnnualYield: bigint }> {
+  const rates = allocations.map(({ baseApyRateDecimal }) => decimalRatio(baseApyRateDecimal));
+  const maximumScale = rates.reduce(
+    (maximum, { fractionalDigits }) => Math.max(maximum, fractionalDigits),
+    0,
   );
-  const result = weightedBasisPoints / 10_000n;
-  if (result > BigInt(Number.MAX_SAFE_INTEGER)) {
+  const denominator = 10n ** BigInt(maximumScale);
+  const annualYieldNumerator = allocations.reduce((total, allocation, index) => {
+    const rate = rates[index];
+    if (rate === undefined) throw new TypeError('missing local demo APY rate');
+    const scaledRate = rate.numerator * 10n ** BigInt(maximumScale - rate.fractionalDigits);
+    return total + BigInt(allocation.amountUsdMinor) * scaledRate;
+  }, 0n);
+  const projectedAnnualYield = annualYieldNumerator / denominator;
+  const effectiveApy =
+    grossCapital === 0n ? 0n : (annualYieldNumerator * 10_000n) / (grossCapital * denominator);
+  if (effectiveApy > BigInt(Number.MAX_SAFE_INTEGER) || effectiveApy > 10_000n) {
     throw new TypeError('local demo effective APY exceeds numeric limits');
   }
-  return Number(result);
+  return Object.freeze({
+    effectiveApyBasisPoints: Number(effectiveApy),
+    projectedAnnualYield,
+  });
 }
 
-function projectBreakEven(
-  totalFees: bigint,
-  annualYieldNumerator: bigint,
-): LocalDemoAllocationPreviewResponse['yieldProjection']['breakEven'] {
-  if (annualYieldNumerator > 0n) {
-    const firstDay = ceilDivide((totalFees + 1n) * 10_000n * 365n, annualYieldNumerator);
-    if (firstDay < 1n || firstDay > BigInt(Number.MAX_SAFE_INTEGER)) {
-      throw new TypeError('local demo break-even day exceeds numeric limits');
-    }
-    return Object.freeze({ status: 'AVAILABLE', firstNetPositiveDay: Number(firstDay) });
+function decimalRatio(value: string): Readonly<{ numerator: bigint; fractionalDigits: number }> {
+  const match = /^(0|[1-9][0-9]*)(?:\.([0-9]+))?$/u.exec(value);
+  if (!match) throw new TypeError('invalid local demo APY rate');
+  const whole = match[1];
+  const fraction = match[2] ?? '';
+  if (whole === undefined || fraction.length > 96) {
+    throw new TypeError('invalid local demo APY rate');
   }
-  return totalFees === 0n
-    ? Object.freeze({ status: 'NOT_APPLICABLE', firstNetPositiveDay: null })
-    : Object.freeze({ status: 'UNAVAILABLE', firstNetPositiveDay: null });
-}
-
-function ceilDivide(dividend: bigint, divisor: bigint): bigint {
-  if (dividend < 0n || divisor <= 0n) throw new TypeError('invalid local demo division');
-  return (dividend + divisor - 1n) / divisor;
+  return Object.freeze({
+    numerator: BigInt(`${whole}${fraction}`),
+    fractionalDigits: fraction.length,
+  });
 }
 
 /** Largest-remainder apportionment keeps every value in exact integer cents. */
@@ -390,4 +355,16 @@ function requiredNumber(values: readonly number[], index: number): number {
   const value = values[index];
   if (value === undefined) throw new TypeError('missing local demo allocation weight');
   return value;
+}
+
+function divideAmountEvenly(total: bigint, count: number): readonly bigint[] {
+  if (total < 0n || !Number.isSafeInteger(count) || count < 1) {
+    throw new TypeError('invalid local demo amount distribution');
+  }
+  const divisor = BigInt(count);
+  const quotient = total / divisor;
+  const remainder = Number(total % divisor);
+  return Object.freeze(
+    Array.from({ length: count }, (_, index) => quotient + (index < remainder ? 1n : 0n)),
+  );
 }

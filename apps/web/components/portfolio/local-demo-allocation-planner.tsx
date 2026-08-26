@@ -11,7 +11,6 @@ import {
 import {
   compareLocalDemoDecimals,
   LOCAL_DEMO_ALLOCATION_PRESETS,
-  type LocalDemoAllocationDeductionCode,
   type LocalDemoAllocationPreview,
   type LocalDemoAllocationSelectionInput,
   type LocalDemoYieldCatalog,
@@ -23,14 +22,6 @@ const AS_OF_FORMATTER = new Intl.DateTimeFormat('en-US', {
   dateStyle: 'medium',
   timeStyle: 'short',
   timeZone: 'UTC',
-});
-
-const DEDUCTION_LABELS: Readonly<Record<LocalDemoAllocationDeductionCode, string>> = Object.freeze({
-  LIQUIDITY: 'Liquidity cost assumption',
-  CONVERSION: 'Conversion costs',
-  SLIPPAGE: 'Estimated slippage',
-  NETWORK: 'Network costs',
-  ROUTING: 'Routing costs',
 });
 
 type LocalDemoPresetSelection = Extract<LocalDemoAllocationSelectionInput, { kind: 'PRESET' }>;
@@ -45,15 +36,6 @@ function Money({ amountUsdMinor }: { amountUsdMinor: string }) {
   return (
     <data value={formatted.decimal} aria-label={formatted.accessible}>
       <span aria-hidden="true">{formatted.visible}</span>
-    </data>
-  );
-}
-
-function DeductionMoney({ amountUsdMinor }: { amountUsdMinor: string }) {
-  const formatted = formatUsdMinor(amountUsdMinor);
-  return (
-    <data value={`-${formatted.decimal}`} aria-label={`${formatted.accessible} estimated fee`}>
-      <span aria-hidden="true">-{formatted.visible}</span>
     </data>
   );
 }
@@ -110,22 +92,15 @@ function Timestamp({ value, prefix }: { value: string; prefix?: string }) {
   );
 }
 
-function BreakEvenValue({ preview }: { preview: LocalDemoAllocationPreview }) {
-  const breakEven = preview.yieldProjection.breakEven;
-  if (breakEven.status === 'NOT_APPLICABLE') {
-    return <span className="local-demo-allocation-projection-unavailable">Not applicable</span>;
+function YieldStartValue({ preview }: { preview: LocalDemoAllocationPreview }) {
+  const hasProjectedYield = BigInt(preview.yieldProjection.projectedAnnualYieldUsdMinor) > 0n;
+  if (!hasProjectedYield) {
+    return <span className="local-demo-allocation-projection-unavailable">Below $0.01/year</span>;
   }
-  if (breakEven.status === 'UNAVAILABLE' || breakEven.firstNetPositiveDay === null) {
-    return <span className="local-demo-allocation-projection-unavailable">Unavailable</span>;
-  }
-  const day = breakEven.firstNetPositiveDay;
   return (
-    <data
-      value={day}
-      aria-label={`${day} ${day === 1 ? 'day' : 'days'} until estimated net-positive`}
-    >
+    <data value="1" aria-label="Projection assumes base yield from day 1">
       <span aria-hidden="true">
-        Day {day} <small>({day === 1 ? '1 day' : `${day} days`})</small>
+        Day 1 <small>(projection assumption)</small>
       </span>
     </data>
   );
@@ -178,7 +153,7 @@ function OpportunityCard({ opportunity }: { opportunity: LocalDemoYieldOpportuni
           </dd>
         </div>
         <div>
-          <dt>Provider borrow-interest fee</dt>
+          <dt>Reported borrower fee (not deducted)</dt>
           <dd>
             <ObservedRate
               rateDecimal={opportunity.apy.providerFee.rateDecimal}
@@ -264,40 +239,40 @@ function YieldProjection({ preview }: { preview: LocalDemoAllocationPreview }) {
       <div className="local-demo-allocation-yield-heading">
         <div>
           <p className="eyebrow">Morpho base APY snapshot</p>
-          <h4 id="local-demo-allocation-yield-title">Snapshot yield projection</h4>
+          <h4 id="local-demo-allocation-yield-title">Illustrative yield projection</h4>
         </div>
-        <p>Non-guaranteed estimate</p>
+        <p>Local scenario · not a live quote</p>
       </div>
       <dl className="local-demo-allocation-yield-metrics">
         <div className="local-demo-allocation-yield-primary">
-          <dt>Effective blended base APY</dt>
+          <dt>Effective blended base APY (rounded down)</dt>
           <dd>
             <Apy basisPoints={preview.yieldProjection.effectiveApyBasisPoints} />
           </dd>
         </div>
         <div>
-          <dt>Projected annual base yield</dt>
+          <dt>Projected base yield in 1 year</dt>
           <dd>
             <Money amountUsdMinor={preview.yieldProjection.projectedAnnualYieldUsdMinor} />
           </dd>
         </div>
         <div>
-          <dt>First net-positive day</dt>
+          <dt>Projection assumes yield from</dt>
           <dd>
-            <BreakEvenValue preview={preview} />
+            <YieldStartValue preview={preview} />
           </dd>
         </div>
         <div>
-          <dt>One-year growth after local cost assumption</dt>
-          <dd>
-            <Money amountUsdMinor={preview.yieldProjection.projectedAnnualNetGrowthUsdMinor} />
-          </dd>
+          <dt>Public execution costs</dt>
+          <dd className="local-demo-allocation-projection-unavailable">Not quoted</dd>
         </div>
       </dl>
       <p className="local-demo-allocation-yield-method">
-        Uses each selected market&apos;s captured base supply APY, rounded down to basis points, and
-        simple daily proration on net planned capital over 365 days. Reward APRs are disclosed but
-        excluded. Rates are point-in-time observations, not forecasts or promised returns.
+        Sums each market position using its exact captured base supply APY. This straight-line
+        one-year estimate excludes reward APR, compounding, rate changes, taxes, and public
+        execution costs. The displayed blended APY and dollar estimate are rounded down to basis
+        points and whole cents, respectively. Rates are point-in-time observations, not forecasts or
+        promised returns.
       </p>
     </section>
   );
@@ -314,8 +289,8 @@ function AllocationPreview({ preview }: { preview: LocalDemoAllocationPreview })
         <p>
           <strong>No user-authorized financial transaction was created.</strong> This estimate
           cannot authorize a transfer, investment, loan, or financial action. Provider rates are
-          historical snapshot observations; the one-percent action cost is still a local testing
-          assumption.
+          historical snapshot observations. This non-executing local simulation models no action
+          cost; public execution costs have not been quoted.
         </p>
       </div>
       {preview.catalog.freshness === 'STALE' ? (
@@ -351,7 +326,10 @@ function AllocationPreview({ preview }: { preview: LocalDemoAllocationPreview })
               <li key={allocation.allocationId}>
                 <span>
                   <strong>{allocation.label}</strong>
-                  <small>{percentage(allocation.percentageBasisPoints)} of gross capital</small>
+                  <small>
+                    Target share: {percentage(allocation.percentageBasisPoints)} of gross capital
+                    (rounded)
+                  </small>
                   {allocation.opportunity === null ? null : (
                     <small>
                       {allocation.opportunity.asset.symbol} · {allocation.opportunity.network.name}{' '}
@@ -377,17 +355,16 @@ function AllocationPreview({ preview }: { preview: LocalDemoAllocationPreview })
         </section>
 
         <section aria-labelledby="local-demo-allocation-fees-title">
-          <h4 id="local-demo-allocation-fees-title">Local action-cost assumptions</h4>
+          <h4 id="local-demo-allocation-fees-title">Execution cost treatment</h4>
           <p className="local-demo-allocation-fee-disclosure">
-            These are KAN-255 testing assumptions, not Morpho charges or live execution quotes.
+            The local preview creates no route or transaction, so its modeled execution cost is $0.
+            Public network, routing, conversion, and slippage costs are not quoted or included.
           </p>
           <ul className="local-demo-allocation-result-list local-demo-allocation-fee-list">
-            {preview.deductions.map((deduction) => (
-              <li key={deduction.code}>
-                <span>{DEDUCTION_LABELS[deduction.code]}</span>
-                <DeductionMoney amountUsdMinor={deduction.amountUsdMinor} />
-              </li>
-            ))}
+            <li>
+              <span>Modeled local execution cost</span>
+              <Money amountUsdMinor={preview.executionCost.modeledLocalAmountUsdMinor} />
+            </li>
           </ul>
         </section>
       </div>
@@ -400,15 +377,15 @@ function AllocationPreview({ preview }: { preview: LocalDemoAllocationPreview })
           </dd>
         </div>
         <div>
-          <dt>Local action-cost assumption</dt>
+          <dt>Modeled local execution cost</dt>
           <dd>
-            <DeductionMoney amountUsdMinor={preview.totalFeesUsdMinor} />
+            <Money amountUsdMinor={preview.executionCost.modeledLocalAmountUsdMinor} />
           </dd>
         </div>
         <div className="local-demo-allocation-net">
-          <dt>Net planned capital</dt>
+          <dt>Capital included in projection</dt>
           <dd>
-            <Money amountUsdMinor={preview.netPlannedCapitalUsdMinor} />
+            <Money amountUsdMinor={preview.capitalIncludedInProjectionUsdMinor} />
           </dd>
         </div>
       </dl>
@@ -628,8 +605,8 @@ export function LocalDemoAllocationPlanner({
         <span className="local-demo-proof-badge">Local snapshot · estimate only</span>
       </div>
       <p className="local-demo-allocation-intro">
-        Compare real, timestamped provider observations without live egress. Fee amounts and
-        net-positive timing appear only after you select a preset.
+        Compare real, timestamped provider observations without live egress. Allocation math,
+        projected yield, and execution-cost treatment appear only after you select a preset.
       </p>
 
       {catalogError ? (

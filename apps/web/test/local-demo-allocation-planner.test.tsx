@@ -32,7 +32,7 @@ function clientWith(options: {
 afterEach(() => cleanup());
 
 describe('LocalDemoAllocationPlanner', () => {
-  it('shows timestamped provider opportunities but no fee values before a selection', async () => {
+  it('shows provider opportunities but no execution-cost treatment before a selection', async () => {
     const harness = clientWith({});
     render(<LocalDemoAllocationPlanner client={harness.client} />);
 
@@ -67,14 +67,13 @@ describe('LocalDemoAllocationPlanner', () => {
     expect(screen.getByRole('button', { name: /More yield/u })).toBeEnabled();
     expect(screen.queryByText('Custom yield')).not.toBeInTheDocument();
     expect(
-      screen.queryByRole('heading', { name: 'Local action-cost assumptions' }),
+      screen.queryByRole('heading', { name: 'Execution cost treatment' }),
     ).not.toBeInTheDocument();
-    expect(document.querySelector('[aria-label$="estimated fee"]')).toBeNull();
-    expect(screen.queryByText('First net-positive day')).not.toBeInTheDocument();
+    expect(screen.queryByText('Projection assumes yield from')).not.toBeInTheDocument();
     expect(harness.previewAllocation).not.toHaveBeenCalled();
   });
 
-  it('sends a closed preset selection and reveals provider-derived yield plus local fee assumptions', async () => {
+  it('reveals exact position yield and honest local execution-cost treatment after selection', async () => {
     const harness = clientWith({});
     render(<LocalDemoAllocationPlanner client={harness.client} />);
     const balanced = await screen.findByRole('button', { name: /Balanced blend/u });
@@ -86,29 +85,66 @@ describe('LocalDemoAllocationPlanner', () => {
       expect.any(AbortSignal),
     );
     const feeHeading = await screen.findByRole('heading', {
-      name: 'Local action-cost assumptions',
+      name: 'Execution cost treatment',
     });
     expect(feeHeading).toBeInTheDocument();
     expect(
       screen.getByText('No user-authorized financial transaction was created.'),
     ).toBeInTheDocument();
     expect(screen.getByText(/historical snapshot observations/u)).toBeInTheDocument();
-    expect(screen.getByText(/testing assumptions, not Morpho charges/u)).toBeInTheDocument();
+    expect(screen.getByText(/public execution costs have not been quoted/u)).toBeInTheDocument();
+    expect(screen.getByText(/modeled execution cost is.*\$0/u)).toBeInTheDocument();
     const projection = screen
-      .getByRole('heading', { name: 'Snapshot yield projection' })
+      .getByRole('heading', { name: 'Illustrative yield projection' })
       .closest('section');
     expect(projection).not.toBeNull();
     expect(
       within(projection!).getByLabelText('3.28 percent base annual percentage yield'),
     ).toBeInTheDocument();
-    expect(within(projection!).getByLabelText('358 US dollars and 27 cents')).toHaveTextContent(
-      '$358.27',
+    expect(within(projection!).getByLabelText('361 US dollars and 32 cents')).toHaveTextContent(
+      '$361.32',
     );
     expect(
-      within(projection!).getByLabelText('79 days until estimated net-positive'),
-    ).toHaveTextContent('Day 79');
-    expect(screen.getByLabelText('77 US dollars estimated fee')).toHaveTextContent('-$77.00');
+      within(projection!).getByLabelText('Projection assumes base yield from day 1'),
+    ).toHaveTextContent('Day 1');
+    expect(within(projection!).getByText('Not quoted')).toBeInTheDocument();
+    const costSection = feeHeading.closest('section');
+    expect(within(costSection!).getByLabelText('0 US dollars')).toHaveTextContent('$0.00');
+    expect(screen.queryByText('Day 79')).not.toBeInTheDocument();
+    expect(
+      screen.getByText(/Target share: 23\.34% of gross capital \(rounded\)/u),
+    ).toBeInTheDocument();
     expect(screen.getByText(/1.73% reward APR excluded/u)).toBeInTheDocument();
+  });
+
+  it('does not claim a Day 1 dollar yield below whole-cent annual precision', async () => {
+    const tinyPreview: LocalDemoAllocationPreview = Object.freeze({
+      ...BALANCED_PREVIEW,
+      grossCapitalUsdMinor: '1',
+      allocations: Object.freeze(
+        BALANCED_PREVIEW.allocations.map((allocation, index) =>
+          Object.freeze({
+            ...allocation,
+            amountUsdMinor: ['0', '1', '0', '0'][index]!,
+          }),
+        ),
+      ),
+      capitalIncludedInProjectionUsdMinor: '1',
+      yieldProjection: Object.freeze({
+        ...BALANCED_PREVIEW.yieldProjection,
+        effectiveApyBasisPoints: 521,
+        projectedAnnualYieldUsdMinor: '0',
+      }),
+    });
+    const harness = clientWith({ previewAllocation: async () => tinyPreview });
+    render(<LocalDemoAllocationPlanner client={harness.client} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /Balanced blend/u }));
+
+    expect(await screen.findByText('Below $0.01/year')).toBeInTheDocument();
+    expect(
+      screen.queryByLabelText('Projection assumes base yield from day 1'),
+    ).not.toBeInTheDocument();
   });
 
   it('retries an unavailable local snapshot in place', async () => {

@@ -19,7 +19,8 @@ provide a production fallback.
 6. Invoke the real KAN-68 `BuyingPowerCalculator`. Its idle-view adjustment explicitly reports
    zero route costs, so supported, current, priced capital remains available in full while the
    calculator continues to exclude stale, unsupported, unpriced, or blocked contributions. The
-   idle web response omits deductions entirely; fees appear only in a requested allocation preview.
+   idle web response omits allocation cost treatment entirely; the zero-cost local-simulation
+   treatment appears only in a requested allocation preview. Public execution costs are not quoted.
 7. Floor scale-18 USD mantissas to integer cents and return the exact KAN-69 web response shape.
 
 With one connected wallet in each namespace, the stable fixtures contain $7,000 EVM USDC and
@@ -41,16 +42,18 @@ capital from the authenticated account, ranks matches by exact base APY then opp
 at most three, and divides the non-reserve allocation deterministically. No match returns a typed
 422 response without fallback.
 
-Only non-reserve capital receives a one-percent local action-cost assumption, split across
-liquidity, conversion, slippage, network, and routing in the established 50/10/10/10/20
-proportions. Integer-cent largest-remainder apportionment makes allocations and itemized estimates
-sum exactly. Projected annual yield uses only the weighted provider base APYs on net planned
-capital; reward APR remains separately disclosed and excluded. Break-even uses simple 365-day APY
-proration and returns the first whole day whose floored accrued cents exceed the local cost
-assumption. The catalog and preview create no user-authorized financial operation, live provider
-request, public-chain transaction, or persistence record and do not make a promise, recommendation,
-or financial authorization. Portfolio fixture maintenance may still create zero-gas transactions
-on the owned loopback EVM after a reset.
+The preview creates no route or transaction, so its execution-cost object models zero local cost
+and marks public network, routing, conversion, and slippage costs explicitly unquoted. It returns no
+generic net-growth or cost-recovery number. Gross capital and capital included in the local
+projection reconcile exactly. The allocator fixes the liquid-reserve cents first, then divides the
+investable cents directly across the selected markets; those market amounts differ by no more than
+one cent.
+Projected annual yield sums each actual market amount multiplied by its exact captured base APY
+decimal. The rounded blended basis-point rate is display-only, while reward APR remains separately
+disclosed and excluded. The catalog and preview create no user-authorized financial operation, live
+provider request, public-chain transaction, or persistence record and do not make a promise,
+recommendation, or financial authorization. Portfolio fixture maintenance may still create
+zero-gas transactions on the owned loopback EVM after a reset.
 
 ## Trust and I/O boundaries
 

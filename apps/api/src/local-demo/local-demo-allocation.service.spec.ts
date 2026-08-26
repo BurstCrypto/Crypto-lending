@@ -69,12 +69,18 @@ describe('LocalDemoAllocationService', () => {
   });
 
   it.each([
-    ['MORE_LIQUID', 6_000, [6_000, 1_334, 1_333, 1_333], '4400', 187],
-    ['BALANCED', 3_000, [3_000, 2_334, 2_333, 2_333], '7700', 328],
-    ['MORE_YIELD', 1_500, [1_500, 2_834, 2_833, 2_833], '9350', 398],
+    ['MORE_LIQUID', 6_000, [6_000, 1_334, 1_333, 1_333], '20646', 187],
+    ['BALANCED', 3_000, [3_000, 2_334, 2_333, 2_333], '36132', 328],
+    ['MORE_YIELD', 1_500, [1_500, 2_834, 2_833, 2_833], '43874', 398],
   ] as const)(
     'projects %s over the same trusted ranked snapshot without external I/O',
-    async (presetId, reserveBasisPoints, expectedWeights, totalFees, effectiveApyBasisPoints) => {
+    async (
+      presetId,
+      reserveBasisPoints,
+      expectedWeights,
+      projectedAnnualYield,
+      effectiveApyBasisPoints,
+    ) => {
       const { service, read } = fixture();
       const fetchSpy = jest
         .spyOn(global, 'fetch')
@@ -121,11 +127,17 @@ describe('LocalDemoAllocationService', () => {
       expect(highestApy?.provenance.payloadSha256).toBe(
         '5afd26e631dc47617a3c6e84d0e04e0ac286ef8f175997611aabe937849723b4',
       );
-      expect(result.feeEstimateSource).toBe('LOCAL_DEMO_ACTION_COST_ASSUMPTION');
-      expect(result.totalFeesUsdMinor).toBe(totalFees);
+      expect(result.executionCost).toEqual({
+        treatment: 'LOCAL_DEMO_ZERO_NO_EXECUTION',
+        modeledLocalAmountUsdMinor: '0',
+        publicExecutionCostStatus: 'UNQUOTED',
+      });
+      expect(result.capitalIncludedInProjectionUsdMinor).toBe(result.grossCapitalUsdMinor);
       expect(result.yieldProjection).toMatchObject({
         source: 'MORPHO_PUBLIC_API_SNAPSHOT',
+        calculationMethod: 'POSITION_WEIGHTED_EXACT_BASE_APY',
         effectiveApyBasisPoints,
+        projectedAnnualYieldUsdMinor: projectedAnnualYield,
       });
       expect(
         result.allocations.reduce(
@@ -133,12 +145,10 @@ describe('LocalDemoAllocationService', () => {
           0n,
         ),
       ).toBe(1_100_000n);
-      expect(
-        result.deductions.reduce(
-          (total, deduction) => total + BigInt(deduction.amountUsdMinor),
-          0n,
-        ),
-      ).toBe(BigInt(totalFees));
+      const yieldAmounts = result.allocations
+        .slice(1)
+        .map(({ amountUsdMinor }) => BigInt(amountUsdMinor));
+      expect(yieldAmounts[0]! - yieldAmounts.at(-1)!).toBeLessThanOrEqual(1n);
       expect(Object.isFrozen(result)).toBe(true);
       expect(Object.isFrozen(result.allocations)).toBe(true);
       expect(Object.isFrozen(highestApy?.apy.rewardAprs)).toBe(true);
@@ -176,8 +186,9 @@ describe('LocalDemoAllocationService', () => {
       apy: { baseRateDecimal: '0.030244914978243814', baseBasisPoints: 302 },
       exitLiquidity: { interpretation: 'AVAILABLE_TO_BORROW_PROXY' },
     });
-    expect(result.totalFeesUsdMinor).toBe('8250');
+    expect(result.executionCost.modeledLocalAmountUsdMinor).toBe('0');
     expect(result.yieldProjection.effectiveApyBasisPoints).toBe(226);
+    expect(result.yieldProjection.projectedAnnualYieldUsdMinor).toBe('24952');
   });
 
   it('keeps the closed 99% reserve boundary locally calculable', async () => {
@@ -196,7 +207,7 @@ describe('LocalDemoAllocationService', () => {
       '1089000',
       '11000',
     ]);
-    expect(result.totalFeesUsdMinor).toBe('110');
+    expect(result.executionCost.modeledLocalAmountUsdMinor).toBe('0');
 
     await expect(
       service.preview(
@@ -227,7 +238,13 @@ describe('LocalDemoAllocationService', () => {
         0n,
       ),
     ).toBe(10_001n);
-    expect(result.totalFeesUsdMinor).toBe('70');
+    expect(result.allocations.map(({ amountUsdMinor }) => amountUsdMinor)).toEqual([
+      '3000',
+      '2334',
+      '2334',
+      '2333',
+    ]);
+    expect(result.executionCost.modeledLocalAmountUsdMinor).toBe('0');
   });
 
   it('keeps a stale snapshot usable only as an explicitly non-executable offline estimate', async () => {
@@ -242,10 +259,7 @@ describe('LocalDemoAllocationService', () => {
       riskClassification: 'NOT_ASSESSED',
     });
     expect(result.mayAuthorizeFinancialAction).toBe(false);
-    expect(result.totalFeesUsdMinor).toBe('0');
-    expect(result.yieldProjection.breakEven).toEqual({
-      status: 'NOT_APPLICABLE',
-      firstNetPositiveDay: null,
-    });
+    expect(result.executionCost.modeledLocalAmountUsdMinor).toBe('0');
+    expect(result.yieldProjection.projectedAnnualYieldUsdMinor).toBe('0');
   });
 });

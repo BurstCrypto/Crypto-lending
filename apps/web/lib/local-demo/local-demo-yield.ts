@@ -37,8 +37,6 @@ export type LocalDemoYieldAssetSymbol = (typeof LOCAL_DEMO_YIELD_ASSET_SYMBOLS)[
 export type LocalDemoYieldProviderId = (typeof LOCAL_DEMO_YIELD_PROVIDER_IDS)[number];
 export type LocalDemoYieldNetworkId = (typeof LOCAL_DEMO_YIELD_NETWORK_IDS)[number];
 export type LocalDemoYieldFreshness = 'CURRENT' | 'STALE';
-export type LocalDemoAllocationDeductionCode =
-  'LIQUIDITY' | 'CONVERSION' | 'SLIPPAGE' | 'NETWORK' | 'ROUTING';
 
 export interface LocalDemoCustomYieldFilters {
   readonly assetSymbols: readonly LocalDemoYieldAssetSymbol[];
@@ -173,41 +171,20 @@ export interface LocalDemoAllocationPreview {
     amountUsdMinor: string;
     opportunity: LocalDemoYieldOpportunity | null;
   }>[];
-  readonly deductions: readonly Readonly<{
-    code: LocalDemoAllocationDeductionCode;
-    amountUsdMinor: string;
-  }>[];
-  readonly feeEstimateSource: 'LOCAL_DEMO_ACTION_COST_ASSUMPTION';
-  readonly totalFeesUsdMinor: string;
-  readonly netPlannedCapitalUsdMinor: string;
+  readonly executionCost: Readonly<{
+    treatment: 'LOCAL_DEMO_ZERO_NO_EXECUTION';
+    modeledLocalAmountUsdMinor: '0';
+    publicExecutionCostStatus: 'UNQUOTED';
+  }>;
+  readonly capitalIncludedInProjectionUsdMinor: string;
   readonly yieldProjection: Readonly<{
     source: 'MORPHO_PUBLIC_API_SNAPSHOT';
-    calculationMethod: 'SIMPLE_DAILY_APY_PRORATION_ON_NET_CAPITAL';
+    calculationMethod: 'POSITION_WEIGHTED_EXACT_BASE_APY';
     effectiveApyBasisPoints: number;
     projectedAnnualYieldUsdMinor: string;
-    projectedAnnualNetGrowthUsdMinor: string;
-    breakEven: Readonly<{
-      status: 'AVAILABLE' | 'NOT_APPLICABLE' | 'UNAVAILABLE';
-      firstNetPositiveDay: number | null;
-    }>;
   }>;
   readonly asOf: string;
 }
-
-const DEDUCTION_CODES = Object.freeze([
-  'LIQUIDITY',
-  'CONVERSION',
-  'SLIPPAGE',
-  'NETWORK',
-  'ROUTING',
-] as const);
-const DEDUCTION_WEIGHTS = Object.freeze({
-  LIQUIDITY: 5_000,
-  CONVERSION: 1_000,
-  SLIPPAGE: 1_000,
-  NETWORK: 1_000,
-  ROUTING: 2_000,
-} as const);
 
 function invalid(): never {
   throw new TypeError('Invalid local demo yield response');
@@ -740,6 +717,48 @@ function divideEvenly(total: number, count: number): readonly number[] {
   );
 }
 
+function divideAmountEvenly(total: bigint, count: number): readonly bigint[] {
+  if (total < 0n || !Number.isSafeInteger(count) || count < 1) return invalid();
+  const divisor = BigInt(count);
+  const quotient = total / divisor;
+  const remainder = Number(total % divisor);
+  return Object.freeze(
+    Array.from({ length: count }, (_, index) => quotient + (index < remainder ? 1n : 0n)),
+  );
+}
+
+function decimalRatio(value: string): Readonly<{ numerator: bigint; fractionalDigits: number }> {
+  const [whole = '', fraction = ''] = value.split('.');
+  if (whole.length === 0 || fraction.length > 96) return invalid();
+  return Object.freeze({
+    numerator: BigInt(`${whole}${fraction}`),
+    fractionalDigits: fraction.length,
+  });
+}
+
+function exactYieldProjection(
+  allocations: LocalDemoAllocationPreview['allocations'],
+  grossCapital: bigint,
+): Readonly<{ effectiveApyBasisPoints: bigint; projectedAnnualYield: bigint }> {
+  const rates = allocations.map(({ baseApyRateDecimal }) => decimalRatio(baseApyRateDecimal));
+  const maximumScale = rates.reduce(
+    (maximum, { fractionalDigits }) => Math.max(maximum, fractionalDigits),
+    0,
+  );
+  const denominator = 10n ** BigInt(maximumScale);
+  const annualYieldNumerator = allocations.reduce((total, allocation, index) => {
+    const rate = rates[index];
+    if (rate === undefined) return invalid();
+    const scaledRate = rate.numerator * 10n ** BigInt(maximumScale - rate.fractionalDigits);
+    return total + BigInt(allocation.amountUsdMinor) * scaledRate;
+  }, 0n);
+  return Object.freeze({
+    effectiveApyBasisPoints:
+      grossCapital === 0n ? 0n : (annualYieldNumerator * 10_000n) / (grossCapital * denominator),
+    projectedAnnualYield: annualYieldNumerator / denominator,
+  });
+}
+
 export function parseLocalDemoAllocationPreview(value: unknown): LocalDemoAllocationPreview {
   const record = exactRecord(value, [
     'use',
@@ -748,18 +767,12 @@ export function parseLocalDemoAllocationPreview(value: unknown): LocalDemoAlloca
     'catalog',
     'grossCapitalUsdMinor',
     'allocations',
-    'deductions',
-    'feeEstimateSource',
-    'totalFeesUsdMinor',
-    'netPlannedCapitalUsdMinor',
+    'executionCost',
+    'capitalIncludedInProjectionUsdMinor',
     'yieldProjection',
     'asOf',
   ]);
-  if (
-    record.use !== 'LOCAL_DEMO_ESTIMATE_ONLY' ||
-    record.mayAuthorizeFinancialAction !== false ||
-    record.feeEstimateSource !== 'LOCAL_DEMO_ACTION_COST_ASSUMPTION'
-  ) {
+  if (record.use !== 'LOCAL_DEMO_ESTIMATE_ONLY' || record.mayAuthorizeFinancialAction !== false) {
     return invalid();
   }
 
@@ -972,7 +985,17 @@ export function parseLocalDemoAllocationPreview(value: unknown): LocalDemoAlloca
     liquidReserveBasisPoints,
     ...divideEvenly(10_000 - liquidReserveBasisPoints, catalog.selectedOpportunityCount),
   ]);
-  const expectedAllocationAmounts = distribute(grossCapital, expectedWeights);
+  const capitalBuckets = distribute(grossCapital, [
+    liquidReserveBasisPoints,
+    10_000 - liquidReserveBasisPoints,
+  ]);
+  const liquidReserveCapital = capitalBuckets[0];
+  const nonReserveCapital = capitalBuckets[1];
+  if (liquidReserveCapital === undefined || nonReserveCapital === undefined) return invalid();
+  const expectedAllocationAmounts = Object.freeze([
+    liquidReserveCapital,
+    ...divideAmountEvenly(nonReserveCapital, catalog.selectedOpportunityCount),
+  ]);
   if (
     allocations.some(
       (allocation, index) =>
@@ -983,102 +1006,46 @@ export function parseLocalDemoAllocationPreview(value: unknown): LocalDemoAlloca
     return invalid();
   }
 
-  const nonReserve = allocations
-    .filter(({ bucket }) => bucket === 'YIELD_OPPORTUNITY')
-    .reduce((sum, allocation) => sum + BigInt(allocation.amountUsdMinor), 0n);
-  const expectedFees = nonReserve / 100n;
-  const expectedDeductionAmounts = distribute(
-    expectedFees,
-    DEDUCTION_CODES.map((code) => DEDUCTION_WEIGHTS[code]),
-  );
-  const deductions = Object.freeze(
-    exactArray(record.deductions, DEDUCTION_CODES.length, DEDUCTION_CODES.length).map(
-      (candidate) => {
-        const deduction = exactRecord(candidate, ['code', 'amountUsdMinor']);
-        const code = enumValue(deduction.code, DEDUCTION_CODES);
-        const amountUsdMinor = usdMinor(deduction.amountUsdMinor);
-        const expected = expectedDeductionAmounts[DEDUCTION_CODES.indexOf(code)];
-        if (expected === undefined || BigInt(amountUsdMinor) !== expected) return invalid();
-        return Object.freeze({ code, amountUsdMinor });
-      },
-    ),
-  );
-  if (new Set(deductions.map(({ code }) => code)).size !== DEDUCTION_CODES.length) return invalid();
-  const totalFeesUsdMinor = usdMinor(record.totalFeesUsdMinor);
+  const executionCostRecord = exactRecord(record.executionCost, [
+    'treatment',
+    'modeledLocalAmountUsdMinor',
+    'publicExecutionCostStatus',
+  ]);
   if (
-    BigInt(totalFeesUsdMinor) !== expectedFees ||
-    deductions.reduce((sum, deduction) => sum + BigInt(deduction.amountUsdMinor), 0n) !==
-      expectedFees
+    executionCostRecord.treatment !== 'LOCAL_DEMO_ZERO_NO_EXECUTION' ||
+    executionCostRecord.modeledLocalAmountUsdMinor !== '0' ||
+    executionCostRecord.publicExecutionCostStatus !== 'UNQUOTED'
   ) {
     return invalid();
   }
-  const netPlannedCapitalUsdMinor = usdMinor(record.netPlannedCapitalUsdMinor);
-  if (grossCapital - expectedFees !== BigInt(netPlannedCapitalUsdMinor)) return invalid();
+  const executionCost = Object.freeze({
+    treatment: 'LOCAL_DEMO_ZERO_NO_EXECUTION' as const,
+    modeledLocalAmountUsdMinor: '0' as const,
+    publicExecutionCostStatus: 'UNQUOTED' as const,
+  });
+  const capitalIncludedInProjectionUsdMinor = usdMinor(record.capitalIncludedInProjectionUsdMinor);
+  if (grossCapital !== BigInt(capitalIncludedInProjectionUsdMinor)) return invalid();
 
   const projectionRecord = exactRecord(record.yieldProjection, [
     'source',
     'calculationMethod',
     'effectiveApyBasisPoints',
     'projectedAnnualYieldUsdMinor',
-    'projectedAnnualNetGrowthUsdMinor',
-    'breakEven',
   ]);
   if (
     projectionRecord.source !== 'MORPHO_PUBLIC_API_SNAPSHOT' ||
-    projectionRecord.calculationMethod !== 'SIMPLE_DAILY_APY_PRORATION_ON_NET_CAPITAL'
+    projectionRecord.calculationMethod !== 'POSITION_WEIGHTED_EXACT_BASE_APY'
   ) {
     return invalid();
   }
-  const weightedApy =
-    allocations.reduce(
-      (sum, allocation) =>
-        sum + BigInt(allocation.percentageBasisPoints) * BigInt(allocation.baseApyBasisPoints),
-      0n,
-    ) / 10_000n;
+  const exactProjection = exactYieldProjection(allocations, grossCapital);
   const effectiveApyBasisPoints = boundedInteger(projectionRecord.effectiveApyBasisPoints);
-  if (BigInt(effectiveApyBasisPoints) !== weightedApy) return invalid();
-  const netCapital = BigInt(netPlannedCapitalUsdMinor);
-  const annualYield = (netCapital * weightedApy) / 10_000n;
+  if (BigInt(effectiveApyBasisPoints) !== exactProjection.effectiveApyBasisPoints) return invalid();
+  const annualYield = exactProjection.projectedAnnualYield;
   const projectedAnnualYieldUsdMinor = usdMinor(projectionRecord.projectedAnnualYieldUsdMinor);
-  if (BigInt(projectedAnnualYieldUsdMinor) !== annualYield || annualYield < expectedFees) {
+  if (BigInt(projectedAnnualYieldUsdMinor) !== annualYield) {
     return invalid();
   }
-  const projectedAnnualNetGrowthUsdMinor = usdMinor(
-    projectionRecord.projectedAnnualNetGrowthUsdMinor,
-  );
-  if (BigInt(projectedAnnualNetGrowthUsdMinor) !== annualYield - expectedFees) return invalid();
-  const breakEvenRecord = exactRecord(projectionRecord.breakEven, [
-    'status',
-    'firstNetPositiveDay',
-  ]);
-  const dailyDenominator = netCapital * weightedApy;
-  let breakEven: LocalDemoAllocationPreview['yieldProjection']['breakEven'];
-  if (dailyDenominator > 0n) {
-    const numerator = (expectedFees + 1n) * 10_000n * 365n;
-    const day = (numerator + dailyDenominator - 1n) / dailyDenominator;
-    if (
-      day > BigInt(Number.MAX_SAFE_INTEGER) ||
-      breakEvenRecord.status !== 'AVAILABLE' ||
-      breakEvenRecord.firstNetPositiveDay !== Number(day)
-    ) {
-      return invalid();
-    }
-    breakEven = Object.freeze({ status: 'AVAILABLE', firstNetPositiveDay: Number(day) });
-  } else if (expectedFees === 0n) {
-    if (
-      breakEvenRecord.status !== 'NOT_APPLICABLE' ||
-      breakEvenRecord.firstNetPositiveDay !== null
-    ) {
-      return invalid();
-    }
-    breakEven = Object.freeze({ status: 'NOT_APPLICABLE', firstNetPositiveDay: null });
-  } else {
-    if (breakEvenRecord.status !== 'UNAVAILABLE' || breakEvenRecord.firstNetPositiveDay !== null) {
-      return invalid();
-    }
-    breakEven = Object.freeze({ status: 'UNAVAILABLE', firstNetPositiveDay: null });
-  }
-
   return Object.freeze({
     use: 'LOCAL_DEMO_ESTIMATE_ONLY',
     mayAuthorizeFinancialAction: false,
@@ -1086,17 +1053,13 @@ export function parseLocalDemoAllocationPreview(value: unknown): LocalDemoAlloca
     catalog,
     grossCapitalUsdMinor,
     allocations,
-    deductions,
-    feeEstimateSource: 'LOCAL_DEMO_ACTION_COST_ASSUMPTION',
-    totalFeesUsdMinor,
-    netPlannedCapitalUsdMinor,
+    executionCost,
+    capitalIncludedInProjectionUsdMinor,
     yieldProjection: Object.freeze({
       source: 'MORPHO_PUBLIC_API_SNAPSHOT',
-      calculationMethod: 'SIMPLE_DAILY_APY_PRORATION_ON_NET_CAPITAL',
+      calculationMethod: 'POSITION_WEIGHTED_EXACT_BASE_APY',
       effectiveApyBasisPoints,
       projectedAnnualYieldUsdMinor,
-      projectedAnnualNetGrowthUsdMinor,
-      breakEven,
     }),
     asOf: timestamp(record.asOf),
   });
