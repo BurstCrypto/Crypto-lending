@@ -1213,7 +1213,7 @@ test('rejects stale final evidence or acceptance performed before observation', 
 });
 
 test('validates the fail-closed production browser policy and rejects external production sources', () => {
-  const source = readFileSync('apps/web/lib/security/browser-egress.ts', 'utf8');
+  const source = readFileSync('apps/web/lib/security/browser-egress.js', 'utf8');
   const current = validateBrowserEgressSource(source);
   assert.deepEqual(current.errors, []);
 
