@@ -158,22 +158,30 @@ restart the attached harness to pick up API source changes.
    fee is deducted before an action is chosen. Inspect the source wallet, chain,
    asset, freshness, and masked-address details.
 9. Review the timestamped managed-rate status, then choose **More liquid**,
-   **Balanced blend**, or **More yield**. Only this explicit closed preset choice
-   requests an allocation preview or reveals its cost treatment. The browser
-   receives aggregate liquid-reserve and managed-yield buckets only; confidential
-   provider, protocol, market, provenance, and endpoint details stay on the
-   server. The request is bound to the displayed portfolio snapshot. The result
-   shows provider-neutral EVM/Solana source and managed totals, keeps capital
-   assigned to its wallet ecosystem, and models no EVM-to-Solana transfer. It
-   does not claim a bridge-free EVM network route. The preview creates no
-   executable route, so the actual local operation costs $0.00 and public execution
-   remains unquoted. A separate non-quote scenario itemizes network, conversion,
-   cross-chain, market-impact, and routing costs, rounds each variable component
-   up to a cent, and deducts the total before allocation and yield projection.
-   Review the aggregate effective APY, annual yield before and after modeled
-   fees, and first-positive-day status. A numbered day is the first whole day
-   when straight-line projected yield exceeds modeled fees by at least one cent
-   within the 365-day horizon; it is not a live rate or execution promise.
+   **Balanced blend**, or **More yield** as a starting point. Only this explicit
+   choice requests the first allocation preview or reveals its cost treatment.
+   In the selected preview, move the liquidity slider from 0% to 95% in 5%
+   steps, then choose **Update preview**. The page keeps the currently applied
+   percentage visible until the recalculation succeeds; changing the draft or
+   updating the preview never moves funds. The reserve percentage applies to
+   capital remaining after modeled one-time fees.
+
+   The browser receives aggregate liquid-reserve and managed-yield buckets only;
+   confidential provider, protocol, market, provenance, and endpoint details
+   stay on the server. The request is bound to the displayed portfolio snapshot.
+   The result shows provider-neutral EVM/Solana source and managed totals, covers
+   each ecosystem's modeled fees from that ecosystem, keeps capital assigned to
+   its wallet ecosystem, and models no EVM-to-Solana transfer. It does not claim
+   a bridge-free EVM network route. The preview creates no executable route, so
+   the actual local operation costs $0.00 and public execution remains unquoted.
+   A separate non-quote scenario itemizes network, conversion, cross-chain,
+   market-impact, and routing costs, rounds each variable component up to a cent,
+   and deducts the total before allocation and yield projection. Review the
+   aggregate effective APY, annual yield before and after modeled fees, and
+   first-positive-day status. A numbered day is the first whole day when
+   straight-line projected yield exceeds modeled fees by at least one cent within
+   the 365-day horizon; it is not a live rate or execution promise.
+
 10. Confirm the page states **No user-authorized financial transaction was
     created**. Refresh the browser to exercise wallet and session restoration.
     Disconnect a wallet to remove its contribution.

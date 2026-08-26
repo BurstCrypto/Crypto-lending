@@ -15,15 +15,22 @@ import {
 describe('local demo HTTP boundary', () => {
   const portfolioSnapshotId = 'local-demo-portfolio:0123456789abcdef0123456789abcdef';
 
-  it.each(['MORE_LIQUID', 'BALANCED', 'MORE_YIELD'] as const)(
-    'accepts only the %s allocation preset identifier',
-    (presetId) => {
+  it.each([
+    { presetId: 'MORE_LIQUID' as const, liquidReserveBasisPoints: 0 },
+    { presetId: 'BALANCED' as const, liquidReserveBasisPoints: 1_550 },
+    { presetId: 'MORE_YIELD' as const, liquidReserveBasisPoints: 9_500 },
+  ])(
+    'accepts the $presetId base plan with a $liquidReserveBasisPoints bps reserve',
+    ({ presetId, liquidReserveBasisPoints }) => {
       const result = parseLocalDemoAllocationPreviewBody({
         portfolioSnapshotId,
-        selection: { kind: 'PRESET', presetId },
+        selection: { kind: 'PRESET', presetId, liquidReserveBasisPoints },
       });
 
-      expect(result).toEqual({ portfolioSnapshotId, selection: { kind: 'PRESET', presetId } });
+      expect(result).toEqual({
+        portfolioSnapshotId,
+        selection: { kind: 'PRESET', presetId, liquidReserveBasisPoints },
+      });
       expect(Object.isFrozen(result)).toBe(true);
       expect(Object.isFrozen(result.selection)).toBe(true);
     },
@@ -32,23 +39,89 @@ describe('local demo HTTP boundary', () => {
   it.each([
     {},
     { presetId: 'BALANCED' },
-    { selection: { kind: 'PRESET', presetId: 'CUSTOM' } },
-    { selection: { kind: 'CUSTOM', presetId: 'BALANCED' } },
     {
+      portfolioSnapshotId,
+      selection: { kind: 'PRESET', presetId: 'CUSTOM', liquidReserveBasisPoints: 3_000 },
+    },
+    {
+      portfolioSnapshotId,
+      selection: { kind: 'CUSTOM', presetId: 'BALANCED', liquidReserveBasisPoints: 3_000 },
+    },
+    {
+      portfolioSnapshotId,
       selection: {
         kind: 'CUSTOM',
         liquidReserveBasisPoints: 2_500,
         filters: { providerIds: ['MORPHO'], networkIds: ['eip155:1'] },
       },
     },
-    { selection: { kind: 'PRESET', presetId: 'BALANCED', amountUsdMinor: '1' } },
-    { selection: { kind: 'PRESET', presetId: 'BALANCED', modeledCostUsdMinor: '1' } },
-    { selection: { kind: 'PRESET', presetId: 'BALANCED' }, accountId: 'caller' },
     {
-      portfolioSnapshotId: 'local-demo-portfolio:../stale',
+      portfolioSnapshotId,
       selection: { kind: 'PRESET', presetId: 'BALANCED' },
     },
-    Object.assign(Object.create({ selection: { kind: 'PRESET', presetId: 'BALANCED' } }), {}),
+    {
+      portfolioSnapshotId,
+      selection: { kind: 'PRESET', presetId: 'BALANCED', liquidReserveBasisPoints: -1 },
+    },
+    {
+      portfolioSnapshotId,
+      selection: { kind: 'PRESET', presetId: 'BALANCED', liquidReserveBasisPoints: 9_501 },
+    },
+    {
+      portfolioSnapshotId,
+      selection: { kind: 'PRESET', presetId: 'BALANCED', liquidReserveBasisPoints: 1.5 },
+    },
+    {
+      portfolioSnapshotId,
+      selection: { kind: 'PRESET', presetId: 'BALANCED', liquidReserveBasisPoints: Number.NaN },
+    },
+    {
+      portfolioSnapshotId,
+      selection: {
+        kind: 'PRESET',
+        presetId: 'BALANCED',
+        liquidReserveBasisPoints: Number.POSITIVE_INFINITY,
+      },
+    },
+    {
+      portfolioSnapshotId,
+      selection: {
+        kind: 'PRESET',
+        presetId: 'BALANCED',
+        liquidReserveBasisPoints: 3_000,
+        amountUsdMinor: '1',
+      },
+    },
+    {
+      portfolioSnapshotId,
+      selection: {
+        kind: 'PRESET',
+        presetId: 'BALANCED',
+        liquidReserveBasisPoints: 3_000,
+        modeledCostUsdMinor: '1',
+      },
+    },
+    {
+      portfolioSnapshotId,
+      selection: { kind: 'PRESET', presetId: 'BALANCED', liquidReserveBasisPoints: 3_000 },
+      accountId: 'caller',
+    },
+    {
+      portfolioSnapshotId: 'local-demo-portfolio:../stale',
+      selection: { kind: 'PRESET', presetId: 'BALANCED', liquidReserveBasisPoints: 3_000 },
+    },
+    Object.assign(Object.create({ polluted: true }), {
+      portfolioSnapshotId,
+      selection: { kind: 'PRESET', presetId: 'BALANCED', liquidReserveBasisPoints: 3_000 },
+    }),
+    {
+      portfolioSnapshotId,
+      selection: Object.assign(Object.create({ polluted: true }), {
+        kind: 'PRESET',
+        presetId: 'BALANCED',
+        liquidReserveBasisPoints: 3_000,
+      }),
+    },
   ])('rejects malformed, custom, or caller-authored allocation input', (body) => {
     expect(() => parseLocalDemoAllocationPreviewBody(body)).toThrow(LocalDemoBodyError);
   });
@@ -64,6 +137,7 @@ describe('local demo HTTP boundary', () => {
       },
     });
     selection.presetId = 'BALANCED';
+    selection.liquidReserveBasisPoints = 3_000;
 
     expect(() => parseLocalDemoAllocationPreviewBody({ portfolioSnapshotId, selection })).toThrow(
       LocalDemoBodyError,
@@ -80,12 +154,17 @@ describe('local demo HTTP boundary', () => {
         selection: {
           type: 'object',
           additionalProperties: false,
-          required: ['kind', 'presetId'],
+          required: ['kind', 'presetId', 'liquidReserveBasisPoints'],
           properties: {
             kind: { type: 'string', enum: ['PRESET'] },
             presetId: {
               type: 'string',
               enum: ['MORE_LIQUID', 'BALANCED', 'MORE_YIELD'],
+            },
+            liquidReserveBasisPoints: {
+              type: 'integer',
+              minimum: 0,
+              maximum: 9_500,
             },
           },
         },
@@ -106,6 +185,15 @@ describe('local demo HTTP boundary', () => {
         'yieldProjection',
       ]),
       properties: {
+        selection: {
+          properties: {
+            liquidReserveBasisPoints: {
+              type: 'integer',
+              minimum: 0,
+              maximum: 9_500,
+            },
+          },
+        },
         executionCost: {
           additionalProperties: false,
           required: ['actualLocalOperation', 'modeledScenario', 'publicExecution'],

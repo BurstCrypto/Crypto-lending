@@ -235,6 +235,22 @@ export const MORE_YIELD_PREVIEW = preview({
   firstPositiveDay: 10,
 });
 
+export const FRACTIONAL_LIQUID_PREVIEW = preview({
+  presetId: 'MORE_YIELD',
+  label: 'More yield',
+  description:
+    'Keep 15.50% readily available and allocate the remainder to the managed yield strategy.',
+  liquidReserveBasisPoints: 1_550,
+  feeAmounts: ['494', '0', '0', '140', '60'],
+  totalFeeUsdMinor: '694',
+  capitalIncludedInProjectionUsdMinor: '699306',
+  allocationAmounts: ['108392', '590914'],
+  effectiveApyBasisPoints: 398,
+  projectedAnnualYieldUsdMinor: '27892',
+  projectedAnnualYieldAfterFeesUsdMinor: '27198',
+  firstPositiveDay: 10,
+});
+
 export const MORE_YIELD_DAY_365_PREVIEW = preview({
   presetId: 'MORE_YIELD',
   label: 'More yield',

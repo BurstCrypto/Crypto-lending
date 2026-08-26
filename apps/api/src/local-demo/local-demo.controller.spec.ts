@@ -71,6 +71,12 @@ const PORTFOLIO = Object.freeze({
   portfolioValueUsdMinor: '1100000',
 });
 
+const BALANCED_REQUEST_SELECTION = Object.freeze({
+  kind: 'PRESET' as const,
+  presetId: 'BALANCED' as const,
+  liquidReserveBasisPoints: 3_000,
+});
+
 const YIELD_CATALOG: LocalDemoYieldCatalogResponse = new LocalDemoYieldCatalogService().read(
   new Date('2026-08-26T22:00:00.000Z'),
 );
@@ -535,7 +541,7 @@ describe('LocalDemoController', () => {
         principal(ACCOUNT_B),
         {
           portfolioSnapshotId: PORTFOLIO.snapshotId,
-          selection: { kind: 'PRESET', presetId: 'BALANCED' },
+          selection: BALANCED_REQUEST_SELECTION,
         },
         response.response,
       ),
@@ -546,7 +552,7 @@ describe('LocalDemoController', () => {
       ACCOUNT_B,
       AUTHENTICATED_REQUEST_CORRELATION_B,
       PORTFOLIO.snapshotId,
-      { kind: 'PRESET', presetId: 'BALANCED' },
+      BALANCED_REQUEST_SELECTION,
     );
     expect(fixture.allocations.preview).not.toHaveBeenCalledWith(
       ACCOUNT_A,
@@ -561,15 +567,46 @@ describe('LocalDemoController', () => {
     const bodies: readonly unknown[] = [
       {},
       { presetId: 'BALANCED' },
-      { selection: { kind: 'PRESET', presetId: 'CUSTOM' } },
       {
-        selection: { kind: 'PRESET', presetId: 'BALANCED', amountUsdMinor: '1100000' },
+        portfolioSnapshotId: PORTFOLIO.snapshotId,
+        selection: { kind: 'PRESET', presetId: 'CUSTOM', liquidReserveBasisPoints: 3_000 },
       },
       {
-        selection: { kind: 'PRESET', presetId: 'MORE_YIELD' },
+        portfolioSnapshotId: PORTFOLIO.snapshotId,
+        selection: { kind: 'PRESET', presetId: 'BALANCED' },
+      },
+      {
+        portfolioSnapshotId: PORTFOLIO.snapshotId,
+        selection: { kind: 'PRESET', presetId: 'BALANCED', liquidReserveBasisPoints: -1 },
+      },
+      {
+        portfolioSnapshotId: PORTFOLIO.snapshotId,
+        selection: { kind: 'PRESET', presetId: 'BALANCED', liquidReserveBasisPoints: 9_501 },
+      },
+      {
+        portfolioSnapshotId: PORTFOLIO.snapshotId,
+        selection: { kind: 'PRESET', presetId: 'BALANCED', liquidReserveBasisPoints: 1.5 },
+      },
+      {
+        portfolioSnapshotId: PORTFOLIO.snapshotId,
+        selection: {
+          kind: 'PRESET',
+          presetId: 'BALANCED',
+          liquidReserveBasisPoints: 3_000,
+          amountUsdMinor: '1100000',
+        },
+      },
+      {
+        portfolioSnapshotId: PORTFOLIO.snapshotId,
+        selection: {
+          kind: 'PRESET',
+          presetId: 'MORE_YIELD',
+          liquidReserveBasisPoints: 1_500,
+        },
         accountId: ACCOUNT_B,
       },
       {
+        portfolioSnapshotId: PORTFOLIO.snapshotId,
         selection: {
           kind: 'CUSTOM',
           liquidReserveBasisPoints: 2_500,
@@ -586,30 +623,38 @@ describe('LocalDemoController', () => {
         },
       },
       {
+        portfolioSnapshotId: PORTFOLIO.snapshotId,
         selection: {
           kind: 'PRESET',
           presetId: 'BALANCED',
+          liquidReserveBasisPoints: 3_000,
           providerId: 'caller-supplied-provider',
         },
       },
       {
+        portfolioSnapshotId: PORTFOLIO.snapshotId,
         selection: {
           kind: 'PRESET',
           presetId: 'BALANCED',
+          liquidReserveBasisPoints: 3_000,
           protocol: 'caller-supplied-protocol',
         },
       },
       {
+        portfolioSnapshotId: PORTFOLIO.snapshotId,
         selection: {
           kind: 'PRESET',
           presetId: 'BALANCED',
+          liquidReserveBasisPoints: 3_000,
           marketId: 'caller-supplied-market',
         },
       },
       {
+        portfolioSnapshotId: PORTFOLIO.snapshotId,
         selection: {
           kind: 'PRESET',
           presetId: 'BALANCED',
+          liquidReserveBasisPoints: 3_000,
           provenance: { endpoint: 'https://example.invalid' },
         },
       },
@@ -643,7 +688,7 @@ describe('LocalDemoController', () => {
           principal(ACCOUNT_B),
           {
             portfolioSnapshotId: PORTFOLIO.snapshotId,
-            selection: { kind: 'PRESET', presetId: 'BALANCED' },
+            selection: BALANCED_REQUEST_SELECTION,
           },
           response.response,
         ),
@@ -673,7 +718,7 @@ describe('LocalDemoController', () => {
           principal(ACCOUNT_B),
           {
             portfolioSnapshotId: PORTFOLIO.snapshotId,
-            selection: { kind: 'PRESET', presetId: 'BALANCED' },
+            selection: BALANCED_REQUEST_SELECTION,
           },
           response.response,
         ),
@@ -767,7 +812,7 @@ describe('LocalDemoController', () => {
             principal(ACCOUNT_B),
             {
               portfolioSnapshotId: PORTFOLIO.snapshotId,
-              selection: { kind: 'PRESET', presetId: 'BALANCED' },
+              selection: BALANCED_REQUEST_SELECTION,
             },
             allocationResponse.response,
           ),
@@ -810,7 +855,7 @@ describe('LocalDemoController', () => {
           principal(ACCOUNT_A),
           {
             portfolioSnapshotId: PORTFOLIO.snapshotId,
-            selection: { kind: 'PRESET', presetId: 'BALANCED' },
+            selection: BALANCED_REQUEST_SELECTION,
           },
           allocationResponse.response,
         ),
@@ -851,7 +896,7 @@ describe('LocalDemoController', () => {
         principal(ACCOUNT_A),
         {
           portfolioSnapshotId: PORTFOLIO.snapshotId,
-          selection: { kind: 'PRESET', presetId: 'BALANCED' },
+          selection: BALANCED_REQUEST_SELECTION,
         },
         responseFixture().response,
       ),

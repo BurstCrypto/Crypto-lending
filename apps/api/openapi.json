@@ -1070,6 +1070,11 @@
                         ],
                         "type": "string"
                       },
+                      "liquidReserveBasisPoints": {
+                        "maximum": 9500,
+                        "minimum": 0,
+                        "type": "integer"
+                      },
                       "presetId": {
                         "enum": [
                           "MORE_LIQUID",
@@ -1081,7 +1086,8 @@
                     },
                     "required": [
                       "kind",
-                      "presetId"
+                      "presetId",
+                      "liquidReserveBasisPoints"
                     ],
                     "type": "object"
                   }
@@ -1484,7 +1490,7 @@
                           "type": "string"
                         },
                         "liquidReserveBasisPoints": {
-                          "maximum": 10000,
+                          "maximum": 9500,
                           "minimum": 0,
                           "type": "integer"
                         },

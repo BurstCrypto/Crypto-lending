@@ -242,7 +242,8 @@ function previewMatchesSelection(
   return (
     preview.portfolioSnapshotId === portfolioSnapshotId &&
     preview.selection.kind === 'PRESET' &&
-    preview.selection.presetId === selection.presetId
+    preview.selection.presetId === selection.presetId &&
+    preview.selection.liquidReserveBasisPoints === selection.liquidReserveBasisPoints
   );
 }
 
@@ -274,7 +275,7 @@ function serializeAllocationSelection(
   portfolioSnapshotId: string,
   selection: LocalDemoAllocationSelectionInput,
 ): string {
-  return `{"portfolioSnapshotId":"${portfolioSnapshotId}","selection":{"kind":"PRESET","presetId":"${selection.presetId}"}}`;
+  return `{"portfolioSnapshotId":"${portfolioSnapshotId}","selection":{"kind":"PRESET","presetId":"${selection.presetId}","liquidReserveBasisPoints":${selection.liquidReserveBasisPoints}}}`;
 }
 
 export class LocalDemoApiClient {

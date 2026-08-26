@@ -240,7 +240,7 @@ describe('authenticated local demo portfolio journey', () => {
     ).toBeInTheDocument();
     expect(harness.previewAllocation).toHaveBeenCalledWith(
       PORTFOLIO.snapshotId,
-      { kind: 'PRESET', presetId: 'BALANCED' },
+      { kind: 'PRESET', presetId: 'BALANCED', liquidReserveBasisPoints: 3_000 },
       expect.any(AbortSignal),
     );
     expect(composition!.textContent).not.toMatch(
@@ -292,7 +292,7 @@ describe('authenticated local demo portfolio journey', () => {
     expect(costHeading).toBeInTheDocument();
     expect(harness.previewAllocation).toHaveBeenCalledWith(
       PORTFOLIO.snapshotId,
-      { kind: 'PRESET', presetId: 'MORE_LIQUID' },
+      { kind: 'PRESET', presetId: 'MORE_LIQUID', liquidReserveBasisPoints: 6_000 },
       expect.any(AbortSignal),
     );
     expect(

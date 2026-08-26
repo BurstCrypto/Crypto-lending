@@ -429,7 +429,10 @@ describe('local demo authentication boundary (e2e)', () => {
       .post('/api/v1/local-demo/allocation-preview')
       .set('Origin', LOCAL_ORIGIN)
       .set('Cookie', cookie)
-      .send({ portfolioSnapshotId, selection: { kind: 'PRESET', presetId: 'BALANCED' } })
+      .send({
+        portfolioSnapshotId,
+        selection: { kind: 'PRESET', presetId: 'BALANCED', liquidReserveBasisPoints: 3_000 },
+      })
       .expect(401);
 
     const preview = await request(app.getHttpServer())
@@ -437,7 +440,10 @@ describe('local demo authentication boundary (e2e)', () => {
       .set('Origin', LOCAL_ORIGIN)
       .set('X-CSRF-Token', csrf)
       .set('Cookie', cookie)
-      .send({ portfolioSnapshotId, selection: { kind: 'PRESET', presetId: 'BALANCED' } })
+      .send({
+        portfolioSnapshotId,
+        selection: { kind: 'PRESET', presetId: 'BALANCED', liquidReserveBasisPoints: 3_000 },
+      })
       .expect(200);
 
     expect(preview.headers).toMatchObject({
@@ -453,6 +459,8 @@ describe('local demo authentication boundary (e2e)', () => {
         kind: 'PRESET',
         presetId: 'BALANCED',
         label: 'Balanced blend',
+        description:
+          'Keep 30% readily available and allocate the remainder to the managed yield strategy.',
         liquidReserveBasisPoints: 3000,
       },
       rateSnapshot: {
@@ -568,33 +576,61 @@ describe('local demo authentication boundary (e2e)', () => {
   });
 
   it('rejects custom strategy details and caller-authored provider metadata', async () => {
+    const portfolioSnapshotId = 'local-demo-portfolio:0123456789abcdef0123456789abcdef';
     const forbiddenBodies = [
-      { selection: { kind: 'CUSTOM', liquidReserveBasisPoints: 2500, filters: {} } },
       {
+        portfolioSnapshotId,
+        selection: { kind: 'CUSTOM', liquidReserveBasisPoints: 2500, filters: {} },
+      },
+      {
+        portfolioSnapshotId,
+        selection: { kind: 'PRESET', presetId: 'BALANCED' },
+      },
+      {
+        portfolioSnapshotId,
+        selection: { kind: 'PRESET', presetId: 'BALANCED', liquidReserveBasisPoints: -1 },
+      },
+      {
+        portfolioSnapshotId,
+        selection: { kind: 'PRESET', presetId: 'BALANCED', liquidReserveBasisPoints: 9501 },
+      },
+      {
+        portfolioSnapshotId,
+        selection: { kind: 'PRESET', presetId: 'BALANCED', liquidReserveBasisPoints: 1.5 },
+      },
+      {
+        portfolioSnapshotId,
         selection: {
           kind: 'PRESET',
           presetId: 'BALANCED',
+          liquidReserveBasisPoints: 3000,
           providerId: 'caller-supplied-provider',
         },
       },
       {
+        portfolioSnapshotId,
         selection: {
           kind: 'PRESET',
           presetId: 'BALANCED',
+          liquidReserveBasisPoints: 3000,
           protocol: 'caller-supplied-protocol',
         },
       },
       {
+        portfolioSnapshotId,
         selection: {
           kind: 'PRESET',
           presetId: 'BALANCED',
+          liquidReserveBasisPoints: 3000,
           marketId: 'caller-supplied-market',
         },
       },
       {
+        portfolioSnapshotId,
         selection: {
           kind: 'PRESET',
           presetId: 'BALANCED',
+          liquidReserveBasisPoints: 3000,
           provenance: { endpoint: 'https://example.invalid' },
         },
       },

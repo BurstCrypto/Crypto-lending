@@ -12,21 +12,21 @@ export const LOCAL_DEMO_ALLOCATION_PRESETS = Object.freeze([
     id: 'MORE_LIQUID',
     label: 'More liquid',
     description:
-      'Keep 60% readily available and allocate the remainder to the managed yield strategy.',
+      'Starts at 60% readily available and allocates the remainder to the managed yield strategy.',
     liquidReserveBasisPoints: 6_000,
   }),
   Object.freeze({
     id: 'BALANCED',
     label: 'Balanced blend',
     description:
-      'Keep 30% readily available and allocate the remainder to the managed yield strategy.',
+      'Starts at 30% readily available and allocates the remainder to the managed yield strategy.',
     liquidReserveBasisPoints: 3_000,
   }),
   Object.freeze({
     id: 'MORE_YIELD',
     label: 'More yield',
     description:
-      'Keep 15% readily available and allocate the remainder to the managed yield strategy.',
+      'Starts at 15% readily available and allocates the remainder to the managed yield strategy.',
     liquidReserveBasisPoints: 1_500,
   }),
 ] as const);
@@ -39,6 +39,9 @@ export const LOCAL_DEMO_EXECUTION_COST_COMPONENTS = Object.freeze([
   'ROUTING',
 ] as const);
 export const LOCAL_DEMO_BREAK_EVEN_MODEL_HORIZON_DAYS = 365 as const;
+export const LOCAL_DEMO_MIN_LIQUID_RESERVE_BASIS_POINTS = 0 as const;
+export const LOCAL_DEMO_MAX_LIQUID_RESERVE_BASIS_POINTS = 9_500 as const;
+export const LOCAL_DEMO_LIQUID_RESERVE_STEP_BASIS_POINTS = 500 as const;
 
 export type LocalDemoAllocationPresetId = (typeof LOCAL_DEMO_ALLOCATION_PRESETS)[number]['id'];
 export type LocalDemoYieldFreshness = 'CURRENT' | 'STALE';
@@ -49,6 +52,7 @@ export type LocalDemoExecutionCostComponentCode =
 export type LocalDemoAllocationSelectionInput = Readonly<{
   kind: 'PRESET';
   presetId: LocalDemoAllocationPresetId;
+  liquidReserveBasisPoints: number;
 }>;
 
 export interface LocalDemoYieldCatalog {
@@ -430,7 +434,7 @@ export function validateLocalDemoPortfolioSnapshotId(value: unknown): string {
 export function validateLocalDemoAllocationSelection(
   value: LocalDemoAllocationSelectionInput,
 ): LocalDemoAllocationSelectionInput {
-  const record = exactRecord(value, ['kind', 'presetId']);
+  const record = exactRecord(value, ['kind', 'presetId', 'liquidReserveBasisPoints']);
   if (record.kind !== 'PRESET') return invalid();
   return Object.freeze({
     kind: 'PRESET',
@@ -438,7 +442,22 @@ export function validateLocalDemoAllocationSelection(
       record.presetId,
       LOCAL_DEMO_ALLOCATION_PRESETS.map(({ id }) => id),
     ),
+    liquidReserveBasisPoints: boundedInteger(
+      record.liquidReserveBasisPoints,
+      LOCAL_DEMO_MIN_LIQUID_RESERVE_BASIS_POINTS,
+      LOCAL_DEMO_MAX_LIQUID_RESERVE_BASIS_POINTS,
+    ),
   });
+}
+
+function liquidReservePercentage(basisPoints: number): string {
+  const whole = Math.floor(basisPoints / 100);
+  const fraction = basisPoints % 100;
+  return fraction === 0 ? `${whole}%` : `${whole}.${fraction.toString().padStart(2, '0')}%`;
+}
+
+function allocationDescription(liquidReserveBasisPoints: number): string {
+  return `Keep ${liquidReservePercentage(liquidReserveBasisPoints)} readily available and allocate the remainder to the managed yield strategy.`;
 }
 
 function distribute(total: bigint, weights: readonly number[]): readonly bigint[] {
@@ -605,11 +624,15 @@ export function parseLocalDemoAllocationPreview(value: unknown): LocalDemoAlloca
     LOCAL_DEMO_ALLOCATION_PRESETS.map(({ id }) => id),
   );
   const preset = LOCAL_DEMO_ALLOCATION_PRESETS.find(({ id }) => id === presetId);
+  const liquidReserveBasisPoints = boundedInteger(
+    selectionRecord.liquidReserveBasisPoints,
+    LOCAL_DEMO_MIN_LIQUID_RESERVE_BASIS_POINTS,
+    LOCAL_DEMO_MAX_LIQUID_RESERVE_BASIS_POINTS,
+  );
   if (
     preset === undefined ||
     selectionRecord.label !== preset.label ||
-    selectionRecord.description !== preset.description ||
-    selectionRecord.liquidReserveBasisPoints !== preset.liquidReserveBasisPoints
+    selectionRecord.description !== allocationDescription(liquidReserveBasisPoints)
   ) {
     return invalid();
   }
@@ -617,8 +640,8 @@ export function parseLocalDemoAllocationPreview(value: unknown): LocalDemoAlloca
     kind: 'PRESET' as const,
     presetId,
     label: preset.label,
-    description: preset.description,
-    liquidReserveBasisPoints: preset.liquidReserveBasisPoints,
+    description: allocationDescription(liquidReserveBasisPoints),
+    liquidReserveBasisPoints,
   });
   const rateSnapshot = parseSnapshot(
     record.rateSnapshot,
@@ -668,13 +691,13 @@ export function parseLocalDemoAllocationPreview(value: unknown): LocalDemoAlloca
               bucket: 'LIQUID_RESERVE' as const,
               allocationId: 'LIQUID_RESERVE' as const,
               label: 'Liquid reserve' as const,
-              percentageBasisPoints: preset.liquidReserveBasisPoints,
+              percentageBasisPoints: liquidReserveBasisPoints,
             })
           : Object.freeze({
               bucket: 'MANAGED_YIELD' as const,
               allocationId: 'MANAGED_YIELD' as const,
               label: 'Managed yield' as const,
-              percentageBasisPoints: 10_000 - preset.liquidReserveBasisPoints,
+              percentageBasisPoints: 10_000 - liquidReserveBasisPoints,
             });
       if (
         allocation.bucket !== expected.bucket ||
@@ -688,8 +711,8 @@ export function parseLocalDemoAllocationPreview(value: unknown): LocalDemoAlloca
     }),
   );
   const expectedAmounts = distribute(capitalIncludedInProjection, [
-    preset.liquidReserveBasisPoints,
-    10_000 - preset.liquidReserveBasisPoints,
+    liquidReserveBasisPoints,
+    10_000 - liquidReserveBasisPoints,
   ]);
   if (
     allocations.some(

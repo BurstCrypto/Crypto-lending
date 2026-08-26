@@ -13,6 +13,7 @@ import {
   LOCAL_DEMO_BREAK_EVEN_MODEL_HORIZON_DAYS,
   LOCAL_DEMO_EXECUTION_COST_COMPONENTS,
   LOCAL_DEMO_EXECUTION_COST_MODEL,
+  LOCAL_DEMO_MAX_LIQUID_RESERVE_BASIS_POINTS,
   LOCAL_DEMO_YIELD_CALCULATION_METHOD,
   LOCAL_DEMO_YIELD_PROJECTION_SOURCE,
   type LocalDemoAllocationSelection,
@@ -102,9 +103,16 @@ export function parseLocalDemoAllocationPreviewBody(
     return fail();
   }
   if (ownDataProperty(body.selection, 'kind') !== 'PRESET') return fail();
-  const selection = exactRecord(body.selection, ['kind', 'presetId']);
+  const selection = exactRecord(body.selection, ['kind', 'presetId', 'liquidReserveBasisPoints']);
   if (
     !LOCAL_DEMO_ALLOCATION_PRESET_IDS.includes(selection.presetId as LocalDemoAllocationPresetId)
+  ) {
+    return fail();
+  }
+  if (
+    !Number.isSafeInteger(selection.liquidReserveBasisPoints) ||
+    (selection.liquidReserveBasisPoints as number) < 0 ||
+    (selection.liquidReserveBasisPoints as number) > LOCAL_DEMO_MAX_LIQUID_RESERVE_BASIS_POINTS
   ) {
     return fail();
   }
@@ -113,6 +121,7 @@ export function parseLocalDemoAllocationPreviewBody(
     selection: Object.freeze({
       kind: 'PRESET',
       presetId: selection.presetId as LocalDemoAllocationPresetId,
+      liquidReserveBasisPoints: selection.liquidReserveBasisPoints as number,
     }),
   });
 }
@@ -162,10 +171,15 @@ export const LOCAL_DEMO_ALLOCATION_PREVIEW_BODY_SCHEMA: SchemaObject = Object.fr
     selection: {
       type: 'object',
       additionalProperties: false,
-      required: ['kind', 'presetId'],
+      required: ['kind', 'presetId', 'liquidReserveBasisPoints'],
       properties: {
         kind: { type: 'string', enum: ['PRESET'] },
         presetId: { type: 'string', enum: [...LOCAL_DEMO_ALLOCATION_PRESET_IDS] },
+        liquidReserveBasisPoints: {
+          type: 'integer',
+          minimum: 0,
+          maximum: LOCAL_DEMO_MAX_LIQUID_RESERVE_BASIS_POINTS,
+        },
       },
     },
   },
@@ -299,7 +313,11 @@ export const LOCAL_DEMO_ALLOCATION_PREVIEW_RESPONSE_SCHEMA: SchemaObject = Objec
         presetId: { type: 'string', enum: [...LOCAL_DEMO_ALLOCATION_PRESET_IDS] },
         label: { type: 'string', maxLength: 96 },
         description: { type: 'string', maxLength: 512 },
-        liquidReserveBasisPoints: { type: 'integer', minimum: 0, maximum: 10_000 },
+        liquidReserveBasisPoints: {
+          type: 'integer',
+          minimum: 0,
+          maximum: LOCAL_DEMO_MAX_LIQUID_RESERVE_BASIS_POINTS,
+        },
       },
     },
     rateSnapshot: {

@@ -34,13 +34,15 @@ identity, protocol identity, market identifiers, exact observations, provenance,
 remain server-confidential. The runtime performs no live provider request; after the first component
 freshness boundary it labels the complete set stale and keeps it non-executable.
 
-`POST /api/v1/local-demo/allocation-preview` accepts the exact displayed portfolio snapshot ID and
-one of the three closed preset IDs. The snapshot ID is a concurrency token: a wallet change produces
-a sanitized 409 instead of allowing an old response to render against a new portfolio. The caller
-cannot send custom filters, capital, managed rates, fee inputs, provider or protocol details, market
-identifiers, or provenance. The server derives chain-qualified capital from the authenticated
-account, reserves each ecosystem's native share, and performs confidential source selection and
-exact-decimal projection internally. The public response contains aggregate `LIQUID_RESERVE` and
+`POST /api/v1/local-demo/allocation-preview` accepts the exact displayed portfolio snapshot ID, one
+of the three closed base-plan IDs, and a required user-selected liquid reserve from 0 through 9,500
+basis points. The snapshot ID is a concurrency token: a wallet change produces a sanitized 409
+instead of allowing an old response to render against a new portfolio. The caller cannot send
+custom filters, capital, managed rates, fee inputs, provider or protocol details, market identifiers,
+or provenance. The server derives chain-qualified capital from the authenticated account, applies
+the requested reserve, and performs confidential source selection and exact-decimal projection
+internally. Its response description is generated from the validated reserve rather than claiming
+a fixed percentage from the base plan. The public response contains aggregate `LIQUID_RESERVE` and
 `MANAGED_YIELD` buckets plus provider-neutral EVM/Solana source and managed-composition totals. No
 venue, market, contract, mint, network identifier, or per-position rate crosses the browser boundary.
 If the confidential strategy is unavailable, the API returns a sanitized typed 422 without fallback
@@ -52,9 +54,11 @@ Solana capital remains assigned to Solana; no EVM-to-Solana principal transfer i
 network placement is still hypothetical, not proof of a bridge-free executable route. A separate,
 non-quote scenario models network, conversion, EVM-to-Solana transfer, market-impact, and routing
 components from server-owned inputs, rounds each variable component up to a cent, and deducts their
-total from gross capital before allocation and projection. The cross-ecosystem-transfer component is
-exactly zero because this composition performs no EVM-to-Solana transfer. The aggregate buckets and
-ecosystem composition reconcile exactly to post-model-cost capital.
+total from gross capital before allocation and projection. Managed capital is apportioned from each
+ecosystem's post-modeled-fee capacity, so neither ecosystem funds the other's fees even at a zero
+reserve. The cross-ecosystem-transfer component is exactly zero because this composition performs no
+EVM-to-Solana transfer. The aggregate buckets and ecosystem composition reconcile exactly to
+post-model-cost capital.
 
 The server projects the confidential positions from exact managed base-rate decimals and returns
 only an aggregate basis-point rate and whole-cent annual yield. Annual yield after modeled fees can

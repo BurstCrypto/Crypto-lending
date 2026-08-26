@@ -25,7 +25,10 @@ export type LocalDemoAllocationPresetId = (typeof LOCAL_DEMO_ALLOCATION_PRESET_I
 export type LocalDemoAllocationSelection = Readonly<{
   kind: 'PRESET';
   presetId: LocalDemoAllocationPresetId;
+  liquidReserveBasisPoints: number;
 }>;
+
+export const LOCAL_DEMO_MAX_LIQUID_RESERVE_BASIS_POINTS = 9_500 as const;
 
 export const LOCAL_DEMO_YIELD_PROJECTION_SOURCE = 'MANAGED_RATE_SNAPSHOT' as const;
 export const LOCAL_DEMO_YIELD_CALCULATION_METHOD =
@@ -59,8 +62,6 @@ export type LocalDemoEcosystem = (typeof LOCAL_DEMO_ECOSYSTEMS)[number];
 interface AllocationPresetDefinition {
   readonly id: LocalDemoAllocationPresetId;
   readonly label: string;
-  readonly description: string;
-  readonly liquidReserveBasisPoints: number;
 }
 
 const PRESETS: Readonly<Record<LocalDemoAllocationPresetId, AllocationPresetDefinition>> =
@@ -68,23 +69,14 @@ const PRESETS: Readonly<Record<LocalDemoAllocationPresetId, AllocationPresetDefi
     MORE_LIQUID: Object.freeze({
       id: 'MORE_LIQUID',
       label: 'More liquid',
-      description:
-        'Keep 60% readily available and allocate the remainder to the managed yield strategy.',
-      liquidReserveBasisPoints: 6_000,
     }),
     BALANCED: Object.freeze({
       id: 'BALANCED',
       label: 'Balanced blend',
-      description:
-        'Keep 30% readily available and allocate the remainder to the managed yield strategy.',
-      liquidReserveBasisPoints: 3_000,
     }),
     MORE_YIELD: Object.freeze({
       id: 'MORE_YIELD',
       label: 'More yield',
-      description:
-        'Keep 15% readily available and allocate the remainder to the managed yield strategy.',
-      liquidReserveBasisPoints: 1_500,
     }),
   });
 
@@ -237,12 +229,12 @@ export class LocalDemoAllocationService {
     expectedPortfolioSnapshotId: string,
     requestedSelection: LocalDemoAllocationSelection,
   ): Promise<LocalDemoAllocationPreviewResponse> {
+    const selection = selectionDefinition(requestedSelection);
     const portfolio = await this.portfolio.read(accountId, correlation);
     if (portfolio.snapshotId !== expectedPortfolioSnapshotId) {
       throw new LocalDemoPortfolioSnapshotChangedError();
     }
     const grossCapital = BigInt(portfolio.buyingPower.amountUsdMinor);
-    const selection = selectionDefinition(requestedSelection);
     const catalogSelection = this.yieldCatalog.select(null);
     const opportunities = catalogSelection.selectedOpportunities;
     const sourceCapitalByEcosystem = ecosystemCapital(portfolio, grossCapital);
@@ -260,10 +252,13 @@ export class LocalDemoAllocationService {
       capitalIncludedInProjection,
       selection.liquidReserveBasisPoints,
     );
-    const managedCapitalByEcosystem = apportionAcrossEcosystems(
-      managedYieldCapital,
-      sourceCapitalByEcosystem,
-    );
+    const managedCapitalByEcosystem = plan.managedCapitalByEcosystem;
+    if (
+      managedCapitalByEcosystem.reduce((sum, capital) => sum + capital.amountUsdMinor, 0n) !==
+      managedYieldCapital
+    ) {
+      throw new TypeError('local demo converged managed capital does not reconcile');
+    }
     const projectedPositions = positionsForCapital(opportunities, managedCapitalByEcosystem);
     const projection = calculateYieldProjection(projectedPositions, capitalIncludedInProjection);
     const firstPositiveDayAfterFees = calculateFirstPositiveDayAfterFees(projection, estimatedCost);
@@ -356,16 +351,70 @@ export class LocalDemoPortfolioSnapshotChangedError extends Error {
 function selectionDefinition(
   selection: LocalDemoAllocationSelection,
 ): LocalDemoAllocationPreviewResponse['selection'] {
-  if (selection.kind !== 'PRESET') throw new TypeError('invalid local demo allocation selection');
-  const preset = PRESETS[selection.presetId];
+  const values = exactSelectionValues(selection);
+  if (values.kind !== 'PRESET') throw new TypeError('invalid local demo allocation selection');
+  if (!LOCAL_DEMO_ALLOCATION_PRESET_IDS.includes(values.presetId as LocalDemoAllocationPresetId)) {
+    throw new TypeError('unsupported local demo allocation preset');
+  }
+  if (
+    !Number.isSafeInteger(values.liquidReserveBasisPoints) ||
+    (values.liquidReserveBasisPoints as number) < 0 ||
+    (values.liquidReserveBasisPoints as number) > LOCAL_DEMO_MAX_LIQUID_RESERVE_BASIS_POINTS
+  ) {
+    throw new TypeError('invalid local demo liquid reserve basis points');
+  }
+  const liquidReserveBasisPoints = values.liquidReserveBasisPoints as number;
+  const preset = PRESETS[values.presetId as LocalDemoAllocationPresetId];
   if (!preset) throw new TypeError('unsupported local demo allocation preset');
   return Object.freeze({
     kind: 'PRESET',
     presetId: preset.id,
     label: preset.label,
-    description: preset.description,
-    liquidReserveBasisPoints: preset.liquidReserveBasisPoints,
+    description: `Keep ${formatPercentage(liquidReserveBasisPoints)} readily available and allocate the remainder to the managed yield strategy.`,
+    liquidReserveBasisPoints,
   });
+}
+
+function exactSelectionValues(selection: unknown): Readonly<Record<string, unknown>> {
+  const expectedKeys = ['kind', 'presetId', 'liquidReserveBasisPoints'] as const;
+  try {
+    if (typeof selection !== 'object' || selection === null || Array.isArray(selection)) {
+      throw new TypeError('invalid local demo allocation selection');
+    }
+    const prototype = Object.getPrototypeOf(selection) as unknown;
+    if (prototype !== Object.prototype && prototype !== null) {
+      throw new TypeError('invalid local demo allocation selection');
+    }
+    const descriptors = Object.getOwnPropertyDescriptors(selection);
+    const keys = Reflect.ownKeys(descriptors);
+    if (
+      keys.length !== expectedKeys.length ||
+      keys.some(
+        (key) => typeof key !== 'string' || !expectedKeys.some((expected) => expected === key),
+      )
+    ) {
+      throw new TypeError('invalid local demo allocation selection');
+    }
+    const values: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
+    for (const key of expectedKeys) {
+      const descriptor = descriptors[key];
+      if (!descriptor || !('value' in descriptor) || descriptor.enumerable !== true) {
+        throw new TypeError('invalid local demo allocation selection');
+      }
+      values[key] = descriptor.value;
+    }
+    return values;
+  } catch (error) {
+    if (error instanceof TypeError) throw error;
+    throw new TypeError('invalid local demo allocation selection', { cause: error });
+  }
+}
+
+function formatPercentage(basisPoints: number): string {
+  const wholePercentage = Math.floor(basisPoints / 100);
+  const fractionalPercentage = basisPoints % 100;
+  if (fractionalPercentage === 0) return `${wholePercentage}%`;
+  return `${wholePercentage}.${fractionalPercentage.toString().padStart(2, '0')}%`;
 }
 
 function positionsForCapital(
@@ -403,35 +452,86 @@ function convergePlan(
   liquidReserveBasisPoints: number,
 ): Readonly<{
   executionCost: LocalDemoAllocationPreviewResponse['executionCost'];
+  managedCapitalByEcosystem: readonly EcosystemCapital[];
 }> {
-  let estimatedCost = 0n;
+  let estimatedEcosystemCosts = zeroEcosystemModeledCosts();
   for (let iteration = 0; iteration < 16; iteration += 1) {
+    const estimatedCost = estimatedEcosystemCosts.reduce((sum, cost) => sum + cost.total, 0n);
     if (estimatedCost >= grossCapital) {
-      throw new TypeError('local demo modeled cost exhausts capital');
+      throw new LocalDemoNoMatchingYieldOpportunitiesError();
     }
     const capitalAfterCost = grossCapital - estimatedCost;
-    const [, managedYieldCapital] = requiredCapitalBuckets(
+    const [liquidReserveCapital, managedYieldCapital] = requiredCapitalBuckets(
       capitalAfterCost,
       liquidReserveBasisPoints,
     );
+    if (managedYieldCapital === 0n) {
+      throw new LocalDemoNoMatchingYieldOpportunitiesError();
+    }
+    const postModeledFeeCapacity = sourceCapitalByEcosystem.map((source) => {
+      const modeledCost = requiredEcosystemCost(estimatedEcosystemCosts, source.ecosystem);
+      if (modeledCost.total > source.amountUsdMinor) {
+        throw new LocalDemoNoMatchingYieldOpportunitiesError();
+      }
+      return Object.freeze({
+        ecosystem: source.ecosystem,
+        amountUsdMinor: source.amountUsdMinor - modeledCost.total,
+      });
+    });
     const managedCapitalByEcosystem = apportionAcrossEcosystems(
       managedYieldCapital,
-      sourceCapitalByEcosystem,
+      postModeledFeeCapacity,
     );
     const positions = positionsForCapital(opportunities, managedCapitalByEcosystem);
     const executionCost = calculateExecutionCost(portfolio, positions, grossCapital);
-    const nextCost = BigInt(executionCost.modeledScenario.totalUsdMinor);
-    if (nextCost === estimatedCost) {
+    const nextEcosystemCosts = calculateEcosystemModeledCosts(portfolio, positions);
+    if (ecosystemCostsEqual(nextEcosystemCosts, estimatedEcosystemCosts)) {
       assertEcosystemSolvency(
         sourceCapitalByEcosystem,
         managedCapitalByEcosystem,
-        calculateEcosystemModeledCosts(portfolio, positions),
+        nextEcosystemCosts,
+        liquidReserveCapital,
       );
-      return Object.freeze({ executionCost });
+      return Object.freeze({ executionCost, managedCapitalByEcosystem });
     }
-    estimatedCost = nextCost;
+    estimatedEcosystemCosts = nextEcosystemCosts;
   }
-  throw new TypeError('local demo modeled cost did not converge');
+  throw new LocalDemoNoMatchingYieldOpportunitiesError();
+}
+
+function zeroEcosystemModeledCosts(): readonly EcosystemModeledCost[] {
+  return Object.freeze(
+    LOCAL_DEMO_ECOSYSTEMS.map((ecosystem) =>
+      Object.freeze({
+        ecosystem,
+        network: 0n,
+        conversion: 0n,
+        marketImpact: 0n,
+        routing: 0n,
+        total: 0n,
+      }),
+    ),
+  );
+}
+
+function requiredEcosystemCost(
+  costs: readonly EcosystemModeledCost[],
+  ecosystem: LocalDemoEcosystem,
+): EcosystemModeledCost {
+  const cost = costs.find((candidate) => candidate.ecosystem === ecosystem);
+  if (cost === undefined) throw new TypeError('missing local demo ecosystem modeled cost');
+  return cost;
+}
+
+function ecosystemCostsEqual(
+  left: readonly EcosystemModeledCost[],
+  right: readonly EcosystemModeledCost[],
+): boolean {
+  return LOCAL_DEMO_ECOSYSTEMS.every(
+    (ecosystem) =>
+      requiredEcosystemCost(left, ecosystem).total ===
+      requiredEcosystemCost(right, ecosystem).total,
+  );
 }
 
 function calculateExecutionCost(
@@ -564,7 +664,9 @@ function assertEcosystemSolvency(
   sources: readonly EcosystemCapital[],
   managedCapital: readonly EcosystemCapital[],
   costs: readonly EcosystemModeledCost[],
+  expectedLiquidReserve: bigint,
 ): void {
+  let liquidReserve = 0n;
   for (const ecosystem of LOCAL_DEMO_ECOSYSTEMS) {
     const source = sources.find((candidate) => candidate.ecosystem === ecosystem);
     const managed = managedCapital.find((candidate) => candidate.ecosystem === ecosystem);
@@ -577,6 +679,10 @@ function assertEcosystemSolvency(
     ) {
       throw new LocalDemoNoMatchingYieldOpportunitiesError();
     }
+    liquidReserve += source.amountUsdMinor - managed.amountUsdMinor - cost.total;
+  }
+  if (liquidReserve !== expectedLiquidReserve) {
+    throw new TypeError('local demo ecosystem capital does not reconcile after modeled costs');
   }
 }
 

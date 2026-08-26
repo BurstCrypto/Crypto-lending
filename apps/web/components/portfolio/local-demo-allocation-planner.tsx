@@ -10,6 +10,9 @@ import {
 } from '@/lib/local-demo/local-demo-client';
 import {
   LOCAL_DEMO_ALLOCATION_PRESETS,
+  LOCAL_DEMO_LIQUID_RESERVE_STEP_BASIS_POINTS,
+  LOCAL_DEMO_MAX_LIQUID_RESERVE_BASIS_POINTS,
+  LOCAL_DEMO_MIN_LIQUID_RESERVE_BASIS_POINTS,
   type LocalDemoAllocationPreview,
   type LocalDemoAllocationSelectionInput,
   type LocalDemoYieldCatalog,
@@ -142,19 +145,37 @@ function EcosystemComposition({ preview }: { preview: LocalDemoAllocationPreview
           {preview.compositionSummary.activeAllocationCount === 1 ? 'allocation' : 'allocations'}
         </p>
       </div>
-      <ul className="local-demo-allocation-result-list local-demo-ecosystem-list">
+      <ul className="local-demo-ecosystem-list">
         {preview.managedYieldComposition.map((composition, index) => {
           const source = preview.sourceCapitalByEcosystem[index]!;
           return (
             <li key={composition.ecosystem}>
-              <span>
-                <strong>{composition.label}</strong>
-                <small>
-                  {percentage(composition.percentageBasisPointsOfManagedYield)} of managed yield ·{' '}
-                  source capital <Money amountUsdMinor={source.amountUsdMinor} />
-                </small>
-              </span>
-              <Money amountUsdMinor={composition.amountUsdMinor} />
+              <strong>{composition.label}</strong>
+              <dl className="local-demo-ecosystem-values">
+                <div className="local-demo-ecosystem-managed-amount">
+                  <dt>Managed amount</dt>
+                  <dd>
+                    <Money amountUsdMinor={composition.amountUsdMinor} />
+                  </dd>
+                </div>
+                <div>
+                  <dt>Source capital</dt>
+                  <dd>
+                    <Money amountUsdMinor={source.amountUsdMinor} />
+                  </dd>
+                </div>
+                <div>
+                  <dt>Share of managed yield</dt>
+                  <dd>
+                    <data
+                      value={(composition.percentageBasisPointsOfManagedYield / 100).toFixed(2)}
+                      aria-label={`${percentage(composition.percentageBasisPointsOfManagedYield)} of managed yield`}
+                    >
+                      {percentage(composition.percentageBasisPointsOfManagedYield)}
+                    </data>
+                  </dd>
+                </div>
+              </dl>
             </li>
           );
         })}
@@ -167,6 +188,81 @@ function EcosystemComposition({ preview }: { preview: LocalDemoAllocationPreview
           is a local composition fixture—not a live route, bridge quote, or transaction. EVM network
           placement remains hypothetical and public execution is unquoted.
         </p>
+      </div>
+    </section>
+  );
+}
+
+interface LiquidityAdjustmentProps {
+  readonly appliedBasisPoints: number;
+  readonly draftBasisPoints: number;
+  readonly pending: boolean;
+  readonly onDraftChange: (basisPoints: number) => void;
+  readonly onApply: () => void;
+}
+
+function LiquidityAdjustment({
+  appliedBasisPoints,
+  draftBasisPoints,
+  pending,
+  onDraftChange,
+  onApply,
+}: LiquidityAdjustmentProps) {
+  const changed = draftBasisPoints !== appliedBasisPoints;
+  return (
+    <section
+      className="local-demo-liquidity-adjustment"
+      aria-labelledby="local-demo-liquidity-adjustment-title"
+      aria-busy={pending}
+    >
+      <div className="local-demo-liquidity-adjustment-heading">
+        <div>
+          <p className="eyebrow">Adjustable liquidity</p>
+          <h4 id="local-demo-liquidity-adjustment-title">Fine-tune this preview</h4>
+        </div>
+        <output
+          className="local-demo-liquidity-output"
+          htmlFor="local-demo-liquidity-range"
+          aria-live="polite"
+        >
+          Draft {percentage(draftBasisPoints)}
+        </output>
+      </div>
+      <label htmlFor="local-demo-liquidity-range">
+        Share kept liquid after estimated one-time fees
+      </label>
+      <input
+        id="local-demo-liquidity-range"
+        type="range"
+        min={LOCAL_DEMO_MIN_LIQUID_RESERVE_BASIS_POINTS}
+        max={LOCAL_DEMO_MAX_LIQUID_RESERVE_BASIS_POINTS}
+        step={LOCAL_DEMO_LIQUID_RESERVE_STEP_BASIS_POINTS}
+        value={draftBasisPoints}
+        aria-valuetext={`${percentage(draftBasisPoints)} kept liquid in the draft`}
+        aria-describedby="local-demo-liquidity-state local-demo-liquidity-help"
+        disabled={pending}
+        onChange={(event) => onDraftChange(Number(event.currentTarget.value))}
+      />
+      <div className="local-demo-liquidity-adjustment-footer">
+        <div>
+          <p id="local-demo-liquidity-state">
+            Current applied preview: <strong>{percentage(appliedBasisPoints)} liquid</strong>.
+            Draft: <strong>{percentage(draftBasisPoints)} liquid</strong>
+            {changed ? ' · not applied yet' : ' · matches current preview'}.
+          </p>
+          <p id="local-demo-liquidity-help">
+            Updating recalculates this preview only. It moves no funds, and the selected share is
+            applied after modeled one-time fees.
+          </p>
+        </div>
+        <button
+          className="portfolio-secondary-action local-demo-liquidity-apply"
+          type="button"
+          disabled={pending || !changed}
+          onClick={onApply}
+        >
+          {pending ? 'Updating…' : 'Update preview'}
+        </button>
       </div>
     </section>
   );
@@ -256,7 +352,19 @@ function YieldProjection({ preview }: { preview: LocalDemoAllocationPreview }) {
   );
 }
 
-function AllocationPreview({ preview }: { preview: LocalDemoAllocationPreview }) {
+function AllocationPreview({
+  preview,
+  draftLiquidReserveBasisPoints,
+  liquidityUpdatePending,
+  onDraftLiquidityChange,
+  onApplyLiquidity,
+}: {
+  preview: LocalDemoAllocationPreview;
+  draftLiquidReserveBasisPoints: number;
+  liquidityUpdatePending: boolean;
+  onDraftLiquidityChange: (basisPoints: number) => void;
+  onApplyLiquidity: () => void;
+}) {
   return (
     <section
       className="local-demo-allocation-preview"
@@ -289,6 +397,14 @@ function AllocationPreview({ preview }: { preview: LocalDemoAllocationPreview })
           Rates captured <Timestamp value={preview.rateSnapshot.capturedAt} />
         </p>
       </div>
+
+      <LiquidityAdjustment
+        appliedBasisPoints={preview.selection.liquidReserveBasisPoints}
+        draftBasisPoints={draftLiquidReserveBasisPoints}
+        pending={liquidityUpdatePending}
+        onDraftChange={onDraftLiquidityChange}
+        onApply={onApplyLiquidity}
+      />
 
       <YieldProjection preview={preview} />
 
@@ -386,6 +502,10 @@ export function LocalDemoAllocationPlanner({
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [pendingKey, setPendingKey] = useState<string | null>(null);
   const [preview, setPreview] = useState<LocalDemoAllocationPreview | null>(null);
+  const [draftLiquidReserveBasisPoints, setDraftLiquidReserveBasisPoints] = useState<number | null>(
+    null,
+  );
+  const [liquidityUpdatePending, setLiquidityUpdatePending] = useState(false);
   const [previewState, setPreviewState] = useState<'IDLE' | 'ERROR' | 'PORTFOLIO_CHANGED'>('IDLE');
   const catalogRequest = useRef<AbortController | null>(null);
   const previewRequest = useRef<AbortController | null>(null);
@@ -462,7 +582,9 @@ export function LocalDemoAllocationPlanner({
   async function requestPreview(
     selection: LocalDemoAllocationSelectionInput,
     key: string,
+    options: Readonly<{ preserveAppliedPreview?: boolean }> = {},
   ): Promise<void> {
+    const preserveAppliedPreview = options.preserveAppliedPreview === true;
     requestGeneration.current += 1;
     previewRequest.current?.abort();
     const controller = new AbortController();
@@ -470,7 +592,11 @@ export function LocalDemoAllocationPlanner({
     previewRequest.current = controller;
     setSelectedKey(key);
     setPendingKey(key);
-    setPreview(null);
+    setLiquidityUpdatePending(preserveAppliedPreview);
+    if (!preserveAppliedPreview) {
+      setPreview(null);
+      setDraftLiquidReserveBasisPoints(null);
+    }
     setPreviewState('IDLE');
     try {
       const result = await client.previewAllocation(
@@ -482,6 +608,8 @@ export function LocalDemoAllocationPlanner({
       if (
         catalog === null ||
         result.portfolioSnapshotId !== portfolioSnapshotId ||
+        result.selection.presetId !== selection.presetId ||
+        result.selection.liquidReserveBasisPoints !== selection.liquidReserveBasisPoints ||
         !previewMatchesCatalog(result, catalog)
       ) {
         throw new LocalDemoApiError('INVALID_RESPONSE');
@@ -499,6 +627,7 @@ export function LocalDemoAllocationPlanner({
             }),
       );
       setPreview(result);
+      setDraftLiquidReserveBasisPoints(result.selection.liquidReserveBasisPoints);
     } catch (error) {
       if (isAbortFailure(error, controller.signal)) return;
       if (isLocalDemoUnauthenticated(error)) {
@@ -508,6 +637,8 @@ export function LocalDemoAllocationPlanner({
       if (error instanceof LocalDemoApiError && error.code === 'PORTFOLIO_SNAPSHOT_CHANGED') {
         if (generation === requestGeneration.current) {
           setSelectedKey(null);
+          setPreview(null);
+          setDraftLiquidReserveBasisPoints(null);
           setPreviewState('PORTFOLIO_CHANGED');
           onPortfolioSnapshotChanged?.();
         }
@@ -518,8 +649,30 @@ export function LocalDemoAllocationPlanner({
       if (generation === requestGeneration.current) {
         previewRequest.current = null;
         setPendingKey(null);
+        setLiquidityUpdatePending(false);
       }
     }
+  }
+
+  function applyDraftLiquidity(): void {
+    if (
+      preview === null ||
+      draftLiquidReserveBasisPoints === null ||
+      draftLiquidReserveBasisPoints === preview.selection.liquidReserveBasisPoints ||
+      pendingKey !== null
+    ) {
+      return;
+    }
+    const key = `PRESET:${preview.selection.presetId}`;
+    void requestPreview(
+      {
+        kind: 'PRESET',
+        presetId: preview.selection.presetId,
+        liquidReserveBasisPoints: draftLiquidReserveBasisPoints,
+      },
+      key,
+      { preserveAppliedPreview: true },
+    );
   }
 
   return (
@@ -571,11 +724,26 @@ export function LocalDemoAllocationPlanner({
               type="button"
               aria-pressed={selectedKey === key}
               disabled={pendingKey !== null || catalog === null}
-              onClick={() => void requestPreview({ kind: 'PRESET', presetId: preset.id }, key)}
+              onClick={() =>
+                void requestPreview(
+                  {
+                    kind: 'PRESET',
+                    presetId: preset.id,
+                    liquidReserveBasisPoints: preset.liquidReserveBasisPoints,
+                  },
+                  key,
+                )
+              }
             >
               <span className="local-demo-allocation-choice-title">
                 <strong>{preset.label}</strong>
-                <small>{pendingKey === key ? 'Calculating…' : 'Preview plan'}</small>
+                <small>
+                  {pendingKey === key
+                    ? liquidityUpdatePending
+                      ? 'Updating…'
+                      : 'Calculating…'
+                    : 'Preview plan'}
+                </small>
               </span>
               <span className="local-demo-allocation-choice-description">{preset.description}</span>
               <span className="local-demo-allocation-choice-apy">
@@ -599,7 +767,9 @@ export function LocalDemoAllocationPlanner({
 
       <span className="visually-hidden" role="status" aria-live="polite">
         {pendingKey !== null
-          ? 'Calculating allocation preview.'
+          ? liquidityUpdatePending
+            ? 'Updating the allocation preview. The current applied preview remains visible.'
+            : 'Calculating allocation preview.'
           : preview === null
             ? ''
             : `${preview.selection.label} preview ready. Estimated fees are ${
@@ -614,11 +784,27 @@ export function LocalDemoAllocationPlanner({
       ) : null}
       {previewState === 'ERROR' ? (
         <p className="local-demo-allocation-error" role="alert">
-          This allocation estimate could not be confirmed. No user-authorized financial transaction
-          was created. Try again.
+          {preview === null
+            ? 'This allocation estimate could not be confirmed. No user-authorized financial transaction was created. Try again.'
+            : 'The liquidity update could not be confirmed. The current applied preview has not changed, and no funds were moved. Try again.'}
         </p>
       ) : null}
-      {preview === null ? null : <AllocationPreview preview={preview} />}
+      {preview === null ? null : (
+        <AllocationPreview
+          preview={preview}
+          draftLiquidReserveBasisPoints={
+            draftLiquidReserveBasisPoints ?? preview.selection.liquidReserveBasisPoints
+          }
+          liquidityUpdatePending={liquidityUpdatePending}
+          onDraftLiquidityChange={(basisPoints) => {
+            if (!liquidityUpdatePending) {
+              setDraftLiquidReserveBasisPoints(basisPoints);
+              setPreviewState('IDLE');
+            }
+          }}
+          onApplyLiquidity={applyDraftLiquidity}
+        />
+      )}
     </section>
   );
 }

@@ -28,8 +28,11 @@ interface WalletFixture {
   readonly stablecoin?: 'USDC' | 'USDT';
 }
 
-function preset(presetId: LocalDemoAllocationPresetId): LocalDemoAllocationSelection {
-  return Object.freeze({ kind: 'PRESET', presetId });
+function preset(
+  presetId: LocalDemoAllocationPresetId,
+  liquidReserveBasisPoints = 3_000,
+): LocalDemoAllocationSelection {
+  return Object.freeze({ kind: 'PRESET', presetId, liquidReserveBasisPoints });
 }
 
 function fixture(
@@ -70,9 +73,15 @@ function fixture(
 function preview(
   service: LocalDemoAllocationService,
   presetId: LocalDemoAllocationPresetId = 'BALANCED',
+  liquidReserveBasisPoints = 3_000,
   portfolioSnapshotId = SNAPSHOT_ID,
 ): Promise<LocalDemoAllocationPreviewResponse> {
-  return service.preview(ACCOUNT_ID, CORRELATION, portfolioSnapshotId, preset(presetId));
+  return service.preview(
+    ACCOUNT_ID,
+    CORRELATION,
+    portfolioSnapshotId,
+    preset(presetId, liquidReserveBasisPoints),
+  );
 }
 
 function componentAmounts(
@@ -229,6 +238,125 @@ describe('LocalDemoAllocationService', () => {
   });
 
   it.each([
+    {
+      liquidReserveBasisPoints: 0,
+      description:
+        'Keep 0% readily available and allocate the remainder to the managed yield strategy.',
+      expectedPercentages: [0, 10_000],
+    },
+    {
+      liquidReserveBasisPoints: 1_550,
+      description:
+        'Keep 15.50% readily available and allocate the remainder to the managed yield strategy.',
+      expectedPercentages: [1_550, 8_450],
+    },
+    {
+      liquidReserveBasisPoints: 9_500,
+      description:
+        'Keep 95% readily available and allocate the remainder to the managed yield strategy.',
+      expectedPercentages: [9_500, 500],
+    },
+  ])(
+    'uses a caller-selected $liquidReserveBasisPoints bps reserve with server-owned text',
+    async ({ liquidReserveBasisPoints, description, expectedPercentages }) => {
+      const result = await preview(
+        fixture([
+          { namespace: 'EVM', amountUsdMinor: '700000' },
+          { namespace: 'SOLANA', amountUsdMinor: '400000' },
+        ]).service,
+        'BALANCED',
+        liquidReserveBasisPoints,
+      );
+
+      expect(result.selection).toMatchObject({
+        kind: 'PRESET',
+        presetId: 'BALANCED',
+        label: 'Balanced blend',
+        description,
+        liquidReserveBasisPoints,
+      });
+      expect(result.allocations.map(({ percentageBasisPoints }) => percentageBasisPoints)).toEqual(
+        expectedPercentages,
+      );
+      expectExactConservation(result);
+    },
+  );
+
+  it('uses post-fee ecosystem capacity so a zero reserve remains solvent for a skewed blend', async () => {
+    const result = await preview(
+      fixture([
+        { namespace: 'EVM', amountUsdMinor: '1000000' },
+        { namespace: 'SOLANA', amountUsdMinor: '500' },
+      ]).service,
+      'MORE_YIELD',
+      0,
+    );
+    const managedByEcosystem = new Map(
+      result.managedYieldComposition.map(({ ecosystem, amountUsdMinor }) => [
+        ecosystem,
+        BigInt(amountUsdMinor),
+      ]),
+    );
+    const perEcosystemRemainders = result.sourceCapitalByEcosystem.map(
+      ({ ecosystem, amountUsdMinor }) =>
+        BigInt(amountUsdMinor) - (managedByEcosystem.get(ecosystem) ?? 0n),
+    );
+
+    expect(perEcosystemRemainders.every((remainder) => remainder >= 0n)).toBe(true);
+    expect(perEcosystemRemainders.reduce((sum, remainder) => sum + remainder, 0n)).toBe(
+      BigInt(result.executionCost.modeledScenario.totalUsdMinor),
+    );
+    expect(result.allocations[0]?.amountUsdMinor).toBe('0');
+    expectExactConservation(result);
+  });
+
+  it('rejects invalid reserve selections before reading portfolio state or accessors', async () => {
+    const invalidSelections: unknown[] = [
+      { kind: 'PRESET', presetId: 'BALANCED' },
+      { kind: 'PRESET', presetId: 'BALANCED', liquidReserveBasisPoints: -1 },
+      { kind: 'PRESET', presetId: 'BALANCED', liquidReserveBasisPoints: 9_501 },
+      { kind: 'PRESET', presetId: 'BALANCED', liquidReserveBasisPoints: 1.5 },
+      {
+        kind: 'PRESET',
+        presetId: 'BALANCED',
+        liquidReserveBasisPoints: 3_000,
+        providerId: 'caller-supplied',
+      },
+      Object.assign(Object.create({ polluted: true }), {
+        kind: 'PRESET',
+        presetId: 'BALANCED',
+        liquidReserveBasisPoints: 3_000,
+      }),
+    ];
+    let accessorInvoked = false;
+    const accessorSelection = Object.create(null) as Record<string, unknown>;
+    accessorSelection.kind = 'PRESET';
+    accessorSelection.presetId = 'BALANCED';
+    Object.defineProperty(accessorSelection, 'liquidReserveBasisPoints', {
+      enumerable: true,
+      get: () => {
+        accessorInvoked = true;
+        return 3_000;
+      },
+    });
+    invalidSelections.push(accessorSelection);
+
+    for (const selection of invalidSelections) {
+      const { service, read } = fixture();
+      await expect(
+        service.preview(
+          ACCOUNT_ID,
+          CORRELATION,
+          SNAPSHOT_ID,
+          selection as LocalDemoAllocationSelection,
+        ),
+      ).rejects.toBeInstanceOf(TypeError);
+      expect(read).not.toHaveBeenCalled();
+    }
+    expect(accessorInvoked).toBe(false);
+  });
+
+  it.each([
     { namespace: 'EVM' as const, expectedSources: ['700000', '0'], expectedRoutes: 2 },
     { namespace: 'SOLANA' as const, expectedSources: ['0', '400000'], expectedRoutes: 1 },
   ])('keeps a $namespace-only portfolio inside its native ecosystem', async (entry) => {
@@ -266,15 +394,20 @@ describe('LocalDemoAllocationService', () => {
     const { service } = fixture();
 
     await expect(
-      preview(service, 'BALANCED', 'local-demo-portfolio:ffffffffffffffffffffffffffffffff'),
+      preview(service, 'BALANCED', 3_000, 'local-demo-portfolio:ffffffffffffffffffffffffffffffff'),
     ).rejects.toBeInstanceOf(LocalDemoPortfolioSnapshotChangedError);
   });
 
-  it('fails closed when modeled activation costs exhaust tiny capital', async () => {
-    const { service } = fixture([{ namespace: 'EVM', amountUsdMinor: '1' }]);
+  it.each([0, 9_500])(
+    'returns the typed unavailable result for unusable dust at %s reserve bps',
+    async (liquidReserveBasisPoints) => {
+      const { service } = fixture([{ namespace: 'EVM', amountUsdMinor: '1' }]);
 
-    await expect(preview(service)).rejects.toThrow('local demo modeled cost exhausts capital');
-  });
+      await expect(preview(service, 'BALANCED', liquidReserveBasisPoints)).rejects.toBeInstanceOf(
+        LocalDemoNoMatchingYieldOpportunitiesError,
+      );
+    },
+  );
 
   it('never funds one ecosystem fees or principal from the other ecosystem', async () => {
     const { service } = fixture([

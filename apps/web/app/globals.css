@@ -1228,10 +1228,89 @@ h1 {
   line-height: 1.55;
 }
 
+.local-demo-liquidity-adjustment {
+  display: grid;
+  gap: 0.8rem;
+  padding: 1rem 1.1rem;
+  background: rgba(5, 18, 13, 0.62);
+  border: 1px solid rgba(112, 225, 179, 0.24);
+  border-radius: 0.9rem;
+}
+
+.local-demo-liquidity-adjustment-heading,
+.local-demo-liquidity-adjustment-footer {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.local-demo-liquidity-adjustment-heading h4 {
+  margin: 0.25rem 0 0;
+  font-size: 0.95rem;
+}
+
+.local-demo-liquidity-adjustment > label {
+  color: var(--text);
+  font-size: 0.8rem;
+  font-weight: 750;
+}
+
+.local-demo-liquidity-adjustment input[type='range'] {
+  width: 100%;
+  min-height: 1.6rem;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.local-demo-liquidity-adjustment input[type='range']:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.local-demo-liquidity-adjustment input[type='range']:focus-visible {
+  outline: 3px solid rgba(112, 225, 179, 0.42);
+  outline-offset: 0.2rem;
+}
+
+.local-demo-liquidity-output {
+  flex: none;
+  padding: 0.35rem 0.6rem;
+  color: var(--accent-strong);
+  background: rgba(112, 225, 179, 0.08);
+  border: 1px solid rgba(112, 225, 179, 0.24);
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.local-demo-liquidity-adjustment-footer p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.76rem;
+  line-height: 1.5;
+}
+
+.local-demo-liquidity-adjustment-footer p + p {
+  margin-top: 0.25rem;
+}
+
+.local-demo-liquidity-adjustment-footer strong {
+  color: var(--text);
+}
+
+.local-demo-liquidity-apply {
+  flex: none;
+  align-self: center;
+}
+
 .local-demo-ecosystem-composition {
   display: grid;
-  gap: 0.9rem;
-  padding: 1.1rem;
+  gap: 1.2rem;
+  padding: clamp(1.15rem, 2.5vw, 1.5rem);
   background: rgba(6, 18, 14, 0.55);
   border: 1px solid rgba(112, 225, 179, 0.24);
   border-radius: 0.9rem;
@@ -1257,19 +1336,67 @@ h1 {
 }
 
 .local-demo-ecosystem-list {
+  display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.75rem;
+  gap: 1rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
 .local-demo-ecosystem-list li {
-  padding: 0.9rem;
+  display: grid;
+  align-content: start;
+  min-width: 0;
+  gap: 1rem;
+  padding: 1.15rem;
   background: rgba(5, 18, 13, 0.55);
   border: 1px solid var(--border);
   border-radius: 0.75rem;
 }
 
-.local-demo-ecosystem-list small data {
-  font-weight: 700;
+.local-demo-ecosystem-list > li > strong {
+  color: var(--accent-strong);
+  font-size: 0.95rem;
+}
+
+.local-demo-ecosystem-values {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem 1rem;
+  margin: 0;
+}
+
+.local-demo-ecosystem-values > div {
+  display: grid;
+  align-content: start;
+  gap: 0.25rem;
+}
+
+.local-demo-ecosystem-values .local-demo-ecosystem-managed-amount {
+  grid-column: 1 / -1;
+  padding-bottom: 0.85rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.local-demo-ecosystem-values dt {
+  color: var(--muted);
+  font-size: 0.7rem;
+  letter-spacing: 0.025em;
+  text-transform: uppercase;
+}
+
+.local-demo-ecosystem-values dd {
+  margin: 0;
+  font-size: 0.9rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 780;
+  overflow-wrap: anywhere;
+}
+
+.local-demo-ecosystem-managed-amount dd {
+  color: var(--text);
+  font-size: 1.2rem;
 }
 
 .local-demo-native-route-note {
@@ -2138,6 +2265,8 @@ footer p {
   .local-demo-allocation-preview-heading,
   .local-demo-allocation-yield-heading,
   .local-demo-ecosystem-composition-heading,
+  .local-demo-liquidity-adjustment-heading,
+  .local-demo-liquidity-adjustment-footer,
   .local-demo-yield-catalog-heading,
   .portfolio-refresh-row,
   .local-demo-wallet-roster li {
@@ -2183,6 +2312,10 @@ footer p {
   .local-demo-allocation-result-values {
     justify-items: start;
     text-align: left;
+  }
+
+  .local-demo-liquidity-apply {
+    align-self: flex-start;
   }
 
   .local-demo-proof-badge {

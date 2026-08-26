@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { LocalDemoAllocationPlanner } from '../components/portfolio/local-demo-allocation-planner';
@@ -45,6 +45,55 @@ function expectProviderPrivate(container: HTMLElement): void {
   );
 }
 
+function adjustedLiquidityPreview(
+  preview: LocalDemoAllocationPreview,
+  liquidReserveBasisPoints: number,
+): LocalDemoAllocationPreview {
+  const capital = BigInt(preview.capitalIncludedInProjectionUsdMinor);
+  const managedBasisPoints = 10_000 - liquidReserveBasisPoints;
+  const liquidProduct = capital * BigInt(liquidReserveBasisPoints);
+  const managedProduct = capital * BigInt(managedBasisPoints);
+  let liquidAmount = liquidProduct / 10_000n;
+  let managedAmount = managedProduct / 10_000n;
+  if (liquidAmount + managedAmount < capital) {
+    if (liquidProduct % 10_000n >= managedProduct % 10_000n) liquidAmount += 1n;
+    else managedAmount += 1n;
+  }
+  const percentage =
+    liquidReserveBasisPoints % 100 === 0
+      ? `${Math.floor(liquidReserveBasisPoints / 100)}%`
+      : `${Math.floor(liquidReserveBasisPoints / 100)}.${String(liquidReserveBasisPoints % 100).padStart(2, '0')}%`;
+
+  return Object.freeze({
+    ...preview,
+    selection: Object.freeze({
+      ...preview.selection,
+      description: `Keep ${percentage} readily available and allocate the remainder to the managed yield strategy.`,
+      liquidReserveBasisPoints,
+    }),
+    allocations: Object.freeze([
+      Object.freeze({
+        ...preview.allocations[0]!,
+        percentageBasisPoints: liquidReserveBasisPoints,
+        amountUsdMinor: String(liquidAmount),
+      }),
+      Object.freeze({
+        ...preview.allocations[1]!,
+        percentageBasisPoints: managedBasisPoints,
+        amountUsdMinor: String(managedAmount),
+      }),
+    ]),
+    managedYieldComposition: Object.freeze([
+      Object.freeze({
+        ...preview.managedYieldComposition[0]!,
+        percentageBasisPointsOfManagedYield: 10_000,
+        amountUsdMinor: String(managedAmount),
+      }),
+      preview.managedYieldComposition[1]!,
+    ]),
+  });
+}
+
 afterEach(() => cleanup());
 
 describe('LocalDemoAllocationPlanner', () => {
@@ -67,7 +116,15 @@ describe('LocalDemoAllocationPlanner', () => {
     expect(screen.getByRole('button', { name: /Balanced blend/u })).toBeEnabled();
     expect(screen.getByRole('button', { name: /More yield/u })).toBeEnabled();
     expect(screen.getAllByRole('button', { name: /Preview plan/u })).toHaveLength(3);
+    expect(screen.getByText(/Starts at 60% readily available/u)).toBeInTheDocument();
+    expect(screen.getByText(/Starts at 30% readily available/u)).toBeInTheDocument();
+    expect(screen.getByText(/Starts at 15% readily available/u)).toBeInTheDocument();
     expect(screen.queryByText(/Custom yield/u)).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('slider', {
+        name: 'Share kept liquid after estimated one-time fees',
+      }),
+    ).not.toBeInTheDocument();
     expect(
       screen.queryByRole('heading', { name: 'Estimated one-time fees' }),
     ).not.toBeInTheDocument();
@@ -90,7 +147,7 @@ describe('LocalDemoAllocationPlanner', () => {
 
     expect(harness.previewAllocation).toHaveBeenCalledWith(
       PORTFOLIO_SNAPSHOT_ID,
-      { kind: 'PRESET', presetId: 'BALANCED' },
+      { kind: 'PRESET', presetId: 'BALANCED', liquidReserveBasisPoints: 3_000 },
       expect.any(AbortSignal),
     );
     const feeHeading = await screen.findByRole('heading', { name: 'Estimated one-time fees' });
@@ -143,6 +200,18 @@ describe('LocalDemoAllocationPlanner', () => {
     expect(screen.getByText('Liquid reserve', { selector: 'strong' })).toBeInTheDocument();
     expect(screen.getByText('Managed yield', { selector: 'strong' })).toBeInTheDocument();
     expect(screen.getByText(/preview ready.*\$6\.13/iu)).toBeInTheDocument();
+    const slider = screen.getByRole('slider', {
+      name: 'Share kept liquid after estimated one-time fees',
+    });
+    expect(slider).toHaveAttribute('min', '0');
+    expect(slider).toHaveAttribute('max', '9500');
+    expect(slider).toHaveAttribute('step', '500');
+    expect(slider).toHaveValue('3000');
+    expect(slider).toHaveAttribute('aria-valuetext', '30% kept liquid in the draft');
+    expect(screen.getByText(/Current applied preview:/u)).toHaveTextContent(
+      'Current applied preview: 30% liquid. Draft: 30% liquid · matches current preview.',
+    );
+    expect(screen.getByRole('button', { name: 'Update preview' })).toBeDisabled();
     expectProviderPrivate(rendered.container);
   });
 
@@ -168,8 +237,26 @@ describe('LocalDemoAllocationPlanner', () => {
     expect(composition).not.toBeNull();
     expect(within(composition!).getByText('EVM managed yield')).toBeInTheDocument();
     expect(within(composition!).getByText('SVM managed yield')).toBeInTheDocument();
-    expect(within(composition!).getByText(/63\.64% of managed yield/u)).toBeInTheDocument();
-    expect(within(composition!).getByText(/36\.36% of managed yield/u)).toBeInTheDocument();
+    expect(within(composition!).getByLabelText('63.64% of managed yield')).toHaveTextContent(
+      '63.64%',
+    );
+    expect(within(composition!).getByLabelText('36.36% of managed yield')).toHaveTextContent(
+      '36.36%',
+    );
+    const evmCard = within(composition!).getByText('EVM managed yield').closest('li');
+    const svmCard = within(composition!).getByText('SVM managed yield').closest('li');
+    expect(evmCard).not.toBeNull();
+    expect(svmCard).not.toBeNull();
+    expect(within(evmCard!).getByText('Managed amount')).toBeInTheDocument();
+    expect(within(evmCard!).getByText('Source capital')).toBeInTheDocument();
+    expect(within(evmCard!).getByLabelText('4,895 US dollars and 94 cents')).toHaveTextContent(
+      '$4,895.94',
+    );
+    expect(within(evmCard!).getByLabelText('7,000 US dollars')).toHaveTextContent('$7,000.00');
+    expect(within(svmCard!).getByLabelText('2,797 US dollars and 68 cents')).toHaveTextContent(
+      '$2,797.68',
+    );
+    expect(within(svmCard!).getByLabelText('4,000 US dollars')).toHaveTextContent('$4,000.00');
     expect(
       within(composition!).getByText('No EVM-to-Solana transfer is modeled.'),
     ).toBeInTheDocument();
@@ -219,6 +306,162 @@ describe('LocalDemoAllocationPlanner', () => {
     );
     expect(screen.getByLabelText(/first positive whole-cent yield.*day 10/iu)).toHaveTextContent(
       'Day 10',
+    );
+  });
+
+  it('keeps a keyboard-adjusted liquidity draft separate until its preview is applied', async () => {
+    const adjustedPreview = adjustedLiquidityPreview(MORE_LIQUID_PREVIEW, 3_500);
+    let resolveUpdate: ((preview: LocalDemoAllocationPreview) => void) | undefined;
+    const pendingUpdate = new Promise<LocalDemoAllocationPreview>((resolve) => {
+      resolveUpdate = resolve;
+    });
+    let requestCount = 0;
+    const harness = clientWith({
+      previewAllocation: async () => {
+        requestCount += 1;
+        return requestCount === 1 ? MORE_LIQUID_PREVIEW : pendingUpdate;
+      },
+    });
+    render(
+      <LocalDemoAllocationPlanner
+        client={harness.client}
+        portfolioSnapshotId={PORTFOLIO_SNAPSHOT_ID}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: /More liquid/u }));
+    const slider = await screen.findByRole('slider', {
+      name: 'Share kept liquid after estimated one-time fees',
+    });
+    expect(harness.previewAllocation).toHaveBeenNthCalledWith(
+      1,
+      PORTFOLIO_SNAPSHOT_ID,
+      { kind: 'PRESET', presetId: 'MORE_LIQUID', liquidReserveBasisPoints: 6_000 },
+      expect.any(AbortSignal),
+    );
+    expect(slider).toHaveValue('6000');
+    expect(slider).toHaveAttribute('aria-valuetext', '60% kept liquid in the draft');
+    slider.focus();
+    expect(slider).toHaveFocus();
+    fireEvent.keyDown(slider, { key: 'ArrowLeft' });
+    fireEvent.change(slider, { target: { value: '3500' } });
+
+    expect(slider).toHaveValue('3500');
+    expect(slider).toHaveAttribute('aria-valuetext', '35% kept liquid in the draft');
+    expect(screen.getByText('Draft 35%')).toBeInTheDocument();
+    expect(screen.getByText(/Current applied preview:/u)).toHaveTextContent(
+      /Current applied preview: 60% liquid.*Draft: 35% liquid.*not applied yet/u,
+    );
+    expect(screen.getByText(/^Keep 60% readily available/u)).toBeInTheDocument();
+    expect(harness.previewAllocation).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Update preview' }));
+    await waitFor(() => expect(harness.previewAllocation).toHaveBeenCalledTimes(2));
+    expect(harness.previewAllocation).toHaveBeenNthCalledWith(
+      2,
+      PORTFOLIO_SNAPSHOT_ID,
+      { kind: 'PRESET', presetId: 'MORE_LIQUID', liquidReserveBasisPoints: 3_500 },
+      expect.any(AbortSignal),
+    );
+    const adjustment = screen
+      .getByRole('heading', { name: 'Fine-tune this preview' })
+      .closest('section');
+    expect(adjustment).toHaveAttribute('aria-busy', 'true');
+    expect(slider).toBeDisabled();
+    expect(screen.getByText(/^Keep 60% readily available/u)).toBeInTheDocument();
+    expect(screen.getByText(/current applied preview remains visible/iu)).toBeInTheDocument();
+
+    await act(async () => {
+      resolveUpdate?.(adjustedPreview);
+      await pendingUpdate;
+    });
+
+    expect(await screen.findByText(/^Keep 35% readily available/u)).toBeInTheDocument();
+    expect(slider).toBeEnabled();
+    expect(slider).toHaveValue('3500');
+    expect(screen.getByText(/Current applied preview:/u)).toHaveTextContent(
+      /Current applied preview: 35% liquid.*Draft: 35% liquid.*matches current preview/u,
+    );
+    expect(screen.getByRole('button', { name: 'Update preview' })).toBeDisabled();
+    expect(screen.getByText(/recalculates this preview only/iu)).toBeInTheDocument();
+    expect(screen.getByText(/moves no funds/iu)).toBeInTheDocument();
+    expect(screen.getByText(/applied after modeled one-time fees/iu)).toBeInTheDocument();
+  });
+
+  it('retains the applied preview and changed draft when a liquidity update fails', async () => {
+    let requestCount = 0;
+    const harness = clientWith({
+      previewAllocation: async () => {
+        requestCount += 1;
+        if (requestCount === 1) return MORE_LIQUID_PREVIEW;
+        throw new LocalDemoApiError('UNAVAILABLE');
+      },
+    });
+    render(
+      <LocalDemoAllocationPlanner
+        client={harness.client}
+        portfolioSnapshotId={PORTFOLIO_SNAPSHOT_ID}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: /More liquid/u }));
+    const slider = await screen.findByRole('slider', {
+      name: 'Share kept liquid after estimated one-time fees',
+    });
+    fireEvent.change(slider, { target: { value: '3500' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Update preview' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(/current applied preview has not changed/u);
+    expect(alert).toHaveTextContent(/no funds were moved/u);
+    expect(screen.getByText(/^Keep 60% readily available/u)).toBeInTheDocument();
+    expect(screen.getByText(/Current applied preview:/u)).toHaveTextContent(
+      /Current applied preview: 60% liquid.*Draft: 35% liquid.*not applied yet/u,
+    );
+    expect(slider).toHaveValue('3500');
+    expect(screen.getByRole('button', { name: 'Update preview' })).toBeEnabled();
+  });
+
+  it('clears an applied preview and refreshes the portfolio when a liquidity update conflicts', async () => {
+    const onPortfolioSnapshotChanged = vi.fn();
+    let requestCount = 0;
+    const harness = clientWith({
+      previewAllocation: async () => {
+        requestCount += 1;
+        if (requestCount === 1) return MORE_LIQUID_PREVIEW;
+        throw new LocalDemoApiError('PORTFOLIO_SNAPSHOT_CHANGED');
+      },
+    });
+    render(
+      <LocalDemoAllocationPlanner
+        client={harness.client}
+        portfolioSnapshotId={PORTFOLIO_SNAPSHOT_ID}
+        onPortfolioSnapshotChanged={onPortfolioSnapshotChanged}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: /More liquid/u }));
+    const slider = await screen.findByRole('slider', {
+      name: 'Share kept liquid after estimated one-time fees',
+    });
+    fireEvent.change(slider, { target: { value: '3500' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Update preview' }));
+
+    expect(
+      await screen.findByText(/connected-wallet portfolio changed before this preview completed/iu),
+    ).toBeInTheDocument();
+    expect(onPortfolioSnapshotChanged).toHaveBeenCalledTimes(1);
+    expect(
+      screen.queryByRole('slider', {
+        name: 'Share kept liquid after estimated one-time fees',
+      }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('heading', { name: 'Illustrative yield result' }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /More liquid/u })).toHaveAttribute(
+      'aria-pressed',
+      'false',
     );
   });
 
@@ -357,18 +600,20 @@ describe('LocalDemoAllocationPlanner', () => {
     ).toBeInTheDocument();
   });
 
-  it('aborts catalog and preview requests when unmounted', async () => {
+  it('aborts an applied-liquidity request and ignores a late response after unmount', async () => {
+    const adjustedPreview = adjustedLiquidityPreview(MORE_LIQUID_PREVIEW, 3_500);
     let previewSignal: AbortSignal | undefined;
+    let resolveLatePreview: ((preview: LocalDemoAllocationPreview) => void) | undefined;
+    const latePreview = new Promise<LocalDemoAllocationPreview>((resolve) => {
+      resolveLatePreview = resolve;
+    });
+    let requestCount = 0;
     const harness = clientWith({
       previewAllocation: async (_portfolioSnapshotId, _selection, signal) => {
+        requestCount += 1;
+        if (requestCount === 1) return MORE_LIQUID_PREVIEW;
         previewSignal = signal;
-        return new Promise((_resolve, reject) => {
-          signal?.addEventListener(
-            'abort',
-            () => reject(new DOMException('Request aborted', 'AbortError')),
-            { once: true },
-          );
-        });
+        return latePreview;
       },
     });
     const rendered = render(
@@ -377,11 +622,21 @@ describe('LocalDemoAllocationPlanner', () => {
         portfolioSnapshotId={PORTFOLIO_SNAPSHOT_ID}
       />,
     );
-    fireEvent.click(await screen.findByRole('button', { name: /More yield/u }));
-    await waitFor(() => expect(harness.previewAllocation).toHaveBeenCalledTimes(1));
+    fireEvent.click(await screen.findByRole('button', { name: /More liquid/u }));
+    const slider = await screen.findByRole('slider', {
+      name: 'Share kept liquid after estimated one-time fees',
+    });
+    fireEvent.change(slider, { target: { value: '3500' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Update preview' }));
+    await waitFor(() => expect(harness.previewAllocation).toHaveBeenCalledTimes(2));
 
     rendered.unmount();
 
     expect(previewSignal?.aborted).toBe(true);
+    await act(async () => {
+      resolveLatePreview?.(adjustedPreview);
+      await latePreview;
+    });
+    expect(harness.previewAllocation).toHaveBeenCalledTimes(2);
   });
 });
