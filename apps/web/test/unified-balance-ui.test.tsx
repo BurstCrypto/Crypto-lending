@@ -96,6 +96,13 @@ describe('UnifiedBalanceView', () => {
     ).toBeInTheDocument();
     expect(screen.queryByText('Why buying power is lower')).not.toBeInTheDocument();
     expect(screen.queryByText('Estimated slippage')).not.toBeInTheDocument();
+    expect(screen.queryByText('Estimated network costs')).not.toBeInTheDocument();
+    expect(screen.queryByText('Estimated conversion costs')).not.toBeInTheDocument();
+    expect(screen.queryByText('Estimated market impact')).not.toBeInTheDocument();
+    expect(screen.queryByText('Estimated routing fee')).not.toBeInTheDocument();
+    expect(screen.queryByText('Total estimated fees')).not.toBeInTheDocument();
+    expect(screen.queryByText('First positive day after estimated fees')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Actual local operation/u)).not.toBeInTheDocument();
   });
 
   it('expands wallet and chain attribution while keeping addresses masked', () => {

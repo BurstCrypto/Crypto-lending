@@ -20,20 +20,11 @@ import {
   type LocalDemoYieldCatalog,
 } from './local-demo-yield';
 
-export {
-  LOCAL_DEMO_ALLOCATION_PRESETS as LOCAL_DEMO_YIELD_ALLOCATION_PRESETS,
-  LOCAL_DEMO_YIELD_ASSET_SYMBOLS,
-  LOCAL_DEMO_YIELD_NETWORK_IDS,
-  LOCAL_DEMO_YIELD_PROVIDER_IDS,
-} from './local-demo-yield';
+export { LOCAL_DEMO_ALLOCATION_PRESETS as LOCAL_DEMO_YIELD_ALLOCATION_PRESETS } from './local-demo-yield';
 export type {
   LocalDemoAllocationSelectionInput,
-  LocalDemoCustomYieldFilters,
-  LocalDemoYieldAssetSymbol,
   LocalDemoYieldCatalog,
   LocalDemoYieldFreshness,
-  LocalDemoYieldNetworkId,
-  LocalDemoYieldOpportunity,
 } from './local-demo-yield';
 
 export const LOCAL_DEMO_WALLETS_PATH = '/api/v1/local-demo/wallets';
@@ -68,7 +59,7 @@ export class LocalDemoApiError extends Error {
         : code === 'CONFLICT'
           ? 'The local demo wallet is already in use.'
           : code === 'NO_MATCHING_YIELD_OPPORTUNITIES'
-            ? 'No local yield snapshot opportunities matched those filters.'
+            ? 'The managed yield strategy is unavailable for this snapshot.'
             : 'The local demo is unavailable.',
     );
     this.name = 'LocalDemoApiError';
@@ -243,26 +234,7 @@ function previewMatchesSelection(
   preview: LocalDemoSnapshotAllocationPreview,
   selection: LocalDemoAllocationSelectionInput,
 ): boolean {
-  if (selection.kind === 'PRESET') {
-    return preview.selection.kind === 'PRESET' && preview.selection.presetId === selection.presetId;
-  }
-  if (preview.selection.kind !== 'CUSTOM' || preview.selection.filters === null) return false;
-  const expected = selection.filters;
-  const actual = preview.selection.filters;
-  return (
-    preview.selection.presetId === null &&
-    preview.selection.liquidReserveBasisPoints === selection.liquidReserveBasisPoints &&
-    expected.minimumApyBasisPoints === actual.minimumApyBasisPoints &&
-    expected.minimumTvlUsdMinor === actual.minimumTvlUsdMinor &&
-    expected.minimumExitLiquidityUsdMinor === actual.minimumExitLiquidityUsdMinor &&
-    expected.maximumUtilizationBasisPoints === actual.maximumUtilizationBasisPoints &&
-    expected.assetSymbols.length === actual.assetSymbols.length &&
-    expected.assetSymbols.every((value, index) => value === actual.assetSymbols[index]) &&
-    expected.providerIds.length === actual.providerIds.length &&
-    expected.providerIds.every((value, index) => value === actual.providerIds[index]) &&
-    expected.networkIds.length === actual.networkIds.length &&
-    expected.networkIds.every((value, index) => value === actual.networkIds[index])
-  );
+  return preview.selection.kind === 'PRESET' && preview.selection.presetId === selection.presetId;
 }
 
 function parseNoMatchingYieldResponse(value: unknown): void {
@@ -270,37 +242,15 @@ function parseNoMatchingYieldResponse(value: unknown): void {
   if (
     record.statusCode !== 422 ||
     record.error !== 'Unprocessable Entity' ||
-    record.message !== 'No trusted snapshot opportunities match this selection' ||
+    record.message !== 'The managed yield strategy is unavailable for this snapshot' ||
     record.code !== 'NO_MATCHING_YIELD_OPPORTUNITIES'
   ) {
     return fail();
   }
 }
 
-function serializeClosedStringArray(values: readonly string[]): string {
-  let result = '[';
-  for (let index = 0; index < values.length; index += 1) {
-    if (index > 0) result += ',';
-    result += `"${values[index]}"`;
-  }
-  return `${result}]`;
-}
-
 function serializeAllocationSelection(selection: LocalDemoAllocationSelectionInput): string {
-  if (selection.kind === 'PRESET') {
-    return `{"selection":{"kind":"PRESET","presetId":"${selection.presetId}"}}`;
-  }
-  const filters = selection.filters;
-  return (
-    `{"selection":{"kind":"CUSTOM","liquidReserveBasisPoints":${selection.liquidReserveBasisPoints},` +
-    `"filters":{"assetSymbols":${serializeClosedStringArray(filters.assetSymbols)},` +
-    `"providerIds":${serializeClosedStringArray(filters.providerIds)},` +
-    `"networkIds":${serializeClosedStringArray(filters.networkIds)},` +
-    `"minimumApyBasisPoints":${filters.minimumApyBasisPoints},` +
-    `"minimumTvlUsdMinor":"${filters.minimumTvlUsdMinor}",` +
-    `"minimumExitLiquidityUsdMinor":"${filters.minimumExitLiquidityUsdMinor}",` +
-    `"maximumUtilizationBasisPoints":${filters.maximumUtilizationBasisPoints}}}}`
-  );
+  return `{"selection":{"kind":"PRESET","presetId":"${selection.presetId}"}}`;
 }
 
 export class LocalDemoApiClient {

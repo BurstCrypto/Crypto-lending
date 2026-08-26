@@ -89,11 +89,13 @@ evidence. Every screen displays a synthetic-data banner while the mode is on.
   local-demo response adapter and renderer. Wallet roster projections remain
   Sepolia/Solana devnet, and shared production network/asset allowlists are not
   widened.
-- Yield comparisons use a checked-in, provenance-bearing Morpho Public API
-  capture. The API and browser never fetch Morpho at runtime. Base supply APY,
-  reward APR, reported provider fee, TVL, utilization, and available-to-borrow
-  remain distinct; the latter is only an exit-liquidity proxy. The capture is
-  labeled stale after its fixed boundary and cannot authorize an action.
+- Yield comparisons use checked-in server-confidential source evidence. The API
+  and browser make no live provider request. Browser responses expose only a
+  product-owned managed-rate snapshot status and aggregate managed-yield
+  results; provider identity, protocol identity, market identifiers,
+  provenance, exact observations, and endpoints remain server-confidential.
+  The snapshot is labeled stale after its fixed boundary and cannot authorize
+  an action.
 
 Do not enter a real email address, phone number, seed phrase, private key,
 signature, wallet address, credential, customer record, or real asset.
@@ -153,19 +155,19 @@ restart the attached harness to pick up API source changes.
    both fixture wallets connected, each is `$11,000.00`; no hypothetical route
    fee is deducted before an action is chosen. Inspect the source wallet, chain,
    asset, freshness, and masked-address details.
-9. Review the timestamped Morpho market capture, with base supply APY kept
-   separate from reward APR and reported provider fees. Market presence means
-   provider-listed only; deposit and withdrawal availability are not verified.
-   Choose **More liquid**, **Balanced blend**, or **More yield**. Only this
-   explicit preset choice requests an allocation preview or reveals its
-   execution-cost treatment. Review the selected markets, evenly divided
-   investable cents, full capital included in the projection, exact
-   position-level base-yield estimate, and the Day 1 projection assumption when
-   at least one whole annual cent is projected. Smaller results are labeled below
-   display precision. The non-executing local simulation models $0 cost; public
-   network, routing, conversion, and slippage costs are unquoted and excluded.
-   Provider values are a point-in-time snapshot, not live or guaranteed returns;
-   rewards are disclosed but excluded from projection.
+9. Review the timestamped managed-rate status, then choose **More liquid**,
+   **Balanced blend**, or **More yield**. Only this explicit closed preset choice
+   requests an allocation preview or reveals its cost treatment. The browser
+   receives aggregate liquid-reserve and managed-yield buckets only; confidential
+   provider, protocol, market, provenance, and endpoint details stay on the
+   server. The preview creates no route, so the actual local operation costs
+   $0.00 and public execution remains unquoted. A separate non-quote scenario
+   models variable network, conversion, market-impact, and routing costs, rounds
+   each component up to a cent, and deducts the total before allocation and yield
+   projection. Review the aggregate effective APY, annual yield before and after
+   modeled fees, and first-positive-day status. A numbered day is the first whole
+   day when straight-line projected yield exceeds modeled fees by at least one
+   cent within the 365-day horizon; it is not a live rate or execution promise.
 10. Confirm the page states **No user-authorized financial transaction was
     created**. Refresh the browser to exercise wallet and session restoration.
     Disconnect a wallet to remove its contribution.

@@ -16,6 +16,8 @@ const USD_MINOR = /^(?:0|[1-9][0-9]{0,17})$/u;
 const SHA256 = /^[0-9a-f]{64}$/u;
 const MAX_SELECTED_OPPORTUNITIES = 3;
 
+export const LOCAL_DEMO_PUBLIC_RATE_SNAPSHOT_ID = 'managed-rate-snapshot-v1' as const;
+
 export const LOCAL_DEMO_YIELD_ASSET_SYMBOLS = Object.freeze(['USDC', 'USDT'] as const);
 export const LOCAL_DEMO_YIELD_PROVIDER_IDS = Object.freeze(['MORPHO'] as const);
 export const LOCAL_DEMO_YIELD_NETWORK_IDS = Object.freeze(['eip155:1', 'eip155:8453'] as const);
@@ -109,7 +111,7 @@ export interface LocalDemoYieldOpportunitySummary {
 }
 
 export interface LocalDemoYieldCatalogMetadata {
-  readonly snapshotId: string;
+  readonly snapshotId: typeof LOCAL_DEMO_PUBLIC_RATE_SNAPSHOT_ID;
   readonly capturedAt: string;
   readonly staleAfter: string;
   readonly freshness: LocalDemoYieldCatalogFreshness;
@@ -119,19 +121,17 @@ export interface LocalDemoYieldCatalogMetadata {
 }
 
 export interface LocalDemoYieldCatalogResponse {
-  readonly use: 'LOCAL_DEMO_SNAPSHOT_ONLY';
+  readonly use: 'LOCAL_DEMO_MANAGED_RATE_SNAPSHOT_ONLY';
   readonly mayAuthorizeFinancialAction: false;
   readonly riskClassificationAvailable: false;
   readonly snapshot: Readonly<{
-    id: string;
-    provider: 'MORPHO_PUBLIC_API';
+    id: typeof LOCAL_DEMO_PUBLIC_RATE_SNAPSHOT_ID;
     capturedAt: string;
     staleAfter: string;
     freshness: LocalDemoYieldCatalogFreshness;
     staleBehavior: 'LABEL_STALE_KEEP_NON_EXECUTABLE';
     riskClassification: 'NOT_ASSESSED';
   }>;
-  readonly opportunities: readonly LocalDemoYieldOpportunitySummary[];
 }
 
 export interface LocalDemoYieldCatalogSelection {
@@ -149,7 +149,7 @@ export class LocalDemoYieldCatalogUnavailableError extends Error {
 
 export class LocalDemoNoMatchingYieldOpportunitiesError extends Error {
   constructor() {
-    super('No trusted snapshot opportunities match this selection');
+    super('The managed yield strategy is unavailable for this snapshot');
     this.name = 'LocalDemoNoMatchingYieldOpportunitiesError';
   }
 }
@@ -453,7 +453,7 @@ function catalogMetadata(now: Date): LocalDemoYieldCatalogMetadata {
     throw new LocalDemoYieldCatalogUnavailableError();
   }
   return Object.freeze({
-    snapshotId: MORPHO_YIELD_SNAPSHOT.snapshotId,
+    snapshotId: LOCAL_DEMO_PUBLIC_RATE_SNAPSHOT_ID,
     capturedAt: MORPHO_YIELD_SNAPSHOT.capturedAt,
     staleAfter: MORPHO_YIELD_SNAPSHOT.staleAfter,
     freshness: nowMilliseconds < Date.parse(MORPHO_YIELD_SNAPSHOT.staleAfter) ? 'CURRENT' : 'STALE',
@@ -536,23 +536,20 @@ function rankOpportunities(
 @Injectable()
 export class LocalDemoYieldCatalogService {
   read(now = new Date()): LocalDemoYieldCatalogResponse {
-    const opportunities = parsedSnapshot;
-    if (opportunities === null) throw new LocalDemoYieldCatalogUnavailableError();
+    if (parsedSnapshot === null) throw new LocalDemoYieldCatalogUnavailableError();
     const metadata = catalogMetadata(now);
     return Object.freeze({
-      use: 'LOCAL_DEMO_SNAPSHOT_ONLY',
+      use: 'LOCAL_DEMO_MANAGED_RATE_SNAPSHOT_ONLY',
       mayAuthorizeFinancialAction: false,
       riskClassificationAvailable: false,
       snapshot: Object.freeze({
         id: metadata.snapshotId,
-        provider: 'MORPHO_PUBLIC_API',
         capturedAt: metadata.capturedAt,
         staleAfter: metadata.staleAfter,
         freshness: metadata.freshness,
         staleBehavior: metadata.staleBehavior,
         riskClassification: metadata.riskClassification,
       }),
-      opportunities,
     });
   }
 
@@ -560,23 +557,25 @@ export class LocalDemoYieldCatalogService {
     filters: LocalDemoCustomYieldFilters | null,
     now = new Date(),
   ): LocalDemoYieldCatalogSelection {
-    const catalog = this.read(now);
+    const opportunities = parsedSnapshot;
+    if (opportunities === null) throw new LocalDemoYieldCatalogUnavailableError();
+    const metadata = catalogMetadata(now);
     if (filters !== null) assertLocalDemoCustomYieldFilters(filters);
     const matches = rankOpportunities(
       filters === null
-        ? catalog.opportunities
-        : catalog.opportunities.filter((opportunity) => matchesFilters(opportunity, filters)),
+        ? opportunities
+        : opportunities.filter((opportunity) => matchesFilters(opportunity, filters)),
     );
     if (matches.length === 0) throw new LocalDemoNoMatchingYieldOpportunitiesError();
     return Object.freeze({
       metadata: Object.freeze({
-        snapshotId: catalog.snapshot.id,
-        capturedAt: catalog.snapshot.capturedAt,
-        staleAfter: catalog.snapshot.staleAfter,
-        freshness: catalog.snapshot.freshness,
-        staleBehavior: catalog.snapshot.staleBehavior,
+        snapshotId: metadata.snapshotId,
+        capturedAt: metadata.capturedAt,
+        staleAfter: metadata.staleAfter,
+        freshness: metadata.freshness,
+        staleBehavior: metadata.staleBehavior,
         riskClassificationAvailable: false,
-        riskClassification: catalog.snapshot.riskClassification,
+        riskClassification: metadata.riskClassification,
       }),
       matchedOpportunities: matches,
       selectedOpportunities: Object.freeze(matches.slice(0, MAX_SELECTED_OPPORTUNITIES)),

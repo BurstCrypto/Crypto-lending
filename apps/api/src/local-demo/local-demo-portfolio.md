@@ -27,33 +27,35 @@ With one connected wallet in each namespace, the stable fixtures contain $7,000 
 $4,000 Solana USDC. The resulting portfolio and idle buying power are both $11,000. A single
 connected namespace receives only its proportional fixture total.
 
-`GET /api/v1/local-demo/yield-catalog` exposes an immutable checked-in capture of five Morpho Blue
-USDC/USDT markets on Ethereum and Base. The capture retains exact source timestamps, provider block
-identities, request/response hashes, base supply APY, reward APR, reported market fee, TVL,
-utilization, and available-to-borrow liquidity. Available-to-borrow is only an exit-liquidity proxy.
-Provider listing is recorded, but deposit and withdrawal availability are not verified. Risk is
-explicitly not assessed. The runtime performs no Morpho or other provider request; after the 24-hour
-capture boundary it labels the data stale and keeps it non-executable.
+`GET /api/v1/local-demo/yield-catalog` exposes only sanitized status for an immutable checked-in
+managed-rate snapshot: a product-owned identifier, capture and stale timestamps, freshness,
+non-executable use, and the fact that risk is not assessed. Provider identity, protocol identity,
+market identifiers, exact observations, provenance, and endpoints remain server-confidential. The
+runtime performs no live provider request; after the 24-hour capture boundary it labels the status
+stale and keeps it non-executable.
 
-`POST /api/v1/local-demo/allocation-preview` accepts a closed preset or bounded custom filter.
-Custom constraints cover asset, provider, network, minimum base APY, minimum TVL, minimum
-available-to-borrow proxy, maximum utilization, and liquid-reserve percentage. The server derives
-capital from the authenticated account, ranks matches by exact base APY then opportunity ID, keeps
-at most three, and divides the non-reserve allocation deterministically. No match returns a typed
-422 response without fallback.
+`POST /api/v1/local-demo/allocation-preview` accepts only one of the three closed preset IDs. The
+caller cannot send custom filters, capital, managed rates, fee inputs, provider or protocol details,
+market identifiers, or provenance. The server derives capital from the authenticated account and
+performs confidential source selection and exact-decimal projection internally. The public response
+contains only aggregate `LIQUID_RESERVE` and `MANAGED_YIELD` buckets. Their basis-point percentages
+are preset target labels; their integer-cent amounts are authoritative. If the confidential strategy
+is unavailable, the API returns a sanitized typed 422 without fallback or internal source details.
 
-The preview creates no route or transaction, so its execution-cost object models zero local cost
-and marks public network, routing, conversion, and slippage costs explicitly unquoted. It returns no
-generic net-growth or cost-recovery number. Gross capital and capital included in the local
-projection reconcile exactly. The allocator fixes the liquid-reserve cents first, then divides the
-investable cents directly across the selected markets; those market amounts differ by no more than
-one cent.
-Projected annual yield sums each actual market amount multiplied by its exact captured base APY
-decimal. The rounded blended basis-point rate is display-only, while reward APR remains separately
-disclosed and excluded. The catalog and preview create no user-authorized financial operation, live
-provider request, public-chain transaction, or persistence record and do not make a promise,
-recommendation, or financial authorization. Portfolio fixture maintenance may still create
-zero-gas transactions on the owned loopback EVM after a reset.
+The preview creates no route or transaction, so the actual local operation is exactly zero and
+public execution remains explicitly unquoted. A separate, non-quote scenario models variable
+network, conversion, market-impact, and routing components from server-owned inputs, rounds each
+component up to a cent, and deducts their total from gross capital before allocation and projection.
+The two aggregate buckets reconcile exactly to the post-model-cost capital.
+
+The server projects the confidential positions from exact managed base-rate decimals and returns
+only an aggregate basis-point rate and whole-cent annual yield. Annual yield after modeled fees can
+be negative. The first-positive-day field is the first whole day when straight-line projected yield
+exceeds modeled fees by at least one cent, limited to a 365-day horizon; it distinguishes no yield
+from not recovering within that horizon. The catalog and preview create no user-authorized financial
+operation, live provider request, public-chain transaction, or persistence record and do not make a
+promise, recommendation, or financial authorization. Portfolio fixture maintenance may still
+create zero-gas transactions on the owned loopback EVM after a reset.
 
 ## Trust and I/O boundaries
 

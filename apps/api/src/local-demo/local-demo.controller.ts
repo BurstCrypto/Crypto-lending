@@ -212,9 +212,9 @@ export class LocalDemoController {
 
   @Get('yield-catalog')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Read the non-executable checked-in Morpho yield snapshot' })
+  @ApiOperation({ summary: 'Read the non-executable managed rate snapshot status' })
   @ApiOkResponse({
-    description: 'Timestamped local-only Morpho observations with provenance and freshness',
+    description: 'Product-owned rate freshness without upstream strategy identity',
     schema: LOCAL_DEMO_YIELD_CATALOG_RESPONSE_SCHEMA,
   })
   @ApiUnauthorizedResponse({ description: 'Missing or invalid authenticated session' })
@@ -242,7 +242,7 @@ export class LocalDemoController {
   @ApiBadRequestResponse({ description: 'Body is malformed or contains unsupported fields' })
   @ApiResponse({
     status: 422,
-    description: 'No trusted snapshot opportunities match the supplied constraints',
+    description: 'The managed yield strategy is unavailable for this snapshot',
     schema: LOCAL_DEMO_ALLOCATION_NO_MATCH_RESPONSE_SCHEMA,
   })
   @ApiUnauthorizedResponse({ description: 'Missing session, origin, or CSRF proof' })
@@ -269,7 +269,7 @@ export class LocalDemoController {
         throw new UnprocessableEntityException({
           statusCode: HttpStatus.UNPROCESSABLE_ENTITY,
           error: 'Unprocessable Entity',
-          message: 'No trusted snapshot opportunities match this selection',
+          message: 'The managed yield strategy is unavailable for this snapshot',
           code: 'NO_MATCHING_YIELD_OPPORTUNITIES',
         });
       }

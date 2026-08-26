@@ -1,190 +1,157 @@
 const CANONICAL_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
-const CANONICAL_DECIMAL = /^(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$/u;
 const CANONICAL_USD_MINOR = /^(?:0|[1-9][0-9]{0,17})$/u;
-const SHA256 = /^[0-9a-f]{64}$/u;
-const FORBIDDEN_TEXT = /[\p{Cc}\p{Cf}\p{Cs}\p{Zl}\p{Zp}]/u;
+const CANONICAL_SIGNED_USD_MINOR = /^(?:0|-?[1-9][0-9]{0,17})$/u;
 
 export const LOCAL_DEMO_YIELD_CATALOG_PATH = '/api/v1/local-demo/yield-catalog' as const;
+export const LOCAL_DEMO_PUBLIC_RATE_SNAPSHOT_ID = 'managed-rate-snapshot-v1' as const;
 
 export const LOCAL_DEMO_ALLOCATION_PRESETS = Object.freeze([
   Object.freeze({
     id: 'MORE_LIQUID',
     label: 'More liquid',
-    description: 'Keep 60% readily available and divide the remainder across snapshot markets.',
+    description:
+      'Keep 60% readily available and allocate the remainder to the managed yield strategy.',
     liquidReserveBasisPoints: 6_000,
   }),
   Object.freeze({
     id: 'BALANCED',
     label: 'Balanced blend',
-    description: 'Keep 30% readily available and divide the remainder across snapshot markets.',
+    description:
+      'Keep 30% readily available and allocate the remainder to the managed yield strategy.',
     liquidReserveBasisPoints: 3_000,
   }),
   Object.freeze({
     id: 'MORE_YIELD',
     label: 'More yield',
-    description: 'Keep 15% readily available and divide the remainder across snapshot markets.',
+    description:
+      'Keep 15% readily available and allocate the remainder to the managed yield strategy.',
     liquidReserveBasisPoints: 1_500,
   }),
 ] as const);
 
-export const LOCAL_DEMO_YIELD_ASSET_SYMBOLS = Object.freeze(['USDC', 'USDT'] as const);
-export const LOCAL_DEMO_YIELD_PROVIDER_IDS = Object.freeze(['MORPHO'] as const);
-export const LOCAL_DEMO_YIELD_NETWORK_IDS = Object.freeze(['eip155:1', 'eip155:8453'] as const);
-export const LOCAL_DEMO_MAX_LIQUID_RESERVE_BASIS_POINTS = 9_900 as const;
+export const LOCAL_DEMO_EXECUTION_COST_COMPONENTS = Object.freeze([
+  'NETWORK',
+  'CONVERSION',
+  'MARKET_IMPACT',
+  'ROUTING',
+] as const);
+export const LOCAL_DEMO_BREAK_EVEN_MODEL_HORIZON_DAYS = 365 as const;
 
 export type LocalDemoAllocationPresetId = (typeof LOCAL_DEMO_ALLOCATION_PRESETS)[number]['id'];
-export type LocalDemoYieldAssetSymbol = (typeof LOCAL_DEMO_YIELD_ASSET_SYMBOLS)[number];
-export type LocalDemoYieldProviderId = (typeof LOCAL_DEMO_YIELD_PROVIDER_IDS)[number];
-export type LocalDemoYieldNetworkId = (typeof LOCAL_DEMO_YIELD_NETWORK_IDS)[number];
 export type LocalDemoYieldFreshness = 'CURRENT' | 'STALE';
+export type LocalDemoExecutionCostComponentCode =
+  (typeof LOCAL_DEMO_EXECUTION_COST_COMPONENTS)[number];
 
-export interface LocalDemoCustomYieldFilters {
-  readonly assetSymbols: readonly LocalDemoYieldAssetSymbol[];
-  readonly providerIds: readonly LocalDemoYieldProviderId[];
-  readonly networkIds: readonly LocalDemoYieldNetworkId[];
-  readonly minimumApyBasisPoints: number;
-  readonly minimumTvlUsdMinor: string;
-  readonly minimumExitLiquidityUsdMinor: string;
-  readonly maximumUtilizationBasisPoints: number;
-}
-
-export type LocalDemoAllocationSelectionInput =
-  | Readonly<{
-      kind: 'PRESET';
-      presetId: LocalDemoAllocationPresetId;
-    }>
-  | Readonly<{
-      kind: 'CUSTOM';
-      liquidReserveBasisPoints: number;
-      filters: LocalDemoCustomYieldFilters;
-    }>;
-
-export interface LocalDemoYieldRewardApr {
-  readonly assetSymbol: string;
-  readonly rateDecimal: string;
-  readonly basisPoints: number;
-}
-
-export interface LocalDemoYieldOpportunity {
-  readonly opportunityId: string;
-  readonly provider: Readonly<{ id: 'MORPHO'; name: 'Morpho' }>;
-  readonly protocol: Readonly<{ id: 'MORPHO_BLUE'; name: 'Morpho Blue'; marketId: string }>;
-  readonly asset: Readonly<{
-    symbol: LocalDemoYieldAssetSymbol;
-    contract: string;
-    decimals: number;
-  }>;
-  readonly network: Readonly<{ id: LocalDemoYieldNetworkId; name: string }>;
-  readonly apy: Readonly<{
-    baseRateDecimal: string;
-    baseBasisPoints: number;
-    observedAt: string;
-    rewardAprs: readonly LocalDemoYieldRewardApr[];
-    providerFee: Readonly<{
-      status: 'REPORTED';
-      rateDecimal: string;
-      basisPoints: number;
-    }>;
-  }>;
-  readonly tvl: Readonly<{
-    sourceAmountUsdDecimal: string;
-    amountUsdMinor: string;
-    observedAt: string;
-  }>;
-  readonly exitLiquidity: Readonly<{
-    sourceAmountUsdDecimal: string;
-    amountUsdMinor: string;
-    observedAt: string;
-    interpretation: 'AVAILABLE_TO_BORROW_PROXY';
-  }>;
-  readonly utilization: Readonly<{
-    rateDecimal: string;
-    basisPoints: number;
-    observedAt: string;
-  }>;
-  readonly availability: Readonly<{
-    status: 'LISTED_ONLY';
-    providerListed: true;
-    depositsEnabled: 'NOT_VERIFIED';
-    withdrawalsEnabled: 'NOT_VERIFIED';
-    asOf: string;
-  }>;
-  readonly provenance: Readonly<{
-    sourceKind: 'API';
-    sourceId: string;
-    sourceReference: string;
-    sourceObservedAt: string;
-    retrievedAt: string;
-    payloadSha256: string;
-    normalizerId: string;
-    normalizerVersion: string;
-    attributes: readonly Readonly<{ key: string; value: string }>[];
-  }>;
-}
+export type LocalDemoAllocationSelectionInput = Readonly<{
+  kind: 'PRESET';
+  presetId: LocalDemoAllocationPresetId;
+}>;
 
 export interface LocalDemoYieldCatalog {
-  readonly use: 'LOCAL_DEMO_SNAPSHOT_ONLY';
+  readonly use: 'LOCAL_DEMO_MANAGED_RATE_SNAPSHOT_ONLY';
   readonly mayAuthorizeFinancialAction: false;
   readonly riskClassificationAvailable: false;
   readonly snapshot: Readonly<{
-    id: string;
-    provider: 'MORPHO_PUBLIC_API';
+    id: typeof LOCAL_DEMO_PUBLIC_RATE_SNAPSHOT_ID;
     capturedAt: string;
     staleAfter: string;
     freshness: LocalDemoYieldFreshness;
     staleBehavior: 'LABEL_STALE_KEEP_NON_EXECUTABLE';
     riskClassification: 'NOT_ASSESSED';
   }>;
-  readonly opportunities: readonly LocalDemoYieldOpportunity[];
 }
 
 export interface LocalDemoAllocationPreview {
   readonly use: 'LOCAL_DEMO_ESTIMATE_ONLY';
   readonly mayAuthorizeFinancialAction: false;
   readonly selection: Readonly<{
-    kind: 'PRESET' | 'CUSTOM';
-    presetId: LocalDemoAllocationPresetId | null;
+    kind: 'PRESET';
+    presetId: LocalDemoAllocationPresetId;
     label: string;
     description: string;
     liquidReserveBasisPoints: number;
-    filters: LocalDemoCustomYieldFilters | null;
   }>;
-  readonly catalog: Readonly<{
-    snapshotId: string;
+  readonly rateSnapshot: Readonly<{
+    id: typeof LOCAL_DEMO_PUBLIC_RATE_SNAPSHOT_ID;
     capturedAt: string;
     staleAfter: string;
     freshness: LocalDemoYieldFreshness;
     staleBehavior: 'LABEL_STALE_KEEP_NON_EXECUTABLE';
     riskClassificationAvailable: false;
     riskClassification: 'NOT_ASSESSED';
-    matchedOpportunityCount: number;
-    selectedOpportunityCount: number;
   }>;
   readonly grossCapitalUsdMinor: string;
   readonly allocations: readonly Readonly<{
-    bucket: 'LIQUID_RESERVE' | 'YIELD_OPPORTUNITY';
-    allocationId: string;
-    label: string;
+    bucket: 'LIQUID_RESERVE' | 'MANAGED_YIELD';
+    allocationId: 'LIQUID_RESERVE' | 'MANAGED_YIELD';
+    label: 'Liquid reserve' | 'Managed yield';
     percentageBasisPoints: number;
-    baseApyBasisPoints: number;
-    baseApyRateDecimal: string;
     amountUsdMinor: string;
-    opportunity: LocalDemoYieldOpportunity | null;
   }>[];
   readonly executionCost: Readonly<{
-    treatment: 'LOCAL_DEMO_ZERO_NO_EXECUTION';
-    modeledLocalAmountUsdMinor: '0';
-    publicExecutionCostStatus: 'UNQUOTED';
+    actualLocalOperation: Readonly<{
+      status: 'NO_EXECUTION';
+      amountUsdMinor: '0';
+    }>;
+    modeledScenario: Readonly<{
+      status: 'AVAILABLE';
+      modelId: 'LOCAL_DEMO_ALLOCATION_COST_V1';
+      isQuote: false;
+      costBasisCapitalUsdMinor: string;
+      fundingTreatment: 'DEDUCT_FROM_GROSS_BEFORE_PROJECTION';
+      rounding: 'CEIL_EACH_VARIABLE_COMPONENT_TO_USD_MINOR';
+      components: readonly Readonly<{
+        code: LocalDemoExecutionCostComponentCode;
+        label: string;
+        calculationBasis:
+          | 'NETWORK_ACTIVATION_AND_POSITION_VOLUME'
+          | 'TWELVE_BPS_OF_REQUIRED_CONVERSION'
+          | 'POSITION_SIZE_AND_UTILIZATION'
+          | 'TWENTY_CENTS_PER_ACTIVE_ALLOCATION';
+        amountUsdMinor: string;
+      }>[];
+      totalUsdMinor: string;
+    }>;
+    publicExecution: Readonly<{
+      status: 'UNQUOTED';
+      amountUsdMinor: null;
+    }>;
   }>;
   readonly capitalIncludedInProjectionUsdMinor: string;
   readonly yieldProjection: Readonly<{
-    source: 'MORPHO_PUBLIC_API_SNAPSHOT';
-    calculationMethod: 'POSITION_WEIGHTED_EXACT_BASE_APY';
+    source: 'MANAGED_RATE_SNAPSHOT';
+    calculationMethod: 'INTERNAL_POSITION_WEIGHTED_EXACT_BASE_APY';
     effectiveApyBasisPoints: number;
     projectedAnnualYieldUsdMinor: string;
+    projectedAnnualYieldAfterFeesUsdMinor: string;
+    firstPositiveDayAfterFees: Readonly<{
+      calculationMethod: 'FIRST_WHOLE_DAY_VISIBLE_YIELD_EXCEEDS_ESTIMATED_FEES';
+      status: 'RECOVERED_WITHIN_HORIZON' | 'NO_PROJECTED_YIELD' | 'NOT_RECOVERED_WITHIN_HORIZON';
+      day: number | null;
+      modelHorizonDays: typeof LOCAL_DEMO_BREAK_EVEN_MODEL_HORIZON_DAYS;
+    }>;
   }>;
   readonly asOf: string;
 }
+
+const COST_COMPONENT_POLICY = Object.freeze({
+  NETWORK: Object.freeze({
+    label: 'Estimated network costs',
+    calculationBasis: 'NETWORK_ACTIVATION_AND_POSITION_VOLUME' as const,
+  }),
+  CONVERSION: Object.freeze({
+    label: 'Estimated conversion costs',
+    calculationBasis: 'TWELVE_BPS_OF_REQUIRED_CONVERSION' as const,
+  }),
+  MARKET_IMPACT: Object.freeze({
+    label: 'Estimated market impact',
+    calculationBasis: 'POSITION_SIZE_AND_UTILIZATION' as const,
+  }),
+  ROUTING: Object.freeze({
+    label: 'Estimated routing fee',
+    calculationBasis: 'TWENTY_CENTS_PER_ACTIVE_ALLOCATION' as const,
+  }),
+});
 
 function invalid(): never {
   throw new TypeError('Invalid local demo yield response');
@@ -220,19 +187,12 @@ function exactRecord(value: unknown, keys: readonly string[]): Record<string, un
   }
 }
 
-function exactArray(value: unknown, minimum: number, maximum: number): readonly unknown[] {
+function exactArray(value: unknown, length: number): readonly unknown[] {
   try {
     if (!Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype) return invalid();
     const descriptors = Object.getOwnPropertyDescriptors(value) as unknown as PropertyDescriptorMap;
     const lengthDescriptor = descriptors.length;
-    if (!lengthDescriptor || !('value' in lengthDescriptor)) return invalid();
-    const length = lengthDescriptor.value;
-    if (
-      typeof length !== 'number' ||
-      !Number.isSafeInteger(length) ||
-      length < minimum ||
-      length > maximum
-    ) {
+    if (!lengthDescriptor || !('value' in lengthDescriptor) || lengthDescriptor.value !== length) {
       return invalid();
     }
     const expected = new Set(['length', ...Array.from({ length }, (_, index) => String(index))]);
@@ -243,34 +203,21 @@ function exactArray(value: unknown, minimum: number, maximum: number): readonly 
     ) {
       return invalid();
     }
-    const result: unknown[] = [];
-    for (let index = 0; index < length; index += 1) {
-      const descriptor = descriptors[String(index)];
-      if (!descriptor || !('value' in descriptor) || descriptor.enumerable !== true) {
-        return invalid();
-      }
-      result.push(descriptor.value);
-    }
-    return Object.freeze(result);
+    return Object.freeze(
+      Array.from({ length }, (_, index) => {
+        const descriptor = descriptors[String(index)];
+        if (!descriptor || !('value' in descriptor) || descriptor.enumerable !== true) {
+          return invalid();
+        }
+        return descriptor.value;
+      }),
+    );
   } catch (error) {
     if (error instanceof TypeError && error.message === 'Invalid local demo yield response') {
       throw error;
     }
     return invalid();
   }
-}
-
-function safeText(value: unknown, maximum = 512): string {
-  if (
-    typeof value !== 'string' ||
-    value.length < 1 ||
-    value.length > maximum ||
-    value.trim() !== value ||
-    FORBIDDEN_TEXT.test(value)
-  ) {
-    return invalid();
-  }
-  return value;
 }
 
 function timestamp(value: unknown): string {
@@ -280,15 +227,13 @@ function timestamp(value: unknown): string {
   return value;
 }
 
-function decimal(value: unknown): string {
-  if (typeof value !== 'string' || value.length > 96 || !CANONICAL_DECIMAL.test(value)) {
-    return invalid();
-  }
+function usdMinor(value: unknown): string {
+  if (typeof value !== 'string' || !CANONICAL_USD_MINOR.test(value)) return invalid();
   return value;
 }
 
-function usdMinor(value: unknown): string {
-  if (typeof value !== 'string' || !CANONICAL_USD_MINOR.test(value)) return invalid();
+function signedUsdMinor(value: unknown): string {
+  if (typeof value !== 'string' || !CANONICAL_SIGNED_USD_MINOR.test(value)) return invalid();
   return value;
 }
 
@@ -304,55 +249,72 @@ function boundedInteger(value: unknown, minimum = 0, maximum = 10_000): number {
   return value;
 }
 
-function basisPointsFromRatio(value: string): number {
-  const [whole = '', fraction = ''] = value.split('.');
-  const denominator = 10n ** BigInt(fraction.length);
-  const numerator = BigInt(`${whole}${fraction}`) * 10_000n;
-  const result = numerator / denominator;
-  if (result > 10_000n) return invalid();
-  return Number(result);
+interface ExactAnnualYieldInterval {
+  readonly lowerScaled: bigint;
+  readonly upperExclusiveScaled: bigint;
+  readonly scale: 10_000n;
 }
 
-export function compareLocalDemoRatioToBasisPoints(value: string, basisPoints: number): number {
-  const [whole = '', fraction = ''] = value.split('.');
-  const left = BigInt(`${whole}${fraction}`) * 10_000n;
-  const right = BigInt(basisPoints) * 10n ** BigInt(fraction.length);
-  return left === right ? 0 : left > right ? 1 : -1;
+function exactAnnualYieldInterval(
+  projectedAnnualYieldUsdMinor: string,
+  capitalIncludedInProjectionUsdMinor: string,
+  effectiveApyBasisPoints: number,
+): ExactAnnualYieldInterval | null {
+  const annualYield = BigInt(projectedAnnualYieldUsdMinor);
+  const capital = BigInt(capitalIncludedInProjectionUsdMinor);
+  if (capital <= 0n) return null;
+
+  // The API intentionally keeps the exact internal rate private. These two
+  // public values are floors of that same exact annual-yield amount, so their
+  // half-open rational intervals must overlap.
+  const lowerScaled =
+    annualYield * 10_000n > BigInt(effectiveApyBasisPoints) * capital
+      ? annualYield * 10_000n
+      : BigInt(effectiveApyBasisPoints) * capital;
+  const upperFromYield = (annualYield + 1n) * 10_000n;
+  const upperFromApy = BigInt(effectiveApyBasisPoints + 1) * capital;
+  const upperExclusive = upperFromYield < upperFromApy ? upperFromYield : upperFromApy;
+  return lowerScaled < upperExclusive
+    ? Object.freeze({ lowerScaled, upperExclusiveScaled: upperExclusive, scale: 10_000n as const })
+    : null;
 }
 
-export function compareLocalDemoDecimals(left: string, right: string): number {
-  const [leftWhole = '', leftFraction = ''] = left.split('.');
-  const [rightWhole = '', rightFraction = ''] = right.split('.');
-  const scale = Math.max(leftFraction.length, rightFraction.length);
-  const leftValue =
-    BigInt(`${leftWhole}${leftFraction}`) * 10n ** BigInt(scale - leftFraction.length);
-  const rightValue =
-    BigInt(`${rightWhole}${rightFraction}`) * 10n ** BigInt(scale - rightFraction.length);
-  return leftValue === rightValue ? 0 : leftValue > rightValue ? 1 : -1;
-}
-
-function opportunityWasCapturedBy(
-  opportunity: LocalDemoYieldOpportunity,
-  capturedAt: string,
+function firstPositiveDayIsConsistent(
+  projectedAnnualYieldUsdMinor: string,
+  estimatedCostUsdMinor: bigint,
+  exactAnnualYield: ExactAnnualYieldInterval,
+  status: LocalDemoAllocationPreview['yieldProjection']['firstPositiveDayAfterFees']['status'],
+  day: number | null,
 ): boolean {
-  const boundary = Date.parse(capturedAt);
-  return [
-    opportunity.apy.observedAt,
-    opportunity.tvl.observedAt,
-    opportunity.exitLiquidity.observedAt,
-    opportunity.utilization.observedAt,
-    opportunity.availability.asOf,
-    opportunity.provenance.sourceObservedAt,
-    opportunity.provenance.retrievedAt,
-  ].every((value) => Date.parse(value) <= boundary);
-}
+  const annualYieldFloor = BigInt(projectedAnnualYieldUsdMinor);
+  if (annualYieldFloor === 0n) {
+    // The private exact value is either zero or a positive fraction of one
+    // cent per year. Neither can recover at least one cent within 365 days.
+    if (day !== null || status === 'RECOVERED_WITHIN_HORIZON') return false;
+    return status === 'NOT_RECOVERED_WITHIN_HORIZON' || exactAnnualYield.lowerScaled === 0n;
+  }
+  if (status === 'NO_PROJECTED_YIELD') return false;
 
-function minorFromUsdDecimal(value: string): string {
-  const [whole = '', fraction = ''] = value.split('.');
-  const cents = `${fraction}00`.slice(0, 2);
-  const result = BigInt(whole) * 100n + BigInt(cents);
-  if (result > 999_999_999_999_999_999n) return invalid();
-  return result.toString();
+  const targetAnnualizedYield =
+    (estimatedCostUsdMinor + 1n) *
+    BigInt(LOCAL_DEMO_BREAK_EVEN_MODEL_HORIZON_DAYS) *
+    exactAnnualYield.scale;
+  // Intersecting the public whole-cent yield and rounded APY intervals gives
+  // the complete possible range for the private exact recovery day.
+  const earliestPossibleDay = targetAnnualizedYield / exactAnnualYield.upperExclusiveScaled + 1n;
+  const latestPossibleDay =
+    (targetAnnualizedYield + exactAnnualYield.lowerScaled - 1n) / exactAnnualYield.lowerScaled;
+  const horizon = BigInt(LOCAL_DEMO_BREAK_EVEN_MODEL_HORIZON_DAYS);
+
+  if (status === 'NOT_RECOVERED_WITHIN_HORIZON') {
+    return day === null && latestPossibleDay > horizon;
+  }
+  return (
+    day !== null &&
+    BigInt(day) >= earliestPossibleDay &&
+    BigInt(day) <= latestPossibleDay &&
+    BigInt(day) <= horizon
+  );
 }
 
 function enumValue<const Values extends readonly string[]>(
@@ -363,194 +325,41 @@ function enumValue<const Values extends readonly string[]>(
   return value as Values[number];
 }
 
-function parseRewardApr(value: unknown): LocalDemoYieldRewardApr {
-  const record = exactRecord(value, ['assetSymbol', 'rateDecimal', 'basisPoints']);
-  const rateDecimal = decimal(record.rateDecimal);
-  const basisPoints = boundedInteger(record.basisPoints);
-  if (basisPoints !== basisPointsFromRatio(rateDecimal)) return invalid();
-  return Object.freeze({
-    assetSymbol: safeText(record.assetSymbol, 32),
-    rateDecimal,
-    basisPoints,
-  });
-}
-
-function parseOpportunity(value: unknown): LocalDemoYieldOpportunity {
+function parseSnapshot(
+  value: unknown,
+  includeRiskFlag: boolean,
+): LocalDemoYieldCatalog['snapshot'] | LocalDemoAllocationPreview['rateSnapshot'] {
   const record = exactRecord(value, [
-    'opportunityId',
-    'provider',
-    'protocol',
-    'asset',
-    'network',
-    'apy',
-    'tvl',
-    'exitLiquidity',
-    'utilization',
-    'availability',
-    'provenance',
-  ]);
-  const provider = exactRecord(record.provider, ['id', 'name']);
-  if (provider.id !== 'MORPHO' || provider.name !== 'Morpho') return invalid();
-  const protocol = exactRecord(record.protocol, ['id', 'name', 'marketId']);
-  if (protocol.id !== 'MORPHO_BLUE' || protocol.name !== 'Morpho Blue') return invalid();
-  const marketId = safeText(protocol.marketId, 192);
-  const asset = exactRecord(record.asset, ['symbol', 'contract', 'decimals']);
-  const symbol = enumValue(asset.symbol, LOCAL_DEMO_YIELD_ASSET_SYMBOLS);
-  const contract = safeText(asset.contract, 192);
-  if (asset.decimals !== 6) return invalid();
-  const network = exactRecord(record.network, ['id', 'name']);
-  const networkId = enumValue(network.id, LOCAL_DEMO_YIELD_NETWORK_IDS);
-  const networkName = networkId === 'eip155:1' ? 'Ethereum' : 'Base';
-  if (network.name !== networkName) return invalid();
-
-  const apy = exactRecord(record.apy, [
-    'baseRateDecimal',
-    'baseBasisPoints',
-    'observedAt',
-    'rewardAprs',
-    'providerFee',
-  ]);
-  const baseRateDecimal = decimal(apy.baseRateDecimal);
-  const baseBasisPoints = boundedInteger(apy.baseBasisPoints);
-  if (baseBasisPoints !== basisPointsFromRatio(baseRateDecimal)) return invalid();
-  const observedAt = timestamp(apy.observedAt);
-  const rewardAprs = Object.freeze(exactArray(apy.rewardAprs, 0, 1).map(parseRewardApr));
-  const providerFee = exactRecord(apy.providerFee, ['status', 'rateDecimal', 'basisPoints']);
-  if (providerFee.status !== 'REPORTED') return invalid();
-  const providerFeeRateDecimal = decimal(providerFee.rateDecimal);
-  const providerFeeBasisPoints = boundedInteger(providerFee.basisPoints);
-  if (providerFeeBasisPoints !== basisPointsFromRatio(providerFeeRateDecimal)) return invalid();
-
-  function amountObservation(candidate: unknown, exitLiquidityProxy = false) {
-    const amount = exactRecord(candidate, [
-      'sourceAmountUsdDecimal',
-      'amountUsdMinor',
-      'observedAt',
-      ...(exitLiquidityProxy ? ['interpretation'] : []),
-    ]);
-    if (exitLiquidityProxy && amount.interpretation !== 'AVAILABLE_TO_BORROW_PROXY') {
-      return invalid();
-    }
-    const sourceAmountUsdDecimal = decimal(amount.sourceAmountUsdDecimal);
-    const amountUsdMinor = usdMinor(amount.amountUsdMinor);
-    if (amountUsdMinor !== minorFromUsdDecimal(sourceAmountUsdDecimal)) return invalid();
-    const observation = {
-      sourceAmountUsdDecimal,
-      amountUsdMinor,
-      observedAt: timestamp(amount.observedAt),
-    };
-    return exitLiquidityProxy
-      ? Object.freeze({ ...observation, interpretation: 'AVAILABLE_TO_BORROW_PROXY' as const })
-      : Object.freeze(observation);
-  }
-
-  const utilization = exactRecord(record.utilization, ['rateDecimal', 'basisPoints', 'observedAt']);
-  const utilizationRateDecimal = decimal(utilization.rateDecimal);
-  const utilizationBasisPoints = boundedInteger(utilization.basisPoints);
-  if (utilizationBasisPoints !== basisPointsFromRatio(utilizationRateDecimal)) return invalid();
-  const availability = exactRecord(record.availability, [
-    'status',
-    'providerListed',
-    'depositsEnabled',
-    'withdrawalsEnabled',
-    'asOf',
+    'id',
+    'capturedAt',
+    'staleAfter',
+    'freshness',
+    'staleBehavior',
+    ...(includeRiskFlag ? ['riskClassificationAvailable'] : []),
+    'riskClassification',
   ]);
   if (
-    availability.status !== 'LISTED_ONLY' ||
-    availability.providerListed !== true ||
-    availability.depositsEnabled !== 'NOT_VERIFIED' ||
-    availability.withdrawalsEnabled !== 'NOT_VERIFIED'
+    record.id !== LOCAL_DEMO_PUBLIC_RATE_SNAPSHOT_ID ||
+    record.staleBehavior !== 'LABEL_STALE_KEEP_NON_EXECUTABLE' ||
+    record.riskClassification !== 'NOT_ASSESSED' ||
+    (includeRiskFlag && record.riskClassificationAvailable !== false)
   ) {
     return invalid();
   }
-  const provenance = exactRecord(record.provenance, [
-    'sourceKind',
-    'sourceId',
-    'sourceReference',
-    'sourceObservedAt',
-    'retrievedAt',
-    'payloadSha256',
-    'normalizerId',
-    'normalizerVersion',
-    'attributes',
-  ]);
-  if (provenance.sourceKind !== 'API') return invalid();
-  const payloadSha256 = safeText(provenance.payloadSha256, 64);
-  if (!SHA256.test(payloadSha256)) return invalid();
-  const attributes = Object.freeze(
-    exactArray(provenance.attributes, 6, 6).map((entry) => {
-      const attribute = exactRecord(entry, ['key', 'value']);
-      return Object.freeze({
-        key: safeText(attribute.key, 192),
-        value: safeText(attribute.value, 1_024),
-      });
-    }),
-  );
-  if (new Set(attributes.map(({ key }) => key)).size !== attributes.length) return invalid();
-  if (
-    provenance.sourceReference !== 'https://api.morpho.org/graphql' ||
-    provenance.normalizerId !== 'morpho-local-demo-snapshot' ||
-    provenance.normalizerVersion !== '1.0.0' ||
-    !attributes.some(
-      ({ key, value }) => key === 'snapshot.risk_classification' && value === 'NOT_ASSESSED',
-    ) ||
-    !attributes.some(
-      ({ key, value }) => key === 'snapshot.raw_response_retained' && value === 'false',
-    )
-  ) {
-    return invalid();
-  }
-
-  return Object.freeze({
-    opportunityId: safeText(record.opportunityId, 192),
-    provider: Object.freeze({ id: 'MORPHO' as const, name: 'Morpho' as const }),
-    protocol: Object.freeze({
-      id: 'MORPHO_BLUE' as const,
-      name: 'Morpho Blue' as const,
-      marketId,
-    }),
-    asset: Object.freeze({ symbol, contract, decimals: 6 }),
-    network: Object.freeze({ id: networkId, name: networkName }),
-    apy: Object.freeze({
-      baseRateDecimal,
-      baseBasisPoints,
-      observedAt,
-      rewardAprs,
-      providerFee: Object.freeze({
-        status: 'REPORTED' as const,
-        rateDecimal: providerFeeRateDecimal,
-        basisPoints: providerFeeBasisPoints,
-      }),
-    }),
-    tvl: amountObservation(record.tvl),
-    exitLiquidity: amountObservation(
-      record.exitLiquidity,
-      true,
-    ) as LocalDemoYieldOpportunity['exitLiquidity'],
-    utilization: Object.freeze({
-      rateDecimal: utilizationRateDecimal,
-      basisPoints: utilizationBasisPoints,
-      observedAt: timestamp(utilization.observedAt),
-    }),
-    availability: Object.freeze({
-      status: 'LISTED_ONLY' as const,
-      providerListed: true as const,
-      depositsEnabled: 'NOT_VERIFIED' as const,
-      withdrawalsEnabled: 'NOT_VERIFIED' as const,
-      asOf: timestamp(availability.asOf),
-    }),
-    provenance: Object.freeze({
-      sourceKind: 'API' as const,
-      sourceId: safeText(provenance.sourceId, 192),
-      sourceReference: safeText(provenance.sourceReference, 1_024),
-      sourceObservedAt: timestamp(provenance.sourceObservedAt),
-      retrievedAt: timestamp(provenance.retrievedAt),
-      payloadSha256,
-      normalizerId: safeText(provenance.normalizerId, 192),
-      normalizerVersion: safeText(provenance.normalizerVersion, 64),
-      attributes,
-    }),
-  });
+  const capturedAt = timestamp(record.capturedAt);
+  const staleAfter = timestamp(record.staleAfter);
+  if (Date.parse(staleAfter) <= Date.parse(capturedAt)) return invalid();
+  const base = {
+    id: LOCAL_DEMO_PUBLIC_RATE_SNAPSHOT_ID,
+    capturedAt,
+    staleAfter,
+    freshness: enumValue(record.freshness, ['CURRENT', 'STALE'] as const),
+    staleBehavior: 'LABEL_STALE_KEEP_NON_EXECUTABLE' as const,
+    riskClassification: 'NOT_ASSESSED' as const,
+  };
+  return includeRiskFlag
+    ? Object.freeze({ ...base, riskClassificationAvailable: false as const })
+    : Object.freeze(base);
 }
 
 export function parseLocalDemoYieldCatalog(value: unknown): LocalDemoYieldCatalog {
@@ -559,129 +368,33 @@ export function parseLocalDemoYieldCatalog(value: unknown): LocalDemoYieldCatalo
     'mayAuthorizeFinancialAction',
     'riskClassificationAvailable',
     'snapshot',
-    'opportunities',
   ]);
   if (
-    record.use !== 'LOCAL_DEMO_SNAPSHOT_ONLY' ||
+    record.use !== 'LOCAL_DEMO_MANAGED_RATE_SNAPSHOT_ONLY' ||
     record.mayAuthorizeFinancialAction !== false ||
     record.riskClassificationAvailable !== false
   ) {
     return invalid();
   }
-  const snapshot = exactRecord(record.snapshot, [
-    'id',
-    'provider',
-    'capturedAt',
-    'staleAfter',
-    'freshness',
-    'staleBehavior',
-    'riskClassification',
-  ]);
-  if (
-    snapshot.provider !== 'MORPHO_PUBLIC_API' ||
-    snapshot.staleBehavior !== 'LABEL_STALE_KEEP_NON_EXECUTABLE' ||
-    snapshot.riskClassification !== 'NOT_ASSESSED'
-  ) {
-    return invalid();
-  }
-  const capturedAt = timestamp(snapshot.capturedAt);
-  const staleAfter = timestamp(snapshot.staleAfter);
-  if (Date.parse(staleAfter) <= Date.parse(capturedAt)) return invalid();
-  const opportunities = Object.freeze(exactArray(record.opportunities, 1, 5).map(parseOpportunity));
-  if (
-    new Set(opportunities.map(({ opportunityId }) => opportunityId)).size !== opportunities.length
-  ) {
-    return invalid();
-  }
-  if (opportunities.some((opportunity) => !opportunityWasCapturedBy(opportunity, capturedAt))) {
-    return invalid();
-  }
   return Object.freeze({
-    use: 'LOCAL_DEMO_SNAPSHOT_ONLY',
+    use: 'LOCAL_DEMO_MANAGED_RATE_SNAPSHOT_ONLY',
     mayAuthorizeFinancialAction: false,
     riskClassificationAvailable: false,
-    snapshot: Object.freeze({
-      id: safeText(snapshot.id, 192),
-      provider: 'MORPHO_PUBLIC_API',
-      capturedAt,
-      staleAfter,
-      freshness: enumValue(snapshot.freshness, ['CURRENT', 'STALE'] as const),
-      staleBehavior: 'LABEL_STALE_KEEP_NON_EXECUTABLE',
-      riskClassification: 'NOT_ASSESSED',
-    }),
-    opportunities,
-  });
-}
-
-function parseStringSet<const Values extends readonly string[]>(
-  value: unknown,
-  allowed: Values,
-): readonly Values[number][] {
-  const parsed = exactArray(value, 1, allowed.length).map((entry) => enumValue(entry, allowed));
-  if (new Set(parsed).size !== parsed.length) return invalid();
-  return Object.freeze(parsed);
-}
-
-export function parseLocalDemoCustomYieldFilters(value: unknown): LocalDemoCustomYieldFilters {
-  const record = exactRecord(value, [
-    'assetSymbols',
-    'providerIds',
-    'networkIds',
-    'minimumApyBasisPoints',
-    'minimumTvlUsdMinor',
-    'minimumExitLiquidityUsdMinor',
-    'maximumUtilizationBasisPoints',
-  ]);
-  return Object.freeze({
-    assetSymbols: parseStringSet(record.assetSymbols, LOCAL_DEMO_YIELD_ASSET_SYMBOLS),
-    providerIds: parseStringSet(record.providerIds, LOCAL_DEMO_YIELD_PROVIDER_IDS),
-    networkIds: parseStringSet(record.networkIds, LOCAL_DEMO_YIELD_NETWORK_IDS),
-    minimumApyBasisPoints: boundedInteger(record.minimumApyBasisPoints),
-    minimumTvlUsdMinor: usdMinor(record.minimumTvlUsdMinor),
-    minimumExitLiquidityUsdMinor: usdMinor(record.minimumExitLiquidityUsdMinor),
-    maximumUtilizationBasisPoints: boundedInteger(record.maximumUtilizationBasisPoints),
+    snapshot: parseSnapshot(record.snapshot, false) as LocalDemoYieldCatalog['snapshot'],
   });
 }
 
 export function validateLocalDemoAllocationSelection(
   value: LocalDemoAllocationSelectionInput,
 ): LocalDemoAllocationSelectionInput {
-  let kind: unknown;
-  try {
-    if (typeof value !== 'object' || value === null || Array.isArray(value)) return invalid();
-    const prototype = Object.getPrototypeOf(value);
-    if (prototype !== Object.prototype && prototype !== null) return invalid();
-    const descriptor = Object.getOwnPropertyDescriptor(value, 'kind');
-    if (!descriptor || !('value' in descriptor) || descriptor.enumerable !== true) return invalid();
-    kind = descriptor.value;
-  } catch (error) {
-    if (error instanceof TypeError && error.message === 'Invalid local demo yield response') {
-      throw error;
-    }
-    return invalid();
-  }
-  const record = exactRecord(
-    value,
-    kind === 'PRESET' ? ['kind', 'presetId'] : ['kind', 'liquidReserveBasisPoints', 'filters'],
-  );
-  if (record.kind === 'PRESET') {
-    return Object.freeze({
-      kind: 'PRESET',
-      presetId: enumValue(
-        record.presetId,
-        LOCAL_DEMO_ALLOCATION_PRESETS.map(({ id }) => id),
-      ),
-    });
-  }
-  if (record.kind !== 'CUSTOM') return invalid();
+  const record = exactRecord(value, ['kind', 'presetId']);
+  if (record.kind !== 'PRESET') return invalid();
   return Object.freeze({
-    kind: 'CUSTOM',
-    liquidReserveBasisPoints: boundedInteger(
-      record.liquidReserveBasisPoints,
-      0,
-      LOCAL_DEMO_MAX_LIQUID_RESERVE_BASIS_POINTS,
+    kind: 'PRESET',
+    presetId: enumValue(
+      record.presetId,
+      LOCAL_DEMO_ALLOCATION_PRESETS.map(({ id }) => id),
     ),
-    filters: parseLocalDemoCustomYieldFilters(record.filters),
   });
 }
 
@@ -706,56 +419,85 @@ function distribute(total: bigint, weights: readonly number[]): readonly bigint[
   return Object.freeze(amounts);
 }
 
-function divideEvenly(total: number, count: number): readonly number[] {
-  if (!Number.isSafeInteger(total) || total < 0 || !Number.isSafeInteger(count) || count < 1) {
+function parseExecutionCost(
+  value: unknown,
+  grossCapital: bigint,
+): LocalDemoAllocationPreview['executionCost'] {
+  const record = exactRecord(value, ['actualLocalOperation', 'modeledScenario', 'publicExecution']);
+  const actual = exactRecord(record.actualLocalOperation, ['status', 'amountUsdMinor']);
+  if (actual.status !== 'NO_EXECUTION' || actual.amountUsdMinor !== '0') return invalid();
+  const modeled = exactRecord(record.modeledScenario, [
+    'status',
+    'modelId',
+    'isQuote',
+    'costBasisCapitalUsdMinor',
+    'fundingTreatment',
+    'rounding',
+    'components',
+    'totalUsdMinor',
+  ]);
+  if (
+    modeled.status !== 'AVAILABLE' ||
+    modeled.modelId !== 'LOCAL_DEMO_ALLOCATION_COST_V1' ||
+    modeled.isQuote !== false ||
+    modeled.fundingTreatment !== 'DEDUCT_FROM_GROSS_BEFORE_PROJECTION' ||
+    modeled.rounding !== 'CEIL_EACH_VARIABLE_COMPONENT_TO_USD_MINOR'
+  ) {
     return invalid();
   }
-  const quotient = Math.floor(total / count);
-  const remainder = total % count;
-  return Object.freeze(
-    Array.from({ length: count }, (_, index) => quotient + (index < remainder ? 1 : 0)),
+  const costBasisCapitalUsdMinor = usdMinor(modeled.costBasisCapitalUsdMinor);
+  if (BigInt(costBasisCapitalUsdMinor) !== grossCapital) return invalid();
+  const components = Object.freeze(
+    exactArray(modeled.components, LOCAL_DEMO_EXECUTION_COST_COMPONENTS.length).map(
+      (candidate, index) => {
+        const component = exactRecord(candidate, [
+          'code',
+          'label',
+          'calculationBasis',
+          'amountUsdMinor',
+        ]);
+        const expectedCode = LOCAL_DEMO_EXECUTION_COST_COMPONENTS[index];
+        if (expectedCode === undefined || component.code !== expectedCode) return invalid();
+        const policy = COST_COMPONENT_POLICY[expectedCode];
+        if (
+          component.label !== policy.label ||
+          component.calculationBasis !== policy.calculationBasis
+        ) {
+          return invalid();
+        }
+        return Object.freeze({
+          code: expectedCode,
+          label: policy.label,
+          calculationBasis: policy.calculationBasis,
+          amountUsdMinor: usdMinor(component.amountUsdMinor),
+        });
+      },
+    ),
   );
-}
-
-function divideAmountEvenly(total: bigint, count: number): readonly bigint[] {
-  if (total < 0n || !Number.isSafeInteger(count) || count < 1) return invalid();
-  const divisor = BigInt(count);
-  const quotient = total / divisor;
-  const remainder = Number(total % divisor);
-  return Object.freeze(
-    Array.from({ length: count }, (_, index) => quotient + (index < remainder ? 1n : 0n)),
-  );
-}
-
-function decimalRatio(value: string): Readonly<{ numerator: bigint; fractionalDigits: number }> {
-  const [whole = '', fraction = ''] = value.split('.');
-  if (whole.length === 0 || fraction.length > 96) return invalid();
+  const totalUsdMinor = usdMinor(modeled.totalUsdMinor);
+  if (
+    components.reduce((sum, component) => sum + BigInt(component.amountUsdMinor), 0n) !==
+    BigInt(totalUsdMinor)
+  ) {
+    return invalid();
+  }
+  const publicExecution = exactRecord(record.publicExecution, ['status', 'amountUsdMinor']);
+  if (publicExecution.status !== 'UNQUOTED' || publicExecution.amountUsdMinor !== null) {
+    return invalid();
+  }
   return Object.freeze({
-    numerator: BigInt(`${whole}${fraction}`),
-    fractionalDigits: fraction.length,
-  });
-}
-
-function exactYieldProjection(
-  allocations: LocalDemoAllocationPreview['allocations'],
-  grossCapital: bigint,
-): Readonly<{ effectiveApyBasisPoints: bigint; projectedAnnualYield: bigint }> {
-  const rates = allocations.map(({ baseApyRateDecimal }) => decimalRatio(baseApyRateDecimal));
-  const maximumScale = rates.reduce(
-    (maximum, { fractionalDigits }) => Math.max(maximum, fractionalDigits),
-    0,
-  );
-  const denominator = 10n ** BigInt(maximumScale);
-  const annualYieldNumerator = allocations.reduce((total, allocation, index) => {
-    const rate = rates[index];
-    if (rate === undefined) return invalid();
-    const scaledRate = rate.numerator * 10n ** BigInt(maximumScale - rate.fractionalDigits);
-    return total + BigInt(allocation.amountUsdMinor) * scaledRate;
-  }, 0n);
-  return Object.freeze({
-    effectiveApyBasisPoints:
-      grossCapital === 0n ? 0n : (annualYieldNumerator * 10_000n) / (grossCapital * denominator),
-    projectedAnnualYield: annualYieldNumerator / denominator,
+    actualLocalOperation: Object.freeze({ status: 'NO_EXECUTION', amountUsdMinor: '0' }),
+    modeledScenario: Object.freeze({
+      status: 'AVAILABLE',
+      modelId: 'LOCAL_DEMO_ALLOCATION_COST_V1',
+      isQuote: false,
+      costBasisCapitalUsdMinor,
+      fundingTreatment: 'DEDUCT_FROM_GROSS_BEFORE_PROJECTION',
+      rounding: 'CEIL_EACH_VARIABLE_COMPONENT_TO_USD_MINOR',
+      components,
+      totalUsdMinor,
+    }),
+    publicExecution: Object.freeze({ status: 'UNQUOTED', amountUsdMinor: null }),
   });
 }
 
@@ -764,7 +506,7 @@ export function parseLocalDemoAllocationPreview(value: unknown): LocalDemoAlloca
     'use',
     'mayAuthorizeFinancialAction',
     'selection',
-    'catalog',
+    'rateSnapshot',
     'grossCapitalUsdMinor',
     'allocations',
     'executionCost',
@@ -775,291 +517,186 @@ export function parseLocalDemoAllocationPreview(value: unknown): LocalDemoAlloca
   if (record.use !== 'LOCAL_DEMO_ESTIMATE_ONLY' || record.mayAuthorizeFinancialAction !== false) {
     return invalid();
   }
-
   const selectionRecord = exactRecord(record.selection, [
     'kind',
     'presetId',
     'label',
     'description',
     'liquidReserveBasisPoints',
-    'filters',
   ]);
-  const selectionKind = enumValue(selectionRecord.kind, ['PRESET', 'CUSTOM'] as const);
-  const liquidReserveBasisPoints = boundedInteger(selectionRecord.liquidReserveBasisPoints);
-  let presetId: LocalDemoAllocationPresetId | null = null;
-  let filters: LocalDemoCustomYieldFilters | null = null;
-  if (selectionKind === 'PRESET') {
-    presetId = enumValue(
-      selectionRecord.presetId,
-      LOCAL_DEMO_ALLOCATION_PRESETS.map(({ id }) => id),
-    );
-    if (selectionRecord.filters !== null) return invalid();
-    const preset = LOCAL_DEMO_ALLOCATION_PRESETS.find(({ id }) => id === presetId);
-    if (
-      !preset ||
-      preset.liquidReserveBasisPoints !== liquidReserveBasisPoints ||
-      selectionRecord.label !== preset.label ||
-      selectionRecord.description !== preset.description
-    ) {
-      return invalid();
-    }
-  } else {
-    if (selectionRecord.presetId !== null) return invalid();
-    filters = parseLocalDemoCustomYieldFilters(selectionRecord.filters);
-    if (
-      selectionRecord.label !== 'Custom yield filter' ||
-      selectionRecord.description !==
-        'Apply asset, provider, network, APY, TVL, liquidity, and utilization constraints.' ||
-      liquidReserveBasisPoints > LOCAL_DEMO_MAX_LIQUID_RESERVE_BASIS_POINTS
-    ) {
-      return invalid();
-    }
+  if (selectionRecord.kind !== 'PRESET') return invalid();
+  const presetId = enumValue(
+    selectionRecord.presetId,
+    LOCAL_DEMO_ALLOCATION_PRESETS.map(({ id }) => id),
+  );
+  const preset = LOCAL_DEMO_ALLOCATION_PRESETS.find(({ id }) => id === presetId);
+  if (
+    preset === undefined ||
+    selectionRecord.label !== preset.label ||
+    selectionRecord.description !== preset.description ||
+    selectionRecord.liquidReserveBasisPoints !== preset.liquidReserveBasisPoints
+  ) {
+    return invalid();
   }
   const selection = Object.freeze({
-    kind: selectionKind,
+    kind: 'PRESET' as const,
     presetId,
-    label: safeText(selectionRecord.label, 96),
-    description: safeText(selectionRecord.description),
-    liquidReserveBasisPoints,
-    filters,
+    label: preset.label,
+    description: preset.description,
+    liquidReserveBasisPoints: preset.liquidReserveBasisPoints,
   });
-
-  const catalogRecord = exactRecord(record.catalog, [
-    'snapshotId',
-    'capturedAt',
-    'staleAfter',
-    'freshness',
-    'staleBehavior',
-    'riskClassificationAvailable',
-    'riskClassification',
-    'matchedOpportunityCount',
-    'selectedOpportunityCount',
-  ]);
-  if (
-    catalogRecord.staleBehavior !== 'LABEL_STALE_KEEP_NON_EXECUTABLE' ||
-    catalogRecord.riskClassificationAvailable !== false ||
-    catalogRecord.riskClassification !== 'NOT_ASSESSED'
-  ) {
-    return invalid();
-  }
-  const catalog = Object.freeze({
-    snapshotId: safeText(catalogRecord.snapshotId, 192),
-    capturedAt: timestamp(catalogRecord.capturedAt),
-    staleAfter: timestamp(catalogRecord.staleAfter),
-    freshness: enumValue(catalogRecord.freshness, ['CURRENT', 'STALE'] as const),
-    staleBehavior: 'LABEL_STALE_KEEP_NON_EXECUTABLE' as const,
-    riskClassificationAvailable: false as const,
-    riskClassification: 'NOT_ASSESSED' as const,
-    matchedOpportunityCount: boundedInteger(catalogRecord.matchedOpportunityCount, 1, 5),
-    selectedOpportunityCount: boundedInteger(catalogRecord.selectedOpportunityCount, 1, 3),
-  });
-  if (
-    catalog.selectedOpportunityCount > catalog.matchedOpportunityCount ||
-    (catalog.selectedOpportunityCount < 3 &&
-      catalog.matchedOpportunityCount !== catalog.selectedOpportunityCount) ||
-    Date.parse(catalog.staleAfter) <= Date.parse(catalog.capturedAt)
-  ) {
-    return invalid();
-  }
+  const rateSnapshot = parseSnapshot(
+    record.rateSnapshot,
+    true,
+  ) as LocalDemoAllocationPreview['rateSnapshot'];
   const grossCapitalUsdMinor = usdMinor(record.grossCapitalUsdMinor);
   const grossCapital = BigInt(grossCapitalUsdMinor);
+  const executionCost = parseExecutionCost(record.executionCost, grossCapital);
+  const estimatedCost = BigInt(executionCost.modeledScenario.totalUsdMinor);
+  const capitalIncludedInProjectionUsdMinor = usdMinor(record.capitalIncludedInProjectionUsdMinor);
+  const capitalIncludedInProjection = BigInt(capitalIncludedInProjectionUsdMinor);
+  if (
+    estimatedCost >= grossCapital ||
+    grossCapital - estimatedCost !== capitalIncludedInProjection
+  ) {
+    return invalid();
+  }
+
   const allocations = Object.freeze(
-    exactArray(record.allocations, 2, 4).map((candidate) => {
+    exactArray(record.allocations, 2).map((candidate, index) => {
       const allocation = exactRecord(candidate, [
         'bucket',
         'allocationId',
         'label',
         'percentageBasisPoints',
-        'baseApyBasisPoints',
-        'baseApyRateDecimal',
         'amountUsdMinor',
-        'opportunity',
       ]);
-      const bucket = enumValue(allocation.bucket, ['LIQUID_RESERVE', 'YIELD_OPPORTUNITY'] as const);
-      const allocationId = safeText(allocation.allocationId, 192);
-      const label = safeText(allocation.label, 256);
-      const percentageBasisPoints = boundedInteger(allocation.percentageBasisPoints);
-      const baseApyBasisPoints = boundedInteger(allocation.baseApyBasisPoints);
-      const baseApyRateDecimal = decimal(allocation.baseApyRateDecimal);
-      const amountUsdMinor = usdMinor(allocation.amountUsdMinor);
-      if (baseApyBasisPoints !== basisPointsFromRatio(baseApyRateDecimal)) return invalid();
-      const opportunity =
-        allocation.opportunity === null ? null : parseOpportunity(allocation.opportunity);
-      if (bucket === 'LIQUID_RESERVE') {
-        if (
-          allocationId !== 'LIQUID_RESERVE' ||
-          label !== 'Liquid reserve' ||
-          percentageBasisPoints !== liquidReserveBasisPoints ||
-          baseApyBasisPoints !== 0 ||
-          baseApyRateDecimal !== '0' ||
-          opportunity !== null
-        ) {
-          return invalid();
-        }
-      } else if (
-        opportunity === null ||
-        allocationId !== opportunity.opportunityId ||
-        label !==
-          `${opportunity.asset.symbol} on ${opportunity.protocol.name} (${opportunity.network.name})` ||
-        baseApyBasisPoints !== opportunity.apy.baseBasisPoints ||
-        baseApyRateDecimal !== opportunity.apy.baseRateDecimal
+      const expected =
+        index === 0
+          ? Object.freeze({
+              bucket: 'LIQUID_RESERVE' as const,
+              allocationId: 'LIQUID_RESERVE' as const,
+              label: 'Liquid reserve' as const,
+              percentageBasisPoints: preset.liquidReserveBasisPoints,
+            })
+          : Object.freeze({
+              bucket: 'MANAGED_YIELD' as const,
+              allocationId: 'MANAGED_YIELD' as const,
+              label: 'Managed yield' as const,
+              percentageBasisPoints: 10_000 - preset.liquidReserveBasisPoints,
+            });
+      if (
+        allocation.bucket !== expected.bucket ||
+        allocation.allocationId !== expected.allocationId ||
+        allocation.label !== expected.label ||
+        allocation.percentageBasisPoints !== expected.percentageBasisPoints
       ) {
         return invalid();
       }
-      return Object.freeze({
-        bucket,
-        allocationId,
-        label,
-        percentageBasisPoints,
-        baseApyBasisPoints,
-        baseApyRateDecimal,
-        amountUsdMinor,
-        opportunity,
-      });
+      return Object.freeze({ ...expected, amountUsdMinor: usdMinor(allocation.amountUsdMinor) });
     }),
   );
+  const expectedAmounts = distribute(capitalIncludedInProjection, [
+    preset.liquidReserveBasisPoints,
+    10_000 - preset.liquidReserveBasisPoints,
+  ]);
   if (
-    allocations[0]?.bucket !== 'LIQUID_RESERVE' ||
-    allocations.filter(({ bucket }) => bucket === 'LIQUID_RESERVE').length !== 1 ||
-    allocations.filter(({ bucket }) => bucket === 'YIELD_OPPORTUNITY').length !==
-      catalog.selectedOpportunityCount ||
-    new Set(allocations.map(({ allocationId }) => allocationId)).size !== allocations.length ||
-    allocations.reduce((sum, allocation) => sum + allocation.percentageBasisPoints, 0) !== 10_000 ||
+    allocations.some(
+      (allocation, index) => BigInt(allocation.amountUsdMinor) !== expectedAmounts[index],
+    ) ||
     allocations.reduce((sum, allocation) => sum + BigInt(allocation.amountUsdMinor), 0n) !==
-      grossCapital ||
-    allocations.some(
-      ({ opportunity }) =>
-        opportunity !== null && !opportunityWasCapturedBy(opportunity, catalog.capturedAt),
-    )
+      capitalIncludedInProjection
   ) {
     return invalid();
   }
-  const yieldAllocations = allocations.filter(
-    (
-      allocation,
-    ): allocation is (typeof allocations)[number] & {
-      opportunity: LocalDemoYieldOpportunity;
-    } => allocation.bucket === 'YIELD_OPPORTUNITY',
-  );
-  if (
-    yieldAllocations.some((allocation, index) => {
-      const next = yieldAllocations[index + 1];
-      if (next === undefined) return false;
-      const apyOrder = compareLocalDemoDecimals(
-        allocation.baseApyRateDecimal,
-        next.baseApyRateDecimal,
-      );
-      return (
-        apyOrder < 0 ||
-        (apyOrder === 0 &&
-          allocation.opportunity.opportunityId.localeCompare(next.opportunity.opportunityId) > 0)
-      );
-    })
-  ) {
-    return invalid();
-  }
-  if (
-    filters !== null &&
-    yieldAllocations.some(({ opportunity }) => {
-      return (
-        !filters.assetSymbols.includes(opportunity.asset.symbol) ||
-        !filters.providerIds.includes(opportunity.provider.id) ||
-        !filters.networkIds.includes(opportunity.network.id) ||
-        compareLocalDemoRatioToBasisPoints(
-          opportunity.apy.baseRateDecimal,
-          filters.minimumApyBasisPoints,
-        ) < 0 ||
-        BigInt(opportunity.tvl.amountUsdMinor) < BigInt(filters.minimumTvlUsdMinor) ||
-        BigInt(opportunity.exitLiquidity.amountUsdMinor) <
-          BigInt(filters.minimumExitLiquidityUsdMinor) ||
-        compareLocalDemoRatioToBasisPoints(
-          opportunity.utilization.rateDecimal,
-          filters.maximumUtilizationBasisPoints,
-        ) > 0
-      );
-    })
-  ) {
-    return invalid();
-  }
-  const expectedWeights = Object.freeze([
-    liquidReserveBasisPoints,
-    ...divideEvenly(10_000 - liquidReserveBasisPoints, catalog.selectedOpportunityCount),
-  ]);
-  const capitalBuckets = distribute(grossCapital, [
-    liquidReserveBasisPoints,
-    10_000 - liquidReserveBasisPoints,
-  ]);
-  const liquidReserveCapital = capitalBuckets[0];
-  const nonReserveCapital = capitalBuckets[1];
-  if (liquidReserveCapital === undefined || nonReserveCapital === undefined) return invalid();
-  const expectedAllocationAmounts = Object.freeze([
-    liquidReserveCapital,
-    ...divideAmountEvenly(nonReserveCapital, catalog.selectedOpportunityCount),
-  ]);
-  if (
-    allocations.some(
-      (allocation, index) =>
-        allocation.percentageBasisPoints !== expectedWeights[index] ||
-        BigInt(allocation.amountUsdMinor) !== expectedAllocationAmounts[index],
-    )
-  ) {
-    return invalid();
-  }
-
-  const executionCostRecord = exactRecord(record.executionCost, [
-    'treatment',
-    'modeledLocalAmountUsdMinor',
-    'publicExecutionCostStatus',
-  ]);
-  if (
-    executionCostRecord.treatment !== 'LOCAL_DEMO_ZERO_NO_EXECUTION' ||
-    executionCostRecord.modeledLocalAmountUsdMinor !== '0' ||
-    executionCostRecord.publicExecutionCostStatus !== 'UNQUOTED'
-  ) {
-    return invalid();
-  }
-  const executionCost = Object.freeze({
-    treatment: 'LOCAL_DEMO_ZERO_NO_EXECUTION' as const,
-    modeledLocalAmountUsdMinor: '0' as const,
-    publicExecutionCostStatus: 'UNQUOTED' as const,
-  });
-  const capitalIncludedInProjectionUsdMinor = usdMinor(record.capitalIncludedInProjectionUsdMinor);
-  if (grossCapital !== BigInt(capitalIncludedInProjectionUsdMinor)) return invalid();
 
   const projectionRecord = exactRecord(record.yieldProjection, [
     'source',
     'calculationMethod',
     'effectiveApyBasisPoints',
     'projectedAnnualYieldUsdMinor',
+    'projectedAnnualYieldAfterFeesUsdMinor',
+    'firstPositiveDayAfterFees',
   ]);
   if (
-    projectionRecord.source !== 'MORPHO_PUBLIC_API_SNAPSHOT' ||
-    projectionRecord.calculationMethod !== 'POSITION_WEIGHTED_EXACT_BASE_APY'
+    projectionRecord.source !== 'MANAGED_RATE_SNAPSHOT' ||
+    projectionRecord.calculationMethod !== 'INTERNAL_POSITION_WEIGHTED_EXACT_BASE_APY'
   ) {
     return invalid();
   }
-  const exactProjection = exactYieldProjection(allocations, grossCapital);
-  const effectiveApyBasisPoints = boundedInteger(projectionRecord.effectiveApyBasisPoints);
-  if (BigInt(effectiveApyBasisPoints) !== exactProjection.effectiveApyBasisPoints) return invalid();
-  const annualYield = exactProjection.projectedAnnualYield;
   const projectedAnnualYieldUsdMinor = usdMinor(projectionRecord.projectedAnnualYieldUsdMinor);
-  if (BigInt(projectedAnnualYieldUsdMinor) !== annualYield) {
+  const projectedAnnualYieldAfterFeesUsdMinor = signedUsdMinor(
+    projectionRecord.projectedAnnualYieldAfterFeesUsdMinor,
+  );
+  if (
+    BigInt(projectedAnnualYieldUsdMinor) - estimatedCost !==
+    BigInt(projectedAnnualYieldAfterFeesUsdMinor)
+  ) {
+    return invalid();
+  }
+  const effectiveApyBasisPoints = boundedInteger(projectionRecord.effectiveApyBasisPoints);
+  const exactAnnualYield = exactAnnualYieldInterval(
+    projectedAnnualYieldUsdMinor,
+    capitalIncludedInProjectionUsdMinor,
+    effectiveApyBasisPoints,
+  );
+  if (exactAnnualYield === null) return invalid();
+  const firstPositiveRecord = exactRecord(projectionRecord.firstPositiveDayAfterFees, [
+    'calculationMethod',
+    'status',
+    'day',
+    'modelHorizonDays',
+  ]);
+  if (
+    firstPositiveRecord.calculationMethod !==
+      'FIRST_WHOLE_DAY_VISIBLE_YIELD_EXCEEDS_ESTIMATED_FEES' ||
+    firstPositiveRecord.modelHorizonDays !== LOCAL_DEMO_BREAK_EVEN_MODEL_HORIZON_DAYS
+  ) {
+    return invalid();
+  }
+  const firstPositiveStatus = enumValue(firstPositiveRecord.status, [
+    'RECOVERED_WITHIN_HORIZON',
+    'NO_PROJECTED_YIELD',
+    'NOT_RECOVERED_WITHIN_HORIZON',
+  ] as const);
+  const day =
+    firstPositiveStatus === 'RECOVERED_WITHIN_HORIZON'
+      ? boundedInteger(firstPositiveRecord.day, 1, LOCAL_DEMO_BREAK_EVEN_MODEL_HORIZON_DAYS)
+      : firstPositiveRecord.day === null
+        ? null
+        : invalid();
+  if (
+    !firstPositiveDayIsConsistent(
+      projectedAnnualYieldUsdMinor,
+      estimatedCost,
+      exactAnnualYield,
+      firstPositiveStatus,
+      day,
+    )
+  ) {
     return invalid();
   }
   return Object.freeze({
     use: 'LOCAL_DEMO_ESTIMATE_ONLY',
     mayAuthorizeFinancialAction: false,
     selection,
-    catalog,
+    rateSnapshot,
     grossCapitalUsdMinor,
     allocations,
     executionCost,
     capitalIncludedInProjectionUsdMinor,
     yieldProjection: Object.freeze({
-      source: 'MORPHO_PUBLIC_API_SNAPSHOT',
-      calculationMethod: 'POSITION_WEIGHTED_EXACT_BASE_APY',
+      source: 'MANAGED_RATE_SNAPSHOT',
+      calculationMethod: 'INTERNAL_POSITION_WEIGHTED_EXACT_BASE_APY',
       effectiveApyBasisPoints,
       projectedAnnualYieldUsdMinor,
+      projectedAnnualYieldAfterFeesUsdMinor,
+      firstPositiveDayAfterFees: Object.freeze({
+        calculationMethod: 'FIRST_WHOLE_DAY_VISIBLE_YIELD_EXCEEDS_ESTIMATED_FEES',
+        status: firstPositiveStatus,
+        day,
+        modelHorizonDays: LOCAL_DEMO_BREAK_EVEN_MODEL_HORIZON_DAYS,
+      }),
     }),
     asOf: timestamp(record.asOf),
   });

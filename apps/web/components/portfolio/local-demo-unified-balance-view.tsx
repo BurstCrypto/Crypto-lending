@@ -268,8 +268,8 @@ function ReadyView({
             />
           )}
           <p className="portfolio-total-help">
-            Full supported capital available before any allocation choice. Execution-cost treatment
-            appears only after you preview a blend.
+            Full supported capital available before any allocation choice. Fee estimates appear only
+            after you preview a plan.
           </p>
         </article>
       </div>

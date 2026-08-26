@@ -9,12 +9,10 @@ import {
   type LocalDemoApiClient,
 } from '@/lib/local-demo/local-demo-client';
 import {
-  compareLocalDemoDecimals,
   LOCAL_DEMO_ALLOCATION_PRESETS,
   type LocalDemoAllocationPreview,
   type LocalDemoAllocationSelectionInput,
   type LocalDemoYieldCatalog,
-  type LocalDemoYieldOpportunity,
 } from '@/lib/local-demo/local-demo-yield';
 import { formatUsdMinor } from '@/lib/portfolio/unified-balance';
 
@@ -23,8 +21,6 @@ const AS_OF_FORMATTER = new Intl.DateTimeFormat('en-US', {
   timeStyle: 'short',
   timeZone: 'UTC',
 });
-
-type LocalDemoPresetSelection = Extract<LocalDemoAllocationSelectionInput, { kind: 'PRESET' }>;
 
 export interface LocalDemoAllocationPlannerProps {
   readonly client: LocalDemoApiClient;
@@ -40,194 +36,111 @@ function Money({ amountUsdMinor }: { amountUsdMinor: string }) {
   );
 }
 
+function SignedMoney({ amountUsdMinor }: { amountUsdMinor: string }) {
+  const negative = amountUsdMinor.startsWith('-');
+  const absolute = negative ? amountUsdMinor.slice(1) : amountUsdMinor;
+  const formatted = formatUsdMinor(absolute);
+  return (
+    <data
+      value={`${negative ? '-' : ''}${formatted.decimal}`}
+      aria-label={`${negative ? 'negative ' : ''}${formatted.accessible}`}
+    >
+      <span aria-hidden="true">
+        {negative ? '-' : ''}
+        {formatted.visible}
+      </span>
+    </data>
+  );
+}
+
 function percentage(basisPoints: number): string {
   const whole = Math.floor(basisPoints / 100);
   const fraction = basisPoints % 100;
   return fraction === 0 ? `${whole}%` : `${whole}.${fraction.toString().padStart(2, '0')}%`;
 }
 
-function Apy({
-  basisPoints,
-  label = 'base annual percentage yield',
-}: {
-  basisPoints: number;
-  label?: string;
-}) {
+function Apy({ basisPoints }: { basisPoints: number }) {
   const decimal = `${Math.floor(basisPoints / 100)}.${(basisPoints % 100)
     .toString()
     .padStart(2, '0')}`;
   return (
-    <data value={decimal} aria-label={`${decimal} percent ${label}`}>
+    <data value={decimal} aria-label={`${decimal} percent estimated annual percentage yield`}>
       <span aria-hidden="true">{decimal}%</span>
     </data>
   );
 }
 
-function ratioPercent(value: string): string {
-  const [whole = '', fraction = ''] = value.split('.');
-  const scale = fraction.length;
-  const numerator = BigInt(`${whole}${fraction}`) * 100n;
-  if (scale === 0) return numerator.toString();
-  const digits = numerator.toString().padStart(scale + 1, '0');
-  const integer = digits.slice(0, -scale);
-  const decimals = digits.slice(-scale).replace(/0+$/u, '');
-  return decimals.length === 0 ? integer : `${integer}.${decimals}`;
+function Timestamp({ value }: { value: string }) {
+  return <time dateTime={value}>{AS_OF_FORMATTER.format(new Date(value))} UTC</time>;
 }
 
-function ObservedRate({ rateDecimal, label }: { rateDecimal: string; label: string }) {
-  const value = ratioPercent(rateDecimal);
-  return (
-    <data value={value} aria-label={`${value} percent ${label}`}>
-      <span aria-hidden="true">{value}%</span>
-    </data>
-  );
-}
-
-function Timestamp({ value, prefix }: { value: string; prefix?: string }) {
-  return (
-    <time dateTime={value}>
-      {prefix}
-      {AS_OF_FORMATTER.format(new Date(value))} UTC
-    </time>
-  );
-}
-
-function YieldStartValue({ preview }: { preview: LocalDemoAllocationPreview }) {
-  const hasProjectedYield = BigInt(preview.yieldProjection.projectedAnnualYieldUsdMinor) > 0n;
-  if (!hasProjectedYield) {
-    return <span className="local-demo-allocation-projection-unavailable">Below $0.01/year</span>;
-  }
-  return (
-    <data value="1" aria-label="Projection assumes base yield from day 1">
-      <span aria-hidden="true">
-        Day 1 <small>(projection assumption)</small>
-      </span>
-    </data>
-  );
-}
-
-function OpportunityCard({ opportunity }: { opportunity: LocalDemoYieldOpportunity }) {
-  const rewardBasisPoints = opportunity.apy.rewardAprs.reduce(
-    (total, reward) => total + reward.basisPoints,
-    0,
-  );
-  const collateral = opportunity.provenance.attributes.find(
-    ({ key }) => key === 'market.collateral_symbol',
-  )?.value;
-  return (
-    <article className="local-demo-yield-opportunity-card">
-      <div className="local-demo-yield-opportunity-title">
-        <div>
-          <strong>{opportunity.asset.symbol}</strong>
-          <span>{opportunity.network.name}</span>
-        </div>
-        <ObservedRate
-          rateDecimal={opportunity.apy.baseRateDecimal}
-          label="observed base annual percentage yield"
-        />
-      </div>
-      <p>
-        Morpho Blue <span aria-hidden="true">·</span> {collateral ?? 'market'}
-      </p>
-      <dl>
-        <div>
-          <dt>Base supply APY</dt>
-          <dd>
-            <ObservedRate
-              rateDecimal={opportunity.apy.baseRateDecimal}
-              label="observed base annual percentage yield"
-            />
-          </dd>
-        </div>
-        <div>
-          <dt>Reward APR</dt>
-          <dd>
-            {rewardBasisPoints === 0 ? (
-              'None observed'
-            ) : (
-              <ObservedRate
-                rateDecimal={opportunity.apy.rewardAprs[0]!.rateDecimal}
-                label="observed reward annual percentage rate"
-              />
-            )}
-          </dd>
-        </div>
-        <div>
-          <dt>Reported borrower fee (not deducted)</dt>
-          <dd>
-            <ObservedRate
-              rateDecimal={opportunity.apy.providerFee.rateDecimal}
-              label="reported provider borrow-interest fee rate"
-            />
-          </dd>
-        </div>
-        <div>
-          <dt>TVL</dt>
-          <dd>
-            <Money amountUsdMinor={opportunity.tvl.amountUsdMinor} />
-          </dd>
-        </div>
-        <div>
-          <dt>Available-to-borrow proxy</dt>
-          <dd>
-            <Money amountUsdMinor={opportunity.exitLiquidity.amountUsdMinor} />
-          </dd>
-        </div>
-        <div>
-          <dt>Utilization</dt>
-          <dd>
-            <ObservedRate
-              rateDecimal={opportunity.utilization.rateDecimal}
-              label="observed utilization"
-            />
-          </dd>
-        </div>
-      </dl>
-      <small>
-        Provider observation: <Timestamp value={opportunity.apy.observedAt} />
-      </small>
-      <small>Provider listing observed · deposit and withdrawal status not verified.</small>
-    </article>
-  );
-}
-
-function CatalogPanel({ catalog }: { catalog: LocalDemoYieldCatalog }) {
+function RateStatus({ catalog }: { catalog: LocalDemoYieldCatalog }) {
   return (
     <section className="local-demo-yield-catalog" aria-labelledby="local-demo-yield-catalog-title">
       <div className="local-demo-yield-catalog-heading">
         <div>
-          <p className="eyebrow">Point-in-time provider data</p>
-          <h3 id="local-demo-yield-catalog-title">Observed Morpho markets</h3>
+          <p className="eyebrow">Managed rate data</p>
+          <h3 id="local-demo-yield-catalog-title">Crypto Lending yield plans</h3>
         </div>
         <span
           className={`local-demo-yield-freshness is-${catalog.snapshot.freshness.toLowerCase()}`}
         >
-          {catalog.snapshot.freshness === 'CURRENT'
-            ? 'Snapshot current'
-            : 'Archived snapshot · stale'}
+          {catalog.snapshot.freshness === 'CURRENT' ? 'Rates current' : 'Archived rates · stale'}
         </span>
       </div>
       <p className="local-demo-yield-catalog-copy">
-        These base supply APYs were captured from the Morpho Public API and are served from a local,
-        immutable snapshot. The app makes no live provider request. Rates can change, rewards remain
-        separate, and risk has not been assessed. Provider listing was observed; deposit and
-        withdrawal availability were not verified.
+        Choose a Crypto Lending plan below. Estimates use a locally cached, point-in-time managed
+        rate set and make no live external request. Rates can change and risk has not been assessed.
       </p>
       <p className="local-demo-yield-catalog-time">
-        Snapshot captured <Timestamp value={catalog.snapshot.capturedAt} />. Data became stale after{' '}
+        Rates captured <Timestamp value={catalog.snapshot.capturedAt} />. Data became stale after{' '}
         <Timestamp value={catalog.snapshot.staleAfter} />.
-      </p>
-      <div className="local-demo-yield-opportunity-grid">
-        {catalog.opportunities.map((opportunity) => (
-          <OpportunityCard key={opportunity.opportunityId} opportunity={opportunity} />
-        ))}
-      </div>
-      <p className="local-demo-yield-proxy-note">
-        Available-to-borrow amounts are shown only as an exit-liquidity proxy; they do not guarantee
-        that a withdrawal can be completed.
       </p>
     </section>
   );
+}
+
+function feeBasisCopy(
+  basis: LocalDemoAllocationPreview['executionCost']['modeledScenario']['components'][number]['calculationBasis'],
+): string {
+  switch (basis) {
+    case 'NETWORK_ACTIVATION_AND_POSITION_VOLUME':
+      return 'Varies with planned network actions and allocation size.';
+    case 'TWELVE_BPS_OF_REQUIRED_CONVERSION':
+      return '0.12% only on capital that requires asset conversion.';
+    case 'POSITION_SIZE_AND_UTILIZATION':
+      return 'Varies with allocation size and modeled liquidity utilization.';
+    case 'TWENTY_CENTS_PER_ACTIVE_ALLOCATION':
+      return '$0.20 for each active managed allocation.';
+  }
+}
+
+function FirstPositiveDay({ preview }: { preview: LocalDemoAllocationPreview }) {
+  const result = preview.yieldProjection.firstPositiveDayAfterFees;
+  if (result.status === 'NO_PROJECTED_YIELD') {
+    return <span className="local-demo-allocation-projection-unavailable">No projected yield</span>;
+  }
+  if (result.status === 'NOT_RECOVERED_WITHIN_HORIZON') {
+    return <span className="local-demo-allocation-projection-unavailable">Not within 1 year</span>;
+  }
+  return (
+    <data
+      value={String(result.day)}
+      aria-label={`First positive whole-cent yield after estimated fees is day ${result.day}`}
+    >
+      <span aria-hidden="true">Day {result.day}</span>
+    </data>
+  );
+}
+
+function firstPositiveDayAnnouncement(preview: LocalDemoAllocationPreview): string {
+  const result = preview.yieldProjection.firstPositiveDayAfterFees;
+  if (result.status === 'RECOVERED_WITHIN_HORIZON') {
+    return `first positive day after estimated fees is day ${result.day}`;
+  }
+  return result.status === 'NO_PROJECTED_YIELD'
+    ? 'no positive yield is projected'
+    : 'estimated fees are not recovered within one year';
 }
 
 function YieldProjection({ preview }: { preview: LocalDemoAllocationPreview }) {
@@ -238,41 +151,49 @@ function YieldProjection({ preview }: { preview: LocalDemoAllocationPreview }) {
     >
       <div className="local-demo-allocation-yield-heading">
         <div>
-          <p className="eyebrow">Morpho base APY snapshot</p>
-          <h4 id="local-demo-allocation-yield-title">Illustrative yield projection</h4>
+          <p className="eyebrow">Post-fee projection</p>
+          <h4 id="local-demo-allocation-yield-title">Illustrative yield result</h4>
         </div>
         <p>Local scenario · not a live quote</p>
       </div>
       <dl className="local-demo-allocation-yield-metrics">
         <div className="local-demo-allocation-yield-primary">
-          <dt>Effective blended base APY (rounded down)</dt>
+          <dt>Estimated blended APY (rounded down)</dt>
           <dd>
             <Apy basisPoints={preview.yieldProjection.effectiveApyBasisPoints} />
           </dd>
         </div>
         <div>
-          <dt>Projected base yield in 1 year</dt>
+          <dt>Projected yield in 1 year before fees</dt>
           <dd>
             <Money amountUsdMinor={preview.yieldProjection.projectedAnnualYieldUsdMinor} />
           </dd>
         </div>
         <div>
-          <dt>Projection assumes yield from</dt>
+          <dt>Estimated one-time fees</dt>
           <dd>
-            <YieldStartValue preview={preview} />
+            <Money amountUsdMinor={preview.executionCost.modeledScenario.totalUsdMinor} />
           </dd>
         </div>
         <div>
-          <dt>Public execution costs</dt>
-          <dd className="local-demo-allocation-projection-unavailable">Not quoted</dd>
+          <dt>Projected yield after fees in 1 year</dt>
+          <dd>
+            <SignedMoney
+              amountUsdMinor={preview.yieldProjection.projectedAnnualYieldAfterFeesUsdMinor}
+            />
+          </dd>
+        </div>
+        <div>
+          <dt>First positive day after estimated fees</dt>
+          <dd>
+            <FirstPositiveDay preview={preview} />
+          </dd>
         </div>
       </dl>
       <p className="local-demo-allocation-yield-method">
-        Sums each market position using its exact captured base supply APY. This straight-line
-        one-year estimate excludes reward APR, compounding, rate changes, taxes, and public
-        execution costs. The displayed blended APY and dollar estimate are rounded down to basis
-        points and whole cents, respectively. Rates are point-in-time observations, not forecasts or
-        promised returns.
+        The first positive day is the first whole day where projected cumulative yield reaches at
+        least one cent more than the modeled one-time fees. The estimate uses exact internal rate
+        math, no compounding, and a one-year horizon. Rates and actual costs may change.
       </p>
     </section>
   );
@@ -287,16 +208,15 @@ function AllocationPreview({ preview }: { preview: LocalDemoAllocationPreview })
       <div className="local-demo-allocation-warning" role="note">
         <span>Preview only</span>
         <p>
-          <strong>No user-authorized financial transaction was created.</strong> This estimate
-          cannot authorize a transfer, investment, loan, or financial action. Provider rates are
-          historical snapshot observations. This non-executing local simulation models no action
-          cost; public execution costs have not been quoted.
+          <strong>No user-authorized financial transaction was created.</strong> This local model is
+          not a public execution quote. Actual rates, fees, and route details may change before any
+          future confirmation.
         </p>
       </div>
-      {preview.catalog.freshness === 'STALE' ? (
+      {preview.rateSnapshot.freshness === 'STALE' ? (
         <p className="local-demo-yield-stale-warning" role="note">
-          This archived snapshot is stale. It remains visible for local, non-executable testing
-          only.
+          This managed rate set is stale and remains available only for local, non-executable
+          testing.
         </p>
       ) : null}
       <div className="local-demo-allocation-preview-heading">
@@ -304,15 +224,12 @@ function AllocationPreview({ preview }: { preview: LocalDemoAllocationPreview })
           <p className="eyebrow">Selected yield plan</p>
           <h3 id="local-demo-allocation-preview-title">{preview.selection.label}</h3>
           <p>{preview.selection.description}</p>
-          <small>
-            {preview.catalog.selectedOpportunityCount} of {preview.catalog.matchedOpportunityCount}{' '}
-            matching snapshot markets selected · risk not assessed
-          </small>
+          <small>Crypto Lending managed strategy · risk not assessed</small>
         </div>
         <p className="local-demo-allocation-as-of">
           Portfolio estimated <Timestamp value={preview.asOf} />
           <br />
-          Rates captured <Timestamp value={preview.catalog.capturedAt} />
+          Rates captured <Timestamp value={preview.rateSnapshot.capturedAt} />
         </p>
       </div>
 
@@ -320,52 +237,46 @@ function AllocationPreview({ preview }: { preview: LocalDemoAllocationPreview })
 
       <div className="local-demo-allocation-results">
         <section aria-labelledby="local-demo-allocation-amounts-title">
-          <h4 id="local-demo-allocation-amounts-title">Allocation amounts</h4>
+          <h4 id="local-demo-allocation-amounts-title">Allocation amounts after estimated fees</h4>
           <ul className="local-demo-allocation-result-list">
             {preview.allocations.map((allocation) => (
               <li key={allocation.allocationId}>
                 <span>
                   <strong>{allocation.label}</strong>
-                  <small>
-                    Target share: {percentage(allocation.percentageBasisPoints)} of gross capital
-                    (rounded)
-                  </small>
-                  {allocation.opportunity === null ? null : (
-                    <small>
-                      {allocation.opportunity.asset.symbol} · {allocation.opportunity.network.name}{' '}
-                      ·{' '}
-                      {allocation.opportunity.apy.rewardAprs.length === 0
-                        ? 'no reward APR observed'
-                        : `${percentage(
-                            allocation.opportunity.apy.rewardAprs.reduce(
-                              (sum, reward) => sum + reward.basisPoints,
-                              0,
-                            ),
-                          )} reward APR excluded`}
-                    </small>
-                  )}
+                  <small>{percentage(allocation.percentageBasisPoints)} target share</small>
                 </span>
-                <span className="local-demo-allocation-result-values">
-                  <Apy basisPoints={allocation.baseApyBasisPoints} />
-                  <Money amountUsdMinor={allocation.amountUsdMinor} />
-                </span>
+                <Money amountUsdMinor={allocation.amountUsdMinor} />
               </li>
             ))}
           </ul>
         </section>
 
         <section aria-labelledby="local-demo-allocation-fees-title">
-          <h4 id="local-demo-allocation-fees-title">Execution cost treatment</h4>
+          <h4 id="local-demo-allocation-fees-title">Estimated one-time fees</h4>
           <p className="local-demo-allocation-fee-disclosure">
-            The local preview creates no route or transaction, so its modeled execution cost is $0.
-            Public network, routing, conversion, and slippage costs are not quoted or included.
+            These amounts come from a deterministic local test model. They change with capital,
+            conversion needs, allocation size, utilization, and routing complexity; they are not a
+            live public quote.
           </p>
           <ul className="local-demo-allocation-result-list local-demo-allocation-fee-list">
+            {preview.executionCost.modeledScenario.components.map((component) => (
+              <li key={component.code}>
+                <span>
+                  <strong>{component.label}</strong>
+                  <small>{feeBasisCopy(component.calculationBasis)}</small>
+                </span>
+                <Money amountUsdMinor={component.amountUsdMinor} />
+              </li>
+            ))}
             <li>
-              <span>Modeled local execution cost</span>
-              <Money amountUsdMinor={preview.executionCost.modeledLocalAmountUsdMinor} />
+              <strong>Total estimated fees</strong>
+              <Money amountUsdMinor={preview.executionCost.modeledScenario.totalUsdMinor} />
             </li>
           </ul>
+          <p className="local-demo-allocation-fee-disclosure">
+            Actual local operation: $0 because no transaction occurred. Public execution costs:
+            unquoted.
+          </p>
         </section>
       </div>
 
@@ -377,9 +288,9 @@ function AllocationPreview({ preview }: { preview: LocalDemoAllocationPreview })
           </dd>
         </div>
         <div>
-          <dt>Modeled local execution cost</dt>
+          <dt>Estimated one-time fees deducted</dt>
           <dd>
-            <Money amountUsdMinor={preview.executionCost.modeledLocalAmountUsdMinor} />
+            <Money amountUsdMinor={preview.executionCost.modeledScenario.totalUsdMinor} />
           </dd>
         </div>
         <div className="local-demo-allocation-net">
@@ -393,73 +304,14 @@ function AllocationPreview({ preview }: { preview: LocalDemoAllocationPreview })
   );
 }
 
-function sameOpportunity(
-  actual: LocalDemoYieldOpportunity,
-  expected: LocalDemoYieldOpportunity,
-): boolean {
-  return (
-    actual.opportunityId === expected.opportunityId &&
-    actual.protocol.marketId === expected.protocol.marketId &&
-    actual.asset.symbol === expected.asset.symbol &&
-    actual.asset.contract === expected.asset.contract &&
-    actual.asset.decimals === expected.asset.decimals &&
-    actual.network.id === expected.network.id &&
-    actual.network.name === expected.network.name &&
-    actual.apy.baseRateDecimal === expected.apy.baseRateDecimal &&
-    actual.apy.baseBasisPoints === expected.apy.baseBasisPoints &&
-    actual.apy.observedAt === expected.apy.observedAt &&
-    actual.apy.providerFee.rateDecimal === expected.apy.providerFee.rateDecimal &&
-    actual.apy.providerFee.basisPoints === expected.apy.providerFee.basisPoints &&
-    actual.apy.rewardAprs.length === expected.apy.rewardAprs.length &&
-    actual.apy.rewardAprs.every(
-      (reward, index) =>
-        reward.assetSymbol === expected.apy.rewardAprs[index]?.assetSymbol &&
-        reward.rateDecimal === expected.apy.rewardAprs[index]?.rateDecimal &&
-        reward.basisPoints === expected.apy.rewardAprs[index]?.basisPoints,
-    ) &&
-    actual.tvl.sourceAmountUsdDecimal === expected.tvl.sourceAmountUsdDecimal &&
-    actual.tvl.amountUsdMinor === expected.tvl.amountUsdMinor &&
-    actual.tvl.observedAt === expected.tvl.observedAt &&
-    actual.exitLiquidity.sourceAmountUsdDecimal === expected.exitLiquidity.sourceAmountUsdDecimal &&
-    actual.exitLiquidity.amountUsdMinor === expected.exitLiquidity.amountUsdMinor &&
-    actual.exitLiquidity.observedAt === expected.exitLiquidity.observedAt &&
-    actual.utilization.rateDecimal === expected.utilization.rateDecimal &&
-    actual.utilization.basisPoints === expected.utilization.basisPoints &&
-    actual.utilization.observedAt === expected.utilization.observedAt &&
-    actual.availability.asOf === expected.availability.asOf &&
-    actual.provenance.sourceId === expected.provenance.sourceId &&
-    actual.provenance.sourceObservedAt === expected.provenance.sourceObservedAt &&
-    actual.provenance.retrievedAt === expected.provenance.retrievedAt &&
-    actual.provenance.payloadSha256 === expected.provenance.payloadSha256 &&
-    actual.provenance.attributes.length === expected.provenance.attributes.length &&
-    actual.provenance.attributes.every(
-      (attribute, index) =>
-        attribute.key === expected.provenance.attributes[index]?.key &&
-        attribute.value === expected.provenance.attributes[index]?.value,
-    )
-  );
-}
-
 function previewMatchesCatalog(
   preview: LocalDemoAllocationPreview,
   catalog: LocalDemoYieldCatalog,
 ): boolean {
-  const matches = [...catalog.opportunities].sort((left, right) => {
-    const apyOrder = compareLocalDemoDecimals(right.apy.baseRateDecimal, left.apy.baseRateDecimal);
-    return apyOrder === 0 ? left.opportunityId.localeCompare(right.opportunityId) : apyOrder;
-  });
-  const selected = matches.slice(0, 3);
-  const actual = preview.allocations.flatMap(({ opportunity }) =>
-    opportunity === null ? [] : [opportunity],
-  );
   return (
-    preview.catalog.matchedOpportunityCount === matches.length &&
-    preview.catalog.selectedOpportunityCount === selected.length &&
-    actual.length === selected.length &&
-    actual.every((opportunity, index) => {
-      const expected = selected[index];
-      return expected !== undefined && sameOpportunity(opportunity, expected);
-    })
+    preview.rateSnapshot.id === catalog.snapshot.id &&
+    preview.rateSnapshot.capturedAt === catalog.snapshot.capturedAt &&
+    preview.rateSnapshot.staleAfter === catalog.snapshot.staleAfter
   );
 }
 
@@ -516,12 +368,15 @@ export function LocalDemoAllocationPlanner({
       );
       setPreview((current) =>
         current === null ||
-        current.catalog.snapshotId !== catalog.snapshot.id ||
-        current.catalog.freshness === 'STALE'
+        current.rateSnapshot.id !== catalog.snapshot.id ||
+        current.rateSnapshot.freshness === 'STALE'
           ? current
           : Object.freeze({
               ...current,
-              catalog: Object.freeze({ ...current.catalog, freshness: 'STALE' as const }),
+              rateSnapshot: Object.freeze({
+                ...current.rateSnapshot,
+                freshness: 'STALE' as const,
+              }),
             }),
       );
     };
@@ -543,7 +398,10 @@ export function LocalDemoAllocationPlanner({
     [],
   );
 
-  async function requestPreview(selection: LocalDemoPresetSelection, key: string): Promise<void> {
+  async function requestPreview(
+    selection: LocalDemoAllocationSelectionInput,
+    key: string,
+  ): Promise<void> {
     requestGeneration.current += 1;
     previewRequest.current?.abort();
     const controller = new AbortController();
@@ -556,13 +414,7 @@ export function LocalDemoAllocationPlanner({
     try {
       const result = await client.previewAllocation(selection, controller.signal);
       if (controller.signal.aborted || generation !== requestGeneration.current) return;
-      if (
-        catalog === null ||
-        result.catalog.snapshotId !== catalog.snapshot.id ||
-        result.catalog.capturedAt !== catalog.snapshot.capturedAt ||
-        result.catalog.staleAfter !== catalog.snapshot.staleAfter ||
-        !previewMatchesCatalog(result, catalog)
-      ) {
+      if (catalog === null || !previewMatchesCatalog(result, catalog)) {
         throw new LocalDemoApiError('INVALID_RESPONSE');
       }
       setCatalog((current) =>
@@ -573,7 +425,7 @@ export function LocalDemoAllocationPlanner({
               snapshot: Object.freeze({
                 ...current.snapshot,
                 freshness:
-                  current.snapshot.freshness === 'STALE' ? 'STALE' : result.catalog.freshness,
+                  current.snapshot.freshness === 'STALE' ? 'STALE' : result.rateSnapshot.freshness,
               }),
             }),
       );
@@ -584,9 +436,7 @@ export function LocalDemoAllocationPlanner({
         onUnauthenticated?.();
         return;
       }
-      if (generation === requestGeneration.current) {
-        setPreviewState('ERROR');
-      }
+      if (generation === requestGeneration.current) setPreviewState('ERROR');
     } finally {
       if (generation === requestGeneration.current) {
         previewRequest.current = null;
@@ -602,17 +452,17 @@ export function LocalDemoAllocationPlanner({
           <p className="eyebrow">Allocation preview</p>
           <h2 id="local-demo-allocation-title">Choose how to allocate your capital.</h2>
         </div>
-        <span className="local-demo-proof-badge">Local snapshot · estimate only</span>
+        <span className="local-demo-proof-badge">Local model · estimate only</span>
       </div>
       <p className="local-demo-allocation-intro">
-        Compare real, timestamped provider observations without live egress. Allocation math,
-        projected yield, and execution-cost treatment appear only after you select a preset.
+        Compare Crypto Lending plans. Allocation amounts, variable fee estimates, and the first
+        positive day after estimated fees appear only after you select a plan.
       </p>
 
       {catalogError ? (
         <div className="local-demo-catalog-error" role="alert">
           <p className="local-demo-allocation-error">
-            The local provider snapshot could not be validated. No yield values were accepted.
+            The managed rate set could not be validated. No yield estimate was accepted.
           </p>
           <button
             className="portfolio-secondary-action"
@@ -622,18 +472,18 @@ export function LocalDemoAllocationPlanner({
               setCatalogLoadAttempt((attempt) => attempt + 1);
             }}
           >
-            Retry snapshot
+            Retry rates
           </button>
         </div>
       ) : catalog === null ? (
         <p className="local-demo-yield-loading" role="status">
-          Loading the local provider snapshot…
+          Loading managed rates…
         </p>
       ) : (
-        <CatalogPanel catalog={catalog} />
+        <RateStatus catalog={catalog} />
       )}
 
-      <div className="local-demo-allocation-choices" role="group" aria-label="Allocation presets">
+      <div className="local-demo-allocation-choices" role="group" aria-label="Allocation plans">
         {LOCAL_DEMO_ALLOCATION_PRESETS.map((preset) => {
           const key = `PRESET:${preset.id}`;
           return (
@@ -647,7 +497,7 @@ export function LocalDemoAllocationPlanner({
             >
               <span className="local-demo-allocation-choice-title">
                 <strong>{preset.label}</strong>
-                <small>{pendingKey === key ? 'Calculating…' : 'Preview snapshot blend'}</small>
+                <small>{pendingKey === key ? 'Calculating…' : 'Preview plan'}</small>
               </span>
               <span className="local-demo-allocation-choice-description">{preset.description}</span>
               <span className="local-demo-allocation-choice-apy">
@@ -656,16 +506,12 @@ export function LocalDemoAllocationPlanner({
               </span>
               <span className="local-demo-allocation-mix">
                 <span>
-                  <small>Yield allocation</small>
+                  <small>Managed yield</small>
                   <strong>{percentage(10_000 - preset.liquidReserveBasisPoints)}</strong>
                 </span>
                 <span>
-                  <small>Markets used</small>
-                  <strong>Up to 3</strong>
-                </span>
-                <span>
-                  <small>Selection</small>
-                  <strong>Base APY, then ID</strong>
+                  <small>Fee estimate</small>
+                  <strong>After selection</strong>
                 </span>
               </span>
             </button>
@@ -678,7 +524,9 @@ export function LocalDemoAllocationPlanner({
           ? 'Calculating allocation preview.'
           : preview === null
             ? ''
-            : `${preview.selection.label} preview ready with ${preview.catalog.selectedOpportunityCount} selected snapshot markets.`}
+            : `${preview.selection.label} preview ready. Estimated fees are ${
+                formatUsdMinor(preview.executionCost.modeledScenario.totalUsdMinor).visible
+              }; ${firstPositiveDayAnnouncement(preview)}.`}
       </span>
       {previewState === 'ERROR' ? (
         <p className="local-demo-allocation-error" role="alert">

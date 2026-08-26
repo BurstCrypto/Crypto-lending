@@ -22,9 +22,9 @@ import { parseUnifiedBalanceResponse } from '../lib/portfolio/unified-balance';
 import { LOCAL_DEMO_CHAIN_PORTFOLIO_PAYLOAD } from './local-demo-portfolio.fixtures';
 import {
   BALANCED_PREVIEW,
-  CUSTOM_FILTERS,
-  CUSTOM_PREVIEW,
   LOCAL_DEMO_YIELD_CATALOG,
+  MORE_YIELD_DAY_365_PREVIEW,
+  MORE_LIQUID_PREVIEW,
 } from './local-demo-yield.fixtures';
 
 const CSRF = 'A'.repeat(43);
@@ -54,6 +54,12 @@ function json(body: unknown, status = 200): Response {
     status,
     headers: { 'Content-Type': 'application/json' },
   });
+}
+
+function expectProviderPrivate(value: unknown): void {
+  expect(JSON.stringify(value)).not.toMatch(
+    /morpho|api\.morpho|eip155:(?:1|8453)|0x[0-9a-f]{40,64}|"(?:provider|protocol|marketId|opportunity|provenance|sourceReference|payloadSha256|normalizerId)"/iu,
+  );
 }
 
 describe('local demo same-origin API client', () => {
@@ -155,12 +161,12 @@ describe('local demo same-origin API client', () => {
     expect(requestFetch).not.toHaveBeenCalled();
   });
 
-  it('reads the immutable catalog and previews exact preset/custom selections through fixed paths', async () => {
+  it('reads only aggregate managed rates and previews a closed preset through fixed paths', async () => {
     const requestFetch = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(json(LOCAL_DEMO_YIELD_CATALOG))
       .mockResolvedValueOnce(json(BALANCED_PREVIEW))
-      .mockResolvedValueOnce(json(CUSTOM_PREVIEW));
+      .mockResolvedValueOnce(json(MORE_LIQUID_PREVIEW));
     const client = new LocalDemoApiClient({
       cookieHeader: `__Host-cl_csrf=${CSRF}`,
       fetch: requestFetch,
@@ -171,12 +177,14 @@ describe('local demo same-origin API client', () => {
       client.previewAllocation({ kind: 'PRESET', presetId: 'BALANCED' }),
     ).resolves.toEqual(BALANCED_PREVIEW);
     await expect(
-      client.previewAllocation({
-        kind: 'CUSTOM',
-        liquidReserveBasisPoints: 3000,
-        filters: CUSTOM_FILTERS,
-      }),
-    ).resolves.toEqual(CUSTOM_PREVIEW);
+      client.previewAllocation({ kind: 'PRESET', presetId: 'MORE_LIQUID' }),
+    ).resolves.toEqual(MORE_LIQUID_PREVIEW);
+    expectProviderPrivate(LOCAL_DEMO_YIELD_CATALOG);
+    expectProviderPrivate(BALANCED_PREVIEW);
+    expectProviderPrivate(MORE_LIQUID_PREVIEW);
+    expect(BALANCED_PREVIEW.executionCost.modeledScenario.totalUsdMinor).not.toBe(
+      MORE_LIQUID_PREVIEW.executionCost.modeledScenario.totalUsdMinor,
+    );
     expect(requestFetch).toHaveBeenNthCalledWith(
       1,
       LOCAL_DEMO_YIELD_CATALOG_PATH,
@@ -207,22 +215,29 @@ describe('local demo same-origin API client', () => {
       LOCAL_DEMO_ALLOCATION_PREVIEW_PATH,
       expect.objectContaining({
         method: 'POST',
-        body: JSON.stringify({
-          selection: {
-            kind: 'CUSTOM',
-            liquidReserveBasisPoints: 3000,
-            filters: CUSTOM_FILTERS,
-          },
-        }),
+        body: JSON.stringify({ selection: { kind: 'PRESET', presetId: 'MORE_LIQUID' } }),
       }),
     );
+    expect(requestFetch).toHaveBeenCalledTimes(3);
   });
 
-  it('rejects forged catalog provenance and allocation arithmetic', async () => {
+  it('rejects legacy identity fields and forged aggregate cost arithmetic', async () => {
     expect(() =>
       parseLocalDemoYieldCatalog({
         ...structuredClone(LOCAL_DEMO_YIELD_CATALOG),
         snapshot: { ...LOCAL_DEMO_YIELD_CATALOG.snapshot, staleBehavior: 'EXECUTE_STALE' },
+      }),
+    ).toThrow(TypeError);
+    expect(() =>
+      parseLocalDemoYieldCatalog({
+        ...structuredClone(LOCAL_DEMO_YIELD_CATALOG),
+        opportunities: [],
+      }),
+    ).toThrow(TypeError);
+    expect(() =>
+      parseLocalDemoYieldCatalog({
+        ...structuredClone(LOCAL_DEMO_YIELD_CATALOG),
+        snapshot: { ...LOCAL_DEMO_YIELD_CATALOG.snapshot, provider: 'LEGACY_PROVIDER' },
       }),
     ).toThrow(TypeError);
     expect(() =>
@@ -233,13 +248,20 @@ describe('local demo same-origin API client', () => {
     ).toThrow(TypeError);
     const forgedExecutionCost = structuredClone(BALANCED_PREVIEW) as unknown as {
       executionCost: {
-        modeledLocalAmountUsdMinor: string;
-        publicExecutionCostStatus: string;
+        actualLocalOperation: { amountUsdMinor: string };
+        publicExecution: { status: string; amountUsdMinor: string | null };
       };
     };
-    forgedExecutionCost.executionCost.modeledLocalAmountUsdMinor = '1';
-    forgedExecutionCost.executionCost.publicExecutionCostStatus = 'QUOTED';
+    forgedExecutionCost.executionCost.actualLocalOperation.amountUsdMinor = '1';
+    forgedExecutionCost.executionCost.publicExecution.status = 'QUOTED';
+    forgedExecutionCost.executionCost.publicExecution.amountUsdMinor = '822';
     expect(() => parseLocalDemoAllocationPreview(forgedExecutionCost)).toThrow(TypeError);
+
+    const legacyAllocation = structuredClone(BALANCED_PREVIEW) as unknown as {
+      allocations: Array<Record<string, unknown>>;
+    };
+    legacyAllocation.allocations[1]!.opportunity = { provider: 'LEGACY_PROVIDER' };
+    expect(() => parseLocalDemoAllocationPreview(legacyAllocation)).toThrow(TypeError);
 
     const client = new LocalDemoApiClient({
       cookieHeader: `__Host-cl_csrf=${CSRF}`,
@@ -252,24 +274,70 @@ describe('local demo same-origin API client', () => {
     });
   });
 
-  it('recomputes exact position yield and rejects invented local costs or recovery timing', () => {
-    const forgedPoolApy = {
-      ...structuredClone(BALANCED_PREVIEW),
-      allocations: BALANCED_PREVIEW.allocations.map((allocation, index) => ({
-        ...allocation,
-        ...(index === 1 ? { baseApyBasisPoints: 522 } : {}),
-      })),
-    };
-    expect(() => parseLocalDemoAllocationPreview(forgedPoolApy)).toThrow(TypeError);
+  it('reconciles components, post-fee yield, allocation cents, and exact recovery timing', () => {
+    expect(() => parseLocalDemoAllocationPreview(BALANCED_PREVIEW)).not.toThrow();
+    expect(BALANCED_PREVIEW.executionCost.modeledScenario.components).toMatchObject([
+      { code: 'NETWORK', amountUsdMinor: '438' },
+      { code: 'CONVERSION', amountUsdMinor: '0' },
+      { code: 'MARKET_IMPACT', amountUsdMinor: '115' },
+      { code: 'ROUTING', amountUsdMinor: '60' },
+    ]);
+    expect(BALANCED_PREVIEW.executionCost.modeledScenario.totalUsdMinor).toBe('613');
+    expect(BALANCED_PREVIEW.executionCost.actualLocalOperation).toEqual({
+      status: 'NO_EXECUTION',
+      amountUsdMinor: '0',
+    });
+    expect(BALANCED_PREVIEW.executionCost.publicExecution).toEqual({
+      status: 'UNQUOTED',
+      amountUsdMinor: null,
+    });
+    expect(BALANCED_PREVIEW.yieldProjection.firstPositiveDayAfterFees).toMatchObject({
+      status: 'RECOVERED_WITHIN_HORIZON',
+      day: 10,
+      modelHorizonDays: 365,
+    });
 
-    const forgedAnnualProjection = {
+    const forgedComponentTotal = {
+      ...structuredClone(BALANCED_PREVIEW),
+      executionCost: {
+        ...BALANCED_PREVIEW.executionCost,
+        modeledScenario: {
+          ...BALANCED_PREVIEW.executionCost.modeledScenario,
+          totalUsdMinor: '614',
+        },
+      },
+    };
+    expect(() => parseLocalDemoAllocationPreview(forgedComponentTotal)).toThrow(TypeError);
+
+    const forgedPostFeeYield = {
       ...structuredClone(BALANCED_PREVIEW),
       yieldProjection: {
         ...BALANCED_PREVIEW.yieldProjection,
-        projectedAnnualYieldUsdMinor: '36133',
+        projectedAnnualYieldAfterFeesUsdMinor: '22361',
       },
     };
-    expect(() => parseLocalDemoAllocationPreview(forgedAnnualProjection)).toThrow(TypeError);
+    expect(() => parseLocalDemoAllocationPreview(forgedPostFeeYield)).toThrow(TypeError);
+
+    const forgedRecoveryDay = {
+      ...structuredClone(BALANCED_PREVIEW),
+      yieldProjection: {
+        ...BALANCED_PREVIEW.yieldProjection,
+        firstPositiveDayAfterFees: {
+          ...BALANCED_PREVIEW.yieldProjection.firstPositiveDayAfterFees,
+          day: 11,
+        },
+      },
+    };
+    expect(() => parseLocalDemoAllocationPreview(forgedRecoveryDay)).toThrow(TypeError);
+
+    const shiftedAllocationAmounts = {
+      ...structuredClone(BALANCED_PREVIEW),
+      allocations: BALANCED_PREVIEW.allocations.map((allocation, index) => ({
+        ...allocation,
+        amountUsdMinor: index === 0 ? '209817' : '489570',
+      })),
+    };
+    expect(() => parseLocalDemoAllocationPreview(shiftedAllocationAmounts)).toThrow(TypeError);
 
     const legacyBreakEven = {
       ...structuredClone(BALANCED_PREVIEW),
@@ -280,70 +348,65 @@ describe('local demo same-origin API client', () => {
     };
     expect(() => parseLocalDemoAllocationPreview(legacyBreakEven)).toThrow(TypeError);
 
-    const shiftedAllocationAmounts = structuredClone(BALANCED_PREVIEW) as unknown as {
-      allocations: Array<{ amountUsdMinor: string }>;
+    const legacyCost = {
+      ...structuredClone(BALANCED_PREVIEW),
+      executionCost: {
+        treatment: 'LOCAL_DEMO_ZERO_NO_EXECUTION',
+        modeledLocalAmountUsdMinor: '0',
+        publicExecutionCostStatus: 'UNQUOTED',
+      },
     };
-    shiftedAllocationAmounts.allocations[1]!.amountUsdMinor = '257740';
-    shiftedAllocationAmounts.allocations[2]!.amountUsdMinor = '255630';
-    expect(() => parseLocalDemoAllocationPreview(shiftedAllocationAmounts)).toThrow(TypeError);
-
-    const filtersDoNotMatchAllocations = structuredClone(CUSTOM_PREVIEW) as unknown as {
-      selection: { filters: { minimumApyBasisPoints: number } };
-    };
-    filtersDoNotMatchAllocations.selection.filters.minimumApyBasisPoints = 10_000;
-    expect(() => parseLocalDemoAllocationPreview(filtersDoNotMatchAllocations)).toThrow(TypeError);
+    expect(() => parseLocalDemoAllocationPreview(legacyCost)).toThrow(TypeError);
   });
 
-  it('rejects hostile custom selections before fetch without reading attacker getters', async () => {
-    const getter = vi.fn(() => 9999);
-    const filters = Object.create(null) as Record<string, unknown>;
-    Object.defineProperty(filters, 'assetSymbols', { enumerable: true, value: ['USDC'] });
-    Object.defineProperty(filters, 'providerIds', { enumerable: true, value: ['MORPHO'] });
-    Object.defineProperty(filters, 'networkIds', { enumerable: true, value: ['eip155:1'] });
-    Object.defineProperty(filters, 'minimumApyBasisPoints', { enumerable: true, get: getter });
-    Object.defineProperty(filters, 'minimumTvlUsdMinor', { enumerable: true, value: '0' });
-    Object.defineProperty(filters, 'minimumExitLiquidityUsdMinor', {
-      enumerable: true,
-      value: '0',
-    });
-    Object.defineProperty(filters, 'maximumUtilizationBasisPoints', {
-      enumerable: true,
-      value: 10000,
-    });
+  it('uses both disclosed yield floors to reject an impossible recovery day at the horizon', () => {
+    expect(() => parseLocalDemoAllocationPreview(MORE_YIELD_DAY_365_PREVIEW)).not.toThrow();
+
+    const forgedDay = {
+      ...structuredClone(MORE_YIELD_DAY_365_PREVIEW),
+      yieldProjection: {
+        ...MORE_YIELD_DAY_365_PREVIEW.yieldProjection,
+        firstPositiveDayAfterFees: {
+          ...MORE_YIELD_DAY_365_PREVIEW.yieldProjection.firstPositiveDayAfterFees,
+          day: 364,
+        },
+      },
+    };
+    expect(() => parseLocalDemoAllocationPreview(forgedDay)).toThrow(TypeError);
+  });
+
+  it('rejects legacy non-preset selections before fetch without reading attacker getters', async () => {
+    const getter = vi.fn(() => ({ attackerControlled: true }));
+    const legacySelection = Object.create(null) as Record<string, unknown>;
+    Object.defineProperty(legacySelection, 'kind', { enumerable: true, value: 'CUSTOM' });
+    Object.defineProperty(legacySelection, 'filters', { enumerable: true, get: getter });
     const requestFetch = vi.fn<typeof fetch>();
     const client = new LocalDemoApiClient({
       cookieHeader: `__Host-cl_csrf=${CSRF}`,
       fetch: requestFetch,
     });
 
-    await expect(
-      client.previewAllocation({
-        kind: 'CUSTOM',
-        liquidReserveBasisPoints: 3000,
-        filters,
-      } as never),
-    ).rejects.toMatchObject({ code: 'INVALID_RESPONSE' });
+    await expect(client.previewAllocation(legacySelection as never)).rejects.toMatchObject({
+      code: 'INVALID_RESPONSE',
+    });
     expect(getter).not.toHaveBeenCalled();
     expect(requestFetch).not.toHaveBeenCalled();
   });
 
-  it('rejects accessor-backed filter arrays before fetch without invoking them', async () => {
-    const getter = vi.fn(() => 'USDC');
-    const assetSymbols = ['USDC'];
-    Object.defineProperty(assetSymbols, '0', { enumerable: true, configurable: true, get: getter });
+  it('rejects an accessor-backed preset before fetch without invoking it', async () => {
+    const getter = vi.fn(() => 'BALANCED');
+    const selection = Object.create(null) as Record<string, unknown>;
+    Object.defineProperty(selection, 'kind', { enumerable: true, value: 'PRESET' });
+    Object.defineProperty(selection, 'presetId', { enumerable: true, get: getter });
     const requestFetch = vi.fn<typeof fetch>();
     const client = new LocalDemoApiClient({
       cookieHeader: `__Host-cl_csrf=${CSRF}`,
       fetch: requestFetch,
     });
 
-    await expect(
-      client.previewAllocation({
-        kind: 'CUSTOM',
-        liquidReserveBasisPoints: 3_000,
-        filters: { ...CUSTOM_FILTERS, assetSymbols } as never,
-      }),
-    ).rejects.toMatchObject({ code: 'INVALID_RESPONSE' });
+    await expect(client.previewAllocation(selection as never)).rejects.toMatchObject({
+      code: 'INVALID_RESPONSE',
+    });
     expect(getter).not.toHaveBeenCalled();
     expect(requestFetch).not.toHaveBeenCalled();
   });
@@ -352,7 +415,7 @@ describe('local demo same-origin API client', () => {
     const exactNoMatch = {
       statusCode: 422,
       error: 'Unprocessable Entity',
-      message: 'No trusted snapshot opportunities match this selection',
+      message: 'The managed yield strategy is unavailable for this snapshot',
       code: 'NO_MATCHING_YIELD_OPPORTUNITIES',
     };
     const exactClient = new LocalDemoApiClient({
@@ -365,7 +428,7 @@ describe('local demo same-origin API client', () => {
 
     const malformedClient = new LocalDemoApiClient({
       cookieHeader: `__Host-cl_csrf=${CSRF}`,
-      fetch: vi.fn(async () => json({ ...exactNoMatch, debug: 'provider detail' }, 422)),
+      fetch: vi.fn(async () => json({ ...exactNoMatch, debug: 'unexpected detail' }, 422)),
     });
     await expect(
       malformedClient.previewAllocation({ kind: 'PRESET', presetId: 'BALANCED' }),
@@ -373,11 +436,7 @@ describe('local demo same-origin API client', () => {
   });
 
   it('serializes closed allocation selections without consulting polluted toJSON hooks', async () => {
-    const responses = [json(BALANCED_PREVIEW), json(CUSTOM_PREVIEW)];
-    const requestFetch = vi
-      .fn<typeof fetch>()
-      .mockResolvedValueOnce(responses[0]!)
-      .mockResolvedValueOnce(responses[1]!);
+    const requestFetch = vi.fn<typeof fetch>().mockResolvedValueOnce(json(BALANCED_PREVIEW));
     const client = new LocalDemoApiClient({
       cookieHeader: `__Host-cl_csrf=${CSRF}`,
       fetch: requestFetch,
@@ -395,11 +454,6 @@ describe('local demo same-origin API client', () => {
         value: () => ['ATTACKER_CONTROLLED'],
       });
       await client.previewAllocation({ kind: 'PRESET', presetId: 'BALANCED' });
-      await client.previewAllocation({
-        kind: 'CUSTOM',
-        liquidReserveBasisPoints: 3_000,
-        filters: CUSTOM_FILTERS,
-      });
     } finally {
       if (objectToJson === undefined) delete (Object.prototype as { toJSON?: unknown }).toJSON;
       else Object.defineProperty(Object.prototype, 'toJSON', objectToJson);
@@ -409,7 +463,6 @@ describe('local demo same-origin API client', () => {
 
     expect(requestFetch.mock.calls.map(([, init]) => init?.body)).toEqual([
       '{"selection":{"kind":"PRESET","presetId":"BALANCED"}}',
-      '{"selection":{"kind":"CUSTOM","liquidReserveBasisPoints":3000,"filters":{"assetSymbols":["USDC","USDT"],"providerIds":["MORPHO"],"networkIds":["eip155:1","eip155:8453"],"minimumApyBasisPoints":0,"minimumTvlUsdMinor":"100000000","minimumExitLiquidityUsdMinor":"100000000","maximumUtilizationBasisPoints":9500}}}',
     ]);
   });
 

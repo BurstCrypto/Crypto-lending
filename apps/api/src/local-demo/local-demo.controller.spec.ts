@@ -73,8 +73,6 @@ const PORTFOLIO = Object.freeze({
 const YIELD_CATALOG: LocalDemoYieldCatalogResponse = new LocalDemoYieldCatalogService().read(
   new Date('2026-08-26T15:00:00.000Z'),
 );
-const CATALOG_OPPORTUNITY = YIELD_CATALOG.opportunities[0];
-if (CATALOG_OPPORTUNITY === undefined) throw new Error('Missing yield catalog fixture');
 
 const ALLOCATION_PREVIEW: LocalDemoAllocationPreviewResponse = Object.freeze({
   use: 'LOCAL_DEMO_ESTIMATE_ONLY',
@@ -83,20 +81,18 @@ const ALLOCATION_PREVIEW: LocalDemoAllocationPreviewResponse = Object.freeze({
     kind: 'PRESET',
     presetId: 'BALANCED',
     label: 'Balanced blend',
-    description: 'Keep 30% readily available and divide the remainder across snapshot markets.',
+    description:
+      'Keep 30% readily available and allocate the remainder to the managed yield strategy.',
     liquidReserveBasisPoints: 3_000,
-    filters: null,
   }),
-  catalog: Object.freeze({
-    snapshotId: YIELD_CATALOG.snapshot.id,
+  rateSnapshot: Object.freeze({
+    id: YIELD_CATALOG.snapshot.id,
     capturedAt: YIELD_CATALOG.snapshot.capturedAt,
     staleAfter: YIELD_CATALOG.snapshot.staleAfter,
     freshness: YIELD_CATALOG.snapshot.freshness,
     staleBehavior: YIELD_CATALOG.snapshot.staleBehavior,
     riskClassificationAvailable: false,
     riskClassification: YIELD_CATALOG.snapshot.riskClassification,
-    matchedOpportunityCount: 5,
-    selectedOpportunityCount: 1,
   }),
   grossCapitalUsdMinor: '1100000',
   allocations: Object.freeze([
@@ -105,33 +101,68 @@ const ALLOCATION_PREVIEW: LocalDemoAllocationPreviewResponse = Object.freeze({
       allocationId: 'LIQUID_RESERVE',
       label: 'Liquid reserve',
       percentageBasisPoints: 3_000,
-      baseApyBasisPoints: 0,
-      baseApyRateDecimal: '0',
-      amountUsdMinor: '330000',
-      opportunity: null,
+      amountUsdMinor: '329700',
     }),
     Object.freeze({
-      bucket: 'YIELD_OPPORTUNITY',
-      allocationId: CATALOG_OPPORTUNITY.opportunityId,
-      label: 'USDC on Morpho Blue (Base)',
+      bucket: 'MANAGED_YIELD',
+      allocationId: 'MANAGED_YIELD',
+      label: 'Managed yield',
       percentageBasisPoints: 7_000,
-      baseApyBasisPoints: CATALOG_OPPORTUNITY.apy.baseBasisPoints,
-      baseApyRateDecimal: CATALOG_OPPORTUNITY.apy.baseRateDecimal,
-      amountUsdMinor: '770000',
-      opportunity: CATALOG_OPPORTUNITY,
+      amountUsdMinor: '769300',
     }),
   ]),
   executionCost: Object.freeze({
-    treatment: 'LOCAL_DEMO_ZERO_NO_EXECUTION',
-    modeledLocalAmountUsdMinor: '0',
-    publicExecutionCostStatus: 'UNQUOTED',
+    actualLocalOperation: Object.freeze({ status: 'NO_EXECUTION', amountUsdMinor: '0' }),
+    modeledScenario: Object.freeze({
+      status: 'AVAILABLE',
+      modelId: 'LOCAL_DEMO_ALLOCATION_COST_V1',
+      isQuote: false,
+      costBasisCapitalUsdMinor: '1100000',
+      fundingTreatment: 'DEDUCT_FROM_GROSS_BEFORE_PROJECTION',
+      rounding: 'CEIL_EACH_VARIABLE_COMPONENT_TO_USD_MINOR',
+      components: Object.freeze([
+        Object.freeze({
+          code: 'NETWORK',
+          label: 'Estimated network costs',
+          calculationBasis: 'NETWORK_ACTIVATION_AND_POSITION_VOLUME',
+          amountUsdMinor: '400',
+        }),
+        Object.freeze({
+          code: 'CONVERSION',
+          label: 'Estimated conversion costs',
+          calculationBasis: 'TWELVE_BPS_OF_REQUIRED_CONVERSION',
+          amountUsdMinor: '200',
+        }),
+        Object.freeze({
+          code: 'MARKET_IMPACT',
+          label: 'Estimated market impact',
+          calculationBasis: 'POSITION_SIZE_AND_UTILIZATION',
+          amountUsdMinor: '340',
+        }),
+        Object.freeze({
+          code: 'ROUTING',
+          label: 'Estimated routing fee',
+          calculationBasis: 'TWENTY_CENTS_PER_ACTIVE_ALLOCATION',
+          amountUsdMinor: '60',
+        }),
+      ]),
+      totalUsdMinor: '1000',
+    }),
+    publicExecution: Object.freeze({ status: 'UNQUOTED', amountUsdMinor: null }),
   }),
-  capitalIncludedInProjectionUsdMinor: '1100000',
+  capitalIncludedInProjectionUsdMinor: '1099000',
   yieldProjection: Object.freeze({
-    source: 'MORPHO_PUBLIC_API_SNAPSHOT',
-    calculationMethod: 'POSITION_WEIGHTED_EXACT_BASE_APY',
-    effectiveApyBasisPoints: 310,
-    projectedAnnualYieldUsdMinor: '34195',
+    source: 'MANAGED_RATE_SNAPSHOT',
+    calculationMethod: 'INTERNAL_POSITION_WEIGHTED_EXACT_BASE_APY',
+    effectiveApyBasisPoints: 325,
+    projectedAnnualYieldUsdMinor: '35717',
+    projectedAnnualYieldAfterFeesUsdMinor: '34717',
+    firstPositiveDayAfterFees: Object.freeze({
+      calculationMethod: 'FIRST_WHOLE_DAY_VISIBLE_YIELD_EXCEEDS_ESTIMATED_FEES',
+      status: 'RECOVERED_WITHIN_HORIZON',
+      day: 11,
+      modelHorizonDays: 365,
+    }),
   }),
   asOf: '2026-08-24T18:30:00.000Z',
 });
@@ -255,6 +286,14 @@ function expectUnavailable(error: unknown, response: ResponseFixture): void {
   });
   expect(response.headers).toEqual(new Map([['Retry-After', '1']]));
   expect(JSON.stringify(httpError.getResponse())).not.toContain(SECRET_CANARY);
+}
+
+function expectNoServerConfidentialStrategyDetails(value: unknown): void {
+  const serialized = JSON.stringify(value);
+  expect(serialized).not.toMatch(/morpho|graphql|api\.morpho/iu);
+  expect(serialized).not.toMatch(
+    /"(?:provider|providerId|providerIds|protocol|protocolId|marketId|marketIds|opportunity|opportunities|provenance|sourceReference|payloadSha256|normalizer|endpoint)"\s*:/iu,
+  );
 }
 
 describe('LocalDemoController', () => {
@@ -427,7 +466,7 @@ describe('LocalDemoController', () => {
     expect(fixture.portfolio.read).not.toHaveBeenCalledWith(ACCOUNT_A, expect.anything());
   });
 
-  it('reads only the checked-in non-executable yield catalog while enabled', () => {
+  it('reads only sanitized non-executable managed-rate status while enabled', () => {
     const fixture = controllerFixture();
     const response = responseFixture();
 
@@ -435,15 +474,20 @@ describe('LocalDemoController', () => {
 
     expect(result).toBe(YIELD_CATALOG);
     expect(fixture.yieldCatalog.read).toHaveBeenCalledWith();
-    expect(result).toMatchObject({
-      use: 'LOCAL_DEMO_SNAPSHOT_ONLY',
+    expect(result).toEqual({
+      use: 'LOCAL_DEMO_MANAGED_RATE_SNAPSHOT_ONLY',
       mayAuthorizeFinancialAction: false,
       riskClassificationAvailable: false,
       snapshot: {
+        id: 'managed-rate-snapshot-v1',
+        capturedAt: '2026-08-26T14:14:54.580Z',
+        staleAfter: '2026-08-27T14:14:54.580Z',
+        freshness: 'CURRENT',
         staleBehavior: 'LABEL_STALE_KEEP_NON_EXECUTABLE',
         riskClassification: 'NOT_ASSESSED',
       },
     });
+    expectNoServerConfidentialStrategyDetails(result);
   });
 
   it('previews only an allowlisted preset for the principal account and active correlation', async () => {
@@ -469,36 +513,7 @@ describe('LocalDemoController', () => {
       expect.anything(),
       expect.anything(),
     );
-  });
-
-  it('forwards only the bounded custom selection for the authenticated account', async () => {
-    const fixture = controllerFixture();
-    const response = responseFixture();
-    const body = {
-      selection: {
-        kind: 'CUSTOM',
-        liquidReserveBasisPoints: 2_500,
-        filters: {
-          assetSymbols: ['USDC'],
-          providerIds: ['MORPHO'],
-          networkIds: ['eip155:8453'],
-          minimumApyBasisPoints: 400,
-          minimumTvlUsdMinor: '100000000',
-          minimumExitLiquidityUsdMinor: '10000000',
-          maximumUtilizationBasisPoints: 9_500,
-        },
-      },
-    };
-
-    await loggingContext.run(AUTHENTICATED_REQUEST_CORRELATION_B, () =>
-      fixture.controller.previewAllocation(principal(ACCOUNT_B), body, response.response),
-    );
-
-    expect(fixture.allocations.preview).toHaveBeenCalledWith(
-      ACCOUNT_B,
-      AUTHENTICATED_REQUEST_CORRELATION_B,
-      body.selection,
-    );
+    expectNoServerConfidentialStrategyDetails(result);
   });
 
   it('rejects caller-authored economics and malformed selections before previewing', async () => {
@@ -519,7 +534,7 @@ describe('LocalDemoController', () => {
           liquidReserveBasisPoints: 2_500,
           filters: {
             assetSymbols: ['USDC'],
-            providerIds: ['MORPHO'],
+            providerIds: ['caller-supplied-provider'],
             networkIds: ['eip155:1'],
             minimumApyBasisPoints: 0,
             minimumTvlUsdMinor: '0',
@@ -527,6 +542,34 @@ describe('LocalDemoController', () => {
             maximumUtilizationBasisPoints: 10_000,
             feeBasisPoints: 0,
           },
+        },
+      },
+      {
+        selection: {
+          kind: 'PRESET',
+          presetId: 'BALANCED',
+          providerId: 'caller-supplied-provider',
+        },
+      },
+      {
+        selection: {
+          kind: 'PRESET',
+          presetId: 'BALANCED',
+          protocol: 'caller-supplied-protocol',
+        },
+      },
+      {
+        selection: {
+          kind: 'PRESET',
+          presetId: 'BALANCED',
+          marketId: 'caller-supplied-market',
+        },
+      },
+      {
+        selection: {
+          kind: 'PRESET',
+          presetId: 'BALANCED',
+          provenance: { endpoint: 'https://example.invalid' },
         },
       },
     ];
@@ -546,7 +589,7 @@ describe('LocalDemoController', () => {
     }
   });
 
-  it('returns a typed 422 when valid custom filters have no trusted match', async () => {
+  it('returns a typed 422 when the server-confidential strategy is unavailable', async () => {
     const fixture = controllerFixture();
     const response = responseFixture();
     fixture.allocations.preview.mockRejectedValueOnce(
@@ -569,7 +612,7 @@ describe('LocalDemoController', () => {
     expect(httpError.getResponse()).toEqual({
       statusCode: HttpStatus.UNPROCESSABLE_ENTITY,
       error: 'Unprocessable Entity',
-      message: 'No trusted snapshot opportunities match this selection',
+      message: 'The managed yield strategy is unavailable for this snapshot',
       code: 'NO_MATCHING_YIELD_OPPORTUNITIES',
     });
     expect(response.response.setHeader).not.toHaveBeenCalled();

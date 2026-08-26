@@ -1,4 +1,5 @@
 import {
+  LOCAL_DEMO_YIELD_PROVIDER_IDS,
   LocalDemoNoMatchingYieldOpportunitiesError,
   LocalDemoYieldCatalogUnavailableError,
   LocalDemoYieldCatalogService,
@@ -11,7 +12,7 @@ function filters(
 ): LocalDemoCustomYieldFilters {
   return Object.freeze({
     assetSymbols: Object.freeze(['USDC', 'USDT'] as const),
-    providerIds: Object.freeze(['MORPHO'] as const),
+    providerIds: LOCAL_DEMO_YIELD_PROVIDER_IDS,
     networkIds: Object.freeze(['eip155:1', 'eip155:8453'] as const),
     minimumApyBasisPoints: 0,
     minimumTvlUsdMinor: '0',
@@ -24,62 +25,33 @@ function filters(
 describe('LocalDemoYieldCatalogService', () => {
   afterEach(() => jest.restoreAllMocks());
 
-  it('returns normalized exact Morpho observations without any runtime provider request', () => {
+  it('returns only sanitized managed-rate snapshot status without runtime network access', () => {
     const fetchSpy = jest.spyOn(global, 'fetch').mockRejectedValue(new Error('network forbidden'));
 
     const result = new LocalDemoYieldCatalogService().read(new Date('2026-08-26T15:00:00.000Z'));
 
     expect(fetchSpy).not.toHaveBeenCalled();
-    expect(result).toMatchObject({
-      use: 'LOCAL_DEMO_SNAPSHOT_ONLY',
+    expect(result).toEqual({
+      use: 'LOCAL_DEMO_MANAGED_RATE_SNAPSHOT_ONLY',
       mayAuthorizeFinancialAction: false,
       riskClassificationAvailable: false,
       snapshot: {
-        provider: 'MORPHO_PUBLIC_API',
+        id: 'managed-rate-snapshot-v1',
+        capturedAt: '2026-08-26T14:14:54.580Z',
+        staleAfter: '2026-08-27T14:14:54.580Z',
         freshness: 'CURRENT',
         staleBehavior: 'LABEL_STALE_KEEP_NON_EXECUTABLE',
         riskClassification: 'NOT_ASSESSED',
       },
     });
-    expect(result.opportunities).toHaveLength(5);
-    expect(result.opportunities[0]).toMatchObject({
-      provider: { id: 'MORPHO', name: 'Morpho' },
-      protocol: { id: 'MORPHO_BLUE', name: 'Morpho Blue' },
-      asset: { symbol: 'USDC', decimals: 6 },
-      network: { id: 'eip155:8453', name: 'Base' },
-      apy: {
-        baseRateDecimal: '0.04440914291661858',
-        baseBasisPoints: 444,
-        providerFee: { status: 'REPORTED', rateDecimal: '0', basisPoints: 0 },
-      },
-      tvl: {
-        sourceAmountUsdDecimal: '1477830502.194782',
-        amountUsdMinor: '147783050219',
-      },
-      exitLiquidity: {
-        sourceAmountUsdDecimal: '145826314.0535183',
-        amountUsdMinor: '14582631405',
-        interpretation: 'AVAILABLE_TO_BORROW_PROXY',
-      },
-      utilization: { rateDecimal: '0.901324059939928', basisPoints: 9013 },
-      availability: {
-        status: 'LISTED_ONLY',
-        providerListed: true,
-        depositsEnabled: 'NOT_VERIFIED',
-        withdrawalsEnabled: 'NOT_VERIFIED',
-      },
-      provenance: {
-        sourceKind: 'API',
-        sourceReference: 'https://api.morpho.org/graphql',
-        payloadSha256: '5afd26e631dc47617a3c6e84d0e04e0ac286ef8f175997611aabe937849723b4',
-      },
-    });
+    expect(JSON.stringify(result)).not.toMatch(
+      /morpho|provider|protocol|market|opportunit|provenance|sourceReference|payloadSha256|normalizer|endpoint|graphql/iu,
+    );
     expect(Object.isFrozen(result)).toBe(true);
-    expect(Object.isFrozen(result.opportunities)).toBe(true);
-    expect(result.opportunities.every((opportunity) => Object.isFrozen(opportunity))).toBe(true);
+    expect(Object.isFrozen(result.snapshot)).toBe(true);
   });
 
-  it('labels age without disabling the permanently non-executable offline catalog', () => {
+  it('labels age without disabling the permanently non-executable offline snapshot', () => {
     const service = new LocalDemoYieldCatalogService();
 
     expect(service.read(new Date('2026-08-27T14:14:54.579Z')).snapshot.freshness).toBe('CURRENT');
@@ -100,7 +72,7 @@ describe('LocalDemoYieldCatalogService', () => {
     expect(() => service.read(new Date(Number.NaN))).toThrow(LocalDemoYieldCatalogUnavailableError);
   });
 
-  it('filters exact provider decimals and deterministically ranks base APY then opportunity ID', () => {
+  it('filters exact server-confidential observations and ranks deterministically', () => {
     const result = new LocalDemoYieldCatalogService().select(
       filters({
         assetSymbols: Object.freeze(['USDC']),
@@ -120,15 +92,16 @@ describe('LocalDemoYieldCatalogService', () => {
     expect(result.selectedOpportunities).toEqual(result.matchedOpportunities);
   });
 
-  it('fails closed for no matches and malformed internal filter constraints', () => {
+  it('fails closed for no internal matches and malformed internal constraints', () => {
     const service = new LocalDemoYieldCatalogService();
+    const providerId = LOCAL_DEMO_YIELD_PROVIDER_IDS[0];
 
     expect(() => service.select(filters({ minimumApyBasisPoints: 10_000 }))).toThrow(
       LocalDemoNoMatchingYieldOpportunitiesError,
     );
     expect(() =>
       assertLocalDemoCustomYieldFilters(
-        filters({ providerIds: Object.freeze(['MORPHO', 'MORPHO'] as const) }),
+        filters({ providerIds: Object.freeze([providerId, providerId]) }),
       ),
     ).toThrow(TypeError);
   });

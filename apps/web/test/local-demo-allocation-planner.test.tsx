@@ -8,7 +8,12 @@ import type {
   LocalDemoAllocationSelectionInput,
   LocalDemoYieldCatalog,
 } from '../lib/local-demo/local-demo-yield';
-import { BALANCED_PREVIEW, LOCAL_DEMO_YIELD_CATALOG } from './local-demo-yield.fixtures';
+import {
+  BALANCED_PREVIEW,
+  LOCAL_DEMO_YIELD_CATALOG,
+  MORE_LIQUID_PREVIEW,
+  MORE_YIELD_PREVIEW,
+} from './local-demo-yield.fixtures';
 
 function clientWith(options: {
   readonly catalog?: LocalDemoYieldCatalog;
@@ -29,125 +34,173 @@ function clientWith(options: {
   };
 }
 
+function expectProviderPrivate(container: HTMLElement): void {
+  const visibleAndAccessibleText = container.textContent ?? '';
+  expect(visibleAndAccessibleText).not.toMatch(
+    /morpho|ethereum|\bbase\b|eip155:|api\.morpho|cbBTC|WETH|USD3|0x[0-9a-f]{40}/iu,
+  );
+}
+
 afterEach(() => cleanup());
 
 describe('LocalDemoAllocationPlanner', () => {
-  it('shows provider opportunities but no execution-cost treatment before a selection', async () => {
+  it('shows only three product-owned plans and no fee amount before a selection', async () => {
     const harness = clientWith({});
-    render(<LocalDemoAllocationPlanner client={harness.client} />);
+    const rendered = render(<LocalDemoAllocationPlanner client={harness.client} />);
 
     expect(
-      await screen.findByRole('heading', { name: 'Observed Morpho markets' }),
+      await screen.findByRole('heading', { name: 'Crypto Lending yield plans' }),
     ).toBeInTheDocument();
-    expect(screen.getAllByText(/Morpho Blue/u)).toHaveLength(3);
-    expect(screen.getByText(/app makes no live provider request/u)).toBeInTheDocument();
-    expect(screen.getByText(/risk has not been assessed/u)).toBeInTheDocument();
-    expect(screen.getByText('Snapshot current')).toBeInTheDocument();
-    expect(
-      screen
-        .getAllByText('Aug 26, 2026, 2:14 PM UTC')
-        .find(
-          (element) =>
-            element.getAttribute('datetime') === LOCAL_DEMO_YIELD_CATALOG.snapshot.capturedAt,
-        ),
-    ).toBeDefined();
-    expect(
-      screen.getAllByLabelText('5.210504022183349 percent observed base annual percentage yield')
-        .length,
-    ).toBeGreaterThan(0);
-    expect(
-      screen.getByLabelText('1.7398639912427037 percent observed reward annual percentage rate'),
-    ).toBeInTheDocument();
-    expect(
-      screen.getAllByText(/deposit and withdrawal status not verified/u).length,
-    ).toBeGreaterThan(0);
-    expect(screen.getAllByText('Available-to-borrow proxy')).toHaveLength(3);
+    expect(screen.getByText('Rates current')).toBeInTheDocument();
+    expect(screen.getByText(/make no live external request/u)).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Allocation plans' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /More liquid/u })).toBeEnabled();
     expect(screen.getByRole('button', { name: /Balanced blend/u })).toBeEnabled();
     expect(screen.getByRole('button', { name: /More yield/u })).toBeEnabled();
-    expect(screen.queryByText('Custom yield')).not.toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /Preview plan/u })).toHaveLength(3);
+    expect(screen.queryByText(/Custom yield/u)).not.toBeInTheDocument();
     expect(
-      screen.queryByRole('heading', { name: 'Execution cost treatment' }),
+      screen.queryByRole('heading', { name: 'Estimated one-time fees' }),
     ).not.toBeInTheDocument();
-    expect(screen.queryByText('Projection assumes yield from')).not.toBeInTheDocument();
+    expect(screen.queryByText(/\$\d/u)).not.toBeInTheDocument();
+    expect(screen.queryByText('First positive day after estimated fees')).not.toBeInTheDocument();
+    expectProviderPrivate(rendered.container);
     expect(harness.previewAllocation).not.toHaveBeenCalled();
   });
 
-  it('reveals exact position yield and honest local execution-cost treatment after selection', async () => {
+  it('shows aggregate variable fees and the exact first-positive day only after selection', async () => {
     const harness = clientWith({});
-    render(<LocalDemoAllocationPlanner client={harness.client} />);
-    const balanced = await screen.findByRole('button', { name: /Balanced blend/u });
+    const rendered = render(<LocalDemoAllocationPlanner client={harness.client} />);
 
-    fireEvent.click(balanced);
+    fireEvent.click(await screen.findByRole('button', { name: /Balanced blend/u }));
 
     expect(harness.previewAllocation).toHaveBeenCalledWith(
       { kind: 'PRESET', presetId: 'BALANCED' },
       expect.any(AbortSignal),
     );
-    const feeHeading = await screen.findByRole('heading', {
-      name: 'Execution cost treatment',
-    });
-    expect(feeHeading).toBeInTheDocument();
+    const feeHeading = await screen.findByRole('heading', { name: 'Estimated one-time fees' });
+    const feeSection = feeHeading.closest('section');
+    expect(feeSection).not.toBeNull();
+    expect(within(feeSection!).getByText('Estimated network costs')).toBeInTheDocument();
+    expect(within(feeSection!).getByLabelText('4 US dollars and 38 cents')).toHaveTextContent(
+      '$4.38',
+    );
+    expect(within(feeSection!).getByText('Estimated conversion costs')).toBeInTheDocument();
+    expect(within(feeSection!).getByLabelText('0 US dollars')).toHaveTextContent('$0.00');
+    expect(within(feeSection!).getByText('Estimated market impact')).toBeInTheDocument();
+    expect(within(feeSection!).getByLabelText('1 US dollar and 15 cents')).toHaveTextContent(
+      '$1.15',
+    );
+    expect(within(feeSection!).getByText('Estimated routing fee')).toBeInTheDocument();
+    expect(within(feeSection!).getByLabelText('0 US dollars and 60 cents')).toHaveTextContent(
+      '$0.60',
+    );
+    expect(within(feeSection!).getByLabelText('6 US dollars and 13 cents')).toHaveTextContent(
+      '$6.13',
+    );
+    expect(within(feeSection!).getByText(/Actual local operation: \$0/u)).toBeInTheDocument();
     expect(
-      screen.getByText('No user-authorized financial transaction was created.'),
+      within(feeSection!).getByText(/Public execution costs:\s*unquoted/iu),
     ).toBeInTheDocument();
-    expect(screen.getByText(/historical snapshot observations/u)).toBeInTheDocument();
-    expect(screen.getByText(/public execution costs have not been quoted/u)).toBeInTheDocument();
-    expect(screen.getByText(/modeled execution cost is.*\$0/u)).toBeInTheDocument();
+
     const projection = screen
-      .getByRole('heading', { name: 'Illustrative yield projection' })
+      .getByRole('heading', { name: 'Illustrative yield result' })
       .closest('section');
     expect(projection).not.toBeNull();
     expect(
-      within(projection!).getByLabelText('3.28 percent base annual percentage yield'),
-    ).toBeInTheDocument();
-    expect(within(projection!).getByLabelText('361 US dollars and 32 cents')).toHaveTextContent(
-      '$361.32',
+      within(projection!).getByLabelText('3.28 percent estimated annual percentage yield'),
+    ).toHaveTextContent('3.28%');
+    expect(within(projection!).getByLabelText('229 US dollars and 73 cents')).toHaveTextContent(
+      '$229.73',
+    );
+    expect(within(projection!).getByLabelText('223 US dollars and 60 cents')).toHaveTextContent(
+      '$223.60',
     );
     expect(
-      within(projection!).getByLabelText('Projection assumes base yield from day 1'),
-    ).toHaveTextContent('Day 1');
-    expect(within(projection!).getByText('Not quoted')).toBeInTheDocument();
-    const costSection = feeHeading.closest('section');
-    expect(within(costSection!).getByLabelText('0 US dollars')).toHaveTextContent('$0.00');
-    expect(screen.queryByText('Day 79')).not.toBeInTheDocument();
-    expect(
-      screen.getByText(/Target share: 23\.34% of gross capital \(rounded\)/u),
-    ).toBeInTheDocument();
-    expect(screen.getByText(/1.73% reward APR excluded/u)).toBeInTheDocument();
+      within(projection!).getByLabelText(
+        'First positive whole-cent yield after estimated fees is day 10',
+      ),
+    ).toHaveTextContent('Day 10');
+    expect(BALANCED_PREVIEW.yieldProjection.firstPositiveDayAfterFees.day).toBe(
+      Math.ceil((614 * 365) / 22_973),
+    );
+    expect(screen.getByText('Liquid reserve', { selector: 'strong' })).toBeInTheDocument();
+    expect(screen.getByText('Managed yield', { selector: 'strong' })).toBeInTheDocument();
+    expect(screen.getByText(/preview ready.*\$6\.13/iu)).toBeInTheDocument();
+    expectProviderPrivate(rendered.container);
   });
 
-  it('does not claim a Day 1 dollar yield below whole-cent annual precision', async () => {
-    const tinyPreview: LocalDemoAllocationPreview = Object.freeze({
+  it('changes the fee estimate with the selected product plan', async () => {
+    const harness = clientWith({
+      previewAllocation: async (selection) =>
+        selection.presetId === 'MORE_LIQUID' ? MORE_LIQUID_PREVIEW : MORE_YIELD_PREVIEW,
+    });
+    render(<LocalDemoAllocationPlanner client={harness.client} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /More liquid/u }));
+    let feeSection = (
+      await screen.findByRole('heading', { name: 'Estimated one-time fees' })
+    ).closest('section');
+    expect(within(feeSection!).getByLabelText('4 US dollars and 52 cents')).toHaveTextContent(
+      '$4.52',
+    );
+    expect(screen.getByLabelText(/first positive whole-cent yield.*day 13/iu)).toHaveTextContent(
+      'Day 13',
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /More yield/u }));
+    await waitFor(() => expect(harness.previewAllocation).toHaveBeenCalledTimes(2));
+    feeSection = (await screen.findByRole('heading', { name: 'Estimated one-time fees' })).closest(
+      'section',
+    );
+    expect(within(feeSection!).getByLabelText('6 US dollars and 94 cents')).toHaveTextContent(
+      '$6.94',
+    );
+    expect(screen.getByLabelText(/first positive whole-cent yield.*day 10/iu)).toHaveTextContent(
+      'Day 10',
+    );
+  });
+
+  it('renders explicit no-yield and beyond-horizon first-positive states', async () => {
+    const noYield: LocalDemoAllocationPreview = Object.freeze({
       ...BALANCED_PREVIEW,
-      grossCapitalUsdMinor: '1',
-      allocations: Object.freeze(
-        BALANCED_PREVIEW.allocations.map((allocation, index) =>
-          Object.freeze({
-            ...allocation,
-            amountUsdMinor: ['0', '1', '0', '0'][index]!,
-          }),
-        ),
-      ),
-      capitalIncludedInProjectionUsdMinor: '1',
       yieldProjection: Object.freeze({
         ...BALANCED_PREVIEW.yieldProjection,
-        effectiveApyBasisPoints: 521,
+        effectiveApyBasisPoints: 0,
         projectedAnnualYieldUsdMinor: '0',
+        projectedAnnualYieldAfterFeesUsdMinor: '-613',
+        firstPositiveDayAfterFees: Object.freeze({
+          ...BALANCED_PREVIEW.yieldProjection.firstPositiveDayAfterFees,
+          status: 'NO_PROJECTED_YIELD',
+          day: null,
+        }),
       }),
     });
-    const harness = clientWith({ previewAllocation: async () => tinyPreview });
+    const beyondHorizon: LocalDemoAllocationPreview = Object.freeze({
+      ...MORE_LIQUID_PREVIEW,
+      yieldProjection: Object.freeze({
+        ...MORE_LIQUID_PREVIEW.yieldProjection,
+        effectiveApyBasisPoints: 1,
+        projectedAnnualYieldUsdMinor: '100',
+        projectedAnnualYieldAfterFeesUsdMinor: '-352',
+        firstPositiveDayAfterFees: Object.freeze({
+          ...MORE_LIQUID_PREVIEW.yieldProjection.firstPositiveDayAfterFees,
+          status: 'NOT_RECOVERED_WITHIN_HORIZON',
+          day: null,
+        }),
+      }),
+    });
+    const previews = [noYield, beyondHorizon];
+    const harness = clientWith({ previewAllocation: async () => previews.shift()! });
     render(<LocalDemoAllocationPlanner client={harness.client} />);
 
     fireEvent.click(await screen.findByRole('button', { name: /Balanced blend/u }));
-
-    expect(await screen.findByText('Below $0.01/year')).toBeInTheDocument();
-    expect(
-      screen.queryByLabelText('Projection assumes base yield from day 1'),
-    ).not.toBeInTheDocument();
+    expect(await screen.findByText('No projected yield')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /More liquid/u }));
+    expect(await screen.findByText('Not within 1 year')).toBeInTheDocument();
   });
 
-  it('retries an unavailable local snapshot in place', async () => {
+  it('retries an unavailable managed rate set in place', async () => {
     const readYieldCatalog = vi
       .fn()
       .mockRejectedValueOnce(new LocalDemoApiError('UNAVAILABLE'))
@@ -155,18 +208,16 @@ describe('LocalDemoAllocationPlanner', () => {
     const harness = clientWith({ readYieldCatalog });
     render(<LocalDemoAllocationPlanner client={harness.client} />);
 
-    expect(
-      await screen.findByText(/local provider snapshot could not be validated/u),
-    ).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Retry snapshot' }));
+    expect(await screen.findByText(/managed rate set could not be validated/u)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry rates' }));
 
     expect(
-      await screen.findByRole('heading', { name: 'Observed Morpho markets' }),
+      await screen.findByRole('heading', { name: 'Crypto Lending yield plans' }),
     ).toBeInTheDocument();
     expect(harness.readYieldCatalog).toHaveBeenCalledTimes(2);
   });
 
-  it('automatically labels an open current snapshot stale at its boundary', async () => {
+  it('labels rates stale at their boundary and reconciles a stale preview', async () => {
     const now = Date.now();
     const catalog: LocalDemoYieldCatalog = Object.freeze({
       ...LOCAL_DEMO_YIELD_CATALOG,
@@ -177,29 +228,24 @@ describe('LocalDemoAllocationPlanner', () => {
         freshness: 'CURRENT',
       }),
     });
-    const harness = clientWith({ catalog });
-    render(<LocalDemoAllocationPlanner client={harness.client} />);
-
-    expect(await screen.findByText('Snapshot current')).toBeInTheDocument();
-    expect(
-      await screen.findByText(/Archived snapshot.*stale/u, {}, { timeout: 1_000 }),
-    ).toBeInTheDocument();
-  });
-
-  it('reconciles a current catalog to a stale preview while keeping it non-executable', async () => {
-    const stalePreview: LocalDemoAllocationPreview = Object.freeze({
+    const preview: LocalDemoAllocationPreview = Object.freeze({
       ...BALANCED_PREVIEW,
-      catalog: Object.freeze({ ...BALANCED_PREVIEW.catalog, freshness: 'STALE' }),
+      rateSnapshot: Object.freeze({
+        ...BALANCED_PREVIEW.rateSnapshot,
+        capturedAt: catalog.snapshot.capturedAt,
+        staleAfter: catalog.snapshot.staleAfter,
+        freshness: 'STALE',
+      }),
     });
-    const harness = clientWith({
-      previewAllocation: async () => stalePreview,
-    });
+    const harness = clientWith({ catalog, previewAllocation: async () => preview });
     render(<LocalDemoAllocationPlanner client={harness.client} />);
 
-    expect(await screen.findByText('Snapshot current')).toBeInTheDocument();
+    expect(await screen.findByText('Rates current')).toBeInTheDocument();
+    expect(
+      await screen.findByText(/Archived rates.*stale/u, {}, { timeout: 1_000 }),
+    ).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /Balanced blend/u }));
-    expect(await screen.findByText('Archived snapshot · stale')).toBeInTheDocument();
-    expect(await screen.findByText(/archived snapshot is stale/u)).toBeInTheDocument();
+    expect(await screen.findByText(/managed rate set is stale/u)).toBeInTheDocument();
     expect(
       screen.getByText('No user-authorized financial transaction was created.'),
     ).toBeInTheDocument();

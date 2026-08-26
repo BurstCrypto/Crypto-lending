@@ -54,6 +54,26 @@ const PROJECTIONS: Readonly<Record<LocalDemoWalletNamespace, LocalDemoWalletProj
 
 const PORTFOLIO = LOCAL_DEMO_CHAIN_PORTFOLIO_PAYLOAD;
 
+function portfolioFor(wallets: readonly LocalDemoWalletProjection[]) {
+  const registeredNamespaces = new Set(wallets.map(({ namespace }) => namespace));
+  const includedWallets = PORTFOLIO.wallets.filter(({ namespace }) =>
+    registeredNamespaces.has(namespace),
+  );
+  const total = includedWallets.reduce(
+    (sum, wallet) => sum + BigInt(wallet.portfolioValueUsdMinor),
+    0n,
+  );
+  return {
+    ...PORTFOLIO,
+    portfolioValueUsdMinor: total.toString(),
+    buyingPower: {
+      ...PORTFOLIO.buyingPower,
+      amountUsdMinor: total.toString(),
+    },
+    wallets: includedWallets,
+  };
+}
+
 interface FakeClientHarness {
   readonly client: LocalDemoApiClient;
   readonly disconnectWallet: ReturnType<typeof vi.fn>;
@@ -80,7 +100,7 @@ function fakeClient(initial: readonly LocalDemoWalletProjection[] = []): FakeCli
     const index = registered.findIndex((wallet) => wallet.connectionId === connectionId);
     if (index >= 0) registered.splice(index, 1);
   });
-  const readPortfolio = vi.fn(async () => PORTFOLIO);
+  const readPortfolio = vi.fn(async () => portfolioFor(registered));
   const readYieldCatalog = vi.fn(async () => LOCAL_DEMO_YIELD_CATALOG);
   const previewAllocation = vi.fn(async () => MORE_LIQUID_PREVIEW);
   return {
@@ -188,7 +208,7 @@ describe('authenticated local demo portfolio journey', () => {
     expect(restoredHarness.readPortfolio).toHaveBeenCalledTimes(1);
   });
 
-  it('offers provider snapshot blends only when ready and defers cost treatment until selection', async () => {
+  it('offers private product plans only when ready and defers every fee amount until selection', async () => {
     const harness = fakeClient();
     experience(harness);
 
@@ -205,28 +225,30 @@ describe('authenticated local demo portfolio journey', () => {
     expect(allocationPlanner).not.toBeNull();
     expect(
       await within(allocationPlanner!).findByRole('heading', {
-        name: 'Observed Morpho markets',
+        name: 'Crypto Lending yield plans',
       }),
     ).toBeInTheDocument();
     expect(
-      within(allocationPlanner!).getAllByLabelText(
-        '5.210504022183349 percent observed base annual percentage yield',
-      ).length,
-    ).toBeGreaterThan(0);
+      within(allocationPlanner!).getAllByRole('button', { name: /Preview plan/u }),
+    ).toHaveLength(3);
+    expect(within(allocationPlanner!).queryByText(/\$\d/u)).not.toBeInTheDocument();
     expect(
-      within(allocationPlanner!).queryByText('Execution cost treatment'),
+      within(allocationPlanner!).queryByText('Estimated one-time fees'),
     ).not.toBeInTheDocument();
     expect(
-      within(allocationPlanner!).queryByText('Projection assumes yield from'),
+      within(allocationPlanner!).queryByText('First positive day after estimated fees'),
     ).not.toBeInTheDocument();
+    expect(allocationPlanner!.textContent).not.toMatch(
+      /morpho|ethereum|\bbase\b|eip155:|api\.morpho|cbBTC|WETH|USD3|0x[0-9a-f]{40}/iu,
+    );
     expect(screen.queryByText('Why buying power is lower')).not.toBeInTheDocument();
     const buyingPowerCard = screen.getByText('Available buying power').closest('article');
-    expect(within(buyingPowerCard!).getByLabelText('11,000 US dollars')).toHaveTextContent(
-      '$11,000.00',
+    expect(within(buyingPowerCard!).getByLabelText('7,000 US dollars')).toHaveTextContent(
+      '$7,000.00',
     );
 
     fireEvent.click(screen.getByRole('button', { name: /More liquid/u }));
-    const costHeading = await screen.findByRole('heading', { name: 'Execution cost treatment' });
+    const costHeading = await screen.findByRole('heading', { name: 'Estimated one-time fees' });
     expect(costHeading).toBeInTheDocument();
     expect(harness.previewAllocation).toHaveBeenCalledWith(
       { kind: 'PRESET', presetId: 'MORE_LIQUID' },
@@ -236,25 +258,39 @@ describe('authenticated local demo portfolio journey', () => {
       screen.getByText('No user-authorized financial transaction was created.'),
     ).toBeInTheDocument();
     const reconciliation = screen.getByText('Full available capital').closest('dl');
-    expect(within(reconciliation!).getAllByLabelText('11,000 US dollars')).toHaveLength(2);
+    expect(within(reconciliation!).getByLabelText('7,000 US dollars')).toHaveTextContent(
+      '$7,000.00',
+    );
     expect(
-      within(costHeading.closest('section')!).getByLabelText('0 US dollars'),
-    ).toHaveTextContent('$0.00');
+      within(reconciliation!).getByLabelText('6,995 US dollars and 48 cents'),
+    ).toHaveTextContent('$6,995.48');
+    const costSection = costHeading.closest('section');
+    expect(within(costSection!).getByLabelText('4 US dollars and 52 cents')).toHaveTextContent(
+      '$4.52',
+    );
+    expect(within(costSection!).getByText(/Actual local operation: \$0/u)).toBeInTheDocument();
+    expect(
+      within(costSection!).getByText(/Public execution costs:\s*unquoted/iu),
+    ).toBeInTheDocument();
     expect(screen.getByText('Capital included in projection')).toBeInTheDocument();
     const yieldProjection = screen
-      .getByRole('heading', { name: 'Illustrative yield projection' })
+      .getByRole('heading', { name: 'Illustrative yield result' })
       .closest('section');
     expect(
-      within(yieldProjection!).getByLabelText('1.87 percent base annual percentage yield'),
+      within(yieldProjection!).getByLabelText('1.87 percent estimated annual percentage yield'),
     ).toHaveTextContent('1.87%');
     expect(
-      within(yieldProjection!).getByLabelText('206 US dollars and 46 cents'),
-    ).toHaveTextContent('$206.46');
+      within(yieldProjection!).getByLabelText('131 US dollars and 30 cents'),
+    ).toHaveTextContent('$131.30');
     expect(
-      within(yieldProjection!).getByLabelText('Projection assumes base yield from day 1'),
-    ).toHaveTextContent('Day 1');
-    expect(within(yieldProjection!).getByText('Not quoted')).toBeInTheDocument();
-    expect(within(yieldProjection!).queryByText('Day 79')).not.toBeInTheDocument();
+      within(yieldProjection!).getByLabelText('126 US dollars and 78 cents'),
+    ).toHaveTextContent('$126.78');
+    expect(
+      within(yieldProjection!).getByLabelText(
+        'First positive whole-cent yield after estimated fees is day 13',
+      ),
+    ).toHaveTextContent('Day 13');
+    expect(allocationPlanner!.textContent).not.toMatch(/morpho|api\.morpho|eip155:/iu);
   });
 
   it('isolates persisted roster metadata and capacity across authenticated account changes', async () => {

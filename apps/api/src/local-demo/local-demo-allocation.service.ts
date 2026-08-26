@@ -2,11 +2,14 @@ import { Injectable } from '@nestjs/common';
 
 import type { AccountId } from '../accounts/domain/account-profile';
 import type { JobCorrelationContext } from '../infrastructure/outbox/job-envelope';
-import { LocalDemoPortfolioService } from './local-demo-portfolio.service';
+import {
+  LocalDemoPortfolioService,
+  type LocalDemoPortfolioResponse,
+} from './local-demo-portfolio.service';
 import {
   LocalDemoYieldCatalogService,
-  type LocalDemoCustomYieldFilters,
   type LocalDemoYieldCatalogFreshness,
+  type LocalDemoYieldNetworkId,
   type LocalDemoYieldOpportunitySummary,
 } from './local-demo-yield-catalog.service';
 
@@ -18,23 +21,34 @@ export const LOCAL_DEMO_ALLOCATION_PRESET_IDS = Object.freeze([
 
 export type LocalDemoAllocationPresetId = (typeof LOCAL_DEMO_ALLOCATION_PRESET_IDS)[number];
 
-export const LOCAL_DEMO_ALLOCATION_SELECTION_KINDS = Object.freeze(['PRESET', 'CUSTOM'] as const);
-export const LOCAL_DEMO_MAX_LIQUID_RESERVE_BASIS_POINTS = 9_900 as const;
+export type LocalDemoAllocationSelection = Readonly<{
+  kind: 'PRESET';
+  presetId: LocalDemoAllocationPresetId;
+}>;
 
-export type LocalDemoAllocationSelection =
-  | Readonly<{
-      kind: 'PRESET';
-      presetId: LocalDemoAllocationPresetId;
-    }>
-  | Readonly<{
-      kind: 'CUSTOM';
-      liquidReserveBasisPoints: number;
-      filters: LocalDemoCustomYieldFilters;
-    }>;
+export const LOCAL_DEMO_YIELD_PROJECTION_SOURCE = 'MANAGED_RATE_SNAPSHOT' as const;
+export const LOCAL_DEMO_YIELD_CALCULATION_METHOD =
+  'INTERNAL_POSITION_WEIGHTED_EXACT_BASE_APY' as const;
+export const LOCAL_DEMO_EXECUTION_COST_MODEL = 'LOCAL_DEMO_ALLOCATION_COST_V1' as const;
+export const LOCAL_DEMO_BREAK_EVEN_CALCULATION_METHOD =
+  'FIRST_WHOLE_DAY_VISIBLE_YIELD_EXCEEDS_ESTIMATED_FEES' as const;
+export const LOCAL_DEMO_BREAK_EVEN_MODEL_HORIZON_DAYS = 365 as const;
 
-export const LOCAL_DEMO_YIELD_PROJECTION_SOURCE = 'MORPHO_PUBLIC_API_SNAPSHOT' as const;
-export const LOCAL_DEMO_YIELD_CALCULATION_METHOD = 'POSITION_WEIGHTED_EXACT_BASE_APY' as const;
-export const LOCAL_DEMO_EXECUTION_COST_TREATMENT = 'LOCAL_DEMO_ZERO_NO_EXECUTION' as const;
+export const LOCAL_DEMO_EXECUTION_COST_COMPONENTS = Object.freeze([
+  'NETWORK',
+  'CONVERSION',
+  'MARKET_IMPACT',
+  'ROUTING',
+] as const);
+
+export type LocalDemoExecutionCostComponentCode =
+  (typeof LOCAL_DEMO_EXECUTION_COST_COMPONENTS)[number];
+
+type LocalDemoExecutionCostBasis =
+  | 'NETWORK_ACTIVATION_AND_POSITION_VOLUME'
+  | 'TWELVE_BPS_OF_REQUIRED_CONVERSION'
+  | 'POSITION_SIZE_AND_UTILIZATION'
+  | 'TWENTY_CENTS_PER_ACTIVE_ALLOCATION';
 
 interface AllocationPresetDefinition {
   readonly id: LocalDemoAllocationPresetId;
@@ -48,60 +62,93 @@ const PRESETS: Readonly<Record<LocalDemoAllocationPresetId, AllocationPresetDefi
     MORE_LIQUID: Object.freeze({
       id: 'MORE_LIQUID',
       label: 'More liquid',
-      description: 'Keep 60% readily available and divide the remainder across snapshot markets.',
+      description:
+        'Keep 60% readily available and allocate the remainder to the managed yield strategy.',
       liquidReserveBasisPoints: 6_000,
     }),
     BALANCED: Object.freeze({
       id: 'BALANCED',
       label: 'Balanced blend',
-      description: 'Keep 30% readily available and divide the remainder across snapshot markets.',
+      description:
+        'Keep 30% readily available and allocate the remainder to the managed yield strategy.',
       liquidReserveBasisPoints: 3_000,
     }),
     MORE_YIELD: Object.freeze({
       id: 'MORE_YIELD',
       label: 'More yield',
-      description: 'Keep 15% readily available and divide the remainder across snapshot markets.',
+      description:
+        'Keep 15% readily available and allocate the remainder to the managed yield strategy.',
       liquidReserveBasisPoints: 1_500,
     }),
   });
+
+const NETWORK_ACTIVATION_COST_USD_MINOR: Readonly<Record<LocalDemoYieldNetworkId, bigint>> =
+  Object.freeze({
+    'eip155:1': 150n,
+    'eip155:8453': 25n,
+  });
+const NETWORK_POSITION_VOLUME_BASIS_POINTS: Readonly<Record<LocalDemoYieldNetworkId, number>> =
+  Object.freeze({
+    'eip155:1': 8,
+    'eip155:8453': 4,
+  });
+const CONVERSION_COST_BASIS_POINTS = 12;
+const ROUTING_COST_PER_ACTIVE_ALLOCATION_USD_MINOR = 20n;
+const MARKET_IMPACT_BASE_BASIS_POINTS = 1;
+const MARKET_IMPACT_UTILIZATION_THRESHOLD_BASIS_POINTS = 8_500;
+const MARKET_IMPACT_UTILIZATION_STEP_BASIS_POINTS = 500;
 
 export interface LocalDemoAllocationPreviewResponse {
   readonly use: 'LOCAL_DEMO_ESTIMATE_ONLY';
   readonly mayAuthorizeFinancialAction: false;
   readonly selection: Readonly<{
-    kind: 'PRESET' | 'CUSTOM';
-    presetId: LocalDemoAllocationPresetId | null;
+    kind: 'PRESET';
+    presetId: LocalDemoAllocationPresetId;
     label: string;
     description: string;
     liquidReserveBasisPoints: number;
-    filters: LocalDemoCustomYieldFilters | null;
   }>;
-  readonly catalog: Readonly<{
-    snapshotId: string;
+  readonly rateSnapshot: Readonly<{
+    id: string;
     capturedAt: string;
     staleAfter: string;
     freshness: LocalDemoYieldCatalogFreshness;
     staleBehavior: 'LABEL_STALE_KEEP_NON_EXECUTABLE';
     riskClassificationAvailable: false;
     riskClassification: 'NOT_ASSESSED';
-    matchedOpportunityCount: number;
-    selectedOpportunityCount: number;
   }>;
   readonly grossCapitalUsdMinor: string;
   readonly allocations: readonly Readonly<{
-    bucket: 'LIQUID_RESERVE' | 'YIELD_OPPORTUNITY';
-    allocationId: string;
-    label: string;
+    bucket: 'LIQUID_RESERVE' | 'MANAGED_YIELD';
+    allocationId: 'LIQUID_RESERVE' | 'MANAGED_YIELD';
+    label: 'Liquid reserve' | 'Managed yield';
     percentageBasisPoints: number;
-    baseApyBasisPoints: number;
-    baseApyRateDecimal: string;
     amountUsdMinor: string;
-    opportunity: LocalDemoYieldOpportunitySummary | null;
   }>[];
   readonly executionCost: Readonly<{
-    treatment: typeof LOCAL_DEMO_EXECUTION_COST_TREATMENT;
-    modeledLocalAmountUsdMinor: '0';
-    publicExecutionCostStatus: 'UNQUOTED';
+    actualLocalOperation: Readonly<{
+      status: 'NO_EXECUTION';
+      amountUsdMinor: '0';
+    }>;
+    modeledScenario: Readonly<{
+      status: 'AVAILABLE';
+      modelId: typeof LOCAL_DEMO_EXECUTION_COST_MODEL;
+      isQuote: false;
+      costBasisCapitalUsdMinor: string;
+      fundingTreatment: 'DEDUCT_FROM_GROSS_BEFORE_PROJECTION';
+      rounding: 'CEIL_EACH_VARIABLE_COMPONENT_TO_USD_MINOR';
+      components: readonly Readonly<{
+        code: LocalDemoExecutionCostComponentCode;
+        label: string;
+        calculationBasis: LocalDemoExecutionCostBasis;
+        amountUsdMinor: string;
+      }>[];
+      totalUsdMinor: string;
+    }>;
+    publicExecution: Readonly<{
+      status: 'UNQUOTED';
+      amountUsdMinor: null;
+    }>;
   }>;
   readonly capitalIncludedInProjectionUsdMinor: string;
   readonly yieldProjection: Readonly<{
@@ -109,14 +156,33 @@ export interface LocalDemoAllocationPreviewResponse {
     calculationMethod: typeof LOCAL_DEMO_YIELD_CALCULATION_METHOD;
     effectiveApyBasisPoints: number;
     projectedAnnualYieldUsdMinor: string;
+    projectedAnnualYieldAfterFeesUsdMinor: string;
+    firstPositiveDayAfterFees: Readonly<{
+      calculationMethod: typeof LOCAL_DEMO_BREAK_EVEN_CALCULATION_METHOD;
+      status: 'RECOVERED_WITHIN_HORIZON' | 'NO_PROJECTED_YIELD' | 'NOT_RECOVERED_WITHIN_HORIZON';
+      day: number | null;
+      modelHorizonDays: typeof LOCAL_DEMO_BREAK_EVEN_MODEL_HORIZON_DAYS;
+    }>;
   }>;
   readonly asOf: string;
 }
 
+interface InternalYieldPosition {
+  readonly opportunity: LocalDemoYieldOpportunitySummary;
+  readonly amountUsdMinor: bigint;
+}
+
+interface ExactYieldProjection {
+  readonly annualYieldNumerator: bigint;
+  readonly denominator: bigint;
+  readonly effectiveApyBasisPoints: number;
+  readonly projectedAnnualYield: bigint;
+}
+
 /**
- * Projects an authenticated portfolio against a checked-in Morpho observation.
- * It performs no live provider request and creates no user-authorized financial
- * operation, quote, reservation, persistence record, or public-chain transaction.
+ * Projects an authenticated portfolio against server-only provider observations.
+ * Browser responses expose only product-owned aggregate strategy data. The local
+ * scenario performs no live request and creates no quote or financial action.
  */
 @Injectable()
 export class LocalDemoAllocationService {
@@ -133,172 +199,299 @@ export class LocalDemoAllocationService {
     const portfolio = await this.portfolio.read(accountId, correlation);
     const grossCapital = BigInt(portfolio.buyingPower.amountUsdMinor);
     const selection = selectionDefinition(requestedSelection);
-    const catalogSelection = this.yieldCatalog.select(selection.filters);
+    const catalogSelection = this.yieldCatalog.select(null);
     const opportunities = catalogSelection.selectedOpportunities;
-    const yieldWeights = divideEvenly(
-      10_000 - selection.liquidReserveBasisPoints,
-      opportunities.length,
-    );
-    const [liquidReserveCapital, nonReserveCapital] = distribute(grossCapital, [
-      selection.liquidReserveBasisPoints,
-      10_000 - selection.liquidReserveBasisPoints,
-    ]);
-    if (liquidReserveCapital === undefined || nonReserveCapital === undefined) {
-      throw new TypeError('missing local demo capital bucket');
-    }
-    const allocationAmounts = Object.freeze([
-      liquidReserveCapital,
-      ...divideAmountEvenly(nonReserveCapital, opportunities.length),
-    ]);
-    const allocations: LocalDemoAllocationPreviewResponse['allocations'] = Object.freeze([
-      Object.freeze({
-        bucket: 'LIQUID_RESERVE' as const,
-        allocationId: 'LIQUID_RESERVE',
-        label: 'Liquid reserve',
-        percentageBasisPoints: selection.liquidReserveBasisPoints,
-        baseApyBasisPoints: 0,
-        baseApyRateDecimal: '0',
-        amountUsdMinor: requiredAmount(allocationAmounts, 0).toString(),
-        opportunity: null,
-      }),
-      ...opportunities.map((opportunity, index) =>
-        Object.freeze({
-          bucket: 'YIELD_OPPORTUNITY' as const,
-          allocationId: opportunity.opportunityId,
-          label: `${opportunity.asset.symbol} on ${opportunity.protocol.name} (${opportunity.network.name})`,
-          percentageBasisPoints: requiredNumber(yieldWeights, index),
-          baseApyBasisPoints: opportunity.apy.baseBasisPoints,
-          baseApyRateDecimal: opportunity.apy.baseRateDecimal,
-          amountUsdMinor: requiredAmount(allocationAmounts, index + 1).toString(),
-          opportunity,
-        }),
-      ),
-    ]);
 
-    // This preview creates no route or transaction, so it must not fabricate a
-    // production execution quote. Public execution costs remain unquoted.
-    const { effectiveApyBasisPoints, projectedAnnualYield } = calculateYieldProjection(
-      allocations,
+    const [, notionalManagedYieldCapital] = requiredCapitalBuckets(
       grossCapital,
+      selection.liquidReserveBasisPoints,
     );
+    const notionalPositions = positionsForCapital(opportunities, notionalManagedYieldCapital);
+    const executionCost = calculateExecutionCost(portfolio, notionalPositions, grossCapital);
+    const estimatedCost = BigInt(executionCost.modeledScenario.totalUsdMinor);
+    if (estimatedCost >= grossCapital) {
+      throw new TypeError('local demo modeled cost exhausts capital');
+    }
+
+    const capitalIncludedInProjection = grossCapital - estimatedCost;
+    const [liquidReserveCapital, managedYieldCapital] = requiredCapitalBuckets(
+      capitalIncludedInProjection,
+      selection.liquidReserveBasisPoints,
+    );
+    const projectedPositions = positionsForCapital(opportunities, managedYieldCapital);
+    const projection = calculateYieldProjection(projectedPositions, capitalIncludedInProjection);
+    const firstPositiveDayAfterFees = calculateFirstPositiveDayAfterFees(projection, estimatedCost);
 
     return Object.freeze({
       use: 'LOCAL_DEMO_ESTIMATE_ONLY',
       mayAuthorizeFinancialAction: false,
       selection,
-      catalog: Object.freeze({
-        snapshotId: catalogSelection.metadata.snapshotId,
+      rateSnapshot: Object.freeze({
+        id: catalogSelection.metadata.snapshotId,
         capturedAt: catalogSelection.metadata.capturedAt,
         staleAfter: catalogSelection.metadata.staleAfter,
         freshness: catalogSelection.metadata.freshness,
-        staleBehavior: 'LABEL_STALE_KEEP_NON_EXECUTABLE',
+        staleBehavior: catalogSelection.metadata.staleBehavior,
         riskClassificationAvailable: false,
-        riskClassification: 'NOT_ASSESSED',
-        matchedOpportunityCount: catalogSelection.matchedOpportunities.length,
-        selectedOpportunityCount: opportunities.length,
+        riskClassification: catalogSelection.metadata.riskClassification,
       }),
       grossCapitalUsdMinor: grossCapital.toString(),
-      allocations,
-      executionCost: Object.freeze({
-        treatment: LOCAL_DEMO_EXECUTION_COST_TREATMENT,
-        modeledLocalAmountUsdMinor: '0',
-        publicExecutionCostStatus: 'UNQUOTED',
-      }),
-      capitalIncludedInProjectionUsdMinor: grossCapital.toString(),
+      allocations: Object.freeze([
+        Object.freeze({
+          bucket: 'LIQUID_RESERVE' as const,
+          allocationId: 'LIQUID_RESERVE' as const,
+          label: 'Liquid reserve' as const,
+          percentageBasisPoints: selection.liquidReserveBasisPoints,
+          amountUsdMinor: liquidReserveCapital.toString(),
+        }),
+        Object.freeze({
+          bucket: 'MANAGED_YIELD' as const,
+          allocationId: 'MANAGED_YIELD' as const,
+          label: 'Managed yield' as const,
+          percentageBasisPoints: 10_000 - selection.liquidReserveBasisPoints,
+          amountUsdMinor: managedYieldCapital.toString(),
+        }),
+      ]),
+      executionCost,
+      capitalIncludedInProjectionUsdMinor: capitalIncludedInProjection.toString(),
       yieldProjection: Object.freeze({
         source: LOCAL_DEMO_YIELD_PROJECTION_SOURCE,
         calculationMethod: LOCAL_DEMO_YIELD_CALCULATION_METHOD,
-        effectiveApyBasisPoints,
-        projectedAnnualYieldUsdMinor: projectedAnnualYield.toString(),
+        effectiveApyBasisPoints: projection.effectiveApyBasisPoints,
+        projectedAnnualYieldUsdMinor: projection.projectedAnnualYield.toString(),
+        projectedAnnualYieldAfterFeesUsdMinor: (
+          projection.projectedAnnualYield - estimatedCost
+        ).toString(),
+        firstPositiveDayAfterFees,
       }),
       asOf: portfolio.asOf,
     });
   }
 }
 
-function copyFilters(filters: LocalDemoCustomYieldFilters): LocalDemoCustomYieldFilters {
-  return Object.freeze({
-    assetSymbols: Object.freeze([...filters.assetSymbols]),
-    providerIds: Object.freeze([...filters.providerIds]),
-    networkIds: Object.freeze([...filters.networkIds]),
-    minimumApyBasisPoints: filters.minimumApyBasisPoints,
-    minimumTvlUsdMinor: filters.minimumTvlUsdMinor,
-    minimumExitLiquidityUsdMinor: filters.minimumExitLiquidityUsdMinor,
-    maximumUtilizationBasisPoints: filters.maximumUtilizationBasisPoints,
-  });
-}
-
 function selectionDefinition(
   selection: LocalDemoAllocationSelection,
 ): LocalDemoAllocationPreviewResponse['selection'] {
-  if (selection.kind === 'PRESET') {
-    const preset = PRESETS[selection.presetId];
-    if (!preset) throw new TypeError('unsupported local demo allocation preset');
-    return Object.freeze({
-      kind: 'PRESET',
-      presetId: preset.id,
-      label: preset.label,
-      description: preset.description,
-      liquidReserveBasisPoints: preset.liquidReserveBasisPoints,
-      filters: null,
-    });
-  }
-  if (
-    selection.kind !== 'CUSTOM' ||
-    !Number.isSafeInteger(selection.liquidReserveBasisPoints) ||
-    selection.liquidReserveBasisPoints < 0 ||
-    selection.liquidReserveBasisPoints > LOCAL_DEMO_MAX_LIQUID_RESERVE_BASIS_POINTS
-  ) {
-    throw new TypeError('invalid local demo allocation selection');
-  }
+  if (selection.kind !== 'PRESET') throw new TypeError('invalid local demo allocation selection');
+  const preset = PRESETS[selection.presetId];
+  if (!preset) throw new TypeError('unsupported local demo allocation preset');
   return Object.freeze({
-    kind: 'CUSTOM',
-    presetId: null,
-    label: 'Custom yield filter',
-    description:
-      'Apply asset, provider, network, APY, TVL, liquidity, and utilization constraints.',
-    liquidReserveBasisPoints: selection.liquidReserveBasisPoints,
-    filters: copyFilters(selection.filters),
+    kind: 'PRESET',
+    presetId: preset.id,
+    label: preset.label,
+    description: preset.description,
+    liquidReserveBasisPoints: preset.liquidReserveBasisPoints,
   });
 }
 
-function divideEvenly(total: number, count: number): readonly number[] {
-  if (!Number.isSafeInteger(total) || total < 0 || !Number.isSafeInteger(count) || count < 1) {
-    throw new TypeError('invalid local demo allocation distribution');
-  }
-  const quotient = Math.floor(total / count);
-  const remainder = total % count;
+function positionsForCapital(
+  opportunities: readonly LocalDemoYieldOpportunitySummary[],
+  managedYieldCapital: bigint,
+): readonly InternalYieldPosition[] {
+  const amounts = divideAmountEvenly(managedYieldCapital, opportunities.length);
   return Object.freeze(
-    Array.from({ length: count }, (_, index) => quotient + (index < remainder ? 1 : 0)),
+    opportunities.map((opportunity, index) =>
+      Object.freeze({ opportunity, amountUsdMinor: requiredAmount(amounts, index) }),
+    ),
   );
 }
 
-function calculateYieldProjection(
-  allocations: LocalDemoAllocationPreviewResponse['allocations'],
+function calculateExecutionCost(
+  portfolio: LocalDemoPortfolioResponse,
+  positions: readonly InternalYieldPosition[],
   grossCapital: bigint,
-): Readonly<{ effectiveApyBasisPoints: number; projectedAnnualYield: bigint }> {
-  const rates = allocations.map(({ baseApyRateDecimal }) => decimalRatio(baseApyRateDecimal));
+): LocalDemoAllocationPreviewResponse['executionCost'] {
+  const activePositions = positions.filter(({ amountUsdMinor }) => amountUsdMinor > 0n);
+  const activeNetworks = new Set(activePositions.map(({ opportunity }) => opportunity.network.id));
+  const networkActivation = [...activeNetworks].reduce(
+    (total, networkId) => total + NETWORK_ACTIVATION_COST_USD_MINOR[networkId],
+    0n,
+  );
+  const networkVolume = activePositions.reduce(
+    (total, position) =>
+      total +
+      percentageCost(
+        position.amountUsdMinor,
+        NETWORK_POSITION_VOLUME_BASIS_POINTS[position.opportunity.network.id],
+      ),
+    0n,
+  );
+  const network = networkActivation + networkVolume;
+  const conversionAmount = requiredConversionAmount(portfolio, activePositions);
+  const conversion = percentageCost(conversionAmount, CONVERSION_COST_BASIS_POINTS);
+  const marketImpact = activePositions.reduce((total, position) => {
+    const utilizationExcess = Math.max(
+      0,
+      position.opportunity.utilization.basisPoints -
+        MARKET_IMPACT_UTILIZATION_THRESHOLD_BASIS_POINTS,
+    );
+    const utilizationPremium = Math.ceil(
+      utilizationExcess / MARKET_IMPACT_UTILIZATION_STEP_BASIS_POINTS,
+    );
+    return (
+      total +
+      percentageCost(position.amountUsdMinor, MARKET_IMPACT_BASE_BASIS_POINTS + utilizationPremium)
+    );
+  }, 0n);
+  const routing = BigInt(activePositions.length) * ROUTING_COST_PER_ACTIVE_ALLOCATION_USD_MINOR;
+  const components = Object.freeze([
+    costComponent(
+      'NETWORK',
+      'Estimated network costs',
+      'NETWORK_ACTIVATION_AND_POSITION_VOLUME',
+      network,
+    ),
+    costComponent(
+      'CONVERSION',
+      'Estimated conversion costs',
+      'TWELVE_BPS_OF_REQUIRED_CONVERSION',
+      conversion,
+    ),
+    costComponent(
+      'MARKET_IMPACT',
+      'Estimated market impact',
+      'POSITION_SIZE_AND_UTILIZATION',
+      marketImpact,
+    ),
+    costComponent(
+      'ROUTING',
+      'Estimated routing fee',
+      'TWENTY_CENTS_PER_ACTIVE_ALLOCATION',
+      routing,
+    ),
+  ]);
+  const total = components.reduce((sum, component) => sum + BigInt(component.amountUsdMinor), 0n);
+  return Object.freeze({
+    actualLocalOperation: Object.freeze({ status: 'NO_EXECUTION', amountUsdMinor: '0' }),
+    modeledScenario: Object.freeze({
+      status: 'AVAILABLE',
+      modelId: LOCAL_DEMO_EXECUTION_COST_MODEL,
+      isQuote: false,
+      costBasisCapitalUsdMinor: grossCapital.toString(),
+      fundingTreatment: 'DEDUCT_FROM_GROSS_BEFORE_PROJECTION',
+      rounding: 'CEIL_EACH_VARIABLE_COMPONENT_TO_USD_MINOR',
+      components,
+      totalUsdMinor: total.toString(),
+    }),
+    publicExecution: Object.freeze({ status: 'UNQUOTED', amountUsdMinor: null }),
+  });
+}
+
+function costComponent(
+  code: LocalDemoExecutionCostComponentCode,
+  label: string,
+  calculationBasis: LocalDemoExecutionCostBasis,
+  amountUsdMinor: bigint,
+): LocalDemoAllocationPreviewResponse['executionCost']['modeledScenario']['components'][number] {
+  return Object.freeze({
+    code,
+    label,
+    calculationBasis,
+    amountUsdMinor: amountUsdMinor.toString(),
+  });
+}
+
+function requiredConversionAmount(
+  portfolio: LocalDemoPortfolioResponse,
+  positions: readonly InternalYieldPosition[],
+): bigint {
+  const availableByAsset = new Map<string, bigint>();
+  for (const wallet of portfolio.wallets) {
+    for (const chain of wallet.chains) {
+      for (const asset of chain.assets) {
+        availableByAsset.set(
+          asset.stablecoin,
+          (availableByAsset.get(asset.stablecoin) ?? 0n) + BigInt(asset.buyingPowerUsdMinor),
+        );
+      }
+    }
+  }
+  const requiredByAsset = new Map<string, bigint>();
+  for (const position of positions) {
+    const symbol = position.opportunity.asset.symbol;
+    requiredByAsset.set(symbol, (requiredByAsset.get(symbol) ?? 0n) + position.amountUsdMinor);
+  }
+  return [...requiredByAsset].reduce((total, [symbol, required]) => {
+    const available = availableByAsset.get(symbol) ?? 0n;
+    return total + (required > available ? required - available : 0n);
+  }, 0n);
+}
+
+function percentageCost(amountUsdMinor: bigint, basisPoints: number): bigint {
+  if (amountUsdMinor < 0n || !Number.isSafeInteger(basisPoints) || basisPoints < 0) {
+    throw new TypeError('invalid local demo cost input');
+  }
+  if (amountUsdMinor === 0n || basisPoints === 0) return 0n;
+  return (amountUsdMinor * BigInt(basisPoints) + 9_999n) / 10_000n;
+}
+
+function calculateYieldProjection(
+  positions: readonly InternalYieldPosition[],
+  capitalIncludedInProjection: bigint,
+): ExactYieldProjection {
+  const rates = positions.map(({ opportunity }) => decimalRatio(opportunity.apy.baseRateDecimal));
   const maximumScale = rates.reduce(
     (maximum, { fractionalDigits }) => Math.max(maximum, fractionalDigits),
     0,
   );
   const denominator = 10n ** BigInt(maximumScale);
-  const annualYieldNumerator = allocations.reduce((total, allocation, index) => {
+  const annualYieldNumerator = positions.reduce((total, position, index) => {
     const rate = rates[index];
     if (rate === undefined) throw new TypeError('missing local demo APY rate');
     const scaledRate = rate.numerator * 10n ** BigInt(maximumScale - rate.fractionalDigits);
-    return total + BigInt(allocation.amountUsdMinor) * scaledRate;
+    return total + position.amountUsdMinor * scaledRate;
   }, 0n);
   const projectedAnnualYield = annualYieldNumerator / denominator;
   const effectiveApy =
-    grossCapital === 0n ? 0n : (annualYieldNumerator * 10_000n) / (grossCapital * denominator);
+    capitalIncludedInProjection === 0n
+      ? 0n
+      : (annualYieldNumerator * 10_000n) / (capitalIncludedInProjection * denominator);
   if (effectiveApy > BigInt(Number.MAX_SAFE_INTEGER) || effectiveApy > 10_000n) {
     throw new TypeError('local demo effective APY exceeds numeric limits');
   }
   return Object.freeze({
+    annualYieldNumerator,
+    denominator,
     effectiveApyBasisPoints: Number(effectiveApy),
     projectedAnnualYield,
   });
+}
+
+function calculateFirstPositiveDayAfterFees(
+  projection: ExactYieldProjection,
+  totalEstimatedCostUsdMinor: bigint,
+): LocalDemoAllocationPreviewResponse['yieldProjection']['firstPositiveDayAfterFees'] {
+  if (projection.annualYieldNumerator === 0n) {
+    return Object.freeze({
+      calculationMethod: LOCAL_DEMO_BREAK_EVEN_CALCULATION_METHOD,
+      status: 'NO_PROJECTED_YIELD',
+      day: null,
+      modelHorizonDays: LOCAL_DEMO_BREAK_EVEN_MODEL_HORIZON_DAYS,
+    });
+  }
+  const firstPositiveDay = ceilingDivide(
+    (totalEstimatedCostUsdMinor + 1n) * 365n * projection.denominator,
+    projection.annualYieldNumerator,
+  );
+  if (firstPositiveDay > BigInt(LOCAL_DEMO_BREAK_EVEN_MODEL_HORIZON_DAYS)) {
+    return Object.freeze({
+      calculationMethod: LOCAL_DEMO_BREAK_EVEN_CALCULATION_METHOD,
+      status: 'NOT_RECOVERED_WITHIN_HORIZON',
+      day: null,
+      modelHorizonDays: LOCAL_DEMO_BREAK_EVEN_MODEL_HORIZON_DAYS,
+    });
+  }
+  return Object.freeze({
+    calculationMethod: LOCAL_DEMO_BREAK_EVEN_CALCULATION_METHOD,
+    status: 'RECOVERED_WITHIN_HORIZON',
+    day: Number(firstPositiveDay),
+    modelHorizonDays: LOCAL_DEMO_BREAK_EVEN_MODEL_HORIZON_DAYS,
+  });
+}
+
+function ceilingDivide(numerator: bigint, denominator: bigint): bigint {
+  if (numerator < 0n || denominator <= 0n) throw new TypeError('invalid local demo division');
+  return (numerator + denominator - 1n) / denominator;
 }
 
 function decimalRatio(value: string): Readonly<{ numerator: bigint; fractionalDigits: number }> {
@@ -313,6 +506,19 @@ function decimalRatio(value: string): Readonly<{ numerator: bigint; fractionalDi
     numerator: BigInt(`${whole}${fraction}`),
     fractionalDigits: fraction.length,
   });
+}
+
+function requiredCapitalBuckets(
+  total: bigint,
+  liquidReserveBasisPoints: number,
+): readonly [bigint, bigint] {
+  const amounts = distribute(total, [liquidReserveBasisPoints, 10_000 - liquidReserveBasisPoints]);
+  const liquidReserve = amounts[0];
+  const managedYield = amounts[1];
+  if (liquidReserve === undefined || managedYield === undefined) {
+    throw new TypeError('missing local demo capital bucket');
+  }
+  return Object.freeze([liquidReserve, managedYield]);
 }
 
 /** Largest-remainder apportionment keeps every value in exact integer cents. */
@@ -349,12 +555,6 @@ function requiredAmount(amounts: readonly bigint[], index: number): bigint {
   const amount = amounts[index];
   if (amount === undefined) throw new TypeError('missing local demo allocation amount');
   return amount;
-}
-
-function requiredNumber(values: readonly number[], index: number): number {
-  const value = values[index];
-  if (value === undefined) throw new TypeError('missing local demo allocation weight');
-  return value;
 }
 
 function divideAmountEvenly(total: bigint, count: number): readonly bigint[] {

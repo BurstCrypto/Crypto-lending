@@ -2,6 +2,9 @@ import type { CallHandler, ExecutionContext } from '@nestjs/common';
 import { of } from 'rxjs';
 
 import {
+  LOCAL_DEMO_ALLOCATION_PREVIEW_BODY_SCHEMA,
+  LOCAL_DEMO_ALLOCATION_PREVIEW_RESPONSE_SCHEMA,
+  LOCAL_DEMO_YIELD_CATALOG_RESPONSE_SCHEMA,
   LocalDemoBodyError,
   LocalDemoPrivacyInterceptor,
   parseLocalDemoAllocationPreviewBody,
@@ -13,138 +16,34 @@ describe('local demo HTTP boundary', () => {
   it.each(['MORE_LIQUID', 'BALANCED', 'MORE_YIELD'] as const)(
     'accepts only the %s allocation preset identifier',
     (presetId) => {
-      expect(
-        parseLocalDemoAllocationPreviewBody({ selection: { kind: 'PRESET', presetId } }),
-      ).toEqual({ selection: { kind: 'PRESET', presetId } });
+      const result = parseLocalDemoAllocationPreviewBody({
+        selection: { kind: 'PRESET', presetId },
+      });
+
+      expect(result).toEqual({ selection: { kind: 'PRESET', presetId } });
+      expect(Object.isFrozen(result)).toBe(true);
+      expect(Object.isFrozen(result.selection)).toBe(true);
     },
   );
-
-  it('accepts and defensively freezes the complete bounded custom filter contract', () => {
-    const result = parseLocalDemoAllocationPreviewBody({
-      selection: {
-        kind: 'CUSTOM',
-        liquidReserveBasisPoints: 2_500,
-        filters: {
-          assetSymbols: ['USDC', 'USDT'],
-          providerIds: ['MORPHO'],
-          networkIds: ['eip155:1', 'eip155:8453'],
-          minimumApyBasisPoints: 300,
-          minimumTvlUsdMinor: '100000000',
-          minimumExitLiquidityUsdMinor: '50000000',
-          maximumUtilizationBasisPoints: 9_500,
-        },
-      },
-    });
-
-    expect(result).toEqual({
-      selection: {
-        kind: 'CUSTOM',
-        liquidReserveBasisPoints: 2_500,
-        filters: {
-          assetSymbols: ['USDC', 'USDT'],
-          providerIds: ['MORPHO'],
-          networkIds: ['eip155:1', 'eip155:8453'],
-          minimumApyBasisPoints: 300,
-          minimumTvlUsdMinor: '100000000',
-          minimumExitLiquidityUsdMinor: '50000000',
-          maximumUtilizationBasisPoints: 9_500,
-        },
-      },
-    });
-    expect(Object.isFrozen(result)).toBe(true);
-    expect(Object.isFrozen(result.selection)).toBe(true);
-    if (result.selection.kind !== 'CUSTOM') throw new Error('Expected custom selection');
-    expect(Object.isFrozen(result.selection.filters)).toBe(true);
-    expect(Object.isFrozen(result.selection.filters.assetSymbols)).toBe(true);
-  });
-
-  it('accepts a 99% reserve and rejects values that leave less than 1% for yield', () => {
-    const body = {
-      selection: {
-        kind: 'CUSTOM',
-        liquidReserveBasisPoints: 9_900,
-        filters: {
-          assetSymbols: ['USDC'],
-          providerIds: ['MORPHO'],
-          networkIds: ['eip155:1'],
-          minimumApyBasisPoints: 0,
-          minimumTvlUsdMinor: '0',
-          minimumExitLiquidityUsdMinor: '0',
-          maximumUtilizationBasisPoints: 10_000,
-        },
-      },
-    };
-
-    expect(parseLocalDemoAllocationPreviewBody(body).selection).toMatchObject({
-      kind: 'CUSTOM',
-      liquidReserveBasisPoints: 9_900,
-    });
-    for (const liquidReserveBasisPoints of [9_901, 10_000]) {
-      expect(() =>
-        parseLocalDemoAllocationPreviewBody({
-          selection: { ...body.selection, liquidReserveBasisPoints },
-        }),
-      ).toThrow(LocalDemoBodyError);
-    }
-  });
 
   it.each([
     {},
     { presetId: 'BALANCED' },
     { selection: { kind: 'PRESET', presetId: 'CUSTOM' } },
-    { selection: { kind: 'PRESET', presetId: 'BALANCED', amountUsdMinor: '1' } },
-    { selection: { kind: 'PRESET', presetId: 'BALANCED' }, accountId: 'caller' },
+    { selection: { kind: 'CUSTOM', presetId: 'BALANCED' } },
     {
       selection: {
         kind: 'CUSTOM',
         liquidReserveBasisPoints: 2_500,
-        filters: {
-          assetSymbols: ['USDC'],
-          providerIds: ['MORPHO'],
-          networkIds: ['eip155:1'],
-          minimumApyBasisPoints: 300,
-          minimumTvlUsdMinor: '0',
-          minimumExitLiquidityUsdMinor: '0',
-          maximumUtilizationBasisPoints: 9_500,
-          callerApyBasisPoints: 900,
-        },
+        filters: { providerIds: ['MORPHO'], networkIds: ['eip155:1'] },
       },
     },
+    { selection: { kind: 'PRESET', presetId: 'BALANCED', amountUsdMinor: '1' } },
+    { selection: { kind: 'PRESET', presetId: 'BALANCED', modeledCostUsdMinor: '1' } },
+    { selection: { kind: 'PRESET', presetId: 'BALANCED' }, accountId: 'caller' },
     Object.assign(Object.create({ selection: { kind: 'PRESET', presetId: 'BALANCED' } }), {}),
-  ])('rejects malformed or caller-authored allocation preview input', (body) => {
+  ])('rejects malformed, custom, or caller-authored allocation input', (body) => {
     expect(() => parseLocalDemoAllocationPreviewBody(body)).toThrow(LocalDemoBodyError);
-  });
-
-  it.each([
-    { field: 'assetSymbols', value: [] },
-    { field: 'assetSymbols', value: ['USDC', 'USDC'] },
-    { field: 'assetSymbols', value: ['DAI'] },
-    { field: 'providerIds', value: [] },
-    { field: 'providerIds', value: ['AAVE'] },
-    { field: 'networkIds', value: ['eip155:11155111'] },
-    { field: 'minimumApyBasisPoints', value: -1 },
-    { field: 'minimumApyBasisPoints', value: 10_001 },
-    { field: 'minimumApyBasisPoints', value: 1.5 },
-    { field: 'minimumTvlUsdMinor', value: '01' },
-    { field: 'minimumTvlUsdMinor', value: '1000000000000000000' },
-    { field: 'minimumExitLiquidityUsdMinor', value: '-1' },
-    { field: 'maximumUtilizationBasisPoints', value: 10_001 },
-  ] as const)('rejects an invalid custom $field constraint', ({ field, value }) => {
-    const filters: Record<string, unknown> = {
-      assetSymbols: ['USDC'],
-      providerIds: ['MORPHO'],
-      networkIds: ['eip155:1'],
-      minimumApyBasisPoints: 0,
-      minimumTvlUsdMinor: '0',
-      minimumExitLiquidityUsdMinor: '0',
-      maximumUtilizationBasisPoints: 10_000,
-    };
-    filters[field] = value;
-    expect(() =>
-      parseLocalDemoAllocationPreviewBody({
-        selection: { kind: 'CUSTOM', liquidReserveBasisPoints: 2_500, filters },
-      }),
-    ).toThrow(LocalDemoBodyError);
   });
 
   it('never evaluates accessors in the allocation request graph', () => {
@@ -161,6 +60,101 @@ describe('local demo HTTP boundary', () => {
 
     expect(() => parseLocalDemoAllocationPreviewBody({ selection })).toThrow(LocalDemoBodyError);
     expect(invoked).toBe(false);
+  });
+
+  it('publishes preset-only request and provider-private aggregate response schemas', () => {
+    expect(LOCAL_DEMO_ALLOCATION_PREVIEW_BODY_SCHEMA).toMatchObject({
+      type: 'object',
+      additionalProperties: false,
+      required: ['selection'],
+      properties: {
+        selection: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['kind', 'presetId'],
+          properties: {
+            kind: { type: 'string', enum: ['PRESET'] },
+            presetId: {
+              type: 'string',
+              enum: ['MORE_LIQUID', 'BALANCED', 'MORE_YIELD'],
+            },
+          },
+        },
+      },
+    });
+    expect(LOCAL_DEMO_ALLOCATION_PREVIEW_RESPONSE_SCHEMA).toMatchObject({
+      type: 'object',
+      additionalProperties: false,
+      required: expect.arrayContaining([
+        'rateSnapshot',
+        'allocations',
+        'executionCost',
+        'capitalIncludedInProjectionUsdMinor',
+        'yieldProjection',
+      ]),
+      properties: {
+        executionCost: {
+          additionalProperties: false,
+          required: ['actualLocalOperation', 'modeledScenario', 'publicExecution'],
+          properties: {
+            actualLocalOperation: {
+              properties: {
+                status: { type: 'string', enum: ['NO_EXECUTION'] },
+                amountUsdMinor: { type: 'string', enum: ['0'] },
+              },
+            },
+            modeledScenario: {
+              properties: {
+                modelId: { type: 'string', enum: ['LOCAL_DEMO_ALLOCATION_COST_V1'] },
+                isQuote: { type: 'boolean', enum: [false] },
+                totalUsdMinor: { type: 'string', pattern: '^(?:0|[1-9][0-9]*)$' },
+              },
+            },
+            publicExecution: {
+              properties: {
+                status: { type: 'string', enum: ['UNQUOTED'] },
+                amountUsdMinor: { type: 'string', nullable: true, enum: [null] },
+              },
+            },
+          },
+        },
+        yieldProjection: {
+          properties: {
+            firstPositiveDayAfterFees: {
+              properties: {
+                calculationMethod: {
+                  type: 'string',
+                  enum: ['FIRST_WHOLE_DAY_VISIBLE_YIELD_EXCEEDS_ESTIMATED_FEES'],
+                },
+                modelHorizonDays: { type: 'integer', enum: [365] },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const publicSchemas = JSON.stringify([
+      LOCAL_DEMO_YIELD_CATALOG_RESPONSE_SCHEMA,
+      LOCAL_DEMO_ALLOCATION_PREVIEW_RESPONSE_SCHEMA,
+    ]);
+    for (const component of ['NETWORK', 'CONVERSION', 'MARKET_IMPACT', 'ROUTING']) {
+      expect(publicSchemas).toContain(`"${component}"`);
+    }
+    for (const forbidden of [
+      'MORPHO',
+      'eip155:',
+      '"provider"',
+      '"protocol"',
+      '"marketId"',
+      '"opportunity"',
+      '"opportunities"',
+      '"sourceReference"',
+      '"payloadSha256"',
+      '"normalizerId"',
+    ]) {
+      expect(publicSchemas).not.toContain(forbidden);
+    }
   });
 
   it.each(['EVM', 'SOLANA'] as const)('accepts the allowlisted %s candidate', (namespace) => {

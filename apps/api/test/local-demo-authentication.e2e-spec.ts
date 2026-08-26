@@ -399,25 +399,23 @@ describe('local demo authentication boundary (e2e)', () => {
       .set('Cookie', cookie)
       .expect(200);
 
-    expect(catalog.body).toMatchObject({
-      use: 'LOCAL_DEMO_SNAPSHOT_ONLY',
+    expect(catalog.body).toEqual({
+      use: 'LOCAL_DEMO_MANAGED_RATE_SNAPSHOT_ONLY',
       mayAuthorizeFinancialAction: false,
       riskClassificationAvailable: false,
       snapshot: {
-        provider: 'MORPHO_PUBLIC_API',
+        id: 'managed-rate-snapshot-v1',
+        capturedAt: '2026-08-26T14:14:54.580Z',
+        staleAfter: '2026-08-27T14:14:54.580Z',
+        freshness: 'CURRENT',
         staleBehavior: 'LABEL_STALE_KEEP_NON_EXECUTABLE',
         riskClassification: 'NOT_ASSESSED',
       },
     });
-    expect(catalog.body.opportunities).toHaveLength(5);
-    expect(catalog.body.opportunities[0]).toMatchObject({
-      provider: { id: 'MORPHO' },
-      apy: {
-        baseRateDecimal: '0.04440914291661858',
-        providerFee: { status: 'REPORTED', rateDecimal: '0' },
-      },
-      exitLiquidity: { interpretation: 'AVAILABLE_TO_BORROW_PROXY' },
-    });
+    expect(JSON.stringify(catalog.body)).not.toMatch(/morpho|graphql|api\.morpho/iu);
+    expect(JSON.stringify(catalog.body)).not.toMatch(
+      /"(?:provider|providerId|providerIds|protocol|protocolId|marketId|marketIds|opportunity|opportunities|provenance|sourceReference|payloadSha256|normalizer|endpoint)"\s*:/iu,
+    );
 
     await request(app.getHttpServer())
       .post('/api/v1/local-demo/allocation-preview')
@@ -448,124 +446,148 @@ describe('local demo authentication boundary (e2e)', () => {
         label: 'Balanced blend',
         liquidReserveBasisPoints: 3000,
       },
-      catalog: {
+      rateSnapshot: {
+        id: 'managed-rate-snapshot-v1',
         staleBehavior: 'LABEL_STALE_KEEP_NON_EXECUTABLE',
         riskClassificationAvailable: false,
         riskClassification: 'NOT_ASSESSED',
-        matchedOpportunityCount: 5,
-        selectedOpportunityCount: 3,
       },
       grossCapitalUsdMinor: '700000',
       allocations: [
         {
           bucket: 'LIQUID_RESERVE',
+          allocationId: 'LIQUID_RESERVE',
+          label: 'Liquid reserve',
           percentageBasisPoints: 3000,
-          baseApyBasisPoints: 0,
-          amountUsdMinor: '210000',
+          amountUsdMinor: '209816',
         },
         {
-          bucket: 'YIELD_OPPORTUNITY',
-          percentageBasisPoints: 2334,
-          baseApyBasisPoints: 521,
-          amountUsdMinor: '163334',
-          opportunity: {
-            provider: { id: 'MORPHO' },
-            apy: {
-              baseRateDecimal: '0.05210504022183349',
-              rewardAprs: [{ assetSymbol: 'USDC', rateDecimal: '0.017398639912427037' }],
-              providerFee: { status: 'REPORTED', rateDecimal: '0' },
-            },
-          },
-        },
-        {
-          bucket: 'YIELD_OPPORTUNITY',
-          percentageBasisPoints: 2333,
-          baseApyBasisPoints: 444,
-          amountUsdMinor: '163333',
-        },
-        {
-          bucket: 'YIELD_OPPORTUNITY',
-          percentageBasisPoints: 2333,
-          baseApyBasisPoints: 442,
-          amountUsdMinor: '163333',
+          bucket: 'MANAGED_YIELD',
+          allocationId: 'MANAGED_YIELD',
+          label: 'Managed yield',
+          percentageBasisPoints: 7000,
+          amountUsdMinor: '489571',
         },
       ],
       executionCost: {
-        treatment: 'LOCAL_DEMO_ZERO_NO_EXECUTION',
-        modeledLocalAmountUsdMinor: '0',
-        publicExecutionCostStatus: 'UNQUOTED',
+        actualLocalOperation: { status: 'NO_EXECUTION', amountUsdMinor: '0' },
+        modeledScenario: {
+          status: 'AVAILABLE',
+          modelId: 'LOCAL_DEMO_ALLOCATION_COST_V1',
+          isQuote: false,
+          costBasisCapitalUsdMinor: '700000',
+          fundingTreatment: 'DEDUCT_FROM_GROSS_BEFORE_PROJECTION',
+          rounding: 'CEIL_EACH_VARIABLE_COMPONENT_TO_USD_MINOR',
+          components: [
+            {
+              code: 'NETWORK',
+              calculationBasis: 'NETWORK_ACTIVATION_AND_POSITION_VOLUME',
+              amountUsdMinor: '438',
+            },
+            {
+              code: 'CONVERSION',
+              calculationBasis: 'TWELVE_BPS_OF_REQUIRED_CONVERSION',
+              amountUsdMinor: '0',
+            },
+            {
+              code: 'MARKET_IMPACT',
+              calculationBasis: 'POSITION_SIZE_AND_UTILIZATION',
+              amountUsdMinor: '115',
+            },
+            {
+              code: 'ROUTING',
+              calculationBasis: 'TWENTY_CENTS_PER_ACTIVE_ALLOCATION',
+              amountUsdMinor: '60',
+            },
+          ],
+          totalUsdMinor: '613',
+        },
+        publicExecution: { status: 'UNQUOTED', amountUsdMinor: null },
       },
-      capitalIncludedInProjectionUsdMinor: '700000',
+      capitalIncludedInProjectionUsdMinor: '699387',
       yieldProjection: {
-        source: 'MORPHO_PUBLIC_API_SNAPSHOT',
-        calculationMethod: 'POSITION_WEIGHTED_EXACT_BASE_APY',
+        source: 'MANAGED_RATE_SNAPSHOT',
+        calculationMethod: 'INTERNAL_POSITION_WEIGHTED_EXACT_BASE_APY',
         effectiveApyBasisPoints: 328,
-        projectedAnnualYieldUsdMinor: '22993',
+        projectedAnnualYieldUsdMinor: '22973',
+        projectedAnnualYieldAfterFeesUsdMinor: '22360',
+        firstPositiveDayAfterFees: {
+          calculationMethod: 'FIRST_WHOLE_DAY_VISIBLE_YIELD_EXCEEDS_ESTIMATED_FEES',
+          status: 'RECOVERED_WITHIN_HORIZON',
+          day: 10,
+          modelHorizonDays: 365,
+        },
       },
       asOf: '2026-08-24T18:30:00.000Z',
     });
+    expect(
+      preview.body.allocations.reduce(
+        (sum: bigint, allocation: { amountUsdMinor: string }) =>
+          sum + BigInt(allocation.amountUsdMinor),
+        0n,
+      ),
+    ).toBe(BigInt(preview.body.capitalIncludedInProjectionUsdMinor));
+    expect(
+      BigInt(preview.body.capitalIncludedInProjectionUsdMinor) +
+        BigInt(preview.body.executionCost.modeledScenario.totalUsdMinor),
+    ).toBe(BigInt(preview.body.grossCapitalUsdMinor));
+    expect(JSON.stringify(preview.body)).not.toMatch(/morpho|graphql|api\.morpho/iu);
+    expect(JSON.stringify(preview.body)).not.toMatch(
+      /"(?:provider|providerId|providerIds|protocol|protocolId|marketId|marketIds|opportunity|opportunities|provenance|sourceReference|payloadSha256|normalizer|endpoint)"\s*:/iu,
+    );
     expect(repository.resolveSession).toHaveBeenLastCalledWith(
       expect.objectContaining({ csrf: expect.objectContaining({ required: true }) }),
     );
   });
 
-  it('server-filters a custom selection and returns a typed no-match state', async () => {
-    const filters = {
-      assetSymbols: ['USDT'],
-      providerIds: ['MORPHO'],
-      networkIds: ['eip155:1'],
-      minimumApyBasisPoints: 300,
-      minimumTvlUsdMinor: '1000000000',
-      minimumExitLiquidityUsdMinor: '100000000',
-      maximumUtilizationBasisPoints: 9000,
-    };
-    const custom = await request(app.getHttpServer())
-      .post('/api/v1/local-demo/allocation-preview')
-      .set('Origin', LOCAL_ORIGIN)
-      .set('X-CSRF-Token', csrf)
-      .set('Cookie', cookie)
-      .send({
-        selection: { kind: 'CUSTOM', liquidReserveBasisPoints: 2500, filters },
-      })
-      .expect(200);
-
-    expect(custom.body).toMatchObject({
-      selection: { kind: 'CUSTOM', presetId: null, filters },
-      catalog: { matchedOpportunityCount: 1, selectedOpportunityCount: 1 },
-      allocations: [
-        { bucket: 'LIQUID_RESERVE', percentageBasisPoints: 2500 },
-        {
-          bucket: 'YIELD_OPPORTUNITY',
-          percentageBasisPoints: 7500,
-          opportunity: {
-            asset: { symbol: 'USDT' },
-            network: { id: 'eip155:1' },
-            apy: { baseRateDecimal: '0.030244914978243814' },
-          },
-        },
-      ],
-    });
-
-    const noMatch = await request(app.getHttpServer())
-      .post('/api/v1/local-demo/allocation-preview')
-      .set('Origin', LOCAL_ORIGIN)
-      .set('X-CSRF-Token', csrf)
-      .set('Cookie', cookie)
-      .send({
+  it('rejects custom strategy details and caller-authored provider metadata', async () => {
+    const forbiddenBodies = [
+      { selection: { kind: 'CUSTOM', liquidReserveBasisPoints: 2500, filters: {} } },
+      {
         selection: {
-          kind: 'CUSTOM',
-          liquidReserveBasisPoints: 2500,
-          filters: { ...filters, minimumApyBasisPoints: 10_000 },
+          kind: 'PRESET',
+          presetId: 'BALANCED',
+          providerId: 'caller-supplied-provider',
         },
-      })
-      .expect(422);
+      },
+      {
+        selection: {
+          kind: 'PRESET',
+          presetId: 'BALANCED',
+          protocol: 'caller-supplied-protocol',
+        },
+      },
+      {
+        selection: {
+          kind: 'PRESET',
+          presetId: 'BALANCED',
+          marketId: 'caller-supplied-market',
+        },
+      },
+      {
+        selection: {
+          kind: 'PRESET',
+          presetId: 'BALANCED',
+          provenance: { endpoint: 'https://example.invalid' },
+        },
+      },
+    ];
 
-    expect(noMatch.body).toEqual({
-      statusCode: 422,
-      error: 'Unprocessable Entity',
-      message: 'No trusted snapshot opportunities match this selection',
-      code: 'NO_MATCHING_YIELD_OPPORTUNITIES',
-    });
+    for (const body of forbiddenBodies) {
+      const rejected = await request(app.getHttpServer())
+        .post('/api/v1/local-demo/allocation-preview')
+        .set('Origin', LOCAL_ORIGIN)
+        .set('X-CSRF-Token', csrf)
+        .set('Cookie', cookie)
+        .send(body)
+        .expect(400);
+
+      expect(rejected.body).toMatchObject({
+        statusCode: 400,
+        error: 'Bad Request',
+        message: 'Local demo request is invalid',
+      });
+    }
   });
 
   it('rejects aliases and wrong ports before wallet mutation', async () => {
