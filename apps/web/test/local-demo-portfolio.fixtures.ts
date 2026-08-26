@@ -12,15 +12,9 @@ export const LOCAL_DEMO_CHAIN_PORTFOLIO_PAYLOAD = {
   portfolioValueUsdMinor: '1100000',
   buyingPower: {
     status: 'AVAILABLE',
-    amountUsdMinor: '1089000',
+    amountUsdMinor: '1100000',
     freshness: 'CURRENT',
-    deductions: [
-      { code: 'LIQUIDITY', amountUsdMinor: '5500' },
-      { code: 'CONVERSION', amountUsdMinor: '1100' },
-      { code: 'SLIPPAGE', amountUsdMinor: '1100' },
-      { code: 'NETWORK', amountUsdMinor: '1100' },
-      { code: 'ROUTING', amountUsdMinor: '2200' },
-    ],
+    deductions: [],
     reasons: [],
   },
   wallets: [
@@ -30,12 +24,12 @@ export const LOCAL_DEMO_CHAIN_PORTFOLIO_PAYLOAD = {
       namespace: 'EVM',
       address: '0x1111111111111111111111111111111111111111',
       portfolioValueUsdMinor: '700000',
-      buyingPowerUsdMinor: '693000',
+      buyingPowerUsdMinor: '700000',
       chains: [
         {
           networkId: LOCAL_DEMO_EVM_NETWORK_ID,
           portfolioValueUsdMinor: '700000',
-          buyingPowerUsdMinor: '693000',
+          buyingPowerUsdMinor: '700000',
           assets: [
             {
               stablecoin: 'USDC',
@@ -43,7 +37,7 @@ export const LOCAL_DEMO_CHAIN_PORTFOLIO_PAYLOAD = {
               amountAtomic: '7000000000',
               decimals: 6,
               portfolioValueUsdMinor: '700000',
-              buyingPowerUsdMinor: '693000',
+              buyingPowerUsdMinor: '700000',
               buyingPowerAvailability: 'INCLUDED',
               buyingPowerReason: null,
               observedAt: '2026-08-24T18:30:00.000Z',
@@ -59,12 +53,12 @@ export const LOCAL_DEMO_CHAIN_PORTFOLIO_PAYLOAD = {
       namespace: 'SOLANA',
       address: '7YttLkHDoNj9wyDur5EYBDauN5QJUJpz94QRtWQyFrA8',
       portfolioValueUsdMinor: '400000',
-      buyingPowerUsdMinor: '396000',
+      buyingPowerUsdMinor: '400000',
       chains: [
         {
           networkId: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp',
           portfolioValueUsdMinor: '400000',
-          buyingPowerUsdMinor: '396000',
+          buyingPowerUsdMinor: '400000',
           assets: [
             {
               stablecoin: 'USDC',
@@ -72,7 +66,7 @@ export const LOCAL_DEMO_CHAIN_PORTFOLIO_PAYLOAD = {
               amountAtomic: '4000000000',
               decimals: 6,
               portfolioValueUsdMinor: '400000',
-              buyingPowerUsdMinor: '396000',
+              buyingPowerUsdMinor: '400000',
               buyingPowerAvailability: 'INCLUDED',
               buyingPowerReason: null,
               observedAt: '2026-08-24T18:30:00.000Z',

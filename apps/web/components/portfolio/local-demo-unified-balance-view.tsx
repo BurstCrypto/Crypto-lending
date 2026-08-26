@@ -5,8 +5,6 @@ import {
   formatUsdMinor,
   maskPortfolioAddress,
   PORTFOLIO_NETWORKS,
-  type BuyingPowerDeduction,
-  type BuyingPowerDeductionCode,
   type PortfolioFreshness,
   type WalletNamespace,
 } from '@/lib/portfolio/unified-balance';
@@ -24,15 +22,6 @@ const AS_OF_FORMATTER = new Intl.DateTimeFormat('en-US', {
   dateStyle: 'medium',
   timeStyle: 'short',
   timeZone: 'UTC',
-});
-
-const DEDUCTION_LABELS: Readonly<Record<BuyingPowerDeductionCode, string>> = Object.freeze({
-  STALE_OR_UNPRICED_BALANCE: 'Stale or unpriced balances',
-  LIQUIDITY: 'Liquidity reserve',
-  CONVERSION: 'Conversion costs',
-  SLIPPAGE: 'Estimated slippage',
-  NETWORK: 'Network costs',
-  ROUTING: 'Routing costs',
 });
 
 export type LocalDemoUnifiedBalanceViewState =
@@ -216,39 +205,6 @@ function WalletSource({ wallet }: { wallet: LocalDemoBalanceWalletContribution }
         </ul>
       </details>
     </li>
-  );
-}
-
-function DeductionAmount({ deduction }: { deduction: BuyingPowerDeduction }) {
-  if (deduction.amountUsdMinor === null) {
-    return <span className="portfolio-cost-unavailable">Cost unavailable</span>;
-  }
-  const formatted = formatUsdMinor(deduction.amountUsdMinor);
-  return (
-    <data
-      className="portfolio-deduction-value"
-      value={`-${formatted.decimal}`}
-      aria-label={`${formatted.accessible} deduction`}
-    >
-      <span aria-hidden="true">-{formatted.visible}</span>
-    </data>
-  );
-}
-
-function BuyingPowerDeductions({ deductions }: { deductions: readonly BuyingPowerDeduction[] }) {
-  if (deductions.length === 0) return null;
-  return (
-    <details className="portfolio-deductions" open>
-      <summary>Why buying power is lower</summary>
-      <ul>
-        {deductions.map((deduction) => (
-          <li key={deduction.code}>
-            <span>{DEDUCTION_LABELS[deduction.code]}</span>
-            <DeductionAmount deduction={deduction} />
-          </li>
-        ))}
-      </ul>
-    </details>
   );
 }
 

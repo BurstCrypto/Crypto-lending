@@ -261,6 +261,11 @@ describe('authenticated local demo portfolio journey', () => {
       within(allocationPlanner!).queryByText('First net-positive day'),
     ).not.toBeInTheDocument();
     expect(allocationPlanner).not.toHaveTextContent('$');
+    expect(screen.queryByText('Why buying power is lower')).not.toBeInTheDocument();
+    const buyingPowerCard = screen.getByText('Available buying power').closest('article');
+    expect(within(buyingPowerCard!).getByLabelText('11,000 US dollars')).toHaveTextContent(
+      '$11,000.00',
+    );
 
     fireEvent.click(screen.getByRole('button', { name: /More liquid/u }));
     expect(

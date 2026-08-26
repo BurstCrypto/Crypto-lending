@@ -187,7 +187,7 @@ describe('local demo same-origin API client', () => {
     const portfolio = await client.readPortfolio();
     expect(portfolio).toMatchObject({
       portfolioValueUsdMinor: '1100000',
-      buyingPower: { amountUsdMinor: '1089000' },
+      buyingPower: { amountUsdMinor: '1100000', deductions: [] },
     });
     expect(portfolio.wallets[0]?.chains[0]).toMatchObject({
       networkId: LOCAL_DEMO_EVM_NETWORK_ID,

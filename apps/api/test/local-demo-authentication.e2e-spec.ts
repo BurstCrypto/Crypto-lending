@@ -44,6 +44,7 @@ import {
 const LOCAL_ORIGIN = 'http://127.0.0.1:3000';
 const ACCOUNT_ID = parseAccountId('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
 const CREDENTIAL_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+const INITIAL_EVM_BALANCE_ATOMIC = '7000000000';
 
 class E2eLocalEvmRuntime implements LocalEvmChainRuntimePort {
   private balance = '0';
@@ -259,6 +260,7 @@ describe('local demo authentication boundary (e2e)', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    localEvm.mutateBalance(INITIAL_EVM_BALANCE_ATOMIC);
     repository.resolveSession.mockResolvedValue({
       status: 'authenticated',
       accountId: ACCOUNT_ID,
