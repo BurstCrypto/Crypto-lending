@@ -9,6 +9,7 @@ import { LOCAL_EVM_CHAIN_RUNTIME, LoopbackLocalEvmChainRuntime } from './local-e
 import { LocalDemoPortfolioService } from './local-demo-portfolio.service';
 import { LOCAL_DEMO_RUNTIME_CONFIG, loadLocalDemoRuntimeConfig } from './local-demo-runtime.config';
 import { LocalDemoWalletService } from './local-demo-wallet.service';
+import { LocalDemoYieldCatalogService } from './local-demo-yield-catalog.service';
 import { LocalDemoController } from './local-demo.controller';
 
 @Module({
@@ -27,6 +28,7 @@ import { LocalDemoController } from './local-demo.controller';
     },
     LocalDemoWalletService,
     LocalDemoPortfolioService,
+    LocalDemoYieldCatalogService,
     LocalDemoAllocationService,
     LocalDemoPrivacyInterceptor,
   ],

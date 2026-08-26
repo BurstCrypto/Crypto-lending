@@ -871,6 +871,157 @@ h1 {
   line-height: 1.6;
 }
 
+.local-demo-yield-loading,
+.local-demo-yield-catalog {
+  margin: 0;
+  padding: 1.1rem;
+  background: rgba(6, 20, 14, 0.62);
+  border: 1px solid var(--border);
+  border-radius: 1rem;
+}
+
+.local-demo-yield-catalog {
+  display: grid;
+  gap: 1rem;
+}
+
+.local-demo-yield-catalog-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.local-demo-yield-catalog-heading h3 {
+  margin: 0.3rem 0 0;
+  font-size: 1.2rem;
+}
+
+.local-demo-yield-freshness {
+  flex: none;
+  padding: 0.38rem 0.62rem;
+  color: var(--accent-strong);
+  background: rgba(112, 225, 179, 0.08);
+  border: 1px solid rgba(112, 225, 179, 0.25);
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.local-demo-yield-freshness.is-stale {
+  color: #ffdda0;
+  background: rgba(255, 207, 112, 0.08);
+  border-color: rgba(255, 207, 112, 0.3);
+}
+
+.local-demo-yield-catalog-copy,
+.local-demo-yield-catalog-time,
+.local-demo-yield-proxy-note,
+.local-demo-allocation-fee-disclosure {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.55;
+}
+
+.local-demo-yield-catalog-time time,
+.local-demo-yield-opportunity-card > small time {
+  color: #cce1d7;
+  font-variant-numeric: tabular-nums;
+}
+
+.local-demo-yield-opportunity-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.local-demo-yield-opportunity-card {
+  display: grid;
+  min-width: 0;
+  gap: 0.75rem;
+  padding: 0.9rem;
+  background: rgba(5, 17, 12, 0.72);
+  border: 1px solid rgba(112, 225, 179, 0.16);
+  border-radius: 0.8rem;
+}
+
+.local-demo-yield-opportunity-title {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.local-demo-yield-opportunity-title > div {
+  display: grid;
+  gap: 0.12rem;
+}
+
+.local-demo-yield-opportunity-title strong {
+  font-size: 1rem;
+}
+
+.local-demo-yield-opportunity-title span,
+.local-demo-yield-opportunity-card > p,
+.local-demo-yield-opportunity-card > small {
+  color: var(--muted);
+  font-size: 0.68rem;
+  line-height: 1.45;
+}
+
+.local-demo-yield-opportunity-title data {
+  color: var(--accent-strong);
+  font-size: 1.05rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+.local-demo-yield-opportunity-card > p,
+.local-demo-yield-opportunity-card > dl,
+.local-demo-yield-opportunity-card > small {
+  margin: 0;
+}
+
+.local-demo-yield-opportunity-card dl {
+  display: grid;
+}
+
+.local-demo-yield-opportunity-card dl > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.34rem 0;
+  border-top: 1px solid var(--border);
+  font-size: 0.66rem;
+}
+
+.local-demo-yield-opportunity-card dt {
+  color: var(--muted);
+}
+
+.local-demo-yield-opportunity-card dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  font-weight: 750;
+  text-align: right;
+}
+
+.local-demo-yield-stale-warning {
+  margin: 0;
+  padding: 0.75rem 0.85rem;
+  color: #ffdda0;
+  background: rgba(255, 207, 112, 0.08);
+  border: 1px solid rgba(255, 207, 112, 0.26);
+  border-radius: 0.65rem;
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
 .local-demo-allocation-choices {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1014,6 +1165,12 @@ h1 {
   border: 1px solid rgba(255, 147, 122, 0.28);
   border-radius: 0.75rem;
   line-height: 1.55;
+}
+
+.local-demo-catalog-error {
+  display: grid;
+  gap: 0.75rem;
+  justify-items: start;
 }
 
 .local-demo-allocation-preview {
@@ -1184,6 +1341,10 @@ h1 {
 .local-demo-allocation-results h4 {
   margin: 0 0 0.75rem;
   font-size: 0.9rem;
+}
+
+.local-demo-allocation-fee-disclosure {
+  margin-bottom: 0.55rem;
 }
 
 .local-demo-allocation-result-list {
@@ -1972,6 +2133,10 @@ footer p {
 }
 
 @media (max-width: 1040px) {
+  .local-demo-yield-opportunity-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .local-demo-allocation-yield-metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -2017,6 +2182,7 @@ footer p {
   .local-demo-allocation-heading,
   .local-demo-allocation-preview-heading,
   .local-demo-allocation-yield-heading,
+  .local-demo-yield-catalog-heading,
   .portfolio-refresh-row,
   .local-demo-wallet-roster li {
     align-items: stretch;
@@ -2029,7 +2195,8 @@ footer p {
 
   .local-demo-allocation-choices,
   .local-demo-allocation-results,
-  .local-demo-allocation-yield-metrics {
+  .local-demo-allocation-yield-metrics,
+  .local-demo-yield-opportunity-grid {
     grid-template-columns: 1fr;
   }
 

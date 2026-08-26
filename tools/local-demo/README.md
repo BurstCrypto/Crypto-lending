@@ -89,6 +89,11 @@ evidence. Every screen displays a synthetic-data banner while the mode is on.
   local-demo response adapter and renderer. Wallet roster projections remain
   Sepolia/Solana devnet, and shared production network/asset allowlists are not
   widened.
+- Yield comparisons use a checked-in, provenance-bearing Morpho Public API
+  capture. The API and browser never fetch Morpho at runtime. Base supply APY,
+  reward APR, reported provider fee, TVL, utilization, and available-to-borrow
+  remain distinct; the latter is only an exit-liquidity proxy. The capture is
+  labeled stale after its fixed boundary and cannot authorize an action.
 
 Do not enter a real email address, phone number, seed phrase, private key,
 signature, wallet address, credential, customer record, or real asset.
@@ -148,17 +153,19 @@ restart the attached harness to pick up API source changes.
    both fixture wallets connected, each is `$11,000.00`; no hypothetical route
    fee is deducted before an action is chosen. Inspect the source wallet, chain,
    asset, freshness, and masked-address details.
-9. Compare the fixed illustrative APYs on **More liquid**, **Balanced blend**,
-   and **More yield**, then choose a blend. Only this explicit choice requests
-   an allocation preview or reveals fee-derived timing. Review the exact bucket
-   amounts and APYs, separately itemized synthetic fees, net planned capital,
-   projected annual growth, and the first whole day when projected yield exceeds
-   entry fees by at least one cent. Change blends to see the 365-day
-   straight-line estimate recalculate without moving funds. These rates are
-   synthetic demo assumptions, not live or guaranteed returns.
-10. Confirm the page still states **No transaction was created**. Refresh the
-    browser to exercise wallet and session restoration. Disconnect a wallet to
-    remove its contribution.
+9. Review the timestamped Morpho market capture, with base supply APY kept
+   separate from reward APR and reported provider fees. Market presence means
+   provider-listed only; deposit and withdrawal availability are not verified.
+   Choose **More liquid**, **Balanced blend**, or **More yield**. Only this
+   explicit preset choice requests an allocation preview or reveals local
+   action-cost amounts and fee-derived timing. Review the selected markets,
+   exact allocation amounts, net planned capital, base-only projected annual
+   growth, and the first whole day when projected yield exceeds the local cost
+   assumption. The provider values are a point-in-time snapshot, not live or
+   guaranteed returns; rewards are disclosed but excluded from projection.
+10. Confirm the page states **No user-authorized financial transaction was
+    created**. Refresh the browser to exercise wallet and session restoration.
+    Disconnect a wallet to remove its contribution.
 
 The portfolio is not embedded in the page. Its EVM balance is read from the
 real loopback development chain; Solana balance and valuation inputs remain

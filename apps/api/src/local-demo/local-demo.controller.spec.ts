@@ -16,6 +16,11 @@ import type {
   LocalDemoAllocationService,
 } from './local-demo-allocation.service';
 import type { LocalDemoRuntimeConfig } from './local-demo-runtime.config';
+import {
+  LocalDemoNoMatchingYieldOpportunitiesError,
+  LocalDemoYieldCatalogService,
+  type LocalDemoYieldCatalogResponse,
+} from './local-demo-yield-catalog.service';
 import type {
   LocalDemoWalletConnection,
   LocalDemoWalletService,
@@ -65,36 +70,55 @@ const PORTFOLIO = Object.freeze({
   portfolioValueUsdMinor: '1100000',
 });
 
+const YIELD_CATALOG: LocalDemoYieldCatalogResponse = new LocalDemoYieldCatalogService().read(
+  new Date('2026-08-26T15:00:00.000Z'),
+);
+const CATALOG_OPPORTUNITY = YIELD_CATALOG.opportunities[0];
+if (CATALOG_OPPORTUNITY === undefined) throw new Error('Missing yield catalog fixture');
+
 const ALLOCATION_PREVIEW: LocalDemoAllocationPreviewResponse = Object.freeze({
   use: 'LOCAL_DEMO_ESTIMATE_ONLY',
   mayAuthorizeFinancialAction: false,
-  preset: Object.freeze({
-    id: 'BALANCED',
+  selection: Object.freeze({
+    kind: 'PRESET',
+    presetId: 'BALANCED',
     label: 'Balanced blend',
-    description: 'Split capital between ready access and diversified synthetic yield.',
+    description: 'Keep 30% readily available and divide the remainder across snapshot markets.',
+    liquidReserveBasisPoints: 3_000,
+    filters: null,
+  }),
+  catalog: Object.freeze({
+    snapshotId: YIELD_CATALOG.snapshot.id,
+    capturedAt: YIELD_CATALOG.snapshot.capturedAt,
+    staleAfter: YIELD_CATALOG.snapshot.staleAfter,
+    freshness: YIELD_CATALOG.snapshot.freshness,
+    staleBehavior: YIELD_CATALOG.snapshot.staleBehavior,
+    riskClassificationAvailable: false,
+    riskClassification: YIELD_CATALOG.snapshot.riskClassification,
+    matchedOpportunityCount: 5,
+    selectedOpportunityCount: 1,
   }),
   grossCapitalUsdMinor: '1100000',
   allocations: Object.freeze([
     Object.freeze({
       bucket: 'LIQUID_RESERVE',
+      allocationId: 'LIQUID_RESERVE',
       label: 'Liquid reserve',
       percentageBasisPoints: 3_000,
-      apyBasisPoints: 0,
+      baseApyBasisPoints: 0,
+      baseApyRateDecimal: '0',
       amountUsdMinor: '330000',
+      opportunity: null,
     }),
     Object.freeze({
-      bucket: 'CONSERVATIVE_YIELD',
-      label: 'Conservative yield',
-      percentageBasisPoints: 4_500,
-      apyBasisPoints: 400,
-      amountUsdMinor: '495000',
-    }),
-    Object.freeze({
-      bucket: 'BALANCED_YIELD',
-      label: 'Balanced yield',
-      percentageBasisPoints: 2_500,
-      apyBasisPoints: 600,
-      amountUsdMinor: '275000',
+      bucket: 'YIELD_OPPORTUNITY',
+      allocationId: CATALOG_OPPORTUNITY.opportunityId,
+      label: 'USDC on Morpho Blue (Base)',
+      percentageBasisPoints: 7_000,
+      baseApyBasisPoints: CATALOG_OPPORTUNITY.apy.baseBasisPoints,
+      baseApyRateDecimal: CATALOG_OPPORTUNITY.apy.baseRateDecimal,
+      amountUsdMinor: '770000',
+      opportunity: CATALOG_OPPORTUNITY,
     }),
   ]),
   deductions: Object.freeze([
@@ -104,10 +128,11 @@ const ALLOCATION_PREVIEW: LocalDemoAllocationPreviewResponse = Object.freeze({
     Object.freeze({ code: 'NETWORK', amountUsdMinor: '770' }),
     Object.freeze({ code: 'ROUTING', amountUsdMinor: '1540' }),
   ]),
+  feeEstimateSource: 'LOCAL_DEMO_ACTION_COST_ASSUMPTION',
   totalFeesUsdMinor: '7700',
   netPlannedCapitalUsdMinor: '1092300',
   yieldProjection: Object.freeze({
-    source: 'SYNTHETIC_FIXED_DEMO_RATES',
+    source: 'MORPHO_PUBLIC_API_SNAPSHOT',
     calculationMethod: 'SIMPLE_DAILY_APY_PRORATION_ON_NET_CAPITAL',
     effectiveApyBasisPoints: 330,
     projectedAnnualYieldUsdMinor: '36045',
@@ -124,11 +149,13 @@ interface PortfolioBoundary {
 }
 
 type AllocationBoundary = Pick<LocalDemoAllocationService, 'preview'>;
+type YieldCatalogBoundary = Pick<LocalDemoYieldCatalogService, 'read'>;
 
 interface ControllerFixture {
   readonly controller: LocalDemoController;
   readonly wallets: jest.Mocked<WalletBoundary>;
   readonly portfolio: jest.Mocked<PortfolioBoundary>;
+  readonly yieldCatalog: jest.Mocked<YieldCatalogBoundary>;
   readonly allocations: jest.Mocked<AllocationBoundary>;
 }
 
@@ -163,11 +190,14 @@ function controllerFixture(config: LocalDemoRuntimeConfig = ENABLED_CONFIG): Con
       return PORTFOLIO;
     }),
   };
+  const yieldCatalog: jest.Mocked<YieldCatalogBoundary> = {
+    read: jest.fn(() => YIELD_CATALOG),
+  };
   const allocations: jest.Mocked<AllocationBoundary> = {
-    preview: jest.fn(async (accountId, correlation, presetId) => {
+    preview: jest.fn(async (accountId, correlation, selection) => {
       void accountId;
       void correlation;
-      void presetId;
+      void selection;
       return ALLOCATION_PREVIEW;
     }),
   };
@@ -175,11 +205,13 @@ function controllerFixture(config: LocalDemoRuntimeConfig = ENABLED_CONFIG): Con
     controller: new LocalDemoController(
       wallets as never,
       portfolio as never,
+      yieldCatalog as never,
       allocations as never,
       config,
     ),
     wallets,
     portfolio,
+    yieldCatalog,
     allocations,
   };
 }
@@ -253,6 +285,11 @@ describe('LocalDemoController', () => {
     expect(Reflect.getMetadata(METHOD_METADATA, prototype.readPortfolio)).toBe(RequestMethod.GET);
     expect(Reflect.getMetadata(PATH_METADATA, prototype.readPortfolio)).toBe('portfolio');
     expect(Reflect.getMetadata(HTTP_CODE_METADATA, prototype.readPortfolio)).toBe(HttpStatus.OK);
+    expect(Reflect.getMetadata(METHOD_METADATA, prototype.readYieldCatalog)).toBe(
+      RequestMethod.GET,
+    );
+    expect(Reflect.getMetadata(PATH_METADATA, prototype.readYieldCatalog)).toBe('yield-catalog');
+    expect(Reflect.getMetadata(HTTP_CODE_METADATA, prototype.readYieldCatalog)).toBe(HttpStatus.OK);
     expect(Reflect.getMetadata(METHOD_METADATA, prototype.previewAllocation)).toBe(
       RequestMethod.POST,
     );
@@ -396,6 +433,25 @@ describe('LocalDemoController', () => {
     expect(fixture.portfolio.read).not.toHaveBeenCalledWith(ACCOUNT_A, expect.anything());
   });
 
+  it('reads only the checked-in non-executable yield catalog while enabled', () => {
+    const fixture = controllerFixture();
+    const response = responseFixture();
+
+    const result = fixture.controller.readYieldCatalog(response.response);
+
+    expect(result).toBe(YIELD_CATALOG);
+    expect(fixture.yieldCatalog.read).toHaveBeenCalledWith();
+    expect(result).toMatchObject({
+      use: 'LOCAL_DEMO_SNAPSHOT_ONLY',
+      mayAuthorizeFinancialAction: false,
+      riskClassificationAvailable: false,
+      snapshot: {
+        staleBehavior: 'LABEL_STALE_KEEP_NON_EXECUTABLE',
+        riskClassification: 'NOT_ASSESSED',
+      },
+    });
+  });
+
   it('previews only an allowlisted preset for the principal account and active correlation', async () => {
     const fixture = controllerFixture();
     const response = responseFixture();
@@ -403,7 +459,7 @@ describe('LocalDemoController', () => {
     const result = await loggingContext.run(AUTHENTICATED_REQUEST_CORRELATION_B, () =>
       fixture.controller.previewAllocation(
         principal(ACCOUNT_B),
-        { presetId: 'BALANCED' },
+        { selection: { kind: 'PRESET', presetId: 'BALANCED' } },
         response.response,
       ),
     );
@@ -412,7 +468,7 @@ describe('LocalDemoController', () => {
     expect(fixture.allocations.preview).toHaveBeenCalledWith(
       ACCOUNT_B,
       AUTHENTICATED_REQUEST_CORRELATION_B,
-      'BALANCED',
+      { kind: 'PRESET', presetId: 'BALANCED' },
     );
     expect(fixture.allocations.preview).not.toHaveBeenCalledWith(
       ACCOUNT_A,
@@ -421,12 +477,64 @@ describe('LocalDemoController', () => {
     );
   });
 
-  it('rejects caller-authored allocation amounts and unsupported presets before previewing', async () => {
+  it('forwards only the bounded custom selection for the authenticated account', async () => {
+    const fixture = controllerFixture();
+    const response = responseFixture();
+    const body = {
+      selection: {
+        kind: 'CUSTOM',
+        liquidReserveBasisPoints: 2_500,
+        filters: {
+          assetSymbols: ['USDC'],
+          providerIds: ['MORPHO'],
+          networkIds: ['eip155:8453'],
+          minimumApyBasisPoints: 400,
+          minimumTvlUsdMinor: '100000000',
+          minimumExitLiquidityUsdMinor: '10000000',
+          maximumUtilizationBasisPoints: 9_500,
+        },
+      },
+    };
+
+    await loggingContext.run(AUTHENTICATED_REQUEST_CORRELATION_B, () =>
+      fixture.controller.previewAllocation(principal(ACCOUNT_B), body, response.response),
+    );
+
+    expect(fixture.allocations.preview).toHaveBeenCalledWith(
+      ACCOUNT_B,
+      AUTHENTICATED_REQUEST_CORRELATION_B,
+      body.selection,
+    );
+  });
+
+  it('rejects caller-authored economics and malformed selections before previewing', async () => {
     const bodies: readonly unknown[] = [
       {},
-      { presetId: 'CUSTOM' },
-      { presetId: 'BALANCED', amountUsdMinor: '1100000' },
-      { presetId: 'MORE_YIELD', accountId: ACCOUNT_B },
+      { presetId: 'BALANCED' },
+      { selection: { kind: 'PRESET', presetId: 'CUSTOM' } },
+      {
+        selection: { kind: 'PRESET', presetId: 'BALANCED', amountUsdMinor: '1100000' },
+      },
+      {
+        selection: { kind: 'PRESET', presetId: 'MORE_YIELD' },
+        accountId: ACCOUNT_B,
+      },
+      {
+        selection: {
+          kind: 'CUSTOM',
+          liquidReserveBasisPoints: 2_500,
+          filters: {
+            assetSymbols: ['USDC'],
+            providerIds: ['MORPHO'],
+            networkIds: ['eip155:1'],
+            minimumApyBasisPoints: 0,
+            minimumTvlUsdMinor: '0',
+            minimumExitLiquidityUsdMinor: '0',
+            maximumUtilizationBasisPoints: 10_000,
+            feeBasisPoints: 0,
+          },
+        },
+      },
     ];
 
     for (const body of bodies) {
@@ -442,6 +550,35 @@ describe('LocalDemoController', () => {
       expect(fixture.allocations.preview).not.toHaveBeenCalled();
       expect(response.response.setHeader).not.toHaveBeenCalled();
     }
+  });
+
+  it('returns a typed 422 when valid custom filters have no trusted match', async () => {
+    const fixture = controllerFixture();
+    const response = responseFixture();
+    fixture.allocations.preview.mockRejectedValueOnce(
+      new LocalDemoNoMatchingYieldOpportunitiesError(),
+    );
+
+    const error = await captureRejected(() =>
+      loggingContext.run(AUTHENTICATED_REQUEST_CORRELATION_B, () =>
+        fixture.controller.previewAllocation(
+          principal(ACCOUNT_B),
+          { selection: { kind: 'PRESET', presetId: 'BALANCED' } },
+          response.response,
+        ),
+      ),
+    );
+
+    expect(error).toBeInstanceOf(HttpException);
+    const httpError = error as HttpException;
+    expect(httpError.getStatus()).toBe(HttpStatus.UNPROCESSABLE_ENTITY);
+    expect(httpError.getResponse()).toEqual({
+      statusCode: HttpStatus.UNPROCESSABLE_ENTITY,
+      error: 'Unprocessable Entity',
+      message: 'No trusted snapshot opportunities match this selection',
+      code: 'NO_MATCHING_YIELD_OPPORTUNITIES',
+    });
+    expect(response.response.setHeader).not.toHaveBeenCalled();
   });
 
   it('uses one generic redacted 503 contract for every dependency failure', async () => {
@@ -499,6 +636,16 @@ describe('LocalDemoController', () => {
       portfolioResponse,
     );
 
+    const catalog = controllerFixture();
+    const catalogResponse = responseFixture();
+    catalog.yieldCatalog.read.mockImplementationOnce(() => {
+      throw new Error(SECRET_CANARY);
+    });
+    expectUnavailable(
+      captureThrown(() => catalog.controller.readYieldCatalog(catalogResponse.response)),
+      catalogResponse,
+    );
+
     const allocation = controllerFixture();
     const allocationResponse = responseFixture();
     allocation.allocations.preview.mockRejectedValueOnce(new Error(SECRET_CANARY));
@@ -507,7 +654,7 @@ describe('LocalDemoController', () => {
         loggingContext.run(AUTHENTICATED_REQUEST_CORRELATION_B, () =>
           allocation.controller.previewAllocation(
             principal(ACCOUNT_B),
-            { presetId: 'BALANCED' },
+            { selection: { kind: 'PRESET', presetId: 'BALANCED' } },
             allocationResponse.response,
           ),
         ),
@@ -547,7 +694,7 @@ describe('LocalDemoController', () => {
       await captureRejected(() =>
         allocation.controller.previewAllocation(
           principal(ACCOUNT_A),
-          { presetId: 'BALANCED' },
+          { selection: { kind: 'PRESET', presetId: 'BALANCED' } },
           allocationResponse.response,
         ),
       ),
@@ -579,10 +726,13 @@ describe('LocalDemoController', () => {
     const portfolioError = await captureRejected(() =>
       fixture.controller.readPortfolio(principal(ACCOUNT_A), responseFixture().response),
     );
+    const catalogError = captureThrown(() =>
+      fixture.controller.readYieldCatalog(responseFixture().response),
+    );
     const allocationError = await captureRejected(() =>
       fixture.controller.previewAllocation(
         principal(ACCOUNT_A),
-        { presetId: 'BALANCED' },
+        { selection: { kind: 'PRESET', presetId: 'BALANCED' } },
         responseFixture().response,
       ),
     );
@@ -592,6 +742,7 @@ describe('LocalDemoController', () => {
       disconnectError,
       connectError,
       portfolioError,
+      catalogError,
       allocationError,
     ]) {
       expect(error).toBeInstanceOf(NotFoundException);
@@ -605,6 +756,7 @@ describe('LocalDemoController', () => {
     expect(fixture.wallets.connect).not.toHaveBeenCalled();
     expect(fixture.wallets.disconnect).not.toHaveBeenCalled();
     expect(fixture.portfolio.read).not.toHaveBeenCalled();
+    expect(fixture.yieldCatalog.read).not.toHaveBeenCalled();
     expect(fixture.allocations.preview).not.toHaveBeenCalled();
   });
 });

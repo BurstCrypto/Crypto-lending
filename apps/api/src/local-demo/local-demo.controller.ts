@@ -11,6 +11,7 @@ import {
   NotFoundException,
   Post,
   Res,
+  UnprocessableEntityException,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
@@ -35,10 +36,12 @@ import { loggingContext } from '../infrastructure/logging';
 import { currentJobCorrelationContext } from '../infrastructure/outbox/job-envelope';
 import {
   LOCAL_DEMO_ALLOCATION_PREVIEW_BODY_SCHEMA,
+  LOCAL_DEMO_ALLOCATION_NO_MATCH_RESPONSE_SCHEMA,
   LOCAL_DEMO_ALLOCATION_PREVIEW_RESPONSE_SCHEMA,
   LOCAL_DEMO_CONNECT_BODY_SCHEMA,
   LOCAL_DEMO_DISCONNECT_BODY_SCHEMA,
   LOCAL_DEMO_WALLET_CONNECTION_SCHEMA,
+  LOCAL_DEMO_YIELD_CATALOG_RESPONSE_SCHEMA,
   LocalDemoBodyError,
   LocalDemoPrivacyInterceptor,
   parseLocalDemoAllocationPreviewBody,
@@ -50,6 +53,11 @@ import {
   type LocalDemoAllocationPreviewResponse,
 } from './local-demo-allocation.service';
 import { LocalDemoPortfolioService } from './local-demo-portfolio.service';
+import {
+  LocalDemoNoMatchingYieldOpportunitiesError,
+  LocalDemoYieldCatalogService,
+  type LocalDemoYieldCatalogResponse,
+} from './local-demo-yield-catalog.service';
 import {
   LOCAL_DEMO_RUNTIME_CONFIG,
   type LocalDemoRuntimeConfig,
@@ -91,6 +99,7 @@ export class LocalDemoController {
   constructor(
     private readonly wallets: LocalDemoWalletService,
     private readonly portfolio: LocalDemoPortfolioService,
+    private readonly yieldCatalog: LocalDemoYieldCatalogService,
     private readonly allocations: LocalDemoAllocationService,
     @Inject(LOCAL_DEMO_RUNTIME_CONFIG) private readonly config: LocalDemoRuntimeConfig,
   ) {}
@@ -201,6 +210,27 @@ export class LocalDemoController {
     }
   }
 
+  @Get('yield-catalog')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Read the non-executable checked-in Morpho yield snapshot' })
+  @ApiOkResponse({
+    description: 'Timestamped local-only Morpho observations with provenance and freshness',
+    schema: LOCAL_DEMO_YIELD_CATALOG_RESPONSE_SCHEMA,
+  })
+  @ApiUnauthorizedResponse({ description: 'Missing or invalid authenticated session' })
+  @ApiNotFoundResponse({ description: 'Synthetic local demo runtime is disabled' })
+  @ApiResponse({ status: 503, description: 'The checked-in snapshot failed closed' })
+  readYieldCatalog(
+    @Res({ passthrough: true }) response: HeaderWriter,
+  ): LocalDemoYieldCatalogResponse {
+    this.assertEnabled();
+    try {
+      return this.yieldCatalog.read();
+    } catch {
+      return unavailable(response);
+    }
+  }
+
   @Post('allocation-preview')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Preview one synthetic allocation without authorizing an action' })
@@ -210,6 +240,11 @@ export class LocalDemoController {
     schema: LOCAL_DEMO_ALLOCATION_PREVIEW_RESPONSE_SCHEMA,
   })
   @ApiBadRequestResponse({ description: 'Body is malformed or contains unsupported fields' })
+  @ApiResponse({
+    status: 422,
+    description: 'No trusted snapshot opportunities match the supplied constraints',
+    schema: LOCAL_DEMO_ALLOCATION_NO_MATCH_RESPONSE_SCHEMA,
+  })
   @ApiUnauthorizedResponse({ description: 'Missing session, origin, or CSRF proof' })
   @ApiNotFoundResponse({ description: 'Synthetic local demo runtime is disabled' })
   @ApiResponse({ status: 503, description: 'A complete synthetic snapshot is unavailable' })
@@ -219,17 +254,25 @@ export class LocalDemoController {
     @Res({ passthrough: true }) response: HeaderWriter,
   ): Promise<LocalDemoAllocationPreviewResponse> {
     this.assertEnabled();
-    let presetId: ReturnType<typeof parseLocalDemoAllocationPreviewBody>['presetId'];
+    let selection: ReturnType<typeof parseLocalDemoAllocationPreviewBody>['selection'];
     try {
-      presetId = parseLocalDemoAllocationPreviewBody(body).presetId;
+      selection = parseLocalDemoAllocationPreviewBody(body).selection;
     } catch (error) {
       return badBody(error);
     }
     try {
       const correlation = currentJobCorrelationContext();
       if (correlation === undefined) throw new Error('Missing local demo correlation context');
-      return await this.allocations.preview(principal.accountId, correlation, presetId);
-    } catch {
+      return await this.allocations.preview(principal.accountId, correlation, selection);
+    } catch (error) {
+      if (error instanceof LocalDemoNoMatchingYieldOpportunitiesError) {
+        throw new UnprocessableEntityException({
+          statusCode: HttpStatus.UNPROCESSABLE_ENTITY,
+          error: 'Unprocessable Entity',
+          message: 'No trusted snapshot opportunities match this selection',
+          code: 'NO_MATCHING_YIELD_OPPORTUNITIES',
+        });
+      }
       return unavailable(response);
     }
   }

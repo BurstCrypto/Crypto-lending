@@ -10,6 +10,31 @@ import {
   parseLocalDemoPortfolioResponse,
   type LocalDemoBalanceApiResponse,
 } from './local-demo-portfolio-response';
+import {
+  LOCAL_DEMO_YIELD_CATALOG_PATH,
+  parseLocalDemoAllocationPreview as parseSnapshotAllocationPreview,
+  parseLocalDemoYieldCatalog,
+  validateLocalDemoAllocationSelection,
+  type LocalDemoAllocationPreview as LocalDemoSnapshotAllocationPreview,
+  type LocalDemoAllocationSelectionInput,
+  type LocalDemoYieldCatalog,
+} from './local-demo-yield';
+
+export {
+  LOCAL_DEMO_ALLOCATION_PRESETS as LOCAL_DEMO_YIELD_ALLOCATION_PRESETS,
+  LOCAL_DEMO_YIELD_ASSET_SYMBOLS,
+  LOCAL_DEMO_YIELD_NETWORK_IDS,
+  LOCAL_DEMO_YIELD_PROVIDER_IDS,
+} from './local-demo-yield';
+export type {
+  LocalDemoAllocationSelectionInput,
+  LocalDemoCustomYieldFilters,
+  LocalDemoYieldAssetSymbol,
+  LocalDemoYieldCatalog,
+  LocalDemoYieldFreshness,
+  LocalDemoYieldNetworkId,
+  LocalDemoYieldOpportunity,
+} from './local-demo-yield';
 
 export const LOCAL_DEMO_WALLETS_PATH = '/api/v1/local-demo/wallets';
 export const LOCAL_DEMO_PORTFOLIO_PATH = '/api/v1/local-demo/portfolio';
@@ -18,125 +43,19 @@ export const LOCAL_DEMO_ALLOCATION_PREVIEW_PATH = '/api/v1/local-demo/allocation
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const CANONICAL_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
 const FORBIDDEN_TEXT = /[\p{Cc}\p{Cf}\p{Cs}\p{Zl}\p{Zp}]/u;
-const USD_MINOR = /^(?:0|[1-9][0-9]{0,17})$/u;
 const MAX_REGISTERED_WALLETS = 2;
 const LOCAL_DEMO_CONNECTOR_NETWORKS = Object.freeze({
   EVM: 'eip155:11155111',
   SOLANA: 'solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1',
 } as const);
 
-export const LOCAL_DEMO_ALLOCATION_BUCKET_APY_BASIS_POINTS = Object.freeze({
-  LIQUID_RESERVE: 0,
-  CONSERVATIVE_YIELD: 400,
-  BALANCED_YIELD: 600,
-} as const);
-
-export const LOCAL_DEMO_ALLOCATION_PRESETS = Object.freeze([
-  Object.freeze({
-    id: 'MORE_LIQUID',
-    label: 'More liquid',
-    description: 'Keep most capital readily available while adding a smaller yield allocation.',
-    effectiveApyBasisPoints: 180,
-    percentages: Object.freeze({
-      LIQUID_RESERVE: 6000,
-      CONSERVATIVE_YIELD: 3000,
-      BALANCED_YIELD: 1000,
-    }),
-  }),
-  Object.freeze({
-    id: 'BALANCED',
-    label: 'Balanced blend',
-    description: 'Split capital between ready access and diversified synthetic yield.',
-    effectiveApyBasisPoints: 330,
-    percentages: Object.freeze({
-      LIQUID_RESERVE: 3000,
-      CONSERVATIVE_YIELD: 4500,
-      BALANCED_YIELD: 2500,
-    }),
-  }),
-  Object.freeze({
-    id: 'MORE_YIELD',
-    label: 'More yield',
-    description: 'Put more capital toward synthetic yield while retaining a liquid reserve.',
-    effectiveApyBasisPoints: 440,
-    percentages: Object.freeze({
-      LIQUID_RESERVE: 1500,
-      CONSERVATIVE_YIELD: 3500,
-      BALANCED_YIELD: 5000,
-    }),
-  }),
-] as const);
-
-const ALLOCATION_BUCKETS = Object.freeze([
-  'LIQUID_RESERVE',
-  'CONSERVATIVE_YIELD',
-  'BALANCED_YIELD',
-] as const);
-const ALLOCATION_DEDUCTION_CODES = Object.freeze([
-  'LIQUIDITY',
-  'CONVERSION',
-  'SLIPPAGE',
-  'NETWORK',
-  'ROUTING',
-] as const);
-const ALLOCATION_DEDUCTION_BASIS_POINTS = Object.freeze({
-  LIQUIDITY: 5000,
-  CONVERSION: 1000,
-  SLIPPAGE: 1000,
-  NETWORK: 1000,
-  ROUTING: 2000,
-} as const);
-const ALLOCATION_BUCKET_LABELS: Readonly<Record<LocalDemoAllocationBucket, string>> = Object.freeze(
-  {
-    LIQUID_RESERVE: 'Liquid reserve',
-    CONSERVATIVE_YIELD: 'Conservative yield',
-    BALANCED_YIELD: 'Balanced yield',
-  },
-);
-
-export type LocalDemoAllocationPresetId = (typeof LOCAL_DEMO_ALLOCATION_PRESETS)[number]['id'];
-export type LocalDemoAllocationBucket = (typeof ALLOCATION_BUCKETS)[number];
-export type LocalDemoAllocationDeductionCode = (typeof ALLOCATION_DEDUCTION_CODES)[number];
-
-export interface LocalDemoAllocationPreview {
-  readonly use: 'LOCAL_DEMO_ESTIMATE_ONLY';
-  readonly mayAuthorizeFinancialAction: false;
-  readonly preset: Readonly<{
-    id: LocalDemoAllocationPresetId;
-    label: string;
-    description: string;
-  }>;
-  readonly grossCapitalUsdMinor: string;
-  readonly allocations: readonly Readonly<{
-    bucket: LocalDemoAllocationBucket;
-    label: string;
-    percentageBasisPoints: number;
-    amountUsdMinor: string;
-    apyBasisPoints: number;
-  }>[];
-  readonly deductions: readonly Readonly<{
-    code: LocalDemoAllocationDeductionCode;
-    amountUsdMinor: string;
-  }>[];
-  readonly totalFeesUsdMinor: string;
-  readonly netPlannedCapitalUsdMinor: string;
-  readonly yieldProjection: Readonly<{
-    source: 'SYNTHETIC_FIXED_DEMO_RATES';
-    calculationMethod: 'SIMPLE_DAILY_APY_PRORATION_ON_NET_CAPITAL';
-    effectiveApyBasisPoints: number;
-    projectedAnnualYieldUsdMinor: string;
-    projectedAnnualNetGrowthUsdMinor: string;
-    breakEven: Readonly<{
-      status: 'AVAILABLE' | 'NOT_APPLICABLE' | 'UNAVAILABLE';
-      firstNetPositiveDay: number | null;
-    }>;
-  }>;
-  readonly asOf: string;
-}
-
 export type LocalDemoWalletNamespace = 'EVM' | 'SOLANA';
 export type LocalDemoApiErrorCode =
-  'CONFLICT' | 'INVALID_RESPONSE' | 'UNAUTHENTICATED' | 'UNAVAILABLE';
+  | 'CONFLICT'
+  | 'INVALID_RESPONSE'
+  | 'NO_MATCHING_YIELD_OPPORTUNITIES'
+  | 'UNAUTHENTICATED'
+  | 'UNAVAILABLE';
 
 export class LocalDemoApiError extends Error {
   constructor(
@@ -148,7 +67,9 @@ export class LocalDemoApiError extends Error {
         ? 'Authentication is required.'
         : code === 'CONFLICT'
           ? 'The local demo wallet is already in use.'
-          : 'The local demo is unavailable.',
+          : code === 'NO_MATCHING_YIELD_OPPORTUNITIES'
+            ? 'No local yield snapshot opportunities matched those filters.'
+            : 'The local demo is unavailable.',
     );
     this.name = 'LocalDemoApiError';
   }
@@ -212,324 +133,6 @@ function safeText(value: unknown, maximumLength: number): string {
     return fail();
   }
   return value;
-}
-
-function canonicalUsdMinor(value: unknown): string {
-  if (typeof value !== 'string' || !USD_MINOR.test(value)) return fail();
-  return value;
-}
-
-function canonicalTimestamp(value: unknown): string {
-  if (typeof value !== 'string' || !CANONICAL_TIMESTAMP.test(value)) return fail();
-  const parsed = new Date(value);
-  if (!Number.isFinite(parsed.getTime()) || parsed.toISOString() !== value) return fail();
-  return value;
-}
-
-function exactArray(value: unknown, expectedLength: number): readonly unknown[] {
-  try {
-    if (!Array.isArray(value) || value.length !== expectedLength) return fail();
-    const descriptors = Object.getOwnPropertyDescriptors(value);
-    const expectedKeys = [
-      ...new Array<string>(expectedLength).fill('').map((_, index) => String(index)),
-      'length',
-    ];
-    if (
-      Reflect.ownKeys(descriptors).length !== expectedKeys.length ||
-      Reflect.ownKeys(descriptors).some(
-        (key) => typeof key !== 'string' || !expectedKeys.includes(key),
-      ) ||
-      expectedKeys.some(
-        (key) => !Object.hasOwn(descriptors, key) || !('value' in descriptors[key]!),
-      )
-    ) {
-      return fail();
-    }
-    return Object.freeze(
-      expectedKeys
-        .slice(0, -1)
-        .map((key) => ('value' in descriptors[key]! ? descriptors[key]!.value : undefined)),
-    );
-  } catch (error) {
-    if (error instanceof LocalDemoApiError) throw error;
-    return fail();
-  }
-}
-
-function allocationPreset(value: unknown) {
-  if (typeof value !== 'string') return fail();
-  const preset = LOCAL_DEMO_ALLOCATION_PRESETS.find(({ id }) => id === value);
-  return preset ?? fail();
-}
-
-function allocationBucket(value: unknown): LocalDemoAllocationBucket {
-  if (
-    typeof value !== 'string' ||
-    !ALLOCATION_BUCKETS.includes(value as LocalDemoAllocationBucket)
-  ) {
-    return fail();
-  }
-  return value as LocalDemoAllocationBucket;
-}
-
-function allocationDeductionCode(value: unknown): LocalDemoAllocationDeductionCode {
-  if (
-    typeof value !== 'string' ||
-    !ALLOCATION_DEDUCTION_CODES.includes(value as LocalDemoAllocationDeductionCode)
-  ) {
-    return fail();
-  }
-  return value as LocalDemoAllocationDeductionCode;
-}
-
-function distributeUsdMinor(total: bigint, basisPoints: readonly number[]): readonly bigint[] {
-  const denominator = 10_000n;
-  const amounts = basisPoints.map((basisPoint) => (total * BigInt(basisPoint)) / denominator);
-  const remainders = basisPoints.map((basisPoint, index) => ({
-    index,
-    value: (total * BigInt(basisPoint)) % denominator,
-  }));
-  let undistributed = total - amounts.reduce((sum, amount) => sum + amount, 0n);
-  remainders.sort((left, right) =>
-    left.value === right.value ? left.index - right.index : left.value > right.value ? -1 : 1,
-  );
-  for (const { index } of remainders) {
-    if (undistributed === 0n) break;
-    const amount = amounts[index];
-    if (amount === undefined) return fail();
-    amounts[index] = amount + 1n;
-    undistributed -= 1n;
-  }
-  if (undistributed !== 0n) return fail();
-  return Object.freeze(amounts);
-}
-
-export function parseLocalDemoAllocationPreview(value: unknown): LocalDemoAllocationPreview {
-  try {
-    const record = ownDataRecord(value, [
-      'use',
-      'mayAuthorizeFinancialAction',
-      'preset',
-      'grossCapitalUsdMinor',
-      'allocations',
-      'deductions',
-      'totalFeesUsdMinor',
-      'netPlannedCapitalUsdMinor',
-      'yieldProjection',
-      'asOf',
-    ]);
-    if (record.use !== 'LOCAL_DEMO_ESTIMATE_ONLY' || record.mayAuthorizeFinancialAction !== false) {
-      return fail();
-    }
-
-    const presetRecord = ownDataRecord(record.preset, ['id', 'label', 'description']);
-    const presetDefinition = allocationPreset(presetRecord.id);
-    if (
-      presetRecord.label !== presetDefinition.label ||
-      presetRecord.description !== presetDefinition.description
-    ) {
-      return fail();
-    }
-    const preset = Object.freeze({
-      id: presetDefinition.id,
-      label: presetDefinition.label,
-      description: presetDefinition.description,
-    });
-
-    const grossCapitalUsdMinor = canonicalUsdMinor(record.grossCapitalUsdMinor);
-    const grossCapital = BigInt(grossCapitalUsdMinor);
-    const expectedAllocationAmounts = distributeUsdMinor(
-      grossCapital,
-      ALLOCATION_BUCKETS.map((bucket) => presetDefinition.percentages[bucket]),
-    );
-    const allocations = Object.freeze(
-      exactArray(record.allocations, ALLOCATION_BUCKETS.length).map((value) => {
-        const allocation = ownDataRecord(value, [
-          'bucket',
-          'label',
-          'percentageBasisPoints',
-          'amountUsdMinor',
-          'apyBasisPoints',
-        ]);
-        const bucket = allocationBucket(allocation.bucket);
-        const percentageBasisPoints = presetDefinition.percentages[bucket];
-        const apyBasisPoints = LOCAL_DEMO_ALLOCATION_BUCKET_APY_BASIS_POINTS[bucket];
-        if (
-          allocation.label !== ALLOCATION_BUCKET_LABELS[bucket] ||
-          allocation.percentageBasisPoints !== percentageBasisPoints ||
-          allocation.apyBasisPoints !== apyBasisPoints
-        ) {
-          return fail();
-        }
-        const amountUsdMinor = canonicalUsdMinor(allocation.amountUsdMinor);
-        const expectedAmount = expectedAllocationAmounts[ALLOCATION_BUCKETS.indexOf(bucket)];
-        if (expectedAmount === undefined || BigInt(amountUsdMinor) !== expectedAmount) {
-          return fail();
-        }
-        return Object.freeze({
-          bucket,
-          label: ALLOCATION_BUCKET_LABELS[bucket],
-          percentageBasisPoints,
-          amountUsdMinor,
-          apyBasisPoints,
-        });
-      }),
-    );
-    if (
-      new Set(allocations.map(({ bucket }) => bucket)).size !== ALLOCATION_BUCKETS.length ||
-      allocations.reduce((total, allocation) => total + BigInt(allocation.amountUsdMinor), 0n) !==
-        grossCapital
-    ) {
-      return fail();
-    }
-
-    const nonReserveCapital = allocations
-      .filter(({ bucket }) => bucket !== 'LIQUID_RESERVE')
-      .reduce((total, allocation) => total + BigInt(allocation.amountUsdMinor), 0n);
-    const expectedTotalFees = nonReserveCapital / 100n;
-    const expectedDeductionAmounts = distributeUsdMinor(
-      expectedTotalFees,
-      ALLOCATION_DEDUCTION_CODES.map((code) => ALLOCATION_DEDUCTION_BASIS_POINTS[code]),
-    );
-    const deductions = Object.freeze(
-      exactArray(record.deductions, ALLOCATION_DEDUCTION_CODES.length).map((value) => {
-        const deduction = ownDataRecord(value, ['code', 'amountUsdMinor']);
-        const code = allocationDeductionCode(deduction.code);
-        const amountUsdMinor = canonicalUsdMinor(deduction.amountUsdMinor);
-        const expectedAmount = expectedDeductionAmounts[ALLOCATION_DEDUCTION_CODES.indexOf(code)];
-        if (expectedAmount === undefined || BigInt(amountUsdMinor) !== expectedAmount) {
-          return fail();
-        }
-        return Object.freeze({
-          code,
-          amountUsdMinor,
-        });
-      }),
-    );
-    if (new Set(deductions.map(({ code }) => code)).size !== ALLOCATION_DEDUCTION_CODES.length) {
-      return fail();
-    }
-    const totalFeesUsdMinor = canonicalUsdMinor(record.totalFeesUsdMinor);
-    const totalFees = BigInt(totalFeesUsdMinor);
-    if (
-      totalFees !== expectedTotalFees ||
-      deductions.reduce((total, deduction) => total + BigInt(deduction.amountUsdMinor), 0n) !==
-        totalFees
-    ) {
-      return fail();
-    }
-    const netPlannedCapitalUsdMinor = canonicalUsdMinor(record.netPlannedCapitalUsdMinor);
-    if (
-      totalFees > grossCapital ||
-      grossCapital - totalFees !== BigInt(netPlannedCapitalUsdMinor)
-    ) {
-      return fail();
-    }
-
-    const derivedEffectiveApyNumerator = ALLOCATION_BUCKETS.reduce(
-      (total, bucket) =>
-        total +
-        BigInt(presetDefinition.percentages[bucket]) *
-          BigInt(LOCAL_DEMO_ALLOCATION_BUCKET_APY_BASIS_POINTS[bucket]),
-      0n,
-    );
-    if (
-      derivedEffectiveApyNumerator / 10_000n !==
-      BigInt(presetDefinition.effectiveApyBasisPoints)
-    ) {
-      return fail();
-    }
-    const yieldRecord = ownDataRecord(record.yieldProjection, [
-      'source',
-      'calculationMethod',
-      'effectiveApyBasisPoints',
-      'projectedAnnualYieldUsdMinor',
-      'projectedAnnualNetGrowthUsdMinor',
-      'breakEven',
-    ]);
-    if (
-      yieldRecord.source !== 'SYNTHETIC_FIXED_DEMO_RATES' ||
-      yieldRecord.calculationMethod !== 'SIMPLE_DAILY_APY_PRORATION_ON_NET_CAPITAL' ||
-      yieldRecord.effectiveApyBasisPoints !== presetDefinition.effectiveApyBasisPoints
-    ) {
-      return fail();
-    }
-    const netPlannedCapital = BigInt(netPlannedCapitalUsdMinor);
-    const effectiveApyBasisPoints = presetDefinition.effectiveApyBasisPoints;
-    const projectedAnnualYield = (netPlannedCapital * BigInt(effectiveApyBasisPoints)) / 10_000n;
-    const projectedAnnualYieldUsdMinor = canonicalUsdMinor(
-      yieldRecord.projectedAnnualYieldUsdMinor,
-    );
-    if (
-      BigInt(projectedAnnualYieldUsdMinor) !== projectedAnnualYield ||
-      projectedAnnualYield < totalFees
-    ) {
-      return fail();
-    }
-    const projectedAnnualNetGrowthUsdMinor = canonicalUsdMinor(
-      yieldRecord.projectedAnnualNetGrowthUsdMinor,
-    );
-    if (BigInt(projectedAnnualNetGrowthUsdMinor) !== projectedAnnualYield - totalFees) {
-      return fail();
-    }
-
-    const breakEvenRecord = ownDataRecord(yieldRecord.breakEven, ['status', 'firstNetPositiveDay']);
-    const dailyYieldDenominator = netPlannedCapital * BigInt(effectiveApyBasisPoints);
-    if (dailyYieldDenominator > 0n) {
-      const numerator = (totalFees + 1n) * 10_000n * 365n;
-      const firstNetPositiveDay = (numerator + dailyYieldDenominator - 1n) / dailyYieldDenominator;
-      if (
-        firstNetPositiveDay > BigInt(Number.MAX_SAFE_INTEGER) ||
-        breakEvenRecord.status !== 'AVAILABLE' ||
-        typeof breakEvenRecord.firstNetPositiveDay !== 'number' ||
-        !Number.isSafeInteger(breakEvenRecord.firstNetPositiveDay) ||
-        breakEvenRecord.firstNetPositiveDay !== Number(firstNetPositiveDay)
-      ) {
-        return fail();
-      }
-    } else if (totalFees === 0n) {
-      if (
-        breakEvenRecord.status !== 'NOT_APPLICABLE' ||
-        breakEvenRecord.firstNetPositiveDay !== null
-      ) {
-        return fail();
-      }
-    } else {
-      if (
-        breakEvenRecord.status !== 'UNAVAILABLE' ||
-        breakEvenRecord.firstNetPositiveDay !== null
-      ) {
-        return fail();
-      }
-    }
-    const yieldProjection = Object.freeze({
-      source: 'SYNTHETIC_FIXED_DEMO_RATES' as const,
-      calculationMethod: 'SIMPLE_DAILY_APY_PRORATION_ON_NET_CAPITAL' as const,
-      effectiveApyBasisPoints,
-      projectedAnnualYieldUsdMinor,
-      projectedAnnualNetGrowthUsdMinor,
-      breakEven: Object.freeze({
-        status: breakEvenRecord.status as 'AVAILABLE' | 'NOT_APPLICABLE' | 'UNAVAILABLE',
-        firstNetPositiveDay: breakEvenRecord.firstNetPositiveDay as number | null,
-      }),
-    });
-
-    return Object.freeze({
-      use: 'LOCAL_DEMO_ESTIMATE_ONLY',
-      mayAuthorizeFinancialAction: false,
-      preset,
-      grossCapitalUsdMinor,
-      allocations,
-      deductions,
-      totalFeesUsdMinor,
-      netPlannedCapitalUsdMinor,
-      yieldProjection,
-      asOf: canonicalTimestamp(record.asOf),
-    });
-  } catch (error) {
-    if (error instanceof LocalDemoApiError) throw error;
-    return fail();
-  }
 }
 
 function parseProjection(value: unknown): LocalDemoWalletProjection {
@@ -636,6 +239,70 @@ function requestInit(
   };
 }
 
+function previewMatchesSelection(
+  preview: LocalDemoSnapshotAllocationPreview,
+  selection: LocalDemoAllocationSelectionInput,
+): boolean {
+  if (selection.kind === 'PRESET') {
+    return preview.selection.kind === 'PRESET' && preview.selection.presetId === selection.presetId;
+  }
+  if (preview.selection.kind !== 'CUSTOM' || preview.selection.filters === null) return false;
+  const expected = selection.filters;
+  const actual = preview.selection.filters;
+  return (
+    preview.selection.presetId === null &&
+    preview.selection.liquidReserveBasisPoints === selection.liquidReserveBasisPoints &&
+    expected.minimumApyBasisPoints === actual.minimumApyBasisPoints &&
+    expected.minimumTvlUsdMinor === actual.minimumTvlUsdMinor &&
+    expected.minimumExitLiquidityUsdMinor === actual.minimumExitLiquidityUsdMinor &&
+    expected.maximumUtilizationBasisPoints === actual.maximumUtilizationBasisPoints &&
+    expected.assetSymbols.length === actual.assetSymbols.length &&
+    expected.assetSymbols.every((value, index) => value === actual.assetSymbols[index]) &&
+    expected.providerIds.length === actual.providerIds.length &&
+    expected.providerIds.every((value, index) => value === actual.providerIds[index]) &&
+    expected.networkIds.length === actual.networkIds.length &&
+    expected.networkIds.every((value, index) => value === actual.networkIds[index])
+  );
+}
+
+function parseNoMatchingYieldResponse(value: unknown): void {
+  const record = ownDataRecord(value, ['statusCode', 'error', 'message', 'code']);
+  if (
+    record.statusCode !== 422 ||
+    record.error !== 'Unprocessable Entity' ||
+    record.message !== 'No trusted snapshot opportunities match this selection' ||
+    record.code !== 'NO_MATCHING_YIELD_OPPORTUNITIES'
+  ) {
+    return fail();
+  }
+}
+
+function serializeClosedStringArray(values: readonly string[]): string {
+  let result = '[';
+  for (let index = 0; index < values.length; index += 1) {
+    if (index > 0) result += ',';
+    result += `"${values[index]}"`;
+  }
+  return `${result}]`;
+}
+
+function serializeAllocationSelection(selection: LocalDemoAllocationSelectionInput): string {
+  if (selection.kind === 'PRESET') {
+    return `{"selection":{"kind":"PRESET","presetId":"${selection.presetId}"}}`;
+  }
+  const filters = selection.filters;
+  return (
+    `{"selection":{"kind":"CUSTOM","liquidReserveBasisPoints":${selection.liquidReserveBasisPoints},` +
+    `"filters":{"assetSymbols":${serializeClosedStringArray(filters.assetSymbols)},` +
+    `"providerIds":${serializeClosedStringArray(filters.providerIds)},` +
+    `"networkIds":${serializeClosedStringArray(filters.networkIds)},` +
+    `"minimumApyBasisPoints":${filters.minimumApyBasisPoints},` +
+    `"minimumTvlUsdMinor":"${filters.minimumTvlUsdMinor}",` +
+    `"minimumExitLiquidityUsdMinor":"${filters.minimumExitLiquidityUsdMinor}",` +
+    `"maximumUtilizationBasisPoints":${filters.maximumUtilizationBasisPoints}}}}`
+  );
+}
+
 export class LocalDemoApiClient {
   readonly #cookieHeader: string | (() => string);
   readonly #fetch: AuthenticationFetch;
@@ -705,22 +372,55 @@ export class LocalDemoApiClient {
     }
   }
 
-  async previewAllocation(
-    presetId: LocalDemoAllocationPresetId,
-    signal?: AbortSignal,
-  ): Promise<LocalDemoAllocationPreview> {
-    allocationPreset(presetId);
-    const response = await this.#unsafeRequest(
-      LOCAL_DEMO_ALLOCATION_PREVIEW_PATH,
-      'POST',
-      JSON.stringify({ presetId }),
+  async readYieldCatalog(signal?: AbortSignal): Promise<LocalDemoYieldCatalog> {
+    const response = await this.#request(
+      LOCAL_DEMO_YIELD_CATALOG_PATH,
+      requestInit('GET', signal),
       signal,
     );
     if (response.status === 401) return fail('UNAUTHENTICATED');
     if (response.status !== 200) return fail('UNAVAILABLE', retryAfterSeconds(response));
-    const preview = parseLocalDemoAllocationPreview(await this.#json(response));
-    if (preview.preset.id !== presetId) return fail();
-    return preview;
+    try {
+      return parseLocalDemoYieldCatalog(await this.#json(response));
+    } catch {
+      return fail();
+    }
+  }
+
+  async previewAllocation(
+    requestedSelection: LocalDemoAllocationSelectionInput,
+    signal?: AbortSignal,
+  ): Promise<LocalDemoSnapshotAllocationPreview> {
+    let selection: LocalDemoAllocationSelectionInput;
+    try {
+      selection = validateLocalDemoAllocationSelection(requestedSelection);
+    } catch {
+      return fail();
+    }
+    const response = await this.#unsafeRequest(
+      LOCAL_DEMO_ALLOCATION_PREVIEW_PATH,
+      'POST',
+      serializeAllocationSelection(selection),
+      signal,
+    );
+    if (response.status === 401) return fail('UNAUTHENTICATED');
+    if (response.status === 422) {
+      try {
+        parseNoMatchingYieldResponse(await this.#json(response));
+      } catch {
+        return fail();
+      }
+      return fail('NO_MATCHING_YIELD_OPPORTUNITIES');
+    }
+    if (response.status !== 200) return fail('UNAVAILABLE', retryAfterSeconds(response));
+    try {
+      const preview = parseSnapshotAllocationPreview(await this.#json(response));
+      if (!previewMatchesSelection(preview, selection)) return fail();
+      return preview;
+    } catch (error) {
+      if (error instanceof LocalDemoApiError) throw error;
+      return fail();
+    }
   }
 
   async #unsafeRequest(

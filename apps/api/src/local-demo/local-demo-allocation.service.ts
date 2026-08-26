@@ -3,6 +3,12 @@ import { Injectable } from '@nestjs/common';
 import type { AccountId } from '../accounts/domain/account-profile';
 import type { JobCorrelationContext } from '../infrastructure/outbox/job-envelope';
 import { LocalDemoPortfolioService } from './local-demo-portfolio.service';
+import {
+  LocalDemoYieldCatalogService,
+  type LocalDemoCustomYieldFilters,
+  type LocalDemoYieldCatalogFreshness,
+  type LocalDemoYieldOpportunitySummary,
+} from './local-demo-yield-catalog.service';
 
 export const LOCAL_DEMO_ALLOCATION_PRESET_IDS = Object.freeze([
   'MORE_LIQUID',
@@ -12,25 +18,24 @@ export const LOCAL_DEMO_ALLOCATION_PRESET_IDS = Object.freeze([
 
 export type LocalDemoAllocationPresetId = (typeof LOCAL_DEMO_ALLOCATION_PRESET_IDS)[number];
 
-export const LOCAL_DEMO_ALLOCATION_BUCKETS = Object.freeze([
-  'LIQUID_RESERVE',
-  'CONSERVATIVE_YIELD',
-  'BALANCED_YIELD',
-] as const);
+export const LOCAL_DEMO_ALLOCATION_SELECTION_KINDS = Object.freeze(['PRESET', 'CUSTOM'] as const);
+export const LOCAL_DEMO_MAX_LIQUID_RESERVE_BASIS_POINTS = 9_900 as const;
 
-export type LocalDemoAllocationBucket = (typeof LOCAL_DEMO_ALLOCATION_BUCKETS)[number];
+export type LocalDemoAllocationSelection =
+  | Readonly<{
+      kind: 'PRESET';
+      presetId: LocalDemoAllocationPresetId;
+    }>
+  | Readonly<{
+      kind: 'CUSTOM';
+      liquidReserveBasisPoints: number;
+      filters: LocalDemoCustomYieldFilters;
+    }>;
 
-export const LOCAL_DEMO_ALLOCATION_APY_BASIS_POINTS: Readonly<
-  Record<LocalDemoAllocationBucket, number>
-> = Object.freeze({
-  LIQUID_RESERVE: 0,
-  CONSERVATIVE_YIELD: 400,
-  BALANCED_YIELD: 600,
-});
-
-export const LOCAL_DEMO_YIELD_PROJECTION_SOURCE = 'SYNTHETIC_FIXED_DEMO_RATES' as const;
+export const LOCAL_DEMO_YIELD_PROJECTION_SOURCE = 'MORPHO_PUBLIC_API_SNAPSHOT' as const;
 export const LOCAL_DEMO_YIELD_CALCULATION_METHOD =
   'SIMPLE_DAILY_APY_PRORATION_ON_NET_CAPITAL' as const;
+export const LOCAL_DEMO_FEE_ESTIMATE_SOURCE = 'LOCAL_DEMO_ACTION_COST_ASSUMPTION' as const;
 
 export type LocalDemoBreakEvenStatus = 'AVAILABLE' | 'NOT_APPLICABLE' | 'UNAVAILABLE';
 
@@ -49,46 +54,28 @@ interface AllocationPresetDefinition {
   readonly id: LocalDemoAllocationPresetId;
   readonly label: string;
   readonly description: string;
-  readonly percentageBasisPoints: Readonly<Record<LocalDemoAllocationBucket, number>>;
+  readonly liquidReserveBasisPoints: number;
 }
-
-const BUCKET_LABELS: Readonly<Record<LocalDemoAllocationBucket, string>> = Object.freeze({
-  LIQUID_RESERVE: 'Liquid reserve',
-  CONSERVATIVE_YIELD: 'Conservative yield',
-  BALANCED_YIELD: 'Balanced yield',
-});
 
 const PRESETS: Readonly<Record<LocalDemoAllocationPresetId, AllocationPresetDefinition>> =
   Object.freeze({
     MORE_LIQUID: Object.freeze({
       id: 'MORE_LIQUID',
       label: 'More liquid',
-      description: 'Keep most capital readily available while adding a smaller yield allocation.',
-      percentageBasisPoints: Object.freeze({
-        LIQUID_RESERVE: 6_000,
-        CONSERVATIVE_YIELD: 3_000,
-        BALANCED_YIELD: 1_000,
-      }),
+      description: 'Keep 60% readily available and divide the remainder across snapshot markets.',
+      liquidReserveBasisPoints: 6_000,
     }),
     BALANCED: Object.freeze({
       id: 'BALANCED',
       label: 'Balanced blend',
-      description: 'Split capital between ready access and diversified synthetic yield.',
-      percentageBasisPoints: Object.freeze({
-        LIQUID_RESERVE: 3_000,
-        CONSERVATIVE_YIELD: 4_500,
-        BALANCED_YIELD: 2_500,
-      }),
+      description: 'Keep 30% readily available and divide the remainder across snapshot markets.',
+      liquidReserveBasisPoints: 3_000,
     }),
     MORE_YIELD: Object.freeze({
       id: 'MORE_YIELD',
       label: 'More yield',
-      description: 'Put more capital toward synthetic yield while retaining a liquid reserve.',
-      percentageBasisPoints: Object.freeze({
-        LIQUID_RESERVE: 1_500,
-        CONSERVATIVE_YIELD: 3_500,
-        BALANCED_YIELD: 5_000,
-      }),
+      description: 'Keep 15% readily available and divide the remainder across snapshot markets.',
+      liquidReserveBasisPoints: 1_500,
     }),
   });
 
@@ -104,23 +91,41 @@ const DEDUCTION_BASIS_POINTS: Readonly<Record<LocalDemoAllocationDeductionCode, 
 export interface LocalDemoAllocationPreviewResponse {
   readonly use: 'LOCAL_DEMO_ESTIMATE_ONLY';
   readonly mayAuthorizeFinancialAction: false;
-  readonly preset: Readonly<{
-    id: LocalDemoAllocationPresetId;
+  readonly selection: Readonly<{
+    kind: 'PRESET' | 'CUSTOM';
+    presetId: LocalDemoAllocationPresetId | null;
     label: string;
     description: string;
+    liquidReserveBasisPoints: number;
+    filters: LocalDemoCustomYieldFilters | null;
+  }>;
+  readonly catalog: Readonly<{
+    snapshotId: string;
+    capturedAt: string;
+    staleAfter: string;
+    freshness: LocalDemoYieldCatalogFreshness;
+    staleBehavior: 'LABEL_STALE_KEEP_NON_EXECUTABLE';
+    riskClassificationAvailable: false;
+    riskClassification: 'NOT_ASSESSED';
+    matchedOpportunityCount: number;
+    selectedOpportunityCount: number;
   }>;
   readonly grossCapitalUsdMinor: string;
   readonly allocations: readonly Readonly<{
-    bucket: LocalDemoAllocationBucket;
+    bucket: 'LIQUID_RESERVE' | 'YIELD_OPPORTUNITY';
+    allocationId: string;
     label: string;
     percentageBasisPoints: number;
-    apyBasisPoints: number;
+    baseApyBasisPoints: number;
+    baseApyRateDecimal: string;
     amountUsdMinor: string;
+    opportunity: LocalDemoYieldOpportunitySummary | null;
   }>[];
   readonly deductions: readonly Readonly<{
     code: LocalDemoAllocationDeductionCode;
     amountUsdMinor: string;
   }>[];
+  readonly feeEstimateSource: typeof LOCAL_DEMO_FEE_ESTIMATE_SOURCE;
   readonly totalFeesUsdMinor: string;
   readonly netPlannedCapitalUsdMinor: string;
   readonly yieldProjection: Readonly<{
@@ -138,35 +143,60 @@ export interface LocalDemoAllocationPreviewResponse {
 }
 
 /**
- * Produces a deterministic estimate for the synthetic local demo. This service
- * only projects the authenticated portfolio snapshot in memory: it has no
- * operation, transaction, provider, network, or persistence dependency.
+ * Projects an authenticated portfolio against a checked-in Morpho observation.
+ * It performs no live provider request and creates no user-authorized financial
+ * operation, quote, reservation, persistence record, or public-chain transaction.
  */
 @Injectable()
 export class LocalDemoAllocationService {
-  constructor(private readonly portfolio: LocalDemoPortfolioService) {}
+  constructor(
+    private readonly portfolio: LocalDemoPortfolioService,
+    private readonly yieldCatalog: LocalDemoYieldCatalogService,
+  ) {}
 
   async preview(
     accountId: AccountId,
     correlation: JobCorrelationContext,
-    presetId: LocalDemoAllocationPresetId,
+    requestedSelection: LocalDemoAllocationSelection,
   ): Promise<LocalDemoAllocationPreviewResponse> {
     const portfolio = await this.portfolio.read(accountId, correlation);
     const grossCapital = BigInt(portfolio.buyingPower.amountUsdMinor);
-    const preset = PRESETS[presetId];
-    const allocationAmounts = distribute(
-      grossCapital,
-      LOCAL_DEMO_ALLOCATION_BUCKETS.map((bucket) => preset.percentageBasisPoints[bucket]),
+    const selection = selectionDefinition(requestedSelection);
+    const catalogSelection = this.yieldCatalog.select(selection.filters);
+    const opportunities = catalogSelection.selectedOpportunities;
+    const yieldWeights = divideEvenly(
+      10_000 - selection.liquidReserveBasisPoints,
+      opportunities.length,
     );
-    const allocations = LOCAL_DEMO_ALLOCATION_BUCKETS.map((bucket, index) =>
+    const percentageBasisPoints = Object.freeze([
+      selection.liquidReserveBasisPoints,
+      ...yieldWeights,
+    ]);
+    const allocationAmounts = distribute(grossCapital, percentageBasisPoints);
+    const allocations: LocalDemoAllocationPreviewResponse['allocations'] = Object.freeze([
       Object.freeze({
-        bucket,
-        label: BUCKET_LABELS[bucket],
-        percentageBasisPoints: preset.percentageBasisPoints[bucket],
-        apyBasisPoints: LOCAL_DEMO_ALLOCATION_APY_BASIS_POINTS[bucket],
-        amountUsdMinor: requiredAmount(allocationAmounts, index).toString(),
+        bucket: 'LIQUID_RESERVE' as const,
+        allocationId: 'LIQUID_RESERVE',
+        label: 'Liquid reserve',
+        percentageBasisPoints: selection.liquidReserveBasisPoints,
+        baseApyBasisPoints: 0,
+        baseApyRateDecimal: '0',
+        amountUsdMinor: requiredAmount(allocationAmounts, 0).toString(),
+        opportunity: null,
       }),
-    );
+      ...opportunities.map((opportunity, index) =>
+        Object.freeze({
+          bucket: 'YIELD_OPPORTUNITY' as const,
+          allocationId: opportunity.opportunityId,
+          label: `${opportunity.asset.symbol} on ${opportunity.protocol.name} (${opportunity.network.name})`,
+          percentageBasisPoints: requiredNumber(yieldWeights, index),
+          baseApyBasisPoints: opportunity.apy.baseBasisPoints,
+          baseApyRateDecimal: opportunity.apy.baseRateDecimal,
+          amountUsdMinor: requiredAmount(allocationAmounts, index + 1).toString(),
+          opportunity,
+        }),
+      ),
+    ]);
 
     const nonReserveCapital = allocationAmounts
       .slice(1)
@@ -176,14 +206,16 @@ export class LocalDemoAllocationService {
       totalFees,
       LOCAL_DEMO_ALLOCATION_DEDUCTION_CODES.map((code) => DEDUCTION_BASIS_POINTS[code]),
     );
-    const deductions = LOCAL_DEMO_ALLOCATION_DEDUCTION_CODES.map((code, index) =>
-      Object.freeze({
-        code,
-        amountUsdMinor: requiredAmount(deductionAmounts, index).toString(),
-      }),
+    const deductions = Object.freeze(
+      LOCAL_DEMO_ALLOCATION_DEDUCTION_CODES.map((code, index) =>
+        Object.freeze({
+          code,
+          amountUsdMinor: requiredAmount(deductionAmounts, index).toString(),
+        }),
+      ),
     );
     const netPlannedCapital = grossCapital - totalFees;
-    const effectiveApyBasisPoints = calculateEffectiveApyBasisPoints(preset);
+    const effectiveApyBasisPoints = calculateEffectiveApyBasisPoints(allocations);
     const annualYieldNumerator = netPlannedCapital * BigInt(effectiveApyBasisPoints);
     const projectedAnnualYield = annualYieldNumerator / 10_000n;
     const projectedAnnualNetGrowth = projectedAnnualYield - totalFees;
@@ -194,14 +226,22 @@ export class LocalDemoAllocationService {
     return Object.freeze({
       use: 'LOCAL_DEMO_ESTIMATE_ONLY',
       mayAuthorizeFinancialAction: false,
-      preset: Object.freeze({
-        id: preset.id,
-        label: preset.label,
-        description: preset.description,
+      selection,
+      catalog: Object.freeze({
+        snapshotId: catalogSelection.metadata.snapshotId,
+        capturedAt: catalogSelection.metadata.capturedAt,
+        staleAfter: catalogSelection.metadata.staleAfter,
+        freshness: catalogSelection.metadata.freshness,
+        staleBehavior: 'LABEL_STALE_KEEP_NON_EXECUTABLE',
+        riskClassificationAvailable: false,
+        riskClassification: 'NOT_ASSESSED',
+        matchedOpportunityCount: catalogSelection.matchedOpportunities.length,
+        selectedOpportunityCount: opportunities.length,
       }),
       grossCapitalUsdMinor: grossCapital.toString(),
-      allocations: Object.freeze(allocations),
-      deductions: Object.freeze(deductions),
+      allocations,
+      deductions,
+      feeEstimateSource: LOCAL_DEMO_FEE_ESTIMATE_SOURCE,
       totalFeesUsdMinor: totalFees.toString(),
       netPlannedCapitalUsdMinor: netPlannedCapital.toString(),
       yieldProjection: Object.freeze({
@@ -217,12 +257,69 @@ export class LocalDemoAllocationService {
   }
 }
 
-function calculateEffectiveApyBasisPoints(preset: AllocationPresetDefinition): number {
-  const weightedBasisPoints = LOCAL_DEMO_ALLOCATION_BUCKETS.reduce(
-    (total, bucket) =>
-      total +
-      BigInt(preset.percentageBasisPoints[bucket]) *
-        BigInt(LOCAL_DEMO_ALLOCATION_APY_BASIS_POINTS[bucket]),
+function copyFilters(filters: LocalDemoCustomYieldFilters): LocalDemoCustomYieldFilters {
+  return Object.freeze({
+    assetSymbols: Object.freeze([...filters.assetSymbols]),
+    providerIds: Object.freeze([...filters.providerIds]),
+    networkIds: Object.freeze([...filters.networkIds]),
+    minimumApyBasisPoints: filters.minimumApyBasisPoints,
+    minimumTvlUsdMinor: filters.minimumTvlUsdMinor,
+    minimumExitLiquidityUsdMinor: filters.minimumExitLiquidityUsdMinor,
+    maximumUtilizationBasisPoints: filters.maximumUtilizationBasisPoints,
+  });
+}
+
+function selectionDefinition(
+  selection: LocalDemoAllocationSelection,
+): LocalDemoAllocationPreviewResponse['selection'] {
+  if (selection.kind === 'PRESET') {
+    const preset = PRESETS[selection.presetId];
+    if (!preset) throw new TypeError('unsupported local demo allocation preset');
+    return Object.freeze({
+      kind: 'PRESET',
+      presetId: preset.id,
+      label: preset.label,
+      description: preset.description,
+      liquidReserveBasisPoints: preset.liquidReserveBasisPoints,
+      filters: null,
+    });
+  }
+  if (
+    selection.kind !== 'CUSTOM' ||
+    !Number.isSafeInteger(selection.liquidReserveBasisPoints) ||
+    selection.liquidReserveBasisPoints < 0 ||
+    selection.liquidReserveBasisPoints > LOCAL_DEMO_MAX_LIQUID_RESERVE_BASIS_POINTS
+  ) {
+    throw new TypeError('invalid local demo allocation selection');
+  }
+  return Object.freeze({
+    kind: 'CUSTOM',
+    presetId: null,
+    label: 'Custom yield filter',
+    description:
+      'Apply asset, provider, network, APY, TVL, liquidity, and utilization constraints.',
+    liquidReserveBasisPoints: selection.liquidReserveBasisPoints,
+    filters: copyFilters(selection.filters),
+  });
+}
+
+function divideEvenly(total: number, count: number): readonly number[] {
+  if (!Number.isSafeInteger(total) || total < 0 || !Number.isSafeInteger(count) || count < 1) {
+    throw new TypeError('invalid local demo allocation distribution');
+  }
+  const quotient = Math.floor(total / count);
+  const remainder = total % count;
+  return Object.freeze(
+    Array.from({ length: count }, (_, index) => quotient + (index < remainder ? 1 : 0)),
+  );
+}
+
+function calculateEffectiveApyBasisPoints(
+  allocations: LocalDemoAllocationPreviewResponse['allocations'],
+): number {
+  const weightedBasisPoints = allocations.reduce(
+    (total, allocation) =>
+      total + BigInt(allocation.percentageBasisPoints) * BigInt(allocation.baseApyBasisPoints),
     0n,
   );
   const result = weightedBasisPoints / 10_000n;
@@ -253,12 +350,18 @@ function ceilDivide(dividend: bigint, divisor: bigint): bigint {
   return (dividend + divisor - 1n) / divisor;
 }
 
-/**
- * Largest-remainder apportionment keeps every value in exact integer cents.
- * Equal fractional remainders resolve in the stable, server-defined order.
- */
+/** Largest-remainder apportionment keeps every value in exact integer cents. */
 function distribute(total: bigint, basisPoints: readonly number[]): readonly bigint[] {
   const denominator = 10_000n;
+  if (
+    total < 0n ||
+    basisPoints.some(
+      (basisPoint) => !Number.isSafeInteger(basisPoint) || basisPoint < 0 || basisPoint > 10_000,
+    ) ||
+    basisPoints.reduce((sum, basisPoint) => sum + basisPoint, 0) !== 10_000
+  ) {
+    throw new TypeError('invalid local demo allocation weights');
+  }
   const amounts = basisPoints.map((basisPoint) => (total * BigInt(basisPoint)) / denominator);
   const remainders = basisPoints.map((basisPoint, index) => ({
     index,
@@ -281,4 +384,10 @@ function requiredAmount(amounts: readonly bigint[], index: number): bigint {
   const amount = amounts[index];
   if (amount === undefined) throw new TypeError('missing local demo allocation amount');
   return amount;
+}
+
+function requiredNumber(values: readonly number[], index: number): number {
+  const value = values[index];
+  if (value === undefined) throw new TypeError('missing local demo allocation weight');
+  return value;
 }

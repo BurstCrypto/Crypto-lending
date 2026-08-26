@@ -1,6 +1,15 @@
 import { parseAccountId } from '../accounts/domain/account-profile';
 import type { JobCorrelationContext } from '../infrastructure/outbox/job-envelope';
-import { LocalDemoAllocationService } from './local-demo-allocation.service';
+import {
+  LocalDemoAllocationService,
+  type LocalDemoAllocationPresetId,
+  type LocalDemoAllocationSelection,
+} from './local-demo-allocation.service';
+import {
+  LocalDemoNoMatchingYieldOpportunitiesError,
+  LocalDemoYieldCatalogService,
+  type LocalDemoCustomYieldFilters,
+} from './local-demo-yield-catalog.service';
 
 const ACCOUNT_ID = parseAccountId('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
 const CORRELATION: JobCorrelationContext = Object.freeze({
@@ -9,6 +18,30 @@ const CORRELATION: JobCorrelationContext = Object.freeze({
   initiatorActorId: ACCOUNT_ID,
 });
 const AS_OF = '2026-08-24T18:30:00.000Z';
+const SNAPSHOT_TIME = new Date('2026-08-26T15:00:00.000Z');
+
+function preset(presetId: LocalDemoAllocationPresetId): LocalDemoAllocationSelection {
+  return Object.freeze({ kind: 'PRESET', presetId });
+}
+
+function custom(
+  overrides: Partial<LocalDemoCustomYieldFilters> = {},
+): LocalDemoAllocationSelection {
+  return Object.freeze({
+    kind: 'CUSTOM',
+    liquidReserveBasisPoints: 2_500,
+    filters: Object.freeze({
+      assetSymbols: Object.freeze(['USDC', 'USDT'] as const),
+      providerIds: Object.freeze(['MORPHO'] as const),
+      networkIds: Object.freeze(['eip155:1', 'eip155:8453'] as const),
+      minimumApyBasisPoints: 0,
+      minimumTvlUsdMinor: '0',
+      minimumExitLiquidityUsdMinor: '0',
+      maximumUtilizationBasisPoints: 10_000,
+      ...overrides,
+    }),
+  });
+}
 
 function fixture(grossCapitalUsdMinor = '1100000'): Readonly<{
   service: LocalDemoAllocationService;
@@ -16,229 +49,203 @@ function fixture(grossCapitalUsdMinor = '1100000'): Readonly<{
 }> {
   const read = jest.fn(async () => ({
     asOf: AS_OF,
-    portfolioValueUsdMinor: '1100000',
+    portfolioValueUsdMinor: '9999999',
     buyingPower: { status: 'AVAILABLE', amountUsdMinor: grossCapitalUsdMinor },
   }));
   return {
-    service: new LocalDemoAllocationService({ read } as never),
+    service: new LocalDemoAllocationService({ read } as never, new LocalDemoYieldCatalogService()),
     read,
   };
 }
 
 describe('LocalDemoAllocationService', () => {
+  beforeEach(() => {
+    jest.useFakeTimers().setSystemTime(SNAPSHOT_TIME);
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+    jest.restoreAllMocks();
+  });
+
   it.each([
-    [
-      'MORE_LIQUID',
-      'More liquid',
-      'Keep most capital readily available while adding a smaller yield allocation.',
-      [
-        ['LIQUID_RESERVE', 'Liquid reserve', 6_000, 0, '660000'],
-        ['CONSERVATIVE_YIELD', 'Conservative yield', 3_000, 400, '330000'],
-        ['BALANCED_YIELD', 'Balanced yield', 1_000, 600, '110000'],
-      ],
-      ['2200', '440', '440', '440', '880'],
-      '4400',
-      '1095600',
-      180,
-      '19720',
-      '15320',
-      82,
-    ],
-    [
-      'BALANCED',
-      'Balanced blend',
-      'Split capital between ready access and diversified synthetic yield.',
-      [
-        ['LIQUID_RESERVE', 'Liquid reserve', 3_000, 0, '330000'],
-        ['CONSERVATIVE_YIELD', 'Conservative yield', 4_500, 400, '495000'],
-        ['BALANCED_YIELD', 'Balanced yield', 2_500, 600, '275000'],
-      ],
-      ['3850', '770', '770', '770', '1540'],
-      '7700',
-      '1092300',
-      330,
-      '36045',
-      '28345',
-      78,
-    ],
-    [
-      'MORE_YIELD',
-      'More yield',
-      'Put more capital toward synthetic yield while retaining a liquid reserve.',
-      [
-        ['LIQUID_RESERVE', 'Liquid reserve', 1_500, 0, '165000'],
-        ['CONSERVATIVE_YIELD', 'Conservative yield', 3_500, 400, '385000'],
-        ['BALANCED_YIELD', 'Balanced yield', 5_000, 600, '550000'],
-      ],
-      ['4675', '935', '935', '935', '1870'],
-      '9350',
-      '1090650',
-      440,
-      '47988',
-      '38638',
-      72,
-    ],
+    ['MORE_LIQUID', 6_000, [6_000, 1_334, 1_333, 1_333], '4400', 187],
+    ['BALANCED', 3_000, [3_000, 2_334, 2_333, 2_333], '7700', 328],
+    ['MORE_YIELD', 1_500, [1_500, 2_834, 2_833, 2_833], '9350', 398],
   ] as const)(
-    'returns an exact deterministic %s preview without performing external I/O',
-    async (
-      presetId,
-      presetLabel,
-      presetDescription,
-      expectedAllocations,
-      expectedDeductions,
-      totalFees,
-      netCapital,
-      effectiveApyBasisPoints,
-      projectedAnnualYieldUsdMinor,
-      projectedAnnualNetGrowthUsdMinor,
-      firstNetPositiveDay,
-    ) => {
+    'projects %s over the same trusted ranked snapshot without external I/O',
+    async (presetId, reserveBasisPoints, expectedWeights, totalFees, effectiveApyBasisPoints) => {
       const { service, read } = fixture();
-      const fetchSpy = jest.spyOn(global, 'fetch').mockImplementation(async () => {
-        throw new Error('network access is forbidden in allocation previews');
+      const fetchSpy = jest
+        .spyOn(global, 'fetch')
+        .mockRejectedValue(new Error('network forbidden'));
+
+      const result = await service.preview(ACCOUNT_ID, CORRELATION, preset(presetId));
+
+      expect(read).toHaveBeenCalledWith(ACCOUNT_ID, CORRELATION);
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(result.selection).toMatchObject({
+        kind: 'PRESET',
+        presetId,
+        liquidReserveBasisPoints: reserveBasisPoints,
+        filters: null,
       });
-
-      try {
-        const result = await service.preview(ACCOUNT_ID, CORRELATION, presetId);
-
-        expect(read).toHaveBeenCalledWith(ACCOUNT_ID, CORRELATION);
-        expect(fetchSpy).not.toHaveBeenCalled();
-        expect(result).toMatchObject({
-          use: 'LOCAL_DEMO_ESTIMATE_ONLY',
-          mayAuthorizeFinancialAction: false,
-          preset: { id: presetId, label: presetLabel, description: presetDescription },
-          grossCapitalUsdMinor: '1100000',
-          totalFeesUsdMinor: totalFees,
-          netPlannedCapitalUsdMinor: netCapital,
-          asOf: AS_OF,
-        });
-        expect(
-          result.allocations.map(
-            ({ bucket, label, percentageBasisPoints, apyBasisPoints, amountUsdMinor }) => [
-              bucket,
-              label,
-              percentageBasisPoints,
-              apyBasisPoints,
-              amountUsdMinor,
-            ],
-          ),
-        ).toEqual(expectedAllocations);
-        expect(result.deductions.map(({ amountUsdMinor }) => amountUsdMinor)).toEqual(
-          expectedDeductions,
-        );
-        expect(result.deductions.map(({ code }) => code)).toEqual([
-          'LIQUIDITY',
-          'CONVERSION',
-          'SLIPPAGE',
-          'NETWORK',
-          'ROUTING',
-        ]);
-        expect(Object.keys(result)).toEqual([
-          'use',
-          'mayAuthorizeFinancialAction',
-          'preset',
-          'grossCapitalUsdMinor',
-          'allocations',
-          'deductions',
-          'totalFeesUsdMinor',
-          'netPlannedCapitalUsdMinor',
-          'yieldProjection',
-          'asOf',
-        ]);
-        expect(result.yieldProjection).toEqual({
-          source: 'SYNTHETIC_FIXED_DEMO_RATES',
-          calculationMethod: 'SIMPLE_DAILY_APY_PRORATION_ON_NET_CAPITAL',
-          effectiveApyBasisPoints,
-          projectedAnnualYieldUsdMinor,
-          projectedAnnualNetGrowthUsdMinor,
-          breakEven: { status: 'AVAILABLE', firstNetPositiveDay },
-        });
-        const fees = BigInt(result.totalFeesUsdMinor);
-        const annualYieldNumerator =
-          BigInt(result.netPlannedCapitalUsdMinor) * BigInt(effectiveApyBasisPoints);
-        const accruedBefore =
-          (annualYieldNumerator * BigInt(firstNetPositiveDay - 1)) / (10_000n * 365n);
-        const accruedOnDay =
-          (annualYieldNumerator * BigInt(firstNetPositiveDay)) / (10_000n * 365n);
-        expect(accruedBefore).toBeLessThanOrEqual(fees);
-        expect(accruedOnDay).toBeGreaterThan(fees);
-        expect(
-          result.allocations.reduce(
-            (total, allocation) => total + BigInt(allocation.amountUsdMinor),
-            0n,
-          ),
-        ).toBe(BigInt(result.grossCapitalUsdMinor));
-        expect(
-          result.deductions.reduce(
-            (total, deduction) => total + BigInt(deduction.amountUsdMinor),
-            0n,
-          ),
-        ).toBe(BigInt(result.totalFeesUsdMinor));
-        expect(Object.isFrozen(result)).toBe(true);
-        expect(Object.isFrozen(result.allocations)).toBe(true);
-        expect(Object.isFrozen(result.yieldProjection)).toBe(true);
-        expect(Object.isFrozen(result.yieldProjection.breakEven)).toBe(true);
-      } finally {
-        fetchSpy.mockRestore();
-      }
+      expect(result.catalog).toEqual({
+        snapshotId: 'morpho-public-api-2026-08-26T14:14:54.580Z',
+        capturedAt: '2026-08-26T14:14:54.580Z',
+        staleAfter: '2026-08-27T14:14:54.580Z',
+        freshness: 'CURRENT',
+        staleBehavior: 'LABEL_STALE_KEEP_NON_EXECUTABLE',
+        riskClassificationAvailable: false,
+        riskClassification: 'NOT_ASSESSED',
+        matchedOpportunityCount: 5,
+        selectedOpportunityCount: 3,
+      });
+      expect(result.allocations.map(({ percentageBasisPoints }) => percentageBasisPoints)).toEqual(
+        expectedWeights,
+      );
+      expect(result.allocations.slice(1).map(({ allocationId }) => allocationId)).toEqual([
+        'morpho-blue:eip155:1:0xe3df58f9d3011b7481ff36b939fa5f8da642f34ea5792d25d3958dbf1efa26d7',
+        'morpho-blue:eip155:8453:0x9103c3b4e834476c9a62ea009ba2c884ee42e94e6e314a26f04d312434191836',
+        'morpho-blue:eip155:8453:0x8793cf302b8ffd655ab97bd1c695dbd967807e8367a65cb2f4edaf1380ba1bda',
+      ]);
+      const highestApy = result.allocations[1]?.opportunity;
+      expect(highestApy?.apy).toMatchObject({
+        baseRateDecimal: '0.05210504022183349',
+        baseBasisPoints: 521,
+        providerFee: { status: 'REPORTED', rateDecimal: '0', basisPoints: 0 },
+        rewardAprs: [
+          { assetSymbol: 'USDC', rateDecimal: '0.017398639912427037', basisPoints: 173 },
+        ],
+      });
+      expect(highestApy?.provenance.payloadSha256).toBe(
+        '5afd26e631dc47617a3c6e84d0e04e0ac286ef8f175997611aabe937849723b4',
+      );
+      expect(result.feeEstimateSource).toBe('LOCAL_DEMO_ACTION_COST_ASSUMPTION');
+      expect(result.totalFeesUsdMinor).toBe(totalFees);
+      expect(result.yieldProjection).toMatchObject({
+        source: 'MORPHO_PUBLIC_API_SNAPSHOT',
+        effectiveApyBasisPoints,
+      });
+      expect(
+        result.allocations.reduce(
+          (total, allocation) => total + BigInt(allocation.amountUsdMinor),
+          0n,
+        ),
+      ).toBe(1_100_000n);
+      expect(
+        result.deductions.reduce(
+          (total, deduction) => total + BigInt(deduction.amountUsdMinor),
+          0n,
+        ),
+      ).toBe(BigInt(totalFees));
+      expect(Object.isFrozen(result)).toBe(true);
+      expect(Object.isFrozen(result.allocations)).toBe(true);
+      expect(Object.isFrozen(highestApy?.apy.rewardAprs)).toBe(true);
     },
   );
 
-  it('uses eligible current buying power rather than excluded portfolio value', async () => {
-    const { service } = fixture('900000');
+  it('re-filters custom constraints server-side and allocates only the deterministic match', async () => {
+    const { service } = fixture();
+    const selection = custom({
+      assetSymbols: Object.freeze(['USDT']),
+      networkIds: Object.freeze(['eip155:1']),
+      minimumApyBasisPoints: 300,
+      minimumTvlUsdMinor: '1000000000',
+      minimumExitLiquidityUsdMinor: '100000000',
+      maximumUtilizationBasisPoints: 9_000,
+    });
 
-    const result = await service.preview(ACCOUNT_ID, CORRELATION, 'BALANCED');
+    const result = await service.preview(ACCOUNT_ID, CORRELATION, selection);
 
-    expect(result.grossCapitalUsdMinor).toBe('900000');
-    expect(result.allocations.map(({ amountUsdMinor }) => amountUsdMinor)).toEqual([
-      '270000',
-      '405000',
-      '225000',
+    expect(result.selection).toMatchObject({
+      kind: 'CUSTOM',
+      presetId: null,
+      liquidReserveBasisPoints: 2_500,
+    });
+    expect(result.catalog).toMatchObject({
+      matchedOpportunityCount: 1,
+      selectedOpportunityCount: 1,
+    });
+    expect(result.allocations.map(({ percentageBasisPoints }) => percentageBasisPoints)).toEqual([
+      2_500, 7_500,
     ]);
-    expect(result.totalFeesUsdMinor).toBe('6300');
-    expect(result.netPlannedCapitalUsdMinor).toBe('893700');
+    expect(result.allocations[1]?.opportunity).toMatchObject({
+      asset: { symbol: 'USDT' },
+      network: { id: 'eip155:1' },
+      apy: { baseRateDecimal: '0.030244914978243814', baseBasisPoints: 302 },
+      exitLiquidity: { interpretation: 'AVAILABLE_TO_BORROW_PROXY' },
+    });
+    expect(result.totalFeesUsdMinor).toBe('8250');
+    expect(result.yieldProjection.effectiveApyBasisPoints).toBe(226);
   });
 
-  it('uses stable largest-remainder allocation for indivisible cents', async () => {
+  it('keeps the closed 99% reserve boundary locally calculable', async () => {
+    const { service } = fixture();
+    const selection = Object.freeze({
+      ...custom({ assetSymbols: Object.freeze(['USDT']) }),
+      liquidReserveBasisPoints: 9_900,
+    });
+
+    const result = await service.preview(ACCOUNT_ID, CORRELATION, selection);
+
+    expect(result.allocations.map(({ percentageBasisPoints }) => percentageBasisPoints)).toEqual([
+      9_900, 100,
+    ]);
+    expect(result.allocations.map(({ amountUsdMinor }) => amountUsdMinor)).toEqual([
+      '1089000',
+      '11000',
+    ]);
+    expect(result.totalFeesUsdMinor).toBe('110');
+
+    await expect(
+      service.preview(
+        ACCOUNT_ID,
+        CORRELATION,
+        Object.freeze({ ...selection, liquidReserveBasisPoints: 9_901 }),
+      ),
+    ).rejects.toThrow(TypeError);
+  });
+
+  it('fails closed when valid custom filters have no trusted match', async () => {
+    const { service } = fixture();
+
+    await expect(
+      service.preview(ACCOUNT_ID, CORRELATION, custom({ minimumApyBasisPoints: 10_000 })),
+    ).rejects.toBeInstanceOf(LocalDemoNoMatchingYieldOpportunitiesError);
+  });
+
+  it('uses eligible buying power, apportions indivisible cents, and never trusts portfolio value', async () => {
     const { service } = fixture('10001');
 
-    const result = await service.preview(ACCOUNT_ID, CORRELATION, 'BALANCED');
+    const result = await service.preview(ACCOUNT_ID, CORRELATION, preset('BALANCED'));
 
-    expect(result.allocations.map(({ amountUsdMinor }) => amountUsdMinor)).toEqual([
-      '3000',
-      '4501',
-      '2500',
-    ]);
-    expect(result.allocations.map(({ amountUsdMinor }) => BigInt(amountUsdMinor))).toEqual(
-      expect.arrayContaining([3000n, 4501n, 2500n]),
-    );
+    expect(result.grossCapitalUsdMinor).toBe('10001');
+    expect(
+      result.allocations.reduce(
+        (total, allocation) => total + BigInt(allocation.amountUsdMinor),
+        0n,
+      ),
+    ).toBe(10_001n);
+    expect(result.totalFeesUsdMinor).toBe('70');
   });
 
-  it('returns the first visible-cent day when fees are zero but projected yield is positive', async () => {
-    const { service } = fixture('100');
-
-    const result = await service.preview(ACCOUNT_ID, CORRELATION, 'BALANCED');
-
-    expect(result.totalFeesUsdMinor).toBe('0');
-    expect(result.yieldProjection).toMatchObject({
-      effectiveApyBasisPoints: 330,
-      projectedAnnualYieldUsdMinor: '3',
-      projectedAnnualNetGrowthUsdMinor: '3',
-      breakEven: { status: 'AVAILABLE', firstNetPositiveDay: 111 },
-    });
-  });
-
-  it('marks break-even not applicable when neither fees nor projected yield exist', async () => {
+  it('keeps a stale snapshot usable only as an explicitly non-executable offline estimate', async () => {
+    jest.setSystemTime(new Date('2027-01-01T00:00:00.000Z'));
     const { service } = fixture('0');
 
-    const result = await service.preview(ACCOUNT_ID, CORRELATION, 'BALANCED');
+    const result = await service.preview(ACCOUNT_ID, CORRELATION, preset('BALANCED'));
 
+    expect(result.catalog).toMatchObject({
+      freshness: 'STALE',
+      staleBehavior: 'LABEL_STALE_KEEP_NON_EXECUTABLE',
+      riskClassification: 'NOT_ASSESSED',
+    });
+    expect(result.mayAuthorizeFinancialAction).toBe(false);
     expect(result.totalFeesUsdMinor).toBe('0');
-    expect(result.yieldProjection).toMatchObject({
-      effectiveApyBasisPoints: 330,
-      projectedAnnualYieldUsdMinor: '0',
-      projectedAnnualNetGrowthUsdMinor: '0',
-      breakEven: { status: 'NOT_APPLICABLE', firstNetPositiveDay: null },
+    expect(result.yieldProjection.breakEven).toEqual({
+      status: 'NOT_APPLICABLE',
+      firstNetPositiveDay: null,
     });
   });
 });

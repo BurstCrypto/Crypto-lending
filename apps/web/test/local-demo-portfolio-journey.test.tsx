@@ -6,12 +6,12 @@ import type { AccountProfile } from '../lib/authentication';
 import {
   LocalDemoApiClient,
   LocalDemoApiError,
-  type LocalDemoAllocationPreview,
   type LocalDemoWalletNamespace,
   type LocalDemoWalletProjection,
 } from '../lib/local-demo/local-demo-client';
 import { localDemoWalletRosterKey } from '../lib/local-demo/wallet-roster';
 import { LOCAL_DEMO_CHAIN_PORTFOLIO_PAYLOAD } from './local-demo-portfolio.fixtures';
+import { LOCAL_DEMO_YIELD_CATALOG, MORE_LIQUID_PREVIEW } from './local-demo-yield.fixtures';
 
 const PROFILE: AccountProfile = Object.freeze({
   accountId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
@@ -54,63 +54,12 @@ const PROJECTIONS: Readonly<Record<LocalDemoWalletNamespace, LocalDemoWalletProj
 
 const PORTFOLIO = LOCAL_DEMO_CHAIN_PORTFOLIO_PAYLOAD;
 
-const MORE_LIQUID_PREVIEW: LocalDemoAllocationPreview = Object.freeze({
-  use: 'LOCAL_DEMO_ESTIMATE_ONLY',
-  mayAuthorizeFinancialAction: false,
-  preset: Object.freeze({
-    id: 'MORE_LIQUID',
-    label: 'More liquid',
-    description: 'Keep most capital readily available while adding a smaller yield allocation.',
-  }),
-  grossCapitalUsdMinor: '1100000',
-  allocations: Object.freeze([
-    Object.freeze({
-      bucket: 'LIQUID_RESERVE',
-      label: 'Liquid reserve',
-      percentageBasisPoints: 6000,
-      apyBasisPoints: 0,
-      amountUsdMinor: '660000',
-    }),
-    Object.freeze({
-      bucket: 'CONSERVATIVE_YIELD',
-      label: 'Conservative yield',
-      percentageBasisPoints: 3000,
-      apyBasisPoints: 400,
-      amountUsdMinor: '330000',
-    }),
-    Object.freeze({
-      bucket: 'BALANCED_YIELD',
-      label: 'Balanced yield',
-      percentageBasisPoints: 1000,
-      apyBasisPoints: 600,
-      amountUsdMinor: '110000',
-    }),
-  ]),
-  deductions: Object.freeze([
-    Object.freeze({ code: 'LIQUIDITY', amountUsdMinor: '2200' }),
-    Object.freeze({ code: 'CONVERSION', amountUsdMinor: '440' }),
-    Object.freeze({ code: 'SLIPPAGE', amountUsdMinor: '440' }),
-    Object.freeze({ code: 'NETWORK', amountUsdMinor: '440' }),
-    Object.freeze({ code: 'ROUTING', amountUsdMinor: '880' }),
-  ]),
-  totalFeesUsdMinor: '4400',
-  netPlannedCapitalUsdMinor: '1095600',
-  yieldProjection: Object.freeze({
-    source: 'SYNTHETIC_FIXED_DEMO_RATES',
-    calculationMethod: 'SIMPLE_DAILY_APY_PRORATION_ON_NET_CAPITAL',
-    effectiveApyBasisPoints: 180,
-    projectedAnnualYieldUsdMinor: '19720',
-    projectedAnnualNetGrowthUsdMinor: '15320',
-    breakEven: Object.freeze({ status: 'AVAILABLE', firstNetPositiveDay: 82 }),
-  }),
-  asOf: '2026-08-24T18:30:00.000Z',
-});
-
 interface FakeClientHarness {
   readonly client: LocalDemoApiClient;
   readonly disconnectWallet: ReturnType<typeof vi.fn>;
   readonly listWallets: ReturnType<typeof vi.fn>;
   readonly previewAllocation: ReturnType<typeof vi.fn>;
+  readonly readYieldCatalog: ReturnType<typeof vi.fn>;
   readonly readPortfolio: ReturnType<typeof vi.fn>;
   readonly registerWallet: ReturnType<typeof vi.fn>;
   readonly registered: LocalDemoWalletProjection[];
@@ -132,6 +81,7 @@ function fakeClient(initial: readonly LocalDemoWalletProjection[] = []): FakeCli
     if (index >= 0) registered.splice(index, 1);
   });
   const readPortfolio = vi.fn(async () => PORTFOLIO);
+  const readYieldCatalog = vi.fn(async () => LOCAL_DEMO_YIELD_CATALOG);
   const previewAllocation = vi.fn(async () => MORE_LIQUID_PREVIEW);
   return {
     client: {
@@ -139,11 +89,13 @@ function fakeClient(initial: readonly LocalDemoWalletProjection[] = []): FakeCli
       registerWallet,
       disconnectWallet,
       readPortfolio,
+      readYieldCatalog,
       previewAllocation,
     } as unknown as LocalDemoApiClient,
     disconnectWallet,
     listWallets,
     previewAllocation,
+    readYieldCatalog,
     readPortfolio,
     registerWallet,
     registered,
@@ -236,7 +188,7 @@ describe('authenticated local demo portfolio journey', () => {
     expect(restoredHarness.readPortfolio).toHaveBeenCalledTimes(1);
   });
 
-  it('offers APY blends only when ready and defers fee and timing details until selection', async () => {
+  it('offers provider snapshot blends only when ready and defers fee details until selection', async () => {
     const harness = fakeClient();
     experience(harness);
 
@@ -252,15 +204,22 @@ describe('authenticated local demo portfolio journey', () => {
     const allocationPlanner = allocationHeading.closest('section');
     expect(allocationPlanner).not.toBeNull();
     expect(
-      within(allocationPlanner!).getByLabelText('1.80 percent estimated annual percentage yield'),
-    ).toHaveTextContent('1.80% APY');
+      await within(allocationPlanner!).findByRole('heading', {
+        name: 'Observed Morpho markets',
+      }),
+    ).toBeInTheDocument();
     expect(
-      within(allocationPlanner!).queryByText('Estimated fees for this blend'),
+      within(allocationPlanner!).getAllByLabelText(
+        '5.210504022183349 percent observed base annual percentage yield',
+      ).length,
+    ).toBeGreaterThan(0);
+    expect(
+      within(allocationPlanner!).queryByText('Local action-cost assumptions'),
     ).not.toBeInTheDocument();
     expect(
       within(allocationPlanner!).queryByText('First net-positive day'),
     ).not.toBeInTheDocument();
-    expect(allocationPlanner).not.toHaveTextContent('$');
+    expect(allocationPlanner!.querySelector('[aria-label$="estimated fee"]')).toBeNull();
     expect(screen.queryByText('Why buying power is lower')).not.toBeInTheDocument();
     const buyingPowerCard = screen.getByText('Available buying power').closest('article');
     expect(within(buyingPowerCard!).getByLabelText('11,000 US dollars')).toHaveTextContent(
@@ -269,10 +228,15 @@ describe('authenticated local demo portfolio journey', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /More liquid/u }));
     expect(
-      await screen.findByRole('heading', { name: 'Estimated fees for this blend' }),
+      await screen.findByRole('heading', { name: 'Local action-cost assumptions' }),
     ).toBeInTheDocument();
-    expect(harness.previewAllocation).toHaveBeenCalledWith('MORE_LIQUID', expect.any(AbortSignal));
-    expect(screen.getByText('No transaction was created.')).toBeInTheDocument();
+    expect(harness.previewAllocation).toHaveBeenCalledWith(
+      { kind: 'PRESET', presetId: 'MORE_LIQUID' },
+      expect.any(AbortSignal),
+    );
+    expect(
+      screen.getByText('No user-authorized financial transaction was created.'),
+    ).toBeInTheDocument();
     const reconciliation = screen.getByText('Full available capital').closest('dl');
     expect(within(reconciliation!).getByLabelText('11,000 US dollars')).toHaveTextContent(
       '$11,000.00',
@@ -280,20 +244,20 @@ describe('authenticated local demo portfolio journey', () => {
     expect(screen.getByLabelText('44 US dollars estimated fee')).toHaveTextContent('-$44.00');
     expect(screen.getByLabelText('10,956 US dollars')).toHaveTextContent('$10,956.00');
     const yieldProjection = screen
-      .getByRole('heading', { name: 'Synthetic yield projection' })
+      .getByRole('heading', { name: 'Snapshot yield projection' })
       .closest('section');
     expect(
-      within(yieldProjection!).getByLabelText('1.80 percent estimated annual percentage yield'),
-    ).toHaveTextContent('1.80% APY');
+      within(yieldProjection!).getByLabelText('1.87 percent base annual percentage yield'),
+    ).toHaveTextContent('1.87%');
     expect(
-      within(yieldProjection!).getByLabelText('197 US dollars and 20 cents'),
-    ).toHaveTextContent('$197.20');
+      within(yieldProjection!).getByLabelText('204 US dollars and 87 cents'),
+    ).toHaveTextContent('$204.87');
     expect(
-      within(yieldProjection!).getByLabelText('82 days until estimated net-positive'),
-    ).toHaveTextContent('Day 82');
+      within(yieldProjection!).getByLabelText('79 days until estimated net-positive'),
+    ).toHaveTextContent('Day 79');
     expect(
-      within(yieldProjection!).getByLabelText('153 US dollars and 20 cents'),
-    ).toHaveTextContent('$153.20');
+      within(yieldProjection!).getByLabelText('160 US dollars and 87 cents'),
+    ).toHaveTextContent('$160.87');
   });
 
   it('isolates persisted roster metadata and capacity across authenticated account changes', async () => {

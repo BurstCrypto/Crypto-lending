@@ -1057,17 +1057,130 @@
               "schema": {
                 "additionalProperties": false,
                 "properties": {
-                  "presetId": {
-                    "enum": [
-                      "MORE_LIQUID",
-                      "BALANCED",
-                      "MORE_YIELD"
-                    ],
-                    "type": "string"
+                  "selection": {
+                    "oneOf": [
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "kind": {
+                            "enum": [
+                              "PRESET"
+                            ],
+                            "type": "string"
+                          },
+                          "presetId": {
+                            "enum": [
+                              "MORE_LIQUID",
+                              "BALANCED",
+                              "MORE_YIELD"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "presetId"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "filters": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "assetSymbols": {
+                                "items": {
+                                  "enum": [
+                                    "USDC",
+                                    "USDT"
+                                  ],
+                                  "type": "string"
+                                },
+                                "maxItems": 2,
+                                "minItems": 1,
+                                "type": "array",
+                                "uniqueItems": true
+                              },
+                              "maximumUtilizationBasisPoints": {
+                                "maximum": 10000,
+                                "minimum": 0,
+                                "type": "integer"
+                              },
+                              "minimumApyBasisPoints": {
+                                "maximum": 10000,
+                                "minimum": 0,
+                                "type": "integer"
+                              },
+                              "minimumExitLiquidityUsdMinor": {
+                                "pattern": "^(?:0|[1-9][0-9]{0,17})$",
+                                "type": "string"
+                              },
+                              "minimumTvlUsdMinor": {
+                                "pattern": "^(?:0|[1-9][0-9]{0,17})$",
+                                "type": "string"
+                              },
+                              "networkIds": {
+                                "items": {
+                                  "enum": [
+                                    "eip155:1",
+                                    "eip155:8453"
+                                  ],
+                                  "type": "string"
+                                },
+                                "maxItems": 2,
+                                "minItems": 1,
+                                "type": "array",
+                                "uniqueItems": true
+                              },
+                              "providerIds": {
+                                "items": {
+                                  "enum": [
+                                    "MORPHO"
+                                  ],
+                                  "type": "string"
+                                },
+                                "maxItems": 1,
+                                "minItems": 1,
+                                "type": "array",
+                                "uniqueItems": true
+                              }
+                            },
+                            "required": [
+                              "assetSymbols",
+                              "providerIds",
+                              "networkIds",
+                              "minimumApyBasisPoints",
+                              "minimumTvlUsdMinor",
+                              "minimumExitLiquidityUsdMinor",
+                              "maximumUtilizationBasisPoints"
+                            ],
+                            "type": "object"
+                          },
+                          "kind": {
+                            "enum": [
+                              "CUSTOM"
+                            ],
+                            "type": "string"
+                          },
+                          "liquidReserveBasisPoints": {
+                            "maximum": 9900,
+                            "minimum": 0,
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "liquidReserveBasisPoints",
+                          "filters"
+                        ],
+                        "type": "object"
+                      }
+                    ]
                   }
                 },
                 "required": [
-                  "presetId"
+                  "selection"
                 ],
                 "type": "object"
               }
@@ -1086,25 +1199,433 @@
                       "items": {
                         "additionalProperties": false,
                         "properties": {
+                          "allocationId": {
+                            "maxLength": 192,
+                            "type": "string"
+                          },
                           "amountUsdMinor": {
                             "pattern": "^(?:0|[1-9][0-9]*)$",
                             "type": "string"
                           },
-                          "apyBasisPoints": {
+                          "baseApyBasisPoints": {
                             "maximum": 10000,
                             "minimum": 0,
                             "type": "integer"
                           },
+                          "baseApyRateDecimal": {
+                            "pattern": "^(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$",
+                            "type": "string"
+                          },
                           "bucket": {
                             "enum": [
                               "LIQUID_RESERVE",
-                              "CONSERVATIVE_YIELD",
-                              "BALANCED_YIELD"
+                              "YIELD_OPPORTUNITY"
                             ],
                             "type": "string"
                           },
                           "label": {
                             "type": "string"
+                          },
+                          "opportunity": {
+                            "additionalProperties": false,
+                            "nullable": true,
+                            "properties": {
+                              "apy": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "baseBasisPoints": {
+                                    "maximum": 10000,
+                                    "minimum": 0,
+                                    "type": "integer"
+                                  },
+                                  "baseRateDecimal": {
+                                    "pattern": "^(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$",
+                                    "type": "string"
+                                  },
+                                  "observedAt": {
+                                    "format": "date-time",
+                                    "type": "string"
+                                  },
+                                  "providerFee": {
+                                    "additionalProperties": false,
+                                    "properties": {
+                                      "basisPoints": {
+                                        "maximum": 10000,
+                                        "minimum": 0,
+                                        "type": "integer"
+                                      },
+                                      "rateDecimal": {
+                                        "pattern": "^(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$",
+                                        "type": "string"
+                                      },
+                                      "status": {
+                                        "enum": [
+                                          "REPORTED"
+                                        ],
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "status",
+                                      "rateDecimal",
+                                      "basisPoints"
+                                    ],
+                                    "type": "object"
+                                  },
+                                  "rewardAprs": {
+                                    "items": {
+                                      "additionalProperties": false,
+                                      "properties": {
+                                        "assetSymbol": {
+                                          "maxLength": 32,
+                                          "type": "string"
+                                        },
+                                        "basisPoints": {
+                                          "maximum": 10000,
+                                          "minimum": 0,
+                                          "type": "integer"
+                                        },
+                                        "rateDecimal": {
+                                          "pattern": "^(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$",
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "assetSymbol",
+                                        "rateDecimal",
+                                        "basisPoints"
+                                      ],
+                                      "type": "object"
+                                    },
+                                    "maxItems": 1,
+                                    "type": "array"
+                                  }
+                                },
+                                "required": [
+                                  "baseRateDecimal",
+                                  "baseBasisPoints",
+                                  "observedAt",
+                                  "rewardAprs",
+                                  "providerFee"
+                                ],
+                                "type": "object"
+                              },
+                              "asset": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "contract": {
+                                    "maxLength": 192,
+                                    "type": "string"
+                                  },
+                                  "decimals": {
+                                    "enum": [
+                                      6
+                                    ],
+                                    "type": "integer"
+                                  },
+                                  "symbol": {
+                                    "enum": [
+                                      "USDC",
+                                      "USDT"
+                                    ],
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "symbol",
+                                  "contract",
+                                  "decimals"
+                                ],
+                                "type": "object"
+                              },
+                              "availability": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "asOf": {
+                                    "format": "date-time",
+                                    "type": "string"
+                                  },
+                                  "depositsEnabled": {
+                                    "enum": [
+                                      "NOT_VERIFIED"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  "providerListed": {
+                                    "enum": [
+                                      true
+                                    ],
+                                    "type": "boolean"
+                                  },
+                                  "status": {
+                                    "enum": [
+                                      "LISTED_ONLY"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  "withdrawalsEnabled": {
+                                    "enum": [
+                                      "NOT_VERIFIED"
+                                    ],
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "status",
+                                  "providerListed",
+                                  "depositsEnabled",
+                                  "withdrawalsEnabled",
+                                  "asOf"
+                                ],
+                                "type": "object"
+                              },
+                              "exitLiquidity": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "amountUsdMinor": {
+                                    "pattern": "^(?:0|[1-9][0-9]{0,17})$",
+                                    "type": "string"
+                                  },
+                                  "interpretation": {
+                                    "enum": [
+                                      "AVAILABLE_TO_BORROW_PROXY"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  "observedAt": {
+                                    "format": "date-time",
+                                    "type": "string"
+                                  },
+                                  "sourceAmountUsdDecimal": {
+                                    "pattern": "^(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$",
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "sourceAmountUsdDecimal",
+                                  "amountUsdMinor",
+                                  "observedAt",
+                                  "interpretation"
+                                ],
+                                "type": "object"
+                              },
+                              "network": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "id": {
+                                    "enum": [
+                                      "eip155:1",
+                                      "eip155:8453"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  "name": {
+                                    "enum": [
+                                      "Ethereum",
+                                      "Base"
+                                    ],
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "name"
+                                ],
+                                "type": "object"
+                              },
+                              "opportunityId": {
+                                "maxLength": 192,
+                                "type": "string"
+                              },
+                              "protocol": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "id": {
+                                    "enum": [
+                                      "MORPHO_BLUE"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  "marketId": {
+                                    "maxLength": 192,
+                                    "type": "string"
+                                  },
+                                  "name": {
+                                    "enum": [
+                                      "Morpho Blue"
+                                    ],
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "name",
+                                  "marketId"
+                                ],
+                                "type": "object"
+                              },
+                              "provenance": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "attributes": {
+                                    "items": {
+                                      "additionalProperties": false,
+                                      "properties": {
+                                        "key": {
+                                          "maxLength": 192,
+                                          "type": "string"
+                                        },
+                                        "value": {
+                                          "maxLength": 1024,
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "key",
+                                        "value"
+                                      ],
+                                      "type": "object"
+                                    },
+                                    "maxItems": 6,
+                                    "minItems": 6,
+                                    "type": "array"
+                                  },
+                                  "normalizerId": {
+                                    "enum": [
+                                      "morpho-local-demo-snapshot"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  "normalizerVersion": {
+                                    "enum": [
+                                      "1.0.0"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  "payloadSha256": {
+                                    "pattern": "^[0-9a-f]{64}$",
+                                    "type": "string"
+                                  },
+                                  "retrievedAt": {
+                                    "format": "date-time",
+                                    "type": "string"
+                                  },
+                                  "sourceId": {
+                                    "maxLength": 192,
+                                    "type": "string"
+                                  },
+                                  "sourceKind": {
+                                    "enum": [
+                                      "API"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  "sourceObservedAt": {
+                                    "format": "date-time",
+                                    "type": "string"
+                                  },
+                                  "sourceReference": {
+                                    "maxLength": 1024,
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "sourceKind",
+                                  "sourceId",
+                                  "sourceReference",
+                                  "sourceObservedAt",
+                                  "retrievedAt",
+                                  "payloadSha256",
+                                  "normalizerId",
+                                  "normalizerVersion",
+                                  "attributes"
+                                ],
+                                "type": "object"
+                              },
+                              "provider": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "id": {
+                                    "enum": [
+                                      "MORPHO"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  "name": {
+                                    "enum": [
+                                      "Morpho"
+                                    ],
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "name"
+                                ],
+                                "type": "object"
+                              },
+                              "tvl": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "amountUsdMinor": {
+                                    "pattern": "^(?:0|[1-9][0-9]{0,17})$",
+                                    "type": "string"
+                                  },
+                                  "observedAt": {
+                                    "format": "date-time",
+                                    "type": "string"
+                                  },
+                                  "sourceAmountUsdDecimal": {
+                                    "pattern": "^(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$",
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "sourceAmountUsdDecimal",
+                                  "amountUsdMinor",
+                                  "observedAt"
+                                ],
+                                "type": "object"
+                              },
+                              "utilization": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "basisPoints": {
+                                    "maximum": 10000,
+                                    "minimum": 0,
+                                    "type": "integer"
+                                  },
+                                  "observedAt": {
+                                    "format": "date-time",
+                                    "type": "string"
+                                  },
+                                  "rateDecimal": {
+                                    "pattern": "^(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$",
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "rateDecimal",
+                                  "basisPoints",
+                                  "observedAt"
+                                ],
+                                "type": "object"
+                              }
+                            },
+                            "required": [
+                              "opportunityId",
+                              "provider",
+                              "protocol",
+                              "asset",
+                              "network",
+                              "apy",
+                              "tvl",
+                              "exitLiquidity",
+                              "utilization",
+                              "availability",
+                              "provenance"
+                            ],
+                            "type": "object"
                           },
                           "percentageBasisPoints": {
                             "maximum": 10000,
@@ -1114,20 +1635,87 @@
                         },
                         "required": [
                           "bucket",
+                          "allocationId",
                           "label",
                           "percentageBasisPoints",
-                          "apyBasisPoints",
-                          "amountUsdMinor"
+                          "baseApyBasisPoints",
+                          "baseApyRateDecimal",
+                          "amountUsdMinor",
+                          "opportunity"
                         ],
                         "type": "object"
                       },
-                      "maxItems": 3,
-                      "minItems": 3,
+                      "maxItems": 4,
+                      "minItems": 2,
                       "type": "array"
                     },
                     "asOf": {
                       "format": "date-time",
                       "type": "string"
+                    },
+                    "catalog": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "capturedAt": {
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        "freshness": {
+                          "enum": [
+                            "CURRENT",
+                            "STALE"
+                          ],
+                          "type": "string"
+                        },
+                        "matchedOpportunityCount": {
+                          "maximum": 5,
+                          "minimum": 1,
+                          "type": "integer"
+                        },
+                        "riskClassification": {
+                          "enum": [
+                            "NOT_ASSESSED"
+                          ],
+                          "type": "string"
+                        },
+                        "riskClassificationAvailable": {
+                          "enum": [
+                            false
+                          ],
+                          "type": "boolean"
+                        },
+                        "selectedOpportunityCount": {
+                          "maximum": 3,
+                          "minimum": 1,
+                          "type": "integer"
+                        },
+                        "snapshotId": {
+                          "maxLength": 192,
+                          "type": "string"
+                        },
+                        "staleAfter": {
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        "staleBehavior": {
+                          "enum": [
+                            "LABEL_STALE_KEEP_NON_EXECUTABLE"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "snapshotId",
+                        "capturedAt",
+                        "staleAfter",
+                        "freshness",
+                        "staleBehavior",
+                        "riskClassificationAvailable",
+                        "riskClassification",
+                        "matchedOpportunityCount",
+                        "selectedOpportunityCount"
+                      ],
+                      "type": "object"
                     },
                     "deductions": {
                       "items": {
@@ -1158,6 +1746,12 @@
                       "minItems": 5,
                       "type": "array"
                     },
+                    "feeEstimateSource": {
+                      "enum": [
+                        "LOCAL_DEMO_ACTION_COST_ASSUMPTION"
+                      ],
+                      "type": "string"
+                    },
                     "grossCapitalUsdMinor": {
                       "pattern": "^(?:0|[1-9][0-9]*)$",
                       "type": "string"
@@ -1172,28 +1766,116 @@
                       "pattern": "^(?:0|[1-9][0-9]*)$",
                       "type": "string"
                     },
-                    "preset": {
+                    "selection": {
                       "additionalProperties": false,
                       "properties": {
                         "description": {
                           "type": "string"
                         },
-                        "id": {
+                        "filters": {
+                          "additionalProperties": false,
+                          "nullable": true,
+                          "properties": {
+                            "assetSymbols": {
+                              "items": {
+                                "enum": [
+                                  "USDC",
+                                  "USDT"
+                                ],
+                                "type": "string"
+                              },
+                              "maxItems": 2,
+                              "minItems": 1,
+                              "type": "array",
+                              "uniqueItems": true
+                            },
+                            "maximumUtilizationBasisPoints": {
+                              "maximum": 10000,
+                              "minimum": 0,
+                              "type": "integer"
+                            },
+                            "minimumApyBasisPoints": {
+                              "maximum": 10000,
+                              "minimum": 0,
+                              "type": "integer"
+                            },
+                            "minimumExitLiquidityUsdMinor": {
+                              "pattern": "^(?:0|[1-9][0-9]{0,17})$",
+                              "type": "string"
+                            },
+                            "minimumTvlUsdMinor": {
+                              "pattern": "^(?:0|[1-9][0-9]{0,17})$",
+                              "type": "string"
+                            },
+                            "networkIds": {
+                              "items": {
+                                "enum": [
+                                  "eip155:1",
+                                  "eip155:8453"
+                                ],
+                                "type": "string"
+                              },
+                              "maxItems": 2,
+                              "minItems": 1,
+                              "type": "array",
+                              "uniqueItems": true
+                            },
+                            "providerIds": {
+                              "items": {
+                                "enum": [
+                                  "MORPHO"
+                                ],
+                                "type": "string"
+                              },
+                              "maxItems": 1,
+                              "minItems": 1,
+                              "type": "array",
+                              "uniqueItems": true
+                            }
+                          },
+                          "required": [
+                            "assetSymbols",
+                            "providerIds",
+                            "networkIds",
+                            "minimumApyBasisPoints",
+                            "minimumTvlUsdMinor",
+                            "minimumExitLiquidityUsdMinor",
+                            "maximumUtilizationBasisPoints"
+                          ],
+                          "type": "object"
+                        },
+                        "kind": {
                           "enum": [
-                            "MORE_LIQUID",
-                            "BALANCED",
-                            "MORE_YIELD"
+                            "PRESET",
+                            "CUSTOM"
                           ],
                           "type": "string"
                         },
                         "label": {
                           "type": "string"
+                        },
+                        "liquidReserveBasisPoints": {
+                          "maximum": 9900,
+                          "minimum": 0,
+                          "type": "integer"
+                        },
+                        "presetId": {
+                          "enum": [
+                            "MORE_LIQUID",
+                            "BALANCED",
+                            "MORE_YIELD"
+                          ],
+                          "nullable": true,
+                          "type": "string"
                         }
                       },
                       "required": [
-                        "id",
+                        "kind",
+                        "presetId",
                         "label",
-                        "description"
+                        "description",
+                        "liquidReserveBasisPoints",
+                        "filters"
                       ],
                       "type": "object"
                     },
@@ -1254,7 +1936,7 @@
                         },
                         "source": {
                           "enum": [
-                            "SYNTHETIC_FIXED_DEMO_RATES"
+                            "MORPHO_PUBLIC_API_SNAPSHOT"
                           ],
                           "type": "string"
                         }
@@ -1273,10 +1955,12 @@
                   "required": [
                     "use",
                     "mayAuthorizeFinancialAction",
-                    "preset",
+                    "selection",
+                    "catalog",
                     "grossCapitalUsdMinor",
                     "allocations",
                     "deductions",
+                    "feeEstimateSource",
                     "totalFeesUsdMinor",
                     "netPlannedCapitalUsdMinor",
                     "yieldProjection",
@@ -1296,6 +1980,49 @@
           },
           "404": {
             "description": "Synthetic local demo runtime is disabled"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": {
+                      "enum": [
+                        "NO_MATCHING_YIELD_OPPORTUNITIES"
+                      ],
+                      "type": "string"
+                    },
+                    "error": {
+                      "enum": [
+                        "Unprocessable Entity"
+                      ],
+                      "type": "string"
+                    },
+                    "message": {
+                      "enum": [
+                        "No trusted snapshot opportunities match this selection"
+                      ],
+                      "type": "string"
+                    },
+                    "statusCode": {
+                      "enum": [
+                        422
+                      ],
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "statusCode",
+                    "error",
+                    "message",
+                    "code"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "No trusted snapshot opportunities match the supplied constraints"
           },
           "503": {
             "description": "A complete synthetic snapshot is unavailable"
@@ -1566,6 +2293,527 @@
           }
         ],
         "summary": "Create and prove one allowlisted synthetic demo wallet",
+        "tags": [
+          "local-demo"
+        ]
+      }
+    },
+    "/api/v1/local-demo/yield-catalog": {
+      "get": {
+        "operationId": "LocalDemoController_readYieldCatalog",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "mayAuthorizeFinancialAction": {
+                      "enum": [
+                        false
+                      ],
+                      "type": "boolean"
+                    },
+                    "opportunities": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "apy": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "baseBasisPoints": {
+                                "maximum": 10000,
+                                "minimum": 0,
+                                "type": "integer"
+                              },
+                              "baseRateDecimal": {
+                                "pattern": "^(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$",
+                                "type": "string"
+                              },
+                              "observedAt": {
+                                "format": "date-time",
+                                "type": "string"
+                              },
+                              "providerFee": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "basisPoints": {
+                                    "maximum": 10000,
+                                    "minimum": 0,
+                                    "type": "integer"
+                                  },
+                                  "rateDecimal": {
+                                    "pattern": "^(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$",
+                                    "type": "string"
+                                  },
+                                  "status": {
+                                    "enum": [
+                                      "REPORTED"
+                                    ],
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "status",
+                                  "rateDecimal",
+                                  "basisPoints"
+                                ],
+                                "type": "object"
+                              },
+                              "rewardAprs": {
+                                "items": {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "assetSymbol": {
+                                      "maxLength": 32,
+                                      "type": "string"
+                                    },
+                                    "basisPoints": {
+                                      "maximum": 10000,
+                                      "minimum": 0,
+                                      "type": "integer"
+                                    },
+                                    "rateDecimal": {
+                                      "pattern": "^(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$",
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "assetSymbol",
+                                    "rateDecimal",
+                                    "basisPoints"
+                                  ],
+                                  "type": "object"
+                                },
+                                "maxItems": 1,
+                                "type": "array"
+                              }
+                            },
+                            "required": [
+                              "baseRateDecimal",
+                              "baseBasisPoints",
+                              "observedAt",
+                              "rewardAprs",
+                              "providerFee"
+                            ],
+                            "type": "object"
+                          },
+                          "asset": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "contract": {
+                                "maxLength": 192,
+                                "type": "string"
+                              },
+                              "decimals": {
+                                "enum": [
+                                  6
+                                ],
+                                "type": "integer"
+                              },
+                              "symbol": {
+                                "enum": [
+                                  "USDC",
+                                  "USDT"
+                                ],
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "symbol",
+                              "contract",
+                              "decimals"
+                            ],
+                            "type": "object"
+                          },
+                          "availability": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "asOf": {
+                                "format": "date-time",
+                                "type": "string"
+                              },
+                              "depositsEnabled": {
+                                "enum": [
+                                  "NOT_VERIFIED"
+                                ],
+                                "type": "string"
+                              },
+                              "providerListed": {
+                                "enum": [
+                                  true
+                                ],
+                                "type": "boolean"
+                              },
+                              "status": {
+                                "enum": [
+                                  "LISTED_ONLY"
+                                ],
+                                "type": "string"
+                              },
+                              "withdrawalsEnabled": {
+                                "enum": [
+                                  "NOT_VERIFIED"
+                                ],
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "status",
+                              "providerListed",
+                              "depositsEnabled",
+                              "withdrawalsEnabled",
+                              "asOf"
+                            ],
+                            "type": "object"
+                          },
+                          "exitLiquidity": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "amountUsdMinor": {
+                                "pattern": "^(?:0|[1-9][0-9]{0,17})$",
+                                "type": "string"
+                              },
+                              "interpretation": {
+                                "enum": [
+                                  "AVAILABLE_TO_BORROW_PROXY"
+                                ],
+                                "type": "string"
+                              },
+                              "observedAt": {
+                                "format": "date-time",
+                                "type": "string"
+                              },
+                              "sourceAmountUsdDecimal": {
+                                "pattern": "^(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$",
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "sourceAmountUsdDecimal",
+                              "amountUsdMinor",
+                              "observedAt",
+                              "interpretation"
+                            ],
+                            "type": "object"
+                          },
+                          "network": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "id": {
+                                "enum": [
+                                  "eip155:1",
+                                  "eip155:8453"
+                                ],
+                                "type": "string"
+                              },
+                              "name": {
+                                "enum": [
+                                  "Ethereum",
+                                  "Base"
+                                ],
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "name"
+                            ],
+                            "type": "object"
+                          },
+                          "opportunityId": {
+                            "maxLength": 192,
+                            "type": "string"
+                          },
+                          "protocol": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "id": {
+                                "enum": [
+                                  "MORPHO_BLUE"
+                                ],
+                                "type": "string"
+                              },
+                              "marketId": {
+                                "maxLength": 192,
+                                "type": "string"
+                              },
+                              "name": {
+                                "enum": [
+                                  "Morpho Blue"
+                                ],
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "name",
+                              "marketId"
+                            ],
+                            "type": "object"
+                          },
+                          "provenance": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "attributes": {
+                                "items": {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "key": {
+                                      "maxLength": 192,
+                                      "type": "string"
+                                    },
+                                    "value": {
+                                      "maxLength": 1024,
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "key",
+                                    "value"
+                                  ],
+                                  "type": "object"
+                                },
+                                "maxItems": 6,
+                                "minItems": 6,
+                                "type": "array"
+                              },
+                              "normalizerId": {
+                                "enum": [
+                                  "morpho-local-demo-snapshot"
+                                ],
+                                "type": "string"
+                              },
+                              "normalizerVersion": {
+                                "enum": [
+                                  "1.0.0"
+                                ],
+                                "type": "string"
+                              },
+                              "payloadSha256": {
+                                "pattern": "^[0-9a-f]{64}$",
+                                "type": "string"
+                              },
+                              "retrievedAt": {
+                                "format": "date-time",
+                                "type": "string"
+                              },
+                              "sourceId": {
+                                "maxLength": 192,
+                                "type": "string"
+                              },
+                              "sourceKind": {
+                                "enum": [
+                                  "API"
+                                ],
+                                "type": "string"
+                              },
+                              "sourceObservedAt": {
+                                "format": "date-time",
+                                "type": "string"
+                              },
+                              "sourceReference": {
+                                "maxLength": 1024,
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "sourceKind",
+                              "sourceId",
+                              "sourceReference",
+                              "sourceObservedAt",
+                              "retrievedAt",
+                              "payloadSha256",
+                              "normalizerId",
+                              "normalizerVersion",
+                              "attributes"
+                            ],
+                            "type": "object"
+                          },
+                          "provider": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "id": {
+                                "enum": [
+                                  "MORPHO"
+                                ],
+                                "type": "string"
+                              },
+                              "name": {
+                                "enum": [
+                                  "Morpho"
+                                ],
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "name"
+                            ],
+                            "type": "object"
+                          },
+                          "tvl": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "amountUsdMinor": {
+                                "pattern": "^(?:0|[1-9][0-9]{0,17})$",
+                                "type": "string"
+                              },
+                              "observedAt": {
+                                "format": "date-time",
+                                "type": "string"
+                              },
+                              "sourceAmountUsdDecimal": {
+                                "pattern": "^(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$",
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "sourceAmountUsdDecimal",
+                              "amountUsdMinor",
+                              "observedAt"
+                            ],
+                            "type": "object"
+                          },
+                          "utilization": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "basisPoints": {
+                                "maximum": 10000,
+                                "minimum": 0,
+                                "type": "integer"
+                              },
+                              "observedAt": {
+                                "format": "date-time",
+                                "type": "string"
+                              },
+                              "rateDecimal": {
+                                "pattern": "^(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$",
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "rateDecimal",
+                              "basisPoints",
+                              "observedAt"
+                            ],
+                            "type": "object"
+                          }
+                        },
+                        "required": [
+                          "opportunityId",
+                          "provider",
+                          "protocol",
+                          "asset",
+                          "network",
+                          "apy",
+                          "tvl",
+                          "exitLiquidity",
+                          "utilization",
+                          "availability",
+                          "provenance"
+                        ],
+                        "type": "object"
+                      },
+                      "maxItems": 5,
+                      "minItems": 1,
+                      "type": "array"
+                    },
+                    "riskClassificationAvailable": {
+                      "enum": [
+                        false
+                      ],
+                      "type": "boolean"
+                    },
+                    "snapshot": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "capturedAt": {
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        "freshness": {
+                          "enum": [
+                            "CURRENT",
+                            "STALE"
+                          ],
+                          "type": "string"
+                        },
+                        "id": {
+                          "maxLength": 192,
+                          "type": "string"
+                        },
+                        "provider": {
+                          "enum": [
+                            "MORPHO_PUBLIC_API"
+                          ],
+                          "type": "string"
+                        },
+                        "riskClassification": {
+                          "enum": [
+                            "NOT_ASSESSED"
+                          ],
+                          "type": "string"
+                        },
+                        "staleAfter": {
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        "staleBehavior": {
+                          "enum": [
+                            "LABEL_STALE_KEEP_NON_EXECUTABLE"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "provider",
+                        "capturedAt",
+                        "staleAfter",
+                        "freshness",
+                        "staleBehavior",
+                        "riskClassification"
+                      ],
+                      "type": "object"
+                    },
+                    "use": {
+                      "enum": [
+                        "LOCAL_DEMO_SNAPSHOT_ONLY"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "use",
+                    "mayAuthorizeFinancialAction",
+                    "riskClassificationAvailable",
+                    "snapshot",
+                    "opportunities"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Timestamped local-only Morpho observations with provenance and freshness"
+          },
+          "401": {
+            "description": "Missing or invalid authenticated session"
+          },
+          "404": {
+            "description": "Synthetic local demo runtime is disabled"
+          },
+          "503": {
+            "description": "The checked-in snapshot failed closed"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Read the non-executable checked-in Morpho yield snapshot",
         "tags": [
           "local-demo"
         ]

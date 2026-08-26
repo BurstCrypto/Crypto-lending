@@ -26,22 +26,31 @@ With one connected wallet in each namespace, the stable fixtures contain $7,000 
 $4,000 Solana USDC. The resulting portfolio and idle buying power are both $11,000. A single
 connected namespace receives only its proportional fixture total.
 
-`POST /api/v1/local-demo/allocation-preview` accepts one closed preset identifier and projects that
-eligible capital across three deterministic buckets. Only non-reserve capital receives a one
-percent synthetic estimate, split across liquidity, conversion, slippage, network, and routing in
-the established 50/10/10/10/20 proportions. Integer-cent largest-remainder apportionment makes
-allocations and itemized estimates sum exactly. The preview creates no operation or transaction and
-has no provider, network, or persistence dependency.
+`GET /api/v1/local-demo/yield-catalog` exposes an immutable checked-in capture of five Morpho Blue
+USDC/USDT markets on Ethereum and Base. The capture retains exact source timestamps, provider block
+identities, request/response hashes, base supply APY, reward APR, reported market fee, TVL,
+utilization, and available-to-borrow liquidity. Available-to-borrow is only an exit-liquidity proxy.
+Provider listing is recorded, but deposit and withdrawal availability are not verified. Risk is
+explicitly not assessed. The runtime performs no Morpho or other provider request; after the 24-hour
+capture boundary it labels the data stale and keeps it non-executable.
 
-The preview also labels fixed synthetic demo APYs of 0% for liquid reserve, 4% for conservative
-yield, and 6% for balanced yield. Each preset's effective APY floors its target-weighted bucket
-rates to whole basis points (1.80%, 3.30%, or 4.40%). Projected annual yield floors
-`net planned capital * effective APY` to whole cents, and projected annual net growth subtracts the
-one-time fee estimate. Break-even uses simple 365-day APY proration on net capital and returns the
-first whole day whose floored accrued cents exceed fees. When fees are zero, that is the first day
-one projected cent is visible; zero projected yield and zero fees have no applicable break-even
-day. These are illustrative fixed-rate projections, not sourced opportunities, quotes, promises,
-or financial authorizations.
+`POST /api/v1/local-demo/allocation-preview` accepts a closed preset or bounded custom filter.
+Custom constraints cover asset, provider, network, minimum base APY, minimum TVL, minimum
+available-to-borrow proxy, maximum utilization, and liquid-reserve percentage. The server derives
+capital from the authenticated account, ranks matches by exact base APY then opportunity ID, keeps
+at most three, and divides the non-reserve allocation deterministically. No match returns a typed
+422 response without fallback.
+
+Only non-reserve capital receives a one-percent local action-cost assumption, split across
+liquidity, conversion, slippage, network, and routing in the established 50/10/10/10/20
+proportions. Integer-cent largest-remainder apportionment makes allocations and itemized estimates
+sum exactly. Projected annual yield uses only the weighted provider base APYs on net planned
+capital; reward APR remains separately disclosed and excluded. Break-even uses simple 365-day APY
+proration and returns the first whole day whose floored accrued cents exceed the local cost
+assumption. The catalog and preview create no user-authorized financial operation, live provider
+request, public-chain transaction, or persistence record and do not make a promise, recommendation,
+or financial authorization. Portfolio fixture maintenance may still create zero-gas transactions
+on the owned loopback EVM after a reset.
 
 ## Trust and I/O boundaries
 
