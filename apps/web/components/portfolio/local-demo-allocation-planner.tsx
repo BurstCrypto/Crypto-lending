@@ -24,7 +24,9 @@ const AS_OF_FORMATTER = new Intl.DateTimeFormat('en-US', {
 
 export interface LocalDemoAllocationPlannerProps {
   readonly client: LocalDemoApiClient;
+  readonly portfolioSnapshotId: string;
   readonly onUnauthenticated?: () => void;
+  readonly onPortfolioSnapshotChanged?: () => void;
 }
 
 function Money({ amountUsdMinor }: { amountUsdMinor: string }) {
@@ -89,8 +91,13 @@ function RateStatus({ catalog }: { catalog: LocalDemoYieldCatalog }) {
         </span>
       </div>
       <p className="local-demo-yield-catalog-copy">
-        Choose a Crypto Lending plan below. Estimates use a locally cached, point-in-time managed
-        rate set and make no live external request. Rates can change and risk has not been assessed.
+        Choose a Crypto Lending plan below. Estimates blend supported EVM and Solana fixture
+        balances with a locally cached, point-in-time managed rate set and make no live external
+        request. Rates can change and risk has not been assessed.
+      </p>
+      <p className="local-demo-yield-catalog-copy">
+        This is a portfolio-composition fixture. It does not create a route, bridge assets, contact
+        a validator, or authorize a transaction.
       </p>
       <p className="local-demo-yield-catalog-time">
         Rates captured <Timestamp value={catalog.snapshot.capturedAt} />. Data became stale after{' '}
@@ -108,11 +115,61 @@ function feeBasisCopy(
       return 'Varies with planned network actions and allocation size.';
     case 'TWELVE_BPS_OF_REQUIRED_CONVERSION':
       return '0.12% only on capital that requires asset conversion.';
+    case 'NO_CROSS_ECOSYSTEM_TRANSFER':
+      return 'No EVM-to-Solana principal transfer is included in this composition.';
     case 'POSITION_SIZE_AND_UTILIZATION':
       return 'Varies with allocation size and modeled liquidity utilization.';
     case 'TWENTY_CENTS_PER_ACTIVE_ALLOCATION':
       return '$0.20 for each active managed allocation.';
   }
+}
+
+function EcosystemComposition({ preview }: { preview: LocalDemoAllocationPreview }) {
+  return (
+    <section
+      className="local-demo-ecosystem-composition"
+      aria-labelledby="local-demo-ecosystem-composition-title"
+    >
+      <div className="local-demo-ecosystem-composition-heading">
+        <div>
+          <p className="eyebrow">Portfolio-level cross-chain blend</p>
+          <h4 id="local-demo-ecosystem-composition-title">Managed allocation by ecosystem</h4>
+        </div>
+        <p>
+          {preview.compositionSummary.activeEcosystemCount}{' '}
+          {preview.compositionSummary.activeEcosystemCount === 1 ? 'ecosystem' : 'ecosystems'} ·{' '}
+          {preview.compositionSummary.activeAllocationCount}{' '}
+          {preview.compositionSummary.activeAllocationCount === 1 ? 'allocation' : 'allocations'}
+        </p>
+      </div>
+      <ul className="local-demo-allocation-result-list local-demo-ecosystem-list">
+        {preview.managedYieldComposition.map((composition, index) => {
+          const source = preview.sourceCapitalByEcosystem[index]!;
+          return (
+            <li key={composition.ecosystem}>
+              <span>
+                <strong>{composition.label}</strong>
+                <small>
+                  {percentage(composition.percentageBasisPointsOfManagedYield)} of managed yield ·{' '}
+                  source capital <Money amountUsdMinor={source.amountUsdMinor} />
+                </small>
+              </span>
+              <Money amountUsdMinor={composition.amountUsdMinor} />
+            </li>
+          );
+        })}
+      </ul>
+      <div className="local-demo-native-route-note" role="note">
+        <strong>No EVM-to-Solana transfer is modeled.</strong>
+        <p>
+          Capital remains assigned to its wallet ecosystem. Modeled EVM-to-Solana transfer:{' '}
+          <Money amountUsdMinor={preview.compositionSummary.crossEcosystemTransferUsdMinor} />. This
+          is a local composition fixture—not a live route, bridge quote, or transaction. EVM network
+          placement remains hypothetical and public execution is unquoted.
+        </p>
+      </div>
+    </section>
+  );
 }
 
 function FirstPositiveDay({ preview }: { preview: LocalDemoAllocationPreview }) {
@@ -235,6 +292,8 @@ function AllocationPreview({ preview }: { preview: LocalDemoAllocationPreview })
 
       <YieldProjection preview={preview} />
 
+      <EcosystemComposition preview={preview} />
+
       <div className="local-demo-allocation-results">
         <section aria-labelledby="local-demo-allocation-amounts-title">
           <h4 id="local-demo-allocation-amounts-title">Allocation amounts after estimated fees</h4>
@@ -317,7 +376,9 @@ function previewMatchesCatalog(
 
 export function LocalDemoAllocationPlanner({
   client,
+  portfolioSnapshotId,
   onUnauthenticated,
+  onPortfolioSnapshotChanged,
 }: LocalDemoAllocationPlannerProps) {
   const [catalog, setCatalog] = useState<LocalDemoYieldCatalog | null>(null);
   const [catalogError, setCatalogError] = useState(false);
@@ -325,7 +386,7 @@ export function LocalDemoAllocationPlanner({
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [pendingKey, setPendingKey] = useState<string | null>(null);
   const [preview, setPreview] = useState<LocalDemoAllocationPreview | null>(null);
-  const [previewState, setPreviewState] = useState<'IDLE' | 'ERROR'>('IDLE');
+  const [previewState, setPreviewState] = useState<'IDLE' | 'ERROR' | 'PORTFOLIO_CHANGED'>('IDLE');
   const catalogRequest = useRef<AbortController | null>(null);
   const previewRequest = useRef<AbortController | null>(null);
   const requestGeneration = useRef(0);
@@ -412,9 +473,17 @@ export function LocalDemoAllocationPlanner({
     setPreview(null);
     setPreviewState('IDLE');
     try {
-      const result = await client.previewAllocation(selection, controller.signal);
+      const result = await client.previewAllocation(
+        portfolioSnapshotId,
+        selection,
+        controller.signal,
+      );
       if (controller.signal.aborted || generation !== requestGeneration.current) return;
-      if (catalog === null || !previewMatchesCatalog(result, catalog)) {
+      if (
+        catalog === null ||
+        result.portfolioSnapshotId !== portfolioSnapshotId ||
+        !previewMatchesCatalog(result, catalog)
+      ) {
         throw new LocalDemoApiError('INVALID_RESPONSE');
       }
       setCatalog((current) =>
@@ -436,6 +505,14 @@ export function LocalDemoAllocationPlanner({
         onUnauthenticated?.();
         return;
       }
+      if (error instanceof LocalDemoApiError && error.code === 'PORTFOLIO_SNAPSHOT_CHANGED') {
+        if (generation === requestGeneration.current) {
+          setSelectedKey(null);
+          setPreviewState('PORTFOLIO_CHANGED');
+          onPortfolioSnapshotChanged?.();
+        }
+        return;
+      }
       if (generation === requestGeneration.current) setPreviewState('ERROR');
     } finally {
       if (generation === requestGeneration.current) {
@@ -455,8 +532,9 @@ export function LocalDemoAllocationPlanner({
         <span className="local-demo-proof-badge">Local model · estimate only</span>
       </div>
       <p className="local-demo-allocation-intro">
-        Compare Crypto Lending plans. Allocation amounts, variable fee estimates, and the first
-        positive day after estimated fees appear only after you select a plan.
+        Compare Crypto Lending plans across connected EVM and Solana fixture balances. Ecosystem
+        allocation, variable fee estimates, and the first positive day after estimated fees appear
+        only after you select a plan.
       </p>
 
       {catalogError ? (
@@ -526,8 +604,14 @@ export function LocalDemoAllocationPlanner({
             ? ''
             : `${preview.selection.label} preview ready. Estimated fees are ${
                 formatUsdMinor(preview.executionCost.modeledScenario.totalUsdMinor).visible
-              }; ${firstPositiveDayAnnouncement(preview)}.`}
+              }; ${preview.compositionSummary.activeEcosystemCount === 2 ? 'EVM and Solana managed allocations are included' : 'one managed ecosystem is included'}; ${firstPositiveDayAnnouncement(preview)}.`}
       </span>
+      {previewState === 'PORTFOLIO_CHANGED' ? (
+        <p className="local-demo-allocation-error" role="alert">
+          Your connected-wallet portfolio changed before this preview completed. The portfolio is
+          being refreshed; choose a plan again when it is ready.
+        </p>
+      ) : null}
       {previewState === 'ERROR' ? (
         <p className="local-demo-allocation-error" role="alert">
           This allocation estimate could not be confirmed. No user-authorized financial transaction

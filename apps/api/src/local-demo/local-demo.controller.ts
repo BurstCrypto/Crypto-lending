@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Body,
+  ConflictException,
   Controller,
   Delete,
   Get,
@@ -40,6 +41,7 @@ import {
   LOCAL_DEMO_ALLOCATION_PREVIEW_RESPONSE_SCHEMA,
   LOCAL_DEMO_CONNECT_BODY_SCHEMA,
   LOCAL_DEMO_DISCONNECT_BODY_SCHEMA,
+  LOCAL_DEMO_PORTFOLIO_CHANGED_RESPONSE_SCHEMA,
   LOCAL_DEMO_WALLET_CONNECTION_SCHEMA,
   LOCAL_DEMO_YIELD_CATALOG_RESPONSE_SCHEMA,
   LocalDemoBodyError,
@@ -50,6 +52,7 @@ import {
 } from './local-demo-http';
 import {
   LocalDemoAllocationService,
+  LocalDemoPortfolioSnapshotChangedError,
   type LocalDemoAllocationPreviewResponse,
 } from './local-demo-allocation.service';
 import { LocalDemoPortfolioService } from './local-demo-portfolio.service';
@@ -245,6 +248,11 @@ export class LocalDemoController {
     description: 'The managed yield strategy is unavailable for this snapshot',
     schema: LOCAL_DEMO_ALLOCATION_NO_MATCH_RESPONSE_SCHEMA,
   })
+  @ApiResponse({
+    status: 409,
+    description: 'The displayed portfolio changed before the preview was calculated',
+    schema: LOCAL_DEMO_PORTFOLIO_CHANGED_RESPONSE_SCHEMA,
+  })
   @ApiUnauthorizedResponse({ description: 'Missing session, origin, or CSRF proof' })
   @ApiNotFoundResponse({ description: 'Synthetic local demo runtime is disabled' })
   @ApiResponse({ status: 503, description: 'A complete synthetic snapshot is unavailable' })
@@ -254,17 +262,30 @@ export class LocalDemoController {
     @Res({ passthrough: true }) response: HeaderWriter,
   ): Promise<LocalDemoAllocationPreviewResponse> {
     this.assertEnabled();
-    let selection: ReturnType<typeof parseLocalDemoAllocationPreviewBody>['selection'];
+    let parsed: ReturnType<typeof parseLocalDemoAllocationPreviewBody>;
     try {
-      selection = parseLocalDemoAllocationPreviewBody(body).selection;
+      parsed = parseLocalDemoAllocationPreviewBody(body);
     } catch (error) {
       return badBody(error);
     }
     try {
       const correlation = currentJobCorrelationContext();
       if (correlation === undefined) throw new Error('Missing local demo correlation context');
-      return await this.allocations.preview(principal.accountId, correlation, selection);
+      return await this.allocations.preview(
+        principal.accountId,
+        correlation,
+        parsed.portfolioSnapshotId,
+        parsed.selection,
+      );
     } catch (error) {
+      if (error instanceof LocalDemoPortfolioSnapshotChangedError) {
+        throw new ConflictException({
+          statusCode: HttpStatus.CONFLICT,
+          error: 'Conflict',
+          message: 'The local demo portfolio changed; refresh and retry',
+          code: 'PORTFOLIO_SNAPSHOT_CHANGED',
+        });
+      }
       if (error instanceof LocalDemoNoMatchingYieldOpportunitiesError) {
         throw new UnprocessableEntityException({
           statusCode: HttpStatus.UNPROCESSABLE_ENTITY,

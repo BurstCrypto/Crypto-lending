@@ -1228,6 +1228,65 @@ h1 {
   line-height: 1.55;
 }
 
+.local-demo-ecosystem-composition {
+  display: grid;
+  gap: 0.9rem;
+  padding: 1.1rem;
+  background: rgba(6, 18, 14, 0.55);
+  border: 1px solid rgba(112, 225, 179, 0.24);
+  border-radius: 0.9rem;
+}
+
+.local-demo-ecosystem-composition-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.local-demo-ecosystem-composition-heading h4 {
+  margin: 0.3rem 0 0;
+  font-size: 0.95rem;
+}
+
+.local-demo-ecosystem-composition-heading > p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.76rem;
+  white-space: nowrap;
+}
+
+.local-demo-ecosystem-list {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.local-demo-ecosystem-list li {
+  padding: 0.9rem;
+  background: rgba(5, 18, 13, 0.55);
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+}
+
+.local-demo-ecosystem-list small data {
+  font-weight: 700;
+}
+
+.local-demo-native-route-note {
+  padding: 0.85rem 0.95rem;
+  color: var(--text);
+  background: rgba(112, 225, 179, 0.07);
+  border-left: 3px solid var(--accent);
+  border-radius: 0.35rem;
+}
+
+.local-demo-native-route-note p {
+  margin: 0.25rem 0 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
 .local-demo-allocation-results {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2078,6 +2137,7 @@ footer p {
   .local-demo-allocation-heading,
   .local-demo-allocation-preview-heading,
   .local-demo-allocation-yield-heading,
+  .local-demo-ecosystem-composition-heading,
   .local-demo-yield-catalog-heading,
   .portfolio-refresh-row,
   .local-demo-wallet-roster li {
@@ -2091,7 +2151,8 @@ footer p {
 
   .local-demo-allocation-choices,
   .local-demo-allocation-results,
-  .local-demo-allocation-yield-metrics {
+  .local-demo-allocation-yield-metrics,
+  .local-demo-ecosystem-list {
     grid-template-columns: 1fr;
   }
 

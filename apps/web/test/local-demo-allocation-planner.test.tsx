@@ -10,15 +10,19 @@ import type {
 } from '../lib/local-demo/local-demo-yield';
 import {
   BALANCED_PREVIEW,
+  CROSS_CHAIN_BALANCED_PREVIEW,
   LOCAL_DEMO_YIELD_CATALOG,
   MORE_LIQUID_PREVIEW,
   MORE_YIELD_PREVIEW,
 } from './local-demo-yield.fixtures';
 
+const PORTFOLIO_SNAPSHOT_ID = BALANCED_PREVIEW.portfolioSnapshotId;
+
 function clientWith(options: {
   readonly catalog?: LocalDemoYieldCatalog;
   readonly readYieldCatalog?: (signal?: AbortSignal) => Promise<LocalDemoYieldCatalog>;
   readonly previewAllocation?: (
+    portfolioSnapshotId: string,
     selection: LocalDemoAllocationSelectionInput,
     signal?: AbortSignal,
   ) => Promise<LocalDemoAllocationPreview>;
@@ -46,7 +50,12 @@ afterEach(() => cleanup());
 describe('LocalDemoAllocationPlanner', () => {
   it('shows only three product-owned plans and no fee amount before a selection', async () => {
     const harness = clientWith({});
-    const rendered = render(<LocalDemoAllocationPlanner client={harness.client} />);
+    const rendered = render(
+      <LocalDemoAllocationPlanner
+        client={harness.client}
+        portfolioSnapshotId={PORTFOLIO_SNAPSHOT_ID}
+      />,
+    );
 
     expect(
       await screen.findByRole('heading', { name: 'Crypto Lending yield plans' }),
@@ -70,11 +79,17 @@ describe('LocalDemoAllocationPlanner', () => {
 
   it('shows aggregate variable fees and the exact first-positive day only after selection', async () => {
     const harness = clientWith({});
-    const rendered = render(<LocalDemoAllocationPlanner client={harness.client} />);
+    const rendered = render(
+      <LocalDemoAllocationPlanner
+        client={harness.client}
+        portfolioSnapshotId={PORTFOLIO_SNAPSHOT_ID}
+      />,
+    );
 
     fireEvent.click(await screen.findByRole('button', { name: /Balanced blend/u }));
 
     expect(harness.previewAllocation).toHaveBeenCalledWith(
+      PORTFOLIO_SNAPSHOT_ID,
       { kind: 'PRESET', presetId: 'BALANCED' },
       expect.any(AbortSignal),
     );
@@ -85,8 +100,9 @@ describe('LocalDemoAllocationPlanner', () => {
     expect(within(feeSection!).getByLabelText('4 US dollars and 38 cents')).toHaveTextContent(
       '$4.38',
     );
-    expect(within(feeSection!).getByText('Estimated conversion costs')).toBeInTheDocument();
-    expect(within(feeSection!).getByLabelText('0 US dollars')).toHaveTextContent('$0.00');
+    const conversionRow = within(feeSection!).getByText('Estimated conversion costs').closest('li');
+    expect(conversionRow).not.toBeNull();
+    expect(within(conversionRow!).getByLabelText('0 US dollars')).toHaveTextContent('$0.00');
     expect(within(feeSection!).getByText('Estimated market impact')).toBeInTheDocument();
     expect(within(feeSection!).getByLabelText('1 US dollar and 15 cents')).toHaveTextContent(
       '$1.15',
@@ -130,12 +146,57 @@ describe('LocalDemoAllocationPlanner', () => {
     expectProviderPrivate(rendered.container);
   });
 
+  it('shows a provider-private native EVM and Solana blend only after selection', async () => {
+    const harness = clientWith({
+      previewAllocation: async () => CROSS_CHAIN_BALANCED_PREVIEW,
+    });
+    const rendered = render(
+      <LocalDemoAllocationPlanner
+        client={harness.client}
+        portfolioSnapshotId={CROSS_CHAIN_BALANCED_PREVIEW.portfolioSnapshotId}
+      />,
+    );
+
+    expect(
+      screen.queryByRole('heading', { name: 'Managed allocation by ecosystem' }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('button', { name: /Balanced blend/u }));
+
+    const composition = (
+      await screen.findByRole('heading', { name: 'Managed allocation by ecosystem' })
+    ).closest('section');
+    expect(composition).not.toBeNull();
+    expect(within(composition!).getByText('EVM managed yield')).toBeInTheDocument();
+    expect(within(composition!).getByText('SVM managed yield')).toBeInTheDocument();
+    expect(within(composition!).getByText(/63\.64% of managed yield/u)).toBeInTheDocument();
+    expect(within(composition!).getByText(/36\.36% of managed yield/u)).toBeInTheDocument();
+    expect(
+      within(composition!).getByText('No EVM-to-Solana transfer is modeled.'),
+    ).toBeInTheDocument();
+    expect(within(composition!).getByText(/Modeled EVM-to-Solana transfer/u)).toBeInTheDocument();
+    expect(within(composition!).getByLabelText('0 US dollars')).toHaveTextContent('$0.00');
+    const fees = screen
+      .getByRole('heading', { name: 'Estimated one-time fees' })
+      .closest('section');
+    expect(within(fees!).getByText('Estimated EVM-Solana transfer costs')).toBeInTheDocument();
+    expect(within(fees!).getByText(/No EVM-to-Solana principal transfer/u)).toBeInTheDocument();
+    expect(
+      screen.getByText(/EVM and Solana managed allocations are included/u),
+    ).toBeInTheDocument();
+    expectProviderPrivate(rendered.container);
+  });
+
   it('changes the fee estimate with the selected product plan', async () => {
     const harness = clientWith({
-      previewAllocation: async (selection) =>
+      previewAllocation: async (_portfolioSnapshotId, selection) =>
         selection.presetId === 'MORE_LIQUID' ? MORE_LIQUID_PREVIEW : MORE_YIELD_PREVIEW,
     });
-    render(<LocalDemoAllocationPlanner client={harness.client} />);
+    render(
+      <LocalDemoAllocationPlanner
+        client={harness.client}
+        portfolioSnapshotId={PORTFOLIO_SNAPSHOT_ID}
+      />,
+    );
 
     fireEvent.click(await screen.findByRole('button', { name: /More liquid/u }));
     let feeSection = (
@@ -192,7 +253,12 @@ describe('LocalDemoAllocationPlanner', () => {
     });
     const previews = [noYield, beyondHorizon];
     const harness = clientWith({ previewAllocation: async () => previews.shift()! });
-    render(<LocalDemoAllocationPlanner client={harness.client} />);
+    render(
+      <LocalDemoAllocationPlanner
+        client={harness.client}
+        portfolioSnapshotId={PORTFOLIO_SNAPSHOT_ID}
+      />,
+    );
 
     fireEvent.click(await screen.findByRole('button', { name: /Balanced blend/u }));
     expect(await screen.findByText('No projected yield')).toBeInTheDocument();
@@ -206,7 +272,12 @@ describe('LocalDemoAllocationPlanner', () => {
       .mockRejectedValueOnce(new LocalDemoApiError('UNAVAILABLE'))
       .mockResolvedValueOnce(LOCAL_DEMO_YIELD_CATALOG);
     const harness = clientWith({ readYieldCatalog });
-    render(<LocalDemoAllocationPlanner client={harness.client} />);
+    render(
+      <LocalDemoAllocationPlanner
+        client={harness.client}
+        portfolioSnapshotId={PORTFOLIO_SNAPSHOT_ID}
+      />,
+    );
 
     expect(await screen.findByText(/managed rate set could not be validated/u)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Retry rates' }));
@@ -215,6 +286,36 @@ describe('LocalDemoAllocationPlanner', () => {
       await screen.findByRole('heading', { name: 'Crypto Lending yield plans' }),
     ).toBeInTheDocument();
     expect(harness.readYieldCatalog).toHaveBeenCalledTimes(2);
+  });
+
+  it('clears selection and requests a portfolio refresh on a snapshot conflict', async () => {
+    const onPortfolioSnapshotChanged = vi.fn();
+    const harness = clientWith({
+      previewAllocation: async () => {
+        throw new LocalDemoApiError('PORTFOLIO_SNAPSHOT_CHANGED');
+      },
+    });
+    render(
+      <LocalDemoAllocationPlanner
+        client={harness.client}
+        portfolioSnapshotId={PORTFOLIO_SNAPSHOT_ID}
+        onPortfolioSnapshotChanged={onPortfolioSnapshotChanged}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: /Balanced blend/u }));
+
+    expect(
+      await screen.findByText(/connected-wallet portfolio changed before this preview completed/iu),
+    ).toHaveAttribute('role', 'alert');
+    expect(onPortfolioSnapshotChanged).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('button', { name: /Balanced blend/u })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
+    expect(
+      screen.queryByRole('heading', { name: 'Managed allocation by ecosystem' }),
+    ).not.toBeInTheDocument();
   });
 
   it('labels rates stale at their boundary and reconciles a stale preview', async () => {
@@ -238,7 +339,12 @@ describe('LocalDemoAllocationPlanner', () => {
       }),
     });
     const harness = clientWith({ catalog, previewAllocation: async () => preview });
-    render(<LocalDemoAllocationPlanner client={harness.client} />);
+    render(
+      <LocalDemoAllocationPlanner
+        client={harness.client}
+        portfolioSnapshotId={PORTFOLIO_SNAPSHOT_ID}
+      />,
+    );
 
     expect(await screen.findByText('Rates current')).toBeInTheDocument();
     expect(
@@ -254,7 +360,7 @@ describe('LocalDemoAllocationPlanner', () => {
   it('aborts catalog and preview requests when unmounted', async () => {
     let previewSignal: AbortSignal | undefined;
     const harness = clientWith({
-      previewAllocation: async (_selection, signal) => {
+      previewAllocation: async (_portfolioSnapshotId, _selection, signal) => {
         previewSignal = signal;
         return new Promise((_resolve, reject) => {
           signal?.addEventListener(
@@ -265,7 +371,12 @@ describe('LocalDemoAllocationPlanner', () => {
         });
       },
     });
-    const rendered = render(<LocalDemoAllocationPlanner client={harness.client} />);
+    const rendered = render(
+      <LocalDemoAllocationPlanner
+        client={harness.client}
+        portfolioSnapshotId={PORTFOLIO_SNAPSHOT_ID}
+      />,
+    );
     fireEvent.click(await screen.findByRole('button', { name: /More yield/u }));
     await waitFor(() => expect(harness.previewAllocation).toHaveBeenCalledTimes(1));
 

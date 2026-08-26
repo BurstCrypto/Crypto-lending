@@ -20,6 +20,7 @@ import {
 } from './local-demo-allocation.service';
 
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+const PORTFOLIO_SNAPSHOT_ID = /^local-demo-portfolio:[0-9a-f]{32}$/u;
 
 export type LocalDemoWalletNamespace = 'EVM' | 'SOLANA';
 
@@ -92,8 +93,14 @@ export function parseLocalDemoDisconnectBody(value: unknown): Readonly<{ connect
 
 export function parseLocalDemoAllocationPreviewBody(
   value: unknown,
-): Readonly<{ selection: LocalDemoAllocationSelection }> {
-  const body = exactRecord(value, ['selection']);
+): Readonly<{ portfolioSnapshotId: string; selection: LocalDemoAllocationSelection }> {
+  const body = exactRecord(value, ['portfolioSnapshotId', 'selection']);
+  if (
+    typeof body.portfolioSnapshotId !== 'string' ||
+    !PORTFOLIO_SNAPSHOT_ID.test(body.portfolioSnapshotId)
+  ) {
+    return fail();
+  }
   if (ownDataProperty(body.selection, 'kind') !== 'PRESET') return fail();
   const selection = exactRecord(body.selection, ['kind', 'presetId']);
   if (
@@ -102,6 +109,7 @@ export function parseLocalDemoAllocationPreviewBody(
     return fail();
   }
   return Object.freeze({
+    portfolioSnapshotId: body.portfolioSnapshotId,
     selection: Object.freeze({
       kind: 'PRESET',
       presetId: selection.presetId as LocalDemoAllocationPresetId,
@@ -145,8 +153,12 @@ export const LOCAL_DEMO_DISCONNECT_BODY_SCHEMA: SchemaObject = Object.freeze({
 export const LOCAL_DEMO_ALLOCATION_PREVIEW_BODY_SCHEMA: SchemaObject = Object.freeze({
   type: 'object',
   additionalProperties: false,
-  required: ['selection'],
+  required: ['portfolioSnapshotId', 'selection'],
   properties: {
+    portfolioSnapshotId: {
+      type: 'string',
+      pattern: '^local-demo-portfolio:[0-9a-f]{32}$',
+    },
     selection: {
       type: 'object',
       additionalProperties: false,
@@ -174,14 +186,40 @@ export const LOCAL_DEMO_ALLOCATION_NO_MATCH_RESPONSE_SCHEMA: SchemaObject = Obje
   },
 });
 
+export const LOCAL_DEMO_PORTFOLIO_CHANGED_RESPONSE_SCHEMA: SchemaObject = Object.freeze({
+  type: 'object',
+  additionalProperties: false,
+  required: ['statusCode', 'error', 'message', 'code'],
+  properties: {
+    statusCode: { type: 'integer', enum: [409] },
+    error: { type: 'string', enum: ['Conflict'] },
+    message: { type: 'string', enum: ['The local demo portfolio changed; refresh and retry'] },
+    code: { type: 'string', enum: ['PORTFOLIO_SNAPSHOT_CHANGED'] },
+  },
+});
+
 export const LOCAL_DEMO_YIELD_CATALOG_RESPONSE_SCHEMA: SchemaObject = Object.freeze({
   type: 'object',
   additionalProperties: false,
-  required: ['use', 'mayAuthorizeFinancialAction', 'riskClassificationAvailable', 'snapshot'],
+  required: [
+    'use',
+    'mayAuthorizeFinancialAction',
+    'riskClassificationAvailable',
+    'strategyMode',
+    'ecosystems',
+    'snapshot',
+  ],
   properties: {
     use: { type: 'string', enum: ['LOCAL_DEMO_MANAGED_RATE_SNAPSHOT_ONLY'] },
     mayAuthorizeFinancialAction: { type: 'boolean', enum: [false] },
     riskClassificationAvailable: { type: 'boolean', enum: [false] },
+    strategyMode: { type: 'string', enum: ['PORTFOLIO_CROSS_CHAIN_BLEND'] },
+    ecosystems: {
+      type: 'array',
+      minItems: 2,
+      maxItems: 2,
+      items: { type: 'string', enum: ['EVM', 'SOLANA'] },
+    },
     snapshot: {
       type: 'object',
       additionalProperties: false,
@@ -194,7 +232,7 @@ export const LOCAL_DEMO_YIELD_CATALOG_RESPONSE_SCHEMA: SchemaObject = Object.fre
         'riskClassification',
       ],
       properties: {
-        id: { type: 'string', enum: ['managed-rate-snapshot-v1'] },
+        id: { type: 'string', enum: ['managed-rate-snapshot-v2'] },
         capturedAt: { type: 'string', format: 'date-time' },
         staleAfter: { type: 'string', format: 'date-time' },
         freshness: { type: 'string', enum: ['CURRENT', 'STALE'] },
@@ -217,6 +255,7 @@ const LOCAL_DEMO_EXECUTION_COST_COMPONENT_SCHEMA: SchemaObject = Object.freeze({
       enum: [
         'NETWORK_ACTIVATION_AND_POSITION_VOLUME',
         'TWELVE_BPS_OF_REQUIRED_CONVERSION',
+        'NO_CROSS_ECOSYSTEM_TRANSFER',
         'POSITION_SIZE_AND_UTILIZATION',
         'TWENTY_CENTS_PER_ACTIVE_ALLOCATION',
       ],
@@ -231,10 +270,14 @@ export const LOCAL_DEMO_ALLOCATION_PREVIEW_RESPONSE_SCHEMA: SchemaObject = Objec
   required: [
     'use',
     'mayAuthorizeFinancialAction',
+    'portfolioSnapshotId',
     'selection',
     'rateSnapshot',
     'grossCapitalUsdMinor',
+    'sourceCapitalByEcosystem',
     'allocations',
+    'managedYieldComposition',
+    'compositionSummary',
     'executionCost',
     'capitalIncludedInProjectionUsdMinor',
     'yieldProjection',
@@ -243,6 +286,10 @@ export const LOCAL_DEMO_ALLOCATION_PREVIEW_RESPONSE_SCHEMA: SchemaObject = Objec
   properties: {
     use: { type: 'string', enum: ['LOCAL_DEMO_ESTIMATE_ONLY'] },
     mayAuthorizeFinancialAction: { type: 'boolean', enum: [false] },
+    portfolioSnapshotId: {
+      type: 'string',
+      pattern: '^local-demo-portfolio:[0-9a-f]{32}$',
+    },
     selection: {
       type: 'object',
       additionalProperties: false,
@@ -268,7 +315,7 @@ export const LOCAL_DEMO_ALLOCATION_PREVIEW_RESPONSE_SCHEMA: SchemaObject = Objec
         'riskClassification',
       ],
       properties: {
-        id: { type: 'string', enum: ['managed-rate-snapshot-v1'] },
+        id: { type: 'string', enum: ['managed-rate-snapshot-v2'] },
         capturedAt: { type: 'string', format: 'date-time' },
         staleAfter: { type: 'string', format: 'date-time' },
         freshness: { type: 'string', enum: ['CURRENT', 'STALE'] },
@@ -278,6 +325,20 @@ export const LOCAL_DEMO_ALLOCATION_PREVIEW_RESPONSE_SCHEMA: SchemaObject = Objec
       },
     },
     grossCapitalUsdMinor: { type: 'string', pattern: '^(?:0|[1-9][0-9]*)$' },
+    sourceCapitalByEcosystem: {
+      type: 'array',
+      minItems: 2,
+      maxItems: 2,
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['ecosystem', 'amountUsdMinor'],
+        properties: {
+          ecosystem: { type: 'string', enum: ['EVM', 'SOLANA'] },
+          amountUsdMinor: { type: 'string', pattern: '^(?:0|[1-9][0-9]*)$' },
+        },
+      },
+    },
     allocations: {
       type: 'array',
       minItems: 2,
@@ -293,6 +354,44 @@ export const LOCAL_DEMO_ALLOCATION_PREVIEW_RESPONSE_SCHEMA: SchemaObject = Objec
           percentageBasisPoints: { type: 'integer', minimum: 0, maximum: 10_000 },
           amountUsdMinor: { type: 'string', pattern: '^(?:0|[1-9][0-9]*)$' },
         },
+      },
+    },
+    managedYieldComposition: {
+      type: 'array',
+      minItems: 2,
+      maxItems: 2,
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['ecosystem', 'label', 'percentageBasisPointsOfManagedYield', 'amountUsdMinor'],
+        properties: {
+          ecosystem: { type: 'string', enum: ['EVM', 'SOLANA'] },
+          label: { type: 'string', enum: ['EVM managed yield', 'SVM managed yield'] },
+          percentageBasisPointsOfManagedYield: {
+            type: 'integer',
+            minimum: 0,
+            maximum: 10_000,
+          },
+          amountUsdMinor: { type: 'string', pattern: '^(?:0|[1-9][0-9]*)$' },
+        },
+      },
+    },
+    compositionSummary: {
+      type: 'object',
+      additionalProperties: false,
+      required: [
+        'mode',
+        'crossEcosystemTransferRequired',
+        'crossEcosystemTransferUsdMinor',
+        'activeEcosystemCount',
+        'activeAllocationCount',
+      ],
+      properties: {
+        mode: { type: 'string', enum: ['SINGLE_ECOSYSTEM', 'EVM_SOLANA_PORTFOLIO_BLEND'] },
+        crossEcosystemTransferRequired: { type: 'boolean', enum: [false] },
+        crossEcosystemTransferUsdMinor: { type: 'string', enum: ['0'] },
+        activeEcosystemCount: { type: 'integer', enum: [1, 2] },
+        activeAllocationCount: { type: 'integer', minimum: 1, maximum: 4 },
       },
     },
     executionCost: {

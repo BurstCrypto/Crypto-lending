@@ -403,9 +403,11 @@ describe('local demo authentication boundary (e2e)', () => {
       use: 'LOCAL_DEMO_MANAGED_RATE_SNAPSHOT_ONLY',
       mayAuthorizeFinancialAction: false,
       riskClassificationAvailable: false,
+      strategyMode: 'PORTFOLIO_CROSS_CHAIN_BLEND',
+      ecosystems: ['EVM', 'SOLANA'],
       snapshot: {
-        id: 'managed-rate-snapshot-v1',
-        capturedAt: '2026-08-26T14:14:54.580Z',
+        id: 'managed-rate-snapshot-v2',
+        capturedAt: '2026-08-26T21:20:06.659Z',
         staleAfter: '2026-08-27T14:14:54.580Z',
         freshness: 'CURRENT',
         staleBehavior: 'LABEL_STALE_KEEP_NON_EXECUTABLE',
@@ -417,11 +419,17 @@ describe('local demo authentication boundary (e2e)', () => {
       /"(?:provider|providerId|providerIds|protocol|protocolId|marketId|marketIds|opportunity|opportunities|provenance|sourceReference|payloadSha256|normalizer|endpoint)"\s*:/iu,
     );
 
+    const displayedPortfolio = await request(app.getHttpServer())
+      .get('/api/v1/local-demo/portfolio')
+      .set('Cookie', cookie)
+      .expect(200);
+    const portfolioSnapshotId = displayedPortfolio.body.snapshotId as string;
+
     await request(app.getHttpServer())
       .post('/api/v1/local-demo/allocation-preview')
       .set('Origin', LOCAL_ORIGIN)
       .set('Cookie', cookie)
-      .send({ selection: { kind: 'PRESET', presetId: 'BALANCED' } })
+      .send({ portfolioSnapshotId, selection: { kind: 'PRESET', presetId: 'BALANCED' } })
       .expect(401);
 
     const preview = await request(app.getHttpServer())
@@ -429,7 +437,7 @@ describe('local demo authentication boundary (e2e)', () => {
       .set('Origin', LOCAL_ORIGIN)
       .set('X-CSRF-Token', csrf)
       .set('Cookie', cookie)
-      .send({ selection: { kind: 'PRESET', presetId: 'BALANCED' } })
+      .send({ portfolioSnapshotId, selection: { kind: 'PRESET', presetId: 'BALANCED' } })
       .expect(200);
 
     expect(preview.headers).toMatchObject({
@@ -440,6 +448,7 @@ describe('local demo authentication boundary (e2e)', () => {
     expect(preview.body).toMatchObject({
       use: 'LOCAL_DEMO_ESTIMATE_ONLY',
       mayAuthorizeFinancialAction: false,
+      portfolioSnapshotId,
       selection: {
         kind: 'PRESET',
         presetId: 'BALANCED',
@@ -447,33 +456,55 @@ describe('local demo authentication boundary (e2e)', () => {
         liquidReserveBasisPoints: 3000,
       },
       rateSnapshot: {
-        id: 'managed-rate-snapshot-v1',
+        id: 'managed-rate-snapshot-v2',
         staleBehavior: 'LABEL_STALE_KEEP_NON_EXECUTABLE',
         riskClassificationAvailable: false,
         riskClassification: 'NOT_ASSESSED',
       },
       grossCapitalUsdMinor: '700000',
+      sourceCapitalByEcosystem: [
+        { ecosystem: 'EVM', amountUsdMinor: '700000' },
+        { ecosystem: 'SOLANA', amountUsdMinor: '0' },
+      ],
       allocations: [
         {
           bucket: 'LIQUID_RESERVE',
           allocationId: 'LIQUID_RESERVE',
           label: 'Liquid reserve',
           percentageBasisPoints: 3000,
-          amountUsdMinor: '209816',
         },
         {
           bucket: 'MANAGED_YIELD',
           allocationId: 'MANAGED_YIELD',
           label: 'Managed yield',
           percentageBasisPoints: 7000,
-          amountUsdMinor: '489571',
         },
       ],
+      managedYieldComposition: [
+        {
+          ecosystem: 'EVM',
+          label: 'EVM managed yield',
+          percentageBasisPointsOfManagedYield: 10000,
+        },
+        {
+          ecosystem: 'SOLANA',
+          label: 'SVM managed yield',
+          percentageBasisPointsOfManagedYield: 0,
+          amountUsdMinor: '0',
+        },
+      ],
+      compositionSummary: {
+        mode: 'SINGLE_ECOSYSTEM',
+        crossEcosystemTransferRequired: false,
+        crossEcosystemTransferUsdMinor: '0',
+        activeEcosystemCount: 1,
+        activeAllocationCount: 2,
+      },
       executionCost: {
         actualLocalOperation: { status: 'NO_EXECUTION', amountUsdMinor: '0' },
         modeledScenario: {
           status: 'AVAILABLE',
-          modelId: 'LOCAL_DEMO_ALLOCATION_COST_V1',
+          modelId: 'LOCAL_DEMO_ALLOCATION_COST_V2',
           isQuote: false,
           costBasisCapitalUsdMinor: '700000',
           fundingTreatment: 'DEDUCT_FROM_GROSS_BEFORE_PROJECTION',
@@ -482,7 +513,6 @@ describe('local demo authentication boundary (e2e)', () => {
             {
               code: 'NETWORK',
               calculationBasis: 'NETWORK_ACTIVATION_AND_POSITION_VOLUME',
-              amountUsdMinor: '438',
             },
             {
               code: 'CONVERSION',
@@ -490,31 +520,28 @@ describe('local demo authentication boundary (e2e)', () => {
               amountUsdMinor: '0',
             },
             {
+              code: 'CROSS_ECOSYSTEM_TRANSFER',
+              calculationBasis: 'NO_CROSS_ECOSYSTEM_TRANSFER',
+              amountUsdMinor: '0',
+            },
+            {
               code: 'MARKET_IMPACT',
               calculationBasis: 'POSITION_SIZE_AND_UTILIZATION',
-              amountUsdMinor: '115',
             },
             {
               code: 'ROUTING',
               calculationBasis: 'TWENTY_CENTS_PER_ACTIVE_ALLOCATION',
-              amountUsdMinor: '60',
             },
           ],
-          totalUsdMinor: '613',
         },
         publicExecution: { status: 'UNQUOTED', amountUsdMinor: null },
       },
-      capitalIncludedInProjectionUsdMinor: '699387',
       yieldProjection: {
         source: 'MANAGED_RATE_SNAPSHOT',
         calculationMethod: 'INTERNAL_POSITION_WEIGHTED_EXACT_BASE_APY',
-        effectiveApyBasisPoints: 328,
-        projectedAnnualYieldUsdMinor: '22973',
-        projectedAnnualYieldAfterFeesUsdMinor: '22360',
         firstPositiveDayAfterFees: {
           calculationMethod: 'FIRST_WHOLE_DAY_VISIBLE_YIELD_EXCEEDS_ESTIMATED_FEES',
           status: 'RECOVERED_WITHIN_HORIZON',
-          day: 10,
           modelHorizonDays: 365,
         },
       },

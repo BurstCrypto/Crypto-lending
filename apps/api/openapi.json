@@ -1057,6 +1057,10 @@
               "schema": {
                 "additionalProperties": false,
                 "properties": {
+                  "portfolioSnapshotId": {
+                    "pattern": "^local-demo-portfolio:[0-9a-f]{32}$",
+                    "type": "string"
+                  },
                   "selection": {
                     "additionalProperties": false,
                     "properties": {
@@ -1083,6 +1087,7 @@
                   }
                 },
                 "required": [
+                  "portfolioSnapshotId",
                   "selection"
                 ],
                 "type": "object"
@@ -1154,6 +1159,50 @@
                       "pattern": "^(?:0|[1-9][0-9]*)$",
                       "type": "string"
                     },
+                    "compositionSummary": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "activeAllocationCount": {
+                          "maximum": 4,
+                          "minimum": 1,
+                          "type": "integer"
+                        },
+                        "activeEcosystemCount": {
+                          "enum": [
+                            1,
+                            2
+                          ],
+                          "type": "integer"
+                        },
+                        "crossEcosystemTransferRequired": {
+                          "enum": [
+                            false
+                          ],
+                          "type": "boolean"
+                        },
+                        "crossEcosystemTransferUsdMinor": {
+                          "enum": [
+                            "0"
+                          ],
+                          "type": "string"
+                        },
+                        "mode": {
+                          "enum": [
+                            "SINGLE_ECOSYSTEM",
+                            "EVM_SOLANA_PORTFOLIO_BLEND"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "mode",
+                        "crossEcosystemTransferRequired",
+                        "crossEcosystemTransferUsdMinor",
+                        "activeEcosystemCount",
+                        "activeAllocationCount"
+                      ],
+                      "type": "object"
+                    },
                     "executionCost": {
                       "additionalProperties": false,
                       "properties": {
@@ -1194,6 +1243,7 @@
                                     "enum": [
                                       "NETWORK_ACTIVATION_AND_POSITION_VOLUME",
                                       "TWELVE_BPS_OF_REQUIRED_CONVERSION",
+                                      "NO_CROSS_ECOSYSTEM_TRANSFER",
                                       "POSITION_SIZE_AND_UTILIZATION",
                                       "TWENTY_CENTS_PER_ACTIVE_ALLOCATION"
                                     ],
@@ -1203,6 +1253,7 @@
                                     "enum": [
                                       "NETWORK",
                                       "CONVERSION",
+                                      "CROSS_ECOSYSTEM_TRANSFER",
                                       "MARKET_IMPACT",
                                       "ROUTING"
                                     ],
@@ -1221,8 +1272,8 @@
                                 ],
                                 "type": "object"
                               },
-                              "maxItems": 4,
-                              "minItems": 4,
+                              "maxItems": 5,
+                              "minItems": 5,
                               "type": "array"
                             },
                             "costBasisCapitalUsdMinor": {
@@ -1243,7 +1294,7 @@
                             },
                             "modelId": {
                               "enum": [
-                                "LOCAL_DEMO_ALLOCATION_COST_V1"
+                                "LOCAL_DEMO_ALLOCATION_COST_V2"
                               ],
                               "type": "string"
                             },
@@ -1311,11 +1362,55 @@
                       "pattern": "^(?:0|[1-9][0-9]*)$",
                       "type": "string"
                     },
+                    "managedYieldComposition": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "amountUsdMinor": {
+                            "pattern": "^(?:0|[1-9][0-9]*)$",
+                            "type": "string"
+                          },
+                          "ecosystem": {
+                            "enum": [
+                              "EVM",
+                              "SOLANA"
+                            ],
+                            "type": "string"
+                          },
+                          "label": {
+                            "enum": [
+                              "EVM managed yield",
+                              "SVM managed yield"
+                            ],
+                            "type": "string"
+                          },
+                          "percentageBasisPointsOfManagedYield": {
+                            "maximum": 10000,
+                            "minimum": 0,
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "ecosystem",
+                          "label",
+                          "percentageBasisPointsOfManagedYield",
+                          "amountUsdMinor"
+                        ],
+                        "type": "object"
+                      },
+                      "maxItems": 2,
+                      "minItems": 2,
+                      "type": "array"
+                    },
                     "mayAuthorizeFinancialAction": {
                       "enum": [
                         false
                       ],
                       "type": "boolean"
+                    },
+                    "portfolioSnapshotId": {
+                      "pattern": "^local-demo-portfolio:[0-9a-f]{32}$",
+                      "type": "string"
                     },
                     "rateSnapshot": {
                       "additionalProperties": false,
@@ -1333,7 +1428,7 @@
                         },
                         "id": {
                           "enum": [
-                            "managed-rate-snapshot-v1"
+                            "managed-rate-snapshot-v2"
                           ],
                           "type": "string"
                         },
@@ -1410,6 +1505,32 @@
                         "liquidReserveBasisPoints"
                       ],
                       "type": "object"
+                    },
+                    "sourceCapitalByEcosystem": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "amountUsdMinor": {
+                            "pattern": "^(?:0|[1-9][0-9]*)$",
+                            "type": "string"
+                          },
+                          "ecosystem": {
+                            "enum": [
+                              "EVM",
+                              "SOLANA"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "ecosystem",
+                          "amountUsdMinor"
+                        ],
+                        "type": "object"
+                      },
+                      "maxItems": 2,
+                      "minItems": 2,
+                      "type": "array"
                     },
                     "use": {
                       "enum": [
@@ -1498,10 +1619,14 @@
                   "required": [
                     "use",
                     "mayAuthorizeFinancialAction",
+                    "portfolioSnapshotId",
                     "selection",
                     "rateSnapshot",
                     "grossCapitalUsdMinor",
+                    "sourceCapitalByEcosystem",
                     "allocations",
+                    "managedYieldComposition",
+                    "compositionSummary",
                     "executionCost",
                     "capitalIncludedInProjectionUsdMinor",
                     "yieldProjection",
@@ -1521,6 +1646,49 @@
           },
           "404": {
             "description": "Synthetic local demo runtime is disabled"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": {
+                      "enum": [
+                        "PORTFOLIO_SNAPSHOT_CHANGED"
+                      ],
+                      "type": "string"
+                    },
+                    "error": {
+                      "enum": [
+                        "Conflict"
+                      ],
+                      "type": "string"
+                    },
+                    "message": {
+                      "enum": [
+                        "The local demo portfolio changed; refresh and retry"
+                      ],
+                      "type": "string"
+                    },
+                    "statusCode": {
+                      "enum": [
+                        409
+                      ],
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "statusCode",
+                    "error",
+                    "message",
+                    "code"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The displayed portfolio changed before the preview was calculated"
           },
           "422": {
             "content": {
@@ -1850,6 +2018,18 @@
                 "schema": {
                   "additionalProperties": false,
                   "properties": {
+                    "ecosystems": {
+                      "items": {
+                        "enum": [
+                          "EVM",
+                          "SOLANA"
+                        ],
+                        "type": "string"
+                      },
+                      "maxItems": 2,
+                      "minItems": 2,
+                      "type": "array"
+                    },
                     "mayAuthorizeFinancialAction": {
                       "enum": [
                         false
@@ -1878,7 +2058,7 @@
                         },
                         "id": {
                           "enum": [
-                            "managed-rate-snapshot-v1"
+                            "managed-rate-snapshot-v2"
                           ],
                           "type": "string"
                         },
@@ -1909,6 +2089,12 @@
                       ],
                       "type": "object"
                     },
+                    "strategyMode": {
+                      "enum": [
+                        "PORTFOLIO_CROSS_CHAIN_BLEND"
+                      ],
+                      "type": "string"
+                    },
                     "use": {
                       "enum": [
                         "LOCAL_DEMO_MANAGED_RATE_SNAPSHOT_ONLY"
@@ -1920,6 +2106,8 @@
                     "use",
                     "mayAuthorizeFinancialAction",
                     "riskClassificationAvailable",
+                    "strategyMode",
+                    "ecosystems",
                     "snapshot"
                   ],
                   "type": "object"

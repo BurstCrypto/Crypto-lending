@@ -91,11 +91,13 @@ evidence. Every screen displays a synthetic-data banner while the mode is on.
   widened.
 - Yield comparisons use checked-in server-confidential source evidence. The API
   and browser make no live provider request. Browser responses expose only a
-  product-owned managed-rate snapshot status and aggregate managed-yield
-  results; provider identity, protocol identity, market identifiers,
-  provenance, exact observations, and endpoints remain server-confidential.
-  The snapshot is labeled stale after its fixed boundary and cannot authorize
-  an action.
+  product-owned EVM/Solana managed-rate status and aggregate ecosystem results;
+  provider identity, protocol identity, market identifiers, provenance, exact
+  observations, and endpoints remain server-confidential. The native blend
+  keeps each fixture asset assigned to its ecosystem, performs no validator,
+  provider, bridge, or transaction I/O, and cannot authorize an action. It does
+  not claim an executable EVM network route. The snapshot is
+  labeled stale after its fixed boundary.
 
 Do not enter a real email address, phone number, seed phrase, private key,
 signature, wallet address, credential, customer record, or real asset.
@@ -160,14 +162,18 @@ restart the attached harness to pick up API source changes.
    requests an allocation preview or reveals its cost treatment. The browser
    receives aggregate liquid-reserve and managed-yield buckets only; confidential
    provider, protocol, market, provenance, and endpoint details stay on the
-   server. The preview creates no route, so the actual local operation costs
-   $0.00 and public execution remains unquoted. A separate non-quote scenario
-   models variable network, conversion, market-impact, and routing costs, rounds
-   each component up to a cent, and deducts the total before allocation and yield
-   projection. Review the aggregate effective APY, annual yield before and after
-   modeled fees, and first-positive-day status. A numbered day is the first whole
-   day when straight-line projected yield exceeds modeled fees by at least one
-   cent within the 365-day horizon; it is not a live rate or execution promise.
+   server. The request is bound to the displayed portfolio snapshot. The result
+   shows provider-neutral EVM/Solana source and managed totals, keeps capital
+   assigned to its wallet ecosystem, and models no EVM-to-Solana transfer. It
+   does not claim a bridge-free EVM network route. The preview creates no
+   executable route, so the actual local operation costs $0.00 and public execution
+   remains unquoted. A separate non-quote scenario itemizes network, conversion,
+   cross-chain, market-impact, and routing costs, rounds each variable component
+   up to a cent, and deducts the total before allocation and yield projection.
+   Review the aggregate effective APY, annual yield before and after modeled
+   fees, and first-positive-day status. A numbered day is the first whole day
+   when straight-line projected yield exceeds modeled fees by at least one cent
+   within the 365-day horizon; it is not a live rate or execution promise.
 10. Confirm the page states **No user-authorized financial transaction was
     created**. Refresh the browser to exercise wallet and session restoration.
     Disconnect a wallet to remove its contribution.

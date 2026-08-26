@@ -22,10 +22,13 @@ import { parseUnifiedBalanceResponse } from '../lib/portfolio/unified-balance';
 import { LOCAL_DEMO_CHAIN_PORTFOLIO_PAYLOAD } from './local-demo-portfolio.fixtures';
 import {
   BALANCED_PREVIEW,
+  CROSS_CHAIN_BALANCED_PREVIEW,
   LOCAL_DEMO_YIELD_CATALOG,
   MORE_YIELD_DAY_365_PREVIEW,
   MORE_LIQUID_PREVIEW,
 } from './local-demo-yield.fixtures';
+
+const PORTFOLIO_SNAPSHOT_ID = BALANCED_PREVIEW.portfolioSnapshotId;
 
 const CSRF = 'A'.repeat(43);
 
@@ -154,7 +157,7 @@ describe('local demo same-origin API client', () => {
       code: 'UNAUTHENTICATED',
     });
     await expect(
-      client.previewAllocation({ kind: 'PRESET', presetId: 'BALANCED' }),
+      client.previewAllocation(PORTFOLIO_SNAPSHOT_ID, { kind: 'PRESET', presetId: 'BALANCED' }),
     ).rejects.toMatchObject({
       code: 'UNAUTHENTICATED',
     });
@@ -174,10 +177,13 @@ describe('local demo same-origin API client', () => {
 
     await expect(client.readYieldCatalog()).resolves.toEqual(LOCAL_DEMO_YIELD_CATALOG);
     await expect(
-      client.previewAllocation({ kind: 'PRESET', presetId: 'BALANCED' }),
+      client.previewAllocation(PORTFOLIO_SNAPSHOT_ID, { kind: 'PRESET', presetId: 'BALANCED' }),
     ).resolves.toEqual(BALANCED_PREVIEW);
     await expect(
-      client.previewAllocation({ kind: 'PRESET', presetId: 'MORE_LIQUID' }),
+      client.previewAllocation(PORTFOLIO_SNAPSHOT_ID, {
+        kind: 'PRESET',
+        presetId: 'MORE_LIQUID',
+      }),
     ).resolves.toEqual(MORE_LIQUID_PREVIEW);
     expectProviderPrivate(LOCAL_DEMO_YIELD_CATALOG);
     expectProviderPrivate(BALANCED_PREVIEW);
@@ -203,7 +209,10 @@ describe('local demo same-origin API client', () => {
         credentials: 'same-origin',
         cache: 'no-store',
         redirect: 'error',
-        body: JSON.stringify({ selection: { kind: 'PRESET', presetId: 'BALANCED' } }),
+        body: JSON.stringify({
+          portfolioSnapshotId: PORTFOLIO_SNAPSHOT_ID,
+          selection: { kind: 'PRESET', presetId: 'BALANCED' },
+        }),
         headers: expect.objectContaining({
           'Content-Type': 'application/json',
           'X-CSRF-Token': CSRF,
@@ -215,7 +224,10 @@ describe('local demo same-origin API client', () => {
       LOCAL_DEMO_ALLOCATION_PREVIEW_PATH,
       expect.objectContaining({
         method: 'POST',
-        body: JSON.stringify({ selection: { kind: 'PRESET', presetId: 'MORE_LIQUID' } }),
+        body: JSON.stringify({
+          portfolioSnapshotId: PORTFOLIO_SNAPSHOT_ID,
+          selection: { kind: 'PRESET', presetId: 'MORE_LIQUID' },
+        }),
       }),
     );
     expect(requestFetch).toHaveBeenCalledTimes(3);
@@ -268,7 +280,10 @@ describe('local demo same-origin API client', () => {
       fetch: vi.fn(async () => json(BALANCED_PREVIEW)),
     });
     await expect(
-      client.previewAllocation({ kind: 'PRESET', presetId: 'MORE_LIQUID' }),
+      client.previewAllocation(PORTFOLIO_SNAPSHOT_ID, {
+        kind: 'PRESET',
+        presetId: 'MORE_LIQUID',
+      }),
     ).rejects.toMatchObject({
       code: 'INVALID_RESPONSE',
     });
@@ -279,6 +294,7 @@ describe('local demo same-origin API client', () => {
     expect(BALANCED_PREVIEW.executionCost.modeledScenario.components).toMatchObject([
       { code: 'NETWORK', amountUsdMinor: '438' },
       { code: 'CONVERSION', amountUsdMinor: '0' },
+      { code: 'CROSS_ECOSYSTEM_TRANSFER', amountUsdMinor: '0' },
       { code: 'MARKET_IMPACT', amountUsdMinor: '115' },
       { code: 'ROUTING', amountUsdMinor: '60' },
     ]);
@@ -359,6 +375,94 @@ describe('local demo same-origin API client', () => {
     expect(() => parseLocalDemoAllocationPreview(legacyCost)).toThrow(TypeError);
   });
 
+  it('reconciles provider-private native ecosystem sources, composition, and routing', () => {
+    expect(() => parseLocalDemoAllocationPreview(CROSS_CHAIN_BALANCED_PREVIEW)).not.toThrow();
+    expect(CROSS_CHAIN_BALANCED_PREVIEW.sourceCapitalByEcosystem).toEqual([
+      { ecosystem: 'EVM', amountUsdMinor: '700000' },
+      { ecosystem: 'SOLANA', amountUsdMinor: '400000' },
+    ]);
+    expect(CROSS_CHAIN_BALANCED_PREVIEW.managedYieldComposition).toMatchObject([
+      { ecosystem: 'EVM', percentageBasisPointsOfManagedYield: 6_364 },
+      { ecosystem: 'SOLANA', percentageBasisPointsOfManagedYield: 3_636 },
+    ]);
+    expect(CROSS_CHAIN_BALANCED_PREVIEW.compositionSummary).toEqual({
+      mode: 'EVM_SOLANA_PORTFOLIO_BLEND',
+      crossEcosystemTransferRequired: false,
+      crossEcosystemTransferUsdMinor: '0',
+      activeEcosystemCount: 2,
+      activeAllocationCount: 3,
+    });
+    expectProviderPrivate(CROSS_CHAIN_BALANCED_PREVIEW);
+
+    const mutations: Array<(candidate: Record<string, unknown>) => void> = [
+      (candidate) => {
+        const rows = candidate.sourceCapitalByEcosystem as Array<Record<string, unknown>>;
+        rows[0]!.amountUsdMinor = '699999';
+      },
+      (candidate) => {
+        const rows = candidate.sourceCapitalByEcosystem as unknown[];
+        rows.reverse();
+      },
+      (candidate) => {
+        const rows = candidate.managedYieldComposition as Array<Record<string, unknown>>;
+        rows[1]!.percentageBasisPointsOfManagedYield = 3_635;
+      },
+      (candidate) => {
+        const rows = candidate.managedYieldComposition as Array<Record<string, unknown>>;
+        rows[1]!.amountUsdMinor = '279767';
+      },
+      (candidate) => {
+        const composition = candidate.compositionSummary as Record<string, unknown>;
+        composition.crossEcosystemTransferRequired = true;
+      },
+      (candidate) => {
+        const composition = candidate.compositionSummary as Record<string, unknown>;
+        composition.activeEcosystemCount = 1;
+      },
+      (candidate) => {
+        const execution = candidate.executionCost as Record<string, unknown>;
+        const modeled = execution.modeledScenario as Record<string, unknown>;
+        const components = modeled.components as Array<Record<string, unknown>>;
+        components[2]!.amountUsdMinor = '1';
+        modeled.totalUsdMinor = '913';
+      },
+    ];
+
+    for (const mutate of mutations) {
+      const candidate = structuredClone(CROSS_CHAIN_BALANCED_PREVIEW) as unknown as Record<
+        string,
+        unknown
+      >;
+      mutate(candidate);
+      expect(() => parseLocalDemoAllocationPreview(candidate)).toThrow(TypeError);
+    }
+
+    const transferHiddenAsNative = structuredClone(
+      CROSS_CHAIN_BALANCED_PREVIEW,
+    ) as unknown as Record<string, unknown>;
+    const hiddenTransferComposition = transferHiddenAsNative.managedYieldComposition as Array<
+      Record<string, unknown>
+    >;
+    hiddenTransferComposition[0]!.amountUsdMinor = '369299';
+    hiddenTransferComposition[0]!.percentageBasisPointsOfManagedYield = 4_800;
+    hiddenTransferComposition[1]!.amountUsdMinor = '400001';
+    hiddenTransferComposition[1]!.percentageBasisPointsOfManagedYield = 5_200;
+    expect(() => parseLocalDemoAllocationPreview(transferHiddenAsNative)).toThrow(TypeError);
+
+    const zeroSourceWithAllocation = structuredClone(BALANCED_PREVIEW) as unknown as Record<
+      string,
+      unknown
+    >;
+    const zeroSourceComposition = zeroSourceWithAllocation.managedYieldComposition as Array<
+      Record<string, unknown>
+    >;
+    zeroSourceComposition[0]!.amountUsdMinor = '489570';
+    zeroSourceComposition[0]!.percentageBasisPointsOfManagedYield = 9_999;
+    zeroSourceComposition[1]!.amountUsdMinor = '1';
+    zeroSourceComposition[1]!.percentageBasisPointsOfManagedYield = 1;
+    expect(() => parseLocalDemoAllocationPreview(zeroSourceWithAllocation)).toThrow(TypeError);
+  });
+
   it('uses both disclosed yield floors to reject an impossible recovery day at the horizon', () => {
     expect(() => parseLocalDemoAllocationPreview(MORE_YIELD_DAY_365_PREVIEW)).not.toThrow();
 
@@ -386,7 +490,9 @@ describe('local demo same-origin API client', () => {
       fetch: requestFetch,
     });
 
-    await expect(client.previewAllocation(legacySelection as never)).rejects.toMatchObject({
+    await expect(
+      client.previewAllocation(PORTFOLIO_SNAPSHOT_ID, legacySelection as never),
+    ).rejects.toMatchObject({
       code: 'INVALID_RESPONSE',
     });
     expect(getter).not.toHaveBeenCalled();
@@ -404,11 +510,71 @@ describe('local demo same-origin API client', () => {
       fetch: requestFetch,
     });
 
-    await expect(client.previewAllocation(selection as never)).rejects.toMatchObject({
+    await expect(
+      client.previewAllocation(PORTFOLIO_SNAPSHOT_ID, selection as never),
+    ).rejects.toMatchObject({
       code: 'INVALID_RESPONSE',
     });
     expect(getter).not.toHaveBeenCalled();
     expect(requestFetch).not.toHaveBeenCalled();
+  });
+
+  it('binds previews to a canonical portfolio snapshot and maps only the exact change conflict', async () => {
+    const requestFetch = vi.fn<typeof fetch>();
+    const invalidClient = new LocalDemoApiClient({
+      cookieHeader: `__Host-cl_csrf=${CSRF}`,
+      fetch: requestFetch,
+    });
+    await expect(
+      invalidClient.previewAllocation('invalid snapshot id', {
+        kind: 'PRESET',
+        presetId: 'BALANCED',
+      }),
+    ).rejects.toMatchObject({ code: 'INVALID_RESPONSE' });
+    expect(requestFetch).not.toHaveBeenCalled();
+
+    const mismatched = {
+      ...structuredClone(BALANCED_PREVIEW),
+      portfolioSnapshotId: 'different-portfolio-snapshot',
+    };
+    const mismatchClient = new LocalDemoApiClient({
+      cookieHeader: `__Host-cl_csrf=${CSRF}`,
+      fetch: vi.fn(async () => json(mismatched)),
+    });
+    await expect(
+      mismatchClient.previewAllocation(PORTFOLIO_SNAPSHOT_ID, {
+        kind: 'PRESET',
+        presetId: 'BALANCED',
+      }),
+    ).rejects.toMatchObject({ code: 'INVALID_RESPONSE' });
+
+    const exactConflict = {
+      statusCode: 409,
+      error: 'Conflict',
+      message: 'The local demo portfolio changed; refresh and retry',
+      code: 'PORTFOLIO_SNAPSHOT_CHANGED',
+    };
+    const conflictClient = new LocalDemoApiClient({
+      cookieHeader: `__Host-cl_csrf=${CSRF}`,
+      fetch: vi.fn(async () => json(exactConflict, 409)),
+    });
+    await expect(
+      conflictClient.previewAllocation(PORTFOLIO_SNAPSHOT_ID, {
+        kind: 'PRESET',
+        presetId: 'BALANCED',
+      }),
+    ).rejects.toMatchObject({ code: 'PORTFOLIO_SNAPSHOT_CHANGED' });
+
+    const malformedConflictClient = new LocalDemoApiClient({
+      cookieHeader: `__Host-cl_csrf=${CSRF}`,
+      fetch: vi.fn(async () => json({ ...exactConflict, detail: 'unexpected' }, 409)),
+    });
+    await expect(
+      malformedConflictClient.previewAllocation(PORTFOLIO_SNAPSHOT_ID, {
+        kind: 'PRESET',
+        presetId: 'BALANCED',
+      }),
+    ).rejects.toMatchObject({ code: 'INVALID_RESPONSE' });
   });
 
   it('maps only the exact bounded 422 body to a no-match result', async () => {
@@ -423,7 +589,10 @@ describe('local demo same-origin API client', () => {
       fetch: vi.fn(async () => json(exactNoMatch, 422)),
     });
     await expect(
-      exactClient.previewAllocation({ kind: 'PRESET', presetId: 'BALANCED' }),
+      exactClient.previewAllocation(PORTFOLIO_SNAPSHOT_ID, {
+        kind: 'PRESET',
+        presetId: 'BALANCED',
+      }),
     ).rejects.toMatchObject({ code: 'NO_MATCHING_YIELD_OPPORTUNITIES' });
 
     const malformedClient = new LocalDemoApiClient({
@@ -431,7 +600,10 @@ describe('local demo same-origin API client', () => {
       fetch: vi.fn(async () => json({ ...exactNoMatch, debug: 'unexpected detail' }, 422)),
     });
     await expect(
-      malformedClient.previewAllocation({ kind: 'PRESET', presetId: 'BALANCED' }),
+      malformedClient.previewAllocation(PORTFOLIO_SNAPSHOT_ID, {
+        kind: 'PRESET',
+        presetId: 'BALANCED',
+      }),
     ).rejects.toMatchObject({ code: 'INVALID_RESPONSE' });
   });
 
@@ -453,7 +625,10 @@ describe('local demo same-origin API client', () => {
         configurable: true,
         value: () => ['ATTACKER_CONTROLLED'],
       });
-      await client.previewAllocation({ kind: 'PRESET', presetId: 'BALANCED' });
+      await client.previewAllocation(PORTFOLIO_SNAPSHOT_ID, {
+        kind: 'PRESET',
+        presetId: 'BALANCED',
+      });
     } finally {
       if (objectToJson === undefined) delete (Object.prototype as { toJSON?: unknown }).toJSON;
       else Object.defineProperty(Object.prototype, 'toJSON', objectToJson);
@@ -462,7 +637,7 @@ describe('local demo same-origin API client', () => {
     }
 
     expect(requestFetch.mock.calls.map(([, init]) => init?.body)).toEqual([
-      '{"selection":{"kind":"PRESET","presetId":"BALANCED"}}',
+      `{"portfolioSnapshotId":"${PORTFOLIO_SNAPSHOT_ID}","selection":{"kind":"PRESET","presetId":"BALANCED"}}`,
     ]);
   });
 

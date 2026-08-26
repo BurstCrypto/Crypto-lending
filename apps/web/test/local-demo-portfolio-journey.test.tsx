@@ -11,7 +11,11 @@ import {
 } from '../lib/local-demo/local-demo-client';
 import { localDemoWalletRosterKey } from '../lib/local-demo/wallet-roster';
 import { LOCAL_DEMO_CHAIN_PORTFOLIO_PAYLOAD } from './local-demo-portfolio.fixtures';
-import { LOCAL_DEMO_YIELD_CATALOG, MORE_LIQUID_PREVIEW } from './local-demo-yield.fixtures';
+import {
+  CROSS_CHAIN_BALANCED_PREVIEW,
+  LOCAL_DEMO_YIELD_CATALOG,
+  MORE_LIQUID_PREVIEW,
+} from './local-demo-yield.fixtures';
 
 const PROFILE: AccountProfile = Object.freeze({
   accountId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
@@ -102,7 +106,9 @@ function fakeClient(initial: readonly LocalDemoWalletProjection[] = []): FakeCli
   });
   const readPortfolio = vi.fn(async () => portfolioFor(registered));
   const readYieldCatalog = vi.fn(async () => LOCAL_DEMO_YIELD_CATALOG);
-  const previewAllocation = vi.fn(async () => MORE_LIQUID_PREVIEW);
+  const previewAllocation = vi.fn(async () =>
+    registered.length === 2 ? CROSS_CHAIN_BALANCED_PREVIEW : MORE_LIQUID_PREVIEW,
+  );
   return {
     client: {
       listWallets,
@@ -208,6 +214,40 @@ describe('authenticated local demo portfolio journey', () => {
     expect(restoredHarness.readPortfolio).toHaveBeenCalledTimes(1);
   });
 
+  it('blends connected EVM and Solana capital without exposing a lending venue', async () => {
+    const harness = fakeClient();
+    experience(harness);
+
+    await screen.findByText('No synthetic wallets are connected yet.');
+    fireEvent.click(screen.getByRole('button', { name: /EVM test wallet/u }));
+    await screen.findByText('Synthetic EVM wallet', { selector: 'strong' });
+    fireEvent.click(screen.getByRole('button', { name: /Solana test wallet/u }));
+    await screen.findByText('Synthetic Solana wallet', { selector: 'strong' });
+
+    const buyingPower = screen.getByText('Available buying power').closest('article');
+    expect(within(buyingPower!).getByLabelText('11,000 US dollars')).toHaveTextContent(
+      '$11,000.00',
+    );
+    fireEvent.click(await screen.findByRole('button', { name: /Balanced blend/u }));
+
+    const composition = (
+      await screen.findByRole('heading', { name: 'Managed allocation by ecosystem' })
+    ).closest('section');
+    expect(within(composition!).getByText('EVM managed yield')).toBeInTheDocument();
+    expect(within(composition!).getByText('SVM managed yield')).toBeInTheDocument();
+    expect(
+      within(composition!).getByText('No EVM-to-Solana transfer is modeled.'),
+    ).toBeInTheDocument();
+    expect(harness.previewAllocation).toHaveBeenCalledWith(
+      PORTFOLIO.snapshotId,
+      { kind: 'PRESET', presetId: 'BALANCED' },
+      expect.any(AbortSignal),
+    );
+    expect(composition!.textContent).not.toMatch(
+      /morpho|api\.morpho|eip155:|0x[0-9a-f]{40}|marketId|protocol/iu,
+    );
+  });
+
   it('offers private product plans only when ready and defers every fee amount until selection', async () => {
     const harness = fakeClient();
     experience(harness);
@@ -251,6 +291,7 @@ describe('authenticated local demo portfolio journey', () => {
     const costHeading = await screen.findByRole('heading', { name: 'Estimated one-time fees' });
     expect(costHeading).toBeInTheDocument();
     expect(harness.previewAllocation).toHaveBeenCalledWith(
+      PORTFOLIO.snapshotId,
       { kind: 'PRESET', presetId: 'MORE_LIQUID' },
       expect.any(AbortSignal),
     );

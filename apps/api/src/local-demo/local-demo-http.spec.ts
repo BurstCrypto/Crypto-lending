@@ -13,14 +13,17 @@ import {
 } from './local-demo-http';
 
 describe('local demo HTTP boundary', () => {
+  const portfolioSnapshotId = 'local-demo-portfolio:0123456789abcdef0123456789abcdef';
+
   it.each(['MORE_LIQUID', 'BALANCED', 'MORE_YIELD'] as const)(
     'accepts only the %s allocation preset identifier',
     (presetId) => {
       const result = parseLocalDemoAllocationPreviewBody({
+        portfolioSnapshotId,
         selection: { kind: 'PRESET', presetId },
       });
 
-      expect(result).toEqual({ selection: { kind: 'PRESET', presetId } });
+      expect(result).toEqual({ portfolioSnapshotId, selection: { kind: 'PRESET', presetId } });
       expect(Object.isFrozen(result)).toBe(true);
       expect(Object.isFrozen(result.selection)).toBe(true);
     },
@@ -41,6 +44,10 @@ describe('local demo HTTP boundary', () => {
     { selection: { kind: 'PRESET', presetId: 'BALANCED', amountUsdMinor: '1' } },
     { selection: { kind: 'PRESET', presetId: 'BALANCED', modeledCostUsdMinor: '1' } },
     { selection: { kind: 'PRESET', presetId: 'BALANCED' }, accountId: 'caller' },
+    {
+      portfolioSnapshotId: 'local-demo-portfolio:../stale',
+      selection: { kind: 'PRESET', presetId: 'BALANCED' },
+    },
     Object.assign(Object.create({ selection: { kind: 'PRESET', presetId: 'BALANCED' } }), {}),
   ])('rejects malformed, custom, or caller-authored allocation input', (body) => {
     expect(() => parseLocalDemoAllocationPreviewBody(body)).toThrow(LocalDemoBodyError);
@@ -58,7 +65,9 @@ describe('local demo HTTP boundary', () => {
     });
     selection.presetId = 'BALANCED';
 
-    expect(() => parseLocalDemoAllocationPreviewBody({ selection })).toThrow(LocalDemoBodyError);
+    expect(() => parseLocalDemoAllocationPreviewBody({ portfolioSnapshotId, selection })).toThrow(
+      LocalDemoBodyError,
+    );
     expect(invoked).toBe(false);
   });
 
@@ -66,7 +75,7 @@ describe('local demo HTTP boundary', () => {
     expect(LOCAL_DEMO_ALLOCATION_PREVIEW_BODY_SCHEMA).toMatchObject({
       type: 'object',
       additionalProperties: false,
-      required: ['selection'],
+      required: ['portfolioSnapshotId', 'selection'],
       properties: {
         selection: {
           type: 'object',
@@ -87,7 +96,11 @@ describe('local demo HTTP boundary', () => {
       additionalProperties: false,
       required: expect.arrayContaining([
         'rateSnapshot',
+        'portfolioSnapshotId',
+        'sourceCapitalByEcosystem',
         'allocations',
+        'managedYieldComposition',
+        'compositionSummary',
         'executionCost',
         'capitalIncludedInProjectionUsdMinor',
         'yieldProjection',
@@ -105,7 +118,7 @@ describe('local demo HTTP boundary', () => {
             },
             modeledScenario: {
               properties: {
-                modelId: { type: 'string', enum: ['LOCAL_DEMO_ALLOCATION_COST_V1'] },
+                modelId: { type: 'string', enum: ['LOCAL_DEMO_ALLOCATION_COST_V2'] },
                 isQuote: { type: 'boolean', enum: [false] },
                 totalUsdMinor: { type: 'string', pattern: '^(?:0|[1-9][0-9]*)$' },
               },
@@ -138,7 +151,13 @@ describe('local demo HTTP boundary', () => {
       LOCAL_DEMO_YIELD_CATALOG_RESPONSE_SCHEMA,
       LOCAL_DEMO_ALLOCATION_PREVIEW_RESPONSE_SCHEMA,
     ]);
-    for (const component of ['NETWORK', 'CONVERSION', 'MARKET_IMPACT', 'ROUTING']) {
+    for (const component of [
+      'NETWORK',
+      'CONVERSION',
+      'CROSS_ECOSYSTEM_TRANSFER',
+      'MARKET_IMPACT',
+      'ROUTING',
+    ]) {
       expect(publicSchemas).toContain(`"${component}"`);
     }
     for (const forbidden of [

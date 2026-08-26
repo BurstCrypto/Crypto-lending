@@ -15,6 +15,7 @@ import type {
   LocalDemoAllocationPreviewResponse,
   LocalDemoAllocationService,
 } from './local-demo-allocation.service';
+import { LocalDemoPortfolioSnapshotChangedError } from './local-demo-allocation.service';
 import type { LocalDemoRuntimeConfig } from './local-demo-runtime.config';
 import {
   LocalDemoNoMatchingYieldOpportunitiesError,
@@ -66,17 +67,18 @@ const CONNECTION: LocalDemoWalletConnection = Object.freeze({
 
 const PORTFOLIO = Object.freeze({
   schemaVersion: 1,
-  snapshotId: 'local-demo-snapshot',
+  snapshotId: 'local-demo-portfolio:0123456789abcdef0123456789abcdef',
   portfolioValueUsdMinor: '1100000',
 });
 
 const YIELD_CATALOG: LocalDemoYieldCatalogResponse = new LocalDemoYieldCatalogService().read(
-  new Date('2026-08-26T15:00:00.000Z'),
+  new Date('2026-08-26T22:00:00.000Z'),
 );
 
 const ALLOCATION_PREVIEW: LocalDemoAllocationPreviewResponse = Object.freeze({
   use: 'LOCAL_DEMO_ESTIMATE_ONLY',
   mayAuthorizeFinancialAction: false,
+  portfolioSnapshotId: PORTFOLIO.snapshotId,
   selection: Object.freeze({
     kind: 'PRESET',
     presetId: 'BALANCED',
@@ -95,6 +97,10 @@ const ALLOCATION_PREVIEW: LocalDemoAllocationPreviewResponse = Object.freeze({
     riskClassification: YIELD_CATALOG.snapshot.riskClassification,
   }),
   grossCapitalUsdMinor: '1100000',
+  sourceCapitalByEcosystem: Object.freeze([
+    Object.freeze({ ecosystem: 'EVM', amountUsdMinor: '700000' }),
+    Object.freeze({ ecosystem: 'SOLANA', amountUsdMinor: '400000' }),
+  ]),
   allocations: Object.freeze([
     Object.freeze({
       bucket: 'LIQUID_RESERVE',
@@ -111,11 +117,32 @@ const ALLOCATION_PREVIEW: LocalDemoAllocationPreviewResponse = Object.freeze({
       amountUsdMinor: '769300',
     }),
   ]),
+  managedYieldComposition: Object.freeze([
+    Object.freeze({
+      ecosystem: 'EVM',
+      label: 'EVM managed yield',
+      percentageBasisPointsOfManagedYield: 6_364,
+      amountUsdMinor: '489555',
+    }),
+    Object.freeze({
+      ecosystem: 'SOLANA',
+      label: 'SVM managed yield',
+      percentageBasisPointsOfManagedYield: 3_636,
+      amountUsdMinor: '279745',
+    }),
+  ]),
+  compositionSummary: Object.freeze({
+    mode: 'EVM_SOLANA_PORTFOLIO_BLEND',
+    crossEcosystemTransferRequired: false,
+    crossEcosystemTransferUsdMinor: '0',
+    activeEcosystemCount: 2,
+    activeAllocationCount: 3,
+  }),
   executionCost: Object.freeze({
     actualLocalOperation: Object.freeze({ status: 'NO_EXECUTION', amountUsdMinor: '0' }),
     modeledScenario: Object.freeze({
       status: 'AVAILABLE',
-      modelId: 'LOCAL_DEMO_ALLOCATION_COST_V1',
+      modelId: 'LOCAL_DEMO_ALLOCATION_COST_V2',
       isQuote: false,
       costBasisCapitalUsdMinor: '1100000',
       fundingTreatment: 'DEDUCT_FROM_GROSS_BEFORE_PROJECTION',
@@ -132,6 +159,12 @@ const ALLOCATION_PREVIEW: LocalDemoAllocationPreviewResponse = Object.freeze({
           label: 'Estimated conversion costs',
           calculationBasis: 'TWELVE_BPS_OF_REQUIRED_CONVERSION',
           amountUsdMinor: '200',
+        }),
+        Object.freeze({
+          code: 'CROSS_ECOSYSTEM_TRANSFER',
+          label: 'Estimated EVM-Solana transfer costs',
+          calculationBasis: 'NO_CROSS_ECOSYSTEM_TRANSFER',
+          amountUsdMinor: '0',
         }),
         Object.freeze({
           code: 'MARKET_IMPACT',
@@ -219,9 +252,10 @@ function controllerFixture(config: LocalDemoRuntimeConfig = ENABLED_CONFIG): Con
     read: jest.fn(() => YIELD_CATALOG),
   };
   const allocations: jest.Mocked<AllocationBoundary> = {
-    preview: jest.fn(async (accountId, correlation, selection) => {
+    preview: jest.fn(async (accountId, correlation, portfolioSnapshotId, selection) => {
       void accountId;
       void correlation;
+      void portfolioSnapshotId;
       void selection;
       return ALLOCATION_PREVIEW;
     }),
@@ -478,9 +512,11 @@ describe('LocalDemoController', () => {
       use: 'LOCAL_DEMO_MANAGED_RATE_SNAPSHOT_ONLY',
       mayAuthorizeFinancialAction: false,
       riskClassificationAvailable: false,
+      strategyMode: 'PORTFOLIO_CROSS_CHAIN_BLEND',
+      ecosystems: ['EVM', 'SOLANA'],
       snapshot: {
-        id: 'managed-rate-snapshot-v1',
-        capturedAt: '2026-08-26T14:14:54.580Z',
+        id: 'managed-rate-snapshot-v2',
+        capturedAt: '2026-08-26T21:20:06.659Z',
         staleAfter: '2026-08-27T14:14:54.580Z',
         freshness: 'CURRENT',
         staleBehavior: 'LABEL_STALE_KEEP_NON_EXECUTABLE',
@@ -497,7 +533,10 @@ describe('LocalDemoController', () => {
     const result = await loggingContext.run(AUTHENTICATED_REQUEST_CORRELATION_B, () =>
       fixture.controller.previewAllocation(
         principal(ACCOUNT_B),
-        { selection: { kind: 'PRESET', presetId: 'BALANCED' } },
+        {
+          portfolioSnapshotId: PORTFOLIO.snapshotId,
+          selection: { kind: 'PRESET', presetId: 'BALANCED' },
+        },
         response.response,
       ),
     );
@@ -506,10 +545,12 @@ describe('LocalDemoController', () => {
     expect(fixture.allocations.preview).toHaveBeenCalledWith(
       ACCOUNT_B,
       AUTHENTICATED_REQUEST_CORRELATION_B,
+      PORTFOLIO.snapshotId,
       { kind: 'PRESET', presetId: 'BALANCED' },
     );
     expect(fixture.allocations.preview).not.toHaveBeenCalledWith(
       ACCOUNT_A,
+      expect.anything(),
       expect.anything(),
       expect.anything(),
     );
@@ -600,7 +641,10 @@ describe('LocalDemoController', () => {
       loggingContext.run(AUTHENTICATED_REQUEST_CORRELATION_B, () =>
         fixture.controller.previewAllocation(
           principal(ACCOUNT_B),
-          { selection: { kind: 'PRESET', presetId: 'BALANCED' } },
+          {
+            portfolioSnapshotId: PORTFOLIO.snapshotId,
+            selection: { kind: 'PRESET', presetId: 'BALANCED' },
+          },
           response.response,
         ),
       ),
@@ -614,6 +658,36 @@ describe('LocalDemoController', () => {
       error: 'Unprocessable Entity',
       message: 'The managed yield strategy is unavailable for this snapshot',
       code: 'NO_MATCHING_YIELD_OPPORTUNITIES',
+    });
+    expect(response.response.setHeader).not.toHaveBeenCalled();
+  });
+
+  it('returns a sanitized 409 when the displayed portfolio snapshot changed', async () => {
+    const fixture = controllerFixture();
+    const response = responseFixture();
+    fixture.allocations.preview.mockRejectedValueOnce(new LocalDemoPortfolioSnapshotChangedError());
+
+    const error = await captureRejected(() =>
+      loggingContext.run(AUTHENTICATED_REQUEST_CORRELATION_B, () =>
+        fixture.controller.previewAllocation(
+          principal(ACCOUNT_B),
+          {
+            portfolioSnapshotId: PORTFOLIO.snapshotId,
+            selection: { kind: 'PRESET', presetId: 'BALANCED' },
+          },
+          response.response,
+        ),
+      ),
+    );
+
+    expect(error).toBeInstanceOf(HttpException);
+    const httpError = error as HttpException;
+    expect(httpError.getStatus()).toBe(HttpStatus.CONFLICT);
+    expect(httpError.getResponse()).toEqual({
+      statusCode: HttpStatus.CONFLICT,
+      error: 'Conflict',
+      message: 'The local demo portfolio changed; refresh and retry',
+      code: 'PORTFOLIO_SNAPSHOT_CHANGED',
     });
     expect(response.response.setHeader).not.toHaveBeenCalled();
   });
@@ -691,7 +765,10 @@ describe('LocalDemoController', () => {
         loggingContext.run(AUTHENTICATED_REQUEST_CORRELATION_B, () =>
           allocation.controller.previewAllocation(
             principal(ACCOUNT_B),
-            { selection: { kind: 'PRESET', presetId: 'BALANCED' } },
+            {
+              portfolioSnapshotId: PORTFOLIO.snapshotId,
+              selection: { kind: 'PRESET', presetId: 'BALANCED' },
+            },
             allocationResponse.response,
           ),
         ),
@@ -731,7 +808,10 @@ describe('LocalDemoController', () => {
       await captureRejected(() =>
         allocation.controller.previewAllocation(
           principal(ACCOUNT_A),
-          { selection: { kind: 'PRESET', presetId: 'BALANCED' } },
+          {
+            portfolioSnapshotId: PORTFOLIO.snapshotId,
+            selection: { kind: 'PRESET', presetId: 'BALANCED' },
+          },
           allocationResponse.response,
         ),
       ),
@@ -769,7 +849,10 @@ describe('LocalDemoController', () => {
     const allocationError = await captureRejected(() =>
       fixture.controller.previewAllocation(
         principal(ACCOUNT_A),
-        { selection: { kind: 'PRESET', presetId: 'BALANCED' } },
+        {
+          portfolioSnapshotId: PORTFOLIO.snapshotId,
+          selection: { kind: 'PRESET', presetId: 'BALANCED' },
+        },
         responseFixture().response,
       ),
     );
