@@ -88,6 +88,44 @@ renderer; shared production network and asset allowlists remain unchanged. See
 the [local EVM runbook](tools/local-evm/README.md) and
 [KAN-256 evidence](docs/KAN-256.md).
 
+### Live public-testnet connectivity
+
+A separate, credential-free local operator smoke test verifies exact chain
+identity and requests a provider-reported finalized head on Ethereum Sepolia,
+Base Sepolia, Arbitrum Sepolia, and Solana devnet through credential-free public
+RPCs:
+
+```powershell
+npm run testnet:live:preflight
+npm run testnet:live:smoke
+npm run test:testnet:live
+```
+
+This performs reads only and has no wallet, key, faucet, signing, transaction,
+or broadcast path. It proves RPC connectivity, not an executable lending flow,
+and it does not feed public observations into application financial state. See
+the [public-testnet smoke runbook](tools/public-testnet/README.md) for the exact
+boundary.
+
+The attached local demo separately offers an explicit browser-wallet proof on
+Solana Devnet after a managed allocation preview. It prepares one exact-message
+deposit of 0.01 native Devnet SOL into one fixed Save/Solend lending position
+and asks the connected Wallet Standard wallet for one confirmation. A public,
+opaque intent memo makes every signed message unique even when two requests
+receive the same recent blockhash. The wallet, not the API, signs and broadcasts
+the transaction. Devnet SOL is free from the official Solana faucet and has no
+real value; no EVM testnet gas, test token, or token approval is part of this
+flow. The lending provider and its accounts are necessarily visible to the
+signer and on the public chain. The API never signs, broadcasts, or requests an
+airdrop, and it accepts the proof only after finalized exact-message and position
+verification. Before invoking the wallet, the browser creates a same-tab
+recovery journal and adds any returned signature synchronously; reload recovery
+can only poll that same signature and never resends it. The position remains
+deposited because this narrow proof has no withdrawal transaction, and it
+neither executes nor validates the displayed cross-chain blend. See the
+[local demo runbook](tools/local-demo/README.md) for funding, confirmation,
+provider visibility, persistence, and no-withdrawal limitations.
+
 ## Restricted wallet validation lab
 
 There are two deliberately separate wallet test surfaces:

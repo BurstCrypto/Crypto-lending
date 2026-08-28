@@ -1228,6 +1228,192 @@ h1 {
   line-height: 1.55;
 }
 
+.local-demo-liquidity-adjustment {
+  display: grid;
+  gap: 0.8rem;
+  padding: 1rem 1.1rem;
+  background: rgba(5, 18, 13, 0.62);
+  border: 1px solid rgba(112, 225, 179, 0.24);
+  border-radius: 0.9rem;
+}
+
+.local-demo-liquidity-adjustment-heading,
+.local-demo-liquidity-adjustment-footer {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.local-demo-liquidity-adjustment-heading h4 {
+  margin: 0.25rem 0 0;
+  font-size: 0.95rem;
+}
+
+.local-demo-liquidity-adjustment > label {
+  color: var(--text);
+  font-size: 0.8rem;
+  font-weight: 750;
+}
+
+.local-demo-liquidity-adjustment input[type='range'] {
+  width: 100%;
+  min-height: 1.6rem;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.local-demo-liquidity-adjustment input[type='range']:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.local-demo-liquidity-adjustment input[type='range']:focus-visible {
+  outline: 3px solid rgba(112, 225, 179, 0.42);
+  outline-offset: 0.2rem;
+}
+
+.local-demo-liquidity-output {
+  flex: none;
+  padding: 0.35rem 0.6rem;
+  color: var(--accent-strong);
+  background: rgba(112, 225, 179, 0.08);
+  border: 1px solid rgba(112, 225, 179, 0.24);
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.local-demo-liquidity-adjustment-footer p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.76rem;
+  line-height: 1.5;
+}
+
+.local-demo-liquidity-adjustment-footer p + p {
+  margin-top: 0.25rem;
+}
+
+.local-demo-liquidity-adjustment-footer strong {
+  color: var(--text);
+}
+
+.local-demo-liquidity-apply {
+  flex: none;
+  align-self: center;
+}
+
+.local-demo-ecosystem-composition {
+  display: grid;
+  gap: 1.2rem;
+  padding: clamp(1.15rem, 2.5vw, 1.5rem);
+  background: rgba(6, 18, 14, 0.55);
+  border: 1px solid rgba(112, 225, 179, 0.24);
+  border-radius: 0.9rem;
+}
+
+.local-demo-ecosystem-composition-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.local-demo-ecosystem-composition-heading h4 {
+  margin: 0.3rem 0 0;
+  font-size: 0.95rem;
+}
+
+.local-demo-ecosystem-composition-heading > p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.76rem;
+  white-space: nowrap;
+}
+
+.local-demo-ecosystem-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.local-demo-ecosystem-list li {
+  display: grid;
+  align-content: start;
+  min-width: 0;
+  gap: 1rem;
+  padding: 1.15rem;
+  background: rgba(5, 18, 13, 0.55);
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+}
+
+.local-demo-ecosystem-list > li > strong {
+  color: var(--accent-strong);
+  font-size: 0.95rem;
+}
+
+.local-demo-ecosystem-values {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem 1rem;
+  margin: 0;
+}
+
+.local-demo-ecosystem-values > div {
+  display: grid;
+  align-content: start;
+  gap: 0.25rem;
+}
+
+.local-demo-ecosystem-values .local-demo-ecosystem-managed-amount {
+  grid-column: 1 / -1;
+  padding-bottom: 0.85rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.local-demo-ecosystem-values dt {
+  color: var(--muted);
+  font-size: 0.7rem;
+  letter-spacing: 0.025em;
+  text-transform: uppercase;
+}
+
+.local-demo-ecosystem-values dd {
+  margin: 0;
+  font-size: 0.9rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 780;
+  overflow-wrap: anywhere;
+}
+
+.local-demo-ecosystem-managed-amount dd {
+  color: var(--text);
+  font-size: 1.2rem;
+}
+
+.local-demo-native-route-note {
+  padding: 0.85rem 0.95rem;
+  color: var(--text);
+  background: rgba(112, 225, 179, 0.07);
+  border-left: 3px solid var(--accent);
+  border-radius: 0.35rem;
+}
+
+.local-demo-native-route-note p {
+  margin: 0.25rem 0 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
 .local-demo-allocation-results {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1337,6 +1523,287 @@ h1 {
 
 .local-demo-allocation-net dt {
   color: inherit;
+}
+
+.public-testnet-proof {
+  display: grid;
+  gap: 1rem;
+  padding: clamp(1.15rem, 3vw, 1.6rem);
+  background:
+    radial-gradient(circle at 95% 0, rgba(112, 225, 179, 0.12), transparent 18rem),
+    rgba(5, 18, 13, 0.72);
+  border: 1px solid rgba(112, 225, 179, 0.32);
+  border-radius: 1rem;
+}
+
+.public-testnet-proof > p,
+.public-testnet-confirmation-panel p {
+  margin: 0;
+  line-height: 1.55;
+}
+
+.public-testnet-proof > p {
+  max-width: 82ch;
+  color: var(--muted);
+}
+
+.public-testnet-proof-heading,
+.public-testnet-confirmation-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.public-testnet-proof-heading h4 {
+  margin: 0.3rem 0 0;
+  font-size: 1.18rem;
+}
+
+.public-testnet-proof-heading > span {
+  flex: none;
+  padding: 0.38rem 0.62rem;
+  color: var(--accent-strong);
+  background: rgba(112, 225, 179, 0.08);
+  border: 1px solid rgba(112, 225, 179, 0.25);
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.public-testnet-review-action,
+.public-testnet-submit-action,
+.public-testnet-wallet-selection button,
+.public-testnet-network-action button,
+.public-testnet-confirmation-heading button {
+  min-height: 2.85rem;
+  padding: 0.72rem 1rem;
+  color: #04120d;
+  background: var(--accent);
+  border: 1px solid transparent;
+  border-radius: 0.75rem;
+  font: inherit;
+  font-weight: 820;
+  cursor: pointer;
+}
+
+.public-testnet-review-action,
+.public-testnet-submit-action {
+  justify-self: start;
+}
+
+.public-testnet-confirmation-heading button {
+  min-height: 2.35rem;
+  padding: 0.45rem 0.68rem;
+  color: var(--text);
+  background: transparent;
+  border-color: var(--border);
+}
+
+.public-testnet-review-action:disabled,
+.public-testnet-submit-action:disabled,
+.public-testnet-wallet-selection button:disabled,
+.public-testnet-network-action button:disabled,
+.public-testnet-confirmation-heading button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.public-testnet-review-action:focus-visible,
+.public-testnet-submit-action:focus-visible,
+.public-testnet-wallet-selection button:focus-visible,
+.public-testnet-network-action button:focus-visible,
+.public-testnet-confirmation-heading button:focus-visible,
+.public-testnet-faucet-actions a:focus-visible,
+.public-testnet-transaction-links a:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.public-testnet-confirmation-panel {
+  display: grid;
+  gap: 1rem;
+  padding: clamp(1rem, 2.5vw, 1.35rem);
+  background: rgba(3, 14, 10, 0.72);
+  border: 1px solid var(--border);
+  border-radius: 0.9rem;
+}
+
+.public-testnet-confirmation-heading > div {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.public-testnet-confirmation-heading small,
+.public-testnet-wallet-selection > p,
+.public-testnet-position-note {
+  color: var(--muted);
+}
+
+.public-testnet-disclosure,
+.public-testnet-position-note,
+.public-testnet-archived-note,
+.public-testnet-recovery-note {
+  padding: 0.85rem 0.95rem;
+  color: #f6e7c8;
+  background: rgba(255, 207, 112, 0.07);
+  border: 1px solid rgba(255, 207, 112, 0.26);
+  border-radius: 0.75rem;
+}
+
+.public-testnet-disclosure p {
+  margin-top: 0.25rem;
+  color: #eadfc8;
+  font-size: 0.82rem;
+}
+
+.public-testnet-wallet-selection,
+.public-testnet-network-action,
+.public-testnet-funding,
+.public-testnet-submit-review {
+  display: grid;
+  justify-items: start;
+  gap: 0.8rem;
+}
+
+.public-testnet-wallet-selection [role='group'],
+.public-testnet-faucet-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.7rem;
+}
+
+.public-testnet-funding {
+  padding: 1rem;
+  color: #f6e7c8;
+  background: rgba(255, 207, 112, 0.06);
+  border: 1px solid rgba(255, 207, 112, 0.25);
+  border-radius: 0.8rem;
+}
+
+.public-testnet-funding p {
+  max-width: 74ch;
+  font-size: 0.82rem;
+}
+
+.public-testnet-faucet-actions a,
+.public-testnet-transaction-links a {
+  color: var(--accent-strong);
+  font-weight: 750;
+}
+
+.public-testnet-submit-review dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  width: 100%;
+  gap: 0.65rem;
+  margin: 0;
+}
+
+.public-testnet-submit-review dl > div {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.8rem;
+  background: rgba(112, 225, 179, 0.04);
+  border: 1px solid var(--border);
+  border-radius: 0.7rem;
+}
+
+.public-testnet-submit-review dt {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.public-testnet-submit-review dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-weight: 750;
+}
+
+.public-testnet-confirm-checkbox {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.7rem;
+  align-items: start;
+  max-width: 78ch;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 0.86rem;
+  line-height: 1.5;
+}
+
+.public-testnet-confirm-checkbox input {
+  width: 1.1rem;
+  height: 1.1rem;
+  margin: 0.12rem 0 0;
+  accent-color: var(--accent);
+}
+
+.public-testnet-phase-status,
+.public-testnet-error,
+.public-testnet-success {
+  padding: 0.85rem 0.95rem;
+  border-radius: 0.75rem;
+}
+
+.public-testnet-phase-status {
+  color: var(--muted);
+  background: rgba(112, 225, 179, 0.05);
+  border: 1px solid var(--border);
+}
+
+.public-testnet-error {
+  color: #ffd4ca;
+  background: rgba(255, 147, 122, 0.08);
+  border: 1px solid rgba(255, 147, 122, 0.28);
+}
+
+.public-testnet-success {
+  color: var(--text);
+  background: rgba(112, 225, 179, 0.09);
+  border: 1px solid rgba(112, 225, 179, 0.3);
+}
+
+.public-testnet-success p {
+  margin-top: 0.25rem;
+  color: var(--muted);
+}
+
+.public-testnet-transaction-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem 1.25rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.public-testnet-verification-status {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.6rem;
+  margin: 0;
+}
+
+.public-testnet-verification-status > div {
+  display: grid;
+  gap: 0.3rem;
+  padding: 0.7rem 0.8rem;
+  background: rgba(112, 225, 179, 0.04);
+  border: 1px solid var(--border);
+  border-radius: 0.65rem;
+}
+
+.public-testnet-verification-status dt {
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+
+.public-testnet-verification-status dd {
+  margin: 0;
+  font-weight: 780;
 }
 
 .portfolio-refresh-row {
@@ -2078,7 +2545,12 @@ footer p {
   .local-demo-allocation-heading,
   .local-demo-allocation-preview-heading,
   .local-demo-allocation-yield-heading,
+  .local-demo-ecosystem-composition-heading,
+  .local-demo-liquidity-adjustment-heading,
+  .local-demo-liquidity-adjustment-footer,
   .local-demo-yield-catalog-heading,
+  .public-testnet-proof-heading,
+  .public-testnet-confirmation-heading,
   .portfolio-refresh-row,
   .local-demo-wallet-roster li {
     align-items: stretch;
@@ -2091,8 +2563,21 @@ footer p {
 
   .local-demo-allocation-choices,
   .local-demo-allocation-results,
-  .local-demo-allocation-yield-metrics {
+  .local-demo-allocation-yield-metrics,
+  .local-demo-ecosystem-list {
     grid-template-columns: 1fr;
+  }
+
+  .public-testnet-submit-review dl {
+    grid-template-columns: 1fr;
+  }
+
+  .public-testnet-verification-status {
+    grid-template-columns: 1fr;
+  }
+
+  .public-testnet-proof-heading > span {
+    align-self: flex-start;
   }
 
   .local-demo-allocation-choices > button {
@@ -2122,6 +2607,10 @@ footer p {
   .local-demo-allocation-result-values {
     justify-items: start;
     text-align: left;
+  }
+
+  .local-demo-liquidity-apply {
+    align-self: flex-start;
   }
 
   .local-demo-proof-badge {

@@ -6,7 +6,7 @@ import {
 
 export const LOCAL_DEMO_CHAIN_PORTFOLIO_PAYLOAD = {
   schemaVersion: 1,
-  snapshotId: 'local-demo-portfolio-chain-backed',
+  snapshotId: 'local-demo-portfolio:11111111111111111111111111111111',
   asOf: '2026-08-24T18:30:00.000Z',
   freshness: 'CURRENT',
   portfolioValueUsdMinor: '1100000',

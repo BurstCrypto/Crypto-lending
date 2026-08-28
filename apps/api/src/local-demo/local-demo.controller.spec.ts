@@ -15,6 +15,7 @@ import type {
   LocalDemoAllocationPreviewResponse,
   LocalDemoAllocationService,
 } from './local-demo-allocation.service';
+import { LocalDemoPortfolioSnapshotChangedError } from './local-demo-allocation.service';
 import type { LocalDemoRuntimeConfig } from './local-demo-runtime.config';
 import {
   LocalDemoNoMatchingYieldOpportunitiesError,
@@ -66,21 +67,28 @@ const CONNECTION: LocalDemoWalletConnection = Object.freeze({
 
 const PORTFOLIO = Object.freeze({
   schemaVersion: 1,
-  snapshotId: 'local-demo-snapshot',
+  snapshotId: 'local-demo-portfolio:0123456789abcdef0123456789abcdef',
   portfolioValueUsdMinor: '1100000',
 });
 
+const BALANCED_REQUEST_SELECTION = Object.freeze({
+  kind: 'PRESET' as const,
+  presetId: 'BALANCED' as const,
+  liquidReserveBasisPoints: 3_000,
+});
+
 const YIELD_CATALOG: LocalDemoYieldCatalogResponse = new LocalDemoYieldCatalogService().read(
-  new Date('2026-08-26T15:00:00.000Z'),
+  new Date('2026-08-27T01:05:00.000Z'),
 );
 
 const ALLOCATION_PREVIEW: LocalDemoAllocationPreviewResponse = Object.freeze({
   use: 'LOCAL_DEMO_ESTIMATE_ONLY',
   mayAuthorizeFinancialAction: false,
+  portfolioSnapshotId: PORTFOLIO.snapshotId,
   selection: Object.freeze({
     kind: 'PRESET',
     presetId: 'BALANCED',
-    label: 'Balanced blend',
+    label: 'Managed blend',
     description:
       'Keep 30% readily available and allocate the remainder to the managed yield strategy.',
     liquidReserveBasisPoints: 3_000,
@@ -95,72 +103,116 @@ const ALLOCATION_PREVIEW: LocalDemoAllocationPreviewResponse = Object.freeze({
     riskClassification: YIELD_CATALOG.snapshot.riskClassification,
   }),
   grossCapitalUsdMinor: '1100000',
+  sourceCapitalByEcosystem: Object.freeze([
+    Object.freeze({ ecosystem: 'EVM', amountUsdMinor: '700000' }),
+    Object.freeze({ ecosystem: 'SOLANA', amountUsdMinor: '400000' }),
+  ]),
   allocations: Object.freeze([
     Object.freeze({
       bucket: 'LIQUID_RESERVE',
       allocationId: 'LIQUID_RESERVE',
       label: 'Liquid reserve',
       percentageBasisPoints: 3_000,
-      amountUsdMinor: '329700',
+      amountUsdMinor: '329718',
     }),
     Object.freeze({
       bucket: 'MANAGED_YIELD',
       allocationId: 'MANAGED_YIELD',
       label: 'Managed yield',
       percentageBasisPoints: 7_000,
-      amountUsdMinor: '769300',
+      amountUsdMinor: '769342',
     }),
   ]),
+  managedYieldComposition: Object.freeze([
+    Object.freeze({
+      ecosystem: 'EVM',
+      label: 'EVM managed yield',
+      percentageBasisPointsOfManagedYield: 6_364,
+      amountUsdMinor: '489609',
+    }),
+    Object.freeze({
+      ecosystem: 'SOLANA',
+      label: 'SVM managed yield',
+      percentageBasisPointsOfManagedYield: 3_636,
+      amountUsdMinor: '279733',
+    }),
+  ]),
+  compositionSummary: Object.freeze({
+    mode: 'EVM_SOLANA_PORTFOLIO_BLEND',
+    crossEcosystemTransferRequired: false,
+    crossEcosystemTransferUsdMinor: '0',
+    activeEcosystemCount: 2,
+  }),
   executionCost: Object.freeze({
     actualLocalOperation: Object.freeze({ status: 'NO_EXECUTION', amountUsdMinor: '0' }),
     modeledScenario: Object.freeze({
       status: 'AVAILABLE',
-      modelId: 'LOCAL_DEMO_ALLOCATION_COST_V1',
+      modelId: 'LOCAL_DEMO_ALLOCATION_COST_V2',
       isQuote: false,
       costBasisCapitalUsdMinor: '1100000',
-      fundingTreatment: 'DEDUCT_FROM_GROSS_BEFORE_PROJECTION',
-      rounding: 'CEIL_EACH_VARIABLE_COMPONENT_TO_USD_MINOR',
+      fundingTreatment: 'MIXED_DEDUCT_FROM_GROSS_AND_ADD_ON_TOP',
+      rounding: 'CEIL_VARIABLE_COMPONENTS_PLATFORM_FEE_HALF_EVEN',
+      routingFeePolicy: Object.freeze({
+        tier: 'FREE',
+        classification: 'MATERIAL_ORCHESTRATION',
+        ruleVersion: 1,
+      }),
       components: Object.freeze([
         Object.freeze({
           code: 'NETWORK',
           label: 'Estimated network costs',
           calculationBasis: 'NETWORK_ACTIVATION_AND_POSITION_VOLUME',
+          fundingTreatment: 'DEDUCTED_FROM_GROSS',
           amountUsdMinor: '400',
         }),
         Object.freeze({
           code: 'CONVERSION',
           label: 'Estimated conversion costs',
           calculationBasis: 'TWELVE_BPS_OF_REQUIRED_CONVERSION',
+          fundingTreatment: 'DEDUCTED_FROM_GROSS',
           amountUsdMinor: '200',
+        }),
+        Object.freeze({
+          code: 'CROSS_ECOSYSTEM_TRANSFER',
+          label: 'Estimated EVM-Solana transfer costs',
+          calculationBasis: 'NO_CROSS_ECOSYSTEM_TRANSFER',
+          fundingTreatment: 'DEDUCTED_FROM_GROSS',
+          amountUsdMinor: '0',
         }),
         Object.freeze({
           code: 'MARKET_IMPACT',
           label: 'Estimated market impact',
           calculationBasis: 'POSITION_SIZE_AND_UTILIZATION',
+          fundingTreatment: 'DEDUCTED_FROM_GROSS',
           amountUsdMinor: '340',
         }),
         Object.freeze({
-          code: 'ROUTING',
-          label: 'Estimated routing fee',
-          calculationBasis: 'TWENTY_CENTS_PER_ACTIVE_ALLOCATION',
-          amountUsdMinor: '60',
+          code: 'PLATFORM_ROUTING',
+          label: 'Estimated platform routing fee',
+          calculationBasis: 'CANONICAL_PLATFORM_ROUTING_RULE_V1',
+          fundingTreatment: 'ADDED_ON_TOP',
+          amountUsdMinor: '1539',
         }),
       ]),
-      totalUsdMinor: '1000',
+      deductedFromGrossUsdMinor: '940',
+      addedOnTopUsdMinor: '1539',
+      retainedRoundingResidualUsdMinor: '0',
+      totalUsdMinor: '2479',
+      requiredCapitalIncludingAddedOnTopUsdMinor: '1101539',
     }),
     publicExecution: Object.freeze({ status: 'UNQUOTED', amountUsdMinor: null }),
   }),
-  capitalIncludedInProjectionUsdMinor: '1099000',
+  capitalIncludedInProjectionUsdMinor: '1099060',
   yieldProjection: Object.freeze({
     source: 'MANAGED_RATE_SNAPSHOT',
-    calculationMethod: 'INTERNAL_POSITION_WEIGHTED_EXACT_BASE_APY',
+    calculationMethod: 'INTERNAL_POSITION_WEIGHTED_25_BPS_CONSERVATIVE_BUCKET',
     effectiveApyBasisPoints: 325,
-    projectedAnnualYieldUsdMinor: '35717',
-    projectedAnnualYieldAfterFeesUsdMinor: '34717',
+    projectedAnnualYieldUsdMinor: '35719',
+    projectedAnnualYieldAfterFeesUsdMinor: '33240',
     firstPositiveDayAfterFees: Object.freeze({
       calculationMethod: 'FIRST_WHOLE_DAY_VISIBLE_YIELD_EXCEEDS_ESTIMATED_FEES',
       status: 'RECOVERED_WITHIN_HORIZON',
-      day: 11,
+      day: 26,
       modelHorizonDays: 365,
     }),
   }),
@@ -219,9 +271,10 @@ function controllerFixture(config: LocalDemoRuntimeConfig = ENABLED_CONFIG): Con
     read: jest.fn(() => YIELD_CATALOG),
   };
   const allocations: jest.Mocked<AllocationBoundary> = {
-    preview: jest.fn(async (accountId, correlation, selection) => {
+    preview: jest.fn(async (accountId, correlation, portfolioSnapshotId, selection) => {
       void accountId;
       void correlation;
+      void portfolioSnapshotId;
       void selection;
       return ALLOCATION_PREVIEW;
     }),
@@ -290,9 +343,11 @@ function expectUnavailable(error: unknown, response: ResponseFixture): void {
 
 function expectNoServerConfidentialStrategyDetails(value: unknown): void {
   const serialized = JSON.stringify(value);
-  expect(serialized).not.toMatch(/morpho|graphql|api\.morpho/iu);
   expect(serialized).not.toMatch(
-    /"(?:provider|providerId|providerIds|protocol|protocolId|marketId|marketIds|opportunity|opportunities|provenance|sourceReference|payloadSha256|normalizer|endpoint)"\s*:/iu,
+    /morpho|kamino|aave|save|solend|compound|moonwell|spark|venus|euler|marginfi|\bp0\b|project[\s._/-]*0|bnb|eip155:56|graphql|api\./iu,
+  );
+  expect(serialized).not.toMatch(
+    /"(?:provider|providerId|providerIds|providerName|protocol|protocolId|protocolName|marketId|marketIds|reserveId|opportunity|opportunityId|opportunities|sourceId|provenance|sourceReference|sourceObservedAt|retrievedAt|payloadSha256|normalizer|normalizerId|normalizerVersion|attributes|endpoint)"\s*:/iu,
   );
 }
 
@@ -478,9 +533,11 @@ describe('LocalDemoController', () => {
       use: 'LOCAL_DEMO_MANAGED_RATE_SNAPSHOT_ONLY',
       mayAuthorizeFinancialAction: false,
       riskClassificationAvailable: false,
+      strategyMode: 'PORTFOLIO_CROSS_CHAIN_BLEND',
+      ecosystems: ['EVM', 'SOLANA'],
       snapshot: {
-        id: 'managed-rate-snapshot-v1',
-        capturedAt: '2026-08-26T14:14:54.580Z',
+        id: 'managed-rate-snapshot-v3',
+        capturedAt: '2026-08-27T01:04:48.000Z',
         staleAfter: '2026-08-27T14:14:54.580Z',
         freshness: 'CURRENT',
         staleBehavior: 'LABEL_STALE_KEEP_NON_EXECUTABLE',
@@ -497,7 +554,10 @@ describe('LocalDemoController', () => {
     const result = await loggingContext.run(AUTHENTICATED_REQUEST_CORRELATION_B, () =>
       fixture.controller.previewAllocation(
         principal(ACCOUNT_B),
-        { selection: { kind: 'PRESET', presetId: 'BALANCED' } },
+        {
+          portfolioSnapshotId: PORTFOLIO.snapshotId,
+          selection: BALANCED_REQUEST_SELECTION,
+        },
         response.response,
       ),
     );
@@ -506,10 +566,12 @@ describe('LocalDemoController', () => {
     expect(fixture.allocations.preview).toHaveBeenCalledWith(
       ACCOUNT_B,
       AUTHENTICATED_REQUEST_CORRELATION_B,
-      { kind: 'PRESET', presetId: 'BALANCED' },
+      PORTFOLIO.snapshotId,
+      BALANCED_REQUEST_SELECTION,
     );
     expect(fixture.allocations.preview).not.toHaveBeenCalledWith(
       ACCOUNT_A,
+      expect.anything(),
       expect.anything(),
       expect.anything(),
     );
@@ -520,15 +582,46 @@ describe('LocalDemoController', () => {
     const bodies: readonly unknown[] = [
       {},
       { presetId: 'BALANCED' },
-      { selection: { kind: 'PRESET', presetId: 'CUSTOM' } },
       {
-        selection: { kind: 'PRESET', presetId: 'BALANCED', amountUsdMinor: '1100000' },
+        portfolioSnapshotId: PORTFOLIO.snapshotId,
+        selection: { kind: 'PRESET', presetId: 'CUSTOM', liquidReserveBasisPoints: 3_000 },
       },
       {
-        selection: { kind: 'PRESET', presetId: 'MORE_YIELD' },
+        portfolioSnapshotId: PORTFOLIO.snapshotId,
+        selection: { kind: 'PRESET', presetId: 'BALANCED' },
+      },
+      {
+        portfolioSnapshotId: PORTFOLIO.snapshotId,
+        selection: { kind: 'PRESET', presetId: 'BALANCED', liquidReserveBasisPoints: -1 },
+      },
+      {
+        portfolioSnapshotId: PORTFOLIO.snapshotId,
+        selection: { kind: 'PRESET', presetId: 'BALANCED', liquidReserveBasisPoints: 9_501 },
+      },
+      {
+        portfolioSnapshotId: PORTFOLIO.snapshotId,
+        selection: { kind: 'PRESET', presetId: 'BALANCED', liquidReserveBasisPoints: 1.5 },
+      },
+      {
+        portfolioSnapshotId: PORTFOLIO.snapshotId,
+        selection: {
+          kind: 'PRESET',
+          presetId: 'BALANCED',
+          liquidReserveBasisPoints: 3_000,
+          amountUsdMinor: '1100000',
+        },
+      },
+      {
+        portfolioSnapshotId: PORTFOLIO.snapshotId,
+        selection: {
+          kind: 'PRESET',
+          presetId: 'MORE_YIELD',
+          liquidReserveBasisPoints: 1_500,
+        },
         accountId: ACCOUNT_B,
       },
       {
+        portfolioSnapshotId: PORTFOLIO.snapshotId,
         selection: {
           kind: 'CUSTOM',
           liquidReserveBasisPoints: 2_500,
@@ -545,30 +638,38 @@ describe('LocalDemoController', () => {
         },
       },
       {
+        portfolioSnapshotId: PORTFOLIO.snapshotId,
         selection: {
           kind: 'PRESET',
           presetId: 'BALANCED',
+          liquidReserveBasisPoints: 3_000,
           providerId: 'caller-supplied-provider',
         },
       },
       {
+        portfolioSnapshotId: PORTFOLIO.snapshotId,
         selection: {
           kind: 'PRESET',
           presetId: 'BALANCED',
+          liquidReserveBasisPoints: 3_000,
           protocol: 'caller-supplied-protocol',
         },
       },
       {
+        portfolioSnapshotId: PORTFOLIO.snapshotId,
         selection: {
           kind: 'PRESET',
           presetId: 'BALANCED',
+          liquidReserveBasisPoints: 3_000,
           marketId: 'caller-supplied-market',
         },
       },
       {
+        portfolioSnapshotId: PORTFOLIO.snapshotId,
         selection: {
           kind: 'PRESET',
           presetId: 'BALANCED',
+          liquidReserveBasisPoints: 3_000,
           provenance: { endpoint: 'https://example.invalid' },
         },
       },
@@ -600,7 +701,10 @@ describe('LocalDemoController', () => {
       loggingContext.run(AUTHENTICATED_REQUEST_CORRELATION_B, () =>
         fixture.controller.previewAllocation(
           principal(ACCOUNT_B),
-          { selection: { kind: 'PRESET', presetId: 'BALANCED' } },
+          {
+            portfolioSnapshotId: PORTFOLIO.snapshotId,
+            selection: BALANCED_REQUEST_SELECTION,
+          },
           response.response,
         ),
       ),
@@ -614,6 +718,36 @@ describe('LocalDemoController', () => {
       error: 'Unprocessable Entity',
       message: 'The managed yield strategy is unavailable for this snapshot',
       code: 'NO_MATCHING_YIELD_OPPORTUNITIES',
+    });
+    expect(response.response.setHeader).not.toHaveBeenCalled();
+  });
+
+  it('returns a sanitized 409 when the displayed portfolio snapshot changed', async () => {
+    const fixture = controllerFixture();
+    const response = responseFixture();
+    fixture.allocations.preview.mockRejectedValueOnce(new LocalDemoPortfolioSnapshotChangedError());
+
+    const error = await captureRejected(() =>
+      loggingContext.run(AUTHENTICATED_REQUEST_CORRELATION_B, () =>
+        fixture.controller.previewAllocation(
+          principal(ACCOUNT_B),
+          {
+            portfolioSnapshotId: PORTFOLIO.snapshotId,
+            selection: BALANCED_REQUEST_SELECTION,
+          },
+          response.response,
+        ),
+      ),
+    );
+
+    expect(error).toBeInstanceOf(HttpException);
+    const httpError = error as HttpException;
+    expect(httpError.getStatus()).toBe(HttpStatus.CONFLICT);
+    expect(httpError.getResponse()).toEqual({
+      statusCode: HttpStatus.CONFLICT,
+      error: 'Conflict',
+      message: 'The local demo portfolio changed; refresh and retry',
+      code: 'PORTFOLIO_SNAPSHOT_CHANGED',
     });
     expect(response.response.setHeader).not.toHaveBeenCalled();
   });
@@ -691,7 +825,10 @@ describe('LocalDemoController', () => {
         loggingContext.run(AUTHENTICATED_REQUEST_CORRELATION_B, () =>
           allocation.controller.previewAllocation(
             principal(ACCOUNT_B),
-            { selection: { kind: 'PRESET', presetId: 'BALANCED' } },
+            {
+              portfolioSnapshotId: PORTFOLIO.snapshotId,
+              selection: BALANCED_REQUEST_SELECTION,
+            },
             allocationResponse.response,
           ),
         ),
@@ -731,7 +868,10 @@ describe('LocalDemoController', () => {
       await captureRejected(() =>
         allocation.controller.previewAllocation(
           principal(ACCOUNT_A),
-          { selection: { kind: 'PRESET', presetId: 'BALANCED' } },
+          {
+            portfolioSnapshotId: PORTFOLIO.snapshotId,
+            selection: BALANCED_REQUEST_SELECTION,
+          },
           allocationResponse.response,
         ),
       ),
@@ -769,7 +909,10 @@ describe('LocalDemoController', () => {
     const allocationError = await captureRejected(() =>
       fixture.controller.previewAllocation(
         principal(ACCOUNT_A),
-        { selection: { kind: 'PRESET', presetId: 'BALANCED' } },
+        {
+          portfolioSnapshotId: PORTFOLIO.snapshotId,
+          selection: BALANCED_REQUEST_SELECTION,
+        },
         responseFixture().response,
       ),
     );

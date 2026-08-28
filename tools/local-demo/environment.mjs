@@ -113,6 +113,11 @@ export function createLocalDemoEnvironments(options = {}) {
   const random = options.randomBytes ?? randomBytes;
   const inherited = safeLocalProcessEnvironment(options.sourceEnvironment ?? process.env);
   const localEvmControl = localEvmControlCredentials(options.localEvmControl, random);
+  const hostedCi =
+    typeof inherited.CI === 'string' &&
+    inherited.CI !== '' &&
+    inherited.CI !== '0' &&
+    inherited.CI.toLowerCase() !== 'false';
   const api = {
     ...inherited,
     ...infrastructureEnvironment(
@@ -122,6 +127,7 @@ export function createLocalDemoEnvironments(options = {}) {
     PORT: '3001',
     API_HOST: '127.0.0.1',
     LOCAL_DEMO_MODE: 'enabled',
+    PUBLIC_TESTNET_DEMO_MODE: hostedCi ? 'disabled' : 'enabled',
     AUTH_MODE: 'oidc',
     OIDC_PROVIDER_KEY: 'local_demo',
     OIDC_ISSUER_URL: 'https://127.0.0.1:3400/local-demo',

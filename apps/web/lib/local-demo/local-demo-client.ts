@@ -15,6 +15,7 @@ import {
   parseLocalDemoAllocationPreview as parseSnapshotAllocationPreview,
   parseLocalDemoYieldCatalog,
   validateLocalDemoAllocationSelection,
+  validateLocalDemoPortfolioSnapshotId,
   type LocalDemoAllocationPreview as LocalDemoSnapshotAllocationPreview,
   type LocalDemoAllocationSelectionInput,
   type LocalDemoYieldCatalog,
@@ -45,6 +46,7 @@ export type LocalDemoApiErrorCode =
   | 'CONFLICT'
   | 'INVALID_RESPONSE'
   | 'NO_MATCHING_YIELD_OPPORTUNITIES'
+  | 'PORTFOLIO_SNAPSHOT_CHANGED'
   | 'UNAUTHENTICATED'
   | 'UNAVAILABLE';
 
@@ -60,7 +62,9 @@ export class LocalDemoApiError extends Error {
           ? 'The local demo wallet is already in use.'
           : code === 'NO_MATCHING_YIELD_OPPORTUNITIES'
             ? 'The managed yield strategy is unavailable for this snapshot.'
-            : 'The local demo is unavailable.',
+            : code === 'PORTFOLIO_SNAPSHOT_CHANGED'
+              ? 'The portfolio changed before the allocation preview was completed.'
+              : 'The local demo is unavailable.',
     );
     this.name = 'LocalDemoApiError';
   }
@@ -232,9 +236,15 @@ function requestInit(
 
 function previewMatchesSelection(
   preview: LocalDemoSnapshotAllocationPreview,
+  portfolioSnapshotId: string,
   selection: LocalDemoAllocationSelectionInput,
 ): boolean {
-  return preview.selection.kind === 'PRESET' && preview.selection.presetId === selection.presetId;
+  return (
+    preview.portfolioSnapshotId === portfolioSnapshotId &&
+    preview.selection.kind === 'PRESET' &&
+    preview.selection.presetId === selection.presetId &&
+    preview.selection.liquidReserveBasisPoints === selection.liquidReserveBasisPoints
+  );
 }
 
 function parseNoMatchingYieldResponse(value: unknown): void {
@@ -249,8 +259,23 @@ function parseNoMatchingYieldResponse(value: unknown): void {
   }
 }
 
-function serializeAllocationSelection(selection: LocalDemoAllocationSelectionInput): string {
-  return `{"selection":{"kind":"PRESET","presetId":"${selection.presetId}"}}`;
+function parsePortfolioSnapshotChangedResponse(value: unknown): void {
+  const record = ownDataRecord(value, ['statusCode', 'error', 'message', 'code']);
+  if (
+    record.statusCode !== 409 ||
+    record.error !== 'Conflict' ||
+    record.message !== 'The local demo portfolio changed; refresh and retry' ||
+    record.code !== 'PORTFOLIO_SNAPSHOT_CHANGED'
+  ) {
+    return fail();
+  }
+}
+
+function serializeAllocationSelection(
+  portfolioSnapshotId: string,
+  selection: LocalDemoAllocationSelectionInput,
+): string {
+  return `{"portfolioSnapshotId":"${portfolioSnapshotId}","selection":{"kind":"PRESET","presetId":"${selection.presetId}","liquidReserveBasisPoints":${selection.liquidReserveBasisPoints}}}`;
 }
 
 export class LocalDemoApiClient {
@@ -338,11 +363,14 @@ export class LocalDemoApiClient {
   }
 
   async previewAllocation(
+    requestedPortfolioSnapshotId: string,
     requestedSelection: LocalDemoAllocationSelectionInput,
     signal?: AbortSignal,
   ): Promise<LocalDemoSnapshotAllocationPreview> {
+    let portfolioSnapshotId: string;
     let selection: LocalDemoAllocationSelectionInput;
     try {
+      portfolioSnapshotId = validateLocalDemoPortfolioSnapshotId(requestedPortfolioSnapshotId);
       selection = validateLocalDemoAllocationSelection(requestedSelection);
     } catch {
       return fail();
@@ -350,10 +378,18 @@ export class LocalDemoApiClient {
     const response = await this.#unsafeRequest(
       LOCAL_DEMO_ALLOCATION_PREVIEW_PATH,
       'POST',
-      serializeAllocationSelection(selection),
+      serializeAllocationSelection(portfolioSnapshotId, selection),
       signal,
     );
     if (response.status === 401) return fail('UNAUTHENTICATED');
+    if (response.status === 409) {
+      try {
+        parsePortfolioSnapshotChangedResponse(await this.#json(response));
+      } catch {
+        return fail();
+      }
+      return fail('PORTFOLIO_SNAPSHOT_CHANGED');
+    }
     if (response.status === 422) {
       try {
         parseNoMatchingYieldResponse(await this.#json(response));
@@ -365,7 +401,7 @@ export class LocalDemoApiClient {
     if (response.status !== 200) return fail('UNAVAILABLE', retryAfterSeconds(response));
     try {
       const preview = parseSnapshotAllocationPreview(await this.#json(response));
-      if (!previewMatchesSelection(preview, selection)) return fail();
+      if (!previewMatchesSelection(preview, portfolioSnapshotId, selection)) return fail();
       return preview;
     } catch (error) {
       if (error instanceof LocalDemoApiError) throw error;

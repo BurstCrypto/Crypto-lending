@@ -5,6 +5,7 @@ import { BlockchainModule } from './blockchain/blockchain.module';
 import { InfrastructureModule } from './infrastructure/infrastructure.module';
 import { LocalDemoModule } from './local-demo/local-demo.module';
 import { PortfolioModule } from './portfolio/portfolio.module';
+import { PublicTestnetModule } from './public-testnet/public-testnet.module';
 import { SystemModule } from './system/system.module';
 import { WalletsModule } from './wallets/wallets.module';
 
@@ -16,6 +17,7 @@ import { WalletsModule } from './wallets/wallets.module';
     WalletsModule,
     PortfolioModule,
     LocalDemoModule,
+    PublicTestnetModule,
     SystemModule,
   ],
 })

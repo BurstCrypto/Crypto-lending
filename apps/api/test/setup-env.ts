@@ -1,6 +1,11 @@
 // These syntactically valid endpoints let Nest construct lazy infrastructure
 // clients in isolated tests. Tests that exercise a dependency provide their own
 // reachable service configuration.
+// Solana's HTTP-only public-testnet adapter does not construct a websocket
+// client. Keep Jest from evaluating rpc-websockets' ESM-only transitive UUID
+// package while loading @solana/web3.js through its CommonJS test transform.
+jest.mock('rpc-websockets', () => ({ CommonClient: class {}, WebSocket: jest.fn() }));
+
 if (
   !process.env.DATABASE_RUNTIME_URL &&
   !process.env.DATABASE_RUNTIME_HOST &&

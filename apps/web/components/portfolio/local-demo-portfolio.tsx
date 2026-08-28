@@ -545,7 +545,9 @@ export function LocalDemoPortfolio({ enabled, dependencies }: LocalDemoPortfolio
             <LocalDemoAllocationPlanner
               key={portfolio.snapshot.snapshotId}
               client={allocationClient}
+              portfolioSnapshotId={portfolio.snapshot.snapshotId}
               onUnauthenticated={requireSignIn}
+              onPortfolioSnapshotChanged={() => void refresh()}
             />
           ) : null
         }

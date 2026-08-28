@@ -17,15 +17,30 @@ import {
   LOCAL_DEMO_YIELD_CATALOG_PATH,
   parseLocalDemoAllocationPreview,
   parseLocalDemoYieldCatalog,
+  validateLocalDemoAllocationSelection,
 } from '../lib/local-demo/local-demo-yield';
 import { parseUnifiedBalanceResponse } from '../lib/portfolio/unified-balance';
 import { LOCAL_DEMO_CHAIN_PORTFOLIO_PAYLOAD } from './local-demo-portfolio.fixtures';
 import {
+  expectProviderPrivateValue,
+  LOCAL_DEMO_PROVIDER_PRIVACY_CANARY,
+  LOCAL_DEMO_PROVIDER_PRIVACY_SAFE_COPY_TEST_CANARIES,
+  LOCAL_DEMO_PROVIDER_PRIVACY_TEST_CANARIES,
+} from './local-demo-provider-privacy';
+import {
   BALANCED_PREVIEW,
+  CROSS_CHAIN_BALANCED_PREVIEW,
+  DIRECT_COMPATIBLE_ZERO_LIQUID_PREVIEW,
+  FRACTIONAL_LIQUID_PREVIEW,
+  HALF_EVEN_DOWN_PLATFORM_FEE_PREVIEW,
+  HALF_EVEN_UP_PLATFORM_FEE_PREVIEW,
   LOCAL_DEMO_YIELD_CATALOG,
   MORE_YIELD_DAY_365_PREVIEW,
   MORE_LIQUID_PREVIEW,
+  RETAINED_ROUNDING_RESIDUAL_PREVIEW,
 } from './local-demo-yield.fixtures';
+
+const PORTFOLIO_SNAPSHOT_ID = BALANCED_PREVIEW.portfolioSnapshotId;
 
 const CSRF = 'A'.repeat(43);
 
@@ -56,13 +71,19 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
-function expectProviderPrivate(value: unknown): void {
-  expect(JSON.stringify(value)).not.toMatch(
-    /morpho|api\.morpho|eip155:(?:1|8453)|0x[0-9a-f]{40,64}|"(?:provider|protocol|marketId|opportunity|provenance|sourceReference|payloadSha256|normalizerId)"/iu,
-  );
-}
-
 describe('local demo same-origin API client', () => {
+  it('covers every supported provider family and private response-field class in its canary', () => {
+    for (const canary of LOCAL_DEMO_PROVIDER_PRIVACY_TEST_CANARIES) {
+      expect(canary).toMatch(LOCAL_DEMO_PROVIDER_PRIVACY_CANARY);
+    }
+  });
+
+  it('does not mistake adjacent generic copy for provider identity', () => {
+    for (const canary of LOCAL_DEMO_PROVIDER_PRIVACY_SAFE_COPY_TEST_CANARIES) {
+      expect(canary).not.toMatch(LOCAL_DEMO_PROVIDER_PRIVACY_CANARY);
+    }
+  });
+
   it('invokes the default browser fetch with its required global receiver', async () => {
     const browserFetch = vi.fn(function (
       this: typeof globalThis,
@@ -154,7 +175,11 @@ describe('local demo same-origin API client', () => {
       code: 'UNAUTHENTICATED',
     });
     await expect(
-      client.previewAllocation({ kind: 'PRESET', presetId: 'BALANCED' }),
+      client.previewAllocation(PORTFOLIO_SNAPSHOT_ID, {
+        kind: 'PRESET',
+        presetId: 'BALANCED',
+        liquidReserveBasisPoints: 3_000,
+      }),
     ).rejects.toMatchObject({
       code: 'UNAUTHENTICATED',
     });
@@ -173,15 +198,28 @@ describe('local demo same-origin API client', () => {
     });
 
     await expect(client.readYieldCatalog()).resolves.toEqual(LOCAL_DEMO_YIELD_CATALOG);
+    expect(LOCAL_DEMO_YIELD_CATALOG.snapshot).toMatchObject({
+      id: 'managed-rate-snapshot-v3',
+      capturedAt: '2026-08-27T01:04:48.000Z',
+      staleAfter: '2026-08-27T14:14:54.580Z',
+    });
     await expect(
-      client.previewAllocation({ kind: 'PRESET', presetId: 'BALANCED' }),
+      client.previewAllocation(PORTFOLIO_SNAPSHOT_ID, {
+        kind: 'PRESET',
+        presetId: 'BALANCED',
+        liquidReserveBasisPoints: 3_000,
+      }),
     ).resolves.toEqual(BALANCED_PREVIEW);
     await expect(
-      client.previewAllocation({ kind: 'PRESET', presetId: 'MORE_LIQUID' }),
+      client.previewAllocation(PORTFOLIO_SNAPSHOT_ID, {
+        kind: 'PRESET',
+        presetId: 'MORE_LIQUID',
+        liquidReserveBasisPoints: 6_000,
+      }),
     ).resolves.toEqual(MORE_LIQUID_PREVIEW);
-    expectProviderPrivate(LOCAL_DEMO_YIELD_CATALOG);
-    expectProviderPrivate(BALANCED_PREVIEW);
-    expectProviderPrivate(MORE_LIQUID_PREVIEW);
+    expectProviderPrivateValue(LOCAL_DEMO_YIELD_CATALOG);
+    expectProviderPrivateValue(BALANCED_PREVIEW);
+    expectProviderPrivateValue(MORE_LIQUID_PREVIEW);
     expect(BALANCED_PREVIEW.executionCost.modeledScenario.totalUsdMinor).not.toBe(
       MORE_LIQUID_PREVIEW.executionCost.modeledScenario.totalUsdMinor,
     );
@@ -203,7 +241,14 @@ describe('local demo same-origin API client', () => {
         credentials: 'same-origin',
         cache: 'no-store',
         redirect: 'error',
-        body: JSON.stringify({ selection: { kind: 'PRESET', presetId: 'BALANCED' } }),
+        body: JSON.stringify({
+          portfolioSnapshotId: PORTFOLIO_SNAPSHOT_ID,
+          selection: {
+            kind: 'PRESET',
+            presetId: 'BALANCED',
+            liquidReserveBasisPoints: 3_000,
+          },
+        }),
         headers: expect.objectContaining({
           'Content-Type': 'application/json',
           'X-CSRF-Token': CSRF,
@@ -215,7 +260,14 @@ describe('local demo same-origin API client', () => {
       LOCAL_DEMO_ALLOCATION_PREVIEW_PATH,
       expect.objectContaining({
         method: 'POST',
-        body: JSON.stringify({ selection: { kind: 'PRESET', presetId: 'MORE_LIQUID' } }),
+        body: JSON.stringify({
+          portfolioSnapshotId: PORTFOLIO_SNAPSHOT_ID,
+          selection: {
+            kind: 'PRESET',
+            presetId: 'MORE_LIQUID',
+            liquidReserveBasisPoints: 6_000,
+          },
+        }),
       }),
     );
     expect(requestFetch).toHaveBeenCalledTimes(3);
@@ -268,21 +320,137 @@ describe('local demo same-origin API client', () => {
       fetch: vi.fn(async () => json(BALANCED_PREVIEW)),
     });
     await expect(
-      client.previewAllocation({ kind: 'PRESET', presetId: 'MORE_LIQUID' }),
+      client.previewAllocation(PORTFOLIO_SNAPSHOT_ID, {
+        kind: 'PRESET',
+        presetId: 'MORE_LIQUID',
+        liquidReserveBasisPoints: 6_000,
+      }),
     ).rejects.toMatchObject({
       code: 'INVALID_RESPONSE',
     });
   });
 
+  it('rejects every provider-private field class and URL at the aggregate boundary', () => {
+    const hostileCases: ReadonlyArray<
+      readonly [string, 'CATALOG' | 'PREVIEW', (candidate: Record<string, unknown>) => void]
+    > = [
+      [
+        'provider identifiers',
+        'CATALOG',
+        (candidate) => {
+          candidate.providerIds = ['MORPHO', 'KAMINO', 'AAVE', 'SAVE', 'SOLEND'];
+        },
+      ],
+      [
+        'protocol identifiers',
+        'CATALOG',
+        (candidate) => {
+          candidate.protocols = ['MORPHO_BLUE', 'KAMINO_LEND', 'AAVE_V3', 'SAVE_LEND'];
+        },
+      ],
+      [
+        'market identifiers',
+        'PREVIEW',
+        (candidate) => {
+          const allocations = candidate.allocations as Array<Record<string, unknown>>;
+          allocations[1]!.marketId = 'opaque-market';
+        },
+      ],
+      [
+        'reserve identifiers',
+        'PREVIEW',
+        (candidate) => {
+          const composition = candidate.managedYieldComposition as Array<Record<string, unknown>>;
+          composition[1]!.reserveId = 'opaque-reserve';
+        },
+      ],
+      [
+        'opportunity identifiers',
+        'PREVIEW',
+        (candidate) => {
+          const allocations = candidate.allocations as Array<Record<string, unknown>>;
+          allocations[1]!.opportunityId = 'opaque-opportunity';
+        },
+      ],
+      [
+        'provenance and provider URLs',
+        'PREVIEW',
+        (candidate) => {
+          const rateSnapshot = candidate.rateSnapshot as Record<string, unknown>;
+          rateSnapshot.provenance = {
+            sourceReference: 'https://api.kamino.finance/private-provider-route',
+            endpoint: 'https://api.morpho.org/graphql',
+          };
+        },
+      ],
+    ];
+
+    for (const [, shape, mutate] of hostileCases) {
+      const candidate = structuredClone(
+        shape === 'CATALOG' ? LOCAL_DEMO_YIELD_CATALOG : BALANCED_PREVIEW,
+      ) as unknown as Record<string, unknown>;
+      mutate(candidate);
+      expect(() =>
+        shape === 'CATALOG'
+          ? parseLocalDemoYieldCatalog(candidate)
+          : parseLocalDemoAllocationPreview(candidate),
+      ).toThrow(TypeError);
+    }
+  });
+
+  it('maps a provider-bearing success body to a fixed error without retaining its detail', async () => {
+    const hostile = structuredClone(BALANCED_PREVIEW) as unknown as Record<string, unknown>;
+    hostile.providerIds = ['MORPHO', 'KAMINO', 'AAVE', 'SAVE', 'SOLEND'];
+    hostile.sourceReference = 'https://save.finance/private-reserve';
+    const client = new LocalDemoApiClient({
+      cookieHeader: `__Host-cl_csrf=${CSRF}`,
+      fetch: vi.fn(async () => json(hostile)),
+    });
+
+    const error = await client
+      .previewAllocation(PORTFOLIO_SNAPSHOT_ID, {
+        kind: 'PRESET',
+        presetId: 'BALANCED',
+        liquidReserveBasisPoints: 3_000,
+      })
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(LocalDemoApiError);
+    expect(error).toMatchObject({ code: 'INVALID_RESPONSE' });
+    expectProviderPrivateValue(error);
+  });
+
   it('reconciles components, post-fee yield, allocation cents, and exact recovery timing', () => {
     expect(() => parseLocalDemoAllocationPreview(BALANCED_PREVIEW)).not.toThrow();
     expect(BALANCED_PREVIEW.executionCost.modeledScenario.components).toMatchObject([
-      { code: 'NETWORK', amountUsdMinor: '438' },
-      { code: 'CONVERSION', amountUsdMinor: '0' },
-      { code: 'MARKET_IMPACT', amountUsdMinor: '115' },
-      { code: 'ROUTING', amountUsdMinor: '60' },
+      { code: 'NETWORK', fundingTreatment: 'DEDUCTED_FROM_GROSS', amountUsdMinor: '489' },
+      { code: 'CONVERSION', fundingTreatment: 'DEDUCTED_FROM_GROSS', amountUsdMinor: '0' },
+      {
+        code: 'CROSS_ECOSYSTEM_TRANSFER',
+        fundingTreatment: 'DEDUCTED_FROM_GROSS',
+        amountUsdMinor: '0',
+      },
+      { code: 'MARKET_IMPACT', fundingTreatment: 'DEDUCTED_FROM_GROSS', amountUsdMinor: '177' },
+      {
+        code: 'PLATFORM_ROUTING',
+        calculationBasis: 'CANONICAL_PLATFORM_ROUTING_RULE_V1',
+        fundingTreatment: 'ADDED_ON_TOP',
+        amountUsdMinor: '979',
+      },
     ]);
-    expect(BALANCED_PREVIEW.executionCost.modeledScenario.totalUsdMinor).toBe('613');
+    expect(BALANCED_PREVIEW.executionCost.modeledScenario.routingFeePolicy).toEqual({
+      tier: 'FREE',
+      classification: 'MATERIAL_ORCHESTRATION',
+      ruleVersion: 1,
+    });
+    expect(BALANCED_PREVIEW.executionCost.modeledScenario).toMatchObject({
+      fundingTreatment: 'MIXED_DEDUCT_FROM_GROSS_AND_ADD_ON_TOP',
+      deductedFromGrossUsdMinor: '666',
+      addedOnTopUsdMinor: '979',
+      retainedRoundingResidualUsdMinor: '0',
+      totalUsdMinor: '1645',
+      requiredCapitalIncludingAddedOnTopUsdMinor: '700979',
+    });
     expect(BALANCED_PREVIEW.executionCost.actualLocalOperation).toEqual({
       status: 'NO_EXECUTION',
       amountUsdMinor: '0',
@@ -293,7 +461,7 @@ describe('local demo same-origin API client', () => {
     });
     expect(BALANCED_PREVIEW.yieldProjection.firstPositiveDayAfterFees).toMatchObject({
       status: 'RECOVERED_WITHIN_HORIZON',
-      day: 10,
+      day: 14,
       modelHorizonDays: 365,
     });
 
@@ -303,20 +471,100 @@ describe('local demo same-origin API client', () => {
         ...BALANCED_PREVIEW.executionCost,
         modeledScenario: {
           ...BALANCED_PREVIEW.executionCost.modeledScenario,
-          totalUsdMinor: '614',
+          totalUsdMinor: '721',
         },
       },
     };
     expect(() => parseLocalDemoAllocationPreview(forgedComponentTotal)).toThrow(TypeError);
 
+    const policyMutations: ReadonlyArray<(policy: Record<string, unknown>) => void> = [
+      (policy) => {
+        policy.tier = 'INDIVIDUAL';
+      },
+      (policy) => {
+        policy.classification = 'UNKNOWN_ROUTE';
+      },
+      (policy) => {
+        policy.ruleVersion = 2;
+      },
+      (policy) => {
+        policy.ruleReferenceId = '76000000-0000-4000-8000-000000000001';
+      },
+    ];
+    for (const mutatePolicy of policyMutations) {
+      const candidate = structuredClone(BALANCED_PREVIEW) as unknown as Record<string, unknown>;
+      const execution = candidate.executionCost as Record<string, unknown>;
+      const modeled = execution.modeledScenario as Record<string, unknown>;
+      mutatePolicy(modeled.routingFeePolicy as Record<string, unknown>);
+      expect(() => parseLocalDemoAllocationPreview(candidate)).toThrow(TypeError);
+    }
+
+    const fundingMutations: ReadonlyArray<(modeled: Record<string, unknown>) => void> = [
+      (modeled) => {
+        modeled.fundingTreatment = 'DEDUCT_FROM_GROSS';
+      },
+      (modeled) => {
+        const components = modeled.components as Array<Record<string, unknown>>;
+        components[0]!.fundingTreatment = 'ADDED_ON_TOP';
+      },
+      (modeled) => {
+        const components = modeled.components as Array<Record<string, unknown>>;
+        components[4]!.calculationBasis = 'FREE_TIER_20_BPS_OF_MANAGED_CAPITAL';
+      },
+      (modeled) => {
+        modeled.deductedFromGrossUsdMinor = '665';
+      },
+      (modeled) => {
+        modeled.addedOnTopUsdMinor = '978';
+      },
+      (modeled) => {
+        modeled.retainedRoundingResidualUsdMinor = '1';
+      },
+      (modeled) => {
+        modeled.requiredCapitalIncludingAddedOnTopUsdMinor = '700978';
+      },
+    ];
+    for (const mutateFunding of fundingMutations) {
+      const candidate = structuredClone(BALANCED_PREVIEW) as unknown as Record<string, unknown>;
+      const execution = candidate.executionCost as Record<string, unknown>;
+      const modeled = execution.modeledScenario as Record<string, unknown>;
+      mutateFunding(modeled);
+      expect(() => parseLocalDemoAllocationPreview(candidate)).toThrow(TypeError);
+    }
+
+    const forgedDirectCompatibleFee = structuredClone(BALANCED_PREVIEW) as unknown as Record<
+      string,
+      unknown
+    >;
+    const forgedDirectExecution = forgedDirectCompatibleFee.executionCost as Record<
+      string,
+      unknown
+    >;
+    const forgedDirectModeled = forgedDirectExecution.modeledScenario as Record<string, unknown>;
+    const forgedDirectPolicy = forgedDirectModeled.routingFeePolicy as Record<string, unknown>;
+    forgedDirectPolicy.classification = 'DIRECT_COMPATIBLE';
+    expect(() => parseLocalDemoAllocationPreview(forgedDirectCompatibleFee)).toThrow(TypeError);
+
     const forgedPostFeeYield = {
       ...structuredClone(BALANCED_PREVIEW),
       yieldProjection: {
         ...BALANCED_PREVIEW.yieldProjection,
-        projectedAnnualYieldAfterFeesUsdMinor: '22361',
+        projectedAnnualYieldAfterFeesUsdMinor: '38525',
       },
     };
     expect(() => parseLocalDemoAllocationPreview(forgedPostFeeYield)).toThrow(TypeError);
+
+    const forgedWholeCentYieldInsideLegacyOneBpInterval = {
+      ...structuredClone(BALANCED_PREVIEW),
+      yieldProjection: {
+        ...BALANCED_PREVIEW.yieldProjection,
+        projectedAnnualYieldUsdMinor: '45454',
+        projectedAnnualYieldAfterFeesUsdMinor: '44739',
+      },
+    };
+    expect(() =>
+      parseLocalDemoAllocationPreview(forgedWholeCentYieldInsideLegacyOneBpInterval),
+    ).toThrow(TypeError);
 
     const forgedRecoveryDay = {
       ...structuredClone(BALANCED_PREVIEW),
@@ -324,7 +572,7 @@ describe('local demo same-origin API client', () => {
         ...BALANCED_PREVIEW.yieldProjection,
         firstPositiveDayAfterFees: {
           ...BALANCED_PREVIEW.yieldProjection.firstPositiveDayAfterFees,
-          day: 11,
+          day: 8,
         },
       },
     };
@@ -334,7 +582,7 @@ describe('local demo same-origin API client', () => {
       ...structuredClone(BALANCED_PREVIEW),
       allocations: BALANCED_PREVIEW.allocations.map((allocation, index) => ({
         ...allocation,
-        amountUsdMinor: index === 0 ? '209817' : '489570',
+        amountUsdMinor: index === 0 ? '209785' : '489500',
       })),
     };
     expect(() => parseLocalDemoAllocationPreview(shiftedAllocationAmounts)).toThrow(TypeError);
@@ -357,6 +605,197 @@ describe('local demo same-origin API client', () => {
       },
     };
     expect(() => parseLocalDemoAllocationPreview(legacyCost)).toThrow(TypeError);
+  });
+
+  it('accepts only a zero platform fee for a direct-compatible preview', () => {
+    expect(() =>
+      parseLocalDemoAllocationPreview(DIRECT_COMPATIBLE_ZERO_LIQUID_PREVIEW),
+    ).not.toThrow();
+    expect(DIRECT_COMPATIBLE_ZERO_LIQUID_PREVIEW.executionCost.modeledScenario).toMatchObject({
+      routingFeePolicy: {
+        tier: 'FREE',
+        classification: 'DIRECT_COMPATIBLE',
+        ruleVersion: 1,
+      },
+      components: expect.arrayContaining([
+        expect.objectContaining({ code: 'PLATFORM_ROUTING', amountUsdMinor: '0' }),
+      ]),
+    });
+
+    const nonzeroPlatformFee = structuredClone(
+      DIRECT_COMPATIBLE_ZERO_LIQUID_PREVIEW,
+    ) as unknown as Record<string, unknown>;
+    const execution = nonzeroPlatformFee.executionCost as Record<string, unknown>;
+    const modeled = execution.modeledScenario as Record<string, unknown>;
+    const components = modeled.components as Array<Record<string, unknown>>;
+    components[4]!.amountUsdMinor = '1';
+    modeled.totalUsdMinor = '1';
+    expect(() => parseLocalDemoAllocationPreview(nonzeroPlatformFee)).toThrow(TypeError);
+  });
+
+  it('validates canonical half-even Free-tier platform fee rounding', () => {
+    expect(() =>
+      parseLocalDemoAllocationPreview(HALF_EVEN_DOWN_PLATFORM_FEE_PREVIEW),
+    ).not.toThrow();
+    expect(() => parseLocalDemoAllocationPreview(HALF_EVEN_UP_PLATFORM_FEE_PREVIEW)).not.toThrow();
+    expect(
+      HALF_EVEN_DOWN_PLATFORM_FEE_PREVIEW.executionCost.modeledScenario.components[4]
+        ?.amountUsdMinor,
+    ).toBe('0');
+    expect(
+      HALF_EVEN_UP_PLATFORM_FEE_PREVIEW.executionCost.modeledScenario.components[4]?.amountUsdMinor,
+    ).toBe('2');
+  });
+
+  it('accepts a coherent retained rounding residual without treating it as a fee', () => {
+    expect(() => parseLocalDemoAllocationPreview(RETAINED_ROUNDING_RESIDUAL_PREVIEW)).not.toThrow();
+    expect(RETAINED_ROUNDING_RESIDUAL_PREVIEW.executionCost.modeledScenario).toMatchObject({
+      deductedFromGrossUsdMinor: '0',
+      addedOnTopUsdMinor: '0',
+      retainedRoundingResidualUsdMinor: '1',
+      totalUsdMinor: '0',
+      requiredCapitalIncludingAddedOnTopUsdMinor: '251',
+    });
+    expect(RETAINED_ROUNDING_RESIDUAL_PREVIEW.capitalIncludedInProjectionUsdMinor).toBe('250');
+
+    const maximumResidual = structuredClone(
+      RETAINED_ROUNDING_RESIDUAL_PREVIEW,
+    ) as unknown as Record<string, unknown>;
+    maximumResidual.grossCapitalUsdMinor = '253';
+    const maximumSources = maximumResidual.sourceCapitalByEcosystem as Array<
+      Record<string, unknown>
+    >;
+    maximumSources[0]!.amountUsdMinor = '253';
+    const maximumExecution = maximumResidual.executionCost as Record<string, unknown>;
+    const maximumModeled = maximumExecution.modeledScenario as Record<string, unknown>;
+    maximumModeled.costBasisCapitalUsdMinor = '253';
+    maximumModeled.retainedRoundingResidualUsdMinor = '3';
+    maximumModeled.requiredCapitalIncludingAddedOnTopUsdMinor = '253';
+    expect(() => parseLocalDemoAllocationPreview(maximumResidual)).not.toThrow();
+
+    const excessiveResidual = structuredClone(
+      RETAINED_ROUNDING_RESIDUAL_PREVIEW,
+    ) as unknown as Record<string, unknown>;
+    excessiveResidual.grossCapitalUsdMinor = '254';
+    const sources = excessiveResidual.sourceCapitalByEcosystem as Array<Record<string, unknown>>;
+    sources[0]!.amountUsdMinor = '254';
+    const execution = excessiveResidual.executionCost as Record<string, unknown>;
+    const modeled = execution.modeledScenario as Record<string, unknown>;
+    modeled.costBasisCapitalUsdMinor = '254';
+    modeled.retainedRoundingResidualUsdMinor = '4';
+    modeled.requiredCapitalIncludingAddedOnTopUsdMinor = '254';
+    expect(() => parseLocalDemoAllocationPreview(excessiveResidual)).toThrow(TypeError);
+  });
+
+  it('accepts only the exact dynamic selection description, including fractional percentages', () => {
+    expect(() => parseLocalDemoAllocationPreview(FRACTIONAL_LIQUID_PREVIEW)).not.toThrow();
+    expect(FRACTIONAL_LIQUID_PREVIEW.selection.description).toBe(
+      'Keep 15.50% readily available and allocate the remainder to the managed yield strategy.',
+    );
+
+    const stalePresetDescription = {
+      ...structuredClone(FRACTIONAL_LIQUID_PREVIEW),
+      selection: {
+        ...FRACTIONAL_LIQUID_PREVIEW.selection,
+        description:
+          'Keep 15% readily available and allocate the remainder to the managed yield strategy.',
+      },
+    };
+    expect(() => parseLocalDemoAllocationPreview(stalePresetDescription)).toThrow(TypeError);
+  });
+
+  it('reconciles provider-private native ecosystem sources, composition, and routing', () => {
+    expect(() => parseLocalDemoAllocationPreview(CROSS_CHAIN_BALANCED_PREVIEW)).not.toThrow();
+    expect(CROSS_CHAIN_BALANCED_PREVIEW.sourceCapitalByEcosystem).toEqual([
+      { ecosystem: 'EVM', amountUsdMinor: '700000' },
+      { ecosystem: 'SOLANA', amountUsdMinor: '400000' },
+    ]);
+    expect(CROSS_CHAIN_BALANCED_PREVIEW.managedYieldComposition).toMatchObject([
+      { ecosystem: 'EVM', percentageBasisPointsOfManagedYield: 6_362 },
+      { ecosystem: 'SOLANA', percentageBasisPointsOfManagedYield: 3_638 },
+    ]);
+    expect(CROSS_CHAIN_BALANCED_PREVIEW.compositionSummary).toEqual({
+      mode: 'EVM_SOLANA_PORTFOLIO_BLEND',
+      crossEcosystemTransferRequired: false,
+      crossEcosystemTransferUsdMinor: '0',
+      activeEcosystemCount: 2,
+    });
+    expectProviderPrivateValue(CROSS_CHAIN_BALANCED_PREVIEW);
+
+    const mutations: Array<(candidate: Record<string, unknown>) => void> = [
+      (candidate) => {
+        const rows = candidate.sourceCapitalByEcosystem as Array<Record<string, unknown>>;
+        rows[0]!.amountUsdMinor = '699999';
+      },
+      (candidate) => {
+        const rows = candidate.sourceCapitalByEcosystem as unknown[];
+        rows.reverse();
+      },
+      (candidate) => {
+        const rows = candidate.managedYieldComposition as Array<Record<string, unknown>>;
+        rows[1]!.percentageBasisPointsOfManagedYield = 3_637;
+      },
+      (candidate) => {
+        const rows = candidate.managedYieldComposition as Array<Record<string, unknown>>;
+        rows[1]!.amountUsdMinor = '279906';
+      },
+      (candidate) => {
+        const composition = candidate.compositionSummary as Record<string, unknown>;
+        composition.crossEcosystemTransferRequired = true;
+      },
+      (candidate) => {
+        const composition = candidate.compositionSummary as Record<string, unknown>;
+        composition.activeEcosystemCount = 1;
+      },
+      (candidate) => {
+        const execution = candidate.executionCost as Record<string, unknown>;
+        const modeled = execution.modeledScenario as Record<string, unknown>;
+        const components = modeled.components as Array<Record<string, unknown>>;
+        components[2]!.amountUsdMinor = '1';
+        modeled.totalUsdMinor = '854';
+      },
+      (candidate) => {
+        const execution = candidate.executionCost as Record<string, unknown>;
+        const modeled = execution.modeledScenario as Record<string, unknown>;
+        const components = modeled.components as Array<Record<string, unknown>>;
+        components[0]!.amountUsdMinor = '518';
+        components[4]!.amountUsdMinor = '78';
+      },
+    ];
+
+    for (const mutate of mutations) {
+      const candidate = structuredClone(CROSS_CHAIN_BALANCED_PREVIEW) as unknown as Record<
+        string,
+        unknown
+      >;
+      mutate(candidate);
+      expect(() => parseLocalDemoAllocationPreview(candidate)).toThrow(TypeError);
+    }
+
+    const transferHiddenAsNative = structuredClone(
+      CROSS_CHAIN_BALANCED_PREVIEW,
+    ) as unknown as Record<string, unknown>;
+    const hiddenTransferComposition = transferHiddenAsNative.managedYieldComposition as Array<
+      Record<string, unknown>
+    >;
+    hiddenTransferComposition[0]!.amountUsdMinor = '369313';
+    hiddenTransferComposition[0]!.percentageBasisPointsOfManagedYield = 4_800;
+    hiddenTransferComposition[1]!.amountUsdMinor = '400090';
+    hiddenTransferComposition[1]!.percentageBasisPointsOfManagedYield = 5_200;
+    expect(() => parseLocalDemoAllocationPreview(transferHiddenAsNative)).toThrow(TypeError);
+
+    const zeroSourceWithAllocation = structuredClone(BALANCED_PREVIEW) as unknown as Record<
+      string,
+      unknown
+    >;
+    const zeroSourceComposition = zeroSourceWithAllocation.managedYieldComposition as Array<
+      Record<string, unknown>
+    >;
+    zeroSourceComposition[0]!.amountUsdMinor = '489498';
+    zeroSourceComposition[0]!.percentageBasisPointsOfManagedYield = 9_999;
+    zeroSourceComposition[1]!.amountUsdMinor = '1';
+    zeroSourceComposition[1]!.percentageBasisPointsOfManagedYield = 1;
+    expect(() => parseLocalDemoAllocationPreview(zeroSourceWithAllocation)).toThrow(TypeError);
   });
 
   it('uses both disclosed yield floors to reject an impossible recovery day at the horizon', () => {
@@ -386,7 +825,9 @@ describe('local demo same-origin API client', () => {
       fetch: requestFetch,
     });
 
-    await expect(client.previewAllocation(legacySelection as never)).rejects.toMatchObject({
+    await expect(
+      client.previewAllocation(PORTFOLIO_SNAPSHOT_ID, legacySelection as never),
+    ).rejects.toMatchObject({
       code: 'INVALID_RESPONSE',
     });
     expect(getter).not.toHaveBeenCalled();
@@ -398,17 +839,147 @@ describe('local demo same-origin API client', () => {
     const selection = Object.create(null) as Record<string, unknown>;
     Object.defineProperty(selection, 'kind', { enumerable: true, value: 'PRESET' });
     Object.defineProperty(selection, 'presetId', { enumerable: true, get: getter });
+    Object.defineProperty(selection, 'liquidReserveBasisPoints', {
+      enumerable: true,
+      value: 3_000,
+    });
     const requestFetch = vi.fn<typeof fetch>();
     const client = new LocalDemoApiClient({
       cookieHeader: `__Host-cl_csrf=${CSRF}`,
       fetch: requestFetch,
     });
 
-    await expect(client.previewAllocation(selection as never)).rejects.toMatchObject({
+    await expect(
+      client.previewAllocation(PORTFOLIO_SNAPSHOT_ID, selection as never),
+    ).rejects.toMatchObject({
       code: 'INVALID_RESPONSE',
     });
     expect(getter).not.toHaveBeenCalled();
     expect(requestFetch).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['missing reserve', { kind: 'PRESET', presetId: 'BALANCED' }],
+    [
+      'unexpected field',
+      {
+        kind: 'PRESET',
+        presetId: 'BALANCED',
+        liquidReserveBasisPoints: 3_000,
+        filters: {},
+      },
+    ],
+    ['negative reserve', { kind: 'PRESET', presetId: 'BALANCED', liquidReserveBasisPoints: -1 }],
+    [
+      'reserve above 95 percent',
+      { kind: 'PRESET', presetId: 'BALANCED', liquidReserveBasisPoints: 9_501 },
+    ],
+    [
+      'fractional basis points',
+      { kind: 'PRESET', presetId: 'BALANCED', liquidReserveBasisPoints: 3_000.5 },
+    ],
+  ])('rejects %s before fetch', async (_case, selection) => {
+    const requestFetch = vi.fn<typeof fetch>();
+    const client = new LocalDemoApiClient({
+      cookieHeader: `__Host-cl_csrf=${CSRF}`,
+      fetch: requestFetch,
+    });
+
+    await expect(
+      client.previewAllocation(PORTFOLIO_SNAPSHOT_ID, selection as never),
+    ).rejects.toMatchObject({ code: 'INVALID_RESPONSE' });
+    expect(requestFetch).not.toHaveBeenCalled();
+  });
+
+  it('accepts both inclusive reserve boundaries in the closed selection contract', () => {
+    expect(
+      validateLocalDemoAllocationSelection({
+        kind: 'PRESET',
+        presetId: 'BALANCED',
+        liquidReserveBasisPoints: 0,
+      }),
+    ).toEqual({ kind: 'PRESET', presetId: 'BALANCED', liquidReserveBasisPoints: 0 });
+    expect(
+      validateLocalDemoAllocationSelection({
+        kind: 'PRESET',
+        presetId: 'BALANCED',
+        liquidReserveBasisPoints: 9_500,
+      }),
+    ).toEqual({ kind: 'PRESET', presetId: 'BALANCED', liquidReserveBasisPoints: 9_500 });
+  });
+
+  it('binds previews to a canonical portfolio snapshot and maps only the exact change conflict', async () => {
+    const requestFetch = vi.fn<typeof fetch>();
+    const invalidClient = new LocalDemoApiClient({
+      cookieHeader: `__Host-cl_csrf=${CSRF}`,
+      fetch: requestFetch,
+    });
+    await expect(
+      invalidClient.previewAllocation('invalid snapshot id', {
+        kind: 'PRESET',
+        presetId: 'BALANCED',
+        liquidReserveBasisPoints: 3_000,
+      }),
+    ).rejects.toMatchObject({ code: 'INVALID_RESPONSE' });
+    expect(requestFetch).not.toHaveBeenCalled();
+
+    const mismatched = {
+      ...structuredClone(BALANCED_PREVIEW),
+      portfolioSnapshotId: 'different-portfolio-snapshot',
+    };
+    const mismatchClient = new LocalDemoApiClient({
+      cookieHeader: `__Host-cl_csrf=${CSRF}`,
+      fetch: vi.fn(async () => json(mismatched)),
+    });
+    await expect(
+      mismatchClient.previewAllocation(PORTFOLIO_SNAPSHOT_ID, {
+        kind: 'PRESET',
+        presetId: 'BALANCED',
+        liquidReserveBasisPoints: 3_000,
+      }),
+    ).rejects.toMatchObject({ code: 'INVALID_RESPONSE' });
+
+    const reserveMismatchClient = new LocalDemoApiClient({
+      cookieHeader: `__Host-cl_csrf=${CSRF}`,
+      fetch: vi.fn(async () => json(BALANCED_PREVIEW)),
+    });
+    await expect(
+      reserveMismatchClient.previewAllocation(PORTFOLIO_SNAPSHOT_ID, {
+        kind: 'PRESET',
+        presetId: 'BALANCED',
+        liquidReserveBasisPoints: 3_500,
+      }),
+    ).rejects.toMatchObject({ code: 'INVALID_RESPONSE' });
+
+    const exactConflict = {
+      statusCode: 409,
+      error: 'Conflict',
+      message: 'The local demo portfolio changed; refresh and retry',
+      code: 'PORTFOLIO_SNAPSHOT_CHANGED',
+    };
+    const conflictClient = new LocalDemoApiClient({
+      cookieHeader: `__Host-cl_csrf=${CSRF}`,
+      fetch: vi.fn(async () => json(exactConflict, 409)),
+    });
+    await expect(
+      conflictClient.previewAllocation(PORTFOLIO_SNAPSHOT_ID, {
+        kind: 'PRESET',
+        presetId: 'BALANCED',
+        liquidReserveBasisPoints: 3_000,
+      }),
+    ).rejects.toMatchObject({ code: 'PORTFOLIO_SNAPSHOT_CHANGED' });
+
+    const malformedConflictClient = new LocalDemoApiClient({
+      cookieHeader: `__Host-cl_csrf=${CSRF}`,
+      fetch: vi.fn(async () => json({ ...exactConflict, detail: 'unexpected' }, 409)),
+    });
+    await expect(
+      malformedConflictClient.previewAllocation(PORTFOLIO_SNAPSHOT_ID, {
+        kind: 'PRESET',
+        presetId: 'BALANCED',
+        liquidReserveBasisPoints: 3_000,
+      }),
+    ).rejects.toMatchObject({ code: 'INVALID_RESPONSE' });
   });
 
   it('maps only the exact bounded 422 body to a no-match result', async () => {
@@ -423,7 +994,11 @@ describe('local demo same-origin API client', () => {
       fetch: vi.fn(async () => json(exactNoMatch, 422)),
     });
     await expect(
-      exactClient.previewAllocation({ kind: 'PRESET', presetId: 'BALANCED' }),
+      exactClient.previewAllocation(PORTFOLIO_SNAPSHOT_ID, {
+        kind: 'PRESET',
+        presetId: 'BALANCED',
+        liquidReserveBasisPoints: 3_000,
+      }),
     ).rejects.toMatchObject({ code: 'NO_MATCHING_YIELD_OPPORTUNITIES' });
 
     const malformedClient = new LocalDemoApiClient({
@@ -431,7 +1006,11 @@ describe('local demo same-origin API client', () => {
       fetch: vi.fn(async () => json({ ...exactNoMatch, debug: 'unexpected detail' }, 422)),
     });
     await expect(
-      malformedClient.previewAllocation({ kind: 'PRESET', presetId: 'BALANCED' }),
+      malformedClient.previewAllocation(PORTFOLIO_SNAPSHOT_ID, {
+        kind: 'PRESET',
+        presetId: 'BALANCED',
+        liquidReserveBasisPoints: 3_000,
+      }),
     ).rejects.toMatchObject({ code: 'INVALID_RESPONSE' });
   });
 
@@ -453,7 +1032,11 @@ describe('local demo same-origin API client', () => {
         configurable: true,
         value: () => ['ATTACKER_CONTROLLED'],
       });
-      await client.previewAllocation({ kind: 'PRESET', presetId: 'BALANCED' });
+      await client.previewAllocation(PORTFOLIO_SNAPSHOT_ID, {
+        kind: 'PRESET',
+        presetId: 'BALANCED',
+        liquidReserveBasisPoints: 3_000,
+      });
     } finally {
       if (objectToJson === undefined) delete (Object.prototype as { toJSON?: unknown }).toJSON;
       else Object.defineProperty(Object.prototype, 'toJSON', objectToJson);
@@ -462,7 +1045,7 @@ describe('local demo same-origin API client', () => {
     }
 
     expect(requestFetch.mock.calls.map(([, init]) => init?.body)).toEqual([
-      '{"selection":{"kind":"PRESET","presetId":"BALANCED"}}',
+      `{"portfolioSnapshotId":"${PORTFOLIO_SNAPSHOT_ID}","selection":{"kind":"PRESET","presetId":"BALANCED","liquidReserveBasisPoints":3000}}`,
     ]);
   });
 

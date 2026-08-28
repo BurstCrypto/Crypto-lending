@@ -13,13 +13,17 @@ import {
   LOCAL_DEMO_BREAK_EVEN_MODEL_HORIZON_DAYS,
   LOCAL_DEMO_EXECUTION_COST_COMPONENTS,
   LOCAL_DEMO_EXECUTION_COST_MODEL,
+  LOCAL_DEMO_MAX_LIQUID_RESERVE_BASIS_POINTS,
+  LOCAL_DEMO_MAX_RETAINED_ROUNDING_RESIDUAL_USD_MINOR,
   LOCAL_DEMO_YIELD_CALCULATION_METHOD,
   LOCAL_DEMO_YIELD_PROJECTION_SOURCE,
   type LocalDemoAllocationSelection,
   type LocalDemoAllocationPresetId,
 } from './local-demo-allocation.service';
+import { LOCAL_DEMO_PUBLIC_RATE_SNAPSHOT_ID } from './local-demo-yield-catalog.service';
 
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+const PORTFOLIO_SNAPSHOT_ID = /^local-demo-portfolio:[0-9a-f]{32}$/u;
 
 export type LocalDemoWalletNamespace = 'EVM' | 'SOLANA';
 
@@ -92,19 +96,34 @@ export function parseLocalDemoDisconnectBody(value: unknown): Readonly<{ connect
 
 export function parseLocalDemoAllocationPreviewBody(
   value: unknown,
-): Readonly<{ selection: LocalDemoAllocationSelection }> {
-  const body = exactRecord(value, ['selection']);
+): Readonly<{ portfolioSnapshotId: string; selection: LocalDemoAllocationSelection }> {
+  const body = exactRecord(value, ['portfolioSnapshotId', 'selection']);
+  if (
+    typeof body.portfolioSnapshotId !== 'string' ||
+    !PORTFOLIO_SNAPSHOT_ID.test(body.portfolioSnapshotId)
+  ) {
+    return fail();
+  }
   if (ownDataProperty(body.selection, 'kind') !== 'PRESET') return fail();
-  const selection = exactRecord(body.selection, ['kind', 'presetId']);
+  const selection = exactRecord(body.selection, ['kind', 'presetId', 'liquidReserveBasisPoints']);
   if (
     !LOCAL_DEMO_ALLOCATION_PRESET_IDS.includes(selection.presetId as LocalDemoAllocationPresetId)
   ) {
     return fail();
   }
+  if (
+    !Number.isSafeInteger(selection.liquidReserveBasisPoints) ||
+    (selection.liquidReserveBasisPoints as number) < 0 ||
+    (selection.liquidReserveBasisPoints as number) > LOCAL_DEMO_MAX_LIQUID_RESERVE_BASIS_POINTS
+  ) {
+    return fail();
+  }
   return Object.freeze({
+    portfolioSnapshotId: body.portfolioSnapshotId,
     selection: Object.freeze({
       kind: 'PRESET',
       presetId: selection.presetId as LocalDemoAllocationPresetId,
+      liquidReserveBasisPoints: selection.liquidReserveBasisPoints as number,
     }),
   });
 }
@@ -145,15 +164,24 @@ export const LOCAL_DEMO_DISCONNECT_BODY_SCHEMA: SchemaObject = Object.freeze({
 export const LOCAL_DEMO_ALLOCATION_PREVIEW_BODY_SCHEMA: SchemaObject = Object.freeze({
   type: 'object',
   additionalProperties: false,
-  required: ['selection'],
+  required: ['portfolioSnapshotId', 'selection'],
   properties: {
+    portfolioSnapshotId: {
+      type: 'string',
+      pattern: '^local-demo-portfolio:[0-9a-f]{32}$',
+    },
     selection: {
       type: 'object',
       additionalProperties: false,
-      required: ['kind', 'presetId'],
+      required: ['kind', 'presetId', 'liquidReserveBasisPoints'],
       properties: {
         kind: { type: 'string', enum: ['PRESET'] },
         presetId: { type: 'string', enum: [...LOCAL_DEMO_ALLOCATION_PRESET_IDS] },
+        liquidReserveBasisPoints: {
+          type: 'integer',
+          minimum: 0,
+          maximum: LOCAL_DEMO_MAX_LIQUID_RESERVE_BASIS_POINTS,
+        },
       },
     },
   },
@@ -174,14 +202,40 @@ export const LOCAL_DEMO_ALLOCATION_NO_MATCH_RESPONSE_SCHEMA: SchemaObject = Obje
   },
 });
 
+export const LOCAL_DEMO_PORTFOLIO_CHANGED_RESPONSE_SCHEMA: SchemaObject = Object.freeze({
+  type: 'object',
+  additionalProperties: false,
+  required: ['statusCode', 'error', 'message', 'code'],
+  properties: {
+    statusCode: { type: 'integer', enum: [409] },
+    error: { type: 'string', enum: ['Conflict'] },
+    message: { type: 'string', enum: ['The local demo portfolio changed; refresh and retry'] },
+    code: { type: 'string', enum: ['PORTFOLIO_SNAPSHOT_CHANGED'] },
+  },
+});
+
 export const LOCAL_DEMO_YIELD_CATALOG_RESPONSE_SCHEMA: SchemaObject = Object.freeze({
   type: 'object',
   additionalProperties: false,
-  required: ['use', 'mayAuthorizeFinancialAction', 'riskClassificationAvailable', 'snapshot'],
+  required: [
+    'use',
+    'mayAuthorizeFinancialAction',
+    'riskClassificationAvailable',
+    'strategyMode',
+    'ecosystems',
+    'snapshot',
+  ],
   properties: {
     use: { type: 'string', enum: ['LOCAL_DEMO_MANAGED_RATE_SNAPSHOT_ONLY'] },
     mayAuthorizeFinancialAction: { type: 'boolean', enum: [false] },
     riskClassificationAvailable: { type: 'boolean', enum: [false] },
+    strategyMode: { type: 'string', enum: ['PORTFOLIO_CROSS_CHAIN_BLEND'] },
+    ecosystems: {
+      type: 'array',
+      minItems: 2,
+      maxItems: 2,
+      items: { type: 'string', enum: ['EVM', 'SOLANA'] },
+    },
     snapshot: {
       type: 'object',
       additionalProperties: false,
@@ -194,7 +248,7 @@ export const LOCAL_DEMO_YIELD_CATALOG_RESPONSE_SCHEMA: SchemaObject = Object.fre
         'riskClassification',
       ],
       properties: {
-        id: { type: 'string', enum: ['managed-rate-snapshot-v1'] },
+        id: { type: 'string', enum: [LOCAL_DEMO_PUBLIC_RATE_SNAPSHOT_ID] },
         capturedAt: { type: 'string', format: 'date-time' },
         staleAfter: { type: 'string', format: 'date-time' },
         freshness: { type: 'string', enum: ['CURRENT', 'STALE'] },
@@ -208,7 +262,7 @@ export const LOCAL_DEMO_YIELD_CATALOG_RESPONSE_SCHEMA: SchemaObject = Object.fre
 const LOCAL_DEMO_EXECUTION_COST_COMPONENT_SCHEMA: SchemaObject = Object.freeze({
   type: 'object',
   additionalProperties: false,
-  required: ['code', 'label', 'calculationBasis', 'amountUsdMinor'],
+  required: ['code', 'label', 'calculationBasis', 'fundingTreatment', 'amountUsdMinor'],
   properties: {
     code: { type: 'string', enum: [...LOCAL_DEMO_EXECUTION_COST_COMPONENTS] },
     label: { type: 'string', maxLength: 96 },
@@ -217,9 +271,14 @@ const LOCAL_DEMO_EXECUTION_COST_COMPONENT_SCHEMA: SchemaObject = Object.freeze({
       enum: [
         'NETWORK_ACTIVATION_AND_POSITION_VOLUME',
         'TWELVE_BPS_OF_REQUIRED_CONVERSION',
+        'NO_CROSS_ECOSYSTEM_TRANSFER',
         'POSITION_SIZE_AND_UTILIZATION',
-        'TWENTY_CENTS_PER_ACTIVE_ALLOCATION',
+        'CANONICAL_PLATFORM_ROUTING_RULE_V1',
       ],
+    },
+    fundingTreatment: {
+      type: 'string',
+      enum: ['DEDUCTED_FROM_GROSS', 'ADDED_ON_TOP'],
     },
     amountUsdMinor: { type: 'string', pattern: '^(?:0|[1-9][0-9]*)$' },
   },
@@ -231,10 +290,14 @@ export const LOCAL_DEMO_ALLOCATION_PREVIEW_RESPONSE_SCHEMA: SchemaObject = Objec
   required: [
     'use',
     'mayAuthorizeFinancialAction',
+    'portfolioSnapshotId',
     'selection',
     'rateSnapshot',
     'grossCapitalUsdMinor',
+    'sourceCapitalByEcosystem',
     'allocations',
+    'managedYieldComposition',
+    'compositionSummary',
     'executionCost',
     'capitalIncludedInProjectionUsdMinor',
     'yieldProjection',
@@ -243,6 +306,10 @@ export const LOCAL_DEMO_ALLOCATION_PREVIEW_RESPONSE_SCHEMA: SchemaObject = Objec
   properties: {
     use: { type: 'string', enum: ['LOCAL_DEMO_ESTIMATE_ONLY'] },
     mayAuthorizeFinancialAction: { type: 'boolean', enum: [false] },
+    portfolioSnapshotId: {
+      type: 'string',
+      pattern: '^local-demo-portfolio:[0-9a-f]{32}$',
+    },
     selection: {
       type: 'object',
       additionalProperties: false,
@@ -252,7 +319,11 @@ export const LOCAL_DEMO_ALLOCATION_PREVIEW_RESPONSE_SCHEMA: SchemaObject = Objec
         presetId: { type: 'string', enum: [...LOCAL_DEMO_ALLOCATION_PRESET_IDS] },
         label: { type: 'string', maxLength: 96 },
         description: { type: 'string', maxLength: 512 },
-        liquidReserveBasisPoints: { type: 'integer', minimum: 0, maximum: 10_000 },
+        liquidReserveBasisPoints: {
+          type: 'integer',
+          minimum: 0,
+          maximum: LOCAL_DEMO_MAX_LIQUID_RESERVE_BASIS_POINTS,
+        },
       },
     },
     rateSnapshot: {
@@ -268,7 +339,7 @@ export const LOCAL_DEMO_ALLOCATION_PREVIEW_RESPONSE_SCHEMA: SchemaObject = Objec
         'riskClassification',
       ],
       properties: {
-        id: { type: 'string', enum: ['managed-rate-snapshot-v1'] },
+        id: { type: 'string', enum: [LOCAL_DEMO_PUBLIC_RATE_SNAPSHOT_ID] },
         capturedAt: { type: 'string', format: 'date-time' },
         staleAfter: { type: 'string', format: 'date-time' },
         freshness: { type: 'string', enum: ['CURRENT', 'STALE'] },
@@ -278,6 +349,20 @@ export const LOCAL_DEMO_ALLOCATION_PREVIEW_RESPONSE_SCHEMA: SchemaObject = Objec
       },
     },
     grossCapitalUsdMinor: { type: 'string', pattern: '^(?:0|[1-9][0-9]*)$' },
+    sourceCapitalByEcosystem: {
+      type: 'array',
+      minItems: 2,
+      maxItems: 2,
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['ecosystem', 'amountUsdMinor'],
+        properties: {
+          ecosystem: { type: 'string', enum: ['EVM', 'SOLANA'] },
+          amountUsdMinor: { type: 'string', pattern: '^(?:0|[1-9][0-9]*)$' },
+        },
+      },
+    },
     allocations: {
       type: 'array',
       minItems: 2,
@@ -293,6 +378,42 @@ export const LOCAL_DEMO_ALLOCATION_PREVIEW_RESPONSE_SCHEMA: SchemaObject = Objec
           percentageBasisPoints: { type: 'integer', minimum: 0, maximum: 10_000 },
           amountUsdMinor: { type: 'string', pattern: '^(?:0|[1-9][0-9]*)$' },
         },
+      },
+    },
+    managedYieldComposition: {
+      type: 'array',
+      minItems: 2,
+      maxItems: 2,
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['ecosystem', 'label', 'percentageBasisPointsOfManagedYield', 'amountUsdMinor'],
+        properties: {
+          ecosystem: { type: 'string', enum: ['EVM', 'SOLANA'] },
+          label: { type: 'string', enum: ['EVM managed yield', 'SVM managed yield'] },
+          percentageBasisPointsOfManagedYield: {
+            type: 'integer',
+            minimum: 0,
+            maximum: 10_000,
+          },
+          amountUsdMinor: { type: 'string', pattern: '^(?:0|[1-9][0-9]*)$' },
+        },
+      },
+    },
+    compositionSummary: {
+      type: 'object',
+      additionalProperties: false,
+      required: [
+        'mode',
+        'crossEcosystemTransferRequired',
+        'crossEcosystemTransferUsdMinor',
+        'activeEcosystemCount',
+      ],
+      properties: {
+        mode: { type: 'string', enum: ['SINGLE_ECOSYSTEM', 'EVM_SOLANA_PORTFOLIO_BLEND'] },
+        crossEcosystemTransferRequired: { type: 'boolean', enum: [false] },
+        crossEcosystemTransferUsdMinor: { type: 'string', enum: ['0'] },
+        activeEcosystemCount: { type: 'integer', enum: [1, 2] },
       },
     },
     executionCost: {
@@ -319,8 +440,13 @@ export const LOCAL_DEMO_ALLOCATION_PREVIEW_RESPONSE_SCHEMA: SchemaObject = Objec
             'costBasisCapitalUsdMinor',
             'fundingTreatment',
             'rounding',
+            'routingFeePolicy',
             'components',
+            'deductedFromGrossUsdMinor',
+            'addedOnTopUsdMinor',
+            'retainedRoundingResidualUsdMinor',
             'totalUsdMinor',
+            'requiredCapitalIncludingAddedOnTopUsdMinor',
           ],
           properties: {
             status: { type: 'string', enum: ['AVAILABLE'] },
@@ -332,11 +458,24 @@ export const LOCAL_DEMO_ALLOCATION_PREVIEW_RESPONSE_SCHEMA: SchemaObject = Objec
             },
             fundingTreatment: {
               type: 'string',
-              enum: ['DEDUCT_FROM_GROSS_BEFORE_PROJECTION'],
+              enum: ['MIXED_DEDUCT_FROM_GROSS_AND_ADD_ON_TOP'],
             },
             rounding: {
               type: 'string',
-              enum: ['CEIL_EACH_VARIABLE_COMPONENT_TO_USD_MINOR'],
+              enum: ['CEIL_VARIABLE_COMPONENTS_PLATFORM_FEE_HALF_EVEN'],
+            },
+            routingFeePolicy: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['tier', 'classification', 'ruleVersion'],
+              properties: {
+                tier: { type: 'string', enum: ['FREE'] },
+                classification: {
+                  type: 'string',
+                  enum: ['DIRECT_COMPATIBLE', 'MATERIAL_ORCHESTRATION'],
+                },
+                ruleVersion: { type: 'integer', enum: [1] },
+              },
             },
             components: {
               type: 'array',
@@ -344,7 +483,26 @@ export const LOCAL_DEMO_ALLOCATION_PREVIEW_RESPONSE_SCHEMA: SchemaObject = Objec
               maxItems: LOCAL_DEMO_EXECUTION_COST_COMPONENTS.length,
               items: LOCAL_DEMO_EXECUTION_COST_COMPONENT_SCHEMA,
             },
+            deductedFromGrossUsdMinor: {
+              type: 'string',
+              pattern: '^(?:0|[1-9][0-9]*)$',
+            },
+            addedOnTopUsdMinor: {
+              type: 'string',
+              pattern: '^(?:0|[1-9][0-9]*)$',
+            },
+            retainedRoundingResidualUsdMinor: {
+              type: 'string',
+              enum: Array.from(
+                { length: LOCAL_DEMO_MAX_RETAINED_ROUNDING_RESIDUAL_USD_MINOR + 1 },
+                (_, amount) => amount.toString(),
+              ),
+            },
             totalUsdMinor: { type: 'string', pattern: '^(?:0|[1-9][0-9]*)$' },
+            requiredCapitalIncludingAddedOnTopUsdMinor: {
+              type: 'string',
+              pattern: '^(?:0|[1-9][0-9]*)$',
+            },
           },
         },
         publicExecution: {

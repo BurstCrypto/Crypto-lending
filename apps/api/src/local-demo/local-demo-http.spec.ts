@@ -13,14 +13,24 @@ import {
 } from './local-demo-http';
 
 describe('local demo HTTP boundary', () => {
-  it.each(['MORE_LIQUID', 'BALANCED', 'MORE_YIELD'] as const)(
-    'accepts only the %s allocation preset identifier',
-    (presetId) => {
+  const portfolioSnapshotId = 'local-demo-portfolio:0123456789abcdef0123456789abcdef';
+
+  it.each([
+    { presetId: 'MORE_LIQUID' as const, liquidReserveBasisPoints: 0 },
+    { presetId: 'BALANCED' as const, liquidReserveBasisPoints: 1_550 },
+    { presetId: 'MORE_YIELD' as const, liquidReserveBasisPoints: 9_500 },
+  ])(
+    'accepts the $presetId base plan with a $liquidReserveBasisPoints bps reserve',
+    ({ presetId, liquidReserveBasisPoints }) => {
       const result = parseLocalDemoAllocationPreviewBody({
-        selection: { kind: 'PRESET', presetId },
+        portfolioSnapshotId,
+        selection: { kind: 'PRESET', presetId, liquidReserveBasisPoints },
       });
 
-      expect(result).toEqual({ selection: { kind: 'PRESET', presetId } });
+      expect(result).toEqual({
+        portfolioSnapshotId,
+        selection: { kind: 'PRESET', presetId, liquidReserveBasisPoints },
+      });
       expect(Object.isFrozen(result)).toBe(true);
       expect(Object.isFrozen(result.selection)).toBe(true);
     },
@@ -29,19 +39,89 @@ describe('local demo HTTP boundary', () => {
   it.each([
     {},
     { presetId: 'BALANCED' },
-    { selection: { kind: 'PRESET', presetId: 'CUSTOM' } },
-    { selection: { kind: 'CUSTOM', presetId: 'BALANCED' } },
     {
+      portfolioSnapshotId,
+      selection: { kind: 'PRESET', presetId: 'CUSTOM', liquidReserveBasisPoints: 3_000 },
+    },
+    {
+      portfolioSnapshotId,
+      selection: { kind: 'CUSTOM', presetId: 'BALANCED', liquidReserveBasisPoints: 3_000 },
+    },
+    {
+      portfolioSnapshotId,
       selection: {
         kind: 'CUSTOM',
         liquidReserveBasisPoints: 2_500,
         filters: { providerIds: ['MORPHO'], networkIds: ['eip155:1'] },
       },
     },
-    { selection: { kind: 'PRESET', presetId: 'BALANCED', amountUsdMinor: '1' } },
-    { selection: { kind: 'PRESET', presetId: 'BALANCED', modeledCostUsdMinor: '1' } },
-    { selection: { kind: 'PRESET', presetId: 'BALANCED' }, accountId: 'caller' },
-    Object.assign(Object.create({ selection: { kind: 'PRESET', presetId: 'BALANCED' } }), {}),
+    {
+      portfolioSnapshotId,
+      selection: { kind: 'PRESET', presetId: 'BALANCED' },
+    },
+    {
+      portfolioSnapshotId,
+      selection: { kind: 'PRESET', presetId: 'BALANCED', liquidReserveBasisPoints: -1 },
+    },
+    {
+      portfolioSnapshotId,
+      selection: { kind: 'PRESET', presetId: 'BALANCED', liquidReserveBasisPoints: 9_501 },
+    },
+    {
+      portfolioSnapshotId,
+      selection: { kind: 'PRESET', presetId: 'BALANCED', liquidReserveBasisPoints: 1.5 },
+    },
+    {
+      portfolioSnapshotId,
+      selection: { kind: 'PRESET', presetId: 'BALANCED', liquidReserveBasisPoints: Number.NaN },
+    },
+    {
+      portfolioSnapshotId,
+      selection: {
+        kind: 'PRESET',
+        presetId: 'BALANCED',
+        liquidReserveBasisPoints: Number.POSITIVE_INFINITY,
+      },
+    },
+    {
+      portfolioSnapshotId,
+      selection: {
+        kind: 'PRESET',
+        presetId: 'BALANCED',
+        liquidReserveBasisPoints: 3_000,
+        amountUsdMinor: '1',
+      },
+    },
+    {
+      portfolioSnapshotId,
+      selection: {
+        kind: 'PRESET',
+        presetId: 'BALANCED',
+        liquidReserveBasisPoints: 3_000,
+        modeledCostUsdMinor: '1',
+      },
+    },
+    {
+      portfolioSnapshotId,
+      selection: { kind: 'PRESET', presetId: 'BALANCED', liquidReserveBasisPoints: 3_000 },
+      accountId: 'caller',
+    },
+    {
+      portfolioSnapshotId: 'local-demo-portfolio:../stale',
+      selection: { kind: 'PRESET', presetId: 'BALANCED', liquidReserveBasisPoints: 3_000 },
+    },
+    Object.assign(Object.create({ polluted: true }), {
+      portfolioSnapshotId,
+      selection: { kind: 'PRESET', presetId: 'BALANCED', liquidReserveBasisPoints: 3_000 },
+    }),
+    {
+      portfolioSnapshotId,
+      selection: Object.assign(Object.create({ polluted: true }), {
+        kind: 'PRESET',
+        presetId: 'BALANCED',
+        liquidReserveBasisPoints: 3_000,
+      }),
+    },
   ])('rejects malformed, custom, or caller-authored allocation input', (body) => {
     expect(() => parseLocalDemoAllocationPreviewBody(body)).toThrow(LocalDemoBodyError);
   });
@@ -57,8 +137,11 @@ describe('local demo HTTP boundary', () => {
       },
     });
     selection.presetId = 'BALANCED';
+    selection.liquidReserveBasisPoints = 3_000;
 
-    expect(() => parseLocalDemoAllocationPreviewBody({ selection })).toThrow(LocalDemoBodyError);
+    expect(() => parseLocalDemoAllocationPreviewBody({ portfolioSnapshotId, selection })).toThrow(
+      LocalDemoBodyError,
+    );
     expect(invoked).toBe(false);
   });
 
@@ -66,17 +149,22 @@ describe('local demo HTTP boundary', () => {
     expect(LOCAL_DEMO_ALLOCATION_PREVIEW_BODY_SCHEMA).toMatchObject({
       type: 'object',
       additionalProperties: false,
-      required: ['selection'],
+      required: ['portfolioSnapshotId', 'selection'],
       properties: {
         selection: {
           type: 'object',
           additionalProperties: false,
-          required: ['kind', 'presetId'],
+          required: ['kind', 'presetId', 'liquidReserveBasisPoints'],
           properties: {
             kind: { type: 'string', enum: ['PRESET'] },
             presetId: {
               type: 'string',
               enum: ['MORE_LIQUID', 'BALANCED', 'MORE_YIELD'],
+            },
+            liquidReserveBasisPoints: {
+              type: 'integer',
+              minimum: 0,
+              maximum: 9_500,
             },
           },
         },
@@ -87,12 +175,25 @@ describe('local demo HTTP boundary', () => {
       additionalProperties: false,
       required: expect.arrayContaining([
         'rateSnapshot',
+        'portfolioSnapshotId',
+        'sourceCapitalByEcosystem',
         'allocations',
+        'managedYieldComposition',
+        'compositionSummary',
         'executionCost',
         'capitalIncludedInProjectionUsdMinor',
         'yieldProjection',
       ]),
       properties: {
+        selection: {
+          properties: {
+            liquidReserveBasisPoints: {
+              type: 'integer',
+              minimum: 0,
+              maximum: 9_500,
+            },
+          },
+        },
         executionCost: {
           additionalProperties: false,
           required: ['actualLocalOperation', 'modeledScenario', 'publicExecution'],
@@ -105,9 +206,46 @@ describe('local demo HTTP boundary', () => {
             },
             modeledScenario: {
               properties: {
-                modelId: { type: 'string', enum: ['LOCAL_DEMO_ALLOCATION_COST_V1'] },
+                modelId: { type: 'string', enum: ['LOCAL_DEMO_ALLOCATION_COST_V2'] },
                 isQuote: { type: 'boolean', enum: [false] },
+                fundingTreatment: {
+                  type: 'string',
+                  enum: ['MIXED_DEDUCT_FROM_GROSS_AND_ADD_ON_TOP'],
+                },
+                rounding: {
+                  type: 'string',
+                  enum: ['CEIL_VARIABLE_COMPONENTS_PLATFORM_FEE_HALF_EVEN'],
+                },
+                routingFeePolicy: {
+                  type: 'object',
+                  additionalProperties: false,
+                  required: ['tier', 'classification', 'ruleVersion'],
+                  properties: {
+                    tier: { type: 'string', enum: ['FREE'] },
+                    classification: {
+                      type: 'string',
+                      enum: ['DIRECT_COMPATIBLE', 'MATERIAL_ORCHESTRATION'],
+                    },
+                    ruleVersion: { type: 'integer', enum: [1] },
+                  },
+                },
+                deductedFromGrossUsdMinor: {
+                  type: 'string',
+                  pattern: '^(?:0|[1-9][0-9]*)$',
+                },
+                addedOnTopUsdMinor: {
+                  type: 'string',
+                  pattern: '^(?:0|[1-9][0-9]*)$',
+                },
+                retainedRoundingResidualUsdMinor: {
+                  type: 'string',
+                  enum: ['0', '1', '2', '3'],
+                },
                 totalUsdMinor: { type: 'string', pattern: '^(?:0|[1-9][0-9]*)$' },
+                requiredCapitalIncludingAddedOnTopUsdMinor: {
+                  type: 'string',
+                  pattern: '^(?:0|[1-9][0-9]*)$',
+                },
               },
             },
             publicExecution: {
@@ -138,7 +276,13 @@ describe('local demo HTTP boundary', () => {
       LOCAL_DEMO_YIELD_CATALOG_RESPONSE_SCHEMA,
       LOCAL_DEMO_ALLOCATION_PREVIEW_RESPONSE_SCHEMA,
     ]);
-    for (const component of ['NETWORK', 'CONVERSION', 'MARKET_IMPACT', 'ROUTING']) {
+    for (const component of [
+      'NETWORK',
+      'CONVERSION',
+      'CROSS_ECOSYSTEM_TRANSFER',
+      'MARKET_IMPACT',
+      'PLATFORM_ROUTING',
+    ]) {
       expect(publicSchemas).toContain(`"${component}"`);
     }
     for (const forbidden of [

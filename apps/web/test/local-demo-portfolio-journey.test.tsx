@@ -11,7 +11,12 @@ import {
 } from '../lib/local-demo/local-demo-client';
 import { localDemoWalletRosterKey } from '../lib/local-demo/wallet-roster';
 import { LOCAL_DEMO_CHAIN_PORTFOLIO_PAYLOAD } from './local-demo-portfolio.fixtures';
-import { LOCAL_DEMO_YIELD_CATALOG, MORE_LIQUID_PREVIEW } from './local-demo-yield.fixtures';
+import { expectProviderPrivateDom } from './local-demo-provider-privacy';
+import {
+  CROSS_CHAIN_ZERO_LIQUID_BALANCED_PREVIEW,
+  LOCAL_DEMO_YIELD_CATALOG,
+  ZERO_LIQUID_BALANCED_PREVIEW,
+} from './local-demo-yield.fixtures';
 
 const PROFILE: AccountProfile = Object.freeze({
   accountId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
@@ -102,7 +107,11 @@ function fakeClient(initial: readonly LocalDemoWalletProjection[] = []): FakeCli
   });
   const readPortfolio = vi.fn(async () => portfolioFor(registered));
   const readYieldCatalog = vi.fn(async () => LOCAL_DEMO_YIELD_CATALOG);
-  const previewAllocation = vi.fn(async () => MORE_LIQUID_PREVIEW);
+  const previewAllocation = vi.fn(async () =>
+    registered.length === 2
+      ? CROSS_CHAIN_ZERO_LIQUID_BALANCED_PREVIEW
+      : ZERO_LIQUID_BALANCED_PREVIEW,
+  );
   return {
     client: {
       listWallets,
@@ -208,29 +217,67 @@ describe('authenticated local demo portfolio journey', () => {
     expect(restoredHarness.readPortfolio).toHaveBeenCalledTimes(1);
   });
 
-  it('offers private product plans only when ready and defers every fee amount until selection', async () => {
+  it('blends connected EVM and Solana capital without exposing a lending venue', async () => {
+    const harness = fakeClient();
+    experience(harness);
+
+    await screen.findByText('No synthetic wallets are connected yet.');
+    fireEvent.click(screen.getByRole('button', { name: /EVM test wallet/u }));
+    await screen.findByText('Synthetic EVM wallet', { selector: 'strong' });
+    fireEvent.click(screen.getByRole('button', { name: /Solana test wallet/u }));
+    await screen.findByText('Synthetic Solana wallet', { selector: 'strong' });
+
+    const buyingPower = screen.getByText('Available buying power').closest('article');
+    expect(within(buyingPower!).getByLabelText('11,000 US dollars')).toHaveTextContent(
+      '$11,000.00',
+    );
+    fireEvent.click(await screen.findByRole('button', { name: /Managed blend/u }));
+
+    const composition = (
+      await screen.findByRole('heading', { name: 'Managed allocation by ecosystem' })
+    ).closest('section');
+    expect(within(composition!).getByText('EVM managed yield')).toBeInTheDocument();
+    expect(within(composition!).getByText('SVM managed yield')).toBeInTheDocument();
+    expect(
+      within(composition!).getByText('No EVM-to-Solana transfer is modeled.'),
+    ).toBeInTheDocument();
+    expect(harness.previewAllocation).toHaveBeenCalledWith(
+      PORTFOLIO.snapshotId,
+      { kind: 'PRESET', presetId: 'BALANCED', liquidReserveBasisPoints: 0 },
+      expect.any(AbortSignal),
+    );
+    expectProviderPrivateDom(composition!);
+  });
+
+  it('offers one provider-private managed blend only when ready and defers fees until selection', async () => {
     const harness = fakeClient();
     experience(harness);
 
     await screen.findByText('No synthetic wallets are connected yet.');
     expect(
-      screen.queryByRole('heading', { name: 'Choose how to allocate your capital.' }),
+      screen.queryByRole('heading', { name: 'Preview your managed allocation.' }),
     ).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /EVM test wallet/u }));
     const allocationHeading = await screen.findByRole('heading', {
-      name: 'Choose how to allocate your capital.',
+      name: 'Preview your managed allocation.',
     });
     const allocationPlanner = allocationHeading.closest('section');
     expect(allocationPlanner).not.toBeNull();
     expect(
       await within(allocationPlanner!).findByRole('heading', {
-        name: 'Crypto Lending yield plans',
+        name: 'Crypto Lending managed blend',
       }),
     ).toBeInTheDocument();
     expect(
-      within(allocationPlanner!).getAllByRole('button', { name: /Preview plan/u }),
-    ).toHaveLength(3);
+      within(allocationPlanner!).getAllByRole('button', { name: /Preview blend/u }),
+    ).toHaveLength(1);
+    expect(
+      within(allocationPlanner!).queryByRole('button', { name: /More liquid/u }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(allocationPlanner!).queryByRole('button', { name: /More yield/u }),
+    ).not.toBeInTheDocument();
     expect(within(allocationPlanner!).queryByText(/\$\d/u)).not.toBeInTheDocument();
     expect(
       within(allocationPlanner!).queryByText('Estimated one-time fees'),
@@ -238,20 +285,19 @@ describe('authenticated local demo portfolio journey', () => {
     expect(
       within(allocationPlanner!).queryByText('First positive day after estimated fees'),
     ).not.toBeInTheDocument();
-    expect(allocationPlanner!.textContent).not.toMatch(
-      /morpho|ethereum|\bbase\b|eip155:|api\.morpho|cbBTC|WETH|USD3|0x[0-9a-f]{40}/iu,
-    );
+    expectProviderPrivateDom(allocationPlanner!);
     expect(screen.queryByText('Why buying power is lower')).not.toBeInTheDocument();
     const buyingPowerCard = screen.getByText('Available buying power').closest('article');
     expect(within(buyingPowerCard!).getByLabelText('7,000 US dollars')).toHaveTextContent(
       '$7,000.00',
     );
 
-    fireEvent.click(screen.getByRole('button', { name: /More liquid/u }));
+    fireEvent.click(screen.getByRole('button', { name: /Managed blend/u }));
     const costHeading = await screen.findByRole('heading', { name: 'Estimated one-time fees' });
     expect(costHeading).toBeInTheDocument();
     expect(harness.previewAllocation).toHaveBeenCalledWith(
-      { kind: 'PRESET', presetId: 'MORE_LIQUID' },
+      PORTFOLIO.snapshotId,
+      { kind: 'PRESET', presetId: 'BALANCED', liquidReserveBasisPoints: 0 },
       expect.any(AbortSignal),
     );
     expect(
@@ -261,13 +307,26 @@ describe('authenticated local demo portfolio journey', () => {
     expect(within(reconciliation!).getByLabelText('7,000 US dollars')).toHaveTextContent(
       '$7,000.00',
     );
-    expect(
-      within(reconciliation!).getByLabelText('6,995 US dollars and 48 cents'),
-    ).toHaveTextContent('$6,995.48');
-    const costSection = costHeading.closest('section');
-    expect(within(costSection!).getByLabelText('4 US dollars and 52 cents')).toHaveTextContent(
-      '$4.52',
+    expect(within(reconciliation!).getByLabelText('8 US dollars and 75 cents')).toHaveTextContent(
+      '$8.75',
     );
+    expect(
+      within(reconciliation!).getByLabelText('6,991 US dollars and 25 cents'),
+    ).toHaveTextContent('$6,991.25');
+    expect(within(reconciliation!).getByLabelText('13 US dollars and 98 cents')).toHaveTextContent(
+      '$13.98',
+    );
+    expect(
+      within(reconciliation!).getByLabelText('7,013 US dollars and 98 cents'),
+    ).toHaveTextContent('$7,013.98');
+    const costSection = costHeading.closest('section');
+    expect(within(costSection!).getByLabelText('22 US dollars and 73 cents')).toHaveTextContent(
+      '$22.73',
+    );
+    expect(within(costSection!).getByText('Estimated platform routing fee')).toBeInTheDocument();
+    expect(
+      within(costSection!).getByText(/Free tier charges 0\.20% of managed capital/iu),
+    ).toBeInTheDocument();
     expect(within(costSection!).getByText(/Actual local operation: \$0/u)).toBeInTheDocument();
     expect(
       within(costSection!).getByText(/Public execution costs:\s*unquoted/iu),
@@ -277,20 +336,20 @@ describe('authenticated local demo portfolio journey', () => {
       .getByRole('heading', { name: 'Illustrative yield result' })
       .closest('section');
     expect(
-      within(yieldProjection!).getByLabelText('1.87 percent estimated annual percentage yield'),
-    ).toHaveTextContent('1.87%');
+      within(yieldProjection!).getByLabelText('9.50 percent estimated annual percentage yield'),
+    ).toHaveTextContent('9.50%');
     expect(
-      within(yieldProjection!).getByLabelText('131 US dollars and 30 cents'),
-    ).toHaveTextContent('$131.30');
+      within(yieldProjection!).getByLabelText('664 US dollars and 16 cents'),
+    ).toHaveTextContent('$664.16');
     expect(
-      within(yieldProjection!).getByLabelText('126 US dollars and 78 cents'),
-    ).toHaveTextContent('$126.78');
+      within(yieldProjection!).getByLabelText('641 US dollars and 43 cents'),
+    ).toHaveTextContent('$641.43');
     expect(
       within(yieldProjection!).getByLabelText(
         'First positive whole-cent yield after estimated fees is day 13',
       ),
     ).toHaveTextContent('Day 13');
-    expect(allocationPlanner!.textContent).not.toMatch(/morpho|api\.morpho|eip155:/iu);
+    expectProviderPrivateDom(allocationPlanner!);
   });
 
   it('isolates persisted roster metadata and capacity across authenticated account changes', async () => {

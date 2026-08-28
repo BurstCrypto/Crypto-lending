@@ -1,5 +1,5 @@
 export const LOCAL_DEMO_BANNER_TEXT =
-  'Synthetic local demo data — no real assets, providers, or transactions';
+  'Synthetic local demo data — no real assets or transactions; no live provider connections or requests';
 
 export function LocalDemoBanner({ enabled }: Readonly<{ enabled: boolean }>) {
   if (!enabled) return null;

@@ -403,25 +403,38 @@ describe('local demo authentication boundary (e2e)', () => {
       use: 'LOCAL_DEMO_MANAGED_RATE_SNAPSHOT_ONLY',
       mayAuthorizeFinancialAction: false,
       riskClassificationAvailable: false,
+      strategyMode: 'PORTFOLIO_CROSS_CHAIN_BLEND',
+      ecosystems: ['EVM', 'SOLANA'],
       snapshot: {
-        id: 'managed-rate-snapshot-v1',
-        capturedAt: '2026-08-26T14:14:54.580Z',
+        id: 'managed-rate-snapshot-v3',
+        capturedAt: '2026-08-27T01:04:48.000Z',
         staleAfter: '2026-08-27T14:14:54.580Z',
-        freshness: 'CURRENT',
+        freshness: 'STALE',
         staleBehavior: 'LABEL_STALE_KEEP_NON_EXECUTABLE',
         riskClassification: 'NOT_ASSESSED',
       },
     });
-    expect(JSON.stringify(catalog.body)).not.toMatch(/morpho|graphql|api\.morpho/iu);
     expect(JSON.stringify(catalog.body)).not.toMatch(
-      /"(?:provider|providerId|providerIds|protocol|protocolId|marketId|marketIds|opportunity|opportunities|provenance|sourceReference|payloadSha256|normalizer|endpoint)"\s*:/iu,
+      /morpho|kamino|aave|save|solend|compound|moonwell|spark|venus|euler|marginfi|\bp0\b|project[\s._/-]*0|bnb|eip155:56|graphql|api\./iu,
     );
+    expect(JSON.stringify(catalog.body)).not.toMatch(
+      /"(?:provider|providerId|providerIds|providerName|protocol|protocolId|protocolName|marketId|marketIds|reserveId|opportunity|opportunityId|opportunities|sourceId|provenance|sourceReference|sourceObservedAt|retrievedAt|payloadSha256|normalizer|normalizerId|normalizerVersion|attributes|endpoint)"\s*:/iu,
+    );
+
+    const displayedPortfolio = await request(app.getHttpServer())
+      .get('/api/v1/local-demo/portfolio')
+      .set('Cookie', cookie)
+      .expect(200);
+    const portfolioSnapshotId = displayedPortfolio.body.snapshotId as string;
 
     await request(app.getHttpServer())
       .post('/api/v1/local-demo/allocation-preview')
       .set('Origin', LOCAL_ORIGIN)
       .set('Cookie', cookie)
-      .send({ selection: { kind: 'PRESET', presetId: 'BALANCED' } })
+      .send({
+        portfolioSnapshotId,
+        selection: { kind: 'PRESET', presetId: 'BALANCED', liquidReserveBasisPoints: 3_000 },
+      })
       .expect(401);
 
     const preview = await request(app.getHttpServer())
@@ -429,7 +442,10 @@ describe('local demo authentication boundary (e2e)', () => {
       .set('Origin', LOCAL_ORIGIN)
       .set('X-CSRF-Token', csrf)
       .set('Cookie', cookie)
-      .send({ selection: { kind: 'PRESET', presetId: 'BALANCED' } })
+      .send({
+        portfolioSnapshotId,
+        selection: { kind: 'PRESET', presetId: 'BALANCED', liquidReserveBasisPoints: 3_000 },
+      })
       .expect(200);
 
     expect(preview.headers).toMatchObject({
@@ -440,81 +456,115 @@ describe('local demo authentication boundary (e2e)', () => {
     expect(preview.body).toMatchObject({
       use: 'LOCAL_DEMO_ESTIMATE_ONLY',
       mayAuthorizeFinancialAction: false,
+      portfolioSnapshotId,
       selection: {
         kind: 'PRESET',
         presetId: 'BALANCED',
-        label: 'Balanced blend',
+        label: 'Managed blend',
+        description:
+          'Keep 30% readily available and allocate the remainder to the managed yield strategy.',
         liquidReserveBasisPoints: 3000,
       },
       rateSnapshot: {
-        id: 'managed-rate-snapshot-v1',
+        id: 'managed-rate-snapshot-v3',
         staleBehavior: 'LABEL_STALE_KEEP_NON_EXECUTABLE',
         riskClassificationAvailable: false,
         riskClassification: 'NOT_ASSESSED',
       },
       grossCapitalUsdMinor: '700000',
+      sourceCapitalByEcosystem: [
+        { ecosystem: 'EVM', amountUsdMinor: '700000' },
+        { ecosystem: 'SOLANA', amountUsdMinor: '0' },
+      ],
       allocations: [
         {
           bucket: 'LIQUID_RESERVE',
           allocationId: 'LIQUID_RESERVE',
           label: 'Liquid reserve',
           percentageBasisPoints: 3000,
-          amountUsdMinor: '209816',
         },
         {
           bucket: 'MANAGED_YIELD',
           allocationId: 'MANAGED_YIELD',
           label: 'Managed yield',
           percentageBasisPoints: 7000,
-          amountUsdMinor: '489571',
         },
       ],
+      managedYieldComposition: [
+        {
+          ecosystem: 'EVM',
+          label: 'EVM managed yield',
+          percentageBasisPointsOfManagedYield: 10000,
+        },
+        {
+          ecosystem: 'SOLANA',
+          label: 'SVM managed yield',
+          percentageBasisPointsOfManagedYield: 0,
+          amountUsdMinor: '0',
+        },
+      ],
+      compositionSummary: {
+        mode: 'SINGLE_ECOSYSTEM',
+        crossEcosystemTransferRequired: false,
+        crossEcosystemTransferUsdMinor: '0',
+        activeEcosystemCount: 1,
+      },
       executionCost: {
         actualLocalOperation: { status: 'NO_EXECUTION', amountUsdMinor: '0' },
         modeledScenario: {
           status: 'AVAILABLE',
-          modelId: 'LOCAL_DEMO_ALLOCATION_COST_V1',
+          modelId: 'LOCAL_DEMO_ALLOCATION_COST_V2',
           isQuote: false,
           costBasisCapitalUsdMinor: '700000',
-          fundingTreatment: 'DEDUCT_FROM_GROSS_BEFORE_PROJECTION',
-          rounding: 'CEIL_EACH_VARIABLE_COMPONENT_TO_USD_MINOR',
+          fundingTreatment: 'MIXED_DEDUCT_FROM_GROSS_AND_ADD_ON_TOP',
+          rounding: 'CEIL_VARIABLE_COMPONENTS_PLATFORM_FEE_HALF_EVEN',
+          routingFeePolicy: {
+            tier: 'FREE',
+            classification: 'MATERIAL_ORCHESTRATION',
+            ruleVersion: 1,
+          },
           components: [
             {
               code: 'NETWORK',
               calculationBasis: 'NETWORK_ACTIVATION_AND_POSITION_VOLUME',
-              amountUsdMinor: '438',
+              fundingTreatment: 'DEDUCTED_FROM_GROSS',
             },
             {
               code: 'CONVERSION',
               calculationBasis: 'TWELVE_BPS_OF_REQUIRED_CONVERSION',
+              fundingTreatment: 'DEDUCTED_FROM_GROSS',
+              amountUsdMinor: '0',
+            },
+            {
+              code: 'CROSS_ECOSYSTEM_TRANSFER',
+              calculationBasis: 'NO_CROSS_ECOSYSTEM_TRANSFER',
+              fundingTreatment: 'DEDUCTED_FROM_GROSS',
               amountUsdMinor: '0',
             },
             {
               code: 'MARKET_IMPACT',
               calculationBasis: 'POSITION_SIZE_AND_UTILIZATION',
-              amountUsdMinor: '115',
+              fundingTreatment: 'DEDUCTED_FROM_GROSS',
             },
             {
-              code: 'ROUTING',
-              calculationBasis: 'TWENTY_CENTS_PER_ACTIVE_ALLOCATION',
-              amountUsdMinor: '60',
+              code: 'PLATFORM_ROUTING',
+              calculationBasis: 'CANONICAL_PLATFORM_ROUTING_RULE_V1',
+              fundingTreatment: 'ADDED_ON_TOP',
             },
           ],
-          totalUsdMinor: '613',
+          deductedFromGrossUsdMinor: expect.any(String),
+          addedOnTopUsdMinor: expect.any(String),
+          retainedRoundingResidualUsdMinor: expect.any(String),
+          requiredCapitalIncludingAddedOnTopUsdMinor: expect.any(String),
         },
         publicExecution: { status: 'UNQUOTED', amountUsdMinor: null },
       },
-      capitalIncludedInProjectionUsdMinor: '699387',
       yieldProjection: {
         source: 'MANAGED_RATE_SNAPSHOT',
-        calculationMethod: 'INTERNAL_POSITION_WEIGHTED_EXACT_BASE_APY',
-        effectiveApyBasisPoints: 328,
-        projectedAnnualYieldUsdMinor: '22973',
-        projectedAnnualYieldAfterFeesUsdMinor: '22360',
+        calculationMethod: 'INTERNAL_POSITION_WEIGHTED_25_BPS_CONSERVATIVE_BUCKET',
         firstPositiveDayAfterFees: {
           calculationMethod: 'FIRST_WHOLE_DAY_VISIBLE_YIELD_EXCEEDS_ESTIMATED_FEES',
           status: 'RECOVERED_WITHIN_HORIZON',
-          day: 10,
           modelHorizonDays: 365,
         },
       },
@@ -529,11 +579,24 @@ describe('local demo authentication boundary (e2e)', () => {
     ).toBe(BigInt(preview.body.capitalIncludedInProjectionUsdMinor));
     expect(
       BigInt(preview.body.capitalIncludedInProjectionUsdMinor) +
-        BigInt(preview.body.executionCost.modeledScenario.totalUsdMinor),
+        BigInt(preview.body.executionCost.modeledScenario.deductedFromGrossUsdMinor) +
+        BigInt(preview.body.executionCost.modeledScenario.retainedRoundingResidualUsdMinor),
     ).toBe(BigInt(preview.body.grossCapitalUsdMinor));
-    expect(JSON.stringify(preview.body)).not.toMatch(/morpho|graphql|api\.morpho/iu);
+    expect(
+      BigInt(preview.body.executionCost.modeledScenario.deductedFromGrossUsdMinor) +
+        BigInt(preview.body.executionCost.modeledScenario.addedOnTopUsdMinor),
+    ).toBe(BigInt(preview.body.executionCost.modeledScenario.totalUsdMinor));
+    expect(
+      BigInt(preview.body.grossCapitalUsdMinor) +
+        BigInt(preview.body.executionCost.modeledScenario.addedOnTopUsdMinor),
+    ).toBe(
+      BigInt(preview.body.executionCost.modeledScenario.requiredCapitalIncludingAddedOnTopUsdMinor),
+    );
     expect(JSON.stringify(preview.body)).not.toMatch(
-      /"(?:provider|providerId|providerIds|protocol|protocolId|marketId|marketIds|opportunity|opportunities|provenance|sourceReference|payloadSha256|normalizer|endpoint)"\s*:/iu,
+      /morpho|kamino|aave|save|solend|compound|moonwell|spark|venus|euler|marginfi|\bp0\b|project[\s._/-]*0|bnb|eip155:56|graphql|api\./iu,
+    );
+    expect(JSON.stringify(preview.body)).not.toMatch(
+      /"(?:provider|providerId|providerIds|providerName|protocol|protocolId|protocolName|marketId|marketIds|reserveId|opportunity|opportunityId|opportunities|sourceId|provenance|sourceReference|sourceObservedAt|retrievedAt|payloadSha256|normalizer|normalizerId|normalizerVersion|attributes|endpoint)"\s*:/iu,
     );
     expect(repository.resolveSession).toHaveBeenLastCalledWith(
       expect.objectContaining({ csrf: expect.objectContaining({ required: true }) }),
@@ -541,33 +604,61 @@ describe('local demo authentication boundary (e2e)', () => {
   });
 
   it('rejects custom strategy details and caller-authored provider metadata', async () => {
+    const portfolioSnapshotId = 'local-demo-portfolio:0123456789abcdef0123456789abcdef';
     const forbiddenBodies = [
-      { selection: { kind: 'CUSTOM', liquidReserveBasisPoints: 2500, filters: {} } },
       {
+        portfolioSnapshotId,
+        selection: { kind: 'CUSTOM', liquidReserveBasisPoints: 2500, filters: {} },
+      },
+      {
+        portfolioSnapshotId,
+        selection: { kind: 'PRESET', presetId: 'BALANCED' },
+      },
+      {
+        portfolioSnapshotId,
+        selection: { kind: 'PRESET', presetId: 'BALANCED', liquidReserveBasisPoints: -1 },
+      },
+      {
+        portfolioSnapshotId,
+        selection: { kind: 'PRESET', presetId: 'BALANCED', liquidReserveBasisPoints: 9501 },
+      },
+      {
+        portfolioSnapshotId,
+        selection: { kind: 'PRESET', presetId: 'BALANCED', liquidReserveBasisPoints: 1.5 },
+      },
+      {
+        portfolioSnapshotId,
         selection: {
           kind: 'PRESET',
           presetId: 'BALANCED',
+          liquidReserveBasisPoints: 3000,
           providerId: 'caller-supplied-provider',
         },
       },
       {
+        portfolioSnapshotId,
         selection: {
           kind: 'PRESET',
           presetId: 'BALANCED',
+          liquidReserveBasisPoints: 3000,
           protocol: 'caller-supplied-protocol',
         },
       },
       {
+        portfolioSnapshotId,
         selection: {
           kind: 'PRESET',
           presetId: 'BALANCED',
+          liquidReserveBasisPoints: 3000,
           marketId: 'caller-supplied-market',
         },
       },
       {
+        portfolioSnapshotId,
         selection: {
           kind: 'PRESET',
           presetId: 'BALANCED',
+          liquidReserveBasisPoints: 3000,
           provenance: { endpoint: 'https://example.invalid' },
         },
       },

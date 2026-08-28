@@ -202,6 +202,7 @@ test('ignores source-code references and symbolic ternary branches but detects l
 test('allows only an exact reviewed public protocol identifier', () => {
   const repository = createRepository();
   const publicIdentifier = 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb';
+  const publicProgramIdentifier = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
   const nearbySecret = ['TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuE', 'a'].join('');
   try {
     write(
@@ -211,6 +212,8 @@ test('allows only an exact reviewed public protocol identifier', () => {
         'const programs = {',
         `  TOKEN_2022: '${publicIdentifier}',`,
         `  API_TOKEN: '${publicIdentifier}',`,
+        `  PUBLIC_TESTNET_TOKEN_PROGRAM: '${publicProgramIdentifier}',`,
+        `  TOKEN_PROGRAM: '${publicProgramIdentifier}',`,
         `  SECONDARY_TOKEN: '${nearbySecret}',`,
         '};',
         '',
@@ -226,9 +229,9 @@ test('allows only an exact reviewed public protocol identifier', () => {
         .trim()
         .split('\n')
         .filter((line) => line.startsWith('rule=assignment.high-entropy-secret\t')).length,
-      2,
+      3,
     );
-    assertRedacted(result, publicIdentifier, nearbySecret);
+    assertRedacted(result, publicIdentifier, publicProgramIdentifier, nearbySecret);
   } finally {
     rmSync(repository, { force: true, recursive: true });
   }

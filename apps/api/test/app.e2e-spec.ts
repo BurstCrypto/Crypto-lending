@@ -81,6 +81,20 @@ describe('system endpoints (e2e)', () => {
       message: 'Authentication required',
       statusCode: 401,
     });
+
+    const publicTestnet = await request(app.getHttpServer())
+      .post('/api/v1/public-testnet/execution-intents')
+      .send({})
+      .expect(401);
+    expect(publicTestnet.headers).toMatchObject({
+      'cache-control': 'private, no-store',
+      vary: 'Cookie, Origin',
+    });
+    expect(publicTestnet.body).toEqual({
+      error: 'Unauthorized',
+      message: 'Authentication required',
+      statusCode: 401,
+    });
   });
 
   it('rejects dependency-readiness work above the replica concurrency cap', async () => {
@@ -149,6 +163,19 @@ describe('system endpoints (e2e)', () => {
     expect(response.body.paths).toHaveProperty('/api/v1/accounts/me');
     expect(response.body.paths).toHaveProperty('/api/v1/local-demo/wallets');
     expect(response.body.paths).toHaveProperty('/api/v1/local-demo/portfolio');
+    expect(response.body.paths).toHaveProperty('/api/v1/public-testnet/execution-intents');
+    expect(response.body.paths).toHaveProperty(
+      '/api/v1/public-testnet/execution-intents/{intentId}/submissions',
+    );
+    expect(
+      response.body.paths['/api/v1/public-testnet/execution-intents'].post.requestBody.content[
+        'application/json'
+      ].schema.properties.selection.properties.presetId.enum,
+    ).toEqual(['BALANCED']);
+    expect(
+      response.body.paths['/api/v1/public-testnet/execution-intents/{intentId}/submissions'].post
+        .responses['200'].content['application/json'].schema.properties.confirmation.enum,
+    ).toEqual(['LATEST_SIGNATURE_STATUS_OBSERVATION']);
     expect(response.body.paths).not.toHaveProperty('/api/v1/internal/health/dependencies');
     expect(
       response.body.paths['/api/v1/health/dependencies'].get.responses['503'].content[
