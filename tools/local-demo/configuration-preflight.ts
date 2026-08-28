@@ -7,6 +7,7 @@ import {
   loadMigrationDatabaseConfig,
 } from '../../apps/api/src/infrastructure/config/infrastructure.config';
 import { loadLocalDemoRuntimeConfig } from '../../apps/api/src/local-demo/local-demo-runtime.config';
+import { loadPublicTestnetExecutionConfig } from '../../apps/api/src/public-testnet/public-testnet-execution.config';
 import { loadWalletRegistrationConfig } from '../../apps/api/src/wallets/infrastructure/config/wallet-registration.config';
 
 // This script is executed through tsx. The JavaScript module is deliberately
@@ -26,6 +27,7 @@ loadInfrastructureConfig(environments.worker);
 loadMigrationDatabaseConfig(environments.migration);
 loadAuthenticationConfig(environments.api);
 loadWalletRegistrationConfig(environments.api);
-loadLocalDemoRuntimeConfig(environments.api);
+const localDemoConfig = loadLocalDemoRuntimeConfig(environments.api);
+loadPublicTestnetExecutionConfig(environments.api, localDemoConfig);
 
 process.stdout.write('Local demo application configuration preflight passed.\n');

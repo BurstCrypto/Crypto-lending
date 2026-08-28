@@ -5,7 +5,7 @@ import type {
   LocalDemoYieldCatalog,
 } from '../lib/local-demo/local-demo-yield';
 
-const CAPTURED_AT = '2026-08-26T14:14:54.580Z';
+const CAPTURED_AT = '2026-08-27T01:04:48.000Z';
 const STALE_AFTER = '2026-08-27T14:14:54.580Z';
 
 export const LOCAL_DEMO_YIELD_CATALOG: LocalDemoYieldCatalog = Object.freeze({
@@ -15,7 +15,7 @@ export const LOCAL_DEMO_YIELD_CATALOG: LocalDemoYieldCatalog = Object.freeze({
   strategyMode: 'PORTFOLIO_CROSS_CHAIN_BLEND',
   ecosystems: Object.freeze(['EVM', 'SOLANA'] as const),
   snapshot: Object.freeze({
-    id: 'managed-rate-snapshot-v2',
+    id: 'managed-rate-snapshot-v3',
     capturedAt: CAPTURED_AT,
     staleAfter: STALE_AFTER,
     freshness: 'CURRENT',
@@ -34,7 +34,8 @@ interface PreviewFixtureInput {
   readonly sourceCapitalAmounts?: readonly [string, string];
   readonly managedYieldCompositionAmounts?: readonly [string, string];
   readonly managedYieldCompositionBasisPoints?: readonly [number, number];
-  readonly activeAllocationCount?: number;
+  readonly routingFeeClassification?: 'MATERIAL_ORCHESTRATION' | 'DIRECT_COMPATIBLE';
+  readonly retainedRoundingResidualUsdMinor?: string;
   readonly feeAmounts: readonly [string, string, string, string, string];
   readonly totalFeeUsdMinor: string;
   readonly capitalIncludedInProjectionUsdMinor: string;
@@ -50,26 +51,31 @@ const COMPONENTS = Object.freeze([
     code: 'NETWORK' as const,
     label: 'Estimated network costs',
     calculationBasis: 'NETWORK_ACTIVATION_AND_POSITION_VOLUME' as const,
+    fundingTreatment: 'DEDUCTED_FROM_GROSS' as const,
   }),
   Object.freeze({
     code: 'CONVERSION' as const,
     label: 'Estimated conversion costs',
     calculationBasis: 'TWELVE_BPS_OF_REQUIRED_CONVERSION' as const,
+    fundingTreatment: 'DEDUCTED_FROM_GROSS' as const,
   }),
   Object.freeze({
     code: 'CROSS_ECOSYSTEM_TRANSFER' as const,
     label: 'Estimated EVM-Solana transfer costs',
     calculationBasis: 'NO_CROSS_ECOSYSTEM_TRANSFER' as const,
+    fundingTreatment: 'DEDUCTED_FROM_GROSS' as const,
   }),
   Object.freeze({
     code: 'MARKET_IMPACT' as const,
     label: 'Estimated market impact',
     calculationBasis: 'POSITION_SIZE_AND_UTILIZATION' as const,
+    fundingTreatment: 'DEDUCTED_FROM_GROSS' as const,
   }),
   Object.freeze({
-    code: 'ROUTING' as const,
-    label: 'Estimated routing fee',
-    calculationBasis: 'TWENTY_CENTS_PER_ACTIVE_ALLOCATION' as const,
+    code: 'PLATFORM_ROUTING' as const,
+    label: 'Estimated platform routing fee',
+    calculationBasis: 'CANONICAL_PLATFORM_ROUTING_RULE_V1' as const,
+    fundingTreatment: 'ADDED_ON_TOP' as const,
   }),
 ] satisfies readonly Readonly<{
   code: LocalDemoExecutionCostComponentCode;
@@ -79,7 +85,8 @@ const COMPONENTS = Object.freeze([
     | 'TWELVE_BPS_OF_REQUIRED_CONVERSION'
     | 'NO_CROSS_ECOSYSTEM_TRANSFER'
     | 'POSITION_SIZE_AND_UTILIZATION'
-    | 'TWENTY_CENTS_PER_ACTIVE_ALLOCATION';
+    | 'CANONICAL_PLATFORM_ROUTING_RULE_V1';
+  fundingTreatment: 'DEDUCTED_FROM_GROSS' | 'ADDED_ON_TOP';
 }>[]);
 
 function preview(input: PreviewFixtureInput): LocalDemoAllocationPreview {
@@ -93,6 +100,14 @@ function preview(input: PreviewFixtureInput): LocalDemoAllocationPreview {
     10_000, 0,
   ];
   const activeEcosystemCount = managedYieldCompositionAmounts[1] === '0' ? 1 : 2;
+  const deductedFromGrossUsdMinor = input.feeAmounts
+    .slice(0, 4)
+    .reduce((sum, amount) => sum + BigInt(amount), 0n)
+    .toString();
+  const addedOnTopUsdMinor = input.feeAmounts[4];
+  const requiredCapitalIncludingAddedOnTopUsdMinor = (
+    BigInt(grossCapitalUsdMinor) + BigInt(addedOnTopUsdMinor)
+  ).toString();
   return Object.freeze({
     use: 'LOCAL_DEMO_ESTIMATE_ONLY',
     mayAuthorizeFinancialAction: false,
@@ -149,7 +164,6 @@ function preview(input: PreviewFixtureInput): LocalDemoAllocationPreview {
       crossEcosystemTransferRequired: false,
       crossEcosystemTransferUsdMinor: '0',
       activeEcosystemCount,
-      activeAllocationCount: input.activeAllocationCount ?? activeEcosystemCount,
     }),
     executionCost: Object.freeze({
       actualLocalOperation: Object.freeze({ status: 'NO_EXECUTION', amountUsdMinor: '0' }),
@@ -158,21 +172,30 @@ function preview(input: PreviewFixtureInput): LocalDemoAllocationPreview {
         modelId: 'LOCAL_DEMO_ALLOCATION_COST_V2',
         isQuote: false,
         costBasisCapitalUsdMinor: grossCapitalUsdMinor,
-        fundingTreatment: 'DEDUCT_FROM_GROSS_BEFORE_PROJECTION',
-        rounding: 'CEIL_EACH_VARIABLE_COMPONENT_TO_USD_MINOR',
+        fundingTreatment: 'MIXED_DEDUCT_FROM_GROSS_AND_ADD_ON_TOP',
+        rounding: 'CEIL_VARIABLE_COMPONENTS_PLATFORM_FEE_HALF_EVEN',
+        routingFeePolicy: Object.freeze({
+          tier: 'FREE' as const,
+          classification: input.routingFeeClassification ?? 'MATERIAL_ORCHESTRATION',
+          ruleVersion: 1 as const,
+        }),
         components: Object.freeze(
           COMPONENTS.map((component, index) =>
             Object.freeze({ ...component, amountUsdMinor: input.feeAmounts[index]! }),
           ),
         ),
+        deductedFromGrossUsdMinor,
+        addedOnTopUsdMinor,
+        retainedRoundingResidualUsdMinor: input.retainedRoundingResidualUsdMinor ?? '0',
         totalUsdMinor: input.totalFeeUsdMinor,
+        requiredCapitalIncludingAddedOnTopUsdMinor,
       }),
       publicExecution: Object.freeze({ status: 'UNQUOTED', amountUsdMinor: null }),
     }),
     capitalIncludedInProjectionUsdMinor: input.capitalIncludedInProjectionUsdMinor,
     yieldProjection: Object.freeze({
       source: 'MANAGED_RATE_SNAPSHOT',
-      calculationMethod: 'INTERNAL_POSITION_WEIGHTED_EXACT_BASE_APY',
+      calculationMethod: 'INTERNAL_POSITION_WEIGHTED_25_BPS_CONSERVATIVE_BUCKET',
       effectiveApyBasisPoints: input.effectiveApyBasisPoints,
       projectedAnnualYieldUsdMinor: input.projectedAnnualYieldUsdMinor,
       projectedAnnualYieldAfterFeesUsdMinor: input.projectedAnnualYieldAfterFeesUsdMinor,
@@ -187,20 +210,121 @@ function preview(input: PreviewFixtureInput): LocalDemoAllocationPreview {
   });
 }
 
+const ZERO_LIQUID_SINGLE_EVM_ECONOMICS = Object.freeze({
+  description:
+    'Keep 0% readily available and allocate the remainder to the managed yield strategy.',
+  liquidReserveBasisPoints: 0,
+  feeAmounts: Object.freeze(['623', '0', '0', '252', '1398'] as const),
+  totalFeeUsdMinor: '2273',
+  capitalIncludedInProjectionUsdMinor: '699125',
+  allocationAmounts: Object.freeze(['0', '699125'] as const),
+  effectiveApyBasisPoints: 950,
+  projectedAnnualYieldUsdMinor: '66416',
+  projectedAnnualYieldAfterFeesUsdMinor: '64143',
+  firstPositiveDay: 13,
+});
+
+export const ZERO_LIQUID_BALANCED_PREVIEW = preview({
+  presetId: 'BALANCED',
+  label: 'Managed blend',
+  ...ZERO_LIQUID_SINGLE_EVM_ECONOMICS,
+});
+
+export const ZERO_LIQUID_MORE_LIQUID_PREVIEW = preview({
+  presetId: 'MORE_LIQUID',
+  label: 'More liquid',
+  ...ZERO_LIQUID_SINGLE_EVM_ECONOMICS,
+});
+
+export const ZERO_LIQUID_MORE_YIELD_PREVIEW = preview({
+  presetId: 'MORE_YIELD',
+  label: 'More yield',
+  ...ZERO_LIQUID_SINGLE_EVM_ECONOMICS,
+});
+
+export const DIRECT_COMPATIBLE_ZERO_LIQUID_PREVIEW = preview({
+  presetId: 'BALANCED',
+  label: 'Managed blend',
+  description:
+    'Keep 0% readily available and allocate the remainder to the managed yield strategy.',
+  liquidReserveBasisPoints: 0,
+  routingFeeClassification: 'DIRECT_COMPATIBLE',
+  feeAmounts: ['0', '0', '0', '0', '0'],
+  totalFeeUsdMinor: '0',
+  capitalIncludedInProjectionUsdMinor: '700000',
+  allocationAmounts: ['0', '700000'],
+  effectiveApyBasisPoints: 500,
+  projectedAnnualYieldUsdMinor: '35000',
+  projectedAnnualYieldAfterFeesUsdMinor: '35000',
+  firstPositiveDay: 1,
+});
+
+export const HALF_EVEN_DOWN_PLATFORM_FEE_PREVIEW = preview({
+  presetId: 'BALANCED',
+  label: 'Managed blend',
+  description:
+    'Keep 0% readily available and allocate the remainder to the managed yield strategy.',
+  liquidReserveBasisPoints: 0,
+  grossCapitalUsdMinor: '250',
+  feeAmounts: ['0', '0', '0', '0', '0'],
+  totalFeeUsdMinor: '0',
+  capitalIncludedInProjectionUsdMinor: '250',
+  allocationAmounts: ['0', '250'],
+  effectiveApyBasisPoints: 400,
+  projectedAnnualYieldUsdMinor: '10',
+  projectedAnnualYieldAfterFeesUsdMinor: '10',
+  firstPositiveDay: 37,
+});
+
+export const RETAINED_ROUNDING_RESIDUAL_PREVIEW = preview({
+  presetId: 'BALANCED',
+  label: 'Managed blend',
+  description:
+    'Keep 0% readily available and allocate the remainder to the managed yield strategy.',
+  liquidReserveBasisPoints: 0,
+  grossCapitalUsdMinor: '251',
+  retainedRoundingResidualUsdMinor: '1',
+  feeAmounts: ['0', '0', '0', '0', '0'],
+  totalFeeUsdMinor: '0',
+  capitalIncludedInProjectionUsdMinor: '250',
+  allocationAmounts: ['0', '250'],
+  effectiveApyBasisPoints: 400,
+  projectedAnnualYieldUsdMinor: '10',
+  projectedAnnualYieldAfterFeesUsdMinor: '10',
+  firstPositiveDay: 37,
+});
+
+export const HALF_EVEN_UP_PLATFORM_FEE_PREVIEW = preview({
+  presetId: 'BALANCED',
+  label: 'Managed blend',
+  description:
+    'Keep 0% readily available and allocate the remainder to the managed yield strategy.',
+  liquidReserveBasisPoints: 0,
+  grossCapitalUsdMinor: '750',
+  feeAmounts: ['0', '0', '0', '0', '2'],
+  totalFeeUsdMinor: '2',
+  capitalIncludedInProjectionUsdMinor: '750',
+  allocationAmounts: ['0', '750'],
+  effectiveApyBasisPoints: 400,
+  projectedAnnualYieldUsdMinor: '30',
+  projectedAnnualYieldAfterFeesUsdMinor: '28',
+  firstPositiveDay: 37,
+});
+
 export const BALANCED_PREVIEW = preview({
   presetId: 'BALANCED',
-  label: 'Balanced blend',
+  label: 'Managed blend',
   description:
     'Keep 30% readily available and allocate the remainder to the managed yield strategy.',
   liquidReserveBasisPoints: 3_000,
-  feeAmounts: ['438', '0', '0', '115', '60'],
-  totalFeeUsdMinor: '613',
-  capitalIncludedInProjectionUsdMinor: '699387',
-  allocationAmounts: ['209816', '489571'],
-  effectiveApyBasisPoints: 328,
-  projectedAnnualYieldUsdMinor: '22973',
-  projectedAnnualYieldAfterFeesUsdMinor: '22360',
-  firstPositiveDay: 10,
+  feeAmounts: ['489', '0', '0', '177', '979'],
+  totalFeeUsdMinor: '1645',
+  capitalIncludedInProjectionUsdMinor: '699334',
+  allocationAmounts: ['209800', '489534'],
+  effectiveApyBasisPoints: 650,
+  projectedAnnualYieldUsdMinor: '45456',
+  projectedAnnualYieldAfterFeesUsdMinor: '43811',
+  firstPositiveDay: 14,
 });
 
 export const MORE_LIQUID_PREVIEW = preview({
@@ -209,14 +333,14 @@ export const MORE_LIQUID_PREVIEW = preview({
   description:
     'Keep 60% readily available and allocate the remainder to the managed yield strategy.',
   liquidReserveBasisPoints: 6_000,
-  feeAmounts: ['326', '0', '0', '66', '60'],
-  totalFeeUsdMinor: '452',
-  capitalIncludedInProjectionUsdMinor: '699548',
-  allocationAmounts: ['419729', '279819'],
-  effectiveApyBasisPoints: 187,
-  projectedAnnualYieldUsdMinor: '13130',
-  projectedAnnualYieldAfterFeesUsdMinor: '12678',
-  firstPositiveDay: 13,
+  feeAmounts: ['355', '0', '0', '102', '560'],
+  totalFeeUsdMinor: '1017',
+  capitalIncludedInProjectionUsdMinor: '699543',
+  allocationAmounts: ['419726', '279817'],
+  effectiveApyBasisPoints: 375,
+  projectedAnnualYieldUsdMinor: '26232',
+  projectedAnnualYieldAfterFeesUsdMinor: '25215',
+  firstPositiveDay: 15,
 });
 
 export const MORE_YIELD_PREVIEW = preview({
@@ -225,14 +349,14 @@ export const MORE_YIELD_PREVIEW = preview({
   description:
     'Keep 15% readily available and allocate the remainder to the managed yield strategy.',
   liquidReserveBasisPoints: 1_500,
-  feeAmounts: ['494', '0', '0', '140', '60'],
-  totalFeeUsdMinor: '694',
-  capitalIncludedInProjectionUsdMinor: '699306',
-  allocationAmounts: ['104896', '594410'],
-  effectiveApyBasisPoints: 398,
-  projectedAnnualYieldUsdMinor: '27892',
-  projectedAnnualYieldAfterFeesUsdMinor: '27198',
-  firstPositiveDay: 10,
+  feeAmounts: ['557', '0', '0', '215', '1189'],
+  totalFeeUsdMinor: '1961',
+  capitalIncludedInProjectionUsdMinor: '699228',
+  allocationAmounts: ['104884', '594344'],
+  effectiveApyBasisPoints: 800,
+  projectedAnnualYieldUsdMinor: '55938',
+  projectedAnnualYieldAfterFeesUsdMinor: '53977',
+  firstPositiveDay: 13,
 });
 
 export const FRACTIONAL_LIQUID_PREVIEW = preview({
@@ -241,14 +365,14 @@ export const FRACTIONAL_LIQUID_PREVIEW = preview({
   description:
     'Keep 15.50% readily available and allocate the remainder to the managed yield strategy.',
   liquidReserveBasisPoints: 1_550,
-  feeAmounts: ['494', '0', '0', '140', '60'],
-  totalFeeUsdMinor: '694',
-  capitalIncludedInProjectionUsdMinor: '699306',
-  allocationAmounts: ['108392', '590914'],
-  effectiveApyBasisPoints: 398,
-  projectedAnnualYieldUsdMinor: '27892',
-  projectedAnnualYieldAfterFeesUsdMinor: '27198',
-  firstPositiveDay: 10,
+  feeAmounts: ['554', '0', '0', '213', '1182'],
+  totalFeeUsdMinor: '1949',
+  capitalIncludedInProjectionUsdMinor: '699233',
+  allocationAmounts: ['108381', '590852'],
+  effectiveApyBasisPoints: 800,
+  projectedAnnualYieldUsdMinor: '55938',
+  projectedAnnualYieldAfterFeesUsdMinor: '53989',
+  firstPositiveDay: 13,
 });
 
 export const MORE_YIELD_DAY_365_PREVIEW = preview({
@@ -257,34 +381,53 @@ export const MORE_YIELD_DAY_365_PREVIEW = preview({
   description:
     'Keep 15% readily available and allocate the remainder to the managed yield strategy.',
   liquidReserveBasisPoints: 1_500,
-  grossCapitalUsdMinor: '6335',
-  feeAmounts: ['179', '0', '0', '3', '60'],
-  totalFeeUsdMinor: '242',
-  capitalIncludedInProjectionUsdMinor: '6093',
-  allocationAmounts: ['914', '5179'],
-  effectiveApyBasisPoints: 398,
-  projectedAnnualYieldUsdMinor: '243',
+  grossCapitalUsdMinor: '4957',
+  feeAmounts: ['179', '0', '0', '3', '8'],
+  totalFeeUsdMinor: '190',
+  capitalIncludedInProjectionUsdMinor: '4775',
+  allocationAmounts: ['716', '4059'],
+  effectiveApyBasisPoints: 400,
+  projectedAnnualYieldUsdMinor: '191',
   projectedAnnualYieldAfterFeesUsdMinor: '1',
   firstPositiveDay: 365,
 });
 
 export const CROSS_CHAIN_BALANCED_PREVIEW = preview({
   presetId: 'BALANCED',
-  label: 'Balanced blend',
+  label: 'Managed blend',
   description:
     'Keep 30% readily available and allocate the remainder to the managed yield strategy.',
   liquidReserveBasisPoints: 3_000,
   grossCapitalUsdMinor: '1100000',
   sourceCapitalAmounts: ['700000', '400000'],
-  managedYieldCompositionAmounts: ['489594', '279768'],
-  managedYieldCompositionBasisPoints: [6_364, 3_636],
-  activeAllocationCount: 3,
-  feeAmounts: ['650', '84', '0', '118', '60'],
-  totalFeeUsdMinor: '912',
-  capitalIncludedInProjectionUsdMinor: '1099088',
-  allocationAmounts: ['329726', '769362'],
-  effectiveApyBasisPoints: 328,
-  projectedAnnualYieldUsdMinor: '36102',
-  projectedAnnualYieldAfterFeesUsdMinor: '35190',
-  firstPositiveDay: 10,
+  managedYieldCompositionAmounts: ['489534', '279935'],
+  managedYieldCompositionBasisPoints: [6_362, 3_638],
+  feeAmounts: ['519', '0', '0', '240', '1539'],
+  totalFeeUsdMinor: '2298',
+  capitalIncludedInProjectionUsdMinor: '1099241',
+  allocationAmounts: ['329772', '769469'],
+  effectiveApyBasisPoints: 525,
+  projectedAnnualYieldUsdMinor: '57710',
+  projectedAnnualYieldAfterFeesUsdMinor: '55412',
+  firstPositiveDay: 15,
+});
+
+export const CROSS_CHAIN_ZERO_LIQUID_BALANCED_PREVIEW = preview({
+  presetId: 'BALANCED',
+  label: 'Managed blend',
+  description:
+    'Keep 0% readily available and allocate the remainder to the managed yield strategy.',
+  liquidReserveBasisPoints: 0,
+  grossCapitalUsdMinor: '1100000',
+  sourceCapitalAmounts: ['700000', '400000'],
+  managedYieldCompositionAmounts: ['699125', '399871'],
+  managedYieldCompositionBasisPoints: [6_361, 3_639],
+  feeAmounts: ['664', '0', '0', '340', '2198'],
+  totalFeeUsdMinor: '3202',
+  capitalIncludedInProjectionUsdMinor: '1098996',
+  allocationAmounts: ['0', '1098996'],
+  effectiveApyBasisPoints: 750,
+  projectedAnnualYieldUsdMinor: '82424',
+  projectedAnnualYieldAfterFeesUsdMinor: '79222',
+  firstPositiveDay: 15,
 });

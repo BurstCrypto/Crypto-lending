@@ -14,11 +14,13 @@ import {
   LOCAL_DEMO_EXECUTION_COST_COMPONENTS,
   LOCAL_DEMO_EXECUTION_COST_MODEL,
   LOCAL_DEMO_MAX_LIQUID_RESERVE_BASIS_POINTS,
+  LOCAL_DEMO_MAX_RETAINED_ROUNDING_RESIDUAL_USD_MINOR,
   LOCAL_DEMO_YIELD_CALCULATION_METHOD,
   LOCAL_DEMO_YIELD_PROJECTION_SOURCE,
   type LocalDemoAllocationSelection,
   type LocalDemoAllocationPresetId,
 } from './local-demo-allocation.service';
+import { LOCAL_DEMO_PUBLIC_RATE_SNAPSHOT_ID } from './local-demo-yield-catalog.service';
 
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const PORTFOLIO_SNAPSHOT_ID = /^local-demo-portfolio:[0-9a-f]{32}$/u;
@@ -246,7 +248,7 @@ export const LOCAL_DEMO_YIELD_CATALOG_RESPONSE_SCHEMA: SchemaObject = Object.fre
         'riskClassification',
       ],
       properties: {
-        id: { type: 'string', enum: ['managed-rate-snapshot-v2'] },
+        id: { type: 'string', enum: [LOCAL_DEMO_PUBLIC_RATE_SNAPSHOT_ID] },
         capturedAt: { type: 'string', format: 'date-time' },
         staleAfter: { type: 'string', format: 'date-time' },
         freshness: { type: 'string', enum: ['CURRENT', 'STALE'] },
@@ -260,7 +262,7 @@ export const LOCAL_DEMO_YIELD_CATALOG_RESPONSE_SCHEMA: SchemaObject = Object.fre
 const LOCAL_DEMO_EXECUTION_COST_COMPONENT_SCHEMA: SchemaObject = Object.freeze({
   type: 'object',
   additionalProperties: false,
-  required: ['code', 'label', 'calculationBasis', 'amountUsdMinor'],
+  required: ['code', 'label', 'calculationBasis', 'fundingTreatment', 'amountUsdMinor'],
   properties: {
     code: { type: 'string', enum: [...LOCAL_DEMO_EXECUTION_COST_COMPONENTS] },
     label: { type: 'string', maxLength: 96 },
@@ -271,8 +273,12 @@ const LOCAL_DEMO_EXECUTION_COST_COMPONENT_SCHEMA: SchemaObject = Object.freeze({
         'TWELVE_BPS_OF_REQUIRED_CONVERSION',
         'NO_CROSS_ECOSYSTEM_TRANSFER',
         'POSITION_SIZE_AND_UTILIZATION',
-        'TWENTY_CENTS_PER_ACTIVE_ALLOCATION',
+        'CANONICAL_PLATFORM_ROUTING_RULE_V1',
       ],
+    },
+    fundingTreatment: {
+      type: 'string',
+      enum: ['DEDUCTED_FROM_GROSS', 'ADDED_ON_TOP'],
     },
     amountUsdMinor: { type: 'string', pattern: '^(?:0|[1-9][0-9]*)$' },
   },
@@ -333,7 +339,7 @@ export const LOCAL_DEMO_ALLOCATION_PREVIEW_RESPONSE_SCHEMA: SchemaObject = Objec
         'riskClassification',
       ],
       properties: {
-        id: { type: 'string', enum: ['managed-rate-snapshot-v2'] },
+        id: { type: 'string', enum: [LOCAL_DEMO_PUBLIC_RATE_SNAPSHOT_ID] },
         capturedAt: { type: 'string', format: 'date-time' },
         staleAfter: { type: 'string', format: 'date-time' },
         freshness: { type: 'string', enum: ['CURRENT', 'STALE'] },
@@ -402,14 +408,12 @@ export const LOCAL_DEMO_ALLOCATION_PREVIEW_RESPONSE_SCHEMA: SchemaObject = Objec
         'crossEcosystemTransferRequired',
         'crossEcosystemTransferUsdMinor',
         'activeEcosystemCount',
-        'activeAllocationCount',
       ],
       properties: {
         mode: { type: 'string', enum: ['SINGLE_ECOSYSTEM', 'EVM_SOLANA_PORTFOLIO_BLEND'] },
         crossEcosystemTransferRequired: { type: 'boolean', enum: [false] },
         crossEcosystemTransferUsdMinor: { type: 'string', enum: ['0'] },
         activeEcosystemCount: { type: 'integer', enum: [1, 2] },
-        activeAllocationCount: { type: 'integer', minimum: 1, maximum: 4 },
       },
     },
     executionCost: {
@@ -436,8 +440,13 @@ export const LOCAL_DEMO_ALLOCATION_PREVIEW_RESPONSE_SCHEMA: SchemaObject = Objec
             'costBasisCapitalUsdMinor',
             'fundingTreatment',
             'rounding',
+            'routingFeePolicy',
             'components',
+            'deductedFromGrossUsdMinor',
+            'addedOnTopUsdMinor',
+            'retainedRoundingResidualUsdMinor',
             'totalUsdMinor',
+            'requiredCapitalIncludingAddedOnTopUsdMinor',
           ],
           properties: {
             status: { type: 'string', enum: ['AVAILABLE'] },
@@ -449,11 +458,24 @@ export const LOCAL_DEMO_ALLOCATION_PREVIEW_RESPONSE_SCHEMA: SchemaObject = Objec
             },
             fundingTreatment: {
               type: 'string',
-              enum: ['DEDUCT_FROM_GROSS_BEFORE_PROJECTION'],
+              enum: ['MIXED_DEDUCT_FROM_GROSS_AND_ADD_ON_TOP'],
             },
             rounding: {
               type: 'string',
-              enum: ['CEIL_EACH_VARIABLE_COMPONENT_TO_USD_MINOR'],
+              enum: ['CEIL_VARIABLE_COMPONENTS_PLATFORM_FEE_HALF_EVEN'],
+            },
+            routingFeePolicy: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['tier', 'classification', 'ruleVersion'],
+              properties: {
+                tier: { type: 'string', enum: ['FREE'] },
+                classification: {
+                  type: 'string',
+                  enum: ['DIRECT_COMPATIBLE', 'MATERIAL_ORCHESTRATION'],
+                },
+                ruleVersion: { type: 'integer', enum: [1] },
+              },
             },
             components: {
               type: 'array',
@@ -461,7 +483,26 @@ export const LOCAL_DEMO_ALLOCATION_PREVIEW_RESPONSE_SCHEMA: SchemaObject = Objec
               maxItems: LOCAL_DEMO_EXECUTION_COST_COMPONENTS.length,
               items: LOCAL_DEMO_EXECUTION_COST_COMPONENT_SCHEMA,
             },
+            deductedFromGrossUsdMinor: {
+              type: 'string',
+              pattern: '^(?:0|[1-9][0-9]*)$',
+            },
+            addedOnTopUsdMinor: {
+              type: 'string',
+              pattern: '^(?:0|[1-9][0-9]*)$',
+            },
+            retainedRoundingResidualUsdMinor: {
+              type: 'string',
+              enum: Array.from(
+                { length: LOCAL_DEMO_MAX_RETAINED_ROUNDING_RESIDUAL_USD_MINOR + 1 },
+                (_, amount) => amount.toString(),
+              ),
+            },
             totalUsdMinor: { type: 'string', pattern: '^(?:0|[1-9][0-9]*)$' },
+            requiredCapitalIncludingAddedOnTopUsdMinor: {
+              type: 'string',
+              pattern: '^(?:0|[1-9][0-9]*)$',
+            },
           },
         },
         publicExecution: {

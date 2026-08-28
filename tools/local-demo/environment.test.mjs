@@ -70,6 +70,7 @@ describe('local demo process configuration', () => {
     assert.equal(environments.api.API_HOST, '127.0.0.1');
     assert.equal(environments.api.APP_ENV, 'dev-local-demo');
     assert.equal(environments.api.LOCAL_DEMO_MODE, 'enabled');
+    assert.equal(environments.api.PUBLIC_TESTNET_DEMO_MODE, 'enabled');
     assert.match(environments.api.LOCAL_EVM_CONTROL_LAUNCH_ID, /^[0-9a-f]{32}$/u);
     assert.match(environments.api.LOCAL_EVM_CONTROL_CAPABILITY, /^[0-9a-f]{64}$/u);
     assert.equal(environments.identity.LOCAL_EVM_CONTROL_CAPABILITY, undefined);
@@ -140,6 +141,16 @@ describe('local demo process configuration', () => {
     ]) {
       assert.notEqual(environments.api[name], restartedEnvironments.api[name]);
     }
+  });
+
+  it('disables public-testnet execution in hosted CI while keeping the local harness testable', () => {
+    const environments = createLocalDemoEnvironments({
+      randomBytes: deterministicRandom,
+      sourceEnvironment: { PATH: 'bin', CI: 'true' },
+    });
+    assert.equal(environments.api.PUBLIC_TESTNET_DEMO_MODE, 'disabled');
+    assert.equal(environments.web.PUBLIC_TESTNET_DEMO_MODE, undefined);
+    assert.equal(environments.worker.PUBLIC_TESTNET_DEMO_MODE, undefined);
   });
 
   it('injects only a live local EVM owner capability into the API environment', () => {

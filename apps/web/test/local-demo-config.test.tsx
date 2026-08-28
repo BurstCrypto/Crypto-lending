@@ -82,5 +82,9 @@ describe('local demo banner', () => {
     expect(screen.getByRole('status', { name: 'Local demo mode' })).toHaveTextContent(
       LOCAL_DEMO_BANNER_TEXT,
     );
+    expect(LOCAL_DEMO_BANNER_TEXT).toBe(
+      'Synthetic local demo data — no real assets or transactions; no live provider connections or requests',
+    );
+    expect(LOCAL_DEMO_BANNER_TEXT).not.toContain('no real providers');
   });
 });

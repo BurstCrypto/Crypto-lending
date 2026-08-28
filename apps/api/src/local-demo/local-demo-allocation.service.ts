@@ -3,6 +3,14 @@ import { Injectable } from '@nestjs/common';
 import type { AccountId } from '../accounts/domain/account-profile';
 import type { JobCorrelationContext } from '../infrastructure/outbox/job-envelope';
 import {
+  ROUTING_FEE_RULE_V1,
+  calculateRoutingFeeSnapshotV1,
+  type RoutingFeeRouteClassificationKind,
+  type RoutingFeeRouteEndpointV1,
+  type RoutingFeeRouteLegV1,
+  type RoutingFeeRouteV1,
+} from '../routing-fees';
+import {
   LocalDemoPortfolioService,
   type LocalDemoPortfolioResponse,
 } from './local-demo-portfolio.service';
@@ -29,10 +37,12 @@ export type LocalDemoAllocationSelection = Readonly<{
 }>;
 
 export const LOCAL_DEMO_MAX_LIQUID_RESERVE_BASIS_POINTS = 9_500 as const;
+export const LOCAL_DEMO_MAX_RETAINED_ROUNDING_RESIDUAL_USD_MINOR = 3 as const;
 
 export const LOCAL_DEMO_YIELD_PROJECTION_SOURCE = 'MANAGED_RATE_SNAPSHOT' as const;
 export const LOCAL_DEMO_YIELD_CALCULATION_METHOD =
-  'INTERNAL_POSITION_WEIGHTED_EXACT_BASE_APY' as const;
+  'INTERNAL_POSITION_WEIGHTED_25_BPS_CONSERVATIVE_BUCKET' as const;
+export const LOCAL_DEMO_PUBLIC_APY_BUCKET_SIZE_BASIS_POINTS = 25 as const;
 export const LOCAL_DEMO_EXECUTION_COST_MODEL = 'LOCAL_DEMO_ALLOCATION_COST_V2' as const;
 export const LOCAL_DEMO_BREAK_EVEN_CALCULATION_METHOD =
   'FIRST_WHOLE_DAY_VISIBLE_YIELD_EXCEEDS_ESTIMATED_FEES' as const;
@@ -43,7 +53,7 @@ export const LOCAL_DEMO_EXECUTION_COST_COMPONENTS = Object.freeze([
   'CONVERSION',
   'CROSS_ECOSYSTEM_TRANSFER',
   'MARKET_IMPACT',
-  'ROUTING',
+  'PLATFORM_ROUTING',
 ] as const);
 
 export type LocalDemoExecutionCostComponentCode =
@@ -54,7 +64,9 @@ type LocalDemoExecutionCostBasis =
   | 'TWELVE_BPS_OF_REQUIRED_CONVERSION'
   | 'NO_CROSS_ECOSYSTEM_TRANSFER'
   | 'POSITION_SIZE_AND_UTILIZATION'
-  | 'TWENTY_CENTS_PER_ACTIVE_ALLOCATION';
+  | 'CANONICAL_PLATFORM_ROUTING_RULE_V1';
+
+type LocalDemoExecutionCostFundingTreatment = 'DEDUCTED_FROM_GROSS' | 'ADDED_ON_TOP';
 
 export const LOCAL_DEMO_ECOSYSTEMS = Object.freeze(['EVM', 'SOLANA'] as const);
 export type LocalDemoEcosystem = (typeof LOCAL_DEMO_ECOSYSTEMS)[number];
@@ -72,7 +84,7 @@ const PRESETS: Readonly<Record<LocalDemoAllocationPresetId, AllocationPresetDefi
     }),
     BALANCED: Object.freeze({
       id: 'BALANCED',
-      label: 'Balanced blend',
+      label: 'Managed blend',
     }),
     MORE_YIELD: Object.freeze({
       id: 'MORE_YIELD',
@@ -83,20 +95,28 @@ const PRESETS: Readonly<Record<LocalDemoAllocationPresetId, AllocationPresetDefi
 const NETWORK_ACTIVATION_COST_USD_MINOR: Readonly<Record<LocalDemoYieldNetworkId, bigint>> =
   Object.freeze({
     'eip155:1': 150n,
+    'eip155:56': 5n,
     'eip155:8453': 25n,
     'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp': 1n,
   });
 const NETWORK_POSITION_VOLUME_BASIS_POINTS: Readonly<Record<LocalDemoYieldNetworkId, number>> =
   Object.freeze({
     'eip155:1': 8,
+    'eip155:56': 2,
     'eip155:8453': 4,
     'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp': 1,
   });
 const CONVERSION_COST_BASIS_POINTS = 12;
-const ROUTING_COST_PER_ACTIVE_ALLOCATION_USD_MINOR = 20n;
 const MARKET_IMPACT_BASE_BASIS_POINTS = 1;
 const MARKET_IMPACT_UTILIZATION_THRESHOLD_BASIS_POINTS = 8_500;
 const MARKET_IMPACT_UTILIZATION_STEP_BASIS_POINTS = 500;
+const LOCAL_DEMO_USD_MINOR_ASSET_REVISION_ID = '25500000-0000-4000-8000-000000000001';
+const LOCAL_DEMO_ROUTING_FEE_QUOTE_REFERENCE_ID = '25500000-0000-4000-8000-000000000002';
+const LOCAL_DEMO_ROUTING_FEE_ROUTE_REFERENCE_ID = '25500000-0000-4000-8000-000000000003';
+// Within a fixed route topology, cent ceilings can move the network,
+// conversion, and market-impact estimates by only a few cents. A larger gap
+// signals a topology/activation discontinuity and must fail closed rather than
+// be mislabeled as rounding residual.
 
 export interface LocalDemoAllocationPreviewResponse {
   readonly use: 'LOCAL_DEMO_ESTIMATE_ONLY';
@@ -141,7 +161,6 @@ export interface LocalDemoAllocationPreviewResponse {
     crossEcosystemTransferRequired: false;
     crossEcosystemTransferUsdMinor: '0';
     activeEcosystemCount: 1 | 2;
-    activeAllocationCount: number;
   }>;
   readonly executionCost: Readonly<{
     actualLocalOperation: Readonly<{
@@ -153,15 +172,25 @@ export interface LocalDemoAllocationPreviewResponse {
       modelId: typeof LOCAL_DEMO_EXECUTION_COST_MODEL;
       isQuote: false;
       costBasisCapitalUsdMinor: string;
-      fundingTreatment: 'DEDUCT_FROM_GROSS_BEFORE_PROJECTION';
-      rounding: 'CEIL_EACH_VARIABLE_COMPONENT_TO_USD_MINOR';
+      fundingTreatment: 'MIXED_DEDUCT_FROM_GROSS_AND_ADD_ON_TOP';
+      rounding: 'CEIL_VARIABLE_COMPONENTS_PLATFORM_FEE_HALF_EVEN';
+      routingFeePolicy: Readonly<{
+        tier: 'FREE';
+        classification: RoutingFeeRouteClassificationKind;
+        ruleVersion: 1;
+      }>;
       components: readonly Readonly<{
         code: LocalDemoExecutionCostComponentCode;
         label: string;
         calculationBasis: LocalDemoExecutionCostBasis;
+        fundingTreatment: LocalDemoExecutionCostFundingTreatment;
         amountUsdMinor: string;
       }>[];
+      deductedFromGrossUsdMinor: string;
+      addedOnTopUsdMinor: string;
+      retainedRoundingResidualUsdMinor: string;
       totalUsdMinor: string;
+      requiredCapitalIncludingAddedOnTopUsdMinor: string;
     }>;
     publicExecution: Readonly<{
       status: 'UNQUOTED';
@@ -200,8 +229,22 @@ interface EcosystemModeledCost {
   readonly network: bigint;
   readonly conversion: bigint;
   readonly marketImpact: bigint;
-  readonly routing: bigint;
+  readonly platformRouting: bigint;
   readonly total: bigint;
+}
+
+interface ModeledCostPlan {
+  readonly ecosystemCosts: readonly EcosystemModeledCost[];
+  readonly routingFeePolicy: LocalDemoAllocationPreviewResponse['executionCost']['modeledScenario']['routingFeePolicy'];
+}
+
+interface ConvergenceCandidate {
+  readonly executionCost: LocalDemoAllocationPreviewResponse['executionCost'];
+  readonly managedCapitalByEcosystem: readonly EcosystemCapital[];
+  readonly actualEcosystemCosts: readonly EcosystemModeledCost[];
+  readonly capitalIncludedInProjection: bigint;
+  readonly liquidReserveCapital: bigint;
+  readonly retainedRoundingResidual: bigint;
 }
 
 interface ExactYieldProjection {
@@ -244,10 +287,21 @@ export class LocalDemoAllocationService {
       sourceCapitalByEcosystem,
       grossCapital,
       selection.liquidReserveBasisPoints,
+      catalogSelection.metadata.capturedAt,
     );
     const executionCost = plan.executionCost;
-    const estimatedCost = BigInt(executionCost.modeledScenario.totalUsdMinor);
-    const capitalIncludedInProjection = grossCapital - estimatedCost;
+    const deductedModeledCost = BigInt(executionCost.modeledScenario.deductedFromGrossUsdMinor);
+    const totalEstimatedFees = BigInt(executionCost.modeledScenario.totalUsdMinor);
+    const retainedRoundingResidual = BigInt(
+      executionCost.modeledScenario.retainedRoundingResidualUsdMinor,
+    );
+    const capitalIncludedInProjection = plan.capitalIncludedInProjection;
+    if (
+      capitalIncludedInProjection + deductedModeledCost + retainedRoundingResidual !==
+      grossCapital
+    ) {
+      throw new TypeError('local demo retained capital does not reconcile');
+    }
     const [liquidReserveCapital, managedYieldCapital] = requiredCapitalBuckets(
       capitalIncludedInProjection,
       selection.liquidReserveBasisPoints,
@@ -261,7 +315,10 @@ export class LocalDemoAllocationService {
     }
     const projectedPositions = positionsForCapital(opportunities, managedCapitalByEcosystem);
     const projection = calculateYieldProjection(projectedPositions, capitalIncludedInProjection);
-    const firstPositiveDayAfterFees = calculateFirstPositiveDayAfterFees(projection, estimatedCost);
+    const firstPositiveDayAfterFees = calculateFirstPositiveDayAfterFees(
+      projection,
+      totalEstimatedFees,
+    );
     const managedYieldComposition = publicManagedYieldComposition(
       managedCapitalByEcosystem,
       managedYieldCapital,
@@ -318,9 +375,6 @@ export class LocalDemoAllocationService {
         crossEcosystemTransferRequired: false as const,
         crossEcosystemTransferUsdMinor: '0' as const,
         activeEcosystemCount,
-        activeAllocationCount: projectedPositions.filter(
-          ({ amountUsdMinor }) => amountUsdMinor > 0n,
-        ).length,
       }),
       executionCost,
       capitalIncludedInProjectionUsdMinor: capitalIncludedInProjection.toString(),
@@ -330,7 +384,7 @@ export class LocalDemoAllocationService {
         effectiveApyBasisPoints: projection.effectiveApyBasisPoints,
         projectedAnnualYieldUsdMinor: projection.projectedAnnualYield.toString(),
         projectedAnnualYieldAfterFeesUsdMinor: (
-          projection.projectedAnnualYield - estimatedCost
+          projection.projectedAnnualYield - totalEstimatedFees
         ).toString(),
         firstPositiveDayAfterFees,
       }),
@@ -434,7 +488,16 @@ function positionsForCapital(
     // route exists. This avoids the previous equal-split/top-APY behavior while
     // keeping the small local search deterministic and provider-confidential.
     const weights = candidates.length === 1 ? [10_000] : [6_000, 4_000];
-    const amounts = distribute(source.amountUsdMinor, weights);
+    const capacities = candidates.map((opportunity) => {
+      const exitLiquidity = BigInt(opportunity.exitLiquidity.amountUsdMinor);
+      const tvl = BigInt(opportunity.tvl.amountUsdMinor);
+      return exitLiquidity < tvl ? exitLiquidity : tvl;
+    });
+    const amounts = distributeLocalDemoCapitalWithinCapacities(
+      source.amountUsdMinor,
+      weights,
+      capacities,
+    );
     candidates.forEach((opportunity, index) => {
       positions.push(
         Object.freeze({ opportunity, amountUsdMinor: requiredAmount(amounts, index) }),
@@ -444,21 +507,58 @@ function positionsForCapital(
   return Object.freeze(positions);
 }
 
+export function distributeLocalDemoCapitalWithinCapacities(
+  total: bigint,
+  basisPoints: readonly number[],
+  capacities: readonly bigint[],
+): readonly bigint[] {
+  if (
+    typeof total !== 'bigint' ||
+    total < 0n ||
+    capacities.length !== basisPoints.length ||
+    capacities.length < 1 ||
+    capacities.length > 2 ||
+    capacities.some((capacity) => typeof capacity !== 'bigint' || capacity < 0n)
+  ) {
+    throw new TypeError('invalid local demo opportunity capacities');
+  }
+
+  const desiredAmounts = distribute(total, basisPoints);
+  const amounts = desiredAmounts.map((desired, index) => {
+    const capacity = requiredAmount(capacities, index);
+    return desired < capacity ? desired : capacity;
+  });
+  let remaining = total - amounts.reduce((sum, amount) => sum + amount, 0n);
+  for (let index = 0; index < amounts.length && remaining > 0n; index += 1) {
+    const current = requiredAmount(amounts, index);
+    const availableCapacity = requiredAmount(capacities, index) - current;
+    const additional = remaining < availableCapacity ? remaining : availableCapacity;
+    amounts[index] = current + additional;
+    remaining -= additional;
+  }
+  if (remaining > 0n) throw new LocalDemoNoMatchingYieldOpportunitiesError();
+  return Object.freeze(amounts);
+}
+
 function convergePlan(
   portfolio: LocalDemoPortfolioResponse,
   opportunities: readonly LocalDemoYieldOpportunitySummary[],
   sourceCapitalByEcosystem: readonly EcosystemCapital[],
   grossCapital: bigint,
   liquidReserveBasisPoints: number,
+  rateSnapshotCapturedAt: string,
 ): Readonly<{
   executionCost: LocalDemoAllocationPreviewResponse['executionCost'];
   managedCapitalByEcosystem: readonly EcosystemCapital[];
+  capitalIncludedInProjection: bigint;
 }> {
   let estimatedEcosystemCosts = zeroEcosystemModeledCosts();
+  const visitedCostStates = new Set([ecosystemCostStateKey(estimatedEcosystemCosts)]);
+  const feasibleCandidates: ConvergenceCandidate[] = [];
   for (let iteration = 0; iteration < 16; iteration += 1) {
     const estimatedCost = estimatedEcosystemCosts.reduce((sum, cost) => sum + cost.total, 0n);
     if (estimatedCost >= grossCapital) {
-      throw new LocalDemoNoMatchingYieldOpportunitiesError();
+      return bestFeasibleCandidate(feasibleCandidates, sourceCapitalByEcosystem);
     }
     const capitalAfterCost = grossCapital - estimatedCost;
     const [liquidReserveCapital, managedYieldCapital] = requiredCapitalBuckets(
@@ -483,20 +583,95 @@ function convergePlan(
       postModeledFeeCapacity,
     );
     const positions = positionsForCapital(opportunities, managedCapitalByEcosystem);
-    const executionCost = calculateExecutionCost(portfolio, positions, grossCapital);
-    const nextEcosystemCosts = calculateEcosystemModeledCosts(portfolio, positions);
-    if (ecosystemCostsEqual(nextEcosystemCosts, estimatedEcosystemCosts)) {
-      assertEcosystemSolvency(
-        sourceCapitalByEcosystem,
-        managedCapitalByEcosystem,
-        nextEcosystemCosts,
-        liquidReserveCapital,
-      );
-      return Object.freeze({ executionCost, managedCapitalByEcosystem });
+    const modeledCostPlan = calculateModeledCostPlan(portfolio, positions, rateSnapshotCapturedAt);
+    const nextEcosystemCosts = modeledCostPlan.ecosystemCosts;
+    const actualDeductedCost = nextEcosystemCosts.reduce((sum, cost) => sum + cost.total, 0n);
+    if (
+      estimatedCost >= actualDeductedCost &&
+      estimatedCost - actualDeductedCost <=
+        BigInt(LOCAL_DEMO_MAX_RETAINED_ROUNDING_RESIDUAL_USD_MINOR)
+    ) {
+      const retainedRoundingResidual = estimatedCost - actualDeductedCost;
+      if (
+        ecosystemPlanIsSolvent(
+          sourceCapitalByEcosystem,
+          managedCapitalByEcosystem,
+          nextEcosystemCosts,
+          liquidReserveCapital,
+          retainedRoundingResidual,
+        )
+      ) {
+        feasibleCandidates.push(
+          Object.freeze({
+            executionCost: calculateExecutionCost(
+              modeledCostPlan,
+              grossCapital,
+              retainedRoundingResidual,
+            ),
+            managedCapitalByEcosystem,
+            actualEcosystemCosts: nextEcosystemCosts,
+            capitalIncludedInProjection: capitalAfterCost,
+            liquidReserveCapital,
+            retainedRoundingResidual,
+          }),
+        );
+      }
     }
+    if (ecosystemCostsEqual(nextEcosystemCosts, estimatedEcosystemCosts)) {
+      return bestFeasibleCandidate(feasibleCandidates, sourceCapitalByEcosystem);
+    }
+    const nextCostState = ecosystemCostStateKey(nextEcosystemCosts);
+    if (visitedCostStates.has(nextCostState)) {
+      return bestFeasibleCandidate(feasibleCandidates, sourceCapitalByEcosystem);
+    }
+    visitedCostStates.add(nextCostState);
     estimatedEcosystemCosts = nextEcosystemCosts;
   }
-  throw new LocalDemoNoMatchingYieldOpportunitiesError();
+  return bestFeasibleCandidate(feasibleCandidates, sourceCapitalByEcosystem);
+}
+
+function ecosystemCostStateKey(costs: readonly EcosystemModeledCost[]): string {
+  return LOCAL_DEMO_ECOSYSTEMS.map((ecosystem) =>
+    requiredEcosystemCost(costs, ecosystem).total.toString(),
+  ).join(':');
+}
+
+function bestFeasibleCandidate(
+  candidates: readonly ConvergenceCandidate[],
+  sourceCapitalByEcosystem: readonly EcosystemCapital[],
+): Readonly<{
+  executionCost: LocalDemoAllocationPreviewResponse['executionCost'];
+  managedCapitalByEcosystem: readonly EcosystemCapital[];
+  capitalIncludedInProjection: bigint;
+}> {
+  const candidate = [...candidates].sort((left, right) => {
+    const leftManaged = left.managedCapitalByEcosystem.reduce(
+      (sum, capital) => sum + capital.amountUsdMinor,
+      0n,
+    );
+    const rightManaged = right.managedCapitalByEcosystem.reduce(
+      (sum, capital) => sum + capital.amountUsdMinor,
+      0n,
+    );
+    if (leftManaged !== rightManaged) return leftManaged > rightManaged ? -1 : 1;
+    if (left.retainedRoundingResidual !== right.retainedRoundingResidual) {
+      return left.retainedRoundingResidual < right.retainedRoundingResidual ? -1 : 1;
+    }
+    return 0;
+  })[0];
+  if (candidate === undefined) throw new LocalDemoNoMatchingYieldOpportunitiesError();
+  assertEcosystemSolvency(
+    sourceCapitalByEcosystem,
+    candidate.managedCapitalByEcosystem,
+    candidate.actualEcosystemCosts,
+    candidate.liquidReserveCapital,
+    candidate.retainedRoundingResidual,
+  );
+  return Object.freeze({
+    executionCost: candidate.executionCost,
+    managedCapitalByEcosystem: candidate.managedCapitalByEcosystem,
+    capitalIncludedInProjection: candidate.capitalIncludedInProjection,
+  });
 }
 
 function zeroEcosystemModeledCosts(): readonly EcosystemModeledCost[] {
@@ -507,7 +682,7 @@ function zeroEcosystemModeledCosts(): readonly EcosystemModeledCost[] {
         network: 0n,
         conversion: 0n,
         marketImpact: 0n,
-        routing: 0n,
+        platformRouting: 0n,
         total: 0n,
       }),
     ),
@@ -535,48 +710,59 @@ function ecosystemCostsEqual(
 }
 
 function calculateExecutionCost(
-  portfolio: LocalDemoPortfolioResponse,
-  positions: readonly InternalYieldPosition[],
+  modeledCostPlan: ModeledCostPlan,
   grossCapital: bigint,
+  retainedRoundingResidual: bigint,
 ): LocalDemoAllocationPreviewResponse['executionCost'] {
-  const ecosystemCosts = calculateEcosystemModeledCosts(portfolio, positions);
+  const ecosystemCosts = modeledCostPlan.ecosystemCosts;
   const network = sumEcosystemCost(ecosystemCosts, 'network');
   const conversion = sumEcosystemCost(ecosystemCosts, 'conversion');
   const marketImpact = sumEcosystemCost(ecosystemCosts, 'marketImpact');
-  const routing = sumEcosystemCost(ecosystemCosts, 'routing');
+  const platformRouting = sumEcosystemCost(ecosystemCosts, 'platformRouting');
   const components = Object.freeze([
     costComponent(
       'NETWORK',
       'Estimated network costs',
       'NETWORK_ACTIVATION_AND_POSITION_VOLUME',
+      'DEDUCTED_FROM_GROSS',
       network,
     ),
     costComponent(
       'CONVERSION',
       'Estimated conversion costs',
       'TWELVE_BPS_OF_REQUIRED_CONVERSION',
+      'DEDUCTED_FROM_GROSS',
       conversion,
     ),
     costComponent(
       'CROSS_ECOSYSTEM_TRANSFER',
       'Estimated EVM-Solana transfer costs',
       'NO_CROSS_ECOSYSTEM_TRANSFER',
+      'DEDUCTED_FROM_GROSS',
       0n,
     ),
     costComponent(
       'MARKET_IMPACT',
       'Estimated market impact',
       'POSITION_SIZE_AND_UTILIZATION',
+      'DEDUCTED_FROM_GROSS',
       marketImpact,
     ),
     costComponent(
-      'ROUTING',
-      'Estimated routing fee',
-      'TWENTY_CENTS_PER_ACTIVE_ALLOCATION',
-      routing,
+      'PLATFORM_ROUTING',
+      'Estimated platform routing fee',
+      'CANONICAL_PLATFORM_ROUTING_RULE_V1',
+      'ADDED_ON_TOP',
+      platformRouting,
     ),
   ]);
-  const total = components.reduce((sum, component) => sum + BigInt(component.amountUsdMinor), 0n);
+  const deductedFromGross = components
+    .filter(({ fundingTreatment }) => fundingTreatment === 'DEDUCTED_FROM_GROSS')
+    .reduce((sum, component) => sum + BigInt(component.amountUsdMinor), 0n);
+  const addedOnTop = components
+    .filter(({ fundingTreatment }) => fundingTreatment === 'ADDED_ON_TOP')
+    .reduce((sum, component) => sum + BigInt(component.amountUsdMinor), 0n);
+  const total = deductedFromGross + addedOnTop;
   return Object.freeze({
     actualLocalOperation: Object.freeze({ status: 'NO_EXECUTION', amountUsdMinor: '0' }),
     modeledScenario: Object.freeze({
@@ -584,32 +770,58 @@ function calculateExecutionCost(
       modelId: LOCAL_DEMO_EXECUTION_COST_MODEL,
       isQuote: false,
       costBasisCapitalUsdMinor: grossCapital.toString(),
-      fundingTreatment: 'DEDUCT_FROM_GROSS_BEFORE_PROJECTION',
-      rounding: 'CEIL_EACH_VARIABLE_COMPONENT_TO_USD_MINOR',
+      fundingTreatment: 'MIXED_DEDUCT_FROM_GROSS_AND_ADD_ON_TOP',
+      rounding: 'CEIL_VARIABLE_COMPONENTS_PLATFORM_FEE_HALF_EVEN',
+      routingFeePolicy: modeledCostPlan.routingFeePolicy,
       components,
+      deductedFromGrossUsdMinor: deductedFromGross.toString(),
+      addedOnTopUsdMinor: addedOnTop.toString(),
+      retainedRoundingResidualUsdMinor: retainedRoundingResidual.toString(),
       totalUsdMinor: total.toString(),
+      requiredCapitalIncludingAddedOnTopUsdMinor: (grossCapital + addedOnTop).toString(),
     }),
     publicExecution: Object.freeze({ status: 'UNQUOTED', amountUsdMinor: null }),
   });
 }
 
-function calculateEcosystemModeledCosts(
+function calculateModeledCostPlan(
   portfolio: LocalDemoPortfolioResponse,
   positions: readonly InternalYieldPosition[],
-): readonly EcosystemModeledCost[] {
-  return Object.freeze(
+  rateSnapshotCapturedAt: string,
+): ModeledCostPlan {
+  const activePositions = positions.filter((position) => position.amountUsdMinor > 0n);
+  const managedCapital = activePositions.reduce(
+    (total, position) => total + position.amountUsdMinor,
+    0n,
+  );
+  const platformRoutingFee = calculateCanonicalPlatformRoutingFee(
+    portfolio,
+    activePositions,
+    managedCapital,
+    rateSnapshotCapturedAt,
+  );
+  const managedCapitalByEcosystem = LOCAL_DEMO_ECOSYSTEMS.map((ecosystem) =>
+    activePositions
+      .filter((position) => position.opportunity.ecosystem === ecosystem)
+      .reduce((total, position) => total + position.amountUsdMinor, 0n),
+  );
+  const platformRoutingByEcosystem = distributeByAmounts(
+    platformRoutingFee.amountUsdMinor,
+    managedCapitalByEcosystem,
+  );
+  const ecosystemCosts = Object.freeze(
     LOCAL_DEMO_ECOSYSTEMS.map((ecosystem) => {
-      const activePositions = positions.filter(
+      const ecosystemPositions = activePositions.filter(
         (position) => position.amountUsdMinor > 0n && position.opportunity.ecosystem === ecosystem,
       );
       const activeNetworks = new Set(
-        activePositions.map(({ opportunity }) => opportunity.network.id),
+        ecosystemPositions.map(({ opportunity }) => opportunity.network.id),
       );
       const networkActivation = [...activeNetworks].reduce(
         (total, networkId) => total + NETWORK_ACTIVATION_COST_USD_MINOR[networkId],
         0n,
       );
-      const networkVolume = activePositions.reduce(
+      const networkVolume = ecosystemPositions.reduce(
         (total, position) =>
           total +
           percentageCost(
@@ -620,10 +832,10 @@ function calculateEcosystemModeledCosts(
       );
       const network = networkActivation + networkVolume;
       const conversion = percentageCost(
-        requiredConversionAmount(portfolio, activePositions, ecosystem),
+        requiredConversionAmount(portfolio, ecosystemPositions, ecosystem),
         CONVERSION_COST_BASIS_POINTS,
       );
-      const marketImpact = activePositions.reduce((total, position) => {
+      const marketImpact = ecosystemPositions.reduce((total, position) => {
         const utilizationExcess = Math.max(
           0,
           position.opportunity.utilization.basisPoints -
@@ -640,22 +852,184 @@ function calculateEcosystemModeledCosts(
           )
         );
       }, 0n);
-      const routing = BigInt(activePositions.length) * ROUTING_COST_PER_ACTIVE_ALLOCATION_USD_MINOR;
+      const ecosystemIndex = LOCAL_DEMO_ECOSYSTEMS.indexOf(ecosystem);
+      const platformRouting = requiredAmount(platformRoutingByEcosystem, ecosystemIndex);
       return Object.freeze({
         ecosystem,
         network,
         conversion,
         marketImpact,
-        routing,
-        total: network + conversion + marketImpact + routing,
+        platformRouting,
+        total: network + conversion + marketImpact,
       });
     }),
   );
+  return Object.freeze({
+    ecosystemCosts,
+    routingFeePolicy: Object.freeze({
+      tier: 'FREE',
+      classification: platformRoutingFee.classification,
+      ruleVersion: 1,
+    }),
+  });
+}
+
+function calculateCanonicalPlatformRoutingFee(
+  portfolio: LocalDemoPortfolioResponse,
+  activePositions: readonly InternalYieldPosition[],
+  managedCapital: bigint,
+  rateSnapshotCapturedAt: string,
+): Readonly<{
+  amountUsdMinor: bigint;
+  classification: RoutingFeeRouteClassificationKind;
+}> {
+  if (managedCapital <= 0n || activePositions.length < 1) {
+    throw new LocalDemoNoMatchingYieldOpportunitiesError();
+  }
+  const snapshot = calculateRoutingFeeSnapshotV1({
+    schemaVersion: 1,
+    // These private IDs identify the deterministic, non-quote local model
+    // input. They are never returned as public route or provider metadata.
+    quoteReferenceId: LOCAL_DEMO_ROUTING_FEE_QUOTE_REFERENCE_ID,
+    routeReferenceId: LOCAL_DEMO_ROUTING_FEE_ROUTE_REFERENCE_ID,
+    quotedAt: rateSnapshotCapturedAt,
+    tier: 'FREE',
+    route: routingFeeRouteForPlan(portfolio, activePositions),
+    feeBase: {
+      assetRevisionId: LOCAL_DEMO_USD_MINOR_ASSET_REVISION_ID,
+      amountAtomic: managedCapital.toString(),
+    },
+    passThroughComponents: [],
+  });
+  const platformComponent = snapshot.components[0];
+  if (
+    snapshot.effectiveTier !== 'FREE' ||
+    ROUTING_FEE_RULE_V1.version !== 1 ||
+    snapshot.rule.version !== ROUTING_FEE_RULE_V1.version ||
+    platformComponent === undefined ||
+    platformComponent.category !== 'PLATFORM' ||
+    platformComponent.assetRevisionId !== LOCAL_DEMO_USD_MINOR_ASSET_REVISION_ID
+  ) {
+    throw new TypeError('invalid local demo canonical routing fee result');
+  }
+  return Object.freeze({
+    amountUsdMinor: BigInt(platformComponent.amountAtomic),
+    classification: snapshot.routeClassification.kind,
+  });
+}
+
+function routingFeeRouteForPlan(
+  portfolio: LocalDemoPortfolioResponse,
+  activePositions: readonly InternalYieldPosition[],
+): RoutingFeeRouteV1 {
+  const sourceByIdentity = new Map<string, RoutingFeeRouteEndpointV1>();
+  for (const wallet of portfolio.wallets) {
+    for (const chain of wallet.chains) {
+      for (const asset of chain.assets) {
+        if (BigInt(asset.buyingPowerUsdMinor) <= 0n) continue;
+        const endpoint = Object.freeze({
+          networkId: chain.networkId,
+          assetId: asset.assetIdentity,
+        });
+        sourceByIdentity.set(routeEndpointKey(endpoint), endpoint);
+      }
+    }
+  }
+  const sources = [...sourceByIdentity.values()].sort(compareRouteEndpoints);
+  const destinations = activePositions.map(({ opportunity }) =>
+    Object.freeze({
+      networkId: opportunity.network.id,
+      assetId: opportunity.asset.contract,
+    }),
+  );
+  const firstDestination = destinations[0];
+  if (sources.length < 1 || firstDestination === undefined) {
+    throw new LocalDemoNoMatchingYieldOpportunitiesError();
+  }
+  const soleSource = sources.length === 1 ? sources[0] : undefined;
+  if (
+    soleSource !== undefined &&
+    destinations.length === 1 &&
+    sameRouteEndpoint(soleSource, firstDestination)
+  ) {
+    const directLeg = Object.freeze({
+      kind: 'DIRECT_SETTLEMENT' as const,
+      source: soleSource,
+      destination: firstDestination,
+    });
+    return Object.freeze({
+      schemaVersion: 1,
+      source: soleSource,
+      destination: firstDestination,
+      legs: Object.freeze([directLeg]),
+    });
+  }
+
+  // A route is free only when the complete modeled plan is one exact direct
+  // settlement. Multiple sources or positions are material orchestration even
+  // when one individual leg happens to preserve network and asset identity.
+  const routeSource =
+    sources.find((source) => !sameRouteEndpoint(source, firstDestination)) ?? sources[0]!;
+  const legs: RoutingFeeRouteLegV1[] = [];
+  let current = routeSource;
+  for (const destination of destinations) {
+    appendCanonicalRouteLegs(legs, current, destination);
+    current = destination;
+  }
+  return Object.freeze({
+    schemaVersion: 1,
+    source: routeSource,
+    destination: current,
+    legs: Object.freeze(legs),
+  });
+}
+
+function appendCanonicalRouteLegs(
+  legs: RoutingFeeRouteLegV1[],
+  source: RoutingFeeRouteEndpointV1,
+  destination: RoutingFeeRouteEndpointV1,
+): void {
+  if (sameRouteEndpoint(source, destination)) {
+    legs.push(Object.freeze({ kind: 'DIRECT_SETTLEMENT', source, destination }));
+    return;
+  }
+  if (source.networkId === destination.networkId) {
+    legs.push(Object.freeze({ kind: 'SWAP', source, destination }));
+    return;
+  }
+  if (source.assetId === destination.assetId) {
+    legs.push(Object.freeze({ kind: 'BRIDGE', source, destination }));
+    return;
+  }
+  const convertedSource = Object.freeze({
+    networkId: source.networkId,
+    assetId: destination.assetId,
+  });
+  legs.push(Object.freeze({ kind: 'SWAP', source, destination: convertedSource }));
+  legs.push(Object.freeze({ kind: 'BRIDGE', source: convertedSource, destination }));
+}
+
+function routeEndpointKey(endpoint: RoutingFeeRouteEndpointV1): string {
+  return `${endpoint.networkId}\u0000${endpoint.assetId}`;
+}
+
+function sameRouteEndpoint(
+  left: RoutingFeeRouteEndpointV1,
+  right: RoutingFeeRouteEndpointV1,
+): boolean {
+  return left.networkId === right.networkId && left.assetId === right.assetId;
+}
+
+function compareRouteEndpoints(
+  left: RoutingFeeRouteEndpointV1,
+  right: RoutingFeeRouteEndpointV1,
+): number {
+  return routeEndpointKey(left).localeCompare(routeEndpointKey(right));
 }
 
 function sumEcosystemCost(
   costs: readonly EcosystemModeledCost[],
-  key: 'network' | 'conversion' | 'marketImpact' | 'routing',
+  key: 'network' | 'conversion' | 'marketImpact' | 'platformRouting',
 ): bigint {
   return costs.reduce((sum, cost) => sum + cost[key], 0n);
 }
@@ -665,8 +1039,9 @@ function assertEcosystemSolvency(
   managedCapital: readonly EcosystemCapital[],
   costs: readonly EcosystemModeledCost[],
   expectedLiquidReserve: bigint,
+  expectedRetainedRoundingResidual: bigint,
 ): void {
-  let liquidReserve = 0n;
+  let unallocatedCapital = 0n;
   for (const ecosystem of LOCAL_DEMO_ECOSYSTEMS) {
     const source = sources.find((candidate) => candidate.ecosystem === ecosystem);
     const managed = managedCapital.find((candidate) => candidate.ecosystem === ecosystem);
@@ -679,10 +1054,34 @@ function assertEcosystemSolvency(
     ) {
       throw new LocalDemoNoMatchingYieldOpportunitiesError();
     }
-    liquidReserve += source.amountUsdMinor - managed.amountUsdMinor - cost.total;
+    unallocatedCapital += source.amountUsdMinor - managed.amountUsdMinor - cost.total;
   }
-  if (liquidReserve !== expectedLiquidReserve) {
+  if (unallocatedCapital !== expectedLiquidReserve + expectedRetainedRoundingResidual) {
     throw new TypeError('local demo ecosystem capital does not reconcile after modeled costs');
+  }
+}
+
+function ecosystemPlanIsSolvent(
+  sources: readonly EcosystemCapital[],
+  managedCapital: readonly EcosystemCapital[],
+  costs: readonly EcosystemModeledCost[],
+  expectedLiquidReserve: bigint,
+  expectedRetainedRoundingResidual: bigint,
+): boolean {
+  try {
+    assertEcosystemSolvency(
+      sources,
+      managedCapital,
+      costs,
+      expectedLiquidReserve,
+      expectedRetainedRoundingResidual,
+    );
+    return true;
+  } catch (error) {
+    if (error instanceof LocalDemoNoMatchingYieldOpportunitiesError || error instanceof TypeError) {
+      return false;
+    }
+    throw error;
   }
 }
 
@@ -690,12 +1089,14 @@ function costComponent(
   code: LocalDemoExecutionCostComponentCode,
   label: string,
   calculationBasis: LocalDemoExecutionCostBasis,
+  fundingTreatment: LocalDemoExecutionCostFundingTreatment,
   amountUsdMinor: bigint,
 ): LocalDemoAllocationPreviewResponse['executionCost']['modeledScenario']['components'][number] {
   return Object.freeze({
     code,
     label,
     calculationBasis,
+    fundingTreatment,
     amountUsdMinor: amountUsdMinor.toString(),
   });
 }
@@ -760,17 +1161,25 @@ function calculateYieldProjection(
     const scaledRate = rate.numerator * 10n ** BigInt(maximumScale - rate.fractionalDigits);
     return total + position.amountUsdMinor * scaledRate;
   }, 0n);
-  const projectedAnnualYield = annualYieldNumerator / denominator;
-  const effectiveApy =
+  const exactEffectiveApy =
     capitalIncludedInProjection === 0n
       ? 0n
       : (annualYieldNumerator * 10_000n) / (capitalIncludedInProjection * denominator);
-  if (effectiveApy > BigInt(Number.MAX_SAFE_INTEGER) || effectiveApy > 10_000n) {
+  if (exactEffectiveApy > BigInt(Number.MAX_SAFE_INTEGER) || exactEffectiveApy > 10_000n) {
     throw new TypeError('local demo effective APY exceeds numeric limits');
   }
+  // Ranking, capacity checks, and position construction retain the exact
+  // server-confidential rates. The public projection deliberately floors the
+  // aggregate to a product-owned 25 bps bucket so exact cents cannot be used
+  // to fingerprint the selected providers from their public market rates.
+  const bucketSize = BigInt(LOCAL_DEMO_PUBLIC_APY_BUCKET_SIZE_BASIS_POINTS);
+  const effectiveApy = exactEffectiveApy - (exactEffectiveApy % bucketSize);
+  const publicDenominator = 10_000n;
+  const publicAnnualYieldNumerator = capitalIncludedInProjection * effectiveApy;
+  const projectedAnnualYield = publicAnnualYieldNumerator / publicDenominator;
   return Object.freeze({
-    annualYieldNumerator,
-    denominator,
+    annualYieldNumerator: publicAnnualYieldNumerator,
+    denominator: publicDenominator,
     effectiveApyBasisPoints: Number(effectiveApy),
     projectedAnnualYield,
   });

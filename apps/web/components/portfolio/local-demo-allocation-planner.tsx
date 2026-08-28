@@ -13,11 +13,17 @@ import {
   LOCAL_DEMO_LIQUID_RESERVE_STEP_BASIS_POINTS,
   LOCAL_DEMO_MAX_LIQUID_RESERVE_BASIS_POINTS,
   LOCAL_DEMO_MIN_LIQUID_RESERVE_BASIS_POINTS,
+  LOCAL_DEMO_VISIBLE_ALLOCATION_PRESET_IDS,
   type LocalDemoAllocationPreview,
   type LocalDemoAllocationSelectionInput,
   type LocalDemoYieldCatalog,
 } from '@/lib/local-demo/local-demo-yield';
 import { formatUsdMinor } from '@/lib/portfolio/unified-balance';
+
+import {
+  PublicTestnetTransactionProof,
+  type PublicTestnetProofDependencies,
+} from './public-testnet-transaction-proof';
 
 const AS_OF_FORMATTER = new Intl.DateTimeFormat('en-US', {
   dateStyle: 'medium',
@@ -30,6 +36,7 @@ export interface LocalDemoAllocationPlannerProps {
   readonly portfolioSnapshotId: string;
   readonly onUnauthenticated?: () => void;
   readonly onPortfolioSnapshotChanged?: () => void;
+  readonly publicTestnetProofDependencies?: PublicTestnetProofDependencies;
 }
 
 function Money({ amountUsdMinor }: { amountUsdMinor: string }) {
@@ -85,7 +92,7 @@ function RateStatus({ catalog }: { catalog: LocalDemoYieldCatalog }) {
       <div className="local-demo-yield-catalog-heading">
         <div>
           <p className="eyebrow">Managed rate data</p>
-          <h3 id="local-demo-yield-catalog-title">Crypto Lending yield plans</h3>
+          <h3 id="local-demo-yield-catalog-title">Crypto Lending managed blend</h3>
         </div>
         <span
           className={`local-demo-yield-freshness is-${catalog.snapshot.freshness.toLowerCase()}`}
@@ -94,17 +101,17 @@ function RateStatus({ catalog }: { catalog: LocalDemoYieldCatalog }) {
         </span>
       </div>
       <p className="local-demo-yield-catalog-copy">
-        Choose a Crypto Lending plan below. Estimates blend supported EVM and Solana fixture
-        balances with a locally cached, point-in-time managed rate set and make no live external
-        request. Rates can change and risk has not been assessed.
+        Preview the Crypto Lending managed blend below. Estimates combine supported EVM and Solana
+        fixture balances with a locally cached, point-in-time managed rate set and make no live
+        external request. Rates can change and risk has not been assessed.
       </p>
       <p className="local-demo-yield-catalog-copy">
         This is a portfolio-composition fixture. It does not create a route, bridge assets, contact
         a validator, or authorize a transaction.
       </p>
       <p className="local-demo-yield-catalog-time">
-        Rates captured <Timestamp value={catalog.snapshot.capturedAt} />. Data became stale after{' '}
-        <Timestamp value={catalog.snapshot.staleAfter} />.
+        Managed snapshot assembled <Timestamp value={catalog.snapshot.capturedAt} />. It becomes
+        stale after <Timestamp value={catalog.snapshot.staleAfter} />.
       </p>
     </section>
   );
@@ -112,6 +119,7 @@ function RateStatus({ catalog }: { catalog: LocalDemoYieldCatalog }) {
 
 function feeBasisCopy(
   basis: LocalDemoAllocationPreview['executionCost']['modeledScenario']['components'][number]['calculationBasis'],
+  routingFeeClassification: LocalDemoAllocationPreview['executionCost']['modeledScenario']['routingFeePolicy']['classification'],
 ): string {
   switch (basis) {
     case 'NETWORK_ACTIVATION_AND_POSITION_VOLUME':
@@ -122,8 +130,10 @@ function feeBasisCopy(
       return 'No EVM-to-Solana principal transfer is included in this composition.';
     case 'POSITION_SIZE_AND_UTILIZATION':
       return 'Varies with allocation size and modeled liquidity utilization.';
-    case 'TWENTY_CENTS_PER_ACTIVE_ALLOCATION':
-      return '$0.20 for each active managed allocation.';
+    case 'CANONICAL_PLATFORM_ROUTING_RULE_V1':
+      return routingFeeClassification === 'DIRECT_COMPATIBLE'
+        ? 'Direct-compatible routing has a $0 platform fee.'
+        : 'Free tier charges 0.20% of managed capital for material orchestration.';
   }
 }
 
@@ -140,9 +150,7 @@ function EcosystemComposition({ preview }: { preview: LocalDemoAllocationPreview
         </div>
         <p>
           {preview.compositionSummary.activeEcosystemCount}{' '}
-          {preview.compositionSummary.activeEcosystemCount === 1 ? 'ecosystem' : 'ecosystems'} ·{' '}
-          {preview.compositionSummary.activeAllocationCount}{' '}
-          {preview.compositionSummary.activeAllocationCount === 1 ? 'allocation' : 'allocations'}
+          {preview.compositionSummary.activeEcosystemCount === 1 ? 'ecosystem' : 'ecosystems'}
         </p>
       </div>
       <ul className="local-demo-ecosystem-list">
@@ -197,6 +205,7 @@ interface LiquidityAdjustmentProps {
   readonly appliedBasisPoints: number;
   readonly draftBasisPoints: number;
   readonly pending: boolean;
+  readonly locked: boolean;
   readonly onDraftChange: (basisPoints: number) => void;
   readonly onApply: () => void;
 }
@@ -205,6 +214,7 @@ function LiquidityAdjustment({
   appliedBasisPoints,
   draftBasisPoints,
   pending,
+  locked,
   onDraftChange,
   onApply,
 }: LiquidityAdjustmentProps) {
@@ -229,7 +239,7 @@ function LiquidityAdjustment({
         </output>
       </div>
       <label htmlFor="local-demo-liquidity-range">
-        Share kept liquid after estimated one-time fees
+        Share of projected capital kept liquid after deducted costs
       </label>
       <input
         id="local-demo-liquidity-range"
@@ -240,7 +250,7 @@ function LiquidityAdjustment({
         value={draftBasisPoints}
         aria-valuetext={`${percentage(draftBasisPoints)} kept liquid in the draft`}
         aria-describedby="local-demo-liquidity-state local-demo-liquidity-help"
-        disabled={pending}
+        disabled={pending || locked}
         onChange={(event) => onDraftChange(Number(event.currentTarget.value))}
       />
       <div className="local-demo-liquidity-adjustment-footer">
@@ -252,16 +262,17 @@ function LiquidityAdjustment({
           </p>
           <p id="local-demo-liquidity-help">
             Updating recalculates this preview only. It moves no funds, and the selected share is
-            applied after modeled one-time fees.
+            applied after costs deducted from gross capital. Any added-on-top platform fee remains
+            separate.
           </p>
         </div>
         <button
           className="portfolio-secondary-action local-demo-liquidity-apply"
           type="button"
-          disabled={pending || !changed}
+          disabled={pending || locked || !changed}
           onClick={onApply}
         >
-          {pending ? 'Updating…' : 'Update preview'}
+          {pending ? 'Updating…' : locked ? 'Locked during submission' : 'Update preview'}
         </button>
       </div>
     </section>
@@ -345,8 +356,9 @@ function YieldProjection({ preview }: { preview: LocalDemoAllocationPreview }) {
       </dl>
       <p className="local-demo-allocation-yield-method">
         The first positive day is the first whole day where projected cumulative yield reaches at
-        least one cent more than the modeled one-time fees. The estimate uses exact internal rate
-        math, no compounding, and a one-year horizon. Rates and actual costs may change.
+        least one cent more than the modeled one-time fees. The public APY is conservatively rounded
+        down to a 0.25 percentage-point bucket; the estimate uses that disclosed bucket, no
+        compounding, and a one-year horizon. Rates and actual costs may change.
       </p>
     </section>
   );
@@ -356,14 +368,22 @@ function AllocationPreview({
   preview,
   draftLiquidReserveBasisPoints,
   liquidityUpdatePending,
+  publicTestnetWriteActive,
   onDraftLiquidityChange,
   onApplyLiquidity,
+  onUnauthenticated,
+  publicTestnetProofDependencies,
+  onPublicTestnetWriteActivityChange,
 }: {
   preview: LocalDemoAllocationPreview;
   draftLiquidReserveBasisPoints: number;
   liquidityUpdatePending: boolean;
+  publicTestnetWriteActive: boolean;
   onDraftLiquidityChange: (basisPoints: number) => void;
   onApplyLiquidity: () => void;
+  onUnauthenticated?: (() => void) | undefined;
+  publicTestnetProofDependencies?: PublicTestnetProofDependencies | undefined;
+  onPublicTestnetWriteActivityChange: (active: boolean) => void;
 }) {
   return (
     <section
@@ -386,7 +406,7 @@ function AllocationPreview({
       ) : null}
       <div className="local-demo-allocation-preview-heading">
         <div>
-          <p className="eyebrow">Selected yield plan</p>
+          <p className="eyebrow">Selected managed blend</p>
           <h3 id="local-demo-allocation-preview-title">{preview.selection.label}</h3>
           <p>{preview.selection.description}</p>
           <small>Crypto Lending managed strategy · risk not assessed</small>
@@ -394,7 +414,7 @@ function AllocationPreview({
         <p className="local-demo-allocation-as-of">
           Portfolio estimated <Timestamp value={preview.asOf} />
           <br />
-          Rates captured <Timestamp value={preview.rateSnapshot.capturedAt} />
+          Managed snapshot assembled <Timestamp value={preview.rateSnapshot.capturedAt} />
         </p>
       </div>
 
@@ -402,6 +422,7 @@ function AllocationPreview({
         appliedBasisPoints={preview.selection.liquidReserveBasisPoints}
         draftBasisPoints={draftLiquidReserveBasisPoints}
         pending={liquidityUpdatePending}
+        locked={publicTestnetWriteActive}
         onDraftChange={onDraftLiquidityChange}
         onApply={onApplyLiquidity}
       />
@@ -412,7 +433,7 @@ function AllocationPreview({
 
       <div className="local-demo-allocation-results">
         <section aria-labelledby="local-demo-allocation-amounts-title">
-          <h4 id="local-demo-allocation-amounts-title">Allocation amounts after estimated fees</h4>
+          <h4 id="local-demo-allocation-amounts-title">Projected allocation amounts</h4>
           <ul className="local-demo-allocation-result-list">
             {preview.allocations.map((allocation) => (
               <li key={allocation.allocationId}>
@@ -438,7 +459,15 @@ function AllocationPreview({
               <li key={component.code}>
                 <span>
                   <strong>{component.label}</strong>
-                  <small>{feeBasisCopy(component.calculationBasis)}</small>
+                  <small>
+                    {feeBasisCopy(
+                      component.calculationBasis,
+                      preview.executionCost.modeledScenario.routingFeePolicy.classification,
+                    )}{' '}
+                    {component.fundingTreatment === 'ADDED_ON_TOP'
+                      ? 'Added on top of available capital.'
+                      : 'Deducted from available capital.'}
+                  </small>
                 </span>
                 <Money amountUsdMinor={component.amountUsdMinor} />
               </li>
@@ -448,6 +477,10 @@ function AllocationPreview({
               <Money amountUsdMinor={preview.executionCost.modeledScenario.totalUsdMinor} />
             </li>
           </ul>
+          <p className="local-demo-allocation-fee-disclosure">
+            Platform fee policy: Free tier charges 0.20% when Crypto Lending materially orchestrates
+            a route. A direct-compatible route has a $0 platform routing fee.
+          </p>
           <p className="local-demo-allocation-fee-disclosure">
             Actual local operation: $0 because no transaction occurred. Public execution costs:
             unquoted.
@@ -463,18 +496,64 @@ function AllocationPreview({
           </dd>
         </div>
         <div>
-          <dt>Estimated one-time fees deducted</dt>
+          <dt>Estimated costs deducted from capital</dt>
           <dd>
-            <Money amountUsdMinor={preview.executionCost.modeledScenario.totalUsdMinor} />
+            <Money
+              amountUsdMinor={preview.executionCost.modeledScenario.deductedFromGrossUsdMinor}
+            />
           </dd>
         </div>
-        <div className="local-demo-allocation-net">
+        {preview.executionCost.modeledScenario.retainedRoundingResidualUsdMinor === '0' ? null : (
+          <div>
+            <dt>Retained rounding residual (not a fee)</dt>
+            <dd>
+              <Money
+                amountUsdMinor={
+                  preview.executionCost.modeledScenario.retainedRoundingResidualUsdMinor
+                }
+              />
+            </dd>
+          </div>
+        )}
+        <div>
           <dt>Capital included in projection</dt>
           <dd>
             <Money amountUsdMinor={preview.capitalIncludedInProjectionUsdMinor} />
           </dd>
         </div>
+        <div>
+          <dt>Platform fee added on top</dt>
+          <dd>
+            <Money amountUsdMinor={preview.executionCost.modeledScenario.addedOnTopUsdMinor} />
+          </dd>
+        </div>
+        <div className="local-demo-allocation-net">
+          <dt>Required capital including added-on-top fee</dt>
+          <dd>
+            <Money
+              amountUsdMinor={
+                preview.executionCost.modeledScenario.requiredCapitalIncludingAddedOnTopUsdMinor
+              }
+            />
+          </dd>
+        </div>
       </dl>
+      {preview.executionCost.modeledScenario.retainedRoundingResidualUsdMinor === '0' ? null : (
+        <p className="local-demo-allocation-fee-disclosure">
+          The retained rounding residual remains outside this projection because cent-rounded
+          modeled costs leave no feasible next cent. It is retained capital, not a fee or spend.
+        </p>
+      )}
+      {!liquidityUpdatePending &&
+      draftLiquidReserveBasisPoints === preview.selection.liquidReserveBasisPoints ? (
+        <PublicTestnetTransactionProof
+          key={`${preview.portfolioSnapshotId}:${preview.rateSnapshot.id}:${preview.selection.liquidReserveBasisPoints}`}
+          preview={preview}
+          onUnauthenticated={onUnauthenticated}
+          onWriteActivityChange={onPublicTestnetWriteActivityChange}
+          dependencies={publicTestnetProofDependencies}
+        />
+      ) : null}
     </section>
   );
 }
@@ -495,6 +574,7 @@ export function LocalDemoAllocationPlanner({
   portfolioSnapshotId,
   onUnauthenticated,
   onPortfolioSnapshotChanged,
+  publicTestnetProofDependencies,
 }: LocalDemoAllocationPlannerProps) {
   const [catalog, setCatalog] = useState<LocalDemoYieldCatalog | null>(null);
   const [catalogError, setCatalogError] = useState(false);
@@ -506,6 +586,7 @@ export function LocalDemoAllocationPlanner({
     null,
   );
   const [liquidityUpdatePending, setLiquidityUpdatePending] = useState(false);
+  const [publicTestnetWriteActive, setPublicTestnetWriteActive] = useState(false);
   const [previewState, setPreviewState] = useState<'IDLE' | 'ERROR' | 'PORTFOLIO_CHANGED'>('IDLE');
   const catalogRequest = useRef<AbortController | null>(null);
   const previewRequest = useRef<AbortController | null>(null);
@@ -584,6 +665,7 @@ export function LocalDemoAllocationPlanner({
     key: string,
     options: Readonly<{ preserveAppliedPreview?: boolean }> = {},
   ): Promise<void> {
+    if (publicTestnetWriteActive) return;
     const preserveAppliedPreview = options.preserveAppliedPreview === true;
     requestGeneration.current += 1;
     previewRequest.current?.abort();
@@ -659,7 +741,8 @@ export function LocalDemoAllocationPlanner({
       preview === null ||
       draftLiquidReserveBasisPoints === null ||
       draftLiquidReserveBasisPoints === preview.selection.liquidReserveBasisPoints ||
-      pendingKey !== null
+      pendingKey !== null ||
+      publicTestnetWriteActive
     ) {
       return;
     }
@@ -680,14 +763,15 @@ export function LocalDemoAllocationPlanner({
       <div className="local-demo-allocation-heading">
         <div>
           <p className="eyebrow">Allocation preview</p>
-          <h2 id="local-demo-allocation-title">Choose how to allocate your capital.</h2>
+          <h2 id="local-demo-allocation-title">Preview your managed allocation.</h2>
         </div>
         <span className="local-demo-proof-badge">Local model · estimate only</span>
       </div>
       <p className="local-demo-allocation-intro">
-        Compare Crypto Lending plans across connected EVM and Solana fixture balances. Ecosystem
-        allocation, variable fee estimates, and the first positive day after estimated fees appear
-        only after you select a plan.
+        Preview a Crypto Lending managed blend across connected EVM and Solana fixture balances. It
+        starts with no liquid reserve; after previewing, use the slider to add liquidity if needed.
+        Ecosystem allocation, variable fee estimates, and the first positive day after estimated
+        fees appear only after you select the blend.
       </p>
 
       {catalogError ? (
@@ -714,8 +798,10 @@ export function LocalDemoAllocationPlanner({
         <RateStatus catalog={catalog} />
       )}
 
-      <div className="local-demo-allocation-choices" role="group" aria-label="Allocation plans">
-        {LOCAL_DEMO_ALLOCATION_PRESETS.map((preset) => {
+      <div className="local-demo-allocation-choices" role="group" aria-label="Managed allocation">
+        {LOCAL_DEMO_ALLOCATION_PRESETS.filter((preset) =>
+          LOCAL_DEMO_VISIBLE_ALLOCATION_PRESET_IDS.some((presetId) => presetId === preset.id),
+        ).map((preset) => {
           const key = `PRESET:${preset.id}`;
           return (
             <button
@@ -723,13 +809,15 @@ export function LocalDemoAllocationPlanner({
               key={preset.id}
               type="button"
               aria-pressed={selectedKey === key}
-              disabled={pendingKey !== null || catalog === null}
+              disabled={pendingKey !== null || catalog === null || publicTestnetWriteActive}
               onClick={() =>
                 void requestPreview(
                   {
                     kind: 'PRESET',
                     presetId: preset.id,
-                    liquidReserveBasisPoints: preset.liquidReserveBasisPoints,
+                    liquidReserveBasisPoints:
+                      preview?.selection.liquidReserveBasisPoints ??
+                      preset.liquidReserveBasisPoints,
                   },
                   key,
                 )
@@ -742,12 +830,12 @@ export function LocalDemoAllocationPlanner({
                     ? liquidityUpdatePending
                       ? 'Updating…'
                       : 'Calculating…'
-                    : 'Preview plan'}
+                    : 'Preview blend'}
                 </small>
               </span>
               <span className="local-demo-allocation-choice-description">{preset.description}</span>
               <span className="local-demo-allocation-choice-apy">
-                <small>Liquid reserve</small>
+                <small>Default liquid reserve</small>
                 <strong>{percentage(preset.liquidReserveBasisPoints)}</strong>
               </span>
               <span className="local-demo-allocation-mix">
@@ -779,7 +867,7 @@ export function LocalDemoAllocationPlanner({
       {previewState === 'PORTFOLIO_CHANGED' ? (
         <p className="local-demo-allocation-error" role="alert">
           Your connected-wallet portfolio changed before this preview completed. The portfolio is
-          being refreshed; choose a plan again when it is ready.
+          being refreshed; preview the managed blend again when it is ready.
         </p>
       ) : null}
       {previewState === 'ERROR' ? (
@@ -796,13 +884,17 @@ export function LocalDemoAllocationPlanner({
             draftLiquidReserveBasisPoints ?? preview.selection.liquidReserveBasisPoints
           }
           liquidityUpdatePending={liquidityUpdatePending}
+          publicTestnetWriteActive={publicTestnetWriteActive}
           onDraftLiquidityChange={(basisPoints) => {
-            if (!liquidityUpdatePending) {
+            if (!liquidityUpdatePending && !publicTestnetWriteActive) {
               setDraftLiquidReserveBasisPoints(basisPoints);
               setPreviewState('IDLE');
             }
           }}
           onApplyLiquidity={applyDraftLiquidity}
+          onUnauthenticated={onUnauthenticated}
+          publicTestnetProofDependencies={publicTestnetProofDependencies}
+          onPublicTestnetWriteActivityChange={setPublicTestnetWriteActive}
         />
       )}
     </section>

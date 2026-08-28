@@ -208,7 +208,44 @@ describe('local demo HTTP boundary', () => {
               properties: {
                 modelId: { type: 'string', enum: ['LOCAL_DEMO_ALLOCATION_COST_V2'] },
                 isQuote: { type: 'boolean', enum: [false] },
+                fundingTreatment: {
+                  type: 'string',
+                  enum: ['MIXED_DEDUCT_FROM_GROSS_AND_ADD_ON_TOP'],
+                },
+                rounding: {
+                  type: 'string',
+                  enum: ['CEIL_VARIABLE_COMPONENTS_PLATFORM_FEE_HALF_EVEN'],
+                },
+                routingFeePolicy: {
+                  type: 'object',
+                  additionalProperties: false,
+                  required: ['tier', 'classification', 'ruleVersion'],
+                  properties: {
+                    tier: { type: 'string', enum: ['FREE'] },
+                    classification: {
+                      type: 'string',
+                      enum: ['DIRECT_COMPATIBLE', 'MATERIAL_ORCHESTRATION'],
+                    },
+                    ruleVersion: { type: 'integer', enum: [1] },
+                  },
+                },
+                deductedFromGrossUsdMinor: {
+                  type: 'string',
+                  pattern: '^(?:0|[1-9][0-9]*)$',
+                },
+                addedOnTopUsdMinor: {
+                  type: 'string',
+                  pattern: '^(?:0|[1-9][0-9]*)$',
+                },
+                retainedRoundingResidualUsdMinor: {
+                  type: 'string',
+                  enum: ['0', '1', '2', '3'],
+                },
                 totalUsdMinor: { type: 'string', pattern: '^(?:0|[1-9][0-9]*)$' },
+                requiredCapitalIncludingAddedOnTopUsdMinor: {
+                  type: 'string',
+                  pattern: '^(?:0|[1-9][0-9]*)$',
+                },
               },
             },
             publicExecution: {
@@ -244,7 +281,7 @@ describe('local demo HTTP boundary', () => {
       'CONVERSION',
       'CROSS_ECOSYSTEM_TRANSFER',
       'MARKET_IMPACT',
-      'ROUTING',
+      'PLATFORM_ROUTING',
     ]) {
       expect(publicSchemas).toContain(`"${component}"`);
     }

@@ -78,7 +78,7 @@ const BALANCED_REQUEST_SELECTION = Object.freeze({
 });
 
 const YIELD_CATALOG: LocalDemoYieldCatalogResponse = new LocalDemoYieldCatalogService().read(
-  new Date('2026-08-26T22:00:00.000Z'),
+  new Date('2026-08-27T01:05:00.000Z'),
 );
 
 const ALLOCATION_PREVIEW: LocalDemoAllocationPreviewResponse = Object.freeze({
@@ -88,7 +88,7 @@ const ALLOCATION_PREVIEW: LocalDemoAllocationPreviewResponse = Object.freeze({
   selection: Object.freeze({
     kind: 'PRESET',
     presetId: 'BALANCED',
-    label: 'Balanced blend',
+    label: 'Managed blend',
     description:
       'Keep 30% readily available and allocate the remainder to the managed yield strategy.',
     liquidReserveBasisPoints: 3_000,
@@ -113,14 +113,14 @@ const ALLOCATION_PREVIEW: LocalDemoAllocationPreviewResponse = Object.freeze({
       allocationId: 'LIQUID_RESERVE',
       label: 'Liquid reserve',
       percentageBasisPoints: 3_000,
-      amountUsdMinor: '329700',
+      amountUsdMinor: '329718',
     }),
     Object.freeze({
       bucket: 'MANAGED_YIELD',
       allocationId: 'MANAGED_YIELD',
       label: 'Managed yield',
       percentageBasisPoints: 7_000,
-      amountUsdMinor: '769300',
+      amountUsdMinor: '769342',
     }),
   ]),
   managedYieldComposition: Object.freeze([
@@ -128,13 +128,13 @@ const ALLOCATION_PREVIEW: LocalDemoAllocationPreviewResponse = Object.freeze({
       ecosystem: 'EVM',
       label: 'EVM managed yield',
       percentageBasisPointsOfManagedYield: 6_364,
-      amountUsdMinor: '489555',
+      amountUsdMinor: '489609',
     }),
     Object.freeze({
       ecosystem: 'SOLANA',
       label: 'SVM managed yield',
       percentageBasisPointsOfManagedYield: 3_636,
-      amountUsdMinor: '279745',
+      amountUsdMinor: '279733',
     }),
   ]),
   compositionSummary: Object.freeze({
@@ -142,7 +142,6 @@ const ALLOCATION_PREVIEW: LocalDemoAllocationPreviewResponse = Object.freeze({
     crossEcosystemTransferRequired: false,
     crossEcosystemTransferUsdMinor: '0',
     activeEcosystemCount: 2,
-    activeAllocationCount: 3,
   }),
   executionCost: Object.freeze({
     actualLocalOperation: Object.freeze({ status: 'NO_EXECUTION', amountUsdMinor: '0' }),
@@ -151,55 +150,69 @@ const ALLOCATION_PREVIEW: LocalDemoAllocationPreviewResponse = Object.freeze({
       modelId: 'LOCAL_DEMO_ALLOCATION_COST_V2',
       isQuote: false,
       costBasisCapitalUsdMinor: '1100000',
-      fundingTreatment: 'DEDUCT_FROM_GROSS_BEFORE_PROJECTION',
-      rounding: 'CEIL_EACH_VARIABLE_COMPONENT_TO_USD_MINOR',
+      fundingTreatment: 'MIXED_DEDUCT_FROM_GROSS_AND_ADD_ON_TOP',
+      rounding: 'CEIL_VARIABLE_COMPONENTS_PLATFORM_FEE_HALF_EVEN',
+      routingFeePolicy: Object.freeze({
+        tier: 'FREE',
+        classification: 'MATERIAL_ORCHESTRATION',
+        ruleVersion: 1,
+      }),
       components: Object.freeze([
         Object.freeze({
           code: 'NETWORK',
           label: 'Estimated network costs',
           calculationBasis: 'NETWORK_ACTIVATION_AND_POSITION_VOLUME',
+          fundingTreatment: 'DEDUCTED_FROM_GROSS',
           amountUsdMinor: '400',
         }),
         Object.freeze({
           code: 'CONVERSION',
           label: 'Estimated conversion costs',
           calculationBasis: 'TWELVE_BPS_OF_REQUIRED_CONVERSION',
+          fundingTreatment: 'DEDUCTED_FROM_GROSS',
           amountUsdMinor: '200',
         }),
         Object.freeze({
           code: 'CROSS_ECOSYSTEM_TRANSFER',
           label: 'Estimated EVM-Solana transfer costs',
           calculationBasis: 'NO_CROSS_ECOSYSTEM_TRANSFER',
+          fundingTreatment: 'DEDUCTED_FROM_GROSS',
           amountUsdMinor: '0',
         }),
         Object.freeze({
           code: 'MARKET_IMPACT',
           label: 'Estimated market impact',
           calculationBasis: 'POSITION_SIZE_AND_UTILIZATION',
+          fundingTreatment: 'DEDUCTED_FROM_GROSS',
           amountUsdMinor: '340',
         }),
         Object.freeze({
-          code: 'ROUTING',
-          label: 'Estimated routing fee',
-          calculationBasis: 'TWENTY_CENTS_PER_ACTIVE_ALLOCATION',
-          amountUsdMinor: '60',
+          code: 'PLATFORM_ROUTING',
+          label: 'Estimated platform routing fee',
+          calculationBasis: 'CANONICAL_PLATFORM_ROUTING_RULE_V1',
+          fundingTreatment: 'ADDED_ON_TOP',
+          amountUsdMinor: '1539',
         }),
       ]),
-      totalUsdMinor: '1000',
+      deductedFromGrossUsdMinor: '940',
+      addedOnTopUsdMinor: '1539',
+      retainedRoundingResidualUsdMinor: '0',
+      totalUsdMinor: '2479',
+      requiredCapitalIncludingAddedOnTopUsdMinor: '1101539',
     }),
     publicExecution: Object.freeze({ status: 'UNQUOTED', amountUsdMinor: null }),
   }),
-  capitalIncludedInProjectionUsdMinor: '1099000',
+  capitalIncludedInProjectionUsdMinor: '1099060',
   yieldProjection: Object.freeze({
     source: 'MANAGED_RATE_SNAPSHOT',
-    calculationMethod: 'INTERNAL_POSITION_WEIGHTED_EXACT_BASE_APY',
+    calculationMethod: 'INTERNAL_POSITION_WEIGHTED_25_BPS_CONSERVATIVE_BUCKET',
     effectiveApyBasisPoints: 325,
-    projectedAnnualYieldUsdMinor: '35717',
-    projectedAnnualYieldAfterFeesUsdMinor: '34717',
+    projectedAnnualYieldUsdMinor: '35719',
+    projectedAnnualYieldAfterFeesUsdMinor: '33240',
     firstPositiveDayAfterFees: Object.freeze({
       calculationMethod: 'FIRST_WHOLE_DAY_VISIBLE_YIELD_EXCEEDS_ESTIMATED_FEES',
       status: 'RECOVERED_WITHIN_HORIZON',
-      day: 11,
+      day: 26,
       modelHorizonDays: 365,
     }),
   }),
@@ -330,9 +343,11 @@ function expectUnavailable(error: unknown, response: ResponseFixture): void {
 
 function expectNoServerConfidentialStrategyDetails(value: unknown): void {
   const serialized = JSON.stringify(value);
-  expect(serialized).not.toMatch(/morpho|graphql|api\.morpho/iu);
   expect(serialized).not.toMatch(
-    /"(?:provider|providerId|providerIds|protocol|protocolId|marketId|marketIds|opportunity|opportunities|provenance|sourceReference|payloadSha256|normalizer|endpoint)"\s*:/iu,
+    /morpho|kamino|aave|save|solend|compound|moonwell|spark|venus|euler|marginfi|\bp0\b|project[\s._/-]*0|bnb|eip155:56|graphql|api\./iu,
+  );
+  expect(serialized).not.toMatch(
+    /"(?:provider|providerId|providerIds|providerName|protocol|protocolId|protocolName|marketId|marketIds|reserveId|opportunity|opportunityId|opportunities|sourceId|provenance|sourceReference|sourceObservedAt|retrievedAt|payloadSha256|normalizer|normalizerId|normalizerVersion|attributes|endpoint)"\s*:/iu,
   );
 }
 
@@ -521,8 +536,8 @@ describe('LocalDemoController', () => {
       strategyMode: 'PORTFOLIO_CROSS_CHAIN_BLEND',
       ecosystems: ['EVM', 'SOLANA'],
       snapshot: {
-        id: 'managed-rate-snapshot-v2',
-        capturedAt: '2026-08-26T21:20:06.659Z',
+        id: 'managed-rate-snapshot-v3',
+        capturedAt: '2026-08-27T01:04:48.000Z',
         staleAfter: '2026-08-27T14:14:54.580Z',
         freshness: 'CURRENT',
         staleBehavior: 'LABEL_STALE_KEEP_NON_EXECUTABLE',

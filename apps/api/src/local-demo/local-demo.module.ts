@@ -32,5 +32,6 @@ import { LocalDemoController } from './local-demo.controller';
     LocalDemoAllocationService,
     LocalDemoPrivacyInterceptor,
   ],
+  exports: [LOCAL_DEMO_RUNTIME_CONFIG, LocalDemoAllocationService],
 })
 export class LocalDemoModule {}

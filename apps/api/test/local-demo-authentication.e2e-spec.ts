@@ -406,17 +406,19 @@ describe('local demo authentication boundary (e2e)', () => {
       strategyMode: 'PORTFOLIO_CROSS_CHAIN_BLEND',
       ecosystems: ['EVM', 'SOLANA'],
       snapshot: {
-        id: 'managed-rate-snapshot-v2',
-        capturedAt: '2026-08-26T21:20:06.659Z',
+        id: 'managed-rate-snapshot-v3',
+        capturedAt: '2026-08-27T01:04:48.000Z',
         staleAfter: '2026-08-27T14:14:54.580Z',
-        freshness: 'CURRENT',
+        freshness: 'STALE',
         staleBehavior: 'LABEL_STALE_KEEP_NON_EXECUTABLE',
         riskClassification: 'NOT_ASSESSED',
       },
     });
-    expect(JSON.stringify(catalog.body)).not.toMatch(/morpho|graphql|api\.morpho/iu);
     expect(JSON.stringify(catalog.body)).not.toMatch(
-      /"(?:provider|providerId|providerIds|protocol|protocolId|marketId|marketIds|opportunity|opportunities|provenance|sourceReference|payloadSha256|normalizer|endpoint)"\s*:/iu,
+      /morpho|kamino|aave|save|solend|compound|moonwell|spark|venus|euler|marginfi|\bp0\b|project[\s._/-]*0|bnb|eip155:56|graphql|api\./iu,
+    );
+    expect(JSON.stringify(catalog.body)).not.toMatch(
+      /"(?:provider|providerId|providerIds|providerName|protocol|protocolId|protocolName|marketId|marketIds|reserveId|opportunity|opportunityId|opportunities|sourceId|provenance|sourceReference|sourceObservedAt|retrievedAt|payloadSha256|normalizer|normalizerId|normalizerVersion|attributes|endpoint)"\s*:/iu,
     );
 
     const displayedPortfolio = await request(app.getHttpServer())
@@ -458,13 +460,13 @@ describe('local demo authentication boundary (e2e)', () => {
       selection: {
         kind: 'PRESET',
         presetId: 'BALANCED',
-        label: 'Balanced blend',
+        label: 'Managed blend',
         description:
           'Keep 30% readily available and allocate the remainder to the managed yield strategy.',
         liquidReserveBasisPoints: 3000,
       },
       rateSnapshot: {
-        id: 'managed-rate-snapshot-v2',
+        id: 'managed-rate-snapshot-v3',
         staleBehavior: 'LABEL_STALE_KEEP_NON_EXECUTABLE',
         riskClassificationAvailable: false,
         riskClassification: 'NOT_ASSESSED',
@@ -506,7 +508,6 @@ describe('local demo authentication boundary (e2e)', () => {
         crossEcosystemTransferRequired: false,
         crossEcosystemTransferUsdMinor: '0',
         activeEcosystemCount: 1,
-        activeAllocationCount: 2,
       },
       executionCost: {
         actualLocalOperation: { status: 'NO_EXECUTION', amountUsdMinor: '0' },
@@ -515,38 +516,52 @@ describe('local demo authentication boundary (e2e)', () => {
           modelId: 'LOCAL_DEMO_ALLOCATION_COST_V2',
           isQuote: false,
           costBasisCapitalUsdMinor: '700000',
-          fundingTreatment: 'DEDUCT_FROM_GROSS_BEFORE_PROJECTION',
-          rounding: 'CEIL_EACH_VARIABLE_COMPONENT_TO_USD_MINOR',
+          fundingTreatment: 'MIXED_DEDUCT_FROM_GROSS_AND_ADD_ON_TOP',
+          rounding: 'CEIL_VARIABLE_COMPONENTS_PLATFORM_FEE_HALF_EVEN',
+          routingFeePolicy: {
+            tier: 'FREE',
+            classification: 'MATERIAL_ORCHESTRATION',
+            ruleVersion: 1,
+          },
           components: [
             {
               code: 'NETWORK',
               calculationBasis: 'NETWORK_ACTIVATION_AND_POSITION_VOLUME',
+              fundingTreatment: 'DEDUCTED_FROM_GROSS',
             },
             {
               code: 'CONVERSION',
               calculationBasis: 'TWELVE_BPS_OF_REQUIRED_CONVERSION',
+              fundingTreatment: 'DEDUCTED_FROM_GROSS',
               amountUsdMinor: '0',
             },
             {
               code: 'CROSS_ECOSYSTEM_TRANSFER',
               calculationBasis: 'NO_CROSS_ECOSYSTEM_TRANSFER',
+              fundingTreatment: 'DEDUCTED_FROM_GROSS',
               amountUsdMinor: '0',
             },
             {
               code: 'MARKET_IMPACT',
               calculationBasis: 'POSITION_SIZE_AND_UTILIZATION',
+              fundingTreatment: 'DEDUCTED_FROM_GROSS',
             },
             {
-              code: 'ROUTING',
-              calculationBasis: 'TWENTY_CENTS_PER_ACTIVE_ALLOCATION',
+              code: 'PLATFORM_ROUTING',
+              calculationBasis: 'CANONICAL_PLATFORM_ROUTING_RULE_V1',
+              fundingTreatment: 'ADDED_ON_TOP',
             },
           ],
+          deductedFromGrossUsdMinor: expect.any(String),
+          addedOnTopUsdMinor: expect.any(String),
+          retainedRoundingResidualUsdMinor: expect.any(String),
+          requiredCapitalIncludingAddedOnTopUsdMinor: expect.any(String),
         },
         publicExecution: { status: 'UNQUOTED', amountUsdMinor: null },
       },
       yieldProjection: {
         source: 'MANAGED_RATE_SNAPSHOT',
-        calculationMethod: 'INTERNAL_POSITION_WEIGHTED_EXACT_BASE_APY',
+        calculationMethod: 'INTERNAL_POSITION_WEIGHTED_25_BPS_CONSERVATIVE_BUCKET',
         firstPositiveDayAfterFees: {
           calculationMethod: 'FIRST_WHOLE_DAY_VISIBLE_YIELD_EXCEEDS_ESTIMATED_FEES',
           status: 'RECOVERED_WITHIN_HORIZON',
@@ -564,11 +579,24 @@ describe('local demo authentication boundary (e2e)', () => {
     ).toBe(BigInt(preview.body.capitalIncludedInProjectionUsdMinor));
     expect(
       BigInt(preview.body.capitalIncludedInProjectionUsdMinor) +
-        BigInt(preview.body.executionCost.modeledScenario.totalUsdMinor),
+        BigInt(preview.body.executionCost.modeledScenario.deductedFromGrossUsdMinor) +
+        BigInt(preview.body.executionCost.modeledScenario.retainedRoundingResidualUsdMinor),
     ).toBe(BigInt(preview.body.grossCapitalUsdMinor));
-    expect(JSON.stringify(preview.body)).not.toMatch(/morpho|graphql|api\.morpho/iu);
+    expect(
+      BigInt(preview.body.executionCost.modeledScenario.deductedFromGrossUsdMinor) +
+        BigInt(preview.body.executionCost.modeledScenario.addedOnTopUsdMinor),
+    ).toBe(BigInt(preview.body.executionCost.modeledScenario.totalUsdMinor));
+    expect(
+      BigInt(preview.body.grossCapitalUsdMinor) +
+        BigInt(preview.body.executionCost.modeledScenario.addedOnTopUsdMinor),
+    ).toBe(
+      BigInt(preview.body.executionCost.modeledScenario.requiredCapitalIncludingAddedOnTopUsdMinor),
+    );
     expect(JSON.stringify(preview.body)).not.toMatch(
-      /"(?:provider|providerId|providerIds|protocol|protocolId|marketId|marketIds|opportunity|opportunities|provenance|sourceReference|payloadSha256|normalizer|endpoint)"\s*:/iu,
+      /morpho|kamino|aave|save|solend|compound|moonwell|spark|venus|euler|marginfi|\bp0\b|project[\s._/-]*0|bnb|eip155:56|graphql|api\./iu,
+    );
+    expect(JSON.stringify(preview.body)).not.toMatch(
+      /"(?:provider|providerId|providerIds|providerName|protocol|protocolId|protocolName|marketId|marketIds|reserveId|opportunity|opportunityId|opportunities|sourceId|provenance|sourceReference|sourceObservedAt|retrievedAt|payloadSha256|normalizer|normalizerId|normalizerVersion|attributes|endpoint)"\s*:/iu,
     );
     expect(repository.resolveSession).toHaveBeenLastCalledWith(
       expect.objectContaining({ csrf: expect.objectContaining({ required: true }) }),

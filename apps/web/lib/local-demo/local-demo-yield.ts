@@ -4,39 +4,42 @@ const CANONICAL_SIGNED_USD_MINOR = /^(?:0|-?[1-9][0-9]{0,17})$/u;
 const LOCAL_DEMO_PORTFOLIO_SNAPSHOT_ID = /^local-demo-portfolio:[0-9a-f]{32}$/u;
 
 export const LOCAL_DEMO_YIELD_CATALOG_PATH = '/api/v1/local-demo/yield-catalog' as const;
-export const LOCAL_DEMO_PUBLIC_RATE_SNAPSHOT_ID = 'managed-rate-snapshot-v2' as const;
+export const LOCAL_DEMO_PUBLIC_RATE_SNAPSHOT_ID = 'managed-rate-snapshot-v3' as const;
 export const LOCAL_DEMO_YIELD_ECOSYSTEMS = Object.freeze(['EVM', 'SOLANA'] as const);
+export const LOCAL_DEMO_DEFAULT_LIQUID_RESERVE_BASIS_POINTS = 0 as const;
+
+const LOCAL_DEMO_ALLOCATION_PRESET_DESCRIPTION =
+  'Starts fully allocated to managed yield. Add a liquid reserve with the slider after previewing.';
 
 export const LOCAL_DEMO_ALLOCATION_PRESETS = Object.freeze([
   Object.freeze({
     id: 'MORE_LIQUID',
     label: 'More liquid',
-    description:
-      'Starts at 60% readily available and allocates the remainder to the managed yield strategy.',
-    liquidReserveBasisPoints: 6_000,
+    description: LOCAL_DEMO_ALLOCATION_PRESET_DESCRIPTION,
+    liquidReserveBasisPoints: LOCAL_DEMO_DEFAULT_LIQUID_RESERVE_BASIS_POINTS,
   }),
   Object.freeze({
     id: 'BALANCED',
-    label: 'Balanced blend',
-    description:
-      'Starts at 30% readily available and allocates the remainder to the managed yield strategy.',
-    liquidReserveBasisPoints: 3_000,
+    label: 'Managed blend',
+    description: LOCAL_DEMO_ALLOCATION_PRESET_DESCRIPTION,
+    liquidReserveBasisPoints: LOCAL_DEMO_DEFAULT_LIQUID_RESERVE_BASIS_POINTS,
   }),
   Object.freeze({
     id: 'MORE_YIELD',
     label: 'More yield',
-    description:
-      'Starts at 15% readily available and allocates the remainder to the managed yield strategy.',
-    liquidReserveBasisPoints: 1_500,
+    description: LOCAL_DEMO_ALLOCATION_PRESET_DESCRIPTION,
+    liquidReserveBasisPoints: LOCAL_DEMO_DEFAULT_LIQUID_RESERVE_BASIS_POINTS,
   }),
 ] as const);
+
+export const LOCAL_DEMO_VISIBLE_ALLOCATION_PRESET_IDS = Object.freeze(['BALANCED'] as const);
 
 export const LOCAL_DEMO_EXECUTION_COST_COMPONENTS = Object.freeze([
   'NETWORK',
   'CONVERSION',
   'CROSS_ECOSYSTEM_TRANSFER',
   'MARKET_IMPACT',
-  'ROUTING',
+  'PLATFORM_ROUTING',
 ] as const);
 export const LOCAL_DEMO_BREAK_EVEN_MODEL_HORIZON_DAYS = 365 as const;
 export const LOCAL_DEMO_MIN_LIQUID_RESERVE_BASIS_POINTS = 0 as const;
@@ -114,7 +117,6 @@ export interface LocalDemoAllocationPreview {
     crossEcosystemTransferRequired: false;
     crossEcosystemTransferUsdMinor: '0';
     activeEcosystemCount: 1 | 2;
-    activeAllocationCount: number;
   }>;
   readonly executionCost: Readonly<{
     actualLocalOperation: Readonly<{
@@ -126,8 +128,13 @@ export interface LocalDemoAllocationPreview {
       modelId: 'LOCAL_DEMO_ALLOCATION_COST_V2';
       isQuote: false;
       costBasisCapitalUsdMinor: string;
-      fundingTreatment: 'DEDUCT_FROM_GROSS_BEFORE_PROJECTION';
-      rounding: 'CEIL_EACH_VARIABLE_COMPONENT_TO_USD_MINOR';
+      fundingTreatment: 'MIXED_DEDUCT_FROM_GROSS_AND_ADD_ON_TOP';
+      rounding: 'CEIL_VARIABLE_COMPONENTS_PLATFORM_FEE_HALF_EVEN';
+      routingFeePolicy: Readonly<{
+        tier: 'FREE';
+        classification: 'MATERIAL_ORCHESTRATION' | 'DIRECT_COMPATIBLE';
+        ruleVersion: 1;
+      }>;
       components: readonly Readonly<{
         code: LocalDemoExecutionCostComponentCode;
         label: string;
@@ -136,10 +143,15 @@ export interface LocalDemoAllocationPreview {
           | 'TWELVE_BPS_OF_REQUIRED_CONVERSION'
           | 'NO_CROSS_ECOSYSTEM_TRANSFER'
           | 'POSITION_SIZE_AND_UTILIZATION'
-          | 'TWENTY_CENTS_PER_ACTIVE_ALLOCATION';
+          | 'CANONICAL_PLATFORM_ROUTING_RULE_V1';
+        fundingTreatment: 'DEDUCTED_FROM_GROSS' | 'ADDED_ON_TOP';
         amountUsdMinor: string;
       }>[];
+      deductedFromGrossUsdMinor: string;
+      addedOnTopUsdMinor: string;
+      retainedRoundingResidualUsdMinor: string;
       totalUsdMinor: string;
+      requiredCapitalIncludingAddedOnTopUsdMinor: string;
     }>;
     publicExecution: Readonly<{
       status: 'UNQUOTED';
@@ -149,7 +161,7 @@ export interface LocalDemoAllocationPreview {
   readonly capitalIncludedInProjectionUsdMinor: string;
   readonly yieldProjection: Readonly<{
     source: 'MANAGED_RATE_SNAPSHOT';
-    calculationMethod: 'INTERNAL_POSITION_WEIGHTED_EXACT_BASE_APY';
+    calculationMethod: 'INTERNAL_POSITION_WEIGHTED_25_BPS_CONSERVATIVE_BUCKET';
     effectiveApyBasisPoints: number;
     projectedAnnualYieldUsdMinor: string;
     projectedAnnualYieldAfterFeesUsdMinor: string;
@@ -180,9 +192,9 @@ const COST_COMPONENT_POLICY = Object.freeze({
     label: 'Estimated market impact',
     calculationBasis: 'POSITION_SIZE_AND_UTILIZATION' as const,
   }),
-  ROUTING: Object.freeze({
-    label: 'Estimated routing fee',
-    calculationBasis: 'TWENTY_CENTS_PER_ACTIVE_ALLOCATION' as const,
+  PLATFORM_ROUTING: Object.freeze({
+    label: 'Estimated platform routing fee',
+    calculationBasis: 'CANONICAL_PLATFORM_ROUTING_RULE_V1' as const,
   }),
 });
 
@@ -297,19 +309,22 @@ function exactAnnualYieldInterval(
   const capital = BigInt(capitalIncludedInProjectionUsdMinor);
   if (capital <= 0n) return null;
 
-  // The API intentionally keeps the exact internal rate private. These two
-  // public values are floors of that same exact annual-yield amount, so their
-  // half-open rational intervals must overlap.
-  const lowerScaled =
-    annualYield * 10_000n > BigInt(effectiveApyBasisPoints) * capital
-      ? annualYield * 10_000n
-      : BigInt(effectiveApyBasisPoints) * capital;
-  const upperFromYield = (annualYield + 1n) * 10_000n;
-  const upperFromApy = BigInt(effectiveApyBasisPoints + 1) * capital;
-  const upperExclusive = upperFromYield < upperFromApy ? upperFromYield : upperFromApy;
-  return lowerScaled < upperExclusive
-    ? Object.freeze({ lowerScaled, upperExclusiveScaled: upperExclusive, scale: 10_000n as const })
-    : null;
+  // The public APY is the exact conservative 25-bps bucket used for the public
+  // projection, rather than a one-basis-point rounding interval. The disclosed
+  // whole-cent yield must therefore be the floor of this exact bucketed amount.
+  if (effectiveApyBasisPoints % 25 !== 0) return null;
+  const bucketedAnnualYieldScaled = BigInt(effectiveApyBasisPoints) * capital;
+  if (
+    bucketedAnnualYieldScaled < annualYield * 10_000n ||
+    bucketedAnnualYieldScaled >= (annualYield + 1n) * 10_000n
+  ) {
+    return null;
+  }
+  return Object.freeze({
+    lowerScaled: bucketedAnnualYieldScaled,
+    upperExclusiveScaled: bucketedAnnualYieldScaled + 1n,
+    scale: 10_000n as const,
+  });
 }
 
 function firstPositiveDayIsConsistent(
@@ -321,10 +336,10 @@ function firstPositiveDayIsConsistent(
 ): boolean {
   const annualYieldFloor = BigInt(projectedAnnualYieldUsdMinor);
   if (annualYieldFloor === 0n) {
-    // The private exact value is either zero or a positive fraction of one
-    // cent per year. Neither can recover at least one cent within 365 days.
     if (day !== null || status === 'RECOVERED_WITHIN_HORIZON') return false;
-    return status === 'NOT_RECOVERED_WITHIN_HORIZON' || exactAnnualYield.lowerScaled === 0n;
+    return exactAnnualYield.lowerScaled === 0n
+      ? status === 'NO_PROJECTED_YIELD'
+      : status === 'NOT_RECOVERED_WITHIN_HORIZON';
   }
   if (status === 'NO_PROJECTED_YIELD') return false;
 
@@ -332,22 +347,15 @@ function firstPositiveDayIsConsistent(
     (estimatedCostUsdMinor + 1n) *
     BigInt(LOCAL_DEMO_BREAK_EVEN_MODEL_HORIZON_DAYS) *
     exactAnnualYield.scale;
-  // Intersecting the public whole-cent yield and rounded APY intervals gives
-  // the complete possible range for the private exact recovery day.
-  const earliestPossibleDay = targetAnnualizedYield / exactAnnualYield.upperExclusiveScaled + 1n;
-  const latestPossibleDay =
+  if (exactAnnualYield.upperExclusiveScaled !== exactAnnualYield.lowerScaled + 1n) return false;
+  const exactFirstPositiveDay =
     (targetAnnualizedYield + exactAnnualYield.lowerScaled - 1n) / exactAnnualYield.lowerScaled;
   const horizon = BigInt(LOCAL_DEMO_BREAK_EVEN_MODEL_HORIZON_DAYS);
 
   if (status === 'NOT_RECOVERED_WITHIN_HORIZON') {
-    return day === null && latestPossibleDay > horizon;
+    return day === null && exactFirstPositiveDay > horizon;
   }
-  return (
-    day !== null &&
-    BigInt(day) >= earliestPossibleDay &&
-    BigInt(day) <= latestPossibleDay &&
-    BigInt(day) <= horizon
-  );
+  return day !== null && BigInt(day) === exactFirstPositiveDay && BigInt(day) <= horizon;
 }
 
 function enumValue<const Values extends readonly string[]>(
@@ -504,6 +512,18 @@ function distributeByAmounts(total: bigint, weights: readonly bigint[]): readonl
   return Object.freeze(amounts);
 }
 
+function halfEvenPercentageCost(amountUsdMinor: bigint, basisPoints: number): bigint {
+  const denominator = 10_000n;
+  const numerator = amountUsdMinor * BigInt(basisPoints);
+  const quotient = numerator / denominator;
+  const remainder = numerator % denominator;
+  const doubledRemainder = remainder * 2n;
+  return doubledRemainder > denominator ||
+    (doubledRemainder === denominator && quotient % 2n === 1n)
+    ? quotient + 1n
+    : quotient;
+}
+
 function parseExecutionCost(
   value: unknown,
   grossCapital: bigint,
@@ -518,18 +538,41 @@ function parseExecutionCost(
     'costBasisCapitalUsdMinor',
     'fundingTreatment',
     'rounding',
+    'routingFeePolicy',
     'components',
+    'deductedFromGrossUsdMinor',
+    'addedOnTopUsdMinor',
+    'retainedRoundingResidualUsdMinor',
     'totalUsdMinor',
+    'requiredCapitalIncludingAddedOnTopUsdMinor',
   ]);
   if (
     modeled.status !== 'AVAILABLE' ||
     modeled.modelId !== 'LOCAL_DEMO_ALLOCATION_COST_V2' ||
     modeled.isQuote !== false ||
-    modeled.fundingTreatment !== 'DEDUCT_FROM_GROSS_BEFORE_PROJECTION' ||
-    modeled.rounding !== 'CEIL_EACH_VARIABLE_COMPONENT_TO_USD_MINOR'
+    modeled.fundingTreatment !== 'MIXED_DEDUCT_FROM_GROSS_AND_ADD_ON_TOP' ||
+    modeled.rounding !== 'CEIL_VARIABLE_COMPONENTS_PLATFORM_FEE_HALF_EVEN'
   ) {
     return invalid();
   }
+  const routingFeePolicyRecord = exactRecord(modeled.routingFeePolicy, [
+    'tier',
+    'classification',
+    'ruleVersion',
+  ]);
+  if (
+    routingFeePolicyRecord.tier !== 'FREE' ||
+    (routingFeePolicyRecord.classification !== 'MATERIAL_ORCHESTRATION' &&
+      routingFeePolicyRecord.classification !== 'DIRECT_COMPATIBLE') ||
+    routingFeePolicyRecord.ruleVersion !== 1
+  ) {
+    return invalid();
+  }
+  const routingFeePolicy = Object.freeze({
+    tier: 'FREE' as const,
+    classification: routingFeePolicyRecord.classification,
+    ruleVersion: 1 as const,
+  });
   const costBasisCapitalUsdMinor = usdMinor(modeled.costBasisCapitalUsdMinor);
   if (BigInt(costBasisCapitalUsdMinor) !== grossCapital) return invalid();
   const components = Object.freeze(
@@ -539,14 +582,20 @@ function parseExecutionCost(
           'code',
           'label',
           'calculationBasis',
+          'fundingTreatment',
           'amountUsdMinor',
         ]);
         const expectedCode = LOCAL_DEMO_EXECUTION_COST_COMPONENTS[index];
         if (expectedCode === undefined || component.code !== expectedCode) return invalid();
         const policy = COST_COMPONENT_POLICY[expectedCode];
+        const fundingTreatment =
+          expectedCode === 'PLATFORM_ROUTING'
+            ? ('ADDED_ON_TOP' as const)
+            : ('DEDUCTED_FROM_GROSS' as const);
         if (
           component.label !== policy.label ||
-          component.calculationBasis !== policy.calculationBasis
+          component.calculationBasis !== policy.calculationBasis ||
+          component.fundingTreatment !== fundingTreatment
         ) {
           return invalid();
         }
@@ -558,15 +607,30 @@ function parseExecutionCost(
           code: expectedCode,
           label: policy.label,
           calculationBasis: policy.calculationBasis,
+          fundingTreatment,
           amountUsdMinor,
         });
       },
     ),
   );
+  const deductedFromGrossUsdMinor = usdMinor(modeled.deductedFromGrossUsdMinor);
+  const addedOnTopUsdMinor = usdMinor(modeled.addedOnTopUsdMinor);
+  const retainedRoundingResidualUsdMinor = usdMinor(modeled.retainedRoundingResidualUsdMinor);
   const totalUsdMinor = usdMinor(modeled.totalUsdMinor);
+  const requiredCapitalIncludingAddedOnTopUsdMinor = usdMinor(
+    modeled.requiredCapitalIncludingAddedOnTopUsdMinor,
+  );
+  const expectedDeductedFromGross = components
+    .filter(({ fundingTreatment }) => fundingTreatment === 'DEDUCTED_FROM_GROSS')
+    .reduce((sum, component) => sum + BigInt(component.amountUsdMinor), 0n);
+  const expectedAddedOnTop = components
+    .filter(({ fundingTreatment }) => fundingTreatment === 'ADDED_ON_TOP')
+    .reduce((sum, component) => sum + BigInt(component.amountUsdMinor), 0n);
   if (
-    components.reduce((sum, component) => sum + BigInt(component.amountUsdMinor), 0n) !==
-    BigInt(totalUsdMinor)
+    expectedDeductedFromGross !== BigInt(deductedFromGrossUsdMinor) ||
+    expectedAddedOnTop !== BigInt(addedOnTopUsdMinor) ||
+    expectedDeductedFromGross + expectedAddedOnTop !== BigInt(totalUsdMinor) ||
+    grossCapital + expectedAddedOnTop !== BigInt(requiredCapitalIncludingAddedOnTopUsdMinor)
   ) {
     return invalid();
   }
@@ -581,10 +645,15 @@ function parseExecutionCost(
       modelId: 'LOCAL_DEMO_ALLOCATION_COST_V2',
       isQuote: false,
       costBasisCapitalUsdMinor,
-      fundingTreatment: 'DEDUCT_FROM_GROSS_BEFORE_PROJECTION',
-      rounding: 'CEIL_EACH_VARIABLE_COMPONENT_TO_USD_MINOR',
+      fundingTreatment: 'MIXED_DEDUCT_FROM_GROSS_AND_ADD_ON_TOP',
+      rounding: 'CEIL_VARIABLE_COMPONENTS_PLATFORM_FEE_HALF_EVEN',
+      routingFeePolicy,
       components,
+      deductedFromGrossUsdMinor,
+      addedOnTopUsdMinor,
+      retainedRoundingResidualUsdMinor,
       totalUsdMinor,
+      requiredCapitalIncludingAddedOnTopUsdMinor,
     }),
     publicExecution: Object.freeze({ status: 'UNQUOTED', amountUsdMinor: null }),
   });
@@ -667,11 +736,16 @@ export function parseLocalDemoAllocationPreview(value: unknown): LocalDemoAlloca
   }
   const executionCost = parseExecutionCost(record.executionCost, grossCapital);
   const estimatedCost = BigInt(executionCost.modeledScenario.totalUsdMinor);
+  const deductedFromGross = BigInt(executionCost.modeledScenario.deductedFromGrossUsdMinor);
+  const retainedRoundingResidual = BigInt(
+    executionCost.modeledScenario.retainedRoundingResidualUsdMinor,
+  );
   const capitalIncludedInProjectionUsdMinor = usdMinor(record.capitalIncludedInProjectionUsdMinor);
   const capitalIncludedInProjection = BigInt(capitalIncludedInProjectionUsdMinor);
   if (
-    estimatedCost >= grossCapital ||
-    grossCapital - estimatedCost !== capitalIncludedInProjection
+    retainedRoundingResidual > 3n ||
+    deductedFromGross + retainedRoundingResidual >= grossCapital ||
+    grossCapital - deductedFromGross - retainedRoundingResidual !== capitalIncludedInProjection
   ) {
     return invalid();
   }
@@ -725,6 +799,17 @@ export function parseLocalDemoAllocationPreview(value: unknown): LocalDemoAlloca
   }
 
   const managedYieldAmount = BigInt(allocations[1]!.amountUsdMinor);
+  const platformRoutingComponent = executionCost.modeledScenario.components.find(
+    ({ code }) => code === 'PLATFORM_ROUTING',
+  );
+  if (platformRoutingComponent === undefined) return invalid();
+  const expectedPlatformRoutingFee =
+    executionCost.modeledScenario.routingFeePolicy.classification === 'DIRECT_COMPATIBLE'
+      ? 0n
+      : halfEvenPercentageCost(managedYieldAmount, 20);
+  if (BigInt(platformRoutingComponent.amountUsdMinor) !== expectedPlatformRoutingFee) {
+    return invalid();
+  }
   const managedYieldComposition = Object.freeze(
     exactArray(record.managedYieldComposition, LOCAL_DEMO_YIELD_ECOSYSTEMS.length).map(
       (candidate, index) => {
@@ -795,7 +880,6 @@ export function parseLocalDemoAllocationPreview(value: unknown): LocalDemoAlloca
     'crossEcosystemTransferRequired',
     'crossEcosystemTransferUsdMinor',
     'activeEcosystemCount',
-    'activeAllocationCount',
   ]);
   const expectedMode =
     activeEcosystemCount === 2
@@ -809,17 +893,11 @@ export function parseLocalDemoAllocationPreview(value: unknown): LocalDemoAlloca
   ) {
     return invalid();
   }
-  const activeAllocationCount = boundedInteger(
-    compositionRecord.activeAllocationCount,
-    activeEcosystemCount,
-    4,
-  );
   const compositionSummary = Object.freeze({
     mode: expectedMode,
     crossEcosystemTransferRequired: false as const,
     crossEcosystemTransferUsdMinor: '0' as const,
     activeEcosystemCount: activeEcosystemCount as 1 | 2,
-    activeAllocationCount,
   });
 
   const projectionRecord = exactRecord(record.yieldProjection, [
@@ -832,7 +910,7 @@ export function parseLocalDemoAllocationPreview(value: unknown): LocalDemoAlloca
   ]);
   if (
     projectionRecord.source !== 'MANAGED_RATE_SNAPSHOT' ||
-    projectionRecord.calculationMethod !== 'INTERNAL_POSITION_WEIGHTED_EXACT_BASE_APY'
+    projectionRecord.calculationMethod !== 'INTERNAL_POSITION_WEIGHTED_25_BPS_CONSERVATIVE_BUCKET'
   ) {
     return invalid();
   }
@@ -903,7 +981,7 @@ export function parseLocalDemoAllocationPreview(value: unknown): LocalDemoAlloca
     capitalIncludedInProjectionUsdMinor,
     yieldProjection: Object.freeze({
       source: 'MANAGED_RATE_SNAPSHOT',
-      calculationMethod: 'INTERNAL_POSITION_WEIGHTED_EXACT_BASE_APY',
+      calculationMethod: 'INTERNAL_POSITION_WEIGHTED_25_BPS_CONSERVATIVE_BUCKET',
       effectiveApyBasisPoints,
       projectedAnnualYieldUsdMinor,
       projectedAnnualYieldAfterFeesUsdMinor,

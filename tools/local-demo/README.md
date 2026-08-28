@@ -89,15 +89,28 @@ evidence. Every screen displays a synthetic-data banner while the mode is on.
   local-demo response adapter and renderer. Wallet roster projections remain
   Sepolia/Solana devnet, and shared production network/asset allowlists are not
   widened.
-- Yield comparisons use checked-in server-confidential source evidence. The API
-  and browser make no live provider request. Browser responses expose only a
-  product-owned EVM/Solana managed-rate status and aggregate ecosystem results;
-  provider identity, protocol identity, market identifiers, provenance, exact
-  observations, and endpoints remain server-confidential. The native blend
-  keeps each fixture asset assigned to its ecosystem, performs no validator,
-  provider, bridge, or transaction I/O, and cannot authorize an action. It does
-  not claim an executable EVM network route. The snapshot is
-  labeled stale after its fixed boundary.
+- Yield comparisons use provider snapshot v3, a checked-in, immutable set of
+  point-in-time developer captures. Its private candidate set contains ten
+  distinct providers: seven on EVM and three on Solana. The EVM candidates are
+  Morpho, Aave, Compound, Moonwell, Spark, Venus, and Euler; the Solana
+  candidates are Kamino, Save, and the internally labeled P0/marginfi candidate.
+  A separately researched Drift observation is excluded before ranking because
+  its observed market was paused and its observation was stale. The API and
+  browser make no live provider request; loading, selecting, and capacity-aware
+  rebalancing over the checked-in snapshots performs no external provider,
+  public-RPC, validator, bridge, or public-chain I/O, creates no transaction,
+  and incurs no provider-request or on-chain execution cost. Browser responses
+  expose only a product-owned EVM/Solana managed-rate status and aggregate
+  ecosystem results. Provider identity, protocol identity, market identifiers,
+  provenance, exact observations, and endpoints remain server-confidential and
+  absent from the public DTO and UI. The v3 aggregate capture time is the latest
+  component capture (`2026-08-27T01:04:48.000Z`), and its stale boundary is the
+  earliest component stale time (`2026-08-27T14:14:54.580Z`), so the complete
+  set becomes stale as soon as any source does. The native blend keeps each
+  fixture asset assigned to its ecosystem and cannot authorize an action.
+  Reward and promotional APR are excluded from ranking and yield projection,
+  provider and protocol risk is unassessed, and deposit and withdrawal
+  availability is unverified. It does not claim an executable EVM network route.
 
 Do not enter a real email address, phone number, seed phrase, private key,
 signature, wallet address, credential, customer record, or real asset.
@@ -157,34 +170,111 @@ restart the attached harness to pick up API source changes.
    both fixture wallets connected, each is `$11,000.00`; no hypothetical route
    fee is deducted before an action is chosen. Inspect the source wallet, chain,
    asset, freshness, and masked-address details.
-9. Review the timestamped managed-rate status, then choose **More liquid**,
-   **Balanced blend**, or **More yield** as a starting point. Only this explicit
-   choice requests the first allocation preview or reveals its cost treatment.
-   In the selected preview, move the liquidity slider from 0% to 95% in 5%
-   steps, then choose **Update preview**. The page keeps the currently applied
+9. Review the timestamped managed-rate status, then choose **Managed blend**.
+   The API retains the other closed preset IDs for compatibility, but the web
+   does not offer them until they gain real server-owned strategy differences.
+   Only this explicit choice requests the first allocation preview or reveals
+   its cost treatment.
+   Every first preview starts at a 0% liquid reserve and 100% managed yield. In
+   the selected preview, move the liquidity slider from 0% to 95% in 5% steps,
+   then choose **Update preview**. The page keeps the currently applied
    percentage visible until the recalculation succeeds; changing the draft or
    updating the preview never moves funds. The reserve percentage applies to
-   capital remaining after modeled one-time fees.
+   capital remaining after deducted modeled costs and any
+   disclosed retained rounding residual.
 
    The browser receives aggregate liquid-reserve and managed-yield buckets only;
    confidential provider, protocol, market, provenance, and endpoint details
    stay on the server. The request is bound to the displayed portfolio snapshot.
-   The result shows provider-neutral EVM/Solana source and managed totals, covers
-   each ecosystem's modeled fees from that ecosystem, keeps capital assigned to
-   its wallet ecosystem, and models no EVM-to-Solana transfer. It does not claim
-   a bridge-free EVM network route. The preview creates no executable route, so
+   The confidential distinct-provider-first selector admits at most one
+   opportunity per provider and caps the result at two opportunities per
+   ecosystem, while the browser receives provider-neutral EVM/Solana source and
+   managed totals without a selected-position count. Internally, the ten private
+   candidates therefore produce at most four selected positions when both
+   ecosystems participate. The selected positions start from the deterministic
+   split, are capped by captured TVL and available-liquidity
+   proxies, and reassign residual capital only within the same ecosystem and
+   selected set. This capacity-aware rebalancing is a local calculation, not a
+   transaction. This heuristic is not a risk assessment. Selection and
+   projection use only captured base supply APY; reward or promotional APR
+   remains separate private metadata and is not included. Provider listing does
+   not verify deposit or withdrawal availability. The result covers each
+   ecosystem's modeled fees from that ecosystem, keeps capital assigned to its
+   wallet ecosystem, and models no EVM-to-Solana transfer. It does not claim a
+   bridge-free EVM network route. The preview creates no executable route, so
    the actual local operation costs $0.00 and public execution remains unquoted.
    A separate non-quote scenario itemizes network, conversion, cross-chain,
-   market-impact, and routing costs, rounds each variable component up to a cent,
-   and deducts the total before allocation and yield projection. Review the
-   aggregate effective APY, annual yield before and after modeled fees, and
-   first-positive-day status. A numbered day is the first whole day when
-   straight-line projected yield exceeds modeled fees by at least one cent within
-   the 365-day horizon; it is not a live rate or execution promise.
+   market-impact, and platform-routing costs. Until subscription entitlements
+   are integrated, the server explicitly uses the canonical Free tier: material
+   orchestration costs 20 basis points of managed capital, and only one exact
+   same-network, same-contract-or-mint direct settlement costs zero. No legacy
+   local-demo routing calculation is stacked with the canonical fee. Network,
+   conversion, and market-impact components round up to a cent and are deducted
+   before allocation. The platform fee uses canonical half-even atomic-unit
+   rounding and is reported as added on top. A fixed-route cent discontinuity
+   can retain up to three cents of user capital outside the projection as a
+   disclosed rounding residual; it is not a fee and is excluded from break-even.
+   Larger route-activation gaps fail closed. Exact observations,
+   including base supply APY decimals and capacity inputs, stay private for
+   ranking, selection, and capacity checks. The public effective APY is
+   conservatively floored to a product-owned 25-basis-point bucket, and public
+   annual yield, after-fee yield, and first-positive-day status are derived from
+   that bucketed rate. Review the aggregate effective APY, annual yield before
+   and after modeled fees, and first-positive-day status. A numbered day is the
+   first whole day when straight-line projected yield exceeds modeled fees by at
+   least one cent within the 365-day horizon; it is not a live rate or execution
+   promise.
 
 10. Confirm the page states **No user-authorized financial transaction was
     created**. Refresh the browser to exercise wallet and session restoration.
     Disconnect a wallet to remove its contribution.
+
+## Optional live public-testnet proof
+
+The attached local harness also enables a separate Solana Devnet proof flow
+outside production and hosted CI. After applying **Managed blend**, connect a
+Solana Devnet browser wallet through Wallet Standard and use the transaction-
+proof submit control. The modeled portfolio and fee preview remain local
+estimates. The live action is only one fixed 0.01 native Devnet SOL deposit into
+one Save/Solend lending position; it does not execute the full EVM/Solana blend
+or move the displayed synthetic portfolio.
+
+Obtain valueless Devnet SOL for free from the official Solana faucet at
+`https://faucet.solana.com/`; do not purchase anything and never enter a seed
+phrase or private key into the application. This flow requires no EVM testnet
+gas, EVM test token, ERC-20 approval, or second wallet confirmation. The API
+prepares one fixed Solana message and the connected Wallet Standard wallet asks
+the user for one confirmation, then signs and broadcasts through the wallet's
+configured Devnet provider. The API never stores a wallet key, signs,
+broadcasts, requests an airdrop, or accepts a caller-supplied RPC, program,
+account list, or transaction message.
+
+The message starts with a fixed-domain, opaque intent memo followed by the five
+reviewed account-setup and lending instructions. The memo makes concurrently
+prepared transactions distinct without adding another confirmation or asset
+movement. Immediately before the wallet call, the browser writes a same-tab
+recovery marker; it adds a returned signature before contacting the API. A
+reload may therefore resume read-only verification of that exact signature, but
+it cannot automatically send or resend a wallet transaction. The marker clears
+only after verified completion, an explicit pre-commit rejection, or the
+server-issued evidence deadline.
+
+The intent remains bound to the authenticated account, Solana wallet, portfolio
+snapshot, and exact applied liquidity selection. Verification retrieves the
+submitted transaction from the fixed Devnet RPC and requires finalized evidence
+for the exact prepared message, signer, program and accounts, 0.01 SOL amount,
+successful lending instruction, and resulting position increase. Pending or
+merely confirmed evidence is not called complete. The Save/Solend program and
+account targets are visible to the wallet, its RPC provider, explorers, and the
+public chain; a non-custodial on-chain transaction cannot conceal them from its
+signer.
+
+The deposited Devnet position remains deposited because this minimal proof
+deliberately has no withdrawal transaction. Restarting the API clears its
+in-memory intent records but does not undo a public Devnet transaction. The
+older `testnet:live:*` commands remain separate four-chain, read-only
+connectivity checks. See `tools/public-testnet/README.md` for the application-
+proof boundary and the independently runnable smoke-test boundary.
 
 The portfolio is not embedded in the page. Its EVM balance is read from the
 real loopback development chain; Solana balance and valuation inputs remain
