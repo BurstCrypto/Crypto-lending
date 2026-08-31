@@ -11,6 +11,7 @@ import type {
   LocalDemoAllocationSelectionInput,
   LocalDemoYieldCatalog,
 } from '../lib/local-demo/local-demo-yield';
+import { rememberPublicTestnetPositionAccount } from '../lib/public-testnet/public-testnet-position-account';
 import type { SelectedSolanaWallet } from '../lib/wallets/solana/discovery';
 import type { SolanaPublicTestnetWalletPort } from '../lib/wallets/solana/public-testnet-executor';
 import { expectProviderPrivateDom } from './local-demo-provider-privacy';
@@ -28,6 +29,7 @@ import {
   PUBLIC_TESTNET_NOW,
   PUBLIC_TESTNET_SIGNATURE,
   publicTestnetIntent,
+  publicTestnetPosition,
   publicTestnetSubmission,
 } from './public-testnet.fixtures';
 
@@ -119,6 +121,52 @@ afterEach(() => {
 });
 
 describe('LocalDemoAllocationPlanner', () => {
+  it('restores the remembered lending position above allocation before any proof is opened', async () => {
+    rememberPublicTestnetPositionAccount(PUBLIC_TESTNET_ACCOUNT);
+    const readPosition = vi.fn(async () => publicTestnetPosition());
+    const proofDependencies: PublicTestnetProofDependencies = {
+      createApi: () => ({
+        createIntent: vi.fn(async () => publicTestnetIntent()),
+        submitTransaction: vi.fn(async () => publicTestnetSubmission()),
+        submitSignedTransaction: vi.fn(async () => publicTestnetSubmission()),
+        readPosition,
+      }),
+      createDiscovery: () => ({
+        start: vi.fn(),
+        stop: vi.fn(),
+        list: () => [],
+        subscribe: () => vi.fn(),
+        select: () => null,
+      }),
+      createWallet: () => {
+        throw new Error('Wallet creation is not expected for a read-only position restore');
+      },
+      now: () => PUBLIC_TESTNET_NOW,
+    };
+    const harness = clientWith({});
+    render(
+      <LocalDemoAllocationPlanner
+        client={harness.client}
+        portfolioSnapshotId={PORTFOLIO_SNAPSHOT_ID}
+        publicTestnetProofDependencies={proofDependencies}
+      />,
+    );
+
+    const allocationPanel = (
+      await screen.findByRole('heading', { name: 'Preview your managed allocation.' })
+    ).closest('section');
+    expect(await screen.findByText(/0\.010000 SOL/u)).toBeInTheDocument();
+    const lendingDashboard = screen.getByRole('region', {
+      name: 'Your Devnet lending position',
+    });
+    expect(lendingDashboard.nextElementSibling).toBe(allocationPanel);
+    expect(readPosition).toHaveBeenCalledWith(
+      expect.objectContaining({ account: PUBLIC_TESTNET_ACCOUNT }),
+      expect.any(AbortSignal),
+    );
+    expect(screen.queryByRole('button', { name: 'Review 0.01 SOL Devnet proof' })).toBeNull();
+  });
+
   it('offers one honest managed blend and no fee amount before selection', async () => {
     const harness = clientWith({});
     const rendered = render(
@@ -809,14 +857,17 @@ describe('LocalDemoAllocationPlanner', () => {
     const pendingSignature = new Promise<string>((resolve) => {
       resolveSignature = resolve;
     });
-    const sendTransaction = vi.fn(async () => pendingSignature);
+    const signTransaction = vi.fn(async () => ({
+      signature: await pendingSignature,
+      serializedTransaction: Uint8Array.of(1, 2, 3),
+    }));
     const wallet: SolanaPublicTestnetWalletPort = {
       connect: vi.fn(async () => PUBLIC_TESTNET_ACCOUNT),
       readSnapshot: vi.fn(async () => ({
         account: PUBLIC_TESTNET_ACCOUNT,
         correctNetwork: true as const,
       })),
-      sendTransaction,
+      signTransaction,
       subscribeInvalidation: vi.fn(() => vi.fn()),
       dispose: vi.fn(),
     };
@@ -824,6 +875,8 @@ describe('LocalDemoAllocationPlanner', () => {
       createApi: () => ({
         createIntent: vi.fn(async () => publicTestnetIntent()),
         submitTransaction: vi.fn(async () => publicTestnetSubmission('PENDING')),
+        submitSignedTransaction: vi.fn(async () => publicTestnetSubmission('PENDING')),
+        readPosition: vi.fn(async () => publicTestnetPosition()),
       }),
       createDiscovery: () => ({
         start: vi.fn(),
@@ -859,10 +912,20 @@ describe('LocalDemoAllocationPlanner', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Review 0.01 SOL Devnet proof' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Connect Phantom' }));
     await screen.findByRole('button', { name: 'Submit Devnet transaction' });
+    const lendingDashboard = screen.getByRole('region', {
+      name: 'Your Devnet lending position',
+    });
+    const allocationPanel = screen
+      .getByRole('heading', { name: 'Preview your managed allocation.' })
+      .closest('section');
+    expect(await within(lendingDashboard).findByText(/0\.010000 SOL/u)).toBeInTheDocument();
+    expect(lendingDashboard.nextElementSibling).toBe(allocationPanel);
+    expect(document.querySelectorAll('#public-testnet-lending-dashboard')).toHaveLength(1);
+    expect(signTransaction).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('checkbox'));
     fireEvent.click(screen.getByRole('button', { name: 'Submit Devnet transaction' }));
 
-    await waitFor(() => expect(sendTransaction).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(signTransaction).toHaveBeenCalledTimes(1));
     expect(slider).toBeDisabled();
     expect(screen.getByRole('button', { name: /Managed blend/u })).toBeDisabled();
     await act(async () => resolveSignature(PUBLIC_TESTNET_SIGNATURE));
@@ -870,7 +933,7 @@ describe('LocalDemoAllocationPlanner', () => {
       await screen.findByRole('button', { name: 'Check server verification' }),
     ).toBeInTheDocument();
     expect(slider).toBeDisabled();
-    expect(sendTransaction).toHaveBeenCalledTimes(1);
+    expect(signTransaction).toHaveBeenCalledTimes(1);
 
     expect(screen.getByRole('button', { name: 'Close' })).toBeDisabled();
     expect(slider).toBeDisabled();

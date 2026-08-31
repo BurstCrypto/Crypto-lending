@@ -1,6 +1,6 @@
 import {
-  SolanaSignAndSendTransaction,
-  type SolanaSignAndSendTransactionFeature,
+  SolanaSignTransaction,
+  type SolanaSignTransactionFeature,
   type SolanaTransactionVersion,
 } from '@solana/wallet-standard-features';
 import { getWallets } from '@wallet-standard/app';
@@ -72,19 +72,19 @@ export function walletStandardEventsFeature(
     : null;
 }
 
-export function walletStandardSignAndSendFeature(
+export function walletStandardSignTransactionFeature(
   wallet: Wallet,
-): SolanaSignAndSendTransactionFeature[typeof SolanaSignAndSendTransaction] | null {
-  const feature = featureRecord(wallet, SolanaSignAndSendTransaction);
+): SolanaSignTransactionFeature[typeof SolanaSignTransaction] | null {
+  const feature = featureRecord(wallet, SolanaSignTransaction);
   if (
     feature === null ||
-    typeof feature.signAndSendTransaction !== 'function' ||
+    typeof feature.signTransaction !== 'function' ||
     !Array.isArray(feature.supportedTransactionVersions) ||
     feature.supportedTransactionVersions.some((version) => version !== 'legacy' && version !== 0)
   ) {
     return null;
   }
-  return feature as unknown as SolanaSignAndSendTransactionFeature[typeof SolanaSignAndSendTransaction];
+  return feature as unknown as SolanaSignTransactionFeature[typeof SolanaSignTransaction];
 }
 
 function safeWalletName(wallet: Wallet): string | null {
@@ -114,7 +114,7 @@ function walletSupportsDevnet(wallet: Wallet): boolean {
 }
 
 function supportedTransactionVersions(wallet: Wallet): readonly SolanaTransactionVersion[] | null {
-  const feature = walletStandardSignAndSendFeature(wallet);
+  const feature = walletStandardSignTransactionFeature(wallet);
   if (feature === null) return null;
   const versions = feature.supportedTransactionVersions.filter(
     (version): version is SolanaTransactionVersion => version === 'legacy' || version === 0,

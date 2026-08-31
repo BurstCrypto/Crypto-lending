@@ -12,11 +12,16 @@ import { LOCAL_DEMO_MAX_LIQUID_RESERVE_BASIS_POINTS } from '../local-demo/local-
 import {
   PUBLIC_TESTNET_ASSET_DECIMALS,
   PUBLIC_TESTNET_CHAIN_ID,
+  PUBLIC_TESTNET_LENDING_MARKET,
+  PUBLIC_TESTNET_LENDING_PROGRAM,
+  PUBLIC_TESTNET_MAX_TRANSACTION_BYTES,
   PUBLIC_TESTNET_PROOF_AMOUNT_ATOMIC_TEXT,
   PUBLIC_TESTNET_SOL_FAUCET,
+  PUBLIC_TESTNET_SOL_RESERVE,
 } from './public-testnet-execution.constants';
 import type {
   PublicTestnetIntentRequest,
+  PublicTestnetPositionRequest,
   PublicTestnetSubmissionRequest,
 } from './public-testnet-execution.service';
 
@@ -130,7 +135,13 @@ export function parsePublicTestnetIntentBody(value: unknown): PublicTestnetInten
 }
 
 export function parsePublicTestnetSubmissionBody(value: unknown): PublicTestnetSubmissionRequest {
-  const body = exactRecord(value, ['signature']);
+  let body: Record<string, unknown>;
+  try {
+    body = exactRecord(value, ['signature']);
+  } catch (error) {
+    if (!(error instanceof PublicTestnetBodyError)) throw error;
+    body = exactRecord(value, ['signature', 'signedTransactionBase64']);
+  }
   if (
     typeof body.signature !== 'string' ||
     body.signature.length < 64 ||
@@ -139,7 +150,49 @@ export function parsePublicTestnetSubmissionBody(value: unknown): PublicTestnetS
   ) {
     return fail();
   }
-  return Object.freeze({ signature: body.signature });
+  if (!('signedTransactionBase64' in body)) {
+    return Object.freeze({ signature: body.signature });
+  }
+  if (
+    typeof body.signedTransactionBase64 !== 'string' ||
+    body.signedTransactionBase64.length === 0 ||
+    !new RegExp(BASE64_SCHEMA, 'u').test(body.signedTransactionBase64)
+  ) {
+    return fail();
+  }
+  const signedTransaction = Buffer.from(body.signedTransactionBase64, 'base64');
+  if (
+    signedTransaction.length === 0 ||
+    signedTransaction.length > PUBLIC_TESTNET_MAX_TRANSACTION_BYTES ||
+    signedTransaction.toString('base64') !== body.signedTransactionBase64
+  ) {
+    return fail();
+  }
+  return Object.freeze({
+    signature: body.signature,
+    signedTransactionBase64: body.signedTransactionBase64,
+  });
+}
+
+export function parsePublicTestnetPositionBody(value: unknown): PublicTestnetPositionRequest {
+  const body = exactRecord(value, ['chainId', 'account']);
+  if (
+    body.chainId !== PUBLIC_TESTNET_CHAIN_ID ||
+    typeof body.account !== 'string' ||
+    body.account.length < 32 ||
+    body.account.length > 44 ||
+    !BASE58.test(body.account)
+  ) {
+    return fail();
+  }
+  let account: string;
+  try {
+    account = new PublicKey(body.account).toBase58();
+  } catch {
+    return fail();
+  }
+  if (account !== body.account) return fail();
+  return Object.freeze({ chainId: PUBLIC_TESTNET_CHAIN_ID, account });
 }
 
 export function parsePublicTestnetIntentId(value: unknown): string {
@@ -195,6 +248,24 @@ export const PUBLIC_TESTNET_SUBMISSION_BODY_SCHEMA: SchemaObject = Object.freeze
   required: ['signature'],
   properties: {
     signature: { type: 'string', pattern: BASE58_SCHEMA, minLength: 64, maxLength: 88 },
+    signedTransactionBase64: {
+      type: 'string',
+      pattern: BASE64_SCHEMA,
+      minLength: 4,
+      maxLength: Math.ceil(PUBLIC_TESTNET_MAX_TRANSACTION_BYTES / 3) * 4,
+      description:
+        'Optional only on the first submission call; exact signed legacy transaction bytes for one server-side Devnet broadcast attempt.',
+    },
+  },
+});
+
+export const PUBLIC_TESTNET_POSITION_BODY_SCHEMA: SchemaObject = Object.freeze({
+  type: 'object',
+  additionalProperties: false,
+  required: ['chainId', 'account'],
+  properties: {
+    chainId: { type: 'string', enum: [PUBLIC_TESTNET_CHAIN_ID] },
+    account: { type: 'string', pattern: BASE58_SCHEMA, minLength: 32, maxLength: 44 },
   },
 });
 
@@ -294,6 +365,96 @@ export const PUBLIC_TESTNET_INTENT_RESPONSE_SCHEMA: SchemaObject = Object.freeze
       },
     },
     providerVisibility: { type: 'string', enum: ['ONCHAIN_TARGETS_PUBLIC_TO_SIGNER'] },
+  },
+});
+
+export const PUBLIC_TESTNET_POSITION_RESPONSE_SCHEMA: SchemaObject = Object.freeze({
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'use',
+    'mayAuthorizeFinancialAction',
+    'chainId',
+    'account',
+    'provider',
+    'position',
+    'rate',
+    'liveObservation',
+  ],
+  properties: {
+    use: { type: 'string', enum: ['PUBLIC_TESTNET_READ_ONLY_POSITION'] },
+    mayAuthorizeFinancialAction: { type: 'boolean', enum: [false] },
+    chainId: { type: 'string', enum: [PUBLIC_TESTNET_CHAIN_ID] },
+    account: { type: 'string', pattern: BASE58_SCHEMA, minLength: 32, maxLength: 44 },
+    provider: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['name', 'program', 'market', 'reserve'],
+      properties: {
+        name: { type: 'string', enum: ['Save / Solend'] },
+        program: { type: 'string', enum: [PUBLIC_TESTNET_LENDING_PROGRAM.toBase58()] },
+        market: { type: 'string', enum: [PUBLIC_TESTNET_LENDING_MARKET.toBase58()] },
+        reserve: { type: 'string', enum: [PUBLIC_TESTNET_SOL_RESERVE.toBase58()] },
+      },
+    },
+    position: {
+      type: 'object',
+      additionalProperties: false,
+      required: [
+        'status',
+        'assetSymbol',
+        'assetDecimals',
+        'suppliedLiquidityAtomic',
+        'collateralTokenSymbol',
+        'collateralTokenAtomic',
+        'collateralTokenDecimals',
+      ],
+      properties: {
+        status: { type: 'string', enum: ['OPEN', 'EMPTY'] },
+        assetSymbol: { type: 'string', enum: ['SOL'] },
+        assetDecimals: { type: 'integer', enum: [PUBLIC_TESTNET_ASSET_DECIMALS] },
+        suppliedLiquidityAtomic: { type: 'string', pattern: DECIMAL_INTEGER },
+        collateralTokenSymbol: { type: 'string', enum: ['cSOL'] },
+        collateralTokenAtomic: { type: 'string', pattern: DECIMAL_INTEGER },
+        collateralTokenDecimals: { type: 'integer', enum: [PUBLIC_TESTNET_ASSET_DECIMALS] },
+      },
+    },
+    rate: {
+      type: 'object',
+      additionalProperties: false,
+      required: [
+        'kind',
+        'supplyApyBasisPoints',
+        'utilizationBasisPoints',
+        'variable',
+        'rewardsIncluded',
+        'riskAssessed',
+        'historyAvailable',
+        'reserveLastUpdatedSlot',
+        'reserveMarkedStale',
+      ],
+      properties: {
+        kind: { type: 'string', enum: ['ONCHAIN_INDICATIVE_BASE_SUPPLY_APY'] },
+        supplyApyBasisPoints: { type: 'integer', minimum: 0 },
+        utilizationBasisPoints: { type: 'integer', minimum: 0, maximum: 10_000 },
+        variable: { type: 'boolean', enum: [true] },
+        rewardsIncluded: { type: 'boolean', enum: [false] },
+        riskAssessed: { type: 'boolean', enum: [false] },
+        historyAvailable: { type: 'boolean', enum: [false] },
+        reserveLastUpdatedSlot: { type: 'string', pattern: DECIMAL_INTEGER },
+        reserveMarkedStale: { type: 'boolean' },
+      },
+    },
+    liveObservation: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['confirmation', 'slot', 'observedAt'],
+      properties: {
+        confirmation: { type: 'string', enum: ['FINALIZED_POSITION_OBSERVATION'] },
+        slot: { type: 'string', pattern: DECIMAL_INTEGER },
+        observedAt: { type: 'string', format: 'date-time' },
+      },
+    },
   },
 });
 

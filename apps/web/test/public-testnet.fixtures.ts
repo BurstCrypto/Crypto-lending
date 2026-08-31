@@ -3,6 +3,7 @@ import { Buffer } from 'node:buffer';
 
 import {
   parsePublicTestnetExecutionIntent,
+  parsePublicTestnetPositionSnapshot,
   parsePublicTestnetSubmissionResult,
   PUBLIC_TESTNET_AMOUNT_ATOMIC,
   PUBLIC_TESTNET_ASSOCIATED_TOKEN_PROGRAM,
@@ -20,6 +21,7 @@ import {
   PUBLIC_TESTNET_WRAPPED_SOL_MINT,
   type PublicTestnetExecutionIntent,
   type PublicTestnetExecutionRequest,
+  type PublicTestnetPositionSnapshot,
   type PublicTestnetSubmissionResult,
 } from '../lib/public-testnet/public-testnet-execution';
 
@@ -309,5 +311,56 @@ export function publicTestnetSubmission(
   return parsePublicTestnetSubmissionResult(publicTestnetSubmissionResponse(status), {
     intentId: PUBLIC_TESTNET_INTENT_ID,
     signature: PUBLIC_TESTNET_SIGNATURE,
+  });
+}
+
+export function publicTestnetPositionResponse(
+  status: 'OPEN' | 'EMPTY' = 'OPEN',
+): Record<string, unknown> {
+  return {
+    use: 'PUBLIC_TESTNET_READ_ONLY_POSITION',
+    mayAuthorizeFinancialAction: false,
+    chainId: PUBLIC_TESTNET_CHAIN_ID,
+    account: PUBLIC_TESTNET_ACCOUNT,
+    provider: {
+      name: 'Save / Solend',
+      program: PUBLIC_TESTNET_SAVE_PROGRAM,
+      market: PUBLIC_TESTNET_SAVE_MARKET,
+      reserve: PUBLIC_TESTNET_SAVE_RESERVE,
+    },
+    position: {
+      status,
+      assetSymbol: 'SOL',
+      assetDecimals: 9,
+      suppliedLiquidityAtomic: status === 'OPEN' ? '9999999' : '0',
+      collateralTokenSymbol: 'cSOL',
+      collateralTokenAtomic: status === 'OPEN' ? '9407374' : '0',
+      collateralTokenDecimals: 9,
+    },
+    rate: {
+      kind: 'ONCHAIN_INDICATIVE_BASE_SUPPLY_APY',
+      supplyApyBasisPoints: 125,
+      utilizationBasisPoints: 3228,
+      variable: true,
+      rewardsIncluded: false,
+      riskAssessed: false,
+      historyAvailable: false,
+      reserveLastUpdatedSlot: '400000005',
+      reserveMarkedStale: true,
+    },
+    liveObservation: {
+      confirmation: 'FINALIZED_POSITION_OBSERVATION',
+      slot: '400000010',
+      observedAt: '2026-08-27T12:00:00.000Z',
+    },
+  };
+}
+
+export function publicTestnetPosition(
+  status: 'OPEN' | 'EMPTY' = 'OPEN',
+): PublicTestnetPositionSnapshot {
+  return parsePublicTestnetPositionSnapshot(publicTestnetPositionResponse(status), {
+    chainId: PUBLIC_TESTNET_CHAIN_ID,
+    account: PUBLIC_TESTNET_ACCOUNT,
   });
 }

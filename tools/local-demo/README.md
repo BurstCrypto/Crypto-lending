@@ -243,35 +243,51 @@ Obtain valueless Devnet SOL for free from the official Solana faucet at
 `https://faucet.solana.com/`; do not purchase anything and never enter a seed
 phrase or private key into the application. This flow requires no EVM testnet
 gas, EVM test token, ERC-20 approval, or second wallet confirmation. The API
-prepares one fixed Solana message and the connected Wallet Standard wallet asks
-the user for one confirmation, then signs and broadcasts through the wallet's
-configured Devnet provider. The API never stores a wallet key, signs,
-broadcasts, requests an airdrop, or accepts a caller-supplied RPC, program,
-account list, or transaction message.
+prepares one fixed six-instruction Solana core and the connected Wallet Standard
+wallet asks the user for one confirmation and is the sole signer. The browser
+submits the signed legacy bytes through the authenticated same-origin API. The
+API never stores a wallet key, signs, requests an airdrop, or accepts an
+arbitrary caller-selected RPC, program, account list, or transaction message. It
+validates and binds the exact signed bytes before making one fixed Devnet
+broadcast attempt and never automatically sends them again.
 
-The message starts with a fixed-domain, opaque intent memo followed by the five
-reviewed account-setup and lending instructions. The memo makes concurrently
+The reviewed core starts with a fixed-domain, opaque intent memo followed by the
+five account-setup and lending instructions. The memo makes concurrently
 prepared transactions distinct without adding another confirmation or asset
-movement. Immediately before the wallet call, the browser writes a same-tab
-recovery marker; it adds a returned signature before contacting the API. A
-reload may therefore resume read-only verification of that exact signature, but
-it cannot automatically send or resend a wallet transaction. The marker clears
-only after verified completion, an explicit pre-commit rejection, or the
-server-issued evidence deadline.
+movement. Phantom may prepend exactly `SetComputeUnitPrice` and then
+`SetComputeUnitLimit`. The server accepts that prefix only when the limit is
+exactly 200,000 compute units, the price is at most 500,000 micro-lamports per
+compute unit, and the resulting priority fee is at most 100,000 lamports
+(0.0001 SOL). It rejects every other added or reordered instruction and every
+change to the six-instruction core. Inspect Phantom's total fee before
+approving; the priority-fee cap does not replace its display of the complete
+transaction cost. After the wallet returns signed bytes and before contacting
+the API, the browser atomically writes a same-tab recovery marker containing
+the signed transaction's signature. It does not create a new unsigned lock just
+for opening the wallet prompt. A reload may therefore resume read-only
+verification of that exact signature, but it cannot resubmit signed bytes or
+trigger another broadcast. An unsigned marker may age out at the server-issued
+evidence deadline. Once a signature is known, missing or negative public-RPC
+lookup results never clear the marker; only positive verification or a definite
+pre-broadcast rejection can do so.
 
 The intent remains bound to the authenticated account, Solana wallet, portfolio
 snapshot, and exact applied liquidity selection. Verification retrieves the
 submitted transaction from the fixed Devnet RPC and requires finalized evidence
-for the exact prepared message, signer, program and accounts, 0.01 SOL amount,
-successful lending instruction, and resulting position increase. Pending or
-merely confirmed evidence is not called complete. The Save/Solend program and
-account targets are visible to the wallet, its RPC provider, explorers, and the
-public chain; a non-custodial on-chain transaction cannot conceal them from its
-signer.
+for the exact prepared core, the optional bounded compute-budget prefix, signer,
+program and accounts, 0.01 SOL amount, successful lending instruction, and
+resulting position increase. Pending or merely confirmed evidence is not called
+complete. The Save/Solend program and account targets are visible to the wallet,
+its RPC provider, explorers, and the public chain; a non-custodial on-chain
+transaction cannot conceal them from its signer.
 
 The deposited Devnet position remains deposited because this minimal proof
 deliberately has no withdrawal transaction. Restarting the API clears its
 in-memory intent records but does not undo a public Devnet transaction. The
+read-only lending dashboard can reconstruct the fixed wallet position from
+finalized cSOL and reserve state after a restart. It labels the supplied SOL as
+an estimate, shows the latest variable base supply APY with rewards excluded,
+and reports “usual APY” as unavailable until a real history exists. The
 older `testnet:live:*` commands remain separate four-chain, read-only
 connectivity checks. See `tools/public-testnet/README.md` for the application-
 proof boundary and the independently runnable smoke-test boundary.

@@ -83,7 +83,7 @@ describe('local demo banner', () => {
       LOCAL_DEMO_BANNER_TEXT,
     );
     expect(LOCAL_DEMO_BANNER_TEXT).toBe(
-      'Synthetic local demo data — no real assets or transactions; no live provider connections or requests',
+      'Synthetic local portfolio data — no real-value assets; only the labeled Devnet proof and dashboard make live public-chain requests',
     );
     expect(LOCAL_DEMO_BANNER_TEXT).not.toContain('no real providers');
   });

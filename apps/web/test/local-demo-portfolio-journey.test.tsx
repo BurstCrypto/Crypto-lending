@@ -263,7 +263,14 @@ describe('authenticated local demo portfolio journey', () => {
       name: 'Preview your managed allocation.',
     });
     const allocationPlanner = allocationHeading.closest('section');
+    const portfolioTotals = document.querySelector('.portfolio-totals');
+    const lendingDashboard = screen.getByRole('region', {
+      name: 'Your Devnet lending position',
+    });
     expect(allocationPlanner).not.toBeNull();
+    expect(portfolioTotals).not.toBeNull();
+    expect(portfolioTotals?.nextElementSibling).toBe(lendingDashboard);
+    expect(lendingDashboard.nextElementSibling).toBe(allocationPlanner);
     expect(
       await within(allocationPlanner!).findByRole('heading', {
         name: 'Crypto Lending managed blend',

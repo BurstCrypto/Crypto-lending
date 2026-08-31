@@ -108,19 +108,39 @@ the [public-testnet smoke runbook](tools/public-testnet/README.md) for the exact
 boundary.
 
 The attached local demo separately offers an explicit browser-wallet proof on
-Solana Devnet after a managed allocation preview. It prepares one exact-message
-deposit of 0.01 native Devnet SOL into one fixed Save/Solend lending position
-and asks the connected Wallet Standard wallet for one confirmation. A public,
-opaque intent memo makes every signed message unique even when two requests
-receive the same recent blockhash. The wallet, not the API, signs and broadcasts
-the transaction. Devnet SOL is free from the official Solana faucet and has no
-real value; no EVM testnet gas, test token, or token approval is part of this
-flow. The lending provider and its accounts are necessarily visible to the
-signer and on the public chain. The API never signs, broadcasts, or requests an
-airdrop, and it accepts the proof only after finalized exact-message and position
-verification. Before invoking the wallet, the browser creates a same-tab
-recovery journal and adds any returned signature synchronously; reload recovery
-can only poll that same signature and never resends it. The position remains
+Solana Devnet after a managed allocation preview. It prepares an exact
+six-instruction core that deposits 0.01 native Devnet SOL into one fixed
+Save/Solend lending position and asks the connected Wallet Standard wallet for
+one confirmation. A public, opaque intent memo makes every signed message unique
+even when two requests receive the same recent blockhash. Phantom may prepend
+only `SetComputeUnitPrice` followed by `SetComputeUnitLimit`; the verifier
+requires a 200,000-compute-unit limit, a price no higher than 500,000
+micro-lamports per compute unit, and a priority fee no higher than 100,000
+lamports (0.0001 SOL). No other addition, reordering, or core mutation is
+accepted, and the user should inspect Phantom's total fee before approving. The
+wallet is the sole signer. The browser returns the signed legacy transaction to
+the authenticated same-origin API, which revalidates the complete wire message,
+binds its signature and bytes to the intent, and makes exactly one server-side
+Devnet broadcast attempt. Devnet SOL is free from the official Solana faucet
+and has no real value; no EVM testnet gas, test
+token, or token approval is part of this flow. The lending provider and its
+accounts are necessarily visible to the signer and on the public chain. The API
+never signs or requests an airdrop, never retries an inconclusive broadcast, and
+accepts the proof only after finalized core-message, bounded compute-budget, and
+position verification. The final Submit click requests a fresh confirmed
+blockhash after finalized deployment checks, and the API checks its exact
+last-valid block height immediately before the one allowed send.
+Once a wallet has crossed the proof recovery boundary, a separate read-only
+dashboard reconstructs its fixed Devnet cSOL position from finalized chain
+state. It shows the estimated supplied SOL and latest variable base supply APY,
+flags stale reserve state, excludes rewards, and does not claim a “usual APY”
+until historical samples exist. After Phantom returns the signed bytes and
+before any server submission, the browser atomically creates a same-tab,
+signature-known recovery journal. Reload recovery can only poll that same
+signature and never resends transaction bytes. A definite RPC rejection clears
+that local recovery marker because the transaction was not accepted for
+broadcast; an ambiguous transport result remains locked for read-only recovery.
+The position remains
 deposited because this narrow proof has no withdrawal transaction, and it
 neither executes nor validates the displayed cross-chain blend. See the
 [local demo runbook](tools/local-demo/README.md) for funding, confirmation,

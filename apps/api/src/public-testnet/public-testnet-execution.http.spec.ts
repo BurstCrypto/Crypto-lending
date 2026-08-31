@@ -8,11 +8,13 @@ import {
   PublicTestnetPrivacyInterceptor,
   parsePublicTestnetIntentBody,
   parsePublicTestnetIntentId,
+  parsePublicTestnetPositionBody,
   parsePublicTestnetSubmissionBody,
 } from './public-testnet-execution.http';
 
 const ACCOUNT = 'GvjoVKNjBvQcFaSKUW1gTE7DxhSpjHbE69umVR5nPuQp';
 const SIGNATURE = '1'.repeat(64);
+const SIGNED_TRANSACTION_BASE64 = Buffer.from([1, 2, 3]).toString('base64');
 
 function intent(): Record<string, unknown> {
   return {
@@ -26,9 +28,18 @@ function intent(): Record<string, unknown> {
 describe('public-testnet HTTP boundary', () => {
   it('accepts one canonical Solana account and one 64-byte base58 signature', () => {
     expect(parsePublicTestnetIntentBody(intent())).toEqual(intent());
+    expect(
+      parsePublicTestnetPositionBody({ chainId: PUBLIC_TESTNET_CHAIN_ID, account: ACCOUNT }),
+    ).toEqual({ chainId: PUBLIC_TESTNET_CHAIN_ID, account: ACCOUNT });
     expect(parsePublicTestnetSubmissionBody({ signature: SIGNATURE })).toEqual({
       signature: SIGNATURE,
     });
+    expect(
+      parsePublicTestnetSubmissionBody({
+        signature: SIGNATURE,
+        signedTransactionBase64: SIGNED_TRANSACTION_BASE64,
+      }),
+    ).toEqual({ signature: SIGNATURE, signedTransactionBase64: SIGNED_TRANSACTION_BASE64 });
   });
 
   it('rejects alternate chains, malformed keys, hashes, and extra fields', () => {
@@ -38,11 +49,33 @@ describe('public-testnet HTTP boundary', () => {
     expect(() => parsePublicTestnetIntentBody({ ...intent(), account: 'not-a-key' })).toThrow(
       PublicTestnetBodyError,
     );
+    expect(() =>
+      parsePublicTestnetPositionBody({
+        chainId: PUBLIC_TESTNET_CHAIN_ID,
+        account: ACCOUNT,
+        reserve: 'attacker',
+      }),
+    ).toThrow(PublicTestnetBodyError);
+    expect(() =>
+      parsePublicTestnetPositionBody({ chainId: 'solana:devnet', account: ACCOUNT }),
+    ).toThrow(PublicTestnetBodyError);
     expect(() => parsePublicTestnetSubmissionBody({ signature: `0x${'a'.repeat(64)}` })).toThrow(
       PublicTestnetBodyError,
     );
     expect(() =>
       parsePublicTestnetSubmissionBody({ signature: SIGNATURE, rawTransaction: 'x' }),
+    ).toThrow(PublicTestnetBodyError);
+    expect(() =>
+      parsePublicTestnetSubmissionBody({
+        signature: SIGNATURE,
+        signedTransactionBase64: 'not+canonical===',
+      }),
+    ).toThrow(PublicTestnetBodyError);
+    expect(() =>
+      parsePublicTestnetSubmissionBody({
+        signature: SIGNATURE,
+        signedTransactionBase64: Buffer.alloc(1_233).toString('base64'),
+      }),
     ).toThrow(PublicTestnetBodyError);
   });
 

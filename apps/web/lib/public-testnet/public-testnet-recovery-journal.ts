@@ -18,6 +18,7 @@ const JOURNAL_FIELDS = [
   'signature',
 ] as const;
 const START_FIELDS = ['intentId', 'account', 'evidenceExpiresAt'] as const;
+const SIGNED_START_FIELDS = [...START_FIELDS, 'signature'] as const;
 
 export interface PublicTestnetRecoveryJournalRecord {
   readonly version: typeof JOURNAL_VERSION;
@@ -33,6 +34,10 @@ export interface PublicTestnetRecoveryJournalStart {
   readonly intentId: string;
   readonly account: string;
   readonly evidenceExpiresAt: string;
+}
+
+export interface PublicTestnetSignedRecoveryJournalStart extends PublicTestnetRecoveryJournalStart {
+  readonly signature: string;
 }
 
 export interface PublicTestnetRecoveryJournalStorage {
@@ -132,6 +137,17 @@ function parseStart(input: unknown): PublicTestnetRecoveryJournalRecord {
   });
 }
 
+function parseSignedStart(input: unknown): PublicTestnetRecoveryJournalRecord {
+  const record = exactRecord(input, SIGNED_START_FIELDS);
+  return parseJournal({
+    version: JOURNAL_VERSION,
+    intentId: record.intentId,
+    account: record.account,
+    evidenceExpiresAt: record.evidenceExpiresAt,
+    signature: record.signature,
+  });
+}
+
 function resolveStorage(
   supplied: PublicTestnetRecoveryJournalStorage | undefined,
 ): PublicTestnetRecoveryJournalStorage {
@@ -195,9 +211,27 @@ function removeAndVerify(storage: PublicTestnetRecoveryJournalStorage): void {
   }
 }
 
+function createJournal(
+  journal: PublicTestnetRecoveryJournalRecord,
+  supplied: PublicTestnetRecoveryJournalStorage | undefined,
+): PublicTestnetRecoveryJournalRecord {
+  const resolved = resolveStorage(supplied);
+  let existing: string | null;
+  try {
+    existing = resolved.getItem(PUBLIC_TESTNET_RECOVERY_JOURNAL_STORAGE_KEY);
+  } catch {
+    return fail();
+  }
+  if (existing !== null) return fail();
+
+  writeAndVerify(resolved, journal);
+  return journal;
+}
+
 /**
- * Reads the same-tab recovery record. Only a valid record that is definitely
- * expired at `now` may be removed as part of a read.
+ * Reads the same-tab recovery record. An expired unsigned record can be
+ * removed because no signed bytes crossed the broadcast boundary. A known
+ * signature is never cleared from negative or missing RPC evidence.
  */
 export function readPublicTestnetRecoveryJournal(
   now: Date,
@@ -214,7 +248,7 @@ export function readPublicTestnetRecoveryJournal(
   const resolved = resolveStorage(storage);
   const journal = readStored(resolved);
   if (journal === null) return null;
-  if (Date.parse(journal.evidenceExpiresAt) <= nowMilliseconds) {
+  if (journal.signature === null && Date.parse(journal.evidenceExpiresAt) <= nowMilliseconds) {
     removeAndVerify(resolved);
     return null;
   }
@@ -236,17 +270,25 @@ export function startPublicTestnetRecoveryJournal(
     return fail();
   }
 
-  const resolved = resolveStorage(storage);
-  let existing: string | null;
+  return createJournal(journal, storage);
+}
+
+/**
+ * Atomically creates a signature-known journal after sign-only wallet approval
+ * and before the signed bytes cross the server broadcast boundary.
+ */
+export function startSignedPublicTestnetRecoveryJournal(
+  input: PublicTestnetSignedRecoveryJournalStart,
+  storage?: PublicTestnetRecoveryJournalStorage,
+): PublicTestnetRecoveryJournalRecord {
+  let journal: PublicTestnetRecoveryJournalRecord;
   try {
-    existing = resolved.getItem(PUBLIC_TESTNET_RECOVERY_JOURNAL_STORAGE_KEY);
+    journal = parseSignedStart(input);
   } catch {
     return fail();
   }
-  if (existing !== null) return fail();
 
-  writeAndVerify(resolved, journal);
-  return journal;
+  return createJournal(journal, storage);
 }
 
 /** Adds the wallet signature only when the exact unsigned journal is current. */
