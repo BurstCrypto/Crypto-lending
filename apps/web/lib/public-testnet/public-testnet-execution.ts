@@ -119,6 +119,49 @@ export interface PublicTestnetSubmissionResult {
   readonly consumed: boolean;
 }
 
+export interface PublicTestnetPositionRequest {
+  readonly chainId: typeof PUBLIC_TESTNET_CHAIN_ID;
+  readonly account: string;
+}
+
+export interface PublicTestnetPositionSnapshot {
+  readonly use: 'PUBLIC_TESTNET_READ_ONLY_POSITION';
+  readonly mayAuthorizeFinancialAction: false;
+  readonly chainId: typeof PUBLIC_TESTNET_CHAIN_ID;
+  readonly account: string;
+  readonly provider: Readonly<{
+    name: 'Save / Solend';
+    program: typeof PUBLIC_TESTNET_SAVE_PROGRAM;
+    market: typeof PUBLIC_TESTNET_SAVE_MARKET;
+    reserve: typeof PUBLIC_TESTNET_SAVE_RESERVE;
+  }>;
+  readonly position: Readonly<{
+    status: 'OPEN' | 'EMPTY';
+    assetSymbol: 'SOL';
+    assetDecimals: 9;
+    suppliedLiquidityAtomic: string;
+    collateralTokenSymbol: 'cSOL';
+    collateralTokenAtomic: string;
+    collateralTokenDecimals: 9;
+  }>;
+  readonly rate: Readonly<{
+    kind: 'ONCHAIN_INDICATIVE_BASE_SUPPLY_APY';
+    supplyApyBasisPoints: number;
+    utilizationBasisPoints: number;
+    variable: true;
+    rewardsIncluded: false;
+    riskAssessed: false;
+    historyAvailable: false;
+    reserveLastUpdatedSlot: string;
+    reserveMarkedStale: boolean;
+  }>;
+  readonly liveObservation: Readonly<{
+    confirmation: 'FINALIZED_POSITION_OBSERVATION';
+    slot: string;
+    observedAt: string;
+  }>;
+}
+
 export class PublicTestnetExecutionValidationError extends Error {
   constructor() {
     super('Public-testnet execution data is invalid');
@@ -472,6 +515,151 @@ export function validatePublicTestnetExecutionRequest(
     }),
     chainId: PUBLIC_TESTNET_CHAIN_ID,
     account: publicKey(record.account),
+  });
+}
+
+export function validatePublicTestnetPositionRequest(
+  value: PublicTestnetPositionRequest,
+): PublicTestnetPositionRequest {
+  const record = exactRecord(value, ['chainId', 'account']);
+  if (record.chainId !== PUBLIC_TESTNET_CHAIN_ID) return fail();
+  return Object.freeze({
+    chainId: PUBLIC_TESTNET_CHAIN_ID,
+    account: publicKey(record.account),
+  });
+}
+
+export function parsePublicTestnetPositionSnapshot(
+  value: unknown,
+  expectedRequest: PublicTestnetPositionRequest,
+): PublicTestnetPositionSnapshot {
+  const expected = validatePublicTestnetPositionRequest(expectedRequest);
+  const record = exactRecord(value, [
+    'use',
+    'mayAuthorizeFinancialAction',
+    'chainId',
+    'account',
+    'provider',
+    'position',
+    'rate',
+    'liveObservation',
+  ]);
+  if (
+    record.use !== 'PUBLIC_TESTNET_READ_ONLY_POSITION' ||
+    record.mayAuthorizeFinancialAction !== false ||
+    record.chainId !== PUBLIC_TESTNET_CHAIN_ID ||
+    publicKey(record.account) !== expected.account
+  ) {
+    return fail();
+  }
+  const provider = exactRecord(record.provider, ['name', 'program', 'market', 'reserve']);
+  if (
+    provider.name !== 'Save / Solend' ||
+    provider.program !== PUBLIC_TESTNET_SAVE_PROGRAM ||
+    provider.market !== PUBLIC_TESTNET_SAVE_MARKET ||
+    provider.reserve !== PUBLIC_TESTNET_SAVE_RESERVE
+  ) {
+    return fail();
+  }
+  const position = exactRecord(record.position, [
+    'status',
+    'assetSymbol',
+    'assetDecimals',
+    'suppliedLiquidityAtomic',
+    'collateralTokenSymbol',
+    'collateralTokenAtomic',
+    'collateralTokenDecimals',
+  ]);
+  const suppliedLiquidityAtomic = decimal(position.suppliedLiquidityAtomic);
+  const collateralTokenAtomic = decimal(position.collateralTokenAtomic);
+  if (
+    (position.status !== 'OPEN' && position.status !== 'EMPTY') ||
+    position.assetSymbol !== 'SOL' ||
+    position.assetDecimals !== 9 ||
+    position.collateralTokenSymbol !== 'cSOL' ||
+    position.collateralTokenDecimals !== 9 ||
+    (position.status === 'OPEN') !== BigInt(collateralTokenAtomic) > 0n ||
+    (position.status === 'EMPTY' && BigInt(suppliedLiquidityAtomic) !== 0n) ||
+    (position.status === 'OPEN' && BigInt(suppliedLiquidityAtomic) <= 0n)
+  ) {
+    return fail();
+  }
+  const rate = exactRecord(record.rate, [
+    'kind',
+    'supplyApyBasisPoints',
+    'utilizationBasisPoints',
+    'variable',
+    'rewardsIncluded',
+    'riskAssessed',
+    'historyAvailable',
+    'reserveLastUpdatedSlot',
+    'reserveMarkedStale',
+  ]);
+  if (
+    rate.kind !== 'ONCHAIN_INDICATIVE_BASE_SUPPLY_APY' ||
+    !Number.isSafeInteger(rate.supplyApyBasisPoints) ||
+    (rate.supplyApyBasisPoints as number) < 0 ||
+    (rate.supplyApyBasisPoints as number) > 1_000_000 ||
+    !Number.isSafeInteger(rate.utilizationBasisPoints) ||
+    (rate.utilizationBasisPoints as number) < 0 ||
+    (rate.utilizationBasisPoints as number) > 10_000 ||
+    rate.variable !== true ||
+    rate.rewardsIncluded !== false ||
+    rate.riskAssessed !== false ||
+    rate.historyAvailable !== false ||
+    typeof rate.reserveMarkedStale !== 'boolean'
+  ) {
+    return fail();
+  }
+  const reserveLastUpdatedSlot = decimal(rate.reserveLastUpdatedSlot);
+  const liveObservation = exactRecord(record.liveObservation, [
+    'confirmation',
+    'slot',
+    'observedAt',
+  ]);
+  const observationSlot = decimal(liveObservation.slot);
+  if (
+    liveObservation.confirmation !== 'FINALIZED_POSITION_OBSERVATION' ||
+    BigInt(reserveLastUpdatedSlot) > BigInt(observationSlot)
+  ) {
+    return fail();
+  }
+  return Object.freeze({
+    use: 'PUBLIC_TESTNET_READ_ONLY_POSITION' as const,
+    mayAuthorizeFinancialAction: false as const,
+    chainId: PUBLIC_TESTNET_CHAIN_ID,
+    account: expected.account,
+    provider: Object.freeze({
+      name: 'Save / Solend' as const,
+      program: PUBLIC_TESTNET_SAVE_PROGRAM,
+      market: PUBLIC_TESTNET_SAVE_MARKET,
+      reserve: PUBLIC_TESTNET_SAVE_RESERVE,
+    }),
+    position: Object.freeze({
+      status: position.status,
+      assetSymbol: 'SOL' as const,
+      assetDecimals: 9 as const,
+      suppliedLiquidityAtomic,
+      collateralTokenSymbol: 'cSOL' as const,
+      collateralTokenAtomic,
+      collateralTokenDecimals: 9 as const,
+    }),
+    rate: Object.freeze({
+      kind: 'ONCHAIN_INDICATIVE_BASE_SUPPLY_APY' as const,
+      supplyApyBasisPoints: rate.supplyApyBasisPoints as number,
+      utilizationBasisPoints: rate.utilizationBasisPoints as number,
+      variable: true as const,
+      rewardsIncluded: false as const,
+      riskAssessed: false as const,
+      historyAvailable: false as const,
+      reserveLastUpdatedSlot,
+      reserveMarkedStale: rate.reserveMarkedStale,
+    }),
+    liveObservation: Object.freeze({
+      confirmation: 'FINALIZED_POSITION_OBSERVATION' as const,
+      slot: observationSlot,
+      observedAt: dateTime(liveObservation.observedAt),
+    }),
   });
 }
 

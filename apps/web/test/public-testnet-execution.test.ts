@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import {
   normalizePublicTestnetAccount,
   parsePublicTestnetExecutionIntent,
+  parsePublicTestnetPositionSnapshot,
   parsePublicTestnetSubmissionResult,
   parsePublicTestnetTransactionSignature,
   publicTestnetExplorerTransactionUrl,
@@ -24,6 +25,7 @@ import {
   publicTestnetIntentResponse,
   publicTestnetRequest,
   publicTestnetSubmissionResponse,
+  publicTestnetPositionResponse,
   serializePublicTestnetTransaction,
 } from './public-testnet.fixtures';
 
@@ -36,6 +38,43 @@ function parse(response: Record<string, unknown>, now = PUBLIC_TESTNET_NOW) {
 }
 
 describe('public testnet execution validation', () => {
+  it('accepts only a self-consistent read-only Devnet position snapshot', () => {
+    const request = { chainId: PUBLIC_TESTNET_CHAIN_ID, account: PUBLIC_TESTNET_ACCOUNT };
+    const position = parsePublicTestnetPositionSnapshot(publicTestnetPositionResponse(), request);
+
+    expect(position).toMatchObject({
+      mayAuthorizeFinancialAction: false,
+      position: {
+        status: 'OPEN',
+        suppliedLiquidityAtomic: '9999999',
+        collateralTokenAtomic: '9407374',
+      },
+      rate: {
+        supplyApyBasisPoints: 125,
+        reserveMarkedStale: true,
+        historyAvailable: false,
+      },
+    });
+
+    const extra = publicTestnetPositionResponse();
+    extra.unexpected = true;
+    expect(() => parsePublicTestnetPositionSnapshot(extra, request)).toThrow(
+      PublicTestnetExecutionValidationError,
+    );
+
+    const inconsistent = publicTestnetPositionResponse();
+    (inconsistent.position as Record<string, unknown>).status = 'EMPTY';
+    expect(() => parsePublicTestnetPositionSnapshot(inconsistent, request)).toThrow(
+      PublicTestnetExecutionValidationError,
+    );
+
+    const futureReserve = publicTestnetPositionResponse();
+    (futureReserve.rate as Record<string, unknown>).reserveLastUpdatedSlot = '400000011';
+    expect(() => parsePublicTestnetPositionSnapshot(futureReserve, request)).toThrow(
+      PublicTestnetExecutionValidationError,
+    );
+  });
+
   it('accepts only the exact reviewed Solana Devnet intent and derives the wallet request', () => {
     const intent = publicTestnetIntent();
 

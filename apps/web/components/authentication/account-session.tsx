@@ -10,6 +10,7 @@ import {
   type AccountProfile,
 } from '@/lib/authentication';
 import { clearBrowserLocalDemoWalletRoster } from '@/lib/local-demo/wallet-roster';
+import { clearBrowserPublicTestnetPositionAccount } from '@/lib/public-testnet/public-testnet-position-account';
 
 import { replaceBrowserLocation } from './browser-navigation';
 import { AuthenticationError } from './authentication-error';
@@ -30,6 +31,7 @@ function countryName(countryCode: string): string {
 
 function clearCurrentWalletRoster(accountId: string | null): void {
   clearBrowserLocalDemoWalletRoster(accountId);
+  clearBrowserPublicTestnetPositionAccount();
 }
 
 export function AccountSession() {

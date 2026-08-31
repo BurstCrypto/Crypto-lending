@@ -42,7 +42,11 @@ import {
 import {
   PUBLIC_TESTNET_EXECUTION_RPC,
   PublicTestnetEvidenceMismatchError,
+  assertPublicTestnetSignedTransactionMatchesIntent,
   type PublicTestnetExecutionRpc,
+  type PublicTestnetPositionObservation,
+  type PublicTestnetTransactionObservation,
+  type PublicTestnetVerificationExpectation,
 } from './public-testnet-execution.rpc';
 
 export type PublicTestnetFundingReadiness = 'READY' | 'NEEDS_DEVNET_SOL';
@@ -105,6 +109,50 @@ export interface PublicTestnetIntentResponse {
 
 export interface PublicTestnetSubmissionRequest {
   readonly signature: string;
+  readonly signedTransactionBase64?: string;
+}
+
+export interface PublicTestnetPositionRequest {
+  readonly chainId: typeof PUBLIC_TESTNET_CHAIN_ID;
+  readonly account: string;
+}
+
+export interface PublicTestnetPositionResponse {
+  readonly use: 'PUBLIC_TESTNET_READ_ONLY_POSITION';
+  readonly mayAuthorizeFinancialAction: false;
+  readonly chainId: typeof PUBLIC_TESTNET_CHAIN_ID;
+  readonly account: string;
+  readonly provider: Readonly<{
+    name: 'Save / Solend';
+    program: string;
+    market: string;
+    reserve: string;
+  }>;
+  readonly position: Readonly<{
+    status: 'OPEN' | 'EMPTY';
+    assetSymbol: 'SOL';
+    assetDecimals: typeof PUBLIC_TESTNET_ASSET_DECIMALS;
+    suppliedLiquidityAtomic: string;
+    collateralTokenSymbol: 'cSOL';
+    collateralTokenAtomic: string;
+    collateralTokenDecimals: typeof PUBLIC_TESTNET_ASSET_DECIMALS;
+  }>;
+  readonly rate: Readonly<{
+    kind: 'ONCHAIN_INDICATIVE_BASE_SUPPLY_APY';
+    supplyApyBasisPoints: number;
+    utilizationBasisPoints: number;
+    variable: true;
+    rewardsIncluded: false;
+    riskAssessed: false;
+    historyAvailable: false;
+    reserveLastUpdatedSlot: string;
+    reserveMarkedStale: boolean;
+  }>;
+  readonly liveObservation: Readonly<{
+    confirmation: 'FINALIZED_POSITION_OBSERVATION';
+    slot: string;
+    observedAt: string;
+  }>;
 }
 
 type StepStatus = 'PENDING' | 'VERIFIED';
@@ -139,11 +187,16 @@ interface StoredIntent {
   readonly evidenceDeadlineMilliseconds: number;
   readonly expectedMessageBase64: string;
   readonly preflightSlot: bigint;
+  readonly lastValidBlockHeight: bigint;
   readonly sourceLiquidityAccount: PublicKey;
   readonly destinationCollateralAccount: PublicKey;
   readonly collateralBalanceBeforeAtomic: bigint;
   readonly response: PublicTestnetIntentResponse;
   submission?: PublicTestnetSubmissionRequest;
+  unboundVerification?: Readonly<{
+    signature: string;
+    result: Promise<PublicTestnetVerificationResponse>;
+  }>;
   verification?: Promise<PublicTestnetVerificationResponse>;
   verified?: PublicTestnetVerificationResponse;
 }
@@ -241,7 +294,14 @@ function sameSubmission(
   left: PublicTestnetSubmissionRequest,
   right: PublicTestnetSubmissionRequest,
 ): boolean {
-  return left.signature === right.signature;
+  if (left.signature !== right.signature) return false;
+  if (left.signedTransactionBase64 === undefined) {
+    return right.signedTransactionBase64 === undefined;
+  }
+  return (
+    right.signedTransactionBase64 === undefined ||
+    right.signedTransactionBase64 === left.signedTransactionBase64
+  );
 }
 
 const BASE58_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
@@ -306,6 +366,53 @@ export class PublicTestnetExecutionService {
     @Inject(PUBLIC_TESTNET_EXECUTION_RPC) private readonly rpc: PublicTestnetExecutionRpc,
     @Inject(PUBLIC_TESTNET_EXECUTION_CONFIG) private readonly config: PublicTestnetExecutionConfig,
   ) {}
+
+  async readPosition(
+    accountId: AccountId,
+    request: PublicTestnetPositionRequest,
+  ): Promise<PublicTestnetPositionResponse> {
+    this.assertEnabled();
+    void accountId;
+    const wallet = new PublicKey(request.account);
+    const observation: PublicTestnetPositionObservation = await this.rpc.readPosition(wallet);
+    return Object.freeze({
+      use: 'PUBLIC_TESTNET_READ_ONLY_POSITION' as const,
+      mayAuthorizeFinancialAction: false as const,
+      chainId: PUBLIC_TESTNET_CHAIN_ID,
+      account: wallet.toBase58(),
+      provider: Object.freeze({
+        name: 'Save / Solend' as const,
+        program: PUBLIC_TESTNET_LENDING_PROGRAM.toBase58(),
+        market: PUBLIC_TESTNET_LENDING_MARKET.toBase58(),
+        reserve: PUBLIC_TESTNET_SOL_RESERVE.toBase58(),
+      }),
+      position: Object.freeze({
+        status: observation.collateralBalanceAtomic > 0n ? ('OPEN' as const) : ('EMPTY' as const),
+        assetSymbol: 'SOL' as const,
+        assetDecimals: PUBLIC_TESTNET_ASSET_DECIMALS,
+        suppliedLiquidityAtomic: observation.suppliedLiquidityAtomic.toString(),
+        collateralTokenSymbol: 'cSOL' as const,
+        collateralTokenAtomic: observation.collateralBalanceAtomic.toString(),
+        collateralTokenDecimals: PUBLIC_TESTNET_ASSET_DECIMALS,
+      }),
+      rate: Object.freeze({
+        kind: 'ONCHAIN_INDICATIVE_BASE_SUPPLY_APY' as const,
+        supplyApyBasisPoints: observation.supplyApyBasisPoints,
+        utilizationBasisPoints: observation.utilizationBasisPoints,
+        variable: true as const,
+        rewardsIncluded: false as const,
+        riskAssessed: false as const,
+        historyAvailable: false as const,
+        reserveLastUpdatedSlot: observation.reserveLastUpdatedSlot.toString(),
+        reserveMarkedStale: observation.reserveMarkedStale,
+      }),
+      liveObservation: Object.freeze({
+        confirmation: 'FINALIZED_POSITION_OBSERVATION' as const,
+        slot: observation.slot.toString(),
+        observedAt: observation.observedAt,
+      }),
+    });
+  }
 
   async createIntent(
     accountId: AccountId,
@@ -407,6 +514,7 @@ export class PublicTestnetExecutionService {
       evidenceDeadlineMilliseconds,
       expectedMessageBase64,
       preflightSlot: observation.slot,
+      lastValidBlockHeight: observation.lastValidBlockHeight,
       sourceLiquidityAccount: observation.sourceLiquidityAccount,
       destinationCollateralAccount: observation.destinationCollateralAccount,
       collateralBalanceBeforeAtomic: observation.collateralBalanceBeforeAtomic,
@@ -443,43 +551,192 @@ export class PublicTestnetExecutionService {
       throw new PublicTestnetIntentConflictError();
     }
     if (intent.verified !== undefined) return intent.verified;
+    if (intent.submission === undefined && submission.signedTransactionBase64 !== undefined) {
+      if (Date.now() >= intent.expiresAtMilliseconds) {
+        throw new PublicTestnetIntentExpiredError();
+      }
+      const signedSubmission = Object.freeze({
+        signature: submission.signature,
+        signedTransactionBase64: submission.signedTransactionBase64,
+      });
+      const expectation = this.verificationExpectation(intent);
+      // Reject malformed or wallet-mutated bytes before they can consume the
+      // intent. Once validated, bind both signature and exact wire bytes before
+      // making the single external send attempt.
+      assertPublicTestnetSignedTransactionMatchesIntent(signedSubmission, expectation);
+      intent.submission = signedSubmission;
+      this.signatureIntents.set(submission.signature, intentId);
+      const verification = this.broadcastAndVerify(
+        accountId,
+        intentId,
+        intent,
+        signedSubmission,
+        expectation,
+      ).finally(() => {
+        delete intent.verification;
+      });
+      intent.verification = verification;
+      return verification;
+    }
     if (intent.submission === undefined) {
       // Authenticate the intent-bound transaction message before reserving this
       // globally unique signature. A signature for another intent must not be
       // able to squat this intent's binding.
       if (!verifiesIntentSignature(intent, submission.signature)) {
-        throw new PublicTestnetEvidenceMismatchError();
+        if (decodeSignature(submission.signature) === undefined) {
+          throw new PublicTestnetEvidenceMismatchError();
+        }
+        return this.verifyUnboundWalletModifiedSubmission(accountId, intentId, intent, submission);
       }
       intent.submission = Object.freeze({ ...submission });
       this.signatureIntents.set(submission.signature, intentId);
     }
     if (intent.verification !== undefined) return intent.verification;
-    const verification = this.performVerification(intent, intent.submission).finally(() => {
+    const verification = this.performVerification(
+      accountId,
+      intentId,
+      intent,
+      intent.submission,
+    ).finally(() => {
       delete intent.verification;
     });
     intent.verification = verification;
     return verification;
   }
 
-  private async performVerification(
+  private async broadcastAndVerify(
+    accountId: AccountId,
+    intentId: string,
+    intent: StoredIntent,
+    submission: Required<PublicTestnetSubmissionRequest>,
+    expectation: PublicTestnetVerificationExpectation,
+  ): Promise<PublicTestnetVerificationResponse> {
+    await this.rpc.broadcastSignedTransaction(submission, expectation);
+    return this.performVerification(accountId, intentId, intent, submission);
+  }
+
+  private verifyUnboundWalletModifiedSubmission(
+    accountId: AccountId,
+    intentId: string,
     intent: StoredIntent,
     submission: PublicTestnetSubmissionRequest,
   ): Promise<PublicTestnetVerificationResponse> {
-    const observation = await this.rpc.verifyFinalizedDeposit(submission.signature, {
-      wallet: intent.wallet,
-      sourceLiquidityAccount: intent.sourceLiquidityAccount,
-      destinationCollateralAccount: intent.destinationCollateralAccount,
-      expectedMessageBase64: intent.expectedMessageBase64,
-      preflightSlot: intent.preflightSlot,
+    const inFlight = intent.unboundVerification;
+    if (inFlight !== undefined) {
+      if (inFlight.signature !== submission.signature) {
+        throw new PublicTestnetIntentConflictError();
+      }
+      return inFlight.result;
+    }
+
+    const result = this.performUnboundWalletModifiedSubmission(
+      accountId,
+      intentId,
+      intent,
+      submission,
+    ).finally(() => {
+      if (intent.unboundVerification?.result === result) delete intent.unboundVerification;
     });
+    intent.unboundVerification = Object.freeze({ signature: submission.signature, result });
+    return result;
+  }
+
+  private async performUnboundWalletModifiedSubmission(
+    accountId: AccountId,
+    intentId: string,
+    intent: StoredIntent,
+    submission: PublicTestnetSubmissionRequest,
+  ): Promise<PublicTestnetVerificationResponse> {
+    // A detached Ed25519 signature cannot reveal a message changed by the
+    // wallet. Consult finalized chain evidence first, and do not reserve an
+    // unproven signature while it is pending or if it is rejected.
+    const observation = await this.observeDeposit(intent, submission);
+
+    this.assertCurrentIntentAfterObservation(accountId, intentId, intent);
+    const signatureIntentId = this.signatureIntents.get(submission.signature);
+    if (signatureIntentId !== undefined && signatureIntentId !== intentId) {
+      throw new PublicTestnetIntentConflictError();
+    }
+    if (intent.submission !== undefined && !sameSubmission(intent.submission, submission)) {
+      throw new PublicTestnetIntentConflictError();
+    }
+    if (intent.verified !== undefined) return intent.verified;
+
+    const result = this.verificationResponse(intent, submission, observation);
+    if (observation.status === 'PENDING') return result;
+
+    // No await may appear between these checks and the binding writes. Two
+    // finalized candidates therefore cannot both consume the same intent.
+    intent.submission = Object.freeze({ ...submission });
+    this.signatureIntents.set(submission.signature, intentId);
+    intent.verified = result;
+    return result;
+  }
+
+  private async performVerification(
+    accountId: AccountId,
+    intentId: string,
+    intent: StoredIntent,
+    submission: PublicTestnetSubmissionRequest,
+  ): Promise<PublicTestnetVerificationResponse> {
+    const observation = await this.observeDeposit(intent, submission);
+    this.assertCurrentIntentAfterObservation(accountId, intentId, intent);
+    const result = this.verificationResponse(intent, submission, observation);
+    if (observation.status === 'VERIFIED') intent.verified = result;
+    return result;
+  }
+
+  private async observeDeposit(
+    intent: StoredIntent,
+    submission: PublicTestnetSubmissionRequest,
+  ): Promise<PublicTestnetTransactionObservation> {
+    const observation = await this.rpc.verifyFinalizedDeposit(
+      submission.signature,
+      this.verificationExpectation(intent),
+    );
     if (
       observation.status === 'VERIFIED' &&
       observation.collateralBalanceBeforeAtomic !== intent.collateralBalanceBeforeAtomic
     ) {
       throw new PublicTestnetEvidenceMismatchError();
     }
+    return observation;
+  }
+
+  private verificationExpectation(intent: StoredIntent): PublicTestnetVerificationExpectation {
+    return Object.freeze({
+      wallet: intent.wallet,
+      sourceLiquidityAccount: intent.sourceLiquidityAccount,
+      destinationCollateralAccount: intent.destinationCollateralAccount,
+      expectedMessageBase64: intent.expectedMessageBase64,
+      preflightSlot: intent.preflightSlot,
+      lastValidBlockHeight: intent.lastValidBlockHeight,
+    });
+  }
+
+  private assertCurrentIntentAfterObservation(
+    accountId: AccountId,
+    intentId: string,
+    intent: StoredIntent,
+  ): void {
+    const currentIntent = this.intents.get(intentId);
+    if (currentIntent !== intent || intent.accountId !== accountId) {
+      throw new PublicTestnetIntentNotFoundError();
+    }
+    if (Date.now() >= intent.evidenceDeadlineMilliseconds) {
+      this.removeIntent(intentId, intent);
+      if (intent.submission !== undefined) throw new PublicTestnetIntentNotFoundError();
+      throw new PublicTestnetIntentExpiredError();
+    }
+  }
+
+  private verificationResponse(
+    intent: StoredIntent,
+    submission: PublicTestnetSubmissionRequest,
+    observation: PublicTestnetTransactionObservation,
+  ): PublicTestnetVerificationResponse {
     const verified = observation.status === 'VERIFIED';
-    const result: PublicTestnetVerificationResponse = Object.freeze({
+    return Object.freeze({
       intentId: intent.response.intentId,
       status: verified ? ('VERIFIED' as const) : ('PENDING' as const),
       confirmation: 'LATEST_SIGNATURE_STATUS_OBSERVATION' as const,
@@ -498,8 +755,6 @@ export class PublicTestnetExecutionService {
       }),
       consumed: verified,
     });
-    if (verified) intent.verified = result;
-    return result;
   }
 
   private assertCapacity(accountId: AccountId): void {

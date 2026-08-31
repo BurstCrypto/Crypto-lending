@@ -21,9 +21,10 @@ import {
   addPublicTestnetRecoverySignature,
   clearPublicTestnetRecoveryJournal,
   readPublicTestnetRecoveryJournal,
-  startPublicTestnetRecoveryJournal,
+  startSignedPublicTestnetRecoveryJournal,
   type PublicTestnetRecoveryJournal,
 } from '@/lib/public-testnet/public-testnet-recovery-journal';
+import { rememberPublicTestnetPositionAccount } from '@/lib/public-testnet/public-testnet-position-account';
 import {
   PhantomSolanaWalletDiscovery,
   type SelectedSolanaWallet,
@@ -71,6 +72,8 @@ export interface PublicTestnetTransactionProofProps {
   readonly preview: LocalDemoAllocationPreview;
   readonly onUnauthenticated?: (() => void) | undefined;
   readonly onWriteActivityChange?: ((active: boolean) => void) | undefined;
+  readonly onPositionAccountChange?: ((account: string) => void) | undefined;
+  readonly onPositionRefreshRequested?: (() => void) | undefined;
   readonly dependencies?: PublicTestnetProofDependencies | undefined;
 }
 
@@ -82,19 +85,24 @@ const DEFAULT_DEPENDENCIES: PublicTestnetProofDependencies = Object.freeze({
   now: () => new Date(),
 });
 
-// Leave time for the Phantom prompt without making a fresh 60-second blockhash intent unusable
-// immediately after its API round trip.
-const MINIMUM_WRITE_WINDOW_MS = 10_000;
+// A Solana recent blockhash has a short lifetime. Keep a conservative approval buffer so a user
+// who spends time reviewing the disclosure receives a refreshed intent before Phantom opens.
+const MINIMUM_WALLET_APPROVAL_WINDOW_MS = 30_000;
+const MINIMUM_SERVER_BROADCAST_WINDOW_MS = 10_000;
 const ACTIVE_OPERATION_PHASES = new Set<ProofPhase>([
   'SIGN_PROMPT',
   'SIGNATURE_KNOWN',
   'VERIFYING',
 ]);
 
-function intentHasWriteWindow(intent: PublicTestnetExecutionIntent, now: Date): boolean {
+function intentHasWriteWindow(
+  intent: PublicTestnetExecutionIntent,
+  now: Date,
+  minimumWindowMilliseconds: number,
+): boolean {
   return (
     Number.isFinite(now.getTime()) &&
-    Date.parse(intent.expiresAt) - now.getTime() >= MINIMUM_WRITE_WINDOW_MS
+    Date.parse(intent.expiresAt) - now.getTime() >= minimumWindowMilliseconds
   );
 }
 
@@ -107,7 +115,7 @@ function phaseStatus(phase: ProofPhase): string {
     case 'PREPARING':
       return 'Checking live Devnet funding and preparing a short-lived transaction intent.';
     case 'SIGN_PROMPT':
-      return 'Review one exact 0.01 SOL Devnet deposit in Phantom.';
+      return "Review the 0.01 SOL Devnet deposit and Phantom's total fee.";
     case 'SIGNATURE_KNOWN':
       return 'The signature is known and is being bound to this execution intent.';
     case 'VERIFYING':
@@ -133,7 +141,7 @@ function failureCopy(error: unknown, signatureKnown: boolean): string {
       return 'Phantom rejected the request. No Devnet transaction was submitted.';
     }
     if (error.code === 'COMMIT_AMBIGUOUS' || error.code === 'REQUEST_PENDING') {
-      return 'Phantom did not return a conclusive signature. Inspect its activity before doing anything else; this app will not retry the write.';
+      return 'Phantom did not return a signed transaction. This app did not broadcast anything; close this review and start again after the wallet request is resolved.';
     }
     if (error.code === 'ACCOUNT_CHANGED' || error.code === 'DISCONNECTED') {
       return signatureKnown
@@ -141,7 +149,7 @@ function failureCopy(error: unknown, signatureKnown: boolean): string {
         : 'The Phantom account changed. Close this review and start a fresh one.';
     }
     if (error.code === 'UNSUPPORTED') {
-      return 'This Phantom wallet does not expose the required Solana Devnet sign-and-send feature.';
+      return 'This Phantom wallet does not expose the required Solana Devnet transaction-signing feature.';
     }
   }
   if (error instanceof PublicTestnetApiError) {
@@ -151,7 +159,7 @@ function failureCopy(error: unknown, signatureKnown: boolean): string {
         : 'The intent expired before signing. Close this review and create a fresh one.';
     }
     if (error.code === 'REJECTED') {
-      return 'The server rejected this signature because the finalized transaction did not match the reviewed intent.';
+      return 'The signed transaction or its finalized evidence was rejected. The app will not broadcast it again; use read-only verification for the known signature.';
     }
     if (error.code === 'CONFLICT') {
       return 'The server says this intent was already consumed with different transaction evidence.';
@@ -181,6 +189,8 @@ export function PublicTestnetTransactionProof({
   preview,
   onUnauthenticated,
   onWriteActivityChange,
+  onPositionAccountChange,
+  onPositionRefreshRequested,
   dependencies = DEFAULT_DEPENDENCIES,
 }: PublicTestnetTransactionProofProps) {
   const [phase, setPhase] = useState<ProofPhase>('RECOVERY_CHECK');
@@ -267,6 +277,16 @@ export function PublicTestnetTransactionProof({
     setFailure(null);
   }
 
+  function rememberDashboardAccount(account: string): void {
+    let rememberedAccount = account;
+    try {
+      rememberedAccount = rememberPublicTestnetPositionAccount(account);
+    } catch {
+      // This public address cache is only a convenience for read-only refreshes.
+    }
+    onPositionAccountChange?.(rememberedAccount);
+  }
+
   function ensureApi(): PublicTestnetExecutionApi | null {
     if (apiReference.current !== null) return apiReference.current;
     try {
@@ -292,6 +312,9 @@ export function PublicTestnetTransactionProof({
       return true;
     }
     if (recovered === null) {
+      abortOperation();
+      releaseWallet();
+      releaseDiscovery();
       clearExecutionState();
       transition('CLOSED');
       return false;
@@ -302,6 +325,7 @@ export function PublicTestnetTransactionProof({
     releaseDiscovery();
     setCurrentRecovery(recovered);
     accountReference.current = recovered.account;
+    rememberDashboardAccount(recovered.account);
     setCurrentIntent(null);
     setSubmission(null);
     setConfirmedDisclosure(false);
@@ -310,13 +334,15 @@ export function PublicTestnetTransactionProof({
       signatureReference.current = null;
       setSignature(null);
       setFailure(
-        'A prior wallet request may have committed without returning a signature. New sends are blocked until its evidence deadline expires.',
+        'Phantom did not return a transaction signature. To prevent a duplicate deposit, this app will not send again while the safety lock is active.',
       );
       transition('COMMIT_AMBIGUOUS');
     } else {
       rememberSignature(recovered.signature);
       setFailure(
-        'Recovered a known Devnet signature from this tab. Only read-only server verification is available; no wallet transaction will be resent.',
+        Date.parse(recovered.evidenceExpiresAt) <= dependencies.now().getTime()
+          ? 'The verification window ended without conclusive evidence. Public Devnet RPC replicas can lag, so this known signature remains locked. Inspect the lending dashboard and Explorer; no new transaction will be sent.'
+          : 'Recovered a known Devnet signature from this tab. Only read-only server verification is available; no wallet transaction will be resent.',
       );
       transition('VERIFICATION_PENDING');
     }
@@ -338,9 +364,51 @@ export function PublicTestnetTransactionProof({
     };
   }, []);
 
+  useEffect(() => {
+    const tracked = recoveryJournal;
+    if (tracked === null || tracked.signature !== null) return;
+    const expiresAtMilliseconds = Date.parse(tracked.evidenceExpiresAt);
+    const recheck = (): void => {
+      if (!mountedReference.current) return;
+      const current = recoveryReference.current;
+      if (
+        current === null ||
+        current.intentId !== tracked.intentId ||
+        current.account !== tracked.account ||
+        current.evidenceExpiresAt !== tracked.evidenceExpiresAt ||
+        current.signature !== tracked.signature
+      ) {
+        return;
+      }
+      restoreRecoveryOnMount();
+    };
+    const remainingMilliseconds = expiresAtMilliseconds - dependencies.now().getTime();
+    if (!Number.isFinite(remainingMilliseconds)) return;
+    let deadlineTimer: ReturnType<typeof globalThis.setTimeout> | null = null;
+    if (remainingMilliseconds <= 0) queueMicrotask(recheck);
+    else {
+      deadlineTimer = globalThis.setTimeout(
+        recheck,
+        Math.min(remainingMilliseconds, 2_147_483_647),
+      );
+    }
+    const recheckOnVisible = (): void => {
+      if (document.visibilityState === 'visible') recheck();
+    };
+    globalThis.addEventListener('focus', recheck);
+    document.addEventListener('visibilitychange', recheckOnVisible);
+    return () => {
+      if (deadlineTimer !== null) globalThis.clearTimeout(deadlineTimer);
+      globalThis.removeEventListener('focus', recheck);
+      document.removeEventListener('visibilitychange', recheckOnVisible);
+    };
+  }, [dependencies, recoveryJournal]);
+
   const unresolvedSignature = signature !== null && phase !== 'CONFIRMED';
   const unresolvedExecution =
     recoveryJournal !== null || unresolvedSignature || phase === 'COMMIT_AMBIGUOUS';
+  const unsignedRecoveryLock =
+    recoveryJournal !== null && recoveryJournal.signature === null && phase !== 'CONFIRMED';
   const writeActive = ACTIVE_OPERATION_PHASES.has(phase) || unresolvedExecution;
 
   useEffect(() => {
@@ -410,6 +478,27 @@ export function PublicTestnetTransactionProof({
     transition('CLOSED');
   }
 
+  function prepareAnotherDeposit(): void {
+    if (phaseReference.current !== 'CONFIRMED' || recoveryReference.current !== null) return;
+    const wallet = walletReference.current;
+    const selectedAccount = accountReference.current;
+    if (wallet === null || selectedAccount === null) {
+      closeReview();
+      return;
+    }
+
+    // Verification consumed the prior intent and cleared its durable recovery record. Retain the
+    // same connected account, but discard every piece of transaction-specific evidence before
+    // preparing the next independently reviewed deposit.
+    setCurrentIntent(null);
+    signatureReference.current = null;
+    setSignature(null);
+    setSubmission(null);
+    setConfirmedDisclosure(false);
+    setFailure(null);
+    void prepareIntent(wallet, selectedAccount);
+  }
+
   async function prepareIntent(
     wallet: SolanaPublicTestnetWalletPort,
     selectedAccount: string,
@@ -467,6 +556,7 @@ export function PublicTestnetTransactionProof({
       const selectedAccount = await wallet.connect(controller.signal);
       if (controller.signal.aborted || generation !== generationReference.current) return;
       accountReference.current = selectedAccount;
+      rememberDashboardAccount(selectedAccount);
       bindWalletInvalidation(wallet);
       await prepareIntent(wallet, selectedAccount);
     } catch (error) {
@@ -480,11 +570,18 @@ export function PublicTestnetTransactionProof({
         );
       }
     } finally {
-      if (generation === generationReference.current) operationReference.current = null;
+      if (generation === generationReference.current) {
+        onPositionRefreshRequested?.();
+        operationReference.current = null;
+      }
     }
   }
 
-  async function verifyKnownSignature(intentId: string, knownSignature: string): Promise<void> {
+  async function verifyKnownSignature(
+    intentId: string,
+    knownSignature: string,
+    signedTransaction?: Uint8Array,
+  ): Promise<void> {
     let tracked = recoveryReference.current;
     if (tracked === null) {
       setFailure('The durable recovery record is missing. No wallet transaction will be resent.');
@@ -520,7 +617,15 @@ export function PublicTestnetTransactionProof({
     setFailure(null);
     transition('VERIFYING');
     try {
-      const result = await api.submitTransaction(intentId, knownSignature, controller.signal);
+      const result =
+        signedTransaction === undefined
+          ? await api.submitTransaction(intentId, knownSignature, controller.signal)
+          : await api.submitSignedTransaction(
+              intentId,
+              knownSignature,
+              signedTransaction,
+              controller.signal,
+            );
       if (controller.signal.aborted || generation !== generationReference.current) return;
       setSubmission(result);
       if (result.status === 'VERIFIED') {
@@ -543,122 +648,177 @@ export function PublicTestnetTransactionProof({
         onUnauthenticated?.();
         return;
       }
+      if (
+        signedTransaction !== undefined &&
+        error instanceof PublicTestnetApiError &&
+        error.code === 'BROADCAST_REJECTED'
+      ) {
+        try {
+          clearPublicTestnetRecoveryJournal(tracked);
+          setCurrentRecovery(null);
+          signatureReference.current = null;
+          setSignature(null);
+          setSubmission(null);
+          setFailure(
+            'The Devnet RPC rejected the signed transaction before accepting it for broadcast. Nothing was submitted; close this review and start again with a fresh intent.',
+          );
+          transition('ERROR');
+        } catch {
+          setFailure(
+            'Devnet did not accept the transaction, but its recovery marker could not be cleared. New sends remain blocked.',
+          );
+          transition('VERIFICATION_PENDING');
+        }
+        return;
+      }
       if (generation === generationReference.current) {
         setFailure(failureCopy(error, true));
         transition('VERIFICATION_PENDING');
       }
     } finally {
-      if (generation === generationReference.current) operationReference.current = null;
+      if (generation === generationReference.current) {
+        onPositionRefreshRequested?.();
+        operationReference.current = null;
+      }
     }
   }
 
   async function submitTransaction(): Promise<void> {
     const wallet = walletReference.current;
-    const currentIntent = intentReference.current;
+    const reviewedIntent = intentReference.current;
     const selectedAccount = accountReference.current;
+    const api = apiReference.current;
     if (
       phaseReference.current !== 'READY' ||
       wallet === null ||
-      currentIntent === null ||
+      reviewedIntent === null ||
       selectedAccount === null ||
+      api === null ||
       !confirmedDisclosure ||
       signatureReference.current !== null
     ) {
-      return;
-    }
-    if (!intentHasWriteWindow(currentIntent, dependencies.now())) {
-      setFailure(
-        'The reviewed transaction is too close to expiry. Review the refreshed intent before signing.',
-      );
-      await prepareIntent(wallet, selectedAccount);
       return;
     }
 
     const { controller, generation } = beginOperation();
     let writeRequested = false;
     setFailure(null);
-    transition('SIGN_PROMPT');
+    transition('PREPARING');
     try {
+      // The connected-wallet review intent is informational. Obtain a new blockhash-bound intent
+      // on the final click so disclosure-reading time cannot age the transaction before Phantom.
+      const currentIntent = await api.createIntent(
+        publicTestnetPreviewRequest(preview, selectedAccount),
+        controller.signal,
+      );
+      if (controller.signal.aborted || generation !== generationReference.current) return;
       const snapshot = await wallet.readSnapshot(controller.signal);
-      if (snapshot.account !== selectedAccount) {
+      if (snapshot.account !== selectedAccount || currentIntent.account !== selectedAccount) {
         throw new SolanaPublicTestnetWalletError('ACCOUNT_CHANGED');
       }
-      const walletTransaction = publicTestnetWalletTransaction(currentIntent);
-      let pendingRecovery: PublicTestnetRecoveryJournal;
-      try {
-        pendingRecovery = startPublicTestnetRecoveryJournal({
-          intentId: currentIntent.intentId,
-          account: selectedAccount,
-          evidenceExpiresAt: currentIntent.evidenceExpiresAt,
-        });
-        setCurrentRecovery(pendingRecovery);
-      } catch {
-        setFailure(
-          'Safe transaction recovery storage is unavailable. Phantom was not asked to send anything.',
-        );
-        transition('ERROR');
+      setCurrentIntent(currentIntent);
+      if (currentIntent.fundingReadiness.status !== 'READY') {
+        setConfirmedDisclosure(false);
+        transition('FUNDING_NEEDED');
         return;
       }
+      if (
+        !intentHasWriteWindow(currentIntent, dependencies.now(), MINIMUM_WALLET_APPROVAL_WINDOW_MS)
+      ) {
+        setFailure(
+          'The refreshed transaction did not retain enough approval time. Submit again to request another fresh intent.',
+        );
+        transition('READY');
+        return;
+      }
+      transition('SIGN_PROMPT');
+      const walletTransaction = publicTestnetWalletTransaction(currentIntent);
       writeRequested = true;
-      const nextSignature = await wallet.sendTransaction(
+      const signedTransaction = await wallet.signTransaction(
         walletTransaction,
         selectedAccount,
         controller.signal,
       );
-
-      // Retain and durably journal the signature before any server verification.
-      rememberSignature(nextSignature);
-      try {
-        pendingRecovery = addPublicTestnetRecoverySignature(pendingRecovery, nextSignature);
-        setCurrentRecovery(pendingRecovery);
-      } catch {
-        setFailure(
-          'The signature is known, but it could not be stored durably. Keep this tab open; no wallet transaction will be resent.',
-        );
-        transition('VERIFICATION_PENDING');
+      if (
+        controller.signal.aborted ||
+        generation !== generationReference.current ||
+        !mountedReference.current
+      ) {
         return;
       }
+      const nextSignature = signedTransaction.signature;
+      if (
+        !intentHasWriteWindow(currentIntent, dependencies.now(), MINIMUM_SERVER_BROADCAST_WINDOW_MS)
+      ) {
+        setFailure(
+          'Phantom returned the signed transaction too close to blockhash expiry. It was not broadcast; close this review and start again with a fresh intent.',
+        );
+        transition('ERROR');
+        return;
+      }
+
+      let pendingRecovery: PublicTestnetRecoveryJournal;
+      try {
+        pendingRecovery = startSignedPublicTestnetRecoveryJournal({
+          intentId: currentIntent.intentId,
+          account: selectedAccount,
+          evidenceExpiresAt: currentIntent.evidenceExpiresAt,
+          signature: nextSignature,
+        });
+        setCurrentRecovery(pendingRecovery);
+        rememberDashboardAccount(selectedAccount);
+      } catch {
+        setFailure(
+          'Phantom signed the transaction, but safe recovery storage is unavailable. The app did not broadcast it; close this review and start again.',
+        );
+        transition('ERROR');
+        return;
+      }
+      // Retain the signature only after its journal is durable and before the
+      // signed bytes cross the server broadcast boundary.
+      rememberSignature(nextSignature);
       transition('SIGNATURE_KNOWN');
-      await verifyKnownSignature(currentIntent.intentId, nextSignature);
+      await verifyKnownSignature(
+        currentIntent.intentId,
+        nextSignature,
+        signedTransaction.serializedTransaction,
+      );
     } catch (error) {
       if (signatureReference.current !== null) {
         setFailure(failureCopy(error, true));
         transition('VERIFICATION_PENDING');
         return;
       }
-      if (error instanceof SolanaPublicTestnetWalletError && error.code === 'USER_REJECTED') {
+      if (writeRequested) {
         const pendingRecovery = recoveryReference.current;
-        if (pendingRecovery !== null) {
+        if (pendingRecovery !== null && pendingRecovery.signature === null) {
           try {
             clearPublicTestnetRecoveryJournal(pendingRecovery);
             setCurrentRecovery(null);
           } catch {
             setFailure(
-              'Phantom rejected the request, but the recovery marker could not be cleared. New sends remain blocked.',
+              'The signing request ended, but its recovery marker could not be cleared. New sends remain blocked.',
             );
             transition('COMMIT_AMBIGUOUS');
             return;
           }
         }
         setFailure(failureCopy(error, false));
-        transition('USER_REJECTED');
-        return;
-      }
-      if (
-        writeRequested &&
-        (controller.signal.aborted ||
-          (error instanceof SolanaPublicTestnetWalletError &&
-            (error.code === 'COMMIT_AMBIGUOUS' || error.code === 'REQUEST_PENDING')))
-      ) {
-        setFailure(failureCopy(new SolanaPublicTestnetWalletError('COMMIT_AMBIGUOUS'), false));
-        transition('COMMIT_AMBIGUOUS');
+        transition(
+          error instanceof SolanaPublicTestnetWalletError && error.code === 'USER_REJECTED'
+            ? 'USER_REJECTED'
+            : 'ERROR',
+        );
         return;
       }
       if (isAbortFailure(error, controller.signal)) return;
       setFailure(failureCopy(error, false));
       transition('ERROR');
     } finally {
-      if (generation === generationReference.current) operationReference.current = null;
+      if (generation === generationReference.current) {
+        if (writeRequested) onPositionRefreshRequested?.();
+        operationReference.current = null;
+      }
     }
   }
 
@@ -777,7 +937,7 @@ export function PublicTestnetTransactionProof({
                 </div>
                 <div>
                   <dt>Wallet confirmations</dt>
-                  <dd>1 exact transaction</dd>
+                  <dd>1 transaction</dd>
                 </div>
                 <div>
                   <dt>Intent expires</dt>
@@ -792,6 +952,13 @@ export function PublicTestnetTransactionProof({
                   </dd>
                 </div>
               </dl>
+              <p className="public-testnet-position-note" role="note">
+                Phantom may prepend only SetComputeUnitPrice followed by SetComputeUnitLimit. The
+                server requires a 200,000 compute-unit limit, a price no higher than 500,000
+                micro-lamports per compute unit, and a priority fee no higher than 100,000 lamports
+                (0.0001 SOL). It rejects every other addition, reordering, or change to the exact
+                six-instruction core. Inspect Phantom&apos;s total fee before approving.
+              </p>
               <p className="public-testnet-position-note" role="note">
                 After verification, the 0.01 Devnet SOL remains in the public testnet lending
                 position. This demo does not withdraw it automatically.
@@ -848,11 +1015,32 @@ export function PublicTestnetTransactionProof({
           )}
 
           {unresolvedExecution ? (
-            <p className="public-testnet-recovery-note" role="note">
-              Keep this tab open while possible. After a reload, this tab blocks every new send and
-              restores read-only verification when a signature is known. Inspect Phantom and the
-              explorer, and do not start another proof that could duplicate the deposit.
-            </p>
+            <div className="public-testnet-recovery-note" role="note">
+              {unsignedRecoveryLock ? (
+                <>
+                  <p>
+                    If the request committed, that Devnet position remains on-chain. You can view
+                    and refresh the read-only lending dashboard on this page while this lock is
+                    active.
+                  </p>
+                  <p>
+                    Safety lock ends automatically after{' '}
+                    <time dateTime={recoveryJournal.evidenceExpiresAt}>
+                      {recoveryJournal.evidenceExpiresAt}
+                    </time>
+                    . This page will unlock when it observes that deadline. The lock affects new
+                    sends only; it does not withdraw, hide, or change an existing position.
+                  </p>
+                  <a href="#public-testnet-lending-dashboard">View lending dashboard</a>
+                </>
+              ) : (
+                <p>
+                  Keep this tab open while possible. After a reload, this tab blocks every new send
+                  and restores read-only verification when a signature is known. Inspect Phantom and
+                  the explorer, and do not start another proof that could duplicate the deposit.
+                </p>
+              )}
+            </div>
           ) : null}
 
           {signature !== null && phase !== 'CONFIRMED' ? (
@@ -873,13 +1061,18 @@ export function PublicTestnetTransactionProof({
 
           {phase === 'COMMIT_AMBIGUOUS' ||
           (recoveryJournal !== null && signature === null && phase !== 'CONFIRMED') ? (
-            <button
-              className="portfolio-secondary-action"
-              type="button"
-              onClick={restoreRecoveryJournal}
-            >
-              Recheck recovery deadline
-            </button>
+            <div className="public-testnet-recovery-controls">
+              <button
+                className="portfolio-secondary-action"
+                type="button"
+                onClick={restoreRecoveryJournal}
+              >
+                Check lock status now
+              </button>
+              <small>
+                Read-only: this cannot send a transaction or clear the lock before its deadline.
+              </small>
+            </div>
           ) : null}
 
           {phase === 'CONFIRMED' && submission?.position.status === 'VERIFIED' ? (
@@ -889,6 +1082,14 @@ export function PublicTestnetTransactionProof({
                 The server matched the transaction and confirmed that the Devnet collateral position
                 increased.
               </p>
+              <a href="#public-testnet-lending-dashboard">View in lending dashboard</a>
+              <button
+                className="portfolio-secondary-action"
+                type="button"
+                onClick={prepareAnotherDeposit}
+              >
+                Review another 0.01 SOL deposit
+              </button>
             </div>
           ) : null}
         </div>

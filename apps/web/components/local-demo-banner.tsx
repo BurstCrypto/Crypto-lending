@@ -1,5 +1,5 @@
 export const LOCAL_DEMO_BANNER_TEXT =
-  'Synthetic local demo data — no real assets or transactions; no live provider connections or requests';
+  'Synthetic local portfolio data — no real-value assets; only the labeled Devnet proof and dashboard make live public-chain requests';
 
 export function LocalDemoBanner({ enabled }: Readonly<{ enabled: boolean }>) {
   if (!enabled) return null;

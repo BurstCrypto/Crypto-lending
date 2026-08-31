@@ -176,6 +176,16 @@ describe('system endpoints (e2e)', () => {
       response.body.paths['/api/v1/public-testnet/execution-intents/{intentId}/submissions'].post
         .responses['200'].content['application/json'].schema.properties.confirmation.enum,
     ).toEqual(['LATEST_SIGNATURE_STATUS_OBSERVATION']);
+    const submissionSchema =
+      response.body.paths['/api/v1/public-testnet/execution-intents/{intentId}/submissions'].post
+        .requestBody.content['application/json'].schema;
+    expect(submissionSchema.required).toEqual(['signature']);
+    expect(submissionSchema.additionalProperties).toBe(false);
+    expect(submissionSchema.properties.signedTransactionBase64).toMatchObject({
+      type: 'string',
+      minLength: 4,
+      maxLength: 1_644,
+    });
     expect(response.body.paths).not.toHaveProperty('/api/v1/internal/health/dependencies');
     expect(
       response.body.paths['/api/v1/health/dependencies'].get.responses['503'].content[

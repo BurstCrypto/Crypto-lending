@@ -1,4 +1,4 @@
-import { PublicKey } from '@solana/web3.js';
+import { ComputeBudgetProgram, PublicKey, Transaction } from '@solana/web3.js';
 import type { Wallet, WalletAccount } from '@wallet-standard/base';
 import type { StandardEventsChangeProperties } from '@wallet-standard/features';
 
@@ -7,11 +7,17 @@ import {
   type SelectedSolanaWallet,
   walletStandardConnectFeature,
   walletStandardEventsFeature,
-  walletStandardSignAndSendFeature,
+  walletStandardSignTransactionFeature,
 } from './discovery';
 
 const BASE58_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
 const MAX_TRANSACTION_BYTES = 1_232;
+const SET_COMPUTE_UNIT_LIMIT_TAG = 2;
+const SET_COMPUTE_UNIT_PRICE_TAG = 3;
+const WALLET_COMPUTE_UNIT_LIMIT = 200_000;
+const WALLET_MAX_COMPUTE_UNIT_PRICE_MICRO_LAMPORTS = 500_000n;
+const WALLET_MAX_PRIORITY_FEE_LAMPORTS = 100_000n;
+const MICRO_LAMPORTS_PER_LAMPORT = 1_000_000n;
 
 export type SolanaPublicTestnetWalletErrorCode =
   | 'ABORTED'
@@ -52,14 +58,19 @@ export interface SolanaPublicTestnetTransactionRequest {
   readonly minContextSlot: number;
 }
 
+export interface SolanaPublicTestnetSignedTransaction {
+  readonly signature: string;
+  readonly serializedTransaction: Uint8Array;
+}
+
 export interface SolanaPublicTestnetWalletPort {
   connect(signal?: AbortSignal): Promise<string>;
   readSnapshot(signal?: AbortSignal): Promise<SolanaPublicTestnetWalletSnapshot>;
-  sendTransaction(
+  signTransaction(
     request: SolanaPublicTestnetTransactionRequest,
     expectedAccount: string,
     signal?: AbortSignal,
-  ): Promise<string>;
+  ): Promise<SolanaPublicTestnetSignedTransaction>;
   subscribeInvalidation(listener: () => void): () => void;
   dispose(): void;
 }
@@ -86,7 +97,7 @@ function providerCode(value: unknown): string | number | undefined {
 
 function providerFailure(
   value: unknown,
-  operation: 'connect' | 'write',
+  operation: 'connect' | 'sign',
   signal?: AbortSignal,
 ): SolanaPublicTestnetWalletError {
   if (value instanceof SolanaPublicTestnetWalletError) return value;
@@ -97,7 +108,9 @@ function providerFailure(
   if (code === -32002 || code === '-32002' || code === 'REQUEST_PENDING') {
     return new SolanaPublicTestnetWalletError('REQUEST_PENDING');
   }
-  if (operation === 'write') return new SolanaPublicTestnetWalletError('COMMIT_AMBIGUOUS');
+  if (operation === 'sign') {
+    return new SolanaPublicTestnetWalletError(signal?.aborted ? 'ABORTED' : 'INVALID_RESPONSE');
+  }
   return new SolanaPublicTestnetWalletError(signal?.aborted ? 'ABORTED' : 'INVALID_RESPONSE');
 }
 
@@ -149,7 +162,7 @@ function validAccount(account: WalletAccount): boolean {
     const address = canonicalAddress(account.address);
     return (
       account.chains.some((chain) => chain === SOLANA_DEVNET_WALLET_STANDARD_CHAIN) &&
-      accountSupportsFeature(account, 'solana:signAndSendTransaction') &&
+      accountSupportsFeature(account, 'solana:signTransaction') &&
       account.publicKey instanceof Uint8Array &&
       account.publicKey.byteLength === 32 &&
       bytesEqual(new PublicKey(address).toBytes(), account.publicKey)
@@ -180,6 +193,113 @@ function encodeBase58(value: Uint8Array): string {
     result += BASE58_ALPHABET[digits[index] ?? 0];
   }
   return result;
+}
+
+function readUnsignedLittleEndian(value: Uint8Array, offset: number, length: number): bigint {
+  let result = 0n;
+  for (let index = length - 1; index >= 0; index -= 1) {
+    result = (result << 8n) | BigInt(value[offset + index] ?? 0);
+  }
+  return result;
+}
+
+function allowedSignedMessage(reviewed: Transaction, signed: Transaction): boolean {
+  const reviewedMessage = reviewed.serializeMessage();
+  const signedMessage = signed.serializeMessage();
+  if (bytesEqual(reviewedMessage, signedMessage)) return true;
+
+  const [priceInstruction, limitInstruction] = signed.instructions;
+  if (
+    priceInstruction === undefined ||
+    limitInstruction === undefined ||
+    !priceInstruction.programId.equals(ComputeBudgetProgram.programId) ||
+    priceInstruction.keys.length !== 0 ||
+    priceInstruction.data.byteLength !== 9 ||
+    priceInstruction.data[0] !== SET_COMPUTE_UNIT_PRICE_TAG ||
+    !limitInstruction.programId.equals(ComputeBudgetProgram.programId) ||
+    limitInstruction.keys.length !== 0 ||
+    limitInstruction.data.byteLength !== 5 ||
+    limitInstruction.data[0] !== SET_COMPUTE_UNIT_LIMIT_TAG
+  ) {
+    return false;
+  }
+
+  const computeUnitPriceMicroLamports = readUnsignedLittleEndian(priceInstruction.data, 1, 8);
+  const computeUnitLimit = Number(readUnsignedLittleEndian(limitInstruction.data, 1, 4));
+  const priorityFeeLamports =
+    (BigInt(computeUnitLimit) * computeUnitPriceMicroLamports + MICRO_LAMPORTS_PER_LAMPORT - 1n) /
+    MICRO_LAMPORTS_PER_LAMPORT;
+  if (
+    computeUnitLimit !== WALLET_COMPUTE_UNIT_LIMIT ||
+    computeUnitPriceMicroLamports > WALLET_MAX_COMPUTE_UNIT_PRICE_MICRO_LAMPORTS ||
+    priorityFeeLamports > WALLET_MAX_PRIORITY_FEE_LAMPORTS
+  ) {
+    return false;
+  }
+
+  if (reviewed.feePayer === undefined || reviewed.recentBlockhash === undefined) return false;
+  try {
+    const allowed = new Transaction({
+      feePayer: reviewed.feePayer,
+      recentBlockhash: reviewed.recentBlockhash,
+    }).add(priceInstruction, limitInstruction, ...reviewed.instructions);
+    return bytesEqual(allowed.serializeMessage(), signedMessage);
+  } catch {
+    return false;
+  }
+}
+
+function parseReviewedTransaction(value: Uint8Array, expectedAccount: string): Transaction {
+  try {
+    const transaction = Transaction.from(value);
+    if (
+      transaction.feePayer?.toBase58() !== expectedAccount ||
+      transaction.recentBlockhash === undefined ||
+      transaction.signatures.length !== 1 ||
+      transaction.signatures[0]?.publicKey.toBase58() !== expectedAccount ||
+      transaction.signatures[0].signature !== null ||
+      !bytesEqual(
+        transaction.serialize({ requireAllSignatures: false, verifySignatures: false }),
+        value,
+      )
+    ) {
+      throw new Error('invalid reviewed transaction');
+    }
+    return transaction;
+  } catch {
+    throw new SolanaPublicTestnetWalletError('INVALID_RESPONSE');
+  }
+}
+
+function parseSignedTransaction(
+  value: unknown,
+  reviewed: Transaction,
+  expectedAccount: string,
+): SolanaPublicTestnetSignedTransaction {
+  try {
+    const serializedTransaction = exactBytes(value);
+    const transaction = Transaction.from(serializedTransaction);
+    const signer = transaction.signatures[0];
+    if (
+      transaction.feePayer?.toBase58() !== expectedAccount ||
+      transaction.recentBlockhash !== reviewed.recentBlockhash ||
+      transaction.signatures.length !== 1 ||
+      signer?.publicKey.toBase58() !== expectedAccount ||
+      signer.signature === null ||
+      signer.signature.byteLength !== 64 ||
+      !transaction.verifySignatures() ||
+      !allowedSignedMessage(reviewed, transaction) ||
+      !bytesEqual(transaction.serialize(), serializedTransaction)
+    ) {
+      throw new Error('invalid signed transaction');
+    }
+    return Object.freeze({
+      signature: encodeBase58(Uint8Array.from(signer.signature)),
+      serializedTransaction: Uint8Array.from(serializedTransaction),
+    });
+  } catch {
+    throw new SolanaPublicTestnetWalletError('INVALID_RESPONSE');
+  }
 }
 
 class DefaultSolanaPublicTestnetWallet implements SolanaPublicTestnetWalletPort {
@@ -236,11 +356,11 @@ class DefaultSolanaPublicTestnetWallet implements SolanaPublicTestnetWalletPort 
     });
   }
 
-  async sendTransaction(
+  async signTransaction(
     request: SolanaPublicTestnetTransactionRequest,
     expectedAccount: string,
     signal?: AbortSignal,
-  ): Promise<string> {
+  ): Promise<SolanaPublicTestnetSignedTransaction> {
     this.#assertLive();
     throwIfAborted(signal);
     const account = this.#requireAccount();
@@ -250,53 +370,44 @@ class DefaultSolanaPublicTestnetWallet implements SolanaPublicTestnetWalletPort 
       throw new SolanaPublicTestnetWalletError('ACCOUNT_CHANGED');
     }
     if (
-      (request.transactionVersion !== 'legacy' && request.transactionVersion !== 0) ||
-      !this.#versions.includes(request.transactionVersion) ||
+      request.transactionVersion !== 'legacy' ||
+      !this.#versions.includes('legacy') ||
       !Number.isSafeInteger(request.minContextSlot) ||
       request.minContextSlot < 0
     ) {
       throw new SolanaPublicTestnetWalletError('UNSUPPORTED');
     }
-    const transaction = exactBytes(request.serializedTransaction);
-    const feature = walletStandardSignAndSendFeature(this.#wallet);
-    if (feature === null || !accountSupportsFeature(account, 'solana:signAndSendTransaction')) {
+    const serializedTransaction = exactBytes(request.serializedTransaction);
+    const reviewedTransaction = parseReviewedTransaction(serializedTransaction, accountAddress);
+    const feature = walletStandardSignTransactionFeature(this.#wallet);
+    if (feature === null || !accountSupportsFeature(account, 'solana:signTransaction')) {
       throw new SolanaPublicTestnetWalletError('UNSUPPORTED');
     }
-    const generation = this.#generation;
-    let output: Awaited<ReturnType<typeof feature.signAndSendTransaction>>;
+    let output: Awaited<ReturnType<typeof feature.signTransaction>>;
     try {
-      output = await feature.signAndSendTransaction({
+      output = await feature.signTransaction({
         account,
         chain: SOLANA_DEVNET_WALLET_STANDARD_CHAIN,
-        transaction,
-        options: {
-          preflightCommitment: 'confirmed',
-          commitment: 'confirmed',
-          minContextSlot: request.minContextSlot,
-          skipPreflight: false,
-          maxRetries: 0,
-        },
+        transaction: serializedTransaction,
       });
     } catch (error) {
-      throw providerFailure(error, 'write', signal);
+      throw providerFailure(error, 'sign', signal);
     }
 
-    // The write request has crossed the provider boundary. Any malformed or missing result may
-    // still represent a broadcast transaction, so it is commit-ambiguous rather than retryable.
-    let signature: string;
+    // This method never broadcasts. A malformed signing result is therefore a pre-broadcast
+    // wallet failure, not an ambiguous on-chain commit.
     try {
       if (!Array.isArray(output) || output.length !== 1 || output[0] === undefined) {
-        throw new Error('missing wallet signature');
+        throw new Error('missing signed transaction');
       }
-      signature = encodeBase58(exactBytes(output[0].signature, 64));
+      return parseSignedTransaction(
+        output[0].signedTransaction,
+        reviewedTransaction,
+        accountAddress,
+      );
     } catch {
-      throw new SolanaPublicTestnetWalletError('COMMIT_AMBIGUOUS');
+      throw new SolanaPublicTestnetWalletError('INVALID_RESPONSE');
     }
-    if (generation !== this.#generation || this.#account !== account) {
-      // The caller still receives the known signature and must use read-only recovery only.
-      return signature;
-    }
-    return signature;
   }
 
   subscribeInvalidation(listener: () => void): () => void {

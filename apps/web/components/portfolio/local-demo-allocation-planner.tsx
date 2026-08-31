@@ -19,7 +19,10 @@ import {
   type LocalDemoYieldCatalog,
 } from '@/lib/local-demo/local-demo-yield';
 import { formatUsdMinor } from '@/lib/portfolio/unified-balance';
+import { PublicTestnetApiClient } from '@/lib/public-testnet/public-testnet-client';
+import { readPublicTestnetPositionAccount } from '@/lib/public-testnet/public-testnet-position-account';
 
+import { PublicTestnetLendingDashboard } from './public-testnet-lending-dashboard';
 import {
   PublicTestnetTransactionProof,
   type PublicTestnetProofDependencies,
@@ -30,6 +33,8 @@ const AS_OF_FORMATTER = new Intl.DateTimeFormat('en-US', {
   timeStyle: 'short',
   timeZone: 'UTC',
 });
+
+const DEFAULT_PUBLIC_TESTNET_API_FACTORY = () => new PublicTestnetApiClient();
 
 export interface LocalDemoAllocationPlannerProps {
   readonly client: LocalDemoApiClient;
@@ -374,6 +379,8 @@ function AllocationPreview({
   onUnauthenticated,
   publicTestnetProofDependencies,
   onPublicTestnetWriteActivityChange,
+  onPublicTestnetPositionAccountChange,
+  onPublicTestnetPositionRefreshRequested,
 }: {
   preview: LocalDemoAllocationPreview;
   draftLiquidReserveBasisPoints: number;
@@ -384,6 +391,8 @@ function AllocationPreview({
   onUnauthenticated?: (() => void) | undefined;
   publicTestnetProofDependencies?: PublicTestnetProofDependencies | undefined;
   onPublicTestnetWriteActivityChange: (active: boolean) => void;
+  onPublicTestnetPositionAccountChange: (account: string) => void;
+  onPublicTestnetPositionRefreshRequested: () => void;
 }) {
   return (
     <section
@@ -551,6 +560,8 @@ function AllocationPreview({
           preview={preview}
           onUnauthenticated={onUnauthenticated}
           onWriteActivityChange={onPublicTestnetWriteActivityChange}
+          onPositionAccountChange={onPublicTestnetPositionAccountChange}
+          onPositionRefreshRequested={onPublicTestnetPositionRefreshRequested}
           dependencies={publicTestnetProofDependencies}
         />
       ) : null}
@@ -587,10 +598,31 @@ export function LocalDemoAllocationPlanner({
   );
   const [liquidityUpdatePending, setLiquidityUpdatePending] = useState(false);
   const [publicTestnetWriteActive, setPublicTestnetWriteActive] = useState(false);
+  const [publicTestnetPositionAccount, setPublicTestnetPositionAccount] = useState<string | null>(
+    null,
+  );
+  const [publicTestnetPositionRefreshKey, setPublicTestnetPositionRefreshKey] = useState(0);
   const [previewState, setPreviewState] = useState<'IDLE' | 'ERROR' | 'PORTFOLIO_CHANGED'>('IDLE');
   const catalogRequest = useRef<AbortController | null>(null);
   const previewRequest = useRef<AbortController | null>(null);
   const requestGeneration = useRef(0);
+  const createPublicTestnetApi =
+    publicTestnetProofDependencies?.createApi ?? DEFAULT_PUBLIC_TESTNET_API_FACTORY;
+
+  useEffect(() => {
+    let mounted = true;
+    queueMicrotask(() => {
+      if (!mounted) return;
+      try {
+        setPublicTestnetPositionAccount(readPublicTestnetPositionAccount());
+      } catch {
+        setPublicTestnetPositionAccount(null);
+      }
+    });
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -759,144 +791,162 @@ export function LocalDemoAllocationPlanner({
   }
 
   return (
-    <section className="local-demo-allocation-panel" aria-labelledby="local-demo-allocation-title">
-      <div className="local-demo-allocation-heading">
-        <div>
-          <p className="eyebrow">Allocation preview</p>
-          <h2 id="local-demo-allocation-title">Preview your managed allocation.</h2>
+    <>
+      <PublicTestnetLendingDashboard
+        key={publicTestnetPositionAccount ?? 'no-position-account'}
+        account={publicTestnetPositionAccount}
+        createApi={createPublicTestnetApi}
+        onUnauthenticated={onUnauthenticated}
+        refreshKey={publicTestnetPositionRefreshKey}
+      />
+      <section
+        className="local-demo-allocation-panel"
+        aria-labelledby="local-demo-allocation-title"
+      >
+        <div className="local-demo-allocation-heading">
+          <div>
+            <p className="eyebrow">Allocation preview</p>
+            <h2 id="local-demo-allocation-title">Preview your managed allocation.</h2>
+          </div>
+          <span className="local-demo-proof-badge">Local model · estimate only</span>
         </div>
-        <span className="local-demo-proof-badge">Local model · estimate only</span>
-      </div>
-      <p className="local-demo-allocation-intro">
-        Preview a Crypto Lending managed blend across connected EVM and Solana fixture balances. It
-        starts with no liquid reserve; after previewing, use the slider to add liquidity if needed.
-        Ecosystem allocation, variable fee estimates, and the first positive day after estimated
-        fees appear only after you select the blend.
-      </p>
-
-      {catalogError ? (
-        <div className="local-demo-catalog-error" role="alert">
-          <p className="local-demo-allocation-error">
-            The managed rate set could not be validated. No yield estimate was accepted.
-          </p>
-          <button
-            className="portfolio-secondary-action"
-            type="button"
-            onClick={() => {
-              setCatalogError(false);
-              setCatalogLoadAttempt((attempt) => attempt + 1);
-            }}
-          >
-            Retry rates
-          </button>
-        </div>
-      ) : catalog === null ? (
-        <p className="local-demo-yield-loading" role="status">
-          Loading managed rates…
+        <p className="local-demo-allocation-intro">
+          Preview a Crypto Lending managed blend across connected EVM and Solana fixture balances.
+          It starts with no liquid reserve; after previewing, use the slider to add liquidity if
+          needed. Ecosystem allocation, variable fee estimates, and the first positive day after
+          estimated fees appear only after you select the blend.
         </p>
-      ) : (
-        <RateStatus catalog={catalog} />
-      )}
 
-      <div className="local-demo-allocation-choices" role="group" aria-label="Managed allocation">
-        {LOCAL_DEMO_ALLOCATION_PRESETS.filter((preset) =>
-          LOCAL_DEMO_VISIBLE_ALLOCATION_PRESET_IDS.some((presetId) => presetId === preset.id),
-        ).map((preset) => {
-          const key = `PRESET:${preset.id}`;
-          return (
+        {catalogError ? (
+          <div className="local-demo-catalog-error" role="alert">
+            <p className="local-demo-allocation-error">
+              The managed rate set could not be validated. No yield estimate was accepted.
+            </p>
             <button
-              className={selectedKey === key ? 'is-selected' : undefined}
-              key={preset.id}
+              className="portfolio-secondary-action"
               type="button"
-              aria-pressed={selectedKey === key}
-              disabled={pendingKey !== null || catalog === null || publicTestnetWriteActive}
-              onClick={() =>
-                void requestPreview(
-                  {
-                    kind: 'PRESET',
-                    presetId: preset.id,
-                    liquidReserveBasisPoints:
-                      preview?.selection.liquidReserveBasisPoints ??
-                      preset.liquidReserveBasisPoints,
-                  },
-                  key,
-                )
-              }
+              onClick={() => {
+                setCatalogError(false);
+                setCatalogLoadAttempt((attempt) => attempt + 1);
+              }}
             >
-              <span className="local-demo-allocation-choice-title">
-                <strong>{preset.label}</strong>
-                <small>
-                  {pendingKey === key
-                    ? liquidityUpdatePending
-                      ? 'Updating…'
-                      : 'Calculating…'
-                    : 'Preview blend'}
-                </small>
-              </span>
-              <span className="local-demo-allocation-choice-description">{preset.description}</span>
-              <span className="local-demo-allocation-choice-apy">
-                <small>Default liquid reserve</small>
-                <strong>{percentage(preset.liquidReserveBasisPoints)}</strong>
-              </span>
-              <span className="local-demo-allocation-mix">
-                <span>
-                  <small>Managed yield</small>
-                  <strong>{percentage(10_000 - preset.liquidReserveBasisPoints)}</strong>
-                </span>
-                <span>
-                  <small>Fee estimate</small>
-                  <strong>After selection</strong>
-                </span>
-              </span>
+              Retry rates
             </button>
-          );
-        })}
-      </div>
+          </div>
+        ) : catalog === null ? (
+          <p className="local-demo-yield-loading" role="status">
+            Loading managed rates…
+          </p>
+        ) : (
+          <RateStatus catalog={catalog} />
+        )}
 
-      <span className="visually-hidden" role="status" aria-live="polite">
-        {pendingKey !== null
-          ? liquidityUpdatePending
-            ? 'Updating the allocation preview. The current applied preview remains visible.'
-            : 'Calculating allocation preview.'
-          : preview === null
-            ? ''
-            : `${preview.selection.label} preview ready. Estimated fees are ${
-                formatUsdMinor(preview.executionCost.modeledScenario.totalUsdMinor).visible
-              }; ${preview.compositionSummary.activeEcosystemCount === 2 ? 'EVM and Solana managed allocations are included' : 'one managed ecosystem is included'}; ${firstPositiveDayAnnouncement(preview)}.`}
-      </span>
-      {previewState === 'PORTFOLIO_CHANGED' ? (
-        <p className="local-demo-allocation-error" role="alert">
-          Your connected-wallet portfolio changed before this preview completed. The portfolio is
-          being refreshed; preview the managed blend again when it is ready.
-        </p>
-      ) : null}
-      {previewState === 'ERROR' ? (
-        <p className="local-demo-allocation-error" role="alert">
-          {preview === null
-            ? 'This allocation estimate could not be confirmed. No user-authorized financial transaction was created. Try again.'
-            : 'The liquidity update could not be confirmed. The current applied preview has not changed, and no funds were moved. Try again.'}
-        </p>
-      ) : null}
-      {preview === null ? null : (
-        <AllocationPreview
-          preview={preview}
-          draftLiquidReserveBasisPoints={
-            draftLiquidReserveBasisPoints ?? preview.selection.liquidReserveBasisPoints
-          }
-          liquidityUpdatePending={liquidityUpdatePending}
-          publicTestnetWriteActive={publicTestnetWriteActive}
-          onDraftLiquidityChange={(basisPoints) => {
-            if (!liquidityUpdatePending && !publicTestnetWriteActive) {
-              setDraftLiquidReserveBasisPoints(basisPoints);
-              setPreviewState('IDLE');
+        <div className="local-demo-allocation-choices" role="group" aria-label="Managed allocation">
+          {LOCAL_DEMO_ALLOCATION_PRESETS.filter((preset) =>
+            LOCAL_DEMO_VISIBLE_ALLOCATION_PRESET_IDS.some((presetId) => presetId === preset.id),
+          ).map((preset) => {
+            const key = `PRESET:${preset.id}`;
+            return (
+              <button
+                className={selectedKey === key ? 'is-selected' : undefined}
+                key={preset.id}
+                type="button"
+                aria-pressed={selectedKey === key}
+                disabled={pendingKey !== null || catalog === null || publicTestnetWriteActive}
+                onClick={() =>
+                  void requestPreview(
+                    {
+                      kind: 'PRESET',
+                      presetId: preset.id,
+                      liquidReserveBasisPoints:
+                        preview?.selection.liquidReserveBasisPoints ??
+                        preset.liquidReserveBasisPoints,
+                    },
+                    key,
+                  )
+                }
+              >
+                <span className="local-demo-allocation-choice-title">
+                  <strong>{preset.label}</strong>
+                  <small>
+                    {pendingKey === key
+                      ? liquidityUpdatePending
+                        ? 'Updating…'
+                        : 'Calculating…'
+                      : 'Preview blend'}
+                  </small>
+                </span>
+                <span className="local-demo-allocation-choice-description">
+                  {preset.description}
+                </span>
+                <span className="local-demo-allocation-choice-apy">
+                  <small>Default liquid reserve</small>
+                  <strong>{percentage(preset.liquidReserveBasisPoints)}</strong>
+                </span>
+                <span className="local-demo-allocation-mix">
+                  <span>
+                    <small>Managed yield</small>
+                    <strong>{percentage(10_000 - preset.liquidReserveBasisPoints)}</strong>
+                  </span>
+                  <span>
+                    <small>Fee estimate</small>
+                    <strong>After selection</strong>
+                  </span>
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        <span className="visually-hidden" role="status" aria-live="polite">
+          {pendingKey !== null
+            ? liquidityUpdatePending
+              ? 'Updating the allocation preview. The current applied preview remains visible.'
+              : 'Calculating allocation preview.'
+            : preview === null
+              ? ''
+              : `${preview.selection.label} preview ready. Estimated fees are ${
+                  formatUsdMinor(preview.executionCost.modeledScenario.totalUsdMinor).visible
+                }; ${preview.compositionSummary.activeEcosystemCount === 2 ? 'EVM and Solana managed allocations are included' : 'one managed ecosystem is included'}; ${firstPositiveDayAnnouncement(preview)}.`}
+        </span>
+        {previewState === 'PORTFOLIO_CHANGED' ? (
+          <p className="local-demo-allocation-error" role="alert">
+            Your connected-wallet portfolio changed before this preview completed. The portfolio is
+            being refreshed; preview the managed blend again when it is ready.
+          </p>
+        ) : null}
+        {previewState === 'ERROR' ? (
+          <p className="local-demo-allocation-error" role="alert">
+            {preview === null
+              ? 'This allocation estimate could not be confirmed. No user-authorized financial transaction was created. Try again.'
+              : 'The liquidity update could not be confirmed. The current applied preview has not changed, and no funds were moved. Try again.'}
+          </p>
+        ) : null}
+        {preview === null ? null : (
+          <AllocationPreview
+            preview={preview}
+            draftLiquidReserveBasisPoints={
+              draftLiquidReserveBasisPoints ?? preview.selection.liquidReserveBasisPoints
             }
-          }}
-          onApplyLiquidity={applyDraftLiquidity}
-          onUnauthenticated={onUnauthenticated}
-          publicTestnetProofDependencies={publicTestnetProofDependencies}
-          onPublicTestnetWriteActivityChange={setPublicTestnetWriteActive}
-        />
-      )}
-    </section>
+            liquidityUpdatePending={liquidityUpdatePending}
+            publicTestnetWriteActive={publicTestnetWriteActive}
+            onDraftLiquidityChange={(basisPoints) => {
+              if (!liquidityUpdatePending && !publicTestnetWriteActive) {
+                setDraftLiquidReserveBasisPoints(basisPoints);
+                setPreviewState('IDLE');
+              }
+            }}
+            onApplyLiquidity={applyDraftLiquidity}
+            onUnauthenticated={onUnauthenticated}
+            publicTestnetProofDependencies={publicTestnetProofDependencies}
+            onPublicTestnetWriteActivityChange={setPublicTestnetWriteActive}
+            onPublicTestnetPositionAccountChange={setPublicTestnetPositionAccount}
+            onPublicTestnetPositionRefreshRequested={() =>
+              setPublicTestnetPositionRefreshKey((value) => value + 1)
+            }
+          />
+        )}
+      </section>
+    </>
   );
 }

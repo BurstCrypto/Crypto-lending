@@ -37,6 +37,7 @@ import { LoginForm } from '../components/authentication/login-form';
 import { RegistrationForm } from '../components/authentication/registration-form';
 import { AuthenticationUnauthenticatedError, type AccountProfile } from '../lib/authentication';
 import { localDemoWalletRosterKey } from '../lib/local-demo/wallet-roster';
+import { PUBLIC_TESTNET_POSITION_ACCOUNT_STORAGE_KEY } from '../lib/public-testnet/public-testnet-position-account';
 
 const PROFILE: AccountProfile = Object.freeze({
   accountId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
@@ -436,6 +437,7 @@ describe('verified account session UI', () => {
     authenticationMocks.restore.mockResolvedValueOnce(PROFILE);
     const rosterKey = localDemoWalletRosterKey(PROFILE.accountId);
     window.sessionStorage.setItem(rosterKey, JSON.stringify({ version: 1, entries: [] }));
+    window.sessionStorage.setItem(PUBLIC_TESTNET_POSITION_ACCOUNT_STORAGE_KEY, 'remembered-wallet');
     navigationMocks.replace.mockImplementationOnce(() => {
       expect(screen.queryByText(PROFILE.contactEmail)).not.toBeInTheDocument();
     });
@@ -447,6 +449,7 @@ describe('verified account session UI', () => {
     await waitFor(() => expect(navigationMocks.replace).toHaveBeenCalledWith('/login'));
     expect(screen.queryByText(PROFILE.contactEmail)).not.toBeInTheDocument();
     expect(window.sessionStorage.getItem(rosterKey)).toBeNull();
+    expect(window.sessionStorage.getItem(PUBLIC_TESTNET_POSITION_ACCOUNT_STORAGE_KEY)).toBeNull();
     expect(screen.getByText('Leaving your protected account…')).toBeInTheDocument();
   });
 

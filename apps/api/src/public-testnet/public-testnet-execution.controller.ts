@@ -38,12 +38,15 @@ import { LocalDemoNoMatchingYieldOpportunitiesError } from '../local-demo/local-
 import {
   PUBLIC_TESTNET_INTENT_BODY_SCHEMA,
   PUBLIC_TESTNET_INTENT_RESPONSE_SCHEMA,
+  PUBLIC_TESTNET_POSITION_BODY_SCHEMA,
+  PUBLIC_TESTNET_POSITION_RESPONSE_SCHEMA,
   PUBLIC_TESTNET_SUBMISSION_BODY_SCHEMA,
   PUBLIC_TESTNET_VERIFICATION_RESPONSE_SCHEMA,
   PublicTestnetBodyError,
   PublicTestnetPrivacyInterceptor,
   parsePublicTestnetIntentBody,
   parsePublicTestnetIntentId,
+  parsePublicTestnetPositionBody,
   parsePublicTestnetSubmissionBody,
 } from './public-testnet-execution.http';
 import {
@@ -53,9 +56,12 @@ import {
   PublicTestnetIntentNotFoundError,
   PublicTestnetExecutionService,
   type PublicTestnetIntentResponse,
+  type PublicTestnetPositionResponse,
   type PublicTestnetVerificationResponse,
 } from './public-testnet-execution.service';
 import {
+  PublicTestnetBroadcastAmbiguousError,
+  PublicTestnetBroadcastRejectedError,
   PublicTestnetEvidenceMismatchError,
   PublicTestnetPreflightRejectedError,
   PublicTestnetRpcUnavailableError,
@@ -93,6 +99,37 @@ function evidenceRejected(): never {
   });
 }
 
+function broadcastRejected(): never {
+  throw new UnprocessableEntityException({
+    statusCode: HttpStatus.UNPROCESSABLE_ENTITY,
+    error: 'Unprocessable Entity',
+    message: 'The fixed Devnet RPC rejected the signed transaction',
+    code: 'PUBLIC_TESTNET_BROADCAST_REJECTED',
+  });
+}
+
+function broadcastAmbiguous(): never {
+  throw new HttpException(
+    {
+      error: 'Service Unavailable',
+      message:
+        'The Devnet broadcast result is inconclusive; recover with signature-only verification',
+      statusCode: HttpStatus.SERVICE_UNAVAILABLE,
+      code: 'PUBLIC_TESTNET_BROADCAST_AMBIGUOUS',
+    },
+    HttpStatus.SERVICE_UNAVAILABLE,
+  );
+}
+
+function positionRejected(): never {
+  throw new UnprocessableEntityException({
+    statusCode: HttpStatus.UNPROCESSABLE_ENTITY,
+    error: 'Unprocessable Entity',
+    message: 'The fixed Devnet lending deployment or reserve failed validation',
+    code: 'PUBLIC_TESTNET_POSITION_UNAVAILABLE',
+  });
+}
+
 @ApiTags('public-testnet')
 @ApiSecurity('sessionCookie')
 @UseGuards(AccountAuthGuard)
@@ -101,12 +138,52 @@ function evidenceRejected(): never {
 export class PublicTestnetExecutionController {
   constructor(private readonly executions: PublicTestnetExecutionService) {}
 
+  @Post('positions/query')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Read one fixed Solana Devnet lending position',
+    description:
+      'Returns a finalized, read-only cSOL position estimate and current on-chain base supply APY. This route never creates an intent, asks for a wallet signature, or broadcasts.',
+  })
+  @ApiBody({ schema: PUBLIC_TESTNET_POSITION_BODY_SCHEMA })
+  @ApiOkResponse({
+    description: 'Finalized position and current variable reserve-rate observation',
+    schema: PUBLIC_TESTNET_POSITION_RESPONSE_SCHEMA,
+  })
+  @ApiBadRequestResponse({ description: 'Body is malformed or contains unsupported fields' })
+  @ApiUnauthorizedResponse({ description: 'Missing session, exact origin, or CSRF proof' })
+  @ApiNotFoundResponse({ description: 'The isolated local public-testnet demo is disabled' })
+  @ApiResponse({ status: 422, description: 'The fixed deployment or reserve failed closed' })
+  @ApiResponse({ status: 503, description: 'The fixed public RPC is unavailable' })
+  async readPosition(
+    @CurrentPrincipal() principal: AuthenticatedPrincipal,
+    @Body() body: unknown,
+    @Res({ passthrough: true }) response: HeaderWriter,
+  ): Promise<PublicTestnetPositionResponse> {
+    let parsed: ReturnType<typeof parsePublicTestnetPositionBody>;
+    try {
+      parsed = parsePublicTestnetPositionBody(body);
+    } catch (error) {
+      return badBody(error);
+    }
+    try {
+      return await this.executions.readPosition(principal.accountId, parsed);
+    } catch (error) {
+      if (error instanceof PublicTestnetIntentNotFoundError) {
+        throw new NotFoundException('Not found');
+      }
+      if (error instanceof PublicTestnetPreflightRejectedError) return positionRejected();
+      if (error instanceof PublicTestnetRpcUnavailableError) return unavailable(response);
+      return unavailable(response);
+    }
+  }
+
   @Post('execution-intents')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
     summary: 'Prepare a fixed browser-wallet lending proof on Solana Devnet',
     description:
-      'Creates a short-lived account-, wallet-, portfolio-, and selection-bound intent. The API never signs or broadcasts.',
+      'Creates a short-lived account-, wallet-, portfolio-, and selection-bound intent. This route never signs or broadcasts.',
   })
   @ApiBody({ schema: PUBLIC_TESTNET_INTENT_BODY_SCHEMA })
   @ApiCreatedResponse({
@@ -169,9 +246,9 @@ export class PublicTestnetExecutionController {
   @Post('execution-intents/:intentId/submissions')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'Verify one browser-broadcast Solana signature against one intent',
+    summary: 'Submit or verify one signed Solana Devnet transaction against one intent',
     description:
-      'Polls latest signature status and accepts only a finalized byte-identical transaction with a positive collateral-token delta. The API never signs or broadcasts.',
+      'The first call may include signedTransactionBase64. The API strictly validates one fee-payer signature and the reviewed legacy message, binds the signature and exact wire bytes, then makes one fixed Devnet sendTransaction request. It never retries an inconclusive send. Later signature-only calls are read-only recovery polls. Final acceptance still requires the byte-identical six-instruction core and a positive collateral-token delta. Phantom may prepend only SetComputeUnitPrice then SetComputeUnitLimit: 200,000 compute units, at most 500,000 micro-lamports per unit, and at most 100,000 lamports (0.0001 SOL) priority fee.',
   })
   @ApiParam({ name: 'intentId', schema: { type: 'string', format: 'uuid' } })
   @ApiBody({ schema: PUBLIC_TESTNET_SUBMISSION_BODY_SCHEMA })
@@ -183,9 +260,18 @@ export class PublicTestnetExecutionController {
   @ApiUnauthorizedResponse({ description: 'Missing session, exact origin, or CSRF proof' })
   @ApiNotFoundResponse({ description: 'Disabled, unknown, or owned by a different account' })
   @ApiResponse({ status: 409, description: 'Intent was already bound to a different signature' })
-  @ApiResponse({ status: 410, description: 'Intent expired before a signature was accepted' })
-  @ApiResponse({ status: 422, description: 'Transaction, receipt, event, or position mismatched' })
-  @ApiResponse({ status: 503, description: 'The fixed public RPC is unavailable' })
+  @ApiResponse({
+    status: 410,
+    description: 'Intent expired before a signature was accepted',
+  })
+  @ApiResponse({
+    status: 422,
+    description: 'Transaction evidence mismatched or the fixed Devnet RPC rejected the send',
+  })
+  @ApiResponse({
+    status: 503,
+    description: 'Verification is unavailable or the one-shot broadcast outcome is ambiguous',
+  })
   async verifySubmission(
     @CurrentPrincipal() principal: AuthenticatedPrincipal,
     @Param('intentId') intentIdValue: unknown,
@@ -214,6 +300,8 @@ export class PublicTestnetExecutionController {
           'Public-testnet intent is already bound to a different signature',
         );
       }
+      if (error instanceof PublicTestnetBroadcastRejectedError) return broadcastRejected();
+      if (error instanceof PublicTestnetBroadcastAmbiguousError) return broadcastAmbiguous();
       if (error instanceof PublicTestnetEvidenceMismatchError) return evidenceRejected();
       if (error instanceof PublicTestnetRpcUnavailableError) return unavailable(response);
       return unavailable(response);

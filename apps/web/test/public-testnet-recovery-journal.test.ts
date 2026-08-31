@@ -6,6 +6,7 @@ import {
   PUBLIC_TESTNET_RECOVERY_JOURNAL_STORAGE_KEY,
   PublicTestnetRecoveryJournalError,
   readPublicTestnetRecoveryJournal,
+  startSignedPublicTestnetRecoveryJournal,
   startPublicTestnetRecoveryJournal,
   type PublicTestnetRecoveryJournalRecord,
   type PublicTestnetRecoveryJournalStorage,
@@ -94,6 +95,22 @@ describe('public-testnet recovery journal', () => {
 
     expect(storage.operations).toEqual(['get', 'remove', 'get']);
     expect(storage.values.has(PUBLIC_TESTNET_RECOVERY_JOURNAL_STORAGE_KEY)).toBe(false);
+  });
+
+  it('atomically creates a signature-known journal before server submission', () => {
+    const storage = new FakeStorage();
+
+    const created = startSignedPublicTestnetRecoveryJournal(
+      { ...startInput(), signature: PUBLIC_TESTNET_SIGNATURE },
+      storage,
+    );
+
+    expect(created).toEqual(journal(PUBLIC_TESTNET_SIGNATURE));
+    expect(Object.isFrozen(created)).toBe(true);
+    expect(storage.operations).toEqual(['get', 'set', 'get']);
+    expect(
+      JSON.parse(storage.values.get(PUBLIC_TESTNET_RECOVERY_JOURNAL_STORAGE_KEY) ?? ''),
+    ).toEqual(journal(PUBLIC_TESTNET_SIGNATURE));
   });
 
   it('uses sessionStorage by default', () => {
@@ -194,7 +211,7 @@ describe('public-testnet recovery journal', () => {
     expect(storage.values.get(PUBLIC_TESTNET_RECOVERY_JOURNAL_STORAGE_KEY)).toBe(persisted);
   });
 
-  it('clears only definitely expired valid records and verifies their removal', () => {
+  it('clears expired unsigned records but retains every known signature', () => {
     const storage = new FakeStorage();
     const created = startPublicTestnetRecoveryJournal(startInput(), storage);
 
@@ -203,6 +220,16 @@ describe('public-testnet recovery journal', () => {
     );
     expect(readPublicTestnetRecoveryJournal(new Date(EVIDENCE_EXPIRES_AT), storage)).toBeNull();
     expect(storage.values.has(PUBLIC_TESTNET_RECOVERY_JOURNAL_STORAGE_KEY)).toBe(false);
+
+    const signed = startSignedPublicTestnetRecoveryJournal(
+      { ...startInput(), signature: PUBLIC_TESTNET_SIGNATURE },
+      storage,
+    );
+    expect(readPublicTestnetRecoveryJournal(new Date(EVIDENCE_EXPIRES_AT), storage)).toEqual(
+      signed,
+    );
+    expect(storage.values.has(PUBLIC_TESTNET_RECOVERY_JOURNAL_STORAGE_KEY)).toBe(true);
+    clearPublicTestnetRecoveryJournal(signed, storage);
 
     startPublicTestnetRecoveryJournal(startInput(), storage);
     storage.ignoreRemoves = true;

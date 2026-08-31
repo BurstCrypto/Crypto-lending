@@ -23,10 +23,14 @@ import {
   PublicTestnetIntentNotFoundError,
   type PublicTestnetExecutionService,
   type PublicTestnetIntentResponse,
+  type PublicTestnetPositionResponse,
   type PublicTestnetVerificationResponse,
 } from './public-testnet-execution.service';
 import {
+  PublicTestnetBroadcastAmbiguousError,
+  PublicTestnetBroadcastRejectedError,
   PublicTestnetEvidenceMismatchError,
+  PublicTestnetPreflightRejectedError,
   PublicTestnetRpcUnavailableError,
 } from './public-testnet-execution.rpc';
 
@@ -50,7 +54,15 @@ const BODY = Object.freeze({
   account: 'GvjoVKNjBvQcFaSKUW1gTE7DxhSpjHbE69umVR5nPuQp',
 });
 const SUBMISSION = Object.freeze({ signature: SIGNATURE });
+const SIGNED_SUBMISSION = Object.freeze({
+  signature: SIGNATURE,
+  signedTransactionBase64: Buffer.from([1, 2, 3]).toString('base64'),
+});
+const POSITION_BODY = Object.freeze({ chainId: PUBLIC_TESTNET_CHAIN_ID, account: BODY.account });
 const INTENT_RESPONSE = Object.freeze({ intentId: INTENT_ID }) as PublicTestnetIntentResponse;
+const POSITION_RESPONSE = Object.freeze({
+  use: 'PUBLIC_TESTNET_READ_ONLY_POSITION',
+}) as PublicTestnetPositionResponse;
 const VERIFICATION_RESPONSE = Object.freeze({
   intentId: INTENT_ID,
   status: 'PENDING' as const,
@@ -71,12 +83,13 @@ const VERIFICATION_RESPONSE = Object.freeze({
 
 function fixture(): {
   controller: PublicTestnetExecutionController;
-  executions: { createIntent: jest.Mock; verifySubmission: jest.Mock };
+  executions: { createIntent: jest.Mock; readPosition: jest.Mock; verifySubmission: jest.Mock };
   headers: Map<string, string>;
   response: { setHeader(name: string, value: string): void };
 } {
   const executions = {
     createIntent: jest.fn(async () => INTENT_RESPONSE),
+    readPosition: jest.fn(async () => POSITION_RESPONSE),
     verifySubmission: jest.fn(async () => VERIFICATION_RESPONSE),
   };
   const headers = new Map<string, string>();
@@ -100,7 +113,7 @@ async function captureRejected(run: () => Promise<unknown>): Promise<unknown> {
 }
 
 describe('PublicTestnetExecutionController', () => {
-  it('publishes only the intent and signature-submission POST routes', () => {
+  it('publishes only the read-only position, intent, and signature-submission POST routes', () => {
     const prototype = PublicTestnetExecutionController.prototype;
     expect(Reflect.getMetadata(PATH_METADATA, PublicTestnetExecutionController)).toBe(
       'public-testnet',
@@ -108,6 +121,9 @@ describe('PublicTestnetExecutionController', () => {
     expect(Reflect.getMetadata(METHOD_METADATA, prototype.createIntent)).toBe(RequestMethod.POST);
     expect(Reflect.getMetadata(PATH_METADATA, prototype.createIntent)).toBe('execution-intents');
     expect(Reflect.getMetadata(HTTP_CODE_METADATA, prototype.createIntent)).toBe(201);
+    expect(Reflect.getMetadata(METHOD_METADATA, prototype.readPosition)).toBe(RequestMethod.POST);
+    expect(Reflect.getMetadata(PATH_METADATA, prototype.readPosition)).toBe('positions/query');
+    expect(Reflect.getMetadata(HTTP_CODE_METADATA, prototype.readPosition)).toBe(200);
     expect(Reflect.getMetadata(METHOD_METADATA, prototype.verifySubmission)).toBe(
       RequestMethod.POST,
     );
@@ -115,6 +131,14 @@ describe('PublicTestnetExecutionController', () => {
       'execution-intents/:intentId/submissions',
     );
     expect(Reflect.getMetadata(HTTP_CODE_METADATA, prototype.verifySubmission)).toBe(200);
+  });
+
+  it('passes only the authenticated account and exact read-only position request', async () => {
+    const { controller, executions, response } = fixture();
+    await expect(controller.readPosition(PRINCIPAL, POSITION_BODY, response)).resolves.toBe(
+      POSITION_RESPONSE,
+    );
+    expect(executions.readPosition).toHaveBeenCalledWith(ACCOUNT_ID, POSITION_BODY);
   });
 
   it('passes only the authenticated account, active correlation, and exact request', async () => {
@@ -140,8 +164,24 @@ describe('PublicTestnetExecutionController', () => {
         response,
       ),
     ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(
+      controller.readPosition(PRINCIPAL, { ...POSITION_BODY, reserve: 'attacker' }, response),
+    ).rejects.toBeInstanceOf(BadRequestException);
     expect(executions.createIntent).not.toHaveBeenCalled();
+    expect(executions.readPosition).not.toHaveBeenCalled();
     expect(executions.verifySubmission).not.toHaveBeenCalled();
+  });
+
+  it('maps failed position validation without exposing reserve internals', async () => {
+    const { controller, executions, response } = fixture();
+    executions.readPosition.mockRejectedValueOnce(
+      new PublicTestnetPreflightRejectedError('RESERVE_UNAVAILABLE'),
+    );
+    const error = await captureRejected(() =>
+      controller.readPosition(PRINCIPAL, POSITION_BODY, response),
+    );
+    expect(error).toBeInstanceOf(UnprocessableEntityException);
+    expect((error as HttpException).getStatus()).toBe(HttpStatus.UNPROCESSABLE_ENTITY);
   });
 
   it('binds one canonical signature to the principal-scoped intent', async () => {
@@ -152,11 +192,24 @@ describe('PublicTestnetExecutionController', () => {
     expect(executions.verifySubmission).toHaveBeenCalledWith(ACCOUNT_ID, INTENT_ID, SUBMISSION);
   });
 
+  it('forwards optional signed transaction bytes only through the authenticated submission route', async () => {
+    const { controller, executions, response } = fixture();
+    await expect(
+      controller.verifySubmission(PRINCIPAL, INTENT_ID, SIGNED_SUBMISSION, response),
+    ).resolves.toBe(VERIFICATION_RESPONSE);
+    expect(executions.verifySubmission).toHaveBeenCalledWith(
+      ACCOUNT_ID,
+      INTENT_ID,
+      SIGNED_SUBMISSION,
+    );
+  });
+
   it.each([
     [new PublicTestnetIntentNotFoundError(), NotFoundException, 404],
     [new PublicTestnetIntentExpiredError(), GoneException, 410],
     [new PublicTestnetIntentConflictError(), ConflictException, 409],
     [new PublicTestnetEvidenceMismatchError(), UnprocessableEntityException, 422],
+    [new PublicTestnetBroadcastRejectedError(), UnprocessableEntityException, 422],
   ] as const)(
     'maps verification failures without leaking internals',
     async (failure, kind, status) => {
@@ -178,5 +231,18 @@ describe('PublicTestnetExecutionController', () => {
     );
     expect((error as HttpException).getStatus()).toBe(HttpStatus.SERVICE_UNAVAILABLE);
     expect(headers.get('Retry-After')).toBe('1');
+  });
+
+  it('marks an inconclusive send as ambiguous without asking the caller to rebroadcast', async () => {
+    const { controller, executions, response, headers } = fixture();
+    executions.verifySubmission.mockRejectedValueOnce(new PublicTestnetBroadcastAmbiguousError());
+    const error = await captureRejected(() =>
+      controller.verifySubmission(PRINCIPAL, INTENT_ID, SIGNED_SUBMISSION, response),
+    );
+    expect((error as HttpException).getStatus()).toBe(HttpStatus.SERVICE_UNAVAILABLE);
+    expect((error as HttpException).getResponse()).toMatchObject({
+      code: 'PUBLIC_TESTNET_BROADCAST_AMBIGUOUS',
+    });
+    expect(headers.has('Retry-After')).toBe(false);
   });
 });

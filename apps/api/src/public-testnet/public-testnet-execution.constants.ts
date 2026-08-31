@@ -12,6 +12,15 @@ export const PUBLIC_TESTNET_ASSET_DECIMALS = 9 as const;
 // Covers the fixed 0.01 SOL deposit, two possible token-account rents, and fee.
 // It is deliberately conservative and is not a wallet fee quote.
 export const PUBLIC_TESTNET_REQUIRED_NATIVE_BALANCE_LAMPORTS = 20_000_000n;
+export const PUBLIC_TESTNET_MAX_TRANSACTION_BYTES = 1_232 as const;
+export const PUBLIC_TESTNET_WALLET_COMPUTE_UNIT_LIMIT = 200_000 as const;
+export const PUBLIC_TESTNET_WALLET_MAX_COMPUTE_UNIT_PRICE_MICRO_LAMPORTS = 500_000n;
+export const PUBLIC_TESTNET_WALLET_MAX_PRIORITY_FEE_LAMPORTS = 100_000n;
+// Preserve enough post-acceptance lifetime for roughly two of an RPC node's
+// generic two-second rebroadcast intervals, even when Devnet is advancing near
+// six block heights per second. The power-of-two cushion also absorbs the race
+// between this read-only guard and the leader receiving the signed bytes.
+export const PUBLIC_TESTNET_MINIMUM_BROADCAST_REMAINING_BLOCK_HEIGHTS = 32n;
 export const PUBLIC_TESTNET_INTENT_TTL_MILLISECONDS = 60 * 1_000;
 export const PUBLIC_TESTNET_EVIDENCE_RETENTION_MILLISECONDS = 10 * 60 * 1_000;
 export const PUBLIC_TESTNET_MAX_INTENTS = 256;

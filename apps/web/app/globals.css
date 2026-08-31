@@ -1771,6 +1771,182 @@ h1 {
   color: var(--muted);
 }
 
+.public-testnet-success a {
+  display: inline-block;
+  margin-top: 0.65rem;
+  color: var(--accent-strong);
+  font-weight: 780;
+}
+
+.public-testnet-lending-dashboard {
+  display: grid;
+  gap: 1rem;
+  padding: clamp(1rem, 2.5vw, 1.35rem);
+  background: rgba(3, 14, 10, 0.76);
+  border: 1px solid var(--border);
+  border-radius: 0.9rem;
+  scroll-margin-top: clamp(5rem, 12vw, 8rem);
+}
+
+.public-testnet-lending-dashboard-heading,
+.public-testnet-lending-dashboard-position-heading,
+.public-testnet-lending-dashboard-metadata {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.public-testnet-lending-dashboard-heading h2 {
+  margin: 0.3rem 0 0;
+  font-size: 1.12rem;
+}
+
+.public-testnet-lending-dashboard-summary,
+.public-testnet-lending-dashboard-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.7rem;
+}
+
+.public-testnet-lending-dashboard-summary > div,
+.public-testnet-lending-dashboard-metrics > div {
+  display: grid;
+  align-content: start;
+  gap: 0.35rem;
+  min-width: 0;
+  padding: 0.85rem;
+  background: rgba(112, 225, 179, 0.045);
+  border: 1px solid var(--border);
+  border-radius: 0.72rem;
+}
+
+.public-testnet-lending-dashboard-summary span,
+.public-testnet-lending-dashboard-summary small,
+.public-testnet-lending-dashboard-metrics dt,
+.public-testnet-lending-dashboard-position-heading span,
+.public-testnet-lending-dashboard-metadata span {
+  color: var(--muted);
+}
+
+.public-testnet-lending-dashboard-summary strong {
+  overflow-wrap: anywhere;
+  font-size: clamp(1.05rem, 2.5vw, 1.4rem);
+  font-variant-numeric: tabular-nums;
+}
+
+.public-testnet-lending-dashboard-summary small {
+  line-height: 1.4;
+}
+
+.public-testnet-lending-dashboard-position {
+  display: grid;
+  gap: 0.9rem;
+  padding: 1rem;
+  background: rgba(112, 225, 179, 0.025);
+  border: 1px solid rgba(112, 225, 179, 0.2);
+  border-radius: 0.8rem;
+}
+
+.public-testnet-lending-dashboard-position-heading > div {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.public-testnet-lending-dashboard-position-heading > span {
+  padding: 0.28rem 0.52rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.public-testnet-lending-dashboard-position-heading > span.is-open {
+  color: var(--accent-strong);
+  background: rgba(112, 225, 179, 0.08);
+  border-color: rgba(112, 225, 179, 0.28);
+}
+
+.public-testnet-lending-dashboard-metrics {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: 0;
+}
+
+.public-testnet-lending-dashboard-metrics dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-weight: 760;
+  font-variant-numeric: tabular-nums;
+}
+
+.public-testnet-lending-dashboard-status,
+.public-testnet-lending-dashboard-empty,
+.public-testnet-lending-dashboard-error,
+.public-testnet-lending-dashboard-note,
+.public-testnet-lending-dashboard-warning {
+  margin: 0;
+  padding: 0.85rem 0.95rem;
+  border-radius: 0.72rem;
+  line-height: 1.5;
+}
+
+.public-testnet-lending-dashboard-status,
+.public-testnet-lending-dashboard-empty,
+.public-testnet-lending-dashboard-note {
+  color: var(--muted);
+  background: rgba(112, 225, 179, 0.05);
+  border: 1px solid var(--border);
+}
+
+.public-testnet-lending-dashboard-error,
+.public-testnet-lending-dashboard-warning {
+  color: #ffd9b0;
+  background: rgba(255, 207, 112, 0.07);
+  border: 1px solid rgba(255, 207, 112, 0.26);
+}
+
+.public-testnet-recovery-note p {
+  margin: 0;
+}
+
+.public-testnet-recovery-note p + p {
+  margin-top: 0.65rem;
+}
+
+.public-testnet-recovery-note a {
+  display: inline-block;
+  margin-top: 0.7rem;
+  color: var(--accent-strong);
+  font-weight: 750;
+}
+
+.public-testnet-recovery-controls {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.public-testnet-recovery-controls small {
+  color: var(--muted);
+}
+
+.public-testnet-lending-dashboard-empty p,
+.public-testnet-lending-dashboard-error p {
+  margin: 0.25rem 0 0;
+}
+
+.public-testnet-lending-dashboard-metadata {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.public-testnet-lending-dashboard-metadata a {
+  color: var(--accent-strong);
+  font-weight: 740;
+}
+
 .public-testnet-transaction-links {
   display: flex;
   flex-wrap: wrap;
@@ -2513,6 +2689,10 @@ footer p {
     flex-direction: column;
     gap: 0.3rem;
   }
+
+  .public-testnet-lending-dashboard-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 760px) {
@@ -2551,6 +2731,9 @@ footer p {
   .local-demo-yield-catalog-heading,
   .public-testnet-proof-heading,
   .public-testnet-confirmation-heading,
+  .public-testnet-lending-dashboard-heading,
+  .public-testnet-lending-dashboard-position-heading,
+  .public-testnet-lending-dashboard-metadata,
   .portfolio-refresh-row,
   .local-demo-wallet-roster li {
     align-items: stretch;
@@ -2573,6 +2756,11 @@ footer p {
   }
 
   .public-testnet-verification-status {
+    grid-template-columns: 1fr;
+  }
+
+  .public-testnet-lending-dashboard-summary,
+  .public-testnet-lending-dashboard-metrics {
     grid-template-columns: 1fr;
   }
 
