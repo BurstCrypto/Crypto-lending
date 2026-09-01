@@ -44,6 +44,20 @@ export interface PublicTestnetPreflightObservation {
   readonly destinationCollateralAccount: PublicKey;
 }
 
+export interface PublicTestnetWithdrawalPreflightObservation {
+  readonly slot: bigint;
+  readonly blockhash: string;
+  readonly lastValidBlockHeight: bigint;
+  readonly observedAt: string;
+  readonly nativeBalanceLamports: bigint;
+  readonly temporaryAccountRentLamports: bigint;
+  readonly collateralBalanceAtomic: bigint;
+  readonly estimatedLiquidityAtomic: bigint;
+  readonly reserveAvailableLiquidityAtomic: bigint;
+  readonly sourceCollateralAccount: PublicKey;
+  readonly temporaryLiquidityAccount: PublicKey;
+}
+
 export interface PublicTestnetPositionObservation {
   readonly slot: bigint;
   readonly observedAt: string;
@@ -64,6 +78,12 @@ export interface PublicTestnetVerificationExpectation {
   readonly lastValidBlockHeight: bigint;
 }
 
+export interface PublicTestnetWithdrawalVerificationExpectation extends PublicTestnetVerificationExpectation {
+  readonly sourceCollateralAccount: PublicKey;
+  readonly temporaryLiquidityAccount: PublicKey;
+  readonly collateralAmountAtomic: bigint;
+}
+
 export interface PublicTestnetSignedTransactionSubmission {
   readonly signature: string;
   readonly signedTransactionBase64: string;
@@ -79,6 +99,18 @@ export type PublicTestnetTransactionObservation =
       increaseAtomic: bigint;
     }>;
 
+export type PublicTestnetWithdrawalTransactionObservation =
+  | Readonly<{ status: 'PENDING' }>
+  | Readonly<{ status: 'FAILED'; slot: bigint | null }>
+  | Readonly<{
+      status: 'VERIFIED' | 'SETTLED_POSITION_REMAINS';
+      slot: bigint;
+      collateralBalanceBeforeAtomic: bigint;
+      collateralBalanceAfterAtomic: bigint;
+      decreaseAtomic: bigint;
+      liquidityReceivedAtomic: bigint;
+    }>;
+
 export interface PublicTestnetExecutionRpc {
   preflight(account: PublicKey): Promise<PublicTestnetPreflightObservation>;
   readPosition(account: PublicKey): Promise<PublicTestnetPositionObservation>;
@@ -90,6 +122,14 @@ export interface PublicTestnetExecutionRpc {
     signature: string,
     expected: PublicTestnetVerificationExpectation,
   ): Promise<PublicTestnetTransactionObservation>;
+  preflightWithdrawal?(
+    account: PublicKey,
+    temporaryLiquidityAccount: PublicKey,
+  ): Promise<PublicTestnetWithdrawalPreflightObservation>;
+  verifyFinalizedWithdrawal?(
+    signature: string,
+    expected: PublicTestnetWithdrawalVerificationExpectation,
+  ): Promise<PublicTestnetWithdrawalTransactionObservation>;
 }
 
 export class PublicTestnetRpcUnavailableError extends Error {
@@ -561,6 +601,61 @@ export class FixedSolanaDevnetExecutionRpc implements PublicTestnetExecutionRpc 
     return (await this.observeFixedDeployment(account, false)).position;
   }
 
+  async preflightWithdrawal(
+    account: PublicKey,
+    temporaryLiquidityAccount: PublicKey,
+  ): Promise<PublicTestnetWithdrawalPreflightObservation> {
+    const observation = await this.observeFixedDeployment(account, true);
+    const preflight = observation.preflight ?? unavailable();
+    const reserveAvailableLiquidityAtomic = observation.reserveAvailableLiquidityAtomic;
+    const estimatedLiquidityAtomic = observation.position.suppliedLiquidityAtomic;
+    if (
+      preflight.collateralBalanceBeforeAtomic <= 0n ||
+      estimatedLiquidityAtomic <= 0n ||
+      reserveAvailableLiquidityAtomic < estimatedLiquidityAtomic
+    ) {
+      throw new PublicTestnetPreflightRejectedError('RESERVE_UNAVAILABLE');
+    }
+    const [rentResult, temporaryAccountResult] = await Promise.all([
+      this.request('getMinimumBalanceForRentExemption', [
+        TOKEN_ACCOUNT_DATA_LENGTH,
+        {
+          commitment: 'finalized',
+        },
+      ]),
+      this.request('getAccountInfo', [
+        temporaryLiquidityAccount.toBase58(),
+        {
+          commitment: 'finalized',
+          encoding: 'base64',
+          minContextSlot: Number(preflight.slot),
+        },
+      ]),
+    ]);
+    const temporaryAccountEnvelope = exactObject(temporaryAccountResult);
+    if (BigInt(safeInteger(exactObject(temporaryAccountEnvelope.context).slot)) < preflight.slot) {
+      return unavailable();
+    }
+    if (temporaryAccountEnvelope.value !== null) {
+      throw new PublicTestnetPreflightRejectedError('DEPLOYMENT_MISMATCH');
+    }
+    const temporaryAccountRentLamports = BigInt(safeInteger(rentResult));
+    if (temporaryAccountRentLamports <= 0n) return unavailable();
+    return Object.freeze({
+      slot: preflight.slot,
+      blockhash: preflight.blockhash,
+      lastValidBlockHeight: preflight.lastValidBlockHeight,
+      observedAt: preflight.observedAt,
+      nativeBalanceLamports: preflight.nativeBalanceLamports,
+      temporaryAccountRentLamports,
+      collateralBalanceAtomic: preflight.collateralBalanceBeforeAtomic,
+      estimatedLiquidityAtomic,
+      reserveAvailableLiquidityAtomic,
+      sourceCollateralAccount: preflight.destinationCollateralAccount,
+      temporaryLiquidityAccount,
+    });
+  }
+
   async broadcastSignedTransaction(
     submission: PublicTestnetSignedTransactionSubmission,
     expected: PublicTestnetVerificationExpectation,
@@ -618,6 +713,7 @@ export class FixedSolanaDevnetExecutionRpc implements PublicTestnetExecutionRpc 
     Readonly<{
       preflight: PublicTestnetPreflightObservation | null;
       position: PublicTestnetPositionObservation;
+      reserveAvailableLiquidityAtomic: bigint;
     }>
   > {
     this.assertEnabled();
@@ -876,6 +972,7 @@ export class FixedSolanaDevnetExecutionRpc implements PublicTestnetExecutionRpc 
 
     return Object.freeze({
       preflight,
+      reserveAvailableLiquidityAtomic: availableLiquidityAtomic,
       position: Object.freeze({
         slot: accountsContextSlot,
         observedAt: positionObservedAt,
@@ -1027,6 +1124,219 @@ export class FixedSolanaDevnetExecutionRpc implements PublicTestnetExecutionRpc 
       collateralBalanceAfterAtomic: collateralAfter,
       increaseAtomic: collateralAfter - collateralBefore,
     });
+  }
+
+  async verifyFinalizedWithdrawal(
+    signature: string,
+    expected: PublicTestnetWithdrawalVerificationExpectation,
+  ): Promise<PublicTestnetWithdrawalTransactionObservation> {
+    this.assertEnabled();
+    const signatureBytes = decodeBase58(signature);
+    if (signatureBytes.length !== 64) return mismatch();
+    const statusResult = await this.request('getSignatureStatuses', [
+      [signature],
+      { searchTransactionHistory: true },
+    ]);
+    const statusEnvelope = exactObject(statusResult);
+    if (!Array.isArray(statusEnvelope.value) || statusEnvelope.value.length !== 1) {
+      return unavailable();
+    }
+    const rawStatus = statusEnvelope.value[0];
+    if (rawStatus !== null && rawStatus !== undefined) {
+      const status = exactObject(rawStatus);
+      if (status.confirmationStatus !== 'finalized') {
+        return Object.freeze({ status: 'PENDING' as const });
+      }
+    }
+    const transactionResult = await this.request('getTransaction', [
+      signature,
+      { commitment: 'finalized', encoding: 'base64', maxSupportedTransactionVersion: 0 },
+    ]);
+    if (transactionResult === null) {
+      const expired = await this.withdrawalSignatureAbsentAfterExpiry(signature, expected);
+      return expired
+        ? Object.freeze({ status: 'FAILED' as const, slot: null })
+        : Object.freeze({ status: 'PENDING' as const });
+    }
+    const envelope = exactObject(transactionResult);
+    const slot = BigInt(safeInteger(envelope.slot));
+    if (slot <= expected.preflightSlot) return mismatch();
+    if (rawStatus !== null && rawStatus !== undefined) {
+      const status = exactObject(rawStatus);
+      if (BigInt(safeInteger(status.slot)) !== slot) return mismatch();
+    }
+    if (!Array.isArray(envelope.transaction) || envelope.transaction.length !== 2) {
+      return mismatch();
+    }
+    if (envelope.transaction[1] !== 'base64') return mismatch();
+    const serialized = base64Bytes(envelope.transaction[0]);
+    let transaction: Transaction;
+    try {
+      transaction = Transaction.from(serialized);
+    } catch {
+      return mismatch();
+    }
+    const actualSignature = transaction.signatures[0];
+    if (
+      transaction.signatures.length !== 1 ||
+      actualSignature === undefined ||
+      actualSignature.signature === null ||
+      !actualSignature.publicKey.equals(expected.wallet) ||
+      !sameBytes(actualSignature.signature, signatureBytes) ||
+      !transaction.verifySignatures() ||
+      !transaction.feePayer?.equals(expected.wallet) ||
+      !matchesExpectedMessageOrAllowedWalletPrefix(transaction, expected.expectedMessageBase64)
+    ) {
+      return mismatch();
+    }
+
+    const meta = exactObject(envelope.meta);
+    const statusFailed =
+      rawStatus !== null && rawStatus !== undefined && exactObject(rawStatus).err !== null;
+    const transactionFailed = meta.err !== null;
+    if (rawStatus !== null && rawStatus !== undefined && statusFailed !== transactionFailed) {
+      return mismatch();
+    }
+    if (transactionFailed) return Object.freeze({ status: 'FAILED' as const, slot });
+    if (!Array.isArray(meta.logMessages)) return mismatch();
+    const logs = meta.logMessages;
+    if (
+      logs.filter((line) => line === 'Program log: Instruction: Redeem Reserve Collateral')
+        .length !== 1 ||
+      !logs.includes(`Program ${PUBLIC_TESTNET_LENDING_PROGRAM.toBase58()} success`)
+    ) {
+      return mismatch();
+    }
+
+    const accountKeys = transaction.compileMessage().accountKeys;
+    const walletIndex = accountKeys.findIndex((key) => key.equals(expected.wallet));
+    const collateralIndex = accountKeys.findIndex((key) =>
+      key.equals(expected.sourceCollateralAccount),
+    );
+    const temporaryIndex = accountKeys.findIndex((key) =>
+      key.equals(expected.temporaryLiquidityAccount),
+    );
+    const liquidityIndex = accountKeys.findIndex((key) =>
+      key.equals(PUBLIC_TESTNET_RESERVE_LIQUIDITY_SUPPLY),
+    );
+    if (
+      walletIndex < 0 ||
+      collateralIndex < 0 ||
+      temporaryIndex < 0 ||
+      liquidityIndex < 0 ||
+      !Array.isArray(meta.preBalances) ||
+      !Array.isArray(meta.postBalances) ||
+      meta.preBalances.length !== accountKeys.length ||
+      meta.postBalances.length !== accountKeys.length
+    ) {
+      return mismatch();
+    }
+    const preLamports = meta.preBalances.map((value) => BigInt(safeInteger(value)));
+    const postLamports = meta.postBalances.map((value) => BigInt(safeInteger(value)));
+    const fee = BigInt(safeInteger(meta.fee));
+    const pre = parseTokenBalances(meta.preTokenBalances);
+    const post = parseTokenBalances(meta.postTokenBalances);
+    const collateralBefore = findTokenBalance(
+      pre,
+      collateralIndex,
+      PUBLIC_TESTNET_COLLATERAL_MINT,
+      expected.wallet,
+    );
+    const collateralAfter = findTokenBalance(
+      post,
+      collateralIndex,
+      PUBLIC_TESTNET_COLLATERAL_MINT,
+      expected.wallet,
+    );
+    const liquidityBefore = findTokenBalance(
+      pre,
+      liquidityIndex,
+      PUBLIC_TESTNET_WRAPPED_SOL_MINT,
+      PUBLIC_TESTNET_LENDING_MARKET_AUTHORITY,
+    );
+    const liquidityAfter = findTokenBalance(
+      post,
+      liquidityIndex,
+      PUBLIC_TESTNET_WRAPPED_SOL_MINT,
+      PUBLIC_TESTNET_LENDING_MARKET_AUTHORITY,
+    );
+    if (
+      collateralBefore === undefined ||
+      collateralAfter === undefined ||
+      liquidityBefore === undefined ||
+      liquidityAfter === undefined ||
+      collateralBefore < expected.collateralAmountAtomic ||
+      collateralBefore - collateralAfter !== expected.collateralAmountAtomic ||
+      liquidityBefore <= liquidityAfter ||
+      (preLamports[temporaryIndex] ?? -1n) !== 0n ||
+      (postLamports[temporaryIndex] ?? -1n) !== 0n
+    ) {
+      return mismatch();
+    }
+    const liquidityReceivedAtomic = liquidityBefore - liquidityAfter;
+    const walletReceivedAfterFee =
+      (postLamports[walletIndex] ?? 0n) - (preLamports[walletIndex] ?? 0n) + fee;
+    if (walletReceivedAfterFee !== liquidityReceivedAtomic) return mismatch();
+    const fullyClosed =
+      collateralBefore === expected.collateralAmountAtomic && collateralAfter === 0n;
+    return Object.freeze({
+      status: fullyClosed ? ('VERIFIED' as const) : ('SETTLED_POSITION_REMAINS' as const),
+      slot,
+      collateralBalanceBeforeAtomic: collateralBefore,
+      collateralBalanceAfterAtomic: collateralAfter,
+      decreaseAtomic: expected.collateralAmountAtomic,
+      liquidityReceivedAtomic,
+    });
+  }
+
+  private async withdrawalSignatureAbsentAfterExpiry(
+    signature: string,
+    expected: PublicTestnetWithdrawalVerificationExpectation,
+  ): Promise<boolean> {
+    if (
+      expected.preflightSlot < 0n ||
+      expected.preflightSlot > BigInt(Number.MAX_SAFE_INTEGER) ||
+      expected.lastValidBlockHeight < 0n ||
+      expected.lastValidBlockHeight > BigInt(Number.MAX_SAFE_INTEGER)
+    ) {
+      return mismatch();
+    }
+    const finalizedBlockHeight = BigInt(
+      safeInteger(
+        await this.request('getBlockHeight', [
+          {
+            commitment: 'finalized',
+            minContextSlot: Number(expected.preflightSlot),
+          },
+        ]),
+      ),
+    );
+    if (finalizedBlockHeight <= expected.lastValidBlockHeight) return false;
+    const addresses = [
+      expected.wallet.toBase58(),
+      expected.sourceCollateralAccount.toBase58(),
+      expected.temporaryLiquidityAccount.toBase58(),
+    ].filter((address, index, all) => all.indexOf(address) === index);
+    for (const address of addresses) {
+      const result = await this.request('getSignaturesForAddress', [
+        address,
+        {
+          commitment: 'finalized',
+          minContextSlot: Number(expected.preflightSlot),
+          limit: FINALIZED_SIGNATURE_HISTORY_LIMIT,
+        },
+      ]);
+      if (!Array.isArray(result)) return unavailable();
+      // A full page could hide older evidence. Treat it as inconclusive rather
+      // than declaring the expired blockhash safe for a fresh withdrawal.
+      if (result.length >= FINALIZED_SIGNATURE_HISTORY_LIMIT) return false;
+      for (const value of result) {
+        const record = exactObject(value);
+        if (typeof record.signature !== 'string') return unavailable();
+        if (record.signature === signature) return false;
+      }
+    }
+    return true;
   }
 
   private async findFinalizedSignatureSlot(
@@ -1190,6 +1500,7 @@ export class FixedSolanaDevnetExecutionRpc implements PublicTestnetExecutionRpc 
       'getSlot',
       'getBlockHeight',
       'getLatestBlockhash',
+      'getMinimumBalanceForRentExemption',
       'getMultipleAccounts',
       'getAccountInfo',
       'getBalance',

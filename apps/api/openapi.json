@@ -3030,6 +3030,969 @@
         ]
       }
     },
+    "/api/v1/public-testnet/evm/execution-intents": {
+      "post": {
+        "description": "Creates a short-lived account-, nonce-, portfolio-, and selection-bound intent. The API only reads chain state; the browser wallet broadcasts.",
+        "operationId": "EvmPublicTestnetController_createIntent",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "account": {
+                    "pattern": "^0x[0-9a-fA-F]{40}$",
+                    "type": "string"
+                  },
+                  "chainId": {
+                    "enum": [
+                      "eip155:84532"
+                    ],
+                    "type": "string"
+                  },
+                  "portfolioSnapshotId": {
+                    "pattern": "^local-demo-portfolio:[0-9a-f]{32}$",
+                    "type": "string"
+                  },
+                  "selection": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "kind": {
+                        "enum": [
+                          "PRESET"
+                        ],
+                        "type": "string"
+                      },
+                      "liquidReserveBasisPoints": {
+                        "maximum": 9500,
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "presetId": {
+                        "enum": [
+                          "BALANCED"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "presetId",
+                      "liquidReserveBasisPoints"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "portfolioSnapshotId",
+                  "selection",
+                  "chainId",
+                  "account"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "account": {
+                      "pattern": "^0x[0-9a-fA-F]{40}$",
+                      "type": "string"
+                    },
+                    "chainId": {
+                      "enum": [
+                        "eip155:84532"
+                      ],
+                      "type": "string"
+                    },
+                    "evidenceExpiresAt": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "expiresAt": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "fundingReadiness": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "faucetUrl": {
+                          "enum": [
+                            "https://portal.cdp.coinbase.com/products/faucet"
+                          ],
+                          "type": "string"
+                        },
+                        "nativeBalanceWei": {
+                          "pattern": "^(?:0|[1-9][0-9]*)$",
+                          "type": "string"
+                        },
+                        "requiredNativeBalanceWei": {
+                          "enum": [
+                            "100000000000000"
+                          ],
+                          "type": "string"
+                        },
+                        "status": {
+                          "enum": [
+                            "READY",
+                            "NEEDS_BASE_SEPOLIA_ETH"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "status",
+                        "nativeBalanceWei",
+                        "requiredNativeBalanceWei",
+                        "faucetUrl"
+                      ],
+                      "type": "object"
+                    },
+                    "intentId": {
+                      "format": "uuid",
+                      "type": "string"
+                    },
+                    "liveObservation": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "aTokenBalanceBeforeAtomic": {
+                          "pattern": "^(?:0|[1-9][0-9]*)$",
+                          "type": "string"
+                        },
+                        "blockHash": {
+                          "pattern": "^0x[0-9a-f]{64}$",
+                          "type": "string"
+                        },
+                        "blockNumber": {
+                          "pattern": "^(?:0|[1-9][0-9]*)$",
+                          "type": "string"
+                        },
+                        "confirmation": {
+                          "enum": [
+                            "LATEST_PREFLIGHT_OBSERVATION"
+                          ],
+                          "type": "string"
+                        },
+                        "observedAt": {
+                          "format": "date-time",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "confirmation",
+                        "blockNumber",
+                        "blockHash",
+                        "observedAt",
+                        "aTokenBalanceBeforeAtomic"
+                      ],
+                      "type": "object"
+                    },
+                    "mayAuthorizeMainnetFinancialAction": {
+                      "enum": [
+                        false
+                      ],
+                      "type": "boolean"
+                    },
+                    "portfolioBinding": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "portfolioSnapshotId": {
+                          "pattern": "^local-demo-portfolio:[0-9a-f]{32}$",
+                          "type": "string"
+                        },
+                        "selection": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "kind": {
+                              "enum": [
+                                "PRESET"
+                              ],
+                              "type": "string"
+                            },
+                            "liquidReserveBasisPoints": {
+                              "maximum": 9500,
+                              "minimum": 0,
+                              "type": "integer"
+                            },
+                            "presetId": {
+                              "enum": [
+                                "BALANCED"
+                              ],
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "presetId",
+                            "liquidReserveBasisPoints"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "portfolioSnapshotId",
+                        "selection"
+                      ],
+                      "type": "object"
+                    },
+                    "proof": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "amountAtomic": {
+                          "enum": [
+                            "50000000000000"
+                          ],
+                          "type": "string"
+                        },
+                        "assetDecimals": {
+                          "enum": [
+                            18
+                          ],
+                          "type": "integer"
+                        },
+                        "assetSymbol": {
+                          "enum": [
+                            "ETH"
+                          ],
+                          "type": "string"
+                        },
+                        "kind": {
+                          "enum": [
+                            "SINGLE_TESTNET_PROOF_POSITION"
+                          ],
+                          "type": "string"
+                        },
+                        "notFullBlend": {
+                          "enum": [
+                            true
+                          ],
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "amountAtomic",
+                        "assetSymbol",
+                        "assetDecimals",
+                        "notFullBlend"
+                      ],
+                      "type": "object"
+                    },
+                    "providerVisibility": {
+                      "enum": [
+                        "ONCHAIN_TARGETS_PUBLIC_TO_SIGNER"
+                      ],
+                      "type": "string"
+                    },
+                    "transaction": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "chainId": {
+                          "enum": [
+                            "0x14a34"
+                          ],
+                          "type": "string"
+                        },
+                        "from": {
+                          "pattern": "^0x[0-9a-fA-F]{40}$",
+                          "type": "string"
+                        },
+                        "input": {
+                          "pattern": "^0x(?:[0-9a-f]{2})*$",
+                          "type": "string"
+                        },
+                        "nonce": {
+                          "pattern": "^0x(?:0|[1-9a-f][0-9a-f]*)$",
+                          "type": "string"
+                        },
+                        "to": {
+                          "enum": [
+                            "0x0568130e794429D2eEBC4dafE18f25Ff1a1ed8b6"
+                          ],
+                          "type": "string"
+                        },
+                        "value": {
+                          "enum": [
+                            "0x2d79883d2000"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "from",
+                        "to",
+                        "value",
+                        "input",
+                        "nonce",
+                        "chainId"
+                      ],
+                      "type": "object"
+                    },
+                    "use": {
+                      "enum": [
+                        "EVM_PUBLIC_TESTNET_SINGLE_POSITION_PROOF_ONLY"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "use",
+                    "mayAuthorizeMainnetFinancialAction",
+                    "intentId",
+                    "expiresAt",
+                    "evidenceExpiresAt",
+                    "chainId",
+                    "account",
+                    "portfolioBinding",
+                    "proof",
+                    "transaction",
+                    "fundingReadiness",
+                    "liveObservation",
+                    "providerVisibility"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "One exact EIP-1193 transaction request for the connected EVM wallet"
+          },
+          "400": {
+            "description": "Body is malformed or contains unsupported fields"
+          },
+          "401": {
+            "description": "Missing session, exact origin, or CSRF proof"
+          },
+          "404": {
+            "description": "The isolated local public-testnet demo is disabled"
+          },
+          "409": {
+            "description": "The displayed portfolio snapshot changed"
+          },
+          "422": {
+            "description": "The preview or fixed deployment failed closed"
+          },
+          "503": {
+            "description": "The fixed RPC or EVM intent capacity is unavailable"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Prepare a fixed browser-wallet Aave proof on Base Sepolia",
+        "tags": [
+          "public-testnet"
+        ]
+      }
+    },
+    "/api/v1/public-testnet/evm/execution-intents/{intentId}/submissions": {
+      "post": {
+        "description": "Accepts an exact transaction hash, or an empty object for read-only bounded log and nonce recovery. The API never submits a transaction and absence alone never authorizes a retry.",
+        "operationId": "EvmPublicTestnetController_verifySubmission",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "intentId",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "additionalProperties": false,
+                    "maxProperties": 0,
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "transactionHash": {
+                        "pattern": "^0x[0-9a-f]{64}$",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "transactionHash"
+                    ],
+                    "type": "object"
+                  }
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "confirmation": {
+                      "enum": [
+                        "LATEST_RECEIPT_AND_FINALITY_OBSERVATION"
+                      ],
+                      "type": "string"
+                    },
+                    "consumed": {
+                      "type": "boolean"
+                    },
+                    "intentId": {
+                      "format": "uuid",
+                      "type": "string"
+                    },
+                    "position": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "aTokenBalanceAfterAtomic": {
+                          "oneOf": [
+                            {
+                              "pattern": "^(?:0|[1-9][0-9]*)$",
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "aTokenBalanceBeforeAtomic": {
+                          "pattern": "^(?:0|[1-9][0-9]*)$",
+                          "type": "string"
+                        },
+                        "increaseAtomic": {
+                          "oneOf": [
+                            {
+                              "pattern": "^(?:0|[1-9][0-9]*)$",
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "status": {
+                          "enum": [
+                            "PENDING",
+                            "CONFIRMED",
+                            "VERIFIED"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "status",
+                        "aTokenBalanceBeforeAtomic",
+                        "aTokenBalanceAfterAtomic",
+                        "increaseAtomic"
+                      ],
+                      "type": "object"
+                    },
+                    "status": {
+                      "enum": [
+                        "PENDING",
+                        "CONFIRMED",
+                        "VERIFIED"
+                      ],
+                      "type": "string"
+                    },
+                    "transaction": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "blockHash": {
+                          "oneOf": [
+                            {
+                              "pattern": "^0x[0-9a-f]{64}$",
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "blockNumber": {
+                          "oneOf": [
+                            {
+                              "pattern": "^(?:0|[1-9][0-9]*)$",
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "status": {
+                          "enum": [
+                            "PENDING",
+                            "CONFIRMED",
+                            "VERIFIED"
+                          ],
+                          "type": "string"
+                        },
+                        "transactionHash": {
+                          "oneOf": [
+                            {
+                              "pattern": "^0x[0-9a-f]{64}$",
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "status",
+                        "transactionHash",
+                        "blockNumber",
+                        "blockHash"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "intentId",
+                    "status",
+                    "confirmation",
+                    "transaction",
+                    "position",
+                    "consumed"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Pending, latest-confirmed, or finalized-and-verified observation"
+          },
+          "400": {
+            "description": "Intent id or body is malformed"
+          },
+          "401": {
+            "description": "Missing session, exact origin, or CSRF proof"
+          },
+          "404": {
+            "description": "Disabled, unknown, or owned by another account"
+          },
+          "409": {
+            "description": "Hash conflict or finalized nonce replacement"
+          },
+          "410": {
+            "description": "Intent expired before a transaction hash was bound"
+          },
+          "422": {
+            "description": "Transaction reverted or evidence mismatched"
+          },
+          "503": {
+            "description": "Fixed Base Sepolia verification is unavailable"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Verify or recover one wallet-broadcast Base Sepolia transaction",
+        "tags": [
+          "public-testnet"
+        ]
+      }
+    },
+    "/api/v1/public-testnet/evm/positions/query": {
+      "post": {
+        "description": "Returns the latest read-only aWETH balance and variable base supply APY. It never creates an intent, signs, or broadcasts.",
+        "operationId": "EvmPublicTestnetController_readPosition",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "account": {
+                    "pattern": "^0x[0-9a-fA-F]{40}$",
+                    "type": "string"
+                  },
+                  "chainId": {
+                    "enum": [
+                      "eip155:84532"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "chainId",
+                  "account"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "account": {
+                      "pattern": "^0x[0-9a-fA-F]{40}$",
+                      "type": "string"
+                    },
+                    "chainId": {
+                      "enum": [
+                        "eip155:84532"
+                      ],
+                      "type": "string"
+                    },
+                    "liveObservation": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "blockHash": {
+                          "pattern": "^0x[0-9a-f]{64}$",
+                          "type": "string"
+                        },
+                        "blockNumber": {
+                          "pattern": "^(?:0|[1-9][0-9]*)$",
+                          "type": "string"
+                        },
+                        "confirmation": {
+                          "enum": [
+                            "LATEST_POSITION_OBSERVATION"
+                          ],
+                          "type": "string"
+                        },
+                        "finalizedBlockHash": {
+                          "pattern": "^0x[0-9a-f]{64}$",
+                          "type": "string"
+                        },
+                        "finalizedBlockNumber": {
+                          "pattern": "^(?:0|[1-9][0-9]*)$",
+                          "type": "string"
+                        },
+                        "observedAt": {
+                          "format": "date-time",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "confirmation",
+                        "blockNumber",
+                        "blockHash",
+                        "finalizedBlockNumber",
+                        "finalizedBlockHash",
+                        "observedAt"
+                      ],
+                      "type": "object"
+                    },
+                    "mayAuthorizeFinancialAction": {
+                      "enum": [
+                        false
+                      ],
+                      "type": "boolean"
+                    },
+                    "position": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "aTokenBalanceAtomic": {
+                          "pattern": "^(?:0|[1-9][0-9]*)$",
+                          "type": "string"
+                        },
+                        "aTokenDecimals": {
+                          "enum": [
+                            18
+                          ],
+                          "type": "integer"
+                        },
+                        "aTokenSymbol": {
+                          "enum": [
+                            "aBaseSepoliaWETH"
+                          ],
+                          "type": "string"
+                        },
+                        "assetDecimals": {
+                          "enum": [
+                            18
+                          ],
+                          "type": "integer"
+                        },
+                        "assetSymbol": {
+                          "enum": [
+                            "ETH"
+                          ],
+                          "type": "string"
+                        },
+                        "status": {
+                          "enum": [
+                            "OPEN",
+                            "EMPTY"
+                          ],
+                          "type": "string"
+                        },
+                        "suppliedLiquidityAtomic": {
+                          "pattern": "^(?:0|[1-9][0-9]*)$",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "status",
+                        "assetSymbol",
+                        "assetDecimals",
+                        "suppliedLiquidityAtomic",
+                        "aTokenSymbol",
+                        "aTokenBalanceAtomic",
+                        "aTokenDecimals"
+                      ],
+                      "type": "object"
+                    },
+                    "provider": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "aToken": {
+                          "enum": [
+                            "0x73a5bB60b0B0fc35710DDc0ea9c407031E31Bdbb"
+                          ],
+                          "type": "string"
+                        },
+                        "addressesProvider": {
+                          "enum": [
+                            "0xE4C23309117Aa30342BFaae6c95c6478e0A4Ad00"
+                          ],
+                          "type": "string"
+                        },
+                        "dataProvider": {
+                          "enum": [
+                            "0xBc9f5b7E248451CdD7cA54e717a2BFe1F32b566b"
+                          ],
+                          "type": "string"
+                        },
+                        "gateway": {
+                          "enum": [
+                            "0x0568130e794429D2eEBC4dafE18f25Ff1a1ed8b6"
+                          ],
+                          "type": "string"
+                        },
+                        "name": {
+                          "enum": [
+                            "Aave V3"
+                          ],
+                          "type": "string"
+                        },
+                        "pool": {
+                          "enum": [
+                            "0x8bAB6d1b75f19e9eD9fCe8b9BD338844fF79aE27"
+                          ],
+                          "type": "string"
+                        },
+                        "reserve": {
+                          "enum": [
+                            "0x4200000000000000000000000000000000000006"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "name",
+                        "pool",
+                        "addressesProvider",
+                        "dataProvider",
+                        "gateway",
+                        "reserve",
+                        "aToken"
+                      ],
+                      "type": "object"
+                    },
+                    "rate": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "historyAvailable": {
+                          "enum": [
+                            false
+                          ],
+                          "type": "boolean"
+                        },
+                        "kind": {
+                          "enum": [
+                            "ONCHAIN_INDICATIVE_BASE_SUPPLY_APY"
+                          ],
+                          "type": "string"
+                        },
+                        "liquidityRateRay": {
+                          "pattern": "^(?:0|[1-9][0-9]*)$",
+                          "type": "string"
+                        },
+                        "rewardsIncluded": {
+                          "enum": [
+                            false
+                          ],
+                          "type": "boolean"
+                        },
+                        "riskAssessed": {
+                          "enum": [
+                            false
+                          ],
+                          "type": "boolean"
+                        },
+                        "supplyApyBasisPoints": {
+                          "maximum": 10000000,
+                          "minimum": 0,
+                          "type": "integer"
+                        },
+                        "variable": {
+                          "enum": [
+                            true
+                          ],
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "liquidityRateRay",
+                        "supplyApyBasisPoints",
+                        "variable",
+                        "rewardsIncluded",
+                        "riskAssessed",
+                        "historyAvailable"
+                      ],
+                      "type": "object"
+                    },
+                    "use": {
+                      "enum": [
+                        "EVM_PUBLIC_TESTNET_READ_ONLY_POSITION"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "use",
+                    "mayAuthorizeFinancialAction",
+                    "chainId",
+                    "account",
+                    "provider",
+                    "position",
+                    "rate",
+                    "liveObservation"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Latest position plus latest and finalized observation metadata"
+          },
+          "400": {
+            "description": "Body is malformed or contains unsupported fields"
+          },
+          "401": {
+            "description": "Missing session, exact origin, or CSRF proof"
+          },
+          "404": {
+            "description": "The isolated local public-testnet demo is disabled"
+          },
+          "422": {
+            "description": "The fixed deployment or reserve failed closed"
+          },
+          "503": {
+            "description": "The fixed Base Sepolia RPC is unavailable"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Read one fixed Aave V3 Base Sepolia position",
+        "tags": [
+          "public-testnet"
+        ]
+      }
+    },
+    "/api/v1/public-testnet/evm/withdrawal-intents": {
+      "post": {
+        "description": "Returns either a fixed maximum aWETH approval or, when maximum allowance already exists, one fixed full native-ETH withdrawal. The browser wallet remains the only broadcaster.",
+        "operationId": "EvmPublicTestnetController_createWithdrawalIntent",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": "The next exact approval or full-withdrawal transaction"
+          },
+          "400": {
+            "description": "Body is malformed or contains unsupported fields"
+          },
+          "401": {
+            "description": "Missing session, exact origin, or CSRF proof"
+          },
+          "404": {
+            "description": "The isolated local public-testnet demo is disabled"
+          },
+          "409": {
+            "description": "No aWETH position is available to withdraw"
+          },
+          "422": {
+            "description": "The fixed deployment or withdrawal simulation failed"
+          },
+          "503": {
+            "description": "The fixed RPC or withdrawal capacity is unavailable"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Prepare the next exact full-position Base Sepolia withdrawal step",
+        "tags": [
+          "public-testnet"
+        ]
+      }
+    },
+    "/api/v1/public-testnet/evm/withdrawal-intents/{intentId}/submissions": {
+      "post": {
+        "description": "Accepts one exact wallet hash or an empty object for read-only nonce-and-event recovery. It never signs, broadcasts, or retries a transaction.",
+        "operationId": "EvmPublicTestnetController_verifyWithdrawalSubmission",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "intentId",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Pending, latest-confirmed, or finalized-and-verified evidence"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Verify or recover one reviewed Base Sepolia withdrawal step",
+        "tags": [
+          "public-testnet"
+        ]
+      }
+    },
     "/api/v1/public-testnet/execution-intents": {
       "post": {
         "description": "Creates a short-lived account-, wallet-, portfolio-, and selection-bound intent. This route never signs or broadcasts.",
@@ -3883,6 +4846,539 @@
           }
         ],
         "summary": "Read one fixed Solana Devnet lending position",
+        "tags": [
+          "public-testnet"
+        ]
+      }
+    },
+    "/api/v1/public-testnet/withdrawal-intents": {
+      "post": {
+        "description": "Snapshots the exact finalized cSOL balance and returns one reviewed legacy transaction. This route never signs or broadcasts.",
+        "operationId": "PublicTestnetWithdrawalController_createIntent",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "account": {
+                    "maxLength": 44,
+                    "minLength": 32,
+                    "pattern": "^[1-9A-HJ-NP-Za-km-z]+$",
+                    "type": "string"
+                  },
+                  "chainId": {
+                    "enum": [
+                      "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "chainId",
+                  "account"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "account": {
+                      "pattern": "^[1-9A-HJ-NP-Za-km-z]+$",
+                      "type": "string"
+                    },
+                    "chainId": {
+                      "enum": [
+                        "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1"
+                      ],
+                      "type": "string"
+                    },
+                    "evidenceExpiresAt": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "expiresAt": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "fundingReadiness": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "faucetUrl": {
+                          "enum": [
+                            "https://faucet.solana.com/"
+                          ],
+                          "type": "string"
+                        },
+                        "nativeBalanceLamports": {
+                          "pattern": "^(?:0|[1-9][0-9]*)$",
+                          "type": "string"
+                        },
+                        "requiredNativeBalanceLamports": {
+                          "enum": [
+                            "20000000"
+                          ],
+                          "type": "string"
+                        },
+                        "status": {
+                          "enum": [
+                            "READY",
+                            "NEEDS_DEVNET_SOL"
+                          ],
+                          "type": "string"
+                        },
+                        "temporaryAccountRentLamports": {
+                          "pattern": "^(?:0|[1-9][0-9]*)$",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "status",
+                        "nativeBalanceLamports",
+                        "requiredNativeBalanceLamports",
+                        "temporaryAccountRentLamports",
+                        "faucetUrl"
+                      ],
+                      "type": "object"
+                    },
+                    "intentId": {
+                      "format": "uuid",
+                      "type": "string"
+                    },
+                    "liveObservation": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "collateralBalanceAtomic": {
+                          "pattern": "^(?:0|[1-9][0-9]*)$",
+                          "type": "string"
+                        },
+                        "confirmation": {
+                          "enum": [
+                            "FINALIZED_PREFLIGHT_OBSERVATION"
+                          ],
+                          "type": "string"
+                        },
+                        "estimatedLiquidityAtomic": {
+                          "pattern": "^(?:0|[1-9][0-9]*)$",
+                          "type": "string"
+                        },
+                        "observedAt": {
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        "reserveAvailableLiquidityAtomic": {
+                          "pattern": "^(?:0|[1-9][0-9]*)$",
+                          "type": "string"
+                        },
+                        "slot": {
+                          "pattern": "^(?:0|[1-9][0-9]*)$",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "confirmation",
+                        "slot",
+                        "observedAt",
+                        "collateralBalanceAtomic",
+                        "estimatedLiquidityAtomic",
+                        "reserveAvailableLiquidityAtomic"
+                      ],
+                      "type": "object"
+                    },
+                    "mayAuthorizeMainnetFinancialAction": {
+                      "enum": [
+                        false
+                      ],
+                      "type": "boolean"
+                    },
+                    "proof": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "assetDecimals": {
+                          "enum": [
+                            9
+                          ],
+                          "type": "integer"
+                        },
+                        "assetSymbol": {
+                          "enum": [
+                            "SOL"
+                          ],
+                          "type": "string"
+                        },
+                        "collateralAmountAtomic": {
+                          "pattern": "^(?:0|[1-9][0-9]*)$",
+                          "type": "string"
+                        },
+                        "collateralSymbol": {
+                          "enum": [
+                            "cSOL"
+                          ],
+                          "type": "string"
+                        },
+                        "estimatedLiquidityAtomic": {
+                          "pattern": "^(?:0|[1-9][0-9]*)$",
+                          "type": "string"
+                        },
+                        "kind": {
+                          "enum": [
+                            "FULL_TESTNET_POSITION_WITHDRAWAL"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "collateralAmountAtomic",
+                        "estimatedLiquidityAtomic",
+                        "collateralSymbol",
+                        "assetSymbol",
+                        "assetDecimals"
+                      ],
+                      "type": "object"
+                    },
+                    "providerVisibility": {
+                      "enum": [
+                        "ONCHAIN_TARGETS_PUBLIC_TO_SIGNER"
+                      ],
+                      "type": "string"
+                    },
+                    "transaction": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "encoding": {
+                          "enum": [
+                            "BASE64"
+                          ],
+                          "type": "string"
+                        },
+                        "feePayer": {
+                          "pattern": "^[1-9A-HJ-NP-Za-km-z]+$",
+                          "type": "string"
+                        },
+                        "lastValidBlockHeight": {
+                          "pattern": "^(?:0|[1-9][0-9]*)$",
+                          "type": "string"
+                        },
+                        "messageVersion": {
+                          "enum": [
+                            "LEGACY"
+                          ],
+                          "type": "string"
+                        },
+                        "minContextSlot": {
+                          "pattern": "^(?:0|[1-9][0-9]*)$",
+                          "type": "string"
+                        },
+                        "recentBlockhash": {
+                          "pattern": "^[1-9A-HJ-NP-Za-km-z]+$",
+                          "type": "string"
+                        },
+                        "serializedTransactionBase64": {
+                          "maxLength": 1644,
+                          "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$",
+                          "type": "string"
+                        },
+                        "sourceCollateralAccount": {
+                          "pattern": "^[1-9A-HJ-NP-Za-km-z]+$",
+                          "type": "string"
+                        },
+                        "temporaryAccountSeed": {
+                          "pattern": "^wdv1:[0-9a-f]{27}$",
+                          "type": "string"
+                        },
+                        "temporaryLiquidityAccount": {
+                          "pattern": "^[1-9A-HJ-NP-Za-km-z]+$",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "encoding",
+                        "messageVersion",
+                        "serializedTransactionBase64",
+                        "recentBlockhash",
+                        "lastValidBlockHeight",
+                        "minContextSlot",
+                        "feePayer",
+                        "sourceCollateralAccount",
+                        "temporaryLiquidityAccount",
+                        "temporaryAccountSeed"
+                      ],
+                      "type": "object"
+                    },
+                    "use": {
+                      "enum": [
+                        "PUBLIC_TESTNET_FULL_POSITION_WITHDRAWAL_ONLY"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "use",
+                    "mayAuthorizeMainnetFinancialAction",
+                    "intentId",
+                    "expiresAt",
+                    "evidenceExpiresAt",
+                    "chainId",
+                    "account",
+                    "proof",
+                    "transaction",
+                    "fundingReadiness",
+                    "liveObservation",
+                    "providerVisibility"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "One short-lived unsigned full-withdrawal transaction"
+          },
+          "400": {
+            "description": "Body is malformed or contains unsupported fields"
+          },
+          "401": {
+            "description": "Missing session, exact origin, or CSRF proof"
+          },
+          "404": {
+            "description": "The isolated public-testnet demo is disabled"
+          },
+          "422": {
+            "description": "No withdrawable fixed position or invalid deployment"
+          },
+          "503": {
+            "description": "RPC or isolated withdrawal capacity unavailable"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Prepare a full fixed-position withdrawal on Solana Devnet",
+        "tags": [
+          "public-testnet"
+        ]
+      }
+    },
+    "/api/v1/public-testnet/withdrawal-intents/{intentId}/submissions": {
+      "post": {
+        "description": "The first request binds exact signed bytes and makes one broadcast attempt. Signature-only follow-ups are read-only; the API never resends.",
+        "operationId": "PublicTestnetWithdrawalController_verifySubmission",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "intentId",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "signature": {
+                    "maxLength": 88,
+                    "minLength": 64,
+                    "pattern": "^[1-9A-HJ-NP-Za-km-z]+$",
+                    "type": "string"
+                  },
+                  "signedTransactionBase64": {
+                    "description": "Optional only on the first submission call; exact signed legacy transaction bytes for one server-side Devnet broadcast attempt.",
+                    "maxLength": 1644,
+                    "minLength": 4,
+                    "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "signature"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "confirmation": {
+                      "enum": [
+                        "LATEST_SIGNATURE_STATUS_OBSERVATION"
+                      ],
+                      "type": "string"
+                    },
+                    "consumed": {
+                      "type": "boolean"
+                    },
+                    "intentId": {
+                      "format": "uuid",
+                      "type": "string"
+                    },
+                    "position": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "collateralBalanceAfterAtomic": {
+                          "oneOf": [
+                            {
+                              "pattern": "^(?:0|[1-9][0-9]*)$",
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "collateralBalanceBeforeAtomic": {
+                          "pattern": "^(?:0|[1-9][0-9]*)$",
+                          "type": "string"
+                        },
+                        "decreaseAtomic": {
+                          "oneOf": [
+                            {
+                              "pattern": "^(?:0|[1-9][0-9]*)$",
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "liquidityReceivedAtomic": {
+                          "oneOf": [
+                            {
+                              "pattern": "^(?:0|[1-9][0-9]*)$",
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "status": {
+                          "enum": [
+                            "PENDING",
+                            "VERIFIED",
+                            "SETTLED_POSITION_REMAINS",
+                            "FAILED"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "status",
+                        "collateralBalanceBeforeAtomic",
+                        "collateralBalanceAfterAtomic",
+                        "decreaseAtomic",
+                        "liquidityReceivedAtomic"
+                      ],
+                      "type": "object"
+                    },
+                    "status": {
+                      "enum": [
+                        "PENDING",
+                        "VERIFIED",
+                        "SETTLED_POSITION_REMAINS",
+                        "FAILED"
+                      ],
+                      "type": "string"
+                    },
+                    "transaction": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "signature": {
+                          "pattern": "^[1-9A-HJ-NP-Za-km-z]+$",
+                          "type": "string"
+                        },
+                        "slot": {
+                          "oneOf": [
+                            {
+                              "pattern": "^(?:0|[1-9][0-9]*)$",
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "status": {
+                          "enum": [
+                            "PENDING",
+                            "VERIFIED",
+                            "SETTLED_POSITION_REMAINS",
+                            "FAILED"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "status",
+                        "signature",
+                        "slot"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "intentId",
+                    "status",
+                    "confirmation",
+                    "transaction",
+                    "position",
+                    "consumed"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Pending, finalized withdrawal, finalized partial remainder, or finalized failure"
+          },
+          "400": {
+            "description": "Intent id or body is malformed"
+          },
+          "401": {
+            "description": "Missing session, exact origin, or CSRF proof"
+          },
+          "404": {
+            "description": "Disabled, unknown, or owned by a different account"
+          },
+          "409": {
+            "description": "Intent is bound to a different signature"
+          },
+          "410": {
+            "description": "Unsigned intent expired"
+          },
+          "422": {
+            "description": "Evidence mismatch or rejected broadcast"
+          },
+          "503": {
+            "description": "RPC unavailable or broadcast outcome ambiguous"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Submit or recover one signed Solana Devnet full withdrawal",
         "tags": [
           "public-testnet"
         ]

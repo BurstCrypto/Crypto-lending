@@ -9,6 +9,7 @@ import {
   restoreAuthenticationSession,
   type AccountProfile,
 } from '@/lib/authentication';
+import { clearBrowserEvmPublicTestnetPositionAccount } from '@/lib/evm-public-testnet/position-account';
 import { clearBrowserLocalDemoWalletRoster } from '@/lib/local-demo/wallet-roster';
 import { clearBrowserPublicTestnetPositionAccount } from '@/lib/public-testnet/public-testnet-position-account';
 
@@ -31,6 +32,7 @@ function countryName(countryCode: string): string {
 
 function clearCurrentWalletRoster(accountId: string | null): void {
   clearBrowserLocalDemoWalletRoster(accountId);
+  clearBrowserEvmPublicTestnetPositionAccount();
   clearBrowserPublicTestnetPositionAccount();
 }
 

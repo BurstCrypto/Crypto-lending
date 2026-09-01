@@ -1525,6 +1525,219 @@ h1 {
   color: inherit;
 }
 
+.public-testnet-dashboard-overview,
+.public-testnet-proof-suite {
+  display: grid;
+  gap: 1rem;
+}
+
+.public-testnet-dashboard-overview {
+  padding: clamp(1.1rem, 2.8vw, 1.55rem);
+  background:
+    radial-gradient(circle at 94% 0, rgba(112, 225, 179, 0.1), transparent 19rem),
+    rgba(4, 17, 12, 0.76);
+  border: 1px solid rgba(112, 225, 179, 0.3);
+  border-radius: 1rem;
+}
+
+.public-testnet-dashboard-overview > p,
+.public-testnet-proof-suite > p {
+  max-width: 84ch;
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.public-testnet-dashboard-overview-heading,
+.public-testnet-proof-suite-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.public-testnet-dashboard-overview-heading h2,
+.public-testnet-proof-suite-heading h4 {
+  margin: 0.3rem 0 0;
+}
+
+.public-testnet-dashboard-overview-heading h2 {
+  font-size: clamp(1.35rem, 3vw, 1.8rem);
+}
+
+.public-testnet-proof-suite-heading h4 {
+  font-size: 1.15rem;
+}
+
+.public-testnet-dashboard-overview-heading > span,
+.public-testnet-proof-suite-heading > span {
+  flex: none;
+  padding: 0.38rem 0.62rem;
+  color: var(--accent-strong);
+  background: rgba(112, 225, 179, 0.08);
+  border: 1px solid rgba(112, 225, 179, 0.25);
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.public-testnet-dashboard-grid,
+.public-testnet-proof-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  align-items: start;
+}
+
+.public-testnet-proof-suite {
+  padding-top: 0.25rem;
+}
+
+.public-testnet-combined-submit {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem;
+  background: rgba(112, 225, 179, 0.07);
+  border: 1px solid rgba(112, 225, 179, 0.3);
+  border-radius: 0.9rem;
+}
+
+.public-testnet-combined-submit .public-testnet-submit-action {
+  flex: none;
+}
+
+.public-testnet-combined-submit p,
+.public-testnet-combined-lane-status {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.public-testnet-combined-lane-status {
+  padding: 0.8rem 0.9rem;
+  background: rgba(112, 225, 179, 0.06);
+  border: 1px solid rgba(112, 225, 179, 0.2);
+  border-radius: 0.75rem;
+}
+
+.public-testnet-withdrawal {
+  display: grid;
+  gap: 1rem;
+  padding: clamp(1rem, 2.5vw, 1.35rem);
+  background: rgba(3, 14, 10, 0.82);
+  border: 1px solid rgba(112, 225, 179, 0.28);
+  border-radius: 0.9rem;
+}
+
+.public-testnet-withdrawal-heading,
+.public-testnet-withdrawal-lane-heading,
+.public-testnet-withdrawal-action {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.public-testnet-withdrawal-heading h3 {
+  margin: 0.3rem 0 0;
+  font-size: 1.18rem;
+}
+
+.public-testnet-withdrawal-heading > span {
+  flex: none;
+  padding: 0.38rem 0.62rem;
+  color: var(--accent-strong);
+  background: rgba(112, 225, 179, 0.08);
+  border: 1px solid rgba(112, 225, 179, 0.25);
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.public-testnet-withdrawal > p,
+.public-testnet-withdrawal-lane p,
+.public-testnet-withdrawal-action p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.public-testnet-withdrawal-lanes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.8rem;
+}
+
+.public-testnet-withdrawal-lane {
+  display: grid;
+  align-content: start;
+  gap: 0.65rem;
+  min-width: 0;
+  padding: 0.9rem;
+  background: rgba(112, 225, 179, 0.04);
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+}
+
+.public-testnet-withdrawal-lane.is-complete {
+  background: rgba(112, 225, 179, 0.09);
+  border-color: rgba(112, 225, 179, 0.32);
+}
+
+.public-testnet-withdrawal-lane.is-recovery_required,
+.public-testnet-withdrawal-lane.is-failed {
+  background: rgba(255, 207, 112, 0.07);
+  border-color: rgba(255, 207, 112, 0.26);
+}
+
+.public-testnet-withdrawal-lane-heading > div {
+  display: grid;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.public-testnet-withdrawal-lane-heading > div > span,
+.public-testnet-withdrawal-lane > small {
+  color: var(--muted);
+}
+
+.public-testnet-withdrawal-lane-heading > div > span {
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+
+.public-testnet-withdrawal-lane-heading > span {
+  flex: none;
+  color: var(--accent-strong);
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.public-testnet-withdrawal-recovery-action {
+  justify-self: start;
+}
+
+.public-testnet-withdrawal-lane-result {
+  padding-top: 0.65rem;
+  border-top: 1px solid var(--border);
+}
+
+.public-testnet-withdrawal-action {
+  align-items: center;
+  padding-top: 0.15rem;
+}
+
+.public-testnet-withdrawal-action .public-testnet-submit-action {
+  flex: none;
+}
+
 .public-testnet-proof {
   display: grid;
   gap: 1rem;
@@ -1786,6 +1999,10 @@ h1 {
   border: 1px solid var(--border);
   border-radius: 0.9rem;
   scroll-margin-top: clamp(5rem, 12vw, 8rem);
+}
+
+.public-testnet-dashboard-grid .public-testnet-lending-dashboard {
+  height: 100%;
 }
 
 .public-testnet-lending-dashboard-heading,
@@ -2680,6 +2897,15 @@ footer p {
 }
 
 @media (max-width: 1040px) {
+  .public-testnet-dashboard-grid,
+  .public-testnet-proof-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .public-testnet-withdrawal-lanes {
+    grid-template-columns: 1fr;
+  }
+
   .local-demo-allocation-yield-metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -2730,6 +2956,12 @@ footer p {
   .local-demo-liquidity-adjustment-footer,
   .local-demo-yield-catalog-heading,
   .public-testnet-proof-heading,
+  .public-testnet-dashboard-overview-heading,
+  .public-testnet-proof-suite-heading,
+  .public-testnet-combined-submit,
+  .public-testnet-withdrawal-heading,
+  .public-testnet-withdrawal-lane-heading,
+  .public-testnet-withdrawal-action,
   .public-testnet-confirmation-heading,
   .public-testnet-lending-dashboard-heading,
   .public-testnet-lending-dashboard-position-heading,
@@ -2765,6 +2997,11 @@ footer p {
   }
 
   .public-testnet-proof-heading > span {
+    align-self: flex-start;
+  }
+
+  .public-testnet-dashboard-overview-heading > span,
+  .public-testnet-proof-suite-heading > span {
     align-self: flex-start;
   }
 

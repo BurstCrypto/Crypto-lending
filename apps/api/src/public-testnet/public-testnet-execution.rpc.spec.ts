@@ -3,8 +3,8 @@ jest.mock('rpc-websockets', () => ({ CommonClient: class {}, WebSocket: jest.fn(
 import {
   ComputeBudgetProgram,
   Keypair,
+  PublicKey,
   TransactionInstruction,
-  type PublicKey,
   type Transaction,
 } from '@solana/web3.js';
 
@@ -353,6 +353,70 @@ function prependObservedWalletComputeBudget(transaction: Transaction): void {
 }
 
 describe('FixedSolanaDevnetExecutionRpc', () => {
+  it('pins full-withdrawal collateral, rent, temporary account absence, and reserve liquidity', async () => {
+    const wallet = Keypair.generate().publicKey;
+    const temporary = await PublicKey.createWithSeed(
+      wallet,
+      'wdv1:0123456789abcdef0123456789a',
+      PUBLIC_TESTNET_TOKEN_PROGRAM,
+    );
+    const baseResolver = preflightResolver(wallet);
+    const fetchMock = rpcFetch((method, params) => {
+      if (method === 'getMinimumBalanceForRentExemption') return 2_039_280;
+      if (method === 'getAccountInfo' && params[0] === temporary.toBase58()) {
+        return { context: { slot: SLOT }, value: null };
+      }
+      return baseResolver(method);
+    });
+    const rpc = new FixedSolanaDevnetExecutionRpc(CONFIG, fetchMock);
+
+    await expect(rpc.preflightWithdrawal(wallet, temporary)).resolves.toMatchObject({
+      slot: 100n,
+      collateralBalanceAtomic: 7n,
+      estimatedLiquidityAtomic: 140_000n,
+      reserveAvailableLiquidityAtomic: 19_000_000_000_000n,
+      temporaryAccountRentLamports: 2_039_280n,
+      sourceCollateralAccount: derivePublicTestnetAssociatedTokenAddress(
+        wallet,
+        PUBLIC_TESTNET_COLLATERAL_MINT,
+      ),
+      temporaryLiquidityAccount: temporary,
+    });
+  });
+
+  it('settles an unseen withdrawal only after finalized blockheight expiry and bounded histories', async () => {
+    const wallet = Keypair.generate().publicKey;
+    const sourceCollateralAccount = derivePublicTestnetAssociatedTokenAddress(
+      wallet,
+      PUBLIC_TESTNET_COLLATERAL_MINT,
+    );
+    const temporaryLiquidityAccount = Keypair.generate().publicKey;
+    const rpc = new FixedSolanaDevnetExecutionRpc(
+      CONFIG,
+      rpcFetch((method) => {
+        if (method === 'getSignatureStatuses') return { context: { slot: 300 }, value: [null] };
+        if (method === 'getTransaction') return null;
+        if (method === 'getBlockHeight') return 300;
+        if (method === 'getSignaturesForAddress') return [];
+        throw new Error(`Unexpected method: ${method}`);
+      }),
+    );
+
+    await expect(
+      rpc.verifyFinalizedWithdrawal('1'.repeat(64), {
+        wallet,
+        sourceLiquidityAccount: temporaryLiquidityAccount,
+        destinationCollateralAccount: sourceCollateralAccount,
+        sourceCollateralAccount,
+        temporaryLiquidityAccount,
+        collateralAmountAtomic: 7n,
+        expectedMessageBase64: Buffer.from('reviewed').toString('base64'),
+        preflightSlot: 100n,
+        lastValidBlockHeight: 250n,
+      }),
+    ).resolves.toEqual({ status: 'FAILED', slot: null });
+  });
+
   it('pins finalized state before fetching a fresh confirmed transaction blockhash', async () => {
     const wallet = Keypair.generate().publicKey;
     const freshBlockhash = Keypair.generate().publicKey.toBase58();

@@ -18,14 +18,32 @@ import {
   type LocalDemoAllocationSelectionInput,
   type LocalDemoYieldCatalog,
 } from '@/lib/local-demo/local-demo-yield';
+import {
+  EvmPublicTestnetApiClient,
+  type EvmPublicTestnetPositionSnapshot,
+} from '@/lib/evm-public-testnet';
+import { readEvmPublicTestnetPositionAccount } from '@/lib/evm-public-testnet/position-account';
 import { formatUsdMinor } from '@/lib/portfolio/unified-balance';
 import { PublicTestnetApiClient } from '@/lib/public-testnet/public-testnet-client';
+import type { PublicTestnetPositionSnapshot } from '@/lib/public-testnet/public-testnet-execution';
 import { readPublicTestnetPositionAccount } from '@/lib/public-testnet/public-testnet-position-account';
 
 import { PublicTestnetLendingDashboard } from './public-testnet-lending-dashboard';
+import { createBrowserPublicTestnetWithdrawalAdapters } from './browser-public-testnet-withdrawal-adapters';
+import {
+  PublicTestnetWithdrawalCoordinator,
+  type PublicTestnetWithdrawalAdapters,
+} from './public-testnet-withdrawal-coordinator';
+import { EvmPublicTestnetLendingDashboard } from './evm-public-testnet-lending-dashboard';
+import {
+  EvmPublicTestnetTransactionProof,
+  type EvmPublicTestnetProofDependencies,
+  type EvmPublicTestnetSubmissionController,
+} from './evm-public-testnet-transaction-proof';
 import {
   PublicTestnetTransactionProof,
   type PublicTestnetProofDependencies,
+  type PublicTestnetSubmissionController,
 } from './public-testnet-transaction-proof';
 
 const AS_OF_FORMATTER = new Intl.DateTimeFormat('en-US', {
@@ -35,6 +53,7 @@ const AS_OF_FORMATTER = new Intl.DateTimeFormat('en-US', {
 });
 
 const DEFAULT_PUBLIC_TESTNET_API_FACTORY = () => new PublicTestnetApiClient();
+const DEFAULT_EVM_PUBLIC_TESTNET_API_FACTORY = () => new EvmPublicTestnetApiClient();
 
 export interface LocalDemoAllocationPlannerProps {
   readonly client: LocalDemoApiClient;
@@ -42,6 +61,8 @@ export interface LocalDemoAllocationPlannerProps {
   readonly onUnauthenticated?: () => void;
   readonly onPortfolioSnapshotChanged?: () => void;
   readonly publicTestnetProofDependencies?: PublicTestnetProofDependencies;
+  readonly evmPublicTestnetProofDependencies?: EvmPublicTestnetProofDependencies;
+  readonly publicTestnetWithdrawalAdapters?: PublicTestnetWithdrawalAdapters;
 }
 
 function Money({ amountUsdMinor }: { amountUsdMinor: string }) {
@@ -373,27 +394,94 @@ function AllocationPreview({
   preview,
   draftLiquidReserveBasisPoints,
   liquidityUpdatePending,
-  publicTestnetWriteActive,
+  anyTestnetWriteActive,
   onDraftLiquidityChange,
   onApplyLiquidity,
   onUnauthenticated,
   publicTestnetProofDependencies,
-  onPublicTestnetWriteActivityChange,
+  evmPublicTestnetProofDependencies,
+  onSvmPublicTestnetWriteActivityChange,
+  onEvmPublicTestnetWriteActivityChange,
+  onCombinedPublicTestnetLaunchActivityChange,
   onPublicTestnetPositionAccountChange,
   onPublicTestnetPositionRefreshRequested,
+  onEvmPublicTestnetPositionAccountChange,
+  onEvmPublicTestnetPositionRefreshRequested,
 }: {
   preview: LocalDemoAllocationPreview;
   draftLiquidReserveBasisPoints: number;
   liquidityUpdatePending: boolean;
-  publicTestnetWriteActive: boolean;
+  anyTestnetWriteActive: boolean;
   onDraftLiquidityChange: (basisPoints: number) => void;
   onApplyLiquidity: () => void;
   onUnauthenticated?: (() => void) | undefined;
   publicTestnetProofDependencies?: PublicTestnetProofDependencies | undefined;
-  onPublicTestnetWriteActivityChange: (active: boolean) => void;
+  evmPublicTestnetProofDependencies?: EvmPublicTestnetProofDependencies | undefined;
+  onSvmPublicTestnetWriteActivityChange: (active: boolean) => void;
+  onEvmPublicTestnetWriteActivityChange: (active: boolean) => void;
+  onCombinedPublicTestnetLaunchActivityChange: (active: boolean) => void;
   onPublicTestnetPositionAccountChange: (account: string) => void;
   onPublicTestnetPositionRefreshRequested: () => void;
+  onEvmPublicTestnetPositionAccountChange: (account: string) => void;
+  onEvmPublicTestnetPositionRefreshRequested: () => void;
 }) {
+  const evmSubmissionController = useRef<EvmPublicTestnetSubmissionController | null>(null);
+  const svmSubmissionController = useRef<PublicTestnetSubmissionController | null>(null);
+  const combinedSubmissionClaim = useRef(false);
+  const [evmSubmitReady, setEvmSubmitReady] = useState(false);
+  const [svmSubmitReady, setSvmSubmitReady] = useState(false);
+  const [combinedSubmissionActive, setCombinedSubmissionActive] = useState(false);
+  const combinedSubmitReady = evmSubmitReady && svmSubmitReady;
+
+  function submitBothTestnetDeposits(): void {
+    const evmController = evmSubmissionController.current;
+    const svmController = svmSubmissionController.current;
+    if (
+      combinedSubmissionClaim.current ||
+      combinedSubmissionActive ||
+      anyTestnetWriteActive ||
+      evmController === null ||
+      svmController === null ||
+      !evmController.canRequestSubmit() ||
+      !svmController.canRequestSubmit()
+    ) {
+      return;
+    }
+
+    combinedSubmissionClaim.current = true;
+    setCombinedSubmissionActive(true);
+    onCombinedPublicTestnetLaunchActivityChange(true);
+
+    // Launch both independent lanes in the same user event without awaiting
+    // either wallet. Each controller synchronously claims its own lane before
+    // reaching a provider or API await, preventing a second transaction send.
+    const evmSubmission = evmController.requestSubmit();
+    const svmSubmission = svmController.requestSubmit();
+
+    if (evmSubmission === null || svmSubmission === null) {
+      combinedSubmissionClaim.current = false;
+      setCombinedSubmissionActive(false);
+      onCombinedPublicTestnetLaunchActivityChange(false);
+      return;
+    }
+
+    void Promise.allSettled([evmSubmission, svmSubmission]).finally(() => {
+      combinedSubmissionClaim.current = false;
+      setCombinedSubmissionActive(false);
+      onCombinedPublicTestnetLaunchActivityChange(false);
+    });
+  }
+
+  const combinedSubmissionStatus = combinedSubmissionActive
+    ? 'Both transaction flows started. Complete the EVM and Phantom wallet approvals.'
+    : combinedSubmitReady
+      ? 'Both reviews are ready. One click starts two independent wallet approvals.'
+      : evmSubmitReady
+        ? 'EVM is ready. Finish and confirm the Solana review.'
+        : svmSubmitReady
+          ? 'Solana is ready. Finish and confirm the EVM review.'
+          : 'Open both reviews, connect both wallets, and confirm both disclosures.';
+
   return (
     <section
       className="local-demo-allocation-preview"
@@ -431,7 +519,7 @@ function AllocationPreview({
         appliedBasisPoints={preview.selection.liquidReserveBasisPoints}
         draftBasisPoints={draftLiquidReserveBasisPoints}
         pending={liquidityUpdatePending}
-        locked={publicTestnetWriteActive}
+        locked={anyTestnetWriteActive}
         onDraftChange={onDraftLiquidityChange}
         onApply={onApplyLiquidity}
       />
@@ -555,15 +643,64 @@ function AllocationPreview({
       )}
       {!liquidityUpdatePending &&
       draftLiquidReserveBasisPoints === preview.selection.liquidReserveBasisPoints ? (
-        <PublicTestnetTransactionProof
-          key={`${preview.portfolioSnapshotId}:${preview.rateSnapshot.id}:${preview.selection.liquidReserveBasisPoints}`}
-          preview={preview}
-          onUnauthenticated={onUnauthenticated}
-          onWriteActivityChange={onPublicTestnetWriteActivityChange}
-          onPositionAccountChange={onPublicTestnetPositionAccountChange}
-          onPositionRefreshRequested={onPublicTestnetPositionRefreshRequested}
-          dependencies={publicTestnetProofDependencies}
-        />
+        <section
+          className="public-testnet-proof-suite"
+          aria-labelledby="public-testnet-proof-suite-title"
+        >
+          <div className="public-testnet-proof-suite-heading">
+            <div>
+              <p className="eyebrow">Coordinated live proofs</p>
+              <h4 id="public-testnet-proof-suite-title">Submit EVM and Solana together</h4>
+            </div>
+            <span>One action · two wallet approvals</span>
+          </div>
+          <p>
+            Prepare and confirm both reviews, then use the single action below. It starts two
+            independent transactions and two wallet approvals; neither proof is an atomic
+            cross-chain transaction.
+          </p>
+          <div className="public-testnet-proof-grid">
+            <EvmPublicTestnetTransactionProof
+              key={`evm:${preview.portfolioSnapshotId}:${preview.rateSnapshot.id}:${preview.selection.liquidReserveBasisPoints}`}
+              ref={evmSubmissionController}
+              preview={preview}
+              onUnauthenticated={onUnauthenticated}
+              onWriteActivityChange={onEvmPublicTestnetWriteActivityChange}
+              onPositionAccountChange={onEvmPublicTestnetPositionAccountChange}
+              onPositionRefreshRequested={onEvmPublicTestnetPositionRefreshRequested}
+              onSubmitReadinessChange={setEvmSubmitReady}
+              submissionMode="COMBINED"
+              dependencies={evmPublicTestnetProofDependencies}
+            />
+            <PublicTestnetTransactionProof
+              key={`svm:${preview.portfolioSnapshotId}:${preview.rateSnapshot.id}:${preview.selection.liquidReserveBasisPoints}`}
+              ref={svmSubmissionController}
+              preview={preview}
+              onUnauthenticated={onUnauthenticated}
+              onWriteActivityChange={onSvmPublicTestnetWriteActivityChange}
+              onPositionAccountChange={onPublicTestnetPositionAccountChange}
+              onPositionRefreshRequested={onPublicTestnetPositionRefreshRequested}
+              onSubmitReadinessChange={setSvmSubmitReady}
+              submissionMode="COMBINED"
+              dependencies={publicTestnetProofDependencies}
+            />
+          </div>
+          <div className="public-testnet-combined-submit">
+            <button
+              className="public-testnet-submit-action"
+              type="button"
+              disabled={!combinedSubmitReady || combinedSubmissionActive || anyTestnetWriteActive}
+              onClick={submitBothTestnetDeposits}
+            >
+              {combinedSubmissionActive
+                ? 'Complete both wallet approvals'
+                : 'Submit both testnet deposits'}
+            </button>
+            <p role="status" aria-live="polite">
+              {combinedSubmissionStatus}
+            </p>
+          </div>
+        </section>
       ) : null}
     </section>
   );
@@ -586,6 +723,8 @@ export function LocalDemoAllocationPlanner({
   onUnauthenticated,
   onPortfolioSnapshotChanged,
   publicTestnetProofDependencies,
+  evmPublicTestnetProofDependencies,
+  publicTestnetWithdrawalAdapters,
 }: LocalDemoAllocationPlannerProps) {
   const [catalog, setCatalog] = useState<LocalDemoYieldCatalog | null>(null);
   const [catalogError, setCatalogError] = useState(false);
@@ -597,17 +736,38 @@ export function LocalDemoAllocationPlanner({
     null,
   );
   const [liquidityUpdatePending, setLiquidityUpdatePending] = useState(false);
-  const [publicTestnetWriteActive, setPublicTestnetWriteActive] = useState(false);
+  const [svmPublicTestnetWriteActive, setSvmPublicTestnetWriteActive] = useState(false);
+  const [evmPublicTestnetWriteActive, setEvmPublicTestnetWriteActive] = useState(false);
+  const [combinedPublicTestnetLaunchActive, setCombinedPublicTestnetLaunchActive] = useState(false);
+  const [publicTestnetWithdrawalActive, setPublicTestnetWithdrawalActive] = useState(false);
   const [publicTestnetPositionAccount, setPublicTestnetPositionAccount] = useState<string | null>(
     null,
   );
   const [publicTestnetPositionRefreshKey, setPublicTestnetPositionRefreshKey] = useState(0);
+  const [evmPublicTestnetPositionAccount, setEvmPublicTestnetPositionAccount] = useState<
+    string | null
+  >(null);
+  const [evmPublicTestnetPositionRefreshKey, setEvmPublicTestnetPositionRefreshKey] = useState(0);
+  const [publicTestnetPositionSnapshot, setPublicTestnetPositionSnapshot] =
+    useState<PublicTestnetPositionSnapshot | null>(null);
+  const [evmPublicTestnetPositionSnapshot, setEvmPublicTestnetPositionSnapshot] =
+    useState<EvmPublicTestnetPositionSnapshot | null>(null);
+  const [defaultPublicTestnetWithdrawalAdapters] = useState(() =>
+    createBrowserPublicTestnetWithdrawalAdapters(),
+  );
   const [previewState, setPreviewState] = useState<'IDLE' | 'ERROR' | 'PORTFOLIO_CHANGED'>('IDLE');
   const catalogRequest = useRef<AbortController | null>(null);
   const previewRequest = useRef<AbortController | null>(null);
   const requestGeneration = useRef(0);
   const createPublicTestnetApi =
     publicTestnetProofDependencies?.createApi ?? DEFAULT_PUBLIC_TESTNET_API_FACTORY;
+  const createEvmPublicTestnetApi =
+    evmPublicTestnetProofDependencies?.createApi ?? DEFAULT_EVM_PUBLIC_TESTNET_API_FACTORY;
+  const anyTestnetWriteActive =
+    combinedPublicTestnetLaunchActive ||
+    publicTestnetWithdrawalActive ||
+    svmPublicTestnetWriteActive ||
+    evmPublicTestnetWriteActive;
 
   useEffect(() => {
     let mounted = true;
@@ -617,6 +777,21 @@ export function LocalDemoAllocationPlanner({
         setPublicTestnetPositionAccount(readPublicTestnetPositionAccount());
       } catch {
         setPublicTestnetPositionAccount(null);
+      }
+    });
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let mounted = true;
+    queueMicrotask(() => {
+      if (!mounted) return;
+      try {
+        setEvmPublicTestnetPositionAccount(readEvmPublicTestnetPositionAccount());
+      } catch {
+        setEvmPublicTestnetPositionAccount(null);
       }
     });
     return () => {
@@ -697,7 +872,7 @@ export function LocalDemoAllocationPlanner({
     key: string,
     options: Readonly<{ preserveAppliedPreview?: boolean }> = {},
   ): Promise<void> {
-    if (publicTestnetWriteActive) return;
+    if (anyTestnetWriteActive) return;
     const preserveAppliedPreview = options.preserveAppliedPreview === true;
     requestGeneration.current += 1;
     previewRequest.current?.abort();
@@ -774,7 +949,7 @@ export function LocalDemoAllocationPlanner({
       draftLiquidReserveBasisPoints === null ||
       draftLiquidReserveBasisPoints === preview.selection.liquidReserveBasisPoints ||
       pendingKey !== null ||
-      publicTestnetWriteActive
+      anyTestnetWriteActive
     ) {
       return;
     }
@@ -792,13 +967,54 @@ export function LocalDemoAllocationPlanner({
 
   return (
     <>
-      <PublicTestnetLendingDashboard
-        key={publicTestnetPositionAccount ?? 'no-position-account'}
-        account={publicTestnetPositionAccount}
-        createApi={createPublicTestnetApi}
-        onUnauthenticated={onUnauthenticated}
-        refreshKey={publicTestnetPositionRefreshKey}
-      />
+      <section
+        className="public-testnet-dashboard-overview"
+        aria-labelledby="public-testnet-dashboard-overview-title"
+      >
+        <div className="public-testnet-dashboard-overview-heading">
+          <div>
+            <p className="eyebrow">Live testnet positions</p>
+            <h2 id="public-testnet-dashboard-overview-title">Your lending dashboards</h2>
+          </div>
+          <span>EVM + SVM · read-only</span>
+        </div>
+        <p>
+          See both public-testnet positions immediately after connecting. Refreshing a dashboard
+          never sends a transaction.
+        </p>
+        <div className="public-testnet-dashboard-grid">
+          <EvmPublicTestnetLendingDashboard
+            key={evmPublicTestnetPositionAccount ?? 'no-evm-position-account'}
+            account={evmPublicTestnetPositionAccount}
+            createApi={createEvmPublicTestnetApi}
+            onUnauthenticated={onUnauthenticated}
+            onSnapshotChange={setEvmPublicTestnetPositionSnapshot}
+            refreshKey={evmPublicTestnetPositionRefreshKey}
+          />
+          <PublicTestnetLendingDashboard
+            key={publicTestnetPositionAccount ?? 'no-position-account'}
+            account={publicTestnetPositionAccount}
+            createApi={createPublicTestnetApi}
+            onUnauthenticated={onUnauthenticated}
+            onSnapshotChange={setPublicTestnetPositionSnapshot}
+            refreshKey={publicTestnetPositionRefreshKey}
+          />
+        </div>
+        <PublicTestnetWithdrawalCoordinator
+          adapters={publicTestnetWithdrawalAdapters ?? defaultPublicTestnetWithdrawalAdapters}
+          evmPositionExpected={evmPublicTestnetPositionAccount !== null}
+          evmSnapshot={evmPublicTestnetPositionSnapshot}
+          svmPositionExpected={publicTestnetPositionAccount !== null}
+          svmSnapshot={publicTestnetPositionSnapshot}
+          onEvmPositionRefreshRequested={() =>
+            setEvmPublicTestnetPositionRefreshKey((value) => value + 1)
+          }
+          onSvmPositionRefreshRequested={() =>
+            setPublicTestnetPositionRefreshKey((value) => value + 1)
+          }
+          onWriteActivityChange={setPublicTestnetWithdrawalActive}
+        />
+      </section>
       <section
         className="local-demo-allocation-panel"
         aria-labelledby="local-demo-allocation-title"
@@ -852,7 +1068,7 @@ export function LocalDemoAllocationPlanner({
                 key={preset.id}
                 type="button"
                 aria-pressed={selectedKey === key}
-                disabled={pendingKey !== null || catalog === null || publicTestnetWriteActive}
+                disabled={pendingKey !== null || catalog === null || anyTestnetWriteActive}
                 onClick={() =>
                   void requestPreview(
                     {
@@ -929,9 +1145,9 @@ export function LocalDemoAllocationPlanner({
               draftLiquidReserveBasisPoints ?? preview.selection.liquidReserveBasisPoints
             }
             liquidityUpdatePending={liquidityUpdatePending}
-            publicTestnetWriteActive={publicTestnetWriteActive}
+            anyTestnetWriteActive={anyTestnetWriteActive}
             onDraftLiquidityChange={(basisPoints) => {
-              if (!liquidityUpdatePending && !publicTestnetWriteActive) {
+              if (!liquidityUpdatePending && !anyTestnetWriteActive) {
                 setDraftLiquidReserveBasisPoints(basisPoints);
                 setPreviewState('IDLE');
               }
@@ -939,10 +1155,17 @@ export function LocalDemoAllocationPlanner({
             onApplyLiquidity={applyDraftLiquidity}
             onUnauthenticated={onUnauthenticated}
             publicTestnetProofDependencies={publicTestnetProofDependencies}
-            onPublicTestnetWriteActivityChange={setPublicTestnetWriteActive}
+            evmPublicTestnetProofDependencies={evmPublicTestnetProofDependencies}
+            onSvmPublicTestnetWriteActivityChange={setSvmPublicTestnetWriteActive}
+            onEvmPublicTestnetWriteActivityChange={setEvmPublicTestnetWriteActive}
+            onCombinedPublicTestnetLaunchActivityChange={setCombinedPublicTestnetLaunchActive}
             onPublicTestnetPositionAccountChange={setPublicTestnetPositionAccount}
             onPublicTestnetPositionRefreshRequested={() =>
               setPublicTestnetPositionRefreshKey((value) => value + 1)
+            }
+            onEvmPublicTestnetPositionAccountChange={setEvmPublicTestnetPositionAccount}
+            onEvmPublicTestnetPositionRefreshRequested={() =>
+              setEvmPublicTestnetPositionRefreshKey((value) => value + 1)
             }
           />
         )}

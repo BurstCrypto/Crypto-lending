@@ -12,6 +12,12 @@ import {
   type PublicTestnetRecoveryJournalStorage,
 } from '../lib/public-testnet/public-testnet-recovery-journal';
 import {
+  claimPublicTestnetOperationLock,
+  clearPublicTestnetOperationLock,
+  PUBLIC_TESTNET_OPERATION_LOCK_STORAGE_KEY,
+  PublicTestnetOperationLockError,
+} from '../lib/public-testnet/public-testnet-operation-lock';
+import {
   PUBLIC_TESTNET_ACCOUNT,
   PUBLIC_TESTNET_INTENT_ID,
   PUBLIC_TESTNET_SIGNATURE,
@@ -74,10 +80,18 @@ describe('public-testnet recovery journal', () => {
 
     expect(created).toEqual(journal());
     expect(Object.isFrozen(created)).toBe(true);
-    expect(storage.operations).toEqual(['get', 'set', 'get']);
+    expect(storage.operations).toEqual(['get', 'get', 'set', 'get', 'set', 'get']);
     expect(
       JSON.parse(storage.values.get(PUBLIC_TESTNET_RECOVERY_JOURNAL_STORAGE_KEY) ?? ''),
     ).toEqual(journal());
+    expect(JSON.parse(storage.values.get(PUBLIC_TESTNET_OPERATION_LOCK_STORAGE_KEY) ?? '')).toEqual(
+      {
+        version: 1,
+        operation: 'DEPOSIT',
+        intentId: PUBLIC_TESTNET_INTENT_ID,
+        account: PUBLIC_TESTNET_ACCOUNT,
+      },
+    );
   });
 
   it('adds a valid 64-byte signature and clears only the exact signed record', () => {
@@ -93,8 +107,9 @@ describe('public-testnet recovery journal', () => {
 
     clearPublicTestnetRecoveryJournal(signed, storage);
 
-    expect(storage.operations).toEqual(['get', 'remove', 'get']);
+    expect(storage.operations).toEqual(['get', 'remove', 'get', 'get', 'get', 'remove', 'get']);
     expect(storage.values.has(PUBLIC_TESTNET_RECOVERY_JOURNAL_STORAGE_KEY)).toBe(false);
+    expect(storage.values.has(PUBLIC_TESTNET_OPERATION_LOCK_STORAGE_KEY)).toBe(false);
   });
 
   it('atomically creates a signature-known journal before server submission', () => {
@@ -107,7 +122,7 @@ describe('public-testnet recovery journal', () => {
 
     expect(created).toEqual(journal(PUBLIC_TESTNET_SIGNATURE));
     expect(Object.isFrozen(created)).toBe(true);
-    expect(storage.operations).toEqual(['get', 'set', 'get']);
+    expect(storage.operations).toEqual(['get', 'get', 'set', 'get', 'set', 'get']);
     expect(
       JSON.parse(storage.values.get(PUBLIC_TESTNET_RECOVERY_JOURNAL_STORAGE_KEY) ?? ''),
     ).toEqual(journal(PUBLIC_TESTNET_SIGNATURE));
@@ -178,7 +193,7 @@ describe('public-testnet recovery journal', () => {
       expect(() => startPublicTestnetRecoveryJournal(startInput(), storage)).toThrow(
         PublicTestnetRecoveryJournalError,
       );
-      expect(storage.operations).toEqual(['get', 'set', 'get']);
+      expect(storage.operations).toEqual(['get', 'get', 'set', 'get']);
     }
 
     const storage = new FakeStorage();
@@ -237,5 +252,40 @@ describe('public-testnet recovery journal', () => {
       PublicTestnetRecoveryJournalError,
     );
     expect(storage.values.has(PUBLIC_TESTNET_RECOVERY_JOURNAL_STORAGE_KEY)).toBe(true);
+  });
+
+  it('fails closed across deposit and withdrawal operations', () => {
+    const storage = new FakeStorage();
+    const withdrawal = claimPublicTestnetOperationLock(
+      {
+        operation: 'WITHDRAWAL',
+        intentId: PUBLIC_TESTNET_INTENT_ID,
+        account: PUBLIC_TESTNET_ACCOUNT,
+      },
+      storage,
+    );
+
+    expect(() => readPublicTestnetRecoveryJournal(NOW, storage)).toThrow(
+      PublicTestnetRecoveryJournalError,
+    );
+    expect(() => startPublicTestnetRecoveryJournal(startInput(), storage)).toThrow(
+      PublicTestnetRecoveryJournalError,
+    );
+    clearPublicTestnetOperationLock(withdrawal, storage);
+
+    startSignedPublicTestnetRecoveryJournal(
+      { ...startInput(), signature: PUBLIC_TESTNET_SIGNATURE },
+      storage,
+    );
+    expect(() =>
+      claimPublicTestnetOperationLock(
+        {
+          operation: 'WITHDRAWAL',
+          intentId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+          account: PUBLIC_TESTNET_ACCOUNT,
+        },
+        storage,
+      ),
+    ).toThrow(PublicTestnetOperationLockError);
   });
 });

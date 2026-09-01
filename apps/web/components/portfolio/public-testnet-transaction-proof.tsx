@@ -1,6 +1,13 @@
 'use client';
 
-import { useEffect, useEffectEvent, useRef, useState } from 'react';
+import {
+  forwardRef,
+  useEffect,
+  useEffectEvent,
+  useImperativeHandle,
+  useRef,
+  useState,
+} from 'react';
 
 import { isAbortFailure } from '@/lib/authentication/http';
 import type { LocalDemoAllocationPreview } from '@/lib/local-demo/local-demo-yield';
@@ -74,7 +81,14 @@ export interface PublicTestnetTransactionProofProps {
   readonly onWriteActivityChange?: ((active: boolean) => void) | undefined;
   readonly onPositionAccountChange?: ((account: string) => void) | undefined;
   readonly onPositionRefreshRequested?: (() => void) | undefined;
+  readonly onSubmitReadinessChange?: ((ready: boolean) => void) | undefined;
+  readonly submissionMode?: 'INDIVIDUAL' | 'COMBINED' | undefined;
   readonly dependencies?: PublicTestnetProofDependencies | undefined;
+}
+
+export interface PublicTestnetSubmissionController {
+  canRequestSubmit(): boolean;
+  requestSubmit(): Promise<void> | null;
 }
 
 const DEFAULT_DEPENDENCIES: PublicTestnetProofDependencies = Object.freeze({
@@ -185,14 +199,22 @@ function SignatureLink({ signature }: { readonly signature: string | null }) {
   );
 }
 
-export function PublicTestnetTransactionProof({
-  preview,
-  onUnauthenticated,
-  onWriteActivityChange,
-  onPositionAccountChange,
-  onPositionRefreshRequested,
-  dependencies = DEFAULT_DEPENDENCIES,
-}: PublicTestnetTransactionProofProps) {
+export const PublicTestnetTransactionProof = forwardRef<
+  PublicTestnetSubmissionController,
+  PublicTestnetTransactionProofProps
+>(function PublicTestnetTransactionProof(
+  {
+    preview,
+    onUnauthenticated,
+    onWriteActivityChange,
+    onPositionAccountChange,
+    onPositionRefreshRequested,
+    onSubmitReadinessChange,
+    submissionMode = 'INDIVIDUAL',
+    dependencies = DEFAULT_DEPENDENCIES,
+  },
+  submissionController,
+) {
   const [phase, setPhase] = useState<ProofPhase>('RECOVERY_CHECK');
   const [wallets, setWallets] = useState<readonly SolanaWalletDescriptor[]>([]);
   const [intent, setIntent] = useState<PublicTestnetExecutionIntent | null>(null);
@@ -215,6 +237,7 @@ export function PublicTestnetTransactionProof({
   const apiReference = useRef<PublicTestnetExecutionApi | null>(null);
   const operationReference = useRef<AbortController | null>(null);
   const generationReference = useRef(0);
+  const submissionClaimReference = useRef(false);
 
   function transition(next: ProofPhase): void {
     phaseReference.current = next;
@@ -234,6 +257,16 @@ export function PublicTestnetTransactionProof({
   function setCurrentRecovery(next: PublicTestnetRecoveryJournal | null): void {
     recoveryReference.current = next;
     if (mountedReference.current) setRecoveryJournal(next);
+  }
+
+  function currentWriteActivity(): boolean {
+    const currentPhase = phaseReference.current;
+    return (
+      ACTIVE_OPERATION_PHASES.has(currentPhase) ||
+      recoveryReference.current !== null ||
+      (signatureReference.current !== null && currentPhase !== 'CONFIRMED') ||
+      currentPhase === 'COMMIT_AMBIGUOUS'
+    );
   }
 
   function abortOperation(): void {
@@ -573,6 +606,7 @@ export function PublicTestnetTransactionProof({
       if (generation === generationReference.current) {
         onPositionRefreshRequested?.();
         operationReference.current = null;
+        onWriteActivityChange?.(currentWriteActivity());
       }
     }
   }
@@ -679,6 +713,7 @@ export function PublicTestnetTransactionProof({
       if (generation === generationReference.current) {
         onPositionRefreshRequested?.();
         operationReference.current = null;
+        onWriteActivityChange?.(currentWriteActivity());
       }
     }
   }
@@ -734,6 +769,9 @@ export function PublicTestnetTransactionProof({
       transition('SIGN_PROMPT');
       const walletTransaction = publicTestnetWalletTransaction(currentIntent);
       writeRequested = true;
+      // Freeze shared allocation controls before Phantom receives the signing
+      // request instead of waiting for the phase synchronization effect.
+      onWriteActivityChange?.(true);
       const signedTransaction = await wallet.signTransaction(
         walletTransaction,
         selectedAccount,
@@ -818,9 +856,44 @@ export function PublicTestnetTransactionProof({
       if (generation === generationReference.current) {
         if (writeRequested) onPositionRefreshRequested?.();
         operationReference.current = null;
+        onWriteActivityChange?.(currentWriteActivity());
       }
     }
   }
+
+  function canRequestSubmit(): boolean {
+    return (
+      !submissionClaimReference.current &&
+      phaseReference.current === 'READY' &&
+      walletReference.current !== null &&
+      intentReference.current !== null &&
+      accountReference.current !== null &&
+      apiReference.current !== null &&
+      confirmedDisclosure &&
+      signatureReference.current === null &&
+      recoveryReference.current === null
+    );
+  }
+
+  function requestSubmit(): Promise<void> | null {
+    if (!canRequestSubmit()) return null;
+    // Claim this lane before the refreshed intent request begins. A combined
+    // launch and a rapid second click must never request two Phantom signatures.
+    submissionClaimReference.current = true;
+    return submitTransaction().finally(() => {
+      submissionClaimReference.current = false;
+    });
+  }
+
+  const submitReady =
+    phase === 'READY' && confirmedDisclosure && recoveryJournal === null && signature === null;
+
+  useEffect(() => {
+    onSubmitReadinessChange?.(submitReady);
+    return () => onSubmitReadinessChange?.(false);
+  }, [onSubmitReadinessChange, submitReady]);
+
+  useImperativeHandle(submissionController, () => ({ canRequestSubmit, requestSubmit }));
 
   const closeDisabled =
     phase === 'RECOVERY_CHECK' || ACTIVE_OPERATION_PHASES.has(phase) || unresolvedExecution;
@@ -973,14 +1046,22 @@ export function PublicTestnetTransactionProof({
                 displayed blend or validate its APY, and does not automatically withdraw the test
                 position.
               </label>
-              <button
-                className="public-testnet-submit-action"
-                type="button"
-                disabled={!confirmedDisclosure}
-                onClick={() => void submitTransaction()}
-              >
-                Submit Devnet transaction
-              </button>
+              {submissionMode === 'INDIVIDUAL' ? (
+                <button
+                  className="public-testnet-submit-action"
+                  type="button"
+                  disabled={!confirmedDisclosure}
+                  onClick={() => void requestSubmit()}
+                >
+                  Submit Devnet transaction
+                </button>
+              ) : (
+                <p className="public-testnet-combined-lane-status" role="status">
+                  {confirmedDisclosure
+                    ? 'Solana review ready for the combined submission.'
+                    : 'Confirm the Solana disclosure to enable the combined submission.'}
+                </p>
+              )}
             </div>
           ) : null}
 
@@ -1096,4 +1177,4 @@ export function PublicTestnetTransactionProof({
       )}
     </section>
   );
-}
+});

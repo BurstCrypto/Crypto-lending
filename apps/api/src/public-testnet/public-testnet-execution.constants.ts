@@ -63,6 +63,8 @@ export const PUBLIC_TESTNET_MEMO_PROGRAM = new PublicKey(
   'MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr',
 );
 export const PUBLIC_TESTNET_MEMO_PREFIX = 'crypto-lending:devnet-proof:v1:' as const;
+export const PUBLIC_TESTNET_WITHDRAWAL_MEMO_PREFIX =
+  'crypto-lending:devnet-withdrawal:v1:' as const;
 export const PUBLIC_TESTNET_UPGRADEABLE_LOADER = new PublicKey(
   'BPFLoaderUpgradeab1e11111111111111111111111',
 );
@@ -75,8 +77,14 @@ export const PUBLIC_TESTNET_LENDING_PROGRAM_UPGRADE_AUTHORITY = new PublicKey(
 );
 
 export const PUBLIC_TESTNET_DEPOSIT_RESERVE_LIQUIDITY_TAG = 4 as const;
+export const PUBLIC_TESTNET_REDEEM_RESERVE_COLLATERAL_TAG = 5 as const;
 export const PUBLIC_TESTNET_SYNC_NATIVE_TAG = 17 as const;
+export const PUBLIC_TESTNET_INITIALIZE_ACCOUNT_3_TAG = 18 as const;
+export const PUBLIC_TESTNET_CLOSE_ACCOUNT_TAG = 9 as const;
 export const PUBLIC_TESTNET_CREATE_ASSOCIATED_TOKEN_IDEMPOTENT_TAG = 1 as const;
+
+export const PUBLIC_TESTNET_WITHDRAWAL_TERMINAL_RETENTION_MILLISECONDS = 60 * 60 * 1_000;
+export const PUBLIC_TESTNET_MAX_ACTIVE_WITHDRAWALS_PER_ACCOUNT = 1;
 
 export function derivePublicTestnetAssociatedTokenAddress(
   owner: PublicKey,
