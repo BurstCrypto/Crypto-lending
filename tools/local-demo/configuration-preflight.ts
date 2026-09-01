@@ -2,6 +2,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { loadAuthenticationConfig } from '../../apps/api/src/authentication/infrastructure/config/authentication.config';
+import { loadEvmPublicTestnetExecutionConfig } from '../../apps/api/src/evm-public-testnet/evm-public-testnet.config';
 import {
   loadInfrastructureConfig,
   loadMigrationDatabaseConfig,
@@ -29,5 +30,6 @@ loadAuthenticationConfig(environments.api);
 loadWalletRegistrationConfig(environments.api);
 const localDemoConfig = loadLocalDemoRuntimeConfig(environments.api);
 loadPublicTestnetExecutionConfig(environments.api, localDemoConfig);
+loadEvmPublicTestnetExecutionConfig(environments.api, localDemoConfig);
 
 process.stdout.write('Local demo application configuration preflight passed.\n');

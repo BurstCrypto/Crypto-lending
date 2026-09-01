@@ -17,6 +17,8 @@ interface PublicTestnetLendingDashboardProps {
   readonly account: string | null;
   readonly createApi: () => PublicTestnetExecutionApi;
   readonly onUnauthenticated?: (() => void) | undefined;
+  readonly onSnapshotChange?:
+    ((snapshot: PublicTestnetPositionSnapshot | null) => void) | undefined;
   readonly refreshKey?: string | number | null | undefined;
 }
 
@@ -54,6 +56,7 @@ export function PublicTestnetLendingDashboard({
   account,
   createApi,
   onUnauthenticated,
+  onSnapshotChange,
   refreshKey,
 }: PublicTestnetLendingDashboardProps) {
   const [refresh, setRefresh] = useState(0);
@@ -91,6 +94,17 @@ export function PublicTestnetLendingDashboard({
     account !== null && state.status === 'READY' && state.snapshot.account === account
       ? state.snapshot
       : null;
+
+  useEffect(() => {
+    onSnapshotChange?.(snapshot);
+  }, [onSnapshotChange, snapshot]);
+
+  useEffect(
+    () => () => {
+      onSnapshotChange?.(null);
+    },
+    [onSnapshotChange],
+  );
 
   return (
     <section

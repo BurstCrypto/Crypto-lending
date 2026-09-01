@@ -42,110 +42,167 @@ test does not enable or validate that flow.
 ## Separate local application proof
 
 `npm run demo:local` enables a narrowly scoped application path only outside
-production and hosted CI. It uses Solana Devnet and one fixed Save/Solend route
-to prove a single native-SOL lending deposit. This application path is distinct
-from the four-network read-only smoke above: the smoke remains exactly eight
-reads and cannot enable, prepare, sign, or verify an application transaction.
+production and hosted CI. It offers two independent proofs: one fixed Aave V3
+native-ETH-to-WETH supply on Base Sepolia and one fixed Save/Solend native-SOL
+deposit on Solana Devnet. This application path remains distinct from the
+four-network read-only smoke above: the smoke remains exactly eight reads and
+cannot enable, prepare, sign, broadcast, or verify either application
+transaction.
 
-The authenticated, exact-origin, CSRF-protected API reruns the selected
-`BALANCED` allocation preview and binds a short-lived, single-use intent to the
-account, Solana wallet, portfolio snapshot, and applied liquidity percentage.
-The browser refreshes that intent on the final Submit click so time spent reading
-the disclosure does not age the transaction before Phantom opens.
-It checks the fixed Devnet identity, lending program, market, reserve, vaults,
-and position state at finalized commitment, then prepares one exact
-six-instruction Solana core for a 0.01 native Devnet SOL deposit. It accepts no
-arbitrary RPC, program, account list, amount, instruction, or transaction
-message. It has no wallet key, server signer, arbitrary relay, airdrop, or retry
-API. Its submission route permits only the intent-bound, one-shot fixed Devnet
-broadcast described below.
+After both chain reviews and disclosures are ready, one **Submit both testnet
+deposits** button starts the EVM and SVM proofs without awaiting either. They
+share no transaction or authorization, and the one application action produces
+two separate wallet approvals: one transaction confirmation in the explicitly
+selected MetaMask or Coinbase Wallet and one confirmation in the explicitly
+selected Solana Wallet Standard wallet. There is no atomic cross-chain
+transaction, implicit approval from one chain to the other, or server-held
+signing key. Because the EVM route supplies native ETH through Aave's WETH
+gateway, it needs no ERC-20 allowance approval or second EVM approval
+transaction.
+
+### Base Sepolia proof
+
+The EVM proof is fixed to Base Sepolia chain ID `84532` (`0x14a34`), public RPC
+`https://sepolia.base.org`, explorer `https://sepolia-explorer.base.org`, and the
+following Aave V3 deployment:
+
+| Role                   | Fixed Base Sepolia address                   |
+| ---------------------- | -------------------------------------------- |
+| Addresses provider     | `0xE4C23309117Aa30342BFaae6c95c6478e0A4Ad00` |
+| Pool                   | `0x8bAB6d1b75f19e9eD9fCe8b9BD338844fF79aE27` |
+| WETH gateway           | `0x0568130e794429D2eEBC4dafE18f25Ff1a1ed8b6` |
+| WETH                   | `0x4200000000000000000000000000000000000006` |
+| aWETH                  | `0x73a5bB60b0B0fc35710DDc0ea9c407031E31Bdbb` |
+| Protocol data provider | `0xBc9f5b7E248451CdD7cA54e717a2BFe1F32b566b` |
+
+The authenticated, exact-origin, CSRF-protected API binds a short-lived,
+single-use EVM intent to the account, selected EVM wallet, portfolio snapshot,
+and applied allocation. The prepared transaction targets only the fixed WETH
+gateway and calls payable `depositETH` for the fixed Pool, connected account,
+and referral code `0`, with exactly **0.00005 ETH**. It appends a
+domain-separated opaque intent marker after the ABI arguments as trailing
+calldata, so otherwise identical deposits remain bound to different intents.
+The complete input and nonce are verified. The proof accepts no caller-selected
+chain, RPC, target, calldata, recipient, asset, or value. The selected MetaMask
+or Coinbase Wallet account is the sole signer and broadcaster. The Aave
+provider, contracts, account, transaction data, and balance are public to the
+wallet, RPC provider, explorer, and chain.
+
+Fund this proof manually with Coinbase's official CDP faucet:
+
+1. In a dedicated test-only MetaMask or Coinbase Wallet, enable test networks
+   and select **Base Sepolia**. Confirm chain ID `84532` (`0x14a34`).
+2. Copy the exact connected `0x` address. Never enter a seed phrase or private
+   key into this app, a faucet, or configuration.
+3. Visit `https://portal.cdp.coinbase.com/products/faucet`, sign in to CDP,
+   select **Base Sepolia** and **ETH**, paste the address, and request test ETH.
+   The official quickstart is
+   `https://docs.cdp.coinbase.com/faucets/introduction/quickstart`.
+4. Confirm the address has at least **0.0001 Base Sepolia ETH** in the wallet or
+   official Base Sepolia explorer. The proof supplies 0.00005 ETH and preserves
+   the remainder for testnet gas.
+
+Base Sepolia ETH is valueless test currency. Do not purchase it or transfer
+Mainnet ETH. Faucet limits and availability are external. The app and API never
+call the faucet, collect a key, or sign for the wallet.
+
+The EVM proof reports confirmed only after a successful receipt and exact checks
+of chain, sender, gateway, value, calldata, Aave supply evidence, and resulting
+aWETH position against Base's latest state. That L2 receipt normally appears in
+seconds, but it is not Base finality. Finality is tracked separately and
+commonly arrives about 20 minutes later. A current dashboard can show the
+confirmed position while finality is pending; neither documentation nor UI
+should relabel latest-state confirmation as finalized.
+
+Before `eth_sendTransaction`, the browser must durably write and read back a
+same-tab EVM recovery lock. If the wallet returns a transaction hash, the
+browser binds that exact hash to the lock. A reload can query only its receipt,
+logs, position, and finality and cannot invoke the wallet write again. A known
+pending hash keeps the EVM send path locked without blocking Solana. EVM has no
+Solana-style last-valid-block-height expiry. An explicit wallet rejection or
+verified failed receipt can permit a fresh, separately confirmed attempt; an
+ambiguous result, including one without a returned hash, remains locked and
+never triggers an automatic resend. Inspect the selected wallet's activity and
+the Base Sepolia explorer before taking another action.
+
+### Solana Devnet proof
+
+The Solana path retains its independent authenticated intent, Wallet Standard
+approval, fixed Save/Solend route, and one-shot API submission. The intent is
+bound to the account, Solana wallet, portfolio snapshot, and applied liquidity
+percentage. After refreshed finalized deployment checks, the API prepares one
+exact six-instruction core for a **0.01 native Devnet SOL** deposit. It accepts
+no arbitrary RPC, program, account list, amount, instruction, or transaction
+message and has no wallet key, server signer, arbitrary relay, airdrop, or retry
+API.
 
 Every message begins with a domain-separated memo containing only its opaque
 intent ID, followed by the five fixed account-setup and lending instructions.
-This makes two intents cryptographically distinct even if Devnet returns the
-same recent blockhash. The browser validates all six instructions before the
-wallet call. Phantom may prepend only `SetComputeUnitPrice` followed by
+Phantom may prepend only `SetComputeUnitPrice` followed by
 `SetComputeUnitLimit`; the verifier requires exactly 200,000 compute units, at
 most 500,000 micro-lamports per unit, and at most 100,000 lamports (0.0001 SOL)
 of priority fee. It rejects every other addition or reordering and every change
-to the six reviewed instructions. The user must inspect Phantom's total fee
-before approving.
+to the reviewed core. The user must inspect Phantom's total fee before
+approving.
 
-The connected Wallet Standard wallet presents one confirmation and is the sole
-signer. There is no EVM testnet funding step, test token, token approval, or
-second transaction. The browser submits the signed legacy bytes through the
-authenticated same-origin API. The server revalidates the fee payer, sole
-Ed25519 signature, exact reviewed message or bounded compute-budget prefix, and
-1,232-byte wire limit before it binds the signature and bytes and makes one
-fixed Devnet `sendTransaction` request. Consequently the Save/Solend program and
-account targets are visible
-to the wallet, RPC provider, explorers, and public chain; a non-custodial
-on-chain transaction cannot keep its provider secret from the signer.
+The Wallet Standard wallet is the sole signer. The browser gives the signed
+legacy bytes to the authenticated same-origin API, which revalidates the fee
+payer, sole Ed25519 signature, exact reviewed message or bounded compute-budget
+prefix, and 1,232-byte wire limit before making one fixed Devnet
+`sendTransaction` request. The Save/Solend program and accounts are public to
+the wallet, RPC provider, explorer, and chain.
 
-After that one send attempt, the API retrieves the transaction through its fixed
-Devnet RPC boundary. It requires finalized evidence for the exact prepared core,
-optional bounded compute-budget prefix, wallet signer, permitted programs and
-accounts, exact 0.01 SOL amount, successful lending instruction, and resulting
-position increase. A wallet-modified signature is not reserved until that
-relationship is proven on signature-only recovery; a first request carrying
-valid signed bytes is instead bound immediately before broadcast so it cannot
-be sent twice. Immediately before that send, the API compares confirmed block
-height with the intent's exact last-valid block height and refuses an expired
-transaction without calling `sendTransaction`. An explicit RPC rejection and an
-ambiguous transport outcome are reported separately. Neither causes an automatic
-resend. Later recovery calls
-contain only the bound signature and are read-only. Pending or
-confirmed-but-not-finalized evidence remains pending, and the intent is consumed
-only after every invariant succeeds. Intent records live only in the API process
-and disappear on restart.
+The API verifies finalized evidence for the exact core, optional bounded
+compute-budget prefix, signer, programs and accounts, 0.01 SOL amount, successful
+lending instruction, and resulting cSOL position increase. It checks the exact
+last-valid block height immediately before the only allowed send. Definite RPC
+rejection and ambiguous transport outcomes are distinct, and neither causes an
+automatic resend. The browser records the known signature before submission;
+later recovery calls contain only that signature and are read-only. Pending or
+confirmed-but-not-finalized evidence remains pending. Missing public-RPC data is
+not evidence that a signed transaction failed to land.
 
-The lending dashboard is separate from those intent records. After a wallet has
-entered the proof recovery boundary, it can call the authenticated, exact-origin,
-CSRF-protected `POST /api/v1/public-testnet/positions/query` route. That route is
-read-only: it derives the wallet's fixed cSOL account, reads finalized reserve
-state, and returns the current receipt balance, an estimated underlying SOL
-value, and an indicated base supply APY. It does not create an intent, call the
-wallet, sign, broadcast, or retry a transaction.
+Funding is manual and free through the official Solana faucet at
+`https://faucet.solana.com/`. Use only valueless Devnet SOL; do not buy it and
+never provide a private key or seed phrase. The API does not request an airdrop.
 
-The estimate follows the fixed reserve's cToken exchange rate and variable
-borrow-rate curve. It excludes rewards and risk assessment. A reserve stale flag
-is shown instead of hidden. The app has no historical rate series, so it reports
-the latest on-chain estimate and explicitly leaves “usual APY” unavailable; one
-sample is not presented as an average or expected Mainnet return.
+### Independent dashboards and persistence
 
-After the wallet returns signed bytes and before the first server submission,
-the browser atomically writes a same-tab recovery journal containing that
-transaction's signature. It does not create a new unsigned lock merely for
-opening the wallet prompt. A reload can resume read-only verification of the
-same signature and cannot resubmit signed bytes or trigger another broadcast.
-An unsigned journal can age out once its server-issued evidence deadline passes.
-A journal containing a known signature clears only after positively verified
-completion or a definite pre-broadcast rejection. Missing status or transaction
-data from a public RPC replica is never treated as proof that a signed transaction
-did not land. The verifier also checks bounded finalized history for the wallet and
-its cSOL account as positive recovery evidence; otherwise the signature remains
-pending and locked against a duplicate send.
+Each proof has its own intent, send lock, recovery state, explorer link, and
+read-only dashboard. The Base dashboard derives the fixed aWETH position and
+reads the Aave reserve; the Solana dashboard derives the fixed cSOL account and
+reads finalized Save/Solend reserve state. Both show an estimated supplied
+balance and only the latest on-chain variable base supply APY, exclude rewards
+and risk assessment, and disclose stale or finality state. There is no
+historical rate series, so neither current sample is labeled a "usual," average,
+expected, or historical APY.
 
-Funding is manual and free: use the official Solana faucet
-(`https://faucet.solana.com/`) for valueless Devnet SOL. Do not buy tokens or
-gas, and never paste a private key or seed phrase into application
-configuration. The API does not call the faucet or airdrop funds. The 0.01
-Devnet SOL remains in the lending position after a successful proof because
-this deliberately minimal flow has no withdrawal transaction. It has no real
-financial value, but resetting or withdrawing it requires a separate manually
-reviewed action.
-
-Server egress remains limited to fixed JSON-RPC calls with bounded timeouts and
-response sizes, redirects disabled, and no automatic retry. Its only write is
-the one intent-bound `sendTransaction` attempt described above. The feature is
-disabled in production and hosted CI.
+Restarting the API clears ephemeral intent records but cannot undo either
+public-chain transaction. The dashboard withdrawal surface prepares separately
+reviewed full-position exits for the same fixed deployments and same connected
+wallets. One app action launches every eligible lane, but the Base Sepolia and
+Solana Devnet writes remain independent and non-atomic. Base may require an
+aWETH approval transaction before its Aave withdrawal; Solana redeems cSOL and
+unwraps the returned WSOL atomically in one transaction. Partial success is
+reported explicitly, and neither lane automatically retries or compensates for
+the other. Server egress remains fixed and bounded, redirects and automatic
+retries remain disabled, and the features are disabled in production and hosted
+CI.
 
 Public endpoint references:
 
 - https://docs.base.org/base-chain/quickstart/connecting-to-base
+- https://docs.base.org/base-chain/network-information/troubleshooting-transactions
+- https://docs.cdp.coinbase.com/faucets/introduction/quickstart
+- https://portal.cdp.coinbase.com/products/faucet
+- https://github.com/aave-dao/aave-address-book/blob/12963110f29699d214531b9ab4c7cfcec460c298/src/ts/AaveV3BaseSepolia.ts
+- https://github.com/aave-dao/aave-v3-origin/blob/main/src/contracts/helpers/WrappedTokenGatewayV3.sol
 - https://docs.arbitrum.io/for-devs/dev-tools-and-resources/chain-info
 - https://solana.com/docs/references/clusters
 - https://faucet.solana.com/
 - https://docs.save.finance/architecture/addresses/devnet
 - https://docs.save.finance/developers/introduction
+- https://github.com/solendprotocol/solana-program-library/blob/mainnet/token-lending/sdk/src/instruction.rs
+- https://github.com/solendprotocol/solana-program-library/blob/mainnet/token-lending/program/src/processor.rs
+- https://github.com/solendprotocol/public/blob/master/solend-sdk/src/core/actions.ts
 - https://ethereum.org/developers/docs/networks/

@@ -3,7 +3,18 @@ import type { Wallet } from '@wallet-standard/base';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { LocalDemoAllocationPlanner } from '../components/portfolio/local-demo-allocation-planner';
+import type { EvmPublicTestnetProofDependencies } from '../components/portfolio/evm-public-testnet-transaction-proof';
 import type { PublicTestnetProofDependencies } from '../components/portfolio/public-testnet-transaction-proof';
+import {
+  EVM_PUBLIC_TESTNET_CHAIN_ID,
+  EVM_PUBLIC_TESTNET_PROVIDER_CHAIN_ID,
+} from '../lib/evm-public-testnet/constants';
+import {
+  parseEvmPublicTestnetExecutionIntent,
+  parseEvmPublicTestnetPositionSnapshot,
+  parseEvmPublicTestnetSubmissionResult,
+} from '../lib/evm-public-testnet/execution';
+import { rememberEvmPublicTestnetPositionAccount } from '../lib/evm-public-testnet/position-account';
 import { LocalDemoApiError, type LocalDemoApiClient } from '../lib/local-demo/local-demo-client';
 import type {
   LocalDemoAllocationPreview,
@@ -12,9 +23,24 @@ import type {
   LocalDemoYieldCatalog,
 } from '../lib/local-demo/local-demo-yield';
 import { rememberPublicTestnetPositionAccount } from '../lib/public-testnet/public-testnet-position-account';
+import type {
+  InjectedProviderDescriptor,
+  SelectedEip1193Provider,
+} from '../lib/wallets/eip1193/discovery';
+import type { EvmPublicTestnetWalletPort } from '../lib/wallets/eip1193/public-testnet-executor';
 import type { SelectedSolanaWallet } from '../lib/wallets/solana/discovery';
 import type { SolanaPublicTestnetWalletPort } from '../lib/wallets/solana/public-testnet-executor';
 import { expectProviderPrivateDom } from './local-demo-provider-privacy';
+import {
+  EVM_PUBLIC_TESTNET_ACCOUNT,
+  EVM_PUBLIC_TESTNET_INTENT_ID,
+  EVM_PUBLIC_TESTNET_NOW,
+  EVM_PUBLIC_TESTNET_TRANSACTION_HASH,
+  evmPublicTestnetIntentResponse,
+  evmPublicTestnetPositionResponse,
+  evmPublicTestnetRequest,
+  evmPublicTestnetSubmissionResponse,
+} from './evm-public-testnet.fixtures';
 import {
   CROSS_CHAIN_ZERO_LIQUID_BALANCED_PREVIEW,
   DIRECT_COMPATIBLE_ZERO_LIQUID_PREVIEW,
@@ -121,8 +147,9 @@ afterEach(() => {
 });
 
 describe('LocalDemoAllocationPlanner', () => {
-  it('restores the remembered lending position above allocation before any proof is opened', async () => {
+  it('restores both remembered lending dashboards above allocation before any proof is opened', async () => {
     rememberPublicTestnetPositionAccount(PUBLIC_TESTNET_ACCOUNT);
+    rememberEvmPublicTestnetPositionAccount(EVM_PUBLIC_TESTNET_ACCOUNT);
     const readPosition = vi.fn(async () => publicTestnetPosition());
     const proofDependencies: PublicTestnetProofDependencies = {
       createApi: () => ({
@@ -143,25 +170,70 @@ describe('LocalDemoAllocationPlanner', () => {
       },
       now: () => PUBLIC_TESTNET_NOW,
     };
+    const evmPosition = parseEvmPublicTestnetPositionSnapshot(evmPublicTestnetPositionResponse(), {
+      chainId: EVM_PUBLIC_TESTNET_CHAIN_ID,
+      account: EVM_PUBLIC_TESTNET_ACCOUNT,
+    });
+    const queryPosition = vi.fn(async () => evmPosition);
+    const evmProofDependencies: EvmPublicTestnetProofDependencies = {
+      createApi: () => ({
+        prepare: vi.fn(),
+        submit: vi.fn(),
+        query: vi.fn(),
+        queryPosition,
+      }),
+      createDiscovery: () => ({
+        start: vi.fn(),
+        stop: vi.fn(),
+        list: () => [],
+        subscribe: () => vi.fn(),
+        select: () => null,
+      }),
+      createWallet: () => {
+        throw new Error('Wallet creation is not expected for a read-only position restore');
+      },
+      now: () => EVM_PUBLIC_TESTNET_NOW,
+    };
     const harness = clientWith({});
     render(
       <LocalDemoAllocationPlanner
         client={harness.client}
         portfolioSnapshotId={PORTFOLIO_SNAPSHOT_ID}
         publicTestnetProofDependencies={proofDependencies}
+        evmPublicTestnetProofDependencies={evmProofDependencies}
       />,
     );
 
     const allocationPanel = (
       await screen.findByRole('heading', { name: 'Preview your managed allocation.' })
     ).closest('section');
-    expect(await screen.findByText(/0\.010000 SOL/u)).toBeInTheDocument();
-    const lendingDashboard = screen.getByRole('region', {
+    const dashboardOverview = screen.getByRole('region', { name: 'Your lending dashboards' });
+    const svmDashboard = within(dashboardOverview).getByRole('region', {
       name: 'Your Devnet lending position',
     });
-    expect(lendingDashboard.nextElementSibling).toBe(allocationPanel);
+    const evmDashboard = within(dashboardOverview).getByRole('region', {
+      name: 'Your Base Sepolia position',
+    });
+    expect(await within(svmDashboard).findByText(/0\.010000 SOL/u)).toBeInTheDocument();
+    expect(await within(evmDashboard).findByText(/0\.00005000 ETH/u)).toBeInTheDocument();
+    const withdrawal = within(dashboardOverview).getByRole('region', {
+      name: 'Withdraw your lending positions',
+    });
+    expect(withdrawal.previousElementSibling).toBe(
+      dashboardOverview.querySelector('.public-testnet-dashboard-grid'),
+    );
+    expect(withdrawal.nextElementSibling).toBeNull();
+    expect(dashboardOverview.nextElementSibling).toBe(allocationPanel);
+    expect(
+      within(withdrawal).getByRole('button', { name: 'Withdraw both testnet positions' }),
+    ).toBeEnabled();
+    expect(within(withdrawal).queryByText(/Withdrawal support is unavailable/iu)).toBeNull();
     expect(readPosition).toHaveBeenCalledWith(
       expect.objectContaining({ account: PUBLIC_TESTNET_ACCOUNT }),
+      expect.any(AbortSignal),
+    );
+    expect(queryPosition).toHaveBeenCalledWith(
+      { chainId: EVM_PUBLIC_TESTNET_CHAIN_ID, account: EVM_PUBLIC_TESTNET_ACCOUNT },
       expect.any(AbortSignal),
     );
     expect(screen.queryByRole('button', { name: 'Review 0.01 SOL Devnet proof' })).toBeNull();
@@ -888,12 +960,78 @@ describe('LocalDemoAllocationPlanner', () => {
       createWallet: () => wallet,
       now: () => PUBLIC_TESTNET_NOW,
     };
+    const evmDescriptor: InjectedProviderDescriptor = {
+      selectionId: 'metamask:recovery-lock',
+      connectorId: 'metamask',
+      displayName: 'MetaMask',
+      supportedNetworks: [
+        {
+          chainId: EVM_PUBLIC_TESTNET_CHAIN_ID,
+          providerChainId: EVM_PUBLIC_TESTNET_PROVIDER_CHAIN_ID,
+          displayName: 'Base Sepolia',
+          environment: 'TESTNET',
+        },
+      ],
+    };
+    const selectedEvm: SelectedEip1193Provider = {
+      descriptor: evmDescriptor,
+      provider: {} as SelectedEip1193Provider['provider'],
+    };
+    const evmWallet: EvmPublicTestnetWalletPort = {
+      connect: vi.fn(async () => EVM_PUBLIC_TESTNET_ACCOUNT),
+      readSnapshot: vi.fn(async () => ({
+        account: EVM_PUBLIC_TESTNET_ACCOUNT,
+        chainId: EVM_PUBLIC_TESTNET_CHAIN_ID,
+        providerChainId: EVM_PUBLIC_TESTNET_PROVIDER_CHAIN_ID,
+        correctNetwork: true as const,
+      })),
+      sendTransaction: vi.fn(async () => ({
+        transactionHash: EVM_PUBLIC_TESTNET_TRANSACTION_HASH,
+      })),
+      subscribeInvalidation: vi.fn(() => vi.fn()),
+      dispose: vi.fn(),
+    };
+    const evmIntent = parseEvmPublicTestnetExecutionIntent(
+      evmPublicTestnetIntentResponse(),
+      evmPublicTestnetRequest(),
+      EVM_PUBLIC_TESTNET_NOW,
+    );
+    const evmPending = parseEvmPublicTestnetSubmissionResult(
+      evmPublicTestnetSubmissionResponse('PENDING'),
+      {
+        intentId: EVM_PUBLIC_TESTNET_INTENT_ID,
+        transactionHash: EVM_PUBLIC_TESTNET_TRANSACTION_HASH,
+      },
+    );
+    const evmProofDependencies: EvmPublicTestnetProofDependencies = {
+      createApi: () => ({
+        prepare: vi.fn(async () => evmIntent),
+        submit: vi.fn(async () => evmPending),
+        query: vi.fn(async () => evmPending),
+        queryPosition: vi.fn(async () =>
+          parseEvmPublicTestnetPositionSnapshot(evmPublicTestnetPositionResponse(), {
+            chainId: EVM_PUBLIC_TESTNET_CHAIN_ID,
+            account: EVM_PUBLIC_TESTNET_ACCOUNT,
+          }),
+        ),
+      }),
+      createDiscovery: () => ({
+        start: vi.fn(),
+        stop: vi.fn(),
+        list: () => [evmDescriptor],
+        subscribe: () => vi.fn(),
+        select: (selectionId) => (selectionId === evmDescriptor.selectionId ? selectedEvm : null),
+      }),
+      createWallet: () => evmWallet,
+      now: () => EVM_PUBLIC_TESTNET_NOW,
+    };
     const harness = clientWith({});
     render(
       <LocalDemoAllocationPlanner
         client={harness.client}
         portfolioSnapshotId={PORTFOLIO_SNAPSHOT_ID}
         publicTestnetProofDependencies={proofDependencies}
+        evmPublicTestnetProofDependencies={evmProofDependencies}
       />,
     );
     const managedBlend = await screen.findByRole('button', { name: /Managed blend/u });
@@ -909,9 +1047,18 @@ describe('LocalDemoAllocationPlanner', () => {
     fireEvent.change(slider, { target: { value: '500' } });
     expect(screen.queryByRole('button', { name: 'Review 0.01 SOL Devnet proof' })).toBeNull();
     fireEvent.change(slider, { target: { value: '0' } });
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Review 0.00005 ETH EVM testnet proof' }),
+    );
     fireEvent.click(await screen.findByRole('button', { name: 'Review 0.01 SOL Devnet proof' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Connect MetaMask' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Connect Phantom' }));
-    await screen.findByRole('button', { name: 'Submit Devnet transaction' });
+    const evmProof = screen.getByRole('region', {
+      name: 'Try one real Base Sepolia lending position',
+    });
+    const svmProof = screen.getByRole('region', { name: 'Try one real testnet lending position' });
+    await within(evmProof).findByText(/Confirm the EVM disclosure/iu);
+    await within(svmProof).findByText(/Confirm the Solana disclosure/iu);
     const lendingDashboard = screen.getByRole('region', {
       name: 'Your Devnet lending position',
     });
@@ -919,14 +1066,25 @@ describe('LocalDemoAllocationPlanner', () => {
       .getByRole('heading', { name: 'Preview your managed allocation.' })
       .closest('section');
     expect(await within(lendingDashboard).findByText(/0\.010000 SOL/u)).toBeInTheDocument();
-    expect(lendingDashboard.nextElementSibling).toBe(allocationPanel);
+    const dashboardOverview = screen.getByRole('region', { name: 'Your lending dashboards' });
+    expect(
+      within(dashboardOverview).getByRole('region', { name: 'Your Base Sepolia position' }),
+    ).toBeInTheDocument();
+    expect(
+      within(dashboardOverview).getByRole('region', { name: 'Your Devnet lending position' }),
+    ).toBe(lendingDashboard);
+    expect(dashboardOverview.nextElementSibling).toBe(allocationPanel);
     expect(document.querySelectorAll('#public-testnet-lending-dashboard')).toHaveLength(1);
     expect(signTransaction).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('checkbox'));
-    fireEvent.click(screen.getByRole('button', { name: 'Submit Devnet transaction' }));
+    fireEvent.click(within(evmProof).getByRole('checkbox'));
+    fireEvent.click(within(svmProof).getByRole('checkbox'));
+    const combinedSubmit = screen.getByRole('button', { name: 'Submit both testnet deposits' });
+    await waitFor(() => expect(combinedSubmit).toBeEnabled());
+    fireEvent.click(combinedSubmit);
 
     await waitFor(() => expect(signTransaction).toHaveBeenCalledTimes(1));
-    expect(slider).toBeDisabled();
+    expect(evmWallet.sendTransaction).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(slider).toBeDisabled());
     expect(screen.getByRole('button', { name: /Managed blend/u })).toBeDisabled();
     await act(async () => resolveSignature(PUBLIC_TESTNET_SIGNATURE));
     expect(
@@ -935,8 +1093,193 @@ describe('LocalDemoAllocationPlanner', () => {
     expect(slider).toBeDisabled();
     expect(signTransaction).toHaveBeenCalledTimes(1);
 
-    expect(screen.getByRole('button', { name: 'Close' })).toBeDisabled();
+    expect(within(svmProof).getByRole('button', { name: 'Close' })).toBeDisabled();
     expect(slider).toBeDisabled();
     expect(screen.getByText(/do not start another proof/iu)).toBeInTheDocument();
+  });
+
+  it('launches exactly one EVM and one SVM transaction from the single combined button', async () => {
+    const evmDescriptor: InjectedProviderDescriptor = {
+      selectionId: 'metamask:1',
+      connectorId: 'metamask',
+      displayName: 'MetaMask',
+      supportedNetworks: [
+        {
+          chainId: EVM_PUBLIC_TESTNET_CHAIN_ID,
+          providerChainId: EVM_PUBLIC_TESTNET_PROVIDER_CHAIN_ID,
+          displayName: 'Base Sepolia',
+          environment: 'TESTNET',
+        },
+      ],
+    };
+    const selectedEvm: SelectedEip1193Provider = {
+      descriptor: evmDescriptor,
+      provider: {} as SelectedEip1193Provider['provider'],
+    };
+    let resolveEvmSend!: (value: { transactionHash: string }) => void;
+    const pendingEvmSend = new Promise<{ transactionHash: string }>((resolve) => {
+      resolveEvmSend = resolve;
+    });
+    const sendTransaction = vi.fn(async () => pendingEvmSend);
+    const evmWallet: EvmPublicTestnetWalletPort = {
+      connect: vi.fn(async () => EVM_PUBLIC_TESTNET_ACCOUNT),
+      readSnapshot: vi.fn(async () => ({
+        account: EVM_PUBLIC_TESTNET_ACCOUNT,
+        chainId: EVM_PUBLIC_TESTNET_CHAIN_ID,
+        providerChainId: EVM_PUBLIC_TESTNET_PROVIDER_CHAIN_ID,
+        correctNetwork: true as const,
+      })),
+      sendTransaction,
+      subscribeInvalidation: vi.fn(() => vi.fn()),
+      dispose: vi.fn(),
+    };
+    const evmIntent = parseEvmPublicTestnetExecutionIntent(
+      evmPublicTestnetIntentResponse(),
+      evmPublicTestnetRequest(),
+      EVM_PUBLIC_TESTNET_NOW,
+    );
+    const evmPending = parseEvmPublicTestnetSubmissionResult(
+      evmPublicTestnetSubmissionResponse('PENDING'),
+      {
+        intentId: EVM_PUBLIC_TESTNET_INTENT_ID,
+        transactionHash: EVM_PUBLIC_TESTNET_TRANSACTION_HASH,
+      },
+    );
+    const evmPosition = parseEvmPublicTestnetPositionSnapshot(evmPublicTestnetPositionResponse(), {
+      chainId: EVM_PUBLIC_TESTNET_CHAIN_ID,
+      account: EVM_PUBLIC_TESTNET_ACCOUNT,
+    });
+    const evmProofDependencies: EvmPublicTestnetProofDependencies = {
+      createApi: () => ({
+        prepare: vi.fn(async () => evmIntent),
+        submit: vi.fn(async () => evmPending),
+        query: vi.fn(async () => evmPending),
+        queryPosition: vi.fn(async () => evmPosition),
+      }),
+      createDiscovery: () => ({
+        start: vi.fn(),
+        stop: vi.fn(),
+        list: () => [evmDescriptor],
+        subscribe: () => vi.fn(),
+        select: (selectionId) => (selectionId === evmDescriptor.selectionId ? selectedEvm : null),
+      }),
+      createWallet: () => evmWallet,
+      now: () => EVM_PUBLIC_TESTNET_NOW,
+    };
+
+    const svmDescriptor = {
+      selectionId: 'phantom:1',
+      displayName: 'Phantom' as const,
+      supportedTransactionVersions: ['legacy', 0] as const,
+    };
+    const selectedSvm: SelectedSolanaWallet = {
+      descriptor: svmDescriptor,
+      wallet: {} as Wallet,
+    };
+    let resolveSvmSignature!: (signature: string) => void;
+    const pendingSvmSignature = new Promise<string>((resolve) => {
+      resolveSvmSignature = resolve;
+    });
+    const signTransaction = vi.fn(async () => ({
+      signature: await pendingSvmSignature,
+      serializedTransaction: Uint8Array.of(1, 2, 3),
+    }));
+    const svmWallet: SolanaPublicTestnetWalletPort = {
+      connect: vi.fn(async () => PUBLIC_TESTNET_ACCOUNT),
+      readSnapshot: vi.fn(async () => ({
+        account: PUBLIC_TESTNET_ACCOUNT,
+        correctNetwork: true as const,
+      })),
+      signTransaction,
+      subscribeInvalidation: vi.fn(() => vi.fn()),
+      dispose: vi.fn(),
+    };
+    const svmProofDependencies: PublicTestnetProofDependencies = {
+      createApi: () => ({
+        createIntent: vi.fn(async () => publicTestnetIntent()),
+        submitTransaction: vi.fn(async () => publicTestnetSubmission('PENDING')),
+        submitSignedTransaction: vi.fn(async () => publicTestnetSubmission('PENDING')),
+        readPosition: vi.fn(async () => publicTestnetPosition()),
+      }),
+      createDiscovery: () => ({
+        start: vi.fn(),
+        stop: vi.fn(),
+        list: () => [svmDescriptor],
+        subscribe: () => vi.fn(),
+        select: (selectionId) => (selectionId === svmDescriptor.selectionId ? selectedSvm : null),
+      }),
+      createWallet: () => svmWallet,
+      now: () => PUBLIC_TESTNET_NOW,
+    };
+
+    const harness = clientWith({});
+    render(
+      <LocalDemoAllocationPlanner
+        client={harness.client}
+        portfolioSnapshotId={PORTFOLIO_SNAPSHOT_ID}
+        publicTestnetProofDependencies={svmProofDependencies}
+        evmPublicTestnetProofDependencies={evmProofDependencies}
+      />,
+    );
+    fireEvent.click(await screen.findByRole('button', { name: /Managed blend/u }));
+    const combinedSubmit = await screen.findByRole('button', {
+      name: 'Submit both testnet deposits',
+    });
+    expect(combinedSubmit).toBeDisabled();
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Review 0.00005 ETH EVM testnet proof' }),
+    );
+    fireEvent.click(await screen.findByRole('button', { name: 'Review 0.01 SOL Devnet proof' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Connect MetaMask' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Connect Phantom' }));
+
+    const evmProof = screen.getByRole('region', {
+      name: 'Try one real Base Sepolia lending position',
+    });
+    const svmProof = screen.getByRole('region', { name: 'Try one real testnet lending position' });
+    await within(evmProof).findByText(/Confirm the EVM disclosure/iu);
+    await within(svmProof).findByText(/Confirm the Solana disclosure/iu);
+    expect(
+      within(evmProof).queryByRole('button', { name: 'Submit Base Sepolia transaction' }),
+    ).toBeNull();
+    expect(
+      within(svmProof).queryByRole('button', { name: 'Submit Devnet transaction' }),
+    ).toBeNull();
+    fireEvent.click(within(evmProof).getByRole('checkbox'));
+    await waitFor(() => {
+      expect(combinedSubmit).toBeDisabled();
+      expect(screen.getByText(/EVM is ready.*Solana review/iu)).toBeInTheDocument();
+    });
+    fireEvent.click(within(svmProof).getByRole('checkbox'));
+
+    await waitFor(() => expect(combinedSubmit).toBeEnabled());
+    expect(
+      screen.getByText(/One click starts two independent wallet approvals/iu),
+    ).toBeInTheDocument();
+    fireEvent.click(combinedSubmit);
+    fireEvent.click(combinedSubmit);
+    await waitFor(() => {
+      expect(sendTransaction).toHaveBeenCalledTimes(1);
+      expect(signTransaction).toHaveBeenCalledTimes(1);
+    });
+    expect(screen.getByRole('button', { name: 'Complete both wallet approvals' })).toBeDisabled();
+
+    expect(within(evmProof).getByText(/Review the 0\.00005 ETH deposit/iu)).toBeInTheDocument();
+    expect(within(svmProof).getByText(/Review the 0\.01 SOL Devnet deposit/iu)).toBeInTheDocument();
+    expect(within(evmProof).getByRole('button', { name: 'Close' })).toBeDisabled();
+    expect(within(svmProof).getByRole('button', { name: 'Close' })).toBeDisabled();
+
+    await act(async () => {
+      resolveEvmSend({ transactionHash: EVM_PUBLIC_TESTNET_TRANSACTION_HASH });
+      resolveSvmSignature(PUBLIC_TESTNET_SIGNATURE);
+    });
+    expect(
+      await within(evmProof).findByRole('button', { name: 'Check EVM verification' }),
+    ).toBeInTheDocument();
+    expect(
+      await within(svmProof).findByRole('button', { name: 'Check server verification' }),
+    ).toBeInTheDocument();
+    expect(sendTransaction).toHaveBeenCalledTimes(1);
+    expect(signTransaction).toHaveBeenCalledTimes(1);
   });
 });

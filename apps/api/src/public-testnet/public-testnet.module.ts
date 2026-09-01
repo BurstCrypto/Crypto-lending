@@ -15,6 +15,8 @@ import {
   FixedSolanaDevnetExecutionRpc,
 } from './public-testnet-execution.rpc';
 import { PublicTestnetExecutionService } from './public-testnet-execution.service';
+import { PublicTestnetWithdrawalController } from './public-testnet-withdrawal.controller';
+import { PublicTestnetWithdrawalService } from './public-testnet-withdrawal.service';
 import {
   LOCAL_DEMO_RUNTIME_CONFIG,
   type LocalDemoRuntimeConfig,
@@ -22,7 +24,7 @@ import {
 
 @Module({
   imports: [AccountsModule, AuthenticationModule, LocalDemoModule],
-  controllers: [PublicTestnetExecutionController],
+  controllers: [PublicTestnetExecutionController, PublicTestnetWithdrawalController],
   providers: [
     {
       provide: PUBLIC_TESTNET_EXECUTION_CONFIG,
@@ -37,6 +39,7 @@ import {
         new FixedSolanaDevnetExecutionRpc(config),
     },
     PublicTestnetExecutionService,
+    PublicTestnetWithdrawalService,
     PublicTestnetPrivacyInterceptor,
   ],
 })

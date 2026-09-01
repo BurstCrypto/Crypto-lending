@@ -231,73 +231,163 @@ restart the attached harness to pick up API source changes.
 
 ## Optional live public-testnet proof
 
-The attached local harness also enables a separate Solana Devnet proof flow
-outside production and hosted CI. After applying **Managed blend**, connect a
-Solana Devnet browser wallet through Wallet Standard and use the transaction-
-proof submit control. The modeled portfolio and fee preview remain local
-estimates. The live action is only one fixed 0.01 native Devnet SOL deposit into
-one Save/Solend lending position; it does not execute the full EVM/Solana blend
-or move the displayed synthetic portfolio.
+The attached local harness enables two narrow application proofs outside
+production and hosted CI: an Aave V3 WETH supply on Base Sepolia and a
+Save/Solend native-SOL deposit on Solana Devnet. After applying **Managed
+blend**, connect both browser wallets, open both reviews, and confirm both
+disclosures. One **Submit both testnet deposits** action then starts the two
+proofs without waiting for either wallet flow to finish. They remain independent
+and may be pending simultaneously. They do not execute the modeled EVM/Solana
+blend, move the displayed synthetic portfolio, or form an atomic cross-chain
+transaction.
+
+The single application action requires two separate user approvals:
+
+1. MetaMask or Coinbase Wallet confirms and broadcasts the EVM transaction.
+2. A Wallet Standard wallet such as Phantom signs the Solana transaction, which
+   the authenticated API submits once after validating its exact bytes.
+
+The Base route uses native ETH through a WETH gateway, so the EVM confirmation
+is not an ERC-20 allowance approval and no separate token-approval transaction
+is required. Each chain has a separate intent, send lock, recovery journal,
+verification state, dashboard, and explorer link. Success, failure, or a pending
+transaction on one chain does not authorize a write or clear a lock on the
+other.
+
+### Fund Base Sepolia
+
+Use a dedicated test-only address in MetaMask or Coinbase Wallet:
+
+1. Enable test networks and select **Base Sepolia**. Its chain ID is `84532`
+   (`0x14a34`), native currency is ETH, public RPC is
+   `https://sepolia.base.org`, and explorer is
+   `https://sepolia-explorer.base.org`.
+2. Copy the exact connected `0x` address. Never paste a seed phrase or private
+   key into this application, a faucet, or local configuration.
+3. Open Coinbase's official CDP faucet at
+   `https://portal.cdp.coinbase.com/products/faucet`. Sign in to CDP, choose
+   **Base Sepolia** as the network and **ETH** as the asset, paste the test-only
+   address, and request funds. Coinbase's official instructions are at
+   `https://docs.cdp.coinbase.com/faucets/introduction/quickstart`.
+4. In the wallet or official Base Sepolia explorer, confirm that the address has
+   at least **0.0001 Base Sepolia ETH** before starting the proof. The proof
+   supplies exactly **0.00005 ETH**; the remainder is reserved for testnet gas.
+
+Base Sepolia ETH is valueless test currency. Do not buy it or send Mainnet ETH.
+Faucet availability and limits are external to the app. The API never requests
+faucet funds and never receives or stores a wallet key.
+
+### Base Sepolia Aave WETH proof
+
+The EVM proof is restricted to chain `84532` and these fixed Aave V3 addresses:
+
+| Role                   | Fixed Base Sepolia address                   |
+| ---------------------- | -------------------------------------------- |
+| Addresses provider     | `0xE4C23309117Aa30342BFaae6c95c6478e0A4Ad00` |
+| Pool                   | `0x8bAB6d1b75f19e9eD9fCe8b9BD338844fF79aE27` |
+| WETH gateway           | `0x0568130e794429D2eEBC4dafE18f25Ff1a1ed8b6` |
+| WETH                   | `0x4200000000000000000000000000000000000006` |
+| aWETH                  | `0x73a5bB60b0B0fc35710DDc0ea9c407031E31Bdbb` |
+| Protocol data provider | `0xBc9f5b7E248451CdD7cA54e717a2BFe1F32b566b` |
+
+The prepared transaction calls the fixed gateway's payable `depositETH` route
+for the fixed Pool, connected account, and referral code `0`, with exactly
+0.00005 ETH of value. A domain-separated opaque intent marker is appended after
+the ABI arguments as trailing calldata, making otherwise identical deposits
+distinct without changing the gateway action. The exact input and nonce are
+intent-bound. The flow cannot accept a caller-selected chain, RPC, target,
+calldata, recipient, asset, amount, or gas payment. The selected MetaMask or
+Coinbase Wallet account is the sole signer and broadcaster. The provider name,
+contracts, account, transaction data, and position are necessarily visible to
+the wallet, its RPC provider, the explorer, and the public chain.
+
+The app reports the transaction as confirmed only after a successful receipt
+and exact checks of chain, sender, gateway, value, call data, Aave supply
+evidence, and resulting aWETH position against Base's latest state. That is an
+L2 latest-state confirmation, not finality. Base finality is a separate
+milestone and commonly takes about 20 minutes; the dashboard may continue to
+show a confirmed position while finality is pending.
+
+Before the wallet call, the browser writes and reads back a same-tab EVM recovery
+lock. If the wallet returns a transaction hash, the browser binds that exact hash
+to the lock. A reload can then make only read-only receipt, log, position, and
+finality queries; it cannot call `eth_sendTransaction` again. A known pending
+hash keeps only the EVM send path locked. EVM transactions do not use Solana's
+last-valid-block-height expiration. An explicit wallet rejection or a verified
+failed receipt can permit a fresh, separately approved attempt. An ambiguous
+wallet/provider result, including one without a returned hash, remains locked
+and is never an instruction to resend automatically: inspect MetaMask or
+Coinbase activity and the Base Sepolia explorer before doing anything else.
+
+### Solana Devnet proof
 
 Obtain valueless Devnet SOL for free from the official Solana faucet at
 `https://faucet.solana.com/`; do not purchase anything and never enter a seed
-phrase or private key into the application. This flow requires no EVM testnet
-gas, EVM test token, ERC-20 approval, or second wallet confirmation. The API
-prepares one fixed six-instruction Solana core and the connected Wallet Standard
-wallet asks the user for one confirmation and is the sole signer. The browser
-submits the signed legacy bytes through the authenticated same-origin API. The
-API never stores a wallet key, signs, requests an airdrop, or accepts an
+phrase or private key into the application. The API prepares one fixed
+six-instruction Solana core for exactly 0.01 native Devnet SOL. The connected
+Wallet Standard wallet asks for one confirmation and is the sole signer. The
+browser submits the signed legacy bytes through the authenticated same-origin
+API. The API never stores a wallet key, signs, requests an airdrop, or accepts an
 arbitrary caller-selected RPC, program, account list, or transaction message. It
 validates and binds the exact signed bytes before making one fixed Devnet
 broadcast attempt and never automatically sends them again.
 
 The reviewed core starts with a fixed-domain, opaque intent memo followed by the
-five account-setup and lending instructions. The memo makes concurrently
-prepared transactions distinct without adding another confirmation or asset
-movement. Phantom may prepend exactly `SetComputeUnitPrice` and then
+five fixed account-setup and lending instructions. The memo makes concurrently
+prepared transactions distinct without another confirmation or asset movement.
+Phantom may prepend exactly `SetComputeUnitPrice` and then
 `SetComputeUnitLimit`. The server accepts that prefix only when the limit is
 exactly 200,000 compute units, the price is at most 500,000 micro-lamports per
 compute unit, and the resulting priority fee is at most 100,000 lamports
 (0.0001 SOL). It rejects every other added or reordered instruction and every
 change to the six-instruction core. Inspect Phantom's total fee before
 approving; the priority-fee cap does not replace its display of the complete
-transaction cost. After the wallet returns signed bytes and before contacting
-the API, the browser atomically writes a same-tab recovery marker containing
-the signed transaction's signature. It does not create a new unsigned lock just
-for opening the wallet prompt. A reload may therefore resume read-only
-verification of that exact signature, but it cannot resubmit signed bytes or
-trigger another broadcast. An unsigned marker may age out at the server-issued
-evidence deadline. Once a signature is known, missing or negative public-RPC
-lookup results never clear the marker; only positive verification or a definite
+transaction cost.
+
+After the wallet returns signed bytes and before contacting the API, the browser
+atomically writes a same-tab recovery marker containing the signed
+transaction's signature. A reload may resume read-only verification of that
+exact signature, but it cannot resubmit signed bytes or trigger another
+broadcast. An unsigned marker may age out at the server-issued evidence
+deadline. Once a signature is known, missing or negative public-RPC lookup
+results never clear the marker; only positive verification or a definite
 pre-broadcast rejection can do so.
 
-The intent remains bound to the authenticated account, Solana wallet, portfolio
-snapshot, and exact applied liquidity selection. Verification retrieves the
-submitted transaction from the fixed Devnet RPC and requires finalized evidence
-for the exact prepared core, the optional bounded compute-budget prefix, signer,
-program and accounts, 0.01 SOL amount, successful lending instruction, and
-resulting position increase. Pending or merely confirmed evidence is not called
-complete. The Save/Solend program and account targets are visible to the wallet,
-its RPC provider, explorers, and the public chain; a non-custodial on-chain
-transaction cannot conceal them from its signer.
+The Solana intent remains bound to the authenticated account, Solana wallet,
+portfolio snapshot, and exact applied liquidity selection. Verification
+requires finalized evidence for the exact prepared core, optional bounded
+compute-budget prefix, signer, program and accounts, 0.01 SOL amount, successful
+lending instruction, and resulting position increase. Pending or merely
+confirmed evidence is not called complete. The Save/Solend program and account
+targets are public.
 
-The deposited Devnet position remains deposited because this minimal proof
-deliberately has no withdrawal transaction. Restarting the API clears its
-in-memory intent records but does not undo a public Devnet transaction. The
-read-only lending dashboard can reconstruct the fixed wallet position from
-finalized cSOL and reserve state after a restart. It labels the supplied SOL as
-an estimate, shows the latest variable base supply APY with rewards excluded,
-and reports “usual APY” as unavailable until a real history exists. The
-older `testnet:live:*` commands remain separate four-chain, read-only
-connectivity checks. See `tools/public-testnet/README.md` for the application-
-proof boundary and the independently runnable smoke-test boundary.
+### Dashboards and persistence
+
+The read-only dashboards reconstruct the fixed Base Sepolia aWETH and Solana
+Devnet cSOL positions independently of ephemeral intent records. Each shows an
+estimated supplied balance and the latest on-chain variable base supply APY for
+its own reserve, with rewards excluded and stale or finality state disclosed.
+The app has no historical rate series, so a current APY sample is never labeled
+as a "usual," average, expected, or historical APY.
+
+The dashboard exposes one full-position withdrawal action for the validated
+testnet balances. It can start both eligible networks together, but it does not
+make them atomic: Base Sepolia may require an aWETH approval and a separate Aave
+withdrawal confirmation, while Solana Devnet uses one cSOL redeem-and-unwrap
+transaction. A completed lane is never repeated or rolled back because the
+other lane fails or remains unresolved. Restarting the API clears in-memory
+intent records but does not undo any public-chain transaction. The older
+`testnet:live:*` commands remain separate four-chain, read-only connectivity
+checks. See `tools/public-testnet/README.md` for the application-proof boundary
+and the independently runnable smoke-test boundary.
 
 The portfolio is not embedded in the page. Its EVM balance is read from the
 real loopback development chain; Solana balance and valuation inputs remain
 fixtures. The authenticated same-origin API composes them through the real
 EVM/Solana indexers, balance-sync orchestrator, valuation policy, unified
 portfolio aggregation, and buying-power calculator. Production adapters remain
-fail closed until separately reviewed and configured; this harness is not
+fail closed until separately reviewed and configured. Apart from the two
+explicit, fixed public-testnet proof boundaries above, this harness is not
 approval to contact a wallet relay, public RPC/indexing provider, oracle, or
 cloud service.
 

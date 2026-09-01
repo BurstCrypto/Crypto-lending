@@ -107,44 +107,69 @@ and it does not feed public observations into application financial state. See
 the [public-testnet smoke runbook](tools/public-testnet/README.md) for the exact
 boundary.
 
-The attached local demo separately offers an explicit browser-wallet proof on
-Solana Devnet after a managed allocation preview. It prepares an exact
-six-instruction core that deposits 0.01 native Devnet SOL into one fixed
-Save/Solend lending position and asks the connected Wallet Standard wallet for
-one confirmation. A public, opaque intent memo makes every signed message unique
-even when two requests receive the same recent blockhash. Phantom may prepend
-only `SetComputeUnitPrice` followed by `SetComputeUnitLimit`; the verifier
-requires a 200,000-compute-unit limit, a price no higher than 500,000
-micro-lamports per compute unit, and a priority fee no higher than 100,000
-lamports (0.0001 SOL). No other addition, reordering, or core mutation is
-accepted, and the user should inspect Phantom's total fee before approving. The
-wallet is the sole signer. The browser returns the signed legacy transaction to
-the authenticated same-origin API, which revalidates the complete wire message,
-binds its signature and bytes to the intent, and makes exactly one server-side
-Devnet broadcast attempt. Devnet SOL is free from the official Solana faucet
-and has no real value; no EVM testnet gas, test
-token, or token approval is part of this flow. The lending provider and its
-accounts are necessarily visible to the signer and on the public chain. The API
-never signs or requests an airdrop, never retries an inconclusive broadcast, and
-accepts the proof only after finalized core-message, bounded compute-budget, and
-position verification. The final Submit click requests a fresh confirmed
-blockhash after finalized deployment checks, and the API checks its exact
-last-valid block height immediately before the one allowed send.
-Once a wallet has crossed the proof recovery boundary, a separate read-only
-dashboard reconstructs its fixed Devnet cSOL position from finalized chain
-state. It shows the estimated supplied SOL and latest variable base supply APY,
-flags stale reserve state, excludes rewards, and does not claim a “usual APY”
-until historical samples exist. After Phantom returns the signed bytes and
-before any server submission, the browser atomically creates a same-tab,
-signature-known recovery journal. Reload recovery can only poll that same
-signature and never resends transaction bytes. A definite RPC rejection clears
-that local recovery marker because the transaction was not accepted for
-broadcast; an ambiguous transport result remains locked for read-only recovery.
-The position remains
-deposited because this narrow proof has no withdrawal transaction, and it
-neither executes nor validates the displayed cross-chain blend. See the
-[local demo runbook](tools/local-demo/README.md) for funding, confirmation,
-provider visibility, persistence, and no-withdrawal limitations.
+The attached local demo separately offers two independent browser-wallet proofs
+after a managed allocation preview. After both reviews and disclosures are
+ready, one **Submit both testnet deposits** button starts both flows without
+awaiting either. They do not execute the displayed cross-chain blend and are not
+one atomic cross-chain transaction. The single application action still requires
+two separate user approvals: MetaMask or Coinbase Wallet confirms the Base
+Sepolia transaction, and a Wallet Standard wallet such as Phantom confirms the
+Solana Devnet transaction.
+
+The EVM proof sends exactly 0.00005 native Base Sepolia ETH through Aave V3's
+fixed WETH gateway and Pool, producing a fixed aWETH position for the connected
+wallet. It requires at least 0.0001 Base Sepolia ETH before starting so the
+remainder is available for testnet gas. Fund a dedicated test-only address from
+the official [Coinbase CDP faucet](https://portal.cdp.coinbase.com/products/faucet)
+using Base Sepolia and ETH; the
+[official quickstart](https://docs.cdp.coinbase.com/faucets/introduction/quickstart)
+describes the claim flow. Base Sepolia is chain ID `84532` (`0x14a34`), with
+public RPC `https://sepolia.base.org` and explorer
+`https://sepolia-explorer.base.org`. The fixed Aave contracts are addresses
+provider `0xE4C23309117Aa30342BFaae6c95c6478e0A4Ad00`, Pool
+`0x8bAB6d1b75f19e9eD9fCe8b9BD338844fF79aE27`, WETH gateway
+`0x0568130e794429D2eEBC4dafE18f25Ff1a1ed8b6`, WETH
+`0x4200000000000000000000000000000000000006`, aWETH
+`0x73a5bB60b0B0fc35710DDc0ea9c407031E31Bdbb`, and protocol data
+provider `0xBc9f5b7E248451CdD7cA54e717a2BFe1F32b566b`. Because this is a
+native-ETH gateway call, it does not need a separate ERC-20 allowance approval.
+The exact ABI call has a domain-separated opaque intent marker appended as
+trailing calldata so otherwise identical deposits remain bound to separate
+intents; the server verifies the complete input and nonce.
+The EVM proof reports transaction confirmation only after a successful receipt
+and exact transaction and position checks against the latest Base state. Base
+finality is a separate milestone and commonly arrives about 20 minutes later;
+the UI must not describe a latest-state receipt as finalized.
+
+The SVM proof prepares an exact six-instruction core that deposits 0.01 native
+Devnet SOL into one fixed Save/Solend lending position. A public, opaque intent
+memo makes every signed message unique even when two requests receive the same
+recent blockhash. Phantom may prepend only `SetComputeUnitPrice` followed by
+`SetComputeUnitLimit`; the verifier requires a 200,000-compute-unit limit, a
+price no higher than 500,000 micro-lamports per compute unit, and a priority fee
+no higher than 100,000 lamports (0.0001 SOL). No other addition, reordering, or
+core mutation is accepted. The authenticated API revalidates the signed legacy
+transaction and makes exactly one Devnet broadcast attempt. It accepts the proof
+only after finalized core-message, bounded compute-budget, and position
+verification.
+
+Each chain has its own send lock, recovery journal, explorer link, and read-only
+lending dashboard. A reload may only poll a known EVM transaction hash or Solana
+signature; neither path automatically resends an ambiguous or pending write.
+The dashboards reconstruct the fixed aWETH and cSOL positions and show only the
+latest on-chain variable base supply APY, with rewards excluded. The app has no
+historical rate series, so it does not claim a "usual" or historical APY.
+
+Directly below those dashboards, one **Withdraw testnet positions** action can
+return every validated nonzero proof position to its same connected wallet. It
+starts the eligible Base Sepolia and Solana Devnet lanes together, but they are
+independent and are not an atomic cross-chain transaction. The EVM lane may
+require an aWETH approval confirmation followed by an Aave withdrawal
+confirmation; Solana uses one redeem-and-unwrap confirmation. A success on one
+chain is never rolled back, repeated, or treated as authorization to retry the
+other. Only valueless public-testnet assets are supported.
+See the [local demo runbook](tools/local-demo/README.md) for exact funding,
+confirmation, public-chain disclosure, recovery, and persistence details.
 
 ## Restricted wallet validation lab
 

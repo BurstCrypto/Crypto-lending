@@ -42,11 +42,13 @@ describe('PublicTestnetLendingDashboard', () => {
   it('shows the current supplied estimate and separates latest APY from a usual rate', async () => {
     const readPosition = vi.fn(async () => publicTestnetPosition());
     const positionApi = api(readPosition);
+    const snapshotChanged = vi.fn();
 
     render(
       <PublicTestnetLendingDashboard
         account={PUBLIC_TESTNET_ACCOUNT}
         createApi={() => positionApi}
+        onSnapshotChange={snapshotChanged}
       />,
     );
 
@@ -63,6 +65,11 @@ describe('PublicTestnetLendingDashboard', () => {
     expect(readPosition).toHaveBeenCalledWith(
       expect.objectContaining({ account: PUBLIC_TESTNET_ACCOUNT }),
       expect.any(AbortSignal),
+    );
+    await waitFor(() =>
+      expect(snapshotChanged).toHaveBeenLastCalledWith(
+        expect.objectContaining({ account: PUBLIC_TESTNET_ACCOUNT }),
+      ),
     );
   });
 

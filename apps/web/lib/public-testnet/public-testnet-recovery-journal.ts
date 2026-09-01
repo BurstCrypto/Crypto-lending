@@ -2,6 +2,13 @@ import {
   normalizePublicTestnetAccount,
   parsePublicTestnetTransactionSignature,
 } from './public-testnet-execution';
+import {
+  assertPublicTestnetOperationLockAllows,
+  claimPublicTestnetOperationLock,
+  clearPublicTestnetOperationLock,
+  readPublicTestnetOperationLock,
+  type PublicTestnetOperationLock,
+} from './public-testnet-operation-lock';
 
 export const PUBLIC_TESTNET_RECOVERY_JOURNAL_STORAGE_KEY =
   'crypto-lending.public-testnet-recovery-journal.v1' as const;
@@ -223,8 +230,25 @@ function createJournal(
     return fail();
   }
   if (existing !== null) return fail();
-
-  writeAndVerify(resolved, journal);
+  let operationLock: PublicTestnetOperationLock;
+  try {
+    operationLock = claimPublicTestnetOperationLock(
+      { operation: 'DEPOSIT', intentId: journal.intentId, account: journal.account },
+      resolved,
+    );
+  } catch {
+    return fail();
+  }
+  try {
+    writeAndVerify(resolved, journal);
+  } catch {
+    try {
+      clearPublicTestnetOperationLock(operationLock, resolved);
+    } catch {
+      // Fail closed if either durable write cannot be established.
+    }
+    return fail();
+  }
   return journal;
 }
 
@@ -246,10 +270,23 @@ export function readPublicTestnetRecoveryJournal(
   if (!Number.isFinite(nowMilliseconds)) return fail();
 
   const resolved = resolveStorage(storage);
+  try {
+    assertPublicTestnetOperationLockAllows('DEPOSIT', resolved);
+  } catch {
+    return fail();
+  }
   const journal = readStored(resolved);
   if (journal === null) return null;
   if (journal.signature === null && Date.parse(journal.evidenceExpiresAt) <= nowMilliseconds) {
     removeAndVerify(resolved);
+    const operationLock = readPublicTestnetOperationLock(resolved);
+    if (
+      operationLock?.operation === 'DEPOSIT' &&
+      operationLock.intentId === journal.intentId &&
+      operationLock.account === journal.account
+    ) {
+      clearPublicTestnetOperationLock(operationLock, resolved);
+    }
     return null;
   }
   return journal;
@@ -332,4 +369,12 @@ export function clearPublicTestnetRecoveryJournal(
   const current = readStored(resolved);
   if (current === null || !sameJournal(current, normalizedExpected)) return fail();
   removeAndVerify(resolved);
+  const operationLock = readPublicTestnetOperationLock(resolved);
+  if (
+    operationLock?.operation === 'DEPOSIT' &&
+    operationLock.intentId === current.intentId &&
+    operationLock.account === current.account
+  ) {
+    clearPublicTestnetOperationLock(operationLock, resolved);
+  }
 }

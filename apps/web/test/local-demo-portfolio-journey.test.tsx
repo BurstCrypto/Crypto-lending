@@ -267,10 +267,12 @@ describe('authenticated local demo portfolio journey', () => {
     const lendingDashboard = screen.getByRole('region', {
       name: 'Your Devnet lending position',
     });
+    const dashboardOverview = lendingDashboard.closest('.public-testnet-dashboard-overview');
     expect(allocationPlanner).not.toBeNull();
     expect(portfolioTotals).not.toBeNull();
-    expect(portfolioTotals?.nextElementSibling).toBe(lendingDashboard);
-    expect(lendingDashboard.nextElementSibling).toBe(allocationPlanner);
+    expect(dashboardOverview).not.toBeNull();
+    expect(portfolioTotals?.nextElementSibling).toBe(dashboardOverview);
+    expect(dashboardOverview?.nextElementSibling).toBe(allocationPlanner);
     expect(
       await within(allocationPlanner!).findByRole('heading', {
         name: 'Crypto Lending managed blend',
