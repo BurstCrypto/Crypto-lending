@@ -130,6 +130,7 @@ export function RegistrationForm({ returnPath }: { readonly returnPath: string }
             id="registration-country"
             name="declaredResidencyCountryCode"
             type="text"
+            list="registration-country-options"
             autoComplete="country"
             autoCapitalize="characters"
             maxLength={2}
@@ -139,6 +140,14 @@ export function RegistrationForm({ returnPath }: { readonly returnPath: string }
             aria-describedby="registration-country-hint"
             required
           />
+          <datalist id="registration-country-options">
+            <option value="US">United States</option>
+            <option value="CA">Canada</option>
+            <option value="GB">United Kingdom</option>
+            <option value="AU">Australia</option>
+            <option value="DE">Germany</option>
+            <option value="FR">France</option>
+          </datalist>
           <p className="authentication-field-hint" id="registration-country-hint">
             Enter the two-letter country code, such as US or CA.
           </p>

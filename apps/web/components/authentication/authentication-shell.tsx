@@ -1,7 +1,10 @@
-import Link from 'next/link';
 import type { ReactNode } from 'react';
 
+import { SiteHeader, type SitePage } from '@/components/site-header';
+
 export interface AuthenticationShellProps {
+  readonly activePage: Extract<SitePage, 'login' | 'register' | 'account'>;
+  readonly authenticationActionHref?: string;
   readonly eyebrow: string;
   readonly title: string;
   readonly description: string;
@@ -10,45 +13,42 @@ export interface AuthenticationShellProps {
 }
 
 export function AuthenticationShell({
+  activePage,
+  authenticationActionHref,
   eyebrow,
   title,
   description,
   children,
   footer,
 }: AuthenticationShellProps) {
+  const authenticationActions =
+    activePage === 'login' ? 'create-account' : activePage === 'register' ? 'sign-in' : 'none';
+
   return (
     <main id="main-content" className="page-shell authentication-shell">
-      <header className="site-header authentication-header">
-        <Link className="brand" href="/" aria-label="Crypto Lending home">
-          <span className="brand-mark" aria-hidden="true">
-            CL
-          </span>
-          <span>Crypto Lending</span>
-        </Link>
-        <p className="security-label">
-          <span className="security-label-dot" aria-hidden="true" />
-          Secure account access
-        </p>
-      </header>
+      <SiteHeader
+        activePage={activePage}
+        authenticationActions={authenticationActions}
+        signInHref={authenticationActionHref}
+        createAccountHref={authenticationActionHref}
+        createAccountLabel={activePage === 'login' ? 'Create an account' : undefined}
+      />
 
-      <div className="authentication-layout">
+      <div className="authentication-layout authentication-layout--simple">
         <section className="authentication-introduction" aria-labelledby="authentication-title">
           <p className="eyebrow">{eyebrow}</p>
           <h1 id="authentication-title">{title}</h1>
           <p className="authentication-description">{description}</p>
           <div className="authentication-assurance" aria-label="Security information">
-            <span aria-hidden="true">01</span>
-            <p>
-              Your session stays in secure, host-only cookies. Crypto Lending never stores an
-              account bearer token in browser storage.
-            </p>
+            <span className="security-label-dot" aria-hidden="true" />
+            <p>Your secure session stays out of browser storage.</p>
           </div>
         </section>
 
-        <section className="authentication-card">{children}</section>
+        <section className="authentication-card authentication-card--focused">{children}</section>
       </div>
 
-      <footer className="authentication-footer">
+      <footer className="authentication-footer site-footer">
         <p>Crypto Lending platform</p>
         {footer}
       </footer>

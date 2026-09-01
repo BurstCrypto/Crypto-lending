@@ -3170,3 +3170,1832 @@ footer p {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* --------------------------------------------------------------------------
+   2026 visual system
+
+   This layer intentionally comes after the feature-specific rules above. It
+   keeps the existing state and transaction selectors stable while giving the
+   application one calm, accessible visual language.
+   -------------------------------------------------------------------------- */
+
+:root {
+  color-scheme: light;
+  --canvas: #f5f4ef;
+  --canvas-strong: #ecefe9;
+  --panel: #ffffff;
+  --panel-subtle: #f7f9f6;
+  --panel-tint: #edf5f0;
+  --ink: #18241f;
+  --ink-soft: #586961;
+  --evergreen: #0d6249;
+  --evergreen-strong: #084c39;
+  --evergreen-soft: #e2f1e9;
+  --line: #d7e0da;
+  --line-strong: #bdcbc2;
+  --warning: #805500;
+  --warning-surface: #fff7e4;
+  --warning-line: #e9cb86;
+  --danger: #973a2d;
+  --danger-surface: #fff1ee;
+  --danger-line: #e9b0a8;
+  --success: #176044;
+  --success-surface: #e8f5ee;
+  --success-line: #a8d2be;
+  --focus-ring: #b34f0b;
+  --shadow-soft: 0 10px 30px rgba(29, 52, 42, 0.08);
+  --shadow-raised: 0 16px 44px rgba(29, 52, 42, 0.11);
+  --radius-small: 0.55rem;
+  --radius-medium: 0.8rem;
+  --radius-large: 1.1rem;
+  --control-height: 2.875rem;
+
+  /* Backwards-compatible semantic aliases used throughout the feature CSS. */
+  --background: var(--canvas);
+  --surface: var(--panel);
+  --surface-strong: var(--panel-subtle);
+  --border: var(--line);
+  --text: var(--ink);
+  --muted: var(--ink-soft);
+  --accent: var(--evergreen);
+  --accent-strong: var(--evergreen-strong);
+  --focus: var(--focus-ring);
+  --shadow: var(--shadow-soft);
+}
+
+html {
+  color: var(--ink);
+  background: var(--canvas);
+  scroll-behavior: smooth;
+  scroll-padding-top: 5rem;
+}
+
+body {
+  color: var(--ink);
+  background: var(--canvas);
+  font-family:
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
+  font-size: 1rem;
+  line-height: 1.5;
+}
+
+::selection {
+  color: #ffffff;
+  background: var(--evergreen);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button:not(:disabled),
+summary {
+  cursor: pointer;
+}
+
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+summary:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 3px;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  color: var(--ink);
+  font-weight: 700;
+  letter-spacing: -0.035em;
+}
+
+h1 {
+  max-width: 14ch;
+  font-size: clamp(2.65rem, 7vw, 5.25rem);
+  line-height: 1.02;
+}
+
+p {
+  line-height: 1.65;
+}
+
+.page-shell {
+  width: min(72rem, calc(100% - 2rem));
+}
+
+.eyebrow {
+  margin-bottom: 0.65rem;
+  color: var(--evergreen);
+  font-size: 0.76rem;
+  font-weight: 750;
+  letter-spacing: 0.1em;
+}
+
+.skip-link {
+  color: #ffffff;
+  background: var(--evergreen-strong);
+  border-radius: var(--radius-small);
+  box-shadow: var(--shadow-raised);
+}
+
+.local-demo-banner {
+  color: #5f4000;
+  background: var(--warning-surface);
+  border-color: var(--warning-line);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.015em;
+  line-height: 1.4;
+  text-transform: none;
+}
+
+/* Shared header and navigation */
+
+.site-header {
+  display: flex;
+  min-height: 4.75rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem 2rem;
+  padding: 0.85rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.brand {
+  flex: none;
+  gap: 0.65rem;
+  color: var(--ink);
+  font-size: 0.95rem;
+  font-weight: 750;
+}
+
+.brand-mark {
+  width: 2.4rem;
+  height: 2.4rem;
+  color: #ffffff;
+  background: var(--evergreen);
+  border-radius: 0.72rem;
+  box-shadow: 0 6px 18px rgba(13, 98, 73, 0.18);
+}
+
+.site-navigation {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.4rem;
+}
+
+.site-header__menus {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.4rem;
+}
+
+.site-navigation--primary,
+.site-navigation--account {
+  align-items: center;
+}
+
+.site-navigation a,
+.navigation-action {
+  display: inline-flex;
+  min-height: 2.75rem;
+  align-items: center;
+  justify-content: center;
+  padding: 0.62rem 0.85rem;
+  color: var(--ink-soft);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-small);
+  font-size: 0.88rem;
+  font-weight: 700;
+  line-height: 1.2;
+  text-decoration: none;
+}
+
+.site-navigation a:hover {
+  color: var(--evergreen-strong);
+  background: var(--evergreen-soft);
+}
+
+.site-navigation a[aria-current='page'] {
+  color: var(--evergreen-strong);
+  background: var(--evergreen-soft);
+  border-color: #c5ddd1;
+}
+
+.site-navigation .navigation-action {
+  color: #ffffff;
+  background: var(--evergreen);
+  border-color: var(--evergreen);
+  box-shadow: none;
+}
+
+.site-navigation .navigation-action:hover {
+  color: #ffffff;
+  background: var(--evergreen-strong);
+  border-color: var(--evergreen-strong);
+}
+
+/* One control language for legacy links and buttons. */
+
+.navigation-action,
+.primary-action,
+.authentication-submit,
+.public-testnet-review-action,
+.public-testnet-submit-action,
+.public-testnet-wallet-selection button,
+.public-testnet-network-action button {
+  display: inline-flex;
+  min-height: var(--control-height);
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.7rem 1rem;
+  color: #ffffff;
+  background: var(--evergreen);
+  border: 1px solid var(--evergreen);
+  border-radius: var(--radius-medium);
+  box-shadow: none;
+  font-size: 0.9rem;
+  font-weight: 750;
+  line-height: 1.25;
+  text-align: center;
+  text-decoration: none;
+}
+
+.secondary-action,
+.authentication-secondary-button,
+.portfolio-secondary-action,
+.account-portfolio-link,
+.local-demo-wallet-choices button,
+.local-demo-wallet-roster button,
+.wallet-lab-grid button {
+  display: inline-flex;
+  min-height: var(--control-height);
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.68rem 0.95rem;
+  color: var(--evergreen-strong);
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-medium);
+  box-shadow: none;
+  font-size: 0.9rem;
+  font-weight: 700;
+  line-height: 1.25;
+  text-align: center;
+  text-decoration: none;
+}
+
+.account-logout {
+  min-height: var(--control-height);
+  color: var(--danger);
+  background: var(--panel);
+  border: 1px solid var(--danger-line);
+  border-radius: var(--radius-medium);
+  box-shadow: none;
+}
+
+.public-testnet-confirmation-heading button {
+  min-height: 2.75rem;
+  color: var(--ink-soft);
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-small);
+}
+
+@media (hover: hover) {
+  .navigation-action:hover,
+  .primary-action:hover,
+  .authentication-submit:hover:not(:disabled),
+  .public-testnet-review-action:hover:not(:disabled),
+  .public-testnet-submit-action:hover:not(:disabled),
+  .public-testnet-wallet-selection button:hover:not(:disabled),
+  .public-testnet-network-action button:hover:not(:disabled) {
+    color: #ffffff;
+    background: var(--evergreen-strong);
+    border-color: var(--evergreen-strong);
+  }
+
+  .secondary-action:hover,
+  .authentication-secondary-button:hover:not(:disabled),
+  .portfolio-secondary-action:hover:not(:disabled),
+  .account-portfolio-link:hover,
+  .local-demo-wallet-choices button:hover:not(:disabled),
+  .local-demo-wallet-roster button:hover:not(:disabled),
+  .wallet-lab-grid button:hover:not(:disabled) {
+    color: var(--evergreen-strong);
+    background: var(--evergreen-soft);
+    border-color: #9fc7b5;
+  }
+
+  .account-logout:hover:not(:disabled) {
+    color: #7f2b21;
+    background: var(--danger-surface);
+    border-color: var(--danger-line);
+  }
+}
+
+.authentication-submit:disabled,
+.authentication-secondary-button:disabled,
+.account-logout:disabled,
+.local-demo-wallet-choices button:disabled,
+.local-demo-wallet-roster button:disabled,
+.portfolio-secondary-action:disabled,
+.local-demo-allocation-choices > button:disabled,
+.public-testnet-review-action:disabled,
+.public-testnet-submit-action:disabled,
+.public-testnet-wallet-selection button:disabled,
+.public-testnet-network-action button:disabled,
+.public-testnet-confirmation-heading button:disabled,
+.wallet-lab-grid button:disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
+}
+
+/* Home */
+
+.hero-grid,
+.home-hero-grid {
+  display: grid;
+  flex: 1;
+  grid-template-columns: minmax(0, 1.15fr) minmax(18rem, 0.85fr);
+  gap: clamp(2.5rem, 7vw, 6rem);
+  align-items: center;
+  padding: clamp(4rem, 10vw, 7.5rem) 0;
+}
+
+.hero,
+.home-hero,
+.home-hero-content {
+  max-width: 43rem;
+}
+
+.hero h1,
+.home-hero h1,
+.home-hero-content h1 {
+  max-width: 13ch;
+  font-size: clamp(3rem, 7.5vw, 5.75rem);
+}
+
+.hero-copy,
+.home-hero-content > p:not(.eyebrow) {
+  max-width: 36rem;
+  margin-top: 1.5rem;
+  color: var(--ink-soft);
+  font-size: clamp(1rem, 1.8vw, 1.15rem);
+  line-height: 1.7;
+}
+
+.hero-actions,
+.home-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 1.75rem;
+}
+
+.hero-actions a,
+.home-actions a {
+  min-height: 3rem;
+  padding-inline: 1.15rem;
+}
+
+.home-steps {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0.45rem 1.35rem;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-large);
+  box-shadow: var(--shadow-soft);
+}
+
+.home-step {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.9rem;
+  align-items: start;
+  padding: 1.15rem 0;
+}
+
+.home-step + .home-step {
+  border-top: 1px solid var(--line);
+}
+
+.home-step > span:first-child {
+  display: grid;
+  width: 2rem;
+  height: 2rem;
+  place-items: center;
+  color: #ffffff;
+  background: var(--evergreen);
+  border-radius: 50%;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.home-step h2,
+.home-step h3,
+.home-step strong {
+  margin: 0;
+  color: var(--ink);
+  font-size: 0.98rem;
+  letter-spacing: -0.015em;
+}
+
+.home-step p {
+  margin: 0.25rem 0 0;
+  color: var(--ink-soft);
+  font-size: 0.86rem;
+  line-height: 1.55;
+}
+
+.next-steps {
+  padding: 0 0 clamp(4rem, 8vw, 6.5rem);
+}
+
+.section-heading {
+  max-width: 42rem;
+  margin-bottom: 1.5rem;
+}
+
+.section-heading h2 {
+  max-width: 18ch;
+  margin: 0;
+  font-size: clamp(1.85rem, 4vw, 2.75rem);
+  line-height: 1.12;
+}
+
+.next-step-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.85rem;
+}
+
+.next-step-card {
+  display: grid;
+  min-width: 0;
+  min-height: 16rem;
+  align-content: start;
+  padding: 1.35rem;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-large);
+  box-shadow: var(--shadow-soft);
+}
+
+.next-step-number {
+  display: grid;
+  width: 2.2rem;
+  height: 2.2rem;
+  place-items: center;
+  color: var(--evergreen-strong);
+  background: var(--evergreen-soft);
+  border-radius: 50%;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.next-step-card h3 {
+  margin: 1rem 0 0;
+  font-size: 1.08rem;
+  letter-spacing: -0.02em;
+}
+
+.next-step-card p {
+  margin: 0.55rem 0 1rem;
+  color: var(--ink-soft);
+  font-size: 0.9rem;
+  line-height: 1.6;
+}
+
+.card-action {
+  display: inline-flex;
+  min-height: 2.75rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+  align-self: end;
+  margin-top: auto;
+  padding: 0.65rem 0.8rem;
+  color: var(--evergreen-strong);
+  background: var(--panel-tint);
+  border: 1px solid transparent;
+  border-radius: var(--radius-medium);
+  font-size: 0.88rem;
+  font-weight: 750;
+  text-decoration: none;
+}
+
+.card-action:hover {
+  background: var(--evergreen-soft);
+  border-color: #b8d6c7;
+}
+
+.status-card {
+  padding: 1.4rem;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-large);
+  box-shadow: var(--shadow-soft);
+  backdrop-filter: none;
+}
+
+.status-details div {
+  background: var(--panel-subtle);
+  border: 1px solid #e5eae6;
+}
+
+.status-badge,
+.account-verified-badge,
+.local-demo-proof-badge,
+.local-demo-yield-freshness,
+.portfolio-freshness-current,
+.public-testnet-dashboard-overview-heading > span,
+.public-testnet-proof-suite-heading > span,
+.public-testnet-withdrawal-heading > span,
+.public-testnet-proof-heading > span {
+  color: var(--success);
+  background: var(--success-surface);
+  border-color: var(--success-line);
+}
+
+.status-links a {
+  color: var(--evergreen-strong);
+}
+
+/* Compact account and authentication flow */
+
+.authentication-shell {
+  min-height: 100vh;
+}
+
+.authentication-header {
+  border-color: var(--line);
+}
+
+.security-label {
+  color: var(--ink-soft);
+}
+
+.security-label-dot,
+.status-dot {
+  background: var(--evergreen);
+  box-shadow: 0 0 0 0.2rem var(--evergreen-soft);
+}
+
+.authentication-layout {
+  display: grid;
+  width: min(100%, 34rem);
+  flex: 1;
+  grid-template-columns: 1fr;
+  gap: 1.5rem;
+  align-items: start;
+  margin: 0 auto;
+  padding: clamp(2.75rem, 8vw, 5.5rem) 0;
+}
+
+.authentication-introduction {
+  max-width: 34rem;
+  text-align: center;
+}
+
+.authentication-introduction h1 {
+  max-width: 13ch;
+  margin-inline: auto;
+  font-size: clamp(2.5rem, 7vw, 4rem);
+}
+
+.authentication-description {
+  max-width: 31rem;
+  margin: 1rem auto 0;
+  color: var(--ink-soft);
+  font-size: 1rem;
+  line-height: 1.65;
+}
+
+.authentication-assurance {
+  max-width: 31rem;
+  margin: 1.25rem auto 0;
+  padding: 0.9rem 1rem;
+  background: var(--panel-tint);
+  border: 1px solid #cfe1d7;
+  border-radius: var(--radius-medium);
+  text-align: left;
+}
+
+.authentication-assurance > span {
+  color: var(--evergreen-strong);
+  border-color: #acd0be;
+}
+
+.authentication-assurance > .security-label-dot {
+  width: 0.65rem;
+  height: 0.65rem;
+  margin-top: 0.35rem;
+  background: var(--evergreen);
+  border: 0;
+  box-shadow: 0 0 0 0.22rem var(--evergreen-soft);
+}
+
+.authentication-assurance p {
+  color: var(--ink-soft);
+}
+
+.authentication-card {
+  width: 100%;
+  max-width: 34rem;
+  justify-self: stretch;
+  padding: clamp(1.35rem, 5vw, 2rem);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-large);
+  box-shadow: var(--shadow-raised);
+  backdrop-filter: none;
+}
+
+.authentication-card-header {
+  margin-bottom: 1.35rem;
+}
+
+.authentication-card-header h2,
+.account-profile-heading h2 {
+  color: var(--ink);
+  font-size: 1.35rem;
+}
+
+.authentication-card-header p,
+.account-profile-heading p,
+.authentication-form-note,
+.authentication-status {
+  color: var(--ink-soft);
+}
+
+.authentication-field label {
+  color: var(--ink);
+}
+
+.authentication-field label span,
+.authentication-field-hint {
+  color: var(--ink-soft);
+}
+
+.authentication-field input {
+  min-height: 3rem;
+  color: var(--ink);
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-medium);
+}
+
+.authentication-field input:hover {
+  border-color: #91aa9d;
+}
+
+.authentication-field input:focus-visible {
+  border-color: var(--evergreen);
+}
+
+.authentication-field input::placeholder {
+  color: #7a8982;
+}
+
+.authentication-error,
+.local-demo-wallet-error,
+.local-demo-allocation-error,
+.public-testnet-error,
+.portfolio-state-error,
+.public-testnet-lending-dashboard-error {
+  color: var(--danger);
+  background: var(--danger-surface);
+  border-color: var(--danger-line);
+}
+
+.authentication-error-mark,
+.portfolio-state-error .portfolio-state-mark {
+  color: #ffffff;
+  background: var(--danger);
+}
+
+.authentication-error p:not(.authentication-error-title) {
+  color: #7f3b32;
+}
+
+.authentication-footer a {
+  color: var(--evergreen-strong);
+}
+
+.account-loading-mark,
+.portfolio-loading-mark {
+  border-color: #cde1d7;
+  border-top-color: var(--evergreen);
+}
+
+.account-profile-details div {
+  border-color: var(--line);
+}
+
+.account-profile-details dt,
+.account-session-loading p {
+  color: var(--ink-soft);
+}
+
+.account-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.7rem;
+}
+
+.account-actions .account-portfolio-link,
+.account-actions .account-logout {
+  width: 100%;
+  margin: 0;
+}
+
+/* Portfolio overview and task navigation */
+
+.portfolio-page-shell {
+  gap: 0;
+  padding-bottom: 2rem;
+}
+
+.portfolio-intro {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(16rem, 0.55fr);
+  gap: 1.5rem 3rem;
+  align-items: end;
+  padding: clamp(2.75rem, 7vw, 5.5rem) 0 1.5rem;
+}
+
+.portfolio-intro h1 {
+  max-width: 13ch;
+  margin: 0;
+  font-size: clamp(2.75rem, 7vw, 5rem);
+}
+
+.portfolio-intro p {
+  max-width: 36rem;
+  margin: 0;
+  color: var(--ink-soft);
+}
+
+.portfolio-jump-nav {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.65rem;
+  padding: 0.75rem;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-large);
+  box-shadow: var(--shadow-soft);
+}
+
+.portfolio-jump-nav a {
+  display: inline-flex;
+  min-height: var(--control-height);
+  align-items: center;
+  justify-content: center;
+  padding: 0.7rem 0.85rem;
+  color: var(--evergreen-strong);
+  background: var(--panel-tint);
+  border: 1px solid transparent;
+  border-radius: var(--radius-medium);
+  font-size: 0.88rem;
+  font-weight: 750;
+  line-height: 1.25;
+  text-align: center;
+  text-decoration: none;
+}
+
+.portfolio-jump-nav a:hover {
+  background: var(--evergreen-soft);
+  border-color: #b8d6c7;
+}
+
+#wallets,
+#balances,
+#opportunities {
+  scroll-margin-top: 5rem;
+}
+
+.portfolio-preview-notice,
+.portfolio-notice,
+.local-demo-allocation-warning,
+.local-demo-yield-stale-warning,
+.public-testnet-disclosure,
+.public-testnet-position-note,
+.public-testnet-archived-note,
+.public-testnet-recovery-note,
+.public-testnet-funding,
+.public-testnet-lending-dashboard-warning,
+.portfolio-source-explanation {
+  color: var(--warning);
+  background: var(--warning-surface);
+  border-color: var(--warning-line);
+}
+
+.portfolio-preview-badge,
+.local-demo-allocation-warning > span,
+.portfolio-notice > span,
+.portfolio-state-mark {
+  color: #ffffff;
+  background: var(--warning);
+}
+
+.local-demo-wallet-panel,
+.local-demo-allocation-panel,
+.portfolio-opportunity-state,
+.public-testnet-dashboard-overview,
+.public-testnet-withdrawal,
+.public-testnet-proof,
+.public-testnet-lending-dashboard,
+.portfolio-total-card,
+.portfolio-state-card,
+.wallet-lab-warning {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-large);
+  box-shadow: var(--shadow-soft);
+}
+
+.portfolio-loading-experience {
+  display: grid;
+  gap: 1rem;
+}
+
+.portfolio-anchor-target {
+  display: block;
+  height: 0;
+  scroll-margin-top: 5rem;
+}
+
+.portfolio-opportunity-state {
+  margin-block: 1.5rem;
+  padding: clamp(1.2rem, 4vw, 2rem);
+  background: var(--panel-tint);
+}
+
+.portfolio-opportunity-state h2 {
+  max-width: 30ch;
+  margin: 0;
+  font-size: clamp(1.45rem, 3vw, 2rem);
+  line-height: 1.15;
+}
+
+.portfolio-opportunity-state > p:last-child {
+  max-width: 62ch;
+  margin: 0.65rem 0 0;
+  color: var(--ink-soft);
+}
+
+.local-demo-wallet-panel {
+  gap: 1.15rem;
+  margin-block: 1.5rem;
+  padding: clamp(1.2rem, 4vw, 2rem);
+}
+
+.local-demo-wallet-heading h1,
+.local-demo-wallet-heading h2 {
+  max-width: 22ch;
+  margin: 0.25rem 0 0;
+  font-size: clamp(1.85rem, 4vw, 2.75rem);
+  line-height: 1.1;
+}
+
+.portfolio-section-intro {
+  max-width: 68ch;
+  margin: 0;
+  color: var(--ink-soft);
+}
+
+.portfolio-disclosure {
+  overflow: clip;
+  background: var(--panel-subtle);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-medium);
+}
+
+.portfolio-disclosure > summary {
+  min-height: 2.875rem;
+  padding: 0.72rem 0.9rem;
+  color: var(--evergreen-strong);
+  font-size: 0.86rem;
+  font-weight: 750;
+  line-height: 1.4;
+}
+
+.portfolio-disclosure > summary:hover {
+  background: var(--evergreen-soft);
+}
+
+.portfolio-disclosure[open] > summary {
+  border-bottom: 1px solid var(--line);
+}
+
+.portfolio-disclosure .local-demo-financial-notice {
+  margin: 0.75rem;
+}
+
+.local-demo-financial-notice {
+  padding: 0.85rem 1rem;
+}
+
+.local-demo-wallet-choices {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.local-demo-wallet-choices button {
+  display: flex;
+  min-height: 3.5rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.7rem 0.85rem;
+  text-align: left;
+}
+
+.local-demo-wallet-choices button small {
+  color: var(--ink-soft);
+  font-size: 0.76rem;
+  font-weight: 600;
+  text-align: right;
+}
+
+.local-demo-wallet-roster li {
+  padding: 0.9rem;
+  background: var(--panel-subtle);
+  border-color: var(--line);
+}
+
+.local-demo-wallet-roster span,
+.local-demo-wallet-roster small,
+.local-demo-wallet-empty,
+.portfolio-refresh-row p {
+  color: var(--ink-soft);
+}
+
+.local-demo-wallet-roster code {
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.portfolio-refresh-row {
+  margin-block: 1rem 0;
+  padding: 0.75rem 0;
+}
+
+.unified-balance {
+  gap: 1.25rem;
+  padding: 1.5rem 0 clamp(3rem, 7vw, 5rem);
+}
+
+.portfolio-heading {
+  padding: clamp(2rem, 5vw, 3.5rem) 0 0.75rem;
+}
+
+.portfolio-heading h1,
+.portfolio-heading h2 {
+  max-width: 17ch;
+  margin: 0;
+  font-size: clamp(2.5rem, 6vw, 4.5rem);
+  line-height: 1.04;
+}
+
+.portfolio-as-of p,
+.portfolio-observed-at {
+  color: var(--ink-soft);
+}
+
+.portfolio-freshness {
+  font-size: 0.74rem;
+  letter-spacing: 0.025em;
+}
+
+.portfolio-freshness-current .portfolio-freshness-dot {
+  background: var(--success);
+  box-shadow: 0 0 0 0.2rem var(--success-surface);
+}
+
+.portfolio-freshness-stale,
+.local-demo-yield-freshness.is-stale,
+.portfolio-inputs-unavailable,
+.portfolio-unavailable-value,
+.local-demo-allocation-projection-unavailable {
+  color: var(--warning);
+  background: var(--warning-surface);
+  border-color: var(--warning-line);
+}
+
+.portfolio-freshness-stale .portfolio-freshness-dot {
+  background: var(--warning);
+  box-shadow: 0 0 0 0.2rem var(--warning-surface);
+}
+
+.portfolio-totals {
+  gap: 0.85rem;
+}
+
+.portfolio-total-card {
+  min-height: 0;
+  padding: clamp(1.25rem, 4vw, 1.8rem);
+}
+
+.portfolio-buying-power-card {
+  background: var(--panel-tint);
+  border-color: #bed9cb;
+}
+
+.portfolio-total-label {
+  color: var(--ink-soft);
+  font-size: 0.78rem;
+  letter-spacing: 0.035em;
+}
+
+.portfolio-total-amount,
+.portfolio-total-unavailable {
+  margin-top: clamp(1.25rem, 4vw, 2rem);
+  color: var(--ink);
+  font-size: clamp(2.15rem, 5vw, 3.8rem);
+  font-weight: 700;
+  letter-spacing: -0.045em;
+}
+
+.portfolio-total-unavailable {
+  color: var(--warning);
+}
+
+.portfolio-total-help,
+.portfolio-section-heading > p,
+.portfolio-explanations ul {
+  color: var(--ink-soft);
+}
+
+.portfolio-explanations,
+.portfolio-deductions {
+  background: var(--panel-subtle);
+  border-color: var(--line);
+  border-radius: var(--radius-medium);
+}
+
+/* Compact allocation controls and results */
+
+.local-demo-allocation-panel {
+  gap: 1.15rem;
+  padding: clamp(1.2rem, 4vw, 2rem);
+}
+
+.local-demo-allocation-heading h2 {
+  color: var(--ink);
+  font-size: clamp(1.65rem, 4vw, 2.5rem);
+}
+
+.local-demo-allocation-intro,
+.local-demo-yield-catalog-copy,
+.local-demo-yield-catalog-time,
+.local-demo-allocation-fee-disclosure,
+.local-demo-allocation-yield-method,
+.local-demo-allocation-as-of,
+.local-demo-allocation-preview-heading > div > p:last-child {
+  color: var(--ink-soft);
+}
+
+.local-demo-yield-catalog-time time {
+  color: var(--ink-soft);
+}
+
+.local-demo-allocation-yield-heading > p {
+  color: var(--warning);
+  background: var(--warning-surface);
+  border-color: var(--warning-line);
+}
+
+.local-demo-yield-catalog,
+.local-demo-yield-loading,
+.local-demo-allocation-yield-projection,
+.local-demo-liquidity-adjustment,
+.local-demo-ecosystem-composition,
+.local-demo-allocation-results > section,
+.local-demo-allocation-reconciliation,
+.public-testnet-confirmation-panel,
+.public-testnet-lending-dashboard-position {
+  background: var(--panel-subtle);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-medium);
+  box-shadow: none;
+}
+
+.local-demo-allocation-choices {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
+  gap: 0.65rem;
+}
+
+.local-demo-allocation-choices > button {
+  display: grid;
+  min-height: 0;
+  align-content: start;
+  gap: 0.4rem;
+  padding: 0.9rem;
+  color: var(--ink);
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-medium);
+  box-shadow: none;
+  text-align: left;
+  transform: none;
+  transition:
+    border-color 140ms ease,
+    background-color 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.local-demo-allocation-choices > button:hover:not(:disabled) {
+  background: var(--panel-tint);
+  border-color: #8ab5a1;
+  transform: none;
+}
+
+.local-demo-allocation-choices > button.is-selected {
+  background: var(--evergreen-soft);
+  border-color: var(--evergreen);
+  box-shadow: 0 0 0 2px rgba(13, 98, 73, 0.1);
+}
+
+.local-demo-allocation-choice-title strong {
+  color: var(--ink);
+  font-size: 1rem;
+}
+
+.local-demo-allocation-choice-title small {
+  color: var(--evergreen-strong);
+  font-size: 0.72rem;
+}
+
+.local-demo-allocation-choice-description {
+  margin-top: 0;
+  color: var(--ink-soft);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.local-demo-allocation-choice-apy,
+.local-demo-allocation-mix {
+  display: none;
+}
+
+.local-demo-allocation-warning,
+.local-demo-yield-stale-warning {
+  color: var(--warning);
+}
+
+.local-demo-allocation-yield-metrics {
+  gap: 0.55rem;
+}
+
+.local-demo-allocation-yield-metrics > div,
+.local-demo-ecosystem-list li,
+.public-testnet-submit-review dl > div,
+.public-testnet-lending-dashboard-summary > div,
+.public-testnet-lending-dashboard-metrics > div,
+.public-testnet-verification-status > div {
+  min-height: 0;
+  padding: 0.8rem;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-small);
+}
+
+.local-demo-allocation-yield-metrics dt,
+.local-demo-ecosystem-values dt,
+.local-demo-allocation-result-list small,
+.local-demo-allocation-reconciliation dt,
+.public-testnet-submit-review dt,
+.public-testnet-lending-dashboard-summary span,
+.public-testnet-lending-dashboard-summary small,
+.public-testnet-lending-dashboard-metrics dt,
+.public-testnet-lending-dashboard-position-heading span,
+.public-testnet-lending-dashboard-metadata span,
+.public-testnet-verification-status dt {
+  color: var(--ink-soft);
+}
+
+.local-demo-allocation-yield-metrics dd,
+.local-demo-ecosystem-values dd,
+.public-testnet-lending-dashboard-metrics dd,
+.public-testnet-verification-status dd {
+  color: var(--ink);
+}
+
+.local-demo-allocation-yield-primary dd,
+.local-demo-ecosystem-list > li > strong,
+.local-demo-allocation-result-values data:first-child,
+.local-demo-allocation-reconciliation .local-demo-allocation-net {
+  color: var(--evergreen-strong);
+}
+
+.local-demo-liquidity-adjustment input[type='range'] {
+  accent-color: var(--evergreen);
+}
+
+.local-demo-liquidity-output {
+  color: var(--evergreen-strong);
+  background: var(--evergreen-soft);
+  border-color: #b9d7c8;
+}
+
+.local-demo-native-route-note {
+  color: var(--ink);
+  background: var(--panel-tint);
+  border-left-color: var(--evergreen);
+}
+
+.local-demo-native-route-note p {
+  color: var(--ink-soft);
+}
+
+.local-demo-allocation-result-list li,
+.local-demo-allocation-reconciliation > div {
+  border-color: var(--line);
+}
+
+.local-demo-allocation-fee-list data,
+.portfolio-deduction-value,
+.portfolio-cost-unavailable {
+  color: var(--warning);
+}
+
+/* Public testnet dashboards and safety states */
+
+.public-testnet-dashboard-overview,
+.public-testnet-withdrawal,
+.public-testnet-proof,
+.public-testnet-lending-dashboard {
+  padding: clamp(1rem, 3vw, 1.35rem);
+}
+
+.public-testnet-dashboard-overview > p,
+.public-testnet-proof-suite > p,
+.public-testnet-proof > p,
+.public-testnet-withdrawal > p,
+.public-testnet-withdrawal-lane p,
+.public-testnet-withdrawal-action p,
+.public-testnet-confirmation-heading small,
+.public-testnet-wallet-selection > p,
+.public-testnet-position-note,
+.public-testnet-funding p,
+.public-testnet-phase-status,
+.public-testnet-success p,
+.public-testnet-lending-dashboard-status,
+.public-testnet-lending-dashboard-empty,
+.public-testnet-lending-dashboard-note,
+.public-testnet-lending-dashboard-metadata,
+.public-testnet-recovery-controls small {
+  color: var(--ink-soft);
+}
+
+.public-testnet-dashboard-grid,
+.public-testnet-proof-grid,
+.public-testnet-withdrawal-lanes {
+  gap: 0.75rem;
+}
+
+.public-testnet-combined-submit,
+.public-testnet-combined-lane-status,
+.public-testnet-phase-status,
+.public-testnet-lending-dashboard-status,
+.public-testnet-lending-dashboard-empty,
+.public-testnet-lending-dashboard-note {
+  color: var(--ink-soft);
+  background: var(--panel-tint);
+  border: 1px solid #cfe0d7;
+  border-radius: var(--radius-medium);
+}
+
+.public-testnet-withdrawal-lane {
+  background: var(--panel-subtle);
+  border-color: var(--line);
+}
+
+.public-testnet-withdrawal-lane.is-complete,
+.public-testnet-success {
+  color: var(--success);
+  background: var(--success-surface);
+  border-color: var(--success-line);
+}
+
+.public-testnet-withdrawal-lane.is-recovery_required,
+.public-testnet-withdrawal-lane.is-failed,
+.public-testnet-lending-dashboard-warning {
+  color: var(--warning);
+  background: var(--warning-surface);
+  border-color: var(--warning-line);
+}
+
+.public-testnet-withdrawal-lane-heading > span,
+.public-testnet-lending-dashboard-position-heading > span.is-open,
+.public-testnet-success a,
+.public-testnet-faucet-actions a,
+.public-testnet-transaction-links a,
+.public-testnet-lending-dashboard-metadata a,
+.public-testnet-recovery-note a {
+  color: var(--evergreen-strong);
+}
+
+.public-testnet-confirm-checkbox {
+  color: var(--ink);
+}
+
+.public-testnet-disclosure p {
+  color: var(--warning);
+}
+
+.public-testnet-confirm-checkbox input {
+  width: 1.2rem;
+  height: 1.2rem;
+  accent-color: var(--evergreen);
+}
+
+.public-testnet-lending-dashboard-position-heading > span {
+  border-color: var(--line-strong);
+}
+
+.public-testnet-lending-dashboard-position-heading > span.is-open {
+  background: var(--success-surface);
+  border-color: var(--success-line);
+}
+
+/* Native disclosure hierarchy */
+
+.portfolio-sources {
+  margin-top: clamp(1.75rem, 5vw, 3.5rem);
+}
+
+.portfolio-wallet-source {
+  overflow: clip;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-large);
+  box-shadow: var(--shadow-soft);
+}
+
+.portfolio-wallet-source[open] {
+  border-color: #a9c8b9;
+}
+
+.portfolio-chain-source {
+  background: var(--panel-subtle);
+  border-color: var(--line);
+}
+
+.portfolio-wallet-source > summary,
+.portfolio-chain-source > summary {
+  color: var(--ink);
+}
+
+.portfolio-wallet-source > summary {
+  min-height: 5.25rem;
+}
+
+.portfolio-chain-source > summary {
+  min-height: 4.5rem;
+}
+
+.portfolio-wallet-source > summary:hover,
+.portfolio-chain-source > summary:hover {
+  background: var(--panel-tint);
+}
+
+.portfolio-wallet-source > summary::before,
+.portfolio-chain-source > summary::before {
+  color: var(--evergreen-strong);
+  background: var(--panel);
+  border-color: #b6d2c4;
+}
+
+.portfolio-masked-address,
+.portfolio-source-count,
+.portfolio-summary-secondary,
+.portfolio-source-values dt,
+.portfolio-observed-at {
+  color: var(--ink-soft);
+}
+
+.portfolio-asset-source {
+  background: var(--panel);
+  border-color: var(--line);
+}
+
+.portfolio-source-values {
+  border-color: var(--line);
+}
+
+.portfolio-source-values div + div {
+  border-color: var(--line);
+}
+
+.portfolio-empty-sources {
+  color: var(--ink-soft);
+  background: var(--panel);
+  border-color: var(--line);
+}
+
+.portfolio-state-card {
+  min-height: 24rem;
+  margin-block: 1.5rem 4rem;
+}
+
+.portfolio-state-card h1,
+.portfolio-state-card h2 {
+  max-width: 18ch;
+  margin: 1rem 0 0;
+  font-size: clamp(2rem, 5vw, 3.25rem);
+  line-height: 1.08;
+}
+
+.portfolio-state-card.portfolio-state-error {
+  background: var(--danger-surface);
+  border-color: var(--danger-line);
+}
+
+.portfolio-state-card.portfolio-state-unavailable {
+  background: var(--warning-surface);
+  border-color: var(--warning-line);
+}
+
+.portfolio-state-card p {
+  color: var(--ink-soft);
+}
+
+/* Restricted internal wallet lab */
+
+.foundation-label,
+.wallet-lab-grid label,
+.lab-evidence-note,
+.wallet-lab-events {
+  color: var(--ink-soft);
+}
+
+.wallet-lab-warning {
+  background: var(--warning-surface);
+  border-color: var(--warning-line);
+}
+
+.wallet-lab-warning h1 {
+  font-size: clamp(2.25rem, 6vw, 4.25rem);
+}
+
+.wallet-lab-grid select {
+  min-height: var(--control-height);
+  color: var(--ink);
+  background: var(--panel);
+  border-color: var(--line-strong);
+}
+
+.lab-result-ok {
+  color: var(--success);
+}
+
+.lab-result-blocked {
+  color: var(--warning);
+}
+
+.wallet-lab-events code {
+  color: var(--ink);
+}
+
+footer {
+  color: var(--ink-soft);
+  border-color: var(--line);
+}
+
+/* Responsive reflow. Primary navigation remains fully available at every size. */
+
+@media (max-width: 900px) {
+  .hero-grid,
+  .home-hero-grid,
+  .portfolio-intro {
+    grid-template-columns: 1fr;
+  }
+
+  .hero-grid,
+  .home-hero-grid {
+    gap: 2.25rem;
+    padding: 3.75rem 0 5rem;
+  }
+
+  .home-steps {
+    max-width: 38rem;
+  }
+
+  .portfolio-intro {
+    align-items: start;
+  }
+
+  .next-step-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .public-testnet-dashboard-grid,
+  .public-testnet-proof-grid,
+  .public-testnet-withdrawal-lanes {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 760px) {
+  .page-shell {
+    width: min(100% - 1.25rem, 72rem);
+  }
+
+  .site-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    align-items: center;
+    justify-content: stretch;
+    padding: 0.75rem 0;
+  }
+
+  .site-header__menus {
+    display: grid;
+    width: 100%;
+    min-width: 0;
+    gap: 0.4rem;
+    justify-content: stretch;
+  }
+
+  .site-navigation {
+    display: grid;
+    width: 100%;
+    min-width: 0;
+    gap: 0.4rem;
+    justify-content: stretch;
+  }
+
+  .site-navigation--primary {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .site-navigation--account {
+    grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr));
+  }
+
+  .site-navigation a,
+  .site-navigation a:not(.navigation-action),
+  .site-navigation .navigation-action {
+    display: inline-flex;
+    min-width: 0;
+    min-height: 2.75rem;
+    padding: 0.55rem 0.65rem;
+    white-space: normal;
+  }
+
+  .hero-grid,
+  .home-hero-grid {
+    padding: 3rem 0 4rem;
+  }
+
+  .hero h1,
+  .home-hero h1,
+  .home-hero-content h1,
+  h1 {
+    font-size: clamp(2.4rem, 12vw, 3.75rem);
+  }
+
+  .hero-actions,
+  .home-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .hero-actions a,
+  .home-actions a {
+    width: 100%;
+  }
+
+  .authentication-layout {
+    gap: 1.25rem;
+    padding: 2.5rem 0 3.5rem;
+  }
+
+  .authentication-introduction h1 {
+    font-size: clamp(2.25rem, 12vw, 3.4rem);
+  }
+
+  .authentication-assurance {
+    margin-top: 1rem;
+  }
+
+  .portfolio-intro {
+    padding-top: 2.5rem;
+  }
+
+  .portfolio-intro h1,
+  .portfolio-heading h1,
+  .portfolio-heading h2 {
+    font-size: clamp(2.35rem, 12vw, 3.5rem);
+  }
+
+  .portfolio-jump-nav {
+    grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
+    padding: 0.6rem;
+  }
+
+  .local-demo-wallet-panel,
+  .local-demo-allocation-panel,
+  .portfolio-opportunity-state,
+  .public-testnet-dashboard-overview,
+  .public-testnet-withdrawal,
+  .public-testnet-proof,
+  .public-testnet-lending-dashboard,
+  .portfolio-total-card,
+  .portfolio-state-card,
+  .authentication-card,
+  .status-card,
+  .wallet-lab-warning {
+    padding: 1rem;
+  }
+
+  .local-demo-wallet-heading,
+  .local-demo-allocation-heading,
+  .local-demo-allocation-preview-heading,
+  .local-demo-allocation-yield-heading,
+  .local-demo-ecosystem-composition-heading,
+  .local-demo-liquidity-adjustment-heading,
+  .local-demo-liquidity-adjustment-footer,
+  .local-demo-yield-catalog-heading,
+  .public-testnet-proof-heading,
+  .public-testnet-dashboard-overview-heading,
+  .public-testnet-proof-suite-heading,
+  .public-testnet-combined-submit,
+  .public-testnet-withdrawal-heading,
+  .public-testnet-withdrawal-lane-heading,
+  .public-testnet-withdrawal-action,
+  .public-testnet-confirmation-heading,
+  .public-testnet-lending-dashboard-heading,
+  .public-testnet-lending-dashboard-position-heading,
+  .public-testnet-lending-dashboard-metadata,
+  .portfolio-refresh-row,
+  .local-demo-wallet-roster li {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .local-demo-wallet-choices,
+  .portfolio-totals,
+  .local-demo-allocation-results,
+  .local-demo-allocation-yield-metrics,
+  .local-demo-ecosystem-list,
+  .public-testnet-submit-review dl,
+  .public-testnet-verification-status,
+  .public-testnet-lending-dashboard-summary,
+  .public-testnet-lending-dashboard-metrics,
+  .status-details {
+    grid-template-columns: 1fr;
+  }
+
+  .local-demo-wallet-choices button {
+    min-height: var(--control-height);
+  }
+
+  .local-demo-allocation-choices > button {
+    min-height: 0;
+  }
+
+  .portfolio-total-card {
+    min-height: 0;
+  }
+
+  .portfolio-wallet-source > summary,
+  .portfolio-chain-source > summary {
+    grid-template-columns: 1fr;
+  }
+
+  .portfolio-source-values {
+    grid-template-columns: 1fr;
+  }
+
+  .portfolio-source-values div + div {
+    padding-left: 0;
+    border-top: 1px solid var(--line);
+    border-left: 0;
+  }
+
+  .portfolio-secondary-action {
+    white-space: normal;
+  }
+
+  .next-step-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .next-step-card {
+    min-height: 0;
+  }
+
+  footer {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 420px) {
+  .page-shell {
+    width: calc(100% - 1rem);
+  }
+
+  .brand {
+    font-size: 0.88rem;
+  }
+
+  .brand-mark {
+    width: 2.2rem;
+    height: 2.2rem;
+  }
+
+  .portfolio-jump-nav {
+    grid-template-columns: 1fr;
+  }
+
+  .home-step {
+    gap: 0.7rem;
+  }
+
+  .local-demo-wallet-choices {
+    grid-template-columns: 1fr;
+  }
+
+  .local-demo-wallet-choices button {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .local-demo-wallet-choices button small {
+    text-align: left;
+  }
+
+  .local-demo-allocation-choices {
+    grid-template-columns: 1fr;
+  }
+
+  .account-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .portfolio-wallet-source > summary {
+    padding: 1rem 0.85rem 1rem 3.3rem;
+  }
+
+  .portfolio-chain-source > summary {
+    padding: 0.9rem 0.75rem 0.9rem 3rem;
+  }
+
+  .portfolio-wallet-source > summary::before {
+    left: 1rem;
+  }
+
+  .portfolio-chain-source > summary::before {
+    left: 0.8rem;
+  }
+}
+
+@media (forced-colors: active) {
+  .brand-mark,
+  .home-step > span:first-child,
+  .next-step-number,
+  .portfolio-preview-badge,
+  .local-demo-allocation-warning > span,
+  .portfolio-notice > span,
+  .portfolio-state-mark,
+  .authentication-error-mark {
+    border: 1px solid ButtonText;
+  }
+
+  .navigation-action,
+  .primary-action,
+  .authentication-submit,
+  .public-testnet-review-action,
+  .public-testnet-submit-action,
+  .public-testnet-wallet-selection button,
+  .public-testnet-network-action button {
+    color: ButtonText;
+    background: ButtonFace;
+    border-color: ButtonText;
+  }
+}

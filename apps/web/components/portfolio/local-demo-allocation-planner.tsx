@@ -969,6 +969,7 @@ export function LocalDemoAllocationPlanner({
     <>
       <section
         className="public-testnet-dashboard-overview"
+        id="testnet-positions"
         aria-labelledby="public-testnet-dashboard-overview-title"
       >
         <div className="public-testnet-dashboard-overview-heading">
@@ -976,7 +977,7 @@ export function LocalDemoAllocationPlanner({
             <p className="eyebrow">Live testnet positions</p>
             <h2 id="public-testnet-dashboard-overview-title">Your lending dashboards</h2>
           </div>
-          <span>EVM + SVM · read-only</span>
+          <span>EVM + SVM · public testnet</span>
         </div>
         <p>
           See both public-testnet positions immediately after connecting. Refreshing a dashboard
@@ -1017,11 +1018,12 @@ export function LocalDemoAllocationPlanner({
       </section>
       <section
         className="local-demo-allocation-panel"
+        id="opportunities"
         aria-labelledby="local-demo-allocation-title"
       >
         <div className="local-demo-allocation-heading">
           <div>
-            <p className="eyebrow">Allocation preview</p>
+            <p className="eyebrow">Step 3 · Explore opportunities</p>
             <h2 id="local-demo-allocation-title">Preview your managed allocation.</h2>
           </div>
           <span className="local-demo-proof-badge">Local model · estimate only</span>

@@ -119,7 +119,7 @@ describe('authentication UI', () => {
     fireEvent.change(screen.getByRole('textbox', { name: /phone number/i }), {
       target: { value: '' },
     });
-    fireEvent.change(screen.getByRole('textbox', { name: 'Country of residence' }), {
+    fireEvent.change(screen.getByRole('combobox', { name: 'Country of residence' }), {
       target: { value: 'us' },
     });
     fireEvent.click(screen.getByRole('button', { name: /continue securely/i }));
@@ -146,7 +146,7 @@ describe('authentication UI', () => {
       'autocomplete',
       'email',
     );
-    expect(screen.getByRole('textbox', { name: 'Country of residence' })).toHaveAttribute(
+    expect(screen.getByRole('combobox', { name: 'Country of residence' })).toHaveAttribute(
       'pattern',
       '[A-Za-z]{2}',
     );
@@ -154,7 +154,7 @@ describe('authentication UI', () => {
       'autocomplete',
       'tel',
     );
-    expect(screen.getByRole('textbox', { name: 'Country of residence' })).toHaveAttribute(
+    expect(screen.getByRole('combobox', { name: 'Country of residence' })).toHaveAttribute(
       'autocomplete',
       'country',
     );
@@ -230,7 +230,7 @@ describe('authentication UI', () => {
     fireEvent.change(screen.getByRole('textbox', { name: 'Email address' }), {
       target: { value: 'person@example.com' },
     });
-    fireEvent.change(screen.getByRole('textbox', { name: 'Country of residence' }), {
+    fireEvent.change(screen.getByRole('combobox', { name: 'Country of residence' }), {
       target: { value: 'US' },
     });
     fireEvent.click(screen.getByRole('button', { name: /continue securely/i }));
@@ -283,7 +283,7 @@ describe('authentication UI', () => {
     fireEvent.change(screen.getByRole('textbox', { name: 'Email address' }), {
       target: { value: 'first@example.com' },
     });
-    fireEvent.change(screen.getByRole('textbox', { name: 'Country of residence' }), {
+    fireEvent.change(screen.getByRole('combobox', { name: 'Country of residence' }), {
       target: { value: 'US' },
     });
     fireEvent.click(screen.getByRole('button', { name: /continue securely/i }));
@@ -297,7 +297,7 @@ describe('authentication UI', () => {
     fireEvent.change(screen.getByRole('textbox', { name: 'Email address' }), {
       target: { value: 'second@example.com' },
     });
-    fireEvent.change(screen.getByRole('textbox', { name: 'Country of residence' }), {
+    fireEvent.change(screen.getByRole('combobox', { name: 'Country of residence' }), {
       target: { value: 'US' },
     });
     const secondButton = screen.getByRole('button', { name: /continue securely/i });
@@ -333,7 +333,7 @@ describe('authentication UI', () => {
     fireEvent.change(screen.getByRole('textbox', { name: 'Email address' }), {
       target: { value: 'person@example.com' },
     });
-    fireEvent.change(screen.getByRole('textbox', { name: 'Country of residence' }), {
+    fireEvent.change(screen.getByRole('combobox', { name: 'Country of residence' }), {
       target: { value: 'US' },
     });
     fireEvent.submit(form as HTMLFormElement);

@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import PortfolioPage, { metadata } from '@/app/portfolio/page';
 import {
@@ -48,14 +48,21 @@ function grossLocalDemoPayload(): unknown {
   };
 }
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  vi.unstubAllEnvs();
+});
 
 describe('UnifiedBalanceView', () => {
   it('distinguishes the reconciled portfolio total from available buying power', () => {
     render(<UnifiedBalanceView state={READY_STATE} />);
 
+    const balances = screen
+      .getByRole('heading', { level: 2, name: 'Your capital, clearly attributed.' })
+      .closest('section');
     const portfolioCard = screen.getByText('Total portfolio value').closest('article');
     const buyingPowerCard = screen.getByText('Available buying power').closest('article');
+    expect(balances).toHaveAttribute('id', 'balances');
     expect(portfolioCard).not.toBeNull();
     expect(buyingPowerCard).not.toBeNull();
     expect(within(portfolioCard!).getByLabelText('11,000 US dollars')).toHaveTextContent(
@@ -182,7 +189,8 @@ describe('UnifiedBalanceView', () => {
     render(<UnifiedBalanceView state={scenario.state} />);
 
     expect(screen.getByRole(scenario.role)).toBeInTheDocument();
-    expect(screen.getByRole('heading', { level: 1, name: scenario.heading })).toBeInTheDocument();
+    const heading = screen.getByRole('heading', { level: 2, name: scenario.heading });
+    expect(heading.closest('section')).toHaveAttribute('id', 'balances');
     expect(screen.getByText(new RegExp(scenario.explanation, 'u'))).toBeInTheDocument();
   });
 });
@@ -194,12 +202,45 @@ describe('PortfolioPage', () => {
     expect(screen.queryByText('Sample data')).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Crypto Lending home' })).toHaveAttribute('href', '/');
     expect(screen.getByRole('link', { name: 'Account' })).toHaveAttribute('href', '/account');
-    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(
-      'Portfolio value is unavailable',
+    const sectionNavigation = screen.getByRole('navigation', {
+      name: 'Jump to portfolio sections',
+    });
+    expect(within(sectionNavigation).getByRole('link', { name: 'Balances' })).toHaveAttribute(
+      'href',
+      '#balances',
     );
+    expect(within(sectionNavigation).queryByRole('link', { name: 'Demo wallets' })).toBeNull();
+    expect(within(sectionNavigation).queryByRole('link', { name: 'Opportunities' })).toBeNull();
+    expect(document.querySelector('#balances')).not.toBeNull();
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
+    expect(
+      screen.getByRole('heading', { level: 2, name: 'Portfolio value is unavailable' }),
+    ).toBeInTheDocument();
     expect(metadata).toMatchObject({
       title: 'Portfolio',
       robots: { index: false, follow: false },
     });
+  });
+
+  it('renders every enabled section button with a stable page target', () => {
+    vi.stubEnv('LOCAL_DEMO_MODE', 'enabled');
+    vi.stubEnv('LOCAL_DEMO_API_ORIGIN', 'http://127.0.0.1:3001');
+    vi.stubEnv('AUTH_PUBLIC_ORIGIN', 'http://127.0.0.1:3000');
+    render(<PortfolioPage />);
+
+    const sectionNavigation = screen.getByRole('navigation', {
+      name: 'Jump to portfolio sections',
+    });
+    const links = within(sectionNavigation).getAllByRole('link');
+    expect(links.map((link) => link.textContent)).toEqual([
+      'Demo wallets',
+      'Balances',
+      'Opportunities',
+    ]);
+    for (const link of links) {
+      const target = link.getAttribute('href');
+      expect(target).toMatch(/^#[a-z-]+$/u);
+      expect(document.querySelector(target!)).not.toBeNull();
+    }
   });
 });

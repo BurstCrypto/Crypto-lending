@@ -5,19 +5,19 @@ type ServiceStatusProps = {
 
 export function ServiceStatus({ environment, version }: ServiceStatusProps) {
   return (
-    <section className="status-card" aria-labelledby="service-status-title">
-      <div className="status-heading">
-        <div>
-          <p className="eyebrow">System status</p>
-          <h2 id="service-status-title">Web application</h2>
+    <section className="status-card service-status" aria-labelledby="service-status-title">
+      <div className="status-heading service-status__heading">
+        <div className="service-status__title">
+          <p className="eyebrow">Application</p>
+          <h2 id="service-status-title">Application details</h2>
         </div>
-        <p className="status-badge">
+        <p className="status-badge" role="status">
           <span className="status-dot" aria-hidden="true" />
-          Ready
+          Page ready
         </p>
       </div>
 
-      <dl className="status-details">
+      <dl className="status-details service-status__details">
         <div>
           <dt>Version</dt>
           <dd>{version}</dd>
@@ -28,7 +28,7 @@ export function ServiceStatus({ environment, version }: ServiceStatusProps) {
         </div>
       </dl>
 
-      <nav className="status-links" aria-label="Operational endpoints">
+      <nav className="status-links service-status__links" aria-label="Operational endpoints">
         <a href="/api/health">Health endpoint</a>
         <a href="/api/version">Version endpoint</a>
       </nav>

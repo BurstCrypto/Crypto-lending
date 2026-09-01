@@ -247,10 +247,14 @@ function WalletSource({ wallet }: { wallet: UnifiedBalanceWalletContribution }) 
 
 function LoadingView() {
   return (
-    <section className="portfolio-state-card" aria-labelledby="portfolio-loading-title">
+    <section
+      id="balances"
+      className="portfolio-state-card"
+      aria-labelledby="portfolio-loading-title"
+    >
       <div role="status" aria-live="polite" aria-busy="true">
         <div className="portfolio-loading-mark" aria-hidden="true" />
-        <h1 id="portfolio-loading-title">Loading your portfolio</h1>
+        <h2 id="portfolio-loading-title">Loading your portfolio</h2>
         <p>
           Waiting for a complete balance and buying-power snapshot. No missing value will be shown
           as zero.
@@ -263,6 +267,7 @@ function LoadingView() {
 function ErrorView() {
   return (
     <section
+      id="balances"
       className="portfolio-state-card portfolio-state-error"
       aria-labelledby="portfolio-error-title"
     >
@@ -270,7 +275,7 @@ function ErrorView() {
         <span className="portfolio-state-mark" aria-hidden="true">
           !
         </span>
-        <h1 id="portfolio-error-title">Your portfolio could not be loaded</h1>
+        <h2 id="portfolio-error-title">Your portfolio could not be loaded</h2>
         <p>
           We could not verify a complete response. Your last confirmed balances are not replaced
           with zero; please try again in a moment.
@@ -283,6 +288,7 @@ function ErrorView() {
 function UnavailableView({ reason }: { reason: 'NO_SUPPORTED_BALANCES' | 'INCOMPLETE_SNAPSHOT' }) {
   return (
     <section
+      id="balances"
       className="portfolio-state-card portfolio-state-unavailable"
       aria-labelledby="portfolio-unavailable-title"
     >
@@ -290,7 +296,7 @@ function UnavailableView({ reason }: { reason: 'NO_SUPPORTED_BALANCES' | 'INCOMP
         <span className="portfolio-state-mark" aria-hidden="true">
           i
         </span>
-        <h1 id="portfolio-unavailable-title">Portfolio value is unavailable</h1>
+        <h2 id="portfolio-unavailable-title">Portfolio value is unavailable</h2>
         <p>
           {reason === 'NO_SUPPORTED_BALANCES'
             ? 'No supported, priced stablecoin balances are available for your connected wallets yet.'
@@ -340,11 +346,11 @@ function ReadyView({
     snapshot.buyingPower.freshness === 'CURRENT' &&
     snapshot.buyingPower.amountUsdMinor === snapshot.portfolioValueUsdMinor;
   return (
-    <section className="unified-balance" aria-labelledby="portfolio-title">
+    <section id="balances" className="unified-balance" aria-labelledby="portfolio-title">
       <header className="portfolio-heading">
         <div>
           <p className="eyebrow">Unified balance</p>
-          <h1 id="portfolio-title">Your capital, clearly attributed.</h1>
+          <h2 id="portfolio-title">Your capital, clearly attributed.</h2>
         </div>
         <div className="portfolio-as-of">
           <FreshnessBadge freshness={snapshot.freshness} />

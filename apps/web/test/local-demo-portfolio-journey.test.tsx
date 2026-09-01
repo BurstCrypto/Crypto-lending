@@ -158,6 +158,20 @@ describe('authenticated local demo portfolio journey', () => {
     experience(harness);
 
     expect(await screen.findByText('No synthetic wallets are connected yet.')).toBeInTheDocument();
+    const walletHeading = screen.getByRole('heading', { level: 2, name: 'Connect demo wallets' });
+    expect(walletHeading.closest('section')).toHaveAttribute('id', 'wallets');
+    const walletDisclosure = screen
+      .getByText('How these synthetic demo wallets work')
+      .closest('details');
+    expect(walletDisclosure).not.toHaveAttribute('open');
+    expect(
+      screen
+        .getByRole('heading', {
+          level: 2,
+          name: 'Connect a demo wallet to explore opportunities.',
+        })
+        .closest('section'),
+    ).toHaveAttribute('id', 'opportunities');
     expect(
       screen.getByRole('heading', { name: 'Portfolio value is unavailable' }),
     ).toBeInTheDocument();
@@ -269,6 +283,8 @@ describe('authenticated local demo portfolio journey', () => {
     });
     const dashboardOverview = lendingDashboard.closest('.public-testnet-dashboard-overview');
     expect(allocationPlanner).not.toBeNull();
+    expect(allocationPlanner).toHaveAttribute('id', 'opportunities');
+    expect(document.querySelectorAll('#opportunities')).toHaveLength(1);
     expect(portfolioTotals).not.toBeNull();
     expect(dashboardOverview).not.toBeNull();
     expect(portfolioTotals?.nextElementSibling).toBe(dashboardOverview);

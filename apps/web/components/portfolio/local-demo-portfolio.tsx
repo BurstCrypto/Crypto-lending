@@ -428,12 +428,18 @@ export function LocalDemoPortfolio({ enabled, dependencies }: LocalDemoPortfolio
   }
 
   if (phase === 'CHECKING' || phase === 'SIGNED_OUT') {
-    return <LocalDemoUnifiedBalanceView state={{ status: 'LOADING' }} />;
+    return (
+      <div className="portfolio-loading-experience">
+        <span id="wallets" className="portfolio-anchor-target" aria-hidden="true" />
+        <LocalDemoUnifiedBalanceView state={{ status: 'LOADING' }} />
+        <span id="opportunities" className="portfolio-anchor-target" aria-hidden="true" />
+      </div>
+    );
   }
 
   if (phase === 'UNAVAILABLE') {
     return (
-      <div className="portfolio-experience-unavailable">
+      <div id="wallets" className="portfolio-experience-unavailable">
         <LocalDemoUnifiedBalanceView state={{ status: 'ERROR' }} />
         <button
           className="portfolio-secondary-action"
@@ -446,31 +452,46 @@ export function LocalDemoPortfolio({ enabled, dependencies }: LocalDemoPortfolio
         >
           Try again
         </button>
+        <span id="opportunities" className="portfolio-anchor-target" aria-hidden="true" />
       </div>
     );
   }
 
   const activeWallets = wallets.entries.filter((entry) => entry.indexingEnabled);
+  const opportunitiesAvailable = portfolio.status === 'READY' && allocationClient !== null;
   return (
     <>
-      <section className="local-demo-wallet-panel" aria-labelledby="local-demo-wallet-title">
+      <section
+        id="wallets"
+        className="local-demo-wallet-panel"
+        aria-labelledby="local-demo-wallet-title"
+        aria-describedby="local-demo-wallet-intro"
+      >
         <div className="local-demo-wallet-heading">
           <div>
-            <p className="eyebrow">Synthetic wallet proof</p>
-            <h1 id="local-demo-wallet-title">Choose a local demo wallet.</h1>
+            <p className="eyebrow">Demo wallets</p>
+            <h2 id="local-demo-wallet-title">Connect demo wallets</h2>
           </div>
           <span className="local-demo-proof-badge">No provider egress</span>
         </div>
-        <div className="portfolio-notice local-demo-financial-notice" role="note">
-          <span aria-hidden="true">i</span>
-          <p>
-            These loopback-only wallets are synthetic. The ownership proof is completed by the local
-            API and <strong>cannot authorize a loan, transfer, quote, or transaction.</strong> EVM
-            balances are observations from the loopback-only LOCAL EVM chain (31337). Solana
-            balances and all price and valuation inputs remain deterministic fixtures; none of this
-            is public-chain or validator evidence.
-          </p>
-        </div>
+        <p id="local-demo-wallet-intro" className="portfolio-section-intro">
+          Connect one or both demo wallets to explore sample balances and a lending plan. No browser
+          wallet or real funds are used.
+        </p>
+        <details className="portfolio-disclosure">
+          <summary>How these synthetic demo wallets work</summary>
+          <div className="portfolio-notice local-demo-financial-notice" role="note">
+            <span aria-hidden="true">i</span>
+            <p>
+              These loopback-only wallets are synthetic. The ownership proof is completed by the
+              local API and{' '}
+              <strong>cannot authorize a loan, transfer, quote, or transaction.</strong> EVM
+              balances are observations from the loopback-only LOCAL EVM chain (31337). Solana
+              balances and all price and valuation inputs remain deterministic fixtures; none of
+              this is public-chain or validator evidence.
+            </p>
+          </div>
+        </details>
 
         <div className="local-demo-wallet-choices" aria-label="Synthetic wallet choices">
           {(['EVM', 'SOLANA'] as const).map((namespace) => {
@@ -541,7 +562,7 @@ export function LocalDemoPortfolio({ enabled, dependencies }: LocalDemoPortfolio
       <LocalDemoUnifiedBalanceView
         state={portfolio}
         readyContent={
-          portfolio.status === 'READY' && allocationClient !== null ? (
+          opportunitiesAvailable ? (
             <LocalDemoAllocationPlanner
               key={portfolio.snapshot.snapshotId}
               client={allocationClient}
@@ -552,6 +573,25 @@ export function LocalDemoPortfolio({ enabled, dependencies }: LocalDemoPortfolio
           ) : null
         }
       />
+      {opportunitiesAvailable ? null : (
+        <section
+          id="opportunities"
+          className="portfolio-opportunity-state"
+          aria-labelledby="portfolio-opportunity-state-title"
+        >
+          <p className="eyebrow">Step 3 · Explore opportunities</p>
+          <h2 id="portfolio-opportunity-state-title">
+            {activeWallets.length === 0
+              ? 'Connect a demo wallet to explore opportunities.'
+              : 'Loading opportunities for your demo balances.'}
+          </h2>
+          <p>
+            {activeWallets.length === 0
+              ? 'An earning preview appears here after a supported demo balance has been loaded.'
+              : 'The earning preview will appear after the latest balance snapshot is confirmed.'}
+          </p>
+        </section>
+      )}
     </>
   );
 }

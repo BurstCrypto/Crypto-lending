@@ -216,11 +216,11 @@ function ReadyView({
   readyContent?: ReactNode;
 }) {
   return (
-    <section className="unified-balance" aria-labelledby="portfolio-title">
+    <section id="balances" className="unified-balance" aria-labelledby="portfolio-title">
       <header className="portfolio-heading">
         <div>
           <p className="eyebrow">Unified balance</p>
-          <h1 id="portfolio-title">Your capital, clearly attributed.</h1>
+          <h2 id="portfolio-title">Your capital, clearly attributed.</h2>
         </div>
         <div className="portfolio-as-of">
           <FreshnessBadge freshness={snapshot.freshness} />

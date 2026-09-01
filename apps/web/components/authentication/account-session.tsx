@@ -188,9 +188,9 @@ export function AccountSession() {
       <div className="account-profile-heading">
         <div>
           <h2>Profile details</h2>
-          <p>Verified from your current secure session.</p>
+          <p>Loaded from your current secure session.</p>
         </div>
-        <span className="account-verified-badge">Session verified</span>
+        <span className="account-verified-badge">Secure session</span>
       </div>
 
       <dl className="account-profile-details">
@@ -217,19 +217,21 @@ export function AccountSession() {
         please try again.
       </AuthenticationError>
 
-      <Link className="account-portfolio-link" href="/portfolio">
-        Open synthetic portfolio
-      </Link>
+      <div className="account-actions">
+        <Link className="account-portfolio-link" href="/portfolio">
+          View portfolio
+        </Link>
 
-      <button
-        className="account-logout"
-        type="button"
-        aria-describedby={logoutFailed ? 'logout-error' : undefined}
-        disabled={loggingOut}
-        onClick={() => void logout()}
-      >
-        {loggingOut ? 'Signing out securely…' : 'Sign out'}
-      </button>
+        <button
+          className="account-logout"
+          type="button"
+          aria-describedby={logoutFailed ? 'logout-error' : undefined}
+          disabled={loggingOut}
+          onClick={() => void logout()}
+        >
+          {loggingOut ? 'Signing out securely…' : 'Sign out'}
+        </button>
+      </div>
       <span className="visually-hidden" aria-live="polite">
         {loggingOut ? 'Secure sign out in progress.' : ''}
       </span>

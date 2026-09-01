@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
-import Link from 'next/link';
 
 import { LocalDemoPortfolio } from '@/components/portfolio/local-demo-portfolio';
+import { SiteHeader } from '@/components/site-header';
 import { loadLocalDemoWebConfig } from '@/lib/local-demo/config-server';
 
 export const metadata: Metadata = {
@@ -16,24 +16,47 @@ export default function PortfolioPage() {
   const localDemo = loadLocalDemoWebConfig();
   return (
     <main id="main-content" className="page-shell portfolio-page-shell">
-      <header className="site-header">
-        <Link className="brand" href="/" aria-label="Crypto Lending home">
-          <span className="brand-mark" aria-hidden="true">
-            CL
-          </span>
-          <span>Crypto Lending</span>
-        </Link>
-        <nav className="site-navigation" aria-label="Portfolio">
-          <Link href="/">Home</Link>
-          <Link className="navigation-action" href="/account">
-            Account
-          </Link>
+      <SiteHeader activePage="portfolio" authenticationActions="none" />
+
+      <section
+        className="portfolio-introduction portfolio-intro"
+        aria-labelledby="portfolio-page-title"
+      >
+        <div className="portfolio-introduction__copy">
+          <p className="eyebrow">Your portfolio</p>
+          <h1 id="portfolio-page-title" className="portfolio-introduction__title">
+            Everything important, in one clear view.
+          </h1>
+          <p className="portfolio-introduction__description">
+            {localDemo.enabled
+              ? 'Start with your demo wallets, confirm what is available, then review opportunities when you are ready.'
+              : 'Review the current portfolio status and return whenever the demo experience is available.'}
+          </p>
+        </div>
+
+        <nav
+          className="portfolio-jump-navigation portfolio-jump-nav"
+          aria-label="Jump to portfolio sections"
+        >
+          {localDemo.enabled ? (
+            <a className="portfolio-jump-link navigation-button" href="#wallets">
+              Demo wallets
+            </a>
+          ) : null}
+          <a className="portfolio-jump-link navigation-button" href="#balances">
+            Balances
+          </a>
+          {localDemo.enabled ? (
+            <a className="portfolio-jump-link navigation-button" href="#opportunities">
+              Opportunities
+            </a>
+          ) : null}
         </nav>
-      </header>
+      </section>
 
       <LocalDemoPortfolio enabled={localDemo.enabled} />
 
-      <footer>
+      <footer className="site-footer">
         <p>Crypto Lending synthetic local portfolio</p>
       </footer>
     </main>

@@ -6,9 +6,10 @@ export const dynamic = 'force-dynamic';
 export default function AccountPage() {
   return (
     <AuthenticationShell
-      eyebrow="Protected account"
+      activePage="account"
+      eyebrow="Account"
       title="Your account."
-      description="Review the contact details attached to your authenticated Crypto Lending profile and leave securely when you are finished."
+      description="Review the contact details on your account or sign out securely."
     >
       <AccountSession />
     </AuthenticationShell>
