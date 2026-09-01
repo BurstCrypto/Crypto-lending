@@ -14,15 +14,23 @@ vi.mock('@/lib/authentication', async (importOriginal) => {
 import HomePage from '../app/page';
 
 describe('HomePage', () => {
-  it('presents a simple navigation path and operational status', async () => {
+  it('presents a simple signed-out path and explains the product', async () => {
     render(<HomePage />);
 
+    const hero = screen.getByRole('region', {
+      name: 'Understand your portfolio before you borrow or lend.',
+    });
     expect(
-      screen.getByRole('heading', {
-        level: 1,
-        name: 'Crypto lending, made clear.',
-      }),
+      within(hero).getByText(/supported balances, estimated buying power/i),
     ).toBeInTheDocument();
+    expect(within(hero).getByRole('link', { name: 'View portfolio' })).toHaveAttribute(
+      'href',
+      '/portfolio',
+    );
+    expect(within(hero).getByRole('link', { name: 'Create an account' })).toHaveAttribute(
+      'href',
+      '/register',
+    );
 
     expect(screen.queryByRole('navigation', { name: 'Primary' })).toBeNull();
 
@@ -36,27 +44,31 @@ describe('HomePage', () => {
       '/register',
     );
 
-    expect(screen.getByRole('link', { name: /Open portfolio/ })).toHaveAttribute(
-      'href',
-      '/portfolio',
-    );
-    expect(screen.getByRole('link', { name: /Review balances/ })).toHaveAttribute(
-      'href',
-      '/portfolio',
-    );
-    expect(screen.getByRole('link', { name: /View opportunities/ })).toHaveAttribute(
-      'href',
-      '/portfolio',
-    );
+    const preview = screen.getByRole('complementary', {
+      name: 'From balances to a lending estimate.',
+    });
+    expect(within(preview).getAllByRole('listitem')).toHaveLength(3);
+    expect(
+      within(preview).getByRole('heading', { name: 'Preview an allocation' }),
+    ).toBeInTheDocument();
 
-    expect(screen.getByText('Page ready')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Health endpoint' })).toHaveAttribute(
-      'href',
-      '/api/health',
-    );
-    expect(screen.getByRole('link', { name: 'Version endpoint' })).toHaveAttribute(
-      'href',
-      '/api/version',
-    );
+    const productExplanation = screen.getByRole('region', {
+      name: 'Make every estimate easier to understand.',
+    });
+    expect(
+      within(productExplanation).getByRole('heading', { name: 'Trace what is included' }),
+    ).toBeInTheDocument();
+    expect(
+      within(productExplanation).getByRole('heading', { name: 'See why buying power changes' }),
+    ).toBeInTheDocument();
+    expect(
+      within(productExplanation).getByRole('heading', { name: 'Explore without real funds' }),
+    ).toBeInTheDocument();
+
+    expect(
+      screen.getByRole('region', { name: 'Review first. Act only when you are ready.' }),
+    ).toHaveTextContent('synthetic or locally cached estimates');
+    expect(screen.queryByRole('link', { name: 'Health endpoint' })).toBeNull();
+    expect(screen.queryByRole('link', { name: 'Version endpoint' })).toBeNull();
   });
 });

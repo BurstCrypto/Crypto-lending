@@ -10,14 +10,15 @@ export const metadata: Metadata = {
     default: 'Crypto Lending',
     template: '%s | Crypto Lending',
   },
-  description: 'A secure foundation for digital-asset lending.',
+  description:
+    'Review supported crypto balances, estimated buying power, and illustrative lending allocations in one clear workspace.',
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   const localDemo = loadLocalDemoWebConfig();
 
   return (
-    <html lang="en">
+    <html lang="en" data-scroll-behavior="smooth">
       <body>
         <a className="skip-link" href="#main-content">
           Skip to main content
