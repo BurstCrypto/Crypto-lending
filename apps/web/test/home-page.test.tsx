@@ -1,10 +1,20 @@
 import { render, screen, within } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+vi.mock('@/lib/authentication', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/authentication')>();
+  return {
+    ...actual,
+    restoreAuthenticationSession: vi
+      .fn()
+      .mockRejectedValue(new actual.AuthenticationUnauthenticatedError()),
+  };
+});
 
 import HomePage from '../app/page';
 
 describe('HomePage', () => {
-  it('presents a simple navigation path and operational status', () => {
+  it('presents a simple navigation path and operational status', async () => {
     render(<HomePage />);
 
     expect(
@@ -14,21 +24,9 @@ describe('HomePage', () => {
       }),
     ).toBeInTheDocument();
 
-    const primaryNavigation = screen.getByRole('navigation', { name: 'Primary' });
-    expect(within(primaryNavigation).getByRole('link', { name: 'Home' })).toHaveAttribute(
-      'aria-current',
-      'page',
-    );
-    expect(within(primaryNavigation).getByRole('link', { name: 'Portfolio' })).toHaveAttribute(
-      'href',
-      '/portfolio',
-    );
-    expect(within(primaryNavigation).getByRole('link', { name: 'Account' })).toHaveAttribute(
-      'href',
-      '/account',
-    );
+    expect(screen.queryByRole('navigation', { name: 'Primary' })).toBeNull();
 
-    const accountActions = screen.getByRole('navigation', { name: 'Account actions' });
+    const accountActions = await screen.findByRole('navigation', { name: 'Account actions' });
     expect(within(accountActions).getByRole('link', { name: 'Sign in' })).toHaveAttribute(
       'href',
       '/login',

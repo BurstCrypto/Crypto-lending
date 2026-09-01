@@ -201,7 +201,7 @@ describe('PortfolioPage', () => {
 
     expect(screen.queryByText('Sample data')).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Crypto Lending home' })).toHaveAttribute('href', '/');
-    expect(screen.getByRole('link', { name: 'Account' })).toHaveAttribute('href', '/account');
+    expect(screen.queryByRole('link', { name: 'Account' })).toBeNull();
     const sectionNavigation = screen.getByRole('navigation', {
       name: 'Jump to portfolio sections',
     });

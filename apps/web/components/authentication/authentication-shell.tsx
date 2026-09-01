@@ -21,8 +21,7 @@ export function AuthenticationShell({
   children,
   footer,
 }: AuthenticationShellProps) {
-  const authenticationActions =
-    activePage === 'login' ? 'create-account' : activePage === 'register' ? 'sign-in' : 'none';
+  const authenticationActions = activePage === 'login' ? 'create-account' : 'sign-in';
 
   return (
     <main id="main-content" className="page-shell authentication-shell">

@@ -16,7 +16,11 @@ export default function PortfolioPage() {
   const localDemo = loadLocalDemoWebConfig();
   return (
     <main id="main-content" className="page-shell portfolio-page-shell">
-      <SiteHeader activePage="portfolio" authenticationActions="none" />
+      <SiteHeader
+        activePage="portfolio"
+        authenticationActions="sign-in"
+        signInHref="/login?returnTo=%2Fportfolio"
+      />
 
       <section
         className="portfolio-introduction portfolio-intro"

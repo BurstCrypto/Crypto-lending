@@ -185,12 +185,13 @@ describe('authentication UI', () => {
   });
 
   it('falls back to the protected account path when a page receives an unsafe return target', async () => {
+    authenticationMocks.restore.mockRejectedValue(new AuthenticationUnauthenticatedError());
     render(
       await LoginPage({
         searchParams: Promise.resolve({ returnTo: 'https://evil.example/account' }),
       }),
     );
-    expect(screen.getByRole('link', { name: 'Create an account' })).toHaveAttribute(
+    expect(await screen.findByRole('link', { name: 'Create an account' })).toHaveAttribute(
       'href',
       '/register?returnTo=%2Faccount',
     );
@@ -201,7 +202,7 @@ describe('authentication UI', () => {
         searchParams: Promise.resolve({ returnTo: '//evil.example' }),
       }),
     );
-    expect(screen.getByRole('link', { name: 'Sign in' })).toHaveAttribute(
+    expect(await screen.findByRole('link', { name: 'Sign in' })).toHaveAttribute(
       'href',
       '/login?returnTo=%2Faccount',
     );
