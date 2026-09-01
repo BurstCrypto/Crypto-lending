@@ -280,6 +280,28 @@ describe('HttpEvmWalletOwnershipClient', () => {
       }),
     ).rejects.toMatchObject({ code: WALLET_OWNERSHIP_HANDOFF_ERROR_CODES.unavailable });
   });
+
+  it.each([
+    [400, WALLET_OWNERSHIP_HANDOFF_ERROR_CODES.rejected],
+    [401, WALLET_OWNERSHIP_HANDOFF_ERROR_CODES.unauthenticated],
+  ] as const)(
+    'separates a rejected ownership proof from an expired account session (%s)',
+    async (status, expectedCode) => {
+      const requestFetch = vi.fn(async () => jsonResponse(status, { message: 'private detail' }));
+      await expect(
+        httpClient(requestFetch).submitProof({
+          challenge: issuedChallenge(),
+          signature: {
+            format: 'siwe',
+            challengeId: CHALLENGE_ID,
+            chainId: 'eip155:11155111',
+            address: ADDRESS,
+            signature: SIGNATURE,
+          },
+        }),
+      ).rejects.toMatchObject({ code: expectedCode });
+    },
+  );
 });
 
 class SigningProvider implements Eip1193Provider {

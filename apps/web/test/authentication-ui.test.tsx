@@ -68,7 +68,7 @@ describe('authentication UI', () => {
       'https://identity.example/authorize?flow=registration',
     );
     authenticationMocks.restore.mockResolvedValue(PROFILE);
-    authenticationMocks.logout.mockResolvedValue(undefined);
+    authenticationMocks.logout.mockResolvedValue(null);
   });
 
   afterEach(() => {
@@ -104,7 +104,8 @@ describe('authentication UI', () => {
 
       const alert = await screen.findByRole('alert');
       expect(alert).toHaveFocus();
-      expect(alert).toHaveTextContent('Please wait a moment and try again');
+      expect(alert).toHaveTextContent('Managed sign-in is unavailable right now');
+      expect(alert).toHaveTextContent('No local demo identity or account fallback was used');
       expect(alert).not.toHaveTextContent(error.message);
       expect(navigationMocks.assign).not.toHaveBeenCalled();
     },
@@ -355,7 +356,7 @@ describe('authentication UI', () => {
 
     const alert = screen.getByRole('alert');
     await waitFor(() => expect(alert).toHaveFocus());
-    expect(alert).toHaveTextContent('Please wait a moment and try again');
+    expect(alert).toHaveTextContent('Managed sign-in is unavailable right now');
     expect(alert).not.toHaveTextContent('callback');
   });
 
@@ -452,6 +453,20 @@ describe('verified account session UI', () => {
     expect(window.sessionStorage.getItem(rosterKey)).toBeNull();
     expect(window.sessionStorage.getItem(PUBLIC_TESTNET_POSITION_ACCOUNT_STORAGE_KEY)).toBeNull();
     expect(screen.getByText('Leaving your protected account…')).toBeInTheDocument();
+  });
+
+  it('navigates to the validated provider logout URL after confirmed local logout', async () => {
+    const providerLogoutUrl =
+      'https://identity.example/logout?client_id=public-client&logout_uri=https%3A%2F%2Fapp.example%2Flogin';
+    authenticationMocks.restore.mockResolvedValueOnce(PROFILE);
+    authenticationMocks.logout.mockResolvedValueOnce(providerLogoutUrl);
+    render(<AccountSession />);
+    expect(await screen.findByText(PROFILE.contactEmail)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+
+    await waitFor(() => expect(navigationMocks.replace).toHaveBeenCalledWith(providerLogoutUrl));
+    expect(screen.queryByText(PROFILE.contactEmail)).not.toBeInTheDocument();
   });
 
   it('retains the verified view when sign-out cannot be confirmed', async () => {

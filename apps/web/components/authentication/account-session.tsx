@@ -127,9 +127,11 @@ export function AccountSession() {
     setLogoutFailed(false);
     setLoggingOut(true);
     try {
-      await logoutAuthenticationSession({ signal: abortController.signal });
+      const providerLogoutUrl = await logoutAuthenticationSession({
+        signal: abortController.signal,
+      });
       if (abortController.signal.aborted || logoutGeneration.current !== generation) return;
-      setSession({ status: 'signed-out', redirectTo: '/login' });
+      setSession({ status: 'signed-out', redirectTo: providerLogoutUrl ?? '/login' });
     } catch {
       if (abortController.signal.aborted || logoutGeneration.current !== generation) return;
       setLogoutFailed(true);

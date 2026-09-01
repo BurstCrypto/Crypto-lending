@@ -39,12 +39,23 @@ The default local endpoints are:
 - Swagger UI: `http://127.0.0.1:3001/api/v1/docs`
 - OpenAPI JSON: `http://127.0.0.1:3001/api/v1/docs-json`
 
-## Synthetic local product demo
+## Current production direction
+
+The product path targets Amazon Cognito managed sign-in and Base mainnet
+(`eip155:8453`). Account identity, wallet ownership proof, portfolio reads, and
+financial actions are separate security boundaries. The current mainnet slice
+is read-only; existing testnet executors are not promoted or relabeled. See the
+[Base mainnet rollout boundary](docs/mainnet-rollout.md) for the explicit gates
+before live reads or any real-value write.
+
+## Isolated regression harness (not product runtime)
 
 KAN-253 adds a guarded, loopback-only composition for exercising the real web,
 API, database, session, and worker boundaries without a managed identity
 provider, wallet relay, RPC/indexing provider, oracle, cloud resource, vendor
-account, trial, or paid service.
+account, trial, or paid service. This harness supplies synthetic identities only
+for local regression tests; the ordinary web application and mainnet product do
+not start or expose it.
 
 ```powershell
 npm run demo:local

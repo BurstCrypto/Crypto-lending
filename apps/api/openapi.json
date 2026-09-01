@@ -926,7 +926,17 @@
         "parameters": [],
         "responses": {
           "204": {
-            "description": "Session revoked or already absent"
+            "description": "Session revoked or already absent",
+            "headers": {
+              "X-Authentication-Provider-Logout": {
+                "description": "Bounded Cognito logout navigation URL, present only after confirmed local revocation",
+                "schema": {
+                  "format": "uri",
+                  "maxLength": 4096,
+                  "type": "string"
+                }
+              }
+            }
           }
         },
         "summary": "Revoke the current local session family",
@@ -5558,8 +5568,11 @@
           "201": {
             "description": "Wallet ownership verified and registered"
           },
-          "401": {
+          "400": {
             "description": "Ownership proof rejected"
+          },
+          "401": {
+            "description": "Missing or invalid authenticated session"
           },
           "409": {
             "description": "Wallet is registered to another account"

@@ -8,7 +8,6 @@ import {
   HttpStatus,
   Post,
   Res,
-  UnauthorizedException,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
@@ -104,7 +103,8 @@ export class WalletRegistrationController {
   @ApiBody({ schema: SUBMIT_WALLET_OWNERSHIP_PROOF_SCHEMA })
   @ApiCreatedResponse({ description: 'Wallet ownership verified and registered' })
   @ApiResponse({ status: 200, description: 'Wallet was already registered to this account' })
-  @ApiUnauthorizedResponse({ description: 'Ownership proof rejected' })
+  @ApiBadRequestResponse({ description: 'Ownership proof rejected' })
+  @ApiUnauthorizedResponse({ description: 'Missing or invalid authenticated session' })
   @ApiResponse({ status: 409, description: 'Wallet is registered to another account' })
   @ApiResponse({ status: 503, description: 'Wallet registration is unavailable' })
   async submitProof(
@@ -126,7 +126,7 @@ export class WalletRegistrationController {
         error instanceof WalletRegistrationBodyError ||
         error instanceof WalletRegistrationRejectedError
       ) {
-        throw new UnauthorizedException('Wallet ownership proof rejected');
+        throw new BadRequestException('Wallet ownership proof rejected');
       }
       if (error instanceof WalletOwnershipConflictError) {
         throw new ConflictException('Wallet ownership proof conflicts with an existing wallet');

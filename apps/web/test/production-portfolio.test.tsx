@@ -1,0 +1,262 @@
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+import {
+  ProductionPortfolio,
+  type WalletOwnershipCallbacks,
+} from '../components/portfolio/production-portfolio';
+import { AuthenticationUnauthenticatedError, type AccountProfile } from '../lib/authentication';
+import { PortfolioApiError } from '../lib/portfolio/portfolio-client';
+import type { ReportingPortfolioSnapshot } from '../lib/portfolio/reporting-portfolio';
+import { REPORTING_PORTFOLIO_SNAPSHOT } from './fixtures/reporting-portfolio';
+
+const PROFILE: AccountProfile = Object.freeze({
+  accountId: '0f27af0b-48b2-4f1b-b3d4-cd531a0b4458',
+  contactEmail: 'portfolio@example.com',
+  contactPhone: null,
+  declaredResidencyCountryCode: 'US',
+  eligibilityStatus: 'UNKNOWN',
+  version: 1,
+  createdAt: '2026-08-20T16:00:00.000Z',
+  updatedAt: '2026-08-20T16:01:00.000Z',
+});
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, reject, resolve };
+}
+
+function dependencies(input: {
+  navigate?: (path: string) => void;
+  readPortfolio: (signal?: AbortSignal) => Promise<ReportingPortfolioSnapshot>;
+  restoreSession: (options: { readonly signal?: AbortSignal }) => Promise<AccountProfile>;
+}) {
+  return {
+    createClient: () => ({ readPortfolio: input.readPortfolio }),
+    navigate: input.navigate ?? vi.fn(),
+    restoreSession: input.restoreSession,
+  };
+}
+
+function ExpiredSessionWallet({ onAuthenticationRequired }: WalletOwnershipCallbacks) {
+  return (
+    <button type="button" onClick={onAuthenticationRequired}>
+      Simulate expired session
+    </button>
+  );
+}
+
+function VerifiedWallet({ onVerified }: WalletOwnershipCallbacks) {
+  return (
+    <button type="button" onClick={onVerified}>
+      Simulate verified wallet
+    </button>
+  );
+}
+
+afterEach(() => cleanup());
+
+describe('authenticated production portfolio', () => {
+  it('keeps portfolio data hidden until the managed session is verified', async () => {
+    const pendingSession = deferred<AccountProfile>();
+    const pendingPortfolio = deferred<ReportingPortfolioSnapshot>();
+    const readPortfolio = vi.fn(async (signal?: AbortSignal) => {
+      void signal;
+      return pendingPortfolio.promise;
+    });
+    const restoreSession = vi.fn(() => pendingSession.promise);
+    render(<ProductionPortfolio dependencies={dependencies({ readPortfolio, restoreSession })} />);
+
+    expect(screen.getByRole('heading', { level: 2, name: 'Loading your portfolio' })).toBeVisible();
+    expect(screen.queryByText('Supported reporting total')).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('region', { name: 'Verify a Base Mainnet wallet' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('navigation', { name: 'Jump to portfolio sections' }),
+    ).not.toBeInTheDocument();
+    expect(readPortfolio).not.toHaveBeenCalled();
+
+    pendingSession.resolve(PROFILE);
+    expect(
+      await screen.findByRole('region', { name: 'Verify a Base Mainnet wallet' }),
+    ).toHaveAttribute('id', 'wallets');
+    const jumpNavigation = screen.getByRole('navigation', {
+      name: 'Jump to portfolio sections',
+    });
+    expect(within(jumpNavigation).getByRole('link', { name: 'Wallet' })).toHaveAttribute(
+      'href',
+      '#wallets',
+    );
+    expect(within(jumpNavigation).getByRole('link', { name: 'Balances' })).toHaveAttribute(
+      'href',
+      '#balances',
+    );
+    expect(screen.getByRole('heading', { level: 2, name: 'Loading your portfolio' })).toBeVisible();
+    pendingPortfolio.resolve(REPORTING_PORTFOLIO_SNAPSHOT);
+    const portfolioCard = (await screen.findByText('Supported reporting total')).closest('article');
+    expect(within(portfolioCard!).getByLabelText('11,000 US dollars')).toHaveTextContent(
+      '$11,000.00',
+    );
+    expect(screen.getByText('Reporting only.')).toBeVisible();
+    expect(screen.getByText('Base')).toBeVisible();
+    expect(document.body).not.toHaveTextContent('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
+    expect(document.body).not.toHaveTextContent('private-reference');
+    expect(document.body).not.toHaveTextContent('Available buying power');
+    expect(readPortfolio).toHaveBeenCalledTimes(1);
+    expect(readPortfolio.mock.calls[0]?.[0]).toEqual(expect.any(AbortSignal));
+  });
+
+  it('replace-redirects a failed session check to the fixed safe portfolio login path', async () => {
+    const navigate = vi.fn();
+    const readPortfolio = vi.fn();
+    const restoreSession = vi.fn(async () => {
+      throw new AuthenticationUnauthenticatedError();
+    });
+    render(
+      <ProductionPortfolio
+        dependencies={dependencies({ navigate, readPortfolio, restoreSession })}
+      />,
+    );
+
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith('/login?returnTo=%2Fportfolio'));
+    expect(readPortfolio).not.toHaveBeenCalled();
+    expect(
+      screen.queryByRole('region', { name: 'Verify a Base Mainnet wallet' }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText('Supported reporting total')).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 2, name: 'Loading your portfolio' })).toBeVisible();
+  });
+
+  it('also redirects safely when the portfolio request observes a session race', async () => {
+    const navigate = vi.fn();
+    const readPortfolio = vi.fn(async () => {
+      throw new PortfolioApiError('UNAUTHENTICATED');
+    });
+    const restoreSession = vi.fn(async () => PROFILE);
+    render(
+      <ProductionPortfolio
+        dependencies={dependencies({ navigate, readPortfolio, restoreSession })}
+      />,
+    );
+
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith('/login?returnTo=%2Fportfolio'));
+    expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Supported reporting total')).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('region', { name: 'Verify a Base Mainnet wallet' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('clears private portfolio data and redirects when wallet challenge issuance proves auth loss', async () => {
+    const navigate = vi.fn();
+    const restoreSession = vi.fn(async () => PROFILE);
+    const readPortfolio = vi.fn(async () => REPORTING_PORTFOLIO_SNAPSHOT);
+    render(
+      <ProductionPortfolio
+        dependencies={dependencies({
+          navigate,
+          readPortfolio,
+          restoreSession,
+        })}
+        walletOwnershipComponent={ExpiredSessionWallet}
+      />,
+    );
+
+    expect(await screen.findByText('Supported reporting total')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Simulate expired session' }));
+
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith('/login?returnTo=%2Fportfolio'));
+    expect(screen.queryByText('Supported reporting total')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Simulate expired session' })).toBeNull();
+  });
+
+  it('hides the old snapshot and refetches after wallet ownership is accepted', async () => {
+    const refreshed = deferred<ReportingPortfolioSnapshot>();
+    const restoreSession = vi.fn(async () => PROFILE);
+    const readPortfolio = vi
+      .fn()
+      .mockResolvedValueOnce(REPORTING_PORTFOLIO_SNAPSHOT)
+      .mockReturnValueOnce(refreshed.promise);
+    render(
+      <ProductionPortfolio
+        dependencies={dependencies({
+          readPortfolio,
+          restoreSession,
+        })}
+        walletOwnershipComponent={VerifiedWallet}
+      />,
+    );
+
+    expect(await screen.findByText('Supported reporting total')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Simulate verified wallet' }));
+
+    await waitFor(() => expect(screen.queryByText('Supported reporting total')).toBeNull());
+    expect(screen.getByRole('heading', { name: 'Loading your portfolio' })).toBeVisible();
+    expect(readPortfolio).toHaveBeenCalledTimes(2);
+    refreshed.resolve(REPORTING_PORTFOLIO_SNAPSHOT);
+    expect(await screen.findByText('Supported reporting total')).toBeVisible();
+  });
+
+  it('renders a retryable unavailable state for 503-class failures', async () => {
+    const readPortfolio = vi
+      .fn()
+      .mockRejectedValueOnce(new PortfolioApiError('UNAVAILABLE', 1))
+      .mockResolvedValueOnce(REPORTING_PORTFOLIO_SNAPSHOT);
+    const restoreSession = vi.fn(async () => PROFILE);
+    render(<ProductionPortfolio dependencies={dependencies({ readPortfolio, restoreSession })} />);
+
+    expect(
+      await screen.findByRole('heading', { level: 2, name: 'Portfolio reporting is unavailable' }),
+    ).toBeVisible();
+    expect(screen.getByRole('region', { name: 'Verify a Base Mainnet wallet' })).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    expect(screen.getByRole('heading', { level: 2, name: 'Loading your portfolio' })).toBeVisible();
+    expect(await screen.findByText('Supported reporting total')).toBeVisible();
+    expect(restoreSession).toHaveBeenCalledTimes(2);
+    expect(readPortfolio).toHaveBeenCalledTimes(2);
+  });
+
+  it('renders invalid data as a retryable error without exposing response details', async () => {
+    const readPortfolio = vi
+      .fn()
+      .mockRejectedValueOnce(new PortfolioApiError('INVALID_RESPONSE'))
+      .mockResolvedValueOnce(REPORTING_PORTFOLIO_SNAPSHOT);
+    const restoreSession = vi.fn(async () => PROFILE);
+    render(<ProductionPortfolio dependencies={dependencies({ readPortfolio, restoreSession })} />);
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Your portfolio could not be loaded');
+    expect(screen.getByRole('region', { name: 'Verify a Base Mainnet wallet' })).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    expect(await screen.findByText('Supported reporting total')).toBeVisible();
+  });
+
+  it('hides a rendered snapshot and revalidates after a persisted pageshow', async () => {
+    const refreshed = deferred<ReportingPortfolioSnapshot>();
+    const readPortfolio = vi
+      .fn()
+      .mockResolvedValueOnce(REPORTING_PORTFOLIO_SNAPSHOT)
+      .mockReturnValueOnce(refreshed.promise);
+    const restoreSession = vi.fn(async () => PROFILE);
+    render(<ProductionPortfolio dependencies={dependencies({ readPortfolio, restoreSession })} />);
+    expect(await screen.findByText('Supported reporting total')).toBeVisible();
+
+    const pageShow = new Event('pageshow');
+    Object.defineProperty(pageShow, 'persisted', { value: true });
+    window.dispatchEvent(pageShow);
+
+    await waitFor(() =>
+      expect(screen.queryByText('Supported reporting total')).not.toBeInTheDocument(),
+    );
+    expect(screen.getByRole('heading', { level: 2, name: 'Loading your portfolio' })).toBeVisible();
+    refreshed.resolve(REPORTING_PORTFOLIO_SNAPSHOT);
+    expect(await screen.findByText('Supported reporting total')).toBeVisible();
+    expect(restoreSession).toHaveBeenCalledTimes(2);
+  });
+});

@@ -91,7 +91,7 @@ export function WalletLabClient() {
   }
 
   return (
-    <main id="main-content" className="page-shell wallet-lab-shell">
+    <main className="page-shell wallet-lab-shell">
       <header className="site-header">
         <div className="brand">
           <span className="brand-mark" aria-hidden="true">
@@ -102,7 +102,12 @@ export function WalletLabClient() {
         <p className="foundation-label">Testnet-only · Mock-only</p>
       </header>
 
-      <section className="wallet-lab-warning" aria-labelledby="lab-title">
+      <section
+        id="main-content"
+        className="wallet-lab-warning"
+        aria-labelledby="lab-title"
+        tabIndex={-1}
+      >
         <p className="eyebrow">KAN-224 restricted environment</p>
         <h1 id="lab-title">No real wallet SDK is active.</h1>
         <p className="hero-copy">

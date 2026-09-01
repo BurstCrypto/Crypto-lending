@@ -5,6 +5,7 @@ import {
   AuthenticationUnavailableError,
 } from '../lib/authentication/errors';
 import {
+  AUTHENTICATION_PROVIDER_LOGOUT_HEADER,
   logoutAuthenticationSession,
   readAuthenticationCsrfToken,
   restoreAuthenticationSession,
@@ -153,7 +154,7 @@ describe('authentication CSRF and logout boundary', () => {
 
     await expect(
       logoutAuthenticationSession({ cookieHeader: `__Host-cl_csrf=${CSRF}`, fetch: requestFetch }),
-    ).resolves.toBeUndefined();
+    ).resolves.toBeNull();
     expect(requestFetch).toHaveBeenCalledWith('/api/v1/auth/logout', {
       method: 'POST',
       cache: 'no-store',
@@ -164,6 +165,48 @@ describe('authentication CSRF and logout boundary', () => {
     const serializedCall = JSON.stringify(requestFetch.mock?.calls ?? []);
     expect(serializedCall).not.toContain('Authorization');
     expect(serializedCall).not.toContain('__Host-cl_csrf');
+  });
+
+  it('returns only the exact same-origin Cognito post-logout navigation hint', async () => {
+    const logoutUri = new URL('/login', window.location.origin).href;
+    const providerLogout = new URL('https://identity.example.test/logout');
+    providerLogout.searchParams.set('client_id', 'public-client');
+    providerLogout.searchParams.set('logout_uri', logoutUri);
+
+    await expect(
+      logoutAuthenticationSession({
+        cookieHeader: `__Host-cl_csrf=${CSRF}`,
+        fetch: async () =>
+          new Response(null, {
+            status: 204,
+            headers: { [AUTHENTICATION_PROVIDER_LOGOUT_HEADER]: providerLogout.href },
+          }),
+      }),
+    ).resolves.toBe(providerLogout.href);
+  });
+
+  it('treats malformed provider logout hints as an absent hint after confirmed local logout', async () => {
+    const logoutUri = new URL('/login', window.location.origin).href;
+    const invalid = [
+      `http://identity.example.test/logout?client_id=public-client&logout_uri=${encodeURIComponent(logoutUri)}`,
+      `https://identity.example.test/logout?client_id=public-client&logout_uri=${encodeURIComponent(`${window.location.origin}/account`)}`,
+      `https://identity.example.test/logout?logout_uri=${encodeURIComponent(logoutUri)}&client_id=public-client`,
+      `https://identity.example.test/logout?client_id=public-client&logout_uri=${encodeURIComponent(logoutUri)}&next=https%3A%2F%2Fevil.example`,
+      `https://identity.example.test/logout?client_id=${'A'.repeat(4_096)}&logout_uri=${encodeURIComponent(logoutUri)}`,
+    ];
+
+    for (const value of invalid) {
+      await expect(
+        logoutAuthenticationSession({
+          cookieHeader: `__Host-cl_csrf=${CSRF}`,
+          fetch: async () =>
+            new Response(null, {
+              status: 204,
+              headers: { [AUTHENTICATION_PROVIDER_LOGOUT_HEADER]: value },
+            }),
+        }),
+      ).resolves.toBeNull();
+    }
   });
 
   it('keeps non-204 logout failures generic and retains bounded retry advice', async () => {

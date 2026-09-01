@@ -199,6 +199,8 @@ export function createLocalDemoEnvironments(options = {}) {
     APP_VERSION: '0.1.0-local-demo',
     LOCAL_DEMO_MODE: 'enabled',
     LOCAL_DEMO_API_ORIGIN,
+    WEB_API_PROXY_MODE: 'enabled',
+    WEB_API_PROXY_ORIGIN: LOCAL_DEMO_API_ORIGIN,
     AUTH_PUBLIC_ORIGIN: LOCAL_DEMO_WEB_ORIGIN,
     NEXT_DISABLE_SWC_WASM: '1',
     NEXT_TELEMETRY_DISABLED: '1',

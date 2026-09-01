@@ -422,7 +422,8 @@ export class HttpEvmWalletOwnershipClient implements EvmWalletOwnershipClient {
       }),
       signal,
     );
-    if (response.status === 401) fail(WALLET_OWNERSHIP_HANDOFF_ERROR_CODES.rejected);
+    if (response.status === 400) fail(WALLET_OWNERSHIP_HANDOFF_ERROR_CODES.rejected);
+    if (response.status === 401) fail(WALLET_OWNERSHIP_HANDOFF_ERROR_CODES.unauthenticated);
     if (response.status === 409) fail(WALLET_OWNERSHIP_HANDOFF_ERROR_CODES.conflict);
     if (response.status === 503) {
       fail(WALLET_OWNERSHIP_HANDOFF_ERROR_CODES.unavailable, retryAfterSeconds(response));

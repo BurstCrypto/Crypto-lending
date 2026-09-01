@@ -2387,6 +2387,11 @@ h1 {
   overflow-wrap: anywhere;
 }
 
+.portfolio-reporting-money {
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+
 .portfolio-total-unavailable {
   color: #ffdda0;
 }
@@ -3588,6 +3593,10 @@ p {
   padding-inline: 1.15rem;
 }
 
+.home-session-actions-checking {
+  min-height: 3rem;
+}
+
 .home-hero-points {
   display: flex;
   flex-wrap: wrap;
@@ -4037,7 +4046,7 @@ p {
 
 .portfolio-jump-nav {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.65rem;
   padding: 0.75rem;
   background: var(--panel);
@@ -4529,6 +4538,39 @@ p {
   padding: clamp(1rem, 3vw, 1.35rem);
 }
 
+.base-mainnet-wallet-ownership {
+  margin-block: 1.5rem;
+}
+
+.base-mainnet-wallet-ownership .public-testnet-proof-heading h2 {
+  margin: 0.3rem 0 0;
+  font-size: 1.3rem;
+}
+
+.base-mainnet-wallet-ownership .local-demo-wallet-error,
+.base-mainnet-wallet-ownership [role='status'] {
+  margin: 0;
+}
+
+.base-mainnet-wallet-provider-note {
+  max-width: 72ch;
+  color: var(--ink-soft);
+  font-size: 0.88rem;
+}
+
+.base-mainnet-wallet-success {
+  width: 100%;
+  padding: 0.85rem 0.95rem;
+  color: var(--evergreen-strong);
+  background: var(--evergreen-soft);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-medium);
+}
+
+.base-mainnet-wallet-success p {
+  margin: 0.25rem 0 0;
+}
+
 .public-testnet-dashboard-overview > p,
 .public-testnet-proof-suite > p,
 .public-testnet-proof > p,
@@ -4921,6 +4963,15 @@ footer {
   .portfolio-jump-nav {
     grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
     padding: 0.6rem;
+  }
+
+  .base-mainnet-wallet-ownership .public-testnet-wallet-selection [role='group'] {
+    display: grid;
+    width: 100%;
+  }
+
+  .base-mainnet-wallet-ownership .public-testnet-wallet-selection button {
+    width: 100%;
   }
 
   .local-demo-wallet-panel,

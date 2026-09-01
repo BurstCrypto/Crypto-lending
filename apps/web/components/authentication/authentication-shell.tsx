@@ -24,7 +24,7 @@ export function AuthenticationShell({
   const authenticationActions = activePage === 'login' ? 'create-account' : 'sign-in';
 
   return (
-    <main id="main-content" className="page-shell authentication-shell">
+    <main className="page-shell authentication-shell">
       <SiteHeader
         activePage={activePage}
         authenticationActions={authenticationActions}
@@ -33,7 +33,11 @@ export function AuthenticationShell({
         createAccountLabel={activePage === 'login' ? 'Create an account' : undefined}
       />
 
-      <div className="authentication-layout authentication-layout--simple">
+      <div
+        id="main-content"
+        className="authentication-layout authentication-layout--simple"
+        tabIndex={-1}
+      >
         <section className="authentication-introduction" aria-labelledby="authentication-title">
           <p className="eyebrow">{eyebrow}</p>
           <h1 id="authentication-title">{title}</h1>

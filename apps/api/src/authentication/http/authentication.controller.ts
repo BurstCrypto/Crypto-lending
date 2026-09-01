@@ -66,6 +66,55 @@ const SESSION_COOKIE_OPTIONS = Object.freeze({ httpOnly: true, sameSite: 'Lax' a
 const CSRF_COOKIE_OPTIONS = Object.freeze({ httpOnly: false, sameSite: 'Strict' as const });
 const GENERIC_AUTHENTICATION_ERROR_PATH = '/login?error=authentication';
 const HTTP_QUALITY_VALUE = /^(?:0(?:\.\d{0,3})?|1(?:\.0{0,3})?)$/u;
+export const AUTHENTICATION_PROVIDER_LOGOUT_HEADER = 'X-Authentication-Provider-Logout';
+const MAXIMUM_PROVIDER_LOGOUT_URL_LENGTH = 4_096;
+
+function cognitoProviderLogoutUrl(
+  config: Extract<RuntimeAuthenticationConfig, { readonly mode: 'oidc' }>,
+): string | undefined {
+  if (
+    config.providerKey !== 'cognito' ||
+    config.endSessionEndpoint === undefined ||
+    config.postLogoutRedirectUri === undefined
+  ) {
+    return undefined;
+  }
+
+  try {
+    const authorizationEndpoint = new URL(config.authorizationEndpoint);
+    const endSessionEndpoint = new URL(config.endSessionEndpoint);
+    const postLogoutRedirectUri = new URL(config.postLogoutRedirectUri);
+    const expectedPostLogoutRedirectUri = new URL('/login', config.publicOrigin).href;
+    if (
+      endSessionEndpoint.protocol !== 'https:' ||
+      endSessionEndpoint.username !== '' ||
+      endSessionEndpoint.password !== '' ||
+      endSessionEndpoint.origin !== authorizationEndpoint.origin ||
+      endSessionEndpoint.pathname !== '/logout' ||
+      endSessionEndpoint.search !== '' ||
+      endSessionEndpoint.hash !== '' ||
+      endSessionEndpoint.href !== config.endSessionEndpoint ||
+      postLogoutRedirectUri.href !== expectedPostLogoutRedirectUri ||
+      postLogoutRedirectUri.href !== config.postLogoutRedirectUri ||
+      !/^[\x21-\x7e]{1,256}$/u.test(config.clientId)
+    ) {
+      return undefined;
+    }
+
+    endSessionEndpoint.searchParams.set('client_id', config.clientId);
+    endSessionEndpoint.searchParams.set('logout_uri', config.postLogoutRedirectUri);
+    const providerLogoutUrl = endSessionEndpoint.href;
+    if (
+      providerLogoutUrl.length > MAXIMUM_PROVIDER_LOGOUT_URL_LENGTH ||
+      !/^[\x21-\x7e]+$/u.test(providerLogoutUrl)
+    ) {
+      return undefined;
+    }
+    return providerLogoutUrl;
+  } catch {
+    return undefined;
+  }
+}
 
 function secondsUntil(expiry: Date): number {
   return Math.max(1, Math.floor((expiry.getTime() - Date.now()) / 1_000));
@@ -283,17 +332,28 @@ export class AuthenticationController {
 
   @Post('logout')
   @ApiOperation({ summary: 'Revoke the current local session family' })
-  @ApiNoContentResponse({ description: 'Session revoked or already absent' })
+  @ApiNoContentResponse({
+    description: 'Session revoked or already absent',
+    headers: {
+      [AUTHENTICATION_PROVIDER_LOGOUT_HEADER]: {
+        description:
+          'Bounded Cognito logout navigation URL, present only after confirmed local revocation',
+        schema: { type: 'string', format: 'uri', maxLength: MAXIMUM_PROVIDER_LOGOUT_URL_LENGTH },
+      },
+    },
+  })
   async logout(
     @Req() request: AuthenticationControllerRequest,
     @Res() response: AuthenticationControllerResponse,
   ): Promise<void> {
     this.privateResponse(response);
     let trustedOrigin = false;
+    let localLogoutConfirmed = false;
     try {
       this.assertTrustedUnsafeOrigin(request);
       trustedOrigin = true;
       await this.authentication.logout(request);
+      localLogoutConfirmed = true;
     } catch (error) {
       if (
         error instanceof AuthenticationUnavailableError ||
@@ -306,6 +366,12 @@ export class AuthenticationController {
       }
     }
     response.setHeader('Set-Cookie', this.clearSessionCookies());
+    if (localLogoutConfirmed) {
+      const providerLogoutUrl = cognitoProviderLogoutUrl(this.enabledConfig());
+      if (providerLogoutUrl !== undefined) {
+        response.setHeader(AUTHENTICATION_PROVIDER_LOGOUT_HEADER, providerLogoutUrl);
+      }
+    }
     response.status(HttpStatus.NO_CONTENT).end();
   }
 

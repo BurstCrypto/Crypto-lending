@@ -196,25 +196,19 @@ describe('UnifiedBalanceView', () => {
 });
 
 describe('PortfolioPage', () => {
-  it('renders an authenticated dynamic shell without embedding the old fixture', () => {
+  it('renders an authenticated production shell without embedding demo data', () => {
     render(<PortfolioPage />);
 
     expect(screen.queryByText('Sample data')).not.toBeInTheDocument();
+    expect(screen.queryByText(/demo wallets/iu)).not.toBeInTheDocument();
+    expect(screen.queryByText(/synthetic local portfolio/iu)).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Crypto Lending home' })).toHaveAttribute('href', '/');
     expect(screen.queryByRole('link', { name: 'Account' })).toBeNull();
-    const sectionNavigation = screen.getByRole('navigation', {
-      name: 'Jump to portfolio sections',
-    });
-    expect(within(sectionNavigation).getByRole('link', { name: 'Balances' })).toHaveAttribute(
-      'href',
-      '#balances',
-    );
-    expect(within(sectionNavigation).queryByRole('link', { name: 'Demo wallets' })).toBeNull();
-    expect(within(sectionNavigation).queryByRole('link', { name: 'Opportunities' })).toBeNull();
+    expect(screen.queryByRole('navigation', { name: 'Jump to portfolio sections' })).toBeNull();
     expect(document.querySelector('#balances')).not.toBeNull();
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
     expect(
-      screen.getByRole('heading', { level: 2, name: 'Portfolio value is unavailable' }),
+      screen.getByRole('heading', { level: 2, name: 'Loading your portfolio' }),
     ).toBeInTheDocument();
     expect(metadata).toMatchObject({
       title: 'Portfolio',
@@ -222,25 +216,22 @@ describe('PortfolioPage', () => {
     });
   });
 
-  it('renders every enabled section button with a stable page target', () => {
+  it('restores the isolated synthetic portfolio only behind the explicit local-demo flag', () => {
     vi.stubEnv('LOCAL_DEMO_MODE', 'enabled');
     vi.stubEnv('LOCAL_DEMO_API_ORIGIN', 'http://127.0.0.1:3001');
     vi.stubEnv('AUTH_PUBLIC_ORIGIN', 'http://127.0.0.1:3000');
     render(<PortfolioPage />);
 
-    const sectionNavigation = screen.getByRole('navigation', {
-      name: 'Jump to portfolio sections',
-    });
-    const links = within(sectionNavigation).getAllByRole('link');
-    expect(links.map((link) => link.textContent)).toEqual([
-      'Demo wallets',
-      'Balances',
-      'Opportunities',
-    ]);
-    for (const link of links) {
-      const target = link.getAttribute('href');
-      expect(target).toMatch(/^#[a-z-]+$/u);
-      expect(document.querySelector(target!)).not.toBeNull();
-    }
+    expect(
+      screen.getByRole('heading', {
+        level: 1,
+        name: 'Your isolated demo balances, in one clear view.',
+      }),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Crypto Lending isolated synthetic regression harness')).toBeVisible();
+    expect(screen.queryByRole('navigation', { name: 'Jump to portfolio sections' })).toBeNull();
+    expect(document.querySelector('#balances')).not.toBeNull();
+    expect(document.querySelector('#wallets')).not.toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Verify a Base Mainnet wallet' })).toBeNull();
   });
 });

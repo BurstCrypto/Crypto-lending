@@ -1,12 +1,13 @@
 import type { Metadata } from 'next';
 
 import { LocalDemoPortfolio } from '@/components/portfolio/local-demo-portfolio';
+import { ProductionPortfolio } from '@/components/portfolio/production-portfolio';
 import { SiteHeader } from '@/components/site-header';
 import { loadLocalDemoWebConfig } from '@/lib/local-demo/config-server';
 
 export const metadata: Metadata = {
   title: 'Portfolio',
-  description: 'Authenticated synthetic wallet and portfolio demonstration.',
+  description: 'Authenticated portfolio reporting and source-freshness workspace.',
   robots: { index: false, follow: false },
 };
 
@@ -14,8 +15,9 @@ export const dynamic = 'force-dynamic';
 
 export default function PortfolioPage() {
   const localDemo = loadLocalDemoWebConfig();
+
   return (
-    <main id="main-content" className="page-shell portfolio-page-shell">
+    <main className="page-shell portfolio-page-shell">
       <SiteHeader
         activePage="portfolio"
         authenticationActions="sign-in"
@@ -23,45 +25,34 @@ export default function PortfolioPage() {
       />
 
       <section
+        id="main-content"
         className="portfolio-introduction portfolio-intro"
         aria-labelledby="portfolio-page-title"
+        tabIndex={-1}
       >
         <div className="portfolio-introduction__copy">
           <p className="eyebrow">Your portfolio</p>
           <h1 id="portfolio-page-title" className="portfolio-introduction__title">
-            Everything important, in one clear view.
+            {localDemo.enabled
+              ? 'Your isolated demo balances, in one clear view.'
+              : 'Your supported balances, in one clear view.'}
           </h1>
           <p className="portfolio-introduction__description">
             {localDemo.enabled
-              ? 'Start with your demo wallets, confirm what is available, then review opportunities when you are ready.'
-              : 'Review the current portfolio status and return whenever the demo experience is available.'}
+              ? 'Exercise synthetic wallets and portfolio reporting inside the guarded loopback-only regression harness.'
+              : 'Preview conservative Base Mainnet reporting, source attribution, and freshness while approved live-data providers remain pending.'}
           </p>
         </div>
-
-        <nav
-          className="portfolio-jump-navigation portfolio-jump-nav"
-          aria-label="Jump to portfolio sections"
-        >
-          {localDemo.enabled ? (
-            <a className="portfolio-jump-link navigation-button" href="#wallets">
-              Demo wallets
-            </a>
-          ) : null}
-          <a className="portfolio-jump-link navigation-button" href="#balances">
-            Balances
-          </a>
-          {localDemo.enabled ? (
-            <a className="portfolio-jump-link navigation-button" href="#opportunities">
-              Opportunities
-            </a>
-          ) : null}
-        </nav>
       </section>
 
-      <LocalDemoPortfolio enabled={localDemo.enabled} />
+      {localDemo.enabled ? <LocalDemoPortfolio enabled /> : <ProductionPortfolio />}
 
       <footer className="site-footer">
-        <p>Crypto Lending synthetic local portfolio</p>
+        <p>
+          {localDemo.enabled
+            ? 'Crypto Lending isolated synthetic regression harness'
+            : 'Crypto Lending Base mainnet read-only preview'}
+        </p>
       </footer>
     </main>
   );

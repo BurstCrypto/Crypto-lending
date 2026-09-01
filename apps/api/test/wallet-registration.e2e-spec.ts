@@ -247,7 +247,7 @@ describe('wallet registration HTTP boundary (e2e)', () => {
     expectPrivate(idempotent);
   });
 
-  it('maps malformed and rejected proof material to the same generic 401', async () => {
+  it('maps malformed and rejected proof material to the same generic 400', async () => {
     const malformed = await authenticate(
       request(app.getHttpServer()).post('/api/v1/wallets/ownership-proofs'),
     )
@@ -257,7 +257,7 @@ describe('wallet registration HTTP boundary (e2e)', () => {
         message: 'raw message must not echo',
         signature: 'not-a-signature',
       })
-      .expect(401);
+      .expect(400);
     expect(malformed.body.message).toBe('Wallet ownership proof rejected');
     expectPrivate(malformed);
     expect(wallets.submitProof).not.toHaveBeenCalled();
@@ -272,7 +272,7 @@ describe('wallet registration HTTP boundary (e2e)', () => {
         message: 'exact server-authored message',
         signature: EVM_SIGNATURE,
       })
-      .expect(401);
+      .expect(400);
     expect(rejected.body).toEqual(malformed.body);
     expectPrivate(rejected);
   });
@@ -372,7 +372,7 @@ describe('wallet registration HTTP boundary (e2e)', () => {
         message: LOGGING_SECRET_CANARIES.privateKey,
         signature: LOGGING_SECRET_CANARIES.rawSignature,
       })
-      .expect(401);
+      .expect(400);
     expect(rejected.body.message).toBe('Wallet ownership proof rejected');
     expect(lines.map((line) => JSON.parse(line) as { event: string; outcome?: string })).toEqual([
       expect.objectContaining({ event: 'http.request.completed', outcome: 'rejected' }),

@@ -74,6 +74,9 @@ record. `Deploy` recomputes and verifies each binding.
 `infra/aws/application-baseline.yaml` is a self-contained environment stack:
 
 - an internet-facing HTTPS load balancer terminates TLS in public subnets;
+- the load balancer pins `routing.http.xff_client_port.enabled=false` so
+  forwarded client addresses remain bare IPs compatible with KAN-37's
+  fail-closed trusted-single-proxy parser;
 - only the approved `ApplicationHostname` is forwarded; unmatched TLS hostnames
   and unmatched plaintext hosts receive a fixed 404 response; only the approved
   plaintext host is redirected to HTTPS;

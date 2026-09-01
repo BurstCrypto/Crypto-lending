@@ -59,6 +59,22 @@ function oidcConfig(): OidcAuthenticationConfig {
   return config;
 }
 
+function cognitoConfig(): OidcAuthenticationConfig {
+  const environment = configEnvironment();
+  environment.OIDC_PROVIDER_KEY = 'cognito';
+  environment.OIDC_AUTHORIZATION_ENDPOINT = 'https://identity.example.test/oauth2/authorize';
+  environment.OIDC_TOKEN_ENDPOINT = 'https://identity.example.test/oauth2/token';
+  environment.OIDC_JWKS_URI = 'https://identity.example.test/tenant/.well-known/jwks.json';
+  environment.OIDC_TOKEN_AUTH_METHOD = 'none';
+  delete environment.OIDC_CLIENT_SECRET;
+  environment.OIDC_REQUIRED_TOKEN_USE = 'id';
+  environment.OIDC_END_SESSION_ENDPOINT = 'https://identity.example.test/logout';
+  environment.OIDC_POST_LOGOUT_REDIRECT_URI = 'https://app.example.test/login';
+  const config = loadAuthenticationConfig(environment);
+  if (config.mode !== 'oidc') throw new Error('Expected OIDC config');
+  return config;
+}
+
 interface Fixture {
   readonly privateKey: CryptoKey;
   readonly jwks: { readonly keys: readonly Record<string, unknown>[] };
@@ -236,6 +252,42 @@ describe('managed OIDC client', () => {
         expectedNonce: nonce,
       }),
     ).resolves.toMatchObject({ subject: 'CaseSensitiveSubject' });
+  });
+
+  it('enforces the configured Cognito ID-token use without constraining generic providers', async () => {
+    const config = cognitoConfig();
+    const keys = await fixture();
+    const nonce = generateOpaqueAuthenticationSecret('oidc-nonce');
+    const validToken = await idToken(keys.privateKey, nonce, { token_use: 'id' });
+
+    await expect(
+      clientWithResponses(config, validToken, keys.jwks).exchangeAuthorizationCode({
+        code: 'authorization-code',
+        codeVerifier: generatePkceVerifier(),
+        expectedNonce: nonce,
+      }),
+    ).resolves.toMatchObject({ providerKey: 'cognito', subject: 'CaseSensitiveSubject' });
+
+    for (const tokenUse of [undefined, 'access', ['id']]) {
+      const token = await idToken(keys.privateKey, nonce, { token_use: tokenUse });
+      await expect(
+        clientWithResponses(config, token, keys.jwks).exchangeAuthorizationCode({
+          code: 'authorization-code',
+          codeVerifier: generatePkceVerifier(),
+          expectedNonce: nonce,
+        }),
+      ).rejects.toMatchObject({ code: 'OIDC_ID_TOKEN_INVALID' });
+    }
+
+    const genericConfig = oidcConfig();
+    const genericToken = await idToken(keys.privateKey, nonce, { token_use: 'access' });
+    await expect(
+      clientWithResponses(genericConfig, genericToken, keys.jwks).exchangeAuthorizationCode({
+        code: 'authorization-code',
+        codeVerifier: generatePkceVerifier(),
+        expectedNonce: nonce,
+      }),
+    ).resolves.toMatchObject({ providerKey: 'primary' });
   });
 
   it('selects eligible signing keys from a mixed provider JWKS', async () => {

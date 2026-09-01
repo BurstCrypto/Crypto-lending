@@ -10,7 +10,9 @@ import {
 export const AUTHENTICATION_ACCOUNT_PROFILE_PATH = '/api/v1/accounts/me';
 export const AUTHENTICATION_LOGOUT_PATH = '/api/v1/auth/logout';
 export const AUTHENTICATION_CSRF_COOKIE_NAME = '__Host-cl_csrf';
+export const AUTHENTICATION_PROVIDER_LOGOUT_HEADER = 'X-Authentication-Provider-Logout';
 const CSRF_TOKEN = /^[A-Za-z0-9_-]{43}$/u;
+const MAXIMUM_PROVIDER_LOGOUT_URL_LENGTH = 4_096;
 
 export interface RestoreAuthenticationSessionOptions {
   readonly fetch?: AuthenticationFetch;
@@ -40,6 +42,52 @@ function requestInit(
 
 function browserCookieHeader(): string {
   return typeof document === 'undefined' ? '' : document.cookie;
+}
+
+function providerLogoutUrl(response: Response): string | null {
+  const value = response.headers.get(AUTHENTICATION_PROVIDER_LOGOUT_HEADER);
+  if (
+    value === null ||
+    typeof window === 'undefined' ||
+    value.length < 1 ||
+    value.length > MAXIMUM_PROVIDER_LOGOUT_URL_LENGTH ||
+    !/^[\x21-\x7e]+$/u.test(value)
+  ) {
+    return null;
+  }
+
+  try {
+    const parsed = new URL(value);
+    if (
+      parsed.protocol !== 'https:' ||
+      parsed.username !== '' ||
+      parsed.password !== '' ||
+      parsed.pathname !== '/logout' ||
+      parsed.hash !== ''
+    ) {
+      return null;
+    }
+
+    const entries = [...parsed.searchParams.entries()];
+    if (
+      entries.length !== 2 ||
+      entries[0]?.[0] !== 'client_id' ||
+      entries[1]?.[0] !== 'logout_uri'
+    ) {
+      return null;
+    }
+    const clientId = entries[0][1];
+    const logoutUri = entries[1][1];
+    const expectedLogoutUri = new URL('/login', window.location.origin).href;
+    if (!/^[\x21-\x7e]{1,256}$/u.test(clientId) || logoutUri !== expectedLogoutUri) return null;
+
+    const canonical = new URL('/logout', parsed.origin);
+    canonical.searchParams.set('client_id', clientId);
+    canonical.searchParams.set('logout_uri', logoutUri);
+    return canonical.href === value ? value : null;
+  } catch {
+    return null;
+  }
 }
 
 export function readAuthenticationCsrfToken(cookieHeader: unknown): string {
@@ -94,7 +142,7 @@ export async function restoreAuthenticationSession(
 
 export async function logoutAuthenticationSession(
   options: LogoutAuthenticationSessionOptions = {},
-): Promise<void> {
+): Promise<string | null> {
   const csrfToken = readAuthenticationCsrfToken(options.cookieHeader ?? browserCookieHeader());
   const requestFetch = options.fetch ?? globalThis.fetch;
   let response: Response;
@@ -115,6 +163,7 @@ export async function logoutAuthenticationSession(
   if (response.status !== 204) {
     throw new AuthenticationUnavailableError(retryAfterSeconds(response));
   }
+  return providerLogoutUrl(response);
 }
 
 export type { AccountProfile, AuthenticationFetch };

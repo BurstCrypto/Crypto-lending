@@ -103,6 +103,25 @@ function acceptedEntry(
   return manager.acceptOwnershipVerification(labeled.connectionId, labeled.lifecycleRevision);
 }
 
+function LocalDemoJumpNavigation() {
+  return (
+    <nav
+      className="portfolio-jump-navigation portfolio-jump-nav"
+      aria-label="Jump to portfolio sections"
+    >
+      <a className="portfolio-jump-link navigation-button" href="#wallets">
+        Demo wallets
+      </a>
+      <a className="portfolio-jump-link navigation-button" href="#balances">
+        Balances
+      </a>
+      <a className="portfolio-jump-link navigation-button" href="#opportunities">
+        Opportunities
+      </a>
+    </nav>
+  );
+}
+
 export function LocalDemoPortfolio({ enabled, dependencies }: LocalDemoPortfolioProps) {
   const configured = useMemo(() => dependenciesFor(dependencies), [dependencies]);
   const [phase, setPhase] = useState<ExperiencePhase>(enabled ? 'CHECKING' : 'UNAVAILABLE');
@@ -461,6 +480,7 @@ export function LocalDemoPortfolio({ enabled, dependencies }: LocalDemoPortfolio
   const opportunitiesAvailable = portfolio.status === 'READY' && allocationClient !== null;
   return (
     <>
+      <LocalDemoJumpNavigation />
       <section
         id="wallets"
         className="local-demo-wallet-panel"

@@ -7,7 +7,8 @@ import { startAuthenticationLogin } from '@/lib/authentication';
 import { assignBrowserLocation } from './browser-navigation';
 import { AuthenticationError } from './authentication-error';
 
-const GENERIC_START_ERROR = 'Please wait a moment and try again. No account details were changed.';
+const GENERIC_START_ERROR =
+  'Managed sign-in is unavailable right now. No local demo identity or account fallback was used, and no account details were changed.';
 
 export function LoginForm({
   returnPath,

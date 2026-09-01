@@ -83,6 +83,30 @@ test('accepts the repository no-external-egress baseline and records the DNS res
   assert.match(report.residualLimitations[3], /FAILED_AUTH_MONITORING_UNRESOLVED/);
 });
 
+test('requires bare forwarded client IPs for trusted-proxy parsing', () => {
+  const expectedError =
+    /ApplicationLoadBalancer must preserve the exact reviewed LoadBalancerAttributes contract, including routing\.http\.xff_client_port\.enabled=false so trusted-proxy parsing receives a bare canonical client IP/;
+
+  assertRejected(
+    mutate((source) =>
+      source.replace(
+        "        - Key: routing.http.xff_client_port.enabled\n          Value: 'false'",
+        "        - Key: routing.http.xff_client_port.enabled\n          Value: 'true'",
+      ),
+    ),
+    expectedError,
+  );
+  assertRejected(
+    mutate((source) =>
+      source.replace(
+        "        - Key: routing.http.xff_client_port.enabled\n          Value: 'false'\n",
+        '',
+      ),
+    ),
+    expectedError,
+  );
+});
+
 test('keeps the environment dashboard opt-in and behind the existing billing gate', () => {
   assertRejected(
     mutate((source) =>

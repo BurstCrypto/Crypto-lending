@@ -21,7 +21,7 @@ const noExternalEgressResidualLimitations = [
   'FAILED_AUTH_MONITORING_UNRESOLVED: local ACL denial and redaction tests exist, but this parent has no validated ElastiCache failed-auth log or metric delivery, filter, alarm, and actionable evidence path.',
 ];
 const reviewedApplicationBaselineSha256 =
-  'b587421b616803792178513b164ab13dbbc2050d17efd9129d85b1cb300b7167';
+  '3627d614933764f351f596af94fd30d7b048a22c88f4d25467b3c4f713c219b5';
 const reviewedWorkloadBoundariesSha256 =
   '93273bb3bf26f7d21702da2d4b155132db765ce3f123134341e2762ae521b3f9';
 const reviewedResourceTypesByLogicalId = new Map([
@@ -921,6 +921,24 @@ function validateNoExternalApplicationEgress(source, parameters, resources, inve
     entriesOf(inventory, 'AWS::ElasticLoadBalancingV2::LoadBalancer'),
     ['ApplicationLoadBalancer'],
     'Load-balancer allowlist',
+    errors,
+  );
+  requireExactSemanticProperty(
+    resources.get('ApplicationLoadBalancer') ?? '',
+    'ApplicationLoadBalancer',
+    'LoadBalancerAttributes',
+    [
+      'LoadBalancerAttributes:',
+      '  - Key: deletion_protection.enabled',
+      "    Value: 'false'",
+      '  - Key: idle_timeout.timeout_seconds',
+      "    Value: '60'",
+      '  - Key: routing.http.drop_invalid_header_fields.enabled',
+      "    Value: 'true'",
+      '  - Key: routing.http.xff_client_port.enabled',
+      "    Value: 'false'",
+    ].join('\n'),
+    'the exact reviewed LoadBalancerAttributes contract, including routing.http.xff_client_port.enabled=false so trusted-proxy parsing receives a bare canonical client IP',
     errors,
   );
   requireExactLogicalIds(

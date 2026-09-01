@@ -66,6 +66,8 @@ describe('local demo process configuration', () => {
       sourceEnvironment: { PATH: 'bin', AWS_PROFILE: 'forbidden' },
     });
     assert.equal(environments.web.LOCAL_DEMO_API_ORIGIN, LOCAL_DEMO_API_ORIGIN);
+    assert.equal(environments.web.WEB_API_PROXY_MODE, 'enabled');
+    assert.equal(environments.web.WEB_API_PROXY_ORIGIN, LOCAL_DEMO_API_ORIGIN);
     assert.equal(environments.web.AUTH_PUBLIC_ORIGIN, LOCAL_DEMO_WEB_ORIGIN);
     assert.equal(environments.api.API_HOST, '127.0.0.1');
     assert.equal(environments.api.APP_ENV, 'dev-local-demo');

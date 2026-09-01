@@ -20,6 +20,7 @@ import {
   parseOidcSubject,
 } from '../src/authentication/domain/authentication';
 import { AUTHENTICATION_COOKIE_NAMES } from '../src/authentication/http/authentication-cookies';
+import { AUTHENTICATION_PROVIDER_LOGOUT_HEADER } from '../src/authentication/http/authentication.controller';
 import {
   AUTHENTICATION_CONFIG,
   type RuntimeAuthenticationConfig,
@@ -28,7 +29,7 @@ import { createAuthenticationKey } from '../src/authentication/infrastructure/cr
 import { configureApplication } from '../src/application';
 import { StructuredLogger } from '../src/infrastructure/logging';
 
-const PROVIDER_KEY = parseOidcProviderKey('fixture');
+const PROVIDER_KEY = parseOidcProviderKey('cognito');
 const ISSUER = 'https://identity.example';
 const ACCOUNT_ID = parseAccountId('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
 
@@ -46,6 +47,9 @@ const CONFIG: RuntimeAuthenticationConfig = Object.freeze({
   jwksUri: `${ISSUER}/jwks`,
   clientId: 'local-client',
   audience: 'local-client',
+  requiredTokenUse: 'id',
+  endSessionEndpoint: `${ISSUER}/logout`,
+  postLogoutRedirectUri: 'https://app.example/login',
   signingAlgorithm: 'RS256',
   tokenEndpointAuthenticationMethod: 'none',
   publicOrigin: 'https://app.example',
@@ -278,7 +282,7 @@ describe('authentication HTTP boundary (e2e)', () => {
       header.startsWith(`${AUTHENTICATION_COOKIE_NAMES.csrf}=`),
     );
     const rotatedCsrfValue = cookieValue(rotatedCsrf as string);
-    await request(app.getHttpServer())
+    const loggedOut = await request(app.getHttpServer())
       .post('/api/v1/auth/logout')
       .set('Origin', CONFIG.publicOrigin)
       .set('X-CSRF-Token', rotatedCsrfValue)
@@ -288,6 +292,27 @@ describe('authentication HTTP boundary (e2e)', () => {
       )
       .expect(204);
     expect(repository.revokeSession).toHaveBeenCalledTimes(1);
+    expect(loggedOut.headers[AUTHENTICATION_PROVIDER_LOGOUT_HEADER.toLowerCase()]).toBe(
+      'https://identity.example/logout?client_id=local-client&logout_uri=https%3A%2F%2Fapp.example%2Flogin',
+    );
+  });
+
+  it('does not expose provider logout when local revocation is rejected', async () => {
+    repository.revokeSession.mockResolvedValueOnce({ status: 'invalid' });
+    const credentialId = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+    const session = `${AUTHENTICATION_COOKIE_NAMES.session}=${credentialId}.${'A'.repeat(43)}`;
+    const csrf = 'B'.repeat(43);
+
+    const response = await request(app.getHttpServer())
+      .post('/api/v1/auth/logout')
+      .set('Origin', CONFIG.publicOrigin)
+      .set('X-CSRF-Token', csrf)
+      .set('Cookie', `${session}; ${AUTHENTICATION_COOKIE_NAMES.csrf}=${csrf}`)
+      .expect(204);
+
+    expect(response.headers[AUTHENTICATION_PROVIDER_LOGOUT_HEADER.toLowerCase()]).toBeUndefined();
+    expect(setCookies(response)).toHaveLength(2);
+    expect(setCookies(response).every((header) => header.includes('Max-Age=0'))).toBe(true);
   });
 
   it('returns authorization URLs to explicit JSON clients without exposing the transaction cookie', async () => {

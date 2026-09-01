@@ -5,6 +5,7 @@ import {
   buildLocalDemoRewrites,
   loadLocalDemoWebConfig,
 } from './lib/local-demo/config-server.js';
+import { buildWebApiProxyRewrites, loadWebApiProxyConfig } from './lib/runtime/api-proxy-config.js';
 import { buildBrowserSecurityHeaders } from './lib/security/browser-egress.js';
 
 const ACCOUNT_SHELL_HEADERS = [
@@ -13,6 +14,7 @@ const ACCOUNT_SHELL_HEADERS = [
 ];
 
 const nextConfig = {
+  agentRules: false,
   output: 'standalone',
   poweredByHeader: false,
   reactStrictMode: true,
@@ -20,7 +22,10 @@ const nextConfig = {
     return buildLocalDemoRedirects(loadLocalDemoWebConfig());
   },
   async rewrites() {
-    return buildLocalDemoRewrites(loadLocalDemoWebConfig());
+    const apiProxyRewrites = buildWebApiProxyRewrites(loadWebApiProxyConfig());
+    return apiProxyRewrites.length > 0
+      ? apiProxyRewrites
+      : buildLocalDemoRewrites(loadLocalDemoWebConfig());
   },
   async headers() {
     const localDemo = loadLocalDemoWebConfig();

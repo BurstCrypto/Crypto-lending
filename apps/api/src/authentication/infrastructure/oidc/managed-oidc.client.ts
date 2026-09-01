@@ -470,6 +470,7 @@ export class ManagedOidcClient implements OidcClientPort {
     const notBefore = payload.nbf;
     const authorizedParty = payload.azp;
     const audience = payload.aud;
+    const tokenUse = payload.token_use;
     if (
       !Number.isSafeInteger(issuedAt) ||
       !Number.isSafeInteger(expiresAt) ||
@@ -496,6 +497,7 @@ export class ManagedOidcClient implements OidcClientPort {
       ) ||
       typeof payload.nonce !== 'string' ||
       !constantTimeAuthenticationValueEquals(payload.nonce, expectedNonce) ||
+      (this.config.requiredTokenUse !== undefined && tokenUse !== this.config.requiredTokenUse) ||
       (authorizedParty !== undefined && authorizedParty !== this.config.clientId) ||
       (Array.isArray(audience) && audience.length > 1 && authorizedParty !== this.config.clientId)
     ) {

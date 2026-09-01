@@ -1,63 +1,73 @@
-import Link from 'next/link';
-
+import { HomeSessionActions } from '@/components/authentication/home-session-actions';
 import { SiteHeader } from '@/components/site-header';
 
 export default function HomePage() {
   return (
-    <main id="main-content" className="page-shell home-page-shell">
-      <SiteHeader activePage="home" />
+    <main className="page-shell home-page-shell">
+      <SiteHeader
+        activePage="home"
+        signInHref="/login?returnTo=%2Fportfolio"
+        createAccountHref="/register?returnTo=%2Fportfolio"
+      />
 
       <div className="hero-grid home-hero-grid">
-        <section className="hero home-hero" aria-labelledby="page-title">
-          <p className="eyebrow">Crypto lending, explained clearly</p>
-          <h1 id="page-title">Understand your portfolio before you borrow or lend.</h1>
+        <section
+          id="main-content"
+          className="hero home-hero"
+          aria-labelledby="page-title"
+          tabIndex={-1}
+        >
+          <p className="eyebrow">Base mainnet read-only preview</p>
+          <h1 id="page-title">
+            See how supported balances will be reported—without giving up wallet control.
+          </h1>
           <p className="hero-copy">
-            Crypto Lending brings supported balances, estimated buying power, and illustrative
-            lending allocations into one focused view. Trace where the numbers come from and review
-            the context before deciding what to do next.
+            Crypto Lending is building one protected workspace for supported Base wallet balances,
+            conservative reporting totals, and source freshness. Live provider-backed balance data
+            is not active yet; this rollout focuses on secure account access and wallet-ownership
+            verification while your wallet keeps control.
           </p>
-          <div className="hero-actions action-group">
-            <Link className="primary-action action-button" href="/portfolio">
-              View portfolio
-            </Link>
-            <Link className="secondary-action action-button" href="/register">
-              Create an account
-            </Link>
-          </div>
+          <HomeSessionActions />
 
           <ul className="home-hero-points" aria-label="Platform highlights">
-            <li>Traceable balances</li>
-            <li>Clear estimates</li>
-            <li>Demo and testnet labels</li>
+            <li>Base mainnet scope</li>
+            <li>Conservative reporting model</li>
+            <li>Ownership-only signatures</li>
           </ul>
         </section>
 
         <aside className="home-preview-card" aria-labelledby="home-preview-title">
           <div className="home-preview-heading">
-            <p className="eyebrow">How the preview works</p>
-            <h2 id="home-preview-title">From balances to a lending estimate.</h2>
+            <p className="eyebrow">How it works</p>
+            <h2 id="home-preview-title">From secure access to an informed decision.</h2>
           </div>
 
           <ol className="home-steps">
             <li className="home-step">
               <span aria-hidden="true">01</span>
               <div>
-                <h3>Review supported positions</h3>
-                <p>See wallet, network, asset, and freshness details in one portfolio view.</p>
+                <h3>Sign in securely</h3>
+                <p>Use a managed identity provider to access your private account workspace.</p>
               </div>
             </li>
             <li className="home-step">
               <span aria-hidden="true">02</span>
               <div>
-                <h3>Separate value from buying power</h3>
-                <p>Understand which inputs are included and why an estimate may be lower.</p>
+                <h3>Verify your wallet</h3>
+                <p>
+                  Prove wallet ownership with a message signature that cannot move funds or approve
+                  a loan.
+                </p>
               </div>
             </li>
             <li className="home-step">
               <span aria-hidden="true">03</span>
               <div>
-                <h3>Preview an allocation</h3>
-                <p>Explore modeled rates, fees, and liquidity settings before any next step.</p>
+                <h3>Preview clear reporting</h3>
+                <p>
+                  See how network and asset totals will expose source coverage and freshness without
+                  treating missing data as zero.
+                </p>
               </div>
             </li>
           </ol>
@@ -68,11 +78,12 @@ export default function HomePage() {
         <div className="home-section-heading">
           <div>
             <p className="eyebrow">What we do</p>
-            <h2 id="home-purpose-title">Make every estimate easier to understand.</h2>
+            <h2 id="home-purpose-title">Design every reported total to be easier to understand.</h2>
           </div>
           <p>
-            Crypto lending data can be scattered across wallets, networks, and protocols. We bring
-            the important parts together and show how each figure was formed.
+            Mainnet lending data can be scattered across wallets, networks, and protocols. We are
+            building a reporting view that brings the important parts together and shows how each
+            figure was formed.
           </p>
         </div>
 
@@ -81,9 +92,10 @@ export default function HomePage() {
             <span className="home-benefit-number" aria-hidden="true">
               01
             </span>
-            <h3>Trace what is included</h3>
+            <h3>Unify supported balances</h3>
             <p>
-              Inspect the wallet, network, asset, source, and observation time behind a balance.
+              Once approved Base data sources are active, review supported network and asset totals
+              with source coverage and observation freshness.
             </p>
           </article>
 
@@ -91,10 +103,10 @@ export default function HomePage() {
             <span className="home-benefit-number" aria-hidden="true">
               02
             </span>
-            <h3>See why buying power changes</h3>
+            <h3>Understand each reported total</h3>
             <p>
-              Keep portfolio value separate from estimates that account for known deductions,
-              unsupported inputs, or stale data.
+              See when unsupported inputs, missing prices, or stale data make a total partial or
+              unavailable instead of treating missing information as zero.
             </p>
           </article>
 
@@ -102,10 +114,10 @@ export default function HomePage() {
             <span className="home-benefit-number" aria-hidden="true">
               03
             </span>
-            <h3>Explore without real funds</h3>
+            <h3>Keep control in your wallet</h3>
             <p>
-              Try illustrative allocations with synthetic data before any separately labeled
-              public-testnet action.
+              Account sign-in and wallet ownership are separate. Neither one can silently approve or
+              broadcast a financial transaction.
             </p>
           </article>
         </div>
@@ -113,21 +125,21 @@ export default function HomePage() {
 
       <section className="home-scope-panel" aria-labelledby="home-scope-title">
         <div>
-          <p className="eyebrow">Built for informed exploration</p>
+          <p className="eyebrow">Built for a careful mainnet rollout</p>
           <h2 id="home-scope-title">Review first. Act only when you are ready.</h2>
         </div>
         <p>
-          Local balances, prices, rates, and allocation results are synthetic or locally cached
-          estimates. Optional public-testnet actions are labeled separately and use test assets. The
-          preview does not assess risk or make a financial recommendation.
+          Mainnet reads will only be enabled after approved provider and protocol checks. Financial
+          actions will only be enabled after separate value-limit, cost, recovery, and
+          emergency-stop controls are reviewed. When enabled, connecting a wallet proves ownership
+          only. No financial action is available in this rollout; any future action would require a
+          separate wallet confirmation after its network, amount, and estimated costs are shown.
+          Portfolio figures are informational and are not financial advice.
         </p>
-        <Link className="secondary-action action-button" href="/portfolio">
-          Open the portfolio workspace
-        </Link>
       </section>
 
       <footer className="site-footer">
-        <p>Crypto Lending platform</p>
+        <p>Crypto Lending platform · Base mainnet, wallet-controlled</p>
       </footer>
     </main>
   );

@@ -50,6 +50,7 @@ export interface SelectedEip1193Provider {
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const SELECTION_ID = /^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$/u;
 const MAX_ANNOUNCED_TEXT = 512;
+const MAX_PROVIDERS_PER_CONNECTOR = 2;
 
 function dataProperty(record: object, key: string): unknown {
   try {
@@ -140,6 +141,16 @@ export class Eip6963ProviderDiscovery {
       return;
     }
 
+    const metadata = connectorMetadata(announcement.info.rdns);
+    if (
+      metadata === null ||
+      [...this.#entries.values()].filter(
+        (entry) => entry.descriptor.connectorId === metadata.connectorId,
+      ).length >= MAX_PROVIDERS_PER_CONNECTOR
+    ) {
+      return;
+    }
+
     let selectionId: string;
     try {
       selectionId = this.#createSelectionId();
@@ -153,8 +164,6 @@ export class Eip6963ProviderDiscovery {
       return;
     }
 
-    const metadata = connectorMetadata(announcement.info.rdns);
-    if (metadata === null) return;
     const descriptor = Object.freeze({
       selectionId,
       ...metadata,

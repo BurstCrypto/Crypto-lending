@@ -40,6 +40,22 @@ function oidcEnvironment(): NodeJS.ProcessEnv {
   };
 }
 
+function cognitoEnvironment(): NodeJS.ProcessEnv {
+  const environment: NodeJS.ProcessEnv = {
+    ...oidcEnvironment(),
+    OIDC_PROVIDER_KEY: 'cognito',
+    OIDC_ISSUER_URL: 'https://cognito-idp.us-west-2.amazonaws.com/us-west-2_ExampleUserPool',
+    OIDC_JWKS_URI:
+      'https://cognito-idp.us-west-2.amazonaws.com/us-west-2_ExampleUserPool/.well-known/jwks.json',
+    OIDC_TOKEN_AUTH_METHOD: 'none',
+    OIDC_REQUIRED_TOKEN_USE: 'id',
+    OIDC_END_SESSION_ENDPOINT: 'https://identity.example.test/logout',
+    OIDC_POST_LOGOUT_REDIRECT_URI: 'https://app.example.test/login',
+  };
+  delete environment.OIDC_CLIENT_SECRET;
+  return environment;
+}
+
 describe('authentication configuration', () => {
   it('defaults to an exact frozen disabled mode when no auth values are present', () => {
     const config = loadAuthenticationConfig({ NODE_ENV: 'test' });
@@ -47,10 +63,15 @@ describe('authentication configuration', () => {
     expect(Object.isFrozen(config)).toBe(true);
   });
 
-  it('rejects dormant OIDC values while disabled', () => {
-    expect(() =>
-      loadAuthenticationConfig({ AUTH_MODE: 'disabled', OIDC_CLIENT_ID: 'dormant' }),
-    ).toThrow(AuthenticationConfigurationError);
+  it.each([
+    'OIDC_CLIENT_ID',
+    'OIDC_REQUIRED_TOKEN_USE',
+    'OIDC_END_SESSION_ENDPOINT',
+    'OIDC_POST_LOGOUT_REDIRECT_URI',
+  ])('rejects dormant %s values while disabled', (name) => {
+    expect(() => loadAuthenticationConfig({ AUTH_MODE: 'disabled', [name]: 'dormant' })).toThrow(
+      AuthenticationConfigurationError,
+    );
   });
 
   it('loads a complete exact OIDC configuration without enumerating the client secret', () => {
@@ -109,6 +130,89 @@ describe('authentication configuration', () => {
 
     publicClient.OIDC_CLIENT_SECRET = 'ambiguous';
     expect(() => loadAuthenticationConfig(publicClient)).toThrow(AuthenticationConfigurationError);
+  });
+
+  it('requires an exact ID-token use policy for Cognito while leaving generic providers opt-in', () => {
+    const missing = oidcEnvironment();
+    missing.OIDC_PROVIDER_KEY = 'cognito';
+    expect(() => loadAuthenticationConfig(missing)).toThrow(
+      expect.objectContaining({ field: 'OIDC_REQUIRED_TOKEN_USE' }),
+    );
+
+    for (const value of ['', 'ID', 'access', ' id']) {
+      const invalid = { ...missing, OIDC_REQUIRED_TOKEN_USE: value };
+      expect(() => loadAuthenticationConfig(invalid)).toThrow(
+        expect.objectContaining({ field: 'OIDC_REQUIRED_TOKEN_USE' }),
+      );
+    }
+
+    const cognito = cognitoEnvironment();
+    expect(loadAuthenticationConfig(cognito)).toMatchObject({
+      mode: 'oidc',
+      providerKey: 'cognito',
+      requiredTokenUse: 'id',
+      endSessionEndpoint: 'https://identity.example.test/logout',
+      postLogoutRedirectUri: 'https://app.example.test/login',
+    });
+
+    const generic = oidcEnvironment();
+    expect(loadAuthenticationConfig(generic)).not.toHaveProperty('requiredTokenUse');
+    generic.OIDC_REQUIRED_TOKEN_USE = 'id';
+    expect(loadAuthenticationConfig(generic)).toMatchObject({ requiredTokenUse: 'id' });
+  });
+
+  it('requires a paired exact Cognito logout contract bound to the provider and app origins', () => {
+    const missingEndpoint = cognitoEnvironment();
+    delete missingEndpoint.OIDC_END_SESSION_ENDPOINT;
+    expect(() => loadAuthenticationConfig(missingEndpoint)).toThrow(
+      expect.objectContaining({ field: 'OIDC_END_SESSION_ENDPOINT' }),
+    );
+
+    const missingRedirect = cognitoEnvironment();
+    delete missingRedirect.OIDC_POST_LOGOUT_REDIRECT_URI;
+    expect(() => loadAuthenticationConfig(missingRedirect)).toThrow(
+      expect.objectContaining({ field: 'OIDC_POST_LOGOUT_REDIRECT_URI' }),
+    );
+
+    for (const [field, value] of [
+      ['OIDC_END_SESSION_ENDPOINT', 'https://identity.example.test/oauth2/logout'],
+      ['OIDC_END_SESSION_ENDPOINT', 'https://other.example.test/logout'],
+      ['OIDC_END_SESSION_ENDPOINT', 'https://identity.example.test/logout?client_id=shadow'],
+      ['OIDC_POST_LOGOUT_REDIRECT_URI', 'https://app.example.test/account'],
+      ['OIDC_POST_LOGOUT_REDIRECT_URI', 'https://other.example.test/login'],
+    ] as const) {
+      const invalid = cognitoEnvironment();
+      invalid[field] = value;
+      expect(() => loadAuthenticationConfig(invalid)).toThrow(expect.objectContaining({ field }));
+    }
+
+    const genericWithOneValue = oidcEnvironment();
+    genericWithOneValue.OIDC_END_SESSION_ENDPOINT = 'https://identity.example.test/logout';
+    expect(() => loadAuthenticationConfig(genericWithOneValue)).toThrow(
+      expect.objectContaining({ field: 'OIDC_POST_LOGOUT_REDIRECT_URI' }),
+    );
+    genericWithOneValue.OIDC_POST_LOGOUT_REDIRECT_URI = 'https://app.example.test/login';
+    expect(loadAuthenticationConfig(genericWithOneValue)).toMatchObject({
+      endSessionEndpoint: 'https://identity.example.test/logout',
+      postLogoutRedirectUri: 'https://app.example.test/login',
+    });
+  });
+
+  it.each([
+    ['OIDC_AUTHORIZATION_ENDPOINT', 'https://identity.example.test/authorize'],
+    ['OIDC_TOKEN_ENDPOINT', 'https://identity.example.test/token'],
+    ['OIDC_TOKEN_ENDPOINT', 'https://other.example.test/oauth2/token'],
+    ['OIDC_JWKS_URI', 'https://identity.example.test/.well-known/jwks.json'],
+    ['OIDC_AUDIENCE', 'another-public-client'],
+    ['OIDC_SIGNING_ALGORITHM', 'ES256'],
+    ['OIDC_TOKEN_AUTH_METHOD', 'client_secret_basic'],
+  ] as const)('rejects a Cognito public-client contract drift in %s', (field, value) => {
+    const environment = cognitoEnvironment();
+    environment[field] = value;
+    if (field === 'OIDC_TOKEN_AUTH_METHOD') {
+      environment.OIDC_CLIENT_SECRET = 'not-a-public-client';
+    }
+    expect(() => loadAuthenticationConfig(environment)).toThrow(expect.objectContaining({ field }));
   });
 
   it('accepts HTTP only for exact loopback provider URLs in tests', () => {

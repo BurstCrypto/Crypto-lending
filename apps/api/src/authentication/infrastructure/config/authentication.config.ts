@@ -10,6 +10,7 @@ import {
 
 export type OidcSigningAlgorithm = 'ES256' | 'PS256' | 'RS256';
 export type OidcTokenEndpointAuthenticationMethod = 'client_secret_basic' | 'none';
+export type OidcRequiredTokenUse = 'id';
 
 export interface DisabledAuthenticationConfig {
   readonly mode: 'disabled';
@@ -25,6 +26,9 @@ export interface OidcAuthenticationConfig {
   readonly jwksUri: string;
   readonly clientId: string;
   readonly audience: string;
+  readonly requiredTokenUse?: OidcRequiredTokenUse;
+  readonly endSessionEndpoint?: string;
+  readonly postLogoutRedirectUri?: string;
   readonly signingAlgorithm: OidcSigningAlgorithm;
   readonly tokenEndpointAuthenticationMethod: OidcTokenEndpointAuthenticationMethod;
   readonly clientSecret?: SensitiveAuthenticationText<'oidc-client-secret'>;
@@ -55,6 +59,9 @@ const OIDC_VARIABLES = [
   'OIDC_JWKS_URI',
   'OIDC_CLIENT_ID',
   'OIDC_AUDIENCE',
+  'OIDC_REQUIRED_TOKEN_USE',
+  'OIDC_END_SESSION_ENDPOINT',
+  'OIDC_POST_LOGOUT_REDIRECT_URI',
   'OIDC_SIGNING_ALGORITHM',
   'OIDC_TOKEN_AUTH_METHOD',
   'OIDC_CLIENT_SECRET',
@@ -199,6 +206,71 @@ function tokenAuthenticationMethod(value: string): OidcTokenEndpointAuthenticati
   return value;
 }
 
+function requiredTokenUse(
+  environment: Readonly<NodeJS.ProcessEnv>,
+  providerKey: OidcProviderKey,
+): OidcRequiredTokenUse | undefined {
+  const value = environment.OIDC_REQUIRED_TOKEN_USE;
+  if (value === undefined) {
+    if (providerKey === 'cognito') return fail('OIDC_REQUIRED_TOKEN_USE');
+    return undefined;
+  }
+  if (value !== 'id') return fail('OIDC_REQUIRED_TOKEN_USE');
+  return value;
+}
+
+interface ConfiguredOidcLogout {
+  readonly endSessionEndpoint?: string;
+  readonly postLogoutRedirectUri?: string;
+}
+
+function configuredOidcLogout(
+  environment: Readonly<NodeJS.ProcessEnv>,
+  providerKey: OidcProviderKey,
+  authorizationEndpoint: string,
+  publicOrigin: string,
+  clientId: string,
+  providerTestRuntime: boolean,
+  browserTestRuntime: boolean,
+): ConfiguredOidcLogout {
+  const rawEndpoint = environment.OIDC_END_SESSION_ENDPOINT;
+  const rawRedirect = environment.OIDC_POST_LOGOUT_REDIRECT_URI;
+  if (rawEndpoint === undefined && rawRedirect === undefined) {
+    if (providerKey === 'cognito') return fail('OIDC_END_SESSION_ENDPOINT');
+    return Object.freeze({});
+  }
+  if (rawEndpoint === undefined) return fail('OIDC_END_SESSION_ENDPOINT');
+  if (rawRedirect === undefined) return fail('OIDC_POST_LOGOUT_REDIRECT_URI');
+
+  const endSessionEndpoint = exactUrl(rawEndpoint, 'OIDC_END_SESSION_ENDPOINT', {
+    allowPath: true,
+    testRuntime: providerTestRuntime,
+  });
+  const parsedEndpoint = new URL(endSessionEndpoint);
+  if (
+    parsedEndpoint.origin !== new URL(authorizationEndpoint).origin ||
+    parsedEndpoint.pathname !== '/logout'
+  ) {
+    return fail('OIDC_END_SESSION_ENDPOINT');
+  }
+
+  const postLogoutRedirectUri = exactUrl(rawRedirect, 'OIDC_POST_LOGOUT_REDIRECT_URI', {
+    allowPath: true,
+    testRuntime: browserTestRuntime,
+  });
+  const parsedRedirect = new URL(postLogoutRedirectUri);
+  if (parsedRedirect.origin !== publicOrigin || parsedRedirect.pathname !== '/login') {
+    return fail('OIDC_POST_LOGOUT_REDIRECT_URI');
+  }
+
+  const providerLogoutUrl = new URL(endSessionEndpoint);
+  providerLogoutUrl.searchParams.set('client_id', clientId);
+  providerLogoutUrl.searchParams.set('logout_uri', postLogoutRedirectUri);
+  if (providerLogoutUrl.href.length > 4_096) return fail('OIDC_END_SESSION_ENDPOINT');
+
+  return Object.freeze({ endSessionEndpoint, postLogoutRedirectUri });
+}
+
 function authenticationKey<
   Purpose extends 'csrf-hmac' | 'identity-hmac' | 'preauth-seal' | 'session-hmac',
 >(
@@ -277,8 +349,21 @@ export function loadAuthenticationConfig(
 
   const clientId = exactText(environment, 'OIDC_CLIENT_ID', 256);
   const audience = exactText(environment, 'OIDC_AUDIENCE', 256);
+  const configuredRequiredTokenUse = requiredTokenUse(environment, providerKey);
+  const configuredLogout = configuredOidcLogout(
+    environment,
+    providerKey,
+    authorizationEndpoint,
+    publicOrigin,
+    clientId,
+    allowProviderLoopbackHttp,
+    localDemo,
+  );
   const tokenEndpointAuthenticationMethod = tokenAuthenticationMethod(
     required(environment, 'OIDC_TOKEN_AUTH_METHOD'),
+  );
+  const configuredSigningAlgorithm = signingAlgorithm(
+    required(environment, 'OIDC_SIGNING_ALGORITHM'),
   );
   const configuredClientSecret = environment.OIDC_CLIENT_SECRET;
   let clientSecret: SensitiveAuthenticationText<'oidc-client-secret'> | undefined;
@@ -293,6 +378,22 @@ export function loadAuthenticationConfig(
     }
   } else if (configuredClientSecret !== undefined) {
     return fail('OIDC_CLIENT_SECRET');
+  }
+
+  if (providerKey === 'cognito') {
+    const authorizationUrl = new URL(authorizationEndpoint);
+    const tokenUrl = new URL(tokenEndpoint);
+    const expectedJwksUri = `${issuer.replace(/\/$/u, '')}/.well-known/jwks.json`;
+    if (authorizationUrl.pathname !== '/oauth2/authorize') {
+      return fail('OIDC_AUTHORIZATION_ENDPOINT');
+    }
+    if (tokenUrl.origin !== authorizationUrl.origin || tokenUrl.pathname !== '/oauth2/token') {
+      return fail('OIDC_TOKEN_ENDPOINT');
+    }
+    if (jwksUri !== expectedJwksUri) return fail('OIDC_JWKS_URI');
+    if (audience !== clientId) return fail('OIDC_AUDIENCE');
+    if (configuredSigningAlgorithm !== 'RS256') return fail('OIDC_SIGNING_ALGORITHM');
+    if (tokenEndpointAuthenticationMethod !== 'none') return fail('OIDC_TOKEN_AUTH_METHOD');
   }
 
   if (localDemo) {
@@ -400,7 +501,11 @@ export function loadAuthenticationConfig(
     jwksUri,
     clientId,
     audience,
-    signingAlgorithm: signingAlgorithm(required(environment, 'OIDC_SIGNING_ALGORITHM')),
+    ...(configuredRequiredTokenUse === undefined
+      ? {}
+      : { requiredTokenUse: configuredRequiredTokenUse }),
+    ...configuredLogout,
+    signingAlgorithm: configuredSigningAlgorithm,
     tokenEndpointAuthenticationMethod,
     ...(clientSecret ? { clientSecret } : {}),
     publicOrigin,

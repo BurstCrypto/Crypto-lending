@@ -167,4 +167,32 @@ describe('Eip6963ProviderDiscovery', () => {
     expect(discovery.list()).toEqual([]);
     unsubscribe();
   });
+
+  it('bounds retained announcements while preserving duplicate-vendor ambiguity', () => {
+    const target = new EventTarget();
+    let selection = 0;
+    const discovery = new Eip6963ProviderDiscovery({
+      target,
+      supportedNetworks: KAN61_EVM_TESTNET_CATALOG,
+      createSelectionId: () => `selection-${++selection}`,
+    });
+    discovery.start();
+
+    for (let index = 0; index < 1_000; index += 1) {
+      const suffix = index.toString(16).padStart(12, '0');
+      announce(target, {
+        uuid: `${index.toString(16).padStart(8, '0')}-1111-4111-8111-${suffix}`,
+        rdns: index % 2 === 0 ? 'io.metamask' : 'com.coinbase.wallet',
+        provider: provider(),
+      });
+    }
+
+    expect(discovery.list()).toHaveLength(4);
+    expect(discovery.list().filter(({ connectorId }) => connectorId === 'metamask')).toHaveLength(
+      2,
+    );
+    expect(discovery.list().filter(({ connectorId }) => connectorId === 'coinbase')).toHaveLength(
+      2,
+    );
+  });
 });
