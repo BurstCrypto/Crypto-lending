@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 
 import { Pool, type QueryResult } from 'pg';
 
@@ -328,6 +328,67 @@ describeWithPostgres('wallet ownership registration persistence', () => {
         nonceDigest: digest(92),
       }),
     ).rejects.toMatchObject({ code: '54000' });
+  });
+
+  it('serializes concurrent registrations at the 32-active-wallet account cap', async () => {
+    const accountId = randomUUID();
+    await pool.query('INSERT INTO accounts (account_id) VALUES ($1)', [accountId]);
+
+    async function issueChallenge(): Promise<string> {
+      const challengeId = randomUUID();
+      await beginChallenge({
+        challengeId,
+        accountId,
+        addressDigest: randomBytes(32),
+        messageDigest: randomBytes(32),
+        nonceDigest: randomBytes(32),
+      });
+      return challengeId;
+    }
+
+    async function completeChallenge(challengeId: string, fill: number): Promise<QueryResult> {
+      return pool.query(
+        `SELECT * FROM complete_wallet_registration(
+           $1, $2, $3, 1::smallint, $4, $5, $6, 1::smallint, $7, $8, $9, $10
+         )`,
+        [
+          challengeId,
+          accountId,
+          randomUUID(),
+          Buffer.from(`capacity-address-${fill}`),
+          iv(fill),
+          tag(fill),
+          Buffer.from(`capacity-metadata-${fill}`),
+          iv(fill + 1),
+          tag(fill + 1),
+          randomUUID(),
+        ],
+      );
+    }
+
+    for (let index = 0; index < 31; index += 1) {
+      await completeChallenge(await issueChallenge(), 120 + index);
+    }
+
+    const contenders = await Promise.all([issueChallenge(), issueChallenge()]);
+    const outcomes = await Promise.allSettled([
+      completeChallenge(contenders[0]!, 200),
+      completeChallenge(contenders[1]!, 202),
+    ]);
+    expect(outcomes.filter(({ status }) => status === 'fulfilled')).toHaveLength(1);
+    const rejected = outcomes.filter(
+      (outcome): outcome is PromiseRejectedResult => outcome.status === 'rejected',
+    );
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0]?.reason).toMatchObject({ code: '54000' });
+
+    await expect(
+      pool.query<{ wallet_count: number }>(
+        `SELECT pg_catalog.count(*)::integer AS wallet_count
+         FROM list_active_wallet_registrations($1::uuid)`,
+        [accountId],
+      ),
+    ).resolves.toMatchObject({ rows: [{ wallet_count: 32 }] });
   });
 
   it('rechecks expiry after a completion waits for the challenge row lock', async () => {

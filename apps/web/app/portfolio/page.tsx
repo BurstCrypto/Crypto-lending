@@ -40,7 +40,7 @@ export default function PortfolioPage() {
           <p className="portfolio-introduction__description">
             {localDemo.enabled
               ? 'Exercise synthetic wallets and portfolio reporting inside the guarded loopback-only regression harness.'
-              : 'Preview conservative Base Mainnet reporting, source attribution, and freshness while approved live-data providers remain pending.'}
+              : 'Preview conservative Ethereum, Base, and Solana reporting, source attribution, and freshness while approved live-data providers remain pending.'}
           </p>
         </div>
       </section>
@@ -51,7 +51,7 @@ export default function PortfolioPage() {
         <p>
           {localDemo.enabled
             ? 'Crypto Lending isolated synthetic regression harness'
-            : 'Crypto Lending Base mainnet read-only preview'}
+            : 'Crypto Lending multi-chain mainnet read-only preview'}
         </p>
       </footer>
     </main>

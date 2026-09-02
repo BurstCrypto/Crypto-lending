@@ -1,6 +1,7 @@
 import {
   reportingNetworkName,
   type ReportingAggregate,
+  type ReportingBalanceCoverage,
   type ReportingExactUsdAmount,
   type ReportingFreshness,
   type ReportingPortfolioSnapshot,
@@ -96,6 +97,19 @@ function sourceCountLabel(aggregate: ReportingAggregate): string {
   } included`;
 }
 
+function walletCoverageLabel(coverage: ReportingBalanceCoverage): string {
+  if (coverage.targetCount === 0) return 'No registered wallet networks were expected.';
+  const incomplete = coverage.partialTargetCount + coverage.unavailableTargetCount;
+  if (incomplete === 0) {
+    return `All ${coverage.targetCount} registered wallet ${
+      coverage.targetCount === 1 ? 'network has' : 'networks have'
+    } complete balance coverage.`;
+  }
+  return `${incomplete} of ${coverage.targetCount} registered wallet ${
+    coverage.targetCount === 1 ? 'network is' : 'networks are'
+  } incomplete or unavailable. Missing balances are shown as unavailable, never $0.`;
+}
+
 function LoadingView() {
   return (
     <section
@@ -176,13 +190,14 @@ function AggregateDetails({ aggregate }: { aggregate: ReportingAggregate }) {
 function ReadyView({ snapshot }: { snapshot: ReportingPortfolioSnapshot }) {
   const formattedAsOf = `${AS_OF_FORMATTER.format(new Date(snapshot.asOf))} UTC`;
   const overall = snapshot.overallTotal;
+  const coverage = snapshot.balanceCoverage;
   return (
     <section id="balances" className="unified-balance" aria-labelledby="reporting-portfolio-title">
       <header className="portfolio-heading">
         <div>
           <p className="eyebrow">Portfolio reporting</p>
           <h2 id="reporting-portfolio-title">
-            Your supported Base Mainnet balances, clearly attributed.
+            Your supported mainnet balances, clearly attributed.
           </h2>
         </div>
         <div className="portfolio-as-of">
@@ -204,7 +219,9 @@ function ReadyView({ snapshot }: { snapshot: ReportingPortfolioSnapshot }) {
       <div className="portfolio-totals">
         <article className="portfolio-total-card" aria-labelledby="reporting-total-label">
           <p id="reporting-total-label" className="portfolio-total-label">
-            Supported reporting total
+            {overall.completeness === 'PARTIAL' && overall.usdValue !== null
+              ? 'Known reported subtotal'
+              : 'Supported reporting total'}
           </p>
           {overall.usdValue === null ? (
             <p className="portfolio-total-unavailable" role="status">
@@ -220,11 +237,12 @@ function ReadyView({ snapshot }: { snapshot: ReportingPortfolioSnapshot }) {
 
         <article className="portfolio-total-card" aria-labelledby="reporting-source-label">
           <p id="reporting-source-label" className="portfolio-total-label">
-            Source coverage
+            Registered wallet coverage
           </p>
           <p className="portfolio-total-amount">
-            {overall.includedSourceCount}/{overall.sourceCount}
+            {coverage.completeTargetCount}/{coverage.targetCount}
           </p>
+          <p className="portfolio-total-help">{walletCoverageLabel(coverage)}</p>
           <p className="portfolio-total-help">
             {snapshot.excludedSourceCount === 0
               ? 'All observed sources use supported assets.'

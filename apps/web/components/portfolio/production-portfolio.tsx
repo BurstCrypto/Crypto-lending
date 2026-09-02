@@ -1,9 +1,9 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState, type ComponentType } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from 'react';
 
 import { replaceBrowserLocation } from '@/components/authentication/browser-navigation';
-import { BaseMainnetWalletOwnership } from '@/components/wallets/base-mainnet-wallet-ownership';
+import { MainnetWalletOwnership } from '@/components/wallets/mainnet-wallet-ownership';
 import {
   AuthenticationUnauthenticatedError,
   restoreAuthenticationSession,
@@ -56,10 +56,10 @@ function DefaultWalletOwnership({
   onVerified,
 }: WalletOwnershipCallbacks) {
   return (
-    <BaseMainnetWalletOwnership
+    <MainnetWalletOwnership
       id="wallets"
       onAuthenticationRequired={onAuthenticationRequired}
-      onVerified={onVerified}
+      onVerified={() => onVerified()}
     />
   );
 }
@@ -160,17 +160,17 @@ export function ProductionPortfolio({
     setRevision((current) => current + 1);
   }
 
-  function clearExpiredSession(): void {
+  const clearExpiredSession = useCallback((): void => {
     requestReference.current?.abort();
     setPortfolio({ status: 'LOADING' });
     setPhase('SIGNED_OUT');
-  }
+  }, []);
 
-  function refreshAfterWalletVerification(): void {
+  const refreshAfterWalletVerification = useCallback((): void => {
     requestReference.current?.abort();
     setPortfolio({ status: 'LOADING' });
     setRevision((current) => current + 1);
-  }
+  }, []);
 
   if (phase === 'SIGNED_OUT' || (phase === 'CHECKING_SESSION' && portfolio.status === 'LOADING')) {
     return <ProductionPortfolioView state={portfolio} />;

@@ -2520,6 +2520,56 @@
                       "maxItems": 3,
                       "type": "array"
                     },
+                    "balanceCoverage": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "status": {
+                          "enum": [
+                            "COMPLETE",
+                            "PARTIAL",
+                            "UNAVAILABLE"
+                          ],
+                          "type": "string"
+                        },
+                        "targets": {
+                          "items": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "networkId": {
+                                "maxLength": 96,
+                                "type": "string"
+                              },
+                              "status": {
+                                "enum": [
+                                  "COMPLETE",
+                                  "PARTIAL",
+                                  "UNAVAILABLE"
+                                ],
+                                "type": "string"
+                              },
+                              "walletId": {
+                                "format": "uuid",
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "walletId",
+                              "networkId",
+                              "status"
+                            ],
+                            "type": "object"
+                          },
+                          "maxItems": 32,
+                          "type": "array",
+                          "uniqueItems": true
+                        }
+                      },
+                      "required": [
+                        "status",
+                        "targets"
+                      ],
+                      "type": "object"
+                    },
                     "balanceSnapshot": {
                       "additionalProperties": false,
                       "properties": {
@@ -3214,6 +3264,7 @@
                     "schemaVersion",
                     "asOf",
                     "balanceSnapshot",
+                    "balanceCoverage",
                     "oldestBalanceObservedAt",
                     "overallTotal",
                     "walletTotals",
@@ -5622,6 +5673,102 @@
         "summary": "Report API contract and service versions",
         "tags": [
           "system"
+        ]
+      }
+    },
+    "/api/v1/wallets": {
+      "get": {
+        "operationId": "WalletRegistrationController_listActiveWallets",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "version": {
+                      "enum": [
+                        1
+                      ],
+                      "type": "integer"
+                    },
+                    "wallets": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "address": {
+                            "maxLength": 128,
+                            "type": "string"
+                          },
+                          "chainId": {
+                            "maxLength": 96,
+                            "type": "string"
+                          },
+                          "registeredAt": {
+                            "format": "date-time",
+                            "type": "string"
+                          },
+                          "registryEnvironment": {
+                            "enum": [
+                              "MAINNET",
+                              "TESTNET"
+                            ],
+                            "type": "string"
+                          },
+                          "registryFingerprintSha256": {
+                            "pattern": "^[0-9a-f]{64}$",
+                            "type": "string"
+                          },
+                          "registryVersion": {
+                            "minimum": 1,
+                            "type": "integer"
+                          },
+                          "walletId": {
+                            "format": "uuid",
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "walletId",
+                          "chainId",
+                          "address",
+                          "registeredAt",
+                          "registryEnvironment",
+                          "registryVersion",
+                          "registryFingerprintSha256"
+                        ],
+                        "type": "object"
+                      },
+                      "maxItems": 32,
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "wallets"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Account-scoped active wallet roster"
+          },
+          "401": {
+            "description": "Missing or invalid authenticated session"
+          },
+          "503": {
+            "description": "Wallet registration is unavailable"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "List active wallets registered to the current account",
+        "tags": [
+          "wallets"
         ]
       }
     },

@@ -32,6 +32,10 @@ import {
   createLedgerFeeAdjustmentIntegrityMigrationV0013,
   createLedgerFeeAdjustmentIntegrityTestSchemaMigrationV0013,
 } from './0013-repair-ledger-fee-adjustment-integrity.migration';
+import {
+  createActiveWalletRegistrationListMigrationV0014,
+  createActiveWalletRegistrationListTestSchemaMigrationV0014,
+} from './0014-list-active-wallet-registrations.migration';
 import type { DatabaseMigration } from './migration';
 
 /**
@@ -53,6 +57,7 @@ export const DATABASE_TEST_SCHEMA_MIGRATION_LIST: readonly DatabaseMigration[] =
   createWalletOwnershipRegistrationTestSchemaMigrationV0011,
   createYieldOperationControlsTestSchemaMigrationV0012,
   createLedgerFeeAdjustmentIntegrityTestSchemaMigrationV0013,
+  createActiveWalletRegistrationListTestSchemaMigrationV0014,
 ]);
 
 export const DATABASE_MIGRATION_LIST: readonly DatabaseMigration[] = Object.freeze([
@@ -69,6 +74,7 @@ export const DATABASE_MIGRATION_LIST: readonly DatabaseMigration[] = Object.free
   createWalletOwnershipRegistrationMigrationV0011,
   createYieldOperationControlsMigrationV0012,
   createLedgerFeeAdjustmentIntegrityMigrationV0013,
+  createActiveWalletRegistrationListMigrationV0014,
 ]);
 
 export type { DatabaseMigration } from './migration';
@@ -112,3 +118,8 @@ export {
   createLedgerFeeAdjustmentIntegrityMigrationV0013,
   createLedgerFeeAdjustmentIntegrityTestSchemaMigrationV0013,
 } from './0013-repair-ledger-fee-adjustment-integrity.migration';
+export {
+  createActiveWalletRegistrationListMigration,
+  createActiveWalletRegistrationListMigrationV0014,
+  createActiveWalletRegistrationListTestSchemaMigrationV0014,
+} from './0014-list-active-wallet-registrations.migration';

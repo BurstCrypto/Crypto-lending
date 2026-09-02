@@ -118,6 +118,20 @@ describeWithPostgres('wallet registration integration', () => {
     expect(rejected).toHaveLength(1);
     expect(rejected[0]?.reason).toBeInstanceOf(WalletRegistrationRejectedError);
 
+    await expect(service.listActiveWallets(accountId)).resolves.toEqual({
+      version: 1,
+      wallets: [
+        expect.objectContaining({
+          walletId: fulfilled[0]?.value.walletId,
+          chainId: 'eip155:11155111',
+          address: account.address.toLowerCase(),
+          registryEnvironment: 'TESTNET',
+          registryVersion: 1,
+          registryFingerprintSha256: challenge.registryFingerprintSha256,
+        }),
+      ],
+    });
+
     const walletRows = await schemaPool.query<{
       address_ciphertext: Buffer;
       address_digest: Buffer;
@@ -203,5 +217,9 @@ describeWithPostgres('wallet registration integration', () => {
         [challenge.challengeId],
       ),
     ).resolves.toMatchObject({ rows: [{ status: 'PENDING' }] });
+    await expect(service.listActiveWallets(otherAccountId)).resolves.toEqual({
+      version: 1,
+      wallets: [],
+    });
   });
 });

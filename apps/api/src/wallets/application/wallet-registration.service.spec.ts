@@ -3,7 +3,9 @@ import { generateKeyPairSync, randomBytes, randomUUID, sign as signNodeMessage }
 import { privateKeyToAccount } from 'viem/accounts';
 
 import { parseAccountId } from '../../accounts/domain/account-profile';
+import { supportedAssetRegistryForEnvironment } from '../../blockchain/domain/supported-asset-registry';
 import type {
+  ActiveWalletRegistrationRecord,
   BeginWalletOwnershipChallengeRequest,
   CompleteWalletRegistrationRequest,
   PrepareWalletOwnershipChallengeResult,
@@ -12,12 +14,19 @@ import type {
 import {
   WalletOwnershipConflictError,
   WalletRegistrationRejectedError,
+  WalletRegistrationUnavailableError,
 } from './wallet-registration.errors';
 import { WalletRegistrationService } from './wallet-registration.service';
+import { parseWalletChallengeId } from '../domain/wallet-ownership-proof';
+import { WALLET_REGISTRATION_LAUNCH_CHAIN_IDS } from '../domain/wallet-registration-launch-policy';
 import {
   loadWalletRegistrationConfig,
-  type WalletRegistrationConfig,
+  type EnabledWalletRegistrationConfig,
 } from '../infrastructure/config/wallet-registration.config';
+import {
+  digestWalletIdentity,
+  sealWalletRegistrationValue,
+} from '../infrastructure/crypto/wallet-registration-crypto';
 
 const NOW = new Date('2026-08-22T17:00:00.000Z');
 const ACCOUNT_ID = parseAccountId(randomUUID());
@@ -28,13 +37,15 @@ function encodedKey(): string {
   return randomBytes(32).toString('base64url');
 }
 
-function config(): WalletRegistrationConfig {
-  return loadWalletRegistrationConfig({
+function config(
+  registryEnvironment: 'MAINNET' | 'TESTNET' = 'TESTNET',
+): EnabledWalletRegistrationConfig {
+  const loaded = loadWalletRegistrationConfig({
     NODE_ENV: 'test',
     AUTH_MODE: 'oidc',
     AUTH_PUBLIC_ORIGIN: 'http://127.0.0.1:3000',
     WALLET_REGISTRATION_MODE: 'enabled',
-    WALLET_REGISTRATION_REGISTRY_ENVIRONMENT: 'TESTNET',
+    WALLET_REGISTRATION_REGISTRY_ENVIRONMENT: registryEnvironment,
     WALLET_REGISTRATION_CHALLENGE_TTL_SECONDS: '300',
     WALLET_IDENTITY_HMAC_KEY_VERSION: '1',
     WALLET_IDENTITY_HMAC_KEY: encodedKey(),
@@ -43,6 +54,8 @@ function config(): WalletRegistrationConfig {
     WALLET_METADATA_SEAL_KEY_VERSION: '1',
     WALLET_METADATA_SEAL_KEY: encodedKey(),
   });
+  if (loaded.mode !== 'enabled') throw new Error('enabled wallet fixture expected');
+  return loaded;
 }
 
 function base58(bytes: Uint8Array): string {
@@ -73,6 +86,7 @@ function base58(bytes: Uint8Array): string {
 interface RepositoryFixture {
   readonly repository: WalletRegistrationRepositoryPort;
   readonly complete: jest.MockedFunction<WalletRegistrationRepositoryPort['completeRegistration']>;
+  readonly list: jest.MockedFunction<WalletRegistrationRepositoryPort['listActiveWallets']>;
 }
 
 function repositoryFixture(): RepositoryFixture {
@@ -85,7 +99,12 @@ function repositoryFixture(): RepositoryFixture {
     walletId: request.walletId,
     registeredAt: NOW,
   }));
+  const list = jest.fn<
+    ReturnType<WalletRegistrationRepositoryPort['listActiveWallets']>,
+    Parameters<WalletRegistrationRepositoryPort['listActiveWallets']>
+  >(async () => []);
   const repository: WalletRegistrationRepositoryPort = {
+    listActiveWallets: list,
     beginChallenge: jest.fn(async (request) => {
       begun = request;
       return { challengeId: request.challengeId, expiresAt: request.expiresAt };
@@ -111,18 +130,130 @@ function repositoryFixture(): RepositoryFixture {
     rejectChallenge: jest.fn(async () => ({ status: 'rejected' as const })),
     completeRegistration: complete,
   };
-  return { repository, complete };
+  return { repository, complete, list };
 }
 
-function serviceFixture(): RepositoryFixture & { readonly service: WalletRegistrationService } {
+function serviceFixture(
+  registryEnvironment: 'MAINNET' | 'TESTNET' = 'TESTNET',
+): RepositoryFixture & {
+  readonly config: EnabledWalletRegistrationConfig;
+  readonly service: WalletRegistrationService;
+} {
   const fixture = repositoryFixture();
-  const service = new WalletRegistrationService(fixture.repository, config(), {
+  const walletConfig = config(registryEnvironment);
+  const service = new WalletRegistrationService(fixture.repository, walletConfig, {
     now: () => new Date(NOW),
   });
-  return { service, ...fixture };
+  return { config: walletConfig, service, ...fixture };
 }
 
 describe('WalletRegistrationService', () => {
+  it('pins the exact three-chain launch allowlist for each registry environment', () => {
+    expect(WALLET_REGISTRATION_LAUNCH_CHAIN_IDS).toEqual({
+      MAINNET: ['eip155:1', 'eip155:8453', 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp'],
+      TESTNET: ['eip155:11155111', 'eip155:84532', 'solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1'],
+    });
+  });
+
+  it('decrypts only account-bound active wallets with current registry and digest bindings', async () => {
+    const { service, config: walletConfig, list } = serviceFixture();
+    const walletId = randomUUID();
+    const registeredByChallengeId = parseWalletChallengeId(randomUUID());
+    const chainId = 'eip155:11155111' as const;
+    const address = '0xde709f2102306220921060314715629080e2fb77';
+    const addressDigest = digestWalletIdentity(walletConfig.identityHmacKey, chainId, address);
+    const registry = supportedAssetRegistryForEnvironment('TESTNET').latest;
+    const record: ActiveWalletRegistrationRecord = {
+      walletId,
+      accountId: ACCOUNT_ID,
+      registeredByChallengeId,
+      chainId,
+      registry: {
+        environment: registry.environment,
+        version: registry.version,
+        fingerprintSha256: registry.fingerprintSha256,
+      },
+      addressDigest,
+      encryptedAddress: sealWalletRegistrationValue(
+        walletConfig.metadataSealKey,
+        {
+          field: 'address',
+          walletId,
+          challengeId: registeredByChallengeId,
+          accountId: ACCOUNT_ID,
+          networkId: chainId,
+          addressDigest,
+        },
+        address,
+      ),
+      registeredAt: NOW,
+    };
+    list.mockResolvedValue([record]);
+
+    await expect(service.listActiveWallets(ACCOUNT_ID)).resolves.toEqual({
+      version: 1,
+      wallets: [
+        {
+          walletId,
+          chainId,
+          address,
+          registeredAt: NOW.toISOString(),
+          registryEnvironment: registry.environment,
+          registryVersion: registry.version,
+          registryFingerprintSha256: registry.fingerprintSha256,
+        },
+      ],
+    });
+    expect(list).toHaveBeenCalledWith({ accountId: ACCOUNT_ID });
+
+    list.mockResolvedValueOnce([{ ...record, accountId: parseAccountId(randomUUID()) }]);
+    await expect(service.listActiveWallets(ACCOUNT_ID)).rejects.toBeInstanceOf(
+      WalletRegistrationUnavailableError,
+    );
+
+    const unsupportedChainId = 'eip155:421614' as const;
+    const unsupportedDigest = digestWalletIdentity(
+      walletConfig.identityHmacKey,
+      unsupportedChainId,
+      address,
+    );
+    list.mockResolvedValueOnce([
+      {
+        ...record,
+        chainId: unsupportedChainId,
+        addressDigest: unsupportedDigest,
+        encryptedAddress: sealWalletRegistrationValue(
+          walletConfig.metadataSealKey,
+          {
+            field: 'address',
+            walletId,
+            challengeId: registeredByChallengeId,
+            accountId: ACCOUNT_ID,
+            networkId: unsupportedChainId,
+            addressDigest: unsupportedDigest,
+          },
+          address,
+        ),
+      },
+    ]);
+    await expect(service.listActiveWallets(ACCOUNT_ID)).rejects.toBeInstanceOf(
+      WalletRegistrationUnavailableError,
+    );
+
+    list.mockResolvedValueOnce([
+      {
+        ...record,
+        encryptedAddress: {
+          ...record.encryptedAddress,
+          authTag: randomBytes(16).toString('base64url'),
+        },
+      },
+    ]);
+    await expect(service.listActiveWallets(ACCOUNT_ID)).rejects.toBeInstanceOf(
+      WalletRegistrationUnavailableError,
+    );
+  });
+
   it('issues and verifies a valid offline EVM EOA proof', async () => {
     const { service, complete } = serviceFixture();
     const account = privateKeyToAccount(`0x${randomBytes(32).toString('hex')}`);
@@ -269,6 +400,28 @@ describe('WalletRegistrationService', () => {
       service.issueChallenge({
         accountId: ACCOUNT_ID,
         chainId: 'eip155:1',
+        address: '0xde709f2102306220921060314715629080e2fb77',
+        correlationId: CORRELATION_ID,
+      }),
+    ).rejects.toBeInstanceOf(WalletRegistrationRejectedError);
+    await expect(
+      service.issueChallenge({
+        accountId: ACCOUNT_ID,
+        chainId: 'eip155:421614',
+        address: '0xde709f2102306220921060314715629080e2fb77',
+        correlationId: CORRELATION_ID,
+      }),
+    ).rejects.toBeInstanceOf(WalletRegistrationRejectedError);
+    expect(repository.beginChallenge).not.toHaveBeenCalled();
+  });
+
+  it('rejects Arbitrum mainnet before creating durable state', async () => {
+    const { service, repository } = serviceFixture('MAINNET');
+
+    await expect(
+      service.issueChallenge({
+        accountId: ACCOUNT_ID,
+        chainId: 'eip155:42161',
         address: '0xde709f2102306220921060314715629080e2fb77',
         correlationId: CORRELATION_ID,
       }),

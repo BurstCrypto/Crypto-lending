@@ -8,12 +8,21 @@ export {
 export { PortfolioUnavailableError } from './application/portfolio.errors';
 export {
   PORTFOLIO_BALANCE_READER,
+  type IndexedBalanceCoverageStatus,
   type IndexedBalanceFreshness,
+  type IndexedPortfolioBalanceCoverage,
+  type IndexedPortfolioBalanceCoverageTarget,
   type IndexedPortfolioBalanceObservation,
   type IndexedPortfolioBalanceSnapshot,
   type PortfolioBalanceReader,
   type ReadPortfolioBalancesRequest,
 } from './application/ports/portfolio-balance-reader.port';
+export {
+  PORTFOLIO_WALLET_REGISTRATION_READER,
+  type ActivePortfolioWalletRegistration,
+  type PortfolioWalletRegistrationReader,
+  type ReadActivePortfolioWalletRegistrationsRequest,
+} from './application/ports/portfolio-wallet-registration-reader.port';
 export {
   PORTFOLIO_PRICE_EVIDENCE_READER,
   type PortfolioPriceEvidenceReader,
@@ -29,6 +38,8 @@ export {
   type PortfolioAggregate,
   type PortfolioAssetReference,
   type PortfolioAssetTotal,
+  type PortfolioBalanceCoverage,
+  type PortfolioBalanceCoverageTarget,
   type PortfolioChainTotal,
   type PortfolioCompleteness,
   type PortfolioFreshness,

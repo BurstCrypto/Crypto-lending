@@ -3,6 +3,7 @@ import {
   Body,
   ConflictException,
   Controller,
+  Get,
   HttpCode,
   HttpException,
   HttpStatus,
@@ -16,10 +17,12 @@ import {
   ApiBody,
   ApiCreatedResponse,
   ApiOperation,
+  ApiOkResponse,
   ApiResponse,
   ApiSecurity,
   ApiTags,
   ApiUnauthorizedResponse,
+  type SchemaObject,
 } from '@nestjs/swagger';
 
 import { AccountAuthGuard } from '../../accounts/auth/account-auth.guard';
@@ -33,6 +36,7 @@ import {
   WalletRegistrationUnavailableError,
 } from '../application/wallet-registration.errors';
 import { WalletRegistrationService } from '../application/wallet-registration.service';
+import { MAX_ACTIVE_WALLET_REGISTRATIONS_PER_ACCOUNT } from '../application/ports/wallet-registration-repository.port';
 import {
   ISSUE_WALLET_OWNERSHIP_CHALLENGE_SCHEMA,
   SUBMIT_WALLET_OWNERSHIP_PROOF_SCHEMA,
@@ -47,6 +51,41 @@ interface StatusWriter {
   status(code: number): this;
 }
 
+const ACTIVE_WALLET_ROSTER_SCHEMA: SchemaObject = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['version', 'wallets'],
+  properties: {
+    version: { type: 'integer', enum: [1] },
+    wallets: {
+      type: 'array',
+      maxItems: MAX_ACTIVE_WALLET_REGISTRATIONS_PER_ACCOUNT,
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: [
+          'walletId',
+          'chainId',
+          'address',
+          'registeredAt',
+          'registryEnvironment',
+          'registryVersion',
+          'registryFingerprintSha256',
+        ],
+        properties: {
+          walletId: { type: 'string', format: 'uuid' },
+          chainId: { type: 'string', maxLength: 96 },
+          address: { type: 'string', maxLength: 128 },
+          registeredAt: { type: 'string', format: 'date-time' },
+          registryEnvironment: { type: 'string', enum: ['MAINNET', 'TESTNET'] },
+          registryVersion: { type: 'integer', minimum: 1 },
+          registryFingerprintSha256: { type: 'string', pattern: '^[0-9a-f]{64}$' },
+        },
+      },
+    },
+  },
+};
+
 @ApiTags('wallets')
 @ApiSecurity('sessionCookie')
 @UseGuards(AccountAuthGuard)
@@ -54,6 +93,25 @@ interface StatusWriter {
 @Controller('wallets')
 export class WalletRegistrationController {
   constructor(private readonly wallets: WalletRegistrationService) {}
+
+  @Get()
+  @ApiOperation({ summary: 'List active wallets registered to the current account' })
+  @ApiOkResponse({
+    description: 'Account-scoped active wallet roster',
+    schema: ACTIVE_WALLET_ROSTER_SCHEMA,
+  })
+  @ApiUnauthorizedResponse({ description: 'Missing or invalid authenticated session' })
+  @ApiResponse({ status: 503, description: 'Wallet registration is unavailable' })
+  async listActiveWallets(
+    @CurrentPrincipal() principal: AuthenticatedPrincipal,
+    @Res({ passthrough: true }) response: StatusWriter,
+  ): Promise<unknown> {
+    try {
+      return await this.wallets.listActiveWallets(principal.accountId);
+    } catch (error) {
+      this.rethrowOperational(error, response);
+    }
+  }
 
   @Post('ownership-challenges')
   @ApiOperation({ summary: 'Issue a one-use, account-bound wallet ownership challenge' })

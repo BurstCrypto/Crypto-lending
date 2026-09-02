@@ -17,11 +17,13 @@ import {
   type RegisteredEvmWalletResult,
 } from '@/lib/wallets/eip1193/ownership';
 import type { Eip1193Provider, Eip1193RequestArguments } from '@/lib/wallets/eip1193/provider';
+import { MAINNET_WALLET_REGISTRY } from '@/lib/wallets/mainnet-network-policy';
 
 const ORIGIN = 'https://app.example.test';
 const ADDRESS = '0x1111111111111111111111111111111111111111';
 const CHALLENGE_ID = '11111111-1111-4111-8111-111111111111';
-const ACCOUNT_ID = '22222222-2222-4222-8222-222222222222';
+const ACCOUNT_ID = `eip155:11155111:${ADDRESS}`;
+const WRONG_REQUEST_ID = '22222222-2222-4222-8222-222222222222';
 const WALLET_ID = '33333333-3333-4333-8333-333333333333';
 const NONCE = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
 const EXPIRES_AT = '2026-08-24T12:05:00.000Z';
@@ -177,7 +179,7 @@ describe('HttpEvmWalletOwnershipClient', () => {
   });
 
   it.each([
-    ['wrong request binding', { message: message({ requestId: ACCOUNT_ID }) }],
+    ['wrong request binding', { message: message({ requestId: WRONG_REQUEST_ID }) }],
     [
       'unexpected signing statement',
       { message: message().replace('does not authorize login', 'authorizes login') },
@@ -199,6 +201,65 @@ describe('HttpEvmWalletOwnershipClient', () => {
       code: WALLET_OWNERSHIP_HANDOFF_ERROR_CODES.unavailable,
       message: 'Wallet ownership service is unavailable',
     });
+  });
+
+  it.each([
+    ['version', { registryVersion: MAINNET_WALLET_REGISTRY.version + 1 }],
+    ['fingerprint', { registryFingerprintSha256: 'cd'.repeat(32) }],
+  ])('rejects MAINNET challenge registry %s drift', async (_name, overrides) => {
+    const requestFetch = vi.fn(async () =>
+      jsonResponse(
+        201,
+        challengeResponse({
+          registryEnvironment: MAINNET_WALLET_REGISTRY.environment,
+          registryVersion: MAINNET_WALLET_REGISTRY.version,
+          registryFingerprintSha256: MAINNET_WALLET_REGISTRY.fingerprintSha256,
+          ...overrides,
+        }),
+      ),
+    );
+
+    await expect(
+      httpClient(requestFetch).issueChallenge({
+        chainId: 'eip155:11155111',
+        address: ADDRESS,
+        registryEnvironment: 'MAINNET',
+      }),
+    ).rejects.toMatchObject({ code: WALLET_OWNERSHIP_HANDOFF_ERROR_CODES.unavailable });
+  });
+
+  it.each([
+    ['version', { registryVersion: MAINNET_WALLET_REGISTRY.version + 1 }],
+    ['fingerprint', { registryFingerprintSha256: 'cd'.repeat(32) }],
+  ])('rejects MAINNET registration registry %s drift', async (_name, overrides) => {
+    const challenge: IssuedEvmOwnershipChallenge = {
+      ...issuedChallenge(),
+      registryEnvironment: MAINNET_WALLET_REGISTRY.environment,
+      registryVersion: MAINNET_WALLET_REGISTRY.version,
+      registryFingerprintSha256: MAINNET_WALLET_REGISTRY.fingerprintSha256,
+    };
+    const requestFetch = vi.fn(async () =>
+      jsonResponse(201, {
+        ...registrationResponse(),
+        registryEnvironment: MAINNET_WALLET_REGISTRY.environment,
+        registryVersion: MAINNET_WALLET_REGISTRY.version,
+        registryFingerprintSha256: MAINNET_WALLET_REGISTRY.fingerprintSha256,
+        ...overrides,
+      }),
+    );
+
+    await expect(
+      httpClient(requestFetch).submitProof({
+        challenge,
+        signature: {
+          format: 'siwe',
+          challengeId: challenge.id,
+          chainId: challenge.chainId,
+          address: challenge.address,
+          signature: SIGNATURE,
+        },
+      }),
+    ).rejects.toMatchObject({ code: WALLET_OWNERSHIP_HANDOFF_ERROR_CODES.unavailable });
   });
 
   it('maps rate limits and API rejection without reading or retaining response detail', async () => {

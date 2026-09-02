@@ -20,7 +20,7 @@ import {
 } from '../blockchain/domain/local-evm-development';
 import type { BalanceSyncObservation } from '../blockchain-sync/domain/balance-sync';
 import type { IndexedPortfolioBalanceObservation } from '../portfolio/application/ports/portfolio-balance-reader.port';
-import { parseIndexedPortfolioBalanceSnapshot } from '../portfolio/domain/portfolio-balance-snapshot';
+import { parseLocalDemoPortfolioBalanceSnapshot } from '../portfolio/domain/portfolio-balance-snapshot';
 import type { JobCorrelationContext } from '../infrastructure/outbox/job-envelope';
 import {
   buildUnifiedPortfolio,
@@ -229,7 +229,7 @@ function toDemoChainWallet(wallet: LocalDemoWalletConnection): LocalDemoChainWal
 function projectBalanceSnapshot(
   accountId: AccountId,
   observations: readonly BalanceSyncObservation[],
-): ReturnType<typeof parseIndexedPortfolioBalanceSnapshot> {
+): ReturnType<typeof parseLocalDemoPortfolioBalanceSnapshot> {
   const projected: IndexedPortfolioBalanceObservation[] = [];
   for (const observation of observations) {
     if (observation.accountId !== accountId || observation.positions.length !== 1) {
@@ -254,7 +254,7 @@ function projectBalanceSnapshot(
     }
   }
   projected.sort((left, right) => left.walletId.localeCompare(right.walletId));
-  return parseIndexedPortfolioBalanceSnapshot(
+  return parseLocalDemoPortfolioBalanceSnapshot(
     {
       snapshotId: `local-demo-balances:${digest(
         'local-demo-balance-snapshot-v2',
@@ -273,7 +273,7 @@ function projectBalanceSnapshot(
 }
 
 function valueAndAggregate(
-  snapshot: ReturnType<typeof parseIndexedPortfolioBalanceSnapshot>,
+  snapshot: ReturnType<typeof parseLocalDemoPortfolioBalanceSnapshot>,
 ): UnifiedPortfolio {
   const mainnetRegistry = MAINNET_SUPPORTED_ASSET_REGISTRY.latest;
   if (mainnetRegistry.environment !== 'MAINNET' || mainnetRegistry.version !== 1) {
@@ -313,6 +313,7 @@ function valueAndAggregate(
     balanceSnapshotId: snapshot.snapshotId,
     balanceCapturedAt: snapshot.capturedAt,
     balanceSnapshotFreshness: snapshot.freshnessClass,
+    balanceCoverage: snapshot.coverage,
     valuedBalances,
     excludedBalances: [],
   });

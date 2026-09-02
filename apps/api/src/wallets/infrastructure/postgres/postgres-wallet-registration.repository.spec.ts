@@ -4,9 +4,10 @@ import type { QueryResult } from 'pg';
 
 import { parseAccountId } from '../../../accounts/domain/account-profile';
 import type { PostgresService } from '../../../infrastructure/database/postgres.service';
-import type {
-  BeginWalletOwnershipChallengeRequest,
-  WalletRegistrationRepositoryPort,
+import {
+  MAX_ACTIVE_WALLET_REGISTRATIONS_PER_ACCOUNT,
+  type BeginWalletOwnershipChallengeRequest,
+  type WalletRegistrationRepositoryPort,
 } from '../../application/ports/wallet-registration-repository.port';
 import { WalletRegistrationRateLimitedError } from '../../application/wallet-registration.errors';
 import { parseWalletChallengeId } from '../../domain/wallet-ownership-proof';
@@ -25,6 +26,7 @@ const NOW = new Date('2026-08-22T17:00:00.000Z');
 const EXPIRES = new Date('2026-08-22T17:05:00.000Z');
 const ACCOUNT_ID = parseAccountId(randomUUID());
 const CHALLENGE_ID = parseWalletChallengeId(randomUUID());
+const WALLET_ID = randomUUID();
 const CORRELATION_ID = randomUUID();
 const ADDRESS = '0xde709f2102306220921060314715629080e2fb77';
 const NETWORK = 'eip155:11155111' as const;
@@ -92,6 +94,73 @@ function repositoryWith(query: jest.Mock): WalletRegistrationRepositoryPort {
 }
 
 describe('PostgresWalletRegistrationRepository', () => {
+  it('lists only bounded encrypted active-wallet rows for the requested account', async () => {
+    const request = beginRequest();
+    const encryptedAddress = sealWalletRegistrationValue(
+      createWalletRegistrationKey('metadata-seal', 1, randomBytes(32).toString('base64url')),
+      {
+        field: 'address',
+        walletId: WALLET_ID,
+        challengeId: CHALLENGE_ID,
+        accountId: ACCOUNT_ID,
+        networkId: NETWORK,
+        addressDigest: request.addressDigest,
+      },
+      ADDRESS,
+    );
+    const row = {
+      active_wallet_id: WALLET_ID,
+      active_account_id: ACCOUNT_ID,
+      active_registered_by_challenge_id: CHALLENGE_ID,
+      active_chain_namespace: 'eip155',
+      active_chain_reference: '11155111',
+      active_registry_environment: request.registry.environment,
+      active_registry_version: request.registry.version,
+      active_registry_fingerprint_sha256: request.registry.fingerprintSha256,
+      active_address_digest_version: request.addressDigest.version,
+      active_address_digest: Buffer.from(request.addressDigest.value, 'hex'),
+      active_address_key_version: encryptedAddress.keyVersion,
+      active_address_ciphertext: Buffer.from(encryptedAddress.ciphertext, 'base64url'),
+      active_address_iv: Buffer.from(encryptedAddress.iv, 'base64url'),
+      active_address_auth_tag: Buffer.from(encryptedAddress.authTag, 'base64url'),
+      active_registered_at: NOW,
+    };
+    const query = jest.fn().mockResolvedValue(result([row]));
+
+    await expect(
+      repositoryWith(query).listActiveWallets({ accountId: ACCOUNT_ID }),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        walletId: WALLET_ID,
+        accountId: ACCOUNT_ID,
+        registeredByChallengeId: CHALLENGE_ID,
+        chainId: NETWORK,
+        registry: request.registry,
+        addressDigest: request.addressDigest,
+        encryptedAddress,
+        registeredAt: NOW,
+      }),
+    ]);
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining('list_active_wallet_registrations'),
+      [ACCOUNT_ID],
+    );
+
+    query.mockResolvedValueOnce(
+      result(Array.from({ length: MAX_ACTIVE_WALLET_REGISTRATIONS_PER_ACCOUNT + 1 }, () => row)),
+    );
+    await expect(
+      repositoryWith(query).listActiveWallets({ accountId: ACCOUNT_ID }),
+    ).rejects.toBeInstanceOf(WalletRegistrationPersistenceError);
+
+    query.mockResolvedValueOnce(
+      result([{ ...row, active_address_ciphertext: Buffer.alloc(513, 1) }]),
+    );
+    await expect(
+      repositoryWith(query).listActiveWallets({ accountId: ACCOUNT_ID }),
+    ).rejects.toBeInstanceOf(WalletRegistrationPersistenceError);
+  });
+
   it('maps an encrypted challenge to the exact fixed SQL boundary', async () => {
     const query = jest
       .fn()

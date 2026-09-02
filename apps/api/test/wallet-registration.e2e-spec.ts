@@ -44,9 +44,10 @@ interface HttpRequestFixture {
 function hasBoundBrowserSession(value: unknown): boolean {
   if (!value || typeof value !== 'object') return false;
   const fixture = value as HttpRequestFixture;
+  if (fixture.headers?.cookie !== COOKIE) return false;
+  if (fixture.method === 'GET') return true;
   return (
     fixture.method === 'POST' &&
-    fixture.headers?.cookie === COOKIE &&
     fixture.headers.origin === PUBLIC_ORIGIN &&
     fixture.headers['x-csrf-token'] === CSRF_TOKEN
   );
@@ -65,7 +66,7 @@ describe('wallet registration HTTP boundary (e2e)', () => {
   let app: INestApplication;
   let lines: string[];
   let resolver: { resolve: jest.Mock };
-  let wallets: { issueChallenge: jest.Mock; submitProof: jest.Mock };
+  let wallets: { issueChallenge: jest.Mock; listActiveWallets: jest.Mock; submitProof: jest.Mock };
 
   beforeAll(async () => {
     lines = [];
@@ -76,6 +77,7 @@ describe('wallet registration HTTP boundary (e2e)', () => {
     };
     wallets = {
       issueChallenge: jest.fn(),
+      listActiveWallets: jest.fn(),
       submitProof: jest.fn(),
     };
     const module = await Test.createTestingModule({
@@ -122,6 +124,20 @@ describe('wallet registration HTTP boundary (e2e)', () => {
       registryVersion: 1,
       registryFingerprintSha256: 'a'.repeat(64),
     });
+    wallets.listActiveWallets.mockResolvedValue({
+      version: 1,
+      wallets: [
+        {
+          walletId: WALLET_ID,
+          chainId: 'eip155:11155111',
+          address: EVM_ADDRESS,
+          registeredAt: '2026-08-22T17:00:00.000Z',
+          registryEnvironment: 'TESTNET',
+          registryVersion: 1,
+          registryFingerprintSha256: 'a'.repeat(64),
+        },
+      ],
+    });
     wallets.submitProof.mockResolvedValue({
       status: 'registered',
       walletId: WALLET_ID,
@@ -136,6 +152,30 @@ describe('wallet registration HTTP boundary (e2e)', () => {
 
   afterAll(async () => {
     await app.close();
+  });
+
+  it('lists only the current principal active wallets with private response headers', async () => {
+    const unauthenticated = await request(app.getHttpServer()).get('/api/v1/wallets').expect(401);
+    expect(unauthenticated.body.message).toBe('Authentication required');
+    expectPrivate(unauthenticated);
+    expect(wallets.listActiveWallets).not.toHaveBeenCalled();
+
+    const response = await request(app.getHttpServer())
+      .get('/api/v1/wallets')
+      .set('Cookie', COOKIE)
+      .expect(200);
+    expect(response.body).toEqual({
+      version: 1,
+      wallets: [
+        expect.objectContaining({
+          walletId: WALLET_ID,
+          chainId: 'eip155:11155111',
+          address: EVM_ADDRESS,
+        }),
+      ],
+    });
+    expectPrivate(response);
+    expect(wallets.listActiveWallets).toHaveBeenCalledWith(ACCOUNT_ID);
   });
 
   it.each([

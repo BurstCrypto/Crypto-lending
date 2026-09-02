@@ -4571,6 +4571,46 @@ p {
   margin: 0.25rem 0 0;
 }
 
+.mainnet-wallet-roster {
+  display: grid;
+  gap: 0.75rem;
+  margin-block: 1rem;
+  padding: 0.9rem;
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-medium);
+}
+
+.mainnet-wallet-roster h3,
+.mainnet-wallet-roster p {
+  margin: 0;
+}
+
+.mainnet-wallet-roster-list {
+  display: grid;
+  gap: 0.55rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mainnet-wallet-roster-list li {
+  display: grid;
+  grid-template-columns: minmax(5rem, 0.7fr) minmax(9rem, 1fr) minmax(8rem, 1fr);
+  gap: 0.6rem;
+  align-items: center;
+  padding: 0.65rem 0.7rem;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-small);
+}
+
+.mainnet-wallet-roster-list code,
+.mainnet-wallet-roster-list span {
+  color: var(--ink-soft);
+  font-size: 0.84rem;
+}
+
 .public-testnet-dashboard-overview > p,
 .public-testnet-proof-suite > p,
 .public-testnet-proof > p,
@@ -5324,6 +5364,16 @@ footer {
 
   .platform-grid {
     grid-template-columns: 1fr;
+  }
+
+  .mainnet-wallet-roster-list li {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .mainnet-wallet-roster-list code {
+    min-width: 0;
+    overflow-wrap: anywhere;
   }
 
   .platform-details {

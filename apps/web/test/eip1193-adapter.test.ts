@@ -132,6 +132,32 @@ describe('InjectedEip1193WalletAdapter connection state', () => {
     );
   });
 
+  it('requires an explicit authorized account selection without switching the provider', async () => {
+    const provider = new FakeProvider();
+    provider.accounts = [ADDRESS, SECOND_ADDRESS];
+    const wallet = adapter(provider);
+    const connected = await wallet.connect();
+
+    const selected = wallet.selectAccount(
+      connected.connectionId,
+      `0x${SECOND_ADDRESS.slice(2).toUpperCase()}`,
+    );
+
+    expect(selected.selectedAccount).toEqual({
+      chainId: 'eip155:11155111',
+      address: SECOND_ADDRESS,
+    });
+    expect(wallet.currentConnection()).toBe(selected);
+    expect(
+      provider.request.mock.calls.some(([request]) =>
+        ['wallet_switchEthereumChain', 'wallet_addEthereumChain'].includes(request.method),
+      ),
+    ).toBe(false);
+    expect(() => wallet.selectAccount(connected.connectionId, `0x${'3'.repeat(40)}`)).toThrow(
+      expect.objectContaining({ code: INJECTED_EVM_ERROR_CODES.accountUnavailable }),
+    );
+  });
+
   it('restores non-interactively, returns null without accounts, and blocks unsupported networks', async () => {
     const restoredProvider = new FakeProvider();
     const restored = await adapter(restoredProvider).restore();

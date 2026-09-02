@@ -24,7 +24,9 @@ import {
   parseWalletChainId,
   walletNamespaceOf,
 } from '../domain/wallet-identity';
+import { isWalletRegistrationLaunchChain } from '../domain/wallet-registration-launch-policy';
 import {
+  MAX_ACTIVE_WALLET_REGISTRATIONS_PER_ACCOUNT,
   WALLET_REGISTRATION_REPOSITORY,
   type PrepareWalletOwnershipChallengeResult,
   type WalletChallengeRejectionReason,
@@ -83,6 +85,23 @@ export interface RegisteredWalletResult {
   readonly registryFingerprintSha256: string;
 }
 
+export const ACTIVE_WALLET_ROSTER_VERSION = 1 as const;
+
+export interface ActiveRegisteredWallet {
+  readonly walletId: string;
+  readonly chainId: string;
+  readonly address: string;
+  readonly registeredAt: string;
+  readonly registryEnvironment: 'MAINNET' | 'TESTNET';
+  readonly registryVersion: number;
+  readonly registryFingerprintSha256: string;
+}
+
+export interface ActiveWalletRoster {
+  readonly version: typeof ACTIVE_WALLET_ROSTER_VERSION;
+  readonly wallets: readonly ActiveRegisteredWallet[];
+}
+
 export const WALLET_REGISTRATION_CLOCK = Symbol('WALLET_REGISTRATION_CLOCK');
 
 export interface WalletRegistrationClock {
@@ -138,6 +157,92 @@ export class WalletRegistrationService {
     private readonly clock: WalletRegistrationClock,
   ) {}
 
+  async listActiveWallets(accountIdInput: AccountId): Promise<ActiveWalletRoster> {
+    const config = this.enabledConfig();
+    let accountId: AccountId;
+    try {
+      accountId = parseAccountId(accountIdInput);
+    } catch {
+      throw new WalletRegistrationUnavailableError();
+    }
+
+    let records;
+    try {
+      records = await this.repository.listActiveWallets({ accountId });
+    } catch {
+      throw new WalletRegistrationUnavailableError();
+    }
+    if (!Array.isArray(records) || records.length > MAX_ACTIVE_WALLET_REGISTRATIONS_PER_ACCOUNT) {
+      throw new WalletRegistrationUnavailableError();
+    }
+
+    try {
+      const latest = supportedAssetRegistryForEnvironment(config.registryEnvironment).latest;
+      const identities = new Set<string>();
+      const wallets = records.map((record): ActiveRegisteredWallet => {
+        const chainId = parseWalletChainId(record.chainId);
+        const network = latest.networks.find((candidate) => candidate.networkId === chainId);
+        if (
+          parseAccountId(record.accountId) !== accountId ||
+          record.registry.environment !== config.registryEnvironment ||
+          record.registry.version !== latest.version ||
+          record.registry.fingerprintSha256 !== latest.fingerprintSha256 ||
+          !isWalletRegistrationLaunchChain(config.registryEnvironment, chainId) ||
+          !network ||
+          network.activationState !== 'ACTIVE' ||
+          !(record.registeredAt instanceof Date) ||
+          !Number.isFinite(record.registeredAt.getTime())
+        ) {
+          throw new WalletRegistrationUnavailableError();
+        }
+        const sealBinding: WalletRegistrationSealBinding = {
+          field: 'address',
+          walletId: record.walletId,
+          challengeId: record.registeredByChallengeId,
+          accountId,
+          networkId: chainId,
+          addressDigest: record.addressDigest,
+        };
+        const address = parseWalletAddress(
+          chainId,
+          openWalletRegistrationValue(config.metadataSealKey, sealBinding, record.encryptedAddress),
+        );
+        if (
+          !walletRegistrationDigestEquals(
+            record.addressDigest,
+            digestWalletIdentity(config.identityHmacKey, chainId, address),
+          )
+        ) {
+          throw new WalletRegistrationUnavailableError();
+        }
+        const identity = `${chainId}\u0000${address}`;
+        if (identities.has(identity)) throw new WalletRegistrationUnavailableError();
+        identities.add(identity);
+        return Object.freeze({
+          walletId: record.walletId,
+          chainId,
+          address,
+          registeredAt: record.registeredAt.toISOString(),
+          registryEnvironment: record.registry.environment,
+          registryVersion: record.registry.version,
+          registryFingerprintSha256: record.registry.fingerprintSha256,
+        });
+      });
+      wallets.sort(
+        (left, right) =>
+          left.chainId.localeCompare(right.chainId) ||
+          left.address.localeCompare(right.address) ||
+          left.walletId.localeCompare(right.walletId),
+      );
+      return Object.freeze({
+        version: ACTIVE_WALLET_ROSTER_VERSION,
+        wallets: Object.freeze(wallets),
+      });
+    } catch {
+      throw new WalletRegistrationUnavailableError();
+    }
+  }
+
   async issueChallenge(
     input: IssueWalletOwnershipChallengeInput,
   ): Promise<IssuedWalletOwnershipChallenge> {
@@ -158,7 +263,11 @@ export class WalletRegistrationService {
     const network = supportedAssetRegistryForEnvironment(
       config.registryEnvironment,
     ).latest.networks.find((candidate) => candidate.networkId === chainId);
-    if (!network || network.activationState !== 'ACTIVE') {
+    if (
+      !isWalletRegistrationLaunchChain(config.registryEnvironment, chainId) ||
+      !network ||
+      network.activationState !== 'ACTIVE'
+    ) {
       throw new WalletRegistrationRejectedError();
     }
     if (
@@ -397,6 +506,7 @@ export class WalletRegistrationService {
       prepared.registry.environment !== config.registryEnvironment ||
       prepared.registry.version !== latest.version ||
       prepared.registry.fingerprintSha256 !== latest.fingerprintSha256 ||
+      !isWalletRegistrationLaunchChain(config.registryEnvironment, record.chainId) ||
       !currentNetwork ||
       currentNetwork.activationState !== 'ACTIVE' ||
       !sameDate(prepared.issuedAt, new Date(record.issuedAtEpochMilliseconds)) ||

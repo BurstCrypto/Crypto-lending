@@ -7,6 +7,7 @@ import type {
 } from '../../infrastructure/crypto/wallet-registration-crypto';
 
 export const WALLET_REGISTRATION_REPOSITORY = Symbol('WALLET_REGISTRATION_REPOSITORY');
+export const MAX_ACTIVE_WALLET_REGISTRATIONS_PER_ACCOUNT = 32 as const;
 
 export type WalletProofScheme =
   'EVM_ERC4361_ERC191' | 'SOLANA_SIWS_SIGN_IN' | 'SOLANA_SIWS_SIGN_MESSAGE';
@@ -93,6 +94,25 @@ export interface CompleteWalletRegistrationRequest {
   readonly correlationId: string;
 }
 
+export interface ListActiveWalletRegistrationsRequest {
+  readonly accountId: AccountId;
+}
+
+/**
+ * Persistence-only representation. Address plaintext remains sealed until the
+ * account-scoped application service validates every registry and AAD binding.
+ */
+export interface ActiveWalletRegistrationRecord {
+  readonly walletId: string;
+  readonly accountId: AccountId;
+  readonly registeredByChallengeId: WalletChallengeId;
+  readonly chainId: WalletOwnershipChainId;
+  readonly registry: WalletRegistryBinding;
+  readonly addressDigest: WalletRegistrationDigestReference<'address'>;
+  readonly encryptedAddress: SealedWalletRegistrationValue;
+  readonly registeredAt: Date;
+}
+
 export type CompleteWalletRegistrationResult =
   | Readonly<{
       status: 'registered' | 'already_registered';
@@ -104,6 +124,9 @@ export type CompleteWalletRegistrationResult =
     }>;
 
 export interface WalletRegistrationRepositoryPort {
+  listActiveWallets(
+    request: ListActiveWalletRegistrationsRequest,
+  ): Promise<readonly ActiveWalletRegistrationRecord[]>;
   beginChallenge(
     request: BeginWalletOwnershipChallengeRequest,
   ): Promise<BegunWalletOwnershipChallenge>;

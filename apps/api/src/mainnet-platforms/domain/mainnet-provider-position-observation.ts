@@ -730,6 +730,7 @@ function positionKey(observation: MainnetProviderPositionObservationV1): string 
     observation.protocolId,
     observation.marketId,
     observation.positionId,
+    observation.positionKind,
   ].join('\0');
 }
 

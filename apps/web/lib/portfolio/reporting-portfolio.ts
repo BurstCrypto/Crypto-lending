@@ -12,11 +12,16 @@ const REGISTRY_FINGERPRINT = /^[0-9a-f]{64}$/u;
 const MAINNET_V1_REGISTRY_FINGERPRINT =
   '5058b141479f114c1e5f87ed8798fbb7a7ffcce7b502aa7e0794dc53ca1f767d';
 const MAX_SOURCES = 512;
+const MAX_WALLETS = 32;
 const MAX_REASONS = 16;
 const MAX_USD_DIGITS = 100;
 const MAX_ATOMIC_DIGITS = 78;
 
-const MAINNET_NETWORK_IDS = ['eip155:8453'] as const;
+const MAINNET_NETWORK_IDS = [
+  'eip155:1',
+  'eip155:8453',
+  'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp',
+] as const;
 
 const FRESHNESS_VALUES = ['CURRENT', 'STALE', 'UNAVAILABLE'] as const;
 const COMPLETENESS_VALUES = ['COMPLETE', 'PARTIAL', 'UNAVAILABLE'] as const;
@@ -62,6 +67,14 @@ export interface ReportingAssetTotal extends ReportingAggregate {
   readonly stablecoin: StablecoinSymbol;
 }
 
+export interface ReportingBalanceCoverage {
+  readonly status: ReportingCompleteness;
+  readonly targetCount: number;
+  readonly completeTargetCount: number;
+  readonly partialTargetCount: number;
+  readonly unavailableTargetCount: number;
+}
+
 /**
  * The browser retains only the reporting fields it renders. Wallet, observation,
  * address, registry, and pricing-provider identifiers are validated and discarded.
@@ -73,6 +86,7 @@ export interface ReportingPortfolioSnapshot {
     readonly capturedAt: string;
     readonly freshnessClass: 'CURRENT' | 'STALE';
   }>;
+  readonly balanceCoverage: ReportingBalanceCoverage;
   readonly oldestBalanceObservedAt: string | null;
   readonly overallTotal: ReportingAggregate;
   readonly chainTotals: readonly ReportingChainTotal[];
@@ -104,6 +118,17 @@ interface ParsedExcludedSource extends Contribution {
   readonly networkId: ProductionPortfolioNetworkId;
   readonly assetIdentity: string;
   readonly balanceObservedAt: string;
+}
+
+interface ParsedBalanceCoverageTarget {
+  readonly walletId: string;
+  readonly networkId: ProductionPortfolioNetworkId;
+  readonly status: ReportingCompleteness;
+}
+
+interface ParsedBalanceCoverage {
+  readonly status: ReportingCompleteness;
+  readonly targets: readonly ParsedBalanceCoverageTarget[];
 }
 
 export class ReportingPortfolioResponseError extends Error {
@@ -247,22 +272,37 @@ function parseAggregateRecord(record: Record<string, unknown>): ReportingAggrega
   const sourceCount = boundedInteger(record.sourceCount, 0, MAX_SOURCES);
   const includedSourceCount = boundedInteger(record.includedSourceCount, 0, sourceCount);
 
-  if (
-    (sourceCount === 0 &&
-      (includedSourceCount !== 0 ||
-        usdValue?.mantissa !== '0' ||
-        freshnessClass !== 'CURRENT' ||
-        completeness !== 'COMPLETE')) ||
-    (sourceCount > 0 &&
-      includedSourceCount === 0 &&
-      (usdValue !== null || completeness !== 'UNAVAILABLE')) ||
-    (sourceCount > 0 &&
-      includedSourceCount === sourceCount &&
-      (usdValue === null || completeness !== 'COMPLETE')) ||
-    (includedSourceCount > 0 &&
-      includedSourceCount < sourceCount &&
-      (usdValue === null || completeness !== 'PARTIAL'))
-  ) {
+  const emptyComplete =
+    sourceCount === 0 &&
+    includedSourceCount === 0 &&
+    usdValue?.mantissa === '0' &&
+    freshnessClass !== 'UNAVAILABLE' &&
+    completeness === 'COMPLETE';
+  const emptyUnavailable =
+    sourceCount === 0 &&
+    includedSourceCount === 0 &&
+    usdValue === null &&
+    freshnessClass === 'UNAVAILABLE' &&
+    completeness === 'UNAVAILABLE';
+  const noneIncluded =
+    sourceCount > 0 &&
+    includedSourceCount === 0 &&
+    usdValue === null &&
+    freshnessClass === 'UNAVAILABLE' &&
+    completeness === 'UNAVAILABLE';
+  const partlyIncluded =
+    includedSourceCount > 0 &&
+    includedSourceCount < sourceCount &&
+    usdValue !== null &&
+    freshnessClass === 'UNAVAILABLE' &&
+    completeness === 'PARTIAL';
+  const allIncluded =
+    sourceCount > 0 &&
+    includedSourceCount === sourceCount &&
+    usdValue !== null &&
+    ((completeness === 'COMPLETE' && freshnessClass !== 'UNAVAILABLE') ||
+      (completeness === 'PARTIAL' && freshnessClass === 'UNAVAILABLE'));
+  if (!(emptyComplete || emptyUnavailable || noneIncluded || partlyIncluded || allIncluded)) {
     return fail();
   }
 
@@ -525,6 +565,41 @@ function parseExcludedSource(value: unknown, asOf: string): ParsedExcludedSource
   };
 }
 
+function coverageTargetKey(target: {
+  readonly walletId: string;
+  readonly networkId: ProductionPortfolioNetworkId;
+}): string {
+  return `${target.walletId}\u0000${target.networkId}`;
+}
+
+function parseBalanceCoverage(value: unknown): ParsedBalanceCoverage {
+  const record = exactDataRecord(value, ['status', 'targets']);
+  const status = oneOf(record.status, COMPLETENESS_VALUES);
+  const targets = boundedArray(record.targets, MAX_WALLETS).map((targetValue) => {
+    const target = exactDataRecord(targetValue, ['walletId', 'networkId', 'status']);
+    return Object.freeze({
+      walletId: uuid(target.walletId),
+      networkId: oneOf(target.networkId, MAINNET_NETWORK_IDS),
+      status: oneOf(target.status, COMPLETENESS_VALUES),
+    });
+  });
+  const targetKeys = targets.map(coverageTargetKey);
+  if (
+    new Set(targetKeys).size !== targetKeys.length ||
+    new Set(targets.map(({ walletId }) => walletId)).size !== targets.length
+  ) {
+    return fail();
+  }
+  const expectedStatus: ReportingCompleteness =
+    targets.length === 0 || targets.every((target) => target.status === 'COMPLETE')
+      ? 'COMPLETE'
+      : targets.every((target) => target.status === 'UNAVAILABLE')
+        ? 'UNAVAILABLE'
+        : 'PARTIAL';
+  if (status !== expectedStatus) return fail();
+  return Object.freeze({ status, targets: Object.freeze(targets) });
+}
+
 function worstFreshness(contributions: readonly Contribution[]): ReportingFreshness {
   if (contributions.some(({ freshnessClass }) => freshnessClass === 'UNAVAILABLE')) {
     return 'UNAVAILABLE';
@@ -533,8 +608,21 @@ function worstFreshness(contributions: readonly Contribution[]): ReportingFreshn
   return 'CURRENT';
 }
 
-function derivedAggregate(contributions: readonly Contribution[]): ReportingAggregate {
+function derivedAggregate(
+  contributions: readonly Contribution[],
+  coverageStatuses: readonly ReportingCompleteness[] = [],
+): ReportingAggregate {
+  const coverageComplete = coverageStatuses.every((status) => status === 'COMPLETE');
   if (contributions.length === 0) {
+    if (!coverageComplete) {
+      return Object.freeze({
+        usdValue: null,
+        freshnessClass: 'UNAVAILABLE',
+        completeness: 'UNAVAILABLE',
+        sourceCount: 0,
+        includedSourceCount: 0,
+      });
+    }
     return Object.freeze({
       usdValue: Object.freeze({
         currency: 'USD',
@@ -568,11 +656,11 @@ function derivedAggregate(contributions: readonly Contribution[]): ReportingAggr
             scale: 18,
             decimal: formatFixedDecimal(mantissa, 18),
           }),
-    freshnessClass: worstFreshness(contributions),
+    freshnessClass: coverageComplete ? worstFreshness(contributions) : 'UNAVAILABLE',
     completeness:
       included.length === 0
         ? 'UNAVAILABLE'
-        : included.length === contributions.length
+        : included.length === contributions.length && coverageComplete
           ? 'COMPLETE'
           : 'PARTIAL',
     sourceCount: contributions.length,
@@ -627,7 +715,7 @@ function parseKeyedAggregate(
 function reconcileKeyedTotals(
   rawTotals: readonly unknown[],
   key: 'walletId' | 'networkId' | 'stablecoin',
-  expected: ReadonlyMap<string, readonly Contribution[]>,
+  expected: ReadonlyMap<string, ReportingAggregate>,
 ): ReadonlyMap<string, ReportingAggregate> {
   const parsed = new Map<string, ReportingAggregate>();
   for (const rawTotal of rawTotals) {
@@ -636,12 +724,24 @@ function reconcileKeyedTotals(
     parsed.set(total.key, total.aggregate);
   }
   if (parsed.size !== expected.size) return fail();
-  for (const [groupKey, contributions] of expected) {
+  for (const [groupKey, expectedAggregate] of expected) {
     const total = parsed.get(groupKey);
-    if (total === undefined || !sameAggregate(total, derivedAggregate(contributions)))
-      return fail();
+    if (total === undefined || !sameAggregate(total, expectedAggregate)) return fail();
   }
   return parsed;
+}
+
+function expectedGroupedTotals(
+  keys: readonly string[],
+  contributions: ReadonlyMap<string, readonly Contribution[]>,
+  coverageStatuses: (key: string) => readonly ReportingCompleteness[],
+): ReadonlyMap<string, ReportingAggregate> {
+  return new Map(
+    [...new Set(keys)].map((key) => [
+      key,
+      derivedAggregate(contributions.get(key) ?? [], coverageStatuses(key)),
+    ]),
+  );
 }
 
 function parseResponse(value: unknown): ReportingPortfolioSnapshot {
@@ -649,6 +749,7 @@ function parseResponse(value: unknown): ReportingPortfolioSnapshot {
     'schemaVersion',
     'asOf',
     'balanceSnapshot',
+    'balanceCoverage',
     'oldestBalanceObservedAt',
     'overallTotal',
     'walletTotals',
@@ -683,6 +784,7 @@ function parseResponse(value: unknown): ReportingPortfolioSnapshot {
   const capturedAt = canonicalTimestamp(snapshotRecord.capturedAt);
   const snapshotFreshness = oneOf(snapshotRecord.freshnessClass, ['CURRENT', 'STALE'] as const);
   if (capturedAt > asOf) return fail();
+  const balanceCoverage = parseBalanceCoverage(record.balanceCoverage);
   const oldestBalanceObservedAt =
     record.oldestBalanceObservedAt === null
       ? null
@@ -708,7 +810,13 @@ function parseResponse(value: unknown): ReportingPortfolioSnapshot {
           `${walletId}\u0000${networkId}\u0000${assetIdentity}`,
       ),
     ).size !== allSources.length ||
-    new Set(sources.map(({ registryFingerprint }) => registryFingerprint)).size > 1
+    new Set(sources.map(({ registryFingerprint }) => registryFingerprint)).size > 1 ||
+    allSources.some((source) => {
+      const target = balanceCoverage.targets.find(
+        (candidate) => coverageTargetKey(candidate) === coverageTargetKey(source),
+      );
+      return target === undefined || target.status === 'UNAVAILABLE';
+    })
   ) {
     return fail();
   }
@@ -717,7 +825,10 @@ function parseResponse(value: unknown): ReportingPortfolioSnapshot {
   if (oldestBalanceObservedAt !== expectedOldest) return fail();
 
   const overallTotal = parseAggregate(record.overallTotal);
-  const derivedOverall = derivedAggregate(allSources);
+  const derivedOverall = derivedAggregate(
+    allSources,
+    balanceCoverage.targets.map(({ status }) => status),
+  );
   const expectedOverall =
     snapshotFreshness === 'STALE' && derivedOverall.freshnessClass === 'CURRENT'
       ? Object.freeze({ ...derivedOverall, freshnessClass: 'STALE' as const })
@@ -727,16 +838,50 @@ function parseResponse(value: unknown): ReportingPortfolioSnapshot {
   const walletGroups = groupBy(allSources, (source) => source.walletId);
   const chainGroups = groupBy(allSources, (source) => source.networkId);
   const assetGroups = groupBy(sources, (source) => source.stablecoin);
-  reconcileKeyedTotals(boundedArray(record.walletTotals, MAX_SOURCES), 'walletId', walletGroups);
-  const chainTotals = reconcileKeyedTotals(
-    boundedArray(record.chainTotals, MAX_SOURCES),
-    'networkId',
+  const expectedWalletTotals = expectedGroupedTotals(
+    balanceCoverage.targets.map(({ walletId }) => walletId),
+    walletGroups,
+    (walletId) =>
+      balanceCoverage.targets
+        .filter((target) => target.walletId === walletId)
+        .map(({ status }) => status),
+  );
+  const expectedChainTotals = expectedGroupedTotals(
+    balanceCoverage.targets.map(({ networkId }) => networkId),
     chainGroups,
+    (networkId) =>
+      balanceCoverage.targets
+        .filter((target) => target.networkId === networkId)
+        .map(({ status }) => status),
+  );
+  const expectedAssetTotals = expectedGroupedTotals(
+    sources.map(({ stablecoin }) => stablecoin),
+    assetGroups,
+    (stablecoinValue) => {
+      const stablecoin = oneOf(stablecoinValue, STABLECOINS);
+      return balanceCoverage.targets
+        .filter((target) => {
+          const registeredIdentities: Partial<Record<StablecoinSymbol, string>> =
+            PORTFOLIO_ASSET_IDENTITIES[target.networkId];
+          return registeredIdentities[stablecoin] !== undefined;
+        })
+        .map(({ status }) => status);
+    },
+  );
+  reconcileKeyedTotals(
+    boundedArray(record.walletTotals, MAX_WALLETS),
+    'walletId',
+    expectedWalletTotals,
+  );
+  const chainTotals = reconcileKeyedTotals(
+    boundedArray(record.chainTotals, MAINNET_NETWORK_IDS.length),
+    'networkId',
+    expectedChainTotals,
   );
   const assetTotals = reconcileKeyedTotals(
     boundedArray(record.assetTotals, STABLECOINS.length),
     'stablecoin',
-    assetGroups,
+    expectedAssetTotals,
   );
 
   return Object.freeze({
@@ -745,6 +890,17 @@ function parseResponse(value: unknown): ReportingPortfolioSnapshot {
     balanceSnapshot: Object.freeze({
       capturedAt,
       freshnessClass: snapshotFreshness,
+    }),
+    balanceCoverage: Object.freeze({
+      status: balanceCoverage.status,
+      targetCount: balanceCoverage.targets.length,
+      completeTargetCount: balanceCoverage.targets.filter(({ status }) => status === 'COMPLETE')
+        .length,
+      partialTargetCount: balanceCoverage.targets.filter(({ status }) => status === 'PARTIAL')
+        .length,
+      unavailableTargetCount: balanceCoverage.targets.filter(
+        ({ status }) => status === 'UNAVAILABLE',
+      ).length,
     }),
     oldestBalanceObservedAt,
     overallTotal,

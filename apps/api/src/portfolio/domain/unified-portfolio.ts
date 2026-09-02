@@ -1,9 +1,14 @@
-import type {
-  SupportedStablecoin,
-  SupportedStablecoinAsset,
+import {
+  MAINNET_SUPPORTED_ASSET_REGISTRY,
+  type SupportedStablecoin,
+  type SupportedStablecoinAsset,
 } from '../../blockchain/domain/supported-asset-registry';
 import type { StablecoinValuationReason, StablecoinValuationResult } from '../../valuation';
-import type { IndexedPortfolioBalanceObservation } from '../application/ports/portfolio-balance-reader.port';
+import type {
+  IndexedBalanceCoverageStatus,
+  IndexedPortfolioBalanceCoverage,
+  IndexedPortfolioBalanceObservation,
+} from '../application/ports/portfolio-balance-reader.port';
 
 export const UNIFIED_PORTFOLIO_SCHEMA_VERSION = 1 as const;
 export const PORTFOLIO_USD_SCALE = 18 as const;
@@ -107,6 +112,17 @@ export interface PortfolioAssetTotal extends PortfolioAggregate {
   readonly stablecoin: SupportedStablecoin;
 }
 
+export interface PortfolioBalanceCoverageTarget {
+  readonly walletId: string;
+  readonly networkId: string;
+  readonly status: IndexedBalanceCoverageStatus;
+}
+
+export interface PortfolioBalanceCoverage {
+  readonly status: IndexedBalanceCoverageStatus;
+  readonly targets: readonly PortfolioBalanceCoverageTarget[];
+}
+
 export interface UnifiedPortfolio {
   readonly schemaVersion: typeof UNIFIED_PORTFOLIO_SCHEMA_VERSION;
   readonly asOf: string;
@@ -115,6 +131,7 @@ export interface UnifiedPortfolio {
     capturedAt: string;
     freshnessClass: 'CURRENT' | 'STALE';
   }>;
+  readonly balanceCoverage: PortfolioBalanceCoverage;
   readonly oldestBalanceObservedAt: string | null;
   readonly overallTotal: PortfolioAggregate;
   readonly walletTotals: readonly PortfolioWalletTotal[];
@@ -140,6 +157,7 @@ export interface BuildUnifiedPortfolioRequest {
   readonly balanceSnapshotId: string;
   readonly balanceCapturedAt: string;
   readonly balanceSnapshotFreshness: 'CURRENT' | 'STALE';
+  readonly balanceCoverage: IndexedPortfolioBalanceCoverage;
   readonly valuedBalances: readonly ValuedPortfolioBalance[];
   readonly excludedBalances: readonly IndexedPortfolioBalanceObservation[];
 }
@@ -263,12 +281,25 @@ function worstFreshness(values: readonly PortfolioFreshness[]): PortfolioFreshne
   return 'CURRENT';
 }
 
-function aggregate(contributions: readonly Contribution[]): PortfolioAggregate {
+function aggregate(
+  contributions: readonly Contribution[],
+  coverageStatuses: readonly IndexedBalanceCoverageStatus[] = [],
+): PortfolioAggregate {
   const included = contributions.filter(
     (contribution): contribution is Contribution & { readonly usdValueMantissa: string } =>
       contribution.usdValueMantissa !== null,
   );
+  const coverageComplete = coverageStatuses.every((status) => status === 'COMPLETE');
   if (contributions.length === 0) {
+    if (!coverageComplete) {
+      return {
+        usdValue: null,
+        freshnessClass: 'UNAVAILABLE',
+        completeness: 'UNAVAILABLE',
+        sourceCount: 0,
+        includedSourceCount: 0,
+      };
+    }
     return {
       usdValue: exactUsdAmount('0'),
       freshnessClass: 'CURRENT',
@@ -290,11 +321,13 @@ function aggregate(contributions: readonly Contribution[]): PortfolioAggregate {
   }
   return {
     usdValue: included.length === 0 ? null : exactUsdAmount(sum.toString()),
-    freshnessClass: worstFreshness(contributions.map(({ freshnessClass }) => freshnessClass)),
+    freshnessClass: coverageComplete
+      ? worstFreshness(contributions.map(({ freshnessClass }) => freshnessClass))
+      : 'UNAVAILABLE',
     completeness:
       included.length === 0
         ? 'UNAVAILABLE'
-        : included.length === contributions.length
+        : included.length === contributions.length && coverageComplete
           ? 'COMPLETE'
           : 'PARTIAL',
     sourceCount: contributions.length,
@@ -317,9 +350,29 @@ const EXCLUDED_CONTRIBUTION: Contribution = Object.freeze({
 function groupedTotals<Key extends string, Output>(
   keys: readonly Key[],
   contributionsFor: (key: Key) => readonly Contribution[],
+  coverageStatusesFor: (key: Key) => readonly IndexedBalanceCoverageStatus[],
   build: (key: Key, total: PortfolioAggregate) => Output,
 ): readonly Output[] {
-  return [...new Set(keys)].sort().map((key) => build(key, aggregate(contributionsFor(key))));
+  return [...new Set(keys)]
+    .sort()
+    .map((key) => build(key, aggregate(contributionsFor(key), coverageStatusesFor(key))));
+}
+
+function immutableBalanceCoverage(
+  coverage: IndexedPortfolioBalanceCoverage,
+): PortfolioBalanceCoverage {
+  return Object.freeze({
+    status: coverage.status,
+    targets: Object.freeze(
+      coverage.targets.map((target) =>
+        Object.freeze({
+          walletId: target.walletId,
+          networkId: target.networkId,
+          status: target.status,
+        }),
+      ),
+    ),
+  });
 }
 
 export function buildUnifiedPortfolio(request: BuildUnifiedPortfolioRequest): UnifiedPortfolio {
@@ -332,10 +385,12 @@ export function buildUnifiedPortfolio(request: BuildUnifiedPortfolioRequest): Un
   const walletKeys = [
     ...sources.map(({ walletId }) => walletId),
     ...excludedSources.map(({ walletId }) => walletId),
+    ...request.balanceCoverage.targets.map(({ walletId }) => walletId),
   ];
   const chainKeys = [
     ...sources.map(({ networkId }) => networkId),
     ...excludedSources.map(({ networkId }) => networkId),
+    ...request.balanceCoverage.targets.map(({ networkId }) => networkId),
   ];
   const assetKeys = sources.map(({ asset }) => asset.stablecoin);
 
@@ -347,6 +402,10 @@ export function buildUnifiedPortfolio(request: BuildUnifiedPortfolioRequest): Un
         .filter((source) => source.walletId === walletId)
         .map(() => EXCLUDED_CONTRIBUTION),
     ],
+    (walletId) =>
+      request.balanceCoverage.targets
+        .filter((target) => target.walletId === walletId)
+        .map(({ status }) => status),
     (walletId, total): PortfolioWalletTotal => ({ walletId, ...total }),
   );
   const chainTotals = groupedTotals(
@@ -357,12 +416,27 @@ export function buildUnifiedPortfolio(request: BuildUnifiedPortfolioRequest): Un
         .filter((source) => source.networkId === networkId)
         .map(() => EXCLUDED_CONTRIBUTION),
     ],
+    (networkId) =>
+      request.balanceCoverage.targets
+        .filter((target) => target.networkId === networkId)
+        .map(({ status }) => status),
     (networkId, total): PortfolioChainTotal => ({ networkId, ...total }),
   );
   const assetTotals = groupedTotals(
     assetKeys,
     (stablecoin) =>
       sources.filter((source) => source.asset.stablecoin === stablecoin).map(sourceContribution),
+    (stablecoin) =>
+      request.balanceCoverage.targets
+        .filter((target) =>
+          MAINNET_SUPPORTED_ASSET_REGISTRY.latest.assets.some(
+            (asset) =>
+              asset.activationState === 'ACTIVE' &&
+              asset.networkId === target.networkId &&
+              asset.stablecoin === stablecoin,
+          ),
+        )
+        .map(({ status }) => status),
     (stablecoin, total): PortfolioAssetTotal => ({ stablecoin, ...total }),
   );
   const observedAt = [
@@ -370,7 +444,10 @@ export function buildUnifiedPortfolio(request: BuildUnifiedPortfolioRequest): Un
     ...excludedSources.map(({ balanceObservedAt }) => balanceObservedAt),
   ].sort();
 
-  const overallTotal = aggregate(contributions);
+  const overallTotal = aggregate(
+    contributions,
+    request.balanceCoverage.targets.map(({ status }) => status),
+  );
   return {
     schemaVersion: UNIFIED_PORTFOLIO_SCHEMA_VERSION,
     asOf: request.asOf,
@@ -379,6 +456,7 @@ export function buildUnifiedPortfolio(request: BuildUnifiedPortfolioRequest): Un
       capturedAt: request.balanceCapturedAt,
       freshnessClass: request.balanceSnapshotFreshness,
     },
+    balanceCoverage: immutableBalanceCoverage(request.balanceCoverage),
     oldestBalanceObservedAt: observedAt[0] ?? null,
     overallTotal:
       request.balanceSnapshotFreshness === 'STALE' && overallTotal.freshnessClass === 'CURRENT'

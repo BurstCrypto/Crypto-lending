@@ -405,6 +405,34 @@ describe('mainnet provider position observation contract', () => {
     );
   });
 
+  it('keeps supply and borrow legs distinct when a protocol reuses one position identifier', () => {
+    const borrow = observation({
+      observationId: '22222222-2222-4222-8222-222222222222',
+      positionKind: 'BORROW',
+      balance: { atomic: '1250000', decimal: '1.250000' },
+      source: evmSource({ sourceObservationId: 'base-block-50000002-borrow' }),
+    });
+    const result = parseMainnetProviderPositionSnapshotV1(
+      snapshot([observation(), borrow]),
+      EVALUATED_AT,
+      strictTestPolicy(),
+      strictTestAssessment([
+        baseAssessmentEntry(),
+        baseAssessmentEntry({
+          observationId: '22222222-2222-4222-8222-222222222222',
+          sourceObservationId: 'base-block-50000002-borrow',
+        }),
+      ]),
+      STRICT_TEST_CHAIN_ASSESSMENT_VERIFIER,
+    );
+
+    expect(result.observations.map(({ positionKind }) => positionKind)).toEqual([
+      'BORROW',
+      'SUPPLY',
+    ]);
+    expect(new Set(result.observations.map(({ positionId }) => positionId)).size).toBe(1);
+  });
+
   it('rejects a repeated observation identity even when the provider position differs', () => {
     const second = observation({
       providerId: 'morpho',

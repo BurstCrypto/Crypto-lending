@@ -7,94 +7,23 @@ import {
 import { readAuthenticationCsrfToken } from '../../authentication/session-client';
 import { MAINNET_WALLET_REGISTRY } from '../mainnet-network-policy';
 import {
+  WALLET_OWNERSHIP_CHALLENGE_PATH,
+  WALLET_OWNERSHIP_HANDOFF_ERROR_CODES,
+  WALLET_OWNERSHIP_PROOF_PATH,
+  WalletOwnershipHandoffError,
+  type WalletOwnershipHandoffErrorCode,
+} from '../eip1193/ownership';
+import {
   assertOwnershipChallenge,
   assertOwnershipSignatureMatchesChallenge,
-  assertWalletAccount,
   assertWalletConnection,
-  type SiweOwnershipChallenge,
-  type SiweOwnershipSignature,
+  toSolanaEd25519OwnershipProofWire,
+  type OwnershipSignature,
+  type SiwsMessageOwnershipChallenge,
+  type SupportedSolanaCaipChainId,
+  type WalletAdapter,
   type WalletConnection,
 } from '../wallet-adapter';
-import type { InjectedEip1193WalletAdapter } from './adapter';
-import type { EvmNetworkEnvironment } from './networks';
-
-export const WALLET_OWNERSHIP_CHALLENGE_PATH = '/api/v1/wallets/ownership-challenges';
-export const WALLET_OWNERSHIP_PROOF_PATH = '/api/v1/wallets/ownership-proofs';
-
-export const WALLET_OWNERSHIP_HANDOFF_ERROR_CODES = Object.freeze({
-  conflict: 'WALLET_OWNERSHIP_CONFLICT',
-  rejected: 'WALLET_OWNERSHIP_REJECTED',
-  unauthenticated: 'WALLET_OWNERSHIP_AUTHENTICATION_REQUIRED',
-  unavailable: 'WALLET_OWNERSHIP_UNAVAILABLE',
-} as const);
-
-export type WalletOwnershipHandoffErrorCode =
-  (typeof WALLET_OWNERSHIP_HANDOFF_ERROR_CODES)[keyof typeof WALLET_OWNERSHIP_HANDOFF_ERROR_CODES];
-
-const ERROR_MESSAGES: Readonly<Record<WalletOwnershipHandoffErrorCode, string>> = Object.freeze({
-  WALLET_OWNERSHIP_CONFLICT: 'Wallet ownership conflicts with an existing registration',
-  WALLET_OWNERSHIP_REJECTED: 'Wallet ownership request was rejected',
-  WALLET_OWNERSHIP_AUTHENTICATION_REQUIRED: 'Wallet ownership requires authentication',
-  WALLET_OWNERSHIP_UNAVAILABLE: 'Wallet ownership service is unavailable',
-});
-
-export class WalletOwnershipHandoffError extends Error {
-  readonly retryAfterSeconds: number | undefined;
-
-  constructor(
-    readonly code: WalletOwnershipHandoffErrorCode,
-    retryAfterSeconds?: number,
-  ) {
-    super(ERROR_MESSAGES[code]);
-    this.name = 'WalletOwnershipHandoffError';
-    this.retryAfterSeconds = retryAfterSeconds;
-  }
-}
-
-export interface IssuedEvmOwnershipChallenge extends SiweOwnershipChallenge {
-  readonly registryEnvironment: EvmNetworkEnvironment;
-  readonly registryVersion: number;
-  readonly registryFingerprintSha256: string;
-}
-
-export interface RegisteredEvmWalletResult {
-  readonly status: 'registered' | 'already_registered';
-  readonly walletId: string;
-  readonly chainId: `eip155:${string}`;
-  readonly address: string;
-  readonly registeredAt: string;
-  readonly registryEnvironment: EvmNetworkEnvironment;
-  readonly registryVersion: number;
-  readonly registryFingerprintSha256: string;
-}
-
-export interface IssueEvmOwnershipChallengeInput {
-  readonly chainId: `eip155:${string}`;
-  readonly address: string;
-  readonly registryEnvironment: EvmNetworkEnvironment;
-}
-
-export interface SubmitEvmOwnershipProofInput {
-  readonly challenge: IssuedEvmOwnershipChallenge;
-  readonly signature: SiweOwnershipSignature;
-}
-
-export interface EvmWalletOwnershipClient {
-  issueChallenge(
-    input: IssueEvmOwnershipChallengeInput,
-    signal?: AbortSignal,
-  ): Promise<IssuedEvmOwnershipChallenge>;
-  submitProof(
-    input: SubmitEvmOwnershipProofInput,
-    signal?: AbortSignal,
-  ): Promise<RegisteredEvmWalletResult>;
-}
-
-export interface EvmWalletOwnershipHttpClientOptions {
-  readonly fetch?: AuthenticationFetch;
-  readonly cookieHeader?: string | (() => string);
-  readonly publicOrigin?: string;
-}
 
 const CHALLENGE_RESPONSE_KEYS = new Set([
   'version',
@@ -120,7 +49,7 @@ const REGISTRATION_RESPONSE_KEYS = new Set([
   'registryFingerprintSha256',
 ]);
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
-const EVM_ADDRESS = /^0x[0-9a-f]{40}$/u;
+const SOLANA_ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/u;
 const REGISTRY_FINGERPRINT = /^[0-9a-f]{64}$/u;
 const NONCE = /^[a-zA-Z0-9]{8,64}$/u;
 const CANONICAL_DATE_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
@@ -129,6 +58,52 @@ const OWNERSHIP_STATEMENT =
 const POLICY_RESOURCE = '- urn:crypto-lending:wallet-ownership:v1';
 const SUBJECT_RESOURCE = /^- urn:crypto-lending:wallet-subject-binding:hmac-sha-256:[0-9a-f]{64}$/u;
 const OPERATION_RESOURCE = '- urn:crypto-lending:wallet-operation:register-wallet';
+
+export interface IssuedSolanaOwnershipChallenge extends SiwsMessageOwnershipChallenge {
+  readonly chainId: SupportedSolanaCaipChainId;
+  readonly registryEnvironment: 'MAINNET' | 'TESTNET';
+  readonly registryVersion: number;
+  readonly registryFingerprintSha256: string;
+}
+
+export interface RegisteredSolanaWalletResult {
+  readonly status: 'registered' | 'already_registered';
+  readonly walletId: string;
+  readonly chainId: SupportedSolanaCaipChainId;
+  readonly address: string;
+  readonly registeredAt: string;
+  readonly registryEnvironment: 'MAINNET' | 'TESTNET';
+  readonly registryVersion: number;
+  readonly registryFingerprintSha256: string;
+}
+
+export interface IssueSolanaOwnershipChallengeInput {
+  readonly chainId: SupportedSolanaCaipChainId;
+  readonly address: string;
+  readonly registryEnvironment: 'MAINNET' | 'TESTNET';
+}
+
+export interface SubmitSolanaOwnershipProofInput {
+  readonly challenge: IssuedSolanaOwnershipChallenge;
+  readonly signature: OwnershipSignature;
+}
+
+export interface SolanaWalletOwnershipClient {
+  issueChallenge(
+    input: IssueSolanaOwnershipChallengeInput,
+    signal?: AbortSignal,
+  ): Promise<IssuedSolanaOwnershipChallenge>;
+  submitProof(
+    input: SubmitSolanaOwnershipProofInput,
+    signal?: AbortSignal,
+  ): Promise<RegisteredSolanaWalletResult>;
+}
+
+export interface SolanaWalletOwnershipHttpClientOptions {
+  readonly fetch?: AuthenticationFetch;
+  readonly cookieHeader?: string | (() => string);
+  readonly publicOrigin?: string;
+}
 
 function fail(
   code: WalletOwnershipHandoffErrorCode = WALLET_OWNERSHIP_HANDOFF_ERROR_CODES.unavailable,
@@ -169,7 +144,7 @@ function canonicalDateTime(value: unknown): value is string {
 }
 
 function positiveVersion(value: unknown): value is number {
-  return Number.isSafeInteger(value) && typeof value === 'number' && value >= 1 && value <= 32_767;
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 1 && value <= 32_767;
 }
 
 function exactMessageLine(lines: readonly string[], prefix: string): string {
@@ -206,21 +181,21 @@ function normalizedOrigin(value: string | undefined): string {
 
 function parseChallenge(
   value: unknown,
-  expected: IssueEvmOwnershipChallengeInput,
+  expected: IssueSolanaOwnershipChallengeInput,
   publicOrigin: string,
-): IssuedEvmOwnershipChallenge {
+): IssuedSolanaOwnershipChallenge {
   const record = ownRecord(value, CHALLENGE_RESPONSE_KEYS);
   const registryEnvironment = record.registryEnvironment;
   if (
     record.version !== 1 ||
-    record.messageFormat !== 'SIWE' ||
+    record.messageFormat !== 'SIWS' ||
     typeof record.challengeId !== 'string' ||
     !UUID_V4.test(record.challengeId) ||
     record.chainId !== expected.chainId ||
     typeof record.address !== 'string' ||
-    !EVM_ADDRESS.test(record.address) ||
-    record.address !== expected.address.toLowerCase() ||
-    record.accountId !== `${expected.chainId}:${expected.address.toLowerCase()}` ||
+    !SOLANA_ADDRESS.test(record.address) ||
+    record.address !== expected.address ||
+    record.accountId !== `${expected.chainId}:${expected.address}` ||
     typeof record.message !== 'string' ||
     record.message.length < 1 ||
     record.message.length > 4_096 ||
@@ -241,7 +216,7 @@ function parseChallenge(
   const lines = record.message.split('\n');
   if (
     lines.length !== 17 ||
-    lines[1]?.toLowerCase() !== record.address ||
+    lines[1] !== record.address ||
     lines[2] !== '' ||
     lines[3] !== OWNERSHIP_STATEMENT ||
     lines[4] !== '' ||
@@ -253,7 +228,7 @@ function parseChallenge(
   ) {
     fail();
   }
-  if (exactMessageLine(lines, 'Chain ID: ') !== expected.chainId.slice('eip155:'.length)) fail();
+  if (exactMessageLine(lines, 'Chain ID: ') !== expected.chainId) fail();
   if (exactMessageLine(lines, 'Version: ') !== '1') fail();
   if (exactMessageLine(lines, 'Expiration Time: ') !== record.expiresAt) fail();
   if (exactMessageLine(lines, 'Request ID: ') !== record.challengeId) fail();
@@ -271,7 +246,7 @@ function parseChallenge(
   const origin = normalizedOrigin(publicOrigin);
   const host = new URL(origin).host;
   if (
-    lines[0] !== `${host} wants you to sign in with your Ethereum account:` ||
+    lines[0] !== `${host} wants you to sign in with your Solana account:` ||
     exactMessageLine(lines, 'URI: ') !== `${origin}/`
   ) {
     fail();
@@ -279,8 +254,8 @@ function parseChallenge(
 
   const challenge = Object.freeze({
     id: record.challengeId,
-    format: 'siwe' as const,
-    chainId: record.chainId,
+    format: 'siws-message' as const,
+    chainId: expected.chainId,
     address: record.address,
     nonce,
     expiresAt: record.expiresAt,
@@ -299,24 +274,20 @@ function parseChallenge(
 
 function parseRegistrationResult(
   value: unknown,
-  expected: SubmitEvmOwnershipProofInput,
+  expected: SubmitSolanaOwnershipProofInput,
   responseStatus: number,
-): RegisteredEvmWalletResult {
+): RegisteredSolanaWalletResult {
   const record = ownRecord(value, REGISTRATION_RESPONSE_KEYS);
   const expectedStatus = responseStatus === 201 ? 'registered' : 'already_registered';
   const status = record.status;
-  const chainId = record.chainId;
   const registryEnvironment = record.registryEnvironment;
   if (
     (status !== 'registered' && status !== 'already_registered') ||
     status !== expectedStatus ||
     typeof record.walletId !== 'string' ||
     !UUID_V4.test(record.walletId) ||
-    typeof chainId !== 'string' ||
-    chainId !== expected.challenge.chainId ||
-    typeof record.address !== 'string' ||
-    !EVM_ADDRESS.test(record.address) ||
-    record.address !== expected.challenge.address.toLowerCase() ||
+    record.chainId !== expected.challenge.chainId ||
+    record.address !== expected.challenge.address ||
     !canonicalDateTime(record.registeredAt) ||
     (registryEnvironment !== 'MAINNET' && registryEnvironment !== 'TESTNET') ||
     registryEnvironment !== expected.challenge.registryEnvironment ||
@@ -331,12 +302,12 @@ function parseRegistrationResult(
   return Object.freeze({
     status,
     walletId: record.walletId,
-    chainId: chainId as `eip155:${string}`,
-    address: record.address,
+    chainId: expected.challenge.chainId,
+    address: expected.challenge.address,
     registeredAt: record.registeredAt,
     registryEnvironment,
-    registryVersion: record.registryVersion,
-    registryFingerprintSha256: record.registryFingerprintSha256,
+    registryVersion: expected.challenge.registryVersion,
+    registryFingerprintSha256: expected.challenge.registryFingerprintSha256,
   });
 }
 
@@ -372,32 +343,25 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
   if (signal?.aborted === true) throw new DOMException('Request aborted', 'AbortError');
 }
 
-export class HttpEvmWalletOwnershipClient implements EvmWalletOwnershipClient {
+export class HttpSolanaWalletOwnershipClient implements SolanaWalletOwnershipClient {
   readonly #fetch: AuthenticationFetch;
   readonly #cookieHeader: string | (() => string);
   readonly #publicOrigin: string;
 
-  constructor(options: EvmWalletOwnershipHttpClientOptions = {}) {
+  constructor(options: SolanaWalletOwnershipHttpClientOptions = {}) {
     this.#fetch = options.fetch ?? globalThis.fetch;
     this.#cookieHeader = options.cookieHeader ?? browserCookieHeader;
     this.#publicOrigin = normalizedOrigin(options.publicOrigin ?? browserPublicOrigin());
   }
 
   async issueChallenge(
-    input: IssueEvmOwnershipChallengeInput,
+    input: IssueSolanaOwnershipChallengeInput,
     signal?: AbortSignal,
-  ): Promise<IssuedEvmOwnershipChallenge> {
-    try {
-      assertWalletAccount({ chainId: input.chainId, address: input.address }, 'eip155');
-    } catch {
-      fail(WALLET_OWNERSHIP_HANDOFF_ERROR_CODES.rejected);
-    }
-    if (input.registryEnvironment !== 'MAINNET' && input.registryEnvironment !== 'TESTNET') {
-      fail(WALLET_OWNERSHIP_HANDOFF_ERROR_CODES.rejected);
-    }
+  ): Promise<IssuedSolanaOwnershipChallenge> {
+    throwIfAborted(signal);
     const response = await this.#post(
       WALLET_OWNERSHIP_CHALLENGE_PATH,
-      JSON.stringify({ chainId: input.chainId, address: input.address.toLowerCase() }),
+      JSON.stringify({ chainId: input.chainId, address: input.address }),
       signal,
     );
     if (response.status === 400) fail(WALLET_OWNERSHIP_HANDOFF_ERROR_CODES.rejected);
@@ -410,24 +374,17 @@ export class HttpEvmWalletOwnershipClient implements EvmWalletOwnershipClient {
   }
 
   async submitProof(
-    input: SubmitEvmOwnershipProofInput,
+    input: SubmitSolanaOwnershipProofInput,
     signal?: AbortSignal,
-  ): Promise<RegisteredEvmWalletResult> {
+  ): Promise<RegisteredSolanaWalletResult> {
+    let body: string;
     try {
       assertOwnershipSignatureMatchesChallenge(input.signature, input.challenge);
+      body = JSON.stringify(toSolanaEd25519OwnershipProofWire(input.signature, input.challenge));
     } catch {
       fail(WALLET_OWNERSHIP_HANDOFF_ERROR_CODES.rejected);
     }
-    const response = await this.#post(
-      WALLET_OWNERSHIP_PROOF_PATH,
-      JSON.stringify({
-        kind: 'EVM_EIP191_EOA',
-        challengeId: input.signature.challengeId,
-        message: input.challenge.message,
-        signature: input.signature.signature,
-      }),
-      signal,
-    );
+    const response = await this.#post(WALLET_OWNERSHIP_PROOF_PATH, body, signal);
     if (response.status === 400) fail(WALLET_OWNERSHIP_HANDOFF_ERROR_CODES.rejected);
     if (response.status === 401) fail(WALLET_OWNERSHIP_HANDOFF_ERROR_CODES.unauthenticated);
     if (response.status === 409) fail(WALLET_OWNERSHIP_HANDOFF_ERROR_CODES.conflict);
@@ -447,7 +404,6 @@ export class HttpEvmWalletOwnershipClient implements EvmWalletOwnershipClient {
     } catch {
       fail(WALLET_OWNERSHIP_HANDOFF_ERROR_CODES.unauthenticated);
     }
-
     try {
       return await this.#fetch(path, requestInit(csrfToken, body, signal));
     } catch (error) {
@@ -465,48 +421,32 @@ export class HttpEvmWalletOwnershipClient implements EvmWalletOwnershipClient {
   }
 }
 
-export interface CompleteEvmWalletOwnershipInput {
-  readonly adapter: InjectedEip1193WalletAdapter;
+export interface CompleteSolanaWalletOwnershipInput {
+  readonly adapter: WalletAdapter;
   readonly connection: WalletConnection;
-  readonly client: EvmWalletOwnershipClient;
+  readonly client: SolanaWalletOwnershipClient;
   readonly signal?: AbortSignal;
 }
 
-/** Executes the exact KAN-56 issue -> sign -> submit handoff. */
-export async function completeEvmWalletOwnershipRegistration(
-  input: CompleteEvmWalletOwnershipInput,
-): Promise<RegisteredEvmWalletResult> {
+/** Executes the exact issue -> SIWS signMessage -> Ed25519 proof handoff. */
+export async function completeSolanaWalletOwnershipRegistration(
+  input: CompleteSolanaWalletOwnershipInput,
+): Promise<RegisteredSolanaWalletResult> {
   try {
-    assertWalletConnection(input.connection, 'eip155', input.adapter.connectorId);
+    assertWalletConnection(input.connection, 'solana', input.adapter.connectorId);
   } catch {
     fail(WALLET_OWNERSHIP_HANDOFF_ERROR_CODES.rejected);
   }
   throwIfAborted(input.signal);
-
   const selected = input.connection.selectedAccount;
-  if (!selected.chainId.startsWith('eip155:')) {
+  if (!selected.chainId.startsWith('solana:')) {
     fail(WALLET_OWNERSHIP_HANDOFF_ERROR_CODES.rejected);
   }
-  const chainId = selected.chainId as `eip155:${string}`;
-  const current = input.adapter.currentConnection();
-  if (
-    current === null ||
-    current.connectionId !== input.connection.connectionId ||
-    current.connectorId !== input.connection.connectorId ||
-    current.selectedAccount.chainId !== chainId ||
-    current.selectedAccount.address.toLowerCase() !== selected.address.toLowerCase()
-  ) {
-    fail(WALLET_OWNERSHIP_HANDOFF_ERROR_CODES.rejected);
-  }
-  const network = input.adapter.descriptor.supportedNetworks.find(
-    (candidate) => candidate.chainId === chainId,
-  );
-  if (network === undefined) fail(WALLET_OWNERSHIP_HANDOFF_ERROR_CODES.rejected);
   const challenge = await input.client.issueChallenge(
     {
-      chainId,
+      chainId: selected.chainId as SupportedSolanaCaipChainId,
       address: selected.address,
-      registryEnvironment: network.environment,
+      registryEnvironment: 'MAINNET',
     },
     input.signal,
   );
@@ -515,7 +455,9 @@ export async function completeEvmWalletOwnershipRegistration(
     input.connection.connectionId,
     challenge,
   );
-  if (signature.format !== 'siwe') fail(WALLET_OWNERSHIP_HANDOFF_ERROR_CODES.rejected);
+  if (signature.format !== 'siws-message') {
+    fail(WALLET_OWNERSHIP_HANDOFF_ERROR_CODES.rejected);
+  }
   throwIfAborted(input.signal);
   return input.client.submitProof({ challenge, signature }, input.signal);
 }

@@ -27,6 +27,11 @@ import {
   type PortfolioPriceEvidenceSnapshot,
   type ReadPortfolioPriceEvidenceRequest,
 } from '../src/portfolio/application/ports/portfolio-price-evidence-reader.port';
+import {
+  PORTFOLIO_WALLET_REGISTRATION_READER,
+  type ActivePortfolioWalletRegistration,
+  type PortfolioWalletRegistrationReader,
+} from '../src/portfolio/application/ports/portfolio-wallet-registration-reader.port';
 import { PortfolioController } from '../src/portfolio/http/portfolio.controller';
 import { PortfolioPrivacyInterceptor } from '../src/portfolio/http/portfolio-privacy.interceptor';
 import {
@@ -39,14 +44,25 @@ const ACCOUNT_ID = parseAccountId('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
 const OTHER_ACCOUNT_ID = parseAccountId('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb');
 const WALLET_A = '11111111-1111-4111-8111-111111111111';
 const WALLET_B = '22222222-2222-4222-8222-222222222222';
+const WALLET_C = '66666666-6666-4666-8666-666666666666';
 const EVALUATED_AT = '2026-08-24T18:00:00.000Z';
 const CORRELATION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+
+const ACTIVE_WALLETS: readonly ActivePortfolioWalletRegistration[] = Object.freeze([
+  { walletId: WALLET_A, networkId: 'eip155:1' },
+  { walletId: WALLET_B, networkId: 'eip155:8453' },
+  { walletId: WALLET_C, networkId: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp' },
+]);
 
 function balanceSnapshot(): IndexedPortfolioBalanceSnapshot {
   return {
     snapshotId: 'idx5-http-snapshot-11000',
     capturedAt: '2026-08-24T17:59:59.000Z',
     freshnessClass: 'CURRENT',
+    coverage: {
+      status: 'COMPLETE',
+      targets: ACTIVE_WALLETS.map((wallet) => ({ ...wallet, status: 'COMPLETE' })),
+    },
     observations: [
       {
         observationId: '33333333-3333-4333-8333-333333333333',
@@ -59,7 +75,7 @@ function balanceSnapshot(): IndexedPortfolioBalanceSnapshot {
       },
       {
         observationId: '44444444-4444-4444-8444-444444444444',
-        walletId: WALLET_A,
+        walletId: WALLET_C,
         networkId: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp',
         assetIdentity: 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB',
         amountAtomic: '2500000000',
@@ -126,10 +142,14 @@ function expectPrivate(response: request.Response): void {
 
 describe('unified portfolio HTTP boundary (e2e)', () => {
   let app: INestApplication;
+  let walletReader: { readActiveWalletRegistrations: jest.Mock };
   let balanceReader: { readCurrentBalances: jest.Mock };
   let priceReader: { readPriceEvidence: jest.Mock };
 
   beforeAll(async () => {
+    walletReader = {
+      readActiveWalletRegistrations: jest.fn(),
+    };
     balanceReader = {
       readCurrentBalances: jest.fn(),
     };
@@ -156,6 +176,10 @@ describe('unified portfolio HTTP boundary (e2e)', () => {
         PortfolioService,
         { provide: CURRENT_PRINCIPAL_RESOLVER, useValue: resolver },
         {
+          provide: PORTFOLIO_WALLET_REGISTRATION_READER,
+          useValue: walletReader satisfies PortfolioWalletRegistrationReader,
+        },
+        {
           provide: PORTFOLIO_BALANCE_READER,
           useValue: balanceReader satisfies PortfolioBalanceReader,
         },
@@ -179,6 +203,7 @@ describe('unified portfolio HTTP boundary (e2e)', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    walletReader.readActiveWalletRegistrations.mockResolvedValue(ACTIVE_WALLETS);
     balanceReader.readCurrentBalances.mockResolvedValue(balanceSnapshot());
     priceReader.readPriceEvidence.mockImplementation(
       async (requestValue: ReadPortfolioPriceEvidenceRequest) => priceEvidence(requestValue),
@@ -201,6 +226,7 @@ describe('unified portfolio HTTP boundary (e2e)', () => {
       message: 'Authentication required',
       statusCode: 401,
     });
+    expect(walletReader.readActiveWalletRegistrations).not.toHaveBeenCalled();
     expect(balanceReader.readCurrentBalances).not.toHaveBeenCalled();
     expect(priceReader.readPriceEvidence).not.toHaveBeenCalled();
   });
@@ -217,6 +243,10 @@ describe('unified portfolio HTTP boundary (e2e)', () => {
     expect(response.body).toMatchObject({
       schemaVersion: 1,
       asOf: EVALUATED_AT,
+      balanceCoverage: {
+        status: 'COMPLETE',
+        targets: ACTIVE_WALLETS.map((wallet) => ({ ...wallet, status: 'COMPLETE' })),
+      },
       overallTotal: {
         usdValue: {
           mantissa: '11000000000000000000000',
@@ -228,8 +258,9 @@ describe('unified portfolio HTTP boundary (e2e)', () => {
         sourceCount: 3,
       },
       walletTotals: [
-        { walletId: WALLET_A, usdValue: { decimal: '7500.000000000000000000' } },
+        { walletId: WALLET_A, usdValue: { decimal: '5000.000000000000000000' } },
         { walletId: WALLET_B, usdValue: { decimal: '3500.000000000000000000' } },
+        { walletId: WALLET_C, usdValue: { decimal: '2500.000000000000000000' } },
       ],
       reportingUse: 'CONSERVATIVE_REPORTING_ONLY',
       mayIncreaseBuyingPower: false,
@@ -242,7 +273,39 @@ describe('unified portfolio HTTP boundary (e2e)', () => {
       accountId: ACCOUNT_ID,
       evaluatedAt: EVALUATED_AT,
       correlationId: expect.stringMatching(CORRELATION_ID),
+      expectedWallets: ACTIVE_WALLETS,
     } satisfies ReadPortfolioBalancesRequest);
+  });
+
+  it('returns exact per-wallet network coverage for a partial 200 response', async () => {
+    const snapshot = balanceSnapshot();
+    const expectedCoverage = {
+      status: 'PARTIAL' as const,
+      targets: ACTIVE_WALLETS.map((wallet) => ({
+        ...wallet,
+        status: wallet.walletId === WALLET_C ? ('UNAVAILABLE' as const) : ('COMPLETE' as const),
+      })),
+    };
+    balanceReader.readCurrentBalances.mockResolvedValueOnce({
+      ...snapshot,
+      coverage: expectedCoverage,
+      observations: snapshot.observations.filter(({ walletId }) => walletId !== WALLET_C),
+    });
+
+    const response = await request(app.getHttpServer())
+      .get('/api/v1/portfolio')
+      .set('Authorization', 'Bearer local-portfolio-fixture')
+      .expect(200);
+
+    expectPrivate(response);
+    expect(response.body.balanceCoverage).toEqual(expectedCoverage);
+    expect(response.body.overallTotal).toMatchObject({
+      usdValue: { decimal: '8500.000000000000000000' },
+      freshnessClass: 'UNAVAILABLE',
+      completeness: 'PARTIAL',
+      sourceCount: 2,
+      includedSourceCount: 2,
+    });
   });
 
   it('maps dependency failure to one generic retryable response without leaking its cause', async () => {
@@ -275,12 +338,33 @@ describe('unified portfolio HTTP boundary (e2e)', () => {
       additionalProperties: false,
       required: expect.arrayContaining([
         'overallTotal',
+        'balanceCoverage',
         'walletTotals',
         'chainTotals',
         'assetTotals',
         'sources',
         'excludedSources',
       ]),
+    });
+    expect(
+      endpoint.responses['200'].content['application/json'].schema.properties.balanceCoverage,
+    ).toMatchObject({
+      type: 'object',
+      additionalProperties: false,
+      required: ['status', 'targets'],
+      properties: {
+        status: { type: 'string', enum: ['COMPLETE', 'PARTIAL', 'UNAVAILABLE'] },
+        targets: {
+          type: 'array',
+          maxItems: 32,
+          uniqueItems: true,
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['walletId', 'networkId', 'status'],
+          },
+        },
+      },
     });
     expect(endpoint.responses).toHaveProperty('401');
     expect(endpoint.responses).toHaveProperty('503');

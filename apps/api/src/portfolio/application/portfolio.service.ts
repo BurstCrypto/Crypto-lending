@@ -14,6 +14,7 @@ import {
   parseIndexedPortfolioBalanceSnapshot,
   PortfolioBalanceSnapshotValidationError,
 } from '../domain/portfolio-balance-snapshot';
+import { parseActivePortfolioWalletRegistrations } from '../domain/active-portfolio-wallet-registrations';
 import {
   buildUnifiedPortfolio,
   PortfolioAggregationError,
@@ -31,6 +32,10 @@ import {
   type PortfolioPriceEvidenceReader,
   type PortfolioPriceEvidenceSnapshot,
 } from './ports/portfolio-price-evidence-reader.port';
+import {
+  PORTFOLIO_WALLET_REGISTRATION_READER,
+  type PortfolioWalletRegistrationReader,
+} from './ports/portfolio-wallet-registration-reader.port';
 import { PortfolioUnavailableError } from './portfolio.errors';
 
 const CORRELATION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
@@ -109,6 +114,8 @@ function parsePriceEvidence(value: unknown): PortfolioPriceEvidenceSnapshot | nu
 @Injectable()
 export class PortfolioService {
   constructor(
+    @Inject(PORTFOLIO_WALLET_REGISTRATION_READER)
+    private readonly wallets: PortfolioWalletRegistrationReader,
     @Inject(PORTFOLIO_BALANCE_READER)
     private readonly balances: PortfolioBalanceReader,
     @Inject(PORTFOLIO_PRICE_EVIDENCE_READER)
@@ -121,15 +128,25 @@ export class PortfolioService {
     if (!CORRELATION_ID.test(request.correlationId)) return unavailable();
     const asOf = this.trustedNow();
 
+    let expectedWallets: ReturnType<typeof parseActivePortfolioWalletRegistrations>;
     let balanceSnapshot: ReturnType<typeof parseIndexedPortfolioBalanceSnapshot>;
     try {
+      expectedWallets = parseActivePortfolioWalletRegistrations(
+        await this.wallets.readActiveWalletRegistrations({
+          accountId: request.accountId,
+          evaluatedAt: asOf,
+          correlationId: request.correlationId,
+        }),
+      );
       balanceSnapshot = parseIndexedPortfolioBalanceSnapshot(
         await this.balances.readCurrentBalances({
           accountId: request.accountId,
           evaluatedAt: asOf,
           correlationId: request.correlationId,
+          expectedWallets,
         }),
         asOf,
+        expectedWallets,
       );
     } catch {
       return unavailable();
@@ -186,6 +203,7 @@ export class PortfolioService {
         balanceSnapshotId: balanceSnapshot.snapshotId,
         balanceCapturedAt: balanceSnapshot.capturedAt,
         balanceSnapshotFreshness: balanceSnapshot.freshnessClass,
+        balanceCoverage: balanceSnapshot.coverage,
         valuedBalances,
         excludedBalances: excluded,
       });

@@ -74,18 +74,17 @@ describe('authenticated production portfolio', () => {
 
     expect(screen.getByRole('heading', { level: 2, name: 'Loading your portfolio' })).toBeVisible();
     expect(screen.queryByText('Supported reporting total')).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole('region', { name: 'Verify a Base Mainnet wallet' }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Add a wallet' })).not.toBeInTheDocument();
     expect(
       screen.queryByRole('navigation', { name: 'Jump to portfolio sections' }),
     ).not.toBeInTheDocument();
     expect(readPortfolio).not.toHaveBeenCalled();
 
     pendingSession.resolve(PROFILE);
-    expect(
-      await screen.findByRole('region', { name: 'Verify a Base Mainnet wallet' }),
-    ).toHaveAttribute('id', 'wallets');
+    expect(await screen.findByRole('region', { name: 'Add a wallet' })).toHaveAttribute(
+      'id',
+      'wallets',
+    );
     const jumpNavigation = screen.getByRole('navigation', {
       name: 'Jump to portfolio sections',
     });
@@ -104,12 +103,71 @@ describe('authenticated production portfolio', () => {
       '$11,000.00',
     );
     expect(screen.getByText('Reporting only.')).toBeVisible();
-    expect(screen.getByText('Base')).toBeVisible();
+    expect(screen.getByText('Registered wallet coverage')).toBeVisible();
+    expect(
+      screen.getByText('All 2 registered wallet networks have complete balance coverage.'),
+    ).toBeVisible();
+    expect(
+      within(
+        screen.getByRole('heading', { level: 3, name: 'Networks' }).closest('article')!,
+      ).getByText('Base'),
+    ).toBeVisible();
     expect(document.body).not.toHaveTextContent('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
     expect(document.body).not.toHaveTextContent('private-reference');
     expect(document.body).not.toHaveTextContent('Available buying power');
     expect(readPortfolio).toHaveBeenCalledTimes(1);
     expect(readPortfolio.mock.calls[0]?.[0]).toEqual(expect.any(AbortSignal));
+  });
+
+  it('shows incomplete registered-wallet coverage as unavailable instead of zero', async () => {
+    const partialSnapshot: ReportingPortfolioSnapshot = {
+      ...REPORTING_PORTFOLIO_SNAPSHOT,
+      balanceCoverage: {
+        status: 'PARTIAL',
+        targetCount: 3,
+        completeTargetCount: 2,
+        partialTargetCount: 0,
+        unavailableTargetCount: 1,
+      },
+      overallTotal: {
+        ...REPORTING_PORTFOLIO_SNAPSHOT.overallTotal,
+        freshnessClass: 'UNAVAILABLE',
+        completeness: 'PARTIAL',
+      },
+      chainTotals: [
+        ...REPORTING_PORTFOLIO_SNAPSHOT.chainTotals,
+        {
+          networkId: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp',
+          usdValue: null,
+          freshnessClass: 'UNAVAILABLE',
+          completeness: 'UNAVAILABLE',
+          sourceCount: 0,
+          includedSourceCount: 0,
+        },
+      ],
+    };
+    render(
+      <ProductionPortfolio
+        dependencies={dependencies({
+          readPortfolio: vi.fn(async () => partialSnapshot),
+          restoreSession: vi.fn(async () => PROFILE),
+        })}
+      />,
+    );
+
+    expect(await screen.findByText('Registered wallet coverage')).toBeVisible();
+    expect(
+      screen.getByText(
+        '1 of 3 registered wallet networks are incomplete or unavailable. Missing balances are shown as unavailable, never $0.',
+      ),
+    ).toBeVisible();
+    expect(screen.getByText('Known reported subtotal')).toBeVisible();
+    expect(screen.queryByText('Supported reporting total')).not.toBeInTheDocument();
+    expect(
+      within(
+        screen.getByRole('heading', { level: 3, name: 'Networks' }).closest('article')!,
+      ).getByText('Solana'),
+    ).toBeVisible();
   });
 
   it('replace-redirects a failed session check to the fixed safe portfolio login path', async () => {
@@ -126,9 +184,7 @@ describe('authenticated production portfolio', () => {
 
     await waitFor(() => expect(navigate).toHaveBeenCalledWith('/login?returnTo=%2Fportfolio'));
     expect(readPortfolio).not.toHaveBeenCalled();
-    expect(
-      screen.queryByRole('region', { name: 'Verify a Base Mainnet wallet' }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Add a wallet' })).not.toBeInTheDocument();
     expect(screen.queryByText('Supported reporting total')).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { level: 2, name: 'Loading your portfolio' })).toBeVisible();
   });
@@ -148,9 +204,7 @@ describe('authenticated production portfolio', () => {
     await waitFor(() => expect(navigate).toHaveBeenCalledWith('/login?returnTo=%2Fportfolio'));
     expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
     expect(screen.queryByText('Supported reporting total')).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole('region', { name: 'Verify a Base Mainnet wallet' }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Add a wallet' })).not.toBeInTheDocument();
   });
 
   it('clears private portfolio data and redirects when wallet challenge issuance proves auth loss', async () => {
@@ -214,7 +268,7 @@ describe('authenticated production portfolio', () => {
     expect(
       await screen.findByRole('heading', { level: 2, name: 'Portfolio reporting is unavailable' }),
     ).toBeVisible();
-    expect(screen.getByRole('region', { name: 'Verify a Base Mainnet wallet' })).toBeVisible();
+    expect(screen.getByRole('region', { name: 'Add a wallet' })).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
     expect(screen.getByRole('heading', { level: 2, name: 'Loading your portfolio' })).toBeVisible();
     expect(await screen.findByText('Supported reporting total')).toBeVisible();
@@ -232,7 +286,7 @@ describe('authenticated production portfolio', () => {
 
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent('Your portfolio could not be loaded');
-    expect(screen.getByRole('region', { name: 'Verify a Base Mainnet wallet' })).toBeVisible();
+    expect(screen.getByRole('region', { name: 'Add a wallet' })).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
     expect(await screen.findByText('Supported reporting total')).toBeVisible();
   });

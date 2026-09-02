@@ -7,10 +7,13 @@ import { parseAccountId } from '../../../accounts/domain/account-profile';
 import { isCanonicalUuidV4 } from '../../../infrastructure/logging';
 import { PostgresService } from '../../../infrastructure/database/postgres.service';
 import {
+  MAX_ACTIVE_WALLET_REGISTRATIONS_PER_ACCOUNT,
+  type ActiveWalletRegistrationRecord,
   type BeginWalletOwnershipChallengeRequest,
   type BegunWalletOwnershipChallenge,
   type CompleteWalletRegistrationRequest,
   type CompleteWalletRegistrationResult,
+  type ListActiveWalletRegistrationsRequest,
   type PrepareWalletOwnershipChallengeRequest,
   type PrepareWalletOwnershipChallengeResult,
   type RejectWalletOwnershipChallengeRequest,
@@ -69,6 +72,24 @@ interface CompleteRow extends QueryResultRow {
   registration_outcome: string;
   wallet_id: string | null;
   registered_at: Date | null;
+}
+
+interface ActiveWalletRow extends QueryResultRow {
+  active_wallet_id: string;
+  active_account_id: string;
+  active_registered_by_challenge_id: string;
+  active_chain_namespace: string;
+  active_chain_reference: string;
+  active_registry_environment: string;
+  active_registry_version: number;
+  active_registry_fingerprint_sha256: string;
+  active_address_digest_version: number;
+  active_address_digest: Buffer;
+  active_address_key_version: number;
+  active_address_ciphertext: Buffer;
+  active_address_iv: Buffer;
+  active_address_auth_tag: Buffer;
+  active_registered_at: Date;
 }
 
 export class WalletRegistrationPersistenceError extends Error {
@@ -160,11 +181,15 @@ function sealedValue(
   ciphertext: unknown,
   iv: unknown,
   authTag: unknown,
+  maximumCiphertextBytes = 16_384,
 ): SealedWalletRegistrationValue {
   if (
+    !Number.isSafeInteger(maximumCiphertextBytes) ||
+    maximumCiphertextBytes < 1 ||
+    maximumCiphertextBytes > 16_384 ||
     !Buffer.isBuffer(ciphertext) ||
     ciphertext.length < 1 ||
-    ciphertext.length > 16_384 ||
+    ciphertext.length > maximumCiphertextBytes ||
     !Buffer.isBuffer(iv) ||
     iv.length !== 12 ||
     !Buffer.isBuffer(authTag) ||
@@ -237,6 +262,67 @@ function isPendingLimit(error: unknown): boolean {
 @Injectable()
 export class PostgresWalletRegistrationRepository implements WalletRegistrationRepositoryPort {
   constructor(private readonly postgres: PostgresService) {}
+
+  async listActiveWallets(
+    request: ListActiveWalletRegistrationsRequest,
+  ): Promise<readonly ActiveWalletRegistrationRecord[]> {
+    try {
+      const accountId = parseAccountId(request.accountId);
+      const result = await this.postgres.query<ActiveWalletRow>(
+        `SELECT active_wallet.*
+         FROM list_active_wallet_registrations($1::uuid) AS active_wallet`,
+        [accountId],
+      );
+      if (result.rows.length > MAX_ACTIVE_WALLET_REGISTRATIONS_PER_ACCOUNT) {
+        throw new WalletRegistrationPersistenceError();
+      }
+
+      const walletIds = new Set<string>();
+      return Object.freeze(
+        result.rows.map((row) => {
+          const walletId = uuid(row.active_wallet_id);
+          if (walletIds.has(walletId)) throw new WalletRegistrationPersistenceError();
+          walletIds.add(walletId);
+          const returnedAccountId = parseAccountId(row.active_account_id);
+          if (returnedAccountId !== accountId) throw new WalletRegistrationPersistenceError();
+          if (
+            typeof row.active_chain_namespace !== 'string' ||
+            typeof row.active_chain_reference !== 'string'
+          ) {
+            throw new WalletRegistrationPersistenceError();
+          }
+          return Object.freeze({
+            walletId,
+            accountId: returnedAccountId,
+            registeredByChallengeId: parseWalletChallengeId(row.active_registered_by_challenge_id),
+            chainId: parseWalletChainId(
+              `${row.active_chain_namespace}:${row.active_chain_reference}`,
+            ),
+            registry: registryBinding(
+              row.active_registry_environment,
+              row.active_registry_version,
+              row.active_registry_fingerprint_sha256,
+            ),
+            addressDigest: digestReference<'address'>(
+              row.active_address_digest_version,
+              row.active_address_digest,
+            ),
+            encryptedAddress: sealedValue(
+              row.active_address_key_version,
+              row.active_address_ciphertext,
+              row.active_address_iv,
+              row.active_address_auth_tag,
+              512,
+            ),
+            registeredAt: finiteDate(row.active_registered_at),
+          });
+        }),
+      );
+    } catch (error) {
+      if (error instanceof WalletRegistrationPersistenceError) throw error;
+      throw new WalletRegistrationPersistenceError();
+    }
+  }
 
   async beginChallenge(
     request: BeginWalletOwnershipChallengeRequest,

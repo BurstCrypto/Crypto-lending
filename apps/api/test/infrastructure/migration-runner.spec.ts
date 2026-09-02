@@ -342,6 +342,7 @@ describe('MigrationRunner', () => {
       '0011',
       '0012',
       '0013',
+      '0014',
     ]);
     expect(database.jobOutboxExists).toBe(true);
     expect(database.applied.has('0001')).toBe(true);
@@ -357,6 +358,7 @@ describe('MigrationRunner', () => {
     expect(database.applied.has('0011')).toBe(true);
     expect(database.applied.has('0012')).toBe(true);
     expect(database.applied.has('0013')).toBe(true);
+    expect(database.applied.has('0014')).toBe(true);
     expect(database.accountSchemaExists).toBe(true);
     expect(database.ledgerSchemaExists).toBe(true);
     expect(database.jobOutboxLastErrorConstraintExists).toBe(true);
@@ -365,14 +367,15 @@ describe('MigrationRunner', () => {
     expect(database.walletRegistrationSchemaExists).toBe(true);
     expect(database.yieldOperationSchemaExists).toBe(true);
     expect(database.ledgerFeeAdjustmentIntegrityRepaired).toBe(true);
-    expect(database.queries.filter((query) => query === 'BEGIN')).toHaveLength(11);
+    expect(database.queries.filter((query) => query === 'BEGIN')).toHaveLength(12);
     expect(
       database.queries.filter((query) => query.startsWith('CREATE INDEX CONCURRENTLY')),
     ).toHaveLength(2);
     await expect(runner.assertUpToDate()).resolves.toBeUndefined();
 
     await expect(runner.up()).resolves.toEqual([]);
-    await expect(runner.down(13)).resolves.toEqual([
+    await expect(runner.down(14)).resolves.toEqual([
+      '0014',
       '0013',
       '0012',
       '0011',
@@ -416,7 +419,7 @@ describe('MigrationRunner', () => {
     );
     await expect(runner.up()).rejects.toThrow('Database migration 0003 schema verification failed');
 
-    await expect(runner.down(11)).rejects.toThrow(
+    await expect(runner.down(12)).rejects.toThrow(
       'Database migration 0003 schema verification failed',
     );
     expect(database.ledgerSchemaExists).toBe(true);
@@ -424,7 +427,8 @@ describe('MigrationRunner', () => {
       'job_outbox_failed_retention_idx',
       "CREATE INDEX CONCURRENTLY job_outbox_failed_retention_idx ON job_outbox (failed_at, id) WHERE status = 'failed'",
     );
-    await expect(runner.down(11)).resolves.toEqual([
+    await expect(runner.down(12)).resolves.toEqual([
+      '0014',
       '0013',
       '0012',
       '0011',
@@ -449,6 +453,7 @@ describe('MigrationRunner', () => {
       '0011',
       '0012',
       '0013',
+      '0014',
     ]);
     expect(database.indexes.has('job_outbox_failed_retention_idx')).toBe(true);
     await expect(runner.assertUpToDate()).resolves.toBeUndefined();

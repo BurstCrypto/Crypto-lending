@@ -1,5 +1,7 @@
 import type { SchemaObject } from '@nestjs/swagger';
 
+import { MAX_ACTIVE_WALLET_REGISTRATIONS_PER_ACCOUNT } from '../../wallets/application/ports/wallet-registration-repository.port';
+
 const EXACT_USD_AMOUNT_SCHEMA: SchemaObject = {
   type: 'object',
   additionalProperties: false,
@@ -38,6 +40,35 @@ const AGGREGATE_SCHEMA: SchemaObject = {
   additionalProperties: false,
   required: AGGREGATE_REQUIRED,
   properties: AGGREGATE_PROPERTIES,
+};
+
+const BALANCE_COVERAGE_STATUS_SCHEMA: SchemaObject = {
+  type: 'string',
+  enum: ['COMPLETE', 'PARTIAL', 'UNAVAILABLE'],
+};
+
+const BALANCE_COVERAGE_SCHEMA: SchemaObject = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['status', 'targets'],
+  properties: {
+    status: BALANCE_COVERAGE_STATUS_SCHEMA,
+    targets: {
+      type: 'array',
+      maxItems: MAX_ACTIVE_WALLET_REGISTRATIONS_PER_ACCOUNT,
+      uniqueItems: true,
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['walletId', 'networkId', 'status'],
+        properties: {
+          walletId: { type: 'string', format: 'uuid' },
+          networkId: { type: 'string', maxLength: 96 },
+          status: BALANCE_COVERAGE_STATUS_SCHEMA,
+        },
+      },
+    },
+  },
 };
 
 const ASSET_REFERENCE_SCHEMA: SchemaObject = {
@@ -215,6 +246,7 @@ export const UNIFIED_PORTFOLIO_RESPONSE_SCHEMA: SchemaObject = {
     'schemaVersion',
     'asOf',
     'balanceSnapshot',
+    'balanceCoverage',
     'oldestBalanceObservedAt',
     'overallTotal',
     'walletTotals',
@@ -239,6 +271,7 @@ export const UNIFIED_PORTFOLIO_RESPONSE_SCHEMA: SchemaObject = {
         freshnessClass: { type: 'string', enum: ['CURRENT', 'STALE'] },
       },
     },
+    balanceCoverage: BALANCE_COVERAGE_SCHEMA,
     oldestBalanceObservedAt: { type: 'string', format: 'date-time', nullable: true },
     overallTotal: AGGREGATE_SCHEMA,
     walletTotals: {

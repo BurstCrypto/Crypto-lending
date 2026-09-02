@@ -1,16 +1,38 @@
 import {
-  parseIndexedPortfolioBalanceSnapshot,
+  parseIndexedPortfolioBalanceSnapshot as parseCoveredBalanceSnapshot,
   PortfolioBalanceSnapshotValidationError,
 } from './portfolio-balance-snapshot';
 import type { IndexedPortfolioBalanceSnapshot } from '../application/ports/portfolio-balance-reader.port';
+import type { ActivePortfolioWalletRegistration } from '../application/ports/portfolio-wallet-registration-reader.port';
 
 const EVALUATED_AT = '2026-08-24T18:00:00.000Z';
+
+function expectedWallets(): readonly ActivePortfolioWalletRegistration[] {
+  return [
+    { walletId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', networkId: 'eip155:1' },
+    {
+      walletId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+      networkId: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp',
+    },
+  ];
+}
+
+function parseIndexedPortfolioBalanceSnapshot(
+  value: unknown,
+  evaluatedAt: unknown,
+): IndexedPortfolioBalanceSnapshot {
+  return parseCoveredBalanceSnapshot(value, evaluatedAt, expectedWallets());
+}
 
 function snapshot(): IndexedPortfolioBalanceSnapshot {
   return {
     snapshotId: 'idx5-snapshot-42',
     capturedAt: '2026-08-24T17:59:59.000Z',
     freshnessClass: 'CURRENT',
+    coverage: {
+      status: 'COMPLETE',
+      targets: expectedWallets().map((target) => ({ ...target, status: 'COMPLETE' as const })),
+    },
     observations: [
       {
         observationId: '11111111-1111-4111-8111-111111111111',
@@ -112,6 +134,58 @@ describe('indexed portfolio balance snapshot', () => {
         EVALUATED_AT,
       ),
     ).toThrow(expect.objectContaining({ code: 'DUPLICATE_BALANCE_SOURCE' }));
+  });
+
+  it('requires exact coverage for every independently expected active wallet and network', () => {
+    const missingTarget = {
+      ...snapshot(),
+      coverage: {
+        status: 'COMPLETE',
+        targets: snapshot().coverage.targets.slice(0, 1),
+      },
+      observations: snapshot().observations.slice(0, 1),
+    };
+    expect(() => parseIndexedPortfolioBalanceSnapshot(missingTarget, EVALUATED_AT)).toThrow(
+      expect.objectContaining({ code: 'INVALID_COVERAGE' }),
+    );
+
+    const unavailableTarget = snapshot().coverage.targets[1];
+    if (!unavailableTarget) throw new Error('fixture missing');
+    const partial = parseCoveredBalanceSnapshot(
+      {
+        ...snapshot(),
+        coverage: {
+          status: 'PARTIAL',
+          targets: [
+            snapshot().coverage.targets[0],
+            { ...unavailableTarget, status: 'UNAVAILABLE' },
+          ],
+        },
+        observations: snapshot().observations.slice(0, 1),
+      },
+      EVALUATED_AT,
+      expectedWallets(),
+    );
+    expect(partial.coverage.status).toBe('PARTIAL');
+    expect(partial.observations).toHaveLength(1);
+  });
+
+  it('rejects observations attributed to absent or unavailable coverage targets', () => {
+    const firstTarget = snapshot().coverage.targets[0];
+    if (!firstTarget) throw new Error('fixture missing');
+    expect(() =>
+      parseCoveredBalanceSnapshot(
+        {
+          ...snapshot(),
+          coverage: {
+            status: 'PARTIAL',
+            targets: [{ ...firstTarget, status: 'UNAVAILABLE' }, snapshot().coverage.targets[1]],
+          },
+        },
+        EVALUATED_AT,
+        expectedWallets(),
+      ),
+    ).toThrow(expect.objectContaining({ code: 'INVALID_COVERAGE' }));
   });
 
   it('rejects non-canonical amounts, identities, timestamps, and future observations', () => {

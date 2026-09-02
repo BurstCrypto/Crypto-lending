@@ -100,6 +100,13 @@ export const REPORTING_PORTFOLIO_RESPONSE = {
     capturedAt: '2026-08-24T17:59:59.000Z',
     freshnessClass: 'CURRENT',
   },
+  balanceCoverage: {
+    status: 'COMPLETE',
+    targets: [
+      { walletId: WALLET_A, networkId: 'eip155:8453', status: 'COMPLETE' },
+      { walletId: WALLET_B, networkId: 'eip155:8453', status: 'COMPLETE' },
+    ],
+  },
   oldestBalanceObservedAt: '2026-08-24T17:59:50.000Z',
   overallTotal: aggregate('11000000000000000000000', 2),
   walletTotals: [

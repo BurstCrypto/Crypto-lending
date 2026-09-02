@@ -6,6 +6,7 @@ import {
   type StablecoinValuationAssetReference,
 } from '../../valuation';
 import type {
+  IndexedPortfolioBalanceCoverage,
   IndexedPortfolioBalanceObservation,
   IndexedPortfolioBalanceSnapshot,
   PortfolioBalanceReader,
@@ -16,6 +17,11 @@ import type {
   PortfolioPriceEvidenceSnapshot,
   ReadPortfolioPriceEvidenceRequest,
 } from './ports/portfolio-price-evidence-reader.port';
+import type {
+  ActivePortfolioWalletRegistration,
+  PortfolioWalletRegistrationReader,
+  ReadActivePortfolioWalletRegistrationsRequest,
+} from './ports/portfolio-wallet-registration-reader.port';
 import type { UnifiedPortfolio } from '../domain/unified-portfolio';
 import { PortfolioService, type PortfolioClock } from './portfolio.service';
 import { PortfolioUnavailableError } from './portfolio.errors';
@@ -26,9 +32,27 @@ const EVALUATED_AT = '2026-08-24T18:00:00.000Z';
 const WALLET_A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const WALLET_B = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const WALLET_C = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+const WALLET_D = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
 const ETHEREUM_USDC = '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48';
 const BASE_USDC = '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913';
 const SOLANA_USDT = 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB';
+
+function activeWallets(): readonly ActivePortfolioWalletRegistration[] {
+  return [
+    { walletId: WALLET_A, networkId: 'eip155:1' },
+    { walletId: WALLET_B, networkId: 'eip155:8453' },
+    { walletId: WALLET_C, networkId: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp' },
+  ];
+}
+
+function completeCoverage(
+  registrations: readonly ActivePortfolioWalletRegistration[],
+): IndexedPortfolioBalanceCoverage {
+  return {
+    status: 'COMPLETE',
+    targets: registrations.map((registration) => ({ ...registration, status: 'COMPLETE' })),
+  };
+}
 
 function balance(
   overrides: Partial<IndexedPortfolioBalanceObservation> &
@@ -49,6 +73,7 @@ function elevenThousandDollarSnapshot(): IndexedPortfolioBalanceSnapshot {
     snapshotId: 'idx5-snapshot-11000',
     capturedAt: '2026-08-24T17:59:59.000Z',
     freshnessClass: 'CURRENT',
+    coverage: completeCoverage(activeWallets()),
     observations: [
       balance({
         observationId: '11111111-1111-4111-8111-111111111111',
@@ -59,7 +84,7 @@ function elevenThousandDollarSnapshot(): IndexedPortfolioBalanceSnapshot {
       }),
       balance({
         observationId: '22222222-2222-4222-8222-222222222222',
-        walletId: WALLET_A,
+        walletId: WALLET_C,
         networkId: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp',
         assetIdentity: SOLANA_USDT,
         amountAtomic: '2500000000',
@@ -73,6 +98,20 @@ function elevenThousandDollarSnapshot(): IndexedPortfolioBalanceSnapshot {
       }),
     ],
   };
+}
+
+class FakeWalletRegistrationReader implements PortfolioWalletRegistrationReader {
+  readonly requests: ReadActivePortfolioWalletRegistrationsRequest[] = [];
+  registrations: readonly ActivePortfolioWalletRegistration[] = activeWallets();
+  failure: Error | null = null;
+
+  readActiveWalletRegistrations(
+    request: ReadActivePortfolioWalletRegistrationsRequest,
+  ): Promise<readonly ActivePortfolioWalletRegistration[]> {
+    this.requests.push(request);
+    if (this.failure !== null) return Promise.reject(this.failure);
+    return Promise.resolve(this.registrations);
+  }
 }
 
 class FakeBalanceReader implements PortfolioBalanceReader {
@@ -161,15 +200,18 @@ const clock: PortfolioClock = {
 };
 
 function service(
+  wallets = new FakeWalletRegistrationReader(),
   balances = new FakeBalanceReader(),
   prices = new FakePriceReader(),
 ): {
   readonly service: PortfolioService;
+  readonly wallets: FakeWalletRegistrationReader;
   readonly balances: FakeBalanceReader;
   readonly prices: FakePriceReader;
 } {
   return {
-    service: new PortfolioService(balances, prices, clock),
+    service: new PortfolioService(wallets, balances, prices, clock),
+    wallets,
     balances,
     prices,
   };
@@ -200,15 +242,27 @@ describe('PortfolioService', () => {
       sourceCount: 3,
       includedSourceCount: 3,
     });
+    expect(result.balanceCoverage).toEqual({
+      status: 'COMPLETE',
+      targets: activeWallets().map((target) => ({ ...target, status: 'COMPLETE' })),
+    });
+    expect(Object.isFrozen(result.balanceCoverage)).toBe(true);
+    expect(Object.isFrozen(result.balanceCoverage.targets)).toBe(true);
+    expect(result.balanceCoverage.targets.every((target) => Object.isFrozen(target))).toBe(true);
     expect(result.walletTotals).toEqual([
       expect.objectContaining({
         walletId: WALLET_A,
-        usdValue: expect.objectContaining({ decimal: '7500.000000000000000000' }),
-        sourceCount: 2,
+        usdValue: expect.objectContaining({ decimal: '5000.000000000000000000' }),
+        sourceCount: 1,
       }),
       expect.objectContaining({
         walletId: WALLET_B,
         usdValue: expect.objectContaining({ decimal: '3500.000000000000000000' }),
+        sourceCount: 1,
+      }),
+      expect.objectContaining({
+        walletId: WALLET_C,
+        usdValue: expect.objectContaining({ decimal: '2500.000000000000000000' }),
         sourceCount: 1,
       }),
     ]);
@@ -271,11 +325,19 @@ describe('PortfolioService', () => {
 
     await read(fixture.service);
 
+    expect(fixture.wallets.requests).toEqual([
+      {
+        accountId: ACCOUNT_ID,
+        evaluatedAt: EVALUATED_AT,
+        correlationId: CORRELATION_ID,
+      },
+    ]);
     expect(fixture.balances.requests).toEqual([
       {
         accountId: ACCOUNT_ID,
         evaluatedAt: EVALUATED_AT,
         correlationId: CORRELATION_ID,
+        expectedWallets: activeWallets(),
       },
     ]);
     expect(JSON.stringify(fixture.balances.snapshot)).not.toContain(ACCOUNT_ID);
@@ -286,7 +348,7 @@ describe('PortfolioService', () => {
     fixture.balances.snapshot = {
       ...fixture.balances.snapshot,
       observations: fixture.balances.snapshot.observations.map((observation) =>
-        observation.walletId === WALLET_A && observation.networkId.startsWith('solana:')
+        observation.walletId === WALLET_C && observation.networkId.startsWith('solana:')
           ? { ...observation, freshnessClass: 'STALE' as const }
           : observation,
       ),
@@ -299,7 +361,7 @@ describe('PortfolioService', () => {
       freshnessClass: 'STALE',
       completeness: 'COMPLETE',
     });
-    expect(result.walletTotals.find(({ walletId }) => walletId === WALLET_A)).toMatchObject({
+    expect(result.walletTotals.find(({ walletId }) => walletId === WALLET_C)).toMatchObject({
       freshnessClass: 'STALE',
     });
     expect(result.sources.find(({ networkId }) => networkId.startsWith('solana:'))).toMatchObject({
@@ -311,13 +373,18 @@ describe('PortfolioService', () => {
 
   it('excludes unsupported assets without calling the price boundary or inflating the total', async () => {
     const fixture = service();
+    fixture.wallets.registrations = [
+      ...activeWallets(),
+      { walletId: WALLET_D, networkId: 'eip155:1' },
+    ];
     fixture.balances.snapshot = {
       ...fixture.balances.snapshot,
+      coverage: completeCoverage(fixture.wallets.registrations),
       observations: [
         ...fixture.balances.snapshot.observations,
         balance({
           observationId: '44444444-4444-4444-8444-444444444444',
-          walletId: WALLET_C,
+          walletId: WALLET_D,
           networkId: 'eip155:1',
           assetIdentity: `0x${'44'.repeat(20)}`,
           amountAtomic: '900000000000000000000000000000',
@@ -336,12 +403,12 @@ describe('PortfolioService', () => {
     });
     expect(result.excludedSources).toEqual([
       expect.objectContaining({
-        walletId: WALLET_C,
+        walletId: WALLET_D,
         reason: 'UNSUPPORTED_ASSET',
         includedInOverallTotal: false,
       }),
     ]);
-    expect(result.walletTotals.find(({ walletId }) => walletId === WALLET_C)).toMatchObject({
+    expect(result.walletTotals.find(({ walletId }) => walletId === WALLET_D)).toMatchObject({
       usdValue: null,
       freshnessClass: 'UNAVAILABLE',
       completeness: 'UNAVAILABLE',
@@ -399,12 +466,13 @@ describe('PortfolioService', () => {
     );
   });
 
-  it('represents a successful empty current snapshot as exact zero, not unavailable data', async () => {
+  it('represents an explicitly complete empty current snapshot as exact zero', async () => {
     const fixture = service();
     fixture.balances.snapshot = {
       snapshotId: 'idx5-empty-snapshot',
       capturedAt: '2026-08-24T17:59:59.000Z',
       freshnessClass: 'CURRENT',
+      coverage: completeCoverage(activeWallets()),
       observations: [],
     };
 
@@ -426,12 +494,90 @@ describe('PortfolioService', () => {
     expect(fixture.prices.requests).toEqual([]);
   });
 
+  it('never presents missing active wallet or network reads as a complete zero', async () => {
+    const fixture = service();
+    fixture.balances.snapshot = {
+      snapshotId: 'idx5-unavailable-coverage',
+      capturedAt: '2026-08-24T17:59:59.000Z',
+      freshnessClass: 'CURRENT',
+      coverage: {
+        status: 'UNAVAILABLE',
+        targets: activeWallets().map((target) => ({ ...target, status: 'UNAVAILABLE' })),
+      },
+      observations: [],
+    };
+
+    const result = await read(fixture.service);
+
+    expect(result.overallTotal).toEqual({
+      usdValue: null,
+      freshnessClass: 'UNAVAILABLE',
+      completeness: 'UNAVAILABLE',
+      sourceCount: 0,
+      includedSourceCount: 0,
+    });
+    expect(result.walletTotals).toHaveLength(3);
+    expect(result.walletTotals.every(({ completeness }) => completeness === 'UNAVAILABLE')).toBe(
+      true,
+    );
+    expect(result.chainTotals.every(({ completeness }) => completeness === 'UNAVAILABLE')).toBe(
+      true,
+    );
+    expect(result.balanceCoverage).toEqual({
+      status: 'UNAVAILABLE',
+      targets: activeWallets().map((target) => ({ ...target, status: 'UNAVAILABLE' })),
+    });
+  });
+
+  it('marks mixed multi-chain coverage partial and preserves only known reporting value', async () => {
+    const fixture = service();
+    fixture.balances.snapshot = {
+      ...fixture.balances.snapshot,
+      coverage: {
+        status: 'PARTIAL',
+        targets: activeWallets().map((target) => ({
+          ...target,
+          status: target.walletId === WALLET_C ? ('UNAVAILABLE' as const) : ('COMPLETE' as const),
+        })),
+      },
+      observations: fixture.balances.snapshot.observations.filter(
+        ({ walletId }) => walletId !== WALLET_C,
+      ),
+    };
+
+    const result = await read(fixture.service);
+
+    expect(result.overallTotal).toMatchObject({
+      usdValue: { decimal: '8500.000000000000000000' },
+      freshnessClass: 'UNAVAILABLE',
+      completeness: 'PARTIAL',
+      sourceCount: 2,
+      includedSourceCount: 2,
+    });
+    expect(result.chainTotals.find(({ networkId }) => networkId.startsWith('solana:'))).toEqual({
+      networkId: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp',
+      usdValue: null,
+      freshnessClass: 'UNAVAILABLE',
+      completeness: 'UNAVAILABLE',
+      sourceCount: 0,
+      includedSourceCount: 0,
+    });
+    expect(result.balanceCoverage).toEqual({
+      status: 'PARTIAL',
+      targets: activeWallets().map((target) => ({
+        ...target,
+        status: target.walletId === WALLET_C ? 'UNAVAILABLE' : 'COMPLETE',
+      })),
+    });
+  });
+
   it('never presents an old empty account snapshot as a fresh zero', async () => {
     const fixture = service();
     fixture.balances.snapshot = {
       snapshotId: 'idx5-stale-empty-snapshot',
       capturedAt: '2026-08-24T17:00:00.000Z',
       freshnessClass: 'STALE',
+      coverage: completeCoverage(activeWallets()),
       observations: [],
     };
 
@@ -462,6 +608,15 @@ describe('PortfolioService', () => {
     await expect(read(fixture.service)).rejects.not.toThrow('database DSN');
   });
 
+  it('fails before the balance read when the authoritative active-wallet roster is unavailable', async () => {
+    const fixture = service();
+    fixture.wallets.failure = new Error('private wallet persistence detail');
+
+    await expect(read(fixture.service)).rejects.toEqual(new PortfolioUnavailableError());
+    expect(fixture.balances.requests).toEqual([]);
+    expect(fixture.prices.requests).toEqual([]);
+  });
+
   it('reduces malformed price evidence to unavailable valuation without exposing raw fields', async () => {
     const fixture = service();
     fixture.prices.malformed = true;
@@ -483,9 +638,14 @@ describe('PortfolioService', () => {
     ).rejects.toEqual(new PortfolioUnavailableError());
     expect(fixture.balances.requests).toEqual([]);
 
-    const badClockService = new PortfolioService(fixture.balances, fixture.prices, {
-      now: () => new Date('invalid'),
-    });
+    const badClockService = new PortfolioService(
+      fixture.wallets,
+      fixture.balances,
+      fixture.prices,
+      {
+        now: () => new Date('invalid'),
+      },
+    );
     await expect(read(badClockService)).rejects.toEqual(new PortfolioUnavailableError());
     expect(fixture.balances.requests).toEqual([]);
   });

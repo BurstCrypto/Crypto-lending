@@ -24,6 +24,7 @@ import {
 import type { Eip1193Listener, Eip1193Provider } from './provider';
 
 export const INJECTED_EVM_ERROR_CODES = Object.freeze({
+  accountUnavailable: 'INJECTED_EVM_ACCOUNT_UNAVAILABLE',
   aborted: 'INJECTED_EVM_ABORTED',
   challengeInvalid: 'INJECTED_EVM_CHALLENGE_INVALID',
   challengeReused: 'INJECTED_EVM_CHALLENGE_REUSED',
@@ -45,6 +46,7 @@ export type InjectedEvmErrorCode =
   (typeof INJECTED_EVM_ERROR_CODES)[keyof typeof INJECTED_EVM_ERROR_CODES];
 
 const ERROR_MESSAGES: Readonly<Record<InjectedEvmErrorCode, string>> = Object.freeze({
+  INJECTED_EVM_ACCOUNT_UNAVAILABLE: 'Injected wallet account is unavailable',
   INJECTED_EVM_ABORTED: 'Injected wallet request cancelled',
   INJECTED_EVM_CHALLENGE_INVALID: 'Wallet ownership challenge is invalid',
   INJECTED_EVM_CHALLENGE_REUSED: 'Wallet ownership challenge requires replacement',
@@ -63,6 +65,7 @@ const ERROR_MESSAGES: Readonly<Record<InjectedEvmErrorCode, string>> = Object.fr
 });
 
 const RECOVERABLE_CODES = new Set<InjectedEvmErrorCode>([
+  INJECTED_EVM_ERROR_CODES.accountUnavailable,
   INJECTED_EVM_ERROR_CODES.aborted,
   INJECTED_EVM_ERROR_CODES.challengeReused,
   INJECTED_EVM_ERROR_CODES.connectionChanged,
@@ -274,6 +277,35 @@ export class InjectedEip1193WalletAdapter implements WalletAdapter {
 
   currentConnection(): WalletConnection | null {
     return this.#connection;
+  }
+
+  /**
+   * Selects one account from the provider's current, explicitly authorized
+   * account list. This never asks the provider to switch accounts and never
+   * accepts an address that was not returned by `eth_accounts`.
+   */
+  selectAccount(connectionId: string, address: string): WalletConnection {
+    this.#assertAvailable();
+    if (this.#signing || this.#connectPromise !== undefined || this.#restorePromise !== undefined) {
+      fail(INJECTED_EVM_ERROR_CODES.operationPending);
+    }
+    const connection = this.#connection;
+    if (connection === null) fail(INJECTED_EVM_ERROR_CODES.notConnected);
+    if (connection.connectionId !== connectionId) {
+      fail(INJECTED_EVM_ERROR_CODES.connectionMismatch);
+    }
+    if (!EVM_ADDRESS.test(address)) fail(INJECTED_EVM_ERROR_CODES.accountUnavailable);
+    const canonical = address.toLowerCase();
+    const selectedAccount = connection.accounts.find(
+      (account) => account.address.toLowerCase() === canonical,
+    );
+    if (selectedAccount === undefined) fail(INJECTED_EVM_ERROR_CODES.accountUnavailable);
+    if (connection.selectedAccount === selectedAccount) return connection;
+
+    this.#revision += 1;
+    const updated = Object.freeze({ ...connection, selectedAccount });
+    this.#connection = updated;
+    return updated;
   }
 
   async connect(options: WalletConnectOptions = {}): Promise<WalletConnection> {
