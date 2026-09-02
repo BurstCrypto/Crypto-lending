@@ -2211,6 +2211,215 @@
         ]
       }
     },
+    "/api/v1/mainnet-platforms": {
+      "get": {
+        "operationId": "MainnetPlatformsController_read",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "mayAuthorizeFinancialAction": {
+                      "enum": [
+                        false
+                      ],
+                      "type": "boolean"
+                    },
+                    "minimumProviderTarget": {
+                      "enum": [
+                        10
+                      ],
+                      "type": "integer"
+                    },
+                    "providers": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "accessStatus": {
+                            "enum": [
+                              "UNAVAILABLE"
+                            ],
+                            "type": "string"
+                          },
+                          "dataStatus": {
+                            "enum": [
+                              "NOT_CONNECTED"
+                            ],
+                            "type": "string"
+                          },
+                          "ecosystem": {
+                            "enum": [
+                              "EVM",
+                              "SOLANA"
+                            ],
+                            "type": "string"
+                          },
+                          "id": {
+                            "enum": [
+                              "aave",
+                              "morpho",
+                              "compound",
+                              "spark",
+                              "euler",
+                              "moonwell",
+                              "venus",
+                              "kamino",
+                              "save",
+                              "project-0",
+                              "jupiter"
+                            ],
+                            "type": "string"
+                          },
+                          "integrationStatus": {
+                            "enum": [
+                              "PLANNED"
+                            ],
+                            "type": "string"
+                          },
+                          "name": {
+                            "enum": [
+                              "Aave",
+                              "Morpho",
+                              "Compound",
+                              "Spark",
+                              "Euler",
+                              "Moonwell",
+                              "Venus",
+                              "Kamino",
+                              "Save",
+                              "Project 0",
+                              "Jupiter"
+                            ],
+                            "type": "string"
+                          },
+                          "networks": {
+                            "items": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "id": {
+                                  "enum": [
+                                    "eip155:1",
+                                    "eip155:56",
+                                    "eip155:8453",
+                                    "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"
+                                  ],
+                                  "type": "string"
+                                },
+                                "name": {
+                                  "enum": [
+                                    "Ethereum",
+                                    "BNB Smart Chain",
+                                    "Base",
+                                    "Solana"
+                                  ],
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "name"
+                              ],
+                              "type": "object"
+                            },
+                            "maxItems": 4,
+                            "minItems": 1,
+                            "type": "array",
+                            "uniqueItems": true
+                          },
+                          "protocol": {
+                            "enum": [
+                              "Aave V3",
+                              "Morpho Blue",
+                              "Compound III",
+                              "SparkLend",
+                              "Euler V2",
+                              "Moonwell V2",
+                              "Venus Core Pool",
+                              "Kamino Lend",
+                              "Save lending",
+                              "marginfi v2",
+                              "Jupiter Lend"
+                            ],
+                            "type": "string"
+                          },
+                          "riskStatus": {
+                            "enum": [
+                              "NOT_ASSESSED"
+                            ],
+                            "type": "string"
+                          },
+                          "supportedActions": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "maxItems": 0,
+                            "minItems": 0,
+                            "type": "array"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "name",
+                          "protocol",
+                          "ecosystem",
+                          "networks",
+                          "integrationStatus",
+                          "dataStatus",
+                          "accessStatus",
+                          "riskStatus",
+                          "supportedActions"
+                        ],
+                        "type": "object"
+                      },
+                      "maxItems": 32,
+                      "minItems": 10,
+                      "type": "array",
+                      "uniqueItems": true
+                    },
+                    "schemaVersion": {
+                      "enum": [
+                        1
+                      ],
+                      "type": "integer"
+                    },
+                    "use": {
+                      "enum": [
+                        "MAINNET_PLATFORM_DIRECTORY"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "schemaVersion",
+                    "use",
+                    "mayAuthorizeFinancialAction",
+                    "minimumProviderTarget",
+                    "providers"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Non-executable platform roadmap with explicit integration availability"
+          },
+          "401": {
+            "description": "Missing or invalid authenticated session"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "List planned mainnet lending platform integrations",
+        "tags": [
+          "mainnet-platforms"
+        ]
+      }
+    },
     "/api/v1/portfolio": {
       "get": {
         "operationId": "PortfolioController_read",

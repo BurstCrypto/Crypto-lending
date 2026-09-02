@@ -16,6 +16,12 @@
   verification. No mainnet transaction builder, transaction signature request,
   transaction submission, or broadcast is enabled by this decision.
 
+The dated critical path, ten-provider program target, count definitions, and
+go/no-go checks are tracked in the
+[production go-live plan](production-go-live-plan.md). A provider appearing in
+the checked-in research catalog does not make it live, readable from production,
+or transaction-enabled.
+
 ## Required architecture boundary
 
 Any future financial action must use a new mainnet bounded context with its own
@@ -43,8 +49,8 @@ hold a signing key or relay an EVM transaction.
    closed on out-of-scope networks and stale, divergent, incomplete, or
    regressing evidence. Define an explicit server-owned `staleAfter` deadline
    and focus/revalidation policy so a long-lived page cannot claim indefinite
-   freshness. The browser deliberately rejects the API's broader multi-mainnet
-   content until that boundary exists.
+   freshness. The browser deliberately rejects the portfolio API's broader
+   multi-mainnet balance content until that boundary exists.
 5. Complete non-production Cognito callback, secure-cookie, logout, recovery,
    MFA, JWKS-rotation, and outage evidence.
 

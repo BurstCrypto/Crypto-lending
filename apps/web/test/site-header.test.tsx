@@ -67,6 +67,7 @@ describe('SiteHeader', () => {
     });
 
     expect(screen.getByRole('link', { name: 'Portfolio' })).toHaveAttribute('href', '/portfolio');
+    expect(screen.getByRole('link', { name: 'Platforms' })).toHaveAttribute('href', '/platforms');
     expect(screen.getByRole('link', { name: 'Home' })).toHaveAttribute('aria-current', 'page');
     expect(screen.getByRole('link', { name: 'Account' })).toHaveAttribute('href', '/account');
     expect(screen.queryByRole('navigation', { name: 'Account actions' })).toBeNull();
@@ -194,5 +195,6 @@ describe('SiteHeader', () => {
     expect(markup).toContain('href="/login"');
     expect(markup).toContain('href="/register"');
     expect(markup).not.toContain('href="/portfolio"');
+    expect(markup).not.toContain('href="/platforms"');
   });
 });

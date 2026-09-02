@@ -95,6 +95,19 @@ describe('system endpoints (e2e)', () => {
       message: 'Authentication required',
       statusCode: 401,
     });
+
+    const mainnetPlatforms = await request(app.getHttpServer())
+      .get('/api/v1/mainnet-platforms')
+      .expect(401);
+    expect(mainnetPlatforms.headers).toMatchObject({
+      'cache-control': 'private, no-store',
+      vary: 'Cookie, Origin',
+    });
+    expect(mainnetPlatforms.body).toEqual({
+      error: 'Unauthorized',
+      message: 'Authentication required',
+      statusCode: 401,
+    });
   });
 
   it('rejects dependency-readiness work above the replica concurrency cap', async () => {
@@ -161,6 +174,32 @@ describe('system endpoints (e2e)', () => {
     expect(response.body.paths).toHaveProperty('/api/v1/health/dependencies');
     expect(response.body.paths).toHaveProperty('/api/v1/version');
     expect(response.body.paths).toHaveProperty('/api/v1/accounts/me');
+    expect(response.body.paths).toHaveProperty('/api/v1/mainnet-platforms');
+    expect(Object.keys(response.body.paths['/api/v1/mainnet-platforms'])).toEqual(['get']);
+    expect(
+      response.body.paths['/api/v1/mainnet-platforms'].get.responses['200'].content[
+        'application/json'
+      ].schema,
+    ).toMatchObject({
+      additionalProperties: false,
+      properties: {
+        mayAuthorizeFinancialAction: { enum: [false] },
+        minimumProviderTarget: { enum: [10] },
+        providers: {
+          minItems: 10,
+          items: {
+            additionalProperties: false,
+            properties: {
+              integrationStatus: { enum: ['PLANNED'] },
+              dataStatus: { enum: ['NOT_CONNECTED'] },
+              accessStatus: { enum: ['UNAVAILABLE'] },
+              riskStatus: { enum: ['NOT_ASSESSED'] },
+              supportedActions: { maxItems: 0 },
+            },
+          },
+        },
+      },
+    });
     expect(response.body.paths).toHaveProperty('/api/v1/local-demo/wallets');
     expect(response.body.paths).toHaveProperty('/api/v1/local-demo/portfolio');
     expect(response.body.paths).toHaveProperty('/api/v1/public-testnet/execution-intents');

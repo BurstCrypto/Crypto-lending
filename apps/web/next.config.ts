@@ -42,6 +42,10 @@ const nextConfig = {
         source: '/portfolio',
         headers: ACCOUNT_SHELL_HEADERS,
       },
+      {
+        source: '/platforms',
+        headers: ACCOUNT_SHELL_HEADERS,
+      },
       ...(localDemo.enabled
         ? [
             {

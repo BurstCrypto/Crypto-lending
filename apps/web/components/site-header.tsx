@@ -8,7 +8,7 @@ import {
   restoreAuthenticationSession,
 } from '@/lib/authentication';
 
-export type SitePage = 'home' | 'portfolio' | 'account' | 'login' | 'register';
+export type SitePage = 'home' | 'platforms' | 'portfolio' | 'account' | 'login' | 'register';
 
 export type SiteHeaderAuthenticationActions = 'both' | 'sign-in' | 'create-account' | 'none';
 
@@ -22,6 +22,7 @@ interface SiteHeaderProps {
 
 const PRIMARY_LINKS = [
   { page: 'home', href: '/', label: 'Home' },
+  { page: 'platforms', href: '/platforms', label: 'Platforms' },
   { page: 'portfolio', href: '/portfolio', label: 'Portfolio' },
   { page: 'account', href: '/account', label: 'Account' },
 ] as const;

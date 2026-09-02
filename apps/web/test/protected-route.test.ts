@@ -68,6 +68,19 @@ describe('protected account shell decision', () => {
     });
   });
 
+  it('preserves the exact protected platforms return path', () => {
+    expect(
+      decideProtectedAccountShell({
+        cookieHeader: null,
+        requestUrl: new URL('https://app.example/platforms'),
+      }),
+    ).toEqual({
+      kind: 'redirect-to-login',
+      reason: 'session-cookie-hint-absent-or-invalid',
+      returnPath: '/platforms',
+    });
+  });
+
   it('falls back to the account root when invoked with a non-account or unsafe path', () => {
     for (const url of [
       'https://app.example/login?returnTo=%2Flogin',

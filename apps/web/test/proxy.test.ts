@@ -38,8 +38,24 @@ describe('web request proxy', () => {
     expect(config.matcher).toEqual([
       '/internal/wallet-lab/:path*',
       '/account/:path*',
+      '/platforms',
       '/portfolio',
     ]);
+  });
+
+  it('protects the platforms shell with the same cookie hint and return path', () => {
+    const redirect = proxy(accountRequest('/platforms'));
+    expect(redirect.status).toBe(307);
+    expect(new URL(redirect.headers.get('location') as string).searchParams.get('returnTo')).toBe(
+      '/platforms',
+    );
+    expectAccountPrivacyHeaders(redirect);
+
+    const shell = proxy(
+      accountRequest('/platforms', `${AUTHENTICATION_SESSION_COOKIE_NAME}=${VALID_SESSION}`),
+    );
+    expect(shell.status).toBe(200);
+    expectAccountPrivacyHeaders(shell);
   });
 
   it('protects the portfolio shell with the same cookie hint and return path', () => {

@@ -58,6 +58,7 @@ const REVIEWED_DUMMY_VALUES = new Set([
   'local_migration_only',
   'local_only_password',
   'local_worker_database_a',
+  'private RPC rejection detail',
   'private-key-signature-challenge-canary',
   'replace-with-an-atlassian-api-token',
   'test-only-placeholder',
@@ -68,10 +69,7 @@ const REVIEWED_DUMMY_VALUES = new Set([
 // Exact public protocol identifiers can contain secret-like words and entropy.
 // Bind each value to its reviewed field name so it cannot excuse a credential.
 const REVIEWED_PUBLIC_IDENTIFIER_ASSIGNMENTS = new Map([
-  [
-    'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',
-    new Set(['PUBLIC_TESTNET_TOKEN_PROGRAM']),
-  ],
+  ['TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', new Set(['PUBLIC_TESTNET_TOKEN_PROGRAM'])],
   ['TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb', new Set(['TOKEN_2022'])],
 ]);
 

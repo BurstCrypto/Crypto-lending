@@ -23,7 +23,12 @@ function applyAccountShellHeaders(response: NextResponse): NextResponse {
 }
 
 function isProtectedShellPath(pathname: string): boolean {
-  return pathname === '/portfolio' || pathname === '/account' || pathname.startsWith('/account/');
+  return (
+    pathname === '/platforms' ||
+    pathname === '/portfolio' ||
+    pathname === '/account' ||
+    pathname.startsWith('/account/')
+  );
 }
 
 function authenticationConfigurationUnavailable(): NextResponse {
@@ -78,5 +83,5 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/internal/wallet-lab/:path*', '/account/:path*', '/portfolio'],
+  matcher: ['/internal/wallet-lab/:path*', '/account/:path*', '/platforms', '/portfolio'],
 };

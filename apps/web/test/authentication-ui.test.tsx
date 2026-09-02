@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const authenticationMocks = vi.hoisted(() => ({
@@ -103,7 +103,7 @@ describe('authentication UI', () => {
       fireEvent.click(screen.getByRole('button', { name: /continue to sign in/i }));
 
       const alert = await screen.findByRole('alert');
-      expect(alert).toHaveFocus();
+      await waitFor(() => expect(alert).toHaveFocus());
       expect(alert).toHaveTextContent('Managed sign-in is unavailable right now');
       expect(alert).toHaveTextContent('No local demo identity or account fallback was used');
       expect(alert).not.toHaveTextContent(error.message);
@@ -426,7 +426,7 @@ describe('verified account session UI', () => {
     render(<AccountSession />);
 
     const alert = await screen.findByRole('alert');
-    expect(alert).toHaveFocus();
+    await waitFor(() => expect(alert).toHaveFocus());
     expect(alert).not.toHaveTextContent('database offline');
     expect(screen.queryByText(PROFILE.contactEmail)).not.toBeInTheDocument();
 
@@ -529,8 +529,9 @@ describe('verified account session UI', () => {
 
     const pageShow = new Event('pageshow');
     Object.defineProperty(pageShow, 'persisted', { value: true });
-    window.dispatchEvent(pageShow);
+    act(() => window.dispatchEvent(pageShow));
 
+    await waitFor(() => expect(authenticationMocks.restore).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(screen.queryByText(PROFILE.contactEmail)).not.toBeInTheDocument());
     expect(screen.getByText('Checking your secure session…')).toBeInTheDocument();
     refreshed.resolve({ ...PROFILE, contactEmail: 'refreshed@example.com' });
@@ -549,8 +550,9 @@ describe('verified account session UI', () => {
 
     const pageShow = new Event('pageshow');
     Object.defineProperty(pageShow, 'persisted', { value: true });
-    window.dispatchEvent(pageShow);
+    act(() => window.dispatchEvent(pageShow));
 
+    await waitFor(() => expect(authenticationMocks.restore).toHaveBeenCalledTimes(2));
     await waitFor(() =>
       expect(navigationMocks.replace).toHaveBeenCalledWith('/login?returnTo=%2Faccount'),
     );

@@ -14,6 +14,7 @@ describe('authentication return paths', () => {
     ['/account/wallets', '/account/wallets'],
     ['/account/wallets?tab=registered&sort=recent', '/account/wallets?tab=registered&sort=recent'],
     ['/portfolio', '/portfolio'],
+    ['/platforms', '/platforms'],
   ])('accepts the narrow account route family: %s', (candidate, expected) => {
     expect(parseSafeAccountReturnPath(candidate)).toBe(expected);
   });
@@ -28,6 +29,7 @@ describe('authentication return paths', () => {
     '/login',
     '/register',
     '/portfolio/history',
+    '/platforms/history',
     '/logout',
     '/api/v1/auth/login',
     '/accountant',
