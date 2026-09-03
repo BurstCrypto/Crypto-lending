@@ -8,6 +8,7 @@ import { LocalDemoModule } from './local-demo/local-demo.module';
 import { MainnetPlatformsModule } from './mainnet-platforms/mainnet-platforms.module';
 import { PortfolioModule } from './portfolio/portfolio.module';
 import { PublicTestnetModule } from './public-testnet/public-testnet.module';
+import { SmartLendingModule } from './smart-lending/smart-lending.module';
 import { SystemModule } from './system/system.module';
 import { WalletsModule } from './wallets/wallets.module';
 
@@ -22,6 +23,7 @@ import { WalletsModule } from './wallets/wallets.module';
     LocalDemoModule,
     PublicTestnetModule,
     EvmPublicTestnetModule,
+    SmartLendingModule,
     SystemModule,
   ],
 })

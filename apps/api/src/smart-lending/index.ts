@@ -13,6 +13,23 @@ export {
   type ReadFeeAwareAllocationInputsRequest,
 } from './application/ports/fee-aware-allocation-input.port';
 export {
+  LIVE_BRIDGE_ROUTE_QUOTE_READER,
+  type LiveBridgeLegQuote,
+  type LiveBridgeRouteEndpoint,
+  type LiveBridgeRouteQuoteReader,
+  type LiveRoundTripBridgeQuote,
+  type ReadLiveRoundTripBridgeQuoteRequest,
+} from './application/ports/live-bridge-route-quote-reader.port';
+export {
+  LIVE_LENDING_MARKET_FEED,
+  SMART_LENDING_PROVIDER_IDS,
+  type LiveLendingMarketFeed,
+  type LiveLendingMarketObservation,
+  type LiveLendingMarketSnapshot,
+  type ReadLiveLendingMarketsRequest,
+  type SmartLendingProviderId,
+} from './application/ports/live-lending-market-feed.port';
+export {
   FEE_AWARE_ALLOCATION_COST_KINDS,
   FEE_AWARE_ALLOCATION_NETWORK_IDS,
   FEE_AWARE_ALLOCATION_POLICY_VERSION,
@@ -37,3 +54,4 @@ export {
   type FeeAwareRiskAssessment,
   type FeeAwareRouteCostQuote,
 } from './domain/fee-aware-allocation';
+export { SmartLendingModule } from './smart-lending.module';

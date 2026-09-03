@@ -58,7 +58,8 @@ normalizing adapters; reference IDs alone are not proof of authenticity.
 A cross-chain candidate additionally requires all of the following:
 
 - active, unexpired consent scoped to considering cross-chain recommendations;
-- entry and anticipated-exit estimates from an allowlisted bridge provider;
+- entry and anticipated-exit estimates whose independently selected bridge
+  providers are both allowlisted;
 - total lifecycle cost at or below `maximumLifecycleCostUsdMantissa`;
 - an eligible same-chain baseline for the same source position; and
 - net improvement over that baseline at or above
@@ -91,6 +92,92 @@ position that cannot fit its preferred route may use its next eligible route.
 The result can therefore be complete, partial, or contain no eligible route,
 but never silently split or over-allocate a source position.
 
+## Read-only evidence adapters
+
+`SmartLendingModule` registers two passive server-side adapters. It makes no
+request during startup, exposes no raw-feed HTTP route, and defaults to
+`SMART_LENDING_EXTERNAL_FEEDS_MODE=disabled`.
+
+- `DefiLlamaMarketFeedAdapter` normalizes the public yield-pool snapshot for all
+  ten planned Ethereum/Solana provider identities. This is aggregate,
+  indicative corroboration only. It does not prove an exact approved
+  deployment, pause state, deposit/withdrawal cap, exit liquidity, fee policy,
+  or risk decision, and its contract fixes
+  `mayEstablishRecommendationEligibility` to `false`.
+- `LifiRoundTripQuoteAdapter` requests separate Ethereum-to-Solana and
+  Solana-to-Ethereum minimum-output quotes for the same six-decimal stablecoin.
+  It forbids exchange steps, checks both independently selected bridge tools
+  and each quote's actual cross step against the server allowlist, includes
+  route-implied transfer loss, every fee marked as not included, and gas in
+  scale-18 USD. The selected bridge must agree across the top-level quote,
+  estimate, and actual cross step. Ambiguous fee metadata or absent/unvalued gas
+  fails closed, and destination contract calls are explicitly disabled. The
+  adapter discards LI.FI's transaction request, and its output cannot authorize
+  or execute a transaction.
+
+The source contracts are documented by DefiLlama's
+[data-update FAQ](https://docs.llama.fi/faqs/frequently-asked-questions) and
+LI.FI's [quote endpoint](https://docs.li.fi/api-reference/get-a-quote-for-a-token-transfer)
+and [rate-limit reference](https://docs.li.fi/api-reference/rate-limits). Those
+documents describe vendor behavior; they are not internal approval artifacts.
+
+The transport fixes its destinations in code to `yields.llama.fi` and
+`li.quest`; callers cannot supply a URL. It enforces GET-only requests, exact
+query allowlists, response-size limits, timeouts, JSON content types, redirect
+rejection, no credentials/referrer/cache, sanitized failures, and independent
+destination kill switches. A LI.FI API key is optional and server-only.
+
+LI.FI's quote contract requires the sending and receiving wallet addresses as
+well as token identities and the exact amount. A round-trip request therefore
+allows that third party and its network-log processors to link a customer's
+Ethereum and Solana addresses with financial metadata. The implemented adapter
+contains no public call path, and the non-production lane must use only
+synthetic, non-customer addresses. Production remains blocked until Privacy,
+Legal, and Security approve the exact purpose, disclosure/consent basis,
+processor and retention terms, query-string log treatment, and data-subject
+lifecycle. Consent to _consider_ a cross-chain recommendation is not by itself
+consent to this third-party disclosure. The canonical security threat register
+must also be revised, re-fingerprinted, and independently reviewed for this new
+trust flow before activation.
+
+Both destination startup gates default to on, even after the overall mode is
+enabled. Turning either one off in non-production requires immutable source
+revision, egress-policy digest and approval reference, and provider-policy
+digest and approval reference metadata. These strings make drift visible but
+are not authorization: they do not verify policy content, status, expiry, or
+signer identity.
+
+Production activation is therefore rejected by code even when all metadata is
+present. It remains blocked until a reviewed activation-manifest capability can
+verify the actual policy artifacts, expiry, destinations, and running source
+revision. Enabled mode additionally requires `NODE_ENV=development` or
+`NODE_ENV=test`; absent, misspelled, staging, and production values fail closed.
+This matches the checked-in deny-all egress decision.
+
+The reviewed non-production acceptance surface is intentionally closed:
+
+```text
+NODE_ENV=test
+SMART_LENDING_EXTERNAL_FEEDS_MODE=enabled
+SMART_LENDING_DEFILLAMA_KILL_SWITCH=off
+SMART_LENDING_LIFI_KILL_SWITCH=off
+SMART_LENDING_EXTERNAL_FEEDS_EGRESS_APPROVAL_REFERENCE_ID=<approved-reference>
+SMART_LENDING_EXTERNAL_FEEDS_EGRESS_POLICY_SHA256=<lowercase-sha256>
+SMART_LENDING_EXTERNAL_FEEDS_PROVIDER_APPROVAL_REFERENCE_ID=<approved-reference>
+SMART_LENDING_EXTERNAL_FEEDS_PROVIDER_POLICY_SHA256=<lowercase-sha256>
+SMART_LENDING_EXTERNAL_FEEDS_SOURCE_REVISION=<immutable-git-sha>
+# SMART_LENDING_LIFI_API_KEY=<server-secret>  # optional
+```
+
+Do not set these values merely to make a deployment start, and never use real
+customer wallet addresses or balances in this lane. Production rejects enabled
+mode outright, and the checked-in egress decision remains deny-all until its
+owners approve and exercise the exact hosts.
+
+Changing these environment values does not stop an already-running process; a
+restart or redeploy is required. Any future production design needs a live,
+centrally controlled deny switch with measured propagation and rollback time.
+
 ## Non-execution boundary and remaining adapters
 
 This domain is a pure, fail-closed recommendation function. It performs no
@@ -103,15 +190,36 @@ fresh transaction review and approval.
 domain. Its caller supplies only an authenticated account ID and correlation
 ID. A server clock supplies the evaluation time, while the injected input
 reader owns portfolio values, policies, consent, opportunities, risk evidence,
-and route quotes. Malformed or unavailable input fails closed; there is no HTTP
-route or production reader implementation yet.
+and route quotes. Malformed or unavailable input fails closed. The new feed
+ports are registered for that future composition, but there is still no HTTP
+route or complete production allocation-input reader.
 
-Before production use, server-owned live adapters must authenticate and
-normalize wallet positions, provider capacity/APY evidence, risk assessments,
-asset valuation, same-chain route quotes, and Ethereum/Solana bridge quotes
-including entry and anticipated-exit minimum outputs and every cost category.
-The production composition must bind recommendations to an immutable input
-snapshot, enforce quote freshness again at transaction review, re-quote before
-submission, and persist the approved route and actual itemized fees. Until those
-integrations and the existing mainnet write gates are complete, this is not a
-live allocator or execution path.
+Before production use, provider-native adapters must still authenticate exact
+deployments and normalize APY, capacity, pause state, fees, and withdrawal
+availability for each of the ten providers. Server-owned wallet positions,
+stablecoin valuation, risk decisions, same-chain costs, provider entry/exit
+costs, cross-chain consent, and remaining network costs must then be composed
+into an immutable input snapshot. The composition must enforce freshness again
+at transaction review, re-quote before submission, and persist the approved
+route and actual itemized fees. Until those integrations, the external-egress
+approval, and the existing mainnet write gates are complete, this is neither a
+live production allocator nor an execution path.
+
+Before any authenticated recommendation route is exposed, the runtime also
+needs a bounded per-account and global quote budget, distributed rate control,
+circuit breaking, and single-flight/cache behavior for the hourly aggregate
+snapshot. The present module deliberately has no HTTP controller, so its two
+sequential bridge reads cannot yet be multiplied across domain candidates by a
+caller.
+
+DefiLlama's payload supplies no per-market observation timestamp. The adapter's
+`retrievedAt` and short `validUntil` prove only when this server retrieved the
+aggregate response, not when each upstream market was observed. That is another
+reason the snapshot is corroboration only; it must never satisfy a provider
+freshness gate.
+
+The implemented aggregate market and route adapters can be exercised in an
+explicitly approved non-production environment without paying for a vendor
+plan, subject to public endpoint limits and availability. That does not provide
+a production SLA or remove the need for dedicated Ethereum/Solana RPC and
+provider-native evidence.

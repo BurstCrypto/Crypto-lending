@@ -18,11 +18,12 @@ identity-provider, chain-provider, or cloud boundary is enabled by this packet.
 
 The model covers customer account and authentication flows, the restricted
 wallet-validation lab, the disabled-by-default local wallet-registration
-boundary, supported-chain normalization, immutable ledger and outbox
-processing, future administrator surfaces, secrets and infrastructure, and
-repository/dependency provenance. It uses STRIDE as a prompt, then records risk,
-response, implemented mitigations, residual risk, accountable repository roles,
-evidence, and an explicit follow-up for every threat.
+boundary, supported-chain normalization, dormant smart-lending evidence egress,
+immutable ledger and outbox processing, future administrator surfaces, secrets
+and infrastructure, and repository/dependency provenance. It uses STRIDE as a
+prompt, then records risk, response, implemented mitigations, residual risk,
+accountable repository roles, evidence, and an explicit follow-up for every
+threat.
 
 The review must be repeated when a new public or administrator route, managed
 identity provider, wallet connector, chain/RPC provider, financial operation,
@@ -47,6 +48,7 @@ flowchart LR
   Edge --> Web[Web workload]
   Edge --> API[API workload]
   API --> IdP[Managed OIDC provider - disabled]
+  API -. production-denied market and route evidence .-> FeedVendors[DefiLlama and LI.FI]
   Client --> Wallet[Wallets, relays, and testnet RPC - restricted lab]
   API --> DB[(PostgreSQL)]
   API --> Redis[(Redis health-only)]
@@ -80,7 +82,11 @@ fail-closed distinctions are:
 - no administrator product route exists, which is deny-by-absence rather than
   evidence of an approved administrator authorization design; and
 - external egress remains deny-all until an exact destination and caller have
-  an independently approved policy and cost/activation record.
+  an independently approved policy and cost/activation record. The dormant
+  smart-lending transport fixes two destinations in code but rejects production
+  activation; LI.FI quote requests would disclose and link two wallet addresses,
+  asset identities, and an exact amount, so they also require a specific
+  privacy/processor decision rather than generic cross-chain opt-in.
 
 ## Data classification
 
@@ -108,6 +114,12 @@ retention state, owner, and code evidence. Important examples are:
 - durable registration stores the chain-qualified canonical address and
   server-authored metadata as versioned AES-256-GCM ciphertext, plus a
   purpose-separated versioned address digest used to enforce active ownership;
+- the dormant LI.FI quote adapter would send Ethereum and Solana wallet
+  addresses, asset identities, and an exact amount in a third-party query. It
+  has no public route and rejects production activation; synthetic addresses
+  only are permitted for an approved non-production exercise until disclosure,
+  processor, retention, log-redaction, and data-subject lifecycle controls are
+  reviewed;
 - actor-bearing structured operational logs, outbox records, and queue/DLQ
   messages are `RESTRICTED`; the current `ledger.journal-committed` payload and
   logging allowlists exclude contact data, wallet proof, credentials, amounts,

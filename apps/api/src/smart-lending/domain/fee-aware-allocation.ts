@@ -94,7 +94,9 @@ export interface FeeAwareLendingOpportunity {
 }
 
 export interface FeeAwareBridgeEstimate {
-  readonly bridgeProviderId: string;
+  /** Entry and anticipated-exit routes may legitimately use different bridges. */
+  readonly entryBridgeProviderId: string;
+  readonly exitBridgeProviderId: string;
   readonly entryEstimateReferenceId: string;
   readonly exitEstimateReferenceId: string;
   readonly entryMinimumOutputAtomic: bigint;
@@ -564,7 +566,10 @@ function assessRouteKind(
   if (quote.bridge === null) {
     reasons.push('BRIDGE_ESTIMATE_REQUIRED');
   } else if (
-    !request.crossChainPolicy.allowedBridgeProviderIds.includes(quote.bridge.bridgeProviderId)
+    !request.crossChainPolicy.allowedBridgeProviderIds.includes(
+      quote.bridge.entryBridgeProviderId,
+    ) ||
+    !request.crossChainPolicy.allowedBridgeProviderIds.includes(quote.bridge.exitBridgeProviderId)
   ) {
     reasons.push('BRIDGE_PROVIDER_NOT_ALLOWED');
   }
@@ -1065,6 +1070,20 @@ function parseCostQuote(value: unknown): ParsedCostQuote {
   const validUntil = timestamp(record.validUntil);
   if (validUntil.milliseconds <= quotedAt.milliseconds) throw new InvalidInput();
   const parsedCosts = parseCosts(record.costsUsdMantissa);
+  const sourceAmountAtomic = positiveBigInt(record.sourceAmountAtomic, MAX_UINT256);
+  const minimumDestinationAmountAtomic = positiveBigInt(
+    record.minimumDestinationAmountAtomic,
+    MAX_UINT256,
+  );
+  const bridge = parseBridge(record.bridge);
+  if (
+    bridge !== null &&
+    (bridge.entryMinimumOutputAtomic !== minimumDestinationAmountAtomic ||
+      bridge.entryMinimumOutputAtomic > sourceAmountAtomic ||
+      bridge.exitMinimumOutputAtomic > bridge.entryMinimumOutputAtomic)
+  ) {
+    throw new InvalidInput();
+  }
   return {
     quoteReferenceId: reference(record.quoteReferenceId),
     routeReferenceId: reference(record.routeReferenceId),
@@ -1079,14 +1098,11 @@ function parseCostQuote(value: unknown): ParsedCostQuote {
     destinationNetworkId: networkId(record.destinationNetworkId),
     sourceAssetId: reference(record.sourceAssetId),
     destinationAssetId: reference(record.destinationAssetId),
-    sourceAmountAtomic: positiveBigInt(record.sourceAmountAtomic, MAX_UINT256),
-    minimumDestinationAmountAtomic: positiveBigInt(
-      record.minimumDestinationAmountAtomic,
-      MAX_UINT256,
-    ),
+    sourceAmountAtomic,
+    minimumDestinationAmountAtomic,
     costsUsdMantissa: parsedCosts.value,
     costIssue: parsedCosts.issue,
-    bridge: parseBridge(record.bridge),
+    bridge,
   };
 }
 
@@ -1125,14 +1141,16 @@ function parseCosts(value: unknown): {
 function parseBridge(value: unknown): FeeAwareBridgeEstimate | null {
   if (value === null) return null;
   const record = exactRecord(value, [
-    'bridgeProviderId',
+    'entryBridgeProviderId',
+    'exitBridgeProviderId',
     'entryEstimateReferenceId',
     'exitEstimateReferenceId',
     'entryMinimumOutputAtomic',
     'exitMinimumOutputAtomic',
   ]);
   return {
-    bridgeProviderId: reference(record.bridgeProviderId),
+    entryBridgeProviderId: reference(record.entryBridgeProviderId),
+    exitBridgeProviderId: reference(record.exitBridgeProviderId),
     entryEstimateReferenceId: reference(record.entryEstimateReferenceId),
     exitEstimateReferenceId: reference(record.exitEstimateReferenceId),
     entryMinimumOutputAtomic: positiveBigInt(record.entryMinimumOutputAtomic, MAX_UINT256),

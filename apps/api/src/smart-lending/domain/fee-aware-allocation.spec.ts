@@ -84,7 +84,8 @@ interface CandidateOptions {
   readonly costs?: FeeAwareAllocationCostsUsdMantissa;
   readonly quotedAt?: string;
   readonly validUntil?: string;
-  readonly bridgeProviderId?: string;
+  readonly entryBridgeProviderId?: string;
+  readonly exitBridgeProviderId?: string;
 }
 
 function candidate(
@@ -114,7 +115,8 @@ function candidate(
       costsUsdMantissa: options.costs ?? costs(),
       bridge: crossChain
         ? {
-            bridgeProviderId: options.bridgeProviderId ?? 'wormhole',
+            entryBridgeProviderId: options.entryBridgeProviderId ?? 'wormhole',
+            exitBridgeProviderId: options.exitBridgeProviderId ?? 'wormhole',
             entryEstimateReferenceId: 'bridge-entry-estimate-1',
             exitEstimateReferenceId: 'bridge-exit-estimate-1',
             entryMinimumOutputAtomic: 990_000_000n,
@@ -542,9 +544,13 @@ describe('fee-aware allocation recommendation policy', () => {
       grossApyBasisPoints: 1_000n,
     });
     const same = candidate(source, ethereum, { candidateId: 'same' });
-    const unapprovedBridge = candidate(source, solana, {
-      candidateId: 'unapproved-bridge',
-      bridgeProviderId: 'unknown-bridge',
+    const unapprovedEntryBridge = candidate(source, solana, {
+      candidateId: 'unapproved-entry-bridge',
+      entryBridgeProviderId: 'unknown-bridge',
+    });
+    const unapprovedExitBridge = candidate(source, solana, {
+      candidateId: 'unapproved-exit-bridge',
+      exitBridgeProviderId: 'unknown-bridge',
     });
     const absentBridge = candidate(source, solana, { candidateId: 'absent-bridge' });
     const absentBridgeQuote: FeeAwareAllocationCandidate = {
@@ -555,17 +561,67 @@ describe('fee-aware allocation recommendation policy', () => {
       request({
         positions: [source],
         opportunities: [ethereum, solana],
-        candidates: [same, unapprovedBridge, absentBridgeQuote],
+        candidates: [same, unapprovedEntryBridge, unapprovedExitBridge, absentBridgeQuote],
         optIn: activeOptIn(),
         minimumCrossChainImprovement: 0n,
       }),
     );
 
     expect(result.decisions[0]?.selectedCandidateId).toBe('same');
-    expect(assessment(result, 'unapproved-bridge').reasons).toContain(
+    expect(assessment(result, 'unapproved-entry-bridge').reasons).toContain(
+      'BRIDGE_PROVIDER_NOT_ALLOWED',
+    );
+    expect(assessment(result, 'unapproved-exit-bridge').reasons).toContain(
       'BRIDGE_PROVIDER_NOT_ALLOWED',
     );
     expect(assessment(result, 'absent-bridge').reasons).toContain('BRIDGE_ESTIMATE_REQUIRED');
+  });
+
+  it('rejects cross-chain bridge evidence whose minimum amounts contradict the route quote', () => {
+    const source = position();
+    const sameOpportunity = opportunity({ opportunityId: 'same-opportunity' });
+    const crossOpportunity = opportunity({
+      opportunityId: 'cross-opportunity',
+      networkId: SOLANA,
+      assetId: 'solana-usdc',
+      grossApyBasisPoints: 1_000n,
+    });
+    const validCross = candidate(source, crossOpportunity, { candidateId: 'cross' });
+    const bridge = validCross.costQuote.bridge;
+    if (bridge === null) throw new Error('missing bridge fixture');
+
+    const contradictoryQuotes = [
+      {
+        ...validCross.costQuote,
+        bridge: { ...bridge, entryMinimumOutputAtomic: 989_000_000n },
+      },
+      {
+        ...validCross.costQuote,
+        minimumDestinationAmountAtomic: 1_000_000_001n,
+        bridge: { ...bridge, entryMinimumOutputAtomic: 1_000_000_001n },
+      },
+      {
+        ...validCross.costQuote,
+        bridge: { ...bridge, exitMinimumOutputAtomic: 990_000_001n },
+      },
+    ];
+
+    for (const [index, costQuote] of contradictoryQuotes.entries()) {
+      const candidateId = `contradictory-${index}`;
+      const result = recommendFeeAwareAllocation(
+        request({
+          positions: [source],
+          opportunities: [sameOpportunity, crossOpportunity],
+          candidates: [
+            candidate(source, sameOpportunity, { candidateId: 'same' }),
+            { ...validCross, candidateId, costQuote },
+          ],
+          optIn: activeOptIn(),
+          minimumCrossChainImprovement: 0n,
+        }),
+      );
+      expect(assessment(result, candidateId).reasons).toContain('INVALID_COST_QUOTE');
+    }
   });
 
   it('rejects unavailable opportunity evidence and a missing current risk assessment', () => {
