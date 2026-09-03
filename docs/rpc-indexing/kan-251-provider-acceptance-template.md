@@ -7,6 +7,11 @@
 > or spend. `NO_EXTERNAL_EGRESS` remains mandatory until KAN-231 separately
 > approves exact destinations.
 
+> **Release-scope binding:** this record may count toward the current launch
+> only for Ethereum and Solana. Base and Arbitrum rows from the broader KAN-62
+> research policy are deferred; testing them preserves future evidence but
+> cannot satisfy an active launch network or provider count.
+
 ## Record and parent binding
 
 | Field                                   | Value                                                              |
@@ -64,21 +69,24 @@ so an authorized verifier can prove the alias maps to the approved host without
 copying it here. Raw or credential-bearing endpoint URLs and secrets never
 belong in this packet.
 
-## Test-network matrix
+## Active launch test-network matrix
 
 Run every row against both providers only after authorization.
 
 | Network          | Expected identity                                                | Alchemy result/evidence | QuickNode result/evidence |
 | ---------------- | ---------------------------------------------------------------- | ----------------------- | ------------------------- |
 | Ethereum Sepolia | `eth_chainId = 0xaa36a7`                                         | `NOT_RUN`               | `NOT_RUN`                 |
-| Base Sepolia     | `eth_chainId = 0x14a34`                                          | `NOT_RUN`               | `NOT_RUN`                 |
-| Arbitrum Sepolia | `eth_chainId = 0x66eee`                                          | `NOT_RUN`               | `NOT_RUN`                 |
 | Solana Devnet    | Full genesis hash `EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG` | `NOT_RUN`               | `NOT_RUN`                 |
 
 For each provider/network record UTC interval, endpoint/config alias, controlled
 KAN-231 exact-host record reference and digest, method-profile version, request
 count, byte estimate, evidence SHA-256, observed cost, and cleanup/disposition.
 Testnet results are not mainnet SLA or archive proof.
+
+Base Sepolia (`eth_chainId = 0x14a34`) and Arbitrum Sepolia
+(`eth_chainId = 0x66eee`) remain in historical KAN-62 policy material but are
+not required or countable for this release. Any future activation requires a
+new scope decision and its own current acceptance evidence.
 
 ## Capability and boundary tests
 
@@ -130,8 +138,8 @@ wallet, transaction, endpoint, or credential identifiers in metric dimensions.
 | Provider-side data deletion/retention disposition recorded             | `NOT_ASSIGNED` | `NOT_RUN`          | `NOT_RUN` |
 | Observed cost, unbilled/overage estimate, retained cost, final recheck | `NOT_ASSIGNED` | `NOT_RUN`          | `NOT_RUN` |
 
-Final acceptance requires current approvals, both-provider/eight-endpoint
-coverage, no unresolved high/critical finding, fail-closed evidence, completed
-cleanup/cost accounting, exact KAN-62 and controlled KAN-231 digest bindings,
-and an independent decision. Nothing in this template approves production or
-mainnet writes.
+Final acceptance requires current approvals, both-provider coverage for both
+active launch networks, no unresolved high/critical finding, fail-closed
+evidence, completed cleanup/cost accounting, exact KAN-62 and controlled
+KAN-231 digest bindings, and an independent decision. Nothing in this template
+approves production or mainnet writes, and no result activates Base.

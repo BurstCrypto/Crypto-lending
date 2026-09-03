@@ -31,8 +31,8 @@ export default function PlatformsPage() {
           <h1 id="platforms-page-title">See what is planned—and what is available.</h1>
         </div>
         <p>
-          Track the Ethereum-compatible and Solana protocols being evaluated for a production
-          launch. Availability is stated plainly before any action can be offered.
+          Track the Ethereum and Solana protocols being evaluated for a production launch.
+          Availability is stated plainly before any action can be offered.
         </p>
       </section>
 

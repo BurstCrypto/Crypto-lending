@@ -25,7 +25,7 @@ function platformEntry(
     name: `Provider ${id}`,
     protocol: `Protocol ${id}`,
     ecosystem: 'EVM',
-    networks: [{ id: 'eip155:8453', name: 'Base' }],
+    networks: [{ id: 'eip155:1', name: 'Ethereum' }],
     integrationStatus,
     dataStatus: live ? 'LIVE' : 'NOT_CONNECTED',
     accessStatus: live ? 'AVAILABLE' : 'UNAVAILABLE',
@@ -177,8 +177,8 @@ test('current repository is a bootstrap blocker audit and exits nonzero for both
   assert.equal(writes.selectedTargetReadiness, 'BLOCKED');
   assert.deepEqual(readOnly.providerCounts, {
     minimumTarget: 10,
-    directory: 11,
-    planned: 11,
+    directory: 10,
+    planned: 10,
     liveReadEvidenceBound: 0,
     transactionEvidenceBound: 0,
   });
@@ -355,6 +355,20 @@ test('directory contract closes target, provider identity, shape, and actions', 
     invalidIdReport.checks.find(({ id }) => id === 'PLATFORM_DIRECTORY')?.localValidation,
     'FAIL',
   );
+
+  for (const network of [
+    { id: 'eip155:8453', name: 'Base' },
+    { id: 'eip155:56', name: 'BNB Smart Chain' },
+  ]) {
+    const outOfScopeNetwork = platformDirectory('LIVE_READ_ONLY');
+    const providers = outOfScopeNetwork.providers as Record<string, unknown>[];
+    providers[0] = { ...providers[0], networks: [network] };
+    const networkReport = evaluateProductionPreflight(completeInput(outOfScopeNetwork));
+    assert.equal(
+      networkReport.checks.find(({ id }) => id === 'PLATFORM_DIRECTORY')?.localValidation,
+      'FAIL',
+    );
+  }
 
   const unsafeAction = platformDirectory('LIVE_READ_ONLY');
   const unsafeProviders = unsafeAction.providers as Record<string, unknown>[];

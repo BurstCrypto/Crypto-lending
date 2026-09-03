@@ -74,7 +74,8 @@ function schemaMigrationsForIsolatedLegacyRole(
       id !== '0011' &&
       id !== '0012' &&
       id !== '0013' &&
-      id !== '0014',
+      id !== '0014' &&
+      id !== '0015',
   ).map((migration) =>
     migration.id === '0004'
       ? {

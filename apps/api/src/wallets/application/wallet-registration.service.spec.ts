@@ -148,9 +148,9 @@ function serviceFixture(
 }
 
 describe('WalletRegistrationService', () => {
-  it('pins the exact three-chain launch allowlist for each registry environment', () => {
+  it('pins the exact production and test launch allowlists', () => {
     expect(WALLET_REGISTRATION_LAUNCH_CHAIN_IDS).toEqual({
-      MAINNET: ['eip155:1', 'eip155:8453', 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp'],
+      MAINNET: ['eip155:1', 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp'],
       TESTNET: ['eip155:11155111', 'eip155:84532', 'solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1'],
     });
   });
@@ -415,17 +415,61 @@ describe('WalletRegistrationService', () => {
     expect(repository.beginChallenge).not.toHaveBeenCalled();
   });
 
-  it('rejects Arbitrum mainnet before creating durable state', async () => {
-    const { service, repository } = serviceFixture('MAINNET');
+  it.each(['eip155:8453', 'eip155:42161'] as const)(
+    'rejects non-launch mainnet %s before creating durable state',
+    async (chainId) => {
+      const { service, repository } = serviceFixture('MAINNET');
 
-    await expect(
-      service.issueChallenge({
+      await expect(
+        service.issueChallenge({
+          accountId: ACCOUNT_ID,
+          chainId,
+          address: '0xde709f2102306220921060314715629080e2fb77',
+          correlationId: CORRELATION_ID,
+        }),
+      ).rejects.toBeInstanceOf(WalletRegistrationRejectedError);
+      expect(repository.beginChallenge).not.toHaveBeenCalled();
+    },
+  );
+
+  it('fails closed when storage returns an active Base mainnet registration', async () => {
+    const { service, config: walletConfig, list } = serviceFixture('MAINNET');
+    const walletId = randomUUID();
+    const registeredByChallengeId = parseWalletChallengeId(randomUUID());
+    const chainId = 'eip155:8453' as const;
+    const address = '0xde709f2102306220921060314715629080e2fb77';
+    const addressDigest = digestWalletIdentity(walletConfig.identityHmacKey, chainId, address);
+    const registry = supportedAssetRegistryForEnvironment('MAINNET').latest;
+    list.mockResolvedValue([
+      {
+        walletId,
         accountId: ACCOUNT_ID,
-        chainId: 'eip155:42161',
-        address: '0xde709f2102306220921060314715629080e2fb77',
-        correlationId: CORRELATION_ID,
-      }),
-    ).rejects.toBeInstanceOf(WalletRegistrationRejectedError);
-    expect(repository.beginChallenge).not.toHaveBeenCalled();
+        registeredByChallengeId,
+        chainId,
+        registry: {
+          environment: registry.environment,
+          version: registry.version,
+          fingerprintSha256: registry.fingerprintSha256,
+        },
+        addressDigest,
+        encryptedAddress: sealWalletRegistrationValue(
+          walletConfig.metadataSealKey,
+          {
+            field: 'address',
+            walletId,
+            challengeId: registeredByChallengeId,
+            accountId: ACCOUNT_ID,
+            networkId: chainId,
+            addressDigest,
+          },
+          address,
+        ),
+        registeredAt: NOW,
+      },
+    ]);
+
+    await expect(service.listActiveWallets(ACCOUNT_ID)).rejects.toBeInstanceOf(
+      WalletRegistrationUnavailableError,
+    );
   });
 });

@@ -58,6 +58,7 @@ describe('MainnetPlatformsController', () => {
         providers: {
           type: 'array',
           minItems: 10,
+          maxItems: 10,
           items: {
             additionalProperties: false,
             properties: {
@@ -71,5 +72,8 @@ describe('MainnetPlatformsController', () => {
         },
       },
     });
+    expect(JSON.stringify(MAINNET_PLATFORM_DIRECTORY_RESPONSE_SCHEMA)).not.toMatch(
+      /eip155:(?:56|8453)|BNB|Base|moonwell|venus/iu,
+    );
   });
 });

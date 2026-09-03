@@ -2264,8 +2264,7 @@
                               "compound",
                               "spark",
                               "euler",
-                              "moonwell",
-                              "venus",
+                              "gearbox",
                               "kamino",
                               "save",
                               "project-0",
@@ -2286,8 +2285,7 @@
                               "Compound",
                               "Spark",
                               "Euler",
-                              "Moonwell",
-                              "Venus",
+                              "Gearbox",
                               "Kamino",
                               "Save",
                               "Project 0",
@@ -2302,8 +2300,6 @@
                                 "id": {
                                   "enum": [
                                     "eip155:1",
-                                    "eip155:56",
-                                    "eip155:8453",
                                     "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"
                                   ],
                                   "type": "string"
@@ -2311,8 +2307,6 @@
                                 "name": {
                                   "enum": [
                                     "Ethereum",
-                                    "BNB Smart Chain",
-                                    "Base",
                                     "Solana"
                                   ],
                                   "type": "string"
@@ -2324,7 +2318,7 @@
                               ],
                               "type": "object"
                             },
-                            "maxItems": 4,
+                            "maxItems": 2,
                             "minItems": 1,
                             "type": "array",
                             "uniqueItems": true
@@ -2336,8 +2330,7 @@
                               "Compound III",
                               "SparkLend",
                               "Euler V2",
-                              "Moonwell V2",
-                              "Venus Core Pool",
+                              "Gearbox V3",
                               "Kamino Lend",
                               "Save lending",
                               "marginfi v2",
@@ -2374,7 +2367,7 @@
                         ],
                         "type": "object"
                       },
-                      "maxItems": 32,
+                      "maxItems": 10,
                       "minItems": 10,
                       "type": "array",
                       "uniqueItems": true

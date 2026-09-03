@@ -1,4 +1,5 @@
 import { chainObservationPolicyForNetwork } from '../../blockchain/domain/chain-observation-policy';
+import { isMainnetLaunchNetwork } from '../../blockchain/domain/mainnet-launch-network-policy';
 import type { SupportedStablecoin } from '../../blockchain/domain/supported-asset-registry';
 import type { MainnetProviderPositionSourceKind } from './mainnet-provider-position-observation-policy';
 
@@ -316,6 +317,7 @@ function parseEntry(value: unknown): MainnetProviderPositionChainAssessmentEntry
   if (typeof record.sourceId !== 'string' || !SAFE_ID.test(record.sourceId)) return fail();
   if (!SOURCE_KINDS.has(record.sourceKind as MainnetProviderPositionSourceKind)) return fail();
   if (typeof record.networkId !== 'string') return fail();
+  if (!isMainnetLaunchNetwork(record.networkId)) return fail();
   const chainPolicy = chainObservationPolicyForNetwork(record.networkId);
   if (!chainPolicy || chainPolicy.environment !== 'MAINNET') return fail();
   if (!IDENTITY_STATUSES.has(record.identityStatus as MainnetProviderPositionChainIdentityStatus)) {

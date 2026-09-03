@@ -31,7 +31,7 @@ describe('active portfolio wallet registration coverage input', () => {
     expect(parseActivePortfolioWalletRegistrations([])).toEqual([]);
   });
 
-  it('rejects testnet, unknown, duplicate, malformed, sparse, and accessor inputs', () => {
+  it('rejects non-launch mainnets, testnet, unknown, duplicate, malformed, sparse, and accessor inputs', () => {
     const accessor = { ...ETHEREUM_WALLET } as Record<string, unknown>;
     Object.defineProperty(accessor, 'networkId', {
       enumerable: true,
@@ -43,6 +43,9 @@ describe('active portfolio wallet registration coverage input', () => {
       networkId: 'eip155:1',
     }));
     for (const value of [
+      [{ ...ETHEREUM_WALLET, networkId: 'eip155:8453' }],
+      [{ ...ETHEREUM_WALLET, networkId: 'eip155:56' }],
+      [{ ...ETHEREUM_WALLET, networkId: 'eip155:42161' }],
       [{ ...ETHEREUM_WALLET, networkId: 'eip155:11155111' }],
       [{ ...ETHEREUM_WALLET, networkId: 'eip155:42161' }],
       [{ ...ETHEREUM_WALLET, networkId: 'eip155:999999' }],

@@ -20,6 +20,12 @@ production evidence, so both targets remain blocked today. A separate,
 sanitized external evidence-index ingestion and validation boundary must be
 implemented before this CLI can ever report local gates clear.
 
+For the current release decision, the only active mainnet networks are
+Ethereum and Solana. The ten-provider target is the exact six-Ethereum/four-
+Solana planning set in the [production go-live plan](production-go-live-plan.md).
+Base and BNB Smart Chain are deferred. A preflight or evidence total that
+includes either deferred chain cannot satisfy the active launch target.
+
 Exit code `1` means at least one named blocker remains. Exit code `2` means the
 arguments were rejected. The evaluator can return exit code `0` only for
 strict synthetic or future independently supplied, revision-bound evidence;

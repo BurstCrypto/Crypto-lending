@@ -6,16 +6,9 @@ const MAXIMUM_NETWORKS_PER_PROVIDER = 4;
 const MAXIMUM_LABEL_CHARACTERS = 80;
 
 const ECOSYSTEMS = ['EVM', 'SOLANA'] as const;
-const NETWORK_IDS = [
-  'eip155:1',
-  'eip155:56',
-  'eip155:8453',
-  'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp',
-] as const;
+const NETWORK_IDS = ['eip155:1', 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp'] as const;
 const NETWORK_DEFINITIONS = {
   'eip155:1': { name: 'Ethereum', ecosystem: 'EVM' },
-  'eip155:56': { name: 'BNB Smart Chain', ecosystem: 'EVM' },
-  'eip155:8453': { name: 'Base', ecosystem: 'EVM' },
   'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp': { name: 'Solana', ecosystem: 'SOLANA' },
 } as const;
 const PLATFORM_IDS = [
@@ -24,8 +17,7 @@ const PLATFORM_IDS = [
   'compound',
   'spark',
   'euler',
-  'moonwell',
-  'venus',
+  'gearbox',
   'kamino',
   'save',
   'project-0',
@@ -36,19 +28,19 @@ const PLATFORM_DEFINITIONS = {
     name: 'Aave',
     protocol: 'Aave V3',
     ecosystem: 'EVM',
-    networkIds: ['eip155:1', 'eip155:8453'],
+    networkIds: ['eip155:1'],
   },
   morpho: {
     name: 'Morpho',
     protocol: 'Morpho Blue',
     ecosystem: 'EVM',
-    networkIds: ['eip155:1', 'eip155:8453'],
+    networkIds: ['eip155:1'],
   },
   compound: {
     name: 'Compound',
     protocol: 'Compound III',
     ecosystem: 'EVM',
-    networkIds: ['eip155:8453'],
+    networkIds: ['eip155:1'],
   },
   spark: {
     name: 'Spark',
@@ -60,19 +52,13 @@ const PLATFORM_DEFINITIONS = {
     name: 'Euler',
     protocol: 'Euler V2',
     ecosystem: 'EVM',
-    networkIds: ['eip155:8453'],
+    networkIds: ['eip155:1'],
   },
-  moonwell: {
-    name: 'Moonwell',
-    protocol: 'Moonwell V2',
+  gearbox: {
+    name: 'Gearbox',
+    protocol: 'Gearbox V3',
     ecosystem: 'EVM',
-    networkIds: ['eip155:8453'],
-  },
-  venus: {
-    name: 'Venus',
-    protocol: 'Venus Core Pool',
-    ecosystem: 'EVM',
-    networkIds: ['eip155:56'],
+    networkIds: ['eip155:1'],
   },
   kamino: {
     name: 'Kamino',

@@ -16,6 +16,20 @@ current repository blockers without reading secrets or contacting cloud or
 provider systems. Its local checks supplement, but never replace, deployed
 evidence and independent approval.
 
+## Active release scope
+
+The candidate production/mainnet scope is Ethereum and Solana only. Base and
+BNB Smart Chain are explicitly deferred and cannot satisfy a launch count,
+provider gate, chain gate, or fallback requirement. Historical Base and BNB
+research remains useful evidence of what was reviewed at that time, but it is
+not evidence for an Ethereum or Solana deployment.
+
+The active planning directory contains exactly ten unavailable candidates: six
+on Ethereum (Aave, Morpho, Compound, Spark, Euler, and Gearbox) and four on
+Solana (Kamino, Save, Project 0 / marginfi v2, and Jupiter). This is a planning
+scope, not a readiness claim. All ten remain unavailable until their exact
+chain-specific evidence and every applicable gate pass.
+
 ## What "ten providers" means
 
 In this plan, a **lending provider** is a distinct lending protocol/provider
@@ -38,23 +52,25 @@ The four product states must be reported separately:
   reviewed allowlist. A wallet connection or ownership signature does not
   qualify.
 
-| Count                                             | Current on 2026-09-02 |                                                Program target | Honest launch claim                                                                                              |
-| ------------------------------------------------- | --------------------: | ------------------------------------------------------------: | ---------------------------------------------------------------------------------------------------------------- |
-| Distinct cataloged lending providers              |                    10 |                                                   At least 10 | Research candidates only                                                                                         |
-| Distinct planned directory providers              |                    11 |                                                   At least 10 | Named roadmap candidates; 0 available                                                                            |
-| Distinct production live read-only providers      |                     0 |               At least 10 after every required chain decision | Do not call a provider live until its adapter and deployment evidence pass                                       |
-| Distinct production transaction-enabled providers |                     0 | At least 10 as a later, separately approved program milestone | Initial Base release remains zero by default; at most one first Base provider can advance after every write gate |
+| Count                                                        | Current on 2026-09-02 |                                                Program target | Honest launch claim                                                                           |
+| ------------------------------------------------------------ | --------------------: | ------------------------------------------------------------: | --------------------------------------------------------------------------------------------- |
+| Distinct active-scope planned directory providers            |                    10 |                                                   At least 10 | Named Ethereum/Solana roadmap candidates; 0 available                                         |
+| Active-scope providers with matching dated research captures |                     6 |                                                   At least 10 | Research input only; four active-scope chain evidence packages are still missing              |
+| Distinct production live read-only providers                 |                     0 |  At least 10 after both active-chain decisions and every gate | Do not call a provider live until its adapter and exact deployment evidence pass              |
+| Distinct production transaction-enabled providers            |                     0 | At least 10 as a later, separately approved program milestone | No write provider or action is selected; Base candidates are excluded from this release scope |
 
-The ten-provider requirement is therefore already met only at the research
-catalog and planning-directory levels. It is **not** met for live reads or user
-lending. Product copy, API fields, dashboards, and release notes must not
-collapse these counts into a single "providers available" number.
+The ten-provider requirement is met only as an active-scope planning-directory
+count. It is **not** met by chain-matched research, live reads, or user lending.
+The older local-demo catalog retains ten historical entries across several
+chains; those entries do not establish the active launch count. Product copy,
+API fields, dashboards, and release notes must not collapse these states into a
+single "providers available" number.
 
 ## Implemented planning-directory slice
 
 The current branch adds authenticated, GET-only
 `GET /api/v1/mainnet-platforms` and the `/platforms` page. This slice publishes
-eleven planned identities while stating **0 available now**. Every entry is
+ten planned Ethereum/Solana identities while stating **0 available now**. Every entry is
 `PLANNED`, `NOT_CONNECTED`, `UNAVAILABLE`, `NOT_ASSESSED`, and has no supported
 actions; the response also fixes `mayAuthorizeFinancialAction` to `false`.
 
@@ -71,31 +87,29 @@ credential, or transaction data is embedded in that allowlist.
 
 ## Researched provider set and rollout disposition
 
-Rows 1-10 are currently `CATALOGED_ONLY`, with financial authorization set to
-false in the local-demo snapshots. Row 11 is a planning candidate supported by
-current official documentation but does not count as cataloged until a dated,
-reproducible evidence capture is checked in and reviewed.
+The table below separates the selected target chain from evidence already in
+the repository. `Planned` and `cataloged` still mean **unavailable**; neither
+state increments a live or transaction-enabled count.
 
-|   # | Provider / protocol     | Researched mainnet network(s) | Read-only rollout disposition                                                                                                                                                                                                 | Transaction rollout disposition               |
-| --: | ----------------------- | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
-|   1 | Aave / Aave V3          | Base, Ethereum                | Base-first candidate                                                                                                                                                                                                          | First Base write candidate only; not approved |
-|   2 | Morpho / Morpho Blue    | Base, Ethereum                | Base-first candidate                                                                                                                                                                                                          | Not selected                                  |
-|   3 | Compound / Compound III | Base                          | Base-first candidate                                                                                                                                                                                                          | Not selected                                  |
-|   4 | Moonwell / Moonwell V2  | Base                          | Base-first candidate                                                                                                                                                                                                          | Not selected                                  |
-|   5 | Euler / Euler V2        | Base                          | Base-first candidate                                                                                                                                                                                                          | Not selected                                  |
-|   6 | Spark / SparkLend       | Ethereum                      | Requires a separate Ethereum product/network decision                                                                                                                                                                         | Not selected                                  |
-|   7 | Venus / Venus Core Pool | BNB Smart Chain               | Requires a separate BNB Smart Chain product/network decision                                                                                                                                                                  | Not selected                                  |
-|   8 | Kamino / Kamino Lend    | Solana                        | Requires a separate Solana mainnet product/network decision                                                                                                                                                                   | Not selected                                  |
-|   9 | Save / Save lending     | Solana                        | Requires a separate Solana mainnet product/network decision; the research capture retains the legacy `SOLEND` protocol ID, and the existing Devnet executor is test-only                                                      | Not selected                                  |
-|  10 | Project 0 / marginfi v2 | Solana                        | Requires a separate Solana mainnet product/network decision                                                                                                                                                                   | Not selected                                  |
-|  11 | Jupiter / Jupiter Lend  | Solana                        | Planned read-only candidate; [official overview](https://developers.jup.ag/docs/lend) and [program identities](https://developers.jup.ag/docs/lend/program-addresses) require a dated evidence capture and independent review | Not selected                                  |
+|   # | Provider / protocol     | Active launch network | Evidence and read-only disposition                                                                                                                                                                                | Transaction disposition |
+| --: | ----------------------- | --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- |
+|   1 | Aave / Aave V3          | Ethereum              | Existing research includes Ethereum, but the exact deployment and production adapter remain unapproved                                                                                                            | Not selected            |
+|   2 | Morpho / Morpho Blue    | Ethereum              | Existing research includes Ethereum, but the exact deployment and production adapter remain unapproved                                                                                                            | Not selected            |
+|   3 | Compound / Compound III | Ethereum              | Planned only for this chain; the existing checked-in capture is Base-specific, so a dated Ethereum evidence package is required                                                                                   | Not selected            |
+|   4 | Spark / SparkLend       | Ethereum              | Existing Ethereum research is an input only; exact deployment and production adapter evidence remain unapproved                                                                                                   | Not selected            |
+|   5 | Euler / Euler V2        | Ethereum              | Planned only for this chain; the existing checked-in capture is Base-specific, so a dated Ethereum evidence package is required                                                                                   | Not selected            |
+|   6 | Gearbox / Gearbox V3    | Ethereum              | Planned only; the [official SDK setup](https://docs.gearbox.finance/developers/sdk-setup) is a research input, and a dated, reproducible Ethereum deployment evidence capture and independent review are required | Not selected            |
+|   7 | Kamino / Kamino Lend    | Solana                | Existing Solana research is an input only; exact program/market and production adapter evidence remain unapproved                                                                                                 | Not selected            |
+|   8 | Save / Save lending     | Solana                | Existing research retains the legacy `SOLEND` protocol ID, and the Devnet executor is test-only; exact mainnet program/market evidence remains unapproved                                                         | Not selected            |
+|   9 | Project 0 / marginfi v2 | Solana                | Existing Solana research is an input only; exact program/market and production adapter evidence remain unapproved                                                                                                 | Not selected            |
+|  10 | Jupiter / Jupiter Lend  | Solana                | Planned only; [official overview](https://developers.jup.ag/docs/lend) and [program identities](https://developers.jup.ag/docs/lend/program-addresses) still require a dated capture and independent review       | Not selected            |
 
-Only five distinct researched providers have a Base deployment in the current
-catalog. The shortest ten-provider live-read path is those five Base providers,
-Spark on Ethereum, and Kamino, Save, Project 0, and Jupiter on Solana. Venus
-remains an eleventh planned fallback because BNB Smart Chain is absent from the
-current production chain and asset registry. Aave and Morpho appearing on both
-Base and Ethereum must not be double-counted.
+Historical Base evidence for Aave, Morpho, Compound, Moonwell, and Euler is
+retained but deferred. Moonwell is not an active launch candidate. Venus and
+its BNB Smart Chain evidence are also deferred. None of those deferred
+deployments can fill an Ethereum/Solana evidence gap or increment a launch
+count. Aave and Morpho remain one provider identity each and cannot be
+double-counted across historical networks.
 
 ## Three-week critical path
 
@@ -112,34 +126,34 @@ Base and Ethereum must not be double-counted.
 4. Approve the exact Cognito tenant, public app client, callback/logout origins,
    MFA/recovery policy, key custody, rotation policy, and non-production test
    account plan.
-5. If ten live read-only providers remains the launch requirement, approve two
-   independent RPC/indexing paths for every required network: Base, Ethereum,
-   and Solana. Record exact plans, quotas, regions, credential owners, spend
-   alarms, and exact-host egress, then complete a network-specific acceptance
-   record after authorized non-production testing. BNB Smart Chain requires an
-   additional decision and registry revision before Venus can enter this path.
+5. Approve two independent RPC/indexing paths for both required launch
+   networks, Ethereum and Solana. Record exact plans, quotas, regions,
+   credential owners, spend alarms, and exact-host egress, then complete a
+   network-specific acceptance record after authorized non-production testing.
+   Base and BNB Smart Chain are deferred and their evidence cannot satisfy
+   either active-chain gate.
 6. Freeze all ten read candidates by exact chain, deployment or program,
    proxy/implementation identity where applicable, market, supported asset
    contract or mint, decimals, oracle, and pause/cap semantics. A catalog
    snapshot is input to review, not evidence that a deployment remains current.
-7. Approve separate Ethereum and Solana product/network decisions, including
-   chain-bound wallet ownership and registration flows. A Base ownership proof
-   is not an Ethereum or Solana ownership proof. Do not import another network
-   through a Base configuration switch or treat one network's wallet/provider
-   evidence as evidence for another.
-8. Produce and independently review a dated Jupiter evidence capture before it
-   can leave `PLANNED`; keep Venus unavailable unless a reviewed registry
-   version adds BNB Smart Chain and its exact supported asset identities.
+7. Approve separate Ethereum and Solana product/network decision records,
+   including chain-bound wallet ownership and registration flows. Do not treat
+   one network's wallet/provider evidence as evidence for another, and do not
+   use dormant Base support as an active-chain fallback.
+8. Produce and independently review the missing chain-matched evidence packages
+   for Compound, Euler, and Gearbox on Ethereum and Jupiter on Solana before
+   those providers can leave `PLANNED`. Revalidate the existing evidence for
+   the other six candidates against their exact active-chain deployments.
 
 **Week 1 exit:** signed scope and owner record; approved non-production identity,
 per-network RPC and egress plans; immutable deployment review inputs for all ten
 selected candidates; chain-bound wallet proof designs; no unresolved question
 about whether the release is read-only.
-Missing approval means the affected adapter cannot start. If a required
-non-Base decision remains open, count only the provider bundles that passed and
-do not satisfy or advertise the ten-live-provider target. If both Ethereum and
-Solana decisions remain open, the September review becomes a Base-only,
-at-most-five-provider milestone.
+Missing approval means the affected adapter cannot start. Count only the
+Ethereum and Solana provider bundles that passed; do not satisfy or advertise
+the ten-live-provider target with a Base or BNB bundle. If either active chain
+remains unapproved, the ten-provider launch target moves. There is no Base-only
+fallback milestone in this release plan.
 
 ### Week 2 — live read-only slice in non-production (September 9–15)
 
@@ -151,14 +165,12 @@ at-most-five-provider milestone.
    The new model must retain provider, protocol, market, position, wallet,
    network, asset, source, and observation identity before the reporting layer
    composes wallet balances and lending positions.
-3. Run three independently reviewed read-adapter lanes in parallel: the five
-   Base candidates (Aave, Morpho, Compound, Moonwell, and Euler), the incremental
-   Ethereum candidate (Spark), and the four Solana candidates (Kamino, Save,
-   Project 0, and Jupiter). Aave and Morpho may also expose separately approved
-   Ethereum observations, but each still counts as one distinct provider. Keep
-   per-provider and per-network kill switches; every unsupported network, stale
-   result, identity mismatch, incomplete result, provider disagreement, and
-   deployment drift must fail closed.
+3. Run two independently reviewed read-adapter lanes in parallel: six Ethereum
+   candidates (Aave, Morpho, Compound, Spark, Euler, and Gearbox) and four
+   Solana candidates (Kamino, Save, Project 0, and Jupiter). Do not start or
+   count a Base or BNB adapter. Keep per-provider and per-network kill switches;
+   every unsupported network, stale result, identity mismatch, incomplete
+   result, provider disagreement, and deployment drift must fail closed.
 4. Record server-owned `observedAt`, `staleAfter`, block number/hash or Solana
    slot/root, source attribution, and provider status. Never reuse the static
    local-demo catalog as current production data.
@@ -167,7 +179,8 @@ at-most-five-provider milestone.
    through the deployed HTTPS/ALB topology.
 6. Exercise Ethereum and Solana wallet discovery, chain/network checks,
    challenge/proof registration, account changes, disconnects, and stale-session
-   recovery. No balance or position may be associated through a Base-only proof.
+   recovery. No launch balance or position may be associated through a Base
+   proof, even if dormant local Base support remains in the repository.
 7. Exercise both approved RPC/indexing paths on every launch network for chain
    identity, freshness, archive boundary, rate limits, WSS gaps, HTTPS backfill,
    divergence, reorg, failover/failback, redaction, cost, and kill-switch
@@ -199,10 +212,12 @@ exactly and moves the ten-provider launch target.
 4. Verify support coverage, incident commander/on-call ownership, customer
    messaging, status page, withdrawal/recovery escalation, evidence retention,
    and rollback authority.
-5. If and only if a real-value action was separately approved, evaluate one
-   exact Aave V3 Base market/asset action through fork/simulation and an
-   allowlisted staff-wallet canary with zero-by-default limits. Keep the public
-   transaction UI absent until that canary and every write gate pass.
+5. No write candidate is selected. If and only if a real-value action is later
+   separately approved, select one exact Ethereum or Solana
+   provider/market/asset action, then evaluate it through fork/simulation and an
+   allowlisted staff-wallet canary with zero-by-default limits. Do not reuse the
+   deferred Base canary plan. Keep the public transaction UI absent until that
+   canary and every write gate pass.
 6. Hold a recorded go/no-go review no earlier than September 23. Re-run the
    blocker audit immediately before the decision.
 
@@ -240,19 +255,19 @@ pause/rollback controls.
 
 ## Hard launch gates
 
-| Gate                | Current blocker                                                                                                                                                                                                                                                                                                     | Closed only when                                                                                                                                                                                                    |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Public/legal        | `docs/wallets/license-review/public-launch-legal-gate.md` says public access is not approved                                                                                                                                                                                                                        | Required legal, regulatory, privacy, OSS/vendor, jurisdiction, and product approvals are named, dated, unexpired, and bound to the shipped artifacts                                                                |
-| Authentication      | Cognito is selected but not provisioned or exercised; authentication remains deny-all without complete configuration                                                                                                                                                                                                | Deployed non-production Cognito evidence covers the full login/session/recovery/outage contract and production secrets/configuration have approved custody and rotation                                             |
-| External egress     | KAN-231 remains `NO_EXTERNAL_EGRESS`                                                                                                                                                                                                                                                                                | Exact destinations, callers, ports, TLS/DNS behavior, spend limits, approval expiry, and kill switch are approved and tested                                                                                        |
-| RPC/indexing        | KAN-251 is `NOT_AUTHORIZED` / `NOT_RUN`; Alchemy and QuickNode are proposals only                                                                                                                                                                                                                                   | Two independent suppliers pass the complete authorized acceptance matrix and have approved commercial, privacy, reliability, and cost terms                                                                         |
-| Provider positions  | The versioned observation contract now preserves provider, market, position, position-kind, wallet, network, and asset identity, but production policy/approval bindings, live adapters, and composition with wallet balances are not implemented or evidenced                                                      | Reviewed policy and approval bindings, live provider adapters, wallet-balance composition, and duplicate-asset/provider isolation evidence all pass for the shipped revision                                        |
-| Chain-bound wallets | Local production UI and HTTP handoffs now support separately bound Base, Ethereum, and Solana ownership proofs plus an account-scoped durable roster; wallet revocation/deactivation, historical encryption-key rotation, deployed HTTPS/provider evidence, and independent review are still absent                 | Ownership, roster, revocation, and key-rotation flows pass chain-bound challenge, account-change, disconnect, stale-session, deployed-browser, migration, recovery, and independent-review evidence                 |
-| Production reads    | The server now requires an exact active wallet/network coverage manifest and cannot turn unread targets into complete zero, but production wallet-balance readers remain unavailable, no live provider-position adapter exists, and no server-owned maximum-age deadline is enforced yet                            | Every counted provider has a live adapter and evidence bundle; server-owned freshness deadlines are enforced; stale/divergent/incomplete data is unavailable rather than zero or current                            |
-| Ten live providers  | Ten static research entries and eleven planned identities exist; only five are current Base candidates                                                                                                                                                                                                              | Ten distinct provider bundles pass, including separately approved Ethereum and Solana decisions; planned or cataloged entries do not count                                                                          |
-| Mainnet writes      | No mainnet transaction bounded context, route, intent store, manifest, or write approval exists                                                                                                                                                                                                                     | Every additional write gate in `mainnet-rollout.md` and the per-provider transaction evidence above passes for an exact allowlisted action                                                                          |
-| Operations/security | No deployed revision-bound production exercise or independent acceptance is recorded                                                                                                                                                                                                                                | Threat model, observability, incident, rollback, recovery, provider drift/outage, finality/reorg, key/credential, and canary evidence pass with no unresolved critical/high finding                                 |
-| Dependencies        | Compatible `qs` and `fast-uri` fixes are applied; the audit's three remaining moderate package findings trace to the transitive `uuid` advisory under `@solana/web3.js`/Jayson. Installed Jayson calls UUID v4, while the advisory names v3/v5/v6 buffer paths, but the residual risk is not independently accepted | A compatible upstream remediation is pinned and verified, or Security records a dated, expiring disposition tied to exact dependency versions and observed call paths; do not use npm's forced Solana SDK downgrade |
+| Gate                | Current blocker                                                                                                                                                                                                                                                                                                                   | Closed only when                                                                                                                                                                                                    |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Public/legal        | `docs/wallets/license-review/public-launch-legal-gate.md` says public access is not approved                                                                                                                                                                                                                                      | Required legal, regulatory, privacy, OSS/vendor, jurisdiction, and product approvals are named, dated, unexpired, and bound to the shipped artifacts                                                                |
+| Authentication      | Cognito is selected but not provisioned or exercised; authentication remains deny-all without complete configuration                                                                                                                                                                                                              | Deployed non-production Cognito evidence covers the full login/session/recovery/outage contract and production secrets/configuration have approved custody and rotation                                             |
+| External egress     | KAN-231 remains `NO_EXTERNAL_EGRESS`                                                                                                                                                                                                                                                                                              | Exact destinations, callers, ports, TLS/DNS behavior, spend limits, approval expiry, and kill switch are approved and tested                                                                                        |
+| RPC/indexing        | KAN-251 is `NOT_AUTHORIZED` / `NOT_RUN`; Alchemy and QuickNode are proposals only                                                                                                                                                                                                                                                 | Two independent suppliers pass the complete authorized acceptance matrix and have approved commercial, privacy, reliability, and cost terms                                                                         |
+| Provider positions  | The versioned observation contract now preserves provider, market, position, position-kind, wallet, network, and asset identity, but production policy/approval bindings, live adapters, and composition with wallet balances are not implemented or evidenced                                                                    | Reviewed policy and approval bindings, live provider adapters, wallet-balance composition, and duplicate-asset/provider isolation evidence all pass for the shipped revision                                        |
+| Chain-bound wallets | Local production UI and HTTP handoffs now expose only separately bound Ethereum and Solana ownership proofs plus an account-scoped durable roster; Base mainnet fails closed, while wallet revocation/deactivation, historical encryption-key rotation, deployed HTTPS/provider evidence, and independent review are still absent | Ethereum/Solana ownership, roster, revocation, and key-rotation flows pass chain-bound challenge, account-change, disconnect, stale-session, deployed-browser, migration, recovery, and independent-review evidence |
+| Production reads    | The server now requires an exact active wallet/network coverage manifest and cannot turn unread targets into complete zero, but production wallet-balance readers remain unavailable, no live provider-position adapter exists, and no server-owned maximum-age deadline is enforced yet                                          | Every counted provider has a live adapter and evidence bundle; server-owned freshness deadlines are enforced; stale/divergent/incomplete data is unavailable rather than zero or current                            |
+| Ten live providers  | Ten Ethereum/Solana identities are planned and unavailable; six have matching-chain historical research inputs, four require new matching-chain captures, and zero have live evidence                                                                                                                                             | All ten exact active-scope provider bundles pass on Ethereum or Solana; planned, cataloged, Base, and BNB entries do not count                                                                                      |
+| Mainnet writes      | No mainnet transaction bounded context, route, intent store, manifest, or write approval exists                                                                                                                                                                                                                                   | Every additional write gate in `mainnet-rollout.md` and the per-provider transaction evidence above passes for an exact allowlisted action                                                                          |
+| Operations/security | No deployed revision-bound production exercise or independent acceptance is recorded                                                                                                                                                                                                                                              | Threat model, observability, incident, rollback, recovery, provider drift/outage, finality/reorg, key/credential, and canary evidence pass with no unresolved critical/high finding                                 |
+| Dependencies        | Compatible `qs` and `fast-uri` fixes are applied; the audit's three remaining moderate package findings trace to the transitive `uuid` advisory under `@solana/web3.js`/Jayson. Installed Jayson calls UUID v4, while the advisory names v3/v5/v6 buffer paths, but the residual risk is not independently accepted               | A compatible upstream remediation is pinned and verified, or Security records a dated, expiring disposition tied to exact dependency versions and observed call paths; do not use npm's forced Solana SDK downgrade |
 
 No waiver may change the meaning of `cataloged`, `live read-only`, or
 `transaction-enabled`. A waiver for a required hard gate means **no-go** for the
@@ -265,6 +280,11 @@ affected launch mode.
 This test proves ten distinct static catalog identities and their permanently
 non-executable policy. It does not prove current rates, live connectivity, risk
 acceptance, deposits, or withdrawals.
+
+That historical catalog includes deferred Base and BNB entries, so its count
+cannot satisfy the active Ethereum/Solana provider target. The separate
+planning-directory check below proves only that the exact ten active-scope
+identities remain named and unavailable.
 
 ```powershell
 npm --workspace @crypto-lending/api run test -- local-demo/local-demo-yield-catalog.service.spec.ts
@@ -379,9 +399,10 @@ candidate revision and all required dependencies as ready. Then complete the
 browser-based Cognito and authenticated portfolio cases because their secure
 cookie and redirect behavior cannot be accepted from an unauthenticated health
 probe. An unauthenticated `GET /api/v1/portfolio` must return `401`; an
-authenticated request must return either current, fully attributed approved
-data or the bounded `503` unavailable response—never fixture data or a partial
-success.
+authenticated request must return current, attributed approved data with the
+exact wallet/network coverage manifest, including visibly partial or
+unavailable targets when applicable, or the bounded `503` unavailable
+response—never fixture data or an unlabeled partial result.
 
 ### Current blocker audit
 
@@ -397,9 +418,9 @@ rg -n 'PUBLIC ACCESS IS NOT APPROVED|NOT_AUTHORIZED|NOT_APPROVED|NO_EXTERNAL_EGR
 
 - **No-go for any public launch** while the public/legal, authentication,
   egress, RPC/indexing, production-read, or operations/security gate is open.
-- **No-go for claims of ten live providers** until ten distinct live read-only
-  evidence bundles pass. Five approved Base providers may be described only as
-  five approved Base providers.
+- **No-go for claims of ten live providers** until all ten exact Ethereum and
+  Solana live read-only evidence bundles pass. Base and BNB provider bundles do
+  not count toward this release.
 - **No-go for any real-value action** while any write gate is open. Hide or
   remove transaction controls; do not ship a disabled-looking control wired to
   an executable route.
@@ -407,5 +428,5 @@ rg -n 'PUBLIC ACCESS IS NOT APPROVED|NOT_AUTHORIZED|NOT_APPROVED|NO_EXTERNAL_EGR
   contract/program, asset, oracle, endpoint, plan, policy, or approval-expiry
   change invalidates the affected evidence and requires review.
 - **Go decisions are mode-specific:** read-only acceptance never authorizes a
-  financial action, and one approved Base provider never authorizes another
-  provider or chain.
+  financial action, and one approved provider never authorizes another provider
+  or chain. No approval in this plan activates Base.

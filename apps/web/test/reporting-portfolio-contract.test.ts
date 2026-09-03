@@ -57,21 +57,24 @@ describe('production reporting portfolio contract', () => {
     ).toThrow(ReportingPortfolioResponseError);
   });
 
-  it.each(['eip155:42161', 'eip155:11155111'])('rejects an out-of-scope %s source', (networkId) => {
-    const outOfScope = cloneResponse();
-    const sources = outOfScope.sources as Record<string, unknown>[];
-    sources[0] = {
-      ...sources[0],
-      networkId,
-      asset: {
-        ...(sources[0]?.asset as Record<string, unknown>),
+  it.each(['eip155:56', 'eip155:8453', 'eip155:42161', 'eip155:11155111'])(
+    'rejects an out-of-scope %s source',
+    (networkId) => {
+      const outOfScope = cloneResponse();
+      const sources = outOfScope.sources as Record<string, unknown>[];
+      sources[0] = {
+        ...sources[0],
         networkId,
-      },
-    };
-    expect(() => parseReportingPortfolioResponse(outOfScope)).toThrow(
-      ReportingPortfolioResponseError,
-    );
-  });
+        asset: {
+          ...(sources[0]?.asset as Record<string, unknown>),
+          networkId,
+        },
+      };
+      expect(() => parseReportingPortfolioResponse(outOfScope)).toThrow(
+        ReportingPortfolioResponseError,
+      );
+    },
+  );
 
   it('retains missing-only Ethereum and Solana coverage as unavailable instead of zero', () => {
     const missing = cloneResponse();
@@ -247,7 +250,7 @@ describe('production reporting portfolio contract', () => {
     );
   });
 
-  it('rejects an unregistered Base stablecoin identity', () => {
+  it('rejects an unregistered Ethereum stablecoin identity', () => {
     const unknownIdentity = cloneResponse();
     const unknownSources = unknownIdentity.sources as Record<string, unknown>[];
     unknownSources[0] = {
@@ -262,7 +265,7 @@ describe('production reporting portfolio contract', () => {
     );
   });
 
-  it('pins Base USDC decimals to the approved registry value', () => {
+  it('pins Ethereum USDC decimals to the approved registry value', () => {
     const wrongDecimals = cloneResponse();
     const source = (wrongDecimals.sources as Record<string, unknown>[])[0]!;
     source.asset = { ...(source.asset as Record<string, unknown>), decimals: 18 };

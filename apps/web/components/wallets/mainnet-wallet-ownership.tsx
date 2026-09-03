@@ -485,7 +485,7 @@ export function MainnetWalletOwnership({
   dependencies,
 }: MainnetWalletOwnershipProps) {
   const configured = useMemo(() => ({ ...DEFAULT_DEPENDENCIES, ...dependencies }), [dependencies]);
-  const [chainId, setChainId] = useState<MainnetWalletNetworkId>('eip155:8453');
+  const [chainId, setChainId] = useState<MainnetWalletNetworkId>('eip155:1');
   const [wallets, setWallets] = useState<readonly InjectedProviderDescriptor[]>([]);
   const [connection, setConnection] = useState<MainnetWalletConnectionChoice | null>(null);
   const [result, setResult] = useState<MainnetWalletVerificationResult | null>(null);
@@ -639,7 +639,7 @@ export function MainnetWalletOwnership({
   }
 
   return (
-    <section id={id} className="base-mainnet-wallet-ownership" aria-labelledby="wallet-title">
+    <section id={id} className="mainnet-wallet-ownership" aria-labelledby="wallet-title">
       <div className="public-testnet-proof-heading">
         <div>
           <p className="eyebrow">Wallet ownership</p>
@@ -752,7 +752,7 @@ export function MainnetWalletOwnership({
         )}
 
         {connection !== null ? (
-          <div className="base-mainnet-wallet-success">
+          <div className="mainnet-wallet-success">
             <strong>3. Choose the account to verify</strong>
             <div role="group" aria-label={`${connection.displayName} accounts`}>
               {connection.accounts.map((account) => (
@@ -779,7 +779,7 @@ export function MainnetWalletOwnership({
             <p>No request is retried automatically.</p>
           </div>
         ) : result !== null ? (
-          <div className="base-mainnet-wallet-success" role="status" aria-live="polite">
+          <div className="mainnet-wallet-success" role="status" aria-live="polite">
             <strong>
               {mainnetWalletNetworkFor(result.chainId).displayName} account{' '}
               {result.status === 'registered' ? 'verified' : 'already verified'}

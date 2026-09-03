@@ -72,6 +72,11 @@ totals `2500`, and the overall result is exactly
 aggregate, so the total is auditable without recomputing from a floating-point
 display value.
 
+This three-chain table is preserved as deterministic historical acceptance
+evidence for the aggregation contract. It is not the current production launch
+scope: only Ethereum and Solana may be active launch coverage targets, and the
+Base fixture row cannot count as a live provider or authorize a Base read.
+
 ## Freshness, completeness, and exclusion rules
 
 - A stale balance snapshot downgrades every apparently-current contained row.

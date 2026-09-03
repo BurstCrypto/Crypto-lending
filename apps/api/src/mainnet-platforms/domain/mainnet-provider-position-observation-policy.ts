@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { chainObservationPolicyForNetwork } from '../../blockchain/domain/chain-observation-policy';
+import { isMainnetLaunchNetwork } from '../../blockchain/domain/mainnet-launch-network-policy';
 import {
   MAINNET_SUPPORTED_ASSET_REGISTRY,
   type SupportedAssetRegistrySnapshot,
@@ -210,6 +211,9 @@ function canonicalNetworkId(value: unknown, path: string): string {
   const networkId = stringField(value, path);
   if (!EVM_NETWORK.test(networkId) && !SOLANA_NETWORK.test(networkId)) {
     return fail(`${path} is not a supported CAIP-2 mainnet identifier`);
+  }
+  if (!isMainnetLaunchNetwork(networkId)) {
+    return fail(`${path} is outside the production launch network allowlist`);
   }
 
   const chainPolicy = chainObservationPolicyForNetwork(networkId);

@@ -41,7 +41,7 @@ const EVM_CONNECTION: MainnetWalletConnectionChoice = Object.freeze({
   connectionToken: 'connection-token',
   connectorId: 'metamask',
   displayName: 'MetaMask',
-  chainId: 'eip155:8453',
+  chainId: 'eip155:1',
   accounts: Object.freeze([
     Object.freeze({ accountToken: 'account-one', addressHint: '0x1111…1111' }),
     Object.freeze({ accountToken: 'account-two', addressHint: '0x2222…2222' }),
@@ -51,7 +51,7 @@ const EVM_CONNECTION: MainnetWalletConnectionChoice = Object.freeze({
 const RESULT: MainnetWalletVerificationResult = Object.freeze({
   status: 'registered',
   walletId: '33333333-3333-4333-8333-333333333333',
-  chainId: 'eip155:8453',
+  chainId: 'eip155:1',
   addressHint: '0x2222…2222',
 });
 
@@ -123,7 +123,15 @@ describe('MainnetWalletOwnership', () => {
     );
 
     expect(screen.getByRole('region', { name: 'Add a wallet' })).toHaveAttribute('id', 'wallets');
-    expect(screen.getByRole('button', { name: 'Base' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Ethereum' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect(screen.queryByRole('button', { name: 'Base' })).toBeNull();
+    expect(MAINNET_WALLET_NETWORKS.map(({ chainId }) => chainId)).toEqual([
+      'eip155:1',
+      'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp',
+    ]);
     expect(screen.getByText('No transaction or network switching')).toBeVisible();
     expect(runtime.connect).not.toHaveBeenCalled();
     expect(runtime.verify).not.toHaveBeenCalled();
@@ -131,7 +139,7 @@ describe('MainnetWalletOwnership', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'MetaMask' }));
     expect(await screen.findByRole('button', { name: 'Verify 0x2222…2222' })).toBeVisible();
     expect(runtime.connect).toHaveBeenCalledWith(
-      'eip155:8453',
+      'eip155:1',
       'metamask',
       METAMASK.selectionId,
       expect.any(AbortSignal),
@@ -139,7 +147,7 @@ describe('MainnetWalletOwnership', () => {
     expect(runtime.verify).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole('button', { name: 'Verify 0x2222…2222' }));
-    expect(await screen.findByText('Base account verified')).toBeVisible();
+    expect(await screen.findByText('Ethereum account verified')).toBeVisible();
     expect(runtime.verify).toHaveBeenCalledWith(
       EVM_CONNECTION.connectionToken,
       'account-two',
@@ -164,12 +172,11 @@ describe('MainnetWalletOwnership', () => {
     render(<MainnetWalletOwnership dependencies={dependencies(runtime)} />);
 
     await screen.findByText('No wallets are verified for this account yet.');
-    fireEvent.click(screen.getByRole('button', { name: 'Ethereum' }));
     expect(screen.getByRole('button', { name: 'Ethereum' })).toHaveAttribute(
       'aria-pressed',
       'true',
     );
-    expect(runtime.cancel).toHaveBeenCalledOnce();
+    expect(runtime.cancel).not.toHaveBeenCalled();
     fireEvent.click(await screen.findByRole('button', { name: 'MetaMask' }));
     await screen.findByRole('button', { name: 'Verify 0x1111…1111' });
     expect(connect).toHaveBeenNthCalledWith(
@@ -203,7 +210,7 @@ describe('MainnetWalletOwnership', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'MetaMask' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      'Set the selected wallet to Base Mainnet',
+      'Set the selected wallet to Ethereum Mainnet',
     );
     expect(screen.getByRole('alert')).toHaveTextContent('will not switch or add a network');
   });
@@ -245,7 +252,7 @@ describe('createMainnetWalletOwnershipRuntime', () => {
             gateInitialChainRead = false;
             await initialChainRead;
           }
-          return '0x2105';
+          return '0x1';
         }
         if (method === 'eth_requestAccounts' || method === 'eth_accounts') return [EVM_ADDRESS];
         throw new Error('Unexpected provider method');
@@ -289,18 +296,13 @@ describe('createMainnetWalletOwnershipRuntime', () => {
     runtime.start();
 
     const firstConnect = runtime.connect(
-      'eip155:8453',
+      'eip155:1',
       'metamask',
       METAMASK.selectionId,
       new AbortController().signal,
     );
     await expect(
-      runtime.connect(
-        'eip155:8453',
-        'metamask',
-        METAMASK.selectionId,
-        new AbortController().signal,
-      ),
+      runtime.connect('eip155:1', 'metamask', METAMASK.selectionId, new AbortController().signal),
     ).rejects.toMatchObject({ code: 'OPERATION_PENDING' });
 
     releaseInitialChainRead();

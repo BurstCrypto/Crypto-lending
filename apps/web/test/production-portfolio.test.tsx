@@ -110,7 +110,7 @@ describe('authenticated production portfolio', () => {
     expect(
       within(
         screen.getByRole('heading', { level: 3, name: 'Networks' }).closest('article')!,
-      ).getByText('Base'),
+      ).getByText('Ethereum'),
     ).toBeVisible();
     expect(document.body).not.toHaveTextContent('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
     expect(document.body).not.toHaveTextContent('private-reference');

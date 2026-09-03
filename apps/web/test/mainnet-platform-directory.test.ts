@@ -15,18 +15,17 @@ function providers(response: Record<string, unknown>): Array<Record<string, unkn
 }
 
 describe('mainnet platform directory response contract', () => {
-  it('accepts eleven distinct read-only candidates and returns an immutable copy', () => {
+  it('accepts ten Ethereum and Solana read-only candidates and returns an immutable copy', () => {
     const parsed = parseMainnetPlatformDirectory(MAINNET_PLATFORM_DIRECTORY_RESPONSE);
 
-    expect(parsed.providers).toHaveLength(11);
+    expect(parsed.providers).toHaveLength(10);
     expect(parsed.providers.map(({ name }) => name)).toEqual([
       'Aave',
       'Morpho',
       'Compound',
       'Spark',
       'Euler',
-      'Moonwell',
-      'Venus',
+      'Gearbox',
       'Kamino',
       'Save',
       'Project 0',
@@ -121,7 +120,7 @@ describe('mainnet platform directory response contract', () => {
     );
 
     const mismatchedSolana = cloneResponse();
-    (providers(mismatchedSolana)[7]!.networks as Array<Record<string, unknown>>)[0]!.id =
+    (providers(mismatchedSolana)[6]!.networks as Array<Record<string, unknown>>)[0]!.id =
       'eip155:1';
     expect(() => parseMainnetPlatformDirectory(mismatchedSolana)).toThrow(
       MainnetPlatformDirectoryResponseError,
@@ -147,6 +146,15 @@ describe('mainnet platform directory response contract', () => {
     expect(() => parseMainnetPlatformDirectory(unknownNetwork)).toThrow(
       MainnetPlatformDirectoryResponseError,
     );
+
+    for (const removedNetworkId of ['eip155:56', 'eip155:8453']) {
+      const removedNetwork = cloneResponse();
+      (providers(removedNetwork)[0]!.networks as Array<Record<string, unknown>>)[0]!.id =
+        removedNetworkId;
+      expect(() => parseMainnetPlatformDirectory(removedNetwork)).toThrow(
+        MainnetPlatformDirectoryResponseError,
+      );
+    }
 
     const mismatchedNetworkName = cloneResponse();
     (providers(mismatchedNetworkName)[0]!.networks as Array<Record<string, unknown>>)[0]!.name =

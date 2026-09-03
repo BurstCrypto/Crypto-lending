@@ -45,6 +45,12 @@ networks in each environment:
 | Mainnet     | Ethereum Mainnet, Base Mainnet, Arbitrum One     |
 | Testnet     | Ethereum Sepolia, Base Sepolia, Arbitrum Sepolia |
 
+This table records the reusable connector's broader display capability. The
+current production wallet UI wires only Ethereum from the EVM catalog, with
+Solana handled by its separate adapter. Base and Arbitrum are not active
+mainnet launch choices and cannot count toward launch readiness. Their catalog
+rows remain historical/testable capability, not production authorization.
+
 Configuration rejects mixed environments, duplicate identities, noncanonical
 hexadecimal provider chain IDs, and decimal/hex mismatches. A connector
 descriptor makes the complete selected-environment allowlist available to the

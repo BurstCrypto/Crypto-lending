@@ -11,7 +11,7 @@ export const metadata: Metadata = {
     template: '%s | Crypto Lending',
   },
   description:
-    'Preview a protected Base mainnet workspace for wallet ownership and conservative, source-attributed portfolio reporting.',
+    'Preview a protected Ethereum and Solana workspace for wallet ownership and conservative, source-attributed portfolio reporting.',
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

@@ -26,6 +26,12 @@ The eight bound CAIP-2 network IDs are `eip155:1`, `eip155:8453`, `eip155:42161`
 `eip155:421614`, and `solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1`. A registry-fingerprint or network-set
 change requires a new reviewed policy version.
 
+The broader policy set is retained for historical compatibility and future
+review. The current production release scope is only Ethereum
+(`eip155:1`) and Solana (`solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp`). Base and
+Arbitrum policy rows are deferred and cannot satisfy a current launch provider,
+network, fallback, or evidence requirement.
+
 KAN-231 keeps application workloads at `NO_EXTERNAL_EGRESS`. This ADR and the accompanying pure local
 policy do not create a provider client, URL, credential, configuration, account, WebSocket, HTTP
 request, cloud resource, or paid service.
@@ -164,11 +170,14 @@ approved primary or fallback it must record:
    residency, deletion, incident-response, support, and exit terms;
 2. an approved account, plan, billing cap, monthly low/expected/stress forecast, taxes/overages/support,
    signed SLA and exclusions, exact Regions, exact endpoint hostnames, and opaque credential references;
-3. separately authorized non-production live evidence for all eight networks and both candidates:
-   exact identity, complete HTTP/WSS method parity, `safe`/`finalized` or Solana commitment semantics,
-   archive start/depth and bounded historical replay, rate limits, latency, response limits, reconnect
-   gaps, skipped slots, reorgs, finality stalls, provider outage, primary/fallback skew, circuit/failover,
-   and failback without duplicates or missing data; and
+3. separately authorized non-production live evidence for Ethereum and Solana
+   with both candidates: exact identity, complete HTTP/WSS method parity,
+   `safe`/`finalized` or Solana commitment semantics, archive start/depth and
+   bounded historical replay, rate limits, latency, response limits, reconnect
+   gaps, skipped slots, reorgs, finality stalls, provider outage,
+   primary/fallback skew, circuit/failover, and failback without duplicates or
+   missing data; broader eight-network qualification remains future work and
+   cannot be used to activate a deferred chain; and
 4. demonstrated provider/cloud/DNS/network/upstream independence, redacted logs, bounded evidence
    retention, kill switches, cleanup, and measured cost. Any failed or undocumented item stays blocked.
 

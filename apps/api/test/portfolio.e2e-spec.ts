@@ -50,7 +50,7 @@ const CORRELATION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-
 
 const ACTIVE_WALLETS: readonly ActivePortfolioWalletRegistration[] = Object.freeze([
   { walletId: WALLET_A, networkId: 'eip155:1' },
-  { walletId: WALLET_B, networkId: 'eip155:8453' },
+  { walletId: WALLET_B, networkId: 'eip155:1' },
   { walletId: WALLET_C, networkId: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp' },
 ]);
 
@@ -85,8 +85,8 @@ function balanceSnapshot(): IndexedPortfolioBalanceSnapshot {
       {
         observationId: '55555555-5555-4555-8555-555555555555',
         walletId: WALLET_B,
-        networkId: 'eip155:8453',
-        assetIdentity: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
+        networkId: 'eip155:1',
+        assetIdentity: '0xdac17f958d2ee523a2206206994597c13d831ec7',
         amountAtomic: '3500000000',
         observedAt: '2026-08-24T17:59:50.000Z',
         freshnessClass: 'CURRENT',

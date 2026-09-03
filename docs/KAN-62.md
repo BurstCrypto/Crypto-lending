@@ -7,6 +7,11 @@ independent fallback** for the provider-neutral indexer defined by KAN-61. The
 proposal covers only standard read-only HTTPS JSON-RPC and standard WebSocket
 subscriptions on Ethereum, Base, Arbitrum, and Solana mainnets and testnets.
 
+That eight-network packet is preserved as provider research, not current
+release scope. The active production decision is limited to Ethereum and
+Solana. Base and Arbitrum are deferred; their rows and any future test results
+cannot satisfy an active launch provider, network, fallback, or evidence count.
+
 This is not a provider, commercial, security, privacy, finance, runtime, or
 egress approval. No provider plan, account, endpoint hostname, API key, secret
 reference, Region, SLA, cost, or destination is approved. No account was
@@ -29,10 +34,10 @@ Its content hash is recorded in
 | Write path           | None      | Not approved   | Transaction broadcast, private relay behavior, retries, replacement, or automatic resubmission                                                                                              |
 
 Alchemy is the proposed primary because its current official pages document
-all eight required networks, HTTPS and WSS, a general full-archive plan claim,
+all eight policy networks, HTTPS and WSS, a general full-archive plan claim,
 and a compute-unit model that can be evaluated without adopting a proprietary
 indexer. QuickNode is proposed as the fallback because its official chain pages
-independently document the same eight networks and standard transports, with
+independently document the same eight policy networks and standard transports, with
 explicit archive/pruning disclosures. This is a paper comparison only; neither
 candidate has passed the live or commercial gate.
 
@@ -40,9 +45,11 @@ Provider independence is also only proposed. Different vendor names do not
 prove independent cloud, DNS, network, or upstream-node failure domains. KAN-251
 must obtain and test that evidence.
 
-## Exact KAN-61 network scope
+## Broader KAN-61 research scope
 
-The proposal is closed to these eight CAIP-2 identifiers. An endpoint response
+The historical proposal is closed to these eight CAIP-2 identifiers. Only the
+Ethereum and Solana mainnet/testnet pairs are active acceptance targets for the
+current release. An endpoint response
 cannot label its own trusted network: each connector must compare `eth_chainId`
 or the full `getGenesisHash` result with the immutable expected value before
 accepting data. An EVM hex chain ID is converted to the decimal CAIP reference;
@@ -218,7 +225,8 @@ they were an authorization.
 KAN-251 is the provider approval and live-validation gate. It must obtain
 independent Architecture, Security, Privacy, Legal, Finance, and Operations
 decisions; approve an account/plan and billing caps; record exact endpoint
-hostnames and secret references; and exercise every network/method/transport,
+hostnames and secret references; and exercise every active Ethereum and Solana
+network/method/transport,
 identity check, historical range, finality tier, reorg, WSS gap, outage,
 fallback, failback, rate limit, measured cost, log-redaction, retention, and
 incident path. KAN-251 does **not** authorize network egress.

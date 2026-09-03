@@ -235,8 +235,6 @@ const PROVIDER_KEYS = Object.freeze([
 const NETWORK_KEYS = Object.freeze(['id', 'name']);
 const NETWORKS = new Map([
   ['eip155:1', 'EVM'],
-  ['eip155:56', 'EVM'],
-  ['eip155:8453', 'EVM'],
   ['solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp', 'SOLANA'],
 ]);
 const READ_EVIDENCE_KEYS = Object.freeze([

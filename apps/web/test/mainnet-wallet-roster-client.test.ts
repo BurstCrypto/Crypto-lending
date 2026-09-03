@@ -13,7 +13,7 @@ const FINGERPRINT = '5058b141479f114c1e5f87ed8798fbb7a7ffcce7b502aa7e0794dc53ca1
 function wallet(overrides: Record<string, unknown> = {}) {
   return {
     walletId: '11111111-1111-4111-8111-111111111111',
-    chainId: 'eip155:8453',
+    chainId: 'eip155:1',
     address: '0x1111111111111111111111111111111111111111',
     registeredAt: '2026-09-02T12:00:00.000Z',
     registryEnvironment: 'MAINNET',
@@ -38,7 +38,7 @@ describe('mainnet wallet roster response', () => {
     expect(parsed.wallets).toEqual([
       {
         walletId: '11111111-1111-4111-8111-111111111111',
-        chainId: 'eip155:8453',
+        chainId: 'eip155:1',
         addressHint: '0x111111…111111',
         registeredAt: '2026-09-02T12:00:00.000Z',
       },
@@ -47,6 +47,7 @@ describe('mainnet wallet roster response', () => {
   });
 
   it.each([
+    ['removed Base mainnet chain', wallet({ chainId: 'eip155:8453' })],
     ['testnet chain', wallet({ chainId: 'eip155:11155111' })],
     ['noncanonical EVM address', wallet({ address: '0x' + 'A'.repeat(40) })],
     ['wrong registry', wallet({ registryFingerprintSha256: 'a'.repeat(64) })],

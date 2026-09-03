@@ -55,7 +55,7 @@ function dependenciesFor(
 }
 
 function readableEcosystem(candidate: MainnetPlatformCandidate): string {
-  return candidate.ecosystem === 'EVM' ? 'Ethereum-compatible' : 'Solana';
+  return candidate.ecosystem === 'EVM' ? 'Ethereum' : 'Solana';
 }
 
 function PlatformCard({ candidate }: { readonly candidate: MainnetPlatformCandidate }) {

@@ -26,6 +26,13 @@ cookie/header pair, and the session-bound CSRF digest before wallet body
 parsing or application work. Responses use `Cache-Control: private, no-store`
 and `Vary: Cookie, Origin`.
 
+For the current mainnet release, the service launch policy accepts only
+Ethereum (`eip155:1`) and Solana
+(`solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp`). Base mainnet challenge issuance
+and roster reads fail closed. Base Sepolia remains non-production test evidence;
+neither it nor broader Base registry support activates Base mainnet or counts
+toward launch readiness.
+
 ## Challenge and identity binding
 
 The signed message binds:

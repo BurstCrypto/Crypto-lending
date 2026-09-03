@@ -5,10 +5,10 @@ import {
 } from './mainnet-platform-directory';
 
 describe('mainnet platform directory', () => {
-  it('publishes at least ten unique planned provider candidates across EVM and Solana', () => {
+  it('publishes exactly ten unique planned provider candidates across Ethereum and Solana', () => {
     const providers = MAINNET_PLATFORM_DIRECTORY.providers;
 
-    expect(providers.length).toBeGreaterThanOrEqual(MAINNET_PLATFORM_MINIMUM_PROVIDER_TARGET);
+    expect(providers).toHaveLength(MAINNET_PLATFORM_MINIMUM_PROVIDER_TARGET);
     expect(new Set(providers.map(({ id }) => id)).size).toBe(providers.length);
     expect(providers.map(({ name }) => name)).toEqual([
       'Aave',
@@ -16,8 +16,7 @@ describe('mainnet platform directory', () => {
       'Compound',
       'Spark',
       'Euler',
-      'Moonwell',
-      'Venus',
+      'Gearbox',
       'Kamino',
       'Save',
       'Project 0',
@@ -27,8 +26,9 @@ describe('mainnet platform directory', () => {
       new Set(['EVM', 'SOLANA']),
     );
     expect(new Set(providers.flatMap(({ networks }) => networks.map(({ id }) => id)))).toEqual(
-      new Set(['eip155:1', 'eip155:56', 'eip155:8453', 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp']),
+      new Set(['eip155:1', 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp']),
     );
+    expect(JSON.stringify(providers)).not.toMatch(/eip155:(?:56|8453)|BNB|Base/iu);
   });
 
   it('marks every candidate planned, disconnected, unavailable, and non-executable', () => {
@@ -62,6 +62,12 @@ describe('mainnet platform directory', () => {
       accessStatus: 'UNAVAILABLE',
       riskStatus: 'NOT_ASSESSED',
       supportedActions: [],
+    });
+    expect(MAINNET_PLATFORM_DIRECTORY.providers.find(({ id }) => id === 'gearbox')).toMatchObject({
+      name: 'Gearbox',
+      protocol: 'Gearbox V3',
+      ecosystem: 'EVM',
+      networks: [{ id: 'eip155:1', name: 'Ethereum' }],
     });
   });
 

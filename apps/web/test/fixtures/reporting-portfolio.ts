@@ -36,7 +36,7 @@ function aggregate(mantissa: string, sourceCount: number) {
 function source(input: {
   readonly observationId: string;
   readonly walletId: string;
-  readonly networkId: 'eip155:8453';
+  readonly networkId: 'eip155:1';
   readonly stablecoin: StablecoinSymbol;
   readonly identity: string;
   readonly atomic: string;
@@ -103,8 +103,8 @@ export const REPORTING_PORTFOLIO_RESPONSE = {
   balanceCoverage: {
     status: 'COMPLETE',
     targets: [
-      { walletId: WALLET_A, networkId: 'eip155:8453', status: 'COMPLETE' },
-      { walletId: WALLET_B, networkId: 'eip155:8453', status: 'COMPLETE' },
+      { walletId: WALLET_A, networkId: 'eip155:1', status: 'COMPLETE' },
+      { walletId: WALLET_B, networkId: 'eip155:1', status: 'COMPLETE' },
     ],
   },
   oldestBalanceObservedAt: '2026-08-24T17:59:50.000Z',
@@ -113,15 +113,15 @@ export const REPORTING_PORTFOLIO_RESPONSE = {
     { walletId: WALLET_A, ...aggregate('7500000000000000000000', 1) },
     { walletId: WALLET_B, ...aggregate('3500000000000000000000', 1) },
   ],
-  chainTotals: [{ networkId: 'eip155:8453', ...aggregate('11000000000000000000000', 2) }],
+  chainTotals: [{ networkId: 'eip155:1', ...aggregate('11000000000000000000000', 2) }],
   assetTotals: [{ stablecoin: 'USDC', ...aggregate('11000000000000000000000', 2) }],
   sources: [
     source({
       observationId: '11111111-1111-4111-8111-111111111111',
       walletId: WALLET_A,
-      networkId: 'eip155:8453',
+      networkId: 'eip155:1',
       stablecoin: 'USDC',
-      identity: PORTFOLIO_ASSET_IDENTITIES['eip155:8453'].USDC,
+      identity: PORTFOLIO_ASSET_IDENTITIES['eip155:1'].USDC,
       atomic: '7500000000',
       usdMantissa: '7500000000000000000000',
       observedAt: '2026-08-24T17:59:50.000Z',
@@ -129,9 +129,9 @@ export const REPORTING_PORTFOLIO_RESPONSE = {
     source({
       observationId: '22222222-2222-4222-8222-222222222222',
       walletId: WALLET_B,
-      networkId: 'eip155:8453',
+      networkId: 'eip155:1',
       stablecoin: 'USDC',
-      identity: PORTFOLIO_ASSET_IDENTITIES['eip155:8453'].USDC,
+      identity: PORTFOLIO_ASSET_IDENTITIES['eip155:1'].USDC,
       atomic: '3500000000',
       usdMantissa: '3500000000000000000000',
       observedAt: '2026-08-24T17:59:54.000Z',

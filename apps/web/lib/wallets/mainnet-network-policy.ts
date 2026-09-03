@@ -9,13 +9,6 @@ export const MAINNET_WALLET_REGISTRY = Object.freeze({
 
 export const MAINNET_WALLET_NETWORKS = Object.freeze([
   Object.freeze({
-    chainId: 'eip155:8453' as const,
-    providerChainId: '0x2105' as const,
-    displayName: 'Base',
-    environment: 'MAINNET' as const,
-    namespace: 'eip155' as const,
-  }),
-  Object.freeze({
     chainId: 'eip155:1' as const,
     providerChainId: '0x1' as const,
     displayName: 'Ethereum',

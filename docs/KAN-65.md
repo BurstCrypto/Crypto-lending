@@ -65,6 +65,11 @@ thresholds. Locally, only `PROVISIONAL` observations are executable:
 | Arbitrum     | `latest`       | 30 seconds        | 5 minutes         |
 | Solana       | `processed`    | 15 seconds        | 2 minutes         |
 
+The table preserves the broader local observation-policy contract. Current
+production launch orchestration is restricted to Ethereum and Solana. Base and
+Arbitrum observations remain deferred and cannot be started, counted, or used
+as fallback evidence for this release.
+
 `CANONICAL` (`safe` or `confirmed`) and `FINANCIAL` (`finalized`) jobs fail
 closed locally. They require live capability, independent agreement, and
 downstream approval evidence that this ticket does not have. A provisional

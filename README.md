@@ -41,11 +41,13 @@ The default local endpoints are:
 
 ## Current production direction
 
-The product path targets Amazon Cognito managed sign-in and Base mainnet
-(`eip155:8453`). Account identity, wallet ownership proof, portfolio reads, and
-financial actions are separate security boundaries. The current mainnet slice
-is read-only; existing testnet executors are not promoted or relabeled. See the
-[Base mainnet rollout boundary](docs/mainnet-rollout.md) for the explicit gates
+The product path targets Amazon Cognito managed sign-in, Ethereum mainnet
+(`eip155:1`), and Solana mainnet
+(`solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp`). Base is outside the active launch
+scope. Account identity, wallet ownership proof, portfolio reads, and financial
+actions are separate security boundaries. The current mainnet slice is
+read-only; existing testnet executors are not promoted or relabeled. See the
+[mainnet rollout boundary](docs/mainnet-rollout.md) for the explicit gates
 before live reads or any real-value write.
 
 ## Isolated regression harness (not product runtime)

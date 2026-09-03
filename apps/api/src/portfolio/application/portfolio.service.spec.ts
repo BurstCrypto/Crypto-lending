@@ -34,13 +34,13 @@ const WALLET_B = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const WALLET_C = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 const WALLET_D = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
 const ETHEREUM_USDC = '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48';
-const BASE_USDC = '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913';
+const ETHEREUM_USDT = '0xdac17f958d2ee523a2206206994597c13d831ec7';
 const SOLANA_USDT = 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB';
 
 function activeWallets(): readonly ActivePortfolioWalletRegistration[] {
   return [
     { walletId: WALLET_A, networkId: 'eip155:1' },
-    { walletId: WALLET_B, networkId: 'eip155:8453' },
+    { walletId: WALLET_B, networkId: 'eip155:1' },
     { walletId: WALLET_C, networkId: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp' },
   ];
 }
@@ -92,8 +92,8 @@ function elevenThousandDollarSnapshot(): IndexedPortfolioBalanceSnapshot {
       balance({
         observationId: '33333333-3333-4333-8333-333333333333',
         walletId: WALLET_B,
-        networkId: 'eip155:8453',
-        assetIdentity: BASE_USDC,
+        networkId: 'eip155:1',
+        assetIdentity: ETHEREUM_USDT,
         amountAtomic: '3500000000',
       }),
     ],
@@ -269,11 +269,7 @@ describe('PortfolioService', () => {
     expect(result.chainTotals).toEqual([
       expect.objectContaining({
         networkId: 'eip155:1',
-        usdValue: expect.objectContaining({ decimal: '5000.000000000000000000' }),
-      }),
-      expect.objectContaining({
-        networkId: 'eip155:8453',
-        usdValue: expect.objectContaining({ decimal: '3500.000000000000000000' }),
+        usdValue: expect.objectContaining({ decimal: '8500.000000000000000000' }),
       }),
       expect.objectContaining({
         networkId: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp',
@@ -283,11 +279,11 @@ describe('PortfolioService', () => {
     expect(result.assetTotals).toEqual([
       expect.objectContaining({
         stablecoin: 'USDC',
-        usdValue: expect.objectContaining({ decimal: '8500.000000000000000000' }),
+        usdValue: expect.objectContaining({ decimal: '5000.000000000000000000' }),
       }),
       expect.objectContaining({
         stablecoin: 'USDT',
-        usdValue: expect.objectContaining({ decimal: '2500.000000000000000000' }),
+        usdValue: expect.objectContaining({ decimal: '6000.000000000000000000' }),
       }),
     ]);
     expect(result.sources).toHaveLength(3);
@@ -429,20 +425,22 @@ describe('PortfolioService', () => {
       sourceCount: 3,
       includedSourceCount: 2,
     });
-    expect(result.sources.find(({ asset }) => asset.stablecoin === 'USDT')).toMatchObject({
-      includedInOverallTotal: false,
-      usdValue: null,
-      freshnessClass: 'UNAVAILABLE',
-      valuation: {
-        priceSnapshotId: null,
-        availability: 'UNAVAILABLE',
+    expect(result.sources.find(({ asset }) => asset.networkId.startsWith('solana:'))).toMatchObject(
+      {
+        includedInOverallTotal: false,
+        usdValue: null,
         freshnessClass: 'UNAVAILABLE',
-        reasons: ['NO_ELIGIBLE_SOURCE'],
+        valuation: {
+          priceSnapshotId: null,
+          availability: 'UNAVAILABLE',
+          freshnessClass: 'UNAVAILABLE',
+          reasons: ['NO_ELIGIBLE_SOURCE'],
+        },
       },
-    });
+    );
     expect(result.assetTotals.find(({ stablecoin }) => stablecoin === 'USDT')).toMatchObject({
-      usdValue: null,
-      completeness: 'UNAVAILABLE',
+      usdValue: { decimal: '3500.000000000000000000' },
+      completeness: 'PARTIAL',
     });
     expect(JSON.stringify(result)).not.toContain('secret provider host');
   });

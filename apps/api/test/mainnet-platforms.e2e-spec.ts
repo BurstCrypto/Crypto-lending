@@ -76,7 +76,13 @@ describe('mainnet platform directory HTTP boundary (e2e)', () => {
       vary: 'Cookie, Origin',
     });
     expect(response.body).toEqual(MAINNET_PLATFORM_DIRECTORY);
-    expect(response.body.providers.length).toBeGreaterThanOrEqual(10);
+    expect(response.body.providers).toHaveLength(10);
+    expect(
+      response.body.providers.flatMap((provider: { networks: Array<{ id: string }> }) =>
+        provider.networks.map(({ id }) => id),
+      ),
+    ).toEqual(expect.arrayContaining(['eip155:1', 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp']));
+    expect(JSON.stringify(response.body)).not.toMatch(/eip155:(?:56|8453)|BNB|Base/iu);
     expect(
       response.body.providers.every(
         (provider: Record<string, unknown>) =>
@@ -102,6 +108,36 @@ describe('mainnet platform directory HTTP boundary (e2e)', () => {
       riskStatus: 'NOT_ASSESSED',
       supportedActions: [],
     });
+  });
+
+  it('publishes the exact two-network, ten-provider response contract in OpenAPI', async () => {
+    const response = await request(app.getHttpServer()).get('/api/v1/docs-json').expect(200);
+    const endpoint = response.body.paths['/api/v1/mainnet-platforms'].get;
+    const schema = endpoint.responses['200'].content['application/json'].schema;
+    const providerSchema = schema.properties.providers;
+    const networkSchema = providerSchema.items.properties.networks.items;
+
+    expect(endpoint.security).toEqual([{ sessionCookie: [] }]);
+    expect(providerSchema).toMatchObject({ minItems: 10, maxItems: 10 });
+    expect(providerSchema.items.properties.id.enum).toEqual([
+      'aave',
+      'morpho',
+      'compound',
+      'spark',
+      'euler',
+      'gearbox',
+      'kamino',
+      'save',
+      'project-0',
+      'jupiter',
+    ]);
+    expect(networkSchema.properties).toMatchObject({
+      id: {
+        enum: ['eip155:1', 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp'],
+      },
+      name: { enum: ['Ethereum', 'Solana'] },
+    });
+    expect(JSON.stringify(schema)).not.toMatch(/eip155:(?:56|8453)|BNB|Base|moonwell|venus/iu);
   });
 
   it('does not expose a mutation route', async () => {

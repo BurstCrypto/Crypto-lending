@@ -17,11 +17,7 @@ const MAX_REASONS = 16;
 const MAX_USD_DIGITS = 100;
 const MAX_ATOMIC_DIGITS = 78;
 
-const MAINNET_NETWORK_IDS = [
-  'eip155:1',
-  'eip155:8453',
-  'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp',
-] as const;
+const MAINNET_NETWORK_IDS = ['eip155:1', 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp'] as const;
 
 const FRESHNESS_VALUES = ['CURRENT', 'STALE', 'UNAVAILABLE'] as const;
 const COMPLETENESS_VALUES = ['COMPLETE', 'PARTIAL', 'UNAVAILABLE'] as const;

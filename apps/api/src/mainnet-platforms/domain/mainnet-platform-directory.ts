@@ -1,3 +1,8 @@
+import {
+  isMainnetLaunchNetwork,
+  type MainnetLaunchNetworkId,
+} from '../../blockchain/domain/mainnet-launch-network-policy';
+
 export const MAINNET_PLATFORM_DIRECTORY_USE = 'MAINNET_PLATFORM_DIRECTORY' as const;
 export const MAINNET_PLATFORM_MINIMUM_PROVIDER_TARGET = 10 as const;
 
@@ -8,8 +13,8 @@ export type MainnetPlatformAccessStatus = 'UNAVAILABLE';
 export type MainnetPlatformRiskStatus = 'NOT_ASSESSED';
 
 export interface MainnetPlatformNetwork {
-  readonly id: 'eip155:1' | 'eip155:56' | 'eip155:8453' | 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp';
-  readonly name: 'Ethereum' | 'BNB Smart Chain' | 'Base' | 'Solana';
+  readonly id: MainnetLaunchNetworkId;
+  readonly name: 'Ethereum' | 'Solana';
 }
 
 export interface MainnetPlatformDirectoryEntry {
@@ -19,8 +24,7 @@ export interface MainnetPlatformDirectoryEntry {
     | 'compound'
     | 'spark'
     | 'euler'
-    | 'moonwell'
-    | 'venus'
+    | 'gearbox'
     | 'kamino'
     | 'save'
     | 'project-0'
@@ -31,8 +35,7 @@ export interface MainnetPlatformDirectoryEntry {
     | 'Compound'
     | 'Spark'
     | 'Euler'
-    | 'Moonwell'
-    | 'Venus'
+    | 'Gearbox'
     | 'Kamino'
     | 'Save'
     | 'Project 0'
@@ -43,8 +46,7 @@ export interface MainnetPlatformDirectoryEntry {
     | 'Compound III'
     | 'SparkLend'
     | 'Euler V2'
-    | 'Moonwell V2'
-    | 'Venus Core Pool'
+    | 'Gearbox V3'
     | 'Kamino Lend'
     | 'Save lending'
     | 'marginfi v2'
@@ -67,11 +69,6 @@ export interface MainnetPlatformDirectory {
 }
 
 const ETHEREUM = Object.freeze({ id: 'eip155:1', name: 'Ethereum' } as const);
-const BASE = Object.freeze({ id: 'eip155:8453', name: 'Base' } as const);
-const BNB_SMART_CHAIN = Object.freeze({
-  id: 'eip155:56',
-  name: 'BNB Smart Chain',
-} as const);
 const SOLANA = Object.freeze({
   id: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp',
   name: 'Solana',
@@ -107,18 +104,15 @@ function plannedPlatform(
 }
 
 const providers: readonly MainnetPlatformDirectoryEntry[] = Object.freeze([
-  plannedPlatform({ id: 'aave', name: 'Aave', protocol: 'Aave V3' }, 'EVM', [ETHEREUM, BASE]),
-  plannedPlatform({ id: 'morpho', name: 'Morpho', protocol: 'Morpho Blue' }, 'EVM', [
+  plannedPlatform({ id: 'aave', name: 'Aave', protocol: 'Aave V3' }, 'EVM', [ETHEREUM]),
+  plannedPlatform({ id: 'morpho', name: 'Morpho', protocol: 'Morpho Blue' }, 'EVM', [ETHEREUM]),
+  plannedPlatform({ id: 'compound', name: 'Compound', protocol: 'Compound III' }, 'EVM', [
     ETHEREUM,
-    BASE,
   ]),
-  plannedPlatform({ id: 'compound', name: 'Compound', protocol: 'Compound III' }, 'EVM', [BASE]),
   plannedPlatform({ id: 'spark', name: 'Spark', protocol: 'SparkLend' }, 'EVM', [ETHEREUM]),
-  plannedPlatform({ id: 'euler', name: 'Euler', protocol: 'Euler V2' }, 'EVM', [BASE]),
-  plannedPlatform({ id: 'moonwell', name: 'Moonwell', protocol: 'Moonwell V2' }, 'EVM', [BASE]),
-  plannedPlatform({ id: 'venus', name: 'Venus', protocol: 'Venus Core Pool' }, 'EVM', [
-    BNB_SMART_CHAIN,
-  ]),
+  plannedPlatform({ id: 'euler', name: 'Euler', protocol: 'Euler V2' }, 'EVM', [ETHEREUM]),
+  // Official planning evidence: https://docs.gearbox.finance/developers/sdk-setup
+  plannedPlatform({ id: 'gearbox', name: 'Gearbox', protocol: 'Gearbox V3' }, 'EVM', [ETHEREUM]),
   plannedPlatform({ id: 'kamino', name: 'Kamino', protocol: 'Kamino Lend' }, 'SOLANA', [SOLANA]),
   plannedPlatform({ id: 'save', name: 'Save', protocol: 'Save lending' }, 'SOLANA', [SOLANA]),
   plannedPlatform({ id: 'project-0', name: 'Project 0', protocol: 'marginfi v2' }, 'SOLANA', [
@@ -134,6 +128,9 @@ function assertSafeDirectory(entries: readonly MainnetPlatformDirectoryEntry[]):
   }
   if (new Set(entries.map(({ id }) => id)).size !== entries.length) {
     throw new TypeError('mainnet platform directory contains a duplicate provider');
+  }
+  if (entries.some(({ networks }) => networks.some(({ id }) => !isMainnetLaunchNetwork(id)))) {
+    throw new TypeError('mainnet platform directory contains a non-launch network');
   }
   if (
     entries.some(

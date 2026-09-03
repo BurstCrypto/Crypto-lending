@@ -36,6 +36,10 @@ import {
   createActiveWalletRegistrationListMigrationV0014,
   createActiveWalletRegistrationListTestSchemaMigrationV0014,
 } from './0014-list-active-wallet-registrations.migration';
+import {
+  createMainnetWalletLaunchNarrowingMigrationV0015,
+  createMainnetWalletLaunchNarrowingTestSchemaMigrationV0015,
+} from './0015-narrow-mainnet-wallet-launch.migration';
 import type { DatabaseMigration } from './migration';
 
 /**
@@ -58,6 +62,7 @@ export const DATABASE_TEST_SCHEMA_MIGRATION_LIST: readonly DatabaseMigration[] =
   createYieldOperationControlsTestSchemaMigrationV0012,
   createLedgerFeeAdjustmentIntegrityTestSchemaMigrationV0013,
   createActiveWalletRegistrationListTestSchemaMigrationV0014,
+  createMainnetWalletLaunchNarrowingTestSchemaMigrationV0015,
 ]);
 
 export const DATABASE_MIGRATION_LIST: readonly DatabaseMigration[] = Object.freeze([
@@ -75,6 +80,7 @@ export const DATABASE_MIGRATION_LIST: readonly DatabaseMigration[] = Object.free
   createYieldOperationControlsMigrationV0012,
   createLedgerFeeAdjustmentIntegrityMigrationV0013,
   createActiveWalletRegistrationListMigrationV0014,
+  createMainnetWalletLaunchNarrowingMigrationV0015,
 ]);
 
 export type { DatabaseMigration } from './migration';
@@ -123,3 +129,8 @@ export {
   createActiveWalletRegistrationListMigrationV0014,
   createActiveWalletRegistrationListTestSchemaMigrationV0014,
 } from './0014-list-active-wallet-registrations.migration';
+export {
+  createMainnetWalletLaunchNarrowingMigration,
+  createMainnetWalletLaunchNarrowingMigrationV0015,
+  createMainnetWalletLaunchNarrowingTestSchemaMigrationV0015,
+} from './0015-narrow-mainnet-wallet-launch.migration';

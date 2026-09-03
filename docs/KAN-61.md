@@ -49,6 +49,11 @@ All configured assets use six decimals and are initially `ACTIVE`.
 `ACTIVE` means the identity is approved for registry normalization; it does not
 authorize a transfer, route, yield product, jurisdiction, or provider.
 
+Registry activation is broader than release activation. For the current
+production release, only Ethereum and Solana are in scope. The Base and
+Arbitrum rows below are retained canonical registry/history inputs but are
+deferred and cannot count toward or authorize this launch.
+
 | Environment | Chain/network                             | Asset | Exact configured identity                      |
 | ----------- | ----------------------------------------- | ----- | ---------------------------------------------- |
 | Mainnet     | `eip155:1`                                | USDC  | `0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48`   |

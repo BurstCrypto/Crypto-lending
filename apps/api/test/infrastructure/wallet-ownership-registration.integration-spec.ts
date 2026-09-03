@@ -101,6 +101,113 @@ describeWithPostgres('wallet ownership registration persistence', () => {
     );
   }
 
+  it('enforces the post-0015 Ethereum and Solana active-wallet launch boundary in PostgreSQL', async () => {
+    const accountId = randomUUID();
+    await pool.query('INSERT INTO accounts (account_id) VALUES ($1)', [accountId]);
+
+    async function insertWallet(
+      chain: Readonly<{ proofScheme: string; namespace: string; reference: string }>,
+      status: 'ACTIVE' | 'REVOKED' = 'ACTIVE',
+    ): Promise<string> {
+      const challengeId = randomUUID();
+      const walletId = randomUUID();
+      const addressDigest = randomBytes(32);
+      await pool.query(
+        `INSERT INTO wallet_ownership_challenges (
+           challenge_id, account_id, proof_scheme, chain_namespace, chain_reference,
+           registry_environment, registry_version, registry_fingerprint_sha256,
+           challenge_payload_key_version, challenge_payload_ciphertext,
+           challenge_payload_iv, challenge_payload_auth_tag,
+           address_digest_version, address_digest, domain_digest_version, domain_digest,
+           message_digest_version, message_digest, nonce_digest_version, nonce_digest,
+           issued_at, expires_at
+         ) VALUES (
+           $1, $2, $3, $4, $5, 'MAINNET', 1, $6,
+           1, $7, $8, $9, 1, $10, 1, $11, 1, $12, 1, $13,
+           clock_timestamp(), clock_timestamp() + interval '5 minutes'
+         )`,
+        [
+          challengeId,
+          accountId,
+          chain.proofScheme,
+          chain.namespace,
+          chain.reference,
+          MAINNET_FINGERPRINT,
+          Buffer.from('launch-boundary-challenge'),
+          randomBytes(12),
+          randomBytes(16),
+          addressDigest,
+          randomBytes(32),
+          randomBytes(32),
+          randomBytes(32),
+        ],
+      );
+      await pool.query(
+        `INSERT INTO registered_wallets (
+           wallet_id, account_id, registered_by_challenge_id,
+           chain_namespace, chain_reference,
+           registry_environment, registry_version, registry_fingerprint_sha256,
+           address_digest_version, address_digest,
+           address_key_version, address_ciphertext, address_iv, address_auth_tag,
+           metadata_key_version, metadata_ciphertext, metadata_iv, metadata_auth_tag,
+           status, registered_at, revoked_at
+         ) VALUES (
+           $1, $2, $3, $4, $5, 'MAINNET', 1, $6,
+           1, $7, 1, $8, $9, $10, 1, $11, $12, $13,
+           $14, clock_timestamp() - interval '1 second',
+           CASE WHEN $14 = 'REVOKED' THEN clock_timestamp() ELSE NULL END
+         )`,
+        [
+          walletId,
+          accountId,
+          challengeId,
+          chain.namespace,
+          chain.reference,
+          MAINNET_FINGERPRINT,
+          addressDigest,
+          Buffer.from('launch-boundary-address'),
+          randomBytes(12),
+          randomBytes(16),
+          Buffer.from('launch-boundary-metadata'),
+          randomBytes(12),
+          randomBytes(16),
+          status,
+        ],
+      );
+      return walletId;
+    }
+
+    const ethereum = {
+      proofScheme: 'EVM_ERC4361_ERC191',
+      namespace: 'eip155',
+      reference: '1',
+    };
+    const solana = {
+      proofScheme: 'SOLANA_SIWS_SIGN_MESSAGE',
+      namespace: 'solana',
+      reference: '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp',
+    };
+    const base = {
+      proofScheme: 'EVM_ERC4361_ERC191',
+      namespace: 'eip155',
+      reference: '8453',
+    };
+
+    await expect(insertWallet(ethereum)).resolves.toEqual(expect.any(String));
+    await expect(insertWallet(solana)).resolves.toEqual(expect.any(String));
+    await expect(insertWallet(base)).rejects.toMatchObject({ code: '23514' });
+
+    const revokedBaseWalletId = await insertWallet(base, 'REVOKED');
+    await expect(
+      pool.query(
+        `UPDATE registered_wallets
+         SET status = 'ACTIVE', revoked_at = NULL
+         WHERE wallet_id = $1`,
+        [revokedBaseWalletId],
+      ),
+    ).rejects.toMatchObject({ code: '23514' });
+  });
+
   it('registers once, rejects conflicts/replays, shreds terminal payloads, and limits pending rows', async () => {
     const accountA = randomUUID();
     const accountB = randomUUID();

@@ -72,10 +72,10 @@ describe('authenticated production platform directory', () => {
     expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
 
     pendingDirectory.resolve(DIRECTORY);
-    expect(await screen.findByText('11 platforms under evaluation')).toBeVisible();
+    expect(await screen.findByText('10 platforms under evaluation')).toBeVisible();
   });
 
-  it('renders eleven simple planning cards without any transaction control', async () => {
+  it('renders ten Ethereum and Solana planning cards without any transaction control', async () => {
     render(
       <ProductionPlatformDirectory
         dependencies={dependencies({
@@ -85,17 +85,17 @@ describe('authenticated production platform directory', () => {
       />,
     );
 
-    expect(await screen.findByText('11 platforms under evaluation')).toBeVisible();
+    expect(await screen.findByText('10 platforms under evaluation')).toBeVisible();
     expect(screen.getByText('0 available now')).toBeVisible();
-    expect(screen.getAllByRole('article')).toHaveLength(11);
+    expect(screen.getAllByRole('article')).toHaveLength(10);
     const aaveCard = screen.getByRole('heading', { level: 3, name: 'Aave' }).closest('article');
     expect(aaveCard).not.toBeNull();
-    expect(within(aaveCard!).getByText('Ethereum-compatible')).toBeVisible();
-    expect(within(aaveCard!).getByText('Ethereum')).toBeVisible();
-    expect(within(aaveCard!).getByText('Base')).toBeVisible();
+    expect(within(aaveCard!).getAllByText('Ethereum')).toHaveLength(2);
     expect(within(aaveCard!).getByText('Not assessed')).toBeVisible();
-    expect(screen.getAllByText('Planned')).toHaveLength(11);
-    expect(screen.getAllByText('Unavailable')).toHaveLength(11);
+    expect(screen.getAllByText('Planned')).toHaveLength(10);
+    expect(screen.getAllByText('Unavailable')).toHaveLength(10);
+    expect(screen.queryByText('Base')).toBeNull();
+    expect(screen.queryByText('BNB Smart Chain')).toBeNull();
     expect(screen.queryByRole('button')).toBeNull();
     expect(screen.queryByRole('link')).toBeNull();
   });
@@ -154,7 +154,7 @@ describe('authenticated production platform directory', () => {
       await screen.findByRole('heading', { name: 'Platform directory is unavailable' }),
     ).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
-    expect(await screen.findByText('11 platforms under evaluation')).toBeVisible();
+    expect(await screen.findByText('10 platforms under evaluation')).toBeVisible();
     expect(restoreSession).toHaveBeenCalledTimes(2);
     expect(readDirectory).toHaveBeenCalledTimes(2);
     expect(screen.queryByRole('button')).toBeNull();

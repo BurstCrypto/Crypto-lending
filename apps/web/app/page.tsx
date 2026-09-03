@@ -17,20 +17,20 @@ export default function HomePage() {
           aria-labelledby="page-title"
           tabIndex={-1}
         >
-          <p className="eyebrow">Base mainnet read-only preview</p>
+          <p className="eyebrow">Ethereum and Solana read-only preview</p>
           <h1 id="page-title">
             See how supported balances will be reported—without giving up wallet control.
           </h1>
           <p className="hero-copy">
-            Crypto Lending is building one protected workspace for supported Base wallet balances,
-            conservative reporting totals, and source freshness. Live provider-backed balance data
-            is not active yet; this rollout focuses on secure account access and wallet-ownership
-            verification while your wallet keeps control.
+            Crypto Lending is building one protected workspace for supported Ethereum and Solana
+            wallet balances, conservative reporting totals, and source freshness. Live
+            provider-backed balance data is not active yet; this rollout focuses on secure account
+            access and wallet-ownership verification while your wallet keeps control.
           </p>
           <HomeSessionActions />
 
           <ul className="home-hero-points" aria-label="Platform highlights">
-            <li>Base mainnet scope</li>
+            <li>Ethereum and Solana scope</li>
             <li>Conservative reporting model</li>
             <li>Ownership-only signatures</li>
           </ul>
@@ -94,8 +94,8 @@ export default function HomePage() {
             </span>
             <h3>Unify supported balances</h3>
             <p>
-              Once approved Base data sources are active, review supported network and asset totals
-              with source coverage and observation freshness.
+              Once approved Ethereum and Solana data sources are active, review supported network
+              and asset totals with source coverage and observation freshness.
             </p>
           </article>
 
@@ -139,7 +139,7 @@ export default function HomePage() {
       </section>
 
       <footer className="site-footer">
-        <p>Crypto Lending platform · Base mainnet, wallet-controlled</p>
+        <p>Crypto Lending platform · Ethereum and Solana, wallet-controlled</p>
       </footer>
     </main>
   );

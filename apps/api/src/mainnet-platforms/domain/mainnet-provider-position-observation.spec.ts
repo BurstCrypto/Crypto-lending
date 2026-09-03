@@ -29,9 +29,9 @@ const SOLANA_OBSERVED_AT = '2026-09-02T16:59:55.000Z';
 const SOLANA_STALE_AFTER = '2026-09-02T17:00:10.000Z';
 const SOLANA_EVALUATED_AT = '2026-09-02T17:00:05.000Z';
 const WALLET_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
-const BASE_USDC = '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913';
-const AAVE_BASE_MARKET = '0xa238dd80c259a72e81d7e4664a9801593f98d1c5';
-const MORPHO_BASE_MARKET = `0x${'cd'.repeat(32)}`;
+const ETHEREUM_USDC = '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48';
+const AAVE_ETHEREUM_MARKET = '0x87870bca3f3fd6335c3f4ce8392d69350b4fa4e2';
+const MORPHO_ETHEREUM_MARKET = `0x${'cd'.repeat(32)}`;
 const SOLANA_MAINNET = 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp';
 const EVM_BLOCK_HASH = `0x${'AB'.repeat(32)}`;
 const TRUSTED_TEST_CHAIN_ASSESSMENTS = new WeakSet<object>();
@@ -62,9 +62,9 @@ function strictTestPolicyContent(overrides: Record<string, unknown> = {}): Recor
             protocolId: 'aave-v3',
             markets: [
               {
-                networkId: 'eip155:8453',
-                marketId: AAVE_BASE_MARKET.toUpperCase().replace('0X', '0x'),
-                assets: [{ stablecoin: 'USDC', identity: BASE_USDC }],
+                networkId: 'eip155:1',
+                marketId: AAVE_ETHEREUM_MARKET.toUpperCase().replace('0X', '0x'),
+                assets: [{ stablecoin: 'USDC', identity: ETHEREUM_USDC }],
               },
             ],
           },
@@ -77,9 +77,9 @@ function strictTestPolicyContent(overrides: Record<string, unknown> = {}): Recor
             protocolId: 'morpho-blue',
             markets: [
               {
-                networkId: 'eip155:8453',
-                marketId: MORPHO_BASE_MARKET.toUpperCase().replace('0X', '0x'),
-                assets: [{ stablecoin: 'USDC', identity: BASE_USDC }],
+                networkId: 'eip155:1',
+                marketId: MORPHO_ETHEREUM_MARKET.toUpperCase().replace('0X', '0x'),
+                assets: [{ stablecoin: 'USDC', identity: ETHEREUM_USDC }],
               },
             ],
           },
@@ -107,7 +107,7 @@ function strictTestPolicyContent(overrides: Record<string, unknown> = {}): Recor
       },
     ],
     sources: [
-      { sourceId: 'base-rpc-primary', sourceKind: 'RPC', networkId: 'eip155:8453' },
+      { sourceId: 'ethereum-rpc-primary', sourceKind: 'RPC', networkId: 'eip155:1' },
       { sourceId: 'solana-rpc-primary', sourceKind: 'RPC', networkId: SOLANA_MAINNET },
     ],
     ...overrides,
@@ -122,11 +122,11 @@ function strictTestPolicy(contentOverrides: Record<string, unknown> = {}): Recor
   };
 }
 
-function baseAsset(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+function ethereumAsset(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     stablecoin: 'USDC',
-    networkId: 'eip155:8453',
-    identity: BASE_USDC.toUpperCase().replace('0X', '0x'),
+    networkId: 'eip155:1',
+    identity: ETHEREUM_USDC.toUpperCase().replace('0X', '0x'),
     decimals: 6,
     ...overrides,
   };
@@ -134,9 +134,9 @@ function baseAsset(overrides: Record<string, unknown> = {}): Record<string, unkn
 
 function evmSource(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    sourceId: 'base-rpc-primary',
+    sourceId: 'ethereum-rpc-primary',
     sourceKind: 'RPC',
-    sourceObservationId: 'base-block-50000001',
+    sourceObservationId: 'ethereum-block-50000001',
     chainAnchor: {
       kind: 'EVM_BLOCK',
       blockNumber: '50000001',
@@ -152,10 +152,10 @@ function observation(overrides: Record<string, unknown> = {}): Record<string, un
     walletId: WALLET_ID,
     providerId: 'aave',
     protocolId: 'aave-v3',
-    marketId: '0xA238Dd80C259a72e81d7e4664a9801593F98d1c5',
-    positionId: 'aave-base-usdc-supply',
+    marketId: '0x87870bCA3F3fD6335C3F4cE8392D69350B4fa4E2',
+    positionId: 'aave-ethereum-usdc-supply',
     positionKind: 'SUPPLY',
-    asset: baseAsset(),
+    asset: ethereumAsset(),
     balance: { atomic: '5000000', decimal: '5.000000' },
     source: evmSource(),
     observedAt: OBSERVED_AT,
@@ -189,13 +189,13 @@ function solanaObservation(overrides: Record<string, unknown> = {}): Record<stri
   });
 }
 
-function baseAssessmentEntry(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+function ethereumAssessmentEntry(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     observationId: '11111111-1111-4111-8111-111111111111',
-    sourceId: 'base-rpc-primary',
+    sourceId: 'ethereum-rpc-primary',
     sourceKind: 'RPC',
-    sourceObservationId: 'base-block-50000001',
-    networkId: 'eip155:8453',
+    sourceObservationId: 'ethereum-block-50000001',
+    networkId: 'eip155:1',
     chainAnchor: {
       kind: 'EVM_BLOCK',
       blockNumber: '50000001',
@@ -226,7 +226,7 @@ function solanaAssessmentEntry(overrides: Record<string, unknown> = {}): Record<
 }
 
 function strictTestAssessment(
-  entries: readonly unknown[] = [baseAssessmentEntry()],
+  entries: readonly unknown[] = [ethereumAssessmentEntry()],
   observationPolicy: Record<string, unknown> = strictTestPolicy(),
   overrides: Record<string, unknown> = {},
 ): Record<string, unknown> {
@@ -300,16 +300,16 @@ function expectValidationCode(
 describe('mainnet provider position observation contract', () => {
   afterEach(() => jest.restoreAllMocks());
 
-  it('keeps two Base USDC positions at different providers as distinct observations', () => {
+  it('keeps two Ethereum USDC positions at different providers as distinct observations', () => {
     const aave = observation();
     const morpho = observation({
       observationId: '22222222-2222-4222-8222-222222222222',
       providerId: 'morpho',
       protocolId: 'morpho-blue',
       marketId: `0x${'CD'.repeat(32)}`,
-      positionId: 'morpho-base-usdc-supply',
+      positionId: 'morpho-ethereum-usdc-supply',
       balance: { atomic: '7250000', decimal: '7.250000' },
-      source: evmSource({ sourceObservationId: 'base-block-50000001-morpho' }),
+      source: evmSource({ sourceObservationId: 'ethereum-block-50000001-morpho' }),
     });
 
     const result = parseMainnetProviderPositionSnapshotV1(
@@ -317,10 +317,10 @@ describe('mainnet provider position observation contract', () => {
       EVALUATED_AT,
       strictTestPolicy(),
       strictTestAssessment([
-        baseAssessmentEntry(),
-        baseAssessmentEntry({
+        ethereumAssessmentEntry(),
+        ethereumAssessmentEntry({
           observationId: '22222222-2222-4222-8222-222222222222',
-          sourceObservationId: 'base-block-50000001-morpho',
+          sourceObservationId: 'ethereum-block-50000001-morpho',
         }),
       ]),
       STRICT_TEST_CHAIN_ASSESSMENT_VERIFIER,
@@ -332,14 +332,14 @@ describe('mainnet provider position observation contract', () => {
     expect(result.observations.map(({ asset }) => asset)).toEqual([
       {
         stablecoin: 'USDC',
-        networkId: 'eip155:8453',
-        identity: BASE_USDC,
+        networkId: 'eip155:1',
+        identity: ETHEREUM_USDC,
         decimals: 6,
       },
       {
         stablecoin: 'USDC',
-        networkId: 'eip155:8453',
-        identity: BASE_USDC,
+        networkId: 'eip155:1',
+        identity: ETHEREUM_USDC,
         decimals: 6,
       },
     ]);
@@ -364,8 +364,8 @@ describe('mainnet provider position observation contract', () => {
     const parsed = result.observations[0];
 
     expect(parsed).toMatchObject({
-      marketId: '0xa238dd80c259a72e81d7e4664a9801593f98d1c5',
-      asset: { identity: BASE_USDC },
+      marketId: AAVE_ETHEREUM_MARKET,
+      asset: { identity: ETHEREUM_USDC },
       source: { chainAnchor: { blockHash: EVM_BLOCK_HASH.toLowerCase() } },
     });
     expect(Object.isFrozen(result)).toBe(true);
@@ -387,7 +387,7 @@ describe('mainnet provider position observation contract', () => {
     const duplicate = observation({
       observationId: '22222222-2222-4222-8222-222222222222',
       balance: { atomic: '6000000', decimal: '6.000000' },
-      source: evmSource({ sourceObservationId: 'base-block-50000002' }),
+      source: evmSource({ sourceObservationId: 'ethereum-block-50000002' }),
     });
 
     expectValidationCode(
@@ -396,10 +396,10 @@ describe('mainnet provider position observation contract', () => {
       EVALUATED_AT,
       strictTestPolicy(),
       strictTestAssessment([
-        baseAssessmentEntry(),
-        baseAssessmentEntry({
+        ethereumAssessmentEntry(),
+        ethereumAssessmentEntry({
           observationId: '22222222-2222-4222-8222-222222222222',
-          sourceObservationId: 'base-block-50000002',
+          sourceObservationId: 'ethereum-block-50000002',
         }),
       ]),
     );
@@ -410,17 +410,17 @@ describe('mainnet provider position observation contract', () => {
       observationId: '22222222-2222-4222-8222-222222222222',
       positionKind: 'BORROW',
       balance: { atomic: '1250000', decimal: '1.250000' },
-      source: evmSource({ sourceObservationId: 'base-block-50000002-borrow' }),
+      source: evmSource({ sourceObservationId: 'ethereum-block-50000002-borrow' }),
     });
     const result = parseMainnetProviderPositionSnapshotV1(
       snapshot([observation(), borrow]),
       EVALUATED_AT,
       strictTestPolicy(),
       strictTestAssessment([
-        baseAssessmentEntry(),
-        baseAssessmentEntry({
+        ethereumAssessmentEntry(),
+        ethereumAssessmentEntry({
           observationId: '22222222-2222-4222-8222-222222222222',
-          sourceObservationId: 'base-block-50000002-borrow',
+          sourceObservationId: 'ethereum-block-50000002-borrow',
         }),
       ]),
       STRICT_TEST_CHAIN_ASSESSMENT_VERIFIER,
@@ -438,7 +438,7 @@ describe('mainnet provider position observation contract', () => {
       providerId: 'morpho',
       protocolId: 'morpho-blue',
       marketId: `0x${'CD'.repeat(32)}`,
-      positionId: 'morpho-base-usdc-supply',
+      positionId: 'morpho-ethereum-usdc-supply',
     });
 
     expectValidationCode(snapshot([observation(), second]), 'DUPLICATE_OBSERVATION');
@@ -532,13 +532,13 @@ describe('mainnet provider position observation contract', () => {
 
   it('pins every asset to an active versioned mainnet registry identity and exact decimals', () => {
     expectValidationCode(
-      snapshot([observation({ asset: baseAsset({ decimals: 18 }) })]),
+      snapshot([observation({ asset: ethereumAsset({ decimals: 18 }) })]),
       'INVALID_ASSET',
     );
     expectValidationCode(
       snapshot([
         observation({
-          asset: baseAsset({
+          asset: ethereumAsset({
             networkId: 'eip155:84532',
             identity: '0x036cbd53842c5426634e7929541ec2318f3dcf7e',
           }),
@@ -623,16 +623,16 @@ describe('mainnet provider position observation contract', () => {
           context.walletId === WALLET_ID &&
           context.providerId === 'aave' &&
           context.protocolId === 'aave-v3' &&
-          context.marketId === AAVE_BASE_MARKET &&
-          context.positionId === 'aave-base-usdc-supply' &&
+          context.marketId === AAVE_ETHEREUM_MARKET &&
+          context.positionId === 'aave-ethereum-usdc-supply' &&
           context.positionKind === 'SUPPLY' &&
           context.stablecoin === 'USDC' &&
-          context.assetIdentity === BASE_USDC &&
+          context.assetIdentity === ETHEREUM_USDC &&
           context.assetDecimals === 6 &&
           context.balanceAtomic === '5000000' &&
           context.balanceDecimal === '5.000000' &&
-          context.sourceObservationId === 'base-block-50000001' &&
-          context.networkId === 'eip155:8453' &&
+          context.sourceObservationId === 'ethereum-block-50000001' &&
+          context.networkId === 'eip155:1' &&
           context.observationTier === 'PROVISIONAL' &&
           context.selector === 'latest' &&
           context.authority === 'DISPLAY_ONLY' &&
@@ -665,32 +665,32 @@ describe('mainnet provider position observation contract', () => {
     expect(seenObservationFingerprints[1]).not.toBe(seenObservationFingerprints[0]);
 
     const blockOneSource = evmSource({
-      sourceObservationId: 'base-block-1',
+      sourceObservationId: 'ethereum-block-1',
       chainAnchor: { kind: 'EVM_BLOCK', blockNumber: '1', blockHash: EVM_BLOCK_HASH },
     });
     const blockOneObservation = observation({ source: blockOneSource });
-    const matchingBlockAssessment = baseAssessmentEntry({
-      sourceObservationId: 'base-block-1',
+    const matchingBlockAssessment = ethereumAssessmentEntry({
+      sourceObservationId: 'ethereum-block-1',
       chainAnchor: { kind: 'EVM_BLOCK', blockNumber: '1', blockHash: EVM_BLOCK_HASH },
     });
 
     for (const assessment of [
       strictTestAssessment([]),
-      strictTestAssessment([baseAssessmentEntry()]),
+      strictTestAssessment([ethereumAssessmentEntry()]),
       strictTestAssessment([
-        baseAssessmentEntry({
+        ethereumAssessmentEntry({
           ...matchingBlockAssessment,
           identityStatus: 'FAILED',
         }),
       ]),
       strictTestAssessment([
-        baseAssessmentEntry({
+        ethereumAssessmentEntry({
           ...matchingBlockAssessment,
           progressionStatus: 'UNAVAILABLE',
         }),
       ]),
       strictTestAssessment([
-        baseAssessmentEntry({
+        ethereumAssessmentEntry({
           ...matchingBlockAssessment,
           finalityStatus: 'QUARANTINED',
         }),
@@ -767,11 +767,11 @@ describe('mainnet provider position observation contract', () => {
       use: 'MAINNET_PROVIDER_POSITION_OBSERVATION_APPROVALS',
       policyId: 'strict-test-policy-v1',
     });
-    expect(policy.providers[0]?.protocols[0]?.markets[0]?.marketId).toBe(AAVE_BASE_MARKET);
+    expect(policy.providers[0]?.protocols[0]?.markets[0]?.marketId).toBe(AAVE_ETHEREUM_MARKET);
     expect(
       policy.providers.find(({ providerId }) => providerId === 'morpho')?.protocols[0]?.markets[0]
         ?.marketId,
-    ).toBe(MORPHO_BASE_MARKET);
+    ).toBe(MORPHO_ETHEREUM_MARKET);
     expect(Object.isFrozen(policy)).toBe(true);
     expect(Object.isFrozen(policy.providers)).toBe(true);
     expect(Object.isFrozen(policy.providers[0])).toBe(true);
@@ -787,7 +787,7 @@ describe('mainnet provider position observation contract', () => {
       observation({ providerId: 'compound' }),
       observation({ protocolId: 'aave-v4' }),
       observation({ marketId: `0x${'ef'.repeat(32)}` }),
-      observation({ source: evmSource({ sourceId: 'base-rpc-secondary' }) }),
+      observation({ source: evmSource({ sourceId: 'ethereum-rpc-secondary' }) }),
       observation({ source: evmSource({ sourceKind: 'INDEXER' }) }),
       observation({ source: evmSource({ sourceId: 'solana-rpc-primary' }) }),
     ]) {
@@ -814,7 +814,7 @@ describe('mainnet provider position observation contract', () => {
     Object.defineProperty(
       (policyWithAccessor.sources as Array<Record<string, unknown>>)[0]!,
       'sourceId',
-      { enumerable: true, get: () => 'base-rpc-primary' },
+      { enumerable: true, get: () => 'ethereum-rpc-primary' },
     );
     expectValidationCode(snapshot(), 'INVALID_POLICY', EVALUATED_AT, policyWithAccessor);
     expectValidationCode(
@@ -828,6 +828,26 @@ describe('mainnet provider position observation contract', () => {
       }),
     );
   });
+
+  it.each(['eip155:8453', 'eip155:56', 'eip155:42161'])(
+    'rejects non-launch mainnet %s in observation policies and trusted assessments',
+    (networkId) => {
+      const policyInput = strictTestPolicy();
+      const providers = policyInput.providers as Array<{
+        protocols: Array<{ markets: Array<Record<string, unknown>> }>;
+      }>;
+      providers[0]!.protocols[0]!.markets[0]!.networkId = networkId;
+
+      expect(() => parseMainnetProviderPositionObservationPolicyV1(policyInput)).toThrow(
+        'outside the production launch network allowlist',
+      );
+      expect(() =>
+        parseMainnetProviderPositionChainAssessmentV1(
+          strictTestAssessment([ethereumAssessmentEntry({ networkId })]),
+        ),
+      ).toThrow('mainnet provider position chain assessment is invalid');
+    },
+  );
 
   it('binds snapshots to a canonical fingerprint of sorted normalized policy content', () => {
     const originalContent = strictTestPolicyContent();
@@ -896,9 +916,9 @@ describe('mainnet provider position observation contract', () => {
         protocolId: `protocol-${protocolIndex}`,
         markets: [
           {
-            networkId: 'eip155:8453',
-            marketId: AAVE_BASE_MARKET,
-            assets: [{ stablecoin: 'USDC', identity: BASE_USDC }],
+            networkId: 'eip155:1',
+            marketId: AAVE_ETHEREUM_MARKET,
+            assets: [{ stablecoin: 'USDC', identity: ETHEREUM_USDC }],
           },
         ],
       })),
@@ -908,7 +928,7 @@ describe('mainnet provider position observation contract', () => {
       mainnetProviderPositionObservationPolicyFingerprintV1(
         strictTestPolicyContent({
           providers,
-          sources: [{ sourceId: 'base-rpc-primary', sourceKind: 'RPC', networkId: 'eip155:8453' }],
+          sources: [{ sourceId: 'ethereum-rpc-primary', sourceKind: 'RPC', networkId: 'eip155:1' }],
         }),
       ),
     ).toThrow('aggregate protocol approval budget');
@@ -934,7 +954,7 @@ describe('mainnet provider position observation contract', () => {
       strictTestAssessment(),
       STRICT_TEST_CHAIN_ASSESSMENT_VERIFIER,
     );
-    expect(sourceDeadlineIsCapped.observations[0]?.staleAfter).toBe(STALE_AFTER);
+    expect(sourceDeadlineIsCapped.observations[0]?.staleAfter).toBe('2026-09-02T17:00:45.000Z');
     expectValidationCode(snapshot(), 'INVALID_FRESHNESS', '2026-09-02T16:59:59.999Z');
   });
 
@@ -961,8 +981,8 @@ describe('mainnet provider position observation contract', () => {
       observationId: '22222222-2222-4222-8222-222222222222',
       providerId: 'morpho',
       protocolId: 'morpho-blue',
-      marketId: MORPHO_BASE_MARKET,
-      positionId: 'morpho-base-usdc-supply',
+      marketId: MORPHO_ETHEREUM_MARKET,
+      positionId: 'morpho-ethereum-usdc-supply',
       observedAt: '2026-09-02T16:58:00.000Z',
       staleAfter: '2027-09-02T17:00:00.000Z',
       freshnessClass: 'STALE',
@@ -972,15 +992,15 @@ describe('mainnet provider position observation contract', () => {
       EVALUATED_AT,
       strictTestPolicy(),
       strictTestAssessment([
-        baseAssessmentEntry(),
-        baseAssessmentEntry({
+        ethereumAssessmentEntry(),
+        ethereumAssessmentEntry({
           observationId: '22222222-2222-4222-8222-222222222222',
         }),
       ]),
       STRICT_TEST_CHAIN_ASSESSMENT_VERIFIER,
     );
 
-    expect(result.staleAfter).toBe('2026-09-02T16:58:30.000Z');
+    expect(result.staleAfter).toBe('2026-09-02T16:59:00.000Z');
     expect(result.freshnessClass).toBe('STALE');
     expect(result.observations.map(({ freshnessClass }) => freshnessClass)).toEqual([
       'CURRENT',
@@ -990,7 +1010,7 @@ describe('mainnet provider position observation contract', () => {
       snapshot(
         [
           observation({
-            observedAt: '2026-09-02T16:55:00.000Z',
+            observedAt: '2026-09-02T16:44:00.000Z',
             staleAfter: '2027-09-02T17:00:00.000Z',
             freshnessClass: 'STALE',
           }),
