@@ -9,10 +9,12 @@ import {
 } from '@/lib/wallets/mainnet-wallet-roster-client';
 
 const FINGERPRINT = '5058b141479f114c1e5f87ed8798fbb7a7ffcce7b502aa7e0794dc53ca1f767d';
+const CSRF_TOKEN = 'c'.repeat(43);
+const WALLET_ID = '11111111-1111-4111-8111-111111111111';
 
 function wallet(overrides: Record<string, unknown> = {}) {
   return {
-    walletId: '11111111-1111-4111-8111-111111111111',
+    walletId: WALLET_ID,
     chainId: 'eip155:1',
     address: '0x1111111111111111111111111111111111111111',
     registeredAt: '2026-09-02T12:00:00.000Z',
@@ -100,6 +102,120 @@ describe('HttpMainnetWalletRosterClient', () => {
     await expect(unavailable.readWallets()).rejects.toMatchObject({
       code: 'UNAVAILABLE',
       retryAfterSeconds: 30,
+    });
+  });
+
+  it('removes one canonical wallet with same-origin credentials and a CSRF proof', async () => {
+    const requestFetch = vi.fn<AuthenticationFetch>(
+      async () => new Response(null, { status: 204 }),
+    );
+    const client = new HttpMainnetWalletRosterClient({
+      fetch: requestFetch,
+      cookieHeader: `theme=dark; __Host-cl_csrf=${CSRF_TOKEN}`,
+    });
+
+    await expect(client.removeWallet(WALLET_ID)).resolves.toBeUndefined();
+    expect(requestFetch).toHaveBeenCalledWith(`${MAINNET_WALLET_ROSTER_PATH}/${WALLET_ID}`, {
+      method: 'DELETE',
+      cache: 'no-store',
+      credentials: 'same-origin',
+      headers: { Accept: 'application/json', 'X-CSRF-Token': CSRF_TOKEN },
+      redirect: 'error',
+    });
+    const serializedCall = JSON.stringify(requestFetch.mock.calls);
+    expect(serializedCall).not.toContain('Authorization');
+    expect(serializedCall).not.toContain('__Host-cl_csrf');
+  });
+
+  it.each([
+    ['missing', ''],
+    ['malformed', '__Host-cl_csrf=short'],
+    ['ambiguous', `__Host-cl_csrf=${CSRF_TOKEN}; __Host-cl_csrf=${CSRF_TOKEN}`],
+  ])('does not send a DELETE with %s CSRF state', async (_label, cookieHeader) => {
+    const requestFetch = vi.fn<AuthenticationFetch>();
+    const client = new HttpMainnetWalletRosterClient({ fetch: requestFetch, cookieHeader });
+
+    await expect(client.removeWallet(WALLET_ID)).rejects.toMatchObject({
+      code: 'UNAUTHENTICATED',
+    });
+    expect(requestFetch).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    '',
+    'not-a-wallet-id',
+    'AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA',
+    '../11111111-1111-4111-8111-111111111111',
+  ])(
+    'rejects a noncanonical wallet ID before reading cookies or fetching: %s',
+    async (walletId) => {
+      const cookieHeader = vi.fn(() => `__Host-cl_csrf=${CSRF_TOKEN}`);
+      const requestFetch = vi.fn<AuthenticationFetch>();
+      const client = new HttpMainnetWalletRosterClient({ fetch: requestFetch, cookieHeader });
+
+      await expect(client.removeWallet(walletId)).rejects.toMatchObject({ code: 'UNAVAILABLE' });
+      expect(cookieHeader).not.toHaveBeenCalled();
+      expect(requestFetch).not.toHaveBeenCalled();
+    },
+  );
+
+  it('keeps removal authentication and temporary failures generic', async () => {
+    const unauthenticated = new HttpMainnetWalletRosterClient({
+      fetch: vi.fn(async () => response(401, { internal: 'not exposed' })) as AuthenticationFetch,
+      cookieHeader: `__Host-cl_csrf=${CSRF_TOKEN}`,
+    });
+    await expect(unauthenticated.removeWallet(WALLET_ID)).rejects.toMatchObject({
+      code: 'UNAUTHENTICATED',
+      message: 'Authentication is required.',
+    });
+
+    const unavailable = new HttpMainnetWalletRosterClient({
+      fetch: vi.fn(async () =>
+        response(503, { internal: 'not exposed' }, { 'Retry-After': '1' }),
+      ) as AuthenticationFetch,
+      cookieHeader: `__Host-cl_csrf=${CSRF_TOKEN}`,
+    });
+    await expect(unavailable.removeWallet(WALLET_ID)).rejects.toMatchObject({
+      code: 'UNAVAILABLE',
+      message: 'Wallet list unavailable.',
+      retryAfterSeconds: 1,
+    });
+  });
+
+  it.each([200, 400, 403, 404, 409, 500])(
+    'accepts only 204 as a confirmed removal, not %i',
+    async (status) => {
+      const client = new HttpMainnetWalletRosterClient({
+        fetch: vi.fn(async () =>
+          response(status, { internal: 'not exposed' }),
+        ) as AuthenticationFetch,
+        cookieHeader: `__Host-cl_csrf=${CSRF_TOKEN}`,
+      });
+
+      await expect(client.removeWallet(WALLET_ID)).rejects.toMatchObject({
+        code: 'UNAVAILABLE',
+      });
+    },
+  );
+
+  it('preserves aborts and maps other transport failures to a generic unavailable error', async () => {
+    const controller = new AbortController();
+    const aborted = new DOMException('Request aborted', 'AbortError');
+    const abortingClient = new HttpMainnetWalletRosterClient({
+      fetch: vi.fn(async () => Promise.reject(aborted)) as AuthenticationFetch,
+      cookieHeader: `__Host-cl_csrf=${CSRF_TOKEN}`,
+    });
+    await expect(abortingClient.removeWallet(WALLET_ID, controller.signal)).rejects.toBe(aborted);
+
+    const unavailableClient = new HttpMainnetWalletRosterClient({
+      fetch: vi.fn(async () =>
+        Promise.reject(new Error('private transport details')),
+      ) as AuthenticationFetch,
+      cookieHeader: `__Host-cl_csrf=${CSRF_TOKEN}`,
+    });
+    await expect(unavailableClient.removeWallet(WALLET_ID)).rejects.toMatchObject({
+      code: 'UNAVAILABLE',
+      message: 'Wallet list unavailable.',
     });
   });
 });

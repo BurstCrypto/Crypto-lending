@@ -181,6 +181,35 @@ describeWithPostgres('wallet registration integration', () => {
         'WALLET_REGISTERED',
       ]),
     );
+
+    const registeredWalletId = fulfilled[0]?.value.walletId;
+    if (!registeredWalletId) throw new Error('registered wallet fixture expected');
+    await expect(
+      service.removeWallet({
+        accountId,
+        walletId: registeredWalletId,
+        correlationId: randomUUID(),
+      }),
+    ).resolves.toEqual({ status: 'removed' });
+    await expect(
+      service.removeWallet({
+        accountId,
+        walletId: registeredWalletId,
+        correlationId: randomUUID(),
+      }),
+    ).resolves.toEqual({ status: 'removed' });
+    await expect(service.listActiveWallets(accountId)).resolves.toEqual({
+      version: 1,
+      wallets: [],
+    });
+    await expect(
+      schemaPool.query<{ event_count: number }>(
+        `SELECT pg_catalog.count(*)::integer AS event_count
+         FROM wallet_registration_audit_events
+         WHERE wallet_id = $1::uuid AND event_type = 'WALLET_REVOKED'`,
+        [registeredWalletId],
+      ),
+    ).resolves.toMatchObject({ rows: [{ event_count: 1 }] });
   });
 
   it('does not expose or consume another account challenge', async () => {

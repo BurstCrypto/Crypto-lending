@@ -4590,7 +4590,7 @@ p {
 
 .mainnet-wallet-roster-list li {
   display: grid;
-  grid-template-columns: minmax(5rem, 0.7fr) minmax(9rem, 1fr) minmax(8rem, 1fr);
+  grid-template-columns: minmax(5rem, 0.7fr) minmax(9rem, 1fr) minmax(8rem, 1fr) auto;
   gap: 0.6rem;
   align-items: center;
   padding: 0.65rem 0.7rem;
@@ -4603,6 +4603,58 @@ p {
 .mainnet-wallet-roster-list span {
   color: var(--ink-soft);
   font-size: 0.84rem;
+}
+
+.mainnet-wallet-remove-button,
+.mainnet-wallet-remove-actions button {
+  display: inline-flex;
+  min-height: 2.5rem;
+  align-items: center;
+  justify-content: center;
+  padding: 0.55rem 0.75rem;
+  color: var(--ink);
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-small);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.mainnet-wallet-remove-button:disabled,
+.mainnet-wallet-remove-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
+}
+
+.mainnet-wallet-remove-confirmation {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 0.65rem;
+  padding: 0.8rem;
+  background: var(--danger-surface);
+  border: 1px solid var(--danger-line);
+  border-radius: var(--radius-small);
+}
+
+.mainnet-wallet-remove-confirmation p {
+  color: var(--ink-soft);
+  font-size: 0.88rem;
+}
+
+.mainnet-wallet-remove-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.mainnet-wallet-remove-actions .mainnet-wallet-remove-confirm {
+  color: var(--on-danger);
+  background: var(--danger-strong);
+  border-color: var(--danger-strong);
+}
+
+.mainnet-wallet-removal-status {
+  color: var(--evergreen-strong);
 }
 
 .public-testnet-dashboard-overview > p,

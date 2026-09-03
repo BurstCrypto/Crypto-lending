@@ -4,6 +4,7 @@ import {
   retryAfterSeconds,
   type AuthenticationFetch,
 } from '../authentication/http';
+import { readAuthenticationCsrfToken } from '../authentication/session-client';
 import {
   MAINNET_WALLET_NETWORKS,
   MAINNET_WALLET_REGISTRY,
@@ -58,8 +59,13 @@ export interface MainnetWalletRosterReader {
   readWallets(signal?: AbortSignal): Promise<MainnetWalletRoster>;
 }
 
+export interface MainnetWalletRosterClient extends MainnetWalletRosterReader {
+  removeWallet(walletId: string, signal?: AbortSignal): Promise<void>;
+}
+
 export interface MainnetWalletRosterClientOptions {
   readonly fetch?: AuthenticationFetch;
+  readonly cookieHeader?: string | (() => string);
 }
 
 function fail(code: MainnetWalletRosterErrorCode = 'INVALID_RESPONSE', retry?: number): never {
@@ -198,7 +204,7 @@ export function parseMainnetWalletRosterResponse(value: unknown): MainnetWalletR
   });
 }
 
-function requestInit(signal: AbortSignal | undefined): RequestInit {
+function readRequestInit(signal: AbortSignal | undefined): RequestInit {
   return {
     method: 'GET',
     cache: 'no-store',
@@ -209,17 +215,38 @@ function requestInit(signal: AbortSignal | undefined): RequestInit {
   };
 }
 
-export class HttpMainnetWalletRosterClient implements MainnetWalletRosterReader {
+function removeRequestInit(csrfToken: string, signal: AbortSignal | undefined): RequestInit {
+  return {
+    method: 'DELETE',
+    cache: 'no-store',
+    credentials: 'same-origin',
+    headers: { Accept: 'application/json', 'X-CSRF-Token': csrfToken },
+    redirect: 'error',
+    ...(signal === undefined ? {} : { signal }),
+  };
+}
+
+function browserCookieHeader(): string {
+  return typeof document === 'undefined' ? '' : document.cookie;
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted === true) throw new DOMException('Request aborted', 'AbortError');
+}
+
+export class HttpMainnetWalletRosterClient implements MainnetWalletRosterClient {
   readonly #fetch: AuthenticationFetch;
+  readonly #cookieHeader: string | (() => string);
 
   constructor(options: MainnetWalletRosterClientOptions = {}) {
     this.#fetch = options.fetch ?? globalThis.fetch;
+    this.#cookieHeader = options.cookieHeader ?? browserCookieHeader;
   }
 
   async readWallets(signal?: AbortSignal): Promise<MainnetWalletRoster> {
     let response: Response;
     try {
-      response = await this.#fetch(MAINNET_WALLET_ROSTER_PATH, requestInit(signal));
+      response = await this.#fetch(MAINNET_WALLET_ROSTER_PATH, readRequestInit(signal));
     } catch (error) {
       if (isAbortFailure(error, signal)) throw error;
       return fail('UNAVAILABLE');
@@ -233,5 +260,36 @@ export class HttpMainnetWalletRosterClient implements MainnetWalletRosterReader 
       if (error instanceof MainnetWalletRosterError) throw error;
       return fail('INVALID_RESPONSE');
     }
+  }
+
+  async removeWallet(walletId: string, signal?: AbortSignal): Promise<void> {
+    throwIfAborted(signal);
+    if (!UUID_V4.test(walletId)) return fail('UNAVAILABLE');
+
+    let csrfToken: string;
+    try {
+      const cookieHeader =
+        typeof this.#cookieHeader === 'function' ? this.#cookieHeader() : this.#cookieHeader;
+      csrfToken = readAuthenticationCsrfToken(cookieHeader);
+    } catch {
+      return fail('UNAUTHENTICATED');
+    }
+
+    let response: Response;
+    try {
+      response = await this.#fetch(
+        `${MAINNET_WALLET_ROSTER_PATH}/${walletId}`,
+        removeRequestInit(csrfToken, signal),
+      );
+    } catch (error) {
+      if (isAbortFailure(error, signal)) throw error;
+      return fail('UNAVAILABLE');
+    }
+
+    if (response.status === 401) return fail('UNAUTHENTICATED');
+    if (response.status === 429 || response.status === 503) {
+      return fail('UNAVAILABLE', retryAfterSeconds(response));
+    }
+    if (response.status !== 204) return fail('UNAVAILABLE');
   }
 }

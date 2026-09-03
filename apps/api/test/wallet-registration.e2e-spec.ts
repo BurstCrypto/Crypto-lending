@@ -47,7 +47,7 @@ function hasBoundBrowserSession(value: unknown): boolean {
   if (fixture.headers?.cookie !== COOKIE) return false;
   if (fixture.method === 'GET') return true;
   return (
-    fixture.method === 'POST' &&
+    (fixture.method === 'POST' || fixture.method === 'DELETE') &&
     fixture.headers.origin === PUBLIC_ORIGIN &&
     fixture.headers['x-csrf-token'] === CSRF_TOKEN
   );
@@ -66,7 +66,12 @@ describe('wallet registration HTTP boundary (e2e)', () => {
   let app: INestApplication;
   let lines: string[];
   let resolver: { resolve: jest.Mock };
-  let wallets: { issueChallenge: jest.Mock; listActiveWallets: jest.Mock; submitProof: jest.Mock };
+  let wallets: {
+    issueChallenge: jest.Mock;
+    listActiveWallets: jest.Mock;
+    removeWallet: jest.Mock;
+    submitProof: jest.Mock;
+  };
 
   beforeAll(async () => {
     lines = [];
@@ -78,6 +83,7 @@ describe('wallet registration HTTP boundary (e2e)', () => {
     wallets = {
       issueChallenge: jest.fn(),
       listActiveWallets: jest.fn(),
+      removeWallet: jest.fn(),
       submitProof: jest.fn(),
     };
     const module = await Test.createTestingModule({
@@ -148,6 +154,7 @@ describe('wallet registration HTTP boundary (e2e)', () => {
       registryVersion: 1,
       registryFingerprintSha256: 'a'.repeat(64),
     });
+    wallets.removeWallet.mockResolvedValue({ status: 'removed' });
   });
 
   afterAll(async () => {
@@ -176,6 +183,80 @@ describe('wallet registration HTTP boundary (e2e)', () => {
     });
     expectPrivate(response);
     expect(wallets.listActiveWallets).toHaveBeenCalledWith(ACCOUNT_ID);
+  });
+
+  it('removes an account-scoped wallet with private, bodyless, idempotent semantics', async () => {
+    const unauthenticated = await request(app.getHttpServer())
+      .delete(`/api/v1/wallets/${WALLET_ID}`)
+      .expect(401);
+    expect(unauthenticated.body.message).toBe('Authentication required');
+    expectPrivate(unauthenticated);
+    expect(wallets.removeWallet).not.toHaveBeenCalled();
+
+    const missingCsrf = await request(app.getHttpServer())
+      .delete(`/api/v1/wallets/${WALLET_ID}`)
+      .set('Cookie', COOKIE)
+      .set('Origin', PUBLIC_ORIGIN)
+      .expect(401);
+    expect(missingCsrf.body.message).toBe('Authentication required');
+    expectPrivate(missingCsrf);
+    expect(wallets.removeWallet).not.toHaveBeenCalled();
+
+    const wrongOrigin = await request(app.getHttpServer())
+      .delete(`/api/v1/wallets/${WALLET_ID}`)
+      .set('Cookie', COOKIE)
+      .set('Origin', 'https://attacker.example')
+      .set('X-CSRF-Token', CSRF_TOKEN)
+      .expect(401);
+    expect(wrongOrigin.body.message).toBe('Authentication required');
+    expectPrivate(wrongOrigin);
+    expect(wallets.removeWallet).not.toHaveBeenCalled();
+
+    const wrongCsrf = await request(app.getHttpServer())
+      .delete(`/api/v1/wallets/${WALLET_ID}`)
+      .set('Cookie', COOKIE)
+      .set('Origin', PUBLIC_ORIGIN)
+      .set('X-CSRF-Token', 'wrong-token')
+      .expect(401);
+    expect(wrongCsrf.body.message).toBe('Authentication required');
+    expectPrivate(wrongCsrf);
+    expect(wallets.removeWallet).not.toHaveBeenCalled();
+
+    const response = await authenticate(
+      request(app.getHttpServer()).delete(`/api/v1/wallets/${WALLET_ID}`),
+    ).expect(204);
+    expect(response.text).toBe('');
+    expectPrivate(response);
+    expect(wallets.removeWallet).toHaveBeenCalledWith({
+      accountId: ACCOUNT_ID,
+      walletId: WALLET_ID,
+      correlationId: expect.stringMatching(CORRELATION_ID_PATTERN),
+    });
+
+    await authenticate(request(app.getHttpServer()).delete(`/api/v1/wallets/${WALLET_ID}`)).expect(
+      204,
+    );
+  });
+
+  it('maps malformed and unavailable removals without exposing wallet state', async () => {
+    wallets.removeWallet.mockRejectedValueOnce(new WalletRegistrationRejectedError());
+    const malformed = await authenticate(
+      request(app.getHttpServer()).delete('/api/v1/wallets/not-a-wallet-id'),
+    ).expect(400);
+    expect(malformed.body.message).toBe('Wallet removal request rejected');
+    expectPrivate(malformed);
+
+    wallets.removeWallet.mockRejectedValueOnce(new WalletRegistrationUnavailableError());
+    const unavailable = await authenticate(
+      request(app.getHttpServer()).delete(`/api/v1/wallets/${WALLET_ID}`),
+    ).expect(503);
+    expect(unavailable.body).toEqual({
+      error: 'Service Unavailable',
+      message: 'Wallet registration unavailable',
+      statusCode: 503,
+    });
+    expect(unavailable.headers['retry-after']).toBe('1');
+    expectPrivate(unavailable);
   });
 
   it.each([

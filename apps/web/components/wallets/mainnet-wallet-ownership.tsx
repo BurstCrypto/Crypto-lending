@@ -30,7 +30,7 @@ import {
   HttpMainnetWalletRosterClient,
   MainnetWalletRosterError,
   type MainnetRegisteredWalletSummary,
-  type MainnetWalletRosterReader,
+  type MainnetWalletRosterClient,
 } from '@/lib/wallets/mainnet-wallet-roster-client';
 import {
   PhantomSolanaAdapterError,
@@ -408,12 +408,13 @@ export function createMainnetWalletOwnershipRuntime(
 
 export interface MainnetWalletOwnershipDependencies {
   readonly createRuntime: () => MainnetWalletOwnershipRuntime;
-  readonly createRosterClient: () => MainnetWalletRosterReader;
+  readonly createRosterClient: () => MainnetWalletRosterClient;
 }
 
 export interface MainnetWalletOwnershipProps {
   readonly id?: string;
   readonly onAuthenticationRequired?: () => void;
+  readonly onWalletsChanged?: () => void;
   readonly onVerified?: (result: MainnetWalletVerificationResult) => void;
   readonly dependencies?: Partial<MainnetWalletOwnershipDependencies>;
 }
@@ -427,6 +428,15 @@ type MainnetWalletRosterState =
   | Readonly<{ status: 'LOADING' }>
   | Readonly<{ status: 'READY'; wallets: readonly MainnetRegisteredWalletSummary[] }>
   | Readonly<{ status: 'UNAVAILABLE' }>;
+
+function publicRemovalFailureMessage(error: unknown): string {
+  if (error instanceof MainnetWalletRosterError) {
+    if (error.code === 'UNAUTHENTICATED') {
+      return 'Your account session ended. Sign in again before removing a wallet.';
+    }
+  }
+  return "We couldn't confirm the removal result. The wallet list is refreshing; check it before trying again.";
+}
 
 function publicFailureMessage(error: unknown, networkName: string): string {
   if (error instanceof MainnetWalletRuntimeError) {
@@ -481,6 +491,7 @@ function connectorMatches(
 export function MainnetWalletOwnership({
   id,
   onAuthenticationRequired,
+  onWalletsChanged,
   onVerified,
   dependencies,
 }: MainnetWalletOwnershipProps) {
@@ -494,8 +505,22 @@ export function MainnetWalletOwnership({
   const [phantomAvailable, setPhantomAvailable] = useState(false);
   const [roster, setRoster] = useState<MainnetWalletRosterState>({ status: 'LOADING' });
   const [rosterRevision, setRosterRevision] = useState(0);
+  const [removalTarget, setRemovalTarget] = useState<MainnetRegisteredWalletSummary | null>(null);
+  const [removingWalletId, setRemovingWalletId] = useState<string | null>(null);
+  const [removalFailure, setRemovalFailure] = useState<string | null>(null);
+  const [removalNotice, setRemovalNotice] = useState<string | null>(null);
   const runtimeReference = useRef<MainnetWalletOwnershipRuntime | null>(null);
-  const operationReference = useRef<AbortController | null>(null);
+  const walletOperationReference = useRef<AbortController | null>(null);
+  const removalOperationReference = useRef<AbortController | null>(null);
+  const removalTargetReference = useRef<MainnetRegisteredWalletSummary | null>(null);
+  const removalReturnFocusReference = useRef<HTMLButtonElement | null>(null);
+  const keepWalletButtonReference = useRef<HTMLButtonElement | null>(null);
+  const rosterHeadingReference = useRef<HTMLHeadingElement | null>(null);
+  const rosterClient = useMemo(() => configured.createRosterClient(), [configured]);
+
+  useEffect(() => {
+    removalTargetReference.current = removalTarget;
+  }, [removalTarget]);
 
   useEffect(() => {
     const runtime = configured.createRuntime();
@@ -511,20 +536,54 @@ export function MainnetWalletOwnership({
     queueMicrotask(() => updateDetectedWallets(runtime.listEvmWallets()));
     return () => {
       active = false;
-      operationReference.current?.abort();
-      operationReference.current = null;
+      walletOperationReference.current?.abort();
+      walletOperationReference.current = null;
       unsubscribe();
       runtime.dispose();
       if (runtimeReference.current === runtime) runtimeReference.current = null;
     };
   }, [configured]);
 
+  useEffect(
+    () => () => {
+      removalOperationReference.current?.abort();
+      removalOperationReference.current = null;
+    },
+    [],
+  );
+
+  useEffect(() => {
+    if (removalTarget !== null && removingWalletId === null) {
+      keepWalletButtonReference.current?.focus();
+    }
+  }, [removalTarget, removingWalletId]);
+
   useEffect(() => {
     const controller = new AbortController();
     async function loadRoster(): Promise<void> {
       try {
-        const next = await configured.createRosterClient().readWallets(controller.signal);
-        if (!controller.signal.aborted) setRoster({ status: 'READY', wallets: next.wallets });
+        const next = await rosterClient.readWallets(controller.signal);
+        if (!controller.signal.aborted) {
+          setRoster({ status: 'READY', wallets: next.wallets });
+          const target = removalTargetReference.current;
+          if (
+            target !== null &&
+            !next.wallets.some((wallet) => wallet.walletId === target.walletId)
+          ) {
+            removalOperationReference.current?.abort();
+            removalOperationReference.current = null;
+            setRemovalTarget(null);
+            setRemovingWalletId(null);
+            setRemovalFailure(null);
+            setRemovalNotice('The wallet is no longer active on this account.');
+            try {
+              onWalletsChanged?.();
+            } catch {
+              // The refreshed roster is already authoritative for this screen.
+            }
+            queueMicrotask(() => rosterHeadingReference.current?.focus());
+          }
+        }
       } catch (error) {
         if (isAbortFailure(error, controller.signal)) return;
         if (
@@ -544,7 +603,7 @@ export function MainnetWalletOwnership({
     }
     void loadRoster();
     return () => controller.abort();
-  }, [configured, onAuthenticationRequired, rosterRevision]);
+  }, [onAuthenticationRequired, onWalletsChanged, rosterClient, rosterRevision]);
 
   const network = mainnetWalletNetworkFor(chainId);
   const metamaskMatches = connectorMatches(wallets, 'metamask');
@@ -552,6 +611,8 @@ export function MainnetWalletOwnership({
   const metamask = metamaskMatches.length === 1 ? metamaskMatches[0] : undefined;
   const coinbase = coinbaseMatches.length === 1 ? coinbaseMatches[0] : undefined;
   const ambiguous = metamaskMatches.length > 1 || coinbaseMatches.length > 1;
+  const removalPending = removingWalletId !== null;
+  const walletInteractionBlocked = busy || removalTarget !== null;
 
   function retryRoster(): void {
     setRoster({ status: 'LOADING' });
@@ -559,7 +620,7 @@ export function MainnetWalletOwnership({
   }
 
   function selectNetwork(nextChainId: MainnetWalletNetworkId): void {
-    if (busy || nextChainId === chainId) return;
+    if (walletInteractionBlocked || nextChainId === chainId) return;
     runtimeReference.current?.cancel();
     setConnection(null);
     setResult(null);
@@ -572,9 +633,9 @@ export function MainnetWalletOwnership({
     selectionId: string | null,
   ): Promise<void> {
     const runtime = runtimeReference.current;
-    if (runtime === null || busy) return;
+    if (runtime === null || walletInteractionBlocked) return;
     const controller = new AbortController();
-    operationReference.current = controller;
+    walletOperationReference.current = controller;
     setBusy(true);
     setConnection(null);
     setResult(null);
@@ -587,16 +648,16 @@ export function MainnetWalletOwnership({
         setFailure(publicFailureMessage(error, `${network.displayName} Mainnet`));
       }
     } finally {
-      if (operationReference.current === controller) operationReference.current = null;
+      if (walletOperationReference.current === controller) walletOperationReference.current = null;
       if (!controller.signal.aborted && runtimeReference.current === runtime) setBusy(false);
     }
   }
 
   async function verify(account: MainnetWalletAccountChoice): Promise<void> {
     const runtime = runtimeReference.current;
-    if (runtime === null || connection === null || busy) return;
+    if (runtime === null || connection === null || walletInteractionBlocked) return;
     const controller = new AbortController();
-    operationReference.current = controller;
+    walletOperationReference.current = controller;
     setBusy(true);
     setFailure(null);
     setResult(null);
@@ -613,6 +674,11 @@ export function MainnetWalletOwnership({
       setRosterRevision((current) => current + 1);
       try {
         onVerified?.(next);
+      } catch {
+        // Parent rendering failures cannot repeat an accepted proof.
+      }
+      try {
+        onWalletsChanged?.();
       } catch {
         // Parent rendering failures cannot repeat an accepted proof.
       }
@@ -633,8 +699,102 @@ export function MainnetWalletOwnership({
       }
       setFailure(publicFailureMessage(error, `${network.displayName} Mainnet`));
     } finally {
-      if (operationReference.current === controller) operationReference.current = null;
+      if (walletOperationReference.current === controller) walletOperationReference.current = null;
       if (!controller.signal.aborted && runtimeReference.current === runtime) setBusy(false);
+    }
+  }
+
+  function requestWalletRemoval(
+    wallet: MainnetRegisteredWalletSummary,
+    returnFocus: HTMLButtonElement,
+  ): void {
+    if (busy || removalTarget !== null) return;
+    removalReturnFocusReference.current = returnFocus;
+    setResult(null);
+    setFailure(null);
+    setRemovalFailure(null);
+    setRemovalNotice(null);
+    setRemovalTarget(wallet);
+  }
+
+  function cancelWalletRemoval(): void {
+    if (removalPending) return;
+    const returnFocus = removalReturnFocusReference.current;
+    setRemovalTarget(null);
+    setRemovalFailure(null);
+    queueMicrotask(() => returnFocus?.focus());
+  }
+
+  function refreshAfterUncertainRemoval(): void {
+    setRemovalTarget(null);
+    setRemovingWalletId(null);
+    setRemovalFailure(publicRemovalFailureMessage(undefined));
+    setRoster({ status: 'LOADING' });
+    setRosterRevision((current) => current + 1);
+    try {
+      onWalletsChanged?.();
+    } catch {
+      // The local roster refresh still reconciles the uncertain request.
+    }
+    queueMicrotask(() => rosterHeadingReference.current?.focus());
+  }
+
+  function stopWaitingForRemoval(): void {
+    if (removingWalletId === null) return;
+    removalOperationReference.current?.abort();
+    removalOperationReference.current = null;
+    refreshAfterUncertainRemoval();
+  }
+
+  async function confirmWalletRemoval(): Promise<void> {
+    const target = removalTarget;
+    if (target === null || busy || removalPending) return;
+    const controller = new AbortController();
+    removalOperationReference.current = controller;
+    setRemovingWalletId(target.walletId);
+    setRemovalFailure(null);
+    setRemovalNotice(null);
+    try {
+      await rosterClient.removeWallet(target.walletId, controller.signal);
+      if (controller.signal.aborted || removalOperationReference.current !== controller) return;
+      setRemovalTarget(null);
+      setRemovalNotice(
+        `${mainnetWalletNetworkFor(target.chainId).displayName} wallet removed. Portfolio monitoring for that address has stopped.`,
+      );
+      setRoster({ status: 'LOADING' });
+      setRosterRevision((current) => current + 1);
+      try {
+        onWalletsChanged?.();
+      } catch {
+        // The local roster refresh still reflects the confirmed removal.
+      }
+      queueMicrotask(() => rosterHeadingReference.current?.focus());
+    } catch (error) {
+      if (
+        isAbortFailure(error, controller.signal) ||
+        removalOperationReference.current !== controller
+      ) {
+        return;
+      }
+      if (
+        error instanceof MainnetWalletRosterError &&
+        error.code === 'UNAUTHENTICATED' &&
+        onAuthenticationRequired !== undefined
+      ) {
+        setRemovalTarget(null);
+        try {
+          onAuthenticationRequired();
+        } catch {
+          setRemovalFailure(publicRemovalFailureMessage(error));
+        }
+        return;
+      }
+      refreshAfterUncertainRemoval();
+    } finally {
+      if (removalOperationReference.current === controller) {
+        removalOperationReference.current = null;
+      }
+      if (!controller.signal.aborted) setRemovingWalletId(null);
     }
   }
 
@@ -662,7 +822,9 @@ export function MainnetWalletOwnership({
         <div className="status-heading">
           <div>
             <p className="eyebrow">Your account</p>
-            <h3 id="verified-wallets-title">Verified wallets</h3>
+            <h3 id="verified-wallets-title" ref={rosterHeadingReference} tabIndex={-1}>
+              Verified wallets
+            </h3>
           </div>
           {roster.status === 'READY' ? <span>{roster.wallets.length}/32</span> : null}
         </div>
@@ -673,7 +835,7 @@ export function MainnetWalletOwnership({
         ) : roster.status === 'UNAVAILABLE' ? (
           <div role="status">
             <p>The verified wallet list is unavailable, so adding another wallet is paused.</p>
-            <button type="button" disabled={busy} onClick={retryRoster}>
+            <button type="button" disabled={busy || removalPending} onClick={retryRoster}>
               Retry wallet list
             </button>
           </div>
@@ -681,22 +843,84 @@ export function MainnetWalletOwnership({
           <p>No wallets are verified for this account yet.</p>
         ) : (
           <ul className="mainnet-wallet-roster-list">
-            {roster.wallets.map((wallet) => (
-              <li key={wallet.walletId}>
-                <strong>{mainnetWalletNetworkFor(wallet.chainId).displayName}</strong>
-                <code>{wallet.addressHint}</code>
-                <span>
-                  Verified{' '}
-                  <time dateTime={wallet.registeredAt}>
-                    {new Date(wallet.registeredAt).toLocaleDateString('en-US', {
-                      timeZone: 'UTC',
-                    })}
-                  </time>
-                </span>
-              </li>
-            ))}
+            {roster.wallets.map((wallet) => {
+              const confirming = removalTarget?.walletId === wallet.walletId;
+              const removing = removingWalletId === wallet.walletId;
+              const descriptionId = `remove-wallet-${wallet.walletId}`;
+              const confirmationId = `${descriptionId}-confirmation`;
+              return (
+                <li key={wallet.walletId} aria-busy={removing}>
+                  <strong>{mainnetWalletNetworkFor(wallet.chainId).displayName}</strong>
+                  <code>{wallet.addressHint}</code>
+                  <span>
+                    Verified{' '}
+                    <time dateTime={wallet.registeredAt}>
+                      {new Date(wallet.registeredAt).toLocaleDateString('en-US', {
+                        timeZone: 'UTC',
+                      })}
+                    </time>
+                  </span>
+                  <button
+                    type="button"
+                    className="mainnet-wallet-remove-button"
+                    aria-label={`Remove ${mainnetWalletNetworkFor(wallet.chainId).displayName} wallet ${wallet.addressHint}`}
+                    aria-expanded={confirming}
+                    aria-controls={confirming ? confirmationId : undefined}
+                    disabled={busy || removalTarget !== null}
+                    onClick={(event) => requestWalletRemoval(wallet, event.currentTarget)}
+                  >
+                    Remove wallet
+                  </button>
+                  {confirming ? (
+                    <div
+                      id={confirmationId}
+                      className="mainnet-wallet-remove-confirmation"
+                      role="group"
+                      aria-labelledby={`${descriptionId}-title`}
+                      aria-describedby={descriptionId}
+                    >
+                      <strong id={`${descriptionId}-title`}>Remove this wallet?</strong>
+                      <p id={descriptionId}>
+                        This stops Crypto Lending from showing or monitoring this address. It does
+                        not disconnect your wallet extension, revoke onchain approvals, or move
+                        funds. Adding it again requires a new ownership signature. An encrypted
+                        security record is retained.
+                      </p>
+                      <div className="mainnet-wallet-remove-actions">
+                        <button
+                          ref={keepWalletButtonReference}
+                          type="button"
+                          onClick={removing ? stopWaitingForRemoval : cancelWalletRemoval}
+                        >
+                          {removing ? 'Stop waiting and refresh' : 'Keep wallet'}
+                        </button>
+                        <button
+                          type="button"
+                          className="mainnet-wallet-remove-confirm"
+                          disabled={removing}
+                          onClick={() => void confirmWalletRemoval()}
+                        >
+                          {removing ? 'Removing wallet...' : 'Yes, remove wallet'}
+                        </button>
+                      </div>
+                      {removing ? (
+                        <p role="status" aria-live="polite">
+                          Removing wallet. Keep this page open.
+                        </p>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </li>
+              );
+            })}
           </ul>
         )}
+        {removalNotice !== null ? (
+          <p className="mainnet-wallet-removal-status" role="status" aria-live="polite">
+            {removalNotice}
+          </p>
+        ) : null}
+        {removalFailure !== null ? <p role="alert">{removalFailure}</p> : null}
       </section>
 
       <div className="public-testnet-wallet-selection">
@@ -707,7 +931,7 @@ export function MainnetWalletOwnership({
               key={candidate.chainId}
               type="button"
               aria-pressed={chainId === candidate.chainId}
-              disabled={busy || roster.status !== 'READY'}
+              disabled={walletInteractionBlocked || roster.status !== 'READY'}
               onClick={() => selectNetwork(candidate.chainId)}
             >
               {candidate.displayName}
@@ -721,7 +945,10 @@ export function MainnetWalletOwnership({
             <button
               type="button"
               disabled={
-                busy || roster.status !== 'READY' || connection !== null || metamask === undefined
+                walletInteractionBlocked ||
+                roster.status !== 'READY' ||
+                connection !== null ||
+                metamask === undefined
               }
               onClick={() => metamask && void connect('metamask', metamask.selectionId)}
             >
@@ -730,7 +957,10 @@ export function MainnetWalletOwnership({
             <button
               type="button"
               disabled={
-                busy || roster.status !== 'READY' || connection !== null || coinbase === undefined
+                walletInteractionBlocked ||
+                roster.status !== 'READY' ||
+                connection !== null ||
+                coinbase === undefined
               }
               onClick={() => coinbase && void connect('coinbase', coinbase.selectionId)}
             >
@@ -742,7 +972,10 @@ export function MainnetWalletOwnership({
             <button
               type="button"
               disabled={
-                busy || roster.status !== 'READY' || connection !== null || !phantomAvailable
+                walletInteractionBlocked ||
+                roster.status !== 'READY' ||
+                connection !== null ||
+                !phantomAvailable
               }
               onClick={() => void connect('phantom', null)}
             >
@@ -759,7 +992,7 @@ export function MainnetWalletOwnership({
                 <button
                   key={account.accountToken}
                   type="button"
-                  disabled={busy}
+                  disabled={walletInteractionBlocked}
                   onClick={() => void verify(account)}
                 >
                   Verify {account.addressHint}

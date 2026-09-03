@@ -3,10 +3,12 @@ import {
   Body,
   ConflictException,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpException,
   HttpStatus,
+  Param,
   Post,
   Res,
   UseGuards,
@@ -16,9 +18,11 @@ import {
   ApiBadRequestResponse,
   ApiBody,
   ApiCreatedResponse,
+  ApiNoContentResponse,
   ApiOperation,
   ApiOkResponse,
   ApiResponse,
+  ApiParam,
   ApiSecurity,
   ApiTags,
   ApiUnauthorizedResponse,
@@ -109,6 +113,38 @@ export class WalletRegistrationController {
     try {
       return await this.wallets.listActiveWallets(principal.accountId);
     } catch (error) {
+      this.rethrowOperational(error, response);
+    }
+  }
+
+  @Delete(':walletId')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Remove a wallet from the current account active roster' })
+  @ApiParam({ name: 'walletId', type: 'string', format: 'uuid' })
+  @ApiNoContentResponse({
+    description: 'Wallet removed or no matching active account-scoped wallet existed',
+  })
+  @ApiBadRequestResponse({ description: 'Malformed wallet identifier' })
+  @ApiUnauthorizedResponse({
+    description: 'Missing session, exact origin, or CSRF proof',
+  })
+  @ApiResponse({ status: 429, description: 'Authentication request rate limited' })
+  @ApiResponse({ status: 503, description: 'Wallet registration is unavailable' })
+  async removeWallet(
+    @CurrentPrincipal() principal: AuthenticatedPrincipal,
+    @Param('walletId') walletId: string,
+    @Res({ passthrough: true }) response: StatusWriter,
+  ): Promise<void> {
+    try {
+      await this.wallets.removeWallet({
+        accountId: principal.accountId,
+        walletId,
+        correlationId: loggingContext.requireCurrent().correlationId,
+      });
+    } catch (error) {
+      if (error instanceof WalletRegistrationRejectedError) {
+        throw new BadRequestException('Wallet removal request rejected');
+      }
       this.rethrowOperational(error, response);
     }
   }

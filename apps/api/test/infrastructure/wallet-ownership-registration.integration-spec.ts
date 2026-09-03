@@ -208,6 +208,370 @@ describeWithPostgres('wallet ownership registration persistence', () => {
     ).rejects.toMatchObject({ code: '23514' });
   });
 
+  it('refuses to remove revocation protections while a retained tombstone exists', async () => {
+    const migration = DATABASE_TEST_SCHEMA_MIGRATION_LIST.find(({ id }) => id === '0016');
+    if (!migration || typeof migration.downSql !== 'string') {
+      throw new Error('Migration 0016 must expose one rollback statement');
+    }
+
+    await expect(pool.query(migration.downSql)).rejects.toMatchObject({ code: '55000' });
+  });
+
+  it('revokes without enumeration and requires a post-revocation proof across accounts', async () => {
+    const accountA = randomUUID();
+    const accountB = randomUUID();
+    const addressDigest = randomBytes(32);
+    await pool.query('INSERT INTO accounts (account_id) VALUES ($1), ($2)', [accountA, accountB]);
+
+    async function complete(
+      challengeId: string,
+      accountId: string,
+      walletId: string,
+      fill: number,
+    ): Promise<QueryResult<{ registration_outcome: string; wallet_id: string | null }>> {
+      return pool.query(
+        `SELECT registration_outcome, wallet_id
+         FROM complete_wallet_registration_guarded(
+           $1, $2, $3,
+           1::smallint, $4::bytea, $5::bytea, $6::bytea,
+           1::smallint, $7::bytea, $8::bytea, $9::bytea,
+           $10
+         )`,
+        [
+          challengeId,
+          accountId,
+          walletId,
+          Buffer.from(`revocation-address-${fill}`),
+          iv(fill),
+          tag(fill),
+          Buffer.from(`revocation-metadata-${fill}`),
+          iv(fill + 1),
+          tag(fill + 1),
+          randomUUID(),
+        ],
+      );
+    }
+
+    async function completeLegacy(
+      challengeId: string,
+      accountId: string,
+      walletId: string,
+      fill: number,
+    ): Promise<QueryResult<{ registration_outcome: string; wallet_id: string | null }>> {
+      return pool.query(
+        `SELECT registration_outcome, wallet_id
+         FROM complete_wallet_registration(
+           $1, $2, $3,
+           1::smallint, $4::bytea, $5::bytea, $6::bytea,
+           1::smallint, $7::bytea, $8::bytea, $9::bytea,
+           $10
+         )`,
+        [
+          challengeId,
+          accountId,
+          walletId,
+          Buffer.from(`legacy-revocation-address-${fill}`),
+          iv(fill),
+          tag(fill),
+          Buffer.from(`legacy-revocation-metadata-${fill}`),
+          iv(fill + 1),
+          tag(fill + 1),
+          randomUUID(),
+        ],
+      );
+    }
+
+    const registeredChallenge = randomUUID();
+    await beginChallenge({
+      challengeId: registeredChallenge,
+      accountId: accountA,
+      addressDigest,
+      messageDigest: randomBytes(32),
+      nonceDigest: randomBytes(32),
+    });
+    const originalWalletId = randomUUID();
+    await expect(
+      complete(registeredChallenge, accountA, originalWalletId, 150),
+    ).resolves.toMatchObject({
+      rows: [{ registration_outcome: 'REGISTERED', wallet_id: originalWalletId }],
+    });
+
+    const staleSameAccountChallenge = randomUUID();
+    await beginChallenge({
+      challengeId: staleSameAccountChallenge,
+      accountId: accountA,
+      addressDigest,
+      messageDigest: randomBytes(32),
+      nonceDigest: randomBytes(32),
+    });
+    const staleOtherAccountChallenge = randomUUID();
+    await beginChallenge({
+      challengeId: staleOtherAccountChallenge,
+      accountId: accountB,
+      addressDigest,
+      messageDigest: randomBytes(32),
+      nonceDigest: randomBytes(32),
+    });
+    const staleAfterReaddChallenge = randomUUID();
+    await beginChallenge({
+      challengeId: staleAfterReaddChallenge,
+      accountId: accountA,
+      addressDigest,
+      messageDigest: randomBytes(32),
+      nonceDigest: randomBytes(32),
+    });
+
+    const revocationCorrelationIds = [randomUUID(), randomUUID()];
+    const concurrentRevocations = await Promise.all([
+      pool.query<{ revocation_outcome: string }>(
+        'SELECT * FROM revoke_wallet_registration($1, $2, $3)',
+        [accountA, originalWalletId, revocationCorrelationIds[0]],
+      ),
+      pool.query<{ revocation_outcome: string }>(
+        'SELECT * FROM revoke_wallet_registration($1, $2, $3)',
+        [accountA, originalWalletId, revocationCorrelationIds[1]],
+      ),
+    ]);
+    expect(
+      concurrentRevocations
+        .map((result) => result.rows[0]?.revocation_outcome)
+        .sort((left, right) => (left ?? '').localeCompare(right ?? '')),
+    ).toEqual(['REVOKED', 'UNCHANGED']);
+    await expect(
+      pool.query<{ revocation_outcome: string }>(
+        'SELECT * FROM revoke_wallet_registration($1, $2, $3)',
+        [accountA, originalWalletId, randomUUID()],
+      ),
+    ).resolves.toMatchObject({ rows: [{ revocation_outcome: 'UNCHANGED' }] });
+    await expect(
+      pool.query<{ revocation_outcome: string }>(
+        'SELECT * FROM revoke_wallet_registration($1, $2, $3)',
+        [accountB, originalWalletId, randomUUID()],
+      ),
+    ).resolves.toMatchObject({ rows: [{ revocation_outcome: 'UNCHANGED' }] });
+    await expect(
+      pool.query<{ revocation_outcome: string }>(
+        'SELECT * FROM revoke_wallet_registration($1, $2, $3)',
+        [accountA, randomUUID(), randomUUID()],
+      ),
+    ).resolves.toMatchObject({ rows: [{ revocation_outcome: 'UNCHANGED' }] });
+
+    const retained = await pool.query<{ status: string; revoked_at: Date | null }>(
+      'SELECT status, revoked_at FROM registered_wallets WHERE wallet_id = $1',
+      [originalWalletId],
+    );
+    expect(retained.rows).toEqual([{ status: 'REVOKED', revoked_at: expect.any(Date) }]);
+    await expect(
+      pool.query<{ wallet_count: number }>(
+        `SELECT pg_catalog.count(*)::integer AS wallet_count
+         FROM list_active_wallet_registrations($1)`,
+        [accountA],
+      ),
+    ).resolves.toMatchObject({ rows: [{ wallet_count: 0 }] });
+    await expect(
+      pool.query(
+        `UPDATE registered_wallets SET status = 'ACTIVE', revoked_at = NULL
+         WHERE wallet_id = $1`,
+        [originalWalletId],
+      ),
+    ).rejects.toMatchObject({ code: '23514' });
+
+    await expect(
+      completeLegacy(staleSameAccountChallenge, accountA, randomUUID(), 152),
+    ).rejects.toMatchObject({ code: 'W1601' });
+    await expect(
+      pool.query<{ status: string }>(
+        'SELECT status FROM wallet_ownership_challenges WHERE challenge_id = $1',
+        [staleSameAccountChallenge],
+      ),
+    ).resolves.toMatchObject({ rows: [{ status: 'PENDING' }] });
+
+    const staleSameResult = await complete(staleSameAccountChallenge, accountA, randomUUID(), 154);
+    const staleOtherResult = await complete(
+      staleOtherAccountChallenge,
+      accountB,
+      randomUUID(),
+      158,
+    );
+    expect(staleSameResult.rows).toEqual([{ registration_outcome: 'REVOKED', wallet_id: null }]);
+    expect(staleOtherResult.rows).toEqual([{ registration_outcome: 'REVOKED', wallet_id: null }]);
+
+    const freshChallenge = randomUUID();
+    await beginChallenge({
+      challengeId: freshChallenge,
+      accountId: accountA,
+      addressDigest,
+      messageDigest: randomBytes(32),
+      nonceDigest: randomBytes(32),
+    });
+    const replacementWalletId = randomUUID();
+    await expect(
+      completeLegacy(freshChallenge, accountA, replacementWalletId, 162),
+    ).resolves.toMatchObject({
+      rows: [{ registration_outcome: 'REGISTERED', wallet_id: replacementWalletId }],
+    });
+
+    await expect(
+      completeLegacy(staleAfterReaddChallenge, accountA, randomUUID(), 164),
+    ).rejects.toMatchObject({ code: 'W1601' });
+    await expect(
+      pool.query<{ status: string }>(
+        'SELECT status FROM wallet_ownership_challenges WHERE challenge_id = $1',
+        [staleAfterReaddChallenge],
+      ),
+    ).resolves.toMatchObject({ rows: [{ status: 'PENDING' }] });
+    await expect(
+      complete(staleAfterReaddChallenge, accountA, randomUUID(), 166),
+    ).resolves.toMatchObject({
+      rows: [{ registration_outcome: 'REVOKED', wallet_id: null }],
+    });
+
+    const activeAfterReadd = await pool.query<{ wallet_id: string }>(
+      `SELECT active_wallet_id AS wallet_id
+       FROM list_active_wallet_registrations($1)`,
+      [accountA],
+    );
+    expect(activeAfterReadd.rows).toEqual([{ wallet_id: replacementWalletId }]);
+
+    const staleChallenges = await pool.query<{
+      status: string;
+      failure_reason: string;
+      challenge_payload_ciphertext: Buffer | null;
+    }>(
+      `SELECT status, failure_reason, challenge_payload_ciphertext
+       FROM wallet_ownership_challenges
+       WHERE challenge_id = ANY($1::uuid[])
+       ORDER BY challenge_id`,
+      [[staleSameAccountChallenge, staleOtherAccountChallenge, staleAfterReaddChallenge]],
+    );
+    expect(staleChallenges.rows).toEqual(
+      Array.from({ length: 3 }, () => ({
+        status: 'REJECTED',
+        failure_reason: 'WALLET_REVOKED',
+        challenge_payload_ciphertext: null,
+      })),
+    );
+
+    const audit = await pool.query<{ event_type: string; event_count: number }>(
+      `SELECT event_type, pg_catalog.count(*)::integer AS event_count
+       FROM wallet_registration_audit_events
+       WHERE correlation_id = ANY($1::uuid[]) OR challenge_id = ANY($2::uuid[])
+      GROUP BY event_type
+      ORDER BY event_type`,
+      [
+        revocationCorrelationIds,
+        [staleSameAccountChallenge, staleOtherAccountChallenge, staleAfterReaddChallenge],
+      ],
+    );
+    expect(audit.rows).toEqual([
+      { event_type: 'CHALLENGE_REJECTED', event_count: 3 },
+      { event_type: 'CHALLENGE_STARTED', event_count: 3 },
+      { event_type: 'WALLET_REVOKED', event_count: 1 },
+    ]);
+
+    const privileges = await pool.query<{
+      guarded: boolean;
+      legacy: boolean;
+      revoke: boolean;
+    }>(
+      `SELECT
+         pg_catalog.has_function_privilege(
+           'crypto_api_runtime',
+           'complete_wallet_registration_guarded(uuid,uuid,uuid,smallint,bytea,bytea,bytea,smallint,bytea,bytea,bytea,uuid)',
+           'EXECUTE'
+         ) AS guarded,
+         pg_catalog.has_function_privilege(
+           'crypto_api_runtime',
+           'complete_wallet_registration(uuid,uuid,uuid,smallint,bytea,bytea,bytea,smallint,bytea,bytea,bytea,uuid)',
+           'EXECUTE'
+         ) AS legacy,
+         pg_catalog.has_function_privilege(
+           'crypto_api_runtime', 'revoke_wallet_registration(uuid,uuid,uuid)', 'EXECUTE'
+         ) AS revoke`,
+    );
+    expect(privileges.rows).toEqual([{ guarded: true, legacy: true, revoke: true }]);
+  });
+
+  it('serializes a pre-issued completion race with removal without reactivating the identity', async () => {
+    const accountId = randomUUID();
+    const addressDigest = randomBytes(32);
+    await pool.query('INSERT INTO accounts (account_id) VALUES ($1)', [accountId]);
+
+    const registeredChallenge = randomUUID();
+    await beginChallenge({
+      challengeId: registeredChallenge,
+      accountId,
+      addressDigest,
+      messageDigest: randomBytes(32),
+      nonceDigest: randomBytes(32),
+    });
+    const walletId = randomUUID();
+    await pool.query(
+      `SELECT * FROM complete_wallet_registration_guarded(
+         $1, $2, $3, 1::smallint, $4, $5, $6, 1::smallint, $7, $8, $9, $10
+       )`,
+      [
+        registeredChallenge,
+        accountId,
+        walletId,
+        Buffer.from('race-original-address'),
+        iv(170),
+        tag(170),
+        Buffer.from('race-original-metadata'),
+        iv(171),
+        tag(171),
+        randomUUID(),
+      ],
+    );
+
+    const staleChallenge = randomUUID();
+    await beginChallenge({
+      challengeId: staleChallenge,
+      accountId,
+      addressDigest,
+      messageDigest: randomBytes(32),
+      nonceDigest: randomBytes(32),
+    });
+    const completionWalletId = randomUUID();
+    const [revocation, completion] = await Promise.all([
+      pool.query<{ revocation_outcome: string }>(
+        'SELECT * FROM revoke_wallet_registration($1, $2, $3)',
+        [accountId, walletId, randomUUID()],
+      ),
+      pool.query<{ registration_outcome: string; wallet_id: string | null }>(
+        `SELECT registration_outcome, wallet_id FROM complete_wallet_registration_guarded(
+           $1, $2, $3, 1::smallint, $4, $5, $6, 1::smallint, $7, $8, $9, $10
+         )`,
+        [
+          staleChallenge,
+          accountId,
+          completionWalletId,
+          Buffer.from('race-stale-address'),
+          iv(172),
+          tag(172),
+          Buffer.from('race-stale-metadata'),
+          iv(173),
+          tag(173),
+          randomUUID(),
+        ],
+      ),
+    ]);
+
+    expect(revocation.rows).toEqual([{ revocation_outcome: 'REVOKED' }]);
+    expect(['ALREADY_REGISTERED', 'REVOKED']).toContain(completion.rows[0]?.registration_outcome);
+    const active = await pool.query<{ wallet_count: number }>(
+      `SELECT pg_catalog.count(*)::integer AS wallet_count
+       FROM registered_wallets
+       WHERE chain_namespace = 'eip155'
+         AND chain_reference = '1'
+         AND address_digest_version = 1
+         AND address_digest = $1
+         AND status = 'ACTIVE'`,
+      [addressDigest],
+    );
+    expect(active.rows).toEqual([{ wallet_count: 0 }]);
+  });
+
   it('registers once, rejects conflicts/replays, shreds terminal payloads, and limits pending rows', async () => {
     const accountA = randomUUID();
     const accountB = randomUUID();
@@ -768,5 +1132,199 @@ describeWithPostgres('wallet ownership registration persistence', () => {
       [addressDigest],
     );
     expect(wallets.rows).toEqual([{ wallet_count: '0' }]);
+  });
+
+  it('round-trips a clean 0016 down to verified 0015 and back up', async () => {
+    const rollbackSchema = `kan56_rollback_${randomUUID().replaceAll('-', '')}`;
+    let rollbackPool: Pool | undefined;
+
+    try {
+      await adminPool.query(`CREATE SCHEMA "${rollbackSchema}"`);
+      rollbackPool = new Pool({
+        connectionString: testDatabaseUrl as string,
+        options: `-c search_path=${rollbackSchema}`,
+      });
+      const priorMigrations = DATABASE_TEST_SCHEMA_MIGRATION_LIST.filter(({ id }) => id < '0016');
+      const priorRunner = new MigrationRunner(rollbackPool, priorMigrations);
+      const fullRunner = new MigrationRunner(rollbackPool, DATABASE_TEST_SCHEMA_MIGRATION_LIST);
+
+      await priorRunner.up();
+      await expect(priorRunner.assertUpToDate()).resolves.toBeUndefined();
+      await expect(fullRunner.up()).resolves.toEqual(['0016']);
+      await expect(fullRunner.assertUpToDate()).resolves.toBeUndefined();
+      await expect(fullRunner.down()).resolves.toEqual(['0016']);
+      await expect(priorRunner.assertUpToDate()).resolves.toBeUndefined();
+
+      const removed = await rollbackPool.query<{
+        challenge_trigger_count: number;
+        guarded_completion: string | null;
+        revocation_function: string | null;
+        revoked_index: string | null;
+      }>(`SELECT
+        to_regprocedure(
+          'complete_wallet_registration_guarded(uuid,uuid,uuid,smallint,bytea,bytea,bytea,smallint,bytea,bytea,bytea,uuid)'
+        )::text AS guarded_completion,
+        to_regprocedure('revoke_wallet_registration(uuid,uuid,uuid)')::text
+          AS revocation_function,
+        to_regclass('registered_wallets_revoked_identity_timeline_idx')::text
+          AS revoked_index,
+        (
+          SELECT pg_catalog.count(*)::integer
+          FROM pg_catalog.pg_trigger
+          WHERE tgrelid = to_regclass('wallet_ownership_challenges')
+            AND tgname = 'wallet_challenge_revocation_tombstone'
+        ) AS challenge_trigger_count`);
+      expect(removed.rows).toEqual([
+        {
+          guarded_completion: null,
+          revocation_function: null,
+          revoked_index: null,
+          challenge_trigger_count: 0,
+        },
+      ]);
+
+      await expect(fullRunner.up()).resolves.toEqual(['0016']);
+      await expect(fullRunner.assertUpToDate()).resolves.toBeUndefined();
+    } finally {
+      if (rollbackPool) await rollbackPool.end();
+      await adminPool.query(`DROP SCHEMA IF EXISTS "${rollbackSchema}" CASCADE`);
+    }
+  });
+
+  it('fails closed when revocation triggers, indexes, or constraints drift', async () => {
+    const migration = DATABASE_TEST_SCHEMA_MIGRATION_LIST.find(({ id }) => id === '0016');
+    if (!migration?.verifySql || typeof migration.verifySql !== 'string') {
+      throw new Error('Migration 0016 must expose one verification statement');
+    }
+
+    await expect(pool.query<{ valid: boolean }>(migration.verifySql)).resolves.toMatchObject({
+      rows: [{ valid: true }],
+    });
+
+    const stateCandidate = await pool.query<{
+      challenge_id: string;
+      original_created_at: Date;
+      revoked_at: Date;
+    }>(
+      `SELECT
+         active_wallet.registered_by_challenge_id AS challenge_id,
+         registration_challenge.created_at AS original_created_at,
+         tombstone.revoked_at
+       FROM registered_wallets AS active_wallet
+       INNER JOIN wallet_ownership_challenges AS registration_challenge
+         ON registration_challenge.challenge_id = active_wallet.registered_by_challenge_id
+       INNER JOIN registered_wallets AS tombstone
+         ON tombstone.chain_namespace = active_wallet.chain_namespace
+         AND tombstone.chain_reference = active_wallet.chain_reference
+         AND tombstone.address_digest_version = active_wallet.address_digest_version
+         AND tombstone.address_digest = active_wallet.address_digest
+         AND tombstone.status = 'REVOKED'
+       WHERE active_wallet.status = 'ACTIVE'
+         AND registration_challenge.created_at > tombstone.revoked_at
+       ORDER BY tombstone.revoked_at DESC
+       LIMIT 1`,
+    );
+    expect(stateCandidate.rows).toHaveLength(1);
+    const candidate = stateCandidate.rows[0];
+    if (!candidate) throw new Error('Expected a fresh re-registration fixture');
+
+    await pool.query(`ALTER TABLE wallet_ownership_challenges
+      DISABLE TRIGGER wallet_ownership_challenge_binding_immutable`);
+    await pool.query(
+      `UPDATE wallet_ownership_challenges SET created_at = $2 WHERE challenge_id = $1`,
+      [candidate.challenge_id, candidate.revoked_at],
+    );
+    await pool.query(`ALTER TABLE wallet_ownership_challenges
+      ENABLE ALWAYS TRIGGER wallet_ownership_challenge_binding_immutable`);
+    await expect(pool.query<{ valid: boolean }>(migration.verifySql)).resolves.toMatchObject({
+      rows: [{ valid: false }],
+    });
+    await pool.query(`ALTER TABLE wallet_ownership_challenges
+      DISABLE TRIGGER wallet_ownership_challenge_binding_immutable`);
+    await pool.query(
+      `UPDATE wallet_ownership_challenges SET created_at = $2 WHERE challenge_id = $1`,
+      [candidate.challenge_id, candidate.original_created_at],
+    );
+    await pool.query(`ALTER TABLE wallet_ownership_challenges
+      ENABLE ALWAYS TRIGGER wallet_ownership_challenge_binding_immutable`);
+    await expect(pool.query<{ valid: boolean }>(migration.verifySql)).resolves.toMatchObject({
+      rows: [{ valid: true }],
+    });
+
+    await pool.query(`DROP TRIGGER wallet_challenge_revocation_tombstone
+      ON wallet_ownership_challenges`);
+    await pool.query(`CREATE TRIGGER wallet_challenge_revocation_tombstone
+      BEFORE UPDATE OF status ON wallet_ownership_challenges
+      FOR EACH ROW WHEN (false)
+      EXECUTE FUNCTION enforce_wallet_challenge_revocation_tombstone()`);
+    await pool.query(`ALTER TABLE wallet_ownership_challenges
+      ENABLE ALWAYS TRIGGER wallet_challenge_revocation_tombstone`);
+    await expect(pool.query<{ valid: boolean }>(migration.verifySql)).resolves.toMatchObject({
+      rows: [{ valid: false }],
+    });
+    await pool.query(`DROP TRIGGER wallet_challenge_revocation_tombstone
+      ON wallet_ownership_challenges`);
+    await pool.query(`CREATE TRIGGER wallet_challenge_revocation_tombstone
+      BEFORE UPDATE OF status ON wallet_ownership_challenges
+      FOR EACH ROW EXECUTE FUNCTION enforce_wallet_challenge_revocation_tombstone()`);
+    await pool.query(`ALTER TABLE wallet_ownership_challenges
+      ENABLE ALWAYS TRIGGER wallet_challenge_revocation_tombstone`);
+    await expect(pool.query<{ valid: boolean }>(migration.verifySql)).resolves.toMatchObject({
+      rows: [{ valid: true }],
+    });
+
+    await pool.query('DROP INDEX registered_wallets_revoked_identity_timeline_idx');
+    await pool.query(`CREATE INDEX registered_wallets_revoked_identity_timeline_idx
+      ON registered_wallets (
+        chain_namespace,
+        chain_reference,
+        address_digest_version,
+        address_digest,
+        revoked_at ASC,
+        wallet_id
+      )
+      WHERE status = 'REVOKED'`);
+    await expect(pool.query<{ valid: boolean }>(migration.verifySql)).resolves.toMatchObject({
+      rows: [{ valid: false }],
+    });
+    await pool.query('DROP INDEX registered_wallets_revoked_identity_timeline_idx');
+    await pool.query(`CREATE INDEX registered_wallets_revoked_identity_timeline_idx
+      ON registered_wallets (
+        chain_namespace,
+        chain_reference,
+        address_digest_version,
+        address_digest,
+        revoked_at DESC,
+        wallet_id
+      )
+      WHERE status = 'REVOKED'`);
+    await expect(pool.query<{ valid: boolean }>(migration.verifySql)).resolves.toMatchObject({
+      rows: [{ valid: true }],
+    });
+
+    await pool.query(`ALTER TABLE wallet_registration_audit_events
+      DROP CONSTRAINT wallet_registration_audit_event_check,
+      ADD CONSTRAINT wallet_registration_audit_event_check CHECK (event_type IS NOT NULL)`);
+    await expect(pool.query<{ valid: boolean }>(migration.verifySql)).resolves.toMatchObject({
+      rows: [{ valid: false }],
+    });
+    await pool.query(`ALTER TABLE wallet_registration_audit_events
+      DROP CONSTRAINT wallet_registration_audit_event_check`);
+    await pool.query(`CREATE TABLE wallet_registration_audit_constraint_decoy (
+      event_type text NOT NULL
+    )`);
+    await pool.query(`ALTER TABLE wallet_registration_audit_constraint_decoy
+      ADD CONSTRAINT wallet_registration_audit_event_check CHECK (event_type IN (
+        'CHALLENGE_STARTED',
+        'CHALLENGE_REPLAY_DETECTED',
+        'CHALLENGE_REJECTED',
+        'CHALLENGE_EXPIRED',
+        'WALLET_REGISTERED',
+        'WALLET_ALREADY_REGISTERED',
+        'WALLET_REVOKED'
+      ))`);
+    await expect(pool.query<{ valid: boolean }>(migration.verifySql)).resolves.toMatchObject({
+      rows: [{ valid: false }],
+    });
   });
 });

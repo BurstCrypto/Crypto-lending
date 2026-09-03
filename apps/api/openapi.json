@@ -5940,6 +5940,48 @@
           "wallets"
         ]
       }
+    },
+    "/api/v1/wallets/{walletId}": {
+      "delete": {
+        "operationId": "WalletRegistrationController_removeWallet",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "walletId",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Wallet removed or no matching active account-scoped wallet existed"
+          },
+          "400": {
+            "description": "Malformed wallet identifier"
+          },
+          "401": {
+            "description": "Missing session, exact origin, or CSRF proof"
+          },
+          "429": {
+            "description": "Authentication request rate limited"
+          },
+          "503": {
+            "description": "Wallet registration is unavailable"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Remove a wallet from the current account active roster",
+        "tags": [
+          "wallets"
+        ]
+      }
     }
   },
   "servers": [],

@@ -87,6 +87,7 @@ interface RepositoryFixture {
   readonly repository: WalletRegistrationRepositoryPort;
   readonly complete: jest.MockedFunction<WalletRegistrationRepositoryPort['completeRegistration']>;
   readonly list: jest.MockedFunction<WalletRegistrationRepositoryPort['listActiveWallets']>;
+  readonly revoke: jest.MockedFunction<WalletRegistrationRepositoryPort['revokeWallet']>;
 }
 
 function repositoryFixture(): RepositoryFixture {
@@ -103,8 +104,13 @@ function repositoryFixture(): RepositoryFixture {
     ReturnType<WalletRegistrationRepositoryPort['listActiveWallets']>,
     Parameters<WalletRegistrationRepositoryPort['listActiveWallets']>
   >(async () => []);
+  const revoke = jest.fn<
+    ReturnType<WalletRegistrationRepositoryPort['revokeWallet']>,
+    Parameters<WalletRegistrationRepositoryPort['revokeWallet']>
+  >(async () => ({ status: 'revoked' }));
   const repository: WalletRegistrationRepositoryPort = {
     listActiveWallets: list,
+    revokeWallet: revoke,
     beginChallenge: jest.fn(async (request) => {
       begun = request;
       return { challengeId: request.challengeId, expiresAt: request.expiresAt };
@@ -130,7 +136,7 @@ function repositoryFixture(): RepositoryFixture {
     rejectChallenge: jest.fn(async () => ({ status: 'rejected' as const })),
     completeRegistration: complete,
   };
-  return { repository, complete, list };
+  return { repository, complete, list, revoke };
 }
 
 function serviceFixture(
@@ -252,6 +258,78 @@ describe('WalletRegistrationService', () => {
     await expect(service.listActiveWallets(ACCOUNT_ID)).rejects.toBeInstanceOf(
       WalletRegistrationUnavailableError,
     );
+  });
+
+  it('removes a wallet with constant idempotent semantics scoped to the current account', async () => {
+    const { service, revoke } = serviceFixture();
+    const walletId = randomUUID();
+
+    await expect(
+      service.removeWallet({ accountId: ACCOUNT_ID, walletId, correlationId: CORRELATION_ID }),
+    ).resolves.toEqual({ status: 'removed' });
+    expect(revoke).toHaveBeenCalledWith({
+      accountId: ACCOUNT_ID,
+      walletId,
+      correlationId: CORRELATION_ID,
+    });
+
+    revoke.mockResolvedValueOnce({ status: 'unchanged' });
+    await expect(
+      service.removeWallet({ accountId: ACCOUNT_ID, walletId, correlationId: CORRELATION_ID }),
+    ).resolves.toEqual({ status: 'removed' });
+  });
+
+  it('keeps removal available while new wallet registration is disabled', async () => {
+    const fixture = repositoryFixture();
+    const service = new WalletRegistrationService(
+      fixture.repository,
+      { mode: 'disabled' },
+      {
+        now: () => new Date(NOW),
+      },
+    );
+    const walletId = randomUUID();
+
+    await expect(
+      service.removeWallet({ accountId: ACCOUNT_ID, walletId, correlationId: CORRELATION_ID }),
+    ).resolves.toEqual({ status: 'removed' });
+    expect(fixture.revoke).toHaveBeenCalledWith({
+      accountId: ACCOUNT_ID,
+      walletId,
+      correlationId: CORRELATION_ID,
+    });
+  });
+
+  it('rejects malformed removal inputs and fails closed on persistence anomalies', async () => {
+    const malformed = serviceFixture();
+    await expect(
+      malformed.service.removeWallet({
+        accountId: ACCOUNT_ID,
+        walletId: 'not-a-wallet-id',
+        correlationId: CORRELATION_ID,
+      }),
+    ).rejects.toBeInstanceOf(WalletRegistrationRejectedError);
+    expect(malformed.revoke).not.toHaveBeenCalled();
+
+    const unavailable = serviceFixture();
+    unavailable.revoke.mockRejectedValueOnce(new Error('database unavailable'));
+    await expect(
+      unavailable.service.removeWallet({
+        accountId: ACCOUNT_ID,
+        walletId: randomUUID(),
+        correlationId: CORRELATION_ID,
+      }),
+    ).rejects.toBeInstanceOf(WalletRegistrationUnavailableError);
+
+    const forged = serviceFixture();
+    forged.revoke.mockResolvedValueOnce({ status: 'unexpected' } as never);
+    await expect(
+      forged.service.removeWallet({
+        accountId: ACCOUNT_ID,
+        walletId: randomUUID(),
+        correlationId: CORRELATION_ID,
+      }),
+    ).rejects.toBeInstanceOf(WalletRegistrationUnavailableError);
   });
 
   it('issues and verifies a valid offline EVM EOA proof', async () => {

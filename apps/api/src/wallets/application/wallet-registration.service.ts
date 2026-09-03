@@ -74,6 +74,17 @@ export interface SubmitWalletOwnershipProofInput {
   readonly correlationId: string;
 }
 
+export interface RemoveWalletInput {
+  readonly accountId: AccountId;
+  readonly walletId: string;
+  readonly correlationId: string;
+}
+
+export interface RemovedWalletResult {
+  /** Constant response prevents wallet existence or ownership enumeration. */
+  readonly status: 'removed';
+}
+
 export interface RegisteredWalletResult {
   readonly status: 'registered' | 'already_registered';
   readonly walletId: string;
@@ -241,6 +252,33 @@ export class WalletRegistrationService {
     } catch {
       throw new WalletRegistrationUnavailableError();
     }
+  }
+
+  async removeWallet(input: RemoveWalletInput): Promise<RemovedWalletResult> {
+    let accountId: AccountId;
+    try {
+      accountId = parseAccountId(input.accountId);
+      if (!isCanonicalUuidV4(input.walletId)) throw new Error('invalid wallet identifier');
+      exactCorrelationId(input.correlationId);
+    } catch {
+      throw new WalletRegistrationRejectedError();
+    }
+
+    let result;
+    try {
+      result = await this.repository.revokeWallet({
+        accountId,
+        walletId: input.walletId,
+        correlationId: input.correlationId,
+      });
+    } catch {
+      throw new WalletRegistrationUnavailableError();
+    }
+    if (result.status !== 'revoked' && result.status !== 'unchanged') {
+      throw new WalletRegistrationUnavailableError();
+    }
+
+    return Object.freeze({ status: 'removed' });
   }
 
   async issueChallenge(

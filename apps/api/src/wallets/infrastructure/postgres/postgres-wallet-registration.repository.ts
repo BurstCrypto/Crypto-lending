@@ -18,6 +18,8 @@ import {
   type PrepareWalletOwnershipChallengeResult,
   type RejectWalletOwnershipChallengeRequest,
   type RejectWalletOwnershipChallengeResult,
+  type RevokeWalletRegistrationRequest,
+  type RevokeWalletRegistrationResult,
   type WalletChallengeRejectionReason,
   type WalletProofScheme,
   type WalletRegistrationRepositoryPort,
@@ -72,6 +74,10 @@ interface CompleteRow extends QueryResultRow {
   registration_outcome: string;
   wallet_id: string | null;
   registered_at: Date | null;
+}
+
+interface RevokeRow extends QueryResultRow {
+  revocation_outcome: string;
 }
 
 interface ActiveWalletRow extends QueryResultRow {
@@ -324,6 +330,27 @@ export class PostgresWalletRegistrationRepository implements WalletRegistrationR
     }
   }
 
+  async revokeWallet(
+    request: RevokeWalletRegistrationRequest,
+  ): Promise<RevokeWalletRegistrationResult> {
+    try {
+      const result = await this.postgres.query<RevokeRow>(
+        `SELECT revoked.revocation_outcome
+         FROM revoke_wallet_registration(
+           $1::uuid, $2::uuid, $3::uuid
+         ) AS revoked`,
+        [parseAccountId(request.accountId), uuid(request.walletId), uuid(request.correlationId)],
+      );
+      const outcome = oneRow(result.rows).revocation_outcome;
+      if (outcome === 'REVOKED') return Object.freeze({ status: 'revoked' });
+      if (outcome === 'UNCHANGED') return Object.freeze({ status: 'unchanged' });
+      throw new WalletRegistrationPersistenceError();
+    } catch (error) {
+      if (error instanceof WalletRegistrationPersistenceError) throw error;
+      throw new WalletRegistrationPersistenceError();
+    }
+  }
+
   async beginChallenge(
     request: BeginWalletOwnershipChallengeRequest,
   ): Promise<BegunWalletOwnershipChallenge> {
@@ -486,7 +513,7 @@ export class PostgresWalletRegistrationRepository implements WalletRegistrationR
         `SELECT completed.registration_outcome,
                 completed.wallet_id,
                 completed.registered_at
-         FROM complete_wallet_registration(
+         FROM complete_wallet_registration_guarded(
            $1::uuid, $2::uuid, $3::uuid,
            $4::smallint, $5::bytea, $6::bytea, $7::bytea,
            $8::smallint, $9::bytea, $10::bytea, $11::bytea,
@@ -518,6 +545,7 @@ export class PostgresWalletRegistrationRepository implements WalletRegistrationR
       if (row.registration_outcome === 'OWNERSHIP_CONFLICT') {
         return Object.freeze({ status: 'ownership_conflict' });
       }
+      if (row.registration_outcome === 'REVOKED') return Object.freeze({ status: 'revoked' });
       if (row.registration_outcome === 'EXPIRED') return Object.freeze({ status: 'expired' });
       if (row.registration_outcome === 'INVALID') return Object.freeze({ status: 'invalid' });
       if (row.registration_outcome === 'REPLAYED') return Object.freeze({ status: 'replayed' });

@@ -9,7 +9,7 @@ const testDatabaseUrl = process.env.TEST_DATABASE_URL;
 const describeWithPostgres = testDatabaseUrl ? describe : describe.skip;
 
 describeWithPostgres('PostgreSQL migration rollback integration', () => {
-  jest.setTimeout(15_000);
+  jest.setTimeout(45_000);
 
   const schema = `kan33_${randomUUID().replaceAll('-', '')}`;
   let adminPool: Pool;
@@ -59,6 +59,9 @@ describeWithPostgres('PostgreSQL migration rollback integration', () => {
       '0011',
       '0012',
       '0013',
+      '0014',
+      '0015',
+      '0016',
     ]);
     const sanitizedLastErrors = await migrationPool.query<{
       id: string;
@@ -148,7 +151,10 @@ describeWithPostgres('PostgreSQL migration rollback integration', () => {
        )`,
     );
     await expect(runner.assertUpToDate()).resolves.toBeUndefined();
-    await expect(runner.down(8)).resolves.toEqual([
+    await expect(runner.down(11)).resolves.toEqual([
+      '0016',
+      '0015',
+      '0014',
       '0013',
       '0012',
       '0011',
@@ -172,6 +178,9 @@ describeWithPostgres('PostgreSQL migration rollback integration', () => {
       '0011',
       '0012',
       '0013',
+      '0014',
+      '0015',
+      '0016',
     ]);
     await expect(
       migrationPool.query<{ last_error: string }>(
@@ -181,7 +190,10 @@ describeWithPostgres('PostgreSQL migration rollback integration', () => {
       rows: [{ last_error: 'OUTBOX_TRANSPORT_FAILED' }],
     });
 
-    await expect(runner.down(12)).resolves.toEqual([
+    await expect(runner.down(15)).resolves.toEqual([
+      '0016',
+      '0015',
+      '0014',
       '0013',
       '0012',
       '0011',
@@ -311,7 +323,22 @@ describeWithPostgres('PostgreSQL migration rollback integration', () => {
 
     const migrationRecordsAfterDown = await migrationPool.query<{ id: string }>(
       'SELECT id FROM schema_migrations WHERE id = ANY($1::text[]) ORDER BY id',
-      [['0004', '0006', '0007', '0008', '0009', '0010', '0011', '0012', '0013']],
+      [
+        [
+          '0004',
+          '0006',
+          '0007',
+          '0008',
+          '0009',
+          '0010',
+          '0011',
+          '0012',
+          '0013',
+          '0014',
+          '0015',
+          '0016',
+        ],
+      ],
     );
     expect(migrationRecordsAfterDown.rows).toEqual([]);
 
@@ -328,6 +355,9 @@ describeWithPostgres('PostgreSQL migration rollback integration', () => {
       '0011',
       '0012',
       '0013',
+      '0014',
+      '0015',
+      '0016',
     ]);
     await expect(runner.assertUpToDate()).resolves.toBeUndefined();
   });

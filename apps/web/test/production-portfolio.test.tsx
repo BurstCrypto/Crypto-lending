@@ -51,10 +51,10 @@ function ExpiredSessionWallet({ onAuthenticationRequired }: WalletOwnershipCallb
   );
 }
 
-function VerifiedWallet({ onVerified }: WalletOwnershipCallbacks) {
+function ChangedWalletRoster({ onWalletsChanged }: WalletOwnershipCallbacks) {
   return (
-    <button type="button" onClick={onVerified}>
-      Simulate verified wallet
+    <button type="button" onClick={onWalletsChanged}>
+      Simulate wallet roster change
     </button>
   );
 }
@@ -230,7 +230,7 @@ describe('authenticated production portfolio', () => {
     expect(screen.queryByRole('button', { name: 'Simulate expired session' })).toBeNull();
   });
 
-  it('hides the old snapshot and refetches after wallet ownership is accepted', async () => {
+  it('hides the old snapshot and refetches after the wallet roster changes', async () => {
     const refreshed = deferred<ReportingPortfolioSnapshot>();
     const restoreSession = vi.fn(async () => PROFILE);
     const readPortfolio = vi
@@ -243,12 +243,12 @@ describe('authenticated production portfolio', () => {
           readPortfolio,
           restoreSession,
         })}
-        walletOwnershipComponent={VerifiedWallet}
+        walletOwnershipComponent={ChangedWalletRoster}
       />,
     );
 
     expect(await screen.findByText('Supported reporting total')).toBeVisible();
-    fireEvent.click(screen.getByRole('button', { name: 'Simulate verified wallet' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Simulate wallet roster change' }));
 
     await waitFor(() => expect(screen.queryByText('Supported reporting total')).toBeNull());
     expect(screen.getByRole('heading', { name: 'Loading your portfolio' })).toBeVisible();

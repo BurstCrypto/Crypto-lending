@@ -863,6 +863,9 @@ describeWithPostgres('KAN-78 immutable fee snapshot PostgreSQL integration', () 
       '0011',
       '0012',
       '0013',
+      '0014',
+      '0015',
+      '0016',
     ]);
     await adminPool.query(
       `GRANT USAGE ON SCHEMA ${quoteIdentifier(schema)} TO ${quoteIdentifier(API_ROLE)}`,
@@ -888,7 +891,7 @@ describeWithPostgres('KAN-78 immutable fee snapshot PostgreSQL integration', () 
         options: `-c search_path=${upgradeSchema}`,
       });
       const migrationsThrough0012 = DATABASE_TEST_SCHEMA_MIGRATION_LIST.filter(
-        ({ id }) => id !== '0013',
+        ({ id }) => id < '0013',
       );
       const preRepairRunner = new MigrationRunner(upgradePool, migrationsThrough0012);
       await expect(preRepairRunner.up()).resolves.toEqual([
@@ -906,7 +909,10 @@ describeWithPostgres('KAN-78 immutable fee snapshot PostgreSQL integration', () 
       ]);
       await expect(preRepairRunner.assertUpToDate()).resolves.toBeUndefined();
 
-      const repairRunner = new MigrationRunner(upgradePool, DATABASE_TEST_SCHEMA_MIGRATION_LIST);
+      const migrationsThrough0013 = DATABASE_TEST_SCHEMA_MIGRATION_LIST.filter(
+        ({ id }) => id <= '0013',
+      );
+      const repairRunner = new MigrationRunner(upgradePool, migrationsThrough0013);
       await expect(repairRunner.up()).resolves.toEqual(['0013']);
       await expect(repairRunner.assertUpToDate()).resolves.toBeUndefined();
     } finally {

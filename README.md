@@ -268,6 +268,24 @@ authenticated EVM EOA and Solana Ed25519 ownership verification with atomic
 replay prevention and encrypted durable wallet identity. It remains disabled by
 default and makes no wallet, RPC, provider, or cloud call.
 
+Verified wallets persist on the account across sign-ins, so returning users do
+not have to reconnect and prove the same wallet on every login. An authenticated
+`DELETE /api/v1/wallets/:walletId` request performs an account-scoped,
+idempotent soft revocation: removing an active wallet, repeating the removal, or
+submitting an identifier that is not active on that account has the same
+no-content outcome. Removal invalidates pending ownership challenges for that
+blockchain identity across Crypto Lending accounts, so a challenge issued before
+removal cannot reactivate it. Adding the wallet again requires a freshly issued
+challenge and a new ownership proof.
+
+Removing a wallet only stops its active association and portfolio monitoring in
+Crypto Lending. It does not disconnect a browser extension or mobile wallet,
+end an external wallet-provider session, revoke any on-chain approval, submit a
+transaction, or move funds. Encrypted registration history and security audit
+records are retained; removal is not a privacy erasure or data-subject-request
+workflow. A separately reviewed privacy deletion, retention, and DSAR workflow
+is still required; this endpoint does not provide one.
+
 ### Mock route
 
 To run the mock route on loopback for an authorized internal test, set the

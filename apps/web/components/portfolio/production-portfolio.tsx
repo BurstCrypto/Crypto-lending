@@ -30,7 +30,7 @@ interface PortfolioReader {
 
 export interface WalletOwnershipCallbacks {
   readonly onAuthenticationRequired: () => void;
-  readonly onVerified: () => void;
+  readonly onWalletsChanged: () => void;
 }
 
 interface ProductionPortfolioDependencies {
@@ -53,13 +53,13 @@ const DEFAULT_DEPENDENCIES: ProductionPortfolioDependencies = Object.freeze({
 
 function DefaultWalletOwnership({
   onAuthenticationRequired,
-  onVerified,
+  onWalletsChanged,
 }: WalletOwnershipCallbacks) {
   return (
     <MainnetWalletOwnership
       id="wallets"
       onAuthenticationRequired={onAuthenticationRequired}
-      onVerified={() => onVerified()}
+      onWalletsChanged={onWalletsChanged}
     />
   );
 }
@@ -166,7 +166,7 @@ export function ProductionPortfolio({
     setPhase('SIGNED_OUT');
   }, []);
 
-  const refreshAfterWalletVerification = useCallback((): void => {
+  const refreshAfterWalletChange = useCallback((): void => {
     requestReference.current?.abort();
     setPortfolio({ status: 'LOADING' });
     setRevision((current) => current + 1);
@@ -192,7 +192,7 @@ export function ProductionPortfolio({
       <PortfolioJumpNavigation />
       <WalletOwnership
         onAuthenticationRequired={clearExpiredSession}
-        onVerified={refreshAfterWalletVerification}
+        onWalletsChanged={refreshAfterWalletChange}
       />
       {portfolio.status === 'READY' || portfolio.status === 'LOADING' ? (
         <ProductionPortfolioView state={portfolio} />

@@ -189,6 +189,44 @@ class InMemoryMigrationDatabase {
           },
         ]);
       } else if (
+        normalized.startsWith(
+          'SELECT ( prior.valid AND state_function.valid AND revoke_function.valid AND guarded_completion.valid',
+        ) &&
+        normalized.includes('revoke_wallet_registration(uuid,uuid,uuid)')
+      ) {
+        return result([
+          {
+            valid:
+              this.accountSchemaExists &&
+              this.jobOutboxExists &&
+              this.ledgerSchemaExists &&
+              this.ledgerIdempotencySchemaExists &&
+              this.authenticationSchemaExists &&
+              this.walletRegistrationSchemaExists &&
+              this.yieldOperationSchemaExists &&
+              this.ledgerFeeAdjustmentIntegrityRepaired,
+          },
+        ]);
+      } else if (
+        normalized.startsWith(
+          'SELECT (prior.valid AND wallet_list.valid AND wallet_capacity.valid)',
+        ) &&
+        normalized.includes('list_active_wallet_registrations(uuid)')
+      ) {
+        return result([
+          {
+            valid:
+              this.accountSchemaExists &&
+              this.jobOutboxExists &&
+              this.ledgerSchemaExists &&
+              this.ledgerIdempotencySchemaExists &&
+              this.authenticationSchemaExists &&
+              this.walletRegistrationSchemaExists &&
+              this.yieldOperationSchemaExists &&
+              this.ledgerFeeAdjustmentIntegrityRepaired,
+          },
+        ]);
+      } else if (
         normalized.startsWith('SELECT (prior.valid AND repair.valid)') &&
         normalized.includes("function_state.proname = 'assert_ledger_journal_integrity'")
       ) {
@@ -275,7 +313,8 @@ class InMemoryMigrationDatabase {
       } else if (
         normalized.startsWith('SELECT (') &&
         normalized.includes('job_outbox_schema_owner_all') &&
-        normalized.includes('pg_catalog.pg_auth_members')
+        normalized.includes('pg_catalog.pg_auth_members') &&
+        !normalized.includes('revoke_wallet_registration(uuid,uuid,uuid)')
       ) {
         // This harness tests MigrationRunner control flow, not PostgreSQL ACL
         // semantics. The dedicated Docker principal suite executes 0005's
@@ -343,6 +382,8 @@ describe('MigrationRunner', () => {
       '0012',
       '0013',
       '0014',
+      '0015',
+      '0016',
     ]);
     expect(database.jobOutboxExists).toBe(true);
     expect(database.applied.has('0001')).toBe(true);
@@ -359,6 +400,8 @@ describe('MigrationRunner', () => {
     expect(database.applied.has('0012')).toBe(true);
     expect(database.applied.has('0013')).toBe(true);
     expect(database.applied.has('0014')).toBe(true);
+    expect(database.applied.has('0015')).toBe(true);
+    expect(database.applied.has('0016')).toBe(true);
     expect(database.accountSchemaExists).toBe(true);
     expect(database.ledgerSchemaExists).toBe(true);
     expect(database.jobOutboxLastErrorConstraintExists).toBe(true);
@@ -367,14 +410,16 @@ describe('MigrationRunner', () => {
     expect(database.walletRegistrationSchemaExists).toBe(true);
     expect(database.yieldOperationSchemaExists).toBe(true);
     expect(database.ledgerFeeAdjustmentIntegrityRepaired).toBe(true);
-    expect(database.queries.filter((query) => query === 'BEGIN')).toHaveLength(12);
+    expect(database.queries.filter((query) => query === 'BEGIN')).toHaveLength(14);
     expect(
       database.queries.filter((query) => query.startsWith('CREATE INDEX CONCURRENTLY')),
     ).toHaveLength(2);
     await expect(runner.assertUpToDate()).resolves.toBeUndefined();
 
     await expect(runner.up()).resolves.toEqual([]);
-    await expect(runner.down(14)).resolves.toEqual([
+    await expect(runner.down(16)).resolves.toEqual([
+      '0016',
+      '0015',
       '0014',
       '0013',
       '0012',
@@ -419,7 +464,7 @@ describe('MigrationRunner', () => {
     );
     await expect(runner.up()).rejects.toThrow('Database migration 0003 schema verification failed');
 
-    await expect(runner.down(12)).rejects.toThrow(
+    await expect(runner.down(14)).rejects.toThrow(
       'Database migration 0003 schema verification failed',
     );
     expect(database.ledgerSchemaExists).toBe(true);
@@ -427,7 +472,9 @@ describe('MigrationRunner', () => {
       'job_outbox_failed_retention_idx',
       "CREATE INDEX CONCURRENTLY job_outbox_failed_retention_idx ON job_outbox (failed_at, id) WHERE status = 'failed'",
     );
-    await expect(runner.down(12)).resolves.toEqual([
+    await expect(runner.down(14)).resolves.toEqual([
+      '0016',
+      '0015',
       '0014',
       '0013',
       '0012',
@@ -454,6 +501,8 @@ describe('MigrationRunner', () => {
       '0012',
       '0013',
       '0014',
+      '0015',
+      '0016',
     ]);
     expect(database.indexes.has('job_outbox_failed_retention_idx')).toBe(true);
     await expect(runner.assertUpToDate()).resolves.toBeUndefined();

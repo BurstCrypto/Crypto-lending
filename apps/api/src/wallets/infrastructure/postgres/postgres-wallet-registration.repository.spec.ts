@@ -161,6 +161,30 @@ describe('PostgresWalletRegistrationRepository', () => {
     ).rejects.toBeInstanceOf(WalletRegistrationPersistenceError);
   });
 
+  it('maps wallet revocation without exposing whether the account-scoped row existed', async () => {
+    const query = jest
+      .fn()
+      .mockResolvedValueOnce(result([{ revocation_outcome: 'REVOKED' }]))
+      .mockResolvedValueOnce(result([{ revocation_outcome: 'UNCHANGED' }]))
+      .mockResolvedValueOnce(result([{ revocation_outcome: 'FORGED' }]));
+    const repository = repositoryWith(query);
+    const request = {
+      accountId: ACCOUNT_ID,
+      walletId: WALLET_ID,
+      correlationId: CORRELATION_ID,
+    };
+
+    await expect(repository.revokeWallet(request)).resolves.toEqual({ status: 'revoked' });
+    await expect(repository.revokeWallet(request)).resolves.toEqual({ status: 'unchanged' });
+    expect(query.mock.calls[0]).toEqual([
+      expect.stringContaining('revoke_wallet_registration('),
+      [ACCOUNT_ID, WALLET_ID, CORRELATION_ID],
+    ]);
+    await expect(repository.revokeWallet(request)).rejects.toBeInstanceOf(
+      WalletRegistrationPersistenceError,
+    );
+  });
+
   it('maps an encrypted challenge to the exact fixed SQL boundary', async () => {
     const query = jest
       .fn()
@@ -230,6 +254,35 @@ describe('PostgresWalletRegistrationRepository', () => {
       challengePayload: request.challengePayload,
     });
     expect(query.mock.calls[0]?.[1]).toEqual([CHALLENGE_ID, ACCOUNT_ID, CORRELATION_ID]);
+  });
+
+  it('uses only guarded completion and maps a revocation tombstone to rejection state', async () => {
+    const encrypted = beginRequest().challengePayload;
+    const query = jest.fn().mockResolvedValue(
+      result([
+        {
+          registration_outcome: 'REVOKED',
+          wallet_id: null,
+          registered_at: null,
+        },
+      ]),
+    );
+    const repository = repositoryWith(query);
+
+    await expect(
+      repository.completeRegistration({
+        challengeId: CHALLENGE_ID,
+        accountId: ACCOUNT_ID,
+        walletId: WALLET_ID,
+        encryptedAddress: encrypted,
+        encryptedMetadata: encrypted,
+        correlationId: CORRELATION_ID,
+      }),
+    ).resolves.toEqual({ status: 'revoked' });
+
+    const [sql] = query.mock.calls[0] as [string];
+    expect(sql).toContain('FROM complete_wallet_registration_guarded(');
+    expect(sql).not.toContain('FROM complete_wallet_registration(');
   });
 
   it('rejects metadata leaks on non-ready outcomes and forged completion results', async () => {

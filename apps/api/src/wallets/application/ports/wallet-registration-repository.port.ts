@@ -98,6 +98,20 @@ export interface ListActiveWalletRegistrationsRequest {
   readonly accountId: AccountId;
 }
 
+export interface RevokeWalletRegistrationRequest {
+  readonly accountId: AccountId;
+  readonly walletId: string;
+  readonly correlationId: string;
+}
+
+export type RevokeWalletRegistrationResult = Readonly<{
+  /**
+   * `unchanged` intentionally combines absent, already-revoked, and
+   * differently-owned wallet identifiers so callers cannot enumerate them.
+   */
+  status: 'revoked' | 'unchanged';
+}>;
+
 /**
  * Persistence-only representation. Address plaintext remains sealed until the
  * account-scoped application service validates every registry and AAD binding.
@@ -120,13 +134,14 @@ export type CompleteWalletRegistrationResult =
       registeredAt: Date;
     }>
   | Readonly<{
-      status: 'expired' | 'invalid' | 'ownership_conflict' | 'replayed';
+      status: 'expired' | 'invalid' | 'ownership_conflict' | 'replayed' | 'revoked';
     }>;
 
 export interface WalletRegistrationRepositoryPort {
   listActiveWallets(
     request: ListActiveWalletRegistrationsRequest,
   ): Promise<readonly ActiveWalletRegistrationRecord[]>;
+  revokeWallet(request: RevokeWalletRegistrationRequest): Promise<RevokeWalletRegistrationResult>;
   beginChallenge(
     request: BeginWalletOwnershipChallengeRequest,
   ): Promise<BegunWalletOwnershipChallenge>;

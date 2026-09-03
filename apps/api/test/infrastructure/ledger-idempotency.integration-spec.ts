@@ -51,7 +51,7 @@ const describeWithPostgres =
 const API_ROLE = 'crypto_api_runtime';
 const IDENTIFIER = /^[a-z][a-z0-9_]{0,62}$/u;
 const LEDGER_IDEMPOTENCY_MIGRATIONS = DATABASE_TEST_SCHEMA_MIGRATION_LIST.filter(
-  ({ id }) => id !== '0010' && id !== '0011' && id !== '0012' && id !== '0013',
+  ({ id }) => id <= '0009',
 );
 
 interface PostingFixture {

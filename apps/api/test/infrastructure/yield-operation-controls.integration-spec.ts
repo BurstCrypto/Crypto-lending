@@ -212,6 +212,9 @@ describeWithPostgres('KAN-186 yield operation PostgreSQL controls', () => {
       '0011',
       '0012',
       '0013',
+      '0014',
+      '0015',
+      '0016',
     ]);
   });
 

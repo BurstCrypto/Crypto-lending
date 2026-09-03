@@ -21,7 +21,11 @@ import {
   type EvmWalletOwnershipClient,
 } from '@/lib/wallets/eip1193/ownership';
 import type { Eip1193Provider, Eip1193RequestArguments } from '@/lib/wallets/eip1193/provider';
-import type { MainnetWalletRosterReader } from '@/lib/wallets/mainnet-wallet-roster-client';
+import {
+  MainnetWalletRosterError,
+  type MainnetRegisteredWalletSummary,
+  type MainnetWalletRosterClient,
+} from '@/lib/wallets/mainnet-wallet-roster-client';
 
 const METAMASK: InjectedProviderDescriptor = Object.freeze({
   selectionId: 'metamask-selection',
@@ -56,6 +60,18 @@ const RESULT: MainnetWalletVerificationResult = Object.freeze({
 });
 
 const EVM_ADDRESS = '0x1111111111111111111111111111111111111111';
+const ETHEREUM_WALLET: MainnetRegisteredWalletSummary = Object.freeze({
+  walletId: '11111111-1111-4111-8111-111111111111',
+  chainId: 'eip155:1',
+  addressHint: '0x111111…111111',
+  registeredAt: '2026-09-02T12:00:00.000Z',
+});
+const SOLANA_WALLET: MainnetRegisteredWalletSummary = Object.freeze({
+  walletId: '22222222-2222-4222-8222-222222222222',
+  chainId: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp',
+  addressHint: '111111…111112',
+  registeredAt: '2026-09-01T12:00:00.000Z',
+});
 
 function announceMetaMask(target: EventTarget, provider: Eip1193Provider): void {
   target.dispatchEvent(
@@ -95,8 +111,9 @@ function runtimeHarness(
 
 function dependencies(
   runtime: MainnetWalletOwnershipRuntime,
-  roster: MainnetWalletRosterReader = {
+  roster: MainnetWalletRosterClient = {
     readWallets: vi.fn(async () => ({ version: 1 as const, wallets: [] })),
+    removeWallet: vi.fn(async () => undefined),
   },
 ) {
   return {
@@ -114,11 +131,13 @@ describe('MainnetWalletOwnership', () => {
   it('uses simple network, wallet, and explicit account buttons before requesting a proof', async () => {
     const runtime = runtimeHarness();
     const onVerified = vi.fn();
+    const onWalletsChanged = vi.fn();
     render(
       <MainnetWalletOwnership
         id="wallets"
         dependencies={dependencies(runtime)}
         onVerified={onVerified}
+        onWalletsChanged={onWalletsChanged}
       />,
     );
 
@@ -154,6 +173,7 @@ describe('MainnetWalletOwnership', () => {
       expect.any(AbortSignal),
     );
     expect(onVerified).toHaveBeenCalledWith(RESULT);
+    expect(onWalletsChanged).toHaveBeenCalledOnce();
   });
 
   it('keeps Ethereum and Solana as separate chain-bound connection choices', async () => {
@@ -234,6 +254,265 @@ describe('MainnetWalletOwnership', () => {
 
     await waitFor(() => expect(onAuthenticationRequired).toHaveBeenCalledOnce());
     expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('requires explicit confirmation and explains the narrow effect of removing a wallet', async () => {
+    const removeWallet = vi.fn<MainnetWalletRosterClient['removeWallet']>();
+    const roster: MainnetWalletRosterClient = {
+      readWallets: vi.fn(async () => ({
+        version: 1 as const,
+        wallets: [ETHEREUM_WALLET, SOLANA_WALLET],
+      })),
+      removeWallet,
+    };
+    render(<MainnetWalletOwnership dependencies={dependencies(runtimeHarness(), roster)} />);
+
+    const removeEthereum = await screen.findByRole('button', {
+      name: `Remove Ethereum wallet ${ETHEREUM_WALLET.addressHint}`,
+    });
+    fireEvent.click(removeEthereum);
+
+    const confirmation = screen.getByRole('group', { name: 'Remove this wallet?' });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Keep wallet' })).toHaveFocus());
+    expect(confirmation).toHaveTextContent('stops Crypto Lending from showing or monitoring');
+    expect(confirmation).toHaveTextContent('does not disconnect your wallet extension');
+    expect(confirmation).toHaveTextContent('revoke onchain approvals');
+    expect(confirmation).toHaveTextContent('move funds');
+    expect(confirmation).toHaveTextContent('requires a new ownership signature');
+    expect(confirmation).toHaveTextContent('An encrypted security record is retained');
+    expect(removeWallet).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Solana' })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Keep wallet' }));
+    expect(screen.queryByRole('group', { name: 'Remove this wallet?' })).toBeNull();
+    expect(removeWallet).not.toHaveBeenCalled();
+    await waitFor(() => expect(removeEthereum).toHaveFocus());
+  });
+
+  it('prevents duplicate removal, confirms only after 204, and refreshes the roster', async () => {
+    let finishRemoval: () => void = () => undefined;
+    const removal = new Promise<void>((resolve) => {
+      finishRemoval = resolve;
+    });
+    const removeWallet = vi.fn<MainnetWalletRosterClient['removeWallet']>(() => removal);
+    const readWallets = vi
+      .fn<MainnetWalletRosterClient['readWallets']>()
+      .mockResolvedValueOnce({ version: 1, wallets: [ETHEREUM_WALLET] })
+      .mockResolvedValueOnce({ version: 1, wallets: [] });
+    const roster: MainnetWalletRosterClient = { readWallets, removeWallet };
+    const onWalletsChanged = vi.fn();
+    render(
+      <MainnetWalletOwnership
+        dependencies={dependencies(runtimeHarness(), roster)}
+        onWalletsChanged={onWalletsChanged}
+      />,
+    );
+
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: `Remove Ethereum wallet ${ETHEREUM_WALLET.addressHint}`,
+      }),
+    );
+    const confirm = screen.getByRole('button', { name: 'Yes, remove wallet' });
+    fireEvent.click(confirm);
+    fireEvent.click(confirm);
+
+    const removing = await screen.findByRole('button', { name: /Removing wallet/u });
+    expect(removing).toBeDisabled();
+    expect(screen.getByRole('group', { name: 'Remove this wallet?' })).toHaveAttribute(
+      'aria-describedby',
+      `remove-wallet-${ETHEREUM_WALLET.walletId}`,
+    );
+    expect(removeWallet).toHaveBeenCalledOnce();
+    expect(removeWallet).toHaveBeenCalledWith(ETHEREUM_WALLET.walletId, expect.any(AbortSignal));
+    expect(readWallets).toHaveBeenCalledOnce();
+
+    finishRemoval();
+    expect(await screen.findByText('No wallets are verified for this account yet.')).toBeVisible();
+    expect(readWallets).toHaveBeenCalledTimes(2);
+    expect(onWalletsChanged).toHaveBeenCalledOnce();
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'Ethereum wallet removed. Portfolio monitoring for that address has stopped.',
+    );
+    expect(screen.getByRole('heading', { name: 'Verified wallets' })).toHaveFocus();
+  });
+
+  it('preserves the roster and offers a safe retry after a removal failure', async () => {
+    const removeWallet = vi
+      .fn<MainnetWalletRosterClient['removeWallet']>()
+      .mockRejectedValueOnce(new MainnetWalletRosterError('UNAVAILABLE', 2))
+      .mockResolvedValueOnce(undefined);
+    const readWallets = vi
+      .fn<MainnetWalletRosterClient['readWallets']>()
+      .mockResolvedValueOnce({ version: 1, wallets: [ETHEREUM_WALLET] })
+      .mockResolvedValueOnce({ version: 1, wallets: [ETHEREUM_WALLET] })
+      .mockResolvedValueOnce({ version: 1, wallets: [] });
+    const roster: MainnetWalletRosterClient = { readWallets, removeWallet };
+    const onWalletsChanged = vi.fn();
+    render(
+      <MainnetWalletOwnership
+        dependencies={dependencies(runtimeHarness(), roster)}
+        onWalletsChanged={onWalletsChanged}
+      />,
+    );
+
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: `Remove Ethereum wallet ${ETHEREUM_WALLET.addressHint}`,
+      }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Yes, remove wallet' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(
+      "We couldn't confirm the removal result. The wallet list is refreshing; check it before trying again.",
+    );
+    expect(alert).not.toHaveTextContent(ETHEREUM_WALLET.walletId);
+    expect(alert).not.toHaveTextContent(ETHEREUM_WALLET.addressHint);
+    expect(screen.queryByRole('group', { name: 'Remove this wallet?' })).toBeNull();
+    await waitFor(() => expect(readWallets).toHaveBeenCalledTimes(2));
+    expect(onWalletsChanged).toHaveBeenCalledOnce();
+    expect(screen.getByText(ETHEREUM_WALLET.addressHint)).toBeVisible();
+
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: `Remove Ethereum wallet ${ETHEREUM_WALLET.addressHint}`,
+      }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Yes, remove wallet' }));
+    expect(await screen.findByText('No wallets are verified for this account yet.')).toBeVisible();
+    expect(removeWallet).toHaveBeenCalledTimes(2);
+    expect(readWallets).toHaveBeenCalledTimes(3);
+    expect(onWalletsChanged).toHaveBeenCalledTimes(2);
+  });
+
+  it('lets the user stop waiting on a stalled removal and reconciles both views', async () => {
+    let operationSignal: AbortSignal | undefined;
+    const readWallets = vi
+      .fn<MainnetWalletRosterClient['readWallets']>()
+      .mockResolvedValue({ version: 1, wallets: [ETHEREUM_WALLET] });
+    const roster: MainnetWalletRosterClient = {
+      readWallets,
+      removeWallet: vi.fn((_walletId, signal) => {
+        operationSignal = signal;
+        return new Promise<void>(() => undefined);
+      }),
+    };
+    const onWalletsChanged = vi.fn();
+    render(
+      <MainnetWalletOwnership
+        dependencies={dependencies(runtimeHarness(), roster)}
+        onWalletsChanged={onWalletsChanged}
+      />,
+    );
+
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: `Remove Ethereum wallet ${ETHEREUM_WALLET.addressHint}`,
+      }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Yes, remove wallet' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Stop waiting and refresh' }));
+
+    expect(operationSignal?.aborted).toBe(true);
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      "We couldn't confirm the removal result.",
+    );
+    await waitFor(() => expect(readWallets).toHaveBeenCalledTimes(2));
+    expect(onWalletsChanged).toHaveBeenCalledOnce();
+    expect(screen.getByRole('heading', { name: 'Verified wallets' })).toHaveFocus();
+  });
+
+  it('recovers if a refreshed roster no longer contains the confirmation target', async () => {
+    const initialRoster: MainnetWalletRosterClient = {
+      readWallets: vi.fn(async () => ({ version: 1 as const, wallets: [ETHEREUM_WALLET] })),
+      removeWallet: vi.fn(async () => undefined),
+    };
+    const refreshedRoster: MainnetWalletRosterClient = {
+      readWallets: vi.fn(async () => ({ version: 1 as const, wallets: [] })),
+      removeWallet: vi.fn(async () => undefined),
+    };
+    const onWalletsChanged = vi.fn();
+    const view = render(
+      <MainnetWalletOwnership
+        dependencies={dependencies(runtimeHarness(), initialRoster)}
+        onWalletsChanged={onWalletsChanged}
+      />,
+    );
+
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: `Remove Ethereum wallet ${ETHEREUM_WALLET.addressHint}`,
+      }),
+    );
+    expect(screen.getByRole('group', { name: 'Remove this wallet?' })).toBeVisible();
+
+    view.rerender(
+      <MainnetWalletOwnership
+        dependencies={dependencies(runtimeHarness(), refreshedRoster)}
+        onWalletsChanged={onWalletsChanged}
+      />,
+    );
+
+    expect(await screen.findByText('No wallets are verified for this account yet.')).toBeVisible();
+    expect(screen.queryByRole('group', { name: 'Remove this wallet?' })).toBeNull();
+    expect(
+      await screen.findByText('The wallet is no longer active on this account.'),
+    ).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Ethereum' })).toBeEnabled();
+    expect(onWalletsChanged).toHaveBeenCalledOnce();
+    expect(screen.getByRole('heading', { name: 'Verified wallets' })).toHaveFocus();
+  });
+
+  it('hands an expired removal session back without exposing an error', async () => {
+    const onAuthenticationRequired = vi.fn();
+    const roster: MainnetWalletRosterClient = {
+      readWallets: vi.fn(async () => ({ version: 1 as const, wallets: [ETHEREUM_WALLET] })),
+      removeWallet: vi.fn(async () => {
+        throw new MainnetWalletRosterError('UNAUTHENTICATED');
+      }),
+    };
+    render(
+      <MainnetWalletOwnership
+        dependencies={dependencies(runtimeHarness(), roster)}
+        onAuthenticationRequired={onAuthenticationRequired}
+      />,
+    );
+
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: `Remove Ethereum wallet ${ETHEREUM_WALLET.addressHint}`,
+      }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Yes, remove wallet' }));
+
+    await waitFor(() => expect(onAuthenticationRequired).toHaveBeenCalledOnce());
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('aborts an in-flight removal when the wallet screen unmounts', async () => {
+    let operationSignal: AbortSignal | undefined;
+    const roster: MainnetWalletRosterClient = {
+      readWallets: vi.fn(async () => ({ version: 1 as const, wallets: [ETHEREUM_WALLET] })),
+      removeWallet: vi.fn((_walletId, signal) => {
+        operationSignal = signal;
+        return new Promise<void>(() => undefined);
+      }),
+    };
+    const view = render(
+      <MainnetWalletOwnership dependencies={dependencies(runtimeHarness(), roster)} />,
+    );
+
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: `Remove Ethereum wallet ${ETHEREUM_WALLET.addressHint}`,
+      }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Yes, remove wallet' }));
+    await waitFor(() => expect(operationSignal).toBeDefined());
+
+    view.unmount();
+    expect(operationSignal?.aborted).toBe(true);
   });
 });
 
