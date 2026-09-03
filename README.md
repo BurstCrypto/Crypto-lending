@@ -49,6 +49,9 @@ actions are separate security boundaries. The current mainnet slice is
 read-only; existing testnet executors are not promoted or relabeled. See the
 [mainnet rollout boundary](docs/mainnet-rollout.md) for the explicit gates
 before live reads or any real-value write.
+The [smart lending allocation policy](docs/smart-lending-allocation-policy.md)
+defines the non-executing, fee-aware recommendation boundary for comparing
+same-chain and explicitly opted-in Ethereum/Solana cross-chain routes.
 
 ## Isolated regression harness (not product runtime)
 
