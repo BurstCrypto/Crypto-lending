@@ -1,4 +1,5 @@
 import type { EnabledSmartLendingExternalFeedConfig } from './smart-lending-external-feed.config';
+import { AAVE_V3_ETHEREUM_MARKET_GRAPHQL_REQUEST } from '../aave/aave-v3-market-feed.query';
 import {
   FixedSmartLendingExternalFeedClient,
   SmartLendingExternalFeedError,
@@ -19,6 +20,7 @@ function enabledConfig(
     approval: null,
     lifiApiKey: null,
     killSwitches: {
+      [SmartLendingExternalFeedDestination.AaveV3EthereumMarket]: false,
       [SmartLendingExternalFeedDestination.DefiLlamaYields]: false,
       [SmartLendingExternalFeedDestination.LifiQuote]: false,
     },
@@ -26,12 +28,24 @@ function enabledConfig(
   };
 }
 
-function jsonResponse(value: unknown, init: ResponseInit = {}): Response {
-  return new Response(JSON.stringify(value), {
-    status: 200,
-    ...init,
-    headers: { 'content-type': 'application/json; charset=utf-8', ...init.headers },
-  });
+function responseAt(response: Response, url: string): Response {
+  Object.defineProperty(response, 'url', { configurable: true, value: url });
+  return response;
+}
+
+function jsonResponse(
+  value: unknown,
+  init: ResponseInit = {},
+  url = 'https://yields.llama.fi/pools',
+): Response {
+  return responseAt(
+    new Response(JSON.stringify(value), {
+      status: 200,
+      ...init,
+      headers: { 'content-type': 'application/json; charset=utf-8', ...init.headers },
+    }),
+    url,
+  );
 }
 
 function lifiQuery(): LifiQuoteQuery {
@@ -59,6 +73,9 @@ describe('FixedSmartLendingExternalFeedClient', () => {
     await expect(
       client.get(SmartLendingExternalFeedDestination.DefiLlamaYields, {}),
     ).rejects.toMatchObject({ code: 'FEEDS_DISABLED' });
+    await expect(client.readEthereumCoreMarket()).rejects.toMatchObject({
+      code: 'FEEDS_DISABLED',
+    });
     expect(fetcher).not.toHaveBeenCalled();
   });
 
@@ -67,6 +84,7 @@ describe('FixedSmartLendingExternalFeedClient', () => {
     const client = new FixedSmartLendingExternalFeedClient(
       enabledConfig({
         killSwitches: {
+          [SmartLendingExternalFeedDestination.AaveV3EthereumMarket]: false,
           [SmartLendingExternalFeedDestination.DefiLlamaYields]: true,
           [SmartLendingExternalFeedDestination.LifiQuote]: false,
         },
@@ -115,6 +133,57 @@ describe('FixedSmartLendingExternalFeedClient', () => {
     expect(init.body).toBeUndefined();
   });
 
+  it('posts only the fixed wallet-free Aave Ethereum Core market query', async () => {
+    const fetcher = jest.fn(async () =>
+      jsonResponse({ data: { market: { reserves: [] } } }, {}, 'https://api.v3.aave.com/graphql'),
+    );
+    const client = new FixedSmartLendingExternalFeedClient(
+      enabledConfig({ lifiApiKey: 'server-only-key' }),
+      fetcher,
+    );
+
+    await expect(client.readEthereumCoreMarket()).resolves.toEqual({
+      data: { market: { reserves: [] } },
+    });
+
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    const [input, init] = fetcher.mock.calls[0] as unknown as [URL, RequestInit];
+    expect(input.href).toBe('https://api.v3.aave.com/graphql');
+    expect(init).toMatchObject({
+      method: 'POST',
+      headers: {
+        accept: 'application/json',
+        'content-type': 'application/json',
+      },
+      credentials: 'omit',
+      redirect: 'error',
+      cache: 'no-store',
+      referrerPolicy: 'no-referrer',
+    });
+    expect(init.headers).not.toHaveProperty('x-lifi-api-key');
+    expect(JSON.parse(String(init.body))).toEqual(AAVE_V3_ETHEREUM_MARKET_GRAPHQL_REQUEST);
+    expect(String(init.body)).not.toMatch(/\b(?:mutation|user|transaction)\b/iu);
+  });
+
+  it('fails before an Aave request when its destination kill switch is active', async () => {
+    const fetcher = jest.fn();
+    const client = new FixedSmartLendingExternalFeedClient(
+      enabledConfig({
+        killSwitches: {
+          [SmartLendingExternalFeedDestination.AaveV3EthereumMarket]: true,
+          [SmartLendingExternalFeedDestination.DefiLlamaYields]: false,
+          [SmartLendingExternalFeedDestination.LifiQuote]: false,
+        },
+      }),
+      fetcher,
+    );
+
+    await expect(client.readEthereumCoreMarket()).rejects.toMatchObject({
+      code: 'DESTINATION_DISABLED',
+    });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
   it('rejects all DefiLlama query parameters and accessor properties', async () => {
     const fetcher = jest.fn();
     const client = new FixedSmartLendingExternalFeedClient(enabledConfig(), fetcher);
@@ -135,7 +204,9 @@ describe('FixedSmartLendingExternalFeedClient', () => {
   });
 
   it('builds a deterministic allowlisted LI.FI query and scopes the API key to LI.FI', async () => {
-    const fetcher = jest.fn(async () => jsonResponse({ estimate: { toAmountMin: '999000' } }));
+    const fetcher = jest.fn(async (input: RequestInfo | URL) =>
+      jsonResponse({ estimate: { toAmountMin: '999000' } }, {}, String(input)),
+    );
     const client = new FixedSmartLendingExternalFeedClient(
       enabledConfig({ lifiApiKey: 'server-only-key' }),
       fetcher,
@@ -206,8 +277,15 @@ describe('FixedSmartLendingExternalFeedClient', () => {
       value: 'https://attacker.invalid/',
     });
     const responses = [
-      new Response('{}', { status: 503, headers: { 'content-type': 'application/json' } }),
-      new Response('{}', { status: 200, headers: { 'content-type': 'text/html' } }),
+      responseAt(
+        new Response('{}', { status: 503, headers: { 'content-type': 'application/json' } }),
+        'https://yields.llama.fi/pools',
+      ),
+      responseAt(
+        new Response('{}', { status: 200, headers: { 'content-type': 'text/html' } }),
+        'https://yields.llama.fi/pools',
+      ),
+      new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } }),
       mismatchedUrl,
     ];
     for (const response of responses) {
@@ -244,12 +322,15 @@ describe('FixedSmartLendingExternalFeedClient', () => {
   });
 
   it('rejects declared oversized responses and malformed JSON', async () => {
-    const oversized = new Response('{}', {
-      headers: {
-        'content-type': 'application/json',
-        'content-length': String(32 * 1_024 * 1_024 + 1),
-      },
-    });
+    const oversized = responseAt(
+      new Response('{}', {
+        headers: {
+          'content-type': 'application/json',
+          'content-length': String(32 * 1_024 * 1_024 + 1),
+        },
+      }),
+      'https://yields.llama.fi/pools',
+    );
     const oversizedClient = new FixedSmartLendingExternalFeedClient(
       enabledConfig(),
       jest.fn(async () => oversized),
@@ -261,9 +342,14 @@ describe('FixedSmartLendingExternalFeedClient', () => {
 
     const malformedClient = new FixedSmartLendingExternalFeedClient(
       enabledConfig(),
-      jest.fn(
-        async () =>
-          new Response('{', { status: 200, headers: { 'content-type': 'application/json' } }),
+      jest.fn(async () =>
+        responseAt(
+          new Response('{', {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          }),
+          'https://yields.llama.fi/pools',
+        ),
       ),
     );
     await expect(

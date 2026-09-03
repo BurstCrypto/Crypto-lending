@@ -1,7 +1,9 @@
 export {
+  AAVE_V3_ETHEREUM_MARKET_EXTERNAL_FEED_CLIENT,
   SMART_LENDING_EXTERNAL_FEED_CLIENT,
   FixedSmartLendingExternalFeedClient,
   SmartLendingExternalFeedError,
+  type AaveV3EthereumMarketExternalFeedClient,
   type SmartLendingExternalFeedClient,
   type SmartLendingExternalFeedErrorCode,
 } from './smart-lending-external-feed.client';
@@ -20,5 +22,6 @@ export {
   type DefiLlamaYieldsQuery,
   type LifiQuoteChain,
   type LifiQuoteQuery,
+  type SmartLendingExternalFeedGetDestination,
   type SmartLendingExternalFeedQueryByDestination,
 } from './smart-lending-external-feed.types';

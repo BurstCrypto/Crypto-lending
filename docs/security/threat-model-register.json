@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
   "ticket": "KAN-49",
-  "modelVersion": "2026-08-22",
+  "modelVersion": "2026-09-03",
   "localStatus": "READY_FOR_INDEPENDENT_REVIEW",
-  "scope": "Crypto Lending repository application, wallet-validation, data-plane, operator, and supply-chain boundaries",
+  "scope": "Crypto Lending repository application, wallet-validation, smart-lending external evidence, data-plane, operator, and supply-chain boundaries",
   "independentApproval": {
     "ticket": "KAN-235",
     "status": "PENDING",
@@ -154,6 +154,22 @@
         "case history and operator actions"
       ],
       "evidence": ["apps/api/src/app.module.ts", "apps/api/src/accounts/auth/current-principal.ts"]
+    },
+    {
+      "id": "TB-12",
+      "name": "API to smart-lending evidence vendors",
+      "source": "Smart-lending API adapters only if exact destination egress is separately approved; currently production-denied",
+      "destination": "Fixed Aave, DefiLlama, and LI.FI HTTPS endpoints",
+      "data": [
+        "fixed Aave Ethereum Core market query and public reserve response",
+        "aggregate public yield observations",
+        "LI.FI wallet addresses, network and asset identities, exact amounts, and route quote responses"
+      ],
+      "evidence": [
+        "apps/api/src/smart-lending/infrastructure/external-feeds/smart-lending-external-feed.client.ts",
+        "apps/api/src/smart-lending/infrastructure/aave/aave-v3-market-feed.adapter.ts",
+        "docs/smart-lending-allocation-policy.md"
+      ]
     }
   ],
   "dataAssets": [
@@ -391,6 +407,24 @@
         "apps/api/src/wallets/domain/wallet-identity.ts",
         "apps/api/src/wallets/infrastructure/crypto/wallet-registration-crypto.ts"
       ]
+    },
+    {
+      "id": "DATA-018",
+      "name": "Smart-lending market corroboration, route quote requests, and quote responses",
+      "classification": "RESTRICTED",
+      "cia": { "confidentiality": "HIGH", "integrity": "HIGH", "availability": "HIGH" },
+      "stores": [
+        "API process memory only in the current dormant adapters",
+        "Third-party vendor systems only if a separately approved non-production exercise activates egress"
+      ],
+      "retention": "REQUEST_SCOPED_MEMORY_ONLY; THIRD_PARTY_RETENTION_POLICY_PENDING",
+      "logging": "NO_WALLET_ADDRESS_EXACT_AMOUNT_RAW_QUERY_OR_RAW_PROVIDER_PAYLOAD",
+      "owner": "Blockchain, Privacy, and Risk",
+      "evidence": [
+        "apps/api/src/smart-lending/application/composed-fee-aware-allocation-input.reader.ts",
+        "apps/api/src/smart-lending/infrastructure/external-feeds/smart-lending-external-feed.client.ts",
+        "docs/smart-lending-allocation-policy.md"
+      ]
     }
   ],
   "secretInventory": [
@@ -582,6 +616,23 @@
         "apps/api/src/wallets/infrastructure/config/wallet-registration.config.ts",
         "apps/api/src/wallets/infrastructure/crypto/wallet-registration-crypto.ts",
         "docs/KAN-50.md"
+      ]
+    },
+    {
+      "id": "KEY-016",
+      "name": "Optional LI.FI server API authentication credential",
+      "classification": "RESTRICTED",
+      "consumers": [
+        "Smart-lending LI.FI external-feed adapter in an explicitly approved non-production exercise"
+      ],
+      "injection": "Optional server-only SMART_LENDING_LIFI_API_KEY environment value from separately authorized managed custody; absent by default and production activation is rejected",
+      "storage": "LI.FI provider custody and API process memory only when configured; never browser, query string, application persistence, logs, source, or review evidence",
+      "rotation": "Revoke and replace through LI.FI after exposure, personnel or processor change, or policy expiry; verify old-value denial and replace runtime tasks",
+      "owner": "Security, SRE, and Privacy",
+      "evidence": [
+        "apps/api/src/smart-lending/infrastructure/external-feeds/smart-lending-external-feed.config.ts",
+        "apps/api/src/smart-lending/infrastructure/external-feeds/smart-lending-external-feed.client.ts",
+        "docs/smart-lending-allocation-policy.md"
       ]
     }
   ],
@@ -933,17 +984,22 @@
       "stride": ["INFORMATION_DISCLOSURE", "ELEVATION_OF_PRIVILEGE"],
       "scenario": "A credential, private key, seed phrase, connection string, raw token, or signature enters Git history, application logs, build output, or review evidence.",
       "risk": "HIGH",
-      "boundaryIds": ["TB-04", "TB-06", "TB-08", "TB-09"],
+      "boundaryIds": ["TB-04", "TB-06", "TB-08", "TB-09", "TB-12"],
       "assetIds": ["DATA-004", "DATA-005", "DATA-009", "DATA-013", "DATA-015"],
       "response": "MITIGATE",
       "mitigations": [
         "History-aware repository secret scanner and mutation tests",
         "API and worker application-owned structured logging source policy and field allowlists",
-        "Workload-specific managed secret references; no cloud, provider, or runtime credentials in CI, and the ephemeral GitHub token is read-only and not persisted"
+        "Workload-specific managed secret references; no cloud, provider, or runtime credentials in CI, and the ephemeral GitHub token is read-only and not persisted",
+        "The optional LI.FI credential is server-only, absent by default, excluded from query strings, and unreachable in production while external-feed activation is rejected"
       ],
       "owner": "Security, SRE, and Release",
       "status": "OPEN_FOLLOW_UP",
-      "evidence": ["docs/KAN-50.md", "docs/KAN-51.md"],
+      "evidence": [
+        "docs/KAN-50.md",
+        "docs/KAN-51.md",
+        "apps/api/src/smart-lending/infrastructure/external-feeds/smart-lending-external-feed.client.ts"
+      ],
       "residualRisk": "Web/framework error paths, ignored local files, runtime memory, external systems, and deployed logs remain outside the complete local source-policy boundary.",
       "followUp": "KAN-51 web and framework error-path coverage plus KAN-235 deployed runtime and reviewer evidence inspection"
     },
@@ -1078,6 +1134,78 @@
       "evidence": ["docs/KAN-37.md", "docs/KAN-51.md"],
       "residualRisk": "Deployed saturation, edge behavior, and distributed rate-limit effectiveness are unproven.",
       "followUp": "KAN-52 saturation telemetry and KAN-235 deployed edge/load review"
+    },
+    {
+      "id": "THR-LEDGER-005",
+      "domain": "LEDGER",
+      "stride": ["TAMPERING", "REPUDIATION"],
+      "scenario": "A compromised, spoofed, stale, incomplete, or semantically changed lending-market or route-quote response is treated as approved evidence and creates an unsafe recommendation or financial action.",
+      "risk": "HIGH",
+      "boundaryIds": ["TB-12"],
+      "assetIds": ["DATA-014", "DATA-018"],
+      "response": "MITIGATE",
+      "mitigations": [
+        "Destinations, methods, queries, and the Aave request body are fixed while strict parsers enforce response shape, size, content type, redirect, timeout, and numeric bounds",
+        "Aave and DefiLlama observations are corroboration only and cannot establish recommendation eligibility or authorize a financial action",
+        "Production feed activation is rejected, no HTTP recommendation route exists, and required production input adapters remain unavailable"
+      ],
+      "owner": "Blockchain, Risk, and Security",
+      "status": "OPEN_EXTERNAL",
+      "evidence": [
+        "apps/api/src/smart-lending/infrastructure/external-feeds/smart-lending-external-feed.client.ts",
+        "apps/api/src/smart-lending/infrastructure/aave/aave-v3-market-feed.adapter.ts",
+        "docs/smart-lending-allocation-policy.md"
+      ],
+      "residualRisk": "Vendor authenticity beyond TLS, authenticated block freshness, deployment anchoring, schema-drift operations, divergence policy, and independent provider review are absent.",
+      "followUp": "Approve exact egress and provider evidence, then implement authenticated chain freshness, deployment anchoring, divergence handling, and independent review before activation"
+    },
+    {
+      "id": "THR-WALLET-004",
+      "domain": "WALLET",
+      "stride": ["INFORMATION_DISCLOSURE", "REPUDIATION"],
+      "scenario": "A cross-chain quote request lets a third party correlate a customer's Ethereum and Solana wallets, assets, exact amount, and lending intent without specific, current disclosure consent.",
+      "risk": "HIGH",
+      "boundaryIds": ["TB-12"],
+      "assetIds": ["DATA-017", "DATA-018"],
+      "response": "MITIGATE",
+      "mitigations": [
+        "Production activation is rejected, no public recommendation route exists, and the raw bridge reader is not exported from the runtime module",
+        "Cross-chain consideration and LI.FI disclosure consents are separate and bound to the account, enclosing policy, both wallet IDs, and exact directed network pair",
+        "The full-lifecycle quote fingerprint binds account, wallets, assets, amount, consents, policy, evidence, risk, deadline, and route allowlist while outward errors are sanitized"
+      ],
+      "owner": "Privacy, Wallet, and Security",
+      "status": "OPEN_EXTERNAL",
+      "evidence": [
+        "apps/api/src/smart-lending/application/composed-fee-aware-allocation-input.reader.ts",
+        "apps/api/src/smart-lending/smart-lending.module.ts",
+        "docs/smart-lending-allocation-policy.md"
+      ],
+      "residualRisk": "LI.FI processor terms, vendor query logging, retention, deletion, data-subject handling, consent presentation, and deployed leak evidence are unresolved.",
+      "followUp": "Privacy and Security must approve the exact disclosure and lifecycle controls and verify them against a deployed non-production candidate before activation"
+    },
+    {
+      "id": "THR-AVAILABILITY-003",
+      "domain": "AVAILABILITY",
+      "stride": ["DENIAL_OF_SERVICE"],
+      "scenario": "Slow, unavailable, or rate-limited market and bridge vendors, or excessive candidate fan-out, exhaust API capacity, vendor quotas, or approved spend.",
+      "risk": "HIGH",
+      "boundaryIds": ["TB-12"],
+      "assetIds": ["DATA-012", "DATA-018"],
+      "response": "MITIGATE",
+      "mitigations": [
+        "One aggregate composition deadline and shared abort signal bound all upstream reads, with sequential quote reads and a hard candidate cap",
+        "The transport enforces per-request timeouts, response-size bounds, fixed destinations, and independent kill switches",
+        "No public route exists, production activation is rejected, and unavailable defaults prevent current recommendation traffic"
+      ],
+      "owner": "Backend, Finance, and SRE",
+      "status": "OPEN_FOLLOW_UP",
+      "evidence": [
+        "apps/api/src/smart-lending/application/composed-fee-aware-allocation-input.reader.ts",
+        "apps/api/src/smart-lending/infrastructure/external-feeds/smart-lending-external-feed.client.ts",
+        "docs/smart-lending-allocation-policy.md"
+      ],
+      "residualRisk": "Per-account and global request or spend budgets, distributed rate control, circuit breakers, single-flight caching, vendor-rate contracts, and deployed alerts are absent.",
+      "followUp": "Implement bounded request and spend budgets, distributed rate controls, circuit breakers, single-flight caching, and deployed alert evidence before route exposure"
     }
   ]
 }

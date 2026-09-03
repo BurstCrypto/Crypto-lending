@@ -29,12 +29,13 @@ describe('loadSmartLendingExternalFeedConfig', () => {
     expect(() =>
       loadSmartLendingExternalFeedConfig({
         SMART_LENDING_EXTERNAL_FEEDS_MODE: 'disabled',
-        SMART_LENDING_DEFILLAMA_KILL_SWITCH: 'off',
+        SMART_LENDING_AAVE_V3_KILL_SWITCH: 'off',
       }),
     ).toThrow(SmartLendingExternalFeedConfigurationError);
   });
 
   it.each([
+    'SMART_LENDING_AAVE_V3_URL',
     'SMART_LENDING_DEFILLAMA_URL',
     'SMART_LENDING_LIFI_ENDPOINT',
     'SMART_LENDING_EXTERNAL_FEEDS_PROXY_ORIGIN',
@@ -50,6 +51,7 @@ describe('loadSmartLendingExternalFeedConfig', () => {
   });
 
   it.each([
+    'SMART_LENDING_AAVE_V3_PRIVATE_KEY',
     'SMART_LENDING_LIFI_PRIVATE_KEY',
     'SMART_LENDING_DEFILLAMA_SIGNER_KEY',
     'SMART_LENDING_EXTERNAL_FEEDS_MNEMONIC',
@@ -65,7 +67,7 @@ describe('loadSmartLendingExternalFeedConfig', () => {
     }
   });
 
-  it('keeps both destination kill switches active by default when enabled', () => {
+  it('keeps every destination kill switch active by default when enabled', () => {
     expect(
       loadSmartLendingExternalFeedConfig({
         NODE_ENV: 'test',
@@ -76,17 +78,19 @@ describe('loadSmartLendingExternalFeedConfig', () => {
       approval: null,
       lifiApiKey: null,
       killSwitches: {
+        [SmartLendingExternalFeedDestination.AaveV3EthereumMarket]: true,
         [SmartLendingExternalFeedDestination.DefiLlamaYields]: true,
         [SmartLendingExternalFeedDestination.LifiQuote]: true,
       },
     });
   });
 
-  it('allows each destination to be enabled independently and accepts a server API key', () => {
+  it('allows the Aave destination to be enabled independently and accepts a server API key', () => {
     const config = loadSmartLendingExternalFeedConfig({
       ...approvalBinding(),
       SMART_LENDING_EXTERNAL_FEEDS_MODE: 'enabled',
-      SMART_LENDING_DEFILLAMA_KILL_SWITCH: 'off',
+      SMART_LENDING_AAVE_V3_KILL_SWITCH: 'off',
+      SMART_LENDING_DEFILLAMA_KILL_SWITCH: 'on',
       SMART_LENDING_LIFI_KILL_SWITCH: 'on',
       SMART_LENDING_LIFI_API_KEY: 'server-api-key',
     });
@@ -94,7 +98,8 @@ describe('loadSmartLendingExternalFeedConfig', () => {
       mode: 'enabled',
       lifiApiKey: 'server-api-key',
       killSwitches: {
-        [SmartLendingExternalFeedDestination.DefiLlamaYields]: false,
+        [SmartLendingExternalFeedDestination.AaveV3EthereumMarket]: false,
+        [SmartLendingExternalFeedDestination.DefiLlamaYields]: true,
         [SmartLendingExternalFeedDestination.LifiQuote]: true,
       },
     });
@@ -115,12 +120,12 @@ describe('loadSmartLendingExternalFeedConfig', () => {
     ).toThrow(SmartLendingExternalFeedConfigurationError);
   });
 
-  it('requires the complete evidence binding before either non-production destination is active', () => {
+  it('requires the complete evidence binding before any non-production destination is active', () => {
     expect(() =>
       loadSmartLendingExternalFeedConfig({
         NODE_ENV: 'development',
         SMART_LENDING_EXTERNAL_FEEDS_MODE: 'enabled',
-        SMART_LENDING_DEFILLAMA_KILL_SWITCH: 'off',
+        SMART_LENDING_AAVE_V3_KILL_SWITCH: 'off',
       }),
     ).toThrow(
       expect.objectContaining<Partial<SmartLendingExternalFeedConfigurationError>>({
@@ -147,7 +152,7 @@ describe('loadSmartLendingExternalFeedConfig', () => {
       loadSmartLendingExternalFeedConfig({
         ...approvalBinding(),
         NODE_ENV: 'production',
-        SMART_LENDING_DEFILLAMA_KILL_SWITCH: 'off',
+        SMART_LENDING_AAVE_V3_KILL_SWITCH: 'off',
       }),
     ).toThrow(
       expect.objectContaining<Partial<SmartLendingExternalFeedConfigurationError>>({

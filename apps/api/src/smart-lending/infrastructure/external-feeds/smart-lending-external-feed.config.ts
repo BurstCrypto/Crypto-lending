@@ -41,6 +41,7 @@ export class SmartLendingExternalFeedConfigurationError extends Error {
 }
 
 const MODE = 'SMART_LENDING_EXTERNAL_FEEDS_MODE' as const;
+const AAVE_V3_KILL_SWITCH = 'SMART_LENDING_AAVE_V3_KILL_SWITCH' as const;
 const DEFILLAMA_KILL_SWITCH = 'SMART_LENDING_DEFILLAMA_KILL_SWITCH' as const;
 const LIFI_KILL_SWITCH = 'SMART_LENDING_LIFI_KILL_SWITCH' as const;
 const LIFI_API_KEY = 'SMART_LENDING_LIFI_API_KEY' as const;
@@ -53,6 +54,7 @@ const APPROVAL_VARIABLES = Object.freeze([
 ] as const);
 const REVIEWED_VARIABLES = new Set<string>([
   MODE,
+  AAVE_V3_KILL_SWITCH,
   DEFILLAMA_KILL_SWITCH,
   LIFI_KILL_SWITCH,
   LIFI_API_KEY,
@@ -60,6 +62,7 @@ const REVIEWED_VARIABLES = new Set<string>([
 ]);
 const MANAGED_PREFIXES = [
   'SMART_LENDING_EXTERNAL_FEEDS_',
+  'SMART_LENDING_AAVE_',
   'SMART_LENDING_DEFILLAMA_',
   'SMART_LENDING_LIFI_',
 ] as const;
@@ -179,6 +182,10 @@ export function loadSmartLendingExternalFeedConfig(
   }
 
   const killSwitches = Object.freeze({
+    [SmartLendingExternalFeedDestination.AaveV3EthereumMarket]: killSwitch(
+      environment,
+      AAVE_V3_KILL_SWITCH,
+    ),
     [SmartLendingExternalFeedDestination.DefiLlamaYields]: killSwitch(
       environment,
       DEFILLAMA_KILL_SWITCH,

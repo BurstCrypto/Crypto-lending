@@ -52,9 +52,10 @@ before live reads or any real-value write.
 The [smart lending allocation policy](docs/smart-lending-allocation-policy.md)
 defines the non-executing, fee-aware recommendation boundary for comparing
 same-chain and explicitly opted-in Ethereum/Solana cross-chain routes. Passive,
-disabled-by-default adapters now normalize aggregate market corroboration and
-read-only round-trip bridge quotes; they do not activate a provider or a
-mainnet transaction path.
+disabled-by-default adapters now normalize wallet-free Aave Ethereum market
+corroboration, aggregate market corroboration, and read-only round-trip bridge
+quotes. A fail-closed composition boundary is wired with unavailable defaults;
+none of these pieces activates a provider or a mainnet transaction path.
 
 ## Isolated regression harness (not product runtime)
 

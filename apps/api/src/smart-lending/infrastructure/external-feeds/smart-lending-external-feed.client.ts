@@ -1,11 +1,20 @@
 import type { SmartLendingExternalFeedConfig } from './smart-lending-external-feed.config';
+import { AAVE_V3_ETHEREUM_MARKET_GRAPHQL_REQUEST } from '../aave/aave-v3-market-feed.query';
 import {
   SmartLendingExternalFeedDestination,
   type LifiQuoteQuery,
+  type SmartLendingExternalFeedGetDestination,
   type SmartLendingExternalFeedQueryByDestination,
 } from './smart-lending-external-feed.types';
 
 export const SMART_LENDING_EXTERNAL_FEED_CLIENT = Symbol('SMART_LENDING_EXTERNAL_FEED_CLIENT');
+export const AAVE_V3_ETHEREUM_MARKET_EXTERNAL_FEED_CLIENT = Symbol(
+  'AAVE_V3_ETHEREUM_MARKET_EXTERNAL_FEED_CLIENT',
+);
+
+export interface AaveV3EthereumMarketExternalFeedClient {
+  readEthereumCoreMarket(): Promise<unknown>;
+}
 
 export type SmartLendingExternalFeedErrorCode =
   | 'FEEDS_DISABLED'
@@ -24,7 +33,7 @@ export class SmartLendingExternalFeedError extends Error {
 }
 
 export interface SmartLendingExternalFeedClient {
-  get<Destination extends SmartLendingExternalFeedDestination>(
+  get<Destination extends SmartLendingExternalFeedGetDestination>(
     destination: Destination,
     query: SmartLendingExternalFeedQueryByDestination[Destination],
   ): Promise<unknown>;
@@ -39,6 +48,11 @@ interface DestinationPolicy {
 const DESTINATION_POLICIES: Readonly<
   Record<SmartLendingExternalFeedDestination, DestinationPolicy>
 > = Object.freeze({
+  [SmartLendingExternalFeedDestination.AaveV3EthereumMarket]: Object.freeze({
+    endpoint: 'https://api.v3.aave.com/graphql',
+    timeoutMilliseconds: 7_000,
+    responseMaximumBytes: 2 * 1_024 * 1_024,
+  }),
   [SmartLendingExternalFeedDestination.DefiLlamaYields]: Object.freeze({
     endpoint: 'https://yields.llama.fi/pools',
     timeoutMilliseconds: 10_000,
@@ -256,71 +270,106 @@ async function boundedJson(response: Response, maximumBytes: number): Promise<un
   }
 }
 
-export class FixedSmartLendingExternalFeedClient implements SmartLendingExternalFeedClient {
+interface LockedJsonRequest {
+  readonly method: 'GET' | 'POST';
+  readonly headers: Readonly<Record<string, string>>;
+  readonly body?: string;
+}
+
+async function requestJson(
+  fetchImplementation: typeof fetch,
+  endpoint: URL,
+  policy: DestinationPolicy,
+  request: LockedJsonRequest,
+): Promise<unknown> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), policy.timeoutMilliseconds);
+  try {
+    let response: Response;
+    try {
+      response = await fetchImplementation(endpoint, {
+        method: request.method,
+        headers: request.headers,
+        ...(request.body === undefined ? {} : { body: request.body }),
+        credentials: 'omit',
+        redirect: 'error',
+        cache: 'no-store',
+        referrerPolicy: 'no-referrer',
+        signal: controller.signal,
+      });
+    } catch {
+      return unavailable('REQUEST_FAILED');
+    }
+    try {
+      if (response.status !== 200 || response.redirected || response.url !== endpoint.href) {
+        await cancelResponseBody(response);
+        return unavailable('INVALID_RESPONSE');
+      }
+      return await boundedJson(response, policy.responseMaximumBytes);
+    } catch (error) {
+      if (error instanceof SmartLendingExternalFeedError) throw error;
+      return unavailable('INVALID_RESPONSE');
+    }
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+export class FixedSmartLendingExternalFeedClient
+  implements SmartLendingExternalFeedClient, AaveV3EthereumMarketExternalFeedClient
+{
   constructor(
     private readonly config: SmartLendingExternalFeedConfig,
     private readonly fetchImplementation: typeof fetch = globalThis.fetch,
   ) {}
 
-  async get<Destination extends SmartLendingExternalFeedDestination>(
+  async get<Destination extends SmartLendingExternalFeedGetDestination>(
     destination: Destination,
     query: SmartLendingExternalFeedQueryByDestination[Destination],
   ): Promise<unknown> {
+    const policy = this.enabledPolicy(destination);
+    const endpoint = new URL(policy.endpoint);
+    endpoint.search = queryParameters(destination, query).toString();
+    const headers: Record<string, string> = { accept: 'application/json' };
+    if (
+      destination === SmartLendingExternalFeedDestination.LifiQuote &&
+      this.config.mode === 'enabled' &&
+      this.config.lifiApiKey !== null
+    ) {
+      headers['x-lifi-api-key'] = this.config.lifiApiKey;
+    }
+
+    return requestJson(this.fetchImplementation, endpoint, policy, {
+      method: 'GET',
+      headers,
+    });
+  }
+
+  async readEthereumCoreMarket(): Promise<unknown> {
+    const policy = this.enabledPolicy(SmartLendingExternalFeedDestination.AaveV3EthereumMarket);
+    const endpoint = new URL(policy.endpoint);
+    const body = JSON.stringify(AAVE_V3_ETHEREUM_MARKET_GRAPHQL_REQUEST);
+    return requestJson(this.fetchImplementation, endpoint, policy, {
+      method: 'POST',
+      headers: Object.freeze({
+        accept: 'application/json',
+        'content-type': 'application/json',
+      }),
+      body,
+    });
+  }
+
+  private enabledPolicy(destination: SmartLendingExternalFeedDestination): DestinationPolicy {
     if (this.config.mode !== 'enabled') return unavailable('FEEDS_DISABLED');
     if (!Object.hasOwn(DESTINATION_POLICIES, destination)) {
       return unavailable('INVALID_DESTINATION');
     }
-    const policy = DESTINATION_POLICIES[destination];
     if (
       !Object.hasOwn(this.config.killSwitches, destination) ||
       this.config.killSwitches[destination] !== false
     ) {
       return unavailable('DESTINATION_DISABLED');
     }
-
-    const endpoint = new URL(policy.endpoint);
-    endpoint.search = queryParameters(destination, query).toString();
-    const headers: Record<string, string> = { accept: 'application/json' };
-    if (
-      destination === SmartLendingExternalFeedDestination.LifiQuote &&
-      this.config.lifiApiKey !== null
-    ) {
-      headers['x-lifi-api-key'] = this.config.lifiApiKey;
-    }
-
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), policy.timeoutMilliseconds);
-    try {
-      let response: Response;
-      try {
-        response = await this.fetchImplementation(endpoint, {
-          method: 'GET',
-          headers,
-          credentials: 'omit',
-          redirect: 'error',
-          cache: 'no-store',
-          referrerPolicy: 'no-referrer',
-          signal: controller.signal,
-        });
-      } catch {
-        return unavailable('REQUEST_FAILED');
-      }
-      try {
-        if (
-          response.status !== 200 ||
-          response.redirected ||
-          (response.url !== '' && response.url !== endpoint.href)
-        ) {
-          await cancelResponseBody(response);
-          return unavailable('INVALID_RESPONSE');
-        }
-        return await boundedJson(response, policy.responseMaximumBytes);
-      } catch (error) {
-        if (error instanceof SmartLendingExternalFeedError) throw error;
-        return unavailable('INVALID_RESPONSE');
-      }
-    } finally {
-      clearTimeout(timeout);
-    }
+    return DESTINATION_POLICIES[destination];
   }
 }

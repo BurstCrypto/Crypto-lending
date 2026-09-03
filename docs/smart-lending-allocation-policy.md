@@ -94,10 +94,19 @@ but never silently split or over-allocate a source position.
 
 ## Read-only evidence adapters
 
-`SmartLendingModule` registers two passive server-side adapters. It makes no
+`SmartLendingModule` registers three passive server-side adapters. It makes no
 request during startup, exposes no raw-feed HTTP route, and defaults to
 `SMART_LENDING_EXTERNAL_FEEDS_MODE=disabled`.
 
+- `AaveV3EthereumMarketFeedAdapter` sends one fixed, wallet-free GraphQL query
+  for the Ethereum Core market and strictly normalizes the active USDC and USDT
+  reserves. It captures base supply APY, provider-reported supply totals and
+  caps, available liquidity, reserve factor, pause state, and freeze state. Its
+  contract fixes its use to `PROVIDER_NATIVE_CORROBORATION_ONLY`, and fixes both
+  `mayEstablishRecommendationEligibility` and `mayAuthorizeFinancialAction` to
+  `false`. The response contains no authenticated block number or independently
+  verified deployment evidence, so the local retrieval time is not chain
+  freshness and this adapter cannot make Aave available to users.
 - `DefiLlamaMarketFeedAdapter` normalizes the public yield-pool snapshot for all
   ten planned Ethereum/Solana provider identities. This is aggregate,
   indicative corroboration only. It does not prove an exact approved
@@ -115,17 +124,23 @@ request during startup, exposes no raw-feed HTTP route, and defaults to
   adapter discards LI.FI's transaction request, and its output cannot authorize
   or execute a transaction.
 
-The source contracts are documented by DefiLlama's
+The source contracts are documented by Aave's
+[GraphQL API overview](https://aave.com/docs/aave-v3/getting-started/graphql)
+and [market-data reference](https://aave.com/docs/aave-v3/markets/data), DefiLlama's
 [data-update FAQ](https://docs.llama.fi/faqs/frequently-asked-questions) and
 LI.FI's [quote endpoint](https://docs.li.fi/api-reference/get-a-quote-for-a-token-transfer)
 and [rate-limit reference](https://docs.li.fi/api-reference/rate-limits). Those
 documents describe vendor behavior; they are not internal approval artifacts.
 
-The transport fixes its destinations in code to `yields.llama.fi` and
-`li.quest`; callers cannot supply a URL. It enforces GET-only requests, exact
-query allowlists, response-size limits, timeouts, JSON content types, redirect
-rejection, no credentials/referrer/cache, sanitized failures, and independent
-destination kill switches. A LI.FI API key is optional and server-only.
+The transport fixes its destinations in code to `api.v3.aave.com`,
+`yields.llama.fi`, and `li.quest`; callers cannot supply a URL. It permits only
+the reviewed GET requests for DefiLlama and LI.FI and one exact POST body for
+Aave. The Aave body contains the fixed market address and chain ID and has no
+caller-controlled field. The transport also enforces exact query allowlists,
+response-size limits, timeouts, JSON content types, redirect rejection, no
+credentials/referrer/cache, sanitized failures, and independent destination
+kill switches. A LI.FI API key is optional and server-only; no credential is
+sent to Aave.
 
 LI.FI's quote contract requires the sending and receiving wallet addresses as
 well as token identities and the exact amount. A round-trip request therefore
@@ -137,11 +152,12 @@ Legal, and Security approve the exact purpose, disclosure/consent basis,
 processor and retention terms, query-string log treatment, and data-subject
 lifecycle. Consent to _consider_ a cross-chain recommendation is not by itself
 consent to this third-party disclosure. The canonical security threat register
-must also be revised, re-fingerprinted, and independently reviewed for this new
-trust flow before activation.
+has been revised and re-fingerprinted for the LI.FI disclosure flow and fixed
+Aave destination, but it still requires an independent review bound to the
+exact release candidate before activation.
 
-Both destination startup gates default to on, even after the overall mode is
-enabled. Turning either one off in non-production requires immutable source
+All three destination startup gates default to on, even after the overall mode is
+enabled. Turning any one off in non-production requires immutable source
 revision, egress-policy digest and approval reference, and provider-policy
 digest and approval reference metadata. These strings make drift visible but
 are not authorization: they do not verify policy content, status, expiry, or
@@ -159,6 +175,7 @@ The reviewed non-production acceptance surface is intentionally closed:
 ```text
 NODE_ENV=test
 SMART_LENDING_EXTERNAL_FEEDS_MODE=enabled
+SMART_LENDING_AAVE_V3_KILL_SWITCH=off
 SMART_LENDING_DEFILLAMA_KILL_SWITCH=off
 SMART_LENDING_LIFI_KILL_SWITCH=off
 SMART_LENDING_EXTERNAL_FEEDS_EGRESS_APPROVAL_REFERENCE_ID=<approved-reference>
@@ -188,15 +205,33 @@ fresh transaction review and approval.
 
 `SmartLendingRecommendationService` is the trusted application seam around the
 domain. Its caller supplies only an authenticated account ID and correlation
-ID. A server clock supplies the evaluation time, while the injected input
-reader owns portfolio values, policies, consent, opportunities, risk evidence,
-and route quotes. Malformed or unavailable input fails closed. The new feed
-ports are registered for that future composition, but there is still no HTTP
-route or complete production allocation-input reader.
+ID. A server clock supplies the evaluation time. Its composed input reader now
+defines separate server-owned ports for account-bound routable capital,
+complete approved opportunities, approved policy and consent, and full
+lifecycle quotes. It validates account, correlation, evaluation-time,
+freshness, complete ten-provider coverage, supported asset identity, risk
+approval, quote binding, and deterministic candidate bounds before calling the
+domain. Cross-chain wallet-address disclosure requires its own active LI.FI
+consent in addition to cross-chain consideration consent. Both consent records
+must be bound to the account, enclosing policy approval, both wallet IDs, and
+the exact directed Ethereum/Solana network pair. Every full-lifecycle quote
+must echo a deterministic request fingerprint covering those bindings plus the
+source and destination wallets, opportunity evidence, risk evidence, bridge
+allowlist, amount, and deadline. Any malformed, partial, stale, misbound,
+over-budget, or unavailable input fails closed.
+
+Those four upstream ports intentionally resolve to unavailable adapters in the
+runtime module. This preserves deny-by-default behavior while their real
+portfolio/valuation, approved-opportunity, policy/consent, and lifecycle-cost
+implementations remain absent. There is still no HTTP recommendation route,
+and neither the composer nor the recommendation service can authorize or
+execute a transaction.
 
 Before production use, provider-native adapters must still authenticate exact
 deployments and normalize APY, capacity, pause state, fees, and withdrawal
-availability for each of the ten providers. Server-owned wallet positions,
+availability for each of the ten providers. The new Aave adapter is only the
+first unauthenticated corroboration slice, not a completed provider gate.
+Server-owned wallet positions,
 stablecoin valuation, risk decisions, same-chain costs, provider entry/exit
 costs, cross-chain consent, and remaining network costs must then be composed
 into an immutable input snapshot. The composition must enforce freshness again
@@ -207,10 +242,17 @@ live production allocator nor an execution path.
 
 Before any authenticated recommendation route is exposed, the runtime also
 needs a bounded per-account and global quote budget, distributed rate control,
-circuit breaking, and single-flight/cache behavior for the hourly aggregate
-snapshot. The present module deliberately has no HTTP controller, so its two
-sequential bridge reads cannot yet be multiplied across domain candidates by a
-caller.
+circuit breaking, and single-flight/cache behavior for aggregate and native
+market snapshots. The composer rejects more than 128 candidate quotes and does
+not silently truncate. One 30-second aggregate deadline and abort signal are
+shared by the capital, opportunity, policy, and sequential quote readers. Both
+the initial combined read and every quote are raced against that deadline, so a
+non-cooperative source cannot keep the composition pending or cause later
+quotes to start. All snapshots, policy, consents, evidence, risk assessments,
+and returned quotes must remain valid through the deadline. These structural
+controls are not a production per-account/global rate or spend budget. The
+present module deliberately has no HTTP controller, so a caller cannot yet
+multiply external quote traffic.
 
 DefiLlama's payload supplies no per-market observation timestamp. The adapter's
 `retrievedAt` and short `validUntil` prove only when this server retrieved the

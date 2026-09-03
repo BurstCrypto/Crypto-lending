@@ -48,7 +48,7 @@ flowchart LR
   Edge --> Web[Web workload]
   Edge --> API[API workload]
   API --> IdP[Managed OIDC provider - disabled]
-  API -. production-denied market and route evidence .-> FeedVendors[DefiLlama and LI.FI]
+  API -. production-denied market and route evidence .-> FeedVendors[Aave, DefiLlama, and LI.FI]
   Client --> Wallet[Wallets, relays, and testnet RPC - restricted lab]
   API --> DB[(PostgreSQL)]
   API --> Redis[(Redis health-only)]
@@ -83,8 +83,9 @@ fail-closed distinctions are:
   evidence of an approved administrator authorization design; and
 - external egress remains deny-all until an exact destination and caller have
   an independently approved policy and cost/activation record. The dormant
-  smart-lending transport fixes two destinations in code but rejects production
-  activation; LI.FI quote requests would disclose and link two wallet addresses,
+  smart-lending transport fixes three destinations in code but rejects production
+  activation. Its fixed Aave query contains no customer or wallet field, while
+  LI.FI quote requests would disclose and link two wallet addresses,
   asset identities, and an exact amount, so they also require a specific
   privacy/processor decision rather than generic cross-chain opt-in.
 
@@ -98,7 +99,7 @@ fail-closed distinctions are:
 | `RESTRICTED`   | Customer, authentication, wallet, financial, audit, or secret metadata | Strongest application access controls, explicit lifecycle approval, no ordinary logs or unrestricted exports. |
 | `PROHIBITED`   | Unauthorized copies of raw authority-granting secret material          | Never collect in business persistence, logs, analytics, source control, Jira, or review evidence.             |
 
-The register maps 17 data assets to CIA impact, storage, logging treatment,
+The register maps 18 data assets to CIA impact, storage, logging treatment,
 retention state, owner, and code evidence. Important examples are:
 
 - account contact/residency, OIDC mapping, authentication state, ephemeral
@@ -120,6 +121,14 @@ retention state, owner, and code evidence. Important examples are:
   only are permitted for an approved non-production exercise until disclosure,
   processor, retention, log-redaction, and data-subject lifecycle controls are
   reviewed;
+- the dormant Aave adapter sends only a fixed Ethereum Core market address and
+  chain ID. Its response is public market metadata, carries no authenticated
+  block anchor, cannot establish recommendation eligibility, and remains
+  production-denied pending egress and provider review;
+- all smart-lending vendor requests and responses are governed as `RESTRICTED`
+  because the dormant LI.FI path can link two customer wallets, assets, exact
+  amounts, and lending intent even though the Aave and DefiLlama market queries
+  themselves contain no customer data;
 - actor-bearing structured operational logs, outbox records, and queue/DLQ
   messages are `RESTRICTED`; the current `ledger.journal-committed` payload and
   logging allowlists exclude contact data, wallet proof, credentials, amounts,
@@ -166,7 +175,8 @@ session, and CSRF keys; workload and migration database credentials; Redis ACL
 passwords; AWS task credentials and KMS authority; TLS private keys; the
 restricted wallet-lab access credential; the separate RDS bootstrap/master
 credential; ledger capability and raw idempotency material; the local Jira API
-credential; the ephemeral read-only GitHub Actions token; and three
+credential; the ephemeral read-only GitHub Actions token; the optional
+server-only LI.FI API credential; and three
 purpose-distinct wallet-registration classes for canonical-identity HMAC,
 challenge HMAC, and challenge-binding/address/metadata AES-256-GCM protection.
 
@@ -176,7 +186,8 @@ items are production injection for the OIDC/authentication and wallet keys; a
 compatible authentication key ring; a dual-digest wallet-identity migration;
 challenge-HMAC overlap across unexpired and replay state; an additive wallet
 decrypt key ring with authenticated reseal/rollback; live A/B credential
-rotation and old-slot denial; and independent inspection that runtime, log, and
+rotation and old-slot denial; LI.FI credential custody, rotation, revocation,
+and processor approval; and independent inspection that runtime, log, and
 review paths contain no usable values. Wallet registration is disabled by
 default. Local tests generate non-production 32-byte fixtures in process; they
 do not establish managed custody. KAN-50 custody and KAN-235 independent review
@@ -187,15 +198,15 @@ remain production gates.
 The canonical register's High-risk rows each have at least one
 mitigation, owner, residual-risk statement, evidence path, and follow-up.
 
-| Domain       | Local posture                                                                                                                                                            | Required next decision                                                                                                                                                       |
-| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Account      | OIDC/PKCE, exact identity mapping, self-scope, cookies/CSRF/replay/rate limits are locally enforced                                                                      | Managed provider, MFA/recovery/logout, key rotation, deployed proxy/edge behavior, privacy and independent authorization review.                                             |
-| Wallet       | Exact registry identity and a one-use, account/domain/network-bound EVM or Solana proof locally protect registration; the proof grants no login or transaction authority | Independent real-wallet/privacy review, deployed concurrency and key custody, trusted chain attestation, contract-wallet RPC policy, and separate login/transaction designs. |
-| Ledger       | Append-only balanced journal, capabilities, lifecycle, idempotency, and atomic outbox are locally enforced                                                               | Privileged tamper evidence, provider/finality/reorg/reconciliation, trusted observations, and valuation/depeg policy.                                                        |
-| Admin        | No product-admin surface is exposed; static cloud/database capability boundaries exist                                                                                   | FND-008/OPS authorization, lookup/masking, case integrity, immutable admin audit, break-glass, live IAM/database evidence, and explicit commercial authorization.            |
-| Secrets      | History-aware source scanner, API/worker log allowlists, and workload-specific static boundaries                                                                         | Web/framework error-path coverage, runtime evidence, production auth-key injection/key ring, live rotation/revocation, and full-hop transport review.                        |
-| Supply chain | Lockfiles, pinned actions, local validation, and candidate-bound evidence patterns                                                                                       | Independent dependency/image review and final-candidate provenance/attestation.                                                                                              |
-| Availability | Bounded queue, parser, logging, rate-limit, retry, and DLQ primitives                                                                                                    | KAN-52 metrics/dashboard evidence plus deployed edge, load, and distributed-limit review.                                                                                    |
+| Domain       | Local posture                                                                                                                                                              | Required next decision                                                                                                                                                 |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Account      | OIDC/PKCE, exact identity mapping, self-scope, cookies/CSRF/replay/rate limits are locally enforced                                                                        | Managed provider, MFA/recovery/logout, key rotation, deployed proxy/edge behavior, privacy and independent authorization review.                                       |
+| Wallet       | Exact registry identity and a one-use, account/domain/network-bound EVM or Solana proof locally protect registration; smart-lending disclosure consent is separately bound | Independent real-wallet/privacy review, deployed key custody, trusted chain attestation, LI.FI processing/lifecycle controls, and separate login/transaction designs.  |
+| Ledger       | Append-only journal controls plus fixed, strict, corroboration-only market/quote parsers are locally enforced; external feeds cannot authorize an action                   | Privileged tamper evidence, provider/finality/reorg/reconciliation, authenticated observations, deployment anchoring, divergence handling, and valuation/depeg policy. |
+| Admin        | No product-admin surface is exposed; static cloud/database capability boundaries exist                                                                                     | FND-008/OPS authorization, lookup/masking, case integrity, immutable admin audit, break-glass, live IAM/database evidence, and explicit commercial authorization.      |
+| Secrets      | History-aware source scanner, API/worker log allowlists, and workload-specific static boundaries                                                                           | Web/framework error-path coverage, runtime evidence, production auth-key injection/key ring, live rotation/revocation, and full-hop transport review.                  |
+| Supply chain | Lockfiles, pinned actions, local validation, and candidate-bound evidence patterns                                                                                         | Independent dependency/image review and final-candidate provenance/attestation.                                                                                        |
+| Availability | Bounded queue, parser, logging, rate-limit, retry, and DLQ primitives; dormant smart-lending reads add a shared deadline, abort, response limits, and candidate cap        | KAN-52 metrics/dashboard evidence plus per-account/global request and spend budgets, circuit breakers, caching, and deployed vendor/edge/load review.                  |
 
 `MITIGATED_LOCAL` means a repository control and local test exist. It does not
 mean the residual risk is accepted. `OPEN_FOLLOW_UP` means a named engineering

@@ -1,7 +1,12 @@
 export enum SmartLendingExternalFeedDestination {
+  AaveV3EthereumMarket = 'AAVE_V3_ETHEREUM_MARKET',
   DefiLlamaYields = 'DEFILLAMA_YIELDS',
   LifiQuote = 'LIFI_QUOTE',
 }
+
+export type SmartLendingExternalFeedGetDestination =
+  | SmartLendingExternalFeedDestination.DefiLlamaYields
+  | SmartLendingExternalFeedDestination.LifiQuote;
 
 /** DefiLlama's reviewed pool snapshot endpoint accepts no query parameters. */
 export type DefiLlamaYieldsQuery = Readonly<Record<string, never>>;
