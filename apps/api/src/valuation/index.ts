@@ -113,4 +113,33 @@ export {
   type PythHermesPriceTranscriptTransport,
 } from './infrastructure/transcript/pyth-hermes-price-transcript.adapter';
 export { StablecoinPriceTranscriptUnavailableError } from './infrastructure/transcript/stablecoin-price-transcript';
+export type {
+  MainnetStablecoin,
+  VerifiedStablecoinPriceEvidenceV1,
+  VerifiedStablecoinPriceSourcePort,
+  VerifiedStablecoinPriceVerificationMethod,
+  VerifiedStablecoinUsdPriceV1,
+} from './application/ports/verified-stablecoin-price-source.port';
+export {
+  DEFAULT_VERIFIED_STABLECOIN_PRICE_SOURCES,
+  FailClosedChainlinkStablecoinPriceSource,
+  FailClosedPythStablecoinPriceSource,
+  VerifiedStablecoinPriceSourceUnavailableError,
+  type VerifiedStablecoinPriceSourceUnavailableCode,
+} from './application/fail-closed-stablecoin-price-source';
+export {
+  createStablecoinPriceIngestionPlan,
+  createVerifiedStablecoinPriceProjectionBatch,
+  fingerprintVerifiedStablecoinPriceEvidence,
+  normalizeVerifiedStablecoinPriceEvidence,
+  StablecoinPriceIngestionPlanValidationError,
+  type StablecoinPriceIngestionPlanV1,
+  type StablecoinPriceIngestionPlanValidationCode,
+  type StablecoinPriceLogicalReadV1,
+  type StablecoinPricePolicyIdentityV1,
+  type StablecoinPriceProjectionTargetV1,
+  type VerifiedStablecoinPriceEvidenceMaterialV1,
+  type VerifiedStablecoinPriceProjectionBatchV1,
+  type VerifiedStablecoinPriceProjectionV1,
+} from './application/stablecoin-price-ingestion-plan';
 export { ValuationModule } from './valuation.module';
