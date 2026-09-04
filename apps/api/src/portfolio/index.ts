@@ -48,4 +48,17 @@ export {
   type PortfolioWalletTotal,
   type UnifiedPortfolio,
 } from './domain/unified-portfolio';
+export {
+  MAINNET_PROVIDER_PORTFOLIO_COMPOSITION_ONLY,
+  MAINNET_PROVIDER_PORTFOLIO_COMPOSITION_VERSION,
+  MainnetProviderPortfolioUnavailableError,
+  composeMainnetProviderPortfolioV1,
+} from './domain/mainnet-provider-portfolio-composition';
+export type {
+  ComposeMainnetProviderPortfolioRequestV1,
+  MainnetProviderPortfolioAssetTotalV1,
+  MainnetProviderPortfolioCompositionV1,
+  MainnetProviderPortfolioUnavailableCode,
+  NormalizedWalletTokenBalanceV1,
+} from './domain/mainnet-provider-portfolio-composition';
 export { PortfolioModule } from './portfolio.module';

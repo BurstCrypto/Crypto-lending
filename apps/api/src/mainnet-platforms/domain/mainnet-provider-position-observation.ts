@@ -579,7 +579,7 @@ function parseObservation(
     !provisionalRule ||
     provisionalRule.state !== 'ALLOWED' ||
     provisionalRule.authority !== 'DISPLAY_ONLY' ||
-    (provisionalRule.selector !== 'latest' && provisionalRule.selector !== 'processed')
+    (provisionalRule.selector !== 'latest' && provisionalRule.selector !== 'confirmed')
   ) {
     return fail('INVALID_CHAIN_ASSESSMENT');
   }

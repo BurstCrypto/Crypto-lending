@@ -45,6 +45,26 @@ export type {
   MainnetProviderPositionValidationCode,
 } from './domain/mainnet-provider-position-observation';
 export {
+  MAINNET_PROVIDER_POSITION_COVERAGE_ONLY,
+  MAINNET_PROVIDER_POSITION_COVERAGE_VERSION,
+  MainnetProviderPositionCoverageUnavailableError,
+  mainnetProviderPositionCoverageManifestFingerprintV1,
+  parseCoveredMainnetProviderPositionSnapshotV1,
+  parseMainnetProviderPositionCoverageManifestV1,
+} from './domain/mainnet-provider-position-coverage';
+export type {
+  CoveredMainnetProviderPositionSnapshotV1,
+  MainnetProviderPositionCoverageAssetV1,
+  MainnetProviderPositionCoverageContextV1,
+  MainnetProviderPositionCoverageDivergenceStatusV1,
+  MainnetProviderPositionCoverageManifestContentV1,
+  MainnetProviderPositionCoverageManifestV1,
+  MainnetProviderPositionCoverageStatusV1,
+  MainnetProviderPositionCoverageTargetV1,
+  MainnetProviderPositionCoverageUnavailableCode,
+  ParseCoveredMainnetProviderPositionSnapshotRequestV1,
+} from './domain/mainnet-provider-position-coverage';
+export {
   MAINNET_PROVIDER_POSITION_OBSERVATION_POLICY_USE,
   MAINNET_PROVIDER_POSITION_OBSERVATION_POLICY_VERSION,
   MainnetProviderPositionObservationPolicyValidationError,

@@ -83,7 +83,7 @@ export interface MainnetProviderPositionChainAssessmentVerificationContextV1 {
   readonly sourceObservationId: string;
   readonly networkId: string;
   readonly observationTier: 'PROVISIONAL';
-  readonly selector: 'latest' | 'processed';
+  readonly selector: 'latest' | 'confirmed';
   readonly authority: 'DISPLAY_ONLY';
   readonly chainAnchor: MainnetProviderPositionAssessmentChainAnchorV1;
   readonly observedAt: string;
