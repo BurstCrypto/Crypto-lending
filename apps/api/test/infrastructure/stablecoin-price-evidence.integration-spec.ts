@@ -418,8 +418,14 @@ describeWithPostgres('stablecoin price evidence PostgreSQL controls', () => {
         'SELECT false AS valid',
     );
     expect(recoveredTriggerBinding.rows).toEqual([{ valid: true }]);
-    await expect(runner.down()).rejects.toThrow(
+    const targetRollbackSql =
+      createStablecoinPriceEvidenceReadModelTestSchemaMigrationV0021.downSql;
+    if (typeof targetRollbackSql !== 'string') {
+      throw new Error('Expected the stablecoin price evidence rollback to be one SQL statement');
+    }
+    await expect(operationPool.query(targetRollbackSql)).rejects.toThrow(
       'cannot roll back stablecoin price evidence after use',
     );
+    await expect(runner.assertUpToDate()).resolves.toBeUndefined();
   });
 });

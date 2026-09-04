@@ -5,6 +5,7 @@ import { Pool } from 'pg';
 
 import { MigrationRunner } from '../../src/infrastructure/database/migration-runner.service';
 import { PRODUCTION_DATABASE_PRINCIPALS } from '../../src/infrastructure/database/migrations/0005-enforce-database-principal-boundaries.migration';
+import { createAaveV3EthereumFinalizedCheckpointTestSchemaMigrationV0017 } from '../../src/infrastructure/database/migrations/0017-create-aave-finalized-checkpoints.migration';
 import { DATABASE_TEST_SCHEMA_MIGRATION_LIST } from '../../src/infrastructure/database/migrations';
 import { PostgresService } from '../../src/infrastructure/database/postgres.service';
 import type { AaveV3EthereumDeploymentEvidence } from '../../src/smart-lending/application/ports/aave-v3-ethereum-deployment-evidence-reader.port';
@@ -936,7 +937,12 @@ describeWithPostgres('Aave V3 Ethereum finalized checkpoint PostgreSQL controls'
     await expect(repository.loadCurrent('rpc-primary:active-backfill')).resolves.toEqual(
       beforeRollbackAttempt,
     );
-    await expect(runner.down()).rejects.toThrow(
+    const targetRollbackSql =
+      createAaveV3EthereumFinalizedCheckpointTestSchemaMigrationV0017.downSql;
+    if (typeof targetRollbackSql !== 'string') {
+      throw new Error('Expected the Aave finalized checkpoint rollback to be one SQL statement');
+    }
+    await expect(operationPool.query(targetRollbackSql)).rejects.toThrow(
       'cannot roll back Aave finalized checkpoints after use',
     );
     await expect(runner.assertUpToDate()).resolves.toBeUndefined();

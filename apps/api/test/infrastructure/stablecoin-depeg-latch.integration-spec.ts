@@ -780,8 +780,13 @@ describeWithPostgres('stablecoin depeg latch PostgreSQL controls', () => {
       createStablecoinDepegLatchTestSchemaMigrationV0019.verifySql ?? 'SELECT false AS valid',
     );
     expect(valid.rows).toEqual([{ valid: true }]);
-    await expect(runner.down()).rejects.toThrow(
+    const targetRollbackSql = createStablecoinDepegLatchTestSchemaMigrationV0019.downSql;
+    if (typeof targetRollbackSql !== 'string') {
+      throw new Error('Expected the stablecoin depeg latch rollback to be one SQL statement');
+    }
+    await expect(operationPool.query(targetRollbackSql)).rejects.toThrow(
       'cannot roll back stablecoin depeg latches after use',
     );
+    await expect(runner.assertUpToDate()).resolves.toBeUndefined();
   });
 });

@@ -37,6 +37,7 @@ interface YieldCommandRow extends QueryResultRow {
   next_state: string;
   reason_code: string;
   ledger_transaction_id: string;
+  transition_recorded_at: Date;
   submission_id: string | null;
   outcome: 'COMMITTED' | 'REPLAYED';
 }
@@ -199,23 +200,9 @@ describeWithPostgres('KAN-186 yield operation PostgreSQL controls', () => {
       options: `-c search_path=${schema}`,
     });
     runner = new MigrationRunner(operationPool, DATABASE_TEST_SCHEMA_MIGRATION_LIST);
-    await expect(runner.up()).resolves.toEqual([
-      '0001',
-      '0002',
-      '0003',
-      '0004',
-      '0006',
-      '0007',
-      '0008',
-      '0009',
-      '0010',
-      '0011',
-      '0012',
-      '0013',
-      '0014',
-      '0015',
-      '0016',
-    ]);
+    await expect(runner.up()).resolves.toEqual(
+      DATABASE_TEST_SCHEMA_MIGRATION_LIST.map(({ id }) => id),
+    );
   });
 
   afterAll(async () => {
@@ -266,21 +253,36 @@ describeWithPostgres('KAN-186 yield operation PostgreSQL controls', () => {
     };
     const submitClient = await operationPool.connect();
     let committed: YieldCommandRow;
+    let committedEnvelope: Readonly<Record<string, unknown>>;
     try {
       await submitClient.query('BEGIN');
       committed = await transitionOperation(submitClient, fixture, submitRequest);
       if (!committed.submission_id) throw new Error('Submission identifier was not created');
+      committedEnvelope = Object.freeze({
+        id: committed.submission_id,
+        kind: 'yield.operation.submit',
+        version: 1,
+        occurredAt: committed.transition_recorded_at.toISOString(),
+        correlation: Object.freeze({
+          correlationId: fixture.correlationId,
+          initiatorActorId: fixture.actorAccountId,
+          quoteId: fixture.quoteReferenceId,
+          transactionId: fixture.ledgerTransactionId,
+        }),
+        payload: Object.freeze({
+          submissionId: committed.submission_id,
+          operationId: fixture.operationId,
+          operationType: 'ALLOCATE',
+          ledgerTransactionId: fixture.ledgerTransactionId,
+          planReferenceId: fixture.planReferenceId,
+          quoteReferenceId: fixture.quoteReferenceId,
+        }),
+      });
       await submitClient.query(
-        `INSERT INTO job_outbox (id, queue_name, payload, message_attributes)
-         VALUES ($1, 'jobs', $2::jsonb, '{}'::jsonb)`,
-        [
-          committed.submission_id,
-          JSON.stringify({
-            id: committed.submission_id,
-            kind: 'yield.operation.submit',
-            operationId: fixture.operationId,
-          }),
-        ],
+        `SELECT enqueue_reviewed_job_v1(
+           $1::text, 'jobs'::text, $2::jsonb, $3::jsonb, NULL::text, NULL::text
+         )`,
+        [committed.submission_id, committedEnvelope, { operationType: 'ALLOCATE' }],
       );
       await submitClient.query('COMMIT');
     } catch (error) {
@@ -387,6 +389,22 @@ describeWithPostgres('KAN-186 yield operation PostgreSQL controls', () => {
     ).resolves.toMatchObject({
       rows: [{ command_count: 1, submission_count: 1, outbox_count: 0 }],
     });
+    await expect(
+      operationPool.query(
+        `SELECT enqueue_reviewed_job_v1(
+           $1::text, 'jobs'::text, $2::jsonb, $3::jsonb, NULL::text, NULL::text
+         )`,
+        [committed.submission_id, committedEnvelope, { operationType: 'ALLOCATE' }],
+      ),
+    ).rejects.toMatchObject({
+      code: '22023',
+      message: 'reviewed outbox job rejected',
+    });
+    await expect(
+      operationPool.query('SELECT count(*)::integer AS count FROM job_outbox WHERE id = $1', [
+        committed.submission_id,
+      ]),
+    ).resolves.toMatchObject({ rows: [{ count: 0 }] });
     await expect(transitionOperation(operationPool, fixture, submitRequest)).resolves.toMatchObject(
       {
         command_id: committed.command_id,
