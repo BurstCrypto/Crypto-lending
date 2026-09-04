@@ -31,6 +31,10 @@ function isProtectedShellPath(pathname: string): boolean {
   );
 }
 
+function isAuthenticationPagePath(pathname: string): boolean {
+  return pathname === '/login' || pathname === '/register';
+}
+
 function authenticationConfigurationUnavailable(): NextResponse {
   const response = new NextResponse('Authentication unavailable.', {
     status: 503,
@@ -61,6 +65,10 @@ export function proxy(request: NextRequest) {
     return applyAccountShellHeaders(response);
   }
 
+  if (isAuthenticationPagePath(request.nextUrl.pathname)) {
+    return applyAccountShellHeaders(NextResponse.next());
+  }
+
   const decision = decideWalletLabAccess({
     authorization: request.headers.get('authorization'),
     configuration: readWalletLabAccessConfiguration(process.env),
@@ -83,5 +91,12 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/internal/wallet-lab/:path*', '/account/:path*', '/platforms', '/portfolio'],
+  matcher: [
+    '/internal/wallet-lab/:path*',
+    '/account/:path*',
+    '/platforms',
+    '/portfolio',
+    '/login',
+    '/register',
+  ],
 };

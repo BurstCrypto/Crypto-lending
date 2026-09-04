@@ -14,6 +14,8 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false, nocache: true },
 };
 
+export const dynamic = 'force-dynamic';
+
 export default async function RegisterPage({ searchParams }: RegisterPageProps) {
   const parameters = searchParams ? await searchParams : {};
   const returnPath = safeAccountReturnPathOrDefault(parameters.returnTo);

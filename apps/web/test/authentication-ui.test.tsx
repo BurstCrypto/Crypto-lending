@@ -30,8 +30,14 @@ vi.mock('@/components/authentication/browser-navigation', () => ({
 }));
 
 import AccountPage from '../app/account/page';
-import LoginPage from '../app/login/page';
-import RegisterPage from '../app/register/page';
+import LoginPage, {
+  dynamic as loginDynamic,
+  metadata as loginMetadata,
+} from '../app/login/page';
+import RegisterPage, {
+  dynamic as registerDynamic,
+  metadata as registerMetadata,
+} from '../app/register/page';
 import { AccountSession } from '../components/authentication/account-session';
 import { LoginForm } from '../components/authentication/login-form';
 import { RegistrationForm } from '../components/authentication/registration-form';
@@ -74,6 +80,13 @@ describe('authentication UI', () => {
   afterEach(() => {
     cleanup();
     window.sessionStorage.clear();
+  });
+
+  it('keeps both access pages dynamic and out of search indexes', () => {
+    expect(loginDynamic).toBe('force-dynamic');
+    expect(registerDynamic).toBe('force-dynamic');
+    expect(loginMetadata.robots).toEqual({ index: false, follow: false, nocache: true });
+    expect(registerMetadata.robots).toEqual({ index: false, follow: false, nocache: true });
   });
 
   it('starts login through the JSON boundary and performs a top-level navigation', async () => {

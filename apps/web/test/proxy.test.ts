@@ -40,8 +40,22 @@ describe('web request proxy', () => {
       '/account/:path*',
       '/platforms',
       '/portfolio',
+      '/login',
+      '/register',
     ]);
   });
+
+  it.each(['/login', '/register'])(
+    'keeps the public authentication page private without requiring a session: %s',
+    (path) => {
+      const response = proxy(accountRequest(path));
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get('x-middleware-next')).toBe('1');
+      expectAccountPrivacyHeaders(response);
+      expect(response.headers.has('location')).toBe(false);
+    },
+  );
 
   it('protects the platforms shell with the same cookie hint and return path', () => {
     const redirect = proxy(accountRequest('/platforms'));
