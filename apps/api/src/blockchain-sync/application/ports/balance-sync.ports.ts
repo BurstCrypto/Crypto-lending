@@ -10,10 +10,26 @@ import type {
   BalanceSyncSourcePoint,
 } from '../../domain/balance-sync';
 
+export const BALANCE_SYNC_CHECKPOINT_PORT = Symbol('BALANCE_SYNC_CHECKPOINT_PORT');
+export const BALANCE_SYNC_WALLET_ADDRESS_RESOLVER_PORT = Symbol(
+  'BALANCE_SYNC_WALLET_ADDRESS_RESOLVER_PORT',
+);
+
 export interface BalanceSyncScope {
   readonly accountId: string;
   readonly walletId: string;
   readonly networkId: BalanceSyncJobEnvelope['payload']['networkId'];
+}
+
+/**
+ * Required boundary for any future live indexer. Its implementation must resolve
+ * and decrypt only the exact active wallet in `scope`. The concrete PostgreSQL
+ * implementation and narrow database function remain unregistered/dormant.
+ * The untrusted result remains `unknown` until a chain-specific indexer validates
+ * the Ethereum or Solana address canonically.
+ */
+export interface BalanceSyncWalletAddressResolverPort {
+  resolveActiveAddress(scope: BalanceSyncScope): Promise<unknown>;
 }
 
 export interface BalanceIndexerSourceCandidate {

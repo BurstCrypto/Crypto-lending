@@ -528,7 +528,7 @@ describe('BalanceSyncOrchestrator', () => {
     expect(test.checkpoints.state?.freshness).toBe('STALE');
   });
 
-  it('uses the Solana processed threshold with deterministic local observations', async () => {
+  it('uses the Solana confirmed display threshold with deterministic local observations', async () => {
     const solanaNetwork = 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp' as const;
     const solana = candidate({
       networkId: solanaNetwork,
@@ -536,7 +536,7 @@ describe('BalanceSyncOrchestrator', () => {
         position: '250000000',
         hash: '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d',
         parentHash: 'EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG',
-        selector: 'processed',
+        selector: 'confirmed',
         retrievedAt: '2026-08-24T12:00:25.000Z',
         identityValidated: true,
       },
@@ -556,7 +556,7 @@ describe('BalanceSyncOrchestrator', () => {
     expect(result).toMatchObject({ status: 'COMPLETED', outcome: 'CREATED' });
     expect(test.checkpoints.state?.currentObservation).toMatchObject({
       networkId: solanaNetwork,
-      source: { selector: 'processed' },
+      source: { selector: 'confirmed' },
     });
   });
 

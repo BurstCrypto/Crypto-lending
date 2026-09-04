@@ -31,6 +31,8 @@ export {
   type CreateDeterministicBalanceSyncJobOptions,
 } from './domain/balance-sync';
 export {
+  BALANCE_SYNC_CHECKPOINT_PORT,
+  BALANCE_SYNC_WALLET_ADDRESS_RESOLVER_PORT,
   type BalanceIndexerCandidate,
   type BalanceIndexerReadRequest,
   type BalanceIndexerRescanRequest,
@@ -46,4 +48,36 @@ export {
   type BalanceSyncMetricsPort,
   type BalanceSyncScope,
   type BalanceSyncSuccessMode,
+  type BalanceSyncWalletAddressResolverPort,
 } from './application/ports/balance-sync.ports';
+export {
+  BalanceSyncCheckpointPersistenceError,
+  PostgresBalanceSyncCheckpointRepository,
+} from './infrastructure/postgres/postgres-balance-sync-checkpoint.repository';
+export {
+  PortfolioBalancePersistenceError,
+  PostgresPortfolioBalanceReader,
+} from './infrastructure/postgres/postgres-portfolio-balance.reader';
+export {
+  BALANCE_CONSUMER_CONFIG,
+  BalanceConsumerConfigurationError,
+  loadBalanceConsumerConfig,
+  type BalanceConsumerConfig,
+  type DisabledBalanceConsumerConfig,
+  type EnabledBalanceConsumerConfig,
+} from './infrastructure/config/balance-consumer.config';
+export {
+  BalanceSyncWalletAddressResolutionError,
+  PostgresBalanceSyncWalletAddressResolver,
+} from './infrastructure/postgres/postgres-balance-sync-wallet-address.resolver';
+export {
+  BalanceJsonRpcTransportFailure,
+  balanceRpcRequest,
+  parseBalanceRpcResult,
+  type BalanceJsonRpcRequest,
+  type BalanceJsonRpcTransport,
+  type BalanceJsonRpcTransportFailureCode,
+} from './infrastructure/rpc/balance-json-rpc';
+export { EthereumMainnetBalanceIndexerAdapter } from './infrastructure/rpc/ethereum-mainnet-balance-indexer.adapter';
+export { SolanaMainnetBalanceIndexerAdapter } from './infrastructure/rpc/solana-mainnet-balance-indexer.adapter';
+export { BlockchainSyncModule } from './blockchain-sync.module';

@@ -167,7 +167,7 @@ describe('balance sync domain', () => {
     ['eip155:1', 'PROVISIONAL', 'latest', true],
     ['eip155:8453', 'CANONICAL', 'safe', false],
     ['eip155:42161', 'CANONICAL', 'safe', false],
-    ['solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp', 'PROVISIONAL', 'processed', true],
+    ['solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp', 'PROVISIONAL', 'confirmed', true],
     ['solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1', 'FINANCIAL', 'finalized', false],
   ])(
     'binds %s %s to selector %s and local gate %s',
