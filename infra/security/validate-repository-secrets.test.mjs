@@ -237,7 +237,7 @@ test('allows only an exact reviewed public protocol identifier', () => {
         .trim()
         .split('\n')
         .filter((line) => line.startsWith('rule=assignment.high-entropy-secret\t')).length,
-      5,
+      4,
     );
     assertRedacted(
       result,
@@ -246,6 +246,68 @@ test('allows only an exact reviewed public protocol identifier', () => {
       publicContractAddress,
       publicDebtContractAddress,
       nearbySecret,
+    );
+  } finally {
+    rmSync(repository, { force: true, recursive: true });
+  }
+});
+
+test('binds production public identifiers to their exact reviewed assignment names', () => {
+  const repository = createRepository();
+  const solanaProgramIdentifier = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
+  const solanaAccountIdentifier = 'BGocb4GEpbTFm8UFV2VsDSaBXHELPfAXrvd4vtt8QWrA';
+  const reserveIdentifier = '94vK29npVbyRHXH63rRcTiSr26SFhrQTzbpNJuhQEDu';
+  const layoutIdentifier = 'SPL_TOKEN_0087CA54_ACCOUNT_PACK_165';
+  const sparkReceiptIdentifier = '0x377c3bd93f2a2984e1e7be6a5c22c525ed4a4815';
+  const sparkImplementationIdentifier = '0x6175ddec3b9b38c88157c10a01ed4a3fa8639cc6';
+  const secretArnIdentifier =
+    'arn:aws:secretsmanager:us-west-2:111122223333:secret:crypto-lending/test/auth-wallet-keys-AbCdEf';
+  try {
+    write(
+      repository,
+      'production-public-identifiers.ts',
+      [
+        'const identifiers = {',
+        `  TOKEN_PROGRAM: '${solanaProgramIdentifier}',`,
+        `  legacyTokenProgramAddress: '${solanaProgramIdentifier}',`,
+        `  TOKEN_ACCOUNT: '${solanaAccountIdentifier}',`,
+        `  usdcTokenReserveAddress: '${reserveIdentifier}',`,
+        `  tokenAccountLayout: '${layoutIdentifier}',`,
+        `  spToken: '${sparkReceiptIdentifier}',`,
+        `  spTokenImplementation: '${sparkImplementationIdentifier}',`,
+        `  AuthWalletKeysSecretArn: '${secretArnIdentifier}',`,
+        `  API_TOKEN: '${solanaProgramIdentifier}',`,
+        `  tokenAccountCopy: '${solanaAccountIdentifier}',`,
+        `  reserveTokenAddress: '${reserveIdentifier}',`,
+        `  tokenAccountLayoutCopy: '${layoutIdentifier}',`,
+        `  spTokenCopy: '${sparkReceiptIdentifier}',`,
+        `  spTokenImplementationCopy: '${sparkImplementationIdentifier}',`,
+        `  OtherSecretArn: '${secretArnIdentifier}',`,
+        '};',
+        '',
+      ].join('\n'),
+    );
+    runGit(repository, 'add', 'production-public-identifiers.ts');
+
+    const result = runScanner(repository);
+
+    assertFinding(result, 'assignment.high-entropy-secret', 'index');
+    assert.equal(
+      result.stdout
+        .trim()
+        .split('\n')
+        .filter((line) => line.startsWith('rule=assignment.high-entropy-secret\t')).length,
+      7,
+    );
+    assertRedacted(
+      result,
+      solanaProgramIdentifier,
+      solanaAccountIdentifier,
+      reserveIdentifier,
+      layoutIdentifier,
+      sparkReceiptIdentifier,
+      sparkImplementationIdentifier,
+      secretArnIdentifier,
     );
   } finally {
     rmSync(repository, { force: true, recursive: true });
@@ -519,6 +581,68 @@ test('keeps reviewed dummy URL credentials exact to protocol, user, password, an
     );
     assertFinding(result, 'assignment.high-entropy-secret', 'index');
     assertRedacted(result, wrongUser, wrongHost, wrongDemoPassword, wrongDemoHost, wrongCanary);
+  } finally {
+    rmSync(repository, { force: true, recursive: true });
+  }
+});
+
+test('allows only the exact reviewed production-test URL and secret canaries', () => {
+  const repository = createRepository();
+  const reviewedUrls = [
+    'postgres://worker:secret@example.invalid/key',
+    'postgres://api:secret@example.invalid/key',
+    'postgresql://user:secret@internal/outbox',
+    'https://credential@secret-provider.example/rpc',
+    'postgres://secret@example/key',
+    'postgres://secret:credential@host/key',
+  ];
+  const changedUrls = reviewedUrls.map((value, index) =>
+    index === 0
+      ? value.replace('worker', ['work', 'er2'].join(''))
+      : value.replace('secret', ['sec', 'ret2'].join('')),
+  );
+  const reviewedCanaries = [
+    'private-key-stateful-proxy-canary',
+    'wallet=0xdeadbeef provider-token=private',
+  ];
+  const changedCanaries = reviewedCanaries.map((value) => `${value}-${['near', 'miss'].join('-')}`);
+  try {
+    write(
+      repository,
+      'reviewed-production-test-fixtures.ts',
+      [
+        ...reviewedUrls.map((value) => `void '${value}';`),
+        ...changedUrls.map((value) => `void '${value}';`),
+        ...reviewedCanaries.map((value, index) => `const secret${index} = '${value}';`),
+        ...changedCanaries.map((value, index) => `const secretChanged${index} = '${value}';`),
+        '',
+      ].join('\n'),
+    );
+    runGit(repository, 'add', 'reviewed-production-test-fixtures.ts');
+
+    const result = runScanner(repository);
+
+    assert.equal(
+      result.stdout
+        .trim()
+        .split('\n')
+        .filter((line) => line.startsWith('rule=url.embedded-credentials\t')).length,
+      changedUrls.length,
+    );
+    assert.equal(
+      result.stdout
+        .trim()
+        .split('\n')
+        .filter((line) => line.startsWith('rule=assignment.high-entropy-secret\t')).length,
+      changedCanaries.length,
+    );
+    assertRedacted(
+      result,
+      ...reviewedUrls,
+      ...changedUrls,
+      ...reviewedCanaries,
+      ...changedCanaries,
+    );
   } finally {
     rmSync(repository, { force: true, recursive: true });
   }

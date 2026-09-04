@@ -60,17 +60,31 @@ const REVIEWED_DUMMY_VALUES = new Set([
   'local_worker_database_a',
   'private RPC rejection detail',
   'private-key-signature-challenge-canary',
+  'private-key-stateful-proxy-canary',
   'replace-with-an-atlassian-api-token',
   'test-only-placeholder',
   'token with:/reserved@characters',
+  'wallet=0xdeadbeef provider-token=private',
   'wc:pairing-topic@2?symKey=do-not-leak',
 ]);
 
 // Exact public protocol identifiers can contain secret-like words and entropy.
 // Bind each value to its reviewed field name so it cannot excuse a credential.
 const REVIEWED_PUBLIC_IDENTIFIER_ASSIGNMENTS = new Map([
-  ['TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', new Set(['PUBLIC_TESTNET_TOKEN_PROGRAM'])],
+  [
+    'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',
+    new Set(['PUBLIC_TESTNET_TOKEN_PROGRAM', 'TOKEN_PROGRAM', 'legacyTokenProgramAddress']),
+  ],
   ['TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb', new Set(['TOKEN_2022'])],
+  ['BGocb4GEpbTFm8UFV2VsDSaBXHELPfAXrvd4vtt8QWrA', new Set(['TOKEN_ACCOUNT'])],
+  ['94vK29npVbyRHXH63rRcTiSr26SFhrQTzbpNJuhQEDu', new Set(['usdcTokenReserveAddress'])],
+  ['SPL_TOKEN_0087CA54_ACCOUNT_PACK_165', new Set(['tokenAccountLayout'])],
+  ['0x377c3bd93f2a2984e1e7be6a5c22c525ed4a4815', new Set(['spToken'])],
+  ['0x6175ddec3b9b38c88157c10a01ed4a3fa8639cc6', new Set(['spTokenImplementation'])],
+  [
+    'arn:aws:secretsmanager:us-west-2:111122223333:secret:crypto-lending/test/auth-wallet-keys-AbCdEf',
+    new Set(['AuthWalletKeysSecretArn']),
+  ],
   [
     '0x98c23e9d8f34fefb1b7bd6a91b7ff122f4e16f5c',
     new Set(['AAVE_V3_ETHEREUM_USDC_A_TOKEN', 'aToken']),
@@ -92,10 +106,15 @@ const REVIEWED_PUBLIC_IDENTIFIER_ASSIGNMENTS = new Map([
 // These tuples are deliberately narrow: protocol, decoded username, decoded
 // password, and host must all match a reviewed local or negative-test fixture.
 const REVIEWED_DUMMY_URL_CREDENTIALS = new Set([
+  'https|credential||secret-provider.example',
+  'postgres|api|secret|example.invalid',
   'postgres|crypto_admin|local_admin_only|localhost',
   'postgres|crypto_api_login_a|local_api_database_a|localhost',
   'postgres|crypto_lending|local_only_password|localhost',
   'postgres|crypto_migration|local_migration_only|localhost',
+  'postgres|secret||example',
+  'postgres|secret|credential|host',
+  'postgres|worker|secret|example.invalid',
   'postgres|openapi|openapi|127.0.0.1',
   'postgres|test|test|127.0.0.1',
   'postgresql|crypto_admin|local_admin_only|127.0.0.1',
@@ -122,6 +141,7 @@ const REVIEWED_DUMMY_URL_CREDENTIALS = new Set([
   'postgresql|migration|secret|db.internal.example',
   'postgresql|service user|p@ss:/word|db.internal.example',
   'postgresql|service|secret|db.internal.example',
+  'postgresql|user|secret|internal',
   'rediss||\n|cache.internal.example',
   'rediss||%ZZ|cache.internal.example',
   'rediss||bad\\npassword|cache.internal.example',
