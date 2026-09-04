@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 
 import { isAbortFailure } from '@/lib/authentication/http';
+import { useSensitiveViewRevalidation } from '@/lib/browser/use-sensitive-view-revalidation';
 import {
   InjectedEvmConnectorRegistry,
   InjectedEvmWalletError,
@@ -519,12 +520,34 @@ export function MainnetWalletOwnership({
   const walletChoicesHeadingReference = useRef<HTMLParagraphElement | null>(null);
   const firstAccountButtonReference = useRef<HTMLButtonElement | null>(null);
   const verificationResultReference = useRef<HTMLDivElement | null>(null);
+  const rosterRequestReference = useRef<AbortController | null>(null);
+  const rosterRequestGenerationReference = useRef(0);
   const removalOperationReference = useRef<AbortController | null>(null);
   const removalTargetReference = useRef<MainnetRegisteredWalletSummary | null>(null);
   const removalReturnFocusReference = useRef<HTMLButtonElement | null>(null);
   const keepWalletButtonReference = useRef<HTMLButtonElement | null>(null);
   const rosterHeadingReference = useRef<HTMLHeadingElement | null>(null);
   const rosterClient = useMemo(() => configured.createRosterClient(), [configured]);
+
+  const invalidateRoster = useCallback((): void => {
+    rosterRequestGenerationReference.current += 1;
+    rosterRequestReference.current?.abort();
+    setRoster({ status: 'LOADING' });
+  }, []);
+
+  const revalidateRoster = useCallback((): void => {
+    setRosterRevision((current) => current + 1);
+  }, []);
+
+  const invalidateSensitiveWalletData = useCallback((): void => {
+    invalidateRoster();
+    setResult(null);
+  }, [invalidateRoster]);
+
+  useSensitiveViewRevalidation({
+    invalidate: invalidateSensitiveWalletData,
+    revalidate: revalidateRoster,
+  });
 
   useEffect(() => {
     removalTargetReference.current = removalTarget;
@@ -589,10 +612,19 @@ export function MainnetWalletOwnership({
 
   useEffect(() => {
     const controller = new AbortController();
+    const generation = rosterRequestGenerationReference.current;
+    rosterRequestReference.current?.abort();
+    rosterRequestReference.current = controller;
+
+    const isCurrentRequest = (): boolean =>
+      !controller.signal.aborted &&
+      rosterRequestReference.current === controller &&
+      rosterRequestGenerationReference.current === generation;
+
     async function loadRoster(): Promise<void> {
       try {
         const next = await rosterClient.readWallets(controller.signal);
-        if (!controller.signal.aborted) {
+        if (isCurrentRequest()) {
           setRoster({ status: 'READY', wallets: next.wallets });
           const target = removalTargetReference.current;
           if (
@@ -614,7 +646,7 @@ export function MainnetWalletOwnership({
           }
         }
       } catch (error) {
-        if (isAbortFailure(error, controller.signal)) return;
+        if (!isCurrentRequest() || isAbortFailure(error, controller.signal)) return;
         if (
           error instanceof MainnetWalletRosterError &&
           error.code === 'UNAUTHENTICATED' &&
@@ -623,15 +655,18 @@ export function MainnetWalletOwnership({
           try {
             onAuthenticationRequired();
           } catch {
-            if (!controller.signal.aborted) setRoster({ status: 'UNAVAILABLE' });
+            if (isCurrentRequest()) setRoster({ status: 'UNAVAILABLE' });
           }
           return;
         }
-        if (!controller.signal.aborted) setRoster({ status: 'UNAVAILABLE' });
+        if (isCurrentRequest()) setRoster({ status: 'UNAVAILABLE' });
       }
     }
     void loadRoster();
-    return () => controller.abort();
+    return () => {
+      controller.abort();
+      if (rosterRequestReference.current === controller) rosterRequestReference.current = null;
+    };
   }, [onAuthenticationRequired, onWalletsChanged, rosterClient, rosterRevision]);
 
   const network = mainnetWalletNetworkFor(chainId);
@@ -641,11 +676,11 @@ export function MainnetWalletOwnership({
   const coinbase = coinbaseMatches.length === 1 ? coinbaseMatches[0] : undefined;
   const ambiguous = metamaskMatches.length > 1 || coinbaseMatches.length > 1;
   const removalPending = removingWalletId !== null;
-  const walletInteractionBlocked = busy || removalTarget !== null;
+  const walletInteractionBlocked = busy || removalTarget !== null || roster.status !== 'READY';
 
   function retryRoster(): void {
-    setRoster({ status: 'LOADING' });
-    setRosterRevision((current) => current + 1);
+    invalidateRoster();
+    revalidateRoster();
   }
 
   function beginWalletOperation(): {
@@ -778,8 +813,8 @@ export function MainnetWalletOwnership({
       if (!isCurrentWalletOperation(runtime, controller, generation)) return;
       setConnection(null);
       setResult(next);
-      setRoster({ status: 'LOADING' });
-      setRosterRevision((current) => current + 1);
+      invalidateRoster();
+      revalidateRoster();
       try {
         onVerified?.(next);
       } catch {
@@ -846,8 +881,8 @@ export function MainnetWalletOwnership({
     setRemovalTarget(null);
     setRemovingWalletId(null);
     setRemovalFailure(publicRemovalFailureMessage(undefined));
-    setRoster({ status: 'LOADING' });
-    setRosterRevision((current) => current + 1);
+    invalidateRoster();
+    revalidateRoster();
     try {
       onWalletsChanged?.();
     } catch {
@@ -878,8 +913,8 @@ export function MainnetWalletOwnership({
       setRemovalNotice(
         `${mainnetWalletNetworkFor(target.chainId).displayName} wallet removed. Portfolio monitoring for that address has stopped.`,
       );
-      setRoster({ status: 'LOADING' });
-      setRosterRevision((current) => current + 1);
+      invalidateRoster();
+      revalidateRoster();
       try {
         onWalletsChanged?.();
       } catch {

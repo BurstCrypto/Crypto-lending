@@ -1,8 +1,9 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { ProductionPlatformDirectory } from '../components/platforms/production-platform-directory';
 import { AuthenticationUnauthenticatedError, type AccountProfile } from '../lib/authentication';
+import { SENSITIVE_VIEW_REVALIDATION_THROTTLE_MS } from '../lib/browser/use-sensitive-view-revalidation';
 import { parseMainnetPlatformDirectory } from '../lib/platforms/mainnet-platform-directory';
 import { MainnetPlatformsApiError } from '../lib/platforms/mainnet-platforms-client';
 import { MAINNET_PLATFORM_DIRECTORY_RESPONSE } from './fixtures/mainnet-platforms';
@@ -41,7 +42,11 @@ function dependencies(input: {
   };
 }
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+  Reflect.deleteProperty(document, 'visibilityState');
+});
 
 describe('authenticated production platform directory', () => {
   it('keeps provider information hidden until the managed session is verified', async () => {
@@ -158,5 +163,52 @@ describe('authenticated production platform directory', () => {
     expect(restoreSession).toHaveBeenCalledTimes(2);
     expect(readDirectory).toHaveBeenCalledTimes(2);
     expect(screen.queryByRole('button')).toBeNull();
+  });
+
+  it('hides provider cards immediately and coalesces visible, focus, and reconnect events', async () => {
+    const refreshed = deferred<typeof DIRECTORY>();
+    const signals: AbortSignal[] = [];
+    const readDirectory = vi.fn((signal?: AbortSignal) => {
+      if (signal !== undefined) signals.push(signal);
+      return signals.length === 1 ? Promise.resolve(DIRECTORY) : refreshed.promise;
+    });
+    const restoreSession = vi.fn(async () => PROFILE);
+    render(
+      <ProductionPlatformDirectory
+        dependencies={dependencies({ readDirectory, restoreSession })}
+      />,
+    );
+    expect(await screen.findByText('10 platforms under evaluation')).toBeVisible();
+    vi.useFakeTimers();
+
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'visible',
+    });
+    act(() => {
+      document.dispatchEvent(new Event('visibilitychange'));
+      window.dispatchEvent(new Event('focus'));
+      window.dispatchEvent(new Event('online'));
+    });
+
+    expect(signals[0]?.aborted).toBe(true);
+    expect(readDirectory).toHaveBeenCalledOnce();
+    expect(screen.queryByText('Aave')).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('heading', { level: 2, name: 'Loading the platform directory' }),
+    ).toBeVisible();
+
+    await act(async () => {
+      vi.advanceTimersByTime(SENSITIVE_VIEW_REVALIDATION_THROTTLE_MS);
+      await Promise.resolve();
+    });
+    expect(readDirectory).toHaveBeenCalledTimes(2);
+    expect(restoreSession).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      refreshed.resolve(DIRECTORY);
+      await Promise.resolve();
+    });
+    expect(screen.getByText('10 platforms under evaluation')).toBeVisible();
   });
 });

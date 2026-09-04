@@ -10,6 +10,7 @@ import {
   type AccountProfile,
 } from '@/lib/authentication';
 import { isAbortFailure } from '@/lib/authentication/http';
+import { useSensitiveViewRevalidation } from '@/lib/browser/use-sensitive-view-revalidation';
 import {
   isPortfolioUnauthenticated,
   PortfolioApiClient,
@@ -97,22 +98,43 @@ export function ProductionPortfolio({
   const [portfolio, setPortfolio] = useState<ProductionPortfolioViewState>({ status: 'LOADING' });
   const [revision, setRevision] = useState(0);
   const requestReference = useRef<AbortController | null>(null);
+  const requestGenerationReference = useRef(0);
+
+  const invalidateSensitiveView = useCallback((): void => {
+    requestGenerationReference.current += 1;
+    requestReference.current?.abort();
+    setPortfolio({ status: 'LOADING' });
+  }, []);
+
+  const revalidateSensitiveView = useCallback((): void => {
+    setRevision((current) => current + 1);
+  }, []);
+
+  useSensitiveViewRevalidation({
+    enabled: phase !== 'SIGNED_OUT',
+    invalidate: invalidateSensitiveView,
+    revalidate: revalidateSensitiveView,
+  });
 
   useEffect(() => {
     const controller = new AbortController();
+    const generation = requestGenerationReference.current;
     requestReference.current?.abort();
     requestReference.current = controller;
+
+    const isCurrentRequest = (): boolean =>
+      !controller.signal.aborted && requestGenerationReference.current === generation;
 
     async function load(): Promise<void> {
       try {
         await configured.restoreSession({ signal: controller.signal });
-        if (controller.signal.aborted) return;
+        if (!isCurrentRequest()) return;
         setPhase('AUTHENTICATED');
         const snapshot = await configured.createClient().readPortfolio(controller.signal);
-        if (controller.signal.aborted) return;
+        if (!isCurrentRequest()) return;
         setPortfolio({ status: 'READY', snapshot });
       } catch (error) {
-        if (isAbortFailure(error, controller.signal)) return;
+        if (!isCurrentRequest() || isAbortFailure(error, controller.signal)) return;
         if (
           error instanceof AuthenticationUnauthenticatedError ||
           isPortfolioUnauthenticated(error)
@@ -140,33 +162,21 @@ export function ProductionPortfolio({
     if (phase === 'SIGNED_OUT') configured.navigate(PORTFOLIO_LOGIN_PATH);
   }, [configured, phase]);
 
-  useEffect(() => {
-    function revalidatePersistedPage(event: PageTransitionEvent): void {
-      if (!event.persisted) return;
-      requestReference.current?.abort();
-      setPortfolio({ status: 'LOADING' });
-      setPhase('CHECKING_SESSION');
-      setRevision((current) => current + 1);
-    }
-
-    window.addEventListener('pageshow', revalidatePersistedPage);
-    return () => window.removeEventListener('pageshow', revalidatePersistedPage);
-  }, []);
-
   function retry(): void {
-    requestReference.current?.abort();
-    setPortfolio({ status: 'LOADING' });
+    invalidateSensitiveView();
     setPhase('CHECKING_SESSION');
-    setRevision((current) => current + 1);
+    revalidateSensitiveView();
   }
 
   const clearExpiredSession = useCallback((): void => {
+    requestGenerationReference.current += 1;
     requestReference.current?.abort();
     setPortfolio({ status: 'LOADING' });
     setPhase('SIGNED_OUT');
   }, []);
 
   const refreshAfterWalletChange = useCallback((): void => {
+    requestGenerationReference.current += 1;
     requestReference.current?.abort();
     setPortfolio({ status: 'LOADING' });
     setRevision((current) => current + 1);

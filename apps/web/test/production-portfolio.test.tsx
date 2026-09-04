@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -6,6 +6,7 @@ import {
   type WalletOwnershipCallbacks,
 } from '../components/portfolio/production-portfolio';
 import { AuthenticationUnauthenticatedError, type AccountProfile } from '../lib/authentication';
+import { SENSITIVE_VIEW_REVALIDATION_THROTTLE_MS } from '../lib/browser/use-sensitive-view-revalidation';
 import { PortfolioApiError } from '../lib/portfolio/portfolio-client';
 import type { ReportingPortfolioSnapshot } from '../lib/portfolio/reporting-portfolio';
 import { REPORTING_PORTFOLIO_SNAPSHOT } from './fixtures/reporting-portfolio';
@@ -59,7 +60,10 @@ function ChangedWalletRoster({ onWalletsChanged }: WalletOwnershipCallbacks) {
   );
 }
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
 
 describe('authenticated production portfolio', () => {
   it('keeps portfolio data hidden until the managed session is verified', async () => {
@@ -291,26 +295,65 @@ describe('authenticated production portfolio', () => {
     expect(await screen.findByText('Supported reporting total')).toBeVisible();
   });
 
-  it('hides a rendered snapshot and revalidates after a persisted pageshow', async () => {
-    const refreshed = deferred<ReportingPortfolioSnapshot>();
-    const readPortfolio = vi
-      .fn()
-      .mockResolvedValueOnce(REPORTING_PORTFOLIO_SNAPSHOT)
-      .mockReturnValueOnce(refreshed.promise);
+  it('hides stale data, coalesces a lifecycle burst, and suppresses a superseded read', async () => {
+    const superseded = deferred<ReportingPortfolioSnapshot>();
+    const current = deferred<ReportingPortfolioSnapshot>();
+    const signals: AbortSignal[] = [];
+    const readPortfolio = vi.fn((signal?: AbortSignal) => {
+      if (signal !== undefined) signals.push(signal);
+      if (signals.length === 1) return Promise.resolve(REPORTING_PORTFOLIO_SNAPSHOT);
+      if (signals.length === 2) return superseded.promise;
+      return current.promise;
+    });
     const restoreSession = vi.fn(async () => PROFILE);
-    render(<ProductionPortfolio dependencies={dependencies({ readPortfolio, restoreSession })} />);
+    render(
+      <ProductionPortfolio
+        dependencies={dependencies({ readPortfolio, restoreSession })}
+        walletOwnershipComponent={ChangedWalletRoster}
+      />,
+    );
     expect(await screen.findByText('Supported reporting total')).toBeVisible();
+    vi.useFakeTimers();
 
     const pageShow = new Event('pageshow');
     Object.defineProperty(pageShow, 'persisted', { value: true });
-    window.dispatchEvent(pageShow);
+    act(() => {
+      window.dispatchEvent(new Event('focus'));
+      window.dispatchEvent(new Event('online'));
+      window.dispatchEvent(pageShow);
+    });
 
-    await waitFor(() =>
-      expect(screen.queryByText('Supported reporting total')).not.toBeInTheDocument(),
-    );
+    expect(signals[0]?.aborted).toBe(true);
+    expect(readPortfolio).toHaveBeenCalledOnce();
+    expect(screen.queryByText('Supported reporting total')).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { level: 2, name: 'Loading your portfolio' })).toBeVisible();
-    refreshed.resolve(REPORTING_PORTFOLIO_SNAPSHOT);
-    expect(await screen.findByText('Supported reporting total')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Simulate wallet roster change' })).toBeVisible();
+
+    await act(async () => {
+      vi.advanceTimersByTime(SENSITIVE_VIEW_REVALIDATION_THROTTLE_MS);
+      await Promise.resolve();
+    });
+    expect(readPortfolio).toHaveBeenCalledTimes(2);
     expect(restoreSession).toHaveBeenCalledTimes(2);
+
+    act(() => window.dispatchEvent(new Event('online')));
+    expect(signals[1]?.aborted).toBe(true);
+    await act(async () => {
+      vi.advanceTimersByTime(SENSITIVE_VIEW_REVALIDATION_THROTTLE_MS);
+      await Promise.resolve();
+    });
+    expect(readPortfolio).toHaveBeenCalledTimes(3);
+
+    await act(async () => {
+      superseded.resolve(REPORTING_PORTFOLIO_SNAPSHOT);
+      await Promise.resolve();
+    });
+    expect(screen.queryByText('Supported reporting total')).not.toBeInTheDocument();
+
+    await act(async () => {
+      current.resolve(REPORTING_PORTFOLIO_SNAPSHOT);
+      await Promise.resolve();
+    });
+    expect(screen.getByText('Supported reporting total')).toBeVisible();
   });
 });

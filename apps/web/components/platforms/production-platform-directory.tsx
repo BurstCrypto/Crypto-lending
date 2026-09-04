@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { replaceBrowserLocation } from '@/components/authentication/browser-navigation';
 import {
@@ -9,6 +9,7 @@ import {
   type AccountProfile,
 } from '@/lib/authentication';
 import { isAbortFailure } from '@/lib/authentication/http';
+import { useSensitiveViewRevalidation } from '@/lib/browser/use-sensitive-view-revalidation';
 import type {
   MainnetPlatformCandidate,
   MainnetPlatformDirectory,
@@ -184,22 +185,44 @@ export function ProductionPlatformDirectory({ dependencies }: ProductionPlatform
   const [directory, setDirectory] = useState<DirectoryState>({ status: 'LOADING' });
   const [revision, setRevision] = useState(0);
   const requestReference = useRef<AbortController | null>(null);
+  const requestGenerationReference = useRef(0);
+
+  const invalidateSensitiveView = useCallback((): void => {
+    requestGenerationReference.current += 1;
+    requestReference.current?.abort();
+    setDirectory({ status: 'LOADING' });
+    setPhase('CHECKING_SESSION');
+  }, []);
+
+  const revalidateSensitiveView = useCallback((): void => {
+    setRevision((current) => current + 1);
+  }, []);
+
+  useSensitiveViewRevalidation({
+    enabled: phase !== 'SIGNED_OUT',
+    invalidate: invalidateSensitiveView,
+    revalidate: revalidateSensitiveView,
+  });
 
   useEffect(() => {
     const controller = new AbortController();
+    const generation = requestGenerationReference.current;
     requestReference.current?.abort();
     requestReference.current = controller;
+
+    const isCurrentRequest = (): boolean =>
+      !controller.signal.aborted && requestGenerationReference.current === generation;
 
     async function load(): Promise<void> {
       try {
         await configured.restoreSession({ signal: controller.signal });
-        if (controller.signal.aborted) return;
+        if (!isCurrentRequest()) return;
         setPhase('AUTHENTICATED');
         const response = await configured.createClient().readDirectory(controller.signal);
-        if (controller.signal.aborted) return;
+        if (!isCurrentRequest()) return;
         setDirectory({ status: 'READY', directory: response });
       } catch (error) {
-        if (isAbortFailure(error, controller.signal)) return;
+        if (!isCurrentRequest() || isAbortFailure(error, controller.signal)) return;
         if (
           error instanceof AuthenticationUnauthenticatedError ||
           isMainnetPlatformsUnauthenticated(error)
@@ -227,24 +250,9 @@ export function ProductionPlatformDirectory({ dependencies }: ProductionPlatform
     if (phase === 'SIGNED_OUT') configured.navigate(PLATFORMS_LOGIN_PATH);
   }, [configured, phase]);
 
-  useEffect(() => {
-    function revalidatePersistedPage(event: PageTransitionEvent): void {
-      if (!event.persisted) return;
-      requestReference.current?.abort();
-      setDirectory({ status: 'LOADING' });
-      setPhase('CHECKING_SESSION');
-      setRevision((current) => current + 1);
-    }
-
-    window.addEventListener('pageshow', revalidatePersistedPage);
-    return () => window.removeEventListener('pageshow', revalidatePersistedPage);
-  }, []);
-
   function retry(): void {
-    requestReference.current?.abort();
-    setDirectory({ status: 'LOADING' });
-    setPhase('CHECKING_SESSION');
-    setRevision((current) => current + 1);
+    invalidateSensitiveView();
+    revalidateSensitiveView();
   }
 
   if (phase === 'SIGNED_OUT' || directory.status === 'LOADING') {

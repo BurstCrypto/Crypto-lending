@@ -11,6 +11,7 @@ import {
   type MainnetWalletOwnershipRuntime,
   type MainnetWalletVerificationResult,
 } from '@/components/wallets/mainnet-wallet-ownership';
+import { SENSITIVE_VIEW_REVALIDATION_THROTTLE_MS } from '@/lib/browser/use-sensitive-view-revalidation';
 import {
   EIP6963_ANNOUNCE_PROVIDER,
   EIP6963_REQUEST_PROVIDER,
@@ -124,6 +125,7 @@ function dependencies(
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
@@ -176,6 +178,10 @@ describe('MainnetWalletOwnership', () => {
     );
     expect(onVerified).toHaveBeenCalledWith(RESULT);
     expect(onWalletsChanged).toHaveBeenCalledOnce();
+
+    act(() => window.dispatchEvent(new Event('focus')));
+    expect(screen.queryByText('Ethereum account verified')).toBeNull();
+    expect(screen.getByText(/Loading verified wallets/u)).toBeVisible();
   });
 
   it('keeps Ethereum and Solana as separate chain-bound connection choices', async () => {
@@ -380,6 +386,71 @@ describe('MainnetWalletOwnership', () => {
 
     await waitFor(() => expect(onAuthenticationRequired).toHaveBeenCalledOnce());
     expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('hides and revalidates the wallet roster while suppressing a superseded late read', async () => {
+    const superseded = Promise.withResolvers<{
+      readonly version: 1;
+      readonly wallets: readonly MainnetRegisteredWalletSummary[];
+    }>();
+    const current = Promise.withResolvers<{
+      readonly version: 1;
+      readonly wallets: readonly MainnetRegisteredWalletSummary[];
+    }>();
+    const signals: AbortSignal[] = [];
+    const readWallets = vi.fn<MainnetWalletRosterClient['readWallets']>((signal) => {
+      if (signal !== undefined) signals.push(signal);
+      if (signals.length === 1) {
+        return Promise.resolve({ version: 1, wallets: [ETHEREUM_WALLET] });
+      }
+      if (signals.length === 2) return superseded.promise;
+      return current.promise;
+    });
+    const roster: MainnetWalletRosterClient = {
+      readWallets,
+      removeWallet: vi.fn(async () => undefined),
+    };
+    render(<MainnetWalletOwnership dependencies={dependencies(runtimeHarness(), roster)} />);
+    expect(await screen.findByText(ETHEREUM_WALLET.addressHint)).toBeVisible();
+    vi.useFakeTimers();
+
+    act(() => {
+      window.dispatchEvent(new Event('focus'));
+      window.dispatchEvent(new Event('online'));
+    });
+
+    expect(signals[0]?.aborted).toBe(true);
+    expect(readWallets).toHaveBeenCalledOnce();
+    expect(screen.queryByText(ETHEREUM_WALLET.addressHint)).toBeNull();
+    expect(screen.getByText(/Loading verified wallets/u)).toBeVisible();
+    expect(screen.getByRole('button', { name: 'MetaMask' })).toBeDisabled();
+
+    await act(async () => {
+      vi.advanceTimersByTime(SENSITIVE_VIEW_REVALIDATION_THROTTLE_MS);
+      await Promise.resolve();
+    });
+    expect(readWallets).toHaveBeenCalledTimes(2);
+
+    act(() => window.dispatchEvent(new Event('focus')));
+    expect(signals[1]?.aborted).toBe(true);
+    await act(async () => {
+      vi.advanceTimersByTime(SENSITIVE_VIEW_REVALIDATION_THROTTLE_MS);
+      await Promise.resolve();
+    });
+    expect(readWallets).toHaveBeenCalledTimes(3);
+
+    await act(async () => {
+      superseded.resolve({ version: 1, wallets: [SOLANA_WALLET] });
+      await Promise.resolve();
+    });
+    expect(screen.queryByText(SOLANA_WALLET.addressHint)).toBeNull();
+    expect(screen.getByText(/Loading verified wallets/u)).toBeVisible();
+
+    await act(async () => {
+      current.resolve({ version: 1, wallets: [ETHEREUM_WALLET] });
+      await Promise.resolve();
+    });
+    expect(screen.getByText(ETHEREUM_WALLET.addressHint)).toBeVisible();
   });
 
   it('requires explicit confirmation and explains the narrow effect of removing a wallet', async () => {
