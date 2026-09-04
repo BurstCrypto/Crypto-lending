@@ -4553,7 +4553,9 @@ p {
 }
 
 .mainnet-wallet-success {
+  display: grid;
   width: 100%;
+  gap: 0.65rem;
   padding: 0.85rem 0.95rem;
   color: var(--evergreen-strong);
   background: var(--evergreen-soft);
@@ -4563,6 +4565,30 @@ p {
 
 .mainnet-wallet-success p {
   margin: 0.25rem 0 0;
+}
+
+.mainnet-wallet-success h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.mainnet-wallet-request-status {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.public-testnet-wallet-selection .mainnet-wallet-change-button {
+  color: var(--evergreen-strong);
+  background: var(--panel);
+  border-color: var(--line-strong);
+}
+
+@media (hover: hover) {
+  .public-testnet-wallet-selection .mainnet-wallet-change-button:hover:not(:disabled) {
+    color: var(--evergreen-strong);
+    background: var(--evergreen-soft);
+    border-color: var(--line-strong);
+  }
 }
 
 .mainnet-wallet-roster {

@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -166,7 +166,9 @@ describe('MainnetWalletOwnership', () => {
     expect(runtime.verify).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole('button', { name: 'Verify 0x2222…2222' }));
-    expect(await screen.findByText('Ethereum account verified')).toBeVisible();
+    const verified = await screen.findByText('Ethereum account verified');
+    expect(verified).toBeVisible();
+    await waitFor(() => expect(verified.closest('[role="status"]')).toHaveFocus());
     expect(runtime.verify).toHaveBeenCalledWith(
       EVM_CONNECTION.connectionToken,
       'account-two',
@@ -217,6 +219,130 @@ describe('MainnetWalletOwnership', () => {
       null,
       expect.any(AbortSignal),
     );
+  });
+
+  it('announces account selection and restores focus when choosing another wallet', async () => {
+    const runtime = runtimeHarness();
+    render(<MainnetWalletOwnership dependencies={dependencies(runtime)} />);
+
+    const metamask = await screen.findByRole('button', { name: 'MetaMask' });
+    fireEvent.click(metamask);
+
+    const firstAccount = await screen.findByRole('button', {
+      name: `Verify ${EVM_CONNECTION.accounts[0]!.addressHint}`,
+    });
+    await waitFor(() => expect(firstAccount).toHaveFocus());
+    expect(screen.getByText('MetaMask connected. Choose an account to verify.')).toHaveAttribute(
+      'aria-live',
+      'polite',
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Choose another wallet' }));
+
+    expect(runtime.cancel).toHaveBeenCalledOnce();
+    expect(
+      screen.queryByRole('button', {
+        name: `Verify ${EVM_CONNECTION.accounts[0]!.addressHint}`,
+      }),
+    ).toBeNull();
+    expect(screen.getByText('Wallet choice cleared. Choose a wallet on Ethereum.')).toHaveAttribute(
+      'aria-live',
+      'polite',
+    );
+    await waitFor(() => expect(metamask).toHaveFocus());
+    expect(metamask).toBeEnabled();
+  });
+
+  it('cancels a pending connection, restores focus, and ignores its late result', async () => {
+    const pendingConnection = Promise.withResolvers<MainnetWalletConnectionChoice>();
+    let operationSignal: AbortSignal | undefined;
+    const runtime = runtimeHarness({
+      connect: vi.fn((_chainId, _connectorId, _selectionId, signal) => {
+        operationSignal = signal;
+        return pendingConnection.promise;
+      }),
+    });
+    render(<MainnetWalletOwnership dependencies={dependencies(runtime)} />);
+
+    const metamask = await screen.findByRole('button', { name: 'MetaMask' });
+    fireEvent.click(metamask);
+    fireEvent.click(await screen.findByRole('button', { name: 'Cancel wallet request' }));
+
+    expect(operationSignal?.aborted).toBe(true);
+    expect(runtime.cancel).toHaveBeenCalledOnce();
+    expect(screen.queryByText(/Follow the wallet prompt/u)).toBeNull();
+    expect(
+      screen.getByText('Wallet request cancelled. Choose a wallet on Ethereum.'),
+    ).toHaveAttribute('aria-live', 'polite');
+    await waitFor(() => expect(metamask).toHaveFocus());
+
+    await act(async () => {
+      pendingConnection.resolve(EVM_CONNECTION);
+      await Promise.resolve();
+    });
+
+    expect(
+      screen.queryByRole('button', {
+        name: `Verify ${EVM_CONNECTION.accounts[0]!.addressHint}`,
+      }),
+    ).toBeNull();
+    expect(screen.queryByText('MetaMask connected. Choose an account to verify.')).toBeNull();
+    expect(
+      screen.getByText('Wallet request cancelled. Choose a wallet on Ethereum.'),
+    ).toBeInTheDocument();
+    expect(metamask).toHaveFocus();
+  });
+
+  it('cancels a pending proof when changing wallets and suppresses its late success', async () => {
+    const pendingVerification = Promise.withResolvers<MainnetWalletVerificationResult>();
+    let operationSignal: AbortSignal | undefined;
+    const verify = vi.fn<MainnetWalletOwnershipRuntime['verify']>(
+      (_connectionToken, _accountToken, signal) => {
+        operationSignal = signal;
+        return pendingVerification.promise;
+      },
+    );
+    const runtime = runtimeHarness({ verify });
+    const onVerified = vi.fn();
+    const onWalletsChanged = vi.fn();
+    render(
+      <MainnetWalletOwnership
+        dependencies={dependencies(runtime)}
+        onVerified={onVerified}
+        onWalletsChanged={onWalletsChanged}
+      />,
+    );
+
+    const metamask = await screen.findByRole('button', { name: 'MetaMask' });
+    fireEvent.click(metamask);
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: `Verify ${EVM_CONNECTION.accounts[0]!.addressHint}`,
+      }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Choose another wallet' }));
+
+    expect(operationSignal?.aborted).toBe(true);
+    expect(runtime.cancel).toHaveBeenCalledOnce();
+    await waitFor(() => expect(metamask).toHaveFocus());
+
+    await act(async () => {
+      pendingVerification.resolve(RESULT);
+      await Promise.resolve();
+    });
+
+    expect(screen.queryByText('Ethereum account verified')).toBeNull();
+    expect(
+      screen.queryByRole('button', {
+        name: `Verify ${EVM_CONNECTION.accounts[0]!.addressHint}`,
+      }),
+    ).toBeNull();
+    expect(onVerified).not.toHaveBeenCalled();
+    expect(onWalletsChanged).not.toHaveBeenCalled();
+    expect(
+      screen.getByText('Wallet choice cleared. Choose a wallet on Ethereum.'),
+    ).toBeInTheDocument();
+    expect(metamask).toHaveFocus();
   });
 
   it('does not switch the wallet and gives manual network guidance', async () => {

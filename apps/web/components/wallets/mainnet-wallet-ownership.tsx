@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 
 import { isAbortFailure } from '@/lib/authentication/http';
 import {
@@ -496,11 +496,13 @@ export function MainnetWalletOwnership({
   dependencies,
 }: MainnetWalletOwnershipProps) {
   const configured = useMemo(() => ({ ...DEFAULT_DEPENDENCIES, ...dependencies }), [dependencies]);
+  const accountChoicesId = useId();
   const [chainId, setChainId] = useState<MainnetWalletNetworkId>('eip155:1');
   const [wallets, setWallets] = useState<readonly InjectedProviderDescriptor[]>([]);
   const [connection, setConnection] = useState<MainnetWalletConnectionChoice | null>(null);
   const [result, setResult] = useState<MainnetWalletVerificationResult | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
+  const [walletAnnouncement, setWalletAnnouncement] = useState('');
   const [busy, setBusy] = useState(false);
   const [phantomAvailable, setPhantomAvailable] = useState(false);
   const [roster, setRoster] = useState<MainnetWalletRosterState>({ status: 'LOADING' });
@@ -511,6 +513,12 @@ export function MainnetWalletOwnership({
   const [removalNotice, setRemovalNotice] = useState<string | null>(null);
   const runtimeReference = useRef<MainnetWalletOwnershipRuntime | null>(null);
   const walletOperationReference = useRef<AbortController | null>(null);
+  const walletOperationGenerationReference = useRef(0);
+  const walletReturnFocusReference = useRef<HTMLButtonElement | null>(null);
+  const pendingWalletFocusReference = useRef<HTMLElement | null>(null);
+  const walletChoicesHeadingReference = useRef<HTMLParagraphElement | null>(null);
+  const firstAccountButtonReference = useRef<HTMLButtonElement | null>(null);
+  const verificationResultReference = useRef<HTMLDivElement | null>(null);
   const removalOperationReference = useRef<AbortController | null>(null);
   const removalTargetReference = useRef<MainnetRegisteredWalletSummary | null>(null);
   const removalReturnFocusReference = useRef<HTMLButtonElement | null>(null);
@@ -536,6 +544,7 @@ export function MainnetWalletOwnership({
     queueMicrotask(() => updateDetectedWallets(runtime.listEvmWallets()));
     return () => {
       active = false;
+      walletOperationGenerationReference.current += 1;
       walletOperationReference.current?.abort();
       walletOperationReference.current = null;
       unsubscribe();
@@ -557,6 +566,26 @@ export function MainnetWalletOwnership({
       keepWalletButtonReference.current?.focus();
     }
   }, [removalTarget, removingWalletId]);
+
+  useEffect(() => {
+    if (connection !== null && !busy) firstAccountButtonReference.current?.focus();
+  }, [busy, connection]);
+
+  useEffect(() => {
+    if (connection !== null || busy) return;
+    const target = pendingWalletFocusReference.current;
+    if (target === null) return;
+    pendingWalletFocusReference.current = null;
+    if (target.isConnected && (!(target instanceof HTMLButtonElement) || !target.disabled)) {
+      target.focus();
+      return;
+    }
+    walletChoicesHeadingReference.current?.focus();
+  }, [busy, connection]);
+
+  useEffect(() => {
+    if (result !== null && !busy) verificationResultReference.current?.focus();
+  }, [busy, result]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -619,55 +648,134 @@ export function MainnetWalletOwnership({
     setRosterRevision((current) => current + 1);
   }
 
-  function selectNetwork(nextChainId: MainnetWalletNetworkId): void {
-    if (walletInteractionBlocked || nextChainId === chainId) return;
-    runtimeReference.current?.cancel();
+  function beginWalletOperation(): {
+    readonly controller: AbortController;
+    readonly generation: number;
+  } {
+    const controller = new AbortController();
+    const generation = walletOperationGenerationReference.current + 1;
+    walletOperationGenerationReference.current = generation;
+    walletOperationReference.current = controller;
+    return { controller, generation };
+  }
+
+  function isCurrentWalletOperation(
+    runtime: MainnetWalletOwnershipRuntime,
+    controller: AbortController,
+    generation: number,
+  ): boolean {
+    return (
+      !controller.signal.aborted &&
+      runtimeReference.current === runtime &&
+      walletOperationReference.current === controller &&
+      walletOperationGenerationReference.current === generation
+    );
+  }
+
+  function invalidateWalletOperation(): void {
+    walletOperationGenerationReference.current += 1;
+    walletOperationReference.current?.abort();
+    walletOperationReference.current = null;
+    try {
+      runtimeReference.current?.cancel();
+    } catch {
+      // The local chooser still resets if an injected wallet cleanup hook fails.
+    }
+  }
+
+  function resetWalletChoice(announcement: string): void {
+    pendingWalletFocusReference.current =
+      walletReturnFocusReference.current ?? walletChoicesHeadingReference.current;
+    invalidateWalletOperation();
+    setBusy(false);
     setConnection(null);
     setResult(null);
     setFailure(null);
+    setWalletAnnouncement(announcement);
+  }
+
+  function selectNetwork(nextChainId: MainnetWalletNetworkId): void {
+    if (walletInteractionBlocked || nextChainId === chainId) return;
+    invalidateWalletOperation();
+    walletReturnFocusReference.current = null;
+    pendingWalletFocusReference.current = null;
+    setConnection(null);
+    setResult(null);
+    setFailure(null);
+    setWalletAnnouncement(
+      `${mainnetWalletNetworkFor(nextChainId).displayName} selected. Choose a wallet.`,
+    );
     setChainId(nextChainId);
+  }
+
+  function cancelWalletRequest(): void {
+    if (!busy || removalTarget !== null) return;
+    resetWalletChoice(`Wallet request cancelled. Choose a wallet on ${network.displayName}.`);
+  }
+
+  function chooseAnotherWallet(): void {
+    if (connection === null || removalTarget !== null) return;
+    resetWalletChoice(`Wallet choice cleared. Choose a wallet on ${network.displayName}.`);
   }
 
   async function connect(
     connectorId: MainnetConnectorId,
     selectionId: string | null,
+    returnFocus: HTMLButtonElement,
   ): Promise<void> {
     const runtime = runtimeReference.current;
-    if (runtime === null || walletInteractionBlocked) return;
-    const controller = new AbortController();
-    walletOperationReference.current = controller;
+    if (runtime === null || walletInteractionBlocked || walletOperationReference.current !== null) {
+      return;
+    }
+    walletReturnFocusReference.current = returnFocus;
+    const { controller, generation } = beginWalletOperation();
     setBusy(true);
     setConnection(null);
     setResult(null);
     setFailure(null);
+    setWalletAnnouncement('');
     try {
       const next = await runtime.connect(chainId, connectorId, selectionId, controller.signal);
-      if (!controller.signal.aborted && runtimeReference.current === runtime) setConnection(next);
+      if (!isCurrentWalletOperation(runtime, controller, generation)) return;
+      setConnection(next);
+      setWalletAnnouncement(`${next.displayName} connected. Choose an account to verify.`);
     } catch (error) {
-      if (!isAbortFailure(error, controller.signal) && runtimeReference.current === runtime) {
+      if (
+        isCurrentWalletOperation(runtime, controller, generation) &&
+        !isAbortFailure(error, controller.signal)
+      ) {
         setFailure(publicFailureMessage(error, `${network.displayName} Mainnet`));
       }
     } finally {
-      if (walletOperationReference.current === controller) walletOperationReference.current = null;
-      if (!controller.signal.aborted && runtimeReference.current === runtime) setBusy(false);
+      if (isCurrentWalletOperation(runtime, controller, generation)) {
+        walletOperationReference.current = null;
+        setBusy(false);
+      }
     }
   }
 
   async function verify(account: MainnetWalletAccountChoice): Promise<void> {
     const runtime = runtimeReference.current;
-    if (runtime === null || connection === null || walletInteractionBlocked) return;
-    const controller = new AbortController();
-    walletOperationReference.current = controller;
+    if (
+      runtime === null ||
+      connection === null ||
+      walletInteractionBlocked ||
+      walletOperationReference.current !== null
+    ) {
+      return;
+    }
+    const { controller, generation } = beginWalletOperation();
     setBusy(true);
     setFailure(null);
     setResult(null);
+    setWalletAnnouncement('');
     try {
       const next = await runtime.verify(
         connection.connectionToken,
         account.accountToken,
         controller.signal,
       );
-      if (controller.signal.aborted || runtimeReference.current !== runtime) return;
+      if (!isCurrentWalletOperation(runtime, controller, generation)) return;
       setConnection(null);
       setResult(next);
       setRoster({ status: 'LOADING' });
@@ -683,8 +791,15 @@ export function MainnetWalletOwnership({
         // Parent rendering failures cannot repeat an accepted proof.
       }
     } catch (error) {
-      if (isAbortFailure(error, controller.signal) || runtimeReference.current !== runtime) return;
+      if (
+        !isCurrentWalletOperation(runtime, controller, generation) ||
+        isAbortFailure(error, controller.signal)
+      ) {
+        return;
+      }
       setConnection(null);
+      pendingWalletFocusReference.current =
+        walletReturnFocusReference.current ?? walletChoicesHeadingReference.current;
       if (
         error instanceof WalletOwnershipHandoffError &&
         error.code === 'WALLET_OWNERSHIP_AUTHENTICATION_REQUIRED' &&
@@ -699,8 +814,10 @@ export function MainnetWalletOwnership({
       }
       setFailure(publicFailureMessage(error, `${network.displayName} Mainnet`));
     } finally {
-      if (walletOperationReference.current === controller) walletOperationReference.current = null;
-      if (!controller.signal.aborted && runtimeReference.current === runtime) setBusy(false);
+      if (isCurrentWalletOperation(runtime, controller, generation)) {
+        walletOperationReference.current = null;
+        setBusy(false);
+      }
     }
   }
 
@@ -924,6 +1041,9 @@ export function MainnetWalletOwnership({
       </section>
 
       <div className="public-testnet-wallet-selection">
+        <span className="visually-hidden" aria-live="polite" aria-atomic="true">
+          {walletAnnouncement}
+        </span>
         <p>1. Choose a network</p>
         <div role="group" aria-label="Wallet network">
           {MAINNET_WALLET_NETWORKS.map((candidate) => (
@@ -939,7 +1059,9 @@ export function MainnetWalletOwnership({
           ))}
         </div>
 
-        <p>2. Connect a wallet on {network.displayName}</p>
+        <p ref={walletChoicesHeadingReference} tabIndex={-1}>
+          2. Connect a wallet on {network.displayName}
+        </p>
         {network.namespace === 'eip155' ? (
           <div role="group" aria-label={`${network.displayName} wallet choices`}>
             <button
@@ -950,7 +1072,9 @@ export function MainnetWalletOwnership({
                 connection !== null ||
                 metamask === undefined
               }
-              onClick={() => metamask && void connect('metamask', metamask.selectionId)}
+              onClick={(event) =>
+                metamask && void connect('metamask', metamask.selectionId, event.currentTarget)
+              }
             >
               MetaMask
             </button>
@@ -962,7 +1086,9 @@ export function MainnetWalletOwnership({
                 connection !== null ||
                 coinbase === undefined
               }
-              onClick={() => coinbase && void connect('coinbase', coinbase.selectionId)}
+              onClick={(event) =>
+                coinbase && void connect('coinbase', coinbase.selectionId, event.currentTarget)
+              }
             >
               Coinbase Wallet
             </button>
@@ -977,7 +1103,7 @@ export function MainnetWalletOwnership({
                 connection !== null ||
                 !phantomAvailable
               }
-              onClick={() => void connect('phantom', null)}
+              onClick={(event) => void connect('phantom', null, event.currentTarget)}
             >
               Phantom
             </button>
@@ -986,11 +1112,12 @@ export function MainnetWalletOwnership({
 
         {connection !== null ? (
           <div className="mainnet-wallet-success">
-            <strong>3. Choose the account to verify</strong>
-            <div role="group" aria-label={`${connection.displayName} accounts`}>
-              {connection.accounts.map((account) => (
+            <h3 id={accountChoicesId}>3. Choose a {connection.displayName} account to verify</h3>
+            <div role="group" aria-labelledby={accountChoicesId}>
+              {connection.accounts.map((account, index) => (
                 <button
                   key={account.accountToken}
+                  ref={index === 0 ? firstAccountButtonReference : undefined}
                   type="button"
                   disabled={walletInteractionBlocked}
                   onClick={() => void verify(account)}
@@ -999,20 +1126,45 @@ export function MainnetWalletOwnership({
                 </button>
               ))}
             </div>
+            <button
+              type="button"
+              className="mainnet-wallet-change-button"
+              disabled={removalTarget !== null}
+              onClick={chooseAnotherWallet}
+            >
+              Choose another wallet
+            </button>
           </div>
         ) : null}
 
         {busy ? (
-          <p role="status" aria-live="polite">
-            Follow the wallet prompt. No request is retried automatically.
-          </p>
+          <div className="mainnet-wallet-request-status">
+            <p role="status" aria-live="polite">
+              Follow the wallet prompt. No request is retried automatically.
+            </p>
+            {connection === null ? (
+              <button
+                type="button"
+                className="mainnet-wallet-change-button"
+                onClick={cancelWalletRequest}
+              >
+                Cancel wallet request
+              </button>
+            ) : null}
+          </div>
         ) : failure !== null ? (
           <div className="local-demo-wallet-error" role="alert">
             <p>{failure}</p>
             <p>No request is retried automatically.</p>
           </div>
         ) : result !== null ? (
-          <div className="mainnet-wallet-success" role="status" aria-live="polite">
+          <div
+            ref={verificationResultReference}
+            className="mainnet-wallet-success"
+            role="status"
+            aria-live="polite"
+            tabIndex={-1}
+          >
             <strong>
               {mainnetWalletNetworkFor(result.chainId).displayName} account{' '}
               {result.status === 'registered' ? 'verified' : 'already verified'}
