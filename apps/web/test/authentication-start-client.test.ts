@@ -35,10 +35,10 @@ describe('authentication start client', () => {
     const requestFetch = vi.fn<AuthenticationFetch>(async () => success());
 
     await expect(
-      startAuthenticationLogin('/account/wallets?tab=active', { fetch: requestFetch }),
+      startAuthenticationLogin('/portfolio?tab=active', { fetch: requestFetch }),
     ).resolves.toBe('https://identity.example/authorize?state=opaque');
     expect(requestFetch).toHaveBeenCalledWith(
-      '/api/v1/auth/login?returnTo=%2Faccount%2Fwallets%3Ftab%3Dactive',
+      '/api/v1/auth/login?returnTo=%2Fportfolio%3Ftab%3Dactive',
       {
         method: 'GET',
         cache: 'no-store',
@@ -69,7 +69,7 @@ describe('authentication start client', () => {
           contactEmail: 'Case.Sensitive@Example.com',
           contactPhone: null,
           declaredResidencyCountryCode: 'US',
-          returnPath: '/account/wallets',
+          returnPath: '/portfolio',
         },
         { fetch: requestFetch },
       ),
@@ -85,7 +85,7 @@ describe('authentication start client', () => {
         contactEmail: 'Case.Sensitive@Example.com',
         contactPhone: null,
         declaredResidencyCountryCode: 'US',
-        returnPath: '/account/wallets',
+        returnPath: '/portfolio',
       }),
       signal: expect.any(AbortSignal),
     });

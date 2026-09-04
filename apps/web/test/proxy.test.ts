@@ -73,7 +73,7 @@ describe('web request proxy', () => {
     expectAccountPrivacyHeaders(shell);
   });
 
-  it('redirects a missing account-session hint temporarily and preserves the safe query', () => {
+  it('redirects a missing account-session hint away from an unshipped account subpage', () => {
     const response = proxy(accountRequest('/account/settings?section=security&mode=compact'));
 
     expect(response.status).toBe(307);
@@ -82,9 +82,7 @@ describe('web request proxy', () => {
     expect(response.headers.get('location')).toMatch(/^https:\/\/app\.example\/login\?/u);
     const location = new URL(response.headers.get('location') as string);
     expect(location.pathname).toBe('/login');
-    expect([...location.searchParams]).toEqual([
-      ['returnTo', '/account/settings?section=security&mode=compact'],
-    ]);
+    expect([...location.searchParams]).toEqual([['returnTo', '/account']]);
   });
 
   it.each([
@@ -99,7 +97,7 @@ describe('web request proxy', () => {
       expectAccountPrivacyHeaders(response);
       expect(response.headers.get('vary')).toBe('Cookie, Origin');
       expect(new URL(response.headers.get('location') as string).searchParams.get('returnTo')).toBe(
-        '/account/wallets',
+        '/account',
       );
     },
   );
@@ -164,7 +162,7 @@ describe('web request proxy', () => {
     );
     expect(localResponse.status).toBe(307);
     expect(localResponse.headers.get('location')).toBe(
-      'http://127.0.0.1:3000/login?returnTo=%2Faccount%2Fsettings',
+      'http://127.0.0.1:3000/login?returnTo=%2Faccount',
     );
 
     vi.stubEnv('NODE_ENV', 'production');

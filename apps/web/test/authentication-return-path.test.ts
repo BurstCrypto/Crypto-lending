@@ -10,12 +10,11 @@ import {
 describe('authentication return paths', () => {
   it.each([
     ['/account', '/account'],
-    ['/account/', '/account/'],
-    ['/account/wallets', '/account/wallets'],
-    ['/account/wallets?tab=registered&sort=recent', '/account/wallets?tab=registered&sort=recent'],
+    ['/account?tab=profile', '/account?tab=profile'],
     ['/portfolio', '/portfolio'],
+    ['/portfolio?view=network', '/portfolio?view=network'],
     ['/platforms', '/platforms'],
-  ])('accepts the narrow account route family: %s', (candidate, expected) => {
+  ])('accepts one exact shipped protected page: %s', (candidate, expected) => {
     expect(parseSafeAccountReturnPath(candidate)).toBe(expected);
   });
 
@@ -33,6 +32,10 @@ describe('authentication return paths', () => {
     '/logout',
     '/api/v1/auth/login',
     '/accountant',
+    '/account/',
+    '/account/settings',
+    '/account/wallets',
+    '/account/wallets?tab=registered&sort=recent',
     '/account#private',
     '/account\\settings',
     '/account/%2fsettings',
@@ -55,8 +58,11 @@ describe('authentication return paths', () => {
   });
 
   it('builds one encoded login URL from a validated local target', () => {
-    expect(buildAuthenticationLoginPath('/account/wallets?tab=registered')).toBe(
-      '/api/v1/auth/login?returnTo=%2Faccount%2Fwallets%3Ftab%3Dregistered',
+    expect(buildAuthenticationLoginPath('/portfolio?view=network')).toBe(
+      '/api/v1/auth/login?returnTo=%2Fportfolio%3Fview%3Dnetwork',
+    );
+    expect(buildAuthenticationLoginPath('/account/wallets')).toBe(
+      '/api/v1/auth/login?returnTo=%2Faccount',
     );
     expect(buildAuthenticationLoginPath('https://evil.example')).toBe(
       '/api/v1/auth/login?returnTo=%2Faccount',

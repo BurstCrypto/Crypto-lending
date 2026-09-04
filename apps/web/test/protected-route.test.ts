@@ -42,16 +42,16 @@ describe('protected account shell decision', () => {
     expect(hasUniqueValidSessionCookieHint(value)).toBe(false);
   });
 
-  it('preserves a safe account pathname and query in the server-built return path', () => {
+  it('preserves the exact account page and query in the server-built return path', () => {
     expect(
       decideProtectedAccountShell({
         cookieHeader: null,
-        requestUrl: new URL('https://app.example/account/settings?section=security&mode=compact'),
+        requestUrl: new URL('https://app.example/account?section=security&mode=compact'),
       }),
     ).toEqual({
       kind: 'redirect-to-login',
       reason: 'session-cookie-hint-absent-or-invalid',
-      returnPath: '/account/settings?section=security&mode=compact',
+      returnPath: '/account?section=security&mode=compact',
     });
   });
 
@@ -85,6 +85,7 @@ describe('protected account shell decision', () => {
     for (const url of [
       'https://app.example/login?returnTo=%2Flogin',
       'https://app.example/api/v1/auth/login',
+      'https://app.example/account/settings',
       'https://app.example/account/%252f%252fevil.example',
     ]) {
       expect(

@@ -57,8 +57,8 @@ function assertDecodedLayersSafe(value: string): void {
 }
 
 /**
- * Accepts only the protected account route family or exact portfolio/platform screens. This
- * cannot be reused as an arbitrary local redirect validator.
+ * Accepts only protected pages that are actually shipped. This cannot be reused as an
+ * arbitrary local redirect validator.
  */
 export function parseSafeAccountReturnPath(value: unknown): string {
   if (
@@ -89,10 +89,9 @@ export function parseSafeAccountReturnPath(value: unknown): string {
     parsed.username !== '' ||
     parsed.password !== '' ||
     parsed.hash !== '' ||
-    (parsed.pathname !== PORTFOLIO_PATH &&
-      parsed.pathname !== PLATFORMS_PATH &&
-      parsed.pathname !== ACCOUNT_PATH &&
-      !parsed.pathname.startsWith(`${ACCOUNT_PATH}/`))
+    parsed.pathname !== PORTFOLIO_PATH &&
+    parsed.pathname !== PLATFORMS_PATH &&
+    parsed.pathname !== ACCOUNT_PATH
   ) {
     reject();
   }
