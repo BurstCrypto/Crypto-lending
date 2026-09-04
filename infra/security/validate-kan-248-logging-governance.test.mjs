@@ -155,14 +155,37 @@ test('pins retention to the template and keeps legal hold unimplemented', () => 
   assert.deepEqual(validateRetentionTemplate(template), []);
   const mutated = template
     .replace(
-      '    Default: 14\n    AllowedValues: [1, 3, 5, 7, 14, 30, 60, 90]',
-      '    Default: 90\n    AllowedValues: [1, 3, 5, 7, 14, 30, 60, 90, 365]',
+      /(LogRetentionDays:\r?\n +Type: Number\r?\n +)Default: 14\r?\n( +)AllowedValues: \[1, 3, 5, 7, 14, 30, 60, 90\]/u,
+      '$1Default: 90\n$2AllowedValues: [1, 3, 5, 7, 14, 30, 60, 90, 365]',
     )
-    .replace('      RetentionInDays: !Ref LogRetentionDays', '      RetentionInDays: 90');
+    .replace(/(^ +)RetentionInDays: !Ref LogRetentionDays\r?$/mu, '$1RetentionInDays: 90');
   const templateErrors = validateRetentionTemplate(mutated);
   assert(templateErrors.some((error) => error.includes('default must remain 14')));
   assert(templateErrors.some((error) => error.includes('allowlist drifted')));
   assert(templateErrors.some((error) => error.includes('ApiLogGroup')));
+});
+
+test('rejects nested decoys for retention parameters and resource properties', () => {
+  const template = readFileSync(applicationBaselinePath, 'utf8');
+  const nestedParameterDecoy = template.replace(
+    /(LogRetentionDays:\r?\n +Type: Number\r?\n +)Default: 14/u,
+    '$1Metadata:\n   Default: 14',
+  );
+  assert(
+    validateRetentionTemplate(nestedParameterDecoy).some((error) =>
+      error.includes('LogRetentionDays declaration is missing or malformed'),
+    ),
+  );
+
+  const nestedResourceDecoy = template.replace(
+    /(^ +)RetentionInDays: !Ref LogRetentionDays\r?$/mu,
+    '$1Metadata:\n$1 RetentionInDays: !Ref LogRetentionDays',
+  );
+  assert(
+    validateRetentionTemplate(nestedResourceDecoy).some((error) =>
+      error.includes('ApiLogGroup must bind retention exactly'),
+    ),
+  );
 });
 
 test('preserves immutable financial-record boundaries', () => {

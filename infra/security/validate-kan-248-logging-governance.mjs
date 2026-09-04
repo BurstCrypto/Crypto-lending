@@ -566,7 +566,7 @@ export function validateLoggerContract(loggingContextSource, structuredLoggerSou
 
   const safeFieldKeys = extractDelimitedValues(
     structuredLoggerSource,
-    /const SAFE_FIELD_KEYS[\s\S]*?new Set[^\(]*\(\[([\s\S]*?)\]\);/u,
+    /const SAFE_FIELD_KEYS[\s\S]*?new Set[^(]*\(\[([\s\S]*?)\]\);/u,
     'SAFE_FIELD_KEYS',
     errors,
   );
@@ -624,14 +624,21 @@ export function validateLoggerContract(loggingContextSource, structuredLoggerSou
 
 export function validateRetentionTemplate(source) {
   const errors = [];
-  const parameter = source.match(
-    /\n  LogRetentionDays:\r?\n    Type: Number\r?\n    Default: (\d+)\r?\n    AllowedValues: \[([^\]]+)\]/u,
+  const parameters = extractTopLevelYamlSection(source, 'Parameters');
+  const parameter = extractIndentedYamlBlock(parameters, 'LogRetentionDays');
+  const parameterValues = extractDirectYamlValues(parameter);
+  const typeLines = parameterValues.filter((value) => value === 'Type: Number');
+  const defaultLines = parameterValues.filter((value) => /^Default: \d+$/u.test(value));
+  const allowedValueLines = parameterValues.filter((value) =>
+    /^AllowedValues: \[[^\]]+\]$/u.test(value),
   );
-  if (!parameter) {
+  if (typeLines.length !== 1 || defaultLines.length !== 1 || allowedValueLines.length !== 1) {
     errors.push('application-baseline LogRetentionDays declaration is missing or malformed.');
   } else {
-    const values = parameter[2].split(',').map((value) => Number(value.trim()));
-    if (Number(parameter[1]) !== 14)
+    const defaultValue = Number(defaultLines[0].slice('Default: '.length));
+    const serializedValues = allowedValueLines[0].slice('AllowedValues: ['.length, -1);
+    const values = serializedValues.split(',').map((value) => Number(value.trim()));
+    if (defaultValue !== 14)
       errors.push('application-baseline log retention default must remain 14 days.');
     if (JSON.stringify(values) !== JSON.stringify(EXPECTED_RETENTION_VALUES)) {
       errors.push(
@@ -639,17 +646,75 @@ export function validateRetentionTemplate(source) {
       );
     }
   }
+  const resources = extractTopLevelYamlSection(source, 'Resources');
   for (const resource of ['ApiLogGroup', 'WebLogGroup', 'WorkerLogGroup']) {
-    const blockPattern = new RegExp(
-      `\\n  ${resource}:\\r?\\n([\\s\\S]*?)(?=\\n  [A-Za-z0-9]+:|$)`,
-      'u',
+    const block = extractIndentedYamlBlock(resources, resource);
+    const properties = extractIndentedYamlBlock(block, 'Properties');
+    const retentionBindings = extractDirectYamlValues(properties).filter(
+      (value) => value === 'RetentionInDays: !Ref LogRetentionDays',
     );
-    const block = source.match(blockPattern)?.[1];
-    if (!block || !/^      RetentionInDays: !Ref LogRetentionDays\r?$/mu.test(block)) {
+    if (retentionBindings.length !== 1) {
       errors.push(`${resource} must bind retention exactly to LogRetentionDays.`);
     }
   }
   return errors;
+}
+
+function extractTopLevelYamlSection(source, name) {
+  if (typeof source !== 'string') return [];
+  const lines = source.split(/\r?\n/u);
+  const heading = `${name}:`;
+  const starts = lines.flatMap((line, index) => (line === heading ? [index] : []));
+  if (starts.length !== 1) return [];
+  const start = starts[0];
+  let end = lines.length;
+  for (let index = start + 1; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (line !== '' && !line.startsWith(' ') && /^[A-Za-z0-9][A-Za-z0-9_-]*:/u.test(line)) {
+      end = index;
+      break;
+    }
+  }
+  return lines.slice(start + 1, end);
+}
+
+function extractIndentedYamlBlock(lines, name) {
+  if (!Array.isArray(lines)) return [];
+  const heading = `${name}:`;
+  const entries = lines.flatMap((line, index) => {
+    if (typeof line !== 'string' || line.trim() === '') return [];
+    return [
+      {
+        index,
+        indent: line.length - line.trimStart().length,
+        value: line.trim(),
+      },
+    ];
+  });
+  const directIndent = Math.min(...entries.map(({ indent }) => indent));
+  const starts = entries.flatMap(({ indent, index, value }) =>
+    indent === directIndent && value === heading ? [index] : [],
+  );
+  if (starts.length !== 1) return [];
+  const start = starts[0];
+  const headingIndent = lines[start].length - lines[start].trimStart().length;
+  for (let index = start + 1; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (line.trim() === '') continue;
+    const indent = line.length - line.trimStart().length;
+    if (indent <= headingIndent) return lines.slice(start + 1, index);
+  }
+  return lines.slice(start + 1);
+}
+
+function extractDirectYamlValues(lines) {
+  if (!Array.isArray(lines)) return [];
+  const entries = lines.flatMap((line) => {
+    if (typeof line !== 'string' || line.trim() === '') return [];
+    return [{ indent: line.length - line.trimStart().length, value: line.trim() }];
+  });
+  const directIndent = Math.min(...entries.map(({ indent }) => indent));
+  return entries.filter(({ indent }) => indent === directIndent).map(({ value }) => value);
 }
 
 export function validateGovernanceRecord(
