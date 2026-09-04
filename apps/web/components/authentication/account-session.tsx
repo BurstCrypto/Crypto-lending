@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import {
   AuthenticationUnauthenticatedError,
@@ -10,6 +10,7 @@ import {
   type AccountProfile,
 } from '@/lib/authentication';
 import { clearBrowserLegacyWalletSessionState } from '@/lib/browser/clear-legacy-wallet-session-state';
+import { useSensitiveViewRevalidation } from '@/lib/browser/use-sensitive-view-revalidation';
 
 import { replaceBrowserLocation } from './browser-navigation';
 import { AuthenticationError } from './authentication-error';
@@ -38,6 +39,27 @@ export function AccountSession() {
   const logoutRequestReference = useRef<AbortController | null>(null);
   const logoutGeneration = useRef(0);
   const accountIdReference = useRef<string | null>(null);
+
+  const invalidateAccountSession = useCallback((): void => {
+    restoreRequestReference.current?.abort();
+    logoutGeneration.current += 1;
+    logoutPendingReference.current = false;
+    logoutRequestReference.current?.abort();
+    logoutRequestReference.current = null;
+    setLogoutFailed(false);
+    setLoggingOut(false);
+    setSession({ status: 'checking' });
+  }, []);
+
+  const revalidateAccountSession = useCallback((): void => {
+    setRetryRevision((revision) => revision + 1);
+  }, []);
+
+  useSensitiveViewRevalidation({
+    invalidate: invalidateAccountSession,
+    revalidate: revalidateAccountSession,
+    enabled: session.status !== 'signed-out',
+  });
 
   useEffect(
     () => () => {
@@ -88,24 +110,6 @@ export function AccountSession() {
       replaceBrowserLocation(session.redirectTo);
     }
   }, [session]);
-
-  useEffect(() => {
-    function revalidatePersistedPage(event: PageTransitionEvent): void {
-      if (!event.persisted) return;
-      restoreRequestReference.current?.abort();
-      logoutGeneration.current += 1;
-      logoutPendingReference.current = false;
-      logoutRequestReference.current?.abort();
-      logoutRequestReference.current = null;
-      setLogoutFailed(false);
-      setLoggingOut(false);
-      setSession({ status: 'checking' });
-      setRetryRevision((revision) => revision + 1);
-    }
-
-    window.addEventListener('pageshow', revalidatePersistedPage);
-    return () => window.removeEventListener('pageshow', revalidatePersistedPage);
-  }, []);
 
   async function logout(): Promise<void> {
     if (logoutPendingReference.current || session.status !== 'authenticated') return;

@@ -43,6 +43,7 @@ import {
   LEGACY_SOLANA_PUBLIC_TESTNET_POSITION_ACCOUNT_STORAGE_KEY,
   legacyLocalDemoWalletRosterKey,
 } from '../lib/browser/clear-legacy-wallet-session-state';
+import { SENSITIVE_VIEW_REVALIDATION_THROTTLE_MS } from '../lib/browser/use-sensitive-view-revalidation';
 
 const PROFILE: AccountProfile = Object.freeze({
   accountId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
@@ -65,6 +66,28 @@ function deferred<Value>() {
   return { promise, reject, resolve };
 }
 
+function dispatchPageShow(persisted: boolean): void {
+  const event = new Event('pageshow');
+  Object.defineProperty(event, 'persisted', { value: persisted });
+  window.dispatchEvent(event);
+}
+
+function dispatchVisibleDocument(): void {
+  Object.defineProperty(document, 'visibilityState', {
+    configurable: true,
+    value: 'visible',
+  });
+  document.dispatchEvent(new Event('visibilitychange'));
+}
+
+const ACCOUNT_SESSION_LIFECYCLE_EVENTS: readonly (readonly [string, () => void])[] = [
+  ['window focus', () => window.dispatchEvent(new Event('focus'))],
+  ['reconnect', () => window.dispatchEvent(new Event('online'))],
+  ['visible document', dispatchVisibleDocument],
+  ['ordinary pageshow', () => dispatchPageShow(false)],
+  ['bfcache pageshow', () => dispatchPageShow(true)],
+];
+
 describe('authentication UI', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -79,6 +102,8 @@ describe('authentication UI', () => {
   afterEach(() => {
     cleanup();
     window.sessionStorage.clear();
+    vi.useRealTimers();
+    Reflect.deleteProperty(document, 'visibilityState');
   });
 
   it('keeps both access pages dynamic and out of search indexes', () => {
@@ -389,6 +414,8 @@ describe('verified account session UI', () => {
   afterEach(() => {
     cleanup();
     window.sessionStorage.clear();
+    vi.useRealTimers();
+    Reflect.deleteProperty(document, 'visibilityState');
   });
 
   it('renders no profile until restoration succeeds, then shows only the verified response', async () => {
@@ -536,44 +563,186 @@ describe('verified account session UI', () => {
     expect(navigationMocks.replace).not.toHaveBeenCalled();
   });
 
-  it('hides cached profile output and revalidates after a persisted pageshow', async () => {
+  it.each(ACCOUNT_SESSION_LIFECYCLE_EVENTS)(
+    'immediately hides profile data and performs one trailing refresh after %s',
+    async (_name, dispatchLifecycleEvent) => {
+      const refreshed = deferred<typeof PROFILE>();
+      authenticationMocks.restore
+        .mockResolvedValueOnce(PROFILE)
+        .mockReturnValueOnce(refreshed.promise);
+      render(<AccountSession />);
+      expect(await screen.findByText(PROFILE.contactEmail)).toBeInTheDocument();
+      vi.useFakeTimers();
+
+      act(() => dispatchLifecycleEvent());
+
+      expect(screen.queryByText(PROFILE.contactEmail)).not.toBeInTheDocument();
+      expect(screen.getByText('Checking your secure session…')).toBeInTheDocument();
+      expect(authenticationMocks.restore).toHaveBeenCalledOnce();
+
+      await act(async () => {
+        vi.advanceTimersByTime(SENSITIVE_VIEW_REVALIDATION_THROTTLE_MS);
+        await Promise.resolve();
+      });
+      expect(authenticationMocks.restore).toHaveBeenCalledTimes(2);
+
+      const refreshedProfile = { ...PROFILE, contactEmail: 'refreshed@example.com' };
+      await act(async () => {
+        refreshed.resolve(refreshedProfile);
+        await refreshed.promise;
+      });
+      expect(screen.getByText(refreshedProfile.contactEmail)).toBeInTheDocument();
+    },
+  );
+
+  it('coalesces a lifecycle event burst into one invalidation and one restore', async () => {
     const refreshed = deferred<typeof PROFILE>();
     authenticationMocks.restore
       .mockResolvedValueOnce(PROFILE)
       .mockReturnValueOnce(refreshed.promise);
     render(<AccountSession />);
     expect(await screen.findByText(PROFILE.contactEmail)).toBeInTheDocument();
+    vi.useFakeTimers();
 
-    const pageShow = new Event('pageshow');
-    Object.defineProperty(pageShow, 'persisted', { value: true });
-    act(() => window.dispatchEvent(pageShow));
+    act(() => {
+      window.dispatchEvent(new Event('focus'));
+      window.dispatchEvent(new Event('online'));
+      dispatchVisibleDocument();
+      dispatchPageShow(false);
+      dispatchPageShow(true);
+    });
 
-    await waitFor(() => expect(authenticationMocks.restore).toHaveBeenCalledTimes(2));
-    await waitFor(() => expect(screen.queryByText(PROFILE.contactEmail)).not.toBeInTheDocument());
-    expect(screen.getByText('Checking your secure session…')).toBeInTheDocument();
-    refreshed.resolve({ ...PROFILE, contactEmail: 'refreshed@example.com' });
-    expect(await screen.findByText('refreshed@example.com')).toBeInTheDocument();
+    expect(screen.queryByText(PROFILE.contactEmail)).not.toBeInTheDocument();
+    expect(authenticationMocks.restore).toHaveBeenCalledOnce();
+    await act(async () => {
+      vi.advanceTimersByTime(SENSITIVE_VIEW_REVALIDATION_THROTTLE_MS);
+      await Promise.resolve();
+    });
     expect(authenticationMocks.restore).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      refreshed.resolve(PROFILE);
+      await refreshed.promise;
+    });
+    expect(screen.getByText(PROFILE.contactEmail)).toBeInTheDocument();
   });
 
-  it('clears the known account roster when persisted-page session revalidation signs out', async () => {
+  it('retains the known account only long enough to clean its roster after revalidation signs out', async () => {
+    const revalidation = deferred<typeof PROFILE>();
     authenticationMocks.restore
       .mockResolvedValueOnce(PROFILE)
-      .mockRejectedValueOnce(new AuthenticationUnauthenticatedError());
+      .mockReturnValueOnce(revalidation.promise);
     const rosterKey = legacyLocalDemoWalletRosterKey(PROFILE.accountId);
     window.sessionStorage.setItem(rosterKey, JSON.stringify({ version: 1, entries: [] }));
     render(<AccountSession />);
     expect(await screen.findByText(PROFILE.contactEmail)).toBeInTheDocument();
+    vi.useFakeTimers();
 
-    const pageShow = new Event('pageshow');
-    Object.defineProperty(pageShow, 'persisted', { value: true });
-    act(() => window.dispatchEvent(pageShow));
+    act(() => window.dispatchEvent(new Event('online')));
 
-    await waitFor(() => expect(authenticationMocks.restore).toHaveBeenCalledTimes(2));
-    await waitFor(() =>
-      expect(navigationMocks.replace).toHaveBeenCalledWith('/login?returnTo=%2Faccount'),
-    );
+    expect(screen.queryByText(PROFILE.contactEmail)).not.toBeInTheDocument();
+    expect(window.sessionStorage.getItem(rosterKey)).not.toBeNull();
+    await act(async () => {
+      vi.advanceTimersByTime(SENSITIVE_VIEW_REVALIDATION_THROTTLE_MS);
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      revalidation.reject(new AuthenticationUnauthenticatedError());
+      await revalidation.promise.catch(() => undefined);
+    });
+    expect(navigationMocks.replace).toHaveBeenCalledWith('/login?returnTo=%2Faccount');
     expect(window.sessionStorage.getItem(rosterKey)).toBeNull();
     expect(screen.queryByText(PROFILE.contactEmail)).not.toBeInTheDocument();
+  });
+
+  it('ignores a late restore that settles after lifecycle revalidation supersedes it', async () => {
+    const initialRestore = deferred<typeof PROFILE>();
+    const revalidation = deferred<typeof PROFILE>();
+    authenticationMocks.restore
+      .mockReturnValueOnce(initialRestore.promise)
+      .mockReturnValueOnce(revalidation.promise);
+    render(<AccountSession />);
+    const initialSignal = authenticationMocks.restore.mock.calls[0]?.[0]?.signal as AbortSignal;
+    vi.useFakeTimers();
+
+    act(() => dispatchPageShow(true));
+
+    expect(initialSignal.aborted).toBe(true);
+    expect(screen.queryByText(PROFILE.contactEmail)).not.toBeInTheDocument();
+    await act(async () => {
+      vi.advanceTimersByTime(SENSITIVE_VIEW_REVALIDATION_THROTTLE_MS);
+      await Promise.resolve();
+    });
+    expect(authenticationMocks.restore).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      initialRestore.resolve({ ...PROFILE, contactEmail: 'stale@example.com' });
+      await initialRestore.promise;
+    });
+    expect(screen.queryByText('stale@example.com')).not.toBeInTheDocument();
+    expect(screen.getByText('Checking your secure session…')).toBeInTheDocument();
+
+    await act(async () => {
+      revalidation.resolve({ ...PROFILE, contactEmail: 'current@example.com' });
+      await revalidation.promise;
+    });
+    expect(screen.getByText('current@example.com')).toBeInTheDocument();
+  });
+
+  it('aborts and suppresses a late logout when lifecycle revalidation begins', async () => {
+    const lateLogout = deferred<string | null>();
+    authenticationMocks.restore.mockResolvedValue(PROFILE);
+    authenticationMocks.logout.mockReturnValueOnce(lateLogout.promise);
+    render(<AccountSession />);
+    expect(await screen.findByText(PROFILE.contactEmail)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+    const logoutSignal = authenticationMocks.logout.mock.calls[0]?.[0]?.signal as AbortSignal;
+    expect(screen.getByRole('button', { name: 'Signing out securely…' })).toBeDisabled();
+    vi.useFakeTimers();
+
+    act(() => window.dispatchEvent(new Event('focus')));
+
+    expect(logoutSignal.aborted).toBe(true);
+    expect(screen.queryByText(PROFILE.contactEmail)).not.toBeInTheDocument();
+    expect(screen.queryByText('Signing out securely…')).not.toBeInTheDocument();
+    await act(async () => {
+      lateLogout.resolve('https://identity.example/logout');
+      await lateLogout.promise;
+    });
+    expect(navigationMocks.replace).not.toHaveBeenCalled();
+
+    await act(async () => {
+      vi.advanceTimersByTime(SENSITIVE_VIEW_REVALIDATION_THROTTLE_MS);
+      await Promise.resolve();
+    });
+    expect(authenticationMocks.restore).toHaveBeenCalledTimes(2);
+    expect(screen.getByText(PROFILE.contactEmail)).toBeInTheDocument();
+    expect(navigationMocks.replace).not.toHaveBeenCalled();
+  });
+
+  it('stops lifecycle refreshes after the session reaches signed-out state', async () => {
+    authenticationMocks.restore.mockResolvedValueOnce(PROFILE);
+    authenticationMocks.logout.mockResolvedValueOnce(null);
+    render(<AccountSession />);
+    expect(await screen.findByText(PROFILE.contactEmail)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+    await waitFor(() => expect(navigationMocks.replace).toHaveBeenCalledWith('/login'));
+    vi.useFakeTimers();
+
+    act(() => {
+      window.dispatchEvent(new Event('focus'));
+      window.dispatchEvent(new Event('online'));
+      dispatchVisibleDocument();
+      dispatchPageShow(false);
+      dispatchPageShow(true);
+      vi.advanceTimersByTime(SENSITIVE_VIEW_REVALIDATION_THROTTLE_MS);
+    });
+
+    expect(authenticationMocks.restore).toHaveBeenCalledOnce();
+    expect(navigationMocks.replace).toHaveBeenCalledOnce();
+    expect(screen.getByText('Leaving your protected account…')).toBeInTheDocument();
   });
 });
