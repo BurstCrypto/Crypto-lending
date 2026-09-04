@@ -1,12 +1,13 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import {
   AuthenticationUnauthenticatedError,
   restoreAuthenticationSession,
 } from '@/lib/authentication';
+import { useSensitiveViewRevalidation } from '@/lib/browser/use-sensitive-view-revalidation';
 
 const PORTFOLIO_LOGIN_PATH = '/login?returnTo=%2Fportfolio';
 const PORTFOLIO_REGISTRATION_PATH = '/register?returnTo=%2Fportfolio';
@@ -44,6 +45,20 @@ export function HomeSessionActions() {
   const [revision, setRevision] = useState(0);
   const activeRequest = useRef<AbortController | null>(null);
 
+  const invalidateSessionActions = useCallback((): void => {
+    activeRequest.current?.abort();
+    setState('checking');
+  }, []);
+
+  const revalidateSessionActions = useCallback((): void => {
+    setRevision((current) => current + 1);
+  }, []);
+
+  useSensitiveViewRevalidation({
+    invalidate: invalidateSessionActions,
+    revalidate: revalidateSessionActions,
+  });
+
   useEffect(() => {
     const controller = new AbortController();
     activeRequest.current?.abort();
@@ -63,18 +78,6 @@ export function HomeSessionActions() {
       if (activeRequest.current === controller) activeRequest.current = null;
     };
   }, [revision]);
-
-  useEffect(() => {
-    function revalidatePersistedPage(event: PageTransitionEvent): void {
-      if (!event.persisted) return;
-      activeRequest.current?.abort();
-      setState('checking');
-      setRevision((current) => current + 1);
-    }
-
-    window.addEventListener('pageshow', revalidatePersistedPage);
-    return () => window.removeEventListener('pageshow', revalidatePersistedPage);
-  }, []);
 
   return (
     <>

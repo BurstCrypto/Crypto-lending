@@ -19,6 +19,7 @@ import {
   AuthenticationUnauthenticatedError,
   AuthenticationUnavailableError,
 } from '@/lib/authentication';
+import { SENSITIVE_VIEW_REVALIDATION_THROTTLE_MS } from '@/lib/browser/use-sensitive-view-revalidation';
 
 function deferred<Value>() {
   let resolve: (value: Value) => void = () => undefined;
@@ -32,7 +33,10 @@ function deferred<Value>() {
 
 describe('SiteHeader', () => {
   beforeEach(() => vi.clearAllMocks());
-  afterEach(() => cleanup());
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
 
   it('shows only guest actions after verification confirms there is no session', async () => {
     const verification = deferred<unknown>();
@@ -134,18 +138,25 @@ describe('SiteHeader', () => {
     expect(screen.queryByRole('navigation', { name: 'Primary' })).toBeNull();
   });
 
-  it('hides protected destinations while a restored page revalidates its session', async () => {
+  it('hides protected destinations while a focused, reconnected page revalidates', async () => {
     const revalidation = deferred<unknown>();
     authenticationMocks.restore.mockResolvedValueOnce({}).mockReturnValueOnce(revalidation.promise);
     render(<SiteHeader activePage="home" />);
     expect(await screen.findByRole('link', { name: 'Portfolio' })).toBeInTheDocument();
+    vi.useFakeTimers();
 
-    const pageShow = new Event('pageshow');
-    Object.defineProperty(pageShow, 'persisted', { value: true });
-    act(() => window.dispatchEvent(pageShow));
+    act(() => {
+      window.dispatchEvent(new Event('focus'));
+      window.dispatchEvent(new Event('online'));
+    });
 
-    await waitFor(() => expect(screen.queryByRole('link', { name: 'Portfolio' })).toBeNull());
+    expect(screen.queryByRole('link', { name: 'Portfolio' })).toBeNull();
     expect(screen.queryByRole('navigation')).toBeNull();
+    expect(authenticationMocks.restore).toHaveBeenCalledOnce();
+    await act(async () => {
+      vi.advanceTimersByTime(SENSITIVE_VIEW_REVALIDATION_THROTTLE_MS);
+      await Promise.resolve();
+    });
     expect(authenticationMocks.restore).toHaveBeenCalledTimes(2);
 
     await act(async () => {
@@ -164,13 +175,18 @@ describe('SiteHeader', () => {
       .mockReturnValueOnce(revalidation.promise);
     render(<SiteHeader activePage="home" />);
     const initialSignal = authenticationMocks.restore.mock.calls[0]?.[0]?.signal as AbortSignal;
+    vi.useFakeTimers();
 
     const pageShow = new Event('pageshow');
     Object.defineProperty(pageShow, 'persisted', { value: true });
     act(() => window.dispatchEvent(pageShow));
 
-    await waitFor(() => expect(authenticationMocks.restore).toHaveBeenCalledTimes(2));
     expect(initialSignal.aborted).toBe(true);
+    await act(async () => {
+      vi.advanceTimersByTime(SENSITIVE_VIEW_REVALIDATION_THROTTLE_MS);
+      await Promise.resolve();
+    });
+    expect(authenticationMocks.restore).toHaveBeenCalledTimes(2);
 
     await act(async () => {
       initial.resolve({});

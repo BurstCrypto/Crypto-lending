@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, render, screen } from '@testing-library/react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -16,6 +16,7 @@ vi.mock('@/lib/authentication', async (importOriginal) => {
 
 import { HomeSessionActions } from '../components/authentication/home-session-actions';
 import { AuthenticationUnauthenticatedError } from '../lib/authentication';
+import { SENSITIVE_VIEW_REVALIDATION_THROTTLE_MS } from '../lib/browser/use-sensitive-view-revalidation';
 
 function deferred<Value>() {
   let resolve: (value: Value) => void = () => undefined;
@@ -29,7 +30,10 @@ function deferred<Value>() {
 
 describe('HomeSessionActions', () => {
   beforeEach(() => vi.clearAllMocks());
-  afterEach(() => cleanup());
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
 
   it('fails closed while checking and exposes protected destinations only after verification', async () => {
     const verification = deferred<unknown>();
@@ -77,22 +81,29 @@ describe('HomeSessionActions', () => {
     expect(document.body).not.toHaveTextContent('private session-provider detail');
   });
 
-  it('hides authenticated actions while a persisted page revalidates', async () => {
+  it('hides authenticated actions while a focused, reconnected page revalidates', async () => {
     const revalidation = deferred<unknown>();
     authenticationMocks.restore.mockResolvedValueOnce({}).mockReturnValueOnce(revalidation.promise);
     render(<HomeSessionActions />);
     expect(await screen.findByRole('link', { name: 'View portfolio' })).toBeInTheDocument();
+    vi.useFakeTimers();
 
-    const pageShow = new Event('pageshow');
-    Object.defineProperty(pageShow, 'persisted', { value: true });
-    act(() => window.dispatchEvent(pageShow));
+    act(() => {
+      window.dispatchEvent(new Event('focus'));
+      window.dispatchEvent(new Event('online'));
+    });
 
-    await waitFor(() => expect(screen.queryByRole('link', { name: 'View portfolio' })).toBeNull());
+    expect(screen.queryByRole('link', { name: 'View portfolio' })).toBeNull();
     expect(screen.queryByRole('link', { name: 'Account' })).toBeNull();
     expect(document.querySelector('[data-home-session-actions="checking"]')).toHaveAttribute(
       'aria-hidden',
       'true',
     );
+    expect(authenticationMocks.restore).toHaveBeenCalledOnce();
+    await act(async () => {
+      vi.advanceTimersByTime(SENSITIVE_VIEW_REVALIDATION_THROTTLE_MS);
+      await Promise.resolve();
+    });
     expect(authenticationMocks.restore).toHaveBeenCalledTimes(2);
 
     await act(async () => {
@@ -110,13 +121,18 @@ describe('HomeSessionActions', () => {
       .mockReturnValueOnce(revalidation.promise);
     render(<HomeSessionActions />);
     const initialSignal = authenticationMocks.restore.mock.calls[0]?.[0]?.signal as AbortSignal;
+    vi.useFakeTimers();
 
     const pageShow = new Event('pageshow');
     Object.defineProperty(pageShow, 'persisted', { value: true });
     act(() => window.dispatchEvent(pageShow));
 
-    await waitFor(() => expect(authenticationMocks.restore).toHaveBeenCalledTimes(2));
     expect(initialSignal.aborted).toBe(true);
+    await act(async () => {
+      vi.advanceTimersByTime(SENSITIVE_VIEW_REVALIDATION_THROTTLE_MS);
+      await Promise.resolve();
+    });
+    expect(authenticationMocks.restore).toHaveBeenCalledTimes(2);
 
     await act(async () => {
       initial.resolve({});

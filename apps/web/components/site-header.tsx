@@ -1,12 +1,13 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import {
   AuthenticationUnauthenticatedError,
   restoreAuthenticationSession,
 } from '@/lib/authentication';
+import { useSensitiveViewRevalidation } from '@/lib/browser/use-sensitive-view-revalidation';
 
 export type SitePage = 'home' | 'platforms' | 'portfolio' | 'account' | 'login' | 'register';
 
@@ -86,6 +87,20 @@ export function SiteHeader({
   const [sessionRevision, setSessionRevision] = useState(0);
   const activeSessionCheck = useRef<AbortController | null>(null);
 
+  const invalidateSessionNavigation = useCallback((): void => {
+    activeSessionCheck.current?.abort();
+    setSessionState('checking');
+  }, []);
+
+  const revalidateSessionNavigation = useCallback((): void => {
+    setSessionRevision((revision) => revision + 1);
+  }, []);
+
+  useSensitiveViewRevalidation({
+    invalidate: invalidateSessionNavigation,
+    revalidate: revalidateSessionNavigation,
+  });
+
   useEffect(() => {
     const abortController = new AbortController();
     activeSessionCheck.current = abortController;
@@ -107,18 +122,6 @@ export function SiteHeader({
       if (activeSessionCheck.current === abortController) activeSessionCheck.current = null;
     };
   }, [sessionRevision]);
-
-  useEffect(() => {
-    function revalidatePersistedPage(event: PageTransitionEvent): void {
-      if (!event.persisted) return;
-      activeSessionCheck.current?.abort();
-      setSessionState('checking');
-      setSessionRevision((revision) => revision + 1);
-    }
-
-    window.addEventListener('pageshow', revalidatePersistedPage);
-    return () => window.removeEventListener('pageshow', revalidatePersistedPage);
-  }, []);
 
   const primaryLinks = sessionState === 'authenticated' ? PRIMARY_LINKS : [];
   const isPublicEntryPage =
