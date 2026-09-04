@@ -68,6 +68,7 @@ describe('authentication configuration', () => {
     'OIDC_REQUIRED_TOKEN_USE',
     'OIDC_END_SESSION_ENDPOINT',
     'OIDC_POST_LOGOUT_REDIRECT_URI',
+    'AUTH_PREAUTH_SEAL_PREVIOUS_KEY_ID',
   ])('rejects dormant %s values while disabled', (name) => {
     expect(() => loadAuthenticationConfig({ AUTH_MODE: 'disabled', [name]: 'dormant' })).toThrow(
       AuthenticationConfigurationError,
@@ -85,6 +86,8 @@ describe('authentication configuration', () => {
       signingAlgorithm: 'RS256',
       sessionIdleTtlSeconds: 86_400,
     });
+    expect(config.preAuthenticationSealKeys).toEqual([config.preAuthenticationSealKey]);
+    expect(Object.isFrozen(config.preAuthenticationSealKeys)).toBe(true);
     expect(JSON.stringify(config)).not.toContain('client-secret-canary');
     expect(Object.isFrozen(config)).toBe(true);
   });
@@ -315,5 +318,171 @@ describe('authentication configuration', () => {
     const badTtls = oidcEnvironment();
     badTtls.AUTH_SESSION_IDLE_TTL_SECONDS = '2592001';
     expect(() => loadAuthenticationConfig(badTtls)).toThrow(AuthenticationConfigurationError);
+  });
+
+  it('loads one bounded previous pre-authentication decrypt key behind an exact pair', () => {
+    const environment = oidcEnvironment();
+    const previousMaterial = Buffer.alloc(32, 9).toString('base64url');
+    environment.AUTH_PREAUTH_SEAL_PREVIOUS_KEY_ID = 'seal_previous';
+    environment.AUTH_PREAUTH_SEAL_PREVIOUS_KEY = previousMaterial;
+    const config = loadAuthenticationConfig(environment);
+    if (config.mode !== 'oidc') throw new Error('Expected OIDC configuration');
+
+    expect(config.preAuthenticationSealKeys.map(({ keyId }) => keyId)).toEqual([
+      'seal_v1',
+      'seal_previous',
+    ]);
+    expect(config.preAuthenticationSealKey).toBe(config.preAuthenticationSealKeys[0]);
+    expect(JSON.stringify(config)).not.toContain(previousMaterial);
+  });
+
+  it('rejects partial, duplicate-ID, and duplicate-material pre-authentication key rotation', () => {
+    const missingMaterial = oidcEnvironment();
+    missingMaterial.AUTH_PREAUTH_SEAL_PREVIOUS_KEY_ID = 'seal_previous';
+    expect(() => loadAuthenticationConfig(missingMaterial)).toThrow(
+      expect.objectContaining({ field: 'AUTH_PREAUTH_SEAL_PREVIOUS_KEY' }),
+    );
+
+    const missingId = oidcEnvironment();
+    missingId.AUTH_PREAUTH_SEAL_PREVIOUS_KEY = Buffer.alloc(32, 9).toString('base64url');
+    expect(() => loadAuthenticationConfig(missingId)).toThrow(
+      expect.objectContaining({ field: 'AUTH_PREAUTH_SEAL_PREVIOUS_KEY_ID' }),
+    );
+
+    const duplicateId = oidcEnvironment();
+    duplicateId.AUTH_PREAUTH_SEAL_PREVIOUS_KEY_ID = duplicateId.AUTH_PREAUTH_SEAL_KEY_ID;
+    duplicateId.AUTH_PREAUTH_SEAL_PREVIOUS_KEY = Buffer.alloc(32, 9).toString('base64url');
+    expect(() => loadAuthenticationConfig(duplicateId)).toThrow(
+      expect.objectContaining({ field: 'AUTH_KEY_IDS' }),
+    );
+
+    const duplicateMaterial = oidcEnvironment();
+    duplicateMaterial.AUTH_PREAUTH_SEAL_PREVIOUS_KEY_ID = 'seal_previous';
+    duplicateMaterial.AUTH_PREAUTH_SEAL_PREVIOUS_KEY = duplicateMaterial.AUTH_PREAUTH_SEAL_KEY;
+    expect(() => loadAuthenticationConfig(duplicateMaterial)).toThrow(
+      expect.objectContaining({ field: 'AUTH_KEY_MATERIAL' }),
+    );
+  });
+
+  it('loads exact bounded HMAC key rings and selects only their declared active writes', () => {
+    const environment = oidcEnvironment();
+    const ring = (purpose: string, start: number): string =>
+      JSON.stringify({
+        activeWriteVersion: 2,
+        keys: [
+          {
+            keyId: `${purpose.replace('-hmac', '')}_v1`,
+            purpose,
+            version: 1,
+            material: Buffer.alloc(32, start).toString('base64url'),
+          },
+          {
+            keyId: `${purpose.replace('-hmac', '')}_v2`,
+            purpose,
+            version: 2,
+            material: Buffer.alloc(32, start + 1).toString('base64url'),
+          },
+        ],
+      });
+    delete environment.AUTH_IDENTITY_HMAC_KEY_ID;
+    delete environment.AUTH_IDENTITY_HMAC_KEY;
+    delete environment.AUTH_SESSION_HMAC_KEY_ID;
+    delete environment.AUTH_SESSION_HMAC_KEY;
+    delete environment.AUTH_CSRF_HMAC_KEY_ID;
+    delete environment.AUTH_CSRF_HMAC_KEY;
+    environment.AUTH_IDENTITY_HMAC_KEY_RING_JSON = ring('identity-hmac', 10);
+    environment.AUTH_SESSION_HMAC_KEY_RING_JSON = ring('session-hmac', 12);
+    environment.AUTH_CSRF_HMAC_KEY_RING_JSON = ring('csrf-hmac', 14);
+    const config = loadAuthenticationConfig(environment);
+    if (config.mode !== 'oidc') throw new Error('Expected OIDC config');
+    expect(config.identityHmacKeys.activeWriteVersion).toBe(2);
+    expect(config.identityHmacKey.version).toBe(2);
+    expect(config.sessionHmacKeys.keys.map(({ version }) => version)).toEqual([1, 2]);
+    expect(config.csrfHmacKey.version).toBe(2);
+    expect(JSON.stringify(config)).not.toContain(Buffer.alloc(32, 10).toString('base64url'));
+  });
+
+  it('permits a read-only successor to be staged before its active-write cutover', () => {
+    const environment = oidcEnvironment();
+    const staged = (purpose: string, start: number): string =>
+      JSON.stringify({
+        activeWriteVersion: 1,
+        keys: [
+          {
+            keyId: `${purpose.replace('-hmac', '')}_v1`,
+            purpose,
+            version: 1,
+            material: Buffer.alloc(32, start).toString('base64url'),
+          },
+          {
+            keyId: `${purpose.replace('-hmac', '')}_v2`,
+            purpose,
+            version: 2,
+            material: Buffer.alloc(32, start + 1).toString('base64url'),
+          },
+        ],
+      });
+    for (const name of [
+      'AUTH_IDENTITY_HMAC_KEY_ID',
+      'AUTH_IDENTITY_HMAC_KEY',
+      'AUTH_SESSION_HMAC_KEY_ID',
+      'AUTH_SESSION_HMAC_KEY',
+      'AUTH_CSRF_HMAC_KEY_ID',
+      'AUTH_CSRF_HMAC_KEY',
+    ]) {
+      delete environment[name];
+    }
+    environment.AUTH_IDENTITY_HMAC_KEY_RING_JSON = staged('identity-hmac', 21);
+    environment.AUTH_SESSION_HMAC_KEY_RING_JSON = staged('session-hmac', 23);
+    environment.AUTH_CSRF_HMAC_KEY_RING_JSON = staged('csrf-hmac', 25);
+
+    const config = loadAuthenticationConfig(environment);
+    if (config.mode !== 'oidc') throw new Error('Expected OIDC config');
+    expect(config.identityHmacKeys.keys.map(({ version }) => version)).toEqual([1, 2]);
+    expect(config.identityHmacKey.version).toBe(1);
+    expect(config.sessionHmacKey.version).toBe(1);
+    expect(config.csrfHmacKey.version).toBe(1);
+  });
+
+  it('keeps legacy single HMAC keys only as an explicit non-production compatibility path', () => {
+    const development = oidcEnvironment();
+    development.NODE_ENV = 'development';
+    expect(loadAuthenticationConfig(development)).toMatchObject({ mode: 'oidc' });
+
+    const environment = oidcEnvironment();
+    environment.NODE_ENV = 'production';
+    try {
+      loadAuthenticationConfig(environment);
+      throw new Error('Expected production legacy HMAC configuration to fail');
+    } catch (error) {
+      expect(error).toEqual(
+        expect.objectContaining({
+          code: 'CONFIGURATION_ERROR',
+          field: 'AUTH_IDENTITY_HMAC_KEY_RING_JSON',
+        }),
+      );
+      expect(String(error)).not.toContain(environment.AUTH_IDENTITY_HMAC_KEY ?? '');
+      expect(JSON.stringify(error)).not.toContain(environment.AUTH_IDENTITY_HMAC_KEY ?? '');
+    }
+  });
+
+  it('rejects non-canonical, oversized, mixed-mode, and cross-purpose-reused rings generically', () => {
+    const environment = oidcEnvironment();
+    const material = Buffer.alloc(32, 20).toString('base64url');
+    environment.AUTH_IDENTITY_HMAC_KEY_RING_JSON = JSON.stringify({
+      activeWriteVersion: 1,
+      keys: [{ keyId: 'identity_ring', purpose: 'identity-hmac', version: 1, material }],
+    });
+    expect(() => loadAuthenticationConfig(environment)).toThrow(
+      expect.objectContaining({ field: 'AUTH_IDENTITY_HMAC_KEY_RING_JSON' }),
+    );
+
+    delete environment.AUTH_IDENTITY_HMAC_KEY_ID;
+    delete environment.AUTH_IDENTITY_HMAC_KEY;
+    environment.AUTH_IDENTITY_HMAC_KEY_RING_JSON = `${environment.AUTH_IDENTITY_HMAC_KEY_RING_JSON} `;
+    expect(() => loadAuthenticationConfig(environment)).toThrow(AuthenticationConfigurationError);
+    expect(() => loadAuthenticationConfig(environment)).toThrow(
+      expect.not.objectContaining({ message: expect.stringContaining(material) }),
+    );
   });
 });

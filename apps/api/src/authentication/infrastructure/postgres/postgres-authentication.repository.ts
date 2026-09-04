@@ -6,8 +6,8 @@ import type { QueryResultRow } from 'pg';
 import { parseAccountId } from '../../../accounts/domain/account-profile';
 import { PostgresService } from '../../../infrastructure/database/postgres.service';
 import {
-  AUTHENTICATION_DIGEST_VERSION,
   type AuthenticationDigestReference,
+  type AuthenticationDigestCandidates,
   type AuthenticationRepositoryPort,
   type BeginAuthenticationTransactionRequest,
   type BegunAuthenticationTransaction,
@@ -82,13 +82,37 @@ export class AuthenticationPersistenceError extends Error {
 }
 
 function digestBytes(reference: AuthenticationDigestReference): Buffer {
-  if (
-    reference.version !== AUTHENTICATION_DIGEST_VERSION ||
-    !DIGEST_PATTERN.test(reference.value)
-  ) {
+  if (!validDigestVersion(reference.version) || !DIGEST_PATTERN.test(reference.value)) {
     throw new AuthenticationPersistenceError();
   }
   return Buffer.from(reference.value, 'hex');
+}
+
+function validDigestVersion(value: unknown): value is number {
+  return Number.isSafeInteger(value) && (value as number) >= 1 && (value as number) <= 32_767;
+}
+
+function digestCandidateParameters(candidates: AuthenticationDigestCandidates): {
+  readonly versions: readonly number[];
+  readonly values: readonly string[];
+} {
+  if (!Array.isArray(candidates) || candidates.length < 1 || candidates.length > 3) {
+    throw new AuthenticationPersistenceError();
+  }
+  let priorVersion = 0;
+  const values = new Set<string>();
+  for (const candidate of candidates) {
+    digestBytes(candidate);
+    if (candidate.version <= priorVersion || values.has(candidate.value)) {
+      throw new AuthenticationPersistenceError();
+    }
+    priorVersion = candidate.version;
+    values.add(candidate.value);
+  }
+  return Object.freeze({
+    versions: Object.freeze(candidates.map(({ version }) => version)),
+    values: Object.freeze(candidates.map(({ value }) => value)),
+  });
 }
 
 function finiteDate(value: unknown): Date {
@@ -198,7 +222,7 @@ export class PostgresAuthenticationRepository implements AuthenticationRepositor
       if (row.claim_outcome === 'CLAIMED') {
         if (
           typeof row.claimed_issuer !== 'string' ||
-          row.claimed_nonce_digest_version !== AUTHENTICATION_DIGEST_VERSION ||
+          !validDigestVersion(row.claimed_nonce_digest_version) ||
           !Buffer.isBuffer(row.claimed_nonce_digest) ||
           row.claimed_nonce_digest.length !== 32
         ) {
@@ -209,7 +233,7 @@ export class PostgresAuthenticationRepository implements AuthenticationRepositor
           flow: applicationFlow(row.claimed_flow),
           issuer: row.claimed_issuer,
           nonceDigest: {
-            version: AUTHENTICATION_DIGEST_VERSION,
+            version: row.claimed_nonce_digest_version,
             value: row.claimed_nonce_digest.toString('hex'),
           },
         });
@@ -266,6 +290,7 @@ export class PostgresAuthenticationRepository implements AuthenticationRepositor
     }
     const registration = request.flow === 'registration' ? request.registration : undefined;
     try {
+      const subjectDigests = digestCandidateParameters(request.subjectDigests);
       const result = await this.postgres.query<CompleteRow>(
         `SELECT completed.login_outcome,
                 completed.account_id,
@@ -273,19 +298,20 @@ export class PostgresAuthenticationRepository implements AuthenticationRepositor
                 completed.credential_id,
                 completed.idle_expires_at,
                 completed.absolute_expires_at
-         FROM complete_authentication_login(
-           $1::uuid, $2::text, $3::smallint, $4::bytea, $5::smallint,
-           $6::bytea, $7::uuid, $8::uuid, $9::uuid, $10::uuid,
-           $11::smallint, $12::bytea, $13::smallint, $14::bytea,
-           $15::integer, $16::integer, $17::text, $18::text, $19::text, $20::uuid
+         FROM complete_auth_login_keyring(
+           $1::uuid, $2::text, $3::text, $4::smallint, $5::bytea,
+           $6::smallint[], $7::text[], $8::uuid, $9::uuid, $10::uuid, $11::uuid,
+           $12::smallint, $13::bytea, $14::smallint, $15::bytea,
+           $16::integer, $17::integer, $18::text, $19::text, $20::text, $21::uuid
          ) AS completed`,
         [
           uuid(request.transactionId),
+          request.identity.providerKey,
           request.identity.issuer,
           request.nonceDigest.version,
           digestBytes(request.nonceDigest),
-          request.subjectDigest.version,
-          digestBytes(request.subjectDigest),
+          subjectDigests.versions,
+          subjectDigests.values,
           parseAccountId(request.proposedAccountId),
           uuid(request.proposedIdentityId),
           uuid(request.proposedSessionFamilyId),
@@ -343,22 +369,25 @@ export class PostgresAuthenticationRepository implements AuthenticationRepositor
     request: ResolveAuthenticationSessionRequest,
   ): Promise<ResolveAuthenticationSessionResult> {
     try {
-      const csrf = request.csrf.required ? request.csrf.digest : undefined;
+      const credentials = digestCandidateParameters(request.credentialDigests);
+      const csrf = request.csrf.required
+        ? digestCandidateParameters(request.csrf.digests)
+        : undefined;
       const result = await this.postgres.query<ResolveRow>(
         `SELECT resolved.authentication_outcome,
                 resolved.account_id,
                 resolved.session_family_id
-         FROM resolve_authentication_session(
-           $1::uuid, $2::smallint, $3::bytea, $4::boolean,
-           $5::smallint, $6::bytea, $7::uuid
+         FROM resolve_auth_session_keyring(
+           $1::uuid, $2::smallint[], $3::text[], $4::boolean,
+           $5::smallint[], $6::text[], $7::uuid
          ) AS resolved`,
         [
           uuid(request.credentialId),
-          request.credentialDigest.version,
-          digestBytes(request.credentialDigest),
+          credentials.versions,
+          credentials.values,
           request.csrf.required,
-          csrf?.version ?? null,
-          csrf ? digestBytes(csrf) : null,
+          csrf?.versions ?? null,
+          csrf?.values ?? null,
           uuid(request.correlationId),
         ],
       );
@@ -390,16 +419,17 @@ export class PostgresAuthenticationRepository implements AuthenticationRepositor
     request: RotateAuthenticationSessionRequest,
   ): Promise<RotateAuthenticationSessionResult> {
     try {
+      const credentials = digestCandidateParameters(request.credentialDigests);
       const result = await this.postgres.query<RotateRow>(
         `SELECT rotated.rotation_outcome, rotated.credential_id, rotated.expires_at
-         FROM rotate_authentication_session(
-           $1::uuid, $2::smallint, $3::bytea, $4::uuid, $5::smallint,
+         FROM rotate_auth_session_keyring(
+           $1::uuid, $2::smallint[], $3::text[], $4::uuid, $5::smallint,
            $6::bytea, $7::smallint, $8::bytea, $9::uuid
          ) AS rotated`,
         [
           uuid(request.credentialId),
-          request.credentialDigest.version,
-          digestBytes(request.credentialDigest),
+          credentials.versions,
+          credentials.values,
           uuid(request.successorCredentialId),
           request.successorCredentialDigest.version,
           digestBytes(request.successorCredentialDigest),
@@ -435,15 +465,16 @@ export class PostgresAuthenticationRepository implements AuthenticationRepositor
     request: RevokeAuthenticationSessionRequest,
   ): Promise<RevokeAuthenticationSessionResult> {
     try {
+      const credentials = digestCandidateParameters(request.credentialDigests);
       const result = await this.postgres.query<RevokeRow>(
         `SELECT revoked.revocation_outcome
-         FROM revoke_authentication_session(
-           $1::uuid, $2::smallint, $3::bytea, $4::uuid
+         FROM revoke_auth_session_keyring(
+           $1::uuid, $2::smallint[], $3::text[], $4::uuid
          ) AS revoked`,
         [
           uuid(request.credentialId),
-          request.credentialDigest.version,
-          digestBytes(request.credentialDigest),
+          credentials.versions,
+          credentials.values,
           uuid(request.correlationId),
         ],
       );

@@ -2,8 +2,13 @@ import { isIP } from 'node:net';
 
 import { parseOidcProviderKey, type OidcProviderKey } from '../../domain/authentication';
 import {
+  activeAuthenticationHmacKey,
+  assertAuthenticationKeysIndependent,
   createAuthenticationKey,
+  createAuthenticationHmacKeyRing,
   createSensitiveAuthenticationText,
+  type AuthenticationHmacKeyPurpose,
+  type AuthenticationHmacKeyRing,
   type AuthenticationKey,
   type SensitiveAuthenticationText,
 } from '../crypto/authentication-crypto';
@@ -44,6 +49,12 @@ export interface OidcAuthenticationConfig {
   readonly sessionIdleTtlSeconds: number;
   readonly sessionAbsoluteTtlSeconds: number;
   readonly preAuthenticationSealKey: AuthenticationKey<'preauth-seal'>;
+  /** Current write key first, followed by bounded decrypt-only predecessors. */
+  readonly preAuthenticationSealKeys: readonly AuthenticationKey<'preauth-seal'>[];
+  readonly identityHmacKeys: AuthenticationHmacKeyRing<'identity-hmac'>;
+  readonly sessionHmacKeys: AuthenticationHmacKeyRing<'session-hmac'>;
+  readonly csrfHmacKeys: AuthenticationHmacKeyRing<'csrf-hmac'>;
+  /** Active-key aliases retained for narrow compatibility with existing adapters/tests. */
   readonly identityHmacKey: AuthenticationKey<'identity-hmac'>;
   readonly sessionHmacKey: AuthenticationKey<'session-hmac'>;
   readonly csrfHmacKey: AuthenticationKey<'csrf-hmac'>;
@@ -78,16 +89,21 @@ const OIDC_VARIABLES = [
   'AUTH_SESSION_ABSOLUTE_TTL_SECONDS',
   'AUTH_PREAUTH_SEAL_KEY_ID',
   'AUTH_PREAUTH_SEAL_KEY',
+  'AUTH_PREAUTH_SEAL_PREVIOUS_KEY_ID',
+  'AUTH_PREAUTH_SEAL_PREVIOUS_KEY',
   'AUTH_IDENTITY_HMAC_KEY_ID',
   'AUTH_IDENTITY_HMAC_KEY',
+  'AUTH_IDENTITY_HMAC_KEY_RING_JSON',
   'AUTH_SESSION_HMAC_KEY_ID',
   'AUTH_SESSION_HMAC_KEY',
+  'AUTH_SESSION_HMAC_KEY_RING_JSON',
   'AUTH_CSRF_HMAC_KEY_ID',
   'AUTH_CSRF_HMAC_KEY',
+  'AUTH_CSRF_HMAC_KEY_RING_JSON',
 ] as const;
 
 export class AuthenticationConfigurationError extends Error {
-  readonly code = 'AUTHENTICATION_CONFIGURATION_ERROR' as const;
+  readonly code = 'CONFIGURATION_ERROR' as const;
 
   constructor(readonly field: string) {
     super(`Invalid authentication configuration: ${field}`);
@@ -278,15 +294,108 @@ function authenticationKey<
   purpose: Purpose,
   idName: string,
   keyName: string,
+  version: unknown = 1,
 ): AuthenticationKey<Purpose> {
   try {
     return createAuthenticationKey(
       purpose,
       required(environment, idName),
       required(environment, keyName),
+      version,
     );
   } catch {
     return fail(keyName);
+  }
+}
+
+interface AuthenticationKeyRingDocumentEntry {
+  readonly keyId: string;
+  readonly purpose: AuthenticationHmacKeyPurpose;
+  readonly version: number;
+  readonly material: string;
+}
+
+interface AuthenticationKeyRingDocument {
+  readonly activeWriteVersion: number;
+  readonly keys: readonly AuthenticationKeyRingDocumentEntry[];
+}
+
+function isExactObject(value: unknown, keys: readonly string[]): value is Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  return Object.keys(value).join('\0') === keys.join('\0');
+}
+
+function parseAuthenticationKeyRingDocument(
+  value: string,
+  field: string,
+): AuthenticationKeyRingDocument {
+  if (value.length > 4_096 || /[\0\r\n]/u.test(value)) return fail(field);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value) as unknown;
+  } catch {
+    return fail(field);
+  }
+  if (
+    !isExactObject(parsed, ['activeWriteVersion', 'keys']) ||
+    !Array.isArray(parsed.keys) ||
+    parsed.keys.length < 1 ||
+    parsed.keys.length > 3 ||
+    JSON.stringify(parsed) !== value
+  ) {
+    return fail(field);
+  }
+  let previousVersion = 0;
+  for (const candidate of parsed.keys) {
+    if (
+      !isExactObject(candidate, ['keyId', 'purpose', 'version', 'material']) ||
+      typeof candidate.keyId !== 'string' ||
+      typeof candidate.purpose !== 'string' ||
+      typeof candidate.version !== 'number' ||
+      !Number.isSafeInteger(candidate.version) ||
+      candidate.version <= previousVersion ||
+      candidate.version > 32_767 ||
+      typeof candidate.material !== 'string'
+    ) {
+      return fail(field);
+    }
+    previousVersion = candidate.version;
+  }
+  return parsed as unknown as AuthenticationKeyRingDocument;
+}
+
+function authenticationHmacKeyRing<Purpose extends AuthenticationHmacKeyPurpose>(
+  environment: Readonly<NodeJS.ProcessEnv>,
+  purpose: Purpose,
+  legacyIdName: string,
+  legacyKeyName: string,
+  ringName: string,
+  legacyPermitted: boolean,
+): AuthenticationHmacKeyRing<Purpose> {
+  try {
+    const encodedRing = environment[ringName];
+    if (encodedRing === undefined) {
+      if (!legacyPermitted) return fail(ringName);
+      return createAuthenticationHmacKeyRing(purpose, 1, [
+        authenticationKey(environment, purpose, legacyIdName, legacyKeyName, 1),
+      ]);
+    }
+    if (environment[legacyIdName] !== undefined || environment[legacyKeyName] !== undefined) {
+      return fail(ringName);
+    }
+    const document = parseAuthenticationKeyRingDocument(required(environment, ringName), ringName);
+    const keys = document.keys.map((candidate) => {
+      if (candidate.purpose !== purpose) return fail(ringName);
+      return createAuthenticationKey(
+        purpose,
+        candidate.keyId,
+        candidate.material,
+        candidate.version,
+      );
+    });
+    return createAuthenticationHmacKeyRing(purpose, document.activeWriteVersion, keys);
+  } catch {
+    return fail(ringName);
   }
 }
 
@@ -476,20 +585,80 @@ export function loadAuthenticationConfig(
     return fail('AUTH_SESSION_TTL_ORDER');
   }
 
-  const rawKeyIds = [
-    required(environment, 'AUTH_PREAUTH_SEAL_KEY_ID'),
-    required(environment, 'AUTH_IDENTITY_HMAC_KEY_ID'),
-    required(environment, 'AUTH_SESSION_HMAC_KEY_ID'),
-    required(environment, 'AUTH_CSRF_HMAC_KEY_ID'),
+  const previousPreAuthenticationKeyId = environment.AUTH_PREAUTH_SEAL_PREVIOUS_KEY_ID;
+  const previousPreAuthenticationKey = environment.AUTH_PREAUTH_SEAL_PREVIOUS_KEY;
+  if (
+    (previousPreAuthenticationKeyId === undefined) !==
+    (previousPreAuthenticationKey === undefined)
+  ) {
+    return fail(
+      previousPreAuthenticationKeyId === undefined
+        ? 'AUTH_PREAUTH_SEAL_PREVIOUS_KEY_ID'
+        : 'AUTH_PREAUTH_SEAL_PREVIOUS_KEY',
+    );
+  }
+  const preAuthenticationSealKey = authenticationKey(
+    environment,
+    'preauth-seal',
+    'AUTH_PREAUTH_SEAL_KEY_ID',
+    'AUTH_PREAUTH_SEAL_KEY',
+  );
+  const previousPreAuthenticationSealKey =
+    previousPreAuthenticationKeyId === undefined
+      ? undefined
+      : authenticationKey(
+          environment,
+          'preauth-seal',
+          'AUTH_PREAUTH_SEAL_PREVIOUS_KEY_ID',
+          'AUTH_PREAUTH_SEAL_PREVIOUS_KEY',
+        );
+  const preAuthenticationSealKeys = Object.freeze([
+    preAuthenticationSealKey,
+    ...(previousPreAuthenticationSealKey ? [previousPreAuthenticationSealKey] : []),
+  ]);
+  // The single-key variables remain a narrowly scoped compatibility bridge for local
+  // development and tests. Production must provide the explicit versioned rings.
+  const permitLegacyHmacKeys = testRuntime || environment.NODE_ENV === 'development';
+  const identityHmacKeys = authenticationHmacKeyRing(
+    environment,
+    'identity-hmac',
+    'AUTH_IDENTITY_HMAC_KEY_ID',
+    'AUTH_IDENTITY_HMAC_KEY',
+    'AUTH_IDENTITY_HMAC_KEY_RING_JSON',
+    permitLegacyHmacKeys,
+  );
+  const sessionHmacKeys = authenticationHmacKeyRing(
+    environment,
+    'session-hmac',
+    'AUTH_SESSION_HMAC_KEY_ID',
+    'AUTH_SESSION_HMAC_KEY',
+    'AUTH_SESSION_HMAC_KEY_RING_JSON',
+    permitLegacyHmacKeys,
+  );
+  const csrfHmacKeys = authenticationHmacKeyRing(
+    environment,
+    'csrf-hmac',
+    'AUTH_CSRF_HMAC_KEY_ID',
+    'AUTH_CSRF_HMAC_KEY',
+    'AUTH_CSRF_HMAC_KEY_RING_JSON',
+    permitLegacyHmacKeys,
+  );
+  const allAuthenticationKeys = [
+    ...preAuthenticationSealKeys,
+    ...identityHmacKeys.keys,
+    ...sessionHmacKeys.keys,
+    ...csrfHmacKeys.keys,
   ];
-  const rawKeys = [
-    required(environment, 'AUTH_PREAUTH_SEAL_KEY'),
-    required(environment, 'AUTH_IDENTITY_HMAC_KEY'),
-    required(environment, 'AUTH_SESSION_HMAC_KEY'),
-    required(environment, 'AUTH_CSRF_HMAC_KEY'),
-  ];
-  if (new Set(rawKeyIds).size !== rawKeyIds.length) return fail('AUTH_KEY_IDS');
-  if (new Set(rawKeys).size !== rawKeys.length) return fail('AUTH_KEY_MATERIAL');
+  if (
+    new Set(allAuthenticationKeys.map(({ keyId }) => keyId)).size !== allAuthenticationKeys.length
+  ) {
+    return fail('AUTH_KEY_IDS');
+  }
+  try {
+    assertAuthenticationKeysIndependent(allAuthenticationKeys);
+  } catch {
+    return fail('AUTH_KEY_MATERIAL');
+  }
 
   return Object.freeze({
     mode: 'oidc',
@@ -519,29 +688,13 @@ export function loadAuthenticationConfig(
     preAuthenticationTtlSeconds,
     sessionIdleTtlSeconds,
     sessionAbsoluteTtlSeconds,
-    preAuthenticationSealKey: authenticationKey(
-      environment,
-      'preauth-seal',
-      'AUTH_PREAUTH_SEAL_KEY_ID',
-      'AUTH_PREAUTH_SEAL_KEY',
-    ),
-    identityHmacKey: authenticationKey(
-      environment,
-      'identity-hmac',
-      'AUTH_IDENTITY_HMAC_KEY_ID',
-      'AUTH_IDENTITY_HMAC_KEY',
-    ),
-    sessionHmacKey: authenticationKey(
-      environment,
-      'session-hmac',
-      'AUTH_SESSION_HMAC_KEY_ID',
-      'AUTH_SESSION_HMAC_KEY',
-    ),
-    csrfHmacKey: authenticationKey(
-      environment,
-      'csrf-hmac',
-      'AUTH_CSRF_HMAC_KEY_ID',
-      'AUTH_CSRF_HMAC_KEY',
-    ),
+    preAuthenticationSealKey,
+    preAuthenticationSealKeys,
+    identityHmacKeys,
+    sessionHmacKeys,
+    csrfHmacKeys,
+    identityHmacKey: activeAuthenticationHmacKey(identityHmacKeys),
+    sessionHmacKey: activeAuthenticationHmacKey(sessionHmacKeys),
+    csrfHmacKey: activeAuthenticationHmacKey(csrfHmacKeys),
   });
 }

@@ -35,7 +35,7 @@ import {
   type AuthenticationRateLimitScope,
 } from './ports/authentication-rate-limiter.port';
 import {
-  AUTHENTICATION_DIGEST_VERSION,
+  AUTHENTICATION_OPAQUE_DIGEST_VERSION,
   AUTHENTICATION_REPOSITORY,
   type AuthenticationDigestReference,
   type AuthenticationRepositoryPort,
@@ -48,6 +48,7 @@ import {
 } from '../infrastructure/config/authentication-config.provider';
 import type { OidcAuthenticationConfig } from '../infrastructure/config/authentication.config';
 import {
+  activeAuthenticationHmacKey,
   constantTimeAuthenticationValueEquals,
   createKeyedAuthenticationDigest,
   createOidcIdentityDigest,
@@ -109,8 +110,8 @@ interface VerifiedBrowserSessionProof {
   readonly csrfToken: string;
 }
 
-function digestReference(value: string): AuthenticationDigestReference {
-  return Object.freeze({ version: AUTHENTICATION_DIGEST_VERSION, value });
+function digestReference(version: number, value: string): AuthenticationDigestReference {
+  return Object.freeze({ version, value });
 }
 
 function requestHeader(request: AuthenticationHttpRequest, name: string): unknown {
@@ -190,11 +191,18 @@ export class AuthenticationService {
         transactionId,
         flow: request.flow,
         issuer: config.issuer,
-        stateDigest: digestReference(digestOpaqueAuthenticationSecret('oidc-state', state)),
+        stateDigest: digestReference(
+          AUTHENTICATION_OPAQUE_DIGEST_VERSION,
+          digestOpaqueAuthenticationSecret('oidc-state', state),
+        ),
         browserBindingDigest: digestReference(
+          AUTHENTICATION_OPAQUE_DIGEST_VERSION,
           digestOpaqueAuthenticationSecret('browser-binding', browserBinding),
         ),
-        nonceDigest: digestReference(digestOpaqueAuthenticationSecret('oidc-nonce', nonce)),
+        nonceDigest: digestReference(
+          AUTHENTICATION_OPAQUE_DIGEST_VERSION,
+          digestOpaqueAuthenticationSecret('oidc-nonce', nonce),
+        ),
         ttlSeconds: config.preAuthenticationTtlSeconds,
         correlationId,
       });
@@ -245,7 +253,7 @@ export class AuthenticationService {
     try {
       payload = openPreAuthenticationTransactionCookie(
         request.transactionCookie,
-        [config.preAuthenticationSealKey],
+        config.preAuthenticationSealKeys,
         Math.floor(Date.now() / 1_000),
         config.preAuthenticationTtlSeconds,
       );
@@ -263,8 +271,12 @@ export class AuthenticationService {
     try {
       claimed = await this.repository.claimTransaction({
         transactionId: payload.transactionId,
-        stateDigest: digestReference(digestOpaqueAuthenticationSecret('oidc-state', payload.state)),
+        stateDigest: digestReference(
+          AUTHENTICATION_OPAQUE_DIGEST_VERSION,
+          digestOpaqueAuthenticationSecret('oidc-state', payload.state),
+        ),
         browserBindingDigest: digestReference(
+          AUTHENTICATION_OPAQUE_DIGEST_VERSION,
           digestOpaqueAuthenticationSecret('browser-binding', payload.browserBinding),
         ),
         correlationId,
@@ -273,6 +285,7 @@ export class AuthenticationService {
       throw new AuthenticationUnavailableError();
     }
     const nonceDigest = digestReference(
+      AUTHENTICATION_OPAQUE_DIGEST_VERSION,
       digestOpaqueAuthenticationSecret('oidc-nonce', payload.nonce),
     );
     if (claimed.status !== 'claimed') {
@@ -331,12 +344,12 @@ export class AuthenticationService {
       transactionId: payload.transactionId,
       identity,
       nonceDigest,
-      subjectDigest: digestReference(
-        createOidcIdentityDigest(
-          config.identityHmacKey,
-          identity.providerKey,
-          identity.issuer,
-          identity.subject,
+      subjectDigests: Object.freeze(
+        config.identityHmacKeys.keys.map((key) =>
+          digestReference(
+            key.version,
+            createOidcIdentityDigest(key, identity.providerKey, identity.issuer, identity.subject),
+          ),
         ),
       ),
       proposedAccountId: parseAccountId(randomUUID()),
@@ -344,10 +357,20 @@ export class AuthenticationService {
       proposedSessionFamilyId: randomUUID(),
       proposedCredentialId,
       credentialDigest: digestReference(
-        createKeyedAuthenticationDigest('session', config.sessionHmacKey, sessionSecret),
+        config.sessionHmacKeys.activeWriteVersion,
+        createKeyedAuthenticationDigest(
+          'session',
+          activeAuthenticationHmacKey(config.sessionHmacKeys),
+          sessionSecret,
+        ),
       ),
       csrfDigest: digestReference(
-        createKeyedAuthenticationDigest('csrf', config.csrfHmacKey, csrfToken),
+        config.csrfHmacKeys.activeWriteVersion,
+        createKeyedAuthenticationDigest(
+          'csrf',
+          activeAuthenticationHmacKey(config.csrfHmacKeys),
+          csrfToken,
+        ),
       ),
       idleTtlSeconds: config.sessionIdleTtlSeconds,
       absoluteTtlSeconds: config.sessionAbsoluteTtlSeconds,
@@ -410,16 +433,26 @@ export class AuthenticationService {
     try {
       resolved = await this.repository.resolveSession({
         credentialId: credential.credentialId,
-        credentialDigest: digestReference(
-          createKeyedAuthenticationDigest('session', config.sessionHmacKey, credential.secret),
+        credentialDigests: Object.freeze(
+          config.sessionHmacKeys.keys.map((key) =>
+            digestReference(
+              key.version,
+              createKeyedAuthenticationDigest('session', key, credential.secret),
+            ),
+          ),
         ),
         csrf:
           csrfValue === null
             ? { required: false }
             : {
                 required: true,
-                digest: digestReference(
-                  createKeyedAuthenticationDigest('csrf', config.csrfHmacKey, csrfValue),
+                digests: Object.freeze(
+                  config.csrfHmacKeys.keys.map((key) =>
+                    digestReference(
+                      key.version,
+                      createKeyedAuthenticationDigest('csrf', key, csrfValue),
+                    ),
+                  ),
                 ),
               },
         correlationId: requestCorrelationId(),
@@ -454,15 +487,30 @@ export class AuthenticationService {
     try {
       result = await this.repository.rotateSession({
         credentialId: current.credentialId,
-        credentialDigest: digestReference(
-          createKeyedAuthenticationDigest('session', config.sessionHmacKey, current.secret),
+        credentialDigests: Object.freeze(
+          config.sessionHmacKeys.keys.map((key) =>
+            digestReference(
+              key.version,
+              createKeyedAuthenticationDigest('session', key, current.secret),
+            ),
+          ),
         ),
         successorCredentialId,
         successorCredentialDigest: digestReference(
-          createKeyedAuthenticationDigest('session', config.sessionHmacKey, successorSecret),
+          config.sessionHmacKeys.activeWriteVersion,
+          createKeyedAuthenticationDigest(
+            'session',
+            activeAuthenticationHmacKey(config.sessionHmacKeys),
+            successorSecret,
+          ),
         ),
         successorCsrfDigest: digestReference(
-          createKeyedAuthenticationDigest('csrf', config.csrfHmacKey, successorCsrf),
+          config.csrfHmacKeys.activeWriteVersion,
+          createKeyedAuthenticationDigest(
+            'csrf',
+            activeAuthenticationHmacKey(config.csrfHmacKeys),
+            successorCsrf,
+          ),
         ),
         correlationId,
       });
@@ -488,8 +536,13 @@ export class AuthenticationService {
     try {
       const result = await this.repository.revokeSession({
         credentialId: current.credentialId,
-        credentialDigest: digestReference(
-          createKeyedAuthenticationDigest('session', config.sessionHmacKey, current.secret),
+        credentialDigests: Object.freeze(
+          config.sessionHmacKeys.keys.map((key) =>
+            digestReference(
+              key.version,
+              createKeyedAuthenticationDigest('session', key, current.secret),
+            ),
+          ),
         ),
         correlationId,
       });
@@ -536,17 +589,23 @@ export class AuthenticationService {
     try {
       const result = await this.repository.resolveSession({
         credentialId: proof.credential.credentialId,
-        credentialDigest: digestReference(
-          createKeyedAuthenticationDigest(
-            'session',
-            config.sessionHmacKey,
-            proof.credential.secret,
+        credentialDigests: Object.freeze(
+          config.sessionHmacKeys.keys.map((key) =>
+            digestReference(
+              key.version,
+              createKeyedAuthenticationDigest('session', key, proof.credential.secret),
+            ),
           ),
         ),
         csrf: {
           required: true,
-          digest: digestReference(
-            createKeyedAuthenticationDigest('csrf', config.csrfHmacKey, proof.csrfToken),
+          digests: Object.freeze(
+            config.csrfHmacKeys.keys.map((key) =>
+              digestReference(
+                key.version,
+                createKeyedAuthenticationDigest('csrf', key, proof.csrfToken),
+              ),
+            ),
           ),
         },
         correlationId,
@@ -569,8 +628,13 @@ export class AuthenticationService {
     try {
       decision = await this.rateLimiter.admit({
         scope,
-        subjectDigest: digestReference(
-          createKeyedAuthenticationDigest('rate-limit', config.sessionHmacKey, subject),
+        subjectDigests: Object.freeze(
+          config.sessionHmacKeys.keys.map((key) =>
+            digestReference(
+              key.version,
+              createKeyedAuthenticationDigest('rate-limit', key, subject),
+            ),
+          ),
         ),
         windowSeconds: policy.windowSeconds,
         limitCount: policy.limitCount,

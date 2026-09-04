@@ -1,5 +1,3 @@
-import { Buffer } from 'node:buffer';
-
 import { Injectable } from '@nestjs/common';
 import type { QueryResultRow } from 'pg';
 
@@ -9,7 +7,6 @@ import type {
   AuthenticationRateLimiterPort,
   AuthenticationRateLimitRequest,
 } from '../../application/ports/authentication-rate-limiter.port';
-import { AUTHENTICATION_DIGEST_VERSION } from '../../application/ports/authentication-repository.port';
 import { parseAuthenticationTransactionId } from '../../domain/authentication';
 
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/u;
@@ -41,22 +38,39 @@ export class PostgresAuthenticationRateLimiter implements AuthenticationRateLimi
   async admit(request: AuthenticationRateLimitRequest): Promise<AuthenticationRateLimitDecision> {
     try {
       if (
-        request.subjectDigest.version !== AUTHENTICATION_DIGEST_VERSION ||
-        !DIGEST_PATTERN.test(request.subjectDigest.value)
+        !Array.isArray(request.subjectDigests) ||
+        request.subjectDigests.length < 1 ||
+        request.subjectDigests.length > 3
       ) {
         throw new AuthenticationRateLimitPersistenceError();
+      }
+      let priorVersion = 0;
+      const values = new Set<string>();
+      for (const digest of request.subjectDigests) {
+        if (
+          !Number.isSafeInteger(digest.version) ||
+          digest.version < 1 ||
+          digest.version > 32_767 ||
+          digest.version <= priorVersion ||
+          !DIGEST_PATTERN.test(digest.value) ||
+          values.has(digest.value)
+        ) {
+          throw new AuthenticationRateLimitPersistenceError();
+        }
+        priorVersion = digest.version;
+        values.add(digest.value);
       }
       const result = await this.postgres.query<RateLimitRow>(
         `SELECT limited.rate_limit_outcome,
                 limited.remaining_count,
                 limited.retry_after_seconds
-         FROM consume_authentication_rate_limit(
-           $1::text, $2::smallint, $3::bytea, $4::integer, $5::integer, $6::uuid
+         FROM consume_auth_rate_limit_keyring(
+           $1::text, $2::smallint[], $3::text[], $4::integer, $5::integer, $6::uuid
          ) AS limited`,
         [
           request.scope,
-          request.subjectDigest.version,
-          Buffer.from(request.subjectDigest.value, 'hex'),
+          request.subjectDigests.map(({ version }) => version),
+          request.subjectDigests.map(({ value }) => value),
           request.windowSeconds,
           request.limitCount,
           parseAuthenticationTransactionId(request.correlationId),

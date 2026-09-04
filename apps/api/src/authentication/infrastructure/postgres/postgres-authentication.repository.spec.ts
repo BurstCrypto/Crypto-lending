@@ -3,7 +3,7 @@ import type { QueryResult } from 'pg';
 import { parseAccountId } from '../../../accounts/domain/account-profile';
 import type { PostgresService } from '../../../infrastructure/database/postgres.service';
 import {
-  AUTHENTICATION_DIGEST_VERSION,
+  AUTHENTICATION_OPAQUE_DIGEST_VERSION,
   type AuthenticationDigestReference,
   type ClaimedAuthenticationRejectionReason,
 } from '../../application/ports/authentication-repository.port';
@@ -21,8 +21,12 @@ const CREDENTIAL_ID = '17565582-f383-4d97-895a-14513135603b';
 const SUCCESSOR_ID = 'a14653b8-f30c-49cf-8d59-1c4f9c971dea';
 const CORRELATION_ID = '08f1e2d4-a534-4a70-999e-972f711c1ec8';
 const DIGEST: AuthenticationDigestReference = Object.freeze({
-  version: AUTHENTICATION_DIGEST_VERSION,
+  version: AUTHENTICATION_OPAQUE_DIGEST_VERSION,
   value: 'ab'.repeat(32),
+});
+const DIGEST_V2: AuthenticationDigestReference = Object.freeze({
+  version: 2,
+  value: 'cd'.repeat(32),
 });
 
 function result<Row extends Record<string, unknown>>(rows: Row[]): QueryResult<Row> {
@@ -194,7 +198,7 @@ describe('PostgresAuthenticationRepository', () => {
           expiresAtEpochSeconds: 2,
         },
         nonceDigest: DIGEST,
-        subjectDigest: DIGEST,
+        subjectDigests: [DIGEST],
         proposedAccountId: ACCOUNT_ID,
         proposedIdentityId: IDENTITY_ID,
         proposedSessionFamilyId: FAMILY_ID,
@@ -213,8 +217,8 @@ describe('PostgresAuthenticationRepository', () => {
       idleExpiresAt,
       absoluteExpiresAt,
     });
-    expect(query.mock.calls[0]?.[0]).toContain('complete_authentication_login');
-    expect(query.mock.calls[0]?.[1]?.slice(16, 19)).toEqual([null, null, null]);
+    expect(query.mock.calls[0]?.[0]).toContain('complete_auth_login_keyring');
+    expect(query.mock.calls[0]?.[1]?.slice(17, 20)).toEqual([null, null, null]);
   });
 
   it('passes required registration profile data only through atomic completion', async () => {
@@ -247,7 +251,7 @@ describe('PostgresAuthenticationRepository', () => {
         expiresAtEpochSeconds: 2,
       },
       nonceDigest: DIGEST,
-      subjectDigest: DIGEST,
+      subjectDigests: [DIGEST],
       proposedAccountId: ACCOUNT_ID,
       proposedIdentityId: IDENTITY_ID,
       proposedSessionFamilyId: FAMILY_ID,
@@ -259,7 +263,7 @@ describe('PostgresAuthenticationRepository', () => {
       correlationId: CORRELATION_ID,
     });
 
-    expect(query.mock.calls[0]?.[1]?.slice(16, 19)).toEqual(['person@example.test', null, 'US']);
+    expect(query.mock.calls[0]?.[1]?.slice(17, 20)).toEqual(['person@example.test', null, 'US']);
   });
 
   it('resolves with optional CSRF and maps replay without exposing an account', async () => {
@@ -273,8 +277,8 @@ describe('PostgresAuthenticationRepository', () => {
     await expect(
       authenticated.repository.resolveSession({
         credentialId: CREDENTIAL_ID,
-        credentialDigest: DIGEST,
-        csrf: { required: true, digest: DIGEST },
+        credentialDigests: [DIGEST],
+        csrf: { required: true, digests: [DIGEST] },
         correlationId: CORRELATION_ID,
       }),
     ).resolves.toEqual({
@@ -289,7 +293,7 @@ describe('PostgresAuthenticationRepository', () => {
     await expect(
       replayed.repository.resolveSession({
         credentialId: CREDENTIAL_ID,
-        credentialDigest: DIGEST,
+        credentialDigests: [DIGEST],
         csrf: { required: false },
         correlationId: CORRELATION_ID,
       }),
@@ -304,7 +308,7 @@ describe('PostgresAuthenticationRepository', () => {
     await expect(
       rotated.repository.rotateSession({
         credentialId: CREDENTIAL_ID,
-        credentialDigest: DIGEST,
+        credentialDigests: [DIGEST],
         successorCredentialId: SUCCESSOR_ID,
         successorCredentialDigest: DIGEST,
         successorCsrfDigest: DIGEST,
@@ -316,11 +320,33 @@ describe('PostgresAuthenticationRepository', () => {
     await expect(
       revoked.repository.revokeSession({
         credentialId: SUCCESSOR_ID,
-        credentialDigest: DIGEST,
+        credentialDigests: [DIGEST],
         correlationId: CORRELATION_ID,
       }),
     ).resolves.toEqual({ status: 'revoked' });
   });
+
+  it.each([
+    [DIGEST_V2, DIGEST],
+    [DIGEST, { version: 2, value: DIGEST.value }],
+    [DIGEST, DIGEST],
+  ] as const)(
+    'rejects unsorted or duplicate credential candidates before SQL',
+    async (...digests) => {
+      const { repository, query } = harness([
+        { authentication_outcome: 'INVALID', account_id: null, session_family_id: null },
+      ]);
+      await expect(
+        repository.resolveSession({
+          credentialId: CREDENTIAL_ID,
+          credentialDigests: digests,
+          csrf: { required: false },
+          correlationId: CORRELATION_ID,
+        }),
+      ).rejects.toBeInstanceOf(AuthenticationPersistenceError);
+      expect(query).not.toHaveBeenCalled();
+    },
+  );
 
   it('rejects malformed result shapes', async () => {
     const malformed = harness([]);

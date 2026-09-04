@@ -7,6 +7,9 @@ import {
 } from '../../domain/authentication';
 import {
   AuthenticationCryptoError,
+  activeAuthenticationHmacKey,
+  assertAuthenticationKeysIndependent,
+  createAuthenticationHmacKeyRing,
   constantTimeAuthenticationValueEquals,
   createAuthenticationKey,
   createKeyedAuthenticationDigest,
@@ -63,6 +66,41 @@ describe('authentication cryptography', () => {
     ]);
     expect(digests.size).toBe(4);
     for (const digest of digests) expect(digest).toMatch(/^[0-9a-f]{64}$/u);
+  });
+
+  it('constructs a bounded versioned key ring with one active write key', () => {
+    const prior = createAuthenticationKey('session-hmac', 'session_v1', encodedKey(8), 1);
+    const successor = createAuthenticationKey('session-hmac', 'session_v2', encodedKey(9), 2);
+    const staged = createAuthenticationHmacKeyRing('session-hmac', 1, [successor, prior]);
+    expect(staged.keys.map(({ version }) => version)).toEqual([1, 2]);
+    expect(activeAuthenticationHmacKey(staged)).toBe(prior);
+
+    const ring = createAuthenticationHmacKeyRing('session-hmac', 2, [successor, prior]);
+    expect(ring.keys.map(({ version }) => version)).toEqual([1, 2]);
+    expect(activeAuthenticationHmacKey(ring)).toBe(successor);
+    expect(Object.isFrozen(ring)).toBe(true);
+    expect(Object.isFrozen(ring.keys)).toBe(true);
+    expect(JSON.stringify(ring)).not.toContain(encodedKey(8));
+  });
+
+  it('rejects duplicate versions/material, missing active versions, and cross-purpose reuse', () => {
+    const first = createAuthenticationKey('identity-hmac', 'identity_v1', encodedKey(10), 1);
+    const duplicateMaterial = createAuthenticationKey(
+      'identity-hmac',
+      'identity_v2',
+      encodedKey(10),
+      2,
+    );
+    expect(() =>
+      createAuthenticationHmacKeyRing('identity-hmac', 2, [first, duplicateMaterial]),
+    ).toThrow(AuthenticationCryptoError);
+    expect(() => createAuthenticationHmacKeyRing('identity-hmac', 2, [first])).toThrow(
+      AuthenticationCryptoError,
+    );
+    const csrf = createAuthenticationKey('csrf-hmac', 'csrf_v1', encodedKey(10), 1);
+    expect(() => assertAuthenticationKeysIndependent([first, csrf, first, csrf])).toThrow(
+      AuthenticationCryptoError,
+    );
   });
 
   it('does not expose wrapped client credentials through enumeration or JSON', () => {

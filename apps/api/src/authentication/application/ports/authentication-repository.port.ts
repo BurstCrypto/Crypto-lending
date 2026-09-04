@@ -5,13 +5,16 @@ import type {
 import type { AuthenticationFlow, VerifiedOidcIdentity } from '../../domain/authentication';
 
 export const AUTHENTICATION_REPOSITORY = Symbol('AUTHENTICATION_REPOSITORY');
-export const AUTHENTICATION_DIGEST_VERSION = 1 as const;
+/** Unkeyed pre-authentication digests retain their original fixed schema version. */
+export const AUTHENTICATION_OPAQUE_DIGEST_VERSION = 1 as const;
 
 /** A versioned, domain-separated 32-byte digest encoded as lowercase hex. */
 export interface AuthenticationDigestReference {
-  readonly version: typeof AUTHENTICATION_DIGEST_VERSION;
+  readonly version: number;
   readonly value: string;
 }
+
+export type AuthenticationDigestCandidates = readonly AuthenticationDigestReference[];
 
 export interface BeginAuthenticationTransactionRequest {
   readonly transactionId: string;
@@ -65,7 +68,7 @@ interface CompleteAuthenticationLoginBaseRequest {
   readonly transactionId: string;
   readonly identity: VerifiedOidcIdentity;
   readonly nonceDigest: AuthenticationDigestReference;
-  readonly subjectDigest: AuthenticationDigestReference;
+  readonly subjectDigests: AuthenticationDigestCandidates;
   readonly proposedAccountId: AccountId;
   readonly proposedIdentityId: string;
   readonly proposedSessionFamilyId: string;
@@ -106,18 +109,18 @@ export type ResolveAuthenticationSessionResult =
 
 export type AuthenticationCsrfValidation =
   | { readonly required: false }
-  | { readonly required: true; readonly digest: AuthenticationDigestReference };
+  | { readonly required: true; readonly digests: AuthenticationDigestCandidates };
 
 export interface ResolveAuthenticationSessionRequest {
   readonly credentialId: string;
-  readonly credentialDigest: AuthenticationDigestReference;
+  readonly credentialDigests: AuthenticationDigestCandidates;
   readonly csrf: AuthenticationCsrfValidation;
   readonly correlationId: string;
 }
 
 export interface RotateAuthenticationSessionRequest {
   readonly credentialId: string;
-  readonly credentialDigest: AuthenticationDigestReference;
+  readonly credentialDigests: AuthenticationDigestCandidates;
   readonly successorCredentialId: string;
   readonly successorCredentialDigest: AuthenticationDigestReference;
   readonly successorCsrfDigest: AuthenticationDigestReference;
@@ -134,7 +137,7 @@ export type RotateAuthenticationSessionResult =
 
 export interface RevokeAuthenticationSessionRequest {
   readonly credentialId: string;
-  readonly credentialDigest: AuthenticationDigestReference;
+  readonly credentialDigests: AuthenticationDigestCandidates;
   readonly correlationId: string;
 }
 

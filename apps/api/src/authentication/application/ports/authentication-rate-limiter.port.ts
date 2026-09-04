@@ -1,4 +1,4 @@
-import type { AuthenticationDigestReference } from './authentication-repository.port';
+import type { AuthenticationDigestCandidates } from './authentication-repository.port';
 
 export const AUTHENTICATION_RATE_LIMITER = Symbol('AUTHENTICATION_RATE_LIMITER');
 
@@ -11,7 +11,7 @@ export type AuthenticationRateLimitDecision =
 export interface AuthenticationRateLimitRequest {
   readonly scope: AuthenticationRateLimitScope;
   /** A server-authored digest; never a raw IP, subject, or session credential. */
-  readonly subjectDigest: AuthenticationDigestReference;
+  readonly subjectDigests: AuthenticationDigestCandidates;
   readonly windowSeconds: number;
   readonly limitCount: number;
   readonly correlationId: string;

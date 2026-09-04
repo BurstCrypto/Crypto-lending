@@ -26,7 +26,9 @@ const CREDENTIAL_ID = '17565582-f383-4d97-895a-14513135603b';
 const IDLE_EXPIRES_AT = new Date('2030-01-01T01:00:00.000Z');
 const ABSOLUTE_EXPIRES_AT = new Date('2030-01-08T00:00:00.000Z');
 
-function authenticationConfig(): OidcAuthenticationConfig {
+function authenticationConfig(
+  overrides: Readonly<Record<string, string | undefined>> = {},
+): OidcAuthenticationConfig {
   const key = (fill: number): string => Buffer.alloc(32, fill).toString('base64url');
   const config = loadAuthenticationConfig({
     NODE_ENV: 'test',
@@ -60,9 +62,43 @@ function authenticationConfig(): OidcAuthenticationConfig {
     AUTH_SESSION_HMAC_KEY: key(3),
     AUTH_CSRF_HMAC_KEY_ID: 'csrf_v1',
     AUTH_CSRF_HMAC_KEY: key(4),
+    ...overrides,
   });
   if (config.mode !== 'oidc') throw new Error('Expected OIDC config');
   return config;
+}
+
+function rotatingAuthenticationConfig(): OidcAuthenticationConfig {
+  const key = (fill: number): string => Buffer.alloc(32, fill).toString('base64url');
+  const ring = (purpose: string, firstFill: number): string =>
+    JSON.stringify({
+      activeWriteVersion: 2,
+      keys: [
+        {
+          keyId: `${purpose.replace('-hmac', '')}_v1`,
+          purpose,
+          version: 1,
+          material: key(firstFill),
+        },
+        {
+          keyId: `${purpose.replace('-hmac', '')}_v2`,
+          purpose,
+          version: 2,
+          material: key(firstFill + 1),
+        },
+      ],
+    });
+  return authenticationConfig({
+    AUTH_IDENTITY_HMAC_KEY_ID: undefined,
+    AUTH_IDENTITY_HMAC_KEY: undefined,
+    AUTH_SESSION_HMAC_KEY_ID: undefined,
+    AUTH_SESSION_HMAC_KEY: undefined,
+    AUTH_CSRF_HMAC_KEY_ID: undefined,
+    AUTH_CSRF_HMAC_KEY: undefined,
+    AUTH_IDENTITY_HMAC_KEY_RING_JSON: ring('identity-hmac', 10),
+    AUTH_SESSION_HMAC_KEY_RING_JSON: ring('session-hmac', 12),
+    AUTH_CSRF_HMAC_KEY_RING_JSON: ring('csrf-hmac', 14),
+  });
 }
 
 interface Harness {
@@ -73,8 +109,7 @@ interface Harness {
   readonly service: AuthenticationService;
 }
 
-function harness(): Harness {
-  const config = authenticationConfig();
+function harness(config: OidcAuthenticationConfig = authenticationConfig()): Harness {
   const repository: jest.Mocked<AuthenticationRepositoryPort> = {
     beginTransaction: jest.fn().mockResolvedValue({
       transactionId: 'b4c78068-fe5b-46ee-9c74-a62908679656',
@@ -262,6 +297,80 @@ describe('AuthenticationService', () => {
     });
   });
 
+  it('reads every accepted HMAC version while all new identity, session, and CSRF writes use the active version', async () => {
+    const fixture = harness(rotatingAuthenticationConfig());
+    const { transactionCookie, payload } = await startedRegistration(fixture);
+    const begun = fixture.repository.beginTransaction.mock.calls[0]?.[0];
+    if (!begun) throw new Error('Expected begin transaction call');
+    fixture.repository.claimTransaction.mockResolvedValue({
+      status: 'claimed',
+      flow: 'registration',
+      issuer: fixture.config.issuer,
+      nonceDigest: begun.nonceDigest,
+    });
+    fixture.repository.completeLogin.mockImplementation((request) =>
+      Promise.resolve({
+        status: 'authenticated',
+        accountId: ACCOUNT_ID,
+        sessionFamilyId: request.proposedSessionFamilyId,
+        credentialId: request.proposedCredentialId,
+        idleExpiresAt: IDLE_EXPIRES_AT,
+        absoluteExpiresAt: ABSOLUTE_EXPIRES_AT,
+      }),
+    );
+    await fixture.service.completeCallback({
+      callback: {
+        kind: 'success',
+        code: 'rotation-code',
+        state: payload.state,
+        issuer: fixture.config.issuer,
+      },
+      transactionCookie,
+      sourceAddress: '198.51.100.10',
+    });
+    const completed = fixture.repository.completeLogin.mock.calls[0]?.[0];
+    expect(completed?.subjectDigests.map(({ version }) => version)).toEqual([1, 2]);
+    expect(completed?.credentialDigest.version).toBe(2);
+    expect(completed?.csrfDigest.version).toBe(2);
+    expect(
+      fixture.rateLimiter.admit.mock.calls.map(([request]) =>
+        request.subjectDigests.map(({ version }) => version),
+      ),
+    ).toEqual([
+      [1, 2],
+      [1, 2],
+    ]);
+
+    const proof = sessionProof(fixture.config);
+    fixture.repository.resolveSession.mockResolvedValue({
+      status: 'authenticated',
+      accountId: ACCOUNT_ID,
+      sessionFamilyId: '39563e7d-8f41-4b47-803b-968cf99a9f2e',
+    });
+    fixture.repository.rotateSession.mockImplementation((request) =>
+      Promise.resolve({
+        status: 'rotated',
+        credentialId: request.successorCredentialId,
+        expiresAt: IDLE_EXPIRES_AT,
+      }),
+    );
+    await fixture.service.resolve(proof.request);
+    const resolved = fixture.repository.resolveSession.mock.calls.at(-1)?.[0];
+    expect(resolved?.credentialDigests.map(({ version }) => version)).toEqual([1, 2]);
+    expect(resolved?.csrf.required && resolved.csrf.digests.map(({ version }) => version)).toEqual([
+      1, 2,
+    ]);
+
+    await fixture.service.rotate(proof.request, '198.51.100.10');
+    const rotated = fixture.repository.rotateSession.mock.calls[0]?.[0];
+    expect(rotated?.credentialDigests.map(({ version }) => version)).toEqual([1, 2]);
+    expect(rotated?.successorCredentialDigest.version).toBe(2);
+    expect(rotated?.successorCsrfDigest.version).toBe(2);
+    expect(
+      fixture.rateLimiter.admit.mock.calls.at(-1)?.[0].subjectDigests.map(({ version }) => version),
+    ).toEqual([1, 2]);
+  });
+
   it('rejects mismatched state, changed browser binding, and replay before another token exchange', async () => {
     const fixture = harness();
     const { transactionCookie, payload } = await startedRegistration(fixture);
@@ -301,6 +410,31 @@ describe('AuthenticationService', () => {
       }),
     ).rejects.toBeInstanceOf(AuthenticationRejectedError);
     expect(fixture.oidc.exchangeAuthorizationCode).not.toHaveBeenCalled();
+  });
+
+  it('writes with the current pre-authentication key and accepts an in-flight previous-key cookie', async () => {
+    const key = (fill: number): string => Buffer.alloc(32, fill).toString('base64url');
+    const config = authenticationConfig({
+      AUTH_PREAUTH_SEAL_KEY_ID: 'seal_v2',
+      AUTH_PREAUTH_SEAL_KEY: key(9),
+      AUTH_PREAUTH_SEAL_PREVIOUS_KEY_ID: 'seal_v1',
+      AUTH_PREAUTH_SEAL_PREVIOUS_KEY: key(1),
+    });
+    const fixture = harness(config);
+    const { transactionCookie, payload } = await startedRegistration(fixture);
+    expect(transactionCookie).toMatch(/^v1\.seal_v2\./u);
+
+    const previousKey = config.preAuthenticationSealKeys[1];
+    if (!previousKey) throw new Error('Expected previous seal key');
+    const previousCookie = sealPreAuthenticationTransactionCookie(payload, previousKey);
+    await expect(
+      fixture.service.completeCallback({
+        callback: { kind: 'success', code: 'code', state: payload.state },
+        transactionCookie: previousCookie,
+        sourceAddress: '198.51.100.10',
+      }),
+    ).rejects.toBeInstanceOf(AuthenticationRejectedError);
+    expect(fixture.repository.claimTransaction).toHaveBeenCalledTimes(1);
   });
 
   it('fails closed while disabled and does not touch dependencies', async () => {
@@ -344,7 +478,10 @@ describe('AuthenticationService', () => {
     });
     const unsafeCall = fixture.repository.resolveSession.mock.calls.at(-1)?.[0];
     expect(unsafeCall?.csrf).toMatchObject({ required: true });
-    if (unsafeCall?.csrf.required) expect(unsafeCall.csrf.digest.value).toMatch(/^[0-9a-f]{64}$/u);
+    if (unsafeCall?.csrf.required) {
+      expect(unsafeCall.csrf.digests).toHaveLength(1);
+      expect(unsafeCall.csrf.digests[0]?.value).toMatch(/^[0-9a-f]{64}$/u);
+    }
 
     await expect(
       fixture.service.resolve({

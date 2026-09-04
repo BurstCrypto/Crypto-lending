@@ -38,7 +38,19 @@ declare const authenticationDigestBrand: unique symbol;
 export interface AuthenticationKey<Purpose extends AuthenticationKeyPurpose> {
   readonly keyId: string;
   readonly purpose: Purpose;
+  readonly version: number;
   readonly [authenticationKeyBrand]: true;
+}
+
+export type AuthenticationHmacKeyPurpose = Extract<
+  AuthenticationKeyPurpose,
+  'csrf-hmac' | 'identity-hmac' | 'session-hmac'
+>;
+
+export interface AuthenticationHmacKeyRing<Purpose extends AuthenticationHmacKeyPurpose> {
+  readonly purpose: Purpose;
+  readonly activeWriteVersion: number;
+  readonly keys: readonly AuthenticationKey<Purpose>[];
 }
 
 export interface SensitiveAuthenticationText<Purpose extends string> {
@@ -50,12 +62,14 @@ export type AuthenticationDigest<Purpose extends string> = string & {
 };
 
 const keyBytes = new WeakMap<object, Buffer>();
+const validHmacKeyRings = new WeakSet<object>();
 const sensitiveTextValues = new WeakMap<object, string>();
 const KEY_ID_PATTERN = /^[a-z][a-z0-9_-]{0,31}$/u;
 const SEALED_COOKIE_PATTERN =
   /^v1\.([a-z][a-z0-9_-]{0,31})\.([A-Za-z0-9_-]{16})\.([A-Za-z0-9_-]{1,4096})\.([A-Za-z0-9_-]{22})$/u;
 const MAX_PREAUTH_PLAINTEXT_BYTES = 1_400;
 const MAX_SEALED_COOKIE_LENGTH = 2_048;
+export const MAX_AUTHENTICATION_HMAC_KEYS_PER_PURPOSE = 3 as const;
 const PREAUTH_AAD_PREFIX = 'crypto-lending:authentication:preauth-cookie:v1:';
 const OPAQUE_SECRET_PURPOSES = new Set<AuthenticationOpaqueSecretPurpose>([
   'browser-binding',
@@ -98,10 +112,18 @@ export function createAuthenticationKey<Purpose extends AuthenticationKeyPurpose
   purpose: Purpose,
   keyId: string,
   encodedKey: unknown,
+  version: unknown = 1,
 ): AuthenticationKey<Purpose> {
-  if (!KEY_ID_PATTERN.test(keyId)) throw new AuthenticationCryptoError();
+  if (
+    !KEY_ID_PATTERN.test(keyId) ||
+    !Number.isSafeInteger(version) ||
+    (version as number) < 1 ||
+    (version as number) > 32_767
+  ) {
+    throw new AuthenticationCryptoError();
+  }
   const bytes = decodeCanonicalKey(encodedKey);
-  const key = Object.freeze({ keyId, purpose }) as AuthenticationKey<Purpose>;
+  const key = Object.freeze({ keyId, purpose, version }) as AuthenticationKey<Purpose>;
   keyBytes.set(key, bytes);
   return key;
 }
@@ -116,13 +138,116 @@ function revealKey<Purpose extends AuthenticationKeyPurpose>(
       typeof key !== 'object' ||
       !Object.isFrozen(key) ||
       key.purpose !== expectedPurpose ||
-      !KEY_ID_PATTERN.test(key.keyId)
+      !KEY_ID_PATTERN.test(key.keyId) ||
+      !Number.isSafeInteger(key.version) ||
+      key.version < 1 ||
+      key.version > 32_767
     ) {
       throw new AuthenticationCryptoError();
     }
     const bytes = keyBytes.get(key);
     if (!bytes || bytes.length !== 32) throw new AuthenticationCryptoError();
     return bytes;
+  } catch {
+    throw new AuthenticationCryptoError();
+  }
+}
+
+function validatedHmacKeyRing<Purpose extends AuthenticationHmacKeyPurpose>(
+  ring: AuthenticationHmacKeyRing<Purpose>,
+  purpose: Purpose,
+): readonly AuthenticationKey<Purpose>[] {
+  if (
+    !ring ||
+    typeof ring !== 'object' ||
+    !Object.isFrozen(ring) ||
+    !validHmacKeyRings.has(ring) ||
+    ring.purpose !== purpose ||
+    !Array.isArray(ring.keys) ||
+    !Object.isFrozen(ring.keys) ||
+    ring.keys.length < 1 ||
+    ring.keys.length > MAX_AUTHENTICATION_HMAC_KEYS_PER_PURPOSE
+  ) {
+    throw new AuthenticationCryptoError();
+  }
+  return ring.keys;
+}
+
+export function createAuthenticationHmacKeyRing<Purpose extends AuthenticationHmacKeyPurpose>(
+  purpose: Purpose,
+  activeWriteVersion: unknown,
+  candidates: readonly AuthenticationKey<Purpose>[],
+): AuthenticationHmacKeyRing<Purpose> {
+  try {
+    if (
+      !Number.isSafeInteger(activeWriteVersion) ||
+      (activeWriteVersion as number) < 1 ||
+      (activeWriteVersion as number) > 32_767 ||
+      !Array.isArray(candidates) ||
+      candidates.length < 1 ||
+      candidates.length > MAX_AUTHENTICATION_HMAC_KEYS_PER_PURPOSE
+    ) {
+      throw new AuthenticationCryptoError();
+    }
+    const keys = [...candidates].sort((left, right) => left.version - right.version);
+    const versions = new Set<number>();
+    const keyIds = new Set<string>();
+    const materials: Buffer[] = [];
+    for (const key of keys) {
+      const material = revealKey(key, purpose);
+      if (
+        versions.has(key.version) ||
+        keyIds.has(key.keyId) ||
+        materials.some((candidate) => candidate.equals(material))
+      ) {
+        throw new AuthenticationCryptoError();
+      }
+      versions.add(key.version);
+      keyIds.add(key.keyId);
+      materials.push(material);
+    }
+    if (!versions.has(activeWriteVersion as number)) {
+      throw new AuthenticationCryptoError();
+    }
+    const ring = Object.freeze({
+      purpose,
+      activeWriteVersion: activeWriteVersion as number,
+      keys: Object.freeze(keys),
+    }) as AuthenticationHmacKeyRing<Purpose>;
+    validHmacKeyRings.add(ring);
+    return ring;
+  } catch {
+    throw new AuthenticationCryptoError();
+  }
+}
+
+export function activeAuthenticationHmacKey<Purpose extends AuthenticationHmacKeyPurpose>(
+  ring: AuthenticationHmacKeyRing<Purpose>,
+): AuthenticationKey<Purpose> {
+  const keys = validatedHmacKeyRing(ring, ring?.purpose);
+  const active = keys.find((key) => key.version === ring.activeWriteVersion);
+  if (!active) throw new AuthenticationCryptoError();
+  return active;
+}
+
+/** Ensures key IDs and raw material cannot be reused across authentication domains. */
+export function assertAuthenticationKeysIndependent(
+  keys: readonly AuthenticationKey<AuthenticationKeyPurpose>[],
+): void {
+  try {
+    if (!Array.isArray(keys) || keys.length < 4 || keys.length > 11) {
+      throw new AuthenticationCryptoError();
+    }
+    const keyIds = new Set<string>();
+    const materials: Buffer[] = [];
+    for (const key of keys) {
+      const material = revealKey(key, key.purpose);
+      if (keyIds.has(key.keyId) || materials.some((candidate) => candidate.equals(material))) {
+        throw new AuthenticationCryptoError();
+      }
+      keyIds.add(key.keyId);
+      materials.push(material);
+    }
   } catch {
     throw new AuthenticationCryptoError();
   }
