@@ -36,6 +36,8 @@ env:
   SQS_ENDPOINT: http://127.0.0.1:4566
   SQS_QUEUE_URL: http://127.0.0.1:4566/000000000000/crypto-lending-jobs
   SQS_DEAD_LETTER_QUEUE_URL: http://127.0.0.1:4566/000000000000/crypto-lending-jobs-dlq
+  SQS_BALANCE_QUEUE_URL: http://127.0.0.1:4566/000000000000/crypto-lending-balance-sync
+  SQS_BALANCE_DEAD_LETTER_QUEUE_URL: http://127.0.0.1:4566/000000000000/crypto-lending-balance-sync-dlq
   SQS_MAX_RECEIVE_COUNT: '3'
   SQS_VISIBILITY_TIMEOUT_SECONDS: '5'
   SQS_RETRY_BASE_DELAY_SECONDS: '1'
@@ -45,7 +47,7 @@ env:
 jobs:
   validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
       - name: Check out repository
@@ -69,6 +71,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Reject high and critical production dependency advisories
+        run: npm run security:audit
+
       - name: Install pinned CloudFormation linter
         run: python -m pip install --disable-pip-version-check --requirement infra/aws/requirements-dev.txt
 
@@ -76,9 +81,11 @@ jobs:
         run: |
           npm run infra:validate
           npm run infra:test:guardrails
+          npm run infra:test:containers
           npm run infra:test:acm-dns
           npm run infra:test:migrations
           npm run infra:test:workload-boundaries
+          npm run infra:test:observability
           npm run infra:test:sqs
           npm run infra:test:redis-acl
           pwsh -NoProfile -File infra/aws/test-invoke-acm-dns-local.ps1
@@ -88,7 +95,7 @@ jobs:
           pwsh -NoProfile -File infra/aws/test-invoke-account-readonly-preflight.ps1
           pwsh -NoProfile -File infra/aws/test-invoke-account-guardrails.ps1
           pwsh -NoProfile -File infra/aws/test-invoke-application-baseline.ps1
-          python infra/aws/lint-cloudformation.py infra/aws/application-baseline.yaml infra/aws/application-workload-boundaries.yaml infra/aws/database-migration-task.yaml infra/aws/account-guardrails.yaml infra/aws/sqs-foundation.yaml
+          python infra/aws/lint-cloudformation.py infra/aws/application-baseline.yaml infra/aws/application-workload-boundaries.yaml infra/aws/application-observability.yaml infra/aws/database-migration-task.yaml infra/aws/account-guardrails.yaml infra/aws/sqs-foundation.yaml
 
       - name: Check formatting
         run: npm run format:check
@@ -118,6 +125,184 @@ jobs:
           npm run openapi:generate
           git diff --exit-code -- apps/api/openapi.json
 
+      - name: Build production container images from the reviewed definitions
+        run: |
+          SOURCE_EPOCH="$(git show -s --format=%ct "$GITHUB_SHA")"
+          SOURCE_CREATED="$(date -u -d "@$SOURCE_EPOCH" +%Y-%m-%dT%H:%M:%SZ)"
+          docker build --provenance=false --file Dockerfile.api \
+            --build-arg "OCI_SOURCE=https://github.com/Trey-Gleason/Crypto-lending" \
+            --build-arg "OCI_REVISION=$GITHUB_SHA" \
+            --build-arg "OCI_CREATED=$SOURCE_CREATED" \
+            --tag crypto-lending-api:ci .
+          docker build --provenance=false --file Dockerfile.web \
+            --build-arg "OCI_SOURCE=https://github.com/Trey-Gleason/Crypto-lending" \
+            --build-arg "OCI_REVISION=$GITHUB_SHA" \
+            --build-arg "OCI_CREATED=$SOURCE_CREATED" \
+            --tag crypto-lending-web:ci .
+
+      - name: Verify hardened production container runtime boundaries
+        run: |
+          test "$(docker image inspect --format '{{.Config.User}}' crypto-lending-api:ci)" = '10001:10001'
+          test "$(docker image inspect --format '{{.Config.User}}' crypto-lending-web:ci)" = '10001:10001'
+          docker run --rm --network none --read-only \
+            --tmpfs /tmp:rw,noexec,nosuid,nodev,size=16m \
+            --entrypoint node crypto-lending-api:ci -e \
+            "const fs=require('node:fs');if(process.getuid()!=10001||process.getgid()!=10001)process.exit(2);try{fs.appendFileSync('/app/apps/api/dist/main.js','x');process.exit(3)}catch{};require('/app/apps/api/dist/app.module.js');if(fs.existsSync('/app/apps/api/dist/local-development-app.module.js'))process.exit(4)"
+          docker run --rm --network none --read-only \
+            --tmpfs /tmp:rw,noexec,nosuid,nodev,size=16m \
+            --entrypoint node crypto-lending-web:ci -e \
+            "const fs=require('node:fs');if(process.getuid()!=10001||process.getgid()!=10001)process.exit(2);try{fs.appendFileSync('/app/apps/web/server.js','x');process.exit(3)}catch{};const p=JSON.parse(fs.readFileSync('/app/apps/web/package.json','utf8'));if(Object.keys(p).sort().join(',')!=='name,private,version')process.exit(4)"
+
+      - name: Prepare isolated production SBOM output
+        run: |
+          test ! -e .local-validation/production-sbom
+          mkdir -p .local-validation
+          test -d .local-validation
+          test ! -L .local-validation
+          mkdir -m 700 .local-validation/production-sbom
+          test ! -e "${RUNNER_TEMP}/crypto-lending-sbom-no-credentials"
+          mkdir -m 700 "${RUNNER_TEMP}/crypto-lending-sbom-no-credentials"
+          printf '{"auths":{}}\n' > "${RUNNER_TEMP}/crypto-lending-sbom-no-credentials/config.json"
+          chmod 600 "${RUNNER_TEMP}/crypto-lending-sbom-no-credentials/config.json"
+
+      - name: Capture production image identities
+        id: production-image-identities
+        env:
+          DOCKER_CONFIG: ${{ runner.temp }}/crypto-lending-sbom-no-credentials
+        run: |
+          API_IMAGE_ID="$(docker image inspect --format '{{.Id}}' crypto-lending-api:ci)"
+          WEB_IMAGE_ID="$(docker image inspect --format '{{.Id}}' crypto-lending-web:ci)"
+          [[ "$API_IMAGE_ID" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$WEB_IMAGE_ID" =~ ^sha256:[0-9a-f]{64}$ ]]
+          test "$API_IMAGE_ID" != "$WEB_IMAGE_ID"
+          printf 'api_id=%s\n' "$API_IMAGE_ID" >> "$GITHUB_OUTPUT"
+          printf 'web_id=%s\n' "$WEB_IMAGE_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Capture exact production image descriptor chains
+        env:
+          API_IMAGE_ID: ${{ steps.production-image-identities.outputs.api_id }}
+          DOCKER_CONFIG: ${{ runner.temp }}/crypto-lending-sbom-no-credentials
+          WEB_IMAGE_ID: ${{ steps.production-image-identities.outputs.web_id }}
+        run: |
+          npm run production:sbom:capture -- api crypto-lending-api:ci "$API_IMAGE_ID" .local-validation/production-sbom/api-image.binding.json
+          npm run production:sbom:capture -- web crypto-lending-web:ci "$WEB_IMAGE_ID" .local-validation/production-sbom/web-image.binding.json
+
+      - name: Generate API production image SPDX SBOM
+        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2 (2026-08-28)
+        env:
+          AWS_REGION: ''
+          AWS_ACCESS_KEY_ID: ''
+          AWS_SECRET_ACCESS_KEY: ''
+          AWS_SESSION_TOKEN: ''
+          DATABASE_RUNTIME_URL: ''
+          MIGRATION_DATABASE_URL: ''
+          TEST_DATABASE_URL: ''
+          REDIS_USERNAME: ''
+          REDIS_PASSWORD: ''
+          SQS_ENDPOINT: ''
+          SQS_QUEUE_URL: ''
+          SQS_DEAD_LETTER_QUEUE_URL: ''
+          DOCKER_CONFIG: ${{ runner.temp }}/crypto-lending-sbom-no-credentials
+        with:
+          image: docker:${{ steps.production-image-identities.outputs.api_id }}
+          format: spdx-json
+          output-file: .local-validation/production-sbom/api-image.spdx.json
+          syft-version: v1.51.1
+          dependency-snapshot: false
+          upload-artifact: false
+          upload-release-assets: false
+          github-token: ''
+
+      - name: Generate API production image binding record
+        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2 (2026-08-28)
+        env:
+          AWS_REGION: ''
+          AWS_ACCESS_KEY_ID: ''
+          AWS_SECRET_ACCESS_KEY: ''
+          AWS_SESSION_TOKEN: ''
+          DATABASE_RUNTIME_URL: ''
+          MIGRATION_DATABASE_URL: ''
+          TEST_DATABASE_URL: ''
+          REDIS_USERNAME: ''
+          REDIS_PASSWORD: ''
+          SQS_ENDPOINT: ''
+          SQS_QUEUE_URL: ''
+          SQS_DEAD_LETTER_QUEUE_URL: ''
+          DOCKER_CONFIG: ${{ runner.temp }}/crypto-lending-sbom-no-credentials
+        with:
+          image: docker:${{ steps.production-image-identities.outputs.api_id }}
+          format: json
+          output-file: .local-validation/production-sbom/api-image.syft.json
+          syft-version: v1.51.1
+          dependency-snapshot: false
+          upload-artifact: false
+          upload-release-assets: false
+          github-token: ''
+
+      - name: Generate web production image SPDX SBOM
+        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2 (2026-08-28)
+        env:
+          AWS_REGION: ''
+          AWS_ACCESS_KEY_ID: ''
+          AWS_SECRET_ACCESS_KEY: ''
+          AWS_SESSION_TOKEN: ''
+          DATABASE_RUNTIME_URL: ''
+          MIGRATION_DATABASE_URL: ''
+          TEST_DATABASE_URL: ''
+          REDIS_USERNAME: ''
+          REDIS_PASSWORD: ''
+          SQS_ENDPOINT: ''
+          SQS_QUEUE_URL: ''
+          SQS_DEAD_LETTER_QUEUE_URL: ''
+          DOCKER_CONFIG: ${{ runner.temp }}/crypto-lending-sbom-no-credentials
+        with:
+          image: docker:${{ steps.production-image-identities.outputs.web_id }}
+          format: spdx-json
+          output-file: .local-validation/production-sbom/web-image.spdx.json
+          syft-version: v1.51.1
+          dependency-snapshot: false
+          upload-artifact: false
+          upload-release-assets: false
+          github-token: ''
+
+      - name: Generate web production image binding record
+        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2 (2026-08-28)
+        env:
+          AWS_REGION: ''
+          AWS_ACCESS_KEY_ID: ''
+          AWS_SECRET_ACCESS_KEY: ''
+          AWS_SESSION_TOKEN: ''
+          DATABASE_RUNTIME_URL: ''
+          MIGRATION_DATABASE_URL: ''
+          TEST_DATABASE_URL: ''
+          REDIS_USERNAME: ''
+          REDIS_PASSWORD: ''
+          SQS_ENDPOINT: ''
+          SQS_QUEUE_URL: ''
+          SQS_DEAD_LETTER_QUEUE_URL: ''
+          DOCKER_CONFIG: ${{ runner.temp }}/crypto-lending-sbom-no-credentials
+        with:
+          image: docker:${{ steps.production-image-identities.outputs.web_id }}
+          format: json
+          output-file: .local-validation/production-sbom/web-image.syft.json
+          syft-version: v1.51.1
+          dependency-snapshot: false
+          upload-artifact: false
+          upload-release-assets: false
+          github-token: ''
+
+      - name: Validate exact production image SBOMs
+        env:
+          DOCKER_CONFIG: ${{ runner.temp }}/crypto-lending-sbom-no-credentials
+        run: |
+          API_IMAGE_ID="${{ steps.production-image-identities.outputs.api_id }}"
+          WEB_IMAGE_ID="${{ steps.production-image-identities.outputs.web_id }}"
+          CURRENT_API_IMAGE_ID="$(docker image inspect --format '{{.Id}}' crypto-lending-api:ci)"
+          CURRENT_WEB_IMAGE_ID="$(docker image inspect --format '{{.Id}}' crypto-lending-web:ci)"
+          test "$CURRENT_API_IMAGE_ID" = "$API_IMAGE_ID"
+          test "$CURRENT_WEB_IMAGE_ID" = "$WEB_IMAGE_ID"
+          npm run production:sbom:validate -- "$API_IMAGE_ID" "$WEB_IMAGE_ID" "$GITHUB_SHA"
+
       - name: Upload OpenAPI contract
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -125,6 +310,11 @@ jobs:
           path: apps/api/openapi.json
           if-no-files-found: error
           retention-days: 14
+
+      - name: Create and verify revision-bound release candidate manifest
+        run: |
+          npm run release:manifest -- create --source-revision "$GITHUB_SHA"
+          npm run release:manifest -- verify --source-revision "$GITHUB_SHA"
 
       - name: Start local dependencies
         run: docker compose up --detach --build --wait --wait-timeout 120
@@ -158,3 +348,18 @@ jobs:
       - name: Stop local dependencies
         if: always()
         run: docker compose down --volumes
+
+      - name: Stage immutable release candidate
+        if: ${{ success() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' }}
+        run: npm run release:manifest -- stage --source-revision "$GITHUB_SHA"
+
+      - name: Upload immutable release candidate
+        if: ${{ success() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' }}
+        id: release-candidate-upload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: crypto-lending-release-candidate-${{ github.sha }}
+          path: .local-validation/release-candidate-stage/
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 14

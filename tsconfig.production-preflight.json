@@ -17,7 +17,12 @@
     "types": ["node"]
   },
   "include": [
+    "scripts/production-evidence-bundle.ts",
+    "scripts/production-evidence-bundle.test.ts",
+    "scripts/production-deployment-target.ts",
     "scripts/production-go-live-preflight.ts",
-    "scripts/production-go-live-preflight.test.ts"
+    "scripts/production-go-live-preflight.test.ts",
+    "scripts/public-launch-authority-decision.ts",
+    "scripts/public-launch-authority-decision.test.ts"
   ]
 }

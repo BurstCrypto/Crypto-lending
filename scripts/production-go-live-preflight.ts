@@ -7,6 +7,28 @@ import { MAINNET_PLATFORM_DIRECTORY } from '../apps/api/src/mainnet-platforms/do
 import { validateEgressPolicy } from '../infra/egress/validate-egress-policy.mjs';
 // @ts-expect-error The audited local validator is an ESM JavaScript module without declarations.
 import { validateProviderDecisionFiles } from '../infra/providers/validate-kan-62-provider-decision.mjs';
+// @ts-expect-error The operations-owned audited manifest boundary is an ESM JavaScript module.
+import * as releaseCandidateManifest from './release-candidate-manifest.mjs';
+import {
+  isVerifiedProductionEvidenceBundle,
+  loadAndVerifyProductionEvidenceBundle,
+  ProductionEvidenceBundleInvalidError,
+  revalidateProductionEvidenceBundleForApplication,
+} from './production-evidence-bundle';
+import type {
+  ProductionEvidenceApplicationOptions,
+  VerifiedProductionEvidenceBundle,
+} from './production-evidence-bundle';
+import {
+  isVerifiedPublicLaunchAuthorityDecisionSet,
+  loadAndVerifyPublicLaunchAuthorityDecision,
+  PublicLaunchAuthorityDecisionInvalidError,
+  revalidatePublicLaunchAuthorityDecisionForApplication,
+} from './public-launch-authority-decision';
+import type {
+  PublicLaunchTargetBinding,
+  VerifiedPublicLaunchAuthorityDecisionSet,
+} from './public-launch-authority-decision';
 
 export const PRODUCTION_PREFLIGHT_SCHEMA_VERSION = 1 as const;
 export const PRODUCTION_PROVIDER_TARGET = 10 as const;
@@ -20,6 +42,7 @@ export type ProductionPreflightCheckId =
   | 'PLATFORM_DIRECTORY'
   | 'PLATFORM_LIVE_READS'
   | 'READ_ONLY_ISOLATION'
+  | 'PUBLIC_LAUNCH_AUTHORITIES'
   | 'MAINNET_WRITES';
 
 export type ProductionPreflightBlockerId =
@@ -49,6 +72,8 @@ export type ProductionPreflightBlockerId =
   | 'LIVE_READ_EVIDENCE_REVISION_MISMATCH'
   | 'READ_ONLY_ISOLATION_LOCAL_VALIDATION_FAILED'
   | 'READ_ONLY_TRANSACTION_CAPABILITY_EXPOSED'
+  | 'PUBLIC_LAUNCH_AUTHORITY_DECISION_MISSING'
+  | 'PUBLIC_LAUNCH_AUTHORITY_DECISION_UNVERIFIED'
   | 'MAINNET_FINANCIAL_ACTIONS_DISABLED'
   | 'MAINNET_TRANSACTION_CAPABILITY_NOT_EXPOSED'
   | 'MAINNET_TRANSACTION_PROVIDER_TARGET_NOT_MET'
@@ -97,11 +122,18 @@ interface PlatformInput {
   mainnetWriteEvidenceIndex: unknown | null;
 }
 
+interface PublicLaunchAuthoritiesInput {
+  readonly decisionSet: VerifiedPublicLaunchAuthorityDecisionSet | null;
+  readonly evidenceBinding: PublicLaunchTargetBinding | null;
+}
+
 export interface ProductionPreflightInput {
   readonly authentication: AuthenticationDeploymentInput;
   readonly egress: EgressInput;
   readonly rpcProviders: RpcProviderInput;
   readonly platforms: PlatformInput;
+  /** Optional only for backwards-compatible callers; absence remains a hard missing blocker. */
+  readonly publicLaunchAuthorities?: PublicLaunchAuthoritiesInput;
 }
 
 export interface ProductionPreflightReport {
@@ -128,7 +160,9 @@ export interface ProductionPreflightReport {
     cloudCallsMade: 0;
     providerCallsMade: 0;
     secretValuesRead: 0;
-    environmentValuesRead: 0;
+    applicationConfigurationEnvironmentValuesRead: 0;
+    /** Names whose existing values may be copied into the scrubbed Git child-process environment. */
+    operatingSystemEnvironmentVariableNamesMayBeReadForGit: readonly string[];
     writesMade: 0;
   }>;
   readonly assurance: 'LOCAL_VALIDATION_IS_NOT_PRODUCTION_APPROVAL';
@@ -158,60 +192,125 @@ interface EvidenceIndexValidation {
   readonly directoryBindingMatches: boolean;
 }
 
-const REQUIRED_API_AUTH_ENVIRONMENT_NAMES = Object.freeze([
-  'AUTH_MODE',
-  'OIDC_PROVIDER_KEY',
-  'OIDC_ISSUER_URL',
-  'OIDC_AUTHORIZATION_ENDPOINT',
-  'OIDC_TOKEN_ENDPOINT',
-  'OIDC_JWKS_URI',
-  'OIDC_CLIENT_ID',
-  'OIDC_AUDIENCE',
-  'OIDC_REQUIRED_TOKEN_USE',
-  'OIDC_END_SESSION_ENDPOINT',
-  'OIDC_POST_LOGOUT_REDIRECT_URI',
-  'OIDC_SIGNING_ALGORITHM',
-  'OIDC_TOKEN_AUTH_METHOD',
-  'AUTH_PUBLIC_ORIGIN',
-  'OIDC_REDIRECT_URI',
-  'OIDC_HTTP_TIMEOUT_MS',
-  'OIDC_TOKEN_RESPONSE_MAX_BYTES',
-  'OIDC_JWKS_RESPONSE_MAX_BYTES',
-  'OIDC_JWKS_CACHE_TTL_SECONDS',
-  'OIDC_CLOCK_TOLERANCE_SECONDS',
-  'OIDC_MAX_ID_TOKEN_AGE_SECONDS',
-  'AUTH_PREAUTH_TTL_SECONDS',
-  'AUTH_SESSION_IDLE_TTL_SECONDS',
-  'AUTH_SESSION_ABSOLUTE_TTL_SECONDS',
-  'AUTH_PREAUTH_SEAL_KEY_ID',
+const REQUIRED_API_AUTH_ENVIRONMENT_BINDINGS = Object.freeze([
+  ['AUTH_MODE', 'oidc'],
+  ['OIDC_PROVIDER_KEY', 'cognito'],
+  [
+    'OIDC_ISSUER_URL',
+    "!Sub 'https://cognito-idp.${AWS::Region}.${AWS::URLSuffix}/${CognitoPoolId}'",
+  ],
+  ['OIDC_AUTHORIZATION_ENDPOINT', "!Sub 'https://${CognitoLoginHostname}/oauth2/authorize'"],
+  ['OIDC_TOKEN_ENDPOINT', "!Sub 'https://${CognitoLoginHostname}/oauth2/token'"],
+  [
+    'OIDC_JWKS_URI',
+    "!Sub 'https://cognito-idp.${AWS::Region}.${AWS::URLSuffix}/${CognitoPoolId}/.well-known/jwks.json'",
+  ],
+  ['OIDC_CLIENT_ID', '!Ref CognitoClientId'],
+  ['OIDC_AUDIENCE', '!Ref CognitoClientId'],
+  ['OIDC_REQUIRED_TOKEN_USE', 'id'],
+  ['OIDC_END_SESSION_ENDPOINT', "!Sub 'https://${CognitoLoginHostname}/logout'"],
+  ['OIDC_POST_LOGOUT_REDIRECT_URI', "!Sub 'https://${ApplicationHostname}/login'"],
+  ['OIDC_SIGNING_ALGORITHM', 'RS256'],
+  ['OIDC_TOKEN_AUTH_METHOD', 'none'],
+  ['AUTH_PUBLIC_ORIGIN', "!Sub 'https://${ApplicationHostname}'"],
+  ['OIDC_REDIRECT_URI', "!Sub 'https://${ApplicationHostname}/api/v1/auth/callback'"],
+  ['OIDC_HTTP_TIMEOUT_MS', "'5000'"],
+  ['OIDC_TOKEN_RESPONSE_MAX_BYTES', "'16384'"],
+  ['OIDC_JWKS_RESPONSE_MAX_BYTES', "'65536'"],
+  ['OIDC_JWKS_CACHE_TTL_SECONDS', "'300'"],
+  ['OIDC_CLOCK_TOLERANCE_SECONDS', "'30'"],
+  ['OIDC_MAX_ID_TOKEN_AGE_SECONDS', "'600'"],
+  ['AUTH_PREAUTH_TTL_SECONDS', "'600'"],
+  ['AUTH_SESSION_IDLE_TTL_SECONDS', "'3600'"],
+  ['AUTH_SESSION_ABSOLUTE_TTL_SECONDS', "'86400'"],
+  ['AUTH_PREAUTH_SEAL_KEY_ID', 'preauth-v1'],
+  ['AUTH_CLIENT_ADDRESS_MODE', 'trusted-single-proxy'],
+  ['AUTH_TRUSTED_PROXY_CIDRS', "!Sub '${PublicSubnetACidr},${PublicSubnetBCidr}'"],
+] as const);
+
+const REQUIRED_API_PRODUCTION_ENVIRONMENT_BINDINGS = Object.freeze([
+  ['NODE_ENV', 'production'],
+] as const);
+
+const REQUIRED_API_AUTH_SECRET_BINDINGS = Object.freeze([
+  ['AUTH_PREAUTH_SEAL_KEY', "!Sub '${AuthWalletKeysSecretArn}:AUTH_PREAUTH_SEAL_KEY::'"],
+  [
+    'AUTH_IDENTITY_HMAC_KEY_RING_JSON',
+    "!Sub '${AuthWalletKeysSecretArn}:AUTH_IDENTITY_HMAC_KEY_RING_JSON::'",
+  ],
+  [
+    'AUTH_SESSION_HMAC_KEY_RING_JSON',
+    "!Sub '${AuthWalletKeysSecretArn}:AUTH_SESSION_HMAC_KEY_RING_JSON::'",
+  ],
+  [
+    'AUTH_CSRF_HMAC_KEY_RING_JSON',
+    "!Sub '${AuthWalletKeysSecretArn}:AUTH_CSRF_HMAC_KEY_RING_JSON::'",
+  ],
+] as const);
+
+const REQUIRED_WALLET_ENVIRONMENT_BINDINGS = Object.freeze([
+  ['WALLET_REGISTRATION_MODE', 'enabled'],
+  ['WALLET_REGISTRATION_REGISTRY_ENVIRONMENT', 'MAINNET'],
+  ['WALLET_REGISTRATION_CHALLENGE_TTL_SECONDS', "'180'"],
+] as const);
+
+const REQUIRED_WALLET_SECRET_BINDINGS = Object.freeze([
+  [
+    'WALLET_IDENTITY_HMAC_KEY_RING_JSON',
+    "!Sub '${AuthWalletKeysSecretArn}:WALLET_IDENTITY_HMAC_KEY_RING_JSON::'",
+  ],
+  [
+    'WALLET_CHALLENGE_HMAC_KEY_RING_JSON',
+    "!Sub '${AuthWalletKeysSecretArn}:WALLET_CHALLENGE_HMAC_KEY_RING_JSON::'",
+  ],
+  [
+    'WALLET_METADATA_SEAL_KEY_RING_JSON',
+    "!Sub '${AuthWalletKeysSecretArn}:WALLET_METADATA_SEAL_KEY_RING_JSON::'",
+  ],
+] as const);
+
+const WALLET_BINDING_NAME = /^WALLET_[A-Z0-9_]+$/u;
+const API_AUTH_RUNTIME_BINDING_NAME = /^(?:(?:AUTH|OIDC)_[A-Z0-9_]+|NODE_ENV|LOCAL_DEMO_MODE)$/u;
+const PRODUCTION_AUTH_WALLET_BINDING_NAME =
+  /^(?:(?:AUTH|OIDC|WALLET)_[A-Z0-9_]+|NODE_ENV|LOCAL_DEMO_MODE)$/u;
+const FORBIDDEN_LEGACY_AUTH_WALLET_BINDINGS = new Set([
   'AUTH_IDENTITY_HMAC_KEY_ID',
-  'AUTH_SESSION_HMAC_KEY_ID',
-  'AUTH_CSRF_HMAC_KEY_ID',
-  'AUTH_CLIENT_ADDRESS_MODE',
-  'AUTH_TRUSTED_PROXY_CIDRS',
-]);
-
-const REQUIRED_API_AUTH_SECRET_NAMES = Object.freeze([
-  'AUTH_PREAUTH_SEAL_KEY',
   'AUTH_IDENTITY_HMAC_KEY',
+  'AUTH_SESSION_HMAC_KEY_ID',
   'AUTH_SESSION_HMAC_KEY',
+  'AUTH_CSRF_HMAC_KEY_ID',
   'AUTH_CSRF_HMAC_KEY',
-]);
-
-const REQUIRED_WALLET_ENVIRONMENT_NAMES = Object.freeze([
-  'WALLET_REGISTRATION_MODE',
-  'WALLET_REGISTRATION_REGISTRY_ENVIRONMENT',
-  'WALLET_REGISTRATION_CHALLENGE_TTL_SECONDS',
   'WALLET_IDENTITY_HMAC_KEY_VERSION',
+  'WALLET_IDENTITY_HMAC_KEY',
   'WALLET_CHALLENGE_HMAC_KEY_VERSION',
+  'WALLET_CHALLENGE_HMAC_KEY',
   'WALLET_METADATA_SEAL_KEY_VERSION',
+  'WALLET_METADATA_SEAL_KEY',
+  'LOCAL_DEMO_MODE',
 ]);
 
-const REQUIRED_WALLET_SECRET_NAMES = Object.freeze([
-  'WALLET_IDENTITY_HMAC_KEY',
-  'WALLET_CHALLENGE_HMAC_KEY',
-  'WALLET_METADATA_SEAL_KEY',
-]);
+const REQUIRED_WEB_AUTH_ENVIRONMENT_BINDINGS = Object.freeze([
+  ['AUTH_PUBLIC_ORIGIN', "!Sub 'https://${ApplicationHostname}'"],
+] as const);
+const REQUIRED_WEB_PRODUCTION_ENVIRONMENT_BINDINGS = Object.freeze([
+  ['NODE_ENV', 'production'],
+] as const);
+
+function bindingNames(bindings: readonly (readonly [string, string])[]): readonly string[] {
+  return Object.freeze(bindings.map(([name]) => name));
+}
+
+const REQUIRED_API_AUTH_ENVIRONMENT_NAMES = bindingNames(REQUIRED_API_AUTH_ENVIRONMENT_BINDINGS);
+const REQUIRED_API_PRODUCTION_ENVIRONMENT_NAMES = bindingNames(
+  REQUIRED_API_PRODUCTION_ENVIRONMENT_BINDINGS,
+);
+const REQUIRED_API_AUTH_SECRET_NAMES = bindingNames(REQUIRED_API_AUTH_SECRET_BINDINGS);
+const REQUIRED_WALLET_ENVIRONMENT_NAMES = bindingNames(REQUIRED_WALLET_ENVIRONMENT_BINDINGS);
+const REQUIRED_WALLET_SECRET_NAMES = bindingNames(REQUIRED_WALLET_SECRET_BINDINGS);
+const REQUIRED_WEB_AUTH_ENVIRONMENT_NAMES = bindingNames(REQUIRED_WEB_AUTH_ENVIRONMENT_BINDINGS);
+const REQUIRED_WEB_PRODUCTION_ENVIRONMENT_NAMES = bindingNames(
+  REQUIRED_WEB_PRODUCTION_ENVIRONMENT_BINDINGS,
+);
 
 const DIRECTORY_KEYS = Object.freeze([
   'schemaVersion',
@@ -269,9 +368,25 @@ const SAFETY_MARKERS = Object.freeze({
   cloudCallsMade: 0 as const,
   providerCallsMade: 0 as const,
   secretValuesRead: 0 as const,
-  environmentValuesRead: 0 as const,
+  applicationConfigurationEnvironmentValuesRead: 0 as const,
+  operatingSystemEnvironmentVariableNamesMayBeReadForGit: Object.freeze([
+    'COMSPEC',
+    'PATHEXT',
+    'SystemRoot',
+    'TEMP',
+    'TMP',
+    'TMPDIR',
+    'WINDIR',
+  ]),
   writesMade: 0 as const,
 });
+const EVIDENCE_DERIVED_PUBLIC_LAUNCH_BINDINGS = new WeakMap<
+  object,
+  Readonly<{
+    bundle: VerifiedProductionEvidenceBundle;
+    applicationOptions: Readonly<ProductionEvidenceApplicationOptions>;
+  }>
+>();
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -550,8 +665,13 @@ function validateEvidenceIndex(
   };
 }
 
-function hasEvery(values: ReadonlySet<string>, required: readonly string[]): boolean {
-  return required.every((name) => values.has(name));
+function hasExactScopedBindings(
+  values: ReadonlySet<string>,
+  required: readonly string[],
+  inScope: (name: string) => boolean,
+): boolean {
+  const scoped = [...values].filter(inScope);
+  return scoped.length === required.length && required.every((name) => values.has(name));
 }
 
 function check(
@@ -622,6 +742,72 @@ function directoryExposesTransactionCapability(value: unknown): boolean {
   );
 }
 
+function publicLaunchAuthorityValidation(value: unknown): Readonly<{
+  localValidation: 'PASS' | 'FAIL';
+  blockers: readonly ProductionPreflightBlockerId[];
+}> {
+  try {
+    if (value === undefined || value === null) {
+      return Object.freeze({
+        localValidation: 'PASS' as const,
+        blockers: Object.freeze(['PUBLIC_LAUNCH_AUTHORITY_DECISION_MISSING'] as const),
+      });
+    }
+    if (!isRecord(value) || !exactKeys(value, ['decisionSet', 'evidenceBinding'])) {
+      throw new PublicLaunchAuthorityDecisionInvalidError();
+    }
+    const decisionSet = value.decisionSet;
+    const evidenceBinding = value.evidenceBinding;
+    if (decisionSet === null) {
+      return Object.freeze({
+        localValidation: 'PASS' as const,
+        blockers: Object.freeze(['PUBLIC_LAUNCH_AUTHORITY_DECISION_MISSING'] as const),
+      });
+    }
+    if (!isRecord(evidenceBinding)) {
+      throw new PublicLaunchAuthorityDecisionInvalidError();
+    }
+    const evidenceContext = EVIDENCE_DERIVED_PUBLIC_LAUNCH_BINDINGS.get(evidenceBinding);
+    if (
+      evidenceContext === undefined ||
+      !isVerifiedProductionEvidenceBundle(evidenceContext.bundle) ||
+      !isVerifiedPublicLaunchAuthorityDecisionSet(decisionSet)
+    ) {
+      throw new PublicLaunchAuthorityDecisionInvalidError();
+    }
+    revalidateProductionEvidenceBundleForApplication(
+      evidenceContext.bundle,
+      evidenceContext.applicationOptions,
+    );
+    if (
+      !isVerifiedProductionEvidenceBundle(evidenceContext.bundle) ||
+      evidenceBinding.releaseCandidateManifestSha256 !==
+        evidenceContext.bundle.content.releaseCandidateManifestSha256 ||
+      evidenceBinding.deploymentTargetId !== evidenceContext.bundle.content.deploymentTargetId ||
+      evidenceBinding.deploymentTargetConfigurationSha256 !==
+        evidenceContext.bundle.content.deploymentTargetSha256
+    ) {
+      throw new PublicLaunchAuthorityDecisionInvalidError();
+    }
+    revalidatePublicLaunchAuthorityDecisionForApplication(
+      decisionSet,
+      evidenceBinding as unknown as PublicLaunchTargetBinding,
+    );
+    if (!isVerifiedPublicLaunchAuthorityDecisionSet(decisionSet)) {
+      throw new PublicLaunchAuthorityDecisionInvalidError();
+    }
+    return Object.freeze({
+      localValidation: 'PASS' as const,
+      blockers: Object.freeze([]),
+    });
+  } catch {
+    return Object.freeze({
+      localValidation: 'FAIL' as const,
+      blockers: Object.freeze(['PUBLIC_LAUNCH_AUTHORITY_DECISION_UNVERIFIED'] as const),
+    });
+  }
+}
+
 export function evaluateProductionPreflight(
   input: ProductionPreflightInput,
   selectedTarget: ProductionPreflightTarget = 'read-only',
@@ -633,29 +819,49 @@ export function evaluateProductionPreflight(
   if (
     !input.authentication.inspected ||
     !input.authentication.syntaxValid ||
-    !hasEvery(input.authentication.apiEnvironmentNames, REQUIRED_API_AUTH_ENVIRONMENT_NAMES)
+    !hasExactScopedBindings(
+      input.authentication.apiEnvironmentNames,
+      [...REQUIRED_API_PRODUCTION_ENVIRONMENT_NAMES, ...REQUIRED_API_AUTH_ENVIRONMENT_NAMES],
+      (name) => API_AUTH_RUNTIME_BINDING_NAME.test(name),
+    )
   ) {
     authenticationBlockers.push('AUTH_PRODUCTION_CONFIGURATION_NOT_WIRED');
   }
   if (
     !input.authentication.inspected ||
     !input.authentication.syntaxValid ||
-    !hasEvery(input.authentication.apiSecretNames, REQUIRED_API_AUTH_SECRET_NAMES)
+    !hasExactScopedBindings(
+      input.authentication.apiSecretNames,
+      REQUIRED_API_AUTH_SECRET_NAMES,
+      (name) => API_AUTH_RUNTIME_BINDING_NAME.test(name),
+    )
   ) {
     authenticationBlockers.push('AUTH_PRODUCTION_SECRET_REFERENCES_NOT_WIRED');
   }
   if (
     !input.authentication.inspected ||
     !input.authentication.syntaxValid ||
-    !input.authentication.webEnvironmentNames.has('AUTH_PUBLIC_ORIGIN')
+    !hasExactScopedBindings(
+      input.authentication.webEnvironmentNames,
+      [...REQUIRED_WEB_PRODUCTION_ENVIRONMENT_NAMES, ...REQUIRED_WEB_AUTH_ENVIRONMENT_NAMES],
+      (name) => PRODUCTION_AUTH_WALLET_BINDING_NAME.test(name),
+    )
   ) {
     authenticationBlockers.push('AUTH_WEB_PUBLIC_ORIGIN_NOT_WIRED');
   }
   if (
     !input.authentication.inspected ||
     !input.authentication.syntaxValid ||
-    !hasEvery(input.authentication.apiEnvironmentNames, REQUIRED_WALLET_ENVIRONMENT_NAMES) ||
-    !hasEvery(input.authentication.apiSecretNames, REQUIRED_WALLET_SECRET_NAMES)
+    !hasExactScopedBindings(
+      input.authentication.apiEnvironmentNames,
+      REQUIRED_WALLET_ENVIRONMENT_NAMES,
+      (name) => WALLET_BINDING_NAME.test(name),
+    ) ||
+    !hasExactScopedBindings(
+      input.authentication.apiSecretNames,
+      REQUIRED_WALLET_SECRET_NAMES,
+      (name) => WALLET_BINDING_NAME.test(name),
+    )
   ) {
     authenticationBlockers.push('WALLET_REGISTRATION_MAINNET_CONFIGURATION_NOT_WIRED');
   }
@@ -770,6 +976,10 @@ export function evaluateProductionPreflight(
     writeBlockers.push('MAINNET_TRANSACTION_PROVIDER_TARGET_NOT_MET');
   }
 
+  // Revalidate the private decision brand, trusted-clock freshness, signatures,
+  // and exact evidence-derived binding immediately before readiness is computed.
+  const publicLaunchAuthorities = publicLaunchAuthorityValidation(input.publicLaunchAuthorities);
+
   const checks = Object.freeze([
     check(
       'AUTHENTICATION',
@@ -785,6 +995,11 @@ export function evaluateProductionPreflight(
     check('PLATFORM_DIRECTORY', directory.valid ? 'PASS' : 'FAIL', directoryBlockers),
     check('PLATFORM_LIVE_READS', readEvidence.valid ? 'PASS' : 'FAIL', readBlockers),
     check('READ_ONLY_ISOLATION', directory.valid ? 'PASS' : 'FAIL', isolationBlockers),
+    check(
+      'PUBLIC_LAUNCH_AUTHORITIES',
+      publicLaunchAuthorities.localValidation,
+      publicLaunchAuthorities.blockers,
+    ),
     check('MAINNET_WRITES', writeEvidence.valid ? 'PASS' : 'FAIL', writeBlockers),
   ]);
 
@@ -803,6 +1018,7 @@ export function evaluateProductionPreflight(
     'PLATFORM_DIRECTORY',
     'PLATFORM_LIVE_READS',
     'READ_ONLY_ISOLATION',
+    'PUBLIC_LAUNCH_AUTHORITIES',
   ]);
   const mainnetWrites = readinessFor([
     'AUTHENTICATION',
@@ -810,6 +1026,7 @@ export function evaluateProductionPreflight(
     'RPC_INDEXING',
     'PLATFORM_DIRECTORY',
     'PLATFORM_LIVE_READS',
+    'PUBLIC_LAUNCH_AUTHORITIES',
     'MAINNET_WRITES',
   ]);
 
@@ -877,10 +1094,24 @@ function yamlNamedSequenceEntryBlock(
   return collected.join('\n');
 }
 
-interface YamlNameInspection {
+interface YamlBindingInspection {
   readonly names: ReadonlySet<string>;
   readonly valid: boolean;
 }
+
+const EXPECTED_API_ENVIRONMENT_BINDINGS: ReadonlyMap<string, string> = new Map([
+  ...REQUIRED_API_PRODUCTION_ENVIRONMENT_BINDINGS,
+  ...REQUIRED_API_AUTH_ENVIRONMENT_BINDINGS,
+  ...REQUIRED_WALLET_ENVIRONMENT_BINDINGS,
+]);
+const EXPECTED_API_SECRET_BINDINGS: ReadonlyMap<string, string> = new Map([
+  ...REQUIRED_API_AUTH_SECRET_BINDINGS,
+  ...REQUIRED_WALLET_SECRET_BINDINGS,
+]);
+const EXPECTED_WEB_ENVIRONMENT_BINDINGS: ReadonlyMap<string, string> = new Map([
+  ...REQUIRED_WEB_PRODUCTION_ENVIRONMENT_BINDINGS,
+  ...REQUIRED_WEB_AUTH_ENVIRONMENT_BINDINGS,
+]);
 
 function validYamlBindingValue(value: string): boolean {
   const trimmed = value.trim();
@@ -901,12 +1132,15 @@ function validYamlBindingValue(value: string): boolean {
   return /^[\x20-\x7e]+$/u.test(trimmed);
 }
 
-function inspectYamlNameEntries(
+function inspectYamlBindings(
   source: string | null,
   valueKey: 'Value' | 'ValueFrom',
-): YamlNameInspection {
+  expectedBindings: ReadonlyMap<string, string>,
+  managedName: (name: string) => boolean,
+): YamlBindingInspection {
   if (source === null) return { names: new Set(), valid: false };
   const names = new Set<string>();
+  const seenNames = new Set<string>();
   const lines = source.replace(/\r\n/gu, '\n').split('\n');
   let valid = true;
   for (let index = 1; index < lines.length; index += 1) {
@@ -914,7 +1148,7 @@ function inspectYamlNameEntries(
     const trimmed = rawLine.trim();
     if (trimmed.length === 0 || trimmed.startsWith('#')) continue;
     const inline = trimmed.match(
-      /^-\s*\{\s*Name:\s*([A-Z][A-Z0-9_]*),\s*(Value|ValueFrom):\s*([^}]+)\s*\}\s*$/u,
+      /^-\s*\{\s*Name:\s*([A-Z][A-Z0-9_]*),\s*(Value|ValueFrom):\s*(.+)\s*\}\s*$/u,
     );
     if (inline) {
       const [, name, observedKey, rawValue] = inline;
@@ -925,10 +1159,19 @@ function inspectYamlNameEntries(
         !validYamlBindingValue(rawValue)
       ) {
         valid = false;
-      } else if (names.has(name)) {
+      } else if (seenNames.has(name)) {
+        valid = false;
+      } else if (
+        FORBIDDEN_LEGACY_AUTH_WALLET_BINDINGS.has(name) ||
+        (managedName(name) && !expectedBindings.has(name))
+      ) {
+        seenNames.add(name);
         valid = false;
       } else {
-        names.add(name);
+        seenNames.add(name);
+        if (!expectedBindings.has(name) || rawValue.trim() === expectedBindings.get(name)) {
+          names.add(name);
+        }
       }
       continue;
     }
@@ -948,11 +1191,21 @@ function inspectYamlNameEntries(
       valueMatch[2] === undefined ||
       !validYamlBindingValue(valueMatch[2]) ||
       leadingSpaces(nextLine) <= leadingSpaces(rawLine) ||
-      names.has(name)
+      seenNames.has(name)
     ) {
       valid = false;
+    } else if (
+      FORBIDDEN_LEGACY_AUTH_WALLET_BINDINGS.has(name) ||
+      (managedName(name) && !expectedBindings.has(name))
+    ) {
+      seenNames.add(name);
+      valid = false;
+      index += 1;
     } else {
-      names.add(name);
+      seenNames.add(name);
+      if (!expectedBindings.has(name) || valueMatch[2].trim() === expectedBindings.get(name)) {
+        names.add(name);
+      }
       index += 1;
     }
   }
@@ -962,20 +1215,47 @@ function inspectYamlNameEntries(
 export function inspectAuthenticationDeploymentTemplate(
   source: string,
 ): AuthenticationDeploymentInput {
-  const apiTask = yamlBlock(source, 'ApiTaskDefinition', 2);
-  const webTask = yamlBlock(source, 'WebTaskDefinition', 2);
-  const apiContainers = apiTask === null ? null : yamlBlock(apiTask, 'ContainerDefinitions', 6);
-  const webContainers = webTask === null ? null : yamlBlock(webTask, 'ContainerDefinitions', 6);
+  const compactResources = yamlBlock(source, 'ApiTaskDefinition', 1) !== null;
+  const resourceIndent = compactResources ? 1 : 2;
+  const propertiesIndent = compactResources ? 3 : 6;
+  const itemIndent = compactResources ? 4 : 8;
+  const containerPropertyIndent = compactResources ? 6 : 10;
+  const apiTask = yamlBlock(source, 'ApiTaskDefinition', resourceIndent);
+  const webTask = yamlBlock(source, 'WebTaskDefinition', resourceIndent);
+  const apiContainers =
+    apiTask === null ? null : yamlBlock(apiTask, 'ContainerDefinitions', propertiesIndent);
+  const webContainers =
+    webTask === null ? null : yamlBlock(webTask, 'ContainerDefinitions', propertiesIndent);
   const apiContainer =
-    apiContainers === null ? null : yamlNamedSequenceEntryBlock(apiContainers, 'api', 8);
+    apiContainers === null ? null : yamlNamedSequenceEntryBlock(apiContainers, 'api', itemIndent);
   const webContainer =
-    webContainers === null ? null : yamlNamedSequenceEntryBlock(webContainers, 'web', 8);
-  const apiEnvironment = apiContainer === null ? null : yamlBlock(apiContainer, 'Environment', 10);
-  const apiSecrets = apiContainer === null ? null : yamlBlock(apiContainer, 'Secrets', 10);
-  const webEnvironment = webContainer === null ? null : yamlBlock(webContainer, 'Environment', 10);
-  const apiEnvironmentInspection = inspectYamlNameEntries(apiEnvironment, 'Value');
-  const apiSecretInspection = inspectYamlNameEntries(apiSecrets, 'ValueFrom');
-  const webEnvironmentInspection = inspectYamlNameEntries(webEnvironment, 'Value');
+    webContainers === null ? null : yamlNamedSequenceEntryBlock(webContainers, 'web', itemIndent);
+  const apiEnvironment =
+    apiContainer === null ? null : yamlBlock(apiContainer, 'Environment', containerPropertyIndent);
+  const apiSecrets =
+    apiContainer === null ? null : yamlBlock(apiContainer, 'Secrets', containerPropertyIndent);
+  const webEnvironment =
+    webContainer === null ? null : yamlBlock(webContainer, 'Environment', containerPropertyIndent);
+  const webSecrets =
+    webContainer === null ? null : yamlBlock(webContainer, 'Secrets', containerPropertyIndent);
+  const apiEnvironmentInspection = inspectYamlBindings(
+    apiEnvironment,
+    'Value',
+    EXPECTED_API_ENVIRONMENT_BINDINGS,
+    (name) => PRODUCTION_AUTH_WALLET_BINDING_NAME.test(name),
+  );
+  const apiSecretInspection = inspectYamlBindings(
+    apiSecrets,
+    'ValueFrom',
+    EXPECTED_API_SECRET_BINDINGS,
+    (name) => PRODUCTION_AUTH_WALLET_BINDING_NAME.test(name),
+  );
+  const webEnvironmentInspection = inspectYamlBindings(
+    webEnvironment,
+    'Value',
+    EXPECTED_WEB_ENVIRONMENT_BINDINGS,
+    (name) => PRODUCTION_AUTH_WALLET_BINDING_NAME.test(name),
+  );
   return Object.freeze({
     inspected:
       apiTask !== null &&
@@ -988,7 +1268,10 @@ export function inspectAuthenticationDeploymentTemplate(
       apiSecrets !== null &&
       webEnvironment !== null,
     syntaxValid:
-      apiEnvironmentInspection.valid && apiSecretInspection.valid && webEnvironmentInspection.valid,
+      apiEnvironmentInspection.valid &&
+      apiSecretInspection.valid &&
+      webEnvironmentInspection.valid &&
+      webSecrets === null,
     apiEnvironmentNames: apiEnvironmentInspection.names,
     apiSecretNames: apiSecretInspection.names,
     webEnvironmentNames: webEnvironmentInspection.names,
@@ -1082,7 +1365,109 @@ export function loadRepositoryProductionPreflightInput(
       liveReadEvidenceIndex: null,
       mainnetWriteEvidenceIndex: null,
     },
+    publicLaunchAuthorities: Object.freeze({
+      decisionSet: null,
+      evidenceBinding: null,
+    }),
   });
+}
+
+export function applyVerifiedProductionEvidenceBundle(
+  input: ProductionPreflightInput,
+  bundle: VerifiedProductionEvidenceBundle,
+  options: ProductionEvidenceApplicationOptions,
+): ProductionPreflightInput {
+  try {
+    const applicationOptions = Object.freeze({
+      releaseManifest: options.releaseManifest,
+      repositoryRoot: options.repositoryRoot,
+      sourceRevision: options.sourceRevision,
+    });
+    revalidateProductionEvidenceBundleForApplication(bundle, applicationOptions);
+    if (
+      !isVerifiedProductionEvidenceBundle(bundle) ||
+      bundle.content.directoryConfigurationSha256 !==
+        productionDirectoryConfigurationSha256(input.platforms.directory)
+    ) {
+      throw new ProductionEvidenceBundleInvalidError();
+    }
+    const evidenceBinding = Object.freeze({
+      releaseCandidateManifestSha256: bundle.content.releaseCandidateManifestSha256,
+      deploymentTargetId: bundle.content.deploymentTargetId,
+      deploymentTargetConfigurationSha256: bundle.content.deploymentTargetSha256,
+    });
+    EVIDENCE_DERIVED_PUBLIC_LAUNCH_BINDINGS.set(
+      evidenceBinding,
+      Object.freeze({ bundle, applicationOptions }),
+    );
+
+    return Object.freeze({
+      authentication: Object.freeze({
+        ...input.authentication,
+        deployedEvidenceAccepted: true,
+      }),
+      egress: Object.freeze({
+        ...input.egress,
+        liveEvidenceComplete: true,
+      }),
+      rpcProviders: Object.freeze({
+        ...input.rpcProviders,
+        liveEvidenceAccepted: true,
+      }),
+      platforms: Object.freeze({
+        directory: input.platforms.directory,
+        sourceRevision: bundle.content.sourceRevision,
+        liveReadEvidenceIndex: bundle.content.liveReadEvidenceIndex,
+        // Evidence schema v1 is read-only and can never supplement write evidence.
+        mainnetWriteEvidenceIndex: null,
+      }),
+      publicLaunchAuthorities: Object.freeze({
+        decisionSet: null,
+        evidenceBinding,
+      }),
+    });
+  } catch {
+    throw new ProductionEvidenceBundleInvalidError();
+  }
+}
+
+export function applyVerifiedPublicLaunchAuthorityDecision(
+  input: ProductionPreflightInput,
+  decisionSet: VerifiedPublicLaunchAuthorityDecisionSet,
+): ProductionPreflightInput {
+  try {
+    const evidenceBinding = input.publicLaunchAuthorities?.evidenceBinding;
+    const evidenceContext =
+      evidenceBinding === null || evidenceBinding === undefined
+        ? undefined
+        : EVIDENCE_DERIVED_PUBLIC_LAUNCH_BINDINGS.get(evidenceBinding);
+    if (
+      evidenceBinding === null ||
+      evidenceBinding === undefined ||
+      evidenceContext === undefined ||
+      !isVerifiedProductionEvidenceBundle(evidenceContext.bundle) ||
+      !isVerifiedPublicLaunchAuthorityDecisionSet(decisionSet)
+    ) {
+      throw new PublicLaunchAuthorityDecisionInvalidError();
+    }
+    revalidateProductionEvidenceBundleForApplication(
+      evidenceContext.bundle,
+      evidenceContext.applicationOptions,
+    );
+    if (!isVerifiedProductionEvidenceBundle(evidenceContext.bundle)) {
+      throw new PublicLaunchAuthorityDecisionInvalidError();
+    }
+    revalidatePublicLaunchAuthorityDecisionForApplication(decisionSet, evidenceBinding);
+    if (!isVerifiedPublicLaunchAuthorityDecisionSet(decisionSet)) {
+      throw new PublicLaunchAuthorityDecisionInvalidError();
+    }
+    return Object.freeze({
+      ...input,
+      publicLaunchAuthorities: Object.freeze({ decisionSet, evidenceBinding }),
+    });
+  } catch {
+    throw new PublicLaunchAuthorityDecisionInvalidError();
+  }
 }
 
 export function formatProductionPreflightReport(report: ProductionPreflightReport): string {
@@ -1101,38 +1486,145 @@ export function formatProductionPreflightReport(report: ProductionPreflightRepor
     for (const blockerId of item.blockerIds) lines.push(`- ${blockerId}`);
   }
   lines.push(
-    'Safety: 0 network, DNS, cloud, provider, secret-value, environment-value, and write operations.',
+    'Safety: 0 network, DNS, cloud, provider, secret-value, application-configuration environment-value, and write operations. Release-manifest Git checks may copy only the named OS process-launch variables reported in safety metadata.',
     'Assurance: LOCAL_VALIDATION_IS_NOT_PRODUCTION_APPROVAL',
   );
   return `${lines.join('\n')}\n`;
 }
 
-interface CliOptions {
+export interface ProductionPreflightCliOptions {
   readonly json: boolean;
   readonly target: ProductionPreflightTarget;
+  readonly evidenceBundlePath: string | null;
+  readonly releaseManifestPath: string | null;
+  readonly sourceRevision: string | null;
+  readonly publicLaunchAuthorityDecisionPath: string | null;
 }
 
-export function parseProductionPreflightArguments(arguments_: readonly string[]): CliOptions {
+export function parseProductionPreflightArguments(
+  arguments_: readonly string[],
+): ProductionPreflightCliOptions {
   let json = false;
   let target: ProductionPreflightTarget = 'read-only';
+  let evidenceBundlePath: string | null = null;
+  let releaseManifestPath: string | null = null;
+  let sourceRevision: string | null = null;
+  let publicLaunchAuthorityDecisionPath: string | null = null;
+  let jsonSeen = false;
+  let targetSeen = false;
+  let evidenceBundleSeen = false;
+  let releaseManifestSeen = false;
+  let sourceRevisionSeen = false;
+  let publicLaunchAuthorityDecisionSeen = false;
   for (let index = 0; index < arguments_.length; index += 1) {
     const argument = arguments_[index];
     if (argument === '--json') {
+      if (jsonSeen) throw new TypeError('PRODUCTION_PREFLIGHT_ARGUMENT_INVALID');
       json = true;
+      jsonSeen = true;
       continue;
     }
     if (argument === '--target') {
       const value = arguments_[index + 1];
-      if (value !== 'read-only' && value !== 'mainnet-write') {
+      if (targetSeen || (value !== 'read-only' && value !== 'mainnet-write')) {
         throw new TypeError('PRODUCTION_PREFLIGHT_ARGUMENT_INVALID');
       }
       target = value;
+      targetSeen = true;
+      index += 1;
+      continue;
+    }
+    if (argument === '--evidence-bundle') {
+      const value = arguments_[index + 1];
+      if (
+        evidenceBundleSeen ||
+        value === undefined ||
+        value.length === 0 ||
+        value.length > 4_096 ||
+        value.trim().length === 0 ||
+        value.includes('\u0000') ||
+        value.startsWith('--')
+      ) {
+        throw new TypeError('PRODUCTION_PREFLIGHT_ARGUMENT_INVALID');
+      }
+      evidenceBundlePath = value;
+      evidenceBundleSeen = true;
+      index += 1;
+      continue;
+    }
+    if (argument === '--release-manifest') {
+      const value = arguments_[index + 1];
+      if (
+        releaseManifestSeen ||
+        value === undefined ||
+        value.length === 0 ||
+        value.length > 4_096 ||
+        value.trim().length === 0 ||
+        value.includes('\u0000') ||
+        value.startsWith('--')
+      ) {
+        throw new TypeError('PRODUCTION_PREFLIGHT_ARGUMENT_INVALID');
+      }
+      releaseManifestPath = value;
+      releaseManifestSeen = true;
+      index += 1;
+      continue;
+    }
+    if (argument === '--source-revision') {
+      const value = arguments_[index + 1];
+      if (sourceRevisionSeen || value === undefined || !/^[a-f0-9]{40}$/u.test(value)) {
+        throw new TypeError('PRODUCTION_PREFLIGHT_ARGUMENT_INVALID');
+      }
+      sourceRevision = value;
+      sourceRevisionSeen = true;
+      index += 1;
+      continue;
+    }
+    if (argument === '--public-launch-authority-decision') {
+      const value = arguments_[index + 1];
+      if (
+        publicLaunchAuthorityDecisionSeen ||
+        value === undefined ||
+        value.length === 0 ||
+        value.length > 4_096 ||
+        value.trim().length === 0 ||
+        value.includes('\u0000') ||
+        value.startsWith('--')
+      ) {
+        throw new TypeError('PRODUCTION_PREFLIGHT_ARGUMENT_INVALID');
+      }
+      publicLaunchAuthorityDecisionPath = value;
+      publicLaunchAuthorityDecisionSeen = true;
       index += 1;
       continue;
     }
     throw new TypeError('PRODUCTION_PREFLIGHT_ARGUMENT_INVALID');
   }
-  return Object.freeze({ json, target });
+  const hasCompleteEvidenceInput =
+    evidenceBundlePath !== null && releaseManifestPath !== null && sourceRevision !== null;
+  const hasAnyEvidenceInput =
+    evidenceBundlePath !== null || releaseManifestPath !== null || sourceRevision !== null;
+  if (
+    hasAnyEvidenceInput !== hasCompleteEvidenceInput ||
+    (hasAnyEvidenceInput && target !== 'read-only') ||
+    (publicLaunchAuthorityDecisionPath !== null && !hasCompleteEvidenceInput)
+  ) {
+    throw new TypeError('PRODUCTION_PREFLIGHT_ARGUMENT_INVALID');
+  }
+  return Object.freeze({
+    json,
+    target,
+    evidenceBundlePath,
+    releaseManifestPath,
+    sourceRevision,
+    publicLaunchAuthorityDecisionPath,
+  });
+}
+
+export function productionPreflightCliErrorCode(error: unknown): string {
+  if (error instanceof ProductionEvidenceBundleInvalidError) return error.code;
+  if (error instanceof PublicLaunchAuthorityDecisionInvalidError) return error.code;
+  return 'PRODUCTION_PREFLIGHT_ARGUMENT_INVALID';
 }
 
 export function productionPreflightExitCode(report: ProductionPreflightReport): 0 | 1 {
@@ -1143,18 +1635,51 @@ function main(): void {
   try {
     const options = parseProductionPreflightArguments(process.argv.slice(2));
     const repositoryRoot = resolve(__dirname, '..');
-    const report = evaluateProductionPreflight(
-      loadRepositoryProductionPreflightInput(repositoryRoot),
-      options.target,
-    );
+    let input = loadRepositoryProductionPreflightInput(repositoryRoot);
+    if (
+      options.evidenceBundlePath !== null &&
+      options.releaseManifestPath !== null &&
+      options.sourceRevision !== null
+    ) {
+      let releaseManifest: unknown;
+      try {
+        releaseManifest = releaseCandidateManifest.loadAndVerifyReleaseManifest(
+          repositoryRoot,
+          options.releaseManifestPath,
+          options.sourceRevision,
+        ) as unknown;
+      } catch {
+        throw new ProductionEvidenceBundleInvalidError();
+      }
+      const bundle = loadAndVerifyProductionEvidenceBundle(options.evidenceBundlePath, {
+        releaseManifest,
+      });
+      input = applyVerifiedProductionEvidenceBundle(input, bundle, {
+        releaseManifest,
+        repositoryRoot,
+        sourceRevision: options.sourceRevision,
+      });
+      if (options.publicLaunchAuthorityDecisionPath !== null) {
+        const evidenceBinding = input.publicLaunchAuthorities?.evidenceBinding;
+        if (evidenceBinding === null || evidenceBinding === undefined) {
+          throw new PublicLaunchAuthorityDecisionInvalidError();
+        }
+        const decisionSet = loadAndVerifyPublicLaunchAuthorityDecision(
+          options.publicLaunchAuthorityDecisionPath,
+          evidenceBinding,
+        );
+        input = applyVerifiedPublicLaunchAuthorityDecision(input, decisionSet);
+      }
+    }
+    const report = evaluateProductionPreflight(input, options.target);
     process.stdout.write(
       options.json
         ? `${JSON.stringify(report, null, 2)}\n`
         : formatProductionPreflightReport(report),
     );
     process.exitCode = productionPreflightExitCode(report);
-  } catch {
-    process.stderr.write('PRODUCTION_PREFLIGHT_ARGUMENT_INVALID\n');
+  } catch (error) {
+    process.stderr.write(`${productionPreflightCliErrorCode(error)}\n`);
     process.exitCode = 2;
   }
 }

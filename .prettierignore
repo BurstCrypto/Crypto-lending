@@ -9,3 +9,5 @@ apps/web/next-env.d.ts
 jira_phase_*.json
 jira_*.ps1
 unified_multi_wallet_tokenized_investment_mvp_epic.md
+# One-space YAML indentation keeps this direct-upload CloudFormation body below 51,200 bytes.
+infra/aws/application-baseline.yaml
