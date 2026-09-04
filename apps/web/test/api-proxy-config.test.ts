@@ -10,7 +10,6 @@ import {
 function enabledEnvironment(): NodeJS.ProcessEnv {
   return {
     NODE_ENV: 'development',
-    LOCAL_DEMO_MODE: 'disabled',
     WEB_API_PROXY_MODE: 'enabled',
     WEB_API_PROXY_ORIGIN: 'http://127.0.0.1:3001',
   };
@@ -33,7 +32,7 @@ describe('standalone web API proxy configuration', () => {
     ).toThrow(WebApiProxyConfigurationError);
   });
 
-  it('installs the exact loopback rewrite independently of local demo mode', () => {
+  it('installs the exact loopback rewrite for separate local development processes', () => {
     const config = loadWebApiProxyConfig(enabledEnvironment());
 
     expect(config).toEqual({
@@ -94,10 +93,8 @@ describe('standalone web API proxy configuration', () => {
 });
 
 describe('Next.js API routing composition', () => {
-  it('uses the standalone proxy without local demo mode', async () => {
+  it('uses the standalone loopback proxy when explicitly enabled', async () => {
     vi.stubEnv('NODE_ENV', 'test');
-    vi.stubEnv('LOCAL_DEMO_MODE', 'disabled');
-    vi.stubEnv('LOCAL_DEMO_API_ORIGIN', undefined);
     vi.stubEnv('WEB_API_PROXY_MODE', 'enabled');
     vi.stubEnv('WEB_API_PROXY_ORIGIN', 'http://127.0.0.1:3001');
 
@@ -109,26 +106,18 @@ describe('Next.js API routing composition', () => {
     ]);
   });
 
-  it('retains the existing exact local-demo rewrite as a compatibility fallback', async () => {
+  it('does not let obsolete local-demo settings create an application rewrite', async () => {
     vi.stubEnv('NODE_ENV', 'test');
     vi.stubEnv('LOCAL_DEMO_MODE', 'enabled');
     vi.stubEnv('LOCAL_DEMO_API_ORIGIN', 'http://127.0.0.1:3001');
-    vi.stubEnv('AUTH_PUBLIC_ORIGIN', 'http://127.0.0.1:3000');
     vi.stubEnv('WEB_API_PROXY_MODE', 'disabled');
     vi.stubEnv('WEB_API_PROXY_ORIGIN', undefined);
 
-    await expect(nextConfig.rewrites()).resolves.toEqual([
-      {
-        source: '/api/v1/:path*',
-        destination: 'http://127.0.0.1:3001/api/v1/:path*',
-      },
-    ]);
+    await expect(nextConfig.rewrites()).resolves.toEqual([]);
   });
 
-  it('installs no API rewrite when both guarded modes are disabled', async () => {
+  it('installs no API rewrite when the standalone proxy is disabled', async () => {
     vi.stubEnv('NODE_ENV', 'test');
-    vi.stubEnv('LOCAL_DEMO_MODE', 'disabled');
-    vi.stubEnv('LOCAL_DEMO_API_ORIGIN', undefined);
     vi.stubEnv('WEB_API_PROXY_MODE', 'disabled');
     vi.stubEnv('WEB_API_PROXY_ORIGIN', undefined);
 
