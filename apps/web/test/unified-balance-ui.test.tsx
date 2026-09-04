@@ -216,7 +216,7 @@ describe('PortfolioPage', () => {
     });
   });
 
-  it('restores the isolated synthetic portfolio only behind the explicit local-demo flag', () => {
+  it('never exposes the retired local-demo experience through the production portfolio route', () => {
     vi.stubEnv('LOCAL_DEMO_MODE', 'enabled');
     vi.stubEnv('LOCAL_DEMO_API_ORIGIN', 'http://127.0.0.1:3001');
     vi.stubEnv('AUTH_PUBLIC_ORIGIN', 'http://127.0.0.1:3000');
@@ -225,13 +225,14 @@ describe('PortfolioPage', () => {
     expect(
       screen.getByRole('heading', {
         level: 1,
-        name: 'Your isolated demo balances, in one clear view.',
+        name: 'Your supported balances, in one clear view.',
       }),
     ).toBeInTheDocument();
-    expect(screen.getByText('Crypto Lending isolated synthetic regression harness')).toBeVisible();
+    expect(screen.queryByText('Crypto Lending isolated synthetic regression harness')).toBeNull();
+    expect(screen.getByText('Crypto Lending multi-chain mainnet read-only preview')).toBeVisible();
     expect(screen.queryByRole('navigation', { name: 'Jump to portfolio sections' })).toBeNull();
     expect(document.querySelector('#balances')).not.toBeNull();
-    expect(document.querySelector('#wallets')).not.toBeNull();
+    expect(document.querySelector('#wallets')).toBeNull();
     expect(screen.queryByRole('heading', { name: 'Verify a Base Mainnet wallet' })).toBeNull();
   });
 });
