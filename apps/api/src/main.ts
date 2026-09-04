@@ -5,8 +5,8 @@ import type { Server } from 'node:http';
 
 import { NestFactory } from '@nestjs/core';
 
-import { AppModule } from './app.module';
 import { configureApplication } from './application';
+import { loadApplicationRootModule } from './application-root';
 import { bindExecutableWorkload } from './infrastructure/config/application-workload';
 import {
   installFatalProcessBoundary,
@@ -18,7 +18,8 @@ import { applyHttpServerLimits, loadHttpServerOptions } from './server-options';
 async function bootstrap(): Promise<void> {
   bindExecutableWorkload(process.env, 'api');
   installFatalProcessBoundary(structuredLogger);
-  const app = await NestFactory.create(AppModule, { logger: structuredLogger });
+  const rootModule = await loadApplicationRootModule(process.env);
+  const app = await NestFactory.create(rootModule, { logger: structuredLogger });
   configureApplication(app);
   app.enableShutdownHooks();
 

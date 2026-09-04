@@ -29,6 +29,9 @@ function enabledEnvironment(): NodeJS.ProcessEnv {
     SQS_ENDPOINT: 'http://127.0.0.1:4566',
     SQS_QUEUE_URL: 'http://127.0.0.1:4566/000000000000/crypto-lending-jobs',
     SQS_DEAD_LETTER_QUEUE_URL: 'http://127.0.0.1:4566/000000000000/crypto-lending-jobs-dlq',
+    SQS_BALANCE_QUEUE_URL: 'http://127.0.0.1:4566/000000000000/crypto-lending-balance-sync',
+    SQS_BALANCE_DEAD_LETTER_QUEUE_URL:
+      'http://127.0.0.1:4566/000000000000/crypto-lending-balance-sync-dlq',
     LOCAL_EVM_RPC_URL: 'http://127.0.0.1:18545',
     LOCAL_EVM_CONTROL_LAUNCH_ID: '0123456789abcdef0123456789abcdef',
     LOCAL_EVM_CONTROL_CAPABILITY:
@@ -105,6 +108,11 @@ describe('local demo runtime configuration', () => {
     ['SQS_ENDPOINT', 'http://queue.example:4566'],
     ['SQS_QUEUE_URL', 'https://sqs.us-east-1.amazonaws.com/000000000000/jobs'],
     ['SQS_DEAD_LETTER_QUEUE_URL', 'https://sqs.us-east-1.amazonaws.com/000000000000/jobs-dlq'],
+    ['SQS_BALANCE_QUEUE_URL', 'https://sqs.us-east-1.amazonaws.com/000000000000/balance-sync'],
+    [
+      'SQS_BALANCE_DEAD_LETTER_QUEUE_URL',
+      'https://sqs.us-east-1.amazonaws.com/000000000000/balance-sync-dlq',
+    ],
   ])('rejects local infrastructure drift in %s', (field, value) => {
     const environment = enabledEnvironment();
     environment[field] = value;

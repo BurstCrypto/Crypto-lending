@@ -66,7 +66,7 @@ describe('system endpoints (e2e)', () => {
     });
   });
 
-  it('fails closed on account routes until a verified principal adapter is installed', async () => {
+  it('fails closed on account routes and omits development-only surfaces', async () => {
     const response = await request(app.getHttpServer())
       .get('/api/v1/accounts/me')
       .set('X-User-ID', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa')
@@ -82,19 +82,13 @@ describe('system endpoints (e2e)', () => {
       statusCode: 401,
     });
 
-    const publicTestnet = await request(app.getHttpServer())
+    await request(app.getHttpServer())
       .post('/api/v1/public-testnet/execution-intents')
       .send({})
-      .expect(401);
-    expect(publicTestnet.headers).toMatchObject({
-      'cache-control': 'private, no-store',
-      vary: 'Cookie, Origin',
-    });
-    expect(publicTestnet.body).toEqual({
-      error: 'Unauthorized',
-      message: 'Authentication required',
-      statusCode: 401,
-    });
+      .expect(404);
+
+    await request(app.getHttpServer()).get('/api/v1/local-demo/portfolio').expect(404);
+    await request(app.getHttpServer()).get('/api/v1/public-testnet/evm/portfolio').expect(404);
 
     const mainnetPlatforms = await request(app.getHttpServer())
       .get('/api/v1/mainnet-platforms')
@@ -200,31 +194,12 @@ describe('system endpoints (e2e)', () => {
         },
       },
     });
-    expect(response.body.paths).toHaveProperty('/api/v1/local-demo/wallets');
-    expect(response.body.paths).toHaveProperty('/api/v1/local-demo/portfolio');
-    expect(response.body.paths).toHaveProperty('/api/v1/public-testnet/execution-intents');
-    expect(response.body.paths).toHaveProperty(
-      '/api/v1/public-testnet/execution-intents/{intentId}/submissions',
-    );
     expect(
-      response.body.paths['/api/v1/public-testnet/execution-intents'].post.requestBody.content[
-        'application/json'
-      ].schema.properties.selection.properties.presetId.enum,
-    ).toEqual(['BALANCED']);
+      Object.keys(response.body.paths).every((path) => !path.startsWith('/api/v1/local-demo')),
+    ).toBe(true);
     expect(
-      response.body.paths['/api/v1/public-testnet/execution-intents/{intentId}/submissions'].post
-        .responses['200'].content['application/json'].schema.properties.confirmation.enum,
-    ).toEqual(['LATEST_SIGNATURE_STATUS_OBSERVATION']);
-    const submissionSchema =
-      response.body.paths['/api/v1/public-testnet/execution-intents/{intentId}/submissions'].post
-        .requestBody.content['application/json'].schema;
-    expect(submissionSchema.required).toEqual(['signature']);
-    expect(submissionSchema.additionalProperties).toBe(false);
-    expect(submissionSchema.properties.signedTransactionBase64).toMatchObject({
-      type: 'string',
-      minLength: 4,
-      maxLength: 1_644,
-    });
+      Object.keys(response.body.paths).every((path) => !path.startsWith('/api/v1/public-testnet')),
+    ).toBe(true);
     expect(response.body.paths).not.toHaveProperty('/api/v1/internal/health/dependencies');
     expect(
       response.body.paths['/api/v1/health/dependencies'].get.responses['503'].content[

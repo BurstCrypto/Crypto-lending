@@ -257,7 +257,7 @@ class LocalDemoBalanceSyncIndexer implements BalanceSyncIndexerPort {
       if (
         fixture === undefined ||
         request.tier !== 'PROVISIONAL' ||
-        request.selector !== (fixture.namespace === 'EVM' ? 'latest' : 'processed')
+        request.selector !== (fixture.namespace === 'EVM' ? 'latest' : 'confirmed')
       ) {
         throw new TypeError('unknown local demo indexing scope');
       }
@@ -332,7 +332,7 @@ class LocalDemoBalanceSyncIndexer implements BalanceSyncIndexerPort {
         position,
         hash: solanaHash('head', fixture.chainId, position),
         parentHash: solanaHash('parent', fixture.chainId, position),
-        selector: 'processed',
+        selector: 'confirmed',
         retrievedAt: LOCAL_DEMO_RETRIEVED_AT,
         identityValidated: true,
       }),
@@ -412,7 +412,7 @@ class LocalDemoSolanaDepositSource implements SolanaDepositSourcePort {
   async getTokenAccountsByOwner(request: SolanaTokenAccountsByOwnerRequest): Promise<unknown> {
     if (
       request.ownerAddress !== this.fixture.address ||
-      request.commitment !== 'processed' ||
+      request.commitment !== 'confirmed' ||
       (request.minContextSlot !== undefined && request.minContextSlot > this.sourceSlot)
     ) {
       throw new TypeError('unexpected local demo Solana balance request');

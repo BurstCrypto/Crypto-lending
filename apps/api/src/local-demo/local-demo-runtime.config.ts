@@ -51,6 +51,9 @@ const REQUIRED_LOCAL_INFRASTRUCTURE = Object.freeze({
   SQS_ENDPOINT: 'http://127.0.0.1:4566',
   SQS_QUEUE_URL: 'http://127.0.0.1:4566/000000000000/crypto-lending-jobs',
   SQS_DEAD_LETTER_QUEUE_URL: 'http://127.0.0.1:4566/000000000000/crypto-lending-jobs-dlq',
+  SQS_BALANCE_QUEUE_URL: 'http://127.0.0.1:4566/000000000000/crypto-lending-balance-sync',
+  SQS_BALANCE_DEAD_LETTER_QUEUE_URL:
+    'http://127.0.0.1:4566/000000000000/crypto-lending-balance-sync-dlq',
   LOCAL_EVM_RPC_URL: 'http://127.0.0.1:18545',
 } as const);
 
