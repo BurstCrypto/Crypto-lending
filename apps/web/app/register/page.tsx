@@ -1,3 +1,5 @@
+import type { Metadata } from 'next';
+
 import { AuthenticationShell } from '@/components/authentication/authentication-shell';
 import { RegistrationForm } from '@/components/authentication/registration-form';
 import { safeAccountReturnPathOrDefault } from '@/lib/authentication';
@@ -5,6 +7,12 @@ import { safeAccountReturnPathOrDefault } from '@/lib/authentication';
 interface RegisterPageProps {
   readonly searchParams?: Promise<{ readonly returnTo?: string | readonly string[] }>;
 }
+
+export const metadata: Metadata = {
+  title: 'Create account',
+  description: 'Create an account for the Crypto Lending workspace.',
+  robots: { index: false, follow: false, nocache: true },
+};
 
 export default async function RegisterPage({ searchParams }: RegisterPageProps) {
   const parameters = searchParams ? await searchParams : {};

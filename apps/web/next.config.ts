@@ -34,6 +34,14 @@ const nextConfig = {
         source: '/platforms',
         headers: ACCOUNT_SHELL_HEADERS,
       },
+      {
+        source: '/login',
+        headers: ACCOUNT_SHELL_HEADERS,
+      },
+      {
+        source: '/register',
+        headers: ACCOUNT_SHELL_HEADERS,
+      },
     ];
   },
 } satisfies NextConfig;
