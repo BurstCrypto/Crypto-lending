@@ -43,6 +43,15 @@ Parameters:
   ApplicationDataKeyArn:
     Type: String
     AllowedPattern: '^arn:[a-z0-9-]+:kms:[a-z0-9-]+:[0-9]{12}:key/[a-f0-9-]+$'
+  AuthWalletKeysSecretArn:
+    Type: String
+    NoEcho: true
+    MaxLength: 2048
+    AllowedPattern: '^arn:[a-z0-9-]+:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:[A-Za-z0-9/_+=.@-]+$'
+  AuthWalletKeysKmsKeyArn:
+    Type: String
+    MaxLength: 2048
+    AllowedPattern: '^arn:[a-z0-9-]+:kms:[a-z0-9-]+:[0-9]{12}:key/[a-f0-9-]+$'
   ApiLogGroupArn:
     Type: String
     AllowedPattern: '^arn:[a-z0-9-]+:logs:[a-z0-9-]+:[0-9]{12}:log-group:[A-Za-z0-9_./#-]+$'
@@ -551,6 +560,7 @@ Resources:
                 Effect: Allow
                 Action: secretsmanager:GetSecretValue
                 Resource:
+                  - !Ref AuthWalletKeysSecretArn
                   - !If
                     - ApiDatabaseAReadable
                     - !Ref ApiDatabaseCredentialASecret
@@ -570,7 +580,7 @@ Resources:
               - Sid: DecryptSecrets
                 Effect: Allow
                 Action: kms:Decrypt
-                Resource: !Ref ApplicationDataKeyArn
+                Resource: [!Ref ApplicationDataKeyArn, !Ref AuthWalletKeysKmsKeyArn]
                 Condition:
                   StringEquals:
                     kms:ViaService: !Sub secretsmanager.${AWS::Region}.${AWS::URLSuffix}

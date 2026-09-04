@@ -45,8 +45,43 @@ test('accepts the reviewed local workload-boundary child under the direct body c
     report.residualLimitations.join('\n'),
     /FIXED_SLOT_CREDENTIAL_REGENERATION_UNRESOLVED/,
   );
-  assert.match(report.residualLimitations.join('\n'), /FAILED_AUTH_MONITORING_UNRESOLVED/);
+  assert.match(report.residualLimitations.join('\n'), /AUTH_WALLET_SECRET_EXTERNAL/);
   assert.match(report.residualLimitations.join('\n'), /not packaged or uploaded/);
+});
+
+test('grants the one external auth/wallet secret and KMS key only to API execution', () => {
+  assertRejected(
+    mutate(
+      '  AuthWalletKeysSecretArn:\n    Type: String\n    NoEcho: true',
+      '  AuthWalletKeysSecretArn:\n    Type: String\n    NoEcho: true\n    Default: arn:aws:secretsmanager:us-west-2:111122223333:secret:prohibited',
+    ),
+    /AuthWalletKeysSecretArn must be one explicit selector-free Secrets Manager ARN/,
+  );
+  assertRejected(
+    mutate('                  - !Ref AuthWalletKeysSecretArn\n', ''),
+    /ApiTaskExecutionRole must retain the exact API log and runtime-secret matrix/,
+  );
+  assertRejected(
+    mutate(
+      '                  - !Ref WorkerDatabaseCredentialBSecret\n',
+      '                  - !Ref WorkerDatabaseCredentialBSecret\n                  - !Ref AuthWalletKeysSecretArn\n',
+    ),
+    /WorkerTaskExecutionRole must retain the exact worker log and runtime-secret matrix|must not read Redis or authentication\/wallet credentials/,
+  );
+  assertRejected(
+    mutate(
+      'Resource: [!Ref ApplicationDataKeyArn, !Ref AuthWalletKeysKmsKeyArn]',
+      'Resource: !Ref ApplicationDataKeyArn',
+    ),
+    /ApiTaskExecutionRole must retain the exact API log and runtime-secret matrix/,
+  );
+  assertRejected(
+    mutate(
+      '                Resource: !Ref RedisOperatorSecret',
+      '                Resource: [!Ref RedisOperatorSecret, !Ref AuthWalletKeysSecretArn]',
+    ),
+    /Redis operator execution must not read application or migration credentials|conditional and read only its scoped operator secret/,
+  );
 });
 
 test('rejects deployment without the exact explicit billing gate', () => {

@@ -60,6 +60,21 @@ function addResource(source, resource) {
   return source.replace(/^Resources:\s*$/m, `Resources:\n${resource}`);
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function mutateResourceBlock(source, logicalId, transform) {
+  const pattern = new RegExp(
+    `(^ ${logicalId}:\\n[\\s\\S]*?)(?=^ [A-Z][A-Za-z0-9]*:\\s*$|^Outputs:\\s*$)`,
+    'm',
+  );
+  let found = false;
+  const result = source.replace(pattern, (block) => {
+    found = true;
+    return transform(block);
+  });
+  assert.equal(found, true, `Resource ${logicalId} was not found.`);
+  return result;
+}
+
 function assertRejected(source, messagePattern) {
   const { report, status } = runValidator(source);
   assert.equal(status, 1);
@@ -75,12 +90,70 @@ test('accepts the repository no-external-egress baseline and records the DNS res
   assert.equal(status, 0);
   assert.equal(report.ok, true);
   assert.deepEqual(report.errors, []);
-  assert.equal(report.residualLimitations.length, 4);
+  assert.equal(report.residualLimitations.length, 5);
   assert.match(report.residualLimitations[0], /port 53 to the VPC CIDR/);
   assert.match(report.residualLimitations[0], /cannot prove/);
   assert.match(report.residualLimitations[1], /REDIS_OPERATOR_EXECUTION_ARTIFACT_UNRESOLVED/);
   assert.match(report.residualLimitations[2], /FIXED_SLOT_CREDENTIAL_REGENERATION_UNRESOLVED/);
-  assert.match(report.residualLimitations[3], /FAILED_AUTH_MONITORING_UNRESOLVED/);
+  assert.match(report.residualLimitations[3], /AUTH_WALLET_EXTERNAL_CONFIGURATION_UNRESOLVED/);
+  assert.match(report.residualLimitations[4], /OPERATIONAL_ALERT_DELIVERY_EXTERNAL/);
+});
+
+test('keeps the parent below the reviewed direct-upload ceiling after child extraction', () => {
+  const bytes = Buffer.byteLength(templateSource, 'utf8');
+  assert.equal(bytes, 50_151);
+  assert.ok(bytes <= 50_500);
+  assert.equal(51_200 - bytes, 1_049);
+});
+
+test('pins the observability child URL, digest, binding, and exact parent mapping', () => {
+  for (const [search, replacement, message] of [
+    [
+      'ObservabilityTemplateSha256:\n  Type: String',
+      'ObservabilityTemplateSha256:\n  Type: Number',
+      /ObservabilityTemplateSha256/,
+    ],
+    [
+      'TemplateURL: !Ref ObservabilityTemplateUrl',
+      'TemplateURL: !Ref WorkloadBoundariesTemplateUrl',
+      /Observability.*exact reviewed minimum-name input/,
+    ],
+    [
+      'AlarmTopicArn: !Ref AlarmTopicArn',
+      'AlarmTopicArn: NONE',
+      /Observability.*exact reviewed minimum-name input/,
+    ],
+    [
+      'LoadBalancerFullName: !GetAtt ApplicationLoadBalancer.LoadBalancerFullName',
+      'LoadBalancerFullName: unreviewed',
+      /Observability.*exact reviewed minimum-name input/,
+    ],
+    [
+      'BalanceQueueName: !GetAtt BalanceQueue.QueueName',
+      'BalanceQueueName: !GetAtt JobQueue.QueueName',
+      /Observability.*exact reviewed minimum-name input/,
+    ],
+    [
+      'BalanceDeadLetterQueueName: !GetAtt BalanceDeadLetterQueue.QueueName',
+      'BalanceDeadLetterQueueName: !GetAtt JobDeadLetterQueue.QueueName',
+      /Observability.*exact reviewed minimum-name input/,
+    ],
+    [
+      'RedisCacheClusterIdPrefix: !Ref RedisReplicationGroup',
+      'RedisCacheClusterIdPrefix: unexpected',
+      /Observability.*exact reviewed minimum-name input/,
+    ],
+    [
+      'Value: !Ref ObservabilityArtifactBindingSha256',
+      'Value: !Ref ObservabilityTemplateSha256',
+      /Observability.*exact reviewed minimum-name input/,
+    ],
+  ]) {
+    assertRejected(
+      mutate((source) => source.replace(search, replacement)),
+      message,
+    );
+  }
 });
 
 test('requires bare forwarded client IPs for trusted-proxy parsing', () => {
@@ -90,148 +163,27 @@ test('requires bare forwarded client IPs for trusted-proxy parsing', () => {
   assertRejected(
     mutate((source) =>
       source.replace(
-        "        - Key: routing.http.xff_client_port.enabled\n          Value: 'false'",
-        "        - Key: routing.http.xff_client_port.enabled\n          Value: 'true'",
+        "    - Key: routing.http.xff_client_port.enabled\n      Value: 'false'",
+        "    - Key: routing.http.xff_client_port.enabled\n      Value: 'true'",
       ),
     ),
     expectedError,
   );
   assertRejected(
     mutate((source) =>
-      source.replace(
-        "        - Key: routing.http.xff_client_port.enabled\n          Value: 'false'\n",
-        '',
-      ),
+      source.replace("    - Key: routing.http.xff_client_port.enabled\n      Value: 'false'\n", ''),
     ),
     expectedError,
-  );
-});
-
-test('keeps the environment dashboard opt-in and behind the existing billing gate', () => {
-  assertRejected(
-    mutate((source) =>
-      source.replace(
-        "  EnableOperationalDashboard:\n    Type: String\n    Default: 'false'",
-        "  EnableOperationalDashboard:\n    Type: String\n    Default: 'true'",
-      ),
-    ),
-    /EnableOperationalDashboard must preserve the exact opt-in String contract with a false default/,
-  );
-  assertRejected(
-    mutate((source) =>
-      source.replace(
-        "CreateOperationalDashboard: !Equals [!Ref EnableOperationalDashboard, 'true']",
-        "CreateOperationalDashboard: !Equals [!Ref EnableOperationalAlarms, 'true']",
-      ),
-    ),
-    /CreateOperationalDashboard must preserve the exact opt-in condition/,
-  );
-  assertRejected(
-    mutate((source) =>
-      source.replace(
-        '    Condition: CreateOperationalDashboard\n    Properties:\n      DashboardName:',
-        '    Condition: CreateOperationalAlarms\n    Properties:\n      DashboardName:',
-      ),
-    ),
-    /OperationalDashboard must remain disabled unless CreateOperationalDashboard is true/,
-  );
-});
-
-test('pins low-cardinality native API, ECS, source-queue, and DLQ dashboard metrics', () => {
-  for (const [search, replacement, message] of [
-    [
-      '"TargetResponseTime",".",".",".",".",{"stat":"p95"}',
-      '"TargetResponseTime",".",".",".",".",{"stat":"Average"}',
-      /native ALB request, target 4xx\/5xx, and p95 latency contract/,
-    ],
-    [
-      '"${ApiService.Name}"],[".","MemoryUtilization"',
-      '"${WebService.Name}"],[".","MemoryUtilization"',
-      /native ECS CPU and memory saturation contract for API, web, and worker/,
-    ],
-    [
-      '"${JobDeadLetterQueue.QueueName}"]]}',
-      '"${JobQueue.QueueName}"]]}',
-      /source-queue backlog\/age and dead-letter-queue depth contract/,
-    ],
-  ]) {
-    assertRejected(
-      mutate((source) => source.replace(search, replacement)),
-      message,
-    );
-  }
-
-  assertRejected(
-    mutate((source) =>
-      source.replace(
-        '"RequestCount","LoadBalancer"',
-        '"RequestCount","correlationId","${EnvironmentName}","LoadBalancer"',
-      ),
-    ),
-    /native metric dimensions must exclude high-cardinality customer and trace identifiers/,
-  );
-});
-
-test('pins bounded allowlisted trace, job-failure, and lifecycle log queries', () => {
-  for (const [search, replacement, message] of [
-    [
-      "SOURCE logGroups(namePrefix: ['/crypto-lending/${EnvironmentName}/'])",
-      "SOURCE 'logGroups(namePrefix: ['/crypto-lending/${EnvironmentName}/'])",
-      /bounded trace query and trace\.span\.completed event contract/,
-    ],
-    [
-      "filter event = 'trace.span.completed' | limit 100",
-      "filter event = 'trace.span.started' | limit 100",
-      /bounded trace query and trace\.span\.completed event contract/,
-    ],
-    [
-      "'job.awaiting_dead_letter'",
-      "'job.processed'",
-      /bounded job-failure query and closed structured-event set/,
-    ],
-    [
-      'by lifecycleScope, state, reason',
-      'by lifecycleScope, state, transactionId',
-      /lifecycle transition query grouped only by closed scope, state, and reason fields/,
-    ],
-  ]) {
-    assertRejected(
-      mutate((source) => source.replace(search, replacement)),
-      message,
-    );
-  }
-
-  assertRejected(
-    mutate((source) =>
-      source.replace(
-        'fields @timestamp, correlationId, traceId',
-        'fields @timestamp, @message, correlationId, traceId',
-      ),
-    ),
-    /log queries must use only reviewed structured fields and must never expose raw messages/,
-  );
-});
-
-test('rejects malformed or expanded operational dashboard JSON', () => {
-  assertRejected(
-    mutate((source) => source.replace('{"widgets":[', '{widgets:[')),
-    /OperationalDashboard\.DashboardBody must contain valid folded JSON/,
-  );
-  assertRejected(
-    mutate((source) =>
-      source.replace('{"widgets":[', '{"unreviewed":{"customerId":"forbidden"},"widgets":['),
-    ),
-    /OperationalDashboard must contain only one JSON widgets array/,
   );
 });
 
 test('rejects mutations to the exact bounded log-retention parameter contract', () => {
   for (const [search, replacement] of [
-    ['  LogRetentionDays:\n    Type: Number', '  LogRetentionDays:\n    Type: String'],
-    ['    Default: 14\n    AllowedValues:', '    Default: 30\n    AllowedValues:'],
+    [' LogRetentionDays:\n  Type: Number', ' LogRetentionDays:\n  Type: String'],
+    ['  Default: 14\n  AllowedValues:', '  Default: 30\n  AllowedValues:'],
     [
-      '    AllowedValues: [1, 3, 5, 7, 14, 30, 60, 90]',
-      '    AllowedValues: [1, 3, 5, 7, 14, 30, 60, 90, 365]',
+      '  AllowedValues: [1, 3, 5, 7, 14, 30, 60, 90]',
+      '  AllowedValues: [1, 3, 5, 7, 14, 30, 60, 90, 365]',
     ],
   ]) {
     assertRejected(
@@ -251,7 +203,7 @@ test('rejects every application log group that escapes the reviewed retention pa
       mutate((source) =>
         source.replace(
           new RegExp(
-            `(  ${logicalId}:[\\s\\S]*?RetentionInDays:) !Ref LogRetentionDays(?=\\n\\n  ${nextLogicalId}:)`,
+            `( ${logicalId}:[\\s\\S]*?RetentionInDays:) !Ref LogRetentionDays(?=\\n\\n ${nextLogicalId}:)`,
           ),
           '$1 365',
         ),
@@ -332,7 +284,7 @@ test('standalone SQS validator rejects missing encryption and bounded-redrive to
   }
 
   const withoutJobQueue = sqsFoundationSource.replace(
-    /^  JobQueue:[\s\S]*?(?=^  JobQueueTlsPolicy:)/m,
+    /^ {2}JobQueue:[\s\S]*?(?=^ {2}JobQueueTlsPolicy:)/m,
     '',
   );
   assert.notEqual(withoutJobQueue, sqsFoundationSource);
@@ -442,7 +394,7 @@ test('rejects an Elastic IP', () => {
 
 test('rejects public IP assignment for application tasks', () => {
   const source = mutate((value) =>
-    value.replace('          AssignPublicIp: DISABLED', '          AssignPublicIp: ENABLED'),
+    value.replace('     AssignPublicIp: DISABLED', '     AssignPublicIp: ENABLED'),
   );
   assertRejected(source, /must disable public IPs|must never enable public IP assignment/);
 });
@@ -450,8 +402,8 @@ test('rejects public IP assignment for application tasks', () => {
 test('rejects an additional ECS task security group', () => {
   const source = mutate((value) =>
     value.replace(
-      '          SecurityGroups:\n            - !Ref WebTaskSecurityGroup\n          Subnets:',
-      '          SecurityGroups:\n            - !Ref WebTaskSecurityGroup\n            - !Ref LoadBalancerSecurityGroup\n          Subnets:',
+      '     SecurityGroups:\n      - !Ref WebTaskSecurityGroup\n     Subnets:',
+      '     SecurityGroups:\n      - !Ref WebTaskSecurityGroup\n      - !Ref LoadBalancerSecurityGroup\n     Subnets:',
     ),
   );
   assertRejected(
@@ -465,11 +417,11 @@ test('rejects an additional ECS task subnet', () => {
     value
       .replace(
         /^Parameters:\s*$/m,
-        'Parameters:\n  UnapprovedTaskSubnetId:\n    Type: AWS::EC2::Subnet::Id',
+        'Parameters:\n UnapprovedTaskSubnetId:\n  Type: AWS::EC2::Subnet::Id',
       )
       .replace(
-        '          Subnets:\n            - !Ref PrivateSubnetA\n            - !Ref PrivateSubnetB\n      PlatformVersion:',
-        '          Subnets:\n            - !Ref PrivateSubnetA\n            - !Ref PrivateSubnetB\n            - !Ref UnapprovedTaskSubnetId\n      PlatformVersion:',
+        '     Subnets:\n      - !Ref PrivateSubnetA\n      - !Ref PrivateSubnetB\n   PlatformVersion:',
+        '     Subnets:\n      - !Ref PrivateSubnetA\n      - !Ref PrivateSubnetB\n      - !Ref UnapprovedTaskSubnetId\n   PlatformVersion:',
       ),
   );
   assertRejected(source, /must use exactly PrivateSubnetA and PrivateSubnetB/);
@@ -494,8 +446,8 @@ test('rejects private route propagation', () => {
 test('rejects VPN replacement of the reviewed internet-gateway attachment', () => {
   const source = mutate((value) =>
     value.replace(
-      '      InternetGatewayId: !Ref InternetGateway',
-      '      VpnGatewayId: vgw-not-approved',
+      '   InternetGatewayId: !Ref InternetGateway',
+      '   VpnGatewayId: vgw-not-approved',
     ),
   );
   assertRejected(source, /InternetGatewayId to equal|must not attach a VPN gateway/);
@@ -546,7 +498,7 @@ test('rejects custom Route 53 Resolver forwarding rules and associations', () =>
 
 test('rejects broad task security-group egress', () => {
   const source = mutate((value) =>
-    value.replace('      CidrIp: !Ref VpcCidr', '      CidrIp: 0.0.0.0/0'),
+    value.replace('   CidrIp: !Ref VpcCidr', '   CidrIp: 0.0.0.0/0'),
   );
   assertRejected(source, /must not allow broad standalone egress|must use only CidrIp/);
 });
@@ -570,10 +522,10 @@ test('rejects an additional VPC endpoint', () => {
 test('rejects widening the S3 endpoint policy beyond ECR image layers', () => {
   const source = mutate((value) =>
     value
-      .replace('            Action: s3:GetObject', '            Action: s3:*')
+      .replace('       Action: s3:GetObject', '       Action: s3:*')
       .replace(
-        '            Resource: !Sub arn:${AWS::Partition}:s3:::prod-${AWS::Region}-starport-layer-bucket/*',
-        "            Resource: '*'",
+        '       Resource: !Sub arn:${AWS::Partition}:s3:::prod-${AWS::Region}-starport-layer-bucket/*',
+        "       Resource: '*'",
       ),
   );
   const { report, status } = runValidator(source);
@@ -641,11 +593,11 @@ test('rejects any resource outside the complete reviewed logical-ID and type gra
   assertRejected(
     mutate((source) =>
       source.replace(
-        '  OperationalDashboard:\n    Type: AWS::CloudWatch::Dashboard',
-        '  OperationalDashboard:\n    Type: AWS::CloudWatch::Alarm',
+        ' Observability:\n  Type: AWS::CloudFormation::Stack',
+        ' Observability:\n  Type: AWS::CloudWatch::Dashboard',
       ),
     ),
-    /OperationalDashboard must retain reviewed resource type AWS::CloudWatch::Dashboard/,
+    /Observability must retain reviewed resource type AWS::CloudFormation::Stack/,
   );
 });
 
@@ -653,18 +605,18 @@ test('rejects same-resource application egress mutations and any unreviewed prop
   assertRejected(
     mutate((source) =>
       source.replace(
-        '                Resource: !GetAtt JobQueue.Arn',
-        '                Resource: arn:aws:sqs:us-west-2:999999999999:external-exfiltration-queue',
+        '          Resource: [!GetAtt JobQueue.Arn, !GetAtt BalanceQueue.Arn]',
+        '          Resource: arn:aws:sqs:us-west-2:999999999999:external-exfiltration-queue',
       ),
     ),
-    /WorkerTaskRole resources must bind exactly to JobQueue/,
+    /WorkerTaskRole resources must bind exactly to both source queues/,
   );
 
   assertRejected(
     mutate((source) =>
       source.replace(
         '- { Name: SQS_QUEUE_URL, Value: !Ref JobQueue }',
-        '- { Name: SQS_QUEUE_URL, Value: https:\/\/sqs.us-west-2.amazonaws.com\/999999999999\/external-exfiltration-queue }',
+        '- { Name: SQS_QUEUE_URL, Value: https://sqs.us-west-2.amazonaws.com/999999999999/external-exfiltration-queue }',
       ),
     ),
     /ApiTaskDefinition must bind exactly one SQS_QUEUE_URL environment value to !Ref JobQueue/,
@@ -673,7 +625,7 @@ test('rejects same-resource application egress mutations and any unreviewed prop
   assertRejected(
     mutate((source) =>
       source.replace(
-        'Description: KAN-34 billable app baseline.',
+        'Description: Production app baseline.',
         'Description: Reviewed-boundary mutation.',
       ),
     ),
@@ -685,7 +637,7 @@ test('pins the versioned child artifact, provenance, and exact nested input cont
   assertRejected(
     mutate((source) =>
       source.replace(
-        'application-workload-boundaries-93273bb3bf26f7d21702da2d4b155132db765ce3f123134341e2762ae521b3f9',
+        'application-workload-boundaries-238dad734b6b7f455dbdbaff6be8b34e0138a424e60ca258b4aa5e30f0df6ef6',
         `application-workload-boundaries-${'0'.repeat(64)}`,
       ),
     ),
@@ -694,7 +646,7 @@ test('pins the versioned child artifact, provenance, and exact nested input cont
   assertRejected(
     mutate((source) =>
       source.replace(
-        'AllowedValues: [93273bb3bf26f7d21702da2d4b155132db765ce3f123134341e2762ae521b3f9]',
+        'AllowedValues: [238dad734b6b7f455dbdbaff6be8b34e0138a424e60ca258b4aa5e30f0df6ef6]',
         `AllowedValues: [${'0'.repeat(64)}]`,
       ),
     ),
@@ -703,8 +655,8 @@ test('pins the versioned child artifact, provenance, and exact nested input cont
   assertRejected(
     mutate((source) =>
       source.replace(
-        "  WorkloadBoundariesArtifactBindingSha256:\n    Type: String\n    AllowedPattern: '^[a-f0-9]{64}$'",
-        `  WorkloadBoundariesArtifactBindingSha256:\n    Type: String\n    Default: ${'0'.repeat(64)}\n    AllowedPattern: '^[a-f0-9]{64}$'`,
+        " WorkloadBoundariesArtifactBindingSha256:\n  Type: String\n  AllowedPattern: '^[a-f0-9]{64}$'",
+        ` WorkloadBoundariesArtifactBindingSha256:\n  Type: String\n  Default: ${'0'.repeat(64)}\n  AllowedPattern: '^[a-f0-9]{64}$'`,
       ),
     ),
     /WorkloadBoundariesArtifactBindingSha256 must be an explicit lowercase SHA-256/,
@@ -721,11 +673,120 @@ test('pins the versioned child artifact, provenance, and exact nested input cont
   assertRejected(
     mutate((source) =>
       source.replace(
-        '          Value: !Ref WorkloadBoundariesArtifactBindingSha256',
-        '          Value: !Ref WorkloadBoundariesTemplateSha256',
+        '      Value: !Ref WorkloadBoundariesArtifactBindingSha256',
+        '      Value: !Ref WorkloadBoundariesTemplateSha256',
       ),
     ),
     /WorkloadBoundaries must preserve the exact reviewed child input contract/,
+  );
+});
+
+test('pins production Cognito, mainnet wallet, and API-only preauth plus six-ring wiring', () => {
+  assertRejected(
+    mutate((source) =>
+      source.replace(
+        ' AuthWalletKeysSecretArn:\n  Type: String\n  NoEcho: true',
+        ' AuthWalletKeysSecretArn:\n  Type: String\n  NoEcho: true\n  Default: arn:aws:secretsmanager:us-west-2:111122223333:secret:prohibited',
+      ),
+    ),
+    /AuthWalletKeysSecretArn must preserve an explicit bounded production identifier\/ARN with no default|must not have a default value/,
+  );
+  assertRejected(
+    mutate((source) =>
+      source.replace(
+        '- { Name: WALLET_REGISTRATION_REGISTRY_ENVIRONMENT, Value: MAINNET }',
+        '- { Name: WALLET_REGISTRATION_REGISTRY_ENVIRONMENT, Value: TESTNET }',
+      ),
+    ),
+    /reviewed production WALLET_REGISTRATION_REGISTRY_ENVIRONMENT value/,
+  );
+  assertRejected(
+    mutate((source) =>
+      source.replace(
+        '${AuthWalletKeysSecretArn}:WALLET_METADATA_SEAL_KEY_RING_JSON::',
+        '${AuthWalletKeysSecretArn}:WALLET_IDENTITY_HMAC_KEY_RING_JSON::',
+      ),
+    ),
+    /WALLET_METADATA_SEAL_KEY_RING_JSON secret value|seven reviewed auth\/wallet key fields/,
+  );
+  assertRejected(
+    mutate((source) =>
+      source.replace(
+        'AuthWalletKeysKmsKeyArn: !Ref AuthWalletKeysKmsKeyArn',
+        'AuthWalletKeysKmsKeyArn: !GetAtt ApplicationDataKey.Arn',
+      ),
+    ),
+    /WorkloadBoundaries must preserve the exact reviewed child input contract/,
+  );
+  assertRejected(
+    mutate((source) =>
+      source.replace(
+        "ValueFrom: !Sub '${WorkloadBoundaries.Outputs.WorkerDatabaseActiveSecretArn}:password::'",
+        [
+          "ValueFrom: !Sub '${WorkloadBoundaries.Outputs.WorkerDatabaseActiveSecretArn}:password::'",
+          "       - { Name: AUTH_PREAUTH_SEAL_KEY, ValueFrom: !Sub '${AuthWalletKeysSecretArn}:AUTH_PREAUTH_SEAL_KEY::' }",
+        ].join('\n'),
+      ),
+    ),
+    /WorkerTaskDefinition must not receive authentication or wallet configuration|exact active workload-scoped ECS secret injection/,
+  );
+});
+
+test('rejects every legacy auth and wallet key binding mixed into the production API task', () => {
+  for (const [name, value] of [
+    ['AUTH_IDENTITY_HMAC_KEY_ID', 'identity-v1'],
+    ['AUTH_SESSION_HMAC_KEY_ID', 'session-v1'],
+    ['AUTH_CSRF_HMAC_KEY_ID', 'csrf-v1'],
+    ['WALLET_IDENTITY_HMAC_KEY_VERSION', "'1'"],
+    ['WALLET_CHALLENGE_HMAC_KEY_VERSION', "'1'"],
+    ['WALLET_METADATA_SEAL_KEY_VERSION', "'1'"],
+  ]) {
+    assertRejected(
+      mutate((source) =>
+        source.replace(
+          '       - { Name: AUTH_PREAUTH_SEAL_KEY_ID, Value: preauth-v1 }',
+          [
+            '       - { Name: AUTH_PREAUTH_SEAL_KEY_ID, Value: preauth-v1 }',
+            `       - { Name: ${name}, Value: ${value} }`,
+          ].join('\n'),
+        ),
+      ),
+      new RegExp(`must not configure legacy or mixed-mode auth/wallet field ${name}`),
+    );
+  }
+
+  for (const name of [
+    'AUTH_IDENTITY_HMAC_KEY',
+    'AUTH_SESSION_HMAC_KEY',
+    'AUTH_CSRF_HMAC_KEY',
+    'WALLET_IDENTITY_HMAC_KEY',
+    'WALLET_CHALLENGE_HMAC_KEY',
+    'WALLET_METADATA_SEAL_KEY',
+  ]) {
+    assertRejected(
+      mutate((source) =>
+        source.replace(
+          "       - { Name: AUTH_PREAUTH_SEAL_KEY, ValueFrom: !Sub '${AuthWalletKeysSecretArn}:AUTH_PREAUTH_SEAL_KEY::' }",
+          [
+            "       - { Name: AUTH_PREAUTH_SEAL_KEY, ValueFrom: !Sub '${AuthWalletKeysSecretArn}:AUTH_PREAUTH_SEAL_KEY::' }",
+            `       - { Name: ${name}, ValueFrom: !Sub '\${AuthWalletKeysSecretArn}:${name}::' }`,
+          ].join('\n'),
+        ),
+      ),
+      new RegExp(`must not configure legacy or mixed-mode auth/wallet field ${name}`),
+    );
+  }
+});
+
+test('rejects local demo authentication mode in the production API task', () => {
+  assertRejected(
+    mutate((source) =>
+      source.replace(
+        '       - { Name: NODE_ENV, Value: production }',
+        "       - { Name: NODE_ENV, Value: production }\n       - { Name: LOCAL_DEMO_MODE, Value: 'true' }",
+      ),
+    ),
+    /ApiTaskDefinition must not configure LOCAL_DEMO_MODE in production/,
   );
 });
 
@@ -733,8 +794,8 @@ test('rejects legacy shared Redis composition and worker Redis drift', () => {
   assertRejected(
     mutate((source) =>
       source.replace(
-        '      AtRestEncryptionEnabled: true',
-        "      AtRestEncryptionEnabled: true\n      AuthToken: '{{resolve:secretsmanager:legacy}}'",
+        '   AtRestEncryptionEnabled: true',
+        "   AtRestEncryptionEnabled: true\n   AuthToken: '{{resolve:secretsmanager:legacy}}'",
       ),
     ),
     /RedisReplicationGroup must not declare AuthToken/,
@@ -742,8 +803,8 @@ test('rejects legacy shared Redis composition and worker Redis drift', () => {
   assertRejected(
     mutate((source) =>
       source.replace(
-        '            - { Name: APPLICATION_WORKLOAD, Value: worker }',
-        '            - { Name: APPLICATION_WORKLOAD, Value: worker }\n            - { Name: REDIS_OPERATOR_TOKEN, Value: prohibited }',
+        '       - { Name: APPLICATION_WORKLOAD, Value: worker }',
+        '       - { Name: APPLICATION_WORKLOAD, Value: worker }\n       - { Name: REDIS_OPERATOR_TOKEN, Value: prohibited }',
       ),
     ),
     /WorkerTaskDefinition must not receive any Redis|must remain a Redis nonconsumer/,
@@ -754,8 +815,8 @@ test('binds executable identity and exact image repository per workload', () => 
   assertRejected(
     mutate((source) =>
       source.replace(
-        '            - { Name: APPLICATION_WORKLOAD, Value: api }',
-        '            - { Name: APPLICATION_WORKLOAD, Value: worker }',
+        '       - { Name: APPLICATION_WORKLOAD, Value: api }',
+        '       - { Name: APPLICATION_WORKLOAD, Value: worker }',
       ),
     ),
     /ApiTaskDefinition must bind exactly one APPLICATION_WORKLOAD=api/,
@@ -763,8 +824,8 @@ test('binds executable identity and exact image repository per workload', () => 
   assertRejected(
     mutate((source) =>
       source.replace(
-        '            - { Name: APP_ENV, Value: !Ref EnvironmentName }',
-        '            - { Name: APP_ENV, Value: staging }',
+        '       - { Name: APP_ENV, Value: !Ref EnvironmentName }',
+        '       - { Name: APP_ENV, Value: staging }',
       ),
     ),
     /ApiTaskDefinition must bind exactly one APP_ENV environment value to !Ref EnvironmentName/,
@@ -885,18 +946,18 @@ test('rejects widening execution-role and task-role capability matrices', () => 
   assertRejected(
     mutate((source) =>
       source.replace(
-        '  ApplicationLoadBalancer:\n',
+        ' ApplicationLoadBalancer:\n',
         [
-          '      Policies:',
-          '        - PolicyName: UnexpectedWebAccess',
-          '          PolicyDocument:',
-          "            Version: '2012-10-17'",
-          '            Statement:',
-          '              - Effect: Allow',
-          '                Action: secretsmanager:GetSecretValue',
-          "                Resource: '*'",
+          '   Policies:',
+          '    - PolicyName: UnexpectedWebAccess',
+          '      PolicyDocument:',
+          "       Version: '2012-10-17'",
+          '       Statement:',
+          '        - Effect: Allow',
+          '          Action: secretsmanager:GetSecretValue',
+          "          Resource: '*'",
           '',
-          '  ApplicationLoadBalancer:',
+          ' ApplicationLoadBalancer:',
           '',
         ].join('\n'),
       ),
@@ -909,8 +970,8 @@ test('rejects task-role remapping and secret injection outside the exact service
   assertRejected(
     mutate((source) =>
       source.replace(
-        '      TaskRoleArn: !GetAtt ApiTaskRole.Arn',
-        '      TaskRoleArn: !GetAtt WorkerTaskRole.Arn',
+        '   TaskRoleArn: !GetAtt ApiTaskRole.Arn',
+        '   TaskRoleArn: !GetAtt WorkerTaskRole.Arn',
       ),
     ),
     /ApiTaskDefinition requires TaskRoleArn to equal !GetAtt ApiTaskRole\.Arn/,
@@ -929,8 +990,8 @@ test('rejects task-role remapping and secret injection outside the exact service
   assertRejected(
     mutate((source) =>
       source.replace(
-        '            - { Name: NODE_ENV, Value: production }',
-        '            - { Name: NODE_ENV, Value: production }\n            - { Name: DATABASE_RUNTIME_PASSWORD, Value: plaintext-is-prohibited }',
+        '       - { Name: NODE_ENV, Value: production }',
+        '       - { Name: NODE_ENV, Value: production }\n       - { Name: DATABASE_RUNTIME_PASSWORD, Value: plaintext-is-prohibited }',
       ),
     ),
     /inject sensitive runtime values only through ECS Secrets/,
@@ -939,12 +1000,12 @@ test('rejects task-role remapping and secret injection outside the exact service
   assertRejected(
     mutate((source) =>
       source.replace(
-        '            - { Name: APP_VERSION, Value: !Ref ApplicationVersion }',
+        '       - { Name: APP_VERSION, Value: !Ref ApplicationVersion }',
         [
-          '            - { Name: APP_VERSION, Value: !Ref ApplicationVersion }',
-          '          Secrets:',
-          '            - Name: DATABASE_RUNTIME_PASSWORD',
-          "              ValueFrom: !Sub '${WorkloadBoundaries.Outputs.ApiDatabaseActiveSecretArn}:password::'",
+          '       - { Name: APP_VERSION, Value: !Ref ApplicationVersion }',
+          '      Secrets:',
+          '       - Name: DATABASE_RUNTIME_PASSWORD',
+          "         ValueFrom: !Sub '${WorkloadBoundaries.Outputs.ApiDatabaseActiveSecretArn}:password::'",
         ].join('\n'),
       ),
     ),
@@ -1008,15 +1069,11 @@ test('rejects authored AWS credential-provider environment variables in every ta
 test('rejects KMS principal, source, context, and ViaService policy widening', () => {
   for (const [search, replacement, message] of [
     [
-      '                aws:SourceAccount: !Ref AWS::AccountId',
-      "                aws:SourceAccount: '*'",
+      '         aws:SourceAccount: !Ref AWS::AccountId',
+      "         aws:SourceAccount: '*'",
       /exact source account and queue ARN scope/,
     ],
-    [
-      '              Service: sqs.amazonaws.com',
-      "              AWS: '*'",
-      /SQS service key policy/,
-    ],
+    ['       Service: sqs.amazonaws.com', "       AWS: '*'", /SQS service key policy/],
     [
       'kms:EncryptionContext:aws:logs:arn: !Sub arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/crypto-lending/${EnvironmentName}/*',
       "kms:EncryptionContext:aws:logs:arn: '*'",
@@ -1043,44 +1100,59 @@ test('rejects KMS principal, source, context, and ViaService policy widening', (
 test('rejects durable-service encryption and queue-policy downgrades semantically', () => {
   for (const [search, replacement, message] of [
     [
-      '      TransitEncryptionMode: required',
-      '      TransitEncryptionMode: preferred',
+      '   TransitEncryptionMode: required',
+      '   TransitEncryptionMode: preferred',
       /RedisReplicationGroup requires TransitEncryptionMode to equal required/,
     ],
     [
-      '      UserGroupIds:\n        - !GetAtt WorkloadBoundaries.Outputs.RedisApiUserGroupId',
-      '      UserGroupIds:\n        - !Ref WebTaskSecurityGroup',
+      '   UserGroupIds:\n    - !GetAtt WorkloadBoundaries.Outputs.RedisApiUserGroupId',
+      '   UserGroupIds:\n    - !Ref WebTaskSecurityGroup',
       /exact API-only ACL user group/,
     ],
     [
-      '      KmsMasterKeyId: !GetAtt ApplicationDataKey.Arn',
-      '      KmsMasterKeyId: alias/aws/sqs',
+      '   KmsMasterKeyId: !GetAtt ApplicationDataKey.Arn',
+      '   KmsMasterKeyId: alias/aws/sqs',
       /JobDeadLetterQueue requires KmsMasterKeyId to equal !GetAtt ApplicationDataKey\.Arn/,
     ],
     [
-      '        redrivePermission: byQueue',
-      '        redrivePermission: allowAll',
+      '    redrivePermission: byQueue',
+      '    redrivePermission: allowAll',
       /single-source byQueue dead-letter redrive allow policy/,
     ],
     [
-      '        maxReceiveCount: !Ref SqsMaxReceiveCount',
-      '        maxReceiveCount: 1000',
+      '    maxReceiveCount: !Ref SqsMaxReceiveCount',
+      '    maxReceiveCount: 1000',
       /exact dead-letter target and bounded receive-count redrive policy/,
     ],
     [
-      "                aws:SecureTransport: 'false'",
-      "                aws:SecureTransport: 'true'",
+      "         aws:SecureTransport: 'false'",
+      "         aws:SecureTransport: 'true'",
       /exact two-queue attachment and unconditional insecure-transport denial/,
     ],
     [
-      '      KmsDataKeyReusePeriodSeconds: 300',
-      '      KmsDataKeyReusePeriodSeconds: 86400',
+      '   KmsDataKeyReusePeriodSeconds: 300',
+      '   KmsDataKeyReusePeriodSeconds: 86400',
       /exact customer-key encryption, retention, name, and single-source dead-letter queue topology/,
     ],
     [
-      '      VisibilityTimeout: !Ref SqsVisibilityTimeoutSeconds',
-      '      VisibilityTimeout: 0',
+      '   VisibilityTimeout: !Ref SqsVisibilityTimeoutSeconds',
+      '   VisibilityTimeout: 0',
       /exact customer-key encryption, retention, long-poll, bounded-redrive, and visibility-timeout primary queue topology/,
+    ],
+    [
+      '   QueueName: !Sub crypto-lending-${EnvironmentName}-balance-sync-dlq',
+      '   QueueName: !Sub crypto-lending-${EnvironmentName}-jobs-dlq',
+      /exact encrypted, single-source balance-sync dead-letter queue topology/,
+    ],
+    [
+      '    deadLetterTargetArn: !GetAtt BalanceDeadLetterQueue.Arn',
+      '    deadLetterTargetArn: !GetAtt JobDeadLetterQueue.Arn',
+      /exact encrypted, bounded-redrive balance-sync source queue topology/,
+    ],
+    [
+      '    - !Ref BalanceDeadLetterQueue\n   PolicyDocument:',
+      '    - !Ref JobDeadLetterQueue\n   PolicyDocument:',
+      /exact isolated balance queue TLS-only policy/,
     ],
   ]) {
     assertRejected(
@@ -1094,8 +1166,8 @@ test('rejects weakening or ordering the internal readiness deny after the API fo
   assertRejected(
     mutate((source) =>
       source.replace(
-        '      HealthCheckPath: /api/v1/internal/health/dependencies',
-        '      HealthCheckPath: /api/v1/health/dependencies',
+        '   HealthCheckPath: /api/v1/internal/health/dependencies',
+        '   HealthCheckPath: /api/v1/health/dependencies',
       ),
     ),
     /ApiTargetGroup must gate traffic on dependency and migration readiness/,
@@ -1114,8 +1186,8 @@ test('rejects weakening or ordering the internal readiness deny after the API fo
   assertRejected(
     mutate((source) =>
       source.replace(
-        '      Priority: 5\n\n  HttpsApiListenerRule:',
-        '      Priority: 15\n\n  HttpsApiListenerRule:',
+        '   Priority: 5\n\n HttpsApiListenerRule:',
+        '   Priority: 15\n\n HttpsApiListenerRule:',
       ),
     ),
     /internal API prefix with fixed 404 at priority 5/,
@@ -1124,8 +1196,8 @@ test('rejects weakening or ordering the internal readiness deny after the API fo
   assertRejected(
     mutate((source) =>
       source.replace(
-        '      Priority: 10\n\n  HttpsWebListenerRule:',
-        '      Priority: 4\n\n  HttpsWebListenerRule:',
+        '   Priority: 10\n\n HttpsWebListenerRule:',
+        '   Priority: 4\n\n HttpsWebListenerRule:',
       ),
     ),
     /must forward the public API only after the internal deny rule/,
@@ -1134,8 +1206,8 @@ test('rejects weakening or ordering the internal readiness deny after the API fo
   assertRejected(
     mutate((source) =>
       source.replace(
-        "          FixedResponseConfig: { ContentType: text/plain, StatusCode: '404' }",
-        '          TargetGroupArn: !Ref ApiTargetGroup',
+        "      FixedResponseConfig: { ContentType: text/plain, StatusCode: '404' }",
+        '      TargetGroupArn: !Ref ApiTargetGroup',
       ),
     ),
     /internal API prefix with fixed 404 at priority 5/,

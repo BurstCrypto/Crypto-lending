@@ -18,12 +18,27 @@ const noExternalEgressResidualLimitations = [
   'Web-task DNS security-group egress permits TCP and UDP port 53 to the VPC CIDR; this static control cannot prove that traffic reaches only the VPC Route 53 Resolver address. API and worker boundaries rely on AmazonProvidedDNS, which is not filtered by security groups.',
   'REDIS_OPERATOR_EXECUTION_ARTIFACT_UNRESOLVED: the nested child exposes conditional operator infrastructure, but this parent defines no reviewed revocation CLI or one-off ECS task. Exact CLIENT KILL targeting, task drain, denial evidence, and immediate operator disablement remain unresolved local-design and live authorization gates.',
   'FIXED_SLOT_CREDENTIAL_REGENERATION_UNRESOLVED: the four enum values constrain each submitted phase but do not compare deployed state or enforce transition adjacency, and retained A/B secrets do not regenerate on a phase-only update. A-to-B-to-A would reuse the original A credential, so the composition can represent reviewed overlap/cutover phases but is neither an enforced workflow nor a repeatable rotation mechanism until inactive-slot regeneration, Redis-password/database-verifier installation, and current-state transition checks are reviewed.',
-  'FAILED_AUTH_MONITORING_UNRESOLVED: local ACL denial and redaction tests exist, but this parent has no validated ElastiCache failed-auth log or metric delivery, filter, alarm, and actionable evidence path.',
+  'AUTH_WALLET_EXTERNAL_CONFIGURATION_UNRESOLVED: static Cognito identifiers and seven API-only key selectors (one pre-authentication key and six bounded key-ring documents) are wired, but the Cognito tenant, one external JSON secret, its customer-managed KMS key/policy, field contents, rotation, and deployed readability require separately authorized evidence.',
+  'OPERATIONAL_ALERT_DELIVERY_EXTERNAL: the template consumes one operator-supplied SNS topic ARN but deliberately provisions no topic or subscription; same-account/Region existence, topic policy, confirmed recipients, escalation ownership, and an end-to-end ALARM-to-OK drill remain external go-live evidence.',
 ];
+const operationalAlarmTopicAllowedPattern =
+  '^(?:NONE|arn:(?:aws|aws-cn|aws-us-gov):sns:[a-z0-9-]+:[0-9]{12}:[A-Za-z0-9_-]{1,256})$';
+const operationalAlarmLogicalIds = Object.freeze([
+  'ApiUnhealthyHostAlarm',
+  'DatabaseLowStorageAlarm',
+  'RedisEvictionsAlarm',
+  'RedisAccessDenialsAlarm',
+  'JobQueueAgeAlarm',
+  'DeadLetterQueueNotEmptyAlarm',
+  'BalanceQueueAgeAlarm',
+  'BalanceDeadLetterQueueNotEmptyAlarm',
+]);
 const reviewedApplicationBaselineSha256 =
-  '3627d614933764f351f596af94fd30d7b048a22c88f4d25467b3c4f713c219b5';
+  '45d4e9db67f8c54c4e177aae7d26638f561181139ef3a429488d4c9acef94561';
 const reviewedWorkloadBoundariesSha256 =
-  '93273bb3bf26f7d21702da2d4b155132db765ce3f123134341e2762ae521b3f9';
+  '238dad734b6b7f455dbdbaff6be8b34e0138a424e60ca258b4aa5e30f0df6ef6';
+const reviewedObservabilitySha256 =
+  'ef0704fc3eea63ca60e6b44bcd8298639696f21478cc119757d968b84920c6a7';
 const reviewedResourceTypesByLogicalId = new Map([
   ['ApplicationDataKey', 'AWS::KMS::Key'],
   ['ApplicationDataKeyAlias', 'AWS::KMS::Alias'],
@@ -72,6 +87,9 @@ const reviewedResourceTypesByLogicalId = new Map([
   ['JobDeadLetterQueue', 'AWS::SQS::Queue'],
   ['JobQueue', 'AWS::SQS::Queue'],
   ['JobQueueTlsPolicy', 'AWS::SQS::QueuePolicy'],
+  ['BalanceDeadLetterQueue', 'AWS::SQS::Queue'],
+  ['BalanceQueue', 'AWS::SQS::Queue'],
+  ['BalanceQueueTlsPolicy', 'AWS::SQS::QueuePolicy'],
   ['ApiLogGroup', 'AWS::Logs::LogGroup'],
   ['WebLogGroup', 'AWS::Logs::LogGroup'],
   ['WorkerLogGroup', 'AWS::Logs::LogGroup'],
@@ -97,12 +115,7 @@ const reviewedResourceTypesByLogicalId = new Map([
   ['ApiService', 'AWS::ECS::Service'],
   ['WebService', 'AWS::ECS::Service'],
   ['WorkerService', 'AWS::ECS::Service'],
-  ['ApiUnhealthyHostAlarm', 'AWS::CloudWatch::Alarm'],
-  ['DatabaseLowStorageAlarm', 'AWS::CloudWatch::Alarm'],
-  ['RedisEvictionsAlarm', 'AWS::CloudWatch::Alarm'],
-  ['JobQueueAgeAlarm', 'AWS::CloudWatch::Alarm'],
-  ['DeadLetterQueueNotEmptyAlarm', 'AWS::CloudWatch::Alarm'],
-  ['OperationalDashboard', 'AWS::CloudWatch::Dashboard'],
+  ['Observability', 'AWS::CloudFormation::Stack'],
 ]);
 
 function parseArguments(argv) {
@@ -189,6 +202,7 @@ function topLevelBlocks(source, sectionName) {
   const blocks = new Map();
   let currentName;
   let currentLines = [];
+  let childIndent;
 
   const saveCurrent = () => {
     if (currentName) {
@@ -202,7 +216,10 @@ function topLevelBlocks(source, sectionName) {
       break;
     }
 
-    const blockStart = line.match(/^  ([A-Za-z][A-Za-z0-9]*):\s*(?:#.*)?$/);
+    const candidate = line.match(/^( +)([A-Za-z][A-Za-z0-9]*):\s*(?:#.*)?$/);
+    if (childIndent === undefined && candidate) childIndent = candidate[1].length;
+    const blockStart =
+      candidate && candidate[1].length === childIndent ? [candidate[0], candidate[2]] : null;
     if (blockStart) {
       saveCurrent();
       currentName = blockStart[1];
@@ -221,7 +238,7 @@ function resourceInventory(source) {
   const inventory = new Map();
 
   for (const [logicalId, block] of resources) {
-    const type = block.match(/^\s{4}Type:\s*['"]?([^\s'"]+)['"]?\s*(?:#.*)?$/m)?.[1];
+    const type = block.match(/^\s+Type:\s*['"]?([^\s'"]+)['"]?\s*(?:#.*)?$/m)?.[1];
     if (!type) {
       continue;
     }
@@ -567,7 +584,7 @@ function requireProperties(entries, rules, errors) {
 function validateNoExternalApplicationEgress(source, parameters, resources, inventory, errors) {
   const privateEgressMode = parameters.get('PrivateEgressMode') ?? '';
   const privateEgressAllowedValues = [
-    ...privateEgressMode.matchAll(/^\s{6}-\s*([A-Za-z0-9]+)\s*$/gm),
+    ...privateEgressMode.matchAll(/^\s+-\s*([A-Za-z0-9]+)\s*$/gm),
   ].map((match) => match[1]);
   if (
     !hasProperty(privateEgressMode, 'Default', 'VpcEndpoints') ||
@@ -578,7 +595,7 @@ function validateNoExternalApplicationEgress(source, parameters, resources, inve
     );
   }
   if (
-    !/^\s{2}UseVpcEndpoints:\s*!Equals \[!Ref PrivateEgressMode, VpcEndpoints\]\s*$/m.test(source)
+    !/^\s+UseVpcEndpoints:\s*!Equals \[!Ref PrivateEgressMode, VpcEndpoints\]\s*$/m.test(source)
   ) {
     errors.push('UseVpcEndpoints must be controlled only by PrivateEgressMode VpcEndpoints.');
   }
@@ -593,13 +610,13 @@ function validateNoExternalApplicationEgress(source, parameters, resources, inve
       'Application baseline YAML anchors, aliases, and merge keys are prohibited because static egress validation must inspect the resolved resource graph.',
     );
   }
-  if (/^  ["'][A-Za-z][A-Za-z0-9]*["']\s*:/m.test(source)) {
+  if (/^ {2}["'][A-Za-z][A-Za-z0-9]*["']\s*:/m.test(source)) {
     errors.push(
       'Application baseline logical IDs must use the canonical unquoted form required by the static resource inventory.',
     );
   }
   for (const [logicalId, block] of resources) {
-    if (!/^\s{4}Type:\s*['"]?[^\s'"]+['"]?\s*(?:#.*)?$/m.test(block)) {
+    if (!/^\s+Type:\s*['"]?[^\s'"]+['"]?\s*(?:#.*)?$/m.test(block)) {
       errors.push(`${logicalId} must declare one canonical, statically visible resource Type.`);
     }
   }
@@ -1039,7 +1056,7 @@ function validateWorkloadBoundaryComposition(source, parameters, resources, inve
 
   requireExactLogicalIds(
     entriesOf(inventory, 'AWS::CloudFormation::Stack'),
-    ['WorkloadBoundaries'],
+    ['WorkloadBoundaries', 'Observability'],
     'Nested-stack allowlist',
     errors,
   );
@@ -1065,6 +1082,8 @@ function validateWorkloadBoundaryComposition(source, parameters, resources, inve
       "    InterfaceEndpointSecurityGroupId: !If [UseVpcEndpoints, !Ref InterfaceEndpointSecurityGroup, '']",
       "    S3ManagedPrefixListId: !If [UseVpcEndpoints, !Ref S3ManagedPrefixListId, '']",
       '    ApplicationDataKeyArn: !GetAtt ApplicationDataKey.Arn',
+      '    AuthWalletKeysSecretArn: !Ref AuthWalletKeysSecretArn',
+      '    AuthWalletKeysKmsKeyArn: !Ref AuthWalletKeysKmsKeyArn',
       '    ApiLogGroupArn: !GetAtt ApiLogGroup.Arn',
       '    WorkerLogGroupArn: !GetAtt WorkerLogGroup.Arn',
       '    ApiImageRepositoryArn: !Sub arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/crypto-lending-api',
@@ -1131,6 +1150,326 @@ function validateWorkloadBoundaryComposition(source, parameters, resources, inve
         `${name} must not expose a raw A/B credential slot around the active-phase contract.`,
       );
     }
+  }
+}
+
+function validateObservabilityComposition(source, parameters, resources, errors) {
+  const expectedUrlPattern = `^https://[a-z0-9][a-z0-9-]{1,61}[a-z0-9]\\.s3\\.[a-z0-9-]+\\.(?:amazonaws\\.com|amazonaws\\.com\\.cn)/application-observability-${reviewedObservabilitySha256}\\.yaml\\?versionId=[A-Za-z0-9._~%+-]+$`;
+  const url = parameters.get('ObservabilityTemplateUrl') ?? '';
+  if (
+    !hasProperty(url, 'Type', 'String') ||
+    !hasProperty(url, 'MaxLength', '1024') ||
+    !hasProperty(url, 'AllowedPattern', expectedUrlPattern) ||
+    hasPropertyName(url, 'Default')
+  ) {
+    errors.push(
+      'ObservabilityTemplateUrl must be the explicit SHA-256-named, versioned S3 child URL.',
+    );
+  }
+  const digest = parameters.get('ObservabilityTemplateSha256') ?? '';
+  if (
+    !hasProperty(digest, 'Type', 'String') ||
+    !hasProperty(digest, 'AllowedValues', `[${reviewedObservabilitySha256}]`) ||
+    hasPropertyName(digest, 'Default')
+  ) {
+    errors.push('ObservabilityTemplateSha256 must pin the exact reviewed child bytes.');
+  }
+  const binding = parameters.get('ObservabilityArtifactBindingSha256') ?? '';
+  if (
+    !hasProperty(binding, 'Type', 'String') ||
+    !hasProperty(binding, 'AllowedPattern', '^[a-f0-9]{64}$') ||
+    hasPropertyName(binding, 'Default')
+  ) {
+    errors.push('ObservabilityArtifactBindingSha256 must be an explicit lowercase SHA-256.');
+  }
+  requireExactSemanticProperty(
+    resources.get('Observability') ?? '',
+    'Observability',
+    'Properties',
+    [
+      'Properties:',
+      '  TemplateURL: !Ref ObservabilityTemplateUrl',
+      '  TimeoutInMinutes: 10',
+      '  Parameters:',
+      '    BillingAcknowledgement: !Ref BillingAcknowledgement',
+      '    DeliveryArtifactSha256: !Ref ObservabilityTemplateSha256',
+      '    DeliveryArtifactBindingSha256: !Ref ObservabilityArtifactBindingSha256',
+      '    EnvironmentName: !Ref EnvironmentName',
+      '    EnableOperationalAlarms: !Ref EnableOperationalAlarms',
+      '    AlarmTopicArn: !Ref AlarmTopicArn',
+      '    EnableOperationalDashboard: !Ref EnableOperationalDashboard',
+      '    LoadBalancerFullName: !GetAtt ApplicationLoadBalancer.LoadBalancerFullName',
+      '    ApiTargetGroupFullName: !GetAtt ApiTargetGroup.TargetGroupFullName',
+      '    DatabaseInstanceIdentifier: !Ref Database',
+      '    RedisCacheClusterIdPrefix: !Ref RedisReplicationGroup',
+      '    JobQueueName: !GetAtt JobQueue.QueueName',
+      '    JobDeadLetterQueueName: !GetAtt JobDeadLetterQueue.QueueName',
+      '    BalanceQueueName: !GetAtt BalanceQueue.QueueName',
+      '    BalanceDeadLetterQueueName: !GetAtt BalanceDeadLetterQueue.QueueName',
+      '    EcsClusterName: !Ref EcsCluster',
+      '    ApiServiceName: !GetAtt ApiService.Name',
+      '    WebServiceName: !GetAtt WebService.Name',
+      '    WorkerServiceName: !GetAtt WorkerService.Name',
+      '    ApiLogGroupName: !Ref ApiLogGroup',
+      '    WorkerLogGroupName: !Ref WorkerLogGroup',
+      '  Tags:',
+      '    - Key: ObservabilityTemplateSha256',
+      '      Value: !Ref ObservabilityTemplateSha256',
+      '    - Key: ObservabilityArtifactBindingSha256',
+      '      Value: !Ref ObservabilityArtifactBindingSha256',
+    ].join('\n'),
+    'the exact reviewed minimum-name input, digest, binding, and tag contract',
+    errors,
+  );
+  const outputs = topLevelBlocks(source, 'Outputs');
+  requireExactProperty(
+    outputs.get('ObservabilityTemplateSha256') ?? '',
+    'ObservabilityTemplateSha256',
+    'Value',
+    '!GetAtt Observability.Outputs.DeliveryArtifactSha256',
+    errors,
+  );
+  requireExactProperty(
+    outputs.get('ObservabilityArtifactBindingSha256') ?? '',
+    'ObservabilityArtifactBindingSha256',
+    'Value',
+    '!GetAtt Observability.Outputs.DeliveryArtifactBindingSha256',
+    errors,
+  );
+  requireExactProperty(
+    outputs.get('OperationalDashboardName') ?? '',
+    'OperationalDashboardName',
+    'Value',
+    '!GetAtt Observability.Outputs.OperationalDashboardName',
+    errors,
+  );
+}
+
+function validateProductionAuthenticationWiring(parameters, resources, errors) {
+  const expectedParameters = new Map([
+    [
+      'CognitoPoolId',
+      [
+        'CognitoPoolId:',
+        '  Type: String',
+        '  MaxLength: 128',
+        "  AllowedPattern: '^[a-z0-9-]+_[A-Za-z0-9]+$'",
+      ],
+    ],
+    [
+      'CognitoLoginHostname',
+      [
+        'CognitoLoginHostname:',
+        '  Type: String',
+        '  MaxLength: 253',
+        "  AllowedPattern: '^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])$'",
+      ],
+    ],
+    [
+      'CognitoClientId',
+      [
+        'CognitoClientId:',
+        '  Type: String',
+        '  MaxLength: 128',
+        "  AllowedPattern: '^[A-Za-z0-9]+$'",
+      ],
+    ],
+    [
+      'AuthWalletKeysSecretArn',
+      [
+        'AuthWalletKeysSecretArn:',
+        '  Type: String',
+        '  NoEcho: true',
+        '  MaxLength: 2048',
+        "  AllowedPattern: '^arn:[a-z0-9-]+:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:[A-Za-z0-9/_+=.@-]+$'",
+      ],
+    ],
+    [
+      'AuthWalletKeysKmsKeyArn',
+      [
+        'AuthWalletKeysKmsKeyArn:',
+        '  Type: String',
+        '  MaxLength: 2048',
+        "  AllowedPattern: '^arn:[a-z0-9-]+:kms:[a-z0-9-]+:[0-9]{12}:key/[a-f0-9-]+$'",
+      ],
+    ],
+  ]);
+  for (const [name, expectedLines] of expectedParameters) {
+    requireExactSemanticBlock(
+      parameters.get(name) ?? '',
+      name,
+      expectedLines.join('\n'),
+      'an explicit bounded production identifier/ARN with no default',
+      errors,
+    );
+  }
+
+  const api = resources.get('ApiTaskDefinition') ?? '';
+  const web = resources.get('WebTaskDefinition') ?? '';
+  const worker = resources.get('WorkerTaskDefinition') ?? '';
+  const apiEnvironment = indentedPropertyBlock(api, 'Environment') ?? '';
+  const webEnvironment = indentedPropertyBlock(web, 'Environment') ?? '';
+  const apiSecrets = indentedPropertyBlock(api, 'Secrets') ?? '';
+  const expectedApiEnvironment = new Map([
+    ['AUTH_MODE', '- {Name: AUTH_MODE,Value: oidc}'],
+    ['OIDC_PROVIDER_KEY', '- {Name: OIDC_PROVIDER_KEY,Value: cognito}'],
+    [
+      'OIDC_ISSUER_URL',
+      "- {Name: OIDC_ISSUER_URL,Value: !Sub 'https://cognito-idp.${AWS::Region}.${AWS::URLSuffix}/${CognitoPoolId}'}",
+    ],
+    [
+      'OIDC_AUTHORIZATION_ENDPOINT',
+      "- {Name: OIDC_AUTHORIZATION_ENDPOINT,Value: !Sub 'https://${CognitoLoginHostname}/oauth2/authorize'}",
+    ],
+    [
+      'OIDC_TOKEN_ENDPOINT',
+      "- {Name: OIDC_TOKEN_ENDPOINT,Value: !Sub 'https://${CognitoLoginHostname}/oauth2/token'}",
+    ],
+    [
+      'OIDC_JWKS_URI',
+      "- {Name: OIDC_JWKS_URI,Value: !Sub 'https://cognito-idp.${AWS::Region}.${AWS::URLSuffix}/${CognitoPoolId}/.well-known/jwks.json'}",
+    ],
+    ['OIDC_CLIENT_ID', '- {Name: OIDC_CLIENT_ID,Value: !Ref CognitoClientId}'],
+    ['OIDC_AUDIENCE', '- {Name: OIDC_AUDIENCE,Value: !Ref CognitoClientId}'],
+    ['OIDC_REQUIRED_TOKEN_USE', '- {Name: OIDC_REQUIRED_TOKEN_USE,Value: id}'],
+    [
+      'OIDC_END_SESSION_ENDPOINT',
+      "- {Name: OIDC_END_SESSION_ENDPOINT,Value: !Sub 'https://${CognitoLoginHostname}/logout'}",
+    ],
+    [
+      'OIDC_POST_LOGOUT_REDIRECT_URI',
+      "- {Name: OIDC_POST_LOGOUT_REDIRECT_URI,Value: !Sub 'https://${ApplicationHostname}/login'}",
+    ],
+    ['OIDC_SIGNING_ALGORITHM', '- {Name: OIDC_SIGNING_ALGORITHM,Value: RS256}'],
+    ['OIDC_TOKEN_AUTH_METHOD', '- {Name: OIDC_TOKEN_AUTH_METHOD,Value: none}'],
+    [
+      'AUTH_PUBLIC_ORIGIN',
+      "- {Name: AUTH_PUBLIC_ORIGIN,Value: !Sub 'https://${ApplicationHostname}'}",
+    ],
+    [
+      'OIDC_REDIRECT_URI',
+      "- {Name: OIDC_REDIRECT_URI,Value: !Sub 'https://${ApplicationHostname}/api/v1/auth/callback'}",
+    ],
+    ['OIDC_HTTP_TIMEOUT_MS', "- {Name: OIDC_HTTP_TIMEOUT_MS,Value: '5000'}"],
+    ['OIDC_TOKEN_RESPONSE_MAX_BYTES', "- {Name: OIDC_TOKEN_RESPONSE_MAX_BYTES,Value: '16384'}"],
+    ['OIDC_JWKS_RESPONSE_MAX_BYTES', "- {Name: OIDC_JWKS_RESPONSE_MAX_BYTES,Value: '65536'}"],
+    ['OIDC_JWKS_CACHE_TTL_SECONDS', "- {Name: OIDC_JWKS_CACHE_TTL_SECONDS,Value: '300'}"],
+    ['OIDC_CLOCK_TOLERANCE_SECONDS', "- {Name: OIDC_CLOCK_TOLERANCE_SECONDS,Value: '30'}"],
+    ['OIDC_MAX_ID_TOKEN_AGE_SECONDS', "- {Name: OIDC_MAX_ID_TOKEN_AGE_SECONDS,Value: '600'}"],
+    ['AUTH_PREAUTH_TTL_SECONDS', "- {Name: AUTH_PREAUTH_TTL_SECONDS,Value: '600'}"],
+    ['AUTH_SESSION_IDLE_TTL_SECONDS', "- {Name: AUTH_SESSION_IDLE_TTL_SECONDS,Value: '3600'}"],
+    [
+      'AUTH_SESSION_ABSOLUTE_TTL_SECONDS',
+      "- {Name: AUTH_SESSION_ABSOLUTE_TTL_SECONDS,Value: '86400'}",
+    ],
+    ['AUTH_PREAUTH_SEAL_KEY_ID', '- {Name: AUTH_PREAUTH_SEAL_KEY_ID,Value: preauth-v1}'],
+    ['AUTH_CLIENT_ADDRESS_MODE', '- {Name: AUTH_CLIENT_ADDRESS_MODE,Value: trusted-single-proxy}'],
+    [
+      'AUTH_TRUSTED_PROXY_CIDRS',
+      "- {Name: AUTH_TRUSTED_PROXY_CIDRS,Value: !Sub '${PublicSubnetACidr},${PublicSubnetBCidr}'}",
+    ],
+    ['WALLET_REGISTRATION_MODE', '- {Name: WALLET_REGISTRATION_MODE,Value: enabled}'],
+    [
+      'WALLET_REGISTRATION_REGISTRY_ENVIRONMENT',
+      '- {Name: WALLET_REGISTRATION_REGISTRY_ENVIRONMENT,Value: MAINNET}',
+    ],
+    [
+      'WALLET_REGISTRATION_CHALLENGE_TTL_SECONDS',
+      "- {Name: WALLET_REGISTRATION_CHALLENGE_TTL_SECONDS,Value: '180'}",
+    ],
+  ]);
+  const apiEnvironmentLines = apiEnvironment.split('\n').map((line) => line.trim());
+  const actualApiAuthNames = [
+    ...apiEnvironment.matchAll(/\bName:\s*((?:AUTH|OIDC|WALLET)_[A-Z0-9_]+)\b/g),
+  ].map((match) => match[1]);
+  for (const [name, expectedLine] of expectedApiEnvironment) {
+    if (
+      actualApiAuthNames.filter((actual) => actual === name).length !== 1 ||
+      apiEnvironmentLines.filter(
+        (line) => semanticYamlTokens(line) === semanticYamlTokens(expectedLine),
+      ).length !== 1
+    ) {
+      errors.push(`ApiTaskDefinition must bind exactly one reviewed production ${name} value.`);
+    }
+  }
+  if (
+    actualApiAuthNames.length !== expectedApiEnvironment.size ||
+    actualApiAuthNames.some((name) => !expectedApiEnvironment.has(name))
+  ) {
+    errors.push(
+      'ApiTaskDefinition must not include unreviewed AUTH_*, OIDC_*, or WALLET_* values.',
+    );
+  }
+
+  const secretFields = [
+    'AUTH_PREAUTH_SEAL_KEY',
+    'AUTH_IDENTITY_HMAC_KEY_RING_JSON',
+    'AUTH_SESSION_HMAC_KEY_RING_JSON',
+    'AUTH_CSRF_HMAC_KEY_RING_JSON',
+    'WALLET_IDENTITY_HMAC_KEY_RING_JSON',
+    'WALLET_CHALLENGE_HMAC_KEY_RING_JSON',
+    'WALLET_METADATA_SEAL_KEY_RING_JSON',
+  ];
+  for (const field of secretFields) {
+    requireExactInlineSecretReference(
+      api,
+      'ApiTaskDefinition',
+      field,
+      'AuthWalletKeysSecretArn',
+      field,
+      errors,
+    );
+  }
+  const actualAuthSecretNames = [
+    ...apiSecrets.matchAll(/\bName:\s*((?:AUTH|OIDC|WALLET)_[A-Z0-9_]+)\b/g),
+  ].map((match) => match[1]);
+  if (
+    actualAuthSecretNames.length !== secretFields.length ||
+    actualAuthSecretNames.some((name) => !secretFields.includes(name))
+  ) {
+    errors.push('ApiTaskDefinition must inject exactly the seven reviewed auth/wallet key fields.');
+  }
+  const forbiddenLegacyAuthWalletBindings = [
+    'AUTH_IDENTITY_HMAC_KEY_ID',
+    'AUTH_IDENTITY_HMAC_KEY',
+    'AUTH_SESSION_HMAC_KEY_ID',
+    'AUTH_SESSION_HMAC_KEY',
+    'AUTH_CSRF_HMAC_KEY_ID',
+    'AUTH_CSRF_HMAC_KEY',
+    'WALLET_IDENTITY_HMAC_KEY_VERSION',
+    'WALLET_IDENTITY_HMAC_KEY',
+    'WALLET_CHALLENGE_HMAC_KEY_VERSION',
+    'WALLET_CHALLENGE_HMAC_KEY',
+    'WALLET_METADATA_SEAL_KEY_VERSION',
+    'WALLET_METADATA_SEAL_KEY',
+  ];
+  const configuredLegacyAuthWalletBinding = forbiddenLegacyAuthWalletBindings.find((name) =>
+    new RegExp(`\\bName:\\s*${name}\\b`, 'u').test(api),
+  );
+  if (configuredLegacyAuthWalletBinding !== undefined) {
+    errors.push(
+      `ApiTaskDefinition must not configure legacy or mixed-mode auth/wallet field ${configuredLegacyAuthWalletBinding}.`,
+    );
+  }
+  if (/\bName:\s*LOCAL_DEMO_MODE\b/u.test(api)) {
+    errors.push('ApiTaskDefinition must not configure LOCAL_DEMO_MODE in production.');
+  }
+
+  const webOrigin = "- {Name: AUTH_PUBLIC_ORIGIN,Value: !Sub 'https://${ApplicationHostname}'}";
+  const actualWebAuthNames = [
+    ...webEnvironment.matchAll(/\bName:\s*((?:AUTH|OIDC|WALLET)_[A-Z0-9_]+)\b/g),
+  ].map((match) => match[1]);
+  if (
+    actualWebAuthNames.join('|') !== 'AUTH_PUBLIC_ORIGIN' ||
+    webEnvironment
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => semanticYamlTokens(line) === semanticYamlTokens(webOrigin)).length !== 1
+  ) {
+    errors.push('WebTaskDefinition must receive only the exact HTTPS AUTH_PUBLIC_ORIGIN binding.');
+  }
+  if (/AuthWalletKeys(?:Secret|KmsKey)Arn|\b(?:AUTH|OIDC|WALLET)_[A-Z0-9_]+\b/.test(worker)) {
+    errors.push('WorkerTaskDefinition must not receive authentication or wallet configuration.');
   }
 }
 
@@ -1232,7 +1571,11 @@ function validateEcsRoleSecurityBoundaries(resources, inventory, errors) {
       '        - Sid: InspectQueueRedriveConfiguration',
       '          Effect: Allow',
       '          Action: sqs:GetQueueAttributes',
-      '          Resource: [!GetAtt JobQueue.Arn, !GetAtt JobDeadLetterQueue.Arn]',
+      '          Resource:',
+      '            - !GetAtt JobQueue.Arn',
+      '            - !GetAtt JobDeadLetterQueue.Arn',
+      '            - !GetAtt BalanceQueue.Arn',
+      '            - !GetAtt BalanceDeadLetterQueue.Arn',
     ].join('\n'),
     'the read-only queue-readiness task policy with no publish, consume, secret, or key access',
     errors,
@@ -1251,11 +1594,15 @@ function validateEcsRoleSecurityBoundaries(resources, inventory, errors) {
       '        - Sid: PublishJobs',
       '          Effect: Allow',
       '          Action: sqs:SendMessage',
-      '          Resource: !GetAtt JobQueue.Arn',
+      '          Resource: [!GetAtt JobQueue.Arn, !GetAtt BalanceQueue.Arn]',
       '        - Sid: InspectQueueRedriveConfiguration',
       '          Effect: Allow',
       '          Action: sqs:GetQueueAttributes',
-      '          Resource: [!GetAtt JobQueue.Arn, !GetAtt JobDeadLetterQueue.Arn]',
+      '          Resource:',
+      '            - !GetAtt JobQueue.Arn',
+      '            - !GetAtt JobDeadLetterQueue.Arn',
+      '            - !GetAtt BalanceQueue.Arn',
+      '            - !GetAtt BalanceDeadLetterQueue.Arn',
       '        - Sid: UseSqsEncryptionKey',
       '          Effect: Allow',
       '          Action:',
@@ -1317,6 +1664,13 @@ function validateEcsRoleSecurityBoundaries(resources, inventory, errors) {
         "    ValueFrom: !Sub '${WorkloadBoundaries.Outputs.ApiDatabaseActiveSecretArn}:password::'",
         '  - Name: REDIS_PASSWORD',
         "    ValueFrom: !Sub '${WorkloadBoundaries.Outputs.RedisActiveSecretArn}:password::'",
+        "  - {Name: AUTH_PREAUTH_SEAL_KEY,ValueFrom: !Sub '${AuthWalletKeysSecretArn}:AUTH_PREAUTH_SEAL_KEY::'}",
+        "  - {Name: AUTH_IDENTITY_HMAC_KEY_RING_JSON,ValueFrom: !Sub '${AuthWalletKeysSecretArn}:AUTH_IDENTITY_HMAC_KEY_RING_JSON::'}",
+        "  - {Name: AUTH_SESSION_HMAC_KEY_RING_JSON,ValueFrom: !Sub '${AuthWalletKeysSecretArn}:AUTH_SESSION_HMAC_KEY_RING_JSON::'}",
+        "  - {Name: AUTH_CSRF_HMAC_KEY_RING_JSON,ValueFrom: !Sub '${AuthWalletKeysSecretArn}:AUTH_CSRF_HMAC_KEY_RING_JSON::'}",
+        "  - {Name: WALLET_IDENTITY_HMAC_KEY_RING_JSON,ValueFrom: !Sub '${AuthWalletKeysSecretArn}:WALLET_IDENTITY_HMAC_KEY_RING_JSON::'}",
+        "  - {Name: WALLET_CHALLENGE_HMAC_KEY_RING_JSON,ValueFrom: !Sub '${AuthWalletKeysSecretArn}:WALLET_CHALLENGE_HMAC_KEY_RING_JSON::'}",
+        "  - {Name: WALLET_METADATA_SEAL_KEY_RING_JSON,ValueFrom: !Sub '${AuthWalletKeysSecretArn}:WALLET_METADATA_SEAL_KEY_RING_JSON::'}",
       ].join('\n'),
     ],
     [
@@ -1397,7 +1751,9 @@ function validateKmsAndEncryptedServiceBoundaries(resources, inventory, errors) 
       '        StringEquals:',
       '          aws:SourceAccount: !Ref AWS::AccountId',
       '        ArnLike:',
-      '          aws:SourceArn: !Sub arn:${AWS::Partition}:sqs:${AWS::Region}:${AWS::AccountId}:crypto-lending-${EnvironmentName}-jobs*',
+      '          aws:SourceArn:',
+      '            - !Sub arn:${AWS::Partition}:sqs:${AWS::Region}:${AWS::AccountId}:crypto-lending-${EnvironmentName}-jobs*',
+      '            - !Sub arn:${AWS::Partition}:sqs:${AWS::Region}:${AWS::AccountId}:crypto-lending-${EnvironmentName}-balance-sync*',
     ].join('\n'),
     'the reviewed account-delegation and SQS service key policy, including exact source account and queue ARN scope',
     errors,
@@ -1445,11 +1801,18 @@ function validateKmsAndEncryptedServiceBoundaries(resources, inventory, errors) 
       errors,
     );
   }
-  for (const logicalId of ['Database', 'RedisReplicationGroup', 'JobQueue', 'JobDeadLetterQueue']) {
+  for (const logicalId of [
+    'Database',
+    'RedisReplicationGroup',
+    'JobQueue',
+    'JobDeadLetterQueue',
+    'BalanceQueue',
+    'BalanceDeadLetterQueue',
+  ]) {
     requireExactProperty(
       resources.get(logicalId) ?? '',
       logicalId,
-      logicalId.startsWith('Job') ? 'KmsMasterKeyId' : 'KmsKeyId',
+      logicalId.endsWith('Queue') ? 'KmsMasterKeyId' : 'KmsKeyId',
       '!GetAtt ApplicationDataKey.Arn',
       errors,
     );
@@ -1504,7 +1867,7 @@ function validateKmsAndEncryptedServiceBoundaries(resources, inventory, errors) 
 
   requireExactLogicalIds(
     entriesOf(inventory, 'AWS::SQS::Queue'),
-    ['JobDeadLetterQueue', 'JobQueue'],
+    ['JobDeadLetterQueue', 'JobQueue', 'BalanceDeadLetterQueue', 'BalanceQueue'],
     'Encrypted application queue topology',
     errors,
   );
@@ -1600,8 +1963,83 @@ function validateKmsAndEncryptedServiceBoundaries(resources, inventory, errors) 
   if (tlsPolicyQueues?.join('|') !== 'JobQueue|JobDeadLetterQueue') {
     errors.push('JobQueueTlsPolicy must attach to exactly JobQueue and JobDeadLetterQueue.');
   }
+
+  requireExactSemanticProperty(
+    resources.get('BalanceDeadLetterQueue') ?? '',
+    'BalanceDeadLetterQueue',
+    'Properties',
+    [
+      'Properties:',
+      '  KmsMasterKeyId: !GetAtt ApplicationDataKey.Arn',
+      '  KmsDataKeyReusePeriodSeconds: 300',
+      '  MessageRetentionPeriod: 1209600',
+      '  QueueName: !Sub crypto-lending-${EnvironmentName}-balance-sync-dlq',
+      '  RedriveAllowPolicy:',
+      '    redrivePermission: byQueue',
+      '    sourceQueueArns:',
+      '      - !Sub arn:${AWS::Partition}:sqs:${AWS::Region}:${AWS::AccountId}:crypto-lending-${EnvironmentName}-balance-sync',
+    ].join('\n'),
+    'the exact encrypted, single-source balance-sync dead-letter queue topology',
+    errors,
+  );
+  requireExactSemanticProperty(
+    resources.get('BalanceQueue') ?? '',
+    'BalanceQueue',
+    'Properties',
+    [
+      'Properties:',
+      '  KmsMasterKeyId: !GetAtt ApplicationDataKey.Arn',
+      '  KmsDataKeyReusePeriodSeconds: 300',
+      '  MessageRetentionPeriod: 345600',
+      '  QueueName: !Sub crypto-lending-${EnvironmentName}-balance-sync',
+      '  ReceiveMessageWaitTimeSeconds: 10',
+      '  RedrivePolicy:',
+      '    deadLetterTargetArn: !GetAtt BalanceDeadLetterQueue.Arn',
+      '    maxReceiveCount: !Ref SqsMaxReceiveCount',
+      '  VisibilityTimeout: !Ref SqsVisibilityTimeoutSeconds',
+    ].join('\n'),
+    'the exact encrypted, bounded-redrive balance-sync source queue topology',
+    errors,
+  );
+  requireExactSemanticProperty(
+    resources.get('BalanceQueueTlsPolicy') ?? '',
+    'BalanceQueueTlsPolicy',
+    'Properties',
+    [
+      'Properties:',
+      '  Queues:',
+      '    - !Ref BalanceQueue',
+      '    - !Ref BalanceDeadLetterQueue',
+      '  PolicyDocument:',
+      "    Version: '2012-10-17'",
+      '    Statement:',
+      '      - Sid: DenyInsecureTransport',
+      '        Effect: Deny',
+      "        Principal: '*'",
+      '        Action: sqs:*',
+      '        Resource:',
+      '          - !GetAtt BalanceQueue.Arn',
+      '          - !GetAtt BalanceDeadLetterQueue.Arn',
+      '        Condition:',
+      '          Bool:',
+      "            aws:SecureTransport: 'false'",
+    ].join('\n'),
+    'the exact isolated balance queue TLS-only policy',
+    errors,
+  );
+  const balanceTlsPolicyQueues = nestedReferenceList(
+    resources.get('BalanceQueueTlsPolicy') ?? '',
+    'Queues',
+  );
+  if (balanceTlsPolicyQueues?.join('|') !== 'BalanceQueue|BalanceDeadLetterQueue') {
+    errors.push(
+      'BalanceQueueTlsPolicy must attach to exactly BalanceQueue and BalanceDeadLetterQueue.',
+    );
+  }
 }
 
+// Retained for compatibility with prior validator evidence; child validation now owns this graph.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function validateOperationalDashboard(source, parameters, resources, errors) {
   requireExactSemanticBlock(
     parameters.get('EnableOperationalDashboard') ?? '',
@@ -1618,7 +2056,7 @@ function validateOperationalDashboard(source, parameters, resources, errors) {
 
   const dashboardConditions =
     source.match(
-      /^  CreateOperationalDashboard: !Equals \[!Ref EnableOperationalDashboard, 'true'\]\s*$/gm,
+      /^\s+CreateOperationalDashboard: !Equals \[!Ref EnableOperationalDashboard, 'true'\]\s*$/gm,
     ) ?? [];
   if (dashboardConditions.length !== 1) {
     errors.push(
@@ -1725,10 +2163,13 @@ function validateOperationalDashboard(source, parameters, resources, errors) {
             ['AWS/SQS', 'ApproximateNumberOfMessagesVisible', 'QueueName', '${JobQueue.QueueName}'],
             ['.', 'ApproximateAgeOfOldestMessage', '.', '.'],
             ['.', 'ApproximateNumberOfMessagesVisible', '.', '${JobDeadLetterQueue.QueueName}'],
+            ['.', 'ApproximateNumberOfMessagesVisible', '.', '${BalanceQueue.QueueName}'],
+            ['.', 'ApproximateAgeOfOldestMessage', '.', '.'],
+            ['.', 'ApproximateNumberOfMessagesVisible', '.', '${BalanceDeadLetterQueue.QueueName}'],
           ],
         },
       },
-      'the exact native source-queue backlog/age and dead-letter-queue depth contract',
+      'the exact native jobs and balance source-queue backlog/age and dead-letter-queue depth contract',
     ],
     [
       'Correlation traces',
@@ -1824,6 +2265,99 @@ function validateOperationalDashboard(source, parameters, resources, errors) {
   }
 }
 
+// Retained for compatibility with prior validator evidence; child validation now owns this graph.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function validateOperationalAlarms(source, parameters, resources, inventory, errors) {
+  requireExactSemanticBlock(
+    parameters.get('EnableOperationalAlarms') ?? '',
+    'EnableOperationalAlarms',
+    [
+      'EnableOperationalAlarms:',
+      '  Type: String',
+      "  Default: 'true'",
+      "  AllowedValues: ['true', 'false']",
+    ].join('\n'),
+    'the exact default-enabled String contract with closed true/false values',
+    errors,
+  );
+  requireExactSemanticBlock(
+    parameters.get('AlarmTopicArn') ?? '',
+    'AlarmTopicArn',
+    [
+      'AlarmTopicArn:',
+      '  Type: String',
+      '  Default: NONE',
+      `  AllowedPattern: '${operationalAlarmTopicAllowedPattern}'`,
+    ].join('\n'),
+    'the exact existing-topic ARN or NONE sentinel contract with no wildcard ARN form',
+    errors,
+  );
+
+  const rules = topLevelBlocks(source, 'Rules');
+  requireExactSemanticBlock(
+    rules.get('AlarmTopicRequired') ?? '',
+    'AlarmTopicRequired',
+    [
+      'AlarmTopicRequired:',
+      '  Assertions:',
+      '    - Assert: !Or',
+      "      - !Equals [!Ref EnableOperationalAlarms, 'false']",
+      '      - !Not [!Equals [!Ref AlarmTopicArn, NONE]]',
+      '      AssertDescription: Enabled alarms require an SNS topic ARN.',
+    ].join('\n'),
+    'the exact fail-closed relationship that permits NONE only while alarms are disabled',
+    errors,
+  );
+
+  const alarmConditions =
+    source.match(/^\s+CreateAlarms: !Equals \[!Ref EnableOperationalAlarms, 'true'\]\s*$/gm) ?? [];
+  if (alarmConditions.length !== 1) {
+    errors.push(
+      'CreateAlarms must preserve the exact condition bound only to EnableOperationalAlarms=true.',
+    );
+  }
+
+  const alarms = entriesOf(inventory, 'AWS::CloudWatch::Alarm');
+  if (
+    alarms.length !== operationalAlarmLogicalIds.length ||
+    alarms.some(({ logicalId }) => !operationalAlarmLogicalIds.includes(logicalId))
+  ) {
+    errors.push('Operational alarms must remain the exact eight reviewed logical resources.');
+  }
+
+  for (const logicalId of operationalAlarmLogicalIds) {
+    const block = resources.get(logicalId) ?? '';
+    if (!hasProperty(block, 'Condition', 'CreateAlarms')) {
+      errors.push(`${logicalId} must be gated only by CreateAlarms.`);
+    }
+    requireAbsentProperty(
+      block,
+      logicalId,
+      'ActionsEnabled',
+      'the CloudWatch true default must not be overridden to suppress notifications',
+      errors,
+    );
+    for (const propertyName of ['AlarmActions', 'OKActions']) {
+      const escapedName = propertyName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const declarations = block.match(new RegExp(`^\\s+${escapedName}:`, 'gm')) ?? [];
+      const exactBindings =
+        block.match(new RegExp(`^\\s+${escapedName}: \\[!Ref AlarmTopicArn\\]\\s*$`, 'gm')) ?? [];
+      if (declarations.length !== 1 || exactBindings.length !== 1) {
+        errors.push(
+          `${logicalId} must preserve exactly one ${propertyName} target bound to !Ref AlarmTopicArn.`,
+        );
+      }
+    }
+    requireAbsentProperty(
+      block,
+      logicalId,
+      'InsufficientDataActions',
+      'missing-data behavior is handled by each reviewed TreatMissingData policy and does not page a separate unactionable route',
+      errors,
+    );
+  }
+}
+
 function validateTemplateShape(source, errors) {
   const templateSha256 = sha256(source);
   if (templateSha256 !== reviewedApplicationBaselineSha256) {
@@ -1833,9 +2367,9 @@ function validateTemplateShape(source, errors) {
   }
 
   const templateBytes = Buffer.byteLength(source, 'utf8');
-  if (templateBytes > 51200) {
+  if (templateBytes > 50500) {
     errors.push(
-      `Application template is ${templateBytes} bytes; keep it at or below the 51,200-byte direct-upload limit so validation/planning never stages it in S3.`,
+      `Application template is ${templateBytes} bytes; keep it at or below the reviewed 50,500-byte parent limit.`,
     );
   }
 
@@ -1976,9 +2510,10 @@ function validateTemplateShape(source, errors) {
 
   validateNoExternalApplicationEgress(source, parameters, resources, inventory, errors);
   validateWorkloadBoundaryComposition(source, parameters, resources, inventory, errors);
+  validateObservabilityComposition(source, parameters, resources, errors);
+  validateProductionAuthenticationWiring(parameters, resources, errors);
   validateEcsRoleSecurityBoundaries(resources, inventory, errors);
   validateKmsAndEncryptedServiceBoundaries(resources, inventory, errors);
-  validateOperationalDashboard(source, parameters, resources, errors);
 
   const requiredTypes = new Map([
     ['AWS::EC2::VPC', 1],
@@ -1998,9 +2533,7 @@ function validateTemplateShape(source, errors) {
     ['AWS::SecretsManager::Secret', 1],
     ['AWS::Logs::LogGroup', 3],
     ['AWS::IAM::Role', 4],
-    ['AWS::CloudFormation::Stack', 1],
-    ['AWS::CloudWatch::Alarm', 1],
-    ['AWS::CloudWatch::Dashboard', 1],
+    ['AWS::CloudFormation::Stack', 2],
     ['AWS::SQS::Queue', 2],
     ['AWS::EC2::VPCEndpoint', 6],
   ]);
@@ -2185,6 +2718,20 @@ function validateTemplateShape(source, errors) {
       'JobDeadLetterQueue',
       errors,
     );
+    requireExactInlineEnvironmentReference(
+      block,
+      logicalId,
+      'SQS_BALANCE_QUEUE_URL',
+      'BalanceQueue',
+      errors,
+    );
+    requireExactInlineEnvironmentReference(
+      block,
+      logicalId,
+      'SQS_BALANCE_DEAD_LETTER_QUEUE_URL',
+      'BalanceDeadLetterQueue',
+      errors,
+    );
   }
   const redisBindingErrors = [];
   requireExactGetAttEnvironmentReference(
@@ -2206,7 +2753,7 @@ function validateTemplateShape(source, errors) {
     errors.push('WorkerTaskDefinition must remain a Redis nonconsumer with no REDIS_* bindings.');
   }
   const webTaskDefinition = resources.get('WebTaskDefinition') ?? '';
-  if (/\bName:\s*SQS_(?:DEAD_LETTER_)?QUEUE_URL\b/.test(webTaskDefinition)) {
+  if (/\bName:\s*SQS_(?:(?:BALANCE_)?DEAD_LETTER_|BALANCE_)?QUEUE_URL\b/.test(webTaskDefinition)) {
     errors.push('WebTaskDefinition must not receive an SQS queue destination.');
   }
 
@@ -2223,21 +2770,38 @@ function validateTemplateShape(source, errors) {
     (match) => match[1],
   );
   const expectedWorkerResourceValues = [
-    '!GetAtt JobQueue.Arn',
-    '[!GetAtt JobQueue.Arn, !GetAtt JobDeadLetterQueue.Arn]',
+    '[!GetAtt JobQueue.Arn, !GetAtt BalanceQueue.Arn]',
+    '- !GetAtt JobQueue.Arn',
     '!GetAtt ApplicationDataKey.Arn',
   ];
-  if (workerResourceValues.join('|') !== expectedWorkerResourceValues.join('|')) {
+  const workerHasReadinessResources = [
+    '!GetAtt JobQueue.Arn',
+    '!GetAtt JobDeadLetterQueue.Arn',
+    '!GetAtt BalanceQueue.Arn',
+    '!GetAtt BalanceDeadLetterQueue.Arn',
+  ].every((resource) => workerTaskRole.includes(resource));
+  if (
+    workerResourceValues.join('|') !== expectedWorkerResourceValues.join('|') ||
+    !workerHasReadinessResources
+  ) {
     errors.push(
-      'WorkerTaskRole resources must bind exactly to JobQueue, JobDeadLetterQueue, and ApplicationDataKey.',
+      'WorkerTaskRole resources must bind exactly to both source queues, both dead-letter queues, and ApplicationDataKey.',
     );
   }
   const apiTaskRole = resources.get('ApiTaskRole') ?? '';
   const apiResourceValues = [...apiTaskRole.matchAll(/^\s+Resource:\s*(.+?)\s*$/gm)].map(
     (match) => match[1],
   );
-  if (apiResourceValues.join('|') !== '[!GetAtt JobQueue.Arn, !GetAtt JobDeadLetterQueue.Arn]') {
-    errors.push('ApiTaskRole resources must bind exactly to JobQueue and JobDeadLetterQueue.');
+  if (
+    apiResourceValues.join('|') !== '- !GetAtt JobQueue.Arn' ||
+    ![
+      '!GetAtt JobQueue.Arn',
+      '!GetAtt JobDeadLetterQueue.Arn',
+      '!GetAtt BalanceQueue.Arn',
+      '!GetAtt BalanceDeadLetterQueue.Arn',
+    ].every((resource) => apiTaskRole.includes(resource))
+  ) {
+    errors.push('ApiTaskRole resources must bind exactly to both isolated queue/DLQ pairs.');
   }
 
   const privateSubnets = entriesOf(inventory, 'AWS::EC2::Subnet').filter(
@@ -2471,7 +3035,9 @@ function validateTemplateShape(source, errors) {
   for (const { logicalId, block } of entriesOf(inventory, 'AWS::IAM::Role')) {
     if (
       /^\s+Action:\s*['"]?\*['"]?\s*$/m.test(block) ||
-      /^\s+-\s*['"]?\*['"]?\s*$/m.test(block.match(/Action:[\s\S]*?(?=\n\s{6}\w|$)/)?.[0] ?? '')
+      /^\s+-\s*['"]?\*['"]?\s*$/m.test(
+        block.match(/Action:[\s\S]*?(?=\n\s+(?:Resource|Condition|Effect|Sid):|$)/)?.[0] ?? '',
+      )
     ) {
       errors.push(
         `${logicalId} contains a wildcard IAM action; enumerate least-privilege actions.`,
@@ -2564,9 +3130,15 @@ function validateDeploymentGuard(source, errors) {
     '$parameterMap.AlbCertificateArn -cne [string] $acmDnsBinding.certificateArn',
     '$parameterMap.ApplicationHostname -cne [string] $acmDnsBinding.applicationHostname',
     "'validate-application-workload-boundaries.mjs'",
+    "'validate-application-observability.mjs'",
     'Get-FileHash -LiteralPath $resolvedWorkloadBoundariesTemplate -Algorithm SHA256',
+    'Get-FileHash -LiteralPath $resolvedObservabilityTemplate -Algorithm SHA256',
+    '$templateInfo.Length -gt 50500',
+    'Parent template exceeds the reviewed 50,500-byte direct-upload ceiling.',
     "Assert-RequiredValue -Name 'WorkloadBoundariesArtifactBucket'",
     "Assert-RequiredValue -Name 'WorkloadBoundariesArtifactVersionId'",
+    "Assert-RequiredValue -Name 'ObservabilityArtifactBucket'",
+    "Assert-RequiredValue -Name 'ObservabilityArtifactVersionId'",
     'Assert-RegionalS3ManagedPrefixList',
     "'describe-managed-prefix-lists'",
     "-Name 'OwnerId'",
@@ -2584,14 +3156,36 @@ function validateDeploymentGuard(source, errors) {
     'WorkloadBoundariesTemplateUrl = $workloadBoundariesTemplateUrl',
     'WorkloadBoundariesTemplateSha256 = $workloadBoundariesTemplateSha256',
     'WorkloadBoundariesArtifactBindingSha256 = $workloadBoundariesArtifactBindingSha256',
-    'child-template-sha256=',
-    'child-artifact-binding-sha256=',
+    'ObservabilityTemplateUrl = $observabilityTemplateUrl',
+    'ObservabilityTemplateSha256 = $observabilityTemplateSha256',
+    'ObservabilityArtifactBindingSha256 = $observabilityArtifactBindingSha256',
+    'workload-template-sha256=',
+    'workload-binding-sha256=',
+    'observability-template-sha256=',
+    'observability-binding-sha256=',
     "'workload-boundaries-sha256' = $workloadBoundariesTemplateSha256",
     "'workload-boundaries-binding-sha256' = $workloadBoundariesArtifactBindingSha256",
+    "'observability-sha256' = $observabilityTemplateSha256",
+    "'observability-binding-sha256' = $observabilityArtifactBindingSha256",
     '$changeSetParameterMap.Count -ne $parameterMap.Count',
     '$reviewedParameterSha256 -cne $parameterSha256',
     '$currentLocalChildSha256 -cne $workloadBoundariesTemplateSha256',
+    '$currentLocalObservabilitySha256 -cne $observabilityTemplateSha256',
     '$reviewedNonSecretControlParameters',
+    '$reviewedSecretReferenceParameters',
+    "'AuthWalletKeysSecretArn'",
+    "'AuthWalletKeysKmsKeyArn'",
+    "'CognitoPoolId'",
+    "'CognitoLoginHostname'",
+    "'CognitoClientId'",
+    '$cognitoPoolPattern',
+    '$expectedAuthSecretPattern',
+    '$expectedAuthKmsPattern',
+    '$expectedOperationalAlarmTopicPattern',
+    "$parameterMap.EnableOperationalAlarms -ceq 'true'",
+    'AlarmTopicArn must be explicitly supplied as one existing SNS topic ARN in the approved partition, account, and Region when operational alarms are enabled.',
+    'selector-free Secrets Manager ARN',
+    'customer-managed KMS key ARN',
     "$allowedCredentialPhases = @('A_ONLY', 'BOTH_USE_A', 'BOTH_USE_B', 'B_ONLY')",
     'RedisOperatorMode must use exactly DISABLED or ENABLED.',
     '$changeSetCapabilities.Count -ne 1',
@@ -2647,7 +3241,7 @@ function validateDeploymentGuard(source, errors) {
     !source.includes('GetEnumerator() | Sort-Object Key') ||
     !source.includes('$submittedTemplateSha256 -cne $templateSha256') ||
     !source.includes('$reviewedParameterSha256 -cne $parameterSha256') ||
-    !source.includes('Assert-WorkloadBoundariesArtifact')
+    !source.includes('Assert-VersionedChildArtifact')
   ) {
     errors.push(
       'Plan and Deploy must bind the reviewed change set to exact template and parameter SHA-256 values and verify the submitted Original template.',

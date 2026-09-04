@@ -21,7 +21,7 @@ const residualLimitations = Object.freeze([
   'No DNS security-group rule is present because AmazonProvidedDNS traffic is not filterable by security groups; a custom resolver requires a separately reviewed exact destination.',
   'REDIS_OPERATOR_EXECUTION_ARTIFACT_UNRESOLVED: this child emits a conditional role, network identity, credential, and ACL user but the repository has no reviewed production revocation CLI or one-off task definition. Redis ACL cannot constrain the CLIENT KILL username argument, so exact-target command construction, task drain, denial evidence, and immediate operator disablement remain unresolved local-design and separately authorized live gates.',
   'FIXED_SLOT_CREDENTIAL_REGENERATION_UNRESOLVED: the four enum values constrain each submitted phase but do not compare deployed state or enforce transition adjacency, and retained A/B Secrets Manager resources do not regenerate when a phase changes. A-to-B-to-A would re-enable the original A credential, so the child can represent reviewed overlap/cutover phases but is neither an enforced workflow nor repeatable rotation until a reviewed inactive-slot regeneration, Redis-password/database-verifier installation, and current-state transition artifact exists.',
-  'FAILED_AUTH_MONITORING_UNRESOLVED: local ACL LOG and application redaction tests prove safe denial behavior, but the repository does not yet define a validated ElastiCache failed-auth log or metric delivery, filter, alarm, and actionable evidence path.',
+  'AUTH_WALLET_SECRET_EXTERNAL: the parent supplies one Secrets Manager ARN for seven distinct authentication and wallet key fields. This static boundary neither provisions that secret nor proves its field set, key material, rotation, resource policy, KMS policy, or deployed readability.',
   'This local template is not packaged or uploaded; a parent nested-stack TemplateURL remains a separately authorized deployment gate.',
 ]);
 
@@ -39,6 +39,8 @@ const parameterTypes = new Map([
   ['InterfaceEndpointSecurityGroupId', 'String'],
   ['S3ManagedPrefixListId', 'String'],
   ['ApplicationDataKeyArn', 'String'],
+  ['AuthWalletKeysSecretArn', 'String'],
+  ['AuthWalletKeysKmsKeyArn', 'String'],
   ['ApiLogGroupArn', 'String'],
   ['WorkerLogGroupArn', 'String'],
   ['ApiImageRepositoryArn', 'String'],
@@ -495,7 +497,9 @@ function expectedExecutionRoleBlock(
   logPolicyName,
   logGroupParameter,
   secretPolicyName,
+  unconditionalSecrets,
   conditionalSecrets,
+  decryptionKeys,
 ) {
   return exactBlock(logicalId, [
     'Type: AWS::IAM::Role',
@@ -543,6 +547,7 @@ function expectedExecutionRoleBlock(
     '            Effect: Allow',
     '            Action: secretsmanager:GetSecretValue',
     '            Resource:',
+    ...unconditionalSecrets.map((secret) => `              - !Ref ${secret}`),
     ...conditionalSecrets.flatMap(([condition, secret]) => [
       '              - !If',
       `                - ${condition}`,
@@ -552,7 +557,9 @@ function expectedExecutionRoleBlock(
     '          - Sid: DecryptSecrets',
     '            Effect: Allow',
     '            Action: kms:Decrypt',
-    '            Resource: !Ref ApplicationDataKeyArn',
+    ...(decryptionKeys.length === 1
+      ? [`            Resource: !Ref ${decryptionKeys[0]}`]
+      : [`            Resource: [${decryptionKeys.map((key) => `!Ref ${key}`).join(', ')}]`]),
     '            Condition:',
     '              StringEquals:',
     '                kms:ViaService: !Sub secretsmanager.${AWS::Region}.${AWS::URLSuffix}',
@@ -663,6 +670,18 @@ function validateParameters(source, errors) {
     errors.push('RedisOperatorMode must be an explicit disabled-by-default break-glass gate.');
   }
   if (
+    (blocks.get('AuthWalletKeysKmsKeyArn') ?? '') !==
+    exactBlock('AuthWalletKeysKmsKeyArn', [
+      'Type: String',
+      'MaxLength: 2048',
+      "AllowedPattern: '^arn:[a-z0-9-]+:kms:[a-z0-9-]+:[0-9]{12}:key/[a-f0-9-]+$'",
+    ])
+  ) {
+    errors.push(
+      'AuthWalletKeysKmsKeyArn must be one explicit customer-managed KMS key ARN and must not expose a default.',
+    );
+  }
+  if (
     (blocks.get('BillingAcknowledgement') ?? '') !==
     exactBlock('BillingAcknowledgement', [
       'Type: String',
@@ -725,7 +744,25 @@ function validateParameters(source, errors) {
       errors.push(`${parameter} must be a concrete reviewed application ECR repository ARN.`);
     }
   }
-  if ([...blocks.keys()].some((name) => /(?:password|token|secret|migration)/iu.test(name))) {
+  if (
+    (blocks.get('AuthWalletKeysSecretArn') ?? '') !==
+    exactBlock('AuthWalletKeysSecretArn', [
+      'Type: String',
+      'NoEcho: true',
+      'MaxLength: 2048',
+      "AllowedPattern: '^arn:[a-z0-9-]+:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:[A-Za-z0-9/_+=.@-]+$'",
+    ])
+  ) {
+    errors.push(
+      'AuthWalletKeysSecretArn must be one explicit selector-free Secrets Manager ARN and must not expose a default.',
+    );
+  }
+  if (
+    [...blocks.keys()].some(
+      (name) =>
+        name !== 'AuthWalletKeysSecretArn' && /(?:password|token|secret|migration)/iu.test(name),
+    )
+  ) {
     errors.push('The child template must own credentials and must not accept secret/admin inputs.');
   }
 }
@@ -967,12 +1004,14 @@ function validateExecutionRoles(resources, errors) {
     'WriteApiLogs',
     'ApiLogGroupArn',
     'ReadApiRuntimeSecrets',
+    ['AuthWalletKeysSecretArn'],
     [
       ['ApiDatabaseAReadable', 'ApiDatabaseCredentialASecret'],
       ['ApiDatabaseBReadable', 'ApiDatabaseCredentialBSecret'],
       ['RedisApiAEnabled', 'RedisApiASecret'],
       ['RedisApiBEnabled', 'RedisApiBSecret'],
     ],
+    ['ApplicationDataKeyArn', 'AuthWalletKeysKmsKeyArn'],
   );
   const expectedWorker = expectedExecutionRoleBlock(
     'WorkerTaskExecutionRole',
@@ -981,10 +1020,12 @@ function validateExecutionRoles(resources, errors) {
     'WriteWorkerLogs',
     'WorkerLogGroupArn',
     'ReadWorkerRuntimeSecrets',
+    [],
     [
       ['WorkerDatabaseAReadable', 'WorkerDatabaseCredentialASecret'],
       ['WorkerDatabaseBReadable', 'WorkerDatabaseCredentialBSecret'],
     ],
+    ['ApplicationDataKeyArn'],
   );
   if ((resources.get('ApiTaskExecutionRole') ?? '') !== expectedApi) {
     errors.push('ApiTaskExecutionRole must retain the exact API log and runtime-secret matrix.');
@@ -1006,11 +1047,13 @@ function validateExecutionRoles(resources, errors) {
     errors.push('Long-lived execution roles must not read migration/admin credentials.');
   }
   const worker = resources.get('WorkerTaskExecutionRole') ?? '';
-  if (/RedisApi|crypto_api_/iu.test(worker)) {
-    errors.push('WorkerTaskExecutionRole must not read Redis credentials.');
+  if (/RedisApi|crypto_api_|AuthWalletKeys(?:Secret|KmsKey)Arn/iu.test(worker)) {
+    errors.push(
+      'WorkerTaskExecutionRole must not read Redis or authentication/wallet credentials.',
+    );
   }
   if (
-    /ApiDatabaseCredential|WorkerDatabaseCredential|MigrationDatabaseCredential|RedisApi[AB]Secret/iu.test(
+    /ApiDatabaseCredential|WorkerDatabaseCredential|MigrationDatabaseCredential|RedisApi[AB]Secret|AuthWalletKeys(?:Secret|KmsKey)Arn/iu.test(
       operator,
     )
   ) {

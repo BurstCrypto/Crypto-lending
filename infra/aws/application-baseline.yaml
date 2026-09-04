@@ -1,1487 +1,1550 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: KAN-34 billable app baseline.
+Description: Production app baseline.
 
 Parameters:
-  BillingAcknowledgement:
-    Type: String
-    Default: NOT_AUTHORIZED
-    AllowedValues: [NOT_AUTHORIZED, I_ACKNOWLEDGE_THIS_CREATES_BILLABLE_AWS_RESOURCES]
+ BillingAcknowledgement:
+  Type: String
+  Default: NOT_AUTHORIZED
+  AllowedValues: [NOT_AUTHORIZED, I_ACKNOWLEDGE_THIS_CREATES_BILLABLE_AWS_RESOURCES]
 
-  EnvironmentName:
-    Type: String
-    Default: dev
-    MaxLength: 31
-    AllowedPattern: '^(dev|test|qa|sandbox|staging)(-[a-z0-9]+)*$'
-  ApplicationVersion:
-    Type: String
-    AllowedPattern: '^[a-f0-9]{40}$'
-  WorkloadBoundariesTemplateUrl:
-    Type: String
-    MaxLength: 1024
-    AllowedPattern: '^https://[a-z0-9][a-z0-9-]{1,61}[a-z0-9]\.s3\.[a-z0-9-]+\.(?:amazonaws\.com|amazonaws\.com\.cn)/application-workload-boundaries-93273bb3bf26f7d21702da2d4b155132db765ce3f123134341e2762ae521b3f9\.yaml\?versionId=[A-Za-z0-9._~%+-]+$'
-  WorkloadBoundariesTemplateSha256:
-    Type: String
-    AllowedValues: [93273bb3bf26f7d21702da2d4b155132db765ce3f123134341e2762ae521b3f9]
-  WorkloadBoundariesArtifactBindingSha256:
-    Type: String
-    AllowedPattern: '^[a-f0-9]{64}$'
+ EnvironmentName:
+  Type: String
+  Default: dev
+  MaxLength: 31
+  AllowedPattern: '^(dev|test|qa|sandbox|staging)(-[a-z0-9]+)*$'
+ ApplicationVersion:
+  Type: String
+  AllowedPattern: '^[a-f0-9]{40}$'
+ WorkloadBoundariesTemplateUrl:
+  Type: String
+  MaxLength: 1024
+  AllowedPattern: '^https://[a-z0-9][a-z0-9-]{1,61}[a-z0-9]\.s3\.[a-z0-9-]+\.(?:amazonaws\.com|amazonaws\.com\.cn)/application-workload-boundaries-238dad734b6b7f455dbdbaff6be8b34e0138a424e60ca258b4aa5e30f0df6ef6\.yaml\?versionId=[A-Za-z0-9._~%+-]+$'
+ WorkloadBoundariesTemplateSha256:
+  Type: String
+  AllowedValues: [238dad734b6b7f455dbdbaff6be8b34e0138a424e60ca258b4aa5e30f0df6ef6]
+ WorkloadBoundariesArtifactBindingSha256:
+  Type: String
+  AllowedPattern: '^[a-f0-9]{64}$'
+ ObservabilityTemplateUrl:
+  Type: String
+  MaxLength: 1024
+  AllowedPattern: '^https://[a-z0-9][a-z0-9-]{1,61}[a-z0-9]\.s3\.[a-z0-9-]+\.(?:amazonaws\.com|amazonaws\.com\.cn)/application-observability-ef0704fc3eea63ca60e6b44bcd8298639696f21478cc119757d968b84920c6a7\.yaml\?versionId=[A-Za-z0-9._~%+-]+$'
+ ObservabilityTemplateSha256:
+  Type: String
+  AllowedValues: [ef0704fc3eea63ca60e6b44bcd8298639696f21478cc119757d968b84920c6a7]
+ ObservabilityArtifactBindingSha256:
+  Type: String
+  AllowedPattern: '^[a-f0-9]{64}$'
 
-  ApiImageUri:
-    Type: String
-    AllowedPattern: '^[0-9]{12}\.dkr\.ecr\.[a-z0-9-]+\.(amazonaws\.com|amazonaws\.com\.cn)/crypto-lending-api@sha256:[a-f0-9]{64}$'
-  WebImageUri:
-    Type: String
-    AllowedPattern: '^[0-9]{12}\.dkr\.ecr\.[a-z0-9-]+\.(amazonaws\.com|amazonaws\.com\.cn)/crypto-lending-web@sha256:[a-f0-9]{64}$'
-  WorkerImageUri:
-    Type: String
-    AllowedPattern: '^[0-9]{12}\.dkr\.ecr\.[a-z0-9-]+\.(amazonaws\.com|amazonaws\.com\.cn)/crypto-lending-worker@sha256:[a-f0-9]{64}$'
-  RdsCaBundlePath:
-    Type: String
-    Default: /etc/ssl/certs/aws-rds-global-bundle.pem
-    AllowedPattern: '^/[A-Za-z0-9._/-]+$'
-  ApiDesiredCount:
-    Type: Number
-    Default: 0
-    MinValue: 0
-    MaxValue: 10
-  WebDesiredCount:
-    Type: Number
-    Default: 0
-    MinValue: 0
-    MaxValue: 10
-  WorkerDesiredCount:
-    Type: Number
-    Default: 0
-    MinValue: 0
-    MaxValue: 10
+ ApiImageUri:
+  Type: String
+  AllowedPattern: '^[0-9]{12}\.dkr\.ecr\.[a-z0-9-]+\.(amazonaws\.com|amazonaws\.com\.cn)/crypto-lending-api@sha256:[a-f0-9]{64}$'
+ WebImageUri:
+  Type: String
+  AllowedPattern: '^[0-9]{12}\.dkr\.ecr\.[a-z0-9-]+\.(amazonaws\.com|amazonaws\.com\.cn)/crypto-lending-web@sha256:[a-f0-9]{64}$'
+ WorkerImageUri:
+  Type: String
+  AllowedPattern: '^[0-9]{12}\.dkr\.ecr\.[a-z0-9-]+\.(amazonaws\.com|amazonaws\.com\.cn)/crypto-lending-worker@sha256:[a-f0-9]{64}$'
+ RdsCaBundlePath:
+  Type: String
+  Default: /etc/ssl/certs/aws-rds-global-bundle.pem
+  AllowedPattern: '^/[A-Za-z0-9._/-]+$'
+ ApiDesiredCount:
+  Type: Number
+  Default: 0
+  MinValue: 0
+  MaxValue: 10
+ WebDesiredCount:
+  Type: Number
+  Default: 0
+  MinValue: 0
+  MaxValue: 10
+ WorkerDesiredCount:
+  Type: Number
+  Default: 0
+  MinValue: 0
+  MaxValue: 10
 
-  VpcCidr:
-    Type: String
-    Default: 10.42.0.0/16
-    AllowedPattern: '^(10\.(?:[0-9]{1,3})\.(?:[0-9]{1,3})\.0/16|172\.(?:1[6-9]|2[0-9]|3[01])\.(?:[0-9]{1,3})\.0/16)$'
-  PublicSubnetACidr:
-    Type: String
-    Default: 10.42.0.0/24
-  PublicSubnetBCidr:
-    Type: String
-    Default: 10.42.1.0/24
-  PrivateSubnetACidr:
-    Type: String
-    Default: 10.42.10.0/24
-  PrivateSubnetBCidr:
-    Type: String
-    Default: 10.42.11.0/24
-  PrivateEgressMode:
-    Type: String
-    Default: VpcEndpoints
-    AllowedValues:
-      - VpcEndpoints
-      - None
-  S3ManagedPrefixListId:
-    Type: String
-    AllowedPattern: '^pl-[a-f0-9]+$'
-  AllowedIngressIpv4Cidr:
-    Type: String
-    AllowedPattern: '^(?:[0-9]{1,3}\.){3}[0-9]{1,3}/(?:[1-9]|[12][0-9]|3[0-2])$'
-  AlbCertificateArn:
-    Type: String
-    AllowedPattern: '^arn:[a-z0-9-]+:acm:[a-z0-9-]+:[0-9]{12}:certificate/[A-Za-z0-9-]+$'
-  ApplicationHostname:
-    Type: String
-    AllowedPattern: '^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.){2,}[a-z](?:[a-z0-9-]{0,61}[a-z0-9])$'
+ VpcCidr:
+  Type: String
+  Default: 10.42.0.0/16
+  AllowedPattern: '^(10\.(?:[0-9]{1,3})\.(?:[0-9]{1,3})\.0/16|172\.(?:1[6-9]|2[0-9]|3[01])\.(?:[0-9]{1,3})\.0/16)$'
+ PublicSubnetACidr:
+  Type: String
+  Default: 10.42.0.0/24
+ PublicSubnetBCidr:
+  Type: String
+  Default: 10.42.1.0/24
+ PrivateSubnetACidr:
+  Type: String
+  Default: 10.42.10.0/24
+ PrivateSubnetBCidr:
+  Type: String
+  Default: 10.42.11.0/24
+ PrivateEgressMode:
+  Type: String
+  Default: VpcEndpoints
+  AllowedValues:
+   - VpcEndpoints
+   - None
+ S3ManagedPrefixListId:
+  Type: String
+  AllowedPattern: '^pl-[a-f0-9]+$'
+ AllowedIngressIpv4Cidr:
+  Type: String
+  AllowedPattern: '^(?:[0-9]{1,3}\.){3}[0-9]{1,3}/(?:[1-9]|[12][0-9]|3[0-2])$'
+ AlbCertificateArn:
+  Type: String
+  AllowedPattern: '^arn:[a-z0-9-]+:acm:[a-z0-9-]+:[0-9]{12}:certificate/[A-Za-z0-9-]+$'
+ ApplicationHostname:
+  Type: String
+  AllowedPattern: '^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.){2,}[a-z](?:[a-z0-9-]{0,61}[a-z0-9])$'
+ CognitoPoolId:
+  Type: String
+  MaxLength: 128
+  AllowedPattern: '^[a-z0-9-]+_[A-Za-z0-9]+$'
+ CognitoLoginHostname:
+  Type: String
+  MaxLength: 253
+  AllowedPattern: '^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])$'
+ CognitoClientId:
+  Type: String
+  MaxLength: 128
+  AllowedPattern: '^[A-Za-z0-9]+$'
+ AuthWalletKeysSecretArn:
+  Type: String
+  NoEcho: true
+  MaxLength: 2048
+  AllowedPattern: '^arn:[a-z0-9-]+:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:[A-Za-z0-9/_+=.@-]+$'
+ AuthWalletKeysKmsKeyArn:
+  Type: String
+  MaxLength: 2048
+  AllowedPattern: '^arn:[a-z0-9-]+:kms:[a-z0-9-]+:[0-9]{12}:key/[a-f0-9-]+$'
 
-  DatabaseName:
-    Type: String
-    Default: crypto_lending
-    AllowedPattern: '^[a-z][a-z0-9_]{0,62}$'
-  DatabaseInstanceClass:
-    Type: String
-    Default: db.t4g.micro
-    AllowedValues: [db.t4g.micro, db.t4g.small, db.t4g.medium]
-  DatabaseAllocatedStorageGiB:
-    Type: Number
-    Default: 20
-    MinValue: 20
-    MaxValue: 100
-  PostgresEngineVersion:
-    Type: String
-    AllowedPattern: '^16\.[0-9]{1,2}$'
-  DatabaseDeletionProtection:
-    Type: String
-    Default: 'false'
-    AllowedValues: ['true', 'false']
-  EnableDatabaseMultiAz:
-    Type: String
-    Default: 'false'
-    AllowedValues: ['true', 'false']
-  RedisNodeType:
-    Type: String
-    Default: cache.t4g.micro
-    AllowedValues: [cache.t4g.micro, cache.t4g.small, cache.t4g.medium]
-  EnableRedisReplica:
-    Type: String
-    Default: 'false'
-    AllowedValues: ['true', 'false']
-  ApiDatabaseCredentialPhase:
-    Type: String
-    Default: A_ONLY
-    AllowedValues: [A_ONLY, BOTH_USE_A, BOTH_USE_B, B_ONLY]
-  WorkerDatabaseCredentialPhase:
-    Type: String
-    Default: A_ONLY
-    AllowedValues: [A_ONLY, BOTH_USE_A, BOTH_USE_B, B_ONLY]
-  RedisCredentialPhase:
-    Type: String
-    Default: A_ONLY
-    AllowedValues: [A_ONLY, BOTH_USE_A, BOTH_USE_B, B_ONLY]
-  RedisOperatorMode:
-    Type: String
-    Default: DISABLED
-    AllowedValues: [DISABLED, ENABLED]
-  StatefulBackupRetentionDays:
-    Type: Number
-    Default: 1
-    MinValue: 1
-    MaxValue: 7
+ DatabaseName:
+  Type: String
+  Default: crypto_lending
+  AllowedPattern: '^[a-z][a-z0-9_]{0,62}$'
+ DatabaseInstanceClass:
+  Type: String
+  Default: db.t4g.micro
+  AllowedValues: [db.t4g.micro, db.t4g.small, db.t4g.medium]
+ DatabaseAllocatedStorageGiB:
+  Type: Number
+  Default: 20
+  MinValue: 20
+  MaxValue: 100
+ PostgresEngineVersion:
+  Type: String
+  AllowedPattern: '^16\.[0-9]{1,2}$'
+ DatabaseDeletionProtection:
+  Type: String
+  Default: 'false'
+  AllowedValues: ['true', 'false']
+ EnableDatabaseMultiAz:
+  Type: String
+  Default: 'false'
+  AllowedValues: ['true', 'false']
+ RedisNodeType:
+  Type: String
+  Default: cache.t4g.micro
+  AllowedValues: [cache.t4g.micro, cache.t4g.small, cache.t4g.medium]
+ EnableRedisReplica:
+  Type: String
+  Default: 'false'
+  AllowedValues: ['true', 'false']
+ ApiDatabaseCredentialPhase:
+  Type: String
+  Default: A_ONLY
+  AllowedValues: [A_ONLY, BOTH_USE_A, BOTH_USE_B, B_ONLY]
+ WorkerDatabaseCredentialPhase:
+  Type: String
+  Default: A_ONLY
+  AllowedValues: [A_ONLY, BOTH_USE_A, BOTH_USE_B, B_ONLY]
+ RedisCredentialPhase:
+  Type: String
+  Default: A_ONLY
+  AllowedValues: [A_ONLY, BOTH_USE_A, BOTH_USE_B, B_ONLY]
+ RedisOperatorMode:
+  Type: String
+  Default: DISABLED
+  AllowedValues: [DISABLED, ENABLED]
+ StatefulBackupRetentionDays:
+  Type: Number
+  Default: 1
+  MinValue: 1
+  MaxValue: 7
 
-  SqsMaxReceiveCount:
-    Type: Number
-    Default: 3
-    MinValue: 1
-    MaxValue: 100
-  SqsVisibilityTimeoutSeconds:
-    Type: Number
-    Default: 30
-    MinValue: 1
-    MaxValue: 43200
+ SqsMaxReceiveCount:
+  Type: Number
+  Default: 3
+  MinValue: 1
+  MaxValue: 100
+ SqsVisibilityTimeoutSeconds:
+  Type: Number
+  Default: 30
+  MinValue: 1
+  MaxValue: 43200
 
-  LogRetentionDays:
-    Type: Number
-    Default: 14
-    AllowedValues: [1, 3, 5, 7, 14, 30, 60, 90]
-  EnableOperationalAlarms:
-    Type: String
-    Default: 'true'
-    AllowedValues: ['true', 'false']
-  EnableOperationalDashboard:
-    Type: String
-    Default: 'false'
-    AllowedValues: ['true', 'false']
-  EnableContainerInsights:
-    Type: String
-    Default: disabled
-    AllowedValues: [enabled, disabled]
+ LogRetentionDays:
+  Type: Number
+  Default: 14
+  AllowedValues: [1, 3, 5, 7, 14, 30, 60, 90]
+ EnableOperationalAlarms:
+  Type: String
+  Default: 'true'
+  AllowedValues: ['true', 'false']
+ AlarmTopicArn:
+  Type: String
+  Default: NONE
+  AllowedPattern: '^(?:NONE|arn:(?:aws|aws-cn|aws-us-gov):sns:[a-z0-9-]+:[0-9]{12}:[A-Za-z0-9_-]{1,256})$'
+ EnableOperationalDashboard:
+  Type: String
+  Default: 'false'
+  AllowedValues: ['true', 'false']
+ EnableContainerInsights:
+  Type: String
+  Default: disabled
+  AllowedValues: [enabled, disabled]
 
 Rules:
-  ExplicitBillingAcknowledgementRequired:
-    Assertions:
-      - Assert: !Equals
-          - !Ref BillingAcknowledgement
-          - I_ACKNOWLEDGE_THIS_CREATES_BILLABLE_AWS_RESOURCES
-        AssertDescription: Explicit billing acknowledgement is required before deployment.
-  NoPrivateEgressRequiresStoppedServices:
-    Assertions:
-      - Assert: !Or
-          - !Not
-            - !Equals
-              - !Ref PrivateEgressMode
-              - None
-          - !And
-            - !Equals
-              - !Ref ApiDesiredCount
-              - 0
-            - !Equals
-              - !Ref WebDesiredCount
-              - 0
-            - !Equals
-              - !Ref WorkerDesiredCount
-              - 0
-        AssertDescription: None mode requires zero ECS desired counts.
-  PublicIngressMustBeRestricted:
-    Assertions:
-      - Assert: !Not [!Equals [!Ref AllowedIngressIpv4Cidr, 0.0.0.0/0]]
-        AssertDescription: Public ingress must exclude 0.0.0.0/0.
-
+ ExplicitBillingAcknowledgementRequired:
+  Assertions:
+   - Assert: !Equals
+      - !Ref BillingAcknowledgement
+      - I_ACKNOWLEDGE_THIS_CREATES_BILLABLE_AWS_RESOURCES
+     AssertDescription: Billing consent is required.
+ NoPrivateEgressRequiresStoppedServices:
+  Assertions:
+   - Assert: !Or
+      - !Not
+        - !Equals
+          - !Ref PrivateEgressMode
+          - None
+      - !And
+        - !Equals
+          - !Ref ApiDesiredCount
+          - 0
+        - !Equals
+          - !Ref WebDesiredCount
+          - 0
+        - !Equals
+          - !Ref WorkerDesiredCount
+          - 0
+     AssertDescription: None requires stopped services.
+ PublicIngressMustBeRestricted:
+  Assertions:
+   - Assert: !Not [!Equals [!Ref AllowedIngressIpv4Cidr, 0.0.0.0/0]]
+     AssertDescription: Public ingress must be restricted.
 Conditions:
-  UseVpcEndpoints: !Equals [!Ref PrivateEgressMode, VpcEndpoints]
-  ProtectDatabase: !Equals [!Ref DatabaseDeletionProtection, 'true']
-  UseDatabaseMultiAz: !Equals [!Ref EnableDatabaseMultiAz, 'true']
-  UseRedisReplica: !Equals [!Ref EnableRedisReplica, 'true']
-  CreateOperationalAlarms: !Equals [!Ref EnableOperationalAlarms, 'true']
-  CreateOperationalDashboard: !Equals [!Ref EnableOperationalDashboard, 'true']
+ UseVpcEndpoints: !Equals [!Ref PrivateEgressMode, VpcEndpoints]
+ ProtectDatabase: !Equals [!Ref DatabaseDeletionProtection, 'true']
+ UseDatabaseMultiAz: !Equals [!Ref EnableDatabaseMultiAz, 'true']
+ UseRedisReplica: !Equals [!Ref EnableRedisReplica, 'true']
+ CreateOperationalDashboard: !Equals [!Ref EnableOperationalDashboard, 'true']
 
 Resources:
-  ApplicationDataKey:
-    Type: AWS::KMS::Key
-    DeletionPolicy: Retain
-    UpdateReplacePolicy: Retain
-    Properties:
-      EnableKeyRotation: true
-      PendingWindowInDays: 30
-      KeyPolicy:
-        Version: '2012-10-17'
-        Statement:
-          - Sid: AccountAdministrationAndIamDelegation
-            Effect: Allow
-            Principal:
-              AWS: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:root
-            Action: kms:*
-            Resource: '*'
-          - Sid: SqsDataKeyUse
-            Effect: Allow
-            Principal:
-              Service: sqs.amazonaws.com
-            Action:
-              - kms:Decrypt
-              - kms:GenerateDataKey
-            Resource: '*'
-            Condition:
-              StringEquals:
-                aws:SourceAccount: !Ref AWS::AccountId
-              ArnLike:
-                aws:SourceArn: !Sub arn:${AWS::Partition}:sqs:${AWS::Region}:${AWS::AccountId}:crypto-lending-${EnvironmentName}-jobs*
+ ApplicationDataKey:
+  Type: AWS::KMS::Key
+  DeletionPolicy: Retain
+  UpdateReplacePolicy: Retain
+  Properties:
+   EnableKeyRotation: true
+   PendingWindowInDays: 30
+   KeyPolicy:
+    Version: '2012-10-17'
+    Statement:
+     - Sid: AccountAdministrationAndIamDelegation
+       Effect: Allow
+       Principal:
+        AWS: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:root
+       Action: kms:*
+       Resource: '*'
+     - Sid: SqsDataKeyUse
+       Effect: Allow
+       Principal:
+        Service: sqs.amazonaws.com
+       Action:
+        - kms:Decrypt
+        - kms:GenerateDataKey
+       Resource: '*'
+       Condition:
+        StringEquals:
+         aws:SourceAccount: !Ref AWS::AccountId
+        ArnLike:
+         aws:SourceArn:
+          - !Sub arn:${AWS::Partition}:sqs:${AWS::Region}:${AWS::AccountId}:crypto-lending-${EnvironmentName}-jobs*
+          - !Sub arn:${AWS::Partition}:sqs:${AWS::Region}:${AWS::AccountId}:crypto-lending-${EnvironmentName}-balance-sync*
 
-  ApplicationDataKeyAlias:
-    Type: AWS::KMS::Alias
-    Properties:
-      AliasName: !Sub alias/crypto-lending-${EnvironmentName}-data
-      TargetKeyId: !Ref ApplicationDataKey
+ ApplicationDataKeyAlias:
+  Type: AWS::KMS::Alias
+  Properties:
+   AliasName: !Sub alias/crypto-lending-${EnvironmentName}-data
+   TargetKeyId: !Ref ApplicationDataKey
 
-  ApplicationLogsKey:
-    Type: AWS::KMS::Key
-    DeletionPolicy: Retain
-    UpdateReplacePolicy: Retain
-    Properties:
-      EnableKeyRotation: true
-      PendingWindowInDays: 30
-      KeyPolicy:
-        Version: '2012-10-17'
-        Statement:
-          - Sid: AccountAdministrationAndIamDelegation
-            Effect: Allow
-            Principal:
-              AWS: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:root
-            Action: kms:*
-            Resource: '*'
-          - Sid: CloudWatchLogsEncryption
-            Effect: Allow
-            Principal:
-              Service: !Sub logs.${AWS::Region}.${AWS::URLSuffix}
-            Action:
-              - kms:Encrypt*
-              - kms:Decrypt*
-              - kms:ReEncrypt*
-              - kms:GenerateDataKey*
-              - kms:Describe*
-            Resource: '*'
-            Condition:
-              ArnLike:
-                kms:EncryptionContext:aws:logs:arn: !Sub arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/crypto-lending/${EnvironmentName}/*
+ ApplicationLogsKey:
+  Type: AWS::KMS::Key
+  DeletionPolicy: Retain
+  UpdateReplacePolicy: Retain
+  Properties:
+   EnableKeyRotation: true
+   PendingWindowInDays: 30
+   KeyPolicy:
+    Version: '2012-10-17'
+    Statement:
+     - Sid: AccountAdministrationAndIamDelegation
+       Effect: Allow
+       Principal:
+        AWS: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:root
+       Action: kms:*
+       Resource: '*'
+     - Sid: CloudWatchLogsEncryption
+       Effect: Allow
+       Principal:
+        Service: !Sub logs.${AWS::Region}.${AWS::URLSuffix}
+       Action:
+        - kms:Encrypt*
+        - kms:Decrypt*
+        - kms:ReEncrypt*
+        - kms:GenerateDataKey*
+        - kms:Describe*
+       Resource: '*'
+       Condition:
+        ArnLike:
+         kms:EncryptionContext:aws:logs:arn: !Sub arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/crypto-lending/${EnvironmentName}/*
 
-  ApplicationLogsKeyAlias:
-    Type: AWS::KMS::Alias
-    Properties:
-      AliasName: !Sub alias/crypto-lending-${EnvironmentName}-logs
-      TargetKeyId: !Ref ApplicationLogsKey
+ ApplicationLogsKeyAlias:
+  Type: AWS::KMS::Alias
+  Properties:
+   AliasName: !Sub alias/crypto-lending-${EnvironmentName}-logs
+   TargetKeyId: !Ref ApplicationLogsKey
 
-  Vpc:
-    Type: AWS::EC2::VPC
-    Properties:
-      CidrBlock: !Ref VpcCidr
-      EnableDnsHostnames: true
-      EnableDnsSupport: true
-      InstanceTenancy: default
+ Vpc:
+  Type: AWS::EC2::VPC
+  Properties:
+   CidrBlock: !Ref VpcCidr
+   EnableDnsHostnames: true
+   EnableDnsSupport: true
+   InstanceTenancy: default
 
-  InternetGateway:
-    Type: AWS::EC2::InternetGateway
+ InternetGateway:
+  Type: AWS::EC2::InternetGateway
 
-  VpcGatewayAttachment:
-    Type: AWS::EC2::VPCGatewayAttachment
-    Properties:
-      InternetGatewayId: !Ref InternetGateway
-      VpcId: !Ref Vpc
+ VpcGatewayAttachment:
+  Type: AWS::EC2::VPCGatewayAttachment
+  Properties:
+   InternetGatewayId: !Ref InternetGateway
+   VpcId: !Ref Vpc
 
-  PublicSubnetA:
-    Type: AWS::EC2::Subnet
-    Properties:
-      AvailabilityZone: !Select [0, !GetAZs '']
-      CidrBlock: !Ref PublicSubnetACidr
-      MapPublicIpOnLaunch: false
-      VpcId: !Ref Vpc
+ PublicSubnetA:
+  Type: AWS::EC2::Subnet
+  Properties:
+   AvailabilityZone: !Select [0, !GetAZs '']
+   CidrBlock: !Ref PublicSubnetACidr
+   MapPublicIpOnLaunch: false
+   VpcId: !Ref Vpc
 
-  PublicSubnetB:
-    Type: AWS::EC2::Subnet
-    Properties:
-      AvailabilityZone: !Select [1, !GetAZs '']
-      CidrBlock: !Ref PublicSubnetBCidr
-      MapPublicIpOnLaunch: false
-      VpcId: !Ref Vpc
+ PublicSubnetB:
+  Type: AWS::EC2::Subnet
+  Properties:
+   AvailabilityZone: !Select [1, !GetAZs '']
+   CidrBlock: !Ref PublicSubnetBCidr
+   MapPublicIpOnLaunch: false
+   VpcId: !Ref Vpc
 
-  PrivateSubnetA:
-    Type: AWS::EC2::Subnet
-    Properties:
-      AvailabilityZone: !Select [0, !GetAZs '']
-      CidrBlock: !Ref PrivateSubnetACidr
-      MapPublicIpOnLaunch: false
-      VpcId: !Ref Vpc
+ PrivateSubnetA:
+  Type: AWS::EC2::Subnet
+  Properties:
+   AvailabilityZone: !Select [0, !GetAZs '']
+   CidrBlock: !Ref PrivateSubnetACidr
+   MapPublicIpOnLaunch: false
+   VpcId: !Ref Vpc
 
-  PrivateSubnetB:
-    Type: AWS::EC2::Subnet
-    Properties:
-      AvailabilityZone: !Select [1, !GetAZs '']
-      CidrBlock: !Ref PrivateSubnetBCidr
-      MapPublicIpOnLaunch: false
-      VpcId: !Ref Vpc
+ PrivateSubnetB:
+  Type: AWS::EC2::Subnet
+  Properties:
+   AvailabilityZone: !Select [1, !GetAZs '']
+   CidrBlock: !Ref PrivateSubnetBCidr
+   MapPublicIpOnLaunch: false
+   VpcId: !Ref Vpc
 
-  PublicRouteTable:
-    Type: AWS::EC2::RouteTable
-    Properties:
-      VpcId: !Ref Vpc
+ PublicRouteTable:
+  Type: AWS::EC2::RouteTable
+  Properties:
+   VpcId: !Ref Vpc
 
-  PublicDefaultRoute:
-    Type: AWS::EC2::Route
-    DependsOn: VpcGatewayAttachment
-    Properties:
-      DestinationCidrBlock: 0.0.0.0/0
-      GatewayId: !Ref InternetGateway
-      RouteTableId: !Ref PublicRouteTable
+ PublicDefaultRoute:
+  Type: AWS::EC2::Route
+  DependsOn: VpcGatewayAttachment
+  Properties:
+   DestinationCidrBlock: 0.0.0.0/0
+   GatewayId: !Ref InternetGateway
+   RouteTableId: !Ref PublicRouteTable
 
-  PublicSubnetARouteTableAssociation:
-    Type: AWS::EC2::SubnetRouteTableAssociation
-    Properties:
-      RouteTableId: !Ref PublicRouteTable
-      SubnetId: !Ref PublicSubnetA
+ PublicSubnetARouteTableAssociation:
+  Type: AWS::EC2::SubnetRouteTableAssociation
+  Properties:
+   RouteTableId: !Ref PublicRouteTable
+   SubnetId: !Ref PublicSubnetA
 
-  PublicSubnetBRouteTableAssociation:
-    Type: AWS::EC2::SubnetRouteTableAssociation
-    Properties:
-      RouteTableId: !Ref PublicRouteTable
-      SubnetId: !Ref PublicSubnetB
+ PublicSubnetBRouteTableAssociation:
+  Type: AWS::EC2::SubnetRouteTableAssociation
+  Properties:
+   RouteTableId: !Ref PublicRouteTable
+   SubnetId: !Ref PublicSubnetB
 
-  PrivateRouteTableA:
-    Type: AWS::EC2::RouteTable
-    Properties:
-      VpcId: !Ref Vpc
+ PrivateRouteTableA:
+  Type: AWS::EC2::RouteTable
+  Properties:
+   VpcId: !Ref Vpc
 
-  PrivateRouteTableB:
-    Type: AWS::EC2::RouteTable
-    Properties:
-      VpcId: !Ref Vpc
+ PrivateRouteTableB:
+  Type: AWS::EC2::RouteTable
+  Properties:
+   VpcId: !Ref Vpc
 
-  PrivateSubnetARouteTableAssociation:
-    Type: AWS::EC2::SubnetRouteTableAssociation
-    Properties:
-      RouteTableId: !Ref PrivateRouteTableA
-      SubnetId: !Ref PrivateSubnetA
+ PrivateSubnetARouteTableAssociation:
+  Type: AWS::EC2::SubnetRouteTableAssociation
+  Properties:
+   RouteTableId: !Ref PrivateRouteTableA
+   SubnetId: !Ref PrivateSubnetA
 
-  PrivateSubnetBRouteTableAssociation:
-    Type: AWS::EC2::SubnetRouteTableAssociation
-    Properties:
-      RouteTableId: !Ref PrivateRouteTableB
-      SubnetId: !Ref PrivateSubnetB
+ PrivateSubnetBRouteTableAssociation:
+  Type: AWS::EC2::SubnetRouteTableAssociation
+  Properties:
+   RouteTableId: !Ref PrivateRouteTableB
+   SubnetId: !Ref PrivateSubnetB
 
-  LoadBalancerSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: Ingress to the public non-production application load balancer
-      VpcId: !Ref Vpc
-      SecurityGroupIngress:
-        - CidrIp: !Ref AllowedIngressIpv4Cidr
-          Description: HTTP ingress and optional HTTPS redirect
-          FromPort: 80
-          IpProtocol: tcp
-          ToPort: 80
-      SecurityGroupEgress: [{ CidrIp: 127.0.0.1/32, IpProtocol: '-1' }]
-
-  LoadBalancerHttpsIngress:
-    Type: AWS::EC2::SecurityGroupIngress
-    Properties:
-      CidrIp: !Ref AllowedIngressIpv4Cidr
-      FromPort: 443
-      GroupId: !Ref LoadBalancerSecurityGroup
+ LoadBalancerSecurityGroup:
+  Type: AWS::EC2::SecurityGroup
+  Properties:
+   GroupDescription: Public load balancer
+   VpcId: !Ref Vpc
+   SecurityGroupIngress:
+    - CidrIp: !Ref AllowedIngressIpv4Cidr
+      Description: HTTP ingress
+      FromPort: 80
       IpProtocol: tcp
-      ToPort: 443
+      ToPort: 80
+   SecurityGroupEgress: [{ CidrIp: 127.0.0.1/32, IpProtocol: '-1' }]
 
-  WebTaskSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: Web tasks
-      VpcId: !Ref Vpc
-      SecurityGroupEgress: [{ CidrIp: 127.0.0.1/32, IpProtocol: '-1' }]
+ LoadBalancerHttpsIngress:
+  Type: AWS::EC2::SecurityGroupIngress
+  Properties:
+   CidrIp: !Ref AllowedIngressIpv4Cidr
+   FromPort: 443
+   GroupId: !Ref LoadBalancerSecurityGroup
+   IpProtocol: tcp
+   ToPort: 443
 
-  LoadBalancerToWebEgress:
-    Type: AWS::EC2::SecurityGroupEgress
-    Properties:
-      DestinationSecurityGroupId: !Ref WebTaskSecurityGroup
-      FromPort: 3000
-      GroupId: !Ref LoadBalancerSecurityGroup
-      IpProtocol: tcp
-      ToPort: 3000
+ WebTaskSecurityGroup:
+  Type: AWS::EC2::SecurityGroup
+  Properties:
+   GroupDescription: Web tasks
+   VpcId: !Ref Vpc
+   SecurityGroupEgress: [{ CidrIp: 127.0.0.1/32, IpProtocol: '-1' }]
 
-  LoadBalancerToWebIngress:
-    Type: AWS::EC2::SecurityGroupIngress
-    Properties:
-      FromPort: 3000
-      GroupId: !Ref WebTaskSecurityGroup
-      IpProtocol: tcp
-      SourceSecurityGroupId: !Ref LoadBalancerSecurityGroup
-      ToPort: 3000
+ LoadBalancerToWebEgress:
+  Type: AWS::EC2::SecurityGroupEgress
+  Properties:
+   DestinationSecurityGroupId: !Ref WebTaskSecurityGroup
+   FromPort: 3000
+   GroupId: !Ref LoadBalancerSecurityGroup
+   IpProtocol: tcp
+   ToPort: 3000
 
-  DatabaseSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: PostgreSQL ingress only from application tasks
-      VpcId: !Ref Vpc
-      SecurityGroupEgress: [{ CidrIp: 127.0.0.1/32, IpProtocol: '-1' }]
+ LoadBalancerToWebIngress:
+  Type: AWS::EC2::SecurityGroupIngress
+  Properties:
+   FromPort: 3000
+   GroupId: !Ref WebTaskSecurityGroup
+   IpProtocol: tcp
+   SourceSecurityGroupId: !Ref LoadBalancerSecurityGroup
+   ToPort: 3000
 
-  RedisSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: Redis TLS ingress only from application tasks
-      VpcId: !Ref Vpc
-      SecurityGroupEgress: [{ CidrIp: 127.0.0.1/32, IpProtocol: '-1' }]
+ DatabaseSecurityGroup:
+  Type: AWS::EC2::SecurityGroup
+  Properties:
+   GroupDescription: PostgreSQL from app tasks
+   VpcId: !Ref Vpc
+   SecurityGroupEgress: [{ CidrIp: 127.0.0.1/32, IpProtocol: '-1' }]
 
-  InterfaceEndpointSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Condition: UseVpcEndpoints
-    Properties:
-      GroupDescription: AWS PrivateLink endpoints reachable only by application tasks
-      VpcId: !Ref Vpc
-      SecurityGroupEgress: [{ CidrIp: 127.0.0.1/32, IpProtocol: '-1' }]
+ RedisSecurityGroup:
+  Type: AWS::EC2::SecurityGroup
+  Properties:
+   GroupDescription: Redis TLS from app tasks
+   VpcId: !Ref Vpc
+   SecurityGroupEgress: [{ CidrIp: 127.0.0.1/32, IpProtocol: '-1' }]
 
-  WebTaskDnsUdpEgress:
-    Type: AWS::EC2::SecurityGroupEgress
-    Properties:
-      CidrIp: !Ref VpcCidr
-      FromPort: 53
-      GroupId: !Ref WebTaskSecurityGroup
-      IpProtocol: udp
-      ToPort: 53
+ InterfaceEndpointSecurityGroup:
+  Type: AWS::EC2::SecurityGroup
+  Condition: UseVpcEndpoints
+  Properties:
+   GroupDescription: PrivateLink from app tasks
+   VpcId: !Ref Vpc
+   SecurityGroupEgress: [{ CidrIp: 127.0.0.1/32, IpProtocol: '-1' }]
 
-  WebTaskDnsTcpEgress:
-    Type: AWS::EC2::SecurityGroupEgress
-    Properties:
-      CidrIp: !Ref VpcCidr
-      FromPort: 53
-      GroupId: !Ref WebTaskSecurityGroup
-      IpProtocol: tcp
-      ToPort: 53
+ WebTaskDnsUdpEgress:
+  Type: AWS::EC2::SecurityGroupEgress
+  Properties:
+   CidrIp: !Ref VpcCidr
+   FromPort: 53
+   GroupId: !Ref WebTaskSecurityGroup
+   IpProtocol: udp
+   ToPort: 53
 
-  WebTaskToInterfaceEndpointEgress:
-    Type: AWS::EC2::SecurityGroupEgress
-    Condition: UseVpcEndpoints
-    Properties:
-      DestinationSecurityGroupId: !Ref InterfaceEndpointSecurityGroup
-      FromPort: 443
-      GroupId: !Ref WebTaskSecurityGroup
-      IpProtocol: tcp
-      ToPort: 443
+ WebTaskDnsTcpEgress:
+  Type: AWS::EC2::SecurityGroupEgress
+  Properties:
+   CidrIp: !Ref VpcCidr
+   FromPort: 53
+   GroupId: !Ref WebTaskSecurityGroup
+   IpProtocol: tcp
+   ToPort: 53
 
-  WebTaskToInterfaceEndpointIngress:
-    Type: AWS::EC2::SecurityGroupIngress
-    Condition: UseVpcEndpoints
-    Properties:
-      FromPort: 443
-      GroupId: !Ref InterfaceEndpointSecurityGroup
-      IpProtocol: tcp
-      SourceSecurityGroupId: !Ref WebTaskSecurityGroup
-      ToPort: 443
+ WebTaskToInterfaceEndpointEgress:
+  Type: AWS::EC2::SecurityGroupEgress
+  Condition: UseVpcEndpoints
+  Properties:
+   DestinationSecurityGroupId: !Ref InterfaceEndpointSecurityGroup
+   FromPort: 443
+   GroupId: !Ref WebTaskSecurityGroup
+   IpProtocol: tcp
+   ToPort: 443
 
-  EcrApiEndpoint:
-    Type: AWS::EC2::VPCEndpoint
-    Condition: UseVpcEndpoints
-    Properties:
-      PrivateDnsEnabled: true
-      SecurityGroupIds:
-        - !Ref InterfaceEndpointSecurityGroup
-      ServiceName: !Sub com.amazonaws.${AWS::Region}.ecr.api
-      SubnetIds:
-        - !Ref PrivateSubnetA
-        - !Ref PrivateSubnetB
-      VpcEndpointType: Interface
-      VpcId: !Ref Vpc
+ WebTaskToInterfaceEndpointIngress:
+  Type: AWS::EC2::SecurityGroupIngress
+  Condition: UseVpcEndpoints
+  Properties:
+   FromPort: 443
+   GroupId: !Ref InterfaceEndpointSecurityGroup
+   IpProtocol: tcp
+   SourceSecurityGroupId: !Ref WebTaskSecurityGroup
+   ToPort: 443
 
-  EcrDockerEndpoint:
-    Type: AWS::EC2::VPCEndpoint
-    Condition: UseVpcEndpoints
-    Properties:
-      PrivateDnsEnabled: true
-      SecurityGroupIds:
-        - !Ref InterfaceEndpointSecurityGroup
-      ServiceName: !Sub com.amazonaws.${AWS::Region}.ecr.dkr
-      SubnetIds:
-        - !Ref PrivateSubnetA
-        - !Ref PrivateSubnetB
-      VpcEndpointType: Interface
-      VpcId: !Ref Vpc
+ EcrApiEndpoint:
+  Type: AWS::EC2::VPCEndpoint
+  Condition: UseVpcEndpoints
+  Properties:
+   PrivateDnsEnabled: true
+   SecurityGroupIds:
+    - !Ref InterfaceEndpointSecurityGroup
+   ServiceName: !Sub com.amazonaws.${AWS::Region}.ecr.api
+   SubnetIds:
+    - !Ref PrivateSubnetA
+    - !Ref PrivateSubnetB
+   VpcEndpointType: Interface
+   VpcId: !Ref Vpc
 
-  CloudWatchLogsEndpoint:
-    Type: AWS::EC2::VPCEndpoint
-    Condition: UseVpcEndpoints
-    Properties:
-      PrivateDnsEnabled: true
-      SecurityGroupIds:
-        - !Ref InterfaceEndpointSecurityGroup
-      ServiceName: !Sub com.amazonaws.${AWS::Region}.logs
-      SubnetIds:
-        - !Ref PrivateSubnetA
-        - !Ref PrivateSubnetB
-      VpcEndpointType: Interface
-      VpcId: !Ref Vpc
+ EcrDockerEndpoint:
+  Type: AWS::EC2::VPCEndpoint
+  Condition: UseVpcEndpoints
+  Properties:
+   PrivateDnsEnabled: true
+   SecurityGroupIds:
+    - !Ref InterfaceEndpointSecurityGroup
+   ServiceName: !Sub com.amazonaws.${AWS::Region}.ecr.dkr
+   SubnetIds:
+    - !Ref PrivateSubnetA
+    - !Ref PrivateSubnetB
+   VpcEndpointType: Interface
+   VpcId: !Ref Vpc
 
-  SecretsManagerEndpoint:
-    Type: AWS::EC2::VPCEndpoint
-    Condition: UseVpcEndpoints
-    Properties:
-      PrivateDnsEnabled: true
-      SecurityGroupIds:
-        - !Ref InterfaceEndpointSecurityGroup
-      ServiceName: !Sub com.amazonaws.${AWS::Region}.secretsmanager
-      SubnetIds:
-        - !Ref PrivateSubnetA
-        - !Ref PrivateSubnetB
-      VpcEndpointType: Interface
-      VpcId: !Ref Vpc
+ CloudWatchLogsEndpoint:
+  Type: AWS::EC2::VPCEndpoint
+  Condition: UseVpcEndpoints
+  Properties:
+   PrivateDnsEnabled: true
+   SecurityGroupIds:
+    - !Ref InterfaceEndpointSecurityGroup
+   ServiceName: !Sub com.amazonaws.${AWS::Region}.logs
+   SubnetIds:
+    - !Ref PrivateSubnetA
+    - !Ref PrivateSubnetB
+   VpcEndpointType: Interface
+   VpcId: !Ref Vpc
 
-  SqsEndpoint:
-    Type: AWS::EC2::VPCEndpoint
-    Condition: UseVpcEndpoints
-    Properties:
-      PrivateDnsEnabled: true
-      SecurityGroupIds:
-        - !Ref InterfaceEndpointSecurityGroup
-      ServiceName: !Sub com.amazonaws.${AWS::Region}.sqs
-      SubnetIds:
-        - !Ref PrivateSubnetA
-        - !Ref PrivateSubnetB
-      VpcEndpointType: Interface
-      VpcId: !Ref Vpc
+ SecretsManagerEndpoint:
+  Type: AWS::EC2::VPCEndpoint
+  Condition: UseVpcEndpoints
+  Properties:
+   PrivateDnsEnabled: true
+   SecurityGroupIds:
+    - !Ref InterfaceEndpointSecurityGroup
+   ServiceName: !Sub com.amazonaws.${AWS::Region}.secretsmanager
+   SubnetIds:
+    - !Ref PrivateSubnetA
+    - !Ref PrivateSubnetB
+   VpcEndpointType: Interface
+   VpcId: !Ref Vpc
 
-  S3GatewayEndpoint:
-    Type: AWS::EC2::VPCEndpoint
-    Condition: UseVpcEndpoints
-    Properties:
-      RouteTableIds:
-        - !Ref PrivateRouteTableA
-        - !Ref PrivateRouteTableB
-      ServiceName: !Sub com.amazonaws.${AWS::Region}.s3
+ SqsEndpoint:
+  Type: AWS::EC2::VPCEndpoint
+  Condition: UseVpcEndpoints
+  Properties:
+   PrivateDnsEnabled: true
+   SecurityGroupIds:
+    - !Ref InterfaceEndpointSecurityGroup
+   ServiceName: !Sub com.amazonaws.${AWS::Region}.sqs
+   SubnetIds:
+    - !Ref PrivateSubnetA
+    - !Ref PrivateSubnetB
+   VpcEndpointType: Interface
+   VpcId: !Ref Vpc
+
+ S3GatewayEndpoint:
+  Type: AWS::EC2::VPCEndpoint
+  Condition: UseVpcEndpoints
+  Properties:
+   RouteTableIds:
+    - !Ref PrivateRouteTableA
+    - !Ref PrivateRouteTableB
+   ServiceName: !Sub com.amazonaws.${AWS::Region}.s3
+   PolicyDocument:
+    Version: '2012-10-17'
+    Statement:
+     - Effect: Allow
+       Principal: '*'
+       Action: s3:GetObject
+       Resource: !Sub arn:${AWS::Partition}:s3:::prod-${AWS::Region}-starport-layer-bucket/*
+   VpcEndpointType: Gateway
+   VpcId: !Ref Vpc
+
+ WebTaskToS3Egress:
+  Type: AWS::EC2::SecurityGroupEgress
+  Condition: UseVpcEndpoints
+  Properties:
+   DestinationPrefixListId: !Ref S3ManagedPrefixListId
+   FromPort: 443
+   GroupId: !Ref WebTaskSecurityGroup
+   IpProtocol: tcp
+   ToPort: 443
+
+ DatabaseSubnetGroup:
+  Type: AWS::RDS::DBSubnetGroup
+  Properties:
+   DBSubnetGroupDescription: !Sub ${EnvironmentName} PostgreSQL
+   SubnetIds:
+    - !Ref PrivateSubnetA
+    - !Ref PrivateSubnetB
+
+ RedisSubnetGroup:
+  Type: AWS::ElastiCache::SubnetGroup
+  Properties:
+   Description: !Sub ${EnvironmentName} Redis
+   SubnetIds:
+    - !Ref PrivateSubnetA
+    - !Ref PrivateSubnetB
+
+ DatabaseCredentialsSecret:
+  Type: AWS::SecretsManager::Secret
+  DeletionPolicy: Retain
+  UpdateReplacePolicy: Retain
+  Properties:
+   GenerateSecretString:
+    ExcludePunctuation: true
+    GenerateStringKey: password
+    IncludeSpace: false
+    PasswordLength: 48
+    SecretStringTemplate: '{"username":"crypto_admin"}'
+   KmsKeyId: !GetAtt ApplicationDataKey.Arn
+
+ DatabaseParameterGroup:
+  Type: AWS::RDS::DBParameterGroup
+  Properties:
+   Description: !Sub ${EnvironmentName} PostgreSQL TLS
+   Family: postgres16
+   Parameters:
+    rds.force_ssl: '1'
+
+ Database:
+  Type: AWS::RDS::DBInstance
+  DeletionPolicy: Snapshot
+  UpdateReplacePolicy: Snapshot
+  Properties:
+   AllocatedStorage: !Ref DatabaseAllocatedStorageGiB
+   AllowMajorVersionUpgrade: false
+   AutoMinorVersionUpgrade: true
+   BackupRetentionPeriod: !Ref StatefulBackupRetentionDays
+   CopyTagsToSnapshot: true
+   DBInstanceClass: !Ref DatabaseInstanceClass
+   DBName: !Ref DatabaseName
+   DBParameterGroupName: !Ref DatabaseParameterGroup
+   DBSubnetGroupName: !Ref DatabaseSubnetGroup
+   DeletionProtection: !If [ProtectDatabase, true, false]
+   EnablePerformanceInsights: false
+   Engine: postgres
+   EngineVersion: !Ref PostgresEngineVersion
+   KmsKeyId: !GetAtt ApplicationDataKey.Arn
+   MasterUsername: !Sub '{{resolve:secretsmanager:${DatabaseCredentialsSecret}:SecretString:username}}'
+   MasterUserPassword: !Sub '{{resolve:secretsmanager:${DatabaseCredentialsSecret}:SecretString:password}}'
+   MonitoringInterval: 0
+   MultiAZ: !If [UseDatabaseMultiAz, true, false]
+   Port: 5432
+   PreferredBackupWindow: 07:00-07:30
+   PreferredMaintenanceWindow: sun:08:00-sun:09:00
+   PubliclyAccessible: false
+   StorageEncrypted: true
+   StorageType: gp3
+   VPCSecurityGroups:
+    - !Ref DatabaseSecurityGroup
+
+ RedisReplicationGroup:
+  Type: AWS::ElastiCache::ReplicationGroup
+  DeletionPolicy: Snapshot
+  UpdateReplacePolicy: Snapshot
+  Properties:
+   AtRestEncryptionEnabled: true
+   AutomaticFailoverEnabled: !If [UseRedisReplica, true, false]
+   AutoMinorVersionUpgrade: true
+   CacheNodeType: !Ref RedisNodeType
+   CacheParameterGroupName: default.redis7
+   CacheSubnetGroupName: !Ref RedisSubnetGroup
+   Engine: redis
+   EngineVersion: '7.1'
+   KmsKeyId: !GetAtt ApplicationDataKey.Arn
+   MultiAZEnabled: !If [UseRedisReplica, true, false]
+   NumCacheClusters: !If [UseRedisReplica, 2, 1]
+   Port: 6379
+   PreferredMaintenanceWindow: sun:09:00-sun:10:00
+   ReplicationGroupDescription: !Sub ${EnvironmentName} Redis
+   SecurityGroupIds:
+    - !Ref RedisSecurityGroup
+   SnapshotRetentionLimit: !Ref StatefulBackupRetentionDays
+   SnapshotWindow: 06:00-07:00
+   TransitEncryptionEnabled: true
+   TransitEncryptionMode: required
+   UserGroupIds:
+    - !GetAtt WorkloadBoundaries.Outputs.RedisApiUserGroupId
+
+ JobDeadLetterQueue:
+  Type: AWS::SQS::Queue
+  Properties:
+   KmsMasterKeyId: !GetAtt ApplicationDataKey.Arn
+   KmsDataKeyReusePeriodSeconds: 300
+   MessageRetentionPeriod: 1209600
+   QueueName: !Sub crypto-lending-${EnvironmentName}-jobs-dlq
+   RedriveAllowPolicy:
+    redrivePermission: byQueue
+    sourceQueueArns:
+     - !Sub arn:${AWS::Partition}:sqs:${AWS::Region}:${AWS::AccountId}:crypto-lending-${EnvironmentName}-jobs
+
+ JobQueue:
+  Type: AWS::SQS::Queue
+  Properties:
+   KmsMasterKeyId: !GetAtt ApplicationDataKey.Arn
+   KmsDataKeyReusePeriodSeconds: 300
+   MessageRetentionPeriod: 345600
+   QueueName: !Sub crypto-lending-${EnvironmentName}-jobs
+   ReceiveMessageWaitTimeSeconds: 10
+   RedrivePolicy:
+    deadLetterTargetArn: !GetAtt JobDeadLetterQueue.Arn
+    maxReceiveCount: !Ref SqsMaxReceiveCount
+   VisibilityTimeout: !Ref SqsVisibilityTimeoutSeconds
+
+ JobQueueTlsPolicy:
+  Type: AWS::SQS::QueuePolicy
+  Properties:
+   Queues:
+    - !Ref JobQueue
+    - !Ref JobDeadLetterQueue
+   PolicyDocument:
+    Version: '2012-10-17'
+    Statement:
+     - Sid: DenyInsecureTransport
+       Effect: Deny
+       Principal: '*'
+       Action: sqs:*
+       Resource:
+        - !GetAtt JobQueue.Arn
+        - !GetAtt JobDeadLetterQueue.Arn
+       Condition:
+        Bool:
+         aws:SecureTransport: 'false'
+
+ BalanceDeadLetterQueue:
+  Type: AWS::SQS::Queue
+  Properties:
+   KmsMasterKeyId: !GetAtt ApplicationDataKey.Arn
+   KmsDataKeyReusePeriodSeconds: 300
+   MessageRetentionPeriod: 1209600
+   QueueName: !Sub crypto-lending-${EnvironmentName}-balance-sync-dlq
+   RedriveAllowPolicy:
+    redrivePermission: byQueue
+    sourceQueueArns:
+     - !Sub arn:${AWS::Partition}:sqs:${AWS::Region}:${AWS::AccountId}:crypto-lending-${EnvironmentName}-balance-sync
+
+ BalanceQueue:
+  Type: AWS::SQS::Queue
+  Properties:
+   KmsMasterKeyId: !GetAtt ApplicationDataKey.Arn
+   KmsDataKeyReusePeriodSeconds: 300
+   MessageRetentionPeriod: 345600
+   QueueName: !Sub crypto-lending-${EnvironmentName}-balance-sync
+   ReceiveMessageWaitTimeSeconds: 10
+   RedrivePolicy:
+    deadLetterTargetArn: !GetAtt BalanceDeadLetterQueue.Arn
+    maxReceiveCount: !Ref SqsMaxReceiveCount
+   VisibilityTimeout: !Ref SqsVisibilityTimeoutSeconds
+
+ BalanceQueueTlsPolicy:
+  Type: AWS::SQS::QueuePolicy
+  Properties:
+   Queues:
+    - !Ref BalanceQueue
+    - !Ref BalanceDeadLetterQueue
+   PolicyDocument:
+    Version: '2012-10-17'
+    Statement:
+     - Sid: DenyInsecureTransport
+       Effect: Deny
+       Principal: '*'
+       Action: sqs:*
+       Resource:
+        - !GetAtt BalanceQueue.Arn
+        - !GetAtt BalanceDeadLetterQueue.Arn
+       Condition:
+        Bool:
+         aws:SecureTransport: 'false'
+
+ ApiLogGroup:
+  Type: AWS::Logs::LogGroup
+  Properties:
+   KmsKeyId: !GetAtt ApplicationLogsKey.Arn
+   LogGroupName: !Sub /crypto-lending/${EnvironmentName}/api
+   RetentionInDays: !Ref LogRetentionDays
+
+ WebLogGroup:
+  Type: AWS::Logs::LogGroup
+  Properties:
+   KmsKeyId: !GetAtt ApplicationLogsKey.Arn
+   LogGroupName: !Sub /crypto-lending/${EnvironmentName}/web
+   RetentionInDays: !Ref LogRetentionDays
+
+ WorkerLogGroup:
+  Type: AWS::Logs::LogGroup
+  Properties:
+   KmsKeyId: !GetAtt ApplicationLogsKey.Arn
+   LogGroupName: !Sub /crypto-lending/${EnvironmentName}/outbox-worker
+   RetentionInDays: !Ref LogRetentionDays
+
+ WorkloadBoundaries:
+  Type: AWS::CloudFormation::Stack
+  Properties:
+   TemplateURL: !Ref WorkloadBoundariesTemplateUrl
+   TimeoutInMinutes: 10
+   Parameters:
+    BillingAcknowledgement: !Ref BillingAcknowledgement
+    DeliveryArtifactSha256: !Ref WorkloadBoundariesTemplateSha256
+    DeliveryArtifactBindingSha256: !Ref WorkloadBoundariesArtifactBindingSha256
+    EnvironmentName: !Ref EnvironmentName
+    DatabaseName: !Ref DatabaseName
+    VpcId: !Ref Vpc
+    LoadBalancerSecurityGroupId: !Ref LoadBalancerSecurityGroup
+    DatabaseSecurityGroupId: !Ref DatabaseSecurityGroup
+    RedisSecurityGroupId: !Ref RedisSecurityGroup
+    PrivateEgressMode: !Ref PrivateEgressMode
+    InterfaceEndpointSecurityGroupId: !If [UseVpcEndpoints, !Ref InterfaceEndpointSecurityGroup, '']
+    S3ManagedPrefixListId: !If [UseVpcEndpoints, !Ref S3ManagedPrefixListId, '']
+    ApplicationDataKeyArn: !GetAtt ApplicationDataKey.Arn
+    AuthWalletKeysSecretArn: !Ref AuthWalletKeysSecretArn
+    AuthWalletKeysKmsKeyArn: !Ref AuthWalletKeysKmsKeyArn
+    ApiLogGroupArn: !GetAtt ApiLogGroup.Arn
+    WorkerLogGroupArn: !GetAtt WorkerLogGroup.Arn
+    ApiImageRepositoryArn: !Sub arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/crypto-lending-api
+    WorkerImageRepositoryArn: !Sub arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/crypto-lending-worker
+    ApiDatabaseCredentialPhase: !Ref ApiDatabaseCredentialPhase
+    WorkerDatabaseCredentialPhase: !Ref WorkerDatabaseCredentialPhase
+    RedisCredentialPhase: !Ref RedisCredentialPhase
+    RedisOperatorMode: !Ref RedisOperatorMode
+   Tags:
+    - Key: WorkloadBoundariesTemplateSha256
+      Value: !Ref WorkloadBoundariesTemplateSha256
+    - Key: WorkloadBoundariesArtifactBindingSha256
+      Value: !Ref WorkloadBoundariesArtifactBindingSha256
+
+ Observability:
+  Type: AWS::CloudFormation::Stack
+  Properties:
+   TemplateURL: !Ref ObservabilityTemplateUrl
+   TimeoutInMinutes: 10
+   Parameters:
+    BillingAcknowledgement: !Ref BillingAcknowledgement
+    DeliveryArtifactSha256: !Ref ObservabilityTemplateSha256
+    DeliveryArtifactBindingSha256: !Ref ObservabilityArtifactBindingSha256
+    EnvironmentName: !Ref EnvironmentName
+    EnableOperationalAlarms: !Ref EnableOperationalAlarms
+    AlarmTopicArn: !Ref AlarmTopicArn
+    EnableOperationalDashboard: !Ref EnableOperationalDashboard
+    LoadBalancerFullName: !GetAtt ApplicationLoadBalancer.LoadBalancerFullName
+    ApiTargetGroupFullName: !GetAtt ApiTargetGroup.TargetGroupFullName
+    DatabaseInstanceIdentifier: !Ref Database
+    RedisCacheClusterIdPrefix: !Ref RedisReplicationGroup
+    JobQueueName: !GetAtt JobQueue.QueueName
+    JobDeadLetterQueueName: !GetAtt JobDeadLetterQueue.QueueName
+    BalanceQueueName: !GetAtt BalanceQueue.QueueName
+    BalanceDeadLetterQueueName: !GetAtt BalanceDeadLetterQueue.QueueName
+    EcsClusterName: !Ref EcsCluster
+    ApiServiceName: !GetAtt ApiService.Name
+    WebServiceName: !GetAtt WebService.Name
+    WorkerServiceName: !GetAtt WorkerService.Name
+    ApiLogGroupName: !Ref ApiLogGroup
+    WorkerLogGroupName: !Ref WorkerLogGroup
+   Tags:
+    - Key: ObservabilityTemplateSha256
+      Value: !Ref ObservabilityTemplateSha256
+    - Key: ObservabilityArtifactBindingSha256
+      Value: !Ref ObservabilityArtifactBindingSha256
+
+ ApplicationImagePullPolicy:
+  Type: AWS::IAM::ManagedPolicy
+  Properties:
+   PolicyDocument:
+    Version: '2012-10-17'
+    Statement:
+     - Effect: Allow
+       Action: ecr:GetAuthorizationToken
+       Resource: '*'
+     - Effect: Allow
+       Action:
+        - ecr:BatchCheckLayerAvailability
+        - ecr:BatchGetImage
+        - ecr:GetDownloadUrlForLayer
+       Resource: !Sub arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/crypto-lending-web
+
+ WebTaskExecutionRole:
+  Type: AWS::IAM::Role
+  Properties:
+   AssumeRolePolicyDocument:
+    Version: '2012-10-17'
+    Statement:
+     - Effect: Allow
+       Principal: { Service: ecs-tasks.amazonaws.com }
+       Action: sts:AssumeRole
+       Condition:
+        StringEquals: { aws:SourceAccount: !Ref AWS::AccountId }
+        ArnLike: { aws:SourceArn: !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:*' }
+   ManagedPolicyArns:
+    - !Ref ApplicationImagePullPolicy
+   Policies:
+    - PolicyName: WriteWebLogs
       PolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal: '*'
-            Action: s3:GetObject
-            Resource: !Sub arn:${AWS::Partition}:s3:::prod-${AWS::Region}-starport-layer-bucket/*
-      VpcEndpointType: Gateway
-      VpcId: !Ref Vpc
+       Version: '2012-10-17'
+       Statement:
+        - Effect: Allow
+          Action: [logs:CreateLogStream, logs:PutLogEvents]
+          Resource: !Sub ${WebLogGroup.Arn}:*
 
-  WebTaskToS3Egress:
-    Type: AWS::EC2::SecurityGroupEgress
-    Condition: UseVpcEndpoints
-    Properties:
-      DestinationPrefixListId: !Ref S3ManagedPrefixListId
-      FromPort: 443
-      GroupId: !Ref WebTaskSecurityGroup
-      IpProtocol: tcp
-      ToPort: 443
-
-  DatabaseSubnetGroup:
-    Type: AWS::RDS::DBSubnetGroup
-    Properties:
-      DBSubnetGroupDescription: !Sub PostgreSQL subnets for ${EnvironmentName}
-      SubnetIds:
-        - !Ref PrivateSubnetA
-        - !Ref PrivateSubnetB
-
-  RedisSubnetGroup:
-    Type: AWS::ElastiCache::SubnetGroup
-    Properties:
-      Description: !Sub Private Redis subnets for ${EnvironmentName}
-      SubnetIds:
-        - !Ref PrivateSubnetA
-        - !Ref PrivateSubnetB
-
-  DatabaseCredentialsSecret:
-    Type: AWS::SecretsManager::Secret
-    DeletionPolicy: Retain
-    UpdateReplacePolicy: Retain
-    Properties:
-      GenerateSecretString:
-        ExcludePunctuation: true
-        GenerateStringKey: password
-        IncludeSpace: false
-        PasswordLength: 48
-        SecretStringTemplate: '{"username":"crypto_admin"}'
-      KmsKeyId: !GetAtt ApplicationDataKey.Arn
-
-  DatabaseParameterGroup:
-    Type: AWS::RDS::DBParameterGroup
-    Properties:
-      Description: !Sub ${EnvironmentName} PostgreSQL TLS policy
-      Family: postgres16
-      Parameters:
-        rds.force_ssl: '1'
-
-  Database:
-    Type: AWS::RDS::DBInstance
-    DeletionPolicy: Snapshot
-    UpdateReplacePolicy: Snapshot
-    Properties:
-      AllocatedStorage: !Ref DatabaseAllocatedStorageGiB
-      AllowMajorVersionUpgrade: false
-      AutoMinorVersionUpgrade: true
-      BackupRetentionPeriod: !Ref StatefulBackupRetentionDays
-      CopyTagsToSnapshot: true
-      DBInstanceClass: !Ref DatabaseInstanceClass
-      DBName: !Ref DatabaseName
-      DBParameterGroupName: !Ref DatabaseParameterGroup
-      DBSubnetGroupName: !Ref DatabaseSubnetGroup
-      DeletionProtection: !If [ProtectDatabase, true, false]
-      EnablePerformanceInsights: false
-      Engine: postgres
-      EngineVersion: !Ref PostgresEngineVersion
-      KmsKeyId: !GetAtt ApplicationDataKey.Arn
-      MasterUsername: !Sub '{{resolve:secretsmanager:${DatabaseCredentialsSecret}:SecretString:username}}'
-      MasterUserPassword: !Sub '{{resolve:secretsmanager:${DatabaseCredentialsSecret}:SecretString:password}}'
-      MonitoringInterval: 0
-      MultiAZ: !If [UseDatabaseMultiAz, true, false]
-      Port: 5432
-      PreferredBackupWindow: 07:00-07:30
-      PreferredMaintenanceWindow: sun:08:00-sun:09:00
-      PubliclyAccessible: false
-      StorageEncrypted: true
-      StorageType: gp3
-      VPCSecurityGroups:
-        - !Ref DatabaseSecurityGroup
-
-  RedisReplicationGroup:
-    Type: AWS::ElastiCache::ReplicationGroup
-    DeletionPolicy: Snapshot
-    UpdateReplacePolicy: Snapshot
-    Properties:
-      AtRestEncryptionEnabled: true
-      AutomaticFailoverEnabled: !If [UseRedisReplica, true, false]
-      AutoMinorVersionUpgrade: true
-      CacheNodeType: !Ref RedisNodeType
-      CacheParameterGroupName: default.redis7
-      CacheSubnetGroupName: !Ref RedisSubnetGroup
-      Engine: redis
-      EngineVersion: '7.1'
-      KmsKeyId: !GetAtt ApplicationDataKey.Arn
-      MultiAZEnabled: !If [UseRedisReplica, true, false]
-      NumCacheClusters: !If [UseRedisReplica, 2, 1]
-      Port: 6379
-      PreferredMaintenanceWindow: sun:09:00-sun:10:00
-      ReplicationGroupDescription: !Sub Crypto Lending ${EnvironmentName} Redis
-      SecurityGroupIds:
-        - !Ref RedisSecurityGroup
-      SnapshotRetentionLimit: !Ref StatefulBackupRetentionDays
-      SnapshotWindow: 06:00-07:00
-      TransitEncryptionEnabled: true
-      TransitEncryptionMode: required
-      UserGroupIds:
-        - !GetAtt WorkloadBoundaries.Outputs.RedisApiUserGroupId
-
-  JobDeadLetterQueue:
-    Type: AWS::SQS::Queue
-    Properties:
-      KmsMasterKeyId: !GetAtt ApplicationDataKey.Arn
-      KmsDataKeyReusePeriodSeconds: 300
-      MessageRetentionPeriod: 1209600
-      QueueName: !Sub crypto-lending-${EnvironmentName}-jobs-dlq
-      RedriveAllowPolicy:
-        redrivePermission: byQueue
-        sourceQueueArns:
-          - !Sub arn:${AWS::Partition}:sqs:${AWS::Region}:${AWS::AccountId}:crypto-lending-${EnvironmentName}-jobs
-
-  JobQueue:
-    Type: AWS::SQS::Queue
-    Properties:
-      KmsMasterKeyId: !GetAtt ApplicationDataKey.Arn
-      KmsDataKeyReusePeriodSeconds: 300
-      MessageRetentionPeriod: 345600
-      QueueName: !Sub crypto-lending-${EnvironmentName}-jobs
-      ReceiveMessageWaitTimeSeconds: 10
-      RedrivePolicy:
-        deadLetterTargetArn: !GetAtt JobDeadLetterQueue.Arn
-        maxReceiveCount: !Ref SqsMaxReceiveCount
-      VisibilityTimeout: !Ref SqsVisibilityTimeoutSeconds
-
-  JobQueueTlsPolicy:
-    Type: AWS::SQS::QueuePolicy
-    Properties:
-      Queues:
-        - !Ref JobQueue
-        - !Ref JobDeadLetterQueue
+ ApiTaskRole:
+  Type: AWS::IAM::Role
+  Properties:
+   AssumeRolePolicyDocument:
+    Version: '2012-10-17'
+    Statement:
+     - Effect: Allow
+       Principal:
+        Service: ecs-tasks.amazonaws.com
+       Action: sts:AssumeRole
+       Condition:
+        StringEquals: { aws:SourceAccount: !Ref AWS::AccountId }
+        ArnLike: { aws:SourceArn: !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:*' }
+   Policies:
+    - PolicyName: ApiJobQueueAccess
       PolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Sid: DenyInsecureTransport
-            Effect: Deny
-            Principal: '*'
-            Action: sqs:*
-            Resource:
-              - !GetAtt JobQueue.Arn
-              - !GetAtt JobDeadLetterQueue.Arn
-            Condition:
-              Bool:
-                aws:SecureTransport: 'false'
+       Version: '2012-10-17'
+       Statement:
+        - Sid: InspectQueueRedriveConfiguration
+          Effect: Allow
+          Action: sqs:GetQueueAttributes
+          Resource:
+           - !GetAtt JobQueue.Arn
+           - !GetAtt JobDeadLetterQueue.Arn
+           - !GetAtt BalanceQueue.Arn
+           - !GetAtt BalanceDeadLetterQueue.Arn
 
-  ApiLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      KmsKeyId: !GetAtt ApplicationLogsKey.Arn
-      LogGroupName: !Sub /crypto-lending/${EnvironmentName}/api
-      RetentionInDays: !Ref LogRetentionDays
-
-  WebLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      KmsKeyId: !GetAtt ApplicationLogsKey.Arn
-      LogGroupName: !Sub /crypto-lending/${EnvironmentName}/web
-      RetentionInDays: !Ref LogRetentionDays
-
-  WorkerLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      KmsKeyId: !GetAtt ApplicationLogsKey.Arn
-      LogGroupName: !Sub /crypto-lending/${EnvironmentName}/outbox-worker
-      RetentionInDays: !Ref LogRetentionDays
-
-  WorkloadBoundaries:
-    Type: AWS::CloudFormation::Stack
-    Properties:
-      TemplateURL: !Ref WorkloadBoundariesTemplateUrl
-      TimeoutInMinutes: 10
-      Parameters:
-        BillingAcknowledgement: !Ref BillingAcknowledgement
-        DeliveryArtifactSha256: !Ref WorkloadBoundariesTemplateSha256
-        DeliveryArtifactBindingSha256: !Ref WorkloadBoundariesArtifactBindingSha256
-        EnvironmentName: !Ref EnvironmentName
-        DatabaseName: !Ref DatabaseName
-        VpcId: !Ref Vpc
-        LoadBalancerSecurityGroupId: !Ref LoadBalancerSecurityGroup
-        DatabaseSecurityGroupId: !Ref DatabaseSecurityGroup
-        RedisSecurityGroupId: !Ref RedisSecurityGroup
-        PrivateEgressMode: !Ref PrivateEgressMode
-        InterfaceEndpointSecurityGroupId:
-          !If [UseVpcEndpoints, !Ref InterfaceEndpointSecurityGroup, '']
-        S3ManagedPrefixListId: !If [UseVpcEndpoints, !Ref S3ManagedPrefixListId, '']
-        ApplicationDataKeyArn: !GetAtt ApplicationDataKey.Arn
-        ApiLogGroupArn: !GetAtt ApiLogGroup.Arn
-        WorkerLogGroupArn: !GetAtt WorkerLogGroup.Arn
-        ApiImageRepositoryArn: !Sub arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/crypto-lending-api
-        WorkerImageRepositoryArn: !Sub arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/crypto-lending-worker
-        ApiDatabaseCredentialPhase: !Ref ApiDatabaseCredentialPhase
-        WorkerDatabaseCredentialPhase: !Ref WorkerDatabaseCredentialPhase
-        RedisCredentialPhase: !Ref RedisCredentialPhase
-        RedisOperatorMode: !Ref RedisOperatorMode
-      Tags:
-        - Key: WorkloadBoundariesTemplateSha256
-          Value: !Ref WorkloadBoundariesTemplateSha256
-        - Key: WorkloadBoundariesArtifactBindingSha256
-          Value: !Ref WorkloadBoundariesArtifactBindingSha256
-
-  ApplicationImagePullPolicy:
-    Type: AWS::IAM::ManagedPolicy
-    Properties:
+ WorkerTaskRole:
+  Type: AWS::IAM::Role
+  Properties:
+   AssumeRolePolicyDocument:
+    Version: '2012-10-17'
+    Statement:
+     - Effect: Allow
+       Principal:
+        Service: ecs-tasks.amazonaws.com
+       Action: sts:AssumeRole
+       Condition:
+        StringEquals: { aws:SourceAccount: !Ref AWS::AccountId }
+        ArnLike: { aws:SourceArn: !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:*' }
+   Policies:
+    - PolicyName: OutboxPublishAccess
       PolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Action: ecr:GetAuthorizationToken
-            Resource: '*'
-          - Effect: Allow
-            Action:
-              - ecr:BatchCheckLayerAvailability
-              - ecr:BatchGetImage
-              - ecr:GetDownloadUrlForLayer
-            Resource: !Sub arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/crypto-lending-web
+       Version: '2012-10-17'
+       Statement:
+        - Sid: PublishJobs
+          Effect: Allow
+          Action: sqs:SendMessage
+          Resource: [!GetAtt JobQueue.Arn, !GetAtt BalanceQueue.Arn]
+        - Sid: InspectQueueRedriveConfiguration
+          Effect: Allow
+          Action: sqs:GetQueueAttributes
+          Resource:
+           - !GetAtt JobQueue.Arn
+           - !GetAtt JobDeadLetterQueue.Arn
+           - !GetAtt BalanceQueue.Arn
+           - !GetAtt BalanceDeadLetterQueue.Arn
+        - Sid: UseSqsEncryptionKey
+          Effect: Allow
+          Action:
+           - kms:Decrypt
+           - kms:GenerateDataKey
+          Resource: !GetAtt ApplicationDataKey.Arn
+          Condition:
+           StringEquals:
+            kms:ViaService: !Sub sqs.${AWS::Region}.${AWS::URLSuffix}
 
-  WebTaskExecutionRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal: { Service: ecs-tasks.amazonaws.com }
-            Action: sts:AssumeRole
-            Condition:
-              StringEquals: { aws:SourceAccount: !Ref AWS::AccountId }
-              ArnLike:
-                {
-                  aws:SourceArn: !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:*',
-                }
-      ManagedPolicyArns:
-        - !Ref ApplicationImagePullPolicy
-      Policies:
-        - PolicyName: WriteWebLogs
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action: [logs:CreateLogStream, logs:PutLogEvents]
-                Resource: !Sub ${WebLogGroup.Arn}:*
+ WebTaskRole:
+  Type: AWS::IAM::Role
+  Properties:
+   AssumeRolePolicyDocument:
+    Version: '2012-10-17'
+    Statement:
+     - Effect: Allow
+       Principal:
+        Service: ecs-tasks.amazonaws.com
+       Action: sts:AssumeRole
+       Condition:
+        StringEquals: { aws:SourceAccount: !Ref AWS::AccountId }
+        ArnLike: { aws:SourceArn: !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:*' }
 
-  ApiTaskRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: ecs-tasks.amazonaws.com
-            Action: sts:AssumeRole
-            Condition:
-              StringEquals: { aws:SourceAccount: !Ref AWS::AccountId }
-              ArnLike:
-                {
-                  aws:SourceArn: !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:*',
-                }
-      Policies:
-        - PolicyName: ApiJobQueueAccess
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Sid: InspectQueueRedriveConfiguration
-                Effect: Allow
-                Action: sqs:GetQueueAttributes
-                Resource: [!GetAtt JobQueue.Arn, !GetAtt JobDeadLetterQueue.Arn]
+ ApplicationLoadBalancer:
+  Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+  DependsOn: VpcGatewayAttachment
+  Properties:
+   IpAddressType: ipv4
+   Scheme: internet-facing
+   SecurityGroups:
+    - !Ref LoadBalancerSecurityGroup
+   Subnets:
+    - !Ref PublicSubnetA
+    - !Ref PublicSubnetB
+   Type: application
+   LoadBalancerAttributes:
+    - Key: deletion_protection.enabled
+      Value: 'false'
+    - Key: idle_timeout.timeout_seconds
+      Value: '60'
+    - Key: routing.http.drop_invalid_header_fields.enabled
+      Value: 'true'
+    - Key: routing.http.xff_client_port.enabled
+      Value: 'false'
 
-  WorkerTaskRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: ecs-tasks.amazonaws.com
-            Action: sts:AssumeRole
-            Condition:
-              StringEquals: { aws:SourceAccount: !Ref AWS::AccountId }
-              ArnLike:
-                {
-                  aws:SourceArn: !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:*',
-                }
-      Policies:
-        - PolicyName: OutboxPublishAccess
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Sid: PublishJobs
-                Effect: Allow
-                Action: sqs:SendMessage
-                Resource: !GetAtt JobQueue.Arn
-              - Sid: InspectQueueRedriveConfiguration
-                Effect: Allow
-                Action: sqs:GetQueueAttributes
-                Resource: [!GetAtt JobQueue.Arn, !GetAtt JobDeadLetterQueue.Arn]
-              - Sid: UseSqsEncryptionKey
-                Effect: Allow
-                Action:
-                  - kms:Decrypt
-                  - kms:GenerateDataKey
-                Resource: !GetAtt ApplicationDataKey.Arn
-                Condition:
-                  StringEquals:
-                    kms:ViaService: !Sub sqs.${AWS::Region}.${AWS::URLSuffix}
+ WebTargetGroup:
+  Type: AWS::ElasticLoadBalancingV2::TargetGroup
+  Properties:
+   HealthCheckEnabled: true
+   HealthCheckIntervalSeconds: 30
+   HealthCheckPath: /api/health
+   HealthCheckPort: traffic-port
+   HealthCheckProtocol: HTTP
+   HealthCheckTimeoutSeconds: 5
+   HealthyThresholdCount: 2
+   Matcher:
+    HttpCode: '200'
+   Port: 3000
+   Protocol: HTTP
+   TargetGroupAttributes:
+    - Key: deregistration_delay.timeout_seconds
+      Value: '30'
+   TargetType: ip
+   UnhealthyThresholdCount: 3
+   VpcId: !Ref Vpc
 
-  WebTaskRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: ecs-tasks.amazonaws.com
-            Action: sts:AssumeRole
-            Condition:
-              StringEquals: { aws:SourceAccount: !Ref AWS::AccountId }
-              ArnLike:
-                {
-                  aws:SourceArn: !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:*',
-                }
+ ApiTargetGroup:
+  Type: AWS::ElasticLoadBalancingV2::TargetGroup
+  Properties:
+   HealthCheckEnabled: true
+   HealthCheckIntervalSeconds: 30
+   HealthCheckPath: /api/v1/internal/health/dependencies
+   HealthCheckPort: traffic-port
+   HealthCheckProtocol: HTTP
+   HealthCheckTimeoutSeconds: 5
+   HealthyThresholdCount: 2
+   Matcher:
+    HttpCode: '200'
+   Port: 3001
+   Protocol: HTTP
+   TargetGroupAttributes:
+    - Key: deregistration_delay.timeout_seconds
+      Value: '30'
+   TargetType: ip
+   UnhealthyThresholdCount: 3
+   VpcId: !Ref Vpc
 
-  ApplicationLoadBalancer:
-    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
-    DependsOn: VpcGatewayAttachment
-    Properties:
-      IpAddressType: ipv4
-      Scheme: internet-facing
-      SecurityGroups:
-        - !Ref LoadBalancerSecurityGroup
-      Subnets:
-        - !Ref PublicSubnetA
-        - !Ref PublicSubnetB
-      Type: application
-      LoadBalancerAttributes:
-        - Key: deletion_protection.enabled
-          Value: 'false'
-        - Key: idle_timeout.timeout_seconds
-          Value: '60'
-        - Key: routing.http.drop_invalid_header_fields.enabled
-          Value: 'true'
-        - Key: routing.http.xff_client_port.enabled
-          Value: 'false'
+ HttpRedirectListener:
+  Type: AWS::ElasticLoadBalancingV2::Listener
+  Properties:
+   DefaultActions:
+    - Type: fixed-response
+      FixedResponseConfig:
+       ContentType: text/plain
+       StatusCode: '404'
+   LoadBalancerArn: !Ref ApplicationLoadBalancer
+   Port: 80
+   Protocol: HTTP
 
-  WebTargetGroup:
-    Type: AWS::ElasticLoadBalancingV2::TargetGroup
-    Properties:
-      HealthCheckEnabled: true
-      HealthCheckIntervalSeconds: 30
-      HealthCheckPath: /api/health
-      HealthCheckPort: traffic-port
-      HealthCheckProtocol: HTTP
-      HealthCheckTimeoutSeconds: 5
-      HealthyThresholdCount: 2
-      Matcher:
-        HttpCode: '200'
-      Port: 3000
-      Protocol: HTTP
-      TargetGroupAttributes:
-        - Key: deregistration_delay.timeout_seconds
-          Value: '30'
-      TargetType: ip
-      UnhealthyThresholdCount: 3
-      VpcId: !Ref Vpc
+ HttpRedirectListenerRule:
+  Type: AWS::ElasticLoadBalancingV2::ListenerRule
+  Properties:
+   Actions:
+    - Type: redirect
+      RedirectConfig:
+       Host: '#{host}'
+       Path: /#{path}
+       Port: '443'
+       Protocol: HTTPS
+       Query: '#{query}'
+       StatusCode: HTTP_301
+   Conditions:
+    - Field: host-header
+      HostHeaderConfig: { Values: [!Ref ApplicationHostname] }
+   ListenerArn: !Ref HttpRedirectListener
+   Priority: 5
 
-  ApiTargetGroup:
-    Type: AWS::ElasticLoadBalancingV2::TargetGroup
-    Properties:
-      HealthCheckEnabled: true
-      HealthCheckIntervalSeconds: 30
-      HealthCheckPath: /api/v1/internal/health/dependencies
-      HealthCheckPort: traffic-port
-      HealthCheckProtocol: HTTP
-      HealthCheckTimeoutSeconds: 5
-      HealthyThresholdCount: 2
-      Matcher:
-        HttpCode: '200'
-      Port: 3001
-      Protocol: HTTP
-      TargetGroupAttributes:
-        - Key: deregistration_delay.timeout_seconds
-          Value: '30'
-      TargetType: ip
-      UnhealthyThresholdCount: 3
-      VpcId: !Ref Vpc
+ HttpsListener:
+  Type: AWS::ElasticLoadBalancingV2::Listener
+  Properties:
+   Certificates: [{ CertificateArn: !Ref AlbCertificateArn }]
+   DefaultActions:
+    - Type: fixed-response
+      FixedResponseConfig:
+       ContentType: text/plain
+       StatusCode: '404'
+   LoadBalancerArn: !Ref ApplicationLoadBalancer
+   Port: 443
+   Protocol: HTTPS
+   SslPolicy: ELBSecurityPolicy-TLS13-1-2-2021-06
 
-  HttpRedirectListener:
-    Type: AWS::ElasticLoadBalancingV2::Listener
-    Properties:
-      DefaultActions:
-        - Type: fixed-response
-          FixedResponseConfig:
-            ContentType: text/plain
-            StatusCode: '404'
-      LoadBalancerArn: !Ref ApplicationLoadBalancer
-      Port: 80
-      Protocol: HTTP
+ HttpsInternalApiDenyRule:
+  Type: AWS::ElasticLoadBalancingV2::ListenerRule
+  Properties:
+   Actions:
+    - Type: fixed-response
+      FixedResponseConfig: { ContentType: text/plain, StatusCode: '404' }
+   Conditions:
+    - Field: host-header
+      HostHeaderConfig: { Values: [!Ref ApplicationHostname] }
+    - Field: path-pattern
+      PathPatternConfig:
+       RegexValues: ['^/[aA][pP][iI]/[vV]1/[iI][nN][tT][eE][rR][nN][aA][lL]/.*$']
+   ListenerArn: !Ref HttpsListener
+   Priority: 5
 
-  HttpRedirectListenerRule:
-    Type: AWS::ElasticLoadBalancingV2::ListenerRule
-    Properties:
-      Actions:
-        - Type: redirect
-          RedirectConfig:
-            Host: '#{host}'
-            Path: /#{path}
-            Port: '443'
-            Protocol: HTTPS
-            Query: '#{query}'
-            StatusCode: HTTP_301
-      Conditions:
-        - Field: host-header
-          HostHeaderConfig: { Values: [!Ref ApplicationHostname] }
-      ListenerArn: !Ref HttpRedirectListener
-      Priority: 5
+ HttpsApiListenerRule:
+  Type: AWS::ElasticLoadBalancingV2::ListenerRule
+  Properties:
+   Actions:
+    - Type: forward
+      TargetGroupArn: !Ref ApiTargetGroup
+   Conditions:
+    - Field: host-header
+      HostHeaderConfig: { Values: [!Ref ApplicationHostname] }
+    - Field: path-pattern
+      PathPatternConfig: { Values: [/api/v1/*] }
+   ListenerArn: !Ref HttpsListener
+   Priority: 10
 
-  HttpsListener:
-    Type: AWS::ElasticLoadBalancingV2::Listener
-    Properties:
-      Certificates: [{ CertificateArn: !Ref AlbCertificateArn }]
-      DefaultActions:
-        - Type: fixed-response
-          FixedResponseConfig:
-            ContentType: text/plain
-            StatusCode: '404'
-      LoadBalancerArn: !Ref ApplicationLoadBalancer
-      Port: 443
-      Protocol: HTTPS
-      SslPolicy: ELBSecurityPolicy-TLS13-1-2-2021-06
+ HttpsWebListenerRule:
+  Type: AWS::ElasticLoadBalancingV2::ListenerRule
+  Properties:
+   Actions:
+    - Type: forward
+      TargetGroupArn: !Ref WebTargetGroup
+   Conditions:
+    - Field: host-header
+      HostHeaderConfig: { Values: [!Ref ApplicationHostname] }
+   ListenerArn: !Ref HttpsListener
+   Priority: 20
 
-  HttpsInternalApiDenyRule:
-    Type: AWS::ElasticLoadBalancingV2::ListenerRule
-    Properties:
-      Actions:
-        - Type: fixed-response
-          FixedResponseConfig: { ContentType: text/plain, StatusCode: '404' }
-      Conditions:
-        - Field: host-header
-          HostHeaderConfig: { Values: [!Ref ApplicationHostname] }
-        - Field: path-pattern
-          PathPatternConfig:
-            RegexValues: ['^/[aA][pP][iI]/[vV]1/[iI][nN][tT][eE][rR][nN][aA][lL]/.*$']
-      ListenerArn: !Ref HttpsListener
-      Priority: 5
+ EcsCluster:
+  Type: AWS::ECS::Cluster
+  Properties:
+   CapacityProviders: [FARGATE, FARGATE_SPOT]
+   ClusterName: !Sub crypto-lending-${EnvironmentName}
+   ClusterSettings:
+    - Name: containerInsights
+      Value: !Ref EnableContainerInsights
+   Configuration:
+    ExecuteCommandConfiguration:
+     Logging: NONE
 
-  HttpsApiListenerRule:
-    Type: AWS::ElasticLoadBalancingV2::ListenerRule
-    Properties:
-      Actions:
-        - Type: forward
-          TargetGroupArn: !Ref ApiTargetGroup
-      Conditions:
-        - Field: host-header
-          HostHeaderConfig: { Values: [!Ref ApplicationHostname] }
-        - Field: path-pattern
-          PathPatternConfig: { Values: [/api/v1/*] }
-      ListenerArn: !Ref HttpsListener
-      Priority: 10
+ ApiTaskDefinition:
+  Type: AWS::ECS::TaskDefinition
+  Properties:
+   ContainerDefinitions:
+    - Name: api
+      Essential: true
+      Image: !Ref ApiImageUri
+      Environment:
+       - { Name: NODE_ENV, Value: production }
+       - { Name: APP_ENV, Value: !Ref EnvironmentName }
+       - { Name: APPLICATION_WORKLOAD, Value: api }
+       - { Name: PORT, Value: '3001' }
+       - { Name: DATABASE_RUNTIME_HOST, Value: !GetAtt Database.Endpoint.Address }
+       - { Name: DATABASE_RUNTIME_PORT, Value: !GetAtt Database.Endpoint.Port }
+       - { Name: DATABASE_RUNTIME_NAME, Value: !Ref DatabaseName }
+       - Name: DATABASE_RUNTIME_USERNAME
+         Value: !GetAtt WorkloadBoundaries.Outputs.ApiDatabaseActiveUsername
+       - { Name: DATABASE_RUNTIME_SSL_MODE, Value: verify-full }
+       - { Name: NODE_EXTRA_CA_CERTS, Value: !Ref RdsCaBundlePath }
+       - { Name: REDIS_HOST, Value: !GetAtt RedisReplicationGroup.PrimaryEndPoint.Address }
+       - { Name: REDIS_PORT, Value: !GetAtt RedisReplicationGroup.PrimaryEndPoint.Port }
+       - { Name: REDIS_TLS, Value: 'true' }
+       - Name: REDIS_USERNAME
+         Value: !GetAtt WorkloadBoundaries.Outputs.RedisActiveUsername
+       - { Name: AWS_REGION, Value: !Ref AWS::Region }
+       - { Name: SQS_QUEUE_URL, Value: !Ref JobQueue }
+       - { Name: SQS_DEAD_LETTER_QUEUE_URL, Value: !Ref JobDeadLetterQueue }
+       - { Name: SQS_BALANCE_QUEUE_URL, Value: !Ref BalanceQueue }
+       - { Name: SQS_BALANCE_DEAD_LETTER_QUEUE_URL, Value: !Ref BalanceDeadLetterQueue }
+       - { Name: SQS_MAX_RECEIVE_COUNT, Value: !Ref SqsMaxReceiveCount }
+       - { Name: SQS_VISIBILITY_TIMEOUT_SECONDS, Value: !Ref SqsVisibilityTimeoutSeconds }
+       - { Name: AUTH_MODE, Value: oidc }
+       - { Name: OIDC_PROVIDER_KEY, Value: cognito }
+       - { Name: OIDC_ISSUER_URL, Value: !Sub 'https://cognito-idp.${AWS::Region}.${AWS::URLSuffix}/${CognitoPoolId}' }
+       - { Name: OIDC_AUTHORIZATION_ENDPOINT, Value: !Sub 'https://${CognitoLoginHostname}/oauth2/authorize' }
+       - { Name: OIDC_TOKEN_ENDPOINT, Value: !Sub 'https://${CognitoLoginHostname}/oauth2/token' }
+       - { Name: OIDC_JWKS_URI, Value: !Sub 'https://cognito-idp.${AWS::Region}.${AWS::URLSuffix}/${CognitoPoolId}/.well-known/jwks.json' }
+       - { Name: OIDC_CLIENT_ID, Value: !Ref CognitoClientId }
+       - { Name: OIDC_AUDIENCE, Value: !Ref CognitoClientId }
+       - { Name: OIDC_REQUIRED_TOKEN_USE, Value: id }
+       - { Name: OIDC_END_SESSION_ENDPOINT, Value: !Sub 'https://${CognitoLoginHostname}/logout' }
+       - { Name: OIDC_POST_LOGOUT_REDIRECT_URI, Value: !Sub 'https://${ApplicationHostname}/login' }
+       - { Name: OIDC_SIGNING_ALGORITHM, Value: RS256 }
+       - { Name: OIDC_TOKEN_AUTH_METHOD, Value: none }
+       - { Name: AUTH_PUBLIC_ORIGIN, Value: !Sub 'https://${ApplicationHostname}' }
+       - { Name: OIDC_REDIRECT_URI, Value: !Sub 'https://${ApplicationHostname}/api/v1/auth/callback' }
+       - { Name: OIDC_HTTP_TIMEOUT_MS, Value: '5000' }
+       - { Name: OIDC_TOKEN_RESPONSE_MAX_BYTES, Value: '16384' }
+       - { Name: OIDC_JWKS_RESPONSE_MAX_BYTES, Value: '65536' }
+       - { Name: OIDC_JWKS_CACHE_TTL_SECONDS, Value: '300' }
+       - { Name: OIDC_CLOCK_TOLERANCE_SECONDS, Value: '30' }
+       - { Name: OIDC_MAX_ID_TOKEN_AGE_SECONDS, Value: '600' }
+       - { Name: AUTH_PREAUTH_TTL_SECONDS, Value: '600' }
+       - { Name: AUTH_SESSION_IDLE_TTL_SECONDS, Value: '3600' }
+       - { Name: AUTH_SESSION_ABSOLUTE_TTL_SECONDS, Value: '86400' }
+       - { Name: AUTH_PREAUTH_SEAL_KEY_ID, Value: preauth-v1 }
+       - { Name: AUTH_CLIENT_ADDRESS_MODE, Value: trusted-single-proxy }
+       - { Name: AUTH_TRUSTED_PROXY_CIDRS, Value: !Sub '${PublicSubnetACidr},${PublicSubnetBCidr}' }
+       - { Name: WALLET_REGISTRATION_MODE, Value: enabled }
+       - { Name: WALLET_REGISTRATION_REGISTRY_ENVIRONMENT, Value: MAINNET }
+       - { Name: WALLET_REGISTRATION_CHALLENGE_TTL_SECONDS, Value: '180' }
+      Secrets:
+       - Name: DATABASE_RUNTIME_PASSWORD
+         ValueFrom: !Sub '${WorkloadBoundaries.Outputs.ApiDatabaseActiveSecretArn}:password::'
+       - Name: REDIS_PASSWORD
+         ValueFrom: !Sub '${WorkloadBoundaries.Outputs.RedisActiveSecretArn}:password::'
+       - { Name: AUTH_PREAUTH_SEAL_KEY, ValueFrom: !Sub '${AuthWalletKeysSecretArn}:AUTH_PREAUTH_SEAL_KEY::' }
+       - { Name: AUTH_IDENTITY_HMAC_KEY_RING_JSON, ValueFrom: !Sub '${AuthWalletKeysSecretArn}:AUTH_IDENTITY_HMAC_KEY_RING_JSON::' }
+       - { Name: AUTH_SESSION_HMAC_KEY_RING_JSON, ValueFrom: !Sub '${AuthWalletKeysSecretArn}:AUTH_SESSION_HMAC_KEY_RING_JSON::' }
+       - { Name: AUTH_CSRF_HMAC_KEY_RING_JSON, ValueFrom: !Sub '${AuthWalletKeysSecretArn}:AUTH_CSRF_HMAC_KEY_RING_JSON::' }
+       - { Name: WALLET_IDENTITY_HMAC_KEY_RING_JSON, ValueFrom: !Sub '${AuthWalletKeysSecretArn}:WALLET_IDENTITY_HMAC_KEY_RING_JSON::' }
+       - { Name: WALLET_CHALLENGE_HMAC_KEY_RING_JSON, ValueFrom: !Sub '${AuthWalletKeysSecretArn}:WALLET_CHALLENGE_HMAC_KEY_RING_JSON::' }
+       - { Name: WALLET_METADATA_SEAL_KEY_RING_JSON, ValueFrom: !Sub '${AuthWalletKeysSecretArn}:WALLET_METADATA_SEAL_KEY_RING_JSON::' }
+      LinuxParameters:
+       Capabilities: { Drop: [ALL] }
+       InitProcessEnabled: true
+      ReadonlyRootFilesystem: true
+      LogConfiguration:
+       LogDriver: awslogs
+       Options:
+        awslogs-create-group: 'false'
+        awslogs-group: !Ref ApiLogGroup
+        awslogs-region: !Ref AWS::Region
+        awslogs-stream-prefix: api
+      PortMappings: [{ ContainerPort: 3001, Name: api-http, Protocol: tcp }]
+      StopTimeout: 30
+      User: '10001:10001'
+   Cpu: '256'
+   ExecutionRoleArn: !GetAtt WorkloadBoundaries.Outputs.ApiTaskExecutionRoleArn
+   Family: !Sub crypto-lending-${EnvironmentName}-api
+   Memory: '512'
+   NetworkMode: awsvpc
+   RequiresCompatibilities:
+    - FARGATE
+   RuntimePlatform: { CpuArchitecture: X86_64, OperatingSystemFamily: LINUX }
+   TaskRoleArn: !GetAtt ApiTaskRole.Arn
 
-  HttpsWebListenerRule:
-    Type: AWS::ElasticLoadBalancingV2::ListenerRule
-    Properties:
-      Actions:
-        - Type: forward
-          TargetGroupArn: !Ref WebTargetGroup
-      Conditions:
-        - Field: host-header
-          HostHeaderConfig: { Values: [!Ref ApplicationHostname] }
-      ListenerArn: !Ref HttpsListener
-      Priority: 20
+ WebTaskDefinition:
+  Type: AWS::ECS::TaskDefinition
+  Properties:
+   ContainerDefinitions:
+    - Name: web
+      Essential: true
+      Image: !Ref WebImageUri
+      Environment:
+       - { Name: NODE_ENV, Value: production }
+       - { Name: HOSTNAME, Value: 0.0.0.0 }
+       - { Name: PORT, Value: '3000' }
+       - { Name: APP_ENV, Value: !Ref EnvironmentName }
+       - { Name: APP_VERSION, Value: !Ref ApplicationVersion }
+       - { Name: AUTH_PUBLIC_ORIGIN, Value: !Sub 'https://${ApplicationHostname}' }
+      LinuxParameters:
+       Capabilities: { Drop: [ALL] }
+       InitProcessEnabled: true
+      ReadonlyRootFilesystem: true
+      LogConfiguration:
+       LogDriver: awslogs
+       Options:
+        awslogs-create-group: 'false'
+        awslogs-group: !Ref WebLogGroup
+        awslogs-region: !Ref AWS::Region
+        awslogs-stream-prefix: web
+      PortMappings: [{ ContainerPort: 3000, Name: web-http, Protocol: tcp }]
+      StopTimeout: 30
+      User: '10001:10001'
+   Cpu: '256'
+   ExecutionRoleArn: !GetAtt WebTaskExecutionRole.Arn
+   Family: !Sub crypto-lending-${EnvironmentName}-web
+   Memory: '512'
+   NetworkMode: awsvpc
+   RequiresCompatibilities:
+    - FARGATE
+   RuntimePlatform: { CpuArchitecture: X86_64, OperatingSystemFamily: LINUX }
+   TaskRoleArn: !GetAtt WebTaskRole.Arn
 
-  EcsCluster:
-    Type: AWS::ECS::Cluster
-    Properties:
-      CapacityProviders: [FARGATE, FARGATE_SPOT]
-      ClusterName: !Sub crypto-lending-${EnvironmentName}
-      ClusterSettings:
-        - Name: containerInsights
-          Value: !Ref EnableContainerInsights
-      Configuration:
-        ExecuteCommandConfiguration:
-          Logging: NONE
+ WorkerTaskDefinition:
+  Type: AWS::ECS::TaskDefinition
+  Properties:
+   ContainerDefinitions:
+    - Name: outbox-worker
+      Command: [node, dist/infrastructure/outbox/outbox-worker.cli.js]
+      Essential: true
+      Image: !Ref WorkerImageUri
+      HealthCheck:
+       Command: [CMD, node, dist/infrastructure/outbox/outbox-worker-health.cli.js]
+       Interval: 30
+       Retries: 3
+       StartPeriod: 60
+       Timeout: 10
+      Environment:
+       - { Name: NODE_ENV, Value: production }
+       - { Name: APP_ENV, Value: !Ref EnvironmentName }
+       - { Name: APPLICATION_WORKLOAD, Value: worker }
+       - { Name: DATABASE_RUNTIME_HOST, Value: !GetAtt Database.Endpoint.Address }
+       - { Name: DATABASE_RUNTIME_PORT, Value: !GetAtt Database.Endpoint.Port }
+       - { Name: DATABASE_RUNTIME_NAME, Value: !Ref DatabaseName }
+       - Name: DATABASE_RUNTIME_USERNAME
+         Value: !GetAtt WorkloadBoundaries.Outputs.WorkerDatabaseActiveUsername
+       - { Name: DATABASE_RUNTIME_SSL_MODE, Value: verify-full }
+       - { Name: NODE_EXTRA_CA_CERTS, Value: !Ref RdsCaBundlePath }
+       - { Name: AWS_REGION, Value: !Ref AWS::Region }
+       - { Name: SQS_QUEUE_URL, Value: !Ref JobQueue }
+       - { Name: SQS_DEAD_LETTER_QUEUE_URL, Value: !Ref JobDeadLetterQueue }
+       - { Name: SQS_BALANCE_QUEUE_URL, Value: !Ref BalanceQueue }
+       - { Name: SQS_BALANCE_DEAD_LETTER_QUEUE_URL, Value: !Ref BalanceDeadLetterQueue }
+       - { Name: SQS_MAX_RECEIVE_COUNT, Value: !Ref SqsMaxReceiveCount }
+       - { Name: SQS_VISIBILITY_TIMEOUT_SECONDS, Value: !Ref SqsVisibilityTimeoutSeconds }
+      Secrets:
+       - Name: DATABASE_RUNTIME_PASSWORD
+         ValueFrom: !Sub '${WorkloadBoundaries.Outputs.WorkerDatabaseActiveSecretArn}:password::'
+      LinuxParameters:
+       Capabilities: { Drop: [ALL] }
+       InitProcessEnabled: true
+      ReadonlyRootFilesystem: true
+      LogConfiguration:
+       LogDriver: awslogs
+       Options:
+        awslogs-create-group: 'false'
+        awslogs-group: !Ref WorkerLogGroup
+        awslogs-region: !Ref AWS::Region
+        awslogs-stream-prefix: outbox-worker
+      StopTimeout: 30
+      User: '10001:10001'
+   Cpu: '256'
+   ExecutionRoleArn: !GetAtt WorkloadBoundaries.Outputs.WorkerTaskExecutionRoleArn
+   Family: !Sub crypto-lending-${EnvironmentName}-outbox-worker
+   Memory: '512'
+   NetworkMode: awsvpc
+   RequiresCompatibilities:
+    - FARGATE
+   RuntimePlatform: { CpuArchitecture: X86_64, OperatingSystemFamily: LINUX }
+   TaskRoleArn: !GetAtt WorkerTaskRole.Arn
 
-  ApiTaskDefinition:
-    Type: AWS::ECS::TaskDefinition
-    Properties:
-      ContainerDefinitions:
-        - Name: api
-          Essential: true
-          Image: !Ref ApiImageUri
-          Environment:
-            - { Name: NODE_ENV, Value: production }
-            - { Name: APP_ENV, Value: !Ref EnvironmentName }
-            - { Name: APPLICATION_WORKLOAD, Value: api }
-            - { Name: PORT, Value: '3001' }
-            - { Name: DATABASE_RUNTIME_HOST, Value: !GetAtt Database.Endpoint.Address }
-            - { Name: DATABASE_RUNTIME_PORT, Value: !GetAtt Database.Endpoint.Port }
-            - { Name: DATABASE_RUNTIME_NAME, Value: !Ref DatabaseName }
-            - {
-                Name: DATABASE_RUNTIME_USERNAME,
-                Value: !GetAtt WorkloadBoundaries.Outputs.ApiDatabaseActiveUsername,
-              }
-            - { Name: DATABASE_RUNTIME_SSL_MODE, Value: verify-full }
-            - { Name: NODE_EXTRA_CA_CERTS, Value: !Ref RdsCaBundlePath }
-            - { Name: REDIS_HOST, Value: !GetAtt RedisReplicationGroup.PrimaryEndPoint.Address }
-            - { Name: REDIS_PORT, Value: !GetAtt RedisReplicationGroup.PrimaryEndPoint.Port }
-            - { Name: REDIS_TLS, Value: 'true' }
-            - {
-                Name: REDIS_USERNAME,
-                Value: !GetAtt WorkloadBoundaries.Outputs.RedisActiveUsername,
-              }
-            - { Name: AWS_REGION, Value: !Ref AWS::Region }
-            - { Name: SQS_QUEUE_URL, Value: !Ref JobQueue }
-            - { Name: SQS_DEAD_LETTER_QUEUE_URL, Value: !Ref JobDeadLetterQueue }
-            - { Name: SQS_MAX_RECEIVE_COUNT, Value: !Ref SqsMaxReceiveCount }
-            - { Name: SQS_VISIBILITY_TIMEOUT_SECONDS, Value: !Ref SqsVisibilityTimeoutSeconds }
-          Secrets:
-            - Name: DATABASE_RUNTIME_PASSWORD
-              ValueFrom: !Sub '${WorkloadBoundaries.Outputs.ApiDatabaseActiveSecretArn}:password::'
-            - Name: REDIS_PASSWORD
-              ValueFrom: !Sub '${WorkloadBoundaries.Outputs.RedisActiveSecretArn}:password::'
-          LinuxParameters:
-            Capabilities: { Drop: [ALL] }
-            InitProcessEnabled: true
-          ReadonlyRootFilesystem: true
-          LogConfiguration:
-            LogDriver: awslogs
-            Options:
-              awslogs-create-group: 'false'
-              awslogs-group: !Ref ApiLogGroup
-              awslogs-region: !Ref AWS::Region
-              awslogs-stream-prefix: api
-          PortMappings: [{ ContainerPort: 3001, Name: api-http, Protocol: tcp }]
-          StopTimeout: 30
-          User: '10001:10001'
-      Cpu: '256'
-      ExecutionRoleArn: !GetAtt WorkloadBoundaries.Outputs.ApiTaskExecutionRoleArn
-      Family: !Sub crypto-lending-${EnvironmentName}-api
-      Memory: '512'
-      NetworkMode: awsvpc
-      RequiresCompatibilities:
-        - FARGATE
-      RuntimePlatform: { CpuArchitecture: X86_64, OperatingSystemFamily: LINUX }
-      TaskRoleArn: !GetAtt ApiTaskRole.Arn
+ ApiService:
+  Type: AWS::ECS::Service
+  DependsOn:
+   - HttpsInternalApiDenyRule
+   - HttpsApiListenerRule
+  Properties:
+   Cluster: !Ref EcsCluster
+   DeploymentConfiguration:
+    DeploymentCircuitBreaker:
+     Enable: true
+     Rollback: true
+    MaximumPercent: 200
+    MinimumHealthyPercent: 50
+   DesiredCount: !Ref ApiDesiredCount
+   EnableECSManagedTags: true
+   EnableExecuteCommand: false
+   HealthCheckGracePeriodSeconds: 60
+   LaunchType: FARGATE
+   LoadBalancers:
+    - ContainerName: api
+      ContainerPort: 3001
+      TargetGroupArn: !Ref ApiTargetGroup
+   NetworkConfiguration:
+    AwsvpcConfiguration:
+     AssignPublicIp: DISABLED
+     SecurityGroups:
+      - !GetAtt WorkloadBoundaries.Outputs.ApiTaskSecurityGroupId
+     Subnets:
+      - !Ref PrivateSubnetA
+      - !Ref PrivateSubnetB
+   PlatformVersion: 1.4.0
+   PropagateTags: SERVICE
+   ServiceName: api
+   TaskDefinition: !Ref ApiTaskDefinition
 
-  WebTaskDefinition:
-    Type: AWS::ECS::TaskDefinition
-    Properties:
-      ContainerDefinitions:
-        - Name: web
-          Essential: true
-          Image: !Ref WebImageUri
-          Environment:
-            - { Name: NODE_ENV, Value: production }
-            - { Name: HOSTNAME, Value: 0.0.0.0 }
-            - { Name: PORT, Value: '3000' }
-            - { Name: APP_ENV, Value: !Ref EnvironmentName }
-            - { Name: APP_VERSION, Value: !Ref ApplicationVersion }
-          LinuxParameters:
-            Capabilities: { Drop: [ALL] }
-            InitProcessEnabled: true
-          ReadonlyRootFilesystem: true
-          LogConfiguration:
-            LogDriver: awslogs
-            Options:
-              awslogs-create-group: 'false'
-              awslogs-group: !Ref WebLogGroup
-              awslogs-region: !Ref AWS::Region
-              awslogs-stream-prefix: web
-          PortMappings: [{ ContainerPort: 3000, Name: web-http, Protocol: tcp }]
-          StopTimeout: 30
-          User: '10001:10001'
-      Cpu: '256'
-      ExecutionRoleArn: !GetAtt WebTaskExecutionRole.Arn
-      Family: !Sub crypto-lending-${EnvironmentName}-web
-      Memory: '512'
-      NetworkMode: awsvpc
-      RequiresCompatibilities:
-        - FARGATE
-      RuntimePlatform: { CpuArchitecture: X86_64, OperatingSystemFamily: LINUX }
-      TaskRoleArn: !GetAtt WebTaskRole.Arn
+ WebService:
+  Type: AWS::ECS::Service
+  DependsOn:
+   - HttpsWebListenerRule
+  Properties:
+   Cluster: !Ref EcsCluster
+   DeploymentConfiguration:
+    DeploymentCircuitBreaker:
+     Enable: true
+     Rollback: true
+    MaximumPercent: 200
+    MinimumHealthyPercent: 50
+   DesiredCount: !Ref WebDesiredCount
+   EnableECSManagedTags: true
+   EnableExecuteCommand: false
+   HealthCheckGracePeriodSeconds: 60
+   LaunchType: FARGATE
+   LoadBalancers:
+    - ContainerName: web
+      ContainerPort: 3000
+      TargetGroupArn: !Ref WebTargetGroup
+   NetworkConfiguration:
+    AwsvpcConfiguration:
+     AssignPublicIp: DISABLED
+     SecurityGroups:
+      - !Ref WebTaskSecurityGroup
+     Subnets:
+      - !Ref PrivateSubnetA
+      - !Ref PrivateSubnetB
+   PlatformVersion: 1.4.0
+   PropagateTags: SERVICE
+   ServiceName: web
+   TaskDefinition: !Ref WebTaskDefinition
 
-  WorkerTaskDefinition:
-    Type: AWS::ECS::TaskDefinition
-    Properties:
-      ContainerDefinitions:
-        - Name: outbox-worker
-          Command: [node, dist/infrastructure/outbox/outbox-worker.cli.js]
-          Essential: true
-          Image: !Ref WorkerImageUri
-          HealthCheck:
-            Command: [CMD, node, dist/infrastructure/outbox/outbox-worker-health.cli.js]
-            Interval: 30
-            Retries: 3
-            StartPeriod: 60
-            Timeout: 10
-          Environment:
-            - { Name: NODE_ENV, Value: production }
-            - { Name: APP_ENV, Value: !Ref EnvironmentName }
-            - { Name: APPLICATION_WORKLOAD, Value: worker }
-            - { Name: DATABASE_RUNTIME_HOST, Value: !GetAtt Database.Endpoint.Address }
-            - { Name: DATABASE_RUNTIME_PORT, Value: !GetAtt Database.Endpoint.Port }
-            - { Name: DATABASE_RUNTIME_NAME, Value: !Ref DatabaseName }
-            - {
-                Name: DATABASE_RUNTIME_USERNAME,
-                Value: !GetAtt WorkloadBoundaries.Outputs.WorkerDatabaseActiveUsername,
-              }
-            - { Name: DATABASE_RUNTIME_SSL_MODE, Value: verify-full }
-            - { Name: NODE_EXTRA_CA_CERTS, Value: !Ref RdsCaBundlePath }
-            - { Name: AWS_REGION, Value: !Ref AWS::Region }
-            - { Name: SQS_QUEUE_URL, Value: !Ref JobQueue }
-            - { Name: SQS_DEAD_LETTER_QUEUE_URL, Value: !Ref JobDeadLetterQueue }
-            - { Name: SQS_MAX_RECEIVE_COUNT, Value: !Ref SqsMaxReceiveCount }
-            - { Name: SQS_VISIBILITY_TIMEOUT_SECONDS, Value: !Ref SqsVisibilityTimeoutSeconds }
-          Secrets:
-            - Name: DATABASE_RUNTIME_PASSWORD
-              ValueFrom: !Sub '${WorkloadBoundaries.Outputs.WorkerDatabaseActiveSecretArn}:password::'
-          LinuxParameters:
-            Capabilities: { Drop: [ALL] }
-            InitProcessEnabled: true
-          ReadonlyRootFilesystem: true
-          LogConfiguration:
-            LogDriver: awslogs
-            Options:
-              awslogs-create-group: 'false'
-              awslogs-group: !Ref WorkerLogGroup
-              awslogs-region: !Ref AWS::Region
-              awslogs-stream-prefix: outbox-worker
-          StopTimeout: 30
-          User: '10001:10001'
-      Cpu: '256'
-      ExecutionRoleArn: !GetAtt WorkloadBoundaries.Outputs.WorkerTaskExecutionRoleArn
-      Family: !Sub crypto-lending-${EnvironmentName}-outbox-worker
-      Memory: '512'
-      NetworkMode: awsvpc
-      RequiresCompatibilities:
-        - FARGATE
-      RuntimePlatform: { CpuArchitecture: X86_64, OperatingSystemFamily: LINUX }
-      TaskRoleArn: !GetAtt WorkerTaskRole.Arn
-
-  ApiService:
-    Type: AWS::ECS::Service
-    DependsOn:
-      - HttpsInternalApiDenyRule
-      - HttpsApiListenerRule
-    Properties:
-      Cluster: !Ref EcsCluster
-      DeploymentConfiguration:
-        DeploymentCircuitBreaker:
-          Enable: true
-          Rollback: true
-        MaximumPercent: 200
-        MinimumHealthyPercent: 50
-      DesiredCount: !Ref ApiDesiredCount
-      EnableECSManagedTags: true
-      EnableExecuteCommand: false
-      HealthCheckGracePeriodSeconds: 60
-      LaunchType: FARGATE
-      LoadBalancers:
-        - ContainerName: api
-          ContainerPort: 3001
-          TargetGroupArn: !Ref ApiTargetGroup
-      NetworkConfiguration:
-        AwsvpcConfiguration:
-          AssignPublicIp: DISABLED
-          SecurityGroups:
-            - !GetAtt WorkloadBoundaries.Outputs.ApiTaskSecurityGroupId
-          Subnets:
-            - !Ref PrivateSubnetA
-            - !Ref PrivateSubnetB
-      PlatformVersion: 1.4.0
-      PropagateTags: SERVICE
-      ServiceName: api
-      TaskDefinition: !Ref ApiTaskDefinition
-
-  WebService:
-    Type: AWS::ECS::Service
-    DependsOn:
-      - HttpsWebListenerRule
-    Properties:
-      Cluster: !Ref EcsCluster
-      DeploymentConfiguration:
-        DeploymentCircuitBreaker:
-          Enable: true
-          Rollback: true
-        MaximumPercent: 200
-        MinimumHealthyPercent: 50
-      DesiredCount: !Ref WebDesiredCount
-      EnableECSManagedTags: true
-      EnableExecuteCommand: false
-      HealthCheckGracePeriodSeconds: 60
-      LaunchType: FARGATE
-      LoadBalancers:
-        - ContainerName: web
-          ContainerPort: 3000
-          TargetGroupArn: !Ref WebTargetGroup
-      NetworkConfiguration:
-        AwsvpcConfiguration:
-          AssignPublicIp: DISABLED
-          SecurityGroups:
-            - !Ref WebTaskSecurityGroup
-          Subnets:
-            - !Ref PrivateSubnetA
-            - !Ref PrivateSubnetB
-      PlatformVersion: 1.4.0
-      PropagateTags: SERVICE
-      ServiceName: web
-      TaskDefinition: !Ref WebTaskDefinition
-
-  WorkerService:
-    Type: AWS::ECS::Service
-    Properties:
-      Cluster: !Ref EcsCluster
-      DeploymentConfiguration:
-        DeploymentCircuitBreaker:
-          Enable: true
-          Rollback: true
-        MaximumPercent: 200
-        MinimumHealthyPercent: 0
-      DesiredCount: !Ref WorkerDesiredCount
-      EnableECSManagedTags: true
-      EnableExecuteCommand: false
-      LaunchType: FARGATE
-      NetworkConfiguration:
-        AwsvpcConfiguration:
-          AssignPublicIp: DISABLED
-          SecurityGroups:
-            - !GetAtt WorkloadBoundaries.Outputs.WorkerTaskSecurityGroupId
-          Subnets:
-            - !Ref PrivateSubnetA
-            - !Ref PrivateSubnetB
-      PlatformVersion: 1.4.0
-      PropagateTags: SERVICE
-      ServiceName: outbox-worker
-      TaskDefinition: !Ref WorkerTaskDefinition
-
-  ApiUnhealthyHostAlarm:
-    Type: AWS::CloudWatch::Alarm
-    Condition: CreateOperationalAlarms
-    Properties:
-      ComparisonOperator: GreaterThanOrEqualToThreshold
-      DatapointsToAlarm: 2
-      Dimensions:
-        - Name: LoadBalancer
-          Value: !GetAtt ApplicationLoadBalancer.LoadBalancerFullName
-        - Name: TargetGroup
-          Value: !GetAtt ApiTargetGroup.TargetGroupFullName
-      EvaluationPeriods: 2
-      MetricName: UnHealthyHostCount
-      Namespace: AWS/ApplicationELB
-      Period: 60
-      Statistic: Maximum
-      Threshold: 1
-      TreatMissingData: notBreaching
-
-  DatabaseLowStorageAlarm:
-    Type: AWS::CloudWatch::Alarm
-    Condition: CreateOperationalAlarms
-    Properties:
-      ComparisonOperator: LessThanThreshold
-      DatapointsToAlarm: 2
-      Dimensions:
-        - Name: DBInstanceIdentifier
-          Value: !Ref Database
-      EvaluationPeriods: 3
-      MetricName: FreeStorageSpace
-      Namespace: AWS/RDS
-      Period: 300
-      Statistic: Minimum
-      Threshold: 2147483648
-      TreatMissingData: breaching
-
-  RedisEvictionsAlarm:
-    Type: AWS::CloudWatch::Alarm
-    Condition: CreateOperationalAlarms
-    Properties:
-      ComparisonOperator: GreaterThanThreshold
-      DatapointsToAlarm: 1
-      Dimensions:
-        - Name: ReplicationGroupId
-          Value: !Ref RedisReplicationGroup
-      EvaluationPeriods: 1
-      MetricName: Evictions
-      Namespace: AWS/ElastiCache
-      Period: 300
-      Statistic: Sum
-      Threshold: 0
-      TreatMissingData: notBreaching
-
-  JobQueueAgeAlarm:
-    Type: AWS::CloudWatch::Alarm
-    Condition: CreateOperationalAlarms
-    Properties:
-      ComparisonOperator: GreaterThanThreshold
-      DatapointsToAlarm: 2
-      Dimensions:
-        - Name: QueueName
-          Value: !GetAtt JobQueue.QueueName
-      EvaluationPeriods: 2
-      MetricName: ApproximateAgeOfOldestMessage
-      Namespace: AWS/SQS
-      Period: 60
-      Statistic: Maximum
-      Threshold: 300
-      TreatMissingData: notBreaching
-
-  DeadLetterQueueNotEmptyAlarm:
-    Type: AWS::CloudWatch::Alarm
-    Condition: CreateOperationalAlarms
-    Properties:
-      ComparisonOperator: GreaterThanOrEqualToThreshold
-      DatapointsToAlarm: 1
-      Dimensions:
-        - Name: QueueName
-          Value: !GetAtt JobDeadLetterQueue.QueueName
-      EvaluationPeriods: 1
-      MetricName: ApproximateNumberOfMessagesVisible
-      Namespace: AWS/SQS
-      Period: 60
-      Statistic: Maximum
-      Threshold: 1
-      TreatMissingData: notBreaching
-
-  OperationalDashboard:
-    Type: AWS::CloudWatch::Dashboard
-    Condition: CreateOperationalDashboard
-    Properties:
-      DashboardName: !Sub crypto-lending-${EnvironmentName}
-      DashboardBody: !Sub >-
-        {"widgets":[{"type":"metric","properties":{"title":"API latency and request outcomes","region":"${AWS::Region}","stat":"Sum","metrics":[["AWS/ApplicationELB","RequestCount","LoadBalancer","${ApplicationLoadBalancer.LoadBalancerFullName}","TargetGroup","${ApiTargetGroup.TargetGroupFullName}"],[".","HTTPCode_Target_4XX_Count",".",".",".","."],[".","HTTPCode_Target_5XX_Count",".",".",".","."],[".","TargetResponseTime",".",".",".",".",{"stat":"p95"}]]}},{"type":"metric","properties":{"title":"ECS CPU/memory saturation","region":"${AWS::Region}","stat":"Average","metrics":[["AWS/ECS","CPUUtilization","ClusterName","${EcsCluster}","ServiceName","${ApiService.Name}"],[".","MemoryUtilization",".",".",".","."],[".","CPUUtilization",".",".",".","${WebService.Name}"],[".","MemoryUtilization",".",".",".","."],[".","CPUUtilization",".",".",".","${WorkerService.Name}"],[".","MemoryUtilization",".",".",".","."]]}},{"type":"metric","properties":{"title":"Queue backlog, age, and DLQ depth","region":"${AWS::Region}","stat":"Maximum","metrics":[["AWS/SQS","ApproximateNumberOfMessagesVisible","QueueName","${JobQueue.QueueName}"],[".","ApproximateAgeOfOldestMessage",".","."],[".","ApproximateNumberOfMessagesVisible",".","${JobDeadLetterQueue.QueueName}"]]}},{"type":"log","width":24,"properties":{"title":"Correlation traces","region":"${AWS::Region}","view":"table","query":"SOURCE logGroups(namePrefix: ['/crypto-lending/${EnvironmentName}/']) | fields @timestamp, correlationId, traceId, spanId, parentSpanId, spanName, durationMs, outcome | filter event = 'trace.span.completed' | limit 100"}},{"type":"log","properties":{"title":"Job failure and redrive","region":"${AWS::Region}","view":"table","query":"SOURCE '${WorkerLogGroup}' | fields @timestamp, event, jobKind, errorCode, outcome | filter event in ['job.publish_failed','job.retry_scheduled','job.awaiting_dead_letter','job.ownership_lost','outbox.dispatch.failed'] | limit 100"}},{"type":"log","properties":{"title":"Lifecycle state/reason counts","region":"${AWS::Region}","view":"table","query":"SOURCE '${ApiLogGroup}' | filter event = 'ledger.lifecycle.transitioned' | stats count(*) as transitions by lifecycleScope, state, reason | limit 100"}}]}
+ WorkerService:
+  Type: AWS::ECS::Service
+  Properties:
+   Cluster: !Ref EcsCluster
+   DeploymentConfiguration:
+    DeploymentCircuitBreaker:
+     Enable: true
+     Rollback: true
+    MaximumPercent: 200
+    MinimumHealthyPercent: 0
+   DesiredCount: !Ref WorkerDesiredCount
+   EnableECSManagedTags: true
+   EnableExecuteCommand: false
+   LaunchType: FARGATE
+   NetworkConfiguration:
+    AwsvpcConfiguration:
+     AssignPublicIp: DISABLED
+     SecurityGroups:
+      - !GetAtt WorkloadBoundaries.Outputs.WorkerTaskSecurityGroupId
+     Subnets:
+      - !Ref PrivateSubnetA
+      - !Ref PrivateSubnetB
+   PlatformVersion: 1.4.0
+   PropagateTags: SERVICE
+   ServiceName: outbox-worker
+   TaskDefinition: !Ref WorkerTaskDefinition
 
 Outputs:
-  WorkloadBoundariesTemplateSha256:
-    Value: !GetAtt WorkloadBoundaries.Outputs.DeliveryArtifactSha256
-  WorkloadBoundariesArtifactBindingSha256:
-    Value: !GetAtt WorkloadBoundaries.Outputs.DeliveryArtifactBindingSha256
-  BillingNotice:
-    Value: This stack contains billable AWS resources; review AWS Pricing before deployment.
-  ApplicationUrl:
-    Value: !Sub https://${ApplicationHostname}
-  LoadBalancerDnsName:
-    Value: !GetAtt ApplicationLoadBalancer.DNSName
-  LoadBalancerArn:
-    Value: !Ref ApplicationLoadBalancer
-  LoadBalancerCanonicalHostedZoneId:
-    Value: !GetAtt ApplicationLoadBalancer.CanonicalHostedZoneID
-  ApiProcessHealthUrl:
-    Value: !Sub https://${ApplicationHostname}/api/v1/health
-  ApiDependencyHealthUrl:
-    Value: !Sub https://${ApplicationHostname}/api/v1/health/dependencies
-  WebHealthUrl:
-    Value: !Sub https://${ApplicationHostname}/api/health
-  VpcId:
-    Value: !Ref Vpc
-  PrivateSubnetIds:
-    Value: !Join [',', [!Ref PrivateSubnetA, !Ref PrivateSubnetB]]
-  EcsClusterArn:
-    Value: !GetAtt EcsCluster.Arn
-  ApiTaskDefinitionArn:
-    Value: !Ref ApiTaskDefinition
-  ApiTaskSecurityGroupId:
-    Value: !GetAtt WorkloadBoundaries.Outputs.ApiTaskSecurityGroupId
-  WorkerTaskSecurityGroupId:
-    Value: !GetAtt WorkloadBoundaries.Outputs.WorkerTaskSecurityGroupId
-  ApiServiceArn:
-    Value: !Ref ApiService
-  WebServiceArn:
-    Value: !Ref WebService
-  WorkerServiceArn:
-    Value: !Ref WorkerService
-  DatabaseEndpointAddress:
-    Value: !GetAtt Database.Endpoint.Address
-  DatabaseEndpointPort:
-    Value: !GetAtt Database.Endpoint.Port
-  DatabaseCredentialsSecretArn:
-    Value: !Ref DatabaseCredentialsSecret
-  ApiDatabaseActiveSecretArn:
-    Value: !GetAtt WorkloadBoundaries.Outputs.ApiDatabaseActiveSecretArn
-  WorkerDatabaseActiveSecretArn:
-    Value: !GetAtt WorkloadBoundaries.Outputs.WorkerDatabaseActiveSecretArn
-  MigrationDatabaseCredentialSecretArn:
-    Value: !GetAtt WorkloadBoundaries.Outputs.MigrationDatabaseCredentialSecretArn
-  RedisPrimaryEndpointAddress:
-    Value: !GetAtt RedisReplicationGroup.PrimaryEndPoint.Address
-  RedisPrimaryEndpointPort:
-    Value: !GetAtt RedisReplicationGroup.PrimaryEndPoint.Port
-  RedisActiveSecretArn:
-    Value: !GetAtt WorkloadBoundaries.Outputs.RedisActiveSecretArn
-  RedisApiUserGroupId:
-    Value: !GetAtt WorkloadBoundaries.Outputs.RedisApiUserGroupId
-  JobQueueUrl:
-    Value: !Ref JobQueue
-  JobQueueArn:
-    Value: !GetAtt JobQueue.Arn
-  JobDeadLetterQueueUrl:
-    Value: !Ref JobDeadLetterQueue
-  JobDeadLetterQueueArn:
-    Value: !GetAtt JobDeadLetterQueue.Arn
-  OperationalDashboardName:
-    Condition: CreateOperationalDashboard
-    Value: !Ref OperationalDashboard
+ WorkloadBoundariesTemplateSha256:
+  Value: !GetAtt WorkloadBoundaries.Outputs.DeliveryArtifactSha256
+ WorkloadBoundariesArtifactBindingSha256:
+  Value: !GetAtt WorkloadBoundaries.Outputs.DeliveryArtifactBindingSha256
+ ObservabilityTemplateSha256:
+  Value: !GetAtt Observability.Outputs.DeliveryArtifactSha256
+ ObservabilityArtifactBindingSha256:
+  Value: !GetAtt Observability.Outputs.DeliveryArtifactBindingSha256
+ BillingNotice:
+  Value: This stack contains billable AWS resources; review AWS Pricing before deployment.
+ ApplicationUrl:
+  Value: !Sub https://${ApplicationHostname}
+ LoadBalancerDnsName:
+  Value: !GetAtt ApplicationLoadBalancer.DNSName
+ LoadBalancerArn:
+  Value: !Ref ApplicationLoadBalancer
+ LoadBalancerCanonicalHostedZoneId:
+  Value: !GetAtt ApplicationLoadBalancer.CanonicalHostedZoneID
+ ApiProcessHealthUrl:
+  Value: !Sub https://${ApplicationHostname}/api/v1/health
+ ApiDependencyHealthUrl:
+  Value: !Sub https://${ApplicationHostname}/api/v1/health/dependencies
+ WebHealthUrl:
+  Value: !Sub https://${ApplicationHostname}/api/health
+ VpcId:
+  Value: !Ref Vpc
+ PrivateSubnetIds:
+  Value: !Join [',', [!Ref PrivateSubnetA, !Ref PrivateSubnetB]]
+ EcsClusterArn:
+  Value: !GetAtt EcsCluster.Arn
+ ApiTaskDefinitionArn:
+  Value: !Ref ApiTaskDefinition
+ ApiTaskSecurityGroupId:
+  Value: !GetAtt WorkloadBoundaries.Outputs.ApiTaskSecurityGroupId
+ WorkerTaskSecurityGroupId:
+  Value: !GetAtt WorkloadBoundaries.Outputs.WorkerTaskSecurityGroupId
+ ApiServiceArn:
+  Value: !Ref ApiService
+ WebServiceArn:
+  Value: !Ref WebService
+ WorkerServiceArn:
+  Value: !Ref WorkerService
+ DatabaseEndpointAddress:
+  Value: !GetAtt Database.Endpoint.Address
+ DatabaseEndpointPort:
+  Value: !GetAtt Database.Endpoint.Port
+ DatabaseCredentialsSecretArn:
+  Value: !Ref DatabaseCredentialsSecret
+ ApiDatabaseActiveSecretArn:
+  Value: !GetAtt WorkloadBoundaries.Outputs.ApiDatabaseActiveSecretArn
+ WorkerDatabaseActiveSecretArn:
+  Value: !GetAtt WorkloadBoundaries.Outputs.WorkerDatabaseActiveSecretArn
+ MigrationDatabaseCredentialSecretArn:
+  Value: !GetAtt WorkloadBoundaries.Outputs.MigrationDatabaseCredentialSecretArn
+ RedisPrimaryEndpointAddress:
+  Value: !GetAtt RedisReplicationGroup.PrimaryEndPoint.Address
+ RedisPrimaryEndpointPort:
+  Value: !GetAtt RedisReplicationGroup.PrimaryEndPoint.Port
+ RedisActiveSecretArn:
+  Value: !GetAtt WorkloadBoundaries.Outputs.RedisActiveSecretArn
+ RedisApiUserGroupId:
+  Value: !GetAtt WorkloadBoundaries.Outputs.RedisApiUserGroupId
+ JobQueueUrl:
+  Value: !Ref JobQueue
+ JobQueueArn:
+  Value: !GetAtt JobQueue.Arn
+ JobDeadLetterQueueUrl:
+  Value: !Ref JobDeadLetterQueue
+ JobDeadLetterQueueArn:
+  Value: !GetAtt JobDeadLetterQueue.Arn
+ BalanceQueueUrl:
+  Value: !Ref BalanceQueue
+ BalanceQueueArn:
+  Value: !GetAtt BalanceQueue.Arn
+ BalanceDeadLetterQueueUrl:
+  Value: !Ref BalanceDeadLetterQueue
+ BalanceDeadLetterQueueArn:
+  Value: !GetAtt BalanceDeadLetterQueue.Arn
+ OperationalDashboardName:
+  Condition: CreateOperationalDashboard
+  Value: !GetAtt Observability.Outputs.OperationalDashboardName

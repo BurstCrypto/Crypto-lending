@@ -7,6 +7,7 @@ $ErrorActionPreference = 'Stop'
 $guardPath = Join-Path $PSScriptRoot 'invoke-application-baseline.ps1'
 $applicationTemplatePath = Join-Path $PSScriptRoot 'application-baseline.yaml'
 $workloadBoundariesTemplatePath = Join-Path $PSScriptRoot 'application-workload-boundaries.yaml'
+$observabilityTemplatePath = Join-Path $PSScriptRoot 'application-observability.yaml'
 $guardrailTemplatePath = Join-Path $PSScriptRoot 'account-guardrails.yaml'
 $recordValidatorPath = Join-Path $PSScriptRoot 'validate-billing-control-record.mjs'
 $acmDnsRecordValidatorPath = Join-Path $PSScriptRoot 'validate-acm-dns-control-record.mjs'
@@ -22,6 +23,7 @@ $bucketLocationResponsePath = Join-Path $temporaryRoot 'bucket-location.json'
 $bucketVersioningResponsePath = Join-Path $temporaryRoot 'bucket-versioning.json'
 $artifactObjectResponsePath = Join-Path $temporaryRoot 'artifact-object.json'
 $artifactObjectSourcePath = Join-Path $temporaryRoot 'artifact-object.yaml'
+$observabilityArtifactObjectSourcePath = Join-Path $temporaryRoot 'observability-artifact-object.yaml'
 $managedPrefixListResponsePath = Join-Path $temporaryRoot 'managed-prefix-list.json'
 $mismatchedChildTemplatePath = Join-Path $temporaryRoot 'mismatched-child-template.yaml'
 $approvedRecordPath = Join-Path $temporaryRoot 'approved-billing-control-record.json'
@@ -43,6 +45,7 @@ $originalEnvironment = @{
     FAKE_AWS_BUCKET_VERSIONING_RESPONSE = $env:FAKE_AWS_BUCKET_VERSIONING_RESPONSE
     FAKE_AWS_ARTIFACT_OBJECT_RESPONSE = $env:FAKE_AWS_ARTIFACT_OBJECT_RESPONSE
     FAKE_AWS_ARTIFACT_OBJECT_SOURCE = $env:FAKE_AWS_ARTIFACT_OBJECT_SOURCE
+    FAKE_AWS_OBSERVABILITY_ARTIFACT_OBJECT_SOURCE = $env:FAKE_AWS_OBSERVABILITY_ARTIFACT_OBJECT_SOURCE
     FAKE_AWS_MANAGED_PREFIX_LIST_RESPONSE = $env:FAKE_AWS_MANAGED_PREFIX_LIST_RESPONSE
 }
 $passed = 0
@@ -260,7 +263,7 @@ function Write-ChangeSetResponse {
 if (-not (Test-Path -LiteralPath $guardPath -PathType Leaf)) {
     throw "Application guard under test was not found: $guardPath"
 }
-foreach ($requiredFile in @($applicationTemplatePath, $workloadBoundariesTemplatePath, $guardrailTemplatePath, $recordValidatorPath, $acmDnsRecordValidatorPath)) {
+foreach ($requiredFile in @($applicationTemplatePath, $workloadBoundariesTemplatePath, $observabilityTemplatePath, $guardrailTemplatePath, $recordValidatorPath, $acmDnsRecordValidatorPath)) {
     if (-not (Test-Path -LiteralPath $requiredFile -PathType Leaf)) {
         throw "Required focused-test input was not found: $requiredFile"
     }
@@ -302,7 +305,14 @@ if ($service -eq 's3api' -and $operation -eq 'get-bucket-versioning') {
 }
 if ($service -eq 's3api' -and $operation -eq 'get-object') {
     $destination = $AwsArguments[-1]
-    [System.IO.File]::Copy($env:FAKE_AWS_ARTIFACT_OBJECT_SOURCE, $destination, $true)
+    $keyIndex = [array]::IndexOf($AwsArguments, '--key')
+    $source = if ($keyIndex -ge 0 -and $AwsArguments[$keyIndex + 1] -like 'application-observability-*') {
+        $env:FAKE_AWS_OBSERVABILITY_ARTIFACT_OBJECT_SOURCE
+    }
+    else {
+        $env:FAKE_AWS_ARTIFACT_OBJECT_SOURCE
+    }
+    [System.IO.File]::Copy($source, $destination, $true)
     Write-ResponseFile -Path $env:FAKE_AWS_ARTIFACT_OBJECT_RESPONSE
 }
 if ($service -eq 'ec2' -and $operation -eq 'describe-managed-prefix-lists') {
@@ -360,6 +370,7 @@ $env:FAKE_AWS_BUCKET_LOCATION_RESPONSE = $bucketLocationResponsePath
 $env:FAKE_AWS_BUCKET_VERSIONING_RESPONSE = $bucketVersioningResponsePath
 $env:FAKE_AWS_ARTIFACT_OBJECT_RESPONSE = $artifactObjectResponsePath
 $env:FAKE_AWS_ARTIFACT_OBJECT_SOURCE = $artifactObjectSourcePath
+$env:FAKE_AWS_OBSERVABILITY_ARTIFACT_OBJECT_SOURCE = $observabilityArtifactObjectSourcePath
 $env:FAKE_AWS_MANAGED_PREFIX_LIST_RESPONSE = $managedPrefixListResponsePath
 
 Write-JsonFile -Path $bucketLocationResponsePath -Value ([ordered]@{ LocationConstraint = 'us-west-2' }) -Depth 3
@@ -572,9 +583,11 @@ $global:LASTEXITCODE = 0
 
 $applicationTemplateBody = Get-Content -LiteralPath $applicationTemplatePath -Raw
 $workloadBoundariesTemplateBody = Get-Content -LiteralPath $workloadBoundariesTemplatePath -Raw
+$observabilityTemplateBody = Get-Content -LiteralPath $observabilityTemplatePath -Raw
 $guardrailTemplateBody = Get-Content -LiteralPath $guardrailTemplatePath -Raw
 $applicationTemplateSha256 = (Get-FileHash -LiteralPath $applicationTemplatePath -Algorithm SHA256).Hash.ToLowerInvariant()
 $workloadBoundariesTemplateSha256 = (Get-FileHash -LiteralPath $workloadBoundariesTemplatePath -Algorithm SHA256).Hash.ToLowerInvariant()
+$observabilityTemplateSha256 = (Get-FileHash -LiteralPath $observabilityTemplatePath -Algorithm SHA256).Hash.ToLowerInvariant()
 $guardrailTemplateSha256 = (Get-FileHash -LiteralPath $guardrailTemplatePath -Algorithm SHA256).Hash.ToLowerInvariant()
 if ((Get-TextSha256 -Value $applicationTemplateBody) -cne $applicationTemplateSha256) {
     throw 'Focused test requires application template text and file SHA-256 values to be identical.'
@@ -586,6 +599,10 @@ if ((Get-TextSha256 -Value $guardrailTemplateBody) -cne $guardrailTemplateSha256
     $artifactObjectSourcePath,
     [System.IO.File]::ReadAllBytes($workloadBoundariesTemplatePath)
 )
+[System.IO.File]::WriteAllBytes(
+    $observabilityArtifactObjectSourcePath,
+    [System.IO.File]::ReadAllBytes($observabilityTemplatePath)
+)
 $artifactVersionId = 'version+/with=padding'
 $artifactBucket = 'crypto-lending-artifacts-111122223333'
 $artifactKey = "application-workload-boundaries-$workloadBoundariesTemplateSha256.yaml"
@@ -593,6 +610,10 @@ $artifactBindingText = "bucket=$artifactBucket`nkey=$artifactKey`nversion-id=$ar
 $artifactBindingSha256 = Get-TextSha256 -Value $artifactBindingText
 $encodedArtifactVersionId = [System.Uri]::EscapeDataString($artifactVersionId)
 $artifactTemplateUrl = "https://$artifactBucket.s3.us-west-2.amazonaws.com/$artifactKey`?versionId=$encodedArtifactVersionId"
+$observabilityArtifactKey = "application-observability-$observabilityTemplateSha256.yaml"
+$observabilityArtifactBindingText = "bucket=$artifactBucket`nkey=$observabilityArtifactKey`nversion-id=$artifactVersionId"
+$observabilityArtifactBindingSha256 = Get-TextSha256 -Value $observabilityArtifactBindingText
+$observabilityTemplateUrl = "https://$artifactBucket.s3.us-west-2.amazonaws.com/$observabilityArtifactKey`?versionId=$encodedArtifactVersionId"
 $incorrectEncodedVersionBinding = Get-TextSha256 -Value "bucket=$artifactBucket`nkey=$artifactKey`nversion-id=$encodedArtifactVersionId"
 if ($artifactBindingSha256 -ceq $incorrectEncodedVersionBinding -or $artifactTemplateUrl -notmatch 'versionId=version%2B%2Fwith%3Dpadding$') {
     throw 'Focused test requires raw VersionId binding and an independently URL-escaped TemplateURL fixture.'
@@ -649,11 +670,15 @@ $guardrailParameterMap = [ordered]@{
 }
 
 $imagePrefix = '111122223333.dkr.ecr.us-west-2.amazonaws.com/'
+$operationalAlarmTopicArn = 'arn:aws:sns:us-west-2:111122223333:crypto-lending-test-kan34-operations'
 $applicationParameterMap = [ordered]@{
     EnvironmentName = 'test-kan34'
     WorkloadBoundariesTemplateUrl = $artifactTemplateUrl
     WorkloadBoundariesTemplateSha256 = $workloadBoundariesTemplateSha256
     WorkloadBoundariesArtifactBindingSha256 = $artifactBindingSha256
+    ObservabilityTemplateUrl = $observabilityTemplateUrl
+    ObservabilityTemplateSha256 = $observabilityTemplateSha256
+    ObservabilityArtifactBindingSha256 = $observabilityArtifactBindingSha256
     BillingAcknowledgement = 'I_ACKNOWLEDGE_THIS_CREATES_BILLABLE_AWS_RESOURCES'
     ApplicationVersion = ('a' * 40)
     ApiImageUri = $imagePrefix + 'crypto-lending-api@sha256:' + ('b' * 64)
@@ -663,6 +688,11 @@ $applicationParameterMap = [ordered]@{
     AllowedIngressIpv4Cidr = '203.0.113.10/32'
     AlbCertificateArn = 'arn:aws:acm:us-west-2:111122223333:certificate/11111111-2222-3333-4444-555555555555'
     ApplicationHostname = 'test.crypto-lending.invalid'
+    CognitoPoolId = 'us-west-2_TestPool123'
+    CognitoLoginHostname = 'login.test.crypto-lending.invalid'
+    CognitoClientId = '1exampleclientid'
+    AuthWalletKeysSecretArn = 'arn:aws:secretsmanager:us-west-2:111122223333:secret:crypto-lending/test/auth-wallet-keys-AbCdEf'
+    AuthWalletKeysKmsKeyArn = 'arn:aws:kms:us-west-2:111122223333:key/11111111-2222-3333-4444-555555555555'
     PostgresEngineVersion = '16.4'
     RdsCaBundlePath = '/etc/ssl/certs/aws-rds-global-bundle.pem'
     ApiDesiredCount = '0'
@@ -690,6 +720,7 @@ $applicationParameterMap = [ordered]@{
     SqsVisibilityTimeoutSeconds = '30'
     LogRetentionDays = '14'
     EnableOperationalAlarms = 'true'
+    AlarmTopicArn = $operationalAlarmTopicArn
     EnableOperationalDashboard = 'false'
     EnableContainerInsights = 'disabled'
 }
@@ -705,13 +736,15 @@ $applicationStackTags = [ordered]@{
     'acm-dns-configuration-sha256' = $acmDnsConfigurationSha256
     'workload-boundaries-sha256' = $workloadBoundariesTemplateSha256
     'workload-boundaries-binding-sha256' = $artifactBindingSha256
+    'observability-sha256' = $observabilityTemplateSha256
+    'observability-binding-sha256' = $observabilityArtifactBindingSha256
     'managed-by' = 'cloudformation'
     ticket = 'KAN-34'
 }
 $parameterSha256 = Get-TextSha256 -Value (Get-CanonicalMapText -Map $applicationParameterMap)
 $tagSha256 = Get-TextSha256 -Value (Get-CanonicalMapText -Map $applicationStackTags)
-$expectedChangeSetDescription = "KAN-34 template-sha256=$applicationTemplateSha256 child-template-sha256=$workloadBoundariesTemplateSha256 child-artifact-binding-sha256=$artifactBindingSha256 parameters-sha256=$parameterSha256 tags-sha256=$tagSha256 control-record-sha256=$controlRecordSha256 acm-dns-record-sha256=$acmDnsRecordSha256 guardrail-policy=kan-229-v1"
-$billableAcknowledgement = "EXECUTE IMMUTABLE CHANGE SET $immutableChangeSetId FOR IMMUTABLE STACK $immutableStackId WITH PARAMETERS $parameterSha256 CHILD TEMPLATE $workloadBoundariesTemplateSha256 ARTIFACT BINDING $artifactBindingSha256 USING BILLING CONTROL $controlRecordSha256 AND ACM DNS CONTROL $acmDnsRecordSha256; I ACKNOWLEDGE BILLABLE AWS RESOURCES IN ACCOUNT 111122223333 REGION us-west-2 USING PROFILE kan34-test"
+$expectedChangeSetDescription = "KAN-34 template-sha256=$applicationTemplateSha256 workload-template-sha256=$workloadBoundariesTemplateSha256 workload-binding-sha256=$artifactBindingSha256 observability-template-sha256=$observabilityTemplateSha256 observability-binding-sha256=$observabilityArtifactBindingSha256 parameters-sha256=$parameterSha256 tags-sha256=$tagSha256 control-record-sha256=$controlRecordSha256 acm-dns-record-sha256=$acmDnsRecordSha256 guardrail-policy=kan-229-v1"
+$billableAcknowledgement = "EXECUTE IMMUTABLE CHANGE SET $immutableChangeSetId FOR IMMUTABLE STACK $immutableStackId WITH PARAMETERS $parameterSha256 WORKLOAD TEMPLATE $workloadBoundariesTemplateSha256 WORKLOAD BINDING $artifactBindingSha256 OBSERVABILITY TEMPLATE $observabilityTemplateSha256 OBSERVABILITY BINDING $observabilityArtifactBindingSha256 USING BILLING CONTROL $controlRecordSha256 AND ACM DNS CONTROL $acmDnsRecordSha256; I ACKNOWLEDGE BILLABLE AWS RESOURCES IN ACCOUNT 111122223333 REGION us-west-2 USING PROFILE kan34-test"
 $parameterOverrides = @(
     'BillingAcknowledgement=I_ACKNOWLEDGE_THIS_CREATES_BILLABLE_AWS_RESOURCES'
     "ApplicationVersion=$('a' * 40)"
@@ -722,13 +755,20 @@ $parameterOverrides = @(
     'AllowedIngressIpv4Cidr=203.0.113.10/32'
     "AlbCertificateArn=$($applicationParameterMap.AlbCertificateArn)"
     'ApplicationHostname=test.crypto-lending.invalid'
+    'CognitoPoolId=us-west-2_TestPool123'
+    'CognitoLoginHostname=login.test.crypto-lending.invalid'
+    'CognitoClientId=1exampleclientid'
+    "AuthWalletKeysSecretArn=$($applicationParameterMap.AuthWalletKeysSecretArn)"
+    "AuthWalletKeysKmsKeyArn=$($applicationParameterMap.AuthWalletKeysKmsKeyArn)"
     'PostgresEngineVersion=16.4'
+    "AlarmTopicArn=$operationalAlarmTopicArn"
 )
 
 $baseArguments = @{
     Action = 'Deploy'
     TemplateFile = $applicationTemplatePath
     WorkloadBoundariesTemplateFile = $workloadBoundariesTemplatePath
+    ObservabilityTemplateFile = $observabilityTemplatePath
     Profile = 'kan34-test'
     AccountId = '111122223333'
     Region = 'us-west-2'
@@ -742,6 +782,8 @@ $baseArguments = @{
     GuardrailControlRegion = 'us-east-1'
     WorkloadBoundariesArtifactBucket = $artifactBucket
     WorkloadBoundariesArtifactVersionId = $artifactVersionId
+    ObservabilityArtifactBucket = $artifactBucket
+    ObservabilityArtifactVersionId = $artifactVersionId
     ParameterOverride = $parameterOverrides
     AllowAwsApiCalls = $true
     BillableAcknowledgement = $billableAcknowledgement
@@ -779,6 +821,15 @@ try {
         Assert-Condition (-not $result.Succeeded) 'Plan accepted a missing versioned child artifact VersionId.'
         Assert-Condition ($result.Output -match 'WorkloadBoundariesArtifactVersionId must be supplied explicitly') 'Missing VersionId rejection did not identify the immutable artifact input.'
         Assert-Condition ((Get-AwsMarkerText) -eq '') 'Missing immutable artifact input reached AWS discovery.'
+
+        $observabilityArguments = Copy-ArgumentMap -Map $baseArguments
+        $observabilityArguments.Action = 'Plan'
+        [void] $observabilityArguments.Remove('BillableAcknowledgement')
+        [void] $observabilityArguments.Remove('ObservabilityArtifactVersionId')
+        $observabilityResult = Invoke-Guard -Arguments $observabilityArguments
+        Assert-Condition (-not $observabilityResult.Succeeded) 'Plan accepted a missing observability artifact VersionId.'
+        Assert-Condition ($observabilityResult.Output -match 'ObservabilityArtifactVersionId must be supplied explicitly') 'Missing observability VersionId rejection was not explicit.'
+        Assert-Condition ((Get-AwsMarkerText) -eq '') 'Missing observability artifact input reached AWS discovery.'
     }
 
     Invoke-FocusedTest -Name 'Plan verifies exact versioned child bytes before creating a nested-aware change set' -Body {
@@ -803,7 +854,89 @@ try {
         Assert-Condition ($createLines[0] -match [regex]::Escape("ParameterKey=WorkloadBoundariesTemplateUrl,ParameterValue=$artifactTemplateUrl")) 'Plan did not bind the constructed versioned TemplateURL.'
         Assert-Condition ($createLines[0] -match [regex]::Escape("ParameterKey=WorkloadBoundariesTemplateSha256,ParameterValue=$workloadBoundariesTemplateSha256")) 'Plan did not bind the reviewed child byte hash.'
         Assert-Condition ($createLines[0] -match [regex]::Escape("ParameterKey=WorkloadBoundariesArtifactBindingSha256,ParameterValue=$artifactBindingSha256")) 'Plan did not bind the artifact location/version hash.'
+        Assert-Condition ($createLines[0] -match [regex]::Escape("ParameterKey=ObservabilityTemplateUrl,ParameterValue=$observabilityTemplateUrl")) 'Plan did not bind the observability versioned TemplateURL.'
+        Assert-Condition ($createLines[0] -match [regex]::Escape("ParameterKey=ObservabilityTemplateSha256,ParameterValue=$observabilityTemplateSha256")) 'Plan did not bind the reviewed observability bytes.'
+        Assert-Condition ($createLines[0] -match [regex]::Escape("ParameterKey=ObservabilityArtifactBindingSha256,ParameterValue=$observabilityArtifactBindingSha256")) 'Plan did not bind the observability artifact location/version hash.'
+        Assert-Condition ($createLines[0] -match [regex]::Escape("ParameterKey=AuthWalletKeysSecretArn,ParameterValue=$($applicationParameterMap.AuthWalletKeysSecretArn)")) 'Plan did not bind the one reviewed auth/wallet secret ARN.'
+        Assert-Condition ($createLines[0] -match [regex]::Escape("ParameterKey=AuthWalletKeysKmsKeyArn,ParameterValue=$($applicationParameterMap.AuthWalletKeysKmsKeyArn)")) 'Plan did not bind the exact auth/wallet KMS key ARN.'
+        Assert-Condition ($createLines[0] -match [regex]::Escape("ParameterKey=AlarmTopicArn,ParameterValue=$operationalAlarmTopicArn")) 'Plan did not bind the exact existing operational alarm SNS topic ARN.'
         Assert-Condition ($marker -notmatch 'put-object|create-bucket|execute-change-set') 'Plan uploaded, created, or executed a cloud resource.'
+    }
+
+    Invoke-FocusedTest -Name 'Plan rejects auth secret selectors and cross-account auth KMS keys' -Body {
+        Write-GuardrailStackResponse -ConfigurationSha256 $controlConfigurationSha256
+        Write-TemplateResponse -Path $guardrailTemplateResponsePath -TemplateBody $guardrailTemplateBody
+
+        Clear-AwsMarker
+        $selectorArguments = Copy-ArgumentMap -Map $baseArguments
+        $selectorArguments.Action = 'Plan'
+        $selectorArguments.ParameterOverride = @($parameterOverrides | Where-Object { $_ -notlike 'AuthWalletKeysSecretArn=*' }) + @(
+            "AuthWalletKeysSecretArn=$($applicationParameterMap.AuthWalletKeysSecretArn):AUTH_PREAUTH_SEAL_KEY::"
+        )
+        $selectorResult = Invoke-Guard -Arguments $selectorArguments
+        Assert-Condition (-not $selectorResult.Succeeded) 'Plan accepted a field-selected ARN instead of the one whole JSON secret ARN.'
+        Assert-Condition ($selectorResult.Output -match 'selector-free Secrets Manager ARN') 'Secret-selector rejection did not identify the exact ARN contract.'
+        Assert-Condition ((Get-AwsMarkerText) -notmatch 'create-change-set|execute-change-set') 'Invalid auth secret ARN reached a change-set mutation.'
+
+        Clear-AwsMarker
+        $kmsArguments = Copy-ArgumentMap -Map $baseArguments
+        $kmsArguments.Action = 'Plan'
+        $kmsArguments.ParameterOverride = @($parameterOverrides | Where-Object { $_ -notlike 'AuthWalletKeysKmsKeyArn=*' }) + @(
+            'AuthWalletKeysKmsKeyArn=arn:aws:kms:us-west-2:999900001111:key/11111111-2222-3333-4444-555555555555'
+        )
+        $kmsResult = Invoke-Guard -Arguments $kmsArguments
+        Assert-Condition (-not $kmsResult.Succeeded) 'Plan accepted an auth/wallet KMS key from another account.'
+        Assert-Condition ($kmsResult.Output -match 'customer-managed KMS key ARN') 'KMS account rejection did not identify the exact ARN contract.'
+        Assert-Condition ((Get-AwsMarkerText) -notmatch 'create-change-set|execute-change-set') 'Invalid auth KMS ARN reached a change-set mutation.'
+    }
+
+    Invoke-FocusedTest -Name 'Plan fails closed on missing or cross-boundary alarm notification topics' -Body {
+        Write-GuardrailStackResponse -ConfigurationSha256 $controlConfigurationSha256
+        Write-TemplateResponse -Path $guardrailTemplateResponsePath -TemplateBody $guardrailTemplateBody
+
+        Clear-AwsMarker
+        $missingArguments = Copy-ArgumentMap -Map $baseArguments
+        $missingArguments.Action = 'Plan'
+        $missingArguments.ParameterOverride = @($parameterOverrides | Where-Object { $_ -notlike 'AlarmTopicArn=*' })
+        $missing = Invoke-Guard -Arguments $missingArguments
+        Assert-Condition (-not $missing.Succeeded) 'Plan accepted enabled operational alarms without an explicit notification topic.'
+        Assert-Condition ($missing.Output -match 'must be explicitly supplied as one existing SNS topic ARN') 'Missing alarm topic rejection did not identify the fail-closed notification contract.'
+        Assert-Condition ((Get-AwsMarkerText) -notmatch 'create-change-set|execute-change-set') 'Missing alarm topic reached a change-set mutation.'
+
+        foreach ($invalidTopicArn in @(
+                'arn:aws:sns:us-east-1:111122223333:crypto-lending-test-kan34-operations',
+                'arn:aws:sns:us-west-2:999900001111:crypto-lending-test-kan34-operations',
+                'arn:aws-cn:sns:us-west-2:111122223333:crypto-lending-test-kan34-operations',
+                'arn:aws:sns:us-west-2:111122223333:*'
+            )) {
+            Clear-AwsMarker
+            $invalidArguments = Copy-ArgumentMap -Map $baseArguments
+            $invalidArguments.Action = 'Plan'
+            $invalidArguments.ParameterOverride = @($parameterOverrides | Where-Object { $_ -notlike 'AlarmTopicArn=*' }) + @(
+                "AlarmTopicArn=$invalidTopicArn"
+            )
+            $invalid = Invoke-Guard -Arguments $invalidArguments
+            Assert-Condition (-not $invalid.Succeeded) "Plan accepted invalid alarm topic ARN '$invalidTopicArn'."
+            Assert-Condition ($invalid.Output -match 'approved partition, account, and Region') 'Invalid alarm topic rejection did not identify the exact deployment boundary.'
+            Assert-Condition ((Get-AwsMarkerText) -notmatch 'create-change-set|execute-change-set') 'Invalid alarm topic reached a change-set mutation.'
+        }
+    }
+
+    Invoke-FocusedTest -Name 'Plan uses the no-topic sentinel only when operational alarms are disabled' -Body {
+        Write-GuardrailStackResponse -ConfigurationSha256 $controlConfigurationSha256
+        Write-TemplateResponse -Path $guardrailTemplateResponsePath -TemplateBody $guardrailTemplateBody
+        Clear-AwsMarker
+        $arguments = Copy-ArgumentMap -Map $baseArguments
+        $arguments.Action = 'Plan'
+        $arguments.ParameterOverride = @($parameterOverrides | Where-Object { $_ -notlike 'AlarmTopicArn=*' }) + @(
+            'EnableOperationalAlarms=false'
+        )
+        $result = Invoke-Guard -Arguments $arguments
+        $marker = Get-AwsMarkerText
+        Assert-Condition $result.Succeeded "Disabled-alarm Plan failed: $($result.Output)"
+        Assert-Condition ($marker -match 'ParameterKey=EnableOperationalAlarms,ParameterValue=false') 'Disabled-alarm Plan did not preserve its exact opt-out.'
+        Assert-Condition ($marker -match 'ParameterKey=AlarmTopicArn,ParameterValue=NONE') 'Disabled-alarm Plan did not use the reviewed no-topic sentinel.'
+        Assert-Condition ($marker -notmatch 'execute-change-set') 'Disabled-alarm Plan unexpectedly executed a change set.'
     }
 
     Invoke-FocusedTest -Name 'Plan accepts only the reviewed non-secret credential rotation phases' -Body {
@@ -1026,6 +1159,22 @@ try {
         [System.IO.File]::WriteAllBytes($artifactObjectSourcePath, [System.IO.File]::ReadAllBytes($workloadBoundariesTemplatePath))
     }
 
+    Invoke-FocusedTest -Name 'Deploy re-verifies observability bytes and blocks execution on artifact drift' -Body {
+        Clear-AwsMarker
+        Write-GuardrailStackResponse -ConfigurationSha256 $controlConfigurationSha256
+        Write-TemplateResponse -Path $guardrailTemplateResponsePath -TemplateBody $guardrailTemplateBody
+        Write-TemplateResponse -Path $applicationTemplateResponsePath -TemplateBody $applicationTemplateBody
+        Write-ChangeSetResponse
+        [System.IO.File]::WriteAllText($observabilityArtifactObjectSourcePath, $observabilityTemplateBody + "`n# drift before execute", [System.Text.UTF8Encoding]::new($false))
+        $result = Invoke-Guard -Arguments $baseArguments
+        $marker = Get-AwsMarkerText
+        Assert-Condition (-not $result.Succeeded) 'Deploy accepted drifted observability artifact bytes.'
+        Assert-Condition ($result.Output -match 'observability artifact does not match reviewed local bytes') 'Deploy observability drift rejection was not explicit.'
+        Assert-Condition ($marker -match ('--key ' + [regex]::Escape($observabilityArtifactKey))) 'Deploy did not retrieve the exact observability artifact key.'
+        Assert-Condition ($marker -notmatch 'execute-change-set') 'Deploy executed after observability artifact drift.'
+        [System.IO.File]::WriteAllBytes($observabilityArtifactObjectSourcePath, [System.IO.File]::ReadAllBytes($observabilityTemplatePath))
+    }
+
     Invoke-FocusedTest -Name 'exact happy path executes only the immutable change-set ARN' -Body {
         Clear-AwsMarker
         Write-GuardrailStackResponse -ConfigurationSha256 $controlConfigurationSha256
@@ -1061,6 +1210,7 @@ finally {
     $env:FAKE_AWS_BUCKET_VERSIONING_RESPONSE = $originalEnvironment.FAKE_AWS_BUCKET_VERSIONING_RESPONSE
     $env:FAKE_AWS_ARTIFACT_OBJECT_RESPONSE = $originalEnvironment.FAKE_AWS_ARTIFACT_OBJECT_RESPONSE
     $env:FAKE_AWS_ARTIFACT_OBJECT_SOURCE = $originalEnvironment.FAKE_AWS_ARTIFACT_OBJECT_SOURCE
+    $env:FAKE_AWS_OBSERVABILITY_ARTIFACT_OBJECT_SOURCE = $originalEnvironment.FAKE_AWS_OBSERVABILITY_ARTIFACT_OBJECT_SOURCE
     $env:FAKE_AWS_MANAGED_PREFIX_LIST_RESPONSE = $originalEnvironment.FAKE_AWS_MANAGED_PREFIX_LIST_RESPONSE
 
     $resolvedTemporaryRoot = [System.IO.Path]::GetFullPath($temporaryRoot)
