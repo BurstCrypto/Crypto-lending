@@ -7,6 +7,7 @@ import { MigrationRunner } from '../../src/infrastructure/database/migration-run
 import { PRODUCTION_DATABASE_PRINCIPALS } from '../../src/infrastructure/database/migrations/0005-enforce-database-principal-boundaries.migration';
 import { createBalanceSyncReadModelTestSchemaMigrationV0020 } from '../../src/infrastructure/database/migrations/0020-create-balance-sync-read-model.migration';
 import { createStablecoinPriceEvidenceReadModelTestSchemaMigrationV0021 } from '../../src/infrastructure/database/migrations/0021-create-stablecoin-price-evidence-read-model.migration';
+import { suspendStablecoinIngestionAuthorityTestSchemaMigrationV0026 } from '../../src/infrastructure/database/migrations/0026-suspend-stablecoin-ingestion-authority.migration';
 import { DATABASE_TEST_SCHEMA_MIGRATION_LIST } from '../../src/infrastructure/database/migrations';
 import { PostgresService } from '../../src/infrastructure/database/postgres.service';
 import type { RecordStablecoinPriceEvidenceRequest } from '../../src/valuation/application/ports/stablecoin-price-evidence-store.port';
@@ -30,6 +31,8 @@ const IDENTIFIER = /^[a-z][a-z0-9_]{0,62}$/u;
 const FINGERPRINT = '5058b141479f114c1e5f87ed8798fbb7a7ffcce7b502aa7e0794dc53ca1f767d';
 const READ_FUNCTION =
   'read_stablecoin_price_evidence(text,smallint,text,text,text,text,smallint,timestamp with time zone)';
+const RECORD_FUNCTION =
+  'record_stablecoin_price_evidence(uuid,text,text,timestamp with time zone,text,text,text,smallint,text,text,text,text,smallint,text,text,numeric,text,timestamp with time zone,timestamp with time zone,numeric,smallint,text,numeric,smallint,text,text,text)';
 const ETHEREUM_USDC: StablecoinValuationAssetReference = Object.freeze({
   registryEnvironment: 'MAINNET',
   registryVersion: 1,
@@ -139,6 +142,7 @@ describeWithPostgres('stablecoin price evidence PostgreSQL controls', () => {
   jest.setTimeout(120_000);
 
   const schema = `price_evidence_${randomBytes(8).toString('hex')}`;
+  const genericRole = `price_evidence_generic_${randomBytes(6).toString('hex')}`;
   const migrations = [...DATABASE_TEST_SCHEMA_MIGRATION_LIST];
   if (!migrations.some(({ id }) => id === '0020')) {
     migrations.push(createBalanceSyncReadModelTestSchemaMigrationV0020);
@@ -171,11 +175,15 @@ describeWithPostgres('stablecoin price evidence PostgreSQL controls', () => {
       bootstrapRole: fixtureIdentity.rows[0]?.bootstrap_role ?? '',
       marker: fixtureIdentity.rows[0]?.marker ?? null,
     });
+    await adminPool.query(`CREATE ROLE ${quoteIdentifier(genericRole)} NOLOGIN`);
     await adminPool.query(`CREATE SCHEMA ${quoteIdentifier(schema)}`);
     await adminPool.query(
       `GRANT USAGE ON SCHEMA ${quoteIdentifier(schema)} TO
        ${quoteIdentifier(PRODUCTION_DATABASE_PRINCIPALS.apiRuntimeRole)},
-       ${quoteIdentifier(PRODUCTION_DATABASE_PRINCIPALS.workerRuntimeRole)}`,
+       ${quoteIdentifier(PRODUCTION_DATABASE_PRINCIPALS.workerRuntimeRole)},
+       ${quoteIdentifier(PRODUCTION_DATABASE_PRINCIPALS.legacyRuntimeRole)},
+       ${quoteIdentifier(PRODUCTION_DATABASE_PRINCIPALS.migrationRole)},
+       ${quoteIdentifier(genericRole)}`,
     );
     operationPool = new Pool({
       connectionString: testDatabaseUrl as string,
@@ -195,27 +203,33 @@ describeWithPostgres('stablecoin price evidence PostgreSQL controls', () => {
     if (operationPool) await operationPool.end();
     if (adminPool) {
       await adminPool.query(`DROP SCHEMA IF EXISTS ${quoteIdentifier(schema)} CASCADE`);
+      await adminPool.query(`DROP ROLE IF EXISTS ${quoteIdentifier(genericRole)}`);
       await adminPool.end();
     }
   });
 
-  it('keeps empty history unavailable and separates API read from worker write', async () => {
+  it('keeps API reads while every runtime and PUBLIC-only role is denied ingestion', async () => {
     const reader = new PostgresPortfolioPriceEvidenceReader(postgres);
+    const api = PRODUCTION_DATABASE_PRINCIPALS.apiRuntimeRole;
+    const deniedRoles = [
+      PRODUCTION_DATABASE_PRINCIPALS.workerRuntimeRole,
+      PRODUCTION_DATABASE_PRINCIPALS.legacyRuntimeRole,
+      PRODUCTION_DATABASE_PRINCIPALS.migrationRole,
+      genericRole,
+    ] as const;
     const request = {
       asset: ETHEREUM_USDC,
       evaluatedAt: at(baseTime, 30_000),
       correlationId: randomUUID(),
     };
     await expect(
-      asRole(postgres, PRODUCTION_DATABASE_PRINCIPALS.apiRuntimeRole, () =>
-        reader.readPriceEvidence(request),
-      ),
+      asRole(postgres, api, () => reader.readPriceEvidence(request)),
     ).resolves.toMatchObject({ observations: [] });
-    await expect(
-      asRole(postgres, PRODUCTION_DATABASE_PRINCIPALS.workerRuntimeRole, () =>
-        reader.readPriceEvidence(request),
-      ),
-    ).rejects.toBeInstanceOf(StablecoinPriceEvidencePersistenceError);
+    for (const role of deniedRoles) {
+      await expect(
+        asRole(postgres, role, () => reader.readPriceEvidence(request)),
+      ).rejects.toBeInstanceOf(StablecoinPriceEvidencePersistenceError);
+    }
 
     const writer = new PostgresStablecoinPriceEvidenceWriter(postgres);
     const write = recordRequest({
@@ -225,19 +239,43 @@ describeWithPostgres('stablecoin price evidence PostgreSQL controls', () => {
       observedAt: at(baseTime, -4_000),
       verifiedAt: at(baseTime, -3_000),
     });
-    await expect(
-      asRole(postgres, PRODUCTION_DATABASE_PRINCIPALS.apiRuntimeRole, () => writer.record(write)),
-    ).rejects.toBeInstanceOf(StablecoinPriceEvidencePersistenceError);
-    await expect(
-      queryAsRole(
-        operationPool,
-        PRODUCTION_DATABASE_PRINCIPALS.apiRuntimeRole,
-        'SELECT * FROM stablecoin_price_observations',
-      ),
-    ).rejects.toBeDefined();
+    for (const role of [api, ...deniedRoles]) {
+      await expect(asRole(postgres, role, () => writer.record(write))).rejects.toBeInstanceOf(
+        StablecoinPriceEvidencePersistenceError,
+      );
+      await expect(
+        queryAsRole(operationPool, role, 'SELECT * FROM stablecoin_price_observations'),
+      ).rejects.toBeDefined();
+    }
+
+    const typeAcl = await operationPool.query<{ role: string; usage: boolean }>(
+      `SELECT role_state.role,
+              pg_catalog.has_type_privilege(role_state.role, type_state.oid, 'USAGE') AS usage
+       FROM pg_catalog.unnest($1::text[]) AS role_state(role)
+       CROSS JOIN pg_catalog.pg_type AS type_state
+       INNER JOIN pg_catalog.pg_namespace AS namespace
+         ON namespace.oid = type_state.typnamespace
+       WHERE namespace.nspname = pg_catalog.current_schema()
+         AND type_state.typname = 'stablecoin_price_observations'
+       ORDER BY role_state.role`,
+      [[api, ...deniedRoles]],
+    );
+    expect(typeAcl.rows).toHaveLength(deniedRoles.length + 1);
+    expect(typeAcl.rows.every(({ usage }) => usage === false)).toBe(true);
+
+    const sequenceCount = await operationPool.query<{ count: string }>(
+      `SELECT pg_catalog.count(*)::text AS count
+       FROM pg_catalog.pg_class AS sequence
+       INNER JOIN pg_catalog.pg_namespace AS namespace
+         ON namespace.oid = sequence.relnamespace
+       WHERE namespace.nspname = pg_catalog.current_schema()
+         AND sequence.relkind = 'S'
+         AND sequence.relname LIKE 'stablecoin\\_%' ESCAPE '\\'`,
+    );
+    expect(sequenceCount.rows).toEqual([{ count: '0' }]);
   });
 
-  it('accepts monotonic evidence, exact replay, and the same bundled update in another asset scope', async () => {
+  it('lets only the local test-schema owner exercise positive ingestion behavior', async () => {
     const writer = new PostgresStablecoinPriceEvidenceWriter(postgres);
     const first = recordRequest({
       asset: ETHEREUM_USDC,
@@ -247,21 +285,18 @@ describeWithPostgres('stablecoin price evidence PostgreSQL controls', () => {
       verifiedAt: at(baseTime, -3_000),
       evidenceFingerprint: '1'.repeat(64),
     });
-    await expect(
-      asRole(postgres, PRODUCTION_DATABASE_PRINCIPALS.workerRuntimeRole, () =>
-        writer.record(first),
-      ),
-    ).resolves.toMatchObject({ outcome: 'ACCEPTED', watermarkRevision: 1 });
-    await expect(
-      asRole(postgres, PRODUCTION_DATABASE_PRINCIPALS.workerRuntimeRole, () =>
-        writer.record(first),
-      ),
-    ).resolves.toMatchObject({ outcome: 'IDEMPOTENT_REPLAY', watermarkRevision: 1 });
-    await expect(
-      asRole(postgres, PRODUCTION_DATABASE_PRINCIPALS.workerRuntimeRole, () =>
-        writer.record({ ...first, correlationId: randomUUID() }),
-      ),
-    ).resolves.toMatchObject({ outcome: 'REPLAYED_UPDATE_ID', watermarkRevision: null });
+    await expect(writer.record(first)).resolves.toMatchObject({
+      outcome: 'ACCEPTED',
+      watermarkRevision: 1,
+    });
+    await expect(writer.record(first)).resolves.toMatchObject({
+      outcome: 'IDEMPOTENT_REPLAY',
+      watermarkRevision: 1,
+    });
+    await expect(writer.record({ ...first, correlationId: randomUUID() })).resolves.toMatchObject({
+      outcome: 'REPLAYED_UPDATE_ID',
+      watermarkRevision: null,
+    });
 
     const solana = recordRequest({
       asset: SOLANA_USDC,
@@ -271,11 +306,10 @@ describeWithPostgres('stablecoin price evidence PostgreSQL controls', () => {
       verifiedAt: at(baseTime, -3_000),
       evidenceFingerprint: '1'.repeat(64),
     });
-    await expect(
-      asRole(postgres, PRODUCTION_DATABASE_PRINCIPALS.workerRuntimeRole, () =>
-        writer.record(solana),
-      ),
-    ).resolves.toMatchObject({ outcome: 'ACCEPTED', watermarkRevision: 1 });
+    await expect(writer.record(solana)).resolves.toMatchObject({
+      outcome: 'ACCEPTED',
+      watermarkRevision: 1,
+    });
 
     const concurrentSolana = ['d', 'e'].map((hex) =>
       recordRequest({
@@ -288,11 +322,7 @@ describeWithPostgres('stablecoin price evidence PostgreSQL controls', () => {
       }),
     );
     const concurrentOutcomes = await Promise.all(
-      concurrentSolana.map((candidate) =>
-        asRole(postgres, PRODUCTION_DATABASE_PRINCIPALS.workerRuntimeRole, () =>
-          writer.record(candidate),
-        ),
-      ),
+      concurrentSolana.map((candidate) => writer.record(candidate)),
     );
     expect(concurrentOutcomes.map(({ outcome }) => outcome).sort()).toEqual([
       'ACCEPTED',
@@ -307,11 +337,10 @@ describeWithPostgres('stablecoin price evidence PostgreSQL controls', () => {
       verifiedAt: at(baseTime, -1_000),
       evidenceFingerprint: '2'.repeat(64),
     });
-    await expect(
-      asRole(postgres, PRODUCTION_DATABASE_PRINCIPALS.workerRuntimeRole, () =>
-        writer.record(second),
-      ),
-    ).resolves.toMatchObject({ outcome: 'ACCEPTED', watermarkRevision: 2 });
+    await expect(writer.record(second)).resolves.toMatchObject({
+      outcome: 'ACCEPTED',
+      watermarkRevision: 2,
+    });
     const regressed = recordRequest({
       asset: ETHEREUM_USDC,
       sequence: '1',
@@ -319,11 +348,10 @@ describeWithPostgres('stablecoin price evidence PostgreSQL controls', () => {
       observedAt: at(baseTime, -1_000),
       verifiedAt: baseTime,
     });
-    await expect(
-      asRole(postgres, PRODUCTION_DATABASE_PRINCIPALS.workerRuntimeRole, () =>
-        writer.record(regressed),
-      ),
-    ).resolves.toMatchObject({ outcome: 'NON_MONOTONIC', watermarkRevision: null });
+    await expect(writer.record(regressed)).resolves.toMatchObject({
+      outcome: 'NON_MONOTONIC',
+      watermarkRevision: null,
+    });
 
     const now = await operationPool.query<{ now: Date }>(
       "SELECT pg_catalog.date_trunc('milliseconds', pg_catalog.clock_timestamp()) AS now",
@@ -370,7 +398,7 @@ describeWithPostgres('stablecoin price evidence PostgreSQL controls', () => {
       )}`,
     );
     const invalid = await operationPool.query<{ valid: boolean }>(
-      createStablecoinPriceEvidenceReadModelTestSchemaMigrationV0021.verifySql ??
+      suspendStablecoinIngestionAuthorityTestSchemaMigrationV0026.verifySql ??
         'SELECT false AS valid',
     );
     expect(invalid.rows).toEqual([{ valid: false }]);
@@ -380,10 +408,18 @@ describeWithPostgres('stablecoin price evidence PostgreSQL controls', () => {
       )}`,
     );
     const valid = await operationPool.query<{ valid: boolean }>(
-      createStablecoinPriceEvidenceReadModelTestSchemaMigrationV0021.verifySql ??
+      suspendStablecoinIngestionAuthorityTestSchemaMigrationV0026.verifySql ??
         'SELECT false AS valid',
     );
     expect(valid.rows).toEqual([{ valid: true }]);
+
+    await operationPool.query(`GRANT EXECUTE ON FUNCTION ${RECORD_FUNCTION} TO PUBLIC`);
+    const publicMutation = await operationPool.query<{ valid: boolean }>(
+      suspendStablecoinIngestionAuthorityTestSchemaMigrationV0026.verifySql ??
+        'SELECT false AS valid',
+    );
+    expect(publicMutation.rows).toEqual([{ valid: false }]);
+    await operationPool.query(`REVOKE EXECUTE ON FUNCTION ${RECORD_FUNCTION} FROM PUBLIC`);
 
     await operationPool.query(`
       CREATE FUNCTION reject_stablecoin_price_tamper_probe()
@@ -399,7 +435,7 @@ describeWithPostgres('stablecoin price evidence PostgreSQL controls', () => {
         stablecoin_price_watermarks_no_delete;
     `);
     const triggerSubstitution = await operationPool.query<{ valid: boolean }>(
-      createStablecoinPriceEvidenceReadModelTestSchemaMigrationV0021.verifySql ??
+      suspendStablecoinIngestionAuthorityTestSchemaMigrationV0026.verifySql ??
         'SELECT false AS valid',
     );
     expect(triggerSubstitution.rows).toEqual([{ valid: false }]);
@@ -414,17 +450,16 @@ describeWithPostgres('stablecoin price evidence PostgreSQL controls', () => {
         stablecoin_price_watermarks_no_delete;
     `);
     const recoveredTriggerBinding = await operationPool.query<{ valid: boolean }>(
-      createStablecoinPriceEvidenceReadModelTestSchemaMigrationV0021.verifySql ??
+      suspendStablecoinIngestionAuthorityTestSchemaMigrationV0026.verifySql ??
         'SELECT false AS valid',
     );
     expect(recoveredTriggerBinding.rows).toEqual([{ valid: true }]);
-    const targetRollbackSql =
-      createStablecoinPriceEvidenceReadModelTestSchemaMigrationV0021.downSql;
+    const targetRollbackSql = suspendStablecoinIngestionAuthorityTestSchemaMigrationV0026.downSql;
     if (typeof targetRollbackSql !== 'string') {
-      throw new Error('Expected the stablecoin price evidence rollback to be one SQL statement');
+      throw new Error('Expected stablecoin authority rollback to be one SQL statement');
     }
     await expect(operationPool.query(targetRollbackSql)).rejects.toThrow(
-      'cannot roll back stablecoin price evidence after use',
+      'cannot roll back suspended stablecoin ingestion authority because rollback would regrant',
     );
     await expect(runner.assertUpToDate()).resolves.toBeUndefined();
   });

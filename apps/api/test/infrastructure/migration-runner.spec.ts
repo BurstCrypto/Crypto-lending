@@ -3,6 +3,8 @@ import type { Pool, PoolClient, QueryResult, QueryResultRow } from 'pg';
 import { MigrationRunner } from '../../src/infrastructure/database/migration-runner.service';
 import { DATABASE_MIGRATION_LIST } from '../../src/infrastructure/database/migrations';
 
+const REVERSIBLE_DATABASE_MIGRATION_LIST = DATABASE_MIGRATION_LIST.filter(({ id }) => id <= '0025');
+
 interface StoredMigration extends QueryResultRow {
   id: string;
   checksum: string;
@@ -227,6 +229,27 @@ class InMemoryMigrationDatabase {
         return result([{ valid: this.newVerifierValid }]);
       } else if (normalized === "SELECT 'third-verifier' AS verifier") {
         return result([{ valid: this.thirdVerifierValid }]);
+      } else if (
+        normalized.startsWith(
+          'SELECT (prior.valid AND function_privileges.valid AND direct_objects.valid)',
+        ) &&
+        normalized.includes('record_stablecoin_price_evidence')
+      ) {
+        return result([
+          {
+            valid:
+              this.accountSchemaExists &&
+              this.jobOutboxExists &&
+              this.ledgerSchemaExists &&
+              this.ledgerIdempotencySchemaExists &&
+              this.authenticationSchemaExists &&
+              this.walletRegistrationSchemaExists &&
+              this.yieldOperationSchemaExists &&
+              this.ledgerFeeAdjustmentIntegrityRepaired &&
+              this.aaveCheckpointSchemaExists &&
+              this.reviewedJobAdmissionExists,
+          },
+        ]);
       } else if (
         normalized.startsWith(
           'SELECT (prior.valid AND function_state.valid AND privileges.valid)',
@@ -526,9 +549,9 @@ describe('MigrationRunner', () => {
     );
   });
 
-  it('migrates a blank database and rolls the migration back', async () => {
+  it('migrates a blank database and rolls back the reversible chain', async () => {
     const database = new InMemoryMigrationDatabase();
-    const runner = new MigrationRunner(database.pool, DATABASE_MIGRATION_LIST);
+    const runner = new MigrationRunner(database.pool, REVERSIBLE_DATABASE_MIGRATION_LIST);
 
     await expect(runner.up()).resolves.toEqual([
       '0001',
@@ -646,7 +669,7 @@ describe('MigrationRunner', () => {
 
   it('requires drift repair before rolling back a cumulative verifier', async () => {
     const database = new InMemoryMigrationDatabase();
-    const runner = new MigrationRunner(database.pool, DATABASE_MIGRATION_LIST);
+    const runner = new MigrationRunner(database.pool, REVERSIBLE_DATABASE_MIGRATION_LIST);
     await runner.up();
 
     database.indexes.delete('job_outbox_failed_retention_idx');

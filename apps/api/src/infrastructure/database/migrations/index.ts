@@ -80,6 +80,10 @@ import {
   createAuthenticationHmacKeyRotationMigrationV0025,
   createAuthenticationHmacKeyRotationTestSchemaMigrationV0025,
 } from './0025-create-authentication-hmac-key-rotation.migration';
+import {
+  suspendStablecoinIngestionAuthorityMigrationV0026,
+  suspendStablecoinIngestionAuthorityTestSchemaMigrationV0026,
+} from './0026-suspend-stablecoin-ingestion-authority.migration';
 import type { DatabaseMigration } from './migration';
 
 /**
@@ -113,6 +117,7 @@ export const DATABASE_TEST_SCHEMA_MIGRATION_LIST: readonly DatabaseMigration[] =
   createBalanceConsumerWalletAddressBoundaryTestSchemaMigrationV0023,
   createWalletMetadataRewrapBoundaryTestSchemaMigrationV0024,
   createAuthenticationHmacKeyRotationTestSchemaMigrationV0025,
+  suspendStablecoinIngestionAuthorityTestSchemaMigrationV0026,
 ]);
 
 export const DATABASE_MIGRATION_LIST: readonly DatabaseMigration[] = Object.freeze([
@@ -141,6 +146,7 @@ export const DATABASE_MIGRATION_LIST: readonly DatabaseMigration[] = Object.free
   createBalanceConsumerWalletAddressBoundaryMigrationV0023,
   createWalletMetadataRewrapBoundaryMigrationV0024,
   createAuthenticationHmacKeyRotationMigrationV0025,
+  suspendStablecoinIngestionAuthorityMigrationV0026,
 ]);
 
 export type { DatabaseMigration } from './migration';
@@ -244,3 +250,8 @@ export {
   createAuthenticationHmacKeyRotationMigrationV0025,
   createAuthenticationHmacKeyRotationTestSchemaMigrationV0025,
 } from './0025-create-authentication-hmac-key-rotation.migration';
+export {
+  createStablecoinIngestionAuthoritySuspensionMigration,
+  suspendStablecoinIngestionAuthorityMigrationV0026,
+  suspendStablecoinIngestionAuthorityTestSchemaMigrationV0026,
+} from './0026-suspend-stablecoin-ingestion-authority.migration';

@@ -6,6 +6,7 @@ import { Pool } from 'pg';
 import { MigrationRunner } from '../../src/infrastructure/database/migration-runner.service';
 import { PRODUCTION_DATABASE_PRINCIPALS } from '../../src/infrastructure/database/migrations/0005-enforce-database-principal-boundaries.migration';
 import { createStablecoinDepegLatchTestSchemaMigrationV0019 } from '../../src/infrastructure/database/migrations/0019-create-stablecoin-depeg-latches.migration';
+import { suspendStablecoinIngestionAuthorityTestSchemaMigrationV0026 } from '../../src/infrastructure/database/migrations/0026-suspend-stablecoin-ingestion-authority.migration';
 import { DATABASE_TEST_SCHEMA_MIGRATION_LIST } from '../../src/infrastructure/database/migrations';
 import { PostgresService } from '../../src/infrastructure/database/postgres.service';
 import type {
@@ -260,6 +261,7 @@ describeWithPostgres('stablecoin depeg latch PostgreSQL controls', () => {
   jest.setTimeout(120_000);
 
   const schema = `stablecoin_latch_${randomBytes(8).toString('hex')}`;
+  const genericRole = `stablecoin_latch_generic_${randomBytes(6).toString('hex')}`;
   const migrations = DATABASE_TEST_SCHEMA_MIGRATION_LIST.some(({ id }) => id === '0019')
     ? DATABASE_TEST_SCHEMA_MIGRATION_LIST
     : [...DATABASE_TEST_SCHEMA_MIGRATION_LIST, createStablecoinDepegLatchTestSchemaMigrationV0019];
@@ -289,11 +291,15 @@ describeWithPostgres('stablecoin depeg latch PostgreSQL controls', () => {
       bootstrapRole: fixtureIdentity.rows[0]?.bootstrap_role ?? '',
       marker: fixtureIdentity.rows[0]?.marker ?? null,
     });
+    await adminPool.query(`CREATE ROLE ${quoteIdentifier(genericRole)} NOLOGIN`);
     await adminPool.query(`CREATE SCHEMA ${quoteIdentifier(schema)}`);
     await adminPool.query(
       `GRANT USAGE ON SCHEMA ${quoteIdentifier(schema)} TO
        ${quoteIdentifier(PRODUCTION_DATABASE_PRINCIPALS.apiRuntimeRole)},
-       ${quoteIdentifier(PRODUCTION_DATABASE_PRINCIPALS.workerRuntimeRole)}`,
+       ${quoteIdentifier(PRODUCTION_DATABASE_PRINCIPALS.workerRuntimeRole)},
+       ${quoteIdentifier(PRODUCTION_DATABASE_PRINCIPALS.legacyRuntimeRole)},
+       ${quoteIdentifier(PRODUCTION_DATABASE_PRINCIPALS.migrationRole)},
+       ${quoteIdentifier(genericRole)}`,
     );
     operationPool = new Pool({
       connectionString: testDatabaseUrl as string,
@@ -313,19 +319,19 @@ describeWithPostgres('stablecoin depeg latch PostgreSQL controls', () => {
     if (operationPool) await operationPool.end();
     if (adminPool) {
       await adminPool.query(`DROP SCHEMA IF EXISTS ${quoteIdentifier(schema)} CASCADE`);
+      await adminPool.query(`DROP ROLE IF EXISTS ${quoteIdentifier(genericRole)}`);
       await adminPool.end();
     }
   });
 
-  it('persists a sticky latch, exact replay, bounded clear, and one-use authorization', async () => {
+  it('lets only the local test-schema owner exercise latch and clear behavior', async () => {
     const repository = new PostgresStablecoinDepegLatchRepository(postgres);
     const latchedAt = at(databaseNow, -2_400_000);
     const latch = latchRequest({ asset: ETHEREUM_PYUSD, at: latchedAt });
-    await expect(
-      repositoryAsRole(postgres, PRODUCTION_DATABASE_PRINCIPALS.workerRuntimeRole, (asWorker) =>
-        asWorker.record(latch),
-      ),
-    ).resolves.toMatchObject({ outcome: 'LATCHED', latch: { revision: 1, status: 'LATCHED' } });
+    await expect(repository.record(latch)).resolves.toMatchObject({
+      outcome: 'LATCHED',
+      latch: { revision: 1, status: 'LATCHED' },
+    });
     await expect(repository.record(latch)).resolves.toMatchObject({
       outcome: 'IDEMPOTENT_REPLAY',
       latch: { revision: 1 },
@@ -546,9 +552,7 @@ describeWithPostgres('stablecoin depeg latch PostgreSQL controls', () => {
     );
     const staleCommand = normalizeRecordStablecoinDepegLatchCommand(staleRelatch);
     await expect(
-      queryAsRole(
-        operationPool,
-        PRODUCTION_DATABASE_PRINCIPALS.workerRuntimeRole,
+      operationPool.query(
         `SELECT * FROM record_stablecoin_depeg_latch(
            $1::bigint, $2::uuid, $3::text, $4::text, $5::smallint,
            $6::text, $7::text, $8::text, $9::smallint, $10::timestamptz,
@@ -647,15 +651,13 @@ describeWithPostgres('stablecoin depeg latch PostgreSQL controls', () => {
 
   it('serializes concurrent absent-asset latches to one event and one revision', async () => {
     const evaluatedAt = at(databaseNow, -2_000);
+    const repository = new PostgresStablecoinDepegLatchRepository(postgres);
     const attempts = await Promise.all(
       ['31', '32'].map((sequence) =>
-        repositoryAsRole(postgres, PRODUCTION_DATABASE_PRINCIPALS.workerRuntimeRole, (repository) =>
-          repository.record(latchRequest({ asset: SOLANA_USDC, at: evaluatedAt, sequence })),
-        ),
+        repository.record(latchRequest({ asset: SOLANA_USDC, at: evaluatedAt, sequence })),
       ),
     );
     expect(attempts.map(({ outcome }) => outcome).sort()).toEqual(['LATCHED', 'REVISION_CONFLICT']);
-    const repository = new PostgresStablecoinDepegLatchRepository(postgres);
     await expect(repository.loadCurrent(SOLANA_USDC)).resolves.toMatchObject({
       revision: 1,
       status: 'LATCHED',
@@ -669,19 +671,23 @@ describeWithPostgres('stablecoin depeg latch PostgreSQL controls', () => {
     expect(events.rows).toEqual([{ count: '1' }]);
   });
 
-  it('enforces runtime ACLs, composite-type ACLs, and owner append-only guards', async () => {
+  it('keeps only API reads while all runtime and PUBLIC-only roles are mutation-denied', async () => {
     const api = PRODUCTION_DATABASE_PRINCIPALS.apiRuntimeRole;
-    const worker = PRODUCTION_DATABASE_PRINCIPALS.workerRuntimeRole;
+    const readDeniedRoles = [
+      PRODUCTION_DATABASE_PRINCIPALS.workerRuntimeRole,
+      PRODUCTION_DATABASE_PRINCIPALS.legacyRuntimeRole,
+      PRODUCTION_DATABASE_PRINCIPALS.migrationRole,
+      genericRole,
+    ] as const;
+    const mutationDeniedRoles = [api, ...readDeniedRoles] as const;
     await expect(
       repositoryAsRole(postgres, api, (repository) => repository.loadCurrent(ETHEREUM_PYUSD)),
     ).resolves.toMatchObject({ status: 'LATCHED' });
-    await expect(
-      repositoryAsRole(postgres, api, (repository) =>
-        repository.record(
-          latchRequest({ asset: ETHEREUM_PYUSD, at: databaseNow, expectedRevision: 3 }),
-        ),
-      ),
-    ).rejects.toBeInstanceOf(StablecoinDepegLatchPersistenceError);
+    for (const role of readDeniedRoles) {
+      await expect(
+        repositoryAsRole(postgres, role, (repository) => repository.loadCurrent(ETHEREUM_PYUSD)),
+      ).rejects.toBeInstanceOf(StablecoinDepegLatchPersistenceError);
+    }
 
     const current = await new PostgresStablecoinDepegLatchRepository(postgres).loadCurrent(
       ETHEREUM_PYUSD,
@@ -701,7 +707,14 @@ describeWithPostgres('stablecoin depeg latch PostgreSQL controls', () => {
       evaluatedAt: databaseNow,
       expectedRevision: 1,
     });
-    for (const role of [api, worker]) {
+    for (const role of mutationDeniedRoles) {
+      await expect(
+        repositoryAsRole(postgres, role, (repository) =>
+          repository.record(
+            latchRequest({ asset: ETHEREUM_PYUSD, at: databaseNow, expectedRevision: 3 }),
+          ),
+        ),
+      ).rejects.toBeInstanceOf(StablecoinDepegLatchPersistenceError);
       await expect(
         repositoryAsRole(postgres, role, (repository) => repository.clear(dormantClear)),
       ).rejects.toBeInstanceOf(StablecoinDepegLatchPersistenceError);
@@ -730,16 +743,28 @@ describeWithPostgres('stablecoin depeg latch PostgreSQL controls', () => {
     const typeAcl = await operationPool.query<{ role: string; usage: boolean }>(
       `SELECT role_state.role,
               pg_catalog.has_type_privilege(role_state.role, type_state.oid, 'USAGE') AS usage
-       FROM (VALUES ($1::text), ($2::text)) AS role_state(role)
+       FROM pg_catalog.unnest($1::text[]) AS role_state(role)
        CROSS JOIN pg_catalog.pg_type AS type_state
        INNER JOIN pg_catalog.pg_namespace AS namespace
          ON namespace.oid = type_state.typnamespace
        WHERE namespace.nspname = pg_catalog.current_schema()
          AND type_state.typname = 'stablecoin_depeg_latch_events'
        ORDER BY role_state.role`,
-      [api, worker],
+      [[...mutationDeniedRoles]],
     );
+    expect(typeAcl.rows).toHaveLength(mutationDeniedRoles.length);
     expect(typeAcl.rows.every(({ usage }) => usage === false)).toBe(true);
+
+    const sequenceCount = await operationPool.query<{ count: string }>(
+      `SELECT pg_catalog.count(*)::text AS count
+       FROM pg_catalog.pg_class AS sequence
+       INNER JOIN pg_catalog.pg_namespace AS namespace
+         ON namespace.oid = sequence.relnamespace
+       WHERE namespace.nspname = pg_catalog.current_schema()
+         AND sequence.relkind = 'S'
+         AND sequence.relname LIKE 'stablecoin\\_%' ESCAPE '\\'`,
+    );
+    expect(sequenceCount.rows).toEqual([{ count: '0' }]);
 
     await expect(
       operationPool.query(
@@ -768,7 +793,8 @@ describeWithPostgres('stablecoin depeg latch PostgreSQL controls', () => {
       )}`,
     );
     const invalid = await operationPool.query<{ valid: boolean }>(
-      createStablecoinDepegLatchTestSchemaMigrationV0019.verifySql ?? 'SELECT false AS valid',
+      suspendStablecoinIngestionAuthorityTestSchemaMigrationV0026.verifySql ??
+        'SELECT false AS valid',
     );
     expect(invalid.rows).toEqual([{ valid: false }]);
     await operationPool.query(
@@ -777,15 +803,16 @@ describeWithPostgres('stablecoin depeg latch PostgreSQL controls', () => {
       )}`,
     );
     const valid = await operationPool.query<{ valid: boolean }>(
-      createStablecoinDepegLatchTestSchemaMigrationV0019.verifySql ?? 'SELECT false AS valid',
+      suspendStablecoinIngestionAuthorityTestSchemaMigrationV0026.verifySql ??
+        'SELECT false AS valid',
     );
     expect(valid.rows).toEqual([{ valid: true }]);
-    const targetRollbackSql = createStablecoinDepegLatchTestSchemaMigrationV0019.downSql;
+    const targetRollbackSql = suspendStablecoinIngestionAuthorityTestSchemaMigrationV0026.downSql;
     if (typeof targetRollbackSql !== 'string') {
-      throw new Error('Expected the stablecoin depeg latch rollback to be one SQL statement');
+      throw new Error('Expected stablecoin authority rollback to be one SQL statement');
     }
     await expect(operationPool.query(targetRollbackSql)).rejects.toThrow(
-      'cannot roll back stablecoin depeg latches after use',
+      'cannot roll back suspended stablecoin ingestion authority because rollback would regrant',
     );
     await expect(runner.assertUpToDate()).resolves.toBeUndefined();
   });

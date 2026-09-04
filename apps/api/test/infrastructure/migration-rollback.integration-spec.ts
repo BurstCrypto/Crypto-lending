@@ -7,6 +7,9 @@ import { DATABASE_TEST_SCHEMA_MIGRATION_LIST } from '../../src/infrastructure/da
 
 const testDatabaseUrl = process.env.TEST_DATABASE_URL;
 const describeWithPostgres = testDatabaseUrl ? describe : describe.skip;
+const REVERSIBLE_TEST_SCHEMA_MIGRATIONS = DATABASE_TEST_SCHEMA_MIGRATION_LIST.filter(
+  ({ id }) => id <= '0025',
+);
 
 describeWithPostgres('PostgreSQL migration rollback integration', () => {
   jest.setTimeout(45_000);
@@ -39,7 +42,7 @@ describeWithPostgres('PostgreSQL migration rollback integration', () => {
       ({ id }) => id < '0006',
     );
     const preConstraintRunner = new MigrationRunner(migrationPool, schemaBeforeLastErrorConstraint);
-    const runner = new MigrationRunner(migrationPool, DATABASE_TEST_SCHEMA_MIGRATION_LIST);
+    const runner = new MigrationRunner(migrationPool, REVERSIBLE_TEST_SCHEMA_MIGRATIONS);
 
     await expect(preConstraintRunner.up()).resolves.toEqual(['0001', '0002', '0003', '0004']);
     await migrationPool.query(
