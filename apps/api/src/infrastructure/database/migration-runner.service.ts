@@ -1,12 +1,14 @@
 import { createHash } from 'node:crypto';
 
 import { Inject, Injectable } from '@nestjs/common';
-import type { Pool, PoolClient } from 'pg';
+import type { Pool, PoolClient, QueryResult } from 'pg';
 
 import type { DatabaseMigration } from './migrations';
 import { DATABASE_MIGRATIONS, POSTGRES_POOL } from './postgres.tokens';
 
 const MIGRATION_LOCK_KEY = 1_923_307_433;
+const MIGRATION_LOCK_RETRY_MILLISECONDS = 25;
+const MIGRATION_LOCK_ACQUISITION_TIMEOUT_MILLISECONDS = 30_000;
 
 export interface MigrationStatus {
   id: string;
@@ -25,6 +27,14 @@ interface MigrationTableLookup {
 
 interface MigrationVerification {
   valid: boolean;
+}
+
+interface AdvisoryLockAttempt {
+  acquired: boolean;
+}
+
+interface AdvisoryLockRelease {
+  released: boolean;
 }
 
 function checksum(migration: DatabaseMigration): string {
@@ -50,15 +60,34 @@ function checksum(migration: DatabaseMigration): string {
   return hash.digest('hex');
 }
 
+function snapshotMigration(migration: DatabaseMigration): DatabaseMigration {
+  const snapshotSql = (sql: string | readonly string[]): string | readonly string[] =>
+    typeof sql === 'string' ? sql : Object.freeze([...sql]);
+  return Object.freeze({
+    id: migration.id,
+    description: migration.description,
+    upSql: snapshotSql(migration.upSql),
+    downSql: snapshotSql(migration.downSql),
+    ...(migration.verifySql === undefined ? {} : { verifySql: migration.verifySql }),
+    ...(migration.supersedesVerificationOf === undefined
+      ? {}
+      : { supersedesVerificationOf: Object.freeze([...migration.supersedesVerificationOf]) }),
+    ...(migration.transactional === undefined ? {} : { transactional: migration.transactional }),
+  });
+}
+
 @Injectable()
 export class MigrationRunner {
+  private readonly migrations: readonly DatabaseMigration[];
+  private readonly expectedChecksums: ReadonlyMap<string, string>;
+
   constructor(
     @Inject(POSTGRES_POOL) private readonly pool: Pool,
-    @Inject(DATABASE_MIGRATIONS)
-    private readonly migrations: readonly DatabaseMigration[],
+    @Inject(DATABASE_MIGRATIONS) migrations: readonly DatabaseMigration[],
   ) {
+    this.migrations = Object.freeze(migrations.map(snapshotMigration));
     const identifiers = new Set<string>();
-    for (const migration of migrations) {
+    for (const migration of this.migrations) {
       if (identifiers.has(migration.id)) {
         throw new Error(`Duplicate database migration id: ${migration.id}`);
       }
@@ -71,10 +100,10 @@ export class MigrationRunner {
     }
 
     const migrationIndexById = new Map(
-      migrations.map((migration, migrationIndex) => [migration.id, migrationIndex]),
+      this.migrations.map((migration, migrationIndex) => [migration.id, migrationIndex]),
     );
     const supersededIdentifiers = new Set<string>();
-    for (const [migrationIndex, migration] of migrations.entries()) {
+    for (const [migrationIndex, migration] of this.migrations.entries()) {
       const superseded = migration.supersedesVerificationOf;
       if (superseded === undefined) continue;
       if (migration.transactional === false) {
@@ -94,7 +123,7 @@ export class MigrationRunner {
             `Database migration ${migration.id} can only supersede an earlier configured verifier`,
           );
         }
-        if (!migrations[supersededIndex]?.verifySql?.trim()) {
+        if (!this.migrations[supersededIndex]?.verifySql?.trim()) {
           throw new Error(
             `Database migration ${migration.id} cannot supersede migration ${supersededId} without verification SQL`,
           );
@@ -107,6 +136,13 @@ export class MigrationRunner {
         supersededIdentifiers.add(supersededId);
       }
     }
+
+    // Migration SQL and its verifier grow with every cumulative boundary. Keep
+    // readiness deterministic without repeatedly hashing the same immutable
+    // application artifact on every load-balancer probe.
+    this.expectedChecksums = new Map(
+      this.migrations.map((migration) => [migration.id, checksum(migration)]),
+    );
   }
 
   async up(): Promise<string[]> {
@@ -119,7 +155,7 @@ export class MigrationRunner {
 
       for (const migration of this.migrations) {
         const existing = appliedById.get(migration.id);
-        const expectedChecksum = checksum(migration);
+        const expectedChecksum = this.expectedChecksum(migration.id);
         if (existing) {
           if (existing.checksum !== expectedChecksum) {
             throw new Error(
@@ -166,7 +202,7 @@ export class MigrationRunner {
         if (!migration) {
           throw new Error(`Cannot roll back unknown migration ${row.id}`);
         }
-        if (row.checksum !== checksum(migration)) {
+        if (row.checksum !== this.expectedChecksum(migration.id)) {
           throw new Error(`Cannot roll back modified migration ${row.id}`);
         }
 
@@ -205,7 +241,7 @@ export class MigrationRunner {
       );
       for (const migration of this.migrations) {
         const appliedChecksum = applied.get(migration.id);
-        if (appliedChecksum && appliedChecksum !== checksum(migration)) {
+        if (appliedChecksum && appliedChecksum !== this.expectedChecksum(migration.id)) {
           throw new Error(`Database migration ${migration.id} checksum does not match`);
         }
       }
@@ -245,7 +281,7 @@ export class MigrationRunner {
         if (!appliedChecksum) {
           throw new Error(`Database migration ${migration.id} has not been applied`);
         }
-        if (appliedChecksum !== checksum(migration)) {
+        if (appliedChecksum !== this.expectedChecksum(migration.id)) {
           throw new Error(`Database migration ${migration.id} checksum does not match`);
         }
       }
@@ -262,15 +298,73 @@ export class MigrationRunner {
 
   private async withMigrationLock<T>(work: (client: PoolClient) => Promise<T>): Promise<T> {
     const client = await this.pool.connect();
+    let acquired = false;
+    let failed = false;
+    let workError: unknown;
+    let workResult: T | undefined;
     try {
-      await client.query('SELECT pg_advisory_lock($1)', [MIGRATION_LOCK_KEY]);
-      return await work(client);
-    } finally {
+      await this.acquireMigrationLock(client);
+      acquired = true;
+      workResult = await work(client);
+    } catch (error) {
+      failed = true;
+      workError = error;
+    }
+
+    let releaseError: Error | undefined;
+    if (acquired) {
       try {
-        await client.query('SELECT pg_advisory_unlock($1)', [MIGRATION_LOCK_KEY]);
-      } finally {
-        client.release();
+        const released = await client.query<AdvisoryLockRelease>(
+          'SELECT pg_advisory_unlock($1) AS released',
+          [MIGRATION_LOCK_KEY],
+        );
+        if (released.rows.length !== 1 || released.rows[0]?.released !== true) {
+          releaseError = new Error('Database migration lock release failed');
+        }
+      } catch {
+        releaseError = new Error('Database migration lock release failed');
       }
+    }
+    try {
+      if (releaseError) client.release(releaseError);
+      else client.release();
+    } catch {
+      releaseError = new Error('Database migration lock release failed');
+    }
+
+    if (failed) throw workError;
+    if (releaseError) throw releaseError;
+    return workResult as T;
+  }
+
+  private async acquireMigrationLock(client: PoolClient): Promise<void> {
+    // A blocking pg_advisory_lock() call keeps its implicit transaction open.
+    // That can deadlock with CREATE INDEX CONCURRENTLY in the lock holder,
+    // because the index build must wait for transactions that started before
+    // its final validation phase. Failed try-lock probes finish immediately and
+    // preserve the same global, session-level exclusion without that cycle.
+    const deadline = Date.now() + MIGRATION_LOCK_ACQUISITION_TIMEOUT_MILLISECONDS;
+    for (;;) {
+      let attempt: QueryResult<AdvisoryLockAttempt>;
+      try {
+        attempt = await client.query<AdvisoryLockAttempt>(
+          'SELECT pg_try_advisory_lock($1) AS acquired',
+          [MIGRATION_LOCK_KEY],
+        );
+      } catch {
+        throw new Error('Database migration lock acquisition failed');
+      }
+      if (attempt.rows.length !== 1 || typeof attempt.rows[0]?.acquired !== 'boolean') {
+        throw new Error('Database migration lock acquisition failed');
+      }
+      if (attempt.rows[0].acquired) return;
+      const remainingMilliseconds = deadline - Date.now();
+      if (remainingMilliseconds <= 0) {
+        throw new Error('Database migration lock acquisition timed out');
+      }
+      await new Promise<void>((resolve) =>
+        setTimeout(resolve, Math.min(MIGRATION_LOCK_RETRY_MILLISECONDS, remainingMilliseconds)),
+      );
     }
   }
 
@@ -346,11 +440,19 @@ export class MigrationRunner {
     for (const migration of this.migrations) {
       const applied = appliedById.get(migration.id);
       const appliedChecksum = typeof applied === 'string' ? applied : applied?.checksum;
-      if (appliedChecksum !== checksum(migration)) continue;
+      if (appliedChecksum !== this.expectedChecksum(migration.id)) continue;
       for (const supersededId of migration.supersedesVerificationOf ?? []) {
         superseded.add(supersededId);
       }
     }
     return superseded;
+  }
+
+  private expectedChecksum(migrationId: string): string {
+    const expected = this.expectedChecksums.get(migrationId);
+    if (!expected) {
+      throw new Error(`Database migration ${migrationId} has no configured checksum`);
+    }
+    return expected;
   }
 }

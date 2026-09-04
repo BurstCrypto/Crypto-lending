@@ -23,12 +23,15 @@ class InMemoryMigrationDatabase {
   readonly indexes = new Map<string, string>();
   readonly queries: string[] = [];
   accountSchemaExists = false;
+  aaveCheckpointSchemaExists = false;
+  balanceAddressResolverExists = false;
   authenticationSchemaExists = false;
   jobOutboxExists = false;
   jobOutboxLastErrorConstraintExists = false;
   ledgerIdempotencySchemaExists = false;
   ledgerSchemaExists = false;
   ledgerFeeAdjustmentIntegrityRepaired = false;
+  reviewedJobAdmissionExists = false;
   walletRegistrationSchemaExists = false;
   yieldOperationSchemaExists = false;
   migrationTableExists = false;
@@ -36,11 +39,17 @@ class InMemoryMigrationDatabase {
   newVerifierValid = true;
   thirdVerifierValid = true;
   released = false;
+  releaseError: Error | boolean | undefined;
+  advisoryLockFailuresRemaining = 0;
+  advisoryUnlockResult: unknown = true;
   private transactionAppliedSnapshot: Map<string, StoredMigration> | undefined;
+  private transactionAaveCheckpointSchemaExistsSnapshot: boolean | undefined;
+  private transactionBalanceAddressResolverExistsSnapshot: boolean | undefined;
   private transactionAuthenticationSchemaExistsSnapshot: boolean | undefined;
   private transactionLedgerSchemaExistsSnapshot: boolean | undefined;
   private transactionLedgerFeeAdjustmentIntegrityRepairedSnapshot: boolean | undefined;
   private transactionLedgerIdempotencySchemaExistsSnapshot: boolean | undefined;
+  private transactionReviewedJobAdmissionExistsSnapshot: boolean | undefined;
   private transactionWalletRegistrationSchemaExistsSnapshot: boolean | undefined;
   private transactionYieldOperationSchemaExistsSnapshot: boolean | undefined;
 
@@ -49,22 +58,34 @@ class InMemoryMigrationDatabase {
       const normalized = text.replace(/\s+/g, ' ').trim();
       this.queries.push(normalized);
 
-      if (normalized === 'BEGIN') {
+      if (normalized === 'SELECT pg_try_advisory_lock($1) AS acquired') {
+        const acquired = this.advisoryLockFailuresRemaining === 0;
+        if (!acquired) this.advisoryLockFailuresRemaining -= 1;
+        return result([{ acquired }]);
+      } else if (normalized === 'SELECT pg_advisory_unlock($1) AS released') {
+        return result([{ released: this.advisoryUnlockResult }]);
+      } else if (normalized === 'BEGIN') {
         this.transactionAppliedSnapshot = new Map(this.applied);
+        this.transactionAaveCheckpointSchemaExistsSnapshot = this.aaveCheckpointSchemaExists;
+        this.transactionBalanceAddressResolverExistsSnapshot = this.balanceAddressResolverExists;
         this.transactionAuthenticationSchemaExistsSnapshot = this.authenticationSchemaExists;
         this.transactionLedgerSchemaExistsSnapshot = this.ledgerSchemaExists;
         this.transactionLedgerFeeAdjustmentIntegrityRepairedSnapshot =
           this.ledgerFeeAdjustmentIntegrityRepaired;
         this.transactionLedgerIdempotencySchemaExistsSnapshot = this.ledgerIdempotencySchemaExists;
+        this.transactionReviewedJobAdmissionExistsSnapshot = this.reviewedJobAdmissionExists;
         this.transactionWalletRegistrationSchemaExistsSnapshot =
           this.walletRegistrationSchemaExists;
         this.transactionYieldOperationSchemaExistsSnapshot = this.yieldOperationSchemaExists;
       } else if (normalized === 'COMMIT') {
         this.transactionAppliedSnapshot = undefined;
+        this.transactionAaveCheckpointSchemaExistsSnapshot = undefined;
+        this.transactionBalanceAddressResolverExistsSnapshot = undefined;
         this.transactionAuthenticationSchemaExistsSnapshot = undefined;
         this.transactionLedgerSchemaExistsSnapshot = undefined;
         this.transactionLedgerFeeAdjustmentIntegrityRepairedSnapshot = undefined;
         this.transactionLedgerIdempotencySchemaExistsSnapshot = undefined;
+        this.transactionReviewedJobAdmissionExistsSnapshot = undefined;
         this.transactionWalletRegistrationSchemaExistsSnapshot = undefined;
         this.transactionYieldOperationSchemaExistsSnapshot = undefined;
       } else if (normalized === 'ROLLBACK') {
@@ -77,6 +98,12 @@ class InMemoryMigrationDatabase {
         if (this.transactionLedgerSchemaExistsSnapshot !== undefined) {
           this.ledgerSchemaExists = this.transactionLedgerSchemaExistsSnapshot;
         }
+        if (this.transactionAaveCheckpointSchemaExistsSnapshot !== undefined) {
+          this.aaveCheckpointSchemaExists = this.transactionAaveCheckpointSchemaExistsSnapshot;
+        }
+        if (this.transactionBalanceAddressResolverExistsSnapshot !== undefined) {
+          this.balanceAddressResolverExists = this.transactionBalanceAddressResolverExistsSnapshot;
+        }
         if (this.transactionLedgerFeeAdjustmentIntegrityRepairedSnapshot !== undefined) {
           this.ledgerFeeAdjustmentIntegrityRepaired =
             this.transactionLedgerFeeAdjustmentIntegrityRepairedSnapshot;
@@ -84,6 +111,9 @@ class InMemoryMigrationDatabase {
         if (this.transactionLedgerIdempotencySchemaExistsSnapshot !== undefined) {
           this.ledgerIdempotencySchemaExists =
             this.transactionLedgerIdempotencySchemaExistsSnapshot;
+        }
+        if (this.transactionReviewedJobAdmissionExistsSnapshot !== undefined) {
+          this.reviewedJobAdmissionExists = this.transactionReviewedJobAdmissionExistsSnapshot;
         }
         if (this.transactionAuthenticationSchemaExistsSnapshot !== undefined) {
           this.authenticationSchemaExists = this.transactionAuthenticationSchemaExistsSnapshot;
@@ -96,10 +126,13 @@ class InMemoryMigrationDatabase {
           this.yieldOperationSchemaExists = this.transactionYieldOperationSchemaExistsSnapshot;
         }
         this.transactionAppliedSnapshot = undefined;
+        this.transactionAaveCheckpointSchemaExistsSnapshot = undefined;
+        this.transactionBalanceAddressResolverExistsSnapshot = undefined;
         this.transactionAuthenticationSchemaExistsSnapshot = undefined;
         this.transactionLedgerSchemaExistsSnapshot = undefined;
         this.transactionLedgerFeeAdjustmentIntegrityRepairedSnapshot = undefined;
         this.transactionLedgerIdempotencySchemaExistsSnapshot = undefined;
+        this.transactionReviewedJobAdmissionExistsSnapshot = undefined;
         this.transactionWalletRegistrationSchemaExistsSnapshot = undefined;
         this.transactionYieldOperationSchemaExistsSnapshot = undefined;
       } else if (normalized.includes('CREATE TABLE IF NOT EXISTS schema_migrations')) {
@@ -124,6 +157,30 @@ class InMemoryMigrationDatabase {
         this.jobOutboxLastErrorConstraintExists = false;
       } else if (normalized.includes('CREATE TABLE accounts (')) {
         this.accountSchemaExists = true;
+      } else if (
+        normalized.includes('CREATE TABLE aave_v3_ethereum_finalized_checkpoint_events (')
+      ) {
+        this.aaveCheckpointSchemaExists = true;
+      } else if (normalized.includes('CREATE FUNCTION enqueue_reviewed_job_v1(')) {
+        this.reviewedJobAdmissionExists = true;
+      } else if (
+        normalized.startsWith('CREATE FUNCTION resolve_active_wallet_address_ciphertext(')
+      ) {
+        this.balanceAddressResolverExists = true;
+      } else if (
+        normalized.startsWith(
+          'DROP FUNCTION resolve_active_wallet_address_ciphertext(uuid,uuid,text)',
+        )
+      ) {
+        this.balanceAddressResolverExists = false;
+      } else if (
+        normalized.includes(
+          'DROP FUNCTION enqueue_reviewed_job_v1(text,text,jsonb,jsonb,text,text)',
+        )
+      ) {
+        this.reviewedJobAdmissionExists = false;
+      } else if (normalized.includes('DROP TABLE aave_v3_ethereum_finalized_checkpoint_events')) {
+        this.aaveCheckpointSchemaExists = false;
       } else if (normalized.includes('DROP TABLE IF EXISTS account_profile_audit')) {
         this.accountSchemaExists = false;
       } else if (normalized.includes('CREATE TABLE ledger_books (')) {
@@ -170,6 +227,52 @@ class InMemoryMigrationDatabase {
         return result([{ valid: this.newVerifierValid }]);
       } else if (normalized === "SELECT 'third-verifier' AS verifier") {
         return result([{ valid: this.thirdVerifierValid }]);
+      } else if (
+        normalized.startsWith(
+          'SELECT (prior.valid AND function_state.valid AND privileges.valid)',
+        ) &&
+        normalized.includes('resolve_active_wallet_address_ciphertext(uuid,uuid,text)')
+      ) {
+        return result([{ valid: this.balanceAddressResolverExists }]);
+      } else if (
+        normalized.startsWith(
+          'SELECT ( prior.valid AND admission_function.valid AND admission_privileges.valid',
+        ) &&
+        normalized.includes('enqueue_reviewed_job_v1')
+      ) {
+        return result([
+          {
+            valid:
+              this.accountSchemaExists &&
+              this.jobOutboxExists &&
+              this.ledgerSchemaExists &&
+              this.ledgerIdempotencySchemaExists &&
+              this.authenticationSchemaExists &&
+              this.walletRegistrationSchemaExists &&
+              this.yieldOperationSchemaExists &&
+              this.ledgerFeeAdjustmentIntegrityRepaired &&
+              this.aaveCheckpointSchemaExists &&
+              this.reviewedJobAdmissionExists,
+          },
+        ]);
+      } else if (
+        normalized.startsWith('SELECT ( prior.valid AND relations.valid') &&
+        normalized.includes('aave_v3_ethereum_finalized_checkpoint_events')
+      ) {
+        return result([
+          {
+            valid:
+              this.accountSchemaExists &&
+              this.jobOutboxExists &&
+              this.ledgerSchemaExists &&
+              this.ledgerIdempotencySchemaExists &&
+              this.authenticationSchemaExists &&
+              this.walletRegistrationSchemaExists &&
+              this.yieldOperationSchemaExists &&
+              this.ledgerFeeAdjustmentIntegrityRepaired &&
+              this.aaveCheckpointSchemaExists,
+          },
+        ]);
       } else if (
         normalized.startsWith('SELECT EXISTS') &&
         normalized.includes('pg_catalog.pg_index')
@@ -352,8 +455,9 @@ class InMemoryMigrationDatabase {
       }
       return result();
     },
-    release: (): void => {
+    release: (error?: Error | boolean): void => {
       this.released = true;
+      this.releaseError = error;
     },
   } as unknown as PoolClient;
 
@@ -363,6 +467,65 @@ class InMemoryMigrationDatabase {
 }
 
 describe('MigrationRunner', () => {
+  it('retries the global session lock without holding a blocking probe transaction open', async () => {
+    const database = new InMemoryMigrationDatabase();
+    database.advisoryLockFailuresRemaining = 1;
+    const runner = new MigrationRunner(database.pool, [
+      {
+        id: '1000',
+        description: 'nonblocking migration lock fixture',
+        upSql: 'SELECT 1000',
+        downSql: 'SELECT -1000',
+      },
+    ]);
+
+    await expect(runner.up()).resolves.toEqual(['1000']);
+    expect(
+      database.queries.filter((query) => query === 'SELECT pg_try_advisory_lock($1) AS acquired'),
+    ).toHaveLength(2);
+    expect(database.queries).not.toContain('SELECT pg_advisory_lock($1)');
+    expect(database.queries).toContain('SELECT pg_advisory_unlock($1) AS released');
+  });
+
+  it('bounds lock acquisition and returns a sanitized timeout', async () => {
+    const database = new InMemoryMigrationDatabase();
+    database.advisoryLockFailuresRemaining = 1;
+    const now = jest.spyOn(Date, 'now').mockReturnValueOnce(1_000).mockReturnValue(31_001);
+    const runner = new MigrationRunner(database.pool, []);
+
+    await expect(runner.up()).rejects.toThrow('Database migration lock acquisition timed out');
+    expect(database.released).toBe(true);
+    expect(database.releaseError).toBeUndefined();
+    now.mockRestore();
+  });
+
+  it('destroys a session on invalid unlock without masking an existing work failure', async () => {
+    const database = new InMemoryMigrationDatabase();
+    database.oldVerifierValid = false;
+    database.advisoryUnlockResult = false;
+    const runner = new MigrationRunner(database.pool, [
+      {
+        id: '1000',
+        description: 'unlock failure fixture',
+        upSql: 'SELECT 1000',
+        downSql: 'SELECT -1000',
+        verifySql: "SELECT 'old-verifier' AS verifier",
+      },
+    ]);
+
+    await expect(runner.up()).rejects.toThrow('Database migration 1000 schema verification failed');
+    expect(database.releaseError).toEqual(new Error('Database migration lock release failed'));
+
+    const successfulDatabase = new InMemoryMigrationDatabase();
+    successfulDatabase.advisoryUnlockResult = null;
+    await expect(new MigrationRunner(successfulDatabase.pool, []).up()).rejects.toThrow(
+      'Database migration lock release failed',
+    );
+    expect(successfulDatabase.releaseError).toEqual(
+      new Error('Database migration lock release failed'),
+    );
+  });
+
   it('migrates a blank database and rolls the migration back', async () => {
     const database = new InMemoryMigrationDatabase();
     const runner = new MigrationRunner(database.pool, DATABASE_MIGRATION_LIST);
@@ -384,6 +547,15 @@ describe('MigrationRunner', () => {
       '0014',
       '0015',
       '0016',
+      '0017',
+      '0018',
+      '0019',
+      '0020',
+      '0021',
+      '0022',
+      '0023',
+      '0024',
+      '0025',
     ]);
     expect(database.jobOutboxExists).toBe(true);
     expect(database.applied.has('0001')).toBe(true);
@@ -402,6 +574,17 @@ describe('MigrationRunner', () => {
     expect(database.applied.has('0014')).toBe(true);
     expect(database.applied.has('0015')).toBe(true);
     expect(database.applied.has('0016')).toBe(true);
+    expect(database.applied.has('0017')).toBe(true);
+    expect(database.applied.has('0018')).toBe(true);
+    expect(database.applied.has('0019')).toBe(true);
+    expect(database.applied.has('0020')).toBe(true);
+    expect(database.applied.has('0021')).toBe(true);
+    expect(database.applied.has('0022')).toBe(true);
+    expect(database.applied.has('0023')).toBe(true);
+    expect(database.applied.has('0024')).toBe(true);
+    expect(database.applied.has('0025')).toBe(true);
+    expect(database.reviewedJobAdmissionExists).toBe(true);
+    expect(database.aaveCheckpointSchemaExists).toBe(true);
     expect(database.accountSchemaExists).toBe(true);
     expect(database.ledgerSchemaExists).toBe(true);
     expect(database.jobOutboxLastErrorConstraintExists).toBe(true);
@@ -410,14 +593,23 @@ describe('MigrationRunner', () => {
     expect(database.walletRegistrationSchemaExists).toBe(true);
     expect(database.yieldOperationSchemaExists).toBe(true);
     expect(database.ledgerFeeAdjustmentIntegrityRepaired).toBe(true);
-    expect(database.queries.filter((query) => query === 'BEGIN')).toHaveLength(14);
+    expect(database.queries.filter((query) => query === 'BEGIN')).toHaveLength(23);
     expect(
       database.queries.filter((query) => query.startsWith('CREATE INDEX CONCURRENTLY')),
     ).toHaveLength(2);
     await expect(runner.assertUpToDate()).resolves.toBeUndefined();
 
     await expect(runner.up()).resolves.toEqual([]);
-    await expect(runner.down(16)).resolves.toEqual([
+    await expect(runner.down(25)).resolves.toEqual([
+      '0025',
+      '0024',
+      '0023',
+      '0022',
+      '0021',
+      '0020',
+      '0019',
+      '0018',
+      '0017',
       '0016',
       '0015',
       '0014',
@@ -443,6 +635,8 @@ describe('MigrationRunner', () => {
     expect(database.walletRegistrationSchemaExists).toBe(false);
     expect(database.yieldOperationSchemaExists).toBe(false);
     expect(database.ledgerFeeAdjustmentIntegrityRepaired).toBe(false);
+    expect(database.aaveCheckpointSchemaExists).toBe(false);
+    expect(database.reviewedJobAdmissionExists).toBe(false);
     expect(database.applied.size).toBe(0);
     await expect(runner.assertUpToDate()).rejects.toThrow(
       'Database migration 0001 has not been applied',
@@ -464,7 +658,7 @@ describe('MigrationRunner', () => {
     );
     await expect(runner.up()).rejects.toThrow('Database migration 0003 schema verification failed');
 
-    await expect(runner.down(14)).rejects.toThrow(
+    await expect(runner.down(22)).rejects.toThrow(
       'Database migration 0003 schema verification failed',
     );
     expect(database.ledgerSchemaExists).toBe(true);
@@ -472,7 +666,16 @@ describe('MigrationRunner', () => {
       'job_outbox_failed_retention_idx',
       "CREATE INDEX CONCURRENTLY job_outbox_failed_retention_idx ON job_outbox (failed_at, id) WHERE status = 'failed'",
     );
-    await expect(runner.down(14)).resolves.toEqual([
+    await expect(runner.down(22)).resolves.toEqual([
+      '0025',
+      '0024',
+      '0023',
+      '0022',
+      '0021',
+      '0020',
+      '0019',
+      '0018',
+      '0017',
       '0016',
       '0015',
       '0014',
@@ -486,10 +689,8 @@ describe('MigrationRunner', () => {
       '0006',
       '0005',
       '0004',
-      '0003',
     ]);
     await expect(runner.up()).resolves.toEqual([
-      '0003',
       '0004',
       '0005',
       '0006',
@@ -503,6 +704,15 @@ describe('MigrationRunner', () => {
       '0014',
       '0015',
       '0016',
+      '0017',
+      '0018',
+      '0019',
+      '0020',
+      '0021',
+      '0022',
+      '0023',
+      '0024',
+      '0025',
     ]);
     expect(database.indexes.has('job_outbox_failed_retention_idx')).toBe(true);
     await expect(runner.assertUpToDate()).resolves.toBeUndefined();
@@ -626,6 +836,32 @@ describe('MigrationRunner', () => {
     await expect(new MigrationRunner(database.pool, mutated).up()).rejects.toThrow(
       'Database migration 1000 schema verification failed',
     );
+  });
+
+  it('snapshots migration artifacts before caching their checksums', async () => {
+    const database = new InMemoryMigrationDatabase();
+    const migration = {
+      id: '1000',
+      description: 'immutable migration snapshot',
+      upSql: ['SELECT 1000'],
+      downSql: ['SELECT -1000'],
+      verifySql: "SELECT 'old-verifier' AS verifier",
+    };
+    const runner = new MigrationRunner(database.pool, [migration]);
+
+    migration.id = '9999';
+    migration.description = 'mutated after construction';
+    migration.upSql[0] = 'SELECT 9999';
+    migration.downSql[0] = 'SELECT -9999';
+    migration.verifySql = "SELECT 'new-verifier' AS verifier";
+
+    await expect(runner.up()).resolves.toEqual(['1000']);
+    expect(database.queries).toContain('SELECT 1000');
+    expect(database.queries).not.toContain('SELECT 9999');
+    expect(database.queries).toContain("SELECT 'old-verifier' AS verifier");
+    await expect(runner.status()).resolves.toEqual([
+      { id: '1000', description: 'immutable migration snapshot', applied: true },
+    ]);
   });
 
   it('rejects invalid or ambiguous verifier supersession declarations', () => {

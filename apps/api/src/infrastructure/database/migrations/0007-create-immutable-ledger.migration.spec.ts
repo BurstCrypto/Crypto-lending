@@ -55,6 +55,15 @@ describe('createImmutableLedgerMigration', () => {
       '0014',
       '0015',
       '0016',
+      '0017',
+      '0018',
+      '0019',
+      '0020',
+      '0021',
+      '0022',
+      '0023',
+      '0024',
+      '0025',
     ]);
     expect(DATABASE_TEST_SCHEMA_MIGRATION_LIST.map(({ id }) => id)).toEqual([
       '0001',
@@ -72,9 +81,18 @@ describe('createImmutableLedgerMigration', () => {
       '0014',
       '0015',
       '0016',
+      '0017',
+      '0018',
+      '0019',
+      '0020',
+      '0021',
+      '0022',
+      '0023',
+      '0024',
+      '0025',
     ]);
-    expect(DATABASE_MIGRATION_LIST.at(-10)).toBe(createImmutableLedgerMigrationV0007);
-    expect(DATABASE_TEST_SCHEMA_MIGRATION_LIST.at(-10)).toBe(
+    expect(DATABASE_MIGRATION_LIST.at(-19)).toBe(createImmutableLedgerMigrationV0007);
+    expect(DATABASE_TEST_SCHEMA_MIGRATION_LIST.at(-19)).toBe(
       createImmutableLedgerTestSchemaMigrationV0007,
     );
   });

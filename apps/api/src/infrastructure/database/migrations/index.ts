@@ -44,6 +44,42 @@ import {
   createWalletRegistrationRevocationMigrationV0016,
   createWalletRegistrationRevocationTestSchemaMigrationV0016,
 } from './0016-revoke-wallet-registration.migration';
+import {
+  createAaveV3EthereumFinalizedCheckpointMigrationV0017,
+  createAaveV3EthereumFinalizedCheckpointTestSchemaMigrationV0017,
+} from './0017-create-aave-finalized-checkpoints.migration';
+import {
+  enforceReviewedJobOutboxAdmissionMigrationV0018,
+  enforceReviewedJobOutboxAdmissionTestSchemaMigrationV0018,
+} from './0018-enforce-reviewed-job-outbox-admission.migration';
+import {
+  createStablecoinDepegLatchMigrationV0019,
+  createStablecoinDepegLatchTestSchemaMigrationV0019,
+} from './0019-create-stablecoin-depeg-latches.migration';
+import {
+  createBalanceSyncReadModelMigrationV0020,
+  createBalanceSyncReadModelTestSchemaMigrationV0020,
+} from './0020-create-balance-sync-read-model.migration';
+import {
+  createStablecoinPriceEvidenceReadModelMigrationV0021,
+  createStablecoinPriceEvidenceReadModelTestSchemaMigrationV0021,
+} from './0021-create-stablecoin-price-evidence-read-model.migration';
+import {
+  createWalletKeyRotationBoundaryMigrationV0022,
+  createWalletKeyRotationBoundaryTestSchemaMigrationV0022,
+} from './0022-create-wallet-key-rotation-boundary.migration';
+import {
+  createBalanceConsumerWalletAddressBoundaryMigrationV0023,
+  createBalanceConsumerWalletAddressBoundaryTestSchemaMigrationV0023,
+} from './0023-create-balance-consumer-wallet-address-boundary.migration';
+import {
+  createWalletMetadataRewrapBoundaryMigrationV0024,
+  createWalletMetadataRewrapBoundaryTestSchemaMigrationV0024,
+} from './0024-create-wallet-metadata-rewrap-boundary.migration';
+import {
+  createAuthenticationHmacKeyRotationMigrationV0025,
+  createAuthenticationHmacKeyRotationTestSchemaMigrationV0025,
+} from './0025-create-authentication-hmac-key-rotation.migration';
 import type { DatabaseMigration } from './migration';
 
 /**
@@ -68,6 +104,15 @@ export const DATABASE_TEST_SCHEMA_MIGRATION_LIST: readonly DatabaseMigration[] =
   createActiveWalletRegistrationListTestSchemaMigrationV0014,
   createMainnetWalletLaunchNarrowingTestSchemaMigrationV0015,
   createWalletRegistrationRevocationTestSchemaMigrationV0016,
+  createAaveV3EthereumFinalizedCheckpointTestSchemaMigrationV0017,
+  enforceReviewedJobOutboxAdmissionTestSchemaMigrationV0018,
+  createStablecoinDepegLatchTestSchemaMigrationV0019,
+  createBalanceSyncReadModelTestSchemaMigrationV0020,
+  createStablecoinPriceEvidenceReadModelTestSchemaMigrationV0021,
+  createWalletKeyRotationBoundaryTestSchemaMigrationV0022,
+  createBalanceConsumerWalletAddressBoundaryTestSchemaMigrationV0023,
+  createWalletMetadataRewrapBoundaryTestSchemaMigrationV0024,
+  createAuthenticationHmacKeyRotationTestSchemaMigrationV0025,
 ]);
 
 export const DATABASE_MIGRATION_LIST: readonly DatabaseMigration[] = Object.freeze([
@@ -87,6 +132,15 @@ export const DATABASE_MIGRATION_LIST: readonly DatabaseMigration[] = Object.free
   createActiveWalletRegistrationListMigrationV0014,
   createMainnetWalletLaunchNarrowingMigrationV0015,
   createWalletRegistrationRevocationMigrationV0016,
+  createAaveV3EthereumFinalizedCheckpointMigrationV0017,
+  enforceReviewedJobOutboxAdmissionMigrationV0018,
+  createStablecoinDepegLatchMigrationV0019,
+  createBalanceSyncReadModelMigrationV0020,
+  createStablecoinPriceEvidenceReadModelMigrationV0021,
+  createWalletKeyRotationBoundaryMigrationV0022,
+  createBalanceConsumerWalletAddressBoundaryMigrationV0023,
+  createWalletMetadataRewrapBoundaryMigrationV0024,
+  createAuthenticationHmacKeyRotationMigrationV0025,
 ]);
 
 export type { DatabaseMigration } from './migration';
@@ -145,3 +199,48 @@ export {
   createWalletRegistrationRevocationMigrationV0016,
   createWalletRegistrationRevocationTestSchemaMigrationV0016,
 } from './0016-revoke-wallet-registration.migration';
+export {
+  createAaveV3EthereumFinalizedCheckpointMigration,
+  createAaveV3EthereumFinalizedCheckpointMigrationV0017,
+  createAaveV3EthereumFinalizedCheckpointTestSchemaMigrationV0017,
+} from './0017-create-aave-finalized-checkpoints.migration';
+export {
+  createReviewedJobOutboxAdmissionMigration,
+  enforceReviewedJobOutboxAdmissionMigrationV0018,
+  enforceReviewedJobOutboxAdmissionTestSchemaMigrationV0018,
+} from './0018-enforce-reviewed-job-outbox-admission.migration';
+export {
+  createStablecoinDepegLatchMigration,
+  createStablecoinDepegLatchMigrationV0019,
+  createStablecoinDepegLatchTestSchemaMigrationV0019,
+} from './0019-create-stablecoin-depeg-latches.migration';
+export {
+  createBalanceSyncReadModelMigration,
+  createBalanceSyncReadModelMigrationV0020,
+  createBalanceSyncReadModelTestSchemaMigrationV0020,
+} from './0020-create-balance-sync-read-model.migration';
+export {
+  createStablecoinPriceEvidenceReadModelMigration,
+  createStablecoinPriceEvidenceReadModelMigrationV0021,
+  createStablecoinPriceEvidenceReadModelTestSchemaMigrationV0021,
+} from './0021-create-stablecoin-price-evidence-read-model.migration';
+export {
+  createWalletKeyRotationBoundaryMigration,
+  createWalletKeyRotationBoundaryMigrationV0022,
+  createWalletKeyRotationBoundaryTestSchemaMigrationV0022,
+} from './0022-create-wallet-key-rotation-boundary.migration';
+export {
+  createBalanceConsumerWalletAddressBoundaryMigration,
+  createBalanceConsumerWalletAddressBoundaryMigrationV0023,
+  createBalanceConsumerWalletAddressBoundaryTestSchemaMigrationV0023,
+} from './0023-create-balance-consumer-wallet-address-boundary.migration';
+export {
+  createWalletMetadataRewrapBoundaryMigration,
+  createWalletMetadataRewrapBoundaryMigrationV0024,
+  createWalletMetadataRewrapBoundaryTestSchemaMigrationV0024,
+} from './0024-create-wallet-metadata-rewrap-boundary.migration';
+export {
+  createAuthenticationHmacKeyRotationMigration,
+  createAuthenticationHmacKeyRotationMigrationV0025,
+  createAuthenticationHmacKeyRotationTestSchemaMigrationV0025,
+} from './0025-create-authentication-hmac-key-rotation.migration';
