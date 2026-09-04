@@ -24,6 +24,12 @@ export interface BeginWalletOwnershipChallengeRequest {
   readonly proofScheme: WalletProofScheme;
   readonly chainId: WalletOwnershipChainId;
   readonly addressDigest: WalletRegistrationDigestReference<'address'>;
+  /**
+   * Exact, version-sorted aliases for every accepted identity-HMAC key. The
+   * persistence boundary admits the challenge only when this set matches its
+   * schema-owner-controlled rotation policy.
+   */
+  readonly identityDigests: readonly WalletRegistrationDigestReference<'address'>[];
   readonly domainDigest: WalletRegistrationDigestReference<'domain'>;
   readonly messageDigest: WalletRegistrationDigestReference<'message'>;
   readonly nonceDigest: WalletRegistrationDigestReference<'nonce'>;
@@ -122,7 +128,10 @@ export interface ActiveWalletRegistrationRecord {
   readonly registeredByChallengeId: WalletChallengeId;
   readonly chainId: WalletOwnershipChainId;
   readonly registry: WalletRegistryBinding;
+  /** Immutable registration-time digest retained in AES-GCM AAD. */
   readonly addressDigest: WalletRegistrationDigestReference<'address'>;
+  /** Current database-policy alias used to validate decrypted plaintext. */
+  readonly verificationAddressDigest: WalletRegistrationDigestReference<'address'>;
   readonly encryptedAddress: SealedWalletRegistrationValue;
   readonly registeredAt: Date;
 }

@@ -24,8 +24,10 @@ import {
   type EnabledWalletRegistrationConfig,
 } from '../infrastructure/config/wallet-registration.config';
 import {
+  activeWalletRegistrationKey,
   digestWalletIdentity,
   sealWalletRegistrationValue,
+  walletRegistrationKeyForVersion,
 } from '../infrastructure/crypto/wallet-registration-crypto';
 
 const NOW = new Date('2026-08-22T17:00:00.000Z');
@@ -53,6 +55,32 @@ function config(
     WALLET_CHALLENGE_HMAC_KEY: encodedKey(),
     WALLET_METADATA_SEAL_KEY_VERSION: '1',
     WALLET_METADATA_SEAL_KEY: encodedKey(),
+  });
+  if (loaded.mode !== 'enabled') throw new Error('enabled wallet fixture expected');
+  return loaded;
+}
+
+function rotatedConfig(): EnabledWalletRegistrationConfig {
+  const keyRing = (purpose: 'challenge-hmac' | 'identity-hmac' | 'metadata-seal'): string =>
+    JSON.stringify({
+      activeWriteVersion: 2,
+      keys: [1, 2].map((version) => ({
+        keyId: `service-${purpose}-${String(version)}`,
+        purpose,
+        version,
+        material: encodedKey(),
+      })),
+    });
+  const loaded = loadWalletRegistrationConfig({
+    NODE_ENV: 'test',
+    AUTH_MODE: 'oidc',
+    AUTH_PUBLIC_ORIGIN: 'http://127.0.0.1:3000',
+    WALLET_REGISTRATION_MODE: 'enabled',
+    WALLET_REGISTRATION_REGISTRY_ENVIRONMENT: 'TESTNET',
+    WALLET_REGISTRATION_CHALLENGE_TTL_SECONDS: '300',
+    WALLET_IDENTITY_HMAC_KEY_RING_JSON: keyRing('identity-hmac'),
+    WALLET_CHALLENGE_HMAC_KEY_RING_JSON: keyRing('challenge-hmac'),
+    WALLET_METADATA_SEAL_KEY_RING_JSON: keyRing('metadata-seal'),
   });
   if (loaded.mode !== 'enabled') throw new Error('enabled wallet fixture expected');
   return loaded;
@@ -167,7 +195,11 @@ describe('WalletRegistrationService', () => {
     const registeredByChallengeId = parseWalletChallengeId(randomUUID());
     const chainId = 'eip155:11155111' as const;
     const address = '0xde709f2102306220921060314715629080e2fb77';
-    const addressDigest = digestWalletIdentity(walletConfig.identityHmacKey, chainId, address);
+    const addressDigest = digestWalletIdentity(
+      activeWalletRegistrationKey(walletConfig.identityHmacKeys),
+      chainId,
+      address,
+    );
     const registry = supportedAssetRegistryForEnvironment('TESTNET').latest;
     const record: ActiveWalletRegistrationRecord = {
       walletId,
@@ -180,8 +212,9 @@ describe('WalletRegistrationService', () => {
         fingerprintSha256: registry.fingerprintSha256,
       },
       addressDigest,
+      verificationAddressDigest: addressDigest,
       encryptedAddress: sealWalletRegistrationValue(
-        walletConfig.metadataSealKey,
+        activeWalletRegistrationKey(walletConfig.metadataSealKeys),
         {
           field: 'address',
           walletId,
@@ -219,7 +252,7 @@ describe('WalletRegistrationService', () => {
 
     const unsupportedChainId = 'eip155:421614' as const;
     const unsupportedDigest = digestWalletIdentity(
-      walletConfig.identityHmacKey,
+      activeWalletRegistrationKey(walletConfig.identityHmacKeys),
       unsupportedChainId,
       address,
     );
@@ -229,7 +262,7 @@ describe('WalletRegistrationService', () => {
         chainId: unsupportedChainId,
         addressDigest: unsupportedDigest,
         encryptedAddress: sealWalletRegistrationValue(
-          walletConfig.metadataSealKey,
+          activeWalletRegistrationKey(walletConfig.metadataSealKeys),
           {
             field: 'address',
             walletId,
@@ -258,6 +291,70 @@ describe('WalletRegistrationService', () => {
     await expect(service.listActiveWallets(ACCOUNT_ID)).rejects.toBeInstanceOf(
       WalletRegistrationUnavailableError,
     );
+  });
+
+  it('reads previous key versions while issuing only active-version writes and all identity aliases', async () => {
+    const repository = repositoryFixture();
+    const walletConfig = rotatedConfig();
+    const service = new WalletRegistrationService(repository.repository, walletConfig, {
+      now: () => new Date(NOW),
+    });
+    const walletId = randomUUID();
+    const registeredByChallengeId = parseWalletChallengeId(randomUUID());
+    const chainId = 'eip155:11155111' as const;
+    const address = '0xde709f2102306220921060314715629080e2fb77';
+    const priorIdentityKey = walletRegistrationKeyForVersion(walletConfig.identityHmacKeys, 1);
+    const priorSealKey = walletRegistrationKeyForVersion(walletConfig.metadataSealKeys, 1);
+    const addressDigest = digestWalletIdentity(priorIdentityKey, chainId, address);
+    const registry = supportedAssetRegistryForEnvironment('TESTNET').latest;
+    repository.list.mockResolvedValue([
+      {
+        walletId,
+        accountId: ACCOUNT_ID,
+        registeredByChallengeId,
+        chainId,
+        registry: {
+          environment: registry.environment,
+          version: registry.version,
+          fingerprintSha256: registry.fingerprintSha256,
+        },
+        addressDigest,
+        verificationAddressDigest: digestWalletIdentity(
+          activeWalletRegistrationKey(walletConfig.identityHmacKeys),
+          chainId,
+          address,
+        ),
+        encryptedAddress: sealWalletRegistrationValue(
+          priorSealKey,
+          {
+            field: 'address',
+            walletId,
+            challengeId: registeredByChallengeId,
+            accountId: ACCOUNT_ID,
+            networkId: chainId,
+            addressDigest,
+          },
+          address,
+        ),
+        registeredAt: NOW,
+      },
+    ]);
+
+    await expect(service.listActiveWallets(ACCOUNT_ID)).resolves.toMatchObject({
+      wallets: [{ walletId, address }],
+    });
+    await service.issueChallenge({
+      accountId: ACCOUNT_ID,
+      chainId,
+      address,
+      correlationId: CORRELATION_ID,
+    });
+    const begun = jest.mocked(repository.repository.beginChallenge).mock.calls[0]?.[0];
+    expect(begun).toBeDefined();
+    expect(begun?.addressDigest.version).toBe(2);
+    expect(begun?.challengePayload.keyVersion).toBe(2);
+    expect(begun?.domainDigest.version).toBe(2);
+    expect(begun?.identityDigests.map((digest) => digest.version)).toEqual([1, 2]);
   });
 
   it('removes a wallet with constant idempotent semantics scoped to the current account', async () => {
@@ -516,7 +613,11 @@ describe('WalletRegistrationService', () => {
     const registeredByChallengeId = parseWalletChallengeId(randomUUID());
     const chainId = 'eip155:8453' as const;
     const address = '0xde709f2102306220921060314715629080e2fb77';
-    const addressDigest = digestWalletIdentity(walletConfig.identityHmacKey, chainId, address);
+    const addressDigest = digestWalletIdentity(
+      activeWalletRegistrationKey(walletConfig.identityHmacKeys),
+      chainId,
+      address,
+    );
     const registry = supportedAssetRegistryForEnvironment('MAINNET').latest;
     list.mockResolvedValue([
       {
@@ -530,8 +631,9 @@ describe('WalletRegistrationService', () => {
           fingerprintSha256: registry.fingerprintSha256,
         },
         addressDigest,
+        verificationAddressDigest: addressDigest,
         encryptedAddress: sealWalletRegistrationValue(
-          walletConfig.metadataSealKey,
+          activeWalletRegistrationKey(walletConfig.metadataSealKeys),
           {
             field: 'address',
             walletId,

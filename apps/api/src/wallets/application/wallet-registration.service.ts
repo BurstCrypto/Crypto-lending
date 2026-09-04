@@ -46,11 +46,13 @@ import {
   type WalletRegistrationConfig,
 } from '../infrastructure/config/wallet-registration.config';
 import {
+  activeWalletRegistrationKey,
   digestWalletChallengeValue,
   digestWalletIdentity,
   digestWalletSubjectBinding,
   openWalletRegistrationValue,
   sealWalletRegistrationValue,
+  walletRegistrationKeyForVersion,
   walletRegistrationDigestEquals,
   type WalletRegistrationSealBinding,
 } from '../infrastructure/crypto/wallet-registration-crypto';
@@ -198,6 +200,7 @@ export class WalletRegistrationService {
           record.registry.environment !== config.registryEnvironment ||
           record.registry.version !== latest.version ||
           record.registry.fingerprintSha256 !== latest.fingerprintSha256 ||
+          record.verificationAddressDigest.version !== config.identityHmacKeys.activeWriteVersion ||
           !isWalletRegistrationLaunchChain(config.registryEnvironment, chainId) ||
           !network ||
           network.activationState !== 'ACTIVE' ||
@@ -216,12 +219,26 @@ export class WalletRegistrationService {
         };
         const address = parseWalletAddress(
           chainId,
-          openWalletRegistrationValue(config.metadataSealKey, sealBinding, record.encryptedAddress),
+          openWalletRegistrationValue(
+            walletRegistrationKeyForVersion(
+              config.metadataSealKeys,
+              record.encryptedAddress.keyVersion,
+            ),
+            sealBinding,
+            record.encryptedAddress,
+          ),
         );
         if (
           !walletRegistrationDigestEquals(
-            record.addressDigest,
-            digestWalletIdentity(config.identityHmacKey, chainId, address),
+            record.verificationAddressDigest,
+            digestWalletIdentity(
+              walletRegistrationKeyForVersion(
+                config.identityHmacKeys,
+                record.verificationAddressDigest.version,
+              ),
+              chainId,
+              address,
+            ),
           )
         ) {
           throw new WalletRegistrationUnavailableError();
@@ -317,8 +334,11 @@ export class WalletRegistrationService {
 
     const challengeId = parseWalletChallengeId(randomUUID());
     const nonce = parseWalletChallengeNonce(randomBytes(32).toString('hex'));
+    const challengeHmacKey = activeWalletRegistrationKey(config.challengeHmacKeys);
+    const identityHmacKey = activeWalletRegistrationKey(config.identityHmacKeys);
+    const metadataSealKey = activeWalletRegistrationKey(config.metadataSealKeys);
     const subjectBindingDigest = parseWalletDigest<'subject-binding'>(
-      digestWalletSubjectBinding(config.challengeHmacKey, accountId, challengeId).value,
+      digestWalletSubjectBinding(challengeHmacKey, accountId, challengeId).value,
     );
     const issuedAt = this.clock.now();
     const expiresAt = new Date(issuedAt.getTime() + config.challengeTtlSeconds * 1_000);
@@ -334,7 +354,10 @@ export class WalletRegistrationService {
       issuedAtEpochMilliseconds: issuedAt.getTime(),
       expiresAtEpochMilliseconds: expiresAt.getTime(),
     });
-    const addressDigest = digestWalletIdentity(config.identityHmacKey, chainId, address);
+    const addressDigest = digestWalletIdentity(identityHmacKey, chainId, address);
+    const identityDigests = Object.freeze(
+      config.identityHmacKeys.keys.map((key) => digestWalletIdentity(key, chainId, address)),
+    );
     const sealBinding: WalletRegistrationSealBinding = {
       field: 'challenge',
       challengeId,
@@ -343,7 +366,7 @@ export class WalletRegistrationService {
       addressDigest,
     };
     const challengePayload = sealWalletRegistrationValue(
-      config.metadataSealKey,
+      metadataSealKey,
       sealBinding,
       safeJsonRecord(created.record),
     );
@@ -356,19 +379,16 @@ export class WalletRegistrationService {
         proofScheme: proofSchemeFor(chainId),
         chainId,
         addressDigest,
-        domainDigest: digestWalletChallengeValue(
-          'domain',
-          config.challengeHmacKey,
-          created.record.origin,
-        ),
+        identityDigests,
+        domainDigest: digestWalletChallengeValue('domain', challengeHmacKey, created.record.origin),
         messageDigest: digestWalletChallengeValue(
           'message',
-          config.challengeHmacKey,
+          challengeHmacKey,
           created.record.messageDigest,
         ),
         nonceDigest: digestWalletChallengeValue(
           'nonce',
-          config.challengeHmacKey,
+          challengeHmacKey,
           created.record.nonceDigest,
         ),
         challengePayload,
@@ -427,7 +447,14 @@ export class WalletRegistrationService {
       };
       record = parseWalletOwnershipChallengeRecord(
         JSON.parse(
-          openWalletRegistrationValue(config.metadataSealKey, binding, prepared.challengePayload),
+          openWalletRegistrationValue(
+            walletRegistrationKeyForVersion(
+              config.metadataSealKeys,
+              prepared.challengePayload.keyVersion,
+            ),
+            binding,
+            prepared.challengePayload,
+          ),
         ) as unknown,
       );
       this.assertPreparedIntegrity(config, prepared, record, accountId);
@@ -435,8 +462,23 @@ export class WalletRegistrationService {
       throw new WalletRegistrationUnavailableError();
     }
 
+    let challengeHmacKey;
+    try {
+      if (
+        prepared.domainDigest.version !== prepared.messageDigest.version ||
+        prepared.domainDigest.version !== prepared.nonceDigest.version
+      ) {
+        throw new Error('challenge digest key versions disagree');
+      }
+      challengeHmacKey = walletRegistrationKeyForVersion(
+        config.challengeHmacKeys,
+        prepared.domainDigest.version,
+      );
+    } catch {
+      throw new WalletRegistrationUnavailableError();
+    }
     const expectedSubjectBindingDigest = parseWalletDigest<'subject-binding'>(
-      digestWalletSubjectBinding(config.challengeHmacKey, accountId, challengeId).value,
+      digestWalletSubjectBinding(challengeHmacKey, accountId, challengeId).value,
     );
     const verification = await verifyWalletOwnershipProof({
       record,
@@ -476,13 +518,14 @@ export class WalletRegistrationService {
       networkId: prepared.chainId,
       addressDigest: prepared.addressDigest,
     } as const;
+    const metadataSealKey = activeWalletRegistrationKey(config.metadataSealKeys);
     const encryptedAddress = sealWalletRegistrationValue(
-      config.metadataSealKey,
+      metadataSealKey,
       { ...sealBase, field: 'address' },
       record.address,
     );
     const encryptedMetadata = sealWalletRegistrationValue(
-      config.metadataSealKey,
+      metadataSealKey,
       { ...sealBase, field: 'metadata' },
       JSON.stringify({
         schemaVersion: 1,
@@ -551,19 +594,35 @@ export class WalletRegistrationService {
       !sameDate(prepared.expiresAt, new Date(record.expiresAtEpochMilliseconds)) ||
       !walletRegistrationDigestEquals(
         prepared.addressDigest,
-        digestWalletIdentity(config.identityHmacKey, record.chainId, record.address),
+        digestWalletIdentity(
+          walletRegistrationKeyForVersion(config.identityHmacKeys, prepared.addressDigest.version),
+          record.chainId,
+          record.address,
+        ),
       ) ||
       !walletRegistrationDigestEquals(
         prepared.domainDigest,
-        digestWalletChallengeValue('domain', config.challengeHmacKey, record.origin),
+        digestWalletChallengeValue(
+          'domain',
+          walletRegistrationKeyForVersion(config.challengeHmacKeys, prepared.domainDigest.version),
+          record.origin,
+        ),
       ) ||
       !walletRegistrationDigestEquals(
         prepared.messageDigest,
-        digestWalletChallengeValue('message', config.challengeHmacKey, record.messageDigest),
+        digestWalletChallengeValue(
+          'message',
+          walletRegistrationKeyForVersion(config.challengeHmacKeys, prepared.messageDigest.version),
+          record.messageDigest,
+        ),
       ) ||
       !walletRegistrationDigestEquals(
         prepared.nonceDigest,
-        digestWalletChallengeValue('nonce', config.challengeHmacKey, record.nonceDigest),
+        digestWalletChallengeValue(
+          'nonce',
+          walletRegistrationKeyForVersion(config.challengeHmacKeys, prepared.nonceDigest.version),
+          record.nonceDigest,
+        ),
       )
     ) {
       throw new WalletRegistrationUnavailableError();

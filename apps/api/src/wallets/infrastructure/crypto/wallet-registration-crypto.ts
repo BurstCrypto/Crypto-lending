@@ -15,9 +15,16 @@ declare const walletRegistrationKeyBrand: unique symbol;
 declare const walletRegistrationDigestBrand: unique symbol;
 
 export interface WalletRegistrationKey<Purpose extends WalletRegistrationKeyPurpose> {
+  readonly keyId: string;
   readonly purpose: Purpose;
   readonly version: number;
   readonly [walletRegistrationKeyBrand]: true;
+}
+
+export interface WalletRegistrationKeyRing<Purpose extends WalletRegistrationKeyPurpose> {
+  readonly purpose: Purpose;
+  readonly activeWriteVersion: number;
+  readonly keys: readonly WalletRegistrationKey<Purpose>[];
 }
 
 export type WalletRegistrationDigest<Purpose extends WalletRegistrationDigestPurpose> = string & {
@@ -55,12 +62,15 @@ export type WalletRegistrationSealBinding =
     });
 
 const keyBytes = new WeakMap<object, Buffer>();
+const validKeyRings = new WeakSet<object>();
+const KEY_ID = /^[a-z][a-z0-9_-]{0,47}$/u;
 const LOWER_HEX_DIGEST = /^[0-9a-f]{64}$/u;
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const NETWORK_ID = /^(?:eip155:[1-9][0-9]{0,18}|solana:[1-9A-HJ-NP-Za-km-z]{32})$/u;
 const DIGEST_INPUT_MAX_BYTES = 16_384;
 const ADDRESS_PLAINTEXT_MAX_BYTES = 128;
 const STRUCTURED_PLAINTEXT_MAX_BYTES = 8_192;
+export const MAX_WALLET_REGISTRATION_KEYS_PER_PURPOSE = 3 as const;
 
 export class WalletRegistrationCryptoError extends Error {
   readonly code = 'WALLET_REGISTRATION_CRYPTO_ERROR' as const;
@@ -102,11 +112,14 @@ export function createWalletRegistrationKey<Purpose extends WalletRegistrationKe
   purpose: Purpose,
   version: unknown,
   encodedKey: unknown,
+  keyId: unknown = `wallet-${purpose}-v${String(version)}`,
 ): WalletRegistrationKey<Purpose> {
   if (purpose !== 'challenge-hmac' && purpose !== 'identity-hmac' && purpose !== 'metadata-seal') {
     return fail();
   }
+  if (typeof keyId !== 'string' || !KEY_ID.test(keyId)) return fail();
   const key = Object.freeze({
+    keyId,
     purpose,
     version: positiveSmallint(version),
   }) as WalletRegistrationKey<Purpose>;
@@ -119,13 +132,138 @@ function revealKey<Purpose extends WalletRegistrationKeyPurpose>(
   purpose: Purpose,
 ): Buffer {
   try {
-    if (!key || typeof key !== 'object' || !Object.isFrozen(key) || key.purpose !== purpose) {
+    if (
+      !key ||
+      typeof key !== 'object' ||
+      !Object.isFrozen(key) ||
+      !KEY_ID.test(key.keyId) ||
+      key.purpose !== purpose
+    ) {
       return fail();
     }
     positiveSmallint(key.version);
     const bytes = keyBytes.get(key);
     if (!bytes || bytes.length !== 32) return fail();
     return bytes;
+  } catch {
+    return fail();
+  }
+}
+
+function validatedKeyRing<Purpose extends WalletRegistrationKeyPurpose>(
+  ring: WalletRegistrationKeyRing<Purpose>,
+  purpose: Purpose,
+): readonly WalletRegistrationKey<Purpose>[] {
+  if (
+    !ring ||
+    typeof ring !== 'object' ||
+    !Object.isFrozen(ring) ||
+    !validKeyRings.has(ring) ||
+    ring.purpose !== purpose ||
+    !Array.isArray(ring.keys) ||
+    !Object.isFrozen(ring.keys) ||
+    ring.keys.length < 1 ||
+    ring.keys.length > MAX_WALLET_REGISTRATION_KEYS_PER_PURPOSE
+  ) {
+    return fail();
+  }
+  return ring.keys;
+}
+
+export function createWalletRegistrationKeyRing<Purpose extends WalletRegistrationKeyPurpose>(
+  purpose: Purpose,
+  activeWriteVersion: unknown,
+  candidates: readonly WalletRegistrationKey<Purpose>[],
+): WalletRegistrationKeyRing<Purpose> {
+  try {
+    const activeVersion = positiveSmallint(activeWriteVersion);
+    if (
+      !Array.isArray(candidates) ||
+      candidates.length < 1 ||
+      candidates.length > MAX_WALLET_REGISTRATION_KEYS_PER_PURPOSE
+    ) {
+      return fail();
+    }
+    const keys = [...candidates].sort((left, right) => left.version - right.version);
+    const versions = new Set<number>();
+    const keyIds = new Set<string>();
+    const materials: Buffer[] = [];
+    for (const key of keys) {
+      const material = revealKey(key, purpose);
+      if (
+        versions.has(key.version) ||
+        keyIds.has(key.keyId) ||
+        materials.some((candidate) => candidate.equals(material))
+      ) {
+        return fail();
+      }
+      versions.add(key.version);
+      keyIds.add(key.keyId);
+      materials.push(material);
+    }
+    if (!versions.has(activeVersion) || keys.some((key) => key.version > activeVersion)) {
+      return fail();
+    }
+    const ring = Object.freeze({
+      purpose,
+      activeWriteVersion: activeVersion,
+      keys: Object.freeze(keys),
+    }) as WalletRegistrationKeyRing<Purpose>;
+    validKeyRings.add(ring);
+    return ring;
+  } catch {
+    return fail();
+  }
+}
+
+export function activeWalletRegistrationKey<Purpose extends WalletRegistrationKeyPurpose>(
+  ring: WalletRegistrationKeyRing<Purpose>,
+): WalletRegistrationKey<Purpose> {
+  const keys = validatedKeyRing(ring, ring?.purpose);
+  const active = keys.find((candidate) => candidate.version === ring.activeWriteVersion);
+  if (!active) return fail();
+  return active;
+}
+
+export function walletRegistrationKeyForVersion<Purpose extends WalletRegistrationKeyPurpose>(
+  ring: WalletRegistrationKeyRing<Purpose>,
+  version: unknown,
+): WalletRegistrationKey<Purpose> {
+  const keys = validatedKeyRing(ring, ring?.purpose);
+  const exactVersion = positiveSmallint(version);
+  const selected = keys.find((candidate) => candidate.version === exactVersion);
+  if (!selected) return fail();
+  return selected;
+}
+
+export function assertWalletRegistrationKeyRingsIndependent(
+  rings: readonly WalletRegistrationKeyRing<WalletRegistrationKeyPurpose>[],
+): void {
+  try {
+    if (!Array.isArray(rings) || rings.length !== 3) return fail();
+    const purposes = new Set<WalletRegistrationKeyPurpose>();
+    const keyIds = new Set<string>();
+    const materials: Buffer[] = [];
+    for (const ring of rings) {
+      const keys = validatedKeyRing(ring, ring?.purpose);
+      if (purposes.has(ring.purpose)) return fail();
+      purposes.add(ring.purpose);
+      for (const key of keys) {
+        const material = revealKey(key, ring.purpose);
+        if (keyIds.has(key.keyId) || materials.some((candidate) => candidate.equals(material))) {
+          return fail();
+        }
+        keyIds.add(key.keyId);
+        materials.push(material);
+      }
+    }
+    if (
+      !purposes.has('identity-hmac') ||
+      !purposes.has('challenge-hmac') ||
+      !purposes.has('metadata-seal')
+    ) {
+      return fail();
+    }
   } catch {
     return fail();
   }

@@ -2,8 +2,11 @@ import { isIP } from 'node:net';
 
 import type { AssetRegistryEnvironment } from '../../../blockchain/domain/supported-asset-registry';
 import {
+  assertWalletRegistrationKeyRingsIndependent,
   createWalletRegistrationKey,
-  type WalletRegistrationKey,
+  createWalletRegistrationKeyRing,
+  type WalletRegistrationKeyPurpose,
+  type WalletRegistrationKeyRing,
 } from '../crypto/wallet-registration-crypto';
 
 export interface DisabledWalletRegistrationConfig {
@@ -15,9 +18,9 @@ export interface EnabledWalletRegistrationConfig {
   readonly publicOrigin: string;
   readonly registryEnvironment: AssetRegistryEnvironment;
   readonly challengeTtlSeconds: number;
-  readonly identityHmacKey: WalletRegistrationKey<'identity-hmac'>;
-  readonly challengeHmacKey: WalletRegistrationKey<'challenge-hmac'>;
-  readonly metadataSealKey: WalletRegistrationKey<'metadata-seal'>;
+  readonly identityHmacKeys: WalletRegistrationKeyRing<'identity-hmac'>;
+  readonly challengeHmacKeys: WalletRegistrationKeyRing<'challenge-hmac'>;
+  readonly metadataSealKeys: WalletRegistrationKeyRing<'metadata-seal'>;
 }
 
 export type WalletRegistrationConfig =
@@ -30,10 +33,13 @@ const WALLET_REGISTRATION_VARIABLES = Object.freeze([
   'WALLET_REGISTRATION_CHALLENGE_TTL_SECONDS',
   'WALLET_IDENTITY_HMAC_KEY_VERSION',
   'WALLET_IDENTITY_HMAC_KEY',
+  'WALLET_IDENTITY_HMAC_KEY_RING_JSON',
   'WALLET_CHALLENGE_HMAC_KEY_VERSION',
   'WALLET_CHALLENGE_HMAC_KEY',
+  'WALLET_CHALLENGE_HMAC_KEY_RING_JSON',
   'WALLET_METADATA_SEAL_KEY_VERSION',
   'WALLET_METADATA_SEAL_KEY',
+  'WALLET_METADATA_SEAL_KEY_RING_JSON',
 ] as const);
 
 export class WalletRegistrationConfigurationError extends Error {
@@ -116,20 +122,89 @@ function registryEnvironment(value: string): AssetRegistryEnvironment {
   return value;
 }
 
-function walletKey<Purpose extends 'challenge-hmac' | 'identity-hmac' | 'metadata-seal'>(
+interface WalletKeyRingDocumentEntry {
+  readonly keyId: string;
+  readonly purpose: WalletRegistrationKeyPurpose;
+  readonly version: number;
+  readonly material: string;
+}
+
+interface WalletKeyRingDocument {
+  readonly activeWriteVersion: number;
+  readonly keys: readonly WalletKeyRingDocumentEntry[];
+}
+
+function isExactObject(value: unknown, keys: readonly string[]): value is Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  return Object.keys(value).join('\0') === keys.join('\0');
+}
+
+function parseKeyRingDocument(value: string, field: string): WalletKeyRingDocument {
+  if (value.length > 4_096 || /[\0\r\n]/u.test(value)) return fail(field);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value) as unknown;
+  } catch {
+    return fail(field);
+  }
+  if (
+    !isExactObject(parsed, ['activeWriteVersion', 'keys']) ||
+    !Array.isArray(parsed.keys) ||
+    parsed.keys.length < 1 ||
+    parsed.keys.length > 3 ||
+    JSON.stringify(parsed) !== value
+  ) {
+    return fail(field);
+  }
+  let previousVersion = 0;
+  for (const candidate of parsed.keys) {
+    if (
+      !isExactObject(candidate, ['keyId', 'purpose', 'version', 'material']) ||
+      typeof candidate.keyId !== 'string' ||
+      typeof candidate.purpose !== 'string' ||
+      typeof candidate.version !== 'number' ||
+      !Number.isInteger(candidate.version) ||
+      candidate.version <= previousVersion ||
+      typeof candidate.material !== 'string'
+    ) {
+      return fail(field);
+    }
+    previousVersion = candidate.version;
+  }
+  return parsed as unknown as WalletKeyRingDocument;
+}
+
+function walletKeyRing<Purpose extends 'challenge-hmac' | 'identity-hmac' | 'metadata-seal'>(
   environment: Readonly<NodeJS.ProcessEnv>,
   purpose: Purpose,
   versionName: string,
   keyName: string,
-): WalletRegistrationKey<Purpose> {
+  ringName: string,
+): WalletRegistrationKeyRing<Purpose> {
   try {
-    return createWalletRegistrationKey(
-      purpose,
-      positiveInteger(environment, versionName, 1, 32_767),
-      required(environment, keyName),
-    );
+    const encodedRing = environment[ringName];
+    if (encodedRing === undefined) {
+      const version = positiveInteger(environment, versionName, 1, 32_767);
+      return createWalletRegistrationKeyRing(purpose, version, [
+        createWalletRegistrationKey(purpose, version, required(environment, keyName)),
+      ]);
+    }
+    if (environment[versionName] !== undefined || environment[keyName] !== undefined) {
+      return fail(ringName);
+    }
+    const document = parseKeyRingDocument(required(environment, ringName), ringName);
+    const keys = document.keys.map((candidate) => {
+      if (candidate.purpose !== purpose) return fail(ringName);
+      return createWalletRegistrationKey(
+        purpose,
+        candidate.version,
+        candidate.material,
+        candidate.keyId,
+      );
+    });
+    return createWalletRegistrationKeyRing(purpose, document.activeWriteVersion, keys);
   } catch {
-    return fail(keyName);
+    return fail(ringName);
   }
 }
 
@@ -157,31 +232,34 @@ export function loadWalletRegistrationConfig(
     return fail('LOCAL_DEMO_MODE');
   }
 
-  const identityHmacKey = walletKey(
+  const identityHmacKeys = walletKeyRing(
     environment,
     'identity-hmac',
     'WALLET_IDENTITY_HMAC_KEY_VERSION',
     'WALLET_IDENTITY_HMAC_KEY',
+    'WALLET_IDENTITY_HMAC_KEY_RING_JSON',
   );
-  const challengeHmacKey = walletKey(
+  const challengeHmacKeys = walletKeyRing(
     environment,
     'challenge-hmac',
     'WALLET_CHALLENGE_HMAC_KEY_VERSION',
     'WALLET_CHALLENGE_HMAC_KEY',
+    'WALLET_CHALLENGE_HMAC_KEY_RING_JSON',
   );
-  const metadataSealKey = walletKey(
+  const metadataSealKeys = walletKeyRing(
     environment,
     'metadata-seal',
     'WALLET_METADATA_SEAL_KEY_VERSION',
     'WALLET_METADATA_SEAL_KEY',
+    'WALLET_METADATA_SEAL_KEY_RING_JSON',
   );
-  if (environment.WALLET_IDENTITY_HMAC_KEY === environment.WALLET_CHALLENGE_HMAC_KEY) {
-    return fail('WALLET_KEY_MATERIAL');
-  }
-  if (
-    environment.WALLET_METADATA_SEAL_KEY === environment.WALLET_IDENTITY_HMAC_KEY ||
-    environment.WALLET_METADATA_SEAL_KEY === environment.WALLET_CHALLENGE_HMAC_KEY
-  ) {
+  try {
+    assertWalletRegistrationKeyRingsIndependent([
+      identityHmacKeys,
+      challengeHmacKeys,
+      metadataSealKeys,
+    ]);
+  } catch {
     return fail('WALLET_KEY_MATERIAL');
   }
 
@@ -200,8 +278,8 @@ export function loadWalletRegistrationConfig(
       60,
       300,
     ),
-    identityHmacKey,
-    challengeHmacKey,
-    metadataSealKey,
+    identityHmacKeys,
+    challengeHmacKeys,
+    metadataSealKeys,
   });
 }

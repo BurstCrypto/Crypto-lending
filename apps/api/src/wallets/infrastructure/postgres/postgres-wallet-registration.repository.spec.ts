@@ -64,6 +64,7 @@ function beginRequest(): BeginWalletOwnershipChallengeRequest {
     proofScheme: 'EVM_ERC4361_ERC191',
     chainId: NETWORK,
     addressDigest,
+    identityDigests: [addressDigest],
     domainDigest: digestWalletChallengeValue('domain', challengeKey, 'https://app.example.test'),
     messageDigest: digestWalletChallengeValue('message', challengeKey, 'message'),
     nonceDigest: digestWalletChallengeValue('nonce', challengeKey, 'nonce'),
@@ -119,6 +120,8 @@ describe('PostgresWalletRegistrationRepository', () => {
       active_registry_fingerprint_sha256: request.registry.fingerprintSha256,
       active_address_digest_version: request.addressDigest.version,
       active_address_digest: Buffer.from(request.addressDigest.value, 'hex'),
+      active_verification_digest_version: request.addressDigest.version,
+      active_verification_digest: Buffer.from(request.addressDigest.value, 'hex'),
       active_address_key_version: encryptedAddress.keyVersion,
       active_address_ciphertext: Buffer.from(encryptedAddress.ciphertext, 'base64url'),
       active_address_iv: Buffer.from(encryptedAddress.iv, 'base64url'),
@@ -137,12 +140,13 @@ describe('PostgresWalletRegistrationRepository', () => {
         chainId: NETWORK,
         registry: request.registry,
         addressDigest: request.addressDigest,
+        verificationAddressDigest: request.addressDigest,
         encryptedAddress,
         registeredAt: NOW,
       }),
     ]);
     expect(query).toHaveBeenCalledWith(
-      expect.stringContaining('list_active_wallet_registrations'),
+      expect.stringContaining('list_active_wallet_registrations_rotatable'),
       [ACCOUNT_ID],
     );
 
@@ -197,12 +201,14 @@ describe('PostgresWalletRegistrationRepository', () => {
       expiresAt: EXPIRES,
     });
     const [sql, parameters] = query.mock.calls[0] as [string, unknown[]];
-    expect(sql).toContain('begin_wallet_ownership_challenge(');
-    expect(parameters).toHaveLength(23);
+    expect(sql).toContain('begin_wallet_ownership_challenge_rotatable(');
+    expect(parameters).toHaveLength(25);
     expect(parameters).toContain('eip155');
     expect(parameters).toContain('11155111');
     expect(JSON.stringify(parameters)).not.toContain(ADDRESS);
     expect(parameters.filter(Buffer.isBuffer)).toHaveLength(7);
+    expect(parameters.at(-2)).toEqual([1]);
+    expect(parameters.at(-1)).toEqual([request.addressDigest.value]);
   });
 
   it('restores only complete READY rows and passes the correlation to expiry preparation', async () => {
@@ -281,7 +287,7 @@ describe('PostgresWalletRegistrationRepository', () => {
     ).resolves.toEqual({ status: 'revoked' });
 
     const [sql] = query.mock.calls[0] as [string];
-    expect(sql).toContain('FROM complete_wallet_registration_guarded(');
+    expect(sql).toContain('FROM complete_wallet_registration_rotatable(');
     expect(sql).not.toContain('FROM complete_wallet_registration(');
   });
 
@@ -328,5 +334,28 @@ describe('PostgresWalletRegistrationRepository', () => {
     await expect(repositoryWith(query).beginChallenge(beginRequest())).rejects.toEqual(
       new WalletRegistrationRateLimitedError(60),
     );
+  });
+
+  it('rejects incomplete, unordered, duplicate, and non-active identity alias sets locally', async () => {
+    const query = jest.fn();
+    const original = beginRequest();
+    const other = {
+      ...original.addressDigest,
+      version: 2,
+      value: randomBytes(32).toString('hex') as typeof original.addressDigest.value,
+    };
+    const malformed = [
+      { ...original, identityDigests: [] },
+      { ...original, identityDigests: [other, original.addressDigest] },
+      { ...original, identityDigests: [original.addressDigest, original.addressDigest] },
+      { ...original, identityDigests: [other] },
+    ];
+
+    for (const request of malformed) {
+      await expect(repositoryWith(query).beginChallenge(request)).rejects.toBeInstanceOf(
+        WalletRegistrationPersistenceError,
+      );
+    }
+    expect(query).not.toHaveBeenCalled();
   });
 });

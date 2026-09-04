@@ -28,10 +28,11 @@ import {
 import { WalletRegistrationRateLimitedError } from '../../application/wallet-registration.errors';
 import { parseWalletChallengeId } from '../../domain/wallet-ownership-proof';
 import { parseWalletChainId } from '../../domain/wallet-identity';
-import type {
-  SealedWalletRegistrationValue,
-  WalletRegistrationDigestPurpose,
-  WalletRegistrationDigestReference,
+import {
+  walletRegistrationDigestEquals,
+  type SealedWalletRegistrationValue,
+  type WalletRegistrationDigestPurpose,
+  type WalletRegistrationDigestReference,
 } from '../crypto/wallet-registration-crypto';
 
 const LOWER_HEX_DIGEST = /^[0-9a-f]{64}$/u;
@@ -91,6 +92,8 @@ interface ActiveWalletRow extends QueryResultRow {
   active_registry_fingerprint_sha256: string;
   active_address_digest_version: number;
   active_address_digest: Buffer;
+  active_verification_digest_version: number;
+  active_verification_digest: Buffer;
   active_address_key_version: number;
   active_address_ciphertext: Buffer;
   active_address_iv: Buffer;
@@ -138,6 +141,34 @@ function digestBytes(reference: WalletRegistrationDigestReference): Buffer {
     throw new WalletRegistrationPersistenceError();
   }
   return Buffer.from(reference.value, 'hex');
+}
+
+function identityDigestParams(
+  request: BeginWalletOwnershipChallengeRequest,
+): readonly [readonly number[], readonly string[]] {
+  const aliases = request.identityDigests;
+  if (!Array.isArray(aliases) || aliases.length < 1 || aliases.length > 3) {
+    throw new WalletRegistrationPersistenceError();
+  }
+  const versions: number[] = [];
+  const digests: string[] = [];
+  for (const [index, alias] of aliases.entries()) {
+    const version = positiveSmallint(alias.version);
+    if (
+      (index > 0 && version <= (versions[index - 1] ?? 0)) ||
+      !LOWER_HEX_DIGEST.test(alias.value) ||
+      digests.includes(alias.value)
+    ) {
+      throw new WalletRegistrationPersistenceError();
+    }
+    versions.push(version);
+    digests.push(alias.value);
+  }
+  const active = aliases.at(-1);
+  if (!active || !walletRegistrationDigestEquals(active, request.addressDigest)) {
+    throw new WalletRegistrationPersistenceError();
+  }
+  return Object.freeze([Object.freeze(versions), Object.freeze(digests)]);
 }
 
 function digestReference<Purpose extends WalletRegistrationDigestPurpose>(
@@ -276,7 +307,7 @@ export class PostgresWalletRegistrationRepository implements WalletRegistrationR
       const accountId = parseAccountId(request.accountId);
       const result = await this.postgres.query<ActiveWalletRow>(
         `SELECT active_wallet.*
-         FROM list_active_wallet_registrations($1::uuid) AS active_wallet`,
+         FROM list_active_wallet_registrations_rotatable($1::uuid) AS active_wallet`,
         [accountId],
       );
       if (result.rows.length > MAX_ACTIVE_WALLET_REGISTRATIONS_PER_ACCOUNT) {
@@ -312,6 +343,10 @@ export class PostgresWalletRegistrationRepository implements WalletRegistrationR
             addressDigest: digestReference<'address'>(
               row.active_address_digest_version,
               row.active_address_digest,
+            ),
+            verificationAddressDigest: digestReference<'address'>(
+              row.active_verification_digest_version,
+              row.active_verification_digest,
             ),
             encryptedAddress: sealedValue(
               row.active_address_key_version,
@@ -357,15 +392,17 @@ export class PostgresWalletRegistrationRepository implements WalletRegistrationR
     try {
       const [namespace, reference] = chainParts(request.chainId);
       const payload = sealedParams(request.challengePayload);
+      const identityAliases = identityDigestParams(request);
       const result = await this.postgres.query<BeginRow>(
         `SELECT begun.challenge_id, begun.expires_at
-         FROM begin_wallet_ownership_challenge(
+         FROM begin_wallet_ownership_challenge_rotatable(
            $1::uuid, $2::uuid, $3::text, $4::text, $5::text,
            $6::text, $7::integer, $8::text,
            $9::smallint, $10::bytea, $11::bytea, $12::bytea,
            $13::smallint, $14::bytea, $15::smallint, $16::bytea,
            $17::smallint, $18::bytea, $19::smallint, $20::bytea,
-           $21::timestamptz, $22::timestamptz, $23::uuid
+           $21::timestamptz, $22::timestamptz, $23::uuid,
+           $24::smallint[], $25::text[]
          ) AS begun`,
         [
           parseWalletChallengeId(request.challengeId),
@@ -388,6 +425,8 @@ export class PostgresWalletRegistrationRepository implements WalletRegistrationR
           finiteDate(request.issuedAt),
           finiteDate(request.expiresAt),
           uuid(request.correlationId),
+          identityAliases[0],
+          identityAliases[1],
         ],
       );
       const row = oneRow(result.rows);
@@ -513,7 +552,7 @@ export class PostgresWalletRegistrationRepository implements WalletRegistrationR
         `SELECT completed.registration_outcome,
                 completed.wallet_id,
                 completed.registered_at
-         FROM complete_wallet_registration_guarded(
+         FROM complete_wallet_registration_rotatable(
            $1::uuid, $2::uuid, $3::uuid,
            $4::smallint, $5::bytea, $6::bytea, $7::bytea,
            $8::smallint, $9::bytea, $10::bytea, $11::bytea,

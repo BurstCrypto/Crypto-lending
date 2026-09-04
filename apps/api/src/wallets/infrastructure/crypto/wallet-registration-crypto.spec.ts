@@ -2,12 +2,16 @@ import { randomBytes, randomUUID } from 'node:crypto';
 
 import {
   WalletRegistrationCryptoError,
+  activeWalletRegistrationKey,
+  assertWalletRegistrationKeyRingsIndependent,
   createWalletRegistrationKey,
+  createWalletRegistrationKeyRing,
   digestWalletChallengeValue,
   digestWalletIdentity,
   digestWalletSubjectBinding,
   openWalletRegistrationValue,
   sealWalletRegistrationValue,
+  walletRegistrationKeyForVersion,
   walletRegistrationDigestEquals,
   type WalletRegistrationSealBinding,
 } from './wallet-registration-crypto';
@@ -66,7 +70,100 @@ describe('wallet registration cryptography', () => {
     expect(subject).not.toEqual(digestWalletSubjectBinding(challenge, accountId, randomUUID()));
     expect(subject).not.toEqual(digestWalletSubjectBinding(challenge, randomUUID(), challengeId));
     expect(JSON.stringify(identity)).not.toContain(keyMaterial);
-    expect(Reflect.ownKeys(identity)).toEqual(['purpose', 'version']);
+    expect(identity.keyId).toBe('wallet-identity-hmac-v7');
+    expect(Reflect.ownKeys(identity)).toEqual(['keyId', 'purpose', 'version']);
+  });
+
+  it('selects exact bounded active and previous key versions without exposing material', () => {
+    const previousMaterial = encodedKey();
+    const activeMaterial = encodedKey();
+    const previous = createWalletRegistrationKey(
+      'metadata-seal',
+      1,
+      previousMaterial,
+      'wallet-metadata-old',
+    );
+    const active = createWalletRegistrationKey(
+      'metadata-seal',
+      2,
+      activeMaterial,
+      'wallet-metadata-current',
+    );
+    const ring = createWalletRegistrationKeyRing('metadata-seal', 2, [active, previous]);
+    const rowBinding = binding();
+    const oldSealed = sealWalletRegistrationValue(previous, rowBinding, 'old-value');
+
+    expect(activeWalletRegistrationKey(ring)).toBe(active);
+    expect(walletRegistrationKeyForVersion(ring, oldSealed.keyVersion)).toBe(previous);
+    expect(
+      openWalletRegistrationValue(
+        walletRegistrationKeyForVersion(ring, oldSealed.keyVersion),
+        rowBinding,
+        oldSealed,
+      ),
+    ).toBe('old-value');
+    expect(JSON.stringify(ring)).not.toContain(previousMaterial);
+    expect(JSON.stringify(ring)).not.toContain(activeMaterial);
+    expect(() => walletRegistrationKeyForVersion(ring, 3)).toThrow(WalletRegistrationCryptoError);
+  });
+
+  it('rejects forged, duplicate, future, oversized, and cross-purpose-reused key rings', () => {
+    const firstMaterial = encodedKey();
+    const first = createWalletRegistrationKey('identity-hmac', 1, firstMaterial, 'identity-one');
+    const second = createWalletRegistrationKey('identity-hmac', 2, encodedKey(), 'identity-two');
+    const identityRing = createWalletRegistrationKeyRing('identity-hmac', 2, [first, second]);
+    const challengeRing = createWalletRegistrationKeyRing('challenge-hmac', 1, [
+      createWalletRegistrationKey('challenge-hmac', 1, encodedKey(), 'challenge-one'),
+    ]);
+    const metadataRing = createWalletRegistrationKeyRing('metadata-seal', 1, [
+      createWalletRegistrationKey('metadata-seal', 1, encodedKey(), 'metadata-one'),
+    ]);
+
+    expect(() =>
+      createWalletRegistrationKeyRing('identity-hmac', 2, [
+        first,
+        createWalletRegistrationKey('identity-hmac', 1, encodedKey(), 'identity-duplicate'),
+      ]),
+    ).toThrow(WalletRegistrationCryptoError);
+    expect(() => createWalletRegistrationKeyRing('identity-hmac', 1, [first, second])).toThrow(
+      WalletRegistrationCryptoError,
+    );
+    expect(() =>
+      createWalletRegistrationKeyRing('identity-hmac', 4, [
+        first,
+        second,
+        createWalletRegistrationKey('identity-hmac', 3, encodedKey(), 'identity-three'),
+        createWalletRegistrationKey('identity-hmac', 4, encodedKey(), 'identity-four'),
+      ]),
+    ).toThrow(WalletRegistrationCryptoError);
+    expect(() =>
+      activeWalletRegistrationKey(
+        Object.freeze({
+          purpose: 'identity-hmac',
+          activeWriteVersion: 2,
+          keys: Object.freeze([first, second]),
+        }) as ReturnType<typeof createWalletRegistrationKeyRing<'identity-hmac'>>,
+      ),
+    ).toThrow(WalletRegistrationCryptoError);
+
+    expect(() =>
+      assertWalletRegistrationKeyRingsIndependent([
+        identityRing,
+        createWalletRegistrationKeyRing('challenge-hmac', 1, [
+          createWalletRegistrationKey('challenge-hmac', 1, firstMaterial, 'challenge-reused'),
+        ]),
+        metadataRing,
+      ]),
+    ).toThrow(WalletRegistrationCryptoError);
+    expect(() =>
+      assertWalletRegistrationKeyRingsIndependent([
+        identityRing,
+        challengeRing,
+        createWalletRegistrationKeyRing('metadata-seal', 1, [
+          createWalletRegistrationKey('metadata-seal', 1, encodedKey(), 'identity-one'),
+        ]),
+      ]),
+    ).toThrow(WalletRegistrationCryptoError);
   });
 
   it('seals values with random AES-GCM nonces and exact row-bound AAD', () => {
