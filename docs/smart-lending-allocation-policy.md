@@ -124,6 +124,35 @@ request during startup, exposes no raw-feed HTTP route, and defaults to
   adapter discards LI.FI's transaction request, and its output cannot authorize
   or execute a transaction.
 
+### Aave Ethereum deployment evidence
+
+The Aave Ethereum deployment-evidence boundary is read-only and unavailable by
+default. Its reference manifest is `AAVE_V3_ETHEREUM_DEPLOYMENT_MANIFEST`,
+pinned to the official immutable Aave address-book
+[v4.66.3 Ethereum module](https://assets.aave.com/address-book/releases/v4.66.3/modules/AaveV3Ethereum.json),
+source commit `12963110f29699d214531b9ab4c7cfcec460c298`, and module SHA-256
+`371c9a43983d32fad37559d83724695f8458f2888552041ba8a05001b666522d`.
+The closed read plan requires any future RPC source implementation to capture
+one finalized Ethereum block and bind every state read to its hash with EIP-1898
+`requireCanonical: true`. The parser accepts a source bundle only when every
+operation attests to that binding and matching pre/post headers. It then checks
+runtime-code presence and records unapproved code hashes; checks the Pool proxy,
+AddressesProvider/admin, provider Pool/DataProvider, immutable DataProvider
+Pool, USDC, and USDT relationships; and observes the active Pool implementation
+with the proxy's simulated admin-context `eth_call`. Missing, malformed,
+unbound, or mismatched evidence is unavailable. No concrete RPC source exists
+yet, so source attestations are explicitly unverified rather than live proof.
+
+This evidence is corroboration only. It cannot establish recommendation
+eligibility, authorize a financial action, or send, sign, or broadcast a write;
+it does not increase the live-provider count or upgrade the authority of the
+Aave GraphQL market feed. Promotion still requires approved primary and
+independent RPC sources, approved runtime-code hashes, durable finalized-block
+checkpoints with continuity and reorg handling, and revision-bound transcript
+proof that every call was canonically block-bound and independent sources
+agree. Until those gates and independent review pass, this is not a live Aave
+production reader.
+
 The source contracts are documented by Aave's
 [GraphQL API overview](https://aave.com/docs/aave-v3/getting-started/graphql)
 and [market-data reference](https://aave.com/docs/aave-v3/markets/data), DefiLlama's

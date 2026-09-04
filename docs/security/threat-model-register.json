@@ -137,10 +137,19 @@
     {
       "id": "TB-10",
       "name": "Chain observation to application indexing",
-      "source": "Future chain connector with immutable network configuration",
-      "destination": "Supported-asset normalization and future observation store",
-      "data": ["network identity", "contract or mint", "block and transaction observations"],
-      "evidence": ["docs/KAN-61.md"]
+      "source": "Future approved chain connector with immutable network configuration; the Aave Ethereum source is currently unavailable",
+      "destination": "Supported-asset normalization, read-only smart-lending deployment evidence, and future observation store",
+      "data": [
+        "network identity",
+        "contract or mint",
+        "block and transaction observations",
+        "contract runtime code and read-only call observations"
+      ],
+      "evidence": [
+        "docs/KAN-61.md",
+        "apps/api/src/smart-lending/infrastructure/aave/aave-v3-ethereum-deployment.manifest.ts",
+        "apps/api/src/smart-lending/infrastructure/aave/aave-v3-ethereum-deployment-evidence.adapter.ts"
+      ]
     },
     {
       "id": "TB-11",
@@ -1146,6 +1155,7 @@
       "response": "MITIGATE",
       "mitigations": [
         "Destinations, methods, queries, and the Aave request body are fixed while strict parsers enforce response shape, size, content type, redirect, timeout, and numeric bounds",
+        "The unavailable-by-default Aave Ethereum deployment boundary fixes an immutable address-book revision and a required finalized EIP-1898 read plan, then strictly checks source-attested per-operation bindings, header consistency, runtime-code presence, the observed Pool implementation pointer, provider/DataProvider relationships, and USDC/USDT reserve-token relationships while leaving execution and code-hash approval unverified",
         "Aave and DefiLlama observations are corroboration only and cannot establish recommendation eligibility or authorize a financial action",
         "Production feed activation is rejected, no HTTP recommendation route exists, and required production input adapters remain unavailable"
       ],
@@ -1154,10 +1164,12 @@
       "evidence": [
         "apps/api/src/smart-lending/infrastructure/external-feeds/smart-lending-external-feed.client.ts",
         "apps/api/src/smart-lending/infrastructure/aave/aave-v3-market-feed.adapter.ts",
+        "apps/api/src/smart-lending/infrastructure/aave/aave-v3-ethereum-deployment.manifest.ts",
+        "apps/api/src/smart-lending/infrastructure/aave/aave-v3-ethereum-deployment-evidence.adapter.ts",
         "docs/smart-lending-allocation-policy.md"
       ],
-      "residualRisk": "Vendor authenticity beyond TLS, authenticated block freshness, deployment anchoring, schema-drift operations, divergence policy, and independent provider review are absent.",
-      "followUp": "Approve exact egress and provider evidence, then implement authenticated chain freshness, deployment anchoring, divergence handling, and independent review before activation"
+      "residualRisk": "Provider authenticity beyond TLS, approved runtime-code hashes, durable authenticated block freshness and lineage, independent-source agreement, schema-drift operations, divergence policy, and independent provider review are absent.",
+      "followUp": "Approve exact RPC and feed egress, provider evidence, and runtime-code hashes, then implement durable checkpoints, independent-source divergence handling, and independent review before activation"
     },
     {
       "id": "THR-WALLET-004",

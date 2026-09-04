@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 
 import { ComposedFeeAwareAllocationInputReader } from './application/composed-fee-aware-allocation-input.reader';
+import { AAVE_V3_ETHEREUM_DEPLOYMENT_EVIDENCE_READER } from './application/ports/aave-v3-ethereum-deployment-evidence-reader.port';
 import { APPROVED_LENDING_OPPORTUNITY_SNAPSHOT_READER } from './application/ports/approved-lending-opportunity-snapshot-reader.port';
 import { APPROVED_SMART_LENDING_POLICY_READER } from './application/ports/approved-smart-lending-policy-reader.port';
 import { FEE_AWARE_ALLOCATION_INPUT_READER } from './application/ports/fee-aware-allocation-input.port';
@@ -18,6 +19,11 @@ import {
   AAVE_V3_ETHEREUM_PROVIDER_NATIVE_LENDING_MARKET_READER,
   AaveV3EthereumMarketFeedAdapter,
 } from './infrastructure/aave/aave-v3-market-feed.adapter';
+import { AaveV3EthereumDeploymentEvidenceAdapter } from './infrastructure/aave/aave-v3-ethereum-deployment-evidence.adapter';
+import {
+  AAVE_V3_ETHEREUM_FINALIZED_RPC_SOURCE,
+  UnavailableAaveV3EthereumFinalizedRpcSource,
+} from './infrastructure/aave/aave-v3-ethereum-finalized-rpc.source';
 import { DefiLlamaMarketFeedAdapter } from './infrastructure/defillama/defillama-market-feed.adapter';
 import {
   AAVE_V3_ETHEREUM_MARKET_EXTERNAL_FEED_CLIENT,
@@ -79,6 +85,16 @@ import {
       provide: PROVIDER_NATIVE_LENDING_MARKET_READER,
       useExisting: AaveV3EthereumMarketFeedAdapter,
     },
+    UnavailableAaveV3EthereumFinalizedRpcSource,
+    {
+      provide: AAVE_V3_ETHEREUM_FINALIZED_RPC_SOURCE,
+      useExisting: UnavailableAaveV3EthereumFinalizedRpcSource,
+    },
+    AaveV3EthereumDeploymentEvidenceAdapter,
+    {
+      provide: AAVE_V3_ETHEREUM_DEPLOYMENT_EVIDENCE_READER,
+      useExisting: AaveV3EthereumDeploymentEvidenceAdapter,
+    },
     UnavailableRoutableCapitalPositionSnapshotReader,
     {
       provide: ROUTABLE_CAPITAL_POSITION_SNAPSHOT_READER,
@@ -111,6 +127,7 @@ import {
     SmartLendingRecommendationService,
   ],
   exports: [
+    AAVE_V3_ETHEREUM_DEPLOYMENT_EVIDENCE_READER,
     LIVE_LENDING_MARKET_FEED,
     PROVIDER_NATIVE_LENDING_MARKET_READER,
     SmartLendingRecommendationService,

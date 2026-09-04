@@ -2,6 +2,10 @@ import { Test } from '@nestjs/testing';
 
 import { parseAccountId } from '../accounts/domain/account-profile';
 import {
+  AAVE_V3_ETHEREUM_DEPLOYMENT_EVIDENCE_READER,
+  type AaveV3EthereumDeploymentEvidenceReader,
+} from './application/ports/aave-v3-ethereum-deployment-evidence-reader.port';
+import {
   LIVE_BRIDGE_ROUTE_QUOTE_READER,
   type LiveBridgeRouteQuoteReader,
 } from './application/ports/live-bridge-route-quote-reader.port';
@@ -33,6 +37,9 @@ describe('SmartLendingModule', () => {
     const bridges = moduleRef.get<LiveBridgeRouteQuoteReader>(LIVE_BRIDGE_ROUTE_QUOTE_READER);
     const nativeMarkets = moduleRef.get<ProviderNativeLendingMarketReader>(
       PROVIDER_NATIVE_LENDING_MARKET_READER,
+    );
+    const aaveDeploymentEvidence = moduleRef.get<AaveV3EthereumDeploymentEvidenceReader>(
+      AAVE_V3_ETHEREUM_DEPLOYMENT_EVIDENCE_READER,
     );
     const recommendations = moduleRef.get(SmartLendingRecommendationService);
 
@@ -79,6 +86,15 @@ describe('SmartLendingModule', () => {
     ).rejects.toMatchObject({
       code: 'AAVE_V3_ETHEREUM_MARKET_UNAVAILABLE',
       message: 'Aave V3 Ethereum market data is unavailable',
+    });
+    await expect(
+      aaveDeploymentEvidence.readCurrentDeploymentEvidence({
+        evaluatedAt: '2026-09-03T12:00:00.000Z',
+        correlationId: '550e8400-e29b-41d4-a716-446655440000',
+      }),
+    ).rejects.toMatchObject({
+      code: 'AAVE_V3_ETHEREUM_DEPLOYMENT_EVIDENCE_UNAVAILABLE',
+      message: 'Aave V3 Ethereum deployment evidence is unavailable',
     });
     await expect(
       recommendations.read({

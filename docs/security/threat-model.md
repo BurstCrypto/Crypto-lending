@@ -121,10 +121,19 @@ retention state, owner, and code evidence. Important examples are:
   only are permitted for an approved non-production exercise until disclosure,
   processor, retention, log-redaction, and data-subject lifecycle controls are
   reviewed;
-- the dormant Aave adapter sends only a fixed Ethereum Core market address and
-  chain ID. Its response is public market metadata, carries no authenticated
-  block anchor, cannot establish recommendation eligibility, and remains
-  production-denied pending egress and provider review;
+- the dormant Aave GraphQL adapter sends only a fixed Ethereum Core market
+  address and chain ID. Its response is public market metadata, carries no
+  authenticated block anchor, cannot establish recommendation eligibility, and
+  remains production-denied pending egress and provider review;
+- the separate Aave Ethereum deployment-evidence boundary has no configured RPC
+  endpoint and is unavailable by default. Its closed plan fixes the network,
+  finalized-block selector, required EIP-1898 binding, immutable address-book
+  revision, contract targets, read methods, and ABI calls. Its parser checks
+  source-attested per-operation bindings, header consistency, runtime-code
+  presence, observed proxy implementation, provider, DataProvider, USDC, and
+  USDT relationships, while explicitly leaving binding execution, code hashes,
+  freshness, finality, and independent source agreement unverified and
+  non-authoritative;
 - all smart-lending vendor requests and responses are governed as `RESTRICTED`
   because the dormant LI.FI path can link two customer wallets, assets, exact
   amounts, and lending intent even though the Aave and DefiLlama market queries
