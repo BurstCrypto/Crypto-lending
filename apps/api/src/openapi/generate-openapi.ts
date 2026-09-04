@@ -47,6 +47,9 @@ async function generateOpenApi(): Promise<void> {
   }
   process.env.SQS_QUEUE_URL ??= 'http://127.0.0.1:4566/000000000000/openapi-jobs';
   process.env.SQS_DEAD_LETTER_QUEUE_URL ??= 'http://127.0.0.1:4566/000000000000/openapi-jobs-dlq';
+  process.env.SQS_BALANCE_QUEUE_URL ??= 'http://127.0.0.1:4566/000000000000/openapi-balance-sync';
+  process.env.SQS_BALANCE_DEAD_LETTER_QUEUE_URL ??=
+    'http://127.0.0.1:4566/000000000000/openapi-balance-sync-dlq';
 
   const outputPath = resolve(process.cwd(), process.argv[2] ?? 'openapi.json');
   const app = await NestFactory.create(AppModule, { logger: false });

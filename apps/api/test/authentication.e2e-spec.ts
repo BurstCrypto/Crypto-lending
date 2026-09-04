@@ -25,7 +25,10 @@ import {
   AUTHENTICATION_CONFIG,
   type RuntimeAuthenticationConfig,
 } from '../src/authentication/infrastructure/config/authentication-config.provider';
-import { createAuthenticationKey } from '../src/authentication/infrastructure/crypto/authentication-crypto';
+import {
+  createAuthenticationHmacKeyRing,
+  createAuthenticationKey,
+} from '../src/authentication/infrastructure/crypto/authentication-crypto';
 import { configureApplication } from '../src/application';
 import { StructuredLogger } from '../src/infrastructure/logging';
 
@@ -36,6 +39,15 @@ const ACCOUNT_ID = parseAccountId('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
 function encodedKey(byte: number): string {
   return Buffer.alloc(32, byte).toString('base64url');
 }
+
+const PRE_AUTHENTICATION_SEAL_KEY = createAuthenticationKey(
+  'preauth-seal',
+  'preauth',
+  encodedKey(1),
+);
+const IDENTITY_HMAC_KEY = createAuthenticationKey('identity-hmac', 'identity', encodedKey(2));
+const SESSION_HMAC_KEY = createAuthenticationKey('session-hmac', 'session', encodedKey(3));
+const CSRF_HMAC_KEY = createAuthenticationKey('csrf-hmac', 'csrf', encodedKey(4));
 
 const CONFIG: RuntimeAuthenticationConfig = Object.freeze({
   mode: 'oidc',
@@ -63,10 +75,14 @@ const CONFIG: RuntimeAuthenticationConfig = Object.freeze({
   preAuthenticationTtlSeconds: 300,
   sessionIdleTtlSeconds: 3_600,
   sessionAbsoluteTtlSeconds: 86_400,
-  preAuthenticationSealKey: createAuthenticationKey('preauth-seal', 'preauth', encodedKey(1)),
-  identityHmacKey: createAuthenticationKey('identity-hmac', 'identity', encodedKey(2)),
-  sessionHmacKey: createAuthenticationKey('session-hmac', 'session', encodedKey(3)),
-  csrfHmacKey: createAuthenticationKey('csrf-hmac', 'csrf', encodedKey(4)),
+  preAuthenticationSealKey: PRE_AUTHENTICATION_SEAL_KEY,
+  preAuthenticationSealKeys: Object.freeze([PRE_AUTHENTICATION_SEAL_KEY]),
+  identityHmacKeys: createAuthenticationHmacKeyRing('identity-hmac', 1, [IDENTITY_HMAC_KEY]),
+  sessionHmacKeys: createAuthenticationHmacKeyRing('session-hmac', 1, [SESSION_HMAC_KEY]),
+  csrfHmacKeys: createAuthenticationHmacKeyRing('csrf-hmac', 1, [CSRF_HMAC_KEY]),
+  identityHmacKey: IDENTITY_HMAC_KEY,
+  sessionHmacKey: SESSION_HMAC_KEY,
+  csrfHmacKey: CSRF_HMAC_KEY,
 });
 
 function cookiePair(header: string): string {
