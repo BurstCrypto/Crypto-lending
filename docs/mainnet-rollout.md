@@ -22,8 +22,11 @@
   OIDC boundary. Wallet ownership remains a separate, account-bound message
   proof.
 - The existing Base Sepolia and Solana Devnet transaction-proof modules remain
-  test-only. They must never be relabeled, imported by a mainnet module, or
-  enabled by changing an environment name.
+  test-only. The production API route graph and checked-in public OpenAPI
+  contract omit them entirely; only an exact `development` or `test` runtime
+  may register them behind their loopback configuration gates. They must never
+  be relabeled, imported by a mainnet module, or enabled by changing an
+  environment name.
 - Initial mainnet delivery is authenticated and read-only. It may request one
   explicit, user-approved ownership message after account verification:
   `personal_sign` for Ethereum or `signMessage` for Solana. No mainnet
@@ -35,6 +38,11 @@ go/no-go checks are tracked in the
 [production go-live plan](production-go-live-plan.md). A provider appearing in
 the checked-in research catalog does not make it live, readable from production,
 or transaction-enabled.
+
+Exactly ten Ethereum/Solana provider identities currently have dormant,
+synthetic transcript boundaries: six Ethereum and four Solana. All ten remain
+unregistered and unavailable. The live read-only and transaction-enabled
+provider counts are both zero.
 
 ## Required architecture boundary
 
@@ -62,16 +70,24 @@ transaction.
    each counted Ethereum or Solana provider. Validate chain identity, bytecode
    or program identity, proxy implementation, market, oracle, pause/freeze,
    cap, and drift before accepting data.
-4. Replace the unavailable production portfolio readers with chain-specific
-   provider adapters. The server coverage contract must report every active
-   `{walletId, networkId}` target as `COMPLETE`, `PARTIAL`, or `UNAVAILABLE` and
-   must fail closed on missing, extra, stale, divergent, incomplete, or
-   regressing evidence. Define an explicit server-owned `staleAfter` deadline
-   and focus/revalidation policy so a long-lived page cannot claim indefinite
-   freshness. The browser must reconcile the returned chain and wallet totals
-   and must never render unread coverage as zero.
+4. Activate the existing durable portfolio readers only through an approved,
+   dedicated balance-sync consumer and chain-specific adapters. The isolated
+   balance queue and publisher contract exist, but no consumer task/service or
+   receive/delete IAM capability exists and the dormant Ethereum/Solana RPC
+   adapters remain unregistered. The server coverage contract must report every
+   active `{walletId, networkId}` target as `COMPLETE`, `PARTIAL`, or
+   `UNAVAILABLE` and must fail closed on missing, extra, stale, divergent,
+   incomplete, or regressing evidence. Define an explicit server-owned
+   `staleAfter` deadline and focus/revalidation policy so a long-lived page
+   cannot claim indefinite freshness. The browser must reconcile the returned
+   chain and wallet totals and must never render unread coverage as zero.
 5. Complete non-production Cognito callback, secure-cookie, logout, recovery,
    MFA, JWKS-rotation, and outage evidence.
+6. Bind the exact clean release manifest, deployment target, and live-read
+   evidence into the two-role signed technical bundle, then obtain the separate
+   seven-role signed public-launch decision. Both checked-in trust registries
+   and the deployment-target registry are empty today, so this gate cannot pass
+   locally.
 
 ## Additional gates before any real-value write
 
@@ -107,5 +123,7 @@ wallet flow can make injected-provider connection and exact chain checks and
 can ask for one user-approved ownership-only message signature; it cannot
 request a transaction signature. No public Ethereum or Solana RPC/indexing
 request, transaction submission, broadcast, provider account, cloud
-deployment, or paid resource is created by the local implementation. The same
-is true of the deferred Base artifacts retained in the repository.
+deployment, or paid resource is created by the local implementation. The
+separate balance-sync queue definition has no activated consumer or chain
+egress and grants no live-read authority. The same is true of the deferred Base
+artifacts retained in the repository.

@@ -2,7 +2,7 @@
 
 The fee-aware allocation domain recommends where an existing Ethereum or
 Solana position could be lent. It defines the production replacement for a
-fixed 60/40 demo heuristic: a deterministic comparison of conservative,
+fixed historical 60/40 heuristic: a deterministic comparison of conservative,
 holding-period returns after the complete expected route lifecycle. It is
 deliberately chain-native-first: a cross-chain candidate must beat the best
 eligible same-chain candidate by the configured minimum, not merely advertise
@@ -150,6 +150,46 @@ configured provider endpoint, credential, Nest registration, or public runtime
 export; the module still binds the fail-closed unavailable source. Synthetic
 transport tests therefore do not make source attestations live or verified.
 
+A separate dormant two-source coordinator now compares two independently
+validated evidence payloads under one frozen request and aggregate deadline. It
+requires exact agreement on the pinned bindings, full finalized header, all
+eight runtime-code hashes, and both reserve-token records. It distinguishes
+ordinary finalized-height skew from same-height header divergence and
+exact-block state divergence, rejects obvious source/evidence alias reuse, and
+recomputes each canonical single-source evidence fingerprint before creating an
+ordered, domain-separated comparison fingerprint. An exact payload match
+remains explicitly different from approved independent-source agreement: the
+coordinator has no approved source-pair binding and is not registered in the
+module, so every provider, egress, live-capability, independence, freshness,
+finality, code-approval, recommendation, and financial-authority field stays
+false or unverified.
+
+An equally dormant source-scoped PostgreSQL checkpoint boundary records the
+validated single-source payload through append-only decisions and a guarded
+last-good head. It handles exact replay, optimistic revision conflicts,
+reobservation, one-block parent continuity, height gaps, timestamp regression,
+and sticky divergence quarantine without upgrading any evidence authority. The
+API has read-only function access, the worker alone has the record capability,
+and neither component is registered. A bounded lineage-repair candidate can now
+verify at most 64 missing historical blocks. It can either backfill an active
+continuity gap or clear a sticky quarantine, but only when an explicit,
+short-lived authorization binds the exact operation, source, deployment,
+current revision/status/last-validation time, complete last-good header and
+content fingerprint, target block, approver, independently approved
+corroborating source, nonce, and expiry. Quarantine recovery additionally binds
+the exact current quarantine reason and time. Every historical block must be
+the next child; both sources must provide unique observations that match on the
+complete header, all eight runtime-code hashes, and both reserve-token records;
+and the final block must equal their shared `finalized` anchor. A successful
+repair appends a new checkpoint decision plus immutable authorization, lineage,
+and per-source audit rows. It never deletes or replaces history. Direct head
+mutation, authorization reuse, over-wide lineage, stale approval, alias reuse,
+broken parentage, or any source divergence fails closed. This code performs no RPC
+read, is not registered in Nest, has no endpoint, and cannot authorize a
+financial action. Real historical readers, an approved independent source-pair
+registry, operational signing/issuance, and a live lineage-repair exercise
+remain required before the capability can be activated.
+
 This evidence is corroboration only. It cannot establish recommendation
 eligibility, authorize a financial action, or send, sign, or broadcast a write;
 it does not increase the live-provider count or upgrade the authority of the
@@ -263,11 +303,14 @@ implementations remain absent. There is still no HTTP recommendation route,
 and neither the composer nor the recommendation service can authorize or
 execute a transaction.
 
-Before production use, provider-native adapters must still authenticate exact
-deployments and normalize APY, capacity, pause state, fees, and withdrawal
-availability for each of the ten providers. The new Aave adapter is only the
-first unauthenticated corroboration slice, not a completed provider gate.
-Server-owned wallet positions,
+Dormant finalized-transcript boundaries now exist for exactly ten active-scope
+providers: Aave, Morpho, Compound, Spark, Euler, and Gearbox on Ethereum; and
+Kamino, Save, Project 0 / marginfi v2, and Jupiter on Solana. All ten remain
+unregistered and unavailable. Before production use, those provider-native
+adapters must authenticate exact deployments through approved independent
+sources and normalize approved APY, capacity, pause state, fees, and withdrawal
+availability. Synthetic transcript validation is not a completed provider
+gate. Server-owned wallet positions,
 stablecoin valuation, risk decisions, same-chain costs, provider entry/exit
 costs, cross-chain consent, and remaining network costs must then be composed
 into an immutable input snapshot. The composition must enforce freshness again
@@ -276,19 +319,29 @@ route and actual itemized fees. Until those integrations, the external-egress
 approval, and the existing mainnet write gates are complete, this is neither a
 live production allocator nor an execution path.
 
-Before any authenticated recommendation route is exposed, the runtime also
-needs a bounded per-account and global quote budget, distributed rate control,
-circuit breaking, and single-flight/cache behavior for aggregate and native
-market snapshots. The composer rejects more than 128 candidate quotes and does
-not silently truncate. One 30-second aggregate deadline and abort signal are
-shared by the capital, opportunity, policy, and sequential quote readers. Both
-the initial combined read and every quote are raced against that deadline, so a
+Before any authenticated recommendation route is exposed, the runtime still
+needs durable fleet-wide quota and provider-billing spend control. A dormant
+in-process admission primitive now provides strict global, destination, and
+LI.FI account concurrency and sliding-window workload budgets, destination
+circuit breakers, and fixed-key single-flight for non-personal Aave and
+DefiLlama reads. LI.FI account reads are never coalesced. A logical timeout or
+caller cancellation retains its physical concurrency reservation until the
+underlying promise really settles, even when a vendor ignores `AbortSignal`.
+This prevents hidden timed-out work from silently exceeding a task's capacity,
+but the primitive is intentionally unwired and its relative workload units are
+not vendor quota or money. Multi-task production still requires an approved
+distributed limiter, cost-accounting boundary, exact operator configuration,
+and deployed alert evidence.
+
+The composer rejects more than 128 candidate quotes and does not silently
+truncate. One 30-second aggregate deadline and abort signal are shared by the
+capital, opportunity, policy, and sequential quote readers. Both the initial
+combined read and every quote are raced against that deadline, so a
 non-cooperative source cannot keep the composition pending or cause later
 quotes to start. All snapshots, policy, consents, evidence, risk assessments,
-and returned quotes must remain valid through the deadline. These structural
-controls are not a production per-account/global rate or spend budget. The
-present module deliberately has no HTTP controller, so a caller cannot yet
-multiply external quote traffic.
+and returned quotes must remain valid through the deadline. The present module
+deliberately has no HTTP controller, so a caller cannot yet multiply external
+quote traffic.
 
 DefiLlama's payload supplies no per-market observation timestamp. The adapter's
 `retrievedAt` and short `validUntil` prove only when this server retrieved the
@@ -296,8 +349,8 @@ aggregate response, not when each upstream market was observed. That is another
 reason the snapshot is corroboration only; it must never satisfy a provider
 freshness gate.
 
-The implemented aggregate market and route adapters can be exercised in an
-explicitly approved non-production environment without paying for a vendor
-plan, subject to public endpoint limits and availability. That does not provide
-a production SLA or remove the need for dedicated Ethereum/Solana RPC and
-provider-native evidence.
+Current verification uses only deterministic local transcripts and injected
+transports. It makes no provider, RPC, bridge, cloud, or chain call and incurs no
+service charge. Any future external non-production exercise remains separately
+authorized and cannot provide a production SLA or remove the need for dedicated
+Ethereum/Solana RPC and provider-native evidence.

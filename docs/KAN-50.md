@@ -5,12 +5,12 @@ service configuration, and application-role boundaries. It strengthens the
 checked-in evidence without creating an AWS resource or representing static
 analysis as proof of a deployed environment.
 
-This branch performs no stack plan or deployment, secret read, IAM simulation,
+This repository work performs no stack plan or deployment, secret read, IAM simulation,
 Access Analyzer call, hosted CI dispatch, image publication, paid scan, or live
 rotation. The CloudFormation application template now composes a separate,
 content-addressed workload-boundary child so the parent remains below
-CloudFormation's 51,200-byte direct-body limit. Neither template was uploaded or
-deployed.
+CloudFormation's 51,200-byte direct-body limit. No checked-in template was
+uploaded or deployed.
 
 ## Dependency and ticket boundary
 
@@ -49,22 +49,30 @@ Generated database values are not proof that a PostgreSQL LOGIN exists or has
 that SCRAM verifier; the reviewed bootstrap deliberately does not synchronize
 passwords.
 
+The authentication/wallet secret is different: the template does not create or
+inspect it. The operator must supply the ARN of one externally provisioned,
+separately KMS-encrypted JSON secret containing only the current
+pre-authentication seal key and the six canonical authentication/wallet key-ring
+documents. The API execution role alone receives exact secret-read/decrypt
+permission. Production task wiring and offline preflight reject all legacy
+single-key auth and wallet selectors, but cannot prove the external secret's
+contents, custody, policy, or readability.
+
 The required replacement launch-time injection contract is:
 
-| Workload          | Injected secret scope                          | Forbidden scope                             |
-| ----------------- | ---------------------------------------------- | ------------------------------------------- |
-| API               | API database login and selected Redis ACL user | bootstrap, migration, and worker DB secrets |
-| outbox worker     | worker database login                          | bootstrap, migration, API DB, and Redis     |
-| web               | none                                           | every database, Redis, and queue credential |
-| one-off migration | migration-only username and password           | bootstrap/master, runtime DB, and Redis     |
+| Workload          | Injected secret scope                                                             | Forbidden scope                                              |
+| ----------------- | --------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| API               | API database login, selected Redis ACL user, and closed auth/wallet secret fields | bootstrap, migration, and worker DB secrets                  |
+| outbox worker     | worker database login                                                             | bootstrap, migration, API DB, Redis, and auth/wallet secrets |
+| web               | none                                                                              | every database, Redis, and auth/wallet secret                |
+| one-off migration | migration-only username and password                                              | bootstrap/master, runtime DB, Redis, and auth/wallet secrets |
 
 ECS obtains runtime values through task-definition `Secrets` entries.
 Sensitive values must not be placed in ordinary task-definition `Environment`
 entries. Updating a Secrets Manager value does not update an already running
 ECS task; the approved rotation procedure must launch replacement tasks before
 revoking the old credential. The checked-in parent/child composition encodes
-this contract, but it has not
-been staged, planned, or deployed.
+this contract, but it has not been staged, planned, or deployed.
 
 ### Encryption and transport
 
@@ -88,20 +96,25 @@ encryption until a reviewed backend TLS design is implemented and exercised.
 
 Static validation treats each role as a capability allowlist:
 
-| Role                       | Reviewed capability                                                                                                            |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| API task execution         | pull only the API image, write API logs, and read only phase-authorized API database and Redis secrets through Secrets Manager |
-| worker task execution      | pull only the worker image, write worker logs, and read only phase-authorized worker database secrets through Secrets Manager  |
-| web task execution         | pull only the web image and write web logs; no secret read                                                                     |
-| conditional Redis operator | prerequisite-only image/log/secret path for a future reviewed one-off revocation task; no application data capability          |
-| API task                   | inspect only the job and dead-letter queue attributes                                                                          |
-| worker task                | publish only to the job queue, inspect both queues, and use the data key only through SQS                                      |
-| web task                   | no application AWS API permission                                                                                              |
-| migration task execution   | pull only the supplied API image, write migration logs, and read/decrypt only the supplied migration secret                    |
+| Role                       | Reviewed capability                                                                                                           |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| API task execution         | pull only the API image, write API logs, and read only phase-authorized API database, Redis, and auth/wallet secrets          |
+| worker task execution      | pull only the worker image, write worker logs, and read only phase-authorized worker database secrets through Secrets Manager |
+| web task execution         | pull only the web image and write web logs; no secret read                                                                    |
+| conditional Redis operator | prerequisite-only image/log/secret path for a future reviewed one-off revocation task; no application data capability         |
+| API task                   | inspect only the jobs and balance-sync source/DLQ attributes                                                                  |
+| worker task                | publish only to the jobs and balance-sync source queues, inspect all four queues, and use the data key only through SQS       |
+| web task                   | no application AWS API permission                                                                                             |
+| migration task execution   | pull only the supplied API image, write migration logs, and read/decrypt only the supplied migration secret                   |
 
 The worker has no Redis environment, secret-read permission, or port-6379
 security-group path. The API and worker use distinct execution roles and task
 security groups.
+
+No current role has `ReceiveMessage` or `DeleteMessage` on the balance-sync
+queue, and no dedicated balance consumer task/service exists. The separate
+queue is an inert routing boundary; it does not enable Ethereum/Solana RPC
+egress or live balance ingestion.
 
 Trust policies admit only `ecs-tasks.amazonaws.com` from the same account and
 the reviewed regional ECS source-ARN shape. Wildcard task actions/resources,
@@ -200,13 +213,18 @@ complete:
   template artifact;
 - database secret-to-LOGIN SCRAM installation/authentication and repeatable
   inactive-slot regeneration;
-- a reviewed executable Redis revocation task/CLI and managed failed-auth
-  monitoring path;
+- a reviewed executable Redis revocation task/CLI (the managed authentication
+  and ACL-denial alarm is locally defined, but deployed delivery and drill
+  evidence remain external);
 - repeatable inactive-slot Redis credential regeneration rather than reuse of a
   retained old slot;
 - a trusted binding proving the separate migration task's supplied secret/key
   ARNs are the exact application-stack migration outputs;
 - actual API, worker, web, and migration startup with injected secrets;
+- successful API-only reads and startup validation of the current
+  pre-authentication key plus all six production key-ring documents, including
+  negative proof that legacy selectors and other workloads cannot read them;
+- application readiness against the immutable migration chain through `0025`;
 - live positive and negative IAM decisions against exact deployed role/resource
   ARNs;
 - full-hop TLS from the load balancer to application targets;

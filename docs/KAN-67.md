@@ -1,17 +1,20 @@
 # KAN-67: unified balance and portfolio-value API
 
-Status: `LOCAL_DEMO_IMPLEMENTED` / `LIVE_READERS_NOT_CONNECTED`
+Status: `DURABLE_READERS_CONNECTED` / `LIVE_INGESTION_BLOCKED`
 
 KAN-67 adds an authenticated, reporting-only `GET /api/v1/portfolio` boundary.
 It combines one account-scoped indexed-balance snapshot with immutable BAL-001
 price evidence, then returns exact USD totals by wallet, network, stablecoin,
-and source. The implementation is provider-neutral and does not call a wallet,
-RPC, market-data provider, database, cloud service, or network endpoint.
+and source. The implementation is provider-neutral. Its production composition
+now reads only from the PostgreSQL balance and price-evidence read models; it
+does not call a wallet, RPC, market-data provider, cloud service, or network
+endpoint.
 
-The application module intentionally installs fail-closed readers. Until the
-IDX-005 balance reader and approved BAL-001 price-evidence reader are wired by
-later integration work, a real request returns the generic retryable `503`
-contract instead of inventing a balance or a one-dollar price.
+The application module installs the migration-`0020` balance reader and the
+migration-`0021` price-evidence reader. Missing, stale, or malformed durable
+evidence remains explicit and can never become an invented zero balance or an
+implicit one-dollar price. Adapter/parser failures still return the generic
+retryable `503` contract.
 
 ## HTTP contract
 
@@ -64,7 +67,7 @@ balances and three independently identified, asset-bound price snapshots:
 | ------ | ---------------- | ----- | ------------------------- |
 | A      | Ethereum mainnet | USDC  | `5000.000000000000000000` |
 | A      | Solana mainnet   | USDT  | `2500.000000000000000000` |
-| B      | Base mainnet     | USDC  | `3500.000000000000000000` |
+| B      | Ethereum mainnet | USDT  | `3500.000000000000000000` |
 
 The resulting wallet totals are `7500` and `3500`; USDC totals `8500`, USDT
 totals `2500`, and the overall result is exactly
@@ -72,10 +75,10 @@ totals `2500`, and the overall result is exactly
 aggregate, so the total is auditable without recomputing from a floating-point
 display value.
 
-This three-chain table is preserved as deterministic historical acceptance
-evidence for the aggregation contract. It is not the current production launch
-scope: only Ethereum and Solana may be active launch coverage targets, and the
-Base fixture row cannot count as a live provider or authorize a Base read.
+This deterministic acceptance example uses only the current Ethereum/Solana
+launch allowlist. It proves arithmetic and attribution with injected local
+evidence; it does not count a provider, prove a live read, or authorize a chain
+request.
 
 ## Freshness, completeness, and exclusion rules
 
@@ -119,26 +122,47 @@ The response includes wallet IDs needed for grouping but never includes an
 account ID, session material, provider credential, RPC URL, raw adapter error,
 or internal stack trace.
 
+The balance read locks and compares the exact active wallet roster supplied by
+the authenticated account-scoped wallet reader. It accepts only Ethereum
+mainnet and Solana mainnet, and each available wallet observation must contain
+the exact registry-pinned USDC, USDT, and PYUSD rows. The API role can execute
+the roster read but cannot select the underlying raw/history/projection tables.
+Every source row remains provisional reporting evidence and cannot authorize a
+financial action.
+
 ## Honest integration gates
 
-- **IDX-005 / KAN-65:** its durable account-scoped multi-chain balance reader is
-  not part of this branch. The local fake demonstrates the port contract, but
-  live indexing, reorg handling, durable freshness, and account isolation must
-  be proven before wiring the port.
-- **BAL-001 / KAN-66:** the pure valuation boundary is present, but real price
-  evidence remains blocked on KAN-252 provider/Risk approval and KAN-231 exact
-  egress approval. No market-data adapter or RPC fallback is configured.
-- **Wallet presentation:** this API intentionally emits opaque wallet IDs.
-  Connector lifecycle state and user-facing wallet labels can be joined by the
-  UI only after their independent branches are merged and reviewed.
+- **IDX-005 / KAN-65:** the durable account-scoped balance reader, append-only
+  observations/events, revisioned projection, stale preservation, and reorg
+  replacement are present and PostgreSQL-tested. A worker-only exact-wallet
+  resolver and dormant Ethereum/Solana transcript adapters are also present.
+  They remain unregistered and own no endpoint or egress path. An isolated
+  balance-sync source/DLQ and publisher contract exist, but no dedicated
+  consumer task/service or receive/delete IAM capability is active. Live
+  indexing is still blocked on that approved consumer/runtime, durable message
+  idempotency, independent RPC identities and evidence, secrets, egress, and
+  operational controls.
+- **BAL-001 / KAN-66:** the durable price-evidence reader/store and dormant Pyth
+  Hermes and Ethereum Chainlink transcript parsers are present. Pyth binary
+  signatures are not verified, and Chainlink requires an independently approved
+  exact deployment manifest and source agreement; neither parser is registered
+  or persistence-eligible. Real evidence ingestion remains blocked on those
+  authenticity controls, KAN-252 provider/Risk approval, KAN-231 exact egress
+  approval, a durable consumer, and operations evidence. An empty store still
+  cannot produce an available valuation.
+- **Wallet presentation:** this API intentionally emits opaque wallet IDs and
+  no address. The authenticated production UI manages the account-scoped wallet
+  roster separately and deliberately renders only aggregate reporting data.
 - **Buying power / KAN-68:** reporting totals are not collateral values and
   cannot authorize a quote, intent, transfer, or buying-power increase.
 - **Live acceptance:** provider timestamps, source independence, throttling,
   outage behavior, reorg recovery, durable replay protection, and operational
   alerting require later approved live-integration evidence.
 
-There were no installs, network/RPC/provider calls, cloud/database services,
-trials, deployments, pushes, or paid actions in this implementation.
+There were no installs, external network/RPC/provider calls, cloud services,
+trials, deployments, pushes, or paid actions in this implementation. Durable
+integration was exercised only against the guarded disposable loopback
+PostgreSQL fixture.
 
 ## Local verification
 

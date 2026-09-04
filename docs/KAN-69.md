@@ -1,123 +1,119 @@
-# KAN-69: unified balance and buying-power UI
+# KAN-69: production portfolio reporting UI
 
-Status: `LOCAL_FIXTURE_PREVIEW_COMPLETE` / `LIVE_API_WIRING_BLOCKED`
+Status: `AUTHENTICATED_DURABLE_API_SOURCE_CONNECTED` / `LIVE_INGESTION_BLOCKED`
 
-KAN-69 adds a local `/portfolio` product preview for BAL-004. It presents total
-portfolio value and available buying power as deliberately different concepts,
-then reconciles each amount through expandable wallet, chain, and asset
-sources. The preview uses a deterministic, in-repository payload and makes that
-fact visible above the screen. It does not fetch an API, inspect a wallet, quote
-a route, create credit, or contact a provider.
+The checked-in production `/portfolio` route now renders an authenticated,
+reporting-only view of `GET /api/v1/portfolio`. It restores the managed session
+before showing private data, redirects signed-out users to the fixed portfolio
+return path, lets an authenticated user manage Ethereum and Solana wallet
+ownership, and refreshes reporting after the wallet roster changes. This is a
+source-level connection, not evidence that the route or identity service has
+been deployed.
 
-No package was installed, no provider account or trial was opened, and no
-network, RPC, database, Docker, cloud, hosted-service, or on-chain call was
-made.
+The route no longer imports or displays the local-demo portfolio, fixture, or
+buying-power preview. Those older contracts remain isolated test/development
+artifacts. Production deliberately displays no lending or transaction control:
+durable balance and price ingestion is not active, and the API response is not
+financial authority.
 
-## View contract
+## Production browser boundary
 
-The strict browser boundary in
-`apps/web/lib/portfolio/unified-balance.ts` models the eventual composed
-BAL-002/BAL-003 response. It is an explicit frontend integration contract, not
-a claim that the independent KAN-67 and KAN-68 branches already expose this
-wire shape.
+`apps/web/lib/portfolio/reporting-portfolio.ts` is the closed browser parser for
+the KAN-67 response. It accepts only Ethereum mainnet and Solana mainnet, the
+exact USDC/USDT/PYUSD registry identities for those networks, the immutable
+mainnet registry fingerprint, and the server's conservative-reporting control
+fields. Base, Arbitrum, testnets, extra assets, changed registry data, accessors,
+and malformed or unreconciled aggregates fail closed.
 
-The boundary accepts only:
+The parser also verifies:
 
-- schema version 1, one safe snapshot ID, and canonical UTC timestamps;
-- exact non-negative USD cents and token atomic amounts serialized as decimal
-  strings, with no floating-point conversion;
-- the reviewed EVM and Solana networks, exact KAN-61 network/stablecoin/asset
-  identity pairs, and six-decimal token quantities;
-- fixed freshness, deduction, exclusion, and unavailable reason codes; and
-- bounded wallet, chain, asset, deduction, and reason arrays made only of plain
-  data properties.
+- canonical UUIDs, timestamps, integer mantissas, decimal renderings, and fixed
+  scale-18 USD amounts;
+- bounded, unique source and coverage arrays made only of plain data fields;
+- exact wallet/network/asset source attribution before private identifiers are
+  discarded;
+- source, wallet, chain, asset, and overall totals recomputed with `BigInt`;
+- complete, partial, unavailable, current, and stale states without converting
+  missing evidence to zero; and
+- `CONSERVATIVE_REPORTING_ONLY`, `mayIncreaseBuyingPower: false`, and
+  `mayAuthorizeFinancialUse: false` on every accepted response.
 
-It rejects accessors, extra or missing fields, malformed identifiers, duplicate
-wallet/chain/asset sources, future observations, hidden stale state, a
-buying-power value above portfolio value, and any wallet, chain, asset, or
-deduction total that does not reconcile. An unavailable buying-power response
-must use `null` plus at least one fixed reason; it cannot substitute zero.
-Accepted data is copied into deeply frozen view objects. Validation failures
-produce one generic error and do not retain provider-authored text.
+Accepted data is copied into a smaller frozen view model. The rendered view
+does not retain wallet addresses, wallet IDs, account IDs, observation IDs,
+provider references, endpoint details, or raw upstream errors.
 
-A stale source cannot be marked as included or contribute a positive buying
-power amount. It must remain visibly attributed with a zero contribution and a
-fixed stale-exclusion reason. The response-level freshness and reason codes
-must agree with that source state, so the stale-data notice cannot contradict
-the amount shown.
+## Session and request handling
 
-The fixture demonstrates a reconciled $11,000.00 portfolio and $7,500.00 of
-available buying power. A stale $2,000.00 holding remains visible in portfolio
-value but contributes zero buying power. Additional exact deductions show the
-liquidity, conversion, slippage, network, and routing adjustments that account
-for the remaining difference.
+`apps/web/lib/portfolio/portfolio-client.ts` performs one fixed same-origin,
+credentialed, `no-store` GET with a bounded response and the closed parser. It
+accepts only the expected success contract, the exact unauthenticated response,
+or the exact bounded unavailable response. Provider-authored text and response
+bodies are never logged or shown.
+
+`ProductionPortfolio`:
+
+- keeps portfolio content hidden until session restoration succeeds;
+- cancels superseded and unmounted requests;
+- revalidates browser back/forward-cache restores;
+- clears private state and redirects when either the session check or a later
+  wallet operation detects authentication loss;
+- reloads after wallet registration or revocation; and
+- renders separate loading, unavailable, invalid-response, empty, partial, and
+  stale states with a bounded retry control.
+
+The route remains `noindex, nofollow`. Responses and the API privacy interceptor
+use private, no-store semantics and vary on authentication-relevant headers.
 
 ## Accessible presentation
 
-The UI provides:
+The production view presents a supported reporting total, exact registered
+wallet-network coverage, and totals by Ethereum/Solana network and stablecoin.
+It uses integer-backed currency formatting, canonical `<time>` elements,
+visible textual freshness and completeness labels, semantic headings and lists,
+and notices that do not rely on color alone. Partial totals are labeled as known
+subtotals; unavailable evidence is never rendered as `$0`.
 
-- explicit `Total portfolio value` and `Available buying power` labels;
-- fixed-US-dollar formatting backed by integer cents and accessible spoken
-  labels;
-- canonical `<time>` values, visible UTC as-of text, and textual current/stale
-  badges that do not rely on color alone;
-- native keyboard-focusable `<details>`/`<summary>` disclosure for wallets and
-  chains, followed by complete asset attribution;
-- masked wallet and asset identities in both visible and accessibility text;
-- a deduction explanation and fixed, non-provider-authored reason copy; and
-- separate loading, request-error, incomplete/no-supported-data, and
-  buying-power-unavailable presentations. None turns missing data into zero.
+Wallet ownership and balance reporting are reached through two simple jump
+buttons after authentication. The shared header exposes Home, Platforms,
+Portfolio, and Account only after the managed session is established; public
+visitors receive only the configured sign-in/registration actions.
 
-The layout is responsive and honors reduced-motion preferences inherited from
-the application stylesheet.
+## Deliberately retained historical preview
 
-## Required wiring gate
+`apps/web/lib/portfolio/unified-balance.ts` and `UnifiedBalanceView` preserve the
+original BAL-004 fixture contract and buying-power presentation tests. They are
+not imported by the production portfolio route. Their broader historical chain
+catalog and deterministic Base fixture therefore cannot become production
+coverage. The active production parser independently pins the two-network
+Ethereum/Solana launch allowlist.
 
-The `/portfolio` page is intentionally labeled `Sample data` and must not be
-presented as an authenticated live account screen. Its metadata is also
-`noindex, nofollow`, so an accidentally hosted preview is not offered to search
-engines as a live account page. Replacing the fixture
-requires a separately reviewed integration change that:
+Buying power remains a separate KAN-68 concern. The current production screen
+does not map a reporting total into buying power and does not expose an intent,
+deposit, allocation, bridge, or withdrawal action.
 
-1. merges or maps the final KAN-67 portfolio DTO and KAN-68 buying-power DTO to
-   this versioned boundary without weakening reconciliation;
-2. binds the request to the authenticated account and the final WAL-006
-   multi-wallet lifecycle instead of accepting account or wallet ownership from
-   browser input;
-3. uses a bounded, same-origin JSON client with abort/supersession behavior and
-   generic errors, never logging response bodies, full addresses, or provider
-   messages;
-4. renders loading before a complete parse and maps transport, invalid-response,
-   no-supported-balance, incomplete-snapshot, stale, and buying-power-unavailable
-   outcomes to the existing explicit states;
-5. verifies the final backend's currency scale, timestamps, freshness rules,
-   reason taxonomy, wallet/chain/asset reconciliation, and snapshot limits; and
-6. removes or converts the public sample route only after product, privacy,
-   security, and authentication review.
+## Remaining activation gates
 
-KAN-67 and KAN-68 are compatible only through that explicit composed mapper;
-neither current branch can be passed directly to this browser boundary.
-KAN-67 emits exact scale-18 USD mantissas, registry evidence, source records,
-and wallet IDs but not WAL-006 labels or addresses. KAN-68 also uses scale 18,
-has `AVAILABLE` / `PARTIAL` / `UNAVAILABLE` outcomes, five cost-deduction
-fields, and a broader unavailable-reason taxonomy. The mapper must define a
-reviewed, non-upward scale-18-to-cent conversion, join wallet presentation data
-only from the authenticated WAL-006 roster, conservatively map KAN-68
-`PARTIAL` to this boundary's `UNAVAILABLE` state unless a later versioned UI
-contract represents partial amounts explicitly, preserve every unavailable
-reason, and reconcile the stale/unpriced difference separately from KAN-68's
-five route-cost deductions. It must also retain both backend `false`
-authorization gates; rendering an estimate never turns it into financial
-authority.
+The UI/API connection proves request, privacy, reconciliation, and presentation
+behavior only. Useful current totals still require approved balance and price
+writers, provider/RPC identities, independent evidence, durable consumers,
+egress, monitoring, and deployed acceptance exercises. Lending recommendations
+and real-value actions require their own reviewed policy, risk, consent,
+simulation, wallet-authorization, reconciliation, legal, finance, security, and
+operations gates.
 
-Until that integration passes, this branch proves only deterministic local UI
-behavior. It does not prove live balance accuracy, price freshness, routing
-costs, wallet ownership, buying-power eligibility, or financial availability.
+The isolated balance-sync source/DLQ and publisher contract do not change that
+status. No dedicated consumer task/service, receive/delete IAM permission, or
+Ethereum/Solana RPC egress is active, so the queue cannot make portfolio data
+live.
+
+No fixture may be substituted when durable evidence is empty. Until those gates
+close, the honest production outcome is a clearly labeled unavailable or
+incomplete reporting state.
 
 ## Local verification
 
 ```text
-npm test --workspace @crypto-lending/web -- unified-balance-contract.test.ts unified-balance-ui.test.tsx
+npm test --workspace @crypto-lending/web -- reporting-portfolio-contract.test.ts portfolio-client.test.ts production-portfolio.test.tsx
 npm test --workspace @crypto-lending/web
 npm run lint --workspace @crypto-lending/web
 npm run typecheck --workspace @crypto-lending/web
@@ -126,4 +122,6 @@ npm run format:check
 npm run security:scan:secrets
 ```
 
-These checks require no external service or provider.
+These checks require no external provider, RPC, cloud service, wallet secret,
+deployment, paid resource, or mainnet transaction. They confer no live-read or
+write authority.

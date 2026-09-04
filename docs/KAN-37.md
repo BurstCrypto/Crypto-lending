@@ -2,9 +2,11 @@
 
 KAN-37 now has a provider-neutral OIDC and cookie-session foundation. Amazon
 Cognito User Pools with managed login is the selected integration target, but
-this repository change remains local and inert: it does not create a user pool,
-register a client, open application egress, deploy infrastructure, publish an
-image, or activate a trial or paid service.
+the infrastructure remains local and inert. The zero-desired-count API/web task
+definitions now accept explicit Cognito identifiers and wire the reviewed OIDC
+constants, callback/logout URLs, trusted ALB proxy ranges, and browser origin.
+They do not create a user pool, register a client, open application egress,
+deploy infrastructure, publish an image, or activate a trial or paid service.
 
 The ticket remains in progress until the exact Cognito tenant contract is
 approved and exercised in a deployed non-production environment. In
@@ -127,10 +129,13 @@ cookie session and advertise the cookie security scheme in OpenAPI. They use
 
 Migration `0010` adds one-use login attempts, exact OIDC identity mappings,
 session families and credential generations, append-only authentication audit
-events, and fixed-window rate-limit buckets. The API runtime receives execute
-permission only on fixed-search-path `SECURITY DEFINER` functions; it has no
-direct access to the authentication tables. The worker, legacy runtime, and
-`PUBLIC` receive no capability.
+events, and fixed-window rate-limit buckets. Migration `0025` adds bounded
+identity/session/CSRF HMAC policies, append-only provider/issuer/account-bound
+identity-digest aliases, and candidate-aware login, session, and rate-limit
+entry points. The API runtime receives execute permission only on
+fixed-search-path `SECURITY DEFINER` functions; it has no direct access to the
+authentication tables. The worker, legacy runtime, and `PUBLIC` receive no new
+rotation capability.
 
 The database records sanitized start, claim, registration/identity, session,
 rotation, revocation, expiry, replay, rejection, and rate-limit transitions.
@@ -158,21 +163,64 @@ deny-all and rejects stray OIDC configuration. Enabling `oidc` requires the
 complete `OIDC_*`/`AUTH_*` contract validated in
 `authentication.config.ts`; secrets are never assigned usable defaults.
 
-The current digest schema version is `1`. The identity HMAC material is
-therefore operationally immutable until a reviewed dual-read/rehash migration
-exists; replacing it in place could reinterpret one issuer/subject as a new
-identity. Pre-auth seal, session, and CSRF key rotation likewise requires an
-explicit overlap/revocation design. Key IDs in configuration label current
-material but do not by themselves provide a key ring. Production enablement
-must treat these as release gates rather than rotating secret values blindly.
+Production identity, session, and CSRF HMAC configuration now requires three
+separate canonical JSON key rings. Each ring contains one to three keys with
+strictly increasing positive numeric versions and selects one listed active
+write version. Key IDs and raw material must be distinct within and across all
+authentication purposes. New identities, session credentials, and CSRF
+digests use their purpose's active version. Legacy single-key variables are
+accepted only when `NODE_ENV` is exactly `development` or `test`; production
+fails closed with a field-only `CONFIGURATION_ERROR` and never includes key
+material in the error.
+
+Migration `0025` intentionally installs an immutable version-one policy and
+does not activate overlap. During an approved future rotation, the database
+accepts only sorted candidate versions that are within the reviewed policy and
+include its active version. OIDC completion resolves every candidate before
+changing the current identity digest, then appends exact
+provider/issuer/account-bound aliases. Concurrent first logins converge on one
+identity. Session resolve, rotate, and revoke bind a matching credential
+candidate under the family lock before any lifecycle or replay mutation; CSRF
+must match the stored CSRF version. Rotation successors use the database-active
+session and CSRF versions. Every supplied rate-limit digest is charged in one
+transaction, and one denied bucket denies the request, so overlap cannot reset
+limits.
+
+Pre-authentication cookies retain their separate one-predecessor design through
+the exact paired
+`AUTH_PREAUTH_SEAL_PREVIOUS_KEY_ID`/`AUTH_PREAUTH_SEAL_PREVIOUS_KEY`
+configuration. New cookies always use the current key, while callbacks already
+in flight may finish under either key; partial pairs, repeated IDs, or repeated
+material fail closed. The production template does not yet inject the optional
+predecessor, so this is a locally tested rotation primitive rather than a
+deployed rotation procedure.
+
+The HMAC overlap boundary is still local and dormant. The zero-desired-count
+production task now selects the three canonical authentication ring documents
+and statically forbids their legacy single-key selectors. This is fail-closed
+configuration wiring, not proof that the external secret exists, can be read,
+or contains an approved ring. A future audited policy migration must stage the
+successor as a read key, prove all API instances use the candidate-aware
+functions, revoke the superseded single-digest function grants, coordinate the
+active-write cutover, and retain predecessors until aggregate readiness is
+zero. See `docs/authentication-key-rotation-runbook.md`. Managed custody,
+deployed rotation/rollback evidence, and old-key destruction remain release
+gates.
 
 ## Remaining live gates
 
-Local tests cannot select or prove a managed identity service. Before changing
-`AUTH_MODE` from `disabled` in a deployed environment, the project still needs:
+Local tests cannot select or prove a managed identity service. The production
+template's static `AUTH_MODE=oidc` binding is held at zero desired count and is
+not deployment evidence. Before deploying it or raising API/web desired count,
+the project still needs:
 
 - approved Cognito user pool, issuer, audience, endpoints, public app client,
   credential storage, and provider logout/revocation semantics;
+- one externally provisioned auth/wallet JSON secret encrypted by the exact
+  supplied customer-managed KMS key and containing the current
+  pre-authentication seal key plus all six canonical authentication/wallet ring
+  documents, with API-execution-only resource/key policies, custody, rotation,
+  and successful field-read evidence;
 - KAN-231 approval for the exact identity destinations and failure policy;
 - registered HTTPS callback/origin and real secure-cookie behavior through the
   ALB/browser topology;

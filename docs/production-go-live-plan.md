@@ -1,6 +1,6 @@
 # Production go-live critical path
 
-Status date: **2026-09-03**
+Status date: **2026-09-04**
 
 Status: **PLANNING — PUBLIC ACCESS AND MAINNET FINANCIAL ACTIONS ARE NOT
 APPROVED**
@@ -52,29 +52,29 @@ The four product states must be reported separately:
   reviewed allowlist. A wallet connection or ownership signature does not
   qualify.
 
-| Count                                                        | Current on 2026-09-03 |                                                Program target | Honest launch claim                                                                           |
+| Count                                                        | Current on 2026-09-04 |                                                Program target | Honest launch claim                                                                           |
 | ------------------------------------------------------------ | --------------------: | ------------------------------------------------------------: | --------------------------------------------------------------------------------------------- |
 | Distinct active-scope planned directory providers            |                    10 |                                                   At least 10 | Named Ethereum/Solana roadmap candidates; 0 available                                         |
-| Active-scope providers with matching dated research captures |                     6 |                                                   At least 10 | Research input only; four active-scope chain evidence packages are still missing              |
+| Active-scope providers with matching dated research captures |                    10 |                                                   At least 10 | Research input only; all ten have chain-matched static inputs, but none has live proof        |
 | Distinct production live read-only providers                 |                     0 |  At least 10 after both active-chain decisions and every gate | Do not call a provider live until its adapter and exact deployment evidence pass              |
 | Distinct production transaction-enabled providers            |                     0 | At least 10 as a later, separately approved program milestone | No write provider or action is selected; Base candidates are excluded from this release scope |
 
 The ten-provider requirement is met only as an active-scope planning-directory
 count. It is **not** met by chain-matched research, live reads, or user lending.
-The older local-demo catalog retains ten historical entries across several
-chains; those entries do not establish the active launch count. Product copy,
-API fields, dashboards, and release notes must not collapse these states into a
-single "providers available" number.
+Retired local-harness fixtures and broader historical chain catalogs do not
+establish the active launch count. Product copy, API fields, dashboards, and
+release notes must not collapse these states into a single "providers
+available" number.
 
 ## Implemented planning-directory slice
 
-The current branch adds authenticated, GET-only
+The repository exposes authenticated, GET-only
 `GET /api/v1/mainnet-platforms` and the `/platforms` page. This slice publishes
 ten planned Ethereum/Solana identities while stating **0 available now**. Every entry is
 `PLANNED`, `NOT_CONNECTED`, `UNAVAILABLE`, `NOT_ASSESSED`, and has no supported
 actions; the response also fixes `mayAuthorizeFinancialAction` to `false`.
 
-This planning directory is deliberately separate from demo snapshots, live
+This planning directory is deliberately separate from fixture snapshots, live
 market data, portfolio readers, RPC connectivity, quotes, and transaction
 modules. It makes the roadmap visible after sign-in but increments neither the
 live read-only count nor the transaction-enabled count.
@@ -91,18 +91,31 @@ The table below separates the selected target chain from evidence already in
 the repository. `Planned` and `cataloged` still mean **unavailable**; neither
 state increments a live or transaction-enabled count.
 
-|   # | Provider / protocol     | Active launch network | Evidence and read-only disposition                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | Transaction disposition |
-| --: | ----------------------- | --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- |
-|   1 | Aave / Aave V3          | Ethereum              | A fixed, wallet-free Ethereum Core market adapter and an unavailable-by-default, read-only deployment-evidence boundary now exist. The latter defines a canonical finalized-block read plan, includes an unregistered synthetic-tested 19-call JSON-RPC executor, and strictly validates immutable address-book v4.66.3 identities and observed contract relationships. No provider endpoint or credential is configured; approved code hashes and RPC sources, durable checkpoints, independent-source live proof, egress/risk approval, and production activation remain absent | Not selected            |
-|   2 | Morpho / Morpho Blue    | Ethereum              | Existing research includes Ethereum, but the exact deployment and production adapter remain unapproved                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | Not selected            |
-|   3 | Compound / Compound III | Ethereum              | Planned only for this chain; the existing checked-in capture is Base-specific, so a dated Ethereum evidence package is required                                                                                                                                                                                                                                                                                                                                                                                                                                                   | Not selected            |
-|   4 | Spark / SparkLend       | Ethereum              | Existing Ethereum research is an input only; exact deployment and production adapter evidence remain unapproved                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | Not selected            |
-|   5 | Euler / Euler V2        | Ethereum              | Planned only for this chain; the existing checked-in capture is Base-specific, so a dated Ethereum evidence package is required                                                                                                                                                                                                                                                                                                                                                                                                                                                   | Not selected            |
-|   6 | Gearbox / Gearbox V3    | Ethereum              | Planned only; the [official SDK setup](https://docs.gearbox.finance/developers/sdk-setup) is a research input, and a dated, reproducible Ethereum deployment evidence capture and independent review are required                                                                                                                                                                                                                                                                                                                                                                 | Not selected            |
-|   7 | Kamino / Kamino Lend    | Solana                | Existing Solana research is an input only; exact program/market and production adapter evidence remain unapproved                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | Not selected            |
-|   8 | Save / Save lending     | Solana                | Existing research retains the legacy `SOLEND` protocol ID, and the Devnet executor is test-only; exact mainnet program/market evidence remains unapproved                                                                                                                                                                                                                                                                                                                                                                                                                         | Not selected            |
-|   9 | Project 0 / marginfi v2 | Solana                | Existing Solana research is an input only; exact program/market and production adapter evidence remain unapproved                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | Not selected            |
-|  10 | Jupiter / Jupiter Lend  | Solana                | Planned only; [official overview](https://developers.jup.ag/docs/lend) and [program identities](https://developers.jup.ag/docs/lend/program-addresses) still require a dated capture and independent review                                                                                                                                                                                                                                                                                                                                                                       | Not selected            |
+|   # | Provider / protocol     | Active launch network | Evidence and read-only disposition                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | Transaction disposition |
+| --: | ----------------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- |
+|   1 | Aave / Aave V3          | Ethereum              | A fixed, wallet-free Ethereum Core market adapter and unavailable-by-default deployment-evidence boundary now exist. The boundary defines a canonical finalized-block read plan, unregistered synthetic-tested 19-call executor, full-state two-source comparator, and bounded 1–64-block continuity verifier. Its dormant PostgreSQL workflow supports separate ACTIVE backfill and sticky-quarantine recovery operations with exact head/source/pair/nonce/expiry binding and append-only lineage/audit history. No real historical reader, approved source-pair registry, cryptographic authorization issuer/verifier, provider endpoint, credential, live exercise, or production approval exists                                                                                                                     | Not selected            |
+|   2 | Morpho / Morpho Blue    | Ethereum              | A dormant finalized-block transcript adapter now validates a caller-pinned Morpho Blue deployment, exact market tuple and market ID, IRM/LLTV relationships, runtime-code hashes, raw market invariants, registry binding, and bounded freshness. It has no endpoint, approved market manifest, independent second source, live capability proof, risk approval, runtime registration, or write path                                                                                                                                                                                                                                                                                                                                                                                                                      | Not selected            |
+|   3 | Compound / Compound III | Ethereum              | A dormant finalized-block transcript adapter now pins the official Ethereum USDC Comet proxy and validates implementation/admin/base-token relationships, code hashes, utilization, supply rate, pause state, totals, registry binding, and bounded freshness. It has no endpoint, independent second source, live capability proof, risk approval, runtime registration, or write path                                                                                                                                                                                                                                                                                                                                                                                                                                   | Not selected            |
+|   4 | Spark / SparkLend       | Ethereum              | A dormant finalized-block transcript adapter now pins the reviewed SparkLend Ethereum USDC deployment and validates provider/pool/configurator/data-provider/token relationships, code hashes, reserve configuration, caps, pause state, supply rate, totals, registry binding, and bounded freshness. It has no endpoint, independent second source, live capability proof, risk approval, runtime registration, or write path                                                                                                                                                                                                                                                                                                                                                                                           | Not selected            |
+|   5 | Euler / Euler V2        | Ethereum              | A dormant finalized-block transcript adapter now validates a caller-pinned Euler V2 vault and asset against the official factory/module identities, MetaProxy trailing-data binding, code hashes, governor/hooks/configuration/caps, totals, conversions, deposit limit, registry binding, and bounded freshness. No vault is approved, and no yield/liquidity proof, endpoint, independent second source, live capability proof, risk approval, runtime registration, or write path exists                                                                                                                                                                                                                                                                                                                               | Not selected            |
+|   6 | Gearbox / Gearbox V3    | Ethereum              | A dormant finalized-block transcript adapter now pins the official direct V3 Ethereum USDC pool and validates AddressProvider/ContractsRegister membership, pool/token/version relationships, code hashes, liquidity, shares, supply rate, pause state, debt limit, registry binding, and bounded freshness. It has no endpoint, independent second source, live capability proof, risk approval, runtime registration, or write path                                                                                                                                                                                                                                                                                                                                                                                     | Not selected            |
+|   7 | Kamino / Kamino Lend    | Solana                | A dormant finalized-slot transcript adapter now pins the official Kamino main program, main lending market, USDC reserve, native-USDC mint, source revisions, and exact account layouts. It validates one caller-bound snapshot, Program-to-ProgramData linkage and binary fingerprint, owners, reserve freshness and active state, mint state, block identity, genesis identity, and registry binding. It has no approved deployment manifest, reproducible bytecode proof, independent source, yield/capacity semantics, endpoint, live capability proof, risk approval, runtime registration, persistence path, or write path                                                                                                                                                                                          | Not selected            |
+|   8 | Save / Save lending     | Solana                | A dormant finalized-slot transcript adapter now scopes Save's main-market native-USDC reserve. It pins the official Solend/Save program and market identities, while explicitly treating the reserve address discovered through Save's production configuration API as untrusted research evidence requiring corroboration. Its exact seven-call transcript validates Program/ProgramData linkage and hashes, market/reserve/mint layouts and ownership, reserve freshness, finalized block continuity, genesis identity, registry binding, and bounded time freshness. It exposes raw reserve integers only—not APR/APY, capacity, recommendation, or persistence. No approved deployment manifest, reproduced deployed binary, independent source, endpoint, risk approval, runtime registration, or write path exists. | Not selected            |
+|   9 | Project 0 / marginfi v2 | Solana                | A dormant finalized-slot transcript adapter now scopes the documented Marginfi production-group native-USDC bank. It pins official program/group/bank/mint identities and rederived vault PDAs, then validates one exact eight-account snapshot covering Program/ProgramData, group, bank, mint, and three SPL vaults; exact hashes/layouts/owners; operational and oracle configuration; cached timestamp freshness; finalized block continuity; genesis identity; and registry binding. It exposes raw share, vault, limit, and cached-oracle fields only—not current external-oracle proof, APR/APY, capacity, recommendation, or persistence. No approved deployment manifest, reproduced deployed binary, independent source, endpoint, risk approval, runtime registration, or write path exists.                   | Not selected            |
+|  10 | Jupiter / Jupiter Lend  | Solana                | A dormant finalized-slot transcript adapter now scopes the Jupiter Lend Earn native-USDC market. It pins the official docs and integration revisions, exact Lending IDL, captured read-SDK package, program identities, and rederived USDC-market PDAs. Its exact seven-call transcript validates Program/ProgramData linkage and binary identity, the 196-byte Lending account, USDC and jlUSDC mint state, finalized block continuity, genesis identity, registry binding, and bounded freshness. It exposes only the two stored raw exchange-price integers and raw mint supplies—not APR/APY, yield, liquidity, capacity, recommendation, or persistence. No approved deployment manifest, independent source, live code/authority proof, endpoint, risk approval, runtime registration, or write path exists.        | Not selected            |
+
+The Compound, Euler, Gearbox, and Jupiter inputs are bound by
+`docs/provider-research/active-scope-2026-09-04/ethereum-solana-missing-provider-captures.json`
+and its SHA-256 sidecar. The offline validator keeps those records explicitly
+dormant, unavailable, unapproved, and unable to authorize any read, egress, or
+financial action.
+
+Locally tested, dormant finalized-transcript adapters now exist for all ten
+active-scope candidates: six on Ethereum and four on Solana. Their synthetic
+suites and the exact-inventory validator close parser, protocol-shape, and
+scope-drift work only; they do not convert research captures into approved
+deployment evidence, add an endpoint, enable egress, satisfy independent-source
+agreement, increment the live-provider count, or authorize a financial action.
 
 The Aave deployment-evidence boundary is pinned to official address-book
 v4.66.3, commit `12963110f29699d214531b9ab4c7cfcec460c298`, and Ethereum-module
@@ -117,8 +130,9 @@ endpoint or credential; the runtime source remains unavailable and code hashes
 remain unapproved. This is a local, read-only corroboration milestone, not live
 evidence or approval. It cannot authorize a recommendation or any write. Aave
 remains unavailable until approved primary and independent RPC sources,
-runtime-code hashes, durable checkpoints, and transcript-backed
-independent-source live proof pass the release-candidate gates.
+runtime-code hashes, live exercise of the durable checkpoints, bounded
+height-gap recovery, authorized quarantine recovery, and transcript-backed
+independent-source proof pass the release-candidate gates.
 
 Historical Base evidence for Aave, Morpho, Compound, Moonwell, and Euler is
 retained but deferred. Moonwell is not an active launch candidate. Venus and
@@ -156,10 +170,11 @@ double-counted across historical networks.
    including chain-bound wallet ownership and registration flows. Do not treat
    one network's wallet/provider evidence as evidence for another, and do not
    use dormant Base support as an active-chain fallback.
-8. Produce and independently review the missing chain-matched evidence packages
-   for Compound, Euler, and Gearbox on Ethereum and Jupiter on Solana before
-   those providers can leave `PLANNED`. Revalidate the existing evidence for
-   the other six candidates against their exact active-chain deployments.
+8. Complete and independently review activation evidence packages for all ten
+   candidates. The checked-in chain-matched research and dormant transcript
+   adapters are inputs only; each exact deployment/program, market, asset,
+   code or ProgramData identity, authority state, and operational policy must
+   still receive release-bound approval before a provider can leave `PLANNED`.
 
 **Week 1 exit:** signed scope and owner record; approved non-production identity,
 per-network RPC and egress plans; immutable deployment review inputs for all ten
@@ -175,12 +190,13 @@ fallback milestone in this release plan.
 
 1. Provision only the approved non-production Cognito and provider resources,
    then enable only the exact approved egress destinations and browser policy.
-2. Add a dedicated read-only provider-market and position bounded context. Keep
-   wallet balances in the existing portfolio balance reader: its wallet/network/
-   asset identity cannot distinguish two protocol positions in the same asset.
-   The new model must retain provider, protocol, market, position, wallet,
-   network, asset, source, and observation identity before the reporting layer
-   composes wallet balances and lending positions.
+2. Complete and activate the dormant read-only provider-position boundary.
+   Keep wallet balances in the existing portfolio balance reader: its
+   wallet/network/asset identity cannot distinguish two protocol positions in
+   the same asset. The local position evidence and composition contracts retain
+   provider, protocol, market, position, wallet, network, asset, source, and
+   observation identity, but no trusted live reader, persistence admission,
+   approved policy binding, or production registration exists.
 3. Run two independently reviewed read-adapter lanes in parallel: six Ethereum
    candidates (Aave, Morpho, Compound, Spark, Euler, and Gearbox) and four
    Solana candidates (Kamino, Save, Project 0, and Jupiter). Do not start or
@@ -188,8 +204,8 @@ fallback milestone in this release plan.
    every unsupported network, stale result, identity mismatch, incomplete
    result, provider disagreement, and deployment drift must fail closed.
 4. Record server-owned `observedAt`, `staleAfter`, block number/hash or Solana
-   slot/root, source attribution, and provider status. Never reuse the static
-   local-demo catalog as current production data.
+   slot/root, source attribution, and provider status. Never reuse a fixture or
+   planning-directory record as current production data.
 5. Exercise Cognito registration, login, callback, secure cookies, logout,
    recovery, MFA, JWKS rotation, provider outage, and account/session revocation
    through the deployed HTTPS/ALB topology.
@@ -237,7 +253,12 @@ exactly and moves the ten-provider launch target.
    deferred Base canary plan. Keep the public transaction UI absent until that
    canary and every write gate pass.
 6. Hold a recorded go/no-go review no earlier than September 23. Re-run the
-   blocker audit immediately before the decision.
+   blocker audit immediately before the decision. The exact clean release
+   manifest, checked-in deployment target, and live-read evidence must first
+   receive the two-role Ed25519 technical quorum; the separately signed
+   seven-role public-launch decision must bind that verified technical bundle.
+   Both authority registries and the deployment-target registry are empty
+   today, so local tests cannot manufacture this evidence.
 
 **Week 3 exit:** every applicable hard gate has a named, dated, unexpired
 approval and revision-bound evidence. If write gates remain open, the release
@@ -271,21 +292,44 @@ reconciliation state, finality/reorg handling, withdrawal/recovery testing,
 staff canary evidence, independent smart-contract security review, and tested
 pause/rollback controls.
 
+The API production root is physically separate from the local harness root.
+`NODE_ENV=production`, an absent runtime label, and every unrecognized label load
+only `AppModule`; they neither import nor execute the synthetic local-demo and
+Solana/EVM public-testnet module graph. Only exact `development` or `test`
+runtimes dynamically import the isolated harness root, where its existing
+loopback configuration gates still apply. The public portfolio route no longer
+contains a flag-controlled demo branch, and the legacy Solana testnet SDK is a
+development-only dependency. The checked-in OpenAPI artifact is generated from
+the production root and tests reject every `/api/v1/local-demo` and
+`/api/v1/public-testnet` path. This closes the repository route and startup-graph
+gap; it does not approve a mainnet read or write path.
+
 ## Hard launch gates
 
-| Gate                | Current blocker                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | Closed only when                                                                                                                                                                                                                                         |
-| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Public/legal        | `docs/wallets/license-review/public-launch-legal-gate.md` says public access is not approved                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | Required legal, regulatory, privacy, OSS/vendor, jurisdiction, and product approvals are named, dated, unexpired, and bound to the shipped artifacts                                                                                                     |
-| Authentication      | Cognito is selected but not provisioned or exercised; authentication remains deny-all without complete configuration                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | Deployed non-production Cognito evidence covers the full login/session/recovery/outage contract and production secrets/configuration have approved custody and rotation                                                                                  |
-| External egress     | KAN-231 remains `NO_EXTERNAL_EGRESS`. Code contains fixed, disabled Aave, DefiLlama, and LI.FI destinations, but production activation is rejected. The Aave request is wallet-free and fixed to Ethereum Core; LI.FI would receive linked Ethereum/Solana wallet addresses, assets, and exact amounts, so privacy, processor, retention, and query-log treatment are unresolved.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | Exact destinations, callers, disclosed fields, purpose/legal basis, processors, retention, ports, TLS/DNS behavior, spend/rate limits, approval expiry, activation manifest, and kill switches are approved and tested                                   |
-| RPC/indexing        | KAN-251 is `NOT_AUTHORIZED` / `NOT_RUN`; Alchemy and QuickNode are proposals only. The local Aave deployment-evidence boundary has no approved RPC sources or durable finalized-block checkpoints.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | Two independent suppliers pass the complete authorized acceptance matrix and have approved commercial, privacy, reliability, and cost terms; durable checkpoints and independent-source live proof pass for the release candidate                        |
-| Provider positions  | The versioned observation contract now preserves provider, market, position, position-kind, wallet, network, and asset identity, but production policy/approval bindings, live adapters, and composition with wallet balances are not implemented or evidenced                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | Reviewed policy and approval bindings, live provider adapters, wallet-balance composition, and duplicate-asset/provider isolation evidence all pass for the shipped revision                                                                             |
-| Chain-bound wallets | Local production UI and HTTP handoffs now expose only separately bound Ethereum and Solana ownership proofs plus an account-scoped durable roster; Base mainnet fails closed. Account-scoped idempotent soft revocation is locally implemented, including rejection of pre-removal challenges and a fresh-proof requirement to re-add, but deployed HTTPS/provider evidence, lifecycle recovery, historical encryption-key rotation, privacy retention/DSAR validation, and independent review remain absent                                                                                                                                                                                                                                                                                                                                                                                                                                         | Ethereum/Solana ownership, roster, revocation, and key-rotation flows plus privacy-retention/DSAR controls pass chain-bound challenge, account-change, disconnect, stale-session, deployed-browser, migration, recovery, and independent-review evidence |
-| Production reads    | The server now requires an exact active wallet/network coverage manifest and cannot turn unread targets into complete zero. Disabled-by-default aggregate-market, wallet-free Aave Ethereum Core, Aave deployment-evidence, and read-only Ethereum/Solana round-trip quote boundaries are implemented, but all remain unavailable for production and none can establish provider eligibility. The Aave boundary validates a pinned immutable manifest and source-attested read bundle only as corroboration; its concrete 19-call RPC executor is synthetic-tested but unregistered and has no endpoint or credential. Approved runtime-code hashes, durable checkpoints, and independent-source live proof remain absent. A strict allocation-input composer is wired to unavailable defaults; production wallet-balance/valuation, approved-opportunity, policy/consent, full-cost, and the other nine provider-native readers remain unavailable. | Every counted provider has a live provider-native adapter and evidence bundle; server-owned freshness deadlines are enforced; stale/divergent/incomplete data is unavailable rather than zero or current                                                 |
-| Ten live providers  | Ten Ethereum/Solana identities are planned and unavailable; six have matching-chain historical research inputs, four require new matching-chain captures, and zero have live evidence                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | All ten exact active-scope provider bundles pass on Ethereum or Solana; planned, cataloged, Base, and BNB entries do not count                                                                                                                           |
-| Mainnet writes      | No mainnet transaction bounded context, route, intent store, manifest, or write approval exists                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | Every additional write gate in `mainnet-rollout.md` and the per-provider transaction evidence above passes for an exact allowlisted action                                                                                                               |
-| Operations/security | No deployed revision-bound production exercise or independent acceptance is recorded                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | Threat model, observability, incident, rollback, recovery, provider drift/outage, finality/reorg, key/credential, and canary evidence pass with no unresolved critical/high finding                                                                      |
-| Dependencies        | Compatible `qs` and `fast-uri` fixes are applied; the audit's three remaining moderate package findings trace to the transitive `uuid` advisory under `@solana/web3.js`/Jayson. Installed Jayson calls UUID v4, while the advisory names v3/v5/v6 buffer paths, but the residual risk is not independently accepted                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | A compatible upstream remediation is pinned and verified, or Security records a dated, expiring disposition tied to exact dependency versions and observed call paths; do not use npm's forced Solana SDK downgrade                                      |
+| Gate                | Current blocker                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | Closed only when                                                                                                                                                                                                                                         |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Public/legal        | `docs/wallets/license-review/public-launch-legal-gate.md` says public access is not approved                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | Required legal, regulatory, privacy, OSS/vendor, jurisdiction, and product approvals are named, dated, unexpired, and bound to the shipped artifacts                                                                                                     |
+| Authentication      | Migration `0025` and the application locally enforce bounded identity/session/CSRF HMAC overlap, provider/issuer/account-bound identity aliases, candidate-bound session/replay handling, and cross-version rate limiting. The zero-desired-count production task selects the current pre-authentication key plus all six canonical authentication/wallet ring documents and forbids legacy selectors. No Cognito tenant, populated external ring secret, KMS custody, egress, or deployed evidence exists.                                                                                                                                                                                                                                                                                                                                                                                | Obtain deployed non-production Cognito, secret/KMS custody and field-read evidence, staged rotation, old-function denial, recovery/outage, and independent-review evidence                                                                               |
+| Release authority   | The offline preflight verifies a clean release manifest, checked-in deployment target, a two-role signed technical read-evidence bundle, and a separately bound seven-role signed public-launch decision. The technical-key, public-authority-key, and deployment-target registries are intentionally empty; no repository-local artifact can satisfy them today.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | Approved trust anchors and target are reviewed source changes, every signature and freshness/binding check passes, and the external technical and public-launch authorities approve the exact release and target                                         |
+| External egress     | KAN-231 remains `NO_EXTERNAL_EGRESS`. Code contains fixed, disabled Aave, DefiLlama, and LI.FI destinations, but production activation is rejected. The Aave request is wallet-free and fixed to Ethereum Core; LI.FI would receive linked Ethereum/Solana wallet addresses, assets, and exact amounts, so privacy, processor, retention, and query-log treatment are unresolved.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | Exact destinations, callers, disclosed fields, purpose/legal basis, processors, retention, ports, TLS/DNS behavior, spend/rate limits, approval expiry, activation manifest, and kill switches are approved and tested                                   |
+| RPC/indexing        | KAN-251 is `NOT_AUTHORIZED` / `NOT_RUN`; Alchemy and QuickNode are proposals only. A dormant durable Aave finalized-checkpoint boundary now has locally tested bounded continuity backfill and quarantine-recovery contracts, but it has no approved RPC sources, real historical readers, source-pair registry, cryptographic authorization issuer/verifier, runtime registration, or live continuity/finality/recovery evidence.                                                                                                                                                                                                                                                                                                                                                                                                                                                         | Two independent suppliers pass the complete authorized acceptance matrix and have approved commercial, privacy, reliability, and cost terms; durable checkpoints and independent-source live proof pass for the release candidate                        |
+| Provider positions  | Dormant contracts now preserve provider, protocol, market, position, position-kind, wallet, network, asset, source, and coverage identity. An empty set can mean zero only when every exact wallet × approved-market target is complete, agreeing, current, and fingerprint-bound; conservative composition keeps liquid and supplied assets separate from borrow liabilities and preserves signed negative net positions. No live provider reader or provider-position ingestion adapter is registered; production registration, policy approval binding, and wallet-balance composition runtime are disabled.                                                                                                                                                                                                                                                                            | Reviewed policy and approval bindings, live provider adapters, wallet-balance composition, and duplicate-asset/provider isolation evidence all pass for the shipped revision                                                                             |
+| Chain-bound wallets | Local production UI and HTTP handoffs now expose only separately bound Ethereum and Solana ownership proofs plus an account-scoped durable roster; Base mainnet fails closed. Account-scoped idempotent soft revocation is locally implemented, including rejection of pre-removal challenges and a fresh-proof requirement to re-add, but deployed HTTPS/provider evidence, lifecycle recovery, historical encryption-key rotation, privacy retention/DSAR validation, and independent review remain absent                                                                                                                                                                                                                                                                                                                                                                               | Ethereum/Solana ownership, roster, revocation, and key-rotation flows plus privacy-retention/DSAR controls pass chain-bound challenge, account-change, disconnect, stale-session, deployed-browser, migration, recovery, and independent-review evidence |
+| Production reads    | The portfolio API binds read-only PostgreSQL projections for exact active-wallet balance coverage and two-source stablecoin price evidence; both fail closed on missing, stale, divergent, malformed, or incomplete state. An isolated balance-sync source/DLQ and publisher contract exist, but no dedicated consumer task/service, receive/delete IAM capability, or RPC egress is active. All ten planned providers have dormant synthetic finalized-transcript boundaries: six Ethereum and four Solana. They remain unregistered and unavailable; none has approved endpoints/source pairs, credentials, release-bound deployment manifests and code identities, provider-risk approval, live capability exercises, or production approval. Provider-position persistence admission, approved-opportunity, policy/consent, and full-cost runtime composition also remain unavailable. | Every counted provider has a live provider-native adapter and evidence bundle; server-owned freshness deadlines are enforced; stale/divergent/incomplete data is unavailable rather than zero or current                                                 |
+| Ten live providers  | Ten Ethereum/Solana identities are planned, cataloged, and represented by dormant synthetic transcript boundaries, but all remain unavailable. Zero have complete independent live evidence or production approval                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | All ten exact active-scope provider bundles pass on Ethereum or Solana; planned, cataloged, Base, and BNB entries do not count                                                                                                                           |
+| Mainnet writes      | No mainnet transaction bounded context, route, intent store, manifest, or write approval exists                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | Every additional write gate in `mainnet-rollout.md` and the per-provider transaction evidence above passes for an exact allowlisted action                                                                                                               |
+| Operations/security | Eight queue, DLQ, application-failure, and Redis access-denial alarms now route both `ALARM` and `OK` transitions to one operator-supplied, same-account/same-Region SNS topic. Queue coverage isolates jobs and balance-sync source/DLQ failures; Redis metrics use the actual node-level member identities across failover. Strict local template and invocation guards are green. No real topic, confirmed primary/backup subscriptions, escalation ownership, deployed dashboard, delivery proof, operational drill, revision-bound exercise, or independent acceptance exists.                                                                                                                                                                                                                                                                                                        | Threat model, observability, incident, rollback, recovery, provider drift/outage, finality/reorg, key/credential, alarm-delivery, and canary evidence pass with no unresolved critical/high finding                                                      |
+| Dependencies        | The legacy public-testnet `@solana/web3.js` graph is development-only and absent from the production startup/web bundle. `npm audit --omit=dev` reports zero findings on 2026-09-04. Final container SBOMs, image scans, provenance, and independent dependency-risk acceptance remain absent                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | The exact immutable API/web/worker images have retained SBOMs and provenance, pass the approved image scanner and policy, and receive a dated, expiring independent dependency-risk decision bound to the release and image digests                      |
+
+Dependency audit update (2026-09-04): the retired demo/public-testnet modules
+remain available to local regression tests but are no longer reachable from the
+public portfolio route or imported by the API production root. Their legacy
+Solana SDK is declared only as a development dependency. A fresh
+`npm audit --omit=dev` reports zero vulnerabilities at every severity, and a
+fresh optimized web build contains no `@solana/web3.js`, Jayson, `stream-json`,
+or legacy `PublicKey` module signature. This repository result does not replace
+final-image scanning, retained SBOM/provenance, or the independent, release-bound
+dependency-risk decision required by the table.
 
 No waiver may change the meaning of `cataloged`, `live read-only`, or
 `transaction-enabled`. A waiver for a required hard gate means **no-go** for the
@@ -328,24 +372,93 @@ drained. Do not roll `0016` down after any revoked wallet,
 `WALLET_REVOKED` audit event, or revocation-rejected challenge exists; the
 migration deliberately refuses that unsafe rollback.
 
+### Aave-checkpoint database rollout
+
+Migration `0017` extends the exact database-principal verifier from `0016` and
+adds the append-only Aave finalized-checkpoint event/head boundary. Because the
+`0016` verifier intentionally rejects the additional checkpoint functions and
+grants, an `0016` application artifact becomes unready as soon as `0017`
+commits. Treat this as another coordinated application-and-database cutover,
+not a normal mixed-version rolling migration.
+
+Use the same hold, quiesce, migrate, verify, switch, and drain sequence above,
+substituting the `0017` verifier and an explicitly `0017`-compatible API/worker
+artifact. Do not register the checkpoint writer during this cutover: it remains
+dormant until two approved independent sources, live continuity/finality
+evidence, bounded historical gap recovery, and authenticated quarantine
+recovery are separately reviewed. Do not roll `0017` down after any checkpoint
+event or head exists; its rollback deliberately refuses that unsafe operation.
+
+### Cumulative `0018` through `0025` database rollout
+
+Migrations `0018` through `0025` continue the exact, cumulative principal
+verifier chain. They must ship as one coordinated maintenance-window cutover
+with an application artifact that expects `0025`; they are not compatible with
+a mixed fleet whose older tasks expect `0017` or any intermediate verifier.
+The sequence adds, in order:
+
+1. reviewed-only outbox admission (`0018`);
+2. append-only stablecoin depeg latch state (`0019`);
+3. append-only Ethereum/Solana balance observations, checkpoints, and portfolio
+   projection (`0020`);
+4. append-only Pyth/Chainlink price-evidence observations and watermarks
+   (`0021`);
+5. wallet identity-digest aliases and the database-owned key-version policy
+   (`0022`);
+6. the sealed, exact-wallet address resolver for the worker role (`0023`);
+7. the dormant schema-owner-only wallet metadata rewrap and retirement-
+   readiness boundary (`0024`); and
+8. authentication identity/session/CSRF key policies, aliases, candidate-aware
+   entry points, and retirement-readiness controls (`0025`).
+
+Use the same hold, quiesce, migrate, verify, switch, and drain pattern required
+for `0016` and `0017`. Before the migration starts, take the approved backup and
+record the exact release, database target, and migration checksums. Hold the new
+API out of its target group and keep every old and new worker from polling.
+Quiesce old API writes, apply all eight migrations with the migration principal,
+then require repeated `0025` readiness checks through both API and worker
+database credentials before serving traffic. Register only the new API and the
+existing reviewed outbox publisher after those checks pass; drain all older
+tasks immediately.
+
+This cutover does **not** activate an oracle writer, chain indexer, Aave
+checkpoint writer, balance consumer, provider endpoint, or financial action.
+Their adapters and durable stores remain dormant until their separate provider,
+egress, custody, monitoring, and deployment gates pass. In particular, the
+metadata-only consumer secret must never be replaced by the bundled API
+authentication/wallet secret.
+
+Treat rollback as a data-preservation decision, not a routine binary rollback.
+Migration `0023` owns no data and can be revoked and dropped with `RESTRICT`
+after the future balance consumer is quiesced. Migrations `0019`, `0020`, and
+`0021` deliberately refuse rollback after their append-only stores have been
+used. Migration `0022` refuses rollback after multi-version identity use, and a
+metadata key still cannot be retired until the dormant `0024` rewrap workflow
+has an approved operator and proves aggregate readiness. Migration `0024`
+refuses rollback after a rewrap preparation or post-migration material
+admission. Migration `0025` refuses rollback after aliases, non-initial policy,
+or retained multi-version authentication state exists. Rolling back `0018`
+restores direct API outbox-column access and is an explicit
+security downgrade. Any schema rollback also requires an exactly compatible
+application artifact; never force a down migration, delete retained history, or
+weaken a verifier to make an old task appear ready.
+
 ## Exact verification lanes
 
-### Research-catalog count (offline only)
+### Active-scope provider inventory (offline only)
 
-This test proves ten distinct static catalog identities and their permanently
-non-executable policy. It does not prove current rates, live connectivity, risk
-acceptance, deposits, or withdrawals.
-
-That historical catalog includes deferred Base and BNB entries, so its count
-cannot satisfy the active Ethereum/Solana provider target. The separate
-planning-directory check below proves only that the exact ten active-scope
-identities remain named and unavailable.
+These validators prove the exact ten Ethereum/Solana planning identities,
+matching dated research inputs, ten dormant adapter registrations, and zero
+enabled registrations. They do not prove current rates, live connectivity,
+risk acceptance, deposits, or withdrawals.
 
 ```powershell
-npm --workspace @crypto-lending/api run test -- local-demo/local-demo-yield-catalog.service.spec.ts
+npm run infra:validate:providers
+npm run infra:test:providers
 ```
 
-The planning-directory safety contract has its own focused check:
+The authenticated planning-directory safety contract has its own focused
+check:
 
 ```powershell
 npm --workspace @crypto-lending/api run test -- mainnet-platforms
@@ -427,11 +540,12 @@ npx tsx scripts/production-go-live-preflight.ts --target mainnet-write
 
 These bootstrap commands must exit `1` today because they deliberately do not
 ingest controlled production evidence. They identify local structure and named
-blockers; they cannot become the final go/no-go gate or authorize a launch. A
-separate sanitized, revision-bound evidence-ingestion boundary and final release
-gate must be designed, reviewed, and implemented before a go decision. Do not
-suppress the current nonzero exit, reinterpret `local validation PASS` as
-approval, or use the read-only result to authorize a mainnet write.
+blockers and cannot authorize a launch. The separate sanitized, revision-bound
+technical-evidence bundle and seven-role public-launch authority gate are now
+implemented and hostile-path tested, but their checked-in trust registries are
+intentionally empty and no controlled evidence exists. Do not suppress the
+current nonzero exit, reinterpret `local validation PASS` as approval, or use
+the read-only result to authorize a mainnet write.
 
 ### Deployed non-production smoke lane
 

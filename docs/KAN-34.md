@@ -71,7 +71,12 @@ record. `Deploy` recomputes and verifies each binding.
 
 ## Architecture
 
-`infra/aws/application-baseline.yaml` is a self-contained environment stack:
+`infra/aws/application-baseline.yaml` composes two content-addressed child
+stacks: workload boundaries and operational observability. The reviewed parent
+is 50,151 bytes (1,049 bytes below the AWS limit), while a local guard enforces
+a 50,500-byte ceiling and leaves a 349-byte repository guard band before that
+ceiling. This prevents accidental growth beyond CloudFormation's 51,200-byte
+direct-body limit.
 
 - an internet-facing HTTPS load balancer terminates TLS in public subnets;
 - the load balancer pins `routing.http.xff_client_port.enabled=false` so
@@ -87,20 +92,21 @@ record. `Deploy` recomputes and verifies each binding.
 - private service endpoints provide the AWS paths needed for ECR image pulls,
   logs, generated secrets, SQS, and S3-backed ECR layers without a NAT
   gateway;
-- the job queue and DLQ retain the established bounded-redrive topology;
+- the jobs and balance-sync queues each retain an isolated, bounded-redrive
+  source/DLQ topology;
 - customer-managed KMS keys protect durable data, queues, secrets, and logs;
 - the RDS master secret is reserved for bootstrap and emergency ownership
-  recovery only. KAN-232 requires separate migration-only, API, and worker
-  PostgreSQL credentials; the current baseline has not yet been rewired to that
-  replacement contract;
-- KAN-232/KAN-233 require split API/worker execution IAM: API may read only its
-  database and selected Redis ACL credential, worker only its database
-  credential, and the one-off migration task only the migration credential.
-  The existing shared execution role is a deployment blocker, not an approved
-  exception; and
-- bounded CloudWatch log groups and service/queue alarms expose infrastructure
-  health without adding an alert destination; the dashboard is optional and
-  off by default, and Container Insights is also disabled by default.
+  recovery only. Separate migration-only, API, and worker PostgreSQL
+  credentials and exact database capability roles are now wired through the
+  reviewed KAN-232/KAN-233 boundary;
+- split API/worker execution IAM permits the API to read only its database and
+  selected Redis ACL/auth-wallet credentials, the worker only its database
+  credential, and the one-off migration task only the migration credential;
+  and
+- bounded CloudWatch log groups and eight service/queue/security alarms expose
+  infrastructure health through one explicitly supplied external SNS topic;
+  the template creates no recipient. The dashboard is optional and off by
+  default, and Container Insights is also disabled by default.
 
 The template accepts only digest-pinned application image URIs. Image building
 and publication belong to the controlled delivery work following FND-003; the
@@ -125,7 +131,7 @@ tool and lint the reviewed templates:
 
 ```powershell
 python -m pip install --requirement infra/aws/requirements-dev.txt
-python infra/aws/lint-cloudformation.py infra/aws/application-baseline.yaml infra/aws/database-migration-task.yaml infra/aws/account-guardrails.yaml infra/aws/sqs-foundation.yaml
+python infra/aws/lint-cloudformation.py infra/aws/application-baseline.yaml infra/aws/application-workload-boundaries.yaml infra/aws/application-observability.yaml infra/aws/database-migration-task.yaml infra/aws/account-guardrails.yaml infra/aws/sqs-foundation.yaml
 ```
 
 These commands read repository files only. CI runs the same checks without AWS
@@ -159,6 +165,29 @@ never run by the local default or CI. See [KAN-229](KAN-229.md) for the separate
 bootstrap, notification-delivery, independent-review, and retention evidence.
 
 ## Runtime configuration and secrets
+
+The zero-desired-count production task definitions now statically wire the
+reviewed Cognito public-client contract and mainnet wallet-registration mode.
+The parent accepts explicit `CognitoPoolId`, `CognitoLoginHostname`, and
+`CognitoClientId` identifiers, derives the issuer/callback/logout URLs, and
+passes the exact HTTPS `AUTH_PUBLIC_ORIGIN` to both API and web. It does not
+create a Cognito user pool or app client.
+
+Authentication and wallet key material comes from one externally provisioned
+JSON secret identified only by `AuthWalletKeysSecretArn`. Its closed field set
+is the current `AUTH_PREAUTH_SEAL_KEY` plus six canonical ring documents:
+`AUTH_IDENTITY_HMAC_KEY_RING_JSON`, `AUTH_SESSION_HMAC_KEY_RING_JSON`,
+`AUTH_CSRF_HMAC_KEY_RING_JSON`, `WALLET_IDENTITY_HMAC_KEY_RING_JSON`,
+`WALLET_CHALLENGE_HMAC_KEY_RING_JSON`, and
+`WALLET_METADATA_SEAL_KEY_RING_JSON`. Legacy single-key auth and wallet
+selectors are forbidden by the production template and preflight contract;
+values never enter CloudFormation parameters or outputs. The nested workload
+boundary grants `GetSecretValue` and decrypt on the exact
+`AuthWalletKeysSecretArn` / `AuthWalletKeysKmsKeyArn` pair only to the API
+execution role. Web, worker, task roles, and the Redis operator receive no
+access. The secret, customer-managed key, key/resource policies, distinct
+canonical key material, custody, and rotation are external gates; static
+wiring is not deployed-readability evidence.
 
 The production runtime contract has four database authorities: the RDS
 master/bootstrap identity, a one-off `crypto_migration` login, an API A/B login,
@@ -208,8 +237,9 @@ After a separately approved deployment, acceptance evidence must record:
   account alias/ID, Region, and UTC deployment window;
 - healthy ECS deployment state and load-balancer target health for web and API;
 - HTTP 200 from the web `/api/health` and API `/api/v1/health` endpoints;
-- HTTP 200 and `status: ok` from `/api/v1/health/dependencies` after migrations,
-  proving PostgreSQL, Redis, SQS, and migration readiness;
+- HTTP 200 and `status: ok` from `/api/v1/health/dependencies` after the exact
+  immutable migration chain through `0025`, proving PostgreSQL, Redis, SQS, and
+  migration readiness;
 - worker container health `HEALTHY`; its internal probe checks PostgreSQL,
   migration checksums, and the SQS/DLQ redrive relationship without constructing
   a Redis client;
@@ -241,7 +271,8 @@ migration-safe compatibility capability, A/B rotation, rollback, and denial
 contract. The former broad single-runtime procedure is intentionally removed.
 
 The authorized delivery sequence is: verify and retrieve the exact
-content-addressed child from an existing versioned same-account/Region S3
+content-addressed workload-boundary and observability children from existing
+versioned same-account/Region S3
 bucket (no guard path creates or uploads it); create the stack at zero desired
 count; provision the restricted LOGIN slots from their scoped secrets; drain old
 sessions; run the exact bootstrap artifact as the bootstrap owner; register and
@@ -279,19 +310,32 @@ parameter set before a change set is executed.
   desired counts.
 - The parent now replaces the obsolete shared Redis token, backend execution
   role, and backend security group with the content-addressed workload-boundary
-  child. Staging the exact versioned child object and invoking the guarded
-  nested-stack plan/deploy remain separately authorized actions with possible
-  storage/request/resource cost.
+  child. The operational alarm/dashboard graph is likewise isolated in its
+  content-addressed child. Staging both exact versioned child objects and
+  invoking the guarded nested-stack plan/deploy remain separately authorized
+  actions with possible storage/request/resource cost.
 - The fixed database/Redis A/B secret resources support a controlled overlap
   and cutover but do not regenerate an inactive slot. A repeat A-to-B-to-A cycle
   would reuse the retained A value until a reviewed regeneration and verifier/
   password installation artifact exists.
 - The conditional Redis operator infrastructure has no reviewed production CLI
-  or one-off task definition, and managed failed-authentication monitoring is
-  not yet defined. Both remain local-design and live-evidence gates.
+  or one-off task definition. Managed authentication and ACL-denial monitoring
+  is locally defined across both deterministic Redis members, but deployed
+  alarm delivery, an authorized non-production drill, and sanitized response
+  evidence remain live gates.
 - PostgreSQL minor and Redis 7.1 availability, VPC endpoint availability,
   service quotas, the S3 prefix-list ID, image startup behavior, and the ACM/DNS
   relationship require target-account preflight and runtime evidence.
+- The external auth/wallet JSON secret must contain exactly the reviewed
+  pre-authentication key and six ring-document fields and use the exact
+  supplied customer-managed KMS key. Its resource/key policies, ring contents,
+  and an API task's successful field-selecting reads remain live evidence; this
+  template deliberately provisions neither resource.
+- The isolated balance-sync source/DLQ resources and publisher wiring are
+  present, but no task role can receive or delete balance messages and no
+  dedicated balance consumer service is defined. The queue therefore cannot
+  activate the dormant Ethereum/Solana RPC adapters or create live-read
+  authority.
 - Tasks have no NAT or general internet egress. Blockchain RPCs, authentication,
   market/oracle data, and other public APIs require a separately reviewed egress
   design; this baseline intentionally cannot reach them. [KAN-231](KAN-231.md)

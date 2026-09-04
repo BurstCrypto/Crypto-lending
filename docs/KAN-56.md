@@ -103,20 +103,36 @@ control; it is not represented by this local pending-row ceiling.
 Registration defaults to `disabled`. Enabling it requires `AUTH_MODE=oidc` and
 the same exact `AUTH_PUBLIC_ORIGIN` used by authentication, plus:
 
-| Variable                                                          | Requirement                                            |
-| ----------------------------------------------------------------- | ------------------------------------------------------ |
-| `WALLET_REGISTRATION_MODE`                                        | Exact `enabled`                                        |
-| `WALLET_REGISTRATION_REGISTRY_ENVIRONMENT`                        | `MAINNET` or `TESTNET`                                 |
-| `WALLET_REGISTRATION_CHALLENGE_TTL_SECONDS`                       | Integer from 60 through 300                            |
-| `WALLET_IDENTITY_HMAC_KEY_VERSION` / `WALLET_IDENTITY_HMAC_KEY`   | Positive version and 32-byte canonical base64url key   |
-| `WALLET_CHALLENGE_HMAC_KEY_VERSION` / `WALLET_CHALLENGE_HMAC_KEY` | Separate positive version and separate 32-byte key     |
-| `WALLET_METADATA_SEAL_KEY_VERSION` / `WALLET_METADATA_SEAL_KEY`   | Separate positive version and separate 32-byte AES key |
+| Variable                                    | Requirement                                               |
+| ------------------------------------------- | --------------------------------------------------------- |
+| `WALLET_REGISTRATION_MODE`                  | Exact `enabled`                                           |
+| `WALLET_REGISTRATION_REGISTRY_ENVIRONMENT`  | `MAINNET` or `TESTNET`                                    |
+| `WALLET_REGISTRATION_CHALLENGE_TTL_SECONDS` | Integer from 60 through 300                               |
+| `WALLET_IDENTITY_HMAC_KEY_RING_JSON`        | Canonical one-to-three-entry identity ring in production  |
+| `WALLET_CHALLENGE_HMAC_KEY_RING_JSON`       | Canonical one-to-three-entry challenge ring in production |
+| `WALLET_METADATA_SEAL_KEY_RING_JSON`        | Canonical one-to-three-entry AES ring in production       |
 
-Stray wallet key variables are rejected while disabled. Identity-HMAC material
-must not be rotated in place: rotation requires a dual-digest migration so the
-global identity invariant cannot be bypassed. The current local slice has one
-active encryption key; production decrypt-key rings, secret injection, and
-rotation evidence remain KAN-50/KAN-235 gates.
+Stray wallet key variables are rejected while disabled. Each purpose supports
+one through three version-sorted keys with an explicit active write version.
+IDs and material must be globally unique, and an old stored version selects
+only its exact HMAC or AES key. The legacy `*_KEY_VERSION` / `*_KEY` pairs remain
+a one-entry compatibility path in application code, but the production
+template and preflight contract forbid them. Migration `0022` adds immutable
+versioned digest aliases and database-policy admission so rotating an identity
+HMAC cannot bypass global wallet uniqueness. Its initial policy remains version
+`1`; a new identity version cannot activate until a separately audited
+alias-backfill migration updates that policy.
+
+KAN-34 statically selects `MAINNET` and the three wallet ring documents from the
+shared API-only JSON secret. It does not provision or inspect that secret.
+Migration `0024` and its application coordinator add a dormant, audited
+metadata rewrap boundary available only to the schema owner; there is no HTTP
+route, CLI, scheduled job, Nest registration, or runtime-role grant. Production
+key custody,
+resource/KMS policy, an authorized rewrap operator, and deployed rotation,
+rollback, and retirement-readiness evidence remain KAN-50/KAN-235 gates. The
+exact fail-closed procedure is in `docs/wallets/key-rotation-runbook.md`; no old
+key is retired automatically.
 
 ## Acceptance evidence
 
@@ -143,19 +159,23 @@ fixture is committed.
 
 ## Honest remaining gates
 
-- KAN-38 supplies the prerequisite authenticated account UI and cookie-session
-  lifecycle only. KAN-57, KAN-58, and KAN-59 own the product EVM,
-  WalletConnect, and Solana connectors and their translation between the frozen
-  WAL-001 adapter and these endpoints, including exact CAIP-2 to Wallet Standard
-  Solana alias mapping. There is no product wallet UI today.
+- KAN-57 and KAN-59 supply the locally tested MetaMask/Coinbase and Phantom
+  ownership adapters. The authenticated production portfolio now composes them
+  into an Ethereum/Solana add, verify, list, and remove experience backed by the
+  durable account-scoped roster. KAN-58 WalletConnect remains deterministic
+  local-only and is not registered in that product UI. This is source and fake-
+  provider evidence, not a deployed real-wallet acceptance result.
 - Structured Wallet Standard `solana:signIn`, ERC-1271/6492 contract wallets,
   and any RPC-backed verification need separately approved designs and live
   evidence.
 - Promoting `viem` from the isolated lab to API runtime dependencies requires
   the KAN-227 Security/Legal candidate to be refreshed before release.
 - Managed identity-provider behavior, deployed CSRF/session behavior, wallet
-  key custody/rotation, privacy/retention approval, distributed throttling, and
-  independent security review remain external KAN-37/KAN-50/KAN-235 gates.
+  key custody and deployed rotation drills, privacy/retention approval,
+  distributed throttling, and independent security review remain external
+  KAN-37/KAN-50/KAN-235 gates. Old metadata-key retirement remains blocked until
+  the dormant `0024` rewrap workflow receives a separately reviewed operator,
+  activation, and successful deployed drill.
 - Real desktop/mobile wallets and vendor behavior remain KAN-225/KAN-226
   evidence work. No real wallet was invoked for KAN-56.
 
