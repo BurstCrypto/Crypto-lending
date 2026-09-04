@@ -13,6 +13,13 @@ export {
   MAX_COMPOSED_FEE_AWARE_CANDIDATES,
 } from './application/composed-fee-aware-allocation-input.reader';
 export {
+  AAVE_V3_ETHEREUM_DEPLOYMENT_AGREEMENT_READER,
+  type AaveV3EthereumComparedSourceEvidence,
+  type AaveV3EthereumDeploymentAgreementDecision,
+  type AaveV3EthereumDeploymentAgreementReader,
+  type AaveV3EthereumDeploymentPayloadComparisonStatus,
+} from './application/ports/aave-v3-ethereum-deployment-agreement-reader.port';
+export {
   AAVE_V3_ETHEREUM_DEPLOYMENT_EVIDENCE_READER,
   type AaveV3EthereumDeploymentEvidence,
   type AaveV3EthereumDeploymentEvidenceReader,

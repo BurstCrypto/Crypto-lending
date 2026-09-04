@@ -1,5 +1,3 @@
-import { createHash } from 'node:crypto';
-
 import { Inject, Injectable } from '@nestjs/common';
 import { keccak256, type Hex } from 'viem';
 
@@ -10,6 +8,7 @@ import type {
   AaveV3EthereumReserveTokenEvidence,
   ReadAaveV3EthereumDeploymentEvidenceRequest,
 } from '../../application/ports/aave-v3-ethereum-deployment-evidence-reader.port';
+import { fingerprintAaveV3EthereumDeploymentEvidence } from '../../domain/aave-v3-ethereum-deployment-evidence-fingerprint';
 import {
   AAVE_V3_ETHEREUM_FINALIZED_RPC_SOURCE,
   type AaveV3EthereumFinalizedRpcSource,
@@ -27,8 +26,6 @@ const HEX_QUANTITY = /^0x(?:0|[1-9a-f][0-9a-f]*)$/u;
 const OPAQUE_REFERENCE = /^[a-z0-9][a-z0-9._:-]{2,127}$/u;
 const MAX_RUNTIME_CODE_BYTES = 24_576;
 const READ_DEADLINE_MILLISECONDS = 5_000;
-const EVIDENCE_FINGERPRINT_DOMAIN =
-  'crypto-lending:aave-v3-ethereum-deployment-evidence:v1' as const;
 const ZERO_ADDRESS = `0x${'0'.repeat(40)}` as const;
 const ZERO_BLOCK_HASH = `0x${'0'.repeat(64)}` as const;
 const MAX_UINT64 = (1n << 64n) - 1n;
@@ -327,71 +324,7 @@ function requestData(value: unknown): Readonly<Record<'evaluatedAt' | 'correlati
 }
 
 function evidenceFingerprint(observation: ParsedObservation, observedAt: string): string {
-  return createHash('sha256')
-    .update(
-      JSON.stringify([
-        EVIDENCE_FINGERPRINT_DOMAIN,
-        1,
-        'AAVE_V3_ETHEREUM_FINALIZED_RPC',
-        'DEPLOYMENT_CORROBORATION_ONLY',
-        false,
-        false,
-        'eip155:1',
-        '0x1',
-        'finalized',
-        'EIP1898_BLOCK_HASH_REQUIRE_CANONICAL',
-        true,
-        true,
-        true,
-        'SOURCE_ATTESTED_UNVERIFIED',
-        'UNVERIFIED',
-        false,
-        false,
-        false,
-        false,
-        'UNVERIFIED_WITHOUT_DURABLE_CHECKPOINT',
-        'UNVERIFIED_WITHOUT_LIVE_CAPABILITY_PROOF',
-        observation.sourceReferenceId,
-        observation.sourceObservationId,
-        manifest.manifestFingerprintSha256,
-        CHAIN_OBSERVATION_REGISTRY_BINDINGS.MAINNET.fingerprintSha256,
-        AAVE_V3_ETHEREUM_FINALIZED_RPC_READ_PLAN_FINGERPRINT_SHA256,
-        observedAt,
-        [
-          observation.finalizedBlock.number.toString(),
-          observation.finalizedBlock.hash,
-          observation.finalizedBlock.parentHash,
-          observation.finalizedBlock.stateRoot,
-          observation.finalizedBlock.timestamp,
-        ],
-        [
-          observation.runtimeCodeKeccak256.poolAddressesProvider,
-          observation.runtimeCodeKeccak256.poolProxy,
-          observation.runtimeCodeKeccak256.poolImplementation,
-          observation.runtimeCodeKeccak256.protocolDataProvider,
-          observation.runtimeCodeKeccak256.usdcAToken,
-          observation.runtimeCodeKeccak256.usdcVariableDebtToken,
-          observation.runtimeCodeKeccak256.usdtAToken,
-          observation.runtimeCodeKeccak256.usdtVariableDebtToken,
-        ],
-        [
-          [
-            observation.reserves.USDC.underlyingAsset,
-            observation.reserves.USDC.aToken,
-            observation.reserves.USDC.stableDebtToken,
-            observation.reserves.USDC.variableDebtToken,
-          ],
-          [
-            observation.reserves.USDT.underlyingAsset,
-            observation.reserves.USDT.aToken,
-            observation.reserves.USDT.stableDebtToken,
-            observation.reserves.USDT.variableDebtToken,
-          ],
-        ],
-      ]),
-      'utf8',
-    )
-    .digest('hex');
+  return fingerprintAaveV3EthereumDeploymentEvidence(observation, observedAt);
 }
 
 @Injectable()
