@@ -5,6 +5,31 @@ export {
   type BalanceSyncProcessingResult,
 } from './application/balance-sync-orchestrator';
 export {
+  createBalanceSyncConsumerComposition,
+  type BalanceSyncConsumerComposition,
+  type BalanceSyncConsumerCompositionDependencies,
+} from './application/balance-sync-consumer.composition';
+export {
+  BalanceSyncConsumerError,
+  BalanceSyncConsumerService,
+  DEFAULT_BALANCE_SYNC_CONSUMER_POLICY,
+  type BalanceSyncConsumerDispatcherPort,
+  type BalanceSyncConsumerErrorCode,
+  type BalanceSyncConsumerPolicy,
+  type BalanceSyncConsumerQueueWorkerPort,
+  type BalanceSyncConsumerWait,
+} from './application/balance-sync-consumer.service';
+export {
+  BALANCE_SYNC_JOB_DISPOSITION_NOT_APPROVED,
+  BalanceSyncJobDispositionNotApprovedError,
+  FailClosedBalanceSyncJobPort,
+} from './application/fail-closed-balance-sync-job.port';
+export {
+  ETHEREUM_MAINNET_BALANCE_NETWORK_ID,
+  MainnetBalanceIndexerRouter,
+  SOLANA_MAINNET_BALANCE_NETWORK_ID,
+} from './application/mainnet-balance-indexer.router';
+export {
   BALANCE_SYNC_JOB_KIND,
   BALANCE_SYNC_JOB_VERSION,
   BALANCE_SYNC_PAYLOAD_VERSION,
