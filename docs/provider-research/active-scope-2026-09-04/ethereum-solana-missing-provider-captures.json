@@ -1,0 +1,346 @@
+{
+  "schemaVersion": 1,
+  "artifactId": "ACTIVE_SCOPE_PROVIDER_RESEARCH_CAPTURE_V1",
+  "capturedOn": "2026-09-04",
+  "capturedAt": "2026-09-04T15:39:48.567Z",
+  "captureMethod": "OFFICIAL_STATIC_DOCUMENTATION_AND_REPOSITORIES_ONLY",
+  "scope": {
+    "releaseNetworks": [
+      {
+        "networkId": "eip155:1",
+        "name": "Ethereum",
+        "ecosystem": "EVM",
+        "environment": "MAINNET"
+      },
+      {
+        "networkId": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+        "name": "Solana",
+        "ecosystem": "SOLANA",
+        "environment": "MAINNET"
+      }
+    ],
+    "providerIds": ["compound", "euler", "gearbox", "jupiter"],
+    "researchOnly": true,
+    "mayAuthorizeFinancialAction": false,
+    "runtimeRegistration": "ABSENT",
+    "liveEvidenceStatus": "NOT_COLLECTED"
+  },
+  "providers": [
+    {
+      "providerId": "compound",
+      "providerName": "Compound",
+      "protocolName": "Compound III",
+      "network": {
+        "networkId": "eip155:1",
+        "name": "Ethereum",
+        "ecosystem": "EVM",
+        "environment": "MAINNET"
+      },
+      "status": {
+        "research": "CATALOGED_OFFLINE_RESEARCH_ONLY",
+        "integration": "DORMANT_UNREGISTERED",
+        "availability": "UNAVAILABLE",
+        "approval": "NOT_APPROVED",
+        "risk": "NOT_ASSESSED",
+        "independentReview": "NOT_PERFORMED",
+        "liveEvidence": "NOT_COLLECTED",
+        "supportedActions": [],
+        "mayAuthorizeFinancialAction": false
+      },
+      "officialDocumentationUrls": ["https://docs.compound.finance/"],
+      "sources": [
+        {
+          "sourceId": "COMPOUND_ETHEREUM_NETWORK_CONFIG",
+          "sourceKind": "OFFICIAL_REPOSITORY_FILE",
+          "repositoryUrl": "https://github.com/compound-finance/comet",
+          "commitSha": "f766f51583c23acc33b2a7824654ef2029a96804",
+          "path": "hardhat.config.ts",
+          "url": "https://raw.githubusercontent.com/compound-finance/comet/f766f51583c23acc33b2a7824654ef2029a96804/hardhat.config.ts",
+          "contentSha256": "d98f061d2200e20e3e9470bf3ae4bbecc31b3f95ec591bb75daf9f8b34d3d742",
+          "contentByteLength": 18646,
+          "observedFacts": [
+            "The pinned configuration maps the mainnet network to chainId 1 and includes the mainnet USDC deployment in its scenario bases."
+          ]
+        },
+        {
+          "sourceId": "COMPOUND_ETHEREUM_USDC_ROOTS",
+          "sourceKind": "OFFICIAL_REPOSITORY_FILE",
+          "repositoryUrl": "https://github.com/compound-finance/comet",
+          "commitSha": "f766f51583c23acc33b2a7824654ef2029a96804",
+          "path": "deployments/mainnet/usdc/roots.json",
+          "url": "https://raw.githubusercontent.com/compound-finance/comet/f766f51583c23acc33b2a7824654ef2029a96804/deployments/mainnet/usdc/roots.json",
+          "contentSha256": "689cf0e940bfdc440eba854201d8ed738be5a442802ee5723a05a4b2d16f6c57",
+          "contentByteLength": 2003,
+          "observedFacts": [
+            "The pinned Compound Comet deployment path deployments/mainnet/usdc identifies the Comet proxy address recorded below."
+          ]
+        }
+      ],
+      "identifiers": [
+        {
+          "kind": "EVM_MARKET_PROXY",
+          "role": "COMET_USDC_PROXY",
+          "value": "0xc3d688B66703497DAA19211EEdff47f25384cdc3",
+          "sourceId": "COMPOUND_ETHEREUM_USDC_ROOTS"
+        }
+      ],
+      "unresolvedFields": [
+        "APPROVED_COMPOUND_MARKET_AND_ASSET_ALLOWLIST",
+        "INDEPENDENT_ETHEREUM_DEPLOYMENT_VERIFICATION",
+        "FINALIZED_BLOCK_PROXY_IMPLEMENTATION_AND_CODE_HASH_EVIDENCE",
+        "READ_ONLY_ADAPTER_AND_TWO_SOURCE_LIVE_EVIDENCE",
+        "RISK_LEGAL_SECURITY_EGRESS_AND_OPERATIONS_APPROVALS",
+        "TRANSACTION_ACTION_ASSET_AND_WALLET_AUTHORIZATION"
+      ]
+    },
+    {
+      "providerId": "euler",
+      "providerName": "Euler",
+      "protocolName": "Euler V2",
+      "network": {
+        "networkId": "eip155:1",
+        "name": "Ethereum",
+        "ecosystem": "EVM",
+        "environment": "MAINNET"
+      },
+      "status": {
+        "research": "CATALOGED_OFFLINE_RESEARCH_ONLY",
+        "integration": "DORMANT_UNREGISTERED",
+        "availability": "UNAVAILABLE",
+        "approval": "NOT_APPROVED",
+        "risk": "NOT_ASSESSED",
+        "independentReview": "NOT_PERFORMED",
+        "liveEvidence": "NOT_COLLECTED",
+        "supportedActions": [],
+        "mayAuthorizeFinancialAction": false
+      },
+      "officialDocumentationUrls": ["https://docs.euler.finance/developers/contract-addresses/"],
+      "sources": [
+        {
+          "sourceId": "EULER_ETHEREUM_CHAIN_REGISTRY",
+          "sourceKind": "OFFICIAL_REPOSITORY_FILE",
+          "repositoryUrl": "https://github.com/euler-xyz/euler-interfaces",
+          "commitSha": "d0e9a428523b3de6cb3e6c7a06ad55b6e59223f3",
+          "path": "EulerChains.json",
+          "url": "https://raw.githubusercontent.com/euler-xyz/euler-interfaces/d0e9a428523b3de6cb3e6c7a06ad55b6e59223f3/EulerChains.json",
+          "contentSha256": "20ca447e2f1236210c63e71b616de7a7ef0b33f26c327c89b70ff1d08547b288",
+          "contentByteLength": 57718,
+          "observedFacts": [
+            "The pinned registry identifies chainId 1 as ethereum with production status and records the Euler core addresses below."
+          ]
+        }
+      ],
+      "identifiers": [
+        {
+          "kind": "EVM_CONTRACT",
+          "role": "EVAULT_FACTORY",
+          "value": "0x29a56a1b8214D9Cf7c5561811750D5cBDb45CC8e",
+          "sourceId": "EULER_ETHEREUM_CHAIN_REGISTRY"
+        },
+        {
+          "kind": "EVM_CONTRACT",
+          "role": "ETHEREUM_VAULT_CONNECTOR",
+          "value": "0x0C9a3dd6b8F28529d72d7f9cE918D493519EE383",
+          "sourceId": "EULER_ETHEREUM_CHAIN_REGISTRY"
+        },
+        {
+          "kind": "EVM_CONTRACT",
+          "role": "PROTOCOL_CONFIG",
+          "value": "0x4cD6BF1D183264c02Be7748Cb5cd3A47d013351b",
+          "sourceId": "EULER_ETHEREUM_CHAIN_REGISTRY"
+        }
+      ],
+      "unresolvedFields": [
+        "APPROVED_EULER_VAULT_EARN_MARKET_AND_ASSET_ALLOWLIST",
+        "VAULT_GOVERNOR_COLLATERAL_ORACLE_IRM_CAP_AND_LIQUIDITY_RISK_ASSESSMENT",
+        "FINALIZED_BLOCK_FACTORY_DEPLOYMENT_AND_CODE_HASH_EVIDENCE",
+        "READ_ONLY_ADAPTER_AND_TWO_SOURCE_LIVE_EVIDENCE",
+        "RISK_LEGAL_SECURITY_EGRESS_AND_OPERATIONS_APPROVALS",
+        "TRANSACTION_ACTION_ASSET_AND_WALLET_AUTHORIZATION"
+      ]
+    },
+    {
+      "providerId": "gearbox",
+      "providerName": "Gearbox",
+      "protocolName": "Gearbox V3",
+      "network": {
+        "networkId": "eip155:1",
+        "name": "Ethereum",
+        "ecosystem": "EVM",
+        "environment": "MAINNET"
+      },
+      "status": {
+        "research": "CATALOGED_OFFLINE_RESEARCH_ONLY",
+        "integration": "DORMANT_UNREGISTERED",
+        "availability": "UNAVAILABLE",
+        "approval": "NOT_APPROVED",
+        "risk": "NOT_ASSESSED",
+        "independentReview": "NOT_PERFORMED",
+        "liveEvidence": "NOT_COLLECTED",
+        "supportedActions": [],
+        "mayAuthorizeFinancialAction": false
+      },
+      "officialDocumentationUrls": ["https://docs.gearbox.finance/developers/sdk-setup"],
+      "sources": [
+        {
+          "sourceId": "GEARBOX_V3_ETHEREUM_SCOPE",
+          "sourceKind": "OFFICIAL_REPOSITORY_FILE",
+          "repositoryUrl": "https://github.com/Gearbox-protocol/security",
+          "commitSha": "3a8af446a2c9f2902b191635ec548e35fdb97dda",
+          "path": "bug-bounty/v3-scope.md",
+          "url": "https://raw.githubusercontent.com/Gearbox-protocol/security/3a8af446a2c9f2902b191635ec548e35fdb97dda/bug-bounty/v3-scope.md",
+          "contentSha256": "17fb638e4ef642a41eda0c5af1aa8bbd15e5b603d382905c0e3cafa4b146cb96",
+          "contentByteLength": 25378,
+          "observedFacts": [
+            "The pinned V3 scope identifies its deployed-contract list as Ethereum Mainnet, records version 3_00 for relevant contracts unless otherwise specified, and records the AddressProviderV3 address below.",
+            "The pinned scope references Gearbox core-v3 commit e16559ae82f0f24c3dc29693c444f40d676ebff9."
+          ]
+        }
+      ],
+      "identifiers": [
+        {
+          "kind": "EVM_CONTRACT",
+          "role": "ADDRESS_PROVIDER_V3",
+          "value": "0x9ea7b04Da02a5373317D745c1571c84aaD03321D",
+          "sourceId": "GEARBOX_V3_ETHEREUM_SCOPE"
+        }
+      ],
+      "unresolvedFields": [
+        "APPROVED_GEARBOX_POOL_MARKET_AND_ASSET_ALLOWLIST",
+        "ADDRESS_PROVIDER_DISCOVERY_AND_COMPONENT_IDENTITY_EVIDENCE",
+        "POOL_CREDIT_MANAGER_ORACLE_CAP_AND_LIQUIDITY_RISK_ASSESSMENT",
+        "FINALIZED_BLOCK_IMPLEMENTATION_AND_CODE_HASH_EVIDENCE",
+        "READ_ONLY_ADAPTER_AND_TWO_SOURCE_LIVE_EVIDENCE",
+        "RISK_LEGAL_SECURITY_EGRESS_OPERATIONS_AND_TRANSACTION_APPROVALS"
+      ]
+    },
+    {
+      "providerId": "jupiter",
+      "providerName": "Jupiter",
+      "protocolName": "Jupiter Lend",
+      "network": {
+        "networkId": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+        "name": "Solana",
+        "ecosystem": "SOLANA",
+        "environment": "MAINNET"
+      },
+      "status": {
+        "research": "CATALOGED_OFFLINE_RESEARCH_ONLY",
+        "integration": "DORMANT_UNREGISTERED",
+        "availability": "UNAVAILABLE",
+        "approval": "NOT_APPROVED",
+        "risk": "NOT_ASSESSED",
+        "independentReview": "NOT_PERFORMED",
+        "liveEvidence": "NOT_COLLECTED",
+        "supportedActions": [],
+        "mayAuthorizeFinancialAction": false
+      },
+      "officialDocumentationUrls": [
+        "https://developers.jup.ag/docs/lend",
+        "https://developers.jup.ag/docs/lend/program-addresses"
+      ],
+      "sources": [
+        {
+          "sourceId": "JUPITER_LEND_SOLANA_OVERVIEW",
+          "sourceKind": "OFFICIAL_REPOSITORY_FILE",
+          "repositoryUrl": "https://github.com/jup-ag/docs",
+          "commitSha": "c4b7ee1172ebb1c58407e479e7153bf225690aaf",
+          "path": "lend/index.mdx",
+          "url": "https://raw.githubusercontent.com/jup-ag/docs/c4b7ee1172ebb1c58407e479e7153bf225690aaf/lend/index.mdx",
+          "contentSha256": "812e77b08e677348196ac7ac687292b0825c67bfc2ac148fbaa51decb0041a05",
+          "contentByteLength": 5523,
+          "observedFacts": [
+            "The pinned overview describes Jupiter Lend Earn and Borrow as operating on Solana."
+          ]
+        },
+        {
+          "sourceId": "JUPITER_LEND_MAINNET_PROGRAM_ADDRESSES",
+          "sourceKind": "OFFICIAL_REPOSITORY_FILE",
+          "repositoryUrl": "https://github.com/jup-ag/docs",
+          "commitSha": "c4b7ee1172ebb1c58407e479e7153bf225690aaf",
+          "path": "lend/program-addresses.mdx",
+          "url": "https://raw.githubusercontent.com/jup-ag/docs/c4b7ee1172ebb1c58407e479e7153bf225690aaf/lend/program-addresses.mdx",
+          "contentSha256": "b1bb2d5285e16512d318d7ca916b3c9e3d2631aac10a1e8af43bc5584c2287d1",
+          "contentByteLength": 1571,
+          "observedFacts": [
+            "The pinned program-address table marks each of the seven Jupiter Lend program identities recorded below as Mainnet."
+          ]
+        }
+      ],
+      "identifiers": [
+        {
+          "kind": "SOLANA_PROGRAM",
+          "role": "EARN",
+          "value": "jup3YeL8QhtSx1e253b2FDvsMNC87fDrgQZivbrndc9",
+          "sourceId": "JUPITER_LEND_MAINNET_PROGRAM_ADDRESSES"
+        },
+        {
+          "kind": "SOLANA_PROGRAM",
+          "role": "LIQUIDITY",
+          "value": "jupeiUmn818Jg1ekPURTpr4mFo29p46vygyykFJ3wZC",
+          "sourceId": "JUPITER_LEND_MAINNET_PROGRAM_ADDRESSES"
+        },
+        {
+          "kind": "SOLANA_PROGRAM",
+          "role": "LENDING_REWARDS_RATE_MODEL",
+          "value": "jup7TthsMgcR9Y3L277b8Eo9uboVSmu1utkuXHNUKar",
+          "sourceId": "JUPITER_LEND_MAINNET_PROGRAM_ADDRESSES"
+        },
+        {
+          "kind": "SOLANA_PROGRAM",
+          "role": "ORACLE",
+          "value": "jupnw4B6Eqs7ft6rxpzYLJZYSnrpRgPcr589n5Kv4oc",
+          "sourceId": "JUPITER_LEND_MAINNET_PROGRAM_ADDRESSES"
+        },
+        {
+          "kind": "SOLANA_PROGRAM",
+          "role": "VAULTS_BORROW",
+          "value": "jupr81YtYssSyPt8jbnGuiWon5f6x9TcDEFxYe3Bdzi",
+          "sourceId": "JUPITER_LEND_MAINNET_PROGRAM_ADDRESSES"
+        },
+        {
+          "kind": "SOLANA_PROGRAM",
+          "role": "FLASHLOAN",
+          "value": "jupgfSgfuAXv4B6R2Uxu85Z1qdzgju79s6MfZekN6XS",
+          "sourceId": "JUPITER_LEND_MAINNET_PROGRAM_ADDRESSES"
+        },
+        {
+          "kind": "SOLANA_PROGRAM",
+          "role": "LEND_AMM",
+          "value": "jupZ4m2GqUCJ5iueMfzQf8khFfH31d4XAQt3RzCT9Vd",
+          "sourceId": "JUPITER_LEND_MAINNET_PROGRAM_ADDRESSES"
+        }
+      ],
+      "unresolvedFields": [
+        "APPROVED_JUPITER_EARN_VAULT_BORROW_MARKET_AND_ASSET_ALLOWLIST",
+        "PROGRAM_DATA_UPGRADE_AUTHORITY_BINARY_HASH_AND_DEPLOYMENT_SLOT_EVIDENCE",
+        "IDL_VERSION_ACCOUNT_DECODER_AND_SDK_DEPENDENCY_PIN",
+        "FINALIZED_COMMITMENT_READ_PLAN_AND_TWO_SOURCE_LIVE_EVIDENCE",
+        "PROGRAM_ORACLE_MARKET_CAP_AND_LIQUIDITY_RISK_ASSESSMENT",
+        "RISK_LEGAL_SECURITY_EGRESS_OPERATIONS_AND_TRANSACTION_APPROVALS"
+      ]
+    }
+  ],
+  "programWideUnresolvedFields": [
+    "APPROVED_PRIMARY_AND_INDEPENDENT_RPC_ENDPOINT_IDENTITIES",
+    "PROVIDER_SPECIFIC_READ_ONLY_ADAPTERS_AND_COMPLETENESS_PROOFS",
+    "FINALIZED_CHAIN_IDENTITY_FRESHNESS_DIVERGENCE_REORG_AND_OUTAGE_EVIDENCE",
+    "PRODUCTION_OBSERVABILITY_ALERTING_INCIDENT_RESPONSE_AND_ROLLBACK_EVIDENCE",
+    "LEGAL_REGULATORY_PRIVACY_SECURITY_DEPENDENCY_FINANCE_AND_OPERATIONS_APPROVALS",
+    "SEPARATE_MAINNET_WRITE_ALLOWLIST_SIMULATION_POLICY_AND_USER_AUTHORIZATION"
+  ],
+  "zeroCostEvidence": {
+    "method": "OFFICIAL_DOCUMENTATION_AND_REPOSITORY_READS_LOCAL_FILE_AUTHORING",
+    "officialSourceHttpsReadsPerformed": true,
+    "providerAccountsCreated": 0,
+    "providerApiRequestsSent": 0,
+    "rpcRequestsSent": 0,
+    "webSocketConnectionsOpened": 0,
+    "providerCredentialsUsed": 0,
+    "egressPoliciesChanged": 0,
+    "runtimeRegistrationsAdded": 0,
+    "transactionsSubmitted": 0,
+    "paidServicesActivated": 0,
+    "costIncurredUsd": "0.00"
+  }
+}
