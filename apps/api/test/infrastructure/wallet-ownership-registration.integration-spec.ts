@@ -45,8 +45,15 @@ describeWithPostgres('wallet ownership registration persistence', () => {
   });
 
   const digest = (fill: number): Buffer => Buffer.alloc(32, fill);
-  const iv = (fill: number): Buffer => Buffer.alloc(12, fill);
+  let ivSequence = 1;
+  const iv = (fill: number): Buffer => {
+    const value = Buffer.alloc(12, fill);
+    value.writeUInt32BE(ivSequence, value.length - 4);
+    ivSequence += 1;
+    return value;
+  };
   const tag = (fill: number): Buffer => Buffer.alloc(16, fill);
+  let challengePayloadSequence = 1;
 
   async function waitUntilChallengeExpired(challengeId: string): Promise<void> {
     for (let attempt = 0; attempt < 500; attempt += 1) {
@@ -69,25 +76,28 @@ describeWithPostgres('wallet ownership registration persistence', () => {
     messageDigest: Buffer;
     nonceDigest: Buffer;
     payloadFill?: number;
-  }): Promise<void> {
+  }): Promise<Buffer> {
     const issuedAt = new Date();
     const expiresAt = new Date(issuedAt.getTime() + 120_000);
     const fill = input.payloadFill ?? 20;
+    const challengePayload = Buffer.from(`sealed-challenge-${fill}-${challengePayloadSequence}`);
+    challengePayloadSequence += 1;
     await pool.query(
       `SELECT *
-       FROM begin_wallet_ownership_challenge(
+       FROM begin_wallet_ownership_challenge_rotatable(
          $1::uuid, $2::uuid, 'EVM_ERC4361_ERC191'::text,
          'eip155'::text, '1'::text, 'MAINNET'::text, 1::integer, $3::text,
          1::smallint, $4::bytea, $5::bytea, $6::bytea,
          1::smallint, $7::bytea, 1::smallint, $8::bytea,
          1::smallint, $9::bytea, 1::smallint, $10::bytea,
-         $11::timestamptz, $12::timestamptz, $13::uuid
+         $11::timestamptz, $12::timestamptz, $13::uuid,
+         $14::smallint[], $15::text[]
        )`,
       [
         input.challengeId,
         input.accountId,
         MAINNET_FINGERPRINT,
-        Buffer.from(`sealed-challenge-${fill}`),
+        challengePayload,
         iv(fill),
         tag(fill),
         input.addressDigest,
@@ -97,8 +107,11 @@ describeWithPostgres('wallet ownership registration persistence', () => {
         issuedAt,
         expiresAt,
         randomUUID(),
+        [1],
+        [input.addressDigest.toString('hex')],
       ],
     );
+    return challengePayload;
   }
 
   it('enforces the post-0015 Ethereum and Solana active-wallet launch boundary in PostgreSQL', async () => {
@@ -141,6 +154,13 @@ describeWithPostgres('wallet ownership registration persistence', () => {
           randomBytes(32),
           randomBytes(32),
         ],
+      );
+      await pool.query(
+        `INSERT INTO wallet_ownership_challenge_identity_digests (
+           challenge_id, account_id, chain_namespace, chain_reference,
+           address_digest_version, address_digest
+         ) VALUES ($1, $2, $3, $4, 1, $5)`,
+        [challengeId, accountId, chain.namespace, chain.reference, addressDigest],
       );
       await pool.query(
         `INSERT INTO registered_wallets (
@@ -579,7 +599,7 @@ describeWithPostgres('wallet ownership registration persistence', () => {
 
     const addressDigest = digest(1);
     const firstChallenge = randomUUID();
-    await beginChallenge({
+    const firstChallengePayload = await beginChallenge({
       challengeId: firstChallenge,
       accountId: accountA,
       addressDigest,
@@ -603,9 +623,7 @@ describeWithPostgres('wallet ownership registration persistence', () => {
       prepared_account_id: accountA,
       prepared_registry_fingerprint_sha256: MAINNET_FINGERPRINT,
     });
-    expect(prepared.rows[0]?.prepared_challenge_payload_ciphertext).toEqual(
-      Buffer.from('sealed-challenge-20'),
-    );
+    expect(prepared.rows[0]?.prepared_challenge_payload_ciphertext).toEqual(firstChallengePayload);
 
     const walletId = randomUUID();
     const completed = await pool.query<{
@@ -1146,7 +1164,10 @@ describeWithPostgres('wallet ownership registration persistence', () => {
       });
       const priorMigrations = DATABASE_TEST_SCHEMA_MIGRATION_LIST.filter(({ id }) => id < '0016');
       const priorRunner = new MigrationRunner(rollbackPool, priorMigrations);
-      const fullRunner = new MigrationRunner(rollbackPool, DATABASE_TEST_SCHEMA_MIGRATION_LIST);
+      const revocationMigrations = DATABASE_TEST_SCHEMA_MIGRATION_LIST.filter(
+        ({ id }) => id <= '0016',
+      );
+      const fullRunner = new MigrationRunner(rollbackPool, revocationMigrations);
 
       await priorRunner.up();
       await expect(priorRunner.assertUpToDate()).resolves.toBeUndefined();
