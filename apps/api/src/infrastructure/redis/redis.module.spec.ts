@@ -23,6 +23,8 @@ function apiConfig(): InfrastructureConfig {
       region: 'us-east-1',
       queueUrl: 'http://127.0.0.1:4566/000000000000/jobs',
       deadLetterQueueUrl: 'http://127.0.0.1:4566/000000000000/jobs-dlq',
+      balanceQueueUrl: 'http://127.0.0.1:4566/000000000000/balance-sync',
+      balanceDeadLetterQueueUrl: 'http://127.0.0.1:4566/000000000000/balance-sync-dlq',
       requestTimeoutMs: 15_000,
       sdkMaxAttempts: 3,
       maxReceiveCount: 3,
