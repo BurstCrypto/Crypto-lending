@@ -883,6 +883,30 @@ test('the reviewed template exposes only preauth plus six key-ring secrets to pr
   assert.deepEqual(authentication?.blockerIds, ['AUTH_DEPLOYED_EVIDENCE_MISSING']);
 });
 
+test('template inspection binds API and outbox worker to one API artifact', () => {
+  const mutations = [
+    [
+      '      Command: [node, dist/infrastructure/outbox/outbox-worker.cli.js]\n      Essential: true\n      Image: !Ref ApiImageUri',
+      '      Command: [node, dist/infrastructure/outbox/outbox-worker.cli.js]\n      Essential: true\n      Image: !Ref WebImageUri',
+    ],
+    ['      Image: !Ref ApiImageUri', '      Image: !Ref WebImageUri'],
+    [' RdsCaBundlePath:', ' WorkerImageUri:\n  Type: String\n RdsCaBundlePath:'],
+    ['/crypto-lending-api@sha256:[a-f0-9]{64}$', '/crypto-lending-[a-z0-9-]+@sha256:[a-f0-9]{64}$'],
+  ] as const;
+
+  for (const [approved, rejected] of mutations) {
+    const mutated = APPLICATION_BASELINE.replace(approved, rejected);
+    assert.notEqual(mutated, APPLICATION_BASELINE, approved);
+    const inspected = inspectAuthenticationDeploymentTemplate(mutated);
+    const input = completeInput(platformDirectory('PLANNED'));
+    const report = evaluateProductionPreflight({ ...input, authentication: inspected });
+    const blockers = report.checks.find(({ id }) => id === 'AUTHENTICATION')?.blockerIds ?? [];
+
+    assert.equal(inspected.syntaxValid, false, approved);
+    assert.ok(blockers.includes('AUTH_TEMPLATE_INSPECTION_FAILED'), approved);
+  }
+});
+
 test('direct auth evaluation rejects managed-prefix supersets and local-demo controls', () => {
   const cases = [
     ['apiEnvironmentNames', 'AUTH_IDENTITY_HMAC_KEY_ID', 'AUTH_PRODUCTION_CONFIGURATION_NOT_WIRED'],

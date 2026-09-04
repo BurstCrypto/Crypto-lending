@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const defaultTemplatePath = join(scriptDirectory, 'database-migration-task.yaml');
-const reviewedTemplateSha256 = 'cef4abf377f9af4b824daf4b7bfbbd7f508b6a72df20ea7cfdd52f570219f1ce';
+const reviewedTemplateSha256 = '32917167b77f5e517581ed411ad5feef57691996e0bcc012ab2f3e68f3bd8c91';
 const migrationBindingResidualLimitation =
   'DatabaseMigrationCredentialsSecretArn and ApplicationDataKeyArn are operator-supplied cross-stack inputs; local validation cannot authenticate their origin. The secret must be the separately scoped crypto_migration credential and must never be the RDS master/bootstrap DatabaseCredentialsSecret.';
 
@@ -62,7 +62,7 @@ function readLocalTemplate(path) {
 function resourceInventory(source) {
   const resourcesSource = source.match(/^Resources:\s*$([\s\S]*?)(?=^Outputs:\s*$)/m)?.[1] ?? '';
   return [
-    ...resourcesSource.matchAll(/^  ([A-Za-z][A-Za-z0-9]*):\s*\n    Type:\s*([^\s#]+)\s*$/gm),
+    ...resourcesSource.matchAll(/^ {2}([A-Za-z][A-Za-z0-9]*):\s*\n {4}Type:\s*([^\s#]+)\s*$/gm),
   ].map(([, logicalId, type]) => ({ logicalId, type }));
 }
 
@@ -84,7 +84,7 @@ function topLevelBlocks(source, sectionName) {
   for (let index = sectionIndex + 1; index < lines.length; index += 1) {
     const line = lines[index];
     if (/^[A-Za-z][A-Za-z0-9]*:\s*$/.test(line)) break;
-    const start = line.match(/^  ([A-Za-z][A-Za-z0-9]*):\s*$/);
+    const start = line.match(/^ {2}([A-Za-z][A-Za-z0-9]*):\s*$/);
     if (start) {
       saveCurrent();
       currentName = start[1];
@@ -148,6 +148,26 @@ export function validateMigrationTaskTemplate(source) {
   }
 
   const parameters = topLevelBlocks(source, 'Parameters');
+  for (const [name, expectedPattern] of [
+    [
+      'ApiImageUri',
+      '^[0-9]{12}\\.dkr\\.ecr\\.[a-z0-9-]+\\.(amazonaws\\.com|amazonaws\\.com\\.cn)/crypto-lending-api@sha256:[a-f0-9]{64}$',
+    ],
+    [
+      'ApiImageRepositoryArn',
+      '^arn:(aws|aws-us-gov|aws-cn):ecr:[a-z0-9-]+:[0-9]{12}:repository/crypto-lending-api$',
+    ],
+  ]) {
+    const block = parameters.get(name) ?? '';
+    if (
+      semanticYamlTokens(block) !==
+      semanticYamlTokens(
+        [name + ':', '  Type: String', `  AllowedPattern: '${expectedPattern}'`].join('\n'),
+      )
+    ) {
+      errors.push(`${name} must bind only the exact immutable crypto-lending-api artifact.`);
+    }
+  }
   const databaseName = parameters.get('DatabaseName') ?? '';
   if (
     semanticYamlTokens(databaseName) !==
@@ -250,6 +270,14 @@ export function validateMigrationTaskTemplate(source) {
   }
 
   const task = resources.get('MigrationTaskDefinition') ?? '';
+  if (
+    exactCount(task, /^\s+Image:\s*!Ref ApiImageUri\s*$/gm) !== 1 ||
+    exactCount(task, /^\s+Image:/gm) !== 1
+  ) {
+    errors.push(
+      'MigrationTaskDefinition must bind exactly one immutable Image reference to ApiImageUri.',
+    );
+  }
   if (!/^\s+ExecutionRoleArn:\s*!GetAtt MigrationTaskExecutionRole\.Arn\s*$/m.test(task)) {
     errors.push(
       'MigrationTaskDefinition must use only MigrationTaskExecutionRole as its ECS execution role.',

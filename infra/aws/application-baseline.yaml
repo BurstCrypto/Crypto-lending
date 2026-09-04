@@ -18,10 +18,10 @@ Parameters:
  WorkloadBoundariesTemplateUrl:
   Type: String
   MaxLength: 1024
-  AllowedPattern: '^https://[a-z0-9][a-z0-9-]{1,61}[a-z0-9]\.s3\.[a-z0-9-]+\.(?:amazonaws\.com|amazonaws\.com\.cn)/application-workload-boundaries-238dad734b6b7f455dbdbaff6be8b34e0138a424e60ca258b4aa5e30f0df6ef6\.yaml\?versionId=[A-Za-z0-9._~%+-]+$'
+  AllowedPattern: '^https://[a-z0-9][a-z0-9-]{1,61}[a-z0-9]\.s3\.[a-z0-9-]+\.(?:amazonaws\.com|amazonaws\.com\.cn)/application-workload-boundaries-78971861599dacc474dc2e087690b72c33397603078b4d90a6b976e8b602239b\.yaml\?versionId=[A-Za-z0-9._~%+-]+$'
  WorkloadBoundariesTemplateSha256:
   Type: String
-  AllowedValues: [238dad734b6b7f455dbdbaff6be8b34e0138a424e60ca258b4aa5e30f0df6ef6]
+  AllowedValues: [78971861599dacc474dc2e087690b72c33397603078b4d90a6b976e8b602239b]
  WorkloadBoundariesArtifactBindingSha256:
   Type: String
   AllowedPattern: '^[a-f0-9]{64}$'
@@ -42,9 +42,6 @@ Parameters:
  WebImageUri:
   Type: String
   AllowedPattern: '^[0-9]{12}\.dkr\.ecr\.[a-z0-9-]+\.(amazonaws\.com|amazonaws\.com\.cn)/crypto-lending-web@sha256:[a-f0-9]{64}$'
- WorkerImageUri:
-  Type: String
-  AllowedPattern: '^[0-9]{12}\.dkr\.ecr\.[a-z0-9-]+\.(amazonaws\.com|amazonaws\.com\.cn)/crypto-lending-worker@sha256:[a-f0-9]{64}$'
  RdsCaBundlePath:
   Type: String
   Default: /etc/ssl/certs/aws-rds-global-bundle.pem
@@ -852,7 +849,6 @@ Resources:
     ApiLogGroupArn: !GetAtt ApiLogGroup.Arn
     WorkerLogGroupArn: !GetAtt WorkerLogGroup.Arn
     ApiImageRepositoryArn: !Sub arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/crypto-lending-api
-    WorkerImageRepositoryArn: !Sub arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/crypto-lending-worker
     ApiDatabaseCredentialPhase: !Ref ApiDatabaseCredentialPhase
     WorkerDatabaseCredentialPhase: !Ref WorkerDatabaseCredentialPhase
     RedisCredentialPhase: !Ref RedisCredentialPhase
@@ -1319,7 +1315,7 @@ Resources:
     - Name: outbox-worker
       Command: [node, dist/infrastructure/outbox/outbox-worker.cli.js]
       Essential: true
-      Image: !Ref WorkerImageUri
+      Image: !Ref ApiImageUri
       HealthCheck:
        Command: [CMD, node, dist/infrastructure/outbox/outbox-worker-health.cli.js]
        Interval: 30

@@ -44,7 +44,6 @@ const parameterTypes = new Map([
   ['ApiLogGroupArn', 'String'],
   ['WorkerLogGroupArn', 'String'],
   ['ApiImageRepositoryArn', 'String'],
-  ['WorkerImageRepositoryArn', 'String'],
   ['ApiDatabaseCredentialPhase', 'String'],
   ['WorkerDatabaseCredentialPhase', 'String'],
   ['RedisCredentialPhase', 'String'],
@@ -446,7 +445,7 @@ function finalSection(source, heading) {
 }
 
 function parseIndentedBlocks(source) {
-  const matches = [...source.matchAll(/^  ([A-Za-z][A-Za-z0-9]*):\n/gmu)];
+  const matches = [...source.matchAll(/^ {2}([A-Za-z][A-Za-z0-9]*):\n/gmu)];
   const blocks = new Map();
   for (const [index, match] of matches.entries()) {
     const start = match.index;
@@ -638,7 +637,7 @@ function validateParameters(source, errors) {
   requireExactIds(blocks, parameterTypes, 'Parameter allowlist', errors);
   for (const [logicalId, expectedType] of parameterTypes) {
     const block = blocks.get(logicalId) ?? '';
-    const actualType = block.match(/^    Type:\s*(\S+)$/mu)?.[1];
+    const actualType = block.match(/^ {4}Type:\s*(\S+)$/mu)?.[1];
     if (actualType !== expectedType) {
       errors.push(`${logicalId} must use parameter type ${expectedType}.`);
     }
@@ -732,10 +731,7 @@ function validateParameters(source, errors) {
       errors.push(`${parameter} must use the exact optional identifier contract.`);
     }
   }
-  for (const [parameter, repository] of [
-    ['ApiImageRepositoryArn', 'crypto-lending-api'],
-    ['WorkerImageRepositoryArn', 'crypto-lending-worker'],
-  ]) {
+  for (const [parameter, repository] of [['ApiImageRepositoryArn', 'crypto-lending-api']]) {
     const repositoryPattern = `^arn:[a-z0-9-]+:ecr:[a-z0-9-]+:[0-9]{12}:repository/${repository}$`;
     if (
       (blocks.get(parameter) ?? '') !==
@@ -1016,7 +1012,7 @@ function validateExecutionRoles(resources, errors) {
   const expectedWorker = expectedExecutionRoleBlock(
     'WorkerTaskExecutionRole',
     'PullWorkerImage',
-    'WorkerImageRepositoryArn',
+    'ApiImageRepositoryArn',
     'WriteWorkerLogs',
     'WorkerLogGroupArn',
     'ReadWorkerRuntimeSecrets',
@@ -1137,7 +1133,7 @@ export function validateApplicationWorkloadBoundariesSource(rawSource) {
   const resources = parseIndentedBlocks(section(source, 'Resources', 'Outputs'));
   requireExactIds(resources, resourceTypes, 'Resource allowlist', errors);
   for (const [logicalId, expectedType] of resourceTypes) {
-    const actualType = resources.get(logicalId)?.match(/^    Type:\s*(\S+)$/mu)?.[1];
+    const actualType = resources.get(logicalId)?.match(/^ {4}Type:\s*(\S+)$/mu)?.[1];
     if (actualType !== expectedType) {
       errors.push(`${logicalId} must use resource type ${expectedType}.`);
     }

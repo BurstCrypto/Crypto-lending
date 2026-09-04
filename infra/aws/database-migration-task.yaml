@@ -14,10 +14,10 @@ Parameters:
     MaxLength: 31
   ApiImageUri:
     Type: String
-    AllowedPattern: '^[0-9]{12}\.dkr\.ecr\.[a-z0-9-]+\.(amazonaws\.com|amazonaws\.com\.cn)/crypto-lending-[a-z0-9._/-]*@sha256:[a-f0-9]{64}$'
+    AllowedPattern: '^[0-9]{12}\.dkr\.ecr\.[a-z0-9-]+\.(amazonaws\.com|amazonaws\.com\.cn)/crypto-lending-api@sha256:[a-f0-9]{64}$'
   ApiImageRepositoryArn:
     Type: String
-    AllowedPattern: '^arn:(aws|aws-us-gov|aws-cn):ecr:[a-z0-9-]+:[0-9]{12}:repository/crypto-lending-[a-z0-9._/-]+$'
+    AllowedPattern: '^arn:(aws|aws-us-gov|aws-cn):ecr:[a-z0-9-]+:[0-9]{12}:repository/crypto-lending-api$'
   RdsCaBundlePath:
     Type: String
     Default: /etc/ssl/certs/aws-rds-global-bundle.pem

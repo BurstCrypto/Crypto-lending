@@ -965,7 +965,6 @@ if ($Action -in @('Plan', 'Deploy')) {
         'ApplicationVersion',
         'ApiImageUri',
         'WebImageUri',
-        'WorkerImageUri',
         'S3ManagedPrefixListId',
         'AllowedIngressIpv4Cidr',
         'AlbCertificateArn',
@@ -1121,7 +1120,7 @@ if ($Action -in @('Plan', 'Deploy')) {
 
     $ecrDnsSuffix = if ($partition -eq 'aws-cn') { 'amazonaws.com.cn' } else { 'amazonaws.com' }
     $expectedEcrPrefix = "$AccountId.dkr.ecr.$Region.$ecrDnsSuffix/"
-    foreach ($imageParameter in @('ApiImageUri', 'WebImageUri', 'WorkerImageUri')) {
+    foreach ($imageParameter in @('ApiImageUri', 'WebImageUri')) {
         if (-not $parameterMap[$imageParameter].StartsWith($expectedEcrPrefix, [System.StringComparison]::Ordinal)) {
             throw "$imageParameter must reference private ECR in the approved account and region: $expectedEcrPrefix"
         }

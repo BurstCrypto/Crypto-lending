@@ -160,6 +160,7 @@ function componentIdentity(
   value: unknown,
   accountId: string,
   region: string,
+  expectedRepository: 'crypto-lending-api' | 'crypto-lending-web',
 ): ProductionDeployedComponentIdentity {
   const parsed = record(value, COMPONENT_KEYS);
   if (typeof parsed.imageUri !== 'string' || typeof parsed.taskDefinitionArn !== 'string') {
@@ -173,6 +174,7 @@ function componentIdentity(
   );
   if (
     imageMatch === null ||
+    imageMatch[1] !== expectedRepository ||
     imageMatch[1]?.includes('//') === true ||
     imageMatch[1]
       ?.split('/')
@@ -228,21 +230,41 @@ function deploymentTarget(value: unknown): ProductionDeploymentTarget {
     return invalid();
   }
   const components = record(parsed.deployedComponents, COMPONENT_SET_KEYS);
-  const api = componentIdentity(components.api, parsed.awsAccountId, parsed.awsRegion);
-  const web = componentIdentity(components.web, parsed.awsAccountId, parsed.awsRegion);
+  const api = componentIdentity(
+    components.api,
+    parsed.awsAccountId,
+    parsed.awsRegion,
+    'crypto-lending-api',
+  );
+  const web = componentIdentity(
+    components.web,
+    parsed.awsAccountId,
+    parsed.awsRegion,
+    'crypto-lending-web',
+  );
   const outboxWorker = componentIdentity(
     components.outboxWorker,
     parsed.awsAccountId,
     parsed.awsRegion,
+    'crypto-lending-api',
   );
-  const migration = componentIdentity(components.migration, parsed.awsAccountId, parsed.awsRegion);
+  const migration = componentIdentity(
+    components.migration,
+    parsed.awsAccountId,
+    parsed.awsRegion,
+    'crypto-lending-api',
+  );
   const taskDefinitions = new Set([
     api.taskDefinitionArn,
     web.taskDefinitionArn,
     outboxWorker.taskDefinitionArn,
     migration.taskDefinitionArn,
   ]);
-  if (taskDefinitions.size !== COMPONENT_SET_KEYS.length) {
+  if (
+    taskDefinitions.size !== COMPONENT_SET_KEYS.length ||
+    outboxWorker.imageUri !== api.imageUri ||
+    migration.imageUri !== api.imageUri
+  ) {
     return invalid();
   }
   return Object.freeze({

@@ -817,7 +817,11 @@ export function loadInfrastructureConfig(
     }
     if (workload === 'api') assertNoUnknownProductionRedisVariables(env);
   }
-  const region = env.AWS_REGION?.trim() || 'us-east-1';
+  const configuredRegion = env.AWS_REGION?.trim();
+  if (production && !configuredRegion) {
+    throw new Error('Production runtime requires AWS_REGION');
+  }
+  const region = configuredRegion || 'us-east-1';
   if (!/^[a-z0-9]+(?:-[a-z0-9]+){2,}$/u.test(region)) {
     throw new Error('AWS_REGION must be a canonical AWS region identifier');
   }

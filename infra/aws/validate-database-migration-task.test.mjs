@@ -38,6 +38,24 @@ test('accepts the reviewed one-off migration task without AWS calls', () => {
   assert.match(report.residualLimitations[0], /cannot authenticate/);
 });
 
+test('rejects an API image or repository parameter that can select another artifact', () => {
+  assertRejected(
+    mutate(
+      '/crypto-lending-api@sha256:[a-f0-9]{64}$',
+      '/crypto-lending-[a-z0-9-]+@sha256:[a-f0-9]{64}$',
+    ),
+    /ApiImageUri must bind only the exact immutable crypto-lending-api artifact/,
+  );
+  assertRejected(
+    mutate("repository/crypto-lending-api$'", "repository/crypto-lending-[a-z0-9-]+$'"),
+    /ApiImageRepositoryArn must bind only the exact immutable crypto-lending-api artifact/,
+  );
+  assertRejected(
+    mutate('          Image: !Ref ApiImageUri', '          Image: !Ref UnreviewedImageUri'),
+    /MigrationTaskDefinition must bind exactly one immutable Image reference to ApiImageUri/,
+  );
+});
+
 test('rejects attaching the migration task to an ECS service', () => {
   assertRejected(
     mutate(

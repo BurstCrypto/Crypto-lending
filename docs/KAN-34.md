@@ -343,8 +343,10 @@ parameter set before a change set is executed.
   selecting a paid egress path without separate architecture, security, and
   cost approval.
 - `ApplicationVersion` is a reviewed runtime label, not cryptographic image
-  provenance. Acceptance must verify all three image digests' build attestations
-  or OCI source-revision labels against the recorded commit.
+  provenance. Acceptance must verify the immutable API and web image digests'
+  build attestations or OCI source-revision labels against the recorded commit.
+  The API digest is reused by the distinct API, outbox-worker, and migration
+  task definitions.
 
 These limitations are explicit non-production review gates, not implied
 production authorization.

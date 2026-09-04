@@ -34,9 +34,9 @@ const operationalAlarmLogicalIds = Object.freeze([
   'BalanceDeadLetterQueueNotEmptyAlarm',
 ]);
 const reviewedApplicationBaselineSha256 =
-  '45d4e9db67f8c54c4e177aae7d26638f561181139ef3a429488d4c9acef94561';
+  'fbdb6828d867ff49502ec9e65c400ee969d4185d99a4f59787910b332effaf72';
 const reviewedWorkloadBoundariesSha256 =
-  '238dad734b6b7f455dbdbaff6be8b34e0138a424e60ca258b4aa5e30f0df6ef6';
+  '78971861599dacc474dc2e087690b72c33397603078b4d90a6b976e8b602239b';
 const reviewedObservabilitySha256 =
   'ef0704fc3eea63ca60e6b44bcd8298639696f21478cc119757d968b84920c6a7';
 const reviewedResourceTypesByLogicalId = new Map([
@@ -1087,7 +1087,6 @@ function validateWorkloadBoundaryComposition(source, parameters, resources, inve
       '    ApiLogGroupArn: !GetAtt ApiLogGroup.Arn',
       '    WorkerLogGroupArn: !GetAtt WorkerLogGroup.Arn',
       '    ApiImageRepositoryArn: !Sub arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/crypto-lending-api',
-      '    WorkerImageRepositoryArn: !Sub arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/crypto-lending-worker',
       '    ApiDatabaseCredentialPhase: !Ref ApiDatabaseCredentialPhase',
       '    WorkerDatabaseCredentialPhase: !Ref WorkerDatabaseCredentialPhase',
       '    RedisCredentialPhase: !Ref RedisCredentialPhase',
@@ -2476,7 +2475,6 @@ function validateTemplateShape(source, errors) {
   const imageRepositories = new Map([
     ['ApiImageUri', 'crypto-lending-api'],
     ['WebImageUri', 'crypto-lending-web'],
-    ['WorkerImageUri', 'crypto-lending-worker'],
   ]);
   for (const [name, repository] of imageRepositories) {
     const block = parameters.get(name);
@@ -2497,6 +2495,11 @@ function validateTemplateShape(source, errors) {
       errors.push(`${name} must be supplied explicitly and must not have a mutable default image.`);
     }
   }
+  if (parameters.has('WorkerImageUri') || source.includes('crypto-lending-worker')) {
+    errors.push(
+      'The outbox worker must not declare a separate image or repository; it reuses the exact ApiImageUri artifact.',
+    );
+  }
   const databaseName = parameters.get('DatabaseName') ?? '';
   if (!hasProperty(databaseName, 'AllowedPattern', '^[a-z][a-z0-9_]{0,62}$')) {
     errors.push('DatabaseName must accept only canonical lowercase PostgreSQL identifiers.');
@@ -2506,6 +2509,24 @@ function validateTemplateShape(source, errors) {
   if (resources.size === 0) {
     errors.push('Application template must contain a non-empty Resources section.');
     return;
+  }
+
+  for (const [logicalId, imageParameter] of [
+    ['ApiTaskDefinition', 'ApiImageUri'],
+    ['WebTaskDefinition', 'WebImageUri'],
+    ['WorkerTaskDefinition', 'ApiImageUri'],
+  ]) {
+    const taskDefinition = resources.get(logicalId) ?? '';
+    const imageBindings =
+      taskDefinition.match(/^\s+Image:\s*!Ref\s+[A-Za-z][A-Za-z0-9]*\s*$/gm) ?? [];
+    if (
+      imageBindings.length !== 1 ||
+      imageBindings[0]?.trim() !== `Image: !Ref ${imageParameter}`
+    ) {
+      errors.push(
+        `${logicalId} must bind exactly one immutable Image reference to ${imageParameter}.`,
+      );
+    }
   }
 
   validateNoExternalApplicationEgress(source, parameters, resources, inventory, errors);
@@ -3105,7 +3126,7 @@ function validateDeploymentGuard(source, errors) {
     "'get-caller-identity'",
     "'--profile', $Profile",
     "'--region', $Region",
-    "'ApiImageUri', 'WebImageUri', 'WorkerImageUri'",
+    "'ApiImageUri', 'WebImageUri'",
     '$expectedEcrPrefix',
     '$expectedCertificatePrefix',
     "'I_ACKNOWLEDGE_THIS_CREATES_BILLABLE_AWS_RESOURCES'",

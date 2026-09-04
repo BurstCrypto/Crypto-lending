@@ -61,9 +61,6 @@ Parameters:
   ApiImageRepositoryArn:
     Type: String
     AllowedPattern: '^arn:[a-z0-9-]+:ecr:[a-z0-9-]+:[0-9]{12}:repository/crypto-lending-api$'
-  WorkerImageRepositoryArn:
-    Type: String
-    AllowedPattern: '^arn:[a-z0-9-]+:ecr:[a-z0-9-]+:[0-9]{12}:repository/crypto-lending-worker$'
   ApiDatabaseCredentialPhase:
     Type: String
     Default: A_ONLY
@@ -615,7 +612,7 @@ Resources:
                   - ecr:BatchCheckLayerAvailability
                   - ecr:BatchGetImage
                   - ecr:GetDownloadUrlForLayer
-                Resource: !Ref WorkerImageRepositoryArn
+                Resource: !Ref ApiImageRepositoryArn
         - PolicyName: WriteWorkerLogs
           PolicyDocument:
             Version: '2012-10-17'

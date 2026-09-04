@@ -256,9 +256,9 @@ for (const [name, search, replacement, expected] of [
     /concrete reviewed application ECR repository ARN/,
   ],
   [
-    'an API execution-role repository swap',
+    'an API execution-role repository remap',
     '                Resource: !Ref ApiImageRepositoryArn',
-    '                Resource: !Ref WorkerImageRepositoryArn',
+    '                Resource: !Ref ApplicationDataKeyArn',
     /exact API log and runtime-secret matrix/,
   ],
   [
@@ -468,8 +468,17 @@ for (const [name, search, replacement, expected] of [
   ],
   [
     'a wildcard execution-role secret resource',
-    '                Resource: !Ref WorkerImageRepositoryArn',
-    "                Resource: '*'",
+    [
+      '        - PolicyName: PullWorkerImage',
+      '          PolicyDocument:',
+      "            Version: '2012-10-17'",
+    ].join('\n'),
+    [
+      '        - PolicyName: PullWorkerImage',
+      '          PolicyDocument:',
+      "            Version: '2012-10-17'",
+      "            Resource: '*'",
+    ].join('\n'),
     /outside ECR authorization|exact worker/,
   ],
   [

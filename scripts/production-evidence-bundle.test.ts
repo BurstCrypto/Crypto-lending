@@ -76,12 +76,13 @@ function validReleaseManifest(
 }
 
 function componentIdentity(
+  repository: 'crypto-lending-api' | 'crypto-lending-web',
   family: string,
   revision: number,
   imageDigest: string,
 ): Readonly<{ imageUri: string; taskDefinitionArn: string }> {
   return Object.freeze({
-    imageUri: `123456789012.dkr.ecr.us-east-1.amazonaws.com/crypto/${family}@sha256:${imageDigest}`,
+    imageUri: `123456789012.dkr.ecr.us-east-1.amazonaws.com/${repository}@sha256:${imageDigest}`,
     taskDefinitionArn: `arn:aws:ecs:us-east-1:123456789012:task-definition/crypto-${family}:${revision}`,
   });
 }
@@ -90,9 +91,9 @@ function validDeploymentTarget(
   overrides: Partial<ProductionDeploymentTarget> = {},
 ): ProductionDeploymentTarget {
   const sharedApiImage = 'c'.repeat(64);
-  const api = componentIdentity('api', 41, sharedApiImage);
-  const workerTask = componentIdentity('worker', 43, sharedApiImage);
-  const migrationTask = componentIdentity('migration', 44, sharedApiImage);
+  const api = componentIdentity('crypto-lending-api', 'api', 41, sharedApiImage);
+  const workerTask = componentIdentity('crypto-lending-api', 'worker', 43, sharedApiImage);
+  const migrationTask = componentIdentity('crypto-lending-api', 'migration', 44, sharedApiImage);
   return {
     targetId: 'production-us-east-1-primary',
     environment: 'production',
@@ -107,9 +108,9 @@ function validDeploymentTarget(
     },
     deployedComponents: {
       api,
-      web: componentIdentity('web', 42, 'd'.repeat(64)),
-      outboxWorker: { ...workerTask, imageUri: api.imageUri },
-      migration: { ...migrationTask, imageUri: api.imageUri },
+      web: componentIdentity('crypto-lending-web', 'web', 42, 'd'.repeat(64)),
+      outboxWorker: workerTask,
+      migration: migrationTask,
     },
     ...overrides,
   };
@@ -433,7 +434,67 @@ test('deployment targets close Cognito, origin, account/region, image, and task 
         ...target.deployedComponents,
         api: {
           ...target.deployedComponents.api,
-          imageUri: `999999999999.dkr.ecr.us-east-1.amazonaws.com/crypto/api@sha256:${'c'.repeat(64)}`,
+          imageUri: `999999999999.dkr.ecr.us-east-1.amazonaws.com/crypto-lending-api@sha256:${'c'.repeat(64)}`,
+        },
+      },
+    }),
+    validDeploymentTarget({
+      deployedComponents: {
+        ...target.deployedComponents,
+        api: {
+          ...target.deployedComponents.api,
+          imageUri: target.deployedComponents.api.imageUri.replace(
+            '/crypto-lending-api@',
+            '/crypto-lending-other@',
+          ),
+        },
+      },
+    }),
+    validDeploymentTarget({
+      deployedComponents: {
+        ...target.deployedComponents,
+        web: {
+          ...target.deployedComponents.web,
+          imageUri: target.deployedComponents.web.imageUri.replace(
+            '/crypto-lending-web@',
+            '/crypto-lending-api@',
+          ),
+        },
+      },
+    }),
+    validDeploymentTarget({
+      deployedComponents: {
+        ...target.deployedComponents,
+        outboxWorker: {
+          ...target.deployedComponents.outboxWorker,
+          imageUri: target.deployedComponents.outboxWorker.imageUri.replace(
+            'c'.repeat(64),
+            'e'.repeat(64),
+          ),
+        },
+      },
+    }),
+    validDeploymentTarget({
+      deployedComponents: {
+        ...target.deployedComponents,
+        outboxWorker: {
+          ...target.deployedComponents.outboxWorker,
+          imageUri: target.deployedComponents.outboxWorker.imageUri.replace(
+            '/crypto-lending-api@',
+            '/crypto-lending-worker@',
+          ),
+        },
+      },
+    }),
+    validDeploymentTarget({
+      deployedComponents: {
+        ...target.deployedComponents,
+        migration: {
+          ...target.deployedComponents.migration,
+          imageUri: target.deployedComponents.migration.imageUri.replace(
+            'c'.repeat(64),
+            'f'.repeat(64),
+          ),
         },
       },
     }),

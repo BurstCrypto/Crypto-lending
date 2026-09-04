@@ -1094,6 +1094,33 @@ function yamlNamedSequenceEntryBlock(
   return collected.join('\n');
 }
 
+function hasExactYamlScalarProperty(source: string | null, name: string, value: string): boolean {
+  if (source === null) return false;
+  const escapedName = name.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+  const matches = source
+    .replace(/\r\n/gu, '\n')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => new RegExp(`^${escapedName}:`).test(line));
+  return matches.length === 1 && matches[0] === `${name}: ${value}`;
+}
+
+function hasExactImmutableImageParameter(
+  source: string,
+  name: 'ApiImageUri' | 'WebImageUri',
+  repository: 'crypto-lending-api' | 'crypto-lending-web',
+): boolean {
+  const parameter = yamlBlock(source, name, 1) ?? yamlBlock(source, name, 2);
+  const allowedPattern =
+    `'^[0-9]{12}\\.dkr\\.ecr\\.[a-z0-9-]+\\.` +
+    `(amazonaws\\.com|amazonaws\\.com\\.cn)/${repository}@sha256:[a-f0-9]{64}$'`;
+  return (
+    hasExactYamlScalarProperty(parameter, 'Type', 'String') &&
+    hasExactYamlScalarProperty(parameter, 'AllowedPattern', allowedPattern) &&
+    !/(?:^|\n)\s+Default:/u.test(parameter ?? '')
+  );
+}
+
 interface YamlBindingInspection {
   readonly names: ReadonlySet<string>;
   readonly valid: boolean;
@@ -1222,14 +1249,21 @@ export function inspectAuthenticationDeploymentTemplate(
   const containerPropertyIndent = compactResources ? 6 : 10;
   const apiTask = yamlBlock(source, 'ApiTaskDefinition', resourceIndent);
   const webTask = yamlBlock(source, 'WebTaskDefinition', resourceIndent);
+  const workerTask = yamlBlock(source, 'WorkerTaskDefinition', resourceIndent);
   const apiContainers =
     apiTask === null ? null : yamlBlock(apiTask, 'ContainerDefinitions', propertiesIndent);
   const webContainers =
     webTask === null ? null : yamlBlock(webTask, 'ContainerDefinitions', propertiesIndent);
+  const workerContainers =
+    workerTask === null ? null : yamlBlock(workerTask, 'ContainerDefinitions', propertiesIndent);
   const apiContainer =
     apiContainers === null ? null : yamlNamedSequenceEntryBlock(apiContainers, 'api', itemIndent);
   const webContainer =
     webContainers === null ? null : yamlNamedSequenceEntryBlock(webContainers, 'web', itemIndent);
+  const workerContainer =
+    workerContainers === null
+      ? null
+      : yamlNamedSequenceEntryBlock(workerContainers, 'outbox-worker', itemIndent);
   const apiEnvironment =
     apiContainer === null ? null : yamlBlock(apiContainer, 'Environment', containerPropertyIndent);
   const apiSecrets =
@@ -1256,6 +1290,22 @@ export function inspectAuthenticationDeploymentTemplate(
     EXPECTED_WEB_ENVIRONMENT_BINDINGS,
     (name) => PRODUCTION_AUTH_WALLET_BINDING_NAME.test(name),
   );
+  const productionArtifactContractRequired =
+    workerTask !== null ||
+    /(?:^|\n)\s+ApiImageUri:\s*(?:\n|$)/u.test(source) ||
+    /(?:^|\n)\s+ApplicationVersion:\s*(?:\n|$)/u.test(source);
+  const artifactBindingsValid =
+    !productionArtifactContractRequired ||
+    (workerTask !== null &&
+      workerContainers !== null &&
+      workerContainer !== null &&
+      hasExactImmutableImageParameter(source, 'ApiImageUri', 'crypto-lending-api') &&
+      hasExactImmutableImageParameter(source, 'WebImageUri', 'crypto-lending-web') &&
+      hasExactYamlScalarProperty(apiContainer, 'Image', '!Ref ApiImageUri') &&
+      hasExactYamlScalarProperty(webContainer, 'Image', '!Ref WebImageUri') &&
+      hasExactYamlScalarProperty(workerContainer, 'Image', '!Ref ApiImageUri') &&
+      !/(?:^|\n)\s+WorkerImageUri:\s*(?:\n|$)/u.test(source) &&
+      !source.includes('crypto-lending-worker'));
   return Object.freeze({
     inspected:
       apiTask !== null &&
@@ -1266,12 +1316,15 @@ export function inspectAuthenticationDeploymentTemplate(
       webContainer !== null &&
       apiEnvironment !== null &&
       apiSecrets !== null &&
-      webEnvironment !== null,
+      webEnvironment !== null &&
+      (!productionArtifactContractRequired ||
+        (workerTask !== null && workerContainers !== null && workerContainer !== null)),
     syntaxValid:
       apiEnvironmentInspection.valid &&
       apiSecretInspection.valid &&
       webEnvironmentInspection.valid &&
-      webSecrets === null,
+      webSecrets === null &&
+      artifactBindingsValid,
     apiEnvironmentNames: apiEnvironmentInspection.names,
     apiSecretNames: apiSecretInspection.names,
     webEnvironmentNames: webEnvironmentInspection.names,

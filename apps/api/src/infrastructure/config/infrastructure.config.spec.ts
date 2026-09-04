@@ -88,6 +88,18 @@ describe('loadInfrastructureConfig', () => {
     ).toThrow('APP_ENV must be a canonical reviewed environment name');
   });
 
+  it('requires an explicit AWS region in production but retains the local default', () => {
+    expect(loadInfrastructureConfig(baseEnvironment({ AWS_REGION: undefined })).sqs.region).toBe(
+      'us-east-1',
+    );
+    expect(() =>
+      loadInfrastructureConfig(baseEnvironment({ NODE_ENV: 'production', AWS_REGION: undefined })),
+    ).toThrow('Production runtime requires AWS_REGION');
+    expect(() =>
+      loadInfrastructureConfig(baseEnvironment({ NODE_ENV: 'production', AWS_REGION: '  ' })),
+    ).toThrow('Production runtime requires AWS_REGION');
+  });
+
   it('omits Redis entirely for a production worker identity', () => {
     const config = loadInfrastructureConfig(
       baseEnvironment({

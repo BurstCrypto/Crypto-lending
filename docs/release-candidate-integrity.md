@@ -154,10 +154,13 @@ that claim.
 This manifest is not a signature, SLSA provenance statement, OCI digest,
 malware scan, vulnerability disposition, or durable release archive. Its two
 contained SPDX documents are package inventories, not scan dispositions. The
-uploaded self-contained stage is not itself a production container. CI builds
-and locally scans the two reviewed non-root/read-only application images before
-manifest creation, but it does not publish or stage those images. Before any
-authorized deployment, the delivery system must bind immutable OCI digests and
+uploaded self-contained stage is not itself a production container. CI builds,
+locally hardening-checks, and inventories the two reviewed non-root/read-only
+application images before manifest creation, but it does not publish or stage
+those images. The exact API image is the shared executable artifact for the API,
+outbox-worker, and migration task definitions; their task identities and runtime
+permissions remain distinct. Before any authorized deployment, the delivery
+system must bind immutable OCI digests and
 source labels to this exact manifest hash, retain the staged SBOMs, generate
 signed provenance, scan the final images, and independently verify the result.
 Registry

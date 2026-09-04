@@ -156,10 +156,11 @@ backfill and must retain both keys throughout the rollback window.
 
 - Secrets Manager/KMS custody, resource policies, key creation, rotation
   authority, and deployed secret-read evidence require approved operators.
-- The current infrastructure template injects the legacy single-key fields; it
-  does not yet select the optional ring documents. Template activation and an
-  isolated schema-owner rewrap identity must be separately reviewed with the
-  exact secret schema, session-drain procedure, and preflight checks. Do not
+- The current infrastructure template selects the pre-authentication key and
+  all six canonical ring documents and rejects the legacy single-key selectors.
+  It does not provision or populate the external secret or define the isolated
+  schema-owner rewrap identity. Those controls must be separately reviewed with
+  the exact secret schema, session-drain procedure, and preflight checks. Do not
   grant 0024 functions to the general API or worker role.
 - A deployed rotation, rollback, and disaster-recovery drill with redacted
   evidence is required before any old key can be retired.

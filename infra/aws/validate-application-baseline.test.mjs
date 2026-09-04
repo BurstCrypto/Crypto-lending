@@ -101,9 +101,9 @@ test('accepts the repository no-external-egress baseline and records the DNS res
 
 test('keeps the parent below the reviewed direct-upload ceiling after child extraction', () => {
   const bytes = Buffer.byteLength(templateSource, 'utf8');
-  assert.equal(bytes, 50_151);
+  assert.equal(bytes, 49_856);
   assert.ok(bytes <= 50_500);
-  assert.equal(51_200 - bytes, 1_049);
+  assert.equal(51_200 - bytes, 1_344);
 });
 
 test('pins the observability child URL, digest, binding, and exact parent mapping', () => {
@@ -637,7 +637,7 @@ test('pins the versioned child artifact, provenance, and exact nested input cont
   assertRejected(
     mutate((source) =>
       source.replace(
-        'application-workload-boundaries-238dad734b6b7f455dbdbaff6be8b34e0138a424e60ca258b4aa5e30f0df6ef6',
+        'application-workload-boundaries-78971861599dacc474dc2e087690b72c33397603078b4d90a6b976e8b602239b',
         `application-workload-boundaries-${'0'.repeat(64)}`,
       ),
     ),
@@ -646,7 +646,7 @@ test('pins the versioned child artifact, provenance, and exact nested input cont
   assertRejected(
     mutate((source) =>
       source.replace(
-        'AllowedValues: [238dad734b6b7f455dbdbaff6be8b34e0138a424e60ca258b4aa5e30f0df6ef6]',
+        'AllowedValues: [78971861599dacc474dc2e087690b72c33397603078b4d90a6b976e8b602239b]',
         `AllowedValues: [${'0'.repeat(64)}]`,
       ),
     ),
@@ -832,9 +832,26 @@ test('binds executable identity and exact image repository per workload', () => 
   );
   assertRejected(
     mutate((source) =>
-      source.replace('/crypto-lending-worker@sha256:', '/crypto-lending-api@sha256:'),
+      source.replace(
+        '      Command: [node, dist/infrastructure/outbox/outbox-worker.cli.js]\n      Essential: true\n      Image: !Ref ApiImageUri',
+        '      Command: [node, dist/infrastructure/outbox/outbox-worker.cli.js]\n      Essential: true\n      Image: !Ref WebImageUri',
+      ),
     ),
-    /WorkerImageUri must accept only the exact crypto-lending-worker ECR repository/,
+    /WorkerTaskDefinition must bind exactly one immutable Image reference to ApiImageUri/,
+  );
+  assertRejected(
+    mutate((source) =>
+      source.replace(
+        ' RdsCaBundlePath:',
+        [
+          ' WorkerImageUri:',
+          '  Type: String',
+          "  AllowedPattern: '^[0-9]{12}\\.dkr\\.ecr\\.[a-z0-9-]+\\.(amazonaws\\.com|amazonaws\\.com\\.cn)/crypto-lending-worker@sha256:[a-f0-9]{64}$'",
+          ' RdsCaBundlePath:',
+        ].join('\n'),
+      ),
+    ),
+    /outbox worker must not declare a separate image or repository/,
   );
 });
 
