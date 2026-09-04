@@ -1,5 +1,6 @@
 import type { AuthenticationFetch } from '@/lib/authentication';
 import { isAbortFailure, retryAfterSeconds } from '@/lib/authentication/http';
+import { createRequestDeadline, readBoundedJsonResponse } from '@/lib/http/bounded-response';
 
 import {
   parseReportingPortfolioResponse,
@@ -7,7 +8,7 @@ import {
 } from './reporting-portfolio';
 
 export const PORTFOLIO_PATH = '/api/v1/portfolio' as const;
-const MAX_PORTFOLIO_RESPONSE_CHARACTERS = 2_000_000;
+const MAX_PORTFOLIO_RESPONSE_BYTES = 2_000_000;
 
 export type PortfolioApiErrorCode = 'INVALID_RESPONSE' | 'UNAUTHENTICATED' | 'UNAVAILABLE';
 
@@ -40,35 +41,6 @@ function requestInit(signal: AbortSignal | undefined): RequestInit {
   };
 }
 
-async function readBoundedPortfolioJson(response: Response): Promise<unknown> {
-  const contentType = response.headers.get('content-type')?.split(';', 1)[0]?.trim().toLowerCase();
-  if (contentType !== 'application/json') return fail('INVALID_RESPONSE');
-
-  const contentLength = response.headers.get('content-length');
-  if (
-    contentLength !== null &&
-    (!/^(?:0|[1-9][0-9]*)$/u.test(contentLength) ||
-      Number(contentLength) > MAX_PORTFOLIO_RESPONSE_CHARACTERS)
-  ) {
-    return fail('INVALID_RESPONSE');
-  }
-
-  let body: string;
-  try {
-    body = await response.text();
-  } catch {
-    return fail('INVALID_RESPONSE');
-  }
-  if (body.length < 1 || body.length > MAX_PORTFOLIO_RESPONSE_CHARACTERS) {
-    return fail('INVALID_RESPONSE');
-  }
-  try {
-    return JSON.parse(body) as unknown;
-  } catch {
-    return fail('INVALID_RESPONSE');
-  }
-}
-
 export class PortfolioApiClient {
   readonly #fetch: AuthenticationFetch;
 
@@ -79,22 +51,35 @@ export class PortfolioApiClient {
   }
 
   async readPortfolio(signal?: AbortSignal): Promise<ReportingPortfolioSnapshot> {
-    let response: Response;
+    const request = createRequestDeadline(signal);
     try {
-      response = await this.#fetch(PORTFOLIO_PATH, requestInit(signal));
-    } catch (error) {
-      if (isAbortFailure(error, signal)) throw error;
-      return fail('UNAVAILABLE');
-    }
+      let response: Response;
+      try {
+        response = await request.waitFor(this.#fetch(PORTFOLIO_PATH, requestInit(request.signal)));
+      } catch (error) {
+        if (request.didTimeout()) return fail('UNAVAILABLE');
+        if (isAbortFailure(error, signal)) throw error;
+        return fail('UNAVAILABLE');
+      }
 
-    if (response.status === 401) return fail('UNAUTHENTICATED');
-    if (response.status !== 200) return fail('UNAVAILABLE', retryAfterSeconds(response));
+      if (response.status === 401) return fail('UNAUTHENTICATED');
+      if (response.status !== 200) return fail('UNAVAILABLE', retryAfterSeconds(response));
 
-    try {
-      return parseReportingPortfolioResponse(await readBoundedPortfolioJson(response));
-    } catch (error) {
-      if (error instanceof PortfolioApiError) throw error;
-      return fail('INVALID_RESPONSE');
+      try {
+        return parseReportingPortfolioResponse(
+          await readBoundedJsonResponse(response, {
+            maximumBytes: MAX_PORTFOLIO_RESPONSE_BYTES,
+            signal: request.signal,
+          }),
+        );
+      } catch (error) {
+        if (request.didTimeout()) return fail('UNAVAILABLE');
+        if (signal?.aborted === true) throw error;
+        if (error instanceof PortfolioApiError) throw error;
+        return fail('INVALID_RESPONSE');
+      }
+    } finally {
+      request.dispose();
     }
   }
 }

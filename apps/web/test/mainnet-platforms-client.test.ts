@@ -207,6 +207,27 @@ describe('mainnet platforms API client', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it('times out an abort-ignorant fetch and ignores its late directory response', async () => {
+    vi.useFakeTimers();
+    const lateResponse = Promise.withResolvers<Response>();
+    let requestSignal: AbortSignal | undefined;
+    const read = new MainnetPlatformsApiClient({
+      fetch: async (_input, init) => {
+        requestSignal = init?.signal ?? undefined;
+        return lateResponse.promise;
+      },
+    }).readDirectory();
+    const failure = expect(read).rejects.toMatchObject({ code: 'UNAVAILABLE' });
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    await failure;
+
+    expect(requestSignal?.aborted).toBe(true);
+    lateResponse.resolve(jsonResponse(MAINNET_PLATFORM_DIRECTORY_RESPONSE));
+    await Promise.resolve();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it('clears the internal deadline after a successful response', async () => {
     vi.useFakeTimers();
 
@@ -220,8 +241,8 @@ describe('mainnet platforms API client', () => {
 
   it('preserves aborts while making other transport failures retryable', async () => {
     const controller = new AbortController();
-    controller.abort();
     const aborted = new DOMException('aborted', 'AbortError');
+    controller.abort(aborted);
     await expect(
       new MainnetPlatformsApiClient({ fetch: async () => Promise.reject(aborted) }).readDirectory(
         controller.signal,

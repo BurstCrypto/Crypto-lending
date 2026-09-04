@@ -9,6 +9,7 @@ import {
   startAuthenticationRegistration,
 } from '../lib/authentication/start-client';
 import type { AuthenticationFetch } from '../lib/authentication/session-client';
+import { API_REQUEST_TIMEOUT_MILLISECONDS } from '../lib/http/bounded-response';
 
 function success(authorizationUrl = 'https://identity.example/authorize?state=opaque'): Response {
   return new Response(JSON.stringify({ authorizationUrl }), {
@@ -25,7 +26,10 @@ function credentialBearingAuthorizationUrl(): string {
 }
 
 describe('authentication start client', () => {
-  afterEach(() => vi.unstubAllEnvs());
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.useRealTimers();
+  });
 
   it('starts login with one safe local target and returns the validated authorization URL', async () => {
     const requestFetch = vi.fn<AuthenticationFetch>(async () => success());
@@ -41,6 +45,7 @@ describe('authentication start client', () => {
         credentials: 'same-origin',
         headers: { Accept: 'application/json' },
         redirect: 'error',
+        signal: expect.any(AbortSignal),
       },
     );
   });
@@ -82,6 +87,7 @@ describe('authentication start client', () => {
         declaredResidencyCountryCode: 'US',
         returnPath: '/account/wallets',
       }),
+      signal: expect.any(AbortSignal),
     });
     expect(JSON.stringify(requestFetch.mock?.calls ?? [])).not.toContain('Authorization');
   });
@@ -184,5 +190,26 @@ describe('authentication start client', () => {
         fetch: async () => new Response('not json', { status: 200 }),
       }),
     ).rejects.toEqual(expect.any(AuthenticationUnavailableError));
+  });
+
+  it('times out an abort-ignorant request and ignores its late authorization result', async () => {
+    vi.useFakeTimers();
+    const lateResponse = Promise.withResolvers<Response>();
+    let requestSignal: AbortSignal | undefined;
+    const login = startAuthenticationLogin('/account', {
+      fetch: async (_input, init) => {
+        requestSignal = init?.signal ?? undefined;
+        return lateResponse.promise;
+      },
+    });
+    const failure = expect(login).rejects.toEqual(expect.any(AuthenticationUnavailableError));
+
+    await vi.advanceTimersByTimeAsync(API_REQUEST_TIMEOUT_MILLISECONDS);
+    await failure;
+
+    expect(requestSignal?.aborted).toBe(true);
+    lateResponse.resolve(success());
+    await Promise.resolve();
+    expect(vi.getTimerCount()).toBe(0);
   });
 });

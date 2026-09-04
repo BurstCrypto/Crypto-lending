@@ -1,6 +1,7 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { AuthenticationFetch } from '@/lib/authentication/http';
+import { API_REQUEST_TIMEOUT_MILLISECONDS } from '@/lib/http/bounded-response';
 import {
   HttpMainnetWalletRosterClient,
   MAINNET_WALLET_ROSTER_PATH,
@@ -31,6 +32,8 @@ function response(status: number, body: unknown, headers: HeadersInit = {}): Res
     headers: { 'Content-Type': 'application/json', ...headers },
   });
 }
+
+afterEach(() => vi.useRealTimers());
 
 describe('mainnet wallet roster response', () => {
   it('retains only masked, chain-qualified summaries for supported mainnet wallets', () => {
@@ -105,6 +108,40 @@ describe('HttpMainnetWalletRosterClient', () => {
     });
   });
 
+  it('rejects a successful roster response with no body stream', async () => {
+    const client = new HttpMainnetWalletRosterClient({
+      fetch: async () =>
+        new Response(null, { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    });
+
+    await expect(client.readWallets()).rejects.toMatchObject({ code: 'INVALID_RESPONSE' });
+  });
+
+  it('maps a stalled roster body deadline to unavailable', async () => {
+    vi.useFakeTimers();
+    const pendingPull = Promise.withResolvers<void>();
+    const cancel = vi.fn(() => pendingPull.resolve());
+    const stalled = new Response(
+      new ReadableStream<Uint8Array>({
+        pull() {
+          return pendingPull.promise;
+        },
+        cancel,
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    );
+    const read = new HttpMainnetWalletRosterClient({
+      fetch: async () => stalled,
+    }).readWallets();
+    const failure = expect(read).rejects.toMatchObject({ code: 'UNAVAILABLE' });
+
+    await vi.advanceTimersByTimeAsync(API_REQUEST_TIMEOUT_MILLISECONDS);
+
+    await failure;
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it('removes one canonical wallet with same-origin credentials and a CSRF proof', async () => {
     const requestFetch = vi.fn<AuthenticationFetch>(
       async () => new Response(null, { status: 204 }),
@@ -121,6 +158,7 @@ describe('HttpMainnetWalletRosterClient', () => {
       credentials: 'same-origin',
       headers: { Accept: 'application/json', 'X-CSRF-Token': CSRF_TOKEN },
       redirect: 'error',
+      signal: expect.any(AbortSignal),
     });
     const serializedCall = JSON.stringify(requestFetch.mock.calls);
     expect(serializedCall).not.toContain('Authorization');
@@ -217,5 +255,28 @@ describe('HttpMainnetWalletRosterClient', () => {
       code: 'UNAVAILABLE',
       message: 'Wallet list unavailable.',
     });
+  });
+
+  it('times out an abort-ignorant removal and never accepts its late 204', async () => {
+    vi.useFakeTimers();
+    const lateResponse = Promise.withResolvers<Response>();
+    let requestSignal: AbortSignal | undefined;
+    const client = new HttpMainnetWalletRosterClient({
+      fetch: async (_input, init) => {
+        requestSignal = init?.signal ?? undefined;
+        return lateResponse.promise;
+      },
+      cookieHeader: `__Host-cl_csrf=${CSRF_TOKEN}`,
+    });
+    const removal = client.removeWallet(WALLET_ID);
+    const failure = expect(removal).rejects.toMatchObject({ code: 'UNAVAILABLE' });
+
+    await vi.advanceTimersByTimeAsync(API_REQUEST_TIMEOUT_MILLISECONDS);
+    await failure;
+
+    expect(requestSignal?.aborted).toBe(true);
+    lateResponse.resolve(new Response(null, { status: 204 }));
+    await Promise.resolve();
+    expect(vi.getTimerCount()).toBe(0);
   });
 });

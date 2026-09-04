@@ -5,6 +5,7 @@ import {
   type AuthenticationFetch,
 } from '../authentication/http';
 import { readAuthenticationCsrfToken } from '../authentication/session-client';
+import { createRequestDeadline } from '../http/bounded-response';
 import {
   MAINNET_WALLET_NETWORKS,
   MAINNET_WALLET_REGISTRY,
@@ -244,21 +245,31 @@ export class HttpMainnetWalletRosterClient implements MainnetWalletRosterClient 
   }
 
   async readWallets(signal?: AbortSignal): Promise<MainnetWalletRoster> {
-    let response: Response;
+    const request = createRequestDeadline(signal);
     try {
-      response = await this.#fetch(MAINNET_WALLET_ROSTER_PATH, readRequestInit(signal));
-    } catch (error) {
-      if (isAbortFailure(error, signal)) throw error;
-      return fail('UNAVAILABLE');
-    }
-    if (response.status === 401) return fail('UNAUTHENTICATED');
-    if (response.status === 503) return fail('UNAVAILABLE', retryAfterSeconds(response));
-    if (response.status !== 200) return fail('UNAVAILABLE');
-    try {
-      return parseMainnetWalletRosterResponse(await readBoundedJson(response));
-    } catch (error) {
-      if (error instanceof MainnetWalletRosterError) throw error;
-      return fail('INVALID_RESPONSE');
+      let response: Response;
+      try {
+        response = await request.waitFor(
+          this.#fetch(MAINNET_WALLET_ROSTER_PATH, readRequestInit(request.signal)),
+        );
+      } catch (error) {
+        if (request.didTimeout()) return fail('UNAVAILABLE');
+        if (isAbortFailure(error, signal)) throw error;
+        return fail('UNAVAILABLE');
+      }
+      if (response.status === 401) return fail('UNAUTHENTICATED');
+      if (response.status === 503) return fail('UNAVAILABLE', retryAfterSeconds(response));
+      if (response.status !== 200) return fail('UNAVAILABLE');
+      try {
+        return parseMainnetWalletRosterResponse(await readBoundedJson(response, request.signal));
+      } catch (error) {
+        if (request.didTimeout()) return fail('UNAVAILABLE');
+        if (signal?.aborted === true) throw error;
+        if (error instanceof MainnetWalletRosterError) throw error;
+        return fail('INVALID_RESPONSE');
+      }
+    } finally {
+      request.dispose();
     }
   }
 
@@ -275,21 +286,29 @@ export class HttpMainnetWalletRosterClient implements MainnetWalletRosterClient 
       return fail('UNAUTHENTICATED');
     }
 
-    let response: Response;
+    const request = createRequestDeadline(signal);
     try {
-      response = await this.#fetch(
-        `${MAINNET_WALLET_ROSTER_PATH}/${walletId}`,
-        removeRequestInit(csrfToken, signal),
-      );
-    } catch (error) {
-      if (isAbortFailure(error, signal)) throw error;
-      return fail('UNAVAILABLE');
-    }
+      let response: Response;
+      try {
+        response = await request.waitFor(
+          this.#fetch(
+            `${MAINNET_WALLET_ROSTER_PATH}/${walletId}`,
+            removeRequestInit(csrfToken, request.signal),
+          ),
+        );
+      } catch (error) {
+        if (request.didTimeout()) return fail('UNAVAILABLE');
+        if (isAbortFailure(error, signal)) throw error;
+        return fail('UNAVAILABLE');
+      }
 
-    if (response.status === 401) return fail('UNAUTHENTICATED');
-    if (response.status === 429 || response.status === 503) {
-      return fail('UNAVAILABLE', retryAfterSeconds(response));
+      if (response.status === 401) return fail('UNAUTHENTICATED');
+      if (response.status === 429 || response.status === 503) {
+        return fail('UNAVAILABLE', retryAfterSeconds(response));
+      }
+      if (response.status !== 204) return fail('UNAVAILABLE');
+    } finally {
+      request.dispose();
     }
-    if (response.status !== 204) return fail('UNAVAILABLE');
   }
 }

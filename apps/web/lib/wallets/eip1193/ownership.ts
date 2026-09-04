@@ -5,6 +5,7 @@ import {
   retryAfterSeconds,
 } from '../../authentication/http';
 import { readAuthenticationCsrfToken } from '../../authentication/session-client';
+import { createRequestDeadline, type RequestDeadline } from '../../http/bounded-response';
 import { MAINNET_WALLET_REGISTRY } from '../mainnet-network-policy';
 import {
   assertOwnershipChallenge,
@@ -395,18 +396,24 @@ export class HttpEvmWalletOwnershipClient implements EvmWalletOwnershipClient {
     if (input.registryEnvironment !== 'MAINNET' && input.registryEnvironment !== 'TESTNET') {
       fail(WALLET_OWNERSHIP_HANDOFF_ERROR_CODES.rejected);
     }
-    const response = await this.#post(
-      WALLET_OWNERSHIP_CHALLENGE_PATH,
-      JSON.stringify({ chainId: input.chainId, address: input.address.toLowerCase() }),
-      signal,
-    );
-    if (response.status === 400) fail(WALLET_OWNERSHIP_HANDOFF_ERROR_CODES.rejected);
-    if (response.status === 401) fail(WALLET_OWNERSHIP_HANDOFF_ERROR_CODES.unauthenticated);
-    if (response.status === 429 || response.status === 503) {
-      fail(WALLET_OWNERSHIP_HANDOFF_ERROR_CODES.unavailable, retryAfterSeconds(response));
+    const request = createRequestDeadline(signal);
+    try {
+      const response = await this.#post(
+        WALLET_OWNERSHIP_CHALLENGE_PATH,
+        JSON.stringify({ chainId: input.chainId, address: input.address.toLowerCase() }),
+        request,
+        signal,
+      );
+      if (response.status === 400) fail(WALLET_OWNERSHIP_HANDOFF_ERROR_CODES.rejected);
+      if (response.status === 401) fail(WALLET_OWNERSHIP_HANDOFF_ERROR_CODES.unauthenticated);
+      if (response.status === 429 || response.status === 503) {
+        fail(WALLET_OWNERSHIP_HANDOFF_ERROR_CODES.unavailable, retryAfterSeconds(response));
+      }
+      if (response.status !== 201) fail();
+      return parseChallenge(await this.#json(response, request, signal), input, this.#publicOrigin);
+    } finally {
+      request.dispose();
     }
-    if (response.status !== 201) fail();
-    return parseChallenge(await this.#json(response), input, this.#publicOrigin);
   }
 
   async submitProof(
@@ -418,27 +425,42 @@ export class HttpEvmWalletOwnershipClient implements EvmWalletOwnershipClient {
     } catch {
       fail(WALLET_OWNERSHIP_HANDOFF_ERROR_CODES.rejected);
     }
-    const response = await this.#post(
-      WALLET_OWNERSHIP_PROOF_PATH,
-      JSON.stringify({
-        kind: 'EVM_EIP191_EOA',
-        challengeId: input.signature.challengeId,
-        message: input.challenge.message,
-        signature: input.signature.signature,
-      }),
-      signal,
-    );
-    if (response.status === 400) fail(WALLET_OWNERSHIP_HANDOFF_ERROR_CODES.rejected);
-    if (response.status === 401) fail(WALLET_OWNERSHIP_HANDOFF_ERROR_CODES.unauthenticated);
-    if (response.status === 409) fail(WALLET_OWNERSHIP_HANDOFF_ERROR_CODES.conflict);
-    if (response.status === 503) {
-      fail(WALLET_OWNERSHIP_HANDOFF_ERROR_CODES.unavailable, retryAfterSeconds(response));
+    const request = createRequestDeadline(signal);
+    try {
+      const response = await this.#post(
+        WALLET_OWNERSHIP_PROOF_PATH,
+        JSON.stringify({
+          kind: 'EVM_EIP191_EOA',
+          challengeId: input.signature.challengeId,
+          message: input.challenge.message,
+          signature: input.signature.signature,
+        }),
+        request,
+        signal,
+      );
+      if (response.status === 400) fail(WALLET_OWNERSHIP_HANDOFF_ERROR_CODES.rejected);
+      if (response.status === 401) fail(WALLET_OWNERSHIP_HANDOFF_ERROR_CODES.unauthenticated);
+      if (response.status === 409) fail(WALLET_OWNERSHIP_HANDOFF_ERROR_CODES.conflict);
+      if (response.status === 503) {
+        fail(WALLET_OWNERSHIP_HANDOFF_ERROR_CODES.unavailable, retryAfterSeconds(response));
+      }
+      if (response.status !== 200 && response.status !== 201) fail();
+      return parseRegistrationResult(
+        await this.#json(response, request, signal),
+        input,
+        response.status,
+      );
+    } finally {
+      request.dispose();
     }
-    if (response.status !== 200 && response.status !== 201) fail();
-    return parseRegistrationResult(await this.#json(response), input, response.status);
   }
 
-  async #post(path: string, body: string, signal: AbortSignal | undefined): Promise<Response> {
+  async #post(
+    path: string,
+    body: string,
+    request: RequestDeadline,
+    callerSignal: AbortSignal | undefined,
+  ): Promise<Response> {
     let csrfToken: string;
     try {
       const cookieHeader =
@@ -449,17 +471,24 @@ export class HttpEvmWalletOwnershipClient implements EvmWalletOwnershipClient {
     }
 
     try {
-      return await this.#fetch(path, requestInit(csrfToken, body, signal));
+      return await request.waitFor(this.#fetch(path, requestInit(csrfToken, body, request.signal)));
     } catch (error) {
-      if (isAbortFailure(error, signal)) throw error;
+      if (request.didTimeout()) fail();
+      if (isAbortFailure(error, callerSignal)) throw error;
       fail();
     }
   }
 
-  async #json(response: Response): Promise<unknown> {
+  async #json(
+    response: Response,
+    request: RequestDeadline,
+    callerSignal: AbortSignal | undefined,
+  ): Promise<unknown> {
     try {
-      return await readBoundedJson(response);
-    } catch {
+      return await readBoundedJson(response, request.signal);
+    } catch (error) {
+      if (request.didTimeout()) fail();
+      if (callerSignal?.aborted === true) throw error;
       fail();
     }
   }

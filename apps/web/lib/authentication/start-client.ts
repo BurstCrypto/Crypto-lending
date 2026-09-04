@@ -1,4 +1,5 @@
 import { AuthenticationRejectedError, AuthenticationUnavailableError } from './errors';
+import { createRequestDeadline } from '../http/bounded-response';
 import {
   type AuthenticationFetch,
   isAbortFailure,
@@ -111,20 +112,33 @@ async function start(
   requestFetch: AuthenticationFetch,
   signal: AbortSignal | undefined,
 ): Promise<string> {
-  let response: Response;
+  const request = createRequestDeadline(signal);
   try {
-    response = await requestFetch(path, init);
-  } catch (error) {
-    if (isAbortFailure(error, signal)) throw error;
-    throw new AuthenticationUnavailableError();
+    let response: Response;
+    try {
+      response = await request.waitFor(requestFetch(path, { ...init, signal: request.signal }));
+    } catch (error) {
+      if (request.didTimeout()) throw new AuthenticationUnavailableError();
+      if (isAbortFailure(error, signal)) throw error;
+      throw new AuthenticationUnavailableError();
+    }
+    if (response.status === 400 || response.status === 401) {
+      throw new AuthenticationRejectedError();
+    }
+    if (response.status !== 200) {
+      throw new AuthenticationUnavailableError(retryAfterSeconds(response));
+    }
+    try {
+      return parseStartResult(await readBoundedJson(response, request.signal));
+    } catch (error) {
+      if (request.didTimeout()) throw new AuthenticationUnavailableError();
+      if (signal?.aborted === true) throw error;
+      if (error instanceof AuthenticationUnavailableError) throw error;
+      throw new AuthenticationUnavailableError();
+    }
+  } finally {
+    request.dispose();
   }
-  if (response.status === 400 || response.status === 401) {
-    throw new AuthenticationRejectedError();
-  }
-  if (response.status !== 200) {
-    throw new AuthenticationUnavailableError(retryAfterSeconds(response));
-  }
-  return parseStartResult(await readBoundedJson(response));
 }
 
 export async function startAuthenticationLogin(

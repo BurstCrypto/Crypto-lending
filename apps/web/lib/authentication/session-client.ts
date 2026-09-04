@@ -1,5 +1,6 @@
 import { parseAccountProfile, type AccountProfile } from './account-profile';
 import { AuthenticationUnauthenticatedError, AuthenticationUnavailableError } from './errors';
+import { createRequestDeadline } from '../http/bounded-response';
 import {
   type AuthenticationFetch,
   isAbortFailure,
@@ -122,22 +123,37 @@ export async function restoreAuthenticationSession(
   options: RestoreAuthenticationSessionOptions = {},
 ): Promise<AccountProfile> {
   const requestFetch = options.fetch ?? globalThis.fetch;
-  let response: Response;
+  const request = createRequestDeadline(options.signal);
   try {
-    response = await requestFetch(
-      AUTHENTICATION_ACCOUNT_PROFILE_PATH,
-      requestInit('GET', options.signal, { Accept: 'application/json' }),
-    );
-  } catch (error) {
-    if (isAbortFailure(error, options.signal)) throw error;
-    throw new AuthenticationUnavailableError();
-  }
+    let response: Response;
+    try {
+      response = await request.waitFor(
+        requestFetch(
+          AUTHENTICATION_ACCOUNT_PROFILE_PATH,
+          requestInit('GET', request.signal, { Accept: 'application/json' }),
+        ),
+      );
+    } catch (error) {
+      if (request.didTimeout()) throw new AuthenticationUnavailableError();
+      if (isAbortFailure(error, options.signal)) throw error;
+      throw new AuthenticationUnavailableError();
+    }
 
-  if (response.status === 401) throw new AuthenticationUnauthenticatedError();
-  if (response.status !== 200) {
-    throw new AuthenticationUnavailableError(retryAfterSeconds(response));
+    if (response.status === 401) throw new AuthenticationUnauthenticatedError();
+    if (response.status !== 200) {
+      throw new AuthenticationUnavailableError(retryAfterSeconds(response));
+    }
+    try {
+      return parseAccountProfile(await readBoundedJson(response, request.signal));
+    } catch (error) {
+      if (request.didTimeout()) throw new AuthenticationUnavailableError();
+      if (options.signal?.aborted === true) throw error;
+      if (error instanceof AuthenticationUnavailableError) throw error;
+      throw new AuthenticationUnavailableError();
+    }
+  } finally {
+    request.dispose();
   }
-  return parseAccountProfile(await readBoundedJson(response));
 }
 
 export async function logoutAuthenticationSession(
@@ -145,25 +161,33 @@ export async function logoutAuthenticationSession(
 ): Promise<string | null> {
   const csrfToken = readAuthenticationCsrfToken(options.cookieHeader ?? browserCookieHeader());
   const requestFetch = options.fetch ?? globalThis.fetch;
-  let response: Response;
+  const request = createRequestDeadline(options.signal);
   try {
-    response = await requestFetch(
-      AUTHENTICATION_LOGOUT_PATH,
-      requestInit('POST', options.signal, {
-        Accept: 'application/json',
-        'X-CSRF-Token': csrfToken,
-      }),
-    );
-  } catch (error) {
-    if (isAbortFailure(error, options.signal)) throw error;
-    throw new AuthenticationUnavailableError();
-  }
+    let response: Response;
+    try {
+      response = await request.waitFor(
+        requestFetch(
+          AUTHENTICATION_LOGOUT_PATH,
+          requestInit('POST', request.signal, {
+            Accept: 'application/json',
+            'X-CSRF-Token': csrfToken,
+          }),
+        ),
+      );
+    } catch (error) {
+      if (request.didTimeout()) throw new AuthenticationUnavailableError();
+      if (isAbortFailure(error, options.signal)) throw error;
+      throw new AuthenticationUnavailableError();
+    }
 
-  if (response.status === 401) throw new AuthenticationUnauthenticatedError();
-  if (response.status !== 204) {
-    throw new AuthenticationUnavailableError(retryAfterSeconds(response));
+    if (response.status === 401) throw new AuthenticationUnauthenticatedError();
+    if (response.status !== 204) {
+      throw new AuthenticationUnavailableError(retryAfterSeconds(response));
+    }
+    return providerLogoutUrl(response);
+  } finally {
+    request.dispose();
   }
-  return providerLogoutUrl(response);
 }
 
 export type { AccountProfile, AuthenticationFetch };

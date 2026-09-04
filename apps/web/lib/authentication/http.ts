@@ -1,11 +1,12 @@
 import { AuthenticationUnavailableError } from './errors';
+import { BoundedResponseError, readBoundedJsonResponse } from '../http/bounded-response';
 
 export type AuthenticationFetch = (
   input: RequestInfo | URL,
   init?: RequestInit,
 ) => Promise<Response>;
 
-const MAX_AUTHENTICATION_RESPONSE_CHARACTERS = 16_384;
+const MAX_AUTHENTICATION_RESPONSE_BYTES = 16_384;
 
 export function isAbortFailure(error: unknown, signal: AbortSignal | undefined): boolean {
   return (
@@ -21,31 +22,15 @@ export function retryAfterSeconds(response: Response): number | undefined {
   return parsed <= 300 ? parsed : undefined;
 }
 
-export async function readBoundedJson(response: Response): Promise<unknown> {
-  const contentType = response.headers.get('content-type')?.split(';', 1)[0]?.trim().toLowerCase();
-  if (contentType !== 'application/json') throw new AuthenticationUnavailableError();
-
-  const contentLength = response.headers.get('content-length');
-  if (
-    contentLength !== null &&
-    (!/^(?:0|[1-9][0-9]*)$/u.test(contentLength) ||
-      Number(contentLength) > MAX_AUTHENTICATION_RESPONSE_CHARACTERS)
-  ) {
-    throw new AuthenticationUnavailableError();
-  }
-
-  let text: string;
+export async function readBoundedJson(response: Response, signal?: AbortSignal): Promise<unknown> {
   try {
-    text = await response.text();
-  } catch {
-    throw new AuthenticationUnavailableError();
-  }
-  if (text.length < 1 || text.length > MAX_AUTHENTICATION_RESPONSE_CHARACTERS) {
-    throw new AuthenticationUnavailableError();
-  }
-  try {
-    return JSON.parse(text) as unknown;
-  } catch {
+    return await readBoundedJsonResponse(response, {
+      maximumBytes: MAX_AUTHENTICATION_RESPONSE_BYTES,
+      ...(signal === undefined ? {} : { signal }),
+    });
+  } catch (error) {
+    if (signal?.aborted === true) throw error;
+    if (!(error instanceof BoundedResponseError)) throw error;
     throw new AuthenticationUnavailableError();
   }
 }

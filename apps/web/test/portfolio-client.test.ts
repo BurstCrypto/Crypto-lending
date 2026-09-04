@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { AuthenticationFetch } from '../lib/authentication';
 import {
@@ -10,6 +10,7 @@ import {
   REPORTING_PORTFOLIO_RESPONSE,
   REPORTING_PORTFOLIO_SNAPSHOT,
 } from './fixtures/reporting-portfolio';
+import { API_REQUEST_TIMEOUT_MILLISECONDS } from '../lib/http/bounded-response';
 
 function jsonResponse(body: unknown, status = 200, headers: HeadersInit = {}): Response {
   return new Response(JSON.stringify(body), {
@@ -17,6 +18,8 @@ function jsonResponse(body: unknown, status = 200, headers: HeadersInit = {}): R
     headers: { 'Content-Type': 'application/json; charset=utf-8', ...headers },
   });
 }
+
+afterEach(() => vi.useRealTimers());
 
 describe('production portfolio API client', () => {
   it('reads and validates the portfolio through one fixed same-origin no-store GET', async () => {
@@ -33,6 +36,7 @@ describe('production portfolio API client', () => {
       credentials: 'same-origin',
       headers: { Accept: 'application/json' },
       redirect: 'error',
+      signal: expect.any(AbortSignal),
     });
     expect(JSON.stringify(requestFetch.mock.calls)).not.toContain('Authorization');
   });
@@ -100,10 +104,53 @@ describe('production portfolio API client', () => {
     ).rejects.toMatchObject({ code: 'INVALID_RESPONSE' });
   });
 
+  it('bounds and cancels an oversized chunked portfolio body', async () => {
+    const cancel = vi.fn();
+    const chunk = new Uint8Array(1_100_000).fill(0x20);
+    const response = new Response(
+      new ReadableStream<Uint8Array>({
+        pull(controller) {
+          controller.enqueue(chunk);
+        },
+        cancel,
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    );
+
+    await expect(
+      new PortfolioApiClient({ fetch: async () => response }).readPortfolio(),
+    ).rejects.toMatchObject({ code: 'INVALID_RESPONSE' });
+    expect(response.headers.has('content-length')).toBe(false);
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('maps a stalled portfolio body deadline to unavailable and clears its timer', async () => {
+    vi.useFakeTimers();
+    const pendingPull = Promise.withResolvers<void>();
+    const cancel = vi.fn(() => pendingPull.resolve());
+    const response = new Response(
+      new ReadableStream<Uint8Array>({
+        pull() {
+          return pendingPull.promise;
+        },
+        cancel,
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    );
+    const read = new PortfolioApiClient({ fetch: async () => response }).readPortfolio();
+    const failure = expect(read).rejects.toMatchObject({ code: 'UNAVAILABLE' });
+
+    await vi.advanceTimersByTimeAsync(API_REQUEST_TIMEOUT_MILLISECONDS);
+
+    await failure;
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it('preserves aborts while making other transport failures retryable', async () => {
     const controller = new AbortController();
-    controller.abort();
     const aborted = new DOMException('aborted', 'AbortError');
+    controller.abort(aborted);
     await expect(
       new PortfolioApiClient({ fetch: async () => Promise.reject(aborted) }).readPortfolio(
         controller.signal,

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   AuthenticationUnauthenticatedError,
@@ -12,6 +12,7 @@ import {
   type AuthenticationFetch,
 } from '../lib/authentication/session-client';
 import { parseAccountProfile } from '../lib/authentication/account-profile';
+import { API_REQUEST_TIMEOUT_MILLISECONDS } from '../lib/http/bounded-response';
 
 const PROFILE = Object.freeze({
   accountId: '0f27af0b-48b2-4f1b-b3d4-cd531a0b4458',
@@ -31,6 +32,8 @@ function jsonResponse(body: unknown, status = 200, headers: HeadersInit = {}): R
     headers: { 'Content-Type': 'application/json; charset=utf-8', ...headers },
   });
 }
+
+afterEach(() => vi.useRealTimers());
 
 describe('account profile response boundary', () => {
   it('accepts and freezes the exact canonical API profile', () => {
@@ -75,6 +78,7 @@ describe('authentication session client', () => {
       credentials: 'same-origin',
       headers: { Accept: 'application/json' },
       redirect: 'error',
+      signal: expect.any(AbortSignal),
     });
     expect(JSON.stringify(requestFetch.mock?.calls ?? '')).not.toContain('Authorization');
   });
@@ -116,10 +120,53 @@ describe('authentication session client', () => {
     ).rejects.toEqual(expect.any(AuthenticationUnavailableError));
   });
 
+  it('bounds and cancels a chunked profile body without Content-Length', async () => {
+    const cancel = vi.fn();
+    const chunk = new Uint8Array(9_000).fill(0x20);
+    const response = new Response(
+      new ReadableStream<Uint8Array>({
+        pull(controller) {
+          controller.enqueue(chunk);
+        },
+        cancel,
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    );
+
+    await expect(restoreAuthenticationSession({ fetch: async () => response })).rejects.toEqual(
+      expect.any(AuthenticationUnavailableError),
+    );
+    expect(response.headers.has('content-length')).toBe(false);
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('maps a stalled profile body deadline to authentication unavailable', async () => {
+    vi.useFakeTimers();
+    const pendingPull = Promise.withResolvers<void>();
+    const cancel = vi.fn(() => pendingPull.resolve());
+    const response = new Response(
+      new ReadableStream<Uint8Array>({
+        pull() {
+          return pendingPull.promise;
+        },
+        cancel,
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    );
+    const restore = restoreAuthenticationSession({ fetch: async () => response });
+    const failure = expect(restore).rejects.toEqual(expect.any(AuthenticationUnavailableError));
+
+    await vi.advanceTimersByTimeAsync(API_REQUEST_TIMEOUT_MILLISECONDS);
+
+    await failure;
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it('preserves aborts so an unmounted UI does not render an outage', async () => {
     const controller = new AbortController();
-    controller.abort();
     const aborted = new DOMException('aborted', 'AbortError');
+    controller.abort(aborted);
 
     await expect(
       restoreAuthenticationSession({
@@ -161,6 +208,7 @@ describe('authentication CSRF and logout boundary', () => {
       credentials: 'same-origin',
       headers: { Accept: 'application/json', 'X-CSRF-Token': CSRF },
       redirect: 'error',
+      signal: expect.any(AbortSignal),
     });
     const serializedCall = JSON.stringify(requestFetch.mock?.calls ?? []);
     expect(serializedCall).not.toContain('Authorization');
@@ -220,5 +268,27 @@ describe('authentication CSRF and logout boundary', () => {
       message: 'Authentication unavailable',
       retryAfterSeconds: 2,
     });
+  });
+
+  it('times out an abort-ignorant logout and never accepts its late 204', async () => {
+    vi.useFakeTimers();
+    const lateResponse = Promise.withResolvers<Response>();
+    let requestSignal: AbortSignal | undefined;
+    const logout = logoutAuthenticationSession({
+      cookieHeader: `__Host-cl_csrf=${CSRF}`,
+      fetch: async (_input, init) => {
+        requestSignal = init?.signal ?? undefined;
+        return lateResponse.promise;
+      },
+    });
+    const failure = expect(logout).rejects.toEqual(expect.any(AuthenticationUnavailableError));
+
+    await vi.advanceTimersByTimeAsync(API_REQUEST_TIMEOUT_MILLISECONDS);
+    await failure;
+
+    expect(requestSignal?.aborted).toBe(true);
+    lateResponse.resolve(new Response(null, { status: 204 }));
+    await Promise.resolve();
+    expect(vi.getTimerCount()).toBe(0);
   });
 });

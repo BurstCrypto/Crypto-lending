@@ -1,6 +1,7 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { AuthenticationFetch } from '@/lib/authentication/http';
+import { API_REQUEST_TIMEOUT_MILLISECONDS } from '@/lib/http/bounded-response';
 import {
   InjectedEip1193WalletAdapter,
   type InjectedEip1193WalletAdapterOptions,
@@ -116,6 +117,8 @@ function httpClient(fetch: AuthenticationFetch) {
     publicOrigin: ORIGIN,
   });
 }
+
+afterEach(() => vi.useRealTimers());
 
 describe('HttpEvmWalletOwnershipClient', () => {
   it('uses the exact KAN-56 endpoints, CSRF contract, challenge, and proof DTO', async () => {
@@ -288,6 +291,79 @@ describe('HttpEvmWalletOwnershipClient', () => {
         registryEnvironment: 'TESTNET',
       }),
     ).rejects.toMatchObject({ code: WALLET_OWNERSHIP_HANDOFF_ERROR_CODES.rejected });
+  });
+
+  it('bounds and cancels an oversized chunked ownership response', async () => {
+    const cancel = vi.fn();
+    const chunk = new Uint8Array(9_000).fill(0x20);
+    const response = new Response(
+      new ReadableStream<Uint8Array>({
+        pull(controller) {
+          controller.enqueue(chunk);
+        },
+        cancel,
+      }),
+      { status: 201, headers: { 'Content-Type': 'application/json' } },
+    );
+
+    await expect(
+      httpClient(async () => response).issueChallenge({
+        chainId: 'eip155:11155111',
+        address: ADDRESS,
+        registryEnvironment: 'TESTNET',
+      }),
+    ).rejects.toMatchObject({ code: WALLET_OWNERSHIP_HANDOFF_ERROR_CODES.unavailable });
+    expect(response.headers.has('content-length')).toBe(false);
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('maps a stalled ownership body deadline to unavailable', async () => {
+    vi.useFakeTimers();
+    const pendingPull = Promise.withResolvers<void>();
+    const cancel = vi.fn(() => pendingPull.resolve());
+    const response = new Response(
+      new ReadableStream<Uint8Array>({
+        pull() {
+          return pendingPull.promise;
+        },
+        cancel,
+      }),
+      { status: 201, headers: { 'Content-Type': 'application/json' } },
+    );
+    const issue = httpClient(async () => response).issueChallenge({
+      chainId: 'eip155:11155111',
+      address: ADDRESS,
+      registryEnvironment: 'TESTNET',
+    });
+    const failure = expect(issue).rejects.toMatchObject({
+      code: WALLET_OWNERSHIP_HANDOFF_ERROR_CODES.unavailable,
+    });
+
+    await vi.advanceTimersByTimeAsync(API_REQUEST_TIMEOUT_MILLISECONDS);
+
+    await failure;
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('preserves caller cancellation while awaiting the ownership API', async () => {
+    const lateResponse = Promise.withResolvers<Response>();
+    const controller = new AbortController();
+    const reason = new DOMException('wallet screen closed', 'AbortError');
+    const issue = httpClient(async () => lateResponse.promise).issueChallenge(
+      {
+        chainId: 'eip155:11155111',
+        address: ADDRESS,
+        registryEnvironment: 'TESTNET',
+      },
+      controller.signal,
+    );
+
+    controller.abort(reason);
+
+    await expect(issue).rejects.toBe(reason);
+    lateResponse.resolve(jsonResponse(201, challengeResponse()));
+    await Promise.resolve();
   });
 
   it('requires a valid session CSRF token before making any request', async () => {

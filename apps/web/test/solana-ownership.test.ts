@@ -1,6 +1,7 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { AuthenticationFetch } from '@/lib/authentication/http';
+import { API_REQUEST_TIMEOUT_MILLISECONDS } from '@/lib/http/bounded-response';
 import {
   WALLET_OWNERSHIP_CHALLENGE_PATH,
   WALLET_OWNERSHIP_PROOF_PATH,
@@ -115,6 +116,8 @@ function jsonResponse(status: number, body: unknown): Response {
   });
 }
 
+afterEach(() => vi.useRealTimers());
+
 describe('HttpSolanaWalletOwnershipClient', () => {
   it('uses the chain-bound SIWS challenge and exact Ed25519 proof body', async () => {
     const requestFetch = vi
@@ -222,6 +225,53 @@ describe('HttpSolanaWalletOwnershipClient', () => {
     await expect(
       client.submitProof({ challenge, signature: signature(challenge) }),
     ).rejects.toMatchObject({ code: 'WALLET_OWNERSHIP_UNAVAILABLE' });
+  });
+
+  it('rejects a successful ownership response with no body stream', async () => {
+    const client = new HttpSolanaWalletOwnershipClient({
+      fetch: async () =>
+        new Response(null, { status: 201, headers: { 'Content-Type': 'application/json' } }),
+      cookieHeader: `__Host-cl_csrf=${CSRF_TOKEN}`,
+      publicOrigin: ORIGIN,
+    });
+
+    await expect(
+      client.issueChallenge({
+        chainId: SOLANA_CAIP_CHAIN_IDS.mainnet,
+        address: ADDRESS,
+        registryEnvironment: 'MAINNET',
+      }),
+    ).rejects.toMatchObject({ code: 'WALLET_OWNERSHIP_UNAVAILABLE' });
+  });
+
+  it('times out an abort-ignorant ownership request and ignores its late response', async () => {
+    vi.useFakeTimers();
+    const lateResponse = Promise.withResolvers<Response>();
+    let requestSignal: AbortSignal | undefined;
+    const client = new HttpSolanaWalletOwnershipClient({
+      fetch: async (_input, init) => {
+        requestSignal = init?.signal ?? undefined;
+        return lateResponse.promise;
+      },
+      cookieHeader: `__Host-cl_csrf=${CSRF_TOKEN}`,
+      publicOrigin: ORIGIN,
+    });
+    const issue = client.issueChallenge({
+      chainId: SOLANA_CAIP_CHAIN_IDS.mainnet,
+      address: ADDRESS,
+      registryEnvironment: 'MAINNET',
+    });
+    const failure = expect(issue).rejects.toMatchObject({
+      code: 'WALLET_OWNERSHIP_UNAVAILABLE',
+    });
+
+    await vi.advanceTimersByTimeAsync(API_REQUEST_TIMEOUT_MILLISECONDS);
+    await failure;
+
+    expect(requestSignal?.aborted).toBe(true);
+    lateResponse.resolve(jsonResponse(201, challengeResponse()));
+    await Promise.resolve();
+    expect(vi.getTimerCount()).toBe(0);
   });
 });
 
