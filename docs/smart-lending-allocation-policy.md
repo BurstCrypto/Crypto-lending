@@ -140,8 +140,15 @@ runtime-code presence and records unapproved code hashes; checks the Pool proxy,
 AddressesProvider/admin, provider Pool/DataProvider, immutable DataProvider
 Pool, USDC, and USDT relationships; and observes the active Pool implementation
 with the proxy's simulated admin-context `eth_call`. Missing, malformed,
-unbound, or mismatched evidence is unavailable. No concrete RPC source exists
-yet, so source attestations are explicitly unverified rather than live proof.
+unbound, or mismatched evidence is unavailable. A dormant concrete executor now
+implements the exact 19-call serial transcript with strict JSON-RPC envelopes,
+one aggregate response-byte budget, absolute deadline and connection bounds,
+redirect and endpoint-change rejection, public-DNS-shaped HTTPS configuration,
+and sanitized failures. IP literals, local/private suffixes, user information,
+queries, fragments, and nonstandard ports are rejected before I/O. It has no
+configured provider endpoint, credential, Nest registration, or public runtime
+export; the module still binds the fail-closed unavailable source. Synthetic
+transport tests therefore do not make source attestations live or verified.
 
 This evidence is corroboration only. It cannot establish recommendation
 eligibility, authorize a financial action, or send, sign, or broadcast a write;

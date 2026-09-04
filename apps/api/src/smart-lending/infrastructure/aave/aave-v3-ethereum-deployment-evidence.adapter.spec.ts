@@ -7,11 +7,13 @@ import {
   type ReadAaveV3EthereumFinalizedRpcObservationRequest,
 } from './aave-v3-ethereum-finalized-rpc.source';
 import {
-  AAVE_V3_ETHEREUM_FINALIZED_RPC_READ_PLAN,
-  AAVE_V3_ETHEREUM_FINALIZED_RPC_READ_PLAN_FINGERPRINT_SHA256,
   AaveV3EthereumDeploymentEvidenceAdapter,
   AaveV3EthereumDeploymentEvidenceUnavailableError,
 } from './aave-v3-ethereum-deployment-evidence.adapter';
+import {
+  AAVE_V3_ETHEREUM_FINALIZED_RPC_READ_PLAN,
+  AAVE_V3_ETHEREUM_FINALIZED_RPC_READ_PLAN_FINGERPRINT_SHA256,
+} from './aave-v3-ethereum-finalized-rpc.plan';
 import { AAVE_V3_ETHEREUM_DEPLOYMENT_MANIFEST } from './aave-v3-ethereum-deployment.manifest';
 
 const EVALUATED_AT = '2026-09-03T18:00:00.000Z';

@@ -176,6 +176,7 @@ test('ignores source-code references and symbolic ternary branches but detects l
         "const outcome = response.status === 400 ? 'OIDC_TOKEN_EXCHANGE_REJECTED' : 'OIDC_TOKEN_SERVICE_UNAVAILABLE';",
         'const rotated = {',
         '  credentialId: input.successorCredentialId,',
+        '  variableDebtToken: PUBLIC_DEBT_TOKEN_ADDRESS,',
         '};',
         `const token = '${sentinel}';`,
         '',
@@ -203,6 +204,8 @@ test('allows only an exact reviewed public protocol identifier', () => {
   const repository = createRepository();
   const publicIdentifier = 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb';
   const publicProgramIdentifier = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
+  const publicContractAddress = '0x98c23e9d8f34fefb1b7bd6a91b7ff122f4e16f5c';
+  const publicDebtContractAddress = '0x72e95b8931767c79ba4eee721354d6e99a61d004';
   const nearbySecret = ['TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuE', 'a'].join('');
   try {
     write(
@@ -214,6 +217,11 @@ test('allows only an exact reviewed public protocol identifier', () => {
         `  API_TOKEN: '${publicIdentifier}',`,
         `  PUBLIC_TESTNET_TOKEN_PROGRAM: '${publicProgramIdentifier}',`,
         `  TOKEN_PROGRAM: '${publicProgramIdentifier}',`,
+        `  aToken: '${publicContractAddress}',`,
+        `  AAVE_V3_ETHEREUM_USDC_A_TOKEN: '${publicContractAddress}',`,
+        `  API_TOKEN: '${publicContractAddress}',`,
+        `  variableDebtToken: '${publicDebtContractAddress}',`,
+        `  SESSION_TOKEN: '${publicDebtContractAddress}',`,
         `  SECONDARY_TOKEN: '${nearbySecret}',`,
         '};',
         '',
@@ -229,9 +237,16 @@ test('allows only an exact reviewed public protocol identifier', () => {
         .trim()
         .split('\n')
         .filter((line) => line.startsWith('rule=assignment.high-entropy-secret\t')).length,
-      3,
+      5,
     );
-    assertRedacted(result, publicIdentifier, publicProgramIdentifier, nearbySecret);
+    assertRedacted(
+      result,
+      publicIdentifier,
+      publicProgramIdentifier,
+      publicContractAddress,
+      publicDebtContractAddress,
+      nearbySecret,
+    );
   } finally {
     rmSync(repository, { force: true, recursive: true });
   }

@@ -71,6 +71,22 @@ const REVIEWED_DUMMY_VALUES = new Set([
 const REVIEWED_PUBLIC_IDENTIFIER_ASSIGNMENTS = new Map([
   ['TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', new Set(['PUBLIC_TESTNET_TOKEN_PROGRAM'])],
   ['TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb', new Set(['TOKEN_2022'])],
+  [
+    '0x98c23e9d8f34fefb1b7bd6a91b7ff122f4e16f5c',
+    new Set(['AAVE_V3_ETHEREUM_USDC_A_TOKEN', 'aToken']),
+  ],
+  [
+    '0x72e95b8931767c79ba4eee721354d6e99a61d004',
+    new Set(['AAVE_V3_ETHEREUM_USDC_VARIABLE_DEBT_TOKEN', 'variableDebtToken']),
+  ],
+  [
+    '0x23878914efe38d27c4d67ab83ed1b93a74d4086a',
+    new Set(['AAVE_V3_ETHEREUM_USDT_A_TOKEN', 'aToken']),
+  ],
+  [
+    '0x6df1c1e379bc5a00a7b4c6e67a203333772f45a8',
+    new Set(['AAVE_V3_ETHEREUM_USDT_VARIABLE_DEBT_TOKEN', 'variableDebtToken']),
+  ],
 ]);
 
 // These tuples are deliberately narrow: protocol, decoded username, decoded
@@ -487,7 +503,8 @@ function entriesAreSourceCode(entries) {
 function isSourceCodeReference(value, entries) {
   return (
     entriesAreSourceCode(entries) &&
-    /^[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)+$/u.test(value.trim())
+    (/^[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)+$/u.test(value.trim()) ||
+      /^[A-Z][A-Z0-9_]{2,}$/u.test(value.trim()))
   );
 }
 

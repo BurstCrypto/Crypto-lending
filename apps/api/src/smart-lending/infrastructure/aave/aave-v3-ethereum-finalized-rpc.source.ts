@@ -51,13 +51,14 @@ export interface ReadAaveV3EthereumFinalizedRpcObservationRequest {
 }
 
 /**
- * Port boundary for one future, separately approved RPC source. Implementations
- * must execute exactly the supplied closed plan, enforce its cumulative
+ * Port boundary for one separately approved RPC source. Implementations must
+ * execute exactly the supplied closed plan, enforce its cumulative
  * response-byte and deadline bounds before parsing, reject redirects or
- * endpoint changes, never log raw RPC payloads, and return the untrusted
- * response bundle for validation by the adapter. The request intentionally
- * contains no endpoint or credential, and the default implementation below
- * always fails closed.
+ * endpoint changes, never log raw RPC payloads, and return the untrusted response
+ * bundle for validation by the adapter. The request intentionally contains no
+ * endpoint or credential. A concrete transport candidate exists in an adjacent
+ * internal file but is deliberately not registered; the default implementation
+ * below remains the runtime binding and always fails closed.
  */
 export interface AaveV3EthereumFinalizedRpcSource {
   readFinalizedDeployment(
