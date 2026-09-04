@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "ticket": "KAN-49",
-  "modelVersion": "2026-09-03",
+  "modelVersion": "2026-09-04",
   "localStatus": "READY_FOR_INDEPENDENT_REVIEW",
   "scope": "Crypto Lending repository application, wallet-validation, smart-lending external evidence, data-plane, operator, and supply-chain boundaries",
   "independentApproval": {
@@ -65,17 +65,19 @@
       "id": "TB-03",
       "name": "API to state stores",
       "source": "API runtime principal",
-      "destination": "PostgreSQL and health-only Redis boundary",
+      "destination": "PostgreSQL, including the dormant finalized-checkpoint store, and the health-only Redis boundary",
       "data": [
         "profiles",
         "authentication state",
         "encrypted wallet registrations and challenge digests",
         "audit events",
-        "financial commands"
+        "financial commands",
+        "source-scoped finalized checkpoint and quarantine events"
       ],
       "evidence": [
         "apps/api/src/infrastructure/database/migrations/0005-enforce-database-principal-boundaries.migration.ts",
         "apps/api/src/infrastructure/database/migrations/0011-create-wallet-ownership-registration.migration.ts",
+        "apps/api/src/infrastructure/database/migrations/0017-create-aave-finalized-checkpoints.migration.ts",
         "docs/KAN-233.md"
       ]
     },
@@ -137,20 +139,23 @@
     {
       "id": "TB-10",
       "name": "Chain observation to application indexing",
-      "source": "Future approved chain connector with immutable network configuration; the Aave Ethereum transcript executor is unregistered and its runtime source remains unavailable",
-      "destination": "Supported-asset normalization, read-only smart-lending deployment evidence, and future observation store",
+      "source": "Future approved chain connectors with immutable network configuration; the Aave Ethereum transcript and two-source comparison executors remain unregistered and their runtime sources remain unavailable",
+      "destination": "Supported-asset normalization, read-only smart-lending deployment evidence, and a dormant source-scoped finalized-checkpoint store",
       "data": [
         "network identity",
         "contract or mint",
         "block and transaction observations",
-        "contract runtime code and read-only call observations"
+        "contract runtime code and read-only call observations",
+        "append-only checkpoint decisions and sticky quarantine state"
       ],
       "evidence": [
         "docs/KAN-61.md",
         "apps/api/src/smart-lending/infrastructure/aave/aave-v3-ethereum-deployment.manifest.ts",
         "apps/api/src/smart-lending/infrastructure/aave/aave-v3-ethereum-deployment-evidence.adapter.ts",
         "apps/api/src/smart-lending/infrastructure/aave/aave-v3-ethereum-finalized-rpc.plan.ts",
-        "apps/api/src/smart-lending/infrastructure/aave/aave-v3-ethereum-json-rpc.source.ts"
+        "apps/api/src/smart-lending/infrastructure/aave/aave-v3-ethereum-json-rpc.source.ts",
+        "apps/api/src/smart-lending/infrastructure/aave/aave-v3-ethereum-two-source-agreement.reader.ts",
+        "apps/api/src/infrastructure/database/migrations/0017-create-aave-finalized-checkpoints.migration.ts"
       ]
     },
     {
@@ -180,6 +185,24 @@
         "apps/api/src/smart-lending/infrastructure/external-feeds/smart-lending-external-feed.client.ts",
         "apps/api/src/smart-lending/infrastructure/aave/aave-v3-market-feed.adapter.ts",
         "docs/smart-lending-allocation-policy.md"
+      ]
+    },
+    {
+      "id": "TB-13",
+      "name": "Release candidate and external launch authority evidence",
+      "source": "CI-produced source and build bytes plus separately accountable deployment, legal, regulatory, privacy, operations, security, dependency-risk, and release reviewers",
+      "destination": "Offline production evidence verification and go-live blocker evaluation",
+      "data": [
+        "Git revision and tree identity",
+        "release component digests",
+        "production deployment target identity",
+        "role-scoped signed technical evidence and public-launch decisions"
+      ],
+      "evidence": [
+        "scripts/release-candidate-manifest.mjs",
+        "scripts/production-deployment-target.ts",
+        "scripts/production-evidence-bundle.ts",
+        "scripts/public-launch-authority-decision.ts"
       ]
     }
   ],
@@ -421,35 +444,62 @@
     },
     {
       "id": "DATA-018",
-      "name": "Smart-lending market corroboration, route quote requests, and quote responses",
+      "name": "Smart-lending market corroboration, provider-position coverage, finalized checkpoints, route quote requests, and quote responses",
       "classification": "RESTRICTED",
       "cia": { "confidentiality": "HIGH", "integrity": "HIGH", "availability": "HIGH" },
       "stores": [
         "API process memory only in the current dormant adapters",
+        "Append-only PostgreSQL Aave finalized-checkpoint events plus a guarded current-head pointer after migration 0017; the writer remains unregistered",
         "Third-party vendor systems only if a separately approved non-production exercise activates egress"
       ],
-      "retention": "REQUEST_SCOPED_MEMORY_ONLY; THIRD_PARTY_RETENTION_POLICY_PENDING",
+      "retention": "REQUEST_SCOPED_MEMORY; CHECKPOINT_HISTORY_APPEND_ONLY_RETENTION_POLICY_PENDING; THIRD_PARTY_RETENTION_POLICY_PENDING",
       "logging": "NO_WALLET_ADDRESS_EXACT_AMOUNT_RAW_QUERY_OR_RAW_PROVIDER_PAYLOAD",
       "owner": "Blockchain, Privacy, and Risk",
       "evidence": [
         "apps/api/src/smart-lending/application/composed-fee-aware-allocation-input.reader.ts",
+        "apps/api/src/mainnet-platforms/domain/mainnet-provider-position-coverage.ts",
+        "apps/api/src/portfolio/domain/mainnet-provider-portfolio-composition.ts",
         "apps/api/src/smart-lending/infrastructure/external-feeds/smart-lending-external-feed.client.ts",
+        "apps/api/src/smart-lending/infrastructure/aave/aave-v3-ethereum-two-source-agreement.reader.ts",
+        "apps/api/src/infrastructure/database/migrations/0017-create-aave-finalized-checkpoints.migration.ts",
         "docs/smart-lending-allocation-policy.md"
+      ]
+    },
+    {
+      "id": "DATA-019",
+      "name": "Release candidate, deployment-target, technical-evidence, and public-launch decision records",
+      "classification": "INTERNAL",
+      "cia": { "confidentiality": "MEDIUM", "integrity": "HIGH", "availability": "HIGH" },
+      "stores": [
+        "Version-controlled empty authority and deployment-target registries",
+        "Short-lived CI release artifacts",
+        "Separately controlled canonical signed evidence files"
+      ],
+      "retention": "DECISION_AND_EXPIRY_BOUND; GENERATED_ARTIFACT_14_DAYS",
+      "logging": "BOUNDED_PUBLIC_IDENTIFIERS_DIGESTS_ROLES_AND_OUTCOMES_ONLY; NO_PRIVATE_KEYS_CREDENTIALS_CUSTOMER_DATA_OR_LOCAL_PATHS",
+      "owner": "Release, Security, and SRE",
+      "evidence": [
+        ".github/workflows/ci.yml",
+        "scripts/release-candidate-manifest.mjs",
+        "scripts/production-deployment-target.ts",
+        "scripts/production-evidence-bundle.ts",
+        "scripts/public-launch-authority-decision.ts"
       ]
     }
   ],
   "secretInventory": [
     {
       "id": "KEY-001",
-      "name": "OIDC client authentication credential",
+      "name": "OIDC public-client PKCE verifier and authorization transaction secrets",
       "classification": "RESTRICTED",
       "consumers": ["API authentication workload"],
-      "injection": "Explicit runtime configuration from a separately authorized managed secret",
-      "storage": "Sensitive in-memory wrapper; never a usable repository default",
-      "rotation": "Provider-coordinated overlap and task replacement required",
+      "injection": "Fresh server-generated 256-bit state, nonce, PKCE verifier, and browser binding for every authorization transaction; the selected Cognito public client has no client credential",
+      "storage": "Short-lived authenticated-encryption cookie and API memory only; PostgreSQL stores purpose-separated digests rather than the raw values",
+      "rotation": "Each transaction is single-use and expires; pre-authentication sealing-key overlap and replay-state retention remain separately governed",
       "owner": "Identity and SRE",
       "evidence": [
         "apps/api/src/authentication/infrastructure/config/authentication.config.ts",
+        "apps/api/src/authentication/infrastructure/crypto/authentication-crypto.ts",
         "docs/KAN-37.md"
       ]
     },
@@ -458,23 +508,33 @@
       "name": "OIDC identity HMAC key",
       "classification": "RESTRICTED",
       "consumers": ["API authentication workload"],
-      "injection": "Explicit runtime configuration from a separately authorized managed secret",
-      "storage": "Memory only; database stores versioned subject digests",
-      "rotation": "Blocked until a reviewed dual-read and rehash migration exists",
+      "injection": "The zero-desired-count production API task selects only the canonical bounded AUTH_IDENTITY_HMAC_KEY_RING_JSON field from an operator-supplied external Secrets Manager ARN; NODE_ENV is production, LOCAL_DEMO_MODE and legacy identity ID/key fields are forbidden, and the template provisions no secret, key, or running task",
+      "storage": "Memory only; PostgreSQL stores the current versioned subject digest and append-only provider/issuer/account-bound digest aliases, never subjects or HMAC material",
+      "rotation": "Migration 0025 installs a dormant accepted-read/active-write policy, concurrent login alias backfill, aggregate retirement gate, and safe rollback refusal; external custody, activation, deployed exercise, and predecessor destruction remain blocked",
       "owner": "Identity and Security",
-      "evidence": ["docs/KAN-37.md"]
+      "evidence": [
+        "apps/api/src/infrastructure/database/migrations/0025-create-authentication-hmac-key-rotation.migration.ts",
+        "apps/api/test/infrastructure/authentication-hmac-key-rotation.integration-spec.ts",
+        "infra/aws/application-baseline.yaml",
+        "docs/authentication-key-rotation-runbook.md",
+        "docs/KAN-37.md"
+      ]
     },
     {
       "id": "KEY-003",
       "name": "Pre-authentication seal, session, and CSRF keys",
       "classification": "RESTRICTED",
       "consumers": ["API authentication workload"],
-      "injection": "Explicit runtime configuration with key identifiers",
+      "injection": "The zero-desired-count production API task selects AUTH_PREAUTH_SEAL_KEY plus purpose-distinct canonical AUTH_SESSION_HMAC_KEY_RING_JSON and AUTH_CSRF_HMAC_KEY_RING_JSON fields from an operator-supplied external Secrets Manager ARN; NODE_ENV is production, LOCAL_DEMO_MODE and legacy session/CSRF ID/key fields are forbidden, and the template provisions no secret, key, or running task",
       "storage": "Memory only; PostgreSQL stores keyed digests",
-      "rotation": "Requires reviewed overlap, replay, and revocation semantics",
+      "rotation": "Pre-authentication supports one bounded decrypt-only predecessor; migration 0025 locally enforces session/CSRF candidate overlap, matching-version CSRF, successor active writes, replay-before-mutation binding, cross-version rate limits, aggregate retirement gates, and rollback refusal; external custody and deployed rotation remain blocked",
       "owner": "Identity and Security",
       "evidence": [
         "apps/api/src/authentication/infrastructure/crypto/authentication-crypto.ts",
+        "apps/api/src/infrastructure/database/migrations/0025-create-authentication-hmac-key-rotation.migration.ts",
+        "apps/api/test/infrastructure/authentication-hmac-key-rotation.integration-spec.ts",
+        "infra/aws/application-baseline.yaml",
+        "docs/authentication-key-rotation-runbook.md",
         "docs/KAN-37.md"
       ]
     },
@@ -588,13 +648,14 @@
       "name": "Wallet registration canonical-identity HMAC key",
       "classification": "RESTRICTED",
       "consumers": ["API wallet-registration workload"],
-      "injection": "Registration is disabled by default; enablement requires an explicit versioned environment value from future separately authorized custody, while local tests create non-production 32-byte base64url fixtures in process only",
+      "injection": "The zero-desired-count production API service is disabled by default; its task selects only WALLET_IDENTITY_HMAC_KEY_RING_JSON from an operator-supplied external Secrets Manager ARN, requires NODE_ENV=production, omits LOCAL_DEMO_MODE and legacy version/key fields, and provisions no secret or key, while local tests create non-production 32-byte base64url fixtures in process only",
       "storage": "Opaque API process-memory wrapper backed by a WeakMap; PostgreSQL stores only the version and purpose-separated keyed canonical-address digest",
-      "rotation": "Operationally immutable until a reviewed dual-digest read/write, uniqueness-conflict, backfill, cutover, rollback, and old-version retirement migration exists; KAN-50 custody and KAN-235 independent review remain production gates",
+      "rotation": "Migration 0022 installs a dormant accepted-read/active-write identity policy, complete version-sorted aliases, conflict-safe cutover checks, revocation synchronization, retirement readiness, and rollback refusal; schema-owner activation, external custody, a deployed drill, old-key retirement, KAN-50, and KAN-235 review remain production gates",
       "owner": "Wallet, Database, and Security",
       "evidence": [
         "apps/api/src/wallets/infrastructure/config/wallet-registration.config.ts",
         "apps/api/src/wallets/infrastructure/crypto/wallet-registration-crypto.ts",
+        "infra/aws/application-baseline.yaml",
         "docs/KAN-50.md"
       ]
     },
@@ -603,13 +664,14 @@
       "name": "Wallet ownership-challenge HMAC key",
       "classification": "RESTRICTED",
       "consumers": ["API wallet-registration workload"],
-      "injection": "Registration is disabled by default; enablement requires a purpose-distinct versioned environment value from future separately authorized custody, while local tests create non-production 32-byte base64url fixtures in process only",
+      "injection": "The zero-desired-count production API service is disabled by default; its task selects only WALLET_CHALLENGE_HMAC_KEY_RING_JSON from an operator-supplied external Secrets Manager ARN, requires NODE_ENV=production, omits LOCAL_DEMO_MODE and legacy version/key fields, and provisions no secret or key, while local tests create non-production 32-byte base64url fixtures in process only",
       "storage": "Opaque API process-memory wrapper backed by a WeakMap; PostgreSQL stores only versioned account-binding, domain, message, nonce, and rate-limit digests",
-      "rotation": "The local runtime has one active version, so replacement is blocked until a reviewed overlap covers every unexpired challenge and replay tombstone; KAN-50 custody and KAN-235 independent review remain production gates",
+      "rotation": "The bounded local ring issues with one active version and reads retained challenge state by its exact accepted version, but external custody, a staged overlap covering every unexpired challenge and replay tombstone, deployed retirement evidence, KAN-50, and KAN-235 review remain production gates",
       "owner": "Wallet, Identity, and Security",
       "evidence": [
         "apps/api/src/wallets/infrastructure/config/wallet-registration.config.ts",
         "apps/api/src/wallets/infrastructure/crypto/wallet-registration-crypto.ts",
+        "infra/aws/application-baseline.yaml",
         "docs/KAN-50.md"
       ]
     },
@@ -618,14 +680,15 @@
       "name": "Wallet registration challenge-binding, address, and metadata AES-256-GCM keys",
       "classification": "RESTRICTED",
       "consumers": ["API wallet-registration workload"],
-      "injection": "Registration is disabled by default; enablement requires an explicit versioned environment value from future separately authorized custody, while local tests create non-production 32-byte base64url fixtures in process only",
+      "injection": "The zero-desired-count production API service is disabled by default; its task selects only WALLET_METADATA_SEAL_KEY_RING_JSON from an operator-supplied external Secrets Manager ARN, requires NODE_ENV=production, omits LOCAL_DEMO_MODE and legacy version/key fields, and provisions no secret or key, while local tests create non-production 32-byte base64url fixtures in process only",
       "storage": "Opaque API process-memory wrapper backed by a WeakMap; PostgreSQL stores versioned ciphertext, random IV, and authentication tag bound to the challenge or wallet row, account, network, address digest, and field through authenticated additional data",
-      "rotation": "The local runtime has one active decrypt version, so production rotation requires an additive decrypt key ring, active-write version, authenticated reseal migration, rollback, and old-key retirement; KAN-50 custody and KAN-235 independent review remain gates",
+      "rotation": "The bounded local ring supports accepted decrypt versions and one active write version; migration 0024 adds a dormant schema-owner-only, audited, atomic rewrap and retirement-readiness boundary with rollback refusal, while custody, authorized activation, a deployed drill, old-key retirement, KAN-50, and KAN-235 review remain gates",
       "owner": "Wallet, Privacy, and Security",
       "evidence": [
         "apps/api/src/infrastructure/database/migrations/0011-create-wallet-ownership-registration.migration.ts",
         "apps/api/src/wallets/infrastructure/config/wallet-registration.config.ts",
         "apps/api/src/wallets/infrastructure/crypto/wallet-registration-crypto.ts",
+        "infra/aws/application-baseline.yaml",
         "docs/KAN-50.md"
       ]
     },
@@ -644,6 +707,24 @@
         "apps/api/src/smart-lending/infrastructure/external-feeds/smart-lending-external-feed.config.ts",
         "apps/api/src/smart-lending/infrastructure/external-feeds/smart-lending-external-feed.client.ts",
         "docs/smart-lending-allocation-policy.md"
+      ]
+    },
+    {
+      "id": "KEY-017",
+      "name": "Production technical-evidence and public-launch decision signing keys",
+      "classification": "RESTRICTED",
+      "consumers": [
+        "Separately accountable evidence issuers and launch authorities",
+        "Offline production preflight verifier"
+      ],
+      "injection": "Only role-scoped Ed25519 public verification keys may enter the reviewed source registries; production registries remain empty until a separately reviewed key-enrollment change",
+      "storage": "Private signing keys remain in separately approved external custody and must never enter this repository, CI artifacts, application configuration, logs, or evidence payloads",
+      "rotation": "Short-lived signed decisions plus key validity, status, one-role scope, revocation, replacement, and re-signing of the exact candidate and target; compromise invalidates every affected decision",
+      "owner": "Release and Security",
+      "evidence": [
+        "scripts/production-evidence-bundle.ts",
+        "scripts/public-launch-authority-decision.ts",
+        "docs/production-preflight.md"
       ]
     }
   ],
@@ -718,14 +799,20 @@
       "assetIds": ["DATA-002", "DATA-003"],
       "response": "MITIGATE",
       "mitigations": [
-        "Current digest schema version is pinned and key material is operationally immutable",
-        "Any rotation requires a reviewed dual-read, rehash, overlap, and revocation migration"
+        "Canonical purpose-distinct key rings contain at most three sorted numeric versions, select one active write key, reject legacy production keys, and never serialize key material",
+        "Migration 0025 atomically maps OIDC digest aliases, binds session and CSRF candidates before lifecycle/replay mutation, charges every rate-limit candidate, and exposes aggregate-only retirement gates",
+        "Migration-owned policies remain at version one until a staged schema-owner activation; stale readers fail closed after an active-version flip and rollback refuses after use"
       ],
       "owner": "Identity, Database, and Security",
-      "status": "OPEN_EXTERNAL",
-      "evidence": ["docs/KAN-37.md"],
-      "residualRisk": "No safe identity-digest or session-key rotation mechanism exists; current key material must remain immutable.",
-      "followUp": "Identity key-ring and rotation design before production rotation"
+      "status": "MITIGATED_LOCAL",
+      "evidence": [
+        "apps/api/src/authentication/infrastructure/config/authentication.config.ts",
+        "apps/api/src/infrastructure/database/migrations/0025-create-authentication-hmac-key-rotation.migration.ts",
+        "apps/api/test/infrastructure/authentication-hmac-key-rotation.integration-spec.ts",
+        "docs/authentication-key-rotation-runbook.md"
+      ],
+      "residualRisk": "The production task has fail-closed ring selectors but remains disabled by default and provisions no key; old single-digest function grants must be removed only after the new fleet is proven, and no external custody, deployed cutover, recovery, or retirement evidence exists.",
+      "followUp": "Authorize and stage externally custodied ring values, perform the staged non-production rotation drill, prove old-function denial, and obtain KAN-50/KAN-235 custody and independent review"
     },
     {
       "id": "THR-WALLET-001",
@@ -824,11 +911,18 @@
       "mitigations": [
         "Immutable idempotency identity and result",
         "Journal, lifecycle event, command result, and outbox enqueue commit atomically",
-        "Outbox rows use immutable job IDs; any future side-effecting consumer must persist deduplication before enablement"
+        "Outbox rows use immutable job IDs; any future side-effecting consumer must persist deduplication before enablement",
+        "The dormant reviewed-job dispatcher requires the complete three-contract handler registry and rejects malformed, legacy, unknown, or non-launch-network jobs before selecting a handler"
       ],
       "owner": "Ledger and Backend",
       "status": "MITIGATED_LOCAL",
-      "evidence": ["docs/KAN-43.md", "docs/KAN-51.md"],
+      "evidence": [
+        "docs/KAN-43.md",
+        "docs/KAN-51.md",
+        "apps/api/src/infrastructure/sqs/reviewed-job-dispatcher.ts",
+        "apps/api/src/infrastructure/sqs/reviewed-job-dispatcher.spec.ts",
+        "docs/outbox/reviewed-job-consumer-dispatch.md"
+      ],
       "residualRisk": "Provider-side idempotency, ambiguous outcomes, and reconciliation are outside the current local database boundary.",
       "followUp": "Provider submission and reconciliation adapter review"
     },
@@ -844,13 +938,25 @@
       "mitigations": [
         "Issuer-reviewed stablecoin identity registry rejects wrong network and unconfigured contracts or mints",
         "Ledger requires explicit valuation availability and immutable recognition evidence",
-        "New observations cannot select an older registry snapshot"
+        "New observations cannot select an older registry snapshot",
+        "The deterministic KAN-66 evaluator uses bounded integer arithmetic, caps upside at one dollar, preserves downside, rejects stale, conflicting, or malformed evidence, and explicitly classifies depeg state",
+        "Migration 0019 records append-only exact-asset depeg latch and clear events, maintains a sticky guarded projection with deterministic revisions and fingerprints, and limits runtime capabilities to read, latch, or separately authorized clear operations",
+        "Clear admission requires a classifier-approved recovery, a one-use 15-minute authorization bound to the exact latch revision and evidence fingerprint, and distinct maker and checker identities"
       ],
       "owner": "Blockchain, Ledger, and Risk",
       "status": "OPEN_FOLLOW_UP",
-      "evidence": ["docs/KAN-61.md", "docs/KAN-41.md"],
-      "residualRisk": "Trusted observation provenance, price freshness, confidence, fallback, and depeg policy are not implemented.",
-      "followUp": "KAN-62 trusted chain sources and KAN-66 deterministic valuation/depeg policy"
+      "evidence": [
+        "docs/KAN-61.md",
+        "docs/KAN-41.md",
+        "docs/KAN-66.md",
+        "apps/api/src/valuation/domain/stablecoin-valuation-policy.ts",
+        "apps/api/src/valuation/domain/stablecoin-depeg-latch.ts",
+        "apps/api/src/valuation/infrastructure/postgres/postgres-stablecoin-depeg-latch.repository.ts",
+        "apps/api/src/infrastructure/database/migrations/0019-create-stablecoin-depeg-latches.migration.ts",
+        "docs/valuation/stablecoin-depeg-latch.md"
+      ],
+      "residualRisk": "Trusted live Pyth and Chainlink observation adapters, approved feed identities and heartbeat evidence, a cryptographic issuer and verifier for Risk clear authorizations, deployed monitoring, and live recovery exercises are absent.",
+      "followUp": "Complete KAN-252 independent provider and valuation approval, implement the approved live observation boundary and cryptographic clear authority, then exercise stale, conflict, depeg, authorization replay, and recovery behavior before activation"
     },
     {
       "id": "THR-LEDGER-004",
@@ -863,13 +969,21 @@
       "response": "MITIGATE",
       "mitigations": [
         "No production provider submission or indexing path is enabled yet",
-        "Future provider adapter must retain explicit finality, reorg, unknown-outcome, and reconciliation state"
+        "A dormant Aave Ethereum checkpoint boundary preserves source-scoped append-only finalized decisions, last-good facts, optimistic revisions, and sticky quarantine",
+        "Continuity backfill and quarantine recovery require two distinct agreeing sources across every contiguous block, are bounded to 64 blocks, and cannot roll back or skip history",
+        "Single-use recovery authorization is bound to operation, sources, chain, deployment, current state, target, approver, nonce, issuance time, and an exclusive expiry before the locked database mutation"
       ],
       "owner": "Blockchain, Ledger, and SRE",
       "status": "OPEN_FOLLOW_UP",
-      "evidence": ["docs/KAN-43.md", "docs/KAN-61.md"],
-      "residualRisk": "No provider, finality, reorganization, or reconciliation path exists; production chain processing must remain disabled.",
-      "followUp": "KAN-62 and subsequent IDX/transaction-provider tickets"
+      "evidence": [
+        "docs/KAN-43.md",
+        "docs/KAN-61.md",
+        "apps/api/src/smart-lending/domain/aave-v3-ethereum-finalized-checkpoint-recovery.ts",
+        "apps/api/src/smart-lending/infrastructure/postgres/postgres-aave-v3-ethereum-finalized-checkpoint.repository.ts",
+        "apps/api/src/infrastructure/database/migrations/0017-create-aave-finalized-checkpoints.migration.ts"
+      ],
+      "residualRisk": "The local recovery contract covers only the dormant Aave Ethereum read checkpoint. Approved independent live readers, source-pair identity, a cryptographic authorization issuer and verifier, live finality and reorg exercises, Solana indexing, and transaction unknown-outcome reconciliation are absent.",
+      "followUp": "Approve and implement the real read sources, source-pair registry, authorization service, and live recovery drill; separately implement network-specific indexing plus idempotent submission and unknown-outcome reconciliation before enabling chain processing"
     },
     {
       "id": "THR-ADMIN-001",
@@ -1001,18 +1115,23 @@
       "mitigations": [
         "History-aware repository secret scanner and mutation tests",
         "API and worker application-owned structured logging source policy and field allowlists",
+        "Next.js Node instrumentation records request and fatal failures through a closed application schema without reading raw paths, headers, error messages, causes, stacks, digests, or provider responses; source-policy tests reject direct application console and stream output",
         "Workload-specific managed secret references; no cloud, provider, or runtime credentials in CI, and the ephemeral GitHub token is read-only and not persisted",
         "The optional LI.FI credential is server-only, absent by default, excluded from query strings, and unreachable in production while external-feed activation is rejected"
       ],
       "owner": "Security, SRE, and Release",
-      "status": "OPEN_FOLLOW_UP",
+      "status": "MITIGATED_LOCAL",
       "evidence": [
         "docs/KAN-50.md",
         "docs/KAN-51.md",
+        "apps/web/instrumentation.ts",
+        "apps/web/lib/logging/web-runtime.server.ts",
+        "apps/web/lib/logging/fatal-process-boundary.server.ts",
+        "apps/web/test/logging-source-policy.test.ts",
         "apps/api/src/smart-lending/infrastructure/external-feeds/smart-lending-external-feed.client.ts"
       ],
-      "residualRisk": "Web/framework error paths, ignored local files, runtime memory, external systems, and deployed logs remain outside the complete local source-policy boundary.",
-      "followUp": "KAN-51 web and framework error-path coverage plus KAN-235 deployed runtime and reviewer evidence inspection"
+      "residualRisk": "Framework-owned diagnostics, ignored or untracked local files, runtime memory, external systems, third-party processors, and deployed logs remain outside the complete local application source-policy boundary.",
+      "followUp": "KAN-235 independent source and final-image review plus an authorized deployed exercise covering framework diagnostics, runtime delivery, access denial, retention, search, and deletion without prohibited values"
     },
     {
       "id": "THR-SECRETS-002",
@@ -1026,8 +1145,10 @@
       "mitigations": [
         "Fixed workload-to-secret capability matrices and separate database roles",
         "Rotation procedures require inactive-slot regeneration, replacement, and old-slot denial",
-        "Authentication and wallet identity digest keys are not rotated until compatible rehash or dual-digest migrations exist",
-        "Wallet challenge-key overlap and address or metadata decrypt-key-ring semantics are explicit production gates rather than locally inferred rotation claims"
+        "Migration 0025 adds purpose-distinct authentication rings, append-only identity digest aliases, candidate-bound session/CSRF/replay behavior, cross-version rate limiting, and aggregate retirement checks without activating an external key",
+        "The zero-desired-count production API task selects AUTH_PREAUTH_SEAL_KEY and all six purpose-distinct authentication and wallet key-ring fields, requires NODE_ENV=production, and forbids LOCAL_DEMO_MODE plus every legacy authentication ID/key and wallet version/key field without provisioning a secret or key",
+        "Authentication overlap remains at version one until authorized external secret staging, a schema-owner policy transition, new-fleet proof, and old single-digest function denial exist",
+        "Migration 0022 provides dormant wallet identity overlap and alias controls, the runtime supports exact-version challenge overlap, and migration 0024 provides a dormant schema-owner-only metadata rewrap boundary"
       ],
       "owner": "Security, Identity, Database, and SRE",
       "status": "OPEN_EXTERNAL",
@@ -1035,11 +1156,14 @@
         "docs/KAN-50.md",
         "docs/KAN-37.md",
         "docs/KAN-233.md",
+        "docs/authentication-key-rotation-runbook.md",
+        "apps/api/src/infrastructure/database/migrations/0025-create-authentication-hmac-key-rotation.migration.ts",
+        "infra/aws/application-baseline.yaml",
         "apps/api/src/wallets/infrastructure/config/wallet-registration.config.ts",
         "apps/api/src/wallets/infrastructure/crypto/wallet-registration-crypto.ts"
       ],
-      "residualRisk": "Deployed revocation evidence, compatible authentication and wallet identity migrations, challenge-key overlap, and a wallet metadata decrypt key ring are absent.",
-      "followUp": "KAN-50/KAN-235 custody and rotation review, separately authorized deployed rotation evidence, and reviewed authentication plus wallet key-ring migrations"
+      "residualRisk": "External key custody and staged secret population, deployed old-function denial and rotation evidence, wallet identity policy activation, exercised challenge overlap, and wallet metadata rewrap activation remain absent.",
+      "followUp": "KAN-50/KAN-235 custody and rotation review, separately authorized secret staging, schema-owner activation, deployed rotation evidence, and old-key retirement drills"
     },
     {
       "id": "THR-SECRETS-003",
@@ -1051,19 +1175,26 @@
       "assetIds": ["DATA-001", "DATA-005", "DATA-006", "DATA-010", "DATA-011", "DATA-013"],
       "response": "ELIMINATE",
       "mitigations": [
-        "The only current ledger.journal-committed producer emits an exact identifier-and-operation payload with closed correlation metadata",
-        "Generic message parsing enforces bounded shape and size but is not treated as data classification or redaction",
-        "Every future job kind is blocked from enablement until it has an explicit payload data-class allowlist, retention review, and leak test"
+        "New rows are admitted only after safe serialization by an exact versioned contract for ledger.journal-committed, yield.operation.submit, or blockchain.balance-sync and the expected jobs destination",
+        "Each reviewed contract enforces exact payload and message-attribute fields, semantic identifier bindings, mainnet-only Ethereum or Solana scope where applicable, and a documented data classification and retention purpose",
+        "Unknown kinds, destinations, extra fields, accessors, custom prototypes, malformed identifiers, and attacker-controlled validation details are rejected before insertion; legacy rows remain lifecycle-readable but gain no new admission path",
+        "Migration 0018 removes direct runtime INSERT authority and exposes only one exact SECURITY DEFINER admission function whose immutable body, owner, search path, ACL, and column privileges are verified",
+        "Database admission locks and resolves ledger command and journal links, the complete latest yield submission relationship, or an active non-revoked Ethereum or Solana mainnet wallet before inserting atomically"
       ],
       "owner": "Backend, Privacy, and Security",
-      "status": "OPEN_FOLLOW_UP",
+      "status": "MITIGATED_LOCAL",
       "evidence": [
         "apps/api/src/infrastructure/outbox/job-message-policy.ts",
+        "apps/api/src/infrastructure/outbox/reviewed-job-contract-policy.ts",
+        "apps/api/src/infrastructure/outbox/job-outbox.repository.ts",
+        "apps/api/src/infrastructure/database/migrations/0018-enforce-reviewed-job-outbox-admission.migration.ts",
+        "apps/api/test/infrastructure/database-principals.integration-spec.ts",
         "apps/api/src/ledger/infrastructure/postgres-ledger.repository.ts",
-        "docs/KAN-33.md"
+        "docs/KAN-33.md",
+        "docs/outbox/reviewed-job-contract-policy.md"
       ],
-      "residualRisk": "The generic infrastructure cannot prevent a newly authored producer from persisting sensitive values without a kind-specific review gate.",
-      "followUp": "Require a kind-specific payload classification schema and retention approval before any new outbox producer is enabled"
+      "residualRisk": "The schema owner, DBA, or migration authority can replace the admission function or its grants, and production queue/DLQ retention, encryption, access, and redrive behavior remain unverified.",
+      "followUp": "Independently review the exact policy and deployed database privileges, require every future kind or version to add a classified contract and adversarial tests, and verify production retention and access evidence"
     },
     {
       "id": "THR-SUPPLY-001",
@@ -1077,17 +1208,25 @@
       "mitigations": [
         "Committed lockfiles, isolated wallet-lab lock, pinned GitHub actions, and dependency/license evidence",
         "No repository or CI cloud secrets and no cloud mutation in CI",
-        "History-aware secret scan executes before dependency installation"
+        "History-aware secret scan executes before dependency installation",
+        "Hardened non-root API and web runtime images are built from pinned lockfiles with BuildKit provenance disabled for the local evidence lane",
+        "Pinned Syft generation retains SPDX and native inventories, while offline validation binds exact runtime package versions and rejects development toolchains"
       ],
       "owner": "Release, OSS, and Security",
       "status": "OPEN_EXTERNAL",
       "evidence": [
         ".github/workflows/ci.yml",
+        "Dockerfile.api",
+        "Dockerfile.web",
+        "scripts/validate-production-sboms.mjs",
+        "scripts/production-sboms.test.mjs",
+        "docs/production-containers.md",
+        "docs/production-sbom.md",
         "docs/wallets/license-review/README.md",
         "docs/KAN-50.md"
       ],
-      "residualRisk": "Independent dependency, container, lifecycle-script, and runtime behavior review is pending.",
-      "followUp": "KAN-235 independent dependency/image review and release-candidate binding"
+      "residualRisk": "Scanner correctness and completeness, vulnerability disposition, registry provenance, signed build provenance, lifecycle-script behavior outside the checked lane, and independent dependency/container review remain unresolved.",
+      "followUp": "Run and retain vulnerability review for the exact candidate, establish signed build and registry provenance, and complete KAN-235 independent dependency, lifecycle, container, and runtime-behavior review"
     },
     {
       "id": "THR-SUPPLY-002",
@@ -1119,13 +1258,25 @@
       "response": "MITIGATE",
       "mitigations": [
         "Bounded batch sizes, leases, heartbeats, retries, visibility delay, redrive, and encrypted DLQ",
-        "At-least-once processing keeps failed messages available for retry and deduplication"
+        "At-least-once processing keeps failed messages available for retry and deduplication",
+        "The content-addressed observability child template defines queue-age and non-empty-DLQ alarms plus a dashboard for backlog, age, DLQ depth, job failures, redrive, and correlation traces",
+        "Every alarm routes ALARM and OK transitions to one operator-supplied standard SNS topic; enabled alarms reject the NONE sentinel, and guarded deployment rejects wildcard or cross-partition, cross-Region, and cross-account topics",
+        "The parent pins the exact observability bytes and versioned artifact binding; plan and deploy re-download and verify those bytes before any change-set execution"
       ],
       "owner": "SRE and Backend",
-      "status": "OPEN_FOLLOW_UP",
-      "evidence": ["docs/KAN-33.md", "infra/aws/sqs-foundation.yaml"],
-      "residualRisk": "Queue, retry, failure, and DLQ metrics and dashboard evidence are not implemented.",
-      "followUp": "KAN-52 queue, failure, and DLQ metrics plus dashboard evidence"
+      "status": "MITIGATED_LOCAL",
+      "evidence": [
+        "docs/KAN-33.md",
+        "infra/aws/sqs-foundation.yaml",
+        "infra/aws/application-baseline.yaml",
+        "infra/aws/application-observability.yaml",
+        "infra/aws/validate-application-baseline.mjs",
+        "infra/aws/validate-application-observability.mjs",
+        "infra/aws/invoke-application-baseline.ps1",
+        "docs/operational-alerting.md"
+      ],
+      "residualRisk": "Local checks cannot prove the supplied topic exists, has a least-privilege policy, reaches confirmed primary and backup responders, or triggers correct escalation; no deployed dashboard, alarm-delivery, poison-job, retry-storm, or DLQ-response exercise is recorded.",
+      "followUp": "Authorize and verify the same-account and same-Region topic, policy, subscriptions, escalation owners, and runbook, then record end-to-end ALARM-to-OK plus queue age, retry, poison-job, and DLQ response drills for the exact release"
     },
     {
       "id": "THR-AVAILABILITY-002",
@@ -1159,6 +1310,10 @@
         "Destinations, methods, queries, and the Aave request body are fixed while strict parsers enforce response shape, size, content type, redirect, timeout, and numeric bounds",
         "The unavailable-by-default Aave Ethereum deployment boundary fixes an immutable address-book revision and a finalized EIP-1898 read plan; an unregistered concrete executor enforces the exact serial read transcript, chain identity, aggregate byte/deadline/connection bounds, strict JSON-RPC envelopes, endpoint/redirect checks, and rejection of IP-literal or local/private hostname shapes without configuring egress",
         "The evidence adapter strictly checks per-operation bindings, header consistency, runtime-code presence, the observed Pool implementation pointer, provider/DataProvider relationships, and USDC/USDT reserve-token relationships while leaving live execution and code-hash approval unverified",
+        "A dormant two-source coordinator revalidates each canonical evidence fingerprint and compares the full finalized header, eight runtime-code hashes, and reserve topology; height skew blocks while header or deployment-state divergence requires quarantine",
+        "Migration 0017 and its unregistered repository preserve source-specific append-only decisions, optimistic revisions, last-good finalized facts, non-refreshing advancement time, and sticky quarantine without granting API write access",
+        "Bounded two-source continuity backfill and single-use state-bound quarantine recovery can advance the dormant checkpoint without skipping or rewriting history",
+        "Provider-position snapshots cannot represent missing work as zero: every exact wallet and approved-market target must be complete, agreeing, current, and fingerprint-bound before conservative liquid, supply, and borrow composition",
         "Aave and DefiLlama observations are corroboration only and cannot establish recommendation eligibility or authorize a financial action",
         "Production feed activation is rejected, no HTTP recommendation route exists, and required production input adapters remain unavailable"
       ],
@@ -1171,10 +1326,16 @@
         "apps/api/src/smart-lending/infrastructure/aave/aave-v3-ethereum-deployment-evidence.adapter.ts",
         "apps/api/src/smart-lending/infrastructure/aave/aave-v3-ethereum-finalized-rpc.plan.ts",
         "apps/api/src/smart-lending/infrastructure/aave/aave-v3-ethereum-json-rpc.source.ts",
+        "apps/api/src/smart-lending/infrastructure/aave/aave-v3-ethereum-two-source-agreement.reader.ts",
+        "apps/api/src/smart-lending/domain/aave-v3-ethereum-finalized-checkpoint-recovery.ts",
+        "apps/api/src/smart-lending/infrastructure/postgres/postgres-aave-v3-ethereum-finalized-checkpoint.repository.ts",
+        "apps/api/src/infrastructure/database/migrations/0017-create-aave-finalized-checkpoints.migration.ts",
+        "apps/api/src/mainnet-platforms/domain/mainnet-provider-position-coverage.ts",
+        "apps/api/src/portfolio/domain/mainnet-provider-portfolio-composition.ts",
         "docs/smart-lending-allocation-policy.md"
       ],
-      "residualRisk": "Provider authenticity beyond TLS, approved runtime-code hashes, durable authenticated block freshness and lineage, independent-source agreement, schema-drift operations, divergence policy, and independent provider review are absent.",
-      "followUp": "Approve exact RPC and feed egress, provider evidence, and runtime-code hashes, then implement durable checkpoints, independent-source divergence handling, and independent review before activation"
+      "residualRisk": "Provider authenticity beyond TLS, approved runtime-code hashes and source-pair independence, real historical readers, a cryptographic recovery-authorization service, live checkpoint/finality behavior, live provider-position adapters, schema-drift operations, and independent provider review are absent.",
+      "followUp": "Approve exact RPC and feed egress, provider/source-pair evidence, runtime-code hashes, and operational owners; implement the approved live readers and authorization service; then exercise checkpoint, recovery, provider-position coverage, and agreement boundaries under independent review before activation"
     },
     {
       "id": "THR-WALLET-004",
@@ -1212,6 +1373,8 @@
       "mitigations": [
         "One aggregate composition deadline and shared abort signal bound all upstream reads, with sequential quote reads and a hard candidate cap",
         "The transport enforces per-request timeouts, response-size bounds, fixed destinations, and independent kill switches",
+        "A dormant fail-closed admission layer enforces per-process global, destination, and LI.FI account concurrency and sliding-window workload budgets, destination circuits, and safe shared-read single-flight",
+        "Logical timeout or caller cancellation never releases physical admission capacity until the upstream promise actually settles, including when a vendor ignores AbortSignal",
         "No public route exists, production activation is rejected, and unavailable defaults prevent current recommendation traffic"
       ],
       "owner": "Backend, Finance, and SRE",
@@ -1219,10 +1382,94 @@
       "evidence": [
         "apps/api/src/smart-lending/application/composed-fee-aware-allocation-input.reader.ts",
         "apps/api/src/smart-lending/infrastructure/external-feeds/smart-lending-external-feed.client.ts",
+        "apps/api/src/smart-lending/infrastructure/external-feeds/smart-lending-upstream-read-admission.ts",
+        "apps/api/src/smart-lending/infrastructure/external-feeds/smart-lending-upstream-read-admission.spec.ts",
         "docs/smart-lending-allocation-policy.md"
       ],
-      "residualRisk": "Per-account and global request or spend budgets, distributed rate control, circuit breakers, single-flight caching, vendor-rate contracts, and deployed alerts are absent.",
-      "followUp": "Implement bounded request and spend budgets, distributed rate controls, circuit breakers, single-flight caching, and deployed alert evidence before route exposure"
+      "residualRisk": "The admission layer remains intentionally unwired and per-process. Fleet-wide distributed limits, provider-billing spend controls, approved operator configuration, vendor-rate contracts, integration with every outbound client, and deployed alert evidence are absent.",
+      "followUp": "Add durable fleet-wide quota and cost controls, independently approve the exact policy, wire every outbound client through the admission boundary, and capture deployed alert evidence before route exposure"
+    },
+    {
+      "id": "THR-SUPPLY-003",
+      "domain": "SUPPLY_CHAIN",
+      "stride": ["TAMPERING", "ELEVATION_OF_PRIVILEGE"],
+      "scenario": "A release inventory is generated from a spoofed Git worktree, follows a link outside the workspace, races mutable build output, or uploads bytes that differ from the verified candidate.",
+      "risk": "HIGH",
+      "boundaryIds": ["TB-09", "TB-13"],
+      "assetIds": ["DATA-015", "DATA-019"],
+      "response": "MITIGATE",
+      "mitigations": [
+        "The candidate manifest binds an exact Git revision and tree to a closed component inventory with domain-separated digests and strict canonical parsing",
+        "Manifest and component reads are bounded regular-file operations with path-containment, link, file-identity, and mutation checks",
+        "Bounded Docker-save capture re-inspects each local tag and verifies an exact OCI index or manifest through image config descriptor chain without equating compressed layer digests to rootfs diff IDs",
+        "Native Syft config bytes and ordered rootfs facts must match the independently captured archive evidence, and output creation detects links, parent swaps, and file-identity races",
+        "Both exact image archive records and the observability child template are mandatory release-manifest components",
+        "CI is required to validate the candidate before any trusted release artifact is retained"
+      ],
+      "owner": "Release and Security",
+      "status": "OPEN_EXTERNAL",
+      "evidence": [
+        "scripts/release-candidate-manifest.mjs",
+        "scripts/release-candidate-manifest.test.mjs",
+        "scripts/capture-production-image-bindings.mjs",
+        "scripts/validate-production-sboms.mjs",
+        "scripts/production-sboms.test.mjs",
+        "docs/production-sbom.md",
+        "docs/release-candidate-integrity.md",
+        ".github/workflows/ci.yml"
+      ],
+      "residualRisk": "The local descriptor chain does not prove scanner completeness, signed build provenance, registry immutability, artifact publication integrity, deployment-time image resolution, or that the deployed tasks run the retained digests; independent review is still absent.",
+      "followUp": "Independently review the filesystem and descriptor-chain boundary, sign and retain candidate provenance, publish by immutable OCI digest, and require the deployment guard plus post-deploy evidence to match the exact retained image digests"
+    },
+    {
+      "id": "THR-SUPPLY-004",
+      "domain": "SUPPLY_CHAIN",
+      "stride": ["SPOOFING", "TAMPERING", "REPUDIATION", "ELEVATION_OF_PRIVILEGE"],
+      "scenario": "Valid-looking technical or launch evidence is replayed across revisions, deployment targets, environments, or time windows, or one signer impersonates multiple independent release authorities.",
+      "risk": "HIGH",
+      "boundaryIds": ["TB-13"],
+      "assetIds": ["DATA-015", "DATA-016", "DATA-019"],
+      "response": "MITIGATE",
+      "mitigations": [
+        "Canonical evidence binds the exact release-candidate manifest digest and production deployment-target digest rather than trusting a signer-authored revision label",
+        "Technical read-only evidence requires distinct role-scoped issuer and independent-verifier signatures over identical bytes and rejects mainnet-write claims",
+        "Public launch decisions require distinct role-scoped legal, regulatory, privacy, operations, independent-security, dependency-risk, and deployment-owner signatures",
+        "Short validity windows, trusted application-time revalidation, empty production registries, and fail-closed parsing prevent local self-approval"
+      ],
+      "owner": "Release, Security, and Risk",
+      "status": "OPEN_EXTERNAL",
+      "evidence": [
+        "scripts/production-deployment-target.ts",
+        "scripts/production-evidence-bundle.ts",
+        "scripts/public-launch-authority-decision.ts",
+        "scripts/production-go-live-preflight.ts"
+      ],
+      "residualRisk": "No production target or authority key is enrolled, no external decision exists, trusted-clock operations and emergency revocation are unexercised, and the complete gate has not received independent acceptance.",
+      "followUp": "Enroll each target and one independently controlled key per role through reviewed changes, exercise expiry and revocation from a trusted release environment, and obtain separately signed decisions for the exact candidate before go-live"
+    },
+    {
+      "id": "THR-SECRETS-004",
+      "domain": "SECRETS",
+      "stride": ["SPOOFING", "REPUDIATION", "ELEVATION_OF_PRIVILEGE"],
+      "scenario": "A release signing key is copied, compromised, shared across roles, retained beyond validity, or used after revocation to manufacture production evidence.",
+      "risk": "HIGH",
+      "boundaryIds": ["TB-09", "TB-13"],
+      "assetIds": ["DATA-015", "DATA-019"],
+      "response": "MITIGATE",
+      "mitigations": [
+        "The repository contains public verification material only and begins with empty production authority registries",
+        "Every key has one exact role and scope, bounded validity, explicit status, canonical Ed25519 encoding, and distinct-key enforcement across required roles",
+        "Signed artifacts expire and bind the exact release candidate and deployment target; changing a key registry changes the release tree and invalidates prior review"
+      ],
+      "owner": "Security and Release",
+      "status": "OPEN_EXTERNAL",
+      "evidence": [
+        "scripts/production-evidence-bundle.ts",
+        "scripts/public-launch-authority-decision.ts",
+        "docs/production-preflight.md"
+      ],
+      "residualRisk": "Private-key custody, hardware protection, issuance authentication, compromise detection, emergency revocation latency, signer succession, and audit retention are outside the repository and unapproved.",
+      "followUp": "Approve separate managed custody and operators for every role, document and exercise issue-rotate-revoke-compromise procedures, and independently verify that no private material enters source, CI, logs, or evidence"
     }
   ]
 }
