@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 
-import type { AccountId } from '../../accounts/domain/account-profile';
+import { isAccountId, type AccountId } from '../../accounts/domain/account-profile';
 import {
   MAINNET_SUPPORTED_ASSET_REGISTRY,
   type SupportedStablecoinAsset,
@@ -74,41 +74,83 @@ function assetKey(asset: StablecoinValuationAssetReference): string {
 }
 
 function dataRecord(value: unknown, keys: readonly string[]): Record<string, unknown> | null {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
-  const record = value as Record<string, unknown>;
-  let actualKeys: string[];
   try {
-    actualKeys = Object.keys(record);
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) return null;
+    const descriptors = Object.getOwnPropertyDescriptors(value) as unknown as PropertyDescriptorMap;
+    const actualKeys = Reflect.ownKeys(descriptors);
+    if (
+      actualKeys.length !== keys.length ||
+      actualKeys.some((key) => typeof key !== 'string' || !keys.includes(key))
+    ) {
+      return null;
+    }
+    const record = Object.create(null) as Record<string, unknown>;
+    for (const key of keys) {
+      const descriptor = descriptors[key];
+      if (!descriptor || !('value' in descriptor) || descriptor.enumerable !== true) return null;
+      record[key] = descriptor.value;
+    }
+    return record;
   } catch {
     return null;
   }
-  return actualKeys.length === keys.length &&
-    keys.every((key) => Object.hasOwn(record, key)) &&
-    actualKeys.every((key) => keys.includes(key))
-    ? record
-    : null;
+}
+
+function dataArray(value: unknown, maximum: number): readonly unknown[] | null {
+  try {
+    if (!Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype) return null;
+    const descriptors = Object.getOwnPropertyDescriptors(value) as unknown as PropertyDescriptorMap;
+    const lengthDescriptor = descriptors.length;
+    if (!lengthDescriptor || !('value' in lengthDescriptor)) return null;
+    const length = lengthDescriptor.value;
+    if (!Number.isSafeInteger(length) || (length as number) < 0 || (length as number) > maximum) {
+      return null;
+    }
+    const expectedKeys = new Set([
+      'length',
+      ...Array.from({ length: length as number }, (_, index) => String(index)),
+    ]);
+    const keys = Reflect.ownKeys(descriptors);
+    if (
+      keys.length !== expectedKeys.size ||
+      keys.some((key) => typeof key !== 'string' || !expectedKeys.has(key))
+    ) {
+      return null;
+    }
+    const result: unknown[] = [];
+    for (let index = 0; index < (length as number); index += 1) {
+      const descriptor = descriptors[String(index)];
+      if (!descriptor || !('value' in descriptor) || descriptor.enumerable !== true) return null;
+      result.push(descriptor.value);
+    }
+    return Object.freeze(result);
+  } catch {
+    return null;
+  }
 }
 
 function parsePriceEvidence(value: unknown): PortfolioPriceEvidenceSnapshot | null {
   const record = dataRecord(value, ['snapshotId', 'observations', 'sourceWatermarks']);
+  const observations =
+    record === null ? null : dataArray(record.observations, MAX_PRICE_OBSERVATIONS);
+  const sourceWatermarks =
+    record === null ? null : dataArray(record.sourceWatermarks, MAX_PRICE_WATERMARKS);
   if (
     record === null ||
     typeof record.snapshotId !== 'string' ||
     !SAFE_SNAPSHOT_ID.test(record.snapshotId) ||
-    !Array.isArray(record.observations) ||
-    record.observations.length > MAX_PRICE_OBSERVATIONS ||
-    !Array.isArray(record.sourceWatermarks) ||
-    record.sourceWatermarks.length > MAX_PRICE_WATERMARKS
+    observations === null ||
+    sourceWatermarks === null
   ) {
     return null;
   }
-  return {
+  return Object.freeze({
     snapshotId: record.snapshotId,
-    observations: [...record.observations] as PortfolioPriceEvidenceSnapshot['observations'],
-    sourceWatermarks: [
-      ...record.sourceWatermarks,
-    ] as PortfolioPriceEvidenceSnapshot['sourceWatermarks'],
-  };
+    observations: observations as PortfolioPriceEvidenceSnapshot['observations'],
+    sourceWatermarks: sourceWatermarks as PortfolioPriceEvidenceSnapshot['sourceWatermarks'],
+  });
 }
 
 @Injectable()
@@ -125,7 +167,17 @@ export class PortfolioService {
   ) {}
 
   async readUnifiedPortfolio(request: ReadUnifiedPortfolioRequest): Promise<UnifiedPortfolio> {
-    if (!CORRELATION_ID.test(request.correlationId)) return unavailable();
+    const requestRecord = dataRecord(request, ['accountId', 'correlationId']);
+    if (
+      requestRecord === null ||
+      !isAccountId(requestRecord.accountId) ||
+      typeof requestRecord.correlationId !== 'string' ||
+      !CORRELATION_ID.test(requestRecord.correlationId)
+    ) {
+      return unavailable();
+    }
+    const accountId = requestRecord.accountId;
+    const correlationId = requestRecord.correlationId;
     const asOf = this.trustedNow();
 
     let expectedWallets: ReturnType<typeof parseActivePortfolioWalletRegistrations>;
@@ -133,16 +185,16 @@ export class PortfolioService {
     try {
       expectedWallets = parseActivePortfolioWalletRegistrations(
         await this.wallets.readActiveWalletRegistrations({
-          accountId: request.accountId,
+          accountId,
           evaluatedAt: asOf,
-          correlationId: request.correlationId,
+          correlationId,
         }),
       );
       balanceSnapshot = parseIndexedPortfolioBalanceSnapshot(
         await this.balances.readCurrentBalances({
-          accountId: request.accountId,
+          accountId,
           evaluatedAt: asOf,
-          correlationId: request.correlationId,
+          correlationId,
           expectedWallets,
         }),
         asOf,
@@ -176,7 +228,7 @@ export class PortfolioService {
     for (const asset of uniqueAssets) {
       evidenceByAsset.set(
         assetKey(asset),
-        await this.safeReadPriceEvidence(asset, asOf, request.correlationId),
+        await this.safeReadPriceEvidence(asset, asOf, correlationId),
       );
     }
 
@@ -254,8 +306,20 @@ export class PortfolioService {
   }
 
   private trustedNow(): string {
-    const now = this.clock.now();
-    if (!(now instanceof Date) || !Number.isFinite(now.getTime())) return unavailable();
-    return now.toISOString();
+    try {
+      const now = this.clock.now();
+      if (
+        typeof now !== 'object' ||
+        now === null ||
+        Object.getPrototypeOf(now) !== Date.prototype
+      ) {
+        return unavailable();
+      }
+      const milliseconds = Date.prototype.getTime.call(now);
+      if (!Number.isFinite(milliseconds)) return unavailable();
+      return Date.prototype.toISOString.call(now);
+    } catch {
+      return unavailable();
+    }
   }
 }

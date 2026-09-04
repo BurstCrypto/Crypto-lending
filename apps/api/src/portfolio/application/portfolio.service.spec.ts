@@ -23,7 +23,11 @@ import type {
   ReadActivePortfolioWalletRegistrationsRequest,
 } from './ports/portfolio-wallet-registration-reader.port';
 import type { UnifiedPortfolio } from '../domain/unified-portfolio';
-import { PortfolioService, type PortfolioClock } from './portfolio.service';
+import {
+  PortfolioService,
+  type PortfolioClock,
+  type ReadUnifiedPortfolioRequest,
+} from './portfolio.service';
 import { PortfolioUnavailableError } from './portfolio.errors';
 
 const ACCOUNT_ID = parseAccountId('dddddddd-dddd-4ddd-8ddd-dddddddddddd');
@@ -626,6 +630,72 @@ describe('PortfolioService', () => {
     expect(JSON.stringify(result)).not.toContain('invalid snapshot ID with spaces');
   });
 
+  it('rejects accessor and custom-prototype price evidence without invoking hostile fields', async () => {
+    const fixture = service();
+    let getterCalls = 0;
+    const accessorEvidence = {
+      get snapshotId(): string {
+        getterCalls += 1;
+        throw new Error('private accessor detail');
+      },
+      observations: [],
+      sourceWatermarks: [],
+    } as unknown as PortfolioPriceEvidenceSnapshot;
+    const accessorReader: PortfolioPriceEvidenceReader = {
+      readPriceEvidence: () => Promise.resolve(accessorEvidence),
+    };
+    const accessorService = new PortfolioService(
+      fixture.wallets,
+      fixture.balances,
+      accessorReader,
+      clock,
+    );
+
+    const accessorResult = await read(accessorService);
+
+    expect(accessorResult.overallTotal.usdValue).toBeNull();
+    expect(getterCalls).toBe(0);
+
+    const inheritedEvidence = Object.assign(Object.create({ inherited: true }) as object, {
+      snapshotId: 'price-hostile-prototype',
+      observations: [],
+      sourceWatermarks: [],
+    }) as PortfolioPriceEvidenceSnapshot;
+    const inheritedReader: PortfolioPriceEvidenceReader = {
+      readPriceEvidence: () => Promise.resolve(inheritedEvidence),
+    };
+    const inheritedResult = await read(
+      new PortfolioService(fixture.wallets, fixture.balances, inheritedReader, clock),
+    );
+    expect(inheritedResult.overallTotal.usdValue).toBeNull();
+  });
+
+  it('rejects request accessors without invoking them or contacting a dependency', async () => {
+    const fixture = service();
+    let getterCalls = 0;
+    const hostileRequest = Object.create(null) as Record<string, unknown>;
+    Object.defineProperties(hostileRequest, {
+      accountId: {
+        enumerable: true,
+        get: () => {
+          getterCalls += 1;
+          throw new Error('private request detail');
+        },
+      },
+      correlationId: { enumerable: true, value: CORRELATION_ID },
+    });
+
+    await expect(
+      fixture.service.readUnifiedPortfolio(
+        hostileRequest as unknown as ReadUnifiedPortfolioRequest,
+      ),
+    ).rejects.toEqual(new PortfolioUnavailableError());
+    expect(getterCalls).toBe(0);
+    expect(fixture.wallets.requests).toEqual([]);
+    expect(fixture.balances.requests).toEqual([]);
+    expect(fixture.prices.requests).toEqual([]);
+  });
+
   it('rejects untrusted request correlation and clock values before a balance read', async () => {
     const fixture = service();
     await expect(
@@ -645,6 +715,48 @@ describe('PortfolioService', () => {
       },
     );
     await expect(read(badClockService)).rejects.toEqual(new PortfolioUnavailableError());
+    expect(fixture.balances.requests).toEqual([]);
+  });
+
+  it('rejects Date subclasses, Date proxies, and clock failures through the fixed error boundary', async () => {
+    const fixture = service();
+    class DateSubclass extends Date {}
+    const subclassClockService = new PortfolioService(
+      fixture.wallets,
+      fixture.balances,
+      fixture.prices,
+      { now: () => new DateSubclass(EVALUATED_AT) },
+    );
+    await expect(read(subclassClockService)).rejects.toEqual(new PortfolioUnavailableError());
+
+    let proxyPropertyReads = 0;
+    const dateProxy = new Proxy(new Date(EVALUATED_AT), {
+      get: () => {
+        proxyPropertyReads += 1;
+        throw new Error('private proxy detail');
+      },
+    });
+    const proxyClockService = new PortfolioService(
+      fixture.wallets,
+      fixture.balances,
+      fixture.prices,
+      { now: () => dateProxy },
+    );
+    await expect(read(proxyClockService)).rejects.toEqual(new PortfolioUnavailableError());
+    expect(proxyPropertyReads).toBe(0);
+
+    const failedClockService = new PortfolioService(
+      fixture.wallets,
+      fixture.balances,
+      fixture.prices,
+      {
+        now: () => {
+          throw new Error('private clock detail');
+        },
+      },
+    );
+    await expect(read(failedClockService)).rejects.toEqual(new PortfolioUnavailableError());
+    await expect(read(failedClockService)).rejects.not.toThrow('private clock detail');
     expect(fixture.balances.requests).toEqual([]);
   });
 });
