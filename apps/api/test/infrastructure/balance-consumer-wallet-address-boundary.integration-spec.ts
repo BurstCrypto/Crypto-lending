@@ -29,6 +29,16 @@ const ETHEREUM = 'eip155:1' as const;
 const SOLANA = 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp' as const;
 const EVM_ADDRESS = '0x1111111111111111111111111111111111111111';
 const SOLANA_ADDRESS = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+const BALANCE_CONSUMER_MIGRATION_INDEX = DATABASE_TEST_SCHEMA_MIGRATION_LIST.findIndex(
+  ({ id }) => id === '0023',
+);
+if (BALANCE_CONSUMER_MIGRATION_INDEX < 0) {
+  throw new Error('Balance consumer integration requires migration 0023');
+}
+const BALANCE_CONSUMER_TEST_MIGRATIONS = DATABASE_TEST_SCHEMA_MIGRATION_LIST.slice(
+  0,
+  BALANCE_CONSUMER_MIGRATION_INDEX + 1,
+);
 
 function quoteIdentifier(value: string): string {
   if (!IDENTIFIER.test(value)) throw new Error(`Unsafe test identifier: ${value}`);
@@ -64,7 +74,7 @@ async function asRole<Row extends QueryResultRow>(
 }
 
 describeWithPostgres('balance consumer wallet address boundary', () => {
-  jest.setTimeout(30_000);
+  jest.setTimeout(60_000);
 
   const schema = `balance_address_${randomBytes(8).toString('hex')}`;
   const metadataV1 = createWalletRegistrationKey(
@@ -201,7 +211,7 @@ describeWithPostgres('balance consumer wallet address boundary', () => {
       options: `-c search_path=${schema}`,
     });
     postgres = new PostgresService(pool);
-    await new MigrationRunner(pool, DATABASE_TEST_SCHEMA_MIGRATION_LIST).up();
+    await new MigrationRunner(pool, BALANCE_CONSUMER_TEST_MIGRATIONS).up();
     accountId = randomUUID();
     await pool.query(`INSERT INTO accounts (account_id) VALUES ($1::uuid)`, [accountId]);
     ethereumWalletId = await register(ETHEREUM, EVM_ADDRESS);

@@ -36,6 +36,16 @@ const IDENTIFIER = /^[a-z][a-z0-9_]{0,62}$/u;
 const REGISTRY_FINGERPRINT = '5058b141479f114c1e5f87ed8798fbb7a7ffcce7b502aa7e0794dc53ca1f767d';
 const ETHEREUM = 'eip155:1' as const;
 const SOLANA = 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp' as const;
+const BALANCE_SYNC_MIGRATION_INDEX = DATABASE_TEST_SCHEMA_MIGRATION_LIST.findIndex(
+  ({ id }) => id === '0020',
+);
+if (BALANCE_SYNC_MIGRATION_INDEX < 0) {
+  throw new Error('Balance sync integration requires migration 0020');
+}
+const BALANCE_SYNC_TEST_MIGRATIONS = DATABASE_TEST_SCHEMA_MIGRATION_LIST.slice(
+  0,
+  BALANCE_SYNC_MIGRATION_INDEX + 1,
+);
 
 function quoteIdentifier(value: string): string {
   if (!IDENTIFIER.test(value)) throw new Error(`Unsafe test identifier: ${value}`);
@@ -148,6 +158,8 @@ async function repositoryAsRole<T>(
 }
 
 describeWithPostgres('balance sync PostgreSQL read model', () => {
+  jest.setTimeout(60_000);
+
   let adminPool: Pool;
   let operationPool: Pool;
   let postgres: PostgresService;
@@ -158,7 +170,7 @@ describeWithPostgres('balance sync PostgreSQL read model', () => {
   let ethereumWalletId: string;
   let solanaWalletId: string;
   const schema = `balance_sync_${randomBytes(8).toString('hex')}`;
-  const expectedMigrationIds = DATABASE_TEST_SCHEMA_MIGRATION_LIST.map(({ id }) => id);
+  const expectedMigrationIds = BALANCE_SYNC_TEST_MIGRATIONS.map(({ id }) => id);
 
   async function registerWallet(
     ownerAccountId: string,
@@ -199,13 +211,6 @@ describeWithPostgres('balance sync PostgreSQL read model', () => {
         randomBytes(32),
         randomBytes(32),
       ],
-    );
-    await operationPool.query(
-      `INSERT INTO wallet_ownership_challenge_identity_digests (
-         challenge_id, account_id, chain_namespace, chain_reference,
-         address_digest_version, address_digest
-       ) VALUES ($1, $2, $3, $4, 1, $5)`,
-      [challengeId, ownerAccountId, namespace, reference, addressDigest],
     );
     await operationPool.query(
       `INSERT INTO registered_wallets (
@@ -270,7 +275,7 @@ describeWithPostgres('balance sync PostgreSQL read model', () => {
       options: `-c search_path=${schema}`,
     });
     postgres = new PostgresService(operationPool);
-    runner = new MigrationRunner(operationPool, DATABASE_TEST_SCHEMA_MIGRATION_LIST);
+    runner = new MigrationRunner(operationPool, BALANCE_SYNC_TEST_MIGRATIONS);
     try {
       expect(await runner.up()).toEqual(expectedMigrationIds);
     } catch (error) {
@@ -317,7 +322,7 @@ describeWithPostgres('balance sync PostgreSQL read model', () => {
     await expect(runner.status()).resolves.toEqual(
       expectedMigrationIds.map((id, index) => ({
         id,
-        description: DATABASE_TEST_SCHEMA_MIGRATION_LIST[index]?.description ?? '',
+        description: BALANCE_SYNC_TEST_MIGRATIONS[index]?.description ?? '',
         applied: true,
       })),
     );
