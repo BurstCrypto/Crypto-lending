@@ -464,5 +464,20 @@ describe('StructuredLogger', () => {
       migrationState: 'up',
       changed: 5,
     });
+
+    const consumerLines: string[] = [];
+    const consumer = new StructuredLogger({
+      environment: { NODE_ENV: 'test' },
+      workload: 'balance-consumer',
+      sink: (line) => consumerLines.push(line),
+    });
+    consumer.emit(LOG_EVENTS.workerStartFailed, 'fatal', {
+      errorCode: 'BALANCE_CONSUMER_STARTUP_REFUSED',
+      outcome: 'failure',
+    });
+    expect(parse(consumerLines[0] ?? '')).toMatchObject({
+      workload: 'balance-consumer',
+      errorCode: 'BALANCE_CONSUMER_STARTUP_REFUSED',
+    });
   });
 });

@@ -14,20 +14,30 @@ import { DATABASE_MIGRATIONS, POSTGRES_POOL } from './postgres.tokens';
 
 export interface RuntimeDatabaseCapabilityRoles {
   api: string;
+  balanceConsumer: string;
   worker: string;
 }
 
 const PRODUCTION_RUNTIME_DATABASE_ROLES: Readonly<RuntimeDatabaseCapabilityRoles> = Object.freeze({
   api: 'crypto_api_runtime',
+  balanceConsumer: 'crypto_balance_consumer_runtime',
   worker: 'crypto_worker_runtime',
 });
+
+function expectedRuntimeDatabaseRole(
+  config: InfrastructureConfig,
+  capabilityRoles: Readonly<RuntimeDatabaseCapabilityRoles>,
+): string {
+  if (config.workload === 'api') return capabilityRoles.api;
+  if (config.workload === 'worker') return capabilityRoles.worker;
+  return capabilityRoles.balanceConsumer;
+}
 
 export function createPostgresPool(
   config: InfrastructureConfig,
   capabilityRoles: Readonly<RuntimeDatabaseCapabilityRoles> = PRODUCTION_RUNTIME_DATABASE_ROLES,
 ): Pool {
-  const expectedSessionRole =
-    config.workload === 'api' ? capabilityRoles.api : capabilityRoles.worker;
+  const expectedSessionRole = expectedRuntimeDatabaseRole(config, capabilityRoles);
   if (config.database.sessionRole && config.database.sessionRole !== expectedSessionRole) {
     throw new Error(
       `Database session role ${config.database.sessionRole} does not match ${config.workload} workload`,

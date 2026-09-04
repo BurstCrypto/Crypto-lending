@@ -49,9 +49,17 @@ export function validateBuiltApiRuntime(apiRootInput) {
   }
   const apiRoot = containedRoot(apiRootInput);
   const appModule = join(apiRoot, 'dist/app.module.js');
+  const balanceConsumerActivation = join(
+    apiRoot,
+    'dist/blockchain-sync/application/balance-sync-consumer.activation.js',
+  );
   for (const relativePath of [
     'dist/main.js',
     'dist/app.module.js',
+    'dist/blockchain-sync/application/balance-sync-consumer.activation.js',
+    'dist/blockchain-sync/application/balance-sync-consumer.cli-mode.js',
+    'dist/blockchain-sync/application/balance-sync-consumer.cli.js',
+    'dist/blockchain-sync/application/balance-sync-consumer.runtime.js',
     'dist/infrastructure/outbox/outbox-worker.cli.js',
     'dist/infrastructure/outbox/outbox-worker-health.cli.js',
     'dist/infrastructure/database/migration.cli.js',
@@ -72,6 +80,10 @@ export function validateBuiltApiRuntime(apiRootInput) {
   }
 
   const runtimeRequire = createRequire(appModule);
+  const activation = runtimeRequire(balanceConsumerActivation);
+  assert.deepEqual(Object.keys(activation).sort(), ['BALANCE_CONSUMER_SOURCE_ACTIVATION']);
+  assert.deepEqual(activation.BALANCE_CONSUMER_SOURCE_ACTIVATION, { enabled: false });
+  assert.equal(Object.isFrozen(activation.BALANCE_CONSUMER_SOURCE_ACTIVATION), true);
   for (const packageName of FORBIDDEN_RUNTIME_PACKAGES) {
     assertPackageDoesNotResolve(runtimeRequire, packageName);
   }
@@ -88,7 +100,7 @@ export function validateBuiltApiRuntime(apiRootInput) {
   }
 
   return Object.freeze({
-    checkedEntrypoints: 5,
+    checkedEntrypoints: 9,
     forbiddenPackages: FORBIDDEN_RUNTIME_PACKAGES,
     valid: true,
   });

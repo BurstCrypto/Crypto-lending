@@ -1,6 +1,6 @@
 # Balance consumer wallet-address boundary
 
-Status: `IMPLEMENTED_DORMANT` / `CONSUMER_AND_PROVIDER_EGRESS_BLOCKED`
+Status: `FAIL_CLOSED_EXECUTABLE` / `CONSUMER_AND_PROVIDER_EGRESS_BLOCKED`
 
 Migration `0023` and `PostgresBalanceSyncWalletAddressResolver` close the local
 wallet-address handoff needed by a future Ethereum/Solana balance consumer.
@@ -102,24 +102,50 @@ in-process caller. The adapter contains no logger and performs no plaintext
 persistence. Future consumer/indexer code must preserve that property and keep
 addresses out of errors, metrics, traces, job payloads, checkpoints, and logs.
 
+## Fail-closed executable boundary
+
+The production image now contains `worker:balance:prod`, but every checked-in
+invocation exits nonzero before dynamically importing the dormant Nest/SQS/
+PostgreSQL runtime module. `APPLICATION_WORKLOAD` must be exactly
+`balance-consumer`; its reviewed database login prefix is
+`crypto_balance_consumer_login_<rotation-id>`, its session role is
+`crypto_balance_consumer_runtime`, and production startup rejects every
+`REDIS_*` variable.
+
+Startup also requires the canonical enabled metadata-ring config, exact
+Ethereum-and-Solana-mainnet scope, and the separate reviewed source-approval
+value. RPC/provider inputs, authentication or general-wallet configuration,
+Redis, signing/private-key material, admin or legacy database credentials,
+demo/testnet inputs, and Base inputs are rejected before the runtime import.
+Environment settings cannot override the immutable checked-in source gate,
+which remains `enabled: false`.
+
 ## Remaining activation gates
 
 This slice remains intentionally dormant. Activation still requires:
 
 - a dedicated business-consumer workload and its metadata-only secret;
+- a migration that creates `crypto_balance_consumer_runtime`, grants only the
+  reviewed resolver/checkpoint capabilities, and a dedicated rotating login;
+- a dedicated ECS/IAM identity and release binding (none is declared yet);
 - reviewed SQS receive/delete/visibility and durable idempotency behavior;
 - approved exact-host Ethereum/Solana RPC providers and egress controls;
 - runtime monitoring, redrive, replay, and key-rotation procedures; and
 - production authority for the deployment and provider accounts.
 
-Until those gates close, no module binds
-`BALANCE_SYNC_WALLET_ADDRESS_RESOLVER_PORT`, no consumer process loads this
-config, and no external traffic can result from this implementation.
+Until those gates close and the source gate receives a reviewed code change,
+no module binds `BALANCE_SYNC_WALLET_ADDRESS_RESOLVER_PORT`, no client is
+constructed, and no external traffic can result from this implementation. The
+existing migration still grants its dormant resolver to the generic worker;
+the new balance-consumer role is configuration-only and intentionally has no
+database principal or grant yet.
 
 ## Local verification
 
 ```powershell
 npm test --workspace @crypto-lending/api -- src/blockchain-sync/infrastructure/config/balance-consumer.config.spec.ts src/blockchain-sync/infrastructure/postgres/postgres-balance-sync-wallet-address.resolver.spec.ts src/infrastructure/database/migrations/0023-create-balance-consumer-wallet-address-boundary.migration.spec.ts
+npm test --workspace @crypto-lending/api -- src/blockchain-sync/application/balance-sync-consumer.cli-mode.spec.ts
+npm run worker:balance:prod
 $env:RUN_INFRASTRUCTURE_INTEGRATION='1'; npm run test:integration --workspace @crypto-lending/api -- test/infrastructure/balance-consumer-wallet-address-boundary.integration-spec.ts
 npm run lint --workspace @crypto-lending/api
 npm run typecheck --workspace @crypto-lending/api

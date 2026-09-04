@@ -27,17 +27,26 @@ function withProduction(callback) {
 function apiFixture(t) {
   const root = temporaryRoot(t, 'crypto-lending-api-runtime-');
   const dist = join(root, 'dist');
+  mkdirSync(join(dist, 'blockchain-sync/application'), { recursive: true });
   mkdirSync(join(dist, 'infrastructure/outbox'), { recursive: true });
   mkdirSync(join(dist, 'infrastructure/database'), { recursive: true });
   for (const file of [
     'main.js',
     'app.module.js',
+    'blockchain-sync/application/balance-sync-consumer.cli-mode.js',
+    'blockchain-sync/application/balance-sync-consumer.cli.js',
+    'blockchain-sync/application/balance-sync-consumer.runtime.js',
     'infrastructure/outbox/outbox-worker.cli.js',
     'infrastructure/outbox/outbox-worker-health.cli.js',
     'infrastructure/database/migration.cli.js',
   ]) {
     writeFileSync(join(dist, file), 'module.exports = Object.freeze({});\n', 'utf8');
   }
+  writeFileSync(
+    join(dist, 'blockchain-sync/application/balance-sync-consumer.activation.js'),
+    'module.exports.BALANCE_CONSUMER_SOURCE_ACTIVATION=Object.freeze({enabled:false});\n',
+    'utf8',
+  );
   return root;
 }
 
@@ -67,7 +76,7 @@ function addPackage(root, name) {
 test('accepts an API runtime whose production root cannot resolve test-only SDKs', (t) => {
   const report = withProduction(() => validateBuiltApiRuntime(apiFixture(t)));
   assert.equal(report.valid, true);
-  assert.equal(report.checkedEntrypoints, 5);
+  assert.equal(report.checkedEntrypoints, 9);
 });
 
 test('rejects an API runtime that can resolve a test-only SDK', (t) => {
@@ -86,6 +95,19 @@ test('requires production mode and every API executable used by ECS', (t) => {
   assert.throws(
     () => withProduction(() => validateBuiltApiRuntime(root)),
     /Missing API runtime artifact/u,
+  );
+});
+
+test('rejects an enabled compiled balance-consumer activation gate', (t) => {
+  const root = apiFixture(t);
+  writeFileSync(
+    join(root, 'dist/blockchain-sync/application/balance-sync-consumer.activation.js'),
+    'module.exports.BALANCE_CONSUMER_SOURCE_ACTIVATION=Object.freeze({enabled:true});\n',
+    'utf8',
+  );
+  assert.throws(
+    () => withProduction(() => validateBuiltApiRuntime(root)),
+    /Expected values to be strictly deep-equal/u,
   );
 });
 

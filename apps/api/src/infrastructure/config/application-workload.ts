@@ -8,9 +8,9 @@ export function bindExecutableWorkload(
   const configured = env.APPLICATION_WORKLOAD;
   const production = env.NODE_ENV?.trim().toLowerCase() === 'production';
 
-  if (production && expected === 'worker' && hasRedisEnvironmentVariables(env)) {
+  if (production && expected !== 'api' && hasRedisEnvironmentVariables(env)) {
     throw new Error(
-      'Production worker executable must not receive any REDIS_* environment variable',
+      `Production ${expected} executable must not receive any REDIS_* environment variable`,
     );
   }
 

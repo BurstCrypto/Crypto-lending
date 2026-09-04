@@ -1,17 +1,23 @@
 import { bindExecutableWorkload } from './application-workload';
 
 describe('bindExecutableWorkload', () => {
-  it.each(['api', 'worker'] as const)('accepts the exact production %s binding', (workload) => {
-    const env = { NODE_ENV: 'production', APPLICATION_WORKLOAD: workload };
-    expect(() => bindExecutableWorkload(env, workload)).not.toThrow();
-    expect(env.APPLICATION_WORKLOAD).toBe(workload);
-  });
+  it.each(['api', 'worker', 'balance-consumer'] as const)(
+    'accepts the exact production %s binding',
+    (workload) => {
+      const env = { NODE_ENV: 'production', APPLICATION_WORKLOAD: workload };
+      expect(() => bindExecutableWorkload(env, workload)).not.toThrow();
+      expect(env.APPLICATION_WORKLOAD).toBe(workload);
+    },
+  );
 
-  it.each(['api', 'worker'] as const)('rejects a missing production %s binding', (workload) => {
-    expect(() => bindExecutableWorkload({ NODE_ENV: 'production' }, workload)).toThrow(
-      `Production ${workload} executable requires explicit APPLICATION_WORKLOAD=${workload}`,
-    );
-  });
+  it.each(['api', 'worker', 'balance-consumer'] as const)(
+    'rejects a missing production %s binding',
+    (workload) => {
+      expect(() => bindExecutableWorkload({ NODE_ENV: 'production' }, workload)).toThrow(
+        `Production ${workload} executable requires explicit APPLICATION_WORKLOAD=${workload}`,
+      );
+    },
+  );
 
   it('rejects a worker command cross-wired with the API identity before startup', () => {
     expect(() =>
@@ -30,6 +36,21 @@ describe('bindExecutableWorkload', () => {
         'worker',
       ),
     ).toThrow('Production worker executable must not receive any REDIS_* environment variable');
+  });
+
+  it('rejects Redis before production balance-consumer startup', () => {
+    expect(() =>
+      bindExecutableWorkload(
+        {
+          NODE_ENV: 'production',
+          APPLICATION_WORKLOAD: 'balance-consumer',
+          REDIS_URL: 'rediss://must-not-be-injected',
+        },
+        'balance-consumer',
+      ),
+    ).toThrow(
+      'Production balance-consumer executable must not receive any REDIS_* environment variable',
+    );
   });
 
   it('rejects whitespace and unknown values instead of normalizing them', () => {

@@ -26,7 +26,7 @@ export interface RedisInfrastructureConfig {
   commandTimeoutMs: number;
 }
 
-export type ApplicationWorkload = 'api' | 'worker';
+export type ApplicationWorkload = 'api' | 'worker' | 'balance-consumer';
 
 export interface SqsInfrastructureConfig {
   region: string;
@@ -91,12 +91,14 @@ function applicationWorkload(env: NodeJS.ProcessEnv): ApplicationWorkload {
   const configured = env.APPLICATION_WORKLOAD;
   if (configured === undefined || configured === '') {
     if (isProduction(env)) {
-      throw new Error('Production runtime requires APPLICATION_WORKLOAD=api or worker');
+      throw new Error(
+        'Production runtime requires APPLICATION_WORKLOAD=api, worker, or balance-consumer',
+      );
     }
     return 'api';
   }
-  if (configured !== 'api' && configured !== 'worker') {
-    throw new Error('APPLICATION_WORKLOAD must be exactly api or worker');
+  if (configured !== 'api' && configured !== 'worker' && configured !== 'balance-consumer') {
+    throw new Error('APPLICATION_WORKLOAD must be exactly api, worker, or balance-consumer');
   }
   return configured;
 }
@@ -250,12 +252,23 @@ const MIGRATION_DATABASE_VARIABLES: DatabaseConnectionVariables = {
 };
 
 function runtimeDatabaseVariables(workload: ApplicationWorkload): DatabaseConnectionVariables {
-  const loginPrefix = workload === 'api' ? 'crypto_api_login_' : 'crypto_worker_login_';
+  const loginPrefix =
+    workload === 'api'
+      ? 'crypto_api_login_'
+      : workload === 'worker'
+        ? 'crypto_worker_login_'
+        : 'crypto_balance_consumer_login_';
   return {
     ...RUNTIME_DATABASE_VARIABLES,
     expectedProductionUsernamePattern: new RegExp(`^${loginPrefix}[a-z0-9]{1,32}$`, 'u'),
     expectedProductionUsernameDescription: `${loginPrefix}<rotation-id>`,
   };
+}
+
+function runtimeDatabaseSessionRole(workload: ApplicationWorkload): string {
+  if (workload === 'api') return 'crypto_api_runtime';
+  if (workload === 'worker') return 'crypto_worker_runtime';
+  return 'crypto_balance_consumer_runtime';
 }
 
 function connectionVariableNames(variables: DatabaseConnectionVariables): readonly string[] {
@@ -709,7 +722,7 @@ function runtimeDatabaseSettings(
       env,
       runtimeDatabaseVariables(workload),
       'DATABASE',
-      workload === 'api' ? 'crypto_api_runtime' : 'crypto_worker_runtime',
+      runtimeDatabaseSessionRole(workload),
     );
   }
 
@@ -722,11 +735,7 @@ function runtimeDatabaseSettings(
     env,
     scopedConfigured ? runtimeDatabaseVariables(workload) : LEGACY_DATABASE_VARIABLES,
     'DATABASE',
-    scopedConfigured
-      ? workload === 'api'
-        ? 'crypto_api_runtime'
-        : 'crypto_worker_runtime'
-      : undefined,
+    scopedConfigured ? runtimeDatabaseSessionRole(workload) : undefined,
   );
 }
 
@@ -814,6 +823,11 @@ export function loadInfrastructureConfig(
     assertNoProductionAwsCredentialOverrides(env);
     if (workload === 'worker' && hasRedisEnvironmentVariables(env)) {
       throw new Error('Production worker must not receive Redis configuration or credentials');
+    }
+    if (workload === 'balance-consumer' && hasRedisEnvironmentVariables(env)) {
+      throw new Error(
+        'Production balance-consumer must not receive Redis configuration or credentials',
+      );
     }
     if (workload === 'api') assertNoUnknownProductionRedisVariables(env);
   }

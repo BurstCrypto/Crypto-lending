@@ -1,6 +1,6 @@
 # Balance-sync physical queue boundary
 
-Status: implemented as a dormant transport boundary; no balance consumer, indexer egress, or deployment has been activated.
+Status: implemented with a fail-closed dormant executable; no balance consumer, indexer egress, or deployment has been activated.
 
 The reviewed logical outbox destination remains `jobs` for database compatibility. At the SQS adapter boundary, only the exact reviewed `blockchain.balance-sync@1` envelope is sent to `SQS_BALANCE_QUEUE_URL`. Reviewed ledger and yield envelopes continue to use `SQS_QUEUE_URL`. An absent balance queue setting fails balance publication closed and never falls back to the jobs queue.
 
@@ -11,6 +11,12 @@ Mixed outbox batches are grouped by physical source queue. Each physical request
 `SqsJobWorker` now binds receive, visibility heartbeat, retry visibility, deletion, and queue metrics to one selected physical source. The registered worker remains the generic jobs worker only. It rejects balance jobs before invoking a handler. The dormant balance dispatcher and balance worker mode accept only exact `blockchain.balance-sync@1` envelopes and reject ledger, yield, unknown, or wrong-version jobs before handler invocation.
 
 Infrastructure templates define separate KMS-encrypted source/DLQ pairs with TLS-only policies and exact redrive relationships. The outbox worker may publish to both source queues and inspect all four queues, but has no receive/delete permission. The API may only inspect all four queues. No balance consumer ECS service or desired count exists.
+
+The shared API image contains a `worker:balance:prod` entrypoint for local and
+compiled-runtime validation. Its immutable source activation remains false, so
+it exits sanitized and nonzero before importing its dormant SQS/PostgreSQL
+runtime module or constructing a client. No balance-consumer IAM role, database
+principal, task definition, service, or desired count was added by this slice.
 
 LocalStack creates both pairs and Docker health verifies all four queue names. CI and the local demo use four explicit, distinct loopback URLs.
 

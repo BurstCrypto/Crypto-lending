@@ -355,7 +355,11 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
             sessionRole: workload === 'api' ? names.apiRuntimeRole : names.workerRuntimeRole,
           },
         },
-        { api: names.apiRuntimeRole, worker: names.workerRuntimeRole },
+        {
+          api: names.apiRuntimeRole,
+          balanceConsumer: 'unused_balance_consumer_runtime',
+          worker: names.workerRuntimeRole,
+        },
       );
     const migrationPrincipalPool = (connectionString: string): Pool =>
       createMigrationPool(

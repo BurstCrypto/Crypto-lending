@@ -21,6 +21,31 @@ function loadSources() {
   return {
     apiDockerfile: readFileSync(join(repositoryRoot, 'Dockerfile.api'), 'utf8'),
     apiPackage: readFileSync(join(repositoryRoot, 'apps/api/package.json'), 'utf8'),
+    balanceConsumerActivation: readFileSync(
+      join(
+        repositoryRoot,
+        'apps/api/src/blockchain-sync/application/balance-sync-consumer.activation.ts',
+      ),
+      'utf8',
+    ),
+    balanceConsumerCli: readFileSync(
+      join(repositoryRoot, 'apps/api/src/blockchain-sync/application/balance-sync-consumer.cli.ts'),
+      'utf8',
+    ),
+    balanceConsumerCliMode: readFileSync(
+      join(
+        repositoryRoot,
+        'apps/api/src/blockchain-sync/application/balance-sync-consumer.cli-mode.ts',
+      ),
+      'utf8',
+    ),
+    balanceConsumerRuntime: readFileSync(
+      join(
+        repositoryRoot,
+        'apps/api/src/blockchain-sync/application/balance-sync-consumer.runtime.ts',
+      ),
+      'utf8',
+    ),
     applicationTemplate: readFileSync(
       join(repositoryRoot, 'infra/aws/application-baseline.yaml'),
       'utf8',
@@ -208,6 +233,50 @@ test('rejects a production Solana SDK dependency or missing built-runtime guard'
       'RUN ["node", "--version"]',
     ),
     /built-runtime dependency boundary/u,
+  );
+});
+
+test('rejects balance-consumer source activation, import-order, and command drift', () => {
+  const source = loadSources();
+  assertRejected(
+    replace(source, 'balanceConsumerActivation', 'enabled: false', 'enabled: true'),
+    /source activation/u,
+  );
+  assertRejected(
+    replace(
+      source,
+      'balanceConsumerCliMode',
+      "return import('./balance-sync-consumer.runtime');",
+      "return import('@nestjs/core');",
+    ),
+    /dynamic runtime import/u,
+  );
+  assertRejected(
+    replace(
+      source,
+      'balanceConsumerRuntime',
+      "from '../../infrastructure/sqs/sqs.module'",
+      "from '../../infrastructure/config/infrastructure.config'",
+    ),
+    /runtime dependencies/u,
+  );
+  assertRejected(
+    replace(
+      source,
+      'apiPackage',
+      'node dist/blockchain-sync/application/balance-sync-consumer.cli.js',
+      'node dist/main.js',
+    ),
+    /API production scripts/u,
+  );
+  assertRejected(
+    replace(
+      source,
+      'rootPackage',
+      'npm run worker:balance:prod --workspace @crypto-lending/api',
+      'npm run start:prod --workspace @crypto-lending/api',
+    ),
+    /Root package/u,
   );
 });
 

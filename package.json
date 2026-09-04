@@ -31,6 +31,8 @@
     "dev:api": "npm run start:dev --workspace @crypto-lending/api",
     "worker:outbox": "npm run worker:outbox --workspace @crypto-lending/api",
     "worker:outbox:prod": "npm run worker:outbox:prod --workspace @crypto-lending/api",
+    "worker:balance": "npm run worker:balance --workspace @crypto-lending/api",
+    "worker:balance:prod": "npm run worker:balance:prod --workspace @crypto-lending/api",
     "outbox:preflight:envelope": "tsx scripts/job-envelope-rollout-preflight.ts",
     "release:manifest": "node scripts/release-candidate-manifest.mjs",
     "lint:release": "eslint scripts/release-candidate-manifest.mjs scripts/release-candidate-manifest.test.mjs --config scripts/eslint.config.mjs --global Buffer --global process --global TextDecoder --global structuredClone",

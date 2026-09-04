@@ -129,7 +129,7 @@ export interface StructuredLoggerOptions {
   readonly context?: LoggingContext;
   readonly environment?: NodeJS.ProcessEnv;
   readonly sink?: StructuredLogSink;
-  readonly workload?: 'api' | 'worker' | 'migration' | 'openapi' | 'unknown';
+  readonly workload?: 'api' | 'worker' | 'balance-consumer' | 'migration' | 'openapi' | 'unknown';
 }
 
 const MAX_SERIALIZED_LOG_BYTES = 4_096;
@@ -152,7 +152,14 @@ const SAFE_METHODS = new Set([
   'TRACE',
 ]);
 const SAFE_LEVELS = new Set<StructuredLogLevel>(['debug', 'info', 'warn', 'error', 'fatal']);
-const SAFE_WORKLOADS = new Set(['api', 'worker', 'migration', 'openapi', 'unknown']);
+const SAFE_WORKLOADS = new Set([
+  'api',
+  'worker',
+  'balance-consumer',
+  'migration',
+  'openapi',
+  'unknown',
+]);
 const SAFE_OUTCOMES = new Set<StructuredLogOutcome>([
   'success',
   'failure',
@@ -242,6 +249,7 @@ const SAFE_FIELD_KEYS = new Set<keyof SafeLogFields>([
 ]);
 const SAFE_ERROR_CODES = new Set([
   'ABORT_ERR',
+  'BALANCE_CONSUMER_STARTUP_REFUSED',
   'CONFIGURATION_ERROR',
   'DATABASE_ERROR',
   'EAI_AGAIN',

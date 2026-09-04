@@ -71,12 +71,12 @@ describe('loadInfrastructureConfig', () => {
       loadInfrastructureConfig(
         baseEnvironment({ NODE_ENV: 'production', APPLICATION_WORKLOAD: undefined }),
       ),
-    ).toThrow('Production runtime requires APPLICATION_WORKLOAD=api or worker');
+    ).toThrow('Production runtime requires APPLICATION_WORKLOAD=api, worker, or balance-consumer');
     expect(() =>
       loadInfrastructureConfig(
         baseEnvironment({ NODE_ENV: 'production', APPLICATION_WORKLOAD: 'api-worker' }),
       ),
-    ).toThrow('APPLICATION_WORKLOAD must be exactly api or worker');
+    ).toThrow('APPLICATION_WORKLOAD must be exactly api, worker, or balance-consumer');
   });
 
   it('requires a canonical APP_ENV identity scope in production', () => {
@@ -145,6 +145,70 @@ describe('loadInfrastructureConfig', () => {
         }),
       ),
     ).toThrow('Production worker must not receive Redis configuration or credentials');
+  });
+
+  it('uses the dedicated production balance-consumer database identity without Redis', () => {
+    const config = loadInfrastructureConfig(
+      baseEnvironment({
+        NODE_ENV: 'production',
+        APPLICATION_WORKLOAD: 'balance-consumer',
+        DATABASE_RUNTIME_URL:
+          'postgresql://crypto_balance_consumer_login_blue:local@127.0.0.1:5432/crypto_lending',
+        DATABASE_RUNTIME_SSL_MODE: 'verify-full',
+        REDIS_URL: undefined,
+      }),
+    );
+
+    expect(config.workload).toBe('balance-consumer');
+    expect(config.database.sessionRole).toBe('crypto_balance_consumer_runtime');
+    expect(config.redis).toBeUndefined();
+  });
+
+  it('rejects a cross-scoped database login for the production balance consumer', () => {
+    expect(() =>
+      loadInfrastructureConfig(
+        baseEnvironment({
+          NODE_ENV: 'production',
+          APPLICATION_WORKLOAD: 'balance-consumer',
+          DATABASE_RUNTIME_URL:
+            'postgresql://crypto_worker_login_a:local@127.0.0.1:5432/crypto_lending',
+          DATABASE_RUNTIME_SSL_MODE: 'verify-full',
+          REDIS_URL: undefined,
+        }),
+      ),
+    ).toThrow(
+      'must contain the reviewed crypto_balance_consumer_login_<rotation-id> username and a password',
+    );
+  });
+
+  it('rejects every Redis setting injected into a production balance consumer', () => {
+    expect(() =>
+      loadInfrastructureConfig(
+        baseEnvironment({
+          NODE_ENV: 'production',
+          APPLICATION_WORKLOAD: 'balance-consumer',
+          DATABASE_RUNTIME_URL:
+            'postgresql://crypto_balance_consumer_login_a:local@127.0.0.1:5432/crypto_lending',
+          DATABASE_RUNTIME_SSL_MODE: 'verify-full',
+        }),
+      ),
+    ).toThrow('Production balance-consumer must not receive Redis configuration or credentials');
+  });
+
+  it('rejects unknown Redis aliases injected into a production balance consumer', () => {
+    expect(() =>
+      loadInfrastructureConfig(
+        baseEnvironment({
+          NODE_ENV: 'production',
+          APPLICATION_WORKLOAD: 'balance-consumer',
+          DATABASE_RUNTIME_URL:
+            'postgresql://crypto_balance_consumer_login_a:local@127.0.0.1:5432/crypto_lending',
+          DATABASE_RUNTIME_SSL_MODE: 'verify-full',
+          REDIS_URL: undefined,
+          REDIS_OPERATOR_TOKEN: 'must-not-be-injected',
+        }),
+      ),
+    ).toThrow('Production balance-consumer must not receive Redis configuration or credentials');
   });
 
   it('rejects unknown Redis aliases injected into a production API', () => {

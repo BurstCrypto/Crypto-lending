@@ -57,6 +57,20 @@ describe('PostgresService', () => {
     );
     await apiPool.end();
 
+    const balanceConsumerPool = createPostgresPool({
+      ...testInfrastructureConfig(),
+      workload: 'balance-consumer',
+      database: {
+        ...testInfrastructureConfig().database,
+        connectionString: 'postgresql://unused',
+        sessionRole: 'crypto_balance_consumer_runtime',
+      },
+    });
+    expect(balanceConsumerPool.options.options).toBe(
+      '-c role=crypto_balance_consumer_runtime -c search_path=public,pg_temp',
+    );
+    await balanceConsumerPool.end();
+
     expect(() =>
       createPostgresPool({
         ...testInfrastructureConfig(),

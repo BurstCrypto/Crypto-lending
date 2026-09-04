@@ -292,6 +292,43 @@ function validateApiDockerfile(source) {
   return errors;
 }
 
+function validateBalanceConsumerExecutable(sources) {
+  const errors = [];
+  addError(
+    errors,
+    /export const BALANCE_CONSUMER_SOURCE_ACTIVATION = Object\.freeze\(\{\s*enabled: false as boolean,\s*\}\);/u.test(
+      sources.balanceConsumerActivation,
+    ),
+    'Balance consumer source activation must remain immutably disabled',
+  );
+  addError(
+    errors,
+    sources.balanceConsumerCliMode.includes("return import('./balance-sync-consumer.runtime');") &&
+      !/\bfrom\s+['"][^'"]*(?:@nestjs|postgres\.module|sqs\.module|balance-sync-consumer\.runtime)/u.test(
+        sources.balanceConsumerCliMode,
+      ),
+    'Balance consumer clients must remain behind the dynamic runtime import',
+  );
+  addError(
+    errors,
+    sources.balanceConsumerRuntime.includes("from '@nestjs/common'") &&
+      sources.balanceConsumerRuntime.includes(
+        "from '../../infrastructure/database/postgres.module'",
+      ) &&
+      sources.balanceConsumerRuntime.includes("from '../../infrastructure/sqs/sqs.module'"),
+    'Balance consumer runtime dependencies must remain isolated in the dormant runtime module',
+  );
+  addError(
+    errors,
+    !sources.balanceConsumerCli.includes('load-dotenv') &&
+      !sources.balanceConsumerCli.includes("from '@nestjs") &&
+      sources.balanceConsumerCli.includes("from './balance-sync-consumer.cli-mode'") &&
+      sources.balanceConsumerCli.includes('installFatalProcessBoundary(logger)'),
+    'Balance consumer CLI must evaluate fail-closed mode before framework configuration loads',
+  );
+  return errors;
+}
+
 function validateWebDockerfile(source) {
   const errors = validateSharedDockerfile(source, 'Dockerfile.web', {
     command: 'CMD ["node", "server.js"]',
@@ -441,6 +478,7 @@ function validateRdsBundle(bundle, checksumFile) {
 export function validateProductionContainerSources(sources) {
   const errors = [
     ...validateApiDockerfile(sources.apiDockerfile),
+    ...validateBalanceConsumerExecutable(sources),
     ...validateWebDockerfile(sources.webDockerfile),
     ...validateCloudFormation(sources.applicationTemplate, sources.migrationTemplate),
     ...validateRdsBundle(sources.rdsBundle, normalize(sources.rdsChecksum)),
@@ -471,9 +509,21 @@ export function validateProductionContainerSources(sources) {
     apiPackage?.scripts?.['start:prod'] === 'node dist/main.js' &&
       apiPackage?.scripts?.['worker:outbox:prod'] ===
         'node dist/infrastructure/outbox/outbox-worker.cli.js' &&
+      apiPackage?.scripts?.['worker:balance'] ===
+        'tsx src/blockchain-sync/application/balance-sync-consumer.cli.ts' &&
+      apiPackage?.scripts?.['worker:balance:prod'] ===
+        'node dist/blockchain-sync/application/balance-sync-consumer.cli.js' &&
       apiPackage?.scripts?.['db:migrate:prod'] ===
         'node dist/infrastructure/database/migration.cli.js --production up',
     'API production scripts must remain compatible with the image and ECS overrides',
+  );
+  addError(
+    errors,
+    rootPackage?.scripts?.['worker:balance'] ===
+      'npm run worker:balance --workspace @crypto-lending/api' &&
+      rootPackage?.scripts?.['worker:balance:prod'] ===
+        'npm run worker:balance:prod --workspace @crypto-lending/api',
+    'Root package must expose the fail-closed balance consumer production command',
   );
   addError(
     errors,
@@ -513,6 +563,31 @@ export function validateProductionContainers(
   return validateProductionContainerSources({
     apiDockerfile: readFileSync(join(repositoryRoot, 'Dockerfile.api'), 'utf8'),
     apiPackage: readFileSync(join(repositoryRoot, 'apps/api/package.json'), 'utf8'),
+    balanceConsumerActivation: readFileSync(
+      join(
+        repositoryRoot,
+        'apps/api/src/blockchain-sync/application/balance-sync-consumer.activation.ts',
+      ),
+      'utf8',
+    ),
+    balanceConsumerCli: readFileSync(
+      join(repositoryRoot, 'apps/api/src/blockchain-sync/application/balance-sync-consumer.cli.ts'),
+      'utf8',
+    ),
+    balanceConsumerCliMode: readFileSync(
+      join(
+        repositoryRoot,
+        'apps/api/src/blockchain-sync/application/balance-sync-consumer.cli-mode.ts',
+      ),
+      'utf8',
+    ),
+    balanceConsumerRuntime: readFileSync(
+      join(
+        repositoryRoot,
+        'apps/api/src/blockchain-sync/application/balance-sync-consumer.runtime.ts',
+      ),
+      'utf8',
+    ),
     applicationTemplate: readFileSync(
       join(repositoryRoot, 'infra/aws/application-baseline.yaml'),
       'utf8',
