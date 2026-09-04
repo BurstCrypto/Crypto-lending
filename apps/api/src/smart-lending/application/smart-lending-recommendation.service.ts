@@ -12,6 +12,17 @@ import {
 } from './ports/fee-aware-allocation-input.port';
 
 const CORRELATION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+const INPUT_KEYS = Object.freeze([
+  'holdingPeriodDays',
+  'maximumQuoteAgeSeconds',
+  'maximumOpportunityAgeSeconds',
+  'minimumNetBenefitUsdMantissa',
+  'crossChainPolicy',
+  'exposurePolicy',
+  'positions',
+  'opportunities',
+  'candidates',
+] as const);
 
 export const SMART_LENDING_RECOMMENDATION_CLOCK = Symbol('SMART_LENDING_RECOMMENDATION_CLOCK');
 
@@ -40,6 +51,49 @@ function unavailable(): never {
   throw new SmartLendingRecommendationUnavailableError();
 }
 
+function dataFields(
+  value: unknown,
+  requiredKeys: readonly string[],
+  exact: boolean,
+): Readonly<Record<string, unknown>> | null {
+  try {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) return null;
+    const descriptors = Object.getOwnPropertyDescriptors(value) as unknown as PropertyDescriptorMap;
+    const keys = Reflect.ownKeys(descriptors);
+    if (
+      (exact && keys.length !== requiredKeys.length) ||
+      (exact && keys.some((key) => typeof key !== 'string' || !requiredKeys.includes(key)))
+    ) {
+      return null;
+    }
+    const record = Object.create(null) as Record<string, unknown>;
+    for (const key of requiredKeys) {
+      const descriptor = descriptors[key];
+      if (!descriptor || !('value' in descriptor) || descriptor.enumerable !== true) return null;
+      record[key] = descriptor.value;
+    }
+    return record;
+  } catch {
+    return null;
+  }
+}
+
+function trustedClockTime(clock: SmartLendingRecommendationClock): string {
+  try {
+    const now = clock.now();
+    if (typeof now !== 'object' || now === null || Object.getPrototypeOf(now) !== Date.prototype) {
+      return unavailable();
+    }
+    const milliseconds = Date.prototype.getTime.call(now);
+    if (!Number.isFinite(milliseconds)) return unavailable();
+    return Date.prototype.toISOString.call(now);
+  } catch {
+    return unavailable();
+  }
+}
+
 /**
  * Trusted application seam for the pure allocation policy. Its public request
  * contains only account and correlation identity; portfolio values, policy,
@@ -58,23 +112,35 @@ export class SmartLendingRecommendationService {
     request: ReadSmartLendingRecommendationRequest,
   ): Promise<FeeAwareAllocationRecommendation> {
     let accountId: AccountId;
+    let correlationId: string;
     let evaluatedAt: string;
     try {
-      accountId = parseAccountId(request.accountId);
-      if (!CORRELATION_ID.test(request.correlationId)) return unavailable();
-      const now = this.clock.now();
-      if (!(now instanceof Date) || !Number.isFinite(now.getTime())) return unavailable();
-      evaluatedAt = now.toISOString();
+      const requestFields = dataFields(request, ['accountId', 'correlationId'], false);
+      if (requestFields === null) return unavailable();
+      accountId = parseAccountId(requestFields.accountId);
+      if (
+        typeof requestFields.correlationId !== 'string' ||
+        !CORRELATION_ID.test(requestFields.correlationId)
+      ) {
+        return unavailable();
+      }
+      correlationId = requestFields.correlationId;
+      evaluatedAt = trustedClockTime(this.clock);
     } catch {
       return unavailable();
     }
 
     try {
-      const input = await this.inputs.read({
-        accountId,
-        correlationId: request.correlationId,
-        evaluatedAt,
-      });
+      const input = dataFields(
+        await this.inputs.read({
+          accountId,
+          correlationId,
+          evaluatedAt,
+        }),
+        INPUT_KEYS,
+        true,
+      );
+      if (input === null) return unavailable();
       const recommendation = recommendFeeAwareAllocation({
         usdScale: FEE_AWARE_ALLOCATION_USD_SCALE,
         evaluatedAt,

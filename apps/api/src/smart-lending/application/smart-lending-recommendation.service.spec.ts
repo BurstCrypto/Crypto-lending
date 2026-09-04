@@ -177,6 +177,52 @@ describe('SmartLendingRecommendationService', () => {
     expect(financialAccessorInvoked).toBe(false);
   });
 
+  it('rejects required request accessors without invoking them or reading financial inputs', async () => {
+    const fixture = serviceFixture();
+    let getterCalls = 0;
+    const request = Object.create(null) as Record<string, unknown>;
+    Object.defineProperties(request, {
+      accountId: {
+        enumerable: true,
+        get: () => {
+          getterCalls += 1;
+          throw new Error('private request detail');
+        },
+      },
+      correlationId: { enumerable: true, value: CORRELATION_ID },
+    });
+
+    await expect(
+      fixture.service.read(
+        request as unknown as Parameters<SmartLendingRecommendationService['read']>[0],
+      ),
+    ).rejects.toEqual(new SmartLendingRecommendationUnavailableError());
+    expect(getterCalls).toBe(0);
+    expect(fixture.reader.read).not.toHaveBeenCalled();
+  });
+
+  it('rejects accessor-backed trusted inputs without invoking their fields', async () => {
+    let getterCalls = 0;
+    const hostileInputs = { ...validInputs() };
+    Object.defineProperty(hostileInputs, 'positions', {
+      configurable: true,
+      enumerable: true,
+      get: () => {
+        getterCalls += 1;
+        throw new Error('private adapter detail');
+      },
+    });
+    const reader = {
+      read: jest.fn().mockResolvedValue(hostileInputs),
+    } as jest.Mocked<FeeAwareAllocationInputReader>;
+    const fixture = serviceFixture({ reader });
+
+    await expect(
+      fixture.service.read({ accountId: ACCOUNT_ID, correlationId: CORRELATION_ID }),
+    ).rejects.toEqual(new SmartLendingRecommendationUnavailableError());
+    expect(getterCalls).toBe(0);
+  });
+
   it('fails closed when the trusted input source fails or returns malformed data', async () => {
     const failures: jest.Mocked<FeeAwareAllocationInputReader>[] = [
       { read: jest.fn().mockRejectedValue(new Error('unavailable')) },
@@ -225,5 +271,42 @@ describe('SmartLendingRecommendationService', () => {
       }),
     ).rejects.toEqual(new SmartLendingRecommendationUnavailableError());
     expect(fixture.reader.read).not.toHaveBeenCalled();
+  });
+
+  it('rejects Date subclasses, Date proxies, and clock failures before reading inputs', async () => {
+    class DateSubclass extends Date {}
+    const subclassFixture = serviceFixture({
+      clock: { now: (): Date => new DateSubclass(EVALUATED_AT) },
+    });
+    await expect(
+      subclassFixture.service.read({ accountId: ACCOUNT_ID, correlationId: CORRELATION_ID }),
+    ).rejects.toEqual(new SmartLendingRecommendationUnavailableError());
+    expect(subclassFixture.reader.read).not.toHaveBeenCalled();
+
+    let proxyPropertyReads = 0;
+    const dateProxy = new Proxy(new Date(EVALUATED_AT), {
+      get: () => {
+        proxyPropertyReads += 1;
+        throw new Error('private proxy detail');
+      },
+    });
+    const proxyFixture = serviceFixture({ clock: { now: (): Date => dateProxy } });
+    await expect(
+      proxyFixture.service.read({ accountId: ACCOUNT_ID, correlationId: CORRELATION_ID }),
+    ).rejects.toEqual(new SmartLendingRecommendationUnavailableError());
+    expect(proxyPropertyReads).toBe(0);
+    expect(proxyFixture.reader.read).not.toHaveBeenCalled();
+
+    const failureFixture = serviceFixture({
+      clock: {
+        now: (): Date => {
+          throw new Error('private clock detail');
+        },
+      },
+    });
+    await expect(
+      failureFixture.service.read({ accountId: ACCOUNT_ID, correlationId: CORRELATION_ID }),
+    ).rejects.toEqual(new SmartLendingRecommendationUnavailableError());
+    expect(failureFixture.reader.read).not.toHaveBeenCalled();
   });
 });
