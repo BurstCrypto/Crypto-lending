@@ -1,0 +1,85 @@
+ARG OCI_SOURCE=
+ARG OCI_REVISION=0000000000000000000000000000000000000000
+ARG OCI_CREATED=1970-01-01T00:00:00Z
+ARG SOURCE_DATE_EPOCH=0
+
+FROM node:24.20.0-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e AS metadata
+
+ARG OCI_SOURCE
+ARG OCI_REVISION
+ARG OCI_CREATED
+ARG SOURCE_DATE_EPOCH
+ENV OCI_SOURCE=${OCI_SOURCE} \
+    OCI_REVISION=${OCI_REVISION} \
+    OCI_CREATED=${OCI_CREATED} \
+    SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH}
+
+WORKDIR /metadata
+COPY infra/containers/validate-oci-build-metadata.mjs ./infra/containers/validate-oci-build-metadata.mjs
+RUN ["node", "infra/containers/validate-oci-build-metadata.mjs"]
+RUN ["node", "-e", "require('node:fs').writeFileSync('/oci-metadata.validated','validated\\n',{encoding:'utf8',flag:'wx',mode:0o444})"]
+
+FROM node:24.20.0-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e AS build
+
+ENV NPM_CONFIG_AUDIT=false \
+    NPM_CONFIG_FUND=false \
+    NPM_CONFIG_IGNORE_SCRIPTS=true \
+    NPM_CONFIG_UPDATE_NOTIFIER=false
+
+WORKDIR /workspace
+RUN ["npm", "install", "--global", "npm@11.6.4"]
+RUN ["node", "-e", "if (require('node:child_process').execFileSync('npm', ['--version'], { encoding: 'utf8' }).trim() !== '11.6.4') process.exit(1)"]
+
+COPY package.json package-lock.json ./
+COPY apps/api/package.json ./apps/api/package.json
+RUN ["npm", "ci", "--workspace", "@crypto-lending/api", "--include-workspace-root=false"]
+
+COPY apps/api/nest-cli.json apps/api/tsconfig.json apps/api/tsconfig.build.json ./apps/api/
+COPY apps/api/src ./apps/api/src
+ENV NODE_ENV=production
+RUN ["npm", "run", "build", "--workspace", "@crypto-lending/api"]
+RUN ["node", "-e", "const fs=require('node:fs');for(const path of ['apps/api/dist/local-demo','apps/api/dist/public-testnet','apps/api/dist/evm-public-testnet','apps/api/dist/local-development-app.module.js'])fs.rmSync(path,{force:true,recursive:true})"]
+RUN ["node", "-e", "const fs=require('node:fs');const path=require('node:path');const root='apps/api/dist';for(const entry of fs.readdirSync(root,{recursive:true,withFileTypes:true})){if(entry.isFile()&&(entry.name.endsWith('.map')||entry.name.endsWith('.d.ts'))){fs.rmSync(path.join(entry.parentPath,entry.name));}}"]
+RUN ["npm", "prune", "--omit=dev", "--workspace", "@crypto-lending/api", "--include-workspace-root=false"]
+RUN ["node", "-e", "require('node:fs').mkdirSync('apps/api/node_modules',{recursive:true})"]
+COPY infra/containers/validate-built-runtime.mjs ./infra/containers/validate-built-runtime.mjs
+RUN ["node", "infra/containers/validate-built-runtime.mjs", "api", "apps/api"]
+
+FROM node:24.20.0-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e AS runtime
+
+ARG OCI_SOURCE
+ARG OCI_REVISION
+ARG OCI_CREATED
+LABEL org.opencontainers.image.base.digest="sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e" \
+      org.opencontainers.image.base.name="docker.io/library/node:24.20.0-bookworm-slim" \
+      org.opencontainers.image.created="${OCI_CREATED}" \
+      org.opencontainers.image.description="Crypto Lending API, outbox worker, and migration runtime" \
+      org.opencontainers.image.licenses="UNLICENSED" \
+      org.opencontainers.image.revision="${OCI_REVISION}" \
+      org.opencontainers.image.source="${OCI_SOURCE}" \
+      org.opencontainers.image.title="crypto-lending-api"
+
+ENV NODE_ENV=production \
+    PORT=3001 \
+    HOME=/tmp \
+    TMPDIR=/tmp
+
+RUN groupadd --gid 10001 app \
+    && useradd --uid 10001 --gid 10001 --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin app \
+    && mkdir -p /app/apps/api \
+    && chown -R 10001:10001 /app \
+    && rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack /opt/yarn-v1.22.22 /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack /usr/local/bin/yarn /usr/local/bin/yarnpkg
+
+WORKDIR /app/apps/api
+COPY --from=metadata --chown=0:0 /oci-metadata.validated /usr/share/crypto-lending/oci-metadata.validated
+COPY --from=build --chown=10001:10001 /workspace/node_modules /app/node_modules
+COPY --from=build --chown=10001:10001 /workspace/apps/api/node_modules ./node_modules
+COPY --from=build --chown=10001:10001 /workspace/apps/api/dist ./dist
+COPY --chown=0:0 infra/containers/aws-rds-global-bundle.crt /etc/ssl/certs/aws-rds-global-bundle.pem
+
+USER 10001:10001
+EXPOSE 3001
+STOPSIGNAL SIGTERM
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 CMD ["node", "-e", "require('node:http').get('http://127.0.0.1:3001/api/v1/health',r=>{r.resume();process.exitCode=r.statusCode===200?0:1}).on('error',()=>process.exit(1))"]
+ENTRYPOINT []
+CMD ["node", "dist/main.js"]

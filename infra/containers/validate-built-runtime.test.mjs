@@ -1,0 +1,142 @@
+import assert from 'node:assert/strict';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import process from 'node:process';
+import test from 'node:test';
+
+import { validateBuiltApiRuntime, validateBuiltWebRuntime } from './validate-built-runtime.mjs';
+
+function temporaryRoot(t, prefix) {
+  const root = mkdtempSync(join(tmpdir(), prefix));
+  t.after(() => rmSync(root, { force: true, recursive: true }));
+  return root;
+}
+
+function withProduction(callback) {
+  const previous = process.env.NODE_ENV;
+  process.env.NODE_ENV = 'production';
+  try {
+    return callback();
+  } finally {
+    if (previous === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = previous;
+  }
+}
+
+function apiFixture(t) {
+  const root = temporaryRoot(t, 'crypto-lending-api-runtime-');
+  const dist = join(root, 'dist');
+  mkdirSync(join(dist, 'infrastructure/outbox'), { recursive: true });
+  mkdirSync(join(dist, 'infrastructure/database'), { recursive: true });
+  for (const file of [
+    'main.js',
+    'app.module.js',
+    'infrastructure/outbox/outbox-worker.cli.js',
+    'infrastructure/outbox/outbox-worker-health.cli.js',
+    'infrastructure/database/migration.cli.js',
+  ]) {
+    writeFileSync(join(dist, file), 'module.exports = Object.freeze({});\n', 'utf8');
+  }
+  return root;
+}
+
+function webFixture(t) {
+  const root = temporaryRoot(t, 'crypto-lending-web-runtime-');
+  mkdirSync(join(root, 'apps/web'), { recursive: true });
+  writeFileSync(join(root, 'apps/web/server.js'), "console.log('server');\n", 'utf8');
+  writeFileSync(
+    join(root, 'apps/web/package.json'),
+    '{"name":"@crypto-lending/web","private":true,"version":"0.1.0"}\n',
+    'utf8',
+  );
+  return root;
+}
+
+function addPackage(root, name) {
+  const packageRoot = join(root, 'node_modules', ...name.split('/'));
+  mkdirSync(packageRoot, { recursive: true });
+  writeFileSync(
+    join(packageRoot, 'package.json'),
+    JSON.stringify({ name, main: 'index.js', version: '1.0.0' }),
+    'utf8',
+  );
+  writeFileSync(join(packageRoot, 'index.js'), 'module.exports = {};\n', 'utf8');
+}
+
+test('accepts an API runtime whose production root cannot resolve test-only SDKs', (t) => {
+  const report = withProduction(() => validateBuiltApiRuntime(apiFixture(t)));
+  assert.equal(report.valid, true);
+  assert.equal(report.checkedEntrypoints, 5);
+});
+
+test('rejects an API runtime that can resolve a test-only SDK', (t) => {
+  const root = apiFixture(t);
+  addPackage(root, '@solana/web3.js');
+  assert.throws(
+    () => withProduction(() => validateBuiltApiRuntime(root)),
+    /Forbidden production dependency resolves: @solana\/web3\.js/u,
+  );
+});
+
+test('requires production mode and every API executable used by ECS', (t) => {
+  const root = apiFixture(t);
+  assert.throws(() => validateBuiltApiRuntime(root), /requires NODE_ENV=production/u);
+  rmSync(join(root, 'dist/infrastructure/database/migration.cli.js'));
+  assert.throws(
+    () => withProduction(() => validateBuiltApiRuntime(root)),
+    /Missing API runtime artifact/u,
+  );
+});
+
+test('rejects a compiled local-demo or public-testnet module in the API runtime', (t) => {
+  const root = apiFixture(t);
+  mkdirSync(join(root, 'dist/public-testnet'));
+  assert.throws(
+    () => withProduction(() => validateBuiltApiRuntime(root)),
+    /Development-only API artifact reached production/u,
+  );
+});
+
+test('accepts harmless shared public-testnet text in the minimal web runtime', (t) => {
+  const root = webFixture(t);
+  writeFileSync(
+    join(root, 'apps/web/chunk.js'),
+    "const cssClass = 'public-testnet-status';\n",
+    'utf8',
+  );
+  assert.equal(withProduction(() => validateBuiltWebRuntime(root)).valid, true);
+});
+
+test('rejects forbidden SDK package paths and module markers in the web runtime', (t) => {
+  const packageRoot = webFixture(t);
+  addPackage(packageRoot, 'jayson');
+  assert.throws(
+    () => withProduction(() => validateBuiltWebRuntime(packageRoot)),
+    /Forbidden web standalone package directory: jayson/u,
+  );
+
+  const markerRoot = webFixture(t);
+  writeFileSync(
+    join(markerRoot, 'apps/web/chunk.js'),
+    'const sdk = require("@solana/web3.js");\n',
+    'utf8',
+  );
+  assert.throws(
+    () => withProduction(() => validateBuiltWebRuntime(markerRoot)),
+    /Forbidden web standalone marker: @solana\/web3\.js/u,
+  );
+});
+
+test('rejects an unsanitized standalone package manifest', (t) => {
+  const root = webFixture(t);
+  writeFileSync(
+    join(root, 'apps/web/package.json'),
+    '{"dependencies":{"@solana/web3.js":"1.98.4"},"name":"@crypto-lending/web","private":true,"version":"0.1.0"}\n',
+    'utf8',
+  );
+  assert.throws(
+    () => withProduction(() => validateBuiltWebRuntime(root)),
+    /Expected values to be strictly deep-equal/u,
+  );
+});
