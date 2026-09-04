@@ -22,6 +22,7 @@ import { MigrationRunner } from '../../src/infrastructure/database/migration-run
 import {
   createLedgerCommandIdempotencyTestSchemaMigrationV0009,
   DATABASE_TEST_SCHEMA_MIGRATION_LIST,
+  enforceReviewedJobOutboxAdmissionTestSchemaMigrationV0018,
 } from '../../src/infrastructure/database/migrations';
 import { PostgresService } from '../../src/infrastructure/database/postgres.service';
 import {
@@ -638,6 +639,11 @@ describeWithPostgres('KAN-43 ledger command idempotency PostgreSQL integration',
         '0008',
         '0009',
       ]);
+      const admissionSql = enforceReviewedJobOutboxAdmissionTestSchemaMigrationV0018.upSql;
+      if (typeof admissionSql !== 'string') {
+        throw new Error('Reviewed outbox admission fixture must be transactional SQL');
+      }
+      await activeTracePool.query(admissionSql);
       const client = await activeTracePool.connect();
       const fixture = await provisionPostingPlan(client);
       client.release();

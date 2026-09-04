@@ -62,6 +62,15 @@ describeWithPostgres('PostgreSQL migration rollback integration', () => {
       '0014',
       '0015',
       '0016',
+      '0017',
+      '0018',
+      '0019',
+      '0020',
+      '0021',
+      '0022',
+      '0023',
+      '0024',
+      '0025',
     ]);
     const sanitizedLastErrors = await migrationPool.query<{
       id: string;
@@ -151,7 +160,79 @@ describeWithPostgres('PostgreSQL migration rollback integration', () => {
        )`,
     );
     await expect(runner.assertUpToDate()).resolves.toBeUndefined();
-    await expect(runner.down(11)).resolves.toEqual([
+
+    await expect(runner.down(8)).resolves.toEqual([
+      '0025',
+      '0024',
+      '0023',
+      '0022',
+      '0021',
+      '0020',
+      '0019',
+      '0018',
+    ]);
+    await expect(
+      migrationPool.query(
+        `SELECT
+           to_regprocedure(
+             'enqueue_reviewed_job_v1(text,text,jsonb,jsonb,text,text)'
+           ) IS NULL AS function_dropped,
+           NOT pg_catalog.has_table_privilege(
+             'crypto_api_runtime', 'job_outbox', 'INSERT'
+           ) AS table_insert_remains_denied,
+           pg_catalog.has_column_privilege(
+             'crypto_api_runtime', 'job_outbox', 'id', 'INSERT'
+           )
+           AND pg_catalog.has_column_privilege(
+             'crypto_api_runtime', 'job_outbox', 'queue_name', 'INSERT'
+           )
+           AND pg_catalog.has_column_privilege(
+             'crypto_api_runtime', 'job_outbox', 'payload', 'INSERT'
+           )
+           AND pg_catalog.has_column_privilege(
+             'crypto_api_runtime', 'job_outbox', 'message_attributes', 'INSERT'
+           )
+           AND pg_catalog.has_column_privilege(
+             'crypto_api_runtime', 'job_outbox', 'ledger_command_id', 'INSERT'
+           )
+           AND pg_catalog.has_column_privilege(
+             'crypto_api_runtime', 'job_outbox', 'ledger_journal_id', 'INSERT'
+           ) AS predecessor_columns_restored,
+           (SELECT count(*)::integer FROM job_outbox WHERE id LIKE 'historical-%')
+             AS legacy_rows_preserved`,
+      ),
+    ).resolves.toMatchObject({
+      rows: [
+        {
+          function_dropped: true,
+          table_insert_remains_denied: true,
+          predecessor_columns_restored: true,
+          legacy_rows_preserved: 3,
+        },
+      ],
+    });
+    await expect(runner.up()).resolves.toEqual([
+      '0018',
+      '0019',
+      '0020',
+      '0021',
+      '0022',
+      '0023',
+      '0024',
+      '0025',
+    ]);
+    await expect(runner.assertUpToDate()).resolves.toBeUndefined();
+
+    await expect(runner.down(20)).resolves.toEqual([
+      '0025',
+      '0024',
+      '0023',
+      '0022',
+      '0021',
+      '0020',
+      '0019',
+      '0018',
+      '0017',
       '0016',
       '0015',
       '0014',
@@ -181,6 +262,15 @@ describeWithPostgres('PostgreSQL migration rollback integration', () => {
       '0014',
       '0015',
       '0016',
+      '0017',
+      '0018',
+      '0019',
+      '0020',
+      '0021',
+      '0022',
+      '0023',
+      '0024',
+      '0025',
     ]);
     await expect(
       migrationPool.query<{ last_error: string }>(
@@ -190,7 +280,16 @@ describeWithPostgres('PostgreSQL migration rollback integration', () => {
       rows: [{ last_error: 'OUTBOX_TRANSPORT_FAILED' }],
     });
 
-    await expect(runner.down(15)).resolves.toEqual([
+    await expect(runner.down(24)).resolves.toEqual([
+      '0025',
+      '0024',
+      '0023',
+      '0022',
+      '0021',
+      '0020',
+      '0019',
+      '0018',
+      '0017',
       '0016',
       '0015',
       '0014',
@@ -240,12 +339,18 @@ describeWithPostgres('PostgreSQL migration rollback integration', () => {
       `SELECT 'relation' AS object_kind, relation.relname AS object_name
        FROM pg_catalog.pg_class AS relation
        WHERE relation.relnamespace = pg_catalog.to_regnamespace($1)
-         AND relation.relname LIKE 'authentication\\_%' ESCAPE '\\'
+         AND (
+           relation.relname LIKE 'authentication\\_%' ESCAPE '\\'
+           OR relation.relname LIKE 'auth\\_%' ESCAPE '\\'
+         )
        UNION ALL
        SELECT 'function' AS object_kind, procedure.proname AS object_name
        FROM pg_catalog.pg_proc AS procedure
        WHERE procedure.pronamespace = pg_catalog.to_regnamespace($1)
-         AND pg_catalog.strpos(procedure.proname, 'authentication') > 0
+         AND (
+           pg_catalog.strpos(procedure.proname, 'authentication') > 0
+           OR procedure.proname LIKE 'auth\\_%' ESCAPE '\\'
+         )
        ORDER BY object_kind, object_name`,
       [schema],
     );
@@ -337,6 +442,15 @@ describeWithPostgres('PostgreSQL migration rollback integration', () => {
           '0014',
           '0015',
           '0016',
+          '0017',
+          '0018',
+          '0019',
+          '0020',
+          '0021',
+          '0022',
+          '0023',
+          '0024',
+          '0025',
         ],
       ],
     );
@@ -358,6 +472,15 @@ describeWithPostgres('PostgreSQL migration rollback integration', () => {
       '0014',
       '0015',
       '0016',
+      '0017',
+      '0018',
+      '0019',
+      '0020',
+      '0021',
+      '0022',
+      '0023',
+      '0024',
+      '0025',
     ]);
     await expect(runner.assertUpToDate()).resolves.toBeUndefined();
   });

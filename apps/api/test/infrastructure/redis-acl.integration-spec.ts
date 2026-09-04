@@ -84,6 +84,8 @@ function apiInfrastructureConfig(
       region: 'us-east-1',
       queueUrl: 'http://127.0.0.1:4566/000000000000/unused',
       deadLetterQueueUrl: 'http://127.0.0.1:4566/000000000000/unused-dlq',
+      balanceQueueUrl: 'http://127.0.0.1:4566/000000000000/unused-balance',
+      balanceDeadLetterQueueUrl: 'http://127.0.0.1:4566/000000000000/unused-balance-dlq',
       requestTimeoutMs: 1_000,
       sdkMaxAttempts: 1,
       maxReceiveCount: 3,

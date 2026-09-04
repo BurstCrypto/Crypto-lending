@@ -25,6 +25,8 @@ export function testInfrastructureConfig(
       region: 'us-east-1',
       queueUrl: 'http://sqs.test/000000000000/jobs',
       deadLetterQueueUrl: 'http://sqs.test/000000000000/jobs-dlq',
+      balanceQueueUrl: 'http://sqs.test/000000000000/balance-sync',
+      balanceDeadLetterQueueUrl: 'http://sqs.test/000000000000/balance-sync-dlq',
       requestTimeoutMs: 1_000,
       sdkMaxAttempts: 1,
       maxReceiveCount: 3,

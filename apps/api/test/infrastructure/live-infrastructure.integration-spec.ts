@@ -1,4 +1,5 @@
-import { randomUUID } from 'node:crypto';
+import { Buffer } from 'node:buffer';
+import { randomBytes, randomUUID } from 'node:crypto';
 
 import {
   CreateQueueCommand,
@@ -21,10 +22,19 @@ import { createRedisClient } from '../../src/infrastructure/redis/redis.module';
 import { RedisService } from '../../src/infrastructure/redis/redis.service';
 import { SqsJobWorker } from '../../src/infrastructure/sqs/sqs-job.worker';
 import { SqsService } from '../../src/infrastructure/sqs/sqs.service';
+import { parseWalletAddress } from '../../src/wallets/domain/wallet-identity';
+import {
+  createWalletRegistrationKey,
+  digestWalletIdentity,
+  sealWalletRegistrationValue,
+} from '../../src/wallets/infrastructure/crypto/wallet-registration-crypto';
 import { testOutboxDispatcherOptions } from './fixtures';
 
 const runLiveIntegration = process.env.RUN_INFRASTRUCTURE_INTEGRATION === '1';
 const describeWithInfrastructure = runLiveIntegration ? describe : describe.skip;
+const ETHEREUM_MAINNET = 'eip155:1' as const;
+const ETHEREUM_ADDRESS = '0x1111111111111111111111111111111111111111';
+const MAINNET_FINGERPRINT = '5058b141479f114c1e5f87ed8798fbb7a7ffcce7b502aa7e0794dc53ca1f767d';
 
 function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -35,6 +45,92 @@ function requireLoopback(rawUrl: string, name: string): void {
   if (!['localhost', '127.0.0.1', '[::1]', '::1'].includes(hostname)) {
     throw new Error(`${name} must target loopback for the live infrastructure test`);
   }
+}
+
+async function registerEthereumWallet(pool: Pool, accountId: string): Promise<string> {
+  const address = parseWalletAddress(ETHEREUM_MAINNET, ETHEREUM_ADDRESS);
+  const challengeId = randomUUID();
+  const walletId = randomUUID();
+  const identityKey = createWalletRegistrationKey(
+    'identity-hmac',
+    1,
+    Buffer.alloc(32, 33).toString('base64url'),
+    'live-smoke-identity-v1',
+  );
+  const metadataKey = createWalletRegistrationKey(
+    'metadata-seal',
+    1,
+    Buffer.alloc(32, 31).toString('base64url'),
+    'live-smoke-metadata-v1',
+  );
+  const digest = digestWalletIdentity(identityKey, ETHEREUM_MAINNET, address);
+  const issuedAt = new Date();
+
+  await pool.query(
+    `SELECT * FROM begin_wallet_ownership_challenge_rotatable(
+      $1::uuid, $2::uuid, 'EVM_ERC4361_ERC191'::text,
+      'eip155'::text, '1'::text, 'MAINNET'::text, 1::integer, $3::text,
+      1::smallint, $4::bytea, $5::bytea, $6::bytea,
+      $7::smallint, $8::bytea, 1::smallint, $9::bytea,
+      1::smallint, $10::bytea, 1::smallint, $11::bytea,
+      $12::timestamptz, $13::timestamptz, $14::uuid,
+      ARRAY[1]::smallint[], ARRAY[$15]::text[]
+    )`,
+    [
+      challengeId,
+      accountId,
+      MAINNET_FINGERPRINT,
+      randomBytes(48),
+      randomBytes(12),
+      randomBytes(16),
+      digest.version,
+      Buffer.from(digest.value, 'hex'),
+      randomBytes(32),
+      randomBytes(32),
+      randomBytes(32),
+      issuedAt,
+      new Date(issuedAt.getTime() + 120_000),
+      randomUUID(),
+      digest.value,
+    ],
+  );
+
+  const sealedAddress = sealWalletRegistrationValue(
+    metadataKey,
+    {
+      field: 'address',
+      walletId,
+      challengeId,
+      accountId,
+      networkId: ETHEREUM_MAINNET,
+      addressDigest: digest,
+    },
+    address,
+  );
+  const completion = await pool.query<{ registration_outcome: string; wallet_id: string }>(
+    `SELECT registration_outcome, wallet_id
+     FROM complete_wallet_registration_rotatable(
+       $1::uuid, $2::uuid, $3::uuid,
+       $4::smallint, $5::bytea, $6::bytea, $7::bytea,
+       1::smallint, $8::bytea, $9::bytea, $10::bytea,
+       $11::uuid
+     )`,
+    [
+      challengeId,
+      accountId,
+      walletId,
+      sealedAddress.keyVersion,
+      Buffer.from(sealedAddress.ciphertext, 'base64url'),
+      Buffer.from(sealedAddress.iv, 'base64url'),
+      Buffer.from(sealedAddress.authTag, 'base64url'),
+      randomBytes(64),
+      randomBytes(12),
+      randomBytes(16),
+      randomUUID(),
+    ],
+  );
+  expect(completion.rows).toEqual([{ registration_outcome: 'REGISTERED', wallet_id: walletId }]);
+  return walletId;
 }
 
 describeWithInfrastructure('live docker-compose infrastructure', () => {
@@ -64,6 +160,12 @@ describeWithInfrastructure('live docker-compose infrastructure', () => {
       SQS_DEAD_LETTER_QUEUE_URL:
         process.env.SQS_DEAD_LETTER_QUEUE_URL ??
         'http://localhost:4566/000000000000/crypto-lending-jobs-dlq',
+      SQS_BALANCE_QUEUE_URL:
+        process.env.SQS_BALANCE_QUEUE_URL ??
+        'http://localhost:4566/000000000000/crypto-lending-balance-sync',
+      SQS_BALANCE_DEAD_LETTER_QUEUE_URL:
+        process.env.SQS_BALANCE_DEAD_LETTER_QUEUE_URL ??
+        'http://localhost:4566/000000000000/crypto-lending-balance-sync-dlq',
       SQS_MAX_RECEIVE_COUNT: '3',
       SQS_VISIBILITY_TIMEOUT_SECONDS: '5',
       SQS_RETRY_BASE_DELAY_SECONDS: '1',
@@ -78,6 +180,8 @@ describeWithInfrastructure('live docker-compose infrastructure', () => {
     requireLoopback(config.sqs.endpoint ?? '', 'SQS_ENDPOINT');
     requireLoopback(config.sqs.queueUrl, 'SQS_QUEUE_URL');
     requireLoopback(config.sqs.deadLetterQueueUrl, 'SQS_DEAD_LETTER_QUEUE_URL');
+    requireLoopback(config.sqs.balanceQueueUrl, 'SQS_BALANCE_QUEUE_URL');
+    requireLoopback(config.sqs.balanceDeadLetterQueueUrl, 'SQS_BALANCE_DEAD_LETTER_QUEUE_URL');
 
     const schema = `kan33_live_${randomUUID().replaceAll('-', '')}`;
     const adminPool = new Pool({ connectionString, max: 1 });
@@ -86,6 +190,8 @@ describeWithInfrastructure('live docker-compose infrastructure', () => {
     let sqsClient: SQSClient | undefined;
     let testQueueUrl: string | undefined;
     let testDeadLetterQueueUrl: string | undefined;
+    let balanceTestQueueUrl: string | undefined;
+    let balanceTestDeadLetterQueueUrl: string | undefined;
 
     try {
       await adminPool.query(`CREATE SCHEMA "${schema}"`);
@@ -108,23 +214,9 @@ describeWithInfrastructure('live docker-compose infrastructure', () => {
       const migrations = new MigrationRunner(postgresPool, DATABASE_TEST_SCHEMA_MIGRATION_LIST);
       const health = new InfrastructureHealthService(postgres, migrations, redis, sqs);
 
-      await expect(migrations.up()).resolves.toEqual([
-        '0001',
-        '0002',
-        '0003',
-        '0004',
-        '0006',
-        '0007',
-        '0008',
-        '0009',
-        '0010',
-        '0011',
-        '0012',
-        '0013',
-        '0014',
-        '0015',
-        '0016',
-      ]);
+      await expect(migrations.up()).resolves.toEqual(
+        DATABASE_TEST_SCHEMA_MIGRATION_LIST.map(({ id }) => id),
+      );
       await expect(
         postgresPool.query("SELECT to_regclass('ledger_journals') AS ledger_table"),
       ).resolves.toMatchObject({ rows: [{ ledger_table: 'ledger_journals' }] });
@@ -133,12 +225,20 @@ describeWithInfrastructure('live docker-compose infrastructure', () => {
       const testQueues = await createIsolatedTestQueues(sqsClient, config.sqs.maxReceiveCount);
       testQueueUrl = testQueues.queueUrl;
       testDeadLetterQueueUrl = testQueues.deadLetterQueueUrl;
+      const balanceTestQueues = await createIsolatedTestQueues(
+        sqsClient,
+        config.sqs.maxReceiveCount,
+      );
+      balanceTestQueueUrl = balanceTestQueues.queueUrl;
+      balanceTestDeadLetterQueueUrl = balanceTestQueues.deadLetterQueueUrl;
       const jobConfig = {
         ...config,
         sqs: {
           ...config.sqs,
           queueUrl: testQueueUrl,
           deadLetterQueueUrl: testDeadLetterQueueUrl,
+          balanceQueueUrl: balanceTestQueueUrl,
+          balanceDeadLetterQueueUrl: balanceTestDeadLetterQueueUrl,
         },
       };
 
@@ -150,12 +250,25 @@ describeWithInfrastructure('live docker-compose infrastructure', () => {
         isolatedSqs,
         testOutboxDispatcherOptions({ batchSize: 5 }),
       );
+      const accountId = randomUUID();
+      await postgresPool.query(`INSERT INTO accounts (account_id) VALUES ($1::uuid)`, [accountId]);
+      const walletId = await registerEthereumWallet(postgresPool, accountId);
       const outboxEnvelope = await postgres.withTransaction(() =>
         transactionalPublisher.enqueue({
           id: `kan33-outbox-${randomUUID()}`,
-          kind: 'sample.live-outbox',
+          kind: 'blockchain.balance-sync',
+          version: 1,
           occurredAt: '2026-08-18T00:00:00.000Z',
-          payload: { acceptanceTest: true },
+          payload: {
+            schemaVersion: 1,
+            accountId,
+            walletId,
+            networkId: ETHEREUM_MAINNET,
+            requiredTier: 'PROVISIONAL',
+            cause: 'SCHEDULED',
+            attempt: 1,
+            rescanFromPosition: null,
+          },
         }),
       );
 
@@ -163,14 +276,14 @@ describeWithInfrastructure('live docker-compose infrastructure', () => {
         claimed: 1,
         published: 1,
       });
-      const [publishedMessage] = await isolatedSqs.receive(testQueueUrl);
+      const [publishedMessage] = await isolatedSqs.receive(balanceTestQueueUrl);
       expect(publishedMessage).toBeDefined();
       expect(isolatedSqs.parseEnvelope(publishedMessage?.body ?? '')).toMatchObject({
         id: outboxEnvelope.id,
         kind: outboxEnvelope.kind,
       });
       if (publishedMessage) {
-        await isolatedSqs.delete(publishedMessage, testQueueUrl);
+        await isolatedSqs.delete(publishedMessage, balanceTestQueueUrl);
       }
       const persistedOutbox = await postgresPool.query<{
         id: string;
@@ -178,33 +291,34 @@ describeWithInfrastructure('live docker-compose infrastructure', () => {
       }>('SELECT id, status FROM job_outbox WHERE id = $1', [outboxEnvelope.id]);
       expect(persistedOutbox.rows).toEqual([{ id: outboxEnvelope.id, status: 'published' }]);
 
-      await expect(migrations.down(15)).resolves.toEqual([
-        '0016',
-        '0015',
-        '0014',
-        '0013',
-        '0012',
-        '0011',
-        '0010',
-        '0009',
-        '0008',
-        '0007',
-        '0006',
-        '0004',
-        '0003',
-        '0002',
-        '0001',
-      ]);
-      const rolledBack = await postgresPool.query<{ table_name: string }>(
-        `SELECT table_name
-         FROM information_schema.tables
-         WHERE table_schema = $1 AND table_name = 'job_outbox'`,
-        [schema],
-      );
-      expect(rolledBack.rows).toEqual([]);
+      const rolledBackOutboxId = `kan33-rollback-${randomUUID()}`;
       await expect(
-        postgresPool.query("SELECT to_regclass('ledger_journals') AS ledger_table"),
-      ).resolves.toMatchObject({ rows: [{ ledger_table: null }] });
+        postgres.withTransaction(async () => {
+          await transactionalPublisher.enqueue({
+            id: rolledBackOutboxId,
+            kind: 'blockchain.balance-sync',
+            version: 1,
+            occurredAt: '2026-08-18T00:00:01.000Z',
+            payload: {
+              schemaVersion: 1,
+              accountId,
+              walletId,
+              networkId: ETHEREUM_MAINNET,
+              requiredTier: 'PROVISIONAL',
+              cause: 'SCHEDULED',
+              attempt: 1,
+              rescanFromPosition: null,
+            },
+          });
+          throw new Error('intentional live outbox transaction rollback');
+        }),
+      ).rejects.toThrow('intentional live outbox transaction rollback');
+      await expect(
+        postgresPool.query<{ persisted: number }>(
+          'SELECT count(*)::int AS persisted FROM job_outbox WHERE id = $1',
+          [rolledBackOutboxId],
+        ),
+      ).resolves.toMatchObject({ rows: [{ persisted: 0 }] });
 
       const worker = new SqsJobWorker(isolatedSqs, jobConfig);
       const sample = await isolatedSqs.sendJob(
@@ -267,6 +381,16 @@ describeWithInfrastructure('live docker-compose infrastructure', () => {
       if (sqsClient && testDeadLetterQueueUrl) {
         await sqsClient
           .send(new DeleteQueueCommand({ QueueUrl: testDeadLetterQueueUrl }))
+          .catch(() => undefined);
+      }
+      if (sqsClient && balanceTestQueueUrl) {
+        await sqsClient
+          .send(new DeleteQueueCommand({ QueueUrl: balanceTestQueueUrl }))
+          .catch(() => undefined);
+      }
+      if (sqsClient && balanceTestDeadLetterQueueUrl) {
+        await sqsClient
+          .send(new DeleteQueueCommand({ QueueUrl: balanceTestDeadLetterQueueUrl }))
           .catch(() => undefined);
       }
       sqsClient?.destroy();

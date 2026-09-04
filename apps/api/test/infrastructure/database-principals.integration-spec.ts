@@ -9,13 +9,22 @@ import { MigrationRunner } from '../../src/infrastructure/database/migration-run
 import { createMigrationPool } from '../../src/infrastructure/database/migration-pool';
 import {
   createActiveWalletRegistrationListMigration,
+  createAaveV3EthereumFinalizedCheckpointMigration,
+  createAuthenticationHmacKeyRotationMigration,
   createAuthenticationSessionsMigration,
+  createBalanceConsumerWalletAddressBoundaryMigration,
+  createBalanceSyncReadModelMigration,
   createDatabasePrincipalBoundaryMigration,
   createImmutableLedgerMigration,
   createLedgerCommandIdempotencyMigration,
   createLedgerFeeAdjustmentIntegrityMigration,
   createLedgerLifecycleMigration,
   createMainnetWalletLaunchNarrowingMigration,
+  createReviewedJobOutboxAdmissionMigration,
+  createStablecoinDepegLatchMigration,
+  createStablecoinPriceEvidenceReadModelMigration,
+  createWalletKeyRotationBoundaryMigration,
+  createWalletMetadataRewrapBoundaryMigration,
   createWalletRegistrationRevocationMigration,
   createWalletOwnershipRegistrationMigration,
   createYieldOperationControlsMigration,
@@ -33,6 +42,8 @@ const describeWithPostgres =
   testDatabaseUrl && runInfrastructureIntegration ? describe : describe.skip;
 
 const IDENTIFIER = /^[a-z][a-z0-9_]{0,62}$/u;
+const MAINNET_REGISTRY_FINGERPRINT =
+  '5058b141479f114c1e5f87ed8798fbb7a7ffcce7b502aa7e0794dc53ca1f767d';
 
 function quoteIdentifier(value: string): string {
   if (!IDENTIFIER.test(value)) throw new Error(`Unsafe test identifier: ${value}`);
@@ -51,6 +62,81 @@ function roleUrl(baseUrl: string, database: string, role: string, password: stri
   url.search = '';
   url.hash = '';
   return url.toString();
+}
+
+interface ReviewedBalanceSyncIdentity {
+  readonly accountId: string;
+  readonly walletId: string;
+  readonly networkId: 'eip155:1' | 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp';
+}
+
+interface ReviewedYieldSubmission {
+  readonly actorAccountId: string;
+  readonly correlationId: string;
+  readonly ledgerTransactionId: string;
+  readonly occurredAt: string;
+  readonly operationId: string;
+  readonly operationType: 'ALLOCATE' | 'WITHDRAW' | 'REBALANCE';
+  readonly planReferenceId: string;
+  readonly quoteReferenceId: string;
+}
+
+interface SubmittedYieldRow {
+  readonly submission_id: string | null;
+  readonly transition_recorded_at: Date;
+}
+
+function reviewedBalanceSyncEnvelope(
+  id: string,
+  identity: ReviewedBalanceSyncIdentity = {
+    accountId: randomUUID(),
+    walletId: randomUUID(),
+    networkId: 'eip155:1',
+  },
+): Readonly<Record<string, unknown>> {
+  return Object.freeze({
+    id,
+    kind: 'blockchain.balance-sync',
+    version: 1,
+    occurredAt: '2026-09-04T12:00:00.000Z',
+    correlation: Object.freeze({ correlationId: randomUUID() }),
+    payload: Object.freeze({
+      schemaVersion: 1,
+      accountId: identity.accountId,
+      walletId: identity.walletId,
+      networkId: identity.networkId,
+      requiredTier: 'PROVISIONAL',
+      cause: 'SCHEDULED',
+      attempt: 1,
+      rescanFromPosition: null,
+    }),
+  });
+}
+
+function reviewedYieldSubmissionEnvelope(
+  id: string,
+  submission: ReviewedYieldSubmission,
+): Readonly<Record<string, unknown>> {
+  return Object.freeze({
+    id,
+    kind: 'yield.operation.submit',
+    version: 1,
+    occurredAt: submission.occurredAt,
+    correlation: Object.freeze({
+      correlationId: submission.correlationId,
+      initiatorActorId: submission.actorAccountId,
+      transactionId: submission.ledgerTransactionId,
+      quoteId: submission.quoteReferenceId,
+    }),
+    payload: Object.freeze({
+      submissionId: id,
+      operationId: submission.operationId,
+      operationType: submission.operationType,
+      ledgerTransactionId: submission.ledgerTransactionId,
+      planReferenceId: submission.planReferenceId,
+      quoteReferenceId: submission.quoteReferenceId,
+    }),
+  });
 }
 
 function schemaMigrationsForIsolatedLegacyRole(
@@ -78,7 +164,16 @@ function schemaMigrationsForIsolatedLegacyRole(
       id !== '0013' &&
       id !== '0014' &&
       id !== '0015' &&
-      id !== '0016',
+      id !== '0016' &&
+      id !== '0017' &&
+      id !== '0018' &&
+      id !== '0019' &&
+      id !== '0020' &&
+      id !== '0021' &&
+      id !== '0022' &&
+      id !== '0023' &&
+      id !== '0024' &&
+      id !== '0025',
   ).map((migration) =>
     migration.id === '0004'
       ? {
@@ -256,6 +351,7 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
             ...infrastructureFixture.database,
             connectionString,
             poolMax: max,
+            statementTimeoutMs: 30_000,
             sessionRole: workload === 'api' ? names.apiRuntimeRole : names.workerRuntimeRole,
           },
         },
@@ -267,6 +363,7 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
           ...infrastructureFixture.database,
           connectionString,
           poolMax: 1,
+          statementTimeoutMs: 30_000,
           sessionRole: names.schemaOwnerRole,
         },
         names.schemaOwnerRole,
@@ -493,6 +590,18 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
       const activeWalletListMigration = createActiveWalletRegistrationListMigration(names);
       const mainnetWalletLaunchMigration = createMainnetWalletLaunchNarrowingMigration(names);
       const walletRevocationMigration = createWalletRegistrationRevocationMigration(names);
+      const aaveCheckpointMigration = createAaveV3EthereumFinalizedCheckpointMigration(names);
+      const reviewedJobAdmissionMigration = createReviewedJobOutboxAdmissionMigration(names);
+      const stablecoinDepegLatchMigration = createStablecoinDepegLatchMigration(names);
+      const balanceSyncReadModelMigration = createBalanceSyncReadModelMigration(names);
+      const stablecoinPriceEvidenceMigration =
+        createStablecoinPriceEvidenceReadModelMigration(names);
+      const walletKeyRotationMigration = createWalletKeyRotationBoundaryMigration(names);
+      const balanceConsumerAddressMigration =
+        createBalanceConsumerWalletAddressBoundaryMigration(names);
+      const walletMetadataRewrapMigration = createWalletMetadataRewrapBoundaryMigration(names);
+      const authenticationHmacRotationMigration =
+        createAuthenticationHmacKeyRotationMigration(names);
       if (!principalMigration.verifySql) throw new Error('Principal migration must be verifiable');
       if (!ledgerMigration.verifySql) throw new Error('Ledger migration must be verifiable');
       if (!lifecycleMigration.verifySql) {
@@ -522,7 +631,34 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
       if (!walletRevocationMigration.verifySql) {
         throw new Error('Wallet revocation migration must be verifiable');
       }
-      const cumulativeVerifySql = walletRevocationMigration.verifySql;
+      if (!aaveCheckpointMigration.verifySql) {
+        throw new Error('Aave checkpoint migration must be verifiable');
+      }
+      if (!reviewedJobAdmissionMigration.verifySql) {
+        throw new Error('Reviewed outbox admission migration must be verifiable');
+      }
+      if (!stablecoinDepegLatchMigration.verifySql) {
+        throw new Error('Stablecoin depeg latch migration must be verifiable');
+      }
+      if (!balanceSyncReadModelMigration.verifySql) {
+        throw new Error('Balance sync read model migration must be verifiable');
+      }
+      if (!stablecoinPriceEvidenceMigration.verifySql) {
+        throw new Error('Stablecoin price evidence migration must be verifiable');
+      }
+      if (!walletKeyRotationMigration.verifySql) {
+        throw new Error('Wallet key rotation migration must be verifiable');
+      }
+      if (!balanceConsumerAddressMigration.verifySql) {
+        throw new Error('Balance consumer address migration must be verifiable');
+      }
+      if (!walletMetadataRewrapMigration.verifySql) {
+        throw new Error('Wallet metadata rewrap migration must be verifiable');
+      }
+      if (!authenticationHmacRotationMigration.verifySql) {
+        throw new Error('Authentication HMAC rotation migration must be verifiable');
+      }
+      const cumulativeVerifySql = authenticationHmacRotationMigration.verifySql;
       const migrations = [
         ...schemaMigrationsBeforePrincipalBoundary,
         principalMigration,
@@ -537,6 +673,15 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
         activeWalletListMigration,
         mainnetWalletLaunchMigration,
         walletRevocationMigration,
+        aaveCheckpointMigration,
+        reviewedJobAdmissionMigration,
+        stablecoinDepegLatchMigration,
+        balanceSyncReadModelMigration,
+        stablecoinPriceEvidenceMigration,
+        walletKeyRotationMigration,
+        balanceConsumerAddressMigration,
+        walletMetadataRewrapMigration,
+        authenticationHmacRotationMigration,
       ];
       const migrationsThrough0012 = migrations.filter(({ id }) => id < '0013');
       const migrationsThrough0015 = migrations.filter(({ id }) => id < '0016');
@@ -595,12 +740,47 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
           'Database migration 0016 has not been applied',
         );
 
-        await expect(runner.up()).resolves.toEqual(['0016']);
+        await expect(runner.up()).resolves.toEqual([
+          '0016',
+          '0017',
+          '0018',
+          '0019',
+          '0020',
+          '0021',
+          '0022',
+          '0023',
+          '0024',
+          '0025',
+        ]);
         await expect(
           migrationPool.query<{ valid: boolean }>(mainnetWalletLaunchMigration.verifySql),
         ).resolves.toMatchObject({ rows: [{ valid: false }] });
         await expect(
           migrationPool.query<{ valid: boolean }>(walletRevocationMigration.verifySql),
+        ).resolves.toMatchObject({ rows: [{ valid: false }] });
+        await expect(
+          migrationPool.query<{ valid: boolean }>(reviewedJobAdmissionMigration.verifySql),
+        ).resolves.toMatchObject({ rows: [{ valid: false }] });
+        await expect(
+          migrationPool.query<{ valid: boolean }>(stablecoinDepegLatchMigration.verifySql),
+        ).resolves.toMatchObject({ rows: [{ valid: false }] });
+        await expect(
+          migrationPool.query<{ valid: boolean }>(balanceSyncReadModelMigration.verifySql),
+        ).resolves.toMatchObject({ rows: [{ valid: false }] });
+        await expect(
+          migrationPool.query<{ valid: boolean }>(stablecoinPriceEvidenceMigration.verifySql),
+        ).resolves.toMatchObject({ rows: [{ valid: false }] });
+        await expect(
+          migrationPool.query<{ valid: boolean }>(walletKeyRotationMigration.verifySql),
+        ).resolves.toMatchObject({ rows: [{ valid: false }] });
+        await expect(
+          migrationPool.query<{ valid: boolean }>(balanceConsumerAddressMigration.verifySql),
+        ).resolves.toMatchObject({ rows: [{ valid: false }] });
+        await expect(
+          migrationPool.query<{ valid: boolean }>(walletMetadataRewrapMigration.verifySql),
+        ).resolves.toMatchObject({ rows: [{ valid: false }] });
+        await expect(
+          migrationPool.query<{ valid: boolean }>(authenticationHmacRotationMigration.verifySql),
         ).resolves.toMatchObject({ rows: [{ valid: true }] });
 
         await expect(oldApiRunner.assertUpToDate()).rejects.toThrow(
@@ -643,7 +823,7 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
           `REVOKE CONNECT ON DATABASE ${quoteIdentifier(database)} FROM ${quoteIdentifier(names.schemaOwnerRole)}`,
         );
         await expect(runner.assertUpToDate()).rejects.toThrow(
-          'Database migration 0016 schema verification failed',
+          'Database migration 0025 schema verification failed',
         );
       } finally {
         await terminateExactSessions(names.schemaOwnerRole);
@@ -731,6 +911,230 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
       const workerRunner = new MigrationRunner(workerPool, migrations);
       await expect(apiRunner.assertUpToDate()).resolves.toBeUndefined();
       await expect(workerRunner.assertUpToDate()).resolves.toBeUndefined();
+      for (let readinessAttempt = 0; readinessAttempt < 3; readinessAttempt += 1) {
+        await expect(
+          Promise.all([apiRunner.assertUpToDate(), workerRunner.assertUpToDate()]),
+        ).resolves.toEqual([undefined, undefined]);
+      }
+      const resolverIdentity = 'resolve_active_wallet_address_ciphertext(uuid,uuid,text)';
+      await expect(
+        migrationPool.query(
+          `SELECT
+             pg_catalog.has_function_privilege($1, $5, 'EXECUTE') AS worker_execute,
+             NOT pg_catalog.has_function_privilege($2, $5, 'EXECUTE') AS api_denied,
+             NOT pg_catalog.has_function_privilege($3, $5, 'EXECUTE') AS legacy_denied,
+             NOT pg_catalog.has_function_privilege($4, $5, 'EXECUTE') AS migration_denied`,
+          [
+            names.workerRuntimeRole,
+            names.apiRuntimeRole,
+            names.legacyRuntimeRole,
+            names.migrationRole,
+            resolverIdentity,
+          ],
+        ),
+      ).resolves.toMatchObject({
+        rows: [
+          {
+            worker_execute: true,
+            api_denied: true,
+            legacy_denied: true,
+            migration_denied: true,
+          },
+        ],
+      });
+      await expect(
+        workerPool.query(
+          `SELECT * FROM resolve_active_wallet_address_ciphertext(
+             $1::uuid, $2::uuid, 'eip155:1'::text
+           )`,
+          [randomUUID(), randomUUID()],
+        ),
+      ).resolves.toMatchObject({ rows: [] });
+      await expectPostgresDenied(
+        apiPool.query(
+          `SELECT * FROM resolve_active_wallet_address_ciphertext(
+             $1::uuid, $2::uuid, 'eip155:1'::text
+           )`,
+          [randomUUID(), randomUUID()],
+        ),
+        ['42501'],
+      );
+      await expectPostgresDenied(
+        workerPool.query('SELECT address_ciphertext FROM registered_wallets'),
+        ['42501'],
+      );
+      await migrationPool.query(
+        `GRANT EXECUTE ON FUNCTION resolve_active_wallet_address_ciphertext(uuid,uuid,text)
+         TO ${quoteIdentifier(names.apiRuntimeRole)}`,
+      );
+      await expect(apiRunner.assertUpToDate()).rejects.toThrow(
+        'Database migration 0025 schema verification failed',
+      );
+      await migrationPool.query(
+        `REVOKE EXECUTE ON FUNCTION resolve_active_wallet_address_ciphertext(uuid,uuid,text)
+         FROM ${quoteIdentifier(names.apiRuntimeRole)}`,
+      );
+      await expect(apiRunner.assertUpToDate()).resolves.toBeUndefined();
+      const rewrapFunctionIdentities = [
+        'wallet_metadata_rewrap_state_sha256(smallint,bytea,bytea,bytea,smallint,bytea,bytea,bytea)',
+        'enforce_wallet_metadata_rewrap_command_lifecycle()',
+        'reject_wallet_metadata_rewrap_history_mutation()',
+        'guard_wallet_metadata_seal_material()',
+        'prepare_wallet_metadata_rewrap(uuid,uuid,uuid,smallint)',
+        'complete_wallet_metadata_rewrap(uuid,uuid,uuid,text,smallint,bytea,bytea,bytea,smallint,bytea,bytea,bytea)',
+        'wallet_metadata_seal_key_retirement_readiness(smallint)',
+        'verify_wallet_metadata_rewrap_state()',
+      ] as const;
+      await expect(
+        migrationPool.query<{ runtime_denied: boolean }>(
+          `SELECT pg_catalog.bool_and(
+             NOT pg_catalog.has_function_privilege(runtime_role.role_name, identity, 'EXECUTE')
+           ) AS runtime_denied
+           FROM pg_catalog.unnest($1::text[]) AS runtime_role(role_name)
+           CROSS JOIN pg_catalog.unnest($2::text[]) AS protected(identity)`,
+          [
+            [names.apiRuntimeRole, names.workerRuntimeRole, names.legacyRuntimeRole],
+            rewrapFunctionIdentities,
+          ],
+        ),
+      ).resolves.toMatchObject({ rows: [{ runtime_denied: true }] });
+      for (const runtime of [apiPool, workerPool]) {
+        const runtimeClient = await runtime.connect();
+        try {
+          await runtimeClient.query('BEGIN');
+          await expect(
+            runtimeClient.query(
+              `SELECT pg_catalog.set_config(
+                 'crypto_lending.wallet_metadata_rewrap_command', $1, true
+               )`,
+              [randomUUID()],
+            ),
+          ).resolves.toBeDefined();
+          await expectPostgresDenied(
+            runtimeClient.query(
+              `UPDATE registered_wallets
+               SET address_iv = $1::bytea
+               WHERE wallet_id = $2::uuid`,
+              [randomBytes(12), randomUUID()],
+            ),
+            ['42501'],
+          );
+        } finally {
+          await runtimeClient.query('ROLLBACK').catch(() => undefined);
+          runtimeClient.release();
+        }
+      }
+      await expectPostgresDenied(
+        apiPool.query(
+          'SELECT * FROM prepare_wallet_metadata_rewrap($1::uuid, $2::uuid, $3::uuid, 2::smallint)',
+          [randomUUID(), randomUUID(), randomUUID()],
+        ),
+        ['42501'],
+      );
+      await expectPostgresDenied(
+        workerPool.query(
+          'SELECT * FROM wallet_metadata_seal_key_retirement_readiness(1::smallint)',
+        ),
+        ['42501'],
+      );
+      const authKeyringRuntimeFunctionIdentities = [
+        'complete_auth_login_keyring(uuid,text,text,smallint,bytea,smallint[],text[],uuid,uuid,uuid,uuid,smallint,bytea,smallint,bytea,integer,integer,text,text,text,uuid)',
+        'resolve_auth_session_keyring(uuid,smallint[],text[],boolean,smallint[],text[],uuid)',
+        'rotate_auth_session_keyring(uuid,smallint[],text[],uuid,smallint,bytea,smallint,bytea,uuid)',
+        'revoke_auth_session_keyring(uuid,smallint[],text[],uuid)',
+        'consume_auth_rate_limit_keyring(text,smallint[],text[],integer,integer,uuid)',
+      ] as const;
+      await expect(
+        migrationPool.query<{ exact_acl: boolean }>(
+          `SELECT pg_catalog.bool_and(
+             pg_catalog.has_function_privilege($1, identity, 'EXECUTE')
+             AND NOT pg_catalog.has_function_privilege($2, identity, 'EXECUTE')
+             AND NOT pg_catalog.has_function_privilege($3, identity, 'EXECUTE')
+             AND NOT pg_catalog.has_function_privilege($4, identity, 'EXECUTE')
+           ) AS exact_acl
+           FROM pg_catalog.unnest($5::text[]) AS runtime_function(identity)`,
+          [
+            names.apiRuntimeRole,
+            names.workerRuntimeRole,
+            names.legacyRuntimeRole,
+            names.migrationRole,
+            authKeyringRuntimeFunctionIdentities,
+          ],
+        ),
+      ).resolves.toMatchObject({ rows: [{ exact_acl: true }] });
+      await expect(
+        apiPool.query(
+          `SELECT * FROM resolve_auth_session_keyring(
+             $1::uuid, ARRAY[1]::smallint[], ARRAY[$2::text]::text[],
+             false, NULL::smallint[], NULL::text[], $3::uuid
+           )`,
+          [randomUUID(), randomBytes(32).toString('hex'), randomUUID()],
+        ),
+      ).resolves.toMatchObject({
+        rows: [{ authentication_outcome: 'INVALID', account_id: null, session_family_id: null }],
+      });
+      await expectPostgresDenied(
+        apiPool.query("SELECT * FROM auth_hmac_key_retirement_readiness('SESSION', 1::smallint)"),
+        ['42501'],
+      );
+      const authMutationClient = await apiPool.connect();
+      try {
+        await authMutationClient.query('BEGIN');
+        await expect(
+          authMutationClient.query(
+            `SELECT pg_catalog.set_config(
+               'crypto_lending.auth_hmac_rotation_command', $1, true
+             )`,
+            [randomUUID()],
+          ),
+        ).resolves.toBeDefined();
+        await authMutationClient.query('SAVEPOINT auth_base_update_denial');
+        await expectPostgresDenied(
+          authMutationClient.query(
+            `UPDATE authentication_oidc_identities
+             SET subject_digest = subject_digest
+             WHERE false`,
+          ),
+          ['42501'],
+        );
+        await authMutationClient.query('ROLLBACK TO SAVEPOINT auth_base_update_denial');
+        await authMutationClient.query('SAVEPOINT auth_alias_insert_denial');
+        await expectPostgresDenied(
+          authMutationClient.query(
+            `INSERT INTO auth_oidc_identity_digest_aliases (
+               identity_id, account_id, provider_key, issuer,
+               subject_digest_version, subject_digest
+             ) VALUES (
+               $1::uuid, $2::uuid, 'primary', 'https://identity.example.test/tenant',
+               1::smallint, $3::bytea
+             )`,
+            [randomUUID(), randomUUID(), randomBytes(32)],
+          ),
+          ['42501'],
+        );
+        await authMutationClient.query('ROLLBACK TO SAVEPOINT auth_alias_insert_denial');
+      } finally {
+        await authMutationClient.query('ROLLBACK').catch(() => undefined);
+        authMutationClient.release();
+      }
+      for (const protectedWalletRotationTable of [
+        'wallet_identity_key_policy',
+        'wallet_ownership_challenge_identity_digests',
+        'registered_wallet_identity_digests',
+        'wallet_metadata_seal_iv_registry',
+        'wallet_metadata_rewrap_commands',
+        'wallet_metadata_rewrap_audit_events',
+        'auth_hmac_key_policies',
+        'auth_oidc_identity_digest_aliases',
+      ]) {
+        await expectPostgresDenied(apiPool.query(`SELECT * FROM ${protectedWalletRotationTable}`), [
+          '42501',
+        ]);
+        await expectPostgresDenied(
+          workerPool.query(`SELECT * FROM ${protectedWalletRotationTable}`),
+          ['42501'],
+        );
+      }
       await expect(
         migrationPool.query(
           `SELECT
@@ -788,12 +1192,22 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
                to_regprocedure('complete_ledger_command_idempotency(uuid,uuid,uuid)'),
                'EXECUTE'
              ) AS api_can_use_idempotency,
-             pg_catalog.has_column_privilege(
+             NOT pg_catalog.has_column_privilege(
                $1, 'job_outbox', 'ledger_command_id', 'INSERT'
              )
-             AND pg_catalog.has_column_privilege(
+             AND NOT pg_catalog.has_column_privilege(
                $1, 'job_outbox', 'ledger_journal_id', 'INSERT'
-             ) AS api_can_link_ledger_outbox,
+             ) AS api_direct_ledger_link_insert_denied,
+             pg_catalog.has_function_privilege(
+               $1,
+               to_regprocedure('enqueue_reviewed_job_v1(text,text,jsonb,jsonb,text,text)'),
+               'EXECUTE'
+             ) AS api_can_enqueue_reviewed_job,
+             NOT pg_catalog.has_function_privilege(
+               $2,
+               to_regprocedure('enqueue_reviewed_job_v1(text,text,jsonb,jsonb,text,text)'),
+               'EXECUTE'
+             ) AS worker_enqueue_reviewed_job_denied,
              NOT pg_catalog.has_function_privilege(
                $1,
                to_regprocedure(
@@ -870,7 +1284,9 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
             api_can_reverse: true,
             api_can_transition: true,
             api_can_use_idempotency: true,
-            api_can_link_ledger_outbox: true,
+            api_direct_ledger_link_insert_denied: true,
+            api_can_enqueue_reviewed_job: true,
+            worker_enqueue_reviewed_job_denied: true,
             api_base_journal_functions_denied: true,
             api_helper_denied: true,
             worker_post_denied: true,
@@ -944,7 +1360,7 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
 
       await migrationPool.query('GRANT USAGE ON TYPE future_default_enum TO PUBLIC');
       await expect(apiRunner.assertUpToDate()).rejects.toThrow(
-        'Database migration 0016 schema verification failed',
+        'Database migration 0025 schema verification failed',
       );
       await migrationPool.query('REVOKE USAGE ON TYPE future_default_enum FROM PUBLIC');
       await expect(apiRunner.assertUpToDate()).resolves.toBeUndefined();
@@ -954,7 +1370,7 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
       );
       try {
         await expect(apiRunner.assertUpToDate()).rejects.toThrow(
-          'Database migration 0016 schema verification failed',
+          'Database migration 0025 schema verification failed',
         );
       } finally {
         await migrationPool.query('DROP TABLE future_non_ledger_row_type_probe');
@@ -965,7 +1381,7 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
         `GRANT SELECT (book_id) ON TABLE ledger_books TO ${quoteIdentifier(names.apiRuntimeRole)}`,
       );
       await expect(apiRunner.assertUpToDate()).rejects.toThrow(
-        'Database migration 0016 schema verification failed',
+        'Database migration 0025 schema verification failed',
       );
       await migrationPool.query(
         `REVOKE SELECT (book_id) ON TABLE ledger_books FROM ${quoteIdentifier(names.apiRuntimeRole)}`,
@@ -977,7 +1393,7 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
          TO ${quoteIdentifier(names.apiRuntimeRole)}`,
       );
       await expect(apiRunner.assertUpToDate()).rejects.toThrow(
-        'Database migration 0016 schema verification failed',
+        'Database migration 0025 schema verification failed',
       );
       await migrationPool.query(
         `REVOKE EXECUTE ON FUNCTION compute_ledger_posting_plan_digest(uuid)
@@ -989,7 +1405,7 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
         'GRANT USAGE, SELECT, UPDATE ON SEQUENCE future_default_sequence TO PUBLIC',
       );
       await expect(apiRunner.assertUpToDate()).rejects.toThrow(
-        'Database migration 0016 schema verification failed',
+        'Database migration 0025 schema verification failed',
       );
       await migrationPool.query(
         'REVOKE USAGE, SELECT, UPDATE ON SEQUENCE future_default_sequence FROM PUBLIC',
@@ -998,7 +1414,7 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
 
       await migrationPool.query('GRANT INSERT (id) ON TABLE job_outbox TO PUBLIC');
       await expect(apiRunner.assertUpToDate()).rejects.toThrow(
-        'Database migration 0016 schema verification failed',
+        'Database migration 0025 schema verification failed',
       );
       await migrationPool.query('REVOKE INSERT (id) ON TABLE job_outbox FROM PUBLIC');
       await expect(apiRunner.assertUpToDate()).resolves.toBeUndefined();
@@ -1013,7 +1429,7 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
         `GRANT UPDATE ON TABLE accounts TO ${quoteIdentifier(names.apiRuntimeRole)}`,
       );
       await expect(apiRunner.assertUpToDate()).rejects.toThrow(
-        'Database migration 0016 schema verification failed',
+        'Database migration 0025 schema verification failed',
       );
       await migrationPool.query(
         `REVOKE UPDATE ON TABLE accounts FROM ${quoteIdentifier(names.apiRuntimeRole)}`,
@@ -1033,7 +1449,7 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
 
       await migrationPool.query('ALTER POLICY job_outbox_worker_delete ON job_outbox USING (true)');
       await expect(workerRunner.assertUpToDate()).rejects.toThrow(
-        'Database migration 0016 schema verification failed',
+        'Database migration 0025 schema verification failed',
       );
       await migrationPool.query(
         "ALTER POLICY job_outbox_worker_delete ON job_outbox USING (status IN ('published', 'failed'))",
@@ -1045,7 +1461,7 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
          WITH ADMIN FALSE, INHERIT FALSE, SET FALSE`,
       );
       await expect(apiRunner.assertUpToDate()).rejects.toThrow(
-        'Database migration 0016 schema verification failed',
+        'Database migration 0025 schema verification failed',
       );
       await admin.query(
         `REVOKE ${quoteIdentifier(outsider)} FROM ${quoteIdentifier(names.legacyRuntimeRole)}`,
@@ -1136,19 +1552,415 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
       await expect(
         apiPool.query('SELECT account_id FROM accounts WHERE account_id = $1', [accountId]),
       ).resolves.toMatchObject({ rows: [{ account_id: accountId }] });
-      await expect(
+
+      const principalMigrationPool = migrationPool;
+      if (!principalMigrationPool) throw new Error('Migration pool was not initialized');
+      const registerWallet = async (
+        ownerAccountId: string,
+        networkId: ReviewedBalanceSyncIdentity['networkId'],
+      ): Promise<string> => {
+        const challengeId = randomUUID();
+        const walletId = randomUUID();
+        const addressDigest = randomBytes(32);
+        const isEthereum = networkId === 'eip155:1';
+        const chainNamespace = isEthereum ? 'eip155' : 'solana';
+        const chainReference = isEthereum ? '1' : '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp';
+        const proofScheme = isEthereum ? 'EVM_ERC4361_ERC191' : 'SOLANA_SIWS_SIGN_MESSAGE';
+        await principalMigrationPool.query(
+          `INSERT INTO wallet_ownership_challenges (
+             challenge_id, account_id, proof_scheme, chain_namespace, chain_reference,
+             registry_environment, registry_version, registry_fingerprint_sha256,
+             address_digest_version, address_digest,
+             domain_digest_version, domain_digest,
+             message_digest_version, message_digest,
+             nonce_digest_version, nonce_digest,
+             status, created_at, issued_at, expires_at, completed_at, payload_destroyed_at
+           ) VALUES (
+             $1, $2, $3, $4, $5, 'MAINNET', 1, $6,
+             1, $7, 1, $8, 1, $9, 1, $10,
+             'REGISTERED', statement_timestamp() - interval '2 minutes',
+             statement_timestamp() - interval '2 minutes',
+             statement_timestamp() + interval '5 minutes',
+             statement_timestamp() - interval '1 minute',
+             statement_timestamp() - interval '1 minute'
+           )`,
+          [
+            challengeId,
+            ownerAccountId,
+            proofScheme,
+            chainNamespace,
+            chainReference,
+            MAINNET_REGISTRY_FINGERPRINT,
+            addressDigest,
+            randomBytes(32),
+            randomBytes(32),
+            randomBytes(32),
+          ],
+        );
+        await principalMigrationPool.query(
+          `INSERT INTO wallet_ownership_challenge_identity_digests (
+             challenge_id, account_id, chain_namespace, chain_reference,
+             address_digest_version, address_digest
+           ) VALUES ($1, $2, $3, $4, 1, $5)`,
+          [challengeId, ownerAccountId, chainNamespace, chainReference, addressDigest],
+        );
+        await principalMigrationPool.query(
+          `INSERT INTO registered_wallets (
+             wallet_id, account_id, registered_by_challenge_id,
+             chain_namespace, chain_reference,
+             registry_environment, registry_version, registry_fingerprint_sha256,
+             address_digest_version, address_digest,
+             address_key_version, address_ciphertext, address_iv, address_auth_tag,
+             metadata_key_version, metadata_ciphertext, metadata_iv, metadata_auth_tag
+           ) VALUES (
+             $1, $2, $3, $4, $5, 'MAINNET', 1, $6,
+             1, $7, 1, $8, $9, $10, 1, $11, $12, $13
+           )`,
+          [
+            walletId,
+            ownerAccountId,
+            challengeId,
+            chainNamespace,
+            chainReference,
+            MAINNET_REGISTRY_FINGERPRINT,
+            addressDigest,
+            Buffer.from('kan232-encrypted-address'),
+            randomBytes(12),
+            randomBytes(16),
+            Buffer.from('kan232-encrypted-metadata'),
+            randomBytes(12),
+            randomBytes(16),
+          ],
+        );
+        return walletId;
+      };
+
+      const ethereumWalletId = await registerWallet(accountId, 'eip155:1');
+      const solanaWalletId = await registerWallet(
+        accountId,
+        'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp',
+      );
+      const revokedWalletId = await registerWallet(accountId, 'eip155:1');
+      const otherAccountId = randomUUID();
+      await apiPool.query(
+        `SELECT * FROM provision_account_profile($1, $2, NULL, 'US', $1, 'kan232:provision')`,
+        [otherAccountId, 'kan232-other@example.test'],
+      );
+      const otherAccountWalletId = await registerWallet(otherAccountId, 'eip155:1');
+
+      const firstOutboxId = 'kan232-job';
+      const firstEnvelope = reviewedBalanceSyncEnvelope(firstOutboxId, {
+        accountId,
+        walletId: ethereumWalletId,
+        networkId: 'eip155:1',
+      });
+      await expectPostgresDenied(
         apiPool.query(
           `INSERT INTO job_outbox (id, queue_name, payload, message_attributes)
-           VALUES ('kan232-job', 'jobs', '{}'::jsonb, '{}'::jsonb)`,
+           VALUES ($1, 'jobs', $2::jsonb, '{}'::jsonb)`,
+          [firstOutboxId, firstEnvelope],
+        ),
+        ['42501'],
+      );
+      await expect(
+        apiPool.query(
+          `SELECT enqueue_reviewed_job_v1(
+             $1::text, $2::text, $3::jsonb, $4::jsonb, $5::text, $6::text
+           )`,
+          [firstOutboxId, 'jobs', firstEnvelope, {}, null, null],
         ),
       ).resolves.toMatchObject({ rowCount: 1 });
+
+      const canonicalSolanaClient = await apiPool.connect();
+      try {
+        await canonicalSolanaClient.query('BEGIN');
+        const canonicalSolanaId = 'kan232-solana-canonical';
+        await expect(
+          canonicalSolanaClient.query(
+            `SELECT enqueue_reviewed_job_v1(
+               $1::text, $2::text, $3::jsonb, $4::jsonb, $5::text, $6::text
+             )`,
+            [
+              canonicalSolanaId,
+              'jobs',
+              reviewedBalanceSyncEnvelope(canonicalSolanaId, {
+                accountId,
+                walletId: solanaWalletId,
+                networkId: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp',
+              }),
+              {},
+              null,
+              null,
+            ],
+          ),
+        ).resolves.toMatchObject({ rowCount: 1 });
+      } finally {
+        await canonicalSolanaClient.query('ROLLBACK');
+        canonicalSolanaClient.release();
+      }
+
+      const rejectedCanary = 'private-key-rejected-outbox-canary';
+      const destinationRejectedId = 'kan232-reject-destination';
+      const kindRejectedId = 'kan232-reject-kind';
+      const rootRejectedId = 'kan232-reject-root';
+      const correlationRejectedId = 'kan232-reject-correlation';
+      const networkRejectedId = 'kan232-reject-network';
+      const attributesRejectedId = 'kan232-reject-attributes';
+      const linkRejectedId = 'kan232-reject-link';
+      const rejectedCases: ReadonlyArray<
+        readonly [string, string, unknown, unknown, unknown, unknown]
+      > = [
+        [
+          destinationRejectedId,
+          'alternate-jobs',
+          reviewedBalanceSyncEnvelope(destinationRejectedId),
+          {},
+          null,
+          null,
+        ],
+        [
+          kindRejectedId,
+          'jobs',
+          {
+            ...reviewedBalanceSyncEnvelope(kindRejectedId),
+            kind: 'future.unreviewed',
+            payload: { rejectedCanary },
+          },
+          {},
+          null,
+          null,
+        ],
+        [
+          rootRejectedId,
+          'jobs',
+          {
+            ...reviewedBalanceSyncEnvelope(rootRejectedId),
+            unexpected: rejectedCanary,
+          },
+          {},
+          null,
+          null,
+        ],
+        [
+          correlationRejectedId,
+          'jobs',
+          {
+            ...reviewedBalanceSyncEnvelope(correlationRejectedId),
+            correlation: {
+              correlationId: randomUUID(),
+              requestId: randomUUID(),
+            },
+          },
+          {},
+          null,
+          null,
+        ],
+        [
+          networkRejectedId,
+          'jobs',
+          {
+            ...reviewedBalanceSyncEnvelope(networkRejectedId),
+            payload: {
+              ...(reviewedBalanceSyncEnvelope(networkRejectedId).payload as Readonly<
+                Record<string, unknown>
+              >),
+              networkId: 'eip155:8453',
+            },
+          },
+          {},
+          null,
+          null,
+        ],
+        [
+          attributesRejectedId,
+          'jobs',
+          reviewedBalanceSyncEnvelope(attributesRejectedId),
+          { diagnostic: rejectedCanary },
+          null,
+          null,
+        ],
+        [
+          linkRejectedId,
+          'jobs',
+          reviewedBalanceSyncEnvelope(linkRejectedId),
+          {},
+          randomUUID(),
+          randomUUID(),
+        ],
+      ];
+      for (const [id, destination, envelope, attributes, commandId, journalId] of rejectedCases) {
+        let rejection: unknown;
+        try {
+          await apiPool.query(
+            `SELECT enqueue_reviewed_job_v1(
+               $1::text, $2::text, $3::jsonb, $4::jsonb, $5::text, $6::text
+             )`,
+            [id, destination, envelope, attributes, commandId, journalId],
+          );
+        } catch (error) {
+          rejection = error;
+        }
+        expect(rejection).toMatchObject({
+          code: '22023',
+          message: 'reviewed outbox job rejected',
+        });
+        expect(String(rejection)).not.toContain(rejectedCanary);
+        expect((rejection as { detail?: unknown }).detail).toBeUndefined();
+        expect((rejection as { hint?: unknown }).hint).toBeUndefined();
+      }
+
+      const relationalRejections: ReadonlyArray<
+        readonly [string, Readonly<Record<string, unknown>>, Readonly<Record<string, unknown>>]
+      > = [
+        [
+          'kan232-reject-fabricated-wallet',
+          reviewedBalanceSyncEnvelope('kan232-reject-fabricated-wallet', {
+            accountId,
+            walletId: randomUUID(),
+            networkId: 'eip155:1',
+          }),
+          {},
+        ],
+        [
+          'kan232-reject-cross-account-wallet',
+          reviewedBalanceSyncEnvelope('kan232-reject-cross-account-wallet', {
+            accountId,
+            walletId: otherAccountWalletId,
+            networkId: 'eip155:1',
+          }),
+          {},
+        ],
+        [
+          'kan232-reject-wrong-wallet-network',
+          reviewedBalanceSyncEnvelope('kan232-reject-wrong-wallet-network', {
+            accountId,
+            walletId: ethereumWalletId,
+            networkId: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp',
+          }),
+          {},
+        ],
+        [
+          'kan232-reject-fabricated-yield',
+          reviewedYieldSubmissionEnvelope('kan232-reject-fabricated-yield', {
+            actorAccountId: accountId,
+            correlationId: randomUUID(),
+            ledgerTransactionId: randomUUID(),
+            occurredAt: '2026-09-04T12:00:00.000Z',
+            operationId: randomUUID(),
+            operationType: 'ALLOCATE',
+            planReferenceId: randomUUID(),
+            quoteReferenceId: randomUUID(),
+          }),
+          { operationType: 'ALLOCATE' },
+        ],
+      ];
+      for (const [id, envelope, attributes] of relationalRejections) {
+        let rejection: unknown;
+        try {
+          await apiPool.query(
+            `SELECT enqueue_reviewed_job_v1(
+               $1::text, 'jobs'::text, $2::jsonb, $3::jsonb, NULL::text, NULL::text
+             )`,
+            [id, envelope, attributes],
+          );
+        } catch (error) {
+          rejection = error;
+        }
+        expect(rejection).toMatchObject({
+          code: '22023',
+          message: 'reviewed outbox job rejected',
+        });
+        expect((rejection as { detail?: unknown }).detail).toBeUndefined();
+        expect((rejection as { hint?: unknown }).hint).toBeUndefined();
+      }
+
+      const revokedAdmissionClient = await apiPool.connect();
+      try {
+        await revokedAdmissionClient.query('BEGIN');
+        await expect(
+          revokedAdmissionClient.query('SELECT * FROM revoke_wallet_registration($1, $2, $3)', [
+            accountId,
+            revokedWalletId,
+            randomUUID(),
+          ]),
+        ).resolves.toMatchObject({ rows: [{ revocation_outcome: 'REVOKED' }] });
+        let revokedRejection: unknown;
+        try {
+          const revokedId = 'kan232-reject-revoked-wallet';
+          await revokedAdmissionClient.query(
+            `SELECT enqueue_reviewed_job_v1(
+               $1::text, 'jobs'::text, $2::jsonb, '{}'::jsonb, NULL::text, NULL::text
+             )`,
+            [
+              revokedId,
+              reviewedBalanceSyncEnvelope(revokedId, {
+                accountId,
+                walletId: revokedWalletId,
+                networkId: 'eip155:1',
+              }),
+            ],
+          );
+        } catch (error) {
+          revokedRejection = error;
+        }
+        expect(revokedRejection).toMatchObject({
+          code: '22023',
+          message: 'reviewed outbox job rejected',
+        });
+        expect((revokedRejection as { detail?: unknown }).detail).toBeUndefined();
+        expect((revokedRejection as { hint?: unknown }).hint).toBeUndefined();
+      } finally {
+        await revokedAdmissionClient.query('ROLLBACK');
+        revokedAdmissionClient.release();
+      }
+      await expect(
+        workerPool.query("SELECT id FROM job_outbox WHERE id LIKE 'kan232-reject-%'"),
+      ).resolves.toMatchObject({ rows: [] });
+
+      let duplicateRejection: unknown;
+      try {
+        await apiPool.query(
+          `SELECT enqueue_reviewed_job_v1(
+             $1::text, $2::text, $3::jsonb, $4::jsonb, $5::text, $6::text
+           )`,
+          [firstOutboxId, 'jobs', firstEnvelope, {}, null, null],
+        );
+      } catch (error) {
+        duplicateRejection = error;
+      }
+      expect(duplicateRejection).toMatchObject({
+        code: '22023',
+        message: 'reviewed outbox job rejected',
+      });
+      await expect(
+        workerPool.query('SELECT count(*)::integer AS count FROM job_outbox WHERE id = $1', [
+          firstOutboxId,
+        ]),
+      ).resolves.toMatchObject({ rows: [{ count: 1 }] });
+      await expectPostgresDenied(
+        workerPool.query(
+          `SELECT enqueue_reviewed_job_v1(
+             $1::text, $2::text, $3::jsonb, $4::jsonb, $5::text, $6::text
+           )`,
+          [
+            'worker-function-denied',
+            'jobs',
+            reviewedBalanceSyncEnvelope('worker-function-denied'),
+            {},
+            null,
+            null,
+          ],
+        ),
+        ['42501'],
+      );
       await expect(workerPool.query('SELECT id FROM job_outbox')).resolves.toMatchObject({
-        rows: [{ id: 'kan232-job' }],
+        rows: [{ id: firstOutboxId }],
       });
       await expect(
         workerPool.query(
           `UPDATE job_outbox SET locked_by = 'worker', locked_until = clock_timestamp() + interval '1 minute'
-           WHERE id = 'kan232-job'`,
+           WHERE id = $1`,
+          [firstOutboxId],
         ),
       ).resolves.toMatchObject({ rowCount: 1 });
       await expect(
@@ -1157,27 +1969,135 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
            SET attempts = attempts + 1, status = 'failed', available_at = clock_timestamp(),
                last_error = 'OUTBOX_TRANSPORT_FAILED', failed_at = clock_timestamp(),
                locked_by = NULL, locked_until = NULL
-           WHERE id = 'kan232-job' AND status = 'pending'`,
+           WHERE id = $1 AND status = 'pending'`,
+          [firstOutboxId],
         ),
       ).resolves.toMatchObject({ rowCount: 1 });
       await expect(
-        workerPool.query("DELETE FROM job_outbox WHERE id = 'kan232-job' AND status = 'failed'"),
+        workerPool.query("DELETE FROM job_outbox WHERE id = $1 AND status = 'failed'", [
+          firstOutboxId,
+        ]),
       ).resolves.toMatchObject({ rowCount: 1 });
-      await apiPool.query(
-        `INSERT INTO job_outbox (id, queue_name, payload, message_attributes)
-         VALUES ('kan232-published', 'jobs', '{}'::jsonb, '{}'::jsonb)`,
+      const yieldLedgerTransactionId = randomUUID();
+      const yieldOperationId = randomUUID();
+      const yieldPlanReferenceId = randomUUID();
+      const yieldQuoteReferenceId = randomUUID();
+      const yieldCorrelationId = randomUUID();
+      const yieldBook = await migrationPool.query<{ book_id: string }>(
+        "SELECT book_id FROM ledger_books WHERE book_code = 'OPERATIONAL_MEMO'",
       );
-      await workerPool.query(
-        `UPDATE job_outbox
-         SET status = 'published', published_at = clock_timestamp(),
-             failed_at = NULL, last_error = NULL, locked_by = NULL, locked_until = NULL
-         WHERE id = 'kan232-published' AND status = 'pending'`,
+      const yieldBookId = yieldBook.rows[0]?.book_id;
+      if (!yieldBookId) throw new Error('Operational ledger book was not provisioned');
+      await migrationPool.query(
+        `GRANT INSERT (
+           transaction_id, tenant_account_id, book_id, intent_type,
+           configuration_revision_reference_id
+         ) ON ledger_transactions TO ${quoteIdentifier(names.apiRuntimeRole)}`,
       );
-      await expect(
-        workerPool.query(
-          "DELETE FROM job_outbox WHERE id = 'kan232-published' AND status = 'published'",
-        ),
-      ).resolves.toMatchObject({ rowCount: 1 });
+      const yieldEffectiveBase = Date.now() - 60_000;
+      const yieldDigest = (): string => randomBytes(32).toString('hex');
+      const yieldSubmitClient = await apiPool.connect();
+      let canonicalYieldAccepted = false;
+      try {
+        await yieldSubmitClient.query('BEGIN');
+        await yieldSubmitClient.query(
+          `INSERT INTO ledger_transactions (
+             transaction_id, tenant_account_id, book_id, intent_type,
+             configuration_revision_reference_id
+           ) VALUES ($1, $2, $3, 'DIRECT_SETTLEMENT', $4)`,
+          [yieldLedgerTransactionId, accountId, yieldBookId, randomUUID()],
+        );
+        await yieldSubmitClient.query(
+          `SELECT * FROM create_yield_operation(
+             $1::uuid, $2::uuid, 'ALLOCATE', $3::uuid, $4::uuid, $5::uuid,
+             $6::timestamptz, $7::uuid, 1::smallint, $8::text, 1::smallint, $9::text
+           )`,
+          [
+            accountId,
+            yieldOperationId,
+            yieldLedgerTransactionId,
+            yieldPlanReferenceId,
+            yieldQuoteReferenceId,
+            new Date(yieldEffectiveBase),
+            yieldCorrelationId,
+            yieldDigest(),
+            yieldDigest(),
+          ],
+        );
+        const transitionYield = (
+          expectedState: string,
+          nextState: string,
+          reason: string,
+          effectiveOffset: number,
+        ): Promise<unknown> =>
+          yieldSubmitClient.query(
+            `SELECT * FROM transition_yield_operation(
+               $1::uuid, $2::uuid, $3::text, $4::text, $5::text,
+               $6::timestamptz, NULL::uuid, $7::uuid, 1::smallint,
+               $8::text, 1::smallint, $9::text
+             )`,
+            [
+              accountId,
+              yieldOperationId,
+              expectedState,
+              nextState,
+              reason,
+              new Date(yieldEffectiveBase + effectiveOffset),
+              yieldCorrelationId,
+              yieldDigest(),
+              yieldDigest(),
+            ],
+          );
+        await transitionYield('CREATED', 'QUOTED', 'QUOTE_CREATED', 1_000);
+        await transitionYield('QUOTED', 'USER_APPROVED', 'USER_APPROVAL_RECORDED', 2_000);
+        const submitted = await yieldSubmitClient.query<SubmittedYieldRow>(
+          `SELECT submission_id, transition_recorded_at
+           FROM transition_yield_operation(
+             $1::uuid, $2::uuid, 'USER_APPROVED', 'SUBMITTED',
+             'SUBMISSION_RECORDED', $3::timestamptz, NULL::uuid, $4::uuid,
+             1::smallint, $5::text, 1::smallint, $6::text
+           )`,
+          [
+            accountId,
+            yieldOperationId,
+            new Date(yieldEffectiveBase + 3_000),
+            yieldCorrelationId,
+            yieldDigest(),
+            yieldDigest(),
+          ],
+        );
+        const submittedRow = submitted.rows[0];
+        if (!submittedRow?.submission_id) {
+          throw new Error('Yield submission identifier was not created');
+        }
+        const submittedEnvelope = reviewedYieldSubmissionEnvelope(submittedRow.submission_id, {
+          actorAccountId: accountId,
+          correlationId: yieldCorrelationId,
+          ledgerTransactionId: yieldLedgerTransactionId,
+          occurredAt: submittedRow.transition_recorded_at.toISOString(),
+          operationId: yieldOperationId,
+          operationType: 'ALLOCATE',
+          planReferenceId: yieldPlanReferenceId,
+          quoteReferenceId: yieldQuoteReferenceId,
+        });
+        await yieldSubmitClient.query(
+          `SELECT enqueue_reviewed_job_v1(
+             $1::text, 'jobs'::text, $2::jsonb, $3::jsonb, NULL::text, NULL::text
+           )`,
+          [submittedRow.submission_id, submittedEnvelope, { operationType: 'ALLOCATE' }],
+        );
+        canonicalYieldAccepted = true;
+      } finally {
+        await yieldSubmitClient.query('ROLLBACK');
+        yieldSubmitClient.release();
+        await migrationPool.query(
+          `REVOKE INSERT (
+             transaction_id, tenant_account_id, book_id, intent_type,
+             configuration_revision_reference_id
+           ) ON ledger_transactions FROM ${quoteIdentifier(names.apiRuntimeRole)}`,
+        );
+      }
+      expect(canonicalYieldAccepted).toBe(true);
 
       const deniedOperations: Array<() => Promise<unknown>> = [
         () => apiPool!.query('SELECT * FROM job_outbox'),
@@ -1203,6 +2123,51 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
         await expect(deniedOperation()).rejects.toBeDefined();
       }
 
+      // These source rows exist only to exercise admission as the real runtime
+      // principal. Remove them without weakening any trigger definition so the
+      // suite can still prove the guarded full rollback on an empty schema.
+      const fixtureCleanupAdmin = new Pool({
+        connectionString: roleUrl(
+          testDatabaseUrl as string,
+          database,
+          bootstrapRole,
+          adminUrl.password,
+        ),
+        max: 1,
+      });
+      try {
+        await fixtureCleanupAdmin.query("SET session_replication_role = 'replica'");
+        await fixtureCleanupAdmin.query(
+          `DELETE FROM wallet_registration_audit_events
+           WHERE account_id = ANY($1::uuid[])`,
+          [[accountId, otherAccountId]],
+        );
+        await fixtureCleanupAdmin.query(
+          `DELETE FROM registered_wallets WHERE account_id = ANY($1::uuid[])`,
+          [[accountId, otherAccountId]],
+        );
+        await fixtureCleanupAdmin.query(
+          `DELETE FROM wallet_ownership_challenges WHERE account_id = ANY($1::uuid[])`,
+          [[accountId, otherAccountId]],
+        );
+        // 0024 intentionally retains its IV/material evidence forever in real
+        // operation. This local empty-schema rollback rehearsal removes only
+        // test-generated evidence under the bootstrap superuser after the
+        // corresponding source fixtures have been deleted.
+        await fixtureCleanupAdmin.query(
+          `ALTER TABLE wallet_metadata_seal_iv_registry
+           DISABLE TRIGGER wallet_metadata_seal_iv_registry_append_only_row`,
+        );
+        await fixtureCleanupAdmin.query('DELETE FROM wallet_metadata_seal_iv_registry');
+        await fixtureCleanupAdmin.query(
+          `ALTER TABLE wallet_metadata_seal_iv_registry
+           ENABLE ALWAYS TRIGGER wallet_metadata_seal_iv_registry_append_only_row`,
+        );
+      } finally {
+        await fixtureCleanupAdmin.query('RESET session_replication_role').catch(() => undefined);
+        await fixtureCleanupAdmin.end();
+      }
+
       const beforeRuntimeMigration = await migrationPool.query<{ count: string }>(
         'SELECT count(*)::text AS count FROM schema_migrations',
       );
@@ -1210,7 +2175,7 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
       const pendingMigrations = [
         ...migrations,
         {
-          id: '0017',
+          id: '9999',
           description: 'synthetic runtime migration denial',
           upSql: 'CREATE TABLE runtime_migration_escape(id integer)',
           downSql: 'DROP TABLE runtime_migration_escape',
@@ -1226,11 +2191,20 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
       await expect(
         migrationPool.query(
           `SELECT to_regclass('runtime_migration_escape') AS object,
-                  EXISTS (SELECT 1 FROM schema_migrations WHERE id = '0017') AS recorded`,
+                  EXISTS (SELECT 1 FROM schema_migrations WHERE id = '9999') AS recorded`,
         ),
       ).resolves.toMatchObject({ rows: [{ object: null, recorded: false }] });
 
-      await expect(runner.down(16)).resolves.toEqual([
+      await expect(runner.down(25)).resolves.toEqual([
+        '0025',
+        '0024',
+        '0023',
+        '0022',
+        '0021',
+        '0020',
+        '0019',
+        '0018',
+        '0017',
         '0016',
         '0015',
         '0014',
@@ -1265,10 +2239,24 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
         '0014',
         '0015',
         '0016',
+        '0017',
+        '0018',
+        '0019',
+        '0020',
+        '0021',
+        '0022',
+        '0023',
+        '0024',
+        '0025',
       ]);
-      await expect(
-        new MigrationRunner(apiPool, migrations).assertUpToDate(),
-      ).resolves.toBeUndefined();
+      for (let readinessAttempt = 0; readinessAttempt < 3; readinessAttempt += 1) {
+        await expect(
+          new MigrationRunner(apiPool, migrations).assertUpToDate(),
+        ).resolves.toBeUndefined();
+        await expect(
+          new MigrationRunner(workerPool, migrations).assertUpToDate(),
+        ).resolves.toBeUndefined();
+      }
 
       await createRole(
         apiNew,
@@ -1284,7 +2272,7 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
       await expect(
         apiNewPool.query('SELECT count(*)::integer AS count FROM schema_migrations'),
       ).resolves.toMatchObject({
-        rows: [{ count: 16 }],
+        rows: [{ count: 25 }],
       });
 
       const activeOldClient = await apiPool.connect();
