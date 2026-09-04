@@ -1,6 +1,7 @@
 import { Test } from '@nestjs/testing';
 
 import { parseAccountId } from '../accounts/domain/account-profile';
+import { AAVE_V3_ETHEREUM_DEPLOYMENT_AGREEMENT_READER } from './application/ports/aave-v3-ethereum-deployment-agreement-reader.port';
 import {
   AAVE_V3_ETHEREUM_DEPLOYMENT_EVIDENCE_READER,
   type AaveV3EthereumDeploymentEvidenceReader,
@@ -42,6 +43,10 @@ describe('SmartLendingModule', () => {
       AAVE_V3_ETHEREUM_DEPLOYMENT_EVIDENCE_READER,
     );
     const recommendations = moduleRef.get(SmartLendingRecommendationService);
+
+    expect(() =>
+      moduleRef.get(AAVE_V3_ETHEREUM_DEPLOYMENT_AGREEMENT_READER, { strict: false }),
+    ).toThrow();
 
     await expect(
       markets.readCurrentMarkets({
