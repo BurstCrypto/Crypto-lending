@@ -86,13 +86,20 @@ checkpoint by themselves. Disconnect, reconnect, sequence uncertainty, or a dete
 advancement and requires bounded, idempotent HTTP polling/backfill before resuming. HTTP polling,
 lineage verification, and finality reconciliation remain authoritative.
 
-EVM multi-read work pins a block number and verifies its hash. Solana reads carry the highest validated
-`minContextSlot` where the standard method supports it and reject older contexts. No method in this
-profile submits or resubmits a transaction.
+EVM multi-read work first selects and validates a header, then binds every supported state read to its
+exact hash with the EIP-1898 object `{ blockHash, requireCanonical: true }`. A block number alone is not
+an acceptable multi-read binding because a same-height reorg could mix state while preserving the
+recorded old hash. Production activation requires endpoint-specific proof that both `eth_getCode` and
+`eth_call` honor this contract. Solana reads carry the highest validated `minContextSlot` where the
+standard method supports it and reject older contexts. No method in this profile submits or resubmits
+a transaction.
 
 ### Separate observation tiers and authorization
 
-- `PROVISIONAL` uses EVM `latest` or Solana `processed` and is display-only.
+- `PROVISIONAL` uses EVM `latest` or Solana `confirmed` and is display-only. Solana deliberately
+  shares the `confirmed` selector with the canonical tier because `getBlock` exposes confirmed-block
+  lineage, not a parent-linked processed-bank block. The tier still controls authority: provisional
+  remains display-only, while canonical remains gated on endpoint-specific live proof.
 - `CANONICAL` uses EVM `safe` or Solana `confirmed` for indexing only after endpoint-specific live
   capability proof. Ethereum, Base, and Solana are `REQUIRES_LIVE_PROOF`. Arbitrum remains the stronger
   `BLOCKED_PENDING_LIVE_PROOF`; no provider tag semantics are assumed, and accepting its evidence
@@ -172,9 +179,11 @@ approved primary or fallback it must record:
    signed SLA and exclusions, exact Regions, exact endpoint hostnames, and opaque credential references;
 3. separately authorized non-production live evidence for Ethereum and Solana
    with both candidates: exact identity, complete HTTP/WSS method parity,
-   `safe`/`finalized` or Solana commitment semantics, archive start/depth and
-   bounded historical replay, rate limits, latency, response limits, reconnect
-   gaps, skipped slots, reorgs, finality stalls, provider outage,
+   Ethereum EIP-1898 canonical-block-hash behavior for `eth_getCode` and
+   `eth_call`, `safe`/`finalized` or Solana commitment semantics, Solana
+   legacy/Token-2022 account behavior, archive start/depth and bounded
+   historical replay, rate limits, latency, response limits, reconnect gaps,
+   skipped slots, reorgs, finality stalls, provider outage,
    primary/fallback skew, circuit/failover, and failback without duplicates or
    missing data; broader eight-network qualification remains future work and
    cannot be used to activate a deferred chain; and
@@ -204,9 +213,11 @@ changes after live evidence, but any change requires a new reviewed policy versi
 ## Protocol references
 
 - [Ethereum JSON-RPC methods and finality tags](https://ethereum.org/developers/docs/apis/json-rpc/)
+- [EIP-1898 exact block-hash state-query parameters](https://eips.ethereum.org/EIPS/eip-1898)
 - [Ethereum proof-of-stake finality](https://ethereum.org/developers/docs/consensus-mechanisms/pos/)
 - [Base RPC overview](https://docs.base.org/base-chain/api-reference/rpc-overview)
 - [Base transaction finality](https://docs.base.org/base-chain/network-information/transaction-finality)
 - [Arbitrum chain information](https://docs.arbitrum.io/for-devs/dev-tools-and-resources/chain-info)
 - [Solana HTTP and WebSocket RPC](https://solana.com/docs/rpc)
 - [Solana `getGenesisHash`](https://solana.com/docs/rpc/http/getgenesishash)
+- [Solana mainnet stablecoin/token-program bindings](https://solana.com/docs/payments/how-payments-work)

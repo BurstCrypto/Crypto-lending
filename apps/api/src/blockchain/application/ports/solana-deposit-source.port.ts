@@ -1,6 +1,6 @@
 import type { SolanaTokenProgramId } from '../../domain/solana-token-account';
 
-export type SolanaDepositCommitment = 'processed' | 'confirmed';
+export type SolanaDepositCommitment = 'confirmed';
 
 export interface SolanaDepositSourceRequestContext {
   readonly signal?: AbortSignal;

@@ -215,7 +215,7 @@ const LOCAL_EVM_TIER_RULES = deepFreeze([
 ] as const);
 
 const SOLANA_TIER_RULES = deepFreeze([
-  tier('PROVISIONAL', 'processed', 'ALLOWED', 'DISPLAY_ONLY'),
+  tier('PROVISIONAL', 'confirmed', 'ALLOWED', 'DISPLAY_ONLY'),
   tier('CANONICAL', 'confirmed', 'REQUIRES_LIVE_PROOF', 'CANONICAL_INDEXING'),
   tier('FINANCIAL', 'finalized', 'ALLOWED', 'FINANCIAL_AND_LEDGER'),
 ] as const);

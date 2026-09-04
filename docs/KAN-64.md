@@ -20,7 +20,7 @@ indexer then:
 1. resolves the network against the KAN-62 chain-observation policy and rejects
    an environment crossover;
 2. validates the wallet as one canonical, nonzero, 32-byte Solana public key;
-3. maps `PROVISIONAL` to `processed`; `CANONICAL` maps to `confirmed` only when
+3. maps `PROVISIONAL` to `confirmed`; `CANONICAL` also maps to `confirmed` only when
    a network-bound live-capability record is supplied;
 4. requires the exact full KAN-62 `getGenesisHash` result before accepting any
    account data;
@@ -84,7 +84,7 @@ Local fixture coverage is not live-provider evidence. Before any adapter or
 canonical runtime can be enabled, all of the following remain required:
 
 - KAN-251 must validate exact genesis identity, standard-method behavior,
-  `minContextSlot`, `processed`/`confirmed` semantics, response bounds, rate
+  `minContextSlot`, confirmed/finalized semantics, response bounds, rate
   limits, timeout behavior, and coherent dual-program reads against an approved
   provider and fallback.
 - KAN-231 must approve exact destination egress. No hostname or credential is

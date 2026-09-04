@@ -202,7 +202,7 @@ function parseSourceResponse(
 }
 
 function commitmentForTier(tier: unknown): SolanaDepositCommitment {
-  if (tier === 'PROVISIONAL') return 'processed';
+  if (tier === 'PROVISIONAL') return 'confirmed';
   if (tier === 'CANONICAL') return 'confirmed';
   throw new SolanaDepositIndexerError('TIER_NOT_AVAILABLE');
 }

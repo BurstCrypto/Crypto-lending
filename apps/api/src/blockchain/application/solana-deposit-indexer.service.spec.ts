@@ -168,7 +168,7 @@ describe('SolanaDepositIndexerService', () => {
       completeness: 'COMPLETE',
       authority: 'DISPLAY_ONLY',
       tier: 'PROVISIONAL',
-      commitment: 'processed',
+      commitment: 'confirmed',
       environment: 'MAINNET',
       networkId: MAINNET_NETWORK,
       ownerAddress: OWNER,
@@ -225,7 +225,7 @@ describe('SolanaDepositIndexerService', () => {
         request: {
           ownerAddress: OWNER,
           tokenProgramId: SOLANA_TOKEN_PROGRAM_IDS.LEGACY,
-          commitment: 'processed',
+          commitment: 'confirmed',
           minContextSlot: 850n,
           signal,
         },
@@ -235,7 +235,7 @@ describe('SolanaDepositIndexerService', () => {
         request: {
           ownerAddress: OWNER,
           tokenProgramId: SOLANA_TOKEN_PROGRAM_IDS.TOKEN_2022,
-          commitment: 'processed',
+          commitment: 'confirmed',
           minContextSlot: 850n,
           signal,
         },

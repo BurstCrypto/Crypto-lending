@@ -181,6 +181,26 @@ describe('chain observation policy', () => {
     ]);
     expect(isAllowedChainObservationMethod(solana.networkId, 'sendTransaction')).toBe(false);
     expect(solana.monotonicReadConstraint).toBe('MIN_CONTEXT_SLOT_REQUIRED');
+    expect(solana.tiers).toEqual([
+      {
+        tier: 'PROVISIONAL',
+        selector: 'confirmed',
+        state: 'ALLOWED',
+        authority: 'DISPLAY_ONLY',
+      },
+      {
+        tier: 'CANONICAL',
+        selector: 'confirmed',
+        state: 'REQUIRES_LIVE_PROOF',
+        authority: 'CANONICAL_INDEXING',
+      },
+      {
+        tier: 'FINANCIAL',
+        selector: 'finalized',
+        state: 'ALLOWED',
+        authority: 'FINANCIAL_AND_LEDGER',
+      },
+    ]);
     expect(solana.transport.webSocket).toEqual({
       role: 'NOTIFICATION_HINT_ONLY',
       allowedMethods: [
