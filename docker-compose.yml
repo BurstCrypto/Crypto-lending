@@ -59,7 +59,7 @@ services:
       test:
         [
           'CMD-SHELL',
-          'curl -fsS http://localhost:4566/_localstack/init/ready | grep -Eq ''"completed"[[:space:]]*:[[:space:]]*true'' && awslocal sqs get-queue-url --queue-name crypto-lending-jobs >/dev/null && awslocal sqs get-queue-url --queue-name crypto-lending-jobs-dlq >/dev/null',
+          'curl -fsS http://localhost:4566/_localstack/init/ready | grep -Eq ''"completed"[[:space:]]*:[[:space:]]*true'' && awslocal sqs get-queue-url --queue-name crypto-lending-jobs >/dev/null && awslocal sqs get-queue-url --queue-name crypto-lending-jobs-dlq >/dev/null && awslocal sqs get-queue-url --queue-name crypto-lending-balance-sync >/dev/null && awslocal sqs get-queue-url --queue-name crypto-lending-balance-sync-dlq >/dev/null',
         ]
       interval: 3s
       timeout: 3s

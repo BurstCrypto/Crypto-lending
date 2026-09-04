@@ -52,11 +52,11 @@ test('rejects added or changed standalone outputs', () => {
       'Outputs:\n',
       ['Outputs:', '  UnexpectedOutput:', '    Value: unexpected', ''].join('\n'),
     ),
-    /Outputs must preserve exactly the four reviewed queue URL and ARN outputs/,
+    /Outputs must preserve exactly the eight reviewed queue URL and ARN outputs/,
   );
   assertRejected(
     mutate('    Value: !Ref JobQueue\n', '    Value: !Ref JobDeadLetterQueue\n'),
-    /Outputs must preserve exactly the four reviewed queue URL and ARN outputs/,
+    /Outputs must preserve exactly the eight reviewed queue URL and ARN outputs/,
   );
 });
 
@@ -158,7 +158,11 @@ test('rejects removing or weakening encryption on either queue', () => {
     /exact AWS-KMS-encrypted, 14-day-retained/,
   );
 
-  const secondKeyIndex = templateSource.lastIndexOf('      KmsMasterKeyId: alias/aws/sqs');
+  const firstKeyIndex = templateSource.indexOf('      KmsMasterKeyId: alias/aws/sqs');
+  const secondKeyIndex = templateSource.indexOf(
+    '      KmsMasterKeyId: alias/aws/sqs',
+    firstKeyIndex + 1,
+  );
   assert.notEqual(secondKeyIndex, -1);
   assertRejected(
     `${templateSource.slice(0, secondKeyIndex)}${templateSource
@@ -166,6 +170,28 @@ test('rejects removing or weakening encryption on either queue', () => {
       .replace('      KmsMasterKeyId: alias/aws/sqs\n', '')}`,
     /exact AWS-KMS-encrypted, bounded-retry primary queue/,
   );
+});
+
+test('rejects balance source/DLQ, encryption, and TLS isolation drift', () => {
+  for (const [search, replacement, message] of [
+    [
+      "      QueueName: !Sub 'crypto-lending-${EnvironmentName}-balance-sync-dlq'",
+      "      QueueName: !Sub 'crypto-lending-${EnvironmentName}-jobs-dlq'",
+      /single-source balance dead-letter/,
+    ],
+    [
+      '        deadLetterTargetArn: !GetAtt BalanceDeadLetterQueue.Arn',
+      '        deadLetterTargetArn: !GetAtt JobDeadLetterQueue.Arn',
+      /bounded-retry balance source queue/,
+    ],
+    [
+      '        - !Ref BalanceDeadLetterQueue',
+      '        - !Ref JobDeadLetterQueue',
+      /exact balance two-queue attachment/,
+    ],
+  ]) {
+    assertRejected(mutate(search, replacement), message);
+  }
 });
 
 test('rejects dead-letter retention and redrive topology drift', () => {

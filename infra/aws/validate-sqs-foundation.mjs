@@ -165,7 +165,7 @@ export function validateSqsFoundationSource(source) {
 
   const expectedScalarEntries = new Map([
     ['AWSTemplateFormatVersion', "AWSTemplateFormatVersion: '2010-09-09'"],
-    ['Description', 'Description: Crypto Lending application job queue and dead-letter queue'],
+    ['Description', 'Description: Crypto Lending isolated job and balance-sync queue pairs'],
   ]);
   for (const [name, expectedLine] of expectedScalarEntries) {
     const matchingEntries = topLevelEntries.filter((entry) => entry.name === name);
@@ -208,8 +208,16 @@ export function validateSqsFoundationSource(source) {
       '    Value: !Ref JobDeadLetterQueue',
       '  JobDeadLetterQueueArn:',
       '    Value: !GetAtt JobDeadLetterQueue.Arn',
+      '  BalanceQueueUrl:',
+      '    Value: !Ref BalanceQueue',
+      '  BalanceQueueArn:',
+      '    Value: !GetAtt BalanceQueue.Arn',
+      '  BalanceDeadLetterQueueUrl:',
+      '    Value: !Ref BalanceDeadLetterQueue',
+      '  BalanceDeadLetterQueueArn:',
+      '    Value: !GetAtt BalanceDeadLetterQueue.Arn',
     ].join('\n'),
-    'exactly the four reviewed queue URL and ARN outputs',
+    'exactly the eight reviewed queue URL and ARN outputs',
     errors,
   );
 
@@ -218,6 +226,9 @@ export function validateSqsFoundationSource(source) {
     ['JobDeadLetterQueue', 'AWS::SQS::Queue'],
     ['JobQueue', 'AWS::SQS::Queue'],
     ['JobQueueTlsPolicy', 'AWS::SQS::QueuePolicy'],
+    ['BalanceDeadLetterQueue', 'AWS::SQS::Queue'],
+    ['BalanceQueue', 'AWS::SQS::Queue'],
+    ['BalanceQueueTlsPolicy', 'AWS::SQS::QueuePolicy'],
   ]);
   const resourceEntryCounts = new Map();
   const invalidResourceEntryLines = [];
@@ -247,7 +258,9 @@ export function validateSqsFoundationSource(source) {
     );
   }
   if (resources.size !== expectedResources.size) {
-    errors.push('Standalone SQS topology must contain exactly two queues and their TLS policy.');
+    errors.push(
+      'Standalone SQS topology must contain exactly two isolated queue/DLQ pairs and their TLS policies.',
+    );
   }
   for (const [logicalId, expectedType] of expectedResources) {
     const block = resources.get(logicalId);
@@ -396,6 +409,80 @@ export function validateSqsFoundationSource(source) {
     policy,
     /          - Sid: DenyInsecureTransport\s*\n            Effect: Deny\s*\n            Principal: ['"]\*['"]\s*\n            Action: sqs:\*\s*\n            Resource:\s*\n              - !GetAtt JobQueue\.Arn\s*\n              - !GetAtt JobDeadLetterQueue\.Arn\s*\n            Condition:\s*\n              Bool:\s*\n                aws:SecureTransport: ['"]false['"]\s*$/,
     'JobQueueTlsPolicy must deny all SQS actions on both queues when aws:SecureTransport is false.',
+    errors,
+  );
+
+  requireExactSemanticProperty(
+    resources.get('BalanceDeadLetterQueue') ?? '',
+    'BalanceDeadLetterQueue',
+    'Properties',
+    [
+      'Properties:',
+      "  QueueName: !Sub 'crypto-lending-${EnvironmentName}-balance-sync-dlq'",
+      '  KmsMasterKeyId: alias/aws/sqs',
+      '  MessageRetentionPeriod: 1209600',
+      '  RedriveAllowPolicy:',
+      '    redrivePermission: byQueue',
+      '    sourceQueueArns:',
+      "      - !Sub 'arn:${AWS::Partition}:sqs:${AWS::Region}:${AWS::AccountId}:crypto-lending-${EnvironmentName}-balance-sync'",
+      '  Tags:',
+      '    - Key: application',
+      '      Value: crypto-lending',
+      '    - Key: environment',
+      '      Value: !Ref EnvironmentName',
+    ].join('\n'),
+    'the exact AWS-KMS-encrypted, 14-day-retained, single-source balance dead-letter queue topology and tags',
+    errors,
+  );
+
+  requireExactSemanticProperty(
+    resources.get('BalanceQueue') ?? '',
+    'BalanceQueue',
+    'Properties',
+    [
+      'Properties:',
+      "  QueueName: !Sub 'crypto-lending-${EnvironmentName}-balance-sync'",
+      '  KmsMasterKeyId: alias/aws/sqs',
+      '  MessageRetentionPeriod: 345600',
+      '  ReceiveMessageWaitTimeSeconds: 10',
+      '  VisibilityTimeout: 30',
+      '  RedrivePolicy:',
+      '    deadLetterTargetArn: !GetAtt BalanceDeadLetterQueue.Arn',
+      '    maxReceiveCount: !Ref MaxReceiveCount',
+      '  Tags:',
+      '    - Key: application',
+      '      Value: crypto-lending',
+      '    - Key: environment',
+      '      Value: !Ref EnvironmentName',
+    ].join('\n'),
+    'the exact AWS-KMS-encrypted, bounded-retry balance source queue topology and tags',
+    errors,
+  );
+
+  requireExactSemanticProperty(
+    resources.get('BalanceQueueTlsPolicy') ?? '',
+    'BalanceQueueTlsPolicy',
+    'Properties',
+    [
+      'Properties:',
+      '  Queues:',
+      '    - !Ref BalanceQueue',
+      '    - !Ref BalanceDeadLetterQueue',
+      '  PolicyDocument:',
+      "    Version: '2012-10-17'",
+      '    Statement:',
+      '      - Sid: DenyInsecureTransport',
+      '        Effect: Deny',
+      "        Principal: '*'",
+      '        Action: sqs:*',
+      '        Resource:',
+      '          - !GetAtt BalanceQueue.Arn',
+      '          - !GetAtt BalanceDeadLetterQueue.Arn',
+      '        Condition:',
+      '          Bool:',
+      "            aws:SecureTransport: 'false'",
+    ].join('\n'),
+    'the exact balance two-queue attachment and unconditional insecure-transport denial',
     errors,
   );
 

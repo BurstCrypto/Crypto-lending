@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: Crypto Lending application job queue and dead-letter queue
+Description: Crypto Lending isolated job and balance-sync queue pairs
 
 Parameters:
   EnvironmentName:
@@ -65,6 +65,59 @@ Resources:
               Bool:
                 aws:SecureTransport: 'false'
 
+  BalanceDeadLetterQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub 'crypto-lending-${EnvironmentName}-balance-sync-dlq'
+      KmsMasterKeyId: alias/aws/sqs
+      MessageRetentionPeriod: 1209600
+      RedriveAllowPolicy:
+        redrivePermission: byQueue
+        sourceQueueArns:
+          - !Sub 'arn:${AWS::Partition}:sqs:${AWS::Region}:${AWS::AccountId}:crypto-lending-${EnvironmentName}-balance-sync'
+      Tags:
+        - Key: application
+          Value: crypto-lending
+        - Key: environment
+          Value: !Ref EnvironmentName
+
+  BalanceQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub 'crypto-lending-${EnvironmentName}-balance-sync'
+      KmsMasterKeyId: alias/aws/sqs
+      MessageRetentionPeriod: 345600
+      ReceiveMessageWaitTimeSeconds: 10
+      VisibilityTimeout: 30
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt BalanceDeadLetterQueue.Arn
+        maxReceiveCount: !Ref MaxReceiveCount
+      Tags:
+        - Key: application
+          Value: crypto-lending
+        - Key: environment
+          Value: !Ref EnvironmentName
+
+  BalanceQueueTlsPolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Ref BalanceQueue
+        - !Ref BalanceDeadLetterQueue
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: '*'
+            Action: sqs:*
+            Resource:
+              - !GetAtt BalanceQueue.Arn
+              - !GetAtt BalanceDeadLetterQueue.Arn
+            Condition:
+              Bool:
+                aws:SecureTransport: 'false'
+
 Outputs:
   JobQueueUrl:
     Value: !Ref JobQueue
@@ -74,3 +127,11 @@ Outputs:
     Value: !Ref JobDeadLetterQueue
   JobDeadLetterQueueArn:
     Value: !GetAtt JobDeadLetterQueue.Arn
+  BalanceQueueUrl:
+    Value: !Ref BalanceQueue
+  BalanceQueueArn:
+    Value: !GetAtt BalanceQueue.Arn
+  BalanceDeadLetterQueueUrl:
+    Value: !Ref BalanceDeadLetterQueue
+  BalanceDeadLetterQueueArn:
+    Value: !GetAtt BalanceDeadLetterQueue.Arn
