@@ -115,8 +115,18 @@ function exactPublicOrigin(value: string, testRuntime: boolean): string {
   return value;
 }
 
-function registryEnvironment(value: string): AssetRegistryEnvironment {
+function registryEnvironment(
+  value: string,
+  nodeEnvironment: string | undefined,
+): AssetRegistryEnvironment {
   if (value !== 'MAINNET' && value !== 'TESTNET') {
+    return fail('WALLET_REGISTRATION_REGISTRY_ENVIRONMENT');
+  }
+  if (
+    value === 'TESTNET' &&
+    nodeEnvironment !== 'development' &&
+    nodeEnvironment !== 'test'
+  ) {
     return fail('WALLET_REGISTRATION_REGISTRY_ENVIRONMENT');
   }
   return value;
@@ -271,6 +281,7 @@ export function loadWalletRegistrationConfig(
     ),
     registryEnvironment: registryEnvironment(
       required(environment, 'WALLET_REGISTRATION_REGISTRY_ENVIRONMENT'),
+      environment.NODE_ENV,
     ),
     challengeTtlSeconds: positiveInteger(
       environment,

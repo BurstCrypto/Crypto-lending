@@ -50,6 +50,20 @@ function useRings(environment: NodeJS.ProcessEnv): void {
   }
 }
 
+function expectConfigurationErrorOnField(
+  environment: NodeJS.ProcessEnv,
+  field: string,
+): void {
+  let thrown: unknown;
+  try {
+    loadWalletRegistrationConfig(environment);
+  } catch (error) {
+    thrown = error;
+  }
+  expect(thrown).toBeInstanceOf(WalletRegistrationConfigurationError);
+  expect(thrown).toMatchObject({ field });
+}
+
 describe('wallet registration configuration', () => {
   it('is disabled by default and rejects stray wallet secrets while disabled', () => {
     expect(loadWalletRegistrationConfig({})).toEqual({ mode: 'disabled' });
@@ -80,6 +94,62 @@ describe('wallet registration configuration', () => {
       purpose: 'metadata-seal',
       activeWriteVersion: 1,
       keys: [{ keyId: 'wallet-metadata-seal-v1', purpose: 'metadata-seal', version: 1 }],
+    });
+  });
+
+  it.each(['development', 'test'] as const)(
+    'accepts TESTNET only for the exact %s runtime label',
+    (nodeEnvironment) => {
+      const environment = enabledEnvironment();
+      environment.NODE_ENV = nodeEnvironment;
+      environment.AUTH_PUBLIC_ORIGIN = 'https://app.example.test';
+
+      expect(loadWalletRegistrationConfig(environment)).toMatchObject({
+        mode: 'enabled',
+        registryEnvironment: 'TESTNET',
+      });
+    },
+  );
+
+  it.each([
+    ['production', 'production'],
+    ['absent', undefined],
+    ['staging', 'staging'],
+    ['empty', ''],
+    ['case variant', 'Test'],
+    ['whitespace variant', ' development '],
+    ['unknown', 'preview'],
+  ] as const)(
+    'rejects TESTNET for the %s runtime label on the registry environment field',
+    (_label, nodeEnvironment) => {
+      const environment = enabledEnvironment();
+      environment.AUTH_PUBLIC_ORIGIN = 'https://app.example.test';
+      if (nodeEnvironment === undefined) delete environment.NODE_ENV;
+      else environment.NODE_ENV = nodeEnvironment;
+
+      expectConfigurationErrorOnField(
+        environment,
+        'WALLET_REGISTRATION_REGISTRY_ENVIRONMENT',
+      );
+    },
+  );
+
+  it.each([
+    ['production', 'production'],
+    ['absent', undefined],
+    ['staging', 'staging'],
+    ['development', 'development'],
+    ['test', 'test'],
+  ] as const)('keeps MAINNET valid for the %s runtime label', (_label, nodeEnvironment) => {
+    const environment = enabledEnvironment();
+    environment.AUTH_PUBLIC_ORIGIN = 'https://app.example.test';
+    environment.WALLET_REGISTRATION_REGISTRY_ENVIRONMENT = 'MAINNET';
+    if (nodeEnvironment === undefined) delete environment.NODE_ENV;
+    else environment.NODE_ENV = nodeEnvironment;
+
+    expect(loadWalletRegistrationConfig(environment)).toMatchObject({
+      mode: 'enabled',
+      registryEnvironment: 'MAINNET',
     });
   });
 
@@ -148,6 +218,7 @@ describe('wallet registration configuration', () => {
     const secure = enabledEnvironment();
     secure.NODE_ENV = 'production';
     secure.AUTH_PUBLIC_ORIGIN = 'https://app.example.test';
+    secure.WALLET_REGISTRATION_REGISTRY_ENVIRONMENT = 'MAINNET';
     expect(loadWalletRegistrationConfig(secure)).toMatchObject({
       mode: 'enabled',
       publicOrigin: 'https://app.example.test',
