@@ -1,0 +1,368 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Production operational alarms and dashboard child stack.
+
+Parameters:
+  BillingAcknowledgement:
+    Type: String
+    Default: NOT_AUTHORIZED
+    AllowedValues: [NOT_AUTHORIZED, I_ACKNOWLEDGE_THIS_CREATES_BILLABLE_AWS_RESOURCES]
+  DeliveryArtifactSha256:
+    Type: String
+    AllowedPattern: '^[a-f0-9]{64}$'
+  DeliveryArtifactBindingSha256:
+    Type: String
+    AllowedPattern: '^[a-f0-9]{64}$'
+  EnvironmentName:
+    Type: String
+    MaxLength: 31
+    AllowedPattern: '^(dev|test|qa|sandbox|staging)(-[a-z0-9]+)*$'
+  EnableOperationalAlarms:
+    Type: String
+    Default: 'true'
+    AllowedValues: ['true', 'false']
+  AlarmTopicArn:
+    Type: String
+    Default: NONE
+    AllowedPattern: '^(?:NONE|arn:(?:aws|aws-cn|aws-us-gov):sns:[a-z0-9-]+:[0-9]{12}:[A-Za-z0-9_-]{1,256})$'
+  EnableOperationalDashboard:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+  LoadBalancerFullName:
+    Type: String
+    AllowedPattern: '^app/[A-Za-z0-9-]{1,32}/[a-f0-9]{16}$'
+  ApiTargetGroupFullName:
+    Type: String
+    AllowedPattern: '^targetgroup/[A-Za-z0-9-]{1,32}/[a-f0-9]{16}$'
+  DatabaseInstanceIdentifier:
+    Type: String
+    AllowedPattern: '^[a-z][a-z0-9-]{0,62}$'
+  RedisCacheClusterIdPrefix:
+    Type: String
+    AllowedPattern: '^[a-z][a-z0-9-]{0,39}$'
+  JobQueueName:
+    Type: String
+    AllowedPattern: '^[A-Za-z0-9_-]{1,80}$'
+  JobDeadLetterQueueName:
+    Type: String
+    AllowedPattern: '^[A-Za-z0-9_-]{1,80}$'
+  BalanceQueueName:
+    Type: String
+    AllowedPattern: '^[A-Za-z0-9_-]{1,80}$'
+  BalanceDeadLetterQueueName:
+    Type: String
+    AllowedPattern: '^[A-Za-z0-9_-]{1,80}$'
+  EcsClusterName:
+    Type: String
+    AllowedPattern: '^[A-Za-z0-9_-]{1,255}$'
+  ApiServiceName:
+    Type: String
+    AllowedPattern: '^[A-Za-z0-9_-]{1,255}$'
+  WebServiceName:
+    Type: String
+    AllowedPattern: '^[A-Za-z0-9_-]{1,255}$'
+  WorkerServiceName:
+    Type: String
+    AllowedPattern: '^[A-Za-z0-9_-]{1,255}$'
+  ApiLogGroupName:
+    Type: String
+    AllowedPattern: '^/crypto-lending/(?:dev|test|qa|sandbox|staging)(?:-[a-z0-9]+)*/api$'
+  WorkerLogGroupName:
+    Type: String
+    AllowedPattern: '^/crypto-lending/(?:dev|test|qa|sandbox|staging)(?:-[a-z0-9]+)*/outbox-worker$'
+
+Rules:
+  ExplicitBillingAcknowledgementRequired:
+    Assertions:
+      - Assert: !Equals
+          - !Ref BillingAcknowledgement
+          - I_ACKNOWLEDGE_THIS_CREATES_BILLABLE_AWS_RESOURCES
+        AssertDescription: Billing consent is required.
+  AlarmTopicRequired:
+    Assertions:
+      - Assert: !Or
+          - !Equals [!Ref EnableOperationalAlarms, 'false']
+          - !Not [!Equals [!Ref AlarmTopicArn, NONE]]
+        AssertDescription: Enabled alarms require an SNS topic ARN.
+
+Conditions:
+  CreateAlarms: !Equals [!Ref EnableOperationalAlarms, 'true']
+  CreateOperationalDashboard: !Equals [!Ref EnableOperationalDashboard, 'true']
+
+Resources:
+  ApiUnhealthyHostAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: CreateAlarms
+    Properties:
+      AlarmActions: [!Ref AlarmTopicArn]
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      DatapointsToAlarm: 2
+      Dimensions:
+        - Name: LoadBalancer
+          Value: !Ref LoadBalancerFullName
+        - Name: TargetGroup
+          Value: !Ref ApiTargetGroupFullName
+      EvaluationPeriods: 2
+      MetricName: UnHealthyHostCount
+      Namespace: AWS/ApplicationELB
+      OKActions: [!Ref AlarmTopicArn]
+      Period: 60
+      Statistic: Maximum
+      Threshold: 1
+      TreatMissingData: notBreaching
+
+  DatabaseLowStorageAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: CreateAlarms
+    Properties:
+      AlarmActions: [!Ref AlarmTopicArn]
+      ComparisonOperator: LessThanThreshold
+      DatapointsToAlarm: 2
+      Dimensions:
+        - Name: DBInstanceIdentifier
+          Value: !Ref DatabaseInstanceIdentifier
+      EvaluationPeriods: 3
+      MetricName: FreeStorageSpace
+      Namespace: AWS/RDS
+      OKActions: [!Ref AlarmTopicArn]
+      Period: 300
+      Statistic: Minimum
+      Threshold: 2147483648
+      TreatMissingData: breaching
+
+  RedisEvictionsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: CreateAlarms
+    Properties:
+      AlarmActions: [!Ref AlarmTopicArn]
+      ComparisonOperator: GreaterThanThreshold
+      DatapointsToAlarm: 1
+      EvaluationPeriods: 1
+      Metrics:
+        - Id: primaryevictions
+          MetricStat:
+            Metric:
+              Dimensions:
+                - Name: CacheClusterId
+                  Value: !Sub ${RedisCacheClusterIdPrefix}-001
+              MetricName: Evictions
+              Namespace: AWS/ElastiCache
+            Period: 300
+            Stat: Sum
+          ReturnData: false
+        - Id: replicaevictions
+          MetricStat:
+            Metric:
+              Dimensions:
+                - Name: CacheClusterId
+                  Value: !Sub ${RedisCacheClusterIdPrefix}-002
+              MetricName: Evictions
+              Namespace: AWS/ElastiCache
+            Period: 300
+            Stat: Sum
+          ReturnData: false
+        - Expression: primaryevictions + replicaevictions
+          Id: totalevictions
+          Label: Redis evictions across members
+          ReturnData: true
+      OKActions: [!Ref AlarmTopicArn]
+      Threshold: 0
+      TreatMissingData: notBreaching
+
+  RedisAccessDenialsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: CreateAlarms
+    Properties:
+      AlarmActions: [!Ref AlarmTopicArn]
+      ComparisonOperator: GreaterThanThreshold
+      DatapointsToAlarm: 1
+      EvaluationPeriods: 1
+      Metrics:
+        - Id: primaryauth
+          MetricStat:
+            Metric:
+              Dimensions:
+                - Name: CacheClusterId
+                  Value: !Sub ${RedisCacheClusterIdPrefix}-001
+              MetricName: AuthenticationFailures
+              Namespace: AWS/ElastiCache
+            Period: 60
+            Stat: Sum
+          ReturnData: false
+        - Id: replicaauth
+          MetricStat:
+            Metric:
+              Dimensions:
+                - Name: CacheClusterId
+                  Value: !Sub ${RedisCacheClusterIdPrefix}-002
+              MetricName: AuthenticationFailures
+              Namespace: AWS/ElastiCache
+            Period: 60
+            Stat: Sum
+          ReturnData: false
+        - Id: primarycommand
+          MetricStat:
+            Metric:
+              Dimensions:
+                - Name: CacheClusterId
+                  Value: !Sub ${RedisCacheClusterIdPrefix}-001
+              MetricName: CommandAuthorizationFailures
+              Namespace: AWS/ElastiCache
+            Period: 60
+            Stat: Sum
+          ReturnData: false
+        - Id: replicacommand
+          MetricStat:
+            Metric:
+              Dimensions:
+                - Name: CacheClusterId
+                  Value: !Sub ${RedisCacheClusterIdPrefix}-002
+              MetricName: CommandAuthorizationFailures
+              Namespace: AWS/ElastiCache
+            Period: 60
+            Stat: Sum
+          ReturnData: false
+        - Id: primarykey
+          MetricStat:
+            Metric:
+              Dimensions:
+                - Name: CacheClusterId
+                  Value: !Sub ${RedisCacheClusterIdPrefix}-001
+              MetricName: KeyAuthorizationFailures
+              Namespace: AWS/ElastiCache
+            Period: 60
+            Stat: Sum
+          ReturnData: false
+        - Id: replicakey
+          MetricStat:
+            Metric:
+              Dimensions:
+                - Name: CacheClusterId
+                  Value: !Sub ${RedisCacheClusterIdPrefix}-002
+              MetricName: KeyAuthorizationFailures
+              Namespace: AWS/ElastiCache
+            Period: 60
+            Stat: Sum
+          ReturnData: false
+        - Id: primarychannel
+          MetricStat:
+            Metric:
+              Dimensions:
+                - Name: CacheClusterId
+                  Value: !Sub ${RedisCacheClusterIdPrefix}-001
+              MetricName: ChannelAuthorizationFailures
+              Namespace: AWS/ElastiCache
+            Period: 60
+            Stat: Sum
+          ReturnData: false
+        - Id: replicachannel
+          MetricStat:
+            Metric:
+              Dimensions:
+                - Name: CacheClusterId
+                  Value: !Sub ${RedisCacheClusterIdPrefix}-002
+              MetricName: ChannelAuthorizationFailures
+              Namespace: AWS/ElastiCache
+            Period: 60
+            Stat: Sum
+          ReturnData: false
+        - Expression: primaryauth + replicaauth + primarycommand + replicacommand + primarykey + replicakey + primarychannel + replicachannel
+          Id: totaldenials
+          Label: Redis authentication and ACL denials across members
+          ReturnData: true
+      OKActions: [!Ref AlarmTopicArn]
+      Threshold: 0
+      TreatMissingData: notBreaching
+
+  JobQueueAgeAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: CreateAlarms
+    Properties:
+      AlarmActions: [!Ref AlarmTopicArn]
+      ComparisonOperator: GreaterThanThreshold
+      DatapointsToAlarm: 2
+      Dimensions:
+        - Name: QueueName
+          Value: !Ref JobQueueName
+      EvaluationPeriods: 2
+      MetricName: ApproximateAgeOfOldestMessage
+      Namespace: AWS/SQS
+      OKActions: [!Ref AlarmTopicArn]
+      Period: 60
+      Statistic: Maximum
+      Threshold: 300
+      TreatMissingData: notBreaching
+
+  DeadLetterQueueNotEmptyAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: CreateAlarms
+    Properties:
+      AlarmActions: [!Ref AlarmTopicArn]
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      DatapointsToAlarm: 1
+      Dimensions:
+        - Name: QueueName
+          Value: !Ref JobDeadLetterQueueName
+      EvaluationPeriods: 1
+      MetricName: ApproximateNumberOfMessagesVisible
+      Namespace: AWS/SQS
+      OKActions: [!Ref AlarmTopicArn]
+      Period: 60
+      Statistic: Maximum
+      Threshold: 1
+      TreatMissingData: notBreaching
+
+  BalanceQueueAgeAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: CreateAlarms
+    Properties:
+      AlarmActions: [!Ref AlarmTopicArn]
+      ComparisonOperator: GreaterThanThreshold
+      DatapointsToAlarm: 2
+      Dimensions:
+        - Name: QueueName
+          Value: !Ref BalanceQueueName
+      EvaluationPeriods: 2
+      MetricName: ApproximateAgeOfOldestMessage
+      Namespace: AWS/SQS
+      OKActions: [!Ref AlarmTopicArn]
+      Period: 60
+      Statistic: Maximum
+      Threshold: 300
+      TreatMissingData: notBreaching
+
+  BalanceDeadLetterQueueNotEmptyAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: CreateAlarms
+    Properties:
+      AlarmActions: [!Ref AlarmTopicArn]
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      DatapointsToAlarm: 1
+      Dimensions:
+        - Name: QueueName
+          Value: !Ref BalanceDeadLetterQueueName
+      EvaluationPeriods: 1
+      MetricName: ApproximateNumberOfMessagesVisible
+      Namespace: AWS/SQS
+      OKActions: [!Ref AlarmTopicArn]
+      Period: 60
+      Statistic: Maximum
+      Threshold: 1
+      TreatMissingData: notBreaching
+
+  OperationalDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Condition: CreateOperationalDashboard
+    Properties:
+      DashboardName: !Sub crypto-lending-${EnvironmentName}
+      DashboardBody: !Sub >-
+        {"widgets":[{"type":"metric","properties":{"title":"API latency and request outcomes","region":"${AWS::Region}","stat":"Sum","metrics":[["AWS/ApplicationELB","RequestCount","LoadBalancer","${LoadBalancerFullName}","TargetGroup","${ApiTargetGroupFullName}"],[".","HTTPCode_Target_4XX_Count",".",".",".","."],[".","HTTPCode_Target_5XX_Count",".",".",".","."],[".","TargetResponseTime",".",".",".",".",{"stat":"p95"}]]}},{"type":"metric","properties":{"title":"ECS CPU/memory saturation","region":"${AWS::Region}","stat":"Average","metrics":[["AWS/ECS","CPUUtilization","ClusterName","${EcsClusterName}","ServiceName","${ApiServiceName}"],[".","MemoryUtilization",".",".",".","."],[".","CPUUtilization",".",".",".","${WebServiceName}"],[".","MemoryUtilization",".",".",".","."],[".","CPUUtilization",".",".",".","${WorkerServiceName}"],[".","MemoryUtilization",".",".",".","."]]}},{"type":"metric","properties":{"title":"Redis access denials","region":"${AWS::Region}","stat":"Sum","metrics":[["AWS/ElastiCache","AuthenticationFailures","CacheClusterId","${RedisCacheClusterIdPrefix}-001"],[".","CommandAuthorizationFailures",".","."],[".","KeyAuthorizationFailures",".","."],[".","ChannelAuthorizationFailures",".","."],[".","AuthenticationFailures",".","${RedisCacheClusterIdPrefix}-002"],[".","CommandAuthorizationFailures",".","."],[".","KeyAuthorizationFailures",".","."],[".","ChannelAuthorizationFailures",".","."]]}},{"type":"metric","properties":{"title":"Queue backlog, age, and DLQ depth","region":"${AWS::Region}","stat":"Maximum","metrics":[["AWS/SQS","ApproximateNumberOfMessagesVisible","QueueName","${JobQueueName}"],[".","ApproximateAgeOfOldestMessage",".","."],[".","ApproximateNumberOfMessagesVisible",".","${JobDeadLetterQueueName}"],[".","ApproximateNumberOfMessagesVisible",".","${BalanceQueueName}"],[".","ApproximateAgeOfOldestMessage",".","."],[".","ApproximateNumberOfMessagesVisible",".","${BalanceDeadLetterQueueName}"]]}},{"type":"log","width":24,"properties":{"title":"Correlation traces","region":"${AWS::Region}","view":"table","query":"SOURCE logGroups(namePrefix: ['/crypto-lending/${EnvironmentName}/']) | fields @timestamp, correlationId, traceId, spanId, parentSpanId, spanName, durationMs, outcome | filter event = 'trace.span.completed' | limit 100"}},{"type":"log","properties":{"title":"Job failure and redrive","region":"${AWS::Region}","view":"table","query":"SOURCE '${WorkerLogGroupName}' | fields @timestamp, event, jobKind, errorCode, outcome | filter event in ['job.publish_failed','job.retry_scheduled','job.awaiting_dead_letter','job.ownership_lost','outbox.dispatch.failed'] | limit 100"}},{"type":"log","properties":{"title":"Lifecycle state/reason counts","region":"${AWS::Region}","view":"table","query":"SOURCE '${ApiLogGroupName}' | filter event = 'ledger.lifecycle.transitioned' | stats count(*) as transitions by lifecycleScope, state, reason | limit 100"}}]}
+
+Outputs:
+  DeliveryArtifactSha256:
+    Value: !Ref DeliveryArtifactSha256
+  DeliveryArtifactBindingSha256:
+    Value: !Ref DeliveryArtifactBindingSha256
+  OperationalDashboardName:
+    Condition: CreateOperationalDashboard
+    Value: !Ref OperationalDashboard
