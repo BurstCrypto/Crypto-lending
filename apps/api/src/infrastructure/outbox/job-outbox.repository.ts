@@ -5,10 +5,14 @@ import { PostgresService } from '../database/postgres.service';
 import { isCanonicalUuidV4 } from '../logging';
 import { parseJobEnvelope, type JobEnvelope } from './job-envelope';
 import { serializeJobMessage } from './job-message-policy';
-import type { LedgerOutboxLink } from './job-publisher.port';
+import type { JobDestination, LedgerOutboxLink } from './job-publisher.port';
+import {
+  assertReviewedOutboxJob,
+  ReviewedJobContractPolicyError,
+} from './reviewed-job-contract-policy';
 
 export interface NewOutboxJob {
-  destination: string;
+  destination: JobDestination;
   envelope: JobEnvelope;
   messageAttributes: Readonly<Record<string, string>>;
   ledgerLink?: LedgerOutboxLink;
@@ -26,6 +30,7 @@ export interface ClaimedOutboxJob {
   destination: string;
   envelope: JobEnvelope;
   messageAttributes: Readonly<Record<string, string>>;
+  ledgerLink?: LedgerOutboxLink;
   attempts: number;
 }
 
@@ -54,11 +59,51 @@ interface ClaimedOutboxRow extends QueryResultRow {
   queue_name: string;
   payload: unknown;
   message_attributes: unknown;
+  ledger_command_id?: string | null;
+  ledger_journal_id?: string | null;
   attempts: number;
 }
 
 interface FailureRow extends QueryResultRow {
   status: 'pending' | 'failed';
+}
+
+const NEW_OUTBOX_JOB_KEYS = new Set(['destination', 'envelope', 'messageAttributes', 'ledgerLink']);
+
+function parseNewOutboxJob(value: unknown): Readonly<{
+  destination: unknown;
+  envelope: unknown;
+  messageAttributes: unknown;
+  ledgerLink: unknown;
+}> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('Invalid outbox job shape');
+  }
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) {
+    throw new Error('Invalid outbox job shape');
+  }
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  const keys = Reflect.ownKeys(descriptors);
+  if (
+    keys.length < 3 ||
+    keys.length > 4 ||
+    keys.some((key) => typeof key !== 'string' || !NEW_OUTBOX_JOB_KEYS.has(key)) ||
+    !Object.hasOwn(descriptors, 'destination') ||
+    !Object.hasOwn(descriptors, 'envelope') ||
+    !Object.hasOwn(descriptors, 'messageAttributes') ||
+    Object.values(descriptors).some(
+      (descriptor) => !('value' in descriptor) || descriptor.enumerable !== true,
+    )
+  ) {
+    throw new Error('Invalid outbox job shape');
+  }
+  return Object.freeze({
+    destination: descriptors.destination?.value,
+    envelope: descriptors.envelope?.value,
+    messageAttributes: descriptors.messageAttributes?.value,
+    ledgerLink: descriptors.ledgerLink?.value,
+  });
 }
 
 function parseLedgerOutboxLink(value: unknown): Readonly<LedgerOutboxLink> | undefined {
@@ -165,44 +210,54 @@ export class JobOutboxRepository {
 
     let serializedEnvelope: string;
     let serializedAttributes: string;
+    let destination: string;
+    let envelopeId: string;
     let ledgerLink: Readonly<LedgerOutboxLink> | undefined;
     try {
-      const jobDescriptors = Object.getOwnPropertyDescriptors(job);
-      const ledgerLinkDescriptor = Object.hasOwn(jobDescriptors, 'ledgerLink')
-        ? jobDescriptors.ledgerLink
-        : undefined;
-      if (ledgerLinkDescriptor && !('value' in ledgerLinkDescriptor)) {
-        throw new Error('Invalid ledger outbox link');
-      }
-      ledgerLink = parseLedgerOutboxLink(
-        ledgerLinkDescriptor && 'value' in ledgerLinkDescriptor
-          ? ledgerLinkDescriptor.value
-          : undefined,
+      const parsedJob = parseNewOutboxJob(job);
+      ledgerLink = parseLedgerOutboxLink(parsedJob.ledgerLink);
+      const serialized = serializeJobMessage(
+        parsedJob.envelope as JobEnvelope,
+        parsedJob.messageAttributes,
       );
-      const serialized = serializeJobMessage(job.envelope, job.messageAttributes);
+      const persistedEnvelope = parseJobEnvelope(JSON.parse(serialized.body) as unknown);
+      assertReviewedOutboxJob({
+        destination: parsedJob.destination,
+        envelope: persistedEnvelope,
+        messageAttributes: serialized.messageAttributes,
+        ...(ledgerLink === undefined ? {} : { ledgerLink }),
+      });
+      destination = 'jobs';
+      envelopeId = persistedEnvelope.id;
       serializedEnvelope = serialized.body;
       serializedAttributes = JSON.stringify(serialized.messageAttributes);
     } catch (error) {
-      const reason = error instanceof Error ? error.message : 'invalid JSON';
-      throw new Error(`Invalid outbox job: ${reason}`, {
-        cause: error,
-      });
+      const reason = error instanceof ReviewedJobContractPolicyError ? `: ${error.code}` : '';
+      // Validation causes can contain rejected payload data. Only the reviewed,
+      // closed policy code is safe to expose at this boundary.
+      // eslint-disable-next-line preserve-caught-error
+      throw new Error(`Invalid outbox job${reason}`);
     }
 
-    await this.postgres.query(
-      `INSERT INTO job_outbox (
-         id, queue_name, payload, message_attributes,
-         ledger_command_id, ledger_journal_id
-       ) VALUES ($1, $2, $3::jsonb, $4::jsonb, $5::uuid, $6::uuid)`,
-      [
-        job.envelope.id,
-        job.destination,
-        serializedEnvelope,
-        serializedAttributes,
-        ledgerLink?.commandId ?? null,
-        ledgerLink?.journalId ?? null,
-      ],
-    );
+    try {
+      await this.postgres.query(
+        `SELECT enqueue_reviewed_job_v1(
+           $1::text, $2::text, $3::jsonb, $4::jsonb, $5::text, $6::text
+         )`,
+        [
+          envelopeId,
+          destination,
+          serializedEnvelope,
+          serializedAttributes,
+          ledgerLink?.commandId ?? null,
+          ledgerLink?.journalId ?? null,
+        ],
+      );
+    } catch {
+      // Database errors can contain SQL, connection details, or row data. This
+      // boundary deliberately replaces them instead of attaching them as cause.
+      throw new Error('Outbox persistence failed');
+    }
   }
 
   async claimBatch(options: ClaimOutboxJobsOptions): Promise<ClaimedOutboxJob[]> {
@@ -230,17 +285,29 @@ export class JobOutboxRepository {
                    outbox.queue_name,
                    outbox.payload,
                    outbox.message_attributes,
+                   outbox.ledger_command_id,
+                   outbox.ledger_journal_id,
                    outbox.attempts`,
         [options.dispatcherId, options.batchSize, options.leaseMs, options.maxAttempts],
       );
 
-      return result.rows.map((row) => ({
-        id: row.id,
-        destination: row.queue_name,
-        envelope: parseJobEnvelope(row.payload),
-        messageAttributes: parseStoredMessageAttributes(row.message_attributes),
-        attempts: row.attempts,
-      }));
+      return result.rows.map((row) => {
+        const ledgerLink =
+          row.ledger_command_id == null && row.ledger_journal_id == null
+            ? undefined
+            : parseLedgerOutboxLink({
+                commandId: row.ledger_command_id,
+                journalId: row.ledger_journal_id,
+              });
+        return {
+          id: row.id,
+          destination: row.queue_name,
+          envelope: parseJobEnvelope(row.payload),
+          messageAttributes: parseStoredMessageAttributes(row.message_attributes),
+          ...(ledgerLink === undefined ? {} : { ledgerLink }),
+          attempts: row.attempts,
+        };
+      });
     });
   }
 

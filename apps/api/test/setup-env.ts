@@ -31,3 +31,7 @@ if (
 process.env.SQS_QUEUE_URL ??= 'http://127.0.0.1:4566/000000000000/crypto-lending-test-jobs';
 process.env.SQS_DEAD_LETTER_QUEUE_URL ??=
   'http://127.0.0.1:4566/000000000000/crypto-lending-test-jobs-dlq';
+process.env.SQS_BALANCE_QUEUE_URL ??=
+  'http://127.0.0.1:4566/000000000000/crypto-lending-test-balance-sync';
+process.env.SQS_BALANCE_DEAD_LETTER_QUEUE_URL ??=
+  'http://127.0.0.1:4566/000000000000/crypto-lending-test-balance-sync-dlq';

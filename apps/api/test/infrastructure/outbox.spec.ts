@@ -34,6 +34,10 @@ import {
 import type { OutboxDispatcherOptions } from '../../src/infrastructure/outbox/outbox-dispatcher.options';
 import { OutboxDispatcher } from '../../src/infrastructure/outbox/outbox-dispatcher.service';
 import type {
+  EnqueueJobRequest,
+  LedgerOutboxLink,
+} from '../../src/infrastructure/outbox/job-publisher.port';
+import type {
   OutboxTransport,
   OutboxTransportMessage,
   OutboxTransportReceipt,
@@ -67,6 +71,27 @@ function testCorrelation(offset: number): Readonly<JobCorrelationContext> {
 
 const DEFAULT_CORRELATION = testCorrelation(10);
 
+type ReviewedLedgerPayload = Readonly<{
+  journalId: string;
+  operation: 'POST_JOURNAL';
+}>;
+
+function reviewedLedgerRequest(
+  id: string,
+  correlation: Readonly<JobCorrelationContext> = DEFAULT_CORRELATION,
+): EnqueueJobRequest<ReviewedLedgerPayload> & { readonly ledgerLink: LedgerOutboxLink } {
+  const journalId = correlation.ledgerEventId ?? testUuid(900);
+  return Object.freeze({
+    id,
+    kind: 'ledger.journal-committed',
+    version: 1,
+    occurredAt: '2026-08-18T00:00:00.000Z',
+    payload: Object.freeze({ journalId, operation: 'POST_JOURNAL' }),
+    correlation,
+    ledgerLink: Object.freeze({ commandId: testUuid(901), journalId }),
+  });
+}
+
 function cloneJson<Value>(value: Value): Value {
   return JSON.parse(JSON.stringify(value)) as Value;
 }
@@ -80,6 +105,7 @@ interface StoredJob {
   destination: string;
   envelope: StoredJobEnvelope;
   messageAttributes: Readonly<Record<string, string>>;
+  ledgerLink?: LedgerOutboxLink;
   status: 'pending' | 'published' | 'failed';
   attempts: number;
   availableAt: number;
@@ -143,16 +169,19 @@ class TransactionalOutboxHarness {
       this.transaction = undefined;
       return queryResult();
     }
-    if (normalized.startsWith('INSERT INTO job_outbox')) {
+    if (normalized.startsWith('SELECT enqueue_reviewed_job_v1(')) {
       if (!this.transaction) {
         throw new Error('test insert occurred outside transaction');
       }
-      const [id, destination, rawEnvelope, rawAttributes] = values;
+      const [id, destination, rawEnvelope, rawAttributes, commandId, journalId] = values;
       this.transaction.push({
         id: String(id),
         destination: String(destination),
         envelope: JSON.parse(String(rawEnvelope)) as JobEnvelope,
         messageAttributes: JSON.parse(String(rawAttributes)) as Record<string, string>,
+        ...(commandId == null || journalId == null
+          ? {}
+          : { ledgerLink: { commandId: String(commandId), journalId: String(journalId) } }),
         status: 'pending',
         attempts: 0,
         availableAt: this.now,
@@ -222,6 +251,8 @@ class TransactionalOutboxHarness {
           queue_name: job.destination,
           payload: job.envelope,
           message_attributes: job.messageAttributes,
+          ledger_command_id: job.ledgerLink?.commandId ?? null,
+          ledger_journal_id: job.ledgerLink?.journalId ?? null,
           attempts: job.attempts,
         })),
       );
@@ -284,15 +315,7 @@ async function enqueueCommitted(
   publisher: TransactionalJobPublisher,
   id: string,
 ): Promise<JobEnvelope> {
-  return postgres.withTransaction(() =>
-    publisher.enqueue({
-      id,
-      kind: 'account.updated',
-      occurredAt: '2026-08-18T00:00:00.000Z',
-      payload: { accountId: 'acct-1' },
-      correlation: DEFAULT_CORRELATION,
-    }),
-  );
+  return postgres.withTransaction(() => publisher.enqueue(reviewedLedgerRequest(id)));
 }
 
 describe('transactional job outbox', () => {
@@ -424,7 +447,7 @@ describe('transactional job outbox', () => {
         }),
       ),
     ).rejects.toThrow('Invalid job correlation context');
-    expect(harness.queries.some((sql) => sql.startsWith('INSERT'))).toBe(false);
+    expect(harness.queries.some((sql) => sql.includes('enqueue_reviewed_job_v1'))).toBe(false);
   });
 
   it('does not inherit envelope options or metadata through prototypes and accessors', () => {
@@ -528,11 +551,7 @@ describe('transactional job outbox', () => {
 
     await expect(
       postgres.withTransaction(async () => {
-        await publisher.enqueue({
-          id: 'rolled-back-job',
-          kind: 'account.updated',
-          payload: { accountId: 'acct-1' },
-        });
+        await publisher.enqueue(reviewedLedgerRequest('rolled-back-job'));
         throw new Error('domain write failed');
       }),
     ).rejects.toThrow('domain write failed');
@@ -633,12 +652,7 @@ describe('transactional job outbox', () => {
       await loggingContext.run(context, async () => {
         await Promise.resolve();
         await postgres.withTransaction(() =>
-          publisher.enqueue({
-            id: `correlated-flow-${index + 1}`,
-            kind: 'account.updated',
-            occurredAt: '2026-08-21T00:00:00.000Z',
-            payload: { accountId: `acct-${index + 1}` },
-          }),
+          publisher.enqueue(reviewedLedgerRequest(`correlated-flow-${index + 1}`, context)),
         );
       });
     }
@@ -756,20 +770,24 @@ describe('transactional job outbox', () => {
     expect(harness.job('batch-failure')?.status).toBe('failed');
   });
 
-  it('splits SQS batches before their aggregate payload exceeds one MiB', async () => {
+  it('rejects oversized unreviewed legacy batches before any physical SQS request', async () => {
     const harness = new TransactionalOutboxHarness();
     const postgres = new PostgresService(harness.pool);
     const repository = new JobOutboxRepository(postgres);
-    const publisher = new TransactionalJobPublisher(repository);
     for (const id of ['large-a', 'large-b']) {
-      await postgres.withTransaction(() =>
-        publisher.enqueue({
+      harness.seed({
+        id,
+        destination: 'jobs',
+        envelope: createJobEnvelope('large.sample', 'x'.repeat(600_000), {
           id,
-          kind: 'large.sample',
           occurredAt: '2026-08-18T00:00:00.000Z',
-          payload: 'x'.repeat(600_000),
+          correlation: DEFAULT_CORRELATION,
         }),
-      );
+        messageAttributes: {},
+        status: 'pending',
+        attempts: 0,
+        availableAt: 0,
+      });
     }
     const send = jest.fn().mockImplementation((command: unknown) => {
       if (!(command instanceof SendMessageBatchCommand)) {
@@ -793,14 +811,10 @@ describe('transactional job outbox', () => {
 
     await expect(dispatcher.dispatchBatch()).resolves.toMatchObject({
       claimed: 2,
-      published: 2,
+      published: 0,
+      retried: 2,
     });
-    expect(send).toHaveBeenCalledTimes(2);
-    expect(
-      send.mock.calls.map(
-        ([command]) => (command as SendMessageBatchCommand).input.Entries?.length,
-      ),
-    ).toEqual([1, 1]);
+    expect(send).not.toHaveBeenCalled();
   });
 
   it('rejects an undefined poison payload before inserting a row', async () => {
@@ -811,8 +825,8 @@ describe('transactional job outbox', () => {
 
     await expect(
       postgres.withTransaction(() => publisher.enqueue({ kind: 'poison', payload: undefined })),
-    ).rejects.toThrow('supported JSON data');
-    expect(harness.queries.some((sql) => sql.startsWith('INSERT'))).toBe(false);
+    ).rejects.toThrow('Invalid outbox job');
+    expect(harness.queries.some((sql) => sql.includes('enqueue_reviewed_job_v1'))).toBe(false);
   });
 
   it('rejects nested values that JSON would otherwise silently discard or coerce', async () => {
@@ -825,13 +839,13 @@ describe('transactional job outbox', () => {
       postgres.withTransaction(() =>
         publisher.enqueue({ kind: 'poison', payload: { nested: undefined } }),
       ),
-    ).rejects.toThrow('supported JSON data');
+    ).rejects.toThrow('Invalid outbox job');
     await expect(
       postgres.withTransaction(() =>
         publisher.enqueue({ kind: 'poison', payload: { amount: Number.POSITIVE_INFINITY } }),
       ),
-    ).rejects.toThrow('supported JSON data');
-    expect(harness.queries.some((sql) => sql.startsWith('INSERT'))).toBe(false);
+    ).rejects.toThrow('Invalid outbox job');
+    expect(harness.queries.some((sql) => sql.includes('enqueue_reviewed_job_v1'))).toBe(false);
   });
 
   it('rejects transport poison messages before inserting an outbox row', async () => {
@@ -847,7 +861,7 @@ describe('transactional job outbox', () => {
       postgres.withTransaction(() =>
         publisher.enqueue({ kind: 'poison', payload: {}, messageAttributes: tooManyAttributes }),
       ),
-    ).rejects.toThrow('custom attributes');
+    ).rejects.toThrow('Invalid outbox job');
     await expect(
       postgres.withTransaction(() =>
         publisher.enqueue({
@@ -856,7 +870,7 @@ describe('transactional job outbox', () => {
           messageAttributes: { jobId: 'shadowed-id' },
         }),
       ),
-    ).rejects.toThrow('reserved job message attribute');
+    ).rejects.toThrow('Invalid outbox job');
     await expect(
       postgres.withTransaction(() =>
         publisher.enqueue({
@@ -865,12 +879,12 @@ describe('transactional job outbox', () => {
           messageAttributes: { correlationId: 'shadowed-correlation' },
         }),
       ),
-    ).rejects.toThrow('reserved job message attribute');
+    ).rejects.toThrow('Invalid outbox job');
     await expect(
       postgres.withTransaction(() =>
         publisher.enqueue({ kind: 'poison', payload: 'x'.repeat(MAX_JOB_MESSAGE_BYTES) }),
       ),
-    ).rejects.toThrow('cannot exceed');
+    ).rejects.toThrow('Invalid outbox job');
     await expect(
       postgres.withTransaction(() =>
         publisher.enqueue({
@@ -879,29 +893,31 @@ describe('transactional job outbox', () => {
           messageAttributes: { trace: 'x'.repeat(MAX_JOB_MESSAGE_BYTES) },
         }),
       ),
-    ).rejects.toThrow('cannot exceed');
+    ).rejects.toThrow('Invalid outbox job');
     await expect(
       postgres.withTransaction(() =>
         publisher.enqueue({ kind: 'poison', payload: {}, messageAttributes: { trace: '' } }),
       ),
-    ).rejects.toThrow('characters SQS cannot accept');
+    ).rejects.toThrow('Invalid outbox job');
     await expect(
       postgres.withTransaction(() =>
         publisher.enqueue({ kind: 'poison', payload: {}, messageAttributes: { trace: '\0' } }),
       ),
-    ).rejects.toThrow('characters SQS cannot accept');
+    ).rejects.toThrow('Invalid outbox job');
     await expect(
       postgres.withTransaction(() => publisher.enqueue({ kind: 'poison', payload: '\uFFFE' })),
-    ).rejects.toThrow('characters SQS cannot accept');
+    ).rejects.toThrow('Invalid outbox job');
     await expect(
       postgres.withTransaction(() => publisher.enqueue({ kind: 'poison\0', payload: {} })),
-    ).rejects.toThrow('characters SQS cannot accept');
+    ).rejects.toThrow('Invalid outbox job');
     await expect(
       postgres.withTransaction(() =>
         publisher.enqueue({ id: 'poison\0id', kind: 'poison', payload: {} }),
       ),
-    ).rejects.toThrow('characters SQS cannot accept');
-    expect(harness.queries.filter((sql) => sql.startsWith('INSERT'))).toHaveLength(0);
+    ).rejects.toThrow('Invalid outbox job');
+    expect(harness.queries.filter((sql) => sql.includes('enqueue_reviewed_job_v1'))).toHaveLength(
+      0,
+    );
   });
 
   it('retires a legacy poison row without blocking newer outbox delivery', async () => {
@@ -1052,23 +1068,28 @@ describe('transactional job outbox', () => {
     ).toBe(true);
   });
 
-  it('records an SQS failure as retry and then terminal failure at the limit', async () => {
+  it('records a legacy-row SQS failure without leaking payload data', async () => {
     const harness = new TransactionalOutboxHarness();
-    const postgres = new PostgresService(harness.pool);
-    const repository = new JobOutboxRepository(postgres);
-    const publisher = new TransactionalJobPublisher(repository);
     const payloadCanary = 'private-outbox-payload-canary';
     const attributeCanary = 'private-outbox-attribute-canary';
-    await postgres.withTransaction(() =>
-      publisher.enqueue({
-        id: 'failing-job',
-        kind: 'account.updated',
-        occurredAt: '2026-08-18T00:00:00.000Z',
-        payload: { privateValue: payloadCanary },
-        correlation: DEFAULT_CORRELATION,
-        messageAttributes: { diagnostic: attributeCanary },
-      }),
-    );
+    harness.seed({
+      id: 'failing-job',
+      destination: 'jobs',
+      envelope: createJobEnvelope(
+        'account.updated',
+        { privateValue: payloadCanary },
+        {
+          id: 'failing-job',
+          occurredAt: '2026-08-18T00:00:00.000Z',
+          correlation: DEFAULT_CORRELATION,
+        },
+      ),
+      messageAttributes: { diagnostic: attributeCanary },
+      status: 'pending',
+      attempts: 0,
+      availableAt: 0,
+    });
+    const repository = new JobOutboxRepository(new PostgresService(harness.pool));
     const lines: string[] = [];
     const captureLogger = new StructuredLogger({
       workload: 'worker',

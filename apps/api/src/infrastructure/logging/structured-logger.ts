@@ -169,7 +169,12 @@ const SAFE_COMPONENTS = new Set([
   'RoutesResolver',
   'RouterExplorer',
 ]);
-const SAFE_JOB_KINDS = new Set(['account.updated', 'ledger.journal-committed']);
+const SAFE_JOB_KINDS = new Set([
+  'account.updated',
+  'blockchain.balance-sync',
+  'ledger.journal-committed',
+  'yield.operation.submit',
+]);
 const SAFE_SPAN_NAMES = new Set<StructuredSpanName>([
   'http.request',
   'quote.create',

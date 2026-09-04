@@ -127,7 +127,7 @@ stalled finality signal. KAN-251 must exercise them against both candidates.
 | Ethereum | at most 60 s     | 15 min        | 15 min            | 30 min         | `latest` provisional/display; `safe` canonical pending live proof; `finalized` financial pending approval/agreement               |
 | Base     | at most 30 s     | 5 min         | 5 min             | 45 min         | sequencer/latest provisional; `safe` canonical pending proof; `finalized` plus L1 settlement financial pending approval/agreement |
 | Arbitrum | at most 30 s     | 5 min         | 5 min             | 45 min         | sequencer/latest provisional; canonical and financial both `BLOCKED_PENDING_LIVE_PROOF`                                           |
-| Solana   | at most 15 s     | 2 min         | 2 min             | 90 s           | `processed` provisional/display; `confirmed` canonical pending live proof; `finalized` financial pending approval/agreement       |
+| Solana   | at most 15 s     | 2 min         | 2 min             | 90 s           | `confirmed` provisional/display; `confirmed` canonical pending live proof; `finalized` financial pending approval/agreement       |
 
 The three tiers are deliberately distinct:
 

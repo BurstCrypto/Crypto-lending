@@ -42,6 +42,12 @@ function baseEnvironment(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
     SQS_DEAD_LETTER_QUEUE_URL: production
       ? 'https://sqs.us-east-1.amazonaws.com/000000000000/crypto-lending-jobs-dlq'
       : 'http://127.0.0.1:4566/000000000000/crypto-lending-jobs-dlq',
+    SQS_BALANCE_QUEUE_URL: production
+      ? 'https://sqs.us-east-1.amazonaws.com/000000000000/crypto-lending-balance-sync'
+      : 'http://127.0.0.1:4566/000000000000/crypto-lending-balance-sync',
+    SQS_BALANCE_DEAD_LETTER_QUEUE_URL: production
+      ? 'https://sqs.us-east-1.amazonaws.com/000000000000/crypto-lending-balance-sync-dlq'
+      : 'http://127.0.0.1:4566/000000000000/crypto-lending-balance-sync-dlq',
     ...overrides,
   };
 }
@@ -179,6 +185,25 @@ describe('loadInfrastructureConfig', () => {
     expect(() =>
       loadInfrastructureConfig(baseEnvironment({ SQS_REQUEST_TIMEOUT_MS: '60001' })),
     ).toThrow('SQS_REQUEST_TIMEOUT_MS must be an integer between 1 and 60000');
+  });
+
+  it('requires a dedicated balance-sync source and dead-letter queue', () => {
+    expect(() =>
+      loadInfrastructureConfig(baseEnvironment({ SQS_BALANCE_QUEUE_URL: undefined })),
+    ).toThrow('Missing required environment variable: SQS_BALANCE_QUEUE_URL');
+    expect(() =>
+      loadInfrastructureConfig(baseEnvironment({ SQS_BALANCE_DEAD_LETTER_QUEUE_URL: undefined })),
+    ).toThrow('Missing required environment variable: SQS_BALANCE_DEAD_LETTER_QUEUE_URL');
+  });
+
+  it('requires all physical SQS queue URLs to be pairwise distinct', () => {
+    expect(() =>
+      loadInfrastructureConfig(
+        baseEnvironment({
+          SQS_BALANCE_QUEUE_URL: 'http://127.0.0.1:4566/000000000000/crypto-lending-jobs',
+        }),
+      ),
+    ).toThrow('SQS source and dead-letter queue URLs must be pairwise different');
   });
 
   it('accepts bounded PostgreSQL pool lifecycle overrides', () => {
@@ -879,6 +904,14 @@ describe('loadInfrastructureConfig', () => {
         }),
       ),
     ).toThrow('SQS_QUEUE_URL must be a canonical HTTPS SQS queue URL');
+    expect(() =>
+      loadInfrastructureConfig(
+        baseEnvironment({
+          ...secureProduction,
+          SQS_BALANCE_QUEUE_URL: 'https://attacker.example/000000000000/balance-sync',
+        }),
+      ),
+    ).toThrow('SQS_BALANCE_QUEUE_URL must be a canonical HTTPS SQS queue URL');
   });
 
   it.each([
@@ -906,6 +939,9 @@ describe('loadInfrastructureConfig', () => {
         AWS_REGION: 'eusc-de-east-1',
         SQS_QUEUE_URL: 'https://sqs.eusc-de-east-1.amazonaws.eu/000000000000/jobs',
         SQS_DEAD_LETTER_QUEUE_URL: 'https://sqs.eusc-de-east-1.amazonaws.eu/000000000000/jobs-dlq',
+        SQS_BALANCE_QUEUE_URL: 'https://sqs.eusc-de-east-1.amazonaws.eu/000000000000/balance-sync',
+        SQS_BALANCE_DEAD_LETTER_QUEUE_URL:
+          'https://sqs.eusc-de-east-1.amazonaws.eu/000000000000/balance-sync-dlq',
       }),
     );
 

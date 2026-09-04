@@ -27,10 +27,11 @@ Solana lifecycle state accepts only KAN-61's canonical CAIP-2 references:
 aliases such as `solana:mainnet`, `solana:devnet`, and `solana:testnet` are
 rejected before a connection or roster row becomes application state.
 
-The isolated ticket branch remains directly based on main and therefore carries
-a compatibility boundary for the older WAL-001 shape. The local integration
-branch removes that fallback and reads KAN-59's shared canonical catalog and
-validator directly. No lifecycle path returns or persists a legacy alias.
+The integrated repository reads KAN-59's shared canonical catalog and validator
+directly. No lifecycle path returns or persists a legacy alias. This KAN-60
+manager remains the isolated browser-roster boundary used by the local demo;
+the production ownership UI uses the durable account-scoped server roster
+described by KAN-56.
 
 The intended UI/controller operations are:
 
@@ -132,13 +133,12 @@ npm run lint --workspace @crypto-lending/web
 
 ## Honest remaining gates
 
-- KAN-57, KAN-58, and KAN-59 own the MetaMask/Coinbase, WalletConnect, and
-  Phantom adapter implementations. Those branches were intentionally not used
-  as a base for KAN-60, so no vendor connector is registered and no product
-  route is wired on this branch.
-- The add/restore/disconnect/read-model contract is ready for a UI composition
-  root after those connectors merge. Until then, automated fakes are not a
-  live-wallet demonstration.
+- KAN-57 and KAN-59 are now composed by the authenticated production portfolio
+  for Ethereum and Solana ownership messages, but they do not use this local
+  browser-roster manager as durable authority. KAN-58 WalletConnect remains
+  unregistered and local-only.
+- The production page and this manager are covered by automated fakes; neither
+  is a deployed live-wallet acceptance demonstration.
 - Real extension, mobile, injected-provider, WalletConnect relay, event-order,
   account-switch, session-expiry, and cleanup behavior still require the
   documented KAN-225/KAN-226 manual matrix. No provider or wallet was invoked

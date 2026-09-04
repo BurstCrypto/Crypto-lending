@@ -51,6 +51,8 @@ class InMemoryRedriveSqs {
     private readonly sourceUrl: string,
     private readonly deadLetterUrl: string,
     private readonly maxReceiveCount: number,
+    private readonly balanceSourceUrl = sourceUrl.replace(/jobs$/, 'balance-sync'),
+    private readonly balanceDeadLetterUrl = deadLetterUrl.replace(/jobs-dlq$/, 'balance-sync-dlq'),
   ) {}
 
   async send(command: unknown): Promise<unknown> {
@@ -113,13 +115,25 @@ class InMemoryRedriveSqs {
     }
 
     if (command instanceof GetQueueAttributesCommand) {
-      const isDeadLetter = command.input.QueueUrl === this.deadLetterUrl;
-      const deadLetterArn = 'arn:aws:sqs:us-east-1:000000000000:jobs-dlq';
+      const isBalance = command.input.QueueUrl === this.balanceSourceUrl;
+      const isDeadLetter =
+        command.input.QueueUrl === this.deadLetterUrl ||
+        command.input.QueueUrl === this.balanceDeadLetterUrl;
+      const deadLetterArn = isBalance
+        ? 'arn:aws:sqs:us-east-1:000000000000:balance-sync-dlq'
+        : 'arn:aws:sqs:us-east-1:000000000000:jobs-dlq';
       return {
         Attributes: isDeadLetter
-          ? { QueueArn: deadLetterArn }
+          ? {
+              QueueArn:
+                command.input.QueueUrl === this.balanceDeadLetterUrl
+                  ? 'arn:aws:sqs:us-east-1:000000000000:balance-sync-dlq'
+                  : 'arn:aws:sqs:us-east-1:000000000000:jobs-dlq',
+            }
           : {
-              QueueArn: 'arn:aws:sqs:us-east-1:000000000000:jobs',
+              QueueArn: isBalance
+                ? 'arn:aws:sqs:us-east-1:000000000000:balance-sync'
+                : 'arn:aws:sqs:us-east-1:000000000000:jobs',
               RedrivePolicy: JSON.stringify({
                 deadLetterTargetArn: deadLetterArn,
                 maxReceiveCount: String(this.maxReceiveCount),
@@ -428,18 +442,32 @@ describe('SQS retry and dead-letter flow', () => {
     );
     const sqs = new SqsService({ send, destroy: jest.fn() } as unknown as SQSClient, config);
     const caller = new AbortController();
+    const submissionId = testUuid(21);
+    const ledgerTransactionId = testUuid(22);
+    const quoteReferenceId = testUuid(23);
     const publication = sqs.publish(
       {
         destination: 'jobs',
         envelope: {
-          id: 'job-bounded-sqs-request',
-          kind: 'sample.publish',
+          id: submissionId,
+          kind: 'yield.operation.submit',
           version: 1,
           occurredAt: '2026-08-20T00:00:00.000Z',
-          correlation: { correlationId: testUuid(20) },
-          payload: {},
+          correlation: {
+            correlationId: testUuid(20),
+            transactionId: ledgerTransactionId,
+            quoteId: quoteReferenceId,
+          },
+          payload: {
+            submissionId,
+            operationId: testUuid(24),
+            operationType: 'ALLOCATE',
+            ledgerTransactionId,
+            planReferenceId: testUuid(25),
+            quoteReferenceId,
+          },
         },
-        messageAttributes: {},
+        messageAttributes: { operationType: 'ALLOCATE' },
       },
       caller.signal,
     );
@@ -581,12 +609,12 @@ describe('SQS retry and dead-letter flow', () => {
     expect(sqs.changeVisibility).toHaveBeenCalledWith(
       message,
       30,
-      undefined,
+      config.sqs.queueUrl,
       expect.any(AbortSignal),
     );
     releaseHandler();
     await expect(processing).resolves.toMatchObject({ status: 'completed', jobId: 'job-long' });
-    expect(sqs.delete).toHaveBeenCalledWith(message, undefined, expect.anything());
+    expect(sqs.delete).toHaveBeenCalledWith(message, config.sqs.queueUrl, expect.anything());
     expect(jest.getTimerCount()).toBe(0);
     await jest.advanceTimersByTimeAsync(60_000);
     expect(sqs.changeVisibility).toHaveBeenCalledTimes(1);

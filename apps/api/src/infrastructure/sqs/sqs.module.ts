@@ -11,7 +11,7 @@ import { SQS_HEALTH } from '../health/sqs-health.port';
 import { OUTBOX_TRANSPORT } from '../outbox/outbox-transport.port';
 import { SqsJobWorker } from './sqs-job.worker';
 import { SqsService } from './sqs.service';
-import { SQS_CLIENT } from './sqs.tokens';
+import { SQS_CLIENT, SQS_WORKER_QUEUE } from './sqs.tokens';
 
 const LOCAL_SQS_CREDENTIALS = {
   accessKeyId: 'local-emulator',
@@ -61,6 +61,7 @@ export function createSqsClient(config: InfrastructureConfig): SQSClient {
       useFactory: createSqsClient,
     },
     SqsService,
+    { provide: SQS_WORKER_QUEUE, useValue: 'jobs' },
     {
       provide: OUTBOX_TRANSPORT,
       useExisting: SqsService,

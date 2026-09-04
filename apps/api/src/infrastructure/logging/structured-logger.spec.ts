@@ -1,5 +1,6 @@
 import { Buffer } from 'node:buffer';
 
+import { AuthenticationConfigurationError } from '../../authentication/infrastructure/config/authentication.config';
 import { LoggingContext } from './logging-context';
 import {
   LOG_EVENTS,
@@ -72,24 +73,33 @@ describe('StructuredLogger', () => {
     expect(Buffer.byteLength(lines[0] ?? '')).toBeLessThanOrEqual(4_096);
   });
 
-  it('admits the committed-ledger job kind without opening the job-kind catalog', () => {
+  it('admits only reviewed current and safe legacy job kinds', () => {
     const lines: string[] = [];
     const logger = new StructuredLogger({ sink: (line) => lines.push(line) });
 
-    logger.emit(LOG_EVENTS.jobProcessed, 'info', {
-      jobKind: 'ledger.journal-committed',
-      outcome: 'success',
-    });
+    for (const jobKind of [
+      'account.updated',
+      'blockchain.balance-sync',
+      'ledger.journal-committed',
+      'yield.operation.submit',
+    ]) {
+      logger.emit(LOG_EVENTS.jobProcessed, 'info', {
+        jobKind,
+        outcome: 'success',
+      });
+    }
     logger.emit(LOG_EVENTS.jobProcessed, 'info', {
       jobKind: 'ledger.unreviewed-operation',
       outcome: 'success',
     });
 
-    expect(parse(lines[0] ?? '')).toMatchObject({
-      event: 'job.processed',
-      jobKind: 'ledger.journal-committed',
-    });
-    expect(parse(lines[1] ?? '')).not.toHaveProperty('jobKind');
+    expect(lines.slice(0, 4).map((line) => parse(line).jobKind)).toEqual([
+      'account.updated',
+      'blockchain.balance-sync',
+      'ledger.journal-committed',
+      'yield.operation.submit',
+    ]);
+    expect(parse(lines[4] ?? '')).not.toHaveProperty('jobKind');
   });
 
   it('emits only canonical completed spans and closed ledger lifecycle transitions', () => {
@@ -308,12 +318,15 @@ describe('StructuredLogger', () => {
     const untrusted = Object.assign(new Error('Bearer super-secret-value'), {
       code: 'AWS_SECRET_ACCESS_KEY',
     });
+    const configuration = new AuthenticationConfigurationError('AUTH_IDENTITY_HMAC_KEY_RING_JSON');
 
     expect(safeErrorCode(untrusted)).toBe('UNEXPECTED_ERROR');
+    expect(safeErrorCode(configuration)).toBe('CONFIGURATION_ERROR');
     logger.emitFatal(LOG_EVENTS.applicationStartFailed, untrusted, { outcome: 'failure' });
     logger.error(untrusted, 'AuthorizationHeader');
+    logger.emitFatal(LOG_EVENTS.applicationStartFailed, configuration, { outcome: 'failure' });
 
-    expect(lines).toHaveLength(2);
+    expect(lines).toHaveLength(3);
     expect(parse(lines[0] ?? '')).toMatchObject({
       event: 'application.start_failed',
       errorCode: 'UNEXPECTED_ERROR',
@@ -323,7 +336,12 @@ describe('StructuredLogger', () => {
       component: 'Nest',
       errorCode: 'UNEXPECTED_ERROR',
     });
+    expect(parse(lines[2] ?? '')).toMatchObject({
+      event: 'application.start_failed',
+      errorCode: 'CONFIGURATION_ERROR',
+    });
     expect(lines.join('\n')).not.toMatch(/super-secret|AWS_SECRET_ACCESS_KEY|AuthorizationHeader/u);
+    expect(lines.join('\n')).not.toContain('AUTH_IDENTITY_HMAC_KEY_RING_JSON');
   });
 
   it('never changes application behavior when construction or delivery fails', () => {

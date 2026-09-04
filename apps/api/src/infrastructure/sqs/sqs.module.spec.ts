@@ -1,7 +1,9 @@
 import { fromHttp } from '@aws-sdk/credential-provider-http';
 
 import type { InfrastructureConfig } from '../config/infrastructure.config';
-import { createSqsClient } from './sqs.module';
+import { SqsJobWorker } from './sqs-job.worker';
+import { createSqsClient, SqsModule } from './sqs.module';
+import { SQS_WORKER_QUEUE } from './sqs.tokens';
 
 jest.mock('@aws-sdk/credential-provider-http', () => ({ fromHttp: jest.fn() }));
 
@@ -22,6 +24,8 @@ describe('createSqsClient', () => {
         endpoint: 'http://127.0.0.1:4566',
         queueUrl: 'http://127.0.0.1:4566/000000000000/jobs',
         deadLetterQueueUrl: 'http://127.0.0.1:4566/000000000000/jobs-dlq',
+        balanceQueueUrl: 'http://127.0.0.1:4566/000000000000/balance-sync',
+        balanceDeadLetterQueueUrl: 'http://127.0.0.1:4566/000000000000/balance-sync-dlq',
         requestTimeoutMs: 15_000,
         sdkMaxAttempts: 1,
         maxReceiveCount: 3,
@@ -65,6 +69,9 @@ describe('createSqsClient', () => {
         credentialRelativeUri: '/v2/credentials/task-role',
         queueUrl: 'https://sqs.us-east-1.amazonaws.com/000000000000/jobs',
         deadLetterQueueUrl: 'https://sqs.us-east-1.amazonaws.com/000000000000/jobs-dlq',
+        balanceQueueUrl: 'https://sqs.us-east-1.amazonaws.com/000000000000/balance-sync',
+        balanceDeadLetterQueueUrl:
+          'https://sqs.us-east-1.amazonaws.com/000000000000/balance-sync-dlq',
         requestTimeoutMs: 15_000,
         sdkMaxAttempts: 3,
         maxReceiveCount: 3,
@@ -88,5 +95,12 @@ describe('createSqsClient', () => {
     } finally {
       client.destroy();
     }
+  });
+
+  it('registers only one dormant-safe generic jobs worker binding', () => {
+    const providers = Reflect.getMetadata('providers', SqsModule) as unknown[];
+    expect(providers.filter((provider) => provider === SqsJobWorker)).toHaveLength(1);
+    expect(providers).toContainEqual({ provide: SQS_WORKER_QUEUE, useValue: 'jobs' });
+    expect(providers).not.toContainEqual({ provide: SQS_WORKER_QUEUE, useValue: 'balance' });
   });
 });

@@ -31,7 +31,12 @@ export const OBSERVABILITY_REQUEST_OUTCOMES = Object.freeze([
   'aborted',
 ] as const);
 export const OBSERVABILITY_WORKERS = Object.freeze(['outbox_dispatcher', 'job_consumer'] as const);
-export const OBSERVABILITY_QUEUES = Object.freeze(['outbox', 'jobs', 'dead_letter'] as const);
+export const OBSERVABILITY_QUEUES = Object.freeze([
+  'outbox',
+  'jobs',
+  'balance',
+  'dead_letter',
+] as const);
 export const OBSERVABILITY_QUEUE_EVENTS = Object.freeze([
   'enqueued',
   'published',
@@ -134,7 +139,7 @@ export interface QueueEventObservation {
 }
 
 export interface JobFailureObservation {
-  readonly queue: 'outbox' | 'jobs';
+  readonly queue: 'outbox' | 'jobs' | 'balance';
   readonly disposition:
     'retry_scheduled' | 'awaiting_dead_letter' | 'dead_lettered' | 'failed' | 'ownership_lost';
   readonly errorClass: ObservabilityJobErrorClass;

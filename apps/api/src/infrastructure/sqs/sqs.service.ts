@@ -18,6 +18,7 @@ import { INFRASTRUCTURE_CONFIG } from '../config/infrastructure-config.module';
 import type { InfrastructureConfig } from '../config/infrastructure.config';
 import { createJobEnvelope, parseJobEnvelope, type JobEnvelope } from '../outbox/job-envelope';
 import { MAX_JOB_MESSAGE_BYTES, serializeJobMessage } from '../outbox/job-message-policy';
+import { assertReviewedOutboxJob } from '../outbox/reviewed-job-contract-policy';
 import type {
   OutboxTransport,
   OutboxTransportBatchResult,
@@ -35,6 +36,7 @@ interface RedrivePolicy {
 interface PreparedBatchEntry {
   bytes: number;
   messageIndex: number;
+  queueUrl: string;
   request: SendMessageBatchRequestEntry;
 }
 
@@ -140,12 +142,13 @@ export class SqsService implements OnApplicationShutdown, OutboxTransport {
       ...(options.correlation === undefined ? {} : { correlation: options.correlation }),
     });
     const serialized = serializeJobMessage(envelope, {});
+    const queueUrl = this.queueUrlForEnvelope(envelope, {});
 
     const request = requestAbortScope(undefined, this.config.sqs.requestTimeoutMs);
     try {
       await this.client.send(
         new SendMessageCommand({
-          QueueUrl: this.config.sqs.queueUrl,
+          QueueUrl: queueUrl,
           MessageBody: serialized.body,
           MessageAttributes: sqsMessageAttributes(envelope, serialized.messageAttributes),
           ...(options.delaySeconds === undefined ? {} : { DelaySeconds: options.delaySeconds }),
@@ -162,9 +165,7 @@ export class SqsService implements OnApplicationShutdown, OutboxTransport {
     message: OutboxTransportMessage,
     abortSignal?: AbortSignal,
   ): Promise<OutboxTransportReceipt> {
-    if (message.destination !== 'jobs') {
-      throw new Error(`Unsupported SQS job destination: ${message.destination}`);
-    }
+    const queueUrl = this.queueUrlForMessage(message);
 
     const request = requestAbortScope(abortSignal, this.config.sqs.requestTimeoutMs);
     let response;
@@ -172,7 +173,7 @@ export class SqsService implements OnApplicationShutdown, OutboxTransport {
       const serialized = serializeJobMessage(message.envelope, message.messageAttributes);
       response = await this.client.send(
         new SendMessageCommand({
-          QueueUrl: this.config.sqs.queueUrl,
+          QueueUrl: queueUrl,
           MessageBody: serialized.body,
           MessageAttributes: sqsMessageAttributes(message.envelope, serialized.messageAttributes),
         }),
@@ -193,85 +194,88 @@ export class SqsService implements OnApplicationShutdown, OutboxTransport {
       throw new Error(`SQS publishBatch accepts at most ${this.maxBatchSize} messages`);
     }
 
-    const request = requestAbortScope(abortSignal, this.config.sqs.requestTimeoutMs);
-    try {
-      const results: Array<OutboxTransportBatchResult | undefined> = new Array(messages.length);
-      const prepared: PreparedBatchEntry[] = [];
-      for (const [messageIndex, message] of messages.entries()) {
-        try {
-          if (message.destination !== 'jobs') {
-            throw new Error(`Unsupported SQS job destination: ${message.destination}`);
-          }
-          const serialized = serializeJobMessage(message.envelope, message.messageAttributes);
-          prepared.push({
-            bytes: serialized.bytes,
-            messageIndex,
-            request: {
-              Id: `entry-${messageIndex}`,
-              MessageBody: serialized.body,
-              MessageAttributes: sqsMessageAttributes(
-                message.envelope,
-                serialized.messageAttributes,
-              ),
-            },
-          });
-        } catch (error) {
-          results[messageIndex] = { status: 'failed', error };
-        }
+    const results: Array<OutboxTransportBatchResult | undefined> = new Array(messages.length);
+    const preparedByQueue = new Map<string, PreparedBatchEntry[]>();
+    for (const [messageIndex, message] of messages.entries()) {
+      try {
+        const queueUrl = this.queueUrlForMessage(message);
+        const serialized = serializeJobMessage(message.envelope, message.messageAttributes);
+        const entry = {
+          bytes: serialized.bytes,
+          messageIndex,
+          queueUrl,
+          request: {
+            Id: `entry-${messageIndex}`,
+            MessageBody: serialized.body,
+            MessageAttributes: sqsMessageAttributes(message.envelope, serialized.messageAttributes),
+          },
+        } satisfies PreparedBatchEntry;
+        const entries = preparedByQueue.get(queueUrl) ?? [];
+        entries.push(entry);
+        preparedByQueue.set(queueUrl, entries);
+      } catch (error) {
+        results[messageIndex] = { status: 'failed', error };
       }
-
-      for (const batch of packSqsBatchEntries(prepared)) {
-        if (request.signal.aborted) {
-          const error = request.signal.reason ?? new Error('SQS batch publication was aborted');
-          for (const entry of batch) {
-            results[entry.messageIndex] = { status: 'failed', error };
-          }
-          continue;
-        }
-        let response;
-        try {
-          response = await this.client.send(
-            new SendMessageBatchCommand({
-              QueueUrl: this.config.sqs.queueUrl,
-              Entries: batch.map(({ request: entry }) => entry),
-            }),
-            { abortSignal: request.signal },
-          );
-        } catch (error) {
-          for (const entry of batch) {
-            results[entry.messageIndex] = { status: 'failed', error };
-          }
-          continue;
-        }
-
-        const successful = new Map((response.Successful ?? []).map((entry) => [entry.Id, entry]));
-        const failed = new Map((response.Failed ?? []).map((entry) => [entry.Id, entry]));
-        for (const entry of batch) {
-          const success = successful.get(entry.request.Id);
-          const failure = failed.get(entry.request.Id);
-          if (success && !failure) {
-            results[entry.messageIndex] = {
-              status: 'published',
-              receipt: success.MessageId ? { transportMessageId: success.MessageId } : {},
-            };
-          } else {
-            results[entry.messageIndex] = {
-              status: 'failed',
-              error: failure
-                ? batchEntryError(failure.Code, failure.Message)
-                : new Error('SQS batch response omitted an entry result'),
-            };
-          }
-        }
-      }
-
-      return results.map(
-        (result) =>
-          result ?? { status: 'failed', error: new Error('SQS batch entry was not sent') },
-      );
-    } finally {
-      request.close();
     }
+
+    const physicalBatches = [...preparedByQueue.values()].flatMap(packSqsBatchEntries);
+    await Promise.all(
+      physicalBatches.map(async (batch) => {
+        const queueUrl = batch[0]?.queueUrl;
+        if (!queueUrl) return;
+        const request = requestAbortScope(abortSignal, this.config.sqs.requestTimeoutMs);
+        try {
+          if (request.signal.aborted) {
+            const error = request.signal.reason ?? new Error('SQS batch publication was aborted');
+            for (const entry of batch) {
+              results[entry.messageIndex] = { status: 'failed', error };
+            }
+            return;
+          }
+          let response;
+          try {
+            response = await this.client.send(
+              new SendMessageBatchCommand({
+                QueueUrl: queueUrl,
+                Entries: batch.map(({ request: entry }) => entry),
+              }),
+              { abortSignal: request.signal },
+            );
+          } catch (error) {
+            for (const entry of batch) {
+              results[entry.messageIndex] = { status: 'failed', error };
+            }
+            return;
+          }
+
+          const successful = new Map((response.Successful ?? []).map((entry) => [entry.Id, entry]));
+          const failed = new Map((response.Failed ?? []).map((entry) => [entry.Id, entry]));
+          for (const entry of batch) {
+            const success = successful.get(entry.request.Id);
+            const failure = failed.get(entry.request.Id);
+            if (success && !failure) {
+              results[entry.messageIndex] = {
+                status: 'published',
+                receipt: success.MessageId ? { transportMessageId: success.MessageId } : {},
+              };
+            } else {
+              results[entry.messageIndex] = {
+                status: 'failed',
+                error: failure
+                  ? batchEntryError(failure.Code, failure.Message)
+                  : new Error('SQS batch response omitted an entry result'),
+              };
+            }
+          }
+        } finally {
+          request.close();
+        }
+      }),
+    );
+
+    return results.map(
+      (result) => result ?? { status: 'failed', error: new Error('SQS batch entry was not sent') },
+    );
   }
 
   async receive(
@@ -377,13 +381,15 @@ export class SqsService implements OnApplicationShutdown, OutboxTransport {
     return parseJobEnvelope<Payload>(JSON.parse(body) as unknown);
   }
 
-  /** Verifies access to both queues and validates the source redrive policy. */
+  /** Verifies access to both physically isolated source/DLQ pairs and their redrive policies. */
   async healthCheck(abortSignal?: AbortSignal): Promise<void> {
     const request = requestAbortScope(abortSignal, this.config.sqs.requestTimeoutMs);
     let source;
     let deadLetter;
+    let balanceSource;
+    let balanceDeadLetter;
     try {
-      [source, deadLetter] = await Promise.all([
+      [source, deadLetter, balanceSource, balanceDeadLetter] = await Promise.all([
         this.client.send(
           new GetQueueAttributesCommand({
             QueueUrl: this.config.sqs.queueUrl,
@@ -398,30 +404,82 @@ export class SqsService implements OnApplicationShutdown, OutboxTransport {
           }),
           { abortSignal: request.signal },
         ),
+        this.client.send(
+          new GetQueueAttributesCommand({
+            QueueUrl: this.config.sqs.balanceQueueUrl,
+            AttributeNames: ['QueueArn', 'RedrivePolicy'],
+          }),
+          { abortSignal: request.signal },
+        ),
+        this.client.send(
+          new GetQueueAttributesCommand({
+            QueueUrl: this.config.sqs.balanceDeadLetterQueueUrl,
+            AttributeNames: ['QueueArn'],
+          }),
+          { abortSignal: request.signal },
+        ),
       ]);
     } finally {
       request.close();
     }
 
-    const deadLetterArn = deadLetter.Attributes?.QueueArn;
-    const rawPolicy = source.Attributes?.RedrivePolicy;
-    if (!deadLetterArn || !rawPolicy) {
-      throw new Error('SQS source queue or dead-letter queue is not configured');
-    }
+    const arns = [
+      source.Attributes?.QueueArn,
+      deadLetter.Attributes?.QueueArn,
+      balanceSource.Attributes?.QueueArn,
+      balanceDeadLetter.Attributes?.QueueArn,
+    ];
+    if (arns.some((arn) => !arn) || new Set(arns).size !== 4)
+      throw new Error('SQS physical queue identities are missing or not isolated');
+    this.assertRedrivePair(source.Attributes?.RedrivePolicy, deadLetter.Attributes?.QueueArn);
+    this.assertRedrivePair(
+      balanceSource.Attributes?.RedrivePolicy,
+      balanceDeadLetter.Attributes?.QueueArn,
+    );
+  }
 
+  private queueUrlForEnvelope(
+    envelope: JobEnvelope,
+    messageAttributes: Readonly<Record<string, string>>,
+  ): string {
+    if (envelope.kind !== 'blockchain.balance-sync') return this.config.sqs.queueUrl;
+    assertReviewedOutboxJob({ destination: 'jobs', envelope, messageAttributes });
+    if (
+      typeof this.config.sqs.balanceQueueUrl !== 'string' ||
+      this.config.sqs.balanceQueueUrl.length === 0
+    )
+      throw new Error('Dedicated balance-sync queue is not configured');
+    return this.config.sqs.balanceQueueUrl;
+  }
+
+  private queueUrlForMessage(message: OutboxTransportMessage): string {
+    assertReviewedOutboxJob(message);
+    if (message.envelope.kind !== 'blockchain.balance-sync' || message.envelope.version !== 1)
+      return this.config.sqs.queueUrl;
+    if (
+      typeof this.config.sqs.balanceQueueUrl !== 'string' ||
+      this.config.sqs.balanceQueueUrl.length === 0
+    )
+      throw new Error('Dedicated balance-sync queue is not configured');
+    return this.config.sqs.balanceQueueUrl;
+  }
+
+  private assertRedrivePair(
+    rawPolicy: string | undefined,
+    deadLetterArn: string | undefined,
+  ): void {
+    if (!deadLetterArn || !rawPolicy)
+      throw new Error('SQS source queue or dead-letter queue is not configured');
     let policy: RedrivePolicy;
     try {
       policy = JSON.parse(rawPolicy) as RedrivePolicy;
     } catch {
       throw new Error('SQS redrive policy is invalid JSON');
     }
-
-    if (policy.deadLetterTargetArn !== deadLetterArn) {
+    if (policy.deadLetterTargetArn !== deadLetterArn)
       throw new Error('SQS redrive policy targets the wrong dead-letter queue');
-    }
-    if (Number(policy.maxReceiveCount) !== this.config.sqs.maxReceiveCount) {
+    if (Number(policy.maxReceiveCount) !== this.config.sqs.maxReceiveCount)
       throw new Error('SQS redrive policy maxReceiveCount does not match configuration');
-    }
   }
 
   onApplicationShutdown(): void {

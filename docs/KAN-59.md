@@ -25,9 +25,12 @@ cloud, hosted-CI, or other network call.
   calls return the same immutable identity and concurrent calls share one
   provider prompt. Ambiguous multi-account provider results fail closed.
 
-No product page activates the connector on this branch. KAN-60 owns persistent
-multi-wallet state, user selection, labels, registration orchestration, and the
-customer-facing add/disconnect experience.
+The authenticated production portfolio now activates this adapter only for the
+ownership-message flow in `MainnetWalletOwnership`, alongside the separate
+Ethereum connector. The page uses the account-scoped server roster for durable
+registration and removal; it never treats an injected session as login or
+transaction authority. No automated test invokes a real Phantom extension, so
+deployed browser and vendor acceptance remain blocking evidence.
 
 ## Cluster and identity boundary
 

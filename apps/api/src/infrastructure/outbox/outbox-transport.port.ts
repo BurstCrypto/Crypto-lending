@@ -1,4 +1,5 @@
 import type { JobEnvelope } from './job-envelope';
+import type { LedgerOutboxLink } from './job-publisher.port';
 
 export const OUTBOX_TRANSPORT = Symbol('OUTBOX_TRANSPORT');
 
@@ -6,6 +7,7 @@ export interface OutboxTransportMessage {
   destination: string;
   envelope: JobEnvelope;
   messageAttributes: Readonly<Record<string, string>>;
+  ledgerLink?: LedgerOutboxLink;
 }
 
 export interface OutboxTransportReceipt {

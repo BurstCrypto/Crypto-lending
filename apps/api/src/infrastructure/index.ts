@@ -27,3 +27,15 @@ export {
 export { OutboxWorker } from './outbox/outbox-worker.service';
 export { RedisModule } from './redis/redis.module';
 export { RedisService } from './redis/redis.service';
+export {
+  ReviewedJobDispatchError,
+  ReviewedJobDispatcher,
+  BalanceSyncJobDispatcher,
+  parseReviewedConsumerJobEnvelope,
+  parseReviewedGenericConsumerJobEnvelope,
+  parseBalanceSyncConsumerJobEnvelope,
+  type ReviewedConsumerJobEnvelope,
+  type ReviewedJobHandlers,
+  type ReviewedGenericConsumerJobEnvelope,
+  type BalanceSyncConsumerJobEnvelope,
+} from './sqs/reviewed-job-dispatcher';

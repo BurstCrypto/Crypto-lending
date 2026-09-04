@@ -20,6 +20,7 @@ import {
   type ObservabilityPort,
 } from '../observability';
 import { SqsService } from './sqs.service';
+import { SQS_WORKER_QUEUE } from './sqs.tokens';
 import type {
   JobEnvelope,
   JobProcessingErrorCode,
@@ -28,6 +29,7 @@ import type {
 } from './sqs.types';
 
 export type JobHandler<Payload = unknown> = (job: JobEnvelope<Payload>) => Promise<void>;
+export type SqsWorkerQueue = 'jobs' | 'balance';
 
 const MAX_RECEIPT_LIFETIME_MS = 12 * 60 * 60 * 1_000;
 const RECEIPT_LIFETIME_SAFETY_MS = 5_000;
@@ -132,11 +134,12 @@ async function changeVisibilityWithDeadline(
   message: ReceivedQueueMessage,
   visibilityTimeoutSeconds: number,
   requestTimeoutMs: number,
+  queueUrl: string,
 ): Promise<void> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), requestTimeoutMs);
   try {
-    await sqs.changeVisibility(message, visibilityTimeoutSeconds, undefined, controller.signal);
+    await sqs.changeVisibility(message, visibilityTimeoutSeconds, queueUrl, controller.signal);
   } finally {
     clearTimeout(timeout);
   }
@@ -146,11 +149,12 @@ async function deleteWithDeadline(
   sqs: SqsService,
   message: ReceivedQueueMessage,
   requestTimeoutMs: number,
+  queueUrl: string,
 ): Promise<void> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), requestTimeoutMs);
   try {
-    await sqs.delete(message, undefined, controller.signal);
+    await sqs.delete(message, queueUrl, controller.signal);
   } finally {
     clearTimeout(timeout);
   }
@@ -160,6 +164,7 @@ function startVisibilityHeartbeat(
   sqs: SqsService,
   message: ReceivedQueueMessage,
   configuredTimeoutSeconds: number,
+  queueUrl: string,
 ): VisibilityHeartbeat {
   const requestTimeoutMs = visibilityRequestTimeoutMs(configuredTimeoutSeconds);
   let failure: { status: 'failed'; error: unknown } | undefined;
@@ -199,7 +204,13 @@ function startVisibilityHeartbeat(
           );
         }
         const renewalSeconds = Math.min(configuredTimeoutSeconds, remainingSeconds);
-        await changeVisibilityWithDeadline(sqs, message, renewalSeconds, requestTimeoutMs);
+        await changeVisibilityWithDeadline(
+          sqs,
+          message,
+          renewalSeconds,
+          requestTimeoutMs,
+          queueUrl,
+        );
         currentVisibilityStartedAtMs = renewalStartedAtMs;
         currentVisibilityTimeoutSeconds = renewalSeconds;
         if (!stopped) {
@@ -280,6 +291,8 @@ function startVisibilityHeartbeat(
 @Injectable()
 export class SqsJobWorker {
   private inFlightJobs = 0;
+  private readonly queue: SqsWorkerQueue;
+  private readonly queueUrl: string;
 
   constructor(
     private readonly sqs: SqsService,
@@ -288,14 +301,24 @@ export class SqsJobWorker {
     @Optional()
     @Inject(OBSERVABILITY_PORT)
     private readonly observability: ObservabilityPort = applicationObservability,
-  ) {}
+    @Optional()
+    @Inject(SQS_WORKER_QUEUE)
+    queue: SqsWorkerQueue = 'jobs',
+  ) {
+    if (queue !== 'jobs' && queue !== 'balance')
+      throw new Error('Invalid SQS worker queue binding');
+    this.queue = queue;
+    this.queueUrl = queue === 'balance' ? config.sqs.balanceQueueUrl : config.sqs.queueUrl;
+    if (typeof this.queueUrl !== 'string' || this.queueUrl.length === 0)
+      throw new Error('Selected SQS worker queue is not configured');
+  }
 
   /**
    * Processes at most one message. Failed messages are never deleted: SQS's
    * redrive policy moves them to the DLQ after maxReceiveCount deliveries.
    */
   async processOne<Payload>(handler: JobHandler<Payload>): Promise<JobProcessingResult> {
-    const [message] = await this.sqs.receive();
+    const [message] = await this.sqs.receive(this.queueUrl);
     if (!message) {
       return { status: 'idle' };
     }
@@ -308,7 +331,7 @@ export class SqsJobWorker {
       }),
     );
     recordDiagnostic(() =>
-      this.observability.recordQueueEvent({ queue: 'jobs', event: 'received' }),
+      this.observability.recordQueueEvent({ queue: this.queue, event: 'received' }),
     );
 
     try {
@@ -331,6 +354,12 @@ export class SqsJobWorker {
     let job: JobEnvelope<Payload>;
     try {
       job = this.sqs.parseEnvelope<Payload>(message.body);
+      if (
+        (this.queue === 'jobs' && job.kind === 'blockchain.balance-sync') ||
+        (this.queue === 'balance' && (job.kind !== 'blockchain.balance-sync' || job.version !== 1))
+      ) {
+        throw new JobProcessingFailure('JOB_ENVELOPE_INVALID');
+      }
     } catch {
       return loggingContext.run(
         {
@@ -362,6 +391,7 @@ export class SqsJobWorker {
               this.sqs,
               message,
               this.config.sqs.visibilityTimeoutSeconds,
+              this.queueUrl,
             );
             const heartbeatReady = await heartbeat.ready();
             if (heartbeatReady.status === 'failed') {
@@ -394,6 +424,7 @@ export class SqsJobWorker {
                 this.sqs,
                 message,
                 visibilityRequestTimeoutMs(this.config.sqs.visibilityTimeoutSeconds),
+                this.queueUrl,
               );
             } catch {
               throw new JobProcessingFailure('SQS_DELETE_FAILED');
@@ -405,7 +436,7 @@ export class SqsJobWorker {
               receiveCount: message.receiveCount,
             });
             recordDiagnostic(() =>
-              this.observability.recordQueueEvent({ queue: 'jobs', event: 'completed' }),
+              this.observability.recordQueueEvent({ queue: this.queue, event: 'completed' }),
             );
             return { status: 'completed', messageId: message.messageId, jobId: job.id };
           } catch (error) {
@@ -434,7 +465,7 @@ export class SqsJobWorker {
     if (isReceiptOwnershipExpired(error)) {
       recordDiagnostic(() =>
         this.observability.recordJobFailure({
-          queue: 'jobs',
+          queue: this.queue,
           disposition: 'ownership_lost',
           errorClass: observabilityErrorClass(errorCode),
         }),
@@ -469,11 +500,12 @@ export class SqsJobWorker {
         message,
         retryDelaySeconds,
         visibilityRequestTimeoutMs(this.config.sqs.visibilityTimeoutSeconds),
+        this.queueUrl,
       );
     } catch {
       recordDiagnostic(() =>
         this.observability.recordJobFailure({
-          queue: 'jobs',
+          queue: this.queue,
           disposition: 'ownership_lost',
           errorClass: 'dependency',
         }),
@@ -496,7 +528,7 @@ export class SqsJobWorker {
 
     recordDiagnostic(() =>
       this.observability.recordJobFailure({
-        queue: 'jobs',
+        queue: this.queue,
         disposition: exhausted ? 'awaiting_dead_letter' : 'retry_scheduled',
         errorClass: observabilityErrorClass(errorCode),
       }),

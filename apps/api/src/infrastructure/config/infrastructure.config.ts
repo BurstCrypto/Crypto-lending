@@ -34,6 +34,8 @@ export interface SqsInfrastructureConfig {
   credentialRelativeUri?: string;
   queueUrl: string;
   deadLetterQueueUrl: string;
+  balanceQueueUrl: string;
+  balanceDeadLetterQueueUrl: string;
   requestTimeoutMs: number;
   sdkMaxAttempts: number;
   maxReceiveCount: number;
@@ -827,14 +829,28 @@ export function loadInfrastructureConfig(
   const credentialRelativeUri = production ? productionEcsCredentialRelativeUri(env) : undefined;
   const rawQueueUrl = required(env, 'SQS_QUEUE_URL');
   const rawDeadLetterQueueUrl = required(env, 'SQS_DEAD_LETTER_QUEUE_URL');
+  const rawBalanceQueueUrl = required(env, 'SQS_BALANCE_QUEUE_URL');
+  const rawBalanceDeadLetterQueueUrl = required(env, 'SQS_BALANCE_DEAD_LETTER_QUEUE_URL');
   const queueUrl = production
     ? productionSqsQueueUrl(rawQueueUrl, 'SQS_QUEUE_URL', region)
     : rawQueueUrl;
   const deadLetterQueueUrl = production
     ? productionSqsQueueUrl(rawDeadLetterQueueUrl, 'SQS_DEAD_LETTER_QUEUE_URL', region)
     : rawDeadLetterQueueUrl;
-  if (queueUrl === deadLetterQueueUrl) {
-    throw new Error('SQS_QUEUE_URL and SQS_DEAD_LETTER_QUEUE_URL must be different');
+  const balanceQueueUrl = production
+    ? productionSqsQueueUrl(rawBalanceQueueUrl, 'SQS_BALANCE_QUEUE_URL', region)
+    : rawBalanceQueueUrl;
+  const balanceDeadLetterQueueUrl = production
+    ? productionSqsQueueUrl(
+        rawBalanceDeadLetterQueueUrl,
+        'SQS_BALANCE_DEAD_LETTER_QUEUE_URL',
+        region,
+      )
+    : rawBalanceDeadLetterQueueUrl;
+  if (
+    new Set([queueUrl, deadLetterQueueUrl, balanceQueueUrl, balanceDeadLetterQueueUrl]).size !== 4
+  ) {
+    throw new Error('SQS source and dead-letter queue URLs must be pairwise different');
   }
 
   const redisConnectionSettings =
@@ -858,6 +874,8 @@ export function loadInfrastructureConfig(
       ...(credentialRelativeUri ? { credentialRelativeUri } : {}),
       queueUrl,
       deadLetterQueueUrl,
+      balanceQueueUrl,
+      balanceDeadLetterQueueUrl,
       requestTimeoutMs: positiveInteger(env, 'SQS_REQUEST_TIMEOUT_MS', 15_000, 60_000),
       sdkMaxAttempts: positiveInteger(env, 'SQS_SDK_MAX_ATTEMPTS', 3, 10),
       maxReceiveCount: positiveInteger(env, 'SQS_MAX_RECEIVE_COUNT', 3, 100),
