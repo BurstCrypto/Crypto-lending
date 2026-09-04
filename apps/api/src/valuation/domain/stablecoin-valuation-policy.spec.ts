@@ -436,9 +436,9 @@ describe('stablecoin valuation policy', () => {
       },
       externalGates: { KAN_252: 'PENDING', KAN_231: 'PENDING' },
       trustBoundary: {
-        durableWatermarkPersistenceImplemented: false,
-        durableUpdateIdUniquenessImplemented: false,
-        durableDepegLatchPersistenceImplemented: false,
+        durableWatermarkPersistenceImplemented: true,
+        durableUpdateIdUniquenessImplemented: true,
+        durableDepegLatchPersistenceImplemented: true,
         manualRiskClearAuthenticationImplemented: false,
         runtimeAdapterImplemented: false,
       },

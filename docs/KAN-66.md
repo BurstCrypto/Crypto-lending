@@ -88,12 +88,16 @@ For each observation:
    checkpoint. The pure evaluator can compare observations supplied together
    and the immediate predecessor checkpoint, but it is not a durable replay
    database and cannot itself detect a cross-request update-ID sequence such as
-   `A -> B -> A`. A future adapter and repository must load and atomically advance a
-   trusted last-accepted checkpoint for each asset/source; restarting a process
-   must not erase that watermark. The checkpoint must atomically retain the last
-   accepted sequence, `pricedAt`, `observedAt`, and update ID. The repository
-   must also enforce a durable unique constraint over registry fingerprint,
-   asset, source, and update ID before data reaches either evaluator. A provider
+   `A -> B -> A`. Migration `0021` and its PostgreSQL adapters now load
+   and atomically advance a trusted last-accepted checkpoint for each exact
+   asset/source/reference; restarting a process does not erase that watermark.
+   Each append-only transition retains both the accepted observation and its
+   immediate predecessor sequence, `pricedAt`, `observedAt`, update ID, and
+   observation identity. The read adapter deliberately supplies that predecessor
+   to the evaluator rather than feeding the observation its own current
+   watermark. The database also enforces durable update-ID uniqueness over the
+   registry version/fingerprint, exact network-qualified asset, source, and
+   source reference before data reaches either evaluator. A provider
    `pricedAt` or `observedAt` may remain equal when sequence advances and the
    update ID passes that repository uniqueness check, but either timestamp may
    never regress.
@@ -194,9 +198,12 @@ An already settled asset movement is still journaled in exact asset units with
 an unavailable valuation marker; any later valuation is an append-only
 backfill that references the original snapshot, never a rewrite.
 
-The pure evaluator signals that a depeg latch is required but does not persist
-or authenticate one; an approved future runtime must do that durably. Recovery
-accepts a closed latch reference containing the exact KAN-61 asset, a 64-character
+The pure evaluator signals that a depeg latch is required but does not itself
+perform persistence or authentication. Migration `0019` and the companion
+PostgreSQL repository now durably enforce append-only exact-asset latch/clear
+events, sticky projections, unique identifiers and nonces, and one-use bounded
+clear admission; that runtime boundary remains dormant. Recovery accepts a
+closed latch reference containing the exact KAN-61 asset, a 64-character
 lowercase hexadecimal opaque latch ID, and canonical `latchedAt`, plus a trusted
 server `evaluatedAt`. A null latch means recovery is not applicable and cannot
 carry a clear. Such a latch cannot clear automatically. Recovery requires all
@@ -229,9 +236,10 @@ Once every automated predicate passes but no Risk clear exists, the result is
 future clear is not accepted. A bound clear yields only the local
 `RECOVERY_CANDIDATE_CLEARED` state and is echoed as the accepted reference; it
 does not authorize financial use while the external gates remain pending.
-KAN-66 does not grant, authenticate, persist, or prove uniqueness of either
-event. KAN-252 must require durable uniqueness for latch and clear IDs and an
-authenticated Risk approval before runtime use.
+KAN-66 does not grant or authenticate either event. The dormant `0019`
+repository persists them and proves local uniqueness, but KAN-252 must still
+require a cryptographically authenticated Risk approval and deployed evidence
+before runtime use.
 
 ## Issuer redemption is context, not a price source
 
@@ -313,9 +321,10 @@ any runtime or financial activation it must obtain and record:
   timestamp/confidence evidence for all three assets;
 - exact Chainlink proxy and aggregator addresses, decimals, heartbeat and
   lifecycle behavior, plus the approved KAN-62 RPC dependency;
-- exact provider sequence semantics, a durable update-ID uniqueness constraint,
-  and replay checkpoints retaining sequence, `pricedAt`, `observedAt`, and
-  update identity: Chainlink
+- exact provider sequence semantics and independent confirmation that the
+  locally implemented `0021` scoped update-ID uniqueness and predecessor
+  checkpoints correctly bind sequence, `pricedAt`, `observedAt`, and update
+  identity to authenticated provider evidence: Chainlink
   `roundId`/round timestamps and a collision-safe Pyth signed-update identity or
   cursor, because `publish_time` alone may repeat;
 - measured 60-second freshness, latency, availability, throttling, and cost
@@ -344,6 +353,9 @@ request.
 npm run infra:validate:valuation
 npm run infra:test:valuation
 npm test --workspace @crypto-lending/api -- --runInBand src/valuation/domain/stablecoin-valuation-policy.spec.ts
+npm test --workspace @crypto-lending/api -- --runInBand src/valuation/domain/stablecoin-price-evidence.spec.ts src/valuation/infrastructure/postgres/postgres-stablecoin-price-evidence.store.spec.ts src/infrastructure/database/migrations/0021-create-stablecoin-price-evidence-read-model.migration.spec.ts
+# With the documented loopback PostgreSQL integration environment:
+npm run test:integration --workspace @crypto-lending/api -- --runTestsByPath test/infrastructure/stablecoin-price-evidence.integration-spec.ts
 npm run typecheck --workspace @crypto-lending/api
 npm run format:check
 npm run security:scan:secrets
