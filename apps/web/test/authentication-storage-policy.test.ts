@@ -37,4 +37,12 @@ describe('authentication browser-storage policy', () => {
       expect(source, path).not.toMatch(/["']Authorization["']\s*:/u);
     }
   });
+
+  it('keeps retired wallet implementations out of production authentication entry points', () => {
+    for (const { path, source } of authenticationSources()) {
+      expect(source, path).not.toMatch(
+        /from\s+["']@\/lib\/(?:evm-public-testnet|local-demo|public-testnet)(?:\/|["'])/u,
+      );
+    }
+  });
 });

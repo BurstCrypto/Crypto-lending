@@ -30,10 +30,7 @@ vi.mock('@/components/authentication/browser-navigation', () => ({
 }));
 
 import AccountPage from '../app/account/page';
-import LoginPage, {
-  dynamic as loginDynamic,
-  metadata as loginMetadata,
-} from '../app/login/page';
+import LoginPage, { dynamic as loginDynamic, metadata as loginMetadata } from '../app/login/page';
 import RegisterPage, {
   dynamic as registerDynamic,
   metadata as registerMetadata,
@@ -42,8 +39,10 @@ import { AccountSession } from '../components/authentication/account-session';
 import { LoginForm } from '../components/authentication/login-form';
 import { RegistrationForm } from '../components/authentication/registration-form';
 import { AuthenticationUnauthenticatedError, type AccountProfile } from '../lib/authentication';
-import { localDemoWalletRosterKey } from '../lib/local-demo/wallet-roster';
-import { PUBLIC_TESTNET_POSITION_ACCOUNT_STORAGE_KEY } from '../lib/public-testnet/public-testnet-position-account';
+import {
+  LEGACY_SOLANA_PUBLIC_TESTNET_POSITION_ACCOUNT_STORAGE_KEY,
+  legacyLocalDemoWalletRosterKey,
+} from '../lib/browser/clear-legacy-wallet-session-state';
 
 const PROFILE: AccountProfile = Object.freeze({
   accountId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
@@ -412,8 +411,8 @@ describe('verified account session UI', () => {
   });
 
   it('replace-redirects an unauthenticated restoration to the local login UI', async () => {
-    const firstRosterKey = localDemoWalletRosterKey(PROFILE.accountId);
-    const secondRosterKey = localDemoWalletRosterKey('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb');
+    const firstRosterKey = legacyLocalDemoWalletRosterKey(PROFILE.accountId);
+    const secondRosterKey = legacyLocalDemoWalletRosterKey('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb');
     window.sessionStorage.setItem(firstRosterKey, JSON.stringify({ version: 1, entries: [] }));
     window.sessionStorage.setItem(secondRosterKey, JSON.stringify({ version: 1, entries: [] }));
     window.sessionStorage.setItem('unrelated.preference', 'preserve-me');
@@ -450,9 +449,12 @@ describe('verified account session UI', () => {
 
   it('clears protected profile output before replace-redirecting after confirmed logout', async () => {
     authenticationMocks.restore.mockResolvedValueOnce(PROFILE);
-    const rosterKey = localDemoWalletRosterKey(PROFILE.accountId);
+    const rosterKey = legacyLocalDemoWalletRosterKey(PROFILE.accountId);
     window.sessionStorage.setItem(rosterKey, JSON.stringify({ version: 1, entries: [] }));
-    window.sessionStorage.setItem(PUBLIC_TESTNET_POSITION_ACCOUNT_STORAGE_KEY, 'remembered-wallet');
+    window.sessionStorage.setItem(
+      LEGACY_SOLANA_PUBLIC_TESTNET_POSITION_ACCOUNT_STORAGE_KEY,
+      'remembered-wallet',
+    );
     navigationMocks.replace.mockImplementationOnce(() => {
       expect(screen.queryByText(PROFILE.contactEmail)).not.toBeInTheDocument();
     });
@@ -464,7 +466,9 @@ describe('verified account session UI', () => {
     await waitFor(() => expect(navigationMocks.replace).toHaveBeenCalledWith('/login'));
     expect(screen.queryByText(PROFILE.contactEmail)).not.toBeInTheDocument();
     expect(window.sessionStorage.getItem(rosterKey)).toBeNull();
-    expect(window.sessionStorage.getItem(PUBLIC_TESTNET_POSITION_ACCOUNT_STORAGE_KEY)).toBeNull();
+    expect(
+      window.sessionStorage.getItem(LEGACY_SOLANA_PUBLIC_TESTNET_POSITION_ACCOUNT_STORAGE_KEY),
+    ).toBeNull();
     expect(screen.getByText('Leaving your protected account…')).toBeInTheDocument();
   });
 
@@ -556,7 +560,7 @@ describe('verified account session UI', () => {
     authenticationMocks.restore
       .mockResolvedValueOnce(PROFILE)
       .mockRejectedValueOnce(new AuthenticationUnauthenticatedError());
-    const rosterKey = localDemoWalletRosterKey(PROFILE.accountId);
+    const rosterKey = legacyLocalDemoWalletRosterKey(PROFILE.accountId);
     window.sessionStorage.setItem(rosterKey, JSON.stringify({ version: 1, entries: [] }));
     render(<AccountSession />);
     expect(await screen.findByText(PROFILE.contactEmail)).toBeInTheDocument();

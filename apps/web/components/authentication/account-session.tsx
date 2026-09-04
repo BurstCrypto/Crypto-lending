@@ -9,9 +9,7 @@ import {
   restoreAuthenticationSession,
   type AccountProfile,
 } from '@/lib/authentication';
-import { clearBrowserEvmPublicTestnetPositionAccount } from '@/lib/evm-public-testnet/position-account';
-import { clearBrowserLocalDemoWalletRoster } from '@/lib/local-demo/wallet-roster';
-import { clearBrowserPublicTestnetPositionAccount } from '@/lib/public-testnet/public-testnet-position-account';
+import { clearBrowserLegacyWalletSessionState } from '@/lib/browser/clear-legacy-wallet-session-state';
 
 import { replaceBrowserLocation } from './browser-navigation';
 import { AuthenticationError } from './authentication-error';
@@ -28,12 +26,6 @@ function countryName(countryCode: string): string {
   } catch {
     return countryCode;
   }
-}
-
-function clearCurrentWalletRoster(accountId: string | null): void {
-  clearBrowserLocalDemoWalletRoster(accountId);
-  clearBrowserEvmPublicTestnetPositionAccount();
-  clearBrowserPublicTestnetPositionAccount();
 }
 
 export function AccountSession() {
@@ -71,7 +63,7 @@ export function AccountSession() {
       })
       .catch((error: unknown) => {
         if (abortController.signal.aborted) return;
-        clearCurrentWalletRoster(accountIdReference.current);
+        clearBrowserLegacyWalletSessionState(accountIdReference.current);
         accountIdReference.current = null;
         if (error instanceof AuthenticationUnauthenticatedError) {
           setSession({
@@ -117,7 +109,7 @@ export function AccountSession() {
 
   async function logout(): Promise<void> {
     if (logoutPendingReference.current || session.status !== 'authenticated') return;
-    clearCurrentWalletRoster(session.profile.accountId);
+    clearBrowserLegacyWalletSessionState(session.profile.accountId);
     accountIdReference.current = null;
     logoutPendingReference.current = true;
     logoutRequestReference.current?.abort();
