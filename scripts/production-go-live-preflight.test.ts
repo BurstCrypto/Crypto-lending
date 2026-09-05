@@ -211,6 +211,7 @@ function completeInput(directory: unknown): ProductionPreflightInput {
       syntaxValid: true,
     },
     databaseMasterDeployment: VERIFIED_DATABASE_MASTER_DEPLOYMENT,
+    rdsMasterLifecycleEvidenceAccepted: true,
     egress: {
       localValidationPassed: true,
       status: 'ACCEPTED',
@@ -313,6 +314,7 @@ test('current repository is a bootstrap blocker audit and exits nonzero for both
   assert.equal(readOnly.auditMode, 'BOOTSTRAP_BLOCKER_AUDIT');
   assert.equal(input.platforms.sourceRevision, null);
   assert.deepEqual(input.databaseMasterDeployment, { inspected: true, syntaxValid: true });
+  assert.equal(input.rdsMasterLifecycleEvidenceAccepted, false);
   assert.equal(readOnly.selectedTargetReadiness, 'BLOCKED');
   assert.equal(writes.selectedTargetReadiness, 'BLOCKED');
   assert.deepEqual(readOnly.providerCounts, {
@@ -345,6 +347,12 @@ test('current repository is a bootstrap blocker audit and exits nonzero for both
       ?.blockerIds.includes('DATABASE_MASTER_SECRET_NOT_RDS_MANAGED'),
     false,
   );
+  assert.equal(
+    readOnly.checks
+      .find(({ id }) => id === 'AUTHENTICATION')
+      ?.blockerIds.includes('RDS_MASTER_LIFECYCLE_EVIDENCE_MISSING'),
+    true,
+  );
   assert.equal(productionPreflightExitCode(readOnly), 1);
   assert.equal(productionPreflightExitCode(writes), 1);
 
@@ -367,6 +375,45 @@ test('current repository is a bootstrap blocker audit and exits nonzero for both
       ?.blockerIds.includes('DATABASE_MASTER_SECRET_NOT_RDS_MANAGED'),
     false,
   );
+  assert.equal(
+    cliReport.checks
+      .find(({ id }) => id === 'AUTHENTICATION')
+      ?.blockerIds.includes('RDS_MASTER_LIFECYCLE_EVIDENCE_MISSING'),
+    true,
+  );
+});
+
+test('RDS master lifecycle evidence remains a private fail-closed launch gate', () => {
+  const baseline = completeInput(platformDirectory('PLANNED'));
+  const candidates: readonly unknown[] = [undefined, false, true, 'true', 1, null];
+  for (const candidate of candidates) {
+    const report = evaluateProductionPreflight({
+      ...baseline,
+      rdsMasterLifecycleEvidenceAccepted: candidate,
+    } as ProductionPreflightInput);
+    const authentication = report.checks.find(({ id }) => id === 'AUTHENTICATION');
+    assert.equal(authentication?.localValidation, 'PASS');
+    assert.ok(authentication?.blockerIds.includes('RDS_MASTER_LIFECYCLE_EVIDENCE_MISSING'));
+    assert.equal(report.selectedTargetReadiness, 'BLOCKED');
+  }
+
+  const authEvidenceMissing = evaluateProductionPreflight({
+    ...baseline,
+    authentication: { ...baseline.authentication, deployedEvidenceAccepted: false },
+  });
+  const authEvidenceBlockers =
+    authEvidenceMissing.checks.find(({ id }) => id === 'AUTHENTICATION')?.blockerIds ?? [];
+  assert.ok(authEvidenceBlockers.includes('AUTH_DEPLOYED_EVIDENCE_MISSING'));
+  assert.ok(authEvidenceBlockers.includes('RDS_MASTER_LIFECYCLE_EVIDENCE_MISSING'));
+
+  const rdsEvidenceMissing = evaluateProductionPreflight({
+    ...baseline,
+    rdsMasterLifecycleEvidenceAccepted: false,
+  });
+  const rdsEvidenceBlockers =
+    rdsEvidenceMissing.checks.find(({ id }) => id === 'AUTHENTICATION')?.blockerIds ?? [];
+  assert.ok(rdsEvidenceBlockers.includes('RDS_MASTER_LIFECYCLE_EVIDENCE_MISSING'));
+  assert.equal(rdsEvidenceBlockers.includes('AUTH_DEPLOYED_EVIDENCE_MISSING'), false);
 });
 
 test('structurally valid inert egress remains launch-blocked', () => {
@@ -420,9 +467,15 @@ test('all synthetic technical inputs remain blocked without seven signed launch 
   assert.equal(productionPreflightExitCode(readOnlyReport), 1);
   assert.ok(
     readOnlyReport.checks
-      .filter(({ id }) => id !== 'PUBLIC_LAUNCH_AUTHORITIES' && id !== 'MAINNET_WRITES')
+      .filter(
+        ({ id }) =>
+          id !== 'AUTHENTICATION' && id !== 'PUBLIC_LAUNCH_AUTHORITIES' && id !== 'MAINNET_WRITES',
+      )
       .every(({ launchReadiness }) => launchReadiness === 'LOCAL_GATES_CLEAR'),
   );
+  assert.deepEqual(readOnlyReport.checks.find(({ id }) => id === 'AUTHENTICATION')?.blockerIds, [
+    'RDS_MASTER_LIFECYCLE_EVIDENCE_MISSING',
+  ]);
 
   const directory = platformDirectory('TRANSACTION_ENABLED');
   const input = completeInput(directory);
@@ -902,7 +955,7 @@ test('auth inspection verifies every reviewed API, wallet, secret, and web bindi
     assert.equal(authentication?.localValidation, 'PASS', name);
     assert.deepEqual(
       authentication?.blockerIds,
-      [expectedBlocker, 'AUTH_DEPLOYED_EVIDENCE_MISSING'],
+      ['RDS_MASTER_LIFECYCLE_EVIDENCE_MISSING', expectedBlocker, 'AUTH_DEPLOYED_EVIDENCE_MISSING'],
       name,
     );
   }
@@ -928,7 +981,10 @@ test('the reviewed template exposes only preauth plus six key-ring secrets to pr
       'WALLET_METADATA_SEAL_KEY_RING_JSON',
     ],
   );
-  assert.deepEqual(authentication?.blockerIds, ['AUTH_DEPLOYED_EVIDENCE_MISSING']);
+  assert.deepEqual(authentication?.blockerIds, [
+    'RDS_MASTER_LIFECYCLE_EVIDENCE_MISSING',
+    'AUTH_DEPLOYED_EVIDENCE_MISSING',
+  ]);
 });
 
 test('template inspection binds API and outbox worker to one API artifact', () => {
@@ -1008,7 +1064,9 @@ test('unrelated non-prefixed task bindings remain outside the exact auth and wal
   };
   const directReport = evaluateProductionPreflight({ ...input, authentication });
 
-  assert.deepEqual(directReport.checks.find(({ id }) => id === 'AUTHENTICATION')?.blockerIds, []);
+  assert.deepEqual(directReport.checks.find(({ id }) => id === 'AUTHENTICATION')?.blockerIds, [
+    'RDS_MASTER_LIFECYCLE_EVIDENCE_MISSING',
+  ]);
 
   const anchor = '       - { Name: NODE_ENV, Value: production }';
   const mutated = APPLICATION_BASELINE.replace(
@@ -1021,6 +1079,7 @@ test('unrelated non-prefixed task bindings remain outside the exact auth and wal
 
   assert.equal(inspected.syntaxValid, true);
   assert.deepEqual(inspectedReport.checks.find(({ id }) => id === 'AUTHENTICATION')?.blockerIds, [
+    'RDS_MASTER_LIFECYCLE_EVIDENCE_MISSING',
     'AUTH_DEPLOYED_EVIDENCE_MISSING',
   ]);
 });

@@ -58,17 +58,21 @@ recomputes the fixed release components. The signed
 same branded manifest and source state are revalidated after bundle verification
 and immediately before evidence application.
 
-The closed bundle is `READ_ONLY`. It binds canonical issuance/expiry timestamps,
-the branded release candidate, platform-directory SHA-256, a checked-in
-deployment-target ID and SHA-256, direct authentication-deployment,
-external-egress, and RPC-live observations, and the live-read evidence index.
+The closed schema-v2 bundle is `READ_ONLY`. It binds canonical issuance/expiry
+timestamps, the branded release candidate, platform-directory SHA-256, a
+checked-in deployment-target ID and SHA-256, direct authentication-deployment,
+RDS-master-lifecycle, external-egress, and RPC-live observations, and the
+live-read evidence index. The v2 signing domain covers the complete new shape;
+a legacy schema-v1 bundle or v1-domain signature fails closed rather than being
+silently upgraded.
 Arbitrary evidence paths, reference IDs, and caller-asserted artifact hashes are
 not part of an authority decision. `mainnetWriteEvidenceIndex` must be literal
 `null`; write scope, action-binding, simulation, reconciliation, or financial-
 authorization claims fail the closed schema. The validity window is at most 24
 hours, each observation must precede issuance by no more than one hour, issuance
-cannot be in the future, and expiry is exclusive. Freshness is checked both when
-the bundle is verified and again when it is applied.
+cannot be in the future, and expiry is exclusive. Freshness is checked when the
+bundle is verified, when it is applied, and whenever the exact branded input is
+evaluated.
 
 Every accepted payload needs an Ed25519 quorum over identical domain-separated
 canonical bytes: one `DEPLOYMENT_EVIDENCE_ISSUER` and one separately scoped
@@ -106,21 +110,26 @@ closed format and filesystem boundary.
 Trust anchors come only from the exact checked-in authority-key registries; an
 artifact cannot add a key or change key role/scope. Both the technical-evidence
 and public-launch registries have no approved key today. The exact checked-in
-deployment-target registry is also empty. A
-future target record must bind environment, AWS account and region, HTTPS public
-origin, coherent Cognito pool/client/login-host/issuer values, and immutable
-digest-pinned image plus task-definition identities for the API, web, outbox
-worker, and migration task. API, worker, and migration may share an image digest,
-but all task-definition revisions must be distinct. Adding either a key or a
-target is a separate reviewed source change and has not happened here.
+deployment-target registry is also empty. A future schema-v2 target record and
+the v2 target-hash domain must bind environment, AWS account and region, HTTPS
+public origin, coherent Cognito pool/client/login-host/issuer values, and
+immutable digest-pinned image plus task-definition identities for the API, web,
+outbox worker, and migration task. Its closed `rds` block must identify the
+CloudFormation stack ID, database instance ARN, database resource ID,
+RDS-managed secret ARN, and application-data KMS key ARN. API, worker, and
+migration may share an image digest, but all task-definition revisions must be
+distinct. Adding either a key or a target is a separate reviewed source change
+and has not happened here.
 
-Verified evidence may only supplement the three live/deployed evidence flags,
-the manifest-bound source revision, and signed live-read index. It cannot override the
-repository's authentication wiring inspection, egress policy status or mode,
-RPC decision/approval/runtime status, platform directory, or any other local
+Verified evidence may only supplement the closed live/deployed evidence fields,
+the manifest-bound source revision, and signed live-read index. It cannot
+override the repository's authentication wiring inspection, RDS-managed-master
+template inspection, egress policy status or mode, RPC
+decision/approval/runtime status, platform directory, or any other local
 approval boundary. A signed claim therefore cannot turn `NOT_APPROVED` into
-`APPROVED`; those repository-side blockers continue to win. Schema v1 always
-sets supplied write evidence to `null` and cannot affect mainnet-write readiness.
+`APPROVED`; those repository-side blockers continue to win. Schema v2 always
+sets supplied write evidence to `null` and cannot affect mainnet-write
+readiness.
 
 For the current release decision, the only active mainnet networks are
 Ethereum and Solana. The ten-provider target is the exact six-Ethereum/four-
@@ -200,6 +209,7 @@ Relevant machine-readable launch blocker IDs include:
 
 - `AUTH_DEPLOYED_EVIDENCE_MISSING`
 - `DATABASE_MASTER_SECRET_NOT_RDS_MANAGED`
+- `RDS_MASTER_LIFECYCLE_EVIDENCE_MISSING`
 - `REDIS_OPERATOR_SECRET_VERSION_NOT_WIRED`
 - `EGRESS_POLICY_NOT_ACCEPTED`
 - `EXTERNAL_EGRESS_DISABLED`
@@ -254,10 +264,56 @@ cannot prove the managed secret exists, uses the intended live key, is readable
 only by the bootstrap operator, or follows the default seven-day rotation. A
 recovery exercise must establish and bind the restored or replacement
 database's managed-secret ARN; the original secret need not survive. Those
-items remain deployed evidence and recovery gates. The current signed evidence
-schema has no dedicated RDS lifecycle record, so this static blocker must not be
-treated as closing that external gate; adding the record and a separate missing-
-evidence blocker remains required before launch approval.
+items remain deployed evidence and recovery gates.
+
+The outer two-role-signed schema-v2 bundle now covers the closed nested
+schema-v1 `rdsMasterLifecycleEvidence` record with type
+`RDS_MASTER_LIFECYCLE_EVIDENCE` and status `ACCEPTED`. It binds the literal
+`crypto_admin` master username, primary and restored database identities,
+managed-secret ARNs and VersionIds, compatibility-output ARN, and
+application-data/managed-secret KMS identities. Exact `PASS` fields cover
+bootstrap IAM/KMS access, application and migration isolation, master-session
+drain, completed managed rotation, new authentication, old-password denial,
+runtime-credential continuity, and restore/rebinding. Its closed schema-v1
+`supportingCapture` metadata names `RDS_MASTER_LIFECYCLE_CAPTURE` in
+`SANITIZED_CANONICAL_JSON_V1` format, a lowercase `captureSha256`, and collection
+start/completion timestamps. The outer signatures cover that digest, but the
+validator deliberately does not open the separately retained capture file; the
+issuer and independent verifier must each calculate the canonical capture hash
+and match `captureSha256` before signing.
+
+The primary database ARN, resource ID, managed-secret ARN, and application-data
+key ARN must exactly match the schema-v2 deployment target's closed `rds` block;
+the outer signatures also cover the v2 target digest, which includes that block's
+CloudFormation stack ID. The
+compatibility output and primary managed-secret ARN must agree, both primary and
+restored secret KMS bindings must equal the target application-data key, and the
+restored database and secret identities must be distinct and
+target-account/Region bound. Primary, rotation, and restored managed-secret
+status must be literal `active`; the current/previous rotation versions must be
+distinct and labeled `AWSCURRENT`/`AWSPREVIOUS`, and the rebound restored version
+must be labeled `AWSCURRENT`. Time ordering is closed as
+`collectionStartedAt <= access.observedAt <= rotation.startedAt <
+rotation.completedAt <= restore.startedAt < restore.completedAt =
+collectionCompletedAt = observedAt`, within a maximum 24-hour capture window.
+
+Preflight accepts that nested record only through the current outer
+two-role-signed schema-v2 bundle bound to the exact release and deployment
+target. Repository/no-bundle input, an absent or forged acceptance flag, and an
+unbranded structural copy emit `RDS_MASTER_LIFECYCLE_EVIDENCE_MISSING`. A
+malformed, already stale, counterfeit, wrong-artifact/status/field, or
+identity-mismatched bundle is rejected during load/application with the
+sanitized `PRODUCTION_PREFLIGHT_EVIDENCE_BUNDLE_INVALID` error and produces no
+preflight report. The exact branded input is revalidated during evaluation; if
+previously accepted evidence later becomes stale,
+`RDS_MASTER_LIFECYCLE_EVIDENCE_MISSING` returns, and a bound launch decision can
+additionally fail public-authority revalidation with
+`PUBLIC_LAUNCH_AUTHORITY_DECISION_UNVERIFIED`. This validates the signed
+attestation, not RDS itself; collecting the authorized live evidence remains
+external and no such record or capture exists today. The controlled record and
+capture contain operational identifiers only. Passwords, `SecretString`,
+connection material, and logs are forbidden, and neither the controlled bundle
+nor separately retained capture may be checked into Git or Jira.
 
 `AUTH_DEPLOYED_EVIDENCE_MISSING` remains by design: the repository neither
 provisions nor contacts Cognito, Secrets Manager, or KMS, and the inspector never

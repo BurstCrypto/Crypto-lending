@@ -47,9 +47,30 @@ CloudFormation VersionId parameter, `UNPINNED` marker, A/B phase, or state key.
 RDS rotates it every seven days by default, and a separately authorized
 master-credential operation must prove the live database/secret identity,
 master-session drain, new authentication, old-password denial, runtime-login
-continuity, and recovery behavior. Adding the master credential to this
-six-slot schema would falsely imply an overlap or stack-controlled rollback
-that the RDS-managed lifecycle does not provide.
+continuity, and recovery behavior. Those operational identities and exact
+results belong only in the nested schema-v1 `rdsMasterLifecycleEvidence` record
+covered by the outer two-role-signed schema-v2 bundle. Its primary
+database/secret/key identities must exactly match the schema-v2 deployment
+target's closed `rds` block; the outer signatures also cover the v2 target
+digest, which includes that block's CloudFormation stack identity. Exact `active` statuses,
+`AWSPREVIOUS`/`AWSCURRENT` rotation stages, the rebound `AWSCURRENT` stage, and
+ordered access/rotation/restore timestamps are closed fields.
+
+The record's schema-v1 `supportingCapture` metadata binds the independently
+calculated `captureSha256` of a separately retained canonical sanitized capture.
+The outer signatures cover the digest, but the validator does not open that
+capture file; each signing role must calculate and match it before signing.
+Repository/no-bundle, absent, forged, or unbranded input emits
+`RDS_MASTER_LIFECYCLE_EVIDENCE_MISSING`; malformed, already stale, or counterfeit
+bundle material is rejected during load/application as sanitized
+`PRODUCTION_PREFLIGHT_EVIDENCE_BUNDLE_INVALID`, before any report. Evidence that
+later becomes stale restores the RDS blocker during evaluation and can
+additionally produce `PUBLIC_LAUNCH_AUTHORITY_DECISION_UNVERIFIED` when a launch
+decision is bound. The evidence record cannot perform a rotation and contains
+no password, `SecretString`, connection, or log material, and the separately
+retained capture is subject to the same prohibition. Adding the master
+credential to this six-slot schema would falsely imply an overlap or
+stack-controlled rollback that the RDS-managed lifecycle does not provide.
 
 ## Records and local verification
 

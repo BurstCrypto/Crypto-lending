@@ -54,6 +54,7 @@ export type ProductionPreflightBlockerId =
   | 'AUTH_TEMPLATE_INSPECTION_FAILED'
   | 'AUTH_WEB_PUBLIC_ORIGIN_NOT_WIRED'
   | 'DATABASE_MASTER_SECRET_NOT_RDS_MANAGED'
+  | 'RDS_MASTER_LIFECYCLE_EVIDENCE_MISSING'
   | 'REDIS_OPERATOR_SECRET_VERSION_NOT_WIRED'
   | 'WALLET_REGISTRATION_MAINNET_CONFIGURATION_NOT_WIRED'
   | 'EGRESS_LIVE_EVIDENCE_INCOMPLETE'
@@ -147,6 +148,8 @@ export interface ProductionPreflightInput {
   readonly authentication: AuthenticationDeploymentInput;
   /** Optional for legacy programmatic callers; absence fails closed during evaluation. */
   readonly databaseMasterDeployment?: DatabaseMasterDeploymentInput;
+  /** Optional for legacy programmatic callers; only a verified evidence bundle sets it in CLI use. */
+  readonly rdsMasterLifecycleEvidenceAccepted?: boolean;
   /** Optional for legacy programmatic callers; absence fails closed during evaluation. */
   readonly redisOperatorDeployment?: RedisOperatorDeploymentInput;
   readonly egress: EgressInput;
@@ -403,12 +406,18 @@ const SAFETY_MARKERS = Object.freeze({
   ]),
   writesMade: 0 as const,
 });
+interface VerifiedEvidenceApplicationContext {
+  readonly bundle: VerifiedProductionEvidenceBundle;
+  readonly applicationOptions: Readonly<ProductionEvidenceApplicationOptions>;
+}
+
 const EVIDENCE_DERIVED_PUBLIC_LAUNCH_BINDINGS = new WeakMap<
   object,
-  Readonly<{
-    bundle: VerifiedProductionEvidenceBundle;
-    applicationOptions: Readonly<ProductionEvidenceApplicationOptions>;
-  }>
+  VerifiedEvidenceApplicationContext
+>();
+const VERIFIED_RDS_MASTER_LIFECYCLE_PREFLIGHT_INPUTS = new WeakMap<
+  ProductionPreflightInput,
+  VerifiedEvidenceApplicationContext
 >();
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -843,6 +852,26 @@ export function evaluateProductionPreflight(
     VERIFIED_DATABASE_MASTER_DEPLOYMENTS.has(databaseMasterDeployment);
   if (!databaseMasterDeploymentValid) {
     authenticationBlockers.push('DATABASE_MASTER_SECRET_NOT_RDS_MANAGED');
+  }
+  let rdsMasterLifecycleEvidenceAccepted = false;
+  try {
+    const evidenceContext = VERIFIED_RDS_MASTER_LIFECYCLE_PREFLIGHT_INPUTS.get(input);
+    if (input.rdsMasterLifecycleEvidenceAccepted === true && evidenceContext !== undefined) {
+      revalidateProductionEvidenceBundleForApplication(
+        evidenceContext.bundle,
+        evidenceContext.applicationOptions,
+      );
+      rdsMasterLifecycleEvidenceAccepted =
+        isVerifiedProductionEvidenceBundle(evidenceContext.bundle) &&
+        evidenceContext.bundle.content.rdsMasterLifecycleEvidence.artifactType ===
+          'RDS_MASTER_LIFECYCLE_EVIDENCE' &&
+        evidenceContext.bundle.content.rdsMasterLifecycleEvidence.status === 'ACCEPTED';
+    }
+  } catch {
+    rdsMasterLifecycleEvidenceAccepted = false;
+  }
+  if (!rdsMasterLifecycleEvidenceAccepted) {
+    authenticationBlockers.push('RDS_MASTER_LIFECYCLE_EVIDENCE_MISSING');
   }
   const redisOperatorDeploymentValid =
     input.redisOperatorDeployment?.inspected === true &&
@@ -1740,6 +1769,7 @@ export function loadRepositoryProductionPreflightInput(
   return Object.freeze({
     authentication,
     databaseMasterDeployment,
+    rdsMasterLifecycleEvidenceAccepted: false,
     redisOperatorDeployment,
     egress: Object.freeze({
       localValidationPassed: egressLocalValidationPassed,
@@ -1793,13 +1823,12 @@ export function applyVerifiedProductionEvidenceBundle(
       deploymentTargetId: bundle.content.deploymentTargetId,
       deploymentTargetConfigurationSha256: bundle.content.deploymentTargetSha256,
     });
-    EVIDENCE_DERIVED_PUBLIC_LAUNCH_BINDINGS.set(
-      evidenceBinding,
-      Object.freeze({ bundle, applicationOptions }),
-    );
+    const evidenceContext = Object.freeze({ bundle, applicationOptions });
+    EVIDENCE_DERIVED_PUBLIC_LAUNCH_BINDINGS.set(evidenceBinding, evidenceContext);
 
-    return Object.freeze({
+    const appliedInput = Object.freeze({
       ...input,
+      rdsMasterLifecycleEvidenceAccepted: true,
       authentication: Object.freeze({
         ...input.authentication,
         deployedEvidenceAccepted: true,
@@ -1816,7 +1845,7 @@ export function applyVerifiedProductionEvidenceBundle(
         directory: input.platforms.directory,
         sourceRevision: bundle.content.sourceRevision,
         liveReadEvidenceIndex: bundle.content.liveReadEvidenceIndex,
-        // Evidence schema v1 is read-only and can never supplement write evidence.
+        // Evidence schema v2 is read-only and can never supplement write evidence.
         mainnetWriteEvidenceIndex: null,
       }),
       publicLaunchAuthorities: Object.freeze({
@@ -1824,6 +1853,8 @@ export function applyVerifiedProductionEvidenceBundle(
         evidenceBinding,
       }),
     });
+    VERIFIED_RDS_MASTER_LIFECYCLE_PREFLIGHT_INPUTS.set(appliedInput, evidenceContext);
+    return appliedInput;
   } catch {
     throw new ProductionEvidenceBundleInvalidError();
   }
@@ -1839,10 +1870,12 @@ export function applyVerifiedPublicLaunchAuthorityDecision(
       evidenceBinding === null || evidenceBinding === undefined
         ? undefined
         : EVIDENCE_DERIVED_PUBLIC_LAUNCH_BINDINGS.get(evidenceBinding);
+    const inputEvidenceContext = VERIFIED_RDS_MASTER_LIFECYCLE_PREFLIGHT_INPUTS.get(input);
     if (
       evidenceBinding === null ||
       evidenceBinding === undefined ||
       evidenceContext === undefined ||
+      inputEvidenceContext !== evidenceContext ||
       !isVerifiedProductionEvidenceBundle(evidenceContext.bundle) ||
       !isVerifiedPublicLaunchAuthorityDecisionSet(decisionSet)
     ) {
@@ -1859,10 +1892,12 @@ export function applyVerifiedPublicLaunchAuthorityDecision(
     if (!isVerifiedPublicLaunchAuthorityDecisionSet(decisionSet)) {
       throw new PublicLaunchAuthorityDecisionInvalidError();
     }
-    return Object.freeze({
+    const appliedInput = Object.freeze({
       ...input,
       publicLaunchAuthorities: Object.freeze({ decisionSet, evidenceBinding }),
     });
+    VERIFIED_RDS_MASTER_LIFECYCLE_PREFLIGHT_INPUTS.set(appliedInput, evidenceContext);
+    return appliedInput;
   } catch {
     throw new PublicLaunchAuthorityDecisionInvalidError();
   }

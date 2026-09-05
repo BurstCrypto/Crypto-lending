@@ -8,9 +8,17 @@ const TARGET_KEYS = Object.freeze([
   'awsRegion',
   'publicOrigin',
   'cognito',
+  'rds',
   'deployedComponents',
 ]);
 const COGNITO_KEYS = Object.freeze(['userPoolId', 'appClientId', 'loginHost', 'issuer']);
+const RDS_KEYS = Object.freeze([
+  'cloudFormationStackId',
+  'databaseInstanceArn',
+  'databaseResourceId',
+  'databaseManagedSecretArn',
+  'applicationDataKeyArn',
+]);
 const COMPONENT_SET_KEYS = Object.freeze(['api', 'web', 'outboxWorker', 'migration']);
 const COMPONENT_KEYS = Object.freeze(['imageUri', 'taskDefinitionArn']);
 const REGISTRY_KEYS = Object.freeze(['schemaVersion', 'artifactType', 'targets']);
@@ -19,7 +27,14 @@ const ACCOUNT_ID_PATTERN = /^[0-9]{12}$/u;
 const REGION_PATTERN = /^[a-z]{2}-[a-z]+-[1-9][0-9]?$/u;
 const CLIENT_ID_PATTERN = /^[a-z0-9]{26}$/u;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
-const TARGET_HASH_DOMAIN = 'crypto-lending:production-deployment-target:v1' as const;
+const CLOUDFORMATION_STACK_RESOURCE_PATTERN =
+  /^stack\/[A-Za-z][A-Za-z0-9-]{0,127}\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/u;
+const RDS_DATABASE_RESOURCE_PATTERN = /^db:[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$/u;
+const RDS_MANAGED_SECRET_RESOURCE_PATTERN = /^secret:rds!db-[A-Za-z0-9/_+=.@-]{1,512}$/u;
+const KMS_KEY_RESOURCE_PATTERN =
+  /^key\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/u;
+const MAX_DATABASE_RESOURCE_ID_LENGTH = 256;
+const TARGET_HASH_DOMAIN = 'crypto-lending:production-deployment-target:v2' as const;
 const VERIFIED_TARGETS = new WeakSet<object>();
 
 export interface ProductionDeployedComponentIdentity {
@@ -39,6 +54,13 @@ export interface ProductionDeploymentTarget {
     loginHost: string;
     issuer: string;
   }>;
+  readonly rds: Readonly<{
+    cloudFormationStackId: string;
+    databaseInstanceArn: string;
+    databaseResourceId: string;
+    databaseManagedSecretArn: string;
+    applicationDataKeyArn: string;
+  }>;
   readonly deployedComponents: Readonly<{
     api: ProductionDeployedComponentIdentity;
     web: ProductionDeployedComponentIdentity;
@@ -48,7 +70,7 @@ export interface ProductionDeploymentTarget {
 }
 
 export interface ProductionDeploymentTargetRegistry {
-  readonly schemaVersion: 1;
+  readonly schemaVersion: 2;
   readonly artifactType: 'PRODUCTION_DEPLOYMENT_TARGET_REGISTRY';
   readonly targets: readonly ProductionDeploymentTarget[];
 }
@@ -63,7 +85,7 @@ export interface VerifiedProductionDeploymentTarget extends ProductionDeployment
  * an independently reviewed source change; an evidence bundle cannot add one.
  */
 export const PRODUCTION_DEPLOYMENT_TARGET_REGISTRY = Object.freeze({
-  schemaVersion: 1,
+  schemaVersion: 2,
   artifactType: 'PRODUCTION_DEPLOYMENT_TARGET_REGISTRY',
   targets: Object.freeze([]),
 } as const satisfies ProductionDeploymentTargetRegistry);
@@ -192,6 +214,83 @@ function componentIdentity(
   });
 }
 
+function regionalArn(
+  value: unknown,
+  service: 'cloudformation' | 'kms' | 'rds' | 'secretsmanager',
+  accountId: string,
+  region: string,
+  resourcePattern: RegExp,
+): string {
+  if (typeof value !== 'string' || value.length === 0 || value.length > 1_024) return invalid();
+  const prefix = `arn:aws:${service}:${region}:${accountId}:`;
+  if (!value.startsWith(prefix) || !resourcePattern.test(value.slice(prefix.length))) {
+    return invalid();
+  }
+  return value;
+}
+
+function opaqueDatabaseResourceId(value: unknown): string {
+  const containsAsciiControl =
+    typeof value === 'string' &&
+    Array.from(value).some((character) => {
+      const codePoint = character.codePointAt(0);
+      return codePoint !== undefined && (codePoint <= 0x1f || codePoint === 0x7f);
+    });
+  if (
+    typeof value !== 'string' ||
+    value.length === 0 ||
+    value.length > MAX_DATABASE_RESOURCE_ID_LENGTH ||
+    value.trim() !== value ||
+    containsAsciiControl
+  ) {
+    return invalid();
+  }
+  return value;
+}
+
+function rdsIdentity(
+  value: unknown,
+  accountId: string,
+  region: string,
+): ProductionDeploymentTarget['rds'] {
+  const parsed = record(value, RDS_KEYS);
+  const databaseInstanceArn = regionalArn(
+    parsed.databaseInstanceArn,
+    'rds',
+    accountId,
+    region,
+    RDS_DATABASE_RESOURCE_PATTERN,
+  );
+  if (databaseInstanceArn.slice(databaseInstanceArn.lastIndexOf(':db:') + 4).includes('--')) {
+    return invalid();
+  }
+  return Object.freeze({
+    cloudFormationStackId: regionalArn(
+      parsed.cloudFormationStackId,
+      'cloudformation',
+      accountId,
+      region,
+      CLOUDFORMATION_STACK_RESOURCE_PATTERN,
+    ),
+    databaseInstanceArn,
+    databaseResourceId: opaqueDatabaseResourceId(parsed.databaseResourceId),
+    databaseManagedSecretArn: regionalArn(
+      parsed.databaseManagedSecretArn,
+      'secretsmanager',
+      accountId,
+      region,
+      RDS_MANAGED_SECRET_RESOURCE_PATTERN,
+    ),
+    applicationDataKeyArn: regionalArn(
+      parsed.applicationDataKeyArn,
+      'kms',
+      accountId,
+      region,
+      KMS_KEY_RESOURCE_PATTERN,
+    ),
+  });
+}
+
 function deploymentTarget(value: unknown): ProductionDeploymentTarget {
   const parsed = record(value, TARGET_KEYS);
   if (
@@ -230,6 +329,7 @@ function deploymentTarget(value: unknown): ProductionDeploymentTarget {
     return invalid();
   }
   const components = record(parsed.deployedComponents, COMPONENT_SET_KEYS);
+  const rds = rdsIdentity(parsed.rds, parsed.awsAccountId, parsed.awsRegion);
   const api = componentIdentity(
     components.api,
     parsed.awsAccountId,
@@ -279,6 +379,7 @@ function deploymentTarget(value: unknown): ProductionDeploymentTarget {
       loginHost: cognito.loginHost,
       issuer: cognito.issuer as string,
     }),
+    rds,
     deployedComponents: Object.freeze({ api, web, outboxWorker, migration }),
   });
 }
@@ -301,7 +402,7 @@ function validatedRegistry(value: unknown): Readonly<{
 }> {
   const parsed = record(value, REGISTRY_KEYS);
   if (
-    parsed.schemaVersion !== 1 ||
+    parsed.schemaVersion !== 2 ||
     parsed.artifactType !== 'PRODUCTION_DEPLOYMENT_TARGET_REGISTRY' ||
     !Array.isArray(parsed.targets) ||
     parsed.targets.length > 16
@@ -316,7 +417,7 @@ function validatedRegistry(value: unknown): Readonly<{
     return target;
   });
   const normalizedRegistry = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     artifactType: 'PRODUCTION_DEPLOYMENT_TARGET_REGISTRY',
     targets,
   } as const;

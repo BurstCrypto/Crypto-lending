@@ -109,6 +109,38 @@ password and managed secret. A bootstrap operator may bind the observed managed
 VersionId in sanitized execution evidence, but that observation is not a stack
 parameter, an A/B slot, or permission to pin or roll back the RDS credential.
 
+The closed nested schema-v1 `rdsMasterLifecycleEvidence` record is covered by
+the outer two-role-signed schema-v2 production-evidence bundle. It binds the
+primary and restored database, managed-secret, VersionId,
+compatibility-output, and KMS identities plus exact IAM/KMS,
+workload-isolation, session-drain, rotation, authentication-denial,
+runtime-continuity, and restore/rebinding results. The primary database ARN,
+resource ID, secret ARN, and application-key ARN must equal the schema-v2
+deployment target's closed `rds` block; the outer signatures also cover its v2
+digest, which includes the CloudFormation stack ID. Primary, rotated, and rebound secret statuses are
+literal `active`, rotation uses distinct `AWSPREVIOUS` and `AWSCURRENT`
+VersionIds, and the rebound version is `AWSCURRENT`.
+
+The record also carries closed schema-v1 `supportingCapture` metadata for a
+separately retained `RDS_MASTER_LIFECYCLE_CAPTURE` in
+`SANITIZED_CANONICAL_JSON_V1` format. The outer signatures cover its
+`captureSha256` and ordered collection/access/rotation/restore timestamps. The
+validator checks the metadata, digest shape, stages, statuses, and time order
+but does not open the capture file; both signing roles must independently
+calculate and match the canonical capture digest before signing.
+
+Repository/no-bundle, absent, forged, or unbranded input emits
+`RDS_MASTER_LIFECYCLE_EVIDENCE_MISSING`. A malformed, already stale, or
+counterfeit bundle is instead rejected during load/application as sanitized
+`PRODUCTION_PREFLIGHT_EVIDENCE_BUNDLE_INVALID`, before any report. If accepted
+evidence later becomes stale, evaluation restores the RDS blocker and can
+additionally invalidate a bound launch decision with
+`PUBLIC_LAUNCH_AUTHORITY_DECISION_UNVERIFIED`. Neither record nor bundle can
+authorize or perform a master-password operation. The record contains
+operational identifiers only, never a password, `SecretString`, connection, or
+log, and neither the controlled bundle nor separately retained capture may be
+checked into Git or Jira. No acceptable live RDS lifecycle record exists today.
+
 For initial adoption, the six A/B parameters and separate operator parameter
 must all be the `UNPINNED` sentinel while API, web, and worker desired counts are
 zero, all phases are `A_ONLY`, and the Redis operator is disabled. In that state
@@ -288,7 +320,11 @@ complete:
   recording the default seven-day rotation posture, database/secret identity,
   master-session drain, new authentication, old-password denial, runtime-login
   continuity, KMS access, and snapshot restore/rebinding behavior without
-  recording secret bytes;
+  recording secret bytes, followed by a separately controlled canonical capture
+  and a current nested schema-v1 `rdsMasterLifecycleEvidence` record, covered by
+  the outer two-role-signed schema-v2 bundle, whose independently matched
+  `captureSha256`, exact target identity, statuses, stages, ordered timestamps,
+  and `PASS` results bind the exercise to the release and deployment target;
 - deployed verification that schema-v2 adoption bound the six A/B versions and
   separate operator version to the exact generated Secrets Manager versions;
 - an authorized run of the locally reviewed Redis revocation task/CLI using the

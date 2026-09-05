@@ -26,12 +26,13 @@ import {
   type VerifiedProductionDeploymentTarget,
 } from './production-deployment-target';
 
-export const PRODUCTION_EVIDENCE_BUNDLE_SCHEMA_VERSION = 1 as const;
+export const PRODUCTION_EVIDENCE_BUNDLE_SCHEMA_VERSION = 2 as const;
 export const MAX_PRODUCTION_EVIDENCE_BUNDLE_BYTES = 262_144 as const;
 export const MAX_PRODUCTION_EVIDENCE_BUNDLE_VALIDITY_MILLISECONDS = 24 * 60 * 60 * 1_000;
 export const MAX_PRODUCTION_EVIDENCE_OBSERVATION_LEAD_MILLISECONDS = 60 * 60 * 1_000;
+const MAX_RDS_MASTER_LIFECYCLE_CAPTURE_MILLISECONDS = 24 * 60 * 60 * 1_000;
 
-const SIGNING_DOMAIN = 'crypto-lending:production-controlled-evidence-bundle:v1' as const;
+const SIGNING_DOMAIN = 'crypto-lending:production-controlled-evidence-bundle:v2' as const;
 const SOURCE_REVISION_PATTERN = /^[a-f0-9]{40}$/u;
 const SOURCE_TREE_PATTERN = /^[a-f0-9]{40,64}$/u;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
@@ -40,6 +41,11 @@ const TARGET_ID_PATTERN = /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/u;
 const PROVIDER_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
 const SAFE_REFERENCE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/-]{2,191}$/u;
 const BASE64_PATTERN = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u;
+const AWS_REGION_PATTERN = /^[a-z]{2}-[a-z]+-[1-9][0-9]?$/u;
+const RDS_DATABASE_ARN_RESOURCE_PATTERN = /^db:[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$/u;
+const RDS_MANAGED_SECRET_ARN_RESOURCE_PATTERN = /^secret:rds!db-[A-Za-z0-9/_+=.@-]{1,512}$/u;
+const KMS_KEY_ARN_RESOURCE_PATTERN =
+  /^key\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/u;
 
 const ROOT_KEYS = Object.freeze(['schemaVersion', 'artifactType', 'content', 'signatures']);
 const UNSIGNED_ROOT_KEYS = Object.freeze(['schemaVersion', 'artifactType', 'content']);
@@ -53,12 +59,79 @@ const CONTENT_KEYS = Object.freeze([
   'deploymentTargetSha256',
   'directoryConfigurationSha256',
   'authenticationDeploymentEvidence',
+  'rdsMasterLifecycleEvidence',
   'externalEgressLiveEvidence',
   'rpcProviderLiveEvidence',
   'liveReadEvidenceIndex',
   'mainnetWriteEvidenceIndex',
 ]);
 const ATTESTATION_KEYS = Object.freeze(['artifactType', 'status', 'observedAt']);
+const RDS_MASTER_LIFECYCLE_KEYS = Object.freeze([
+  'schemaVersion',
+  'artifactType',
+  'status',
+  'observedAt',
+  'supportingCapture',
+  'binding',
+  'access',
+  'rotation',
+  'restore',
+]);
+const RDS_MASTER_SUPPORTING_CAPTURE_KEYS = Object.freeze([
+  'schemaVersion',
+  'artifactType',
+  'format',
+  'captureSha256',
+  'collectionStartedAt',
+  'collectionCompletedAt',
+]);
+const RDS_MASTER_BINDING_KEYS = Object.freeze([
+  'applicationDataKeyArn',
+  'compatibilityOutputSecretArn',
+  'databaseInstanceArn',
+  'databaseManagedSecretArn',
+  'databaseResourceId',
+  'managedSecretKmsKeyArn',
+  'managedSecretStatus',
+  'masterUsername',
+]);
+const RDS_MASTER_ACCESS_KEYS = Object.freeze([
+  'applicationTaskCredentialIsolation',
+  'bootstrapIamAndKmsAccess',
+  'migrationTaskCredentialIsolation',
+  'observedAt',
+]);
+const RDS_MASTER_ROTATION_KEYS = Object.freeze([
+  'automaticRotationEnabled',
+  'completedAt',
+  'currentSecretVersionId',
+  'currentSecretVersionStage',
+  'managedSecretStatus',
+  'masterSessionDrain',
+  'newMasterAuthentication',
+  'oldMasterAuthenticationDenied',
+  'previousSecretVersionId',
+  'previousSecretVersionStage',
+  'rotationCompleted',
+  'rotationScheduleDays',
+  'runtimeCredentialContinuity',
+  'startedAt',
+]);
+const RDS_MASTER_RESTORE_KEYS = Object.freeze([
+  'completedAt',
+  'databaseInstanceArn',
+  'databaseResourceId',
+  'originalMasterAuthenticationDenied',
+  'reboundManagedSecretArn',
+  'reboundManagedSecretKmsKeyArn',
+  'reboundManagedSecretStatus',
+  'reboundManagedSecretVersionId',
+  'reboundManagedSecretVersionStage',
+  'rebindingStatus',
+  'restoredMasterAuthentication',
+  'runtimeCredentialContinuity',
+  'startedAt',
+]);
 const SIGNATURE_KEYS = Object.freeze([
   'role',
   'scope',
@@ -155,6 +228,68 @@ export interface ProductionEvidenceObservation {
   readonly observedAt: string;
 }
 
+export interface ProductionRdsMasterLifecycleEvidence {
+  readonly schemaVersion: 1;
+  readonly artifactType: 'RDS_MASTER_LIFECYCLE_EVIDENCE';
+  readonly status: 'ACCEPTED';
+  readonly observedAt: string;
+  readonly supportingCapture: Readonly<{
+    schemaVersion: 1;
+    artifactType: 'RDS_MASTER_LIFECYCLE_CAPTURE';
+    format: 'SANITIZED_CANONICAL_JSON_V1';
+    captureSha256: string;
+    collectionStartedAt: string;
+    collectionCompletedAt: string;
+  }>;
+  readonly binding: Readonly<{
+    applicationDataKeyArn: string;
+    compatibilityOutputSecretArn: string;
+    databaseInstanceArn: string;
+    databaseManagedSecretArn: string;
+    databaseResourceId: string;
+    managedSecretKmsKeyArn: string;
+    managedSecretStatus: 'active';
+    masterUsername: 'crypto_admin';
+  }>;
+  readonly access: Readonly<{
+    applicationTaskCredentialIsolation: 'PASS';
+    bootstrapIamAndKmsAccess: 'PASS';
+    migrationTaskCredentialIsolation: 'PASS';
+    observedAt: string;
+  }>;
+  readonly rotation: Readonly<{
+    automaticRotationEnabled: 'PASS';
+    completedAt: string;
+    currentSecretVersionId: string;
+    currentSecretVersionStage: 'AWSCURRENT';
+    managedSecretStatus: 'active';
+    masterSessionDrain: 'PASS';
+    newMasterAuthentication: 'PASS';
+    oldMasterAuthenticationDenied: 'PASS';
+    previousSecretVersionId: string;
+    previousSecretVersionStage: 'AWSPREVIOUS';
+    rotationCompleted: 'PASS';
+    rotationScheduleDays: 7;
+    runtimeCredentialContinuity: 'PASS';
+    startedAt: string;
+  }>;
+  readonly restore: Readonly<{
+    completedAt: string;
+    databaseInstanceArn: string;
+    databaseResourceId: string;
+    originalMasterAuthenticationDenied: 'PASS';
+    reboundManagedSecretArn: string;
+    reboundManagedSecretKmsKeyArn: string;
+    reboundManagedSecretStatus: 'active';
+    reboundManagedSecretVersionId: string;
+    reboundManagedSecretVersionStage: 'AWSCURRENT';
+    rebindingStatus: 'PASS';
+    restoredMasterAuthentication: 'PASS';
+    runtimeCredentialContinuity: 'PASS';
+    startedAt: string;
+  }>;
+}
+
 export interface ProductionLiveReadEvidenceIndex {
   readonly schemaVersion: 1;
   readonly artifactType: 'PRODUCTION_LIVE_READ_EVIDENCE_INDEX';
@@ -176,6 +311,7 @@ export interface ProductionEvidenceBundleContent {
   readonly deploymentTargetSha256: string;
   readonly directoryConfigurationSha256: string;
   readonly authenticationDeploymentEvidence: ProductionEvidenceObservation;
+  readonly rdsMasterLifecycleEvidence: ProductionRdsMasterLifecycleEvidence;
   readonly externalEgressLiveEvidence: ProductionEvidenceObservation;
   readonly rpcProviderLiveEvidence: ProductionEvidenceObservation;
   readonly liveReadEvidenceIndex: ProductionLiveReadEvidenceIndex;
@@ -191,7 +327,7 @@ export interface ProductionEvidenceSignature {
 }
 
 export interface UnsignedProductionEvidenceBundle {
-  readonly schemaVersion: 1;
+  readonly schemaVersion: 2;
   readonly artifactType: 'PRODUCTION_CONTROLLED_EVIDENCE_BUNDLE';
   readonly content: ProductionEvidenceBundleContent;
 }
@@ -314,6 +450,73 @@ function safeReference(value: unknown): string {
   return value;
 }
 
+interface ParsedAwsArn {
+  readonly value: string;
+  readonly service: string;
+  readonly region: string;
+  readonly accountId: string;
+  readonly resource: string;
+}
+
+function awsArn(
+  value: unknown,
+  expectedService: 'kms' | 'rds' | 'secretsmanager',
+  resourcePattern: RegExp,
+): ParsedAwsArn {
+  if (typeof value !== 'string' || value.length === 0 || value.length > 1_024) return invalid();
+  const match = /^arn:aws:([a-z0-9-]+):([a-z]{2}-[a-z]+-[1-9][0-9]?):([0-9]{12}):(.+)$/u.exec(
+    value,
+  );
+  if (
+    match === null ||
+    match[1] !== expectedService ||
+    !AWS_REGION_PATTERN.test(match[2] ?? '') ||
+    /^0{12}$/u.test(match[3] ?? '') ||
+    !resourcePattern.test(match[4] ?? '') ||
+    (expectedService === 'rds' && (match[4] ?? '').slice(3).includes('--'))
+  ) {
+    return invalid();
+  }
+  return Object.freeze({
+    value,
+    service: match[1] as string,
+    region: match[2] as string,
+    accountId: match[3] as string,
+    resource: match[4] as string,
+  });
+}
+
+function databaseResourceId(value: unknown): string {
+  const containsAsciiControl =
+    typeof value === 'string' &&
+    Array.from(value).some((character) => {
+      const codePoint = character.codePointAt(0);
+      return codePoint !== undefined && (codePoint <= 0x1f || codePoint === 0x7f);
+    });
+  if (
+    typeof value !== 'string' ||
+    value.length === 0 ||
+    value.length > 256 ||
+    value.trim() !== value ||
+    containsAsciiControl
+  ) {
+    return invalid();
+  }
+  return value;
+}
+
+function secretVersionId(value: unknown): string {
+  // AWS documents VersionId as an opaque 32-64 character string. It is signed
+  // and compared only; no undocumented alphabet is imposed here.
+  if (typeof value !== 'string' || value.length < 32 || value.length > 64) return invalid();
+  return value;
+}
+
+function pass(value: unknown): 'PASS' {
+  if (value !== 'PASS') return invalid();
+  return 'PASS';
+}
+
 function canonicalBase64(value: unknown, expectedBytes?: number): Buffer {
   if (
     typeof value !== 'string' ||
@@ -364,6 +567,243 @@ function observation(
     return invalid();
   }
   return Object.freeze({ artifactType, status: 'ACCEPTED', observedAt: observedAt.text });
+}
+
+function rdsMasterLifecycleEvidence(
+  value: unknown,
+  issuedAtMilliseconds: number,
+): ProductionRdsMasterLifecycleEvidence {
+  const parsed = record(value, RDS_MASTER_LIFECYCLE_KEYS);
+  if (
+    parsed.schemaVersion !== 1 ||
+    parsed.artifactType !== 'RDS_MASTER_LIFECYCLE_EVIDENCE' ||
+    parsed.status !== 'ACCEPTED'
+  ) {
+    return invalid();
+  }
+  const observedAt = timestamp(parsed.observedAt);
+  if (
+    observedAt.milliseconds > issuedAtMilliseconds ||
+    issuedAtMilliseconds - observedAt.milliseconds >
+      MAX_PRODUCTION_EVIDENCE_OBSERVATION_LEAD_MILLISECONDS
+  ) {
+    return invalid();
+  }
+
+  const supportingCapture = record(parsed.supportingCapture, RDS_MASTER_SUPPORTING_CAPTURE_KEYS);
+  const collectionStartedAt = timestamp(supportingCapture.collectionStartedAt);
+  const collectionCompletedAt = timestamp(supportingCapture.collectionCompletedAt);
+  if (
+    supportingCapture.schemaVersion !== 1 ||
+    supportingCapture.artifactType !== 'RDS_MASTER_LIFECYCLE_CAPTURE' ||
+    supportingCapture.format !== 'SANITIZED_CANONICAL_JSON_V1' ||
+    collectionStartedAt.milliseconds >= collectionCompletedAt.milliseconds ||
+    collectionCompletedAt.text !== observedAt.text ||
+    collectionCompletedAt.milliseconds - collectionStartedAt.milliseconds >
+      MAX_RDS_MASTER_LIFECYCLE_CAPTURE_MILLISECONDS
+  ) {
+    return invalid();
+  }
+  const captureSha256 = sha256(supportingCapture.captureSha256);
+
+  const binding = record(parsed.binding, RDS_MASTER_BINDING_KEYS);
+  const applicationDataKeyArn = awsArn(
+    binding.applicationDataKeyArn,
+    'kms',
+    KMS_KEY_ARN_RESOURCE_PATTERN,
+  ).value;
+  const compatibilityOutputSecretArn = awsArn(
+    binding.compatibilityOutputSecretArn,
+    'secretsmanager',
+    RDS_MANAGED_SECRET_ARN_RESOURCE_PATTERN,
+  ).value;
+  const databaseInstanceArn = awsArn(
+    binding.databaseInstanceArn,
+    'rds',
+    RDS_DATABASE_ARN_RESOURCE_PATTERN,
+  ).value;
+  const databaseManagedSecretArn = awsArn(
+    binding.databaseManagedSecretArn,
+    'secretsmanager',
+    RDS_MANAGED_SECRET_ARN_RESOURCE_PATTERN,
+  ).value;
+  const primaryDatabaseResourceId = databaseResourceId(binding.databaseResourceId);
+  const managedSecretKmsKeyArn = awsArn(
+    binding.managedSecretKmsKeyArn,
+    'kms',
+    KMS_KEY_ARN_RESOURCE_PATTERN,
+  ).value;
+  if (
+    binding.masterUsername !== 'crypto_admin' ||
+    binding.managedSecretStatus !== 'active' ||
+    compatibilityOutputSecretArn !== databaseManagedSecretArn ||
+    managedSecretKmsKeyArn !== applicationDataKeyArn
+  ) {
+    return invalid();
+  }
+
+  const access = record(parsed.access, RDS_MASTER_ACCESS_KEYS);
+  const accessObservedAt = timestamp(access.observedAt);
+  const rotation = record(parsed.rotation, RDS_MASTER_ROTATION_KEYS);
+  const rotationStartedAt = timestamp(rotation.startedAt);
+  const rotationCompletedAt = timestamp(rotation.completedAt);
+  const previousSecretVersionId = secretVersionId(rotation.previousSecretVersionId);
+  const currentSecretVersionId = secretVersionId(rotation.currentSecretVersionId);
+  if (
+    rotation.rotationScheduleDays !== 7 ||
+    rotation.currentSecretVersionStage !== 'AWSCURRENT' ||
+    rotation.previousSecretVersionStage !== 'AWSPREVIOUS' ||
+    rotation.managedSecretStatus !== 'active' ||
+    previousSecretVersionId === currentSecretVersionId
+  ) {
+    return invalid();
+  }
+
+  const restore = record(parsed.restore, RDS_MASTER_RESTORE_KEYS);
+  const restoreStartedAt = timestamp(restore.startedAt);
+  const restoreCompletedAt = timestamp(restore.completedAt);
+  const restoredDatabaseInstanceArn = awsArn(
+    restore.databaseInstanceArn,
+    'rds',
+    RDS_DATABASE_ARN_RESOURCE_PATTERN,
+  ).value;
+  const restoredDatabaseResourceId = databaseResourceId(restore.databaseResourceId);
+  const reboundManagedSecretArn = awsArn(
+    restore.reboundManagedSecretArn,
+    'secretsmanager',
+    RDS_MANAGED_SECRET_ARN_RESOURCE_PATTERN,
+  ).value;
+  const reboundManagedSecretKmsKeyArn = awsArn(
+    restore.reboundManagedSecretKmsKeyArn,
+    'kms',
+    KMS_KEY_ARN_RESOURCE_PATTERN,
+  ).value;
+  if (
+    restore.reboundManagedSecretStatus !== 'active' ||
+    restore.reboundManagedSecretVersionStage !== 'AWSCURRENT' ||
+    restoredDatabaseInstanceArn === databaseInstanceArn ||
+    restoredDatabaseResourceId === primaryDatabaseResourceId ||
+    reboundManagedSecretArn === databaseManagedSecretArn ||
+    reboundManagedSecretKmsKeyArn !== applicationDataKeyArn
+  ) {
+    return invalid();
+  }
+  if (
+    collectionStartedAt.milliseconds > accessObservedAt.milliseconds ||
+    accessObservedAt.milliseconds > rotationStartedAt.milliseconds ||
+    rotationStartedAt.milliseconds >= rotationCompletedAt.milliseconds ||
+    rotationCompletedAt.milliseconds > restoreStartedAt.milliseconds ||
+    restoreStartedAt.milliseconds >= restoreCompletedAt.milliseconds ||
+    restoreCompletedAt.milliseconds !== collectionCompletedAt.milliseconds
+  ) {
+    return invalid();
+  }
+
+  return deepFreeze({
+    schemaVersion: 1,
+    artifactType: 'RDS_MASTER_LIFECYCLE_EVIDENCE',
+    status: 'ACCEPTED',
+    observedAt: observedAt.text,
+    supportingCapture: {
+      schemaVersion: 1,
+      artifactType: 'RDS_MASTER_LIFECYCLE_CAPTURE',
+      format: 'SANITIZED_CANONICAL_JSON_V1',
+      captureSha256,
+      collectionStartedAt: collectionStartedAt.text,
+      collectionCompletedAt: collectionCompletedAt.text,
+    },
+    binding: {
+      applicationDataKeyArn,
+      compatibilityOutputSecretArn,
+      databaseInstanceArn,
+      databaseManagedSecretArn,
+      databaseResourceId: primaryDatabaseResourceId,
+      managedSecretKmsKeyArn,
+      managedSecretStatus: 'active',
+      masterUsername: 'crypto_admin',
+    },
+    access: {
+      applicationTaskCredentialIsolation: pass(access.applicationTaskCredentialIsolation),
+      bootstrapIamAndKmsAccess: pass(access.bootstrapIamAndKmsAccess),
+      migrationTaskCredentialIsolation: pass(access.migrationTaskCredentialIsolation),
+      observedAt: accessObservedAt.text,
+    },
+    rotation: {
+      automaticRotationEnabled: pass(rotation.automaticRotationEnabled),
+      completedAt: rotationCompletedAt.text,
+      currentSecretVersionId,
+      currentSecretVersionStage: 'AWSCURRENT',
+      managedSecretStatus: 'active',
+      masterSessionDrain: pass(rotation.masterSessionDrain),
+      newMasterAuthentication: pass(rotation.newMasterAuthentication),
+      oldMasterAuthenticationDenied: pass(rotation.oldMasterAuthenticationDenied),
+      previousSecretVersionId,
+      previousSecretVersionStage: 'AWSPREVIOUS',
+      rotationCompleted: pass(rotation.rotationCompleted),
+      rotationScheduleDays: 7,
+      runtimeCredentialContinuity: pass(rotation.runtimeCredentialContinuity),
+      startedAt: rotationStartedAt.text,
+    },
+    restore: {
+      completedAt: restoreCompletedAt.text,
+      databaseInstanceArn: restoredDatabaseInstanceArn,
+      databaseResourceId: restoredDatabaseResourceId,
+      originalMasterAuthenticationDenied: pass(restore.originalMasterAuthenticationDenied),
+      reboundManagedSecretArn,
+      reboundManagedSecretKmsKeyArn,
+      reboundManagedSecretStatus: 'active',
+      reboundManagedSecretVersionId: secretVersionId(restore.reboundManagedSecretVersionId),
+      reboundManagedSecretVersionStage: 'AWSCURRENT',
+      rebindingStatus: pass(restore.rebindingStatus),
+      restoredMasterAuthentication: pass(restore.restoredMasterAuthentication),
+      runtimeCredentialContinuity: pass(restore.runtimeCredentialContinuity),
+      startedAt: restoreStartedAt.text,
+    },
+  });
+}
+
+function validateRdsMasterLifecycleTargetBinding(
+  evidence: ProductionRdsMasterLifecycleEvidence,
+  target: VerifiedProductionDeploymentTarget,
+): void {
+  if (
+    evidence.binding.applicationDataKeyArn !== target.rds.applicationDataKeyArn ||
+    evidence.binding.compatibilityOutputSecretArn !== target.rds.databaseManagedSecretArn ||
+    evidence.binding.databaseInstanceArn !== target.rds.databaseInstanceArn ||
+    evidence.binding.databaseManagedSecretArn !== target.rds.databaseManagedSecretArn ||
+    evidence.binding.databaseResourceId !== target.rds.databaseResourceId ||
+    evidence.binding.managedSecretKmsKeyArn !== target.rds.applicationDataKeyArn
+  ) {
+    return invalid();
+  }
+  const identities: readonly Readonly<[string, 'kms' | 'rds' | 'secretsmanager', RegExp]>[] = [
+    [evidence.binding.applicationDataKeyArn, 'kms', KMS_KEY_ARN_RESOURCE_PATTERN],
+    [
+      evidence.binding.compatibilityOutputSecretArn,
+      'secretsmanager',
+      RDS_MANAGED_SECRET_ARN_RESOURCE_PATTERN,
+    ],
+    [evidence.binding.databaseInstanceArn, 'rds', RDS_DATABASE_ARN_RESOURCE_PATTERN],
+    [
+      evidence.binding.databaseManagedSecretArn,
+      'secretsmanager',
+      RDS_MANAGED_SECRET_ARN_RESOURCE_PATTERN,
+    ],
+    [evidence.binding.managedSecretKmsKeyArn, 'kms', KMS_KEY_ARN_RESOURCE_PATTERN],
+    [evidence.restore.databaseInstanceArn, 'rds', RDS_DATABASE_ARN_RESOURCE_PATTERN],
+    [
+      evidence.restore.reboundManagedSecretArn,
+      'secretsmanager',
+      RDS_MANAGED_SECRET_ARN_RESOURCE_PATTERN,
+    ],
+    [evidence.restore.reboundManagedSecretKmsKeyArn, 'kms', KMS_KEY_ARN_RESOURCE_PATTERN],
+  ];
+  for (const [value, service, resourcePattern] of identities) {
+    const parsed = awsArn(value, service, resourcePattern);
+    if (parsed.accountId !== target.awsAccountId || parsed.region !== target.awsRegion) {
+      return invalid();
+    }
+  }
 }
 
 function readEvidenceIndex(
@@ -432,6 +872,10 @@ function content(value: unknown): ProductionEvidenceBundleContent {
     authenticationDeploymentEvidence: observation(
       parsed.authenticationDeploymentEvidence,
       'AUTHENTICATION_DEPLOYMENT_EVIDENCE',
+      issuedAt.milliseconds,
+    ),
+    rdsMasterLifecycleEvidence: rdsMasterLifecycleEvidence(
+      parsed.rdsMasterLifecycleEvidence,
       issuedAt.milliseconds,
     ),
     externalEgressLiveEvidence: observation(
@@ -656,7 +1100,11 @@ function validateContext(
   ) {
     return invalid();
   }
-  targetResolver(validatedContent.deploymentTargetId, validatedContent.deploymentTargetSha256);
+  const target = targetResolver(
+    validatedContent.deploymentTargetId,
+    validatedContent.deploymentTargetSha256,
+  );
+  validateRdsMasterLifecycleTargetBinding(validatedContent.rdsMasterLifecycleEvidence, target);
   return evaluatedAt.milliseconds;
 }
 

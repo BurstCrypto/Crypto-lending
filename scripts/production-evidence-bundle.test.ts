@@ -33,6 +33,7 @@ import {
   type ProductionEvidenceSignature,
   type ProductionEvidenceSignerRole,
   type ProductionLiveReadEvidenceIndex,
+  type ProductionRdsMasterLifecycleEvidence,
   type TestProductionEvidenceBundleVerificationOptions,
   type UnsignedProductionEvidenceBundle,
 } from './production-evidence-bundle';
@@ -57,6 +58,20 @@ const MANIFEST_SHA256 = '1'.repeat(64);
 const DIRECTORY_SHA256 = 'b'.repeat(64);
 const EVALUATED_AT = '2026-09-04T12:00:00.000Z';
 const PROVIDER_IDS = Object.freeze(Array.from({ length: 10 }, (_, index) => `provider-${index}`));
+const AWS_ACCOUNT_ID = '123456789012';
+const AWS_REGION = 'us-east-1';
+const APPLICATION_DATA_KEY_ARN = `arn:aws:kms:${AWS_REGION}:${AWS_ACCOUNT_ID}:key/11111111-1111-4111-8111-111111111111`;
+const APPLICATION_STACK_ID = `arn:aws:cloudformation:${AWS_REGION}:${AWS_ACCOUNT_ID}:stack/crypto-lending-production/11111111-1111-4111-8111-111111111111`;
+const DATABASE_INSTANCE_ARN = `arn:aws:rds:${AWS_REGION}:${AWS_ACCOUNT_ID}:db:crypto-lending-production`;
+const RESTORED_DATABASE_INSTANCE_ARN = `arn:aws:rds:${AWS_REGION}:${AWS_ACCOUNT_ID}:db:crypto-lending-production-restore`;
+const DATABASE_RESOURCE_ID = `db-${'A'.repeat(26)}`;
+const RESTORED_DATABASE_RESOURCE_ID = `db-${'B'.repeat(26)}`;
+const DATABASE_MANAGED_SECRET_ARN = `arn:aws:secretsmanager:${AWS_REGION}:${AWS_ACCOUNT_ID}:secret:rds!db-${'a'.repeat(36)}-AbCdEf`;
+const REBOUND_MANAGED_SECRET_ARN = `arn:aws:secretsmanager:${AWS_REGION}:${AWS_ACCOUNT_ID}:secret:rds!db-${'b'.repeat(36)}-GhIjKl`;
+const PREVIOUS_SECRET_VERSION_ID = 'p'.repeat(32);
+const CURRENT_SECRET_VERSION_ID = 'c'.repeat(32);
+const REBOUND_SECRET_VERSION_ID = 'r'.repeat(32);
+const RDS_LIFECYCLE_CAPTURE_SHA256 = 'e'.repeat(64);
 const ISSUER_KEY = generateKeyPairSync('ed25519');
 const VERIFIER_KEY = generateKeyPairSync('ed25519');
 const OPTIONAL_KEY = generateKeyPairSync('ed25519');
@@ -98,14 +113,21 @@ function validDeploymentTarget(
   return {
     targetId: 'production-us-east-1-primary',
     environment: 'production',
-    awsAccountId: '123456789012',
-    awsRegion: 'us-east-1',
+    awsAccountId: AWS_ACCOUNT_ID,
+    awsRegion: AWS_REGION,
     publicOrigin: 'https://app.example.com',
     cognito: {
       userPoolId: 'us-east-1_AbCdEf123',
       appClientId: 'a'.repeat(26),
       loginHost: 'crypto-lending.auth.us-east-1.amazoncognito.com',
       issuer: 'https://cognito-idp.us-east-1.amazonaws.com/us-east-1_AbCdEf123',
+    },
+    rds: {
+      cloudFormationStackId: APPLICATION_STACK_ID,
+      databaseInstanceArn: DATABASE_INSTANCE_ARN,
+      databaseResourceId: DATABASE_RESOURCE_ID,
+      databaseManagedSecretArn: DATABASE_MANAGED_SECRET_ARN,
+      applicationDataKeyArn: APPLICATION_DATA_KEY_ARN,
     },
     deployedComponents: {
       api,
@@ -121,7 +143,7 @@ function targetRegistry(
   targets: readonly ProductionDeploymentTarget[] = [validDeploymentTarget()],
 ): ProductionDeploymentTargetRegistry {
   return Object.freeze({
-    schemaVersion: 1,
+    schemaVersion: 2,
     artifactType: 'PRODUCTION_DEPLOYMENT_TARGET_REGISTRY',
     targets: Object.freeze(targets),
   });
@@ -181,6 +203,70 @@ function liveReadEvidenceIndex(
   });
 }
 
+function validRdsMasterLifecycleEvidence(): ProductionRdsMasterLifecycleEvidence {
+  return {
+    schemaVersion: 1,
+    artifactType: 'RDS_MASTER_LIFECYCLE_EVIDENCE',
+    status: 'ACCEPTED',
+    observedAt: '2026-09-04T11:23:00.000Z',
+    supportingCapture: {
+      schemaVersion: 1,
+      artifactType: 'RDS_MASTER_LIFECYCLE_CAPTURE',
+      format: 'SANITIZED_CANONICAL_JSON_V1',
+      captureSha256: RDS_LIFECYCLE_CAPTURE_SHA256,
+      collectionStartedAt: '2026-09-04T10:30:00.000Z',
+      collectionCompletedAt: '2026-09-04T11:23:00.000Z',
+    },
+    binding: {
+      applicationDataKeyArn: APPLICATION_DATA_KEY_ARN,
+      compatibilityOutputSecretArn: DATABASE_MANAGED_SECRET_ARN,
+      databaseInstanceArn: DATABASE_INSTANCE_ARN,
+      databaseManagedSecretArn: DATABASE_MANAGED_SECRET_ARN,
+      databaseResourceId: DATABASE_RESOURCE_ID,
+      managedSecretKmsKeyArn: APPLICATION_DATA_KEY_ARN,
+      managedSecretStatus: 'active',
+      masterUsername: 'crypto_admin',
+    },
+    access: {
+      applicationTaskCredentialIsolation: 'PASS',
+      bootstrapIamAndKmsAccess: 'PASS',
+      migrationTaskCredentialIsolation: 'PASS',
+      observedAt: '2026-09-04T10:35:00.000Z',
+    },
+    rotation: {
+      automaticRotationEnabled: 'PASS',
+      completedAt: '2026-09-04T10:50:00.000Z',
+      currentSecretVersionId: CURRENT_SECRET_VERSION_ID,
+      currentSecretVersionStage: 'AWSCURRENT',
+      managedSecretStatus: 'active',
+      masterSessionDrain: 'PASS',
+      newMasterAuthentication: 'PASS',
+      oldMasterAuthenticationDenied: 'PASS',
+      previousSecretVersionId: PREVIOUS_SECRET_VERSION_ID,
+      previousSecretVersionStage: 'AWSPREVIOUS',
+      rotationCompleted: 'PASS',
+      rotationScheduleDays: 7,
+      runtimeCredentialContinuity: 'PASS',
+      startedAt: '2026-09-04T10:40:00.000Z',
+    },
+    restore: {
+      completedAt: '2026-09-04T11:23:00.000Z',
+      databaseInstanceArn: RESTORED_DATABASE_INSTANCE_ARN,
+      databaseResourceId: RESTORED_DATABASE_RESOURCE_ID,
+      originalMasterAuthenticationDenied: 'PASS',
+      reboundManagedSecretArn: REBOUND_MANAGED_SECRET_ARN,
+      reboundManagedSecretKmsKeyArn: APPLICATION_DATA_KEY_ARN,
+      reboundManagedSecretStatus: 'active',
+      reboundManagedSecretVersionId: REBOUND_SECRET_VERSION_ID,
+      reboundManagedSecretVersionStage: 'AWSCURRENT',
+      rebindingStatus: 'PASS',
+      restoredMasterAuthentication: 'PASS',
+      runtimeCredentialContinuity: 'PASS',
+      startedAt: '2026-09-04T10:55:00.000Z',
+    },
+  };
+}
+
 function validContent(
   overrides: Partial<ProductionEvidenceBundleContent> = {},
 ): ProductionEvidenceBundleContent {
@@ -199,6 +285,7 @@ function validContent(
       status: 'ACCEPTED',
       observedAt: '2026-09-04T11:20:00.000Z',
     },
+    rdsMasterLifecycleEvidence: validRdsMasterLifecycleEvidence(),
     externalEgressLiveEvidence: {
       artifactType: 'EXTERNAL_EGRESS_LIVE_EVIDENCE',
       status: 'ACCEPTED',
@@ -219,7 +306,7 @@ function unsignedBundle(
   content: ProductionEvidenceBundleContent = validContent(),
 ): UnsignedProductionEvidenceBundle {
   return Object.freeze({
-    schemaVersion: 1,
+    schemaVersion: 2,
     artifactType: 'PRODUCTION_CONTROLLED_EVIDENCE_BUNDLE',
     content,
   });
@@ -289,6 +376,29 @@ function canonicalBytes(value: unknown): Buffer {
   return Buffer.from(canonicalProductionEvidenceJson(value), 'utf8');
 }
 
+function mutableRecord(value: unknown): Record<string, unknown> {
+  assert.ok(value !== null && typeof value === 'object' && !Array.isArray(value));
+  return value as Record<string, unknown>;
+}
+
+function expectInvalidRdsMasterLifecycleMutation(
+  mutate: (evidence: Record<string, unknown>) => void,
+  options: TestProductionEvidenceBundleVerificationOptions = testOptions(),
+  label?: string,
+): void {
+  const candidate = structuredClone(validContent()) as unknown as Record<string, unknown>;
+  mutate(mutableRecord(candidate.rdsMasterLifecycleEvidence));
+  assert.throws(
+    () =>
+      verifyProductionEvidenceBundleBytesWithTestRegistries(
+        signedBundleBytes(candidate as unknown as ProductionEvidenceBundleContent),
+        options,
+      ),
+    ProductionEvidenceBundleInvalidError,
+    label,
+  );
+}
+
 test('dual-role Ed25519 quorum verifies one manifest, target, and read-only payload', () => {
   const options = testOptions();
   const verified = verifyProductionEvidenceBundleBytesWithTestRegistries(
@@ -297,12 +407,31 @@ test('dual-role Ed25519 quorum verifies one manifest, target, and read-only payl
   );
 
   assert.equal(verified.signatureValidated, true);
+  assert.equal(verified.schemaVersion, 2);
   assert.deepEqual(verified.verifiedSignerRoles, [
     'DEPLOYMENT_EVIDENCE_ISSUER',
     'INDEPENDENT_RELEASE_VERIFIER',
   ]);
   assert.equal(verified.content.scope, 'READ_ONLY');
   assert.equal(verified.content.mainnetWriteEvidenceIndex, null);
+  assert.equal(
+    verified.content.rdsMasterLifecycleEvidence.artifactType,
+    'RDS_MASTER_LIFECYCLE_EVIDENCE',
+  );
+  assert.equal(verified.content.rdsMasterLifecycleEvidence.rotation.rotationScheduleDays, 7);
+  assert.equal(Object.isFrozen(verified.content.rdsMasterLifecycleEvidence), true);
+  assert.equal(
+    Object.isFrozen(verified.content.rdsMasterLifecycleEvidence.supportingCapture),
+    true,
+  );
+  assert.equal(Object.isFrozen(verified.content.rdsMasterLifecycleEvidence.binding), true);
+  assert.equal(Object.isFrozen(verified.content.rdsMasterLifecycleEvidence.access), true);
+  assert.equal(Object.isFrozen(verified.content.rdsMasterLifecycleEvidence.rotation), true);
+  assert.equal(Object.isFrozen(verified.content.rdsMasterLifecycleEvidence.restore), true);
+  assert.match(
+    productionEvidenceBundleSigningBytes(unsignedBundle()).toString('utf8'),
+    /^crypto-lending:production-controlled-evidence-bundle:v2\n/u,
+  );
   assert.match(verified.bundleSha256, /^[a-f0-9]{64}$/u);
   assert.equal(Object.isFrozen(verified), true);
   assert.equal(isVerifiedProductionEvidenceBundle(verified), false);
@@ -392,9 +521,509 @@ test('deployment target binding prevents cross-environment and cross-target repl
   );
 });
 
-test('deployment targets close Cognito, origin, account/region, image, and task identities', () => {
+test('RDS master lifecycle evidence is mandatory, exact-shaped, canonical, and fresh', () => {
+  const missingEvidence = structuredClone(validContent()) as unknown as Record<string, unknown>;
+  delete missingEvidence.rdsMasterLifecycleEvidence;
+  expectInvalid(() =>
+    signedBundleBytes(missingEvidence as unknown as ProductionEvidenceBundleContent),
+  );
+  for (const invalidEvidence of [null, [], 'caller-asserted-evidence']) {
+    const invalidContent = structuredClone(validContent()) as unknown as Record<string, unknown>;
+    invalidContent.rdsMasterLifecycleEvidence = invalidEvidence;
+    expectInvalid(() =>
+      signedBundleBytes(invalidContent as unknown as ProductionEvidenceBundleContent),
+    );
+  }
+
+  const mutations: readonly (readonly [string, (evidence: Record<string, unknown>) => void])[] = [
+    ['null binding', (evidence) => Object.assign(evidence, { binding: null })],
+    ['null supporting capture', (evidence) => Object.assign(evidence, { supportingCapture: null })],
+    ['wrong schema', (evidence) => Object.assign(evidence, { schemaVersion: 2 })],
+    ['wrong artifact type', (evidence) => Object.assign(evidence, { artifactType: 'OTHER' })],
+    ['wrong artifact status', (evidence) => Object.assign(evidence, { status: 'PASS' })],
+    [
+      'noncanonical observedAt',
+      (evidence) => Object.assign(evidence, { observedAt: '2026-09-04T11:23:00Z' }),
+    ],
+    [
+      'future observedAt',
+      (evidence) => Object.assign(evidence, { observedAt: '2026-09-04T11:30:00.001Z' }),
+    ],
+    [
+      'stale observedAt',
+      (evidence) => Object.assign(evidence, { observedAt: '2026-09-04T10:29:59.999Z' }),
+    ],
+    ['extra root password', (evidence) => Object.assign(evidence, { password: 'do-not-accept' })],
+    [
+      'missing supporting capture digest',
+      (evidence) => delete mutableRecord(evidence.supportingCapture).captureSha256,
+    ],
+    [
+      'extra supporting capture location',
+      (evidence) =>
+        Object.assign(mutableRecord(evidence.supportingCapture), {
+          storageLocation: 'caller/asserted/file',
+        }),
+    ],
+    [
+      'missing binding field',
+      (evidence) => delete mutableRecord(evidence.binding).databaseResourceId,
+    ],
+    [
+      'extra binding secret field',
+      (evidence) =>
+        Object.assign(mutableRecord(evidence.binding), { masterPassword: 'do-not-accept' }),
+    ],
+    [
+      'missing access field',
+      (evidence) => delete mutableRecord(evidence.access).bootstrapIamAndKmsAccess,
+    ],
+    [
+      'extra access freeform field',
+      (evidence) => Object.assign(mutableRecord(evidence.access), { notes: 'caller assertion' }),
+    ],
+    [
+      'missing rotation field',
+      (evidence) => delete mutableRecord(evidence.rotation).rotationCompleted,
+    ],
+    [
+      'extra rotation reference field',
+      (evidence) =>
+        Object.assign(mutableRecord(evidence.rotation), {
+          evidenceReferenceId: 'caller/asserted/file',
+        }),
+    ],
+    ['missing restore field', (evidence) => delete mutableRecord(evidence.restore).rebindingStatus],
+    [
+      'extra restore connection string',
+      (evidence) =>
+        Object.assign(mutableRecord(evidence.restore), {
+          connectionString: 'postgres://do-not-accept',
+        }),
+    ],
+  ];
+
+  for (const [label, mutate] of mutations) {
+    expectInvalidRdsMasterLifecycleMutation(mutate, testOptions(), label);
+  }
+});
+
+test('RDS lifecycle capture provenance is exact, immutable, and chronologically bounded', () => {
+  const mutations: readonly (readonly [string, (evidence: Record<string, unknown>) => void])[] = [
+    [
+      'wrong capture schema',
+      (evidence) => {
+        mutableRecord(evidence.supportingCapture).schemaVersion = 2;
+      },
+    ],
+    [
+      'wrong capture type',
+      (evidence) => {
+        mutableRecord(evidence.supportingCapture).artifactType = 'OTHER';
+      },
+    ],
+    [
+      'wrong capture format',
+      (evidence) => {
+        mutableRecord(evidence.supportingCapture).format = 'FREEFORM_TEXT';
+      },
+    ],
+    [
+      'malformed capture digest',
+      (evidence) => {
+        mutableRecord(evidence.supportingCapture).captureSha256 = 'E'.repeat(64);
+      },
+    ],
+    [
+      'noncanonical collection start',
+      (evidence) => {
+        mutableRecord(evidence.supportingCapture).collectionStartedAt = '2026-09-04T10:30:00Z';
+      },
+    ],
+    [
+      'capture completion differs from observation',
+      (evidence) => {
+        mutableRecord(evidence.supportingCapture).collectionCompletedAt =
+          '2026-09-04T11:22:59.999Z';
+      },
+    ],
+    [
+      'capture exceeds one day',
+      (evidence) => {
+        mutableRecord(evidence.supportingCapture).collectionStartedAt = '2026-09-03T11:22:59.999Z';
+      },
+    ],
+    [
+      'access predates capture',
+      (evidence) => {
+        mutableRecord(evidence.access).observedAt = '2026-09-04T10:29:59.999Z';
+      },
+    ],
+    [
+      'access follows rotation start',
+      (evidence) => {
+        mutableRecord(evidence.access).observedAt = '2026-09-04T10:40:00.001Z';
+      },
+    ],
+    [
+      'rotation has no duration',
+      (evidence) => {
+        mutableRecord(evidence.rotation).startedAt = '2026-09-04T10:50:00.000Z';
+      },
+    ],
+    [
+      'rotation overlaps restore',
+      (evidence) => {
+        mutableRecord(evidence.rotation).completedAt = '2026-09-04T10:55:00.001Z';
+      },
+    ],
+    [
+      'restore has no duration',
+      (evidence) => {
+        mutableRecord(evidence.restore).startedAt = '2026-09-04T11:23:00.000Z';
+      },
+    ],
+    [
+      'restore completion differs from capture',
+      (evidence) => {
+        mutableRecord(evidence.restore).completedAt = '2026-09-04T11:22:59.999Z';
+      },
+    ],
+  ];
+
+  for (const [label, mutate] of mutations) {
+    expectInvalidRdsMasterLifecycleMutation(mutate, testOptions(), label);
+  }
+});
+
+test('RDS master lifecycle evidence requires exact access, rotation, and restore outcomes', () => {
+  const passFields: readonly (readonly ['access' | 'rotation' | 'restore', string])[] = [
+    ['access', 'applicationTaskCredentialIsolation'],
+    ['access', 'bootstrapIamAndKmsAccess'],
+    ['access', 'migrationTaskCredentialIsolation'],
+    ['rotation', 'automaticRotationEnabled'],
+    ['rotation', 'masterSessionDrain'],
+    ['rotation', 'newMasterAuthentication'],
+    ['rotation', 'oldMasterAuthenticationDenied'],
+    ['rotation', 'rotationCompleted'],
+    ['rotation', 'runtimeCredentialContinuity'],
+    ['restore', 'originalMasterAuthenticationDenied'],
+    ['restore', 'rebindingStatus'],
+    ['restore', 'restoredMasterAuthentication'],
+    ['restore', 'runtimeCredentialContinuity'],
+  ];
+
+  for (const [group, field] of passFields) {
+    expectInvalidRdsMasterLifecycleMutation(
+      (evidence) => {
+        mutableRecord(evidence[group])[field] = 'FAIL';
+      },
+      testOptions(),
+      `${group}.${field}`,
+    );
+  }
+
+  const scalarMutations: readonly (readonly [
+    string,
+    (evidence: Record<string, unknown>) => void,
+  ])[] = [
+    [
+      'master username',
+      (evidence) => {
+        mutableRecord(evidence.binding).masterUsername = 'postgres';
+      },
+    ],
+    [
+      'initial managed secret is not active',
+      (evidence) => {
+        mutableRecord(evidence.binding).managedSecretStatus = 'impaired';
+      },
+    ],
+    [
+      'numeric rotation schedule',
+      (evidence) => {
+        mutableRecord(evidence.rotation).rotationScheduleDays = 6;
+      },
+    ],
+    [
+      'string rotation schedule',
+      (evidence) => {
+        mutableRecord(evidence.rotation).rotationScheduleDays = '7';
+      },
+    ],
+    [
+      'same previous and current version',
+      (evidence) => {
+        mutableRecord(evidence.rotation).previousSecretVersionId = CURRENT_SECRET_VERSION_ID;
+      },
+    ],
+    [
+      'current version lacks AWSCURRENT',
+      (evidence) => {
+        mutableRecord(evidence.rotation).currentSecretVersionStage = 'AWSPENDING';
+      },
+    ],
+    [
+      'previous version lacks AWSPREVIOUS',
+      (evidence) => {
+        mutableRecord(evidence.rotation).previousSecretVersionStage = 'AWSCURRENT';
+      },
+    ],
+    [
+      'rotated managed secret is not active',
+      (evidence) => {
+        mutableRecord(evidence.rotation).managedSecretStatus = 'rotating';
+      },
+    ],
+    [
+      'short current version',
+      (evidence) => {
+        mutableRecord(evidence.rotation).currentSecretVersionId = 'short';
+      },
+    ],
+    [
+      'invalid rebound version',
+      (evidence) => {
+        mutableRecord(evidence.restore).reboundManagedSecretVersionId = 'invalid';
+      },
+    ],
+    [
+      'rebound managed secret is not active',
+      (evidence) => {
+        mutableRecord(evidence.restore).reboundManagedSecretStatus = 'impaired';
+      },
+    ],
+    [
+      'rebound version lacks AWSCURRENT',
+      (evidence) => {
+        mutableRecord(evidence.restore).reboundManagedSecretVersionStage = 'AWSPREVIOUS';
+      },
+    ],
+    [
+      'invalid primary database resource ID',
+      (evidence) => {
+        mutableRecord(evidence.binding).databaseResourceId = '';
+      },
+    ],
+    [
+      'invalid restored database resource ID',
+      (evidence) => {
+        mutableRecord(evidence.restore).databaseResourceId = 'x'.repeat(257);
+      },
+    ],
+  ];
+
+  for (const [label, mutate] of scalarMutations) {
+    expectInvalidRdsMasterLifecycleMutation(mutate, testOptions(), label);
+  }
+});
+
+test('RDS and Secrets Manager opaque identifiers are bounded without invented alphabets', () => {
+  const target = validDeploymentTarget({
+    rds: {
+      ...validDeploymentTarget().rds,
+      databaseResourceId: 'opaque/resource.id:v2_01',
+    },
+  });
+  const content = structuredClone(validContent()) as unknown as Record<string, unknown>;
+  content.deploymentTargetSha256 = productionDeploymentTargetSha256(target);
+  const lifecycle = mutableRecord(content.rdsMasterLifecycleEvidence);
+  mutableRecord(lifecycle.binding).databaseResourceId = target.rds.databaseResourceId;
+  mutableRecord(lifecycle.rotation).previousSecretVersionId = '.'.repeat(32);
+
+  assert.doesNotThrow(() =>
+    verifyProductionEvidenceBundleBytesWithTestRegistries(
+      signedBundleBytes(content as unknown as ProductionEvidenceBundleContent),
+      testOptions({ deploymentTargetRegistry: targetRegistry([target]) }),
+    ),
+  );
+});
+
+test('RDS master lifecycle identities and restore rebinding fail closed', () => {
+  const otherSecretArn = DATABASE_MANAGED_SECRET_ARN.replace('a'.repeat(36), 'd'.repeat(36));
+  const otherKeyArn = APPLICATION_DATA_KEY_ARN.replace(
+    '11111111-1111-4111-8111-111111111111',
+    '22222222-2222-4222-8222-222222222222',
+  );
+  const mutations: readonly (readonly [string, (evidence: Record<string, unknown>) => void])[] = [
+    [
+      'compatibility output does not identify the managed secret',
+      (evidence) => {
+        mutableRecord(evidence.binding).compatibilityOutputSecretArn = otherSecretArn;
+      },
+    ],
+    [
+      'managed secret uses another KMS key',
+      (evidence) => {
+        mutableRecord(evidence.binding).managedSecretKmsKeyArn = otherKeyArn;
+      },
+    ],
+    [
+      'rebound secret uses another KMS key',
+      (evidence) => {
+        mutableRecord(evidence.restore).reboundManagedSecretKmsKeyArn = otherKeyArn;
+      },
+    ],
+    [
+      'restored database reuses original ARN',
+      (evidence) => {
+        mutableRecord(evidence.restore).databaseInstanceArn = DATABASE_INSTANCE_ARN;
+      },
+    ],
+    [
+      'restored database reuses original resource ID',
+      (evidence) => {
+        mutableRecord(evidence.restore).databaseResourceId = DATABASE_RESOURCE_ID;
+      },
+    ],
+    [
+      'restored database reuses original managed secret',
+      (evidence) => {
+        mutableRecord(evidence.restore).reboundManagedSecretArn = DATABASE_MANAGED_SECRET_ARN;
+      },
+    ],
+    [
+      'custom current secret namespace',
+      (evidence) => {
+        const customSecretArn = DATABASE_MANAGED_SECRET_ARN.replace(
+          'secret:rds!db-',
+          'secret:application-',
+        );
+        mutableRecord(evidence.binding).compatibilityOutputSecretArn = customSecretArn;
+        mutableRecord(evidence.binding).databaseManagedSecretArn = customSecretArn;
+      },
+    ],
+    [
+      'custom rebound secret namespace',
+      (evidence) => {
+        mutableRecord(evidence.restore).reboundManagedSecretArn =
+          REBOUND_MANAGED_SECRET_ARN.replace('secret:rds!db-', 'secret:application-');
+      },
+    ],
+    [
+      'malformed database ARN',
+      (evidence) => {
+        mutableRecord(evidence.binding).databaseInstanceArn = DATABASE_INSTANCE_ARN.replace(
+          ':db:crypto-',
+          ':cluster:crypto-',
+        );
+      },
+    ],
+    [
+      'non-AWS partition',
+      (evidence) => {
+        mutableRecord(evidence.restore).databaseInstanceArn =
+          RESTORED_DATABASE_INSTANCE_ARN.replace('arn:aws:', 'arn:aws-cn:');
+      },
+    ],
+  ];
+
+  for (const [label, mutate] of mutations) {
+    expectInvalidRdsMasterLifecycleMutation(mutate, testOptions(), label);
+  }
+});
+
+test('RDS master lifecycle identities must match the resolved AWS account and Region', () => {
+  expectInvalidRdsMasterLifecycleMutation(
+    (evidence) => {
+      const crossAccountKeyArn = APPLICATION_DATA_KEY_ARN.replace(AWS_ACCOUNT_ID, '210987654321');
+      mutableRecord(evidence.binding).applicationDataKeyArn = crossAccountKeyArn;
+      mutableRecord(evidence.binding).managedSecretKmsKeyArn = crossAccountKeyArn;
+      mutableRecord(evidence.restore).reboundManagedSecretKmsKeyArn = crossAccountKeyArn;
+    },
+    testOptions(),
+    'cross-account KMS identities',
+  );
+  expectInvalidRdsMasterLifecycleMutation(
+    (evidence) => {
+      const crossAccountSecretArn = DATABASE_MANAGED_SECRET_ARN.replace(
+        AWS_ACCOUNT_ID,
+        '210987654321',
+      );
+      mutableRecord(evidence.binding).compatibilityOutputSecretArn = crossAccountSecretArn;
+      mutableRecord(evidence.binding).databaseManagedSecretArn = crossAccountSecretArn;
+    },
+    testOptions(),
+    'cross-account current managed secret identity',
+  );
+  expectInvalidRdsMasterLifecycleMutation(
+    (evidence) => {
+      mutableRecord(evidence.binding).databaseInstanceArn = DATABASE_INSTANCE_ARN.replace(
+        AWS_REGION,
+        'us-west-2',
+      );
+    },
+    testOptions(),
+    'cross-Region primary database identity',
+  );
+  expectInvalidRdsMasterLifecycleMutation(
+    (evidence) => {
+      mutableRecord(evidence.restore).reboundManagedSecretArn = REBOUND_MANAGED_SECRET_ARN.replace(
+        AWS_REGION,
+        'us-west-2',
+      );
+    },
+    testOptions(),
+    'cross-Region rebound secret identity',
+  );
+  expectInvalidRdsMasterLifecycleMutation(
+    (evidence) => {
+      mutableRecord(evidence.restore).databaseInstanceArn = RESTORED_DATABASE_INSTANCE_ARN.replace(
+        AWS_REGION,
+        'us-west-2',
+      );
+    },
+    testOptions(),
+    'cross-Region restored database identity',
+  );
+});
+
+test('RDS lifecycle evidence must match the exact database and KMS identities in the target', () => {
+  expectInvalidRdsMasterLifecycleMutation(
+    (evidence) => {
+      const alternateSecretArn = DATABASE_MANAGED_SECRET_ARN.replace(
+        'a'.repeat(36),
+        'd'.repeat(36),
+      );
+      mutableRecord(evidence.binding).databaseInstanceArn =
+        `${DATABASE_INSTANCE_ARN}-same-account-shadow`;
+      mutableRecord(evidence.binding).databaseResourceId = 'same-account-shadow-resource';
+      mutableRecord(evidence.binding).compatibilityOutputSecretArn = alternateSecretArn;
+      mutableRecord(evidence.binding).databaseManagedSecretArn = alternateSecretArn;
+    },
+    testOptions(),
+    'same-account database substitution',
+  );
+  expectInvalidRdsMasterLifecycleMutation(
+    (evidence) => {
+      const alternateKeyArn = APPLICATION_DATA_KEY_ARN.replace(
+        '11111111-1111-4111-8111-111111111111',
+        '22222222-2222-4222-8222-222222222222',
+      );
+      mutableRecord(evidence.binding).applicationDataKeyArn = alternateKeyArn;
+      mutableRecord(evidence.binding).managedSecretKmsKeyArn = alternateKeyArn;
+      mutableRecord(evidence.restore).reboundManagedSecretKmsKeyArn = alternateKeyArn;
+    },
+    testOptions(),
+    'same-account KMS substitution',
+  );
+});
+
+test('RDS lifecycle evidence is covered by the bundle signatures', () => {
+  const tampered = jsonRecord(signedBundleBytes());
+  const lifecycle = mutableRecord(mutableRecord(tampered.content).rdsMasterLifecycleEvidence);
+  mutableRecord(lifecycle.supportingCapture).captureSha256 = 'f'.repeat(64);
+
+  expectInvalid(() =>
+    verifyProductionEvidenceBundleBytesWithTestRegistries(canonicalBytes(tampered), testOptions()),
+  );
+});
+
+test('deployment targets close Cognito, RDS/KMS, origin, account/region, image, and task identities', () => {
   const target = validDeploymentTarget();
   assert.match(productionDeploymentTargetSha256(target), /^[a-f0-9]{64}$/u);
+  assert.equal(PRODUCTION_DEPLOYMENT_TARGET_REGISTRY.schemaVersion, 2);
+  assert.equal(PRODUCTION_DEPLOYMENT_TARGET_REGISTRY.targets.length, 0);
   assert.equal(
     target.deployedComponents.api.imageUri,
     target.deployedComponents.outboxWorker.imageUri,
@@ -409,11 +1038,64 @@ test('deployment targets close Cognito, origin, account/region, image, and task 
     targetRegistry([target]),
   );
   assert.equal(isVerifiedProductionDeploymentTarget(testResolved), false);
+  assert.equal(Object.isFrozen(testResolved.rds), true);
+  assert.equal(testResolved.rds.cloudFormationStackId, APPLICATION_STACK_ID);
+  assert.equal(testResolved.rds.databaseInstanceArn, DATABASE_INSTANCE_ARN);
+  assert.equal(testResolved.rds.databaseResourceId, DATABASE_RESOURCE_ID);
+  assert.equal(testResolved.rds.databaseManagedSecretArn, DATABASE_MANAGED_SECRET_ARN);
+  assert.equal(testResolved.rds.applicationDataKeyArn, APPLICATION_DATA_KEY_ARN);
   assert.throws(
     () =>
       resolveProductionDeploymentTarget(target.targetId, productionDeploymentTargetSha256(target)),
     ProductionDeploymentTargetInvalidError,
   );
+
+  const opaqueResourceTarget = validDeploymentTarget({
+    rds: { ...target.rds, databaseResourceId: 'opaque/resource.id:v2_01' },
+  });
+  assert.match(productionDeploymentTargetSha256(opaqueResourceTarget), /^[a-f0-9]{64}$/u);
+  assert.notEqual(
+    productionDeploymentTargetSha256(opaqueResourceTarget),
+    productionDeploymentTargetSha256(target),
+  );
+  const alternateRdsIdentities: readonly ProductionDeploymentTarget['rds'][] = [
+    {
+      ...target.rds,
+      cloudFormationStackId: APPLICATION_STACK_ID.replace(
+        'crypto-lending-production/',
+        'crypto-lending-production-blue/',
+      ),
+    },
+    { ...target.rds, databaseInstanceArn: `${DATABASE_INSTANCE_ARN}-blue` },
+    { ...target.rds, databaseResourceId: 'opaque-resource-blue' },
+    {
+      ...target.rds,
+      databaseManagedSecretArn: DATABASE_MANAGED_SECRET_ARN.replace('a'.repeat(36), 'd'.repeat(36)),
+    },
+    {
+      ...target.rds,
+      applicationDataKeyArn: APPLICATION_DATA_KEY_ARN.replace(
+        '11111111-1111-4111-8111-111111111111',
+        '22222222-2222-4222-8222-222222222222',
+      ),
+    },
+  ];
+  for (const rds of alternateRdsIdentities) {
+    assert.notEqual(
+      productionDeploymentTargetSha256(validDeploymentTarget({ rds })),
+      productionDeploymentTargetSha256(target),
+    );
+  }
+
+  const accessorRds = { ...target.rds };
+  Object.defineProperty(accessorRds, 'databaseResourceId', {
+    enumerable: true,
+    get: () => DATABASE_RESOURCE_ID,
+  });
+  const { applicationDataKeyArn: omittedApplicationDataKeyArn, ...missingRdsField } = target.rds;
+  assert.equal(omittedApplicationDataKeyArn, APPLICATION_DATA_KEY_ARN);
+  const { rds: omittedRds, ...legacyTarget } = target;
+  assert.equal(omittedRds, target.rds);
 
   const hostileTargets: unknown[] = [
     validDeploymentTarget({ publicOrigin: 'http://app.example.com' }),
@@ -430,6 +1112,103 @@ test('deployment targets close Cognito, origin, account/region, image, and task 
     validDeploymentTarget({
       cognito: { ...target.cognito, userPoolId: 'us-west-2_AbCdEf123' },
     }),
+    validDeploymentTarget({
+      rds: {
+        ...target.rds,
+        cloudFormationStackId: APPLICATION_STACK_ID.replace(AWS_ACCOUNT_ID, '210987654321'),
+      },
+    }),
+    validDeploymentTarget({
+      rds: {
+        ...target.rds,
+        cloudFormationStackId: APPLICATION_STACK_ID.replace(AWS_REGION, 'us-west-2'),
+      },
+    }),
+    validDeploymentTarget({
+      rds: {
+        ...target.rds,
+        cloudFormationStackId: APPLICATION_STACK_ID.replace('arn:aws:', 'arn:aws-cn:'),
+      },
+    }),
+    validDeploymentTarget({
+      rds: {
+        ...target.rds,
+        databaseInstanceArn: DATABASE_INSTANCE_ARN.replace(AWS_ACCOUNT_ID, '210987654321'),
+      },
+    }),
+    validDeploymentTarget({
+      rds: {
+        ...target.rds,
+        databaseInstanceArn: DATABASE_INSTANCE_ARN.replace(AWS_REGION, 'us-west-2'),
+      },
+    }),
+    validDeploymentTarget({
+      rds: {
+        ...target.rds,
+        databaseInstanceArn: DATABASE_INSTANCE_ARN.replace('crypto-lending', 'crypto--lending'),
+      },
+    }),
+    validDeploymentTarget({ rds: { ...target.rds, databaseResourceId: '' } }),
+    validDeploymentTarget({ rds: { ...target.rds, databaseResourceId: 'x'.repeat(257) } }),
+    validDeploymentTarget({ rds: { ...target.rds, databaseResourceId: ' resource-id' } }),
+    validDeploymentTarget({ rds: { ...target.rds, databaseResourceId: 'resource\nidentifier' } }),
+    validDeploymentTarget({
+      rds: {
+        ...target.rds,
+        databaseManagedSecretArn: DATABASE_MANAGED_SECRET_ARN.replace(
+          'secret:rds!db-',
+          'secret:application-',
+        ),
+      },
+    }),
+    validDeploymentTarget({
+      rds: {
+        ...target.rds,
+        databaseManagedSecretArn: DATABASE_MANAGED_SECRET_ARN.replace(
+          AWS_ACCOUNT_ID,
+          '210987654321',
+        ),
+      },
+    }),
+    validDeploymentTarget({
+      rds: {
+        ...target.rds,
+        databaseManagedSecretArn: DATABASE_MANAGED_SECRET_ARN.replace(AWS_REGION, 'us-west-2'),
+      },
+    }),
+    validDeploymentTarget({
+      rds: {
+        ...target.rds,
+        applicationDataKeyArn: APPLICATION_DATA_KEY_ARN.replace(AWS_ACCOUNT_ID, '210987654321'),
+      },
+    }),
+    validDeploymentTarget({
+      rds: {
+        ...target.rds,
+        applicationDataKeyArn: APPLICATION_DATA_KEY_ARN.replace(AWS_REGION, 'us-west-2'),
+      },
+    }),
+    validDeploymentTarget({
+      rds: {
+        ...target.rds,
+        applicationDataKeyArn: APPLICATION_DATA_KEY_ARN.replace(':key/', ':alias/'),
+      },
+    }),
+    validDeploymentTarget({ rds: missingRdsField as ProductionDeploymentTarget['rds'] }),
+    validDeploymentTarget({
+      rds: {
+        ...target.rds,
+        undocumentedIdentity: true,
+      } as unknown as ProductionDeploymentTarget['rds'],
+    }),
+    validDeploymentTarget({ rds: accessorRds }),
+    validDeploymentTarget({
+      rds: Object.assign(
+        Object.create({ inherited: true }) as object,
+        target.rds,
+      ) as ProductionDeploymentTarget['rds'],
+    }),
+    legacyTarget,
     validDeploymentTarget({
       deployedComponents: {
         ...target.deployedComponents,
@@ -517,6 +1296,19 @@ test('deployment targets close Cognito, origin, account/region, image, and task 
       ProductionDeploymentTargetInvalidError,
     );
   }
+
+  assert.throws(
+    () =>
+      resolveProductionDeploymentTargetWithTestRegistry(
+        target.targetId,
+        productionDeploymentTargetSha256(target),
+        {
+          ...targetRegistry([target]),
+          schemaVersion: 1,
+        } as unknown as ProductionDeploymentTargetRegistry,
+      ),
+    ProductionDeploymentTargetInvalidError,
+  );
 });
 
 test('one signer, one physical key in two roles, or a missing technical role cannot form quorum', () => {
@@ -595,8 +1387,16 @@ test('additional scoped signatures are verified but do not replace the technical
   ]);
 });
 
-test('schema v1 rejects every write scope, write index, and write-authority assertion', () => {
+test('schema v2 rejects v1 bundles and every write-authority assertion', () => {
   const base = jsonRecord(signedBundleBytes());
+  const oldSchema = structuredClone(base);
+  oldSchema.schemaVersion = 1;
+  expectInvalid(() =>
+    productionEvidenceBundleSigningBytes({
+      ...unsignedBundle(),
+      schemaVersion: 1,
+    } as unknown as UnsignedProductionEvidenceBundle),
+  );
   const writeScope = structuredClone(base);
   (writeScope.content as Record<string, unknown>).scope = 'MAINNET_WRITE';
   const writeIndex = structuredClone(base);
@@ -614,7 +1414,7 @@ test('schema v1 rejects every write scope, write index, and write-authority asse
       .authenticationDeploymentEvidence as Record<string, unknown>
   ).evidenceReferenceId = 'caller/asserted/file';
 
-  for (const claim of [writeScope, writeIndex, writeAuthority, unverifiedReference]) {
+  for (const claim of [oldSchema, writeScope, writeIndex, writeAuthority, unverifiedReference]) {
     expectInvalid(() =>
       verifyProductionEvidenceBundleBytesWithTestRegistries(canonicalBytes(claim), testOptions()),
     );
@@ -833,6 +1633,7 @@ test('unbranded bundles cannot alter repository approvals or supply write eviden
       webEnvironmentNames: new Set<string>(),
       deployedEvidenceAccepted: false,
     },
+    rdsMasterLifecycleEvidenceAccepted: false,
     egress: {
       localValidationPassed: true,
       status: 'NOT_APPROVED',
@@ -872,5 +1673,6 @@ test('unbranded bundles cannot alter repository approvals or supply write eviden
   assert.equal(input.rpcProviders.runtimeStatus, 'NOT_APPROVED');
   assert.equal(input.rpcProviders.approvalBoundaryApproved, false);
   assert.equal(input.authentication.deployedEvidenceAccepted, false);
+  assert.equal(input.rdsMasterLifecycleEvidenceAccepted, false);
   assert.equal(input.platforms.mainnetWriteEvidenceIndex, null);
 });

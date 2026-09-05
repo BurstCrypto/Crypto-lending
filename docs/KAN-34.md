@@ -358,7 +358,33 @@ with only the `crypto_migration` secret; wait for exit code zero; run
 negative capability probes for both API and worker; then raise desired counts.
 Every future migration must preserve the exact role boundary and may not add
 broad table, sequence, function, type, schema, or default grants. Evidence
-records identifiers and redacted outcomes, never secret values.
+records identifiers and redacted outcomes, never secret values. The complete
+authorized rotation and restore exercise must place the primary and restored
+database, managed-secret, VersionId, compatibility-output, and KMS identities
+plus the exact IAM/KMS, isolation, session-drain, rotation, authentication,
+denial, continuity, and rebinding results in the nested schema-v1
+`rdsMasterLifecycleEvidence` record covered by the outer two-role-signed
+schema-v2 bundle. The primary database ARN/resource ID, RDS-managed secret ARN,
+and application-key ARN must exactly match the schema-v2 target registry's
+closed `rds` block; the outer signatures also cover the v2 target digest, which
+includes its CloudFormation stack ID. Primary, rotated, and rebound secret statuses must be `active`, with
+distinct `AWSPREVIOUS`/`AWSCURRENT` rotation VersionIds and an `AWSCURRENT`
+rebound version.
+
+Closed schema-v1 `supportingCapture` metadata identifies a separately retained
+`RDS_MASTER_LIFECYCLE_CAPTURE` in `SANITIZED_CANONICAL_JSON_V1` format and binds
+its `captureSha256` plus ordered collection/access/rotation/restore timestamps.
+The outer signatures cover that digest. The validator does not open the capture
+file, so both signing roles must independently calculate and match its canonical
+hash before signing. Repository/no-bundle, absent, forged, or unbranded input emits
+`RDS_MASTER_LIFECYCLE_EVIDENCE_MISSING`; malformed, already stale, or counterfeit
+bundle material is instead rejected during load/application as sanitized
+`PRODUCTION_PREFLIGHT_EVIDENCE_BUNDLE_INVALID`, before any report. Evidence that
+later becomes stale restores the RDS blocker during evaluation and can
+additionally fail a bound launch decision with
+`PUBLIC_LAUNCH_AUTHORITY_DECISION_UNVERIFIED`. Neither record nor capture may
+contain a password, `SecretString`, connection, or log or be checked into Git or
+Jira.
 
 The migration task's `DatabaseMigrationCredentialsSecretArn` must resolve to
 the exact `crypto_migration` secret, and the required
@@ -422,6 +448,12 @@ template deliberately does not launch the task.
   API reads from the exact pinned VersionId, task replacement, rotation drill,
   and a dedicated reviewed version-transition guard remain live or external
   evidence; this template deliberately provisions neither resource.
+- The outer two-role-signed schema-v2 bundle, nested schema-v1 lifecycle record,
+  separately retained capture digest, and
+  `RDS_MASTER_LIFECYCLE_EVIDENCE_MISSING` blocker provide a fail-closed carrier
+  for sanitized RDS master rotation and recovery results. They do not perform a
+  cloud operation, and no acceptable live lifecycle record or capture exists
+  today.
 - The isolated balance-sync source/DLQ resources and publisher wiring are
   present, but no task role can receive or delete balance messages and no
   dedicated balance consumer service is defined. The queue therefore cannot
@@ -452,7 +484,11 @@ database lifecycle, so deletion, replacement, and snapshot restoration may
 remove or change its ARN. A snapshot alone is not evidence that bootstrap
 credentials are recoverable. An authorized restore drill must rediscover the
 managed secret, prove KMS readability, and verify new authentication,
-old-password denial, master-session cleanup, and runtime-login continuity.
+old-password denial, master-session cleanup, and runtime-login continuity. Its
+primary/restored identity and exact results must populate the nested schema-v1
+`rdsMasterLifecycleEvidence` record covered by the outer two-role-signed
+schema-v2 bundle, with an independently matched digest of the separately
+retained canonical capture, before the dedicated blocker can clear.
 Retained artifacts remain billable, and encrypted snapshots depend on retained
 keys. Database deletion protection must be deliberately disabled before a
 protected database can be removed. Log groups have bounded retention, but their
