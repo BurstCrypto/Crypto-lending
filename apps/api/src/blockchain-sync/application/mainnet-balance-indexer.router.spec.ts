@@ -134,9 +134,7 @@ describe('MainnetBalanceIndexerRouter', () => {
 
   it('does not fall back across chains after a rescan failure', async () => {
     const test = harness();
-    test.solanaRescan.mockRejectedValueOnce(
-      new BalanceSyncIndexerFailure('REORG_RECOVERY_FAILED'),
-    );
+    test.solanaRescan.mockRejectedValueOnce(new BalanceSyncIndexerFailure('REORG_RECOVERY_FAILED'));
 
     await expect(
       test.router.rescanFromCheckpoint(rescanRequest(SOLANA_MAINNET_BALANCE_NETWORK_ID)),

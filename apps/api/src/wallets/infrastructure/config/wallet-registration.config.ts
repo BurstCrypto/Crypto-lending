@@ -122,11 +122,7 @@ function registryEnvironment(
   if (value !== 'MAINNET' && value !== 'TESTNET') {
     return fail('WALLET_REGISTRATION_REGISTRY_ENVIRONMENT');
   }
-  if (
-    value === 'TESTNET' &&
-    nodeEnvironment !== 'development' &&
-    nodeEnvironment !== 'test'
-  ) {
+  if (value === 'TESTNET' && nodeEnvironment !== 'development' && nodeEnvironment !== 'test') {
     return fail('WALLET_REGISTRATION_REGISTRY_ENVIRONMENT');
   }
   return value;

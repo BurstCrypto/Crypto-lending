@@ -14,10 +14,7 @@ export interface BalanceSyncConsumerPolicy {
   readonly dependencyFailureMaxDelayMs: number;
 }
 
-export type BalanceSyncConsumerWait = (
-  milliseconds: number,
-  signal: AbortSignal,
-) => Promise<void>;
+export type BalanceSyncConsumerWait = (milliseconds: number, signal: AbortSignal) => Promise<void>;
 
 export const DEFAULT_BALANCE_SYNC_CONSUMER_POLICY = Object.freeze({
   idleDelayMs: 1_000,

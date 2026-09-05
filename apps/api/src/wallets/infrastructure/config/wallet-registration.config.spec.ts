@@ -50,10 +50,7 @@ function useRings(environment: NodeJS.ProcessEnv): void {
   }
 }
 
-function expectConfigurationErrorOnField(
-  environment: NodeJS.ProcessEnv,
-  field: string,
-): void {
+function expectConfigurationErrorOnField(environment: NodeJS.ProcessEnv, field: string): void {
   let thrown: unknown;
   try {
     loadWalletRegistrationConfig(environment);
@@ -127,10 +124,7 @@ describe('wallet registration configuration', () => {
       if (nodeEnvironment === undefined) delete environment.NODE_ENV;
       else environment.NODE_ENV = nodeEnvironment;
 
-      expectConfigurationErrorOnField(
-        environment,
-        'WALLET_REGISTRATION_REGISTRY_ENVIRONMENT',
-      );
+      expectConfigurationErrorOnField(environment, 'WALLET_REGISTRATION_REGISTRY_ENVIRONMENT');
     },
   );
 

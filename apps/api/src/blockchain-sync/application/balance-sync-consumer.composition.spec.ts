@@ -110,9 +110,7 @@ describe('createBalanceSyncConsumerComposition', () => {
     const test = createHarness();
 
     expect(Object.isFrozen(test.composition)).toBe(true);
-    expect(test.composition.ethereumIndexer).toBeInstanceOf(
-      EthereumMainnetBalanceIndexerAdapter,
-    );
+    expect(test.composition.ethereumIndexer).toBeInstanceOf(EthereumMainnetBalanceIndexerAdapter);
     expect(test.composition.solanaIndexer).toBeInstanceOf(SolanaMainnetBalanceIndexerAdapter);
     expect(test.composition.indexer).toBeInstanceOf(MainnetBalanceIndexerRouter);
     expect(test.composition.jobDisposition).toBeInstanceOf(FailClosedBalanceSyncJobPort);
@@ -159,7 +157,10 @@ describe('createBalanceSyncConsumerComposition', () => {
         walletId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
         networkId,
         tier: 'PROVISIONAL' as const,
-        selector: networkId === ETHEREUM_MAINNET_BALANCE_NETWORK_ID ? 'latest' as const : 'confirmed' as const,
+        selector:
+          networkId === ETHEREUM_MAINNET_BALANCE_NETWORK_ID
+            ? ('latest' as const)
+            : ('confirmed' as const),
       });
 
     await expect(

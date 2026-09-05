@@ -10,8 +10,7 @@ import type {
 } from './ports/balance-sync.ports';
 
 export const ETHEREUM_MAINNET_BALANCE_NETWORK_ID = 'eip155:1' as const;
-export const SOLANA_MAINNET_BALANCE_NETWORK_ID =
-  'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp' as const;
+export const SOLANA_MAINNET_BALANCE_NETWORK_ID = 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp' as const;
 
 const READ_REQUEST_KEYS = Object.freeze([
   'accountId',
@@ -72,10 +71,7 @@ export class MainnetBalanceIndexerRouter implements BalanceSyncIndexerPort {
   }
 }
 
-function copyReadRequest(
-  request: unknown,
-  keys: readonly string[],
-): BalanceIndexerReadRequest {
+function copyReadRequest(request: unknown, keys: readonly string[]): BalanceIndexerReadRequest {
   return Object.freeze(copyReadRecord(exactDataRecord(request, keys)));
 }
 

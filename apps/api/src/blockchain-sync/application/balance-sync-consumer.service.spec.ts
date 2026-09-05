@@ -51,11 +51,7 @@ describe('BalanceSyncConsumerService', () => {
         jobId: JOB.id,
       } satisfies JobProcessingResult;
     });
-    const service = new BalanceSyncConsumerService(
-      { processOne },
-      configuredDispatcher,
-      POLICY,
-    );
+    const service = new BalanceSyncConsumerService({ processOne }, configuredDispatcher, POLICY);
 
     expect(processOne).not.toHaveBeenCalled();
     expect(configuredDispatcher.dispatch).not.toHaveBeenCalled();
@@ -91,12 +87,7 @@ describe('BalanceSyncConsumerService', () => {
       delays.push(milliseconds);
       if (delays.length === 4) controller.abort();
     };
-    const service = new BalanceSyncConsumerService(
-      { processOne },
-      dispatcher(),
-      POLICY,
-      wait,
-    );
+    const service = new BalanceSyncConsumerService({ processOne }, dispatcher(), POLICY, wait);
 
     await service.run(controller.signal);
 
@@ -116,12 +107,7 @@ describe('BalanceSyncConsumerService', () => {
       delays.push(milliseconds);
       if (delays.length === 2) controller.abort();
     };
-    const service = new BalanceSyncConsumerService(
-      { processOne },
-      dispatcher(),
-      POLICY,
-      wait,
-    );
+    const service = new BalanceSyncConsumerService({ processOne }, dispatcher(), POLICY, wait);
 
     await service.run(controller.signal);
 

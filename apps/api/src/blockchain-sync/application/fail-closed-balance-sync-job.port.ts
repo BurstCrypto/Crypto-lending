@@ -19,9 +19,7 @@ export class BalanceSyncJobDispositionNotApprovedError extends Error {
  * explicitly approved. Both methods perform no I/O and always fail closed.
  */
 export class FailClosedBalanceSyncJobPort implements BalanceSyncJobPort {
-  async scheduleRetry(
-    _input: Parameters<BalanceSyncJobPort['scheduleRetry']>[0],
-  ): Promise<void> {
+  async scheduleRetry(_input: Parameters<BalanceSyncJobPort['scheduleRetry']>[0]): Promise<void> {
     void _input;
     throw new BalanceSyncJobDispositionNotApprovedError();
   }
