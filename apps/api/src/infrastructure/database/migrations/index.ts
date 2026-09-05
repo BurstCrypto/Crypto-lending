@@ -84,6 +84,10 @@ import {
   suspendStablecoinIngestionAuthorityMigrationV0026,
   suspendStablecoinIngestionAuthorityTestSchemaMigrationV0026,
 } from './0026-suspend-stablecoin-ingestion-authority.migration';
+import {
+  createMainnetBalanceAgreementEvidenceMigrationV0027,
+  createMainnetBalanceAgreementEvidenceTestSchemaMigrationV0027,
+} from './0027-create-mainnet-balance-agreement-evidence.migration';
 import type { DatabaseMigration } from './migration';
 
 /**
@@ -118,6 +122,7 @@ export const DATABASE_TEST_SCHEMA_MIGRATION_LIST: readonly DatabaseMigration[] =
   createWalletMetadataRewrapBoundaryTestSchemaMigrationV0024,
   createAuthenticationHmacKeyRotationTestSchemaMigrationV0025,
   suspendStablecoinIngestionAuthorityTestSchemaMigrationV0026,
+  createMainnetBalanceAgreementEvidenceTestSchemaMigrationV0027,
 ]);
 
 export const DATABASE_MIGRATION_LIST: readonly DatabaseMigration[] = Object.freeze([
@@ -147,6 +152,7 @@ export const DATABASE_MIGRATION_LIST: readonly DatabaseMigration[] = Object.free
   createWalletMetadataRewrapBoundaryMigrationV0024,
   createAuthenticationHmacKeyRotationMigrationV0025,
   suspendStablecoinIngestionAuthorityMigrationV0026,
+  createMainnetBalanceAgreementEvidenceMigrationV0027,
 ]);
 
 export type { DatabaseMigration } from './migration';
@@ -255,3 +261,8 @@ export {
   suspendStablecoinIngestionAuthorityMigrationV0026,
   suspendStablecoinIngestionAuthorityTestSchemaMigrationV0026,
 } from './0026-suspend-stablecoin-ingestion-authority.migration';
+export {
+  createMainnetBalanceAgreementEvidenceMigration,
+  createMainnetBalanceAgreementEvidenceMigrationV0027,
+  createMainnetBalanceAgreementEvidenceTestSchemaMigrationV0027,
+} from './0027-create-mainnet-balance-agreement-evidence.migration';

@@ -27,6 +27,7 @@ class InMemoryMigrationDatabase {
   accountSchemaExists = false;
   aaveCheckpointSchemaExists = false;
   balanceAddressResolverExists = false;
+  financialAgreementEvidenceExists = false;
   authenticationSchemaExists = false;
   jobOutboxExists = false;
   jobOutboxLastErrorConstraintExists = false;
@@ -48,6 +49,7 @@ class InMemoryMigrationDatabase {
   private transactionAaveCheckpointSchemaExistsSnapshot: boolean | undefined;
   private transactionBalanceAddressResolverExistsSnapshot: boolean | undefined;
   private transactionAuthenticationSchemaExistsSnapshot: boolean | undefined;
+  private transactionFinancialAgreementEvidenceExistsSnapshot: boolean | undefined;
   private transactionLedgerSchemaExistsSnapshot: boolean | undefined;
   private transactionLedgerFeeAdjustmentIntegrityRepairedSnapshot: boolean | undefined;
   private transactionLedgerIdempotencySchemaExistsSnapshot: boolean | undefined;
@@ -71,6 +73,8 @@ class InMemoryMigrationDatabase {
         this.transactionAaveCheckpointSchemaExistsSnapshot = this.aaveCheckpointSchemaExists;
         this.transactionBalanceAddressResolverExistsSnapshot = this.balanceAddressResolverExists;
         this.transactionAuthenticationSchemaExistsSnapshot = this.authenticationSchemaExists;
+        this.transactionFinancialAgreementEvidenceExistsSnapshot =
+          this.financialAgreementEvidenceExists;
         this.transactionLedgerSchemaExistsSnapshot = this.ledgerSchemaExists;
         this.transactionLedgerFeeAdjustmentIntegrityRepairedSnapshot =
           this.ledgerFeeAdjustmentIntegrityRepaired;
@@ -84,6 +88,7 @@ class InMemoryMigrationDatabase {
         this.transactionAaveCheckpointSchemaExistsSnapshot = undefined;
         this.transactionBalanceAddressResolverExistsSnapshot = undefined;
         this.transactionAuthenticationSchemaExistsSnapshot = undefined;
+        this.transactionFinancialAgreementEvidenceExistsSnapshot = undefined;
         this.transactionLedgerSchemaExistsSnapshot = undefined;
         this.transactionLedgerFeeAdjustmentIntegrityRepairedSnapshot = undefined;
         this.transactionLedgerIdempotencySchemaExistsSnapshot = undefined;
@@ -120,6 +125,10 @@ class InMemoryMigrationDatabase {
         if (this.transactionAuthenticationSchemaExistsSnapshot !== undefined) {
           this.authenticationSchemaExists = this.transactionAuthenticationSchemaExistsSnapshot;
         }
+        if (this.transactionFinancialAgreementEvidenceExistsSnapshot !== undefined) {
+          this.financialAgreementEvidenceExists =
+            this.transactionFinancialAgreementEvidenceExistsSnapshot;
+        }
         if (this.transactionWalletRegistrationSchemaExistsSnapshot !== undefined) {
           this.walletRegistrationSchemaExists =
             this.transactionWalletRegistrationSchemaExistsSnapshot;
@@ -131,6 +140,7 @@ class InMemoryMigrationDatabase {
         this.transactionAaveCheckpointSchemaExistsSnapshot = undefined;
         this.transactionBalanceAddressResolverExistsSnapshot = undefined;
         this.transactionAuthenticationSchemaExistsSnapshot = undefined;
+        this.transactionFinancialAgreementEvidenceExistsSnapshot = undefined;
         this.transactionLedgerSchemaExistsSnapshot = undefined;
         this.transactionLedgerFeeAdjustmentIntegrityRepairedSnapshot = undefined;
         this.transactionLedgerIdempotencySchemaExistsSnapshot = undefined;
@@ -191,6 +201,8 @@ class InMemoryMigrationDatabase {
         this.ledgerIdempotencySchemaExists = true;
       } else if (normalized.includes('CREATE TABLE authentication_oidc_identities (')) {
         this.authenticationSchemaExists = true;
+      } else if (normalized.includes('CREATE TABLE balance_sync_financial_agreement_evidence (')) {
+        this.financialAgreementEvidenceExists = true;
       } else if (normalized.includes('CREATE TABLE wallet_ownership_challenges (')) {
         this.walletRegistrationSchemaExists = true;
       } else if (normalized.includes('CREATE TABLE yield_operations (')) {
@@ -213,6 +225,8 @@ class InMemoryMigrationDatabase {
         this.walletRegistrationSchemaExists = false;
       } else if (normalized === 'DROP TABLE authentication_oidc_identities') {
         this.authenticationSchemaExists = false;
+      } else if (normalized === 'DROP TABLE balance_sync_financial_agreement_evidence') {
+        this.financialAgreementEvidenceExists = false;
       } else if (normalized === 'DROP TABLE ledger_command_idempotency') {
         this.ledgerIdempotencySchemaExists = false;
       } else if (normalized === 'DROP TABLE ledger_books') {
@@ -229,6 +243,11 @@ class InMemoryMigrationDatabase {
         return result([{ valid: this.newVerifierValid }]);
       } else if (normalized === "SELECT 'third-verifier' AS verifier") {
         return result([{ valid: this.thirdVerifierValid }]);
+      } else if (
+        normalized.startsWith('SELECT ( prior.valid AND relation_state.valid') &&
+        normalized.includes('balance_sync_financial_agreement_evidence')
+      ) {
+        return result([{ valid: this.financialAgreementEvidenceExists }]);
       } else if (
         normalized.startsWith(
           'SELECT (prior.valid AND function_privileges.valid AND direct_objects.valid)',

@@ -1,6 +1,7 @@
 # KAN-67: unified balance and portfolio-value API
 
-Status: `DURABLE_READERS_CONNECTED` / `LIVE_INGESTION_BLOCKED`
+Status: `DURABLE_READERS_CONNECTED` / `AGREEMENT_EVIDENCE_OWNER_ONLY` /
+`LIVE_INGESTION_BLOCKED`
 
 KAN-67 adds an authenticated, reporting-only `GET /api/v1/portfolio` boundary.
 It combines one account-scoped indexed-balance snapshot with immutable BAL-001
@@ -143,6 +144,21 @@ financial action.
   parent checkpoint; and identical complete stablecoin balances. Its immutable
   candidate preserves both source attestations and a domain-separated agreement
   fingerprint, while setting both persistence and financial authority false.
+  Migration `0027` now adds a separate append-only
+  `balance_sync_financial_agreement_evidence` table and an owner-only recording
+  function. The database revalidates the complete closed envelope, the exact
+  active three-asset set, canonical position IDs, the later retrieval time,
+  both ordered and independent attestations, exact finalized checkpoint, and
+  every coordinator-v1 domain-separated SHA-256 fingerprint before recording.
+  It locks and binds the active registered wallet and accepts a new record only
+  while the source-pair approval and chain freshness window remain current.
+  Exact replay returns `IDEMPOTENT_REPLAY`; same-fingerprint content conflict is
+  rejected. Both row mutation and truncation are protected by `ALWAYS`
+  append-only triggers, and rollback refuses to delete history once any row
+  exists. The table, row type, validators, and recorder remain schema-owner
+  only: API, worker, legacy, migration, and `PUBLIC` receive no table or function
+  capability. Migration `0027` supersedes the cumulative `0026` verifier and
+  therefore preserves the stablecoin-ingestion suspension.
   The checked-in source-pair registry is empty and `NOT_APPROVED`; the
   coordinator and transcript adapters remain unregistered and own no endpoint
   or egress path. Distinct synthetic aliases do not establish real provider
@@ -150,9 +166,11 @@ financial action.
   exist, but no dedicated consumer task/service or receive/delete IAM capability
   is active. Live indexing is still blocked on that approved consumer/runtime,
   durable message idempotency, independently approved RPC identities and live
-  evidence, secrets, egress, and operational controls. A later persistence
-  change must retain the whole agreement envelope; persisting only its nested
-  observation candidate would discard required provenance and is prohibited.
+  evidence, secrets, egress, and operational controls. The boundary is
+  deliberately not registered in Nest, the balance worker, or
+  any endpoint and does not make `mayPersist` or financial authority true.
+  Persisting only the nested observation candidate would discard required
+  provenance and remains prohibited.
 - **BAL-001 / KAN-66:** the durable price-evidence reader/store and dormant Pyth
   Hermes and Ethereum Chainlink transcript parsers are present. Pyth binary
   signatures are not verified, and Chainlink requires an independently approved
@@ -181,6 +199,7 @@ All tests use deterministic injected readers and an injected clock.
 
 ```powershell
 npm test --workspace @crypto-lending/api -- --runInBand src/blockchain-sync/application/mainnet-balance-two-source-agreement.coordinator.spec.ts
+npm test --workspace @crypto-lending/api -- --runInBand src/infrastructure/database/migrations/0027-create-mainnet-balance-agreement-evidence.migration.spec.ts
 npm test --workspace @crypto-lending/api -- --runInBand src/portfolio/domain/portfolio-balance-snapshot.spec.ts src/portfolio/application/portfolio.service.spec.ts
 npm run test:e2e --workspace @crypto-lending/api -- --runInBand test/portfolio.e2e-spec.ts
 npm run typecheck --workspace @crypto-lending/api
@@ -190,3 +209,8 @@ npm run format:check
 npm run security:scan:secrets
 git diff --check main...HEAD
 ```
+
+The optional PostgreSQL integration suite is
+`test/infrastructure/mainnet-balance-agreement-evidence.integration-spec.ts`.
+It remains guarded by `RUN_INFRASTRUCTURE_INTEGRATION=1`, requires the exact
+marked loopback fixture, and is not a live provider or blockchain test.

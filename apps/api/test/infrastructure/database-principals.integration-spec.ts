@@ -20,8 +20,10 @@ import {
   createLedgerFeeAdjustmentIntegrityMigration,
   createLedgerLifecycleMigration,
   createMainnetWalletLaunchNarrowingMigration,
+  createMainnetBalanceAgreementEvidenceMigration,
   createReviewedJobOutboxAdmissionMigration,
   createStablecoinDepegLatchMigration,
+  createStablecoinIngestionAuthoritySuspensionMigration,
   createStablecoinPriceEvidenceReadModelMigration,
   createWalletKeyRotationBoundaryMigration,
   createWalletMetadataRewrapBoundaryMigration,
@@ -606,6 +608,10 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
       const walletMetadataRewrapMigration = createWalletMetadataRewrapBoundaryMigration(names);
       const authenticationHmacRotationMigration =
         createAuthenticationHmacKeyRotationMigration(names);
+      const stablecoinIngestionSuspensionMigration =
+        createStablecoinIngestionAuthoritySuspensionMigration(names);
+      const mainnetBalanceAgreementEvidenceMigration =
+        createMainnetBalanceAgreementEvidenceMigration(names);
       if (!principalMigration.verifySql) throw new Error('Principal migration must be verifiable');
       if (!ledgerMigration.verifySql) throw new Error('Ledger migration must be verifiable');
       if (!lifecycleMigration.verifySql) {
@@ -662,6 +668,12 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
       if (!authenticationHmacRotationMigration.verifySql) {
         throw new Error('Authentication HMAC rotation migration must be verifiable');
       }
+      if (!stablecoinIngestionSuspensionMigration.verifySql) {
+        throw new Error('Stablecoin ingestion suspension migration must be verifiable');
+      }
+      if (!mainnetBalanceAgreementEvidenceMigration.verifySql) {
+        throw new Error('Mainnet balance agreement evidence migration must be verifiable');
+      }
       const cumulativeVerifySql = authenticationHmacRotationMigration.verifySql;
       const migrations = [
         ...schemaMigrationsBeforePrincipalBoundary,
@@ -692,6 +704,11 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
       const preRepairRunner = new MigrationRunner(migrationPool, migrationsThrough0012);
       const preRevocationRunner = new MigrationRunner(migrationPool, migrationsThrough0015);
       const runner = new MigrationRunner(migrationPool, migrations);
+      const forwardOnlyMigrations = [
+        ...migrations,
+        stablecoinIngestionSuspensionMigration,
+        mainnetBalanceAgreementEvidenceMigration,
+      ];
 
       await expect(
         migrationPool.query(
@@ -2432,6 +2449,35 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
       await expect(
         new MigrationRunner(migrationPool, migrations).assertUpToDate(),
       ).resolves.toBeUndefined();
+
+      const forwardOnlyRunner = new MigrationRunner(migrationPool, forwardOnlyMigrations);
+      await expect(forwardOnlyRunner.up()).resolves.toEqual(['0026', '0027']);
+      await expect(forwardOnlyRunner.assertUpToDate()).resolves.toBeUndefined();
+      await expect(
+        migrationPool.query<{ valid: boolean }>(mainnetBalanceAgreementEvidenceMigration.verifySql),
+      ).resolves.toMatchObject({ rows: [{ valid: true }] });
+      for (const runtimePoolInstance of [apiNewPool, workerNewPool]) {
+        await expect(
+          new MigrationRunner(runtimePoolInstance, forwardOnlyMigrations).assertUpToDate(),
+        ).resolves.toBeUndefined();
+        await expect(
+          runtimePoolInstance.query('SELECT * FROM balance_sync_financial_agreement_evidence'),
+        ).rejects.toBeDefined();
+        await expect(
+          runtimePoolInstance.query(
+            "SELECT record_balance_sync_financial_agreement_evidence('{}'::jsonb)",
+          ),
+        ).rejects.toBeDefined();
+      }
+      await expect(
+        workerNewPool.query<{ may_record_stablecoin_price: boolean }>(
+          `SELECT pg_catalog.has_function_privilege(
+             current_user,
+             'record_stablecoin_price_evidence(uuid,text,text,timestamp with time zone,text,text,text,smallint,text,text,text,text,smallint,text,text,numeric,text,timestamp with time zone,timestamp with time zone,numeric,smallint,text,numeric,smallint,text,text,text)',
+             'EXECUTE'
+           ) AS may_record_stablecoin_price`,
+        ),
+      ).resolves.toMatchObject({ rows: [{ may_record_stablecoin_price: false }] });
 
       const deniedCrossDatabase = new Pool({
         connectionString: roleUrl(
