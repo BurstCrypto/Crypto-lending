@@ -40,7 +40,7 @@ test('accepts the reviewed local workload-boundary child under the direct body c
   assert.match(report.residualLimitations.join('\n'), /No DNS security-group rule/);
   assert.match(report.residualLimitations.join('\n'), /PostgreSQL LOGIN principals/);
   assert.match(report.residualLimitations.join('\n'), /CLIENT KILL/);
-  assert.match(report.residualLimitations.join('\n'), /EXECUTION_ARTIFACT_UNRESOLVED/);
+  assert.match(report.residualLimitations.join('\n'), /LIVE_REVOCATION_UNRESOLVED/);
   assert.match(
     report.residualLimitations.join('\n'),
     /FIXED_SLOT_CREDENTIAL_REGENERATION_UNRESOLVED/,
@@ -153,6 +153,13 @@ test('rejects an operator without the private artifact-delivery gate', () => {
       '  RedisOperatorToInterfaceEndpointEgress:\n    Type: AWS::EC2::SecurityGroupEgress\n    Condition: RedisOperatorVpcEndpointRulesEnabled\n    Metadata: { cfn-lint: { config: { ignore_checks: [W1030] } } }\n    Properties:\n      DestinationSecurityGroupId: !Ref InterfaceEndpointSecurityGroupId\n      FromPort: 443\n      GroupId: !Ref ApiTaskSecurityGroup',
     ),
     /RedisOperatorToInterfaceEndpointEgress.*exact/,
+  );
+  assertRejected(
+    mutate(
+      '          - !Equals [!Ref RedisCredentialPhase, B_ONLY]\n        AssertDescription: Redis operator mode requires one inactive application credential slot.',
+      '          - !Equals [!Ref RedisCredentialPhase, BOTH_USE_B]\n        AssertDescription: Redis operator mode requires one inactive application credential slot.',
+    ),
+    /Deployment rules.*billing acknowledgement/,
   );
 });
 

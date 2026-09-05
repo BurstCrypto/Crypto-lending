@@ -325,11 +325,11 @@ parameter set before a change set is executed.
   and cutover but do not regenerate an inactive slot. A repeat A-to-B-to-A cycle
   would reuse the retained A value until a reviewed regeneration and verifier/
   password installation artifact exists.
-- The conditional Redis operator infrastructure has no reviewed production CLI
-  or one-off task definition. Managed authentication and ACL-denial monitoring
-  is locally defined across both deterministic Redis members, but deployed
-  alarm delivery, an authorized non-production drill, and sanitized response
-  evidence remain live gates.
+- The conditional Redis operator now has a production-only, exact-inactive-slot
+  CLI and a no-service one-off task definition. Both remain disabled by default
+  and have not been deployed or run. Workload drain, post-command session and
+  reconnect denial, immediate operator disablement, managed alarm delivery, and
+  sanitized live evidence remain separately authorized gates.
 - PostgreSQL minor and Redis 7.1 availability, VPC endpoint availability,
   service quotas, the S3 prefix-list ID, image startup behavior, and the ACM/DNS
   relationship require target-account preflight and runtime evidence.

@@ -19,7 +19,7 @@ const residualLimitations = Object.freeze([
   'Generated database secrets and phase-scoped injection do not create, enable, disable, or install SCRAM verifiers for PostgreSQL LOGIN principals; those remain separately authorized privileged provisioning gates.',
   'PrivateEgressMode=None intentionally provides no ECR, logs, Secrets Manager, or SQS path; the parent must independently enforce zero API and worker desired counts.',
   'No DNS security-group rule is present because AmazonProvidedDNS traffic is not filterable by security groups; a custom resolver requires a separately reviewed exact destination.',
-  'REDIS_OPERATOR_EXECUTION_ARTIFACT_UNRESOLVED: this child emits a conditional role, network identity, credential, and ACL user but the repository has no reviewed production revocation CLI or one-off task definition. Redis ACL cannot constrain the CLIENT KILL username argument, so exact-target command construction, task drain, denial evidence, and immediate operator disablement remain unresolved local-design and separately authorized live gates.',
+  'REDIS_OPERATOR_LIVE_REVOCATION_UNRESOLVED: the validated parent composes a conditional one-off task and production CLI that derive only the inactive environment slot and issue CLIENT KILL USER <target> SKIPME YES, but no task is authorized or run. Workload drain, live session denial evidence, immediate operator disablement, and credential installation or regeneration remain external gates.',
   'FIXED_SLOT_CREDENTIAL_REGENERATION_UNRESOLVED: the four enum values constrain each submitted phase but do not compare deployed state or enforce transition adjacency, and retained A/B Secrets Manager resources do not regenerate when a phase changes. A-to-B-to-A would re-enable the original A credential, so the child can represent reviewed overlap/cutover phases but is neither an enforced workflow nor repeatable rotation until a reviewed inactive-slot regeneration, Redis-password/database-verifier installation, and current-state transition artifact exists.',
   'AUTH_WALLET_SECRET_EXTERNAL: the parent supplies one Secrets Manager ARN for seven distinct authentication and wallet key fields. This static boundary neither provisions that secret nor proves its field set, key material, rotation, resource policy, KMS policy, or deployed readability.',
   'This local template is not packaged or uploaded; a parent nested-stack TemplateURL remains a separately authorized deployment gate.',
@@ -789,6 +789,13 @@ function validateRules(source, errors) {
     '          - !Equals [!Ref RedisOperatorMode, DISABLED]',
     '          - !Equals [!Ref PrivateEgressMode, VpcEndpoints]',
     '        AssertDescription: Redis operator mode requires the reviewed private ECR, logs, Secrets Manager, and S3 delivery path.',
+    '  RedisOperatorRequiresInactiveSlot:',
+    '    Assertions:',
+    '      - Assert: !Or',
+    '          - !Equals [!Ref RedisOperatorMode, DISABLED]',
+    '          - !Equals [!Ref RedisCredentialPhase, A_ONLY]',
+    '          - !Equals [!Ref RedisCredentialPhase, B_ONLY]',
+    '        AssertDescription: Redis operator mode requires one inactive application credential slot.',
   ].join('\n');
   if (section(source, 'Rules', 'Conditions').trimEnd() !== expected) {
     errors.push('Deployment rules must require exact explicit billing acknowledgement.');
@@ -943,8 +950,8 @@ function validateRedis(resources, errors) {
     'Properties:',
     '  AccessString: !If',
     '    - RedisOperatorEnabled',
-    "    - 'on sanitize-payload resetkeys resetchannels -@all +ping +quit +client|kill'",
-    "    - 'off sanitize-payload resetkeys resetchannels -@all +ping +quit +client|kill'",
+    "    - 'on sanitize-payload resetkeys resetchannels -@all +client|kill'",
+    "    - 'off sanitize-payload resetkeys resetchannels -@all +client|kill'",
     '  AuthenticationMode:',
     "    Passwords: [!Sub '{{resolve:secretsmanager:${RedisOperatorSecret}:SecretString:password}}']",
     '    Type: password',

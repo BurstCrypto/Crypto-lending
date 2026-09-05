@@ -70,6 +70,30 @@ Parameters:
   WorkerLogGroupName:
     Type: String
     AllowedPattern: '^/crypto-lending/(?:dev|test|qa|sandbox|staging)(?:-[a-z0-9]+)*/outbox-worker$'
+  RedisOperatorMode:
+    Type: String
+    Default: DISABLED
+    AllowedValues: [DISABLED, ENABLED]
+  RedisCredentialPhase:
+    Type: String
+    Default: A_ONLY
+    AllowedValues: [A_ONLY, BOTH_USE_A, BOTH_USE_B, B_ONLY]
+  ApiImageUri:
+    Type: String
+    AllowedPattern: '^[0-9]{12}\.dkr\.ecr\.[a-z0-9-]+\.(amazonaws\.com|amazonaws\.com\.cn)/crypto-lending-api@sha256:[a-f0-9]{64}$'
+  RedisEndpointAddress:
+    Type: String
+    MaxLength: 253
+    AllowedPattern: '^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$'
+  RedisOperatorTaskExecutionRoleArn:
+    Type: String
+    Default: NONE
+    AllowedPattern: '^(?:NONE|arn:[a-z0-9-]+:iam::[0-9]{12}:role/[A-Za-z0-9_+=,.@/-]{1,512})$'
+  RedisOperatorSecretArn:
+    Type: String
+    NoEcho: true
+    Default: NONE
+    AllowedPattern: '^(?:NONE|arn:[a-z0-9-]+:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:[A-Za-z0-9/_+=.@-]+)$'
 
 Rules:
   ExplicitBillingAcknowledgementRequired:
@@ -84,10 +108,26 @@ Rules:
           - !Equals [!Ref EnableOperationalAlarms, 'false']
           - !Not [!Equals [!Ref AlarmTopicArn, NONE]]
         AssertDescription: Enabled alarms require an SNS topic ARN.
+  RedisOperatorRequiresInactiveSlot:
+    Assertions:
+      - Assert: !Or
+          - !Equals [!Ref RedisOperatorMode, DISABLED]
+          - !Equals [!Ref RedisCredentialPhase, A_ONLY]
+          - !Equals [!Ref RedisCredentialPhase, B_ONLY]
+        AssertDescription: Redis operator mode requires one inactive application credential slot.
+  RedisOperatorRequiresBoundIdentity:
+    Assertions:
+      - Assert: !Or
+          - !Equals [!Ref RedisOperatorMode, DISABLED]
+          - !And
+            - !Not [!Equals [!Ref RedisOperatorTaskExecutionRoleArn, NONE]]
+            - !Not [!Equals [!Ref RedisOperatorSecretArn, NONE]]
+        AssertDescription: Redis operator mode requires its exact execution role and secret.
 
 Conditions:
   CreateAlarms: !Equals [!Ref EnableOperationalAlarms, 'true']
   CreateOperationalDashboard: !Equals [!Ref EnableOperationalDashboard, 'true']
+  RedisOperatorEnabled: !Equals [!Ref RedisOperatorMode, ENABLED]
 
 Resources:
   ApiUnhealthyHostAlarm:
@@ -358,6 +398,49 @@ Resources:
       DashboardBody: !Sub >-
         {"widgets":[{"type":"metric","properties":{"title":"API latency and request outcomes","region":"${AWS::Region}","stat":"Sum","metrics":[["AWS/ApplicationELB","RequestCount","LoadBalancer","${LoadBalancerFullName}","TargetGroup","${ApiTargetGroupFullName}"],[".","HTTPCode_Target_4XX_Count",".",".",".","."],[".","HTTPCode_Target_5XX_Count",".",".",".","."],[".","TargetResponseTime",".",".",".",".",{"stat":"p95"}]]}},{"type":"metric","properties":{"title":"ECS CPU/memory saturation","region":"${AWS::Region}","stat":"Average","metrics":[["AWS/ECS","CPUUtilization","ClusterName","${EcsClusterName}","ServiceName","${ApiServiceName}"],[".","MemoryUtilization",".",".",".","."],[".","CPUUtilization",".",".",".","${WebServiceName}"],[".","MemoryUtilization",".",".",".","."],[".","CPUUtilization",".",".",".","${WorkerServiceName}"],[".","MemoryUtilization",".",".",".","."]]}},{"type":"metric","properties":{"title":"Redis access denials","region":"${AWS::Region}","stat":"Sum","metrics":[["AWS/ElastiCache","AuthenticationFailures","CacheClusterId","${RedisCacheClusterIdPrefix}-001"],[".","CommandAuthorizationFailures",".","."],[".","KeyAuthorizationFailures",".","."],[".","ChannelAuthorizationFailures",".","."],[".","AuthenticationFailures",".","${RedisCacheClusterIdPrefix}-002"],[".","CommandAuthorizationFailures",".","."],[".","KeyAuthorizationFailures",".","."],[".","ChannelAuthorizationFailures",".","."]]}},{"type":"metric","properties":{"title":"Queue backlog, age, and DLQ depth","region":"${AWS::Region}","stat":"Maximum","metrics":[["AWS/SQS","ApproximateNumberOfMessagesVisible","QueueName","${JobQueueName}"],[".","ApproximateAgeOfOldestMessage",".","."],[".","ApproximateNumberOfMessagesVisible",".","${JobDeadLetterQueueName}"],[".","ApproximateNumberOfMessagesVisible",".","${BalanceQueueName}"],[".","ApproximateAgeOfOldestMessage",".","."],[".","ApproximateNumberOfMessagesVisible",".","${BalanceDeadLetterQueueName}"]]}},{"type":"log","width":24,"properties":{"title":"Correlation traces","region":"${AWS::Region}","view":"table","query":"SOURCE logGroups(namePrefix: ['/crypto-lending/${EnvironmentName}/']) | fields @timestamp, correlationId, traceId, spanId, parentSpanId, spanName, durationMs, outcome | filter event = 'trace.span.completed' | limit 100"}},{"type":"log","properties":{"title":"Job failure and redrive","region":"${AWS::Region}","view":"table","query":"SOURCE '${WorkerLogGroupName}' | fields @timestamp, event, jobKind, errorCode, outcome | filter event in ['job.publish_failed','job.retry_scheduled','job.awaiting_dead_letter','job.ownership_lost','outbox.dispatch.failed'] | limit 100"}},{"type":"log","properties":{"title":"Lifecycle state/reason counts","region":"${AWS::Region}","view":"table","query":"SOURCE '${ApiLogGroupName}' | filter event = 'ledger.lifecycle.transitioned' | stats count(*) as transitions by lifecycleScope, state, reason | limit 100"}}]}
 
+  RedisSessionRevocationTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Condition: RedisOperatorEnabled
+    Properties:
+      ContainerDefinitions:
+        - Name: redis-session-revocation
+          Command: [node, dist/infrastructure/redis/redis-session-revocation.cli.js]
+          Essential: true
+          Image: !Ref ApiImageUri
+          Environment:
+            - { Name: NODE_ENV, Value: production }
+            - { Name: APP_ENV, Value: !Ref EnvironmentName }
+            - { Name: APPLICATION_WORKLOAD, Value: redis-session-revocation }
+            - { Name: PRODUCT_NETWORK_SCOPE, Value: ethereum-solana-mainnet }
+            - { Name: REDIS_CREDENTIAL_PHASE, Value: !Ref RedisCredentialPhase }
+            - { Name: REDIS_HOST, Value: !Ref RedisEndpointAddress }
+            - { Name: REDIS_PORT, Value: '6379' }
+            - { Name: REDIS_TLS, Value: 'true' }
+            - { Name: REDIS_OPERATOR_USERNAME, Value: !Sub 'crypto_operator_${EnvironmentName}' }
+          Secrets:
+            - Name: REDIS_OPERATOR_PASSWORD
+              ValueFrom: !Sub '${RedisOperatorSecretArn}:password::'
+          LinuxParameters:
+            Capabilities: { Drop: [ALL] }
+            InitProcessEnabled: true
+          ReadonlyRootFilesystem: true
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-create-group: 'false'
+              awslogs-group: !Ref ApiLogGroupName
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: redis-session-revocation
+          StopTimeout: 30
+          User: '10001:10001'
+      Cpu: '256'
+      ExecutionRoleArn: !Ref RedisOperatorTaskExecutionRoleArn
+      Family: !Sub crypto-lending-${EnvironmentName}-redis-session-revocation
+      Memory: '512'
+      NetworkMode: awsvpc
+      RequiresCompatibilities: [FARGATE]
+      RuntimePlatform: { CpuArchitecture: X86_64, OperatingSystemFamily: LINUX }
+
 Outputs:
   DeliveryArtifactSha256:
     Value: !Ref DeliveryArtifactSha256
@@ -366,3 +449,6 @@ Outputs:
   OperationalDashboardName:
     Condition: CreateOperationalDashboard
     Value: !Ref OperationalDashboard
+  RedisSessionRevocationTaskDefinitionArn:
+    Condition: RedisOperatorEnabled
+    Value: !Ref RedisSessionRevocationTaskDefinition

@@ -18,6 +18,8 @@
     "worker:outbox:prod": "node dist/infrastructure/outbox/outbox-worker.cli.js",
     "worker:balance": "tsx src/blockchain-sync/application/balance-sync-consumer.cli.ts",
     "worker:balance:prod": "node dist/blockchain-sync/application/balance-sync-consumer.cli.js",
+    "redis:revoke-inactive-sessions": "tsx src/infrastructure/redis/redis-session-revocation.cli.ts",
+    "redis:revoke-inactive-sessions:prod": "node dist/infrastructure/redis/redis-session-revocation.cli.js",
     "lint": "eslint \"{src,test}/**/*.ts\" --max-warnings=0",
     "lint:fix": "npm run lint -- --fix",
     "test": "jest --runInBand",

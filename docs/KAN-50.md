@@ -96,16 +96,16 @@ encryption until a reviewed backend TLS design is implemented and exercised.
 
 Static validation treats each role as a capability allowlist:
 
-| Role                       | Reviewed capability                                                                                                           |
-| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| API task execution         | pull only the API image, write API logs, and read only phase-authorized API database, Redis, and auth/wallet secrets          |
-| worker task execution      | pull only the worker image, write worker logs, and read only phase-authorized worker database secrets through Secrets Manager |
-| web task execution         | pull only the web image and write web logs; no secret read                                                                    |
-| conditional Redis operator | prerequisite-only image/log/secret path for a future reviewed one-off revocation task; no application data capability         |
-| API task                   | inspect only the jobs and balance-sync source/DLQ attributes                                                                  |
-| worker task                | publish only to the jobs and balance-sync source queues, inspect all four queues, and use the data key only through SQS       |
-| web task                   | no application AWS API permission                                                                                             |
-| migration task execution   | pull only the supplied API image, write migration logs, and read/decrypt only the supplied migration secret                   |
+| Role                       | Reviewed capability                                                                                                                                                 |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| API task execution         | pull only the API image, write API logs, and read only phase-authorized API database, Redis, and auth/wallet secrets                                                |
+| worker task execution      | pull only the worker image, write worker logs, and read only phase-authorized worker database secrets through Secrets Manager                                       |
+| web task execution         | pull only the web image and write web logs; no secret read                                                                                                          |
+| conditional Redis operator | pull the digest-pinned API image, write API-scoped logs, and read only its operator secret for the reviewed one-off revocation task; no application data capability |
+| API task                   | inspect only the jobs and balance-sync source/DLQ attributes                                                                                                        |
+| worker task                | publish only to the jobs and balance-sync source queues, inspect all four queues, and use the data key only through SQS                                             |
+| web task                   | no application AWS API permission                                                                                                                                   |
+| migration task execution   | pull only the supplied API image, write migration logs, and read/decrypt only the supplied migration secret                                                         |
 
 The worker has no Redis environment, secret-read permission, or port-6379
 security-group path. The API and worker use distinct execution roles and task
@@ -213,9 +213,9 @@ complete:
   template artifact;
 - database secret-to-LOGIN SCRAM installation/authentication and repeatable
   inactive-slot regeneration;
-- a reviewed executable Redis revocation task/CLI (the managed authentication
-  and ACL-denial alarm is locally defined, but deployed delivery and drill
-  evidence remain external);
+- an authorized run of the locally reviewed Redis revocation task/CLI, including
+  workload drain, old-slot session and reconnect denial, immediate operator
+  disablement, managed alarm delivery, and sanitized drill evidence;
 - repeatable inactive-slot Redis credential regeneration rather than reuse of a
   retained old slot;
 - a trusted binding proving the separate migration task's supplied secret/key

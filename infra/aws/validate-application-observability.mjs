@@ -13,7 +13,7 @@ import {
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const defaultTemplatePath = join(scriptDirectory, 'application-observability.yaml');
 export const reviewedApplicationObservabilitySha256 =
-  'ef0704fc3eea63ca60e6b44bcd8298639696f21478cc119757d968b84920c6a7';
+  '4e3fdde76c3805500f17e1eedc0cd213e77ea0d1704fe56f30810ffa8fd859f9';
 export const MAX_APPLICATION_OBSERVABILITY_TEMPLATE_BYTES = 51_200;
 export const APPLICATION_OBSERVABILITY_TEMPLATE_INPUT_ERROR =
   'Application observability child template must be a non-empty, stable, single-link regular file of at most 51200 bytes at a canonical local path containing UTF-8 text without a byte-order mark.';
@@ -59,6 +59,23 @@ const requiredFragments = Object.freeze([
   "filter event = 'trace.span.completed' | limit 100",
   "filter event in ['job.publish_failed','job.retry_scheduled','job.awaiting_dead_letter','job.ownership_lost','outbox.dispatch.failed'] | limit 100",
   'stats count(*) as transitions by lifecycleScope, state, reason | limit 100',
+  'RedisOperatorMode:\n    Type: String\n    Default: DISABLED\n    AllowedValues: [DISABLED, ENABLED]',
+  'RedisCredentialPhase:\n    Type: String\n    Default: A_ONLY\n    AllowedValues: [A_ONLY, BOTH_USE_A, BOTH_USE_B, B_ONLY]',
+  'RedisOperatorRequiresInactiveSlot:',
+  'RedisOperatorRequiresBoundIdentity:',
+  'RedisOperatorEnabled: !Equals [!Ref RedisOperatorMode, ENABLED]',
+  'RedisSessionRevocationTaskDefinition:\n    Type: AWS::ECS::TaskDefinition\n    Condition: RedisOperatorEnabled',
+  'Command: [node, dist/infrastructure/redis/redis-session-revocation.cli.js]',
+  'Name: PRODUCT_NETWORK_SCOPE, Value: ethereum-solana-mainnet',
+  'Name: REDIS_CREDENTIAL_PHASE, Value: !Ref RedisCredentialPhase',
+  "Name: REDIS_TLS, Value: 'true'",
+  "Name: REDIS_OPERATOR_USERNAME, Value: !Sub 'crypto_operator_${EnvironmentName}'",
+  "ValueFrom: !Sub '${RedisOperatorSecretArn}:password::'",
+  'Capabilities: { Drop: [ALL] }',
+  'ReadonlyRootFilesystem: true',
+  "User: '10001:10001'",
+  'ExecutionRoleArn: !Ref RedisOperatorTaskExecutionRoleArn',
+  'RedisSessionRevocationTaskDefinitionArn:\n    Condition: RedisOperatorEnabled\n    Value: !Ref RedisSessionRevocationTaskDefinition',
   'DeliveryArtifactSha256:\n    Value: !Ref DeliveryArtifactSha256',
   'DeliveryArtifactBindingSha256:\n    Value: !Ref DeliveryArtifactBindingSha256',
 ]);
@@ -73,6 +90,7 @@ const requiredResources = Object.freeze({
   BalanceQueueAgeAlarm: 'AWS::CloudWatch::Alarm',
   BalanceDeadLetterQueueNotEmptyAlarm: 'AWS::CloudWatch::Alarm',
   OperationalDashboard: 'AWS::CloudWatch::Dashboard',
+  RedisSessionRevocationTaskDefinition: 'AWS::ECS::TaskDefinition',
 });
 
 function sha256(source) {
@@ -132,7 +150,9 @@ export function validateApplicationObservabilitySource(source) {
   const resourcesSource = normalized.match(/^Resources:\n([\s\S]*?)(?=^Outputs:\s*$)/m)?.[1] ?? '';
   const entries = [...resourcesSource.matchAll(/^ {2}([A-Z][A-Za-z0-9]*):\n {4}Type: ([^\n]+)$/gm)];
   if (entries.length !== Object.keys(requiredResources).length) {
-    errors.push('Observability child must contain exactly eight alarms and one dashboard.');
+    errors.push(
+      'Operational child must contain exactly eight alarms, one dashboard, and one conditional Redis revocation task definition.',
+    );
   }
   for (const [logicalId, expectedType] of Object.entries(requiredResources)) {
     const entry = entries.find((candidate) => candidate[1] === logicalId);
@@ -155,6 +175,17 @@ export function validateApplicationObservabilitySource(source) {
     )
   ) {
     errors.push('Dashboard must not expose high-cardinality or sensitive fields.');
+  }
+  const revocationTask =
+    resourcesSource.match(/^ {2}RedisSessionRevocationTaskDefinition:\n[\s\S]*$/m)?.[0] ?? '';
+  if (
+    !revocationTask ||
+    /\b(?:TaskRoleArn|DesiredCount|EnableExecuteCommand)\b/.test(revocationTask) ||
+    /Type:\s*AWS::ECS::Service/.test(resourcesSource)
+  ) {
+    errors.push(
+      'Redis revocation must remain a conditional no-service task with no task role, desired count, or exec path.',
+    );
   }
 
   return { ok: errors.length === 0, awsCallsMade: 0, templateSha256: digest, errors };

@@ -238,6 +238,56 @@ for (const [name, search, replacement] of [
     'Value: !Ref DeliveryArtifactSha256',
     'Value: !Ref DeliveryArtifactBindingSha256',
   ],
+  [
+    'enabled-by-default Redis operator',
+    'RedisOperatorMode:\n    Type: String\n    Default: DISABLED',
+    'RedisOperatorMode:\n    Type: String\n    Default: ENABLED',
+  ],
+  [
+    'operator overlap phase',
+    '- !Equals [!Ref RedisCredentialPhase, B_ONLY]',
+    '- !Equals [!Ref RedisCredentialPhase, BOTH_USE_B]',
+  ],
+  [
+    'operator task condition',
+    'RedisSessionRevocationTaskDefinition:\n    Type: AWS::ECS::TaskDefinition\n    Condition: RedisOperatorEnabled',
+    'RedisSessionRevocationTaskDefinition:\n    Type: AWS::ECS::TaskDefinition',
+  ],
+  [
+    'operator task command',
+    'Command: [node, dist/infrastructure/redis/redis-session-revocation.cli.js]',
+    'Command: [node, dist/main.js, CLIENT, KILL]',
+  ],
+  [
+    'operator task Base scope',
+    'Name: PRODUCT_NETWORK_SCOPE, Value: ethereum-solana-mainnet',
+    'Name: PRODUCT_NETWORK_SCOPE, Value: ethereum-solana-base-mainnet',
+  ],
+  [
+    'operator task hard-coded target phase',
+    'Name: REDIS_CREDENTIAL_PHASE, Value: !Ref RedisCredentialPhase',
+    'Name: REDIS_CREDENTIAL_PHASE, Value: B_ONLY',
+  ],
+  [
+    'operator task application credential',
+    "ValueFrom: !Sub '${RedisOperatorSecretArn}:password::'",
+    "ValueFrom: !Sub '${RedisOperatorTaskExecutionRoleArn}:password::'",
+  ],
+  ['operator task TLS', "Name: REDIS_TLS, Value: 'true'", "Name: REDIS_TLS, Value: 'false'"],
+  ['operator task filesystem', 'ReadonlyRootFilesystem: true', 'ReadonlyRootFilesystem: false'],
+  ['operator task user', "User: '10001:10001'", "User: '0:0'"],
+  ['operator task capabilities', 'Capabilities: { Drop: [ALL] }', 'Capabilities: { Add: [ALL] }'],
+  ['operator task image', 'Image: !Ref ApiImageUri', 'Image: crypto-lending-api:latest'],
+  [
+    'operator task execution role',
+    'ExecutionRoleArn: !Ref RedisOperatorTaskExecutionRoleArn',
+    'ExecutionRoleArn: !Ref RedisOperatorSecretArn',
+  ],
+  [
+    'operator task role authority',
+    'RuntimePlatform: { CpuArchitecture: X86_64, OperatingSystemFamily: LINUX }',
+    'RuntimePlatform: { CpuArchitecture: X86_64, OperatingSystemFamily: LINUX }\n      TaskRoleArn: !Ref RedisOperatorTaskExecutionRoleArn',
+  ],
 ]) {
   test(`rejects ${name} mutation`, () => {
     const mutated = source.replace(search, replacement);
@@ -247,3 +297,15 @@ for (const [name, search, replacement] of [
     assert.equal(report.awsCallsMade, 0);
   });
 }
+
+test('rejects a service or desired count added to the one-off Redis task', () => {
+  const mutated = source.replace(
+    'Outputs:\n',
+    '  RedisRevocationService:\n    Type: AWS::ECS::Service\n    Properties:\n      DesiredCount: 1\nOutputs:\n',
+  );
+  assert.notEqual(mutated, source);
+  const report = validateApplicationObservabilitySource(mutated);
+  assert.equal(report.ok, false);
+  assert.equal(report.awsCallsMade, 0);
+  assert.match(report.errors.join('\n'), /no-service task/);
+});

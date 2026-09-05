@@ -16,7 +16,7 @@ const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = resolve(scriptDirectory, '..', '..');
 const noExternalEgressResidualLimitations = [
   'Web-task DNS security-group egress permits TCP and UDP port 53 to the VPC CIDR; this static control cannot prove that traffic reaches only the VPC Route 53 Resolver address. API and worker boundaries rely on AmazonProvidedDNS, which is not filtered by security groups.',
-  'REDIS_OPERATOR_EXECUTION_ARTIFACT_UNRESOLVED: the nested child exposes conditional operator infrastructure, but this parent defines no reviewed revocation CLI or one-off ECS task. Exact CLIENT KILL targeting, task drain, denial evidence, and immediate operator disablement remain unresolved local-design and live authorization gates.',
+  'REDIS_OPERATOR_LIVE_REVOCATION_UNRESOLVED: the nested child conditionally defines the reviewed exact-target one-off revocation task, but no task is authorized or run. Workload drain, live denial evidence, immediate operator disablement, and credential installation or regeneration remain external gates.',
   'FIXED_SLOT_CREDENTIAL_REGENERATION_UNRESOLVED: the four enum values constrain each submitted phase but do not compare deployed state or enforce transition adjacency, and retained A/B secrets do not regenerate on a phase-only update. A-to-B-to-A would reuse the original A credential, so the composition can represent reviewed overlap/cutover phases but is neither an enforced workflow nor a repeatable rotation mechanism until inactive-slot regeneration, Redis-password/database-verifier installation, and current-state transition checks are reviewed.',
   'AUTH_WALLET_EXTERNAL_CONFIGURATION_UNRESOLVED: static Cognito identifiers and seven API-only key selectors (one pre-authentication key and six bounded key-ring documents) are wired, but the Cognito tenant, one external JSON secret, its customer-managed KMS key/policy, field contents, rotation, and deployed readability require separately authorized evidence.',
   'OPERATIONAL_ALERT_DELIVERY_EXTERNAL: the template consumes one operator-supplied SNS topic ARN but deliberately provisions no topic or subscription; same-account/Region existence, topic policy, confirmed recipients, escalation ownership, and an end-to-end ALARM-to-OK drill remain external go-live evidence.',
@@ -34,11 +34,11 @@ const operationalAlarmLogicalIds = Object.freeze([
   'BalanceDeadLetterQueueNotEmptyAlarm',
 ]);
 const reviewedApplicationBaselineSha256 =
-  'fbdb6828d867ff49502ec9e65c400ee969d4185d99a4f59787910b332effaf72';
+  'd79161b2d2851b1c286b2dfe94d1899ddbcd5fc51b4e850a7ee4d87480076b21';
 const reviewedWorkloadBoundariesSha256 =
-  '78971861599dacc474dc2e087690b72c33397603078b4d90a6b976e8b602239b';
+  'd38d0bf07704075615b4ab75041012675dcc30f824430b579623945d408d14f0';
 const reviewedObservabilitySha256 =
-  'ef0704fc3eea63ca60e6b44bcd8298639696f21478cc119757d968b84920c6a7';
+  '4e3fdde76c3805500f17e1eedc0cd213e77ea0d1704fe56f30810ffa8fd859f9';
 const reviewedResourceTypesByLogicalId = new Map([
   ['ApplicationDataKey', 'AWS::KMS::Key'],
   ['ApplicationDataKeyAlias', 'AWS::KMS::Alias'],
@@ -1211,6 +1211,12 @@ function validateObservabilityComposition(source, parameters, resources, errors)
       '    WorkerServiceName: !GetAtt WorkerService.Name',
       '    ApiLogGroupName: !Ref ApiLogGroup',
       '    WorkerLogGroupName: !Ref WorkerLogGroup',
+      '    RedisOperatorMode: !Ref RedisOperatorMode',
+      '    RedisCredentialPhase: !Ref RedisCredentialPhase',
+      '    ApiImageUri: !Ref ApiImageUri',
+      '    RedisEndpointAddress: !GetAtt RedisReplicationGroup.PrimaryEndPoint.Address',
+      '    RedisOperatorTaskExecutionRoleArn: !If [RedisOperatorEnabled, !GetAtt WorkloadBoundaries.Outputs.RedisOperatorTaskExecutionRoleArn, NONE]',
+      '    RedisOperatorSecretArn: !If [RedisOperatorEnabled, !GetAtt WorkloadBoundaries.Outputs.RedisOperatorSecretArn, NONE]',
       '  Tags:',
       '    - Key: ObservabilityTemplateSha256',
       '      Value: !Ref ObservabilityTemplateSha256',

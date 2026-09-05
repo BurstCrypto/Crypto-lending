@@ -18,20 +18,20 @@ Parameters:
  WorkloadBoundariesTemplateUrl:
   Type: String
   MaxLength: 1024
-  AllowedPattern: '^https://[a-z0-9][a-z0-9-]{1,61}[a-z0-9]\.s3\.[a-z0-9-]+\.(?:amazonaws\.com|amazonaws\.com\.cn)/application-workload-boundaries-78971861599dacc474dc2e087690b72c33397603078b4d90a6b976e8b602239b\.yaml\?versionId=[A-Za-z0-9._~%+-]+$'
+  AllowedPattern: '^https://[a-z0-9][a-z0-9-]{1,61}[a-z0-9]\.s3\.[a-z0-9-]+\.(?:amazonaws\.com|amazonaws\.com\.cn)/application-workload-boundaries-d38d0bf07704075615b4ab75041012675dcc30f824430b579623945d408d14f0\.yaml\?versionId=[A-Za-z0-9._~%+-]+$'
  WorkloadBoundariesTemplateSha256:
   Type: String
-  AllowedValues: [78971861599dacc474dc2e087690b72c33397603078b4d90a6b976e8b602239b]
+  AllowedValues: [d38d0bf07704075615b4ab75041012675dcc30f824430b579623945d408d14f0]
  WorkloadBoundariesArtifactBindingSha256:
   Type: String
   AllowedPattern: '^[a-f0-9]{64}$'
  ObservabilityTemplateUrl:
   Type: String
   MaxLength: 1024
-  AllowedPattern: '^https://[a-z0-9][a-z0-9-]{1,61}[a-z0-9]\.s3\.[a-z0-9-]+\.(?:amazonaws\.com|amazonaws\.com\.cn)/application-observability-ef0704fc3eea63ca60e6b44bcd8298639696f21478cc119757d968b84920c6a7\.yaml\?versionId=[A-Za-z0-9._~%+-]+$'
+  AllowedPattern: '^https://[a-z0-9][a-z0-9-]{1,61}[a-z0-9]\.s3\.[a-z0-9-]+\.(?:amazonaws\.com|amazonaws\.com\.cn)/application-observability-4e3fdde76c3805500f17e1eedc0cd213e77ea0d1704fe56f30810ffa8fd859f9\.yaml\?versionId=[A-Za-z0-9._~%+-]+$'
  ObservabilityTemplateSha256:
   Type: String
-  AllowedValues: [ef0704fc3eea63ca60e6b44bcd8298639696f21478cc119757d968b84920c6a7]
+  AllowedValues: [4e3fdde76c3805500f17e1eedc0cd213e77ea0d1704fe56f30810ffa8fd859f9]
  ObservabilityArtifactBindingSha256:
   Type: String
   AllowedPattern: '^[a-f0-9]{64}$'
@@ -239,6 +239,7 @@ Conditions:
  UseDatabaseMultiAz: !Equals [!Ref EnableDatabaseMultiAz, 'true']
  UseRedisReplica: !Equals [!Ref EnableRedisReplica, 'true']
  CreateOperationalDashboard: !Equals [!Ref EnableOperationalDashboard, 'true']
+ RedisOperatorEnabled: !Equals [!Ref RedisOperatorMode, ENABLED]
 
 Resources:
  ApplicationDataKey:
@@ -886,6 +887,12 @@ Resources:
     WorkerServiceName: !GetAtt WorkerService.Name
     ApiLogGroupName: !Ref ApiLogGroup
     WorkerLogGroupName: !Ref WorkerLogGroup
+    RedisOperatorMode: !Ref RedisOperatorMode
+    RedisCredentialPhase: !Ref RedisCredentialPhase
+    ApiImageUri: !Ref ApiImageUri
+    RedisEndpointAddress: !GetAtt RedisReplicationGroup.PrimaryEndPoint.Address
+    RedisOperatorTaskExecutionRoleArn: !If [RedisOperatorEnabled, !GetAtt WorkloadBoundaries.Outputs.RedisOperatorTaskExecutionRoleArn, NONE]
+    RedisOperatorSecretArn: !If [RedisOperatorEnabled, !GetAtt WorkloadBoundaries.Outputs.RedisOperatorSecretArn, NONE]
    Tags:
     - Key: ObservabilityTemplateSha256
       Value: !Ref ObservabilityTemplateSha256

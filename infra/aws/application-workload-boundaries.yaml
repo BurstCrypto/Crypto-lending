@@ -103,6 +103,13 @@ Rules:
           - !Equals [!Ref RedisOperatorMode, DISABLED]
           - !Equals [!Ref PrivateEgressMode, VpcEndpoints]
         AssertDescription: Redis operator mode requires the reviewed private ECR, logs, Secrets Manager, and S3 delivery path.
+  RedisOperatorRequiresInactiveSlot:
+    Assertions:
+      - Assert: !Or
+          - !Equals [!Ref RedisOperatorMode, DISABLED]
+          - !Equals [!Ref RedisCredentialPhase, A_ONLY]
+          - !Equals [!Ref RedisCredentialPhase, B_ONLY]
+        AssertDescription: Redis operator mode requires one inactive application credential slot.
 
 Conditions:
   CreateVpcEndpointRules: !Equals [!Ref PrivateEgressMode, VpcEndpoints]
@@ -491,8 +498,8 @@ Resources:
     Properties:
       AccessString: !If
         - RedisOperatorEnabled
-        - 'on sanitize-payload resetkeys resetchannels -@all +ping +quit +client|kill'
-        - 'off sanitize-payload resetkeys resetchannels -@all +ping +quit +client|kill'
+        - 'on sanitize-payload resetkeys resetchannels -@all +client|kill'
+        - 'off sanitize-payload resetkeys resetchannels -@all +client|kill'
       AuthenticationMode:
         Passwords: [!Sub '{{resolve:secretsmanager:${RedisOperatorSecret}:SecretString:password}}']
         Type: password

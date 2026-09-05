@@ -93,7 +93,7 @@ test('accepts the repository no-external-egress baseline and records the DNS res
   assert.equal(report.residualLimitations.length, 5);
   assert.match(report.residualLimitations[0], /port 53 to the VPC CIDR/);
   assert.match(report.residualLimitations[0], /cannot prove/);
-  assert.match(report.residualLimitations[1], /REDIS_OPERATOR_EXECUTION_ARTIFACT_UNRESOLVED/);
+  assert.match(report.residualLimitations[1], /REDIS_OPERATOR_LIVE_REVOCATION_UNRESOLVED/);
   assert.match(report.residualLimitations[2], /FIXED_SLOT_CREDENTIAL_REGENERATION_UNRESOLVED/);
   assert.match(report.residualLimitations[3], /AUTH_WALLET_EXTERNAL_CONFIGURATION_UNRESOLVED/);
   assert.match(report.residualLimitations[4], /OPERATIONAL_ALERT_DELIVERY_EXTERNAL/);
@@ -101,9 +101,9 @@ test('accepts the repository no-external-egress baseline and records the DNS res
 
 test('keeps the parent below the reviewed direct-upload ceiling after child extraction', () => {
   const bytes = Buffer.byteLength(templateSource, 'utf8');
-  assert.equal(bytes, 49_856);
+  assert.equal(bytes, 50_395);
   assert.ok(bytes <= 50_500);
-  assert.equal(51_200 - bytes, 1_344);
+  assert.equal(51_200 - bytes, 805);
 });
 
 test('pins the observability child URL, digest, binding, and exact parent mapping', () => {
@@ -146,6 +146,21 @@ test('pins the observability child URL, digest, binding, and exact parent mappin
     [
       'Value: !Ref ObservabilityArtifactBindingSha256',
       'Value: !Ref ObservabilityTemplateSha256',
+      /Observability.*exact reviewed minimum-name input/,
+    ],
+    [
+      'RedisEndpointAddress: !GetAtt RedisReplicationGroup.PrimaryEndPoint.Address',
+      'RedisEndpointAddress: attacker.example',
+      /Observability.*exact reviewed minimum-name input/,
+    ],
+    [
+      'RedisOperatorTaskExecutionRoleArn: !If [RedisOperatorEnabled, !GetAtt WorkloadBoundaries.Outputs.RedisOperatorTaskExecutionRoleArn, NONE]',
+      'RedisOperatorTaskExecutionRoleArn: !GetAtt WorkloadBoundaries.Outputs.ApiTaskExecutionRoleArn',
+      /Observability.*exact reviewed minimum-name input/,
+    ],
+    [
+      'RedisOperatorSecretArn: !If [RedisOperatorEnabled, !GetAtt WorkloadBoundaries.Outputs.RedisOperatorSecretArn, NONE]',
+      'RedisOperatorSecretArn: !GetAtt WorkloadBoundaries.Outputs.RedisActiveSecretArn',
       /Observability.*exact reviewed minimum-name input/,
     ],
   ]) {
@@ -637,7 +652,7 @@ test('pins the versioned child artifact, provenance, and exact nested input cont
   assertRejected(
     mutate((source) =>
       source.replace(
-        'application-workload-boundaries-78971861599dacc474dc2e087690b72c33397603078b4d90a6b976e8b602239b',
+        'application-workload-boundaries-d38d0bf07704075615b4ab75041012675dcc30f824430b579623945d408d14f0',
         `application-workload-boundaries-${'0'.repeat(64)}`,
       ),
     ),
@@ -646,7 +661,7 @@ test('pins the versioned child artifact, provenance, and exact nested input cont
   assertRejected(
     mutate((source) =>
       source.replace(
-        'AllowedValues: [78971861599dacc474dc2e087690b72c33397603078b4d90a6b976e8b602239b]',
+        'AllowedValues: [d38d0bf07704075615b4ab75041012675dcc30f824430b579623945d408d14f0]',
         `AllowedValues: [${'0'.repeat(64)}]`,
       ),
     ),
