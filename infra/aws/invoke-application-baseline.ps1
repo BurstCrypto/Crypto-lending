@@ -1896,6 +1896,35 @@ $rootChangeSetId = [string] (Get-OptionalPropertyValue -InputObject $changeSet -
 if (-not [string]::IsNullOrEmpty($rootChangeSetId) -and $rootChangeSetId -cne $changeSetId) {
     throw 'The reviewed change set returned an unexpected root change-set identity.'
 }
+if ($ChangeSetType -eq 'UPDATE') {
+    $changesProperty = $changeSet.PSObject.Properties['Changes']
+    if ($null -eq $changesProperty -or $null -eq $changesProperty.Value) {
+        throw 'The reviewed UPDATE change set did not expose its complete resource-change list.'
+    }
+    foreach ($change in @($changesProperty.Value)) {
+        if ($null -eq $change -or [string] (Get-OptionalPropertyValue -InputObject $change -Name 'Type') -cne 'Resource') {
+            throw 'The reviewed UPDATE change set contains an unrecognized change entry.'
+        }
+        $resourceChange = Get-OptionalPropertyValue -InputObject $change -Name 'ResourceChange'
+        if ($null -eq $resourceChange) {
+            throw 'The reviewed UPDATE change set contains a resource entry without resource-change details.'
+        }
+        $logicalResourceId = [string] (Get-OptionalPropertyValue -InputObject $resourceChange -Name 'LogicalResourceId')
+        $resourceType = [string] (Get-OptionalPropertyValue -InputObject $resourceChange -Name 'ResourceType')
+        $resourceAction = [string] (Get-OptionalPropertyValue -InputObject $resourceChange -Name 'Action')
+        $replacement = [string] (Get-OptionalPropertyValue -InputObject $resourceChange -Name 'Replacement')
+        if ($logicalResourceId -ceq 'Database' -and (
+                $resourceType -cne 'AWS::RDS::DBInstance' -or
+                $resourceAction -cne 'Modify' -or
+                $replacement -cne 'False'
+            )) {
+            throw 'UPDATE change sets must not replace, add, or remove the stateful Database resource. Use a separately reviewed database migration path.'
+        }
+        if ($logicalResourceId -ceq 'DatabaseCredentialsSecret') {
+            throw 'UPDATE change sets must not modify or remove the legacy retained database master secret through this guard. Inventory and retire it separately.'
+        }
+    }
+}
 
 # The description is not template provenance: a manually created change set can
 # copy it. Retrieve the user-submitted body for this immutable change-set ARN and

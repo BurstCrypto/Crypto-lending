@@ -41,13 +41,22 @@ exercise.
 
 ### Secret creation and injection
 
-The parent and workload-boundary child generate separate database bootstrap,
-migration, API A/B, worker A/B, Redis API A/B, and disabled-by-default Redis
-operator secret material in Secrets Manager using the application data KMS key.
-They do not accept plaintext passwords as CloudFormation parameters or outputs.
-Generated database values are not proof that a PostgreSQL LOGIN exists or has
-that SCRAM verifier; the reviewed bootstrap deliberately does not synchronize
-passwords.
+The parent delegates the `crypto_admin` master password to RDS-managed Secrets
+Manager custody. RDS generates and owns that secret, encrypts it with the
+application data customer-managed KMS key, and rotates it every seven days by
+default. The workload-boundary child separately generates migration, API A/B,
+worker A/B, Redis API A/B, and disabled-by-default Redis operator secret
+material with the same application data key. Neither template accepts a
+plaintext password as a CloudFormation parameter or output. Generated runtime
+database values are not proof that a PostgreSQL LOGIN exists or has that SCRAM
+verifier; the reviewed bootstrap deliberately does not synchronize passwords.
+
+The RDS-managed master credential is not a fixed slot and is not selected by a
+CloudFormation Secrets Manager VersionId. The parent supplies no
+`MasterUserPassword` or custom master secret. It keeps the existing
+`DatabaseCredentialsSecretArn` output name for compatibility, but that output
+contains only `Database.MasterUserSecret.SecretArn`. It is bootstrap metadata,
+not authority to expose the secret to an application task.
 
 The authentication/wallet secret is different: the template does not create or
 inspect it. The operator must supply the selector-free ARN and exact 32-64
@@ -93,6 +102,12 @@ invocation guard compares and preserves the deployed secret ARN, VersionId, and
 KMS key ARN as one tuple. Neither `APPLICATION` nor `CREDENTIAL_TRANSITION` may
 change it; a dedicated reviewed auth/wallet transition record and guard remain
 an open production gate.
+
+The database master is also separate from the fixed-slot and auth/wallet
+transition schemas. RDS, rather than an application change set, coordinates its
+password and managed secret. A bootstrap operator may bind the observed managed
+VersionId in sanitized execution evidence, but that observation is not a stack
+parameter, an A/B slot, or permission to pin or roll back the RDS credential.
 
 For initial adoption, the six A/B parameters and separate operator parameter
 must all be the `UNPINNED` sentinel while API, web, and worker desired counts are
@@ -266,6 +281,14 @@ complete:
 - database secret-to-LOGIN SCRAM installation/authentication and authorized
   inactive-slot regeneration, with the resulting exact version bound into the
   reviewed transition record and deployment parameters;
+- deployed proof that RDS created the master secret with the application data
+  KMS key, the compatibility output identifies that exact secret, and no API,
+  worker, web, or migration task can read or receive it;
+- an authorized RDS-managed master-credential rotation and recovery exercise
+  recording the default seven-day rotation posture, database/secret identity,
+  master-session drain, new authentication, old-password denial, runtime-login
+  continuity, KMS access, and snapshot restore/rebinding behavior without
+  recording secret bytes;
 - deployed verification that schema-v2 adoption bound the six A/B versions and
   separate operator version to the exact generated Secrets Manager versions;
 - an authorized run of the locally reviewed Redis revocation task/CLI using the
@@ -293,8 +316,8 @@ complete:
 - an authorized run through the checked-in transition guard proving that its
   recorded current state still matches the live immutable stack at execution
   time;
-- deployed secret rotation followed by forced task replacement and old-secret
-  denial; and
+- deployed runtime-secret rotation followed by forced task replacement and
+  old-secret denial; and
 - independently reviewed security logs and redaction evidence coordinated with
   KAN-51. KAN-248's local classification/access/query packet remains
   `NOT_EFFECTIVE` while KAN-220 and Security/Privacy/Operations decisions are
@@ -310,3 +333,4 @@ mocked response, Jira transition, or branch merge.
 - [AWS KMS condition keys, including `kms:ViaService`](https://docs.aws.amazon.com/kms/latest/developerguide/conditions-kms.html)
 - [IAM Access Analyzer policy validation](https://docs.aws.amazon.com/IAM/latest/UserGuide/access-analyzer-policy-validation.html)
 - [ElastiCache user groups](https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-resource-elasticache-usergroup.html)
+- [RDS password management with Secrets Manager](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/rds-secrets-manager.html)

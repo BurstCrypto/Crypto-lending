@@ -18,7 +18,7 @@ corresponding call and mutation counters at zero.
 
 The production CloudFormation contract now takes six explicit A/B-slot
 `VersionId` parameters plus one explicit Redis-operator `VersionId`. It binds
-every database, Redis-user, and ECS secret consumer to the exact selected
+every A/B database, Redis-user, and ECS secret consumer to the exact selected
 version and never selects `AWSCURRENT` or another mutable stage. The
 application invocation guard now compares a submitted transition with the exact
 immutable deployed stack and binds the current template, complete parameter and
@@ -39,6 +39,17 @@ one `UNPINNED` source marker to an exact target VersionId alongside the six
 slots. Every later record must preserve that exact operator version. Rotating it
 requires a future dedicated Redis-operator transition; the A/B state machine
 cannot authorize that change.
+
+The RDS `crypto_admin` master credential is outside this record entirely. RDS
+generates, stores, and rotates its managed password through Secrets Manager,
+encrypted with the application data customer-managed KMS key. It has no
+CloudFormation VersionId parameter, `UNPINNED` marker, A/B phase, or state key.
+RDS rotates it every seven days by default, and a separately authorized
+master-credential operation must prove the live database/secret identity,
+master-session drain, new authentication, old-password denial, runtime-login
+continuity, and recovery behavior. Adding the master credential to this
+six-slot schema would falsely imply an overlap or stack-controlled rollback
+that the RDS-managed lifecycle does not provide.
 
 ## Records and local verification
 

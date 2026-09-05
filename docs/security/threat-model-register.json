@@ -608,12 +608,15 @@
       "id": "KEY-009",
       "name": "RDS bootstrap or master database credential",
       "classification": "RESTRICTED",
-      "consumers": ["Separately authorized database bootstrap operator only"],
-      "injection": "Managed database credential boundary; explicitly forbidden from API, worker, web, and migration tasks",
-      "storage": "Designed retained Secrets Manager resource and database verifier; never application configuration, logs, or review evidence",
-      "rotation": "Separately authorized database bootstrap rotation with runtime-login continuity and old-credential denial evidence",
+      "consumers": [
+        "Amazon RDS managed control plane and database boundary",
+        "Separately authorized database bootstrap operator only"
+      ],
+      "injection": "RDS-managed Secrets Manager boundary whose compatibility output contains only the ARN; separate IAM and KMS authorization is required, checked-in application task definitions omit it, and migration-task use is prohibited but still requires deployed origin and IAM-denial evidence",
+      "storage": "RDS-managed secret encrypted with the application data customer-managed KMS key and the database verifier; lifecycle-coupled to the database and never application configuration, logs, or review evidence",
+      "rotation": "RDS-owned default seven-day managed rotation through the RDS lifecycle only, with separately authorized bootstrap, on-demand rotation, runtime-login continuity, old-password denial, and restore/rebinding evidence",
       "owner": "Database and SRE",
-      "evidence": ["docs/KAN-34.md", "docs/KAN-50.md"]
+      "evidence": ["docs/KAN-34.md", "docs/KAN-50.md", "infra/aws/application-baseline.yaml"]
     },
     {
       "id": "KEY-010",
@@ -1142,7 +1145,7 @@
       "id": "THR-SECRETS-002",
       "domain": "SECRETS",
       "stride": ["TAMPERING", "DENIAL_OF_SERVICE", "ELEVATION_OF_PRIVILEGE"],
-      "scenario": "Secret rotation reuses a retained slot, leaves old credentials valid, breaks identity mapping, or gives one workload another workload's secret.",
+      "scenario": "Secret rotation reuses a retained slot, leaves old credentials valid, breaks identity mapping, gives one workload another workload's secret, or loses the RDS-managed master-secret binding during database recovery.",
       "risk": "HIGH",
       "boundaryIds": ["TB-03", "TB-08"],
       "assetIds": ["DATA-002", "DATA-003", "DATA-013", "DATA-017"],
@@ -1154,7 +1157,8 @@
         "The zero-desired-count production API task selects AUTH_PREAUTH_SEAL_KEY and all six purpose-distinct authentication and wallet key-ring fields from one exact immutable shared-secret VersionId with an empty stage, requires NODE_ENV=production, and forbids LOCAL_DEMO_MODE plus every legacy authentication ID/key and wallet version/key field without provisioning a secret or key",
         "The deployment guard preserves the shared-secret ARN/VersionId/KMS tuple across both current update intents and rejects rotation until a dedicated reviewed transition exists",
         "Authentication overlap remains at version one until authorized external secret staging, a schema-owner policy transition, new-fleet proof, and old single-digest function denial exist",
-        "Migration 0022 provides dormant wallet identity overlap and alias controls, the runtime supports exact-version challenge overlap, and migration 0024 provides a dormant schema-owner-only metadata rewrap boundary"
+        "Migration 0022 provides dormant wallet identity overlap and alias controls, the runtime supports exact-version challenge overlap, and migration 0024 provides a dormant schema-owner-only metadata rewrap boundary",
+        "RDS owns the KMS-bound master secret and default seven-day password rotation; the compatibility output exposes only its ARN, checked-in application task definitions omit it, and deployed migration-secret origin plus IAM denial remain external gates"
       ],
       "owner": "Security, Identity, Database, and SRE",
       "status": "OPEN_EXTERNAL",
@@ -1168,8 +1172,8 @@
         "apps/api/src/wallets/infrastructure/config/wallet-registration.config.ts",
         "apps/api/src/wallets/infrastructure/crypto/wallet-registration-crypto.ts"
       ],
-      "residualRisk": "A dedicated auth/wallet VersionId transition guard, external key custody and staged secret population, deployed old-function denial and rotation evidence, wallet identity policy activation, exercised challenge overlap, and wallet metadata rewrap activation remain absent.",
-      "followUp": "Implement the dedicated shared-secret transition guard; obtain KAN-50/KAN-235 custody and rotation review, separately authorized secret staging, schema-owner activation, deployed rotation evidence, and old-key retirement drills"
+      "residualRisk": "A dedicated auth/wallet VersionId transition guard, external key custody and staged secret population, deployed old-function denial and rotation evidence, wallet identity policy activation, exercised challenge overlap, wallet metadata rewrap activation, and live RDS master IAM/KMS, rotation, denial, and snapshot-restore rebinding evidence remain absent.",
+      "followUp": "Implement the dedicated shared-secret transition guard; obtain KAN-50/KAN-235 custody and rotation review, separately authorized secret staging, schema-owner activation, deployed rotation and old-key retirement drills, and an authorized RDS-managed master rotation/recovery exercise"
     },
     {
       "id": "THR-SECRETS-003",

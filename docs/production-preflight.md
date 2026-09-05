@@ -196,9 +196,10 @@ remain in force. API unit tests and the CI OpenAPI regeneration check protect
 this route-surface boundary. It does not alter any provider approval or preflight
 blocker status.
 
-The current machine-readable launch blockers include:
+Relevant machine-readable launch blocker IDs include:
 
 - `AUTH_DEPLOYED_EVIDENCE_MISSING`
+- `DATABASE_MASTER_SECRET_NOT_RDS_MANAGED`
 - `REDIS_OPERATOR_SECRET_VERSION_NOT_WIRED`
 - `EGRESS_POLICY_NOT_ACCEPTED`
 - `EXTERNAL_EGRESS_DISABLED`
@@ -239,6 +240,24 @@ before adoption, and the same exact stage-free version in the ElastiCache user
 and conditional ECS revocation task. Omitted versions, `AWSCURRENT`,
 `AWSPREVIOUS`, alternate parameters, mismatched child propagation, or an enabled
 unpinned task emit `REDIS_OPERATOR_SECRET_VERSION_NOT_WIRED`.
+
+Parent-template inspection separately requires the RDS database to use the
+literal `crypto_admin` master username, `ManageMasterUserPassword: true`, and
+`MasterUserSecret.KmsKeyId: !GetAtt ApplicationDataKey.Arn`. It rejects a
+custom `DatabaseCredentialsSecret`, any `MasterUserPassword` or Secrets Manager
+dynamic reference, a different KMS binding, and a compatibility output that is
+not exactly `!GetAtt Database.MasterUserSecret.SecretArn`. Missing or altered
+wiring emits `DATABASE_MASTER_SECRET_NOT_RDS_MANAGED`. This check proves only
+the exact hash-bound authored RDS-managed boundary; a private in-process brand
+prevents callers from clearing it with a forged pair of success booleans. It
+cannot prove the managed secret exists, uses the intended live key, is readable
+only by the bootstrap operator, or follows the default seven-day rotation. A
+recovery exercise must establish and bind the restored or replacement
+database's managed-secret ARN; the original secret need not survive. Those
+items remain deployed evidence and recovery gates. The current signed evidence
+schema has no dedicated RDS lifecycle record, so this static blocker must not be
+treated as closing that external gate; adding the record and a separate missing-
+evidence blocker remains required before launch approval.
 
 `AUTH_DEPLOYED_EVIDENCE_MISSING` remains by design: the repository neither
 provisions nor contacts Cognito, Secrets Manager, or KMS, and the inspector never

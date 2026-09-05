@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { generateKeyPairSync, sign } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -9,6 +10,7 @@ import {
   evaluateProductionPreflight,
   formatProductionPreflightReport,
   inspectAuthenticationDeploymentTemplate,
+  inspectDatabaseMasterDeploymentTemplate,
   inspectRedisOperatorDeploymentTemplates,
   loadRepositoryProductionPreflightInput,
   parseProductionPreflightArguments,
@@ -51,6 +53,11 @@ const APPLICATION_WORKLOAD_BOUNDARIES = readFileSync(
 const APPLICATION_OBSERVABILITY = readFileSync(
   resolve(__dirname, '../infra/aws/application-observability.yaml'),
   'utf8',
+);
+const PREFLIGHT_SCRIPT_PATH = resolve(__dirname, 'production-go-live-preflight.ts');
+const RDS_MANAGED_DATABASE_TEMPLATE = APPLICATION_BASELINE;
+const VERIFIED_DATABASE_MASTER_DEPLOYMENT = inspectDatabaseMasterDeploymentTemplate(
+  RDS_MANAGED_DATABASE_TEMPLATE,
 );
 
 type AuthBindingMutation = readonly [
@@ -203,6 +210,7 @@ function completeInput(directory: unknown): ProductionPreflightInput {
       inspected: true,
       syntaxValid: true,
     },
+    databaseMasterDeployment: VERIFIED_DATABASE_MASTER_DEPLOYMENT,
     egress: {
       localValidationPassed: true,
       status: 'ACCEPTED',
@@ -304,6 +312,7 @@ test('current repository is a bootstrap blocker audit and exits nonzero for both
 
   assert.equal(readOnly.auditMode, 'BOOTSTRAP_BLOCKER_AUDIT');
   assert.equal(input.platforms.sourceRevision, null);
+  assert.deepEqual(input.databaseMasterDeployment, { inspected: true, syntaxValid: true });
   assert.equal(readOnly.selectedTargetReadiness, 'BLOCKED');
   assert.equal(writes.selectedTargetReadiness, 'BLOCKED');
   assert.deepEqual(readOnly.providerCounts, {
@@ -330,8 +339,34 @@ test('current repository is a bootstrap blocker audit and exits nonzero for both
       .find(({ id }) => id === 'PUBLIC_LAUNCH_AUTHORITIES')
       ?.blockerIds.includes('PUBLIC_LAUNCH_AUTHORITY_DECISION_MISSING'),
   );
+  assert.equal(
+    readOnly.checks
+      .find(({ id }) => id === 'AUTHENTICATION')
+      ?.blockerIds.includes('DATABASE_MASTER_SECRET_NOT_RDS_MANAGED'),
+    false,
+  );
   assert.equal(productionPreflightExitCode(readOnly), 1);
   assert.equal(productionPreflightExitCode(writes), 1);
+
+  const cli = spawnSync(process.execPath, ['--import', 'tsx', PREFLIGHT_SCRIPT_PATH, '--json'], {
+    cwd: repositoryRoot,
+    encoding: 'utf8',
+    windowsHide: true,
+  });
+  assert.equal(cli.status, 1);
+  assert.equal(cli.stderr, '');
+  const cliReport = JSON.parse(cli.stdout) as {
+    readonly checks: readonly {
+      readonly id: string;
+      readonly blockerIds: readonly string[];
+    }[];
+  };
+  assert.equal(
+    cliReport.checks
+      .find(({ id }) => id === 'AUTHENTICATION')
+      ?.blockerIds.includes('DATABASE_MASTER_SECRET_NOT_RDS_MANAGED'),
+    false,
+  );
 });
 
 test('structurally valid inert egress remains launch-blocked', () => {
@@ -1336,6 +1371,202 @@ test('auth inspection rejects mutable, omitted, or alternate auth/wallet secret 
         ?.blockerIds.includes('AUTH_PRODUCTION_SECRET_REFERENCES_NOT_WIRED'),
       replacement,
     );
+  }
+});
+
+test('database master inspection accepts only the RDS-managed compatibility contract', () => {
+  const inspected = inspectDatabaseMasterDeploymentTemplate(RDS_MANAGED_DATABASE_TEMPLATE);
+  assert.deepEqual(inspected, { inspected: true, syntaxValid: true });
+
+  const report = evaluateProductionPreflight({
+    ...completeInput(platformDirectory('PLANNED')),
+    databaseMasterDeployment: inspected,
+  });
+  const authentication = report.checks.find(({ id }) => id === 'AUTHENTICATION');
+  assert.equal(authentication?.localValidation, 'PASS');
+  assert.equal(
+    authentication?.blockerIds.includes('DATABASE_MASTER_SECRET_NOT_RDS_MANAGED'),
+    false,
+  );
+
+  const complete = completeInput(platformDirectory('PLANNED'));
+  const { databaseMasterDeployment: intentionallyOmitted, ...legacyInput } = complete;
+  assert.notEqual(intentionallyOmitted, undefined);
+  const legacyReport = evaluateProductionPreflight(legacyInput);
+  const legacyAuthentication = legacyReport.checks.find(({ id }) => id === 'AUTHENTICATION');
+  assert.equal(legacyAuthentication?.localValidation, 'FAIL');
+  assert.ok(legacyAuthentication?.blockerIds.includes('DATABASE_MASTER_SECRET_NOT_RDS_MANAGED'));
+  assert.match(
+    formatProductionPreflightReport(legacyReport),
+    /DATABASE_MASTER_SECRET_NOT_RDS_MANAGED/u,
+  );
+
+  const forgedReport = evaluateProductionPreflight({
+    ...completeInput(platformDirectory('PLANNED')),
+    databaseMasterDeployment: Object.freeze({ inspected: true, syntaxValid: true }),
+  });
+  const forgedAuthentication = forgedReport.checks.find(({ id }) => id === 'AUTHENTICATION');
+  assert.equal(forgedAuthentication?.localValidation, 'FAIL');
+  assert.ok(forgedAuthentication?.blockerIds.includes('DATABASE_MASTER_SECRET_NOT_RDS_MANAGED'));
+});
+
+test('database master inspection rejects custom, mutable, counterfeit, or ambiguous bindings', () => {
+  const mutate = (approved: string, rejected: string, label: string): string => {
+    const result = RDS_MANAGED_DATABASE_TEMPLATE.replace(approved, rejected);
+    assert.notEqual(result, RDS_MANAGED_DATABASE_TEMPLATE, label);
+    return result;
+  };
+  const mutations = [
+    [
+      'managed password disabled',
+      mutate('   ManageMasterUserPassword: true', '   ManageMasterUserPassword: false', 'mode'),
+    ],
+    ['managed password omitted', mutate('   ManageMasterUserPassword: true\n', '', 'missing mode')],
+    [
+      'managed password duplicated',
+      mutate(
+        '   ManageMasterUserPassword: true',
+        '   ManageMasterUserPassword: true\n   ManageMasterUserPassword: true',
+        'duplicate mode',
+      ),
+    ],
+    [
+      'counterfeit master username',
+      mutate('   MasterUsername: crypto_admin', '   MasterUsername: attacker_admin', 'username'),
+    ],
+    [
+      'mutable master username',
+      mutate(
+        '   MasterUsername: crypto_admin',
+        "   MasterUsername: !Sub '{{resolve:secretsmanager:${DatabaseCredentialsSecret}:SecretString:username}}'",
+        'dynamic username',
+      ),
+    ],
+    [
+      'master password dynamic reference',
+      mutate(
+        '   ManageMasterUserPassword: true',
+        "   ManageMasterUserPassword: true\n   MasterUserPassword: !Sub '{{resolve:secretsmanager:${DatabaseCredentialsSecret}:SecretString:password}}'",
+        'dynamic password',
+      ),
+    ],
+    [
+      'master password exact-version reference',
+      mutate(
+        '   ManageMasterUserPassword: true',
+        "   ManageMasterUserPassword: true\n   MasterUserPassword: !Sub '{{resolve:secretsmanager:${DatabaseCredentialsSecret}:SecretString:password::${DatabaseCredentialsSecretVersionId}}'",
+        'versioned password',
+      ),
+    ],
+    [
+      'wrong master-secret KMS key',
+      mutate(
+        '    KmsKeyId: !GetAtt ApplicationDataKey.Arn',
+        '    KmsKeyId: alias/aws/secretsmanager',
+        'KMS key',
+      ),
+    ],
+    [
+      'counterfeit ApplicationDataKey resource',
+      mutate('  Type: AWS::KMS::Key', '  Type: AWS::SSM::Parameter', 'key resource'),
+    ],
+    [
+      'custom database secret',
+      mutate(
+        ' Database:',
+        ' DatabaseCredentialsSecret:\n  Type: AWS::SecretsManager::Secret\n Database:',
+        'custom secret',
+      ),
+    ],
+    [
+      'quoted custom database secret',
+      mutate(
+        ' Database:',
+        ' "DatabaseCredentialsSecret":\n  Type: AWS::SecretsManager::Secret\n Database:',
+        'quoted custom secret',
+      ),
+    ],
+    [
+      'commented custom database secret',
+      mutate(
+        ' Database:',
+        ' DatabaseCredentialsSecret: # legacy secret\n  Type: AWS::SecretsManager::Secret\n Database:',
+        'commented custom secret',
+      ),
+    ],
+    [
+      'flow-form custom database secret',
+      mutate(
+        ' Database:',
+        ' DatabaseCredentialsSecret: { Type: AWS::SecretsManager::Secret }\n Database:',
+        'flow custom secret',
+      ),
+    ],
+    [
+      'quoted duplicate master username',
+      mutate(
+        '   MasterUsername: crypto_admin',
+        '   MasterUsername: crypto_admin\n   "MasterUsername": attacker_admin',
+        'quoted duplicate username',
+      ),
+    ],
+    [
+      'quoted duplicate managed-password mode',
+      mutate(
+        '   ManageMasterUserPassword: true',
+        '   ManageMasterUserPassword: true\n   "ManageMasterUserPassword": false',
+        'quoted duplicate mode',
+      ),
+    ],
+    [
+      'quoted duplicate master-secret block',
+      mutate(
+        '   MasterUserSecret:',
+        '   MasterUserSecret:\n   "MasterUserSecret": { KmsKeyId: alias/aws/secretsmanager }',
+        'quoted duplicate master secret',
+      ),
+    ],
+    [
+      'legacy compatibility output',
+      mutate(
+        '  Value: !GetAtt Database.MasterUserSecret.SecretArn',
+        '  Value: !Ref DatabaseCredentialsSecret',
+        'legacy output',
+      ),
+    ],
+    [
+      'alternate managed-secret output',
+      mutate(
+        '  Value: !GetAtt Database.MasterUserSecret.SecretArn',
+        '  Value: !GetAtt AlternateDatabase.MasterUserSecret.SecretArn',
+        'alternate output',
+      ),
+    ],
+    [
+      'ambiguous compatibility output',
+      mutate(
+        '  Value: !GetAtt Database.MasterUserSecret.SecretArn',
+        '  Value: !GetAtt Database.MasterUserSecret.SecretArn\n  Value: !GetAtt Database.MasterUserSecret.SecretArn',
+        'duplicate output',
+      ),
+    ],
+    ['invalid trailing YAML', `${RDS_MANAGED_DATABASE_TEMPLATE}\n[`],
+  ] as const;
+
+  assert.deepEqual(inspectDatabaseMasterDeploymentTemplate(APPLICATION_BASELINE), {
+    inspected: true,
+    syntaxValid: true,
+  });
+  for (const [label, source] of mutations) {
+    const inspected = inspectDatabaseMasterDeploymentTemplate(source);
+    assert.equal(inspected.syntaxValid, false, label);
+    const report = evaluateProductionPreflight({
+      ...completeInput(platformDirectory('PLANNED')),
+      databaseMasterDeployment: inspected,
+    });
+    const authentication = report.checks.find(({ id }) => id === 'AUTHENTICATION');
+    assert.equal(authentication?.localValidation, 'FAIL', label);
+    assert.ok(authentication?.blockerIds.includes('DATABASE_MASTER_SECRET_NOT_RDS_MANAGED'), label);
   }
 });
 

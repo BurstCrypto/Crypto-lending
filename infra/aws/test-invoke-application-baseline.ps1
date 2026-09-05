@@ -231,7 +231,8 @@ function Write-ChangeSetResponse {
         [string] $ChangeSetType = 'CREATE',
         [string] $UsePreviousParameter,
         [bool] $IncludeNestedStacks = $true,
-        [string[]] $Capabilities = @('CAPABILITY_IAM')
+        [string[]] $Capabilities = @('CAPABILITY_IAM'),
+        [object[]] $Changes = @()
     )
 
     if ($null -eq $ParameterMap) {
@@ -267,7 +268,7 @@ function Write-ChangeSetResponse {
             Parameters = $parameters
             Tags = $tags
             Capabilities = $Capabilities
-            Changes = @()
+            Changes = $Changes
     })
 }
 
@@ -2184,6 +2185,82 @@ try {
         Assert-Condition (-not $result.Succeeded) 'UPDATE Deploy accepted UsePreviousValue for the Redis operator VersionId.'
         Assert-Condition ($result.Output -match 'non-explicit parameter') 'Redis operator UsePreviousValue rejection was not explicit.'
         Assert-Condition ($marker -notmatch 'execute-change-set') 'UPDATE executed after accepting an implicit Redis operator VersionId.'
+    }
+
+    Invoke-FocusedTest -Name 'UPDATE Deploy rejects database replacement and legacy master-secret retirement' -Body {
+        $unsafeChanges = @(
+            [pscustomobject]@{
+                Name = 'database replacement'
+                ExpectedError = 'must not replace, add, or remove the stateful Database resource'
+                Change = [ordered]@{
+                    Type = 'Resource'
+                    ResourceChange = [ordered]@{
+                        Action = 'Modify'
+                        LogicalResourceId = 'Database'
+                        ResourceType = 'AWS::RDS::DBInstance'
+                        Replacement = 'True'
+                    }
+                }
+            },
+            [pscustomobject]@{
+                Name = 'conditional database replacement'
+                ExpectedError = 'must not replace, add, or remove the stateful Database resource'
+                Change = [ordered]@{
+                    Type = 'Resource'
+                    ResourceChange = [ordered]@{
+                        Action = 'Modify'
+                        LogicalResourceId = 'Database'
+                        ResourceType = 'AWS::RDS::DBInstance'
+                        Replacement = 'Conditional'
+                    }
+                }
+            },
+            [pscustomobject]@{
+                Name = 'database removal'
+                ExpectedError = 'must not replace, add, or remove the stateful Database resource'
+                Change = [ordered]@{
+                    Type = 'Resource'
+                    ResourceChange = [ordered]@{
+                        Action = 'Remove'
+                        LogicalResourceId = 'Database'
+                        ResourceType = 'AWS::RDS::DBInstance'
+                        Replacement = 'False'
+                    }
+                }
+            },
+            [pscustomobject]@{
+                Name = 'legacy retained master-secret removal'
+                ExpectedError = 'must not modify or remove the legacy retained database master secret'
+                Change = [ordered]@{
+                    Type = 'Resource'
+                    ResourceChange = [ordered]@{
+                        Action = 'Remove'
+                        LogicalResourceId = 'DatabaseCredentialsSecret'
+                        ResourceType = 'AWS::SecretsManager::Secret'
+                        Replacement = 'False'
+                    }
+                }
+            }
+        )
+
+        foreach ($unsafeChange in $unsafeChanges) {
+            Write-ApplicationStackResponse -ParameterMap $updateApplicationParameterMap -TagMap $updateApplicationStackTags
+            Write-GuardrailStackResponse -ConfigurationSha256 $controlConfigurationSha256
+            Write-TemplateResponse -Path $guardrailTemplateResponsePath -TemplateBody $guardrailTemplateBody
+            Write-TemplateResponse -Path $applicationTemplateResponsePath -TemplateBody $applicationTemplateBody
+            Write-ChangeSetResponse `
+                -ParameterMap $applicationUpdateParameterMap `
+                -TagMap $updateApplicationStackTags `
+                -Description $applicationUpdateExpectedChangeSetDescription `
+                -ChangeSetType 'UPDATE' `
+                -Changes @($unsafeChange.Change)
+            Clear-AwsMarker
+            $result = Invoke-Guard -Arguments $applicationUpdateArguments
+            $marker = Get-AwsMarkerText
+            Assert-Condition (-not $result.Succeeded) "UPDATE Deploy accepted $($unsafeChange.Name)."
+            Assert-Condition ($result.Output -match [regex]::Escape($unsafeChange.ExpectedError)) "The $($unsafeChange.Name) rejection was not explicit."
+            Assert-Condition ($marker -notmatch 'execute-change-set') "UPDATE executed after $($unsafeChange.Name)."
+        }
     }
 
     Invoke-FocusedTest -Name 'exact UPDATE Deploy executes only with the transition-bound acknowledgement' -Body {

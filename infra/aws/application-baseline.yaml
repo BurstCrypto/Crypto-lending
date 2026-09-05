@@ -665,19 +665,6 @@ Resources:
     - !Ref PrivateSubnetA
     - !Ref PrivateSubnetB
 
- DatabaseCredentialsSecret:
-  Type: AWS::SecretsManager::Secret
-  DeletionPolicy: Retain
-  UpdateReplacePolicy: Retain
-  Properties:
-   GenerateSecretString:
-    ExcludePunctuation: true
-    GenerateStringKey: password
-    IncludeSpace: false
-    PasswordLength: 48
-    SecretStringTemplate: '{"username":"crypto_admin"}'
-   KmsKeyId: !GetAtt ApplicationDataKey.Arn
-
  DatabaseParameterGroup:
   Type: AWS::RDS::DBParameterGroup
   Properties:
@@ -705,8 +692,10 @@ Resources:
    Engine: postgres
    EngineVersion: !Ref PostgresEngineVersion
    KmsKeyId: !GetAtt ApplicationDataKey.Arn
-   MasterUsername: !Sub '{{resolve:secretsmanager:${DatabaseCredentialsSecret}:SecretString:username}}'
-   MasterUserPassword: !Sub '{{resolve:secretsmanager:${DatabaseCredentialsSecret}:SecretString:password}}'
+   MasterUsername: crypto_admin
+   ManageMasterUserPassword: true
+   MasterUserSecret:
+    KmsKeyId: !GetAtt ApplicationDataKey.Arn
    MonitoringInterval: 0
    MultiAZ: !If [UseDatabaseMultiAz, true, false]
    Port: 5432
@@ -1442,7 +1431,7 @@ Outputs:
  DatabaseEndpointPort:
   Value: !GetAtt Database.Endpoint.Port
  DatabaseCredentialsSecretArn:
-  Value: !Ref DatabaseCredentialsSecret
+  Value: !GetAtt Database.MasterUserSecret.SecretArn
  ApiDatabaseActiveSecretArn:
   Value: !GetAtt WorkloadBoundaries.Outputs.ApiDatabaseActiveSecretArn
  WorkerDatabaseActiveSecretArn:

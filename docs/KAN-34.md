@@ -73,8 +73,8 @@ record. `Deploy` recomputes and verifies each binding.
 
 `infra/aws/application-baseline.yaml` composes two content-addressed child
 stacks: workload boundaries and operational observability. The reviewed parent
-is 50,316 bytes (884 bytes below the AWS limit), while a local guard enforces a
-50,500-byte ceiling and leaves a 184-byte repository guard band before that
+is 49,882 bytes (1,318 bytes below the AWS limit), while a local guard enforces a
+50,500-byte ceiling and leaves a 618-byte repository guard band before that
 ceiling. This prevents accidental growth beyond CloudFormation's 51,200-byte
 direct-body limit.
 
@@ -95,9 +95,11 @@ direct-body limit.
 - the jobs and balance-sync queues each retain an isolated, bounded-redrive
   source/DLQ topology;
 - customer-managed KMS keys protect durable data, queues, secrets, and logs;
-- the RDS master secret is reserved for bootstrap and emergency ownership
-  recovery only. Separate migration-only, API, and worker PostgreSQL
-  credentials and exact database capability roles are now wired through the
+- RDS generates and manages the `crypto_admin` master password in Secrets
+  Manager, encrypted with the application data customer-managed KMS key. Its
+  ARN-only compatibility output is reserved for bootstrap and emergency
+  ownership recovery; separate migration-only, API, and worker PostgreSQL
+  credentials and exact database capability roles are wired through the
   reviewed KAN-232/KAN-233 boundary;
 - split API/worker execution IAM permits the API to read only its database and
   selected Redis ACL/auth-wallet credentials, the worker only its database
@@ -219,6 +221,19 @@ and a worker A/B login. API and worker receive only their own
 prefixes and all legacy unscoped `DATABASE_*` credentials. The bootstrap/master
 credential is never an application or migration-task input.
 
+The RDS master does not use the fixed-slot VersionId state machine. The database
+has the literal stable username `crypto_admin`, enables
+`ManageMasterUserPassword`, binds `MasterUserSecret.KmsKeyId` to
+`ApplicationDataKey`, and supplies no custom master secret or
+`MasterUserPassword` dynamic reference. RDS owns the generated secret and its
+default seven-day rotation. `DatabaseCredentialsSecretArn` remains as a
+compatibility output backed by `Database.MasterUserSecret.SecretArn`; it is an
+operator-facing identifier, not a secret value or task-readable capability.
+The managed secret's KMS key is an adoption/recovery-time binding. Operators
+must stop on key drift and use a separately reviewed database/secret recovery
+path for key migration; routine managed-password rotation does not change that
+binding.
+
 All production PostgreSQL paths require `verify-full` plus an explicit
 `NODE_EXTRA_CA_CERTS` bundle. The process parses that PEM bundle before opening
 the pool and fails closed when it is absent, unreadable, or invalid. The
@@ -319,8 +334,11 @@ versioned same-account/Region S3
 bucket (no guard path creates or uploads it); create the stack with the six A/B
 version parameters and separate operator version explicitly set to `UNPINNED`,
 every credential phase at `A_ONLY`, the Redis operator disabled, and all
-workload desired counts at zero; capture the seven generated Secrets Manager
-`VersionId` values without recording secret material; validate a schema-v2
+workload desired counts at zero; confirm that RDS created the managed master
+secret with the application data key and bind the database identity plus
+`DatabaseCredentialsSecretArn` output without retrieving its value; capture the
+six fixed-slot Secrets Manager `VersionId` values plus the separate Redis
+operator version without recording secret material; validate a schema-v2
 `ADOPT_AND_PIN` record whose target state contains those exact seven IDs;
 provision the restricted PostgreSQL LOGIN slots from their exact scoped secret
 versions while workloads remain stopped; then apply the all-pinned follow-up
@@ -329,8 +347,12 @@ validated record. That follow-up installs the pinned API Redis and operator
 passwords while retaining the `A_ONLY` and operator-disabled access boundaries.
 Independently verify the
 deployed pins and backend-installation evidence against the adoption record
-before continuing. Then drain old sessions; run the exact bootstrap artifact as
-the bootstrap owner; register and run the separately reviewed migration task
+before continuing. Then drain old sessions; ensure no other `crypto_admin`
+session exists; bind the current managed-secret VersionId in sanitized
+bootstrap evidence; retrieve it only into the authorized ephemeral operator
+boundary; and run the exact bootstrap artifact over verified TLS as the
+bootstrap owner. Stop if the database, secret ARN, or observed version changes.
+Next register and run the separately reviewed migration task
 with only the `crypto_migration` secret; wait for exit code zero; run
 `npm run db:status:prod --workspace @crypto-lending/api`; exercise positive and
 negative capability probes for both API and worker; then raise desired counts.
@@ -361,11 +383,12 @@ template deliberately does not launch the task.
   deploy both stacks or attempt an unreviewed resource import.
 - Physical names make this a one-stack-per-`EnvironmentName` baseline. A second
   stack for the same environment will collide rather than create a hidden copy.
-- PostgreSQL LOGIN provisioning and secret-to-role password synchronization
-  remain explicit operator steps because CloudFormation cannot safely manage
-  database-native credentials. Capability roles and grants are reconciled by
-  the reviewed bootstrap artifact; live A/B cutover remains an authorized
-  maintenance procedure.
+- Migration/API/worker PostgreSQL LOGIN provisioning and secret-to-role
+  password synchronization remain explicit operator steps because
+  CloudFormation cannot safely manage those database-native credentials. RDS
+  owns only the separate master password. Capability roles and grants are
+  reconciled by the reviewed bootstrap artifact; live A/B cutover remains an
+  authorized maintenance procedure.
 - Static validation cannot prove that the migration-task parameters were mapped
   to the intended application-stack outputs or that runtime privilege denial is
   effective. Those checks remain mandatory deployment evidence before raising
@@ -422,14 +445,25 @@ production authorization.
 ## Cleanup and rollback
 
 CloudFormation rollback is enabled for an authorized deployment. Database and
-cache replacement/deletion may retain snapshots; the Secrets Manager values and
-customer-managed KMS keys are retained indefinitely by the current template.
-Those retained artifacts remain billable, and encrypted snapshots depend on
-the retained keys. Database deletion protection must be deliberately disabled
-before a protected database can be removed. Log groups have bounded retention,
-but their retained data can also incur charges. An operator must inventory and
-approve each deletion separately rather than using an unreviewed recursive
-cleanup.
+cache replacement/deletion may retain snapshots; application-managed runtime
+Secrets Manager values and customer-managed KMS keys are retained indefinitely
+by the current template. The RDS-managed master secret instead follows the
+database lifecycle, so deletion, replacement, and snapshot restoration may
+remove or change its ARN. A snapshot alone is not evidence that bootstrap
+credentials are recoverable. An authorized restore drill must rediscover the
+managed secret, prove KMS readability, and verify new authentication,
+old-password denial, master-session cleanup, and runtime-login continuity.
+Retained artifacts remain billable, and encrypted snapshots depend on retained
+keys. Database deletion protection must be deliberately disabled before a
+protected database can be removed. Log groups have bounded retention, but their
+retained data can also incur charges. An operator must inventory and approve
+each deletion separately rather than using an unreviewed recursive cleanup.
 
 Never place credentials, secret values, generated parameter files, stack
 outputs, or copied CloudFormation state in Git or Jira evidence.
+
+For UPDATE deployment, the guard rejects any `Database` add, remove, or
+`True`/`Conditional` replacement and rejects any change to the former retained
+`DatabaseCredentialsSecret` resource. Existing-stack adoption therefore needs
+a separately reviewed database migration; this application guard cannot retire
+the orphaned legacy secret or authorize a replacement.

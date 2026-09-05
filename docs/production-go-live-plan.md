@@ -321,6 +321,40 @@ gap; it does not approve a mainnet read or write path.
 | Operations/security | Eight queue, DLQ, application-failure, and Redis access-denial alarms route both `ALARM` and `OK` transitions to one operator-supplied, same-account/same-Region SNS topic. Redis metrics use the actual node-level member identities across failover. The dormant Redis operator user and one-off task now share one exact stage-free secret VersionId captured by inert adoption, and ordinary/A-B updates cannot change it. Strict local template, invocation, and preflight guards are green. No real topic, confirmed subscriptions, escalation ownership, deployed dashboard, operator-secret rotation path, delivery proof, revocation drill, revision-bound exercise, or independent acceptance exists.                                                                                                                                                                            | Threat model, observability, incident, rollback, recovery, provider drift/outage, finality/reorg, dedicated operator-key rotation, alarm-delivery, revocation, and canary evidence pass with no unresolved critical/high finding                                                                                              |
 | Dependencies        | The legacy public-testnet `@solana/web3.js` graph is development-only and absent from the production startup/web bundle. `npm audit --omit=dev` reports zero findings on 2026-09-04. CI produces candidate SPDX inventories for the API and web images and binds them into the release stage; retained SBOMs for the final registry artifacts, final-image scans, provenance, and independent dependency-risk acceptance remain absent                                                                                                                                                                                                                                                                                                                                                                                                                                                     | The exact immutable API and web images have retained SBOMs and provenance, pass the approved image scanner and policy, and receive a dated, expiring independent dependency-risk decision bound to the release and image digests; the API digest is reused by the distinct API, outbox-worker, and migration task definitions |
 
+### RDS master credential gate
+
+The application template delegates the stable `crypto_admin` master password to
+RDS-managed Secrets Manager custody, encrypted with `ApplicationDataKey`. It
+contains no custom master secret, `MasterUserPassword`, mutable-stage dynamic
+reference, fixed-slot VersionId, or task injection. The existing
+`DatabaseCredentialsSecretArn` output remains an ARN-only compatibility surface
+only. Separate bootstrap IAM and KMS authorization is still required. RDS owns
+the password and its default seven-day rotation; application and fixed-slot
+updates neither pin nor roll it back, and operators must not mutate the managed
+value through a generic Secrets Manager update. The managed secret's KMS key is
+an adoption/recovery-time binding, not a routine rotation field. Stop on key
+drift and route any key migration through a separately reviewed database/secret
+recovery path.
+
+This static contract is not launch evidence. Before go-live, an authorized
+non-production exercise must bind the exact database and managed-secret ARN,
+prove customer-key access and bootstrap-only IAM, drain master sessions, observe
+a managed rotation, verify new authentication and old-password denial while
+API/worker logins stay healthy, and restore a snapshot into the reviewed
+recovery path. Because the managed secret follows the database lifecycle, the
+restore exercise must rediscover and bind the restored secret rather than
+assuming that the original compatibility output or credential survived.
+
+Updating an older deployed stack is not approved by this source change. The
+master-username property can be replacement-sensitive even though the old
+dynamic reference resolved to the same text, and removal of the former
+`Retain`-policy secret can leave an orphaned billable secret while RDS creates
+the managed replacement. The deployment guard rejects any database add, remove,
+or possible replacement and any change to the legacy master-secret resource.
+A separate migration must inventory the legacy secret; any eventual deletion
+requires its own authorization after the managed credential and recovery
+evidence pass.
+
 Dependency audit update (2026-09-04): the retired demo/public-testnet modules
 remain available to local regression tests but are no longer reachable from the
 public portfolio route or imported by the API production root. Their legacy

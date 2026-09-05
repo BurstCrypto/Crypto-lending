@@ -104,9 +104,9 @@ test('accepts the repository no-external-egress baseline and records the DNS res
 
 test('keeps the parent below the reviewed direct-upload ceiling after child extraction', () => {
   const bytes = Buffer.byteLength(templateSource, 'utf8');
-  assert.equal(bytes, 50_316);
+  assert.equal(bytes, 49_882);
   assert.ok(bytes <= 50_500);
-  assert.equal(51_200 - bytes, 884);
+  assert.equal(51_200 - bytes, 1_318);
 });
 
 test('pins the observability child URL, digest, binding, and exact parent mapping', () => {
@@ -1120,12 +1120,68 @@ test('rejects crossing the runtime and migration database credential boundary', 
   assertRejected(
     mutate((source) =>
       source.replace(
-        '${DatabaseCredentialsSecret}:SecretString:username',
-        '${WorkloadBoundaries.Outputs.MigrationDatabaseCredentialSecretArn}:SecretString:username',
+        '       - { Name: APP_ENV, Value: !Ref EnvironmentName }',
+        '       - { Name: APP_ENV, Value: !Ref EnvironmentName }\n       - { Name: MASTER_SECRET_ARN, Value: !GetAtt Database.MasterUserSecret.SecretArn }',
       ),
     ),
-    /must preserve DatabaseCredentialsSecret as its bootstrap master credential/,
+    /ApiTaskDefinition must not reference the RDS master\/bootstrap secret/,
   );
+});
+
+test('delegates the database master credential to RDS with the reviewed KMS key', () => {
+  for (const [search, replacement, message] of [
+    [
+      '   ManageMasterUserPassword: true\n',
+      '',
+      /Database must delegate master-password management to RDS/,
+    ],
+    [
+      '   ManageMasterUserPassword: true',
+      '   ManageMasterUserPassword: false',
+      /Database must delegate master-password management to RDS/,
+    ],
+    [
+      '   MasterUsername: crypto_admin',
+      '   MasterUsername: postgres',
+      /Database requires MasterUsername to equal crypto_admin/,
+    ],
+    [
+      '   ManageMasterUserPassword: true',
+      [
+        "   MasterUserPassword: !Sub '{{resolve:secretsmanager:${WorkloadBoundaries.Outputs.MigrationDatabaseCredentialSecretArn}:SecretString:password}}'",
+        '   ManageMasterUserPassword: true',
+      ].join('\n'),
+      /Database must not declare MasterUserPassword when RDS manages it/,
+    ],
+    [
+      '   ManageMasterUserPassword: true',
+      [
+        "   MasterUserPassword: !Sub '{{resolve:secretsmanager:${WorkloadBoundaries.Outputs.MigrationDatabaseCredentialSecretArn}:SecretString:password:AWSCURRENT}}'",
+        '   ManageMasterUserPassword: true',
+      ].join('\n'),
+      /Database must not declare MasterUserPassword when RDS manages it/,
+    ],
+    [
+      '   MasterUserSecret:\n    KmsKeyId: !GetAtt ApplicationDataKey.Arn',
+      '   MasterUserSecret:\n    KmsKeyId: !GetAtt ApplicationLogsKey.Arn',
+      /Database must preserve the exact RDS-managed master-secret KMS binding to ApplicationDataKey/,
+    ],
+    [
+      '   MasterUserSecret:\n    KmsKeyId: !GetAtt ApplicationDataKey.Arn\n',
+      '',
+      /Database must preserve the exact RDS-managed master-secret KMS binding to ApplicationDataKey/,
+    ],
+    [
+      '  Value: !GetAtt Database.MasterUserSecret.SecretArn',
+      '  Value: !Ref Database',
+      /DatabaseCredentialsSecretArn requires Value to equal !GetAtt Database.MasterUserSecret.SecretArn/,
+    ],
+  ]) {
+    assertRejected(
+      mutate((source) => source.replace(search, replacement)),
+      message,
+    );
+  }
 });
 
 test('rejects recreating a workload IAM role outside the pinned child', () => {

@@ -19,7 +19,7 @@ const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const defaultTemplatePath = join(scriptDirectory, 'database-migration-task.yaml');
 const reviewedTemplateSha256 = '3b98d6aea9b2a12cc18b0b31739c1367406f41c5495c514e2070c40440c0c70c';
 const migrationBindingResidualLimitation =
-  'DatabaseMigrationCredentialsSecretArn, its exact immutable VersionId, and ApplicationDataKeyArn are operator-supplied cross-stack inputs; local validation cannot authenticate their origin or prove that the pinned version contains the installed crypto_migration verifier. The secret must be separately scoped and must never be the RDS master/bootstrap DatabaseCredentialsSecret. Any authorized ECS run-task path must also pin a Fargate Linux platform version that supports JSON-key plus VersionId secret selection; this template does not run a task.';
+  'DatabaseMigrationCredentialsSecretArn, its exact immutable VersionId, and ApplicationDataKeyArn are operator-supplied cross-stack inputs; local validation cannot authenticate their origin or prove that the pinned version contains the installed crypto_migration verifier. The secret must be separately scoped and must never be the RDS-managed master/bootstrap secret exposed by the DatabaseCredentialsSecretArn compatibility output. Any authorized ECS run-task path must also pin a Fargate Linux platform version that supports JSON-key plus VersionId secret selection; this template does not run a task.';
 
 export const MAX_DATABASE_MIGRATION_TEMPLATE_BYTES = 51_200;
 export const DATABASE_MIGRATION_TEMPLATE_INPUT_ERROR =

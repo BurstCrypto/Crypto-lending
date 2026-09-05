@@ -397,10 +397,15 @@ capability role before the first query. The separate
 `infra/aws/database-migration-task.yaml` defines an operator-invoked, one-off
 task that receives only the `crypto_migration` `MIGRATION_DATABASE_*`
 credential. The RDS master/bootstrap credential is forbidden from all
-long-lived and migration task definitions. The local Compose database uses
-distinct, deliberately local-only fixtures for all three paths and retains the
-pre-KAN-232 volume under its old name rather than mutating it. See KAN-232 and
-KAN-34 for bootstrap order, rotation, billing gates, and residual live work.
+long-lived and migration task definitions. RDS owns that KMS-encrypted managed
+secret and its default seven-day rotation; the preserved compatibility output
+name `DatabaseCredentialsSecretArn` exposes only the current database's
+managed-secret ARN. Separate IAM and KMS authorization is required for any
+bootstrap use. The local Compose database uses distinct, deliberately
+local-only fixtures for all three
+paths and retains the pre-KAN-232 volume under its old name rather than mutating
+it. See KAN-232 and KAN-34 for bootstrap order, rotation, recovery, billing
+gates, and residual live work.
 
 The live test refuses non-loopback service URLs, creates isolated queues and a
 unique PostgreSQL schema, and removes only those test resources. See

@@ -32,6 +32,8 @@ import type {
 
 export const PRODUCTION_PREFLIGHT_SCHEMA_VERSION = 1 as const;
 export const PRODUCTION_PROVIDER_TARGET = 10 as const;
+const REVIEWED_DATABASE_MASTER_TEMPLATE_SHA256 =
+  '9ffa126c63a1758db315eae58462f3d1a47cf3542136db39a65749c47dd08fb6';
 
 export type ProductionPreflightTarget = 'read-only' | 'mainnet-write';
 export type ProductionPreflightReadiness = 'BLOCKED' | 'LOCAL_GATES_CLEAR';
@@ -51,6 +53,7 @@ export type ProductionPreflightBlockerId =
   | 'AUTH_PRODUCTION_SECRET_REFERENCES_NOT_WIRED'
   | 'AUTH_TEMPLATE_INSPECTION_FAILED'
   | 'AUTH_WEB_PUBLIC_ORIGIN_NOT_WIRED'
+  | 'DATABASE_MASTER_SECRET_NOT_RDS_MANAGED'
   | 'REDIS_OPERATOR_SECRET_VERSION_NOT_WIRED'
   | 'WALLET_REGISTRATION_MAINNET_CONFIGURATION_NOT_WIRED'
   | 'EGRESS_LIVE_EVIDENCE_INCOMPLETE'
@@ -106,6 +109,13 @@ export interface RedisOperatorDeploymentInput {
   readonly syntaxValid: boolean;
 }
 
+export interface DatabaseMasterDeploymentInput {
+  readonly inspected: boolean;
+  readonly syntaxValid: boolean;
+}
+
+const VERIFIED_DATABASE_MASTER_DEPLOYMENTS = new WeakSet<DatabaseMasterDeploymentInput>();
+
 interface EgressInput {
   readonly localValidationPassed: boolean;
   readonly status: unknown;
@@ -135,6 +145,8 @@ interface PublicLaunchAuthoritiesInput {
 
 export interface ProductionPreflightInput {
   readonly authentication: AuthenticationDeploymentInput;
+  /** Optional for legacy programmatic callers; absence fails closed during evaluation. */
+  readonly databaseMasterDeployment?: DatabaseMasterDeploymentInput;
   /** Optional for legacy programmatic callers; absence fails closed during evaluation. */
   readonly redisOperatorDeployment?: RedisOperatorDeploymentInput;
   readonly egress: EgressInput;
@@ -824,6 +836,14 @@ export function evaluateProductionPreflight(
   selectedTarget: ProductionPreflightTarget = 'read-only',
 ): ProductionPreflightReport {
   const authenticationBlockers: ProductionPreflightBlockerId[] = [];
+  const databaseMasterDeployment = input.databaseMasterDeployment;
+  const databaseMasterDeploymentValid =
+    databaseMasterDeployment?.inspected === true &&
+    databaseMasterDeployment.syntaxValid === true &&
+    VERIFIED_DATABASE_MASTER_DEPLOYMENTS.has(databaseMasterDeployment);
+  if (!databaseMasterDeploymentValid) {
+    authenticationBlockers.push('DATABASE_MASTER_SECRET_NOT_RDS_MANAGED');
+  }
   const redisOperatorDeploymentValid =
     input.redisOperatorDeployment?.inspected === true &&
     input.redisOperatorDeployment.syntaxValid === true;
@@ -1002,6 +1022,7 @@ export function evaluateProductionPreflight(
       'AUTHENTICATION',
       input.authentication.inspected &&
         input.authentication.syntaxValid &&
+        databaseMasterDeploymentValid &&
         redisOperatorDeploymentValid
         ? 'PASS'
         : 'FAIL',
@@ -1214,6 +1235,65 @@ function hasExactNestedParameterPropagation(
     'RedisOperatorSecretVersionId',
     '!Ref RedisOperatorSecretVersionId',
   );
+}
+
+export function inspectDatabaseMasterDeploymentTemplate(
+  source: string,
+): DatabaseMasterDeploymentInput {
+  const resources = yamlBlock(source, 'Resources', 0);
+  const applicationDataKey =
+    resources === null ? null : yamlBlock(resources, 'ApplicationDataKey', 1);
+  const database = resources === null ? null : yamlBlock(resources, 'Database', 1);
+  const databaseProperties = database === null ? null : yamlBlock(database, 'Properties', 2);
+  const masterUserSecret =
+    databaseProperties === null ? null : yamlBlock(databaseProperties, 'MasterUserSecret', 3);
+  const outputs = yamlBlock(source, 'Outputs', 0);
+  const compatibilityOutput =
+    outputs === null ? null : yamlBlock(outputs, 'DatabaseCredentialsSecretArn', 1);
+  const inspected =
+    resources !== null &&
+    applicationDataKey !== null &&
+    database !== null &&
+    databaseProperties !== null &&
+    outputs !== null &&
+    compatibilityOutput !== null;
+  const exactMasterUserSecret =
+    semanticYamlLines(masterUserSecret)
+      .map((line) => line.trim())
+      .join('\n') === ['MasterUserSecret:', 'KmsKeyId: !GetAtt ApplicationDataKey.Arn'].join('\n');
+  const exactCompatibilityOutput =
+    semanticYamlLines(compatibilityOutput)
+      .map((line) => line.trim())
+      .join('\n') ===
+    ['DatabaseCredentialsSecretArn:', 'Value: !GetAtt Database.MasterUserSecret.SecretArn'].join(
+      '\n',
+    );
+  const customDatabaseSecretAbsent =
+    resources !== null && !/^\s*["']?DatabaseCredentialsSecret["']?\s*:/mu.test(resources);
+  const masterPasswordAbsent =
+    database !== null && !/^\s*["']?MasterUserPassword["']?\s*:/mu.test(database);
+  const reviewedSource =
+    createHash('sha256').update(source, 'utf8').digest('hex') ===
+    REVIEWED_DATABASE_MASTER_TEMPLATE_SHA256;
+
+  const result: DatabaseMasterDeploymentInput = Object.freeze({
+    inspected,
+    syntaxValid:
+      inspected &&
+      reviewedSource &&
+      hasExactYamlScalarProperty(applicationDataKey, 'Type', 'AWS::KMS::Key') &&
+      hasExactYamlScalarProperty(database, 'Type', 'AWS::RDS::DBInstance') &&
+      hasExactYamlScalarProperty(databaseProperties, 'MasterUsername', 'crypto_admin') &&
+      hasExactYamlScalarProperty(databaseProperties, 'ManageMasterUserPassword', 'true') &&
+      exactMasterUserSecret &&
+      masterPasswordAbsent &&
+      customDatabaseSecretAbsent &&
+      exactCompatibilityOutput,
+  });
+  if (result.inspected && result.syntaxValid) {
+    VERIFIED_DATABASE_MASTER_DEPLOYMENTS.add(result);
+  }
+  return result;
 }
 
 export function inspectRedisOperatorDeploymentTemplates(
@@ -1613,6 +1693,8 @@ export function loadRepositoryProductionPreflightInput(
   } catch {
     // The evaluator reports the failed local inspection with non-secret blocker IDs.
   }
+  const databaseMasterDeployment =
+    inspectDatabaseMasterDeploymentTemplate(applicationTemplateSource);
 
   let redisOperatorDeployment = inspectRedisOperatorDeploymentTemplates('', '', '');
   try {
@@ -1657,6 +1739,7 @@ export function loadRepositoryProductionPreflightInput(
 
   return Object.freeze({
     authentication,
+    databaseMasterDeployment,
     redisOperatorDeployment,
     egress: Object.freeze({
       localValidationPassed: egressLocalValidationPassed,
@@ -1716,6 +1799,7 @@ export function applyVerifiedProductionEvidenceBundle(
     );
 
     return Object.freeze({
+      ...input,
       authentication: Object.freeze({
         ...input.authentication,
         deployedEvidenceAccepted: true,

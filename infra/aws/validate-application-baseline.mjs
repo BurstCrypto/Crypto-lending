@@ -34,7 +34,7 @@ const operationalAlarmLogicalIds = Object.freeze([
   'BalanceDeadLetterQueueNotEmptyAlarm',
 ]);
 const reviewedApplicationBaselineSha256 =
-  'abb0c99176ec6c262a348132feb7e7ee8a33de3a0aa1858f3260c78dd27dbae9';
+  '9ffa126c63a1758db315eae58462f3d1a47cf3542136db39a65749c47dd08fb6';
 const reviewedWorkloadBoundariesSha256 =
   '4c74c98e73635df30570dfe1e726b41cb6f62832f0bfc2e43dcd087d384b78de';
 const reviewedObservabilitySha256 =
@@ -94,7 +94,6 @@ const reviewedResourceTypesByLogicalId = new Map([
   ['WebTaskToS3Egress', 'AWS::EC2::SecurityGroupEgress'],
   ['DatabaseSubnetGroup', 'AWS::RDS::DBSubnetGroup'],
   ['RedisSubnetGroup', 'AWS::ElastiCache::SubnetGroup'],
-  ['DatabaseCredentialsSecret', 'AWS::SecretsManager::Secret'],
   ['DatabaseParameterGroup', 'AWS::RDS::DBParameterGroup'],
   ['Database', 'AWS::RDS::DBInstance'],
   ['RedisReplicationGroup', 'AWS::ElastiCache::ReplicationGroup'],
@@ -1704,15 +1703,6 @@ function validateKmsAndEncryptedServiceBoundaries(resources, inventory, errors) 
     errors,
   );
 
-  for (const logicalId of ['DatabaseCredentialsSecret']) {
-    requireExactProperty(
-      resources.get(logicalId) ?? '',
-      logicalId,
-      'KmsKeyId',
-      '!GetAtt ApplicationDataKey.Arn',
-      errors,
-    );
-  }
   for (const logicalId of [
     'Database',
     'RedisReplicationGroup',
@@ -2486,7 +2476,6 @@ function validateTemplateShape(source, errors) {
     ['AWS::ElastiCache::ReplicationGroup', 1],
     ['AWS::ElastiCache::SubnetGroup', 1],
     ['AWS::KMS::Key', 2],
-    ['AWS::SecretsManager::Secret', 1],
     ['AWS::Logs::LogGroup', 3],
     ['AWS::CloudFormation::Stack', 2],
     ['AWS::SQS::Queue', 2],
@@ -2638,8 +2627,10 @@ function validateTemplateShape(source, errors) {
     if (/\bDATABASE_(?:URL|HOST|PORT|NAME|USERNAME|PASSWORD|SSL_MODE)\b/.test(block)) {
       errors.push(`${logicalId} must not receive legacy unscoped database variables.`);
     }
-    if (/\bDatabaseCredentialsSecret\b/.test(block)) {
-      errors.push(`${logicalId} must not reference the database migration/admin secret.`);
+    if (
+      /\bDatabaseCredentialsSecret(?:Arn)?\b|\bDatabase\.MasterUserSecret\.SecretArn\b/.test(block)
+    ) {
+      errors.push(`${logicalId} must not reference the RDS master/bootstrap secret.`);
     }
     const usernameBindingErrors = [];
     requireExactGetAttEnvironmentReference(
@@ -2886,11 +2877,11 @@ function validateTemplateShape(source, errors) {
     if (!/UpdateReplacePolicy:\s*(?:Snapshot|Retain)/m.test(block)) {
       errors.push(`${logicalId} must retain or snapshot data when replaced.`);
     }
-    if (
-      !/\{\{resolve:secretsmanager:/i.test(block) &&
-      !hasProperty(block, 'ManageMasterUserPassword', 'true')
-    ) {
-      errors.push(`${logicalId} must obtain its master password from Secrets Manager.`);
+    if (!hasProperty(block, 'ManageMasterUserPassword', 'true')) {
+      errors.push(`${logicalId} must delegate master-password management to RDS.`);
+    }
+    if (hasPropertyName(block, 'MasterUserPassword')) {
+      errors.push(`${logicalId} must not declare MasterUserPassword when RDS manages it.`);
     }
   }
 
@@ -2930,25 +2921,29 @@ function validateTemplateShape(source, errors) {
     [{ name: 'GenerateSecretString' }, { name: 'KmsKeyId' }],
     errors,
   );
-  const databaseSecret = resources.get('DatabaseCredentialsSecret') ?? '';
-  const databaseUsername = databaseSecret.match(/"username":"([A-Za-z][A-Za-z0-9_]*)"/)?.[1];
-  if (!databaseUsername || databaseUsername.length > 16) {
-    errors.push('DatabaseCredentialsSecret username must satisfy the RDS 1-16 character limit.');
-  }
   const database = resources.get('Database') ?? '';
-  if (
-    !/MasterUsername:\s*!Sub\s+'\{\{resolve:secretsmanager:\$\{DatabaseCredentialsSecret\}:SecretString:username\}\}'/.test(
-      database,
-    ) ||
-    !/MasterUserPassword:\s*!Sub\s+'\{\{resolve:secretsmanager:\$\{DatabaseCredentialsSecret\}:SecretString:password\}\}'/.test(
-      database,
-    ) ||
-    /DatabaseRuntimeCredentialsSecret/.test(database)
-  ) {
+  requireExactProperty(database, 'Database', 'MasterUsername', 'crypto_admin', errors);
+  requireExactSemanticProperty(
+    database,
+    'Database',
+    'MasterUserSecret',
+    ['MasterUserSecret:', '  KmsKeyId: !GetAtt ApplicationDataKey.Arn'].join('\n'),
+    'the exact RDS-managed master-secret KMS binding to ApplicationDataKey',
+    errors,
+  );
+  if (/\{\{resolve:secretsmanager:/i.test(database)) {
     errors.push(
-      'Database must preserve DatabaseCredentialsSecret as its bootstrap master credential.',
+      'Database must not use Secrets Manager dynamic references for its RDS-managed master credential.',
     );
   }
+  const outputs = topLevelBlocks(source, 'Outputs');
+  requireExactProperty(
+    outputs.get('DatabaseCredentialsSecretArn') ?? '',
+    'DatabaseCredentialsSecretArn',
+    'Value',
+    '!GetAtt Database.MasterUserSecret.SecretArn',
+    errors,
+  );
   requireProperties(
     entriesOf(inventory, 'AWS::Logs::LogGroup'),
     [{ name: 'KmsKeyId' }, { name: 'RetentionInDays' }],
