@@ -58,18 +58,18 @@ evidence.
    application. Drain old tasks and prove all live tasks call the `*_keyring`
    entry points. The repository template has the exact selectors but remains
    disabled by default and supplies no secret value.
-3. In a separately reviewed schema-owner migration, expand each applicable
-   accepted-read policy to `[1,2]` while keeping active write version `1`.
-   Existing version-one readers remain valid because candidate sets may be a
-   policy subset, but every set must contain the database-active version.
-4. Add freshly generated version-two material to the applicable application
-   ring with `activeWriteVersion` still `1`; deploy and drain the fleet. Verify
-   all candidates are presented. At this stage, writes remain version one and
-   rate limiting charges both candidate digests.
-5. Revoke the API role's superseded migration-`0010` single-digest login,
+3. Revoke the API role's superseded migration-`0010` single-digest login,
    session, and rate-limit function grants in the same reviewed release gate
    that certifies the whole fleet uses migration-`0025` functions. Do not expand
    overlap while a bypass-capable old entry point remains reachable.
+4. In a separately reviewed schema-owner migration, expand each applicable
+   accepted-read policy to `[1,2]` while keeping active write version `1`.
+   Existing version-one readers remain valid because candidate sets may be a
+   policy subset, but every set must contain the database-active version.
+5. Add freshly generated version-two material to the applicable application
+   ring with `activeWriteVersion` still `1`; deploy and drain the fleet. Verify
+   all candidates are presented. At this stage, writes remain version one and
+   rate limiting charges both candidate digests.
 6. Coordinate a blue/green or bounded maintenance cutover that changes the
    database active-write version and each application ring's
    `activeWriteVersion` to `2`. A stale instance missing version two fails
@@ -80,11 +80,14 @@ evidence.
    credential tombstones to expire or become terminal.
 8. From schema-owner tooling, read only the aggregate result from
    `auth_hmac_key_retirement_readiness(purpose, version)`. Do not remove version
-   one unless `ready` is true for the applicable purpose and the cumulative
-   verifier remains true. Identity readiness requires every active identity to
-   have its exact active-version alias. Session readiness includes live
-   `ACTIVE` and `ROTATED` credential rows and unexpired rate-limit buckets. CSRF
-   readiness includes live credential rows.
+   one unless the result repeats requested version `1`, reports expected
+   `active_write_version = 2`, `candidate_is_accepted = true`, every returned
+   blocker count is zero, `ready = true`, and the cumulative verifier remains
+   true. `ready` alone is insufficient because an arbitrary version outside the
+   accepted set can otherwise have no blockers. Identity readiness requires
+   every active identity to have its exact active-version alias. Session
+   readiness includes live `ACTIVE` and `ROTATED` credential rows and unexpired
+   rate-limit buckets. CSRF readiness includes live credential rows.
 9. Deploy rings containing only version two after readiness is zero, then use a
    reviewed schema-owner migration to remove version one from the accepted
    policy. Re-run concurrency, replay, rate-limit, principal, rollback, and
