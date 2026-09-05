@@ -523,6 +523,7 @@ export function MainnetWalletOwnership({
   const rosterRequestReference = useRef<AbortController | null>(null);
   const rosterRequestGenerationReference = useRef(0);
   const removalOperationReference = useRef<AbortController | null>(null);
+  const removalOperationGenerationReference = useRef(0);
   const removalTargetReference = useRef<MainnetRegisteredWalletSummary | null>(null);
   const removalReturnFocusReference = useRef<HTMLButtonElement | null>(null);
   const keepWalletButtonReference = useRef<HTMLButtonElement | null>(null);
@@ -540,6 +541,12 @@ export function MainnetWalletOwnership({
     }
   }, []);
 
+  const invalidateRemovalOperation = useCallback((): void => {
+    removalOperationGenerationReference.current += 1;
+    removalOperationReference.current?.abort();
+    removalOperationReference.current = null;
+  }, []);
+
   const invalidateRoster = useCallback((): void => {
     rosterRequestGenerationReference.current += 1;
     rosterRequestReference.current?.abort();
@@ -552,15 +559,22 @@ export function MainnetWalletOwnership({
 
   const invalidateSensitiveWalletData = useCallback((): void => {
     invalidateWalletOperation();
+    invalidateRemovalOperation();
     invalidateRoster();
     walletReturnFocusReference.current = null;
     pendingWalletFocusReference.current = null;
+    removalTargetReference.current = null;
+    removalReturnFocusReference.current = null;
     setBusy(false);
     setConnection(null);
     setResult(null);
     setFailure(null);
     setWalletAnnouncement('');
-  }, [invalidateRoster, invalidateWalletOperation]);
+    setRemovalTarget(null);
+    setRemovingWalletId(null);
+    setRemovalFailure(null);
+    setRemovalNotice(null);
+  }, [invalidateRemovalOperation, invalidateRoster, invalidateWalletOperation]);
 
   useSensitiveViewRevalidation({
     invalidate: invalidateSensitiveWalletData,
@@ -594,13 +608,7 @@ export function MainnetWalletOwnership({
     };
   }, [configured]);
 
-  useEffect(
-    () => () => {
-      removalOperationReference.current?.abort();
-      removalOperationReference.current = null;
-    },
-    [],
-  );
+  useEffect(() => () => invalidateRemovalOperation(), [invalidateRemovalOperation]);
 
   useEffect(() => {
     if (removalTarget !== null && removingWalletId === null) {
@@ -649,8 +657,7 @@ export function MainnetWalletOwnership({
             target !== null &&
             !next.wallets.some((wallet) => wallet.walletId === target.walletId)
           ) {
-            removalOperationReference.current?.abort();
-            removalOperationReference.current = null;
+            invalidateRemovalOperation();
             setRemovalTarget(null);
             setRemovingWalletId(null);
             setRemovalFailure(null);
@@ -685,7 +692,13 @@ export function MainnetWalletOwnership({
       controller.abort();
       if (rosterRequestReference.current === controller) rosterRequestReference.current = null;
     };
-  }, [onAuthenticationRequired, onWalletsChanged, rosterClient, rosterRevision]);
+  }, [
+    invalidateRemovalOperation,
+    onAuthenticationRequired,
+    onWalletsChanged,
+    rosterClient,
+    rosterRevision,
+  ]);
 
   const network = mainnetWalletNetworkFor(chainId);
   const metamaskMatches = connectorMatches(wallets, 'metamask');
@@ -900,22 +913,31 @@ export function MainnetWalletOwnership({
 
   function stopWaitingForRemoval(): void {
     if (removingWalletId === null) return;
-    removalOperationReference.current?.abort();
-    removalOperationReference.current = null;
+    invalidateRemovalOperation();
     refreshAfterUncertainRemoval();
+  }
+
+  function isCurrentRemovalOperation(controller: AbortController, generation: number): boolean {
+    return (
+      !controller.signal.aborted &&
+      removalOperationReference.current === controller &&
+      removalOperationGenerationReference.current === generation
+    );
   }
 
   async function confirmWalletRemoval(): Promise<void> {
     const target = removalTarget;
     if (target === null || busy || removalPending) return;
     const controller = new AbortController();
+    const generation = removalOperationGenerationReference.current + 1;
+    removalOperationGenerationReference.current = generation;
     removalOperationReference.current = controller;
     setRemovingWalletId(target.walletId);
     setRemovalFailure(null);
     setRemovalNotice(null);
     try {
       await rosterClient.removeWallet(target.walletId, controller.signal);
-      if (controller.signal.aborted || removalOperationReference.current !== controller) return;
+      if (!isCurrentRemovalOperation(controller, generation)) return;
       setRemovalTarget(null);
       setRemovalNotice(
         `${mainnetWalletNetworkFor(target.chainId).displayName} wallet removed. Portfolio monitoring for that address has stopped.`,
@@ -930,8 +952,8 @@ export function MainnetWalletOwnership({
       queueMicrotask(() => rosterHeadingReference.current?.focus());
     } catch (error) {
       if (
-        isAbortFailure(error, controller.signal) ||
-        removalOperationReference.current !== controller
+        !isCurrentRemovalOperation(controller, generation) ||
+        isAbortFailure(error, controller.signal)
       ) {
         return;
       }
@@ -950,10 +972,10 @@ export function MainnetWalletOwnership({
       }
       refreshAfterUncertainRemoval();
     } finally {
-      if (removalOperationReference.current === controller) {
+      if (isCurrentRemovalOperation(controller, generation)) {
         removalOperationReference.current = null;
+        setRemovingWalletId(null);
       }
-      if (!controller.signal.aborted) setRemovingWalletId(null);
     }
   }
 

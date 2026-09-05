@@ -766,6 +766,125 @@ describe('MainnetWalletOwnership', () => {
     expect(screen.getByRole('heading', { name: 'Verified wallets' })).toHaveFocus();
   });
 
+  it('suppresses a late removal success after pagehide and reconciles from the visible roster', async () => {
+    const pendingRemoval = Promise.withResolvers<void>();
+    let operationSignal: AbortSignal | undefined;
+    const removeWallet = vi.fn<MainnetWalletRosterClient['removeWallet']>((_walletId, signal) => {
+      operationSignal = signal;
+      return pendingRemoval.promise;
+    });
+    const readWallets = vi
+      .fn<MainnetWalletRosterClient['readWallets']>()
+      .mockResolvedValueOnce({ version: 1, wallets: [ETHEREUM_WALLET] })
+      .mockResolvedValueOnce({ version: 1, wallets: [] });
+    const onWalletsChanged = vi.fn();
+    render(
+      <MainnetWalletOwnership
+        dependencies={dependencies(runtimeHarness(), { readWallets, removeWallet })}
+        onWalletsChanged={onWalletsChanged}
+      />,
+    );
+
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: `Remove Ethereum wallet ${ETHEREUM_WALLET.addressHint}`,
+      }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Yes, remove wallet' }));
+    await waitFor(() => expect(operationSignal).toBeDefined());
+    vi.useFakeTimers();
+
+    act(() => window.dispatchEvent(new Event('pagehide')));
+
+    expect(operationSignal?.aborted).toBe(true);
+    expect(screen.queryByRole('group', { name: 'Remove this wallet?' })).toBeNull();
+    expect(screen.getByText(/Loading verified wallets/u)).toBeVisible();
+
+    await act(async () => {
+      pendingRemoval.resolve();
+      await Promise.resolve();
+    });
+
+    expect(onWalletsChanged).not.toHaveBeenCalled();
+    expect(screen.queryByText(/wallet removed/u)).toBeNull();
+    expect(readWallets).toHaveBeenCalledOnce();
+
+    await act(async () => {
+      window.dispatchEvent(new Event('pageshow'));
+      vi.advanceTimersByTime(SENSITIVE_VIEW_REVALIDATION_THROTTLE_MS);
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText('No wallets are verified for this account yet.')).toBeVisible();
+    expect(readWallets).toHaveBeenCalledTimes(2);
+    expect(removeWallet).toHaveBeenCalledOnce();
+    expect(onWalletsChanged).not.toHaveBeenCalled();
+    expect(screen.queryByText(/wallet removed/u)).toBeNull();
+  });
+
+  it('suppresses a late removal failure while hidden and restores the authoritative wallet roster', async () => {
+    const pendingRemoval = Promise.withResolvers<void>();
+    let operationSignal: AbortSignal | undefined;
+    const removeWallet = vi.fn<MainnetWalletRosterClient['removeWallet']>((_walletId, signal) => {
+      operationSignal = signal;
+      return pendingRemoval.promise;
+    });
+    const readWallets = vi
+      .fn<MainnetWalletRosterClient['readWallets']>()
+      .mockResolvedValueOnce({ version: 1, wallets: [ETHEREUM_WALLET] })
+      .mockResolvedValueOnce({ version: 1, wallets: [ETHEREUM_WALLET] });
+    const onWalletsChanged = vi.fn();
+    render(
+      <MainnetWalletOwnership
+        dependencies={dependencies(runtimeHarness(), { readWallets, removeWallet })}
+        onWalletsChanged={onWalletsChanged}
+      />,
+    );
+
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: `Remove Ethereum wallet ${ETHEREUM_WALLET.addressHint}`,
+      }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Yes, remove wallet' }));
+    await waitFor(() => expect(operationSignal).toBeDefined());
+    vi.useFakeTimers();
+
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'hidden',
+    });
+    act(() => document.dispatchEvent(new Event('visibilitychange')));
+
+    expect(operationSignal?.aborted).toBe(true);
+    expect(screen.queryByRole('group', { name: 'Remove this wallet?' })).toBeNull();
+
+    await act(async () => {
+      pendingRemoval.reject(new MainnetWalletRosterError('UNAVAILABLE'));
+      await Promise.resolve();
+    });
+
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(onWalletsChanged).not.toHaveBeenCalled();
+    expect(readWallets).toHaveBeenCalledOnce();
+
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'visible',
+    });
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'));
+      vi.advanceTimersByTime(SENSITIVE_VIEW_REVALIDATION_THROTTLE_MS);
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText(ETHEREUM_WALLET.addressHint)).toBeVisible();
+    expect(readWallets).toHaveBeenCalledTimes(2);
+    expect(removeWallet).toHaveBeenCalledOnce();
+    expect(onWalletsChanged).not.toHaveBeenCalled();
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
   it('recovers if a refreshed roster no longer contains the confirmation target', async () => {
     const initialRoster: MainnetWalletRosterClient = {
       readWallets: vi.fn(async () => ({ version: 1 as const, wallets: [ETHEREUM_WALLET] })),
