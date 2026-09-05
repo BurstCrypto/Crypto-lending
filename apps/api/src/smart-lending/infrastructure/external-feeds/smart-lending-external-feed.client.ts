@@ -101,9 +101,41 @@ const ATOMIC_AMOUNT = /^[1-9][0-9]{0,77}$/u;
 const TOKEN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/u;
 const BRIDGE_LIST = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}(?:,[A-Za-z0-9][A-Za-z0-9._-]{0,63}){0,15}$/u;
 const RESERVED_TOOL_KEYWORDS = new Set(['all', 'none', 'default']);
+const MAX_RESPONSE_CHUNKS = 4_096;
 
 function unavailable(code: SmartLendingExternalFeedErrorCode): never {
   throw new SmartLendingExternalFeedError(code);
+}
+
+function sanitizedFailure(error: unknown, fallback: SmartLendingExternalFeedErrorCode): never {
+  let code: SmartLendingExternalFeedErrorCode | undefined;
+  try {
+    if (
+      error instanceof SmartLendingExternalFeedError &&
+      Object.getPrototypeOf(error) === SmartLendingExternalFeedError.prototype
+    ) {
+      const descriptor = Object.getOwnPropertyDescriptor(error, 'code');
+      if (
+        descriptor &&
+        'value' in descriptor &&
+        typeof descriptor.value === 'string' &&
+        [
+          'FEEDS_DISABLED',
+          'DESTINATION_DISABLED',
+          'INVALID_DESTINATION',
+          'INVALID_QUERY',
+          'REQUEST_FAILED',
+          'INVALID_RESPONSE',
+          'RESPONSE_TOO_LARGE',
+        ].includes(descriptor.value)
+      ) {
+        code = descriptor.value as SmartLendingExternalFeedErrorCode;
+      }
+    }
+  } catch {
+    // Hostile thrown values cannot escape this boundary through reflection.
+  }
+  return unavailable(code ?? fallback);
 }
 
 function ownDataRecord(value: unknown): Readonly<Record<string, unknown>> {
@@ -127,8 +159,7 @@ function ownDataRecord(value: unknown): Readonly<Record<string, unknown>> {
     }
     return result;
   } catch (error) {
-    if (error instanceof SmartLendingExternalFeedError) throw error;
-    return unavailable('INVALID_QUERY');
+    return sanitizedFailure(error, 'INVALID_QUERY');
   }
 }
 
@@ -221,52 +252,222 @@ async function cancelResponseBody(response: Response): Promise<void> {
   }
 }
 
-async function boundedJson(response: Response, maximumBytes: number): Promise<unknown> {
-  if (!jsonContentType(response.headers.get('content-type'))) {
-    await cancelResponseBody(response);
-    return unavailable('INVALID_RESPONSE');
-  }
-  const declaredLength = response.headers.get('content-length');
-  if (
-    declaredLength !== null &&
-    (!/^(?:0|[1-9][0-9]*)$/u.test(declaredLength) || Number(declaredLength) > maximumBytes)
-  ) {
-    await cancelResponseBody(response);
-    return unavailable('RESPONSE_TOO_LARGE');
-  }
-  if (response.body === null) return unavailable('INVALID_RESPONSE');
+function parseJsonWithoutDuplicateKeys(text: string): unknown {
+  let index = 0;
+  const numberPattern = /-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?/uy;
 
-  const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let length = 0;
-  try {
-    for (;;) {
-      const next = await reader.read();
-      if (next.done) break;
-      if (next.value.byteLength === 0) continue;
-      length += next.value.byteLength;
-      if (length > maximumBytes) {
-        await reader.cancel();
-        return unavailable('RESPONSE_TOO_LARGE');
-      }
-      chunks.push(next.value);
+  const invalid = (): never => unavailable('INVALID_RESPONSE');
+  const whitespace = (): void => {
+    while (
+      text[index] === ' ' ||
+      text[index] === '\t' ||
+      text[index] === '\r' ||
+      text[index] === '\n'
+    ) {
+      index += 1;
     }
-  } catch (error) {
-    if (error instanceof SmartLendingExternalFeedError) throw error;
-    return unavailable('INVALID_RESPONSE');
-  }
+  };
+  const string = (): string => {
+    if (text[index] !== '"') return invalid();
+    const start = index;
+    index += 1;
+    while (index < text.length) {
+      const character = text.charCodeAt(index);
+      if (character === 0x22) {
+        index += 1;
+        try {
+          return JSON.parse(text.slice(start, index)) as string;
+        } catch {
+          return invalid();
+        }
+      }
+      if (character < 0x20) return invalid();
+      if (character !== 0x5c) {
+        index += 1;
+        continue;
+      }
+      index += 1;
+      const escaped = text[index];
+      if (escaped === 'u') {
+        if (!/^[0-9a-fA-F]{4}$/u.test(text.slice(index + 1, index + 5))) return invalid();
+        index += 5;
+        continue;
+      }
+      if (!['"', '\\', '/', 'b', 'f', 'n', 'r', 't'].includes(escaped ?? '')) return invalid();
+      index += 1;
+    }
+    return invalid();
+  };
+  const number = (): void => {
+    numberPattern.lastIndex = index;
+    if (!numberPattern.exec(text)) return invalid();
+    index = numberPattern.lastIndex;
+  };
+  const value = (depth: number): void => {
+    if (depth > 64) return invalid();
+    whitespace();
+    if (text[index] === '"') {
+      string();
+      return;
+    }
+    if (text[index] === '{') {
+      object(depth + 1);
+      return;
+    }
+    if (text[index] === '[') {
+      list(depth + 1);
+      return;
+    }
+    for (const literal of ['true', 'false', 'null']) {
+      if (text.startsWith(literal, index)) {
+        index += literal.length;
+        return;
+      }
+    }
+    number();
+  };
+  const object = (depth: number): void => {
+    index += 1;
+    whitespace();
+    if (text[index] === '}') {
+      index += 1;
+      return;
+    }
+    const keys = new Set<string>();
+    while (index < text.length) {
+      const key = string();
+      if (keys.has(key)) return invalid();
+      keys.add(key);
+      whitespace();
+      if (text[index] !== ':') return invalid();
+      index += 1;
+      value(depth);
+      whitespace();
+      if (text[index] === '}') {
+        index += 1;
+        return;
+      }
+      if (text[index] !== ',') return invalid();
+      index += 1;
+      whitespace();
+    }
+    return invalid();
+  };
+  const list = (depth: number): void => {
+    index += 1;
+    whitespace();
+    if (text[index] === ']') {
+      index += 1;
+      return;
+    }
+    while (index < text.length) {
+      value(depth);
+      whitespace();
+      if (text[index] === ']') {
+        index += 1;
+        return;
+      }
+      if (text[index] !== ',') return invalid();
+      index += 1;
+      whitespace();
+    }
+    return invalid();
+  };
 
-  const bytes = new Uint8Array(length);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
+  whitespace();
+  value(0);
+  whitespace();
+  if (index !== text.length) return invalid();
   try {
-    const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
     return JSON.parse(text) as unknown;
   } catch {
-    return unavailable('INVALID_RESPONSE');
+    return invalid();
+  }
+}
+
+async function boundedJson(
+  response: Response,
+  maximumBytes: number,
+  signal: AbortSignal,
+): Promise<unknown> {
+  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+  const chunks: Uint8Array[] = [];
+  let length = 0;
+  let chunkCount = 0;
+  let cancellation: Promise<void> | undefined;
+  const cancelLockedReader = (): Promise<void> => {
+    cancellation ??= (async () => {
+      try {
+        await reader?.cancel();
+      } catch {
+        // Cleanup failure never changes the classified response failure.
+      }
+    })();
+    return cancellation;
+  };
+  const cancelReader = (): void => {
+    void cancelLockedReader();
+  };
+  try {
+    if (!jsonContentType(response.headers.get('content-type'))) {
+      await cancelResponseBody(response);
+      return unavailable('INVALID_RESPONSE');
+    }
+    const declaredLength = response.headers.get('content-length');
+    if (
+      declaredLength !== null &&
+      (!/^(?:0|[1-9][0-9]*)$/u.test(declaredLength) || Number(declaredLength) > maximumBytes)
+    ) {
+      await cancelResponseBody(response);
+      return unavailable('RESPONSE_TOO_LARGE');
+    }
+    const body = response.body;
+    if (body === null) return unavailable('INVALID_RESPONSE');
+    reader = body.getReader();
+    signal.addEventListener('abort', cancelReader, { once: true });
+    if (signal.aborted) {
+      await cancelLockedReader();
+      return unavailable('REQUEST_FAILED');
+    }
+    for (;;) {
+      const next = await reader.read();
+      if (next.done === true) break;
+      if (next.done !== false || !(next.value instanceof Uint8Array)) {
+        return unavailable('INVALID_RESPONSE');
+      }
+      chunkCount += 1;
+      if (chunkCount > MAX_RESPONSE_CHUNKS) {
+        await cancelLockedReader();
+        return unavailable('RESPONSE_TOO_LARGE');
+      }
+      const chunkLength = next.value.byteLength;
+      if (chunkLength > maximumBytes - length) {
+        await cancelLockedReader();
+        return unavailable('RESPONSE_TOO_LARGE');
+      }
+      const chunk = Uint8Array.from(next.value);
+      if (chunk.byteLength === 0) continue;
+      length += chunk.byteLength;
+      chunks.push(chunk);
+    }
+    if (signal.aborted) return unavailable('REQUEST_FAILED');
+    const bytes = new Uint8Array(length);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    return parseJsonWithoutDuplicateKeys(text);
+  } catch (error) {
+    return sanitizedFailure(error, 'INVALID_RESPONSE');
+  } finally {
+    signal.removeEventListener('abort', cancelReader);
+    try {
+      reader?.releaseLock();
+    } catch {
+      // Cleanup failure never changes the sanitized external-feed error contract.
+    }
   }
 }
 
@@ -283,11 +484,12 @@ async function requestJson(
   request: LockedJsonRequest,
 ): Promise<unknown> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), policy.timeoutMilliseconds);
-  try {
+  let timeout: NodeJS.Timeout | undefined;
+  const expectedEndpoint = endpoint.href;
+  const operation = async (): Promise<unknown> => {
     let response: Response;
     try {
-      response = await fetchImplementation(endpoint, {
+      response = await fetchImplementation(new URL(expectedEndpoint), {
         method: request.method,
         headers: request.headers,
         ...(request.body === undefined ? {} : { body: request.body }),
@@ -301,17 +503,30 @@ async function requestJson(
       return unavailable('REQUEST_FAILED');
     }
     try {
-      if (response.status !== 200 || response.redirected || response.url !== endpoint.href) {
+      const status = response.status;
+      const redirected = response.redirected;
+      const responseUrl = response.url;
+      if (status !== 200 || redirected || responseUrl !== expectedEndpoint) {
         await cancelResponseBody(response);
         return unavailable('INVALID_RESPONSE');
       }
-      return await boundedJson(response, policy.responseMaximumBytes);
+      return await boundedJson(response, policy.responseMaximumBytes, controller.signal);
     } catch (error) {
-      if (error instanceof SmartLendingExternalFeedError) throw error;
-      return unavailable('INVALID_RESPONSE');
+      return sanitizedFailure(error, 'INVALID_RESPONSE');
     }
+  };
+  const timedOut = new Promise<never>((_, reject) => {
+    timeout = setTimeout(() => {
+      controller.abort();
+      reject(new SmartLendingExternalFeedError('REQUEST_FAILED'));
+    }, policy.timeoutMilliseconds);
+  });
+  try {
+    return await Promise.race([operation(), timedOut]);
+  } catch (error) {
+    return sanitizedFailure(error, 'REQUEST_FAILED');
   } finally {
-    clearTimeout(timeout);
+    if (timeout !== undefined) clearTimeout(timeout);
   }
 }
 

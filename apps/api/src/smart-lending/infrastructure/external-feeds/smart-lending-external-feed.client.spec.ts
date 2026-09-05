@@ -48,6 +48,16 @@ function jsonResponse(
   );
 }
 
+function rawJsonResponse(body: string, url = 'https://yields.llama.fi/pools'): Response {
+  return responseAt(
+    new Response(body, {
+      status: 200,
+      headers: { 'content-type': 'application/json; charset=utf-8' },
+    }),
+    url,
+  );
+}
+
 function lifiQuery(): LifiQuoteQuery {
   return {
     fromChain: '1',
@@ -321,6 +331,52 @@ describe('FixedSmartLendingExternalFeedClient', () => {
     });
   });
 
+  it('sanitizes hostile thrown response values without reflecting on them outside the boundary', async () => {
+    const revoked = Proxy.revocable({}, {});
+    revoked.revoke();
+    const malformed = Object.create(null) as Response;
+    Object.defineProperty(malformed, 'status', {
+      enumerable: true,
+      get: () => {
+        throw revoked.proxy;
+      },
+    });
+    const client = new FixedSmartLendingExternalFeedClient(
+      enabledConfig(),
+      jest.fn(async () => malformed),
+    );
+
+    const operation = client.get(SmartLendingExternalFeedDestination.DefiLlamaYields, {});
+    await expect(operation).rejects.toEqual(new SmartLendingExternalFeedError('INVALID_RESPONSE'));
+    await expect(operation).rejects.not.toHaveProperty('cause');
+  });
+
+  it('rejects escaped-equivalent duplicate JSON keys instead of accepting last-key-wins data', async () => {
+    const response = rawJsonResponse('{"data":[],"\\u0064ata":[{"pool":"forged"}]}');
+    const client = new FixedSmartLendingExternalFeedClient(
+      enabledConfig(),
+      jest.fn(async () => response),
+    );
+
+    await expect(
+      client.get(SmartLendingExternalFeedDestination.DefiLlamaYields, {}),
+    ).rejects.toEqual(new SmartLendingExternalFeedError('INVALID_RESPONSE'));
+    expect(response.body?.locked).toBe(false);
+  });
+
+  it('pins response URL validation to the pre-fetch destination snapshot', async () => {
+    const fetcher = jest.fn(async (input: RequestInfo | URL) => {
+      expect(input).toBeInstanceOf(URL);
+      (input as URL).href = 'https://attacker.invalid/redirected';
+      return rawJsonResponse('{}', 'https://attacker.invalid/redirected');
+    });
+    const client = new FixedSmartLendingExternalFeedClient(enabledConfig(), fetcher);
+
+    await expect(
+      client.get(SmartLendingExternalFeedDestination.DefiLlamaYields, {}),
+    ).rejects.toEqual(new SmartLendingExternalFeedError('INVALID_RESPONSE'));
+  });
+
   it('rejects declared oversized responses and malformed JSON', async () => {
     const oversized = responseAt(
       new Response('{}', {
@@ -396,5 +452,123 @@ describe('FixedSmartLendingExternalFeedClient', () => {
     } finally {
       jest.useRealTimers();
     }
+  });
+
+  it('bounds the fixed timeout across a response body that never completes', async () => {
+    jest.useFakeTimers();
+    try {
+      let requestSignal: AbortSignal | null = null;
+      const body = new ReadableStream<Uint8Array>({
+        pull: () => new Promise<void>(() => undefined),
+      });
+      const fetcher = jest.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        requestSignal = init?.signal instanceof AbortSignal ? init.signal : null;
+        return responseAt(
+          new Response(body, { headers: { 'content-type': 'application/json' } }),
+          'https://yields.llama.fi/pools',
+        );
+      });
+      const client = new FixedSmartLendingExternalFeedClient(enabledConfig(), fetcher);
+      const pending = client.get(SmartLendingExternalFeedDestination.DefiLlamaYields, {});
+      const rejection = expect(pending).rejects.toEqual(
+        new SmartLendingExternalFeedError('REQUEST_FAILED'),
+      );
+
+      await jest.advanceTimersByTimeAsync(10_000);
+      await rejection;
+      expect(requestSignal).toEqual(expect.objectContaining({ aborted: true }));
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('cancels and unlocks a body returned after its request deadline already elapsed', async () => {
+    jest.useFakeTimers();
+    try {
+      let resolveFetch: ((response: Response) => void) | undefined;
+      const cancel = jest.fn();
+      const body = new ReadableStream<Uint8Array>({ cancel });
+      const response = responseAt(
+        new Response(body, { headers: { 'content-type': 'application/json' } }),
+        'https://yields.llama.fi/pools',
+      );
+      const fetcher = jest.fn(
+        () =>
+          new Promise<Response>((resolve) => {
+            resolveFetch = resolve;
+          }),
+      );
+      const client = new FixedSmartLendingExternalFeedClient(enabledConfig(), fetcher);
+      const pending = client.get(SmartLendingExternalFeedDestination.DefiLlamaYields, {});
+      const rejection = expect(pending).rejects.toEqual(
+        new SmartLendingExternalFeedError('REQUEST_FAILED'),
+      );
+
+      await jest.advanceTimersByTimeAsync(10_000);
+      await rejection;
+      expect(resolveFetch).toBeDefined();
+      resolveFetch?.(response);
+      await jest.advanceTimersByTimeAsync(0);
+
+      expect(cancel).toHaveBeenCalledTimes(1);
+      expect(response.body?.locked).toBe(false);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('preserves a known byte overflow when locked-reader cancellation rejects', async () => {
+    const cancel = jest.fn(async () => {
+      throw new Error('sensitive cancellation detail');
+    });
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(1_024 * 1_024 + 1));
+      },
+      cancel,
+    });
+    let response: Response | undefined;
+    const fetcher = jest.fn(async (input: RequestInfo | URL) => {
+      response = responseAt(
+        new Response(body, { headers: { 'content-type': 'application/json' } }),
+        String(input),
+      );
+      return response;
+    });
+    const client = new FixedSmartLendingExternalFeedClient(enabledConfig(), fetcher);
+
+    const operation = client.get(SmartLendingExternalFeedDestination.LifiQuote, lifiQuery());
+    await expect(operation).rejects.toEqual(
+      new SmartLendingExternalFeedError('RESPONSE_TOO_LARGE'),
+    );
+    await expect(operation).rejects.not.toHaveProperty('cause');
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(response?.body?.locked).toBe(false);
+  });
+
+  it('rejects pathologically fragmented bodies within the byte cap', async () => {
+    let chunks = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        chunks += 1;
+        if (chunks <= 4_097) controller.enqueue(Uint8Array.of(0x20));
+        else controller.close();
+      },
+    });
+    const response = responseAt(
+      new Response(body, { headers: { 'content-type': 'application/json' } }),
+      'https://yields.llama.fi/pools',
+    );
+    const client = new FixedSmartLendingExternalFeedClient(
+      enabledConfig(),
+      jest.fn(async () => response),
+    );
+
+    await expect(
+      client.get(SmartLendingExternalFeedDestination.DefiLlamaYields, {}),
+    ).rejects.toEqual(new SmartLendingExternalFeedError('RESPONSE_TOO_LARGE'));
+    expect(chunks).toBeGreaterThanOrEqual(4_097);
+    expect(chunks).toBeLessThanOrEqual(4_098);
+    expect(response.body?.locked).toBe(false);
   });
 });
