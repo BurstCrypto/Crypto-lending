@@ -145,6 +145,13 @@ const BALANCE_CONSUMER_ARTIFACTS = Object.freeze({
     ),
     'utf8',
   ),
+  balanceConsumerSqsReceiptResourceSource: readFileSync(
+    resolve(
+      __dirname,
+      '../apps/api/src/blockchain-sync/infrastructure/sqs/balance-consumer-sqs-receipt.resource.ts',
+    ),
+    'utf8',
+  ),
   runtimePostgresPoolSource: readFileSync(
     resolve(__dirname, '../apps/api/src/infrastructure/database/runtime-postgres-pool.ts'),
     'utf8',
@@ -176,6 +183,10 @@ const BALANCE_CONSUMER_ARTIFACTS = Object.freeze({
   ),
   blockchainSyncIndexSource: readFileSync(
     resolve(__dirname, '../apps/api/src/blockchain-sync/index.ts'),
+    'utf8',
+  ),
+  jobEnvelopeSource: readFileSync(
+    resolve(__dirname, '../apps/api/src/infrastructure/outbox/job-envelope.ts'),
     'utf8',
   ),
   blockchainSyncModuleSource: readFileSync(
@@ -1038,6 +1049,77 @@ const INVALID_BALANCE_CONSUMER_DEPLOYMENT = Object.freeze({
   databaseCapability: 'INVALID',
   deploymentEvidence: 'INVALID',
 } as const);
+
+test('balance-consumer inspection rejects dormant SQS receipt capability drift', () => {
+  const mutations: readonly (readonly [keyof BalanceConsumerArtifactSources, string, string])[] = [
+    ['balanceConsumerSqsReceiptResourceSource', 'ReceiveMessageCommand,', 'SendMessageCommand,'],
+    [
+      'balanceConsumerSqsReceiptResourceSource',
+      'useQueueUrlAsEndpoint: false,',
+      'useQueueUrlAsEndpoint: true,',
+    ],
+    [
+      'balanceConsumerSqsReceiptResourceSource',
+      'ignoreConfiguredEndpointUrls: true,',
+      'ignoreConfiguredEndpointUrls: false,',
+    ],
+    [
+      'balanceConsumerSqsReceiptResourceSource',
+      'parsed.hostname !== `sqs.${region}.amazonaws.com`',
+      'parsed.hostname !== `sqs.${region}.amazonaws.com.cn`',
+    ],
+    ['balanceConsumerSqsReceiptResourceSource', '!COMMERCIAL_AWS_REGION.test(value)', '!value'],
+    [
+      'balanceConsumerSqsReceiptResourceSource',
+      'resourceLifecycle.abort(new BalanceConsumerSqsReceiptClosedError());',
+      'void resourceLifecycle.signal;',
+    ],
+    [
+      'balanceConsumerSqsReceiptResourceSource',
+      "controller.abort(new Error('SQS request aborted'));",
+      'controller.abort(signals[0]);',
+    ],
+    [
+      'balanceConsumerSqsReceiptResourceSource',
+      'await Promise.allSettled(acceptedOperationGates);',
+      'void acceptedOperationGates;',
+    ],
+    [
+      'balanceConsumerSqsReceiptResourceSource',
+      'const acceptedOperationGates = [...inFlight];',
+      'const acceptedOperationGates: Promise<void>[] = [];',
+    ],
+    ['balanceConsumerSqsReceiptResourceSource', '-balance-sync$/u;', '-jobs$/u;'],
+    [
+      'balanceConsumerSqsReceiptResourceSource',
+      'return parseJobEnvelope<Payload>(JSON.parse(body) as unknown);',
+      'return JSON.parse(body) as JobEnvelope<Payload>;',
+    ],
+    [
+      'jobEnvelopeSource',
+      'export function parseJobEnvelope<Payload = unknown>',
+      'export function parseUncheckedJobEnvelope<Payload = unknown>',
+    ],
+  ];
+
+  for (const [key, approved, rejected] of mutations) {
+    assert.deepEqual(
+      inspectBalanceConsumerDeploymentArtifacts(
+        mutateBalanceConsumerArtifact(key, approved, rejected),
+      ),
+      INVALID_BALANCE_CONSUMER_DEPLOYMENT,
+      `${key}: ${approved}`,
+    );
+  }
+
+  assert.deepEqual(
+    inspectBalanceConsumerDeploymentArtifacts({
+      ...BALANCE_CONSUMER_ARTIFACTS,
+      balanceConsumerSqsReceiptResourceSource: `${BALANCE_CONSUMER_ARTIFACTS.balanceConsumerSqsReceiptResourceSource}\nimport { SqsService } from '../../../infrastructure/sqs/sqs.service';\nvoid SqsService;\nconst unnecessaryAttributes = { MessageAttributeNames: ['All'] };\nvoid unnecessaryAttributes;\n`,
+    }),
+    INVALID_BALANCE_CONSUMER_DEPLOYMENT,
+  );
+});
 
 test('balance-consumer inspection brands and freezes only the exact dormant local contract', () => {
   const inspected = inspectBalanceConsumerDeploymentArtifacts(BALANCE_CONSUMER_ARTIFACTS);

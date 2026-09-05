@@ -160,12 +160,14 @@ export interface BalanceConsumerArtifactSources {
   readonly runtimeSource: string;
   readonly compositionSource: string;
   readonly balanceConsumerPersistenceResourceSource: string;
+  readonly balanceConsumerSqsReceiptResourceSource: string;
   readonly runtimePostgresPoolSource: string;
   readonly postgresServiceSource: string;
   readonly balanceSyncCheckpointRepositorySource: string;
   readonly balanceSyncWalletAddressResolverSource: string;
   readonly balanceConsumerConfigSource: string;
   readonly blockchainSyncIndexSource: string;
+  readonly jobEnvelopeSource: string;
   readonly blockchainSyncModuleSource: string;
   readonly appModuleSource: string;
   readonly applicationRootSource: string;
@@ -515,12 +517,14 @@ const BALANCE_CONSUMER_ARTIFACT_KEYS = Object.freeze([
   'runtimeSource',
   'compositionSource',
   'balanceConsumerPersistenceResourceSource',
+  'balanceConsumerSqsReceiptResourceSource',
   'runtimePostgresPoolSource',
   'postgresServiceSource',
   'balanceSyncCheckpointRepositorySource',
   'balanceSyncWalletAddressResolverSource',
   'balanceConsumerConfigSource',
   'blockchainSyncIndexSource',
+  'jobEnvelopeSource',
   'blockchainSyncModuleSource',
   'appModuleSource',
   'applicationRootSource',
@@ -568,6 +572,8 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
   compositionSource: 'a898bcebc7ea56cae7b51e71e27107cb76330a98c4659b5bf761fa4a2e988971',
   balanceConsumerPersistenceResourceSource:
     'e95c1ce138f15202e0e181ff31fe164fa22d61e2eaa642a32ea81865a28ff27d',
+  balanceConsumerSqsReceiptResourceSource:
+    '470dc9f137b0231d96996379a04dffa96de99176270edefd0fbf98a5250f3a60',
   runtimePostgresPoolSource: 'd15b4a0604cda0bcc9d8df7f597863e42c4ef573ba8ed4362386cd2beaa1f823',
   postgresServiceSource: 'fd1cf4fa1ea8d2fc1d5219a474f88b8577c9fddaa4c0bfa979a1df202b9e2a11',
   balanceSyncCheckpointRepositorySource:
@@ -576,6 +582,7 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
     '9d89ad5897a9ab5a7023a89819891b4e0ee090f3683d3fa7340b0a44251453f0',
   balanceConsumerConfigSource: 'bbcce014594c79f7ea76fee4dc211c8e5436947549fef54e848df5afaeb0ab14',
   blockchainSyncIndexSource: 'ad708f554e81f8e623a68e34d468fa3b2bd50f83a778448f838c21d81ddd9431',
+  jobEnvelopeSource: '40b070d9676fe4243c91cb49e2819c0e7cfb664ec9298e827e5d6e40b5944281',
   blockchainSyncModuleSource: 'e78aeb6ee670cd9930c66db37dd03a0cb1e2190eb6542d1470c99afff5f5c6f4',
   appModuleSource: 'fd7cecd6d535a8f854f30a1f82811f6a9a32e7c7f9f0a38bfbee6471eb30504f',
   applicationRootSource: 'fcad49388bdfddcc55b0865a4ac4220e3d27ba77a20a19537121b68bf4b5c9dd',
@@ -2099,6 +2106,267 @@ function hasDormantBalanceConsumerPersistenceResourceContract(
   );
 }
 
+function hasDormantBalanceConsumerSqsReceiptResourceContract(
+  sources: BalanceConsumerArtifactSources,
+): boolean {
+  const resource = sources.balanceConsumerSqsReceiptResourceSource.replace(/\r\n/gu, '\n');
+  const resourceInterfaceStart = resource.indexOf(
+    'export interface BalanceConsumerSqsReceiptResource {',
+  );
+  const reviewedConfigurationStart = resource.indexOf(
+    'interface ReviewedBalanceConsumerSqsReceiptConfiguration {',
+  );
+  const transportStart = resource.indexOf(
+    'class BalanceConsumerSqsReceiptTransport implements PinnedSqsQueueReceiptPort {',
+    reviewedConfigurationStart,
+  );
+  const configurationErrorStart = resource.indexOf(
+    'class BalanceConsumerSqsReceiptConfigurationError extends Error {',
+    resourceInterfaceStart,
+  );
+  const factoryStart = resource.indexOf(
+    'export async function createDormantBalanceConsumerSqsReceiptResource(',
+    transportStart,
+  );
+  if (
+    reviewedConfigurationStart < 0 ||
+    resourceInterfaceStart <= reviewedConfigurationStart ||
+    configurationErrorStart <= resourceInterfaceStart ||
+    transportStart <= configurationErrorStart ||
+    factoryStart <= transportStart
+  ) {
+    return false;
+  }
+
+  const resourceInterface = resource.slice(resourceInterfaceStart, configurationErrorStart);
+  const factory = resource.slice(factoryStart);
+  const operationGateRegistration = factory.indexOf('inFlight.add(gate);');
+  const operationInvocation = factory.indexOf('result = operation();', operationGateRegistration);
+  const closeTransition = factory.indexOf('closed = true;', operationInvocation);
+  const closeMemoizationGuard = factory.indexOf(
+    'if (closePromise !== undefined) return closePromise;',
+    closeTransition,
+  );
+  const acceptedOperationSnapshot = factory.indexOf(
+    'const acceptedOperationGates = [...inFlight];',
+    closeMemoizationGuard,
+  );
+  const closePromiseAssignment = factory.indexOf(
+    'closePromise = new Promise<void>((resolve) => {',
+    acceptedOperationSnapshot,
+  );
+  const acceptedOperationDrain = factory.indexOf(
+    'await Promise.allSettled(acceptedOperationGates);',
+    closePromiseAssignment,
+  );
+  const clientDestroy = factory.indexOf(
+    'await destroyClient(resourceClient, () => new BalanceConsumerSqsReceiptCloseError());',
+    acceptedOperationDrain,
+  );
+  const lifecycleAbort = factory.indexOf(
+    'resourceLifecycle.abort(new BalanceConsumerSqsReceiptClosedError());',
+    closePromiseAssignment,
+  );
+  const closeStart = factory.indexOf('startClose();', lifecycleAbort);
+  if (
+    operationGateRegistration < 0 ||
+    operationInvocation <= operationGateRegistration ||
+    closeTransition <= operationInvocation ||
+    closeMemoizationGuard <= closeTransition ||
+    acceptedOperationSnapshot <= closeMemoizationGuard ||
+    closePromiseAssignment <= acceptedOperationSnapshot ||
+    acceptedOperationDrain <= closePromiseAssignment ||
+    clientDestroy <= acceptedOperationDrain ||
+    lifecycleAbort <= closePromiseAssignment ||
+    closeStart <= lifecycleAbort
+  ) {
+    return false;
+  }
+
+  const jobEnvelope = sources.jobEnvelopeSource.replace(/\r\n/gu, '\n');
+  const jobEnvelopeParserStart = jobEnvelope.indexOf(
+    'export function parseJobEnvelope<Payload = unknown>(value: unknown): JobEnvelope<Payload> {',
+  );
+  if (jobEnvelopeParserStart < 0) return false;
+  const jobEnvelopeParser = jobEnvelope.slice(jobEnvelopeParserStart);
+  const launchAndBarrelSources = [
+    sources.runtimeSource,
+    sources.cliSource,
+    sources.cliModeSource,
+    sources.compositionSource,
+    sources.blockchainSyncIndexSource,
+    sources.blockchainSyncModuleSource,
+    sources.appModuleSource,
+    sources.applicationRootSource,
+    sources.localDevelopmentAppModuleSource,
+    sources.mainSource,
+    sources.outboxWorkerCliSource,
+    sources.redisSessionRevocationCliSource,
+    sources.migrationCliSource,
+  ];
+
+  return (
+    trimmedExecutableLines(resourceInterface).filter((line) => line.startsWith('readonly '))
+      .length === 2 &&
+    exactExecutableLineCount(
+      resourceInterface,
+      'readonly receipt: Readonly<PinnedSqsQueueReceiptPort>;',
+    ) === 1 &&
+    exactExecutableLineCount(resourceInterface, 'readonly close: () => Promise<void>;') === 1 &&
+    trimmedExecutableLines(resource).filter((line) => line.startsWith('export ')).length === 2 &&
+    exactExecutableLineCount(resource, 'ReceiveMessageCommand,') === 1 &&
+    exactExecutableLineCount(resource, 'DeleteMessageCommand,') === 1 &&
+    exactExecutableLineCount(resource, 'ChangeMessageVisibilityCommand,') === 1 &&
+    exactExecutableLineCount(resource, "} from '@aws-sdk/client-sqs';") === 1 &&
+    exactExecutableLineCount(
+      resource,
+      "import { fromHttp } from '@aws-sdk/credential-provider-http';",
+    ) === 1 &&
+    !/\b(?:SendMessageCommand|SendMessageBatchCommand|GetQueueAttributesCommand|GetQueueUrlCommand|CreateQueueCommand|DeleteQueueCommand|PurgeQueueCommand|ListQueuesCommand|SqsService|SqsModule|SQS_(?:CLIENT|HEALTH|PINNED_QUEUE_RECEIPT|WORKER_QUEUE)|NestFactory|InfrastructureConfigModule|OUTBOX_TRANSPORT)\b/u.test(
+      resource,
+    ) &&
+    !/balanceDeadLetterQueueUrl|process\.env|\bfetch\s*\(|\.healthCheck\s*\(|\.sendJob\s*\(|\.publish(?:Batch)?\s*\(/u.test(
+      resource,
+    ) &&
+    exactExecutableLineCount(
+      resource,
+      "const infrastructure = selectedDataRecord(infrastructureConfig, ['workload', 'sqs']);",
+    ) === 1 &&
+    exactExecutableLineCount(
+      resource,
+      "if (infrastructure.workload !== 'balance-consumer') return invalidConfiguration();",
+    ) === 1 &&
+    exactExecutableLineCount(resource, 'assertBalanceConsumerSqsReceiptRedrivePolicy({') === 1 &&
+    exactExecutableLineCount(
+      resource,
+      'if ((endpoint === undefined) === (credentialRelativeUri === undefined)) {',
+    ) === 1 &&
+    exactExecutableLineCount(
+      resource,
+      '/^\\/\\d{12}\\/crypto-lending-(?:dev|test|qa|sandbox|staging)(?:-[a-z0-9]+)*-balance-sync$/u;',
+    ) === 1 &&
+    exactExecutableLineCount(
+      resource,
+      "if (parsed.protocol !== 'http:' || parsed.origin !== endpoint) {",
+    ) === 1 &&
+    exactExecutableLineCount(resource, '!COMMERCIAL_AWS_REGION.test(value)') === 1 &&
+    exactExecutableLineCount(resource, "parsed.protocol !== 'https:' ||") === 1 &&
+    exactExecutableLineCount(resource, "parsed.port !== '' ||") === 1 &&
+    exactExecutableLineCount(resource, 'parsed.hostname !== `sqs.${region}.amazonaws.com`') === 1 &&
+    exactExecutableLineCount(
+      resource,
+      'awsContainerCredentialsRelativeUri: credentialRelativeUri,',
+    ) === 1 &&
+    exactExecutableLineCount(resource, "awsContainerCredentialsFullUri: '',") === 1 &&
+    exactExecutableLineCount(resource, "awsContainerAuthorizationToken: '',") === 1 &&
+    exactExecutableLineCount(resource, "awsContainerAuthorizationTokenFile: '',") === 1 &&
+    exactExecutableLineCount(resource, 'maxRetries: 2,') === 1 &&
+    exactExecutableLineCount(resource, 'timeout: 1_000,') === 1 &&
+    exactExecutableLineCount(resource, "defaultsMode: 'standard',") === 1 &&
+    exactExecutableLineCount(resource, "retryMode: 'standard',") === 1 &&
+    exactExecutableLineCount(resource, 'useFipsEndpoint: false,') === 1 &&
+    exactExecutableLineCount(resource, 'useDualstackEndpoint: false,') === 1 &&
+    exactExecutableLineCount(resource, 'useQueueUrlAsEndpoint: false,') === 1 &&
+    exactExecutableLineCount(resource, 'ignoreConfiguredEndpointUrls: true,') === 1 &&
+    exactExecutableLineCount(resource, 'new ReceiveMessageCommand({') === 1 &&
+    exactExecutableLineCount(resource, 'new DeleteMessageCommand({') === 1 &&
+    exactExecutableLineCount(resource, 'new ChangeMessageVisibilityCommand({') === 1 &&
+    exactExecutableLineCount(
+      resource,
+      "MessageSystemAttributeNames: ['ApproximateReceiveCount'],",
+    ) === 1 &&
+    !resource.includes('MessageAttributeNames') &&
+    exactExecutableLineCount(resource, 'const receivedAtMonotonicMs = performance.now();') === 1 &&
+    exactExecutableLineCount(
+      resource,
+      "const descriptor = Object.getOwnPropertyDescriptor(message, 'receiptHandle');",
+    ) === 1 &&
+    exactExecutableLineCount(
+      resource,
+      "const rawMessages = dataProperty(response, 'Messages', false);",
+    ) === 1 &&
+    exactExecutableLineCount(resource, '(length as number) > maximumMessages ||') === 1 &&
+    exactExecutableLineCount(resource, '(length as number) > 10') === 1 &&
+    exactExecutableLineCount(
+      resource,
+      'return Object.freeze(parsed) as unknown as ReceivedQueueMessage[];',
+    ) === 1 &&
+    exactExecutableLineCount(
+      resource,
+      'return Object.freeze(Object.assign(Object.create(null) as T, members));',
+    ) === 1 &&
+    exactExecutableLineCount(
+      resource,
+      'if (closed) return Promise.reject(new BalanceConsumerSqsReceiptClosedError());',
+    ) === 1 &&
+    exactExecutableLineCount(
+      resource,
+      'if (closed) throw new BalanceConsumerSqsReceiptClosedError();',
+    ) === 1 &&
+    exactExecutableLineCount(resource, 'const inFlight = new Set<Promise<void>>();') === 1 &&
+    exactExecutableLineCount(resource, 'const TRUSTED_INPUT_ERRORS = new WeakSet<object>();') ===
+      1 &&
+    exactExecutableLineCount(resource, 'TRUSTED_INPUT_ERRORS.add(this);') === 1 &&
+    exactExecutableLineCount(resource, 'inFlight.add(gate);') === 1 &&
+    exactExecutableLineCount(resource, 'inFlight.delete(gate);') === 1 &&
+    exactExecutableLineCount(resource, 'settleGate();') === 1 &&
+    exactExecutableLineCount(
+      resource,
+      "if (typeof error === 'object' && error !== null && TRUSTED_INPUT_ERRORS.has(error)) {",
+    ) === 1 &&
+    exactExecutableLineCount(resource, 'throw new BalanceConsumerSqsReceiptOperationError();') ===
+      1 &&
+    exactExecutableLineCount(
+      resource,
+      'whileOpen(() => transport.receive(maxMessages, waitTimeSeconds, abortSignal)),',
+    ) === 1 &&
+    exactExecutableLineCount(
+      resource,
+      'delete: (message, abortSignal) => whileOpen(() => transport.delete(message, abortSignal)),',
+    ) === 1 &&
+    exactExecutableLineCount(
+      resource,
+      'whileOpen(() => transport.changeVisibility(message, visibilityTimeoutSeconds, abortSignal)),',
+    ) === 1 &&
+    exactExecutableLineCount(
+      resource,
+      'return parseJobEnvelope<Payload>(JSON.parse(body) as unknown);',
+    ) === 1 &&
+    exactExecutableLineCount(
+      resource,
+      'const lifecycle = reviewedAbortSignal(lifecycleSignal);',
+    ) === 1 &&
+    exactExecutableLineCount(resource, "controller.abort(new Error('SQS request aborted'));") ===
+      1 &&
+    !/\breasonGetter\b|\.reason\s*\(/u.test(resource) &&
+    exactExecutableLineCount(resource, 'const acceptedOperationGates = [...inFlight];') === 1 &&
+    exactExecutableLineCount(
+      resource,
+      'resourceLifecycle.abort(new BalanceConsumerSqsReceiptClosedError());',
+    ) === 1 &&
+    exactExecutableLineCount(resource, 'await Promise.allSettled(acceptedOperationGates);') === 1 &&
+    exactExecutableLineCount(
+      resource,
+      'await destroyClient(resourceClient, () => new BalanceConsumerSqsReceiptCloseError());',
+    ) === 1 &&
+    exactExecutableLineCount(resource, 'return closePromise;') === 1 &&
+    exactExecutableLineCount(
+      jobEnvelopeParser,
+      'export function parseJobEnvelope<Payload = unknown>(value: unknown): JobEnvelope<Payload> {',
+    ) === 1 &&
+    exactExecutableLineCount(
+      jobEnvelopeParser,
+      'const descriptors = Object.getOwnPropertyDescriptors(value);',
+    ) === 1 &&
+    exactExecutableLineCount(jobEnvelopeParser, "throw new Error('Invalid job envelope');") >= 2 &&
+    launchAndBarrelSources.every(
+      (source) =>
+        !source.includes('createDormantBalanceConsumerSqsReceiptResource') &&
+        !source.includes('balance-consumer-sqs-receipt.resource'),
+    )
+  );
+}
+
 function hasPinnedBalanceConsumerQueueBoundaryContract(
   sources: BalanceConsumerArtifactSources,
 ): boolean {
@@ -3344,6 +3612,7 @@ export function inspectBalanceConsumerDeploymentArtifacts(
       hasExactReviewedBalanceConsumerArtifactBytes(sources) &&
       hasDormantBalanceConsumerSourceContract(sources) &&
       hasDormantBalanceConsumerPersistenceResourceContract(sources) &&
+      hasDormantBalanceConsumerSqsReceiptResourceContract(sources) &&
       hasPinnedBalanceConsumerQueueBoundaryContract(sources) &&
       hasExactBalanceConsumerNativeReceiptRedriveContract(sources) &&
       hasDormantBalanceConsumerPackagingContract(sources) &&
@@ -3988,6 +4257,13 @@ export function loadRepositoryProductionPreflightInput(
         ),
         'utf8',
       ),
+      balanceConsumerSqsReceiptResourceSource: readFileSync(
+        resolve(
+          repositoryRoot,
+          'apps/api/src/blockchain-sync/infrastructure/sqs/balance-consumer-sqs-receipt.resource.ts',
+        ),
+        'utf8',
+      ),
       runtimePostgresPoolSource: readFileSync(
         resolve(repositoryRoot, 'apps/api/src/infrastructure/database/runtime-postgres-pool.ts'),
         'utf8',
@@ -4019,6 +4295,10 @@ export function loadRepositoryProductionPreflightInput(
       ),
       blockchainSyncIndexSource: readFileSync(
         resolve(repositoryRoot, 'apps/api/src/blockchain-sync/index.ts'),
+        'utf8',
+      ),
+      jobEnvelopeSource: readFileSync(
+        resolve(repositoryRoot, 'apps/api/src/infrastructure/outbox/job-envelope.ts'),
         'utf8',
       ),
       blockchainSyncModuleSource: readFileSync(
