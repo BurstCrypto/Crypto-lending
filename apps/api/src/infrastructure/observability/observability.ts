@@ -654,7 +654,7 @@ export class InProcessObservability implements ObservabilityPort {
       const record = closedRecord(input, ['queue', 'disposition', 'errorClass']);
       if (
         !record ||
-        !oneOf(record.queue, ['outbox', 'jobs'] as const) ||
+        !oneOf(record.queue, ['outbox', 'jobs', 'balance'] as const) ||
         !oneOf(record.disposition, [
           'retry_scheduled',
           'awaiting_dead_letter',

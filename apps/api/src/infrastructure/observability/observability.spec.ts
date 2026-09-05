@@ -195,6 +195,27 @@ describe('InProcessObservability', () => {
 
     expect(
       observability.recordJobFailure({
+        queue: 'balance',
+        disposition: 'awaiting_dead_letter',
+        errorClass: 'dependency',
+      }),
+    ).toBe(true);
+    snapshot = observability.dashboardSnapshot();
+    expect(
+      counter(snapshot, 'job_errors_total', {
+        queue: 'balance',
+        error_class: 'dependency',
+      })?.value,
+    ).toBe(1);
+    expect(
+      counter(snapshot, 'queue_events_total', {
+        queue: 'balance',
+        event: 'awaiting_dead_letter',
+      })?.value,
+    ).toBe(1);
+
+    expect(
+      observability.recordJobFailure({
         queue: 'jobs',
         disposition: 'dead_lettered',
         errorClass: 'internal',
