@@ -17,6 +17,30 @@ npm run --silent production:preflight:json
 This is currently a `BOOTSTRAP_BLOCKER_AUDIT`, not a launch-certification
 command. With no explicit bundle, its repository loader does not discover or
 ingest controlled production evidence, so both targets remain blocked today.
+
+`PRODUCTION_INFRASTRUCTURE` separately inspects the exact environment-contract
+markers across the KAN-34 application path: the parent, workload,
+observability, migration, and account-guardrail templates; their deployment
+guards; and the application, fixed-slot, billing, egress, auth/wallet, and
+Redis-operator validators. The current reviewed matrix is deliberately
+`NON_PRODUCTION_ONLY`, so its local inspection is `PASS` while launch readiness
+is hard-blocked by
+`PRODUCTION_INFRASTRUCTURE_DEPLOYMENT_PATH_NOT_ENABLED`. Missing, malformed,
+mixed, forged, or superficially widened artifacts instead emit
+`PRODUCTION_INFRASTRUCTURE_INSPECTION_FAILED`. A private in-process brand keeps
+callers from replacing the inspected result with asserted booleans or a
+fabricated `PRODUCTION_ENABLED` value.
+
+This check recognizes the selected environment contract and guard markers; it
+is not a substitute for the dedicated CloudFormation linters and artifact
+validators. The standalone `sqs-foundation.yaml` is intentionally outside this
+matrix because the KAN-34 parent owns its queues and is mutually exclusive with
+that alternative stack for one environment. The standalone template remains
+covered by its own validator and CI suite. Enabling a production-named path
+requires a separate reviewed cost, billing, egress, rotation, and deployment
+authority design; this checkpoint does not widen any template or authorize a
+deployment.
+
 The offline ingestion boundary is opt-in only:
 
 ```powershell
@@ -145,13 +169,16 @@ arguments or controlled evidence were rejected. CLI failures are reduced to
 material, parser details, and signature details are never printed. Structural
 or synthetic technical inputs cannot return exit code `0` without the private,
 current seven-role production decision brand. The checked-in empty registries
-therefore make exit code `0` impossible today. Even after independently
-approved keys, evidence, and decisions exist,
+and the deliberately non-production infrastructure contract independently make
+exit code `0` impossible today. Even after independently approved keys,
+evidence, decisions, and a separately reviewed production deployment path
+exist,
 `LOCAL_VALIDATION_IS_NOT_PRODUCTION_APPROVAL` remains in the report.
 
-The audit reads only local repository, non-secret artifacts: ECS environment and
-secret-reference names, the inert KAN-231 egress example, the KAN-62 provider
-decision record and digest, and the mainnet platform capability directory. It
+The audit reads only local repository, non-secret artifacts: selected KAN-34
+environment-contract and guard markers, ECS environment and secret-reference
+names, the inert KAN-231 egress example, the KAN-62 provider decision record and
+digest, and the mainnet platform capability directory. It
 parses the egress record as strict UTF-8 JSON and rejects byte-order marks or
 duplicate object keys before evaluating its status, mode, or evidence fields. It
 loads that record through the same bounded, canonical-path, stable double-read
@@ -207,6 +234,8 @@ blocker status.
 
 Relevant machine-readable launch blocker IDs include:
 
+- `PRODUCTION_INFRASTRUCTURE_INSPECTION_FAILED`
+- `PRODUCTION_INFRASTRUCTURE_DEPLOYMENT_PATH_NOT_ENABLED`
 - `AUTH_DEPLOYED_EVIDENCE_MISSING`
 - `DATABASE_MASTER_SECRET_NOT_RDS_MANAGED`
 - `RDS_MASTER_LIFECYCLE_EVIDENCE_MISSING`
@@ -250,6 +279,21 @@ before adoption, and the same exact stage-free version in the ElastiCache user
 and conditional ECS revocation task. Omitted versions, `AWSCURRENT`,
 `AWSPREVIOUS`, alternate parameters, mismatched child propagation, or an enabled
 unpinned task emit `REDIS_OPERATOR_SECRET_VERSION_NOT_WIRED`.
+
+Separate from that authored-template check, the repository now has a schema-v3
+fixed-slot state with append-only Redis operator VersionId history, a dedicated
+two-role-signed Redis-operator validator, and a deployment-integrated
+`REDIS_OPERATOR_TRANSITION` intent. The local path accepts only no-op chain
+adoption or one fresh VersionId append while the operator stays disabled and
+its task stays absent; it binds the Redis, composite credential, and preserved
+auth/wallet predecessors and constrains the reviewed nested change to the exact
+operator-user authentication update. The production Redis-operator authority
+registry is intentionally empty. This preflight does not ingest that transition
+artifact or treat the local guard as live evidence: no operational record is
+authorized, and no secret staging, AWS/Redis operation, deployment, or rotation
+has occurred. External custody, signatures, approvals, live capture,
+candidate/old-credential authentication, continuity, recovery, and deployed
+verification remain blockers.
 
 Parent-template inspection separately requires the RDS database to use the
 literal `crypto_admin` master username, `ManageMasterUserPassword: true`, and

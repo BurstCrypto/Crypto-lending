@@ -102,8 +102,9 @@ invocation guard compares the deployed secret ARN, VersionId, and KMS key ARN as
 one tuple. Neither `APPLICATION` nor `CREDENTIAL_TRANSITION` may change it. The
 separate `AUTH_WALLET_TRANSITION` intent now accepts a two-role-signed offline
 record for no-op adoption or for one exact VersionId advance with one sanitized
-inner-purpose operation, while preserving the secret/KMS ARNs and fixed-slot
-chain. Its production authority registry is intentionally empty, and external
+inner-purpose operation, while preserving the secret/KMS ARNs, composite
+credential chain, and Redis-operator chain. Its production authority registry
+is intentionally empty, and external
 custody, authorized key population, live drills/captures, independent approval,
 and deployment remain open production gates.
 
@@ -151,23 +152,36 @@ zero, all phases are `A_ONLY`, and the Redis operator is disabled. In that state
 all Redis identities are off, the operator uses `no-password-required`, and
 fixed-slot database/Redis execution-role reads remain closed. Version parameters
 intentionally have no defaults, so creation requires all seven sentinels to be
-supplied explicitly and cannot activate a workload. The schema-v2
-`ADOPT_AND_PIN` record changes all seven to exact generated VersionIds in one
-zero-count follow-up update. The operator user then receives its exact password
-reference while its ACL remains off.
+supplied explicitly and cannot activate a workload. The schema-v3
+`ADOPT_AND_PIN` record changes all seven to exact generated VersionIds,
+initializes the operator's singleton append-only history, and applies them in
+one zero-count follow-up update. The operator user then receives its exact
+password reference while its ACL remains off.
 
-The application invocation guard now has separate `CREDENTIAL_TRANSITION` and
-`APPLICATION` update intents. Credential transitions require a locally approved
-schema-v2 record whose exact current/target state, including the operator
-VersionId, is compared with the immutable deployed stack and bound into the
+The application invocation guard now has separate `CREDENTIAL_TRANSITION`,
+`AUTH_WALLET_TRANSITION`, `REDIS_OPERATOR_TRANSITION`, and `APPLICATION` update
+intents. Fixed-slot credential transitions require a locally approved schema-v3
+record whose exact current/target state, including the operator VersionId and
+history, is compared with the immutable deployed stack and bound into the
 reviewed change set and acknowledgement; unrelated template, parameter, and tag
 changes are rejected. After adoption, each fixed-slot transition and ordinary
-application update preserves the operator VersionId. Changing it requires a
-future dedicated operator transition. Ordinary application updates reject
-transition evidence, require every credential-state binding to equal deployed
-state, and preserve the credential-chain tags. Deploy rechecks the current stack
-immediately before execution. This is an offline-tested control path, not
-evidence that a transition was authorized or run in AWS.
+application update preserves the operator VersionId and history.
+
+The dedicated Redis-operator intent accepts only a canonical, two-role-signed
+no-op `ADOPT_EXISTING_BINDING` or one exact
+`ROTATE_DISABLED_OPERATOR_CREDENTIAL` VersionId append. It binds the immutable
+parent and child stacks/templates, secret/KMS/user identities, the current
+Redis, composite credential, and auth/wallet chain heads, plus sanitized
+evidence and approval references. Adoption only adds the separate Redis chain;
+a transition keeps the operator disabled and its task absent, preserves every
+A/B slot and auth/wallet binding, permits only the exact non-replacing operator-
+user authentication update, and advances the Redis and composite credential
+chains together. The production Redis-operator authority registry is
+intentionally empty. Ordinary application updates reject all transition
+evidence, require every credential-state binding to equal deployed state, and
+preserve all three chains. Deploy rechecks the current stack immediately before
+execution. These are offline-tested controls, not evidence that any transition
+was authorized, staged, or run in AWS.
 
 ### Encryption and transport
 
@@ -329,8 +343,10 @@ complete:
   the outer two-role-signed schema-v2 bundle, whose independently matched
   `captureSha256`, exact target identity, statuses, stages, ordered timestamps,
   and `PASS` results bind the exercise to the release and deployment target;
-- deployed verification that schema-v2 adoption bound the six A/B versions and
-  separate operator version to the exact generated Secrets Manager versions;
+- deployed verification that schema-v3 adoption bound the six A/B versions and
+  separate operator version plus singleton history to the exact generated
+  Secrets Manager versions, followed by independently signed no-op adoption of
+  the Redis-specific chain;
 - an authorized run of the locally reviewed Redis revocation task/CLI using the
   exact adopted operator VersionId, including workload drain, old-slot session
   and reconnect denial, immediate operator disablement, managed alarm delivery,
@@ -338,8 +354,10 @@ complete:
 - authorized inactive-slot Redis credential regeneration and password
   installation, with its exact version bound into the reviewed transition
   record and deployment parameters;
-- a dedicated current-to-target operator-version transition and replacement
-  task drill before the adopted operator password is ever rotated;
+- production trust anchors, an independently signed current-to-target operator-
+  version record, external secret staging/custody, candidate and old-credential
+  authentication evidence, and a replacement-task/recovery drill before the
+  adopted operator password is ever rotated;
 - a trusted binding proving the separate migration task's supplied secret/key
   ARNs are the exact application-stack migration outputs;
 - actual API, worker, web, and migration startup with injected secrets;

@@ -109,10 +109,13 @@ direct-body limit.
   `RedisOperatorSecretVersionId` immutably pins the disabled-by-default operator
   credential. The only unpinned adoption state requires all seven selectors to
   be `UNPINNED`, keeps every service stopped and phase at `A_ONLY`, leaves every
-  Redis identity off, and closes fixed-slot execution-role reads. The schema-v2
+  Redis identity off, and closes fixed-slot execution-role reads. The schema-v3
   adoption record and guarded update bind all seven versions to the immutable
-  deployed stack; later fixed-slot transitions preserve the operator version,
-  and ordinary releases preserve every credential binding and chain tag; and
+  deployed stack and initialize the operator's singleton append-only history;
+  later fixed-slot transitions preserve the operator version and history, while
+  a dedicated signed Redis-operator intent may advance them only with the
+  operator disabled. Ordinary releases preserve every credential binding and
+  chain tag; and
 - bounded CloudWatch log groups and eight service/queue/security alarms expose
   infrastructure health through one explicitly supplied external SNS topic;
   the template creates no recipient. The dashboard is optional and off by
@@ -204,9 +207,10 @@ boundary grants `GetSecretValue` and decrypt on the exact
 execution role. Web, worker, task roles, and the Redis operator receive no
 access. CREATE can bind the initial exact version but accepts no transition
 input. `APPLICATION` preserves the deployed ARN/VersionId/KMS tuple, and after
-schema-v2 adoption each `CREDENTIAL_TRANSITION` is limited to one step in the
-separate six-slot A/B state machine while preserving both the Redis-operator
-version and auth/wallet chain. The dedicated `AUTH_WALLET_TRANSITION` intent now
+schema-v3 adoption each `CREDENTIAL_TRANSITION` is limited to one step in the
+separate six-slot A/B state machine while preserving the Redis-operator
+version/history plus the auth/wallet and Redis-operator chains. The dedicated
+`AUTH_WALLET_TRANSITION` intent now
 integrates a canonical offline artifact signed by an issuer and an independent
 verifier. A no-op `adopt` binds the existing singleton version; `transition`
 appends one new outer VersionId and changes exactly one sanitized ring purpose
@@ -256,15 +260,25 @@ worker Redis network path are not part of the replacement contract.
 
 The separately scoped Redis operator identity is also inert during initial
 creation: while `RedisOperatorSecretVersionId=UNPINNED`, its ACL access is off
-and its authentication mode is `no-password-required`. Schema-v2 adoption pins
-the generated operator secret version together with the six A/B versions. The
+and its authentication mode is `no-password-required`. Schema-v3 adoption pins
+the generated operator secret version, initializes its singleton append-only
+history, and binds it together with the six A/B versions. The
 follow-up stack then selects that exact version, with an empty version stage, in
 both the ElastiCache operator user's dynamic reference and the conditional
 one-off ECS task's `REDIS_OPERATOR_PASSWORD` selector. An omitted version,
 `AWSCURRENT`, `AWSPREVIOUS`, or a different version parameter fails local
 validation. Every later fixed-slot transition and ordinary application update
-must preserve the adopted operator VersionId; changing it requires a future
-dedicated operator transition. Any future authorized `ecs run-task` path must
+must preserve the adopted operator VersionId and history. The separate
+two-role-signed Redis-operator validator and guarded
+`REDIS_OPERATOR_TRANSITION` update now support a no-op adoption of that binding
+or one exact globally fresh VersionId append while the operator remains
+disabled and its task remains absent. The transition preserves all six A/B
+slots and the auth/wallet chain, binds the immutable child stack/template plus
+secret/KMS/user identities, permits only the exact non-replacing operator-user
+authentication update, and advances the Redis-specific and composite
+credential chains together. Its production authority registry is intentionally
+empty, so no operational record can be authorized locally. Any future
+authorized `ecs run-task` path must
 select Fargate Linux platform `1.4.0` or newer for JSON-key plus VersionId
 selection. None of these static controls authorizes or runs the task, rotates a
 live password, or proves deployed session revocation.
@@ -345,14 +359,18 @@ workload desired counts at zero; confirm that RDS created the managed master
 secret with the application data key and bind the database identity plus
 `DatabaseCredentialsSecretArn` output without retrieving its value; capture the
 six fixed-slot Secrets Manager `VersionId` values plus the separate Redis
-operator version without recording secret material; validate a schema-v2
-`ADOPT_AND_PIN` record whose target state contains those exact seven IDs;
+operator version without recording secret material; validate a schema-v3
+`ADOPT_AND_PIN` record whose target state contains those exact seven IDs and the
+operator's singleton history;
 provision the restricted PostgreSQL LOGIN slots from their exact scoped secret
 versions while workloads remain stopped; then apply the all-pinned follow-up
 stack update at zero desired count using exactly the seven target IDs from the
 validated record. That follow-up installs the pinned API Redis and operator
 passwords while retaining the `A_ONLY` and operator-disabled access boundaries.
-Independently verify the
+After the auth/wallet no-op adoption, validate and apply the separately signed
+Redis-operator no-op adoption so its chain binds the pinned operator singleton,
+the current composite credential head, and the current auth/wallet head before
+any application activation. Independently verify the
 deployed pins and backend-installation evidence against the adoption record
 before continuing. Then drain old sessions; ensure no other `crypto_admin`
 session exists; bind the current managed-secret VersionId in sanitized
@@ -442,10 +460,14 @@ template deliberately does not launch the task.
 - The conditional Redis operator now has a production-only, exact-inactive-slot
   CLI and a no-service one-off task definition whose password selector uses the
   separately adopted exact operator VersionId. Both remain disabled by default
-  and have not been deployed or run. A dedicated operator-version transition,
-  workload drain, post-command session and reconnect denial, immediate operator
-  disablement, managed alarm delivery, and sanitized live evidence remain
-  separately authorized gates.
+  and have not been deployed or run. The dedicated two-role-signed
+  operator-version validator and deployment intent exist only as offline/local
+  guards, and their production registry is empty. External secret staging and
+  custody, independently signed operational records, workload drain,
+  candidate/old-credential authentication evidence, forward recovery,
+  post-command session and reconnect denial, immediate operator disablement,
+  managed alarm delivery, and sanitized live evidence remain separately
+  authorized gates.
 - PostgreSQL minor and Redis 7.1 availability, VPC endpoint availability,
   service quotas, the S3 prefix-list ID, image startup behavior, and the ACM/DNS
   relationship require target-account preflight and runtime evidence.

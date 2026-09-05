@@ -37,11 +37,23 @@ registry bindings remain completely separate from this six-slot A/B state
 machine.
 
 The Redis operator secret is likewise not an A/B slot. Its generated version is
-unknown during the inert initial CREATE, so schema-v2 adoption records bind its
-one `UNPINNED` source marker to an exact target VersionId alongside the six
-slots. Every later record must preserve that exact operator version. Rotating it
-requires a future dedicated Redis-operator transition; the A/B state machine
-cannot authorize that change.
+unknown during the inert initial CREATE, so schema-v3 adoption records bind its
+one `UNPINNED` source marker to an exact target VersionId and initialize its
+singleton append-only history alongside the six slots. Fixed-slot records must
+preserve both the current operator version and its history. A separate
+two-role-signed Redis-operator artifact and deployment-integrated
+`REDIS_OPERATOR_TRANSITION` intent now provide no-op chain adoption and one
+exact disabled-operator VersionId transition without broadening the A/B state
+machine.
+
+The dedicated Redis validator signs the complete schema-v3 current and target
+states, the independent Redis-operator and composite credential predecessors,
+the preserved auth/wallet chain, immutable parent/workload/observability and
+secret/KMS/user bindings, sanitized evidence hashes, and purpose-separated
+approval references. Its production authority registry is intentionally empty.
+The checked-in example therefore cannot authorize an operational record, and
+no operator credential has been staged, rotated, deployed, or exercised by this
+local capability.
 
 The RDS `crypto_admin` master credential is outside this record entirely. RDS
 generates, stores, and rotates its managed password through Secrets Manager,
@@ -85,6 +97,13 @@ npm run infra:validate:credential-transition
 npm run infra:test:credential-transition
 ```
 
+The dedicated Redis-operator example and test suite are also inert and local:
+
+```powershell
+npm run infra:validate:redis-operator-transition
+npm run infra:test:redis-operator-transition
+```
+
 An operational record must be created only under the already ignored
 `.local-validation/` directory, must end in
 `.credential-transition.local.json`, and must never be committed. Adoption and
@@ -118,32 +137,57 @@ failures use fixed messages that do not disclose supplied paths or arguments.
 Example mode rejects every operational binding argument and remains tied to
 the inert checked-in example.
 
+Redis-operator adoption and transition records use the same secure local-file
+boundary, but must end in `.redis-operator-transition.local.json`. Operational
+validation requires every deployment, template, secret/KMS/user, current and
+target VersionId, Redis-chain, composite credential-chain, auth/wallet-chain,
+operation, and field binding to be supplied independently. The only accepted
+operations are `ADOPT_EXISTING_BINDING` for a no-op binding and
+`ROTATE_DISABLED_OPERATOR_CREDENTIAL` for one exact fresh VersionId; the field
+is always `REDIS_OPERATOR_SECRET_VERSION_ID`. The artifact must carry valid
+Ed25519 signatures from distinct `REDIS_OPERATOR_TRANSITION_ISSUER` and
+`INDEPENDENT_REDIS_OPERATOR_TRANSITION_VERIFIER` keys in the dedicated scope.
+There is no apply mode, and the empty production registry means no checked-in or
+test-registry record can produce a production-authorized report.
+
 ## Guarded CloudFormation updates
 
-`invoke-application-baseline.ps1` separates updates into three exact intents:
+`invoke-application-baseline.ps1` separates updates into four exact intents:
 
 - `CREDENTIAL_TRANSITION` requires the ignored approved record, its exact
   `adopt` or `transition` mode, a current canonical validation instant, the
   immutable stack ARN, all seven target `VersionId` values, and all four
   phase/operator controls. The guard validates the record twice before AWS
   discovery, verifies the deployed current state, prohibits parent-template and
-  unrelated parameter/tag changes, advances the three credential-chain tags,
+  unrelated parameter/tag changes, preserves the Redis-operator and auth/wallet
+  chains, advances the three composite credential-chain tags,
   and binds those facts into the change-set description and acknowledgement.
 - `APPLICATION` rejects transition evidence and permits an ordinary release
-  only after adoption. All seven pinned versions and all four controls must be
-  explicitly supplied and must exactly equal the deployed values. The existing
-  credential-chain and auth/wallet-chain tags are carried forward unchanged
-  while reviewed application parameters or templates may change.
+  only after all three chain adoptions. All seven pinned versions and all four
+  controls must be explicitly supplied and must exactly equal the deployed
+  values. The existing composite credential, Redis-operator, and auth/wallet
+  chain tags are carried forward unchanged while reviewed application
+  parameters or templates may change.
 - `AUTH_WALLET_TRANSITION` rejects fixed-slot evidence and requires an ignored,
   canonical, two-role-signed auth/wallet record, exact `adopt` or `transition`
   mode, current validation instant, production authority-registry digest, and
   independently supplied current/target VersionIds, operation, and field. It
-  preserves the complete fixed-slot chain and unrelated template, parameter,
-  and base-tag state. Adoption is a no-op tuple binding with only zero changes
-  or non-replacing tag propagation; a transition requires the exact API task-
-  definition replacement and API-service modification.
+  preserves the complete fixed-slot and Redis-operator chains and unrelated
+  template, parameter, and base-tag state. Adoption is a no-op tuple binding
+  with only zero changes or non-replacing tag propagation; a transition
+  requires the exact API task-definition replacement and API-service
+  modification.
+- `REDIS_OPERATOR_TRANSITION` rejects fixed-slot and auth/wallet transition
+  evidence and requires an ignored, canonical, two-role-signed Redis-operator
+  record plus every independently supplied live identity and chain binding.
+  `adopt` leaves the complete schema-v3 state unchanged and adds only the
+  Redis-operator chain tags. `transition` keeps the operator disabled and its
+  task absent, preserves every A/B slot and the auth/wallet chain, and permits
+  only the exact non-replacing `RedisOperatorUser` authentication-password
+  update in the direct workload child. It advances the Redis-specific chain and
+  the composite credential chain atomically.
 
-All three intents require the named auth/wallet secret VersionId and compare the
+All four intents require the named auth/wallet secret VersionId and compare the
 complete deployed auth/wallet ARN/VersionId/KMS tuple. `APPLICATION` and
 `CREDENTIAL_TRANSITION` must preserve it. `AUTH_WALLET_TRANSITION` may adopt the
 unchanged tuple or advance only its VersionId after signed validation; its
@@ -157,16 +201,19 @@ auth/wallet VersionId, all seven fixed-slot/Redis-operator values as `UNPINNED`,
 zero desired task counts, and no transition inputs. The zero-count fixed-slot
 adoption runs first while the auth/wallet chain is untracked. A signed no-op
 auth/wallet `adopt` update then binds the already deployed singleton VersionId
-and sanitized seven-field manifest before any `APPLICATION` activation. The
+and sanitized seven-field manifest. A signed no-op Redis-operator `adopt` then
+binds the already pinned operator VersionId, singleton history, composite
+credential head, and auth/wallet head before any `APPLICATION` activation. The
 standalone auth/wallet validator also has a signed `create` state-model mode,
 but the CloudFormation invocation path deliberately accepts only `adopt` and
 `transition` for UPDATE.
 
-The production auth/wallet authority registry is intentionally empty. Local
-validation and wrapper integration therefore do not authorize a record,
-populate a key, or prove a deployed change. External custody and population,
-live capture and rotation/recovery drills, independently controlled signing
-keys and approval, and the first production deployment all remain outstanding.
+The production auth/wallet and Redis-operator authority registries are
+intentionally empty. Local validation and wrapper integration therefore do not
+authorize a record, populate a key, or prove a deployed change. External
+custody and population, live capture and rotation/recovery drills,
+independently controlled signing keys and approval, and the first production
+deployment all remain outstanding.
 
 Every update addresses the immutable stack ARN rather than its mutable name.
 Deploy repeats all local and current-state checks, verifies the exact submitted
@@ -177,7 +224,7 @@ requires the exact hash-bound billable-resource acknowledgement it prints.
 
 ## State and history contract
 
-One schema-v2 record contains an exact deployment identity and complete current
+One schema-v3 record contains an exact deployment identity and complete current
 and target state for all six A/B slots plus the immutable Redis-operator secret
 version:
 
@@ -189,6 +236,8 @@ version:
 
 The separate `RedisOperatorSecretVersionId` state field and template parameter
 identify the one operator credential; they do not add a phase or another slot.
+The schema-v3 state also carries `redisOperatorUsedVersionIds`, the bounded,
+append-only history for that separate credential.
 
 The version parameters intentionally have no defaults. Each must be supplied
 as either the exact uppercase `UNPINNED` adoption sentinel or a 32–64 character
@@ -209,28 +258,36 @@ generated version IDs can then be captured by a separately authorized adoption
 procedure; it cannot activate a workload or the operator.
 
 Each slot stores a bounded generation number, its current exact secret
-`VersionId`, and the complete ordered history of version IDs used by that
-slot. Histories are append-only, version IDs are unique across every workload
-and slot, and the last history entry must equal the current version. A burned
-or retired version ID is never removed or reused. The local record retains at
-most 64 generations per slot and fails closed at that bound; long-term history
-must be moved into a separately reviewed durable control before the bound is
-reached.
+`VersionId`, and the complete ordered history of version IDs used by that slot.
+The Redis operator stores its current exact `VersionId` plus its own complete
+ordered history. All seven histories are append-only, version IDs are globally
+unique across the six slots and the operator, and each last history entry must
+equal its current version. A burned or retired version ID is never removed or
+reused. Each history retains at most 64 versions and validation fails closed at
+that bound; long-term history must be moved into a separately reviewed durable
+control before the bound is reached.
 
 Every post-adoption record binds the canonical SHA-256 of its complete current
-state and the canonical SHA-256 of the preceding transition. The validator
-also returns hashes of the current state, target state, and complete canonical
-record so the next reviewed record can extend the chain. These hashes are
-metadata integrity bindings, not proof that an external action occurred.
+state and the canonical SHA-256 of the preceding composite credential
+transition. The fixed-slot validator returns hashes of the current state,
+target state, and complete canonical record so the next reviewed record can
+extend that chain. It cannot change the Redis operator's current version or
+history.
 
-The Redis operator field has no generation/history semantics because this
-validator cannot rotate it. Adoption captures it once, post-adoption records
-require it to remain byte-for-byte unchanged, and a dedicated future lifecycle
-must carry its own append-only rotation evidence.
+The Redis-operator validator derives an independent projection hash from
+`operatorMode`, the current operator VersionId, and the full operator history.
+Its no-op adoption starts that separate chain at `UNTRACKED` / `NONE` while
+binding the existing composite credential and auth/wallet heads. A rotation
+must bind the current Redis projection and prior Redis record, append and select
+exactly one globally fresh VersionId, preserve the complete A/B and auth/wallet
+state, and advance both the Redis-specific and composite credential chains.
+The next fixed-slot record may therefore chain from a Redis transition without
+losing the operator history. All hashes remain metadata integrity bindings, not
+proof that an external action occurred.
 
-`operatorMode` must remain `DISABLED` through every transition. The Redis
-revocation operator is outside this validator and cannot be activated by a
-record or plan.
+`operatorMode` must remain `DISABLED` through every fixed-slot or Redis-operator
+transition. Neither validator can activate or run the Redis revocation
+operator.
 
 ## Reviewed state machine
 
@@ -245,10 +302,11 @@ The full operation sequence is:
 
 1. `ADOPT_AND_PIN` starts from six explicit generation-zero A/B-slot
    placeholders plus the operator's `UNPINNED` marker, captures seven distinct
-   exact version IDs (six generation-one slots and the operator binding), and
-   keeps every scope at `A_ONLY` while all three workload desired counts remain
-   zero. The follow-up template parameters must exactly equal all seven target
-   bindings before any workload can be activated.
+   exact version IDs (six generation-one slots and the operator binding),
+   initializes the operator's singleton history, and keeps every scope at
+   `A_ONLY` while all three workload desired counts remain zero. The follow-up
+   template parameters must exactly equal all seven target bindings before any
+   workload can be activated.
 2. `PREPARE_INACTIVE` leaves the phase unchanged, advances only the inactive
    slot by one generation, appends one fresh version ID, and binds independent
    secret-regeneration and backend-installation evidence.
@@ -272,7 +330,7 @@ extensions fail closed. Secret regeneration, backend installation, phase
 change, and rollback approval groups must be mutually disjoint, and the
 independent verifier cannot appear in any approval group.
 
-## Separately authorized inactive-slot work
+## Separately authorized credential work
 
 A successful operational validation emits only symbolic, non-executable steps.
 The future executor must remain a separate reviewed component and must bind
@@ -290,6 +348,18 @@ install only that password on the exact fixed ElastiCache user while preserving
 the reviewed ACL, and prove candidate authentication plus current active-slot
 continuity. The application revocation task is not a password installer and
 must not be broadened into one.
+
+For the Redis operator, a signed `ADOPT_EXISTING_BINDING` record only establishes
+the separate chain around an already pinned, disabled singleton. A signed
+`ROTATE_DISABLED_OPERATOR_CREDENTIAL` record may describe one fresh target
+version, but the local validator still cannot generate or read it, update the
+ElastiCache user, launch a task, or test authentication. Separately authorized
+operators must keep the user disabled and the task absent, prove no live
+operator connection, stage the externally custodied target version, update only
+the operator user's password set, verify candidate authentication and old-
+credential denial without retaining secret material, prove application runtime
+continuity, and retain a forward-recovery plan using another never-reused
+version.
 
 After replacement readiness, retirement separately requires draining the old
 slot, revoking the exact backend identity, terminating only its sessions, and
