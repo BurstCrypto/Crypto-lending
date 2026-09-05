@@ -135,13 +135,24 @@ financial action.
 - **IDX-005 / KAN-65:** the durable account-scoped balance reader, append-only
   observations/events, revisioned projection, stale preservation, and reorg
   replacement are present and PostgreSQL-tested. A worker-only exact-wallet
-  resolver and dormant Ethereum/Solana transcript adapters are also present.
-  They remain unregistered and own no endpoint or egress path. An isolated
-  balance-sync source/DLQ and publisher contract exist, but no dedicated
-  consumer task/service or receive/delete IAM capability is active. Live
-  indexing is still blocked on that approved consumer/runtime, durable message
-  idempotency, independent RPC identities and evidence, secrets, egress, and
-  operational controls.
+  resolver and dormant Ethereum/Solana transcript adapters are also present. A
+  finalized-only, two-source agreement coordinator now requires an exact,
+  time-bounded source-pair registry; distinct source IDs, failure families, and
+  reader instances; current identity-validated evidence; an exact Ethereum
+  block-number/hash/parent checkpoint or Solana rooted finalized-slot/block/
+  parent checkpoint; and identical complete stablecoin balances. Its immutable
+  candidate preserves both source attestations and a domain-separated agreement
+  fingerprint, while setting both persistence and financial authority false.
+  The checked-in source-pair registry is empty and `NOT_APPROVED`; the
+  coordinator and transcript adapters remain unregistered and own no endpoint
+  or egress path. Distinct synthetic aliases do not establish real provider
+  independence. An isolated balance-sync source/DLQ and publisher contract
+  exist, but no dedicated consumer task/service or receive/delete IAM capability
+  is active. Live indexing is still blocked on that approved consumer/runtime,
+  durable message idempotency, independently approved RPC identities and live
+  evidence, secrets, egress, and operational controls. A later persistence
+  change must retain the whole agreement envelope; persisting only its nested
+  observation candidate would discard required provenance and is prohibited.
 - **BAL-001 / KAN-66:** the durable price-evidence reader/store and dormant Pyth
   Hermes and Ethereum Chainlink transcript parsers are present. Pyth binary
   signatures are not verified, and Chainlink requires an independently approved
@@ -169,6 +180,7 @@ PostgreSQL fixture.
 All tests use deterministic injected readers and an injected clock.
 
 ```powershell
+npm test --workspace @crypto-lending/api -- --runInBand src/blockchain-sync/application/mainnet-balance-two-source-agreement.coordinator.spec.ts
 npm test --workspace @crypto-lending/api -- --runInBand src/portfolio/domain/portfolio-balance-snapshot.spec.ts src/portfolio/application/portfolio.service.spec.ts
 npm run test:e2e --workspace @crypto-lending/api -- --runInBand test/portfolio.e2e-spec.ts
 npm run typecheck --workspace @crypto-lending/api
