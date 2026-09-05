@@ -10,6 +10,11 @@ import {
   type SQSClient,
 } from '@aws-sdk/client-sqs';
 
+import {
+  FailClosedBalanceSyncJobPort,
+  balanceSyncReceiptRetryMinimumDelaySeconds,
+} from '../../blockchain-sync/application/fail-closed-balance-sync-job.port';
+import type { BalanceSyncJobEnvelope } from '../../blockchain-sync/domain/balance-sync';
 import type {
   BalanceConsumerInfrastructureConfig,
   InfrastructureConfig,
@@ -174,6 +179,19 @@ function ledgerMessage(): OutboxTransportMessage {
     messageAttributes: {},
     ledgerLink: { commandId: UUIDS.command, journalId: UUIDS.journal },
   };
+}
+
+async function trustedReceiptRetryError(delaySeconds: number): Promise<unknown> {
+  try {
+    await new FailClosedBalanceSyncJobPort().scheduleRetry({
+      envelope: balanceMessage().envelope as BalanceSyncJobEnvelope,
+      delaySeconds,
+      failureCode: 'RATE_LIMITED',
+    });
+  } catch (error) {
+    return error;
+  }
+  throw new Error('expected receipt disposition rejection');
 }
 
 describe('dedicated balance-sync physical SQS boundary', () => {
@@ -658,6 +676,154 @@ describe('dedicated balance-sync physical SQS boundary', () => {
     );
     expect(sqs.delete).not.toHaveBeenCalled();
   });
+
+  it.each([
+    ['provider floor', 1, 30, 3, 30],
+    ['native exponential floor', 2, 5, 3, 10],
+    ['maximum trusted floor', 1, 60, 3, 60],
+    ['native maximum cap', 6, 5, 7, 60],
+    ['exhausted receipt', 3, 60, 3, 0],
+  ] as const)(
+    'applies the %s without changing native receipt exhaustion authority',
+    async (_scenario, receiveCount, trustedMinimum, maxReceiveCount, expectedDelay) => {
+      const current = config({
+        maxReceiveCount,
+        retryBaseDelaySeconds: 5,
+        retryMaxDelaySeconds: 60,
+      });
+      const envelope = balanceMessage().envelope as JobEnvelope;
+      const message = {
+        messageId: `message-trusted-delay-${receiveCount}`,
+        receiptHandle: `receipt-trusted-delay-${receiveCount}`,
+        body: JSON.stringify(envelope),
+        receiveCount,
+        receivedAtMonotonicMs: performance.now(),
+      };
+      const sendMessage = jest.fn();
+      const directDeadLetter = jest.fn();
+      const sqs = {
+        receive: jest.fn().mockResolvedValue([message]),
+        parseEnvelope: jest.fn().mockReturnValue(envelope),
+        changeVisibility: jest.fn().mockResolvedValue(undefined),
+        delete: jest.fn().mockResolvedValue(undefined),
+        sendMessage,
+        directDeadLetter,
+      } as unknown as SqsService;
+      const marker = await trustedReceiptRetryError(trustedMinimum);
+      const handler = jest.fn(async () => Promise.reject(marker));
+
+      const result = await receiptWorker(sqs, current).processOne(handler);
+
+      expect(result).toMatchObject({
+        status: receiveCount >= maxReceiveCount ? 'awaiting-dead-letter' : 'retry-scheduled',
+        errorCode: 'JOB_HANDLER_FAILED',
+        receiveCount,
+        retryDelaySeconds: expectedDelay,
+      });
+      expect(sqs.changeVisibility).toHaveBeenCalledWith(
+        message,
+        expectedDelay,
+        current.sqs.balanceQueueUrl,
+        expect.any(AbortSignal),
+      );
+      expect(sqs.delete).not.toHaveBeenCalled();
+      expect(sendMessage).not.toHaveBeenCalled();
+      expect(directDeadLetter).not.toHaveBeenCalled();
+    },
+  );
+
+  it('ignores trusted receipt timing on the generic queue', async () => {
+    const current = config();
+    const envelope = yieldMessage().envelope;
+    const message = {
+      messageId: 'message-generic-trusted-delay',
+      receiptHandle: 'receipt-generic-trusted-delay',
+      body: JSON.stringify(envelope),
+      receiveCount: 1,
+      receivedAtMonotonicMs: performance.now(),
+    };
+    const sqs = {
+      receive: jest.fn().mockResolvedValue([message]),
+      parseEnvelope: jest.fn().mockReturnValue(envelope),
+      changeVisibility: jest.fn().mockResolvedValue(undefined),
+      delete: jest.fn().mockResolvedValue(undefined),
+    } as unknown as SqsService;
+    const marker = await trustedReceiptRetryError(30);
+
+    const result = await receiptWorker(sqs, current, 'jobs').processOne(async () =>
+      Promise.reject(marker),
+    );
+
+    expect(balanceSyncReceiptRetryMinimumDelaySeconds(marker)).toBe(30);
+    expect(result).toMatchObject({
+      status: 'retry-scheduled',
+      errorCode: 'JOB_HANDLER_FAILED',
+      retryDelaySeconds: 1,
+    });
+    expect(sqs.changeVisibility).toHaveBeenCalledWith(
+      message,
+      1,
+      current.sqs.queueUrl,
+      expect.any(AbortSignal),
+    );
+    expect(sqs.delete).not.toHaveBeenCalled();
+  });
+
+  it.each(['lookalike', 'proxied marker', 'undefined rejection'] as const)(
+    'uses only native timing for a %s',
+    async (scenario) => {
+      const current = config({ retryBaseDelaySeconds: 5 });
+      const envelope = balanceMessage().envelope as JobEnvelope;
+      const message = {
+        messageId: `message-untrusted-${scenario}`,
+        receiptHandle: `receipt-untrusted-${scenario}`,
+        body: JSON.stringify(envelope),
+        receiveCount: 1,
+        receivedAtMonotonicMs: performance.now(),
+      };
+      const sqs = {
+        receive: jest.fn().mockResolvedValue([message]),
+        parseEnvelope: jest.fn().mockReturnValue(envelope),
+        changeVisibility: jest.fn().mockResolvedValue(undefined),
+        delete: jest.fn().mockResolvedValue(undefined),
+      } as unknown as SqsService;
+      const trusted = await trustedReceiptRetryError(30);
+      let trapCalls = 0;
+      const rejection =
+        scenario === 'lookalike'
+          ? { code: 'BALANCE_SYNC_JOB_DISPOSITION_NOT_APPROVED', delaySeconds: 30 }
+          : scenario === 'proxied marker'
+            ? new Proxy(trusted as object, {
+                get: () => {
+                  trapCalls += 1;
+                  throw new Error('provider-private-secret');
+                },
+                getPrototypeOf: () => {
+                  trapCalls += 1;
+                  throw new Error('provider-private-secret');
+                },
+              })
+            : undefined;
+
+      const result = await receiptWorker(sqs, current).processOne(async () =>
+        Promise.reject(rejection),
+      );
+
+      expect(result).toMatchObject({
+        status: 'retry-scheduled',
+        errorCode: 'JOB_HANDLER_FAILED',
+        retryDelaySeconds: 5,
+      });
+      expect(sqs.changeVisibility).toHaveBeenCalledWith(
+        message,
+        5,
+        current.sqs.balanceQueueUrl,
+        expect.any(AbortSignal),
+      );
+      expect(sqs.delete).not.toHaveBeenCalled();
+      expect(trapCalls).toBe(0);
+    },
+  );
 
   it('does not use a generic worker to consume a balance job', async () => {
     const current = config();

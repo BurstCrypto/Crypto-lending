@@ -14,6 +14,10 @@ import {
   BalanceSyncOrchestratorError,
   type BalanceSyncProcessingResult,
 } from './balance-sync-orchestrator';
+import {
+  FailClosedBalanceSyncJobPort,
+  balanceSyncReceiptRetryMinimumDelaySeconds,
+} from './fail-closed-balance-sync-job.port';
 import type {
   BalanceIndexerCandidate,
   BalanceIndexerReadRequest,
@@ -968,6 +972,42 @@ describe('BalanceSyncOrchestrator', () => {
       new BalanceSyncOrchestratorError('BALANCE_SYNC_CHECKPOINT_FAILED'),
     );
     await expect(jobFailure.orchestrator.process(job())).rejects.toEqual(
+      new BalanceSyncOrchestratorError('BALANCE_SYNC_JOB_DISPOSITION_FAILED'),
+    );
+  });
+
+  it('preserves only the trusted receipt retry minimum from the fail-closed port', async () => {
+    const test = harness({
+      read: async () => {
+        throw new BalanceSyncIndexerFailure('RATE_LIMITED', { retryAfterSeconds: 30 });
+      },
+    });
+    const receiptDisposition = new FailClosedBalanceSyncJobPort();
+    test.jobs.scheduleRetry = (input) => receiptDisposition.scheduleRetry(input);
+
+    let caught: unknown;
+    try {
+      await test.orchestrator.process(job());
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(balanceSyncReceiptRetryMinimumDelaySeconds(caught)).toBe(30);
+    expect(caught).toMatchObject({
+      message: 'BALANCE_SYNC_JOB_DISPOSITION_NOT_APPROVED',
+    });
+  });
+
+  it('sanitizes the fail-closed port unmarked dead-letter failure', async () => {
+    const test = harness({
+      read: async () => {
+        throw new BalanceSyncIndexerFailure('PERMANENT_PROVIDER_FAILURE');
+      },
+    });
+    const receiptDisposition = new FailClosedBalanceSyncJobPort();
+    test.jobs.deadLetter = (input) => receiptDisposition.deadLetter(input);
+
+    await expect(test.orchestrator.process(job())).rejects.toEqual(
       new BalanceSyncOrchestratorError('BALANCE_SYNC_JOB_DISPOSITION_FAILED'),
     );
   });

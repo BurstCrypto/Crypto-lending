@@ -159,6 +159,7 @@ export interface BalanceConsumerArtifactSources {
   readonly cliModeSource: string;
   readonly runtimeSource: string;
   readonly compositionSource: string;
+  readonly balanceSyncOrchestratorSource: string;
   readonly balanceSyncDomainSource: string;
   readonly chainObservationPolicySource: string;
   readonly failClosedJobDispositionSource: string;
@@ -497,6 +498,7 @@ const BALANCE_CONSUMER_ARTIFACT_KEYS = Object.freeze([
   'cliModeSource',
   'runtimeSource',
   'compositionSource',
+  'balanceSyncOrchestratorSource',
   'balanceSyncDomainSource',
   'chainObservationPolicySource',
   'failClosedJobDispositionSource',
@@ -532,14 +534,15 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
   cliModeSource: '2b03494cb126e80f4f7af1176cb08cf13aef2d14d4bf3cb371faa6f06a7294a8',
   runtimeSource: '9eb119d5c4ed60708931bdc25b810d0f61e064d8521c3465ae4c85046480fd5b',
   compositionSource: 'a898bcebc7ea56cae7b51e71e27107cb76330a98c4659b5bf761fa4a2e988971',
+  balanceSyncOrchestratorSource: '818f824b7fd398a7cd86038de375c3723270ba86311a9cb0e1836eff44c6d72e',
   balanceSyncDomainSource: '67b1cf8449da0e7c60a95a43cc29425ddc7e33b176933901923538e804171921',
   chainObservationPolicySource: 'ef887514b86230d1516e5a8139c94dc2b2dde06c979440bc6eb3f4df90511533',
   failClosedJobDispositionSource:
-    '9e85fc07c1c26c9a42138e7aaf9e45f9cf660fc86660bce446e7f401d53ce9ea',
-  reviewedJobDispatcherSource: '91a9fcb2b5f8b2ec02bc19d3fbc592d80118731eedb0c0cd544de94f65c8a8e7',
+    'd49d752db7ca17513a67219af26261add92bf73433224dfd847a098f73baf833',
+  reviewedJobDispatcherSource: 'a3c122c2d96a25671d7ad4266dafa984880ccb90e133804ec9e3b257e1098418',
   infrastructureConfigSource: 'ca472922050bb95bd1b7bd94e0810674e7998d90287edc2be0fce1017b9b8898',
   pinnedQueueReceiptSource: '76543f1e4b4c446eb98b85ad52ea934d7e84f8f7fedcd82f6e516a7eb45a8c56',
-  sqsJobWorkerSource: 'da2de20e4313bd9e1057b330d61f571ecbcee679e1a7f3ab9d67ca32a70880da',
+  sqsJobWorkerSource: '6000c7706c8e7d0bd31c89c1a87f5c97cd84ee453cc9570eeb8660c332fbb277',
   sqsServiceSource: '2abb5d6592858be750263200fdd8b17a3ad15e0ee3ad5ca8fe14e36b5ac46d13',
   sqsModuleSource: 'dc958100bd372500a9428c28cc6219a4cb00db61314a63478368d0b0cf95221b',
   sqsTokensSource: REVIEWED_SQS_TOKENS_SOURCE_SHA256,
@@ -2049,6 +2052,7 @@ function hasExactBalanceConsumerNativeReceiptRedriveContract(
   const resiliencePolicy = observationPolicy.slice(observationPolicyStart, observationPolicyEnd);
 
   const composition = sources.compositionSource.replace(/\r\n/gu, '\n');
+  const orchestrator = sources.balanceSyncOrchestratorSource.replace(/\r\n/gu, '\n');
   const disposition = sources.failClosedJobDispositionSource.replace(/\r\n/gu, '\n');
   const dispatcher = sources.reviewedJobDispatcherSource.replace(/\r\n/gu, '\n');
   const applicationValidator = sources.applicationValidatorSource.replace(/\r\n/gu, '\n');
@@ -2056,6 +2060,13 @@ function hasExactBalanceConsumerNativeReceiptRedriveContract(
   const ingressEnd = dispatcher.indexOf('function parseHandlers(', ingressStart);
   if (ingressStart < 0 || ingressEnd <= ingressStart) return false;
   const ingress = dispatcher.slice(ingressStart, ingressEnd);
+  const genericDispatcherStart = dispatcher.indexOf('export class ReviewedJobDispatcher {');
+  const balanceDispatcherStart = dispatcher.indexOf('export class BalanceSyncJobDispatcher {');
+  if (genericDispatcherStart < 0 || balanceDispatcherStart <= genericDispatcherStart) {
+    return false;
+  }
+  const genericDispatcher = dispatcher.slice(genericDispatcherStart, balanceDispatcherStart);
+  const balanceDispatcher = dispatcher.slice(balanceDispatcherStart);
   const worker = sources.sqsJobWorkerSource.replace(/\r\n/gu, '\n');
 
   return (
@@ -2128,11 +2139,47 @@ function hasExactBalanceConsumerNativeReceiptRedriveContract(
     ) === 1 &&
     exactExecutableLineCount(
       disposition,
+      'const receiptRetryMinimumDelaySecondsByError = new WeakMap<object, number>();',
+    ) === 1 &&
+    exactExecutableLineCount(
+      disposition,
+      "const descriptor = Object.getOwnPropertyDescriptor(input, 'delaySeconds');",
+    ) === 1 &&
+    exactExecutableLineCount(
+      disposition,
+      'delaySeconds < BALANCE_SYNC_POLICY.retryBaseDelaySeconds ||',
+    ) === 1 &&
+    exactExecutableLineCount(
+      disposition,
+      'delaySeconds > BALANCE_SYNC_POLICY.retryMaximumDelaySeconds',
+    ) === 1 &&
+    exactExecutableLineCount(
+      disposition,
+      'return receiptRetryMinimumDelaySecondsByError.get(error as object);',
+    ) === 1 &&
+    exactExecutableLineCount(
+      disposition,
+      'receiptRetryMinimumDelaySecondsByError.set(error, minimumDelaySeconds);',
+    ) === 1 &&
+    exactExecutableLineCount(disposition, 'throw error;') === 1 &&
+    exactExecutableLineCount(
+      disposition,
       'throw new BalanceSyncJobDispositionNotApprovedError();',
-    ) === 2 &&
+    ) === 1 &&
+    !disposition.includes('export const receiptRetryMinimumDelaySecondsByError') &&
+    !disposition.includes('input.delaySeconds') &&
     !/(?:node:|@aws-sdk|\bfetch\s*\(|\bsendMessage\s*\(|\bdirectDeadLetter\s*\(|\bsendJob\s*\(|\bpublish(?:Batch)?\s*\()/u.test(
       disposition,
     ) &&
+    exactExecutableLineCount(
+      orchestrator,
+      'if (balanceSyncReceiptRetryMinimumDelaySeconds(error) !== undefined) throw error;',
+    ) === 1 &&
+    exactExecutableLineCount(
+      balanceDispatcher,
+      'if (balanceSyncReceiptRetryMinimumDelaySeconds(error) !== undefined) throw error;',
+    ) === 1 &&
+    !genericDispatcher.includes('balanceSyncReceiptRetryMinimumDelaySeconds') &&
     exactExecutableLineCount(
       worker,
       'const exhausted = message.receiveCount >= this.policy.maxReceiveCount;',
@@ -2140,6 +2187,12 @@ function hasExactBalanceConsumerNativeReceiptRedriveContract(
     exactExecutableLineCount(
       worker,
       'this.policy.retryBaseDelaySeconds * 2 ** (message.receiveCount - 1),',
+    ) === 1 &&
+    exactExecutableLineCount(worker, "this.queue === 'balance'") === 1 &&
+    exactExecutableLineCount(worker, '? balanceSyncReceiptRetryMinimumDelaySeconds(error)') === 1 &&
+    exactExecutableLineCount(
+      worker,
+      'Math.max(nativeRetryDelaySeconds, trustedMinimumDelaySeconds ?? 0),',
     ) === 1 &&
     exactExecutableLineCount(worker, 'await changeVisibilityWithDeadline(') === 1 &&
     !/\.(?:scheduleRetry|deadLetter|sendMessage|directDeadLetter)\s*\(/u.test(worker)
@@ -3580,6 +3633,13 @@ export function loadRepositoryProductionPreflightInput(
         resolve(
           repositoryRoot,
           'apps/api/src/blockchain-sync/application/balance-sync-consumer.composition.ts',
+        ),
+        'utf8',
+      ),
+      balanceSyncOrchestratorSource: readFileSync(
+        resolve(
+          repositoryRoot,
+          'apps/api/src/blockchain-sync/application/balance-sync-orchestrator.ts',
         ),
         'utf8',
       ),

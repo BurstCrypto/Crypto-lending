@@ -1,3 +1,4 @@
+import { balanceSyncReceiptRetryMinimumDelaySeconds } from '../../blockchain-sync/application/fail-closed-balance-sync-job.port';
 import {
   parseBalanceSyncJobEnvelope,
   type BalanceSyncJobEnvelope,
@@ -318,7 +319,8 @@ export class BalanceSyncJobDispatcher {
     const job = parseBalanceSyncConsumerJobEnvelope(value);
     try {
       await this.handler(job);
-    } catch {
+    } catch (error) {
+      if (balanceSyncReceiptRetryMinimumDelaySeconds(error) !== undefined) throw error;
       return fail('JOB_HANDLER_FAILED');
     }
   }

@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 
 import { Injectable } from '@nestjs/common';
 
+import { balanceSyncReceiptRetryMinimumDelaySeconds } from '../../blockchain-sync/application/fail-closed-balance-sync-job.port';
 import {
   createSafeLegacyCorrelationId,
   createSafeLogReference,
@@ -50,7 +51,10 @@ const MAX_VISIBILITY_REQUEST_MS = 5_000;
 class ReceiptOwnershipExpiredError extends Error {}
 
 class JobProcessingFailure extends Error {
-  constructor(readonly code: JobProcessingErrorCode) {
+  constructor(
+    readonly code: JobProcessingErrorCode,
+    readonly receiptRetryMinimumDelaySeconds?: number,
+  ) {
     super(code);
     this.name = 'JobProcessingFailure';
   }
@@ -417,11 +421,16 @@ export class SqsJobWorker {
               }
               throw new JobProcessingFailure('SQS_VISIBILITY_HEARTBEAT_FAILED');
             }
-            let processingFailed = false;
+            let handlerFailure: JobProcessingFailure | undefined;
             try {
               await handler(job);
-            } catch {
-              processingFailed = true;
+            } catch (error) {
+              handlerFailure = new JobProcessingFailure(
+                'JOB_HANDLER_FAILED',
+                this.queue === 'balance'
+                  ? balanceSyncReceiptRetryMinimumDelaySeconds(error)
+                  : undefined,
+              );
             }
             const heartbeatResult = await heartbeat.stop();
             if (
@@ -430,9 +439,7 @@ export class SqsJobWorker {
             ) {
               throw heartbeatResult.error;
             }
-            if (processingFailed) {
-              throw new JobProcessingFailure('JOB_HANDLER_FAILED');
-            }
+            if (handlerFailure) throw handlerFailure;
             if (heartbeatResult.status === 'failed') {
               throw new JobProcessingFailure('SQS_VISIBILITY_HEARTBEAT_FAILED');
             }
@@ -503,11 +510,17 @@ export class SqsJobWorker {
     }
 
     const exhausted = message.receiveCount >= this.policy.maxReceiveCount;
+    const trustedMinimumDelaySeconds =
+      error instanceof JobProcessingFailure ? error.receiptRetryMinimumDelaySeconds : undefined;
+    const nativeRetryDelaySeconds = Math.min(
+      this.policy.retryBaseDelaySeconds * 2 ** (message.receiveCount - 1),
+      this.policy.retryMaxDelaySeconds,
+    );
     const retryDelaySeconds = exhausted
       ? 0
       : Math.min(
-          this.policy.retryBaseDelaySeconds * 2 ** (message.receiveCount - 1),
           this.policy.retryMaxDelaySeconds,
+          Math.max(nativeRetryDelaySeconds, trustedMinimumDelaySeconds ?? 0),
         );
 
     try {

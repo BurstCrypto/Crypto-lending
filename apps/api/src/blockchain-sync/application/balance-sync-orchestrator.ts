@@ -22,6 +22,7 @@ import {
   type BalanceSyncPosition,
   type BalanceSyncSourcePoint,
 } from '../domain/balance-sync';
+import { balanceSyncReceiptRetryMinimumDelaySeconds } from './fail-closed-balance-sync-job.port';
 import type {
   BalanceIndexerReadRequest,
   BalanceIndexerRescanRequest,
@@ -477,7 +478,8 @@ export class BalanceSyncOrchestrator {
             failureCode,
           }),
         );
-      } catch {
+      } catch (error) {
+        if (balanceSyncReceiptRetryMinimumDelaySeconds(error) !== undefined) throw error;
         throw orchestratorError('BALANCE_SYNC_JOB_DISPOSITION_FAILED');
       }
       this.recordMetric({

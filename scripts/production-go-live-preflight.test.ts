@@ -138,6 +138,10 @@ const BALANCE_CONSUMER_ARTIFACTS = Object.freeze({
     ),
     'utf8',
   ),
+  balanceSyncOrchestratorSource: readFileSync(
+    resolve(__dirname, '../apps/api/src/blockchain-sync/application/balance-sync-orchestrator.ts'),
+    'utf8',
+  ),
   balanceSyncDomainSource: readFileSync(
     resolve(__dirname, '../apps/api/src/blockchain-sync/domain/balance-sync.ts'),
     'utf8',
@@ -1032,6 +1036,12 @@ test('balance-consumer inspection fails closed for drift in every reviewed artif
       'compositionSource',
       'const jobDisposition = new FailClosedBalanceSyncJobPort();',
       'const jobDisposition = dependencies.jobDisposition;',
+    ],
+    [
+      'trusted retry signal preservation',
+      'balanceSyncOrchestratorSource',
+      'if (balanceSyncReceiptRetryMinimumDelaySeconds(error) !== undefined) throw error;',
+      "throw orchestratorError('BALANCE_SYNC_JOB_DISPOSITION_FAILED');",
     ],
     [
       'dedicated infrastructure loader',

@@ -3,6 +3,10 @@ import {
   parseBalanceSyncJobEnvelope,
   type BalanceSyncJobPayload,
 } from '../../blockchain-sync/domain/balance-sync';
+import {
+  FailClosedBalanceSyncJobPort,
+  balanceSyncReceiptRetryMinimumDelaySeconds,
+} from '../../blockchain-sync/application/fail-closed-balance-sync-job.port';
 import { createJobEnvelope, type JobEnvelope } from '../outbox/job-envelope';
 import {
   BalanceSyncJobDispatcher,
@@ -106,6 +110,19 @@ function expectDispatchCode(work: () => unknown, code: string): void {
     expect((error as ReviewedJobDispatchError).code).toBe(code);
     expect(String(error)).not.toMatch(/secret|provider-private|database/u);
   }
+}
+
+async function trustedReceiptRetryError(delaySeconds: number): Promise<unknown> {
+  try {
+    await new FailClosedBalanceSyncJobPort().scheduleRetry({
+      envelope: parseBalanceSyncJobEnvelope(balanceJob()),
+      delaySeconds,
+      failureCode: 'RATE_LIMITED',
+    });
+  } catch (error) {
+    return error;
+  }
+  throw new Error('expected receipt disposition rejection');
 }
 
 describe('ReviewedJobDispatcher', () => {
@@ -298,5 +315,53 @@ describe('ReviewedJobDispatcher', () => {
       message: 'Reviewed job dispatch failed',
     });
     expect(configured['ledger.journal-committed']).not.toHaveBeenCalled();
+  });
+
+  it('preserves a trusted retry minimum only through the dedicated balance dispatcher', async () => {
+    const receiptDisposition = new FailClosedBalanceSyncJobPort();
+    const dispatcher = new BalanceSyncJobDispatcher((job) =>
+      receiptDisposition.scheduleRetry({
+        envelope: job,
+        delaySeconds: 30,
+        failureCode: 'RATE_LIMITED',
+      }),
+    );
+
+    let caught: unknown;
+    try {
+      await dispatcher.dispatch(balanceJob());
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(balanceSyncReceiptRetryMinimumDelaySeconds(caught)).toBe(30);
+  });
+
+  it('sanitizes arbitrary balance failures and trusted markers thrown by generic handlers', async () => {
+    const balanceDispatcher = new BalanceSyncJobDispatcher(async () => {
+      throw new Error('provider-private-secret');
+    });
+    await expect(balanceDispatcher.dispatch(balanceJob())).rejects.toMatchObject({
+      code: 'JOB_HANDLER_FAILED',
+      message: 'Reviewed job dispatch failed',
+    });
+
+    const marker = await trustedReceiptRetryError(30);
+    const configured = handlers();
+    configured['ledger.journal-committed'].mockRejectedValueOnce(marker);
+    const genericDispatcher = new ReviewedJobDispatcher(configured);
+    let genericError: unknown;
+    try {
+      await genericDispatcher.dispatch(ledgerJob());
+    } catch (error) {
+      genericError = error;
+    }
+
+    expect(genericError).not.toBe(marker);
+    expect(genericError).toMatchObject({
+      code: 'JOB_HANDLER_FAILED',
+      message: 'Reviewed job dispatch failed',
+    });
+    expect(balanceSyncReceiptRetryMinimumDelaySeconds(genericError)).toBeUndefined();
   });
 });

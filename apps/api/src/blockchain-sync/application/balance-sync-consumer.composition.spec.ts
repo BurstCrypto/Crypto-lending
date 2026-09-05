@@ -6,6 +6,7 @@ import type { SqsQueueReceiptTransport } from '../../infrastructure/sqs/sqs-queu
 import type { JobProcessingResult, ReceivedQueueMessage } from '../../infrastructure/sqs/sqs.types';
 import {
   BALANCE_SYNC_POLICY,
+  BalanceSyncIndexerFailure,
   createDeterministicBalanceSyncJobEnvelope,
 } from '../domain/balance-sync';
 import type { BalanceJsonRpcTransport } from '../infrastructure/rpc/balance-json-rpc';
@@ -59,6 +60,9 @@ function infrastructureConfig(
 
 function createHarness(
   configuredInfrastructure: BalanceConsumerInfrastructureConfig = infrastructureConfig(),
+  configuredClock: BalanceSyncClockPort = {
+    now: () => new Date('2026-09-04T12:00:00.000Z'),
+  },
 ): Readonly<{
   composition: ReturnType<typeof createBalanceSyncConsumerComposition>;
   ethereumExchange: jest.Mock;
@@ -88,7 +92,7 @@ function createHarness(
     replaceProvisionalAfterReorg: jest.fn(),
     preserveLastGoodAndMarkStale: jest.fn(),
   };
-  const clock: BalanceSyncClockPort = { now: () => new Date('2026-09-04T12:00:00.000Z') };
+  const clock = configuredClock;
   const metrics: BalanceSyncMetricsPort = { record: jest.fn(), alert: jest.fn() };
   const receive = jest.fn().mockResolvedValue([]);
   const deleteReceipt = jest.fn().mockResolvedValue(undefined);
@@ -337,6 +341,70 @@ describe('createBalanceSyncConsumerComposition', () => {
       },
     ]);
     expect(handler).toHaveBeenCalledTimes(BALANCE_SYNC_POLICY.maxAttempts);
+    expect(test.deleteReceipt).not.toHaveBeenCalled();
+    expect(test.sendMessage).not.toHaveBeenCalled();
+    expect(test.directDeadLetter).not.toHaveBeenCalled();
+  });
+
+  it('carries a validated provider rate-limit floor through the composed native receipt path', async () => {
+    const times = [
+      '2026-09-04T12:00:01.000Z',
+      '2026-09-04T12:00:02.000Z',
+      '2026-09-04T12:00:03.000Z',
+    ];
+    let clockIndex = 0;
+    const test = createHarness(infrastructureConfig(), {
+      now: () => new Date(times[Math.min(clockIndex++, times.length - 1)] ?? Number.NaN),
+    });
+    const job = createDeterministicBalanceSyncJobEnvelope(
+      {
+        schemaVersion: 1,
+        accountId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        walletId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+        networkId: ETHEREUM_MAINNET_BALANCE_NETWORK_ID,
+        requiredTier: 'PROVISIONAL',
+        cause: 'SCHEDULED',
+        attempt: 1,
+        rescanFromPosition: null,
+      },
+      {
+        id: 'balance-rate-limited-job-1',
+        occurredAt: '2026-09-04T12:00:00.000Z',
+        correlation: { correlationId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc' },
+      },
+    );
+    const message: ReceivedQueueMessage = {
+      messageId: 'balance-rate-limited-message-1',
+      receiptHandle: 'balance-rate-limited-receipt-1',
+      body: JSON.stringify(job),
+      receiveCount: 1,
+      receivedAtMonotonicMs: performance.now(),
+    };
+    test.receive.mockResolvedValueOnce([message]);
+    (test.checkpoints.load as jest.Mock).mockResolvedValue(null);
+    jest.spyOn(test.composition.indexer, 'readCurrent').mockRejectedValue(
+      new BalanceSyncIndexerFailure('RATE_LIMITED', {
+        retryAfterSeconds: 30,
+      }),
+    );
+
+    const result = await test.composition.queueWorker.processOne((candidate) =>
+      test.composition.dispatcher.dispatch(candidate),
+    );
+
+    expect(result).toMatchObject({
+      status: 'retry-scheduled',
+      errorCode: 'JOB_HANDLER_FAILED',
+      receiveCount: 1,
+      retryDelaySeconds: 30,
+    });
+    expect(test.changeVisibility).toHaveBeenCalledWith(
+      message,
+      30,
+      infrastructureConfig().sqs.balanceQueueUrl,
+      expect.any(AbortSignal),
+    );
+    expect(test.checkpoints.preserveLastGoodAndMarkStale).toHaveBeenCalledTimes(1);
     expect(test.deleteReceipt).not.toHaveBeenCalled();
     expect(test.sendMessage).not.toHaveBeenCalled();
     expect(test.directDeadLetter).not.toHaveBeenCalled();
