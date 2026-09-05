@@ -7,6 +7,7 @@ import type { PostgresService } from '../../../infrastructure/database/postgres.
 import {
   MAX_ACTIVE_WALLET_REGISTRATIONS_PER_ACCOUNT,
   type BeginWalletOwnershipChallengeRequest,
+  type CompleteWalletRegistrationRequest,
   type WalletRegistrationRepositoryPort,
 } from '../../application/ports/wallet-registration-repository.port';
 import { WalletRegistrationRateLimitedError } from '../../application/wallet-registration.errors';
@@ -90,6 +91,24 @@ function beginRequest(): BeginWalletOwnershipChallengeRequest {
   };
 }
 
+function completeRequest(): CompleteWalletRegistrationRequest {
+  const encrypted = beginRequest().challengePayload;
+  return {
+    challengeId: CHALLENGE_ID,
+    accountId: ACCOUNT_ID,
+    walletId: WALLET_ID,
+    encryptedAddress: encrypted,
+    encryptedMetadata: encrypted,
+    correlationId: CORRELATION_ID,
+  };
+}
+
+function revokedProxy(): object {
+  const { proxy, revoke } = Proxy.revocable({}, {});
+  revoke();
+  return proxy;
+}
+
 function repositoryWith(query: jest.Mock): WalletRegistrationRepositoryPort {
   return new PostgresWalletRegistrationRepository({ query } as unknown as PostgresService);
 }
@@ -146,7 +165,7 @@ describe('PostgresWalletRegistrationRepository', () => {
       }),
     ]);
     expect(query).toHaveBeenCalledWith(
-      expect.stringContaining('list_active_wallet_registrations_rotatable'),
+      expect.stringMatching(/list_active_wallet_registrations_rotatable[\s\S]+LIMIT 33/u),
       [ACCOUNT_ID],
     );
 
@@ -181,7 +200,7 @@ describe('PostgresWalletRegistrationRepository', () => {
     await expect(repository.revokeWallet(request)).resolves.toEqual({ status: 'revoked' });
     await expect(repository.revokeWallet(request)).resolves.toEqual({ status: 'unchanged' });
     expect(query.mock.calls[0]).toEqual([
-      expect.stringContaining('revoke_wallet_registration('),
+      expect.stringMatching(/revoke_wallet_registration\([\s\S]+AS revoked\s+LIMIT 2/u),
       [ACCOUNT_ID, WALLET_ID, CORRELATION_ID],
     ]);
     await expect(repository.revokeWallet(request)).rejects.toBeInstanceOf(
@@ -201,7 +220,7 @@ describe('PostgresWalletRegistrationRepository', () => {
       expiresAt: EXPIRES,
     });
     const [sql, parameters] = query.mock.calls[0] as [string, unknown[]];
-    expect(sql).toContain('begin_wallet_ownership_challenge_rotatable(');
+    expect(sql).toMatch(/begin_wallet_ownership_challenge_rotatable\([\s\S]+AS begun\s+LIMIT 2/u);
     expect(parameters).toHaveLength(25);
     expect(parameters).toContain('eip155');
     expect(parameters).toContain('11155111');
@@ -209,6 +228,38 @@ describe('PostgresWalletRegistrationRepository', () => {
     expect(parameters.filter(Buffer.isBuffer)).toHaveLength(7);
     expect(parameters.at(-2)).toEqual([1]);
     expect(parameters.at(-1)).toEqual([request.addressDigest.value]);
+  });
+
+  it('rejects ambiguous or mismatched challenge creation results without leaking identifiers', async () => {
+    const request = beginRequest();
+    const otherChallengeId = randomUUID();
+    const ambiguous = jest
+      .fn()
+      .mockResolvedValue(result([{ challenge_id: CHALLENGE_ID, expires_at: EXPIRES }]))
+      .mockResolvedValueOnce(
+        result([
+          { challenge_id: CHALLENGE_ID, expires_at: EXPIRES },
+          { challenge_id: CHALLENGE_ID, expires_at: EXPIRES },
+        ]),
+      );
+    await expect(repositoryWith(ambiguous).beginChallenge(request)).rejects.toBeInstanceOf(
+      WalletRegistrationPersistenceError,
+    );
+
+    const mismatched = jest
+      .fn()
+      .mockResolvedValue(result([{ challenge_id: otherChallengeId, expires_at: EXPIRES }]));
+    let thrown: unknown;
+    try {
+      await repositoryWith(mismatched).beginChallenge(request);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toMatchObject({
+      name: 'WalletRegistrationPersistenceError',
+      message: 'Wallet registration persistence operation failed',
+    });
+    expect(String(thrown)).not.toContain(otherChallengeId);
   });
 
   it('restores only complete READY rows and passes the correlation to expiry preparation', async () => {
@@ -278,7 +329,6 @@ describe('PostgresWalletRegistrationRepository', () => {
   });
 
   it('uses only guarded completion and maps a revocation tombstone to rejection state', async () => {
-    const encrypted = beginRequest().challengePayload;
     const query = jest.fn().mockResolvedValue(
       result([
         {
@@ -290,20 +340,72 @@ describe('PostgresWalletRegistrationRepository', () => {
     );
     const repository = repositoryWith(query);
 
-    await expect(
-      repository.completeRegistration({
-        challengeId: CHALLENGE_ID,
-        accountId: ACCOUNT_ID,
-        walletId: WALLET_ID,
-        encryptedAddress: encrypted,
-        encryptedMetadata: encrypted,
-        correlationId: CORRELATION_ID,
-      }),
-    ).resolves.toEqual({ status: 'revoked' });
+    await expect(repository.completeRegistration(completeRequest())).resolves.toEqual({
+      status: 'revoked',
+    });
 
     const [sql] = query.mock.calls[0] as [string];
-    expect(sql).toContain('FROM complete_wallet_registration_rotatable(');
+    expect(sql).toMatch(/FROM complete_wallet_registration_rotatable\([\s\S]+LIMIT 2/u);
     expect(sql).not.toContain('FROM complete_wallet_registration(');
+  });
+
+  it('binds a newly registered wallet result to the requested wallet identifier', async () => {
+    const otherWalletId = randomUUID();
+    const registeredAt = new Date('2026-08-22T17:00:01.000Z');
+    const mismatched = jest.fn().mockResolvedValue(
+      result([
+        {
+          registration_outcome: 'REGISTERED',
+          wallet_id: otherWalletId,
+          registered_at: registeredAt,
+        },
+      ]),
+    );
+    let thrown: unknown;
+    try {
+      await repositoryWith(mismatched).completeRegistration(completeRequest());
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toMatchObject({
+      name: 'WalletRegistrationPersistenceError',
+      message: 'Wallet registration persistence operation failed',
+    });
+    expect(String(thrown)).not.toContain(otherWalletId);
+
+    const existingWalletId = randomUUID();
+    const alreadyRegistered = jest.fn().mockResolvedValue(
+      result([
+        {
+          registration_outcome: 'ALREADY_REGISTERED',
+          wallet_id: existingWalletId,
+          registered_at: registeredAt,
+        },
+      ]),
+    );
+    await expect(
+      repositoryWith(alreadyRegistered).completeRegistration(completeRequest()),
+    ).resolves.toEqual({
+      status: 'already_registered',
+      walletId: existingWalletId,
+      registeredAt,
+    });
+  });
+
+  it('bounds challenge rejection results before mapping an outcome', async () => {
+    const query = jest.fn().mockResolvedValue(result([{ rejection_outcome: 'REJECTED' }]));
+    await expect(
+      repositoryWith(query).rejectChallenge({
+        challengeId: CHALLENGE_ID,
+        accountId: ACCOUNT_ID,
+        reason: 'SIGNATURE_INVALID',
+        correlationId: CORRELATION_ID,
+      }),
+    ).resolves.toEqual({ status: 'rejected' });
+    expect(query.mock.calls[0]).toEqual([
+      expect.stringMatching(/reject_wallet_ownership_challenge\([\s\S]+LIMIT 2/u),
+      [CHALLENGE_ID, ACCOUNT_ID, 'SIGNATURE_INVALID', CORRELATION_ID],
+    ]);
   });
 
   it('rejects metadata leaks on non-ready outcomes and forged completion results', async () => {
@@ -348,6 +450,28 @@ describe('PostgresWalletRegistrationRepository', () => {
     const query = jest.fn().mockRejectedValue({ code: '54000' });
     await expect(repositoryWith(query).beginChallenge(beginRequest())).rejects.toEqual(
       new WalletRegistrationRateLimitedError(60),
+    );
+  });
+
+  it.each([
+    Object.create({ code: '54000' }) as object,
+    Object.defineProperty({}, 'code', {
+      configurable: true,
+      get: () => {
+        throw new Error('sensitive getter detail');
+      },
+    }),
+  ])('sanitizes hostile or inherited database error-code shapes', async (databaseError) => {
+    const query = jest.fn().mockRejectedValue(databaseError);
+    await expect(repositoryWith(query).beginChallenge(beginRequest())).rejects.toEqual(
+      new WalletRegistrationPersistenceError(),
+    );
+  });
+
+  it('sanitizes a revoked database-error proxy', async () => {
+    const query = jest.fn().mockRejectedValue(revokedProxy());
+    await expect(repositoryWith(query).beginChallenge(beginRequest())).rejects.toEqual(
+      new WalletRegistrationPersistenceError(),
     );
   });
 

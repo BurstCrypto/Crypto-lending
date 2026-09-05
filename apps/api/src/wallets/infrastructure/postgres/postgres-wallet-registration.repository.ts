@@ -36,6 +36,7 @@ import {
 } from '../crypto/wallet-registration-crypto';
 
 const LOWER_HEX_DIGEST = /^[0-9a-f]{64}$/u;
+const ACTIVE_WALLET_RESULT_LIMIT = MAX_ACTIVE_WALLET_REGISTRATIONS_PER_ACCOUNT + 1;
 
 interface BeginRow extends QueryResultRow {
   challenge_id: string;
@@ -111,6 +112,7 @@ export class WalletRegistrationPersistenceError extends Error {
 }
 
 function oneRow<Row extends QueryResultRow>(rows: readonly Row[]): Row {
+  if (!Array.isArray(rows)) throw new WalletRegistrationPersistenceError();
   const row = rows[0];
   if (!row || rows.length !== 1) throw new WalletRegistrationPersistenceError();
   return row;
@@ -293,7 +295,13 @@ function rejectionReason(value: WalletChallengeRejectionReason): WalletChallenge
 }
 
 function isPendingLimit(error: unknown): boolean {
-  return typeof error === 'object' && error !== null && 'code' in error && error.code === '54000';
+  try {
+    if (typeof error !== 'object' || error === null) return false;
+    const descriptor = Object.getOwnPropertyDescriptor(error, 'code');
+    return descriptor !== undefined && 'value' in descriptor && descriptor.value === '54000';
+  } catch {
+    return false;
+  }
 }
 
 @Injectable()
@@ -307,10 +315,14 @@ export class PostgresWalletRegistrationRepository implements WalletRegistrationR
       const accountId = parseAccountId(request.accountId);
       const result = await this.postgres.query<ActiveWalletRow>(
         `SELECT active_wallet.*
-         FROM list_active_wallet_registrations_rotatable($1::uuid) AS active_wallet`,
+         FROM list_active_wallet_registrations_rotatable($1::uuid) AS active_wallet
+         LIMIT ${ACTIVE_WALLET_RESULT_LIMIT}`,
         [accountId],
       );
-      if (result.rows.length > MAX_ACTIVE_WALLET_REGISTRATIONS_PER_ACCOUNT) {
+      if (
+        !Array.isArray(result.rows) ||
+        result.rows.length > MAX_ACTIVE_WALLET_REGISTRATIONS_PER_ACCOUNT
+      ) {
         throw new WalletRegistrationPersistenceError();
       }
 
@@ -359,8 +371,7 @@ export class PostgresWalletRegistrationRepository implements WalletRegistrationR
           });
         }),
       );
-    } catch (error) {
-      if (error instanceof WalletRegistrationPersistenceError) throw error;
+    } catch {
       throw new WalletRegistrationPersistenceError();
     }
   }
@@ -369,19 +380,22 @@ export class PostgresWalletRegistrationRepository implements WalletRegistrationR
     request: RevokeWalletRegistrationRequest,
   ): Promise<RevokeWalletRegistrationResult> {
     try {
+      const accountId = parseAccountId(request.accountId);
+      const walletId = uuid(request.walletId);
+      const correlationId = uuid(request.correlationId);
       const result = await this.postgres.query<RevokeRow>(
         `SELECT revoked.revocation_outcome
          FROM revoke_wallet_registration(
            $1::uuid, $2::uuid, $3::uuid
-         ) AS revoked`,
-        [parseAccountId(request.accountId), uuid(request.walletId), uuid(request.correlationId)],
+         ) AS revoked
+         LIMIT 2`,
+        [accountId, walletId, correlationId],
       );
       const outcome = oneRow(result.rows).revocation_outcome;
       if (outcome === 'REVOKED') return Object.freeze({ status: 'revoked' });
       if (outcome === 'UNCHANGED') return Object.freeze({ status: 'unchanged' });
       throw new WalletRegistrationPersistenceError();
-    } catch (error) {
-      if (error instanceof WalletRegistrationPersistenceError) throw error;
+    } catch {
       throw new WalletRegistrationPersistenceError();
     }
   }
@@ -390,6 +404,7 @@ export class PostgresWalletRegistrationRepository implements WalletRegistrationR
     request: BeginWalletOwnershipChallengeRequest,
   ): Promise<BegunWalletOwnershipChallenge> {
     try {
+      const challengeId = parseWalletChallengeId(request.challengeId);
       const [namespace, reference] = chainParts(request.chainId);
       const payload = sealedParams(request.challengePayload);
       const identityAliases = identityDigestParams(request);
@@ -403,9 +418,10 @@ export class PostgresWalletRegistrationRepository implements WalletRegistrationR
            $17::smallint, $18::bytea, $19::smallint, $20::bytea,
            $21::timestamptz, $22::timestamptz, $23::uuid,
            $24::smallint[], $25::text[]
-         ) AS begun`,
+         ) AS begun
+         LIMIT 2`,
         [
-          parseWalletChallengeId(request.challengeId),
+          challengeId,
           parseAccountId(request.accountId),
           proofScheme(request.proofScheme),
           namespace,
@@ -430,12 +446,15 @@ export class PostgresWalletRegistrationRepository implements WalletRegistrationR
         ],
       );
       const row = oneRow(result.rows);
+      const returnedChallengeId = parseWalletChallengeId(row.challenge_id);
+      if (returnedChallengeId !== challengeId) {
+        throw new WalletRegistrationPersistenceError();
+      }
       return Object.freeze({
-        challengeId: parseWalletChallengeId(row.challenge_id),
+        challengeId: returnedChallengeId,
         expiresAt: finiteDate(row.expires_at),
       });
     } catch (error) {
-      if (error instanceof WalletRegistrationPersistenceError) throw error;
       if (isPendingLimit(error)) throw new WalletRegistrationRateLimitedError(60);
       throw new WalletRegistrationPersistenceError();
     }
@@ -512,8 +531,7 @@ export class PostgresWalletRegistrationRepository implements WalletRegistrationR
       if (row.prepare_outcome === 'INVALID') return Object.freeze({ status: 'invalid' });
       if (row.prepare_outcome === 'REPLAYED') return Object.freeze({ status: 'replayed' });
       throw new WalletRegistrationPersistenceError();
-    } catch (error) {
-      if (error instanceof WalletRegistrationPersistenceError) throw error;
+    } catch {
       throw new WalletRegistrationPersistenceError();
     }
   }
@@ -522,17 +540,16 @@ export class PostgresWalletRegistrationRepository implements WalletRegistrationR
     request: RejectWalletOwnershipChallengeRequest,
   ): Promise<RejectWalletOwnershipChallengeResult> {
     try {
+      const challengeId = parseWalletChallengeId(request.challengeId);
+      const accountId = parseAccountId(request.accountId);
+      const correlationId = uuid(request.correlationId);
       const result = await this.postgres.query<RejectRow>(
         `SELECT rejected.rejection_outcome
          FROM reject_wallet_ownership_challenge(
            $1::uuid, $2::uuid, $3::text, $4::uuid
-         ) AS rejected`,
-        [
-          parseWalletChallengeId(request.challengeId),
-          parseAccountId(request.accountId),
-          rejectionReason(request.reason),
-          uuid(request.correlationId),
-        ],
+         ) AS rejected
+         LIMIT 2`,
+        [challengeId, accountId, rejectionReason(request.reason), correlationId],
       );
       const outcome = oneRow(result.rows).rejection_outcome;
       if (outcome === 'REJECTED') return Object.freeze({ status: 'rejected' });
@@ -540,8 +557,7 @@ export class PostgresWalletRegistrationRepository implements WalletRegistrationR
       if (outcome === 'INVALID') return Object.freeze({ status: 'invalid' });
       if (outcome === 'REPLAYED') return Object.freeze({ status: 'replayed' });
       throw new WalletRegistrationPersistenceError();
-    } catch (error) {
-      if (error instanceof WalletRegistrationPersistenceError) throw error;
+    } catch {
       throw new WalletRegistrationPersistenceError();
     }
   }
@@ -550,6 +566,10 @@ export class PostgresWalletRegistrationRepository implements WalletRegistrationR
     request: CompleteWalletRegistrationRequest,
   ): Promise<CompleteWalletRegistrationResult> {
     try {
+      const challengeId = parseWalletChallengeId(request.challengeId);
+      const accountId = parseAccountId(request.accountId);
+      const requestedWalletId = uuid(request.walletId);
+      const correlationId = uuid(request.correlationId);
       const address = sealedParams(request.encryptedAddress);
       const metadata = sealedParams(request.encryptedMetadata);
       const result = await this.postgres.query<CompleteRow>(
@@ -561,24 +581,22 @@ export class PostgresWalletRegistrationRepository implements WalletRegistrationR
            $4::smallint, $5::bytea, $6::bytea, $7::bytea,
            $8::smallint, $9::bytea, $10::bytea, $11::bytea,
            $12::uuid
-         ) AS completed`,
-        [
-          parseWalletChallengeId(request.challengeId),
-          parseAccountId(request.accountId),
-          uuid(request.walletId),
-          ...address,
-          ...metadata,
-          uuid(request.correlationId),
-        ],
+         ) AS completed
+         LIMIT 2`,
+        [challengeId, accountId, requestedWalletId, ...address, ...metadata, correlationId],
       );
       const row = oneRow(result.rows);
       if (
         row.registration_outcome === 'REGISTERED' ||
         row.registration_outcome === 'ALREADY_REGISTERED'
       ) {
+        const walletId = uuid(row.wallet_id);
+        if (row.registration_outcome === 'REGISTERED' && walletId !== requestedWalletId) {
+          throw new WalletRegistrationPersistenceError();
+        }
         return Object.freeze({
           status: row.registration_outcome === 'REGISTERED' ? 'registered' : 'already_registered',
-          walletId: uuid(row.wallet_id),
+          walletId,
           registeredAt: finiteDate(row.registered_at),
         });
       }
@@ -593,8 +611,7 @@ export class PostgresWalletRegistrationRepository implements WalletRegistrationR
       if (row.registration_outcome === 'INVALID') return Object.freeze({ status: 'invalid' });
       if (row.registration_outcome === 'REPLAYED') return Object.freeze({ status: 'replayed' });
       throw new WalletRegistrationPersistenceError();
-    } catch (error) {
-      if (error instanceof WalletRegistrationPersistenceError) throw error;
+    } catch {
       throw new WalletRegistrationPersistenceError();
     }
   }
