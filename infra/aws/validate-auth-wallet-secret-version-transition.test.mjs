@@ -347,6 +347,11 @@ function assertAccepted(record, mode) {
   assert.equal(report.productionAuthorityValidated, false);
   assert.equal(isProductionAuthorizedAuthWalletTransitionReport(report), false);
   assert.equal(report.plan.executionAllowed, false);
+  assert.equal(
+    report.predecessorTransitionSha256,
+    record.content.predecessor.transitionSha256,
+    'accepted reports must expose the exact signed predecessor transition',
+  );
   for (const key of [
     'externalCallsMade',
     'awsCallsMade',
@@ -386,10 +391,31 @@ test('keeps the checked-in example inert, unsigned, and zero-call', () => {
 test('accepts signed create and no-op adoption structures only through the unbranded test seam', () => {
   const createReport = assertAccepted(recordFor('create'), 'create');
   assert.equal(createReport.currentStateSha256, 'NO_DEPLOYED_STATE');
+  assert.equal(createReport.predecessorTransitionSha256, 'NONE');
   assert.match(createReport.targetStateSha256, /^[a-f0-9]{64}$/u);
   const adoption = recordFor('adopt');
   const adoptReport = assertAccepted(adoption, 'adopt');
   assert.equal(adoptReport.currentStateSha256, adoptReport.targetStateSha256);
+  assert.equal(adoptReport.predecessorTransitionSha256, 'NONE');
+});
+
+test('binds the reported predecessor transition to the signed record', () => {
+  const record = recordFor('transition');
+  const signed = signRecord(record);
+  const report = verify(signed, 'transition');
+  assert.equal(report.ok, true, report.errors.join('\n'));
+  assert.equal(report.predecessorTransitionSha256, record.content.predecessor.transitionSha256);
+
+  signed.content.predecessor.transitionSha256 = 'd'.repeat(64);
+  const tampered = verifyAuthWalletSecretVersionTransitionWithTestRegistry(
+    signed,
+    optionsFor(signed, 'transition'),
+    testRegistry,
+  );
+  assert.equal(tampered.ok, false);
+  assert.equal(tampered.signatureValidated, false);
+  assert.equal(tampered.predecessorTransitionSha256, undefined);
+  assert.match(tampered.errors.join('\n'), /production authority registry/u);
 });
 
 test('accepts every exact auth and wallet inner-purpose operation', () => {

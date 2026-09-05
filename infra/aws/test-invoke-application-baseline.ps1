@@ -12,6 +12,7 @@ $guardrailTemplatePath = Join-Path $PSScriptRoot 'account-guardrails.yaml'
 $recordValidatorPath = Join-Path $PSScriptRoot 'validate-billing-control-record.mjs'
 $acmDnsRecordValidatorPath = Join-Path $PSScriptRoot 'validate-acm-dns-control-record.mjs'
 $fixedSlotCredentialTransitionValidatorPath = Join-Path $PSScriptRoot 'validate-fixed-slot-credential-transition.mjs'
+$authWalletTransitionValidatorPath = Join-Path $PSScriptRoot 'validate-auth-wallet-secret-version-transition.mjs'
 $temporaryRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("kan34-application-guard-test-" + [guid]::NewGuid().ToString('N'))
 $fakeAwsDirectory = Join-Path $temporaryRoot 'fake-aws'
 $markerPath = Join-Path $temporaryRoot 'aws-calls.log'
@@ -37,6 +38,9 @@ $incompleteAcmDnsRecordPath = Join-Path $temporaryRoot 'incomplete-acm-dns-boots
 $localTransitionDirectory = [System.IO.Path]::GetFullPath((Join-Path (Split-Path -Parent $PSScriptRoot) '..\.local-validation'))
 $approvedTransitionRecordPath = Join-Path $localTransitionDirectory ("invoke-application-$([guid]::NewGuid().ToString('N')).credential-transition.local.json")
 $approvedRotationRecordPath = Join-Path $localTransitionDirectory ("invoke-application-$([guid]::NewGuid().ToString('N')).credential-transition.local.json")
+$approvedAuthWalletAdoptionRecordPath = Join-Path $localTransitionDirectory ("invoke-application-$([guid]::NewGuid().ToString('N')).auth-wallet-transition.local.json")
+$approvedAuthWalletTransitionRecordPath = Join-Path $localTransitionDirectory ("invoke-application-$([guid]::NewGuid().ToString('N')).auth-wallet-transition.local.json")
+$authWalletValidatorMarkerPath = Join-Path $temporaryRoot 'auth-wallet-validator-calls.log'
 $immutableChangeSetId = 'arn:aws:cloudformation:us-west-2:111122223333:changeSet/kan34-application-20260819/11111111-2222-3333-4444-555555555555'
 $immutableStackId = 'arn:aws:cloudformation:us-west-2:111122223333:stack/crypto-lending-application-test/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
 $originalEnvironment = @{
@@ -55,6 +59,17 @@ $originalEnvironment = @{
     FAKE_AWS_ARTIFACT_OBJECT_SOURCE = $env:FAKE_AWS_ARTIFACT_OBJECT_SOURCE
     FAKE_AWS_OBSERVABILITY_ARTIFACT_OBJECT_SOURCE = $env:FAKE_AWS_OBSERVABILITY_ARTIFACT_OBJECT_SOURCE
     FAKE_AWS_MANAGED_PREFIX_LIST_RESPONSE = $env:FAKE_AWS_MANAGED_PREFIX_LIST_RESPONSE
+    FAKE_REAL_NODE = $env:FAKE_REAL_NODE
+    FAKE_AUTH_WALLET_VALIDATOR_MARKER = $env:FAKE_AUTH_WALLET_VALIDATOR_MARKER
+    FAKE_AUTH_WALLET_VALIDATOR_VARIANT = $env:FAKE_AUTH_WALLET_VALIDATOR_VARIANT
+    FAKE_AUTH_WALLET_CANONICAL_SHA256 = $env:FAKE_AUTH_WALLET_CANONICAL_SHA256
+    FAKE_AUTH_WALLET_CURRENT_STATE_SHA256 = $env:FAKE_AUTH_WALLET_CURRENT_STATE_SHA256
+    FAKE_AUTH_WALLET_TARGET_STATE_SHA256 = $env:FAKE_AUTH_WALLET_TARGET_STATE_SHA256
+    FAKE_AUTH_WALLET_PREDECESSOR_TRANSITION_SHA256 = $env:FAKE_AUTH_WALLET_PREDECESSOR_TRANSITION_SHA256
+    FAKE_AUTH_WALLET_AUTHORITY_REGISTRY_SHA256 = $env:FAKE_AUTH_WALLET_AUTHORITY_REGISTRY_SHA256
+    FAKE_AUTH_WALLET_OPERATION = $env:FAKE_AUTH_WALLET_OPERATION
+    FAKE_AUTH_WALLET_FIELD_NAME = $env:FAKE_AUTH_WALLET_FIELD_NAME
+    FAKE_AUTH_WALLET_INITIAL_VALIDATION_AT = $env:FAKE_AUTH_WALLET_INITIAL_VALIDATION_AT
 }
 $passed = 0
 
@@ -93,6 +108,42 @@ function Clear-AwsMarker {
     if (Test-Path -LiteralPath $markerPath) {
         Remove-Item -LiteralPath $markerPath -Force
     }
+}
+
+function Clear-AuthWalletValidatorMarker {
+    if (Test-Path -LiteralPath $authWalletValidatorMarkerPath) {
+        Remove-Item -LiteralPath $authWalletValidatorMarkerPath -Force
+    }
+}
+
+function Set-FakeAuthWalletValidationFixture {
+    param(
+        [string] $CanonicalSha256,
+        [string] $CurrentStateSha256,
+        [string] $TargetStateSha256,
+        [string] $PredecessorTransitionSha256,
+        [string] $AuthorityRegistrySha256,
+        [string] $Operation,
+        [string] $FieldName,
+        [string] $InitialValidationAt,
+        [string] $Variant = ''
+    )
+
+    $env:FAKE_AUTH_WALLET_CANONICAL_SHA256 = $CanonicalSha256
+    $env:FAKE_AUTH_WALLET_CURRENT_STATE_SHA256 = $CurrentStateSha256
+    $env:FAKE_AUTH_WALLET_TARGET_STATE_SHA256 = $TargetStateSha256
+    $env:FAKE_AUTH_WALLET_PREDECESSOR_TRANSITION_SHA256 = if ([string]::IsNullOrWhiteSpace($PredecessorTransitionSha256)) {
+        if ($Operation -ceq 'ADOPT_EXISTING_BINDING') { 'NONE' } else { 'd' * 64 }
+    }
+    else {
+        $PredecessorTransitionSha256
+    }
+    $env:FAKE_AUTH_WALLET_AUTHORITY_REGISTRY_SHA256 = $AuthorityRegistrySha256
+    $env:FAKE_AUTH_WALLET_OPERATION = $Operation
+    $env:FAKE_AUTH_WALLET_FIELD_NAME = $FieldName
+    $env:FAKE_AUTH_WALLET_INITIAL_VALIDATION_AT = $InitialValidationAt
+    $env:FAKE_AUTH_WALLET_VALIDATOR_VARIANT = $Variant
+    Clear-AuthWalletValidatorMarker
 }
 
 function Get-AwsMarkerText {
@@ -483,15 +534,16 @@ function Write-ApplicationStackResponse {
 if (-not (Test-Path -LiteralPath $guardPath -PathType Leaf)) {
     throw "Application guard under test was not found: $guardPath"
 }
-foreach ($requiredFile in @($applicationTemplatePath, $workloadBoundariesTemplatePath, $observabilityTemplatePath, $guardrailTemplatePath, $recordValidatorPath, $acmDnsRecordValidatorPath, $fixedSlotCredentialTransitionValidatorPath)) {
+foreach ($requiredFile in @($applicationTemplatePath, $workloadBoundariesTemplatePath, $observabilityTemplatePath, $guardrailTemplatePath, $recordValidatorPath, $acmDnsRecordValidatorPath, $fixedSlotCredentialTransitionValidatorPath, $authWalletTransitionValidatorPath)) {
     if (-not (Test-Path -LiteralPath $requiredFile -PathType Leaf)) {
         throw "Required focused-test input was not found: $requiredFile"
     }
 }
 
+$realNodeCommand = Get-Command node -ErrorAction Stop
 New-Item -ItemType Directory -Path $fakeAwsDirectory -Force | Out-Null
 New-Item -ItemType Directory -Path $localTransitionDirectory -Force | Out-Null
-$fakeAwsScriptPath = Join-Path $fakeAwsDirectory 'fake-aws.ps1'
+$fakeAwsScriptPath = Join-Path $fakeAwsDirectory 'aws.ps1'
 @'
 param(
     [Parameter(ValueFromRemainingArguments = $true)]
@@ -499,21 +551,26 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+if ($AwsArguments.Count -eq 1 -and $AwsArguments[0] -match '\s--') {
+    $AwsArguments = @($AwsArguments[0] -split '\s+')
+}
 Add-Content -LiteralPath $env:FAKE_AWS_MARKER -Value ($AwsArguments -join ' ') -Encoding Ascii
 
 function Write-ResponseFile {
     param([string] $Path)
-    [Console]::Out.Write([System.IO.File]::ReadAllText($Path))
-    exit 0
+    Write-Output -NoEnumerate ([System.IO.File]::ReadAllText($Path))
 }
 
 if ($AwsArguments.Count -lt 2) {
-    exit 98
+    $global:LASTEXITCODE = 98
+    return
 }
 $service = $AwsArguments[0]
 $operation = $AwsArguments[1]
 if ($service -eq 'sts' -and $operation -eq 'get-caller-identity') {
     Write-ResponseFile -Path $env:FAKE_AWS_IDENTITY_RESPONSE
+    $global:LASTEXITCODE = 0
+    return
 }
 if ($service -eq 'cloudformation' -and $operation -eq 'describe-stacks') {
     $stackNameIndex = [array]::IndexOf($AwsArguments, '--stack-name')
@@ -534,16 +591,26 @@ if ($service -eq 'cloudformation' -and $operation -eq 'describe-stacks') {
             (Test-Path -LiteralPath $afterFirstResponse -PathType Leaf)
         ) {
             Write-ResponseFile -Path $afterFirstResponse
+            $global:LASTEXITCODE = 0
+            return
         }
         Write-ResponseFile -Path $env:FAKE_AWS_APPLICATION_STACK_RESPONSE
+        $global:LASTEXITCODE = 0
+        return
     }
     Write-ResponseFile -Path $env:FAKE_AWS_GUARDRAIL_STACK_RESPONSE
+    $global:LASTEXITCODE = 0
+    return
 }
 if ($service -eq 's3api' -and $operation -eq 'get-bucket-location') {
     Write-ResponseFile -Path $env:FAKE_AWS_BUCKET_LOCATION_RESPONSE
+    $global:LASTEXITCODE = 0
+    return
 }
 if ($service -eq 's3api' -and $operation -eq 'get-bucket-versioning') {
     Write-ResponseFile -Path $env:FAKE_AWS_BUCKET_VERSIONING_RESPONSE
+    $global:LASTEXITCODE = 0
+    return
 }
 if ($service -eq 's3api' -and $operation -eq 'get-object') {
     $destination = $AwsArguments[-1]
@@ -556,13 +623,18 @@ if ($service -eq 's3api' -and $operation -eq 'get-object') {
     }
     [System.IO.File]::Copy($source, $destination, $true)
     Write-ResponseFile -Path $env:FAKE_AWS_ARTIFACT_OBJECT_RESPONSE
+    $global:LASTEXITCODE = 0
+    return
 }
 if ($service -eq 'ec2' -and $operation -eq 'describe-managed-prefix-lists') {
     Write-ResponseFile -Path $env:FAKE_AWS_MANAGED_PREFIX_LIST_RESPONSE
+    $global:LASTEXITCODE = 0
+    return
 }
 if ($service -eq 'cloudformation' -and $operation -eq 'create-change-set') {
-    [Console]::Out.Write('{"Id":"arn:aws:cloudformation:us-west-2:111122223333:changeSet/kan34-application-20260819/11111111-2222-3333-4444-555555555555","StackId":"arn:aws:cloudformation:us-west-2:111122223333:stack/crypto-lending-application-test/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"}')
-    exit 0
+    Write-Output -NoEnumerate '{"Id":"arn:aws:cloudformation:us-west-2:111122223333:changeSet/kan34-application-20260819/11111111-2222-3333-4444-555555555555","StackId":"arn:aws:cloudformation:us-west-2:111122223333:stack/crypto-lending-application-test/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"}'
+    $global:LASTEXITCODE = 0
+    return
 }
 if ($service -eq 'cloudformation' -and $operation -eq 'get-template') {
     $stackNameIndex = [array]::IndexOf($AwsArguments, '--stack-name')
@@ -573,33 +645,36 @@ if ($service -eq 'cloudformation' -and $operation -eq 'get-template') {
         $requestedStack -like '*:stack/crypto-lending-application-test/*'
     ) {
         Write-ResponseFile -Path $env:FAKE_AWS_APPLICATION_TEMPLATE_RESPONSE
+        $global:LASTEXITCODE = 0
+        return
     }
     Write-ResponseFile -Path $env:FAKE_AWS_GUARDRAIL_TEMPLATE_RESPONSE
+    $global:LASTEXITCODE = 0
+    return
 }
 if ($service -eq 'cloudformation' -and $operation -eq 'describe-change-set') {
     Write-ResponseFile -Path $env:FAKE_AWS_CHANGE_SET_RESPONSE
+    $global:LASTEXITCODE = 0
+    return
 }
 if ($service -eq 'cloudformation' -and $operation -eq 'execute-change-set') {
-    [Console]::Out.Write('{}')
-    exit 0
+    Write-Output -NoEnumerate '{}'
+    $global:LASTEXITCODE = 0
+    return
 }
-exit 99
+$global:LASTEXITCODE = 99
+return
 '@ | Set-Content -LiteralPath $fakeAwsScriptPath -Encoding Ascii
 $isWindowsPlatform = [System.Environment]::OSVersion.Platform -eq [System.PlatformID]::Win32NT
 if ($isWindowsPlatform) {
-    $fakeAwsCommandPath = Join-Path $fakeAwsDirectory 'aws.cmd'
-    @'
-@echo off
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0fake-aws.ps1" %*
-exit /b %ERRORLEVEL%
-'@ | Set-Content -LiteralPath $fakeAwsCommandPath -Encoding Ascii
+    $fakeAwsCommandPath = $fakeAwsScriptPath
 }
 else {
     $fakeAwsCommandPath = Join-Path $fakeAwsDirectory 'aws'
     @'
 #!/usr/bin/env sh
 script_directory=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-exec pwsh -NoProfile -File "$script_directory/fake-aws.ps1" "$@"
+exec pwsh -NoProfile -File "$script_directory/aws.ps1" "$@"
 '@ | Set-Content -LiteralPath $fakeAwsCommandPath -Encoding Ascii
     & chmod +x $fakeAwsCommandPath
     if ($LASTEXITCODE -ne 0) {
@@ -607,7 +682,129 @@ exec pwsh -NoProfile -File "$script_directory/fake-aws.ps1" "$@"
     }
 }
 
+$fakeNodeScriptPath = Join-Path $fakeAwsDirectory 'node.ps1'
+@'
+param(
+    [Parameter(ValueFromRemainingArguments = $true)]
+    [string[]] $NodeArguments
+)
+
+$ErrorActionPreference = 'Stop'
+if ($NodeArguments.Count -eq 1 -and $NodeArguments[0] -match '\s--') {
+    $NodeArguments = @($NodeArguments[0] -split '\s+')
+}
+if ($NodeArguments.Count -eq 0 -or (Split-Path -Leaf $NodeArguments[0]) -cne 'validate-auth-wallet-secret-version-transition.mjs') {
+    & $env:FAKE_REAL_NODE @NodeArguments
+    return
+}
+
+function Get-ArgumentValue {
+    param([string] $Name)
+    $index = [array]::IndexOf($NodeArguments, $Name)
+    if ($index -lt 0 -or $index + 1 -ge $NodeArguments.Count) {
+        return ''
+    }
+    return [string] $NodeArguments[$index + 1]
+}
+
+$mode = Get-ArgumentValue -Name '--mode'
+$validationAt = Get-ArgumentValue -Name '--at'
+$currentVersionId = Get-ArgumentValue -Name '--expected-current-version-id'
+$targetVersionId = Get-ArgumentValue -Name '--expected-target-version-id'
+Add-Content -LiteralPath $env:FAKE_AUTH_WALLET_VALIDATOR_MARKER -Value "mode=$mode at=$validationAt current=$currentVersionId target=$targetVersionId" -Encoding Ascii
+$callCount = @(Get-Content -LiteralPath $env:FAKE_AUTH_WALLET_VALIDATOR_MARKER).Count
+$variant = [string] $env:FAKE_AUTH_WALLET_VALIDATOR_VARIANT
+if ($variant -ceq 'FAIL_ALWAYS' -or ($variant -ceq 'FAIL_FRESH' -and $callCount -gt 2)) {
+    $global:LASTEXITCODE = 1
+    return
+}
+
+$operation = [string] $env:FAKE_AUTH_WALLET_OPERATION
+$fieldName = [string] $env:FAKE_AUTH_WALLET_FIELD_NAME
+$authorityRegistrySha256 = [string] $env:FAKE_AUTH_WALLET_AUTHORITY_REGISTRY_SHA256
+$targetStateSha256 = [string] $env:FAKE_AUTH_WALLET_TARGET_STATE_SHA256
+$predecessorTransitionSha256 = [string] $env:FAKE_AUTH_WALLET_PREDECESSOR_TRANSITION_SHA256
+$productionAuthorityValidated = $true
+if ($variant -ceq 'WRONG_REGISTRY') {
+    $authorityRegistrySha256 = '0' * 64
+}
+elseif ($variant -ceq 'UNAUTHORIZED') {
+    $productionAuthorityValidated = $false
+}
+elseif ($variant -ceq 'MALFORMED_PREDECESSOR') {
+    $predecessorTransitionSha256 = 'NONE'
+}
+elseif ($variant -ceq 'WRONG_PREDECESSOR') {
+    $predecessorTransitionSha256 = '8' * 64
+}
+elseif ($variant -ceq 'CURRENT_BINDING_MISMATCH') {
+    $currentVersionId = 'auth_wallet_keys_secret_version_0001'
+}
+elseif ($variant -ceq 'DRIFT_FRESH' -and $callCount -gt 2) {
+    $targetStateSha256 = '9' * 64
+}
+
+$report = [ordered]@{
+    ok = $true
+    readyForAuthorizedPlan = $true
+    productionAuthorityValidated = $productionAuthorityValidated
+    signatureValidated = $true
+    mode = $mode
+    operation = $operation
+    fieldName = $fieldName
+    canonicalSha256 = [string] $env:FAKE_AUTH_WALLET_CANONICAL_SHA256
+    currentStateSha256 = [string] $env:FAKE_AUTH_WALLET_CURRENT_STATE_SHA256
+    targetStateSha256 = $targetStateSha256
+    predecessorTransitionSha256 = $predecessorTransitionSha256
+    authorityRegistrySha256 = $authorityRegistrySha256
+    plan = [ordered]@{
+        kind = 'LOCAL_ONLY_NON_EXECUTABLE_AUTH_WALLET_VERSION_PLAN'
+        operation = $operation
+        fieldName = $fieldName
+        versionParameter = 'AuthWalletKeysSecretVersionId'
+        currentVersionId = $currentVersionId
+        targetVersionId = $targetVersionId
+        executionAllowed = $false
+        separateAuthorizationRequired = $true
+    }
+    errors = @()
+    externalCallsMade = 0
+    awsCallsMade = 0
+    databaseConnectionsMade = 0
+    redisConnectionsMade = 0
+    dnsQueriesMade = 0
+    httpRequestsMade = 0
+    resourcesCreated = 0
+    credentialBytesRead = 0
+    filesWritten = 0
+}
+if ($variant -ceq 'STRING_ZERO') {
+    $report.awsCallsMade = '0'
+}
+Write-Output -NoEnumerate ($report | ConvertTo-Json -Depth 8 -Compress)
+$global:LASTEXITCODE = 0
+return
+'@ | Set-Content -LiteralPath $fakeNodeScriptPath -Encoding Ascii
+if ($isWindowsPlatform) {
+    $fakeNodeCommandPath = $fakeNodeScriptPath
+}
+else {
+    $fakeNodeCommandPath = Join-Path $fakeAwsDirectory 'node'
+    @'
+#!/usr/bin/env sh
+script_directory=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+exec pwsh -NoProfile -File "$script_directory/node.ps1" "$@"
+'@ | Set-Content -LiteralPath $fakeNodeCommandPath -Encoding Ascii
+    & chmod +x $fakeNodeCommandPath
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Unable to mark the fake Node executable as executable.'
+    }
+}
+
 $env:PATH = $fakeAwsDirectory + [System.IO.Path]::PathSeparator + $originalEnvironment.PATH
+$env:FAKE_REAL_NODE = $realNodeCommand.Source
+$env:FAKE_AUTH_WALLET_VALIDATOR_MARKER = $authWalletValidatorMarkerPath
+$env:FAKE_AUTH_WALLET_VALIDATOR_VARIANT = ''
 $env:FAKE_AWS_MARKER = $markerPath
 $env:FAKE_AWS_IDENTITY_RESPONSE = $identityResponsePath
 $env:FAKE_AWS_GUARDRAIL_STACK_RESPONSE = $guardrailStackResponsePath
@@ -1142,6 +1339,57 @@ foreach ($entry in $applicationStackTags.GetEnumerator()) {
 $updateApplicationStackTags['credential-predecessor-sha256'] = 'NONE'
 $updateApplicationStackTags['credential-transition-sha256'] = $transitionRecordSha256
 $updateApplicationStackTags['credential-state-sha256'] = $transitionTargetStateSha256
+$authWalletTransitionAuthorityRegistrySha256 = ('c' * 64)
+$authWalletAdoptionRecordSha256 = ('d' * 64)
+$authWalletAdoptionStateSha256 = ('e' * 64)
+$authWalletTransitionRecordSha256 = ('f' * 64)
+$authWalletTransitionTargetStateSha256 = ('0' * 64)
+$authWalletTargetVersionId = 'auth_wallet_keys_secret_version_0002'
+$authWalletValidationAt = $transitionFixtureNow.AddMinutes(-1).ToString('yyyy-MM-ddTHH:mm:ssZ', [System.Globalization.CultureInfo]::InvariantCulture)
+$authWalletAdoptionRecord = [ordered]@{
+    content = [ordered]@{
+        operation = [ordered]@{ action = 'ADOPT_EXISTING_BINDING'; fieldName = 'ALL_SEVEN_FIELDS' }
+        predecessor = [ordered]@{ stateSha256 = 'UNTRACKED'; transitionSha256 = 'NONE' }
+        currentState = [ordered]@{
+            secretArn = [string] $applicationParameterMap.AuthWalletKeysSecretArn
+            kmsKeyArn = [string] $applicationParameterMap.AuthWalletKeysKmsKeyArn
+            currentVersionId = $authWalletKeysSecretVersionId
+        }
+        targetState = [ordered]@{
+            secretArn = [string] $applicationParameterMap.AuthWalletKeysSecretArn
+            kmsKeyArn = [string] $applicationParameterMap.AuthWalletKeysKmsKeyArn
+            currentVersionId = $authWalletKeysSecretVersionId
+        }
+    }
+}
+$authWalletTransitionRecord = [ordered]@{
+    content = [ordered]@{
+        operation = [ordered]@{ action = 'STAGE_SUCCESSOR'; fieldName = 'AUTH_IDENTITY_HMAC_KEY_RING_JSON' }
+        predecessor = [ordered]@{
+            stateSha256 = $authWalletAdoptionStateSha256
+            transitionSha256 = $authWalletAdoptionRecordSha256
+        }
+        currentState = [ordered]@{
+            secretArn = [string] $applicationParameterMap.AuthWalletKeysSecretArn
+            kmsKeyArn = [string] $applicationParameterMap.AuthWalletKeysKmsKeyArn
+            currentVersionId = $authWalletKeysSecretVersionId
+        }
+        targetState = [ordered]@{
+            secretArn = [string] $applicationParameterMap.AuthWalletKeysSecretArn
+            kmsKeyArn = [string] $applicationParameterMap.AuthWalletKeysKmsKeyArn
+            currentVersionId = $authWalletTargetVersionId
+        }
+    }
+}
+Write-JsonFile -Path $approvedAuthWalletAdoptionRecordPath -Value $authWalletAdoptionRecord -Depth 8
+Write-JsonFile -Path $approvedAuthWalletTransitionRecordPath -Value $authWalletTransitionRecord -Depth 8
+$authWalletAdoptedStackTags = [ordered]@{}
+foreach ($entry in $updateApplicationStackTags.GetEnumerator()) {
+    $authWalletAdoptedStackTags[$entry.Key] = [string] $entry.Value
+}
+$authWalletAdoptedStackTags['auth-wallet-predecessor-sha256'] = 'NONE'
+$authWalletAdoptedStackTags['auth-wallet-transition-sha256'] = $authWalletAdoptionRecordSha256
+$authWalletAdoptedStackTags['auth-wallet-state-sha256'] = $authWalletAdoptionStateSha256
 $updateParameterSha256 = Get-TextSha256 -Value (Get-CanonicalMapText -Map $updateApplicationParameterMap)
 $updateTagSha256 = Get-TextSha256 -Value (Get-CanonicalMapText -Map $updateApplicationStackTags)
 $updateExpectedChangeSetDescription = "KAN-34 template-sha256=$applicationTemplateSha256 workload-template-sha256=$workloadBoundariesTemplateSha256 workload-binding-sha256=$artifactBindingSha256 observability-template-sha256=$observabilityTemplateSha256 observability-binding-sha256=$observabilityArtifactBindingSha256 parameters-sha256=$updateParameterSha256 tags-sha256=$updateTagSha256 control-record-sha256=$controlRecordSha256 acm-dns-record-sha256=$acmDnsRecordSha256 guardrail-policy=kan-229-v1 current-stack-binding-sha256=$currentStackBindingSha256 credential-transition-binding-sha256=$transitionDeploymentBindingSha256"
@@ -1176,11 +1424,12 @@ $applicationUpdateParameterOverrides = @($updateParameterOverrides | Where-Objec
     'WorkerDesiredCount=1'
 )
 $applicationCurrentParameterSnapshotSha256 = Get-TextSha256 -Value (Get-CanonicalMapText -Map $updateApplicationParameterMap)
-$applicationCurrentTagSnapshotSha256 = Get-TextSha256 -Value (Get-CanonicalMapText -Map $updateApplicationStackTags)
+$applicationCurrentTagSnapshotSha256 = Get-TextSha256 -Value (Get-CanonicalMapText -Map $authWalletAdoptedStackTags)
 $applicationCurrentStackBindingText = "current-stack-id=$immutableStackId`ncurrent-parent-template-sha256=$applicationTemplateSha256`ncurrent-stack-parameters-sha256=$applicationCurrentParameterSnapshotSha256`ncurrent-stack-tags-sha256=$applicationCurrentTagSnapshotSha256`nupdate-intent=APPLICATION"
 $applicationCurrentStackBindingSha256 = Get-TextSha256 -Value $applicationCurrentStackBindingText
 $applicationUpdateParameterSha256 = Get-TextSha256 -Value (Get-CanonicalMapText -Map $applicationUpdateParameterMap)
-$applicationUpdateExpectedChangeSetDescription = "KAN-34 template-sha256=$applicationTemplateSha256 workload-template-sha256=$workloadBoundariesTemplateSha256 workload-binding-sha256=$artifactBindingSha256 observability-template-sha256=$observabilityTemplateSha256 observability-binding-sha256=$observabilityArtifactBindingSha256 parameters-sha256=$applicationUpdateParameterSha256 tags-sha256=$updateTagSha256 control-record-sha256=$controlRecordSha256 acm-dns-record-sha256=$acmDnsRecordSha256 guardrail-policy=kan-229-v1 current-stack-binding-sha256=$applicationCurrentStackBindingSha256"
+$applicationUpdateTagSha256 = Get-TextSha256 -Value (Get-CanonicalMapText -Map $authWalletAdoptedStackTags)
+$applicationUpdateExpectedChangeSetDescription = "KAN-34 template-sha256=$applicationTemplateSha256 workload-template-sha256=$workloadBoundariesTemplateSha256 workload-binding-sha256=$artifactBindingSha256 observability-template-sha256=$observabilityTemplateSha256 observability-binding-sha256=$observabilityArtifactBindingSha256 parameters-sha256=$applicationUpdateParameterSha256 tags-sha256=$applicationUpdateTagSha256 control-record-sha256=$controlRecordSha256 acm-dns-record-sha256=$acmDnsRecordSha256 guardrail-policy=kan-229-v1 current-stack-binding-sha256=$applicationCurrentStackBindingSha256"
 $applicationUpdateBillableAcknowledgement = "EXECUTE IMMUTABLE CHANGE SET $immutableChangeSetId FOR IMMUTABLE STACK $immutableStackId WITH PARAMETERS $applicationUpdateParameterSha256 WORKLOAD TEMPLATE $workloadBoundariesTemplateSha256 WORKLOAD BINDING $artifactBindingSha256 OBSERVABILITY TEMPLATE $observabilityTemplateSha256 OBSERVABILITY BINDING $observabilityArtifactBindingSha256 CURRENT STACK STATE $applicationCurrentStackBindingSha256 USING BILLING CONTROL $controlRecordSha256 AND ACM DNS CONTROL $acmDnsRecordSha256; I ACKNOWLEDGE BILLABLE AWS RESOURCES IN ACCOUNT 111122223333 REGION us-west-2 USING PROFILE kan34-test"
 $applicationUpdateArguments = Copy-ArgumentMap -Map $updateArguments
 $applicationUpdateArguments.UpdateIntent = 'APPLICATION'
@@ -1242,7 +1491,7 @@ foreach ($entry in $updateApplicationParameterMap.GetEnumerator()) {
 }
 $rotationApplicationParameterMap.ApiDatabaseSlotBVersionId = [string] $rotatedFixedSlotVersions.ApiDatabaseSlotBVersionId
 $rotationApplicationStackTags = [ordered]@{}
-foreach ($entry in $applicationStackTags.GetEnumerator()) {
+foreach ($entry in $authWalletAdoptedStackTags.GetEnumerator()) {
     $rotationApplicationStackTags[$entry.Key] = [string] $entry.Value
 }
 $rotationApplicationStackTags['credential-predecessor-sha256'] = $transitionRecordSha256
@@ -1256,6 +1505,94 @@ $rotationArguments.FixedSlotCredentialTransitionRecordFile = $approvedRotationRe
 $rotationArguments.FixedSlotCredentialTransitionMode = 'transition'
 foreach ($entry in $rotatedFixedSlotVersions.GetEnumerator()) {
     $rotationArguments[$entry.Key] = [string] $entry.Value
+}
+
+$authWalletAdoptionCurrentStackBindingText = "current-stack-id=$immutableStackId`ncurrent-parent-template-sha256=$applicationTemplateSha256`ncurrent-stack-parameters-sha256=$applicationCurrentParameterSnapshotSha256`ncurrent-stack-tags-sha256=$(Get-TextSha256 -Value (Get-CanonicalMapText -Map $updateApplicationStackTags))`nupdate-intent=AUTH_WALLET_TRANSITION"
+$authWalletAdoptionCurrentStackBindingSha256 = Get-TextSha256 -Value $authWalletAdoptionCurrentStackBindingText
+$authWalletAdoptionDeploymentBindingText = "record-sha256=$authWalletAdoptionRecordSha256`ncurrent-state-sha256=$authWalletAdoptionStateSha256`ntarget-state-sha256=$authWalletAdoptionStateSha256`npredecessor-transition-sha256=NONE`nauthority-registry-sha256=$authWalletTransitionAuthorityRegistrySha256`ncurrent-stack-id=$immutableStackId`nparent-template-sha256=$applicationTemplateSha256`nworkload-template-sha256=$workloadBoundariesTemplateSha256`nobservability-template-sha256=$observabilityTemplateSha256`nmode=adopt`noperation=ADOPT_EXISTING_BINDING`nfield=ALL_SEVEN_FIELDS`ncurrent-stack-binding-sha256=$authWalletAdoptionCurrentStackBindingSha256"
+$authWalletAdoptionDeploymentBindingSha256 = Get-TextSha256 -Value $authWalletAdoptionDeploymentBindingText
+$authWalletAdoptionExpectedChangeSetDescription = "KAN-34 template-sha256=$applicationTemplateSha256 workload-template-sha256=$workloadBoundariesTemplateSha256 workload-binding-sha256=$artifactBindingSha256 observability-template-sha256=$observabilityTemplateSha256 observability-binding-sha256=$observabilityArtifactBindingSha256 parameters-sha256=$updateParameterSha256 tags-sha256=$applicationUpdateTagSha256 control-record-sha256=$controlRecordSha256 acm-dns-record-sha256=$acmDnsRecordSha256 guardrail-policy=kan-229-v1 current-stack-binding-sha256=$authWalletAdoptionCurrentStackBindingSha256 auth-wallet-transition-binding-sha256=$authWalletAdoptionDeploymentBindingSha256 auth-wallet-authority-registry-sha256=$authWalletTransitionAuthorityRegistrySha256"
+$authWalletAdoptionBillableAcknowledgement = "EXECUTE IMMUTABLE CHANGE SET $immutableChangeSetId FOR IMMUTABLE STACK $immutableStackId WITH PARAMETERS $updateParameterSha256 WORKLOAD TEMPLATE $workloadBoundariesTemplateSha256 WORKLOAD BINDING $artifactBindingSha256 OBSERVABILITY TEMPLATE $observabilityTemplateSha256 OBSERVABILITY BINDING $observabilityArtifactBindingSha256 CURRENT STACK STATE $authWalletAdoptionCurrentStackBindingSha256 AUTH-WALLET TRANSITION $authWalletAdoptionRecordSha256 FROM STATE $authWalletAdoptionStateSha256 TO STATE $authWalletAdoptionStateSha256 USING AUTHORITY REGISTRY $authWalletTransitionAuthorityRegistrySha256 BOUND BY $authWalletAdoptionDeploymentBindingSha256 WITH TAGS $applicationUpdateTagSha256 USING BILLING CONTROL $controlRecordSha256 AND ACM DNS CONTROL $acmDnsRecordSha256; I ACKNOWLEDGE BILLABLE AWS RESOURCES IN ACCOUNT 111122223333 REGION us-west-2 USING PROFILE kan34-test"
+$authWalletAdoptionArguments = Copy-ArgumentMap -Map $updateArguments
+$authWalletAdoptionArguments.UpdateIntent = 'AUTH_WALLET_TRANSITION'
+[void] $authWalletAdoptionArguments.Remove('FixedSlotCredentialTransitionRecordFile')
+[void] $authWalletAdoptionArguments.Remove('FixedSlotCredentialTransitionMode')
+[void] $authWalletAdoptionArguments.Remove('FixedSlotCredentialTransitionValidationAt')
+$authWalletAdoptionArguments.AuthWalletTransitionRecordFile = $approvedAuthWalletAdoptionRecordPath
+$authWalletAdoptionArguments.AuthWalletTransitionMode = 'adopt'
+$authWalletAdoptionArguments.AuthWalletTransitionValidationAt = $authWalletValidationAt
+$authWalletAdoptionArguments.AuthWalletTransitionAuthorityRegistrySha256 = $authWalletTransitionAuthorityRegistrySha256
+$authWalletAdoptionArguments.AuthWalletTransitionCurrentVersionId = $authWalletKeysSecretVersionId
+$authWalletAdoptionArguments.AuthWalletTransitionOperation = 'ADOPT_EXISTING_BINDING'
+$authWalletAdoptionArguments.AuthWalletTransitionFieldName = 'ALL_SEVEN_FIELDS'
+$authWalletAdoptionArguments.BillableAcknowledgement = $authWalletAdoptionBillableAcknowledgement
+
+$authWalletTransitionParameterMap = [ordered]@{}
+foreach ($entry in $updateApplicationParameterMap.GetEnumerator()) {
+    $authWalletTransitionParameterMap[$entry.Key] = [string] $entry.Value
+}
+$authWalletTransitionParameterMap.AuthWalletKeysSecretVersionId = $authWalletTargetVersionId
+$authWalletTransitionStackTags = [ordered]@{}
+foreach ($entry in $authWalletAdoptedStackTags.GetEnumerator()) {
+    $authWalletTransitionStackTags[$entry.Key] = [string] $entry.Value
+}
+$authWalletTransitionStackTags['auth-wallet-predecessor-sha256'] = $authWalletAdoptionRecordSha256
+$authWalletTransitionStackTags['auth-wallet-transition-sha256'] = $authWalletTransitionRecordSha256
+$authWalletTransitionStackTags['auth-wallet-state-sha256'] = $authWalletTransitionTargetStateSha256
+$authWalletTransitionCurrentStackBindingText = "current-stack-id=$immutableStackId`ncurrent-parent-template-sha256=$applicationTemplateSha256`ncurrent-stack-parameters-sha256=$applicationCurrentParameterSnapshotSha256`ncurrent-stack-tags-sha256=$applicationCurrentTagSnapshotSha256`nupdate-intent=AUTH_WALLET_TRANSITION"
+$authWalletTransitionCurrentStackBindingSha256 = Get-TextSha256 -Value $authWalletTransitionCurrentStackBindingText
+$authWalletTransitionDeploymentBindingText = "record-sha256=$authWalletTransitionRecordSha256`ncurrent-state-sha256=$authWalletAdoptionStateSha256`ntarget-state-sha256=$authWalletTransitionTargetStateSha256`npredecessor-transition-sha256=$authWalletAdoptionRecordSha256`nauthority-registry-sha256=$authWalletTransitionAuthorityRegistrySha256`ncurrent-stack-id=$immutableStackId`nparent-template-sha256=$applicationTemplateSha256`nworkload-template-sha256=$workloadBoundariesTemplateSha256`nobservability-template-sha256=$observabilityTemplateSha256`nmode=transition`noperation=STAGE_SUCCESSOR`nfield=AUTH_IDENTITY_HMAC_KEY_RING_JSON`ncurrent-stack-binding-sha256=$authWalletTransitionCurrentStackBindingSha256"
+$authWalletTransitionDeploymentBindingSha256 = Get-TextSha256 -Value $authWalletTransitionDeploymentBindingText
+$authWalletTransitionParameterSha256 = Get-TextSha256 -Value (Get-CanonicalMapText -Map $authWalletTransitionParameterMap)
+$authWalletTransitionTagSha256 = Get-TextSha256 -Value (Get-CanonicalMapText -Map $authWalletTransitionStackTags)
+$authWalletTransitionExpectedChangeSetDescription = "KAN-34 template-sha256=$applicationTemplateSha256 workload-template-sha256=$workloadBoundariesTemplateSha256 workload-binding-sha256=$artifactBindingSha256 observability-template-sha256=$observabilityTemplateSha256 observability-binding-sha256=$observabilityArtifactBindingSha256 parameters-sha256=$authWalletTransitionParameterSha256 tags-sha256=$authWalletTransitionTagSha256 control-record-sha256=$controlRecordSha256 acm-dns-record-sha256=$acmDnsRecordSha256 guardrail-policy=kan-229-v1 current-stack-binding-sha256=$authWalletTransitionCurrentStackBindingSha256 auth-wallet-transition-binding-sha256=$authWalletTransitionDeploymentBindingSha256 auth-wallet-authority-registry-sha256=$authWalletTransitionAuthorityRegistrySha256"
+$authWalletTransitionBillableAcknowledgement = "EXECUTE IMMUTABLE CHANGE SET $immutableChangeSetId FOR IMMUTABLE STACK $immutableStackId WITH PARAMETERS $authWalletTransitionParameterSha256 WORKLOAD TEMPLATE $workloadBoundariesTemplateSha256 WORKLOAD BINDING $artifactBindingSha256 OBSERVABILITY TEMPLATE $observabilityTemplateSha256 OBSERVABILITY BINDING $observabilityArtifactBindingSha256 CURRENT STACK STATE $authWalletTransitionCurrentStackBindingSha256 AUTH-WALLET TRANSITION $authWalletTransitionRecordSha256 FROM STATE $authWalletAdoptionStateSha256 TO STATE $authWalletTransitionTargetStateSha256 USING AUTHORITY REGISTRY $authWalletTransitionAuthorityRegistrySha256 BOUND BY $authWalletTransitionDeploymentBindingSha256 WITH TAGS $authWalletTransitionTagSha256 USING BILLING CONTROL $controlRecordSha256 AND ACM DNS CONTROL $acmDnsRecordSha256; I ACKNOWLEDGE BILLABLE AWS RESOURCES IN ACCOUNT 111122223333 REGION us-west-2 USING PROFILE kan34-test"
+$authWalletTransitionArguments = Copy-ArgumentMap -Map $authWalletAdoptionArguments
+$authWalletTransitionArguments.AuthWalletKeysSecretVersionId = $authWalletTargetVersionId
+$authWalletTransitionArguments.AuthWalletTransitionRecordFile = $approvedAuthWalletTransitionRecordPath
+$authWalletTransitionArguments.AuthWalletTransitionMode = 'transition'
+$authWalletTransitionArguments.AuthWalletTransitionOperation = 'STAGE_SUCCESSOR'
+$authWalletTransitionArguments.AuthWalletTransitionFieldName = 'AUTH_IDENTITY_HMAC_KEY_RING_JSON'
+$authWalletTransitionArguments.BillableAcknowledgement = $authWalletTransitionBillableAcknowledgement
+$expectedAuthWalletResourceChanges = @(
+    [ordered]@{
+        Type = 'Resource'
+        ResourceChange = [ordered]@{
+            Action = 'Modify'
+            LogicalResourceId = 'ApiTaskDefinition'
+            ResourceType = 'AWS::ECS::TaskDefinition'
+            Replacement = 'True'
+        }
+    },
+    [ordered]@{
+        Type = 'Resource'
+        ResourceChange = [ordered]@{
+            Action = 'Modify'
+            LogicalResourceId = 'ApiService'
+            ResourceType = 'AWS::ECS::Service'
+            Replacement = 'False'
+        }
+    }
+)
+$tagOnlyAuthWalletResourceChange = [ordered]@{
+    Type = 'Resource'
+    ResourceChange = [ordered]@{
+        Action = 'Modify'
+        LogicalResourceId = 'WebService'
+        ResourceType = 'AWS::ECS::Service'
+        Replacement = 'False'
+        Scope = @('Tags')
+        Details = @(
+            [ordered]@{
+                ChangeSource = 'DirectModification'
+                Evaluation = 'Static'
+                Target = [ordered]@{
+                    Attribute = 'Tags'
+                    RequiresRecreation = 'Never'
+                }
+            }
+        )
+    }
 }
 Write-ApplicationStackResponse -ParameterMap $applicationParameterMap -TagMap $applicationStackTags
 Write-TemplateResponse -Path $applicationTemplateResponsePath -TemplateBody $applicationTemplateBody
@@ -1401,8 +1738,315 @@ try {
         $mixedIntentArguments.UpdateIntent = 'APPLICATION'
         $mixedIntent = Invoke-Guard -Arguments $mixedIntentArguments
         Assert-Condition (-not $mixedIntent.Succeeded) 'APPLICATION update accepted fixed-slot transition inputs.'
-        Assert-Condition ($mixedIntent.Output -match 'must not supply fixed-slot transition evidence') 'Mixed update-intent rejection was not explicit.'
+        Assert-Condition ($mixedIntent.Output -match 'must not supply fixed-slot or auth/wallet transition inputs') 'Mixed update-intent rejection was not explicit.'
         Assert-Condition ((Get-AwsMarkerText) -eq '') 'Mixed update intent reached AWS discovery.'
+    }
+
+    Invoke-FocusedTest -Name 'auth wallet intent requires every dedicated input and exact authority digest with zero AWS calls' -Body {
+        foreach ($missingInput in @(
+                'AuthWalletTransitionRecordFile',
+                'AuthWalletTransitionMode',
+                'AuthWalletTransitionValidationAt',
+                'AuthWalletTransitionAuthorityRegistrySha256',
+                'AuthWalletTransitionCurrentVersionId',
+                'AuthWalletTransitionOperation',
+                'AuthWalletTransitionFieldName'
+            )) {
+            Clear-AwsMarker
+            $arguments = Copy-ArgumentMap -Map $authWalletAdoptionArguments
+            $arguments.Action = 'Plan'
+            [void] $arguments.Remove($missingInput)
+            $result = Invoke-Guard -Arguments $arguments
+            Assert-Condition (-not $result.Succeeded) "AUTH_WALLET_TRANSITION accepted missing $missingInput."
+            Assert-Condition ($result.Output -match [regex]::Escape("$missingInput must be supplied explicitly")) "Missing $missingInput rejection was not explicit. Output: $($result.Output)"
+            Assert-Condition ((Get-AwsMarkerText) -eq '') "Missing $missingInput reached AWS discovery."
+        }
+
+        Clear-AwsMarker
+        $invalidDigestArguments = Copy-ArgumentMap -Map $authWalletAdoptionArguments
+        $invalidDigestArguments.Action = 'Plan'
+        $invalidDigestArguments.AuthWalletTransitionAuthorityRegistrySha256 = ('C' * 64)
+        $invalidDigest = Invoke-Guard -Arguments $invalidDigestArguments
+        Assert-Condition (-not $invalidDigest.Succeeded) 'AUTH_WALLET_TRANSITION accepted a non-lowercase authority registry digest.'
+        Assert-Condition ($invalidDigest.Output -match 'exact lowercase SHA-256') 'Malformed authority digest rejection was not explicit.'
+        Assert-Condition ((Get-AwsMarkerText) -eq '') 'Malformed authority digest reached AWS discovery.'
+    }
+
+    Invoke-FocusedTest -Name 'update intents reject cross-intent transition inputs before AWS discovery' -Body {
+        foreach ($case in @(
+                [pscustomobject]@{
+                    Name = 'APPLICATION auth/wallet evidence'
+                    Arguments = $applicationUpdateArguments
+                    Add = @{ AuthWalletTransitionRecordFile = $approvedAuthWalletAdoptionRecordPath }
+                    Error = 'must not supply fixed-slot or auth/wallet transition inputs'
+                },
+                [pscustomobject]@{
+                    Name = 'CREDENTIAL_TRANSITION auth/wallet authority digest'
+                    Arguments = $updateArguments
+                    Add = @{ AuthWalletTransitionAuthorityRegistrySha256 = $authWalletTransitionAuthorityRegistrySha256 }
+                    Error = 'must not supply auth/wallet transition inputs'
+                },
+                [pscustomobject]@{
+                    Name = 'AUTH_WALLET_TRANSITION fixed-slot evidence'
+                    Arguments = $authWalletAdoptionArguments
+                    Add = @{ FixedSlotCredentialTransitionRecordFile = $approvedTransitionRecordPath }
+                    Error = 'must not supply fixed-slot transition inputs'
+                }
+            )) {
+            Clear-AwsMarker
+            $arguments = Copy-ArgumentMap -Map $case.Arguments
+            $arguments.Action = 'Plan'
+            foreach ($entry in $case.Add.GetEnumerator()) {
+                $arguments[$entry.Key] = [string] $entry.Value
+            }
+            $result = Invoke-Guard -Arguments $arguments
+            Assert-Condition (-not $result.Succeeded) "$($case.Name) was accepted."
+            Assert-Condition ($result.Output -match [regex]::Escape($case.Error)) "$($case.Name) rejection was not explicit."
+            Assert-Condition ((Get-AwsMarkerText) -eq '') "$($case.Name) reached AWS discovery."
+        }
+    }
+
+    Invoke-FocusedTest -Name 'bootstrap sequence adopts fixed slots before the separate auth wallet chain' -Body {
+        Write-GuardrailStackResponse -ConfigurationSha256 $controlConfigurationSha256
+        Write-TemplateResponse -Path $guardrailTemplateResponsePath -TemplateBody $guardrailTemplateBody
+        Write-TemplateResponse -Path $applicationTemplateResponsePath -TemplateBody $applicationTemplateBody
+
+        Write-ApplicationStackResponse -ParameterMap $applicationParameterMap -TagMap $applicationStackTags
+        Clear-AwsMarker
+        $fixedArguments = Copy-ArgumentMap -Map $updateArguments
+        $fixedArguments.Action = 'Plan'
+        $fixedResult = Invoke-Guard -Arguments $fixedArguments
+        $fixedMarker = Get-AwsMarkerText
+        $fixedCreateLine = @($fixedMarker -split "`r?`n" | Where-Object { $_ -match 'cloudformation create-change-set' }) | Select-Object -First 1
+        Assert-Condition $fixedResult.Succeeded "Initial fixed-slot adoption failed: $($fixedResult.Output)"
+        Assert-Condition ($fixedCreateLine -notmatch 'auth-wallet-(?:predecessor|transition|state)-sha256') 'Initial fixed-slot adoption incorrectly fabricated auth/wallet chain tags.'
+
+        Set-FakeAuthWalletValidationFixture `
+            -CanonicalSha256 $authWalletAdoptionRecordSha256 `
+            -CurrentStateSha256 $authWalletAdoptionStateSha256 `
+            -TargetStateSha256 $authWalletAdoptionStateSha256 `
+            -AuthorityRegistrySha256 $authWalletTransitionAuthorityRegistrySha256 `
+            -Operation 'ADOPT_EXISTING_BINDING' `
+            -FieldName 'ALL_SEVEN_FIELDS' `
+            -InitialValidationAt $authWalletValidationAt
+        Write-ApplicationStackResponse -ParameterMap $updateApplicationParameterMap -TagMap $updateApplicationStackTags
+        Clear-AwsMarker
+        $authArguments = Copy-ArgumentMap -Map $authWalletAdoptionArguments
+        $authArguments.Action = 'Plan'
+        $authResult = Invoke-Guard -Arguments $authArguments
+        $authMarker = Get-AwsMarkerText
+        $authCreateLine = @($authMarker -split "`r?`n" | Where-Object { $_ -match 'cloudformation create-change-set' }) | Select-Object -First 1
+        Assert-Condition $authResult.Succeeded "Auth/wallet adoption after fixed-slot adoption failed: $($authResult.Output)"
+        Assert-Condition ($authCreateLine -match ('auth-wallet-transition-binding-sha256=' + $authWalletAdoptionDeploymentBindingSha256)) 'Auth/wallet adoption description omitted its exact deployment binding.'
+        Assert-Condition ($authCreateLine -match ('auth-wallet-authority-registry-sha256=' + $authWalletTransitionAuthorityRegistrySha256)) 'Auth/wallet adoption description omitted the authority registry pin.'
+        foreach ($fixedTag in @('credential-predecessor-sha256', 'credential-transition-sha256', 'credential-state-sha256')) {
+            Assert-Condition ($authCreateLine -match ("Key=$fixedTag,Value=" + [regex]::Escape([string] $updateApplicationStackTags[$fixedTag]))) "Auth/wallet adoption did not preserve fixed-slot chain tag $fixedTag."
+        }
+        foreach ($authTag in @('auth-wallet-predecessor-sha256', 'auth-wallet-transition-sha256', 'auth-wallet-state-sha256')) {
+            Assert-Condition ($authCreateLine -match ("Key=$authTag,Value=" + [regex]::Escape([string] $authWalletAdoptedStackTags[$authTag]))) "Auth/wallet adoption omitted exact chain tag $authTag."
+        }
+        Assert-Condition (@(Get-Content -LiteralPath $authWalletValidatorMarkerPath).Count -eq 2) 'Auth/wallet Plan did not perform two stable offline validations.'
+    }
+
+    Invoke-FocusedTest -Name 'auth wallet transition Plan changes only the signed outer VersionId and chain head' -Body {
+        Set-FakeAuthWalletValidationFixture `
+            -CanonicalSha256 $authWalletTransitionRecordSha256 `
+            -CurrentStateSha256 $authWalletAdoptionStateSha256 `
+            -TargetStateSha256 $authWalletTransitionTargetStateSha256 `
+            -AuthorityRegistrySha256 $authWalletTransitionAuthorityRegistrySha256 `
+            -Operation 'STAGE_SUCCESSOR' `
+            -FieldName 'AUTH_IDENTITY_HMAC_KEY_RING_JSON' `
+            -InitialValidationAt $authWalletValidationAt
+        Write-ApplicationStackResponse -ParameterMap $updateApplicationParameterMap -TagMap $authWalletAdoptedStackTags
+        Write-GuardrailStackResponse -ConfigurationSha256 $controlConfigurationSha256
+        Write-TemplateResponse -Path $guardrailTemplateResponsePath -TemplateBody $guardrailTemplateBody
+        Write-TemplateResponse -Path $applicationTemplateResponsePath -TemplateBody $applicationTemplateBody
+        Clear-AwsMarker
+        $arguments = Copy-ArgumentMap -Map $authWalletTransitionArguments
+        $arguments.Action = 'Plan'
+        $result = Invoke-Guard -Arguments $arguments
+        $marker = Get-AwsMarkerText
+        $createLine = @($marker -split "`r?`n" | Where-Object { $_ -match 'cloudformation create-change-set' }) | Select-Object -First 1
+        Assert-Condition $result.Succeeded "Exact auth/wallet transition Plan failed: $($result.Output)"
+        Assert-Condition ($createLine -match [regex]::Escape("ParameterKey=AuthWalletKeysSecretVersionId,ParameterValue=$authWalletTargetVersionId")) 'Auth/wallet transition omitted the signed target outer VersionId.'
+        Assert-Condition ($createLine -match ('auth-wallet-transition-binding-sha256=' + $authWalletTransitionDeploymentBindingSha256)) 'Auth/wallet transition description omitted its exact deployment binding.'
+        foreach ($entry in $pinnedCredentialVersions.GetEnumerator()) {
+            Assert-Condition ($createLine -match ("ParameterKey=$($entry.Key),ParameterValue=" + [regex]::Escape([string] $entry.Value))) "Auth/wallet transition did not preserve fixed-slot pin $($entry.Key)."
+        }
+        foreach ($fixedTag in @('credential-predecessor-sha256', 'credential-transition-sha256', 'credential-state-sha256')) {
+            Assert-Condition ($createLine -match ("Key=$fixedTag,Value=" + [regex]::Escape([string] $authWalletAdoptedStackTags[$fixedTag]))) "Auth/wallet transition did not preserve fixed-slot tag $fixedTag."
+        }
+        Assert-Condition ($createLine -match ('Key=auth-wallet-predecessor-sha256,Value=' + $authWalletAdoptionRecordSha256)) 'Auth/wallet transition did not extend the exact prior chain head.'
+        Assert-Condition ($createLine -match ('Key=auth-wallet-transition-sha256,Value=' + $authWalletTransitionRecordSha256)) 'Auth/wallet transition did not bind its signed record digest.'
+        Assert-Condition ($createLine -match ('Key=auth-wallet-state-sha256,Value=' + $authWalletTransitionTargetStateSha256)) 'Auth/wallet transition did not bind its signed target-state digest.'
+    }
+
+    Invoke-FocusedTest -Name 'auth wallet transition freezes unrelated parameters base tags and parent template' -Body {
+        Set-FakeAuthWalletValidationFixture `
+            -CanonicalSha256 $authWalletTransitionRecordSha256 `
+            -CurrentStateSha256 $authWalletAdoptionStateSha256 `
+            -TargetStateSha256 $authWalletTransitionTargetStateSha256 `
+            -AuthorityRegistrySha256 $authWalletTransitionAuthorityRegistrySha256 `
+            -Operation 'STAGE_SUCCESSOR' `
+            -FieldName 'AUTH_IDENTITY_HMAC_KEY_RING_JSON' `
+            -InitialValidationAt $authWalletValidationAt
+        Write-GuardrailStackResponse -ConfigurationSha256 $controlConfigurationSha256
+        Write-TemplateResponse -Path $guardrailTemplateResponsePath -TemplateBody $guardrailTemplateBody
+        Write-TemplateResponse -Path $applicationTemplateResponsePath -TemplateBody $applicationTemplateBody
+
+        Write-ApplicationStackResponse -ParameterMap $updateApplicationParameterMap -TagMap $authWalletAdoptedStackTags
+        Clear-AwsMarker
+        $parameterArguments = Copy-ArgumentMap -Map $authWalletTransitionArguments
+        $parameterArguments.Action = 'Plan'
+        $parameterArguments.ParameterOverride = @($updateParameterOverrides) + @('LogRetentionDays=30')
+        $parameterResult = Invoke-Guard -Arguments $parameterArguments
+        Assert-Condition (-not $parameterResult.Succeeded) 'Auth/wallet-only update accepted an unrelated parameter change.'
+        Assert-Condition ($parameterResult.Output -match "cannot change unrelated parameter 'LogRetentionDays'") 'Auth/wallet unrelated parameter rejection was not explicit.'
+        Assert-Condition ((Get-AwsMarkerText) -notmatch 's3api get-object|create-change-set') 'Auth/wallet unrelated parameter change reached artifact reads or planning.'
+
+        $driftedAuthWalletBaseTags = [ordered]@{}
+        foreach ($entry in $authWalletAdoptedStackTags.GetEnumerator()) {
+            $driftedAuthWalletBaseTags[$entry.Key] = [string] $entry.Value
+        }
+        $driftedAuthWalletBaseTags.owner = 'unexpected-owner'
+        Write-ApplicationStackResponse -ParameterMap $updateApplicationParameterMap -TagMap $driftedAuthWalletBaseTags
+        Clear-AwsMarker
+        $tagArguments = Copy-ArgumentMap -Map $authWalletTransitionArguments
+        $tagArguments.Action = 'Plan'
+        $tagResult = Invoke-Guard -Arguments $tagArguments
+        Assert-Condition (-not $tagResult.Succeeded) 'Auth/wallet-only update accepted unrelated base-tag drift.'
+        Assert-Condition ($tagResult.Output -match "cannot change or repair unrelated stack tag 'owner'") 'Auth/wallet unrelated base-tag rejection was not explicit.'
+        Assert-Condition ((Get-AwsMarkerText) -notmatch 's3api get-object|create-change-set') 'Auth/wallet base-tag drift reached artifact reads or planning.'
+
+        Write-ApplicationStackResponse -ParameterMap $updateApplicationParameterMap -TagMap $authWalletAdoptedStackTags
+        Write-TemplateResponse -Path $applicationTemplateResponsePath -TemplateBody ($applicationTemplateBody + "`n# drift")
+        Clear-AwsMarker
+        $templateArguments = Copy-ArgumentMap -Map $authWalletTransitionArguments
+        $templateArguments.Action = 'Plan'
+        $templateResult = Invoke-Guard -Arguments $templateArguments
+        Assert-Condition (-not $templateResult.Succeeded) 'Auth/wallet-only update accepted a parent-template change.'
+        Assert-Condition ($templateResult.Output -match 'cannot include a parent-template change') 'Auth/wallet parent-template freeze rejection was not explicit.'
+        Assert-Condition ((Get-AwsMarkerText) -notmatch 's3api get-object|create-change-set') 'Auth/wallet parent-template change reached artifact reads or planning.'
+        Write-TemplateResponse -Path $applicationTemplateResponsePath -TemplateBody $applicationTemplateBody
+    }
+
+    Invoke-FocusedTest -Name 'auth wallet transition permits the signed abort-staged-successor recovery action' -Body {
+        try {
+            $abortRecord = ($authWalletTransitionRecord | ConvertTo-Json -Depth 8) | ConvertFrom-Json
+            $abortRecord.content.operation.action = 'ABORT_STAGED_SUCCESSOR'
+            Write-JsonFile -Path $approvedAuthWalletTransitionRecordPath -Value $abortRecord -Depth 8
+            Set-FakeAuthWalletValidationFixture `
+                -CanonicalSha256 $authWalletTransitionRecordSha256 `
+                -CurrentStateSha256 $authWalletAdoptionStateSha256 `
+                -TargetStateSha256 $authWalletTransitionTargetStateSha256 `
+                -AuthorityRegistrySha256 $authWalletTransitionAuthorityRegistrySha256 `
+                -Operation 'ABORT_STAGED_SUCCESSOR' `
+                -FieldName 'AUTH_IDENTITY_HMAC_KEY_RING_JSON' `
+                -InitialValidationAt $authWalletValidationAt
+            Write-ApplicationStackResponse -ParameterMap $updateApplicationParameterMap -TagMap $authWalletAdoptedStackTags
+            Write-GuardrailStackResponse -ConfigurationSha256 $controlConfigurationSha256
+            Write-TemplateResponse -Path $guardrailTemplateResponsePath -TemplateBody $guardrailTemplateBody
+            Write-TemplateResponse -Path $applicationTemplateResponsePath -TemplateBody $applicationTemplateBody
+            Clear-AwsMarker
+            $arguments = Copy-ArgumentMap -Map $authWalletTransitionArguments
+            $arguments.Action = 'Plan'
+            $arguments.AuthWalletTransitionOperation = 'ABORT_STAGED_SUCCESSOR'
+            $result = Invoke-Guard -Arguments $arguments
+            Assert-Condition $result.Succeeded "Signed abort-staged-successor recovery Plan failed: $($result.Output)"
+            Assert-Condition ((Get-AwsMarkerText) -match 'cloudformation create-change-set') 'Signed abort-staged-successor recovery did not create a review-only change set.'
+        }
+        finally {
+            Write-JsonFile -Path $approvedAuthWalletTransitionRecordPath -Value $authWalletTransitionRecord -Depth 8
+        }
+    }
+
+    Invoke-FocusedTest -Name 'auth wallet wrapper consumes only the signed report and never directly parses the record' -Body {
+        $guardSource = Get-Content -LiteralPath $guardPath -Raw
+        Assert-Condition ($guardSource -notmatch '\$authWalletTransitionRecordText') 'Auth/wallet wrapper retained a direct transition-record text read.'
+        Assert-Condition ($guardSource -notmatch '\$authWalletTransitionRecord\.content') 'Auth/wallet wrapper retained direct parsed-record field access.'
+        Assert-Condition ($guardSource -match '\$validation\.PSObject\.Properties\[''predecessorTransitionSha256''\]') 'Auth/wallet wrapper does not require the validator-reported signed predecessor.'
+
+        Set-FakeAuthWalletValidationFixture `
+            -CanonicalSha256 $authWalletTransitionRecordSha256 `
+            -CurrentStateSha256 $authWalletAdoptionStateSha256 `
+            -TargetStateSha256 $authWalletTransitionTargetStateSha256 `
+            -AuthorityRegistrySha256 $authWalletTransitionAuthorityRegistrySha256 `
+            -Operation 'STAGE_SUCCESSOR' `
+            -FieldName 'AUTH_IDENTITY_HMAC_KEY_RING_JSON' `
+            -InitialValidationAt $authWalletValidationAt `
+            -Variant 'FAIL_ALWAYS'
+        Clear-AwsMarker
+        $arguments = Copy-ArgumentMap -Map $authWalletTransitionArguments
+        $arguments.Action = 'Plan'
+        $arguments.AuthWalletTransitionRecordFile = Join-Path $temporaryRoot 'untrusted-record-does-not-exist.json'
+        $result = Invoke-Guard -Arguments $arguments
+        Assert-Condition (-not $result.Succeeded) 'AUTH_WALLET_TRANSITION accepted an untrusted nonexistent record path.'
+        Assert-Condition ($result.Output -match 'malformed, stale, unauthorized, or deployment-mismatched') 'The secure validator was not the first component to reject the untrusted path.'
+        Assert-Condition (@(Get-Content -LiteralPath $authWalletValidatorMarkerPath).Count -eq 1) 'The untrusted path was not rejected by the first secure validation pass.'
+        Assert-Condition ((Get-AwsMarkerText) -eq '') 'Untrusted auth/wallet record path reached AWS discovery.'
+        $env:FAKE_AUTH_WALLET_VALIDATOR_VARIANT = ''
+    }
+
+    Invoke-FocusedTest -Name 'auth wallet transition rejects unauthorized or malformed validator reports before AWS discovery' -Body {
+        foreach ($variant in @('WRONG_REGISTRY', 'UNAUTHORIZED', 'STRING_ZERO', 'MALFORMED_PREDECESSOR')) {
+            Set-FakeAuthWalletValidationFixture `
+                -CanonicalSha256 $authWalletTransitionRecordSha256 `
+                -CurrentStateSha256 $authWalletAdoptionStateSha256 `
+                -TargetStateSha256 $authWalletTransitionTargetStateSha256 `
+                -AuthorityRegistrySha256 $authWalletTransitionAuthorityRegistrySha256 `
+                -Operation 'STAGE_SUCCESSOR' `
+                -FieldName 'AUTH_IDENTITY_HMAC_KEY_RING_JSON' `
+                -InitialValidationAt $authWalletValidationAt `
+                -Variant $variant
+            Clear-AwsMarker
+            $arguments = Copy-ArgumentMap -Map $authWalletTransitionArguments
+            $arguments.Action = 'Plan'
+            $result = Invoke-Guard -Arguments $arguments
+            Assert-Condition (-not $result.Succeeded) "Auth/wallet transition accepted hostile validator variant $variant."
+            Assert-Condition ((Get-AwsMarkerText) -eq '') "Hostile validator variant $variant reached AWS discovery."
+        }
+        $env:FAKE_AUTH_WALLET_VALIDATOR_VARIANT = ''
+
+        Set-FakeAuthWalletValidationFixture `
+            -CanonicalSha256 $authWalletTransitionRecordSha256 `
+            -CurrentStateSha256 $authWalletAdoptionStateSha256 `
+            -TargetStateSha256 $authWalletTransitionTargetStateSha256 `
+            -AuthorityRegistrySha256 $authWalletTransitionAuthorityRegistrySha256 `
+            -Operation 'STAGE_SUCCESSOR' `
+            -FieldName 'AUTH_IDENTITY_HMAC_KEY_RING_JSON' `
+            -InitialValidationAt $authWalletValidationAt `
+            -Variant 'WRONG_PREDECESSOR'
+        Write-ApplicationStackResponse -ParameterMap $updateApplicationParameterMap -TagMap $authWalletAdoptedStackTags
+        Write-GuardrailStackResponse -ConfigurationSha256 $controlConfigurationSha256
+        Write-TemplateResponse -Path $guardrailTemplateResponsePath -TemplateBody $guardrailTemplateBody
+        Write-TemplateResponse -Path $applicationTemplateResponsePath -TemplateBody $applicationTemplateBody
+        Clear-AwsMarker
+        $wrongPredecessorArguments = Copy-ArgumentMap -Map $authWalletTransitionArguments
+        $wrongPredecessorArguments.Action = 'Plan'
+        $wrongPredecessor = Invoke-Guard -Arguments $wrongPredecessorArguments
+        Assert-Condition (-not $wrongPredecessor.Succeeded) 'Auth/wallet transition accepted a signed predecessor that did not match the deployed chain head.'
+        Assert-Condition ($wrongPredecessor.Output -match 'chain head does not match the signed transition predecessor') 'Wrong predecessor rejection did not identify the signed chain binding.'
+        Assert-Condition ((Get-AwsMarkerText) -notmatch 's3api get-object|cloudformation create-change-set') 'Wrong auth/wallet predecessor reached artifact reads or change-set creation.'
+        $env:FAKE_AUTH_WALLET_VALIDATOR_VARIANT = ''
+
+        Set-FakeAuthWalletValidationFixture `
+            -CanonicalSha256 $authWalletTransitionRecordSha256 `
+            -CurrentStateSha256 $authWalletAdoptionStateSha256 `
+            -TargetStateSha256 $authWalletTransitionTargetStateSha256 `
+            -AuthorityRegistrySha256 $authWalletTransitionAuthorityRegistrySha256 `
+            -Operation 'STAGE_SUCCESSOR' `
+            -FieldName 'AUTH_IDENTITY_HMAC_KEY_RING_JSON' `
+            -InitialValidationAt $authWalletValidationAt `
+            -Variant 'CURRENT_BINDING_MISMATCH'
+        Clear-AwsMarker
+        $mismatchedCurrentArguments = Copy-ArgumentMap -Map $authWalletTransitionArguments
+        $mismatchedCurrentArguments.Action = 'Plan'
+        $mismatchedCurrentArguments.AuthWalletTransitionCurrentVersionId = 'auth_wallet_keys_secret_version_0999'
+        $mismatchedCurrent = Invoke-Guard -Arguments $mismatchedCurrentArguments
+        Assert-Condition (-not $mismatchedCurrent.Succeeded) 'Auth/wallet transition accepted a record that did not match the independently named current VersionId.'
+        Assert-Condition ($mismatchedCurrent.Output -match 'exact non-executable outer-VersionId plan') 'Independent current VersionId mismatch rejection was not explicit.'
+        Assert-Condition ((Get-AwsMarkerText) -eq '') 'Independent current VersionId mismatch reached AWS discovery.'
+        $env:FAKE_AUTH_WALLET_VALIDATOR_VARIANT = ''
     }
 
     Invoke-FocusedTest -Name 'UPDATE rejects malformed, unauthorized, and target-mismatched transition records with zero AWS calls' -Body {
@@ -1503,7 +2147,7 @@ try {
                     Name = 'APPLICATION'
                     Arguments = $applicationUpdateArguments
                     CurrentParameters = $updateApplicationParameterMap
-                    CurrentTags = $updateApplicationStackTags
+                    CurrentTags = $authWalletAdoptedStackTags
                 },
                 [pscustomobject]@{
                     Name = 'CREDENTIAL_TRANSITION'
@@ -1524,7 +2168,7 @@ try {
             Assert-Condition ($marker -notmatch 's3api get-object|create-change-set') "$($intentCase.Name) auth/wallet VersionId rotation reached artifact reads or change-set creation."
         }
 
-        Write-ApplicationStackResponse -ParameterMap $updateApplicationParameterMap -TagMap $updateApplicationStackTags
+        Write-ApplicationStackResponse -ParameterMap $updateApplicationParameterMap -TagMap $authWalletAdoptedStackTags
         foreach ($tupleMutation in @(
                 [pscustomobject]@{
                     Parameter = 'AuthWalletKeysSecretArn'
@@ -1550,7 +2194,7 @@ try {
 
         $missingVersionParameters = Copy-ArgumentMap -Map $updateApplicationParameterMap
         [void] $missingVersionParameters.Remove('AuthWalletKeysSecretVersionId')
-        Write-ApplicationStackResponse -ParameterMap $missingVersionParameters -TagMap $updateApplicationStackTags
+        Write-ApplicationStackResponse -ParameterMap $missingVersionParameters -TagMap $authWalletAdoptedStackTags
         Clear-AwsMarker
         $missingArguments = Copy-ArgumentMap -Map $applicationUpdateArguments
         $missingArguments.Action = 'Plan'
@@ -1570,14 +2214,14 @@ try {
                     Name = 'APPLICATION'
                     Arguments = $applicationUpdateArguments
                     CurrentParameters = $updateApplicationParameterMap
-                    CurrentTags = $updateApplicationStackTags
+                    CurrentTags = $authWalletAdoptedStackTags
                     ExpectedError = 'drifted from the approved update current state'
                 },
                 [pscustomobject]@{
                     Name = 'CREDENTIAL_TRANSITION'
                     Arguments = $rotationArguments
                     CurrentParameters = $updateApplicationParameterMap
-                    CurrentTags = $updateApplicationStackTags
+                    CurrentTags = $authWalletAdoptedStackTags
                     ExpectedError = 'does not match the approved transition record'
                 }
             )) {
@@ -1653,7 +2297,7 @@ try {
     }
 
     Invoke-FocusedTest -Name 'credential transition Plan advances one inactive slot without unrelated changes' -Body {
-        Write-ApplicationStackResponse -ParameterMap $updateApplicationParameterMap -TagMap $updateApplicationStackTags
+        Write-ApplicationStackResponse -ParameterMap $updateApplicationParameterMap -TagMap $authWalletAdoptedStackTags
         Write-GuardrailStackResponse -ConfigurationSha256 $controlConfigurationSha256
         Write-TemplateResponse -Path $guardrailTemplateResponsePath -TemplateBody $guardrailTemplateBody
         Write-TemplateResponse -Path $applicationTemplateResponsePath -TemplateBody $applicationTemplateBody
@@ -1669,6 +2313,9 @@ try {
         Assert-Condition ($createLine -match ('Key=credential-predecessor-sha256,Value=' + $transitionRecordSha256)) 'Inactive-slot transition did not extend the deployed credential chain.'
         Assert-Condition ($createLine -match ('Key=credential-transition-sha256,Value=' + $rotationRecordSha256)) 'Inactive-slot transition did not bind its exact record hash.'
         Assert-Condition ($createLine -match ('Key=credential-state-sha256,Value=' + $rotationTargetStateSha256)) 'Inactive-slot transition did not bind its exact target-state hash.'
+        foreach ($authWalletTag in @('auth-wallet-predecessor-sha256', 'auth-wallet-transition-sha256', 'auth-wallet-state-sha256')) {
+            Assert-Condition ($createLine -match ("Key=$authWalletTag,Value=" + [regex]::Escape([string] $authWalletAdoptedStackTags[$authWalletTag]))) "Inactive-slot transition did not preserve auth/wallet-chain tag $authWalletTag."
+        }
         Assert-Condition ($createLine -match [regex]::Escape("ParameterKey=ApiDatabaseSlotBVersionId,ParameterValue=$($rotatedFixedSlotVersions.ApiDatabaseSlotBVersionId)")) 'Inactive-slot transition omitted its exact new VersionId.'
         Assert-Condition ($createLine -match [regex]::Escape("--stack-name $immutableStackId")) 'Inactive-slot transition did not address the immutable stack ARN.'
     }
@@ -1688,7 +2335,7 @@ try {
         Assert-Condition ($missingChain.Output -match 'valid existing credential-chain tag') 'Missing credential-chain rejection was not explicit.'
         Assert-Condition ($missingChainMarker -notmatch 's3api get-object|create-change-set') 'Missing credential chain reached artifact reads or change-set creation.'
 
-        Write-ApplicationStackResponse -ParameterMap $updateApplicationParameterMap -TagMap $updateApplicationStackTags
+        Write-ApplicationStackResponse -ParameterMap $updateApplicationParameterMap -TagMap $authWalletAdoptedStackTags
         Clear-AwsMarker
         $driftedBindingArguments = Copy-ArgumentMap -Map $applicationUpdateArguments
         $driftedBindingArguments.Action = 'Plan'
@@ -1701,7 +2348,7 @@ try {
     }
 
     Invoke-FocusedTest -Name 'APPLICATION Plan permits service activation while preserving pinned credentials and chain tags' -Body {
-        Write-ApplicationStackResponse -ParameterMap $updateApplicationParameterMap -TagMap $updateApplicationStackTags
+        Write-ApplicationStackResponse -ParameterMap $updateApplicationParameterMap -TagMap $authWalletAdoptedStackTags
         Write-GuardrailStackResponse -ConfigurationSha256 $controlConfigurationSha256
         Write-TemplateResponse -Path $guardrailTemplateResponsePath -TemplateBody $guardrailTemplateBody
         Write-TemplateResponse -Path $applicationTemplateResponsePath -TemplateBody $applicationTemplateBody
@@ -1724,7 +2371,10 @@ try {
         }
         Assert-Condition ($createLine -match [regex]::Escape("ParameterKey=AuthWalletKeysSecretVersionId,ParameterValue=$authWalletKeysSecretVersionId")) 'APPLICATION update changed or omitted the auth/wallet secret VersionId.'
         foreach ($credentialTag in @('credential-predecessor-sha256', 'credential-transition-sha256', 'credential-state-sha256')) {
-            Assert-Condition ($createLine -match ("Key=$credentialTag,Value=" + [regex]::Escape([string] $updateApplicationStackTags[$credentialTag]))) "APPLICATION update did not preserve credential-chain tag $credentialTag."
+            Assert-Condition ($createLine -match ("Key=$credentialTag,Value=" + [regex]::Escape([string] $authWalletAdoptedStackTags[$credentialTag]))) "APPLICATION update did not preserve credential-chain tag $credentialTag."
+        }
+        foreach ($authWalletTag in @('auth-wallet-predecessor-sha256', 'auth-wallet-transition-sha256', 'auth-wallet-state-sha256')) {
+            Assert-Condition ($createLine -match ("Key=$authWalletTag,Value=" + [regex]::Escape([string] $authWalletAdoptedStackTags[$authWalletTag]))) "APPLICATION update did not preserve auth/wallet-chain tag $authWalletTag."
         }
     }
 
@@ -2244,13 +2894,13 @@ try {
         )
 
         foreach ($unsafeChange in $unsafeChanges) {
-            Write-ApplicationStackResponse -ParameterMap $updateApplicationParameterMap -TagMap $updateApplicationStackTags
+            Write-ApplicationStackResponse -ParameterMap $updateApplicationParameterMap -TagMap $authWalletAdoptedStackTags
             Write-GuardrailStackResponse -ConfigurationSha256 $controlConfigurationSha256
             Write-TemplateResponse -Path $guardrailTemplateResponsePath -TemplateBody $guardrailTemplateBody
             Write-TemplateResponse -Path $applicationTemplateResponsePath -TemplateBody $applicationTemplateBody
             Write-ChangeSetResponse `
                 -ParameterMap $applicationUpdateParameterMap `
-                -TagMap $updateApplicationStackTags `
+                -TagMap $authWalletAdoptedStackTags `
                 -Description $applicationUpdateExpectedChangeSetDescription `
                 -ChangeSetType 'UPDATE' `
                 -Changes @($unsafeChange.Change)
@@ -2261,6 +2911,307 @@ try {
             Assert-Condition ($result.Output -match [regex]::Escape($unsafeChange.ExpectedError)) "The $($unsafeChange.Name) rejection was not explicit."
             Assert-Condition ($marker -notmatch 'execute-change-set') "UPDATE executed after $($unsafeChange.Name)."
         }
+    }
+
+    Invoke-FocusedTest -Name 'auth wallet Deploy rejects functional changes outside the exact two API changes' -Body {
+        $changeCases = @(
+            [pscustomobject]@{
+                Name = 'missing ApiService change'
+                Changes = @($expectedAuthWalletResourceChanges[0])
+            },
+            [pscustomobject]@{
+                Name = 'unexpected third resource'
+                Changes = @($expectedAuthWalletResourceChanges) + @(
+                    [ordered]@{
+                        Type = 'Resource'
+                        ResourceChange = [ordered]@{
+                            Action = 'Modify'
+                            LogicalResourceId = 'WebService'
+                            ResourceType = 'AWS::ECS::Service'
+                            Replacement = 'False'
+                        }
+                    }
+                )
+            },
+            [pscustomobject]@{
+                Name = 'wrong task-definition replacement'
+                Changes = @(
+                    [ordered]@{
+                        Type = 'Resource'
+                        ResourceChange = [ordered]@{
+                            Action = 'Modify'
+                            LogicalResourceId = 'ApiTaskDefinition'
+                            ResourceType = 'AWS::ECS::TaskDefinition'
+                            Replacement = 'False'
+                        }
+                    },
+                    $expectedAuthWalletResourceChanges[1]
+                )
+            }
+        )
+        foreach ($changeCase in $changeCases) {
+            Set-FakeAuthWalletValidationFixture `
+                -CanonicalSha256 $authWalletTransitionRecordSha256 `
+                -CurrentStateSha256 $authWalletAdoptionStateSha256 `
+                -TargetStateSha256 $authWalletTransitionTargetStateSha256 `
+                -AuthorityRegistrySha256 $authWalletTransitionAuthorityRegistrySha256 `
+                -Operation 'STAGE_SUCCESSOR' `
+                -FieldName 'AUTH_IDENTITY_HMAC_KEY_RING_JSON' `
+                -InitialValidationAt $authWalletValidationAt
+            Write-ApplicationStackResponse -ParameterMap $updateApplicationParameterMap -TagMap $authWalletAdoptedStackTags
+            Write-GuardrailStackResponse -ConfigurationSha256 $controlConfigurationSha256
+            Write-TemplateResponse -Path $guardrailTemplateResponsePath -TemplateBody $guardrailTemplateBody
+            Write-TemplateResponse -Path $applicationTemplateResponsePath -TemplateBody $applicationTemplateBody
+            Write-ChangeSetResponse `
+                -ParameterMap $authWalletTransitionParameterMap `
+                -TagMap $authWalletTransitionStackTags `
+                -Description $authWalletTransitionExpectedChangeSetDescription `
+                -ChangeSetType 'UPDATE' `
+                -Changes $changeCase.Changes
+            Clear-AwsMarker
+            $result = Invoke-Guard -Arguments $authWalletTransitionArguments
+            $marker = Get-AwsMarkerText
+            Assert-Condition (-not $result.Succeeded) "AUTH_WALLET_TRANSITION accepted $($changeCase.Name)."
+            Assert-Condition ($result.Output -match 'AUTH_WALLET_TRANSITION') "$($changeCase.Name) rejection did not identify the strict auth/wallet allowlist."
+            Assert-Condition ($marker -notmatch 'cloudformation execute-change-set') "AUTH_WALLET_TRANSITION executed with $($changeCase.Name)."
+        }
+    }
+
+    Invoke-FocusedTest -Name 'auth wallet adoption Deploy rejects any root resource mutation' -Body {
+        Set-FakeAuthWalletValidationFixture `
+            -CanonicalSha256 $authWalletAdoptionRecordSha256 `
+            -CurrentStateSha256 $authWalletAdoptionStateSha256 `
+            -TargetStateSha256 $authWalletAdoptionStateSha256 `
+            -AuthorityRegistrySha256 $authWalletTransitionAuthorityRegistrySha256 `
+            -Operation 'ADOPT_EXISTING_BINDING' `
+            -FieldName 'ALL_SEVEN_FIELDS' `
+            -InitialValidationAt $authWalletValidationAt
+        Write-ApplicationStackResponse -ParameterMap $updateApplicationParameterMap -TagMap $updateApplicationStackTags
+        Write-GuardrailStackResponse -ConfigurationSha256 $controlConfigurationSha256
+        Write-TemplateResponse -Path $guardrailTemplateResponsePath -TemplateBody $guardrailTemplateBody
+        Write-TemplateResponse -Path $applicationTemplateResponsePath -TemplateBody $applicationTemplateBody
+        Write-ChangeSetResponse `
+            -ParameterMap $updateApplicationParameterMap `
+            -TagMap $authWalletAdoptedStackTags `
+            -Description $authWalletAdoptionExpectedChangeSetDescription `
+            -ChangeSetType 'UPDATE' `
+            -Changes @($expectedAuthWalletResourceChanges[0])
+        Clear-AwsMarker
+        $result = Invoke-Guard -Arguments $authWalletAdoptionArguments
+        $marker = Get-AwsMarkerText
+        Assert-Condition (-not $result.Succeeded) 'Auth/wallet adoption accepted a root resource mutation.'
+        Assert-Condition ($result.Output -match 'adoption permits only zero changes or non-replacing changes') 'Auth/wallet adoption mutation rejection was not explicit.'
+        Assert-Condition ($marker -notmatch 'cloudformation execute-change-set') 'Auth/wallet adoption executed with a root resource mutation.'
+    }
+
+    Invoke-FocusedTest -Name 'auth wallet adoption rejects a mislabeled tag-only resource change' -Body {
+        Set-FakeAuthWalletValidationFixture `
+            -CanonicalSha256 $authWalletAdoptionRecordSha256 `
+            -CurrentStateSha256 $authWalletAdoptionStateSha256 `
+            -TargetStateSha256 $authWalletAdoptionStateSha256 `
+            -AuthorityRegistrySha256 $authWalletTransitionAuthorityRegistrySha256 `
+            -Operation 'ADOPT_EXISTING_BINDING' `
+            -FieldName 'ALL_SEVEN_FIELDS' `
+            -InitialValidationAt $authWalletValidationAt
+        $mislabeledTagChange = [ordered]@{
+            Type = 'Resource'
+            ResourceChange = [ordered]@{
+                Action = 'Modify'
+                LogicalResourceId = 'WebService'
+                ResourceType = 'AWS::ECS::Service'
+                Replacement = 'False'
+                Scope = @('Tags')
+                Details = @(
+                    [ordered]@{
+                        Target = [ordered]@{
+                            Attribute = 'Properties'
+                            RequiresRecreation = 'Never'
+                        }
+                    }
+                )
+            }
+        }
+        Write-ApplicationStackResponse -ParameterMap $updateApplicationParameterMap -TagMap $updateApplicationStackTags
+        Write-GuardrailStackResponse -ConfigurationSha256 $controlConfigurationSha256
+        Write-TemplateResponse -Path $guardrailTemplateResponsePath -TemplateBody $guardrailTemplateBody
+        Write-TemplateResponse -Path $applicationTemplateResponsePath -TemplateBody $applicationTemplateBody
+        Write-ChangeSetResponse `
+            -ParameterMap $updateApplicationParameterMap `
+            -TagMap $authWalletAdoptedStackTags `
+            -Description $authWalletAdoptionExpectedChangeSetDescription `
+            -ChangeSetType 'UPDATE' `
+            -Changes @($mislabeledTagChange)
+        Clear-AwsMarker
+        $result = Invoke-Guard -Arguments $authWalletAdoptionArguments
+        $marker = Get-AwsMarkerText
+        Assert-Condition (-not $result.Succeeded) 'Auth/wallet adoption accepted a tag Scope whose Detail targeted Properties.'
+        Assert-Condition ($result.Output -match 'every Detail target are exactly Tags') 'Mislabeled adoption tag-change rejection was not explicit.'
+        Assert-Condition ($marker -notmatch 'cloudformation execute-change-set') 'Auth/wallet adoption executed a mislabeled tag-only resource change.'
+    }
+
+    Invoke-FocusedTest -Name 'exact auth wallet adoption Deploy executes with reviewed tag propagation' -Body {
+        Set-FakeAuthWalletValidationFixture `
+            -CanonicalSha256 $authWalletAdoptionRecordSha256 `
+            -CurrentStateSha256 $authWalletAdoptionStateSha256 `
+            -TargetStateSha256 $authWalletAdoptionStateSha256 `
+            -AuthorityRegistrySha256 $authWalletTransitionAuthorityRegistrySha256 `
+            -Operation 'ADOPT_EXISTING_BINDING' `
+            -FieldName 'ALL_SEVEN_FIELDS' `
+            -InitialValidationAt $authWalletValidationAt
+        Write-ApplicationStackResponse -ParameterMap $updateApplicationParameterMap -TagMap $updateApplicationStackTags
+        Write-GuardrailStackResponse -ConfigurationSha256 $controlConfigurationSha256
+        Write-TemplateResponse -Path $guardrailTemplateResponsePath -TemplateBody $guardrailTemplateBody
+        Write-TemplateResponse -Path $applicationTemplateResponsePath -TemplateBody $applicationTemplateBody
+        Write-ChangeSetResponse `
+            -ParameterMap $updateApplicationParameterMap `
+            -TagMap $authWalletAdoptedStackTags `
+            -Description $authWalletAdoptionExpectedChangeSetDescription `
+            -ChangeSetType 'UPDATE' `
+            -Changes @($tagOnlyAuthWalletResourceChange)
+        Clear-AwsMarker
+        $result = Invoke-Guard -Arguments $authWalletAdoptionArguments
+        $marker = Get-AwsMarkerText
+        $validationCalls = @(Get-Content -LiteralPath $authWalletValidatorMarkerPath)
+        Assert-Condition $result.Succeeded "Exact auth/wallet adoption Deploy failed: $($result.Output)"
+        Assert-Condition ($marker -match 'cloudformation execute-change-set') 'Exact auth/wallet adoption did not execute the immutable change set with reviewed tag propagation.'
+        Assert-Condition ($validationCalls.Count -eq 3) 'Exact auth/wallet adoption Deploy did not revalidate immediately before execution.'
+        Assert-Condition ($validationCalls[2] -notmatch [regex]::Escape("at=$authWalletValidationAt")) 'Exact auth/wallet adoption Deploy reused its initial validation timestamp.'
+        Assert-Condition ($result.Output -match [regex]::Escape($authWalletAdoptionDeploymentBindingSha256)) 'Exact auth/wallet adoption Deploy did not report its deployment binding.'
+        Assert-Condition ($result.Output -match [regex]::Escape($authWalletTransitionAuthorityRegistrySha256)) 'Exact auth/wallet adoption Deploy did not report its authority registry binding.'
+    }
+
+    Invoke-FocusedTest -Name 'auth wallet Deploy requires its transition-bound acknowledgement' -Body {
+        Set-FakeAuthWalletValidationFixture `
+            -CanonicalSha256 $authWalletTransitionRecordSha256 `
+            -CurrentStateSha256 $authWalletAdoptionStateSha256 `
+            -TargetStateSha256 $authWalletTransitionTargetStateSha256 `
+            -AuthorityRegistrySha256 $authWalletTransitionAuthorityRegistrySha256 `
+            -Operation 'STAGE_SUCCESSOR' `
+            -FieldName 'AUTH_IDENTITY_HMAC_KEY_RING_JSON' `
+            -InitialValidationAt $authWalletValidationAt
+        Write-ApplicationStackResponse -ParameterMap $updateApplicationParameterMap -TagMap $authWalletAdoptedStackTags
+        Write-GuardrailStackResponse -ConfigurationSha256 $controlConfigurationSha256
+        Write-TemplateResponse -Path $guardrailTemplateResponsePath -TemplateBody $guardrailTemplateBody
+        Write-TemplateResponse -Path $applicationTemplateResponsePath -TemplateBody $applicationTemplateBody
+        Write-ChangeSetResponse `
+            -ParameterMap $authWalletTransitionParameterMap `
+            -TagMap $authWalletTransitionStackTags `
+            -Description $authWalletTransitionExpectedChangeSetDescription `
+            -ChangeSetType 'UPDATE' `
+            -Changes $expectedAuthWalletResourceChanges
+        Clear-AwsMarker
+        $arguments = Copy-ArgumentMap -Map $authWalletTransitionArguments
+        $arguments.BillableAcknowledgement = 'NOT_THE_REVIEWED_AUTH_WALLET_ACKNOWLEDGEMENT'
+        $result = Invoke-Guard -Arguments $arguments
+        $marker = Get-AwsMarkerText
+        Assert-Condition (-not $result.Succeeded) 'AUTH_WALLET_TRANSITION accepted an incorrect acknowledgement.'
+        Assert-Condition ($result.Output -match [regex]::Escape($authWalletTransitionBillableAcknowledgement)) 'Auth/wallet acknowledgement rejection did not print the exact required text.'
+        Assert-Condition ($marker -notmatch 'cloudformation execute-change-set') 'AUTH_WALLET_TRANSITION executed with an incorrect acknowledgement.'
+        Assert-Condition (@(Get-Content -LiteralPath $authWalletValidatorMarkerPath).Count -eq 2) 'Incorrect acknowledgement unexpectedly reached final auth/wallet revalidation.'
+    }
+
+    Invoke-FocusedTest -Name 'auth wallet Deploy detects current-state drift before execution' -Body {
+        Set-FakeAuthWalletValidationFixture `
+            -CanonicalSha256 $authWalletTransitionRecordSha256 `
+            -CurrentStateSha256 $authWalletAdoptionStateSha256 `
+            -TargetStateSha256 $authWalletTransitionTargetStateSha256 `
+            -AuthorityRegistrySha256 $authWalletTransitionAuthorityRegistrySha256 `
+            -Operation 'STAGE_SUCCESSOR' `
+            -FieldName 'AUTH_IDENTITY_HMAC_KEY_RING_JSON' `
+            -InitialValidationAt $authWalletValidationAt
+        $driftedAuthWalletParameters = [ordered]@{}
+        foreach ($entry in $updateApplicationParameterMap.GetEnumerator()) {
+            $driftedAuthWalletParameters[$entry.Key] = [string] $entry.Value
+        }
+        $driftedAuthWalletParameters.AuthWalletKeysSecretVersionId = $authWalletTargetVersionId
+        Write-ApplicationStackResponse -ParameterMap $updateApplicationParameterMap -TagMap $authWalletAdoptedStackTags
+        Write-ApplicationStackResponse -ParameterMap $driftedAuthWalletParameters -TagMap $authWalletAdoptedStackTags -Path $applicationStackResponseAfterFirstPath
+        Write-GuardrailStackResponse -ConfigurationSha256 $controlConfigurationSha256
+        Write-TemplateResponse -Path $guardrailTemplateResponsePath -TemplateBody $guardrailTemplateBody
+        Write-TemplateResponse -Path $applicationTemplateResponsePath -TemplateBody $applicationTemplateBody
+        Write-ChangeSetResponse `
+            -ParameterMap $authWalletTransitionParameterMap `
+            -TagMap $authWalletTransitionStackTags `
+            -Description $authWalletTransitionExpectedChangeSetDescription `
+            -ChangeSetType 'UPDATE' `
+            -Changes $expectedAuthWalletResourceChanges
+        Clear-AwsMarker
+        $env:FAKE_AWS_APPLICATION_STACK_RESPONSE_AFTER_FIRST = $applicationStackResponseAfterFirstPath
+        try {
+            $result = Invoke-Guard -Arguments $authWalletTransitionArguments
+            $marker = Get-AwsMarkerText
+            Assert-Condition (-not $result.Succeeded) 'AUTH_WALLET_TRANSITION accepted current-state drift before execution.'
+            Assert-Condition ($result.Output -match 'changed after review and before execution') 'Auth/wallet current-state drift rejection was not explicit.'
+            Assert-Condition ($marker -notmatch 'cloudformation execute-change-set') 'AUTH_WALLET_TRANSITION executed after current-state drift.'
+        }
+        finally {
+            $env:FAKE_AWS_APPLICATION_STACK_RESPONSE_AFTER_FIRST = ''
+        }
+    }
+
+    Invoke-FocusedTest -Name 'auth wallet Deploy expires closed and revalidates with a fresh UTC instant' -Body {
+        Set-FakeAuthWalletValidationFixture `
+            -CanonicalSha256 $authWalletTransitionRecordSha256 `
+            -CurrentStateSha256 $authWalletAdoptionStateSha256 `
+            -TargetStateSha256 $authWalletTransitionTargetStateSha256 `
+            -AuthorityRegistrySha256 $authWalletTransitionAuthorityRegistrySha256 `
+            -Operation 'STAGE_SUCCESSOR' `
+            -FieldName 'AUTH_IDENTITY_HMAC_KEY_RING_JSON' `
+            -InitialValidationAt $authWalletValidationAt `
+            -Variant 'FAIL_FRESH'
+        Write-ApplicationStackResponse -ParameterMap $updateApplicationParameterMap -TagMap $authWalletAdoptedStackTags
+        Write-GuardrailStackResponse -ConfigurationSha256 $controlConfigurationSha256
+        Write-TemplateResponse -Path $guardrailTemplateResponsePath -TemplateBody $guardrailTemplateBody
+        Write-TemplateResponse -Path $applicationTemplateResponsePath -TemplateBody $applicationTemplateBody
+        Write-ChangeSetResponse `
+            -ParameterMap $authWalletTransitionParameterMap `
+            -TagMap $authWalletTransitionStackTags `
+            -Description $authWalletTransitionExpectedChangeSetDescription `
+            -ChangeSetType 'UPDATE' `
+            -Changes $expectedAuthWalletResourceChanges
+        Clear-AwsMarker
+        $result = Invoke-Guard -Arguments $authWalletTransitionArguments
+        $marker = Get-AwsMarkerText
+        $validationCalls = @(Get-Content -LiteralPath $authWalletValidatorMarkerPath)
+        Assert-Condition (-not $result.Succeeded) 'AUTH_WALLET_TRANSITION executed after final validation expired.'
+        Assert-Condition ($result.Output -match 'malformed, stale, unauthorized, or deployment-mismatched') 'Final auth/wallet expiry rejection was not explicit.'
+        Assert-Condition ($marker -notmatch 'cloudformation execute-change-set') 'AUTH_WALLET_TRANSITION executed after final validation expired.'
+        Assert-Condition ($validationCalls.Count -eq 3) 'AUTH_WALLET_TRANSITION did not make its third immediate pre-execution validation.'
+        Assert-Condition ($validationCalls[0] -match [regex]::Escape("at=$authWalletValidationAt")) 'Initial auth/wallet validation did not use the explicit caller timestamp.'
+        Assert-Condition ($validationCalls[2] -match 'at=\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z') 'Final auth/wallet validation did not use a canonical UTC timestamp.'
+        Assert-Condition ($validationCalls[2] -notmatch [regex]::Escape("at=$authWalletValidationAt")) 'Final auth/wallet validation incorrectly reused the initial timestamp.'
+        $env:FAKE_AUTH_WALLET_VALIDATOR_VARIANT = ''
+    }
+
+    Invoke-FocusedTest -Name 'exact auth wallet Deploy executes its immutable transition with reviewed tag propagation' -Body {
+        Set-FakeAuthWalletValidationFixture `
+            -CanonicalSha256 $authWalletTransitionRecordSha256 `
+            -CurrentStateSha256 $authWalletAdoptionStateSha256 `
+            -TargetStateSha256 $authWalletTransitionTargetStateSha256 `
+            -AuthorityRegistrySha256 $authWalletTransitionAuthorityRegistrySha256 `
+            -Operation 'STAGE_SUCCESSOR' `
+            -FieldName 'AUTH_IDENTITY_HMAC_KEY_RING_JSON' `
+            -InitialValidationAt $authWalletValidationAt
+        Write-ApplicationStackResponse -ParameterMap $updateApplicationParameterMap -TagMap $authWalletAdoptedStackTags
+        Write-GuardrailStackResponse -ConfigurationSha256 $controlConfigurationSha256
+        Write-TemplateResponse -Path $guardrailTemplateResponsePath -TemplateBody $guardrailTemplateBody
+        Write-TemplateResponse -Path $applicationTemplateResponsePath -TemplateBody $applicationTemplateBody
+        Write-ChangeSetResponse `
+            -ParameterMap $authWalletTransitionParameterMap `
+            -TagMap $authWalletTransitionStackTags `
+            -Description $authWalletTransitionExpectedChangeSetDescription `
+            -ChangeSetType 'UPDATE' `
+            -Changes (@($expectedAuthWalletResourceChanges) + @($tagOnlyAuthWalletResourceChange))
+        Clear-AwsMarker
+        $result = Invoke-Guard -Arguments $authWalletTransitionArguments
+        $marker = Get-AwsMarkerText
+        $validationCalls = @(Get-Content -LiteralPath $authWalletValidatorMarkerPath)
+        Assert-Condition $result.Succeeded "Exact auth/wallet Deploy failed: $($result.Output)"
+        Assert-Condition ($marker -match 'cloudformation execute-change-set') 'Exact auth/wallet transition did not execute the immutable change set.'
+        Assert-Condition ($validationCalls.Count -eq 3) 'Exact auth/wallet Deploy did not revalidate immediately before execution.'
+        Assert-Condition ($validationCalls[2] -notmatch [regex]::Escape("at=$authWalletValidationAt")) 'Exact auth/wallet Deploy reused its initial validation timestamp.'
+        Assert-Condition ($result.Output -match [regex]::Escape($authWalletTransitionDeploymentBindingSha256)) 'Exact auth/wallet Deploy did not report its deployment binding.'
+        Assert-Condition ($result.Output -match [regex]::Escape($authWalletTransitionAuthorityRegistrySha256)) 'Exact auth/wallet Deploy did not report its authority registry binding.'
     }
 
     Invoke-FocusedTest -Name 'exact UPDATE Deploy executes only with the transition-bound acknowledgement' -Body {
@@ -2287,14 +3238,14 @@ try {
             $lateDriftParameterMap[$entry.Key] = [string] $entry.Value
         }
         $lateDriftParameterMap.AuthWalletKeysSecretVersionId = $authWalletKeysSecretVersionId -replace '0001$', '0002'
-        Write-ApplicationStackResponse -ParameterMap $updateApplicationParameterMap -TagMap $updateApplicationStackTags
-        Write-ApplicationStackResponse -ParameterMap $lateDriftParameterMap -TagMap $updateApplicationStackTags -Path $applicationStackResponseAfterFirstPath
+        Write-ApplicationStackResponse -ParameterMap $updateApplicationParameterMap -TagMap $authWalletAdoptedStackTags
+        Write-ApplicationStackResponse -ParameterMap $lateDriftParameterMap -TagMap $authWalletAdoptedStackTags -Path $applicationStackResponseAfterFirstPath
         Write-GuardrailStackResponse -ConfigurationSha256 $controlConfigurationSha256
         Write-TemplateResponse -Path $guardrailTemplateResponsePath -TemplateBody $guardrailTemplateBody
         Write-TemplateResponse -Path $applicationTemplateResponsePath -TemplateBody $applicationTemplateBody
         Write-ChangeSetResponse `
             -ParameterMap $applicationUpdateParameterMap `
-            -TagMap $updateApplicationStackTags `
+            -TagMap $authWalletAdoptedStackTags `
             -Description $applicationUpdateExpectedChangeSetDescription `
             -ChangeSetType 'UPDATE'
         Clear-AwsMarker
@@ -2312,13 +3263,13 @@ try {
     }
 
     Invoke-FocusedTest -Name 'exact APPLICATION Deploy executes only with the current-state-bound acknowledgement' -Body {
-        Write-ApplicationStackResponse -ParameterMap $updateApplicationParameterMap -TagMap $updateApplicationStackTags
+        Write-ApplicationStackResponse -ParameterMap $updateApplicationParameterMap -TagMap $authWalletAdoptedStackTags
         Write-GuardrailStackResponse -ConfigurationSha256 $controlConfigurationSha256
         Write-TemplateResponse -Path $guardrailTemplateResponsePath -TemplateBody $guardrailTemplateBody
         Write-TemplateResponse -Path $applicationTemplateResponsePath -TemplateBody $applicationTemplateBody
         Write-ChangeSetResponse `
             -ParameterMap $applicationUpdateParameterMap `
-            -TagMap $updateApplicationStackTags `
+            -TagMap $authWalletAdoptedStackTags `
             -Description $applicationUpdateExpectedChangeSetDescription `
             -ChangeSetType 'UPDATE'
         Clear-AwsMarker
@@ -2369,6 +3320,17 @@ finally {
     $env:FAKE_AWS_ARTIFACT_OBJECT_SOURCE = $originalEnvironment.FAKE_AWS_ARTIFACT_OBJECT_SOURCE
     $env:FAKE_AWS_OBSERVABILITY_ARTIFACT_OBJECT_SOURCE = $originalEnvironment.FAKE_AWS_OBSERVABILITY_ARTIFACT_OBJECT_SOURCE
     $env:FAKE_AWS_MANAGED_PREFIX_LIST_RESPONSE = $originalEnvironment.FAKE_AWS_MANAGED_PREFIX_LIST_RESPONSE
+    $env:FAKE_REAL_NODE = $originalEnvironment.FAKE_REAL_NODE
+    $env:FAKE_AUTH_WALLET_VALIDATOR_MARKER = $originalEnvironment.FAKE_AUTH_WALLET_VALIDATOR_MARKER
+    $env:FAKE_AUTH_WALLET_VALIDATOR_VARIANT = $originalEnvironment.FAKE_AUTH_WALLET_VALIDATOR_VARIANT
+    $env:FAKE_AUTH_WALLET_CANONICAL_SHA256 = $originalEnvironment.FAKE_AUTH_WALLET_CANONICAL_SHA256
+    $env:FAKE_AUTH_WALLET_CURRENT_STATE_SHA256 = $originalEnvironment.FAKE_AUTH_WALLET_CURRENT_STATE_SHA256
+    $env:FAKE_AUTH_WALLET_TARGET_STATE_SHA256 = $originalEnvironment.FAKE_AUTH_WALLET_TARGET_STATE_SHA256
+    $env:FAKE_AUTH_WALLET_PREDECESSOR_TRANSITION_SHA256 = $originalEnvironment.FAKE_AUTH_WALLET_PREDECESSOR_TRANSITION_SHA256
+    $env:FAKE_AUTH_WALLET_AUTHORITY_REGISTRY_SHA256 = $originalEnvironment.FAKE_AUTH_WALLET_AUTHORITY_REGISTRY_SHA256
+    $env:FAKE_AUTH_WALLET_OPERATION = $originalEnvironment.FAKE_AUTH_WALLET_OPERATION
+    $env:FAKE_AUTH_WALLET_FIELD_NAME = $originalEnvironment.FAKE_AUTH_WALLET_FIELD_NAME
+    $env:FAKE_AUTH_WALLET_INITIAL_VALIDATION_AT = $originalEnvironment.FAKE_AUTH_WALLET_INITIAL_VALIDATION_AT
 
     $resolvedTransitionDirectory = [System.IO.Path]::GetFullPath($localTransitionDirectory)
     $transitionDirectoryPrefix = $resolvedTransitionDirectory.TrimEnd(
@@ -2383,6 +3345,16 @@ finally {
             (Test-Path -LiteralPath $resolvedTransitionRecordPath -PathType Leaf)
         ) {
             Remove-Item -LiteralPath $resolvedTransitionRecordPath -Force
+        }
+    }
+    foreach ($authWalletRecordPath in @($approvedAuthWalletAdoptionRecordPath, $approvedAuthWalletTransitionRecordPath)) {
+        $resolvedAuthWalletRecordPath = [System.IO.Path]::GetFullPath($authWalletRecordPath)
+        if (
+            $resolvedAuthWalletRecordPath.StartsWith($transitionDirectoryPrefix, [System.StringComparison]::OrdinalIgnoreCase) -and
+            ([System.IO.Path]::GetFileName($resolvedAuthWalletRecordPath) -like 'invoke-application-*.auth-wallet-transition.local.json') -and
+            (Test-Path -LiteralPath $resolvedAuthWalletRecordPath -PathType Leaf)
+        ) {
+            Remove-Item -LiteralPath $resolvedAuthWalletRecordPath -Force
         }
     }
 

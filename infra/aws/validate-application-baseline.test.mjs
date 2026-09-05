@@ -255,17 +255,55 @@ test('pins immutable child bytes and the AWS-owned regional S3 delivery boundary
   }
 });
 
-test('binds one exact auth wallet secret version and preserves its auditable update tuple', () => {
+test('binds auth wallet versions to a dedicated signed transition and auditable update tuple', () => {
   for (const fragment of [
     "Assert-RequiredValue -Name 'AuthWalletKeysSecretVersionId'",
     "$AuthWalletKeysSecretVersionId -cnotmatch '^[A-Za-z0-9_-]{32,64}$'",
     'AuthWalletKeysSecretVersionId = $AuthWalletKeysSecretVersionId',
-    '$immutableAuthWalletBindings = [ordered]@{',
+    '$expectedCurrentAuthWalletBindings = [ordered]@{',
     '$currentStackParameterMap[$authWalletBinding.Key] -cne [string] $authWalletBinding.Value',
     'A dedicated reviewed auth/wallet transition is required.',
+    "[ValidateSet('APPLICATION', 'CREDENTIAL_TRANSITION', 'AUTH_WALLET_TRANSITION')]",
+    "$isAuthWalletTransition = $UpdateIntent -ceq 'AUTH_WALLET_TRANSITION'",
+    "Assert-RequiredValue -Name 'AuthWalletTransitionAuthorityRegistrySha256'",
+    "Assert-RequiredValue -Name 'AuthWalletTransitionCurrentVersionId'",
+    "Assert-RequiredValue -Name 'AuthWalletTransitionOperation'",
+    "Assert-RequiredValue -Name 'AuthWalletTransitionFieldName'",
+    'productionAuthorityValidated',
+    'signatureValidated',
+    'authorityRegistrySha256',
+    'ABORT_STAGED_SUCCESSOR',
+    '$authWalletValidationOne = Invoke-AuthWalletTransitionValidation',
+    "PSObject.Properties['predecessorTransitionSha256']",
+    '$authWalletPredecessorTransitionSha256',
+    '$authWalletTransitionDeploymentBindingSha256',
+    "'auth-wallet-transition-sha256'",
+    '$freshAuthWalletValidationAt',
+    '$reviewedResourceChanges.Count -lt 2',
+    '$isTagOnlyResourceChange',
+    '$resourceChangeScope.Count -eq 1',
+    "[string] $resourceChangeScope[0] -ceq 'Tags'",
+    "[string] (Get-OptionalPropertyValue -InputObject $resourceChangeTarget -Name 'Attribute') -cne 'Tags'",
+    '$observedAuthWalletFunctionalResourceChanges',
+    "'ApiTaskDefinition'",
+    "'ApiService'",
   ]) {
     assert.ok(deploymentGuardSource.includes(fragment), `Deployment guard is missing ${fragment}`);
     assert.ok(validatorSource.includes(fragment), `Static guard contract is missing ${fragment}`);
+  }
+  for (const forbiddenAuthWalletRecordRead of [
+    '$authWalletTransitionRecordText',
+    '$authWalletTransitionRecord.content',
+    '[System.IO.File]::ReadAllText($resolvedAuthWalletTransitionRecord)',
+  ]) {
+    assert.ok(
+      !deploymentGuardSource.includes(forbiddenAuthWalletRecordRead),
+      `Deployment guard directly reads auth/wallet record JSON: ${forbiddenAuthWalletRecordRead}`,
+    );
+    assert.ok(
+      validatorSource.includes(forbiddenAuthWalletRecordRead),
+      `Static guard contract does not prohibit direct auth/wallet record read: ${forbiddenAuthWalletRecordRead}`,
+    );
   }
 });
 

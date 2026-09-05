@@ -50,8 +50,8 @@ Exact non-null S3 VersionId for the observability child template object.
 
 .PARAMETER AuthWalletKeysSecretVersionId
 Exact 32-64 character Secrets Manager VersionId shared by all seven API
-authentication and wallet key selectors. CREATE requires an exact version;
-UPDATE preserves it until a dedicated reviewed auth/wallet transition exists.
+authentication and wallet key selectors. APPLICATION and fixed-slot updates
+preserve it; AUTH_WALLET_TRANSITION alone may adopt or advance its signed state.
 
 .PARAMETER RedisOperatorSecretVersionId
 Exact Secrets Manager VersionId for the disabled Redis operator credential, or
@@ -77,7 +77,9 @@ credential transitions also require the local record to name the same ARN.
 Required for UPDATE. APPLICATION permits a non-credential application change
 only while all eleven credential-state version/phase/operator bindings remain
 unchanged. CREDENTIAL_TRANSITION permits only the transition record's exact
-eleven bindings and prohibits unrelated template, parameter, or tag changes.
+eleven bindings. AUTH_WALLET_TRANSITION permits a signed chain-tag adoption or
+shared outer VersionId change. Both transition intents freeze unrelated template,
+parameter, and base-tag state and preserve the other credential chain.
 
 .PARAMETER FixedSlotCredentialTransitionMode
 Exact lowercase adopt or transition mode for the local fixed-slot validator.
@@ -86,6 +88,33 @@ Exact lowercase adopt or transition mode for the local fixed-slot validator.
 Explicit current canonical UTC instant used by the local transition validator.
 It must be within five minutes of this invocation so an old validation instant
 cannot make expired evidence appear current.
+
+.PARAMETER AuthWalletTransitionRecordFile
+Git-ignored local signed record for the dedicated auth/wallet outer-VersionId
+adoption or transition. It is prohibited for every other update intent.
+
+.PARAMETER AuthWalletTransitionMode
+Exact lowercase adopt or transition mode for the signed auth/wallet validator.
+
+.PARAMETER AuthWalletTransitionValidationAt
+Explicit current canonical UTC instant for the initial offline auth/wallet
+validation. Deploy revalidates at a fresh canonical UTC instant immediately
+before execution.
+
+.PARAMETER AuthWalletTransitionAuthorityRegistrySha256
+Exact lowercase SHA-256 of the validator's checked-in production authority
+registry. This is a digest pin only; callers cannot supply a trust registry.
+
+.PARAMETER AuthWalletTransitionCurrentVersionId
+Exact currently deployed outer Secrets Manager VersionId independently supplied
+by the caller and checked against both the signed record and live stack.
+
+.PARAMETER AuthWalletTransitionOperation
+Exact reviewed signed operation independently selected by the caller.
+
+.PARAMETER AuthWalletTransitionFieldName
+Exact reviewed seven-field adoption marker or individual auth/wallet ring field
+independently selected by the caller.
 
 .PARAMETER AllowAwsApiCalls
 Explicit opt-in required before this script resolves credentials or calls AWS.
@@ -174,7 +203,7 @@ param(
 
     [string] $CurrentStackId,
 
-    [ValidateSet('APPLICATION', 'CREDENTIAL_TRANSITION')]
+    [ValidateSet('APPLICATION', 'CREDENTIAL_TRANSITION', 'AUTH_WALLET_TRANSITION')]
     [string] $UpdateIntent,
 
     [string] $FixedSlotCredentialTransitionRecordFile,
@@ -183,6 +212,21 @@ param(
     [string] $FixedSlotCredentialTransitionMode,
 
     [string] $FixedSlotCredentialTransitionValidationAt,
+
+    [string] $AuthWalletTransitionRecordFile,
+
+    [ValidateSet('adopt', 'transition')]
+    [string] $AuthWalletTransitionMode,
+
+    [string] $AuthWalletTransitionValidationAt,
+
+    [string] $AuthWalletTransitionAuthorityRegistrySha256,
+
+    [string] $AuthWalletTransitionCurrentVersionId,
+
+    [string] $AuthWalletTransitionOperation,
+
+    [string] $AuthWalletTransitionFieldName,
 
     [string[]] $ParameterOverride = @(),
 
@@ -210,6 +254,7 @@ $observabilityValidatorPath = Join-Path $PSScriptRoot 'validate-application-obse
 $billingRecordValidatorPath = Join-Path $PSScriptRoot 'validate-billing-control-record.mjs'
 $acmDnsRecordValidatorPath = Join-Path $PSScriptRoot 'validate-acm-dns-control-record.mjs'
 $fixedSlotCredentialTransitionValidatorPath = Join-Path $PSScriptRoot 'validate-fixed-slot-credential-transition.mjs'
+$authWalletTransitionValidatorPath = Join-Path $PSScriptRoot 'validate-auth-wallet-secret-version-transition.mjs'
 $accountGuardrailTemplatePath = Join-Path $PSScriptRoot 'account-guardrails.yaml'
 $resolvedTemplate = [System.IO.Path]::GetFullPath($TemplateFile)
 $resolvedWorkloadBoundariesTemplate = [System.IO.Path]::GetFullPath($WorkloadBoundariesTemplateFile)
@@ -219,6 +264,7 @@ function Assert-RequiredValue {
     param(
         [string] $Name,
         [AllowNull()]
+        [AllowEmptyString()]
         [string] $Value
     )
 
@@ -426,6 +472,122 @@ function Invoke-FixedSlotCredentialTransitionValidation {
     return $validation
 }
 
+function Invoke-AuthWalletTransitionValidation {
+    param(
+        [string] $RecordPath,
+        [string] $Mode,
+        [string] $ValidationAt,
+        [string] $ExpectedStackId,
+        [string] $ExpectedSecretArn,
+        [string] $ExpectedKmsKeyArn,
+        [string] $ExpectedCurrentVersionId,
+        [string] $ExpectedTargetVersionId,
+        [string] $ExpectedOperation,
+        [string] $ExpectedFieldName,
+        [string] $ExpectedAuthorityRegistrySha256
+    )
+
+    $validationOutput = @(& $nodeCommand.Source @(
+            $authWalletTransitionValidatorPath,
+            '--record', $RecordPath,
+            '--mode', $Mode,
+            '--at', $ValidationAt,
+            '--expected-account', $AccountId,
+            '--expected-region', $Region,
+            '--expected-stack', $StackName,
+            '--expected-stack-id', $ExpectedStackId,
+            '--expected-environment', $EnvironmentName,
+            '--expected-parent-template-sha256', $templateSha256,
+            '--expected-workload-template-sha256', $workloadBoundariesTemplateSha256,
+            '--expected-secret-arn', $ExpectedSecretArn,
+            '--expected-kms-key-arn', $ExpectedKmsKeyArn,
+            '--expected-current-version-id', $ExpectedCurrentVersionId,
+            '--expected-target-version-id', $ExpectedTargetVersionId,
+            '--json'
+        ) 2>&1)
+    $validationExitCode = $LASTEXITCODE
+    if ($validationExitCode -ne 0) {
+        throw 'The auth/wallet transition record is malformed, stale, unauthorized, or deployment-mismatched. No AWS calls were made.'
+    }
+    try {
+        $validation = (($validationOutput | ForEach-Object { $_.ToString() }) -join "`n") | ConvertFrom-Json
+    }
+    catch {
+        throw 'Auth/wallet transition validation did not return a valid local report. No AWS calls were made.'
+    }
+
+    foreach ($trueProperty in @('ok', 'readyForAuthorizedPlan', 'productionAuthorityValidated', 'signatureValidated')) {
+        $property = $validation.PSObject.Properties[$trueProperty]
+        if ($null -eq $property -or $property.Value -isnot [bool] -or $property.Value -ne $true) {
+            throw "Auth/wallet transition validation did not return exact true '$trueProperty' authority."
+        }
+    }
+    if (
+        [string] $validation.mode -cne $Mode -or
+        [string] $validation.operation -cne $ExpectedOperation -or
+        [string] $validation.fieldName -cne $ExpectedFieldName -or
+        $null -eq $validation.PSObject.Properties['errors'] -or
+        @($validation.errors).Count -ne 0
+    ) {
+        throw 'Auth/wallet transition validation did not match the exact signed operation, field, and mode.'
+    }
+    foreach ($counterProperty in @(
+            'externalCallsMade',
+            'awsCallsMade',
+            'databaseConnectionsMade',
+            'redisConnectionsMade',
+            'dnsQueriesMade',
+            'httpRequestsMade',
+            'resourcesCreated',
+            'credentialBytesRead',
+            'filesWritten'
+        )) {
+        $counter = $validation.PSObject.Properties[$counterProperty]
+        if (
+            $null -eq $counter -or
+            $counter.Value -is [bool] -or
+            $counter.Value -is [string] -or
+            $counter.Value -notin @([byte] 0, [sbyte] 0, [int16] 0, [uint16] 0, [int32] 0, [uint32] 0, [int64] 0, [uint64] 0, [single] 0, [double] 0, [decimal] 0)
+        ) {
+            throw "Auth/wallet transition validation did not return exact numeric zero '$counterProperty'."
+        }
+    }
+    foreach ($hashProperty in @('canonicalSha256', 'currentStateSha256', 'targetStateSha256', 'authorityRegistrySha256')) {
+        if ([string] $validation.$hashProperty -cnotmatch '^[a-f0-9]{64}$') {
+            throw "Auth/wallet transition validation did not return a valid $hashProperty binding."
+        }
+    }
+    $predecessorTransitionProperty = $validation.PSObject.Properties['predecessorTransitionSha256']
+    $predecessorTransitionSha256 = if ($null -eq $predecessorTransitionProperty) { $null } else { [string] $predecessorTransitionProperty.Value }
+    if (
+        ($Mode -ceq 'adopt' -and $predecessorTransitionSha256 -cne 'NONE') -or
+        ($Mode -ceq 'transition' -and $predecessorTransitionSha256 -cnotmatch '^[a-f0-9]{64}$')
+    ) {
+        throw 'Auth/wallet transition validation did not return the exact signed predecessor transition binding.'
+    }
+    if ([string] $validation.authorityRegistrySha256 -cne $ExpectedAuthorityRegistrySha256) {
+        throw 'Auth/wallet transition validation used a different production authority registry than the exact caller-pinned digest.'
+    }
+    $planProperty = $validation.PSObject.Properties['plan']
+    $plan = if ($null -eq $planProperty) { $null } else { $planProperty.Value }
+    if (
+        $null -eq $plan -or
+        [string] $plan.kind -cne 'LOCAL_ONLY_NON_EXECUTABLE_AUTH_WALLET_VERSION_PLAN' -or
+        [string] $plan.operation -cne $ExpectedOperation -or
+        [string] $plan.fieldName -cne $ExpectedFieldName -or
+        [string] $plan.versionParameter -cne 'AuthWalletKeysSecretVersionId' -or
+        [string] $plan.currentVersionId -cne $ExpectedCurrentVersionId -or
+        [string] $plan.targetVersionId -cne $ExpectedTargetVersionId -or
+        $plan.executionAllowed -isnot [bool] -or
+        $plan.executionAllowed -ne $false -or
+        $plan.separateAuthorizationRequired -isnot [bool] -or
+        $plan.separateAuthorizationRequired -ne $true
+    ) {
+        throw 'Auth/wallet transition validation did not return the exact non-executable outer-VersionId plan.'
+    }
+    return $validation
+}
+
 function Assert-VersionedChildArtifact {
     param(
         [string] $ArtifactLabel,
@@ -597,6 +759,9 @@ if (-not (Test-Path -LiteralPath $acmDnsRecordValidatorPath -PathType Leaf)) {
 if (-not (Test-Path -LiteralPath $fixedSlotCredentialTransitionValidatorPath -PathType Leaf)) {
     throw "Fixed-slot credential transition validator was not found: $fixedSlotCredentialTransitionValidatorPath"
 }
+if (-not (Test-Path -LiteralPath $authWalletTransitionValidatorPath -PathType Leaf)) {
+    throw "Auth/wallet transition validator was not found: $authWalletTransitionValidatorPath"
+}
 
 $nodeCommand = Get-Command node -ErrorAction SilentlyContinue
 if ($null -eq $nodeCommand) {
@@ -707,13 +872,27 @@ $fixedSlotTargetStateSha256 = $null
 $fixedSlotTransitionDeploymentBindingSha256 = $null
 $fixedSlotCurrentBindings = $null
 $fixedSlotTargetBindings = $null
+$authWalletTransitionValidation = $null
+$authWalletTransitionRecordSha256 = $null
+$authWalletCurrentStateSha256 = $null
+$authWalletTargetStateSha256 = $null
+$authWalletPredecessorTransitionSha256 = $null
+$authWalletTransitionDeploymentBindingSha256 = $null
+$authWalletCurrentVersionId = $null
+$authWalletTargetVersionId = $null
+$validatedAuthWalletTransitionOperation = $null
+$validatedAuthWalletTransitionFieldName = $null
+$resolvedAuthWalletTransitionRecord = $null
+$authWalletTransitionRecordRawShaBefore = $null
 $currentStackParameterSnapshotSha256 = $null
 $currentStackTagSnapshotSha256 = $null
 $currentApplicationTemplateSha256 = $null
 $currentStackBindingSha256 = $null
 $isApplicationUpdate = $false
 $isCredentialTransition = $false
+$isAuthWalletTransition = $false
 $preservedCredentialTags = $null
+$preservedAuthWalletTags = $null
 $credentialVersionValues = [ordered]@{
     RedisOperatorSecretVersionId = $RedisOperatorSecretVersionId
     ApiDatabaseSlotAVersionId = $ApiDatabaseSlotAVersionId
@@ -836,9 +1015,16 @@ if ($Action -in @('Plan', 'Deploy')) {
             -not [string]::IsNullOrWhiteSpace($CurrentStackId) -or
             -not [string]::IsNullOrWhiteSpace($FixedSlotCredentialTransitionRecordFile) -or
             -not [string]::IsNullOrWhiteSpace($FixedSlotCredentialTransitionMode) -or
-            -not [string]::IsNullOrWhiteSpace($FixedSlotCredentialTransitionValidationAt)
+            -not [string]::IsNullOrWhiteSpace($FixedSlotCredentialTransitionValidationAt) -or
+            -not [string]::IsNullOrWhiteSpace($AuthWalletTransitionRecordFile) -or
+            -not [string]::IsNullOrWhiteSpace($AuthWalletTransitionMode) -or
+            -not [string]::IsNullOrWhiteSpace($AuthWalletTransitionValidationAt) -or
+            -not [string]::IsNullOrWhiteSpace($AuthWalletTransitionAuthorityRegistrySha256) -or
+            -not [string]::IsNullOrWhiteSpace($AuthWalletTransitionCurrentVersionId) -or
+            -not [string]::IsNullOrWhiteSpace($AuthWalletTransitionOperation) -or
+            -not [string]::IsNullOrWhiteSpace($AuthWalletTransitionFieldName)
         ) {
-            throw 'CREATE must not supply UPDATE-only stack or credential-transition inputs.'
+            throw 'CREATE must not supply UPDATE-only stack or transition inputs.'
         }
         if ($unpinnedVersionCount -ne 7) {
             throw 'CREATE requires all seven credential-state VersionId values to be UNPINNED.'
@@ -865,8 +1051,9 @@ if ($Action -in @('Plan', 'Deploy')) {
         Assert-RequiredValue -Name 'UpdateIntent' -Value $UpdateIntent
         $isApplicationUpdate = $UpdateIntent -ceq 'APPLICATION'
         $isCredentialTransition = $UpdateIntent -ceq 'CREDENTIAL_TRANSITION'
-        if (-not $isApplicationUpdate -and -not $isCredentialTransition) {
-            throw 'UpdateIntent must use exact uppercase APPLICATION or CREDENTIAL_TRANSITION.'
+        $isAuthWalletTransition = $UpdateIntent -ceq 'AUTH_WALLET_TRANSITION'
+        if (-not $isApplicationUpdate -and -not $isCredentialTransition -and -not $isAuthWalletTransition) {
+            throw 'UpdateIntent must use exact uppercase APPLICATION, CREDENTIAL_TRANSITION, or AUTH_WALLET_TRANSITION.'
         }
         $expectedCurrentStackIdPattern = '^arn:' + [regex]::Escape($requestedPartition) + ':cloudformation:' + [regex]::Escape($Region) + ':' + [regex]::Escape($AccountId) + ':stack/' + [regex]::Escape($StackName) + '/[A-Za-z0-9-]{8,64}$'
         if ($CurrentStackId -cnotmatch $expectedCurrentStackIdPattern) {
@@ -884,14 +1071,7 @@ if ($Action -in @('Plan', 'Deploy')) {
             }
         }
 
-        if ($isApplicationUpdate) {
-            if (
-                -not [string]::IsNullOrWhiteSpace($FixedSlotCredentialTransitionRecordFile) -or
-                -not [string]::IsNullOrWhiteSpace($FixedSlotCredentialTransitionMode) -or
-                -not [string]::IsNullOrWhiteSpace($FixedSlotCredentialTransitionValidationAt)
-            ) {
-                throw 'APPLICATION updates must not supply fixed-slot transition evidence or mode inputs.'
-            }
+        if ($isApplicationUpdate -or $isAuthWalletTransition) {
             $fixedSlotTargetBindings = [ordered]@{}
             foreach ($credentialVersion in $credentialVersionValues.GetEnumerator()) {
                 $fixedSlotTargetBindings[$credentialVersion.Key] = [string] $credentialVersion.Value
@@ -905,7 +1085,35 @@ if ($Action -in @('Plan', 'Deploy')) {
                 $fixedSlotTargetBindings[$fixedSlotControl] = [string] $explicitParameterOverrides[$fixedSlotControl]
             }
         }
-        else {
+
+        if ($isApplicationUpdate) {
+            if (
+                -not [string]::IsNullOrWhiteSpace($FixedSlotCredentialTransitionRecordFile) -or
+                -not [string]::IsNullOrWhiteSpace($FixedSlotCredentialTransitionMode) -or
+                -not [string]::IsNullOrWhiteSpace($FixedSlotCredentialTransitionValidationAt) -or
+                -not [string]::IsNullOrWhiteSpace($AuthWalletTransitionRecordFile) -or
+                -not [string]::IsNullOrWhiteSpace($AuthWalletTransitionMode) -or
+                -not [string]::IsNullOrWhiteSpace($AuthWalletTransitionValidationAt) -or
+                -not [string]::IsNullOrWhiteSpace($AuthWalletTransitionAuthorityRegistrySha256) -or
+                -not [string]::IsNullOrWhiteSpace($AuthWalletTransitionCurrentVersionId) -or
+                -not [string]::IsNullOrWhiteSpace($AuthWalletTransitionOperation) -or
+                -not [string]::IsNullOrWhiteSpace($AuthWalletTransitionFieldName)
+            ) {
+                throw 'APPLICATION updates must not supply fixed-slot or auth/wallet transition inputs.'
+            }
+        }
+        elseif ($isCredentialTransition) {
+            if (
+                -not [string]::IsNullOrWhiteSpace($AuthWalletTransitionRecordFile) -or
+                -not [string]::IsNullOrWhiteSpace($AuthWalletTransitionMode) -or
+                -not [string]::IsNullOrWhiteSpace($AuthWalletTransitionValidationAt) -or
+                -not [string]::IsNullOrWhiteSpace($AuthWalletTransitionAuthorityRegistrySha256) -or
+                -not [string]::IsNullOrWhiteSpace($AuthWalletTransitionCurrentVersionId) -or
+                -not [string]::IsNullOrWhiteSpace($AuthWalletTransitionOperation) -or
+                -not [string]::IsNullOrWhiteSpace($AuthWalletTransitionFieldName)
+            ) {
+                throw 'CREDENTIAL_TRANSITION updates must not supply auth/wallet transition inputs.'
+            }
             Assert-RequiredValue -Name 'FixedSlotCredentialTransitionRecordFile' -Value $FixedSlotCredentialTransitionRecordFile
             Assert-RequiredValue -Name 'FixedSlotCredentialTransitionMode' -Value $FixedSlotCredentialTransitionMode
             Assert-RequiredValue -Name 'FixedSlotCredentialTransitionValidationAt' -Value $FixedSlotCredentialTransitionValidationAt
@@ -991,6 +1199,149 @@ if ($Action -in @('Plan', 'Deploy')) {
             ) {
                 throw 'The fixed-slot credential transition operation does not match the explicitly requested mode.'
             }
+        }
+        else {
+            if (
+                -not [string]::IsNullOrWhiteSpace($FixedSlotCredentialTransitionRecordFile) -or
+                -not [string]::IsNullOrWhiteSpace($FixedSlotCredentialTransitionMode) -or
+                -not [string]::IsNullOrWhiteSpace($FixedSlotCredentialTransitionValidationAt)
+            ) {
+                throw 'AUTH_WALLET_TRANSITION updates must not supply fixed-slot transition inputs.'
+            }
+            Assert-RequiredValue -Name 'AuthWalletTransitionRecordFile' -Value $AuthWalletTransitionRecordFile
+            Assert-RequiredValue -Name 'AuthWalletTransitionMode' -Value $AuthWalletTransitionMode
+            Assert-RequiredValue -Name 'AuthWalletTransitionValidationAt' -Value $AuthWalletTransitionValidationAt
+            Assert-RequiredValue -Name 'AuthWalletTransitionAuthorityRegistrySha256' -Value $AuthWalletTransitionAuthorityRegistrySha256
+            Assert-RequiredValue -Name 'AuthWalletTransitionCurrentVersionId' -Value $AuthWalletTransitionCurrentVersionId
+            Assert-RequiredValue -Name 'AuthWalletTransitionOperation' -Value $AuthWalletTransitionOperation
+            Assert-RequiredValue -Name 'AuthWalletTransitionFieldName' -Value $AuthWalletTransitionFieldName
+            if (@('adopt', 'transition') -cnotcontains $AuthWalletTransitionMode) {
+                throw 'AuthWalletTransitionMode must use exact lowercase adopt or transition.'
+            }
+            if ($AuthWalletTransitionAuthorityRegistrySha256 -cnotmatch '^[a-f0-9]{64}$') {
+                throw 'AuthWalletTransitionAuthorityRegistrySha256 must be one exact lowercase SHA-256 digest.'
+            }
+            if ($AuthWalletTransitionCurrentVersionId -cnotmatch '^[A-Za-z0-9_-]{32,64}$') {
+                throw 'AuthWalletTransitionCurrentVersionId must be an exact 32-64 character Secrets Manager VersionId.'
+            }
+
+            $parsedAuthWalletValidationAt = [DateTimeOffset]::MinValue
+            $canonicalAuthWalletValidationAt = $AuthWalletTransitionValidationAt -match '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$' -and
+                [DateTimeOffset]::TryParse(
+                    $AuthWalletTransitionValidationAt,
+                    [System.Globalization.CultureInfo]::InvariantCulture,
+                    [System.Globalization.DateTimeStyles]::AssumeUniversal -bor [System.Globalization.DateTimeStyles]::AdjustToUniversal,
+                    [ref] $parsedAuthWalletValidationAt
+                ) -and
+                $parsedAuthWalletValidationAt.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss'Z'", [System.Globalization.CultureInfo]::InvariantCulture) -ceq $AuthWalletTransitionValidationAt
+            if (-not $canonicalAuthWalletValidationAt) {
+                throw 'AuthWalletTransitionValidationAt must be one canonical UTC instant.'
+            }
+            $authWalletValidationAgeSeconds = ([DateTimeOffset]::UtcNow - $parsedAuthWalletValidationAt).TotalSeconds
+            if ($authWalletValidationAgeSeconds -lt -60 -or $authWalletValidationAgeSeconds -gt 300) {
+                throw 'AuthWalletTransitionValidationAt must be current within the reviewed five-minute window. No AWS calls were made.'
+            }
+
+            foreach ($requiredAuthWalletParameter in @('AuthWalletKeysSecretArn', 'AuthWalletKeysKmsKeyArn')) {
+                if (-not $explicitParameterOverrides.Contains($requiredAuthWalletParameter)) {
+                    throw "AUTH_WALLET_TRANSITION requires explicit '$requiredAuthWalletParameter' before offline record validation. No AWS calls were made."
+                }
+            }
+            $expectedAuthWalletSecretArn = [string] $explicitParameterOverrides.AuthWalletKeysSecretArn
+            $expectedAuthWalletKmsKeyArn = [string] $explicitParameterOverrides.AuthWalletKeysKmsKeyArn
+            $earlyExpectedAuthSecretPattern = '^arn:' + [regex]::Escape($requestedPartition) + ':secretsmanager:' + [regex]::Escape($Region) + ':' + [regex]::Escape($AccountId) + ':secret:[A-Za-z0-9/_+=.@-]+$'
+            $earlyExpectedAuthKmsPattern = '^arn:' + [regex]::Escape($requestedPartition) + ':kms:' + [regex]::Escape($Region) + ':' + [regex]::Escape($AccountId) + ':key/[a-f0-9-]+$'
+            if ($expectedAuthWalletSecretArn -cnotmatch $earlyExpectedAuthSecretPattern -or $expectedAuthWalletKmsKeyArn -cnotmatch $earlyExpectedAuthKmsPattern) {
+                throw 'AUTH_WALLET_TRANSITION requires exact selector-free secret and customer-managed KMS ARNs in the approved account and Region. No AWS calls were made.'
+            }
+
+            $authWalletCurrentVersionId = $AuthWalletTransitionCurrentVersionId
+            $authWalletTargetVersionId = $AuthWalletKeysSecretVersionId
+            $validatedAuthWalletTransitionOperation = $AuthWalletTransitionOperation
+            $validatedAuthWalletTransitionFieldName = $AuthWalletTransitionFieldName
+            if (
+                ($AuthWalletTransitionMode -ceq 'adopt' -and (
+                        $validatedAuthWalletTransitionOperation -cne 'ADOPT_EXISTING_BINDING' -or
+                        $validatedAuthWalletTransitionFieldName -cne 'ALL_SEVEN_FIELDS' -or
+                        $authWalletCurrentVersionId -cne $authWalletTargetVersionId
+                    )) -or
+                ($AuthWalletTransitionMode -ceq 'transition' -and (
+                        $validatedAuthWalletTransitionOperation -ceq 'ADOPT_EXISTING_BINDING' -or
+                        $validatedAuthWalletTransitionFieldName -ceq 'ALL_SEVEN_FIELDS' -or
+                        $authWalletCurrentVersionId -ceq $authWalletTargetVersionId
+                    ))
+            ) {
+                throw 'The auth/wallet transition operation does not match the explicitly requested adopt or transition mode.'
+            }
+            $authRingTransitionFields = @(
+                'AUTH_IDENTITY_HMAC_KEY_RING_JSON',
+                'AUTH_SESSION_HMAC_KEY_RING_JSON',
+                'AUTH_CSRF_HMAC_KEY_RING_JSON'
+            )
+            $walletRingTransitionFields = @(
+                'WALLET_IDENTITY_HMAC_KEY_RING_JSON',
+                'WALLET_CHALLENGE_HMAC_KEY_RING_JSON',
+                'WALLET_METADATA_SEAL_KEY_RING_JSON'
+            )
+            if (
+                $AuthWalletTransitionMode -ceq 'transition' -and
+                (
+                    ($authRingTransitionFields -ccontains $validatedAuthWalletTransitionFieldName -and $validatedAuthWalletTransitionOperation -cnotin @('STAGE_SUCCESSOR', 'ACTIVATE_SUCCESSOR', 'ABORT_STAGED_SUCCESSOR', 'RETIRE_PREDECESSOR')) -or
+                    ($walletRingTransitionFields -ccontains $validatedAuthWalletTransitionFieldName -and $validatedAuthWalletTransitionOperation -cnotin @('ADD_AND_ACTIVATE_SUCCESSOR', 'RETIRE_PREDECESSOR')) -or
+                    ($authRingTransitionFields -cnotcontains $validatedAuthWalletTransitionFieldName -and $walletRingTransitionFields -cnotcontains $validatedAuthWalletTransitionFieldName)
+                )
+            ) {
+                throw 'AuthWalletTransitionOperation and AuthWalletTransitionFieldName must identify one exact reviewed auth or wallet ring transition.'
+            }
+
+            $resolvedAuthWalletTransitionRecord = [System.IO.Path]::GetFullPath($AuthWalletTransitionRecordFile)
+            $authWalletValidationOne = Invoke-AuthWalletTransitionValidation `
+                -RecordPath $resolvedAuthWalletTransitionRecord `
+                -Mode $AuthWalletTransitionMode `
+                -ValidationAt $AuthWalletTransitionValidationAt `
+                -ExpectedStackId $CurrentStackId `
+                -ExpectedSecretArn $expectedAuthWalletSecretArn `
+                -ExpectedKmsKeyArn $expectedAuthWalletKmsKeyArn `
+                -ExpectedCurrentVersionId $authWalletCurrentVersionId `
+                -ExpectedTargetVersionId $authWalletTargetVersionId `
+                -ExpectedOperation $validatedAuthWalletTransitionOperation `
+                -ExpectedFieldName $validatedAuthWalletTransitionFieldName `
+                -ExpectedAuthorityRegistrySha256 $AuthWalletTransitionAuthorityRegistrySha256
+            try {
+                $authWalletTransitionRecordRawShaBefore = (Get-FileHash -LiteralPath $resolvedAuthWalletTransitionRecord -Algorithm SHA256).Hash.ToLowerInvariant()
+            }
+            catch {
+                throw 'The validated auth/wallet transition record could not be hashed stably. No AWS calls were made.'
+            }
+            $authWalletValidationTwo = Invoke-AuthWalletTransitionValidation `
+                -RecordPath $resolvedAuthWalletTransitionRecord `
+                -Mode $AuthWalletTransitionMode `
+                -ValidationAt $AuthWalletTransitionValidationAt `
+                -ExpectedStackId $CurrentStackId `
+                -ExpectedSecretArn $expectedAuthWalletSecretArn `
+                -ExpectedKmsKeyArn $expectedAuthWalletKmsKeyArn `
+                -ExpectedCurrentVersionId $authWalletCurrentVersionId `
+                -ExpectedTargetVersionId $authWalletTargetVersionId `
+                -ExpectedOperation $validatedAuthWalletTransitionOperation `
+                -ExpectedFieldName $validatedAuthWalletTransitionFieldName `
+                -ExpectedAuthorityRegistrySha256 $AuthWalletTransitionAuthorityRegistrySha256
+            $authWalletTransitionRecordRawShaAfterValidation = (Get-FileHash -LiteralPath $resolvedAuthWalletTransitionRecord -Algorithm SHA256).Hash.ToLowerInvariant()
+            if (
+                $authWalletTransitionRecordRawShaBefore -cne $authWalletTransitionRecordRawShaAfterValidation -or
+                [string] $authWalletValidationOne.canonicalSha256 -cne [string] $authWalletValidationTwo.canonicalSha256 -or
+                [string] $authWalletValidationOne.currentStateSha256 -cne [string] $authWalletValidationTwo.currentStateSha256 -or
+                [string] $authWalletValidationOne.targetStateSha256 -cne [string] $authWalletValidationTwo.targetStateSha256 -or
+                [string] $authWalletValidationOne.predecessorTransitionSha256 -cne [string] $authWalletValidationTwo.predecessorTransitionSha256 -or
+                [string] $authWalletValidationOne.authorityRegistrySha256 -cne [string] $authWalletValidationTwo.authorityRegistrySha256
+            ) {
+                throw 'The auth/wallet transition record or authority binding changed during local validation. No AWS calls were made.'
+            }
+            $authWalletTransitionValidation = $authWalletValidationTwo
+            $authWalletTransitionRecordSha256 = [string] $authWalletTransitionValidation.canonicalSha256
+            $authWalletCurrentStateSha256 = [string] $authWalletTransitionValidation.currentStateSha256
+            $authWalletTargetStateSha256 = [string] $authWalletTransitionValidation.targetStateSha256
+            $authWalletPredecessorTransitionSha256 = [string] $authWalletTransitionValidation.predecessorTransitionSha256
+            $authWalletTransitionDeploymentBindingText = "record-sha256=$authWalletTransitionRecordSha256`ncurrent-state-sha256=$authWalletCurrentStateSha256`ntarget-state-sha256=$authWalletTargetStateSha256`npredecessor-transition-sha256=$authWalletPredecessorTransitionSha256`nauthority-registry-sha256=$AuthWalletTransitionAuthorityRegistrySha256`ncurrent-stack-id=$CurrentStackId`nparent-template-sha256=$templateSha256`nworkload-template-sha256=$workloadBoundariesTemplateSha256`nobservability-template-sha256=$observabilityTemplateSha256`nmode=$AuthWalletTransitionMode`noperation=$validatedAuthWalletTransitionOperation`nfield=$validatedAuthWalletTransitionFieldName"
         }
     }
     $workloadBoundariesArtifactKey = "application-workload-boundaries-$workloadBoundariesTemplateSha256.yaml"
@@ -1484,16 +1835,22 @@ if ($Action -in @('Plan', 'Deploy')) {
         if ($currentEnvironment -cne $EnvironmentName) {
             throw "EnvironmentName '$EnvironmentName' does not match the existing stack value '$currentEnvironment'. Create a separate stack for a different environment."
         }
-        $immutableAuthWalletBindings = [ordered]@{
+        $expectedCurrentAuthWalletBindings = [ordered]@{
             AuthWalletKeysSecretArn = [string] $parameterMap.AuthWalletKeysSecretArn
-            AuthWalletKeysSecretVersionId = [string] $parameterMap.AuthWalletKeysSecretVersionId
+            AuthWalletKeysSecretVersionId = if ($isAuthWalletTransition) { $authWalletCurrentVersionId } else { [string] $parameterMap.AuthWalletKeysSecretVersionId }
             AuthWalletKeysKmsKeyArn = [string] $parameterMap.AuthWalletKeysKmsKeyArn
         }
-        foreach ($authWalletBinding in $immutableAuthWalletBindings.GetEnumerator()) {
+        foreach ($authWalletBinding in $expectedCurrentAuthWalletBindings.GetEnumerator()) {
             if (-not $currentStackParameterMap.Contains($authWalletBinding.Key)) {
+                if ($isAuthWalletTransition) {
+                    throw "The existing application stack is missing current auth/wallet binding '$($authWalletBinding.Key)'."
+                }
                 throw "The existing application stack is missing immutable auth/wallet binding '$($authWalletBinding.Key)'. A dedicated reviewed auth/wallet transition is required."
             }
             if ([string] $currentStackParameterMap[$authWalletBinding.Key] -cne [string] $authWalletBinding.Value) {
+                if ($isAuthWalletTransition) {
+                    throw "Existing auth/wallet binding '$($authWalletBinding.Key)' differs from the exact approved current state."
+                }
                 throw "Existing auth/wallet binding '$($authWalletBinding.Key)' differs from the approved target. A dedicated reviewed auth/wallet transition is required."
             }
         }
@@ -1549,15 +1906,76 @@ if ($Action -in @('Plan', 'Deploy')) {
                     -not $currentStackTags.Contains($credentialTagName) -or
                     [string] $currentStackTags[$credentialTagName] -cnotmatch '^(?:NONE|[a-f0-9]{64})$'
                 ) {
-                    throw "APPLICATION update requires a valid existing credential-chain tag '$credentialTagName'."
+                    throw "$UpdateIntent update requires a valid existing credential-chain tag '$credentialTagName'."
                 }
             }
             if ([string] $currentStackTags['credential-transition-sha256'] -ceq 'NONE' -or [string] $currentStackTags['credential-state-sha256'] -ceq 'NONE') {
-                throw 'APPLICATION update requires a completed fixed-slot adoption chain head.'
+                throw "$UpdateIntent update requires a completed fixed-slot adoption chain head."
             }
             $preservedCredentialTags = [ordered]@{}
             foreach ($credentialTagName in $credentialTagNames) {
                 $preservedCredentialTags[$credentialTagName] = [string] $currentStackTags[$credentialTagName]
+            }
+        }
+
+        $authWalletTagNames = @(
+            'auth-wallet-predecessor-sha256',
+            'auth-wallet-transition-sha256',
+            'auth-wallet-state-sha256'
+        )
+        if ($isAuthWalletTransition) {
+            if ($AuthWalletTransitionMode -ceq 'adopt') {
+                foreach ($authWalletTagName in $authWalletTagNames) {
+                    if ($currentStackTags.Contains($authWalletTagName)) {
+                        throw 'Auth/wallet adoption requires an explicitly untracked existing stack without auth/wallet chain tags.'
+                    }
+                }
+            }
+            else {
+                foreach ($authWalletTagName in $authWalletTagNames) {
+                    if (
+                        -not $currentStackTags.Contains($authWalletTagName) -or
+                        [string] $currentStackTags[$authWalletTagName] -cnotmatch '^(?:NONE|[a-f0-9]{64})$'
+                    ) {
+                        throw "Auth/wallet transition requires a valid existing chain tag '$authWalletTagName'."
+                    }
+                }
+                if (
+                    [string] $currentStackTags['auth-wallet-transition-sha256'] -cne $authWalletPredecessorTransitionSha256 -or
+                    [string] $currentStackTags['auth-wallet-state-sha256'] -cne $authWalletCurrentStateSha256
+                ) {
+                    throw 'The existing auth/wallet chain head does not match the signed transition predecessor and current state.'
+                }
+                if ([string] $currentStackTags['auth-wallet-transition-sha256'] -ceq 'NONE' -or [string] $currentStackTags['auth-wallet-state-sha256'] -ceq 'NONE') {
+                    throw 'Auth/wallet transition requires a completed prior auth/wallet chain head.'
+                }
+            }
+        }
+        else {
+            $preservedAuthWalletTags = [ordered]@{}
+            if ($isCredentialTransition -and $FixedSlotCredentialTransitionMode -ceq 'adopt') {
+                foreach ($authWalletTagName in $authWalletTagNames) {
+                    if ($currentStackTags.Contains($authWalletTagName)) {
+                        throw 'Initial fixed-slot adoption requires the auth/wallet chain to remain explicitly untracked.'
+                    }
+                }
+            }
+            else {
+                foreach ($authWalletTagName in $authWalletTagNames) {
+                    if (
+                        -not $currentStackTags.Contains($authWalletTagName) -or
+                        [string] $currentStackTags[$authWalletTagName] -cnotmatch '^(?:NONE|[a-f0-9]{64})$'
+                    ) {
+                        throw "$UpdateIntent update requires a valid existing auth/wallet-chain tag '$authWalletTagName'."
+                    }
+                    $preservedAuthWalletTags[$authWalletTagName] = [string] $currentStackTags[$authWalletTagName]
+                }
+                if (
+                    [string] $preservedAuthWalletTags['auth-wallet-transition-sha256'] -ceq 'NONE' -or
+                    [string] $preservedAuthWalletTags['auth-wallet-state-sha256'] -ceq 'NONE'
+                ) {
+                    throw "$UpdateIntent update requires a completed auth/wallet adoption chain head."
+                }
             }
         }
         $currentApplicationTemplateOutput = & $script:AwsExecutable @(
@@ -1578,7 +1996,7 @@ if ($Action -in @('Plan', 'Deploy')) {
             throw "CloudFormation did not return the current application stack's Original template body."
         }
         $currentApplicationTemplateSha256 = Get-TextSha256 -Value ([string] $currentApplicationTemplate.TemplateBody)
-        if ($isCredentialTransition -and $currentApplicationTemplateSha256 -cne $templateSha256) {
+        if (($isCredentialTransition -or $isAuthWalletTransition) -and $currentApplicationTemplateSha256 -cne $templateSha256) {
             throw 'Credential transitions cannot include a parent-template change; the current deployed and reviewed local parent hashes differ.'
         }
         $currentStackParameterSnapshotSha256 = Get-TextSha256 -Value (ConvertTo-CanonicalTagText -Tags $currentStackParameterMap)
@@ -1588,6 +2006,10 @@ if ($Action -in @('Plan', 'Deploy')) {
         if ($isCredentialTransition) {
             $fixedSlotTransitionDeploymentBindingText += "`ncurrent-stack-binding-sha256=$currentStackBindingSha256"
             $fixedSlotTransitionDeploymentBindingSha256 = Get-TextSha256 -Value $fixedSlotTransitionDeploymentBindingText
+        }
+        elseif ($isAuthWalletTransition) {
+            $authWalletTransitionDeploymentBindingText += "`ncurrent-stack-binding-sha256=$currentStackBindingSha256"
+            $authWalletTransitionDeploymentBindingSha256 = Get-TextSha256 -Value $authWalletTransitionDeploymentBindingText
         }
         foreach ($parameter in $currentStackParameterMap.GetEnumerator()) {
             if ($parameterDefaults.Contains($parameter.Key) -and -not $parameterMap.Contains($parameter.Key)) {
@@ -1718,6 +2140,22 @@ if ($Action -in @('Plan', 'Deploy')) {
             }
         }
     }
+    elseif ($isAuthWalletTransition) {
+        if ($currentStackParameterMap.Count -ne $parameterMap.Count) {
+            throw "Auth/wallet-only UPDATE requires the current and target parameter sets to match exactly (Current=$($currentStackParameterMap.Count), Target=$($parameterMap.Count))."
+        }
+        foreach ($targetParameter in $parameterMap.GetEnumerator()) {
+            if (-not $currentStackParameterMap.Contains($targetParameter.Key)) {
+                throw "Auth/wallet-only UPDATE found target parameter '$($targetParameter.Key)' missing from the current stack."
+            }
+            if (
+                [string] $targetParameter.Key -cne 'AuthWalletKeysSecretVersionId' -and
+                [string] $currentStackParameterMap[$targetParameter.Key] -cne [string] $targetParameter.Value
+            ) {
+                throw "Auth/wallet-only UPDATE cannot change unrelated parameter '$($targetParameter.Key)'."
+            }
+        }
+    }
 
     $stackTags = [ordered]@{
         application = 'crypto-lending'
@@ -1738,8 +2176,9 @@ if ($Action -in @('Plan', 'Deploy')) {
     }
     if ($isCredentialTransition) {
         $currentCredentialTagCount = if ($FixedSlotCredentialTransitionMode -ceq 'adopt') { 0 } else { 3 }
-        if ($currentStackTags.Count -ne ($stackTags.Count + $currentCredentialTagCount)) {
-            throw 'Credential-only UPDATE requires the existing stack to have the exact reviewed base and credential-chain tag set.'
+        $currentAuthWalletTagCount = if ($FixedSlotCredentialTransitionMode -ceq 'adopt') { 0 } else { 3 }
+        if ($currentStackTags.Count -ne ($stackTags.Count + $currentCredentialTagCount + $currentAuthWalletTagCount)) {
+            throw 'Credential-only UPDATE requires the existing stack to have the exact reviewed base, credential-chain, and auth/wallet-chain tag set.'
         }
         foreach ($baseTag in $stackTags.GetEnumerator()) {
             if (
@@ -1761,10 +2200,36 @@ if ($Action -in @('Plan', 'Deploy')) {
         $stackTags['credential-predecessor-sha256'] = [string] $fixedSlotTransitionRecord.predecessor.transitionSha256
         $stackTags['credential-transition-sha256'] = $fixedSlotTransitionRecordSha256
         $stackTags['credential-state-sha256'] = $fixedSlotTargetStateSha256
+        foreach ($authWalletTag in $preservedAuthWalletTags.GetEnumerator()) {
+            $stackTags[$authWalletTag.Key] = [string] $authWalletTag.Value
+        }
+    }
+    elseif ($isAuthWalletTransition) {
+        $currentAuthWalletTagCount = if ($AuthWalletTransitionMode -ceq 'adopt') { 0 } else { 3 }
+        if ($currentStackTags.Count -ne ($stackTags.Count + 3 + $currentAuthWalletTagCount)) {
+            throw 'Auth/wallet-only UPDATE requires the existing stack to have the exact reviewed base, fixed-slot-chain, and auth/wallet-chain tag set.'
+        }
+        foreach ($baseTag in $stackTags.GetEnumerator()) {
+            if (
+                -not $currentStackTags.Contains($baseTag.Key) -or
+                [string] $currentStackTags[$baseTag.Key] -cne [string] $baseTag.Value
+            ) {
+                throw "Auth/wallet-only UPDATE cannot change or repair unrelated stack tag '$($baseTag.Key)'."
+            }
+        }
+        foreach ($credentialTag in $preservedCredentialTags.GetEnumerator()) {
+            $stackTags[$credentialTag.Key] = [string] $credentialTag.Value
+        }
+        $stackTags['auth-wallet-predecessor-sha256'] = $authWalletPredecessorTransitionSha256
+        $stackTags['auth-wallet-transition-sha256'] = $authWalletTransitionRecordSha256
+        $stackTags['auth-wallet-state-sha256'] = $authWalletTargetStateSha256
     }
     elseif ($isApplicationUpdate) {
         foreach ($credentialTag in $preservedCredentialTags.GetEnumerator()) {
             $stackTags[$credentialTag.Key] = [string] $credentialTag.Value
+        }
+        foreach ($authWalletTag in $preservedAuthWalletTags.GetEnumerator()) {
+            $stackTags[$authWalletTag.Key] = [string] $authWalletTag.Value
         }
     }
     $canonicalTags = ConvertTo-CanonicalTagText -Tags $stackTags
@@ -1788,6 +2253,9 @@ if ($Action -in @('Plan', 'Deploy')) {
     }
     if ($isCredentialTransition) {
         $updateDescription += " credential-transition-binding-sha256=$fixedSlotTransitionDeploymentBindingSha256"
+    }
+    elseif ($isAuthWalletTransition) {
+        $updateDescription += " auth-wallet-transition-binding-sha256=$authWalletTransitionDeploymentBindingSha256 auth-wallet-authority-registry-sha256=$AuthWalletTransitionAuthorityRegistrySha256"
     }
     $expectedChangeSetDescription = "KAN-34 template-sha256=$templateSha256 workload-template-sha256=$workloadBoundariesTemplateSha256 workload-binding-sha256=$workloadBoundariesArtifactBindingSha256 observability-template-sha256=$observabilityTemplateSha256 observability-binding-sha256=$observabilityArtifactBindingSha256 parameters-sha256=$parameterSha256 tags-sha256=$tagSha256 control-record-sha256=$controlRecordSha256 acm-dns-record-sha256=$acmDnsRecordSha256 guardrail-policy=$expectedGuardrailPolicyVersion$updateDescription"
 
@@ -1901,7 +2369,17 @@ if ($ChangeSetType -eq 'UPDATE') {
     if ($null -eq $changesProperty -or $null -eq $changesProperty.Value) {
         throw 'The reviewed UPDATE change set did not expose its complete resource-change list.'
     }
-    foreach ($change in @($changesProperty.Value)) {
+    $reviewedResourceChanges = @($changesProperty.Value)
+    if (
+        $isAuthWalletTransition -and
+        $AuthWalletTransitionMode -ceq 'transition' -and
+        $reviewedResourceChanges.Count -lt 2
+    ) {
+        throw 'AUTH_WALLET_TRANSITION requires its two functional API changes; additional changes may only be non-replacing tag propagation.'
+    }
+    $observedAuthWalletLogicalResourceChanges = [System.Collections.Specialized.OrderedDictionary]::new([System.StringComparer]::Ordinal)
+    $observedAuthWalletFunctionalResourceChanges = [System.Collections.Specialized.OrderedDictionary]::new([System.StringComparer]::Ordinal)
+    foreach ($change in $reviewedResourceChanges) {
         if ($null -eq $change -or [string] (Get-OptionalPropertyValue -InputObject $change -Name 'Type') -cne 'Resource') {
             throw 'The reviewed UPDATE change set contains an unrecognized change entry.'
         }
@@ -1913,6 +2391,78 @@ if ($ChangeSetType -eq 'UPDATE') {
         $resourceType = [string] (Get-OptionalPropertyValue -InputObject $resourceChange -Name 'ResourceType')
         $resourceAction = [string] (Get-OptionalPropertyValue -InputObject $resourceChange -Name 'Action')
         $replacement = [string] (Get-OptionalPropertyValue -InputObject $resourceChange -Name 'Replacement')
+        $policyAction = [string] (Get-OptionalPropertyValue -InputObject $resourceChange -Name 'PolicyAction')
+        $resourceChangeScope = @((Get-OptionalPropertyValue -InputObject $resourceChange -Name 'Scope'))
+        $resourceChangeDetails = @((Get-OptionalPropertyValue -InputObject $resourceChange -Name 'Details'))
+        $isTagOnlyResourceChange = (
+            $resourceAction -ceq 'Modify' -and
+            $replacement -ceq 'False' -and
+            [string]::IsNullOrEmpty($policyAction) -and
+            $resourceChangeScope.Count -eq 1 -and
+            [string] $resourceChangeScope[0] -ceq 'Tags' -and
+            $resourceChangeDetails.Count -gt 0
+        )
+        if ($isTagOnlyResourceChange) {
+            foreach ($resourceChangeDetail in $resourceChangeDetails) {
+                $resourceChangeTarget = if ($null -eq $resourceChangeDetail) {
+                    $null
+                }
+                else {
+                    Get-OptionalPropertyValue -InputObject $resourceChangeDetail -Name 'Target'
+                }
+                $detailRequiresRecreation = if ($null -eq $resourceChangeTarget) {
+                    $null
+                }
+                else {
+                    [string] (Get-OptionalPropertyValue -InputObject $resourceChangeTarget -Name 'RequiresRecreation')
+                }
+                if (
+                    $null -eq $resourceChangeDetail -or
+                    $null -eq $resourceChangeTarget -or
+                    [string] (Get-OptionalPropertyValue -InputObject $resourceChangeTarget -Name 'Attribute') -cne 'Tags' -or
+                    -not [string]::IsNullOrEmpty([string] (Get-OptionalPropertyValue -InputObject $resourceChangeTarget -Name 'Name')) -or
+                    (-not [string]::IsNullOrEmpty($detailRequiresRecreation) -and $detailRequiresRecreation -cne 'Never')
+                ) {
+                    $isTagOnlyResourceChange = $false
+                    break
+                }
+            }
+        }
+        if ($isAuthWalletTransition) {
+            if ([string]::IsNullOrWhiteSpace($logicalResourceId) -or [string]::IsNullOrWhiteSpace($resourceType)) {
+                throw 'AUTH_WALLET_TRANSITION change set contains a resource change without an exact logical ID and resource type.'
+            }
+            if ($observedAuthWalletLogicalResourceChanges.Contains($logicalResourceId)) {
+                throw "AUTH_WALLET_TRANSITION change set contains duplicate resource change '$logicalResourceId'."
+            }
+            $observedAuthWalletLogicalResourceChanges[$logicalResourceId] = $true
+            if ($AuthWalletTransitionMode -ceq 'adopt') {
+                if (-not $isTagOnlyResourceChange) {
+                    throw 'AUTH_WALLET_TRANSITION adoption permits only zero changes or non-replacing changes whose Scope and every Detail target are exactly Tags.'
+                }
+                continue
+            }
+            if ($isTagOnlyResourceChange) {
+                continue
+            }
+            if (
+                ($logicalResourceId -ceq 'ApiTaskDefinition' -and (
+                        $resourceType -cne 'AWS::ECS::TaskDefinition' -or
+                        $resourceAction -cne 'Modify' -or
+                        $replacement -cne 'True'
+                    )) -or
+                ($logicalResourceId -ceq 'ApiService' -and (
+                        $resourceType -cne 'AWS::ECS::Service' -or
+                        $resourceAction -cne 'Modify' -or
+                        $replacement -cne 'False'
+                    )) -or
+                $logicalResourceId -cnotin @('ApiTaskDefinition', 'ApiService')
+            ) {
+                throw 'AUTH_WALLET_TRANSITION change set is not the exact reviewed ApiTaskDefinition replacement, ApiService modification, and optional non-replacing tag propagation plan.'
+            }
+            $observedAuthWalletFunctionalResourceChanges[$logicalResourceId] = $true
+            continue
+        }
         if ($logicalResourceId -ceq 'Database' -and (
                 $resourceType -cne 'AWS::RDS::DBInstance' -or
                 $resourceAction -cne 'Modify' -or
@@ -1923,6 +2473,13 @@ if ($ChangeSetType -eq 'UPDATE') {
         if ($logicalResourceId -ceq 'DatabaseCredentialsSecret') {
             throw 'UPDATE change sets must not modify or remove the legacy retained database master secret through this guard. Inventory and retire it separately.'
         }
+    }
+    if (
+        $isAuthWalletTransition -and
+        $AuthWalletTransitionMode -ceq 'transition' -and
+        (-not $observedAuthWalletFunctionalResourceChanges.Contains('ApiTaskDefinition') -or -not $observedAuthWalletFunctionalResourceChanges.Contains('ApiService'))
+    ) {
+        throw 'AUTH_WALLET_TRANSITION change set is missing one of its two exact reviewed API resource changes.'
     }
 }
 
@@ -2118,6 +2675,13 @@ if ($isCredentialTransition) {
     Write-Host "Reviewed fixed-slot target state SHA-256: $fixedSlotTargetStateSha256"
     Write-Host "Reviewed fixed-slot deployment binding SHA-256: $fixedSlotTransitionDeploymentBindingSha256"
 }
+elseif ($isAuthWalletTransition) {
+    Write-Host "Reviewed auth/wallet transition record SHA-256: $authWalletTransitionRecordSha256"
+    Write-Host "Reviewed auth/wallet current state SHA-256: $authWalletCurrentStateSha256"
+    Write-Host "Reviewed auth/wallet target state SHA-256: $authWalletTargetStateSha256"
+    Write-Host "Reviewed auth/wallet authority registry SHA-256: $AuthWalletTransitionAuthorityRegistrySha256"
+    Write-Host "Reviewed auth/wallet deployment binding SHA-256: $authWalletTransitionDeploymentBindingSha256"
+}
 
 $updateAcknowledgement = if ($ChangeSetType -eq 'UPDATE') {
     " CURRENT STACK STATE $currentStackBindingSha256"
@@ -2128,6 +2692,9 @@ else {
 if ($isCredentialTransition) {
     $updateAcknowledgement += " FIXED-SLOT TRANSITION $fixedSlotTransitionRecordSha256 FROM STATE $fixedSlotCurrentStateSha256 TO STATE $fixedSlotTargetStateSha256 BOUND BY $fixedSlotTransitionDeploymentBindingSha256 WITH TAGS $tagSha256"
 }
+elseif ($isAuthWalletTransition) {
+    $updateAcknowledgement += " AUTH-WALLET TRANSITION $authWalletTransitionRecordSha256 FROM STATE $authWalletCurrentStateSha256 TO STATE $authWalletTargetStateSha256 USING AUTHORITY REGISTRY $AuthWalletTransitionAuthorityRegistrySha256 BOUND BY $authWalletTransitionDeploymentBindingSha256 WITH TAGS $tagSha256"
+}
 $expectedAcknowledgement = "EXECUTE IMMUTABLE CHANGE SET $changeSetId FOR IMMUTABLE STACK $stackId WITH PARAMETERS $parameterSha256 WORKLOAD TEMPLATE $workloadBoundariesTemplateSha256 WORKLOAD BINDING $workloadBoundariesArtifactBindingSha256 OBSERVABILITY TEMPLATE $observabilityTemplateSha256 OBSERVABILITY BINDING $observabilityArtifactBindingSha256$updateAcknowledgement USING BILLING CONTROL $controlRecordSha256 AND ACM DNS CONTROL $acmDnsRecordSha256; I ACKNOWLEDGE BILLABLE AWS RESOURCES IN ACCOUNT $AccountId REGION $Region USING PROFILE $Profile"
 if ($BillableAcknowledgement -cne $expectedAcknowledgement) {
     throw @"
@@ -2135,6 +2702,37 @@ Deploy can create RDS, ElastiCache, load balancer, networking, logging, KMS, and
 After reviewing the change set and budget controls, supply this exact acknowledgement:
 $expectedAcknowledgement
 "@
+}
+
+if ($isAuthWalletTransition) {
+    $freshAuthWalletValidationAt = [DateTimeOffset]::UtcNow.ToString("yyyy-MM-ddTHH:mm:ss'Z'", [System.Globalization.CultureInfo]::InvariantCulture)
+    $authWalletTransitionRecordRawShaBeforeExecute = (Get-FileHash -LiteralPath $resolvedAuthWalletTransitionRecord -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($authWalletTransitionRecordRawShaBeforeExecute -cne $authWalletTransitionRecordRawShaBefore) {
+        throw 'The auth/wallet transition record changed before final authorization. Re-run Plan and review a new change set.'
+    }
+    $finalAuthWalletValidation = Invoke-AuthWalletTransitionValidation `
+        -RecordPath $resolvedAuthWalletTransitionRecord `
+        -Mode $AuthWalletTransitionMode `
+        -ValidationAt $freshAuthWalletValidationAt `
+        -ExpectedStackId $CurrentStackId `
+        -ExpectedSecretArn $expectedAuthWalletSecretArn `
+        -ExpectedKmsKeyArn $expectedAuthWalletKmsKeyArn `
+        -ExpectedCurrentVersionId $authWalletCurrentVersionId `
+        -ExpectedTargetVersionId $authWalletTargetVersionId `
+        -ExpectedOperation $validatedAuthWalletTransitionOperation `
+        -ExpectedFieldName $validatedAuthWalletTransitionFieldName `
+        -ExpectedAuthorityRegistrySha256 $AuthWalletTransitionAuthorityRegistrySha256
+    $authWalletTransitionRecordRawShaAfterExecuteValidation = (Get-FileHash -LiteralPath $resolvedAuthWalletTransitionRecord -Algorithm SHA256).Hash.ToLowerInvariant()
+    if (
+        $authWalletTransitionRecordRawShaAfterExecuteValidation -cne $authWalletTransitionRecordRawShaBefore -or
+        [string] $finalAuthWalletValidation.canonicalSha256 -cne $authWalletTransitionRecordSha256 -or
+        [string] $finalAuthWalletValidation.currentStateSha256 -cne $authWalletCurrentStateSha256 -or
+        [string] $finalAuthWalletValidation.targetStateSha256 -cne $authWalletTargetStateSha256 -or
+        [string] $finalAuthWalletValidation.predecessorTransitionSha256 -cne $authWalletPredecessorTransitionSha256 -or
+        [string] $finalAuthWalletValidation.authorityRegistrySha256 -cne $AuthWalletTransitionAuthorityRegistrySha256
+    ) {
+        throw 'The signed auth/wallet transition or authority binding changed before execution. Re-run Plan and review a new change set.'
+    }
 }
 
 Write-Warning "Executing reviewed change set '$ChangeSetName' can create billable AWS resources in account $AccountId ($Region)."

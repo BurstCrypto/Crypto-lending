@@ -3105,9 +3105,33 @@ function validateDeploymentGuard(source, errors) {
     '$credentialVersionValues = [ordered]@{',
     '$unpinnedVersionCount -notin @(0, 7)',
     'RedisOperatorSecretVersionId = $RedisOperatorSecretVersionId',
-    '$immutableAuthWalletBindings = [ordered]@{',
+    '$expectedCurrentAuthWalletBindings = [ordered]@{',
     '$currentStackParameterMap[$authWalletBinding.Key] -cne [string] $authWalletBinding.Value',
     'A dedicated reviewed auth/wallet transition is required.',
+    "[ValidateSet('APPLICATION', 'CREDENTIAL_TRANSITION', 'AUTH_WALLET_TRANSITION')]",
+    "$isAuthWalletTransition = $UpdateIntent -ceq 'AUTH_WALLET_TRANSITION'",
+    "Assert-RequiredValue -Name 'AuthWalletTransitionAuthorityRegistrySha256'",
+    "Assert-RequiredValue -Name 'AuthWalletTransitionCurrentVersionId'",
+    "Assert-RequiredValue -Name 'AuthWalletTransitionOperation'",
+    "Assert-RequiredValue -Name 'AuthWalletTransitionFieldName'",
+    'productionAuthorityValidated',
+    'signatureValidated',
+    'authorityRegistrySha256',
+    'ABORT_STAGED_SUCCESSOR',
+    '$authWalletValidationOne = Invoke-AuthWalletTransitionValidation',
+    "PSObject.Properties['predecessorTransitionSha256']",
+    '$authWalletPredecessorTransitionSha256',
+    '$authWalletTransitionDeploymentBindingSha256',
+    "'auth-wallet-transition-sha256'",
+    '$freshAuthWalletValidationAt',
+    '$reviewedResourceChanges.Count -lt 2',
+    '$isTagOnlyResourceChange',
+    '$resourceChangeScope.Count -eq 1',
+    "[string] $resourceChangeScope[0] -ceq 'Tags'",
+    "[string] (Get-OptionalPropertyValue -InputObject $resourceChangeTarget -Name 'Attribute') -cne 'Tags'",
+    '$observedAuthWalletFunctionalResourceChanges',
+    "'ApiTaskDefinition'",
+    "'ApiService'",
     '$expectedOperationalAlarmTopicPattern',
     "$parameterMap.EnableOperationalAlarms -ceq 'true'",
     'AlarmTopicArn must be explicitly supplied as one existing SNS topic ARN in the approved partition, account, and Region when operational alarms are enabled.',
@@ -3118,7 +3142,6 @@ function validateDeploymentGuard(source, errors) {
     '$changeSetCapabilities.Count -ne 1',
     '$parentChangeSetId',
     '$stackId',
-    "[ValidateSet('APPLICATION', 'CREDENTIAL_TRANSITION')]",
     "Assert-RequiredValue -Name 'UpdateIntent'",
     "$isCredentialTransition = $UpdateIntent -ceq 'CREDENTIAL_TRANSITION'",
     '$fixedSlotTransitionDeploymentBindingSha256',
@@ -3130,6 +3153,20 @@ function validateDeploymentGuard(source, errors) {
   for (const fragment of requiredIdentityGuards) {
     if (!source.includes(fragment)) {
       errors.push(`Deployment guard is missing required identity safeguard: ${fragment}`);
+    }
+  }
+
+  for (const forbiddenAuthWalletRecordRead of [
+    '$authWalletTransitionRecordText',
+    '$authWalletTransitionRecord.content',
+    '[System.IO.File]::ReadAllText($resolvedAuthWalletTransitionRecord)',
+  ]) {
+    if (source.includes(forbiddenAuthWalletRecordRead)) {
+      errors.push(
+        `Deployment guard must consume only the signed auth/wallet validator report, not direct record JSON: ${
+          forbiddenAuthWalletRecordRead
+        }`,
+      );
     }
   }
 

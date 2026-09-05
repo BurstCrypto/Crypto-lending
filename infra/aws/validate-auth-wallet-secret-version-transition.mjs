@@ -1122,6 +1122,8 @@ function verifyRecord(record, options, registry, production) {
     mode: structural.mode,
     operation: ok && structural.operational ? record.content.operation.action : undefined,
     fieldName: ok && structural.operational ? record.content.operation.fieldName : undefined,
+    predecessorTransitionSha256:
+      ok && structural.operational ? record.content.predecessor.transitionSha256 : undefined,
     canonicalSha256: safeRecordSha256(record),
     currentStateSha256:
       ok && structural.operational
