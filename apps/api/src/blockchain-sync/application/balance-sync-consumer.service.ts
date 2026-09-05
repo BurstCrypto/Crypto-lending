@@ -1,4 +1,9 @@
 import type { JobEnvelope, JobProcessingResult } from '../../infrastructure/sqs/sqs.types';
+import {
+  createBalanceSyncExecutionContext,
+  reviewBalanceSyncExecutionContext,
+  type BalanceSyncExecutionContext,
+} from './ports/balance-sync.ports';
 
 export interface BalanceSyncConsumerQueueWorkerPort {
   processOne(
@@ -8,13 +13,15 @@ export interface BalanceSyncConsumerQueueWorkerPort {
 }
 
 export interface BalanceSyncConsumerDispatcherPort {
-  dispatch(value: unknown): Promise<void>;
+  dispatch(value: unknown, context: BalanceSyncExecutionContext): Promise<void>;
 }
 
 export interface BalanceSyncConsumerPolicy {
   readonly idleDelayMs: number;
   readonly dependencyFailureBaseDelayMs: number;
   readonly dependencyFailureMaxDelayMs: number;
+  /** Bounds the propagated JSON-RPC execution window, not signal-less persistence/resolution. */
+  readonly maximumRpcWindowMs: number;
 }
 
 export type BalanceSyncConsumerWait = (milliseconds: number, signal: AbortSignal) => Promise<void>;
@@ -23,6 +30,7 @@ export const DEFAULT_BALANCE_SYNC_CONSUMER_POLICY = Object.freeze({
   idleDelayMs: 1_000,
   dependencyFailureBaseDelayMs: 250,
   dependencyFailureMaxDelayMs: 30_000,
+  maximumRpcWindowMs: 10_800_000,
 }) satisfies BalanceSyncConsumerPolicy;
 
 export type BalanceSyncConsumerErrorCode =
@@ -56,26 +64,49 @@ export class BalanceSyncConsumerService {
   }
 
   async run(signal: AbortSignal): Promise<void> {
-    if (!(signal instanceof AbortSignal)) {
+    const parentSignal = reviewAbortSignal(signal);
+    if (parentSignal === null) {
       throw new BalanceSyncConsumerError('INVALID_BALANCE_SYNC_CONSUMER_SIGNAL');
     }
     if (this.running) {
       throw new BalanceSyncConsumerError('BALANCE_SYNC_CONSUMER_ALREADY_RUNNING');
     }
 
+    const runOwner = createBalanceSyncExecutionContext();
+    const ownedExecution = reviewBalanceSyncExecutionContext(runOwner.context);
+    if (ownedExecution === null) {
+      throw new BalanceSyncConsumerError('INVALID_BALANCE_SYNC_CONSUMER_SIGNAL');
+    }
+    const reviewedSignal = reviewAbortSignal(ownedExecution.signal);
+    if (reviewedSignal === null) {
+      throw new BalanceSyncConsumerError('INVALID_BALANCE_SYNC_CONSUMER_SIGNAL');
+    }
+    const relayShutdown = (): void => runOwner.abort('SHUTDOWN');
+    let listeningForShutdown = false;
+    if (parentSignal.aborted()) {
+      relayShutdown();
+    } else {
+      parentSignal.add(relayShutdown);
+      listeningForShutdown = true;
+      if (parentSignal.aborted()) relayShutdown();
+    }
+
     this.running = true;
     let consecutiveFailures = 0;
     try {
-      while (!signal.aborted) {
+      while (!reviewedSignal.aborted()) {
         let result: JobProcessingResult;
         try {
-          result = await this.worker.processOne((job) => this.dispatcher.dispatch(job), signal);
+          result = await this.worker.processOne(
+            (job) => this.dispatchAccepted(job, reviewedSignal),
+            ownedExecution.signal,
+          );
         } catch {
           consecutiveFailures += 1;
-          await this.waitAfterFailure(consecutiveFailures, signal);
+          await this.waitAfterFailure(consecutiveFailures, ownedExecution.signal);
           continue;
         }
-        if (signal.aborted) break;
+        if (reviewedSignal.aborted()) break;
 
         if (result.status === 'completed') {
           consecutiveFailures = 0;
@@ -83,20 +114,45 @@ export class BalanceSyncConsumerService {
         }
         if (result.status === 'idle') {
           consecutiveFailures = 0;
-          await this.wait(this.policy.idleDelayMs, signal);
+          await this.wait(this.policy.idleDelayMs, ownedExecution.signal);
           continue;
         }
 
         consecutiveFailures += 1;
-        await this.waitAfterFailure(consecutiveFailures, signal);
+        await this.waitAfterFailure(consecutiveFailures, ownedExecution.signal);
       }
     } finally {
+      runOwner.abort('SHUTDOWN');
+      if (listeningForShutdown) parentSignal.remove(relayShutdown);
       this.running = false;
     }
   }
 
+  private async dispatchAccepted(job: JobEnvelope, runSignal: ReviewedAbortSignal): Promise<void> {
+    // This signal currently reaches balance JSON-RPC only. Checkpoint and address
+    // resolver ports remain signal-less and therefore are not bounded by this timer.
+    const owner = createBalanceSyncExecutionContext();
+    const relayShutdown = (): void => owner.abort('SHUTDOWN');
+    let listening = false;
+    if (runSignal.aborted()) {
+      relayShutdown();
+    } else {
+      runSignal.add(relayShutdown);
+      listening = true;
+      if (runSignal.aborted()) relayShutdown();
+    }
+    const deadline = setTimeout(() => owner.abort('DEADLINE'), this.policy.maximumRpcWindowMs);
+    deadline.unref?.();
+    try {
+      await this.dispatcher.dispatch(job, owner.context);
+    } finally {
+      clearTimeout(deadline);
+      if (listening) runSignal.remove(relayShutdown);
+    }
+  }
+
   private async waitAfterFailure(failureCount: number, signal: AbortSignal): Promise<void> {
-    if (signal.aborted) return;
+    if (abortSignalAborted(signal)) return;
     const exponent = Math.min(Math.max(failureCount - 1, 0), 30);
     const delay = Math.min(
       this.policy.dependencyFailureMaxDelayMs,
@@ -120,6 +176,7 @@ function validatePolicy(value: BalanceSyncConsumerPolicy): Readonly<BalanceSyncC
       'idleDelayMs',
       'dependencyFailureBaseDelayMs',
       'dependencyFailureMaxDelayMs',
+      'maximumRpcWindowMs',
     ] as const;
     const keys = Reflect.ownKeys(descriptors);
     if (
@@ -133,13 +190,15 @@ function validatePolicy(value: BalanceSyncConsumerPolicy): Readonly<BalanceSyncC
     const parsed = Object.create(null) as Record<(typeof expectedKeys)[number], number>;
     for (const key of expectedKeys) {
       const descriptor = descriptors[key];
+      const minimum = key === 'maximumRpcWindowMs' ? 7_200_000 : 10;
+      const maximum = key === 'maximumRpcWindowMs' ? 21_600_000 : 60_000;
       if (
         !descriptor ||
         !('value' in descriptor) ||
         descriptor.enumerable !== true ||
         !Number.isSafeInteger(descriptor.value) ||
-        descriptor.value < 10 ||
-        descriptor.value > 60_000
+        descriptor.value < minimum ||
+        descriptor.value > maximum
       ) {
         throw new BalanceSyncConsumerError('INVALID_BALANCE_SYNC_CONSUMER_POLICY');
       }
@@ -152,6 +211,7 @@ function validatePolicy(value: BalanceSyncConsumerPolicy): Readonly<BalanceSyncC
       idleDelayMs: parsed.idleDelayMs,
       dependencyFailureBaseDelayMs: parsed.dependencyFailureBaseDelayMs,
       dependencyFailureMaxDelayMs: parsed.dependencyFailureMaxDelayMs,
+      maximumRpcWindowMs: parsed.maximumRpcWindowMs,
     });
   } catch (error) {
     if (error instanceof BalanceSyncConsumerError) throw error;
@@ -160,17 +220,68 @@ function validatePolicy(value: BalanceSyncConsumerPolicy): Readonly<BalanceSyncC
 }
 
 function waitForNextPoll(milliseconds: number, signal: AbortSignal): Promise<void> {
-  if (signal.aborted) return Promise.resolve();
+  const reviewed = reviewAbortSignal(signal);
+  if (reviewed === null || reviewed.aborted()) return Promise.resolve();
   return new Promise((resolve) => {
     function finish(): void {
       clearTimeout(timeout);
-      signal.removeEventListener('abort', finish);
+      reviewed?.remove(finish);
       resolve();
     }
     const timeout = setTimeout(finish, milliseconds);
-    signal.addEventListener('abort', finish, { once: true });
-    if (signal.aborted) {
+    reviewed.add(finish);
+    if (reviewed.aborted()) {
       finish();
     }
   });
+}
+
+interface ReviewedAbortSignal {
+  readonly aborted: () => boolean;
+  readonly add: (listener: EventListener) => void;
+  readonly remove: (listener: EventListener) => void;
+}
+
+const ABORT_SIGNAL_ABORTED_GETTER = Object.getOwnPropertyDescriptor(
+  AbortSignal.prototype,
+  'aborted',
+)?.get;
+const EVENT_TARGET_ADD_EVENT_LISTENER = Object.getOwnPropertyDescriptor(
+  EventTarget.prototype,
+  'addEventListener',
+)?.value as EventTarget['addEventListener'] | undefined;
+const EVENT_TARGET_REMOVE_EVENT_LISTENER = Object.getOwnPropertyDescriptor(
+  EventTarget.prototype,
+  'removeEventListener',
+)?.value as EventTarget['removeEventListener'] | undefined;
+
+function reviewAbortSignal(value: unknown): Readonly<ReviewedAbortSignal> | null {
+  try {
+    if (
+      (typeof value !== 'object' && typeof value !== 'function') ||
+      value === null ||
+      ABORT_SIGNAL_ABORTED_GETTER === undefined ||
+      typeof EVENT_TARGET_ADD_EVENT_LISTENER !== 'function' ||
+      typeof EVENT_TARGET_REMOVE_EVENT_LISTENER !== 'function'
+    ) {
+      return null;
+    }
+    const signal = value as AbortSignal;
+    Reflect.apply(ABORT_SIGNAL_ABORTED_GETTER, signal, []);
+    return Object.freeze({
+      aborted: (): boolean => Reflect.apply(ABORT_SIGNAL_ABORTED_GETTER, signal, []) as boolean,
+      add: (listener: EventListener): void => {
+        Reflect.apply(EVENT_TARGET_ADD_EVENT_LISTENER, signal, ['abort', listener, { once: true }]);
+      },
+      remove: (listener: EventListener): void => {
+        Reflect.apply(EVENT_TARGET_REMOVE_EVENT_LISTENER, signal, ['abort', listener]);
+      },
+    });
+  } catch {
+    return null;
+  }
+}
+
+function abortSignalAborted(signal: AbortSignal): boolean {
+  return reviewAbortSignal(signal)?.aborted() ?? true;
 }

@@ -33,18 +33,21 @@ import {
   BalanceSyncOrchestrator,
   type BalanceSyncProcessingResult,
 } from '../blockchain-sync/application/balance-sync-orchestrator';
-import type {
-  BalanceIndexerReadRequest,
-  BalanceIndexerRescanRequest,
-  BalanceSyncAlert,
-  BalanceSyncCheckpoint,
-  BalanceSyncCheckpointPort,
-  BalanceSyncClockPort,
-  BalanceSyncIndexerPort,
-  BalanceSyncJobPort,
-  BalanceSyncMetricEvent,
-  BalanceSyncMetricsPort,
-  BalanceSyncScope,
+import {
+  createBalanceSyncExecutionContext,
+  reviewBalanceSyncExecutionContext,
+  type BalanceIndexerReadRequest,
+  type BalanceIndexerRescanRequest,
+  type BalanceSyncAlert,
+  type BalanceSyncCheckpoint,
+  type BalanceSyncCheckpointPort,
+  type BalanceSyncClockPort,
+  type BalanceSyncExecutionContext,
+  type BalanceSyncIndexerPort,
+  type BalanceSyncJobPort,
+  type BalanceSyncMetricEvent,
+  type BalanceSyncMetricsPort,
+  type BalanceSyncScope,
 } from '../blockchain-sync/application/ports/balance-sync.ports';
 import {
   BALANCE_SYNC_PAYLOAD_VERSION,
@@ -182,7 +185,11 @@ export class LocalDemoChainPipeline {
             correlation,
           }),
         );
-        const outcome: BalanceSyncProcessingResult = await orchestrator.process(job);
+        const execution = createBalanceSyncExecutionContext();
+        const outcome: BalanceSyncProcessingResult = await orchestrator.process(
+          job,
+          execution.context,
+        );
         if (outcome.status !== 'COMPLETED') throw new LocalDemoChainPipelineError();
         const checkpoint = await checkpoints.load(
           Object.freeze({ accountId, walletId: fixture.walletId, networkId }),
@@ -251,8 +258,14 @@ class LocalDemoBalanceSyncIndexer implements BalanceSyncIndexerPort {
     );
   }
 
-  async readCurrent(request: BalanceIndexerReadRequest): Promise<unknown> {
+  async readCurrent(
+    request: BalanceIndexerReadRequest,
+    context: BalanceSyncExecutionContext,
+  ): Promise<unknown> {
     try {
+      if (reviewBalanceSyncExecutionContext(context) === null) {
+        throw new BalanceSyncIndexerFailure('PROVIDER_UNAVAILABLE');
+      }
       const fixture = this.fixtures.get(scopeKey(request));
       if (
         fixture === undefined ||
@@ -270,7 +283,13 @@ class LocalDemoBalanceSyncIndexer implements BalanceSyncIndexerPort {
     }
   }
 
-  async rescanFromCheckpoint(request: BalanceIndexerRescanRequest): Promise<unknown> {
+  async rescanFromCheckpoint(
+    request: BalanceIndexerRescanRequest,
+    context: BalanceSyncExecutionContext,
+  ): Promise<unknown> {
+    if (reviewBalanceSyncExecutionContext(context) === null) {
+      throw new BalanceSyncIndexerFailure('PROVIDER_UNAVAILABLE');
+    }
     void request;
     throw new BalanceSyncIndexerFailure('REORG_RECOVERY_FAILED');
   }

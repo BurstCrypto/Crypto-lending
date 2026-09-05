@@ -18,20 +18,24 @@ import {
   FailClosedBalanceSyncJobPort,
   balanceSyncReceiptRetryMinimumDelaySeconds,
 } from './fail-closed-balance-sync-job.port';
-import type {
-  BalanceIndexerCandidate,
-  BalanceIndexerReadRequest,
-  BalanceIndexerRescanRequest,
-  BalanceIndexerRescanResult,
-  BalanceSyncAlert,
-  BalanceSyncCheckpoint,
-  BalanceSyncCheckpointPort,
-  BalanceSyncClockPort,
-  BalanceSyncIndexerPort,
-  BalanceSyncJobPort,
-  BalanceSyncMetricEvent,
-  BalanceSyncScope,
-  BalanceSyncSuccessMode,
+import {
+  createBalanceSyncExecutionContext,
+  INERT_BALANCE_SYNC_EXECUTION_CONTEXT,
+  reviewBalanceSyncExecutionContext,
+  type BalanceIndexerCandidate,
+  type BalanceIndexerReadRequest,
+  type BalanceIndexerRescanRequest,
+  type BalanceIndexerRescanResult,
+  type BalanceSyncAlert,
+  type BalanceSyncCheckpoint,
+  type BalanceSyncCheckpointPort,
+  type BalanceSyncClockPort,
+  type BalanceSyncExecutionContext,
+  type BalanceSyncIndexerPort,
+  type BalanceSyncJobPort,
+  type BalanceSyncMetricEvent,
+  type BalanceSyncScope,
+  type BalanceSyncSuccessMode,
 } from './ports/balance-sync.ports';
 
 const NOW = '2026-08-24T12:00:30.000Z';
@@ -319,12 +323,23 @@ function sequencedClock(...values: readonly (string | number)[]): BalanceSyncClo
 function harness(
   options: {
     initial?: BalanceSyncCheckpoint | null;
-    read?: (request: BalanceIndexerReadRequest) => Promise<unknown>;
-    rescan?: (request: BalanceIndexerRescanRequest) => Promise<unknown>;
+    read?: (
+      request: BalanceIndexerReadRequest,
+      context: BalanceSyncExecutionContext,
+    ) => Promise<unknown>;
+    rescan?: (
+      request: BalanceIndexerRescanRequest,
+      context: BalanceSyncExecutionContext,
+    ) => Promise<unknown>;
     clock?: BalanceSyncClockPort;
   } = {},
 ): Readonly<{
-  orchestrator: BalanceSyncOrchestrator;
+  orchestrator: Readonly<{
+    process: (
+      input: unknown,
+      context?: BalanceSyncExecutionContext,
+    ) => Promise<BalanceSyncProcessingResult>;
+  }>;
   checkpoints: MemoryCheckpointPort;
   jobs: MemoryJobPort;
   metrics: MemoryMetricsPort;
@@ -342,8 +357,18 @@ function harness(
     rescanFromCheckpoint: options.rescan ?? (async () => recoveryCandidate()),
   };
   const clock = options.clock ?? { now: () => new Date(NOW) };
+  const runtimeOrchestrator = new BalanceSyncOrchestrator(
+    jobs,
+    checkpoints,
+    indexer,
+    clock,
+    metrics,
+  );
   return {
-    orchestrator: new BalanceSyncOrchestrator(jobs, checkpoints, indexer, clock, metrics),
+    orchestrator: Object.freeze({
+      process: (input, context = INERT_BALANCE_SYNC_EXECUTION_CONTEXT) =>
+        runtimeOrchestrator.process(input, context),
+    }),
     checkpoints,
     jobs,
     metrics,
@@ -474,21 +499,37 @@ describe('BalanceSyncOrchestrator', () => {
 
   it('rescans from the finalized checkpoint and replaces the affected provisional observation', async () => {
     const original = checkpoint();
-    const read = jest.fn(async () => candidate({ source: source('100', BLOCK_100_B, BLOCK_99) }));
-    const rescan = jest.fn(async () => recoveryCandidate());
+    const read = jest.fn(
+      async (_request: BalanceIndexerReadRequest, _context: BalanceSyncExecutionContext) => {
+        void _request;
+        void _context;
+        return candidate({ source: source('100', BLOCK_100_B, BLOCK_99) });
+      },
+    );
+    const rescan = jest.fn(
+      async (_request: BalanceIndexerRescanRequest, _context: BalanceSyncExecutionContext) => {
+        void _request;
+        void _context;
+        return recoveryCandidate();
+      },
+    );
     const test = harness({ initial: original, read, rescan });
 
     const result = await test.orchestrator.process(job());
 
     expect(result).toMatchObject({ status: 'COMPLETED', outcome: 'REORG_RECOVERED' });
     assertCompleted(result);
-    expect(rescan).toHaveBeenCalledWith({
-      ...scope(),
-      tier: 'PROVISIONAL',
-      selector: 'latest',
-      fromFinalizedSource: finalizedSource(),
-      maximumReadUnits: 2_048,
-    });
+    expect(rescan).toHaveBeenCalledWith(
+      {
+        ...scope(),
+        tier: 'PROVISIONAL',
+        selector: 'latest',
+        fromFinalizedSource: finalizedSource(),
+        maximumReadUnits: 2_048,
+      },
+      INERT_BALANCE_SYNC_EXECUTION_CONTEXT,
+    );
+    expect(read.mock.calls[0]?.[1]).toBe(INERT_BALANCE_SYNC_EXECUTION_CONTEXT);
     expect(test.checkpoints.replacements).toEqual([
       {
         removedObservationId: original.currentObservation?.observationId,
@@ -620,6 +661,43 @@ describe('BalanceSyncOrchestrator', () => {
     expect(result).toMatchObject({ status: 'COMPLETED', outcome: 'REORG_RECOVERED' });
     expect(test.checkpoints.replacements).toHaveLength(1);
   });
+
+  it.each([
+    ['DEADLINE', 'PROVIDER_TIMEOUT'],
+    ['SHUTDOWN', 'PROVIDER_UNAVAILABLE'],
+  ] as const)(
+    'preserves an authenticated %s cancellation during rescan as %s',
+    async (abortKind, failureCode) => {
+      const owner = createBalanceSyncExecutionContext();
+      owner.abort(abortKind);
+      const rescan = jest.fn(
+        async (
+          _request: BalanceIndexerRescanRequest,
+          context: BalanceSyncExecutionContext,
+        ): Promise<unknown> => {
+          expect(context).toBe(owner.context);
+          expect(reviewBalanceSyncExecutionContext(context)?.abortKind).toBe(abortKind);
+          throw new BalanceSyncIndexerFailure(failureCode);
+        },
+      );
+      const test = harness({ rescan });
+
+      const result = await test.orchestrator.process(
+        job({ cause: 'MANUAL_RECOVERY', rescanFromPosition: '99' }),
+        owner.context,
+      );
+
+      expect(result).toMatchObject({
+        status: 'RETRY_SCHEDULED',
+        failureCode,
+      });
+      expect(rescan).toHaveBeenCalledTimes(1);
+      expect(test.checkpoints.state).toMatchObject({
+        freshness: 'STALE',
+        lastFailureCode: failureCode,
+      });
+    },
+  );
 
   it('keeps the finalized anchor when a manual recovery is retried', async () => {
     let scans = 0;

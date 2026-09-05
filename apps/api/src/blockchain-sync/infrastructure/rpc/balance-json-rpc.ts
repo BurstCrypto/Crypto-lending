@@ -1,6 +1,11 @@
 import { createHash } from 'node:crypto';
 
 import { BalanceSyncIndexerFailure } from '../../domain/balance-sync';
+import {
+  reviewBalanceSyncExecutionContext,
+  type BalanceSyncExecutionContext,
+  type ReviewedBalanceSyncExecutionContext,
+} from '../../application/ports/balance-sync.ports';
 
 const MAX_JSON_DEPTH = 32;
 const MAX_JSON_NODES = 200_000;
@@ -17,9 +22,12 @@ export interface BalanceJsonRpcRequest {
 /**
  * Deliberately transport-only. Implementations own no URL, credential, retry,
  * DNS, TLS, or client policy here; no implementation is registered at runtime.
+ * A transport must cooperatively stop and reject promptly when `signal` aborts;
+ * it may not leave accepted I/O unresolved. This boundary never detaches I/O
+ * with Promise.race.
  */
 export interface BalanceJsonRpcTransport {
-  exchange(request: BalanceJsonRpcRequest): Promise<unknown>;
+  exchange(request: BalanceJsonRpcRequest, signal: AbortSignal): Promise<unknown>;
 }
 
 export type BalanceJsonRpcTransportFailureCode =
@@ -114,15 +122,37 @@ export async function exchangeBalanceRpc(
   transport: BalanceJsonRpcTransport,
   method: string,
   params: readonly unknown[],
+  context: BalanceSyncExecutionContext,
 ): Promise<unknown> {
+  const execution = requireExecutionContext(context);
+  throwIfExecutionAborted(execution);
   const request = balanceRpcRequest(method, params);
   let response: unknown;
   try {
-    response = await transport.exchange(request);
+    response = await transport.exchange(request, execution.signal);
   } catch (error) {
+    throwIfExecutionAborted(requireExecutionContext(context));
     throwMappedTransportFailure(error);
   }
+  throwIfExecutionAborted(requireExecutionContext(context));
   return parseBalanceRpcResult(response, request.id);
+}
+
+function requireExecutionContext(context: unknown): Readonly<ReviewedBalanceSyncExecutionContext> {
+  const reviewed = reviewBalanceSyncExecutionContext(context);
+  if (reviewed === null) throw new BalanceSyncIndexerFailure('PROVIDER_UNAVAILABLE');
+  return reviewed;
+}
+
+function throwIfExecutionAborted(execution: Readonly<ReviewedBalanceSyncExecutionContext>): void {
+  switch (execution.abortKind) {
+    case 'DEADLINE':
+      throw new BalanceSyncIndexerFailure('PROVIDER_TIMEOUT');
+    case 'SHUTDOWN':
+      throw new BalanceSyncIndexerFailure('PROVIDER_UNAVAILABLE');
+    case null:
+      return;
+  }
 }
 
 export function exactRecord(value: unknown, keys: readonly string[]): Record<string, unknown> {

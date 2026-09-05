@@ -6,14 +6,16 @@ import {
   type BalanceSyncPosition,
   type BalanceSyncSourcePoint,
 } from '../../domain/balance-sync';
-import type {
-  BalanceIndexerCandidate,
-  BalanceIndexerReadRequest,
-  BalanceIndexerRescanRequest,
-  BalanceIndexerRescanResult,
-  BalanceSyncClockPort,
-  BalanceSyncIndexerPort,
-  BalanceSyncWalletAddressResolverPort,
+import {
+  reviewBalanceSyncExecutionContext,
+  type BalanceIndexerCandidate,
+  type BalanceIndexerReadRequest,
+  type BalanceIndexerRescanRequest,
+  type BalanceIndexerRescanResult,
+  type BalanceSyncClockPort,
+  type BalanceSyncExecutionContext,
+  type BalanceSyncIndexerPort,
+  type BalanceSyncWalletAddressResolverPort,
 } from '../../application/ports/balance-sync.ports';
 import { supportedAssetRegistryForEnvironment } from '../../../blockchain/domain/supported-asset-registry';
 import { parseEvmWalletAddress } from '../../../wallets/domain/wallet-identity';
@@ -98,12 +100,22 @@ export class EthereumMainnetBalanceIndexerAdapter implements BalanceSyncIndexerP
       throw new TypeError('invalid Ethereum asset registry binding');
   }
 
-  async readCurrent(request: BalanceIndexerReadRequest): Promise<unknown> {
-    return this.guarded(async () => (await this.readBundle(request)).candidate);
+  async readCurrent(
+    request: BalanceIndexerReadRequest,
+    context: BalanceSyncExecutionContext,
+  ): Promise<unknown> {
+    return this.guarded(async () => {
+      requireActiveExecution(context);
+      return (await this.readBundle(request, context)).candidate;
+    });
   }
 
-  async rescanFromCheckpoint(request: BalanceIndexerRescanRequest): Promise<unknown> {
+  async rescanFromCheckpoint(
+    request: BalanceIndexerRescanRequest,
+    context: BalanceSyncExecutionContext,
+  ): Promise<unknown> {
     return this.guarded(async () => {
+      requireActiveExecution(context);
       validateEthereumRequest(request);
       if (
         !Number.isSafeInteger(request.maximumReadUnits) ||
@@ -113,7 +125,7 @@ export class EthereumMainnetBalanceIndexerAdapter implements BalanceSyncIndexerP
         throw new BalanceSyncIndexerFailure('REORG_RECOVERY_FAILED');
       }
       const anchor = parseEthereumAnchor(request.fromFinalizedSource);
-      const bundle = await this.readBundle(request);
+      const bundle = await this.readBundle(request, context);
       const distance = bundle.header.position - anchor.position;
       if (distance < 0n || distance > BigInt(request.maximumReadUnits)) {
         throw new BalanceSyncIndexerFailure('REORG_RECOVERY_FAILED');
@@ -135,23 +147,27 @@ export class EthereumMainnetBalanceIndexerAdapter implements BalanceSyncIndexerP
         const header =
           position === bundle.header.position
             ? bundle.header
-            : await this.readBlock(toHexQuantity(position), position);
+            : await this.readBlock(toHexQuantity(position), context, position);
         if (header.position !== previousPosition + 1n || header.parentHash !== previousHash) {
           throw new BalanceSyncIndexerFailure('REORG_RECOVERY_FAILED');
         }
         previousPosition = header.position;
         previousHash = header.hash;
       }
-      await this.assertMainnetIdentity();
+      await this.assertMainnetIdentity(context);
+      requireActiveExecution(context);
       return recoveryResult(bundle.candidate, anchor.position, Number(distance));
     });
   }
 
-  private async readBundle(request: BalanceIndexerReadRequest): Promise<EthereumReadBundle> {
+  private async readBundle(
+    request: BalanceIndexerReadRequest,
+    context: BalanceSyncExecutionContext,
+  ): Promise<EthereumReadBundle> {
     validateEthereumRequest(request);
-    await this.assertMainnetIdentity();
+    await this.assertMainnetIdentity(context);
     const address = await this.resolveAddress(request);
-    const header = await this.readBlock(request.selector);
+    const header = await this.readBlock(request.selector, context);
     const exactCanonicalBlock = Object.freeze({
       blockHash: header.hash,
       requireCanonical: true as const,
@@ -159,20 +175,27 @@ export class EthereumMainnetBalanceIndexerAdapter implements BalanceSyncIndexerP
     const positions: BalanceSyncPosition[] = [];
 
     for (const asset of ETHEREUM_ASSETS) {
-      const code = await exchangeBalanceRpc(this.transport, 'eth_getCode', [
-        asset.identity,
-        exactCanonicalBlock,
-      ]);
+      const code = await exchangeBalanceRpc(
+        this.transport,
+        'eth_getCode',
+        [asset.identity, exactCanonicalBlock],
+        context,
+      );
       if (typeof code !== 'string' || !HEX_DATA.test(code) || code === '0x') {
         throw new BalanceSyncIndexerFailure('PROVIDER_INVALID_DATA');
       }
-      const result = await exchangeBalanceRpc(this.transport, 'eth_call', [
-        Object.freeze({
-          data: `0x${BALANCE_OF_SELECTOR}${'0'.repeat(24)}${address.slice(2)}`,
-          to: asset.identity,
-        }),
-        exactCanonicalBlock,
-      ]);
+      const result = await exchangeBalanceRpc(
+        this.transport,
+        'eth_call',
+        [
+          Object.freeze({
+            data: `0x${BALANCE_OF_SELECTOR}${'0'.repeat(24)}${address.slice(2)}`,
+            to: asset.identity,
+          }),
+          exactCanonicalBlock,
+        ],
+        context,
+      );
       if (typeof result !== 'string' || !UINT256_RESULT.test(result)) {
         throw new BalanceSyncIndexerFailure('PROVIDER_INVALID_DATA');
       }
@@ -190,7 +213,8 @@ export class EthereumMainnetBalanceIndexerAdapter implements BalanceSyncIndexerP
         }),
       );
     }
-    await this.assertMainnetIdentity();
+    await this.assertMainnetIdentity(context);
+    requireActiveExecution(context);
     const retrievedAt = canonicalClockTime(this.clock);
     return Object.freeze({
       header,
@@ -211,8 +235,8 @@ export class EthereumMainnetBalanceIndexerAdapter implements BalanceSyncIndexerP
     });
   }
 
-  private async assertMainnetIdentity(): Promise<void> {
-    const chainId = await exchangeBalanceRpc(this.transport, 'eth_chainId', []);
+  private async assertMainnetIdentity(context: BalanceSyncExecutionContext): Promise<void> {
+    const chainId = await exchangeBalanceRpc(this.transport, 'eth_chainId', [], context);
     if (chainId !== ETHEREUM_MAINNET_CHAIN_ID) {
       throw new BalanceSyncIndexerFailure('PROVIDER_INVALID_DATA');
     }
@@ -235,12 +259,15 @@ export class EthereumMainnetBalanceIndexerAdapter implements BalanceSyncIndexerP
 
   private async readBlock(
     selector: string,
+    context: BalanceSyncExecutionContext,
     expectedPosition?: bigint,
   ): Promise<EthereumBlockHeader> {
-    const result = await exchangeBalanceRpc(this.transport, 'eth_getBlockByNumber', [
-      selector,
-      false,
-    ]);
+    const result = await exchangeBalanceRpc(
+      this.transport,
+      'eth_getBlockByNumber',
+      [selector, false],
+      context,
+    );
     const record = allowedRecord(
       result,
       ['number', 'hash', 'parentHash', 'transactions', 'uncles'],
@@ -440,4 +467,12 @@ function recoveryResult(
       complete: true,
     }),
   });
+}
+
+function requireActiveExecution(context: unknown): void {
+  const reviewed = reviewBalanceSyncExecutionContext(context);
+  if (reviewed?.abortKind === null) return;
+  throw new BalanceSyncIndexerFailure(
+    reviewed?.abortKind === 'DEADLINE' ? 'PROVIDER_TIMEOUT' : 'PROVIDER_UNAVAILABLE',
+  );
 }

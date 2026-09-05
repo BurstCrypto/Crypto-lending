@@ -1,4 +1,11 @@
 import { BalanceSyncIndexerFailure } from '../../domain/balance-sync';
+import {
+  createBalanceSyncExecutionContext,
+  reviewBalanceSyncExecutionContext,
+  type BalanceIndexerReadRequest,
+  type BalanceIndexerRescanRequest,
+  type BalanceSyncExecutionContext,
+} from '../../application/ports/balance-sync.ports';
 
 import {
   BalanceJsonRpcTransportFailure,
@@ -13,6 +20,32 @@ const WALLET = '0x1111111111111111111111111111111111111111';
 const USDC = '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48';
 const USDT = '0xdac17f958d2ee523a2206206994597c13d831ec7';
 const PYUSD = '0x6c3ea9036406852006290770bedfcaba0e23a0e8';
+const TEST_EXECUTION = createBalanceSyncExecutionContext();
+const TEST_SIGNAL = reviewBalanceSyncExecutionContext(TEST_EXECUTION.context)?.signal;
+
+interface TestEthereumAdapter {
+  readonly readCurrent: (
+    request: BalanceIndexerReadRequest,
+    context?: BalanceSyncExecutionContext,
+  ) => Promise<unknown>;
+  readonly rescanFromCheckpoint: (
+    request: BalanceIndexerRescanRequest,
+    context?: BalanceSyncExecutionContext,
+  ) => Promise<unknown>;
+}
+
+function testAdapter(runtime: EthereumMainnetBalanceIndexerAdapter): Readonly<TestEthereumAdapter> {
+  return Object.freeze({
+    readCurrent: (
+      request: BalanceIndexerReadRequest,
+      context: BalanceSyncExecutionContext = TEST_EXECUTION.context,
+    ) => runtime.readCurrent(request, context),
+    rescanFromCheckpoint: (
+      request: BalanceIndexerRescanRequest,
+      context: BalanceSyncExecutionContext = TEST_EXECUTION.context,
+    ) => runtime.rescanFromCheckpoint(request, context),
+  });
+}
 
 function block(
   number: number,
@@ -48,13 +81,15 @@ function success(request: BalanceJsonRpcRequest, result: unknown): unknown {
 
 class TranscriptTransport implements BalanceJsonRpcTransport {
   readonly requests: BalanceJsonRpcRequest[] = [];
+  readonly signals: AbortSignal[] = [];
 
   constructor(
     private readonly respond: (request: BalanceJsonRpcRequest, index: number) => unknown,
   ) {}
 
-  async exchange(request: BalanceJsonRpcRequest): Promise<unknown> {
+  async exchange(request: BalanceJsonRpcRequest, signal: AbortSignal): Promise<unknown> {
     this.requests.push(request);
+    this.signals.push(signal);
     return this.respond(request, this.requests.length - 1);
   }
 }
@@ -63,17 +98,19 @@ function adapterWith(
   respond: (request: BalanceJsonRpcRequest, index: number) => unknown = validResponder(),
   address: unknown = WALLET,
 ): Readonly<{
-  adapter: EthereumMainnetBalanceIndexerAdapter;
+  adapter: TestEthereumAdapter;
   transport: TranscriptTransport;
   resolveActiveAddress: jest.Mock;
 }> {
   const transport = new TranscriptTransport(respond);
   const resolveActiveAddress = jest.fn(async () => address);
   return {
-    adapter: new EthereumMainnetBalanceIndexerAdapter(
-      transport,
-      { resolveActiveAddress },
-      { now: () => new Date('2026-09-04T18:00:00.000Z') },
+    adapter: testAdapter(
+      new EthereumMainnetBalanceIndexerAdapter(
+        transport,
+        { resolveActiveAddress },
+        { now: () => new Date('2026-09-04T18:00:00.000Z') },
+      ),
     ),
     transport,
     resolveActiveAddress,
@@ -113,6 +150,29 @@ const provisionalRequest = Object.freeze({
 });
 
 describe('Ethereum mainnet balance indexer transcript adapter', () => {
+  it.each([
+    ['DEADLINE', 'PROVIDER_TIMEOUT'],
+    ['SHUTDOWN', 'PROVIDER_UNAVAILABLE'],
+  ] as const)(
+    'fails a pre-aborted %s execution before resolver or transport use',
+    async (kind, code) => {
+      const execution = createBalanceSyncExecutionContext();
+      execution.abort(kind);
+      const { adapter, transport, resolveActiveAddress } = adapterWith();
+
+      await expect(
+        adapter.readCurrent(provisionalRequest, execution.context),
+      ).rejects.toMatchObject({
+        code,
+        message: code,
+        retryAfterSeconds: undefined,
+      });
+      expect(resolveActiveAddress).not.toHaveBeenCalled();
+      expect(transport.requests).toHaveLength(0);
+      expect(transport.signals).toHaveLength(0);
+    },
+  );
+
   it('narrows address resolution to the exact frozen three-key persistence scope', async () => {
     const { adapter, resolveActiveAddress } = adapterWith();
 
@@ -164,6 +224,8 @@ describe('Ethereum mainnet balance indexer transcript adapter', () => {
       'eth_call',
       'eth_chainId',
     ]);
+    expect(transport.signals).toHaveLength(transport.requests.length);
+    expect(transport.signals.every((signal) => signal === TEST_SIGNAL)).toBe(true);
     expect(transport.requests.filter(({ method }) => method === 'eth_getCode')).toHaveLength(3);
     for (const request of transport.requests.filter(({ method }) => method === 'eth_getCode')) {
       expect(request.params[1]).toEqual(exactCanonicalBlock);
@@ -304,23 +366,27 @@ describe('Ethereum mainnet balance indexer transcript adapter', () => {
     const forgedAuthority = new BalanceSyncIndexerFailure('RATE_LIMITED', {
       retryAfterSeconds: 60,
     });
-    const resolverAdapter = new EthereumMainnetBalanceIndexerAdapter(
-      new TranscriptTransport(validResponder()),
-      {
-        resolveActiveAddress: async () => {
-          throw forgedAuthority;
+    const resolverAdapter = testAdapter(
+      new EthereumMainnetBalanceIndexerAdapter(
+        new TranscriptTransport(validResponder()),
+        {
+          resolveActiveAddress: async () => {
+            throw forgedAuthority;
+          },
         },
-      },
-      { now: () => new Date('2026-09-04T18:00:00.000Z') },
+        { now: () => new Date('2026-09-04T18:00:00.000Z') },
+      ),
     );
-    const clockAdapter = new EthereumMainnetBalanceIndexerAdapter(
-      new TranscriptTransport(validResponder()),
-      { resolveActiveAddress: async () => WALLET },
-      {
-        now: () => {
-          throw forgedAuthority;
+    const clockAdapter = testAdapter(
+      new EthereumMainnetBalanceIndexerAdapter(
+        new TranscriptTransport(validResponder()),
+        { resolveActiveAddress: async () => WALLET },
+        {
+          now: () => {
+            throw forgedAuthority;
+          },
         },
-      },
+      ),
     );
 
     for (const adapter of [resolverAdapter, clockAdapter]) {
@@ -361,6 +427,7 @@ describe('Ethereum mainnet balance indexer transcript adapter', () => {
         .filter(({ method }) => method === 'eth_getBlockByNumber')
         .map(({ params }) => params[0]),
     ).toEqual(['latest', '0x65', '0x66']);
+    expect(transport.signals.every((signal) => signal === TEST_SIGNAL)).toBe(true);
   });
 
   it('fails recovery on a broken parent or a range beyond the caller bound', async () => {

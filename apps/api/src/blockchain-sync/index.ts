@@ -83,6 +83,8 @@ export {
 export {
   BALANCE_SYNC_CHECKPOINT_PORT,
   BALANCE_SYNC_WALLET_ADDRESS_RESOLVER_PORT,
+  createBalanceSyncExecutionContext,
+  reviewBalanceSyncExecutionContext,
   type BalanceIndexerCandidate,
   type BalanceIndexerReadRequest,
   type BalanceIndexerRescanRequest,
@@ -92,6 +94,9 @@ export {
   type BalanceSyncCheckpoint,
   type BalanceSyncCheckpointPort,
   type BalanceSyncClockPort,
+  type BalanceSyncExecutionAbortKind,
+  type BalanceSyncExecutionContext,
+  type BalanceSyncExecutionContextOwner,
   type BalanceSyncIndexerPort,
   type BalanceSyncJobPort,
   type BalanceSyncMetricEvent,
@@ -99,6 +104,7 @@ export {
   type BalanceSyncScope,
   type BalanceSyncSuccessMode,
   type BalanceSyncWalletAddressResolverPort,
+  type ReviewedBalanceSyncExecutionContext,
 } from './application/ports/balance-sync.ports';
 export {
   BalanceSyncCheckpointPersistenceError,

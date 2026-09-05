@@ -6,14 +6,16 @@ import {
   type BalanceSyncPosition,
   type BalanceSyncSourcePoint,
 } from '../../domain/balance-sync';
-import type {
-  BalanceIndexerCandidate,
-  BalanceIndexerReadRequest,
-  BalanceIndexerRescanRequest,
-  BalanceIndexerRescanResult,
-  BalanceSyncClockPort,
-  BalanceSyncIndexerPort,
-  BalanceSyncWalletAddressResolverPort,
+import {
+  reviewBalanceSyncExecutionContext,
+  type BalanceIndexerCandidate,
+  type BalanceIndexerReadRequest,
+  type BalanceIndexerRescanRequest,
+  type BalanceIndexerRescanResult,
+  type BalanceSyncClockPort,
+  type BalanceSyncExecutionContext,
+  type BalanceSyncIndexerPort,
+  type BalanceSyncWalletAddressResolverPort,
 } from '../../application/ports/balance-sync.ports';
 import { supportedAssetRegistryForEnvironment } from '../../../blockchain/domain/supported-asset-registry';
 import {
@@ -89,12 +91,22 @@ export class SolanaMainnetBalanceIndexerAdapter implements BalanceSyncIndexerPor
     }
   }
 
-  async readCurrent(request: BalanceIndexerReadRequest): Promise<unknown> {
-    return this.guarded(async () => (await this.readBundle(request)).candidate);
+  async readCurrent(
+    request: BalanceIndexerReadRequest,
+    context: BalanceSyncExecutionContext,
+  ): Promise<unknown> {
+    return this.guarded(async () => {
+      requireActiveExecution(context);
+      return (await this.readBundle(request, context)).candidate;
+    });
   }
 
-  async rescanFromCheckpoint(request: BalanceIndexerRescanRequest): Promise<unknown> {
+  async rescanFromCheckpoint(
+    request: BalanceIndexerRescanRequest,
+    context: BalanceSyncExecutionContext,
+  ): Promise<unknown> {
     return this.guarded(async () => {
+      requireActiveExecution(context);
       validateSolanaRequest(request);
       if (
         !Number.isSafeInteger(request.maximumReadUnits) ||
@@ -104,7 +116,7 @@ export class SolanaMainnetBalanceIndexerAdapter implements BalanceSyncIndexerPor
         throw new BalanceSyncIndexerFailure('REORG_RECOVERY_FAILED');
       }
       const anchor = parseSolanaAnchor(request.fromFinalizedSource);
-      const bundle = await this.readBundle(request);
+      const bundle = await this.readBundle(request, context);
       const distance = bundle.header.position - anchor.position;
       if (distance < 0n || distance > BigInt(request.maximumReadUnits)) {
         throw new BalanceSyncIndexerFailure('REORG_RECOVERY_FAILED');
@@ -126,7 +138,7 @@ export class SolanaMainnetBalanceIndexerAdapter implements BalanceSyncIndexerPor
         const header =
           position === bundle.header.position
             ? bundle.header
-            : await this.readBlock(position, request.selector);
+            : await this.readBlock(position, request.selector, context);
         if (header === null) continue;
         if (header.parentPosition !== previousPosition || header.parentHash !== previousHash) {
           throw new BalanceSyncIndexerFailure('REORG_RECOVERY_FAILED');
@@ -137,21 +149,28 @@ export class SolanaMainnetBalanceIndexerAdapter implements BalanceSyncIndexerPor
       if (previousPosition !== bundle.header.position || previousHash !== bundle.header.hash) {
         throw new BalanceSyncIndexerFailure('REORG_RECOVERY_FAILED');
       }
-      await this.assertMainnetIdentity();
+      await this.assertMainnetIdentity(context);
+      requireActiveExecution(context);
       return recoveryResult(bundle.candidate, anchor.position, Number(distance));
     });
   }
 
-  private async readBundle(request: BalanceIndexerReadRequest): Promise<SolanaReadBundle> {
+  private async readBundle(
+    request: BalanceIndexerReadRequest,
+    context: BalanceSyncExecutionContext,
+  ): Promise<SolanaReadBundle> {
     validateSolanaRequest(request);
-    await this.assertMainnetIdentity();
+    await this.assertMainnetIdentity(context);
     const address = await this.resolveAddress(request);
     const commitment = request.selector;
-    const slotResult = await exchangeBalanceRpc(this.transport, 'getSlot', [
-      Object.freeze({ commitment }),
-    ]);
+    const slotResult = await exchangeBalanceRpc(
+      this.transport,
+      'getSlot',
+      [Object.freeze({ commitment })],
+      context,
+    );
     const slot = parseSafeSlot(slotResult, 'PROVIDER_INVALID_DATA');
-    const selectedHeader = await this.readBlock(BigInt(slot), commitment);
+    const selectedHeader = await this.readBlock(BigInt(slot), commitment, context);
     if (selectedHeader === null) {
       throw new BalanceSyncIndexerFailure('PROVIDER_UNAVAILABLE');
     }
@@ -160,11 +179,16 @@ export class SolanaMainnetBalanceIndexerAdapter implements BalanceSyncIndexerPor
     for (const asset of SOLANA_ASSETS) {
       const program = tokenProgramBinding(asset.identity);
       if (program === undefined) throw new BalanceSyncIndexerFailure('PROVIDER_INVALID_DATA');
-      const result = await exchangeBalanceRpc(this.transport, 'getTokenAccountsByOwner', [
-        address,
-        Object.freeze({ mint: asset.identity }),
-        Object.freeze({ commitment, encoding: 'base64', minContextSlot: slot }),
-      ]);
+      const result = await exchangeBalanceRpc(
+        this.transport,
+        'getTokenAccountsByOwner',
+        [
+          address,
+          Object.freeze({ mint: asset.identity }),
+          Object.freeze({ commitment, encoding: 'base64', minContextSlot: slot }),
+        ],
+        context,
+      );
       const amountAtomic = parseTokenAccounts(result, address, asset.identity, slot, program);
       positions.push(
         Object.freeze({
@@ -180,11 +204,12 @@ export class SolanaMainnetBalanceIndexerAdapter implements BalanceSyncIndexerPor
         }),
       );
     }
-    const verifiedHeader = await this.readBlock(BigInt(slot), commitment);
+    const verifiedHeader = await this.readBlock(BigInt(slot), commitment, context);
     if (verifiedHeader === null || !sameBlockHeader(selectedHeader, verifiedHeader)) {
       throw new BalanceSyncIndexerFailure('PROVIDER_UNAVAILABLE');
     }
-    await this.assertMainnetIdentity();
+    await this.assertMainnetIdentity(context);
+    requireActiveExecution(context);
     const retrievedAt = canonicalClockTime(this.clock);
     return Object.freeze({
       header: verifiedHeader,
@@ -205,8 +230,8 @@ export class SolanaMainnetBalanceIndexerAdapter implements BalanceSyncIndexerPor
     });
   }
 
-  private async assertMainnetIdentity(): Promise<void> {
-    const genesisHash = await exchangeBalanceRpc(this.transport, 'getGenesisHash', []);
+  private async assertMainnetIdentity(context: BalanceSyncExecutionContext): Promise<void> {
+    const genesisHash = await exchangeBalanceRpc(this.transport, 'getGenesisHash', [], context);
     if (genesisHash !== SOLANA_MAINNET_GENESIS_HASH) {
       throw new BalanceSyncIndexerFailure('PROVIDER_INVALID_DATA');
     }
@@ -231,14 +256,17 @@ export class SolanaMainnetBalanceIndexerAdapter implements BalanceSyncIndexerPor
   private async readBlock(
     position: bigint,
     commitment: 'confirmed' | 'finalized',
+    context: BalanceSyncExecutionContext,
   ): Promise<SolanaBlockHeader | null> {
     if (position < 0n || position > BigInt(Number.MAX_SAFE_INTEGER)) {
       throw new BalanceSyncIndexerFailure('REORG_RECOVERY_FAILED');
     }
-    const result = await exchangeBalanceRpc(this.transport, 'getBlock', [
-      Number(position),
-      Object.freeze({ commitment, transactionDetails: 'none', rewards: false }),
-    ]);
+    const result = await exchangeBalanceRpc(
+      this.transport,
+      'getBlock',
+      [Number(position), Object.freeze({ commitment, transactionDetails: 'none', rewards: false })],
+      context,
+    );
     if (result === null) return null;
     const record = allowedRecord(
       result,
@@ -480,4 +508,12 @@ function recoveryResult(
       complete: true,
     }),
   });
+}
+
+function requireActiveExecution(context: unknown): void {
+  const reviewed = reviewBalanceSyncExecutionContext(context);
+  if (reviewed?.abortKind === null) return;
+  throw new BalanceSyncIndexerFailure(
+    reviewed?.abortKind === 'DEADLINE' ? 'PROVIDER_TIMEOUT' : 'PROVIDER_UNAVAILABLE',
+  );
 }

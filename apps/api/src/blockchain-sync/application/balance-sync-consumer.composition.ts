@@ -117,8 +117,8 @@ export function createBalanceSyncConsumerComposition(
     dependencies.clock,
     dependencies.metrics,
   );
-  const dispatcher = new BalanceSyncJobDispatcher(async (job) => {
-    await orchestrator.process(job);
+  const dispatcher = new BalanceSyncJobDispatcher(async (job, context) => {
+    await orchestrator.process(job, context);
   });
   const queueWorker = new SqsJobWorker(
     dependencies.sqs,

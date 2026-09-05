@@ -39,7 +39,9 @@ import type {
   BalanceSyncMetricsPort,
   BalanceSyncScope,
   BalanceSyncSuccessMode,
+  BalanceSyncExecutionContext,
 } from './ports/balance-sync.ports';
+import { reviewBalanceSyncExecutionContext } from './ports/balance-sync.ports';
 
 const FINGERPRINT_PATTERN = /^[0-9a-f]{64}$/u;
 const EVM_BLOCK_HASH_PATTERN = /^0x[0-9a-fA-F]{64}$/u;
@@ -127,7 +129,13 @@ export class BalanceSyncOrchestrator {
     private readonly metrics: BalanceSyncMetricsPort,
   ) {}
 
-  async process(input: unknown): Promise<BalanceSyncProcessingResult> {
+  async process(
+    input: unknown,
+    context: BalanceSyncExecutionContext,
+  ): Promise<BalanceSyncProcessingResult> {
+    if (reviewBalanceSyncExecutionContext(context) === null) {
+      throw orchestratorError('INVALID_BALANCE_SYNC_JOB');
+    }
     let job: BalanceSyncJobEnvelope;
     try {
       job = parseBalanceSyncJobEnvelope(input);
@@ -161,7 +169,7 @@ export class BalanceSyncOrchestrator {
 
     try {
       if (job.payload.cause === 'MANUAL_RECOVERY' || job.payload.rescanFromPosition !== null) {
-        const recovery = await this.recoverFromReorg(job, scope, checkpoint, advanceClock);
+        const recovery = await this.recoverFromReorg(job, scope, checkpoint, advanceClock, context);
         await this.commitRecovery(scope, checkpoint, recovery, recovery.completedAt.canonical);
         this.recordMetric({
           event: 'REORG_RECOVERED',
@@ -183,7 +191,7 @@ export class BalanceSyncOrchestrator {
         tier: job.payload.requiredTier,
         selector: threshold.selector,
       });
-      const value = await this.indexer.readCurrent(request);
+      const value = await this.indexer.readCurrent(request, context);
       const readCompletedAt = advanceClock();
       const candidate = normalizeCandidate(value, request, readCompletedAt.milliseconds);
       const continuity = continuityAction(checkpoint?.currentObservation ?? null, candidate);
@@ -197,7 +205,7 @@ export class BalanceSyncOrchestrator {
           tier: job.payload.requiredTier,
           attempt: job.payload.attempt,
         });
-        const recovery = await this.recoverFromReorg(job, scope, checkpoint, advanceClock);
+        const recovery = await this.recoverFromReorg(job, scope, checkpoint, advanceClock, context);
         await this.commitRecovery(scope, checkpoint, recovery, recovery.completedAt.canonical);
         this.recordMetric({
           event: 'REORG_RECOVERED',
@@ -304,6 +312,7 @@ export class BalanceSyncOrchestrator {
     scope: BalanceSyncScope,
     checkpoint: BalanceSyncCheckpoint | null,
     advanceClock: () => ClockTime,
+    context: BalanceSyncExecutionContext,
   ): Promise<RecoveryResult> {
     const anchor = checkpoint?.lastFinalizedSource;
     if (
@@ -327,8 +336,12 @@ export class BalanceSyncOrchestrator {
     });
     let value: unknown;
     try {
-      value = await this.indexer.rescanFromCheckpoint(request);
-    } catch {
+      value = await this.indexer.rescanFromCheckpoint(request, context);
+    } catch (error) {
+      const failure = reviewBalanceSyncIndexerFailure(error);
+      if (failure?.code === 'PROVIDER_TIMEOUT' || failure?.code === 'PROVIDER_UNAVAILABLE') {
+        throw new BalanceSyncIndexerFailure(failure.code);
+      }
       throw new BalanceSyncIndexerFailure('REORG_RECOVERY_FAILED');
     }
     const completedAt = advanceClock();

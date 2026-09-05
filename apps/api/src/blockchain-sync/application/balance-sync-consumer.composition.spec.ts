@@ -26,13 +26,16 @@ import {
   MainnetBalanceIndexerRouter,
   SOLANA_MAINNET_BALANCE_NETWORK_ID,
 } from './mainnet-balance-indexer.router';
-import type {
-  BalanceIndexerReadRequest,
-  BalanceSyncCheckpointPort,
-  BalanceSyncClockPort,
-  BalanceSyncMetricsPort,
-  BalanceSyncWalletAddressResolverPort,
+import {
+  createBalanceSyncExecutionContext,
+  type BalanceIndexerReadRequest,
+  type BalanceSyncCheckpointPort,
+  type BalanceSyncClockPort,
+  type BalanceSyncMetricsPort,
+  type BalanceSyncWalletAddressResolverPort,
 } from './ports/balance-sync.ports';
+
+const TEST_EXECUTION = createBalanceSyncExecutionContext();
 
 function receiptPolicy(visibilityTimeoutSeconds = 30): BalanceSyncConsumerReceiptPolicy {
   return { visibilityTimeoutSeconds };
@@ -369,13 +372,13 @@ describe('createBalanceSyncConsumerComposition', () => {
   });
 
   it('wires the two chain adapters into the closed mainnet router', async () => {
-    const test = createHarness();
     const ethereumRead = jest
-      .spyOn(test.composition.ethereumIndexer, 'readCurrent')
+      .spyOn(EthereumMainnetBalanceIndexerAdapter.prototype, 'readCurrent')
       .mockResolvedValue('ethereum');
     const solanaRead = jest
-      .spyOn(test.composition.solanaIndexer, 'readCurrent')
+      .spyOn(SolanaMainnetBalanceIndexerAdapter.prototype, 'readCurrent')
       .mockResolvedValue('solana');
+    const test = createHarness();
     const request = (
       networkId: BalanceIndexerReadRequest['networkId'],
     ): BalanceIndexerReadRequest =>
@@ -391,16 +394,26 @@ describe('createBalanceSyncConsumerComposition', () => {
       });
 
     await expect(
-      test.composition.indexer.readCurrent(request(ETHEREUM_MAINNET_BALANCE_NETWORK_ID)),
+      test.composition.indexer.readCurrent(
+        request(ETHEREUM_MAINNET_BALANCE_NETWORK_ID),
+        TEST_EXECUTION.context,
+      ),
     ).resolves.toBe('ethereum');
     await expect(
-      test.composition.indexer.readCurrent(request(SOLANA_MAINNET_BALANCE_NETWORK_ID)),
+      test.composition.indexer.readCurrent(
+        request(SOLANA_MAINNET_BALANCE_NETWORK_ID),
+        TEST_EXECUTION.context,
+      ),
     ).resolves.toBe('solana');
 
     expect(ethereumRead).toHaveBeenCalledTimes(1);
     expect(solanaRead).toHaveBeenCalledTimes(1);
+    expect(ethereumRead.mock.calls[0]?.[1]).toBe(TEST_EXECUTION.context);
+    expect(solanaRead.mock.calls[0]?.[1]).toBe(TEST_EXECUTION.context);
     expect(test.ethereumExchange).not.toHaveBeenCalled();
     expect(test.solanaExchange).not.toHaveBeenCalled();
+    ethereumRead.mockRestore();
+    solanaRead.mockRestore();
   });
 
   it('receives only through the already-pinned capability without queue coordinates', async () => {
@@ -535,7 +548,7 @@ describe('createBalanceSyncConsumerComposition', () => {
     );
 
     const result = await test.composition.queueWorker.processOne((candidate) =>
-      test.composition.dispatcher.dispatch(candidate),
+      test.composition.dispatcher.dispatch(candidate, TEST_EXECUTION.context),
     );
 
     expect(result).toMatchObject({
@@ -545,6 +558,67 @@ describe('createBalanceSyncConsumerComposition', () => {
       retryDelaySeconds: 30,
     });
     expect(test.changeVisibility).toHaveBeenCalledWith(message, 30, expect.any(AbortSignal));
+    expect(test.checkpoints.preserveLastGoodAndMarkStale).toHaveBeenCalledTimes(1);
+    expect(test.deleteReceipt).not.toHaveBeenCalled();
+  });
+
+  it('settles an accepted hung RPC on shutdown and retains the source receipt', async () => {
+    const test = createHarness();
+    const job = createDeterministicBalanceSyncJobEnvelope(
+      {
+        schemaVersion: 1,
+        accountId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        walletId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+        networkId: ETHEREUM_MAINNET_BALANCE_NETWORK_ID,
+        requiredTier: 'PROVISIONAL',
+        cause: 'SCHEDULED',
+        attempt: 1,
+        rescanFromPosition: null,
+      },
+      {
+        id: 'balance-hung-rpc-job-1',
+        occurredAt: '2026-09-04T11:59:59.000Z',
+        correlation: { correlationId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc' },
+      },
+    );
+    const message: ReceivedQueueMessage = {
+      messageId: 'balance-hung-rpc-message-1',
+      receiptHandle: 'balance-hung-rpc-receipt-1',
+      body: JSON.stringify(job),
+      receiveCount: 1,
+      receivedAtMonotonicMs: performance.now(),
+    };
+    test.receive.mockResolvedValueOnce([message]);
+    (test.checkpoints.load as jest.Mock).mockResolvedValue(null);
+    let markTransportStarted: (() => void) | undefined;
+    const transportStarted = new Promise<void>((resolve) => {
+      markTransportStarted = resolve;
+    });
+    let receivedSignal: AbortSignal | undefined;
+    test.ethereumExchange.mockImplementation(
+      async (_request: unknown, signal: AbortSignal): Promise<unknown> =>
+        new Promise((_resolve, reject) => {
+          receivedSignal = signal;
+          markTransportStarted?.();
+          signal.addEventListener('abort', () => reject(new Error('raw transport abort')), {
+            once: true,
+          });
+        }),
+    );
+    const controller = new AbortController();
+
+    const running = test.composition.consumer.run(controller.signal);
+    await transportStarted;
+    controller.abort('raw lifecycle reason');
+    await expect(running).resolves.toBeUndefined();
+
+    expect(receivedSignal).toBeInstanceOf(AbortSignal);
+    expect(receivedSignal).not.toBe(controller.signal);
+    expect(test.changeVisibility).toHaveBeenCalledWith(
+      message,
+      BALANCE_SYNC_POLICY.retryBaseDelaySeconds,
+      expect.any(AbortSignal),
+    );
     expect(test.checkpoints.preserveLastGoodAndMarkStale).toHaveBeenCalledTimes(1);
     expect(test.deleteReceipt).not.toHaveBeenCalled();
   });
@@ -575,9 +649,9 @@ describe('createBalanceSyncConsumerComposition', () => {
       },
     );
 
-    await test.composition.dispatcher.dispatch(job);
+    await test.composition.dispatcher.dispatch(job, TEST_EXECUTION.context);
 
     expect(process).toHaveBeenCalledTimes(1);
-    expect(process).toHaveBeenCalledWith(job);
+    expect(process).toHaveBeenCalledWith(job, TEST_EXECUTION.context);
   });
 });

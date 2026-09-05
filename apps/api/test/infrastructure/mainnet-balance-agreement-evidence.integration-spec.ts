@@ -17,9 +17,10 @@ import {
   type MainnetBalanceSourcePairRegistryContentV1,
   type MainnetBalanceTwoSourceAgreementCandidateV1,
 } from '../../src/blockchain-sync/application/mainnet-balance-two-source-agreement.coordinator';
-import type {
-  BalanceIndexerReadRequest,
-  BalanceIndexerSourceCandidate,
+import {
+  INERT_BALANCE_SYNC_EXECUTION_CONTEXT,
+  type BalanceIndexerReadRequest,
+  type BalanceIndexerSourceCandidate,
 } from '../../src/blockchain-sync/application/ports/balance-sync.ports';
 import { canonicalPositionId } from '../../src/blockchain-sync/infrastructure/rpc/balance-json-rpc';
 import { MigrationRunner } from '../../src/infrastructure/database/migration-runner.service';
@@ -308,20 +309,26 @@ describeWithPostgres('mainnet balance two-source agreement evidence boundary', (
     solanaWalletId = await registerWallet(accountId, SOLANA);
     const coordinator = agreementCoordinator(now);
     evidence = Object.freeze([
-      await coordinator.readCurrentAgreement({
-        accountId,
-        walletId: ethereumWalletId,
-        networkId: ETHEREUM,
-        tier: 'FINANCIAL',
-        selector: 'finalized',
-      }),
-      await coordinator.readCurrentAgreement({
-        accountId,
-        walletId: solanaWalletId,
-        networkId: SOLANA,
-        tier: 'FINANCIAL',
-        selector: 'finalized',
-      }),
+      await coordinator.readCurrentAgreement(
+        {
+          accountId,
+          walletId: ethereumWalletId,
+          networkId: ETHEREUM,
+          tier: 'FINANCIAL',
+          selector: 'finalized',
+        },
+        INERT_BALANCE_SYNC_EXECUTION_CONTEXT,
+      ),
+      await coordinator.readCurrentAgreement(
+        {
+          accountId,
+          walletId: solanaWalletId,
+          networkId: SOLANA,
+          tier: 'FINANCIAL',
+          selector: 'finalized',
+        },
+        INERT_BALANCE_SYNC_EXECUTION_CONTEXT,
+      ),
     ]);
   });
 

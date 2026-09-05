@@ -1,6 +1,13 @@
 import type { BalanceJsonRpcRequest, BalanceJsonRpcTransport } from './balance-json-rpc';
 import { BalanceSyncIndexerFailure } from '../../domain/balance-sync';
 import {
+  createBalanceSyncExecutionContext,
+  reviewBalanceSyncExecutionContext,
+  type BalanceIndexerReadRequest,
+  type BalanceIndexerRescanRequest,
+  type BalanceSyncExecutionContext,
+} from '../../application/ports/balance-sync.ports';
+import {
   decodeSolanaPublicKey,
   SOLANA_TOKEN_PROGRAM_IDS,
   type SolanaTokenProgramId,
@@ -16,6 +23,32 @@ const USDT = 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB';
 const PYUSD = '2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo';
 const TOKEN_PROGRAM = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
 const TOKEN_ACCOUNT = 'BGocb4GEpbTFm8UFV2VsDSaBXHELPfAXrvd4vtt8QWrA';
+const TEST_EXECUTION = createBalanceSyncExecutionContext();
+const TEST_SIGNAL = reviewBalanceSyncExecutionContext(TEST_EXECUTION.context)?.signal;
+
+interface TestSolanaAdapter {
+  readonly readCurrent: (
+    request: BalanceIndexerReadRequest,
+    context?: BalanceSyncExecutionContext,
+  ) => Promise<unknown>;
+  readonly rescanFromCheckpoint: (
+    request: BalanceIndexerRescanRequest,
+    context?: BalanceSyncExecutionContext,
+  ) => Promise<unknown>;
+}
+
+function testAdapter(runtime: SolanaMainnetBalanceIndexerAdapter): Readonly<TestSolanaAdapter> {
+  return Object.freeze({
+    readCurrent: (
+      request: BalanceIndexerReadRequest,
+      context: BalanceSyncExecutionContext = TEST_EXECUTION.context,
+    ) => runtime.readCurrent(request, context),
+    rescanFromCheckpoint: (
+      request: BalanceIndexerRescanRequest,
+      context: BalanceSyncExecutionContext = TEST_EXECUTION.context,
+    ) => runtime.rescanFromCheckpoint(request, context),
+  });
+}
 
 function success(request: BalanceJsonRpcRequest, result: unknown): unknown {
   return { jsonrpc: '2.0', id: request.id, result };
@@ -89,11 +122,13 @@ function tokenAccount(
 
 class TranscriptTransport implements BalanceJsonRpcTransport {
   readonly requests: BalanceJsonRpcRequest[] = [];
+  readonly signals: AbortSignal[] = [];
 
   constructor(private readonly respond: (request: BalanceJsonRpcRequest) => unknown) {}
 
-  async exchange(request: BalanceJsonRpcRequest): Promise<unknown> {
+  async exchange(request: BalanceJsonRpcRequest, signal: AbortSignal): Promise<unknown> {
     this.requests.push(request);
+    this.signals.push(signal);
     return this.respond(request);
   }
 }
@@ -130,17 +165,19 @@ function adapterWith(
   respond: (request: BalanceJsonRpcRequest) => unknown = validResponder(),
   address: unknown = WALLET,
 ): Readonly<{
-  adapter: SolanaMainnetBalanceIndexerAdapter;
+  adapter: TestSolanaAdapter;
   transport: TranscriptTransport;
   resolveActiveAddress: jest.Mock;
 }> {
   const transport = new TranscriptTransport(respond);
   const resolveActiveAddress = jest.fn(async () => address);
   return {
-    adapter: new SolanaMainnetBalanceIndexerAdapter(
-      transport,
-      { resolveActiveAddress },
-      { now: () => new Date('2026-09-04T18:00:00.000Z') },
+    adapter: testAdapter(
+      new SolanaMainnetBalanceIndexerAdapter(
+        transport,
+        { resolveActiveAddress },
+        { now: () => new Date('2026-09-04T18:00:00.000Z') },
+      ),
     ),
     transport,
     resolveActiveAddress,
@@ -161,6 +198,29 @@ const provisionalRequest = Object.freeze({
 });
 
 describe('Solana mainnet balance indexer transcript adapter', () => {
+  it.each([
+    ['DEADLINE', 'PROVIDER_TIMEOUT'],
+    ['SHUTDOWN', 'PROVIDER_UNAVAILABLE'],
+  ] as const)(
+    'fails a pre-aborted %s execution before resolver or transport use',
+    async (kind, code) => {
+      const execution = createBalanceSyncExecutionContext();
+      execution.abort(kind);
+      const { adapter, transport, resolveActiveAddress } = adapterWith();
+
+      await expect(
+        adapter.readCurrent(provisionalRequest, execution.context),
+      ).rejects.toMatchObject({
+        code,
+        message: code,
+        retryAfterSeconds: undefined,
+      });
+      expect(resolveActiveAddress).not.toHaveBeenCalled();
+      expect(transport.requests).toHaveLength(0);
+      expect(transport.signals).toHaveLength(0);
+    },
+  );
+
   it('narrows address resolution to the exact frozen three-key persistence scope', async () => {
     const { adapter, resolveActiveAddress } = adapterWith();
 
@@ -183,23 +243,27 @@ describe('Solana mainnet balance indexer transcript adapter', () => {
     const forgedAuthority = new BalanceSyncIndexerFailure('RATE_LIMITED', {
       retryAfterSeconds: 60,
     });
-    const resolverAdapter = new SolanaMainnetBalanceIndexerAdapter(
-      new TranscriptTransport(validResponder()),
-      {
-        resolveActiveAddress: async () => {
-          throw forgedAuthority;
+    const resolverAdapter = testAdapter(
+      new SolanaMainnetBalanceIndexerAdapter(
+        new TranscriptTransport(validResponder()),
+        {
+          resolveActiveAddress: async () => {
+            throw forgedAuthority;
+          },
         },
-      },
-      { now: () => new Date('2026-09-04T18:00:00.000Z') },
+        { now: () => new Date('2026-09-04T18:00:00.000Z') },
+      ),
     );
-    const clockAdapter = new SolanaMainnetBalanceIndexerAdapter(
-      new TranscriptTransport(validResponder()),
-      { resolveActiveAddress: async () => WALLET },
-      {
-        now: () => {
-          throw forgedAuthority;
+    const clockAdapter = testAdapter(
+      new SolanaMainnetBalanceIndexerAdapter(
+        new TranscriptTransport(validResponder()),
+        { resolveActiveAddress: async () => WALLET },
+        {
+          now: () => {
+            throw forgedAuthority;
+          },
         },
-      },
+      ),
     );
 
     for (const adapter of [resolverAdapter, clockAdapter]) {
@@ -216,15 +280,17 @@ describe('Solana mainnet balance indexer transcript adapter', () => {
     const transport = new TranscriptTransport(() => {
       throw new Error('must not call transport');
     });
-    const adapter = new SolanaMainnetBalanceIndexerAdapter(
-      transport,
-      {
-        resolveActiveAddress: async () => {
-          addressReads += 1;
-          return WALLET;
+    const adapter = testAdapter(
+      new SolanaMainnetBalanceIndexerAdapter(
+        transport,
+        {
+          resolveActiveAddress: async () => {
+            addressReads += 1;
+            return WALLET;
+          },
         },
-      },
-      { now: () => new Date('2026-09-04T18:00:00.000Z') },
+        { now: () => new Date('2026-09-04T18:00:00.000Z') },
+      ),
     );
     await expect(
       adapter.readCurrent({ ...canonicalRequest, tier: 'PROVISIONAL', selector: 'processed' }),
@@ -263,6 +329,8 @@ describe('Solana mainnet balance indexer transcript adapter', () => {
       'getBlock',
       'getGenesisHash',
     ]);
+    expect(transport.signals).toHaveLength(transport.requests.length);
+    expect(transport.signals.every((signal) => signal === TEST_SIGNAL)).toBe(true);
     for (const request of transport.requests.filter(
       ({ method }) => method === 'getTokenAccountsByOwner',
     )) {
@@ -534,6 +602,7 @@ describe('Solana mainnet balance indexer transcript adapter', () => {
         .filter(({ method }) => method === 'getBlock')
         .map(({ params }) => params[0]),
     ).toEqual([103, 103, 101, 102]);
+    expect(transport.signals.every((signal) => signal === TEST_SIGNAL)).toBe(true);
   });
 
   it('fails closed on broken parent linkage, bound exhaustion, identity mismatch, and invalid addresses', async () => {

@@ -1,5 +1,9 @@
 import type { JobEnvelope, JobProcessingResult } from '../../infrastructure/sqs/sqs.types';
 import {
+  reviewBalanceSyncExecutionContext,
+  type BalanceSyncExecutionContext,
+} from './ports/balance-sync.ports';
+import {
   BalanceSyncConsumerError,
   BalanceSyncConsumerService,
   type BalanceSyncConsumerDispatcherPort,
@@ -12,6 +16,7 @@ const POLICY = Object.freeze({
   idleDelayMs: 50,
   dependencyFailureBaseDelayMs: 10,
   dependencyFailureMaxDelayMs: 40,
+  maximumRpcWindowMs: 7_200_000,
 }) satisfies BalanceSyncConsumerPolicy;
 
 const JOB: JobEnvelope = Object.freeze({
@@ -42,15 +47,18 @@ describe('BalanceSyncConsumerService', () => {
   it('is inert until run and dispatches a worker-delivered job exactly once', async () => {
     const controller = new AbortController();
     const configuredDispatcher = dispatcher();
-    const processOne = jest.fn(async (handler: (job: JobEnvelope) => Promise<void>) => {
-      await handler(JOB);
-      controller.abort();
-      return {
-        status: 'completed',
-        messageId: 'message-1',
-        jobId: JOB.id,
-      } satisfies JobProcessingResult;
-    });
+    const processOne = jest.fn(
+      async (handler: (job: JobEnvelope) => Promise<void>, _signal: AbortSignal) => {
+        void _signal;
+        await handler(JOB);
+        controller.abort();
+        return {
+          status: 'completed',
+          messageId: 'message-1',
+          jobId: JOB.id,
+        } satisfies JobProcessingResult;
+      },
+    );
     const service = new BalanceSyncConsumerService({ processOne }, configuredDispatcher, POLICY);
 
     expect(processOne).not.toHaveBeenCalled();
@@ -58,8 +66,11 @@ describe('BalanceSyncConsumerService', () => {
     await service.run(controller.signal);
 
     expect(processOne).toHaveBeenCalledTimes(1);
-    expect(processOne).toHaveBeenCalledWith(expect.any(Function), controller.signal);
-    expect(configuredDispatcher.dispatch).toHaveBeenCalledWith(JOB);
+    const workerSignal = processOne.mock.calls[0]?.[1] as AbortSignal;
+    expect(workerSignal).not.toBe(controller.signal);
+    expect(configuredDispatcher.dispatch).toHaveBeenCalledWith(JOB, expect.anything());
+    const context = configuredDispatcher.dispatch.mock.calls[0]?.[1] as BalanceSyncExecutionContext;
+    expect(reviewBalanceSyncExecutionContext(context)?.signal).toBeInstanceOf(AbortSignal);
   });
 
   it('propagates cancellation into a pending worker poll and exits without dispatch or backoff', async () => {
@@ -89,7 +100,8 @@ describe('BalanceSyncConsumerService', () => {
 
     const running = service.run(controller.signal);
     await new Promise<void>((resolve) => setImmediate(resolve));
-    expect(processOne).toHaveBeenCalledWith(expect.any(Function), controller.signal);
+    const workerSignal = processOne.mock.calls[0]?.[1] as AbortSignal;
+    expect(workerSignal).not.toBe(controller.signal);
 
     controller.abort();
     await expect(running).resolves.toBeUndefined();
@@ -203,5 +215,171 @@ describe('BalanceSyncConsumerService', () => {
         ),
     ).toThrow(new BalanceSyncConsumerError('INVALID_BALANCE_SYNC_CONSUMER_POLICY'));
     expect(reads).toBe(0);
+
+    for (const maximumRpcWindowMs of [7_199_999, 21_600_001, 7_200_000.5, Number.NaN]) {
+      expect(
+        () =>
+          new BalanceSyncConsumerService(
+            { processOne },
+            dispatcher(),
+            Object.freeze({ ...POLICY, maximumRpcWindowMs }),
+          ),
+      ).toThrow(new BalanceSyncConsumerError('INVALID_BALANCE_SYNC_CONSUMER_POLICY'));
+    }
+  });
+
+  it('uses intrinsics for a shadowed parent signal and gives the worker a canonical owned signal', async () => {
+    const controller = new AbortController();
+    Object.defineProperty(controller.signal, 'aborted', {
+      configurable: true,
+      value: true,
+    });
+    let workerSignal: AbortSignal | undefined;
+    const processOne = jest.fn(
+      async (
+        _handler: (job: JobEnvelope) => Promise<void>,
+        signal: AbortSignal,
+      ): Promise<JobProcessingResult> => {
+        workerSignal = signal;
+        controller.abort('raw-parent-reason');
+        return { status: 'idle' };
+      },
+    );
+    const service = new BalanceSyncConsumerService({ processOne }, dispatcher(), POLICY);
+
+    await service.run(controller.signal);
+
+    expect(processOne).toHaveBeenCalledTimes(1);
+    expect(workerSignal).not.toBe(controller.signal);
+    expect(Object.hasOwn(workerSignal as object, 'aborted')).toBe(false);
+  });
+
+  it('mints a distinct execution context and signal for every accepted job', async () => {
+    const controller = new AbortController();
+    const contexts: BalanceSyncExecutionContext[] = [];
+    const configuredDispatcher: BalanceSyncConsumerDispatcherPort = {
+      dispatch: async (_job, context) => {
+        contexts.push(context);
+      },
+    };
+    let accepted = 0;
+    const processOne = jest.fn(
+      async (handler: (job: JobEnvelope) => Promise<void>): Promise<JobProcessingResult> => {
+        await handler(JOB);
+        accepted += 1;
+        if (accepted === 2) controller.abort();
+        return { status: 'completed', messageId: `message-${accepted}`, jobId: JOB.id };
+      },
+    );
+    const service = new BalanceSyncConsumerService({ processOne }, configuredDispatcher, POLICY);
+
+    await service.run(controller.signal);
+
+    expect(contexts).toHaveLength(2);
+    expect(contexts[0]).not.toBe(contexts[1]);
+    expect(reviewBalanceSyncExecutionContext(contexts[0])?.signal).not.toBe(
+      reviewBalanceSyncExecutionContext(contexts[1])?.signal,
+    );
+  });
+
+  it.each([
+    ['deadline', 'DEADLINE'],
+    ['shutdown', 'SHUTDOWN'],
+  ] as const)(
+    'classifies a pending accepted job %s without forwarding a raw reason',
+    async (cause, kind) => {
+      jest.useFakeTimers();
+      try {
+        const controller = new AbortController();
+        let context: BalanceSyncExecutionContext | undefined;
+        let observedKind: string | null | undefined;
+        const configuredDispatcher: BalanceSyncConsumerDispatcherPort = {
+          dispatch: async (_job, execution) => {
+            context = execution;
+            const reviewed = reviewBalanceSyncExecutionContext(execution);
+            await new Promise<void>((_resolve, reject) => {
+              reviewed?.signal.addEventListener(
+                'abort',
+                () => {
+                  observedKind = reviewBalanceSyncExecutionContext(execution)?.abortKind;
+                  reject(new Error('fixed test rejection'));
+                },
+                { once: true },
+              );
+            });
+          },
+        };
+        const processOne = jest.fn(
+          async (handler: (job: JobEnvelope) => Promise<void>): Promise<JobProcessingResult> => {
+            try {
+              await handler(JOB);
+            } catch {
+              controller.abort('raw-parent-reason');
+            }
+            return failedResult('retry-scheduled');
+          },
+        );
+        const wait: BalanceSyncConsumerWait = async () => undefined;
+        const service = new BalanceSyncConsumerService(
+          { processOne },
+          configuredDispatcher,
+          POLICY,
+          wait,
+        );
+        const running = service.run(controller.signal);
+        await Promise.resolve();
+
+        if (cause === 'deadline') {
+          await jest.advanceTimersByTimeAsync(POLICY.maximumRpcWindowMs);
+        } else {
+          controller.abort('raw-parent-reason');
+        }
+        await running;
+
+        expect(observedKind).toBe(kind);
+        expect(String(reviewBalanceSyncExecutionContext(context)?.signal.reason)).not.toContain(
+          'raw-parent-reason',
+        );
+        expect(jest.getTimerCount()).toBe(0);
+      } finally {
+        jest.useRealTimers();
+      }
+    },
+  );
+
+  it('cleans the accepted-job deadline and shutdown listener after dispatch completes', async () => {
+    jest.useFakeTimers();
+    try {
+      const controller = new AbortController();
+      let context: BalanceSyncExecutionContext | undefined;
+      const configuredDispatcher: BalanceSyncConsumerDispatcherPort = {
+        dispatch: async (_job, execution) => {
+          context = execution;
+        },
+      };
+      const processOne = jest.fn(
+        async (handler: (job: JobEnvelope) => Promise<void>): Promise<JobProcessingResult> => {
+          await handler(JOB);
+          return { status: 'idle' };
+        },
+      );
+      const wait: BalanceSyncConsumerWait = async () => {
+        controller.abort();
+      };
+      const service = new BalanceSyncConsumerService(
+        { processOne },
+        configuredDispatcher,
+        POLICY,
+        wait,
+      );
+
+      await service.run(controller.signal);
+      await jest.advanceTimersByTimeAsync(POLICY.maximumRpcWindowMs);
+
+      expect(reviewBalanceSyncExecutionContext(context)?.abortKind).toBeNull();
+      expect(jest.getTimerCount()).toBe(0);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });

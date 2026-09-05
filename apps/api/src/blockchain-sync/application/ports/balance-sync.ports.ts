@@ -68,10 +68,100 @@ export interface BalanceIndexerRescanResult extends BalanceIndexerCandidate {
   }>;
 }
 
+export type BalanceSyncExecutionAbortKind = 'SHUTDOWN' | 'DEADLINE';
+
+export interface BalanceSyncExecutionContext {
+  readonly signal: AbortSignal;
+}
+
+export interface ReviewedBalanceSyncExecutionContext {
+  readonly signal: AbortSignal;
+  readonly abortKind: BalanceSyncExecutionAbortKind | null;
+}
+
+export interface BalanceSyncExecutionContextOwner {
+  readonly context: BalanceSyncExecutionContext;
+  readonly abort: (kind: BalanceSyncExecutionAbortKind) => void;
+}
+
+const VERIFIED_BALANCE_SYNC_EXECUTION_CONTEXTS = new WeakMap<object, AbortSignal>();
+const VERIFIED_BALANCE_SYNC_ABORT_KINDS = new WeakMap<object, BalanceSyncExecutionAbortKind>();
+const ABORT_SIGNAL_ABORTED_GETTER = Object.getOwnPropertyDescriptor(
+  AbortSignal.prototype,
+  'aborted',
+)?.get;
+const ABORT_CONTROLLER_SIGNAL_GETTER = Object.getOwnPropertyDescriptor(
+  AbortController.prototype,
+  'signal',
+)?.get;
+const ABORT_CONTROLLER_ABORT = Object.getOwnPropertyDescriptor(AbortController.prototype, 'abort')
+  ?.value as ((reason?: unknown) => void) | undefined;
+
+function frozenNullPrototype<T extends object>(members: T): Readonly<T> {
+  return Object.freeze(Object.assign(Object.create(null) as T, members));
+}
+
+/**
+ * Creates one privately controlled execution signal. Abort classification is
+ * retained out of band, so downstream code never needs to inspect a reason.
+ */
+export function createBalanceSyncExecutionContext(): Readonly<BalanceSyncExecutionContextOwner> {
+  if (
+    ABORT_SIGNAL_ABORTED_GETTER === undefined ||
+    ABORT_CONTROLLER_SIGNAL_GETTER === undefined ||
+    typeof ABORT_CONTROLLER_ABORT !== 'function'
+  ) {
+    throw new TypeError('balance sync execution context is unavailable');
+  }
+  const controller = new AbortController();
+  const signal = Reflect.apply(ABORT_CONTROLLER_SIGNAL_GETTER, controller, []) as AbortSignal;
+  const context = frozenNullPrototype<BalanceSyncExecutionContext>({ signal });
+  VERIFIED_BALANCE_SYNC_EXECUTION_CONTEXTS.set(context, signal);
+  const abort = (kind: BalanceSyncExecutionAbortKind): void => {
+    if (kind !== 'SHUTDOWN' && kind !== 'DEADLINE') {
+      throw new TypeError('invalid balance sync execution abort kind');
+    }
+    const aborted = Reflect.apply(ABORT_SIGNAL_ABORTED_GETTER, signal, []) as boolean;
+    if (aborted) return;
+    VERIFIED_BALANCE_SYNC_ABORT_KINDS.set(signal, kind);
+    Reflect.apply(ABORT_CONTROLLER_ABORT, controller, []);
+  };
+  return frozenNullPrototype<BalanceSyncExecutionContextOwner>({ context, abort });
+}
+
+/** Recognizes only exact contexts minted by this module, without reading input properties. */
+export function reviewBalanceSyncExecutionContext(
+  value: unknown,
+): Readonly<ReviewedBalanceSyncExecutionContext> | null {
+  try {
+    if ((typeof value !== 'object' && typeof value !== 'function') || value === null) return null;
+    const signal = VERIFIED_BALANCE_SYNC_EXECUTION_CONTEXTS.get(value as object);
+    if (signal === undefined || ABORT_SIGNAL_ABORTED_GETTER === undefined) return null;
+    const aborted = Reflect.apply(ABORT_SIGNAL_ABORTED_GETTER, signal, []) as boolean;
+    return frozenNullPrototype({
+      signal,
+      abortKind: aborted ? (VERIFIED_BALANCE_SYNC_ABORT_KINDS.get(signal) ?? 'SHUTDOWN') : null,
+    });
+  } catch {
+    return null;
+  }
+}
+
+const INERT_BALANCE_SYNC_EXECUTION_OWNER = createBalanceSyncExecutionContext();
+
+/** Branded non-aborting context for direct, inert unit-level API compatibility only. */
+export const INERT_BALANCE_SYNC_EXECUTION_CONTEXT = INERT_BALANCE_SYNC_EXECUTION_OWNER.context;
+
 /** No concrete RPC/indexer adapter is registered by KAN-65. */
 export interface BalanceSyncIndexerPort {
-  readCurrent(request: BalanceIndexerReadRequest): Promise<unknown>;
-  rescanFromCheckpoint(request: BalanceIndexerRescanRequest): Promise<unknown>;
+  readCurrent(
+    request: BalanceIndexerReadRequest,
+    context: BalanceSyncExecutionContext,
+  ): Promise<unknown>;
+  rescanFromCheckpoint(
+    request: BalanceIndexerRescanRequest,
+    context: BalanceSyncExecutionContext,
+  ): Promise<unknown>;
 }
 
 export interface BalanceSyncCheckpoint {

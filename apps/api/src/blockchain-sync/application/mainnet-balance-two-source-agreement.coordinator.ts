@@ -8,11 +8,13 @@ import {
   normalizeBalanceSyncPosition,
   type BalanceSyncPosition,
 } from '../domain/balance-sync';
-import type {
-  BalanceIndexerCandidate,
-  BalanceIndexerReadRequest,
-  BalanceIndexerSourceCandidate,
-  BalanceSyncIndexerPort,
+import {
+  reviewBalanceSyncExecutionContext,
+  type BalanceIndexerCandidate,
+  type BalanceIndexerReadRequest,
+  type BalanceIndexerSourceCandidate,
+  type BalanceSyncExecutionContext,
+  type BalanceSyncIndexerPort,
 } from './ports/balance-sync.ports';
 import { canonicalPositionId } from '../infrastructure/rpc/balance-json-rpc';
 
@@ -168,7 +170,10 @@ interface ParsedSourceCandidate {
 
 interface NormalizedSourceBinding extends Omit<MainnetBalanceAgreementSourceBinding, 'reader'> {
   readonly readerIdentity: object;
-  readonly readCurrent: (request: BalanceIndexerReadRequest) => Promise<unknown>;
+  readonly readCurrent: (
+    request: BalanceIndexerReadRequest,
+    context: BalanceSyncExecutionContext,
+  ) => Promise<unknown>;
 }
 
 interface CapturedDataMethod {
@@ -245,22 +250,24 @@ export class DormantMainnetBalanceTwoSourceAgreementCoordinator {
 
   async readCurrentAgreement(
     requestInput: BalanceIndexerReadRequest,
+    context: BalanceSyncExecutionContext,
   ): Promise<MainnetBalanceTwoSourceAgreementCandidateV1> {
+    requireActiveAgreementExecution(context);
     const request = parseRequest(requestInput);
     const started = clockTime(this.clockNow);
     const pair = trustedCurrentPair(this.registry, request.networkId, started.milliseconds);
     const primaryBinding = bindingFor(this.bindings, pair, 'PRIMARY');
     const corroboratingBinding = bindingFor(this.bindings, pair, 'CORROBORATING');
-    let primaryValue: unknown;
-    let corroboratingValue: unknown;
-    try {
-      [primaryValue, corroboratingValue] = await Promise.all([
-        primaryBinding.readCurrent(request),
-        corroboratingBinding.readCurrent(request),
-      ]);
-    } catch {
+    const [primaryResult, corroboratingResult] = await Promise.allSettled([
+      primaryBinding.readCurrent(request, context),
+      corroboratingBinding.readCurrent(request, context),
+    ]);
+    requireActiveAgreementExecution(context);
+    if (primaryResult.status !== 'fulfilled' || corroboratingResult.status !== 'fulfilled') {
       return fail('SOURCE_UNAVAILABLE');
     }
+    const primaryValue = primaryResult.value;
+    const corroboratingValue = corroboratingResult.value;
     if (
       typeof primaryValue === 'object' &&
       primaryValue !== null &&
@@ -354,6 +361,11 @@ export class DormantMainnetBalanceTwoSourceAgreementCoordinator {
       agreement,
     });
   }
+}
+
+function requireActiveAgreementExecution(context: unknown): void {
+  const reviewed = reviewBalanceSyncExecutionContext(context);
+  if (reviewed === null || reviewed.abortKind !== null) return fail('SOURCE_UNAVAILABLE');
 }
 
 function parseRegistry(input: unknown): MainnetBalanceSourcePairRegistryV1 {
@@ -483,8 +495,11 @@ function normalizeBindings(
       sourceFamilyId: record.sourceFamilyId,
       sourceId: record.sourceId,
       readerIdentity: capturedReader.receiver,
-      readCurrent: async (request: BalanceIndexerReadRequest): Promise<unknown> =>
-        Reflect.apply(capturedReader.method, capturedReader.receiver, [request]),
+      readCurrent: async (
+        request: BalanceIndexerReadRequest,
+        context: BalanceSyncExecutionContext,
+      ): Promise<unknown> =>
+        Reflect.apply(capturedReader.method, capturedReader.receiver, [request, context]),
     });
   });
   const expected = registry.pairs.flatMap((pair) => [

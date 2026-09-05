@@ -1,5 +1,10 @@
 import { BalanceSyncIndexerFailure } from '../../domain/balance-sync';
 import {
+  createBalanceSyncExecutionContext,
+  reviewBalanceSyncExecutionContext,
+  type BalanceSyncExecutionContext,
+} from '../../application/ports/balance-sync.ports';
+import {
   BalanceJsonRpcTransportFailure,
   balanceRpcRequest,
   canonicalPositionId,
@@ -16,10 +21,12 @@ function success(id: string, result: unknown): unknown {
 }
 
 function transportWith(
-  exchange: (request: BalanceJsonRpcRequest) => Promise<unknown>,
+  exchange: (request: BalanceJsonRpcRequest, signal: AbortSignal) => Promise<unknown>,
 ): BalanceJsonRpcTransport {
   return { exchange };
 }
+
+const TEST_EXECUTION = createBalanceSyncExecutionContext();
 
 async function rejection(operation: Promise<unknown>): Promise<Error> {
   try {
@@ -270,6 +277,7 @@ describe('balance JSON-RPC boundary', () => {
           }),
           'method',
           [],
+          TEST_EXECUTION.context,
         ),
       );
 
@@ -291,6 +299,7 @@ describe('balance JSON-RPC boundary', () => {
           }),
           'method',
           [],
+          TEST_EXECUTION.context,
         ),
       );
 
@@ -347,6 +356,7 @@ describe('balance JSON-RPC boundary', () => {
             }),
             'method',
             [],
+            TEST_EXECUTION.context,
           ),
         );
         expect(error).toMatchObject({
@@ -359,6 +369,105 @@ describe('balance JSON-RPC boundary', () => {
       expect(proxyReads).toBe(0);
     });
 
+    it.each([
+      ['DEADLINE', 'PROVIDER_TIMEOUT'],
+      ['SHUTDOWN', 'PROVIDER_UNAVAILABLE'],
+    ] as const)(
+      'rejects a pre-aborted %s execution without invoking transport',
+      async (kind, code) => {
+        const execution = createBalanceSyncExecutionContext();
+        execution.abort(kind);
+        const exchange = jest.fn(async () => undefined);
+
+        await expect(
+          exchangeBalanceRpc(transportWith(exchange), 'method', [], execution.context),
+        ).rejects.toMatchObject({ code, message: code });
+        expect(exchange).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each([
+      ['DEADLINE', 'PROVIDER_TIMEOUT'],
+      ['SHUTDOWN', 'PROVIDER_UNAVAILABLE'],
+    ] as const)(
+      'passes one exact signal and maps a compliant mid-flight %s abort',
+      async (kind, code) => {
+        const execution = createBalanceSyncExecutionContext();
+        let receivedSignal: AbortSignal | undefined;
+        const pending = exchangeBalanceRpc(
+          transportWith(
+            async (_request, signal) =>
+              new Promise((_resolve, reject) => {
+                receivedSignal = signal;
+                signal.addEventListener('abort', () => reject(new Error('raw abort detail')), {
+                  once: true,
+                });
+              }),
+          ),
+          'method',
+          [],
+          execution.context,
+        );
+        await new Promise<void>((resolve) => setImmediate(resolve));
+
+        execution.abort(kind);
+        await expect(pending).rejects.toMatchObject({ code, message: code });
+        expect(receivedSignal).toBe(reviewSignal(execution.context));
+      },
+    );
+
+    it('lets an execution abort win over a valid response resolved afterward', async () => {
+      const execution = createBalanceSyncExecutionContext();
+      let resolveTransport: (() => void) | undefined;
+      const pending = exchangeBalanceRpc(
+        transportWith(
+          async (request) =>
+            new Promise((resolve) => {
+              resolveTransport = () => resolve(success(request.id, 'late-valid-result'));
+            }),
+        ),
+        'method',
+        [],
+        execution.context,
+      );
+      await new Promise<void>((resolve) => setImmediate(resolve));
+
+      execution.abort('DEADLINE');
+      resolveTransport?.();
+
+      await expect(pending).rejects.toMatchObject({
+        code: 'PROVIDER_TIMEOUT',
+        message: 'PROVIDER_TIMEOUT',
+      });
+    });
+
+    it('rejects counterfeit and proxied execution contexts without inspecting them', async () => {
+      let reads = 0;
+      const hostile = new Proxy(Object.create(null) as object, {
+        get: () => {
+          reads += 1;
+          throw new Error('must not read context');
+        },
+        getPrototypeOf: () => {
+          reads += 1;
+          throw new Error('must not inspect context');
+        },
+      });
+      const exchange = jest.fn(async () => undefined);
+      for (const context of [{ signal: new AbortController().signal }, hostile]) {
+        await expect(
+          exchangeBalanceRpc(
+            transportWith(exchange),
+            'method',
+            [],
+            context as BalanceSyncExecutionContext,
+          ),
+        ).rejects.toMatchObject({ code: 'PROVIDER_UNAVAILABLE' });
+      }
+      expect(exchange).not.toHaveBeenCalled();
+      expect(reads).toBe(0);
+    });
+
     it('validates requests before invoking the transport', async () => {
       let calls = 0;
       const error = await rejection(
@@ -369,6 +478,7 @@ describe('balance JSON-RPC boundary', () => {
           }),
           'invalid-method',
           [],
+          TEST_EXECUTION.context,
         ),
       );
 
@@ -419,3 +529,7 @@ describe('balance JSON-RPC boundary', () => {
     });
   });
 });
+
+function reviewSignal(context: BalanceSyncExecutionContext): AbortSignal | undefined {
+  return reviewBalanceSyncExecutionContext(context)?.signal;
+}

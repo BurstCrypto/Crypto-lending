@@ -1,8 +1,11 @@
 import { MAINNET_SUPPORTED_ASSET_REGISTRY } from '../../blockchain/domain/supported-asset-registry';
 import { canonicalPositionId } from '../infrastructure/rpc/balance-json-rpc';
-import type {
-  BalanceIndexerCandidate,
-  BalanceIndexerReadRequest,
+import {
+  createBalanceSyncExecutionContext,
+  INERT_BALANCE_SYNC_EXECUTION_CONTEXT,
+  type BalanceIndexerCandidate,
+  type BalanceIndexerReadRequest,
+  type BalanceSyncExecutionContext,
 } from './ports/balance-sync.ports';
 import {
   DormantMainnetBalanceTwoSourceAgreementCoordinator,
@@ -33,12 +36,24 @@ type MutableRecord = Record<string, unknown>;
 
 class SyntheticBalanceReader {
   readonly calls: BalanceIndexerReadRequest[] = [];
+  readonly contexts: BalanceSyncExecutionContext[] = [];
   error: Error | undefined;
+  operation:
+    | ((
+        request: BalanceIndexerReadRequest,
+        context: BalanceSyncExecutionContext,
+      ) => Promise<unknown>)
+    | undefined;
 
   constructor(public response: unknown) {}
 
-  async readCurrent(request: BalanceIndexerReadRequest): Promise<unknown> {
+  async readCurrent(
+    request: BalanceIndexerReadRequest,
+    context: BalanceSyncExecutionContext,
+  ): Promise<unknown> {
     this.calls.push(request);
+    this.contexts.push(context);
+    if (this.operation) return this.operation(request, context);
     if (this.error) throw this.error;
     return this.response;
   }
@@ -220,12 +235,25 @@ function harness(): Harness {
   };
 }
 
-function coordinator(value: Harness): DormantMainnetBalanceTwoSourceAgreementCoordinator {
-  return new DormantMainnetBalanceTwoSourceAgreementCoordinator(
+interface TestAgreementCoordinator {
+  readonly readCurrentAgreement: (
+    request: BalanceIndexerReadRequest,
+    context?: BalanceSyncExecutionContext,
+  ) => ReturnType<DormantMainnetBalanceTwoSourceAgreementCoordinator['readCurrentAgreement']>;
+}
+
+function coordinator(value: Harness): Readonly<TestAgreementCoordinator> {
+  const runtime = new DormantMainnetBalanceTwoSourceAgreementCoordinator(
     value.registry,
     value.bindings,
     value.clock,
   );
+  return Object.freeze({
+    readCurrentAgreement: (
+      request: BalanceIndexerReadRequest,
+      context: BalanceSyncExecutionContext = INERT_BALANCE_SYNC_EXECUTION_CONTEXT,
+    ) => runtime.readCurrentAgreement(request, context),
+  });
 }
 
 function readerFor(
@@ -302,12 +330,84 @@ describe('DormantMainnetBalanceTwoSourceAgreementCoordinator', () => {
       [],
       new SyntheticClock(),
     );
-    await expectUnavailable(dormant.readCurrentAgreement(request()), 'UNTRUSTED_SOURCE_IDENTITY');
+    await expectUnavailable(
+      dormant.readCurrentAgreement(request(), INERT_BALANCE_SYNC_EXECUTION_CONTEXT),
+      'UNTRUSTED_SOURCE_IDENTITY',
+    );
+  });
+
+  it.each(['DEADLINE', 'SHUTDOWN'] as const)(
+    'rejects a pre-aborted authenticated %s context before either source reader starts',
+    async (abortKind) => {
+      const value = harness();
+      const owner = createBalanceSyncExecutionContext();
+      owner.abort(abortKind);
+
+      await expectUnavailable(
+        coordinator(value).readCurrentAgreement(request(), owner.context),
+        'SOURCE_UNAVAILABLE',
+      );
+
+      expect(totalReaderCalls(value)).toBe(0);
+    },
+  );
+
+  it('waits for a fast-failure sibling to abort and settle before returning a sanitized error', async () => {
+    const value = harness();
+    const owner = createBalanceSyncExecutionContext();
+    value.readers.ethereumPrimary.error = new Error('private primary failure');
+    let markSiblingStarted: (() => void) | undefined;
+    const siblingStarted = new Promise<void>((resolve) => {
+      markSiblingStarted = resolve;
+    });
+    let siblingAborted = false;
+    value.readers.ethereumCorroborating.operation = async (_request, context) => {
+      void _request;
+      return new Promise((_resolve, reject) => {
+        expect(context).toBe(owner.context);
+        markSiblingStarted?.();
+        context.signal.addEventListener(
+          'abort',
+          () => {
+            siblingAborted = true;
+            reject(new Error('private sibling abort detail'));
+          },
+          { once: true },
+        );
+      });
+    };
+
+    const pending = coordinator(value).readCurrentAgreement(request(), owner.context);
+    let outcomeSettled = false;
+    void pending.then(
+      () => {
+        outcomeSettled = true;
+      },
+      () => {
+        outcomeSettled = true;
+      },
+    );
+    await siblingStarted;
+    await Promise.resolve();
+
+    expect(outcomeSettled).toBe(false);
+    owner.abort('SHUTDOWN');
+    const error = await expectUnavailable(pending, 'SOURCE_UNAVAILABLE');
+
+    expect(siblingAborted).toBe(true);
+    expect(value.readers.ethereumPrimary.calls).toHaveLength(1);
+    expect(value.readers.ethereumCorroborating.calls).toHaveLength(1);
+    expect(JSON.stringify(error)).not.toContain('private');
   });
 
   it('emits a frozen Ethereum agreement bound to the exact block and both source attestations', async () => {
     const value = harness();
     const result = await coordinator(value).readCurrentAgreement(request());
+
+    expect(value.readers.ethereumPrimary.contexts).toEqual([INERT_BALANCE_SYNC_EXECUTION_CONTEXT]);
+    expect(value.readers.ethereumCorroborating.contexts).toEqual([
+      INERT_BALANCE_SYNC_EXECUTION_CONTEXT,
+    ]);
 
     expect(result).toMatchObject({
       agreementVersion: 1,

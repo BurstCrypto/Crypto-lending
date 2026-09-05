@@ -1,5 +1,9 @@
 import { balanceSyncReceiptRetryMinimumDelaySeconds } from '../../blockchain-sync/application/fail-closed-balance-sync-job.port';
 import {
+  reviewBalanceSyncExecutionContext,
+  type BalanceSyncExecutionContext,
+} from '../../blockchain-sync/application/ports/balance-sync.ports';
+import {
   parseBalanceSyncJobEnvelope,
   type BalanceSyncJobEnvelope,
 } from '../../blockchain-sync/domain/balance-sync';
@@ -308,17 +312,26 @@ export class ReviewedJobDispatcher {
  * and is intentionally not registered in any module.
  */
 export class BalanceSyncJobDispatcher {
-  private readonly handler: ReviewedJobHandler<BalanceSyncConsumerJobEnvelope>;
+  private readonly handler: (
+    job: BalanceSyncConsumerJobEnvelope,
+    context: BalanceSyncExecutionContext,
+  ) => Promise<void>;
 
-  constructor(handler: ReviewedJobHandler<BalanceSyncConsumerJobEnvelope>) {
+  constructor(
+    handler: (
+      job: BalanceSyncConsumerJobEnvelope,
+      context: BalanceSyncExecutionContext,
+    ) => Promise<void>,
+  ) {
     if (typeof handler !== 'function') fail('INVALID_HANDLER_REGISTRY');
     this.handler = handler;
   }
 
-  async dispatch(value: unknown): Promise<void> {
+  async dispatch(value: unknown, context: BalanceSyncExecutionContext): Promise<void> {
     const job = parseBalanceSyncConsumerJobEnvelope(value);
+    if (reviewBalanceSyncExecutionContext(context) === null) return fail('JOB_HANDLER_FAILED');
     try {
-      await this.handler(job);
+      await this.handler(job, context);
     } catch (error) {
       if (balanceSyncReceiptRetryMinimumDelaySeconds(error) !== undefined) throw error;
       return fail('JOB_HANDLER_FAILED');

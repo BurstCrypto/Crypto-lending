@@ -4,11 +4,37 @@ import {
   MainnetBalanceIndexerRouter,
   SOLANA_MAINNET_BALANCE_NETWORK_ID,
 } from './mainnet-balance-indexer.router';
-import type {
-  BalanceIndexerReadRequest,
-  BalanceIndexerRescanRequest,
-  BalanceSyncIndexerPort,
+import {
+  INERT_BALANCE_SYNC_EXECUTION_CONTEXT,
+  type BalanceIndexerReadRequest,
+  type BalanceIndexerRescanRequest,
+  type BalanceSyncExecutionContext,
+  type BalanceSyncIndexerPort,
 } from './ports/balance-sync.ports';
+
+interface TestRouter {
+  readonly readCurrent: (
+    request: BalanceIndexerReadRequest,
+    context?: BalanceSyncExecutionContext,
+  ) => Promise<unknown>;
+  readonly rescanFromCheckpoint: (
+    request: BalanceIndexerRescanRequest,
+    context?: BalanceSyncExecutionContext,
+  ) => Promise<unknown>;
+}
+
+function testRouter(runtime: MainnetBalanceIndexerRouter): Readonly<TestRouter> {
+  return Object.freeze({
+    readCurrent: (
+      request: BalanceIndexerReadRequest,
+      context: BalanceSyncExecutionContext = INERT_BALANCE_SYNC_EXECUTION_CONTEXT,
+    ) => runtime.readCurrent(request, context),
+    rescanFromCheckpoint: (
+      request: BalanceIndexerRescanRequest,
+      context: BalanceSyncExecutionContext = INERT_BALANCE_SYNC_EXECUTION_CONTEXT,
+    ) => runtime.rescanFromCheckpoint(request, context),
+  });
+}
 
 function readRequest(
   networkId: BalanceIndexerReadRequest['networkId'] = ETHEREUM_MAINNET_BALANCE_NETWORK_ID,
@@ -39,7 +65,7 @@ function rescanRequest(
 }
 
 function harness(): Readonly<{
-  router: MainnetBalanceIndexerRouter;
+  router: TestRouter;
   ethereumRead: jest.Mock;
   ethereumRescan: jest.Mock;
   solanaRead: jest.Mock;
@@ -58,7 +84,7 @@ function harness(): Readonly<{
     rescanFromCheckpoint: solanaRescan,
   };
   return {
-    router: new MainnetBalanceIndexerRouter(ethereum, solana),
+    router: testRouter(new MainnetBalanceIndexerRouter(ethereum, solana)),
     ethereumRead,
     ethereumRescan,
     solanaRead,
@@ -120,7 +146,7 @@ describe('MainnetBalanceIndexerRouter', () => {
       readCurrent: solanaRead,
       rescanFromCheckpoint: solanaRescan,
     };
-    const router = new MainnetBalanceIndexerRouter(ethereum, solana);
+    const router = testRouter(new MainnetBalanceIndexerRouter(ethereum, solana));
     const redirectedEthereumRead = jest.fn(async () => 'redirected-ethereum');
     const redirectedSolanaRescan = jest.fn(async () => 'redirected-solana-rescan');
     let lateGetterReads = 0;
@@ -237,8 +263,8 @@ describe('MainnetBalanceIndexerRouter', () => {
     await expect(test.router.readCurrent(read)).resolves.toBe('ethereum-read');
     await expect(test.router.rescanFromCheckpoint(rescan)).resolves.toBe('ethereum-rescan');
 
-    expect(test.ethereumRead).toHaveBeenCalledWith(read);
-    expect(test.ethereumRescan).toHaveBeenCalledWith(rescan);
+    expect(test.ethereumRead).toHaveBeenCalledWith(read, INERT_BALANCE_SYNC_EXECUTION_CONTEXT);
+    expect(test.ethereumRescan).toHaveBeenCalledWith(rescan, INERT_BALANCE_SYNC_EXECUTION_CONTEXT);
     expect(test.solanaRead).not.toHaveBeenCalled();
     expect(test.solanaRescan).not.toHaveBeenCalled();
   });
@@ -251,8 +277,8 @@ describe('MainnetBalanceIndexerRouter', () => {
     await expect(test.router.readCurrent(read)).resolves.toBe('solana-read');
     await expect(test.router.rescanFromCheckpoint(rescan)).resolves.toBe('solana-rescan');
 
-    expect(test.solanaRead).toHaveBeenCalledWith(read);
-    expect(test.solanaRescan).toHaveBeenCalledWith(rescan);
+    expect(test.solanaRead).toHaveBeenCalledWith(read, INERT_BALANCE_SYNC_EXECUTION_CONTEXT);
+    expect(test.solanaRescan).toHaveBeenCalledWith(rescan, INERT_BALANCE_SYNC_EXECUTION_CONTEXT);
     expect(test.ethereumRead).not.toHaveBeenCalled();
     expect(test.ethereumRescan).not.toHaveBeenCalled();
   });
@@ -306,6 +332,23 @@ describe('MainnetBalanceIndexerRouter', () => {
     expect(test.ethereumRescan).not.toHaveBeenCalled();
   });
 
+  it('rejects a structurally similar but unminted execution context before routing', async () => {
+    const test = harness();
+    const counterfeit = Object.freeze({ signal: new AbortController().signal });
+
+    await expect(test.router.readCurrent(readRequest(), counterfeit)).rejects.toMatchObject({
+      code: 'PROVIDER_UNAVAILABLE',
+    });
+    await expect(
+      test.router.rescanFromCheckpoint(rescanRequest(), counterfeit),
+    ).rejects.toMatchObject({ code: 'PROVIDER_UNAVAILABLE' });
+
+    expect(test.ethereumRead).not.toHaveBeenCalled();
+    expect(test.ethereumRescan).not.toHaveBeenCalled();
+    expect(test.solanaRead).not.toHaveBeenCalled();
+    expect(test.solanaRescan).not.toHaveBeenCalled();
+  });
+
   it.each([0, -1, 2_049, 1.5, Number.NaN, Number.POSITIVE_INFINITY])(
     'rejects invalid recovery read-unit bound %s before either indexer is called',
     async (maximumReadUnits) => {
@@ -355,19 +398,23 @@ describe('MainnetBalanceIndexerRouter', () => {
   it('passes owned exact frozen request snapshots to the selected indexer', async () => {
     let observedRead: BalanceIndexerReadRequest | undefined;
     let observedRescan: BalanceIndexerRescanRequest | undefined;
+    let observedReadContext: BalanceSyncExecutionContext | undefined;
+    let observedRescanContext: BalanceSyncExecutionContext | undefined;
     const ethereum: BalanceSyncIndexerPort = {
-      readCurrent: async (request) => {
+      readCurrent: async (request, context) => {
         observedRead = request;
+        observedReadContext = context;
       },
-      rescanFromCheckpoint: async (request) => {
+      rescanFromCheckpoint: async (request, context) => {
         observedRescan = request;
+        observedRescanContext = context;
       },
     };
     const solana: BalanceSyncIndexerPort = {
       readCurrent: async () => undefined,
       rescanFromCheckpoint: async () => undefined,
     };
-    const router = new MainnetBalanceIndexerRouter(ethereum, solana);
+    const router = testRouter(new MainnetBalanceIndexerRouter(ethereum, solana));
     const mutableRead = { ...readRequest() };
     const mutableSource = { ...rescanRequest().fromFinalizedSource };
     const mutableRescan = {
@@ -393,6 +440,7 @@ describe('MainnetBalanceIndexerRouter', () => {
     expect(Object.getPrototypeOf(observedRead)).toBeNull();
     expect(Object.isFrozen(observedRead)).toBe(true);
     expect(observedRead?.accountId).toBe('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
+    expect(observedReadContext).toBe(INERT_BALANCE_SYNC_EXECUTION_CONTEXT);
 
     expect(observedRescan).not.toBe(mutableRescan);
     expect(Reflect.ownKeys(observedRescan ?? {})).toEqual([
@@ -411,6 +459,7 @@ describe('MainnetBalanceIndexerRouter', () => {
     expect(Object.getPrototypeOf(observedRescan?.fromFinalizedSource)).toBeNull();
     expect(Object.isFrozen(observedRescan?.fromFinalizedSource)).toBe(true);
     expect(observedRescan?.fromFinalizedSource.hash).toBe('source-hash');
+    expect(observedRescanContext).toBe(INERT_BALANCE_SYNC_EXECUTION_CONTEXT);
   });
 
   it('maps hostile values thrown during request reflection without inspecting them', async () => {

@@ -3,10 +3,12 @@ import {
   BalanceSyncIndexerFailure,
   type BalanceSyncSourcePoint,
 } from '../domain/balance-sync';
-import type {
-  BalanceIndexerReadRequest,
-  BalanceIndexerRescanRequest,
-  BalanceSyncIndexerPort,
+import {
+  reviewBalanceSyncExecutionContext,
+  type BalanceIndexerReadRequest,
+  type BalanceIndexerRescanRequest,
+  type BalanceSyncExecutionContext,
+  type BalanceSyncIndexerPort,
 } from './ports/balance-sync.ports';
 
 export const ETHEREUM_MAINNET_BALANCE_NETWORK_ID = 'eip155:1' as const;
@@ -36,8 +38,14 @@ const SELECTORS = Object.freeze(['latest', 'safe', 'finalized', 'processed', 'co
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 
 interface ReviewedBalanceIndexer {
-  readonly readCurrent: (request: BalanceIndexerReadRequest) => Promise<unknown>;
-  readonly rescanFromCheckpoint: (request: BalanceIndexerRescanRequest) => Promise<unknown>;
+  readonly readCurrent: (
+    request: BalanceIndexerReadRequest,
+    context: BalanceSyncExecutionContext,
+  ) => Promise<unknown>;
+  readonly rescanFromCheckpoint: (
+    request: BalanceIndexerRescanRequest,
+    context: BalanceSyncExecutionContext,
+  ) => Promise<unknown>;
 }
 
 class MainnetBalanceIndexerRouterConfigurationError extends Error {
@@ -64,19 +72,27 @@ export class MainnetBalanceIndexerRouter implements BalanceSyncIndexerPort {
     this.solana = reviewed.solana;
   }
 
-  async readCurrent(request: BalanceIndexerReadRequest): Promise<unknown> {
+  async readCurrent(
+    request: BalanceIndexerReadRequest,
+    context: BalanceSyncExecutionContext,
+  ): Promise<unknown> {
+    requireExecutionContext(context);
     const validated = copyReadRequest(request, READ_REQUEST_KEYS);
-    return this.indexerFor(validated.networkId).readCurrent(validated);
+    return this.indexerFor(validated.networkId).readCurrent(validated, context);
   }
 
-  async rescanFromCheckpoint(request: BalanceIndexerRescanRequest): Promise<unknown> {
+  async rescanFromCheckpoint(
+    request: BalanceIndexerRescanRequest,
+    context: BalanceSyncExecutionContext,
+  ): Promise<unknown> {
+    requireExecutionContext(context);
     const record = exactDataRecord(request, RESCAN_REQUEST_KEYS);
     const validated = frozenNullPrototype({
       ...copyReadRecord(record),
       fromFinalizedSource: copySourcePoint(record.fromFinalizedSource),
       maximumReadUnits: boundedRecoveryReadUnits(record.maximumReadUnits),
     }) satisfies BalanceIndexerRescanRequest;
-    return this.indexerFor(validated.networkId).rescanFromCheckpoint(validated);
+    return this.indexerFor(validated.networkId).rescanFromCheckpoint(validated, context);
   }
 
   private indexerFor(networkId: string): BalanceSyncIndexerPort {
@@ -209,10 +225,16 @@ function reviewedIndexer(value: unknown): ReviewedBalanceIndexer {
   const readCurrent = capturedDataMethod(receiver, 'readCurrent');
   const rescanFromCheckpoint = capturedDataMethod(receiver, 'rescanFromCheckpoint');
   return Object.freeze({
-    readCurrent: (request: BalanceIndexerReadRequest): Promise<unknown> =>
-      Reflect.apply(readCurrent, receiver, [request]) as Promise<unknown>,
-    rescanFromCheckpoint: (request: BalanceIndexerRescanRequest): Promise<unknown> =>
-      Reflect.apply(rescanFromCheckpoint, receiver, [request]) as Promise<unknown>,
+    readCurrent: (
+      request: BalanceIndexerReadRequest,
+      context: BalanceSyncExecutionContext,
+    ): Promise<unknown> =>
+      Reflect.apply(readCurrent, receiver, [request, context]) as Promise<unknown>,
+    rescanFromCheckpoint: (
+      request: BalanceIndexerRescanRequest,
+      context: BalanceSyncExecutionContext,
+    ): Promise<unknown> =>
+      Reflect.apply(rescanFromCheckpoint, receiver, [request, context]) as Promise<unknown>,
   });
 }
 
@@ -248,4 +270,10 @@ function invalidConfiguration(): never {
 
 function unsupportedRequest(): never {
   throw new BalanceSyncIndexerFailure('PERMANENT_PROVIDER_FAILURE');
+}
+
+function requireExecutionContext(context: unknown): void {
+  if (reviewBalanceSyncExecutionContext(context) === null) {
+    throw new BalanceSyncIndexerFailure('PROVIDER_UNAVAILABLE');
+  }
 }

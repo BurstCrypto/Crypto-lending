@@ -7,6 +7,7 @@ import {
   FailClosedBalanceSyncJobPort,
   balanceSyncReceiptRetryMinimumDelaySeconds,
 } from '../../blockchain-sync/application/fail-closed-balance-sync-job.port';
+import { createBalanceSyncExecutionContext } from '../../blockchain-sync/application/ports/balance-sync.ports';
 import { createJobEnvelope, type JobEnvelope } from '../outbox/job-envelope';
 import {
   BalanceSyncJobDispatcher,
@@ -29,6 +30,7 @@ const UUIDS = Object.freeze({
   wallet: '00000000-0000-4000-8000-000000000008',
   correlation: '00000000-0000-4000-8000-000000000009',
 });
+const TEST_EXECUTION = createBalanceSyncExecutionContext();
 
 function ledgerJob(): JobEnvelope {
   return createJobEnvelope(
@@ -159,18 +161,23 @@ describe('ReviewedJobDispatcher', () => {
   it('dedicates the balance dispatcher to exact balance jobs and rejects all others before invocation', async () => {
     const handler = jest.fn().mockResolvedValue(undefined);
     const dispatcher = new BalanceSyncJobDispatcher(handler);
-    await dispatcher.dispatch(balanceJob());
-    await dispatcher.dispatch(balanceJob('solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp'));
+    await dispatcher.dispatch(balanceJob(), TEST_EXECUTION.context);
+    await dispatcher.dispatch(
+      balanceJob('solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp'),
+      TEST_EXECUTION.context,
+    );
     await dispatcher.dispatch(
       balanceJob('eip155:1', { cause: 'MANUAL_RECOVERY', rescanFromPosition: '0' }),
+      TEST_EXECUTION.context,
     );
     expect(handler).toHaveBeenCalledTimes(3);
     for (const candidate of [ledgerJob(), yieldJob(), { ...balanceJob(), kind: 'unknown' }]) {
-      await expect(dispatcher.dispatch(candidate)).rejects.toMatchObject({
+      await expect(dispatcher.dispatch(candidate, TEST_EXECUTION.context)).rejects.toMatchObject({
         code: 'UNREVIEWED_JOB',
       });
     }
     expect(handler).toHaveBeenCalledTimes(3);
+    expect(handler.mock.calls.every((call) => call[1] === TEST_EXECUTION.context)).toBe(true);
     expect(parseBalanceSyncConsumerJobEnvelope(balanceJob()).kind).toBe('blockchain.balance-sync');
   });
 
@@ -187,12 +194,37 @@ describe('ReviewedJobDispatcher', () => {
         payload: { cause: 'RETRY', attempt: candidate.payload.attempt },
       });
       expectDispatchCode(() => parseBalanceSyncConsumerJobEnvelope(candidate), 'UNREVIEWED_JOB');
-      await expect(dispatcher.dispatch(candidate)).rejects.toMatchObject({
+      await expect(dispatcher.dispatch(candidate, TEST_EXECUTION.context)).rejects.toMatchObject({
         code: 'UNREVIEWED_JOB',
         message: 'Reviewed job dispatch failed',
       });
     }
     expect(handler).not.toHaveBeenCalled();
+  });
+
+  it('rejects counterfeit and proxied balance execution contexts without invoking the handler', async () => {
+    const handler = jest.fn().mockResolvedValue(undefined);
+    const dispatcher = new BalanceSyncJobDispatcher(handler);
+    let reads = 0;
+    const proxy = new Proxy(Object.create(null) as object, {
+      get: () => {
+        reads += 1;
+        throw new Error('must not read execution context');
+      },
+      getPrototypeOf: () => {
+        reads += 1;
+        throw new Error('must not inspect execution context');
+      },
+    });
+
+    for (const context of [{ signal: new AbortController().signal }, proxy]) {
+      await expect(dispatcher.dispatch(balanceJob(), context as never)).rejects.toMatchObject({
+        code: 'JOB_HANDLER_FAILED',
+        message: 'Reviewed job dispatch failed',
+      });
+    }
+    expect(handler).not.toHaveBeenCalled();
+    expect(reads).toBe(0);
   });
 
   it('rejects a valid later-attempt manual recovery at native-redrive ingress', async () => {
@@ -210,7 +242,7 @@ describe('ReviewedJobDispatcher', () => {
       payload: { cause: 'MANUAL_RECOVERY', attempt: 2, rescanFromPosition: '100' },
     });
     expectDispatchCode(() => parseBalanceSyncConsumerJobEnvelope(candidate), 'UNREVIEWED_JOB');
-    await expect(dispatcher.dispatch(candidate)).rejects.toMatchObject({
+    await expect(dispatcher.dispatch(candidate, TEST_EXECUTION.context)).rejects.toMatchObject({
       code: 'UNREVIEWED_JOB',
       message: 'Reviewed job dispatch failed',
     });
@@ -329,7 +361,7 @@ describe('ReviewedJobDispatcher', () => {
 
     let caught: unknown;
     try {
-      await dispatcher.dispatch(balanceJob());
+      await dispatcher.dispatch(balanceJob(), TEST_EXECUTION.context);
     } catch (error) {
       caught = error;
     }
@@ -341,7 +373,9 @@ describe('ReviewedJobDispatcher', () => {
     const balanceDispatcher = new BalanceSyncJobDispatcher(async () => {
       throw new Error('provider-private-secret');
     });
-    await expect(balanceDispatcher.dispatch(balanceJob())).rejects.toMatchObject({
+    await expect(
+      balanceDispatcher.dispatch(balanceJob(), TEST_EXECUTION.context),
+    ).rejects.toMatchObject({
       code: 'JOB_HANDLER_FAILED',
       message: 'Reviewed job dispatch failed',
     });
