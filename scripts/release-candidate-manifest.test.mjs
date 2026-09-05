@@ -286,6 +286,54 @@ test('binds the deployable observability child template as an exact release comp
   assert.throws(() => verifyReleaseManifest(root, manifest), ReleaseManifestError);
 });
 
+test('binds the dormant balance-consumer envelope exactly and rejects hostile substitution', () => {
+  const specification = RELEASE_COMPONENTS.find(
+    ({ name }) => name === 'balance-consumer-deployment-envelope-cloudformation',
+  );
+  assert.deepEqual(specification, {
+    name: 'balance-consumer-deployment-envelope-cloudformation',
+    path: 'infra/aws/balance-consumer-deployment-envelope.yaml',
+    kind: 'file',
+    requiredFiles: ['.'],
+  });
+
+  const root = createWorkspace();
+  const reviewedBytes = [
+    'AWSTemplateFormatVersion: 2010-09-09',
+    'Resources:',
+    '  BalanceConsumerTaskDefinition:',
+    '    Type: AWS::ECS::TaskDefinition',
+    '',
+  ].join('\n');
+  const templatePath = resolve(root, specification.path);
+  writeFileSync(templatePath, reviewedBytes, 'utf8');
+
+  const manifest = createReleaseManifest(root, SOURCE, BUILDER);
+  const component = manifest.components.find(({ name }) => name === specification.name);
+  assert.equal(component.path, specification.path);
+  assert.equal(component.kind, 'file');
+  assert.equal(component.fileCount, 1);
+  assert.equal(component.files[0].path, '.');
+  assert.equal(component.files[0].sha256, createHash('sha256').update(reviewedBytes).digest('hex'));
+  assert.doesNotThrow(() => verifyReleaseManifest(root, manifest));
+
+  const hostileBytes = reviewedBytes.replace(
+    'BalanceConsumerTaskDefinition',
+    'UnreviewedBalanceConsumerService',
+  );
+  writeFileSync(templatePath, hostileBytes, 'utf8');
+  assert.throws(() => verifyReleaseManifest(root, manifest), ReleaseManifestError);
+
+  const substitutedManifest = structuredClone(manifest);
+  const componentIndex = substitutedManifest.components.findIndex(
+    ({ name }) => name === specification.name,
+  );
+  substitutedManifest.components[componentIndex] = structuredClone(
+    substitutedManifest.components.find(({ name }) => name === 'application-cloudformation'),
+  );
+  assert.throws(() => validateReleaseManifest(substitutedManifest), /component shape/u);
+});
+
 test('detects drift in build output and every preflight decision binding', () => {
   const paths = RELEASE_COMPONENTS.map((component) =>
     component.kind === 'file'

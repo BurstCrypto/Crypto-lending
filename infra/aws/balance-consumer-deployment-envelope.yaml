@@ -1,0 +1,232 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  Standalone non-production balance-consumer deployment envelope. This source is intentionally
+  uncomposed and keeps the ECS service at a literal desired count of zero.
+
+Parameters:
+  BillingAcknowledgement:
+    Type: String
+    Default: NOT_AUTHORIZED
+    AllowedValues: [NOT_AUTHORIZED, I_ACKNOWLEDGE_THIS_CREATES_BILLABLE_AWS_RESOURCES]
+  EnvironmentName:
+    Type: String
+    MaxLength: 31
+    AllowedPattern: '^(dev|test|qa|sandbox|staging)(-[a-z0-9]+)*$'
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+  PrivateSubnetAId:
+    Type: AWS::EC2::Subnet::Id
+  PrivateSubnetBId:
+    Type: AWS::EC2::Subnet::Id
+  ApplicationDataKeyId:
+    Type: String
+    AllowedPattern: '^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$'
+  ApplicationLogsKeyId:
+    Type: String
+    AllowedPattern: '^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$'
+  ApiImageDigest:
+    Type: String
+    AllowedPattern: '^[a-f0-9]{64}$'
+  SqsMaxReceiveCount:
+    Type: Number
+    Default: 3
+    MinValue: 1
+    MaxValue: 100
+  SqsVisibilityTimeoutSeconds:
+    Type: Number
+    Default: 30
+    MinValue: 1
+    MaxValue: 43200
+  LogRetentionDays:
+    Type: Number
+    Default: 14
+    AllowedValues: [1, 3, 5, 7, 14, 30, 60, 90]
+
+Rules:
+  ExplicitBillingAcknowledgementRequired:
+    Assertions:
+      - Assert: !Equals
+          - !Ref BillingAcknowledgement
+          - I_ACKNOWLEDGE_THIS_CREATES_BILLABLE_AWS_RESOURCES
+        AssertDescription: Explicit billing acknowledgement is required before deployment.
+  PrivateSubnetsMustBeDistinct:
+    Assertions:
+      - Assert: !Not [!Equals [!Ref PrivateSubnetAId, !Ref PrivateSubnetBId]]
+        AssertDescription: The two private subnet identifiers must be distinct.
+  DataAndLogsKeysMustBeDistinct:
+    Assertions:
+      - Assert: !Not [!Equals [!Ref ApplicationDataKeyId, !Ref ApplicationLogsKeyId]]
+        AssertDescription: Application data and log encryption keys must be distinct.
+
+Resources:
+  BalanceConsumerLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      KmsKeyId: !Sub arn:${AWS::Partition}:kms:${AWS::Region}:${AWS::AccountId}:key/${ApplicationLogsKeyId}
+      LogGroupName: !Sub /crypto-lending/${EnvironmentName}/balance-consumer
+      RetentionInDays: !Ref LogRetentionDays
+
+  BalanceConsumerTaskSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub ${EnvironmentName} dormant balance consumer tasks
+      VpcId: !Ref VpcId
+      SecurityGroupEgress: [{ CidrIp: 127.0.0.1/32, IpProtocol: '-1' }]
+
+  BalanceConsumerTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ecs-tasks.amazonaws.com }
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals: { aws:SourceAccount: !Ref AWS::AccountId }
+              ArnLike:
+                {
+                  aws:SourceArn: !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:*',
+                }
+      Policies:
+        - PolicyName: PullBalanceConsumerImage
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: RegistryAuthentication
+                Effect: Allow
+                Action: ecr:GetAuthorizationToken
+                Resource: '*'
+              - Sid: RepositoryImageRead
+                Effect: Allow
+                Action:
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:BatchGetImage
+                  - ecr:GetDownloadUrlForLayer
+                Resource: !Sub arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/crypto-lending-api
+        - PolicyName: WriteBalanceConsumerLogs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !Sub arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/crypto-lending/${EnvironmentName}/balance-consumer:*
+
+  BalanceConsumerTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ecs-tasks.amazonaws.com }
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals: { aws:SourceAccount: !Ref AWS::AccountId }
+              ArnLike:
+                {
+                  aws:SourceArn: !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:*',
+                }
+      Policies:
+        - PolicyName: ConsumeBalanceSourceQueue
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ConsumeBalanceMessages
+                Effect: Allow
+                Action:
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:ChangeMessageVisibility
+                Resource: !Sub arn:${AWS::Partition}:sqs:${AWS::Region}:${AWS::AccountId}:crypto-lending-${EnvironmentName}-balance-sync
+              - Sid: DecryptBalanceMessages
+                Effect: Allow
+                Action: kms:Decrypt
+                Resource: !Sub arn:${AWS::Partition}:kms:${AWS::Region}:${AWS::AccountId}:key/${ApplicationDataKeyId}
+                Condition:
+                  StringEquals:
+                    kms:ViaService: !Sub sqs.${AWS::Region}.${AWS::URLSuffix}
+
+  BalanceConsumerTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      ContainerDefinitions:
+        - Name: balance-consumer
+          Command: [node, dist/blockchain-sync/application/balance-sync-consumer.cli.js]
+          Essential: true
+          Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.${AWS::URLSuffix}/crypto-lending-api@sha256:${ApiImageDigest}
+          Environment:
+            - { Name: NODE_ENV, Value: production }
+            - { Name: APP_ENV, Value: !Ref EnvironmentName }
+            - { Name: APPLICATION_WORKLOAD, Value: balance-consumer }
+            - { Name: BALANCE_CONSUMER_MODE, Value: disabled }
+            - { Name: BALANCE_CONSUMER_NETWORK, Value: ethereum-solana-mainnet }
+            - { Name: BALANCE_CONSUMER_SOURCE_APPROVAL, Value: ethereum-solana-mainnet-reviewed }
+            - { Name: AWS_REGION, Value: !Ref AWS::Region }
+            - Name: SQS_BALANCE_QUEUE_URL
+              Value: !Sub https://sqs.${AWS::Region}.${AWS::URLSuffix}/${AWS::AccountId}/crypto-lending-${EnvironmentName}-balance-sync
+            - Name: SQS_BALANCE_DEAD_LETTER_QUEUE_URL
+              Value: !Sub https://sqs.${AWS::Region}.${AWS::URLSuffix}/${AWS::AccountId}/crypto-lending-${EnvironmentName}-balance-sync-dlq
+            - { Name: SQS_MAX_RECEIVE_COUNT, Value: !Ref SqsMaxReceiveCount }
+            - { Name: SQS_VISIBILITY_TIMEOUT_SECONDS, Value: !Ref SqsVisibilityTimeoutSeconds }
+          LinuxParameters:
+            Capabilities: { Drop: [ALL] }
+            InitProcessEnabled: true
+          ReadonlyRootFilesystem: true
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-create-group: 'false'
+              awslogs-group: !Ref BalanceConsumerLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: balance-consumer
+          StopTimeout: 30
+          User: '10001:10001'
+      Cpu: '256'
+      ExecutionRoleArn: !GetAtt BalanceConsumerTaskExecutionRole.Arn
+      Family: !Sub crypto-lending-${EnvironmentName}-balance-consumer
+      Memory: '512'
+      NetworkMode: awsvpc
+      RequiresCompatibilities: [FARGATE]
+      RuntimePlatform: { CpuArchitecture: X86_64, OperatingSystemFamily: LINUX }
+      TaskRoleArn: !GetAtt BalanceConsumerTaskRole.Arn
+
+  BalanceConsumerService:
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: !Sub arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:cluster/crypto-lending-${EnvironmentName}
+      DeploymentConfiguration:
+        DeploymentCircuitBreaker:
+          Enable: true
+          Rollback: true
+        MaximumPercent: 200
+        MinimumHealthyPercent: 0
+      DesiredCount: 0
+      EnableECSManagedTags: true
+      EnableExecuteCommand: false
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          SecurityGroups: [!Ref BalanceConsumerTaskSecurityGroup]
+          Subnets: [!Ref PrivateSubnetAId, !Ref PrivateSubnetBId]
+      PlatformVersion: 1.4.0
+      PropagateTags: SERVICE
+      ServiceName: balance-consumer
+      TaskDefinition: !Ref BalanceConsumerTaskDefinition
+
+Outputs:
+  BalanceConsumerLogGroupName:
+    Value: !Ref BalanceConsumerLogGroup
+  BalanceConsumerTaskSecurityGroupId:
+    Value: !Ref BalanceConsumerTaskSecurityGroup
+  BalanceConsumerTaskExecutionRoleArn:
+    Value: !GetAtt BalanceConsumerTaskExecutionRole.Arn
+  BalanceConsumerTaskRoleArn:
+    Value: !GetAtt BalanceConsumerTaskRole.Arn
+  BalanceConsumerTaskDefinitionArn:
+    Value: !Ref BalanceConsumerTaskDefinition
+  BalanceConsumerServiceArn:
+    Value: !Ref BalanceConsumerService

@@ -85,6 +85,7 @@ jobs:
           npm run infra:test:acm-dns
           npm run infra:test:migrations
           npm run infra:test:workload-boundaries
+          npm run infra:test:balance-consumer-envelope
           npm run infra:test:observability
           npm run infra:test:auth-wallet-transition
           npm run infra:test:credential-transition
@@ -98,7 +99,7 @@ jobs:
           pwsh -NoProfile -File infra/aws/test-invoke-account-readonly-preflight.ps1
           pwsh -NoProfile -File infra/aws/test-invoke-account-guardrails.ps1
           pwsh -NoProfile -File infra/aws/test-invoke-application-baseline.ps1
-          python infra/aws/lint-cloudformation.py infra/aws/application-baseline.yaml infra/aws/application-workload-boundaries.yaml infra/aws/application-observability.yaml infra/aws/database-migration-task.yaml infra/aws/account-guardrails.yaml infra/aws/sqs-foundation.yaml
+          python infra/aws/lint-cloudformation.py infra/aws/application-baseline.yaml infra/aws/application-workload-boundaries.yaml infra/aws/balance-consumer-deployment-envelope.yaml infra/aws/application-observability.yaml infra/aws/database-migration-task.yaml infra/aws/account-guardrails.yaml infra/aws/sqs-foundation.yaml
 
       - name: Check formatting
         run: npm run format:check

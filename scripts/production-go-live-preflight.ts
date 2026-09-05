@@ -171,6 +171,8 @@ export interface BalanceConsumerArtifactSources {
   readonly applicationValidatorSource: string;
   readonly workloadTemplateSource: string;
   readonly workloadValidatorSource: string;
+  readonly balanceConsumerEnvelopeSource: string;
+  readonly balanceConsumerEnvelopeValidatorSource: string;
   readonly bootstrapPrincipalsSource: string;
   readonly bootstrapPrincipalsValidatorSource: string;
   readonly walletAddressMigrationSource: string;
@@ -502,6 +504,8 @@ const BALANCE_CONSUMER_ARTIFACT_KEYS = Object.freeze([
   'applicationValidatorSource',
   'workloadTemplateSource',
   'workloadValidatorSource',
+  'balanceConsumerEnvelopeSource',
+  'balanceConsumerEnvelopeValidatorSource',
   'bootstrapPrincipalsSource',
   'bootstrapPrincipalsValidatorSource',
   'walletAddressMigrationSource',
@@ -523,11 +527,14 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
   sqsModuleSource: 'dc958100bd372500a9428c28cc6219a4cb00db61314a63478368d0b0cf95221b',
   sqsTokensSource: '9727c85465fd2bec762ea6c0445b698a1011234396778a156f7f161cac29ac14',
   apiPackageSource: '28b9f69d1cf3cf1d16ee76ba6a4afd4881df9afb205c010e6512b0c3633c0c9c',
-  rootPackageSource: 'ef84bc2e7171073fa581d26c2a9d88c934cdf2af9d7897c10cadf1de159fbf7c',
+  rootPackageSource: '9b5de24a61088f46403cf5d85f07dea53534a2e558e32cffde8fe4fd782fe528',
   applicationTemplateSource: '9ffa126c63a1758db315eae58462f3d1a47cf3542136db39a65749c47dd08fb6',
   applicationValidatorSource: 'd9b21305fa911cd7290c70bda1e512b54442a8a5705663b74d0d572f03654f4d',
   workloadTemplateSource: '4c74c98e73635df30570dfe1e726b41cb6f62832f0bfc2e43dcd087d384b78de',
   workloadValidatorSource: '694f28c926fb08f6648d2d399fd31161681247eadacf43042077c4759dcbafba',
+  balanceConsumerEnvelopeSource: '91b9129ea24a8c9abd8baa66d411d231eba84e417a80d066f1bd0fc819bd7685',
+  balanceConsumerEnvelopeValidatorSource:
+    'a4fe9b4765d488f77ad78fe46a865809dbad857021547d53aae4fd711021b397',
   bootstrapPrincipalsSource: 'da3793b00efbfe12baa64446912376a85d2c6d7095f84dfb14c6e173dbefb9ac',
   bootstrapPrincipalsValidatorSource:
     '6731fee433acae8f7c240995c6ffe64247c7f4ef730be2b7367c3fa10ad40681',
@@ -535,7 +542,7 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
   workerAuthoritySuspensionMigrationSource:
     'f61ff9f4ad74e6067203ee1078502955c82af0acde164ff783970e5bc27949b0',
   migrationIndexSource: '2565fe9b9ed14d4b32a92cef583343de4d18832995426da8d75542701d70696d',
-  releaseManifestSource: '9797f1c2ea55be0e60df2a1c7e19757dba4549b2a9ecb37c03c848700d9be2c3',
+  releaseManifestSource: '234f2e397055af0884b45a599b7767fe9e24952b7978b769af4a46c73c1653ea',
   productionContainerValidatorSource:
     '730b7c27949b4236d2b2c7343d60a30e04a204f753a920af085bd8009457eeb2',
 } satisfies Readonly<Record<keyof BalanceConsumerArtifactSources, string>>);
@@ -2017,7 +2024,9 @@ function hasDormantBalanceConsumerPackagingContract(
   );
 }
 
-function hasNoBalanceConsumerTaskDeployment(sources: BalanceConsumerArtifactSources): boolean {
+function hasUncomposedBalanceConsumerParentContract(
+  sources: BalanceConsumerArtifactSources,
+): boolean {
   const requiredLogicalIds = [
     'ApiTaskDefinition',
     'WebTaskDefinition',
@@ -2035,7 +2044,7 @@ function hasNoBalanceConsumerTaskDeployment(sources: BalanceConsumerArtifactSour
       'Type: AWS::ECS::TaskDefinition',
     ) !== 3 ||
     exactExecutableLineCount(sources.applicationTemplateSource, 'Type: AWS::ECS::Service') !== 3 ||
-    /balance-sync-consumer\.cli\.js|APPLICATION_WORKLOAD[^\n]*balance-consumer/iu.test(
+    /balance-consumer-deployment-envelope|balance-sync-consumer\.cli\.js|APPLICATION_WORKLOAD[^\n]*balance-consumer|BalanceConsumer(?:TaskDefinition|Service)/iu.test(
       sources.applicationTemplateSource,
     )
   ) {
@@ -2053,11 +2062,15 @@ function hasNoBalanceConsumerTaskDeployment(sources: BalanceConsumerArtifactSour
       sources.applicationValidatorSource,
       'errors.push(`Reviewed resource graph contains unapproved resource ${logicalId}.`);',
     ) === 1 &&
-    !/BalanceConsumer(?:TaskDefinition|Service)/u.test(sources.applicationValidatorSource)
+    !/balance-consumer-deployment-envelope|BalanceConsumer(?:TaskDefinition|Service)/iu.test(
+      sources.applicationValidatorSource,
+    )
   );
 }
 
-function hasNoBalanceConsumerIamCapability(sources: BalanceConsumerArtifactSources): boolean {
+function hasIsolatedBalanceConsumerWorkloadContract(
+  sources: BalanceConsumerArtifactSources,
+): boolean {
   const workloadLines = trimmedExecutableLines(sources.workloadTemplateSource);
   const workloadValidatorLines = trimmedExecutableLines(sources.workloadValidatorSource);
   const forbiddenQueueCapability =
@@ -2074,7 +2087,12 @@ function hasNoBalanceConsumerIamCapability(sources: BalanceConsumerArtifactSourc
   return (
     workloadLines.filter((line) => line === 'Type: AWS::IAM::Role').length === 7 &&
     !forbiddenQueueCapability.test(workloadLines.join('\n')) &&
-    !/BalanceConsumer(?:TaskRole|TaskExecutionRole)/u.test(sources.workloadTemplateSource) &&
+    !/balance-consumer-deployment-envelope|BalanceConsumer(?:TaskRole|TaskExecutionRole)/iu.test(
+      sources.workloadTemplateSource,
+    ) &&
+    expectedRoles.every(
+      (logicalId) => yamlBlock(sources.workloadTemplateSource, logicalId, 2) !== null,
+    ) &&
     expectedRoles.every(
       (logicalId) =>
         exactExecutableLineCount(
@@ -2087,8 +2105,310 @@ function hasNoBalanceConsumerIamCapability(sources: BalanceConsumerArtifactSourc
       sources.workloadValidatorSource,
       "requireExactIds(resources, resourceTypes, 'Resource allowlist', errors);",
     ) === 1 &&
-    !/BalanceConsumer(?:TaskRole|TaskExecutionRole)/u.test(sources.workloadValidatorSource)
+    !forbiddenQueueCapability.test(workloadValidatorLines.join('\n')) &&
+    !/balance-consumer-deployment-envelope|BalanceConsumer(?:TaskRole|TaskExecutionRole)/iu.test(
+      sources.workloadValidatorSource,
+    )
   );
+}
+
+function hasExactAwsPolicyActions(source: string, expected: readonly string[]): boolean {
+  const actual = [
+    ...source.matchAll(/\b((?:ecr|kms|logs|secretsmanager|sqs|sts):[A-Za-z][A-Za-z0-9*]*)\b/gu),
+  ]
+    .map((match) => match[1])
+    .filter((action): action is string => action !== undefined && action !== 'kms:ViaService')
+    .sort();
+  return actual.join('|') === [...expected].sort().join('|');
+}
+
+function hasExactBalanceConsumerEnvelopeResourceGraph(
+  sources: BalanceConsumerArtifactSources,
+): boolean {
+  const envelope = sources.balanceConsumerEnvelopeSource.replace(/\r\n/gu, '\n');
+  const resources = yamlBlock(envelope, 'Resources', 0);
+  if (resources === null) return false;
+  const expectedResources = [
+    ['BalanceConsumerLogGroup', 'AWS::Logs::LogGroup'],
+    ['BalanceConsumerTaskSecurityGroup', 'AWS::EC2::SecurityGroup'],
+    ['BalanceConsumerTaskExecutionRole', 'AWS::IAM::Role'],
+    ['BalanceConsumerTaskRole', 'AWS::IAM::Role'],
+    ['BalanceConsumerTaskDefinition', 'AWS::ECS::TaskDefinition'],
+    ['BalanceConsumerService', 'AWS::ECS::Service'],
+  ] as const;
+  const resourceNames = resources.split('\n').flatMap((line) => {
+    const match = /^ {2}([A-Za-z][A-Za-z0-9]*):\s*$/u.exec(line);
+    return match?.[1] === undefined ? [] : [match[1]];
+  });
+  return (
+    resourceNames.join('|') === expectedResources.map(([logicalId]) => logicalId).join('|') &&
+    expectedResources.every(([logicalId, type]) => {
+      const block = yamlBlock(resources, logicalId, 2);
+      return hasExactYamlScalarProperty(block, 'Type', type);
+    })
+  );
+}
+
+function hasExactStandaloneBalanceConsumerEnvelopeContract(
+  sources: BalanceConsumerArtifactSources,
+): boolean {
+  const envelope = sources.balanceConsumerEnvelopeSource.replace(/\r\n/gu, '\n');
+  const executionRole = yamlBlock(envelope, 'BalanceConsumerTaskExecutionRole', 2);
+  const taskRole = yamlBlock(envelope, 'BalanceConsumerTaskRole', 2);
+  const taskDefinition = yamlBlock(envelope, 'BalanceConsumerTaskDefinition', 2);
+  const service = yamlBlock(envelope, 'BalanceConsumerService', 2);
+  const securityGroup = yamlBlock(envelope, 'BalanceConsumerTaskSecurityGroup', 2);
+  const billingRule = yamlBlock(envelope, 'ExplicitBillingAcknowledgementRequired', 2);
+  if (
+    executionRole === null ||
+    taskRole === null ||
+    taskDefinition === null ||
+    service === null ||
+    securityGroup === null ||
+    billingRule === null
+  ) {
+    return false;
+  }
+
+  const executionActions = [
+    'sts:AssumeRole',
+    'ecr:GetAuthorizationToken',
+    'ecr:BatchCheckLayerAvailability',
+    'ecr:BatchGetImage',
+    'ecr:GetDownloadUrlForLayer',
+    'logs:CreateLogStream',
+    'logs:PutLogEvents',
+  ] as const;
+  const receiptActions = [
+    'sts:AssumeRole',
+    'sqs:ReceiveMessage',
+    'sqs:DeleteMessage',
+    'sqs:ChangeMessageVisibility',
+    'kms:Decrypt',
+  ] as const;
+  const expectedEnvironmentNames = [
+    'NODE_ENV',
+    'APP_ENV',
+    'APPLICATION_WORKLOAD',
+    'BALANCE_CONSUMER_MODE',
+    'BALANCE_CONSUMER_NETWORK',
+    'BALANCE_CONSUMER_SOURCE_APPROVAL',
+    'AWS_REGION',
+    'SQS_BALANCE_QUEUE_URL',
+    'SQS_BALANCE_DEAD_LETTER_QUEUE_URL',
+    'SQS_MAX_RECEIVE_COUNT',
+    'SQS_VISIBILITY_TIMEOUT_SECONDS',
+  ] as const;
+  const environment =
+    taskDefinition.match(/\n\s+Environment:\n([\s\S]*?)\n\s+LinuxParameters:/u)?.[1] ?? '';
+  const actualEnvironmentNames = [
+    ...environment.matchAll(/\bName:\s*([A-Z][A-Z0-9_]*)\b/gu),
+  ].flatMap((match) => (match[1] === undefined ? [] : [match[1]]));
+  const exactEnvironment =
+    actualEnvironmentNames.length === expectedEnvironmentNames.length &&
+    expectedEnvironmentNames.every(
+      (name) => actualEnvironmentNames.filter((actual) => actual === name).length === 1,
+    );
+
+  const nonProductionAndBillingGated =
+    hasExactTopLevelParameter(envelope, 'BillingAcknowledgement', [
+      'Type: String',
+      'Default: NOT_AUTHORIZED',
+      'AllowedValues: [NOT_AUTHORIZED, I_ACKNOWLEDGE_THIS_CREATES_BILLABLE_AWS_RESOURCES]',
+    ]) &&
+    hasExactTopLevelParameter(envelope, 'EnvironmentName', [
+      'Type: String',
+      'MaxLength: 31',
+      "AllowedPattern: '^(dev|test|qa|sandbox|staging)(-[a-z0-9]+)*$'",
+    ]) &&
+    exactExecutableLineCount(billingRule, '- !Ref BillingAcknowledgement') === 1 &&
+    exactExecutableLineCount(billingRule, '- I_ACKNOWLEDGE_THIS_CREATES_BILLABLE_AWS_RESOURCES') ===
+      1 &&
+    !/(?:^|\n)(?:Transform|Conditions):/u.test(envelope);
+
+  const networkIsolated =
+    hasExactYamlScalarProperty(
+      securityGroup,
+      'SecurityGroupEgress',
+      "[{ CidrIp: 127.0.0.1/32, IpProtocol: '-1' }]",
+    ) &&
+    !/SecurityGroupIngress:|AWS::EC2::SecurityGroup(?:Ingress|Egress)|0\.0\.0\.0\/0|::\/0/u.test(
+      envelope,
+    );
+
+  const executionRoleIsImageAndLogOnly =
+    hasExactAwsPolicyActions(executionRole, executionActions) &&
+    exactExecutableLineCount(executionRole, "Resource: '*'") === 1 &&
+    exactExecutableLineCount(
+      executionRole,
+      'Resource: !Sub arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/crypto-lending-api',
+    ) === 1 &&
+    exactExecutableLineCount(
+      executionRole,
+      'Resource: !Sub arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/crypto-lending/${EnvironmentName}/balance-consumer:*',
+    ) === 1 &&
+    !/(?:secretsmanager|sqs|kms):/iu.test(executionRole);
+
+  const taskRoleIsReceiptOnly =
+    hasExactAwsPolicyActions(taskRole, receiptActions) &&
+    exactExecutableLineCount(
+      taskRole,
+      'Resource: !Sub arn:${AWS::Partition}:sqs:${AWS::Region}:${AWS::AccountId}:crypto-lending-${EnvironmentName}-balance-sync',
+    ) === 1 &&
+    exactExecutableLineCount(
+      taskRole,
+      'Resource: !Sub arn:${AWS::Partition}:kms:${AWS::Region}:${AWS::AccountId}:key/${ApplicationDataKeyId}',
+    ) === 1 &&
+    exactExecutableLineCount(
+      taskRole,
+      'kms:ViaService: !Sub sqs.${AWS::Region}.${AWS::URLSuffix}',
+    ) === 1 &&
+    !/(?:SendMessage|GetQueueAttributes|DeadLetter|jobs|balance-sync-dlq|secretsmanager:|ecr:|logs:)/iu.test(
+      taskRole,
+    ) &&
+    !/Action:\s*(?:\[[^\]]*\*|['"]?[^\s'"]*\*)|Resource:\s*(?:\[[^\]]*\*|['"]?\*)/u.test(taskRole);
+
+  const taskIsDisabledAndHardened =
+    exactEnvironment &&
+    hasExactYamlScalarProperty(
+      taskDefinition,
+      'Image',
+      '!Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.${AWS::URLSuffix}/crypto-lending-api@sha256:${ApiImageDigest}',
+    ) &&
+    exactExecutableLineCount(
+      taskDefinition,
+      'Command: [node, dist/blockchain-sync/application/balance-sync-consumer.cli.js]',
+    ) === 1 &&
+    exactExecutableLineCount(
+      taskDefinition,
+      '- { Name: APPLICATION_WORKLOAD, Value: balance-consumer }',
+    ) === 1 &&
+    exactExecutableLineCount(
+      taskDefinition,
+      '- { Name: BALANCE_CONSUMER_MODE, Value: disabled }',
+    ) === 1 &&
+    exactExecutableLineCount(
+      taskDefinition,
+      '- { Name: BALANCE_CONSUMER_NETWORK, Value: ethereum-solana-mainnet }',
+    ) === 1 &&
+    exactExecutableLineCount(
+      taskDefinition,
+      '- { Name: BALANCE_CONSUMER_SOURCE_APPROVAL, Value: ethereum-solana-mainnet-reviewed }',
+    ) === 1 &&
+    exactExecutableLineCount(taskDefinition, 'Capabilities: { Drop: [ALL] }') === 1 &&
+    hasExactYamlScalarProperty(taskDefinition, 'ReadonlyRootFilesystem', 'true') &&
+    hasExactYamlScalarProperty(taskDefinition, 'User', "'10001:10001'") &&
+    hasExactYamlScalarProperty(taskDefinition, 'NetworkMode', 'awsvpc') &&
+    exactExecutableLineCount(taskDefinition, 'RequiresCompatibilities: [FARGATE]') === 1 &&
+    !/^\s+Secrets:/mu.test(taskDefinition) &&
+    !/\bName:\s*(?:SQS_QUEUE_URL|SQS_DEAD_LETTER_QUEUE_URL)\b/u.test(taskDefinition) &&
+    !/\b(?:DATABASE|REDIS|AUTH|OIDC|WALLET|RPC|ETHEREUM|SOLANA|PROVIDER)_[A-Z0-9_]+\b/iu.test(
+      taskDefinition,
+    );
+
+  const serviceIsHardZero =
+    hasExactYamlScalarProperty(service, 'DesiredCount', '0') &&
+    hasExactYamlScalarProperty(service, 'EnableExecuteCommand', 'false') &&
+    hasExactYamlScalarProperty(service, 'AssignPublicIp', 'DISABLED') &&
+    hasExactYamlScalarProperty(service, 'LaunchType', 'FARGATE') &&
+    hasExactYamlScalarProperty(service, 'PlatformVersion', '1.4.0') &&
+    hasExactYamlScalarProperty(
+      service,
+      'SecurityGroups',
+      '[!Ref BalanceConsumerTaskSecurityGroup]',
+    ) &&
+    hasExactYamlScalarProperty(service, 'TaskDefinition', '!Ref BalanceConsumerTaskDefinition') &&
+    !/DesiredCount:\s*!|DesiredCount:\s*[1-9]|AssignPublicIp:\s*ENABLED/iu.test(service);
+
+  const noRuntimeAuthority =
+    !/AWS::SecretsManager|secretsmanager:|\b(?:DATABASE|REDIS|AUTH|OIDC|WALLET|RPC|PROVIDER)_[A-Z0-9_]+\b/iu.test(
+      envelope,
+    );
+
+  return (
+    hasExactBalanceConsumerEnvelopeResourceGraph(sources) &&
+    nonProductionAndBillingGated &&
+    networkIsolated &&
+    executionRoleIsImageAndLogOnly &&
+    taskRoleIsReceiptOnly &&
+    taskIsDisabledAndHardened &&
+    serviceIsHardZero &&
+    noRuntimeAuthority
+  );
+}
+
+function hasExactBalanceConsumerEnvelopeValidatorContract(
+  sources: BalanceConsumerArtifactSources,
+): boolean {
+  const validator = sources.balanceConsumerEnvelopeValidatorSource.replace(/\r\n/gu, '\n');
+  const requiredResourceEntries = [
+    "['BalanceConsumerLogGroup', 'AWS::Logs::LogGroup'],",
+    "['BalanceConsumerTaskSecurityGroup', 'AWS::EC2::SecurityGroup'],",
+    "['BalanceConsumerTaskExecutionRole', 'AWS::IAM::Role'],",
+    "['BalanceConsumerTaskRole', 'AWS::IAM::Role'],",
+    "['BalanceConsumerTaskDefinition', 'AWS::ECS::TaskDefinition'],",
+    "['BalanceConsumerService', 'AWS::ECS::Service'],",
+  ] as const;
+  const requiredValidationCalls = [
+    'validateParameters(source, errors);',
+    'validateRules(source, errors);',
+    'const resources = validateResourceInventory(source, errors);',
+    'validateNetwork(resources, source, errors);',
+    'validateIam(resources, errors);',
+    'validateTaskDefinition(resources, errors);',
+    'validateService(resources, errors);',
+    'validateLogGroup(resources, errors);',
+    'validateOutputs(source, errors);',
+  ] as const;
+  const requiredEnforcementMarkers = [
+    "const reviewedTemplateSha256 = '91b9129ea24a8c9abd8baa66d411d231eba84e417a80d066f1bd0fc819bd7685';",
+    "'UNCOMPOSED_SOURCE_ONLY: release and preflight controls only bind and inspect this source; no application parent template or deployment target composes or provisions it.',",
+    "'HARD_ZERO_AND_NO_EGRESS: the ECS service has a literal desired count of zero and its dedicated security group has no external egress path, so this source cannot run the consumer.',",
+    "'NON_PRODUCTION_ONLY: EnvironmentName accepts only dev, test, qa, sandbox, or staging families, and deployment still requires explicit billing acknowledgement.',",
+    "'ACTIVATION_GATES_UNRESOLVED: source activation, runtime composition, database grants and credentials, metadata-only secret custody, mainnet RPC egress, operational ownership, and deployed evidence remain absent.',",
+    "requireExactIds(resources, expectedResources, 'Resource allowlist', errors);",
+    `"[{ CidrIp: 127.0.0.1/32, IpProtocol: '-1' }]"`,
+    "'BalanceConsumerTaskExecutionRole must be image-pull/log-only with only the ECR authorization wildcard.',",
+    "'BalanceConsumerTaskRole must have only exact source receive/delete/change-visibility and SQS-scoped decrypt authority.',",
+    "'BalanceConsumerTaskDefinition must receive only the eleven reviewed nonsecret settings.',",
+    "'BalanceConsumerTaskDefinition must not receive generic queues, databases, Redis, auth/wallet, RPC/provider endpoints or credentials, or secret configuration.',",
+    "'BalanceConsumerService must remain hard-zero with no public IP activation path.'",
+    'if (templateSha256 !== reviewedTemplateSha256) {',
+  ] as const;
+  const checks = [
+    requiredResourceEntries.every((line) => exactExecutableLineCount(validator, line) === 1),
+    trimmedExecutableLines(validator).filter(
+      (line) =>
+        line.endsWith("'AWS::ECS::TaskDefinition'],") ||
+        line.endsWith("'AWS::ECS::Service'],") ||
+        line.endsWith("'AWS::IAM::Role'],") ||
+        line.endsWith("'AWS::EC2::SecurityGroup'],") ||
+        line.endsWith("'AWS::Logs::LogGroup'],"),
+    ).length === 6,
+    requiredValidationCalls.every((line) => exactExecutableLineCount(validator, line) === 1),
+    requiredEnforcementMarkers.every((fragment) => validator.includes(fragment)),
+    validator.includes("'^(dev|test|qa|sandbox|staging)(-[a-z0-9]+)*$'"),
+    validator.includes('I_ACKNOWLEDGE_THIS_CREATES_BILLABLE_AWS_RESOURCES'),
+    validator.includes("'sqs:ReceiveMessage'"),
+    validator.includes("'sqs:DeleteMessage'"),
+    validator.includes("'sqs:ChangeMessageVisibility'"),
+    validator.includes("'kms:Decrypt'"),
+    validator.includes('kms:ViaService: !Sub sqs.${AWS::Region}.${AWS::URLSuffix}'),
+    validator.includes(
+      '(?:SendMessage|GetQueueAttributes|DeadLetter|jobs|balance-sync-dlq|secretsmanager:|ecr:|logs:)',
+    ),
+    validator.includes('crypto-lending-api@sha256:${ApiImageDigest}'),
+    validator.includes('balance-sync-consumer.cli.js'),
+    validator.includes('BALANCE_CONSUMER_MODE, Value: disabled'),
+    validator.includes('BALANCE_CONSUMER_NETWORK, Value: ethereum-solana-mainnet'),
+    validator.includes('BALANCE_CONSUMER_SOURCE_APPROVAL, Value: ethereum-solana-mainnet-reviewed'),
+    validator.includes("['DesiredCount', '0']"),
+    validator.includes("['EnableExecuteCommand', 'false']"),
+    validator.includes("['AssignPublicIp', 'DISABLED']"),
+    validator.includes("['PlatformVersion', '1.4.0']"),
+    !/node:(?:child_process|dns|http|https|net|tls)|\bfetch\s*\(/u.test(validator),
+  ];
+  return checks.every(Boolean);
 }
 
 function hasDormantBalanceConsumerDatabaseCapability(
@@ -2309,8 +2629,10 @@ export function inspectBalanceConsumerDeploymentArtifacts(
       hasDormantBalanceConsumerSourceContract(sources) &&
       hasPinnedBalanceConsumerQueueBoundaryContract(sources) &&
       hasDormantBalanceConsumerPackagingContract(sources) &&
-      hasNoBalanceConsumerTaskDeployment(sources) &&
-      hasNoBalanceConsumerIamCapability(sources) &&
+      hasUncomposedBalanceConsumerParentContract(sources) &&
+      hasIsolatedBalanceConsumerWorkloadContract(sources) &&
+      hasExactStandaloneBalanceConsumerEnvelopeContract(sources) &&
+      hasExactBalanceConsumerEnvelopeValidatorContract(sources) &&
       hasDormantBalanceConsumerDatabaseCapability(sources);
     if (!contractValid) return invalid(true);
     const result: BalanceConsumerDeploymentInput = Object.freeze({
@@ -2974,6 +3296,14 @@ export function loadRepositoryProductionPreflightInput(
       workloadTemplateSource,
       workloadValidatorSource: readFileSync(
         resolve(repositoryRoot, 'infra/aws/validate-application-workload-boundaries.mjs'),
+        'utf8',
+      ),
+      balanceConsumerEnvelopeSource: readFileSync(
+        resolve(repositoryRoot, 'infra/aws/balance-consumer-deployment-envelope.yaml'),
+        'utf8',
+      ),
+      balanceConsumerEnvelopeValidatorSource: readFileSync(
+        resolve(repositoryRoot, 'infra/aws/validate-balance-consumer-deployment-envelope.mjs'),
         'utf8',
       ),
       bootstrapPrincipalsSource: readFileSync(

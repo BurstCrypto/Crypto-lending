@@ -180,6 +180,12 @@ export const RELEASE_COMPONENTS = Object.freeze([
     requiredFiles: Object.freeze(['.']),
   }),
   Object.freeze({
+    name: 'balance-consumer-deployment-envelope-cloudformation',
+    path: 'infra/aws/balance-consumer-deployment-envelope.yaml',
+    kind: 'file',
+    requiredFiles: Object.freeze(['.']),
+  }),
+  Object.freeze({
     name: 'migration-task-cloudformation',
     path: 'infra/aws/database-migration-task.yaml',
     kind: 'file',

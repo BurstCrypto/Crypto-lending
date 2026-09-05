@@ -174,6 +174,14 @@ const BALANCE_CONSUMER_ARTIFACTS = Object.freeze({
     resolve(__dirname, '../infra/aws/validate-application-workload-boundaries.mjs'),
     'utf8',
   ),
+  balanceConsumerEnvelopeSource: readFileSync(
+    resolve(__dirname, '../infra/aws/balance-consumer-deployment-envelope.yaml'),
+    'utf8',
+  ),
+  balanceConsumerEnvelopeValidatorSource: readFileSync(
+    resolve(__dirname, '../infra/aws/validate-balance-consumer-deployment-envelope.mjs'),
+    'utf8',
+  ),
   bootstrapPrincipalsSource: readFileSync(
     resolve(__dirname, '../infra/postgres/bootstrap-principals.sql'),
     'utf8',
@@ -789,6 +797,18 @@ test('balance-consumer inspection rejects retained-marker semantic overrides and
     },
     {
       ...BALANCE_CONSUMER_ARTIFACTS,
+      applicationTemplateSource: `${BALANCE_CONSUMER_ARTIFACTS.applicationTemplateSource}\n# balance-consumer-deployment-envelope.yaml\n`,
+    },
+    {
+      ...BALANCE_CONSUMER_ARTIFACTS,
+      balanceConsumerEnvelopeSource: `${BALANCE_CONSUMER_ARTIFACTS.balanceConsumerEnvelopeSource}\n  UnreviewedBalanceConsumerActivator:\n    Type: Custom::Activator\n`,
+    },
+    {
+      ...BALANCE_CONSUMER_ARTIFACTS,
+      balanceConsumerEnvelopeValidatorSource: `${BALANCE_CONSUMER_ARTIFACTS.balanceConsumerEnvelopeValidatorSource}\nvoid fetch('https://unreviewed.invalid');\n`,
+    },
+    {
+      ...BALANCE_CONSUMER_ARTIFACTS,
       bootstrapPrincipalsSource: `${BALANCE_CONSUMER_ARTIFACTS.bootstrapPrincipalsSource}\n${dynamicCredentialMutation}\n`,
     },
     {
@@ -1060,6 +1080,42 @@ test('balance-consumer inspection fails closed for drift in every reviewed artif
       'workloadValidatorSource',
       "requireExactIds(resources, resourceTypes, 'Resource allowlist', errors);",
       "requireExactIds(resources, resourceTypes, 'Resource inventory', errors);",
+    ],
+    [
+      'standalone envelope non-production gate',
+      'balanceConsumerEnvelopeSource',
+      "AllowedPattern: '^(dev|test|qa|sandbox|staging)(-[a-z0-9]+)*$'",
+      "AllowedPattern: '^(dev|test|qa|sandbox|staging|production)(-[a-z0-9]+)*$'",
+    ],
+    [
+      'standalone envelope receipt-only IAM',
+      'balanceConsumerEnvelopeSource',
+      '- sqs:ReceiveMessage',
+      '- sqs:SendMessage',
+    ],
+    [
+      'standalone envelope hard-zero service',
+      'balanceConsumerEnvelopeSource',
+      'DesiredCount: 0',
+      'DesiredCount: 1',
+    ],
+    [
+      'standalone envelope validator resource allowlist',
+      'balanceConsumerEnvelopeValidatorSource',
+      "requireExactIds(resources, expectedResources, 'Resource allowlist', errors);",
+      "requireExactIds(resources, new Map(resources), 'Resource allowlist', errors);",
+    ],
+    [
+      'standalone envelope validator hard-zero enforcement',
+      'balanceConsumerEnvelopeValidatorSource',
+      "['DesiredCount', '0'],",
+      "['DesiredCount', '1'],",
+    ],
+    [
+      'standalone envelope validator reviewed digest',
+      'balanceConsumerEnvelopeValidatorSource',
+      "const reviewedTemplateSha256 = '91b9129ea24a8c9abd8baa66d411d231eba84e417a80d066f1bd0fc819bd7685';",
+      "const reviewedTemplateSha256 = '01b9129ea24a8c9abd8baa66d411d231eba84e417a80d066f1bd0fc819bd7685';",
     ],
     [
       'bootstrap principal input',
