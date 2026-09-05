@@ -59,6 +59,7 @@ const SQS_REQUIRED_KEYS = Object.freeze([
   'balanceDeadLetterQueueUrl',
 ] as const);
 const SQS_OPTIONAL_KEYS = Object.freeze(['endpoint', 'credentialRelativeUri'] as const);
+const BALANCE_SYNC_CONSUMER_SHUTDOWN_DRAIN_TIMEOUT_MS = 25_000;
 
 export interface DormantBalanceSyncConsumerResourceDependencies {
   readonly infrastructureConfig: BalanceConsumerInfrastructureConfig;
@@ -135,6 +136,15 @@ class BalanceSyncConsumerResourceCloseError extends Error {
   constructor() {
     super('Balance sync consumer resource close failed');
     this.name = 'BalanceSyncConsumerResourceCloseError';
+  }
+}
+
+class BalanceSyncConsumerResourceShutdownDrainTimeoutError extends Error {
+  readonly code = 'BALANCE_SYNC_CONSUMER_RESOURCE_SHUTDOWN_DRAIN_TIMEOUT' as const;
+
+  constructor() {
+    super('Balance sync consumer resource shutdown drain timed out');
+    this.name = 'BalanceSyncConsumerResourceShutdownDrainTimeoutError';
   }
 }
 
@@ -482,6 +492,8 @@ export async function createDormantBalanceSyncConsumerResource(
       clock: reviewed.clock,
       metrics: reviewed.metrics,
     });
+    const scheduleShutdownTimeout = globalThis.setTimeout.bind(globalThis);
+    const clearShutdownTimeout = globalThis.clearTimeout.bind(globalThis);
 
     let closed = false;
     let started = false;
@@ -564,9 +576,17 @@ export async function createDormantBalanceSyncConsumerResource(
       if (closePromise !== undefined) return closePromise;
       const acceptedRun = activeRun;
       const acceptedRunController = activeRunController;
-      let startClose: () => void = () => undefined;
-      closePromise = new Promise<void>((resolve) => {
-        startClose = resolve;
+      let resolveClose!: () => void;
+      let rejectClose!: (error: Error) => void;
+      const publicClose = new Promise<void>((resolve, reject) => {
+        resolveClose = resolve;
+        rejectClose = reject;
+      });
+      closePromise = publicClose;
+
+      let startCleanup: () => void = () => undefined;
+      const cleanup = new Promise<void>((resolve) => {
+        startCleanup = resolve;
       }).then(async () => {
         if (acceptedRun !== undefined) await Promise.allSettled([acceptedRun]);
         const sqsClosed = await attemptClose(resourceSqsClose);
@@ -575,14 +595,54 @@ export async function createDormantBalanceSyncConsumerResource(
           throw new BalanceSyncConsumerResourceCloseError();
         }
       });
+      let publicCloseSettled = false;
+      let shutdownTimeout: ReturnType<typeof setTimeout> | undefined;
+      const clearWatchdog = (): void => {
+        if (shutdownTimeout === undefined) return;
+        try {
+          clearShutdownTimeout(shutdownTimeout);
+        } catch {
+          // Cleanup settlement remains authoritative even if timer cleanup fails.
+        }
+      };
+      try {
+        shutdownTimeout = scheduleShutdownTimeout(() => {
+          if (publicCloseSettled) return;
+          publicCloseSettled = true;
+          rejectClose(new BalanceSyncConsumerResourceShutdownDrainTimeoutError());
+        }, BALANCE_SYNC_CONSUMER_SHUTDOWN_DRAIN_TIMEOUT_MS);
+        try {
+          shutdownTimeout.unref?.();
+        } catch {
+          // The watchdog still enforces the fixed deadline when unref is unavailable.
+        }
+      } catch {
+        publicCloseSettled = true;
+        rejectClose(new BalanceSyncConsumerResourceCloseError());
+      }
+
+      void cleanup.then(
+        () => {
+          clearWatchdog();
+          if (publicCloseSettled) return;
+          publicCloseSettled = true;
+          resolveClose();
+        },
+        () => {
+          clearWatchdog();
+          if (publicCloseSettled) return;
+          publicCloseSettled = true;
+          rejectClose(new BalanceSyncConsumerResourceCloseError());
+        },
+      );
       try {
         acceptedRunController?.abort(new Error('Balance sync consumer resource closed'));
       } catch {
         // Cleanup still starts and reports only the fixed close outcome.
       } finally {
-        startClose();
+        startCleanup();
       }
-      return closePromise;
+      return publicClose;
     };
 
     return frozenNullPrototype<DormantBalanceSyncConsumerResource>({ run, close });

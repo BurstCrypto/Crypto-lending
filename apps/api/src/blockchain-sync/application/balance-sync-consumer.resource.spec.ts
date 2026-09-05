@@ -139,6 +139,22 @@ interface CapsuleHarness {
   readonly persistenceResource: Readonly<BalanceConsumerPersistenceResource>;
 }
 
+interface Deferred<T> {
+  readonly promise: Promise<T>;
+  readonly resolve: (value: T | PromiseLike<T>) => void;
+  readonly reject: (reason?: unknown) => void;
+}
+
+function deferred<T>(): Deferred<T> {
+  let resolvePromise!: (value: T | PromiseLike<T>) => void;
+  let rejectPromise!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromiseValue, rejectPromiseValue) => {
+    resolvePromise = resolvePromiseValue;
+    rejectPromise = rejectPromiseValue;
+  });
+  return Object.freeze({ promise, resolve: resolvePromise, reject: rejectPromise });
+}
+
 function arrangeCapsules(): CapsuleHarness {
   const receive = jest.fn().mockResolvedValue([]);
   const deleteReceipt = jest.fn().mockResolvedValue(undefined);
@@ -213,7 +229,15 @@ async function capturedRejection(
 
 function expectFixedError(
   error: Error & { readonly code?: string },
-  kind: 'Configuration' | 'Construction' | 'Run' | 'AlreadyStarted' | 'Signal' | 'Closed' | 'Close',
+  kind:
+    | 'Configuration'
+    | 'Construction'
+    | 'Run'
+    | 'AlreadyStarted'
+    | 'Signal'
+    | 'Closed'
+    | 'Close'
+    | 'ShutdownDrainTimeout',
 ): void {
   const expected = {
     Configuration: {
@@ -244,6 +268,10 @@ function expectFixedError(
       code: 'BALANCE_SYNC_CONSUMER_RESOURCE_CLOSE_FAILED',
       message: 'Balance sync consumer resource close failed',
     },
+    ShutdownDrainTimeout: {
+      code: 'BALANCE_SYNC_CONSUMER_RESOURCE_SHUTDOWN_DRAIN_TIMEOUT',
+      message: 'Balance sync consumer resource shutdown drain timed out',
+    },
   } as const;
   expect(error).toMatchObject(expected[kind]);
   expect(error.name).toBe(`BalanceSyncConsumerResource${kind}Error`);
@@ -263,6 +291,11 @@ describe('createDormantBalanceSyncConsumerResource', () => {
     mockedCreatePersistence.mockReset();
     mockedCreateSqsReceipt.mockReset();
     mockedCreateComposition.mockReset().mockImplementation(actualCreateComposition);
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+    jest.restoreAllMocks();
   });
 
   it('builds an inert exact facade from one deep frozen infrastructure snapshot', async () => {
@@ -848,7 +881,151 @@ describe('createDormantBalanceSyncConsumerResource', () => {
     expectFixedError(lateRun, 'Closed');
   });
 
+  it('clears and unreferences the 25 second watchdog when the entire cleanup wins', async () => {
+    jest.useFakeTimers();
+    const capsules = arrangeCapsules();
+    const unref = jest.fn();
+    const shutdownTimer = { unref } as unknown as ReturnType<typeof setTimeout>;
+    const setTimeoutSpy = jest.spyOn(globalThis, 'setTimeout').mockReturnValue(shutdownTimer);
+    const clearTimeoutSpy = jest
+      .spyOn(globalThis, 'clearTimeout')
+      .mockImplementation(() => undefined);
+    const resource = await createDormantBalanceSyncConsumerResource(dependencies());
+
+    const first = resource.close();
+    expect(resource.close()).toBe(first);
+    await expect(first).resolves.toBeUndefined();
+
+    expect(setTimeoutSpy).toHaveBeenCalledTimes(1);
+    expect(setTimeoutSpy).toHaveBeenCalledWith(expect.any(Function), 25_000);
+    expect(unref).toHaveBeenCalledTimes(1);
+    expect(clearTimeoutSpy).toHaveBeenCalledTimes(1);
+    expect(clearTimeoutSpy).toHaveBeenCalledWith(shutdownTimer);
+    expect(capsules.sqsClose).toHaveBeenCalledTimes(1);
+    expect(capsules.persistenceClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns a memoized fixed failure and still cleans up when watchdog scheduling throws', async () => {
+    const capsules = arrangeCapsules();
+    const setTimeoutSpy = jest.spyOn(globalThis, 'setTimeout').mockImplementation(() => {
+      throw new Error('private scheduler failure');
+    });
+    const resource = await createDormantBalanceSyncConsumerResource(dependencies());
+
+    let first!: Promise<void>;
+    expect(() => {
+      first = resource.close();
+    }).not.toThrow();
+    expect(resource.close()).toBe(first);
+    const error = await capturedRejection(() => first);
+
+    expectFixedError(error, 'Close');
+    expect(String(error)).not.toContain('private scheduler failure');
+    await waitUntil(
+      () =>
+        capsules.sqsClose.mock.calls.length === 1 &&
+        capsules.persistenceClose.mock.calls.length === 1,
+    );
+    expect(setTimeoutSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps successful cleanup authoritative when watchdog unref and clear throw', async () => {
+    const capsules = arrangeCapsules();
+    const unref = jest.fn(() => {
+      throw new Error('private unref failure');
+    });
+    const shutdownTimer = { unref } as unknown as ReturnType<typeof setTimeout>;
+    jest.spyOn(globalThis, 'setTimeout').mockReturnValue(shutdownTimer);
+    const clearTimeoutSpy = jest.spyOn(globalThis, 'clearTimeout').mockImplementation(() => {
+      throw new Error('private clear failure');
+    });
+    const resource = await createDormantBalanceSyncConsumerResource(dependencies());
+
+    let first!: Promise<void>;
+    expect(() => {
+      first = resource.close();
+    }).not.toThrow();
+    expect(resource.close()).toBe(first);
+    await expect(first).resolves.toBeUndefined();
+
+    expect(unref).toHaveBeenCalledTimes(1);
+    expect(clearTimeoutSpy).toHaveBeenCalledTimes(1);
+    expect(capsules.sqsClose).toHaveBeenCalledTimes(1);
+    expect(capsules.persistenceClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps fixed cleanup failure authoritative when watchdog clear throws', async () => {
+    const capsules = arrangeCapsules();
+    capsules.persistenceClose.mockRejectedValueOnce(new Error('private persistence failure'));
+    const shutdownTimer = { unref: jest.fn() } as unknown as ReturnType<typeof setTimeout>;
+    jest.spyOn(globalThis, 'setTimeout').mockReturnValue(shutdownTimer);
+    const clearTimeoutSpy = jest.spyOn(globalThis, 'clearTimeout').mockImplementation(() => {
+      throw new Error('private clear failure');
+    });
+    const resource = await createDormantBalanceSyncConsumerResource(dependencies());
+
+    const first = resource.close();
+    expect(resource.close()).toBe(first);
+    const error = await capturedRejection(() => first);
+
+    expectFixedError(error, 'Close');
+    expect(String(error)).not.toMatch(/private persistence failure|private clear failure/u);
+    expect(clearTimeoutSpy).toHaveBeenCalledTimes(1);
+    expect(capsules.sqsClose).toHaveBeenCalledTimes(1);
+    expect(capsules.persistenceClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('stays pending through 24,999ms, times out at 25,000ms, and observes late cleanup', async () => {
+    jest.useFakeTimers();
+    const capsules = arrangeCapsules();
+    const sqsClose = deferred<void>();
+    const holder: {
+      resource?: Awaited<ReturnType<typeof createDormantBalanceSyncConsumerResource>>;
+    } = {};
+    let reentrantClose: Promise<void> | undefined;
+    capsules.sqsClose.mockImplementation(() => {
+      reentrantClose = holder.resource!.close();
+      return sqsClose.promise;
+    });
+    capsules.persistenceClose.mockRejectedValueOnce(
+      new Error('private late persistence cleanup failure'),
+    );
+    const resource = await createDormantBalanceSyncConsumerResource(dependencies());
+    holder.resource = resource;
+
+    const first = resource.close();
+    let publicOutcome: 'PENDING' | 'FULFILLED' | 'REJECTED' = 'PENDING';
+    void first.then(
+      () => {
+        publicOutcome = 'FULFILLED';
+      },
+      () => {
+        publicOutcome = 'REJECTED';
+      },
+    );
+    await jest.advanceTimersByTimeAsync(0);
+    expect(reentrantClose).toBe(first);
+
+    await jest.advanceTimersByTimeAsync(24_999);
+    expect(publicOutcome).toBe('PENDING');
+    expect(capsules.persistenceClose).not.toHaveBeenCalled();
+
+    await jest.advanceTimersByTimeAsync(1);
+    const error = await capturedRejection(() => first);
+    expectFixedError(error, 'ShutdownDrainTimeout');
+    expect(publicOutcome).toBe('REJECTED');
+    expect(String(error)).not.toContain('private');
+    expect(resource.close()).toBe(first);
+
+    sqsClose.reject(new Error('private late SQS cleanup failure'));
+    await jest.advanceTimersByTimeAsync(0);
+    expect(capsules.persistenceClose).toHaveBeenCalledTimes(1);
+    expect(publicOutcome).toBe('REJECTED');
+    expect(await capturedRejection(() => resource.close())).toBe(error);
+  });
+
   it('memoizes a fixed close failure while attempting both child closes in order', async () => {
+    jest.useFakeTimers();
     const capsules = arrangeCapsules();
     const order: string[] = [];
     capsules.sqsClose.mockImplementation(() => {
@@ -870,6 +1047,7 @@ describe('createDormantBalanceSyncConsumerResource', () => {
     expect(String(error)).not.toContain('private');
     expect(order).toEqual(['sqs', 'persistence']);
     expect(resource.close()).toBe(first);
+    expect(jest.getTimerCount()).toBe(0);
   });
 
   it('sanitizes unexpected consumer failures and remains one-shot', async () => {

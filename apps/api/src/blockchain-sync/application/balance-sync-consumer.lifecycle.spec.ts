@@ -95,25 +95,22 @@ describe('createDormantBalanceSyncConsumerLifecycleCoordinator', () => {
     removeListener.mockRestore();
   });
 
-  it('bridges an expected stop without forwarding its hostile reason, drains run, then closes', async () => {
+  it('starts close on an expected stop without forwarding its hostile reason, then drains run', async () => {
     const external = new AbortController();
     const order: string[] = [];
     let privateSignal: AbortSignal | undefined;
-    const run = jest.fn(
-      (signal: AbortSignal) =>
-        new Promise<void>((resolve) => {
-          privateSignal = signal;
-          order.push('run-started');
-          const finish = (): void => {
-            order.push('run-settled');
-            resolve();
-          };
-          if (signal.aborted) finish();
-          else signal.addEventListener('abort', finish, { once: true });
-        }),
-    );
+    const runGate = deferred<void>();
+    const run = jest.fn(async (signal: AbortSignal) => {
+      privateSignal = signal;
+      order.push('run-started');
+      await runGate.promise;
+      order.push('run-settled');
+    });
     const close = jest.fn(async () => {
-      order.push('close');
+      order.push('close-started');
+      runGate.resolve(undefined);
+      await runGate.promise;
+      order.push('close-settled');
     });
     const operator = operatorHarness();
     const coordinator = createDormantBalanceSyncConsumerLifecycleCoordinator({
@@ -141,7 +138,7 @@ describe('createDormantBalanceSyncConsumerLifecycleCoordinator', () => {
       new Error('Balance sync consumer lifecycle stop requested'),
     );
     expect(privateSignal?.reason).not.toBe(hostileReason);
-    expect(order).toEqual(['run-started', 'run-settled', 'close']);
+    expect(order).toEqual(['run-started', 'close-started', 'run-settled', 'close-settled']);
     expect(close).toHaveBeenCalledTimes(1);
     expect(operator.events.map(({ event }) => event)).toEqual(['STARTED', 'STOPPED']);
     for (const event of operator.events) {
@@ -278,6 +275,49 @@ describe('createDormantBalanceSyncConsumerLifecycleCoordinator', () => {
       'RUN_FAILED',
       'CLOSE_FAILED',
     ]);
+  });
+
+  it('propagates close failure without waiting forever for a run that ignores shutdown', async () => {
+    const external = new AbortController();
+    const operator = operatorHarness();
+    const runGate = deferred<void>();
+    const closeGate = deferred<void>();
+    let privateSignal: AbortSignal | undefined;
+    const run = jest.fn((signal: AbortSignal) => {
+      privateSignal = signal;
+      return runGate.promise;
+    });
+    const close = jest.fn(() => closeGate.promise);
+    const coordinator = createDormantBalanceSyncConsumerLifecycleCoordinator({
+      resource: aggregateResource(run, close),
+      signal: external.signal,
+      operatorEvents: operator.port,
+    });
+
+    const running = coordinator.run();
+    await Promise.resolve();
+    await Promise.resolve();
+    external.abort(new Error('external secret'));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(privateSignal?.aborted).toBe(true);
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(operator.events.map(({ event }) => event)).toEqual(['STARTED']);
+
+    closeGate.reject(new Error('aggregate timeout detail'));
+    const error = await capturedRejection(() => running);
+    expectFixedError(error, {
+      code: 'BALANCE_SYNC_CONSUMER_LIFECYCLE_CLOSE_FAILED',
+      name: 'BalanceSyncConsumerLifecycleCloseError',
+      message: 'Balance sync consumer lifecycle close failed',
+    });
+    expect(operator.events.map(({ event }) => event)).toEqual(['STARTED', 'CLOSE_FAILED']);
+    expect(operator.events.map(({ event }) => event)).not.toContain('STOPPED');
+
+    runGate.reject(new Error('late run detail'));
+    await new Promise<void>((resolveImmediate) => setImmediate(resolveImmediate));
+    expect(operator.events.map(({ event }) => event)).toEqual(['STARTED', 'CLOSE_FAILED']);
   });
 
   it('marks one-shot state synchronously and rejects concurrent and late attempts', async () => {

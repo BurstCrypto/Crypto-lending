@@ -49,6 +49,19 @@ const client = {
   destroy: clientDestroy,
 } as unknown as SQSClient;
 
+interface Deferred<T> {
+  readonly promise: Promise<T>;
+  readonly resolve: (value: T | PromiseLike<T>) => void;
+}
+
+function deferred<T>(): Deferred<T> {
+  let resolvePromise!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((resolvePromiseValue) => {
+    resolvePromise = resolvePromiseValue;
+  });
+  return Object.freeze({ promise, resolve: resolvePromise });
+}
+
 const METADATA_KEY_RING = createWalletRegistrationKeyRing('metadata-seal', 1, [
   createWalletRegistrationKey(
     'metadata-seal',
@@ -113,6 +126,19 @@ async function waitUntil(predicate: () => boolean): Promise<void> {
   throw new Error('Condition did not settle');
 }
 
+async function flushMicrotasks(): Promise<void> {
+  for (let index = 0; index < 20; index += 1) await Promise.resolve();
+}
+
+async function capturedRejection(work: () => Promise<unknown>): Promise<unknown> {
+  try {
+    await work();
+  } catch (error) {
+    return error;
+  }
+  throw new Error('Expected work to reject');
+}
+
 describe('dormant balance-sync consumer real-capsule compatibility', () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -121,6 +147,10 @@ describe('dormant balance-sync consumer real-capsule compatibility', () => {
     clientSend.mockResolvedValue({});
     mockedCreatePostgresPool.mockReturnValue(pool);
     MockedSqsClient.mockImplementation(() => client);
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
   });
 
   it('composes the actual child capsules without database, queue, credential, or RPC work', async () => {
@@ -194,5 +224,79 @@ describe('dormant balance-sync consumer real-capsule compatibility', () => {
       poolEnd.mock.invocationCallOrder[0] as number,
     );
     expect(resource.close()).toBe(resource.close());
+  });
+
+  it('reports close failure instead of stopped when the aggregate drain exceeds 25 seconds', async () => {
+    jest.useFakeTimers();
+    const pendingReceive = deferred<Record<string, never>>();
+    const external = new AbortController();
+    let requestSignal: AbortSignal | undefined;
+    clientSend.mockImplementation(
+      (_command: unknown, options?: Readonly<{ abortSignal?: AbortSignal }>) => {
+        requestSignal = options?.abortSignal;
+        return pendingReceive.promise;
+      },
+    );
+    const resource = await createDormantBalanceSyncConsumerResource(dependencies());
+    const events: BalanceSyncConsumerLifecycleEvent['event'][] = [];
+    const coordinator = createDormantBalanceSyncConsumerLifecycleCoordinator({
+      resource,
+      signal: external.signal,
+      operatorEvents: {
+        record: (event) => {
+          events.push(event.event);
+        },
+      },
+    });
+
+    const running = coordinator.run();
+    await flushMicrotasks();
+    expect(clientSend).toHaveBeenCalledTimes(1);
+    external.abort(new Error('caller-private-stop-reason'));
+    await jest.advanceTimersByTimeAsync(0);
+    expect(requestSignal?.aborted).toBe(true);
+    expect(poolEnd).not.toHaveBeenCalled();
+
+    let lifecycleOutcome: 'PENDING' | 'FULFILLED' | 'REJECTED' = 'PENDING';
+    void running.then(
+      () => {
+        lifecycleOutcome = 'FULFILLED';
+      },
+      () => {
+        lifecycleOutcome = 'REJECTED';
+      },
+    );
+    await jest.advanceTimersByTimeAsync(24_999);
+    expect(lifecycleOutcome).toBe('PENDING');
+    expect(events).toEqual(['STARTED']);
+
+    await jest.advanceTimersByTimeAsync(1);
+    const lifecycleError = await capturedRejection(() => running);
+    expect(lifecycleError).toMatchObject({
+      code: 'BALANCE_SYNC_CONSUMER_LIFECYCLE_CLOSE_FAILED',
+      name: 'BalanceSyncConsumerLifecycleCloseError',
+      message: 'Balance sync consumer lifecycle close failed',
+    });
+    expect(lifecycleOutcome).toBe('REJECTED');
+    expect(events).toEqual(['STARTED', 'CLOSE_FAILED']);
+    expect(events).not.toContain('STOPPED');
+
+    const aggregateError = await capturedRejection(() => resource.close());
+    expect(aggregateError).toMatchObject({
+      code: 'BALANCE_SYNC_CONSUMER_RESOURCE_SHUTDOWN_DRAIN_TIMEOUT',
+      name: 'BalanceSyncConsumerResourceShutdownDrainTimeoutError',
+      message: 'Balance sync consumer resource shutdown drain timed out',
+    });
+    pendingReceive.resolve({});
+    for (
+      let attempt = 0;
+      attempt < 20 && (clientDestroy.mock.calls.length === 0 || poolEnd.mock.calls.length === 0);
+      attempt += 1
+    ) {
+      await jest.advanceTimersByTimeAsync(0);
+    }
+    expect(clientDestroy).toHaveBeenCalledTimes(1);
+    expect(poolEnd).toHaveBeenCalledTimes(1);
+    expect(events).not.toContain('STOPPED');
   });
 });

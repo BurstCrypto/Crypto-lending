@@ -226,9 +226,28 @@ async function executeLifecycle(reviewed: ReviewedDependencies): Promise<void> {
   const controller = new AbortController();
   let stopRequested = false;
   let listening = false;
+  let runHandoffComplete = false;
+  let closeOperation: Promise<boolean> | undefined;
+  let wakeProgress!: () => void;
+  const progress = new Promise<void>((resolve) => {
+    wakeProgress = resolve;
+  });
+  const beginClose = (): Promise<boolean> => {
+    if (closeOperation !== undefined) return closeOperation;
+    closeOperation = closeResource(reviewed.closeResource);
+    void closeOperation.then(() => {
+      wakeProgress();
+    });
+    return closeOperation;
+  };
   const requestStop = (): void => {
+    if (stopRequested) return;
     stopRequested = true;
-    controller.abort(new Error('Balance sync consumer lifecycle stop requested'));
+    try {
+      controller.abort(new Error('Balance sync consumer lifecycle stop requested'));
+    } finally {
+      if (runHandoffComplete) void beginClose();
+    }
   };
 
   try {
@@ -256,22 +275,68 @@ async function executeLifecycle(reviewed: ReviewedDependencies): Promise<void> {
   }
 
   let runFailed = false;
-  let prematureExit = false;
+  let runSettled = false;
+  let runFailureReported = false;
   let runOperation: Promise<void> | undefined;
   try {
     runOperation = Promise.resolve(reviewed.runResource(controller.signal));
   } catch {
     runFailed = true;
+    runSettled = true;
   }
+  let observedRun: Promise<void> | undefined;
+  if (runOperation !== undefined) {
+    observedRun = runOperation.then(
+      () => {
+        runSettled = true;
+        wakeProgress();
+      },
+      () => {
+        runFailed = true;
+        runSettled = true;
+        wakeProgress();
+      },
+    );
+  }
+  runHandoffComplete = true;
+
   if (runOperation !== undefined) {
     if (!stopRequested) recordEvent(reviewed.recordEvent, 'STARTED');
+    if (stopRequested) void beginClose();
+    await progress;
+  } else if (stopRequested) {
+    void beginClose();
+  }
+
+  const prematureExit = runSettled && !runFailed && !stopRequested;
+  if (!stopRequested && runSettled && listening) {
     try {
-      await runOperation;
-      prematureExit = !stopRequested;
+      reviewed.signal.removeAbortListener(requestStop);
+      listening = false;
     } catch {
-      runFailed = true;
+      // Listener cleanup cannot replace the fixed lifecycle outcome.
     }
   }
+
+  if (runFailed) {
+    recordEvent(reviewed.recordEvent, 'RUN_FAILED');
+    runFailureReported = true;
+  } else if (prematureExit) recordEvent(reviewed.recordEvent, 'PREMATURE_RUN_EXIT');
+
+  const closed = await beginClose();
+  if (!closed) {
+    if (listening) {
+      try {
+        reviewed.signal.removeAbortListener(requestStop);
+      } catch {
+        // Listener cleanup cannot replace the fixed close outcome.
+      }
+    }
+    recordEvent(reviewed.recordEvent, 'CLOSE_FAILED');
+    throw new BalanceSyncConsumerLifecycleCloseError();
+  }
+
+  if (observedRun !== undefined && !runSettled) await observedRun;
   if (listening) {
     try {
       reviewed.signal.removeAbortListener(requestStop);
@@ -279,15 +344,7 @@ async function executeLifecycle(reviewed: ReviewedDependencies): Promise<void> {
       // Listener cleanup cannot replace the fixed lifecycle outcome.
     }
   }
-
-  if (runFailed) recordEvent(reviewed.recordEvent, 'RUN_FAILED');
-  else if (prematureExit) recordEvent(reviewed.recordEvent, 'PREMATURE_RUN_EXIT');
-
-  const closed = await closeResource(reviewed.closeResource);
-  if (!closed) {
-    recordEvent(reviewed.recordEvent, 'CLOSE_FAILED');
-    throw new BalanceSyncConsumerLifecycleCloseError();
-  }
+  if (runFailed && !runFailureReported) recordEvent(reviewed.recordEvent, 'RUN_FAILED');
   if (runFailed) throw new BalanceSyncConsumerLifecycleRunError();
   if (prematureExit) throw new BalanceSyncConsumerLifecyclePrematureExitError();
   recordEvent(reviewed.recordEvent, 'STOPPED');
