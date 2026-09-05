@@ -38,6 +38,7 @@ const REVIEWED_DATABASE_MASTER_TEMPLATE_SHA256 =
 export type ProductionPreflightTarget = 'read-only' | 'mainnet-write';
 export type ProductionPreflightReadiness = 'BLOCKED' | 'LOCAL_GATES_CLEAR';
 export type ProductionPreflightCheckId =
+  | 'PRODUCTION_INFRASTRUCTURE'
   | 'AUTHENTICATION'
   | 'EXTERNAL_EGRESS'
   | 'RPC_INDEXING'
@@ -48,6 +49,8 @@ export type ProductionPreflightCheckId =
   | 'MAINNET_WRITES';
 
 export type ProductionPreflightBlockerId =
+  | 'PRODUCTION_INFRASTRUCTURE_INSPECTION_FAILED'
+  | 'PRODUCTION_INFRASTRUCTURE_DEPLOYMENT_PATH_NOT_ENABLED'
   | 'AUTH_DEPLOYED_EVIDENCE_MISSING'
   | 'AUTH_PRODUCTION_CONFIGURATION_NOT_WIRED'
   | 'AUTH_PRODUCTION_SECRET_REFERENCES_NOT_WIRED'
@@ -117,6 +120,31 @@ export interface DatabaseMasterDeploymentInput {
 
 const VERIFIED_DATABASE_MASTER_DEPLOYMENTS = new WeakSet<DatabaseMasterDeploymentInput>();
 
+export interface ProductionInfrastructureArtifactSources {
+  readonly applicationTemplateSource: string;
+  readonly workloadTemplateSource: string;
+  readonly observabilityTemplateSource: string;
+  readonly migrationTemplateSource: string;
+  readonly accountGuardrailsTemplateSource: string;
+  readonly applicationInvokerSource: string;
+  readonly accountGuardrailsInvokerSource: string;
+  readonly applicationValidatorSource: string;
+  readonly fixedSlotTransitionValidatorSource: string;
+  readonly billingControlValidatorSource: string;
+  readonly egressPolicyValidatorSource: string;
+  readonly authWalletTransitionValidatorSource: string;
+  readonly redisOperatorTransitionValidatorSource: string;
+}
+
+export interface ProductionInfrastructureDeploymentInput {
+  readonly inspected: boolean;
+  readonly syntaxValid: boolean;
+  readonly environmentContract: 'INVALID' | 'NON_PRODUCTION_ONLY' | 'PRODUCTION_ENABLED';
+}
+
+const VERIFIED_PRODUCTION_INFRASTRUCTURE_DEPLOYMENTS =
+  new WeakSet<ProductionInfrastructureDeploymentInput>();
+
 interface EgressInput {
   readonly localValidationPassed: boolean;
   readonly status: unknown;
@@ -146,6 +174,8 @@ interface PublicLaunchAuthoritiesInput {
 
 export interface ProductionPreflightInput {
   readonly authentication: AuthenticationDeploymentInput;
+  /** Optional for legacy callers; absence or an unbranded value fails closed. */
+  readonly productionInfrastructureDeployment?: ProductionInfrastructureDeploymentInput;
   /** Optional for legacy programmatic callers; absence fails closed during evaluation. */
   readonly databaseMasterDeployment?: DatabaseMasterDeploymentInput;
   /** Optional for legacy programmatic callers; only a verified evidence bundle sets it in CLI use. */
@@ -387,6 +417,30 @@ const WRITE_EVIDENCE_KEYS = Object.freeze([
 const SOURCE_REVISION_PATTERN = /^[a-f0-9]{40}$/u;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
 const PROVIDER_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
+const PRODUCTION_INFRASTRUCTURE_ARTIFACT_KEYS = Object.freeze([
+  'applicationTemplateSource',
+  'workloadTemplateSource',
+  'observabilityTemplateSource',
+  'migrationTemplateSource',
+  'accountGuardrailsTemplateSource',
+  'applicationInvokerSource',
+  'accountGuardrailsInvokerSource',
+  'applicationValidatorSource',
+  'fixedSlotTransitionValidatorSource',
+  'billingControlValidatorSource',
+  'egressPolicyValidatorSource',
+  'authWalletTransitionValidatorSource',
+  'redisOperatorTransitionValidatorSource',
+] as const satisfies readonly (keyof ProductionInfrastructureArtifactSources)[]);
+const MAX_PRODUCTION_INFRASTRUCTURE_ARTIFACT_BYTES = 512 * 1024;
+const MAX_PRODUCTION_INFRASTRUCTURE_TOTAL_BYTES = 2 * 1024 * 1024;
+const NON_PRODUCTION_ENVIRONMENT_ALLOWED_PATTERN = "'^(dev|test|qa|sandbox|staging)(-[a-z0-9]+)*$'";
+const PRODUCTION_AWARE_ENVIRONMENT_PATTERN_SOURCE =
+  '/^(?:dev|test|qa|sandbox|staging|production)(?:-[a-z0-9]+)*$/u';
+const NON_PRODUCTION_ENVIRONMENT_PATTERN_SOURCE =
+  '/^(?:dev|test|qa|sandbox|staging)(?:-[a-z0-9]+)*$/u';
+const NON_PRODUCTION_ENVIRONMENT_PATTERN_SOURCE_NO_UNICODE =
+  '/^(?:dev|test|qa|sandbox|staging)(?:-[a-z0-9]+)*$/';
 
 const SAFETY_MARKERS = Object.freeze({
   networkCallsMade: 0 as const,
@@ -844,6 +898,28 @@ export function evaluateProductionPreflight(
   input: ProductionPreflightInput,
   selectedTarget: ProductionPreflightTarget = 'read-only',
 ): ProductionPreflightReport {
+  const productionInfrastructureBlockers: ProductionPreflightBlockerId[] = [];
+  let productionInfrastructureInspected = false;
+  let productionInfrastructureEnabled = false;
+  try {
+    const deployment = input.productionInfrastructureDeployment;
+    productionInfrastructureInspected =
+      deployment?.inspected === true &&
+      deployment.syntaxValid === true &&
+      VERIFIED_PRODUCTION_INFRASTRUCTURE_DEPLOYMENTS.has(deployment);
+    productionInfrastructureEnabled =
+      productionInfrastructureInspected &&
+      deployment !== undefined &&
+      deployment.environmentContract === 'PRODUCTION_ENABLED';
+  } catch {
+    // Initialized fail-closed values are preserved for malformed or hostile inputs.
+  }
+  if (!productionInfrastructureInspected) {
+    productionInfrastructureBlockers.push('PRODUCTION_INFRASTRUCTURE_INSPECTION_FAILED');
+  } else if (!productionInfrastructureEnabled) {
+    productionInfrastructureBlockers.push('PRODUCTION_INFRASTRUCTURE_DEPLOYMENT_PATH_NOT_ENABLED');
+  }
+
   const authenticationBlockers: ProductionPreflightBlockerId[] = [];
   const databaseMasterDeployment = input.databaseMasterDeployment;
   const databaseMasterDeploymentValid =
@@ -1048,6 +1124,11 @@ export function evaluateProductionPreflight(
 
   const checks = Object.freeze([
     check(
+      'PRODUCTION_INFRASTRUCTURE',
+      productionInfrastructureInspected ? 'PASS' : 'FAIL',
+      productionInfrastructureBlockers,
+    ),
+    check(
       'AUTHENTICATION',
       input.authentication.inspected &&
         input.authentication.syntaxValid &&
@@ -1083,6 +1164,7 @@ export function evaluateProductionPreflight(
       ? 'LOCAL_GATES_CLEAR'
       : 'BLOCKED';
   const publicReadOnly = readinessFor([
+    'PRODUCTION_INFRASTRUCTURE',
     'AUTHENTICATION',
     'EXTERNAL_EGRESS',
     'RPC_INDEXING',
@@ -1092,6 +1174,7 @@ export function evaluateProductionPreflight(
     'PUBLIC_LAUNCH_AUTHORITIES',
   ]);
   const mainnetWrites = readinessFor([
+    'PRODUCTION_INFRASTRUCTURE',
     'AUTHENTICATION',
     'EXTERNAL_EGRESS',
     'RPC_INDEXING',
@@ -1223,6 +1306,206 @@ function hasExactTopLevelParameter(
     .map((line) => line.trim())
     .filter((line) => line.length > 0 && !line.startsWith('#'));
   return semanticLines.join('\n') === [`${name}:`, ...expectedProperties].join('\n');
+}
+
+function trimmedExecutableLines(source: string): readonly string[] {
+  return source
+    .replace(/\r\n/gu, '\n')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !line.startsWith('#') && !line.startsWith('//'));
+}
+
+function exactExecutableLineCount(source: string, expected: string): number {
+  return trimmedExecutableLines(source).filter((line) => line === expected).length;
+}
+
+function snapshotProductionInfrastructureArtifactSources(
+  value: unknown,
+): ProductionInfrastructureArtifactSources | null {
+  if (!isRecord(value) || Object.getOwnPropertySymbols(value).length !== 0) return null;
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) return null;
+  const ownKeys = Reflect.ownKeys(value);
+  if (
+    ownKeys.length !== PRODUCTION_INFRASTRUCTURE_ARTIFACT_KEYS.length ||
+    !PRODUCTION_INFRASTRUCTURE_ARTIFACT_KEYS.every((key) => ownKeys.includes(key))
+  ) {
+    return null;
+  }
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  let totalBytes = 0;
+  const snapshot: Partial<Record<keyof ProductionInfrastructureArtifactSources, string>> = {};
+  for (const key of PRODUCTION_INFRASTRUCTURE_ARTIFACT_KEYS) {
+    const descriptor = descriptors[key];
+    if (
+      descriptor === undefined ||
+      !('value' in descriptor) ||
+      typeof descriptor.value !== 'string' ||
+      descriptor.value.length === 0
+    ) {
+      return null;
+    }
+    const bytes = Buffer.byteLength(descriptor.value, 'utf8');
+    if (bytes > MAX_PRODUCTION_INFRASTRUCTURE_ARTIFACT_BYTES) return null;
+    totalBytes += bytes;
+    if (totalBytes > MAX_PRODUCTION_INFRASTRUCTURE_TOTAL_BYTES) return null;
+    snapshot[key] = descriptor.value;
+  }
+  return snapshot as ProductionInfrastructureArtifactSources;
+}
+
+/**
+ * Recognizes the exact, deliberately non-production environment matrix. This
+ * checkpoint intentionally has no path that can brand production enablement;
+ * that requires a separately reviewed production authority and cost contract.
+ */
+export function inspectProductionInfrastructureDeploymentArtifacts(
+  value: unknown,
+): ProductionInfrastructureDeploymentInput {
+  const invalid = (inspected: boolean): ProductionInfrastructureDeploymentInput =>
+    Object.freeze({ inspected, syntaxValid: false, environmentContract: 'INVALID' });
+  try {
+    const sources = snapshotProductionInfrastructureArtifactSources(value);
+    if (sources === null) return invalid(false);
+    const applicationEnvironment = hasExactTopLevelParameter(
+      sources.applicationTemplateSource,
+      'EnvironmentName',
+      [
+        'Type: String',
+        'Default: dev',
+        'MaxLength: 31',
+        `AllowedPattern: ${NON_PRODUCTION_ENVIRONMENT_ALLOWED_PATTERN}`,
+      ],
+    );
+    const workloadEnvironment = hasExactTopLevelParameter(
+      sources.workloadTemplateSource,
+      'EnvironmentName',
+      [
+        'Type: String',
+        'MaxLength: 31',
+        `AllowedPattern: ${NON_PRODUCTION_ENVIRONMENT_ALLOWED_PATTERN}`,
+      ],
+    );
+    const observabilityEnvironment = hasExactTopLevelParameter(
+      sources.observabilityTemplateSource,
+      'EnvironmentName',
+      [
+        'Type: String',
+        'MaxLength: 31',
+        `AllowedPattern: ${NON_PRODUCTION_ENVIRONMENT_ALLOWED_PATTERN}`,
+      ],
+    );
+    const migrationEnvironment = hasExactTopLevelParameter(
+      sources.migrationTemplateSource,
+      'EnvironmentName',
+      [
+        'Type: String',
+        `AllowedPattern: ${NON_PRODUCTION_ENVIRONMENT_ALLOWED_PATTERN}`,
+        'MaxLength: 31',
+      ],
+    );
+    const guardrailParameters = yamlBlock(sources.accountGuardrailsTemplateSource, 'Parameters', 0);
+    const guardrailEnvironment =
+      guardrailParameters !== null &&
+      hasExactTopLevelParameter(guardrailParameters, 'EnvironmentName', [
+        'Type: String',
+        'MaxLength: 31',
+        `AllowedPattern: ${NON_PRODUCTION_ENVIRONMENT_ALLOWED_PATTERN}`,
+      ]);
+    const observabilityLogGroups =
+      hasExactTopLevelParameter(sources.observabilityTemplateSource, 'ApiLogGroupName', [
+        'Type: String',
+        "AllowedPattern: '^/crypto-lending/(?:dev|test|qa|sandbox|staging)(?:-[a-z0-9]+)*/api$'",
+      ]) &&
+      hasExactTopLevelParameter(sources.observabilityTemplateSource, 'WorkerLogGroupName', [
+        'Type: String',
+        "AllowedPattern: '^/crypto-lending/(?:dev|test|qa|sandbox|staging)(?:-[a-z0-9]+)*/outbox-worker$'",
+      ]);
+    const applicationInvokerGuard =
+      exactExecutableLineCount(
+        sources.applicationInvokerSource,
+        "if ($EnvironmentName.Length -gt 31 -or $EnvironmentName -notmatch '^(dev|test|qa|sandbox|staging)(-[a-z0-9]+)*$') {",
+      ) === 2 &&
+      exactExecutableLineCount(
+        sources.applicationInvokerSource,
+        "throw 'EnvironmentName must be at most 31 characters and use the template non-production pattern: dev|test|qa|sandbox|staging with optional lowercase suffix segments.'",
+      ) === 2;
+    const accountGuardrailsInvokerGuard =
+      exactExecutableLineCount(
+        sources.accountGuardrailsInvokerSource,
+        "if ($EnvironmentName.Length -gt 31 -or $EnvironmentName -notmatch '^(dev|test|qa|sandbox|staging)(-[a-z0-9]+)*$') {",
+      ) === 1 &&
+      exactExecutableLineCount(
+        sources.accountGuardrailsInvokerSource,
+        "throw 'EnvironmentName must use dev|test|qa|sandbox|staging with optional lowercase suffix segments and be at most 31 characters.'",
+      ) === 1;
+    const applicationValidatorGuard =
+      exactExecutableLineCount(
+        sources.applicationValidatorSource,
+        `"${NON_PRODUCTION_ENVIRONMENT_ALLOWED_PATTERN}",`,
+      ) === 1;
+    const fixedSlotGuard =
+      exactExecutableLineCount(
+        sources.fixedSlotTransitionValidatorSource,
+        `const ENVIRONMENT_PATTERN = ${NON_PRODUCTION_ENVIRONMENT_PATTERN_SOURCE};`,
+      ) === 1 &&
+      exactExecutableLineCount(
+        sources.fixedSlotTransitionValidatorSource,
+        "errors.push('record.deployment.environmentName must be an exact non-production environment.');",
+      ) === 1;
+    const billingGuard =
+      exactExecutableLineCount(
+        sources.billingControlValidatorSource,
+        `const NON_PRODUCTION_ENVIRONMENT_PATTERN = ${NON_PRODUCTION_ENVIRONMENT_PATTERN_SOURCE_NO_UNICODE};`,
+      ) === 1 &&
+      exactExecutableLineCount(
+        sources.billingControlValidatorSource,
+        "errors.push('record.environment.name must use the approved non-production pattern.');",
+      ) === 1;
+    const egressGuard =
+      exactExecutableLineCount(
+        sources.egressPolicyValidatorSource,
+        `const ENVIRONMENT_PATTERN = ${NON_PRODUCTION_ENVIRONMENT_PATTERN_SOURCE_NO_UNICODE};`,
+      ) === 1 &&
+      exactExecutableLineCount(
+        sources.egressPolicyValidatorSource,
+        "'policy.environment.name must identify an explicit non-production environment.',",
+      ) === 1;
+    const futureTransitionValidatorsRemainProductionAware =
+      exactExecutableLineCount(
+        sources.authWalletTransitionValidatorSource,
+        `const ENVIRONMENT_PATTERN = ${PRODUCTION_AWARE_ENVIRONMENT_PATTERN_SOURCE};`,
+      ) === 1 &&
+      exactExecutableLineCount(
+        sources.redisOperatorTransitionValidatorSource,
+        `const ENVIRONMENT_PATTERN = ${PRODUCTION_AWARE_ENVIRONMENT_PATTERN_SOURCE};`,
+      ) === 1;
+    const syntaxValid =
+      applicationEnvironment &&
+      workloadEnvironment &&
+      observabilityEnvironment &&
+      migrationEnvironment &&
+      guardrailEnvironment &&
+      observabilityLogGroups &&
+      applicationInvokerGuard &&
+      accountGuardrailsInvokerGuard &&
+      applicationValidatorGuard &&
+      fixedSlotGuard &&
+      billingGuard &&
+      egressGuard &&
+      futureTransitionValidatorsRemainProductionAware;
+    if (!syntaxValid) return invalid(true);
+    const result: ProductionInfrastructureDeploymentInput = Object.freeze({
+      inspected: true,
+      syntaxValid: true,
+      environmentContract: 'NON_PRODUCTION_ONLY',
+    });
+    VERIFIED_PRODUCTION_INFRASTRUCTURE_DEPLOYMENTS.add(result);
+    return result;
+  } catch {
+    return invalid(false);
+  }
 }
 
 function hasExactAuthWalletSecretVersionParameter(source: string): boolean {
@@ -1713,6 +1996,8 @@ export function loadRepositoryProductionPreflightInput(
 ): ProductionPreflightInput {
   let authentication = inspectAuthenticationDeploymentTemplate('');
   let applicationTemplateSource = '';
+  let workloadTemplateSource = '';
+  let observabilityTemplateSource = '';
   try {
     applicationTemplateSource = readFileSync(
       resolve(repositoryRoot, 'infra/aws/application-baseline.yaml'),
@@ -1727,16 +2012,72 @@ export function loadRepositoryProductionPreflightInput(
 
   let redisOperatorDeployment = inspectRedisOperatorDeploymentTemplates('', '', '');
   try {
+    workloadTemplateSource = readFileSync(
+      resolve(repositoryRoot, 'infra/aws/application-workload-boundaries.yaml'),
+      'utf8',
+    );
+    observabilityTemplateSource = readFileSync(
+      resolve(repositoryRoot, 'infra/aws/application-observability.yaml'),
+      'utf8',
+    );
     redisOperatorDeployment = inspectRedisOperatorDeploymentTemplates(
       applicationTemplateSource,
-      readFileSync(
-        resolve(repositoryRoot, 'infra/aws/application-workload-boundaries.yaml'),
-        'utf8',
-      ),
-      readFileSync(resolve(repositoryRoot, 'infra/aws/application-observability.yaml'), 'utf8'),
+      workloadTemplateSource,
+      observabilityTemplateSource,
     );
   } catch {
     // The evaluator reports the failed local inspection without exposing paths or values.
+  }
+
+  let productionInfrastructureDeployment = inspectProductionInfrastructureDeploymentArtifacts(null);
+  try {
+    productionInfrastructureDeployment = inspectProductionInfrastructureDeploymentArtifacts({
+      applicationTemplateSource,
+      workloadTemplateSource,
+      observabilityTemplateSource,
+      migrationTemplateSource: readFileSync(
+        resolve(repositoryRoot, 'infra/aws/database-migration-task.yaml'),
+        'utf8',
+      ),
+      accountGuardrailsTemplateSource: readFileSync(
+        resolve(repositoryRoot, 'infra/aws/account-guardrails.yaml'),
+        'utf8',
+      ),
+      applicationInvokerSource: readFileSync(
+        resolve(repositoryRoot, 'infra/aws/invoke-application-baseline.ps1'),
+        'utf8',
+      ),
+      accountGuardrailsInvokerSource: readFileSync(
+        resolve(repositoryRoot, 'infra/aws/invoke-account-guardrails.ps1'),
+        'utf8',
+      ),
+      applicationValidatorSource: readFileSync(
+        resolve(repositoryRoot, 'infra/aws/validate-application-baseline.mjs'),
+        'utf8',
+      ),
+      fixedSlotTransitionValidatorSource: readFileSync(
+        resolve(repositoryRoot, 'infra/aws/validate-fixed-slot-credential-transition.mjs'),
+        'utf8',
+      ),
+      billingControlValidatorSource: readFileSync(
+        resolve(repositoryRoot, 'infra/aws/validate-billing-control-record.mjs'),
+        'utf8',
+      ),
+      egressPolicyValidatorSource: readFileSync(
+        resolve(repositoryRoot, 'infra/egress/validate-egress-policy.mjs'),
+        'utf8',
+      ),
+      authWalletTransitionValidatorSource: readFileSync(
+        resolve(repositoryRoot, 'infra/aws/validate-auth-wallet-secret-version-transition.mjs'),
+        'utf8',
+      ),
+      redisOperatorTransitionValidatorSource: readFileSync(
+        resolve(repositoryRoot, 'infra/aws/validate-redis-operator-secret-version-transition.mjs'),
+        'utf8',
+      ),
+    });
+  } catch {
+    // The evaluator reports an inspection failure without exposing local paths or source bytes.
   }
 
   let egressRecord: Record<string, unknown> = {};
@@ -1768,6 +2109,7 @@ export function loadRepositoryProductionPreflightInput(
 
   return Object.freeze({
     authentication,
+    productionInfrastructureDeployment,
     databaseMasterDeployment,
     rdsMasterLifecycleEvidenceAccepted: false,
     redisOperatorDeployment,

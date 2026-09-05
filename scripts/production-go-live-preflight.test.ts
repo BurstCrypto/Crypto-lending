@@ -11,6 +11,7 @@ import {
   formatProductionPreflightReport,
   inspectAuthenticationDeploymentTemplate,
   inspectDatabaseMasterDeploymentTemplate,
+  inspectProductionInfrastructureDeploymentArtifacts,
   inspectRedisOperatorDeploymentTemplates,
   loadRepositoryProductionPreflightInput,
   parseProductionPreflightArguments,
@@ -18,6 +19,7 @@ import {
   productionPreflightCliErrorCode,
   productionPreflightExitCode,
   type ProductionPreflightBlockerId,
+  type ProductionInfrastructureArtifactSources,
   type ProductionPreflightInput,
 } from './production-go-live-preflight';
 import {
@@ -54,6 +56,53 @@ const APPLICATION_OBSERVABILITY = readFileSync(
   resolve(__dirname, '../infra/aws/application-observability.yaml'),
   'utf8',
 );
+const PRODUCTION_INFRASTRUCTURE_ARTIFACTS = Object.freeze({
+  applicationTemplateSource: APPLICATION_BASELINE,
+  workloadTemplateSource: APPLICATION_WORKLOAD_BOUNDARIES,
+  observabilityTemplateSource: APPLICATION_OBSERVABILITY,
+  migrationTemplateSource: readFileSync(
+    resolve(__dirname, '../infra/aws/database-migration-task.yaml'),
+    'utf8',
+  ),
+  accountGuardrailsTemplateSource: readFileSync(
+    resolve(__dirname, '../infra/aws/account-guardrails.yaml'),
+    'utf8',
+  ),
+  applicationInvokerSource: readFileSync(
+    resolve(__dirname, '../infra/aws/invoke-application-baseline.ps1'),
+    'utf8',
+  ),
+  accountGuardrailsInvokerSource: readFileSync(
+    resolve(__dirname, '../infra/aws/invoke-account-guardrails.ps1'),
+    'utf8',
+  ),
+  applicationValidatorSource: readFileSync(
+    resolve(__dirname, '../infra/aws/validate-application-baseline.mjs'),
+    'utf8',
+  ),
+  fixedSlotTransitionValidatorSource: readFileSync(
+    resolve(__dirname, '../infra/aws/validate-fixed-slot-credential-transition.mjs'),
+    'utf8',
+  ),
+  billingControlValidatorSource: readFileSync(
+    resolve(__dirname, '../infra/aws/validate-billing-control-record.mjs'),
+    'utf8',
+  ),
+  egressPolicyValidatorSource: readFileSync(
+    resolve(__dirname, '../infra/egress/validate-egress-policy.mjs'),
+    'utf8',
+  ),
+  authWalletTransitionValidatorSource: readFileSync(
+    resolve(__dirname, '../infra/aws/validate-auth-wallet-secret-version-transition.mjs'),
+    'utf8',
+  ),
+  redisOperatorTransitionValidatorSource: readFileSync(
+    resolve(__dirname, '../infra/aws/validate-redis-operator-secret-version-transition.mjs'),
+    'utf8',
+  ),
+} satisfies ProductionInfrastructureArtifactSources);
+const VERIFIED_PRODUCTION_INFRASTRUCTURE_DEPLOYMENT =
+  inspectProductionInfrastructureDeploymentArtifacts(PRODUCTION_INFRASTRUCTURE_ARTIFACTS);
 const PREFLIGHT_SCRIPT_PATH = resolve(__dirname, 'production-go-live-preflight.ts');
 const RDS_MANAGED_DATABASE_TEMPLATE = APPLICATION_BASELINE;
 const VERIFIED_DATABASE_MASTER_DEPLOYMENT = inspectDatabaseMasterDeploymentTemplate(
@@ -190,6 +239,7 @@ function completeAuthEnvironmentNames(): Set<string> {
 
 function completeInput(directory: unknown): ProductionPreflightInput {
   return {
+    productionInfrastructureDeployment: VERIFIED_PRODUCTION_INFRASTRUCTURE_DEPLOYMENT,
     authentication: {
       inspected: true,
       syntaxValid: true,
@@ -313,6 +363,11 @@ test('current repository is a bootstrap blocker audit and exits nonzero for both
 
   assert.equal(readOnly.auditMode, 'BOOTSTRAP_BLOCKER_AUDIT');
   assert.equal(input.platforms.sourceRevision, null);
+  assert.deepEqual(input.productionInfrastructureDeployment, {
+    inspected: true,
+    syntaxValid: true,
+    environmentContract: 'NON_PRODUCTION_ONLY',
+  });
   assert.deepEqual(input.databaseMasterDeployment, { inspected: true, syntaxValid: true });
   assert.equal(input.rdsMasterLifecycleEvidenceAccepted, false);
   assert.equal(readOnly.selectedTargetReadiness, 'BLOCKED');
@@ -326,6 +381,15 @@ test('current repository is a bootstrap blocker audit and exits nonzero for both
   });
   assert.equal(readOnly.checks.find(({ id }) => id === 'EXTERNAL_EGRESS')?.localValidation, 'PASS');
   assert.equal(readOnly.checks.find(({ id }) => id === 'RPC_INDEXING')?.localValidation, 'PASS');
+  assert.deepEqual(
+    readOnly.checks.find(({ id }) => id === 'PRODUCTION_INFRASTRUCTURE'),
+    {
+      id: 'PRODUCTION_INFRASTRUCTURE',
+      localValidation: 'PASS',
+      launchReadiness: 'BLOCKED',
+      blockerIds: ['PRODUCTION_INFRASTRUCTURE_DEPLOYMENT_PATH_NOT_ENABLED'],
+    },
+  );
   assert.ok(
     readOnly.checks
       .find(({ id }) => id === 'PLATFORM_LIVE_READS')
@@ -381,6 +445,203 @@ test('current repository is a bootstrap blocker audit and exits nonzero for both
       ?.blockerIds.includes('RDS_MASTER_LIFECYCLE_EVIDENCE_MISSING'),
     true,
   );
+  assert.deepEqual(
+    cliReport.checks.find(({ id }) => id === 'PRODUCTION_INFRASTRUCTURE')?.blockerIds,
+    ['PRODUCTION_INFRASTRUCTURE_DEPLOYMENT_PATH_NOT_ENABLED'],
+  );
+});
+
+function mutateProductionInfrastructureArtifact(
+  key: keyof ProductionInfrastructureArtifactSources,
+  approved: string,
+  rejected: string,
+): ProductionInfrastructureArtifactSources {
+  const source = PRODUCTION_INFRASTRUCTURE_ARTIFACTS[key];
+  assert.ok(source.includes(approved), `fixture is missing ${key} mutation target`);
+  return {
+    ...PRODUCTION_INFRASTRUCTURE_ARTIFACTS,
+    [key]: source.replace(approved, rejected),
+  };
+}
+
+test('production infrastructure inspection brands only the exact non-production artifact matrix', () => {
+  const inspected = inspectProductionInfrastructureDeploymentArtifacts(
+    PRODUCTION_INFRASTRUCTURE_ARTIFACTS,
+  );
+  assert.deepEqual(inspected, {
+    inspected: true,
+    syntaxValid: true,
+    environmentContract: 'NON_PRODUCTION_ONLY',
+  });
+  assert.equal(Object.isFrozen(inspected), true);
+
+  const readOnly = evaluateProductionPreflight(completeInput(platformDirectory('LIVE_READ_ONLY')));
+  const mainnetWrite = evaluateProductionPreflight(
+    completeInput(platformDirectory('TRANSACTION_ENABLED')),
+    'mainnet-write',
+  );
+  for (const report of [readOnly, mainnetWrite]) {
+    assert.deepEqual(
+      report.checks.find(({ id }) => id === 'PRODUCTION_INFRASTRUCTURE'),
+      {
+        id: 'PRODUCTION_INFRASTRUCTURE',
+        localValidation: 'PASS',
+        launchReadiness: 'BLOCKED',
+        blockerIds: ['PRODUCTION_INFRASTRUCTURE_DEPLOYMENT_PATH_NOT_ENABLED'],
+      },
+    );
+    assert.equal(report.selectedTargetReadiness, 'BLOCKED');
+  }
+});
+
+test('production infrastructure inspection fails closed for drift in every reviewed artifact', () => {
+  const nonProductionYaml = "AllowedPattern: '^(dev|test|qa|sandbox|staging)(-[a-z0-9]+)*$'";
+  const widenedYaml = "AllowedPattern: '^(dev|test|qa|sandbox|staging|production)(-[a-z0-9]+)*$'";
+  const nonProductionJavascript = '/^(?:dev|test|qa|sandbox|staging)(?:-[a-z0-9]+)*$/u';
+  const productionAwareJavascript =
+    '/^(?:dev|test|qa|sandbox|staging|production)(?:-[a-z0-9]+)*$/u';
+  const mutations: readonly (readonly [
+    string,
+    keyof ProductionInfrastructureArtifactSources,
+    string,
+    string,
+  ])[] = [
+    ['application template', 'applicationTemplateSource', nonProductionYaml, widenedYaml],
+    ['workload template', 'workloadTemplateSource', nonProductionYaml, widenedYaml],
+    ['observability template', 'observabilityTemplateSource', nonProductionYaml, widenedYaml],
+    [
+      'observability log identity',
+      'observabilityTemplateSource',
+      "(?:dev|test|qa|sandbox|staging)(?:-[a-z0-9]+)*/api$'",
+      "(?:dev|test|qa|sandbox|staging|production)(?:-[a-z0-9]+)*/api$'",
+    ],
+    ['migration template', 'migrationTemplateSource', nonProductionYaml, widenedYaml],
+    ['guardrail template', 'accountGuardrailsTemplateSource', nonProductionYaml, widenedYaml],
+    [
+      'application invoker',
+      'applicationInvokerSource',
+      "'^(dev|test|qa|sandbox|staging)(-[a-z0-9]+)*$'",
+      "'^(dev|test|qa|sandbox|staging|production)(-[a-z0-9]+)*$'",
+    ],
+    [
+      'guardrail invoker',
+      'accountGuardrailsInvokerSource',
+      "'^(dev|test|qa|sandbox|staging)(-[a-z0-9]+)*$'",
+      "'^(dev|test|qa|sandbox|staging|production)(-[a-z0-9]+)*$'",
+    ],
+    [
+      'application validator',
+      'applicationValidatorSource',
+      "'^(dev|test|qa|sandbox|staging)(-[a-z0-9]+)*$'",
+      "'^(dev|test|qa|sandbox|staging|production)(-[a-z0-9]+)*$'",
+    ],
+    [
+      'fixed-slot validator',
+      'fixedSlotTransitionValidatorSource',
+      nonProductionJavascript,
+      productionAwareJavascript,
+    ],
+    [
+      'billing validator',
+      'billingControlValidatorSource',
+      '/^(?:dev|test|qa|sandbox|staging)(?:-[a-z0-9]+)*$/',
+      '/^(?:dev|test|qa|sandbox|staging|production)(?:-[a-z0-9]+)*$/',
+    ],
+    [
+      'egress validator',
+      'egressPolicyValidatorSource',
+      '/^(?:dev|test|qa|sandbox|staging)(?:-[a-z0-9]+)*$/',
+      '/^(?:dev|test|qa|sandbox|staging|production)(?:-[a-z0-9]+)*$/',
+    ],
+    [
+      'auth/wallet transition validator',
+      'authWalletTransitionValidatorSource',
+      productionAwareJavascript,
+      nonProductionJavascript,
+    ],
+    [
+      'Redis transition validator',
+      'redisOperatorTransitionValidatorSource',
+      productionAwareJavascript,
+      nonProductionJavascript,
+    ],
+  ];
+  for (const [label, key, approved, rejected] of mutations) {
+    const inspected = inspectProductionInfrastructureDeploymentArtifacts(
+      mutateProductionInfrastructureArtifact(key, approved, rejected),
+    );
+    assert.deepEqual(
+      inspected,
+      { inspected: true, syntaxValid: false, environmentContract: 'INVALID' },
+      label,
+    );
+    assert.equal(Object.isFrozen(inspected), true, label);
+  }
+});
+
+test('production infrastructure input shape and brand cannot be forged or bypassed', () => {
+  const missing = { ...PRODUCTION_INFRASTRUCTURE_ARTIFACTS } as Record<string, unknown>;
+  delete missing.applicationTemplateSource;
+  const malformedCandidates: readonly unknown[] = [
+    null,
+    {},
+    missing,
+    { ...PRODUCTION_INFRASTRUCTURE_ARTIFACTS, unexpected: 'value' },
+    { ...PRODUCTION_INFRASTRUCTURE_ARTIFACTS, migrationTemplateSource: 1 },
+    new Proxy(PRODUCTION_INFRASTRUCTURE_ARTIFACTS, {
+      ownKeys() {
+        throw new Error('untrusted proxy');
+      },
+    }),
+  ];
+  for (const candidate of malformedCandidates) {
+    assert.doesNotThrow(() => inspectProductionInfrastructureDeploymentArtifacts(candidate));
+    assert.deepEqual(inspectProductionInfrastructureDeploymentArtifacts(candidate), {
+      inspected: false,
+      syntaxValid: false,
+      environmentContract: 'INVALID',
+    });
+  }
+
+  const complete = completeInput(platformDirectory('LIVE_READ_ONLY'));
+  const { productionInfrastructureDeployment: intentionallyOmitted, ...legacyInput } = complete;
+  assert.notEqual(intentionallyOmitted, undefined);
+  const forgedInputs = [
+    legacyInput,
+    {
+      ...complete,
+      productionInfrastructureDeployment: Object.freeze({
+        inspected: true,
+        syntaxValid: true,
+        environmentContract: 'NON_PRODUCTION_ONLY' as const,
+      }),
+    },
+    {
+      ...complete,
+      productionInfrastructureDeployment: Object.freeze({
+        inspected: true,
+        syntaxValid: true,
+        environmentContract: 'PRODUCTION_ENABLED' as const,
+      }),
+    },
+  ];
+  for (const input of forgedInputs) {
+    const report = evaluateProductionPreflight(input);
+    assert.deepEqual(
+      report.checks.find(({ id }) => id === 'PRODUCTION_INFRASTRUCTURE'),
+      {
+        id: 'PRODUCTION_INFRASTRUCTURE',
+        localValidation: 'FAIL',
+        launchReadiness: 'BLOCKED',
+        blockerIds: ['PRODUCTION_INFRASTRUCTURE_INSPECTION_FAILED'],
+      },
+    );
+    assert.equal(report.readiness.publicReadOnly, 'BLOCKED');
+    assert.match(
+      formatProductionPreflightReport(report),
+      /PRODUCTION_INFRASTRUCTURE_INSPECTION_FAILED/u,
+    );
+  }
 });
 
 test('RDS master lifecycle evidence remains a private fail-closed launch gate', () => {
@@ -469,7 +730,10 @@ test('all synthetic technical inputs remain blocked without seven signed launch 
     readOnlyReport.checks
       .filter(
         ({ id }) =>
-          id !== 'AUTHENTICATION' && id !== 'PUBLIC_LAUNCH_AUTHORITIES' && id !== 'MAINNET_WRITES',
+          id !== 'PRODUCTION_INFRASTRUCTURE' &&
+          id !== 'AUTHENTICATION' &&
+          id !== 'PUBLIC_LAUNCH_AUTHORITIES' &&
+          id !== 'MAINNET_WRITES',
       )
       .every(({ launchReadiness }) => launchReadiness === 'LOCAL_GATES_CLEAR'),
   );
