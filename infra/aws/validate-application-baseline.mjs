@@ -18,7 +18,7 @@ const noExternalEgressResidualLimitations = [
   'Web-task DNS security-group egress permits TCP and UDP port 53 to the VPC CIDR; this static control cannot prove that traffic reaches only the VPC Route 53 Resolver address. API and worker boundaries rely on AmazonProvidedDNS, which is not filtered by security groups.',
   'REDIS_OPERATOR_LIVE_REVOCATION_UNRESOLVED: the nested child conditionally defines the reviewed exact-target one-off revocation task, but no task is authorized or run. Workload drain, live denial evidence, immediate operator disablement, and credential installation or regeneration remain external gates.',
   'FIXED_SLOT_CREDENTIAL_EXTERNAL_EXECUTION_UNRESOLVED: the deployment command now binds an approved transition record to the exact immutable current stack, template, parameter, tag, target-state, change-set, and acknowledgement hashes, while ordinary application updates must preserve all fixed-slot bindings and credential-chain tags. Inactive-slot regeneration, backend installation, live candidate/continuity/revocation evidence, task replacement, and external approval remain separately authorized gates.',
-  'AUTH_WALLET_EXTERNAL_CONFIGURATION_UNRESOLVED: static Cognito identifiers and seven API-only key selectors (one pre-authentication key and six bounded key-ring documents) are wired, but the Cognito tenant, one external JSON secret, its customer-managed KMS key/policy, field contents, rotation, and deployed readability require separately authorized evidence.',
+  'AUTH_WALLET_EXTERNAL_CONFIGURATION_UNRESOLVED: static Cognito identifiers and seven API-only key selectors (one pre-authentication key and six bounded key-ring documents) are wired to one immutable external secret VersionId, but the Cognito tenant, external JSON secret, customer-managed KMS key/policy, field contents, dedicated rotation transition, and deployed readability require separately authorized evidence.',
   'OPERATIONAL_ALERT_DELIVERY_EXTERNAL: the template consumes one operator-supplied SNS topic ARN but deliberately provisions no topic or subscription; same-account/Region existence, topic policy, confirmed recipients, escalation ownership, and an end-to-end ALARM-to-OK drill remain external go-live evidence.',
 ];
 const operationalAlarmTopicAllowedPattern =
@@ -34,9 +34,9 @@ const operationalAlarmLogicalIds = Object.freeze([
   'BalanceDeadLetterQueueNotEmptyAlarm',
 ]);
 const reviewedApplicationBaselineSha256 =
-  '94d056751011aa3e457166a775ba344b559b0a2e0149690f85894781289bcf07';
+  '83c4f275c40a62f47e84d574a9837d6effc996daada276675b59efbb113c2750';
 const reviewedWorkloadBoundariesSha256 =
-  'ab0afc494bf51e68ae0f3e0d267aac544b69f5480754056f95a82baefc0c9219';
+  '3a6da9fed6e5e632c7d2fcf0804809de9f50997adb467407c20f95096813228e';
 const reviewedObservabilitySha256 =
   '4e3fdde76c3805500f17e1eedc0cd213e77ea0d1704fe56f30810ffa8fd859f9';
 const fixedSlotVersionParameterNames = Object.freeze([
@@ -46,6 +46,10 @@ const fixedSlotVersionParameterNames = Object.freeze([
   'WorkerDatabaseSlotBVersionId',
   'RedisApiSlotAVersionId',
   'RedisApiSlotBVersionId',
+]);
+const auditableSecretSelectorParameterNames = new Set([
+  'AuthWalletKeysSecretArn',
+  'AuthWalletKeysSecretVersionId',
 ]);
 const reviewedResourceTypesByLogicalId = new Map([
   ['ApplicationDataKey', 'AWS::KMS::Key'],
@@ -1315,9 +1319,18 @@ function validateProductionAuthenticationWiring(parameters, resources, errors) {
       [
         'AuthWalletKeysSecretArn:',
         '  Type: String',
-        '  NoEcho: true',
         '  MaxLength: 2048',
         "  AllowedPattern: '^arn:[a-z0-9-]+:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:[A-Za-z0-9/_+=.@-]+$'",
+      ],
+    ],
+    [
+      'AuthWalletKeysSecretVersionId',
+      [
+        'AuthWalletKeysSecretVersionId:',
+        '  Type: String',
+        '  MinLength: 32',
+        '  MaxLength: 64',
+        "  AllowedPattern: '^[A-Za-z0-9_-]{32,64}$'",
       ],
     ],
     [
@@ -1454,6 +1467,7 @@ function validateProductionAuthenticationWiring(parameters, resources, errors) {
       'AuthWalletKeysSecretArn',
       field,
       errors,
+      'AuthWalletKeysSecretVersionId',
     );
   }
   const actualAuthSecretNames = [
@@ -1558,13 +1572,13 @@ function validateEcsRoleSecurityBoundaries(resources, inventory, errors) {
         "    ValueFrom: !Sub '${WorkloadBoundaries.Outputs.ApiDatabaseActiveSecretArn}:password::${WorkloadBoundaries.Outputs.ApiDatabaseActiveVersionId}'",
         '  - Name: REDIS_PASSWORD',
         "    ValueFrom: !Sub '${WorkloadBoundaries.Outputs.RedisActiveSecretArn}:password::${WorkloadBoundaries.Outputs.RedisActiveVersionId}'",
-        "  - {Name: AUTH_PREAUTH_SEAL_KEY,ValueFrom: !Sub '${AuthWalletKeysSecretArn}:AUTH_PREAUTH_SEAL_KEY::'}",
-        "  - {Name: AUTH_IDENTITY_HMAC_KEY_RING_JSON,ValueFrom: !Sub '${AuthWalletKeysSecretArn}:AUTH_IDENTITY_HMAC_KEY_RING_JSON::'}",
-        "  - {Name: AUTH_SESSION_HMAC_KEY_RING_JSON,ValueFrom: !Sub '${AuthWalletKeysSecretArn}:AUTH_SESSION_HMAC_KEY_RING_JSON::'}",
-        "  - {Name: AUTH_CSRF_HMAC_KEY_RING_JSON,ValueFrom: !Sub '${AuthWalletKeysSecretArn}:AUTH_CSRF_HMAC_KEY_RING_JSON::'}",
-        "  - {Name: WALLET_IDENTITY_HMAC_KEY_RING_JSON,ValueFrom: !Sub '${AuthWalletKeysSecretArn}:WALLET_IDENTITY_HMAC_KEY_RING_JSON::'}",
-        "  - {Name: WALLET_CHALLENGE_HMAC_KEY_RING_JSON,ValueFrom: !Sub '${AuthWalletKeysSecretArn}:WALLET_CHALLENGE_HMAC_KEY_RING_JSON::'}",
-        "  - {Name: WALLET_METADATA_SEAL_KEY_RING_JSON,ValueFrom: !Sub '${AuthWalletKeysSecretArn}:WALLET_METADATA_SEAL_KEY_RING_JSON::'}",
+        "  - {Name: AUTH_PREAUTH_SEAL_KEY,ValueFrom: !Sub '${AuthWalletKeysSecretArn}:AUTH_PREAUTH_SEAL_KEY::${AuthWalletKeysSecretVersionId}'}",
+        "  - {Name: AUTH_IDENTITY_HMAC_KEY_RING_JSON,ValueFrom: !Sub '${AuthWalletKeysSecretArn}:AUTH_IDENTITY_HMAC_KEY_RING_JSON::${AuthWalletKeysSecretVersionId}'}",
+        "  - {Name: AUTH_SESSION_HMAC_KEY_RING_JSON,ValueFrom: !Sub '${AuthWalletKeysSecretArn}:AUTH_SESSION_HMAC_KEY_RING_JSON::${AuthWalletKeysSecretVersionId}'}",
+        "  - {Name: AUTH_CSRF_HMAC_KEY_RING_JSON,ValueFrom: !Sub '${AuthWalletKeysSecretArn}:AUTH_CSRF_HMAC_KEY_RING_JSON::${AuthWalletKeysSecretVersionId}'}",
+        "  - {Name: WALLET_IDENTITY_HMAC_KEY_RING_JSON,ValueFrom: !Sub '${AuthWalletKeysSecretArn}:WALLET_IDENTITY_HMAC_KEY_RING_JSON::${AuthWalletKeysSecretVersionId}'}",
+        "  - {Name: WALLET_CHALLENGE_HMAC_KEY_RING_JSON,ValueFrom: !Sub '${AuthWalletKeysSecretArn}:WALLET_CHALLENGE_HMAC_KEY_RING_JSON::${AuthWalletKeysSecretVersionId}'}",
+        "  - {Name: WALLET_METADATA_SEAL_KEY_RING_JSON,ValueFrom: !Sub '${AuthWalletKeysSecretArn}:WALLET_METADATA_SEAL_KEY_RING_JSON::${AuthWalletKeysSecretVersionId}'}",
       ].join('\n'),
     ],
     [
@@ -2272,6 +2286,12 @@ function validateTemplateShape(source, errors) {
   }
 
   const parameters = topLevelBlocks(source, 'Parameters');
+  for (const name of auditableSecretSelectorParameterNames) {
+    const declarations = source.match(new RegExp(`^ ${name}:\\s*$`, 'gm')) ?? [];
+    if (declarations.length !== 1) {
+      errors.push(`Parameter ${name} must be declared exactly once.`);
+    }
+  }
   requireExactSemanticBlock(
     parameters.get('LogRetentionDays') ?? '',
     'LogRetentionDays',
@@ -2290,7 +2310,7 @@ function validateTemplateShape(source, errors) {
       continue;
     }
 
-    if (!hasProperty(block, 'NoEcho', 'true')) {
+    if (!auditableSecretSelectorParameterNames.has(name) && !hasProperty(block, 'NoEcho', 'true')) {
       errors.push(`Sensitive parameter ${name} must set NoEcho: true.`);
     }
     if (hasPropertyName(block, 'Default')) {
@@ -3080,6 +3100,12 @@ function validateDeploymentGuard(source, errors) {
     '$cognitoPoolPattern',
     '$expectedAuthSecretPattern',
     '$expectedAuthKmsPattern',
+    "Assert-RequiredValue -Name 'AuthWalletKeysSecretVersionId'",
+    "$AuthWalletKeysSecretVersionId -cnotmatch '^[A-Za-z0-9_-]{32,64}$'",
+    'AuthWalletKeysSecretVersionId = $AuthWalletKeysSecretVersionId',
+    '$immutableAuthWalletBindings = [ordered]@{',
+    '$currentStackParameterMap[$authWalletBinding.Key] -cne [string] $authWalletBinding.Value',
+    'A dedicated reviewed auth/wallet transition is required.',
     '$expectedOperationalAlarmTopicPattern',
     "$parameterMap.EnableOperationalAlarms -ceq 'true'",
     'AlarmTopicArn must be explicitly supplied as one existing SNS topic ARN in the approved partition, account, and Region when operational alarms are enabled.',

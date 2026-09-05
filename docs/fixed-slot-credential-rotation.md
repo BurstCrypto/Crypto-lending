@@ -26,6 +26,12 @@ set, and explicit execution acknowledgement. This closes the in-repository
 deployment-binding gap; it does not authorize or perform any external rotation
 step.
 
+The separate shared authentication/wallet secret also has an exact immutable
+VersionId, but it is not a seventh fixed slot and has no `UNPINNED` state. The
+guard preserves its ARN/VersionId/KMS tuple during ordinary releases and
+forbids changing it in a fixed-slot transition. Its future dedicated transition
+record must not be folded into this six-slot A/B state machine.
+
 ## Records and local verification
 
 The default command validates only
@@ -85,6 +91,11 @@ the inert checked-in example.
   explicitly supplied and must exactly equal the deployed values. The existing
   credential-chain tags are carried forward unchanged while reviewed
   application parameters or templates may change.
+
+Both intents additionally require the named auth/wallet secret VersionId and
+compare the complete deployed auth/wallet ARN/VersionId/KMS tuple. A mismatch
+fails closed and requires the still-unimplemented dedicated auth/wallet
+transition workflow.
 
 Every update addresses the immutable stack ARN rather than its mutable name.
 Deploy repeats all local and current-state checks, verifies the exact submitted

@@ -508,9 +508,9 @@
       "name": "OIDC identity HMAC key",
       "classification": "RESTRICTED",
       "consumers": ["API authentication workload"],
-      "injection": "The zero-desired-count production API task selects only the canonical bounded AUTH_IDENTITY_HMAC_KEY_RING_JSON field from an operator-supplied external Secrets Manager ARN; NODE_ENV is production, LOCAL_DEMO_MODE and legacy identity ID/key fields are forbidden, and the template provisions no secret, key, or running task",
+      "injection": "The zero-desired-count production API task selects only the canonical bounded AUTH_IDENTITY_HMAC_KEY_RING_JSON field from an operator-supplied selector-free Secrets Manager ARN at the exact shared immutable VersionId; NODE_ENV is production, LOCAL_DEMO_MODE and legacy identity ID/key fields are forbidden, and the template provisions no secret, key, or running task",
       "storage": "Memory only; PostgreSQL stores the current versioned subject digest and append-only provider/issuer/account-bound digest aliases, never subjects or HMAC material",
-      "rotation": "Migration 0025 installs a dormant accepted-read/active-write policy, concurrent login alias backfill, aggregate retirement gate, and safe rollback refusal; external custody, activation, deployed exercise, and predecessor destruction remain blocked",
+      "rotation": "Migration 0025 installs a dormant accepted-read/active-write policy, concurrent login alias backfill, aggregate retirement gate, and safe rollback refusal; the deployment guard preserves the shared-secret ARN/VersionId/KMS tuple, while a dedicated version-transition guard, external custody, activation, deployed exercise, and predecessor destruction remain blocked",
       "owner": "Identity and Security",
       "evidence": [
         "apps/api/src/infrastructure/database/migrations/0025-create-authentication-hmac-key-rotation.migration.ts",
@@ -525,9 +525,9 @@
       "name": "Pre-authentication seal, session, and CSRF keys",
       "classification": "RESTRICTED",
       "consumers": ["API authentication workload"],
-      "injection": "The zero-desired-count production API task selects AUTH_PREAUTH_SEAL_KEY plus purpose-distinct canonical AUTH_SESSION_HMAC_KEY_RING_JSON and AUTH_CSRF_HMAC_KEY_RING_JSON fields from an operator-supplied external Secrets Manager ARN; NODE_ENV is production, LOCAL_DEMO_MODE and legacy session/CSRF ID/key fields are forbidden, and the template provisions no secret, key, or running task",
+      "injection": "The zero-desired-count production API task selects AUTH_PREAUTH_SEAL_KEY plus purpose-distinct canonical AUTH_SESSION_HMAC_KEY_RING_JSON and AUTH_CSRF_HMAC_KEY_RING_JSON fields from an operator-supplied selector-free Secrets Manager ARN at the exact shared immutable VersionId; NODE_ENV is production, LOCAL_DEMO_MODE and legacy session/CSRF ID/key fields are forbidden, and the template provisions no secret, key, or running task",
       "storage": "Memory only; PostgreSQL stores keyed digests",
-      "rotation": "Pre-authentication supports one bounded decrypt-only predecessor; migration 0025 locally enforces session/CSRF candidate overlap, matching-version CSRF, successor active writes, replay-before-mutation binding, cross-version rate limits, aggregate retirement gates, and rollback refusal; external custody and deployed rotation remain blocked",
+      "rotation": "Pre-authentication supports one bounded decrypt-only predecessor; migration 0025 locally enforces session/CSRF candidate overlap, matching-version CSRF, successor active writes, replay-before-mutation binding, cross-version rate limits, aggregate retirement gates, and rollback refusal; a dedicated shared-secret VersionId transition guard, external custody, and deployed rotation remain blocked",
       "owner": "Identity and Security",
       "evidence": [
         "apps/api/src/authentication/infrastructure/crypto/authentication-crypto.ts",
@@ -648,9 +648,9 @@
       "name": "Wallet registration canonical-identity HMAC key",
       "classification": "RESTRICTED",
       "consumers": ["API wallet-registration workload"],
-      "injection": "The zero-desired-count production API service is disabled by default; its task selects only WALLET_IDENTITY_HMAC_KEY_RING_JSON from an operator-supplied external Secrets Manager ARN, requires NODE_ENV=production, omits LOCAL_DEMO_MODE and legacy version/key fields, and provisions no secret or key, while local tests create non-production 32-byte base64url fixtures in process only",
+      "injection": "The zero-desired-count production API service is disabled by default; its task selects only WALLET_IDENTITY_HMAC_KEY_RING_JSON from an operator-supplied selector-free Secrets Manager ARN at the exact shared immutable VersionId, requires NODE_ENV=production, omits LOCAL_DEMO_MODE and legacy version/key fields, and provisions no secret or key, while local tests create non-production 32-byte base64url fixtures in process only",
       "storage": "Opaque API process-memory wrapper backed by a WeakMap; PostgreSQL stores only the version and purpose-separated keyed canonical-address digest",
-      "rotation": "Migration 0022 installs a dormant accepted-read/active-write identity policy, complete version-sorted aliases, conflict-safe cutover checks, revocation synchronization, retirement readiness, and rollback refusal; schema-owner activation, external custody, a deployed drill, old-key retirement, KAN-50, and KAN-235 review remain production gates",
+      "rotation": "Migration 0022 installs a dormant accepted-read/active-write identity policy, complete version-sorted aliases, conflict-safe cutover checks, revocation synchronization, retirement readiness, and rollback refusal; a dedicated shared-secret VersionId transition guard, schema-owner activation, external custody, a deployed drill, old-key retirement, KAN-50, and KAN-235 review remain production gates",
       "owner": "Wallet, Database, and Security",
       "evidence": [
         "apps/api/src/wallets/infrastructure/config/wallet-registration.config.ts",
@@ -664,9 +664,9 @@
       "name": "Wallet ownership-challenge HMAC key",
       "classification": "RESTRICTED",
       "consumers": ["API wallet-registration workload"],
-      "injection": "The zero-desired-count production API service is disabled by default; its task selects only WALLET_CHALLENGE_HMAC_KEY_RING_JSON from an operator-supplied external Secrets Manager ARN, requires NODE_ENV=production, omits LOCAL_DEMO_MODE and legacy version/key fields, and provisions no secret or key, while local tests create non-production 32-byte base64url fixtures in process only",
+      "injection": "The zero-desired-count production API service is disabled by default; its task selects only WALLET_CHALLENGE_HMAC_KEY_RING_JSON from an operator-supplied selector-free Secrets Manager ARN at the exact shared immutable VersionId, requires NODE_ENV=production, omits LOCAL_DEMO_MODE and legacy version/key fields, and provisions no secret or key, while local tests create non-production 32-byte base64url fixtures in process only",
       "storage": "Opaque API process-memory wrapper backed by a WeakMap; PostgreSQL stores only versioned account-binding, domain, message, nonce, and rate-limit digests",
-      "rotation": "The bounded local ring issues with one active version and reads retained challenge state by its exact accepted version, but external custody, a staged overlap covering every unexpired challenge and replay tombstone, deployed retirement evidence, KAN-50, and KAN-235 review remain production gates",
+      "rotation": "The bounded local ring issues with one active version and reads retained challenge state by its exact accepted version, but a dedicated shared-secret VersionId transition guard, external custody, a staged overlap covering every unexpired challenge and replay tombstone, deployed retirement evidence, KAN-50, and KAN-235 review remain production gates",
       "owner": "Wallet, Identity, and Security",
       "evidence": [
         "apps/api/src/wallets/infrastructure/config/wallet-registration.config.ts",
@@ -680,9 +680,9 @@
       "name": "Wallet registration challenge-binding, address, and metadata AES-256-GCM keys",
       "classification": "RESTRICTED",
       "consumers": ["API wallet-registration workload"],
-      "injection": "The zero-desired-count production API service is disabled by default; its task selects only WALLET_METADATA_SEAL_KEY_RING_JSON from an operator-supplied external Secrets Manager ARN, requires NODE_ENV=production, omits LOCAL_DEMO_MODE and legacy version/key fields, and provisions no secret or key, while local tests create non-production 32-byte base64url fixtures in process only",
+      "injection": "The zero-desired-count production API service is disabled by default; its task selects only WALLET_METADATA_SEAL_KEY_RING_JSON from an operator-supplied selector-free Secrets Manager ARN at the exact shared immutable VersionId, requires NODE_ENV=production, omits LOCAL_DEMO_MODE and legacy version/key fields, and provisions no secret or key, while local tests create non-production 32-byte base64url fixtures in process only",
       "storage": "Opaque API process-memory wrapper backed by a WeakMap; PostgreSQL stores versioned ciphertext, random IV, and authentication tag bound to the challenge or wallet row, account, network, address digest, and field through authenticated additional data",
-      "rotation": "The bounded local ring supports accepted decrypt versions and one active write version; migration 0024 adds a dormant schema-owner-only, audited, atomic rewrap and retirement-readiness boundary with rollback refusal, while custody, authorized activation, a deployed drill, old-key retirement, KAN-50, and KAN-235 review remain gates",
+      "rotation": "The bounded local ring supports accepted decrypt versions and one active write version; migration 0024 adds a dormant schema-owner-only, audited, atomic rewrap and retirement-readiness boundary with rollback refusal, while a dedicated shared-secret VersionId transition guard, custody, authorized activation, a deployed drill, old-key retirement, KAN-50, and KAN-235 review remain gates",
       "owner": "Wallet, Privacy, and Security",
       "evidence": [
         "apps/api/src/infrastructure/database/migrations/0011-create-wallet-ownership-registration.migration.ts",
@@ -811,8 +811,8 @@
         "apps/api/test/infrastructure/authentication-hmac-key-rotation.integration-spec.ts",
         "docs/authentication-key-rotation-runbook.md"
       ],
-      "residualRisk": "The production task has fail-closed ring selectors but remains disabled by default and provisions no key; old single-digest function grants must be removed only after the new fleet is proven, and no external custody, deployed cutover, recovery, or retirement evidence exists.",
-      "followUp": "Authorize and stage externally custodied ring values, perform the staged non-production rotation drill, prove old-function denial, and obtain KAN-50/KAN-235 custody and independent review"
+      "residualRisk": "The production task pins fail-closed ring selectors to one exact shared-secret VersionId but remains disabled by default and provisions no key; no dedicated current-to-target auth/wallet version-transition guard, external custody, deployed cutover, recovery, or retirement evidence exists, and old single-digest function grants must be removed only after the new fleet is proven.",
+      "followUp": "Implement and independently review the shared-secret VersionId transition guard, authorize and stage externally custodied ring values, perform the staged non-production rotation drill, prove old-function denial, and obtain KAN-50/KAN-235 custody and independent review"
     },
     {
       "id": "THR-WALLET-001",
@@ -1146,7 +1146,8 @@
         "Fixed workload-to-secret capability matrices and separate database roles",
         "Rotation procedures require inactive-slot regeneration, replacement, and old-slot denial",
         "Migration 0025 adds purpose-distinct authentication rings, append-only identity digest aliases, candidate-bound session/CSRF/replay behavior, cross-version rate limiting, and aggregate retirement checks without activating an external key",
-        "The zero-desired-count production API task selects AUTH_PREAUTH_SEAL_KEY and all six purpose-distinct authentication and wallet key-ring fields, requires NODE_ENV=production, and forbids LOCAL_DEMO_MODE plus every legacy authentication ID/key and wallet version/key field without provisioning a secret or key",
+        "The zero-desired-count production API task selects AUTH_PREAUTH_SEAL_KEY and all six purpose-distinct authentication and wallet key-ring fields from one exact immutable shared-secret VersionId with an empty stage, requires NODE_ENV=production, and forbids LOCAL_DEMO_MODE plus every legacy authentication ID/key and wallet version/key field without provisioning a secret or key",
+        "The deployment guard preserves the shared-secret ARN/VersionId/KMS tuple across both current update intents and rejects rotation until a dedicated reviewed transition exists",
         "Authentication overlap remains at version one until authorized external secret staging, a schema-owner policy transition, new-fleet proof, and old single-digest function denial exist",
         "Migration 0022 provides dormant wallet identity overlap and alias controls, the runtime supports exact-version challenge overlap, and migration 0024 provides a dormant schema-owner-only metadata rewrap boundary"
       ],
@@ -1162,8 +1163,8 @@
         "apps/api/src/wallets/infrastructure/config/wallet-registration.config.ts",
         "apps/api/src/wallets/infrastructure/crypto/wallet-registration-crypto.ts"
       ],
-      "residualRisk": "External key custody and staged secret population, deployed old-function denial and rotation evidence, wallet identity policy activation, exercised challenge overlap, and wallet metadata rewrap activation remain absent.",
-      "followUp": "KAN-50/KAN-235 custody and rotation review, separately authorized secret staging, schema-owner activation, deployed rotation evidence, and old-key retirement drills"
+      "residualRisk": "A dedicated auth/wallet VersionId transition guard, external key custody and staged secret population, deployed old-function denial and rotation evidence, wallet identity policy activation, exercised challenge overlap, and wallet metadata rewrap activation remain absent.",
+      "followUp": "Implement the dedicated shared-secret transition guard; obtain KAN-50/KAN-235 custody and rotation review, separately authorized secret staging, schema-owner activation, deployed rotation evidence, and old-key retirement drills"
     },
     {
       "id": "THR-SECRETS-003",

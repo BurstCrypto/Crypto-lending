@@ -45,7 +45,6 @@ Parameters:
     AllowedPattern: '^arn:[a-z0-9-]+:kms:[a-z0-9-]+:[0-9]{12}:key/[a-f0-9-]+$'
   AuthWalletKeysSecretArn:
     Type: String
-    NoEcho: true
     MaxLength: 2048
     AllowedPattern: '^arn:[a-z0-9-]+:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:[A-Za-z0-9/_+=.@-]+$'
   AuthWalletKeysKmsKeyArn:

@@ -22,8 +22,9 @@ Non-secret CloudFormation parameters in Key=Value form. Secret values are
 rejected; AuthWalletKeysSecretArn is the sole reviewed external secret reference.
 When operational alarms are enabled, AlarmTopicArn must name one
 existing SNS topic in the approved partition, account, and Region.
-The child-template delivery parameters and six fixed-slot VersionIds are
-derived from named inputs by this guard and must not be supplied as overrides.
+The child-template delivery parameters, auth/wallet secret VersionId, and six
+fixed-slot VersionIds are derived from named inputs by this guard and must not
+be supplied as overrides.
 
 .PARAMETER WorkloadBoundariesTemplateFile
 Reviewed local workload-boundary child template. Its exact byte SHA-256 is bound
@@ -46,6 +47,11 @@ content-addressed observability child. This guard never uploads it.
 
 .PARAMETER ObservabilityArtifactVersionId
 Exact non-null S3 VersionId for the observability child template object.
+
+.PARAMETER AuthWalletKeysSecretVersionId
+Exact 32-64 character Secrets Manager VersionId shared by all seven API
+authentication and wallet key selectors. CREATE requires an exact version;
+UPDATE preserves it until a dedicated reviewed auth/wallet transition exists.
 
 .PARAMETER ApiDatabaseSlotAVersionId
 Exact Secrets Manager VersionId for API database slot A, or the uppercase
@@ -143,6 +149,8 @@ param(
     [string] $ObservabilityArtifactBucket,
 
     [string] $ObservabilityArtifactVersionId,
+
+    [string] $AuthWalletKeysSecretVersionId,
 
     [string] $ApiDatabaseSlotAVersionId,
 
@@ -776,6 +784,13 @@ if ($Action -in @('Plan', 'Deploy')) {
     }
 
     $explicitParameterOverrides = ConvertFrom-ParameterOverrides -Overrides $ParameterOverride
+    Assert-RequiredValue -Name 'AuthWalletKeysSecretVersionId' -Value $AuthWalletKeysSecretVersionId
+    if ($AuthWalletKeysSecretVersionId -cnotmatch '^[A-Za-z0-9_-]{32,64}$') {
+        throw 'AuthWalletKeysSecretVersionId must be an exact 32-64 character Secrets Manager VersionId.'
+    }
+    if ($explicitParameterOverrides.Contains('AuthWalletKeysSecretVersionId')) {
+        throw 'AuthWalletKeysSecretVersionId is a named immutable binding and must not be supplied in ParameterOverride.'
+    }
     foreach ($fixedSlotVersion in $fixedSlotVersionValues.GetEnumerator()) {
         Assert-RequiredValue -Name $fixedSlotVersion.Key -Value ([string] $fixedSlotVersion.Value)
         if ([string] $fixedSlotVersion.Value -cnotmatch '^(UNPINNED|[A-Za-z0-9_-]{32,64})$') {
@@ -1304,6 +1319,7 @@ if ($Action -in @('Plan', 'Deploy')) {
         ObservabilityTemplateUrl = $observabilityTemplateUrl
         ObservabilityTemplateSha256 = $observabilityTemplateSha256
         ObservabilityArtifactBindingSha256 = $observabilityArtifactBindingSha256
+        AuthWalletKeysSecretVersionId = $AuthWalletKeysSecretVersionId
         ApiDatabaseSlotAVersionId = $ApiDatabaseSlotAVersionId
         ApiDatabaseSlotBVersionId = $ApiDatabaseSlotBVersionId
         WorkerDatabaseSlotAVersionId = $WorkerDatabaseSlotAVersionId
@@ -1329,6 +1345,7 @@ if ($Action -in @('Plan', 'Deploy')) {
                 'ObservabilityTemplateUrl',
                 'ObservabilityTemplateSha256',
                 'ObservabilityArtifactBindingSha256',
+                'AuthWalletKeysSecretVersionId',
                 'ApiDatabaseSlotAVersionId',
                 'ApiDatabaseSlotBVersionId',
                 'WorkerDatabaseSlotAVersionId',
@@ -1413,7 +1430,8 @@ if ($Action -in @('Plan', 'Deploy')) {
         'ObservabilityArtifactBindingSha256'
     )
     $fixedSlotVersionParameterNames = @($fixedSlotVersionValues.Keys)
-    $allowedParameterNames = @('EnvironmentName') + $deliveryParameterNames + $fixedSlotVersionParameterNames + $requiredParameters + @($parameterDefaults.Keys)
+    $immutableAuthWalletParameterNames = @('AuthWalletKeysSecretVersionId')
+    $allowedParameterNames = @('EnvironmentName') + $deliveryParameterNames + $immutableAuthWalletParameterNames + $fixedSlotVersionParameterNames + $requiredParameters + @($parameterDefaults.Keys)
     foreach ($parameterName in $parameterMap.Keys) {
         if ($allowedParameterNames -cnotcontains $parameterName) {
             throw "ParameterOverride contains unknown template parameter '$parameterName'."
@@ -1453,6 +1471,19 @@ if ($Action -in @('Plan', 'Deploy')) {
         $currentEnvironment = [string] $currentStackParameterMap.EnvironmentName
         if ($currentEnvironment -cne $EnvironmentName) {
             throw "EnvironmentName '$EnvironmentName' does not match the existing stack value '$currentEnvironment'. Create a separate stack for a different environment."
+        }
+        $immutableAuthWalletBindings = [ordered]@{
+            AuthWalletKeysSecretArn = [string] $parameterMap.AuthWalletKeysSecretArn
+            AuthWalletKeysSecretVersionId = [string] $parameterMap.AuthWalletKeysSecretVersionId
+            AuthWalletKeysKmsKeyArn = [string] $parameterMap.AuthWalletKeysKmsKeyArn
+        }
+        foreach ($authWalletBinding in $immutableAuthWalletBindings.GetEnumerator()) {
+            if (-not $currentStackParameterMap.Contains($authWalletBinding.Key)) {
+                throw "The existing application stack is missing immutable auth/wallet binding '$($authWalletBinding.Key)'. A dedicated reviewed auth/wallet transition is required."
+            }
+            if ([string] $currentStackParameterMap[$authWalletBinding.Key] -cne [string] $authWalletBinding.Value) {
+                throw "Existing auth/wallet binding '$($authWalletBinding.Key)' differs from the approved target. A dedicated reviewed auth/wallet transition is required."
+            }
         }
         $expectedCurrentFixedSlotBindings = if ($isCredentialTransition) {
             $fixedSlotCurrentBindings

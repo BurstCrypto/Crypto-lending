@@ -104,9 +104,9 @@ test('accepts the repository no-external-egress baseline and records the DNS res
 
 test('keeps the parent below the reviewed direct-upload ceiling after child extraction', () => {
   const bytes = Buffer.byteLength(templateSource, 'utf8');
-  assert.equal(bytes, 49_632);
+  assert.equal(bytes, 49_963);
   assert.ok(bytes <= 50_500);
-  assert.equal(51_200 - bytes, 1_568);
+  assert.equal(51_200 - bytes, 1_237);
 });
 
 test('pins the observability child URL, digest, binding, and exact parent mapping', () => {
@@ -239,6 +239,20 @@ test('pins immutable child bytes and the AWS-owned regional S3 delivery boundary
     "-cne 'AWS'",
     '$pinnedChildHashMatch.Groups[1].Value -cne $workloadBoundariesTemplateSha256',
     "does not match the parent template's exact AllowedValue and content-addressed TemplateURL pin",
+  ]) {
+    assert.ok(deploymentGuardSource.includes(fragment), `Deployment guard is missing ${fragment}`);
+    assert.ok(validatorSource.includes(fragment), `Static guard contract is missing ${fragment}`);
+  }
+});
+
+test('binds one exact auth wallet secret version and preserves its auditable update tuple', () => {
+  for (const fragment of [
+    "Assert-RequiredValue -Name 'AuthWalletKeysSecretVersionId'",
+    "$AuthWalletKeysSecretVersionId -cnotmatch '^[A-Za-z0-9_-]{32,64}$'",
+    'AuthWalletKeysSecretVersionId = $AuthWalletKeysSecretVersionId',
+    '$immutableAuthWalletBindings = [ordered]@{',
+    '$currentStackParameterMap[$authWalletBinding.Key] -cne [string] $authWalletBinding.Value',
+    'A dedicated reviewed auth/wallet transition is required.',
   ]) {
     assert.ok(deploymentGuardSource.includes(fragment), `Deployment guard is missing ${fragment}`);
     assert.ok(validatorSource.includes(fragment), `Static guard contract is missing ${fragment}`);
@@ -655,7 +669,7 @@ test('pins the versioned child artifact, provenance, and exact nested input cont
   assertRejected(
     mutate((source) =>
       source.replace(
-        'application-workload-boundaries-ab0afc494bf51e68ae0f3e0d267aac544b69f5480754056f95a82baefc0c9219',
+        'application-workload-boundaries-3a6da9fed6e5e632c7d2fcf0804809de9f50997adb467407c20f95096813228e',
         `application-workload-boundaries-${'0'.repeat(64)}`,
       ),
     ),
@@ -664,7 +678,7 @@ test('pins the versioned child artifact, provenance, and exact nested input cont
   assertRejected(
     mutate((source) =>
       source.replace(
-        'AllowedValues: [ab0afc494bf51e68ae0f3e0d267aac544b69f5480754056f95a82baefc0c9219]',
+        'AllowedValues: [3a6da9fed6e5e632c7d2fcf0804809de9f50997adb467407c20f95096813228e]',
         `AllowedValues: [${'0'.repeat(64)}]`,
       ),
     ),
@@ -812,11 +826,65 @@ test('pins production Cognito, mainnet wallet, and API-only preauth plus six-rin
   assertRejected(
     mutate((source) =>
       source.replace(
-        ' AuthWalletKeysSecretArn:\n  Type: String\n  NoEcho: true',
-        ' AuthWalletKeysSecretArn:\n  Type: String\n  NoEcho: true\n  Default: arn:aws:secretsmanager:us-west-2:111122223333:secret:prohibited',
+        ' AuthWalletKeysSecretArn:\n  Type: String',
+        ' AuthWalletKeysSecretArn:\n  Type: String\n  Default: arn:aws:secretsmanager:us-west-2:111122223333:secret:prohibited',
       ),
     ),
     /AuthWalletKeysSecretArn must preserve an explicit bounded production identifier\/ARN with no default|must not have a default value/,
+  );
+  assertRejected(
+    mutate((source) =>
+      source.replace(
+        " AuthWalletKeysSecretVersionId:\n  Type: String\n  MinLength: 32\n  MaxLength: 64\n  AllowedPattern: '^[A-Za-z0-9_-]{32,64}$'\n",
+        '',
+      ),
+    ),
+    /AuthWalletKeysSecretVersionId must preserve an explicit bounded production identifier\/ARN with no default/,
+  );
+  assertRejected(
+    mutate((source) =>
+      source.replace(
+        ' AuthWalletKeysSecretVersionId:\n  Type: String',
+        ` AuthWalletKeysSecretVersionId:\n  Type: String\n  Default: ${'a'.repeat(32)}`,
+      ),
+    ),
+    /AuthWalletKeysSecretVersionId must preserve an explicit bounded production identifier\/ARN with no default|must not have a default value/,
+  );
+  assertRejected(
+    mutate((source) =>
+      source.replace(
+        ' AuthWalletKeysKmsKeyArn:',
+        " AuthWalletKeysSecretVersionId:\n  Type: String\n  MinLength: 32\n  MaxLength: 64\n  AllowedPattern: '^[A-Za-z0-9_-]{32,64}$'\n AuthWalletKeysKmsKeyArn:",
+      ),
+    ),
+    /Parameter AuthWalletKeysSecretVersionId must be declared exactly once/,
+  );
+  assertRejected(
+    mutate((source) =>
+      source.replace(
+        '${AuthWalletKeysSecretArn}:AUTH_PREAUTH_SEAL_KEY::${AuthWalletKeysSecretVersionId}',
+        '${AuthWalletKeysSecretArn}:AUTH_PREAUTH_SEAL_KEY::',
+      ),
+    ),
+    /AUTH_PREAUTH_SEAL_KEY secret value|exact active workload-scoped ECS secret injection/,
+  );
+  assertRejected(
+    mutate((source) =>
+      source.replace(
+        '${AuthWalletKeysSecretArn}:AUTH_SESSION_HMAC_KEY_RING_JSON::${AuthWalletKeysSecretVersionId}',
+        '${AuthWalletKeysSecretArn}:AUTH_SESSION_HMAC_KEY_RING_JSON:AWSCURRENT:',
+      ),
+    ),
+    /AUTH_SESSION_HMAC_KEY_RING_JSON secret value|exact active workload-scoped ECS secret injection/,
+  );
+  assertRejected(
+    mutate((source) =>
+      source.replace(
+        '${AuthWalletKeysSecretArn}:AUTH_CSRF_HMAC_KEY_RING_JSON::${AuthWalletKeysSecretVersionId}',
+        '${AuthWalletKeysSecretArn}:AUTH_CSRF_HMAC_KEY_RING_JSON::${ApiDatabaseSlotAVersionId}',
+      ),
+    ),
+    /AUTH_CSRF_HMAC_KEY_RING_JSON secret value|exact active workload-scoped ECS secret injection/,
   );
   assertRejected(
     mutate((source) =>
@@ -830,8 +898,8 @@ test('pins production Cognito, mainnet wallet, and API-only preauth plus six-rin
   assertRejected(
     mutate((source) =>
       source.replace(
-        '${AuthWalletKeysSecretArn}:WALLET_METADATA_SEAL_KEY_RING_JSON::',
-        '${AuthWalletKeysSecretArn}:WALLET_IDENTITY_HMAC_KEY_RING_JSON::',
+        '${AuthWalletKeysSecretArn}:WALLET_METADATA_SEAL_KEY_RING_JSON::${AuthWalletKeysSecretVersionId}',
+        '${AuthWalletKeysSecretArn}:WALLET_IDENTITY_HMAC_KEY_RING_JSON::${AuthWalletKeysSecretVersionId}',
       ),
     ),
     /WALLET_METADATA_SEAL_KEY_RING_JSON secret value|seven reviewed auth\/wallet key fields/,
@@ -851,7 +919,7 @@ test('pins production Cognito, mainnet wallet, and API-only preauth plus six-rin
         "ValueFrom: !Sub '${WorkloadBoundaries.Outputs.WorkerDatabaseActiveSecretArn}:password::${WorkloadBoundaries.Outputs.WorkerDatabaseActiveVersionId}'",
         [
           "ValueFrom: !Sub '${WorkloadBoundaries.Outputs.WorkerDatabaseActiveSecretArn}:password::${WorkloadBoundaries.Outputs.WorkerDatabaseActiveVersionId}'",
-          "       - { Name: AUTH_PREAUTH_SEAL_KEY, ValueFrom: !Sub '${AuthWalletKeysSecretArn}:AUTH_PREAUTH_SEAL_KEY::' }",
+          "       - { Name: AUTH_PREAUTH_SEAL_KEY, ValueFrom: !Sub '${AuthWalletKeysSecretArn}:AUTH_PREAUTH_SEAL_KEY::${AuthWalletKeysSecretVersionId}' }",
         ].join('\n'),
       ),
     ),
@@ -893,10 +961,10 @@ test('rejects every legacy auth and wallet key binding mixed into the production
     assertRejected(
       mutate((source) =>
         source.replace(
-          "       - { Name: AUTH_PREAUTH_SEAL_KEY, ValueFrom: !Sub '${AuthWalletKeysSecretArn}:AUTH_PREAUTH_SEAL_KEY::' }",
+          "       - { Name: AUTH_PREAUTH_SEAL_KEY, ValueFrom: !Sub '${AuthWalletKeysSecretArn}:AUTH_PREAUTH_SEAL_KEY::${AuthWalletKeysSecretVersionId}' }",
           [
-            "       - { Name: AUTH_PREAUTH_SEAL_KEY, ValueFrom: !Sub '${AuthWalletKeysSecretArn}:AUTH_PREAUTH_SEAL_KEY::' }",
-            `       - { Name: ${name}, ValueFrom: !Sub '\${AuthWalletKeysSecretArn}:${name}::' }`,
+            "       - { Name: AUTH_PREAUTH_SEAL_KEY, ValueFrom: !Sub '${AuthWalletKeysSecretArn}:AUTH_PREAUTH_SEAL_KEY::${AuthWalletKeysSecretVersionId}' }",
+            `       - { Name: ${name}, ValueFrom: !Sub '\${AuthWalletKeysSecretArn}:${name}::\${AuthWalletKeysSecretVersionId}' }`,
           ].join('\n'),
         ),
       ),

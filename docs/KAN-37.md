@@ -197,9 +197,11 @@ deployed rotation procedure.
 
 The HMAC overlap boundary is still local and dormant. The zero-desired-count
 production task now selects the three canonical authentication ring documents
-and statically forbids their legacy single-key selectors. This is fail-closed
-configuration wiring, not proof that the external secret exists, can be read,
-or contains an approved ring. A future audited policy migration must stage the
+from the same exact immutable Secrets Manager VersionId as the pre-authentication
+and wallet fields, and statically forbids legacy or mutable-stage selectors.
+This is fail-closed configuration wiring, not proof that the external
+secret/version exists, can be read, or contains an approved ring. A future
+dedicated deployment transition guard and audited policy migration must stage the
 successor as a read key, prove all API instances use the candidate-aware
 functions, revoke the superseded single-digest function grants, coordinate the
 active-write cutover, and retain predecessors until aggregate readiness is
@@ -219,8 +221,9 @@ the project still needs:
 - one externally provisioned auth/wallet JSON secret encrypted by the exact
   supplied customer-managed KMS key and containing the current
   pre-authentication seal key plus all six canonical authentication/wallet ring
-  documents, with API-execution-only resource/key policies, custody, rotation,
-  and successful field-read evidence;
+  documents, with an exact pinned outer VersionId, API-execution-only
+  resource/key policies, custody, a reviewed current-to-target version
+  transition, rotation, and successful exact-version field-read evidence;
 - KAN-231 approval for the exact identity destinations and failure policy;
 - registered HTTPS callback/origin and real secure-cookie behavior through the
   ALB/browser topology;

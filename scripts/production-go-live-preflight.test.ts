@@ -741,29 +741,29 @@ const API_AUTH_SECRET_BINDING_MUTATIONS = [
   [
     'AUTH_PREAUTH_SEAL_KEY',
     'ValueFrom',
-    "!Sub '${AuthWalletKeysSecretArn}:AUTH_PREAUTH_SEAL_KEY::'",
-    "!Sub '${AuthWalletKeysSecretArn}:WRONG_PREAUTH_KEY::'",
+    "!Sub '${AuthWalletKeysSecretArn}:AUTH_PREAUTH_SEAL_KEY::${AuthWalletKeysSecretVersionId}'",
+    "!Sub '${AuthWalletKeysSecretArn}:WRONG_PREAUTH_KEY::${AuthWalletKeysSecretVersionId}'",
     'AUTH_PRODUCTION_SECRET_REFERENCES_NOT_WIRED',
   ],
   [
     'AUTH_IDENTITY_HMAC_KEY_RING_JSON',
     'ValueFrom',
-    "!Sub '${AuthWalletKeysSecretArn}:AUTH_IDENTITY_HMAC_KEY_RING_JSON::'",
-    "!Sub '${AttackerSecretArn}:AUTH_IDENTITY_HMAC_KEY_RING_JSON::'",
+    "!Sub '${AuthWalletKeysSecretArn}:AUTH_IDENTITY_HMAC_KEY_RING_JSON::${AuthWalletKeysSecretVersionId}'",
+    "!Sub '${AttackerSecretArn}:AUTH_IDENTITY_HMAC_KEY_RING_JSON::${AuthWalletKeysSecretVersionId}'",
     'AUTH_PRODUCTION_SECRET_REFERENCES_NOT_WIRED',
   ],
   [
     'AUTH_SESSION_HMAC_KEY_RING_JSON',
     'ValueFrom',
-    "!Sub '${AuthWalletKeysSecretArn}:AUTH_SESSION_HMAC_KEY_RING_JSON::'",
-    "!Sub '${AuthWalletKeysSecretArn}:WRONG_SESSION_KEY::'",
+    "!Sub '${AuthWalletKeysSecretArn}:AUTH_SESSION_HMAC_KEY_RING_JSON::${AuthWalletKeysSecretVersionId}'",
+    "!Sub '${AuthWalletKeysSecretArn}:WRONG_SESSION_KEY::${AuthWalletKeysSecretVersionId}'",
     'AUTH_PRODUCTION_SECRET_REFERENCES_NOT_WIRED',
   ],
   [
     'AUTH_CSRF_HMAC_KEY_RING_JSON',
     'ValueFrom',
-    "!Sub '${AuthWalletKeysSecretArn}:AUTH_CSRF_HMAC_KEY_RING_JSON::'",
-    "!Sub '${AttackerSecretArn}:AUTH_CSRF_HMAC_KEY_RING_JSON::'",
+    "!Sub '${AuthWalletKeysSecretArn}:AUTH_CSRF_HMAC_KEY_RING_JSON::${AuthWalletKeysSecretVersionId}'",
+    "!Sub '${AttackerSecretArn}:AUTH_CSRF_HMAC_KEY_RING_JSON::${AuthWalletKeysSecretVersionId}'",
     'AUTH_PRODUCTION_SECRET_REFERENCES_NOT_WIRED',
   ],
 ] as const satisfies readonly AuthBindingMutation[];
@@ -793,22 +793,22 @@ const API_WALLET_BINDING_MUTATIONS = [
   [
     'WALLET_IDENTITY_HMAC_KEY_RING_JSON',
     'ValueFrom',
-    "!Sub '${AuthWalletKeysSecretArn}:WALLET_IDENTITY_HMAC_KEY_RING_JSON::'",
-    "!Sub '${AuthWalletKeysSecretArn}:WRONG_WALLET_IDENTITY_KEY::'",
+    "!Sub '${AuthWalletKeysSecretArn}:WALLET_IDENTITY_HMAC_KEY_RING_JSON::${AuthWalletKeysSecretVersionId}'",
+    "!Sub '${AuthWalletKeysSecretArn}:WRONG_WALLET_IDENTITY_KEY::${AuthWalletKeysSecretVersionId}'",
     'WALLET_REGISTRATION_MAINNET_CONFIGURATION_NOT_WIRED',
   ],
   [
     'WALLET_CHALLENGE_HMAC_KEY_RING_JSON',
     'ValueFrom',
-    "!Sub '${AuthWalletKeysSecretArn}:WALLET_CHALLENGE_HMAC_KEY_RING_JSON::'",
-    "!Sub '${AttackerSecretArn}:WALLET_CHALLENGE_HMAC_KEY_RING_JSON::'",
+    "!Sub '${AuthWalletKeysSecretArn}:WALLET_CHALLENGE_HMAC_KEY_RING_JSON::${AuthWalletKeysSecretVersionId}'",
+    "!Sub '${AttackerSecretArn}:WALLET_CHALLENGE_HMAC_KEY_RING_JSON::${AuthWalletKeysSecretVersionId}'",
     'WALLET_REGISTRATION_MAINNET_CONFIGURATION_NOT_WIRED',
   ],
   [
     'WALLET_METADATA_SEAL_KEY_RING_JSON',
     'ValueFrom',
-    "!Sub '${AuthWalletKeysSecretArn}:WALLET_METADATA_SEAL_KEY_RING_JSON::'",
-    "!Sub '${AuthWalletKeysSecretArn}:WRONG_WALLET_SEAL_KEY::'",
+    "!Sub '${AuthWalletKeysSecretArn}:WALLET_METADATA_SEAL_KEY_RING_JSON::${AuthWalletKeysSecretVersionId}'",
+    "!Sub '${AuthWalletKeysSecretArn}:WRONG_WALLET_SEAL_KEY::${AuthWalletKeysSecretVersionId}'",
     'WALLET_REGISTRATION_MAINNET_CONFIGURATION_NOT_WIRED',
   ],
 ] as const satisfies readonly AuthBindingMutation[];
@@ -980,7 +980,7 @@ test('unrelated non-prefixed task bindings remain outside the exact auth and wal
 test('template inspection rejects every legacy single-key field mixed with key rings', () => {
   const environmentAnchor = '       - { Name: AUTH_PREAUTH_SEAL_KEY_ID, Value: preauth-v1 }';
   const secretAnchor =
-    "       - { Name: AUTH_PREAUTH_SEAL_KEY, ValueFrom: !Sub '${AuthWalletKeysSecretArn}:AUTH_PREAUTH_SEAL_KEY::' }";
+    "       - { Name: AUTH_PREAUTH_SEAL_KEY, ValueFrom: !Sub '${AuthWalletKeysSecretArn}:AUTH_PREAUTH_SEAL_KEY::${AuthWalletKeysSecretVersionId}' }";
   const legacyEnvironmentNames = [
     'AUTH_IDENTITY_HMAC_KEY_ID',
     'AUTH_SESSION_HMAC_KEY_ID',
@@ -1011,7 +1011,7 @@ test('template inspection rejects every legacy single-key field mixed with key r
   for (const name of legacySecretNames) {
     const mutated = APPLICATION_BASELINE.replace(
       secretAnchor,
-      `${secretAnchor}\n       - { Name: ${name}, ValueFrom: !Sub '\${AuthWalletKeysSecretArn}:${name}::' }`,
+      `${secretAnchor}\n       - { Name: ${name}, ValueFrom: !Sub '\${AuthWalletKeysSecretArn}:${name}::\${AuthWalletKeysSecretVersionId}' }`,
     );
     assert.notEqual(mutated, APPLICATION_BASELINE, name);
     const inspected = inspectAuthenticationDeploymentTemplate(mutated);
@@ -1022,7 +1022,7 @@ test('template inspection rejects every legacy single-key field mixed with key r
 test('template inspection rejects unknown managed names, wrong sections, and local demo mode', () => {
   const environmentAnchor = '       - { Name: AUTH_PREAUTH_SEAL_KEY_ID, Value: preauth-v1 }';
   const secretAnchor =
-    "       - { Name: AUTH_PREAUTH_SEAL_KEY, ValueFrom: !Sub '${AuthWalletKeysSecretArn}:AUTH_PREAUTH_SEAL_KEY::' }";
+    "       - { Name: AUTH_PREAUTH_SEAL_KEY, ValueFrom: !Sub '${AuthWalletKeysSecretArn}:AUTH_PREAUTH_SEAL_KEY::${AuthWalletKeysSecretVersionId}' }";
   const cases = [
     [environmentAnchor, '       - { Name: AUTH_UNREVIEWED_VALUE, Value: enabled }'],
     [environmentAnchor, '       - { Name: OIDC_UNREVIEWED_VALUE, Value: enabled }'],
@@ -1063,7 +1063,7 @@ test('template inspection requires the production web task to remain secret-free
     [
       "       - { Name: AUTH_PUBLIC_ORIGIN, Value: !Sub 'https://${ApplicationHostname}' }",
       '      Secrets:',
-      "       - { Name: AUTH_PUBLIC_ORIGIN, ValueFrom: !Sub '${AuthWalletKeysSecretArn}:AUTH_PREAUTH_SEAL_KEY::' }",
+      "       - { Name: AUTH_PUBLIC_ORIGIN, ValueFrom: !Sub '${AuthWalletKeysSecretArn}:AUTH_PREAUTH_SEAL_KEY::${AuthWalletKeysSecretVersionId}' }",
       '      LinuxParameters:',
     ].join('\n'),
   );
@@ -1206,6 +1206,12 @@ Resources:
 
 test('auth inspection accepts compact direct-upload YAML and quoted substitutions with braces', () => {
   const inspected = inspectAuthenticationDeploymentTemplate(`
+Parameters:
+ AuthWalletKeysSecretVersionId:
+  Type: String
+  MinLength: 32
+  MaxLength: 64
+  AllowedPattern: '^[A-Za-z0-9_-]{32,64}$'
 Resources:
  ApiTaskDefinition:
   Type: AWS::ECS::TaskDefinition
@@ -1216,7 +1222,7 @@ Resources:
        - { Name: AUTH_MODE, Value: oidc }
        - { Name: AUTH_PUBLIC_ORIGIN, Value: !Sub 'https://\${ApplicationHostname}' }
       Secrets:
-       - { Name: AUTH_PREAUTH_SEAL_KEY, ValueFrom: !Sub '\${AuthWalletKeysSecretArn}:AUTH_PREAUTH_SEAL_KEY::' }
+       - { Name: AUTH_PREAUTH_SEAL_KEY, ValueFrom: !Sub '\${AuthWalletKeysSecretArn}:AUTH_PREAUTH_SEAL_KEY::\${AuthWalletKeysSecretVersionId}' }
  WebTaskDefinition:
   Type: AWS::ECS::TaskDefinition
   Properties:
@@ -1232,6 +1238,92 @@ Resources:
   assert.deepEqual([...inspected.apiSecretNames], ['AUTH_PREAUTH_SEAL_KEY']);
   assert.deepEqual([...inspected.webEnvironmentNames], ['AUTH_PUBLIC_ORIGIN']);
   assert.equal(inspected.deployedEvidenceAccepted, false);
+});
+
+test('auth inspection requires one exact auditable auth/wallet secret VersionId parameter', () => {
+  const parameterBlock = [
+    ' AuthWalletKeysSecretVersionId:',
+    '  Type: String',
+    '  MinLength: 32',
+    '  MaxLength: 64',
+    "  AllowedPattern: '^[A-Za-z0-9_-]{32,64}$'",
+  ].join('\n');
+  const moveOutsideParameters = APPLICATION_BASELINE.replace(`${parameterBlock}\n`, '').replace(
+    'Resources:\n',
+    `Resources:\n${parameterBlock}\n`,
+  );
+  const nestedParameterBlock = parameterBlock
+    .split('\n')
+    .map((line) => ` ${line}`)
+    .join('\n');
+  const nestUnderAnotherParameter = APPLICATION_BASELINE.replace(`${parameterBlock}\n`, '').replace(
+    ' EnvironmentName:\n',
+    ` EnvironmentName:\n${nestedParameterBlock}\n`,
+  );
+  const mutations = [
+    APPLICATION_BASELINE.replace(`${parameterBlock}\n`, ''),
+    APPLICATION_BASELINE.replace(
+      parameterBlock,
+      parameterBlock.replace('  Type: String', '  Type: Number'),
+    ),
+    APPLICATION_BASELINE.replace(
+      parameterBlock,
+      parameterBlock.replace('  MinLength: 32', '  MinLength: 1'),
+    ),
+    APPLICATION_BASELINE.replace(
+      parameterBlock,
+      parameterBlock.replace('  MaxLength: 64', '  MaxLength: 128'),
+    ),
+    APPLICATION_BASELINE.replace(
+      parameterBlock,
+      parameterBlock.replace(
+        "  AllowedPattern: '^[A-Za-z0-9_-]{32,64}$'",
+        "  AllowedPattern: '^.+$'",
+      ),
+    ),
+    APPLICATION_BASELINE.replace(
+      parameterBlock,
+      parameterBlock.replace('  Type: String', '  Type: String\n  Default: AWSCURRENT'),
+    ),
+    APPLICATION_BASELINE.replace(
+      parameterBlock,
+      parameterBlock.replace('  Type: String', '  Type: String\n  NoEcho: true'),
+    ),
+    APPLICATION_BASELINE.replace(`${parameterBlock}\n`, `${parameterBlock}\n${parameterBlock}\n`),
+    moveOutsideParameters,
+    nestUnderAnotherParameter,
+  ];
+
+  for (const mutated of mutations) {
+    assert.notEqual(mutated, APPLICATION_BASELINE);
+    assert.equal(inspectAuthenticationDeploymentTemplate(mutated).syntaxValid, false);
+  }
+});
+
+test('auth inspection rejects mutable, omitted, or alternate auth/wallet secret versions', () => {
+  const exact =
+    '${AuthWalletKeysSecretArn}:AUTH_PREAUTH_SEAL_KEY::${AuthWalletKeysSecretVersionId}';
+  for (const replacement of [
+    '${AuthWalletKeysSecretArn}:AUTH_PREAUTH_SEAL_KEY::',
+    '${AuthWalletKeysSecretArn}:AUTH_PREAUTH_SEAL_KEY:AWSCURRENT:',
+    '${AuthWalletKeysSecretArn}:AUTH_PREAUTH_SEAL_KEY:AWSPREVIOUS:',
+    '${AuthWalletKeysSecretArn}:AUTH_PREAUTH_SEAL_KEY::${ApiDatabaseSlotAVersionId}',
+  ]) {
+    const mutated = APPLICATION_BASELINE.replace(exact, replacement);
+    assert.notEqual(mutated, APPLICATION_BASELINE, replacement);
+    const authentication = inspectAuthenticationDeploymentTemplate(mutated);
+    assert.equal(authentication.apiSecretNames.has('AUTH_PREAUTH_SEAL_KEY'), false, replacement);
+    const report = evaluateProductionPreflight({
+      ...completeInput(platformDirectory('PLANNED')),
+      authentication,
+    });
+    assert.ok(
+      report.checks
+        .find(({ id }) => id === 'AUTHENTICATION')
+        ?.blockerIds.includes('AUTH_PRODUCTION_SECRET_REFERENCES_NOT_WIRED'),
+      replacement,
+    );
+  }
 });
 
 test('auth inspection rejects absent, null, empty, and conditional bindings', () => {

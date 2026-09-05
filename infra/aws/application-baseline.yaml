@@ -18,10 +18,10 @@ Parameters:
  WorkloadBoundariesTemplateUrl:
   Type: String
   MaxLength: 1024
-  AllowedPattern: '^https://[a-z0-9][a-z0-9-]{1,61}[a-z0-9]\.s3\.[a-z0-9-]+\.(?:amazonaws\.com|amazonaws\.com\.cn)/application-workload-boundaries-ab0afc494bf51e68ae0f3e0d267aac544b69f5480754056f95a82baefc0c9219\.yaml\?versionId=[A-Za-z0-9._~%+-]+$'
+  AllowedPattern: '^https://[a-z0-9][a-z0-9-]{1,61}[a-z0-9]\.s3\.[a-z0-9-]+\.(?:amazonaws\.com|amazonaws\.com\.cn)/application-workload-boundaries-3a6da9fed6e5e632c7d2fcf0804809de9f50997adb467407c20f95096813228e\.yaml\?versionId=[A-Za-z0-9._~%+-]+$'
  WorkloadBoundariesTemplateSha256:
   Type: String
-  AllowedValues: [ab0afc494bf51e68ae0f3e0d267aac544b69f5480754056f95a82baefc0c9219]
+  AllowedValues: [3a6da9fed6e5e632c7d2fcf0804809de9f50997adb467407c20f95096813228e]
  WorkloadBoundariesArtifactBindingSha256:
   Type: String
   AllowedPattern: '^[a-f0-9]{64}$'
@@ -110,9 +110,13 @@ Parameters:
   AllowedPattern: '^[A-Za-z0-9]+$'
  AuthWalletKeysSecretArn:
   Type: String
-  NoEcho: true
   MaxLength: 2048
   AllowedPattern: '^arn:[a-z0-9-]+:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:[A-Za-z0-9/_+=.@-]+$'
+ AuthWalletKeysSecretVersionId:
+  Type: String
+  MinLength: 32
+  MaxLength: 64
+  AllowedPattern: '^[A-Za-z0-9_-]{32,64}$'
  AuthWalletKeysKmsKeyArn:
   Type: String
   MaxLength: 2048
@@ -1162,13 +1166,13 @@ Resources:
          ValueFrom: !Sub '${WorkloadBoundaries.Outputs.ApiDatabaseActiveSecretArn}:password::${WorkloadBoundaries.Outputs.ApiDatabaseActiveVersionId}'
        - Name: REDIS_PASSWORD
          ValueFrom: !Sub '${WorkloadBoundaries.Outputs.RedisActiveSecretArn}:password::${WorkloadBoundaries.Outputs.RedisActiveVersionId}'
-       - { Name: AUTH_PREAUTH_SEAL_KEY, ValueFrom: !Sub '${AuthWalletKeysSecretArn}:AUTH_PREAUTH_SEAL_KEY::' }
-       - { Name: AUTH_IDENTITY_HMAC_KEY_RING_JSON, ValueFrom: !Sub '${AuthWalletKeysSecretArn}:AUTH_IDENTITY_HMAC_KEY_RING_JSON::' }
-       - { Name: AUTH_SESSION_HMAC_KEY_RING_JSON, ValueFrom: !Sub '${AuthWalletKeysSecretArn}:AUTH_SESSION_HMAC_KEY_RING_JSON::' }
-       - { Name: AUTH_CSRF_HMAC_KEY_RING_JSON, ValueFrom: !Sub '${AuthWalletKeysSecretArn}:AUTH_CSRF_HMAC_KEY_RING_JSON::' }
-       - { Name: WALLET_IDENTITY_HMAC_KEY_RING_JSON, ValueFrom: !Sub '${AuthWalletKeysSecretArn}:WALLET_IDENTITY_HMAC_KEY_RING_JSON::' }
-       - { Name: WALLET_CHALLENGE_HMAC_KEY_RING_JSON, ValueFrom: !Sub '${AuthWalletKeysSecretArn}:WALLET_CHALLENGE_HMAC_KEY_RING_JSON::' }
-       - { Name: WALLET_METADATA_SEAL_KEY_RING_JSON, ValueFrom: !Sub '${AuthWalletKeysSecretArn}:WALLET_METADATA_SEAL_KEY_RING_JSON::' }
+       - { Name: AUTH_PREAUTH_SEAL_KEY, ValueFrom: !Sub '${AuthWalletKeysSecretArn}:AUTH_PREAUTH_SEAL_KEY::${AuthWalletKeysSecretVersionId}' }
+       - { Name: AUTH_IDENTITY_HMAC_KEY_RING_JSON, ValueFrom: !Sub '${AuthWalletKeysSecretArn}:AUTH_IDENTITY_HMAC_KEY_RING_JSON::${AuthWalletKeysSecretVersionId}' }
+       - { Name: AUTH_SESSION_HMAC_KEY_RING_JSON, ValueFrom: !Sub '${AuthWalletKeysSecretArn}:AUTH_SESSION_HMAC_KEY_RING_JSON::${AuthWalletKeysSecretVersionId}' }
+       - { Name: AUTH_CSRF_HMAC_KEY_RING_JSON, ValueFrom: !Sub '${AuthWalletKeysSecretArn}:AUTH_CSRF_HMAC_KEY_RING_JSON::${AuthWalletKeysSecretVersionId}' }
+       - { Name: WALLET_IDENTITY_HMAC_KEY_RING_JSON, ValueFrom: !Sub '${AuthWalletKeysSecretArn}:WALLET_IDENTITY_HMAC_KEY_RING_JSON::${AuthWalletKeysSecretVersionId}' }
+       - { Name: WALLET_CHALLENGE_HMAC_KEY_RING_JSON, ValueFrom: !Sub '${AuthWalletKeysSecretArn}:WALLET_CHALLENGE_HMAC_KEY_RING_JSON::${AuthWalletKeysSecretVersionId}' }
+       - { Name: WALLET_METADATA_SEAL_KEY_RING_JSON, ValueFrom: !Sub '${AuthWalletKeysSecretArn}:WALLET_METADATA_SEAL_KEY_RING_JSON::${AuthWalletKeysSecretVersionId}' }
       LinuxParameters:
        Capabilities: { Drop: [ALL] }
        InitProcessEnabled: true

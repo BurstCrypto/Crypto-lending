@@ -233,18 +233,21 @@ const REQUIRED_API_PRODUCTION_ENVIRONMENT_BINDINGS = Object.freeze([
 ] as const);
 
 const REQUIRED_API_AUTH_SECRET_BINDINGS = Object.freeze([
-  ['AUTH_PREAUTH_SEAL_KEY', "!Sub '${AuthWalletKeysSecretArn}:AUTH_PREAUTH_SEAL_KEY::'"],
+  [
+    'AUTH_PREAUTH_SEAL_KEY',
+    "!Sub '${AuthWalletKeysSecretArn}:AUTH_PREAUTH_SEAL_KEY::${AuthWalletKeysSecretVersionId}'",
+  ],
   [
     'AUTH_IDENTITY_HMAC_KEY_RING_JSON',
-    "!Sub '${AuthWalletKeysSecretArn}:AUTH_IDENTITY_HMAC_KEY_RING_JSON::'",
+    "!Sub '${AuthWalletKeysSecretArn}:AUTH_IDENTITY_HMAC_KEY_RING_JSON::${AuthWalletKeysSecretVersionId}'",
   ],
   [
     'AUTH_SESSION_HMAC_KEY_RING_JSON',
-    "!Sub '${AuthWalletKeysSecretArn}:AUTH_SESSION_HMAC_KEY_RING_JSON::'",
+    "!Sub '${AuthWalletKeysSecretArn}:AUTH_SESSION_HMAC_KEY_RING_JSON::${AuthWalletKeysSecretVersionId}'",
   ],
   [
     'AUTH_CSRF_HMAC_KEY_RING_JSON',
-    "!Sub '${AuthWalletKeysSecretArn}:AUTH_CSRF_HMAC_KEY_RING_JSON::'",
+    "!Sub '${AuthWalletKeysSecretArn}:AUTH_CSRF_HMAC_KEY_RING_JSON::${AuthWalletKeysSecretVersionId}'",
   ],
 ] as const);
 
@@ -257,15 +260,15 @@ const REQUIRED_WALLET_ENVIRONMENT_BINDINGS = Object.freeze([
 const REQUIRED_WALLET_SECRET_BINDINGS = Object.freeze([
   [
     'WALLET_IDENTITY_HMAC_KEY_RING_JSON',
-    "!Sub '${AuthWalletKeysSecretArn}:WALLET_IDENTITY_HMAC_KEY_RING_JSON::'",
+    "!Sub '${AuthWalletKeysSecretArn}:WALLET_IDENTITY_HMAC_KEY_RING_JSON::${AuthWalletKeysSecretVersionId}'",
   ],
   [
     'WALLET_CHALLENGE_HMAC_KEY_RING_JSON',
-    "!Sub '${AuthWalletKeysSecretArn}:WALLET_CHALLENGE_HMAC_KEY_RING_JSON::'",
+    "!Sub '${AuthWalletKeysSecretArn}:WALLET_CHALLENGE_HMAC_KEY_RING_JSON::${AuthWalletKeysSecretVersionId}'",
   ],
   [
     'WALLET_METADATA_SEAL_KEY_RING_JSON',
-    "!Sub '${AuthWalletKeysSecretArn}:WALLET_METADATA_SEAL_KEY_RING_JSON::'",
+    "!Sub '${AuthWalletKeysSecretArn}:WALLET_METADATA_SEAL_KEY_RING_JSON::${AuthWalletKeysSecretVersionId}'",
   ],
 ] as const);
 
@@ -1121,6 +1124,44 @@ function hasExactImmutableImageParameter(
   );
 }
 
+function hasExactAuthWalletSecretVersionParameter(source: string): boolean {
+  const normalizedSource = source.replace(/\r\n/gu, '\n');
+  const parameters = yamlBlock(normalizedSource, 'Parameters', 0);
+  if (parameters === null) return false;
+  const declarations = normalizedSource
+    .split('\n')
+    .filter((line) => /^\s+AuthWalletKeysSecretVersionId:\s*$/u.test(line));
+  const parameterDeclarations = parameters
+    .replace(/\r\n/gu, '\n')
+    .split('\n')
+    .filter((line) => /^\s+AuthWalletKeysSecretVersionId:\s*$/u.test(line));
+  if (declarations.length !== 1 || parameterDeclarations.length !== 1) return false;
+  const indent = leadingSpaces(parameterDeclarations[0] ?? '');
+  const directChildIndent = Math.min(
+    ...parameters
+      .split('\n')
+      .filter((line) => /^\s+[A-Za-z][A-Za-z0-9]*:\s*$/u.test(line))
+      .map(leadingSpaces),
+  );
+  if (!Number.isFinite(directChildIndent) || indent !== directChildIndent) return false;
+  const parameter = yamlBlock(parameters, 'AuthWalletKeysSecretVersionId', indent);
+  if (parameter === null) return false;
+  const semanticLines = parameter
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !line.startsWith('#'));
+  return (
+    semanticLines.join('\n') ===
+    [
+      'AuthWalletKeysSecretVersionId:',
+      'Type: String',
+      'MinLength: 32',
+      'MaxLength: 64',
+      "AllowedPattern: '^[A-Za-z0-9_-]{32,64}$'",
+    ].join('\n')
+  );
+}
+
 interface YamlBindingInspection {
   readonly names: ReadonlySet<string>;
   readonly valid: boolean;
@@ -1320,6 +1361,7 @@ export function inspectAuthenticationDeploymentTemplate(
       (!productionArtifactContractRequired ||
         (workerTask !== null && workerContainers !== null && workerContainer !== null)),
     syntaxValid:
+      hasExactAuthWalletSecretVersionParameter(source) &&
       apiEnvironmentInspection.valid &&
       apiSecretInspection.valid &&
       webEnvironmentInspection.valid &&

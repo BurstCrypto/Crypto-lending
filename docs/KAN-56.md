@@ -124,7 +124,11 @@ HMAC cannot bypass global wallet uniqueness. Its initial policy remains version
 alias-backfill migration updates that policy.
 
 KAN-34 statically selects `MAINNET` and the three wallet ring documents from the
-shared API-only JSON secret. It does not provision or inspect that secret.
+shared API-only JSON secret at the same exact immutable Secrets Manager
+VersionId as the four authentication fields. It rejects omitted and mutable
+stage selectors but does not provision or inspect that secret. The deployment
+guard preserves the ARN/VersionId/KMS tuple; its dedicated rotation transition
+workflow remains unimplemented.
 Migration `0024` and its application coordinator add a dormant, audited
 metadata rewrap boundary available only to the schema owner; there is no HTTP
 route, CLI, scheduled job, Nest registration, or runtime-role grant. Production

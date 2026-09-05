@@ -29,7 +29,7 @@ const residualLimitations = Object.freeze([
   'No DNS security-group rule is present because AmazonProvidedDNS traffic is not filterable by security groups; a custom resolver requires a separately reviewed exact destination.',
   'REDIS_OPERATOR_LIVE_REVOCATION_UNRESOLVED: the validated parent composes a conditional one-off task and production CLI that derive only the inactive environment slot and issue CLIENT KILL USER <target> SKIPME YES, but no task is authorized or run. Workload drain, live session denial evidence, immediate operator disablement, and credential installation or regeneration remain external gates.',
   'FIXED_SLOT_CREDENTIAL_EXTERNAL_EXECUTION_UNRESOLVED: the deployment command now binds an approved transition record to the exact immutable current stack, template, parameter, tag, target-state, change-set, and acknowledgement hashes, while ordinary application updates must preserve all fixed-slot bindings and credential-chain tags. Inactive-slot regeneration, backend installation, live candidate/continuity/revocation evidence, task replacement, and external approval remain separately authorized gates.',
-  'AUTH_WALLET_SECRET_EXTERNAL: the parent supplies one Secrets Manager ARN for seven distinct authentication and wallet key fields. This static boundary neither provisions that secret nor proves its field set, key material, rotation, resource policy, KMS policy, or deployed readability.',
+  'AUTH_WALLET_SECRET_EXTERNAL: the parent supplies one selector-free Secrets Manager ARN and pins all seven authentication and wallet key fields to one immutable VersionId. This static boundary neither provisions that secret nor proves its field set, key material, dedicated rotation transition, resource policy, KMS policy, or deployed readability.',
   'This local template is not packaged or uploaded; a parent nested-stack TemplateURL remains a separately authorized deployment gate.',
 ]);
 
@@ -984,13 +984,12 @@ function validateParameters(source, errors) {
     (blocks.get('AuthWalletKeysSecretArn') ?? '') !==
     exactBlock('AuthWalletKeysSecretArn', [
       'Type: String',
-      'NoEcho: true',
       'MaxLength: 2048',
       "AllowedPattern: '^arn:[a-z0-9-]+:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:[A-Za-z0-9/_+=.@-]+$'",
     ])
   ) {
     errors.push(
-      'AuthWalletKeysSecretArn must be one explicit selector-free Secrets Manager ARN and must not expose a default.',
+      'AuthWalletKeysSecretArn must be one explicit auditable selector-free Secrets Manager ARN and must not expose a default.',
     );
   }
   if (

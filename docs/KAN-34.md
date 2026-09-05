@@ -179,20 +179,31 @@ passes the exact HTTPS `AUTH_PUBLIC_ORIGIN` to both API and web. It does not
 create a Cognito user pool or app client.
 
 Authentication and wallet key material comes from one externally provisioned
-JSON secret identified only by `AuthWalletKeysSecretArn`. Its closed field set
-is the current `AUTH_PREAUTH_SEAL_KEY` plus six canonical ring documents:
+JSON secret identified by the selector-free `AuthWalletKeysSecretArn` and the
+required, no-default `AuthWalletKeysSecretVersionId`. The latter is an exact
+32-64 character Secrets Manager version; all seven ECS JSON-field selectors
+use that same immutable version with an empty stage. Omitted versions, mutable
+`AWSCURRENT`/`AWSPREVIOUS` stages, and alternate version references are
+rejected. Its closed field set is the current `AUTH_PREAUTH_SEAL_KEY` plus six
+canonical ring documents:
 `AUTH_IDENTITY_HMAC_KEY_RING_JSON`, `AUTH_SESSION_HMAC_KEY_RING_JSON`,
 `AUTH_CSRF_HMAC_KEY_RING_JSON`, `WALLET_IDENTITY_HMAC_KEY_RING_JSON`,
 `WALLET_CHALLENGE_HMAC_KEY_RING_JSON`, and
 `WALLET_METADATA_SEAL_KEY_RING_JSON`. Legacy single-key auth and wallet
-selectors are forbidden by the production template and preflight contract;
-values never enter CloudFormation parameters or outputs. The nested workload
+selectors are forbidden by the production template and preflight contract.
+Secret payload bytes never enter CloudFormation parameters or outputs; the ARN
+and VersionId are intentionally inspectable IAM-controlled deployment metadata
+so the guard can compare current and target state. The nested workload
 boundary grants `GetSecretValue` and decrypt on the exact
 `AuthWalletKeysSecretArn` / `AuthWalletKeysKmsKeyArn` pair only to the API
 execution role. Web, worker, task roles, and the Redis operator receive no
-access. The secret, customer-managed key, key/resource policies, distinct
-canonical key material, custody, and rotation are external gates; static
-wiring is not deployed-readability evidence.
+access. CREATE can bind the initial exact version. Every UPDATE preserves the
+deployed ARN/VersionId/KMS tuple: `APPLICATION` cannot rotate it and
+`CREDENTIAL_TRANSITION` is limited to the separate six fixed slots. A dedicated
+auth/wallet transition record and guard do not yet exist. The secret,
+customer-managed key, key/resource policies, distinct canonical key material,
+custody, and rotation are external gates; static wiring is not
+deployed-readability evidence.
 
 The production runtime contract has four database authorities: the RDS
 master/bootstrap identity, a one-off `crypto_migration` login, an API A/B login,
@@ -359,8 +370,9 @@ template deliberately does not launch the task.
 - The external auth/wallet JSON secret must contain exactly the reviewed
   pre-authentication key and six ring-document fields and use the exact
   supplied customer-managed KMS key. Its resource/key policies, ring contents,
-  and an API task's successful field-selecting reads remain live evidence; this
-  template deliberately provisions neither resource.
+  API reads from the exact pinned VersionId, task replacement, rotation drill,
+  and a dedicated reviewed version-transition guard remain live or external
+  evidence; this template deliberately provisions neither resource.
 - The isolated balance-sync source/DLQ resources and publisher wiring are
   present, but no task role can receive or delete balance messages and no
   dedicated balance consumer service is defined. The queue therefore cannot

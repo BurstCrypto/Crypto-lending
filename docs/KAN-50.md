@@ -50,13 +50,18 @@ that SCRAM verifier; the reviewed bootstrap deliberately does not synchronize
 passwords.
 
 The authentication/wallet secret is different: the template does not create or
-inspect it. The operator must supply the ARN of one externally provisioned,
-separately KMS-encrypted JSON secret containing only the current
+inspect it. The operator must supply the selector-free ARN and exact 32-64
+character `VersionId` of one externally provisioned, separately KMS-encrypted
+JSON secret containing only the current
 pre-authentication seal key and the six canonical authentication/wallet key-ring
 documents. The API execution role alone receives exact secret-read/decrypt
 permission. Production task wiring and offline preflight reject all legacy
-single-key auth and wallet selectors, but cannot prove the external secret's
-contents, custody, policy, or readability.
+single-key auth and wallet selectors. All seven JSON-key selectors share the
+exact immutable VersionId and empty version stage; omitted versions,
+`AWSCURRENT`, `AWSPREVIOUS`, and alternate version references fail closed. The
+ARN and VersionId are auditable deployment metadata, while secret payload bytes
+remain outside CloudFormation parameters and outputs. Static checks cannot
+prove the external secret's contents, custody, policy, or readability.
 
 The required replacement launch-time injection contract is:
 
@@ -76,6 +81,13 @@ its pinned parameter does not update an already running ECS task; the approved
 rotation procedure must launch replacement tasks before revoking the old
 credential. The checked-in parent/child composition encodes this contract, but
 it has not been staged, planned, or deployed.
+
+The auth/wallet VersionId is separate from those six A/B slots and has no
+`UNPINNED` sentinel. CREATE requires an exact initial version. On UPDATE, the
+invocation guard compares and preserves the deployed secret ARN, VersionId, and
+KMS key ARN as one tuple. Neither `APPLICATION` nor `CREDENTIAL_TRANSITION` may
+change it; a dedicated reviewed auth/wallet transition record and guard remain
+an open production gate.
 
 For initial adoption, all six parameters may be the `UNPINNED` sentinel only
 while API, web, and worker desired counts are zero, all phases are `A_ONLY`, and
@@ -252,8 +264,11 @@ complete:
   ARNs are the exact application-stack migration outputs;
 - actual API, worker, web, and migration startup with injected secrets;
 - successful API-only reads and startup validation of the current
-  pre-authentication key plus all six production key-ring documents, including
-  negative proof that legacy selectors and other workloads cannot read them;
+  pre-authentication key plus all six production key-ring documents from the
+  exact pinned Secrets Manager VersionId, including negative proof that legacy
+  selectors and other workloads cannot read them;
+- a guarded, current-to-target auth/wallet VersionId transition and deployed
+  replacement/rollback drill before rotating that shared external secret;
 - application readiness against the immutable migration chain through `0025`;
 - live positive and negative IAM decisions against exact deployed role/resource
   ARNs;

@@ -24,7 +24,7 @@
     "releaseTreeSha": null,
     "releaseManifestSha256": null,
     "threatModelPath": "docs/security/threat-model-register.json",
-    "threatModelSha256": "c714872fb8ae8afac2e6bd25177d2f032dd0a8f0d9a26d0ba3a91fd567d34acd",
+    "threatModelSha256": "8adfb3394fee6bb997ed395891f284b91c1123cebdab9cda938ea77e57b7490d",
     "walletReviewPrerequisite": {
       "ticket": "KAN-227",
       "status": "PENDING",

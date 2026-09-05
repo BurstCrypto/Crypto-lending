@@ -16,9 +16,9 @@ export const MAX_PREPARATION_BYTES = 16_384;
 export const MAX_SIDECAR_BYTES = 65;
 export const MAX_THREAT_MODEL_BYTES = 131_072;
 export const EXPECTED_PREPARATION_SHA256 =
-  '27ad88156cd140b641d1ac27b84181e02f5be2447b7f324bdebb121174866f7c';
+  '3d6bce54b560a96f21e69f27c3110ae8ea6562b31211c0785ef7cd862efc6d3b';
 export const EXPECTED_THREAT_MODEL_SHA256 =
-  'c714872fb8ae8afac2e6bd25177d2f032dd0a8f0d9a26d0ba3a91fd567d34acd';
+  '8adfb3394fee6bb997ed395891f284b91c1123cebdab9cda938ea77e57b7490d';
 export const PREPARATION_FILE_ERROR =
   'KAN-235 preparation record, sidecar, or reviewed threat model is missing, unsafe, or unreadable.';
 export const PREPARATION_JSON_ERROR =

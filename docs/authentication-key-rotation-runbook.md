@@ -24,12 +24,24 @@ keys, or any other authentication purpose. Production rejects legacy
 `AUTH_*_HMAC_KEY_ID`/`AUTH_*_HMAC_KEY` pairs; those pairs exist only for explicit
 development and test compatibility.
 
+The numeric `version` inside a ring is not a Secrets Manager `VersionId`. The
+production task uses a selector-free shared-secret ARN plus one required exact
+`AuthWalletKeysSecretVersionId`; all seven authentication/wallet field selectors
+use that outer version with an empty stage. Moving `AWSCURRENT` alone does not
+change pinned tasks. Every content change, cutover, or retirement must create a
+complete new shared-secret version carrying forward all unchanged fields, then
+replace tasks through a guarded current-to-target VersionId transition.
+
 The reviewed production task definition sets `NODE_ENV=production`, omits
 `LOCAL_DEMO_MODE`, and selects `AUTH_PREAUTH_SEAL_KEY` plus the three
 `AUTH_*_HMAC_KEY_RING_JSON` documents from an operator-supplied external secret
 ARN. It does not provision or read that secret, and the service remains at zero
 desired tasks. Template wiring therefore proves only the fail-closed field
-boundary, not custody, usable key material, deployment, or rotation.
+boundary, not custody, usable key material, deployment, or rotation. CREATE can
+bind an initial exact outer VersionId. The current `APPLICATION` and
+`CREDENTIAL_TRANSITION` update intents both preserve it; a dedicated
+auth/wallet-secret transition record and guard must be implemented and approved
+before this runbook can rotate the deployed outer version.
 
 Never put a real ring document, digest, cookie, token, OIDC subject, or key in a
 ticket, shell history, migration, log, screenshot, or evidence bundle. Secret
@@ -105,5 +117,6 @@ denial, aggregate readiness, immutable policies/aliases, least-privilege roles,
 and rollback refusal. Production still requires approved external secret/KMS
 custody, authorized population of the selected fields, a deployed blue/green
 exercise, old-function denial evidence, recovery timing, sanitized alerting,
-and independent security review. None of those external gates is satisfied by
-the template, this runbook, or the migration.
+an approved dedicated outer-VersionId transition guard, and independent
+security review. None of those external gates is satisfied by the template,
+this runbook, or the migration.

@@ -52,10 +52,17 @@ test('accepts the reviewed local workload-boundary child under the direct body c
 test('grants the one external auth/wallet secret and KMS key only to API execution', () => {
   assertRejected(
     mutate(
-      '  AuthWalletKeysSecretArn:\n    Type: String\n    NoEcho: true',
-      '  AuthWalletKeysSecretArn:\n    Type: String\n    NoEcho: true\n    Default: arn:aws:secretsmanager:us-west-2:111122223333:secret:prohibited',
+      '  AuthWalletKeysSecretArn:\n    Type: String',
+      '  AuthWalletKeysSecretArn:\n    Type: String\n    Default: arn:aws:secretsmanager:us-west-2:111122223333:secret:prohibited',
     ),
-    /AuthWalletKeysSecretArn must be one explicit selector-free Secrets Manager ARN/,
+    /AuthWalletKeysSecretArn must be one explicit auditable selector-free Secrets Manager ARN/,
+  );
+  assertRejected(
+    mutate(
+      '  AuthWalletKeysSecretArn:\n    Type: String',
+      '  AuthWalletKeysSecretArn:\n    Type: String\n    NoEcho: true',
+    ),
+    /AuthWalletKeysSecretArn must be one explicit auditable selector-free Secrets Manager ARN/,
   );
   assertRejected(
     mutate('                  - !Ref AuthWalletKeysSecretArn\n', ''),

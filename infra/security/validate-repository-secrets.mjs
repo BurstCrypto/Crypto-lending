@@ -19,7 +19,7 @@ const REVIEWED_FALSE_POSITIVE_LEDGER_PATH = fileURLToPath(
 // The ledger contains no matched material. Its reviewed bytes and every
 // rule/scope/path/line/blob/redacted-fingerprint tuple must match exactly.
 const REVIEWED_FALSE_POSITIVE_LEDGER_SHA256 =
-  '46a82916185b5b72eda4ad3f910e618fc96942e5d57999ee3f28cbd520481d94';
+  '7faf168dc55d2dcab4a0b179e227bbc7d14e72eeb65ac80f0e3f129ea89c49f9';
 const REVIEWED_FALSE_POSITIVE_CLASSIFICATIONS = new Set([
   'LOCAL_LOOPBACK_DATABASE_TEST_FIXTURE',
   'NON_SECRET_HASH_BINDING_TEST_EXPRESSION',

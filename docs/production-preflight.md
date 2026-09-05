@@ -217,14 +217,18 @@ values and CloudFormation expressions. It pins `NODE_ENV=production`, requires
 selector, and checks the Cognito issuer/JWKS and login-host derivations,
 client/audience reference, HTTPS callback/origin paths, algorithm, token use,
 timeouts, TTLs, trusted-proxy inputs, mainnet wallet mode, and each JSON secret
-selector under the one external secret ARN. A nonempty substitute, alternate
-`!Ref`/`!Sub`, attacker-controlled host, wrong selector, extra legacy field, or
-safe-looking mode change is not counted as the required binding and emits the
-applicable configuration/reference blocker. The current exact template omits
-those local wiring blocker IDs and remains at zero desired tasks. This proves
-only that the authored template matches the migration-`0025` fail-closed
-configuration contract; it does not prove that the secret exists, its rings are
-valid, or a task can read them.
+selector under the one external secret ARN. Inspection also requires one exact,
+top-level, no-default/no-`NoEcho` `AuthWalletKeysSecretVersionId` parameter and
+binds all seven selectors to it with an empty stage. An omitted version,
+`AWSCURRENT`, `AWSPREVIOUS`, alternate version parameter, counterfeit nested
+parameter, nonempty substitute, alternate `!Ref`/`!Sub`, attacker-controlled
+host, wrong selector, extra legacy field, or safe-looking mode change is not
+counted as the required binding and emits the applicable
+configuration/reference blocker. The current exact template omits those local
+wiring blocker IDs and remains at zero desired tasks. This proves only that the
+authored template matches the migration-`0025` fail-closed configuration
+contract; it does not prove that the secret/version exists, its rings are valid,
+or a task can read it.
 
 `AUTH_DEPLOYED_EVIDENCE_MISSING` remains by design: the repository neither
 provisions nor contacts Cognito, Secrets Manager, or KMS, and the inspector never

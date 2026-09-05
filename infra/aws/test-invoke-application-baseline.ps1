@@ -918,6 +918,10 @@ $guardrailParameterMap = [ordered]@{
 
 $imagePrefix = '111122223333.dkr.ecr.us-west-2.amazonaws.com/'
 $operationalAlarmTopicArn = 'arn:aws:sns:us-west-2:111122223333:crypto-lending-test-kan34-operations'
+$authWalletKeysSecretVersionId = @('auth', 'wallet', 'keys', 'secret', 'version', '0001') -join '_'
+if ($authWalletKeysSecretVersionId -cnotmatch '^[A-Za-z0-9_-]{32,64}$') {
+    throw 'Focused auth/wallet secret VersionId fixture is malformed.'
+}
 $applicationParameterMap = [ordered]@{
     EnvironmentName = 'test-kan34'
     WorkloadBoundariesTemplateUrl = $artifactTemplateUrl
@@ -944,6 +948,7 @@ $applicationParameterMap = [ordered]@{
     CognitoLoginHostname = 'login.test.crypto-lending.invalid'
     CognitoClientId = '1exampleclientid'
     AuthWalletKeysSecretArn = 'arn:aws:secretsmanager:us-west-2:111122223333:secret:crypto-lending/test/auth-wallet-keys-AbCdEf'
+    AuthWalletKeysSecretVersionId = $authWalletKeysSecretVersionId
     AuthWalletKeysKmsKeyArn = 'arn:aws:kms:us-west-2:111122223333:key/11111111-2222-3333-4444-555555555555'
     PostgresEngineVersion = '16.4'
     RdsCaBundlePath = '/etc/ssl/certs/aws-rds-global-bundle.pem'
@@ -1035,6 +1040,7 @@ $baseArguments = @{
     WorkloadBoundariesArtifactVersionId = $artifactVersionId
     ObservabilityArtifactBucket = $artifactBucket
     ObservabilityArtifactVersionId = $artifactVersionId
+    AuthWalletKeysSecretVersionId = $authWalletKeysSecretVersionId
     ApiDatabaseSlotAVersionId = 'UNPINNED'
     ApiDatabaseSlotBVersionId = 'UNPINNED'
     WorkerDatabaseSlotAVersionId = 'UNPINNED'
@@ -1253,6 +1259,45 @@ try {
         Assert-Condition ($result.Output -match 'No AWS calls were made') 'LocalValidate did not report its zero-call boundary.'
     }
 
+    Invoke-FocusedTest -Name 'Plan requires an exact named auth wallet secret VersionId before AWS discovery' -Body {
+        Clear-AwsMarker
+        $missingArguments = Copy-ArgumentMap -Map $baseArguments
+        $missingArguments.Action = 'Plan'
+        [void] $missingArguments.Remove('AuthWalletKeysSecretVersionId')
+        $missing = Invoke-Guard -Arguments $missingArguments
+        Assert-Condition (-not $missing.Succeeded) 'Plan accepted a missing auth/wallet secret VersionId.'
+        Assert-Condition ($missing.Output -match 'AuthWalletKeysSecretVersionId must be supplied explicitly') 'Missing auth/wallet VersionId rejection was not explicit.'
+        Assert-Condition ((Get-AwsMarkerText) -eq '') 'Missing auth/wallet VersionId reached AWS discovery.'
+
+        foreach ($invalidVersion in @(
+                'UNPINNED',
+                'AWSCURRENT',
+                ('a' * 31),
+                ('a' * 65),
+                (('a' * 31) + '!')
+            )) {
+            Clear-AwsMarker
+            $invalidArguments = Copy-ArgumentMap -Map $baseArguments
+            $invalidArguments.Action = 'Plan'
+            $invalidArguments.AuthWalletKeysSecretVersionId = $invalidVersion
+            $invalid = Invoke-Guard -Arguments $invalidArguments
+            Assert-Condition (-not $invalid.Succeeded) "Plan accepted invalid auth/wallet VersionId '$invalidVersion'."
+            Assert-Condition ($invalid.Output -match 'exact 32-64 character Secrets Manager VersionId') 'Malformed auth/wallet VersionId rejection was not explicit.'
+            Assert-Condition ((Get-AwsMarkerText) -eq '') 'Malformed auth/wallet VersionId reached AWS discovery.'
+        }
+
+        Clear-AwsMarker
+        $overrideArguments = Copy-ArgumentMap -Map $baseArguments
+        $overrideArguments.Action = 'Plan'
+        $overrideArguments.ParameterOverride = @($parameterOverrides) + @(
+            "AuthWalletKeysSecretVersionId=$authWalletKeysSecretVersionId"
+        )
+        $override = Invoke-Guard -Arguments $overrideArguments
+        Assert-Condition (-not $override.Succeeded) 'Plan accepted auth/wallet VersionId through ParameterOverride.'
+        Assert-Condition ($override.Output -match 'named immutable binding') 'Auth/wallet VersionId override rejection was not explicit.'
+        Assert-Condition ((Get-AwsMarkerText) -eq '') 'Auth/wallet VersionId override reached AWS discovery.'
+    }
+
     Invoke-FocusedTest -Name 'Plan requires all six explicit fixed-slot VersionIds before AWS discovery' -Body {
         Clear-AwsMarker
         $arguments = Copy-ArgumentMap -Map $baseArguments
@@ -1416,6 +1461,74 @@ try {
         Write-ApplicationStackResponse -ParameterMap $applicationParameterMap -TagMap $applicationStackTags
     }
 
+    Invoke-FocusedTest -Name 'UPDATE intents preserve the exact auth wallet secret ARN version and KMS tuple' -Body {
+        $alternateVersionId = 'auth_wallet_keys_secret_version_0002'
+
+        foreach ($intentCase in @(
+                [pscustomobject]@{
+                    Name = 'APPLICATION'
+                    Arguments = $applicationUpdateArguments
+                    CurrentParameters = $updateApplicationParameterMap
+                    CurrentTags = $updateApplicationStackTags
+                },
+                [pscustomobject]@{
+                    Name = 'CREDENTIAL_TRANSITION'
+                    Arguments = $updateArguments
+                    CurrentParameters = $applicationParameterMap
+                    CurrentTags = $applicationStackTags
+                }
+            )) {
+            Write-ApplicationStackResponse -ParameterMap $intentCase.CurrentParameters -TagMap $intentCase.CurrentTags
+            Clear-AwsMarker
+            $arguments = Copy-ArgumentMap -Map $intentCase.Arguments
+            $arguments.Action = 'Plan'
+            $arguments.AuthWalletKeysSecretVersionId = $alternateVersionId
+            $result = Invoke-Guard -Arguments $arguments
+            $marker = Get-AwsMarkerText
+            Assert-Condition (-not $result.Succeeded) "$($intentCase.Name) accepted auth/wallet VersionId rotation."
+            Assert-Condition ($result.Output -match 'dedicated reviewed auth/wallet transition') "$($intentCase.Name) VersionId rejection did not identify the dedicated transition requirement."
+            Assert-Condition ($marker -notmatch 's3api get-object|create-change-set') "$($intentCase.Name) auth/wallet VersionId rotation reached artifact reads or change-set creation."
+        }
+
+        Write-ApplicationStackResponse -ParameterMap $updateApplicationParameterMap -TagMap $updateApplicationStackTags
+        foreach ($tupleMutation in @(
+                [pscustomobject]@{
+                    Parameter = 'AuthWalletKeysSecretArn'
+                    Value = 'arn:aws:secretsmanager:us-west-2:111122223333:secret:crypto-lending/test/alternate-auth-wallet-AbCdEf'
+                },
+                [pscustomobject]@{
+                    Parameter = 'AuthWalletKeysKmsKeyArn'
+                    Value = 'arn:aws:kms:us-west-2:111122223333:key/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+                }
+            )) {
+            Clear-AwsMarker
+            $arguments = Copy-ArgumentMap -Map $applicationUpdateArguments
+            $arguments.Action = 'Plan'
+            $arguments.ParameterOverride = @($applicationUpdateParameterOverrides | Where-Object {
+                    $_ -notlike "$($tupleMutation.Parameter)=*"
+                }) + @("$($tupleMutation.Parameter)=$($tupleMutation.Value)")
+            $result = Invoke-Guard -Arguments $arguments
+            $marker = Get-AwsMarkerText
+            Assert-Condition (-not $result.Succeeded) "APPLICATION accepted $($tupleMutation.Parameter) rotation."
+            Assert-Condition ($result.Output -match 'dedicated reviewed auth/wallet transition') "$($tupleMutation.Parameter) rejection did not identify the dedicated transition requirement."
+            Assert-Condition ($marker -notmatch 's3api get-object|create-change-set') "$($tupleMutation.Parameter) rotation reached artifact reads or change-set creation."
+        }
+
+        $missingVersionParameters = Copy-ArgumentMap -Map $updateApplicationParameterMap
+        [void] $missingVersionParameters.Remove('AuthWalletKeysSecretVersionId')
+        Write-ApplicationStackResponse -ParameterMap $missingVersionParameters -TagMap $updateApplicationStackTags
+        Clear-AwsMarker
+        $missingArguments = Copy-ArgumentMap -Map $applicationUpdateArguments
+        $missingArguments.Action = 'Plan'
+        $missing = Invoke-Guard -Arguments $missingArguments
+        $missingMarker = Get-AwsMarkerText
+        Assert-Condition (-not $missing.Succeeded) 'APPLICATION accepted a deployed stack missing AuthWalletKeysSecretVersionId.'
+        Assert-Condition ($missing.Output -match 'missing immutable auth/wallet binding') 'Missing deployed auth/wallet VersionId rejection was not explicit.'
+        Assert-Condition ($missingMarker -notmatch 's3api get-object|create-change-set') 'Missing deployed auth/wallet VersionId reached artifact reads or change-set creation.'
+
+        Write-ApplicationStackResponse -ParameterMap $applicationParameterMap -TagMap $applicationStackTags
+    }
+
     Invoke-FocusedTest -Name 'credential-only UPDATE rejects unrelated parameter and stack-tag changes' -Body {
         Write-GuardrailStackResponse -ConfigurationSha256 $controlConfigurationSha256
         Write-TemplateResponse -Path $guardrailTemplateResponsePath -TemplateBody $guardrailTemplateBody
@@ -1467,6 +1580,7 @@ try {
         foreach ($entry in $pinnedFixedSlotVersions.GetEnumerator()) {
             Assert-Condition ($createLine -match ("ParameterKey=$($entry.Key),ParameterValue=" + [regex]::Escape([string] $entry.Value))) "UPDATE omitted exact target $($entry.Key)."
         }
+        Assert-Condition ($createLine -match [regex]::Escape("ParameterKey=AuthWalletKeysSecretVersionId,ParameterValue=$authWalletKeysSecretVersionId")) 'UPDATE omitted the preserved auth/wallet secret VersionId.'
         Assert-Condition ($createLine -match [regex]::Escape("--stack-name $immutableStackId")) 'UPDATE Plan did not address the immutable stack ARN.'
         Assert-Condition ($createLine -match ('current-stack-binding-sha256=' + $currentStackBindingSha256)) 'UPDATE description did not bind the exact current stack state.'
     }
@@ -1541,6 +1655,7 @@ try {
         foreach ($entry in $pinnedFixedSlotVersions.GetEnumerator()) {
             Assert-Condition ($createLine -match ("ParameterKey=$($entry.Key),ParameterValue=" + [regex]::Escape([string] $entry.Value))) "APPLICATION update changed or omitted fixed-slot pin $($entry.Key)."
         }
+        Assert-Condition ($createLine -match [regex]::Escape("ParameterKey=AuthWalletKeysSecretVersionId,ParameterValue=$authWalletKeysSecretVersionId")) 'APPLICATION update changed or omitted the auth/wallet secret VersionId.'
         foreach ($credentialTag in @('credential-predecessor-sha256', 'credential-transition-sha256', 'credential-state-sha256')) {
             Assert-Condition ($createLine -match ("Key=$credentialTag,Value=" + [regex]::Escape([string] $updateApplicationStackTags[$credentialTag]))) "APPLICATION update did not preserve credential-chain tag $credentialTag."
         }
@@ -1606,6 +1721,7 @@ try {
         Assert-Condition ($createLines[0] -match [regex]::Escape("ParameterKey=ObservabilityTemplateSha256,ParameterValue=$observabilityTemplateSha256")) 'Plan did not bind the reviewed observability bytes.'
         Assert-Condition ($createLines[0] -match [regex]::Escape("ParameterKey=ObservabilityArtifactBindingSha256,ParameterValue=$observabilityArtifactBindingSha256")) 'Plan did not bind the observability artifact location/version hash.'
         Assert-Condition ($createLines[0] -match [regex]::Escape("ParameterKey=AuthWalletKeysSecretArn,ParameterValue=$($applicationParameterMap.AuthWalletKeysSecretArn)")) 'Plan did not bind the one reviewed auth/wallet secret ARN.'
+        Assert-Condition ($createLines[0] -match [regex]::Escape("ParameterKey=AuthWalletKeysSecretVersionId,ParameterValue=$authWalletKeysSecretVersionId")) 'Plan did not bind the exact auth/wallet secret VersionId.'
         Assert-Condition ($createLines[0] -match [regex]::Escape("ParameterKey=AuthWalletKeysKmsKeyArn,ParameterValue=$($applicationParameterMap.AuthWalletKeysKmsKeyArn)")) 'Plan did not bind the exact auth/wallet KMS key ARN.'
         Assert-Condition ($createLines[0] -match [regex]::Escape("ParameterKey=AlarmTopicArn,ParameterValue=$operationalAlarmTopicArn")) 'Plan did not bind the exact existing operational alarm SNS topic ARN.'
         Assert-Condition ($marker -notmatch 'put-object|create-bucket|execute-change-set') 'Plan uploaded, created, or executed a cloud resource.'
@@ -1872,6 +1988,21 @@ try {
         Assert-Condition ($marker -notmatch 's3api get-object|execute-change-set') 'Deploy reached artifact billing or execution after remote parameter mismatch.'
     }
 
+    Invoke-FocusedTest -Name 'Deploy rejects a remote auth wallet secret version mutation' -Body {
+        Clear-AwsMarker
+        Write-GuardrailStackResponse -ConfigurationSha256 $controlConfigurationSha256
+        Write-TemplateResponse -Path $guardrailTemplateResponsePath -TemplateBody $guardrailTemplateBody
+        Write-TemplateResponse -Path $applicationTemplateResponsePath -TemplateBody $applicationTemplateBody
+        $mutatedParameters = Copy-ArgumentMap -Map $applicationParameterMap
+        $mutatedParameters.AuthWalletKeysSecretVersionId = $authWalletKeysSecretVersionId -replace '0001$', '0002'
+        Write-ChangeSetResponse -ParameterMap $mutatedParameters
+        $result = Invoke-Guard -Arguments $baseArguments
+        $marker = Get-AwsMarkerText
+        Assert-Condition (-not $result.Succeeded) 'Deploy accepted a remote auth/wallet VersionId mutation.'
+        Assert-Condition ($result.Output -match 'AuthWalletKeysSecretVersionId.*does not match') 'Remote auth/wallet VersionId rejection was not explicit.'
+        Assert-Condition ($marker -notmatch 's3api get-object|execute-change-set') 'Deploy reached artifact billing or execution after remote auth/wallet VersionId mismatch.'
+    }
+
     Invoke-FocusedTest -Name 'Deploy requires nested-stack review context' -Body {
         Clear-AwsMarker
         Write-GuardrailStackResponse -ConfigurationSha256 $controlConfigurationSha256
@@ -1936,6 +2067,25 @@ try {
         Assert-Condition ($marker -notmatch 'execute-change-set') 'UPDATE executed after accepting an implicit previous fixed-slot value.'
     }
 
+    Invoke-FocusedTest -Name 'UPDATE Deploy rejects UsePreviousValue for the auth wallet secret version' -Body {
+        Write-ApplicationStackResponse -ParameterMap $applicationParameterMap -TagMap $applicationStackTags
+        Write-GuardrailStackResponse -ConfigurationSha256 $controlConfigurationSha256
+        Write-TemplateResponse -Path $guardrailTemplateResponsePath -TemplateBody $guardrailTemplateBody
+        Write-TemplateResponse -Path $applicationTemplateResponsePath -TemplateBody $applicationTemplateBody
+        Write-ChangeSetResponse `
+            -ParameterMap $updateApplicationParameterMap `
+            -TagMap $updateApplicationStackTags `
+            -Description $updateExpectedChangeSetDescription `
+            -ChangeSetType 'UPDATE' `
+            -UsePreviousParameter 'AuthWalletKeysSecretVersionId'
+        Clear-AwsMarker
+        $result = Invoke-Guard -Arguments $updateArguments
+        $marker = Get-AwsMarkerText
+        Assert-Condition (-not $result.Succeeded) 'UPDATE Deploy accepted UsePreviousValue for the auth/wallet VersionId.'
+        Assert-Condition ($result.Output -match 'non-explicit parameter') 'Auth/wallet UsePreviousValue rejection was not explicit.'
+        Assert-Condition ($marker -notmatch 'execute-change-set') 'UPDATE executed after accepting an implicit auth/wallet VersionId.'
+    }
+
     Invoke-FocusedTest -Name 'exact UPDATE Deploy executes only with the transition-bound acknowledgement' -Body {
         Write-ApplicationStackResponse -ParameterMap $applicationParameterMap -TagMap $applicationStackTags
         Write-GuardrailStackResponse -ConfigurationSha256 $controlConfigurationSha256
@@ -1959,7 +2109,7 @@ try {
         foreach ($entry in $updateApplicationParameterMap.GetEnumerator()) {
             $lateDriftParameterMap[$entry.Key] = [string] $entry.Value
         }
-        $lateDriftParameterMap.ApiDesiredCount = '2'
+        $lateDriftParameterMap.AuthWalletKeysSecretVersionId = $authWalletKeysSecretVersionId -replace '0001$', '0002'
         Write-ApplicationStackResponse -ParameterMap $updateApplicationParameterMap -TagMap $updateApplicationStackTags
         Write-ApplicationStackResponse -ParameterMap $lateDriftParameterMap -TagMap $updateApplicationStackTags -Path $applicationStackResponseAfterFirstPath
         Write-GuardrailStackResponse -ConfigurationSha256 $controlConfigurationSha256
