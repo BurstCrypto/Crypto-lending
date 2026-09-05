@@ -126,6 +126,7 @@ describe('PostgresAccountProfileRepository', () => {
     expect(sql).toContain('FROM provision_account_profile(');
     expect(sql).toContain('$1::uuid');
     expect(sql).toContain('$6::text');
+    expect(sql).toMatch(/AS provisioned\s+LIMIT 2/u);
     expect(sql).not.toMatch(/\bINSERT\b|\bUPDATE\b|account_profile_audit/iu);
     expect(sql).not.toContain('account@example.test');
     expect(values).toEqual([
@@ -136,6 +137,41 @@ describe('PostgresAccountProfileRepository', () => {
       accountId,
       'request:kan36-provision',
     ]);
+  });
+
+  it('rejects ambiguous or cross-account provisioning results without leaking profile data', async () => {
+    const { query, repository } = setup();
+    const input = {
+      accountId,
+      contactEmail: 'account@example.test',
+      contactPhone: '+12025550123',
+      declaredResidencyCountryCode: 'CA',
+    };
+    const audit = { actorAccountId: accountId, correlationId: 'request:kan36-provision' };
+
+    query.mockResolvedValueOnce(result([profileRow(), profileRow()]));
+    await expect(repository.provisionForAccount(input, audit)).rejects.toBeInstanceOf(
+      AccountProfilePersistenceError,
+    );
+
+    const otherAccountId = parseAccountId('78d5e055-c37e-48df-a566-07ce3e8af195');
+    query.mockResolvedValueOnce(
+      result([
+        profileRow({
+          account_id: otherAccountId,
+          contact_email: 'other-account@example.test',
+        }),
+      ]),
+    );
+    let thrown: unknown;
+    try {
+      await repository.provisionForAccount(input, audit);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(AccountProfilePersistenceError);
+    expect(String(thrown)).not.toContain(otherAccountId);
+    expect(String(thrown)).not.toContain('other-account@example.test');
   });
 
   it('updates only through the fixed security-definer boundary', async () => {
@@ -166,6 +202,7 @@ describe('PostgresAccountProfileRepository', () => {
     expect(sql).toContain('$1::uuid');
     expect(sql).toContain('$2::integer');
     expect(sql).toContain('$10::text');
+    expect(sql).toMatch(/AS updated\s+LIMIT 2/u);
     expect(sql).not.toMatch(/\bINSERT\b|\bUPDATE\b|account_profile_audit/iu);
     expect(sql).not.toContain('new@example.test');
     expect(values).toEqual([
@@ -180,6 +217,42 @@ describe('PostgresAccountProfileRepository', () => {
       accountId,
       'request:kan36-1',
     ]);
+  });
+
+  it('rejects ambiguous or cross-account successful update results', async () => {
+    const { query, repository } = setup();
+    const updated = profileRow({ outcome: 'updated', version: 2 });
+    const update = (): ReturnType<PostgresAccountProfileRepository['update']> =>
+      repository.update(
+        accountId,
+        1,
+        { declaredResidencyCountryCode: 'GB' },
+        { actorAccountId: accountId, correlationId: 'request:kan36-update-hostile' },
+      );
+
+    query.mockResolvedValueOnce(result([updated, updated]));
+    await expect(update()).rejects.toBeInstanceOf(AccountProfilePersistenceError);
+
+    const otherAccountId = parseAccountId('78d5e055-c37e-48df-a566-07ce3e8af195');
+    query.mockResolvedValueOnce(
+      result([
+        profileRow({
+          outcome: 'updated',
+          account_id: otherAccountId,
+          contact_email: 'other-account@example.test',
+          version: 2,
+        }),
+      ]),
+    );
+    let thrown: unknown;
+    try {
+      await update();
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(AccountProfilePersistenceError);
+    expect(String(thrown)).not.toContain(otherAccountId);
+    expect(String(thrown)).not.toContain('other-account@example.test');
   });
 
   it.each(['stale', 'not-found'] as const)(
@@ -210,6 +283,42 @@ describe('PostgresAccountProfileRepository', () => {
           { actorAccountId: accountId, correlationId: 'request:kan36-2' },
         ),
       ).resolves.toEqual({ status: outcome });
+    },
+  );
+
+  it.each(['stale', 'not-found'] as const)(
+    'rejects a %s result that carries profile material',
+    async (outcome) => {
+      const { query, repository } = setup();
+      query.mockResolvedValue(
+        result([
+          {
+            outcome,
+            account_id: accountId,
+            contact_email: 'other-account@example.test',
+            contact_phone: null,
+            declared_residency_country_code: null,
+            eligibility_status: null,
+            version: null,
+            created_at: null,
+            updated_at: null,
+          },
+        ]),
+      );
+
+      let thrown: unknown;
+      try {
+        await repository.update(
+          accountId,
+          1,
+          { declaredResidencyCountryCode: 'GB' },
+          { actorAccountId: accountId, correlationId: 'request:kan36-no-profile-material' },
+        );
+      } catch (error) {
+        thrown = error;
+      }
+      expect(thrown).toBeInstanceOf(AccountProfilePersistenceError);
+      expect(String(thrown)).not.toContain('other-account@example.test');
     },
   );
 

@@ -96,6 +96,24 @@ function mapProfile(row: AccountProfileRow): AccountProfile {
   };
 }
 
+function oneRow<Row>(rows: readonly Row[]): Row {
+  if (!Array.isArray(rows) || rows.length !== 1 || !rows[0]) {
+    throw new AccountProfilePersistenceError();
+  }
+  return rows[0];
+}
+
+function accountScopedProfile(
+  row: AccountProfileRow,
+  expectedAccountId: AccountId,
+): AccountProfile {
+  const profile = mapProfile(row);
+  if (profile.accountId !== expectedAccountId) {
+    throw new AccountProfilePersistenceError();
+  }
+  return profile;
+}
+
 function mapAccountScopedProfileRead(
   rows: readonly AccountProfileRow[],
   expectedAccountId: AccountId,
@@ -104,18 +122,13 @@ function mapAccountScopedProfileRead(
     throw new AccountProfilePersistenceError();
   }
   if (rows.length === 0) return null;
-  if (rows.length !== 1 || !rows[0]) {
-    throw new AccountProfilePersistenceError();
-  }
-
-  const profile = mapProfile(rows[0]);
-  if (profile.accountId !== expectedAccountId) {
-    throw new AccountProfilePersistenceError();
-  }
-  return profile;
+  return accountScopedProfile(oneRow(rows), expectedAccountId);
 }
 
-function profileFromUpdateRow(row: AccountProfileUpdateRow): AccountProfile {
+function profileFromUpdateRow(
+  row: AccountProfileUpdateRow,
+  expectedAccountId: AccountId,
+): AccountProfile {
   if (
     row.account_id === null ||
     row.contact_email === null ||
@@ -127,16 +140,34 @@ function profileFromUpdateRow(row: AccountProfileUpdateRow): AccountProfile {
   ) {
     throw new AccountProfilePersistenceError();
   }
-  return mapProfile({
-    account_id: row.account_id,
-    contact_email: row.contact_email,
-    contact_phone: row.contact_phone,
-    declared_residency_country_code: row.declared_residency_country_code,
-    eligibility_status: row.eligibility_status,
-    version: row.version,
-    created_at: row.created_at,
-    updated_at: row.updated_at,
-  });
+  return accountScopedProfile(
+    {
+      account_id: row.account_id,
+      contact_email: row.contact_email,
+      contact_phone: row.contact_phone,
+      declared_residency_country_code: row.declared_residency_country_code,
+      eligibility_status: row.eligibility_status,
+      version: row.version,
+      created_at: row.created_at,
+      updated_at: row.updated_at,
+    },
+    expectedAccountId,
+  );
+}
+
+function assertNoProfileMaterial(row: AccountProfileUpdateRow): void {
+  if (
+    row.account_id !== null ||
+    row.contact_email !== null ||
+    row.contact_phone !== null ||
+    row.declared_residency_country_code !== null ||
+    row.eligibility_status !== null ||
+    row.version !== null ||
+    row.created_at !== null ||
+    row.updated_at !== null
+  ) {
+    throw new AccountProfilePersistenceError();
+  }
 }
 
 @Injectable()
@@ -194,7 +225,8 @@ export class PostgresAccountProfileRepository implements AccountProfileRepositor
            $4::text,
            $5::uuid,
            $6::text
-         ) AS provisioned`,
+         ) AS provisioned
+         LIMIT 2`,
         [
           accountId,
           contactEmail,
@@ -204,11 +236,7 @@ export class PostgresAccountProfileRepository implements AccountProfileRepositor
           actor.correlationId,
         ],
       );
-      const row = result.rows[0];
-      if (!row || result.rows.length !== 1) {
-        throw new AccountProfilePersistenceError();
-      }
-      return mapProfile(row);
+      return accountScopedProfile(oneRow(result.rows), accountId);
     } catch {
       throw new AccountProfilePersistenceError();
     }
@@ -265,7 +293,8 @@ export class PostgresAccountProfileRepository implements AccountProfileRepositor
            $8::text,
            $9::uuid,
            $10::text
-         ) AS updated`,
+         ) AS updated
+         LIMIT 2`,
         [
           normalizedAccountId,
           version,
@@ -279,17 +308,18 @@ export class PostgresAccountProfileRepository implements AccountProfileRepositor
           actor.correlationId,
         ],
       );
-      const row = result.rows[0];
-      if (!row || result.rows.length !== 1) {
-        throw new AccountProfilePersistenceError();
-      }
+      const row = oneRow(result.rows);
       if (row.outcome === 'stale' || row.outcome === 'not-found') {
+        assertNoProfileMaterial(row);
         return { status: row.outcome };
       }
       if (row.outcome !== 'updated') {
         throw new AccountProfilePersistenceError();
       }
-      return { status: 'updated', profile: profileFromUpdateRow(row) };
+      return {
+        status: 'updated',
+        profile: profileFromUpdateRow(row, normalizedAccountId),
+      };
     } catch {
       throw new AccountProfilePersistenceError();
     }
