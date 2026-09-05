@@ -1,14 +1,7 @@
-import {
-  assertBalanceConsumerSqsReceiptRedrivePolicy,
-  type BalanceConsumerInfrastructureConfig,
-} from '../../infrastructure/config/infrastructure.config';
 import type { ObservabilityPort } from '../../infrastructure/observability';
 import { BalanceSyncJobDispatcher } from '../../infrastructure/sqs/reviewed-job-dispatcher';
 import { SqsJobWorker } from '../../infrastructure/sqs/sqs-job.worker';
-import {
-  PinnedSqsQueueReceiptAdapter,
-  type SqsQueueReceiptTransport,
-} from '../../infrastructure/sqs/sqs-queue-receipt.port';
+import type { PinnedSqsQueueReceiptPort } from '../../infrastructure/sqs/sqs-queue-receipt.port';
 import { BALANCE_SYNC_POLICY } from '../domain/balance-sync';
 import { EthereumMainnetBalanceIndexerAdapter } from '../infrastructure/rpc/ethereum-mainnet-balance-indexer.adapter';
 import type { BalanceJsonRpcTransport } from '../infrastructure/rpc/balance-json-rpc';
@@ -29,9 +22,13 @@ import type {
   BalanceSyncWalletAddressResolverPort,
 } from './ports/balance-sync.ports';
 
+export interface BalanceSyncConsumerReceiptPolicy {
+  readonly visibilityTimeoutSeconds: number;
+}
+
 export interface BalanceSyncConsumerCompositionDependencies {
-  readonly sqs: SqsQueueReceiptTransport;
-  readonly infrastructureConfig: BalanceConsumerInfrastructureConfig;
+  readonly sqs: Readonly<PinnedSqsQueueReceiptPort>;
+  readonly receiptPolicy: BalanceSyncConsumerReceiptPolicy;
   readonly observability: ObservabilityPort;
   readonly ethereumTransport: BalanceJsonRpcTransport;
   readonly solanaTransport: BalanceJsonRpcTransport;
@@ -54,20 +51,52 @@ export interface BalanceSyncConsumerComposition {
   readonly consumer: BalanceSyncConsumerService;
 }
 
+function snapshotReceiptPolicy(
+  value: BalanceSyncConsumerReceiptPolicy,
+): Readonly<BalanceSyncConsumerReceiptPolicy> {
+  try {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+      throw new Error('invalid receipt policy');
+    }
+    const prototype = Object.getPrototypeOf(value) as unknown;
+    if (prototype !== Object.prototype && prototype !== null) {
+      throw new Error('invalid receipt policy');
+    }
+    const descriptors = Object.getOwnPropertyDescriptors(value);
+    const keys = Reflect.ownKeys(descriptors);
+    if (
+      keys.length !== 1 ||
+      keys[0] !== 'visibilityTimeoutSeconds' ||
+      !descriptors.visibilityTimeoutSeconds?.enumerable ||
+      !('value' in descriptors.visibilityTimeoutSeconds)
+    ) {
+      throw new Error('invalid receipt policy');
+    }
+    const visibilityTimeoutSeconds = descriptors.visibilityTimeoutSeconds.value as unknown;
+    if (
+      !Number.isSafeInteger(visibilityTimeoutSeconds) ||
+      (visibilityTimeoutSeconds as number) < 1 ||
+      (visibilityTimeoutSeconds as number) > 43_200
+    ) {
+      throw new Error('invalid receipt policy');
+    }
+    return Object.freeze({ visibilityTimeoutSeconds: visibilityTimeoutSeconds as number });
+  } catch {
+    throw new Error('Balance sync consumer receipt policy is invalid');
+  }
+}
+
 /**
  * Inert object-graph factory for a future dedicated process. It deliberately
- * fixes queue selection to `balance`. Failed application dispositions retain
- * the source receipt, so native SQS visibility/redrive remains the only retry
- * and DLQ authority. Nothing here is registered with Nest or starts the
- * consumer.
+ * binds worker behavior to the already-pinned `balance` receipt capability.
+ * Failed application dispositions retain the source receipt, so native SQS
+ * visibility/redrive remains the only retry and DLQ authority. Nothing here is
+ * registered with Nest or starts the consumer.
  */
 export function createBalanceSyncConsumerComposition(
   dependencies: BalanceSyncConsumerCompositionDependencies,
 ): Readonly<BalanceSyncConsumerComposition> {
-  if (dependencies.infrastructureConfig.workload !== 'balance-consumer') {
-    throw new Error('Balance sync consumer composition requires the balance-consumer workload');
-  }
-  assertBalanceConsumerSqsReceiptRedrivePolicy(dependencies.infrastructureConfig.sqs);
+  const receiptPolicy = snapshotReceiptPolicy(dependencies.receiptPolicy);
 
   const ethereumIndexer = new EthereumMainnetBalanceIndexerAdapter(
     dependencies.ethereumTransport,
@@ -91,15 +120,11 @@ export function createBalanceSyncConsumerComposition(
   const dispatcher = new BalanceSyncJobDispatcher(async (job) => {
     await orchestrator.process(job);
   });
-  const balanceQueueReceipt = new PinnedSqsQueueReceiptAdapter(
-    dependencies.sqs,
-    dependencies.infrastructureConfig.sqs.balanceQueueUrl,
-  );
   const queueWorker = new SqsJobWorker(
-    balanceQueueReceipt,
+    dependencies.sqs,
     Object.freeze({
       maxReceiveCount: BALANCE_SYNC_POLICY.maxAttempts,
-      visibilityTimeoutSeconds: dependencies.infrastructureConfig.sqs.visibilityTimeoutSeconds,
+      visibilityTimeoutSeconds: receiptPolicy.visibilityTimeoutSeconds,
       retryBaseDelaySeconds: BALANCE_SYNC_POLICY.retryBaseDelaySeconds,
       retryMaxDelaySeconds: BALANCE_SYNC_POLICY.retryMaximumDelaySeconds,
     }),

@@ -1,9 +1,12 @@
 import { performance } from 'node:perf_hooks';
 
-import type { BalanceConsumerInfrastructureConfig } from '../../infrastructure/config/infrastructure.config';
 import { applicationObservability } from '../../infrastructure/observability';
-import type { SqsQueueReceiptTransport } from '../../infrastructure/sqs/sqs-queue-receipt.port';
-import type { JobProcessingResult, ReceivedQueueMessage } from '../../infrastructure/sqs/sqs.types';
+import type { PinnedSqsQueueReceiptPort } from '../../infrastructure/sqs/sqs-queue-receipt.port';
+import type {
+  JobEnvelope,
+  JobProcessingResult,
+  ReceivedQueueMessage,
+} from '../../infrastructure/sqs/sqs.types';
 import {
   BALANCE_SYNC_POLICY,
   BalanceSyncIndexerFailure,
@@ -12,7 +15,10 @@ import {
 import type { BalanceJsonRpcTransport } from '../infrastructure/rpc/balance-json-rpc';
 import { EthereumMainnetBalanceIndexerAdapter } from '../infrastructure/rpc/ethereum-mainnet-balance-indexer.adapter';
 import { SolanaMainnetBalanceIndexerAdapter } from '../infrastructure/rpc/solana-mainnet-balance-indexer.adapter';
-import { createBalanceSyncConsumerComposition } from './balance-sync-consumer.composition';
+import {
+  createBalanceSyncConsumerComposition,
+  type BalanceSyncConsumerReceiptPolicy,
+} from './balance-sync-consumer.composition';
 import { BalanceSyncConsumerService } from './balance-sync-consumer.service';
 import { FailClosedBalanceSyncJobPort } from './fail-closed-balance-sync-job.port';
 import {
@@ -28,41 +34,16 @@ import type {
   BalanceSyncWalletAddressResolverPort,
 } from './ports/balance-sync.ports';
 
-function infrastructureConfig(
-  workload: BalanceConsumerInfrastructureConfig['workload'] = 'balance-consumer',
-): BalanceConsumerInfrastructureConfig {
-  return {
-    workload,
-    database: {
-      connectionString: 'postgresql://unused',
-      connectionTimeoutMs: 100,
-      idleTimeoutMs: 100,
-      lockTimeoutMs: 100,
-      maxLifetimeSeconds: 100,
-      poolMax: 1,
-      statementTimeoutMs: 100,
-      ssl: false,
-    },
-    sqs: {
-      region: 'us-east-1',
-      balanceQueueUrl: 'https://sqs.us-east-1.amazonaws.com/000000000000/balance-sync',
-      balanceDeadLetterQueueUrl:
-        'https://sqs.us-east-1.amazonaws.com/000000000000/balance-sync-dlq',
-      requestTimeoutMs: 1_000,
-      sdkMaxAttempts: 1,
-      maxReceiveCount: 3,
-      visibilityTimeoutSeconds: 30,
-      retryBaseDelaySeconds: 5,
-      retryMaxDelaySeconds: 60,
-    },
-  };
+function receiptPolicy(visibilityTimeoutSeconds = 30): BalanceSyncConsumerReceiptPolicy {
+  return { visibilityTimeoutSeconds };
 }
 
 function createHarness(
-  configuredInfrastructure: BalanceConsumerInfrastructureConfig = infrastructureConfig(),
+  configuredReceiptPolicy: BalanceSyncConsumerReceiptPolicy = receiptPolicy(),
   configuredClock: BalanceSyncClockPort = {
     now: () => new Date('2026-09-04T12:00:00.000Z'),
   },
+  configuredSqs?: PinnedSqsQueueReceiptPort,
 ): Readonly<{
   composition: ReturnType<typeof createBalanceSyncConsumerComposition>;
   ethereumExchange: jest.Mock;
@@ -73,11 +54,10 @@ function createHarness(
   checkpoints: BalanceSyncCheckpointPort;
   clock: BalanceSyncClockPort;
   metrics: BalanceSyncMetricsPort;
+  sqs: PinnedSqsQueueReceiptPort;
   receive: jest.Mock;
   deleteReceipt: jest.Mock;
   changeVisibility: jest.Mock;
-  sendMessage: jest.Mock;
-  directDeadLetter: jest.Mock;
 }> {
   const ethereumExchange = jest.fn();
   const solanaExchange = jest.fn();
@@ -97,19 +77,17 @@ function createHarness(
   const receive = jest.fn().mockResolvedValue([]);
   const deleteReceipt = jest.fn().mockResolvedValue(undefined);
   const changeVisibility = jest.fn().mockResolvedValue(undefined);
-  const sendMessage = jest.fn().mockResolvedValue(undefined);
-  const directDeadLetter = jest.fn().mockResolvedValue(undefined);
-  const sqs = {
+  const defaultSqs: PinnedSqsQueueReceiptPort = {
     receive,
     delete: deleteReceipt,
     changeVisibility,
-    parseEnvelope: (body: string) => JSON.parse(body) as unknown,
-    sendMessage,
-    directDeadLetter,
-  } as unknown as SqsQueueReceiptTransport;
+    parseEnvelope: <Payload = unknown>(body: string): JobEnvelope<Payload> =>
+      JSON.parse(body) as JobEnvelope<Payload>,
+  };
+  const sqs = configuredSqs ?? defaultSqs;
   const composition = createBalanceSyncConsumerComposition({
     sqs,
-    infrastructureConfig: configuredInfrastructure,
+    receiptPolicy: configuredReceiptPolicy,
     observability: applicationObservability,
     ethereumTransport,
     solanaTransport,
@@ -128,59 +106,231 @@ function createHarness(
     checkpoints,
     clock,
     metrics,
+    sqs,
     receive,
     deleteReceipt,
     changeVisibility,
-    sendMessage,
-    directDeadLetter,
   };
 }
 
 describe('createBalanceSyncConsumerComposition', () => {
-  it('rejects a forged non-consumer workload before constructing the dormant consumer graph', () => {
-    const ethereumExchange = jest.fn();
-    const solanaExchange = jest.fn();
-    const receive = jest.fn();
-
-    expect(() =>
-      createBalanceSyncConsumerComposition({
-        sqs: { receive } as unknown as SqsQueueReceiptTransport,
-        infrastructureConfig: {
-          ...infrastructureConfig(),
-          workload: 'worker',
-        } as unknown as BalanceConsumerInfrastructureConfig,
-        observability: applicationObservability,
-        ethereumTransport: { exchange: ethereumExchange },
-        solanaTransport: { exchange: solanaExchange },
-        walletAddressResolver: { resolveActiveAddress: jest.fn() },
-        checkpoints: {
-          load: jest.fn(),
-          upsertCurrent: jest.fn(),
-          replaceProvisionalAfterReorg: jest.fn(),
-          preserveLastGoodAndMarkStale: jest.fn(),
-        },
-        clock: { now: () => new Date('2026-09-04T12:00:00.000Z') },
-        metrics: { record: jest.fn(), alert: jest.fn() },
-      }),
-    ).toThrow('Balance sync consumer composition requires the balance-consumer workload');
-    expect(receive).not.toHaveBeenCalled();
-    expect(ethereumExchange).not.toHaveBeenCalled();
-    expect(solanaExchange).not.toHaveBeenCalled();
-  });
+  const invalidReceiptPolicyError = 'Balance sync consumer receipt policy is invalid';
 
   it.each([
-    ['maxReceiveCount', 2],
-    ['retryBaseDelaySeconds', 1],
-    ['retryMaxDelaySeconds', 59],
-  ] as const)('rejects forged balance receipt policy field %s', (field, value) => {
-    const configuredInfrastructure = infrastructureConfig();
-
+    ['zero', 0],
+    ['negative', -1],
+    ['above SQS maximum', 43_201],
+    ['fractional', 1.5],
+    ['unsafe integer', Number.MAX_SAFE_INTEGER + 1],
+    ['NaN', Number.NaN],
+    ['positive infinity', Number.POSITIVE_INFINITY],
+    ['string', '30'],
+    ['undefined', undefined],
+    ['null', null],
+  ])('rejects a %s visibility timeout with a fixed error', (_label, value) => {
     expect(() =>
-      createHarness({
-        ...configuredInfrastructure,
-        sqs: { ...configuredInfrastructure.sqs, [field]: value },
+      createHarness({ visibilityTimeoutSeconds: value } as BalanceSyncConsumerReceiptPolicy),
+    ).toThrow(invalidReceiptPolicyError);
+  });
+
+  it('rejects accessor, symbol, surplus, missing, non-enumerable, array, and non-plain policies', () => {
+    let accessorReads = 0;
+    const accessorPolicy = Object.create(null) as Record<string, unknown>;
+    Object.defineProperty(accessorPolicy, 'visibilityTimeoutSeconds', {
+      configurable: true,
+      enumerable: true,
+      get: () => {
+        accessorReads += 1;
+        throw new Error('secret accessor detail');
+      },
+    });
+    const symbolPolicy = { visibilityTimeoutSeconds: 30 } as Record<PropertyKey, unknown>;
+    symbolPolicy[Symbol('unreviewed')] = true;
+    const nonEnumerablePolicy = Object.create(null) as Record<string, unknown>;
+    Object.defineProperty(nonEnumerablePolicy, 'visibilityTimeoutSeconds', {
+      enumerable: false,
+      value: 30,
+    });
+
+    const candidates: unknown[] = [
+      accessorPolicy,
+      symbolPolicy,
+      { visibilityTimeoutSeconds: 30, maxReceiveCount: 3 },
+      {},
+      nonEnumerablePolicy,
+      [30],
+      Object.assign(Object.create({ inherited: true }) as object, {
+        visibilityTimeoutSeconds: 30,
       }),
-    ).toThrow('Balance-consumer SQS receipt redrive policy must exactly match BALANCE_SYNC_POLICY');
+      new (class ReceiptPolicy {
+        readonly visibilityTimeoutSeconds = 30;
+      })(),
+    ];
+
+    for (const candidate of candidates) {
+      expect(() => createHarness(candidate as BalanceSyncConsumerReceiptPolicy)).toThrow(
+        invalidReceiptPolicyError,
+      );
+    }
+    expect(accessorReads).toBe(0);
+  });
+
+  it('sanitizes hostile and revoked policy proxies without constructing the graph', () => {
+    const secret = 'private-policy-proxy-detail';
+    const exchange = jest.fn();
+    const throwingPolicy = new Proxy(
+      { visibilityTimeoutSeconds: 30 },
+      {
+        getPrototypeOf: () => {
+          throw new Error(secret);
+        },
+      },
+    );
+    const revocable = Proxy.revocable({ visibilityTimeoutSeconds: 30 }, {});
+    revocable.revoke();
+
+    for (const candidate of [throwingPolicy, revocable.proxy]) {
+      let thrown: unknown;
+      try {
+        createBalanceSyncConsumerComposition({
+          sqs: {} as PinnedSqsQueueReceiptPort,
+          receiptPolicy: candidate,
+          observability: applicationObservability,
+          ethereumTransport: { exchange },
+          solanaTransport: { exchange },
+          walletAddressResolver: { resolveActiveAddress: jest.fn() },
+          checkpoints: {
+            load: jest.fn(),
+            upsertCurrent: jest.fn(),
+            replaceProvisionalAfterReorg: jest.fn(),
+            preserveLastGoodAndMarkStale: jest.fn(),
+          },
+          clock: { now: jest.fn() },
+          metrics: { record: jest.fn(), alert: jest.fn() },
+        });
+      } catch (error) {
+        thrown = error;
+      }
+      expect(thrown).toEqual(new Error(invalidReceiptPolicyError));
+      expect(String(thrown)).not.toContain(secret);
+    }
+    expect(exchange).not.toHaveBeenCalled();
+  });
+
+  it('snapshots the exact policy once before graph construction and derives other values from the domain', () => {
+    const target = { visibilityTimeoutSeconds: 30 };
+    let ordinaryReads = 0;
+    let descriptorReads = 0;
+    const configuredPolicy = new Proxy(target, {
+      get: () => {
+        ordinaryReads += 1;
+        throw new Error('ordinary property reads are forbidden');
+      },
+      getOwnPropertyDescriptor: (candidate, property) => {
+        descriptorReads += 1;
+        return Reflect.getOwnPropertyDescriptor(candidate, property);
+      },
+    });
+
+    const test = createHarness(configuredPolicy);
+    target.visibilityTimeoutSeconds = 60;
+    type WorkerWiring = Readonly<{
+      sqs: PinnedSqsQueueReceiptPort;
+      policy: Readonly<{
+        maxReceiveCount: number;
+        visibilityTimeoutSeconds: number;
+        retryBaseDelaySeconds: number;
+        retryMaxDelaySeconds: number;
+      }>;
+    }>;
+    const worker = test.composition.queueWorker as unknown as WorkerWiring;
+
+    expect(descriptorReads).toBe(1);
+    expect(ordinaryReads).toBe(0);
+    expect(worker.sqs).toBe(test.sqs);
+    expect(worker.policy).toEqual({
+      maxReceiveCount: BALANCE_SYNC_POLICY.maxAttempts,
+      visibilityTimeoutSeconds: 30,
+      retryBaseDelaySeconds: BALANCE_SYNC_POLICY.retryBaseDelaySeconds,
+      retryMaxDelaySeconds: BALANCE_SYNC_POLICY.retryMaximumDelaySeconds,
+    });
+    expect(Object.isFrozen(worker.policy)).toBe(true);
+    expect(worker.policy).not.toBe(configuredPolicy);
+  });
+
+  it('accepts an exact null-prototype receipt policy', () => {
+    const configuredPolicy = Object.assign(Object.create(null) as object, {
+      visibilityTimeoutSeconds: 43_200,
+    }) as BalanceSyncConsumerReceiptPolicy;
+
+    expect(() => createHarness(configuredPolicy)).not.toThrow();
+  });
+
+  it('does not inspect an opaque receipt capability until worker execution', async () => {
+    const receiveArguments: unknown[][] = [];
+    const receive: PinnedSqsQueueReceiptPort['receive'] = async (...args) => {
+      receiveArguments.push(args);
+      return [];
+    };
+    const portTarget: PinnedSqsQueueReceiptPort = {
+      receive,
+      delete: async () => undefined,
+      changeVisibility: async () => undefined,
+      parseEnvelope: <Payload = unknown>(body: string): JobEnvelope<Payload> =>
+        JSON.parse(body) as JobEnvelope<Payload>,
+    };
+    let receiveAccessorReads = 0;
+    Object.defineProperty(portTarget, 'receive', {
+      configurable: true,
+      enumerable: true,
+      get: () => {
+        receiveAccessorReads += 1;
+        return receive;
+      },
+    });
+    const traps: PropertyKey[] = [];
+    const sqs = new Proxy(portTarget, {
+      get: (target, property, receiver) => {
+        traps.push(property);
+        return Reflect.get(target, property, receiver) as unknown;
+      },
+      getOwnPropertyDescriptor: (target, property) => {
+        traps.push(property);
+        return Reflect.getOwnPropertyDescriptor(target, property);
+      },
+      getPrototypeOf: (target) => {
+        traps.push('[[Prototype]]');
+        return Reflect.getPrototypeOf(target);
+      },
+      ownKeys: (target) => {
+        traps.push('[[OwnKeys]]');
+        return Reflect.ownKeys(target);
+      },
+    });
+    Object.defineProperty(portTarget, 'queueUrl', {
+      configurable: true,
+      enumerable: true,
+      get: () => {
+        throw new Error('queue URL must remain unread');
+      },
+    });
+
+    const test = createHarness(receiptPolicy(), undefined, sqs);
+    const worker = test.composition.queueWorker as unknown as Readonly<{
+      sqs: PinnedSqsQueueReceiptPort;
+    }>;
+
+    expect(traps).toEqual([]);
+    expect(receiveAccessorReads).toBe(0);
+    expect(receiveArguments).toEqual([]);
+    expect(worker.sqs).toBe(sqs);
+
+    await expect(test.composition.queueWorker.processOne(async () => undefined)).resolves.toEqual({
+      status: 'idle',
+    });
+    expect(traps).toEqual(['receive']);
+    expect(receiveAccessorReads).toBe(1);
+    expect(receiveArguments).toEqual([[]]);
   });
 
   it('constructs an inert, transparent, fail-closed object graph', () => {
@@ -253,7 +403,7 @@ describe('createBalanceSyncConsumerComposition', () => {
     expect(test.solanaExchange).not.toHaveBeenCalled();
   });
 
-  it('binds SqsJobWorker to only the physical balance queue', async () => {
+  it('receives only through the already-pinned capability without queue coordinates', async () => {
     const test = createHarness();
 
     await expect(test.composition.queueWorker.processOne(async () => undefined)).resolves.toEqual({
@@ -261,9 +411,7 @@ describe('createBalanceSyncConsumerComposition', () => {
     });
 
     expect(test.receive).toHaveBeenCalledTimes(1);
-    expect(test.receive).toHaveBeenCalledWith(
-      'https://sqs.us-east-1.amazonaws.com/000000000000/balance-sync',
-    );
+    expect(test.receive).toHaveBeenCalledWith();
   });
 
   it('uses only pinned receipt visibility and native redrive for three bounded failures', async () => {
@@ -318,32 +466,30 @@ describe('createBalanceSyncConsumerComposition', () => {
       0,
     ]);
     expect(
-      test.changeVisibility.mock.calls.map(([message, delaySeconds, queueUrl]) => ({
+      test.changeVisibility.mock.calls.map(([message, delaySeconds, abortSignal]) => ({
         messageId: (message as ReceivedQueueMessage).messageId,
         delaySeconds,
-        queueUrl,
+        hasAbortSignal: abortSignal instanceof AbortSignal,
       })),
     ).toEqual([
       {
         messageId: 'balance-message-1',
         delaySeconds: 5,
-        queueUrl: 'https://sqs.us-east-1.amazonaws.com/000000000000/balance-sync',
+        hasAbortSignal: true,
       },
       {
         messageId: 'balance-message-2',
         delaySeconds: 10,
-        queueUrl: 'https://sqs.us-east-1.amazonaws.com/000000000000/balance-sync',
+        hasAbortSignal: true,
       },
       {
         messageId: 'balance-message-3',
         delaySeconds: 0,
-        queueUrl: 'https://sqs.us-east-1.amazonaws.com/000000000000/balance-sync',
+        hasAbortSignal: true,
       },
     ]);
     expect(handler).toHaveBeenCalledTimes(BALANCE_SYNC_POLICY.maxAttempts);
     expect(test.deleteReceipt).not.toHaveBeenCalled();
-    expect(test.sendMessage).not.toHaveBeenCalled();
-    expect(test.directDeadLetter).not.toHaveBeenCalled();
   });
 
   it('carries a validated provider rate-limit floor through the composed native receipt path', async () => {
@@ -353,7 +499,7 @@ describe('createBalanceSyncConsumerComposition', () => {
       '2026-09-04T12:00:03.000Z',
     ];
     let clockIndex = 0;
-    const test = createHarness(infrastructureConfig(), {
+    const test = createHarness(receiptPolicy(), {
       now: () => new Date(times[Math.min(clockIndex++, times.length - 1)] ?? Number.NaN),
     });
     const job = createDeterministicBalanceSyncJobEnvelope(
@@ -398,16 +544,9 @@ describe('createBalanceSyncConsumerComposition', () => {
       receiveCount: 1,
       retryDelaySeconds: 30,
     });
-    expect(test.changeVisibility).toHaveBeenCalledWith(
-      message,
-      30,
-      infrastructureConfig().sqs.balanceQueueUrl,
-      expect.any(AbortSignal),
-    );
+    expect(test.changeVisibility).toHaveBeenCalledWith(message, 30, expect.any(AbortSignal));
     expect(test.checkpoints.preserveLastGoodAndMarkStale).toHaveBeenCalledTimes(1);
     expect(test.deleteReceipt).not.toHaveBeenCalled();
-    expect(test.sendMessage).not.toHaveBeenCalled();
-    expect(test.directDeadLetter).not.toHaveBeenCalled();
   });
 
   it('dispatches an exact launch-network job only through the composed orchestrator', async () => {

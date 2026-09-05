@@ -20,11 +20,13 @@ service. That port exposes only receive, delete, change-visibility, and envelope
 parsing; it exposes no publish operation or queue URL, and callers cannot supply
 a `QueueUrl`. The registered generic worker is pinned to the jobs queue and
 rejects balance jobs before invoking a handler. The dormant balance composition
-is pinned to the exact balance source queue and accepts only exact
-`blockchain.balance-sync@1` envelopes, rejecting ledger, yield, unknown, or
-wrong-version jobs before handler invocation. When the raw `SqsService` is
-loaded for the balance-consumer workload, send/publish, batch-publish, and queue
-health inspection fail closed.
+accepts an already source-pinned balance receipt capability and accepts only
+exact `blockchain.balance-sync@1` envelopes, rejecting ledger, yield, unknown,
+or wrong-version jobs before handler invocation. The future aggregate must
+establish that source provenance and derive receive visibility and worker
+heartbeat visibility from the same frozen configuration snapshot. When the raw
+`SqsService` is loaded for the balance-consumer workload, send/publish,
+batch-publish, and queue health inspection fail closed.
 
 The source-only balance-consumer receipt capsule is not registered or exported
 through a barrel. It snapshots hostile configuration before allocating its

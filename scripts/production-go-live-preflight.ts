@@ -569,7 +569,7 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
   cliSource: '7fec5d0cc345b82ed4fb5f26e1fa7099f0cb38c246224ada7a9fe51a65d4c455',
   cliModeSource: '2b03494cb126e80f4f7af1176cb08cf13aef2d14d4bf3cb371faa6f06a7294a8',
   runtimeSource: '9eb119d5c4ed60708931bdc25b810d0f61e064d8521c3465ae4c85046480fd5b',
-  compositionSource: 'a898bcebc7ea56cae7b51e71e27107cb76330a98c4659b5bf761fa4a2e988971',
+  compositionSource: '3167bf5e65ffd8ff3b73f90cdb1af962261a090c7f7661f44d0973ea49320aa5',
   balanceConsumerPersistenceResourceSource:
     'e95c1ce138f15202e0e181ff31fe164fa22d61e2eaa642a32ea81865a28ff27d',
   balanceConsumerSqsReceiptResourceSource:
@@ -1873,14 +1873,41 @@ function hasDormantBalanceConsumerSourceContract(sources: BalanceConsumerArtifac
     exactExecutableLineCount(sources.compositionSource, "'balance',") === 1 &&
     exactExecutableLineCount(
       sources.compositionSource,
-      'const balanceQueueReceipt = new PinnedSqsQueueReceiptAdapter(',
+      "import type { PinnedSqsQueueReceiptPort } from '../../infrastructure/sqs/sqs-queue-receipt.port';",
     ) === 1 &&
     exactExecutableLineCount(
       sources.compositionSource,
-      'dependencies.infrastructureConfig.sqs.balanceQueueUrl,',
+      'readonly sqs: Readonly<PinnedSqsQueueReceiptPort>;',
     ) === 1 &&
-    exactExecutableLineCount(sources.compositionSource, 'balanceQueueReceipt,') === 1 &&
-    !/(?:^|\.)sqs\.queueUrl\b/u.test(sources.compositionSource) &&
+    exactExecutableLineCount(
+      sources.compositionSource,
+      'readonly visibilityTimeoutSeconds: number;',
+    ) === 1 &&
+    exactExecutableLineCount(
+      sources.compositionSource,
+      'const receiptPolicy = snapshotReceiptPolicy(dependencies.receiptPolicy);',
+    ) === 1 &&
+    exactExecutableLineCount(
+      sources.compositionSource,
+      'const descriptors = Object.getOwnPropertyDescriptors(value);',
+    ) === 1 &&
+    exactExecutableLineCount(
+      sources.compositionSource,
+      "keys[0] !== 'visibilityTimeoutSeconds' ||",
+    ) === 1 &&
+    exactExecutableLineCount(
+      sources.compositionSource,
+      'return Object.freeze({ visibilityTimeoutSeconds: visibilityTimeoutSeconds as number });',
+    ) === 1 &&
+    exactExecutableLineCount(sources.compositionSource, 'dependencies.sqs,') === 1 &&
+    exactExecutableLineCount(
+      sources.compositionSource,
+      'visibilityTimeoutSeconds: receiptPolicy.visibilityTimeoutSeconds,',
+    ) === 1 &&
+    sources.compositionSource.includes('Balance sync consumer receipt policy is invalid') &&
+    !/\b(?:BalanceConsumerInfrastructureConfig|PinnedSqsQueueReceiptAdapter|SqsQueueReceiptTransport|infrastructureConfig|balanceQueueUrl|queueUrl|QueueUrl)\b/u.test(
+      sources.compositionSource,
+    ) &&
     !/\bNestFactory\b|@Module\s*\(|createApplicationContext\s*\(|\.listen\s*\(/u.test(
       sources.compositionSource,
     )
@@ -2675,7 +2702,11 @@ function hasExactBalanceConsumerNativeReceiptRedriveContract(
     ) === 1 &&
     exactExecutableLineCount(
       composition,
-      'assertBalanceConsumerSqsReceiptRedrivePolicy(dependencies.infrastructureConfig.sqs);',
+      'const receiptPolicy = snapshotReceiptPolicy(dependencies.receiptPolicy);',
+    ) === 1 &&
+    exactExecutableLineCount(
+      composition,
+      'visibilityTimeoutSeconds: receiptPolicy.visibilityTimeoutSeconds,',
     ) === 1 &&
     exactExecutableLineCount(composition, 'maxReceiveCount: BALANCE_SYNC_POLICY.maxAttempts,') ===
       1 &&
@@ -2687,7 +2718,7 @@ function hasExactBalanceConsumerNativeReceiptRedriveContract(
       composition,
       'retryMaxDelaySeconds: BALANCE_SYNC_POLICY.retryMaximumDelaySeconds,',
     ) === 1 &&
-    !/infrastructureConfig\.sqs\.(?:maxReceiveCount|retryBaseDelaySeconds|retryMaxDelaySeconds)/u.test(
+    !/(?:dependencies|receiptPolicy)\.(?:maxReceiveCount|retryBaseDelaySeconds|retryMaxDelaySeconds)\b/u.test(
       composition,
     ) &&
     exactExecutableLineCount(ingress, "job.kind !== 'blockchain.balance-sync' ||") === 1 &&
