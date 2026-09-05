@@ -233,7 +233,7 @@ describe('Solana mainnet balance indexer transcript adapter', () => {
     expect(addressReads).toBe(0);
   });
 
-  it('serves provisional display balances from one parent-linked confirmed slot', async () => {
+  it('brackets provisional display balances with the same parent-linked confirmed block', async () => {
     const { adapter, transport } = adapterWith();
     await expect(adapter.readCurrent(provisionalRequest)).resolves.toMatchObject({
       walletId: WALLET_ID,
@@ -256,6 +256,7 @@ describe('Solana mainnet balance indexer transcript adapter', () => {
     expect(transport.requests.map(({ method }) => method)).toEqual([
       'getGenesisHash',
       'getSlot',
+      'getBlock',
       'getTokenAccountsByOwner',
       'getTokenAccountsByOwner',
       'getTokenAccountsByOwner',
@@ -272,9 +273,67 @@ describe('Solana mainnet balance indexer transcript adapter', () => {
         minContextSlot: 100,
       });
     }
-    expect(transport.requests.find(({ method }) => method === 'getBlock')?.params).toEqual([
-      100,
-      { commitment: 'confirmed', transactionDetails: 'none', rewards: false },
+    const blockRequests = transport.requests.filter(({ method }) => method === 'getBlock');
+    expect(blockRequests).toHaveLength(2);
+    for (const request of blockRequests) {
+      expect(request.params).toEqual([
+        100,
+        { commitment: 'confirmed', transactionDetails: 'none', rewards: false },
+      ]);
+    }
+  });
+
+  it.each(['before', 'after'] as const)(
+    'treats a null selected-slot header %s the account bundle as retryable unavailability',
+    async (phase) => {
+      const respond = validResponder();
+      let blockReads = 0;
+      const { adapter, transport } = adapterWith((request) => {
+        if (request.method === 'getBlock') {
+          blockReads += 1;
+          if (phase === 'before' || blockReads === 2) return success(request, null);
+        }
+        return respond(request);
+      });
+
+      await expect(adapter.readCurrent(provisionalRequest)).rejects.toMatchObject({
+        code: 'PROVIDER_UNAVAILABLE',
+        message: 'PROVIDER_UNAVAILABLE',
+        retryAfterSeconds: undefined,
+      });
+      expect(blockReads).toBe(phase === 'before' ? 1 : 2);
+      expect(
+        transport.requests.filter(({ method }) => method === 'getTokenAccountsByOwner'),
+      ).toHaveLength(phase === 'before' ? 0 : 3);
+    },
+  );
+
+  it('rejects a same-slot fork identity change across the account bundle', async () => {
+    const respond = validResponder();
+    let blockReads = 0;
+    const { adapter, transport } = adapterWith((request) => {
+      if (request.method === 'getBlock') {
+        blockReads += 1;
+        return success(
+          request,
+          blockReads === 1 ? block(100, USDC, 99, PYUSD) : block(100, USDT, 99, PYUSD),
+        );
+      }
+      return respond(request);
+    });
+
+    await expect(adapter.readCurrent(provisionalRequest)).rejects.toMatchObject({
+      code: 'PROVIDER_UNAVAILABLE',
+      message: 'PROVIDER_UNAVAILABLE',
+    });
+    expect(transport.requests.map(({ method }) => method)).toEqual([
+      'getGenesisHash',
+      'getSlot',
+      'getBlock',
+      'getTokenAccountsByOwner',
+      'getTokenAccountsByOwner',
+      'getTokenAccountsByOwner',
+      'getBlock',
     ]);
   });
 
@@ -474,7 +533,7 @@ describe('Solana mainnet balance indexer transcript adapter', () => {
       transport.requests
         .filter(({ method }) => method === 'getBlock')
         .map(({ params }) => params[0]),
-    ).toEqual([103, 101, 102]);
+    ).toEqual([103, 103, 101, 102]);
   });
 
   it('fails closed on broken parent linkage, bound exhaustion, identity mismatch, and invalid addresses', async () => {

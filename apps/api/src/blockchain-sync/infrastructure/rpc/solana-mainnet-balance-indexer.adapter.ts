@@ -151,6 +151,10 @@ export class SolanaMainnetBalanceIndexerAdapter implements BalanceSyncIndexerPor
       Object.freeze({ commitment }),
     ]);
     const slot = parseSafeSlot(slotResult, 'PROVIDER_INVALID_DATA');
+    const selectedHeader = await this.readBlock(BigInt(slot), commitment);
+    if (selectedHeader === null) {
+      throw new BalanceSyncIndexerFailure('PROVIDER_UNAVAILABLE');
+    }
     const positions: BalanceSyncPosition[] = [];
 
     for (const asset of SOLANA_ASSETS) {
@@ -176,20 +180,22 @@ export class SolanaMainnetBalanceIndexerAdapter implements BalanceSyncIndexerPor
         }),
       );
     }
-    const header = await this.readBlock(BigInt(slot), commitment);
-    if (header === null) throw new BalanceSyncIndexerFailure('PROVIDER_UNAVAILABLE');
+    const verifiedHeader = await this.readBlock(BigInt(slot), commitment);
+    if (verifiedHeader === null || !sameBlockHeader(selectedHeader, verifiedHeader)) {
+      throw new BalanceSyncIndexerFailure('PROVIDER_UNAVAILABLE');
+    }
     await this.assertMainnetIdentity();
     const retrievedAt = canonicalClockTime(this.clock);
     return Object.freeze({
-      header,
+      header: verifiedHeader,
       candidate: Object.freeze({
         walletId: request.walletId,
         networkId: SOLANA_MAINNET_NETWORK_ID,
         tier: request.tier,
         source: Object.freeze({
-          position: header.position.toString(10),
-          hash: header.hash,
-          parentHash: header.parentHash,
+          position: verifiedHeader.position.toString(10),
+          hash: verifiedHeader.hash,
+          parentHash: verifiedHeader.parentHash,
           selector: commitment,
           retrievedAt,
           identityValidated: true,
@@ -290,6 +296,15 @@ function validateSolanaRequest(
   ) {
     throw new BalanceSyncIndexerFailure('PERMANENT_PROVIDER_FAILURE');
   }
+}
+
+function sameBlockHeader(left: SolanaBlockHeader, right: SolanaBlockHeader): boolean {
+  return (
+    left.position === right.position &&
+    left.hash === right.hash &&
+    left.parentPosition === right.parentPosition &&
+    left.parentHash === right.parentHash
+  );
 }
 
 function parseTokenAccounts(
