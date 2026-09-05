@@ -22,8 +22,8 @@ Non-secret CloudFormation parameters in Key=Value form. Secret values are
 rejected; AuthWalletKeysSecretArn is the sole reviewed external secret reference.
 When operational alarms are enabled, AlarmTopicArn must name one
 existing SNS topic in the approved partition, account, and Region.
-The three workload-boundary delivery parameters are derived by this guard and
-must not be supplied as overrides.
+The child-template delivery parameters and six fixed-slot VersionIds are
+derived from named inputs by this guard and must not be supplied as overrides.
 
 .PARAMETER WorkloadBoundariesTemplateFile
 Reviewed local workload-boundary child template. Its exact byte SHA-256 is bound
@@ -46,6 +46,34 @@ content-addressed observability child. This guard never uploads it.
 
 .PARAMETER ObservabilityArtifactVersionId
 Exact non-null S3 VersionId for the observability child template object.
+
+.PARAMETER ApiDatabaseSlotAVersionId
+Exact Secrets Manager VersionId for API database slot A, or the uppercase
+UNPINNED sentinel for a zero-count CREATE only. The other five fixed-slot
+VersionId parameters have the same contract and must be supplied together.
+
+.PARAMETER FixedSlotCredentialTransitionRecordFile
+Git-ignored local JSON record validated for every UPDATE against the exact
+account, Region, immutable stack ID, environment, and reviewed template hashes.
+
+.PARAMETER CurrentStackId
+Exact immutable application stack ARN. Required for UPDATE and checked against
+the live stack response, change set, current-state binding, and acknowledgement;
+credential transitions also require the local record to name the same ARN.
+
+.PARAMETER UpdateIntent
+Required for UPDATE. APPLICATION permits a non-credential application change
+only while all ten fixed-slot version/phase/operator bindings remain unchanged.
+CREDENTIAL_TRANSITION permits only the transition record's exact ten bindings
+and prohibits unrelated template, parameter, or tag changes.
+
+.PARAMETER FixedSlotCredentialTransitionMode
+Exact lowercase adopt or transition mode for the local fixed-slot validator.
+
+.PARAMETER FixedSlotCredentialTransitionValidationAt
+Explicit current canonical UTC instant used by the local transition validator.
+It must be within five minutes of this invocation so an old validation instant
+cannot make expired evidence appear current.
 
 .PARAMETER AllowAwsApiCalls
 Explicit opt-in required before this script resolves credentials or calls AWS.
@@ -116,6 +144,30 @@ param(
 
     [string] $ObservabilityArtifactVersionId,
 
+    [string] $ApiDatabaseSlotAVersionId,
+
+    [string] $ApiDatabaseSlotBVersionId,
+
+    [string] $WorkerDatabaseSlotAVersionId,
+
+    [string] $WorkerDatabaseSlotBVersionId,
+
+    [string] $RedisApiSlotAVersionId,
+
+    [string] $RedisApiSlotBVersionId,
+
+    [string] $CurrentStackId,
+
+    [ValidateSet('APPLICATION', 'CREDENTIAL_TRANSITION')]
+    [string] $UpdateIntent,
+
+    [string] $FixedSlotCredentialTransitionRecordFile,
+
+    [ValidateSet('adopt', 'transition')]
+    [string] $FixedSlotCredentialTransitionMode,
+
+    [string] $FixedSlotCredentialTransitionValidationAt,
+
     [string[]] $ParameterOverride = @(),
 
     [switch] $AllowAwsApiCalls,
@@ -141,6 +193,7 @@ $workloadBoundariesValidatorPath = Join-Path $PSScriptRoot 'validate-application
 $observabilityValidatorPath = Join-Path $PSScriptRoot 'validate-application-observability.mjs'
 $billingRecordValidatorPath = Join-Path $PSScriptRoot 'validate-billing-control-record.mjs'
 $acmDnsRecordValidatorPath = Join-Path $PSScriptRoot 'validate-acm-dns-control-record.mjs'
+$fixedSlotCredentialTransitionValidatorPath = Join-Path $PSScriptRoot 'validate-fixed-slot-credential-transition.mjs'
 $accountGuardrailTemplatePath = Join-Path $PSScriptRoot 'account-guardrails.yaml'
 $resolvedTemplate = [System.IO.Path]::GetFullPath($TemplateFile)
 $resolvedWorkloadBoundariesTemplate = [System.IO.Path]::GetFullPath($WorkloadBoundariesTemplateFile)
@@ -260,6 +313,100 @@ function Get-OptionalPropertyValue {
         return $null
     }
     return $property.Value
+}
+
+function ConvertFrom-ParameterOverrides {
+    param([string[]] $Overrides)
+
+    $result = [System.Collections.Specialized.OrderedDictionary]::new([System.StringComparer]::Ordinal)
+    foreach ($item in $Overrides) {
+        if ($item -notmatch '^([A-Za-z][A-Za-z0-9]*)=(.+)$') {
+            throw "ParameterOverride '$item' must use the exact Key=Value form."
+        }
+        $key = $Matches[1]
+        if ($result.Contains($key)) {
+            throw "ParameterOverride contains duplicate key '$key'."
+        }
+        $result[$key] = $Matches[2]
+    }
+    return $result
+}
+
+function ConvertFrom-FixedSlotRecordState {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object] $State
+    )
+
+    return [ordered]@{
+        ApiDatabaseSlotAVersionId = [string] $State.apiDatabase.slots.a.currentVersionId
+        ApiDatabaseSlotBVersionId = [string] $State.apiDatabase.slots.b.currentVersionId
+        WorkerDatabaseSlotAVersionId = [string] $State.workerDatabase.slots.a.currentVersionId
+        WorkerDatabaseSlotBVersionId = [string] $State.workerDatabase.slots.b.currentVersionId
+        RedisApiSlotAVersionId = [string] $State.redis.slots.a.currentVersionId
+        RedisApiSlotBVersionId = [string] $State.redis.slots.b.currentVersionId
+        ApiDatabaseCredentialPhase = [string] $State.apiDatabase.phase
+        WorkerDatabaseCredentialPhase = [string] $State.workerDatabase.phase
+        RedisCredentialPhase = [string] $State.redis.phase
+        RedisOperatorMode = [string] $State.operatorMode
+    }
+}
+
+function Invoke-FixedSlotCredentialTransitionValidation {
+    param(
+        [string] $RecordPath,
+        [string] $Mode,
+        [string] $ValidationAt,
+        [string] $ExpectedStackId
+    )
+
+    $validationOutput = @(& $nodeCommand.Source @(
+            $fixedSlotCredentialTransitionValidatorPath,
+            '--record', $RecordPath,
+            '--mode', $Mode,
+            '--at', $ValidationAt,
+            '--expected-account', $AccountId,
+            '--expected-region', $Region,
+            '--expected-stack', $StackName,
+            '--expected-stack-id', $ExpectedStackId,
+            '--expected-environment', $EnvironmentName,
+            '--expected-parent-template-sha256', $templateSha256,
+            '--expected-workload-template-sha256', $workloadBoundariesTemplateSha256,
+            '--json'
+        ) 2>&1)
+    $validationExitCode = $LASTEXITCODE
+    if ($validationExitCode -ne 0) {
+        throw 'The fixed-slot credential transition record is malformed, stale, unauthorized, or deployment-mismatched. No AWS calls were made.'
+    }
+    try {
+        $validation = (($validationOutput | ForEach-Object { $_.ToString() }) -join "`n") | ConvertFrom-Json
+    }
+    catch {
+        throw 'Fixed-slot credential transition validation did not return a valid local report. No AWS calls were made.'
+    }
+    if (
+        -not $validation.ok -or
+        -not $validation.readyForAuthorizedPlan -or
+        [string] $validation.mode -cne $Mode -or
+        $validation.plan.executionAllowed -ne $false -or
+        $validation.externalCallsMade -ne 0 -or
+        $validation.awsCallsMade -ne 0 -or
+        $validation.databaseConnectionsMade -ne 0 -or
+        $validation.redisConnectionsMade -ne 0 -or
+        $validation.dnsQueriesMade -ne 0 -or
+        $validation.httpRequestsMade -ne 0 -or
+        $validation.resourcesCreated -ne 0 -or
+        $validation.credentialBytesRead -ne 0 -or
+        $validation.filesWritten -ne 0
+    ) {
+        throw 'Fixed-slot credential transition validation did not produce an approved zero-call, non-executable report.'
+    }
+    foreach ($hashProperty in @('canonicalSha256', 'currentStateSha256', 'targetStateSha256')) {
+        if ([string] $validation.$hashProperty -notmatch '^[a-f0-9]{64}$') {
+            throw "Fixed-slot credential transition validation did not return a valid $hashProperty binding."
+        }
+    }
+    return $validation
 }
 
 function Assert-VersionedChildArtifact {
@@ -430,6 +577,9 @@ if (-not (Test-Path -LiteralPath $billingRecordValidatorPath -PathType Leaf)) {
 if (-not (Test-Path -LiteralPath $acmDnsRecordValidatorPath -PathType Leaf)) {
     throw "ACM/DNS control record validator was not found: $acmDnsRecordValidatorPath"
 }
+if (-not (Test-Path -LiteralPath $fixedSlotCredentialTransitionValidatorPath -PathType Leaf)) {
+    throw "Fixed-slot credential transition validator was not found: $fixedSlotCredentialTransitionValidatorPath"
+}
 
 $nodeCommand = Get-Command node -ErrorAction SilentlyContinue
 if ($null -eq $nodeCommand) {
@@ -524,6 +674,38 @@ if ($Profile -match '^default$') {
     throw "The implicit/default AWS profile is prohibited. Supply a named, non-default profile."
 }
 
+$requestedPartition = if ($Region -like 'cn-*') {
+    'aws-cn'
+} elseif ($Region -like 'us-gov-*') {
+    'aws-us-gov'
+} else {
+    'aws'
+}
+$explicitParameterOverrides = [System.Collections.Specialized.OrderedDictionary]::new([System.StringComparer]::Ordinal)
+$fixedSlotTransitionRecord = $null
+$fixedSlotTransitionValidation = $null
+$fixedSlotTransitionRecordSha256 = $null
+$fixedSlotCurrentStateSha256 = $null
+$fixedSlotTargetStateSha256 = $null
+$fixedSlotTransitionDeploymentBindingSha256 = $null
+$fixedSlotCurrentBindings = $null
+$fixedSlotTargetBindings = $null
+$currentStackParameterSnapshotSha256 = $null
+$currentStackTagSnapshotSha256 = $null
+$currentApplicationTemplateSha256 = $null
+$currentStackBindingSha256 = $null
+$isApplicationUpdate = $false
+$isCredentialTransition = $false
+$preservedCredentialTags = $null
+$fixedSlotVersionValues = [ordered]@{
+    ApiDatabaseSlotAVersionId = $ApiDatabaseSlotAVersionId
+    ApiDatabaseSlotBVersionId = $ApiDatabaseSlotBVersionId
+    WorkerDatabaseSlotAVersionId = $WorkerDatabaseSlotAVersionId
+    WorkerDatabaseSlotBVersionId = $WorkerDatabaseSlotBVersionId
+    RedisApiSlotAVersionId = $RedisApiSlotAVersionId
+    RedisApiSlotBVersionId = $RedisApiSlotBVersionId
+}
+
 $controlRecord = $null
 $controlRecordSha256 = $null
 $controlConfigurationSha256 = $null
@@ -540,6 +722,12 @@ $observabilityArtifactKey = $null
 $observabilityArtifactBindingSha256 = $null
 $observabilityTemplateUrl = $null
 if ($Action -in @('Plan', 'Deploy')) {
+    Assert-RequiredValue -Name 'StackName' -Value $StackName
+    Assert-RequiredValue -Name 'ChangeSetName' -Value $ChangeSetName
+    Assert-RequiredValue -Name 'ChangeSetType' -Value $ChangeSetType
+    if (@('CREATE', 'UPDATE') -cnotcontains $ChangeSetType) {
+        throw 'ChangeSetType must use exact uppercase CREATE or UPDATE.'
+    }
     Assert-RequiredValue -Name 'EnvironmentName' -Value $EnvironmentName
     Assert-RequiredValue -Name 'BillingControlRecordFile' -Value $BillingControlRecordFile
     Assert-RequiredValue -Name 'AcmDnsControlRecordFile' -Value $AcmDnsControlRecordFile
@@ -549,6 +737,13 @@ if ($Action -in @('Plan', 'Deploy')) {
     Assert-RequiredValue -Name 'WorkloadBoundariesArtifactVersionId' -Value $WorkloadBoundariesArtifactVersionId
     Assert-RequiredValue -Name 'ObservabilityArtifactBucket' -Value $ObservabilityArtifactBucket
     Assert-RequiredValue -Name 'ObservabilityArtifactVersionId' -Value $ObservabilityArtifactVersionId
+
+    if ($StackName -notmatch '^[A-Za-z][A-Za-z0-9-]{0,127}$') {
+        throw 'StackName must be a valid explicit CloudFormation stack name.'
+    }
+    if ($ChangeSetName -notmatch '^[A-Za-z][A-Za-z0-9-]{0,127}$') {
+        throw 'ChangeSetName must be an explicit CloudFormation-safe name.'
+    }
 
     if ($EnvironmentName.Length -gt 31 -or $EnvironmentName -notmatch '^(dev|test|qa|sandbox|staging)(-[a-z0-9]+)*$') {
         throw 'EnvironmentName must be at most 31 characters and use the template non-production pattern: dev|test|qa|sandbox|staging with optional lowercase suffix segments.'
@@ -578,6 +773,200 @@ if ($Action -in @('Plan', 'Deploy')) {
         $ObservabilityArtifactVersionId -match '[\x00-\x1f\x7f]'
     ) {
         throw 'ObservabilityArtifactVersionId must be an exact non-null printable S3 VersionId of at most 1,024 characters.'
+    }
+
+    $explicitParameterOverrides = ConvertFrom-ParameterOverrides -Overrides $ParameterOverride
+    foreach ($fixedSlotVersion in $fixedSlotVersionValues.GetEnumerator()) {
+        Assert-RequiredValue -Name $fixedSlotVersion.Key -Value ([string] $fixedSlotVersion.Value)
+        if ([string] $fixedSlotVersion.Value -cnotmatch '^(UNPINNED|[A-Za-z0-9_-]{32,64})$') {
+            throw "$($fixedSlotVersion.Key) must be exactly UNPINNED or a 32-64 character Secrets Manager VersionId."
+        }
+        if ($explicitParameterOverrides.Contains($fixedSlotVersion.Key)) {
+            throw "$($fixedSlotVersion.Key) is a named immutable binding and must not be supplied in ParameterOverride."
+        }
+    }
+    $unpinnedVersionCount = @($fixedSlotVersionValues.Values | Where-Object { [string] $_ -ceq 'UNPINNED' }).Count
+    if ($unpinnedVersionCount -notin @(0, 6)) {
+        throw 'The six fixed-slot VersionId values must be either all exact pins or all UNPINNED; mixed state is prohibited.'
+    }
+
+    $earlyControlValues = [ordered]@{
+        ApiDesiredCount = '0'
+        WebDesiredCount = '0'
+        WorkerDesiredCount = '0'
+        ApiDatabaseCredentialPhase = 'A_ONLY'
+        WorkerDatabaseCredentialPhase = 'A_ONLY'
+        RedisCredentialPhase = 'A_ONLY'
+        RedisOperatorMode = 'DISABLED'
+    }
+    foreach ($controlName in @($earlyControlValues.Keys)) {
+        if ($explicitParameterOverrides.Contains($controlName)) {
+            $earlyControlValues[$controlName] = [string] $explicitParameterOverrides[$controlName]
+        }
+    }
+
+    if ($ChangeSetType -eq 'CREATE') {
+        if (
+            -not [string]::IsNullOrWhiteSpace($UpdateIntent) -or
+            -not [string]::IsNullOrWhiteSpace($CurrentStackId) -or
+            -not [string]::IsNullOrWhiteSpace($FixedSlotCredentialTransitionRecordFile) -or
+            -not [string]::IsNullOrWhiteSpace($FixedSlotCredentialTransitionMode) -or
+            -not [string]::IsNullOrWhiteSpace($FixedSlotCredentialTransitionValidationAt)
+        ) {
+            throw 'CREATE must not supply UPDATE-only stack or credential-transition inputs.'
+        }
+        if ($unpinnedVersionCount -ne 6) {
+            throw 'CREATE requires all six fixed-slot VersionId values to be UNPINNED.'
+        }
+        foreach ($desiredCount in @('ApiDesiredCount', 'WebDesiredCount', 'WorkerDesiredCount')) {
+            if ($earlyControlValues[$desiredCount] -cne '0') {
+                throw "$desiredCount must be 0 for a CREATE change set. Start services only in a reviewed UPDATE after endpoints and migrations are ready."
+            }
+        }
+        foreach ($phaseName in @('ApiDatabaseCredentialPhase', 'WorkerDatabaseCredentialPhase', 'RedisCredentialPhase')) {
+            if ($earlyControlValues[$phaseName] -cne 'A_ONLY') {
+                throw "$phaseName must be A_ONLY while CREATE uses the UNPINNED fixed-slot sentinel."
+            }
+        }
+        if ($earlyControlValues.RedisOperatorMode -cne 'DISABLED') {
+            throw 'RedisOperatorMode must be DISABLED while CREATE uses the UNPINNED fixed-slot sentinel.'
+        }
+    }
+    else {
+        if ($unpinnedVersionCount -ne 0) {
+            throw 'UPDATE requires all six fixed-slot VersionId values to be exact immutable pins.'
+        }
+        Assert-RequiredValue -Name 'CurrentStackId' -Value $CurrentStackId
+        Assert-RequiredValue -Name 'UpdateIntent' -Value $UpdateIntent
+        $isApplicationUpdate = $UpdateIntent -ceq 'APPLICATION'
+        $isCredentialTransition = $UpdateIntent -ceq 'CREDENTIAL_TRANSITION'
+        if (-not $isApplicationUpdate -and -not $isCredentialTransition) {
+            throw 'UpdateIntent must use exact uppercase APPLICATION or CREDENTIAL_TRANSITION.'
+        }
+        $expectedCurrentStackIdPattern = '^arn:' + [regex]::Escape($requestedPartition) + ':cloudformation:' + [regex]::Escape($Region) + ':' + [regex]::Escape($AccountId) + ':stack/' + [regex]::Escape($StackName) + '/[A-Za-z0-9-]{8,64}$'
+        if ($CurrentStackId -cnotmatch $expectedCurrentStackIdPattern) {
+            throw 'CurrentStackId must be the exact immutable stack ARN for the approved account, Region, and stack name.'
+        }
+
+        foreach ($explicitFixedSlotControl in @(
+                'ApiDatabaseCredentialPhase',
+                'WorkerDatabaseCredentialPhase',
+                'RedisCredentialPhase',
+                'RedisOperatorMode'
+            )) {
+            if (-not $explicitParameterOverrides.Contains($explicitFixedSlotControl)) {
+                throw "UPDATE must explicitly provide '$explicitFixedSlotControl'; implicit previous fixed-slot controls are prohibited."
+            }
+        }
+
+        if ($isApplicationUpdate) {
+            if (
+                -not [string]::IsNullOrWhiteSpace($FixedSlotCredentialTransitionRecordFile) -or
+                -not [string]::IsNullOrWhiteSpace($FixedSlotCredentialTransitionMode) -or
+                -not [string]::IsNullOrWhiteSpace($FixedSlotCredentialTransitionValidationAt)
+            ) {
+                throw 'APPLICATION updates must not supply fixed-slot transition evidence or mode inputs.'
+            }
+            $fixedSlotTargetBindings = [ordered]@{}
+            foreach ($fixedSlotVersion in $fixedSlotVersionValues.GetEnumerator()) {
+                $fixedSlotTargetBindings[$fixedSlotVersion.Key] = [string] $fixedSlotVersion.Value
+            }
+            foreach ($fixedSlotControl in @(
+                    'ApiDatabaseCredentialPhase',
+                    'WorkerDatabaseCredentialPhase',
+                    'RedisCredentialPhase',
+                    'RedisOperatorMode'
+                )) {
+                $fixedSlotTargetBindings[$fixedSlotControl] = [string] $explicitParameterOverrides[$fixedSlotControl]
+            }
+        }
+        else {
+            Assert-RequiredValue -Name 'FixedSlotCredentialTransitionRecordFile' -Value $FixedSlotCredentialTransitionRecordFile
+            Assert-RequiredValue -Name 'FixedSlotCredentialTransitionMode' -Value $FixedSlotCredentialTransitionMode
+            Assert-RequiredValue -Name 'FixedSlotCredentialTransitionValidationAt' -Value $FixedSlotCredentialTransitionValidationAt
+            if (@('adopt', 'transition') -cnotcontains $FixedSlotCredentialTransitionMode) {
+                throw 'FixedSlotCredentialTransitionMode must use exact lowercase adopt or transition.'
+            }
+
+            $parsedValidationAt = [DateTimeOffset]::MinValue
+            $canonicalValidationAt = $FixedSlotCredentialTransitionValidationAt -match '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$' -and
+                [DateTimeOffset]::TryParse(
+                    $FixedSlotCredentialTransitionValidationAt,
+                    [System.Globalization.CultureInfo]::InvariantCulture,
+                    [System.Globalization.DateTimeStyles]::AssumeUniversal -bor [System.Globalization.DateTimeStyles]::AdjustToUniversal,
+                    [ref] $parsedValidationAt
+                ) -and
+                $parsedValidationAt.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss'Z'", [System.Globalization.CultureInfo]::InvariantCulture) -ceq $FixedSlotCredentialTransitionValidationAt
+            if (-not $canonicalValidationAt) {
+                throw 'FixedSlotCredentialTransitionValidationAt must be one canonical UTC instant.'
+            }
+            $validationAgeSeconds = ([DateTimeOffset]::UtcNow - $parsedValidationAt).TotalSeconds
+            if ($validationAgeSeconds -lt -60 -or $validationAgeSeconds -gt 300) {
+                throw 'FixedSlotCredentialTransitionValidationAt must be current within the reviewed five-minute window. No AWS calls were made.'
+            }
+
+            if ($FixedSlotCredentialTransitionMode -ceq 'adopt') {
+                foreach ($desiredCount in @('ApiDesiredCount', 'WebDesiredCount', 'WorkerDesiredCount')) {
+                    if (-not $explicitParameterOverrides.Contains($desiredCount) -or [string] $explicitParameterOverrides[$desiredCount] -cne '0') {
+                        throw "Fixed-slot adoption requires explicit $desiredCount=0."
+                    }
+                }
+            }
+
+            $resolvedFixedSlotTransitionRecord = [System.IO.Path]::GetFullPath($FixedSlotCredentialTransitionRecordFile)
+            $fixedSlotValidationOne = Invoke-FixedSlotCredentialTransitionValidation `
+                -RecordPath $resolvedFixedSlotTransitionRecord `
+                -Mode $FixedSlotCredentialTransitionMode `
+                -ValidationAt $FixedSlotCredentialTransitionValidationAt `
+                -ExpectedStackId $CurrentStackId
+            try {
+                $recordRawShaBefore = (Get-FileHash -LiteralPath $resolvedFixedSlotTransitionRecord -Algorithm SHA256).Hash.ToLowerInvariant()
+                $fixedSlotTransitionRecordText = [System.IO.File]::ReadAllText($resolvedFixedSlotTransitionRecord)
+                $recordRawShaAfterRead = (Get-FileHash -LiteralPath $resolvedFixedSlotTransitionRecord -Algorithm SHA256).Hash.ToLowerInvariant()
+                $fixedSlotTransitionRecord = $fixedSlotTransitionRecordText | ConvertFrom-Json
+            }
+            catch {
+                throw 'The validated fixed-slot credential transition record could not be read stably. No AWS calls were made.'
+            }
+            $fixedSlotValidationTwo = Invoke-FixedSlotCredentialTransitionValidation `
+                -RecordPath $resolvedFixedSlotTransitionRecord `
+                -Mode $FixedSlotCredentialTransitionMode `
+                -ValidationAt $FixedSlotCredentialTransitionValidationAt `
+                -ExpectedStackId $CurrentStackId
+            $recordRawShaAfterValidation = (Get-FileHash -LiteralPath $resolvedFixedSlotTransitionRecord -Algorithm SHA256).Hash.ToLowerInvariant()
+            if (
+                $recordRawShaBefore -cne $recordRawShaAfterRead -or
+                $recordRawShaBefore -cne $recordRawShaAfterValidation -or
+                [string] $fixedSlotValidationOne.canonicalSha256 -cne [string] $fixedSlotValidationTwo.canonicalSha256 -or
+                [string] $fixedSlotValidationOne.currentStateSha256 -cne [string] $fixedSlotValidationTwo.currentStateSha256 -or
+                [string] $fixedSlotValidationOne.targetStateSha256 -cne [string] $fixedSlotValidationTwo.targetStateSha256
+            ) {
+                throw 'The fixed-slot credential transition record changed during local validation. No AWS calls were made.'
+            }
+            $fixedSlotTransitionValidation = $fixedSlotValidationTwo
+            $fixedSlotTransitionRecordSha256 = [string] $fixedSlotTransitionValidation.canonicalSha256
+            $fixedSlotCurrentStateSha256 = [string] $fixedSlotTransitionValidation.currentStateSha256
+            $fixedSlotTargetStateSha256 = [string] $fixedSlotTransitionValidation.targetStateSha256
+            $fixedSlotTransitionDeploymentBindingText = "record-sha256=$fixedSlotTransitionRecordSha256`ncurrent-state-sha256=$fixedSlotCurrentStateSha256`ntarget-state-sha256=$fixedSlotTargetStateSha256`ncurrent-stack-id=$CurrentStackId`nparent-template-sha256=$templateSha256`nworkload-template-sha256=$workloadBoundariesTemplateSha256`nobservability-template-sha256=$observabilityTemplateSha256`nmode=$FixedSlotCredentialTransitionMode`noperation=$($fixedSlotTransitionValidation.operation)"
+            $fixedSlotCurrentBindings = ConvertFrom-FixedSlotRecordState -State $fixedSlotTransitionRecord.currentState
+            $fixedSlotTargetBindings = ConvertFrom-FixedSlotRecordState -State $fixedSlotTransitionRecord.targetState
+            foreach ($targetVersion in $fixedSlotVersionValues.GetEnumerator()) {
+                if ([string] $fixedSlotTargetBindings[$targetVersion.Key] -cne [string] $targetVersion.Value) {
+                    throw "Target fixed-slot binding '$($targetVersion.Key)' does not match the approved transition record. No AWS calls were made."
+                }
+            }
+            foreach ($targetControl in @('ApiDatabaseCredentialPhase', 'WorkerDatabaseCredentialPhase', 'RedisCredentialPhase', 'RedisOperatorMode')) {
+                if ([string] $fixedSlotTargetBindings[$targetControl] -cne [string] $explicitParameterOverrides[$targetControl]) {
+                    throw "Target fixed-slot control '$targetControl' does not match the approved transition record. No AWS calls were made."
+                }
+            }
+            if (
+                ($FixedSlotCredentialTransitionMode -ceq 'adopt' -and [string] $fixedSlotTransitionValidation.operation -cne 'ADOPT_AND_PIN') -or
+                ($FixedSlotCredentialTransitionMode -ceq 'transition' -and [string] $fixedSlotTransitionValidation.operation -ceq 'ADOPT_AND_PIN')
+            ) {
+                throw 'The fixed-slot credential transition operation does not match the explicitly requested mode.'
+            }
+        }
     }
     $workloadBoundariesArtifactKey = "application-workload-boundaries-$workloadBoundariesTemplateSha256.yaml"
     $artifactBindingText = "bucket=$WorkloadBoundariesArtifactBucket`nkey=$workloadBoundariesArtifactKey`nversion-id=$WorkloadBoundariesArtifactVersionId"
@@ -898,13 +1287,7 @@ if ($ChangeSetName -notmatch '^[A-Za-z][A-Za-z0-9-]{0,127}$') {
     throw 'ChangeSetName must be an explicit CloudFormation-safe name.'
 }
 
-$partition = if ($Region -like 'cn-*') {
-    'aws-cn'
-} elseif ($Region -like 'us-gov-*') {
-    'aws-us-gov'
-} else {
-    'aws'
-}
+$partition = $requestedPartition
 
 if ($Action -in @('Plan', 'Deploy')) {
     Assert-RequiredValue -Name 'ChangeSetType' -Value $ChangeSetType
@@ -921,6 +1304,12 @@ if ($Action -in @('Plan', 'Deploy')) {
         ObservabilityTemplateUrl = $observabilityTemplateUrl
         ObservabilityTemplateSha256 = $observabilityTemplateSha256
         ObservabilityArtifactBindingSha256 = $observabilityArtifactBindingSha256
+        ApiDatabaseSlotAVersionId = $ApiDatabaseSlotAVersionId
+        ApiDatabaseSlotBVersionId = $ApiDatabaseSlotBVersionId
+        WorkerDatabaseSlotAVersionId = $WorkerDatabaseSlotAVersionId
+        WorkerDatabaseSlotBVersionId = $WorkerDatabaseSlotBVersionId
+        RedisApiSlotAVersionId = $RedisApiSlotAVersionId
+        RedisApiSlotBVersionId = $RedisApiSlotBVersionId
     }
     $sensitiveParameterName = '(?i)(password|credential|accesskey|secret(?:value|string)?|token)'
     $reviewedNonSecretControlParameters = @(
@@ -929,13 +1318,9 @@ if ($Action -in @('Plan', 'Deploy')) {
         'RedisCredentialPhase'
     )
     $reviewedSecretReferenceParameters = @('AuthWalletKeysSecretArn')
-    foreach ($item in $ParameterOverride) {
-        if ($item -notmatch '^([A-Za-z][A-Za-z0-9]*)=(.+)$') {
-            throw "ParameterOverride '$item' must use the exact Key=Value form."
-        }
-
-        $key = $Matches[1]
-        $value = $Matches[2]
+    foreach ($override in $explicitParameterOverrides.GetEnumerator()) {
+        $key = [string] $override.Key
+        $value = [string] $override.Value
         if ($key -in @(
                 'EnvironmentName',
                 'WorkloadBoundariesTemplateUrl',
@@ -943,7 +1328,13 @@ if ($Action -in @('Plan', 'Deploy')) {
                 'WorkloadBoundariesArtifactBindingSha256',
                 'ObservabilityTemplateUrl',
                 'ObservabilityTemplateSha256',
-                'ObservabilityArtifactBindingSha256'
+                'ObservabilityArtifactBindingSha256',
+                'ApiDatabaseSlotAVersionId',
+                'ApiDatabaseSlotBVersionId',
+                'WorkerDatabaseSlotAVersionId',
+                'WorkerDatabaseSlotBVersionId',
+                'RedisApiSlotAVersionId',
+                'RedisApiSlotBVersionId'
             )) {
             throw "$key is derived by a named, locally verified input and must not be repeated in ParameterOverride."
         }
@@ -953,9 +1344,6 @@ if ($Action -in @('Plan', 'Deploy')) {
             $reviewedSecretReferenceParameters -cnotcontains $key
         ) {
             throw "Secret-bearing override '$key' is prohibited. Generate and resolve secrets through Secrets Manager."
-        }
-        if ($parameterMap.Contains($key)) {
-            throw "ParameterOverride contains duplicate key '$key'."
         }
         $parameterMap[$key] = $value
     }
@@ -1024,7 +1412,8 @@ if ($Action -in @('Plan', 'Deploy')) {
         'ObservabilityTemplateSha256',
         'ObservabilityArtifactBindingSha256'
     )
-    $allowedParameterNames = @('EnvironmentName') + $deliveryParameterNames + $requiredParameters + @($parameterDefaults.Keys)
+    $fixedSlotVersionParameterNames = @($fixedSlotVersionValues.Keys)
+    $allowedParameterNames = @('EnvironmentName') + $deliveryParameterNames + $fixedSlotVersionParameterNames + $requiredParameters + @($parameterDefaults.Keys)
     foreach ($parameterName in $parameterMap.Keys) {
         if ($allowedParameterNames -cnotcontains $parameterName) {
             throw "ParameterOverride contains unknown template parameter '$parameterName'."
@@ -1034,28 +1423,132 @@ if ($Action -in @('Plan', 'Deploy')) {
         $stackOutput = & $script:AwsExecutable @(
             'cloudformation',
             'describe-stacks',
-            '--stack-name', $StackName,
+            '--stack-name', $CurrentStackId,
             '--profile', $Profile,
             '--region', $Region,
             '--output', 'json',
             '--no-cli-pager'
         )
         if ($LASTEXITCODE -ne 0) {
-            throw "Unable to read current parameters for stack '$StackName'."
+            throw "Unable to read current parameters for immutable stack '$CurrentStackId'."
         }
         $currentStack = (($stackOutput | Out-String) | ConvertFrom-Json).Stacks | Select-Object -First 1
         if ($null -eq $currentStack) {
-            throw "Stack '$StackName' was not returned for UPDATE planning."
+            throw "Immutable stack '$CurrentStackId' was not returned for UPDATE planning."
         }
-        $currentEnvironment = $currentStack.Parameters |
-            Where-Object ParameterKey -eq 'EnvironmentName' |
-            Select-Object -ExpandProperty ParameterValue -First 1
+        if (
+            [string] (Get-OptionalPropertyValue -InputObject $currentStack -Name 'StackName') -cne $StackName -or
+            [string] (Get-OptionalPropertyValue -InputObject $currentStack -Name 'StackId') -cne $CurrentStackId
+        ) {
+            throw 'The existing application stack does not match the explicitly approved name and immutable stack ID.'
+        }
+        $currentStackStatus = [string] (Get-OptionalPropertyValue -InputObject $currentStack -Name 'StackStatus')
+        if ($currentStackStatus -notin @('CREATE_COMPLETE', 'UPDATE_COMPLETE')) {
+            throw "The existing application stack is not in a stable complete state (Status=$currentStackStatus)."
+        }
+        $currentStackParameterMap = Get-StackParameterMap -Stack $currentStack
+        if (-not $currentStackParameterMap.Contains('EnvironmentName')) {
+            throw "Stack '$StackName' does not expose an explicit EnvironmentName parameter."
+        }
+        $currentEnvironment = [string] $currentStackParameterMap.EnvironmentName
         if ($currentEnvironment -cne $EnvironmentName) {
             throw "EnvironmentName '$EnvironmentName' does not match the existing stack value '$currentEnvironment'. Create a separate stack for a different environment."
         }
-        foreach ($parameter in $currentStack.Parameters) {
-            if ($parameterDefaults.Contains($parameter.ParameterKey) -and -not $parameterMap.Contains($parameter.ParameterKey)) {
-                $parameterMap[$parameter.ParameterKey] = [string] $parameter.ParameterValue
+        $expectedCurrentFixedSlotBindings = if ($isCredentialTransition) {
+            $fixedSlotCurrentBindings
+        }
+        else {
+            $fixedSlotTargetBindings
+        }
+        foreach ($currentBinding in $expectedCurrentFixedSlotBindings.GetEnumerator()) {
+            if (-not $currentStackParameterMap.Contains($currentBinding.Key)) {
+                throw "The existing application stack is missing current fixed-slot binding '$($currentBinding.Key)'."
+            }
+            if ([string] $currentStackParameterMap[$currentBinding.Key] -cne [string] $currentBinding.Value) {
+                throw "Existing fixed-slot binding '$($currentBinding.Key)' drifted from the approved update current state."
+            }
+        }
+        $currentStackTags = ConvertFrom-ChangeSetTags -Tags (Get-OptionalPropertyValue -InputObject $currentStack -Name 'Tags')
+        if ($isCredentialTransition) {
+            if ($FixedSlotCredentialTransitionMode -ceq 'adopt') {
+                foreach ($desiredCount in @('ApiDesiredCount', 'WebDesiredCount', 'WorkerDesiredCount')) {
+                    if (-not $currentStackParameterMap.Contains($desiredCount) -or [string] $currentStackParameterMap[$desiredCount] -cne '0') {
+                        throw "Fixed-slot adoption requires the existing stack's $desiredCount to remain 0."
+                    }
+                }
+                if ($currentStackTags.Contains('credential-transition-sha256') -or $currentStackTags.Contains('credential-state-sha256')) {
+                    throw 'Fixed-slot adoption requires an explicitly untracked existing stack without prior credential-chain tags.'
+                }
+            }
+            else {
+                if (
+                    -not $currentStackTags.Contains('credential-transition-sha256') -or
+                    [string] $currentStackTags['credential-transition-sha256'] -cne [string] $fixedSlotTransitionRecord.predecessor.transitionSha256
+                ) {
+                    throw 'The existing stack credential-transition chain head does not match the approved record predecessor.'
+                }
+                if (
+                    -not $currentStackTags.Contains('credential-state-sha256') -or
+                    [string] $currentStackTags['credential-state-sha256'] -cne $fixedSlotCurrentStateSha256
+                ) {
+                    throw 'The existing stack credential-state hash does not match the approved transition current state.'
+                }
+            }
+        }
+        else {
+            $credentialTagNames = @(
+                'credential-predecessor-sha256',
+                'credential-transition-sha256',
+                'credential-state-sha256'
+            )
+            foreach ($credentialTagName in $credentialTagNames) {
+                if (
+                    -not $currentStackTags.Contains($credentialTagName) -or
+                    [string] $currentStackTags[$credentialTagName] -cnotmatch '^(?:NONE|[a-f0-9]{64})$'
+                ) {
+                    throw "APPLICATION update requires a valid existing credential-chain tag '$credentialTagName'."
+                }
+            }
+            if ([string] $currentStackTags['credential-transition-sha256'] -ceq 'NONE' -or [string] $currentStackTags['credential-state-sha256'] -ceq 'NONE') {
+                throw 'APPLICATION update requires a completed fixed-slot adoption chain head.'
+            }
+            $preservedCredentialTags = [ordered]@{}
+            foreach ($credentialTagName in $credentialTagNames) {
+                $preservedCredentialTags[$credentialTagName] = [string] $currentStackTags[$credentialTagName]
+            }
+        }
+        $currentApplicationTemplateOutput = & $script:AwsExecutable @(
+            'cloudformation',
+            'get-template',
+            '--stack-name', $CurrentStackId,
+            '--template-stage', 'Original',
+            '--profile', $Profile,
+            '--region', $Region,
+            '--output', 'json',
+            '--no-cli-pager'
+        )
+        if ($LASTEXITCODE -ne 0) {
+            throw "Unable to retrieve the current Original template for stack '$StackName'."
+        }
+        $currentApplicationTemplate = ($currentApplicationTemplateOutput | Out-String) | ConvertFrom-Json
+        if ($null -eq $currentApplicationTemplate -or $currentApplicationTemplate.TemplateBody -isnot [string]) {
+            throw "CloudFormation did not return the current application stack's Original template body."
+        }
+        $currentApplicationTemplateSha256 = Get-TextSha256 -Value ([string] $currentApplicationTemplate.TemplateBody)
+        if ($isCredentialTransition -and $currentApplicationTemplateSha256 -cne $templateSha256) {
+            throw 'Credential transitions cannot include a parent-template change; the current deployed and reviewed local parent hashes differ.'
+        }
+        $currentStackParameterSnapshotSha256 = Get-TextSha256 -Value (ConvertTo-CanonicalTagText -Tags $currentStackParameterMap)
+        $currentStackTagSnapshotSha256 = Get-TextSha256 -Value (ConvertTo-CanonicalTagText -Tags $currentStackTags)
+        $currentStackBindingText = "current-stack-id=$CurrentStackId`ncurrent-parent-template-sha256=$currentApplicationTemplateSha256`ncurrent-stack-parameters-sha256=$currentStackParameterSnapshotSha256`ncurrent-stack-tags-sha256=$currentStackTagSnapshotSha256`nupdate-intent=$UpdateIntent"
+        $currentStackBindingSha256 = Get-TextSha256 -Value $currentStackBindingText
+        if ($isCredentialTransition) {
+            $fixedSlotTransitionDeploymentBindingText += "`ncurrent-stack-binding-sha256=$currentStackBindingSha256"
+            $fixedSlotTransitionDeploymentBindingSha256 = Get-TextSha256 -Value $fixedSlotTransitionDeploymentBindingText
+        }
+        foreach ($parameter in $currentStackParameterMap.GetEnumerator()) {
+            if ($parameterDefaults.Contains($parameter.Key) -and -not $parameterMap.Contains($parameter.Key)) {
+                $parameterMap[$parameter.Key] = [string] $parameter.Value
             }
         }
     }
@@ -1073,6 +1566,13 @@ if ($Action -in @('Plan', 'Deploy')) {
     }
     if (@('DISABLED', 'ENABLED') -cnotcontains [string] $parameterMap.RedisOperatorMode) {
         throw 'RedisOperatorMode must use exactly DISABLED or ENABLED.'
+    }
+    if ($ChangeSetType -eq 'UPDATE') {
+        foreach ($targetBinding in $fixedSlotTargetBindings.GetEnumerator()) {
+            if (-not $parameterMap.Contains($targetBinding.Key) -or [string] $parameterMap[$targetBinding.Key] -cne [string] $targetBinding.Value) {
+            throw "Planned fixed-slot binding '$($targetBinding.Key)' does not match the approved update target state."
+            }
+        }
     }
     foreach ($booleanParameter in @('EnableOperationalAlarms', 'EnableOperationalDashboard')) {
         if (@('true', 'false') -cnotcontains [string] $parameterMap[$booleanParameter]) {
@@ -1158,6 +1658,23 @@ if ($Action -in @('Plan', 'Deploy')) {
     if ($parameterMap.AuthWalletKeysKmsKeyArn -notmatch $expectedAuthKmsPattern) {
         throw 'AuthWalletKeysKmsKeyArn must be one customer-managed KMS key ARN in the approved account and Region.'
     }
+    if ($isCredentialTransition) {
+        if ($currentStackParameterMap.Count -ne $parameterMap.Count) {
+            throw "Credential-only UPDATE requires the current and target parameter sets to match exactly (Current=$($currentStackParameterMap.Count), Target=$($parameterMap.Count))."
+        }
+        $fixedSlotBindingNames = @($fixedSlotTargetBindings.Keys)
+        foreach ($targetParameter in $parameterMap.GetEnumerator()) {
+            if (-not $currentStackParameterMap.Contains($targetParameter.Key)) {
+                throw "Credential-only UPDATE found target parameter '$($targetParameter.Key)' missing from the current stack."
+            }
+            if (
+                $fixedSlotBindingNames -cnotcontains [string] $targetParameter.Key -and
+                [string] $currentStackParameterMap[$targetParameter.Key] -cne [string] $targetParameter.Value
+            ) {
+                throw "Credential-only UPDATE cannot change unrelated parameter '$($targetParameter.Key)'."
+            }
+        }
+    }
 
     $stackTags = [ordered]@{
         application = 'crypto-lending'
@@ -1176,6 +1693,37 @@ if ($Action -in @('Plan', 'Deploy')) {
         'managed-by' = 'cloudformation'
         ticket = 'KAN-34'
     }
+    if ($isCredentialTransition) {
+        $currentCredentialTagCount = if ($FixedSlotCredentialTransitionMode -ceq 'adopt') { 0 } else { 3 }
+        if ($currentStackTags.Count -ne ($stackTags.Count + $currentCredentialTagCount)) {
+            throw 'Credential-only UPDATE requires the existing stack to have the exact reviewed base and credential-chain tag set.'
+        }
+        foreach ($baseTag in $stackTags.GetEnumerator()) {
+            if (
+                -not $currentStackTags.Contains($baseTag.Key) -or
+                [string] $currentStackTags[$baseTag.Key] -cne [string] $baseTag.Value
+            ) {
+                throw "Credential-only UPDATE cannot change or repair unrelated stack tag '$($baseTag.Key)'."
+            }
+        }
+        if (
+            $FixedSlotCredentialTransitionMode -ceq 'transition' -and
+            (
+                -not $currentStackTags.Contains('credential-predecessor-sha256') -or
+                [string] $currentStackTags['credential-predecessor-sha256'] -cnotmatch '^(?:NONE|[a-f0-9]{64})$'
+            )
+        ) {
+            throw 'The existing stack credential predecessor tag is missing or malformed.'
+        }
+        $stackTags['credential-predecessor-sha256'] = [string] $fixedSlotTransitionRecord.predecessor.transitionSha256
+        $stackTags['credential-transition-sha256'] = $fixedSlotTransitionRecordSha256
+        $stackTags['credential-state-sha256'] = $fixedSlotTargetStateSha256
+    }
+    elseif ($isApplicationUpdate) {
+        foreach ($credentialTag in $preservedCredentialTags.GetEnumerator()) {
+            $stackTags[$credentialTag.Key] = [string] $credentialTag.Value
+        }
+    }
     $canonicalTags = ConvertTo-CanonicalTagText -Tags $stackTags
     $tagSha256 = Get-TextSha256 -Value $canonicalTags
     $tagArguments = @()
@@ -1189,7 +1737,16 @@ if ($Action -in @('Plan', 'Deploy')) {
     }
     $canonicalParameters = ($parameterMap.GetEnumerator() | Sort-Object Key | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join "`n"
     $parameterSha256 = Get-TextSha256 -Value $canonicalParameters
-    $expectedChangeSetDescription = "KAN-34 template-sha256=$templateSha256 workload-template-sha256=$workloadBoundariesTemplateSha256 workload-binding-sha256=$workloadBoundariesArtifactBindingSha256 observability-template-sha256=$observabilityTemplateSha256 observability-binding-sha256=$observabilityArtifactBindingSha256 parameters-sha256=$parameterSha256 tags-sha256=$tagSha256 control-record-sha256=$controlRecordSha256 acm-dns-record-sha256=$acmDnsRecordSha256 guardrail-policy=$expectedGuardrailPolicyVersion"
+    $updateDescription = if ($ChangeSetType -eq 'UPDATE') {
+        " current-stack-binding-sha256=$currentStackBindingSha256"
+    }
+    else {
+        ''
+    }
+    if ($isCredentialTransition) {
+        $updateDescription += " credential-transition-binding-sha256=$fixedSlotTransitionDeploymentBindingSha256"
+    }
+    $expectedChangeSetDescription = "KAN-34 template-sha256=$templateSha256 workload-template-sha256=$workloadBoundariesTemplateSha256 workload-binding-sha256=$workloadBoundariesArtifactBindingSha256 observability-template-sha256=$observabilityTemplateSha256 observability-binding-sha256=$observabilityArtifactBindingSha256 parameters-sha256=$parameterSha256 tags-sha256=$tagSha256 control-record-sha256=$controlRecordSha256 acm-dns-record-sha256=$acmDnsRecordSha256 guardrail-policy=$expectedGuardrailPolicyVersion$updateDescription"
 
     if ($Action -eq 'Plan') {
         Assert-RegionalS3ManagedPrefixList `
@@ -1217,11 +1774,12 @@ if ($Action -in @('Plan', 'Deploy')) {
             -ExpectedSha256 $observabilityTemplateSha256 `
             -ProfileName $Profile
 
+        $planStackTarget = if ($ChangeSetType -eq 'UPDATE') { $CurrentStackId } else { $StackName }
         $planArguments = @(
         'cloudformation',
         'create-change-set',
         '--template-body', $templateUri,
-        '--stack-name', $StackName,
+        '--stack-name', $planStackTarget,
         '--change-set-name', $ChangeSetName,
         '--change-set-type', $ChangeSetType,
         '--description', $expectedChangeSetDescription,
@@ -1243,10 +1801,11 @@ if ($Action -in @('Plan', 'Deploy')) {
     }
 }
 
+$deployStackTarget = if ($ChangeSetType -eq 'UPDATE') { $CurrentStackId } else { $StackName }
 $descriptionOutput = & $script:AwsExecutable @(
     'cloudformation',
     'describe-change-set',
-    '--stack-name', $StackName,
+    '--stack-name', $deployStackTarget,
     '--change-set-name', $ChangeSetName,
     '--profile', $Profile,
     '--region', $Region,
@@ -1282,6 +1841,9 @@ $stackId = [string] (Get-OptionalPropertyValue -InputObject $changeSet -Name 'St
 $expectedStackIdPattern = '^arn:' + [regex]::Escape($partition) + ':cloudformation:' + [regex]::Escape($Region) + ':' + [regex]::Escape($AccountId) + ':stack/' + [regex]::Escape($StackName) + '/[A-Za-z0-9-]+$'
 if ($stackId -notmatch $expectedStackIdPattern) {
     throw 'The reviewed change set is not bound to the expected immutable stack ARN in the approved account and Region.'
+}
+if ($ChangeSetType -eq 'UPDATE' -and $stackId -cne $CurrentStackId) {
+    throw 'The reviewed UPDATE change set is not bound to the exact immutable current stack ID in the approved update context.'
 }
 $parentChangeSetId = [string] (Get-OptionalPropertyValue -InputObject $changeSet -Name 'ParentChangeSetId')
 if (-not [string]::IsNullOrEmpty($parentChangeSetId)) {
@@ -1371,6 +1933,24 @@ if (
 ) {
     throw 'A reviewed local template changed during Deploy verification. Re-run Plan and review a new change set.'
 }
+if ($isCredentialTransition) {
+    $currentTransitionRecordRawSha256 = (Get-FileHash -LiteralPath $resolvedFixedSlotTransitionRecord -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($currentTransitionRecordRawSha256 -cne $recordRawShaBefore) {
+        throw 'The fixed-slot credential transition record changed after Plan/Deploy validation. Re-run Plan and review a new change set.'
+    }
+    $finalFixedSlotValidation = Invoke-FixedSlotCredentialTransitionValidation `
+        -RecordPath $resolvedFixedSlotTransitionRecord `
+        -Mode $FixedSlotCredentialTransitionMode `
+        -ValidationAt $FixedSlotCredentialTransitionValidationAt `
+        -ExpectedStackId $CurrentStackId
+    if (
+        [string] $finalFixedSlotValidation.canonicalSha256 -cne $fixedSlotTransitionRecordSha256 -or
+        [string] $finalFixedSlotValidation.currentStateSha256 -cne $fixedSlotCurrentStateSha256 -or
+        [string] $finalFixedSlotValidation.targetStateSha256 -cne $fixedSlotTargetStateSha256
+    ) {
+        throw 'The fixed-slot credential transition validation binding changed before execution. Re-run Plan and review a new change set.'
+    }
+}
 Assert-RegionalS3ManagedPrefixList `
     -PrefixListId ([string] $parameterMap.S3ManagedPrefixListId) `
     -ExpectedRegion $Region `
@@ -1396,6 +1976,57 @@ Assert-VersionedChildArtifact `
     -ExpectedSha256 $observabilityTemplateSha256 `
     -ProfileName $Profile
 
+if ($ChangeSetType -eq 'UPDATE') {
+    $finalStackOutput = & $script:AwsExecutable @(
+        'cloudformation',
+        'describe-stacks',
+        '--stack-name', $CurrentStackId,
+        '--profile', $Profile,
+        '--region', $Region,
+        '--output', 'json',
+        '--no-cli-pager'
+    )
+    if ($LASTEXITCODE -ne 0) {
+        throw "Unable to re-read immutable stack '$CurrentStackId' immediately before execution."
+    }
+    $finalCurrentStack = (($finalStackOutput | Out-String) | ConvertFrom-Json).Stacks | Select-Object -First 1
+    if (
+        $null -eq $finalCurrentStack -or
+        [string] (Get-OptionalPropertyValue -InputObject $finalCurrentStack -Name 'StackName') -cne $StackName -or
+        [string] (Get-OptionalPropertyValue -InputObject $finalCurrentStack -Name 'StackId') -cne $CurrentStackId -or
+        [string] (Get-OptionalPropertyValue -InputObject $finalCurrentStack -Name 'StackStatus') -notin @('CREATE_COMPLETE', 'UPDATE_COMPLETE')
+    ) {
+        throw 'The current application stack identity or stable status changed before execution. Re-plan and review a new change set.'
+    }
+    $finalCurrentParameterMap = Get-StackParameterMap -Stack $finalCurrentStack
+    $finalCurrentTags = ConvertFrom-ChangeSetTags -Tags (Get-OptionalPropertyValue -InputObject $finalCurrentStack -Name 'Tags')
+    $finalCurrentTemplateOutput = & $script:AwsExecutable @(
+        'cloudformation',
+        'get-template',
+        '--stack-name', $CurrentStackId,
+        '--template-stage', 'Original',
+        '--profile', $Profile,
+        '--region', $Region,
+        '--output', 'json',
+        '--no-cli-pager'
+    )
+    if ($LASTEXITCODE -ne 0) {
+        throw "Unable to re-read the Original template for immutable stack '$CurrentStackId' immediately before execution."
+    }
+    $finalCurrentTemplate = ($finalCurrentTemplateOutput | Out-String) | ConvertFrom-Json
+    if ($null -eq $finalCurrentTemplate -or $finalCurrentTemplate.TemplateBody -isnot [string]) {
+        throw 'CloudFormation did not return the current Original application template immediately before execution.'
+    }
+    $finalCurrentTemplateSha256 = Get-TextSha256 -Value ([string] $finalCurrentTemplate.TemplateBody)
+    $finalCurrentParameterSnapshotSha256 = Get-TextSha256 -Value (ConvertTo-CanonicalTagText -Tags $finalCurrentParameterMap)
+    $finalCurrentTagSnapshotSha256 = Get-TextSha256 -Value (ConvertTo-CanonicalTagText -Tags $finalCurrentTags)
+    $finalCurrentStackBindingText = "current-stack-id=$CurrentStackId`ncurrent-parent-template-sha256=$finalCurrentTemplateSha256`ncurrent-stack-parameters-sha256=$finalCurrentParameterSnapshotSha256`ncurrent-stack-tags-sha256=$finalCurrentTagSnapshotSha256`nupdate-intent=$UpdateIntent"
+    $finalCurrentStackBindingSha256 = Get-TextSha256 -Value $finalCurrentStackBindingText
+    if ($finalCurrentStackBindingSha256 -cne $currentStackBindingSha256) {
+        throw 'The immutable current stack changed after review and before execution. Re-plan and review a new change set.'
+    }
+}
+
 Write-Host "Reviewed template SHA-256: $templateSha256"
 Write-Host "Verified submitted template SHA-256: $submittedTemplateSha256"
 Write-Host "Verified workload-boundary template SHA-256: $workloadBoundariesTemplateSha256"
@@ -1406,8 +2037,26 @@ Write-Host "Reviewed parameter SHA-256: $parameterSha256"
 Write-Host "Reviewed tag SHA-256: $tagSha256"
 Write-Host "Reviewed billing control record SHA-256: $controlRecordSha256"
 Write-Host "Reviewed ACM/DNS control record SHA-256: $acmDnsRecordSha256"
+if ($ChangeSetType -eq 'UPDATE') {
+    Write-Host "Reviewed current stack binding SHA-256: $currentStackBindingSha256"
+}
+if ($isCredentialTransition) {
+    Write-Host "Reviewed fixed-slot credential transition record SHA-256: $fixedSlotTransitionRecordSha256"
+    Write-Host "Reviewed fixed-slot current state SHA-256: $fixedSlotCurrentStateSha256"
+    Write-Host "Reviewed fixed-slot target state SHA-256: $fixedSlotTargetStateSha256"
+    Write-Host "Reviewed fixed-slot deployment binding SHA-256: $fixedSlotTransitionDeploymentBindingSha256"
+}
 
-$expectedAcknowledgement = "EXECUTE IMMUTABLE CHANGE SET $changeSetId FOR IMMUTABLE STACK $stackId WITH PARAMETERS $parameterSha256 WORKLOAD TEMPLATE $workloadBoundariesTemplateSha256 WORKLOAD BINDING $workloadBoundariesArtifactBindingSha256 OBSERVABILITY TEMPLATE $observabilityTemplateSha256 OBSERVABILITY BINDING $observabilityArtifactBindingSha256 USING BILLING CONTROL $controlRecordSha256 AND ACM DNS CONTROL $acmDnsRecordSha256; I ACKNOWLEDGE BILLABLE AWS RESOURCES IN ACCOUNT $AccountId REGION $Region USING PROFILE $Profile"
+$updateAcknowledgement = if ($ChangeSetType -eq 'UPDATE') {
+    " CURRENT STACK STATE $currentStackBindingSha256"
+}
+else {
+    ''
+}
+if ($isCredentialTransition) {
+    $updateAcknowledgement += " FIXED-SLOT TRANSITION $fixedSlotTransitionRecordSha256 FROM STATE $fixedSlotCurrentStateSha256 TO STATE $fixedSlotTargetStateSha256 BOUND BY $fixedSlotTransitionDeploymentBindingSha256 WITH TAGS $tagSha256"
+}
+$expectedAcknowledgement = "EXECUTE IMMUTABLE CHANGE SET $changeSetId FOR IMMUTABLE STACK $stackId WITH PARAMETERS $parameterSha256 WORKLOAD TEMPLATE $workloadBoundariesTemplateSha256 WORKLOAD BINDING $workloadBoundariesArtifactBindingSha256 OBSERVABILITY TEMPLATE $observabilityTemplateSha256 OBSERVABILITY BINDING $observabilityArtifactBindingSha256$updateAcknowledgement USING BILLING CONTROL $controlRecordSha256 AND ACM DNS CONTROL $acmDnsRecordSha256; I ACKNOWLEDGE BILLABLE AWS RESOURCES IN ACCOUNT $AccountId REGION $Region USING PROFILE $Profile"
 if ($BillableAcknowledgement -cne $expectedAcknowledgement) {
     throw @"
 Deploy can create RDS, ElastiCache, load balancer, networking, logging, KMS, and other billable resources.

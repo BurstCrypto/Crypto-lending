@@ -105,7 +105,9 @@ direct-body limit.
 - six explicit, no-default Secrets Manager version parameters pin the API
   database, worker database, and API Redis A/B slots. The only unpinned adoption
   state keeps every service stopped, every phase at `A_ONLY`, Redis access off,
-  and fixed-slot execution-role reads closed; and
+  and fixed-slot execution-role reads closed. Guarded updates bind credential
+  transitions to the immutable deployed stack and allow ordinary releases only
+  when every fixed-slot binding and credential-chain tag is preserved; and
 - bounded CloudWatch log groups and eight service/queue/security alarms expose
   infrastructure health through one explicitly supplied external SNS topic;
   the template creates no recipient. The dashboard is optional and off by

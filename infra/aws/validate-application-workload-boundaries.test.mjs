@@ -43,7 +43,7 @@ test('accepts the reviewed local workload-boundary child under the direct body c
   assert.match(report.residualLimitations.join('\n'), /LIVE_REVOCATION_UNRESOLVED/);
   assert.match(
     report.residualLimitations.join('\n'),
-    /FIXED_SLOT_CREDENTIAL_DEPLOYMENT_GUARD_UNRESOLVED/,
+    /FIXED_SLOT_CREDENTIAL_EXTERNAL_EXECUTION_UNRESOLVED/,
   );
   assert.match(report.residualLimitations.join('\n'), /AUTH_WALLET_SECRET_EXTERNAL/);
   assert.match(report.residualLimitations.join('\n'), /not packaged or uploaded/);

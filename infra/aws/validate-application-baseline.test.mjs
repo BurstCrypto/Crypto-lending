@@ -94,7 +94,10 @@ test('accepts the repository no-external-egress baseline and records the DNS res
   assert.match(report.residualLimitations[0], /port 53 to the VPC CIDR/);
   assert.match(report.residualLimitations[0], /cannot prove/);
   assert.match(report.residualLimitations[1], /REDIS_OPERATOR_LIVE_REVOCATION_UNRESOLVED/);
-  assert.match(report.residualLimitations[2], /FIXED_SLOT_CREDENTIAL_DEPLOYMENT_GUARD_UNRESOLVED/);
+  assert.match(
+    report.residualLimitations[2],
+    /FIXED_SLOT_CREDENTIAL_EXTERNAL_EXECUTION_UNRESOLVED/,
+  );
   assert.match(report.residualLimitations[3], /AUTH_WALLET_EXTERNAL_CONFIGURATION_UNRESOLVED/);
   assert.match(report.residualLimitations[4], /OPERATIONAL_ALERT_DELIVERY_EXTERNAL/);
 });

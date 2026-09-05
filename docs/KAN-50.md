@@ -84,6 +84,16 @@ and fixed-slot database/Redis execution-role reads remain closed. Version
 parameters intentionally have no defaults, so adoption requires all six
 sentinels to be supplied explicitly and cannot activate a workload.
 
+The application invocation guard now has separate `CREDENTIAL_TRANSITION` and
+`APPLICATION` update intents. Credential transitions require a locally approved
+record whose exact current/target state is compared with the immutable deployed
+stack and bound into the reviewed change set and acknowledgement; unrelated
+template, parameter, and tag changes are rejected. Ordinary application updates
+reject transition evidence, require every fixed-slot value to equal deployed
+state, and preserve the credential-chain tags. Deploy rechecks the current stack
+immediately before execution. This is an offline-tested control path, not
+evidence that a transition was authorized or run in AWS.
+
 ### Encryption and transport
 
 The checked-in baseline requires:
@@ -240,8 +250,8 @@ complete:
 - live positive and negative IAM decisions against exact deployed role/resource
   ARNs;
 - full-hop TLS from the load balancer to application targets;
-- a deployment guard that compares the reviewed transition record with current
-  deployed state before changing the six fixed-slot version/phase parameters;
+- an authorized guarded transition whose recorded current state matches the
+  live immutable stack at execution time;
 - deployed secret rotation followed by forced task replacement and old-secret
   denial; and
 - independently reviewed security logs and redaction evidence coordinated with

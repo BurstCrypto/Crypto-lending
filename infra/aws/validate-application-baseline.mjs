@@ -17,7 +17,7 @@ const repositoryRoot = resolve(scriptDirectory, '..', '..');
 const noExternalEgressResidualLimitations = [
   'Web-task DNS security-group egress permits TCP and UDP port 53 to the VPC CIDR; this static control cannot prove that traffic reaches only the VPC Route 53 Resolver address. API and worker boundaries rely on AmazonProvidedDNS, which is not filtered by security groups.',
   'REDIS_OPERATOR_LIVE_REVOCATION_UNRESOLVED: the nested child conditionally defines the reviewed exact-target one-off revocation task, but no task is authorized or run. Workload drain, live denial evidence, immediate operator disablement, and credential installation or regeneration remain external gates.',
-  'FIXED_SLOT_CREDENTIAL_DEPLOYMENT_GUARD_UNRESOLVED: all six fixed slots now require exact VersionId pins before activation and the unpinned creation state is inert, but the deployment command does not yet bind a reviewed transition record to deployed state. Inactive-slot regeneration, backend installation, transition adjacency, current-state comparison, and live evidence remain separately authorized gates.',
+  'FIXED_SLOT_CREDENTIAL_EXTERNAL_EXECUTION_UNRESOLVED: the deployment command now binds an approved transition record to the exact immutable current stack, template, parameter, tag, target-state, change-set, and acknowledgement hashes, while ordinary application updates must preserve all fixed-slot bindings and credential-chain tags. Inactive-slot regeneration, backend installation, live candidate/continuity/revocation evidence, task replacement, and external approval remain separately authorized gates.',
   'AUTH_WALLET_EXTERNAL_CONFIGURATION_UNRESOLVED: static Cognito identifiers and seven API-only key selectors (one pre-authentication key and six bounded key-ring documents) are wired, but the Cognito tenant, one external JSON secret, its customer-managed KMS key/policy, field contents, rotation, and deployed readability require separately authorized evidence.',
   'OPERATIONAL_ALERT_DELIVERY_EXTERNAL: the template consumes one operator-supplied SNS topic ARN but deliberately provisions no topic or subscription; same-account/Region existence, topic policy, confirmed recipients, escalation ownership, and an end-to-end ALARM-to-OK drill remain external go-live evidence.',
 ];
@@ -3090,6 +3090,14 @@ function validateDeploymentGuard(source, errors) {
     '$changeSetCapabilities.Count -ne 1',
     '$parentChangeSetId',
     '$stackId',
+    "[ValidateSet('APPLICATION', 'CREDENTIAL_TRANSITION')]",
+    "Assert-RequiredValue -Name 'UpdateIntent'",
+    "$isCredentialTransition = $UpdateIntent -ceq 'CREDENTIAL_TRANSITION'",
+    '$fixedSlotTransitionDeploymentBindingSha256',
+    'current-stack-binding-sha256=',
+    'CURRENT STACK STATE',
+    "'--stack-name', $CurrentStackId",
+    'The immutable current stack changed after review and before execution.',
   ];
   for (const fragment of requiredIdentityGuards) {
     if (!source.includes(fragment)) {

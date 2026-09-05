@@ -19,9 +19,12 @@ corresponding call and mutation counters at zero.
 The production CloudFormation contract now takes six explicit `VersionId`
 parameters and binds every fixed-slot consumer to the exact selected version;
 it never selects `AWSCURRENT` or another mutable stage for these slots. The
-deployment command still does not compare a submitted transition with deployed
-state, so the deployment-time current-state and transition-record guard remains
-required before this procedure can authorize a production rotation.
+application invocation guard now compares a submitted transition with the exact
+immutable deployed stack and binds the current template, complete parameter and
+tag snapshots, transition record, current and target states, reviewed change
+set, and explicit execution acknowledgement. This closes the in-repository
+deployment-binding gap; it does not authorize or perform any external rotation
+step.
 
 ## Records and local verification
 
@@ -65,6 +68,30 @@ oversized input, a UTF-8 BOM, invalid UTF-8, and duplicate JSON keys. CLI input
 failures use fixed messages that do not disclose supplied paths or arguments.
 Example mode rejects every operational binding argument and remains tied to
 the inert checked-in example.
+
+## Guarded CloudFormation updates
+
+`invoke-application-baseline.ps1` separates updates into two exact intents:
+
+- `CREDENTIAL_TRANSITION` requires the ignored approved record, its exact
+  `adopt` or `transition` mode, a current canonical validation instant, the
+  immutable stack ARN, all six target `VersionId` values, and all four
+  phase/operator controls. The guard validates the record twice before AWS
+  discovery, verifies the deployed current state, prohibits parent-template and
+  unrelated parameter/tag changes, advances the three credential-chain tags,
+  and binds those facts into the change-set description and acknowledgement.
+- `APPLICATION` rejects transition evidence and permits an ordinary release
+  only after adoption. All six pinned versions and all four controls must be
+  explicitly supplied and must exactly equal the deployed values. The existing
+  credential-chain tags are carried forward unchanged while reviewed
+  application parameters or templates may change.
+
+Every update addresses the immutable stack ARN rather than its mutable name.
+Deploy repeats all local and current-state checks, verifies the exact submitted
+template, parameters, tags, and versioned child artifacts, then re-reads the
+current stack immediately before execution. Any drift requires a new Plan and
+review. The script makes no AWS call without `-AllowAwsApiCalls`; Deploy also
+requires the exact hash-bound billable-resource acknowledgement it prints.
 
 ## State and history contract
 
