@@ -41,6 +41,29 @@ requires a separate reviewed cost, billing, egress, rotation, and deployment
 authority design; this checkpoint does not widen any template or authorize a
 deployment.
 
+`BALANCE_CONSUMER` separately binds and inspects the exact release-bound
+standalone balance-consumer envelope together with its validator and dormant
+application source. That envelope is not referenced or composed by the
+application parent or the deployment target. It admits only non-production
+environment names, requires the explicit
+`I_ACKNOWLEDGE_THIS_CREATES_BILLABLE_AWS_RESOURCES` parameter before any
+deployment, and fixes its ECS service at literal `DesiredCount: 0`. The
+inspector performs local filesystem/source checks only; it makes no cloud,
+provider, or other external request and cannot incur cloud cost.
+
+The inspected source keeps activation false, sets
+`BALANCE_CONSUMER_MODE=disabled`, and leaves the runtime uncomposed. The task
+has no database secret/grants, metadata key, RPC/provider input, Redis, auth,
+generic jobs queue, public IP, or ECS Exec. Its loopback-only security group has
+no external egress. Its task role is limited to receive/delete/change-visibility
+on the exact balance source plus KMS decrypt through SQS; jobs/DLQ access,
+send/publish, `GetQueueAttributes`, Secrets Manager, Redis, auth, provider, and
+RPC actions are absent. Its execution role can only pull the same-account
+digest-pinned image and write dedicated logs. The Fargate `1.4.0` task is
+non-root, read-only-root, and drops all Linux capabilities. A valid local
+inspection proves these dormant source constraints only; it never turns them
+into deployed or production-ready evidence.
+
 The offline ingestion boundary is opt-in only:
 
 ```powershell
@@ -236,6 +259,12 @@ Relevant machine-readable launch blocker IDs include:
 
 - `PRODUCTION_INFRASTRUCTURE_INSPECTION_FAILED`
 - `PRODUCTION_INFRASTRUCTURE_DEPLOYMENT_PATH_NOT_ENABLED`
+- `BALANCE_CONSUMER_SOURCE_ACTIVATION_DISABLED`
+- `BALANCE_CONSUMER_RUNTIME_NOT_COMPOSED`
+- `BALANCE_CONSUMER_TASK_NOT_PROVISIONED`
+- `BALANCE_CONSUMER_IAM_NOT_PROVISIONED`
+- `BALANCE_CONSUMER_DATABASE_CAPABILITY_NOT_ENABLED`
+- `BALANCE_CONSUMER_DEPLOYED_EVIDENCE_MISSING`
 - `AUTH_DEPLOYED_EVIDENCE_MISSING`
 - `DATABASE_MASTER_SECRET_NOT_RDS_MANAGED`
 - `RDS_MASTER_LIFECYCLE_EVIDENCE_MISSING`
@@ -363,9 +392,15 @@ nor separately retained capture may be checked into Git or Jira.
 provisions nor contacts Cognito, Secrets Manager, or KMS, and the inspector never
 converts authored YAML into deployed acceptance.
 
-The separate balance-sync source/DLQ and publisher wiring likewise cannot clear
-a live-read blocker. No dedicated consumer task/service, receive/delete IAM
-capability, or Ethereum/Solana RPC egress is active.
+The separate balance-sync source/DLQ, publisher wiring, and standalone hard-zero
+consumer envelope likewise cannot clear a live-read blocker. No consumer is
+composed or provisioned, no receive/delete IAM capability is deployed, and no
+database authority or Ethereum/Solana RPC egress is active. Consequently
+`BALANCE_CONSUMER_TASK_NOT_PROVISIONED`,
+`BALANCE_CONSUMER_IAM_NOT_PROVISIONED`, and
+`BALANCE_CONSUMER_DEPLOYED_EVIDENCE_MISSING` remain intentional blockers, along
+with every database, external-egress, RPC/provider, authentication, authority,
+and other production blocker described by the report.
 
 Run the focused checks with:
 

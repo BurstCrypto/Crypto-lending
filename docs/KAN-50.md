@@ -228,10 +228,34 @@ The worker has no Redis environment, secret-read permission, or port-6379
 security-group path. The API and worker use distinct execution roles and task
 security groups.
 
-No current role has `ReceiveMessage` or `DeleteMessage` on the balance-sync
-queue, and no dedicated balance consumer task/service exists. The separate
-queue is an inert routing boundary; it does not enable Ethereum/Solana RPC
-egress or live balance ingestion.
+No role provisioned by the application path has `ReceiveMessage` or
+`DeleteMessage` on the balance-sync queue, and its parent template and
+deployment target contain no dedicated balance-consumer task or service. The
+separate queue is an inert routing boundary; it does not enable
+Ethereum/Solana RPC egress or live balance ingestion.
+
+A release-bound standalone CloudFormation envelope now expresses a dedicated
+balance-consumer service, task definition, execution role, task role, log group,
+and security group as locally validated and offline-preflight-inspected source.
+The application parent and deployment target do not reference or compose this
+envelope, so no task/service or IAM role is provisioned. It accepts only
+non-production environment names, requires the explicit
+`I_ACKNOWLEDGE_THIS_CREATES_BILLABLE_AWS_RESOURCES` input before deployment,
+and fixes the service at literal `DesiredCount: 0`. Authoring and validating it
+performed no cloud or external action and incurred no cloud cost.
+
+The standalone task remains inert because source activation is false, its mode
+is `disabled`, and no runtime is composed. It receives no database secret or
+grants, metadata key, RPC/provider inputs, generic jobs queue, Redis, or auth
+configuration. Its security group has no ingress and loopback-only egress, with
+public IP and ECS Exec disabled. The task role allows only
+`ReceiveMessage`/`DeleteMessage`/`ChangeMessageVisibility` on the exact
+same-account balance source and `kms:Decrypt` through regional SQS. It allows no
+jobs or DLQ access, send/publish, `GetQueueAttributes`, Secrets Manager, Redis,
+auth, provider, or RPC operation. The execution role only pulls the
+same-account digest-pinned API image and writes the dedicated encrypted logs.
+The Fargate `1.4.0` definition runs non-root, uses a read-only root filesystem,
+drops all Linux capabilities, and invokes only the balance-consumer CLI.
 
 The dormant balance-consumer source boundary is narrower than that future IAM
 capability. Its dedicated loader accepts only the exact `APP_ENV` balance
@@ -241,7 +265,11 @@ receive, delete, change-visibility, and envelope parsing, exposes no publish
 operation, and gives the caller no `QueueUrl`. Raw balance-consumer `SqsService`
 publish, batch, and health operations fail closed. These local source controls
 are not evidence of a deployed task, queue policy, role decision, or production
-readiness.
+readiness. The same is true of the standalone hard-zero envelope. Offline
+preflight retains `BALANCE_CONSUMER_TASK_NOT_PROVISIONED`,
+`BALANCE_CONSUMER_IAM_NOT_PROVISIONED`, and
+`BALANCE_CONSUMER_DEPLOYED_EVIDENCE_MISSING`, along with the database,
+external-egress, RPC/provider, and other production blockers.
 
 Migration `0028` also revokes the generic worker's execution of the exact
 wallet-address resolver and four balance checkpoint functions. The dormant
@@ -323,6 +351,8 @@ The KAN-50 local gates are:
 npm run security:scan:secrets
 npm run security:test:secrets
 npm run infra:validate
+npm run infra:validate:balance-consumer-envelope
+npm run infra:test:balance-consumer-envelope
 npm run infra:test:migrations
 npm run infra:test:sqs
 npm run infra:test:egress

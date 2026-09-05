@@ -304,6 +304,40 @@ the production root and tests reject every `/api/v1/local-demo` and
 `/api/v1/public-testnet` path. This closes the repository route and startup-graph
 gap; it does not approve a mainnet read or write path.
 
+### Dormant balance-consumer deployment envelope
+
+The release manifest and offline preflight now bind and locally inspect a
+standalone balance-consumer CloudFormation envelope. It is deliberately outside
+the application parent and checked-in deployment target: neither references or
+composes it, and no task, service, or IAM role has been provisioned. Its
+environment selector accepts only non-production names, and an actual
+deployment requires the literal
+`I_ACKNOWLEDGE_THIS_CREATES_BILLABLE_AWS_RESOURCES` acknowledgement. This work
+performed no deployment, cloud/provider request, or other external action and
+incurred no cloud cost.
+
+The source fixes `DesiredCount: 0`, while immutable source activation remains
+false, `BALANCE_CONSUMER_MODE=disabled`, and the runtime remains uncomposed. It
+attaches no database secret or grant, metadata key, RPC/provider input, Redis,
+auth, or generic jobs-queue configuration. The security group has no ingress
+and permits only loopback egress; public IP assignment and ECS Exec are
+disabled. The task role is limited to receive/delete/change-visibility on the
+exact balance source queue plus KMS decrypt only through SQS. It cannot access
+jobs or the DLQ, send/publish, inspect queue attributes, read Secrets Manager,
+use Redis/auth/provider authority, or reach an RPC. The execution role is
+limited to pulling the same-account digest-pinned API image and writing the
+dedicated encrypted log stream. The Fargate `1.4.0` task uses a non-root user,
+a read-only root filesystem, dropped Linux capabilities, and only the
+balance-consumer CLI.
+
+Those are hardening properties of source for a dormant non-production envelope,
+not deployed evidence or production readiness. Preflight must retain
+`BALANCE_CONSUMER_TASK_NOT_PROVISIONED`,
+`BALANCE_CONSUMER_IAM_NOT_PROVISIONED`, and
+`BALANCE_CONSUMER_DEPLOYED_EVIDENCE_MISSING`. Source activation, runtime,
+database, external-egress, RPC/provider, operations, authority, and every other
+production blocker remain open.
+
 ## Hard launch gates
 
 | Gate                      | Current blocker                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | Closed only when                                                                                                                                                                                                                                                                                                              |

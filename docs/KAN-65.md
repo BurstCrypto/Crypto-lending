@@ -41,6 +41,26 @@ The pinned port exposes receive, delete, change-visibility, and envelope parsing
 only; it has no publish capability or caller-supplied `QueueUrl`, while raw
 balance-consumer SQS publish, batch, and health operations fail closed.
 
+A release-bound standalone CloudFormation envelope now records the intended
+dormant process boundary and is inspected by local validation and offline
+preflight. It is source-only: the application parent and deployment target do
+not reference or compose it, no task or role was provisioned, and its
+environment selector excludes production. An actual deployment would require
+the explicit billable-resource acknowledgement; no cloud or external action
+was taken for this checkpoint.
+
+The envelope holds the service at literal `DesiredCount: 0` while source
+activation stays false, `BALANCE_CONSUMER_MODE=disabled`, and the runtime stays
+uncomposed. Its loopback-only security group cannot reach a provider or RPC.
+The task role contains only receive/delete/change-visibility for the exact
+balance source and KMS decrypt through SQS; it has no jobs/DLQ, send,
+`GetQueueAttributes`, Secrets Manager, Redis, auth, provider, or RPC capability.
+The execution role can only pull the same-account digest-pinned API image and
+write its dedicated logs. No database secret or grants, metadata key, or RPC
+input is attached. Public IP and ECS Exec are disabled; Fargate `1.4.0`, a
+non-root user, read-only root filesystem, and dropped Linux capabilities harden
+the inert task definition.
+
 Migration `0023` originally gave the generic worker execution of the exact
 wallet-address resolver without wallet-table access. Migration `0028` revokes
 that resolver and all four balance checkpoint functions from the generic
@@ -248,6 +268,14 @@ but cannot obtain them itself. It makes no claim that a live balance has been
 indexed or that runtime/task activation, IAM, dedicated database grants, SQS,
 RPC, address decryption, monitoring, or any deployed behavior has been
 validated.
+
+The authored standalone envelope does not change that conclusion. Preflight
+must retain `BALANCE_CONSUMER_TASK_NOT_PROVISIONED`,
+`BALANCE_CONSUMER_IAM_NOT_PROVISIONED`, and
+`BALANCE_CONSUMER_DEPLOYED_EVIDENCE_MISSING` until independently controlled,
+target-bound deployment evidence exists. The database, external-egress,
+Ethereum/Solana RPC, provider, and all other production blockers also remain
+open.
 
 ## Local verification
 

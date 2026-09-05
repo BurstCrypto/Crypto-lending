@@ -124,6 +124,29 @@ the caller cannot provide a `QueueUrl`, and the port cannot publish. Raw
 balance-consumer `SqsService` send/publish, batch-publish, and health operations
 also fail closed.
 
+The release now binds and local/offline preflight inspects a standalone dormant
+balance-consumer deployment envelope. It is deliberately restricted to
+non-production environment names, requires an explicit acknowledgement that an
+actual deployment would create billable AWS resources, and is not referenced
+or composed by the application parent template or deployment target. Its
+service stays at literal `DesiredCount: 0`; source activation remains false,
+`BALANCE_CONSUMER_MODE` remains `disabled`, and the runtime is still uncomposed.
+No cloud, provider, or other external action was taken to create or validate
+this source.
+
+The envelope supplies neither a database secret/grant nor the metadata key ring
+described above. It also supplies no RPC/provider, Redis, authentication,
+general-wallet, or generic jobs-queue setting. The task security group has no
+ingress and loopback-only egress; public IP assignment and ECS Exec are
+disabled. Its task role is limited to receive/delete/change-visibility on the
+exact balance source queue and SQS-scoped KMS decrypt. It has no jobs/DLQ,
+send/publish, `GetQueueAttributes`, Secrets Manager, Redis, auth, provider, or
+RPC authority. Its execution role can only pull the same-account digest-pinned
+API image and write the dedicated logs. The Fargate `1.4.0` task runs non-root,
+uses a read-only root filesystem, drops all Linux capabilities, and selects
+only the balance-consumer CLI. These are inert source constraints, not a
+deployed identity or a usable address-decryption path.
+
 Startup also requires the canonical enabled metadata-ring config, exact
 Ethereum-and-Solana-mainnet scope, and the separate reviewed source-approval
 value. RPC/provider inputs, authentication or general-wallet configuration,
@@ -140,7 +163,8 @@ This slice remains intentionally dormant. Activation still requires:
   with its metadata-only secret;
 - a later reviewed migration granting only the exact resolver/checkpoint
   capabilities to the existing `crypto_balance_consumer_runtime` identity;
-- a dedicated ECS/IAM identity and release binding (none is declared yet);
+- composition and provisioning of the release-bound standalone ECS/IAM source;
+  it is declared only as an unreferenced, hard-zero non-production envelope;
 - deployed SQS receive/delete/visibility IAM, redrive, and durable idempotency
   evidence for the exact source/DLQ pair;
 - approved exact-host Ethereum/Solana RPC providers and egress controls;
@@ -155,7 +179,11 @@ role and one or two external rotating login slots with exact `SET`-only
 membership. It installs no credentials and grants those identities no database
 connection, schema, object, function, default-ACL, or ownership authority.
 Runtime activation, task and IAM wiring, database grants, RPC approval, and
-deployed evidence all remain blocked.
+deployed evidence all remain blocked. Offline preflight therefore retains
+`BALANCE_CONSUMER_TASK_NOT_PROVISIONED`,
+`BALANCE_CONSUMER_IAM_NOT_PROVISIONED`, and
+`BALANCE_CONSUMER_DEPLOYED_EVIDENCE_MISSING`; locally inspecting the standalone
+source cannot satisfy any of those deployment claims.
 
 ## Local verification
 
