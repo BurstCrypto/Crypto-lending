@@ -598,7 +598,7 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
   mainSource: 'b902f7f4f71fc4e6237c3baa75206a42244e93a902684a8387a167a6a180a0e9',
   outboxWorkerCliSource: 'd416d7a635479e2c45dc03049ac70748c087ab061c7378f41470aaa4e4b88677',
   redisSessionRevocationCliSource:
-    'f222f63fb2d2edc534f941a5ee5980c2b1bf7a64ec1014323cf1215196d7c8b6',
+    'fabc12502a15b2b8771c0f4e133bcec7a9ec3c92da389b8f677c9c10f6fa769b',
   migrationCliSource: '9155e1b10fce756188c8b9d8de201b2f82c36680fb76ee28c15923b5c7101b51',
   balanceSyncOrchestratorSource: '818f824b7fd398a7cd86038de375c3723270ba86311a9cb0e1836eff44c6d72e',
   balanceSyncDomainSource: '67b1cf8449da0e7c60a95a43cc29425ddc7e33b176933901923538e804171921',

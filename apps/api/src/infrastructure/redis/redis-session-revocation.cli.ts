@@ -1,21 +1,28 @@
+import { installFatalProcessBoundary, LOG_EVENTS, StructuredLogger } from '../logging';
 import { runRedisSessionRevocation } from './redis-session-revocation';
+
+const logger = new StructuredLogger({ workload: 'worker' });
+installFatalProcessBoundary(logger);
 
 void runRedisSessionRevocation(process.argv.slice(2), process.env)
   .then((result) => {
     if (result.status === 'completed') {
-      process.stdout.write(
-        `${JSON.stringify({
-          status: result.status,
-          inactiveSlot: result.inactiveSlot,
-          killedClientCount: result.killedClientCount,
-        })}\n`,
-      );
+      logger.emit(LOG_EVENTS.workerStopped, 'info', { outcome: 'success' });
     } else {
-      process.stderr.write(`${JSON.stringify({ status: result.status, code: result.code })}\n`);
+      logger.emit(LOG_EVENTS.workerStartFailed, 'error', {
+        outcome: 'failure',
+        errorCode:
+          result.code === 'ARGUMENTS_INVALID' || result.code === 'CONFIGURATION_INVALID'
+            ? 'CONFIGURATION_ERROR'
+            : 'REDIS_ERROR',
+      });
     }
     process.exitCode = result.exitCode;
   })
   .catch(() => {
-    process.stderr.write(`${JSON.stringify({ status: 'refused', code: 'OPERATION_FAILED' })}\n`);
+    logger.emit(LOG_EVENTS.workerStartFailed, 'fatal', {
+      outcome: 'failure',
+      errorCode: 'REDIS_ERROR',
+    });
     process.exitCode = 1;
   });

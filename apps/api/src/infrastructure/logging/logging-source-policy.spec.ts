@@ -56,6 +56,7 @@ describe('application logging source policy', () => {
       'infrastructure/database/migration.cli.ts',
       'infrastructure/outbox/outbox-worker.cli.ts',
       'infrastructure/outbox/outbox-worker-health.cli.ts',
+      'infrastructure/redis/redis-session-revocation.cli.ts',
       'blockchain-sync/application/balance-sync-consumer.cli.ts',
       'openapi/generate-openapi.ts',
     ]) {
