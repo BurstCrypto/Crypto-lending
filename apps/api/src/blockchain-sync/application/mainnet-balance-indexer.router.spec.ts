@@ -66,7 +66,169 @@ function harness(): Readonly<{
   };
 }
 
+function expectFixedConfigurationFailure(operation: () => unknown): void {
+  let caught: unknown;
+  try {
+    operation();
+  } catch (error) {
+    caught = error;
+  }
+  expect(caught).toMatchObject({
+    name: 'MainnetBalanceIndexerRouterConfigurationError',
+    code: 'MAINNET_BALANCE_INDEXER_ROUTER_CONFIGURATION_INVALID',
+    message: 'Mainnet balance indexer router configuration is invalid',
+  });
+  expect(typeof caught === 'object' && caught !== null && Object.isFrozen(caught)).toBe(true);
+}
+
+function restoreDescriptor(
+  target: object,
+  key: PropertyKey,
+  descriptor: PropertyDescriptor | undefined,
+): void {
+  if (descriptor === undefined) {
+    Reflect.deleteProperty(target, key);
+  } else {
+    Object.defineProperty(target, key, descriptor);
+  }
+}
+
 describe('MainnetBalanceIndexerRouter', () => {
+  it('captures dependency methods once, preserves their receivers, and ignores later redirection', async () => {
+    const receivers: unknown[] = [];
+    const ethereumRead = jest.fn(function (this: unknown): Promise<unknown> {
+      receivers.push(this);
+      return Promise.resolve('captured-ethereum');
+    });
+    const ethereumRescan = jest.fn(function (this: unknown): Promise<unknown> {
+      receivers.push(this);
+      return Promise.resolve('captured-ethereum-rescan');
+    });
+    const solanaRead = jest.fn(function (this: unknown): Promise<unknown> {
+      receivers.push(this);
+      return Promise.resolve('captured-solana');
+    });
+    const solanaRescan = jest.fn(function (this: unknown): Promise<unknown> {
+      receivers.push(this);
+      return Promise.resolve('captured-solana-rescan');
+    });
+    const ethereum: BalanceSyncIndexerPort = {
+      readCurrent: ethereumRead,
+      rescanFromCheckpoint: ethereumRescan,
+    };
+    const solana: BalanceSyncIndexerPort = {
+      readCurrent: solanaRead,
+      rescanFromCheckpoint: solanaRescan,
+    };
+    const router = new MainnetBalanceIndexerRouter(ethereum, solana);
+    const redirectedEthereumRead = jest.fn(async () => 'redirected-ethereum');
+    const redirectedSolanaRescan = jest.fn(async () => 'redirected-solana-rescan');
+    let lateGetterReads = 0;
+    Object.defineProperty(ethereum, 'readCurrent', {
+      configurable: true,
+      get: () => {
+        lateGetterReads += 1;
+        return redirectedEthereumRead;
+      },
+    });
+    Object.defineProperty(solana, 'rescanFromCheckpoint', {
+      configurable: true,
+      get: () => {
+        lateGetterReads += 1;
+        return redirectedSolanaRescan;
+      },
+    });
+
+    await expect(router.readCurrent(readRequest())).resolves.toBe('captured-ethereum');
+    await expect(
+      router.rescanFromCheckpoint(rescanRequest(SOLANA_MAINNET_BALANCE_NETWORK_ID)),
+    ).resolves.toBe('captured-solana-rescan');
+
+    expect(receivers).toEqual([ethereum, solana]);
+    expect(ethereumRead).toHaveBeenCalledTimes(1);
+    expect(solanaRescan).toHaveBeenCalledTimes(1);
+    expect(redirectedEthereumRead).not.toHaveBeenCalled();
+    expect(redirectedSolanaRescan).not.toHaveBeenCalled();
+    expect(lateGetterReads).toBe(0);
+  });
+
+  it('rejects missing, accessor-backed, aliased, and hostile indexer dependencies with one fixed error', () => {
+    const valid: BalanceSyncIndexerPort = {
+      readCurrent: async () => undefined,
+      rescanFromCheckpoint: async () => undefined,
+    };
+    let getterReads = 0;
+    const accessorBacked = {
+      rescanFromCheckpoint: async () => undefined,
+    } as Record<string, unknown>;
+    Object.defineProperty(accessorBacked, 'readCurrent', {
+      enumerable: true,
+      get: () => {
+        getterReads += 1;
+        return async () => undefined;
+      },
+    });
+    let hostileErrorInspections = 0;
+    const hostileThrown = new Proxy(Object.create(null) as object, {
+      getPrototypeOf: () => {
+        hostileErrorInspections += 1;
+        throw new Error('hostile error inspection must not run');
+      },
+    });
+    const hostileDependency = new Proxy(Object.create(null) as object, {
+      getOwnPropertyDescriptor: () => {
+        throw hostileThrown;
+      },
+    });
+
+    expectFixedConfigurationFailure(
+      () => new MainnetBalanceIndexerRouter(accessorBacked as never, valid),
+    );
+    expectFixedConfigurationFailure(
+      () => new MainnetBalanceIndexerRouter({ readCurrent: async () => undefined } as never, valid),
+    );
+    expectFixedConfigurationFailure(() => new MainnetBalanceIndexerRouter(valid, valid));
+    expectFixedConfigurationFailure(
+      () => new MainnetBalanceIndexerRouter(hostileDependency as never, valid),
+    );
+
+    expect(getterReads).toBe(0);
+    expect(hostileErrorInspections).toBe(0);
+  });
+
+  it('never sources indexer methods from polluted terminal prototypes', () => {
+    const valid: BalanceSyncIndexerPort = {
+      readCurrent: async () => undefined,
+      rescanFromCheckpoint: async () => undefined,
+    };
+    const objectRead = Object.getOwnPropertyDescriptor(Object.prototype, 'readCurrent');
+    const objectRescan = Object.getOwnPropertyDescriptor(Object.prototype, 'rescanFromCheckpoint');
+    const functionRead = Object.getOwnPropertyDescriptor(Function.prototype, 'readCurrent');
+    const functionRescan = Object.getOwnPropertyDescriptor(
+      Function.prototype,
+      'rescanFromCheckpoint',
+    );
+    Object.defineProperties(Object.prototype, {
+      readCurrent: { configurable: true, value: async () => 'polluted-object-read' },
+      rescanFromCheckpoint: { configurable: true, value: async () => 'polluted-object-rescan' },
+    });
+    Object.defineProperties(Function.prototype, {
+      readCurrent: { configurable: true, value: async () => 'polluted-function-read' },
+      rescanFromCheckpoint: { configurable: true, value: async () => 'polluted-function-rescan' },
+    });
+    try {
+      expectFixedConfigurationFailure(() => new MainnetBalanceIndexerRouter({} as never, valid));
+      expectFixedConfigurationFailure(
+        () => new MainnetBalanceIndexerRouter((() => undefined) as never, valid),
+      );
+    } finally {
+      restoreDescriptor(Object.prototype, 'readCurrent', objectRead);
+      restoreDescriptor(Object.prototype, 'rescanFromCheckpoint', objectRescan);
+      restoreDescriptor(Function.prototype, 'readCurrent', functionRead);
+      restoreDescriptor(Function.prototype, 'rescanFromCheckpoint', functionRescan);
+    }
+  });
+
   it('routes both operations to exactly the Ethereum mainnet indexer', async () => {
     const test = harness();
     const read = readRequest();
@@ -158,6 +320,133 @@ describe('MainnetBalanceIndexerRouter', () => {
       expect(test.solanaRescan).not.toHaveBeenCalled();
     },
   );
+
+  it.each([
+    ['accountId', 'not-a-uuid'],
+    ['accountId', 'AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA'],
+    ['accountId', 'aaaaaaaa-aaaa-1aaa-8aaa-aaaaaaaaaaaa'],
+    ['accountId', 'aaaaaaaa-aaaa-4aaa-7aaa-aaaaaaaaaaaa'],
+    ['accountId', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\0suffix'],
+    ['walletId', 'not-a-uuid'],
+    ['walletId', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\0suffix'],
+  ] as const)('rejects invalid %s value before either indexer is called', async (field, value) => {
+    const test = harness();
+    const candidate = { ...readRequest(), [field]: value } as BalanceIndexerReadRequest;
+    const rescanCandidate = {
+      ...rescanRequest(),
+      [field]: value,
+    } as BalanceIndexerRescanRequest;
+
+    await expect(test.router.readCurrent(candidate)).rejects.toMatchObject({
+      code: 'PERMANENT_PROVIDER_FAILURE',
+      message: 'PERMANENT_PROVIDER_FAILURE',
+    });
+    await expect(test.router.rescanFromCheckpoint(rescanCandidate)).rejects.toMatchObject({
+      code: 'PERMANENT_PROVIDER_FAILURE',
+      message: 'PERMANENT_PROVIDER_FAILURE',
+    });
+
+    expect(test.ethereumRead).not.toHaveBeenCalled();
+    expect(test.ethereumRescan).not.toHaveBeenCalled();
+    expect(test.solanaRead).not.toHaveBeenCalled();
+    expect(test.solanaRescan).not.toHaveBeenCalled();
+  });
+
+  it('passes owned exact frozen request snapshots to the selected indexer', async () => {
+    let observedRead: BalanceIndexerReadRequest | undefined;
+    let observedRescan: BalanceIndexerRescanRequest | undefined;
+    const ethereum: BalanceSyncIndexerPort = {
+      readCurrent: async (request) => {
+        observedRead = request;
+      },
+      rescanFromCheckpoint: async (request) => {
+        observedRescan = request;
+      },
+    };
+    const solana: BalanceSyncIndexerPort = {
+      readCurrent: async () => undefined,
+      rescanFromCheckpoint: async () => undefined,
+    };
+    const router = new MainnetBalanceIndexerRouter(ethereum, solana);
+    const mutableRead = { ...readRequest() };
+    const mutableSource = { ...rescanRequest().fromFinalizedSource };
+    const mutableRescan = {
+      ...readRequest(),
+      fromFinalizedSource: mutableSource,
+      maximumReadUnits: 128,
+    };
+
+    await router.readCurrent(mutableRead);
+    await router.rescanFromCheckpoint(mutableRescan);
+    mutableRead.accountId = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+    mutableRescan.maximumReadUnits = 64;
+    mutableSource.hash = 'mutated';
+
+    expect(observedRead).not.toBe(mutableRead);
+    expect(Reflect.ownKeys(observedRead ?? {})).toEqual([
+      'accountId',
+      'walletId',
+      'networkId',
+      'tier',
+      'selector',
+    ]);
+    expect(Object.getPrototypeOf(observedRead)).toBeNull();
+    expect(Object.isFrozen(observedRead)).toBe(true);
+    expect(observedRead?.accountId).toBe('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
+
+    expect(observedRescan).not.toBe(mutableRescan);
+    expect(Reflect.ownKeys(observedRescan ?? {})).toEqual([
+      'accountId',
+      'walletId',
+      'networkId',
+      'tier',
+      'selector',
+      'fromFinalizedSource',
+      'maximumReadUnits',
+    ]);
+    expect(Object.getPrototypeOf(observedRescan)).toBeNull();
+    expect(Object.isFrozen(observedRescan)).toBe(true);
+    expect(observedRescan?.maximumReadUnits).toBe(128);
+    expect(observedRescan?.fromFinalizedSource).not.toBe(mutableSource);
+    expect(Object.getPrototypeOf(observedRescan?.fromFinalizedSource)).toBeNull();
+    expect(Object.isFrozen(observedRescan?.fromFinalizedSource)).toBe(true);
+    expect(observedRescan?.fromFinalizedSource.hash).toBe('source-hash');
+  });
+
+  it('maps hostile values thrown during request reflection without inspecting them', async () => {
+    const test = harness();
+    let hostileErrorInspections = 0;
+    const hostileThrown = new Proxy(Object.create(null) as object, {
+      getPrototypeOf: () => {
+        hostileErrorInspections += 1;
+        throw new Error('hostile error inspection must not run');
+      },
+      get: () => {
+        hostileErrorInspections += 1;
+        throw new Error('hostile error property must not be read');
+      },
+    });
+    const hostileRequest = new Proxy(
+      { ...readRequest() },
+      {
+        ownKeys: () => {
+          throw hostileThrown;
+        },
+      },
+    );
+
+    await expect(
+      test.router.readCurrent(hostileRequest as BalanceIndexerReadRequest),
+    ).rejects.toMatchObject({
+      name: 'BalanceSyncIndexerFailure',
+      code: 'PERMANENT_PROVIDER_FAILURE',
+      message: 'PERMANENT_PROVIDER_FAILURE',
+    });
+
+    expect(hostileErrorInspections).toBe(0);
+    expect(test.ethereumRead).not.toHaveBeenCalled();
+    expect(test.solanaRead).not.toHaveBeenCalled();
+  });
 
   it('rejects accessor, symbol, custom-prototype, and nested-accessor inputs without reading them', async () => {
     const test = harness();

@@ -33,16 +33,36 @@ const SOURCE_POINT_KEYS = Object.freeze([
 ] as const);
 const TIERS = Object.freeze(['PROVISIONAL', 'CANONICAL', 'FINANCIAL'] as const);
 const SELECTORS = Object.freeze(['latest', 'safe', 'finalized', 'processed', 'confirmed'] as const);
+const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+
+interface ReviewedBalanceIndexer {
+  readonly readCurrent: (request: BalanceIndexerReadRequest) => Promise<unknown>;
+  readonly rescanFromCheckpoint: (request: BalanceIndexerRescanRequest) => Promise<unknown>;
+}
+
+class MainnetBalanceIndexerRouterConfigurationError extends Error {
+  readonly code = 'MAINNET_BALANCE_INDEXER_ROUTER_CONFIGURATION_INVALID' as const;
+
+  constructor() {
+    super('Mainnet balance indexer router configuration is invalid');
+    this.name = 'MainnetBalanceIndexerRouterConfigurationError';
+    Object.freeze(this);
+  }
+}
 
 /**
  * Closed launch-network router. It selects exactly one injected mainnet reader
  * and owns no provider fallback, endpoint, credential, client, or retry policy.
  */
 export class MainnetBalanceIndexerRouter implements BalanceSyncIndexerPort {
-  constructor(
-    private readonly ethereum: BalanceSyncIndexerPort,
-    private readonly solana: BalanceSyncIndexerPort,
-  ) {}
+  private readonly ethereum: ReviewedBalanceIndexer;
+  private readonly solana: ReviewedBalanceIndexer;
+
+  constructor(ethereum: BalanceSyncIndexerPort, solana: BalanceSyncIndexerPort) {
+    const reviewed = reviewedIndexers(ethereum, solana);
+    this.ethereum = reviewed.ethereum;
+    this.solana = reviewed.solana;
+  }
 
   async readCurrent(request: BalanceIndexerReadRequest): Promise<unknown> {
     const validated = copyReadRequest(request, READ_REQUEST_KEYS);
@@ -51,7 +71,7 @@ export class MainnetBalanceIndexerRouter implements BalanceSyncIndexerPort {
 
   async rescanFromCheckpoint(request: BalanceIndexerRescanRequest): Promise<unknown> {
     const record = exactDataRecord(request, RESCAN_REQUEST_KEYS);
-    const validated = Object.freeze({
+    const validated = frozenNullPrototype({
       ...copyReadRecord(record),
       fromFinalizedSource: copySourcePoint(record.fromFinalizedSource),
       maximumReadUnits: boundedRecoveryReadUnits(record.maximumReadUnits),
@@ -72,13 +92,15 @@ export class MainnetBalanceIndexerRouter implements BalanceSyncIndexerPort {
 }
 
 function copyReadRequest(request: unknown, keys: readonly string[]): BalanceIndexerReadRequest {
-  return Object.freeze(copyReadRecord(exactDataRecord(request, keys)));
+  return copyReadRecord(exactDataRecord(request, keys));
 }
 
 function copyReadRecord(record: Record<string, unknown>): BalanceIndexerReadRequest {
   if (
     typeof record.accountId !== 'string' ||
+    !UUID_V4.test(record.accountId) ||
     typeof record.walletId !== 'string' ||
+    !UUID_V4.test(record.walletId) ||
     typeof record.networkId !== 'string' ||
     !TIERS.includes(record.tier as (typeof TIERS)[number]) ||
     !SELECTORS.includes(record.selector as (typeof SELECTORS)[number])
@@ -91,13 +113,13 @@ function copyReadRecord(record: Record<string, unknown>): BalanceIndexerReadRequ
   ) {
     return unsupportedRequest();
   }
-  return {
+  return frozenNullPrototype({
     accountId: record.accountId,
     walletId: record.walletId,
     networkId: record.networkId,
     tier: record.tier as BalanceIndexerReadRequest['tier'],
     selector: record.selector as BalanceIndexerReadRequest['selector'],
-  };
+  });
 }
 
 function copySourcePoint(value: unknown): BalanceSyncSourcePoint {
@@ -111,7 +133,7 @@ function copySourcePoint(value: unknown): BalanceSyncSourcePoint {
   ) {
     return unsupportedRequest();
   }
-  return Object.freeze({
+  return frozenNullPrototype({
     position: record.position,
     hash: record.hash,
     parentHash: record.parentHash,
@@ -155,10 +177,73 @@ function exactDataRecord(value: unknown, expectedKeys: readonly string[]): Recor
       copy[key] = descriptor.value;
     }
     return copy;
-  } catch (error) {
-    if (error instanceof BalanceSyncIndexerFailure) throw error;
+  } catch {
     return unsupportedRequest();
   }
+}
+
+function reviewedIndexers(
+  ethereum: unknown,
+  solana: unknown,
+): Readonly<{ ethereum: ReviewedBalanceIndexer; solana: ReviewedBalanceIndexer }> {
+  try {
+    if (ethereum === solana) return invalidConfiguration();
+    return Object.freeze({
+      ethereum: reviewedIndexer(ethereum),
+      solana: reviewedIndexer(solana),
+    });
+  } catch {
+    return invalidConfiguration();
+  }
+}
+
+function reviewedIndexer(value: unknown): ReviewedBalanceIndexer {
+  if (
+    (typeof value !== 'object' && typeof value !== 'function') ||
+    value === null ||
+    Array.isArray(value)
+  ) {
+    return invalidConfiguration();
+  }
+  const receiver = value as object;
+  const readCurrent = capturedDataMethod(receiver, 'readCurrent');
+  const rescanFromCheckpoint = capturedDataMethod(receiver, 'rescanFromCheckpoint');
+  return Object.freeze({
+    readCurrent: (request: BalanceIndexerReadRequest): Promise<unknown> =>
+      Reflect.apply(readCurrent, receiver, [request]) as Promise<unknown>,
+    rescanFromCheckpoint: (request: BalanceIndexerRescanRequest): Promise<unknown> =>
+      Reflect.apply(rescanFromCheckpoint, receiver, [request]) as Promise<unknown>,
+  });
+}
+
+function capturedDataMethod(receiver: object, name: string): (...arguments_: unknown[]) => unknown {
+  const visited = new Set<object>();
+  let owner: object | null = receiver;
+  while (
+    owner !== null &&
+    owner !== Object.prototype &&
+    owner !== Function.prototype &&
+    !visited.has(owner)
+  ) {
+    visited.add(owner);
+    const descriptor = Object.getOwnPropertyDescriptor(owner, name);
+    if (descriptor !== undefined) {
+      if (!('value' in descriptor) || typeof descriptor.value !== 'function') {
+        return invalidConfiguration();
+      }
+      return descriptor.value as (...arguments_: unknown[]) => unknown;
+    }
+    owner = Object.getPrototypeOf(owner) as object | null;
+  }
+  return invalidConfiguration();
+}
+
+function frozenNullPrototype<T extends object>(members: T): Readonly<T> {
+  return Object.freeze(Object.assign(Object.create(null) as T, members));
+}
+
+function invalidConfiguration(): never {
+  throw new MainnetBalanceIndexerRouterConfigurationError();
 }
 
 function unsupportedRequest(): never {
