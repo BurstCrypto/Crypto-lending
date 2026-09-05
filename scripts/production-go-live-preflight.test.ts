@@ -1394,6 +1394,8 @@ test('balance-consumer inspection rejects provider-neutral JSON-RPC capability a
       'exchangeBalanceRpc(this.transport,',
       'this.transport.exchange(',
     ],
+    ['ethereumBalanceIndexerSource', 'accountId: request.accountId,', 'tier: request.tier,'],
+    ['solanaBalanceIndexerSource', 'accountId: request.accountId,', 'selector: request.selector,'],
   ];
   for (const [key, approved, rejected] of capabilityMutations) {
     assert.deepEqual(

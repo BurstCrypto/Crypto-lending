@@ -584,8 +584,8 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
   balanceConsumerLifecycleSource:
     'd4313b5a5e3f50022678beda7afb8768c9426f6b361be137e4be27e8e86f3a81',
   balanceJsonRpcSource: 'cbe7a9ba94879e138342cd7d7c39c301aa7fbfc284723057edf62257dbe58b97',
-  ethereumBalanceIndexerSource: '9c42509bfb59687b3dc2c05ba2f521b0cdb6b3141a9c2552656a898287861e25',
-  solanaBalanceIndexerSource: 'ba27828c1e122606ada27cc6044eef5198c44ebb459cbae46f121b7a8cec32df',
+  ethereumBalanceIndexerSource: '5ba525689d01a4536a162ed381f9178619e7baf8471eaa1932dcece89b3ae5d2',
+  solanaBalanceIndexerSource: 'b089d2af88951c98125ee567c9a9c208836ab2982e6c6180d23d0b4df992617b',
   balanceConsumerPersistenceResourceSource:
     'e95c1ce138f15202e0e181ff31fe164fa22d61e2eaa642a32ea81865a28ff27d',
   balanceConsumerSqsReceiptResourceSource:
@@ -1974,6 +1974,16 @@ function hasDormantProviderNeutralBalanceRpcContract(
   const helperExchangeCount = helper.split('transport.exchange(request)').length - 1;
   const ethereumExchangeCount = ethereum.split('exchangeBalanceRpc(this.transport,').length - 1;
   const solanaExchangeCount = solana.split('exchangeBalanceRpc(this.transport,').length - 1;
+  const ethereumResolverStart = ethereum.indexOf(
+    'private async resolveAddress(request: BalanceIndexerReadRequest): Promise<string> {',
+  );
+  const ethereumResolverEnd = ethereum.indexOf('private async readBlock(', ethereumResolverStart);
+  const solanaResolverStart = solana.indexOf(
+    'private async resolveAddress(request: BalanceIndexerReadRequest): Promise<string> {',
+  );
+  const solanaResolverEnd = solana.indexOf('private async readBlock(', solanaResolverStart);
+  const ethereumResolver = ethereum.slice(ethereumResolverStart, ethereumResolverEnd);
+  const solanaResolver = solana.slice(solanaResolverStart, solanaResolverEnd);
 
   if (
     providerSources.some(
@@ -2010,6 +2020,20 @@ function hasDormantProviderNeutralBalanceRpcContract(
     exactExecutableLineCount(solana, 'exchangeBalanceRpc,') !== 1 ||
     ethereumExchangeCount !== 4 ||
     solanaExchangeCount !== 4 ||
+    ethereumResolverStart < 0 ||
+    ethereumResolverEnd <= ethereumResolverStart ||
+    solanaResolverStart < 0 ||
+    solanaResolverEnd <= solanaResolverStart ||
+    exactExecutableLineCount(ethereumResolver, 'Object.freeze({') !== 1 ||
+    exactExecutableLineCount(ethereumResolver, 'accountId: request.accountId,') !== 1 ||
+    exactExecutableLineCount(ethereumResolver, 'walletId: request.walletId,') !== 1 ||
+    exactExecutableLineCount(ethereumResolver, 'networkId: ETHEREUM_MAINNET_NETWORK_ID,') !== 1 ||
+    exactExecutableLineCount(solanaResolver, 'Object.freeze({') !== 1 ||
+    exactExecutableLineCount(solanaResolver, 'accountId: request.accountId,') !== 1 ||
+    exactExecutableLineCount(solanaResolver, 'walletId: request.walletId,') !== 1 ||
+    exactExecutableLineCount(solanaResolver, 'networkId: SOLANA_MAINNET_NETWORK_ID,') !== 1 ||
+    /resolveActiveAddress\s*\(\s*request\s*\)/u.test(ethereumResolver) ||
+    /resolveActiveAddress\s*\(\s*request\s*\)/u.test(solanaResolver) ||
     /\.exchange\s*\(/u.test(ethereum) ||
     /\.exchange\s*\(/u.test(solana)
   ) {

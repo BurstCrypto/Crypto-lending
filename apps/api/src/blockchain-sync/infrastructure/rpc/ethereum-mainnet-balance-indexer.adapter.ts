@@ -220,7 +220,13 @@ export class EthereumMainnetBalanceIndexerAdapter implements BalanceSyncIndexerP
   private async resolveAddress(request: BalanceIndexerReadRequest): Promise<string> {
     let value: unknown;
     try {
-      value = await this.addresses.resolveActiveAddress(request);
+      value = await this.addresses.resolveActiveAddress(
+        Object.freeze({
+          accountId: request.accountId,
+          walletId: request.walletId,
+          networkId: ETHEREUM_MAINNET_NETWORK_ID,
+        }),
+      );
       return parseEvmWalletAddress(value);
     } catch (error) {
       if (error instanceof BalanceSyncIndexerFailure) throw error;

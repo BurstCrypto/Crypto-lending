@@ -207,7 +207,15 @@ export class SolanaMainnetBalanceIndexerAdapter implements BalanceSyncIndexerPor
 
   private async resolveAddress(request: BalanceIndexerReadRequest): Promise<string> {
     try {
-      return parseSolanaWalletAddress(await this.addresses.resolveActiveAddress(request));
+      return parseSolanaWalletAddress(
+        await this.addresses.resolveActiveAddress(
+          Object.freeze({
+            accountId: request.accountId,
+            walletId: request.walletId,
+            networkId: SOLANA_MAINNET_NETWORK_ID,
+          }),
+        ),
+      );
     } catch (error) {
       if (error instanceof BalanceSyncIndexerFailure) throw error;
       throw new BalanceSyncIndexerFailure('PROVIDER_INVALID_DATA');

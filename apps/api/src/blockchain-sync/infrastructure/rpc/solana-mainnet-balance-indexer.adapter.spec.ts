@@ -131,15 +131,18 @@ function adapterWith(
 ): Readonly<{
   adapter: SolanaMainnetBalanceIndexerAdapter;
   transport: TranscriptTransport;
+  resolveActiveAddress: jest.Mock;
 }> {
   const transport = new TranscriptTransport(respond);
+  const resolveActiveAddress = jest.fn(async () => address);
   return {
     adapter: new SolanaMainnetBalanceIndexerAdapter(
       transport,
-      { resolveActiveAddress: async () => address },
+      { resolveActiveAddress },
       { now: () => new Date('2026-09-04T18:00:00.000Z') },
     ),
     transport,
+    resolveActiveAddress,
   };
 }
 
@@ -157,6 +160,24 @@ const provisionalRequest = Object.freeze({
 });
 
 describe('Solana mainnet balance indexer transcript adapter', () => {
+  it('narrows address resolution to the exact frozen three-key persistence scope', async () => {
+    const { adapter, resolveActiveAddress } = adapterWith();
+
+    await adapter.readCurrent(provisionalRequest);
+
+    expect(resolveActiveAddress).toHaveBeenCalledTimes(1);
+    const scope = resolveActiveAddress.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(scope).toEqual({
+      accountId: ACCOUNT_ID,
+      walletId: WALLET_ID,
+      networkId: canonicalRequest.networkId,
+    });
+    expect(Reflect.ownKeys(scope).sort()).toEqual(['accountId', 'networkId', 'walletId']);
+    expect(Object.isFrozen(scope)).toBe(true);
+    expect(scope).not.toHaveProperty('tier');
+    expect(scope).not.toHaveProperty('selector');
+  });
+
   it('keeps processed balance indexing explicitly unavailable without making an RPC call', async () => {
     let addressReads = 0;
     const transport = new TranscriptTransport(() => {

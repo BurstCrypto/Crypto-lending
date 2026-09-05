@@ -28,6 +28,11 @@ remain source-level API exposure only; they do not register or construct a
 transport. This local check neither chooses an endpoint nor changes any live
 RPC, egress, deployment, or provider-evidence blocker.
 
+Before address decryption, each adapter copies only `accountId`, `walletId`,
+and its exact mainnet `networkId` into a frozen resolver scope. This matches the
+real PostgreSQL resolver's closed three-key contract; `tier` and `selector` are
+never forwarded into that persistence boundary.
+
 ## Ethereum mainnet
 
 The Ethereum adapter requires `eip155:1`, brackets its read with exact

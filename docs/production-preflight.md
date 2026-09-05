@@ -67,6 +67,8 @@ barrel exports remain allowed because they neither construct a transport nor
 register a provider. Mutation tests cover direct capability additions and
 launch-root registration. This is static source integrity only and cannot
 select a provider, permit egress, activate the consumer, or clear live evidence.
+The adapter contract also requires each five-field read request to be narrowed
+to the resolver's frozen three-key account, wallet, and network scope.
 
 The inspected source keeps activation false, sets
 `BALANCE_CONSUMER_MODE=disabled`, and leaves the runtime uncomposed. The task

@@ -63,15 +63,18 @@ function adapterWith(
 ): Readonly<{
   adapter: EthereumMainnetBalanceIndexerAdapter;
   transport: TranscriptTransport;
+  resolveActiveAddress: jest.Mock;
 }> {
   const transport = new TranscriptTransport(respond);
+  const resolveActiveAddress = jest.fn(async () => address);
   return {
     adapter: new EthereumMainnetBalanceIndexerAdapter(
       transport,
-      { resolveActiveAddress: async () => address },
+      { resolveActiveAddress },
       { now: () => new Date('2026-09-04T18:00:00.000Z') },
     ),
     transport,
+    resolveActiveAddress,
   };
 }
 
@@ -108,6 +111,20 @@ const provisionalRequest = Object.freeze({
 });
 
 describe('Ethereum mainnet balance indexer transcript adapter', () => {
+  it('narrows address resolution to the exact frozen three-key persistence scope', async () => {
+    const { adapter, resolveActiveAddress } = adapterWith();
+
+    await adapter.readCurrent(provisionalRequest);
+
+    expect(resolveActiveAddress).toHaveBeenCalledTimes(1);
+    const scope = resolveActiveAddress.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(scope).toEqual({ accountId: ACCOUNT_ID, walletId: WALLET_ID, networkId: 'eip155:1' });
+    expect(Reflect.ownKeys(scope).sort()).toEqual(['accountId', 'networkId', 'walletId']);
+    expect(Object.isFrozen(scope)).toBe(true);
+    expect(scope).not.toHaveProperty('tier');
+    expect(scope).not.toHaveProperty('selector');
+  });
+
   it('pins code and all three exact balanceOf calls to one canonical block hash', async () => {
     const { adapter, transport } = adapterWith();
     const exactCanonicalBlock = {

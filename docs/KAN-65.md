@@ -214,6 +214,9 @@ requires their identities to remain absent from module, activation, runtime,
 and CLI launch roots. Existing barrel exports are intentionally allowed and do
 not compose a transport. Passing this local source check leaves every RPC,
 egress, task, IAM, database, deployment, and live-evidence blocker unchanged.
+Each adapter narrows its five-field read request to the resolver's exact frozen
+`accountId`/`walletId`/`networkId` scope, matching the real PostgreSQL resolver
+instead of forwarding surplus tier and selector fields.
 
 `CANONICAL` (`safe` or `confirmed`) and `FINANCIAL` (`finalized`) jobs fail
 closed locally. They require live capability, independent agreement, and
