@@ -1,12 +1,18 @@
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { isDeepStrictEqual } from 'node:util';
+import { isDeepStrictEqual, TextDecoder } from 'node:util';
+
+import { parseStrictJsonBytes } from '../shared/parse-strict-json.mjs';
+import { readSecureLocalFile } from '../shared/read-secure-local-file.mjs';
 
 export const REPOSITORY_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 export const DECISION_PATH = 'docs/valuation/kan-66-stablecoin-valuation-decision.json';
 export const SIDECAR_PATH = 'docs/valuation/kan-66-stablecoin-valuation-decision.sha256';
+export const MAX_VALUATION_DECISION_BYTES = 131_072;
+export const MAX_VALUATION_SIDECAR_BYTES = 65;
+export const VALUATION_JSON_INVALID_ERROR =
+  'KAN-66 valuation decision must be strict UTF-8 JSON without a byte-order mark or duplicate object keys.';
 
 const DAY_MS = 86_400_000;
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/u;
@@ -1672,18 +1678,33 @@ export function validateValuationDecisionSidecar(decisionBytes, sidecar) {
   }
 }
 
+export function parseValuationDecisionBytes(decisionBytes) {
+  try {
+    return parseStrictJsonBytes(decisionBytes);
+  } catch {
+    throw new Error(VALUATION_JSON_INVALID_ERROR);
+  }
+}
+
 export function validateValuationDecisionFiles({
   repositoryRoot = REPOSITORY_ROOT,
   now = new Date(),
 } = {}) {
   try {
-    const decisionBytes = readFileSync(resolve(repositoryRoot, DECISION_PATH));
-    const sidecar = readFileSync(resolve(repositoryRoot, SIDECAR_PATH), 'utf8');
+    const decisionBytes = readSecureLocalFile(
+      resolve(repositoryRoot, DECISION_PATH),
+      MAX_VALUATION_DECISION_BYTES,
+    );
+    const sidecarBytes = readSecureLocalFile(
+      resolve(repositoryRoot, SIDECAR_PATH),
+      MAX_VALUATION_SIDECAR_BYTES,
+    );
+    const sidecar = new TextDecoder('utf-8', { fatal: true }).decode(sidecarBytes);
     let record;
     try {
-      record = JSON.parse(decisionBytes.toString('utf8'));
+      record = parseValuationDecisionBytes(decisionBytes);
     } catch {
-      return { errors: ['KAN-66 valuation decision is not valid JSON.'], fingerprint: null };
+      return { errors: [VALUATION_JSON_INVALID_ERROR], fingerprint: null };
     }
     const fingerprint = sha256(decisionBytes);
     return {

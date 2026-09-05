@@ -1,18 +1,34 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { linkSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 
 import {
   DECISION_PATH,
+  MAX_VALUATION_DECISION_BYTES,
+  MAX_VALUATION_SIDECAR_BYTES,
   REPOSITORY_ROOT,
   SIDECAR_PATH,
   VALUATION_VALIDATOR_TEST_HOOKS,
+  VALUATION_JSON_INVALID_ERROR,
+  parseValuationDecisionBytes,
   validateValuationDecisionFiles,
   validateValuationDecisionRecord,
   validateValuationDecisionSidecar,
 } from './validate-kan-66-stablecoin-valuation-decision.mjs';
 
 const NOW = new Date('2026-08-22T23:59:59.999Z');
+const EXPECTED_DECISION_FINGERPRINT =
+  '6c36c7bc78d70102c74255b9630f7a7e18e842e6daff52c9a73eed182121b7f3';
+
+function writeValuationFixture(repositoryRoot, decisionBytes, sidecarBytes) {
+  const valuationDirectory = join(repositoryRoot, 'docs', 'valuation');
+  mkdirSync(valuationDirectory, { recursive: true });
+  writeFileSync(join(repositoryRoot, DECISION_PATH), decisionBytes);
+  writeFileSync(join(repositoryRoot, SIDECAR_PATH), sidecarBytes);
+}
 
 function loadDecision() {
   return JSON.parse(readFileSync(`${REPOSITORY_ROOT}/${DECISION_PATH}`, 'utf8'));
@@ -37,7 +53,7 @@ test('the exact canonical packet and byte sidecar are valid but activate nothing
   assert.deepEqual(validate(record), []);
   assert.deepEqual(validateValuationDecisionFiles({ now: NOW }), {
     errors: [],
-    fingerprint: '6c36c7bc78d70102c74255b9630f7a7e18e842e6daff52c9a73eed182121b7f3',
+    fingerprint: EXPECTED_DECISION_FINGERPRINT,
     canonicalFingerprint: '3b50fd1ceb2f94924426d1015ffb7a0941579a115ef2f104915b0928e06ad370',
   });
   assert.equal(record.externalStatus, 'PENDING_EXTERNAL_APPROVAL');
@@ -567,6 +583,113 @@ test('the sidecar rejects byte drift, uppercase, missing LF, aliases, and malfor
   );
   assert.doesNotThrow(() => validateValuationDecisionSidecar(null, null));
   assert.ok(validateValuationDecisionSidecar(null, null).length > 0);
+});
+
+test('strict file parsing rejects matching-sidecar duplicate keys and a byte-order mark', () => {
+  const canonicalBytes = readFileSync(`${REPOSITORY_ROOT}/${DECISION_PATH}`);
+  const canonicalText = canonicalBytes.toString('utf8');
+  const hostileBytes = [
+    Buffer.from(canonicalText.replace('{\n', '{\n  "schemaVersion": 999,\n'), 'utf8'),
+    Buffer.from(
+      canonicalText.replace(
+        '  "selection": {\n',
+        '  "selection": {\n    "runtimeStatus": "APPROVED",\n',
+      ),
+      'utf8',
+    ),
+    Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), canonicalBytes]),
+  ];
+
+  for (const decisionBytes of hostileBytes) {
+    const fingerprint = createHash('sha256').update(decisionBytes).digest('hex');
+    const sidecar = `${fingerprint}\n`;
+    assert.deepEqual(validateValuationDecisionSidecar(decisionBytes, sidecar), []);
+    assert.notEqual(fingerprint, EXPECTED_DECISION_FINGERPRINT);
+    assert.throws(
+      () => parseValuationDecisionBytes(decisionBytes),
+      (error) => error instanceof Error && error.message === VALUATION_JSON_INVALID_ERROR,
+    );
+
+    const temporaryRoot = mkdtempSync(join(tmpdir(), 'kan-66-strict-json-'));
+    try {
+      writeValuationFixture(temporaryRoot, decisionBytes, sidecar);
+      assert.deepEqual(
+        validateValuationDecisionFiles({ repositoryRoot: temporaryRoot, now: NOW }),
+        {
+          errors: [VALUATION_JSON_INVALID_ERROR],
+          fingerprint: null,
+        },
+      );
+    } finally {
+      rmSync(temporaryRoot, { recursive: true, force: true });
+    }
+  }
+
+  for (const decisionBytes of hostileBytes.slice(0, 2)) {
+    assert.deepEqual(validate(JSON.parse(decisionBytes.toString('utf8'))), []);
+  }
+});
+
+test('file loading rejects oversized, empty, and hard-linked controlled artifacts', () => {
+  const canonicalBytes = readFileSync(`${REPOSITORY_ROOT}/${DECISION_PATH}`);
+  const canonicalSidecar = readFileSync(`${REPOSITORY_ROOT}/${SIDECAR_PATH}`);
+  const cases = [
+    {
+      name: 'oversized decision',
+      prepare(repositoryRoot) {
+        writeValuationFixture(
+          repositoryRoot,
+          Buffer.alloc(MAX_VALUATION_DECISION_BYTES + 1, 0x20),
+          canonicalSidecar,
+        );
+      },
+    },
+    {
+      name: 'empty sidecar',
+      prepare(repositoryRoot) {
+        writeValuationFixture(repositoryRoot, canonicalBytes, Buffer.alloc(0));
+      },
+    },
+    {
+      name: 'oversized sidecar',
+      prepare(repositoryRoot) {
+        writeValuationFixture(
+          repositoryRoot,
+          canonicalBytes,
+          Buffer.alloc(MAX_VALUATION_SIDECAR_BYTES + 1, 0x30),
+        );
+      },
+    },
+    {
+      name: 'hard-linked decision',
+      prepare(repositoryRoot) {
+        const valuationDirectory = join(repositoryRoot, 'docs', 'valuation');
+        mkdirSync(valuationDirectory, { recursive: true });
+        const sourcePath = join(valuationDirectory, 'decision-source.json');
+        writeFileSync(sourcePath, canonicalBytes);
+        linkSync(sourcePath, join(repositoryRoot, DECISION_PATH));
+        writeFileSync(join(repositoryRoot, SIDECAR_PATH), canonicalSidecar);
+      },
+    },
+  ];
+
+  for (const { name, prepare } of cases) {
+    const temporaryRoot = mkdtempSync(join(tmpdir(), 'kan-66-secure-file-'));
+    try {
+      prepare(temporaryRoot);
+      assert.deepEqual(
+        validateValuationDecisionFiles({ repositoryRoot: temporaryRoot, now: NOW }),
+        {
+          errors: ['KAN-66 valuation decision or SHA-256 sidecar is missing or unreadable.'],
+          fingerprint: null,
+          canonicalFingerprint: null,
+        },
+        name,
+      );
+    } finally {
+      rmSync(temporaryRoot, { recursive: true, force: true });
+    }
+  }
 });
 
 test('the closed packet records zero external activity and validator has no network or cost path', () => {

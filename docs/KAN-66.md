@@ -26,6 +26,14 @@ merged Git commit and tree, this packet's exact SHA-256, and the KAN-61 registry
 fingerprint together. The approved commit, tree, packet hash, and registry hash
 fields remain `null` until that post-merge review exists.
 
+The validator reads the decision and sidecar as non-empty, bounded, stable,
+single-link regular files at canonical local paths. It rejects linked path
+components, hard links, replacement or metadata drift, duplicate JSON keys at
+any depth, malformed UTF-8, and byte-order marks before semantic validation.
+The decision is limited to 128 KiB and the exact digest sidecar to 65 bytes.
+These checks supplement the compiled reviewed exact-byte and canonical semantic
+fingerprints; neither fingerprint constitutes approval.
+
 ## Proposed source decision
 
 | Role                     | Candidate                                      | Why it is realistic                                                                                                                                                          | Important limitation                                                                                                                                                           |
