@@ -82,10 +82,11 @@ visitors receive only the configured sign-in/registration actions.
 
 `apps/web/lib/portfolio/unified-balance.ts` and `UnifiedBalanceView` preserve the
 original BAL-004 fixture contract and buying-power presentation tests. They are
-not imported by the production portfolio route. Their broader historical chain
-catalog and deterministic Base fixture therefore cannot become production
-coverage. The active production parser independently pins the two-network
-Ethereum/Solana launch allowlist.
+not imported by the production portfolio route. The active parser imports the
+deeply frozen, Ethereum/Solana-only `production-reporting-registry.ts` boundary;
+its broader historical chain catalog and deterministic Base fixture therefore
+cannot become production coverage. Source-boundary and exact-registry tests guard
+that isolation.
 
 Buying power remains a separate KAN-68 concern. The current production screen
 does not map a reporting total into buying power and does not expose an intent,

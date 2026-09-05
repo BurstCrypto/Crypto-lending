@@ -1,8 +1,11 @@
 import {
-  PORTFOLIO_ASSET_IDENTITIES,
-  PORTFOLIO_NETWORKS,
-  type StablecoinSymbol,
-} from './unified-balance';
+  PRODUCTION_REPORTING_ASSET_IDENTITIES,
+  PRODUCTION_REPORTING_NETWORK_IDS,
+  PRODUCTION_REPORTING_NETWORKS,
+  PRODUCTION_REPORTING_STABLECOINS,
+  type ProductionReportingNetworkId,
+  type ProductionReportingStablecoin,
+} from './production-reporting-registry';
 
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const SAFE_SNAPSHOT_ID = /^[A-Za-z0-9](?:[A-Za-z0-9._:-]{0,126}[A-Za-z0-9])?$/u;
@@ -17,11 +20,11 @@ const MAX_REASONS = 16;
 const MAX_USD_DIGITS = 100;
 const MAX_ATOMIC_DIGITS = 78;
 
-const MAINNET_NETWORK_IDS = ['eip155:1', 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp'] as const;
+const MAINNET_NETWORK_IDS = PRODUCTION_REPORTING_NETWORK_IDS;
 
 const FRESHNESS_VALUES = ['CURRENT', 'STALE', 'UNAVAILABLE'] as const;
 const COMPLETENESS_VALUES = ['COMPLETE', 'PARTIAL', 'UNAVAILABLE'] as const;
-const STABLECOINS = ['USDC', 'USDT', 'PYUSD'] as const;
+const STABLECOINS = PRODUCTION_REPORTING_STABLECOINS;
 const VALUATION_REASONS = [
   'INVALID_INPUT',
   'NO_ELIGIBLE_SOURCE',
@@ -36,9 +39,10 @@ const VALUATION_REASONS = [
   'NUMERIC_LIMIT_EXCEEDED',
 ] as const;
 
-export type ProductionPortfolioNetworkId = (typeof MAINNET_NETWORK_IDS)[number];
+export type ProductionPortfolioNetworkId = ProductionReportingNetworkId;
 export type ReportingFreshness = (typeof FRESHNESS_VALUES)[number];
 export type ReportingCompleteness = (typeof COMPLETENESS_VALUES)[number];
+type StablecoinSymbol = ProductionReportingStablecoin;
 
 export interface ReportingExactUsdAmount {
   readonly currency: 'USD';
@@ -477,7 +481,7 @@ function parseSource(value: unknown, asOf: string): ParsedSource {
   const stablecoin = oneOf(assetRecord.stablecoin, STABLECOINS);
   if (assetRecord.networkId !== networkId) return fail();
   const registeredIdentities: Partial<Record<StablecoinSymbol, string>> =
-    PORTFOLIO_ASSET_IDENTITIES[networkId];
+    PRODUCTION_REPORTING_ASSET_IDENTITIES[networkId];
   if (assetRecord.identity !== registeredIdentities[stablecoin]) return fail();
   const decimals = boundedInteger(assetRecord.decimals, 0, 36);
   if (decimals !== 6) return fail();
@@ -858,7 +862,7 @@ function parseResponse(value: unknown): ReportingPortfolioSnapshot {
       return balanceCoverage.targets
         .filter((target) => {
           const registeredIdentities: Partial<Record<StablecoinSymbol, string>> =
-            PORTFOLIO_ASSET_IDENTITIES[target.networkId];
+            PRODUCTION_REPORTING_ASSET_IDENTITIES[target.networkId];
           return registeredIdentities[stablecoin] !== undefined;
         })
         .map(({ status }) => status);
@@ -933,5 +937,5 @@ export function parseReportingPortfolioResponse(value: unknown): ReportingPortfo
 }
 
 export function reportingNetworkName(networkId: ProductionPortfolioNetworkId): string {
-  return PORTFOLIO_NETWORKS[networkId].name;
+  return PRODUCTION_REPORTING_NETWORKS[networkId].name;
 }
