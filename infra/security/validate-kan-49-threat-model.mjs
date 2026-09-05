@@ -1,9 +1,13 @@
 #!/usr/bin/env node
 
 import { createHash } from 'node:crypto';
-import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs';
+import { existsSync, lstatSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { TextDecoder } from 'node:util';
+
+import { parseStrictJsonBytes } from '../shared/parse-strict-json.mjs';
+import { readSecureLocalFile } from '../shared/read-secure-local-file.mjs';
 
 const moduleDirectory = dirname(fileURLToPath(import.meta.url));
 export const repositoryRoot = resolve(moduleDirectory, '..', '..');
@@ -19,6 +23,16 @@ export const threatModelFingerprintPath = resolve(
   'security',
   'threat-model-register.sha256',
 );
+export const MAX_THREAT_MODEL_BYTES = 131_072;
+export const MAX_THREAT_MODEL_SIDECAR_BYTES = 65;
+export const EXPECTED_THREAT_MODEL_SHA256 =
+  'c714872fb8ae8afac2e6bd25177d2f032dd0a8f0d9a26d0ba3a91fd567d34acd';
+export const THREAT_MODEL_FILE_ERROR =
+  'Canonical threat model or fingerprint file is missing, unsafe, or unreadable.';
+export const THREAT_MODEL_JSON_ERROR =
+  'Canonical threat model must be strict UTF-8 JSON without a byte-order mark or duplicate object keys.';
+export const THREAT_MODEL_SIDECAR_ERROR =
+  'Canonical fingerprint must be exactly one lowercase SHA-256 value followed by LF.';
 
 const CLASSIFICATION_CONTRACT = new Map([
   [
@@ -635,33 +649,61 @@ export function validateThreatModelRecord(
   return errors;
 }
 
-export function validateCanonicalThreatModel() {
-  let source;
-  let expectedFingerprint;
+export function parseThreatModelBytes(sourceBytes) {
   try {
-    source = readFileSync(threatModelPath, 'utf8');
-    expectedFingerprint = readFileSync(threatModelFingerprintPath, 'utf8').trim();
+    return parseStrictJsonBytes(sourceBytes);
   } catch {
-    return {
-      errors: ['Canonical threat model or fingerprint file is missing.'],
-      fingerprint: null,
-    };
+    throw new Error(THREAT_MODEL_JSON_ERROR);
   }
+}
 
+function validateThreatModelFiles(root, evidenceExists) {
+  let sourceBytes;
+  let sidecarBytes;
+  try {
+    sourceBytes = readSecureLocalFile(
+      resolve(root, 'docs', 'security', 'threat-model-register.json'),
+      MAX_THREAT_MODEL_BYTES,
+    );
+    sidecarBytes = readSecureLocalFile(
+      resolve(root, 'docs', 'security', 'threat-model-register.sha256'),
+      MAX_THREAT_MODEL_SIDECAR_BYTES,
+    );
+  } catch {
+    return { errors: [THREAT_MODEL_FILE_ERROR], fingerprint: null };
+  }
   let record;
   try {
-    record = JSON.parse(source);
+    record = parseThreatModelBytes(sourceBytes);
   } catch {
-    return { errors: ['Canonical threat model is not valid JSON.'], fingerprint: null };
+    return { errors: [THREAT_MODEL_JSON_ERROR], fingerprint: null };
   }
-  const fingerprint = createHash('sha256').update(source, 'utf8').digest('hex');
-  const errors = validateThreatModelRecord(record);
-  if (!/^[0-9a-f]{64}$/u.test(expectedFingerprint)) {
-    errors.push('Canonical fingerprint must be one lowercase SHA-256 value.');
-  } else if (expectedFingerprint !== fingerprint) {
+  let sidecar;
+  try {
+    sidecar = new TextDecoder('utf-8', { fatal: true }).decode(sidecarBytes);
+  } catch {
+    return { errors: [THREAT_MODEL_SIDECAR_ERROR], fingerprint: null };
+  }
+  const fingerprint = createHash('sha256').update(sourceBytes).digest('hex');
+  const errors = validateThreatModelRecord(record, { evidenceExists });
+  if (!/^[0-9a-f]{64}\n$/u.test(sidecar)) {
+    errors.push(THREAT_MODEL_SIDECAR_ERROR);
+  } else if (sidecar !== `${fingerprint}\n`) {
     errors.push('Canonical threat model fingerprint does not match its reviewed sidecar.');
   }
+  if (fingerprint !== EXPECTED_THREAT_MODEL_SHA256) {
+    errors.push('Canonical threat model bytes do not match the compiled reviewed fingerprint.');
+  }
   return { errors, fingerprint };
+}
+
+export function validateCanonicalThreatModel() {
+  return validateThreatModelFiles(repositoryRoot, isEvidenceFileWithinRepository);
+}
+
+/** Test-only fixture boundary; production validation always uses repositoryRoot. */
+export function validateCanonicalThreatModelForTest(root) {
+  return validateThreatModelFiles(root, () => true);
 }
 
 function main() {

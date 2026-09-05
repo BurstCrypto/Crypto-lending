@@ -1,14 +1,39 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import {
+  linkSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import {
+  EXPECTED_THREAT_MODEL_SHA256,
+  MAX_THREAT_MODEL_BYTES,
+  MAX_THREAT_MODEL_SIDECAR_BYTES,
+  THREAT_MODEL_FILE_ERROR,
+  THREAT_MODEL_JSON_ERROR,
+  THREAT_MODEL_SIDECAR_ERROR,
   isEvidenceFileWithinRepository,
+  parseThreatModelBytes,
+  threatModelFingerprintPath,
   threatModelPath,
   validateCanonicalThreatModel,
+  validateCanonicalThreatModelForTest,
   validateThreatModelRecord,
 } from './validate-kan-49-threat-model.mjs';
+
+function writeThreatModelFixture(root, sourceBytes, sidecarBytes) {
+  const directory = join(root, 'docs', 'security');
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(join(directory, 'threat-model-register.json'), sourceBytes);
+  writeFileSync(join(directory, 'threat-model-register.sha256'), sidecarBytes);
+}
 
 function canonicalRecord() {
   return JSON.parse(readFileSync(threatModelPath, 'utf8'));
@@ -19,7 +44,140 @@ function errorsFor(record) {
 }
 
 test('accepts the canonical fingerprint-bound KAN-49 register', () => {
-  assert.deepEqual(validateCanonicalThreatModel().errors, []);
+  assert.deepEqual(validateCanonicalThreatModel(), {
+    errors: [],
+    fingerprint: EXPECTED_THREAT_MODEL_SHA256,
+  });
+});
+
+test('strict parsing rejects matching-sidecar duplicate keys and a byte-order mark', () => {
+  const canonicalBytes = readFileSync(threatModelPath);
+  const canonicalText = canonicalBytes.toString('utf8');
+  const hostileBytes = [
+    Buffer.from(canonicalText.replace('{\n', '{\n  "schemaVersion": 999,\n'), 'utf8'),
+    Buffer.from(
+      canonicalText.replace(
+        '  "independentApproval": {\n',
+        '  "independentApproval": {\n    "status": "APPROVED",\n',
+      ),
+      'utf8',
+    ),
+    Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), canonicalBytes]),
+  ];
+
+  for (const sourceBytes of hostileBytes) {
+    const fingerprint = createHash('sha256').update(sourceBytes).digest('hex');
+    assert.notEqual(fingerprint, EXPECTED_THREAT_MODEL_SHA256);
+    assert.throws(
+      () => parseThreatModelBytes(sourceBytes),
+      (error) => error instanceof Error && error.message === THREAT_MODEL_JSON_ERROR,
+    );
+    const root = mkdtempSync(join(tmpdir(), 'kan49-strict-json-'));
+    try {
+      writeThreatModelFixture(root, sourceBytes, `${fingerprint}\n`);
+      assert.deepEqual(validateCanonicalThreatModelForTest(root), {
+        errors: [THREAT_MODEL_JSON_ERROR],
+        fingerprint: null,
+      });
+    } finally {
+      rmSync(root, { force: true, recursive: true });
+    }
+  }
+
+  for (const sourceBytes of hostileBytes.slice(0, 2)) {
+    assert.deepEqual(
+      validateThreatModelRecord(JSON.parse(sourceBytes.toString('utf8')), {
+        evidenceExists: () => true,
+      }),
+      [],
+    );
+  }
+});
+
+test('compiled fingerprint rejects a semantically valid self-resealed register', () => {
+  const canonicalText = readFileSync(threatModelPath, 'utf8');
+  const sourceBytes = Buffer.from(
+    canonicalText.replace(
+      'supply-chain boundaries",',
+      'supply-chain boundaries with locally resealed drift",',
+    ),
+    'utf8',
+  );
+  const fingerprint = createHash('sha256').update(sourceBytes).digest('hex');
+  assert.deepEqual(
+    validateThreatModelRecord(JSON.parse(sourceBytes.toString('utf8')), {
+      evidenceExists: () => true,
+    }),
+    [],
+  );
+
+  const root = mkdtempSync(join(tmpdir(), 'kan49-resealed-'));
+  try {
+    writeThreatModelFixture(root, sourceBytes, `${fingerprint}\n`);
+    assert.deepEqual(validateCanonicalThreatModelForTest(root), {
+      errors: ['Canonical threat model bytes do not match the compiled reviewed fingerprint.'],
+      fingerprint,
+    });
+  } finally {
+    rmSync(root, { force: true, recursive: true });
+  }
+});
+
+test('sidecar format is exact and rejects trim-equivalent aliases', () => {
+  const canonicalBytes = readFileSync(threatModelPath);
+  for (const sidecar of [EXPECTED_THREAT_MODEL_SHA256, `${EXPECTED_THREAT_MODEL_SHA256} `]) {
+    const root = mkdtempSync(join(tmpdir(), 'kan49-sidecar-format-'));
+    try {
+      writeThreatModelFixture(root, canonicalBytes, sidecar);
+      assert.deepEqual(validateCanonicalThreatModelForTest(root), {
+        errors: [THREAT_MODEL_SIDECAR_ERROR],
+        fingerprint: EXPECTED_THREAT_MODEL_SHA256,
+      });
+    } finally {
+      rmSync(root, { force: true, recursive: true });
+    }
+  }
+});
+
+test('canonical file loading rejects oversized, empty, and hard-linked artifacts', () => {
+  const canonicalBytes = readFileSync(threatModelPath);
+  const canonicalSidecar = readFileSync(threatModelFingerprintPath);
+  const cases = [
+    (root) =>
+      writeThreatModelFixture(
+        root,
+        Buffer.alloc(MAX_THREAT_MODEL_BYTES + 1, 0x20),
+        canonicalSidecar,
+      ),
+    (root) => writeThreatModelFixture(root, canonicalBytes, Buffer.alloc(0)),
+    (root) =>
+      writeThreatModelFixture(
+        root,
+        canonicalBytes,
+        Buffer.alloc(MAX_THREAT_MODEL_SIDECAR_BYTES + 1, 0x30),
+      ),
+    (root) => {
+      const directory = join(root, 'docs', 'security');
+      mkdirSync(directory, { recursive: true });
+      const source = join(directory, 'source.json');
+      writeFileSync(source, canonicalBytes);
+      linkSync(source, join(directory, 'threat-model-register.json'));
+      writeFileSync(join(directory, 'threat-model-register.sha256'), canonicalSidecar);
+    },
+  ];
+
+  for (const prepare of cases) {
+    const root = mkdtempSync(join(tmpdir(), 'kan49-secure-file-'));
+    try {
+      prepare(root);
+      assert.deepEqual(validateCanonicalThreatModelForTest(root), {
+        errors: [THREAT_MODEL_FILE_ERROR],
+        fingerprint: null,
+      });
+    } finally {
+      rmSync(root, { force: true, recursive: true });
+    }
+  }
 });
 
 test('requires independent review and forbids local approval claims', () => {

@@ -42,8 +42,19 @@ The dependency-free validator rejects:
 - secret-material-shaped fields in the inventory;
 - missing repository evidence paths;
 - directory, traversal, or symlink evidence escapes;
-- a fabricated local approval or broadened decision/binding vocabulary; and
-- any drift between the canonical JSON bytes and its SHA-256 sidecar.
+- a fabricated local approval or broadened decision/binding vocabulary;
+- malformed UTF-8, byte-order marks, or duplicate JSON object keys;
+- empty, oversized, linked, replaced, or unstable register/sidecar files;
+- a sidecar other than exactly one lowercase SHA-256 plus LF;
+- any drift between the canonical JSON bytes and its SHA-256 sidecar; and
+- any drift from the compiled reviewed register fingerprint.
+
+The register is capped at 128 KiB and its sidecar at exactly 65 bytes. Both are
+loaded through a canonical-path, single-link, descriptor-bound stable double
+read. The compiled fingerprint prevents a semantically valid edit from being
+self-resealed with a new sidecar without an explicit validator change. It is a
+local review-integrity control only; KAN-235 remains the independent approval
+gate and must bind the eventual merged commit and tree.
 
 The validator is part of `infra:validate`, and its mutation tests are part of
 the local/CI unit gate. This is a document-integrity control, not a security
