@@ -221,6 +221,40 @@ describe('Solana mainnet balance indexer transcript adapter', () => {
     },
   );
 
+  it.each([
+    ['DEADLINE', 'PROVIDER_TIMEOUT'],
+    ['SHUTDOWN', 'PROVIDER_UNAVAILABLE'],
+  ] as const)(
+    'maps a %s raised during address resolution and starts no later RPC',
+    async (kind, code) => {
+      const execution = createBalanceSyncExecutionContext();
+      const reasonRead = jest.fn(() => 'private');
+      const hostileReason = Object.create(null) as object;
+      Object.defineProperty(hostileReason, 'detail', { enumerable: true, get: reasonRead });
+      const transport = new TranscriptTransport(validResponder());
+      const resolveActiveAddress = jest.fn(
+        async (_scope: unknown, context: BalanceSyncExecutionContext): Promise<unknown> => {
+          expect(context).toBe(execution.context);
+          execution.abort(kind);
+          throw hostileReason;
+        },
+      );
+      const adapter = testAdapter(
+        new SolanaMainnetBalanceIndexerAdapter(
+          transport,
+          { resolveActiveAddress },
+          { now: () => new Date('2026-09-04T18:00:00.000Z') },
+        ),
+      );
+
+      await expect(
+        adapter.readCurrent(provisionalRequest, execution.context),
+      ).rejects.toMatchObject({ code, message: code });
+      expect(transport.requests.map(({ method }) => method)).toEqual(['getGenesisHash']);
+      expect(reasonRead).not.toHaveBeenCalled();
+    },
+  );
+
   it('narrows address resolution to the exact frozen three-key persistence scope', async () => {
     const { adapter, resolveActiveAddress } = adapterWith();
 
@@ -237,6 +271,7 @@ describe('Solana mainnet balance indexer transcript adapter', () => {
     expect(Object.isFrozen(scope)).toBe(true);
     expect(scope).not.toHaveProperty('tier');
     expect(scope).not.toHaveProperty('selector');
+    expect(resolveActiveAddress.mock.calls[0]?.[1]).toBe(TEST_EXECUTION.context);
   });
 
   it('does not let resolver or clock collaborators grant provider retry authority', async () => {
@@ -266,13 +301,16 @@ describe('Solana mainnet balance indexer transcript adapter', () => {
       ),
     );
 
-    for (const adapter of [resolverAdapter, clockAdapter]) {
-      await expect(adapter.readCurrent(provisionalRequest)).rejects.toMatchObject({
-        code: 'PROVIDER_INVALID_DATA',
-        message: 'PROVIDER_INVALID_DATA',
-        retryAfterSeconds: undefined,
-      });
-    }
+    await expect(resolverAdapter.readCurrent(provisionalRequest)).rejects.toMatchObject({
+      code: 'PROVIDER_UNAVAILABLE',
+      message: 'PROVIDER_UNAVAILABLE',
+      retryAfterSeconds: undefined,
+    });
+    await expect(clockAdapter.readCurrent(provisionalRequest)).rejects.toMatchObject({
+      code: 'PROVIDER_INVALID_DATA',
+      message: 'PROVIDER_INVALID_DATA',
+      retryAfterSeconds: undefined,
+    });
   });
 
   it('keeps processed balance indexing explicitly unavailable without making an RPC call', async () => {

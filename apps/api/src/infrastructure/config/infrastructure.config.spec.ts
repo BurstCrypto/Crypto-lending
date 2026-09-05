@@ -5,6 +5,7 @@ import { rootCertificates } from 'node:tls';
 
 import { BALANCE_SYNC_POLICY } from '../../blockchain-sync/domain/balance-sync';
 import {
+  BALANCE_CONSUMER_DATABASE_TIMEOUT_LIMITS,
   BALANCE_CONSUMER_SQS_RECEIPT_REDRIVE_POLICY,
   loadBalanceConsumerInfrastructureConfig,
   loadInfrastructureConfig,
@@ -189,6 +190,31 @@ describe('loadInfrastructureConfig', () => {
     expect(config.database.sessionRole).toBe('crypto_balance_consumer_runtime');
     expect('redis' in config).toBe(false);
   });
+
+  it('accepts the exact balance-consumer database timeout ceilings', () => {
+    const config = loadBalanceConsumerInfrastructureConfig(
+      balanceConsumerEnvironment({
+        DATABASE_CONNECTION_TIMEOUT_MS: '5000',
+        DATABASE_LOCK_TIMEOUT_MS: '5000',
+        DATABASE_STATEMENT_TIMEOUT_MS: '15000',
+      }),
+    );
+
+    expect(config.database).toMatchObject(BALANCE_CONSUMER_DATABASE_TIMEOUT_LIMITS);
+  });
+
+  it.each([
+    ['DATABASE_CONNECTION_TIMEOUT_MS', '5001', 'between 1 and 5000'],
+    ['DATABASE_LOCK_TIMEOUT_MS', '5001', 'between 1 and 5000'],
+    ['DATABASE_STATEMENT_TIMEOUT_MS', '15001', 'between 1 and 15000'],
+  ] as const)(
+    'rejects balance-consumer %s above its shutdown-safe ceiling',
+    (name, value, text) => {
+      expect(() =>
+        loadBalanceConsumerInfrastructureConfig(balanceConsumerEnvironment({ [name]: value })),
+      ).toThrow(text);
+    },
+  );
 
   it('rejects a cross-scoped database login for the production balance consumer', () => {
     expect(() =>

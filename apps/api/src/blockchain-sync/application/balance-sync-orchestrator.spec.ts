@@ -190,6 +190,7 @@ function recoveryCandidate(
 
 class MemoryCheckpointPort implements BalanceSyncCheckpointPort {
   state: BalanceSyncCheckpoint | null;
+  readonly contexts: BalanceSyncExecutionContext[] = [];
   readonly upserts: Array<
     Readonly<{ mode: BalanceSyncSuccessMode; observationId: string; succeededAt: string }>
   > = [];
@@ -207,7 +208,11 @@ class MemoryCheckpointPort implements BalanceSyncCheckpointPort {
     this.state = initial;
   }
 
-  async load(requestedScope: BalanceSyncScope): Promise<BalanceSyncCheckpoint | null> {
+  async load(
+    requestedScope: BalanceSyncScope,
+    context: BalanceSyncExecutionContext,
+  ): Promise<BalanceSyncCheckpoint | null> {
+    this.contexts.push(context);
     if (this.state && !sameScope(this.state.scope, requestedScope))
       throw new Error('scope mismatch');
     return this.state;
@@ -215,7 +220,9 @@ class MemoryCheckpointPort implements BalanceSyncCheckpointPort {
 
   async upsertCurrent(
     input: Parameters<BalanceSyncCheckpointPort['upsertCurrent']>[0],
+    context: BalanceSyncExecutionContext,
   ): Promise<void> {
+    this.contexts.push(context);
     this.assertRevision(input.expectedRevision);
     if (
       input.mode === 'UNCHANGED' &&
@@ -241,7 +248,9 @@ class MemoryCheckpointPort implements BalanceSyncCheckpointPort {
 
   async replaceProvisionalAfterReorg(
     input: Parameters<BalanceSyncCheckpointPort['replaceProvisionalAfterReorg']>[0],
+    context: BalanceSyncExecutionContext,
   ): Promise<void> {
+    this.contexts.push(context);
     this.assertRevision(input.expectedRevision);
     if (this.state?.lastFinalizedSource?.hash !== input.lastFinalizedSource.hash) {
       throw new Error('finalized anchor mismatch');
@@ -264,7 +273,9 @@ class MemoryCheckpointPort implements BalanceSyncCheckpointPort {
 
   async preserveLastGoodAndMarkStale(
     input: Parameters<BalanceSyncCheckpointPort['preserveLastGoodAndMarkStale']>[0],
+    context: BalanceSyncExecutionContext,
   ): Promise<void> {
+    this.contexts.push(context);
     this.assertRevision(input.expectedRevision);
     this.staleWrites.push({ failureCode: input.failureCode, failedAt: input.failedAt });
     this.state = Object.freeze({
@@ -377,6 +388,66 @@ function harness(
 }
 
 describe('BalanceSyncOrchestrator', () => {
+  it('passes one exact execution context through checkpoint load and success persistence', async () => {
+    const execution = createBalanceSyncExecutionContext();
+    const test = harness({ initial: null });
+
+    await expect(test.orchestrator.process(job(), execution.context)).resolves.toMatchObject({
+      status: 'COMPLETED',
+      outcome: 'CREATED',
+    });
+    expect(test.checkpoints.contexts).toEqual([execution.context, execution.context]);
+  });
+
+  it.each([
+    ['DEADLINE', 'PROVIDER_TIMEOUT'],
+    ['SHUTDOWN', 'PROVIDER_UNAVAILABLE'],
+  ] as const)(
+    'retains the source receipt when %s occurs during success persistence',
+    async (kind, code) => {
+      const execution = createBalanceSyncExecutionContext();
+      const test = harness({ initial: null });
+      test.checkpoints.upsertCurrent = async (_input, context) => {
+        expect(context).toBe(execution.context);
+        execution.abort(kind);
+      };
+
+      await expect(test.orchestrator.process(job(), execution.context)).rejects.toMatchObject({
+        code,
+        message: code,
+      });
+      expect(test.checkpoints.upserts).toHaveLength(0);
+      expect(test.checkpoints.staleWrites).toHaveLength(0);
+      expect(test.jobs.retries).toHaveLength(0);
+      expect(test.jobs.deadLetters).toHaveLength(0);
+      expect(test.metrics.events).toHaveLength(0);
+      expect(test.metrics.alerts).toHaveLength(0);
+    },
+  );
+
+  it('starts no metrics or job disposition after shutdown interrupts stale persistence', async () => {
+    const execution = createBalanceSyncExecutionContext();
+    const test = harness({
+      read: async () => {
+        throw new BalanceSyncIndexerFailure('PROVIDER_UNAVAILABLE');
+      },
+    });
+    test.checkpoints.preserveLastGoodAndMarkStale = async (_input, context) => {
+      expect(context).toBe(execution.context);
+      execution.abort('SHUTDOWN');
+    };
+
+    await expect(test.orchestrator.process(job(), execution.context)).rejects.toMatchObject({
+      code: 'PROVIDER_UNAVAILABLE',
+      message: 'PROVIDER_UNAVAILABLE',
+    });
+    expect(test.checkpoints.staleWrites).toHaveLength(0);
+    expect(test.jobs.retries).toHaveLength(0);
+    expect(test.jobs.deadLetters).toHaveLength(0);
+    expect(test.metrics.events).toHaveLength(0);
+    expect(test.metrics.alerts).toHaveLength(0);
+  });
+
   it('creates one current observation and makes a repeated job idempotent', async () => {
     const test = harness({ initial: null });
 
@@ -669,33 +740,31 @@ describe('BalanceSyncOrchestrator', () => {
     'preserves an authenticated %s cancellation during rescan as %s',
     async (abortKind, failureCode) => {
       const owner = createBalanceSyncExecutionContext();
-      owner.abort(abortKind);
       const rescan = jest.fn(
         async (
           _request: BalanceIndexerRescanRequest,
           context: BalanceSyncExecutionContext,
         ): Promise<unknown> => {
           expect(context).toBe(owner.context);
+          owner.abort(abortKind);
           expect(reviewBalanceSyncExecutionContext(context)?.abortKind).toBe(abortKind);
           throw new BalanceSyncIndexerFailure(failureCode);
         },
       );
       const test = harness({ rescan });
 
-      const result = await test.orchestrator.process(
-        job({ cause: 'MANUAL_RECOVERY', rescanFromPosition: '99' }),
-        owner.context,
-      );
-
-      expect(result).toMatchObject({
-        status: 'RETRY_SCHEDULED',
-        failureCode,
+      await expect(
+        test.orchestrator.process(
+          job({ cause: 'MANUAL_RECOVERY', rescanFromPosition: '99' }),
+          owner.context,
+        ),
+      ).rejects.toMatchObject({
+        code: failureCode,
       });
       expect(rescan).toHaveBeenCalledTimes(1);
-      expect(test.checkpoints.state).toMatchObject({
-        freshness: 'STALE',
-        lastFailureCode: failureCode,
-      });
+      expect(test.checkpoints.state).toEqual(checkpoint());
+      expect(test.checkpoints.staleWrites).toHaveLength(0);
+      expect(test.metrics.events).toHaveLength(0);
     },
   );
 

@@ -4,6 +4,7 @@ import type {
   DatabaseInfrastructureConfig,
   RuntimeInfrastructureConfig,
 } from '../../../infrastructure/config/infrastructure.config';
+import { BALANCE_CONSUMER_DATABASE_TIMEOUT_LIMITS } from '../../../infrastructure/config/infrastructure.config';
 import { PostgresService } from '../../../infrastructure/database/postgres.service';
 import {
   createPostgresPool,
@@ -223,12 +224,21 @@ function databaseSnapshot(value: unknown): Readonly<DatabaseInfrastructureConfig
   const reviewedConnectionString = connectionString(record.connectionString);
   return Object.freeze({
     connectionString: reviewedConnectionString.value,
-    connectionTimeoutMs: boundedInteger(record.connectionTimeoutMs, 60_000),
+    connectionTimeoutMs: boundedInteger(
+      record.connectionTimeoutMs,
+      BALANCE_CONSUMER_DATABASE_TIMEOUT_LIMITS.connectionTimeoutMs,
+    ),
     idleTimeoutMs: boundedInteger(record.idleTimeoutMs, 600_000),
-    lockTimeoutMs: boundedInteger(record.lockTimeoutMs, 60_000),
+    lockTimeoutMs: boundedInteger(
+      record.lockTimeoutMs,
+      BALANCE_CONSUMER_DATABASE_TIMEOUT_LIMITS.lockTimeoutMs,
+    ),
     maxLifetimeSeconds: boundedInteger(record.maxLifetimeSeconds, 86_400),
     poolMax: boundedInteger(record.poolMax, 100),
-    statementTimeoutMs: boundedInteger(record.statementTimeoutMs, 300_000),
+    statementTimeoutMs: boundedInteger(
+      record.statementTimeoutMs,
+      BALANCE_CONSUMER_DATABASE_TIMEOUT_LIMITS.statementTimeoutMs,
+    ),
     ssl: sslSnapshot(record.ssl, reviewedConnectionString.loopback),
     sessionRole: BALANCE_CONSUMER_SESSION_ROLE,
   });
@@ -302,38 +312,89 @@ export async function createDormantBalanceConsumerPersistenceResource(
 ): Promise<Readonly<BalanceConsumerPersistenceResource>> {
   const reviewed = reviewedConfiguration(infrastructureConfig, balanceConsumerConfig);
   let pool: Pool | undefined;
+  let postgres: PostgresService | undefined;
 
   try {
     pool = createPostgresPool(reviewed.infrastructure);
-    const postgres = new PostgresService(pool);
-    const checkpointRepository = new PostgresBalanceSyncCheckpointRepository(postgres);
+    postgres = new PostgresService(pool);
+    const resourcePostgres = postgres;
+    const checkpointRepository = new PostgresBalanceSyncCheckpointRepository(resourcePostgres);
     const walletAddressResolverRepository = new PostgresBalanceSyncWalletAddressResolver(
-      postgres,
+      resourcePostgres,
       reviewed.balanceConsumer,
     );
 
     let closed = false;
+    const operationGates = new Set<Promise<void>>();
     const whileOpen = <Result>(operation: () => Promise<Result>): Promise<Result> => {
       if (closed) return Promise.reject(new BalanceConsumerPersistenceClosedError());
-      return operation();
+      let finishGate: (() => void) | undefined;
+      const gate = new Promise<void>((resolve) => {
+        finishGate = resolve;
+      });
+      operationGates.add(gate);
+      const result = Promise.resolve().then(operation);
+      void result.then(
+        () => finishGate?.(),
+        () => finishGate?.(),
+      );
+      void gate.then(
+        () => operationGates.delete(gate),
+        () => operationGates.delete(gate),
+      );
+      return result;
+    };
+    const drainOperations = async (): Promise<void> => {
+      while (operationGates.size > 0) {
+        await Promise.allSettled([...operationGates]);
+      }
     };
     const checkpoints = frozenNullPrototype<BalanceSyncCheckpointPort>({
-      load: (scope) => whileOpen(() => checkpointRepository.load(scope)),
-      upsertCurrent: (input) => whileOpen(() => checkpointRepository.upsertCurrent(input)),
-      replaceProvisionalAfterReorg: (input) =>
-        whileOpen(() => checkpointRepository.replaceProvisionalAfterReorg(input)),
-      preserveLastGoodAndMarkStale: (input) =>
-        whileOpen(() => checkpointRepository.preserveLastGoodAndMarkStale(input)),
+      load: (scope, context) => whileOpen(() => checkpointRepository.load(scope, context)),
+      upsertCurrent: (input, context) =>
+        whileOpen(() => checkpointRepository.upsertCurrent(input, context)),
+      replaceProvisionalAfterReorg: (input, context) =>
+        whileOpen(() => checkpointRepository.replaceProvisionalAfterReorg(input, context)),
+      preserveLastGoodAndMarkStale: (input, context) =>
+        whileOpen(() => checkpointRepository.preserveLastGoodAndMarkStale(input, context)),
     });
     const walletAddressResolver = frozenNullPrototype<BalanceSyncWalletAddressResolverPort>({
-      resolveActiveAddress: (scope) =>
-        whileOpen(() => walletAddressResolverRepository.resolveActiveAddress(scope)),
+      resolveActiveAddress: (scope, context) =>
+        whileOpen(() => walletAddressResolverRepository.resolveActiveAddress(scope, context)),
     });
     const resourcePool = pool;
     let closePromise: Promise<void> | undefined;
     const close = (): Promise<void> => {
+      if (closePromise !== undefined) return closePromise;
       closed = true;
-      closePromise ??= closePool(resourcePool, () => new BalanceConsumerPersistenceCloseError());
+      let finish: (() => void) | undefined;
+      let fail: ((error: BalanceConsumerPersistenceCloseError) => void) | undefined;
+      closePromise = new Promise<void>((resolve, reject) => {
+        finish = resolve;
+        fail = reject;
+      });
+      let postgresDrain: Promise<void>;
+      try {
+        postgresDrain = resourcePostgres.closeCancellableQueries();
+      } catch {
+        postgresDrain = Promise.reject(new BalanceConsumerPersistenceCloseError());
+      }
+      void Promise.allSettled([postgresDrain, drainOperations()])
+        .then(async (drainSettlements) => {
+          const [poolSettlement] = await Promise.allSettled([
+            closePool(resourcePool, () => new BalanceConsumerPersistenceCloseError()),
+          ]);
+          if (
+            drainSettlements.some(({ status }) => status === 'rejected') ||
+            poolSettlement?.status === 'rejected'
+          ) {
+            throw new BalanceConsumerPersistenceCloseError();
+          }
+        })
+        .then(
+          () => finish?.(),
+          () => fail?.(new BalanceConsumerPersistenceCloseError()),
+        );
       return closePromise;
     };
 
@@ -343,6 +404,13 @@ export async function createDormantBalanceConsumerPersistenceResource(
       close,
     });
   } catch {
+    if (postgres !== undefined) {
+      try {
+        await Promise.allSettled([postgres.closeCancellableQueries()]);
+      } catch {
+        // The fixed construction error below remains authoritative.
+      }
+    }
     if (pool !== undefined) {
       await closePool(pool, () => new BalanceConsumerPersistenceConstructionError()).catch(
         () => undefined,

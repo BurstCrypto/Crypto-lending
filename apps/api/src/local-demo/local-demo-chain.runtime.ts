@@ -193,6 +193,7 @@ export class LocalDemoChainPipeline {
         if (outcome.status !== 'COMPLETED') throw new LocalDemoChainPipelineError();
         const checkpoint = await checkpoints.load(
           Object.freeze({ accountId, walletId: fixture.walletId, networkId }),
+          execution.context,
         );
         if (checkpoint?.freshness !== 'CURRENT' || checkpoint.currentObservation === null) {
           throw new LocalDemoChainPipelineError();
@@ -451,13 +452,19 @@ class LocalDemoSolanaDepositSource implements SolanaDepositSourcePort {
 class RequestLocalCheckpointPort implements BalanceSyncCheckpointPort {
   private readonly states = new Map<string, BalanceSyncCheckpoint>();
 
-  async load(scope: BalanceSyncScope): Promise<BalanceSyncCheckpoint | null> {
+  async load(
+    scope: BalanceSyncScope,
+    context: BalanceSyncExecutionContext,
+  ): Promise<BalanceSyncCheckpoint | null> {
+    requireActiveLocalExecution(context);
     return this.states.get(scopeKey(scope)) ?? null;
   }
 
   async upsertCurrent(
     input: Parameters<BalanceSyncCheckpointPort['upsertCurrent']>[0],
+    context: BalanceSyncExecutionContext,
   ): Promise<void> {
+    requireActiveLocalExecution(context);
     const existing = this.states.get(scopeKey(input.scope));
     assertRevision(existing, input.expectedRevision);
     if (
@@ -482,7 +489,9 @@ class RequestLocalCheckpointPort implements BalanceSyncCheckpointPort {
 
   async replaceProvisionalAfterReorg(
     input: Parameters<BalanceSyncCheckpointPort['replaceProvisionalAfterReorg']>[0],
+    context: BalanceSyncExecutionContext,
   ): Promise<void> {
+    requireActiveLocalExecution(context);
     const existing = this.states.get(scopeKey(input.scope));
     assertRevision(existing, input.expectedRevision);
     if (existing === undefined) throw new TypeError('missing local demo checkpoint');
@@ -502,7 +511,9 @@ class RequestLocalCheckpointPort implements BalanceSyncCheckpointPort {
 
   async preserveLastGoodAndMarkStale(
     input: Parameters<BalanceSyncCheckpointPort['preserveLastGoodAndMarkStale']>[0],
+    context: BalanceSyncExecutionContext,
   ): Promise<void> {
+    requireActiveLocalExecution(context);
     const existing = this.states.get(scopeKey(input.scope));
     assertRevision(existing, input.expectedRevision);
     this.states.set(
@@ -518,6 +529,11 @@ class RequestLocalCheckpointPort implements BalanceSyncCheckpointPort {
       }),
     );
   }
+}
+
+function requireActiveLocalExecution(context: unknown): void {
+  const reviewed = reviewBalanceSyncExecutionContext(context);
+  if (reviewed === null || reviewed.abortKind !== null) throw new LocalDemoChainPipelineError();
 }
 
 class RequestLocalJobPort implements BalanceSyncJobPort {

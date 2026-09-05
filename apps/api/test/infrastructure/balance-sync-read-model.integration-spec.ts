@@ -1,13 +1,16 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 
-import type { PoolClient, QueryResult, QueryResultRow } from 'pg';
+import type { QueryResult, QueryResultRow } from 'pg';
 import { Pool } from 'pg';
 
 import {
   MAINNET_SUPPORTED_ASSET_REGISTRY,
   type SupportedStablecoinAsset,
 } from '../../src/blockchain/domain/supported-asset-registry';
-import type { BalanceSyncScope } from '../../src/blockchain-sync/application/ports/balance-sync.ports';
+import {
+  INERT_BALANCE_SYNC_EXECUTION_CONTEXT,
+  type BalanceSyncScope,
+} from '../../src/blockchain-sync/application/ports/balance-sync.ports';
 import {
   BalanceSyncCheckpointPersistenceError,
   PostgresBalanceSyncCheckpointRepository,
@@ -26,6 +29,7 @@ import { PRODUCTION_DATABASE_PRINCIPALS } from '../../src/infrastructure/databas
 import { createBalanceSyncReadModelTestSchemaMigrationV0020 } from '../../src/infrastructure/database/migrations/0020-create-balance-sync-read-model.migration';
 import { DATABASE_TEST_SCHEMA_MIGRATION_LIST } from '../../src/infrastructure/database/migrations';
 import { PostgresService } from '../../src/infrastructure/database/postgres.service';
+import { postgresStartupOptions } from '../../src/infrastructure/database/postgres-startup-options';
 import { assertLocalPrincipalFixture } from './local-principal-fixture-guard';
 
 const testDatabaseUrl = process.env.TEST_DATABASE_URL;
@@ -147,14 +151,23 @@ async function asRole<Row extends QueryResultRow>(
 }
 
 async function repositoryAsRole<T>(
-  postgres: PostgresService,
+  schema: string,
   role: string,
   operation: (repository: PostgresBalanceSyncCheckpointRepository) => Promise<T>,
 ): Promise<T> {
-  return postgres.withTransaction(async (client: PoolClient) => {
-    await client.query(`SET LOCAL ROLE ${quoteIdentifier(role)}`);
-    return operation(new PostgresBalanceSyncCheckpointRepository(postgres));
+  if (!IDENTIFIER.test(schema)) throw new Error('Unsafe balance sync test schema');
+  const rolePool = new Pool({
+    connectionString: testDatabaseUrl,
+    max: 1,
+    options: `${postgresStartupOptions(role)} -c search_path=${schema},pg_temp`,
   });
+  try {
+    return await operation(
+      new PostgresBalanceSyncCheckpointRepository(new PostgresService(rolePool)),
+    );
+  } finally {
+    await rolePool.end();
+  }
 }
 
 describeWithPostgres('balance sync PostgreSQL read model', () => {
@@ -170,6 +183,7 @@ describeWithPostgres('balance sync PostgreSQL read model', () => {
   let ethereumWalletId: string;
   let solanaWalletId: string;
   const schema = `balance_sync_${randomBytes(8).toString('hex')}`;
+  if (!IDENTIFIER.test(schema)) throw new Error('Unsafe balance sync test schema');
   const expectedMigrationIds = BALANCE_SYNC_TEST_MIGRATIONS.map(({ id }) => id);
 
   async function registerWallet(
@@ -366,25 +380,33 @@ describeWithPostgres('balance sync PostgreSQL read model', () => {
       parentHash: hash('1'),
       at: at(databaseNow, -5_000),
     });
-    await repositoryAsRole(postgres, PRODUCTION_DATABASE_PRINCIPALS.workerRuntimeRole, (asWorker) =>
-      asWorker.upsertCurrent({
-        scope,
-        expectedRevision: null,
-        observation: first,
-        mode: 'CREATED',
-        succeededAt: at(databaseNow, -4_000),
-      }),
+    await repositoryAsRole(schema, PRODUCTION_DATABASE_PRINCIPALS.workerRuntimeRole, (asWorker) =>
+      asWorker.upsertCurrent(
+        {
+          scope,
+          expectedRevision: null,
+          observation: first,
+          mode: 'CREATED',
+          succeededAt: at(databaseNow, -4_000),
+        },
+        INERT_BALANCE_SYNC_EXECUTION_CONTEXT,
+      ),
     );
     await expect(
-      repository.upsertCurrent({
-        scope,
-        expectedRevision: null,
-        observation: first,
-        mode: 'CREATED',
-        succeededAt: at(databaseNow, -4_000),
-      }),
+      repository.upsertCurrent(
+        {
+          scope,
+          expectedRevision: null,
+          observation: first,
+          mode: 'CREATED',
+          succeededAt: at(databaseNow, -4_000),
+        },
+        INERT_BALANCE_SYNC_EXECUTION_CONTEXT,
+      ),
     ).resolves.toBeUndefined();
-    await expect(repository.load(scope)).resolves.toMatchObject({
+    await expect(
+      repository.load(scope, INERT_BALANCE_SYNC_EXECUTION_CONTEXT),
+    ).resolves.toMatchObject({
       revision: 1,
       freshness: 'CURRENT',
       currentObservation: { observationId: first.observationId },
@@ -398,20 +420,28 @@ describeWithPostgres('balance sync PostgreSQL read model', () => {
       at: at(databaseNow, -3_000),
       amountOffset: 10,
     });
-    await repository.upsertCurrent({
-      scope,
-      expectedRevision: 1,
-      observation: second,
-      mode: 'UPDATED',
-      succeededAt: at(databaseNow, -2_000),
-    });
-    await repository.preserveLastGoodAndMarkStale({
-      scope,
-      expectedRevision: 2,
-      failedAt: at(databaseNow, -1_000),
-      failureCode: 'PROVIDER_TIMEOUT',
-    });
-    await expect(repository.load(scope)).resolves.toMatchObject({
+    await repository.upsertCurrent(
+      {
+        scope,
+        expectedRevision: 1,
+        observation: second,
+        mode: 'UPDATED',
+        succeededAt: at(databaseNow, -2_000),
+      },
+      INERT_BALANCE_SYNC_EXECUTION_CONTEXT,
+    );
+    await repository.preserveLastGoodAndMarkStale(
+      {
+        scope,
+        expectedRevision: 2,
+        failedAt: at(databaseNow, -1_000),
+        failureCode: 'PROVIDER_TIMEOUT',
+      },
+      INERT_BALANCE_SYNC_EXECUTION_CONTEXT,
+    );
+    await expect(
+      repository.load(scope, INERT_BALANCE_SYNC_EXECUTION_CONTEXT),
+    ).resolves.toMatchObject({
       revision: 3,
       freshness: 'STALE',
       staleSince: at(databaseNow, -1_000),
@@ -517,13 +547,16 @@ describeWithPostgres('balance sync PostgreSQL read model', () => {
       at: at(databaseNow, -5_000),
     });
     const repository = new PostgresBalanceSyncCheckpointRepository(postgres);
-    await repository.upsertCurrent({
-      scope,
-      expectedRevision: null,
-      observation: current,
-      mode: 'CREATED',
-      succeededAt: at(databaseNow, -4_000),
-    });
+    await repository.upsertCurrent(
+      {
+        scope,
+        expectedRevision: null,
+        observation: current,
+        mode: 'CREATED',
+        succeededAt: at(databaseNow, -4_000),
+      },
+      INERT_BALANCE_SYNC_EXECUTION_CONTEXT,
+    );
     const reader = new PostgresPortfolioBalanceReader(postgres);
     await expect(
       asRole(
@@ -580,13 +613,16 @@ describeWithPostgres('balance sync PostgreSQL read model', () => {
       at: at(databaseNow, -1_000),
     });
     await expect(
-      repository.upsertCurrent({
-        scope: wrongScope,
-        expectedRevision: null,
-        observation: candidate,
-        mode: 'CREATED',
-        succeededAt: databaseNow,
-      }),
+      repository.upsertCurrent(
+        {
+          scope: wrongScope,
+          expectedRevision: null,
+          observation: candidate,
+          mode: 'CREATED',
+          succeededAt: databaseNow,
+        },
+        INERT_BALANCE_SYNC_EXECUTION_CONTEXT,
+      ),
     ).rejects.toBeInstanceOf(BalanceSyncCheckpointPersistenceError);
     await expect(
       operationPool.query(
@@ -598,11 +634,14 @@ describeWithPostgres('balance sync PostgreSQL read model', () => {
     ).rejects.toMatchObject({ code: '22023' });
 
     const current = (
-      await repository.load({
-        accountId,
-        walletId: ethereumWalletId,
-        networkId: ETHEREUM,
-      })
+      await repository.load(
+        {
+          accountId,
+          walletId: ethereumWalletId,
+          networkId: ETHEREUM,
+        },
+        INERT_BALANCE_SYNC_EXECUTION_CONTEXT,
+      )
     )?.currentObservation;
     if (!current) throw new Error('Expected Ethereum checkpoint');
     const gap = observation({
@@ -613,29 +652,38 @@ describeWithPostgres('balance sync PostgreSQL read model', () => {
       at: databaseNow,
     });
     await expect(
-      repository.upsertCurrent({
-        scope: { accountId, walletId: ethereumWalletId, networkId: ETHEREUM },
-        expectedRevision: 3,
-        observation: gap,
-        mode: 'UPDATED',
-        succeededAt: databaseNow,
-      }),
+      repository.upsertCurrent(
+        {
+          scope: { accountId, walletId: ethereumWalletId, networkId: ETHEREUM },
+          expectedRevision: 3,
+          observation: gap,
+          mode: 'UPDATED',
+          succeededAt: databaseNow,
+        },
+        INERT_BALANCE_SYNC_EXECUTION_CONTEXT,
+      ),
     ).rejects.toBeInstanceOf(BalanceSyncCheckpointPersistenceError);
     await expect(
-      repository.upsertCurrent({
-        scope: { accountId, walletId: ethereumWalletId, networkId: ETHEREUM },
-        expectedRevision: 3,
-        observation: { ...current, positions: current.positions.slice(0, 2) },
-        mode: 'UNCHANGED',
-        succeededAt: databaseNow,
-      }),
+      repository.upsertCurrent(
+        {
+          scope: { accountId, walletId: ethereumWalletId, networkId: ETHEREUM },
+          expectedRevision: 3,
+          observation: { ...current, positions: current.positions.slice(0, 2) },
+          mode: 'UNCHANGED',
+          succeededAt: databaseNow,
+        },
+        INERT_BALANCE_SYNC_EXECUTION_CONTEXT,
+      ),
     ).rejects.toBeInstanceOf(BalanceSyncCheckpointPersistenceError);
 
-    const ethereumCheckpoint = await repository.load({
-      accountId,
-      walletId: ethereumWalletId,
-      networkId: ETHEREUM,
-    });
+    const ethereumCheckpoint = await repository.load(
+      {
+        accountId,
+        walletId: ethereumWalletId,
+        networkId: ETHEREUM,
+      },
+      INERT_BALANCE_SYNC_EXECUTION_CONTEXT,
+    );
     if (!ethereumCheckpoint?.currentObservation) throw new Error('Expected Ethereum observation');
     await expect(
       operationPool.query(
@@ -700,13 +748,16 @@ describeWithPostgres('balance sync PostgreSQL read model', () => {
     const repository = new PostgresBalanceSyncCheckpointRepository(postgres);
     const outcomes = await Promise.allSettled(
       candidates.map((candidate) =>
-        repository.upsertCurrent({
-          scope,
-          expectedRevision: null,
-          observation: candidate,
-          mode: 'CREATED',
-          succeededAt: databaseNow,
-        }),
+        repository.upsertCurrent(
+          {
+            scope,
+            expectedRevision: null,
+            observation: candidate,
+            mode: 'CREATED',
+            succeededAt: databaseNow,
+          },
+          INERT_BALANCE_SYNC_EXECUTION_CONTEXT,
+        ),
       ),
     );
     expect(outcomes.filter(({ status }) => status === 'fulfilled')).toHaveLength(1);
@@ -774,9 +825,15 @@ describeWithPostgres('balance sync PostgreSQL read model', () => {
       replacement,
       recoveredAt: databaseNow,
     } as const;
-    await expect(repository.replaceProvisionalAfterReorg(recovery)).resolves.toBeUndefined();
-    await expect(repository.replaceProvisionalAfterReorg(recovery)).resolves.toBeUndefined();
-    await expect(repository.load(scope)).resolves.toMatchObject({
+    await expect(
+      repository.replaceProvisionalAfterReorg(recovery, INERT_BALANCE_SYNC_EXECUTION_CONTEXT),
+    ).resolves.toBeUndefined();
+    await expect(
+      repository.replaceProvisionalAfterReorg(recovery, INERT_BALANCE_SYNC_EXECUTION_CONTEXT),
+    ).resolves.toBeUndefined();
+    await expect(
+      repository.load(scope, INERT_BALANCE_SYNC_EXECUTION_CONTEXT),
+    ).resolves.toMatchObject({
       revision: 5,
       freshness: 'CURRENT',
       lastFinalizedSource: anchor,

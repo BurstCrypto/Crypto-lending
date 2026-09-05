@@ -19,6 +19,7 @@ import type {
   BalanceSyncCheckpointPort,
   BalanceSyncScope,
 } from '../../application/ports/balance-sync.ports';
+import { INERT_BALANCE_SYNC_EXECUTION_CONTEXT } from '../../application/ports/balance-sync.ports';
 import {
   loadBalanceConsumerConfig,
   type BalanceConsumerConfig,
@@ -115,6 +116,13 @@ async function capturedRejection(
   throw new Error('Expected action to reject');
 }
 
+async function flushMicrotasks(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
 function expectSanitizedConfigurationError(error: Error & { readonly code?: string }): void {
   expect(error).toMatchObject({
     name: 'BalanceConsumerPersistenceConfigurationError',
@@ -130,6 +138,7 @@ describe('createDormantBalanceConsumerPersistenceResource', () => {
   const poolConnect = jest.fn();
   const postgresQuery = jest.fn();
   const postgresHealthCheck = jest.fn();
+  const postgresCloseCancellableQueries = jest.fn();
   const checkpointLoad = jest.fn();
   const checkpointUpsertCurrent = jest.fn();
   const checkpointReplaceAfterReorg = jest.fn();
@@ -144,6 +153,7 @@ describe('createDormantBalanceConsumerPersistenceResource', () => {
   const postgres = {
     query: postgresQuery,
     healthCheck: postgresHealthCheck,
+    closeCancellableQueries: postgresCloseCancellableQueries,
   } as unknown as PostgresService;
   const checkpointRepository = {
     load: checkpointLoad,
@@ -158,6 +168,7 @@ describe('createDormantBalanceConsumerPersistenceResource', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     poolEnd.mockResolvedValue(undefined);
+    postgresCloseCancellableQueries.mockResolvedValue(undefined);
     checkpointLoad.mockResolvedValue(null);
     checkpointUpsertCurrent.mockResolvedValue(undefined);
     checkpointReplaceAfterReorg.mockResolvedValue(undefined);
@@ -285,17 +296,42 @@ describe('createDormantBalanceConsumerPersistenceResource', () => {
     expect(resource).not.toHaveProperty('postgres');
     expect(resource).not.toHaveProperty('config');
 
-    await resource.checkpoints.load.call(null, SCOPE);
-    await resource.checkpoints.upsertCurrent.call(null, upsertInput);
-    await resource.checkpoints.replaceProvisionalAfterReorg.call(null, reorgInput);
-    await resource.checkpoints.preserveLastGoodAndMarkStale.call(null, staleInput);
-    await resource.walletAddressResolver.resolveActiveAddress.call(null, SCOPE);
+    await resource.checkpoints.load.call(null, SCOPE, INERT_BALANCE_SYNC_EXECUTION_CONTEXT);
+    await resource.checkpoints.upsertCurrent.call(
+      null,
+      upsertInput,
+      INERT_BALANCE_SYNC_EXECUTION_CONTEXT,
+    );
+    await resource.checkpoints.replaceProvisionalAfterReorg.call(
+      null,
+      reorgInput,
+      INERT_BALANCE_SYNC_EXECUTION_CONTEXT,
+    );
+    await resource.checkpoints.preserveLastGoodAndMarkStale.call(
+      null,
+      staleInput,
+      INERT_BALANCE_SYNC_EXECUTION_CONTEXT,
+    );
+    await resource.walletAddressResolver.resolveActiveAddress.call(
+      null,
+      SCOPE,
+      INERT_BALANCE_SYNC_EXECUTION_CONTEXT,
+    );
 
-    expect(checkpointLoad).toHaveBeenCalledWith(SCOPE);
-    expect(checkpointUpsertCurrent).toHaveBeenCalledWith(upsertInput);
-    expect(checkpointReplaceAfterReorg).toHaveBeenCalledWith(reorgInput);
-    expect(checkpointMarkStale).toHaveBeenCalledWith(staleInput);
-    expect(resolveActiveAddress).toHaveBeenCalledWith(SCOPE);
+    expect(checkpointLoad).toHaveBeenCalledWith(SCOPE, INERT_BALANCE_SYNC_EXECUTION_CONTEXT);
+    expect(checkpointUpsertCurrent).toHaveBeenCalledWith(
+      upsertInput,
+      INERT_BALANCE_SYNC_EXECUTION_CONTEXT,
+    );
+    expect(checkpointReplaceAfterReorg).toHaveBeenCalledWith(
+      reorgInput,
+      INERT_BALANCE_SYNC_EXECUTION_CONTEXT,
+    );
+    expect(checkpointMarkStale).toHaveBeenCalledWith(
+      staleInput,
+      INERT_BALANCE_SYNC_EXECUTION_CONTEXT,
+    );
+    expect(resolveActiveAddress).toHaveBeenCalledWith(SCOPE, INERT_BALANCE_SYNC_EXECUTION_CONTEXT);
   });
 
   it.each([
@@ -322,6 +358,22 @@ describe('createDormantBalanceConsumerPersistenceResource', () => {
       expect(mockedCreatePostgresPool).not.toHaveBeenCalled();
     },
   );
+
+  it.each([
+    ['connection timeout', { connectionTimeoutMs: 5_001 }],
+    ['lock timeout', { lockTimeoutMs: 5_001 }],
+    ['statement timeout', { statementTimeoutMs: 15_001 }],
+  ] as const)('rejects an excessive %s before pool allocation', async (_label, override) => {
+    const error = await capturedRejection(() =>
+      createDormantBalanceConsumerPersistenceResource(
+        infrastructureConfig('crypto_balance_consumer_runtime', override),
+        enabledBalanceConsumerConfig(),
+      ),
+    );
+
+    expectSanitizedConfigurationError(error);
+    expect(mockedCreatePostgresPool).not.toHaveBeenCalled();
+  });
 
   it('reads data descriptors without invoking hostile property access', async () => {
     let propertyReads = 0;
@@ -642,7 +694,7 @@ describe('createDormantBalanceConsumerPersistenceResource', () => {
         settled = true;
       },
     );
-    await Promise.resolve();
+    await flushMicrotasks();
 
     expect(poolEnd).toHaveBeenCalledTimes(1);
     expect(settled).toBe(false);
@@ -716,7 +768,7 @@ describe('createDormantBalanceConsumerPersistenceResource', () => {
 
     expect(concurrent).toBe(first);
     expect(poolEnd).not.toHaveBeenCalled();
-    await Promise.resolve();
+    await flushMicrotasks();
     expect(poolEnd).toHaveBeenCalledTimes(1);
     resolveEnd?.();
     await first;
@@ -731,21 +783,27 @@ describe('createDormantBalanceConsumerPersistenceResource', () => {
     );
     const closing = resource.close();
     const operationResults = [
-      resource.checkpoints.load(SCOPE),
+      resource.checkpoints.load(SCOPE, INERT_BALANCE_SYNC_EXECUTION_CONTEXT),
       resource.checkpoints.upsertCurrent(
         Object.freeze({}) as Parameters<BalanceSyncCheckpointPort['upsertCurrent']>[0],
+        INERT_BALANCE_SYNC_EXECUTION_CONTEXT,
       ),
       resource.checkpoints.replaceProvisionalAfterReorg(
         Object.freeze({}) as Parameters<
           BalanceSyncCheckpointPort['replaceProvisionalAfterReorg']
         >[0],
+        INERT_BALANCE_SYNC_EXECUTION_CONTEXT,
       ),
       resource.checkpoints.preserveLastGoodAndMarkStale(
         Object.freeze({}) as Parameters<
           BalanceSyncCheckpointPort['preserveLastGoodAndMarkStale']
         >[0],
+        INERT_BALANCE_SYNC_EXECUTION_CONTEXT,
       ),
-      resource.walletAddressResolver.resolveActiveAddress(SCOPE),
+      resource.walletAddressResolver.resolveActiveAddress(
+        SCOPE,
+        INERT_BALANCE_SYNC_EXECUTION_CONTEXT,
+      ),
     ];
 
     expect(poolEnd).not.toHaveBeenCalled();
@@ -771,6 +829,52 @@ describe('createDormantBalanceConsumerPersistenceResource', () => {
     expect(poolEnd).toHaveBeenCalledTimes(1);
   });
 
+  it('aborts cancellable clients and drains an accepted facade before ending the pool', async () => {
+    let finishLoad: ((value: null) => void) | undefined;
+    checkpointLoad.mockReturnValueOnce(
+      new Promise<null>((resolvePromise) => {
+        finishLoad = resolvePromise;
+      }),
+    );
+    const resource = await createDormantBalanceConsumerPersistenceResource(
+      infrastructureConfig(),
+      enabledBalanceConsumerConfig(),
+    );
+    const operation = resource.checkpoints.load(SCOPE, INERT_BALANCE_SYNC_EXECUTION_CONTEXT);
+    await flushMicrotasks();
+    expect(checkpointLoad).toHaveBeenCalledTimes(1);
+
+    const closing = resource.close();
+    expect(postgresCloseCancellableQueries).toHaveBeenCalledTimes(1);
+    expect(poolEnd).not.toHaveBeenCalled();
+    finishLoad?.(null);
+    await operation;
+    await closing;
+
+    expect(poolEnd).toHaveBeenCalledTimes(1);
+    expect(postgresCloseCancellableQueries.mock.invocationCallOrder[0]).toBeLessThan(
+      poolEnd.mock.invocationCallOrder[0] as number,
+    );
+  });
+
+  it('still closes the pool and rejects truthfully when cancellable teardown fails', async () => {
+    postgresCloseCancellableQueries.mockRejectedValueOnce(new Error('private teardown detail'));
+    const resource = await createDormantBalanceConsumerPersistenceResource(
+      infrastructureConfig(),
+      enabledBalanceConsumerConfig(),
+    );
+
+    const error = await capturedRejection(() => resource.close());
+
+    expect(error).toMatchObject({
+      name: 'BalanceConsumerPersistenceCloseError',
+      code: 'BALANCE_CONSUMER_PERSISTENCE_CLOSE_FAILED',
+      message: 'Balance consumer persistence close failed',
+    });
+    expect(error).not.toHaveProperty('cause');
+    expect(poolEnd).toHaveBeenCalledTimes(1);
+  });
+
   it('memoizes the close promise before a synchronous end implementation can re-enter', async () => {
     const resource = await createDormantBalanceConsumerPersistenceResource(
       infrastructureConfig(),
@@ -780,7 +884,7 @@ describe('createDormantBalanceConsumerPersistenceResource', () => {
     let reentrantOperation: Promise<unknown> | undefined;
     poolEnd.mockImplementationOnce(() => {
       reentrant = resource.close();
-      reentrantOperation = resource.checkpoints.load(SCOPE);
+      reentrantOperation = resource.checkpoints.load(SCOPE, INERT_BALANCE_SYNC_EXECUTION_CONTEXT);
       return Promise.resolve();
     });
 

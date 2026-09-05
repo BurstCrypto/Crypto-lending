@@ -20,8 +20,8 @@ export interface BalanceSyncConsumerPolicy {
   readonly idleDelayMs: number;
   readonly dependencyFailureBaseDelayMs: number;
   readonly dependencyFailureMaxDelayMs: number;
-  /** Bounds the propagated JSON-RPC execution window, not signal-less persistence/resolution. */
-  readonly maximumRpcWindowMs: number;
+  /** Propagates one deadline through resolution, RPC, and checkpoint persistence. */
+  readonly jobTimeoutMs: number;
 }
 
 export type BalanceSyncConsumerWait = (milliseconds: number, signal: AbortSignal) => Promise<void>;
@@ -30,7 +30,7 @@ export const DEFAULT_BALANCE_SYNC_CONSUMER_POLICY = Object.freeze({
   idleDelayMs: 1_000,
   dependencyFailureBaseDelayMs: 250,
   dependencyFailureMaxDelayMs: 30_000,
-  maximumRpcWindowMs: 10_800_000,
+  jobTimeoutMs: 10_800_000,
 }) satisfies BalanceSyncConsumerPolicy;
 
 export type BalanceSyncConsumerErrorCode =
@@ -129,8 +129,6 @@ export class BalanceSyncConsumerService {
   }
 
   private async dispatchAccepted(job: JobEnvelope, runSignal: ReviewedAbortSignal): Promise<void> {
-    // This signal currently reaches balance JSON-RPC only. Checkpoint and address
-    // resolver ports remain signal-less and therefore are not bounded by this timer.
     const owner = createBalanceSyncExecutionContext();
     const relayShutdown = (): void => owner.abort('SHUTDOWN');
     let listening = false;
@@ -141,7 +139,7 @@ export class BalanceSyncConsumerService {
       listening = true;
       if (runSignal.aborted()) relayShutdown();
     }
-    const deadline = setTimeout(() => owner.abort('DEADLINE'), this.policy.maximumRpcWindowMs);
+    const deadline = setTimeout(() => owner.abort('DEADLINE'), this.policy.jobTimeoutMs);
     deadline.unref?.();
     try {
       await this.dispatcher.dispatch(job, owner.context);
@@ -176,7 +174,7 @@ function validatePolicy(value: BalanceSyncConsumerPolicy): Readonly<BalanceSyncC
       'idleDelayMs',
       'dependencyFailureBaseDelayMs',
       'dependencyFailureMaxDelayMs',
-      'maximumRpcWindowMs',
+      'jobTimeoutMs',
     ] as const;
     const keys = Reflect.ownKeys(descriptors);
     if (
@@ -190,8 +188,8 @@ function validatePolicy(value: BalanceSyncConsumerPolicy): Readonly<BalanceSyncC
     const parsed = Object.create(null) as Record<(typeof expectedKeys)[number], number>;
     for (const key of expectedKeys) {
       const descriptor = descriptors[key];
-      const minimum = key === 'maximumRpcWindowMs' ? 7_200_000 : 10;
-      const maximum = key === 'maximumRpcWindowMs' ? 21_600_000 : 60_000;
+      const minimum = key === 'jobTimeoutMs' ? 7_200_000 : 10;
+      const maximum = key === 'jobTimeoutMs' ? 21_600_000 : 60_000;
       if (
         !descriptor ||
         !('value' in descriptor) ||
@@ -211,7 +209,7 @@ function validatePolicy(value: BalanceSyncConsumerPolicy): Readonly<BalanceSyncC
       idleDelayMs: parsed.idleDelayMs,
       dependencyFailureBaseDelayMs: parsed.dependencyFailureBaseDelayMs,
       dependencyFailureMaxDelayMs: parsed.dependencyFailureMaxDelayMs,
-      maximumRpcWindowMs: parsed.maximumRpcWindowMs,
+      jobTimeoutMs: parsed.jobTimeoutMs,
     });
   } catch (error) {
     if (error instanceof BalanceSyncConsumerError) throw error;

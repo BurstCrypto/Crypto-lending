@@ -20,6 +20,26 @@ export interface DatabaseInfrastructureConfig {
   sessionRole?: string;
 }
 
+interface RuntimeDatabaseTimeoutLimits {
+  readonly connectionTimeoutMs: number;
+  readonly lockTimeoutMs: number;
+  readonly statementTimeoutMs: number;
+}
+
+export const BALANCE_CONSUMER_DATABASE_TIMEOUT_LIMITS: Readonly<RuntimeDatabaseTimeoutLimits> =
+  Object.freeze({
+    connectionTimeoutMs: 5_000,
+    lockTimeoutMs: 5_000,
+    statementTimeoutMs: 15_000,
+  });
+
+const DEFAULT_RUNTIME_DATABASE_TIMEOUT_LIMITS: Readonly<RuntimeDatabaseTimeoutLimits> =
+  Object.freeze({
+    connectionTimeoutMs: 60_000,
+    lockTimeoutMs: 60_000,
+    statementTimeoutMs: 300_000,
+  });
+
 export interface RedisInfrastructureConfig {
   url: string;
   username?: string;
@@ -747,6 +767,7 @@ function databaseSettings(
   variables: DatabaseConnectionVariables,
   tuningPrefix: 'DATABASE' | 'MIGRATION_DATABASE',
   sessionRole?: string,
+  runtimeTimeoutLimits: Readonly<RuntimeDatabaseTimeoutLimits> = DEFAULT_RUNTIME_DATABASE_TIMEOUT_LIMITS,
 ): DatabaseInfrastructureConfig {
   const migration = tuningPrefix === 'MIGRATION_DATABASE';
   return {
@@ -755,14 +776,14 @@ function databaseSettings(
       env,
       `${tuningPrefix}_CONNECTION_TIMEOUT_MS`,
       5_000,
-      60_000,
+      migration ? 60_000 : runtimeTimeoutLimits.connectionTimeoutMs,
     ),
     idleTimeoutMs: positiveInteger(env, `${tuningPrefix}_IDLE_TIMEOUT_MS`, 30_000, 600_000),
     lockTimeoutMs: positiveInteger(
       env,
       `${tuningPrefix}_LOCK_TIMEOUT_MS`,
       migration ? 10_000 : 5_000,
-      migration ? 300_000 : 60_000,
+      migration ? 300_000 : runtimeTimeoutLimits.lockTimeoutMs,
     ),
     maxLifetimeSeconds: positiveInteger(env, `${tuningPrefix}_MAX_LIFETIME_SECONDS`, 1_800, 86_400),
     poolMax: migration ? 1 : positiveInteger(env, 'DATABASE_POOL_MAX', 10, 100),
@@ -770,7 +791,7 @@ function databaseSettings(
       env,
       `${tuningPrefix}_STATEMENT_TIMEOUT_MS`,
       migration ? 3_600_000 : 15_000,
-      migration ? 43_200_000 : 300_000,
+      migration ? 43_200_000 : runtimeTimeoutLimits.statementTimeoutMs,
     ),
     ssl: databaseSsl(env, variables),
     ...(sessionRole ? { sessionRole } : {}),
@@ -793,6 +814,10 @@ function runtimeDatabaseSettings(
 ): DatabaseInfrastructureConfig {
   const scopedConfigured = hasAny(env, connectionVariableNames(RUNTIME_DATABASE_VARIABLES));
   const legacyConfigured = hasAny(env, connectionVariableNames(LEGACY_DATABASE_VARIABLES));
+  const timeoutLimits =
+    workload === 'balance-consumer'
+      ? BALANCE_CONSUMER_DATABASE_TIMEOUT_LIMITS
+      : DEFAULT_RUNTIME_DATABASE_TIMEOUT_LIMITS;
 
   if (isProduction(env)) {
     if (configuredEnvironmentVariableNamesWithPrefix(env, 'MIGRATION_DATABASE_').length > 0) {
@@ -813,6 +838,7 @@ function runtimeDatabaseSettings(
       runtimeDatabaseVariables(workload),
       'DATABASE',
       runtimeDatabaseSessionRole(workload),
+      timeoutLimits,
     );
   }
 
@@ -826,6 +852,7 @@ function runtimeDatabaseSettings(
     scopedConfigured ? runtimeDatabaseVariables(workload) : LEGACY_DATABASE_VARIABLES,
     'DATABASE',
     scopedConfigured ? runtimeDatabaseSessionRole(workload) : undefined,
+    timeoutLimits,
   );
 }
 

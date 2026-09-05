@@ -6,9 +6,11 @@ import { PostgresService } from '../../../infrastructure/database/postgres.servi
 import type {
   BalanceSyncCheckpoint,
   BalanceSyncCheckpointPort,
+  BalanceSyncExecutionContext,
   BalanceSyncScope,
   BalanceSyncSuccessMode,
 } from '../../application/ports/balance-sync.ports';
+import { reviewBalanceSyncExecutionContext } from '../../application/ports/balance-sync.ports';
 import {
   BALANCE_SYNC_POLICY,
   createBalanceSyncObservationId,
@@ -109,6 +111,12 @@ export class BalanceSyncCheckpointPersistenceError extends Error {
 
 function fail(): never {
   throw new BalanceSyncCheckpointPersistenceError();
+}
+
+function activeExecutionSignal(context: unknown): AbortSignal {
+  const reviewed = reviewBalanceSyncExecutionContext(context);
+  if (reviewed === null || reviewed.abortKind !== null) return fail();
+  return reviewed.signal;
 }
 
 function dataRecord(value: unknown, expectedKeys: readonly string[]): Record<string, unknown> {
@@ -483,14 +491,20 @@ function mapCheckpoint(
 export class PostgresBalanceSyncCheckpointRepository implements BalanceSyncCheckpointPort {
   constructor(private readonly postgres: PostgresService) {}
 
-  async load(input: BalanceSyncScope): Promise<BalanceSyncCheckpoint | null> {
+  async load(
+    input: BalanceSyncScope,
+    context: BalanceSyncExecutionContext,
+  ): Promise<BalanceSyncCheckpoint | null> {
     try {
+      const signal = activeExecutionSignal(context);
       const parsedScope = scope(input);
-      const result = await this.postgres.query<CheckpointRow>(
+      const result = await this.postgres.queryWithCancellation<CheckpointRow>(
         `SELECT checkpoint.*
          FROM read_balance_sync_checkpoint($1::uuid, $2::uuid, $3::text) AS checkpoint`,
         [parsedScope.accountId, parsedScope.walletId, parsedScope.networkId],
+        signal,
       );
+      activeExecutionSignal(context);
       if (result.rows.length === 0) return null;
       return mapCheckpoint(oneCheckpointRow(result.rows), parsedScope);
     } catch (error) {
@@ -501,8 +515,10 @@ export class PostgresBalanceSyncCheckpointRepository implements BalanceSyncCheck
 
   async upsertCurrent(
     input: Parameters<BalanceSyncCheckpointPort['upsertCurrent']>[0],
+    context: BalanceSyncExecutionContext,
   ): Promise<void> {
     try {
+      const signal = activeExecutionSignal(context);
       const record = dataRecord(input, [
         'scope',
         'expectedRevision',
@@ -516,7 +532,7 @@ export class PostgresBalanceSyncCheckpointRepository implements BalanceSyncCheck
       const mode = record.mode as BalanceSyncSuccessMode;
       if (mode !== 'CREATED' && mode !== 'UPDATED' && mode !== 'UNCHANGED') return fail();
       const succeededAt = timestamp(record.succeededAt);
-      const result = await this.postgres.query<WriteRow>(
+      const result = await this.postgres.queryWithCancellation<WriteRow>(
         `SELECT written.* FROM record_balance_sync_current(
            $1::uuid, $2::uuid, $3::text, $4::bigint, $5::text,
            $6::text, $7::numeric, $8::text, $9::text, $10::text,
@@ -538,7 +554,9 @@ export class PostgresBalanceSyncCheckpointRepository implements BalanceSyncCheck
           JSON.stringify(parsedObservation.positions),
           succeededAt,
         ],
+        signal,
       );
+      activeExecutionSignal(context);
       writeResult(result.rows, (expectedRevision ?? 0) + 1);
     } catch (error) {
       if (error instanceof BalanceSyncCheckpointPersistenceError) throw error;
@@ -548,8 +566,10 @@ export class PostgresBalanceSyncCheckpointRepository implements BalanceSyncCheck
 
   async replaceProvisionalAfterReorg(
     input: Parameters<BalanceSyncCheckpointPort['replaceProvisionalAfterReorg']>[0],
+    context: BalanceSyncExecutionContext,
   ): Promise<void> {
     try {
+      const signal = activeExecutionSignal(context);
       const record = dataRecord(input, [
         'scope',
         'expectedRevision',
@@ -562,7 +582,7 @@ export class PostgresBalanceSyncCheckpointRepository implements BalanceSyncCheck
       const anchor = source(record.lastFinalizedSource, parsedScope.networkId, 'finalized');
       const replacement = observation(record.replacement, parsedScope);
       const recoveredAt = timestamp(record.recoveredAt);
-      const result = await this.postgres.query<WriteRow>(
+      const result = await this.postgres.queryWithCancellation<WriteRow>(
         `SELECT written.* FROM replace_balance_sync_after_reorg(
            $1::uuid, $2::uuid, $3::text, $4::bigint,
            $5::numeric, $6::text, $7::text, $8::text, $9::timestamptz,
@@ -589,7 +609,9 @@ export class PostgresBalanceSyncCheckpointRepository implements BalanceSyncCheck
           JSON.stringify(replacement.positions),
           recoveredAt,
         ],
+        signal,
       );
+      activeExecutionSignal(context);
       writeResult(result.rows, expectedRevision + 1);
     } catch (error) {
       if (error instanceof BalanceSyncCheckpointPersistenceError) throw error;
@@ -599,14 +621,16 @@ export class PostgresBalanceSyncCheckpointRepository implements BalanceSyncCheck
 
   async preserveLastGoodAndMarkStale(
     input: Parameters<BalanceSyncCheckpointPort['preserveLastGoodAndMarkStale']>[0],
+    context: BalanceSyncExecutionContext,
   ): Promise<void> {
     try {
+      const signal = activeExecutionSignal(context);
       const record = dataRecord(input, ['scope', 'expectedRevision', 'failedAt', 'failureCode']);
       const parsedScope = scope(record.scope);
       const expectedRevision = revision(record.expectedRevision, true);
       const failedAt = timestamp(record.failedAt);
       const parsedFailureCode = failureCode(record.failureCode);
-      const result = await this.postgres.query<WriteRow>(
+      const result = await this.postgres.queryWithCancellation<WriteRow>(
         `SELECT written.* FROM mark_balance_sync_checkpoint_stale(
            $1::uuid, $2::uuid, $3::text, $4::bigint, $5::timestamptz, $6::text
          ) AS written`,
@@ -618,7 +642,9 @@ export class PostgresBalanceSyncCheckpointRepository implements BalanceSyncCheck
           failedAt,
           parsedFailureCode,
         ],
+        signal,
       );
+      activeExecutionSignal(context);
       writeResult(result.rows, (expectedRevision ?? 0) + 1);
     } catch (error) {
       if (error instanceof BalanceSyncCheckpointPersistenceError) throw error;

@@ -16,7 +16,7 @@ const POLICY = Object.freeze({
   idleDelayMs: 50,
   dependencyFailureBaseDelayMs: 10,
   dependencyFailureMaxDelayMs: 40,
-  maximumRpcWindowMs: 7_200_000,
+  jobTimeoutMs: 7_200_000,
 }) satisfies BalanceSyncConsumerPolicy;
 
 const JOB: JobEnvelope = Object.freeze({
@@ -216,13 +216,13 @@ describe('BalanceSyncConsumerService', () => {
     ).toThrow(new BalanceSyncConsumerError('INVALID_BALANCE_SYNC_CONSUMER_POLICY'));
     expect(reads).toBe(0);
 
-    for (const maximumRpcWindowMs of [7_199_999, 21_600_001, 7_200_000.5, Number.NaN]) {
+    for (const jobTimeoutMs of [7_199_999, 21_600_001, 7_200_000.5, Number.NaN]) {
       expect(
         () =>
           new BalanceSyncConsumerService(
             { processOne },
             dispatcher(),
-            Object.freeze({ ...POLICY, maximumRpcWindowMs }),
+            Object.freeze({ ...POLICY, jobTimeoutMs }),
           ),
       ).toThrow(new BalanceSyncConsumerError('INVALID_BALANCE_SYNC_CONSUMER_POLICY'));
     }
@@ -330,7 +330,7 @@ describe('BalanceSyncConsumerService', () => {
         await Promise.resolve();
 
         if (cause === 'deadline') {
-          await jest.advanceTimersByTimeAsync(POLICY.maximumRpcWindowMs);
+          await jest.advanceTimersByTimeAsync(POLICY.jobTimeoutMs);
         } else {
           controller.abort('raw-parent-reason');
         }
@@ -374,7 +374,7 @@ describe('BalanceSyncConsumerService', () => {
       );
 
       await service.run(controller.signal);
-      await jest.advanceTimersByTimeAsync(POLICY.maximumRpcWindowMs);
+      await jest.advanceTimersByTimeAsync(POLICY.jobTimeoutMs);
 
       expect(reviewBalanceSyncExecutionContext(context)?.abortKind).toBeNull();
       expect(jest.getTimerCount()).toBe(0);

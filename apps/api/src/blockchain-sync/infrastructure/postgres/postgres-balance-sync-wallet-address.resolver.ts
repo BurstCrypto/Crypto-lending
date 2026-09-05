@@ -11,9 +11,11 @@ import {
   type WalletRegistrationDigest,
 } from '../../../wallets/infrastructure/crypto/wallet-registration-crypto';
 import type {
+  BalanceSyncExecutionContext,
   BalanceSyncScope,
   BalanceSyncWalletAddressResolverPort,
 } from '../../application/ports/balance-sync.ports';
+import { reviewBalanceSyncExecutionContext } from '../../application/ports/balance-sync.ports';
 import {
   BALANCE_CONSUMER_CONFIG,
   type BalanceConsumerConfig,
@@ -59,6 +61,12 @@ export class BalanceSyncWalletAddressResolutionError extends Error {
 
 function fail(): never {
   throw new BalanceSyncWalletAddressResolutionError();
+}
+
+function activeExecutionSignal(context: unknown): AbortSignal {
+  const reviewed = reviewBalanceSyncExecutionContext(context);
+  if (reviewed === null || reviewed.abortKind !== null) return fail();
+  return reviewed.signal;
 }
 
 function exactScope(value: unknown): Readonly<{
@@ -160,15 +168,21 @@ export class PostgresBalanceSyncWalletAddressResolver implements BalanceSyncWall
     @Inject(BALANCE_CONSUMER_CONFIG) private readonly config: BalanceConsumerConfig,
   ) {}
 
-  async resolveActiveAddress(scopeInput: BalanceSyncScope): Promise<unknown> {
+  async resolveActiveAddress(
+    scopeInput: BalanceSyncScope,
+    context: BalanceSyncExecutionContext,
+  ): Promise<unknown> {
     try {
+      const signal = activeExecutionSignal(context);
       if (this.config.mode !== 'enabled') return fail();
       const scope = exactScope(scopeInput);
-      const result = await this.postgres.query<ResolvedAddressRow>(
+      const result = await this.postgres.queryWithCancellation<ResolvedAddressRow>(
         `SELECT *
          FROM resolve_active_wallet_address_ciphertext($1::uuid, $2::uuid, $3::text)`,
         [scope.accountId, scope.walletId, scope.networkId],
+        signal,
       );
+      activeExecutionSignal(context);
       if (result.rows.length !== 1) return fail();
       const row = exactRow(result.rows[0]);
       const walletId = uuid(row.resolved_wallet_id);

@@ -29,7 +29,10 @@ export interface BalanceSyncScope {
  * the Ethereum or Solana address canonically.
  */
 export interface BalanceSyncWalletAddressResolverPort {
-  resolveActiveAddress(scope: BalanceSyncScope): Promise<unknown>;
+  resolveActiveAddress(
+    scope: BalanceSyncScope,
+    context: BalanceSyncExecutionContext,
+  ): Promise<unknown>;
 }
 
 export interface BalanceIndexerSourceCandidate {
@@ -177,7 +180,10 @@ export interface BalanceSyncCheckpoint {
 export type BalanceSyncSuccessMode = 'CREATED' | 'UPDATED' | 'UNCHANGED';
 
 export interface BalanceSyncCheckpointPort {
-  load(scope: BalanceSyncScope): Promise<BalanceSyncCheckpoint | null>;
+  load(
+    scope: BalanceSyncScope,
+    context: BalanceSyncExecutionContext,
+  ): Promise<BalanceSyncCheckpoint | null>;
   upsertCurrent(
     input: Readonly<{
       scope: BalanceSyncScope;
@@ -186,6 +192,7 @@ export interface BalanceSyncCheckpointPort {
       mode: BalanceSyncSuccessMode;
       succeededAt: string;
     }>,
+    context: BalanceSyncExecutionContext,
   ): Promise<void>;
   replaceProvisionalAfterReorg(
     input: Readonly<{
@@ -195,6 +202,7 @@ export interface BalanceSyncCheckpointPort {
       replacement: BalanceSyncObservation;
       recoveredAt: string;
     }>,
+    context: BalanceSyncExecutionContext,
   ): Promise<void>;
   preserveLastGoodAndMarkStale(
     input: Readonly<{
@@ -203,6 +211,7 @@ export interface BalanceSyncCheckpointPort {
       failedAt: string;
       failureCode: BalanceSyncFailureCode;
     }>,
+    context: BalanceSyncExecutionContext,
   ): Promise<void>;
 }
 

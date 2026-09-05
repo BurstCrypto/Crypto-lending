@@ -104,7 +104,7 @@ export class EthereumMainnetBalanceIndexerAdapter implements BalanceSyncIndexerP
     request: BalanceIndexerReadRequest,
     context: BalanceSyncExecutionContext,
   ): Promise<unknown> {
-    return this.guarded(async () => {
+    return this.guarded(context, async () => {
       requireActiveExecution(context);
       return (await this.readBundle(request, context)).candidate;
     });
@@ -114,7 +114,7 @@ export class EthereumMainnetBalanceIndexerAdapter implements BalanceSyncIndexerP
     request: BalanceIndexerRescanRequest,
     context: BalanceSyncExecutionContext,
   ): Promise<unknown> {
-    return this.guarded(async () => {
+    return this.guarded(context, async () => {
       requireActiveExecution(context);
       validateEthereumRequest(request);
       if (
@@ -166,7 +166,7 @@ export class EthereumMainnetBalanceIndexerAdapter implements BalanceSyncIndexerP
   ): Promise<EthereumReadBundle> {
     validateEthereumRequest(request);
     await this.assertMainnetIdentity(context);
-    const address = await this.resolveAddress(request);
+    const address = await this.resolveAddress(request, context);
     const header = await this.readBlock(request.selector, context);
     const exactCanonicalBlock = Object.freeze({
       blockHash: header.hash,
@@ -242,15 +242,27 @@ export class EthereumMainnetBalanceIndexerAdapter implements BalanceSyncIndexerP
     }
   }
 
-  private async resolveAddress(request: BalanceIndexerReadRequest): Promise<string> {
+  private async resolveAddress(
+    request: BalanceIndexerReadRequest,
+    context: BalanceSyncExecutionContext,
+  ): Promise<string> {
+    requireActiveExecution(context);
+    let value: unknown;
     try {
-      const value = await this.addresses.resolveActiveAddress(
+      value = await this.addresses.resolveActiveAddress(
         Object.freeze({
           accountId: request.accountId,
           walletId: request.walletId,
           networkId: ETHEREUM_MAINNET_NETWORK_ID,
         }),
+        context,
       );
+    } catch {
+      requireActiveExecution(context);
+      throw new BalanceSyncIndexerFailure('PROVIDER_UNAVAILABLE');
+    }
+    requireActiveExecution(context);
+    try {
       return parseEvmWalletAddress(value);
     } catch {
       throw new BalanceSyncIndexerFailure('PROVIDER_INVALID_DATA');
@@ -295,10 +307,14 @@ export class EthereumMainnetBalanceIndexerAdapter implements BalanceSyncIndexerP
     return Object.freeze({ position, hash: record.hash, parentHash: record.parentHash });
   }
 
-  private async guarded<T>(operation: () => Promise<T>): Promise<T> {
+  private async guarded<T>(
+    context: BalanceSyncExecutionContext,
+    operation: () => Promise<T>,
+  ): Promise<T> {
     try {
       return await operation();
     } catch (error) {
+      requireActiveExecution(context);
       const reviewed = reviewBalanceSyncIndexerFailure(error);
       if (reviewed) {
         throw new BalanceSyncIndexerFailure(

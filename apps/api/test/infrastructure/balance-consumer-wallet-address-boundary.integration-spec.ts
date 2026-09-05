@@ -1,15 +1,17 @@
 import { Buffer } from 'node:buffer';
 import { randomBytes, randomUUID } from 'node:crypto';
 
-import type { PoolClient, QueryResult, QueryResultRow } from 'pg';
+import type { QueryResult, QueryResultRow } from 'pg';
 import { Pool } from 'pg';
 
 import { PostgresBalanceSyncWalletAddressResolver } from '../../src/blockchain-sync/infrastructure/postgres/postgres-balance-sync-wallet-address.resolver';
+import { INERT_BALANCE_SYNC_EXECUTION_CONTEXT } from '../../src/blockchain-sync/application/ports/balance-sync.ports';
 import { MigrationRunner } from '../../src/infrastructure/database/migration-runner.service';
 import { DATABASE_TEST_SCHEMA_MIGRATION_LIST } from '../../src/infrastructure/database/migrations';
 import { PRODUCTION_DATABASE_PRINCIPALS } from '../../src/infrastructure/database/migrations/0005-enforce-database-principal-boundaries.migration';
 import { createBalanceConsumerWalletAddressBoundaryTestSchemaMigrationV0023 } from '../../src/infrastructure/database/migrations/0023-create-balance-consumer-wallet-address-boundary.migration';
 import { PostgresService } from '../../src/infrastructure/database/postgres.service';
+import { postgresStartupOptions } from '../../src/infrastructure/database/postgres-startup-options';
 import { parseWalletAddress } from '../../src/wallets/domain/wallet-identity';
 import {
   createWalletRegistrationKey,
@@ -73,10 +75,29 @@ async function asRole<Row extends QueryResultRow>(
   }
 }
 
+async function withPostgresRole<T>(
+  role: string,
+  schema: string,
+  operation: (postgres: PostgresService) => Promise<T>,
+): Promise<T> {
+  if (!IDENTIFIER.test(schema)) throw new Error('Unsafe balance consumer test schema');
+  const rolePool = new Pool({
+    connectionString: testDatabaseUrl,
+    max: 1,
+    options: `${postgresStartupOptions(role)} -c search_path=${schema},pg_temp`,
+  });
+  try {
+    return await operation(new PostgresService(rolePool));
+  } finally {
+    await rolePool.end();
+  }
+}
+
 describeWithPostgres('balance consumer wallet address boundary', () => {
   jest.setTimeout(60_000);
 
   const schema = `balance_address_${randomBytes(8).toString('hex')}`;
+  if (!IDENTIFIER.test(schema)) throw new Error('Unsafe balance consumer test schema');
   const metadataV1 = createWalletRegistrationKey(
     'metadata-seal',
     1,
@@ -97,7 +118,6 @@ describeWithPostgres('balance consumer wallet address boundary', () => {
   );
   let adminPool: Pool;
   let pool: Pool;
-  let postgres: PostgresService;
   let accountId: string;
   let ethereumWalletId: string;
   let solanaWalletId: string;
@@ -210,7 +230,6 @@ describeWithPostgres('balance consumer wallet address boundary', () => {
       connectionString: testDatabaseUrl as string,
       options: `-c search_path=${schema}`,
     });
-    postgres = new PostgresService(pool);
     await new MigrationRunner(pool, BALANCE_CONSUMER_TEST_MIGRATIONS).up();
     accountId = randomUUID();
     await pool.query(`INSERT INTO accounts (account_id) VALUES ($1::uuid)`, [accountId]);
@@ -256,24 +275,28 @@ describeWithPostgres('balance consumer wallet address boundary', () => {
   ] as const)(
     'resolves only the exact active %s scope through the worker role',
     async (networkId, walletId, expectedAddress) => {
-      const resolver = new PostgresBalanceSyncWalletAddressResolver(postgres, {
-        mode: 'enabled',
-        walletMetadataSealKeys: createWalletRegistrationKeyRing('metadata-seal', 2, [
-          metadataV1,
-          metadataV2,
-        ]),
-      });
       await expect(
-        postgres.withTransaction(async (client: PoolClient) => {
-          await client.query(
-            `SET LOCAL ROLE ${quoteIdentifier(PRODUCTION_DATABASE_PRINCIPALS.workerRuntimeRole)}`,
-          );
-          return resolver.resolveActiveAddress({
-            accountId,
-            walletId: walletId(),
-            networkId,
-          });
-        }),
+        withPostgresRole(
+          PRODUCTION_DATABASE_PRINCIPALS.workerRuntimeRole,
+          schema,
+          (rolePostgres) => {
+            const resolver = new PostgresBalanceSyncWalletAddressResolver(rolePostgres, {
+              mode: 'enabled',
+              walletMetadataSealKeys: createWalletRegistrationKeyRing('metadata-seal', 2, [
+                metadataV1,
+                metadataV2,
+              ]),
+            });
+            return resolver.resolveActiveAddress(
+              {
+                accountId,
+                walletId: walletId(),
+                networkId,
+              },
+              INERT_BALANCE_SYNC_EXECUTION_CONTEXT,
+            );
+          },
+        ),
       ).resolves.toBe(expectedAddress);
     },
   );

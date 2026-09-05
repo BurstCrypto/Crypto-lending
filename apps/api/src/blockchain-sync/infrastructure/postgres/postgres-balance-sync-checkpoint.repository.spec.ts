@@ -2,7 +2,12 @@ import type { QueryResult } from 'pg';
 
 import { MAINNET_SUPPORTED_ASSET_REGISTRY } from '../../../blockchain/domain/supported-asset-registry';
 import type { PostgresService } from '../../../infrastructure/database/postgres.service';
-import type { BalanceSyncScope } from '../../application/ports/balance-sync.ports';
+import {
+  createBalanceSyncExecutionContext,
+  INERT_BALANCE_SYNC_EXECUTION_CONTEXT,
+  reviewBalanceSyncExecutionContext,
+  type BalanceSyncScope,
+} from '../../application/ports/balance-sync.ports';
 import {
   createBalanceSyncObservationId,
   type BalanceSyncObservation,
@@ -104,12 +109,42 @@ function harness(): {
   return {
     query,
     repository: new PostgresBalanceSyncCheckpointRepository({
-      query,
+      queryWithCancellation: query,
     } as unknown as PostgresService),
   };
 }
 
 describe('Postgres balance sync checkpoint repository', () => {
+  it.each(['DEADLINE', 'SHUTDOWN'] as const)(
+    'rejects a pre-aborted %s context before issuing SQL',
+    async (kind) => {
+      const execution = createBalanceSyncExecutionContext();
+      execution.abort(kind);
+      const test = harness();
+
+      await expect(test.repository.load(SCOPE, execution.context)).rejects.toEqual(
+        new BalanceSyncCheckpointPersistenceError(),
+      );
+      expect(test.query).not.toHaveBeenCalled();
+    },
+  );
+
+  it('rejects when the exact context aborts while an awaited query settles', async () => {
+    const execution = createBalanceSyncExecutionContext();
+    const test = harness();
+    test.query.mockImplementation(async () => {
+      execution.abort('DEADLINE');
+      return result([checkpointRow()]);
+    });
+
+    await expect(test.repository.load(SCOPE, execution.context)).rejects.toEqual(
+      new BalanceSyncCheckpointPersistenceError(),
+    );
+    expect(test.query.mock.calls[0]?.[2]).toBe(
+      reviewBalanceSyncExecutionContext(execution.context)?.signal,
+    );
+  });
+
   it('writes only a normalized exact-mainnet observation and parses the closed outcome', async () => {
     const test = harness();
     const current = observation();
@@ -124,13 +159,16 @@ describe('Postgres balance sync checkpoint repository', () => {
     );
 
     await expect(
-      test.repository.upsertCurrent({
-        scope: SCOPE,
-        expectedRevision: null,
-        observation: current,
-        mode: 'CREATED',
-        succeededAt: AT,
-      }),
+      test.repository.upsertCurrent(
+        {
+          scope: SCOPE,
+          expectedRevision: null,
+          observation: current,
+          mode: 'CREATED',
+          succeededAt: AT,
+        },
+        INERT_BALANCE_SYNC_EXECUTION_CONTEXT,
+      ),
     ).resolves.toBeUndefined();
     expect(test.query.mock.calls[0]?.[0]).toContain('record_balance_sync_current');
     expect(test.query.mock.calls[0]?.[1]).toEqual([
@@ -149,13 +187,18 @@ describe('Postgres balance sync checkpoint repository', () => {
       JSON.stringify(current.positions),
       AT,
     ]);
+    expect(test.query.mock.calls[0]?.[2]).toBe(
+      reviewBalanceSyncExecutionContext(INERT_BALANCE_SYNC_EXECUTION_CONTEXT)?.signal,
+    );
   });
 
   it('maps a complete checkpoint and independently verifies its observation digest', async () => {
     const test = harness();
     test.query.mockResolvedValue(result([checkpointRow()]));
 
-    await expect(test.repository.load(SCOPE)).resolves.toEqual({
+    await expect(
+      test.repository.load(SCOPE, INERT_BALANCE_SYNC_EXECUTION_CONTEXT),
+    ).resolves.toEqual({
       revision: 1,
       scope: SCOPE,
       currentObservation: observation(),
@@ -177,14 +220,19 @@ describe('Postgres balance sync checkpoint repository', () => {
   ])('fails closed on %s', async (row) => {
     const test = harness();
     test.query.mockResolvedValue(result([row as Record<string, unknown>]));
-    await expect(test.repository.load(SCOPE)).rejects.toBeInstanceOf(
-      BalanceSyncCheckpointPersistenceError,
-    );
+    await expect(
+      test.repository.load(SCOPE, INERT_BALANCE_SYNC_EXECUTION_CONTEXT),
+    ).rejects.toBeInstanceOf(BalanceSyncCheckpointPersistenceError);
   });
 
   it('rejects unsupported scope and malformed output before details can escape', async () => {
     const test = harness();
-    await expect(test.repository.load({ ...SCOPE, networkId: 'eip155:8453' })).rejects.toEqual(
+    await expect(
+      test.repository.load(
+        { ...SCOPE, networkId: 'eip155:8453' },
+        INERT_BALANCE_SYNC_EXECUTION_CONTEXT,
+      ),
+    ).rejects.toEqual(
       expect.objectContaining({
         code: 'BALANCE_SYNC_CHECKPOINT_PERSISTENCE_FAILED',
         message: 'Balance sync checkpoint persistence failed',
@@ -193,7 +241,7 @@ describe('Postgres balance sync checkpoint repository', () => {
     expect(test.query).not.toHaveBeenCalled();
 
     test.query.mockRejectedValue(new Error('postgres://worker:secret@example.invalid/key'));
-    await expect(test.repository.load(SCOPE)).rejects.toEqual(
+    await expect(test.repository.load(SCOPE, INERT_BALANCE_SYNC_EXECUTION_CONTEXT)).rejects.toEqual(
       expect.objectContaining({
         code: 'BALANCE_SYNC_CHECKPOINT_PERSISTENCE_FAILED',
         message: 'Balance sync checkpoint persistence failed',

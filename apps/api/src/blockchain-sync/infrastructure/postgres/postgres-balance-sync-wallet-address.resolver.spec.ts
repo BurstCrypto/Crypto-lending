@@ -2,6 +2,12 @@ import { Buffer } from 'node:buffer';
 
 import type { PostgresService } from '../../../infrastructure/database/postgres.service';
 import {
+  createBalanceSyncExecutionContext,
+  INERT_BALANCE_SYNC_EXECUTION_CONTEXT,
+  reviewBalanceSyncExecutionContext,
+  type BalanceSyncScope,
+} from '../../application/ports/balance-sync.ports';
+import {
   createWalletRegistrationKey,
   createWalletRegistrationKeyRing,
   sealWalletRegistrationValue,
@@ -93,14 +99,57 @@ function fixture(
   resolver: PostgresBalanceSyncWalletAddressResolver;
 }> {
   const query = jest.fn().mockResolvedValue({ rows });
-  const postgres = { query } as unknown as PostgresService;
+  const postgres = { queryWithCancellation: query } as unknown as PostgresService;
   return {
     query,
     resolver: new PostgresBalanceSyncWalletAddressResolver(postgres, config),
   };
 }
 
+function resolveAddress(
+  resolver: PostgresBalanceSyncWalletAddressResolver,
+  scope: BalanceSyncScope,
+): Promise<unknown> {
+  return resolver.resolveActiveAddress(scope, INERT_BALANCE_SYNC_EXECUTION_CONTEXT);
+}
+
 describe('PostgresBalanceSyncWalletAddressResolver', () => {
+  it.each(['DEADLINE', 'SHUTDOWN'] as const)(
+    'rejects a pre-aborted %s context before issuing SQL',
+    async (kind) => {
+      const execution = createBalanceSyncExecutionContext();
+      execution.abort(kind);
+      const test = fixture([row(ETHEREUM, EVM_ADDRESS)]);
+
+      await expect(
+        test.resolver.resolveActiveAddress(
+          { accountId: ACCOUNT_ID, walletId: WALLET_ID, networkId: ETHEREUM },
+          execution.context,
+        ),
+      ).rejects.toEqual(new BalanceSyncWalletAddressResolutionError());
+      expect(test.query).not.toHaveBeenCalled();
+    },
+  );
+
+  it('rejects when the exact context aborts while an awaited query settles', async () => {
+    const execution = createBalanceSyncExecutionContext();
+    const test = fixture([row(ETHEREUM, EVM_ADDRESS)]);
+    test.query.mockImplementation(async () => {
+      execution.abort('SHUTDOWN');
+      return { rows: [row(ETHEREUM, EVM_ADDRESS)] };
+    });
+
+    await expect(
+      test.resolver.resolveActiveAddress(
+        { accountId: ACCOUNT_ID, walletId: WALLET_ID, networkId: ETHEREUM },
+        execution.context,
+      ),
+    ).rejects.toEqual(new BalanceSyncWalletAddressResolutionError());
+    expect(test.query.mock.calls[0]?.[2]).toBe(
+      reviewBalanceSyncExecutionContext(execution.context)?.signal,
+    );
+  });
+
   it.each([
     [ETHEREUM, EVM_ADDRESS],
     [SOLANA, SOLANA_ADDRESS],
@@ -109,11 +158,12 @@ describe('PostgresBalanceSyncWalletAddressResolver', () => {
     async (networkId, address) => {
       const { query, resolver } = fixture([row(networkId, address)]);
       await expect(
-        resolver.resolveActiveAddress({ accountId: ACCOUNT_ID, walletId: WALLET_ID, networkId }),
+        resolveAddress(resolver, { accountId: ACCOUNT_ID, walletId: WALLET_ID, networkId }),
       ).resolves.toBe(address);
       expect(query).toHaveBeenCalledWith(
         expect.stringContaining('resolve_active_wallet_address_ciphertext'),
         [ACCOUNT_ID, WALLET_ID, networkId],
+        reviewBalanceSyncExecutionContext(INERT_BALANCE_SYNC_EXECUTION_CONTEXT)?.signal,
       );
     },
   );
@@ -122,7 +172,7 @@ describe('PostgresBalanceSyncWalletAddressResolver', () => {
     const currentRow = row(ETHEREUM, EVM_ADDRESS, CURRENT_KEY);
     const { resolver } = fixture([currentRow]);
     await expect(
-      resolver.resolveActiveAddress({
+      resolveAddress(resolver, {
         accountId: ACCOUNT_ID,
         walletId: WALLET_ID,
         networkId: ETHEREUM,
@@ -147,7 +197,7 @@ describe('PostgresBalanceSyncWalletAddressResolver', () => {
     ['unexpected returned field', [{ ...row(ETHEREUM, EVM_ADDRESS), raw_address: EVM_ADDRESS }]],
   ])('fails closed with one sanitized error for %s', async (_name, rows) => {
     const { resolver } = fixture(rows as readonly ResolverRow[]);
-    const operation = resolver.resolveActiveAddress({
+    const operation = resolveAddress(resolver, {
       accountId: ACCOUNT_ID,
       walletId: WALLET_ID,
       networkId: ETHEREUM,
@@ -159,7 +209,7 @@ describe('PostgresBalanceSyncWalletAddressResolver', () => {
   it('rejects noncanonical plaintext after successful authenticated decryption', async () => {
     const { resolver } = fixture([row(ETHEREUM, '0x52908400098527886E0F7030069857D2E4169EE7')]);
     await expect(
-      resolver.resolveActiveAddress({
+      resolveAddress(resolver, {
         accountId: ACCOUNT_ID,
         walletId: WALLET_ID,
         networkId: ETHEREUM,
@@ -177,7 +227,7 @@ describe('PostgresBalanceSyncWalletAddressResolver', () => {
     });
     const accessorFixture = fixture([accessor]);
     await expect(
-      accessorFixture.resolver.resolveActiveAddress({
+      resolveAddress(accessorFixture.resolver, {
         accountId: ACCOUNT_ID,
         walletId: WALLET_ID,
         networkId: ETHEREUM,
@@ -190,7 +240,7 @@ describe('PostgresBalanceSyncWalletAddressResolver', () => {
     }) as ResolverRow;
     const prototypeFixture = fixture([inherited]);
     await expect(
-      prototypeFixture.resolver.resolveActiveAddress({
+      resolveAddress(prototypeFixture.resolver, {
         accountId: ACCOUNT_ID,
         walletId: WALLET_ID,
         networkId: ETHEREUM,
@@ -201,7 +251,7 @@ describe('PostgresBalanceSyncWalletAddressResolver', () => {
   it('does not query when disabled or when the requested scope is malformed', async () => {
     const disabled = fixture([row(ETHEREUM, EVM_ADDRESS)], { mode: 'disabled' });
     await expect(
-      disabled.resolver.resolveActiveAddress({
+      resolveAddress(disabled.resolver, {
         accountId: ACCOUNT_ID,
         walletId: WALLET_ID,
         networkId: ETHEREUM,
@@ -211,7 +261,7 @@ describe('PostgresBalanceSyncWalletAddressResolver', () => {
 
     const enabled = fixture([row(ETHEREUM, EVM_ADDRESS)]);
     await expect(
-      enabled.resolver.resolveActiveAddress({
+      resolveAddress(enabled.resolver, {
         accountId: ACCOUNT_ID,
         walletId: WALLET_ID,
         networkId: 'eip155:8453',
@@ -223,10 +273,10 @@ describe('PostgresBalanceSyncWalletAddressResolver', () => {
   it('maps database failures to the same non-sensitive error', async () => {
     const query = jest.fn().mockRejectedValue(new Error(`driver leaked ${EVM_ADDRESS}`));
     const resolver = new PostgresBalanceSyncWalletAddressResolver(
-      { query } as unknown as PostgresService,
+      { queryWithCancellation: query } as unknown as PostgresService,
       CONFIG,
     );
-    const operation = resolver.resolveActiveAddress({
+    const operation = resolveAddress(resolver, {
       accountId: ACCOUNT_ID,
       walletId: WALLET_ID,
       networkId: ETHEREUM,

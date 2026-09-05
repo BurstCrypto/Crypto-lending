@@ -133,9 +133,7 @@ export class BalanceSyncOrchestrator {
     input: unknown,
     context: BalanceSyncExecutionContext,
   ): Promise<BalanceSyncProcessingResult> {
-    if (reviewBalanceSyncExecutionContext(context) === null) {
-      throw orchestratorError('INVALID_BALANCE_SYNC_JOB');
-    }
+    requireActiveExecution(context);
     let job: BalanceSyncJobEnvelope;
     try {
       job = parseBalanceSyncJobEnvelope(input);
@@ -155,7 +153,7 @@ export class BalanceSyncOrchestrator {
       walletId: job.payload.walletId,
       networkId: job.payload.networkId,
     });
-    const checkpoint = await this.loadCheckpoint(scope, advanceClock);
+    const checkpoint = await this.loadCheckpoint(scope, advanceClock, context);
     const threshold = balanceSyncTierThreshold(job.payload.networkId, job.payload.requiredTier);
     if (!threshold?.locallyExecutable) {
       return this.handleFailure(
@@ -164,13 +162,21 @@ export class BalanceSyncOrchestrator {
         checkpoint,
         observedAt.canonical,
         'PERMANENT_PROVIDER_FAILURE',
+        context,
       );
     }
 
     try {
       if (job.payload.cause === 'MANUAL_RECOVERY' || job.payload.rescanFromPosition !== null) {
         const recovery = await this.recoverFromReorg(job, scope, checkpoint, advanceClock, context);
-        await this.commitRecovery(scope, checkpoint, recovery, recovery.completedAt.canonical);
+        await this.commitRecovery(
+          scope,
+          checkpoint,
+          recovery,
+          recovery.completedAt.canonical,
+          context,
+        );
+        requireActiveExecution(context);
         this.recordMetric({
           event: 'REORG_RECOVERED',
           networkId: scope.networkId,
@@ -191,7 +197,9 @@ export class BalanceSyncOrchestrator {
         tier: job.payload.requiredTier,
         selector: threshold.selector,
       });
+      requireActiveExecution(context);
       const value = await this.indexer.readCurrent(request, context);
+      requireActiveExecution(context);
       const readCompletedAt = advanceClock();
       const candidate = normalizeCandidate(value, request, readCompletedAt.milliseconds);
       const continuity = continuityAction(checkpoint?.currentObservation ?? null, candidate);
@@ -206,7 +214,14 @@ export class BalanceSyncOrchestrator {
           attempt: job.payload.attempt,
         });
         const recovery = await this.recoverFromReorg(job, scope, checkpoint, advanceClock, context);
-        await this.commitRecovery(scope, checkpoint, recovery, recovery.completedAt.canonical);
+        await this.commitRecovery(
+          scope,
+          checkpoint,
+          recovery,
+          recovery.completedAt.canonical,
+          context,
+        );
+        requireActiveExecution(context);
         this.recordMetric({
           event: 'REORG_RECOVERED',
           networkId: scope.networkId,
@@ -253,7 +268,15 @@ export class BalanceSyncOrchestrator {
       } else {
         mode = 'UPDATED';
       }
-      await this.commitCurrent(scope, checkpoint, observation, mode, readCompletedAt.canonical);
+      await this.commitCurrent(
+        scope,
+        checkpoint,
+        observation,
+        mode,
+        readCompletedAt.canonical,
+        context,
+      );
+      requireActiveExecution(context);
       this.recordMetric({
         event: `SYNC_${mode}`,
         networkId: scope.networkId,
@@ -268,6 +291,7 @@ export class BalanceSyncOrchestrator {
         observationId: observation.observationId,
       });
     } catch (error) {
+      requireActiveExecution(context);
       const failure = failureFrom(error);
       if (failure.code === 'REORG_RECOVERY_FAILED') {
         this.recordAlert({
@@ -284,6 +308,7 @@ export class BalanceSyncOrchestrator {
         checkpoint,
         failedAt.canonical,
         failure.code,
+        context,
         failure.retryAfterSeconds,
       );
     }
@@ -292,11 +317,15 @@ export class BalanceSyncOrchestrator {
   private async loadCheckpoint(
     scope: BalanceSyncScope,
     advanceClock: () => ClockTime,
+    context: BalanceSyncExecutionContext,
   ): Promise<BalanceSyncCheckpoint | null> {
     let value: unknown;
     try {
-      value = await this.checkpoints.load(scope);
+      requireActiveExecution(context);
+      value = await this.checkpoints.load(scope, context);
+      requireActiveExecution(context);
     } catch {
+      requireActiveExecution(context);
       throw orchestratorError('BALANCE_SYNC_CHECKPOINT_FAILED');
     }
     const loadedAt = advanceClock();
@@ -336,8 +365,11 @@ export class BalanceSyncOrchestrator {
     });
     let value: unknown;
     try {
+      requireActiveExecution(context);
       value = await this.indexer.rescanFromCheckpoint(request, context);
+      requireActiveExecution(context);
     } catch (error) {
+      requireActiveExecution(context);
       const failure = reviewBalanceSyncIndexerFailure(error);
       if (failure?.code === 'PROVIDER_TIMEOUT' || failure?.code === 'PROVIDER_UNAVAILABLE') {
         throw new BalanceSyncIndexerFailure(failure.code);
@@ -416,8 +448,10 @@ export class BalanceSyncOrchestrator {
     observation: BalanceSyncObservation,
     mode: BalanceSyncSuccessMode,
     succeededAt: string,
+    context: BalanceSyncExecutionContext,
   ): Promise<void> {
     try {
+      requireActiveExecution(context);
       await this.checkpoints.upsertCurrent(
         Object.freeze({
           scope,
@@ -426,8 +460,11 @@ export class BalanceSyncOrchestrator {
           mode,
           succeededAt,
         }),
+        context,
       );
+      requireActiveExecution(context);
     } catch {
+      requireActiveExecution(context);
       throw orchestratorError('BALANCE_SYNC_CHECKPOINT_FAILED');
     }
   }
@@ -437,9 +474,11 @@ export class BalanceSyncOrchestrator {
     checkpoint: BalanceSyncCheckpoint | null,
     recovery: RecoveryResult,
     recoveredAt: string,
+    context: BalanceSyncExecutionContext,
   ): Promise<void> {
     if (!checkpoint) throw orchestratorError('INVALID_BALANCE_SYNC_CHECKPOINT');
     try {
+      requireActiveExecution(context);
       await this.checkpoints.replaceProvisionalAfterReorg(
         Object.freeze({
           scope,
@@ -448,8 +487,11 @@ export class BalanceSyncOrchestrator {
           replacement: recovery.observation,
           recoveredAt,
         }),
+        context,
       );
+      requireActiveExecution(context);
     } catch {
+      requireActiveExecution(context);
       throw orchestratorError('BALANCE_SYNC_CHECKPOINT_FAILED');
     }
   }
@@ -460,9 +502,11 @@ export class BalanceSyncOrchestrator {
     checkpoint: BalanceSyncCheckpoint | null,
     failedAt: string,
     failureCode: BalanceSyncFailureCode,
+    context: BalanceSyncExecutionContext,
     retryAfterSeconds?: number,
   ): Promise<BalanceSyncProcessingResult> {
     try {
+      requireActiveExecution(context);
       await this.checkpoints.preserveLastGoodAndMarkStale(
         Object.freeze({
           scope,
@@ -470,8 +514,11 @@ export class BalanceSyncOrchestrator {
           failedAt,
           failureCode,
         }),
+        context,
       );
+      requireActiveExecution(context);
     } catch {
+      requireActiveExecution(context);
       throw orchestratorError('BALANCE_SYNC_CHECKPOINT_FAILED');
     }
     const positionCount = checkpoint?.currentObservation?.positions.length ?? 0;
@@ -503,6 +550,7 @@ export class BalanceSyncOrchestrator {
     if (disposition.action === 'RETRY') {
       const retryEnvelope = createBalanceSyncRetryEnvelope(job, failedAt);
       try {
+        requireActiveExecution(context);
         await this.jobs.scheduleRetry(
           Object.freeze({
             envelope: retryEnvelope,
@@ -510,7 +558,9 @@ export class BalanceSyncOrchestrator {
             failureCode,
           }),
         );
+        requireActiveExecution(context);
       } catch (error) {
+        requireActiveExecution(context);
         if (balanceSyncReceiptRetryMinimumDelaySeconds(error) !== undefined) throw error;
         throw orchestratorError('BALANCE_SYNC_JOB_DISPOSITION_FAILED');
       }
@@ -530,10 +580,13 @@ export class BalanceSyncOrchestrator {
       });
     }
     try {
+      requireActiveExecution(context);
       await this.jobs.deadLetter(
         Object.freeze({ envelope: job, failureCode, reason: disposition.reason }),
       );
+      requireActiveExecution(context);
     } catch {
+      requireActiveExecution(context);
       throw orchestratorError('BALANCE_SYNC_JOB_DISPOSITION_FAILED');
     }
     this.recordMetric({
@@ -952,6 +1005,15 @@ function failureFrom(error: unknown): Readonly<{
   const orchestratorCode = reviewBalanceSyncOrchestratorError(error);
   if (orchestratorCode) throw orchestratorError(orchestratorCode);
   return Object.freeze({ code: 'UNCLASSIFIED_FAILURE' });
+}
+
+function requireActiveExecution(context: unknown): void {
+  const reviewed = reviewBalanceSyncExecutionContext(context);
+  if (reviewed === null) throw orchestratorError('INVALID_BALANCE_SYNC_JOB');
+  if (reviewed.abortKind === null) return;
+  throw new BalanceSyncIndexerFailure(
+    reviewed.abortKind === 'DEADLINE' ? 'PROVIDER_TIMEOUT' : 'PROVIDER_UNAVAILABLE',
+  );
 }
 
 function clockTime(clock: BalanceSyncClockPort): ClockTime {

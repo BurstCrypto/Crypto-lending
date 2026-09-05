@@ -619,7 +619,7 @@ describe('createBalanceSyncConsumerComposition', () => {
       BALANCE_SYNC_POLICY.retryBaseDelaySeconds,
       expect.any(AbortSignal),
     );
-    expect(test.checkpoints.preserveLastGoodAndMarkStale).toHaveBeenCalledTimes(1);
+    expect(test.checkpoints.preserveLastGoodAndMarkStale).not.toHaveBeenCalled();
     expect(test.deleteReceipt).not.toHaveBeenCalled();
   });
 

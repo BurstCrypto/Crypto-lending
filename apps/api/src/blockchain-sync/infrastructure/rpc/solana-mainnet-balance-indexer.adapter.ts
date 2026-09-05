@@ -95,7 +95,7 @@ export class SolanaMainnetBalanceIndexerAdapter implements BalanceSyncIndexerPor
     request: BalanceIndexerReadRequest,
     context: BalanceSyncExecutionContext,
   ): Promise<unknown> {
-    return this.guarded(async () => {
+    return this.guarded(context, async () => {
       requireActiveExecution(context);
       return (await this.readBundle(request, context)).candidate;
     });
@@ -105,7 +105,7 @@ export class SolanaMainnetBalanceIndexerAdapter implements BalanceSyncIndexerPor
     request: BalanceIndexerRescanRequest,
     context: BalanceSyncExecutionContext,
   ): Promise<unknown> {
-    return this.guarded(async () => {
+    return this.guarded(context, async () => {
       requireActiveExecution(context);
       validateSolanaRequest(request);
       if (
@@ -161,7 +161,7 @@ export class SolanaMainnetBalanceIndexerAdapter implements BalanceSyncIndexerPor
   ): Promise<SolanaReadBundle> {
     validateSolanaRequest(request);
     await this.assertMainnetIdentity(context);
-    const address = await this.resolveAddress(request);
+    const address = await this.resolveAddress(request, context);
     const commitment = request.selector;
     const slotResult = await exchangeBalanceRpc(
       this.transport,
@@ -237,17 +237,28 @@ export class SolanaMainnetBalanceIndexerAdapter implements BalanceSyncIndexerPor
     }
   }
 
-  private async resolveAddress(request: BalanceIndexerReadRequest): Promise<string> {
+  private async resolveAddress(
+    request: BalanceIndexerReadRequest,
+    context: BalanceSyncExecutionContext,
+  ): Promise<string> {
+    requireActiveExecution(context);
+    let value: unknown;
     try {
-      return parseSolanaWalletAddress(
-        await this.addresses.resolveActiveAddress(
-          Object.freeze({
-            accountId: request.accountId,
-            walletId: request.walletId,
-            networkId: SOLANA_MAINNET_NETWORK_ID,
-          }),
-        ),
+      value = await this.addresses.resolveActiveAddress(
+        Object.freeze({
+          accountId: request.accountId,
+          walletId: request.walletId,
+          networkId: SOLANA_MAINNET_NETWORK_ID,
+        }),
+        context,
       );
+    } catch {
+      requireActiveExecution(context);
+      throw new BalanceSyncIndexerFailure('PROVIDER_UNAVAILABLE');
+    }
+    requireActiveExecution(context);
+    try {
+      return parseSolanaWalletAddress(value);
     } catch {
       throw new BalanceSyncIndexerFailure('PROVIDER_INVALID_DATA');
     }
@@ -293,10 +304,14 @@ export class SolanaMainnetBalanceIndexerAdapter implements BalanceSyncIndexerPor
     return Object.freeze({ position, hash, parentPosition, parentHash });
   }
 
-  private async guarded<T>(operation: () => Promise<T>): Promise<T> {
+  private async guarded<T>(
+    context: BalanceSyncExecutionContext,
+    operation: () => Promise<T>,
+  ): Promise<T> {
     try {
       return await operation();
     } catch (error) {
+      requireActiveExecution(context);
       const reviewed = reviewBalanceSyncIndexerFailure(error);
       if (reviewed) {
         throw new BalanceSyncIndexerFailure(
