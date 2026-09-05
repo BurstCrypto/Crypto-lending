@@ -3,10 +3,13 @@ import { describe, expect, it } from 'vitest';
 import {
   createSupportedEvmNetworks,
   findSupportedEvmNetwork,
-  KAN61_EVM_NETWORK_CATALOG,
-  KAN61_EVM_TESTNET_CATALOG,
   parseEip1193ChainId,
 } from '@/lib/wallets/eip1193/networks';
+
+import {
+  KAN61_EVM_NETWORK_CATALOG,
+  KAN61_EVM_TESTNET_CATALOG,
+} from './eip1193-network-catalog.fixture';
 
 describe('EIP-1193 network policy', () => {
   it('keeps the KAN-61 mainnet and testnet display catalogs distinct', () => {

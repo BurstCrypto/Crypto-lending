@@ -13,8 +13,6 @@ export {
   type InjectedProviderDescriptor,
 } from './discovery';
 export {
-  KAN61_EVM_NETWORK_CATALOG,
-  KAN61_EVM_TESTNET_CATALOG,
   createSupportedEvmNetworks,
   findSupportedEvmNetwork,
   parseEip1193ChainId,

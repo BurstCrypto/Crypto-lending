@@ -6,7 +6,6 @@ import {
   InjectedEip1193WalletAdapter,
   type InjectedEip1193WalletAdapterOptions,
 } from '@/lib/wallets/eip1193/adapter';
-import { KAN61_EVM_TESTNET_CATALOG } from '@/lib/wallets/eip1193/networks';
 import {
   HttpEvmWalletOwnershipClient,
   WALLET_OWNERSHIP_CHALLENGE_PATH,
@@ -19,6 +18,8 @@ import {
 } from '@/lib/wallets/eip1193/ownership';
 import type { Eip1193Provider, Eip1193RequestArguments } from '@/lib/wallets/eip1193/provider';
 import { MAINNET_WALLET_REGISTRY } from '@/lib/wallets/mainnet-network-policy';
+
+import { KAN61_EVM_TESTNET_CATALOG } from './eip1193-network-catalog.fixture';
 
 const ORIGIN = 'https://app.example.test';
 const ADDRESS = '0x1111111111111111111111111111111111111111';

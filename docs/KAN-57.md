@@ -37,19 +37,22 @@ part of that trust decision.
 
 ## Network display and validation
 
-The connector exports immutable KAN-61 v1 display catalogs for the three EVM
-networks in each environment:
+The shipped connector contains validation primitives but no broad network
+catalog. The production wallet supplies one exact, immutable EVM allowlist:
+Ethereum mainnet (`eip155:1`, provider chain ID `0x1`). Base, Arbitrum, and EVM
+testnet identities are absent from the production dependency graph and built
+client artifacts.
+
+The earlier KAN-61 v1 display rows remain only in a test fixture so the generic
+connector boundary can still be exercised against multiple networks:
 
 | Environment | Display networks                                 |
 | ----------- | ------------------------------------------------ |
 | Mainnet     | Ethereum Mainnet, Base Mainnet, Arbitrum One     |
 | Testnet     | Ethereum Sepolia, Base Sepolia, Arbitrum Sepolia |
 
-This table records the reusable connector's broader display capability. The
-current production wallet UI wires only Ethereum from the EVM catalog, with
-Solana handled by its separate adapter. Base and Arbitrum are not active
-mainnet launch choices and cannot count toward launch readiness. Their catalog
-rows remain historical/testable capability, not production authorization.
+This table records historical test inputs, not shipped capability or production
+authorization. Solana remains handled by its separate adapter.
 
 Configuration rejects mixed environments, duplicate identities, noncanonical
 hexadecimal provider chain IDs, and decimal/hex mismatches. A connector
@@ -57,10 +60,10 @@ descriptor makes the complete selected-environment allowlist available to the
 UI. An unsupported or malformed chain never creates a normalized connection;
 an unsupported `chainChanged` event invalidates the active connection.
 
-These web catalogs intentionally contain display identity only. The versioned
-KAN-61 API registry remains authoritative for registration and asset support.
-KAN-56 rechecks the exact chain against its configured active environment, so a
-stale or tampered client catalog cannot register an unsupported identity.
+The historical fixture contains display identity only. The versioned KAN-61 API
+registry remains authoritative for registration and asset support. KAN-56
+rechecks the exact chain against its configured active environment, so a stale
+or tampered client allowlist cannot register an unsupported identity.
 
 ## Connection and invalidation controls
 

@@ -5,13 +5,14 @@ import {
   InjectedEip1193WalletAdapter,
 } from '@/lib/wallets/eip1193/adapter';
 import type { InjectedProviderDescriptor } from '@/lib/wallets/eip1193/discovery';
-import { KAN61_EVM_TESTNET_CATALOG } from '@/lib/wallets/eip1193/networks';
 import type {
   Eip1193Listener,
   Eip1193Provider,
   Eip1193RequestArguments,
 } from '@/lib/wallets/eip1193/provider';
 import type { SiweOwnershipChallenge, WalletEvent } from '@/lib/wallets/wallet-adapter';
+
+import { KAN61_EVM_TESTNET_CATALOG } from './eip1193-network-catalog.fixture';
 
 const ADDRESS = '0x1111111111111111111111111111111111111111';
 const SECOND_ADDRESS = '0x2222222222222222222222222222222222222222';

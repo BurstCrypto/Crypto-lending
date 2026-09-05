@@ -6,8 +6,9 @@ import {
   EIP6963_REQUEST_PROVIDER,
   Eip6963ProviderDiscovery,
 } from '@/lib/wallets/eip1193/discovery';
-import { KAN61_EVM_TESTNET_CATALOG } from '@/lib/wallets/eip1193/networks';
 import type { Eip1193Provider } from '@/lib/wallets/eip1193/provider';
+
+import { KAN61_EVM_TESTNET_CATALOG } from './eip1193-network-catalog.fixture';
 
 function provider(): Eip1193Provider {
   return {
