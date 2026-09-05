@@ -91,7 +91,7 @@ Resources:
       VisibilityTimeout: 30
       RedrivePolicy:
         deadLetterTargetArn: !GetAtt BalanceDeadLetterQueue.Arn
-        maxReceiveCount: !Ref MaxReceiveCount
+        maxReceiveCount: 3
       Tags:
         - Key: application
           Value: crypto-lending

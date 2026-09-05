@@ -802,7 +802,7 @@ Resources:
    ReceiveMessageWaitTimeSeconds: 10
    RedrivePolicy:
     deadLetterTargetArn: !GetAtt BalanceDeadLetterQueue.Arn
-    maxReceiveCount: !Ref SqsMaxReceiveCount
+    maxReceiveCount: 3
    VisibilityTimeout: !Ref SqsVisibilityTimeoutSeconds
 
  BalanceQueueTlsPolicy:

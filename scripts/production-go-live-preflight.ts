@@ -33,7 +33,7 @@ import type {
 export const PRODUCTION_PREFLIGHT_SCHEMA_VERSION = 1 as const;
 export const PRODUCTION_PROVIDER_TARGET = 10 as const;
 const REVIEWED_DATABASE_MASTER_TEMPLATE_SHA256 =
-  '9ffa126c63a1758db315eae58462f3d1a47cf3542136db39a65749c47dd08fb6';
+  '7fa270567d03d78a833e40cc0524c968c61f00fd43df877e5e0dfdd9ea1a07be';
 
 export type ProductionPreflightTarget = 'read-only' | 'mainnet-write';
 export type ProductionPreflightReadiness = 'BLOCKED' | 'LOCAL_GATES_CLEAR';
@@ -524,6 +524,8 @@ const BALANCE_CONSUMER_ARTIFACT_KEYS = Object.freeze([
   'releaseManifestSource',
   'productionContainerValidatorSource',
 ] as const satisfies readonly (keyof BalanceConsumerArtifactSources)[]);
+const REVIEWED_SQS_TOKENS_SOURCE_SHA256 =
+  '9727c85465fd2bec762ea6c0445b698a1011234396778a156f7f161cac29ac14';
 const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
   activationSource: '75ae4b590e2ad9d70542ea9c38809f4ed24d61ec354838e7318afdccc07dd091',
   cliSource: '7fec5d0cc345b82ed4fb5f26e1fa7099f0cb38c246224ada7a9fe51a65d4c455',
@@ -540,11 +542,11 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
   sqsJobWorkerSource: 'da2de20e4313bd9e1057b330d61f571ecbcee679e1a7f3ab9d67ca32a70880da',
   sqsServiceSource: '2abb5d6592858be750263200fdd8b17a3ad15e0ee3ad5ca8fe14e36b5ac46d13',
   sqsModuleSource: 'dc958100bd372500a9428c28cc6219a4cb00db61314a63478368d0b0cf95221b',
-  sqsTokensSource: '9727c85465fd2bec762ea6c0445b698a1011234396778a156f7f161cac29ac14',
+  sqsTokensSource: REVIEWED_SQS_TOKENS_SOURCE_SHA256,
   apiPackageSource: '28b9f69d1cf3cf1d16ee76ba6a4afd4881df9afb205c010e6512b0c3633c0c9c',
   rootPackageSource: '1a2c762fe9278975a123073be69b7dc332b547e348ecbb71303233da7ebac8fd',
-  applicationTemplateSource: '9ffa126c63a1758db315eae58462f3d1a47cf3542136db39a65749c47dd08fb6',
-  applicationValidatorSource: 'd9b21305fa911cd7290c70bda1e512b54442a8a5705663b74d0d572f03654f4d',
+  applicationTemplateSource: '7fa270567d03d78a833e40cc0524c968c61f00fd43df877e5e0dfdd9ea1a07be',
+  applicationValidatorSource: '0b80e3896627857740b18c78a609162e13ebbfd940b483428b654e780b62f112',
   workloadTemplateSource: '4c74c98e73635df30570dfe1e726b41cb6f62832f0bfc2e43dcd087d384b78de',
   workloadValidatorSource: '694f28c926fb08f6648d2d399fd31161681247eadacf43042077c4759dcbafba',
   balanceConsumerEnvelopeSource: '3b621023e516cd553c34fbe09e4b0047d1395fab45e105eef7692570d6429045',
@@ -2002,6 +2004,10 @@ function hasPinnedBalanceConsumerQueueBoundaryContract(
 function hasExactBalanceConsumerNativeReceiptRedriveContract(
   sources: BalanceConsumerArtifactSources,
 ): boolean {
+  const applicationBalanceQueue = yamlBlock(sources.applicationTemplateSource, 'BalanceQueue', 1);
+  const applicationJobQueue = yamlBlock(sources.applicationTemplateSource, 'JobQueue', 1);
+  if (applicationBalanceQueue === null || applicationJobQueue === null) return false;
+
   const infrastructure = sources.infrastructureConfigSource.replace(/\r\n/gu, '\n');
   const policyStart = infrastructure.indexOf(
     'export const BALANCE_CONSUMER_SQS_RECEIPT_REDRIVE_POLICY = Object.freeze({',
@@ -2041,6 +2047,7 @@ function hasExactBalanceConsumerNativeReceiptRedriveContract(
   const composition = sources.compositionSource.replace(/\r\n/gu, '\n');
   const disposition = sources.failClosedJobDispositionSource.replace(/\r\n/gu, '\n');
   const dispatcher = sources.reviewedJobDispatcherSource.replace(/\r\n/gu, '\n');
+  const applicationValidator = sources.applicationValidatorSource.replace(/\r\n/gu, '\n');
   const ingressStart = dispatcher.indexOf('export function parseBalanceSyncConsumerJobEnvelope(');
   const ingressEnd = dispatcher.indexOf('function parseHandlers(', ingressStart);
   if (ingressStart < 0 || ingressEnd <= ingressStart) return false;
@@ -2048,6 +2055,18 @@ function hasExactBalanceConsumerNativeReceiptRedriveContract(
   const worker = sources.sqsJobWorkerSource.replace(/\r\n/gu, '\n');
 
   return (
+    exactExecutableLineCount(applicationBalanceQueue, 'maxReceiveCount: 3') === 1 &&
+    !applicationBalanceQueue.includes('maxReceiveCount: !Ref SqsMaxReceiveCount') &&
+    exactExecutableLineCount(applicationJobQueue, 'maxReceiveCount: !Ref SqsMaxReceiveCount') ===
+      1 &&
+    exactExecutableLineCount(applicationJobQueue, 'maxReceiveCount: 3') === 0 &&
+    applicationValidator.includes(
+      'the exact encrypted, domain-pinned redrive balance-sync source queue topology',
+    ) &&
+    applicationValidator.includes(
+      'the exact dead-letter target and domain-pinned maxReceiveCount of 3',
+    ) &&
+    exactExecutableLineCount(applicationValidator, "'  maxReceiveCount: 3',") === 1 &&
     exactExecutableLineCount(resiliencePolicy, 'maxAttempts: 3,') === 1 &&
     exactExecutableLineCount(
       balancePolicy,

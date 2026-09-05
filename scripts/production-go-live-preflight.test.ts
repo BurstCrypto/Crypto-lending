@@ -1142,10 +1142,22 @@ test('balance-consumer inspection fails closed for drift in every reviewed artif
       ' WorkerServiceOld:',
     ],
     [
+      'application balance queue redrive bound',
+      'applicationTemplateSource',
+      '    maxReceiveCount: 3',
+      '    maxReceiveCount: !Ref SqsMaxReceiveCount',
+    ],
+    [
       'application task inventory validator',
       'applicationValidatorSource',
       "['AWS::ECS::TaskDefinition', 3],",
       "['AWS::ECS::TaskDefinition', 4],",
+    ],
+    [
+      'application balance queue redrive validator',
+      'applicationValidatorSource',
+      'the exact dead-letter target and domain-pinned maxReceiveCount of 3',
+      'the exact dead-letter target and configurable maxReceiveCount',
     ],
     [
       'workload queue capability',

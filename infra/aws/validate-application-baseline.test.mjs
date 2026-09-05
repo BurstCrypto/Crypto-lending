@@ -104,9 +104,9 @@ test('accepts the repository no-external-egress baseline and records the DNS res
 
 test('keeps the parent below the reviewed direct-upload ceiling after child extraction', () => {
   const bytes = Buffer.byteLength(templateSource, 'utf8');
-  assert.equal(bytes, 49_882);
+  assert.equal(bytes, 49_860);
   assert.ok(bytes <= 50_500);
-  assert.equal(51_200 - bytes, 1_318);
+  assert.equal(51_200 - bytes, 1_340);
 });
 
 test('pins the observability child URL, digest, binding, and exact parent mapping', () => {
@@ -1528,7 +1528,17 @@ test('rejects durable-service encryption and queue-policy downgrades semanticall
     [
       '    deadLetterTargetArn: !GetAtt BalanceDeadLetterQueue.Arn',
       '    deadLetterTargetArn: !GetAtt JobDeadLetterQueue.Arn',
-      /exact encrypted, bounded-redrive balance-sync source queue topology/,
+      /exact encrypted, domain-pinned redrive balance-sync source queue topology/,
+    ],
+    [
+      '    deadLetterTargetArn: !GetAtt BalanceDeadLetterQueue.Arn\n    maxReceiveCount: 3',
+      '    deadLetterTargetArn: !GetAtt BalanceDeadLetterQueue.Arn\n    maxReceiveCount: !Ref SqsMaxReceiveCount',
+      /exact dead-letter target and domain-pinned maxReceiveCount of 3/,
+    ],
+    [
+      '    deadLetterTargetArn: !GetAtt BalanceDeadLetterQueue.Arn\n    maxReceiveCount: 3',
+      '    deadLetterTargetArn: !GetAtt BalanceDeadLetterQueue.Arn\n    maxReceiveCount: 4',
+      /exact dead-letter target and domain-pinned maxReceiveCount of 3/,
     ],
     [
       '    - !Ref BalanceDeadLetterQueue\n   PolicyDocument:',

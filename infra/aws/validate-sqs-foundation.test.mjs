@@ -343,7 +343,12 @@ test('rejects balance source/DLQ, encryption, and TLS isolation drift', () => {
     [
       '        deadLetterTargetArn: !GetAtt BalanceDeadLetterQueue.Arn',
       '        deadLetterTargetArn: !GetAtt JobDeadLetterQueue.Arn',
-      /bounded-retry balance source queue/,
+      /literal three-receive redrive bound/,
+    ],
+    [
+      '        maxReceiveCount: 3',
+      '        maxReceiveCount: !Ref MaxReceiveCount',
+      /literal three-receive redrive bound/,
     ],
     [
       '        - !Ref BalanceDeadLetterQueue',
@@ -352,6 +357,21 @@ test('rejects balance source/DLQ, encryption, and TLS isolation drift', () => {
     ],
   ]) {
     assertRejected(mutate(search, replacement), message);
+  }
+});
+
+test('pins only the balance queue to the exact literal three-receive redrive bound', () => {
+  assert.match(
+    templateSource,
+    /^ {8}maxReceiveCount: !Ref MaxReceiveCount$/m,
+    'The generic JobQueue must remain parameterized.',
+  );
+
+  for (const replacement of ['        maxReceiveCount: 4', "        maxReceiveCount: '3'"]) {
+    assertRejected(
+      mutate('        maxReceiveCount: 3', replacement),
+      /exact literal integer 3|literal three-receive redrive bound/,
+    );
   }
 });
 

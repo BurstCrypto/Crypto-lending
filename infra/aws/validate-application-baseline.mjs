@@ -34,7 +34,7 @@ const operationalAlarmLogicalIds = Object.freeze([
   'BalanceDeadLetterQueueNotEmptyAlarm',
 ]);
 const reviewedApplicationBaselineSha256 =
-  '9ffa126c63a1758db315eae58462f3d1a47cf3542136db39a65749c47dd08fb6';
+  '7fa270567d03d78a833e40cc0524c968c61f00fd43df877e5e0dfdd9ea1a07be';
 const reviewedWorkloadBoundariesSha256 =
   '4c74c98e73635df30570dfe1e726b41cb6f62832f0bfc2e43dcd087d384b78de';
 const reviewedObservabilitySha256 =
@@ -1897,10 +1897,22 @@ function validateKmsAndEncryptedServiceBoundaries(resources, inventory, errors) 
       '  ReceiveMessageWaitTimeSeconds: 10',
       '  RedrivePolicy:',
       '    deadLetterTargetArn: !GetAtt BalanceDeadLetterQueue.Arn',
-      '    maxReceiveCount: !Ref SqsMaxReceiveCount',
+      '    maxReceiveCount: 3',
       '  VisibilityTimeout: !Ref SqsVisibilityTimeoutSeconds',
     ].join('\n'),
-    'the exact encrypted, bounded-redrive balance-sync source queue topology',
+    'the exact encrypted, domain-pinned redrive balance-sync source queue topology',
+    errors,
+  );
+  requireExactSemanticProperty(
+    resources.get('BalanceQueue') ?? '',
+    'BalanceQueue',
+    'RedrivePolicy',
+    [
+      'RedrivePolicy:',
+      '  deadLetterTargetArn: !GetAtt BalanceDeadLetterQueue.Arn',
+      '  maxReceiveCount: 3',
+    ].join('\n'),
+    'the exact dead-letter target and domain-pinned maxReceiveCount of 3',
     errors,
   );
   requireExactSemanticProperty(

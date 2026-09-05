@@ -491,14 +491,21 @@ export function validateSqsFoundationSource(source) {
       '  VisibilityTimeout: 30',
       '  RedrivePolicy:',
       '    deadLetterTargetArn: !GetAtt BalanceDeadLetterQueue.Arn',
-      '    maxReceiveCount: !Ref MaxReceiveCount',
+      '    maxReceiveCount: 3',
       '  Tags:',
       '    - Key: application',
       '      Value: crypto-lending',
       '    - Key: environment',
       '      Value: !Ref EnvironmentName',
     ].join('\n'),
-    'the exact AWS-KMS-encrypted, bounded-retry balance source queue topology and tags',
+    'the exact AWS-KMS-encrypted balance source queue topology, literal three-receive redrive bound, and tags',
+    errors,
+  );
+
+  requireMatch(
+    resources.get('BalanceQueue') ?? '',
+    /^ {8}maxReceiveCount: 3$/m,
+    'BalanceQueue RedrivePolicy must set maxReceiveCount to the exact literal integer 3.',
     errors,
   );
 
