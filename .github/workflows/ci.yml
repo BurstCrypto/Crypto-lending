@@ -86,7 +86,9 @@ jobs:
           npm run infra:test:migrations
           npm run infra:test:workload-boundaries
           npm run infra:test:observability
+          npm run infra:test:auth-wallet-transition
           npm run infra:test:credential-transition
+          npm run infra:test:redis-operator-transition
           npm run infra:test:sqs
           npm run infra:test:redis-acl
           pwsh -NoProfile -File infra/aws/test-invoke-acm-dns-local.ps1

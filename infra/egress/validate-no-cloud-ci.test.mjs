@@ -33,8 +33,14 @@ test('CI scans full history without retaining checkout credentials before depend
   );
 });
 
-test('CI requires the KAN-50 secret and SQS mutation suites', () => {
+test('CI requires the offline secret, transition, and SQS mutation suites', () => {
   assert.match(workflow, /^\s+npm run infra:test:sqs\s*$/m);
+  assert.match(workflow, /^\s+npm run infra:test:auth-wallet-transition\s*$/m);
+  assert.match(workflow, /^\s+npm run infra:test:redis-operator-transition\s*$/m);
+  assert.match(
+    workflow,
+    /^\s+npm run infra:test:auth-wallet-transition\s*\r?\n\s+npm run infra:test:credential-transition\s*\r?\n\s+npm run infra:test:redis-operator-transition\s*$/m,
+  );
   assert.match(workflow, /^\s+npm run security:test:secrets\s*$/m);
 });
 
