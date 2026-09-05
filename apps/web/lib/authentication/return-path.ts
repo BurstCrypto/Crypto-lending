@@ -89,9 +89,9 @@ export function parseSafeAccountReturnPath(value: unknown): string {
     parsed.username !== '' ||
     parsed.password !== '' ||
     parsed.hash !== '' ||
-    parsed.pathname !== PORTFOLIO_PATH &&
-    parsed.pathname !== PLATFORMS_PATH &&
-    parsed.pathname !== ACCOUNT_PATH
+    (parsed.pathname !== PORTFOLIO_PATH &&
+      parsed.pathname !== PLATFORMS_PATH &&
+      parsed.pathname !== ACCOUNT_PATH)
   ) {
     reject();
   }

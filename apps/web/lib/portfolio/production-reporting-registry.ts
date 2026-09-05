@@ -5,14 +5,9 @@ export const PRODUCTION_REPORTING_NETWORK_IDS = Object.freeze([
 
 export type ProductionReportingNetworkId = (typeof PRODUCTION_REPORTING_NETWORK_IDS)[number];
 
-export const PRODUCTION_REPORTING_STABLECOINS = Object.freeze([
-  'USDC',
-  'USDT',
-  'PYUSD',
-] as const);
+export const PRODUCTION_REPORTING_STABLECOINS = Object.freeze(['USDC', 'USDT', 'PYUSD'] as const);
 
-export type ProductionReportingStablecoin =
-  (typeof PRODUCTION_REPORTING_STABLECOINS)[number];
+export type ProductionReportingStablecoin = (typeof PRODUCTION_REPORTING_STABLECOINS)[number];
 
 export const PRODUCTION_REPORTING_NETWORKS = Object.freeze({
   'eip155:1': Object.freeze({ name: 'Ethereum' }),
