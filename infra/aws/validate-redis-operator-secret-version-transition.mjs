@@ -224,6 +224,22 @@ function operatorProjection(state) {
   };
 }
 
+function deploymentBindingsFromState(state) {
+  return deepFreeze({
+    RedisOperatorSecretVersionId: state.redisOperatorSecretVersionId,
+    ApiDatabaseSlotAVersionId: state.apiDatabase.slots.a.currentVersionId,
+    ApiDatabaseSlotBVersionId: state.apiDatabase.slots.b.currentVersionId,
+    WorkerDatabaseSlotAVersionId: state.workerDatabase.slots.a.currentVersionId,
+    WorkerDatabaseSlotBVersionId: state.workerDatabase.slots.b.currentVersionId,
+    RedisApiSlotAVersionId: state.redis.slots.a.currentVersionId,
+    RedisApiSlotBVersionId: state.redis.slots.b.currentVersionId,
+    ApiDatabaseCredentialPhase: state.apiDatabase.phase,
+    WorkerDatabaseCredentialPhase: state.workerDatabase.phase,
+    RedisCredentialPhase: state.redis.phase,
+    RedisOperatorMode: state.operatorMode,
+  });
+}
+
 export function redisOperatorTransitionStateSha256(state) {
   return hashDomain(
     OPERATOR_STATE_HASH_DOMAIN,
@@ -882,12 +898,16 @@ function verifyRecord(record, options, registry, production) {
   let targetOperatorStateSha256;
   let currentCredentialStateSha256;
   let targetCredentialStateSha256;
+  let currentDeploymentBindings;
+  let targetDeploymentBindings;
   if (ok && structural.operational) {
     try {
       currentOperatorStateSha256 = redisOperatorTransitionStateSha256(content.currentState);
       targetOperatorStateSha256 = redisOperatorTransitionStateSha256(content.targetState);
       currentCredentialStateSha256 = fixedSlotCredentialStateSha256(content.currentState);
       targetCredentialStateSha256 = fixedSlotCredentialStateSha256(content.targetState);
+      currentDeploymentBindings = deploymentBindingsFromState(content.currentState);
+      targetDeploymentBindings = deploymentBindingsFromState(content.targetState);
     } catch {
       return baseFailureReport(structural.mode, [
         'Redis operator transition structure is malformed or non-canonical.',
@@ -907,6 +927,8 @@ function verifyRecord(record, options, registry, production) {
     targetOperatorStateSha256,
     currentCredentialStateSha256,
     targetCredentialStateSha256,
+    currentDeploymentBindings,
+    targetDeploymentBindings,
     redisOperatorPredecessorTransitionSha256:
       ok && structural.operational ? content.predecessors.redisOperatorTransitionSha256 : undefined,
     credentialPredecessorTransitionSha256:

@@ -60,6 +60,19 @@ const EVIDENCE_KEYS = [
   'forwardRecoveryPlanSha256',
   'unrelatedStatePreservationPlanSha256',
 ];
+const DEPLOYMENT_BINDING_KEYS = [
+  'RedisOperatorSecretVersionId',
+  'ApiDatabaseSlotAVersionId',
+  'ApiDatabaseSlotBVersionId',
+  'WorkerDatabaseSlotAVersionId',
+  'WorkerDatabaseSlotBVersionId',
+  'RedisApiSlotAVersionId',
+  'RedisApiSlotBVersionId',
+  'ApiDatabaseCredentialPhase',
+  'WorkerDatabaseCredentialPhase',
+  'RedisCredentialPhase',
+  'RedisOperatorMode',
+];
 
 mkdirSync(LOCAL_REDIS_OPERATOR_TRANSITION_ROOT, { recursive: true });
 
@@ -382,6 +395,8 @@ test('checked-in Redis operator example remains inert and production authority e
   assert.equal(report.awsCallsMade, 0);
   assert.equal(report.redisConnectionsMade, 0);
   assert.equal(report.filesWritten, 0);
+  assert.equal(report.currentDeploymentBindings, undefined);
+  assert.equal(report.targetDeploymentBindings, undefined);
 });
 
 test('accepts signed adoption and transition only through the unbranded test seam', () => {
@@ -411,6 +426,76 @@ test('accepts signed adoption and transition only through the unbranded test sea
   );
   assert.equal(transitionReport.plan.kind, 'LOCAL_ONLY_NON_EXECUTABLE_REDIS_OPERATOR_VERSION_PLAN');
   assert.equal(transitionReport.plan.versionParameter, 'RedisOperatorSecretVersionId');
+});
+
+test('reports exact immutable deployment bindings derived only from signed full states', () => {
+  const adoptionRecord = recordFor('adopt');
+  const adoption = assertAccepted(adoptionRecord, 'adopt');
+  assert.deepEqual(Object.keys(adoption.currentDeploymentBindings), DEPLOYMENT_BINDING_KEYS);
+  assert.deepEqual(adoption.currentDeploymentBindings, adoption.targetDeploymentBindings);
+
+  const transitionRecord = recordFor('transition');
+  const transition = assertAccepted(transitionRecord, 'transition');
+  assert.deepEqual(Object.keys(transition.currentDeploymentBindings), DEPLOYMENT_BINDING_KEYS);
+  assert.deepEqual(Object.keys(transition.targetDeploymentBindings), DEPLOYMENT_BINDING_KEYS);
+  assert.deepEqual(transition.currentDeploymentBindings, {
+    RedisOperatorSecretVersionId:
+      transitionRecord.content.currentState.redisOperatorSecretVersionId,
+    ApiDatabaseSlotAVersionId:
+      transitionRecord.content.currentState.apiDatabase.slots.a.currentVersionId,
+    ApiDatabaseSlotBVersionId:
+      transitionRecord.content.currentState.apiDatabase.slots.b.currentVersionId,
+    WorkerDatabaseSlotAVersionId:
+      transitionRecord.content.currentState.workerDatabase.slots.a.currentVersionId,
+    WorkerDatabaseSlotBVersionId:
+      transitionRecord.content.currentState.workerDatabase.slots.b.currentVersionId,
+    RedisApiSlotAVersionId: transitionRecord.content.currentState.redis.slots.a.currentVersionId,
+    RedisApiSlotBVersionId: transitionRecord.content.currentState.redis.slots.b.currentVersionId,
+    ApiDatabaseCredentialPhase: transitionRecord.content.currentState.apiDatabase.phase,
+    WorkerDatabaseCredentialPhase: transitionRecord.content.currentState.workerDatabase.phase,
+    RedisCredentialPhase: transitionRecord.content.currentState.redis.phase,
+    RedisOperatorMode: transitionRecord.content.currentState.operatorMode,
+  });
+  assert.deepEqual(transition.targetDeploymentBindings, {
+    ...transition.currentDeploymentBindings,
+    RedisOperatorSecretVersionId: transitionRecord.content.targetState.redisOperatorSecretVersionId,
+  });
+  const changedKeys = DEPLOYMENT_BINDING_KEYS.filter(
+    (key) => transition.currentDeploymentBindings[key] !== transition.targetDeploymentBindings[key],
+  );
+  assert.deepEqual(changedKeys, ['RedisOperatorSecretVersionId']);
+  assert.equal(Object.isFrozen(transition.currentDeploymentBindings), true);
+  assert.equal(Object.isFrozen(transition.targetDeploymentBindings), true);
+  assert.throws(() => {
+    transition.targetDeploymentBindings.RedisOperatorMode = 'ENABLED';
+  }, TypeError);
+  for (const bindings of [
+    transition.currentDeploymentBindings,
+    transition.targetDeploymentBindings,
+  ]) {
+    for (const value of Object.values(bindings)) {
+      assert.equal(typeof value, 'string');
+      assert.equal(value.includes('arn:'), false);
+      assert.equal(value.toLowerCase().includes('password'), false);
+      assert.equal(value.length <= 64, true);
+    }
+  }
+});
+
+test('full-state tampering cannot produce deployment bindings', () => {
+  const record = recordFor('transition');
+  const options = optionsFor(record, 'transition');
+  signRecord(record);
+  record.content.currentState.apiDatabase.slots.a.currentVersionId = versionId('tampered_slot', 9);
+  const report = verifyRedisOperatorSecretVersionTransitionWithTestRegistry(
+    record,
+    options,
+    testRegistry,
+  );
+  assert.equal(report.ok, false);
+  assert.equal(report.currentDeploymentBindings, undefined);
+  assert.equal(report.targetDeploymentBindings, undefined);
+  assert.match(report.errors.join('\n'), /valid pinned|current full state|signatures/u);
 });
 
 test('public structural API cannot validate operational records or mint a production brand', () => {
