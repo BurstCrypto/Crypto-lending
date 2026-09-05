@@ -2,6 +2,11 @@ import { createHash } from 'node:crypto';
 
 import { BalanceSyncIndexerFailure } from '../../domain/balance-sync';
 
+const MAX_JSON_DEPTH = 32;
+const MAX_JSON_NODES = 200_000;
+const MAX_JSON_BYTES = 4 * 1024 * 1024;
+const VERIFIED_TRANSPORT_FAILURES = new WeakSet<object>();
+
 export interface BalanceJsonRpcRequest {
   readonly jsonrpc: '2.0';
   readonly id: string;
@@ -22,22 +27,27 @@ export type BalanceJsonRpcTransportFailureCode =
 
 /** A bounded transport classification. Raw provider text is never retained. */
 export class BalanceJsonRpcTransportFailure extends Error {
+  readonly code: BalanceJsonRpcTransportFailureCode;
   readonly retryAfterSeconds: number | undefined;
 
   constructor(
-    readonly code: BalanceJsonRpcTransportFailureCode,
+    code: BalanceJsonRpcTransportFailureCode,
     options: Readonly<{ retryAfterSeconds?: number }> = {},
   ) {
-    super(code);
+    const validCode = isTransportFailureCode(code);
+    super(validCode ? code : 'invalid balance JSON-RPC transport failure');
     this.name = 'BalanceJsonRpcTransportFailure';
-    if (
-      !['TIMEOUT', 'RATE_LIMITED', 'UNAVAILABLE', 'PERMANENT'].includes(code) ||
-      (options.retryAfterSeconds !== undefined &&
-        (!Number.isSafeInteger(options.retryAfterSeconds) || options.retryAfterSeconds < 0))
-    ) {
+    let retryAfterSeconds: number | undefined;
+    try {
+      retryAfterSeconds = snapshotRetryAfterSeconds(options);
+    } catch {
       throw new TypeError('invalid balance JSON-RPC transport failure');
     }
-    this.retryAfterSeconds = options.retryAfterSeconds;
+    if (!validCode) throw new TypeError('invalid balance JSON-RPC transport failure');
+    this.code = code;
+    this.retryAfterSeconds = retryAfterSeconds;
+    VERIFIED_TRANSPORT_FAILURES.add(this);
+    Object.freeze(this);
   }
 }
 
@@ -45,17 +55,26 @@ export function balanceRpcRequest(
   method: string,
   params: readonly unknown[],
 ): BalanceJsonRpcRequest {
-  if (!/^[A-Za-z][A-Za-z0-9_]{0,63}$/u.test(method)) {
+  if (typeof method !== 'string' || !/^[A-Za-z][A-Za-z0-9_]{0,63}$/u.test(method)) {
     throw new TypeError('invalid JSON-RPC method');
   }
-  const frozenParams = deepFreezeCopy(params) as readonly unknown[];
+  let frozenParams: readonly unknown[];
+  let canonicalParams: string;
+  try {
+    const snapshot = boundedJsonSnapshot(params);
+    if (!Array.isArray(snapshot)) throw new Error('invalid JSON-RPC params');
+    frozenParams = snapshot;
+    canonicalParams = JSON.stringify(snapshot);
+  } catch {
+    throw new TypeError('invalid JSON-RPC params');
+  }
   return Object.freeze({
     jsonrpc: '2.0',
     id: createHash('sha256')
       .update('crypto-lending:balance-json-rpc-request:v1\0')
       .update(method)
       .update('\0')
-      .update(JSON.stringify(frozenParams))
+      .update(canonicalParams)
       .digest('hex'),
     method,
     params: frozenParams,
@@ -63,8 +82,10 @@ export function balanceRpcRequest(
 }
 
 export function parseBalanceRpcResult(response: unknown, expectedId: string): unknown {
-  assertBoundedJson(response);
-  const record = plainRecord(response);
+  if (typeof expectedId !== 'string' || !/^[0-9a-f]{64}$/u.test(expectedId)) {
+    throw new BalanceSyncIndexerFailure('PROVIDER_INVALID_DATA');
+  }
+  const record = snapshotRecord(response);
   if (record.jsonrpc !== '2.0' || record.id !== expectedId) {
     throw new BalanceSyncIndexerFailure('PROVIDER_INVALID_DATA');
   }
@@ -95,34 +116,17 @@ export async function exchangeBalanceRpc(
   params: readonly unknown[],
 ): Promise<unknown> {
   const request = balanceRpcRequest(method, params);
+  let response: unknown;
   try {
-    const response = await transport.exchange(request);
-    return parseBalanceRpcResult(response, request.id);
+    response = await transport.exchange(request);
   } catch (error) {
-    if (error instanceof BalanceSyncIndexerFailure) throw error;
-    if (error instanceof BalanceJsonRpcTransportFailure) {
-      switch (error.code) {
-        case 'TIMEOUT':
-          throw new BalanceSyncIndexerFailure('PROVIDER_TIMEOUT');
-        case 'RATE_LIMITED':
-          throw new BalanceSyncIndexerFailure(
-            'RATE_LIMITED',
-            error.retryAfterSeconds === undefined
-              ? {}
-              : { retryAfterSeconds: error.retryAfterSeconds },
-          );
-        case 'UNAVAILABLE':
-          throw new BalanceSyncIndexerFailure('PROVIDER_UNAVAILABLE');
-        case 'PERMANENT':
-          throw new BalanceSyncIndexerFailure('PERMANENT_PROVIDER_FAILURE');
-      }
-    }
-    throw new BalanceSyncIndexerFailure('PROVIDER_UNAVAILABLE');
+    throwMappedTransportFailure(error);
   }
+  return parseBalanceRpcResult(response, request.id);
 }
 
 export function exactRecord(value: unknown, keys: readonly string[]): Record<string, unknown> {
-  const record = plainRecord(value);
+  const record = snapshotRecord(value);
   if (!sameKeys(Object.keys(record).sort(), [...keys].sort())) {
     throw new BalanceSyncIndexerFailure('PROVIDER_INVALID_DATA');
   }
@@ -134,7 +138,7 @@ export function allowedRecord(
   requiredKeys: readonly string[],
   allowedKeys: readonly string[],
 ): Record<string, unknown> {
-  const record = plainRecord(value);
+  const record = snapshotRecord(value);
   const actual = Object.keys(record);
   if (
     requiredKeys.some((key) => !actual.includes(key)) ||
@@ -146,12 +150,25 @@ export function allowedRecord(
 }
 
 export function canonicalPositionId(parts: readonly string[]): string {
+  let reviewedParts: readonly string[];
+  try {
+    const snapshot = boundedJsonSnapshot(parts);
+    if (
+      !Array.isArray(snapshot) ||
+      snapshot.some((part) => typeof part !== 'string' || part.includes('\0'))
+    ) {
+      throw new Error('invalid balance position id parts');
+    }
+    reviewedParts = snapshot as readonly string[];
+  } catch {
+    throw new TypeError('invalid balance position id parts');
+  }
   const hash = createHash('sha256').update('crypto-lending:balance-position:v1');
-  for (const part of parts) hash.update('\0').update(part);
+  for (const part of reviewedParts) hash.update('\0').update(part);
   return hash.digest('hex');
 }
 
-function plainRecord(value: unknown): Record<string, unknown> {
+function recordFromOwnedJson(value: unknown): Record<string, unknown> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     throw new BalanceSyncIndexerFailure('PROVIDER_INVALID_DATA');
   }
@@ -166,70 +183,205 @@ function sameKeys(actual: readonly string[], expected: readonly string[]): boole
   return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
 }
 
-function assertBoundedJson(value: unknown): void {
+function snapshotRecord(value: unknown): Record<string, unknown> {
   try {
-    const seen = new WeakSet<object>();
-    let bytes = 0;
-    let nodes = 0;
-    const visit = (candidate: unknown, depth: number): void => {
-      nodes += 1;
-      if (depth > 32 || nodes > 200_000) throw new Error('complex JSON-RPC response');
-      if (candidate === null || typeof candidate === 'boolean') {
-        bytes += 5;
-      } else if (typeof candidate === 'number') {
-        if (!Number.isFinite(candidate)) throw new Error('non-JSON number');
-        bytes += 32;
-      } else if (typeof candidate === 'string') {
-        bytes += Buffer.byteLength(candidate, 'utf8') + 2;
-      } else if (typeof candidate === 'object') {
-        if (seen.has(candidate)) throw new Error('cyclic JSON-RPC response');
-        seen.add(candidate);
-        const prototype = Object.getPrototypeOf(candidate) as unknown;
-        if (
-          (Array.isArray(candidate) && prototype !== Array.prototype) ||
-          (!Array.isArray(candidate) && prototype !== Object.prototype && prototype !== null) ||
-          Object.getOwnPropertySymbols(candidate).length !== 0
-        ) {
-          throw new Error('non-data JSON-RPC response');
-        }
-        const descriptors = Object.getOwnPropertyDescriptors(candidate);
-        for (const [key, descriptor] of Object.entries(descriptors)) {
-          if (Array.isArray(candidate) && key === 'length') continue;
-          if (!('value' in descriptor) || !descriptor.enumerable) {
-            throw new Error('non-data JSON-RPC response');
-          }
-          bytes += Buffer.byteLength(key, 'utf8') + 3;
-          visit(descriptor.value, depth + 1);
-        }
-        if (Array.isArray(candidate)) {
-          const keys = Object.keys(candidate);
-          if (
-            keys.length !== candidate.length ||
-            keys.some((key, index) => key !== String(index))
-          ) {
-            throw new Error('sparse JSON-RPC response');
-          }
-        }
-      } else {
-        throw new Error('non-JSON value');
-      }
-      if (bytes > 4 * 1024 * 1024) throw new Error('oversized JSON-RPC response');
-    };
-    visit(value, 0);
+    return recordFromOwnedJson(boundedJsonSnapshot(value));
   } catch {
     throw new BalanceSyncIndexerFailure('PROVIDER_INVALID_DATA');
   }
 }
 
-function deepFreezeCopy(value: unknown): unknown {
-  if (Array.isArray(value)) return Object.freeze(value.map(deepFreezeCopy));
-  if (typeof value === 'object' && value !== null) {
-    const record = value as Record<string, unknown>;
-    return Object.freeze(
-      Object.fromEntries(
-        Object.entries(record).map(([key, nested]) => [key, deepFreezeCopy(nested)]),
-      ),
-    );
+interface JsonSnapshotState {
+  readonly seen: WeakSet<object>;
+  nodes: number;
+  bytes: number;
+}
+
+function boundedJsonSnapshot(value: unknown): unknown {
+  const state: JsonSnapshotState = { seen: new WeakSet<object>(), nodes: 0, bytes: 0 };
+  const snapshot = snapshotJsonValue(value, 0, state);
+  const encoded = JSON.stringify(snapshot);
+  if (encoded === undefined || Buffer.byteLength(encoded, 'utf8') > MAX_JSON_BYTES) {
+    throw new Error('invalid JSON value');
   }
-  return value;
+  return snapshot;
+}
+
+function snapshotJsonValue(value: unknown, depth: number, state: JsonSnapshotState): unknown {
+  state.nodes += 1;
+  if (depth > MAX_JSON_DEPTH || state.nodes > MAX_JSON_NODES) {
+    throw new Error('invalid JSON value');
+  }
+  if (value === null || typeof value === 'boolean') {
+    addSnapshotBytes(state, 5);
+    return value;
+  }
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) throw new Error('invalid JSON value');
+    addSnapshotBytes(state, 32);
+    return Object.is(value, -0) ? 0 : value;
+  }
+  if (typeof value === 'string') {
+    addSnapshotBytes(state, Buffer.byteLength(value, 'utf8') + 2);
+    return value;
+  }
+  if (typeof value !== 'object') throw new Error('invalid JSON value');
+  if (state.seen.has(value)) throw new Error('invalid JSON value');
+  state.seen.add(value);
+
+  const array = Array.isArray(value);
+  const prototype = Object.getPrototypeOf(value) as unknown;
+  if (
+    (array && prototype !== Array.prototype) ||
+    (!array && prototype !== Object.prototype && prototype !== null)
+  ) {
+    throw new Error('invalid JSON value');
+  }
+  const descriptors = Object.getOwnPropertyDescriptors(value) as unknown as PropertyDescriptorMap;
+  const propertyKeys = Reflect.ownKeys(descriptors);
+  if (propertyKeys.some((key) => typeof key !== 'string')) throw new Error('invalid JSON value');
+  addSnapshotBytes(state, 2);
+
+  if (array) return snapshotJsonArray(descriptors, propertyKeys as string[], depth, state);
+  return snapshotJsonRecord(descriptors, propertyKeys as string[], depth, state);
+}
+
+function snapshotJsonArray(
+  descriptors: PropertyDescriptorMap,
+  propertyKeys: readonly string[],
+  depth: number,
+  state: JsonSnapshotState,
+): readonly unknown[] {
+  const lengthDescriptor = descriptors.length;
+  if (
+    !lengthDescriptor ||
+    !('value' in lengthDescriptor) ||
+    !Number.isSafeInteger(lengthDescriptor.value) ||
+    lengthDescriptor.value < 0 ||
+    lengthDescriptor.value > MAX_JSON_NODES - state.nodes ||
+    propertyKeys.length !== lengthDescriptor.value + 1
+  ) {
+    throw new Error('invalid JSON value');
+  }
+  const length = lengthDescriptor.value as number;
+  const result: unknown[] = [];
+  for (let index = 0; index < length; index += 1) {
+    const descriptor = descriptors[String(index)];
+    if (!descriptor?.enumerable || !('value' in descriptor)) {
+      throw new Error('invalid JSON value');
+    }
+    addSnapshotBytes(state, 1);
+    result.push(snapshotJsonValue(descriptor.value, depth + 1, state));
+  }
+  return Object.freeze(result);
+}
+
+function snapshotJsonRecord(
+  descriptors: PropertyDescriptorMap,
+  propertyKeys: readonly string[],
+  depth: number,
+  state: JsonSnapshotState,
+): Readonly<Record<string, unknown>> {
+  if (propertyKeys.length > MAX_JSON_NODES - state.nodes) throw new Error('invalid JSON value');
+  const result = Object.create(null) as Record<string, unknown>;
+  for (const key of [...propertyKeys].sort()) {
+    const descriptor = descriptors[key];
+    if (!descriptor?.enumerable || !('value' in descriptor)) {
+      throw new Error('invalid JSON value');
+    }
+    addSnapshotBytes(state, Buffer.byteLength(key, 'utf8') + 3);
+    result[key] = snapshotJsonValue(descriptor.value, depth + 1, state);
+  }
+  return Object.freeze(result);
+}
+
+function addSnapshotBytes(state: JsonSnapshotState, bytes: number): void {
+  if (!Number.isSafeInteger(bytes) || bytes < 0 || state.bytes > MAX_JSON_BYTES - bytes) {
+    throw new Error('invalid JSON value');
+  }
+  state.bytes += bytes;
+}
+
+function isTransportFailureCode(value: unknown): value is BalanceJsonRpcTransportFailureCode {
+  return (
+    value === 'TIMEOUT' ||
+    value === 'RATE_LIMITED' ||
+    value === 'UNAVAILABLE' ||
+    value === 'PERMANENT'
+  );
+}
+
+function snapshotRetryAfterSeconds(value: unknown): number | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new Error('invalid transport failure');
+  }
+  const prototype = Object.getPrototypeOf(value) as unknown;
+  if (prototype !== Object.prototype && prototype !== null) {
+    throw new Error('invalid transport failure');
+  }
+  const descriptors = Object.getOwnPropertyDescriptors(value) as unknown as PropertyDescriptorMap;
+  const keys = Reflect.ownKeys(descriptors);
+  if (
+    keys.some((key) => typeof key !== 'string') ||
+    keys.some((key) => key !== 'retryAfterSeconds') ||
+    keys.length > 1
+  ) {
+    throw new Error('invalid transport failure');
+  }
+  if (keys.length === 0) return undefined;
+  const descriptor = descriptors.retryAfterSeconds;
+  if (!descriptor?.enumerable || !('value' in descriptor)) {
+    throw new Error('invalid transport failure');
+  }
+  const retryAfterSeconds = descriptor.value as unknown;
+  if (retryAfterSeconds === undefined) return undefined;
+  if (!Number.isSafeInteger(retryAfterSeconds) || (retryAfterSeconds as number) < 0) {
+    throw new Error('invalid transport failure');
+  }
+  return retryAfterSeconds as number;
+}
+
+function reviewedTransportFailure(
+  value: unknown,
+): Readonly<{ code: BalanceJsonRpcTransportFailureCode; retryAfterSeconds?: number }> | null {
+  try {
+    if ((typeof value !== 'object' && typeof value !== 'function') || value === null) return null;
+    if (!VERIFIED_TRANSPORT_FAILURES.has(value) || !Object.isFrozen(value)) return null;
+    const descriptors = Object.getOwnPropertyDescriptors(value) as unknown as PropertyDescriptorMap;
+    const code = descriptors.code?.value as unknown;
+    const retryAfterSeconds = descriptors.retryAfterSeconds?.value as unknown;
+    if (
+      !isTransportFailureCode(code) ||
+      (retryAfterSeconds !== undefined &&
+        (!Number.isSafeInteger(retryAfterSeconds) || (retryAfterSeconds as number) < 0))
+    ) {
+      return null;
+    }
+    return retryAfterSeconds === undefined
+      ? Object.freeze({ code })
+      : Object.freeze({ code, retryAfterSeconds: retryAfterSeconds as number });
+  } catch {
+    return null;
+  }
+}
+
+function throwMappedTransportFailure(error: unknown): never {
+  const failure = reviewedTransportFailure(error);
+  switch (failure?.code) {
+    case 'TIMEOUT':
+      throw new BalanceSyncIndexerFailure('PROVIDER_TIMEOUT');
+    case 'RATE_LIMITED':
+      throw new BalanceSyncIndexerFailure(
+        'RATE_LIMITED',
+        failure.retryAfterSeconds === undefined
+          ? {}
+          : { retryAfterSeconds: failure.retryAfterSeconds },
+      );
+    case 'UNAVAILABLE':
+      throw new BalanceSyncIndexerFailure('PROVIDER_UNAVAILABLE');
+    case 'PERMANENT':
+      throw new BalanceSyncIndexerFailure('PERMANENT_PROVIDER_FAILURE');
+    default:
+      throw new BalanceSyncIndexerFailure('PROVIDER_UNAVAILABLE');
+  }
 }
