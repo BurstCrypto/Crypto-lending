@@ -30,6 +30,7 @@ import {
   ReleaseManifestError,
   canonicalJson,
   createReleaseManifest,
+  fingerprintReleaseArtifactFileForTest,
   inspectCleanGitSource,
   isVerifiedReleaseManifest,
   loadAndVerifyReleaseManifest,
@@ -676,6 +677,26 @@ test('unbranded file seam rejects a same-size rewrite between descriptor reads',
       return true;
     },
   );
+});
+
+test('caps a concurrently growing artifact read at its inspected size', () => {
+  const root = temporaryDirectory();
+  const artifactPath = write(root, 'artifact.bin', 'x');
+  let consumedChunks = 0;
+
+  assert.throws(
+    () =>
+      fingerprintReleaseArtifactFileForTest(artifactPath, () => {
+        consumedChunks += 1;
+        if (consumedChunks < 4) appendFileSync(artifactPath, 'x');
+      }),
+    (error) => {
+      assert.equal(error.name, 'ReleaseManifestInvalidError');
+      assert.equal(error.message, 'Release candidate manifest is invalid.');
+      return true;
+    },
+  );
+  assert.equal(consumedChunks, 1);
 });
 
 test('rejects malformed CLI arguments without inspecting Git or writing output', () => {

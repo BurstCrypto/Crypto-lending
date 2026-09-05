@@ -463,7 +463,38 @@ function accountCandidateFiles(totals, fileCount, totalBytes) {
   totals.totalBytes += totalBytes;
 }
 
-function hashStableFile(context, absolutePath, candidateTotals) {
+function consumeExactBoundedDescriptor(
+  descriptor,
+  expectedSize,
+  consumeChunk,
+  afterChunkForTest = undefined,
+) {
+  if (!Number.isSafeInteger(expectedSize) || expectedSize < 0 || expectedSize > MAX_FILE_BYTES) {
+    fail('A release component file exceeds the size limit.');
+  }
+  const buffer = Buffer.allocUnsafe(READ_BUFFER_BYTES);
+  let offset = 0;
+  while (offset < expectedSize) {
+    const count = readSync(
+      descriptor,
+      buffer,
+      0,
+      Math.min(buffer.length, expectedSize - offset),
+      offset,
+    );
+    if (count <= 0) fail('A release component file ended unexpectedly.');
+    consumeChunk(buffer.subarray(0, count), offset);
+    offset += count;
+    afterChunkForTest?.();
+  }
+  const overflow = Buffer.allocUnsafe(1);
+  if (readSync(descriptor, overflow, 0, 1, expectedSize) !== 0) {
+    fail('A release component file exceeded its inspected size.');
+  }
+  return offset;
+}
+
+function hashStableFile(context, absolutePath, candidateTotals, afterChunkForTest = undefined) {
   const beforePath = safeExistingPath(context, absolutePath, 'file');
   const before = beforePath.finalStat;
   if (before.size > BigInt(MAX_FILE_BYTES))
@@ -485,14 +516,12 @@ function hashStableFile(context, absolutePath, candidateTotals) {
     }
 
     const hash = createHash('sha256');
-    const buffer = Buffer.allocUnsafe(READ_BUFFER_BYTES);
-    let offset = 0;
-    while (true) {
-      const count = readSync(descriptor, buffer, 0, buffer.length, offset);
-      if (count === 0) break;
-      hash.update(buffer.subarray(0, count));
-      offset += count;
-    }
+    const offset = consumeExactBoundedDescriptor(
+      descriptor,
+      Number(opened.size),
+      (chunk) => hash.update(chunk),
+      afterChunkForTest,
+    );
 
     const after = fstatSync(descriptor, { bigint: true });
     const finalPath = safeExistingPath(context, absolutePath, 'file');
@@ -509,6 +538,21 @@ function hashStableFile(context, absolutePath, candidateTotals) {
     return Object.freeze({ size: offset, sha256: hash.digest('hex') });
   } finally {
     closeSync(descriptor);
+  }
+}
+
+/** Unbranded hostile-artifact test seam; it cannot confer release authority. */
+export function fingerprintReleaseArtifactFileForTest(artifactPath, afterChunkForTest) {
+  try {
+    const absolutePath = resolve(artifactPath);
+    return hashStableFile(
+      workspaceContext(dirname(absolutePath)),
+      absolutePath,
+      { fileCount: 0, totalBytes: 0 },
+      afterChunkForTest,
+    );
+  } catch {
+    throw new ReleaseManifestInvalidError();
   }
 }
 
@@ -1220,26 +1264,25 @@ function copyManifestFile(sourceRoot, stageRoot, component, file) {
       fail('A staged release file is not a single-link regular file.');
     }
     const hash = createHash('sha256');
-    const buffer = Buffer.allocUnsafe(READ_BUFFER_BYTES);
-    let offset = 0;
-    while (true) {
-      const count = readSync(sourceDescriptor, buffer, 0, buffer.length, offset);
-      if (count === 0) break;
-      hash.update(buffer.subarray(0, count));
-      let written = 0;
-      while (written < count) {
-        const writeCount = writeSync(
-          destinationDescriptor,
-          buffer,
-          written,
-          count - written,
-          offset + written,
-        );
-        if (writeCount <= 0) fail('A staged release file could not be written completely.');
-        written += writeCount;
-      }
-      offset += count;
-    }
+    const offset = consumeExactBoundedDescriptor(
+      sourceDescriptor,
+      file.size,
+      (chunk, chunkOffset) => {
+        hash.update(chunk);
+        let written = 0;
+        while (written < chunk.length) {
+          const writeCount = writeSync(
+            destinationDescriptor,
+            chunk,
+            written,
+            chunk.length - written,
+            chunkOffset + written,
+          );
+          if (writeCount <= 0) fail('A staged release file could not be written completely.');
+          written += writeCount;
+        }
+      },
+    );
     fchmodSync(destinationDescriptor, 0o400);
     fsyncSync(destinationDescriptor);
     const finalSource = fstatSync(sourceDescriptor, { bigint: true });
