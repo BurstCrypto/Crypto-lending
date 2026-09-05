@@ -10,6 +10,7 @@ import {
   evaluateProductionPreflight,
   formatProductionPreflightReport,
   inspectAuthenticationDeploymentTemplate,
+  inspectBalanceConsumerDeploymentArtifacts,
   inspectDatabaseMasterDeploymentTemplate,
   inspectProductionInfrastructureDeploymentArtifacts,
   inspectRedisOperatorDeploymentTemplates,
@@ -18,6 +19,7 @@ import {
   productionDirectoryConfigurationSha256,
   productionPreflightCliErrorCode,
   productionPreflightExitCode,
+  type BalanceConsumerArtifactSources,
   type ProductionPreflightBlockerId,
   type ProductionInfrastructureArtifactSources,
   type ProductionPreflightInput,
@@ -103,6 +105,96 @@ const PRODUCTION_INFRASTRUCTURE_ARTIFACTS = Object.freeze({
 } satisfies ProductionInfrastructureArtifactSources);
 const VERIFIED_PRODUCTION_INFRASTRUCTURE_DEPLOYMENT =
   inspectProductionInfrastructureDeploymentArtifacts(PRODUCTION_INFRASTRUCTURE_ARTIFACTS);
+const BALANCE_CONSUMER_ARTIFACTS = Object.freeze({
+  activationSource: readFileSync(
+    resolve(
+      __dirname,
+      '../apps/api/src/blockchain-sync/application/balance-sync-consumer.activation.ts',
+    ),
+    'utf8',
+  ),
+  cliSource: readFileSync(
+    resolve(__dirname, '../apps/api/src/blockchain-sync/application/balance-sync-consumer.cli.ts'),
+    'utf8',
+  ),
+  cliModeSource: readFileSync(
+    resolve(
+      __dirname,
+      '../apps/api/src/blockchain-sync/application/balance-sync-consumer.cli-mode.ts',
+    ),
+    'utf8',
+  ),
+  runtimeSource: readFileSync(
+    resolve(
+      __dirname,
+      '../apps/api/src/blockchain-sync/application/balance-sync-consumer.runtime.ts',
+    ),
+    'utf8',
+  ),
+  compositionSource: readFileSync(
+    resolve(
+      __dirname,
+      '../apps/api/src/blockchain-sync/application/balance-sync-consumer.composition.ts',
+    ),
+    'utf8',
+  ),
+  apiPackageSource: readFileSync(resolve(__dirname, '../apps/api/package.json'), 'utf8'),
+  rootPackageSource: readFileSync(resolve(__dirname, '../package.json'), 'utf8'),
+  applicationTemplateSource: APPLICATION_BASELINE,
+  applicationValidatorSource: readFileSync(
+    resolve(__dirname, '../infra/aws/validate-application-baseline.mjs'),
+    'utf8',
+  ),
+  workloadTemplateSource: APPLICATION_WORKLOAD_BOUNDARIES,
+  workloadValidatorSource: readFileSync(
+    resolve(__dirname, '../infra/aws/validate-application-workload-boundaries.mjs'),
+    'utf8',
+  ),
+  bootstrapPrincipalsSource: readFileSync(
+    resolve(__dirname, '../infra/postgres/bootstrap-principals.sql'),
+    'utf8',
+  ),
+  bootstrapPrincipalsValidatorSource: readFileSync(
+    resolve(__dirname, '../infra/postgres/validate-bootstrap-principals.mjs'),
+    'utf8',
+  ),
+  walletAddressMigrationSource: readFileSync(
+    resolve(
+      __dirname,
+      '../apps/api/src/infrastructure/database/migrations/0023-create-balance-consumer-wallet-address-boundary.migration.ts',
+    ),
+    'utf8',
+  ),
+  releaseManifestSource: readFileSync(
+    resolve(__dirname, './release-candidate-manifest.mjs'),
+    'utf8',
+  ),
+  productionContainerValidatorSource: readFileSync(
+    resolve(__dirname, '../infra/containers/validate-production-containers.mjs'),
+    'utf8',
+  ),
+} satisfies BalanceConsumerArtifactSources);
+const VERIFIED_BALANCE_CONSUMER_DEPLOYMENT = inspectBalanceConsumerDeploymentArtifacts(
+  BALANCE_CONSUMER_ARTIFACTS,
+);
+const EXPECTED_DORMANT_BALANCE_CONSUMER_DEPLOYMENT = Object.freeze({
+  inspected: true,
+  contractValid: true,
+  sourceActivation: 'DISABLED',
+  runtimeComposition: 'NOT_COMPOSED',
+  taskDeployment: 'NOT_PROVISIONED',
+  iamCapability: 'NOT_PROVISIONED',
+  databaseCapability: 'DORMANT_SOURCE_ONLY',
+  deploymentEvidence: 'MISSING',
+} as const);
+const EXPECTED_DORMANT_BALANCE_CONSUMER_BLOCKERS = Object.freeze([
+  'BALANCE_CONSUMER_SOURCE_ACTIVATION_DISABLED',
+  'BALANCE_CONSUMER_RUNTIME_NOT_COMPOSED',
+  'BALANCE_CONSUMER_TASK_NOT_PROVISIONED',
+  'BALANCE_CONSUMER_IAM_NOT_PROVISIONED',
+  'BALANCE_CONSUMER_DATABASE_CAPABILITY_NOT_ENABLED',
+  'BALANCE_CONSUMER_DEPLOYED_EVIDENCE_MISSING',
+] satisfies readonly ProductionPreflightBlockerId[]);
 const PREFLIGHT_SCRIPT_PATH = resolve(__dirname, 'production-go-live-preflight.ts');
 const RDS_MANAGED_DATABASE_TEMPLATE = APPLICATION_BASELINE;
 const VERIFIED_DATABASE_MASTER_DEPLOYMENT = inspectDatabaseMasterDeploymentTemplate(
@@ -240,6 +332,7 @@ function completeAuthEnvironmentNames(): Set<string> {
 function completeInput(directory: unknown): ProductionPreflightInput {
   return {
     productionInfrastructureDeployment: VERIFIED_PRODUCTION_INFRASTRUCTURE_DEPLOYMENT,
+    balanceConsumerDeployment: VERIFIED_BALANCE_CONSUMER_DEPLOYMENT,
     authentication: {
       inspected: true,
       syntaxValid: true,
@@ -368,6 +461,7 @@ test('current repository is a bootstrap blocker audit and exits nonzero for both
     syntaxValid: true,
     environmentContract: 'NON_PRODUCTION_ONLY',
   });
+  assert.deepEqual(input.balanceConsumerDeployment, EXPECTED_DORMANT_BALANCE_CONSUMER_DEPLOYMENT);
   assert.deepEqual(input.databaseMasterDeployment, { inspected: true, syntaxValid: true });
   assert.equal(input.rdsMasterLifecycleEvidenceAccepted, false);
   assert.equal(readOnly.selectedTargetReadiness, 'BLOCKED');
@@ -388,6 +482,15 @@ test('current repository is a bootstrap blocker audit and exits nonzero for both
       localValidation: 'PASS',
       launchReadiness: 'BLOCKED',
       blockerIds: ['PRODUCTION_INFRASTRUCTURE_DEPLOYMENT_PATH_NOT_ENABLED'],
+    },
+  );
+  assert.deepEqual(
+    readOnly.checks.find(({ id }) => id === 'BALANCE_CONSUMER'),
+    {
+      id: 'BALANCE_CONSUMER',
+      localValidation: 'PASS',
+      launchReadiness: 'BLOCKED',
+      blockerIds: EXPECTED_DORMANT_BALANCE_CONSUMER_BLOCKERS,
     },
   );
   assert.ok(
@@ -448,6 +551,10 @@ test('current repository is a bootstrap blocker audit and exits nonzero for both
   assert.deepEqual(
     cliReport.checks.find(({ id }) => id === 'PRODUCTION_INFRASTRUCTURE')?.blockerIds,
     ['PRODUCTION_INFRASTRUCTURE_DEPLOYMENT_PATH_NOT_ENABLED'],
+  );
+  assert.deepEqual(
+    cliReport.checks.find(({ id }) => id === 'BALANCE_CONSUMER')?.blockerIds,
+    EXPECTED_DORMANT_BALANCE_CONSUMER_BLOCKERS,
   );
 });
 
@@ -577,6 +684,68 @@ test('production infrastructure inspection fails closed for drift in every revie
     );
     assert.equal(Object.isFrozen(inspected), true, label);
   }
+
+  for (const key of Object.keys(
+    BALANCE_CONSUMER_ARTIFACTS,
+  ) as readonly (keyof BalanceConsumerArtifactSources)[]) {
+    const source = BALANCE_CONSUMER_ARTIFACTS[key];
+    const replacement = source.endsWith('x') ? 'y' : 'x';
+    const inspected = inspectBalanceConsumerDeploymentArtifacts({
+      ...BALANCE_CONSUMER_ARTIFACTS,
+      [key]: `${source.slice(0, -1)}${replacement}`,
+    });
+    assert.deepEqual(inspected, INVALID_BALANCE_CONSUMER_DEPLOYMENT, `${key} byte drift`);
+  }
+});
+
+test('balance-consumer inspection rejects retained-marker semantic overrides and decoys', () => {
+  const dynamicCredentialMutation = [
+    'ALTER ROLE crypto_balance_consumer_login_a',
+    'PASSWORD',
+    "pg_catalog.current_setting('runtime.credential');",
+  ].join(' ');
+  const candidates: readonly BalanceConsumerArtifactSources[] = [
+    {
+      ...BALANCE_CONSUMER_ARTIFACTS,
+      activationSource: `${BALANCE_CONSUMER_ARTIFACTS.activationSource}\nBALANCE_CONSUMER_SOURCE_ACTIVATION['enabled'] = true;\n`,
+    },
+    {
+      ...BALANCE_CONSUMER_ARTIFACTS,
+      cliModeSource: `/*\n${BALANCE_CONSUMER_ARTIFACTS.cliModeSource}\n*/\nexport const activeConsumer = true;\n`,
+    },
+    {
+      ...BALANCE_CONSUMER_ARTIFACTS,
+      cliSource: `${BALANCE_CONSUMER_ARTIFACTS.cliSource}\nvoid import('./balance-sync-consumer.runtime').then(({ runBalanceSyncConsumer }) => runBalanceSyncConsumer());\n`,
+    },
+    {
+      ...BALANCE_CONSUMER_ARTIFACTS,
+      workloadTemplateSource: `${BALANCE_CONSUMER_ARTIFACTS.workloadTemplateSource}\n  NestedBalanceConsumer:\n    Type: AWS::CloudFormation::Stack\n`,
+    },
+    {
+      ...BALANCE_CONSUMER_ARTIFACTS,
+      workloadTemplateSource: BALANCE_CONSUMER_ARTIFACTS.workloadTemplateSource.replace(
+        'Action: sqs:GetQueueAttributes',
+        'Action: sqs:Receive*',
+      ),
+    },
+    {
+      ...BALANCE_CONSUMER_ARTIFACTS,
+      bootstrapPrincipalsSource: `${BALANCE_CONSUMER_ARTIFACTS.bootstrapPrincipalsSource}\n${dynamicCredentialMutation}\n`,
+    },
+    {
+      ...BALANCE_CONSUMER_ARTIFACTS,
+      releaseManifestSource: `${BALANCE_CONSUMER_ARTIFACTS.releaseManifestSource.replace(
+        "'blockchain-sync/application/balance-sync-consumer.cli.js',",
+        '',
+      )}\n/* name: 'api-runtime'; 'blockchain-sync/application/balance-sync-consumer.cli.js', */\n`,
+    },
+  ];
+  for (const candidate of candidates) {
+    assert.deepEqual(
+      inspectBalanceConsumerDeploymentArtifacts(candidate),
+      INVALID_BALANCE_CONSUMER_DEPLOYMENT,
+    );
+  }
 });
 
 test('production infrastructure input shape and brand cannot be forged or bypassed', () => {
@@ -641,6 +810,255 @@ test('production infrastructure input shape and brand cannot be forged or bypass
       formatProductionPreflightReport(report),
       /PRODUCTION_INFRASTRUCTURE_INSPECTION_FAILED/u,
     );
+  }
+});
+
+function mutateBalanceConsumerArtifact(
+  key: keyof BalanceConsumerArtifactSources,
+  approved: string,
+  rejected: string,
+): BalanceConsumerArtifactSources {
+  const source = BALANCE_CONSUMER_ARTIFACTS[key];
+  assert.ok(source.includes(approved), `fixture is missing ${key} mutation target`);
+  return {
+    ...BALANCE_CONSUMER_ARTIFACTS,
+    [key]: source.replace(approved, rejected),
+  };
+}
+
+const INVALID_BALANCE_CONSUMER_DEPLOYMENT = Object.freeze({
+  inspected: true,
+  contractValid: false,
+  sourceActivation: 'INVALID',
+  runtimeComposition: 'INVALID',
+  taskDeployment: 'INVALID',
+  iamCapability: 'INVALID',
+  databaseCapability: 'INVALID',
+  deploymentEvidence: 'INVALID',
+} as const);
+
+test('balance-consumer inspection brands and freezes only the exact dormant local contract', () => {
+  const inspected = inspectBalanceConsumerDeploymentArtifacts(BALANCE_CONSUMER_ARTIFACTS);
+  assert.deepEqual(inspected, EXPECTED_DORMANT_BALANCE_CONSUMER_DEPLOYMENT);
+  assert.equal(Object.isFrozen(inspected), true);
+
+  const readOnly = evaluateProductionPreflight(completeInput(platformDirectory('LIVE_READ_ONLY')));
+  const mainnetWrite = evaluateProductionPreflight(
+    completeInput(platformDirectory('TRANSACTION_ENABLED')),
+    'mainnet-write',
+  );
+  for (const report of [readOnly, mainnetWrite]) {
+    assert.deepEqual(
+      report.checks.find(({ id }) => id === 'BALANCE_CONSUMER'),
+      {
+        id: 'BALANCE_CONSUMER',
+        localValidation: 'PASS',
+        launchReadiness: 'BLOCKED',
+        blockerIds: EXPECTED_DORMANT_BALANCE_CONSUMER_BLOCKERS,
+      },
+    );
+    assert.equal(report.selectedTargetReadiness, 'BLOCKED');
+    assert.match(
+      formatProductionPreflightReport(report),
+      /BALANCE_CONSUMER_DEPLOYED_EVIDENCE_MISSING/u,
+    );
+  }
+});
+
+test('balance-consumer launch blockers participate in both readiness calculations', () => {
+  const source = readFileSync(PREFLIGHT_SCRIPT_PATH, 'utf8');
+  const readOnlyStart = source.indexOf('const publicReadOnly = readinessFor([');
+  const mainnetStart = source.indexOf('const mainnetWrites = readinessFor([', readOnlyStart);
+  const readinessEnd = source.indexOf('return Object.freeze({', mainnetStart);
+  assert.ok(readOnlyStart >= 0 && mainnetStart > readOnlyStart && readinessEnd > mainnetStart);
+  assert.equal(source.slice(readOnlyStart, mainnetStart).split("'BALANCE_CONSUMER'").length - 1, 1);
+  assert.equal(source.slice(mainnetStart, readinessEnd).split("'BALANCE_CONSUMER'").length - 1, 1);
+});
+
+test('balance-consumer inspection fails closed for drift in every reviewed artifact', () => {
+  const mutations: readonly (readonly [
+    string,
+    keyof BalanceConsumerArtifactSources,
+    string,
+    string,
+  ])[] = [
+    ['activation', 'activationSource', 'enabled: false as boolean,', 'enabled: true as boolean,'],
+    [
+      'CLI entrypoint',
+      'cliSource',
+      "from './balance-sync-consumer.cli-mode'",
+      "from './balance-sync-consumer.runtime'",
+    ],
+    [
+      'CLI source gate',
+      'cliModeSource',
+      "blockers.push('SOURCE_ACTIVATION_DISABLED');",
+      "blockers.push('SOURCE_ACTIVATION_APPROVED');",
+    ],
+    [
+      'runtime refusal',
+      'runtimeSource',
+      'BALANCE_CONSUMER_RUNTIME_NOT_COMPOSED',
+      'BALANCE_CONSUMER_RUNTIME_COMPOSED',
+    ],
+    [
+      'inert composition',
+      'compositionSource',
+      'const jobDisposition = new FailClosedBalanceSyncJobPort();',
+      'const jobDisposition = dependencies.jobDisposition;',
+    ],
+    [
+      'API entrypoint',
+      'apiPackageSource',
+      'node dist/blockchain-sync/application/balance-sync-consumer.cli.js',
+      'node dist/blockchain-sync/application/disabled-balance-consumer.cli.js',
+    ],
+    [
+      'bootstrap validator command',
+      'rootPackageSource',
+      'node infra/aws/validate-database-migration-task.mjs && node infra/postgres/validate-bootstrap-principals.mjs',
+      'node infra/aws/validate-database-migration-task.mjs',
+    ],
+    [
+      'application task graph',
+      'applicationTemplateSource',
+      ' WorkerService:',
+      ' WorkerServiceOld:',
+    ],
+    [
+      'application task inventory validator',
+      'applicationValidatorSource',
+      "['AWS::ECS::TaskDefinition', 3],",
+      "['AWS::ECS::TaskDefinition', 4],",
+    ],
+    [
+      'workload queue capability',
+      'workloadTemplateSource',
+      'Action: sqs:GetQueueAttributes',
+      'Action: sqs:ReceiveMessage',
+    ],
+    [
+      'workload resource allowlist validator',
+      'workloadValidatorSource',
+      "requireExactIds(resources, resourceTypes, 'Resource allowlist', errors);",
+      "requireExactIds(resources, resourceTypes, 'Resource inventory', errors);",
+    ],
+    [
+      'bootstrap principal input',
+      'bootstrapPrincipalsSource',
+      '\\if :{?balance_consumer_runtime_role}',
+      '\\if :{?balance_consumer_runtime_role_disabled}',
+    ],
+    [
+      'bootstrap principal validator',
+      'bootstrapPrincipalsValidatorSource',
+      'Bootstrap must keep balance-consumer database, schema, and object ACLs denied',
+      'Bootstrap may grant balance-consumer database, schema, and object ACLs',
+    ],
+    [
+      'wallet resolver ACL',
+      'walletAddressMigrationSource',
+      'GRANT EXECUTE ON FUNCTION ${RESOLVE_ACTIVE_ADDRESS} TO ${worker};',
+      'GRANT EXECUTE ON FUNCTION ${RESOLVE_ACTIVE_ADDRESS} TO ${balance_consumer_runtime_role};',
+    ],
+    [
+      'release entrypoint',
+      'releaseManifestSource',
+      "'blockchain-sync/application/balance-sync-consumer.cli.js',",
+      "'blockchain-sync/application/disabled-balance-consumer.cli.js',",
+    ],
+    [
+      'production container CLI boundary validator',
+      'productionContainerValidatorSource',
+      '...validateBalanceConsumerExecutable(sources),',
+      '...validateBalanceConsumerExecutable({ ...sources, balanceConsumerCli: sources.balanceConsumerRuntime }),',
+    ],
+  ];
+
+  for (const [label, key, approved, rejected] of mutations) {
+    const inspected = inspectBalanceConsumerDeploymentArtifacts(
+      mutateBalanceConsumerArtifact(key, approved, rejected),
+    );
+    assert.deepEqual(inspected, INVALID_BALANCE_CONSUMER_DEPLOYMENT, label);
+    assert.equal(Object.isFrozen(inspected), true, label);
+  }
+});
+
+test('balance-consumer artifact shape, bounds, and private brand fail closed', () => {
+  const missing = { ...BALANCE_CONSUMER_ARTIFACTS } as Record<string, unknown>;
+  delete missing.activationSource;
+  const accessor = { ...BALANCE_CONSUMER_ARTIFACTS } as Record<string, unknown>;
+  Object.defineProperty(accessor, 'activationSource', {
+    enumerable: true,
+    get() {
+      throw new Error('must not read accessor');
+    },
+  });
+  const withSymbol = { ...BALANCE_CONSUMER_ARTIFACTS } as Record<PropertyKey, unknown>;
+  withSymbol[Symbol('unexpected')] = 'value';
+  const oversized = {
+    ...BALANCE_CONSUMER_ARTIFACTS,
+    activationSource: 'x'.repeat(256 * 1024 + 1),
+  };
+  const oversizedTotal = Object.fromEntries(
+    Object.keys(BALANCE_CONSUMER_ARTIFACTS).map((key) => [key, 'x'.repeat(80 * 1024)]),
+  );
+  const malformedCandidates: readonly unknown[] = [
+    null,
+    {},
+    missing,
+    { ...BALANCE_CONSUMER_ARTIFACTS, unexpected: 'value' },
+    { ...BALANCE_CONSUMER_ARTIFACTS, runtimeSource: 1 },
+    accessor,
+    withSymbol,
+    oversized,
+    oversizedTotal,
+    new Proxy(BALANCE_CONSUMER_ARTIFACTS, {
+      ownKeys() {
+        throw new Error('untrusted proxy');
+      },
+    }),
+  ];
+  for (const candidate of malformedCandidates) {
+    assert.doesNotThrow(() => inspectBalanceConsumerDeploymentArtifacts(candidate));
+    assert.deepEqual(inspectBalanceConsumerDeploymentArtifacts(candidate), {
+      ...INVALID_BALANCE_CONSUMER_DEPLOYMENT,
+      inspected: false,
+    });
+  }
+
+  const complete = completeInput(platformDirectory('LIVE_READ_ONLY'));
+  const { balanceConsumerDeployment: intentionallyOmitted, ...legacyInput } = complete;
+  assert.notEqual(intentionallyOmitted, undefined);
+  const hostileInput = { ...complete } as ProductionPreflightInput;
+  Object.defineProperty(hostileInput, 'balanceConsumerDeployment', {
+    enumerable: true,
+    get() {
+      throw new Error('untrusted input getter');
+    },
+  });
+  const forgedInputs: readonly ProductionPreflightInput[] = [
+    legacyInput,
+    hostileInput,
+    {
+      ...complete,
+      balanceConsumerDeployment: Object.freeze({
+        ...EXPECTED_DORMANT_BALANCE_CONSUMER_DEPLOYMENT,
+      }),
+    },
+  ];
+  for (const input of forgedInputs) {
+    const report = evaluateProductionPreflight(input);
+    assert.deepEqual(
+      report.checks.find(({ id }) => id === 'BALANCE_CONSUMER'),
+      {
+        id: 'BALANCE_CONSUMER',
+        localValidation: 'FAIL',
+        launchReadiness: 'BLOCKED',
+        blockerIds: ['BALANCE_CONSUMER_INSPECTION_FAILED'],
+      },
+    );
+    assert.equal(report.readiness.publicReadOnly, 'BLOCKED');
   }
 });
 
@@ -731,6 +1149,7 @@ test('all synthetic technical inputs remain blocked without seven signed launch 
       .filter(
         ({ id }) =>
           id !== 'PRODUCTION_INFRASTRUCTURE' &&
+          id !== 'BALANCE_CONSUMER' &&
           id !== 'AUTHENTICATION' &&
           id !== 'PUBLIC_LAUNCH_AUTHORITIES' &&
           id !== 'MAINNET_WRITES',

@@ -175,6 +175,17 @@ test('creates a deterministic canonical manifest for the fixed release surface',
   assert.deepEqual(verifyReleaseManifest(root, first), first);
 });
 
+test('requires the compiled dormant balance-consumer CLI in the API runtime', () => {
+  const requiredPath = 'blockchain-sync/application/balance-sync-consumer.cli.js';
+  const apiRuntime = RELEASE_COMPONENTS.find(({ name }) => name === 'api-runtime');
+  assert.ok(apiRuntime);
+  assert.ok(apiRuntime.requiredFiles.includes(requiredPath));
+
+  const root = createWorkspace();
+  rmSync(resolve(root, 'apps/api/dist', ...requiredPath.split('/')));
+  assert.throws(() => createReleaseManifest(root, SOURCE, BUILDER), /entry point/u);
+});
+
 test('binds both exact production image SBOM, native, and archive records as staged components', () => {
   const root = createWorkspace();
   const apiBytes = '{"name":"api-exact-sbom-bytes"}\n';
@@ -535,8 +546,13 @@ test('stages a self-contained verified candidate without rereading mutable build
   const stagedManifest = parseReleaseManifest(readFileSync(stageManifestPath, 'utf8'));
   assert.doesNotThrow(() => verifyReleaseManifest(stageRoot, stagedManifest));
   const stagedMain = lstatSync(resolve(stageRoot, 'apps/api/dist/main.js'));
+  const stagedBalanceConsumer = lstatSync(
+    resolve(stageRoot, 'apps/api/dist/blockchain-sync/application/balance-sync-consumer.cli.js'),
+  );
   assert.equal(stagedMain.nlink, 1);
+  assert.equal(stagedBalanceConsumer.nlink, 1);
   assert.equal(stagedMain.mode & 0o222, 0);
+  assert.equal(stagedBalanceConsumer.mode & 0o222, 0);
   if (process.platform !== 'win32') {
     assert.equal(stagedMain.mode & 0o777, 0o400);
     assert.equal(lstatSync(stageRoot).mode & 0o777, 0o500);

@@ -39,6 +39,7 @@ export type ProductionPreflightTarget = 'read-only' | 'mainnet-write';
 export type ProductionPreflightReadiness = 'BLOCKED' | 'LOCAL_GATES_CLEAR';
 export type ProductionPreflightCheckId =
   | 'PRODUCTION_INFRASTRUCTURE'
+  | 'BALANCE_CONSUMER'
   | 'AUTHENTICATION'
   | 'EXTERNAL_EGRESS'
   | 'RPC_INDEXING'
@@ -51,6 +52,13 @@ export type ProductionPreflightCheckId =
 export type ProductionPreflightBlockerId =
   | 'PRODUCTION_INFRASTRUCTURE_INSPECTION_FAILED'
   | 'PRODUCTION_INFRASTRUCTURE_DEPLOYMENT_PATH_NOT_ENABLED'
+  | 'BALANCE_CONSUMER_INSPECTION_FAILED'
+  | 'BALANCE_CONSUMER_SOURCE_ACTIVATION_DISABLED'
+  | 'BALANCE_CONSUMER_RUNTIME_NOT_COMPOSED'
+  | 'BALANCE_CONSUMER_TASK_NOT_PROVISIONED'
+  | 'BALANCE_CONSUMER_IAM_NOT_PROVISIONED'
+  | 'BALANCE_CONSUMER_DATABASE_CAPABILITY_NOT_ENABLED'
+  | 'BALANCE_CONSUMER_DEPLOYED_EVIDENCE_MISSING'
   | 'AUTH_DEPLOYED_EVIDENCE_MISSING'
   | 'AUTH_PRODUCTION_CONFIGURATION_NOT_WIRED'
   | 'AUTH_PRODUCTION_SECRET_REFERENCES_NOT_WIRED'
@@ -145,6 +153,38 @@ export interface ProductionInfrastructureDeploymentInput {
 const VERIFIED_PRODUCTION_INFRASTRUCTURE_DEPLOYMENTS =
   new WeakSet<ProductionInfrastructureDeploymentInput>();
 
+export interface BalanceConsumerArtifactSources {
+  readonly activationSource: string;
+  readonly cliSource: string;
+  readonly cliModeSource: string;
+  readonly runtimeSource: string;
+  readonly compositionSource: string;
+  readonly apiPackageSource: string;
+  readonly rootPackageSource: string;
+  readonly applicationTemplateSource: string;
+  readonly applicationValidatorSource: string;
+  readonly workloadTemplateSource: string;
+  readonly workloadValidatorSource: string;
+  readonly bootstrapPrincipalsSource: string;
+  readonly bootstrapPrincipalsValidatorSource: string;
+  readonly walletAddressMigrationSource: string;
+  readonly releaseManifestSource: string;
+  readonly productionContainerValidatorSource: string;
+}
+
+export interface BalanceConsumerDeploymentInput {
+  readonly inspected: boolean;
+  readonly contractValid: boolean;
+  readonly sourceActivation: 'INVALID' | 'DISABLED';
+  readonly runtimeComposition: 'INVALID' | 'NOT_COMPOSED';
+  readonly taskDeployment: 'INVALID' | 'NOT_PROVISIONED';
+  readonly iamCapability: 'INVALID' | 'NOT_PROVISIONED';
+  readonly databaseCapability: 'INVALID' | 'DORMANT_SOURCE_ONLY';
+  readonly deploymentEvidence: 'INVALID' | 'MISSING';
+}
+
+const VERIFIED_BALANCE_CONSUMER_DEPLOYMENTS = new WeakSet<BalanceConsumerDeploymentInput>();
+
 interface EgressInput {
   readonly localValidationPassed: boolean;
   readonly status: unknown;
@@ -176,6 +216,8 @@ export interface ProductionPreflightInput {
   readonly authentication: AuthenticationDeploymentInput;
   /** Optional for legacy callers; absence or an unbranded value fails closed. */
   readonly productionInfrastructureDeployment?: ProductionInfrastructureDeploymentInput;
+  /** Optional for legacy callers; only the private local-artifact inspector can brand it. */
+  readonly balanceConsumerDeployment?: BalanceConsumerDeploymentInput;
   /** Optional for legacy programmatic callers; absence fails closed during evaluation. */
   readonly databaseMasterDeployment?: DatabaseMasterDeploymentInput;
   /** Optional for legacy programmatic callers; only a verified evidence bundle sets it in CLI use. */
@@ -434,6 +476,46 @@ const PRODUCTION_INFRASTRUCTURE_ARTIFACT_KEYS = Object.freeze([
 ] as const satisfies readonly (keyof ProductionInfrastructureArtifactSources)[]);
 const MAX_PRODUCTION_INFRASTRUCTURE_ARTIFACT_BYTES = 512 * 1024;
 const MAX_PRODUCTION_INFRASTRUCTURE_TOTAL_BYTES = 2 * 1024 * 1024;
+const BALANCE_CONSUMER_ARTIFACT_KEYS = Object.freeze([
+  'activationSource',
+  'cliSource',
+  'cliModeSource',
+  'runtimeSource',
+  'compositionSource',
+  'apiPackageSource',
+  'rootPackageSource',
+  'applicationTemplateSource',
+  'applicationValidatorSource',
+  'workloadTemplateSource',
+  'workloadValidatorSource',
+  'bootstrapPrincipalsSource',
+  'bootstrapPrincipalsValidatorSource',
+  'walletAddressMigrationSource',
+  'releaseManifestSource',
+  'productionContainerValidatorSource',
+] as const satisfies readonly (keyof BalanceConsumerArtifactSources)[]);
+const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
+  activationSource: '75ae4b590e2ad9d70542ea9c38809f4ed24d61ec354838e7318afdccc07dd091',
+  cliSource: '7fec5d0cc345b82ed4fb5f26e1fa7099f0cb38c246224ada7a9fe51a65d4c455',
+  cliModeSource: '77668ae46779954fcd3dbaae0c52048c323fcb4c0533381af290dcd99b29ea7a',
+  runtimeSource: '311d5ed733abc1bc6f3428bcba2acd2f0858dab31f8eaf3259fc99560e6e1d7d',
+  compositionSource: '818b08e7161c7a9cc2b57185d91a1799ded81f58b79300a7566a67291c4347eb',
+  apiPackageSource: '28b9f69d1cf3cf1d16ee76ba6a4afd4881df9afb205c010e6512b0c3633c0c9c',
+  rootPackageSource: 'ef84bc2e7171073fa581d26c2a9d88c934cdf2af9d7897c10cadf1de159fbf7c',
+  applicationTemplateSource: '9ffa126c63a1758db315eae58462f3d1a47cf3542136db39a65749c47dd08fb6',
+  applicationValidatorSource: 'd9b21305fa911cd7290c70bda1e512b54442a8a5705663b74d0d572f03654f4d',
+  workloadTemplateSource: '4c74c98e73635df30570dfe1e726b41cb6f62832f0bfc2e43dcd087d384b78de',
+  workloadValidatorSource: '694f28c926fb08f6648d2d399fd31161681247eadacf43042077c4759dcbafba',
+  bootstrapPrincipalsSource: 'da3793b00efbfe12baa64446912376a85d2c6d7095f84dfb14c6e173dbefb9ac',
+  bootstrapPrincipalsValidatorSource:
+    '6731fee433acae8f7c240995c6ffe64247c7f4ef730be2b7367c3fa10ad40681',
+  walletAddressMigrationSource: '74e32999fe3ac3b5791365c5a55129296cf68cb5b3d5697f2ffe462012029a84',
+  releaseManifestSource: '9797f1c2ea55be0e60df2a1c7e19757dba4549b2a9ecb37c03c848700d9be2c3',
+  productionContainerValidatorSource:
+    '730b7c27949b4236d2b2c7343d60a30e04a204f753a920af085bd8009457eeb2',
+} satisfies Readonly<Record<keyof BalanceConsumerArtifactSources, string>>);
+const MAX_BALANCE_CONSUMER_ARTIFACT_BYTES = 256 * 1024;
+const MAX_BALANCE_CONSUMER_TOTAL_BYTES = 1024 * 1024;
 const NON_PRODUCTION_ENVIRONMENT_ALLOWED_PATTERN = "'^(dev|test|qa|sandbox|staging)(-[a-z0-9]+)*$'";
 const PRODUCTION_AWARE_ENVIRONMENT_PATTERN_SOURCE =
   '/^(?:dev|test|qa|sandbox|staging|production)(?:-[a-z0-9]+)*$/u';
@@ -920,6 +1002,37 @@ export function evaluateProductionPreflight(
     productionInfrastructureBlockers.push('PRODUCTION_INFRASTRUCTURE_DEPLOYMENT_PATH_NOT_ENABLED');
   }
 
+  const balanceConsumerBlockers: ProductionPreflightBlockerId[] = [];
+  let balanceConsumerInspected = false;
+  let balanceConsumerDeployment: BalanceConsumerDeploymentInput | undefined;
+  try {
+    balanceConsumerDeployment = input.balanceConsumerDeployment;
+    balanceConsumerInspected =
+      balanceConsumerDeployment?.inspected === true &&
+      balanceConsumerDeployment.contractValid === true &&
+      balanceConsumerDeployment.sourceActivation === 'DISABLED' &&
+      balanceConsumerDeployment.runtimeComposition === 'NOT_COMPOSED' &&
+      balanceConsumerDeployment.taskDeployment === 'NOT_PROVISIONED' &&
+      balanceConsumerDeployment.iamCapability === 'NOT_PROVISIONED' &&
+      balanceConsumerDeployment.databaseCapability === 'DORMANT_SOURCE_ONLY' &&
+      balanceConsumerDeployment.deploymentEvidence === 'MISSING' &&
+      VERIFIED_BALANCE_CONSUMER_DEPLOYMENTS.has(balanceConsumerDeployment);
+  } catch {
+    // Initialized fail-closed values are preserved for malformed or hostile inputs.
+  }
+  if (!balanceConsumerInspected || balanceConsumerDeployment === undefined) {
+    balanceConsumerBlockers.push('BALANCE_CONSUMER_INSPECTION_FAILED');
+  } else {
+    balanceConsumerBlockers.push(
+      'BALANCE_CONSUMER_SOURCE_ACTIVATION_DISABLED',
+      'BALANCE_CONSUMER_RUNTIME_NOT_COMPOSED',
+      'BALANCE_CONSUMER_TASK_NOT_PROVISIONED',
+      'BALANCE_CONSUMER_IAM_NOT_PROVISIONED',
+      'BALANCE_CONSUMER_DATABASE_CAPABILITY_NOT_ENABLED',
+      'BALANCE_CONSUMER_DEPLOYED_EVIDENCE_MISSING',
+    );
+  }
+
   const authenticationBlockers: ProductionPreflightBlockerId[] = [];
   const databaseMasterDeployment = input.databaseMasterDeployment;
   const databaseMasterDeploymentValid =
@@ -1128,6 +1241,7 @@ export function evaluateProductionPreflight(
       productionInfrastructureInspected ? 'PASS' : 'FAIL',
       productionInfrastructureBlockers,
     ),
+    check('BALANCE_CONSUMER', balanceConsumerInspected ? 'PASS' : 'FAIL', balanceConsumerBlockers),
     check(
       'AUTHENTICATION',
       input.authentication.inspected &&
@@ -1165,6 +1279,7 @@ export function evaluateProductionPreflight(
       : 'BLOCKED';
   const publicReadOnly = readinessFor([
     'PRODUCTION_INFRASTRUCTURE',
+    'BALANCE_CONSUMER',
     'AUTHENTICATION',
     'EXTERNAL_EGRESS',
     'RPC_INDEXING',
@@ -1175,6 +1290,7 @@ export function evaluateProductionPreflight(
   ]);
   const mainnetWrites = readinessFor([
     'PRODUCTION_INFRASTRUCTURE',
+    'BALANCE_CONSUMER',
     'AUTHENTICATION',
     'EXTERNAL_EGRESS',
     'RPC_INDEXING',
@@ -1502,6 +1618,360 @@ export function inspectProductionInfrastructureDeploymentArtifacts(
       environmentContract: 'NON_PRODUCTION_ONLY',
     });
     VERIFIED_PRODUCTION_INFRASTRUCTURE_DEPLOYMENTS.add(result);
+    return result;
+  } catch {
+    return invalid(false);
+  }
+}
+
+function snapshotBalanceConsumerArtifactSources(
+  value: unknown,
+): BalanceConsumerArtifactSources | null {
+  if (!isRecord(value) || Object.getOwnPropertySymbols(value).length !== 0) return null;
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) return null;
+  const ownKeys = Reflect.ownKeys(value);
+  if (
+    ownKeys.length !== BALANCE_CONSUMER_ARTIFACT_KEYS.length ||
+    !BALANCE_CONSUMER_ARTIFACT_KEYS.every((key) => ownKeys.includes(key))
+  ) {
+    return null;
+  }
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  let totalBytes = 0;
+  const snapshot: Partial<Record<keyof BalanceConsumerArtifactSources, string>> = {};
+  for (const key of BALANCE_CONSUMER_ARTIFACT_KEYS) {
+    const descriptor = descriptors[key];
+    if (
+      descriptor === undefined ||
+      !('value' in descriptor) ||
+      typeof descriptor.value !== 'string' ||
+      descriptor.value.length === 0
+    ) {
+      return null;
+    }
+    const bytes = Buffer.byteLength(descriptor.value, 'utf8');
+    if (bytes > MAX_BALANCE_CONSUMER_ARTIFACT_BYTES) return null;
+    totalBytes += bytes;
+    if (totalBytes > MAX_BALANCE_CONSUMER_TOTAL_BYTES) return null;
+    snapshot[key] = descriptor.value;
+  }
+  return snapshot as BalanceConsumerArtifactSources;
+}
+
+function parsedPackageScripts(source: string): Record<string, unknown> | null {
+  try {
+    const manifest = JSON.parse(source) as unknown;
+    if (!isRecord(manifest) || !isRecord(manifest.scripts)) return null;
+    return manifest.scripts;
+  } catch {
+    return null;
+  }
+}
+
+function hasExactReviewedBalanceConsumerArtifactBytes(
+  sources: BalanceConsumerArtifactSources,
+): boolean {
+  return BALANCE_CONSUMER_ARTIFACT_KEYS.every(
+    (key) =>
+      createHash('sha256').update(sources[key], 'utf8').digest('hex') ===
+      REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256[key],
+  );
+}
+
+function hasDormantBalanceConsumerSourceContract(sources: BalanceConsumerArtifactSources): boolean {
+  const activationLines = trimmedExecutableLines(sources.activationSource);
+  const activationAssignments = activationLines.filter((line) => /^enabled\s*:/u.test(line));
+  if (
+    activationAssignments.length !== 1 ||
+    activationAssignments[0] !== 'enabled: false as boolean,'
+  ) {
+    return false;
+  }
+
+  if (
+    exactExecutableLineCount(
+      sources.cliSource,
+      "import { runBalanceSyncConsumerCli } from './balance-sync-consumer.cli-mode';",
+    ) !== 1 ||
+    exactExecutableLineCount(
+      sources.cliSource,
+      'void runBalanceSyncConsumerCli(process.argv.slice(2), process.env)',
+    ) !== 1 ||
+    /balance-sync-consumer\.runtime|\bNestFactory\b|createApplicationContext\s*\(|\.listen\s*\(/u.test(
+      sources.cliSource,
+    )
+  ) {
+    return false;
+  }
+
+  const cliLines = trimmedExecutableLines(sources.cliModeSource);
+  const cliGate = cliLines.indexOf('if (!BALANCE_CONSUMER_SOURCE_ACTIVATION.enabled) {');
+  const cliBlocker = cliLines.indexOf("blockers.push('SOURCE_ACTIVATION_DISABLED');");
+  const cliRefusal = cliLines.indexOf('if (blockers.length > 0 || !balance || !infrastructure) {');
+  const cliLaunchGuard = cliLines.indexOf(
+    'if (!evaluation.launchContext) return evaluation.publicResult;',
+  );
+  const cliRuntimeLoad = cliLines.indexOf('const runtime = await runtimeLoader();');
+  if (
+    cliGate < 0 ||
+    cliBlocker !== cliGate + 1 ||
+    cliRefusal <= cliBlocker ||
+    cliLaunchGuard <= cliRefusal ||
+    cliRuntimeLoad <= cliLaunchGuard ||
+    exactExecutableLineCount(
+      sources.cliModeSource,
+      "return import('./balance-sync-consumer.runtime');",
+    ) !== 1
+  ) {
+    return false;
+  }
+
+  if (
+    exactExecutableLineCount(
+      sources.runtimeSource,
+      'export class DormantBalanceSyncConsumerRuntimeModule {}',
+    ) !== 1 ||
+    exactExecutableLineCount(
+      sources.runtimeSource,
+      "() => Promise.reject(new Error('BALANCE_CONSUMER_RUNTIME_NOT_COMPOSED'));",
+    ) !== 1 ||
+    /\bNestFactory\b|createApplicationContext\s*\(|\.listen\s*\(/u.test(sources.runtimeSource)
+  ) {
+    return false;
+  }
+
+  return (
+    exactExecutableLineCount(
+      sources.compositionSource,
+      'const jobDisposition = new FailClosedBalanceSyncJobPort();',
+    ) === 1 &&
+    exactExecutableLineCount(sources.compositionSource, "'balance',") === 1 &&
+    !/\bNestFactory\b|@Module\s*\(|createApplicationContext\s*\(|\.listen\s*\(/u.test(
+      sources.compositionSource,
+    )
+  );
+}
+
+function hasDormantBalanceConsumerPackagingContract(
+  sources: BalanceConsumerArtifactSources,
+): boolean {
+  const apiScripts = parsedPackageScripts(sources.apiPackageSource);
+  const rootScripts = parsedPackageScripts(sources.rootPackageSource);
+  if (
+    apiScripts?.['worker:balance:prod'] !==
+      'node dist/blockchain-sync/application/balance-sync-consumer.cli.js' ||
+    rootScripts?.['infra:validate:migrations'] !==
+      'node infra/aws/validate-database-migration-task.mjs && node infra/postgres/validate-bootstrap-principals.mjs' ||
+    rootScripts?.['infra:test:migrations'] !==
+      'node --test infra/aws/validate-database-migration-task.test.mjs infra/postgres/validate-bootstrap-principals.test.mjs'
+  ) {
+    return false;
+  }
+
+  const apiRuntimeStart = sources.releaseManifestSource.indexOf("name: 'api-runtime'");
+  const nextComponent = sources.releaseManifestSource.indexOf(
+    "name: 'web-standalone-runtime'",
+    apiRuntimeStart + 1,
+  );
+  if (apiRuntimeStart < 0 || nextComponent <= apiRuntimeStart) return false;
+  const apiRuntime = sources.releaseManifestSource.slice(apiRuntimeStart, nextComponent);
+  const containerValidator = sources.productionContainerValidatorSource;
+  return (
+    exactExecutableLineCount(
+      apiRuntime,
+      "'blockchain-sync/application/balance-sync-consumer.cli.js',",
+    ) === 1 &&
+    containerValidator.includes(
+      "path: 'apps/api/src/blockchain-sync/application/balance-sync-consumer.cli.ts',",
+    ) &&
+    containerValidator.includes(
+      "path: 'apps/api/src/blockchain-sync/application/balance-sync-consumer.cli-mode.ts',",
+    ) &&
+    containerValidator.includes('...validateBalanceConsumerExecutable(sources),') &&
+    containerValidator.includes(
+      'sources.balanceConsumerCli.includes("from \'./balance-sync-consumer.cli-mode\'")',
+    )
+  );
+}
+
+function hasNoBalanceConsumerTaskDeployment(sources: BalanceConsumerArtifactSources): boolean {
+  const requiredLogicalIds = [
+    'ApiTaskDefinition',
+    'WebTaskDefinition',
+    'WorkerTaskDefinition',
+    'ApiService',
+    'WebService',
+    'WorkerService',
+  ] as const;
+  if (
+    requiredLogicalIds.some(
+      (logicalId) => yamlBlock(sources.applicationTemplateSource, logicalId, 1) === null,
+    ) ||
+    exactExecutableLineCount(
+      sources.applicationTemplateSource,
+      'Type: AWS::ECS::TaskDefinition',
+    ) !== 3 ||
+    exactExecutableLineCount(sources.applicationTemplateSource, 'Type: AWS::ECS::Service') !== 3 ||
+    /balance-sync-consumer\.cli\.js|APPLICATION_WORKLOAD[^\n]*balance-consumer/iu.test(
+      sources.applicationTemplateSource,
+    )
+  ) {
+    return false;
+  }
+
+  return (
+    exactExecutableLineCount(
+      sources.applicationValidatorSource,
+      "['AWS::ECS::TaskDefinition', 3],",
+    ) === 1 &&
+    exactExecutableLineCount(sources.applicationValidatorSource, "['AWS::ECS::Service', 3],") ===
+      1 &&
+    exactExecutableLineCount(
+      sources.applicationValidatorSource,
+      'errors.push(`Reviewed resource graph contains unapproved resource ${logicalId}.`);',
+    ) === 1 &&
+    !/BalanceConsumer(?:TaskDefinition|Service)/u.test(sources.applicationValidatorSource)
+  );
+}
+
+function hasNoBalanceConsumerIamCapability(sources: BalanceConsumerArtifactSources): boolean {
+  const workloadLines = trimmedExecutableLines(sources.workloadTemplateSource);
+  const workloadValidatorLines = trimmedExecutableLines(sources.workloadValidatorSource);
+  const forbiddenQueueCapability =
+    /sqs:(?:ReceiveMessage|DeleteMessage|ChangeMessageVisibility|\*)/iu;
+  const expectedRoles = [
+    'ApiTaskExecutionRole',
+    'WebTaskExecutionRole',
+    'WebTaskRole',
+    'ApiTaskRole',
+    'WorkerTaskRole',
+    'WorkerTaskExecutionRole',
+    'RedisOperatorTaskExecutionRole',
+  ] as const;
+  return (
+    workloadLines.filter((line) => line === 'Type: AWS::IAM::Role').length === 7 &&
+    !forbiddenQueueCapability.test(workloadLines.join('\n')) &&
+    !/BalanceConsumer(?:TaskRole|TaskExecutionRole)/u.test(sources.workloadTemplateSource) &&
+    expectedRoles.every(
+      (logicalId) =>
+        exactExecutableLineCount(
+          sources.workloadValidatorSource,
+          `['${logicalId}', 'AWS::IAM::Role'],`,
+        ) === 1,
+    ) &&
+    workloadValidatorLines.filter((line) => line.endsWith("'AWS::IAM::Role'],")).length === 7 &&
+    exactExecutableLineCount(
+      sources.workloadValidatorSource,
+      "requireExactIds(resources, resourceTypes, 'Resource allowlist', errors);",
+    ) === 1 &&
+    !/BalanceConsumer(?:TaskRole|TaskExecutionRole)/u.test(sources.workloadValidatorSource)
+  );
+}
+
+function hasDormantBalanceConsumerDatabaseCapability(
+  sources: BalanceConsumerArtifactSources,
+): boolean {
+  const bootstrap = sources.bootstrapPrincipalsSource.replace(/\r\n/gu, '\n');
+  const bootstrapLines = trimmedExecutableLines(bootstrap);
+  const executableBootstrap = bootstrapLines.join('\n');
+  const grantConnectStart = executableBootstrap.indexOf(
+    "'GRANT CONNECT ON DATABASE %I TO %I, %I, %I'",
+  );
+  const grantConnectEnd = executableBootstrap.indexOf('\\gexec', grantConnectStart);
+  const grantConnect =
+    grantConnectStart >= 0 && grantConnectEnd > grantConnectStart
+      ? executableBootstrap.slice(grantConnectStart, grantConnectEnd)
+      : '';
+  const requiredBootstrapInputs = [
+    'balance_consumer_runtime_role',
+    'balance_consumer_login_prefix',
+    'balance_consumer_login',
+  ] as const;
+  if (
+    requiredBootstrapInputs.some(
+      (name) => bootstrapLines.filter((line) => line === `\\if :{?${name}}`).length !== 1,
+    ) ||
+    !executableBootstrap.includes(
+      "'GRANT %I TO %I WITH ADMIN FALSE, INHERIT FALSE, SET TRUE',\n:'balance_consumer_runtime_role', :'balance_consumer_login'",
+    ) ||
+    grantConnect.length === 0 ||
+    grantConnect.includes('balance_consumer') ||
+    /balance_consumer_(?:login_)?password/iu.test(executableBootstrap) ||
+    /GRANT\s+(?:USAGE|CREATE|SELECT|INSERT|UPDATE|DELETE|EXECUTE|ALL)[\s\S]{0,160}(?:SCHEMA|TABLE|SEQUENCE|FUNCTION|TYPE)[\s\S]{0,160}balance_consumer/iu.test(
+      executableBootstrap,
+    )
+  ) {
+    return false;
+  }
+
+  const validator = sources.bootstrapPrincipalsValidatorSource;
+  if (
+    exactExecutableLineCount(
+      validator,
+      'export function validateBootstrapPrincipalsSource(source) {',
+    ) !== 1 ||
+    exactExecutableLineCount(
+      validator,
+      "errors.push('Bootstrap must never accept, embed, print, or mutate credential material');",
+    ) !== 1 ||
+    exactExecutableLineCount(
+      validator,
+      "errors.push('Bootstrap must keep balance-consumer database, schema, and object ACLs denied');",
+    ) !== 1 ||
+    /node:(?:child_process|dns|http|https|net|tls)|\bfetch\s*\(/u.test(validator)
+  ) {
+    return false;
+  }
+
+  return (
+    sources.walletAddressMigrationSource.includes(
+      'GRANT EXECUTE ON FUNCTION ${RESOLVE_ACTIVE_ADDRESS} TO ${worker};',
+    ) && !/balance_consumer_(?:runtime_role|login)/iu.test(sources.walletAddressMigrationSource)
+  );
+}
+
+/**
+ * Recognizes only the exact source-authored dormant balance-consumer boundary.
+ * A successful inspection deliberately cannot represent deployed readiness or
+ * authorize activation; those require target-bound signed evidence in a future schema.
+ */
+export function inspectBalanceConsumerDeploymentArtifacts(
+  value: unknown,
+): BalanceConsumerDeploymentInput {
+  const invalid = (inspected: boolean): BalanceConsumerDeploymentInput =>
+    Object.freeze({
+      inspected,
+      contractValid: false,
+      sourceActivation: 'INVALID',
+      runtimeComposition: 'INVALID',
+      taskDeployment: 'INVALID',
+      iamCapability: 'INVALID',
+      databaseCapability: 'INVALID',
+      deploymentEvidence: 'INVALID',
+    });
+  try {
+    const sources = snapshotBalanceConsumerArtifactSources(value);
+    if (sources === null) return invalid(false);
+    const contractValid =
+      hasExactReviewedBalanceConsumerArtifactBytes(sources) &&
+      hasDormantBalanceConsumerSourceContract(sources) &&
+      hasDormantBalanceConsumerPackagingContract(sources) &&
+      hasNoBalanceConsumerTaskDeployment(sources) &&
+      hasNoBalanceConsumerIamCapability(sources) &&
+      hasDormantBalanceConsumerDatabaseCapability(sources);
+    if (!contractValid) return invalid(true);
+    const result: BalanceConsumerDeploymentInput = Object.freeze({
+      inspected: true,
+      contractValid: true,
+      sourceActivation: 'DISABLED',
+      runtimeComposition: 'NOT_COMPOSED',
+      taskDeployment: 'NOT_PROVISIONED',
+      iamCapability: 'NOT_PROVISIONED',
+      databaseCapability: 'DORMANT_SOURCE_ONLY',
+      deploymentEvidence: 'MISSING',
+    });
+    VERIFIED_BALANCE_CONSUMER_DEPLOYMENTS.add(result);
     return result;
   } catch {
     return invalid(false);
@@ -2080,6 +2550,84 @@ export function loadRepositoryProductionPreflightInput(
     // The evaluator reports an inspection failure without exposing local paths or source bytes.
   }
 
+  let balanceConsumerDeployment = inspectBalanceConsumerDeploymentArtifacts(null);
+  try {
+    balanceConsumerDeployment = inspectBalanceConsumerDeploymentArtifacts({
+      activationSource: readFileSync(
+        resolve(
+          repositoryRoot,
+          'apps/api/src/blockchain-sync/application/balance-sync-consumer.activation.ts',
+        ),
+        'utf8',
+      ),
+      cliSource: readFileSync(
+        resolve(
+          repositoryRoot,
+          'apps/api/src/blockchain-sync/application/balance-sync-consumer.cli.ts',
+        ),
+        'utf8',
+      ),
+      cliModeSource: readFileSync(
+        resolve(
+          repositoryRoot,
+          'apps/api/src/blockchain-sync/application/balance-sync-consumer.cli-mode.ts',
+        ),
+        'utf8',
+      ),
+      runtimeSource: readFileSync(
+        resolve(
+          repositoryRoot,
+          'apps/api/src/blockchain-sync/application/balance-sync-consumer.runtime.ts',
+        ),
+        'utf8',
+      ),
+      compositionSource: readFileSync(
+        resolve(
+          repositoryRoot,
+          'apps/api/src/blockchain-sync/application/balance-sync-consumer.composition.ts',
+        ),
+        'utf8',
+      ),
+      apiPackageSource: readFileSync(resolve(repositoryRoot, 'apps/api/package.json'), 'utf8'),
+      rootPackageSource: readFileSync(resolve(repositoryRoot, 'package.json'), 'utf8'),
+      applicationTemplateSource,
+      applicationValidatorSource: readFileSync(
+        resolve(repositoryRoot, 'infra/aws/validate-application-baseline.mjs'),
+        'utf8',
+      ),
+      workloadTemplateSource,
+      workloadValidatorSource: readFileSync(
+        resolve(repositoryRoot, 'infra/aws/validate-application-workload-boundaries.mjs'),
+        'utf8',
+      ),
+      bootstrapPrincipalsSource: readFileSync(
+        resolve(repositoryRoot, 'infra/postgres/bootstrap-principals.sql'),
+        'utf8',
+      ),
+      bootstrapPrincipalsValidatorSource: readFileSync(
+        resolve(repositoryRoot, 'infra/postgres/validate-bootstrap-principals.mjs'),
+        'utf8',
+      ),
+      walletAddressMigrationSource: readFileSync(
+        resolve(
+          repositoryRoot,
+          'apps/api/src/infrastructure/database/migrations/0023-create-balance-consumer-wallet-address-boundary.migration.ts',
+        ),
+        'utf8',
+      ),
+      releaseManifestSource: readFileSync(
+        resolve(repositoryRoot, 'scripts/release-candidate-manifest.mjs'),
+        'utf8',
+      ),
+      productionContainerValidatorSource: readFileSync(
+        resolve(repositoryRoot, 'infra/containers/validate-production-containers.mjs'),
+        'utf8',
+      ),
+    });
+  } catch {
+    // The evaluator reports an inspection failure without exposing local paths or source bytes.
+  }
+
   let egressRecord: Record<string, unknown> = {};
   let egressLocalValidationPassed = false;
   try {
@@ -2110,6 +2658,7 @@ export function loadRepositoryProductionPreflightInput(
   return Object.freeze({
     authentication,
     productionInfrastructureDeployment,
+    balanceConsumerDeployment,
     databaseMasterDeployment,
     rdsMasterLifecycleEvidenceAccepted: false,
     redisOperatorDeployment,

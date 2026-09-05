@@ -47,6 +47,7 @@ export const RELEASE_COMPONENTS = Object.freeze([
     kind: 'directory',
     requiredFiles: Object.freeze([
       'main.js',
+      'blockchain-sync/application/balance-sync-consumer.cli.js',
       'infrastructure/database/migration.cli.js',
       'infrastructure/outbox/outbox-worker.cli.js',
       'infrastructure/outbox/outbox-worker-health.cli.js',
