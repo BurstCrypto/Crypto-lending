@@ -15,6 +15,7 @@ import { test } from 'node:test';
 
 import {
   canonicalProductionEvidenceJson,
+  closeProductionEvidenceFileDescriptorForTest,
   isVerifiedProductionEvidenceBundle,
   loadAndVerifyProductionEvidenceBundle,
   loadAndVerifyProductionEvidenceBundleWithTestRegistries,
@@ -807,6 +808,10 @@ test('bounded file loading rejects unstable, empty, linked, and oversized inputs
     rmdirSync(directoryPath);
     rmdirSync(temporaryDirectory);
   }
+});
+
+test('descriptor close failures retain the fixed bundle error contract', () => {
+  expectInvalid(() => closeProductionEvidenceFileDescriptorForTest(-1));
 });
 
 function permissionDenied(error: unknown): boolean {
