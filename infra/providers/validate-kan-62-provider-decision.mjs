@@ -1,12 +1,24 @@
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import {
+  closeSync,
+  constants as fsConstants,
+  fstatSync,
+  lstatSync,
+  openSync,
+  readSync,
+  realpathSync,
+} from 'node:fs';
+import { dirname, isAbsolute, join, normalize, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { isDeepStrictEqual } from 'node:util';
+import { isDeepStrictEqual, TextDecoder } from 'node:util';
 
 export const REPOSITORY_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 export const DECISION_PATH = 'docs/rpc-indexing/kan-62-provider-decision.json';
 export const SIDECAR_PATH = 'docs/rpc-indexing/kan-62-provider-decision.sha256';
+export const MAX_PROVIDER_DECISION_BYTES = 131_072;
+export const MAX_PROVIDER_DECISION_SIDECAR_BYTES = 65;
+export const PROVIDER_DECISION_FILES_UNSAFE_ERROR =
+  'KAN-62 provider decision or SHA-256 sidecar is unavailable or unsafe.';
 
 const DAY_MS = 86_400_000;
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/u;
@@ -861,6 +873,140 @@ function deepFreeze(value) {
   return Object.freeze(value);
 }
 
+function comparablePath(value) {
+  let path = normalize(resolve(value));
+  if (path.startsWith('\\\\?\\UNC\\')) path = `\\\\${path.slice(8)}`;
+  else if (path.startsWith('\\\\?\\')) path = path.slice(4);
+  path = path.replace(/[\\/]+$/u, '');
+  return process.platform === 'win32' ? path.toLowerCase() : path;
+}
+
+function sameStableFile(left, right) {
+  return (
+    left.isFile() &&
+    right.isFile() &&
+    left.nlink === 1n &&
+    right.nlink === 1n &&
+    left.dev === right.dev &&
+    left.ino === right.ino &&
+    left.mode === right.mode &&
+    left.size === right.size &&
+    left.mtimeNs === right.mtimeNs &&
+    left.ctimeNs === right.ctimeNs
+  );
+}
+
+function controlledRepositoryPath(repositoryRoot, relativePath) {
+  if (
+    typeof repositoryRoot !== 'string' ||
+    repositoryRoot.length === 0 ||
+    repositoryRoot.length > 4_096 ||
+    repositoryRoot.includes('\u0000')
+  ) {
+    throw new Error(PROVIDER_DECISION_FILES_UNSAFE_ERROR);
+  }
+  const root = resolve(repositoryRoot);
+  const rootStatus = lstatSync(root, { bigint: true });
+  if (
+    rootStatus.isSymbolicLink() ||
+    !rootStatus.isDirectory() ||
+    comparablePath(realpathSync.native(root)) !== comparablePath(root)
+  ) {
+    throw new Error(PROVIDER_DECISION_FILES_UNSAFE_ERROR);
+  }
+  const absolutePath = resolve(root, relativePath);
+  const childPath = relative(root, absolutePath);
+  if (
+    childPath === '' ||
+    childPath === '..' ||
+    childPath.startsWith(`..${sep}`) ||
+    isAbsolute(childPath)
+  ) {
+    throw new Error(PROVIDER_DECISION_FILES_UNSAFE_ERROR);
+  }
+  let current = root;
+  const components = childPath.split(/[\\/]+/u);
+  for (let index = 0; index < components.length; index += 1) {
+    const component = components[index];
+    if (component.length === 0) throw new Error(PROVIDER_DECISION_FILES_UNSAFE_ERROR);
+    current = join(current, component);
+    const status = lstatSync(current, { bigint: true });
+    const final = index === components.length - 1;
+    if (status.isSymbolicLink() || (!final && !status.isDirectory())) {
+      throw new Error(PROVIDER_DECISION_FILES_UNSAFE_ERROR);
+    }
+    if (comparablePath(realpathSync.native(current)) !== comparablePath(current)) {
+      throw new Error(PROVIDER_DECISION_FILES_UNSAFE_ERROR);
+    }
+  }
+  return absolutePath;
+}
+
+function readDescriptorExactly(descriptor, size) {
+  const bytes = Buffer.allocUnsafe(size);
+  let offset = 0;
+  while (offset < size) {
+    const count = readSync(descriptor, bytes, offset, size - offset, offset);
+    if (count <= 0) throw new Error(PROVIDER_DECISION_FILES_UNSAFE_ERROR);
+    offset += count;
+  }
+  const overflow = Buffer.allocUnsafe(1);
+  if (readSync(descriptor, overflow, 0, 1, size) !== 0) {
+    throw new Error(PROVIDER_DECISION_FILES_UNSAFE_ERROR);
+  }
+  return bytes;
+}
+
+function readBoundedStableRepositoryFile(
+  repositoryRoot,
+  relativePath,
+  maximumBytes,
+  afterFirstReadForTest,
+) {
+  let descriptor;
+  try {
+    const absolutePath = controlledRepositoryPath(repositoryRoot, relativePath);
+    const before = lstatSync(absolutePath, { bigint: true });
+    if (
+      before.isSymbolicLink() ||
+      !before.isFile() ||
+      before.nlink !== 1n ||
+      before.size <= 0n ||
+      before.size > BigInt(maximumBytes)
+    ) {
+      throw new Error(PROVIDER_DECISION_FILES_UNSAFE_ERROR);
+    }
+    const noFollow = process.platform === 'win32' ? 0 : (fsConstants.O_NOFOLLOW ?? 0);
+    descriptor = openSync(absolutePath, fsConstants.O_RDONLY | noFollow);
+    const opened = fstatSync(descriptor, { bigint: true });
+    if (!sameStableFile(before, opened)) {
+      throw new Error(PROVIDER_DECISION_FILES_UNSAFE_ERROR);
+    }
+    const size = Number(opened.size);
+    const first = readDescriptorExactly(descriptor, size);
+    afterFirstReadForTest?.();
+    const afterFirst = fstatSync(descriptor, { bigint: true });
+    if (!sameStableFile(opened, afterFirst)) {
+      throw new Error(PROVIDER_DECISION_FILES_UNSAFE_ERROR);
+    }
+    const second = readDescriptorExactly(descriptor, size);
+    const afterSecond = fstatSync(descriptor, { bigint: true });
+    const finalPath = controlledRepositoryPath(repositoryRoot, relativePath);
+    const final = lstatSync(finalPath, { bigint: true });
+    if (
+      comparablePath(finalPath) !== comparablePath(absolutePath) ||
+      !sameStableFile(opened, afterSecond) ||
+      !sameStableFile(afterSecond, final) ||
+      !first.equals(second)
+    ) {
+      throw new Error(PROVIDER_DECISION_FILES_UNSAFE_ERROR);
+    }
+    return first;
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
+  }
+}
+
 function canonicalJson(value) {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
   if (isRecord(value)) {
@@ -1106,16 +1252,31 @@ export function validateProviderDecisionSidecar(decisionBytes, sidecar) {
   }
 }
 
-export function loadValidatedProviderDecisionSnapshot({
+function loadProviderDecisionSnapshot({
   repositoryRoot = REPOSITORY_ROOT,
   now = new Date(),
+  afterDecisionFirstReadForTest = undefined,
+  afterSidecarFirstReadForTest = undefined,
 } = {}) {
   try {
-    const decisionBytes = readFileSync(resolve(repositoryRoot, DECISION_PATH));
-    const sidecar = readFileSync(resolve(repositoryRoot, SIDECAR_PATH), 'utf8');
+    const decisionBytes = readBoundedStableRepositoryFile(
+      repositoryRoot,
+      DECISION_PATH,
+      MAX_PROVIDER_DECISION_BYTES,
+      afterDecisionFirstReadForTest,
+    );
+    const sidecarBytes = readBoundedStableRepositoryFile(
+      repositoryRoot,
+      SIDECAR_PATH,
+      MAX_PROVIDER_DECISION_SIDECAR_BYTES,
+      afterSidecarFirstReadForTest,
+    );
+    const decoder = new TextDecoder('utf-8', { fatal: true });
+    const decisionText = decoder.decode(decisionBytes);
+    const sidecar = decoder.decode(sidecarBytes);
     let record;
     try {
-      record = JSON.parse(decisionBytes.toString('utf8'));
+      record = JSON.parse(decisionText);
     } catch {
       return Object.freeze({
         errors: Object.freeze(['KAN-62 provider decision is not valid JSON.']),
@@ -1136,13 +1297,33 @@ export function loadValidatedProviderDecisionSnapshot({
     return result;
   } catch {
     return Object.freeze({
-      errors: Object.freeze([
-        'KAN-62 provider decision or SHA-256 sidecar is missing or unreadable.',
-      ]),
+      errors: Object.freeze([PROVIDER_DECISION_FILES_UNSAFE_ERROR]),
       fingerprint: null,
       record: null,
     });
   }
+}
+
+export function loadValidatedProviderDecisionSnapshot({
+  repositoryRoot = REPOSITORY_ROOT,
+  now = new Date(),
+} = {}) {
+  return loadProviderDecisionSnapshot({ repositoryRoot, now });
+}
+
+/** Test-only fault seam; production preflight uses loadValidatedProviderDecisionSnapshot. */
+export function loadValidatedProviderDecisionSnapshotForTest({
+  repositoryRoot = REPOSITORY_ROOT,
+  now = new Date(),
+  afterDecisionFirstReadForTest = undefined,
+  afterSidecarFirstReadForTest = undefined,
+} = {}) {
+  return loadProviderDecisionSnapshot({
+    repositoryRoot,
+    now,
+    afterDecisionFirstReadForTest,
+    afterSidecarFirstReadForTest,
+  });
 }
 
 export function validateProviderDecisionFiles(options = {}) {

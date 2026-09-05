@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  linkSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import test from 'node:test';
@@ -8,6 +15,10 @@ import test from 'node:test';
 import {
   DECISION_PATH,
   loadValidatedProviderDecisionSnapshot,
+  loadValidatedProviderDecisionSnapshotForTest,
+  MAX_PROVIDER_DECISION_BYTES,
+  MAX_PROVIDER_DECISION_SIDECAR_BYTES,
+  PROVIDER_DECISION_FILES_UNSAFE_ERROR,
   REPOSITORY_ROOT,
   SIDECAR_PATH,
   validateProviderDecisionFiles,
@@ -16,6 +27,44 @@ import {
 } from './validate-kan-62-provider-decision.mjs';
 
 const NOW = new Date('2026-08-22T23:59:59.999Z');
+
+function canonicalDecisionBytes() {
+  return readFileSync(`${REPOSITORY_ROOT}/${DECISION_PATH}`);
+}
+
+function canonicalSidecarBytes() {
+  return readFileSync(`${REPOSITORY_ROOT}/${SIDECAR_PATH}`);
+}
+
+function createControlledPair(repositoryRoot) {
+  const decisionPath = resolve(repositoryRoot, DECISION_PATH);
+  const sidecarPath = resolve(repositoryRoot, SIDECAR_PATH);
+  mkdirSync(dirname(decisionPath), { recursive: true });
+  writeFileSync(decisionPath, canonicalDecisionBytes());
+  writeFileSync(sidecarPath, canonicalSidecarBytes());
+  return { decisionPath, sidecarPath };
+}
+
+function assertUnsafeSnapshot(snapshot) {
+  assert.deepEqual(snapshot, {
+    errors: [PROVIDER_DECISION_FILES_UNSAFE_ERROR],
+    fingerprint: null,
+    record: null,
+  });
+}
+
+function skipUnsupportedLink(error, context) {
+  if (
+    error &&
+    typeof error === 'object' &&
+    'code' in error &&
+    ['EACCES', 'EINVAL', 'ENOSYS', 'EPERM', 'UNKNOWN'].includes(error.code)
+  ) {
+    context.skip(`filesystem link operation is unavailable (${error.code})`);
+    return true;
+  }
+  return false;
+}
 
 function loadDecision() {
   return JSON.parse(readFileSync(`${REPOSITORY_ROOT}/${DECISION_PATH}`, 'utf8'));
@@ -48,16 +97,8 @@ test('the canonical packet and exact lowercase SHA-256 sidecar are valid but not
 test('preflight fields come from one immutable sidecar-validated snapshot', () => {
   const repositoryRoot = mkdtempSync(join(tmpdir(), 'kan-62-snapshot-'));
   try {
-    const decisionPath = resolve(repositoryRoot, DECISION_PATH);
-    const sidecarPath = resolve(repositoryRoot, SIDECAR_PATH);
-    mkdirSync(dirname(decisionPath), { recursive: true });
-    const decisionBytes = readFileSync(`${REPOSITORY_ROOT}/${DECISION_PATH}`);
-    writeFileSync(decisionPath, decisionBytes);
-    writeFileSync(
-      sidecarPath,
-      `${createHash('sha256').update(decisionBytes).digest('hex')}\n`,
-      'utf8',
-    );
+    const { decisionPath } = createControlledPair(repositoryRoot);
+    const decisionBytes = canonicalDecisionBytes();
 
     const snapshot = loadValidatedProviderDecisionSnapshot({ repositoryRoot, now: NOW });
     const replacement = JSON.parse(decisionBytes.toString('utf8'));
@@ -81,6 +122,137 @@ test('preflight fields come from one immutable sidecar-validated snapshot', () =
     );
   } finally {
     rmSync(repositoryRoot, { recursive: true, force: true });
+  }
+});
+
+test('controlled decision files reject empty and oversized inputs with one fixed error', () => {
+  const mutations = [
+    [DECISION_PATH, Buffer.alloc(0)],
+    [DECISION_PATH, Buffer.alloc(MAX_PROVIDER_DECISION_BYTES + 1, 0x61)],
+    [SIDECAR_PATH, Buffer.alloc(0)],
+    [SIDECAR_PATH, Buffer.alloc(MAX_PROVIDER_DECISION_SIDECAR_BYTES + 1, 0x61)],
+  ];
+  for (const [relativePath, bytes] of mutations) {
+    const repositoryRoot = mkdtempSync(join(tmpdir(), 'kan-62-bounds-'));
+    try {
+      createControlledPair(repositoryRoot);
+      writeFileSync(resolve(repositoryRoot, relativePath), bytes);
+      assertUnsafeSnapshot(loadValidatedProviderDecisionSnapshot({ repositoryRoot, now: NOW }));
+    } finally {
+      rmSync(repositoryRoot, { recursive: true, force: true });
+    }
+  }
+});
+
+test('controlled decision files reject hard-linked final files', () => {
+  const repositoryRoot = mkdtempSync(join(tmpdir(), 'kan-62-hardlink-'));
+  try {
+    const { decisionPath } = createControlledPair(repositoryRoot);
+    const secondLink = resolve(dirname(decisionPath), 'decision-second-link.json');
+    linkSync(decisionPath, secondLink);
+    assertUnsafeSnapshot(loadValidatedProviderDecisionSnapshot({ repositoryRoot, now: NOW }));
+  } finally {
+    rmSync(repositoryRoot, { recursive: true, force: true });
+  }
+});
+
+test('controlled decision files reject a final symbolic link when supported', (context) => {
+  const repositoryRoot = mkdtempSync(join(tmpdir(), 'kan-62-symlink-'));
+  try {
+    const decisionPath = resolve(repositoryRoot, DECISION_PATH);
+    const sidecarPath = resolve(repositoryRoot, SIDECAR_PATH);
+    const targetPath = resolve(repositoryRoot, 'decision-target.json');
+    mkdirSync(dirname(decisionPath), { recursive: true });
+    writeFileSync(targetPath, canonicalDecisionBytes());
+    writeFileSync(sidecarPath, canonicalSidecarBytes());
+    try {
+      symlinkSync(targetPath, decisionPath, 'file');
+    } catch (error) {
+      if (skipUnsupportedLink(error, context)) return;
+      throw error;
+    }
+    assertUnsafeSnapshot(loadValidatedProviderDecisionSnapshot({ repositoryRoot, now: NOW }));
+  } finally {
+    rmSync(repositoryRoot, { recursive: true, force: true });
+  }
+});
+
+test('controlled decision files reject a linked intermediate directory when supported', (context) => {
+  const repositoryRoot = mkdtempSync(join(tmpdir(), 'kan-62-junction-'));
+  try {
+    const targetDirectory = resolve(repositoryRoot, 'rpc-indexing-target');
+    const linkedDirectory = resolve(repositoryRoot, 'docs/rpc-indexing');
+    mkdirSync(targetDirectory, { recursive: true });
+    mkdirSync(dirname(linkedDirectory), { recursive: true });
+    writeFileSync(
+      resolve(targetDirectory, 'kan-62-provider-decision.json'),
+      canonicalDecisionBytes(),
+    );
+    writeFileSync(
+      resolve(targetDirectory, 'kan-62-provider-decision.sha256'),
+      canonicalSidecarBytes(),
+    );
+    try {
+      symlinkSync(
+        targetDirectory,
+        linkedDirectory,
+        process.platform === 'win32' ? 'junction' : 'dir',
+      );
+    } catch (error) {
+      if (skipUnsupportedLink(error, context)) return;
+      throw error;
+    }
+    assertUnsafeSnapshot(loadValidatedProviderDecisionSnapshot({ repositoryRoot, now: NOW }));
+  } finally {
+    rmSync(repositoryRoot, { recursive: true, force: true });
+  }
+});
+
+test('controlled decision files reject same-size concurrent rewrites', () => {
+  const cases = [
+    {
+      name: 'decision',
+      path: DECISION_PATH,
+      mutate(bytes) {
+        const replacement = Buffer.from(bytes);
+        replacement[0] = replacement[0] === 0x7b ? 0x5b : 0x7b;
+        return replacement;
+      },
+      hook(path, replacement) {
+        return { afterDecisionFirstReadForTest: () => writeFileSync(path, replacement) };
+      },
+    },
+    {
+      name: 'sidecar',
+      path: SIDECAR_PATH,
+      mutate(bytes) {
+        const replacement = Buffer.from(bytes);
+        replacement[0] = replacement[0] === 0x30 ? 0x31 : 0x30;
+        return replacement;
+      },
+      hook(path, replacement) {
+        return { afterSidecarFirstReadForTest: () => writeFileSync(path, replacement) };
+      },
+    },
+  ];
+  for (const hostileCase of cases) {
+    const repositoryRoot = mkdtempSync(join(tmpdir(), `kan-62-${hostileCase.name}-rewrite-`));
+    try {
+      createControlledPair(repositoryRoot);
+      const path = resolve(repositoryRoot, hostileCase.path);
+      const original = readFileSync(path);
+      const replacement = hostileCase.mutate(original);
+      assert.equal(replacement.length, original.length);
+      assertUnsafeSnapshot(
+        loadValidatedProviderDecisionSnapshotForTest({
+          repositoryRoot,
+          now: NOW,
+          ...hostileCase.hook(path, replacement),
+        }),
+      );
+    } finally {
+      rmSync(repositoryRoot, { recursive: true, force: true });
+    }
   }
 });
 

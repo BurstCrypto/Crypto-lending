@@ -146,6 +146,10 @@ decision record and digest, and the mainnet platform capability directory. It
 derives KAN-62 local validation and every provider approval/runtime field from
 one immutable parsed snapshot of the exact decision bytes bound by that digest;
 it never re-reads status fields from a second, potentially different snapshot.
+Both controlled files must be non-empty, bounded, single-link regular files at
+canonical repository paths. Each file is descriptor-bound and read twice, so a
+linked path, path replacement, size change, metadata change, or same-size rewrite
+fails closed behind one sanitized validation error.
 The audit does not scan implementation source for status phrases, derive
 application configuration from process-environment values, read secret material
 or `.env` files, contact provider endpoints, or accept catalog status strings as
