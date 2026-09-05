@@ -37,19 +37,26 @@ source-only capsules remain deliberately unregistered: the balance-consumer
 persistence resource encloses its PostgreSQL pool and repositories behind
 checkpoint/address-resolution closures, while the balance-consumer receipt
 resource encloses a private SQS client behind receive, delete,
-change-visibility, and envelope-parsing closures. Neither capsule is exported
-from the blockchain-sync barrel or referenced by a launch root, module,
-runtime, CLI, or composition path.
+change-visibility, and envelope-parsing closures. Both capsules are now
+referenced only by the source-only
+`application/balance-sync-consumer.resource.ts` aggregate. That aggregate gives
+both child factories the same exact frozen infrastructure snapshot, wires their
+exact checkpoint, address-resolution, and pinned receipt ports into the inert
+application composition, and exposes only a one-shot `run(signal)` plus
+memoized `close()`. It is not exported from a barrel or referenced by a Nest
+module, runtime, CLI, activation path, or other launch root.
 
 The dedicated runtime is an exact empty Nest `@Module({})`, and its start
 function always rejects with `BALANCE_CONSUMER_RUNTIME_NOT_COMPOSED`. It imports
-and composes neither dormant capsule. Source activation remains false, so the
-CLI refuses startup before dynamically importing even that empty runtime. The
-dedicated loader accepts only the exact `APP_ENV` balance source/DLQ pair in one
-AWS account and rejects generic queue variables and unknown SQS aliases. The
-receipt capsule snapshots only the source coordinate and required client
-settings; it neither reads nor retains the DLQ URL and exposes no publish,
-queue-health, queue-attribute, or caller-supplied `QueueUrl` capability.
+and composes neither the dormant aggregate nor either child capsule. The
+aggregate does not compose or replace that refusing runtime. Source activation
+remains false, so the CLI refuses startup before dynamically importing even
+that empty runtime. The dedicated loader accepts only the exact `APP_ENV`
+balance source/DLQ pair in one AWS account and rejects generic queue variables
+and unknown SQS aliases. The receipt capsule snapshots only the source
+coordinate and required client settings; it neither reads nor retains the DLQ
+URL and exposes no publish, queue-health, queue-attribute, or caller-supplied
+`QueueUrl` capability.
 
 A release-bound standalone CloudFormation envelope now records the intended
 dormant process boundary and is inspected by local validation and offline
@@ -299,10 +306,14 @@ RPC, address decryption, monitoring, or any deployed behavior has been
 validated.
 
 The receipt and persistence capsule work was implemented and verified with
-local source/unit checks only. No AWS, SQS, ECS credential endpoint, RPC, or
-chain-provider call was made, and no task, IAM identity, dedicated
-balance-consumer database grant, or runtime activation was deployed for this
-checkpoint.
+local source/unit checks only. The aggregate lifecycle and wiring checks use
+mocked child construction and local in-memory capabilities; they are not live
+provider, database, queue, credential, or deployment evidence. No AWS, SQS, ECS
+credential endpoint, RPC, or chain-provider call was made, and no task, IAM
+identity, dedicated balance-consumer database grant, or runtime activation was
+deployed for this checkpoint. Adding this dormant aggregate does not select or
+implement RPC providers, activate the source, grant database or IAM authority,
+deploy anything, create cloud costs, or satisfy any live-acceptance gate.
 
 The authored standalone envelope does not change that conclusion. Preflight
 must retain `BALANCE_CONSUMER_TASK_NOT_PROVISIONED`,

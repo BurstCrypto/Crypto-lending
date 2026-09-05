@@ -138,6 +138,13 @@ const BALANCE_CONSUMER_ARTIFACTS = Object.freeze({
     ),
     'utf8',
   ),
+  balanceConsumerResourceSource: readFileSync(
+    resolve(
+      __dirname,
+      '../apps/api/src/blockchain-sync/application/balance-sync-consumer.resource.ts',
+    ),
+    'utf8',
+  ),
   balanceConsumerPersistenceResourceSource: readFileSync(
     resolve(
       __dirname,
@@ -1119,6 +1126,111 @@ test('balance-consumer inspection rejects dormant SQS receipt capability drift',
     }),
     INVALID_BALANCE_CONSUMER_DEPLOYMENT,
   );
+});
+
+test('balance-consumer inspection rejects dormant aggregate lifecycle and capability drift', () => {
+  const mutations: readonly (readonly [keyof BalanceConsumerArtifactSources, string, string])[] = [
+    [
+      'balanceConsumerResourceSource',
+      'BALANCE_SYNC_CONSUMER_RESOURCE_CONFIGURATION_INVALID',
+      'BALANCE_SYNC_CONSUMER_RESOURCE_CONFIGURATION_UNREVIEWED',
+    ],
+    [
+      'balanceConsumerResourceSource',
+      'await createDormantBalanceConsumerSqsReceiptResource(reviewed.infrastructure),',
+      'await createDormantBalanceConsumerSqsReceiptResource({ ...reviewed.infrastructure }),',
+    ],
+    [
+      'balanceConsumerResourceSource',
+      'reviewed.infrastructure,',
+      'dependencies.infrastructureConfig,',
+    ],
+    [
+      'balanceConsumerResourceSource',
+      'visibilityTimeoutSeconds: reviewed.infrastructure.sqs.visibilityTimeoutSeconds,',
+      'visibilityTimeoutSeconds: 30,',
+    ],
+    [
+      'balanceConsumerResourceSource',
+      'return frozenNullPrototype<DormantBalanceSyncConsumerResource>({ run, close });',
+      'return frozenNullPrototype({ run, close, composition });',
+    ],
+    [
+      'balanceConsumerResourceSource',
+      "controller.abort(new Error('Balance sync consumer run aborted'));",
+      'controller.abort(signal.reason);',
+    ],
+    [
+      'balanceConsumerResourceSource',
+      'const controller = new AbortController();',
+      'const controller = new AbortController();\n      void AbortSignal.any([signal]);',
+    ],
+    [
+      'balanceConsumerResourceSource',
+      'if (started) {',
+      'if (started && activeRun !== undefined) {',
+    ],
+    [
+      'balanceConsumerResourceSource',
+      'if (acceptedRun !== undefined) await Promise.allSettled([acceptedRun]);',
+      'void acceptedRun;',
+    ],
+    [
+      'balanceConsumerResourceSource',
+      'const acceptedRunController = activeRunController;',
+      'const acceptedRunController = undefined;',
+    ],
+    [
+      'balanceConsumerResourceSource',
+      'const sqsClosed = await attemptClose(resourceSqsClose);\n        const persistenceClosed = await attemptClose(resourcePersistenceClose);',
+      'const persistenceClosed = await attemptClose(resourcePersistenceClose);\n        const sqsClosed = await attemptClose(resourceSqsClose);',
+    ],
+    [
+      'balanceConsumerResourceSource',
+      'const persistenceClosed = await attemptClose(resourcePersistenceClose);',
+      'const persistenceClosed = true;',
+    ],
+    [
+      'balanceConsumerResourceSource',
+      'if (closePromise !== undefined) return closePromise;',
+      'if (closePromise !== undefined) closePromise = undefined;',
+    ],
+  ];
+
+  for (const [key, approved, rejected] of mutations) {
+    assert.deepEqual(
+      inspectBalanceConsumerDeploymentArtifacts(
+        mutateBalanceConsumerArtifact(key, approved, rejected),
+      ),
+      INVALID_BALANCE_CONSUMER_DEPLOYMENT,
+      `${key}: ${approved}`,
+    );
+  }
+
+  const launchRegistrations: readonly BalanceConsumerArtifactSources[] = [
+    {
+      ...BALANCE_CONSUMER_ARTIFACTS,
+      blockchainSyncIndexSource: `${BALANCE_CONSUMER_ARTIFACTS.blockchainSyncIndexSource}\nexport { createDormantBalanceSyncConsumerResource } from './application/balance-sync-consumer.resource';\n`,
+    },
+    {
+      ...BALANCE_CONSUMER_ARTIFACTS,
+      runtimeSource: `${BALANCE_CONSUMER_ARTIFACTS.runtimeSource}\nimport { createDormantBalanceSyncConsumerResource } from './balance-sync-consumer.resource';\nvoid createDormantBalanceSyncConsumerResource;\n`,
+    },
+    {
+      ...BALANCE_CONSUMER_ARTIFACTS,
+      blockchainSyncModuleSource: `${BALANCE_CONSUMER_ARTIFACTS.blockchainSyncModuleSource}\nimport { createDormantBalanceSyncConsumerResource } from './application/balance-sync-consumer.resource';\nvoid createDormantBalanceSyncConsumerResource;\n`,
+    },
+    {
+      ...BALANCE_CONSUMER_ARTIFACTS,
+      activationSource: `${BALANCE_CONSUMER_ARTIFACTS.activationSource}\nimport { createDormantBalanceSyncConsumerResource } from './balance-sync-consumer.resource';\nvoid createDormantBalanceSyncConsumerResource;\n`,
+    },
+  ];
+  for (const candidate of launchRegistrations) {
+    assert.deepEqual(
+      inspectBalanceConsumerDeploymentArtifacts(candidate),
+      INVALID_BALANCE_CONSUMER_DEPLOYMENT,
+    );
+  }
 });
 
 test('balance-consumer inspection brands and freezes only the exact dormant local contract', () => {

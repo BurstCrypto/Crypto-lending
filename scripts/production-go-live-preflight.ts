@@ -159,6 +159,7 @@ export interface BalanceConsumerArtifactSources {
   readonly cliModeSource: string;
   readonly runtimeSource: string;
   readonly compositionSource: string;
+  readonly balanceConsumerResourceSource: string;
   readonly balanceConsumerPersistenceResourceSource: string;
   readonly balanceConsumerSqsReceiptResourceSource: string;
   readonly runtimePostgresPoolSource: string;
@@ -516,6 +517,7 @@ const BALANCE_CONSUMER_ARTIFACT_KEYS = Object.freeze([
   'cliModeSource',
   'runtimeSource',
   'compositionSource',
+  'balanceConsumerResourceSource',
   'balanceConsumerPersistenceResourceSource',
   'balanceConsumerSqsReceiptResourceSource',
   'runtimePostgresPoolSource',
@@ -570,6 +572,7 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
   cliModeSource: '2b03494cb126e80f4f7af1176cb08cf13aef2d14d4bf3cb371faa6f06a7294a8',
   runtimeSource: '9eb119d5c4ed60708931bdc25b810d0f61e064d8521c3465ae4c85046480fd5b',
   compositionSource: '3167bf5e65ffd8ff3b73f90cdb1af962261a090c7f7661f44d0973ea49320aa5',
+  balanceConsumerResourceSource: 'f210defba63ab0c2379ad499c8d84d4df79a3bc23f8ea31d51e740c8b71d0118',
   balanceConsumerPersistenceResourceSource:
     'e95c1ce138f15202e0e181ff31fe164fa22d61e2eaa642a32ea81865a28ff27d',
   balanceConsumerSqsReceiptResourceSource:
@@ -1910,6 +1913,481 @@ function hasDormantBalanceConsumerSourceContract(sources: BalanceConsumerArtifac
     ) &&
     !/\bNestFactory\b|@Module\s*\(|createApplicationContext\s*\(|\.listen\s*\(/u.test(
       sources.compositionSource,
+    )
+  );
+}
+
+function hasDormantBalanceConsumerAggregateResourceContract(
+  sources: BalanceConsumerArtifactSources,
+): boolean {
+  const resource = sources.balanceConsumerResourceSource.replace(/\r\n/gu, '\n');
+  const dependencyInterfaceStart = resource.indexOf(
+    'export interface DormantBalanceSyncConsumerResourceDependencies {',
+  );
+  const resourceInterfaceStart = resource.indexOf(
+    'export interface DormantBalanceSyncConsumerResource {',
+    dependencyInterfaceStart,
+  );
+  const configurationErrorStart = resource.indexOf(
+    'class BalanceSyncConsumerResourceConfigurationError extends Error {',
+    resourceInterfaceStart,
+  );
+  const infrastructureSnapshotStart = resource.indexOf(
+    'function snapshotInfrastructure(value: unknown): Readonly<BalanceConsumerInfrastructureConfig> {',
+    configurationErrorStart,
+  );
+  const reviewedDependenciesStart = resource.indexOf(
+    'function reviewedDependencies(value: unknown): ReviewedDependencies {',
+    infrastructureSnapshotStart,
+  );
+  const childFacadeReviewStart = resource.indexOf(
+    'function ownedFrozenNullPrototypeRecord(',
+    reviewedDependenciesStart,
+  );
+  const factoryStart = resource.indexOf(
+    'export async function createDormantBalanceSyncConsumerResource(',
+    childFacadeReviewStart,
+  );
+  if (
+    dependencyInterfaceStart < 0 ||
+    resourceInterfaceStart <= dependencyInterfaceStart ||
+    configurationErrorStart <= resourceInterfaceStart ||
+    infrastructureSnapshotStart <= configurationErrorStart ||
+    reviewedDependenciesStart <= infrastructureSnapshotStart ||
+    childFacadeReviewStart <= reviewedDependenciesStart ||
+    factoryStart <= childFacadeReviewStart
+  ) {
+    return false;
+  }
+
+  const dependencyInterface = resource.slice(dependencyInterfaceStart, resourceInterfaceStart);
+  const resourceInterface = resource.slice(resourceInterfaceStart, configurationErrorStart);
+  const infrastructureSnapshot = resource.slice(
+    infrastructureSnapshotStart,
+    reviewedDependenciesStart,
+  );
+  const reviewedDependencies = resource.slice(reviewedDependenciesStart, childFacadeReviewStart);
+  const childFacadeReview = resource.slice(childFacadeReviewStart, factoryStart);
+  const factory = resource.slice(factoryStart);
+
+  const persistenceReviewStart = childFacadeReview.indexOf('function reviewedPersistenceResource(');
+  const persistenceCloseRetention = childFacadeReview.indexOf(
+    'retainClose(close);',
+    persistenceReviewStart,
+  );
+  const persistencePortReview = childFacadeReview.indexOf(
+    'const checkpoints = ownedFrozenNullPrototypeRecord(resource.checkpoints, [',
+    persistenceCloseRetention,
+  );
+  const sqsReviewStart = childFacadeReview.indexOf(
+    'function reviewedSqsReceiptResource(',
+    persistencePortReview,
+  );
+  const sqsCloseRetention = childFacadeReview.indexOf('retainClose(close);', sqsReviewStart);
+  const receiptPortReview = childFacadeReview.indexOf(
+    'const receipt = ownedFrozenNullPrototypeRecord(resource.receipt, [',
+    sqsCloseRetention,
+  );
+
+  const reviewedSnapshot = factory.indexOf('const reviewed = reviewedDependencies(dependencies);');
+  const persistenceConstruction = factory.indexOf(
+    'await createDormantBalanceConsumerPersistenceResource(',
+    reviewedSnapshot,
+  );
+  const persistenceCloseCapture = factory.indexOf(
+    'persistenceClose = close;',
+    persistenceConstruction,
+  );
+  const sqsConstruction = factory.indexOf(
+    'await createDormantBalanceConsumerSqsReceiptResource(reviewed.infrastructure),',
+    persistenceCloseCapture,
+  );
+  const sqsCloseCapture = factory.indexOf('sqsClose = close;', sqsConstruction);
+  const compositionConstruction = factory.indexOf(
+    'const composition = createBalanceSyncConsumerComposition({',
+    sqsCloseCapture,
+  );
+
+  const runStart = factory.indexOf(
+    'const run = (signal: AbortSignal): Promise<void> => {',
+    compositionConstruction,
+  );
+  const runClosedGuard = factory.indexOf(
+    'if (closed) return Promise.reject(new BalanceSyncConsumerResourceClosedError());',
+    runStart,
+  );
+  const runStartedGuard = factory.indexOf('if (started) {', runClosedGuard);
+  const signalReview = factory.indexOf('supplied = reviewedAbortSignal(signal);', runStartedGuard);
+  const privateController = factory.indexOf(
+    'const controller = new AbortController();',
+    signalReview,
+  );
+  const callerListener = factory.indexOf(
+    'supplied.addAbortListener(relayAbort);',
+    privateController,
+  );
+  const callerAbortRecheck = factory.indexOf(
+    'if (supplied.aborted()) relayAbort();',
+    callerListener,
+  );
+  const startedTransition = factory.indexOf('started = true;', callerAbortRecheck);
+  const runGate = factory.indexOf(
+    'const startGate = new Promise<void>((resolve) => {',
+    startedTransition,
+  );
+  const consumerRun = factory.indexOf(
+    '.then(() => composition.consumer.run(controller.signal))',
+    runGate,
+  );
+  const runFailureSanitization = factory.indexOf(
+    'throw new BalanceSyncConsumerResourceRunError();',
+    consumerRun,
+  );
+  const runFinalizer = factory.indexOf('.finally(() => {', runFailureSanitization);
+  const callerListenerRemoval = factory.indexOf(
+    'supplied.removeAbortListener(relayAbort);',
+    runFinalizer,
+  );
+  const activeControllerPublication = factory.indexOf(
+    'activeRunController = controller;',
+    callerListenerRemoval,
+  );
+  const activeRunPublication = factory.indexOf(
+    'activeRun = operation;',
+    activeControllerPublication,
+  );
+  const runRelease = factory.indexOf('startRun();', activeRunPublication);
+
+  const closeStart = factory.indexOf('const close = (): Promise<void> => {', runRelease);
+  const closeTransition = factory.indexOf('closed = true;', closeStart);
+  const closeMemoizationGuard = factory.indexOf(
+    'if (closePromise !== undefined) return closePromise;',
+    closeTransition,
+  );
+  const acceptedRunSnapshot = factory.indexOf(
+    'const acceptedRun = activeRun;',
+    closeMemoizationGuard,
+  );
+  const acceptedRunControllerSnapshot = factory.indexOf(
+    'const acceptedRunController = activeRunController;',
+    acceptedRunSnapshot,
+  );
+  const closePromisePublication = factory.indexOf(
+    'closePromise = new Promise<void>((resolve) => {',
+    acceptedRunControllerSnapshot,
+  );
+  const acceptedRunDrain = factory.indexOf(
+    'if (acceptedRun !== undefined) await Promise.allSettled([acceptedRun]);',
+    closePromisePublication,
+  );
+  const sqsClose = factory.indexOf(
+    'const sqsClosed = await attemptClose(resourceSqsClose);',
+    acceptedRunDrain,
+  );
+  const persistenceClose = factory.indexOf(
+    'const persistenceClosed = await attemptClose(resourcePersistenceClose);',
+    sqsClose,
+  );
+  const closeFailureSanitization = factory.indexOf(
+    'throw new BalanceSyncConsumerResourceCloseError();',
+    persistenceClose,
+  );
+  const privateCloseAbort = factory.indexOf(
+    "acceptedRunController?.abort(new Error('Balance sync consumer resource closed'));",
+    closePromisePublication,
+  );
+  const closeRelease = factory.indexOf('startClose();', privateCloseAbort);
+  const closePromiseReturn = factory.indexOf('return closePromise;', closeRelease);
+  const facadeReturn = factory.indexOf(
+    'return frozenNullPrototype<DormantBalanceSyncConsumerResource>({ run, close });',
+    closePromiseReturn,
+  );
+  const constructionSqsCleanup = factory.indexOf('await attemptClose(sqsClose);', facadeReturn);
+  const constructionPersistenceCleanup = factory.indexOf(
+    'await attemptClose(persistenceClose);',
+    constructionSqsCleanup,
+  );
+
+  if (
+    persistenceReviewStart < 0 ||
+    persistenceCloseRetention <= persistenceReviewStart ||
+    persistencePortReview <= persistenceCloseRetention ||
+    sqsReviewStart <= persistencePortReview ||
+    sqsCloseRetention <= sqsReviewStart ||
+    receiptPortReview <= sqsCloseRetention ||
+    reviewedSnapshot < 0 ||
+    persistenceConstruction <= reviewedSnapshot ||
+    persistenceCloseCapture <= persistenceConstruction ||
+    sqsConstruction <= persistenceCloseCapture ||
+    sqsCloseCapture <= sqsConstruction ||
+    compositionConstruction <= sqsCloseCapture ||
+    runStart <= compositionConstruction ||
+    runClosedGuard <= runStart ||
+    runStartedGuard <= runClosedGuard ||
+    signalReview <= runStartedGuard ||
+    privateController <= signalReview ||
+    callerListener <= privateController ||
+    callerAbortRecheck <= callerListener ||
+    startedTransition <= callerAbortRecheck ||
+    runGate <= startedTransition ||
+    consumerRun <= runGate ||
+    runFailureSanitization <= consumerRun ||
+    runFinalizer <= runFailureSanitization ||
+    callerListenerRemoval <= runFinalizer ||
+    activeControllerPublication <= callerListenerRemoval ||
+    activeRunPublication <= activeControllerPublication ||
+    runRelease <= activeRunPublication ||
+    closeStart <= runRelease ||
+    closeTransition <= closeStart ||
+    closeMemoizationGuard <= closeTransition ||
+    acceptedRunSnapshot <= closeMemoizationGuard ||
+    acceptedRunControllerSnapshot <= acceptedRunSnapshot ||
+    closePromisePublication <= acceptedRunControllerSnapshot ||
+    acceptedRunDrain <= closePromisePublication ||
+    sqsClose <= acceptedRunDrain ||
+    persistenceClose <= sqsClose ||
+    closeFailureSanitization <= persistenceClose ||
+    privateCloseAbort <= closePromisePublication ||
+    closeRelease <= privateCloseAbort ||
+    closePromiseReturn <= closeRelease ||
+    facadeReturn <= closePromiseReturn ||
+    constructionSqsCleanup <= facadeReturn ||
+    constructionPersistenceCleanup <= constructionSqsCleanup
+  ) {
+    return false;
+  }
+
+  const fixedErrors = [
+    [
+      "readonly code = 'BALANCE_SYNC_CONSUMER_RESOURCE_CONFIGURATION_INVALID' as const;",
+      "super('Balance sync consumer resource configuration is invalid');",
+      "this.name = 'BalanceSyncConsumerResourceConfigurationError';",
+    ],
+    [
+      "readonly code = 'BALANCE_SYNC_CONSUMER_RESOURCE_CONSTRUCTION_FAILED' as const;",
+      "super('Balance sync consumer resource construction failed');",
+      "this.name = 'BalanceSyncConsumerResourceConstructionError';",
+    ],
+    [
+      "readonly code = 'BALANCE_SYNC_CONSUMER_RESOURCE_RUN_FAILED' as const;",
+      "super('Balance sync consumer resource run failed');",
+      "this.name = 'BalanceSyncConsumerResourceRunError';",
+    ],
+    [
+      "readonly code = 'BALANCE_SYNC_CONSUMER_RESOURCE_ALREADY_STARTED' as const;",
+      "super('Balance sync consumer resource is already started');",
+      "this.name = 'BalanceSyncConsumerResourceAlreadyStartedError';",
+    ],
+    [
+      "readonly code = 'BALANCE_SYNC_CONSUMER_RESOURCE_SIGNAL_INVALID' as const;",
+      "super('Balance sync consumer resource signal is invalid');",
+      "this.name = 'BalanceSyncConsumerResourceSignalError';",
+    ],
+    [
+      "readonly code = 'BALANCE_SYNC_CONSUMER_RESOURCE_CLOSED' as const;",
+      "super('Balance sync consumer resource is closed');",
+      "this.name = 'BalanceSyncConsumerResourceClosedError';",
+    ],
+    [
+      "readonly code = 'BALANCE_SYNC_CONSUMER_RESOURCE_CLOSE_FAILED' as const;",
+      "super('Balance sync consumer resource close failed');",
+      "this.name = 'BalanceSyncConsumerResourceCloseError';",
+    ],
+  ] as const;
+  const launchAndBarrelSources = [
+    sources.runtimeSource,
+    sources.cliSource,
+    sources.cliModeSource,
+    sources.activationSource,
+    sources.compositionSource,
+    sources.blockchainSyncIndexSource,
+    sources.blockchainSyncModuleSource,
+    sources.sqsModuleSource,
+    sources.appModuleSource,
+    sources.applicationRootSource,
+    sources.localDevelopmentAppModuleSource,
+    sources.mainSource,
+    sources.outboxWorkerCliSource,
+    sources.redisSessionRevocationCliSource,
+    sources.migrationCliSource,
+    sources.apiPackageSource,
+    sources.rootPackageSource,
+    sources.applicationTemplateSource,
+    sources.workloadTemplateSource,
+    sources.balanceConsumerEnvelopeSource,
+    sources.releaseManifestSource,
+    sources.productionContainerValidatorSource,
+  ];
+
+  return (
+    trimmedExecutableLines(resource).filter((line) => line.startsWith('export ')).length === 3 &&
+    trimmedExecutableLines(dependencyInterface).filter((line) => line.startsWith('readonly '))
+      .length === 7 &&
+    exactExecutableLineCount(
+      dependencyInterface,
+      'readonly infrastructureConfig: BalanceConsumerInfrastructureConfig;',
+    ) === 1 &&
+    exactExecutableLineCount(
+      dependencyInterface,
+      'readonly balanceConsumerConfig: EnabledBalanceConsumerConfig;',
+    ) === 1 &&
+    exactExecutableLineCount(dependencyInterface, 'readonly observability: ObservabilityPort;') ===
+      1 &&
+    exactExecutableLineCount(
+      dependencyInterface,
+      'readonly ethereumTransport: BalanceJsonRpcTransport;',
+    ) === 1 &&
+    exactExecutableLineCount(
+      dependencyInterface,
+      'readonly solanaTransport: BalanceJsonRpcTransport;',
+    ) === 1 &&
+    exactExecutableLineCount(dependencyInterface, 'readonly clock: BalanceSyncClockPort;') === 1 &&
+    exactExecutableLineCount(dependencyInterface, 'readonly metrics: BalanceSyncMetricsPort;') ===
+      1 &&
+    trimmedExecutableLines(resourceInterface).filter((line) => line.startsWith('readonly '))
+      .length === 2 &&
+    exactExecutableLineCount(
+      resourceInterface,
+      'readonly run: (signal: AbortSignal) => Promise<void>;',
+    ) === 1 &&
+    exactExecutableLineCount(resourceInterface, 'readonly close: () => Promise<void>;') === 1 &&
+    exactExecutableLineCount(
+      resource,
+      "} from '../infrastructure/postgres/balance-consumer-persistence.resource';",
+    ) === 1 &&
+    exactExecutableLineCount(
+      resource,
+      "} from '../infrastructure/sqs/balance-consumer-sqs-receipt.resource';",
+    ) === 1 &&
+    exactExecutableLineCount(
+      resource,
+      "import { createBalanceSyncConsumerComposition } from './balance-sync-consumer.composition';",
+    ) === 1 &&
+    exactExecutableLineCount(
+      resource,
+      'const descriptors = Object.getOwnPropertyDescriptors(value) as unknown as PropertyDescriptorMap;',
+    ) === 2 &&
+    exactExecutableLineCount(
+      infrastructureSnapshot,
+      "if (infrastructure.workload !== 'balance-consumer') return invalidConfiguration();",
+    ) === 1 &&
+    exactExecutableLineCount(
+      infrastructureSnapshot,
+      "'endpoint' in sqs === 'credentialRelativeUri' in sqs ||",
+    ) === 1 &&
+    exactExecutableLineCount(
+      infrastructureSnapshot,
+      'sqs.maxReceiveCount !== BALANCE_SYNC_POLICY.maxAttempts ||',
+    ) === 1 &&
+    exactExecutableLineCount(
+      infrastructureSnapshot,
+      'sqs.retryBaseDelaySeconds !== BALANCE_SYNC_POLICY.retryBaseDelaySeconds ||',
+    ) === 1 &&
+    exactExecutableLineCount(
+      infrastructureSnapshot,
+      'sqs.retryMaxDelaySeconds !== BALANCE_SYNC_POLICY.retryMaximumDelaySeconds',
+    ) === 1 &&
+    exactExecutableLineCount(
+      infrastructureSnapshot,
+      'database: snapshotDatabase(infrastructure.database),',
+    ) === 1 &&
+    exactExecutableLineCount(infrastructureSnapshot, 'return Object.freeze({') === 1 &&
+    exactExecutableLineCount(infrastructureSnapshot, 'sqs: Object.freeze({') === 1 &&
+    exactExecutableLineCount(
+      resource,
+      "if (record.sessionRole !== 'crypto_balance_consumer_runtime') return invalidConfiguration();",
+    ) === 1 &&
+    exactExecutableLineCount(
+      resource,
+      "activeWalletRegistrationKey(walletMetadataSealKeys).purpose !== 'metadata-seal'",
+    ) === 1 &&
+    exactExecutableLineCount(
+      reviewedDependencies,
+      'const dependencies = exactDataRecord(value, DEPENDENCY_KEYS);',
+    ) === 1 &&
+    exactExecutableLineCount(
+      reviewedDependencies,
+      'infrastructure: snapshotInfrastructure(dependencies.infrastructureConfig),',
+    ) === 1 &&
+    exactExecutableLineCount(
+      reviewedDependencies,
+      'balanceConsumer: snapshotBalanceConsumerConfig(dependencies.balanceConsumerConfig),',
+    ) === 1 &&
+    exactExecutableLineCount(reviewedDependencies, 'return Object.freeze({') === 1 &&
+    exactExecutableLineCount(
+      childFacadeReview,
+      'if (Object.getPrototypeOf(value) !== null || !Object.isFrozen(value)) {',
+    ) === 1 &&
+    exactExecutableLineCount(childFacadeReview, 'descriptor.configurable !== false ||') === 1 &&
+    exactExecutableLineCount(childFacadeReview, 'descriptor.writable !== false') === 1 &&
+    exactExecutableLineCount(childFacadeReview, 'retainClose(close);') === 2 &&
+    exactExecutableLineCount(factory, 'reviewed.infrastructure,') === 1 &&
+    exactExecutableLineCount(
+      factory,
+      'await createDormantBalanceConsumerSqsReceiptResource(reviewed.infrastructure),',
+    ) === 1 &&
+    exactExecutableLineCount(
+      factory,
+      'visibilityTimeoutSeconds: reviewed.infrastructure.sqs.visibilityTimeoutSeconds,',
+    ) === 1 &&
+    exactExecutableLineCount(factory, 'sqs: sqs.receipt,') === 1 &&
+    exactExecutableLineCount(
+      factory,
+      'walletAddressResolver: persistence.walletAddressResolver,',
+    ) === 1 &&
+    exactExecutableLineCount(factory, 'checkpoints: persistence.checkpoints,') === 1 &&
+    exactExecutableLineCount(factory, 'let started = false;') === 1 &&
+    exactExecutableLineCount(factory, 'started = true;') === 1 &&
+    !/^\s*started\s*=\s*false;/mu.test(factory) &&
+    exactExecutableLineCount(
+      resource,
+      "const abortedGetter = Object.getOwnPropertyDescriptor(AbortSignal.prototype, 'aborted')?.get;",
+    ) === 1 &&
+    exactExecutableLineCount(
+      resource,
+      "EventTarget.prototype.addEventListener.call(value, 'abort', listener, { once: true });",
+    ) === 1 &&
+    exactExecutableLineCount(
+      resource,
+      "EventTarget.prototype.removeEventListener.call(value, 'abort', listener);",
+    ) === 1 &&
+    exactExecutableLineCount(
+      factory,
+      "controller.abort(new Error('Balance sync consumer run aborted'));",
+    ) === 1 &&
+    exactExecutableLineCount(factory, 'supplied.removeAbortListener(relayAbort);') === 2 &&
+    exactExecutableLineCount(
+      factory,
+      'if (acceptedRun !== undefined) await Promise.allSettled([acceptedRun]);',
+    ) === 1 &&
+    exactExecutableLineCount(factory, 'return closePromise;') === 1 &&
+    exactExecutableLineCount(
+      resource,
+      'return Object.freeze(Object.assign(Object.create(null) as T, members));',
+    ) === 1 &&
+    exactExecutableLineCount(
+      factory,
+      'return frozenNullPrototype<DormantBalanceSyncConsumerResource>({ run, close });',
+    ) === 1 &&
+    fixedErrors.every((binding) =>
+      binding.every((line) => exactExecutableLineCount(resource, line) === 1),
+    ) &&
+    !/\b(?:AbortSignal\.any|loadBalanceConsumerConfig|loadBalanceConsumerInfrastructureConfig|loadInfrastructureConfig|InfrastructureConfigModule|NestFactory|PostgresService|SQSClient|SqsModule|SqsService|SqsQueueReceiptTransport|PinnedSqsQueueReceiptAdapter|createPostgresPool|createRawSqsClient|ReceiveMessageCommand|DeleteMessageCommand|ChangeMessageVisibilityCommand|XMLHttpRequest|WebSocket|axios|undici)\b/u.test(
+      resource,
+    ) &&
+    !/(?:@aws-sdk\/|from ['"]pg['"]|node:(?:http|https|net|tls)|process\.env|\bfetch\s*\(|\bset(?:Interval|Timeout)\s*\(|\bcreateApplicationContext\s*\(|@Module\s*\(|\.listen\s*\(|\.reason\b)/u.test(
+      resource,
+    ) &&
+    !factory.includes('dependencies.infrastructureConfig') &&
+    !factory.includes('dependencies.balanceConsumerConfig') &&
+    !factory.includes('snapshotInfrastructure(') &&
+    !factory.includes('Promise.all([') &&
+    !/\bcause\s*[:=]/u.test(resource) &&
+    launchAndBarrelSources.every(
+      (source) =>
+        !source.includes('createDormantBalanceSyncConsumerResource') &&
+        !source.includes('DormantBalanceSyncConsumerResource') &&
+        !source.includes('balance-sync-consumer.resource'),
     )
   );
 }
@@ -3642,6 +4120,7 @@ export function inspectBalanceConsumerDeploymentArtifacts(
     const contractValid =
       hasExactReviewedBalanceConsumerArtifactBytes(sources) &&
       hasDormantBalanceConsumerSourceContract(sources) &&
+      hasDormantBalanceConsumerAggregateResourceContract(sources) &&
       hasDormantBalanceConsumerPersistenceResourceContract(sources) &&
       hasDormantBalanceConsumerSqsReceiptResourceContract(sources) &&
       hasPinnedBalanceConsumerQueueBoundaryContract(sources) &&
@@ -4278,6 +4757,13 @@ export function loadRepositoryProductionPreflightInput(
         resolve(
           repositoryRoot,
           'apps/api/src/blockchain-sync/application/balance-sync-consumer.composition.ts',
+        ),
+        'utf8',
+      ),
+      balanceConsumerResourceSource: readFileSync(
+        resolve(
+          repositoryRoot,
+          'apps/api/src/blockchain-sync/application/balance-sync-consumer.resource.ts',
         ),
         'utf8',
       ),

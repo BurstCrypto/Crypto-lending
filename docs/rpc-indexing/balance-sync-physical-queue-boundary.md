@@ -22,11 +22,14 @@ a `QueueUrl`. The registered generic worker is pinned to the jobs queue and
 rejects balance jobs before invoking a handler. The dormant balance composition
 accepts an already source-pinned balance receipt capability and accepts only
 exact `blockchain.balance-sync@1` envelopes, rejecting ledger, yield, unknown,
-or wrong-version jobs before handler invocation. The future aggregate must
-establish that source provenance and derive receive visibility and worker
-heartbeat visibility from the same frozen configuration snapshot. When the raw
-`SqsService` is loaded for the balance-consumer workload, send/publish,
-batch-publish, and queue health inspection fail closed.
+or wrong-version jobs before handler invocation. The new source-only
+`application/balance-sync-consumer.resource.ts` aggregate establishes the
+capsule provenance boundary, gives the SQS and persistence child factories the
+same exact frozen infrastructure snapshot, derives worker visibility from that
+snapshot, and passes the exact pinned receipt and persistence ports into the
+composition. It exposes only a one-shot `run(signal)` and memoized `close()`.
+When the raw `SqsService` is loaded for the balance-consumer workload,
+send/publish, batch-publish, and queue health inspection fail closed.
 
 The source-only balance-consumer receipt capsule is not registered or exported
 through a barrel. It snapshots hostile configuration before allocating its
@@ -35,9 +38,10 @@ frozen receipt and close closures. Its client can issue only receive, delete,
 and change-visibility commands; it does not read or retain the balance DLQ URL,
 fetch arbitrary message attributes, or expose send, queue-attribute, health, or
 direct-DLQ capabilities. A separate source-only persistence capsule similarly
-encloses its PostgreSQL pool and balance repositories. Neither capsule is
-referenced by the runtime, CLI, Nest module, application composition, or another
-launch root.
+encloses its PostgreSQL pool and balance repositories. Both capsules are
+referenced only by the dormant aggregate; the aggregate itself is unbarreled,
+unregistered, and absent from the runtime, CLI, activation path, Nest module,
+and every other launch root.
 
 The application infrastructure templates define separate KMS-encrypted
 source/DLQ pairs with TLS-only policies and exact redrive relationships. The
@@ -80,6 +84,7 @@ it exits sanitized and nonzero before dynamically importing the dedicated
 runtime or constructing either capsule. Even if that import boundary were
 reached, the runtime is an exact empty Nest `@Module({})`; its start function
 always rejects `BALANCE_CONSUMER_RUNTIME_NOT_COMPOSED` and composes no resource.
+The source-only aggregate does not compose or replace that refusing runtime.
 The database bootstrap declares the dormant `crypto_balance_consumer_runtime`
 capability identity and bounded rotating login slots, but gives them no database
 connection, schema, object, function, default-ACL, or ownership authority.
@@ -110,10 +115,15 @@ semantics, not evidence of an executing consumer or deployed queue behavior.
 
 LocalStack creates both pairs and Docker health verifies all four queue names. CI and the local demo use four explicit, distinct loopback URLs.
 
-This checkpoint used local source and unit validation only. No AWS, SQS, ECS
-credential endpoint, RPC, or chain-provider call was made; no task, IAM identity,
-dedicated balance-consumer database grant, service, or runtime activation was
-deployed.
+This checkpoint used local source and unit validation only. Aggregate wiring,
+one-shot lifecycle, close/drain ordering, and failure cleanup were exercised
+with mocked child construction and local in-memory capabilities; they are not
+live queue, provider, database, IAM, or deployment evidence. No AWS, SQS, ECS
+credential endpoint, RPC, or chain-provider call was made; no task, IAM
+identity, dedicated balance-consumer database grant, service, or runtime
+activation was deployed. The aggregate does not select or implement RPC
+providers, activate source processing, grant database or IAM authority, deploy
+resources, create cloud costs, or satisfy any remaining live-evidence gate.
 
 ## Remaining activation gates
 
