@@ -452,11 +452,23 @@ function assertSafeDirectoryOrWorkspaceRoot(context, absolutePath) {
   safeExistingPath(context, absolutePath, 'directory');
 }
 
-function hashStableFile(context, absolutePath) {
+function accountCandidateFiles(totals, fileCount, totalBytes) {
+  if (totals.fileCount > MAX_FILES - fileCount) {
+    fail('The release candidate exceeds the aggregate file limit.');
+  }
+  if (totals.totalBytes > MAX_TOTAL_BYTES - totalBytes) {
+    fail('The release candidate exceeds the aggregate byte limit.');
+  }
+  totals.fileCount += fileCount;
+  totals.totalBytes += totalBytes;
+}
+
+function hashStableFile(context, absolutePath, candidateTotals) {
   const beforePath = safeExistingPath(context, absolutePath, 'file');
   const before = beforePath.finalStat;
   if (before.size > BigInt(MAX_FILE_BYTES))
     fail('A release component file exceeds the size limit.');
+  accountCandidateFiles(candidateTotals, 1, Number(before.size));
 
   const noFollow = process.platform === 'win32' ? 0 : (fsConstants.O_NOFOLLOW ?? 0);
   let descriptor;
@@ -606,7 +618,7 @@ function readBoundedStableFile(absolutePath, maximumBytes, afterFirstReadForTest
   }
 }
 
-function collectDirectoryFiles(context, absoluteRoot) {
+function collectDirectoryFiles(context, absoluteRoot, candidateTotals) {
   const files = [];
   const caseFolded = new Set();
   let totalBytes = 0;
@@ -643,7 +655,7 @@ function collectDirectoryFiles(context, absoluteRoot) {
       caseFolded.add(folded);
       if (files.length >= MAX_FILES) fail('The release candidate contains too many files.');
 
-      const fingerprint = hashStableFile(context, absolutePath);
+      const fingerprint = hashStableFile(context, absolutePath, candidateTotals);
       totalBytes += fingerprint.size;
       if (totalBytes > MAX_TOTAL_BYTES) fail('The release candidate exceeds the total size limit.');
       files.push(Object.freeze({ path: manifestPath, ...fingerprint }));
@@ -659,14 +671,16 @@ function collectDirectoryFiles(context, absoluteRoot) {
   return Object.freeze(files.sort((left, right) => compareUtf8(left.path, right.path)));
 }
 
-function buildComponent(context, spec) {
+function buildComponent(context, spec, candidateTotals) {
   const absolutePath = resolve(context.lexicalRoot, ...spec.path.split('/'));
   assertContained(context.lexicalRoot, absolutePath);
   let files;
   if (spec.kind === 'file') {
-    files = Object.freeze([Object.freeze({ path: '.', ...hashStableFile(context, absolutePath) })]);
+    files = Object.freeze([
+      Object.freeze({ path: '.', ...hashStableFile(context, absolutePath, candidateTotals) }),
+    ]);
   } else {
-    files = collectDirectoryFiles(context, absolutePath);
+    files = collectDirectoryFiles(context, absolutePath, candidateTotals);
     if (files.length === 0) fail('A release component directory is empty.');
   }
 
@@ -798,8 +812,14 @@ export function validateReleaseManifest(manifest) {
   }
   validateSource(manifest.source);
   validateBuilder(manifest.builder);
+  const candidateTotals = { fileCount: 0, totalBytes: 0 };
   for (let index = 0; index < RELEASE_COMPONENTS.length; index += 1) {
     validateComponent(manifest.components[index], RELEASE_COMPONENTS[index]);
+    accountCandidateFiles(
+      candidateTotals,
+      manifest.components[index].fileCount,
+      manifest.components[index].totalBytes,
+    );
   }
 
   const payload = {
@@ -826,7 +846,10 @@ export function createReleaseManifest(workspaceRoot, source, builder = undefined
     },
   );
   validateBuilder(resolvedBuilder);
-  const components = Object.freeze(RELEASE_COMPONENTS.map((spec) => buildComponent(context, spec)));
+  const candidateTotals = { fileCount: 0, totalBytes: 0 };
+  const components = Object.freeze(
+    RELEASE_COMPONENTS.map((spec) => buildComponent(context, spec, candidateTotals)),
+  );
   assertWorkspaceContextCurrent(context);
   const payload = Object.freeze({
     schemaVersion: 1,

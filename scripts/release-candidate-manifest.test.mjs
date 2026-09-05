@@ -127,6 +127,33 @@ function initializeRepository(root) {
   };
 }
 
+function resignComponent(component) {
+  component.fileCount = component.files.length;
+  component.totalBytes = component.files.reduce((sum, file) => sum + file.size, 0);
+  const payload = {
+    kind: component.kind,
+    name: component.name,
+    path: component.path,
+    files: component.files,
+  };
+  component.sha256 = createHash('sha256')
+    .update(`crypto-lending/release-component/v1/${component.name}\0`, 'utf8')
+    .update(canonicalJson(payload), 'utf8')
+    .digest('hex');
+}
+
+function expandComponentToFileCount(component, fileCount) {
+  const filesByPath = new Map(component.files.map((file) => [file.path, file]));
+  for (let index = 0; filesByPath.size < fileCount; index += 1) {
+    const path = `generated/${String(index).padStart(5, '0')}.js`;
+    filesByPath.set(path, { path, sha256: '0'.repeat(64), size: 0 });
+  }
+  component.files = [...filesByPath.values()].sort((left, right) =>
+    Buffer.compare(Buffer.from(left.path, 'utf8'), Buffer.from(right.path, 'utf8')),
+  );
+  resignComponent(component);
+}
+
 test('creates a deterministic canonical manifest for the fixed release surface', () => {
   const root = createWorkspace();
   const first = createReleaseManifest(root, SOURCE, BUILDER);
@@ -354,6 +381,30 @@ test('rejects noncanonical, duplicate-key, unknown-key, traversal, and digest-ta
     platformAlias.components[0].files[0].path = invalidPath;
     assert.throws(() => validateReleaseManifest(platformAlias), /file entry/u, invalidPath);
   }
+});
+
+test('rejects a manifest whose individually valid components exceed the aggregate byte limit', () => {
+  const root = createWorkspace();
+  const manifest = structuredClone(createReleaseManifest(root, SOURCE, BUILDER));
+
+  for (const component of manifest.components) {
+    component.files[0].size = 100 * 1024 * 1024;
+    resignComponent(component);
+  }
+
+  assert.throws(() => validateReleaseManifest(manifest), /aggregate byte limit/u);
+});
+
+test('rejects a manifest whose individually valid components exceed the aggregate file limit', () => {
+  const root = createWorkspace();
+  const manifest = structuredClone(createReleaseManifest(root, SOURCE, BUILDER));
+  const directoryComponents = manifest.components.filter(({ kind }) => kind === 'directory');
+  assert.ok(directoryComponents.length >= 2);
+
+  expandComponentToFileCount(directoryComponents[0], 25_000);
+  expandComponentToFileCount(directoryComponents[1], 25_000);
+
+  assert.throws(() => validateReleaseManifest(manifest), /aggregate file limit/u);
 });
 
 test('rejects non-NFC paths and Unicode compatibility aliases in generated output', () => {
