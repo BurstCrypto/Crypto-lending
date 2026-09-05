@@ -1,10 +1,20 @@
-import { readFileSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
+import { TextDecoder } from 'node:util';
 import { fileURLToPath } from 'node:url';
 
+import { parseStrictJsonBytes } from '../shared/parse-strict-json.mjs';
+import { readSecureLocalFile } from '../shared/read-secure-local-file.mjs';
 import { validateBillingControlRecord } from './validate-billing-control-record.mjs';
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
+const maximumBytes = Object.freeze({
+  template: 51_200,
+  guard: 131_072,
+  applicationGuard: 131_072,
+  preflight: 65_536,
+  record: 65_536,
+  readonlyPolicy: 16_384,
+});
 
 function parseArguments(argv) {
   const options = {
@@ -44,11 +54,25 @@ function parseArguments(argv) {
   return options;
 }
 
-function readRequiredFile(path, label, errors) {
+function readRequiredFile(path, label, limit, errors) {
   try {
-    return readFileSync(path, 'utf8');
-  } catch (error) {
-    errors.push(`${label} could not be read at ${path}: ${error.message}`);
+    return readSecureLocalFile(path, limit);
+  } catch {
+    errors.push(
+      `${label} must be a non-empty, stable, single-link regular file of at most ${limit} bytes at a canonical local path.`,
+    );
+    return undefined;
+  }
+}
+
+function decodeRequiredUtf8(bytes, label, errors) {
+  if (bytes === undefined) {
+    return '';
+  }
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch {
+    errors.push(`${label} must contain valid UTF-8 text.`);
     return '';
   }
 }
@@ -75,7 +99,7 @@ function topLevelBlocks(source, sectionName) {
       break;
     }
     const entry = line.match(
-      /^  (?:(?:"([A-Za-z][A-Za-z0-9]*)")|(?:'([A-Za-z][A-Za-z0-9]*)')|([A-Za-z][A-Za-z0-9]*))\s*:\s*$/,
+      /^ {2}(?:(?:"([A-Za-z][A-Za-z0-9]*)")|(?:'([A-Za-z][A-Za-z0-9]*)')|([A-Za-z][A-Za-z0-9]*))\s*:\s*$/,
     );
     if (entry) {
       flush();
@@ -99,12 +123,9 @@ function requireFragments(source, label, fragments, errors) {
   }
 }
 
-function validateTemplate(source, path, errors) {
+function validateTemplate(source, errors) {
   if (!source) {
     return;
-  }
-  if (statSync(path).size > 51_200) {
-    errors.push('Account guardrail template exceeds the 51,200-byte direct-upload limit.');
   }
   if (/^\s*(?:["']?Transform["']?|["']?Fn::Transform["']?)\s*:/m.test(source)) {
     errors.push(
@@ -285,7 +306,7 @@ function validateTemplate(source, path, errors) {
   if (/^\s+Default:\s+[^\r\n]*@/m.test(source)) {
     errors.push('The template must not commit a default notification email address.');
   }
-  if (/^\s+Address:\s+(?!\!Ref)[^\r\n]*@/m.test(source)) {
+  if (/^\s+Address:\s+(?![!]Ref)[^\r\n]*@/m.test(source)) {
     errors.push('The template must not commit a literal notification email address.');
   }
   if (/^\s+(?:SubscriptionType|Type):\s+SNS\s*$/m.test(source)) {
@@ -443,15 +464,17 @@ function validateApplicationGuard(source, errors) {
   );
 }
 
-function validateReadOnlyPreflightPolicy(source, errors) {
-  if (!source) {
+function validateReadOnlyPreflightPolicy(bytes, errors) {
+  if (bytes === undefined) {
     return;
   }
   let policy;
   try {
-    policy = JSON.parse(source);
-  } catch (error) {
-    errors.push(`KAN-229 read-only preflight policy is not valid JSON: ${error.message}`);
+    policy = parseStrictJsonBytes(bytes);
+  } catch {
+    errors.push(
+      'KAN-229 read-only preflight policy must be strict UTF-8 JSON without a byte-order mark or duplicate object keys.',
+    );
     return;
   }
 
@@ -605,32 +628,66 @@ export function validateAccountGuardrails({
   readonlyPolicy,
 }) {
   const errors = [];
-  const templateSource = readRequiredFile(template, 'Account guardrail template', errors);
-  const guardSource = readRequiredFile(guard, 'Account guardrail invocation guard', errors);
-  const applicationGuardSource = readRequiredFile(
+  const templateBytes = readRequiredFile(
+    template,
+    'Account guardrail template',
+    maximumBytes.template,
+    errors,
+  );
+  const guardBytes = readRequiredFile(
+    guard,
+    'Account guardrail invocation guard',
+    maximumBytes.guard,
+    errors,
+  );
+  const applicationGuardBytes = readRequiredFile(
     applicationGuard,
+    'Application invocation guard',
+    maximumBytes.applicationGuard,
+    errors,
+  );
+  const preflightBytes = readRequiredFile(
+    preflight,
+    'KAN-229 read-only preflight',
+    maximumBytes.preflight,
+    errors,
+  );
+  const recordBytes = readRequiredFile(
+    record,
+    'Billing control record example',
+    maximumBytes.record,
+    errors,
+  );
+  const readonlyPolicyBytes = readRequiredFile(
+    readonlyPolicy,
+    'KAN-229 read-only preflight policy',
+    maximumBytes.readonlyPolicy,
+    errors,
+  );
+  const templateSource = decodeRequiredUtf8(templateBytes, 'Account guardrail template', errors);
+  const guardSource = decodeRequiredUtf8(guardBytes, 'Account guardrail invocation guard', errors);
+  const applicationGuardSource = decodeRequiredUtf8(
+    applicationGuardBytes,
     'Application invocation guard',
     errors,
   );
-  const preflightSource = readRequiredFile(preflight, 'KAN-229 read-only preflight', errors);
-  const recordSource = readRequiredFile(record, 'Billing control record example', errors);
-  const readonlyPolicySource = readRequiredFile(
-    readonlyPolicy,
-    'KAN-229 read-only preflight policy',
-    errors,
-  );
+  const preflightSource = decodeRequiredUtf8(preflightBytes, 'KAN-229 read-only preflight', errors);
 
-  validateTemplate(templateSource, template, errors);
+  validateTemplate(templateSource, errors);
   validateStandaloneGuard(guardSource, errors);
   validateApplicationGuard(applicationGuardSource, errors);
   validateReadOnlyPreflight(preflightSource, errors);
-  validateReadOnlyPreflightPolicy(readonlyPolicySource, errors);
-  if (recordSource) {
+  validateReadOnlyPreflightPolicy(readonlyPolicyBytes, errors);
+  if (recordBytes !== undefined) {
     try {
-      const result = validateBillingControlRecord(JSON.parse(recordSource), { mode: 'example' });
+      const result = validateBillingControlRecord(parseStrictJsonBytes(recordBytes), {
+        mode: 'example',
+      });
       errors.push(...result.errors.map((error) => `Control record example: ${error}`));
-    } catch (error) {
-      errors.push(`Billing control record example is not valid JSON: ${error.message}`);
+    } catch {
+      errors.push(
+        'Billing control record example must be strict UTF-8 JSON without a byte-order mark or duplicate object keys.',
+      );
     }
   }
 

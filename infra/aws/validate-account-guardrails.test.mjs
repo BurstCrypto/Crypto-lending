@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { linkSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
@@ -36,6 +36,27 @@ function withMutatedReadOnlyPolicy(replace) {
   };
 }
 
+function withMutatedBillingRecord(replace) {
+  const directory = mkdtempSync(join(tmpdir(), 'kan-229-billing-record-'));
+  const path = join(directory, 'billing-control-record.example.json');
+  writeFileSync(path, replace(readFileSync(paths.record, 'utf8')), 'utf8');
+  return {
+    result: validateAccountGuardrails({ ...paths, record: path }),
+    cleanup: () => rmSync(directory, { recursive: true, force: true }),
+  };
+}
+
+function withTemporaryArtifact(option, filename, contents) {
+  const directory = mkdtempSync(join(tmpdir(), 'kan-229-controlled-file-'));
+  const path = join(directory, filename);
+  writeFileSync(path, contents);
+  return {
+    path,
+    result: validateAccountGuardrails({ ...paths, [option]: path }),
+    cleanup: () => rmSync(directory, { recursive: true, force: true }),
+  };
+}
+
 function withMutatedPreflight(replace) {
   const directory = mkdtempSync(join(tmpdir(), 'kan-229-readonly-preflight-'));
   const path = join(directory, 'invoke-account-readonly-preflight.ps1');
@@ -68,6 +89,101 @@ test('rejects Cost Explorer or write permissions in the constrained preflight po
     );
   } finally {
     mutation.cleanup();
+  }
+});
+
+test('rejects review-ambiguous duplicate keys in the read-only policy', () => {
+  const mutations = [
+    (source) =>
+      source.replace(/^\{\r?\n {2}"Version":/u, '{\n  "Version": "2099-01-01",\n  "Version":'),
+    (source) => source.replace('"Effect": "Allow",', '"Effect": "Deny",\n      "Effect": "Allow",'),
+  ];
+
+  for (const mutate of mutations) {
+    const mutation = withMutatedReadOnlyPolicy(mutate);
+    try {
+      assert.deepEqual(mutation.result.errors, [
+        'KAN-229 read-only preflight policy must be strict UTF-8 JSON without a byte-order mark or duplicate object keys.',
+      ]);
+      assert.equal(mutation.result.awsCallsMade, 0);
+    } finally {
+      mutation.cleanup();
+    }
+  }
+});
+
+test('rejects duplicate keys whose last value preserves the example billing state', () => {
+  const mutation = withMutatedBillingRecord((source) =>
+    source.replace(
+      '"status": "NOT_APPROVED",',
+      '"status": "APPROVED",\n  "status": "NOT_APPROVED",',
+    ),
+  );
+  try {
+    assert.deepEqual(mutation.result.errors, [
+      'Billing control record example must be strict UTF-8 JSON without a byte-order mark or duplicate object keys.',
+    ]);
+    assert.equal(mutation.result.awsCallsMade, 0);
+  } finally {
+    mutation.cleanup();
+  }
+});
+
+test('rejects oversized controlled inputs with a fixed path-free error', () => {
+  const mutation = withTemporaryArtifact(
+    'readonlyPolicy',
+    'oversized-policy.json',
+    Buffer.alloc(16_385, 0x20),
+  );
+  try {
+    assert.deepEqual(mutation.result.errors, [
+      'KAN-229 read-only preflight policy must be a non-empty, stable, single-link regular file of at most 16384 bytes at a canonical local path.',
+    ]);
+    assert.equal(mutation.result.errors.join('\n').includes(mutation.path), false);
+    assert.equal(mutation.result.awsCallsMade, 0);
+  } finally {
+    mutation.cleanup();
+  }
+});
+
+test('rejects hard-linked controlled inputs before policy parsing', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'kan-229-linked-policy-'));
+  const sourcePath = join(directory, 'source.json');
+  const linkedPath = join(directory, 'linked.json');
+  writeFileSync(sourcePath, readFileSync(paths.readonlyPolicy));
+  linkSync(sourcePath, linkedPath);
+  try {
+    const result = validateAccountGuardrails({ ...paths, readonlyPolicy: linkedPath });
+    assert.deepEqual(result.errors, [
+      'KAN-229 read-only preflight policy must be a non-empty, stable, single-link regular file of at most 16384 bytes at a canonical local path.',
+    ]);
+    assert.equal(result.awsCallsMade, 0);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('rejects BOM-prefixed and malformed UTF-8 policy JSON', () => {
+  const policyBytes = readFileSync(paths.readonlyPolicy);
+  const mutations = [
+    Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), policyBytes]),
+    Buffer.concat([policyBytes.subarray(0, policyBytes.length - 1), Buffer.from([0xff, 0x7d])]),
+  ];
+
+  for (const [index, contents] of mutations.entries()) {
+    const mutation = withTemporaryArtifact(
+      'readonlyPolicy',
+      `invalid-encoding-${index}.json`,
+      contents,
+    );
+    try {
+      assert.deepEqual(mutation.result.errors, [
+        'KAN-229 read-only preflight policy must be strict UTF-8 JSON without a byte-order mark or duplicate object keys.',
+      ]);
+      assert.equal(mutation.result.awsCallsMade, 0);
+    } finally {
+      mutation.cleanup();
+    }
   }
 });
 
