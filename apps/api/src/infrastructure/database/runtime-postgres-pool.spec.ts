@@ -1,14 +1,17 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import type { RuntimeInfrastructureConfig } from '../config/infrastructure.config';
-import { createPostgresPool, type RuntimeDatabaseCapabilityRoles } from './runtime-postgres-pool';
+import {
+  createPostgresPool,
+  type RuntimeDatabaseCapabilityRoles,
+  type RuntimePostgresPoolConfig,
+} from './runtime-postgres-pool';
 
 function runtimeConfig(
-  workload: RuntimeInfrastructureConfig['workload'],
+  workload: RuntimePostgresPoolConfig['workload'],
   sessionRole?: string,
-  ssl: RuntimeInfrastructureConfig['database']['ssl'] = false,
-): RuntimeInfrastructureConfig {
+  ssl: RuntimePostgresPoolConfig['database']['ssl'] = false,
+): RuntimePostgresPoolConfig {
   const database = {
     connectionString: 'postgresql://unused',
     connectionTimeoutMs: 2_500,
@@ -20,42 +23,18 @@ function runtimeConfig(
     ssl,
     ...(sessionRole ? { sessionRole } : {}),
   };
-  const sqsClient = {
-    region: 'us-east-1',
-    requestTimeoutMs: 1_000,
-    sdkMaxAttempts: 1,
-    maxReceiveCount: 3,
-    visibilityTimeoutSeconds: 30,
-    retryBaseDelaySeconds: 1,
-    retryMaxDelaySeconds: 60,
-  };
-  if (workload === 'balance-consumer') {
-    return {
-      workload,
-      database,
-      sqs: {
-        ...sqsClient,
-        balanceQueueUrl: 'http://sqs.test/000000000000/balance-sync',
-        balanceDeadLetterQueueUrl: 'http://sqs.test/000000000000/balance-sync-dlq',
-      },
-    };
-  }
   return {
     workload,
     database,
-    sqs: {
-      ...sqsClient,
-      queueUrl: 'http://sqs.test/000000000000/jobs',
-      deadLetterQueueUrl: 'http://sqs.test/000000000000/jobs-dlq',
-      balanceQueueUrl: 'http://sqs.test/000000000000/balance-sync',
-      balanceDeadLetterQueueUrl: 'http://sqs.test/000000000000/balance-sync-dlq',
-    },
   };
 }
 
 describe('createPostgresPool', () => {
-  it('maps the validated runtime database settings to a lazy pool', async () => {
-    const pool = createPostgresPool(runtimeConfig('api'));
+  it('maps a database-only runtime snapshot to a lazy pool', async () => {
+    const config = runtimeConfig('api');
+    expect(Reflect.ownKeys(config)).toEqual(['workload', 'database']);
+    expect(config).not.toHaveProperty('sqs');
+    const pool = createPostgresPool(config);
     try {
       expect(pool.options).toMatchObject({
         application_name: 'crypto-lending-api',

@@ -159,6 +159,21 @@ export interface BalanceConsumerArtifactSources {
   readonly cliModeSource: string;
   readonly runtimeSource: string;
   readonly compositionSource: string;
+  readonly balanceConsumerPersistenceResourceSource: string;
+  readonly runtimePostgresPoolSource: string;
+  readonly postgresServiceSource: string;
+  readonly balanceSyncCheckpointRepositorySource: string;
+  readonly balanceSyncWalletAddressResolverSource: string;
+  readonly balanceConsumerConfigSource: string;
+  readonly blockchainSyncIndexSource: string;
+  readonly blockchainSyncModuleSource: string;
+  readonly appModuleSource: string;
+  readonly applicationRootSource: string;
+  readonly localDevelopmentAppModuleSource: string;
+  readonly mainSource: string;
+  readonly outboxWorkerCliSource: string;
+  readonly redisSessionRevocationCliSource: string;
+  readonly migrationCliSource: string;
   readonly balanceSyncOrchestratorSource: string;
   readonly balanceSyncDomainSource: string;
   readonly chainObservationPolicySource: string;
@@ -499,6 +514,21 @@ const BALANCE_CONSUMER_ARTIFACT_KEYS = Object.freeze([
   'cliModeSource',
   'runtimeSource',
   'compositionSource',
+  'balanceConsumerPersistenceResourceSource',
+  'runtimePostgresPoolSource',
+  'postgresServiceSource',
+  'balanceSyncCheckpointRepositorySource',
+  'balanceSyncWalletAddressResolverSource',
+  'balanceConsumerConfigSource',
+  'blockchainSyncIndexSource',
+  'blockchainSyncModuleSource',
+  'appModuleSource',
+  'applicationRootSource',
+  'localDevelopmentAppModuleSource',
+  'mainSource',
+  'outboxWorkerCliSource',
+  'redisSessionRevocationCliSource',
+  'migrationCliSource',
   'balanceSyncOrchestratorSource',
   'balanceSyncDomainSource',
   'chainObservationPolicySource',
@@ -536,6 +566,26 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
   cliModeSource: '2b03494cb126e80f4f7af1176cb08cf13aef2d14d4bf3cb371faa6f06a7294a8',
   runtimeSource: '9eb119d5c4ed60708931bdc25b810d0f61e064d8521c3465ae4c85046480fd5b',
   compositionSource: 'a898bcebc7ea56cae7b51e71e27107cb76330a98c4659b5bf761fa4a2e988971',
+  balanceConsumerPersistenceResourceSource:
+    'e95c1ce138f15202e0e181ff31fe164fa22d61e2eaa642a32ea81865a28ff27d',
+  runtimePostgresPoolSource: 'd15b4a0604cda0bcc9d8df7f597863e42c4ef573ba8ed4362386cd2beaa1f823',
+  postgresServiceSource: 'fd1cf4fa1ea8d2fc1d5219a474f88b8577c9fddaa4c0bfa979a1df202b9e2a11',
+  balanceSyncCheckpointRepositorySource:
+    'ba84cf9c09ad65f4bd73fdbc0367090b34a0e3ea2f9c722ffb52cf75c29419bd',
+  balanceSyncWalletAddressResolverSource:
+    '9d89ad5897a9ab5a7023a89819891b4e0ee090f3683d3fa7340b0a44251453f0',
+  balanceConsumerConfigSource: 'bbcce014594c79f7ea76fee4dc211c8e5436947549fef54e848df5afaeb0ab14',
+  blockchainSyncIndexSource: 'ad708f554e81f8e623a68e34d468fa3b2bd50f83a778448f838c21d81ddd9431',
+  blockchainSyncModuleSource: 'e78aeb6ee670cd9930c66db37dd03a0cb1e2190eb6542d1470c99afff5f5c6f4',
+  appModuleSource: 'fd7cecd6d535a8f854f30a1f82811f6a9a32e7c7f9f0a38bfbee6471eb30504f',
+  applicationRootSource: 'fcad49388bdfddcc55b0865a4ac4220e3d27ba77a20a19537121b68bf4b5c9dd',
+  localDevelopmentAppModuleSource:
+    'c607a60bd2a388dce1605752ca4d858ee137e670fccee0052ec157bc02605fc2',
+  mainSource: 'b902f7f4f71fc4e6237c3baa75206a42244e93a902684a8387a167a6a180a0e9',
+  outboxWorkerCliSource: 'd416d7a635479e2c45dc03049ac70748c087ab061c7378f41470aaa4e4b88677',
+  redisSessionRevocationCliSource:
+    'f222f63fb2d2edc534f941a5ee5980c2b1bf7a64ec1014323cf1215196d7c8b6',
+  migrationCliSource: '9155e1b10fce756188c8b9d8de201b2f82c36680fb76ee28c15923b5c7101b51',
   balanceSyncOrchestratorSource: '818f824b7fd398a7cd86038de375c3723270ba86311a9cb0e1836eff44c6d72e',
   balanceSyncDomainSource: '67b1cf8449da0e7c60a95a43cc29425ddc7e33b176933901923538e804171921',
   chainObservationPolicySource: 'ef887514b86230d1516e5a8139c94dc2b2dde06c979440bc6eb3f4df90511533',
@@ -1830,6 +1880,225 @@ function hasDormantBalanceConsumerSourceContract(sources: BalanceConsumerArtifac
   );
 }
 
+function hasDormantBalanceConsumerPersistenceResourceContract(
+  sources: BalanceConsumerArtifactSources,
+): boolean {
+  const resource = sources.balanceConsumerPersistenceResourceSource.replace(/\r\n/gu, '\n');
+  const resourceInterfaceStart = resource.indexOf(
+    'export interface BalanceConsumerPersistenceResource {',
+  );
+  const reviewedConfigurationStart = resource.indexOf(
+    'interface ReviewedPersistenceConfiguration {',
+    resourceInterfaceStart,
+  );
+  const factoryStart = resource.indexOf(
+    'export async function createDormantBalanceConsumerPersistenceResource(',
+    reviewedConfigurationStart,
+  );
+  if (
+    resourceInterfaceStart < 0 ||
+    reviewedConfigurationStart <= resourceInterfaceStart ||
+    factoryStart <= reviewedConfigurationStart
+  ) {
+    return false;
+  }
+
+  const resourceInterface = resource.slice(resourceInterfaceStart, reviewedConfigurationStart);
+  const factory = resource.slice(factoryStart);
+  const poolCreation = factory.indexOf('pool = createPostgresPool(reviewed.infrastructure);');
+  const serviceCreation = factory.indexOf('const postgres = new PostgresService(pool);');
+  const checkpointCreation = factory.indexOf(
+    'const checkpointRepository = new PostgresBalanceSyncCheckpointRepository(postgres);',
+  );
+  const resolverCreation = factory.indexOf(
+    'const walletAddressResolverRepository = new PostgresBalanceSyncWalletAddressResolver(',
+  );
+  const closedGuard = factory.indexOf(
+    'if (closed) return Promise.reject(new BalanceConsumerPersistenceClosedError());',
+  );
+  const closedTransition = factory.indexOf('closed = true;', closedGuard);
+  const closeMemoization = factory.indexOf(
+    'closePromise ??= closePool(resourcePool, () => new BalanceConsumerPersistenceCloseError());',
+    closedTransition,
+  );
+  if (
+    poolCreation < 0 ||
+    serviceCreation <= poolCreation ||
+    checkpointCreation <= serviceCreation ||
+    resolverCreation <= checkpointCreation ||
+    closedGuard <= resolverCreation ||
+    closedTransition <= closedGuard ||
+    closeMemoization <= closedTransition
+  ) {
+    return false;
+  }
+
+  const runtimePool = sources.runtimePostgresPoolSource.replace(/\r\n/gu, '\n');
+  const postgresService = sources.postgresServiceSource.replace(/\r\n/gu, '\n');
+  const checkpointRepository = sources.balanceSyncCheckpointRepositorySource.replace(
+    /\r\n/gu,
+    '\n',
+  );
+  const walletAddressResolver = sources.balanceSyncWalletAddressResolverSource.replace(
+    /\r\n/gu,
+    '\n',
+  );
+  const balanceConsumerConfig = sources.balanceConsumerConfigSource.replace(/\r\n/gu, '\n');
+  const launchAndBarrelSources = [
+    sources.runtimeSource,
+    sources.cliSource,
+    sources.cliModeSource,
+    sources.compositionSource,
+    sources.blockchainSyncIndexSource,
+    sources.blockchainSyncModuleSource,
+    sources.appModuleSource,
+    sources.applicationRootSource,
+    sources.localDevelopmentAppModuleSource,
+    sources.mainSource,
+    sources.outboxWorkerCliSource,
+    sources.redisSessionRevocationCliSource,
+    sources.migrationCliSource,
+  ];
+
+  return (
+    trimmedExecutableLines(resourceInterface).filter((line) => line.startsWith('readonly '))
+      .length === 3 &&
+    exactExecutableLineCount(
+      resourceInterface,
+      'readonly checkpoints: Readonly<BalanceSyncCheckpointPort>;',
+    ) === 1 &&
+    exactExecutableLineCount(
+      resourceInterface,
+      'readonly walletAddressResolver: Readonly<BalanceSyncWalletAddressResolverPort>;',
+    ) === 1 &&
+    exactExecutableLineCount(resourceInterface, 'readonly close: () => Promise<void>;') === 1 &&
+    trimmedExecutableLines(resource).filter((line) => line.startsWith('export ')).length === 2 &&
+    exactExecutableLineCount(
+      resource,
+      "const BALANCE_CONSUMER_SESSION_ROLE = 'crypto_balance_consumer_runtime' as const;",
+    ) === 1 &&
+    exactExecutableLineCount(
+      resource,
+      "const infrastructureRecord = selectedDataRecord(infrastructure, ['workload', 'database']);",
+    ) === 1 &&
+    exactExecutableLineCount(
+      resource,
+      "if (infrastructureRecord.workload !== 'balance-consumer') return invalidConfiguration();",
+    ) === 1 &&
+    exactExecutableLineCount(resource, 'const record = exactDataRecord(value, DATABASE_KEYS);') ===
+      1 &&
+    exactExecutableLineCount(
+      resource,
+      'if (record.sessionRole !== BALANCE_CONSUMER_SESSION_ROLE) return invalidConfiguration();',
+    ) === 1 &&
+    exactExecutableLineCount(
+      resource,
+      "if (record.mode !== 'enabled') return invalidConfiguration();",
+    ) === 1 &&
+    exactExecutableLineCount(resource, "value.includes('?') ||") === 1 &&
+    exactExecutableLineCount(resource, '!/^[1-9][0-9]{0,4}$/u.test(parsed.port) ||') === 1 &&
+    exactExecutableLineCount(resource, 'Number(parsed.port) > 65_535 ||') === 1 &&
+    exactExecutableLineCount(
+      resource,
+      '!/^crypto_balance_consumer_login_[a-z0-9]{1,32}$/u.test(',
+    ) === 1 &&
+    exactExecutableLineCount(resource, 'if (!loopback) return invalidConfiguration();') === 1 &&
+    exactExecutableLineCount(
+      resource,
+      'if (record.rejectUnauthorized !== true) return invalidConfiguration();',
+    ) === 1 &&
+    exactExecutableLineCount(
+      resource,
+      "if (activeWalletRegistrationKey(ring).purpose !== 'metadata-seal') {",
+    ) === 1 &&
+    exactExecutableLineCount(resource, "workload: 'balance-consumer',") === 1 &&
+    exactExecutableLineCount(
+      resource,
+      'database: databaseSnapshot(infrastructureRecord.database),',
+    ) === 1 &&
+    exactExecutableLineCount(
+      resource,
+      'return Object.freeze(Object.assign(Object.create(null) as T, members));',
+    ) === 1 &&
+    exactExecutableLineCount(
+      resource,
+      'load: (scope) => whileOpen(() => checkpointRepository.load(scope)),',
+    ) === 1 &&
+    exactExecutableLineCount(
+      resource,
+      'upsertCurrent: (input) => whileOpen(() => checkpointRepository.upsertCurrent(input)),',
+    ) === 1 &&
+    exactExecutableLineCount(
+      resource,
+      'whileOpen(() => checkpointRepository.replaceProvisionalAfterReorg(input)),',
+    ) === 1 &&
+    exactExecutableLineCount(
+      resource,
+      'whileOpen(() => checkpointRepository.preserveLastGoodAndMarkStale(input)),',
+    ) === 1 &&
+    exactExecutableLineCount(
+      resource,
+      'whileOpen(() => walletAddressResolverRepository.resolveActiveAddress(scope)),',
+    ) === 1 &&
+    exactExecutableLineCount(
+      resource,
+      'closePromise ??= closePool(resourcePool, () => new BalanceConsumerPersistenceCloseError());',
+    ) === 1 &&
+    exactExecutableLineCount(resource, '.then(() => pool.end())') === 1 &&
+    exactExecutableLineCount(
+      resource,
+      'await closePool(pool, () => new BalanceConsumerPersistenceConstructionError()).catch(',
+    ) === 1 &&
+    exactExecutableLineCount(
+      resource,
+      'throw new BalanceConsumerPersistenceConstructionError();',
+    ) === 1 &&
+    !/@nestjs|PostgresModule|InfrastructureConfigModule|MigrationRunner|process\.env|\.connect\s*\(|\.query\s*\(|healthCheck\s*\(|withTransaction\s*\(/u.test(
+      resource,
+    ) &&
+    exactExecutableLineCount(runtimePool, 'export interface RuntimePostgresPoolConfig {') === 1 &&
+    exactExecutableLineCount(
+      runtimePool,
+      "readonly workload: RuntimeInfrastructureConfig['workload'];",
+    ) === 1 &&
+    exactExecutableLineCount(
+      runtimePool,
+      'readonly database: Readonly<DatabaseInfrastructureConfig>;',
+    ) === 1 &&
+    !/readonly\s+sqs\s*:/u.test(runtimePool) &&
+    exactExecutableLineCount(runtimePool, "balanceConsumer: 'crypto_balance_consumer_runtime',") ===
+      1 &&
+    exactExecutableLineCount(runtimePool, 'return capabilityRoles.balanceConsumer;') === 1 &&
+    exactExecutableLineCount(runtimePool, 'return new Pool({') === 1 &&
+    exactExecutableLineCount(
+      postgresService,
+      'constructor(@Inject(POSTGRES_POOL) private readonly pool: Pool) {}',
+    ) === 1 &&
+    exactExecutableLineCount(
+      checkpointRepository,
+      'constructor(private readonly postgres: PostgresService) {}',
+    ) === 1 &&
+    exactExecutableLineCount(
+      walletAddressResolver,
+      'private readonly postgres: PostgresService,',
+    ) === 1 &&
+    exactExecutableLineCount(
+      walletAddressResolver,
+      '@Inject(BALANCE_CONSUMER_CONFIG) private readonly config: BalanceConsumerConfig,',
+    ) === 1 &&
+    exactExecutableLineCount(balanceConsumerConfig, "readonly mode: 'enabled';") === 1 &&
+    exactExecutableLineCount(
+      balanceConsumerConfig,
+      "readonly walletMetadataSealKeys: WalletRegistrationKeyRing<'metadata-seal'>;",
+    ) === 1 &&
+    launchAndBarrelSources.every(
+      (source) =>
+        !source.includes('createDormantBalanceConsumerPersistenceResource') &&
+        !source.includes('balance-consumer-persistence.resource'),
+    )
+  );
+}
+
 function hasPinnedBalanceConsumerQueueBoundaryContract(
   sources: BalanceConsumerArtifactSources,
 ): boolean {
@@ -3074,6 +3343,7 @@ export function inspectBalanceConsumerDeploymentArtifacts(
     const contractValid =
       hasExactReviewedBalanceConsumerArtifactBytes(sources) &&
       hasDormantBalanceConsumerSourceContract(sources) &&
+      hasDormantBalanceConsumerPersistenceResourceContract(sources) &&
       hasPinnedBalanceConsumerQueueBoundaryContract(sources) &&
       hasExactBalanceConsumerNativeReceiptRedriveContract(sources) &&
       hasDormantBalanceConsumerPackagingContract(sources) &&
@@ -3709,6 +3979,75 @@ export function loadRepositoryProductionPreflightInput(
           repositoryRoot,
           'apps/api/src/blockchain-sync/application/balance-sync-consumer.composition.ts',
         ),
+        'utf8',
+      ),
+      balanceConsumerPersistenceResourceSource: readFileSync(
+        resolve(
+          repositoryRoot,
+          'apps/api/src/blockchain-sync/infrastructure/postgres/balance-consumer-persistence.resource.ts',
+        ),
+        'utf8',
+      ),
+      runtimePostgresPoolSource: readFileSync(
+        resolve(repositoryRoot, 'apps/api/src/infrastructure/database/runtime-postgres-pool.ts'),
+        'utf8',
+      ),
+      postgresServiceSource: readFileSync(
+        resolve(repositoryRoot, 'apps/api/src/infrastructure/database/postgres.service.ts'),
+        'utf8',
+      ),
+      balanceSyncCheckpointRepositorySource: readFileSync(
+        resolve(
+          repositoryRoot,
+          'apps/api/src/blockchain-sync/infrastructure/postgres/postgres-balance-sync-checkpoint.repository.ts',
+        ),
+        'utf8',
+      ),
+      balanceSyncWalletAddressResolverSource: readFileSync(
+        resolve(
+          repositoryRoot,
+          'apps/api/src/blockchain-sync/infrastructure/postgres/postgres-balance-sync-wallet-address.resolver.ts',
+        ),
+        'utf8',
+      ),
+      balanceConsumerConfigSource: readFileSync(
+        resolve(
+          repositoryRoot,
+          'apps/api/src/blockchain-sync/infrastructure/config/balance-consumer.config.ts',
+        ),
+        'utf8',
+      ),
+      blockchainSyncIndexSource: readFileSync(
+        resolve(repositoryRoot, 'apps/api/src/blockchain-sync/index.ts'),
+        'utf8',
+      ),
+      blockchainSyncModuleSource: readFileSync(
+        resolve(repositoryRoot, 'apps/api/src/blockchain-sync/blockchain-sync.module.ts'),
+        'utf8',
+      ),
+      appModuleSource: readFileSync(resolve(repositoryRoot, 'apps/api/src/app.module.ts'), 'utf8'),
+      applicationRootSource: readFileSync(
+        resolve(repositoryRoot, 'apps/api/src/application-root.ts'),
+        'utf8',
+      ),
+      localDevelopmentAppModuleSource: readFileSync(
+        resolve(repositoryRoot, 'apps/api/src/local-development-app.module.ts'),
+        'utf8',
+      ),
+      mainSource: readFileSync(resolve(repositoryRoot, 'apps/api/src/main.ts'), 'utf8'),
+      outboxWorkerCliSource: readFileSync(
+        resolve(repositoryRoot, 'apps/api/src/infrastructure/outbox/outbox-worker.cli.ts'),
+        'utf8',
+      ),
+      redisSessionRevocationCliSource: readFileSync(
+        resolve(
+          repositoryRoot,
+          'apps/api/src/infrastructure/redis/redis-session-revocation.cli.ts',
+        ),
+        'utf8',
+      ),
+      migrationCliSource: readFileSync(
+        resolve(repositoryRoot, 'apps/api/src/infrastructure/database/migration.cli.ts'),
         'utf8',
       ),
       balanceSyncOrchestratorSource: readFileSync(

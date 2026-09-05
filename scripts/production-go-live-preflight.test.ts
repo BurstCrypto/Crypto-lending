@@ -138,6 +138,72 @@ const BALANCE_CONSUMER_ARTIFACTS = Object.freeze({
     ),
     'utf8',
   ),
+  balanceConsumerPersistenceResourceSource: readFileSync(
+    resolve(
+      __dirname,
+      '../apps/api/src/blockchain-sync/infrastructure/postgres/balance-consumer-persistence.resource.ts',
+    ),
+    'utf8',
+  ),
+  runtimePostgresPoolSource: readFileSync(
+    resolve(__dirname, '../apps/api/src/infrastructure/database/runtime-postgres-pool.ts'),
+    'utf8',
+  ),
+  postgresServiceSource: readFileSync(
+    resolve(__dirname, '../apps/api/src/infrastructure/database/postgres.service.ts'),
+    'utf8',
+  ),
+  balanceSyncCheckpointRepositorySource: readFileSync(
+    resolve(
+      __dirname,
+      '../apps/api/src/blockchain-sync/infrastructure/postgres/postgres-balance-sync-checkpoint.repository.ts',
+    ),
+    'utf8',
+  ),
+  balanceSyncWalletAddressResolverSource: readFileSync(
+    resolve(
+      __dirname,
+      '../apps/api/src/blockchain-sync/infrastructure/postgres/postgres-balance-sync-wallet-address.resolver.ts',
+    ),
+    'utf8',
+  ),
+  balanceConsumerConfigSource: readFileSync(
+    resolve(
+      __dirname,
+      '../apps/api/src/blockchain-sync/infrastructure/config/balance-consumer.config.ts',
+    ),
+    'utf8',
+  ),
+  blockchainSyncIndexSource: readFileSync(
+    resolve(__dirname, '../apps/api/src/blockchain-sync/index.ts'),
+    'utf8',
+  ),
+  blockchainSyncModuleSource: readFileSync(
+    resolve(__dirname, '../apps/api/src/blockchain-sync/blockchain-sync.module.ts'),
+    'utf8',
+  ),
+  appModuleSource: readFileSync(resolve(__dirname, '../apps/api/src/app.module.ts'), 'utf8'),
+  applicationRootSource: readFileSync(
+    resolve(__dirname, '../apps/api/src/application-root.ts'),
+    'utf8',
+  ),
+  localDevelopmentAppModuleSource: readFileSync(
+    resolve(__dirname, '../apps/api/src/local-development-app.module.ts'),
+    'utf8',
+  ),
+  mainSource: readFileSync(resolve(__dirname, '../apps/api/src/main.ts'), 'utf8'),
+  outboxWorkerCliSource: readFileSync(
+    resolve(__dirname, '../apps/api/src/infrastructure/outbox/outbox-worker.cli.ts'),
+    'utf8',
+  ),
+  redisSessionRevocationCliSource: readFileSync(
+    resolve(__dirname, '../apps/api/src/infrastructure/redis/redis-session-revocation.cli.ts'),
+    'utf8',
+  ),
+  migrationCliSource: readFileSync(
+    resolve(__dirname, '../apps/api/src/infrastructure/database/migration.cli.ts'),
+    'utf8',
+  ),
   balanceSyncOrchestratorSource: readFileSync(
     resolve(__dirname, '../apps/api/src/blockchain-sync/application/balance-sync-orchestrator.ts'),
     'utf8',
@@ -796,6 +862,14 @@ test('balance-consumer inspection rejects retained-marker semantic overrides and
     },
     {
       ...BALANCE_CONSUMER_ARTIFACTS,
+      balanceConsumerPersistenceResourceSource: `${BALANCE_CONSUMER_ARTIFACTS.balanceConsumerPersistenceResourceSource}\nexport const leakedPersistence = { query: true };\n`,
+    },
+    {
+      ...BALANCE_CONSUMER_ARTIFACTS,
+      runtimeSource: `${BALANCE_CONSUMER_ARTIFACTS.runtimeSource}\nvoid import('../infrastructure/postgres/balance-consumer-persistence.resource');\n`,
+    },
+    {
+      ...BALANCE_CONSUMER_ARTIFACTS,
       pinnedQueueReceiptSource: `${BALANCE_CONSUMER_ARTIFACTS.pinnedQueueReceiptSource}\nPinnedSqsQueueReceiptAdapter.prototype.publish = async () => ({});\n`,
     },
     {
@@ -1040,6 +1114,90 @@ test('balance-consumer inspection fails closed for drift in every reviewed artif
       'compositionSource',
       'const jobDisposition = new FailClosedBalanceSyncJobPort();',
       'const jobDisposition = dependencies.jobDisposition;',
+    ],
+    [
+      'persistence narrow checkpoint facade',
+      'balanceConsumerPersistenceResourceSource',
+      'load: (scope) => whileOpen(() => checkpointRepository.load(scope)),',
+      'query: (text) => postgres.query(text),',
+    ],
+    [
+      'persistence close memoization',
+      'balanceConsumerPersistenceResourceSource',
+      'closePromise ??= closePool(resourcePool, () => new BalanceConsumerPersistenceCloseError());',
+      'closePromise = closePool(resourcePool, () => new BalanceConsumerPersistenceCloseError());',
+    ],
+    [
+      'persistence immutable database snapshot',
+      'balanceConsumerPersistenceResourceSource',
+      'database: databaseSnapshot(infrastructureRecord.database),',
+      'database: infrastructureRecord.database,',
+    ],
+    [
+      'persistence connection parameter exclusion',
+      'balanceConsumerPersistenceResourceSource',
+      "value.includes('?') ||",
+      'false ||',
+    ],
+    [
+      'persistence explicit database port',
+      'balanceConsumerPersistenceResourceSource',
+      '!/^[1-9][0-9]{0,4}$/u.test(parsed.port) ||',
+      'parsed.port.length > 5 ||',
+    ],
+    [
+      'persistence synchronous closed-state transition',
+      'balanceConsumerPersistenceResourceSource',
+      'closed = true;',
+      'closed = false;',
+    ],
+    [
+      'runtime pool balance role',
+      'runtimePostgresPoolSource',
+      "balanceConsumer: 'crypto_balance_consumer_runtime',",
+      "balanceConsumer: 'crypto_worker_runtime',",
+    ],
+    [
+      'database-only runtime pool input',
+      'runtimePostgresPoolSource',
+      'readonly database: Readonly<DatabaseInfrastructureConfig>;',
+      'readonly sqs: Readonly<SqsInfrastructureConfig>;',
+    ],
+    [
+      'private postgres pool',
+      'postgresServiceSource',
+      'constructor(@Inject(POSTGRES_POOL) private readonly pool: Pool) {}',
+      'constructor(@Inject(POSTGRES_POOL) readonly pool: Pool) {}',
+    ],
+    [
+      'private checkpoint database service',
+      'balanceSyncCheckpointRepositorySource',
+      'constructor(private readonly postgres: PostgresService) {}',
+      'constructor(readonly postgres: PostgresService) {}',
+    ],
+    [
+      'private wallet resolver key configuration',
+      'balanceSyncWalletAddressResolverSource',
+      '@Inject(BALANCE_CONSUMER_CONFIG) private readonly config: BalanceConsumerConfig,',
+      '@Inject(BALANCE_CONSUMER_CONFIG) readonly config: BalanceConsumerConfig,',
+    ],
+    [
+      'read-only balance metadata keys',
+      'balanceConsumerConfigSource',
+      '/** Read-only key selection; this boundary exposes no sealing operation. */',
+      '/** Key selection and sealing authority. */',
+    ],
+    [
+      'persistence resource remains outside the public barrel',
+      'blockchainSyncIndexSource',
+      "from './application/balance-sync-orchestrator';",
+      "from './infrastructure/postgres/balance-consumer-persistence.resource';",
+    ],
+    [
+      'persistence resource remains outside the Nest module graph',
+      'blockchainSyncModuleSource',
+      'providers: [',
+      'providers: [createDormantBalanceConsumerPersistenceResource,',
     ],
     [
       'trusted retry signal preservation',

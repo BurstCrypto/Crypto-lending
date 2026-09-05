@@ -1,7 +1,15 @@
 import { Pool } from 'pg';
 
-import type { RuntimeInfrastructureConfig } from '../config/infrastructure.config';
+import type {
+  DatabaseInfrastructureConfig,
+  RuntimeInfrastructureConfig,
+} from '../config/infrastructure.config';
 import { postgresStartupOptions } from './postgres-startup-options';
+
+export interface RuntimePostgresPoolConfig {
+  readonly workload: RuntimeInfrastructureConfig['workload'];
+  readonly database: Readonly<DatabaseInfrastructureConfig>;
+}
 
 export interface RuntimeDatabaseCapabilityRoles {
   api: string;
@@ -16,7 +24,7 @@ const PRODUCTION_RUNTIME_DATABASE_ROLES: Readonly<RuntimeDatabaseCapabilityRoles
 });
 
 function expectedRuntimeDatabaseRole(
-  config: RuntimeInfrastructureConfig,
+  config: RuntimePostgresPoolConfig,
   capabilityRoles: Readonly<RuntimeDatabaseCapabilityRoles>,
 ): string {
   if (config.workload === 'api') return capabilityRoles.api;
@@ -25,7 +33,7 @@ function expectedRuntimeDatabaseRole(
 }
 
 export function createPostgresPool(
-  config: RuntimeInfrastructureConfig,
+  config: RuntimePostgresPoolConfig,
   capabilityRoles: Readonly<RuntimeDatabaseCapabilityRoles> = PRODUCTION_RUNTIME_DATABASE_ROLES,
 ): Pool {
   const expectedSessionRole = expectedRuntimeDatabaseRole(config, capabilityRoles);
