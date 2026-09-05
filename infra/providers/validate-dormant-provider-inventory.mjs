@@ -1,22 +1,22 @@
-import {
-  closeSync,
-  fstatSync,
-  lstatSync,
-  openSync,
-  readdirSync,
-  readFileSync,
-  realpathSync,
-} from 'node:fs';
+import { readdirSync, realpathSync } from 'node:fs';
 import { dirname, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { TextDecoder } from 'node:util';
+
+import {
+  readSecureLocalFile,
+  readSecureLocalFileForTest,
+} from '../shared/read-secure-local-file.mjs';
 
 export const REPOSITORY_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 export const DIRECTORY_PATH = 'apps/api/src/mainnet-platforms/domain/mainnet-platform-directory.ts';
 
 const API_SOURCE_ROOT = 'apps/api/src';
-const MAX_ARTIFACT_BYTES = 2 * 1024 * 1024;
-const MAX_RUNTIME_FILES = 4_096;
-const MAX_RUNTIME_BYTES = 24 * 1024 * 1024;
+export const MAX_DORMANT_PROVIDER_ARTIFACT_BYTES = 2 * 1024 * 1024;
+export const MAX_DORMANT_PROVIDER_RUNTIME_FILES = 4_096;
+export const MAX_DORMANT_PROVIDER_RUNTIME_BYTES = 24 * 1024 * 1024;
+export const DORMANT_PROVIDER_INVENTORY_INPUT_ERROR =
+  'Dormant provider inventory inputs must be non-empty, stable, single-link regular files of at most 2097152 bytes at canonical paths inside the repository and contain UTF-8 text without a byte-order mark.';
 
 export const DORMANT_PROVIDER_INVENTORY = Object.freeze([
   Object.freeze({
@@ -339,42 +339,24 @@ export function validateDormantProviderInventorySnapshot(snapshot) {
   return [...new Set(errors)];
 }
 
-function repositoryFile(repositoryRoot, path, maximumBytes) {
-  const root = realpathSync(repositoryRoot);
-  const resolved = resolve(root, path);
-  const relation = relative(root, resolved);
-  if (relation === '' || relation.startsWith(`..${sep}`) || relation === '..') {
-    throw new Error('artifact escaped repository root');
-  }
-  const pathStat = lstatSync(resolved);
-  if (!pathStat.isFile() || pathStat.isSymbolicLink() || pathStat.nlink !== 1) {
-    throw new Error('artifact must be one regular file');
-  }
-  const descriptor = openSync(resolved, 'r');
+function repositoryFile(repositoryRoot, path, maximumBytes, afterFirstReadForTest) {
   try {
-    const before = fstatSync(descriptor);
-    if (before.size <= 0 || before.size > maximumBytes) throw new Error('artifact size is invalid');
-    const bytes = readFileSync(descriptor);
-    const after = fstatSync(descriptor);
-    const afterPath = lstatSync(resolved);
-    if (
-      !afterPath.isFile() ||
-      afterPath.isSymbolicLink() ||
-      afterPath.nlink !== 1 ||
-      realpathSync(resolved) !== resolved ||
-      before.dev !== after.dev ||
-      before.ino !== after.ino ||
-      before.size !== after.size ||
-      before.mtimeMs !== after.mtimeMs ||
-      afterPath.dev !== before.dev ||
-      afterPath.ino !== before.ino ||
-      bytes.length !== before.size
-    ) {
-      throw new Error('artifact changed while being read');
+    const root = realpathSync.native(resolve(repositoryRoot));
+    const resolved = resolve(root, path);
+    const relation = relative(root, resolved);
+    if (relation === '' || relation.startsWith(`..${sep}`) || relation === '..') {
+      throw new Error(DORMANT_PROVIDER_INVENTORY_INPUT_ERROR);
+    }
+    const bytes =
+      afterFirstReadForTest === undefined
+        ? readSecureLocalFile(resolved, maximumBytes)
+        : readSecureLocalFileForTest(resolved, maximumBytes, () => afterFirstReadForTest(path));
+    if (bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) {
+      throw new Error(DORMANT_PROVIDER_INVENTORY_INPUT_ERROR);
     }
     return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
-  } finally {
-    closeSync(descriptor);
+  } catch {
+    throw new Error(DORMANT_PROVIDER_INVENTORY_INPUT_ERROR);
   }
 }
 
@@ -395,7 +377,9 @@ function runtimeSourcePaths(repositoryRoot) {
         !entry.name.endsWith('.test.ts')
       ) {
         paths.push(normalizedPath(relative(repositoryRoot, absolute)));
-        if (paths.length > MAX_RUNTIME_FILES) throw new Error('runtime source file bound exceeded');
+        if (paths.length > MAX_DORMANT_PROVIDER_RUNTIME_FILES) {
+          throw new Error(DORMANT_PROVIDER_INVENTORY_INPUT_ERROR);
+        }
       }
     }
   };
@@ -403,7 +387,7 @@ function runtimeSourcePaths(repositoryRoot) {
   return paths.sort();
 }
 
-export function loadDormantProviderInventorySnapshot(repositoryRoot = REPOSITORY_ROOT) {
+function loadDormantProviderInventorySnapshotInternal(repositoryRoot, afterFirstReadForTest) {
   const artifacts = new Map();
   for (const provider of DORMANT_PROVIDER_INVENTORY) {
     for (const path of [
@@ -413,7 +397,15 @@ export function loadDormantProviderInventorySnapshot(repositoryRoot = REPOSITORY
       provider.capabilityPath,
     ].filter(Boolean)) {
       if (!artifacts.has(path)) {
-        artifacts.set(path, repositoryFile(repositoryRoot, path, MAX_ARTIFACT_BYTES));
+        artifacts.set(
+          path,
+          repositoryFile(
+            repositoryRoot,
+            path,
+            MAX_DORMANT_PROVIDER_ARTIFACT_BYTES,
+            afterFirstReadForTest,
+          ),
+        );
       }
     }
   }
@@ -423,17 +415,46 @@ export function loadDormantProviderInventorySnapshot(repositoryRoot = REPOSITORY
   let runtimeBytes = 0;
   for (const path of runtimeSourcePaths(repositoryRoot)) {
     if (adapterPaths.has(path)) continue;
-    const source = repositoryFile(repositoryRoot, path, MAX_ARTIFACT_BYTES);
+    const source = repositoryFile(
+      repositoryRoot,
+      path,
+      MAX_DORMANT_PROVIDER_ARTIFACT_BYTES,
+      afterFirstReadForTest,
+    );
     runtimeBytes += Buffer.byteLength(source, 'utf8');
-    if (runtimeBytes > MAX_RUNTIME_BYTES) throw new Error('runtime source byte bound exceeded');
+    if (runtimeBytes > MAX_DORMANT_PROVIDER_RUNTIME_BYTES) {
+      throw new Error(DORMANT_PROVIDER_INVENTORY_INPUT_ERROR);
+    }
     runtimeSources.set(path, source);
   }
 
   return {
-    directorySource: repositoryFile(repositoryRoot, DIRECTORY_PATH, MAX_ARTIFACT_BYTES),
+    directorySource: repositoryFile(
+      repositoryRoot,
+      DIRECTORY_PATH,
+      MAX_DORMANT_PROVIDER_ARTIFACT_BYTES,
+      afterFirstReadForTest,
+    ),
     artifacts,
     runtimeSources,
   };
+}
+
+export function loadDormantProviderInventorySnapshot(repositoryRoot = REPOSITORY_ROOT) {
+  try {
+    return loadDormantProviderInventorySnapshotInternal(repositoryRoot, undefined);
+  } catch {
+    throw new Error(DORMANT_PROVIDER_INVENTORY_INPUT_ERROR);
+  }
+}
+
+/** Test-only fault seam; production callers use loadDormantProviderInventorySnapshot. */
+export function loadDormantProviderInventorySnapshotForTest(repositoryRoot, afterFirstReadForTest) {
+  try {
+    return loadDormantProviderInventorySnapshotInternal(repositoryRoot, afterFirstReadForTest);
+  } catch {
+    throw new Error(DORMANT_PROVIDER_INVENTORY_INPUT_ERROR);
+  }
 }
 
 export function validateDormantProviderInventoryFiles(repositoryRoot = REPOSITORY_ROOT) {
@@ -442,7 +463,7 @@ export function validateDormantProviderInventoryFiles(repositoryRoot = REPOSITOR
       loadDormantProviderInventorySnapshot(repositoryRoot),
     );
   } catch {
-    return ['dormant provider inventory files are missing, unsafe, or unreadable'];
+    return [DORMANT_PROVIDER_INVENTORY_INPUT_ERROR];
   }
 }
 

@@ -1,10 +1,24 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import {
+  linkSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 import test from 'node:test';
 
 import {
+  DIRECTORY_PATH,
+  DORMANT_PROVIDER_INVENTORY_INPUT_ERROR,
   DORMANT_PROVIDER_INVENTORY,
   loadDormantProviderInventorySnapshot,
+  loadDormantProviderInventorySnapshotForTest,
+  MAX_DORMANT_PROVIDER_ARTIFACT_BYTES,
   REPOSITORY_ROOT,
   validateDormantProviderInventoryFiles,
   validateDormantProviderInventorySnapshot,
@@ -24,6 +38,58 @@ function assertMutationRejected(name, mutate) {
   const changed = snapshot();
   mutate(changed);
   assert.ok(validateDormantProviderInventorySnapshot(changed).length > 0, `${name} must fail`);
+}
+
+function fixturePath(repositoryRoot, path) {
+  return join(repositoryRoot, ...path.split('/'));
+}
+
+function writeFixtureFile(repositoryRoot, path, contents) {
+  const absolutePath = fixturePath(repositoryRoot, path);
+  mkdirSync(dirname(absolutePath), { recursive: true });
+  writeFileSync(absolutePath, contents);
+  return absolutePath;
+}
+
+function withTemporaryRepository(assertion) {
+  const repositoryRoot = mkdtempSync(join(tmpdir(), 'dormant-provider-inventory-'));
+  try {
+    writeFixtureFile(repositoryRoot, DIRECTORY_PATH, baseline.directorySource);
+    for (const [path, source] of baseline.artifacts) {
+      writeFixtureFile(repositoryRoot, path, source);
+    }
+    assert.deepEqual(validateDormantProviderInventoryFiles(repositoryRoot), []);
+    assertion(repositoryRoot);
+  } finally {
+    rmSync(repositoryRoot, { recursive: true, force: true });
+  }
+}
+
+function assertInputRejected(repositoryRoot, sensitivePath) {
+  assert.throws(
+    () => loadDormantProviderInventorySnapshot(repositoryRoot),
+    (error) =>
+      error instanceof Error &&
+      error.message === DORMANT_PROVIDER_INVENTORY_INPUT_ERROR &&
+      !error.message.includes(repositoryRoot) &&
+      !error.message.includes(sensitivePath),
+  );
+  assert.deepEqual(validateDormantProviderInventoryFiles(repositoryRoot), [
+    DORMANT_PROVIDER_INVENTORY_INPUT_ERROR,
+  ]);
+}
+
+function skipUnsupportedLink(error, context) {
+  if (
+    error &&
+    typeof error === 'object' &&
+    'code' in error &&
+    ['EACCES', 'EINVAL', 'ENOSYS', 'ENOTSUP', 'EPERM', 'UNKNOWN'].includes(error.code)
+  ) {
+    context.skip(`symbolic links are unavailable: ${error.code}`);
+    return true;
+  }
+  return false;
 }
 
 test('the exact ten planning entries have dormant adapter, hostile spec, and research artifacts', () => {
@@ -215,6 +281,89 @@ test('malformed snapshots fail closed without escaping', () => {
     assert.doesNotThrow(() => validateDormantProviderInventorySnapshot(value));
     assert.ok(validateDormantProviderInventorySnapshot(value).length > 0);
   }
+});
+
+test('rejects malformed UTF-8, a byte-order mark, empty input, and oversized input', () => {
+  const target = DORMANT_PROVIDER_INVENTORY[1].researchPath;
+  const original = Buffer.from(baseline.artifacts.get(target), 'utf8');
+  const mutations = [
+    Buffer.concat([original, Buffer.from([0xff])]),
+    Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), original]),
+    Buffer.alloc(0),
+    Buffer.alloc(MAX_DORMANT_PROVIDER_ARTIFACT_BYTES + 1, 0x20),
+  ];
+
+  for (const contents of mutations) {
+    withTemporaryRepository((repositoryRoot) => {
+      const absolutePath = writeFixtureFile(repositoryRoot, target, contents);
+      assertInputRejected(repositoryRoot, absolutePath);
+    });
+  }
+});
+
+test('rejects directory and hard-linked inventory artifacts', () => {
+  const target = DORMANT_PROVIDER_INVENTORY[2].researchPath;
+  withTemporaryRepository((repositoryRoot) => {
+    const absolutePath = fixturePath(repositoryRoot, target);
+    rmSync(absolutePath);
+    mkdirSync(absolutePath);
+    assertInputRejected(repositoryRoot, absolutePath);
+  });
+
+  withTemporaryRepository((repositoryRoot) => {
+    const absolutePath = fixturePath(repositoryRoot, target);
+    const hardLinkSource = join(repositoryRoot, 'sensitive-unreviewed-hard-link-source.md');
+    writeFileSync(hardLinkSource, baseline.artifacts.get(target));
+    rmSync(absolutePath);
+    linkSync(hardLinkSource, absolutePath);
+    assertInputRejected(repositoryRoot, absolutePath);
+  });
+});
+
+test('rejects a symbolic-link inventory artifact when supported', (context) => {
+  const target = DORMANT_PROVIDER_INVENTORY[3].researchPath;
+  withTemporaryRepository((repositoryRoot) => {
+    const absolutePath = fixturePath(repositoryRoot, target);
+    const symbolicLinkTarget = join(repositoryRoot, 'sensitive-unreviewed-symbolic-target.md');
+    writeFileSync(symbolicLinkTarget, baseline.artifacts.get(target));
+    rmSync(absolutePath);
+    try {
+      symlinkSync(symbolicLinkTarget, absolutePath, 'file');
+    } catch (error) {
+      if (skipUnsupportedLink(error, context)) return;
+      throw error;
+    }
+    assertInputRejected(repositoryRoot, absolutePath);
+  });
+});
+
+test('rejects a same-size rewrite during the stable descriptor read', () => {
+  const target = DORMANT_PROVIDER_INVENTORY[4].researchPath;
+  const original = Buffer.from(baseline.artifacts.get(target), 'utf8');
+  const replacement = Buffer.from(original);
+  replacement[replacement.length - 1] ^= 0x01;
+  assert.equal(replacement.length, original.length);
+  assert.notDeepEqual(replacement, original);
+
+  withTemporaryRepository((repositoryRoot) => {
+    const absolutePath = fixturePath(repositoryRoot, target);
+    assert.throws(
+      () =>
+        loadDormantProviderInventorySnapshotForTest(repositoryRoot, (path) => {
+          if (path === target) writeFileSync(absolutePath, replacement);
+        }),
+      (error) => error instanceof Error && error.message === DORMANT_PROVIDER_INVENTORY_INPUT_ERROR,
+    );
+  });
+});
+
+test('loader and validation errors are fixed and do not disclose hostile paths', () => {
+  withTemporaryRepository((repositoryRoot) => {
+    const target = DORMANT_PROVIDER_INVENTORY[5].researchPath;
+    const absolutePath = fixturePath(repositoryRoot, target);
+    rmSync(absolutePath);
+    assertInputRejected(repositoryRoot, absolutePath);
+  });
 });
 
 test('the validator contains no network, provider, cloud, credential, or subprocess capability', () => {
