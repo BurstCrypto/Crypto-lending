@@ -3,6 +3,8 @@ import tseslint from 'typescript-eslint';
 
 export default tseslint.config(eslint.configs.recommended, ...tseslint.configs.recommended, {
   files: [
+    'job-envelope-rollout-preflight.ts',
+    'job-envelope-rollout-preflight.test.ts',
     'production-evidence-bundle.ts',
     'production-evidence-bundle.test.ts',
     'production-deployment-target.ts',

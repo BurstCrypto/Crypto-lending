@@ -17,6 +17,8 @@
     "types": ["node"]
   },
   "include": [
+    "scripts/job-envelope-rollout-preflight.ts",
+    "scripts/job-envelope-rollout-preflight.test.ts",
     "scripts/production-evidence-bundle.ts",
     "scripts/production-evidence-bundle.test.ts",
     "scripts/production-deployment-target.ts",
