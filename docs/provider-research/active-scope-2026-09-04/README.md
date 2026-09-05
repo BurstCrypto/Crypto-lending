@@ -23,6 +23,12 @@ ambiguous last-key-wins artifact from being accepted during a future reviewed
 fingerprint rotation. A matching self-generated sidecar alone does not establish
 that parsing is unambiguous.
 
+The local loader also requires both inputs to remain bounded, non-empty,
+single-link regular files at canonical paths inside the repository. It compares
+bigint device, inode, mode, size, and nanosecond timestamp identities around two
+exact descriptor snapshots, and rejects links, path replacement, growth, or
+same-size mutation before any capture can be accepted.
+
 ## Interpretation boundary
 
 `CATALOGED_OFFLINE_RESEARCH_ONLY` means only that an official, static source was

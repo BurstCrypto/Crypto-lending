@@ -1,18 +1,14 @@
 import { createHash } from 'node:crypto';
-import {
-  closeSync,
-  constants as fsConstants,
-  fstatSync,
-  lstatSync,
-  openSync,
-  readFileSync,
-  realpathSync,
-} from 'node:fs';
+import { realpathSync } from 'node:fs';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 
 import { parseStrictJsonBytes } from '../shared/parse-strict-json.mjs';
+import {
+  readSecureLocalFile,
+  readSecureLocalFileForTest,
+} from '../shared/read-secure-local-file.mjs';
 
 export const REPOSITORY_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 export const CAPTURE_PATH =
@@ -21,9 +17,10 @@ export const SIDECAR_PATH =
   'docs/provider-research/active-scope-2026-09-04/ethereum-solana-missing-provider-captures.sha256';
 export const CAPTURE_JSON_INVALID_ERROR =
   'capture must contain strict UTF-8 JSON without a byte-order mark or duplicate object keys';
+export const CAPTURE_FILES_INVALID_ERROR = 'capture files are missing, unsafe, or unreadable';
 
-const MAX_CAPTURE_BYTES = 32_768;
-const MAX_SIDECAR_BYTES = 65;
+export const MAX_CAPTURE_BYTES = 32_768;
+export const MAX_SIDECAR_BYTES = 65;
 const EXPECTED_CAPTURE_SHA256 = 'db13db3ff78d6dd0641f8f61067e48d8eb45d0eab309491e2bff9a60112a97d2';
 const SHA256 = /^[0-9a-f]{64}$/u;
 const COMMIT_SHA = /^[0-9a-f]{40}$/u;
@@ -646,75 +643,45 @@ export function parseProviderResearchCaptureBytes(captureBytes) {
   }
 }
 
-function repositoryFile(relativePath, maximumBytes) {
-  const root = realpathSync(REPOSITORY_ROOT);
-  const resolved = resolve(root, relativePath);
-  const pathRelativeToRoot = relative(root, resolved);
-  if (
-    pathRelativeToRoot === '' ||
-    pathRelativeToRoot === '..' ||
-    pathRelativeToRoot.startsWith(`..${sep}`) ||
-    isAbsolute(pathRelativeToRoot)
-  ) {
-    throw new Error('research file must be inside the repository');
-  }
-  const beforePathStat = lstatSync(resolved);
-  if (
-    !beforePathStat.isFile() ||
-    beforePathStat.isSymbolicLink() ||
-    beforePathStat.nlink !== 1 ||
-    beforePathStat.size < 1 ||
-    beforePathStat.size > maximumBytes
-  ) {
-    throw new Error('research file must be a bounded single-link regular file');
-  }
-  if (realpathSync(resolved) !== resolved) {
-    throw new Error('research file must not traverse a link or junction');
-  }
-  const flags = fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0);
-  const descriptor = openSync(resolved, flags);
+function repositoryFile(repositoryRoot, relativePath, maximumBytes, afterFirstReadForTest) {
   try {
-    const beforeDescriptorStat = fstatSync(descriptor);
+    const root = realpathSync.native(resolve(repositoryRoot));
+    const resolved = resolve(root, relativePath);
+    const pathRelativeToRoot = relative(root, resolved);
     if (
-      !beforeDescriptorStat.isFile() ||
-      beforeDescriptorStat.nlink !== 1 ||
-      beforeDescriptorStat.size < 1 ||
-      beforeDescriptorStat.size > maximumBytes ||
-      beforeDescriptorStat.dev !== beforePathStat.dev ||
-      beforeDescriptorStat.ino !== beforePathStat.ino
+      pathRelativeToRoot === '' ||
+      pathRelativeToRoot === '..' ||
+      pathRelativeToRoot.startsWith(`..${sep}`) ||
+      isAbsolute(pathRelativeToRoot)
     ) {
-      throw new Error('research file changed before descriptor binding');
+      throw new Error(CAPTURE_FILES_INVALID_ERROR);
     }
-    const bytes = readFileSync(descriptor);
-    const afterDescriptorStat = fstatSync(descriptor);
-    const afterPathStat = lstatSync(resolved);
-    if (
-      !afterPathStat.isFile() ||
-      afterPathStat.isSymbolicLink() ||
-      afterPathStat.nlink !== 1 ||
-      realpathSync(resolved) !== resolved ||
-      afterDescriptorStat.dev !== beforeDescriptorStat.dev ||
-      afterDescriptorStat.ino !== beforeDescriptorStat.ino ||
-      afterDescriptorStat.size !== beforeDescriptorStat.size ||
-      afterDescriptorStat.mtimeMs !== beforeDescriptorStat.mtimeMs ||
-      afterPathStat.dev !== beforeDescriptorStat.dev ||
-      afterPathStat.ino !== beforeDescriptorStat.ino ||
-      bytes.length !== beforeDescriptorStat.size
-    ) {
-      throw new Error('research file changed while it was being read');
-    }
-    return bytes;
-  } finally {
-    closeSync(descriptor);
+    return afterFirstReadForTest === undefined
+      ? readSecureLocalFile(resolved, maximumBytes)
+      : readSecureLocalFileForTest(resolved, maximumBytes, () =>
+          afterFirstReadForTest(relativePath),
+        );
+  } catch {
+    throw new Error(CAPTURE_FILES_INVALID_ERROR);
   }
 }
 
-export function validateProviderResearchCaptureFiles() {
+function validateProviderResearchCaptureFilesInternal(repositoryRoot, afterFirstReadForTest) {
   const errors = [];
   let fingerprint = null;
   try {
-    const captureBytes = repositoryFile(CAPTURE_PATH, MAX_CAPTURE_BYTES);
-    const sidecarBytes = repositoryFile(SIDECAR_PATH, MAX_SIDECAR_BYTES);
+    const captureBytes = repositoryFile(
+      repositoryRoot,
+      CAPTURE_PATH,
+      MAX_CAPTURE_BYTES,
+      afterFirstReadForTest,
+    );
+    const sidecarBytes = repositoryFile(
+      repositoryRoot,
+      SIDECAR_PATH,
+      MAX_SIDECAR_BYTES,
+      afterFirstReadForTest,
+    );
     const captureText = new TextDecoder('utf-8', { fatal: true }).decode(captureBytes);
     const sidecarText = new TextDecoder('utf-8', { fatal: true }).decode(sidecarBytes);
     if (
@@ -739,9 +706,18 @@ export function validateProviderResearchCaptureFiles() {
       errors.push('capture bytes do not match the reviewed canonical artifact');
     }
   } catch {
-    errors.push('capture files are missing, unsafe, or unreadable');
+    errors.push(CAPTURE_FILES_INVALID_ERROR);
   }
   return { errors: [...new Set(errors)], fingerprint };
+}
+
+export function validateProviderResearchCaptureFiles() {
+  return validateProviderResearchCaptureFilesInternal(REPOSITORY_ROOT, undefined);
+}
+
+/** Test-only fault seam; production validation always reads from REPOSITORY_ROOT. */
+export function validateProviderResearchCaptureFilesForTest(repositoryRoot, afterFirstReadForTest) {
+  return validateProviderResearchCaptureFilesInternal(repositoryRoot, afterFirstReadForTest);
 }
 
 const invokedPath = process.argv[1] ? pathToFileURL(resolve(process.argv[1])).href : '';

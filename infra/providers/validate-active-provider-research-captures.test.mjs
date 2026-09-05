@@ -1,23 +1,39 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import {
+  linkSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 import test from 'node:test';
 
 import {
+  CAPTURE_FILES_INVALID_ERROR,
   CAPTURE_JSON_INVALID_ERROR,
   CAPTURE_PATH,
+  MAX_CAPTURE_BYTES,
+  MAX_SIDECAR_BYTES,
   REPOSITORY_ROOT,
   SIDECAR_PATH,
   parseProviderResearchCaptureBytes,
   validateProviderResearchCaptureFiles,
+  validateProviderResearchCaptureFilesForTest,
   validateProviderResearchCaptureRecord,
   validateProviderResearchCaptureSidecar,
 } from './validate-active-provider-research-captures.mjs';
 
 const EXPECTED_FINGERPRINT = 'db13db3ff78d6dd0641f8f61067e48d8eb45d0eab309491e2bff9a60112a97d2';
+const CANONICAL_CAPTURE_BYTES = readFileSync(`${REPOSITORY_ROOT}/${CAPTURE_PATH}`);
+const CANONICAL_SIDECAR_BYTES = readFileSync(`${REPOSITORY_ROOT}/${SIDECAR_PATH}`);
 
 function loadCapture() {
-  return JSON.parse(readFileSync(`${REPOSITORY_ROOT}/${CAPTURE_PATH}`, 'utf8'));
+  return JSON.parse(CANONICAL_CAPTURE_BYTES.toString('utf8'));
 }
 
 function assertMutationRejected(name, mutate) {
@@ -25,6 +41,56 @@ function assertMutationRejected(name, mutate) {
   mutate(capture);
   const errors = validateProviderResearchCaptureRecord(capture);
   assert.ok(errors.length > 0, `${name} should fail closed`);
+}
+
+function fixturePath(repositoryRoot, path) {
+  return join(repositoryRoot, ...path.split('/'));
+}
+
+function writeFixtureFile(repositoryRoot, path, contents) {
+  const absolutePath = fixturePath(repositoryRoot, path);
+  mkdirSync(dirname(absolutePath), { recursive: true });
+  writeFileSync(absolutePath, contents);
+  return absolutePath;
+}
+
+function withTemporaryRepository(assertion) {
+  const repositoryRoot = mkdtempSync(join(tmpdir(), 'active-provider-capture-'));
+  try {
+    writeFixtureFile(repositoryRoot, CAPTURE_PATH, CANONICAL_CAPTURE_BYTES);
+    writeFixtureFile(repositoryRoot, SIDECAR_PATH, CANONICAL_SIDECAR_BYTES);
+    assert.deepEqual(validateProviderResearchCaptureFilesForTest(repositoryRoot), {
+      errors: [],
+      fingerprint: EXPECTED_FINGERPRINT,
+    });
+    assertion(repositoryRoot);
+  } finally {
+    rmSync(repositoryRoot, { recursive: true, force: true });
+  }
+}
+
+function assertFileInputsRejected(repositoryRoot, sensitivePath) {
+  const result = validateProviderResearchCaptureFilesForTest(repositoryRoot);
+  assert.deepEqual(result, {
+    errors: [CAPTURE_FILES_INVALID_ERROR],
+    fingerprint: null,
+  });
+  const serialized = JSON.stringify(result);
+  assert.equal(serialized.includes(repositoryRoot), false);
+  assert.equal(serialized.includes(sensitivePath), false);
+}
+
+function skipUnsupportedLink(error, context) {
+  if (
+    error &&
+    typeof error === 'object' &&
+    'code' in error &&
+    ['EACCES', 'EINVAL', 'ENOSYS', 'ENOTSUP', 'EPERM', 'UNKNOWN'].includes(error.code)
+  ) {
+    context.skip(`symbolic links are unavailable: ${error.code}`);
+    return true;
+  }
+  return false;
 }
 
 test('the canonical four-provider research packet is valid and remains non-operational', () => {
@@ -197,7 +263,7 @@ test('the lowercase sidecar binds the exact capture bytes', () => {
 });
 
 test('strict capture parsing rejects matching-sidecar duplicate keys and a byte-order mark', () => {
-  const canonicalBytes = readFileSync(`${REPOSITORY_ROOT}/${CAPTURE_PATH}`);
+  const canonicalBytes = CANONICAL_CAPTURE_BYTES;
   const canonicalText = canonicalBytes.toString('utf8');
   const ambiguousCaptures = [
     Buffer.from(canonicalText.replace('{\n', '{\n  "schemaVersion": 999,\n'), 'utf8'),
@@ -229,6 +295,76 @@ test('strict capture parsing rejects matching-sidecar duplicate keys and a byte-
     () => parseProviderResearchCaptureBytes(byteOrderMarked),
     (error) => error instanceof Error && error.message === CAPTURE_JSON_INVALID_ERROR,
   );
+});
+
+test('file loading rejects malformed UTF-8, empty input, and bounded-file overflow', () => {
+  const mutations = [
+    [CAPTURE_PATH, Buffer.concat([CANONICAL_CAPTURE_BYTES, Buffer.from([0xff])])],
+    [CAPTURE_PATH, Buffer.alloc(0)],
+    [CAPTURE_PATH, Buffer.alloc(MAX_CAPTURE_BYTES + 1, 0x20)],
+    [SIDECAR_PATH, Buffer.alloc(MAX_SIDECAR_BYTES + 1, 0x30)],
+  ];
+
+  for (const [path, contents] of mutations) {
+    withTemporaryRepository((repositoryRoot) => {
+      const absolutePath = writeFixtureFile(repositoryRoot, path, contents);
+      assertFileInputsRejected(repositoryRoot, absolutePath);
+    });
+  }
+});
+
+test('file loading rejects hard-linked capture input', () => {
+  withTemporaryRepository((repositoryRoot) => {
+    const absolutePath = fixturePath(repositoryRoot, CAPTURE_PATH);
+    const hardLinkSource = join(repositoryRoot, 'unreviewed-hard-link-capture.json');
+    writeFileSync(hardLinkSource, CANONICAL_CAPTURE_BYTES);
+    rmSync(absolutePath);
+    linkSync(hardLinkSource, absolutePath);
+    assertFileInputsRejected(repositoryRoot, hardLinkSource);
+  });
+});
+
+test('file loading rejects symbolic-link sidecar input when supported', (context) => {
+  withTemporaryRepository((repositoryRoot) => {
+    const absolutePath = fixturePath(repositoryRoot, SIDECAR_PATH);
+    const symbolicLinkTarget = join(repositoryRoot, 'unreviewed-symbolic-sidecar.sha256');
+    writeFileSync(symbolicLinkTarget, CANONICAL_SIDECAR_BYTES);
+    rmSync(absolutePath);
+    try {
+      symlinkSync(symbolicLinkTarget, absolutePath, 'file');
+    } catch (error) {
+      if (skipUnsupportedLink(error, context)) return;
+      throw error;
+    }
+    assertFileInputsRejected(repositoryRoot, symbolicLinkTarget);
+  });
+});
+
+test('file loading rejects a same-size rewrite between exact descriptor snapshots', () => {
+  const replacement = Buffer.from(CANONICAL_SIDECAR_BYTES);
+  replacement[0] = replacement[0] === 0x30 ? 0x31 : 0x30;
+  assert.equal(replacement.length, CANONICAL_SIDECAR_BYTES.length);
+  assert.notDeepEqual(replacement, CANONICAL_SIDECAR_BYTES);
+
+  withTemporaryRepository((repositoryRoot) => {
+    const absolutePath = fixturePath(repositoryRoot, SIDECAR_PATH);
+    const result = validateProviderResearchCaptureFilesForTest(repositoryRoot, (path) => {
+      if (path === SIDECAR_PATH) writeFileSync(absolutePath, replacement);
+    });
+    assert.deepEqual(result, {
+      errors: [CAPTURE_FILES_INVALID_ERROR],
+      fingerprint: null,
+    });
+  });
+});
+
+test('file loading returns fixed errors without disclosing hostile paths', () => {
+  withTemporaryRepository((repositoryRoot) => {
+    const absolutePath = fixturePath(repositoryRoot, CAPTURE_PATH);
+    rmSync(absolutePath);
+    assert.doesNotThrow(() => validateProviderResearchCaptureFilesForTest(repositoryRoot));
+    assertFileInputsRejected(repositoryRoot, absolutePath);
+  });
 });
 
 test('the validator has no network, provider client, cloud, credential, or subprocess path', () => {
