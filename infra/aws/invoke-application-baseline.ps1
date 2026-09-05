@@ -1258,7 +1258,8 @@ function Assert-RedisOperatorFunctionalResourceChange {
         if (
             $null -ne $path -and
             $path -cne '/Properties/AuthenticationMode' -and
-            -not $path.StartsWith('/Properties/AuthenticationMode/', [System.StringComparison]::Ordinal)
+            $path -cne '/Properties/AuthenticationMode/Passwords' -and
+            -not $path.StartsWith('/Properties/AuthenticationMode/Passwords/', [System.StringComparison]::Ordinal)
         ) {
             throw "$context contains an unexpected AuthenticationMode Path."
         }

@@ -2098,6 +2098,14 @@ try {
                 Mutate = { param($change) $change.ResourceChange.Details[0].Target.Path = '/Properties/AccessString' }
             },
             [pscustomobject]@{
+                Name = 'AuthenticationMode AccessString path'
+                Mutate = { param($change) $change.ResourceChange.Details[0].Target.Path = '/Properties/AuthenticationMode/AccessString' }
+            },
+            [pscustomobject]@{
+                Name = 'AuthenticationMode Type path'
+                Mutate = { param($change) $change.ResourceChange.Details[0].Target.Path = '/Properties/AuthenticationMode/Type' }
+            },
+            [pscustomobject]@{
                 Name = 'AuthenticationMode near-prefix path'
                 Mutate = { param($change) $change.ResourceChange.Details[0].Target.Path = '/Properties/AuthenticationModeEvil' }
             },
