@@ -48,6 +48,7 @@ function apiFixture(t) {
   mkdirSync(join(dist, 'blockchain-sync/application'), { recursive: true });
   mkdirSync(join(dist, 'infrastructure/outbox'), { recursive: true });
   mkdirSync(join(dist, 'infrastructure/database'), { recursive: true });
+  mkdirSync(join(dist, 'infrastructure/redis'), { recursive: true });
   for (const file of [
     'main.js',
     'app.module.js',
@@ -57,6 +58,8 @@ function apiFixture(t) {
     'infrastructure/outbox/outbox-worker.cli.js',
     'infrastructure/outbox/outbox-worker-health.cli.js',
     'infrastructure/database/migration.cli.js',
+    'infrastructure/redis/redis-session-revocation.js',
+    'infrastructure/redis/redis-session-revocation.cli.js',
   ]) {
     writeFileSync(join(dist, file), 'module.exports = Object.freeze({});\n', 'utf8');
   }
@@ -111,7 +114,7 @@ function createSymbolicLinkOrSkip(t, target, path, type) {
 test('accepts an API runtime whose production root cannot resolve test-only SDKs', (t) => {
   const report = withProduction(() => validateBuiltApiRuntime(apiFixture(t)));
   assert.equal(report.valid, true);
-  assert.equal(report.checkedEntrypoints, 9);
+  assert.equal(report.checkedEntrypoints, 11);
 });
 
 test('rejects an API runtime that can resolve a test-only SDK', (t) => {
@@ -131,6 +134,20 @@ test('requires production mode and every API executable used by ECS', (t) => {
     () => withProduction(() => validateBuiltApiRuntime(root)),
     /Missing API runtime artifact/u,
   );
+});
+
+test('requires both Redis session-revocation runtime artifacts', (t) => {
+  for (const artifact of [
+    'infrastructure/redis/redis-session-revocation.js',
+    'infrastructure/redis/redis-session-revocation.cli.js',
+  ]) {
+    const root = apiFixture(t);
+    rmSync(join(root, 'dist', artifact));
+    assert.throws(
+      () => withProduction(() => validateBuiltApiRuntime(root)),
+      new RegExp(`Missing API runtime artifact: dist/${artifact.replaceAll('.', '\\.')}`, 'u'),
+    );
+  }
 });
 
 test('rejects an enabled compiled balance-consumer activation gate', (t) => {

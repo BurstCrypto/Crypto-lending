@@ -374,6 +374,8 @@ function validateBuiltApiRuntimeInternal(apiRootInput, options = {}) {
     'infrastructure/outbox/outbox-worker.cli.js',
     'infrastructure/outbox/outbox-worker-health.cli.js',
     'infrastructure/database/migration.cli.js',
+    'infrastructure/redis/redis-session-revocation.js',
+    'infrastructure/redis/redis-session-revocation.cli.js',
   ];
   for (const relativePath of requiredPaths) {
     if (!snapshot.files.has(relativePath)) {

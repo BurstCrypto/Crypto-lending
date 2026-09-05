@@ -35,6 +35,14 @@ function loadSources() {
   return {
     apiDockerfile: readFileSync(join(repositoryRoot, 'Dockerfile.api'), 'utf8'),
     apiPackage: readFileSync(join(repositoryRoot, 'apps/api/package.json')),
+    redisSessionRevocationCli: readFileSync(
+      join(repositoryRoot, 'apps/api/src/infrastructure/redis/redis-session-revocation.cli.ts'),
+      'utf8',
+    ),
+    redisSessionRevocationRuntime: readFileSync(
+      join(repositoryRoot, 'apps/api/src/infrastructure/redis/redis-session-revocation.ts'),
+      'utf8',
+    ),
     balanceConsumerActivation: readFileSync(
       join(
         repositoryRoot,
@@ -62,6 +70,10 @@ function loadSources() {
     ),
     applicationTemplate: readFileSync(
       join(repositoryRoot, 'infra/aws/application-baseline.yaml'),
+      'utf8',
+    ),
+    observabilityTemplate: readFileSync(
+      join(repositoryRoot, 'infra/aws/application-observability.yaml'),
       'utf8',
     ),
     dockerignore: readFileSync(join(repositoryRoot, '.dockerignore'), 'utf8'),
@@ -143,8 +155,8 @@ test('accepts the reviewed production container contract deterministically', () 
 });
 
 test('loads exactly the bounded reviewed source set through stable local reads', () => {
-  assert.equal(PRODUCTION_CONTAINER_SOURCE_PATHS.length, 15);
-  assert.equal(new Set(PRODUCTION_CONTAINER_SOURCE_PATHS).size, 15);
+  assert.equal(PRODUCTION_CONTAINER_SOURCE_PATHS.length, 18);
+  assert.equal(new Set(PRODUCTION_CONTAINER_SOURCE_PATHS).size, 18);
   assert.equal(MAX_PRODUCTION_CONTAINER_SOURCE_BYTES, 393_216);
 
   withTemporarySourceTree((root) => {
@@ -472,6 +484,45 @@ test('rejects balance-consumer source activation, import-order, and command drif
       'npm run start:prod --workspace @crypto-lending/api',
     ),
     /Root package/u,
+  );
+});
+
+test('binds the reviewed Redis revocation sources, package scripts, and task command', () => {
+  const source = loadSources();
+  assertRejected(
+    replace(
+      source,
+      'redisSessionRevocationRuntime',
+      "'ethereum-solana-mainnet'",
+      "'ethereum-solana-base-mainnet'",
+    ),
+    /exact reviewed source/u,
+  );
+  assertRejected(
+    replace(source, 'redisSessionRevocationCli', 'process.argv.slice(2)', "['CLIENT', 'KILL']"),
+    /exact reviewed source/u,
+  );
+  assertRejected(
+    replace(
+      source,
+      'apiPackage',
+      'node dist/infrastructure/redis/redis-session-revocation.cli.js',
+      'node dist/main.js',
+    ),
+    /API production scripts/u,
+  );
+  assertRejected(
+    replace(
+      source,
+      'observabilityTemplate',
+      'Command: [node, dist/infrastructure/redis/redis-session-revocation.cli.js]',
+      'Command: [node, dist/main.js]',
+    ),
+    /Redis revocation task/u,
+  );
+  assertRejected(
+    replace(source, 'observabilityTemplate', "User: '10001:10001'", "User: '0:0'"),
+    /Redis revocation task/u,
   );
 });
 

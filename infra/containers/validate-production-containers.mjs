@@ -19,8 +19,12 @@ export const NPM_VERSION = '11.6.4';
 export const RDS_BUNDLE_SHA256 = 'e5bb2084ccf45087bda1c9bffdea0eb15ee67f0b91646106e466714f9de3c7e3';
 export const MAX_PRODUCTION_CONTAINER_SOURCE_BYTES = 393_216;
 export const PRODUCTION_CONTAINER_INPUT_ERROR =
-  'Production container inputs must be the 15 non-empty, canonical, stable, single-link repository files within their reviewed per-file limits and 393216-byte aggregate limit; text must be strict UTF-8 without a byte-order mark.';
+  'Production container inputs must be the 18 non-empty, canonical, stable, single-link repository files within their reviewed per-file limits and 393216-byte aggregate limit; text must be strict UTF-8 without a byte-order mark.';
 const SOURCE_URL = 'https://github.com/Trey-Gleason/Crypto-lending';
+const REDIS_SESSION_REVOCATION_CLI_SHA256 =
+  'f222f63fb2d2edc534f941a5ee5980c2b1bf7a64ec1014323cf1215196d7c8b6';
+const REDIS_SESSION_REVOCATION_RUNTIME_SHA256 =
+  'fd84beff96d167ba3316d9ae476256ed0b32fb2b00717a4e062c36950d73a86b';
 const EXPECTED_DOCKERIGNORE = `**
 !Dockerfile.api
 !Dockerfile.web
@@ -83,6 +87,16 @@ const SOURCE_FILES = Object.freeze([
     json: true,
   }),
   Object.freeze({
+    key: 'redisSessionRevocationCli',
+    path: 'apps/api/src/infrastructure/redis/redis-session-revocation.cli.ts',
+    maximumBytes: 4_096,
+  }),
+  Object.freeze({
+    key: 'redisSessionRevocationRuntime',
+    path: 'apps/api/src/infrastructure/redis/redis-session-revocation.ts',
+    maximumBytes: 16_384,
+  }),
+  Object.freeze({
     key: 'balanceConsumerActivation',
     path: 'apps/api/src/blockchain-sync/application/balance-sync-consumer.activation.ts',
     maximumBytes: 4_096,
@@ -106,6 +120,11 @@ const SOURCE_FILES = Object.freeze([
     key: 'applicationTemplate',
     path: 'infra/aws/application-baseline.yaml',
     maximumBytes: 65_536,
+  }),
+  Object.freeze({
+    key: 'observabilityTemplate',
+    path: 'infra/aws/application-observability.yaml',
+    maximumBytes: 51_200,
   }),
   Object.freeze({ key: 'dockerignore', path: '.dockerignore', maximumBytes: 8_192 }),
   Object.freeze({
@@ -419,6 +438,27 @@ function validateBalanceConsumerExecutable(sources) {
   return errors;
 }
 
+function validateRedisSessionRevocationExecutable(sources) {
+  const errors = [];
+  const cliDigest = createHash('sha256')
+    .update(sources.redisSessionRevocationCli, 'utf8')
+    .digest('hex');
+  const runtimeDigest = createHash('sha256')
+    .update(sources.redisSessionRevocationRuntime, 'utf8')
+    .digest('hex');
+  addError(
+    errors,
+    cliDigest === REDIS_SESSION_REVOCATION_CLI_SHA256,
+    'Redis session-revocation CLI must match the exact reviewed source',
+  );
+  addError(
+    errors,
+    runtimeDigest === REDIS_SESSION_REVOCATION_RUNTIME_SHA256,
+    'Redis session-revocation runtime must match the exact reviewed source',
+  );
+  return errors;
+}
+
 function validateWebDockerfile(source) {
   const errors = validateSharedDockerfile(source, 'Dockerfile.web', {
     command: 'CMD ["node", "server.js"]',
@@ -453,13 +493,19 @@ function validateWebDockerfile(source) {
   return errors;
 }
 
-function validateCloudFormation(applicationTemplate, migrationTemplate) {
+function validateCloudFormation(applicationTemplate, migrationTemplate, observabilityTemplate) {
   const errors = [];
   const application = normalize(applicationTemplate);
   const migration = normalize(migrationTemplate);
+  const observability = normalize(observabilityTemplate);
   const api = block(application, ' ApiTaskDefinition:', ' WebTaskDefinition:');
   const web = block(application, ' WebTaskDefinition:', ' WorkerTaskDefinition:');
   const worker = block(application, ' WorkerTaskDefinition:', ' ApiService:');
+  const redisRevocation = block(
+    observability,
+    '  RedisSessionRevocationTaskDefinition:',
+    '\nOutputs:',
+  );
 
   addError(
     errors,
@@ -485,6 +531,30 @@ function validateCloudFormation(applicationTemplate, migrationTemplate) {
       'Command: [node, dist/infrastructure/database/migration.cli.js, --production, up]',
     ),
     'Migration task command must exist in the API image build output',
+  );
+  addError(
+    errors,
+    observability.includes(
+      'RedisOperatorMode:\n    Type: String\n    Default: DISABLED\n    AllowedValues: [DISABLED, ENABLED]',
+    ) &&
+      observability.includes('RedisOperatorEnabled: !Equals [!Ref RedisOperatorMode, ENABLED]') &&
+      redisRevocation.includes('Type: AWS::ECS::TaskDefinition') &&
+      redisRevocation.includes('Condition: RedisOperatorEnabled') &&
+      redisRevocation.includes(
+        'Command: [node, dist/infrastructure/redis/redis-session-revocation.cli.js]',
+      ) &&
+      redisRevocation.includes('Image: !Ref ApiImageUri') &&
+      redisRevocation.includes('Name: PRODUCT_NETWORK_SCOPE, Value: ethereum-solana-mainnet') &&
+      redisRevocation.includes('Name: REDIS_CREDENTIAL_PHASE, Value: !Ref RedisCredentialPhase') &&
+      redisRevocation.includes("ValueFrom: !Sub '${RedisOperatorSecretArn}:password::'") &&
+      redisRevocation.includes('Capabilities: { Drop: [ALL] }') &&
+      redisRevocation.includes('ReadonlyRootFilesystem: true') &&
+      redisRevocation.includes("User: '10001:10001'") &&
+      !redisRevocation.includes('TaskRoleArn:') &&
+      !redisRevocation.includes('DesiredCount:') &&
+      !redisRevocation.includes('EnableExecuteCommand:') &&
+      !observability.includes('Type: AWS::ECS::Service'),
+    'Redis revocation task must remain a disabled-by-default, exact-command, hardened one-off API-image task',
   );
   for (const [name, task, port] of [
     ['API', api, 3001],
@@ -569,8 +639,13 @@ export function validateProductionContainerSources(sources) {
   const errors = [
     ...validateApiDockerfile(sources.apiDockerfile),
     ...validateBalanceConsumerExecutable(sources),
+    ...validateRedisSessionRevocationExecutable(sources),
     ...validateWebDockerfile(sources.webDockerfile),
-    ...validateCloudFormation(sources.applicationTemplate, sources.migrationTemplate),
+    ...validateCloudFormation(
+      sources.applicationTemplate,
+      sources.migrationTemplate,
+      sources.observabilityTemplate,
+    ),
     ...validateRdsBundle(sources.rdsBundle, normalize(sources.rdsChecksum)),
   ];
   addError(
@@ -605,6 +680,10 @@ export function validateProductionContainerSources(sources) {
         'tsx src/blockchain-sync/application/balance-sync-consumer.cli.ts' &&
       apiPackage?.scripts?.['worker:balance:prod'] ===
         'node dist/blockchain-sync/application/balance-sync-consumer.cli.js' &&
+      apiPackage?.scripts?.['redis:revoke-inactive-sessions'] ===
+        'tsx src/infrastructure/redis/redis-session-revocation.cli.ts' &&
+      apiPackage?.scripts?.['redis:revoke-inactive-sessions:prod'] ===
+        'node dist/infrastructure/redis/redis-session-revocation.cli.js' &&
       apiPackage?.scripts?.['db:migrate:prod'] ===
         'node dist/infrastructure/database/migration.cli.js --production up',
     'API production scripts must remain compatible with the image and ECS overrides',
@@ -668,7 +747,7 @@ export function validateProductionContainers(
 function loadProductionContainerSourcesInternal(repositoryRoot, faultPath, afterFirstReadForTest) {
   try {
     if (
-      SOURCE_FILES.length !== 15 ||
+      SOURCE_FILES.length !== 18 ||
       new Set(SOURCE_FILES.map(({ key }) => key)).size !== SOURCE_FILES.length ||
       new Set(SOURCE_FILES.map(({ path }) => path)).size !== SOURCE_FILES.length
     ) {
