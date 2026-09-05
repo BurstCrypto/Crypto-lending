@@ -1,11 +1,14 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import {
+  CAPTURE_JSON_INVALID_ERROR,
   CAPTURE_PATH,
   REPOSITORY_ROOT,
   SIDECAR_PATH,
+  parseProviderResearchCaptureBytes,
   validateProviderResearchCaptureFiles,
   validateProviderResearchCaptureRecord,
   validateProviderResearchCaptureSidecar,
@@ -191,6 +194,41 @@ test('the lowercase sidecar binds the exact capture bytes', () => {
   );
   assert.doesNotThrow(() => validateProviderResearchCaptureSidecar(null, null));
   assert.ok(validateProviderResearchCaptureSidecar(null, null).length > 0);
+});
+
+test('strict capture parsing rejects matching-sidecar duplicate keys and a byte-order mark', () => {
+  const canonicalBytes = readFileSync(`${REPOSITORY_ROOT}/${CAPTURE_PATH}`);
+  const canonicalText = canonicalBytes.toString('utf8');
+  const ambiguousCaptures = [
+    Buffer.from(canonicalText.replace('{\n', '{\n  "schemaVersion": 999,\n'), 'utf8'),
+    Buffer.from(
+      canonicalText.replace('  "scope": {\n', '  "scope": {\n    "researchOnly": false,\n'),
+      'utf8',
+    ),
+  ];
+
+  for (const bytes of ambiguousCaptures) {
+    const digest = createHash('sha256').update(bytes).digest('hex');
+    assert.deepEqual(validateProviderResearchCaptureSidecar(bytes, `${digest}\n`), []);
+    assert.deepEqual(validateProviderResearchCaptureRecord(JSON.parse(bytes.toString('utf8'))), []);
+    assert.notEqual(digest, EXPECTED_FINGERPRINT);
+    assert.throws(
+      () => parseProviderResearchCaptureBytes(bytes),
+      (error) => error instanceof Error && error.message === CAPTURE_JSON_INVALID_ERROR,
+    );
+  }
+
+  const byteOrderMarked = Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), canonicalBytes]);
+  const byteOrderMarkedDigest = createHash('sha256').update(byteOrderMarked).digest('hex');
+  assert.deepEqual(
+    validateProviderResearchCaptureSidecar(byteOrderMarked, `${byteOrderMarkedDigest}\n`),
+    [],
+  );
+  assert.notEqual(byteOrderMarkedDigest, EXPECTED_FINGERPRINT);
+  assert.throws(
+    () => parseProviderResearchCaptureBytes(byteOrderMarked),
+    (error) => error instanceof Error && error.message === CAPTURE_JSON_INVALID_ERROR,
+  );
 });
 
 test('the validator has no network, provider client, cloud, credential, or subprocess path', () => {

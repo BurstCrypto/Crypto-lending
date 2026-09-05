@@ -16,6 +16,12 @@ The machine-readable artifact is
 [`ethereum-solana-missing-provider-captures.json`](ethereum-solana-missing-provider-captures.json).
 Its sidecar hashes the exact canonical UTF-8 bytes. The offline validator is
 `infra/providers/validate-active-provider-research-captures.mjs`.
+Before semantic validation, the validator rejects malformed UTF-8, a byte-order
+mark, and duplicate object keys at any depth. The compiled reviewed SHA-256
+independently rejects any byte change; strict parsing additionally prevents an
+ambiguous last-key-wins artifact from being accepted during a future reviewed
+fingerprint rotation. A matching self-generated sidecar alone does not establish
+that parsing is unambiguous.
 
 ## Interpretation boundary
 

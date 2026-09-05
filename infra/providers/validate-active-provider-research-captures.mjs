@@ -12,11 +12,15 @@ import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 
+import { parseStrictJsonBytes } from '../shared/parse-strict-json.mjs';
+
 export const REPOSITORY_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 export const CAPTURE_PATH =
   'docs/provider-research/active-scope-2026-09-04/ethereum-solana-missing-provider-captures.json';
 export const SIDECAR_PATH =
   'docs/provider-research/active-scope-2026-09-04/ethereum-solana-missing-provider-captures.sha256';
+export const CAPTURE_JSON_INVALID_ERROR =
+  'capture must contain strict UTF-8 JSON without a byte-order mark or duplicate object keys';
 
 const MAX_CAPTURE_BYTES = 32_768;
 const MAX_SIDECAR_BYTES = 65;
@@ -634,6 +638,14 @@ export function validateProviderResearchCaptureSidecar(captureBytes, sidecarText
   return errors;
 }
 
+export function parseProviderResearchCaptureBytes(captureBytes) {
+  try {
+    return parseStrictJsonBytes(captureBytes);
+  } catch {
+    throw new Error(CAPTURE_JSON_INVALID_ERROR);
+  }
+}
+
 function repositoryFile(relativePath, maximumBytes) {
   const root = realpathSync(REPOSITORY_ROOT);
   const resolved = resolve(root, relativePath);
@@ -716,9 +728,9 @@ export function validateProviderResearchCaptureFiles() {
     }
     let record;
     try {
-      record = JSON.parse(captureText);
+      record = parseProviderResearchCaptureBytes(captureBytes);
     } catch {
-      errors.push('capture must contain valid JSON');
+      errors.push(CAPTURE_JSON_INVALID_ERROR);
     }
     if (record !== undefined) errors.push(...validateProviderResearchCaptureRecord(record));
     errors.push(...validateProviderResearchCaptureSidecar(captureBytes, sidecarText));
