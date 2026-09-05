@@ -35,7 +35,7 @@ import {
   type DatabaseMigration,
   type DatabasePrincipalNames,
 } from '../../src/infrastructure/database/migrations';
-import { createPostgresPool } from '../../src/infrastructure/database/postgres.module';
+import { createPostgresPool } from '../../src/infrastructure/database/runtime-postgres-pool';
 import { testInfrastructureConfig } from './fixtures';
 import { assertLocalPrincipalFixture } from './local-principal-fixture-guard';
 
