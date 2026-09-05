@@ -4,9 +4,12 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { validateBillingControlRecord } from '../aws/validate-billing-control-record.mjs';
+import { parseStrictJsonBytes } from '../shared/parse-strict-json.mjs';
 
 const MODULE_PATH = fileURLToPath(import.meta.url);
 const REPOSITORY_ROOT = resolve(dirname(MODULE_PATH), '..', '..');
+export const EGRESS_JSON_INVALID_ERROR =
+  'strict UTF-8 JSON without a byte-order mark or duplicate object keys is required';
 const LOCAL_ARTIFACT_PATTERN = /\.(?:egress-policy|egress-evidence|egress-plan)\.local\.json$/i;
 const IGNORED_SCAN_DIRECTORIES = new Set([
   '.git',
@@ -434,6 +437,14 @@ function sortedJson(value) {
   );
 }
 
+export function parseEgressJsonBytes(bytes) {
+  try {
+    return parseStrictJsonBytes(bytes);
+  } catch {
+    throw new Error(EGRESS_JSON_INVALID_ERROR);
+  }
+}
+
 export function canonicalizeEgressPolicy(policy) {
   return JSON.stringify(sortedJson(policy));
 }
@@ -549,9 +560,9 @@ export function validateBillingControlRecordFile(
 
   let record;
   try {
-    record = JSON.parse(readFileSync(absolutePath, 'utf8'));
-  } catch (error) {
-    errors.push(`Unable to parse billing control record: ${error.message}`);
+    record = parseEgressJsonBytes(readFileSync(absolutePath));
+  } catch {
+    errors.push(`Unable to parse billing control record: ${EGRESS_JSON_INVALID_ERROR}.`);
     return { ok: false, errors, recordPath: absolutePath };
   }
   const binding = validateBillingControlBinding(record, policy, {
@@ -741,9 +752,9 @@ export function validateEvidenceIndexRecordFile(
 
   let record;
   try {
-    record = JSON.parse(readFileSync(absolutePath, 'utf8'));
-  } catch (error) {
-    errors.push(`Unable to parse evidence-index record: ${error.message}`);
+    record = parseEgressJsonBytes(readFileSync(absolutePath));
+  } catch {
+    errors.push(`Unable to parse evidence-index record: ${EGRESS_JSON_INVALID_ERROR}.`);
     return {
       ok: false,
       errors,
@@ -2922,9 +2933,9 @@ function main() {
   }
   let policy;
   try {
-    policy = JSON.parse(readFileSync(policyPath, 'utf8'));
-  } catch (error) {
-    process.stderr.write(`Unable to parse egress policy: ${error.message}\n`);
+    policy = parseEgressJsonBytes(readFileSync(policyPath));
+  } catch {
+    process.stderr.write(`Unable to parse egress policy: ${EGRESS_JSON_INVALID_ERROR}.\n`);
     writeZeroCallMarkers(process.stderr);
     process.exit(1);
   }

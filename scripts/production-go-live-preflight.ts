@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 
 import { MAINNET_PLATFORM_DIRECTORY } from '../apps/api/src/mainnet-platforms/domain/mainnet-platform-directory';
 // @ts-expect-error The audited local validator is an ESM JavaScript module without declarations.
-import { validateEgressPolicy } from '../infra/egress/validate-egress-policy.mjs';
+import * as egressPolicy from '../infra/egress/validate-egress-policy.mjs';
 // @ts-expect-error The audited local validator is an ESM JavaScript module without declarations.
 import { loadValidatedProviderDecisionSnapshot } from '../infra/providers/validate-kan-62-provider-decision.mjs';
 // @ts-expect-error The operations-owned audited manifest boundary is an ESM JavaScript module.
@@ -1337,10 +1337,6 @@ function objectRecord(value: unknown): Record<string, unknown> {
   return isRecord(value) ? value : {};
 }
 
-function parseJsonFile(path: string): Record<string, unknown> {
-  return objectRecord(JSON.parse(readFileSync(path, 'utf8')) as unknown);
-}
-
 function allEgressEvidencePassed(record: Record<string, unknown>): boolean {
   const evidence = objectRecord(record.evidence);
   const required = [
@@ -1371,10 +1367,12 @@ export function loadRepositoryProductionPreflightInput(
   let egressRecord: Record<string, unknown> = {};
   let egressLocalValidationPassed = false;
   try {
-    egressRecord = parseJsonFile(
-      resolve(repositoryRoot, 'infra/egress/egress-policy.example.json'),
+    egressRecord = objectRecord(
+      egressPolicy.parseEgressJsonBytes(
+        readFileSync(resolve(repositoryRoot, 'infra/egress/egress-policy.example.json')),
+      ) as unknown,
     );
-    const validation = validateEgressPolicy(egressRecord, { mode: 'example' });
+    const validation = egressPolicy.validateEgressPolicy(egressRecord, { mode: 'example' });
     egressLocalValidationPassed = validation.ok === true;
   } catch {
     // The evaluator emits a closed local-validation blocker.

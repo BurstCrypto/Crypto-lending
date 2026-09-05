@@ -7,10 +7,12 @@ import { test } from 'node:test';
 import Ajv2020 from 'ajv/dist/2020.js';
 
 import {
+  EGRESS_JSON_INVALID_ERROR,
   EVIDENCE_INDEX_INTEGRITY_MODEL,
   EVIDENCE_INDEX_RECORD_SCHEMA,
   canonicalizeEgressPolicy,
   canonicalizeEgressPolicyConfiguration,
+  parseEgressJsonBytes,
   validateBillingControlBinding,
   validateBillingControlRecordFile,
   validateBrowserEgressSource,
@@ -570,6 +572,26 @@ test('accepts final acceptance only after current protected runtime evidence is 
   assert.equal(result.ok, true);
 });
 
+test('strict policy JSON rejects duplicate approval keys despite a matching independent digest', () => {
+  const canonical = JSON.stringify(finalPolicy());
+  const ambiguous = canonical.replace(
+    '"status":"ACCEPTED"',
+    '"status":"DRAFT","status":"ACCEPTED"',
+  );
+  assert.notEqual(ambiguous, canonical);
+  const lastWinsPolicy = JSON.parse(ambiguous);
+  const semanticResult = validateEgressPolicy(lastWinsPolicy, {
+    ...approvedOptions,
+    mode: 'final',
+  });
+  assert.deepEqual(semanticResult.errors, []);
+  assert.equal(semanticResult.policyConfigurationSha256, EXPECTED_POLICY_CONFIGURATION_SHA256);
+  assert.throws(
+    () => parseEgressJsonBytes(Buffer.from(ambiguous, 'utf8')),
+    (error) => error instanceof Error && error.message === EGRESS_JSON_INVALID_ERROR,
+  );
+});
+
 test('binds final policy to a strict protected evidence-index artifact and independent digest', () => {
   const policy = finalPolicy();
   const record = finalEvidenceIndexRecord(policy);
@@ -808,6 +830,67 @@ test('binds final evidence to lifecycle, design approval, policy expiry, and des
     mutate(lifecycleChange);
     const lifecycleResult = validateEgressPolicy(lifecycleChange, approvedOptions);
     assert.notEqual(lifecycleResult.policyConfigurationSha256, approved.policyConfigurationSha256);
+  }
+});
+
+test('file-backed final controls reject last-wins duplicate approval keys', () => {
+  const temporaryDirectory = mkdtempSync(join(tmpdir(), 'kan-231-duplicate-controls-'));
+  try {
+    const policy = finalPolicy();
+    const billingPath = join(temporaryDirectory, 'final-billing-record.json');
+    const billingCanonical = JSON.stringify(BILLING_RECORD);
+    const billingAmbiguous = billingCanonical.replace(
+      '"status":"APPROVED"',
+      '"status":"DRAFT","status":"APPROVED"',
+    );
+    const lastWinsBilling = JSON.parse(billingAmbiguous);
+    assert.equal(
+      validateBillingControlRecord(lastWinsBilling, {
+        mode: 'approved',
+        expectedEnvironment: 'dev',
+        expectedAccount: '123456789012',
+        expectedApplicationRegion: 'us-west-2',
+        now: NOW,
+      }).ok,
+      true,
+    );
+    writeFileSync(billingPath, billingAmbiguous, 'utf8');
+    const billingResult = validateBillingControlRecordFile(billingPath, policy, {
+      expectedEnvironment: 'dev',
+      expectedAccount: '123456789012',
+      expectedRegion: 'us-west-2',
+      now: NOW,
+    });
+    assert.equal(billingResult.ok, false);
+    assert.deepEqual(billingResult.errors, [
+      `Unable to parse billing control record: ${EGRESS_JSON_INVALID_ERROR}.`,
+    ]);
+
+    const evidencePath = join(temporaryDirectory, 'protected-evidence-index.json');
+    const evidenceCanonical = JSON.stringify(finalEvidenceIndexRecord(policy));
+    const evidenceAmbiguous = evidenceCanonical.replace(
+      '"status":"FINAL"',
+      '"status":"DRAFT","status":"FINAL"',
+    );
+    const lastWinsEvidence = JSON.parse(evidenceAmbiguous);
+    assert.equal(
+      validateEvidenceIndexBinding(lastWinsEvidence, policy, {
+        expectedPolicyConfigurationSha256: EXPECTED_POLICY_CONFIGURATION_SHA256,
+        now: NOW,
+      }).ok,
+      true,
+    );
+    writeFileSync(evidencePath, evidenceAmbiguous, 'utf8');
+    const evidenceResult = validateEvidenceIndexRecordFile(evidencePath, policy, {
+      expectedPolicyConfigurationSha256: EXPECTED_POLICY_CONFIGURATION_SHA256,
+      now: NOW,
+    });
+    assert.equal(evidenceResult.ok, false);
+    assert.deepEqual(evidenceResult.errors, [
+      `Unable to parse evidence-index record: ${EGRESS_JSON_INVALID_ERROR}.`,
+    ]);
+  } finally {
+    rmSync(temporaryDirectory, { recursive: true, force: true });
   }
 });
 

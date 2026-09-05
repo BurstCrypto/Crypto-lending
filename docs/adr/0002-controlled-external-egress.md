@@ -211,6 +211,10 @@ and `--expected-policy-configuration-sha256`. Earlier modes reject those final
 arguments. Policy, billing-record, evidence-index, and optional
 `--browser-egress-source` inputs must be regular, non-symlink local files.
 UNC/device and URI paths are denied.
+Policy, billing-record, and evidence-index bytes must also be strict UTF-8 JSON
+without a byte-order mark or duplicate object keys at any depth. A matching
+independent configuration digest cannot make a last-key-wins ambiguous record
+eligible for validation.
 
 ### Enforce DNS, TLS, and redirects as part of the allow
 
