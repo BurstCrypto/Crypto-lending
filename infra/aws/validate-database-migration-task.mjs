@@ -6,15 +6,24 @@
  */
 
 import { createHash } from 'node:crypto';
-import { lstatSync, readFileSync, realpathSync } from 'node:fs';
-import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { TextDecoder } from 'node:util';
+
+import {
+  readSecureLocalFile,
+  readSecureLocalFileForTest,
+} from '../shared/read-secure-local-file.mjs';
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const defaultTemplatePath = join(scriptDirectory, 'database-migration-task.yaml');
 const reviewedTemplateSha256 = '32917167b77f5e517581ed411ad5feef57691996e0bcc012ab2f3e68f3bd8c91';
 const migrationBindingResidualLimitation =
   'DatabaseMigrationCredentialsSecretArn and ApplicationDataKeyArn are operator-supplied cross-stack inputs; local validation cannot authenticate their origin. The secret must be the separately scoped crypto_migration credential and must never be the RDS master/bootstrap DatabaseCredentialsSecret.';
+
+export const MAX_DATABASE_MIGRATION_TEMPLATE_BYTES = 51_200;
+export const DATABASE_MIGRATION_TEMPLATE_INPUT_ERROR =
+  'Database migration task template must be a non-empty, stable, single-link regular file of at most 51200 bytes at a canonical local path containing UTF-8 text without a byte-order mark.';
 
 function sha256(value) {
   return createHash('sha256').update(value, 'utf8').digest('hex');
@@ -40,23 +49,35 @@ function parseArguments(argv) {
   return options;
 }
 
-function readLocalTemplate(path) {
-  if (
-    /^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(path) ||
-    /^\\\\/.test(path) ||
-    /^\\\\[?.]\\/.test(path)
-  ) {
-    throw new Error('Template must be a local filesystem path, not a URI or network path');
+function readLocalTemplateInternal(path, afterFirstReadForTest) {
+  try {
+    const bytes =
+      afterFirstReadForTest === undefined
+        ? readSecureLocalFile(path, MAX_DATABASE_MIGRATION_TEMPLATE_BYTES)
+        : readSecureLocalFileForTest(
+            path,
+            MAX_DATABASE_MIGRATION_TEMPLATE_BYTES,
+            afterFirstReadForTest,
+          );
+    if (bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) {
+      throw new Error(DATABASE_MIGRATION_TEMPLATE_INPUT_ERROR);
+    }
+    return {
+      resolved: resolve(path),
+      source: new TextDecoder('utf-8', { fatal: true }).decode(bytes),
+    };
+  } catch {
+    throw new Error(DATABASE_MIGRATION_TEMPLATE_INPUT_ERROR);
   }
-  const resolved = isAbsolute(path) ? resolve(path) : resolve(process.cwd(), path);
-  const stats = lstatSync(resolved);
-  if (!stats.isFile() || stats.isSymbolicLink()) {
-    throw new Error('Template must be a regular local file and not a symbolic link');
-  }
-  if (realpathSync(resolved) !== resolved) {
-    throw new Error('Template path must resolve canonically without indirection');
-  }
-  return { resolved, source: readFileSync(resolved, 'utf8') };
+}
+
+export function readLocalTemplate(path) {
+  return readLocalTemplateInternal(path, undefined);
+}
+
+/** Test-only fault seam; production callers use readLocalTemplate. */
+export function readLocalTemplateForTest(path, afterFirstReadForTest) {
+  return readLocalTemplateInternal(path, afterFirstReadForTest);
 }
 
 function resourceInventory(source) {
@@ -143,7 +164,7 @@ export function validateMigrationTaskTemplate(source) {
     );
   }
   const templateBytes = Buffer.byteLength(source, 'utf8');
-  if (templateBytes > 51_200) {
+  if (templateBytes > MAX_DATABASE_MIGRATION_TEMPLATE_BYTES) {
     errors.push(`Migration task template is ${templateBytes} bytes; direct upload allows 51200.`);
   }
 

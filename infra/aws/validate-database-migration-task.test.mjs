@@ -1,16 +1,65 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import {
+  linkSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
-import { validateMigrationTaskTemplate } from './validate-database-migration-task.mjs';
+import {
+  DATABASE_MIGRATION_TEMPLATE_INPUT_ERROR,
+  MAX_DATABASE_MIGRATION_TEMPLATE_BYTES,
+  readLocalTemplate,
+  readLocalTemplateForTest,
+  validateMigrationTaskTemplate,
+} from './validate-database-migration-task.mjs';
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const templatePath = join(scriptDirectory, 'database-migration-task.yaml');
 const validatorPath = join(scriptDirectory, 'validate-database-migration-task.mjs');
 const templateSource = readFileSync(templatePath, 'utf8');
+
+function withTemporaryTemplate(contents, assertion) {
+  const directory = mkdtempSync(join(tmpdir(), 'migration-template-input-'));
+  const temporaryTemplatePath = join(directory, 'template.yaml');
+  writeFileSync(temporaryTemplatePath, contents);
+  try {
+    assertion(temporaryTemplatePath, directory);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+function assertInputRejected(path) {
+  assert.throws(
+    () => readLocalTemplate(path),
+    (error) =>
+      error instanceof Error &&
+      error.message === DATABASE_MIGRATION_TEMPLATE_INPUT_ERROR &&
+      !error.message.includes(path),
+  );
+}
+
+function skipUnsupportedLink(error, context) {
+  if (
+    error &&
+    typeof error === 'object' &&
+    'code' in error &&
+    ['EACCES', 'EINVAL', 'ENOSYS', 'ENOTSUP', 'EPERM', 'UNKNOWN'].includes(error.code)
+  ) {
+    context.skip(`symbolic links are unavailable: ${error.code}`);
+    return true;
+  }
+  return false;
+}
 
 function mutate(search, replacement) {
   const result = templateSource.replace(search, replacement);
@@ -36,6 +85,95 @@ test('accepts the reviewed one-off migration task without AWS calls', () => {
   assert.equal(report.residualLimitations.length, 1);
   assert.match(report.residualLimitations[0], /operator-supplied cross-stack inputs/);
   assert.match(report.residualLimitations[0], /cannot authenticate/);
+});
+
+test('securely loads the reviewed migration template', () => {
+  const loaded = readLocalTemplate(templatePath);
+  assert.equal(loaded.source, templateSource);
+  assert.equal(loaded.resolved, templatePath);
+});
+
+test('rejects malformed UTF-8, a byte-order mark, empty input, and oversized input', () => {
+  const bytes = readFileSync(templatePath);
+  for (const contents of [
+    Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), bytes]),
+    Buffer.concat([bytes.subarray(0, bytes.length - 1), Buffer.from([0xff])]),
+    Buffer.alloc(0),
+    Buffer.alloc(MAX_DATABASE_MIGRATION_TEMPLATE_BYTES + 1, 0x20),
+  ]) {
+    withTemporaryTemplate(contents, assertInputRejected);
+  }
+});
+
+test('rejects directory and hard-linked migration template inputs', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'migration-template-files-'));
+  try {
+    const directoryPath = join(directory, 'directory.yaml');
+    mkdirSync(directoryPath);
+    assertInputRejected(directoryPath);
+
+    const sourcePath = join(directory, 'source.yaml');
+    const linkedPath = join(directory, 'hard-link.yaml');
+    writeFileSync(sourcePath, templateSource);
+    linkSync(sourcePath, linkedPath);
+    assertInputRejected(sourcePath);
+    assertInputRejected(linkedPath);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('rejects a symbolic-link migration template when supported', (context) => {
+  const directory = mkdtempSync(join(tmpdir(), 'migration-template-symlink-'));
+  try {
+    const targetPath = join(directory, 'target.yaml');
+    const linkedPath = join(directory, 'linked.yaml');
+    writeFileSync(targetPath, templateSource);
+    try {
+      symlinkSync(targetPath, linkedPath, 'file');
+    } catch (error) {
+      if (skipUnsupportedLink(error, context)) return;
+      throw error;
+    }
+    assertInputRejected(linkedPath);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('rejects a same-size template rewrite during the stable descriptor read', () => {
+  const original = Buffer.from(templateSource, 'utf8');
+  const replacement = Buffer.from(
+    templateSource.replace('Description: One-off', 'Description: Changed'),
+    'utf8',
+  );
+  assert.equal(replacement.length, original.length);
+  assert.notDeepEqual(replacement, original);
+
+  withTemporaryTemplate(original, (path) => {
+    assert.throws(
+      () =>
+        readLocalTemplateForTest(path, () => {
+          writeFileSync(path, replacement);
+        }),
+      (error) =>
+        error instanceof Error && error.message === DATABASE_MIGRATION_TEMPLATE_INPUT_ERROR,
+    );
+  });
+});
+
+test('CLI input failures expose one fixed path-free error', () => {
+  const hostilePath = join(tmpdir(), 'missing-template-with-sensitive-name.yaml');
+  const result = spawnSync(process.execPath, [validatorPath, '--template', hostilePath, '--json'], {
+    encoding: 'utf8',
+    env: { ...process.env, AWS_EC2_METADATA_DISABLED: 'true' },
+    windowsHide: true,
+  });
+
+  assert.equal(result.status, 2);
+  assert.equal(result.stdout, '');
+  assert.equal(result.stderr, `${DATABASE_MIGRATION_TEMPLATE_INPUT_ERROR}\n`);
+  assert.equal(result.stderr.includes(hostilePath), false);
 });
 
 test('rejects an API image or repository parameter that can select another artifact', () => {
@@ -272,5 +410,5 @@ test('CLI rejects URI inputs before filesystem or network access', () => {
 
   assert.equal(result.status, 2);
   assert.equal(result.stdout, '');
-  assert.match(result.stderr, /local filesystem path, not a URI or network path/);
+  assert.equal(result.stderr, `${DATABASE_MIGRATION_TEMPLATE_INPUT_ERROR}\n`);
 });

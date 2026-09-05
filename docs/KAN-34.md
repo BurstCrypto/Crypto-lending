@@ -260,6 +260,13 @@ role. Registering that separate template and running the resulting Fargate task
 are cloud actions with their own billing acknowledgement and require separate
 authorization.
 
+The offline migration-task validator reads its optional `--template` input
+through a 51,200-byte, canonical single-link regular-file boundary. It compares
+two stable descriptor snapshots, requires strict UTF-8 without a byte-order
+mark, and derives the reviewed SHA-256 only from the accepted in-memory bytes.
+Invalid inputs produce one fixed path-free error; validation never invokes AWS
+or starts a migration.
+
 CloudFormation cannot safely create or synchronize PostgreSQL-native logins.
 `infra/postgres/bootstrap-principals.sql` is therefore the only reviewed role,
 ownership, membership, and grant reconciliation body. It accepts identifiers,
