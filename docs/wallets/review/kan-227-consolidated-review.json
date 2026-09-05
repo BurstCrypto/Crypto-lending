@@ -5,10 +5,10 @@
   "status": "PENDING_EXTERNAL_REVIEW",
   "preparedAt": "2026-08-22T00:00:00.000Z",
   "candidate": {
-    "executableCommit": "a0fc8527172cd29743c5d6475cf6264bbd6bde05",
+    "executableCommit": "2e9714da029ba0a95c4fd7a265177e2f25e297ce",
     "executableScope": "tools/wallet-lab",
-    "executableTree": "58ba5e657d4584e60ce2db41aecf6d7a265d4351",
-    "packetPreparationBaseCommit": "d0408a2d9727b434734a4add52598a5886832e61",
+    "executableTree": "830d63188be2ba2223abea6fa5e967f179a82ede",
+    "packetPreparationBaseCommit": "a21a4414c943f3482964cc138f1e64f0d1c03540",
     "packageManifestPath": "tools/wallet-lab/package.json",
     "packageManifestSha256": "E778E4C862E919FE4BD3081EB61076E9EAB1C7144E6197DDE5A97FC35C554F06",
     "packageLockPath": "tools/wallet-lab/package-lock.json",
@@ -23,7 +23,7 @@
     {
       "id": "KAN_227_PACKET",
       "path": "docs/wallets/KAN-227.md",
-      "sha256": "6FE689E5AEB0D64496D337020B6D454651F379A7DE3A71950ED9A056C8749E53"
+      "sha256": "3320295D9315B918F8A56231E027EFA9904D4386D5DE1A4270F98DD536E1AAAC"
     },
     {
       "id": "COMPATIBILITY_MATRIX",
@@ -58,7 +58,7 @@
     {
       "id": "THREAT_MODEL",
       "path": "docs/wallets/security-review/threat-model.md",
-      "sha256": "759EB5CF957BED145005C6EFCA299DCE35629DB94B5C748AED39DD2BDA6544B7"
+      "sha256": "C634DA86176A1B897DC5C4015A24A67ED317B7A257A754E84643065E3226B8A8"
     },
     {
       "id": "SECURITY_DECISION_TEMPLATE",
@@ -126,7 +126,7 @@
       "sha256": "9260279615F525C7F0FC489F81A1B97322D01E29AB7BA34651C5FFDB42E85291"
     }
   ],
-  "supportingArtifactSetSha256": "B714F652421D78C5C5A8DB5AAC727F4FFBDFA52A7238EA48F0B457C747E6FABD",
+  "supportingArtifactSetSha256": "6940A6DBB546987C00CF9A5676D1A915A9AC2F02E209CBC87BF5C9B715CD17D2",
   "versions": {
     "dependencies": {
       "@coinbase/wallet-sdk": "4.3.7",
@@ -1346,11 +1346,11 @@
       "ownerTicket": "KAN-223",
       "status": "PENDING",
       "scopeBinding": {
-        "executableCommit": "a0fc8527172cd29743c5d6475cf6264bbd6bde05",
-        "executableTree": "58ba5e657d4584e60ce2db41aecf6d7a265d4351",
+        "executableCommit": "2e9714da029ba0a95c4fd7a265177e2f25e297ce",
+        "executableTree": "830d63188be2ba2223abea6fa5e967f179a82ede",
         "packageManifestSha256": "E778E4C862E919FE4BD3081EB61076E9EAB1C7144E6197DDE5A97FC35C554F06",
         "packageLockSha256": "D723EC5710968AE94663CD2AE3CB107F11349281E3DC6DA580246B2BD71473B9",
-        "supportingArtifactSetSha256": "B714F652421D78C5C5A8DB5AAC727F4FFBDFA52A7238EA48F0B457C747E6FABD"
+        "supportingArtifactSetSha256": "6940A6DBB546987C00CF9A5676D1A915A9AC2F02E209CBC87BF5C9B715CD17D2"
       },
       "reviewer": null,
       "decidedAt": null,
@@ -1364,11 +1364,11 @@
       "ownerTicket": "KAN-222",
       "status": "PENDING",
       "scopeBinding": {
-        "executableCommit": "a0fc8527172cd29743c5d6475cf6264bbd6bde05",
-        "executableTree": "58ba5e657d4584e60ce2db41aecf6d7a265d4351",
+        "executableCommit": "2e9714da029ba0a95c4fd7a265177e2f25e297ce",
+        "executableTree": "830d63188be2ba2223abea6fa5e967f179a82ede",
         "packageManifestSha256": "E778E4C862E919FE4BD3081EB61076E9EAB1C7144E6197DDE5A97FC35C554F06",
         "packageLockSha256": "D723EC5710968AE94663CD2AE3CB107F11349281E3DC6DA580246B2BD71473B9",
-        "supportingArtifactSetSha256": "B714F652421D78C5C5A8DB5AAC727F4FFBDFA52A7238EA48F0B457C747E6FABD"
+        "supportingArtifactSetSha256": "6940A6DBB546987C00CF9A5676D1A915A9AC2F02E209CBC87BF5C9B715CD17D2"
       },
       "reviewer": null,
       "decidedAt": null,
@@ -1382,11 +1382,11 @@
       "ownerTicket": "KAN-223",
       "status": "PENDING",
       "scopeBinding": {
-        "executableCommit": "a0fc8527172cd29743c5d6475cf6264bbd6bde05",
-        "executableTree": "58ba5e657d4584e60ce2db41aecf6d7a265d4351",
+        "executableCommit": "2e9714da029ba0a95c4fd7a265177e2f25e297ce",
+        "executableTree": "830d63188be2ba2223abea6fa5e967f179a82ede",
         "packageManifestSha256": "E778E4C862E919FE4BD3081EB61076E9EAB1C7144E6197DDE5A97FC35C554F06",
         "packageLockSha256": "D723EC5710968AE94663CD2AE3CB107F11349281E3DC6DA580246B2BD71473B9",
-        "supportingArtifactSetSha256": "B714F652421D78C5C5A8DB5AAC727F4FFBDFA52A7238EA48F0B457C747E6FABD"
+        "supportingArtifactSetSha256": "6940A6DBB546987C00CF9A5676D1A915A9AC2F02E209CBC87BF5C9B715CD17D2"
       },
       "reviewer": null,
       "decidedAt": null,
@@ -1402,11 +1402,11 @@
       "ownerTicket": "KAN-227",
       "status": "PENDING",
       "scopeBinding": {
-        "executableCommit": "a0fc8527172cd29743c5d6475cf6264bbd6bde05",
-        "executableTree": "58ba5e657d4584e60ce2db41aecf6d7a265d4351",
+        "executableCommit": "2e9714da029ba0a95c4fd7a265177e2f25e297ce",
+        "executableTree": "830d63188be2ba2223abea6fa5e967f179a82ede",
         "packageManifestSha256": "E778E4C862E919FE4BD3081EB61076E9EAB1C7144E6197DDE5A97FC35C554F06",
         "packageLockSha256": "D723EC5710968AE94663CD2AE3CB107F11349281E3DC6DA580246B2BD71473B9",
-        "supportingArtifactSetSha256": "B714F652421D78C5C5A8DB5AAC727F4FFBDFA52A7238EA48F0B457C747E6FABD"
+        "supportingArtifactSetSha256": "6940A6DBB546987C00CF9A5676D1A915A9AC2F02E209CBC87BF5C9B715CD17D2"
       },
       "signer": null,
       "signedAt": null,
@@ -1420,11 +1420,11 @@
       "ownerTicket": "KAN-227",
       "status": "PENDING",
       "scopeBinding": {
-        "executableCommit": "a0fc8527172cd29743c5d6475cf6264bbd6bde05",
-        "executableTree": "58ba5e657d4584e60ce2db41aecf6d7a265d4351",
+        "executableCommit": "2e9714da029ba0a95c4fd7a265177e2f25e297ce",
+        "executableTree": "830d63188be2ba2223abea6fa5e967f179a82ede",
         "packageManifestSha256": "E778E4C862E919FE4BD3081EB61076E9EAB1C7144E6197DDE5A97FC35C554F06",
         "packageLockSha256": "D723EC5710968AE94663CD2AE3CB107F11349281E3DC6DA580246B2BD71473B9",
-        "supportingArtifactSetSha256": "B714F652421D78C5C5A8DB5AAC727F4FFBDFA52A7238EA48F0B457C747E6FABD"
+        "supportingArtifactSetSha256": "6940A6DBB546987C00CF9A5676D1A915A9AC2F02E209CBC87BF5C9B715CD17D2"
       },
       "signer": null,
       "signedAt": null,
@@ -1438,11 +1438,11 @@
       "ownerTicket": "KAN-227",
       "status": "PENDING",
       "scopeBinding": {
-        "executableCommit": "a0fc8527172cd29743c5d6475cf6264bbd6bde05",
-        "executableTree": "58ba5e657d4584e60ce2db41aecf6d7a265d4351",
+        "executableCommit": "2e9714da029ba0a95c4fd7a265177e2f25e297ce",
+        "executableTree": "830d63188be2ba2223abea6fa5e967f179a82ede",
         "packageManifestSha256": "E778E4C862E919FE4BD3081EB61076E9EAB1C7144E6197DDE5A97FC35C554F06",
         "packageLockSha256": "D723EC5710968AE94663CD2AE3CB107F11349281E3DC6DA580246B2BD71473B9",
-        "supportingArtifactSetSha256": "B714F652421D78C5C5A8DB5AAC727F4FFBDFA52A7238EA48F0B457C747E6FABD"
+        "supportingArtifactSetSha256": "6940A6DBB546987C00CF9A5676D1A915A9AC2F02E209CBC87BF5C9B715CD17D2"
       },
       "signer": null,
       "signedAt": null,
@@ -1456,11 +1456,11 @@
       "ownerTicket": "KAN-227",
       "status": "PENDING",
       "scopeBinding": {
-        "executableCommit": "a0fc8527172cd29743c5d6475cf6264bbd6bde05",
-        "executableTree": "58ba5e657d4584e60ce2db41aecf6d7a265d4351",
+        "executableCommit": "2e9714da029ba0a95c4fd7a265177e2f25e297ce",
+        "executableTree": "830d63188be2ba2223abea6fa5e967f179a82ede",
         "packageManifestSha256": "E778E4C862E919FE4BD3081EB61076E9EAB1C7144E6197DDE5A97FC35C554F06",
         "packageLockSha256": "D723EC5710968AE94663CD2AE3CB107F11349281E3DC6DA580246B2BD71473B9",
-        "supportingArtifactSetSha256": "B714F652421D78C5C5A8DB5AAC727F4FFBDFA52A7238EA48F0B457C747E6FABD"
+        "supportingArtifactSetSha256": "6940A6DBB546987C00CF9A5676D1A915A9AC2F02E209CBC87BF5C9B715CD17D2"
       },
       "signer": null,
       "signedAt": null,

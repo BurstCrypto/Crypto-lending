@@ -1,17 +1,35 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { linkSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 
 import {
+  MAX_WALLET_REVIEW_REGISTER_BYTES,
   REQUIRED_RESULTS,
   REPOSITORY_ROOT,
   REVIEW_REGISTER_PATH,
+  REVIEW_SIDECAR_PATH,
+  WALLET_REVIEW_JSON_INVALID_ERROR,
   validateWalletReviewFiles,
   validateWalletReviewRegister,
   validateWalletReviewSidecar,
 } from './validate-kan-227-wallet-review.mjs';
 
 const NOW = new Date('2026-08-23T00:00:00.000Z');
+
+function reviewSidecar(bytes) {
+  const digest = createHash('sha256').update(bytes).digest('hex');
+  return `${digest}  kan-227-consolidated-review.json\n`;
+}
+
+function writeReviewFixture(repositoryRoot, registerBytes, sidecar = reviewSidecar(registerBytes)) {
+  const reviewDirectory = join(repositoryRoot, 'docs', 'wallets', 'review');
+  mkdirSync(reviewDirectory, { recursive: true });
+  writeFileSync(join(repositoryRoot, REVIEW_REGISTER_PATH), registerBytes);
+  writeFileSync(join(repositoryRoot, REVIEW_SIDECAR_PATH), sidecar, 'utf8');
+}
 
 function loadRegister() {
   return JSON.parse(readFileSync(`${REPOSITORY_ROOT}/${REVIEW_REGISTER_PATH}`, 'utf8'));
@@ -57,6 +75,68 @@ test('the sidecar rejects changed register bytes without touching workspace file
     validateWalletReviewSidecar(Buffer.concat([registerBytes, Buffer.from(' ')]), sidecar),
     ['KAN-227 SHA-256 sidecar does not exactly bind the register bytes.'],
   );
+});
+
+test('strict file parsing rejects matching-sidecar duplicate keys and malformed UTF-8', () => {
+  const canonicalBytes = readFileSync(`${REPOSITORY_ROOT}/${REVIEW_REGISTER_PATH}`);
+  const canonicalText = canonicalBytes.toString('utf8');
+  const hostileBytes = [
+    Buffer.from(
+      canonicalText.replace(
+        '  "status": "PENDING_EXTERNAL_REVIEW",',
+        '  "status": "READY_FOR_IN_REVIEW",\n  "status": "PENDING_EXTERNAL_REVIEW",',
+      ),
+      'utf8',
+    ),
+    Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), canonicalBytes]),
+    Buffer.from([0x7b, 0x22, 0x78, 0x22, 0x3a, 0x22, 0xc3, 0x28, 0x22, 0x7d]),
+  ];
+
+  assert.deepEqual(validate(JSON.parse(hostileBytes[0].toString('utf8'))), {
+    errors: [],
+    ready: false,
+  });
+  for (const registerBytes of hostileBytes) {
+    const temporaryRoot = mkdtempSync(join(tmpdir(), 'kan-227-strict-json-'));
+    try {
+      writeReviewFixture(temporaryRoot, registerBytes);
+      assert.deepEqual(validateWalletReviewFiles({ repositoryRoot: temporaryRoot, now: NOW }), {
+        errors: [WALLET_REVIEW_JSON_INVALID_ERROR],
+        ready: false,
+      });
+    } finally {
+      rmSync(temporaryRoot, { recursive: true, force: true });
+    }
+  }
+});
+
+test('controlled register loading rejects oversized and hard-linked files', () => {
+  const canonicalBytes = readFileSync(`${REPOSITORY_ROOT}/${REVIEW_REGISTER_PATH}`);
+  for (const kind of ['oversized', 'hard-linked']) {
+    const temporaryRoot = mkdtempSync(join(tmpdir(), 'kan-227-secure-file-'));
+    try {
+      if (kind === 'oversized') {
+        writeReviewFixture(temporaryRoot, Buffer.alloc(MAX_WALLET_REVIEW_REGISTER_BYTES + 1, 0x20));
+      } else {
+        const reviewDirectory = join(temporaryRoot, 'docs', 'wallets', 'review');
+        mkdirSync(reviewDirectory, { recursive: true });
+        const source = join(reviewDirectory, 'source.json');
+        writeFileSync(source, canonicalBytes);
+        linkSync(source, join(temporaryRoot, REVIEW_REGISTER_PATH));
+        writeFileSync(
+          join(temporaryRoot, REVIEW_SIDECAR_PATH),
+          reviewSidecar(canonicalBytes),
+          'utf8',
+        );
+      }
+      assert.deepEqual(validateWalletReviewFiles({ repositoryRoot: temporaryRoot, now: NOW }), {
+        errors: ['Register or SHA-256 sidecar is missing/unsafe.'],
+        ready: false,
+      });
+    } finally {
+      rmSync(temporaryRoot, { recursive: true, force: true });
+    }
+  }
 });
 
 test('the closed crosswalk uses canonical environments and exact mobile cases', () => {

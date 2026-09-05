@@ -3,10 +3,18 @@ import { createHash } from 'node:crypto';
 import { lstatSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { TextDecoder } from 'node:util';
+
+import { parseStrictJsonBytes } from '../shared/parse-strict-json.mjs';
+import { readSecureLocalFile } from '../shared/read-secure-local-file.mjs';
 
 export const REPOSITORY_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 export const REVIEW_REGISTER_PATH = 'docs/wallets/review/kan-227-consolidated-review.json';
 export const REVIEW_SIDECAR_PATH = 'docs/wallets/review/kan-227-consolidated-review.sha256';
+export const MAX_WALLET_REVIEW_REGISTER_BYTES = 65_536;
+export const MAX_WALLET_REVIEW_SIDECAR_BYTES = 99;
+export const WALLET_REVIEW_JSON_INVALID_ERROR =
+  'KAN-227 register must be valid, unambiguous UTF-8 JSON.';
 
 const SHA256 = /^[A-F0-9]{64}$/u;
 const GIT_OID = /^[a-f0-9]{40}$/u;
@@ -1023,15 +1031,30 @@ export function validateWalletReviewFiles({
   const sidecarAbsolute = containedPath(repositoryRoot, REVIEW_SIDECAR_PATH);
   if (registerAbsolute === null || sidecarAbsolute === null)
     return { errors: ['Register or SHA-256 sidecar is missing/unsafe.'], ready: false };
-  let register;
-  const bytes = readFileSync(registerAbsolute);
+  let bytes;
+  let sidecar;
   try {
-    register = JSON.parse(bytes.toString('utf8'));
+    bytes = readSecureLocalFile(
+      resolve(repositoryRoot, REVIEW_REGISTER_PATH),
+      MAX_WALLET_REVIEW_REGISTER_BYTES,
+    );
+    sidecar = new TextDecoder('utf-8', { fatal: true }).decode(
+      readSecureLocalFile(
+        resolve(repositoryRoot, REVIEW_SIDECAR_PATH),
+        MAX_WALLET_REVIEW_SIDECAR_BYTES,
+      ),
+    );
   } catch {
-    return { errors: ['KAN-227 register is not valid JSON.'], ready: false };
+    return { errors: ['Register or SHA-256 sidecar is missing/unsafe.'], ready: false };
+  }
+  let register;
+  try {
+    register = parseStrictJsonBytes(bytes);
+  } catch {
+    return { errors: [WALLET_REVIEW_JSON_INVALID_ERROR], ready: false };
   }
   const result = validateWalletReviewRegister(register, { repositoryRoot, now });
-  result.errors.push(...validateWalletReviewSidecar(bytes, readFileSync(sidecarAbsolute, 'utf8')));
+  result.errors.push(...validateWalletReviewSidecar(bytes, sidecar));
   return result;
 }
 
