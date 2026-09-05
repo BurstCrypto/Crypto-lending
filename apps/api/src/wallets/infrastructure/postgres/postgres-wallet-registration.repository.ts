@@ -445,26 +445,30 @@ export class PostgresWalletRegistrationRepository implements WalletRegistrationR
     request: PrepareWalletOwnershipChallengeRequest,
   ): Promise<PrepareWalletOwnershipChallengeResult> {
     try {
+      const challengeId = parseWalletChallengeId(request.challengeId);
+      const accountId = parseAccountId(request.accountId);
+      const correlationId = uuid(request.correlationId);
       const result = await this.postgres.query<PrepareRow>(
         `SELECT prepared.*
          FROM prepare_wallet_ownership_challenge(
            $1::uuid, $2::uuid, $3::uuid
-         ) AS prepared`,
-        [
-          parseWalletChallengeId(request.challengeId),
-          parseAccountId(request.accountId),
-          uuid(request.correlationId),
-        ],
+         ) AS prepared
+         LIMIT 2`,
+        [challengeId, accountId, correlationId],
       );
       const row = oneRow(result.rows);
       if (row.prepare_outcome === 'READY') {
         if (row.prepared_chain_namespace === null || row.prepared_chain_reference === null) {
           throw new WalletRegistrationPersistenceError();
         }
+        const preparedAccountId = parseAccountId(row.prepared_account_id);
+        if (preparedAccountId !== accountId) {
+          throw new WalletRegistrationPersistenceError();
+        }
         return Object.freeze({
           status: 'pending',
-          challengeId: parseWalletChallengeId(request.challengeId),
-          accountId: parseAccountId(row.prepared_account_id),
+          challengeId,
+          accountId: preparedAccountId,
           proofScheme: proofScheme(row.prepared_proof_scheme),
           chainId: parseWalletChainId(
             `${row.prepared_chain_namespace}:${row.prepared_chain_reference}`,

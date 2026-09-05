@@ -214,51 +214,66 @@ describe('PostgresWalletRegistrationRepository', () => {
   it('restores only complete READY rows and passes the correlation to expiry preparation', async () => {
     const request = beginRequest();
     const payload = Buffer.from(request.challengePayload.ciphertext, 'base64url');
-    const query = jest.fn().mockResolvedValue(
-      result([
-        {
-          prepare_outcome: 'READY',
-          prepared_account_id: ACCOUNT_ID,
-          prepared_proof_scheme: request.proofScheme,
-          prepared_chain_namespace: 'eip155',
-          prepared_chain_reference: '11155111',
-          prepared_registry_environment: request.registry.environment,
-          prepared_registry_version: request.registry.version,
-          prepared_registry_fingerprint_sha256: request.registry.fingerprintSha256,
-          prepared_challenge_payload_key_version: request.challengePayload.keyVersion,
-          prepared_challenge_payload_ciphertext: payload,
-          prepared_challenge_payload_iv: Buffer.from(request.challengePayload.iv, 'base64url'),
-          prepared_challenge_payload_auth_tag: Buffer.from(
-            request.challengePayload.authTag,
-            'base64url',
-          ),
-          prepared_address_digest_version: request.addressDigest.version,
-          prepared_address_digest: Buffer.from(request.addressDigest.value, 'hex'),
-          prepared_domain_digest_version: request.domainDigest.version,
-          prepared_domain_digest: Buffer.from(request.domainDigest.value, 'hex'),
-          prepared_message_digest_version: request.messageDigest.version,
-          prepared_message_digest: Buffer.from(request.messageDigest.value, 'hex'),
-          prepared_nonce_digest_version: request.nonceDigest.version,
-          prepared_nonce_digest: Buffer.from(request.nonceDigest.value, 'hex'),
-          prepared_issued_at: NOW,
-          prepared_expires_at: EXPIRES,
-        },
-      ]),
-    );
+    const readyRow = {
+      prepare_outcome: 'READY',
+      prepared_account_id: ACCOUNT_ID,
+      prepared_proof_scheme: request.proofScheme,
+      prepared_chain_namespace: 'eip155',
+      prepared_chain_reference: '11155111',
+      prepared_registry_environment: request.registry.environment,
+      prepared_registry_version: request.registry.version,
+      prepared_registry_fingerprint_sha256: request.registry.fingerprintSha256,
+      prepared_challenge_payload_key_version: request.challengePayload.keyVersion,
+      prepared_challenge_payload_ciphertext: payload,
+      prepared_challenge_payload_iv: Buffer.from(request.challengePayload.iv, 'base64url'),
+      prepared_challenge_payload_auth_tag: Buffer.from(
+        request.challengePayload.authTag,
+        'base64url',
+      ),
+      prepared_address_digest_version: request.addressDigest.version,
+      prepared_address_digest: Buffer.from(request.addressDigest.value, 'hex'),
+      prepared_domain_digest_version: request.domainDigest.version,
+      prepared_domain_digest: Buffer.from(request.domainDigest.value, 'hex'),
+      prepared_message_digest_version: request.messageDigest.version,
+      prepared_message_digest: Buffer.from(request.messageDigest.value, 'hex'),
+      prepared_nonce_digest_version: request.nonceDigest.version,
+      prepared_nonce_digest: Buffer.from(request.nonceDigest.value, 'hex'),
+      prepared_issued_at: NOW,
+      prepared_expires_at: EXPIRES,
+    };
+    const query = jest.fn().mockResolvedValue(result([readyRow]));
     const repository = repositoryWith(query);
+    const prepareRequest = {
+      challengeId: CHALLENGE_ID,
+      accountId: ACCOUNT_ID,
+      correlationId: CORRELATION_ID,
+    };
 
-    await expect(
-      repository.prepareChallenge({
-        challengeId: CHALLENGE_ID,
-        accountId: ACCOUNT_ID,
-        correlationId: CORRELATION_ID,
-      }),
-    ).resolves.toMatchObject({
+    await expect(repository.prepareChallenge(prepareRequest)).resolves.toMatchObject({
       status: 'pending',
       chainId: NETWORK,
       registry: request.registry,
       challengePayload: request.challengePayload,
     });
+    const [sql, parameters] = query.mock.calls[0] as [string, unknown[]];
+    expect(sql).toMatch(/AS prepared\s+LIMIT 2/u);
+    expect(parameters).toEqual([CHALLENGE_ID, ACCOUNT_ID, CORRELATION_ID]);
+
+    query.mockResolvedValueOnce(result([readyRow, readyRow]));
+    await expect(repository.prepareChallenge(prepareRequest)).rejects.toBeInstanceOf(
+      WalletRegistrationPersistenceError,
+    );
+
+    const otherAccountId = parseAccountId(randomUUID());
+    query.mockResolvedValueOnce(result([{ ...readyRow, prepared_account_id: otherAccountId }]));
+    let thrown: unknown;
+    try {
+      await repository.prepareChallenge(prepareRequest);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(WalletRegistrationPersistenceError);
+    expect(String(thrown)).not.toContain(otherAccountId);
     expect(query.mock.calls[0]?.[1]).toEqual([CHALLENGE_ID, ACCOUNT_ID, CORRELATION_ID]);
   });
 
