@@ -128,6 +128,7 @@ export {
   type VerifiedStablecoinPriceSourceUnavailableCode,
 } from './application/fail-closed-stablecoin-price-source';
 export {
+  assertCanonicalStablecoinPriceIngestionPlan,
   createStablecoinPriceIngestionPlan,
   createVerifiedStablecoinPriceProjectionBatch,
   fingerprintVerifiedStablecoinPriceEvidence,
@@ -142,4 +143,11 @@ export {
   type VerifiedStablecoinPriceProjectionBatchV1,
   type VerifiedStablecoinPriceProjectionV1,
 } from './application/stablecoin-price-ingestion-plan';
+export {
+  DormantStablecoinPriceIngestionOrchestrator,
+  STABLECOIN_PRICE_INGESTION_EXECUTION_POLICY,
+  StablecoinPriceIngestionOrchestratorError,
+  type StablecoinPriceIngestionOrchestratorErrorCode,
+  type VerifiedStablecoinPriceSourceMap,
+} from './application/stablecoin-price-ingestion.orchestrator';
 export { ValuationModule } from './valuation.module';

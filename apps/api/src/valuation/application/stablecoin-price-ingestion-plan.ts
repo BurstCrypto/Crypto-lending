@@ -206,6 +206,15 @@ export function createStablecoinPriceIngestionPlan(
   return plan;
 }
 
+/** Accepts only an in-process immutable plan created by the factory above. */
+export function assertCanonicalStablecoinPriceIngestionPlan(
+  value: unknown,
+): asserts value is StablecoinPriceIngestionPlanV1 {
+  if (typeof value !== 'object' || value === null || !CREATED_PLANS.has(value)) {
+    return invalid('INVALID_INGESTION_PLAN');
+  }
+}
+
 /** Computes the fingerprint over every evidence field except the fingerprint itself. */
 export function fingerprintVerifiedStablecoinPriceEvidence(evidenceMaterialInput: unknown): string {
   const evidence = normalizeEvidenceMaterial(evidenceMaterialInput);
@@ -629,9 +638,7 @@ function exactArray(
 }
 
 function assertCreatedPlan(plan: StablecoinPriceIngestionPlanV1): void {
-  if (typeof plan !== 'object' || plan === null || !CREATED_PLANS.has(plan)) {
-    return invalid('INVALID_INGESTION_PLAN');
-  }
+  assertCanonicalStablecoinPriceIngestionPlan(plan);
 }
 
 function invalid(code: StablecoinPriceIngestionPlanValidationCode): never {

@@ -50,5 +50,6 @@ export interface VerifiedStablecoinPriceEvidenceV1 {
  * Results remain untrusted until the pure ingestion boundary validates them.
  */
 export interface VerifiedStablecoinPriceSourcePort {
+  readonly sourceId: StablecoinValuationSourceId;
   read(stablecoin: MainnetStablecoin, signal: AbortSignal): Promise<unknown>;
 }

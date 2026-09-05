@@ -4,6 +4,7 @@ import {
   FailClosedChainlinkStablecoinPriceSource,
   FailClosedPythStablecoinPriceSource,
 } from './fail-closed-stablecoin-price-source';
+import { DormantStablecoinPriceIngestionOrchestrator } from './stablecoin-price-ingestion.orchestrator';
 
 function metadata(target: object, key: 'imports' | 'providers' | 'exports'): readonly unknown[] {
   return (Reflect.getMetadata(key, target) as readonly unknown[] | undefined) ?? [];
@@ -18,6 +19,8 @@ describe('verified stablecoin price ingestion runtime absence', () => {
     expect(providers).not.toContain(FailClosedChainlinkStablecoinPriceSource);
     expect(exports).not.toContain(FailClosedPythStablecoinPriceSource);
     expect(exports).not.toContain(FailClosedChainlinkStablecoinPriceSource);
+    expect(providers).not.toContain(DormantStablecoinPriceIngestionOrchestrator);
+    expect(exports).not.toContain(DormantStablecoinPriceIngestionOrchestrator);
   });
 
   it('adds no source or ingestion module to production startup', () => {
@@ -32,6 +35,7 @@ describe('verified stablecoin price ingestion runtime absence', () => {
         'StablecoinPriceIngestionModule',
         'FailClosedPythStablecoinPriceSource',
         'FailClosedChainlinkStablecoinPriceSource',
+        'DormantStablecoinPriceIngestionOrchestrator',
       ]),
     );
   });
