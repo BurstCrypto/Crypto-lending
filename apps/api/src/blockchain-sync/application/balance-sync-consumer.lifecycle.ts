@@ -9,7 +9,7 @@ export type BalanceSyncConsumerLifecycleEvent = Readonly<{
 }>;
 
 export interface BalanceSyncConsumerLifecycleOperatorPort {
-  readonly record: (event: BalanceSyncConsumerLifecycleEvent) => void;
+  readonly record: (event: BalanceSyncConsumerLifecycleEvent) => void | Promise<void>;
 }
 
 export interface DormantBalanceSyncConsumerLifecycleDependencies {
@@ -86,7 +86,7 @@ interface ReviewedDependencies {
   readonly runResource: (signal: AbortSignal) => Promise<void>;
   readonly closeResource: () => Promise<void>;
   readonly signal: ReviewedSignal;
-  readonly recordEvent: (event: BalanceSyncConsumerLifecycleEvent) => void;
+  readonly recordEvent: (event: BalanceSyncConsumerLifecycleEvent) => void | Promise<void>;
 }
 
 function invalidConfiguration(): never {
@@ -170,10 +170,12 @@ function reviewedSignal(value: unknown): ReviewedSignal {
   });
 }
 
-function reviewedOperatorPort(value: unknown): (event: BalanceSyncConsumerLifecycleEvent) => void {
+function reviewedOperatorPort(
+  value: unknown,
+): (event: BalanceSyncConsumerLifecycleEvent) => void | Promise<void> {
   const record = exactDataRecord(value, OPERATOR_PORT_KEYS).record;
   if (typeof record !== 'function') return invalidConfiguration();
-  return record as (event: BalanceSyncConsumerLifecycleEvent) => void;
+  return record as (event: BalanceSyncConsumerLifecycleEvent) => void | Promise<void>;
 }
 
 function reviewedDependencies(value: unknown): ReviewedDependencies {
@@ -201,11 +203,11 @@ function lifecycleEvent(
 }
 
 function recordEvent(
-  recorder: (event: BalanceSyncConsumerLifecycleEvent) => void,
+  recorder: (event: BalanceSyncConsumerLifecycleEvent) => void | Promise<void>,
   event: BalanceSyncConsumerLifecycleEvent['event'],
 ): void {
   try {
-    recorder(lifecycleEvent(event));
+    void Promise.resolve(recorder(lifecycleEvent(event))).catch(() => undefined);
   } catch {
     // Operator diagnostics cannot replace the fixed lifecycle outcome.
   }
@@ -253,21 +255,28 @@ async function executeLifecycle(reviewed: ReviewedDependencies): Promise<void> {
     throw new BalanceSyncConsumerLifecycleSignalError();
   }
 
-  if (!stopRequested) recordEvent(reviewed.recordEvent, 'STARTED');
   let runFailed = false;
   let prematureExit = false;
+  let runOperation: Promise<void> | undefined;
   try {
-    await Promise.resolve().then(() => reviewed.runResource(controller.signal));
-    prematureExit = !stopRequested;
+    runOperation = Promise.resolve(reviewed.runResource(controller.signal));
   } catch {
     runFailed = true;
-  } finally {
-    if (listening) {
-      try {
-        reviewed.signal.removeAbortListener(requestStop);
-      } catch {
-        // Listener cleanup cannot replace the fixed lifecycle outcome.
-      }
+  }
+  if (runOperation !== undefined) {
+    if (!stopRequested) recordEvent(reviewed.recordEvent, 'STARTED');
+    try {
+      await runOperation;
+      prematureExit = !stopRequested;
+    } catch {
+      runFailed = true;
+    }
+  }
+  if (listening) {
+    try {
+      reviewed.signal.removeAbortListener(requestStop);
+    } catch {
+      // Listener cleanup cannot replace the fixed lifecycle outcome.
     }
   }
 

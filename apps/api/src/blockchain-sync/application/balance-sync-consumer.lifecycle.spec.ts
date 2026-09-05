@@ -39,7 +39,9 @@ function operatorHarness(): {
   readonly record: jest.Mock;
 } {
   const events: BalanceSyncConsumerLifecycleEvent[] = [];
-  const record = jest.fn((event: BalanceSyncConsumerLifecycleEvent) => events.push(event));
+  const record = jest.fn((event: BalanceSyncConsumerLifecycleEvent) => {
+    events.push(event);
+  });
   return { events, port: { record }, record };
 }
 
@@ -222,6 +224,29 @@ describe('createDormantBalanceSyncConsumerLifecycleCoordinator', () => {
     expect(close).toHaveBeenCalledTimes(1);
   });
 
+  it('does not report started when the aggregate rejects the run handoff synchronously', async () => {
+    const operator = operatorHarness();
+    const close = jest.fn(async () => undefined);
+    const synchronousFailure = (): Promise<void> => {
+      throw new Error('synchronous aggregate secret');
+    };
+    const coordinator = createDormantBalanceSyncConsumerLifecycleCoordinator({
+      resource: aggregateResource(synchronousFailure, close),
+      signal: new AbortController().signal,
+      operatorEvents: operator.port,
+    });
+
+    const error = await capturedRejection(() => coordinator.run());
+
+    expectFixedError(error, {
+      code: 'BALANCE_SYNC_CONSUMER_LIFECYCLE_RUN_FAILED',
+      name: 'BalanceSyncConsumerLifecycleRunError',
+      message: 'Balance sync consumer lifecycle run failed',
+    });
+    expect(operator.events.map(({ event }) => event)).toEqual(['RUN_FAILED']);
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
   it('gives a fixed close failure precedence while retaining both terminal operator events', async () => {
     const external = new AbortController();
     const operator = operatorHarness();
@@ -312,6 +337,42 @@ describe('createDormantBalanceSyncConsumerLifecycleCoordinator', () => {
     expect(await lateAttempts[0]).toMatchObject({
       code: 'BALANCE_SYNC_CONSUMER_LIFECYCLE_ALREADY_STARTED',
     });
+  });
+
+  it('drains rejected async operator callbacks without an unhandled rejection', async () => {
+    const external = new AbortController();
+    const unhandled = jest.fn();
+    const events: BalanceSyncConsumerLifecycleEvent['event'][] = [];
+    const coordinator = createDormantBalanceSyncConsumerLifecycleCoordinator({
+      resource: aggregateResource(
+        (signal) =>
+          new Promise<void>((resolve) => {
+            signal.addEventListener('abort', () => resolve(), { once: true });
+          }),
+        async () => undefined,
+      ),
+      signal: external.signal,
+      operatorEvents: {
+        record: (event) => {
+          events.push(event.event);
+          return Promise.reject(new Error('async operator sink secret'));
+        },
+      },
+    });
+    process.on('unhandledRejection', unhandled);
+
+    try {
+      const running = coordinator.run();
+      await Promise.resolve();
+      external.abort();
+      await expect(running).resolves.toBeUndefined();
+      await new Promise<void>((resolveImmediate) => setImmediate(resolveImmediate));
+
+      expect(events).toEqual(['STARTED', 'STOPPED']);
+      expect(unhandled).not.toHaveBeenCalled();
+    } finally {
+      process.removeListener('unhandledRejection', unhandled);
+    }
   });
 
   it('rejects malformed boundaries without invoking accessors or aggregate capabilities', () => {

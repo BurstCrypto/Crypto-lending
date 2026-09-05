@@ -14,6 +14,10 @@ import {
 } from '../../wallets/infrastructure/crypto/wallet-registration-crypto';
 import type { EnabledBalanceConsumerConfig } from '../infrastructure/config/balance-consumer.config';
 import {
+  createDormantBalanceSyncConsumerLifecycleCoordinator,
+  type BalanceSyncConsumerLifecycleEvent,
+} from './balance-sync-consumer.lifecycle';
+import {
   createDormantBalanceSyncConsumerResource,
   type DormantBalanceSyncConsumerResourceDependencies,
 } from './balance-sync-consumer.resource';
@@ -101,6 +105,14 @@ function dependencies(): DormantBalanceSyncConsumerResourceDependencies {
   };
 }
 
+async function waitUntil(predicate: () => boolean): Promise<void> {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    if (predicate()) return;
+    await new Promise<void>((resolveImmediate) => setImmediate(resolveImmediate));
+  }
+  throw new Error('Condition did not settle');
+}
+
 describe('dormant balance-sync consumer real-capsule compatibility', () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -133,29 +145,54 @@ describe('dormant balance-sync consumer real-capsule compatibility', () => {
     await resource.close();
   });
 
-  it('drains an aborting mocked receive and closes SQS before PostgreSQL', async () => {
-    const caller = new AbortController();
-    clientSend.mockImplementation(async (command: unknown) => {
-      expect(command).toBeInstanceOf(ReceiveMessageCommand);
-      caller.abort(new Error('caller-private-stop-reason'));
-      return {};
-    });
+  it('propagates lifecycle cancellation through the real aggregate and closes in order', async () => {
+    const external = new AbortController();
+    let requestSignal: AbortSignal | undefined;
+    clientSend.mockImplementation(
+      (command: unknown, options?: Readonly<{ abortSignal?: AbortSignal }>) => {
+        expect(command).toBeInstanceOf(ReceiveMessageCommand);
+        requestSignal = options?.abortSignal;
+        if (requestSignal === undefined) {
+          return Promise.reject(new Error('Expected a locally mocked request signal'));
+        }
+        return new Promise<never>((_resolve, reject) => {
+          const rejectOnAbort = (): void => {
+            reject(new Error('Locally mocked SQS receive aborted'));
+          };
+          if (requestSignal?.aborted) rejectOnAbort();
+          else requestSignal?.addEventListener('abort', rejectOnAbort, { once: true });
+        });
+      },
+    );
     const resource = await createDormantBalanceSyncConsumerResource(dependencies());
+    const events: BalanceSyncConsumerLifecycleEvent['event'][] = [];
+    const coordinator = createDormantBalanceSyncConsumerLifecycleCoordinator({
+      resource,
+      signal: external.signal,
+      operatorEvents: {
+        record: (event) => {
+          events.push(event.event);
+        },
+      },
+    });
 
-    await expect(resource.run(caller.signal)).resolves.toBeUndefined();
+    const running = coordinator.run();
+    await waitUntil(() => clientSend.mock.calls.length === 1);
+    expect(requestSignal).toBeDefined();
+    expect(requestSignal).not.toBe(external.signal);
+    external.abort(new Error('caller-private-stop-reason'));
+
+    await expect(running).resolves.toBeUndefined();
     expect(clientSend).toHaveBeenCalledTimes(1);
+    expect(requestSignal?.aborted).toBe(true);
     expect(poolConnect).not.toHaveBeenCalled();
     expect(poolQuery).not.toHaveBeenCalled();
-
-    const firstClose = resource.close();
-    const secondClose = resource.close();
-    expect(secondClose).toBe(firstClose);
-    await firstClose;
-
+    expect(events).toEqual(['STARTED', 'STOPPED']);
     expect(clientDestroy).toHaveBeenCalledTimes(1);
     expect(poolEnd).toHaveBeenCalledTimes(1);
     expect(clientDestroy.mock.invocationCallOrder[0]).toBeLessThan(
       poolEnd.mock.invocationCallOrder[0] as number,
     );
+    expect(resource.close()).toBe(resource.close());
   });
 });
