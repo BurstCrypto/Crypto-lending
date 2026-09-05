@@ -35,6 +35,11 @@ Parameters:
   DatabaseMigrationCredentialsSecretArn:
     Type: String
     AllowedPattern: '^arn:(aws|aws-us-gov|aws-cn):secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:[A-Za-z0-9/_+=.@-]+$'
+  DatabaseMigrationCredentialsVersionId:
+    Type: String
+    MinLength: 32
+    MaxLength: 64
+    AllowedPattern: '^[A-Za-z0-9_-]{32,64}$'
   ApplicationDataKeyArn:
     Type: String
     AllowedPattern: '^arn:(aws|aws-us-gov|aws-cn):kms:[a-z0-9-]+:[0-9]{12}:key/[a-f0-9-]+$'
@@ -117,9 +122,9 @@ Resources:
             - { Name: NODE_EXTRA_CA_CERTS, Value: !Ref RdsCaBundlePath }
           Secrets:
             - Name: MIGRATION_DATABASE_USERNAME
-              ValueFrom: !Sub '${DatabaseMigrationCredentialsSecretArn}:username::'
+              ValueFrom: !Sub '${DatabaseMigrationCredentialsSecretArn}:username::${DatabaseMigrationCredentialsVersionId}'
             - Name: MIGRATION_DATABASE_PASSWORD
-              ValueFrom: !Sub '${DatabaseMigrationCredentialsSecretArn}:password::'
+              ValueFrom: !Sub '${DatabaseMigrationCredentialsSecretArn}:password::${DatabaseMigrationCredentialsVersionId}'
           LinuxParameters:
             Capabilities: { Drop: [ALL] }
             InitProcessEnabled: true

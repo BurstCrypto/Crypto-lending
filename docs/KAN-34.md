@@ -306,12 +306,20 @@ broad table, sequence, function, type, schema, or default grants. Evidence
 records identifiers and redacted outcomes, never secret values.
 
 The migration task's `DatabaseMigrationCredentialsSecretArn` must resolve to
-the exact `crypto_migration` secret. Binding the RDS master/bootstrap
+the exact `crypto_migration` secret, and the required
+`DatabaseMigrationCredentialsVersionId` must identify the exact installed
+32-64 character secret version. Both ECS username/password selectors bind that
+same immutable version; `AWSCURRENT`, `AWSPREVIOUS`, an omitted selector, and a
+different version parameter are rejected. Binding the RDS master/bootstrap
 `DatabaseCredentialsSecretArn` is forbidden. Reuse the reviewed environment,
 database endpoint/name, RDS CA path, digest-pinned API image, repository ARN,
 and `ApplicationDataKey` ARN. Static validation cannot authenticate those
-cross-stack identities, so an independent reviewer must verify the complete
-parameter set before a change set is executed.
+cross-stack identities or prove the version's database verifier, so an
+independent reviewer must verify the complete parameter set before a change set
+is executed. The later authorized `ecs run-task` command must explicitly select
+Fargate Linux platform version `1.4.0` or newer because JSON-key plus VersionId
+secret selection is a run-platform capability; this task-definition-only
+template deliberately does not launch the task.
 
 ## Non-production limitations
 

@@ -220,6 +220,92 @@ test('rejects runtime credentials in the migration task', () => {
   );
 });
 
+test('requires one no-default exact migration credential VersionId', () => {
+  for (const [search, replacement] of [
+    ['    MinLength: 32', '    MinLength: 1'],
+    ['    MaxLength: 64', '    MaxLength: 4096'],
+    ["    AllowedPattern: '^[A-Za-z0-9_-]{32,64}$'", "    AllowedPattern: '^.*$'"],
+    [
+      '    Type: String\n    MinLength: 32\n    MaxLength: 64',
+      '    Type: String\n    Default: version_fixture_0000000000000000\n    MinLength: 32\n    MaxLength: 64',
+    ],
+    [
+      '  DatabaseMigrationCredentialsVersionId:\n',
+      '  DatabaseMigrationCredentialsVersionIdRenamed:\n',
+    ],
+    [
+      '  ApplicationDataKeyArn:\n',
+      [
+        '  DatabaseMigrationCredentialsVersionId:',
+        '    Type: String',
+        '    MinLength: 32',
+        '    MaxLength: 64',
+        "    AllowedPattern: '^[A-Za-z0-9_-]{32,64}$'",
+        '  ApplicationDataKeyArn:',
+        '',
+      ].join('\n'),
+    ],
+  ]) {
+    assertRejected(
+      mutate(search, replacement),
+      /DatabaseMigrationCredentialsVersionId must be a required no-default exact 32-64 character Secrets Manager VersionId/,
+    );
+  }
+});
+
+test('rejects unpinned, mutable-stage, or mismatched migration secret selectors', () => {
+  for (const [search, replacement] of [
+    [
+      '${DatabaseMigrationCredentialsSecretArn}:username::${DatabaseMigrationCredentialsVersionId}',
+      '${DatabaseMigrationCredentialsSecretArn}:username::',
+    ],
+    [
+      '${DatabaseMigrationCredentialsSecretArn}:password::${DatabaseMigrationCredentialsVersionId}',
+      '${DatabaseMigrationCredentialsSecretArn}:password::',
+    ],
+    [
+      '${DatabaseMigrationCredentialsSecretArn}:username::${DatabaseMigrationCredentialsVersionId}',
+      '${DatabaseMigrationCredentialsSecretArn}:username:CUSTOM_STAGE:',
+    ],
+    [
+      '${DatabaseMigrationCredentialsSecretArn}:password::${DatabaseMigrationCredentialsVersionId}',
+      '${DatabaseMigrationCredentialsSecretArn}:password:AWSCURRENT:',
+    ],
+    [
+      '${DatabaseMigrationCredentialsSecretArn}:password::${DatabaseMigrationCredentialsVersionId}',
+      '${DatabaseMigrationCredentialsSecretArn}:password::${UnreviewedVersionId}',
+    ],
+  ]) {
+    assertRejected(
+      mutate(search, replacement),
+      /exact migration-only username and password injection|exact immutable VersionId|must never use a mutable Secrets Manager stage/,
+    );
+  }
+
+  const alternateVersionParameter = templateSource
+    .replace(
+      '  ApplicationDataKeyArn:\n',
+      [
+        '  UnreviewedVersionId:',
+        '    Type: String',
+        '    MinLength: 32',
+        '    MaxLength: 64',
+        "    AllowedPattern: '^[A-Za-z0-9_-]{32,64}$'",
+        '  ApplicationDataKeyArn:',
+        '',
+      ].join('\n'),
+    )
+    .replace(
+      '${DatabaseMigrationCredentialsSecretArn}:password::${DatabaseMigrationCredentialsVersionId}',
+      '${DatabaseMigrationCredentialsSecretArn}:password::${UnreviewedVersionId}',
+    );
+  assert.notEqual(alternateVersionParameter, templateSource);
+  assertRejected(
+    alternateVersionParameter,
+    /exact migration-only username and password injection|exact immutable VersionId/,
+  );
+});
+
 test('rejects wildcard migration-secret access', () => {
   assertRejected(
     mutate(
@@ -299,8 +385,8 @@ test('rejects migration role remapping and cross-scope secret injection', () => 
 
   assertRejected(
     mutate(
-      "ValueFrom: !Sub '${DatabaseMigrationCredentialsSecretArn}:username::'",
-      "ValueFrom: !Sub '${DatabaseMigrationCredentialsSecretArn}:password::'",
+      "ValueFrom: !Sub '${DatabaseMigrationCredentialsSecretArn}:username::${DatabaseMigrationCredentialsVersionId}'",
+      "ValueFrom: !Sub '${DatabaseMigrationCredentialsSecretArn}:password::${DatabaseMigrationCredentialsVersionId}'",
     ),
     /exact migration-only username and password injection/,
   );
@@ -315,11 +401,11 @@ test('rejects migration role remapping and cross-scope secret injection', () => 
 
   assertRejected(
     mutate(
-      "              ValueFrom: !Sub '${DatabaseMigrationCredentialsSecretArn}:password::'",
+      "              ValueFrom: !Sub '${DatabaseMigrationCredentialsSecretArn}:password::${DatabaseMigrationCredentialsVersionId}'",
       [
-        "              ValueFrom: !Sub '${DatabaseMigrationCredentialsSecretArn}:password::'",
+        "              ValueFrom: !Sub '${DatabaseMigrationCredentialsSecretArn}:password::${DatabaseMigrationCredentialsVersionId}'",
         '            - Name: REDIS_AUTH_TOKEN',
-        "              ValueFrom: !Sub '${DatabaseMigrationCredentialsSecretArn}:authToken::'",
+        "              ValueFrom: !Sub '${DatabaseMigrationCredentialsSecretArn}:authToken::${DatabaseMigrationCredentialsVersionId}'",
       ].join('\n'),
     ),
     /exact migration-only username and password injection/,

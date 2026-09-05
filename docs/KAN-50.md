@@ -125,7 +125,15 @@ Static validation treats each role as a capability allowlist:
 | API task                   | inspect only the jobs and balance-sync source/DLQ attributes                                                                                                        |
 | worker task                | publish only to the jobs and balance-sync source queues, inspect all four queues, and use the data key only through SQS                                             |
 | web task                   | no application AWS API permission                                                                                                                                   |
-| migration task execution   | pull only the supplied API image, write migration logs, and read/decrypt only the supplied migration secret                                                         |
+| migration task execution   | pull only the supplied API image, write migration logs, and read/decrypt only the supplied migration secret at its exact required VersionId                         |
+
+The migration task's two JSON-key selectors share one required immutable
+VersionId. IAM can scope `GetSecretValue` to the migration secret ARN but not to
+one version within that secret, so the exact-version guarantee is enforced by
+the task selector, the property-complete local validator, and independent
+operator verification. Any future authorized `ecs run-task` guard must require
+Fargate Linux platform `1.4.0` or newer; the checked-in template registers only
+the task definition and never launches it.
 
 The worker has no Redis environment, secret-read permission, or port-6379
 security-group path. The API and worker use distinct execution roles and task

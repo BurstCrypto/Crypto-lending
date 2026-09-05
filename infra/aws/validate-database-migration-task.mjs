@@ -17,9 +17,9 @@ import {
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const defaultTemplatePath = join(scriptDirectory, 'database-migration-task.yaml');
-const reviewedTemplateSha256 = '32917167b77f5e517581ed411ad5feef57691996e0bcc012ab2f3e68f3bd8c91';
+const reviewedTemplateSha256 = '3b98d6aea9b2a12cc18b0b31739c1367406f41c5495c514e2070c40440c0c70c';
 const migrationBindingResidualLimitation =
-  'DatabaseMigrationCredentialsSecretArn and ApplicationDataKeyArn are operator-supplied cross-stack inputs; local validation cannot authenticate their origin. The secret must be the separately scoped crypto_migration credential and must never be the RDS master/bootstrap DatabaseCredentialsSecret.';
+  'DatabaseMigrationCredentialsSecretArn, its exact immutable VersionId, and ApplicationDataKeyArn are operator-supplied cross-stack inputs; local validation cannot authenticate their origin or prove that the pinned version contains the installed crypto_migration verifier. The secret must be separately scoped and must never be the RDS master/bootstrap DatabaseCredentialsSecret. Any authorized ECS run-task path must also pin a Fargate Linux platform version that supports JSON-key plus VersionId secret selection; this template does not run a task.';
 
 export const MAX_DATABASE_MIGRATION_TEMPLATE_BYTES = 51_200;
 export const DATABASE_MIGRATION_TEMPLATE_INPUT_ERROR =
@@ -200,6 +200,24 @@ export function validateMigrationTaskTemplate(source) {
       'DatabaseName must use the canonical lowercase PostgreSQL identifier contract required by the principal bootstrap.',
     );
   }
+  const migrationCredentialsVersion = parameters.get('DatabaseMigrationCredentialsVersionId') ?? '';
+  if (
+    exactCount(source, /^ {2}DatabaseMigrationCredentialsVersionId:\s*$/gm) !== 1 ||
+    semanticYamlTokens(migrationCredentialsVersion) !==
+      semanticYamlTokens(
+        [
+          'DatabaseMigrationCredentialsVersionId:',
+          '  Type: String',
+          '  MinLength: 32',
+          '  MaxLength: 64',
+          "  AllowedPattern: '^[A-Za-z0-9_-]{32,64}$'",
+        ].join('\n'),
+      )
+  ) {
+    errors.push(
+      'DatabaseMigrationCredentialsVersionId must be a required no-default exact 32-64 character Secrets Manager VersionId.',
+    );
+  }
 
   const expectedResources = new Map([
     ['MigrationTaskExecutionRole', 'AWS::IAM::Role'],
@@ -311,11 +329,11 @@ export function validateMigrationTaskTemplate(source) {
     [
       'Secrets:',
       '  - Name: MIGRATION_DATABASE_USERNAME',
-      "    ValueFrom: !Sub '${DatabaseMigrationCredentialsSecretArn}:username::'",
+      "    ValueFrom: !Sub '${DatabaseMigrationCredentialsSecretArn}:username::${DatabaseMigrationCredentialsVersionId}'",
       '  - Name: MIGRATION_DATABASE_PASSWORD',
-      "    ValueFrom: !Sub '${DatabaseMigrationCredentialsSecretArn}:password::'",
+      "    ValueFrom: !Sub '${DatabaseMigrationCredentialsSecretArn}:password::${DatabaseMigrationCredentialsVersionId}'",
     ].join('\n'),
-    'the exact migration-only username and password injection from the single migration-secret parameter',
+    'the exact migration-only username and password injection from one secret ARN and one immutable VersionId',
     errors,
   );
   const environment = indentedPropertyBlock(task, 'Environment') ?? '';
@@ -354,16 +372,19 @@ export function validateMigrationTaskTemplate(source) {
   if (
     exactCount(
       source,
-      /ValueFrom:\s*!Sub\s+'\$\{DatabaseMigrationCredentialsSecretArn\}:username::'/g,
+      /ValueFrom:\s*!Sub\s+'\$\{DatabaseMigrationCredentialsSecretArn\}:username::\$\{DatabaseMigrationCredentialsVersionId\}'/g,
     ) !== 1 ||
     exactCount(
       source,
-      /ValueFrom:\s*!Sub\s+'\$\{DatabaseMigrationCredentialsSecretArn\}:password::'/g,
+      /ValueFrom:\s*!Sub\s+'\$\{DatabaseMigrationCredentialsSecretArn\}:password::\$\{DatabaseMigrationCredentialsVersionId\}'/g,
     ) !== 1
   ) {
     errors.push(
-      'Migration task username/password must come only from the migration secret parameter.',
+      'Migration task username/password must come only from the migration secret parameter at one exact immutable VersionId.',
     );
+  }
+  if (/\b(?:AWSCURRENT|AWSPREVIOUS)\b/.test(source)) {
+    errors.push('Migration task secret selectors must never use a mutable Secrets Manager stage.');
   }
   if (
     !/Command:\s*\[node, dist\/infrastructure\/database\/migration\.cli\.js, --production, up\]/.test(
