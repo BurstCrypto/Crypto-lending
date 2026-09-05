@@ -1,4 +1,4 @@
-export const LOCAL_PRINCIPAL_FIXTURE_MARKER = 'crypto-lending-compose-principals-v1';
+export const LOCAL_PRINCIPAL_FIXTURE_MARKER = 'crypto-lending-compose-principals-v2';
 
 export interface LocalPrincipalFixtureIdentity {
   database: string;

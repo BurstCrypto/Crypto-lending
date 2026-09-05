@@ -206,11 +206,17 @@ async function expectPostgresDenied(
 const repositoryRoot = resolve(__dirname, '..', '..', '..', '..');
 const bootstrapPath = resolve(repositoryRoot, 'infra', 'postgres', 'bootstrap-principals.sql');
 
+interface BootstrapPrincipalNames extends DatabasePrincipalNames {
+  readonly balanceConsumerRuntimeRole: string;
+  readonly balanceConsumerLoginPrefix: string;
+}
+
 async function runBootstrapArtifact(
   database: string,
-  names: DatabasePrincipalNames,
+  names: BootstrapPrincipalNames,
   apiLogin: string,
   workerLogin: string,
+  balanceConsumerLogin: string,
 ): Promise<void> {
   const bootstrapSql = await readFile(bootstrapPath, 'utf8');
   const composeFile = resolve(repositoryRoot, 'docker-compose.yml');
@@ -222,10 +228,13 @@ async function runBootstrapArtifact(
     legacy_runtime_role: names.legacyRuntimeRole,
     api_runtime_role: names.apiRuntimeRole,
     worker_runtime_role: names.workerRuntimeRole,
+    balance_consumer_runtime_role: names.balanceConsumerRuntimeRole,
     api_login_prefix: names.apiLoginPrefix,
     worker_login_prefix: names.workerLoginPrefix,
+    balance_consumer_login_prefix: names.balanceConsumerLoginPrefix,
     api_login: apiLogin,
     worker_login: workerLogin,
+    balance_consumer_login: balanceConsumerLogin,
   };
   for (const value of Object.values(psqlVariables)) {
     if (!IDENTIFIER.test(value)) throw new Error(`Unsafe bootstrap variable: ${value}`);
@@ -302,20 +311,24 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
     const suffix = randomUUID().replaceAll('-', '').slice(0, 10);
     const database = `k232_db_${suffix}`;
     const deniedDatabase = `k232_denied_${suffix}`;
-    const names: DatabasePrincipalNames = {
+    const names: BootstrapPrincipalNames = {
       bootstrapRole,
       schemaOwnerRole: `k232_owner_${suffix}`,
       migrationRole: `k232_migrate_${suffix}`,
       apiRuntimeRole: `k232_api_cap_${suffix}`,
       workerRuntimeRole: `k232_worker_cap_${suffix}`,
+      balanceConsumerRuntimeRole: `k232_balance_cap_${suffix}`,
       apiLoginPrefix: `k232_api_${suffix}_`,
       workerLoginPrefix: `k232_worker_${suffix}_`,
+      balanceConsumerLoginPrefix: `k232_balance_${suffix}_`,
       legacyRuntimeRole: `k232_legacy_${suffix}`,
     };
     const apiOld = `${names.apiLoginPrefix}a`;
     const apiNew = `${names.apiLoginPrefix}b`;
     const workerLogin = `${names.workerLoginPrefix}a`;
     const workerNew = `${names.workerLoginPrefix}b`;
+    const balanceConsumerLogin = `${names.balanceConsumerLoginPrefix}a`;
+    const balanceConsumerNew = `${names.balanceConsumerLoginPrefix}b`;
     const outsider = `k232_outsider_${suffix}`;
     const migrationPassword = randomBytes(24).toString('hex');
     const migrationNewPassword = randomBytes(24).toString('hex');
@@ -446,6 +459,10 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
         workerPassword,
       );
       await createRole(
+        balanceConsumerLogin,
+        'LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS',
+      );
+      await createRole(
         outsider,
         'LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS',
         outsiderPassword,
@@ -499,6 +516,7 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
           { ...names, apiRuntimeRole: bootstrapRole },
           apiOld,
           workerLogin,
+          balanceConsumerLogin,
         ),
       ).rejects.toThrow('do not match the reviewed contract');
       await expect(
@@ -518,18 +536,18 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
       ).resolves.toMatchObject({ rows: [{ capability_created: false }] });
 
       await admin.query(`ALTER ROLE ${quoteIdentifier(names.migrationRole)} NOLOGIN`);
-      await expect(runBootstrapArtifact(database, names, apiOld, workerLogin)).rejects.toThrow(
-        'pre-provisioned restricted LOGIN roles',
-      );
+      await expect(
+        runBootstrapArtifact(database, names, apiOld, workerLogin, balanceConsumerLogin),
+      ).rejects.toThrow('pre-provisioned restricted LOGIN roles');
       await admin.query(`ALTER ROLE ${quoteIdentifier(names.migrationRole)} LOGIN`);
 
       await createRole(
         names.schemaOwnerRole,
         'LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS',
       );
-      await expect(runBootstrapArtifact(database, names, apiOld, workerLogin)).rejects.toThrow(
-        'committed capability NOLOGIN state',
-      );
+      await expect(
+        runBootstrapArtifact(database, names, apiOld, workerLogin, balanceConsumerLogin),
+      ).rejects.toThrow('committed capability NOLOGIN state');
       await expect(
         admin.query(
           `SELECT EXISTS (
@@ -557,8 +575,10 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
       await expect(
         activeLegacyClient.query('SELECT count(*) FROM accounts'),
       ).resolves.toBeDefined();
-      await expect(runBootstrapArtifact(database, names, apiOld, workerLogin)).rejects.toThrow(
-        'migration, capability, legacy, API, and worker sessions must be drained and terminated first',
+      await expect(
+        runBootstrapArtifact(database, names, apiOld, workerLogin, balanceConsumerLogin),
+      ).rejects.toThrow(
+        'migration, capability, legacy, API, worker, and balance-consumer sessions must be drained and terminated first',
       );
       await terminateExactSessions(names.legacyRuntimeRole);
       await expect(activeLegacyClient.query('SELECT 1')).rejects.toBeDefined();
@@ -568,8 +588,57 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
       const retiredLegacyPool = new Pool({ connectionString: legacyUrl, max: 1 });
       await expect(retiredLegacyPool.query('SELECT 1')).rejects.toBeDefined();
       await retiredLegacyPool.end().catch(() => undefined);
-      await runBootstrapArtifact(database, names, apiOld, workerLogin);
-      createdRoles.push(names.apiRuntimeRole, names.workerRuntimeRole);
+
+      await expect(
+        runBootstrapArtifact(
+          database,
+          { ...names, balanceConsumerRuntimeRole: names.workerRuntimeRole },
+          apiOld,
+          workerLogin,
+          balanceConsumerLogin,
+        ),
+      ).rejects.toThrow('distinct principals');
+
+      await admin.query(
+        `GRANT ${quoteIdentifier(names.legacyRuntimeRole)}
+         TO ${quoteIdentifier(balanceConsumerLogin)}`,
+      );
+      await expect(
+        runBootstrapArtifact(database, names, apiOld, workerLogin, balanceConsumerLogin),
+      ).rejects.toThrow('do not match the reviewed contract');
+      await admin.query(
+        `REVOKE ${quoteIdentifier(names.legacyRuntimeRole)}
+         FROM ${quoteIdentifier(balanceConsumerLogin)}`,
+      );
+
+      const malformedBalanceConsumerLogin = `${names.balanceConsumerLoginPrefix}_bad`;
+      await createRole(
+        malformedBalanceConsumerLogin,
+        'LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS',
+      );
+      await expect(
+        runBootstrapArtifact(database, names, apiOld, workerLogin, balanceConsumerLogin),
+      ).rejects.toThrow('do not match the reviewed contract');
+      await admin.query(`DROP ROLE ${quoteIdentifier(malformedBalanceConsumerLogin)}`);
+      createdRoles.splice(createdRoles.indexOf(malformedBalanceConsumerLogin), 1);
+
+      const excessBalanceConsumerLogin = `${names.balanceConsumerLoginPrefix}b`;
+      await createRole(
+        excessBalanceConsumerLogin,
+        'LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS',
+      );
+      await expect(
+        runBootstrapArtifact(database, names, apiOld, workerLogin, balanceConsumerLogin),
+      ).rejects.toThrow('do not match the reviewed contract');
+      await admin.query(`DROP ROLE ${quoteIdentifier(excessBalanceConsumerLogin)}`);
+      createdRoles.splice(createdRoles.indexOf(excessBalanceConsumerLogin), 1);
+
+      await runBootstrapArtifact(database, names, apiOld, workerLogin, balanceConsumerLogin);
+      createdRoles.push(
+        names.apiRuntimeRole,
+        names.workerRuntimeRole,
+        names.balanceConsumerRuntimeRole,
+      );
       await expect(
         admin.query<{ password_retired: boolean }>(
           `SELECT rolpassword IS NULL AS password_retired
@@ -577,6 +646,175 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
           [names.legacyRuntimeRole],
         ),
       ).resolves.toMatchObject({ rows: [{ password_retired: true }] });
+      await expect(
+        admin.query<{
+          capability_restricted: boolean;
+          exact_membership: boolean;
+          credential_disabled: boolean;
+          login_database_denied: boolean;
+          capability_database_denied: boolean;
+          capability_schema_denied: boolean;
+        }>(
+          `SELECT
+             EXISTS (
+               SELECT 1 FROM pg_catalog.pg_roles
+               WHERE rolname = $1
+                 AND NOT rolcanlogin AND NOT rolinherit
+                 AND NOT rolsuper AND NOT rolcreaterole AND NOT rolcreatedb
+                 AND NOT rolreplication AND NOT rolbypassrls
+             ) AS capability_restricted,
+             (
+               SELECT count(*) = 1
+               FROM pg_catalog.pg_auth_members AS membership
+               INNER JOIN pg_catalog.pg_roles AS granted_role
+                 ON granted_role.oid = membership.roleid
+               INNER JOIN pg_catalog.pg_roles AS member_role
+                 ON member_role.oid = membership.member
+               WHERE granted_role.rolname = $1
+                 AND member_role.rolname = $2
+                 AND NOT membership.admin_option
+                 AND NOT membership.inherit_option
+                 AND membership.set_option
+             ) AS exact_membership,
+             (
+               SELECT rolpassword IS NULL
+               FROM pg_catalog.pg_authid
+               WHERE rolname = $2
+             ) AS credential_disabled,
+             NOT pg_catalog.has_database_privilege($2, $3, 'CONNECT')
+               AND NOT pg_catalog.has_database_privilege($2, $3, 'CREATE')
+               AND NOT pg_catalog.has_database_privilege($2, $3, 'TEMP')
+               AS login_database_denied,
+             NOT pg_catalog.has_database_privilege($1, $3, 'CONNECT')
+               AND NOT pg_catalog.has_database_privilege($1, $3, 'CREATE')
+               AND NOT pg_catalog.has_database_privilege($1, $3, 'TEMP')
+               AS capability_database_denied,
+             NOT pg_catalog.has_schema_privilege($1, 'public', 'USAGE')
+               AND NOT pg_catalog.has_schema_privilege($1, 'public', 'CREATE')
+               AS capability_schema_denied`,
+          [names.balanceConsumerRuntimeRole, balanceConsumerLogin, database],
+        ),
+      ).resolves.toMatchObject({
+        rows: [
+          {
+            capability_restricted: true,
+            exact_membership: true,
+            credential_disabled: true,
+            login_database_denied: true,
+            capability_database_denied: true,
+            capability_schema_denied: true,
+          },
+        ],
+      });
+      const deniedBalanceConsumerPool = new Pool({
+        connectionString: roleUrl(
+          testDatabaseUrl as string,
+          database,
+          balanceConsumerLogin,
+          randomBytes(24).toString('hex'),
+        ),
+        max: 1,
+      });
+      await expect(deniedBalanceConsumerPool.query('SELECT 1')).rejects.toBeDefined();
+      await deniedBalanceConsumerPool.end().catch(() => undefined);
+
+      await createRole(
+        balanceConsumerNew,
+        'LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS',
+      );
+      await runBootstrapArtifact(database, names, apiOld, workerLogin, balanceConsumerNew);
+      await expect(
+        admin.query<{ bounded_overlap_valid: boolean }>(
+          `SELECT count(*) = 2
+             AND pg_catalog.bool_and(
+               NOT pg_catalog.has_database_privilege(login_role.oid, $3, 'CONNECT')
+               AND 1 = (
+                 SELECT count(*)
+                 FROM pg_catalog.pg_auth_members AS membership
+                 INNER JOIN pg_catalog.pg_roles AS granted_role
+                   ON granted_role.oid = membership.roleid
+                 WHERE membership.member = login_role.oid
+                   AND granted_role.rolname = $2
+                   AND NOT membership.admin_option
+                   AND NOT membership.inherit_option
+                   AND membership.set_option
+               )
+             ) AS bounded_overlap_valid
+           FROM pg_catalog.pg_roles AS login_role
+           WHERE pg_catalog.left(login_role.rolname, pg_catalog.length($1)) = $1`,
+          [names.balanceConsumerLoginPrefix, names.balanceConsumerRuntimeRole, database],
+        ),
+      ).resolves.toMatchObject({ rows: [{ bounded_overlap_valid: true }] });
+
+      const excessBalanceConsumerSuccessor = `${names.balanceConsumerLoginPrefix}c`;
+      await createRole(
+        excessBalanceConsumerSuccessor,
+        'LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS',
+      );
+      await expect(
+        runBootstrapArtifact(database, names, apiOld, workerLogin, balanceConsumerNew),
+      ).rejects.toThrow('do not match the reviewed contract');
+      await admin.query(`DROP ROLE ${quoteIdentifier(excessBalanceConsumerSuccessor)}`);
+      createdRoles.splice(createdRoles.indexOf(excessBalanceConsumerSuccessor), 1);
+
+      await admin.query(
+        `GRANT CONNECT ON DATABASE ${quoteIdentifier(deniedDatabase)}
+         TO ${quoteIdentifier(balanceConsumerLogin)}`,
+      );
+      await expect(
+        runBootstrapArtifact(database, names, apiOld, workerLogin, balanceConsumerNew),
+      ).rejects.toThrow('database boundary does not match');
+      await admin.query(
+        `REVOKE CONNECT ON DATABASE ${quoteIdentifier(deniedDatabase)}
+         FROM ${quoteIdentifier(balanceConsumerLogin)}`,
+      );
+
+      await admin.query(
+        `GRANT CREATE, TEMP ON DATABASE ${quoteIdentifier(deniedDatabase)}
+         TO ${quoteIdentifier(balanceConsumerLogin)}`,
+      );
+      await expect(
+        runBootstrapArtifact(database, names, apiOld, workerLogin, balanceConsumerNew),
+      ).rejects.toThrow('database boundary does not match');
+      await admin.query(
+        `REVOKE CREATE, TEMP ON DATABASE ${quoteIdentifier(deniedDatabase)}
+         FROM ${quoteIdentifier(balanceConsumerLogin)}`,
+      );
+
+      await admin.query(
+        `GRANT SELECT (id) ON TABLE public.job_outbox
+         TO ${quoteIdentifier(balanceConsumerLogin)}`,
+      );
+      await expect(
+        runBootstrapArtifact(database, names, apiOld, workerLogin, balanceConsumerNew),
+      ).rejects.toThrow('database boundary does not match');
+      await admin.query(
+        `REVOKE SELECT (id) ON TABLE public.job_outbox
+         FROM ${quoteIdentifier(balanceConsumerLogin)}`,
+      );
+
+      await admin.query(`ALTER ROLE ${quoteIdentifier(balanceConsumerLogin)} NOLOGIN`);
+      await admin.query(
+        `REVOKE ${quoteIdentifier(names.balanceConsumerRuntimeRole)}
+         FROM ${quoteIdentifier(balanceConsumerLogin)}`,
+      );
+      await terminateExactSessions(balanceConsumerLogin);
+      await admin.query(`DROP ROLE ${quoteIdentifier(balanceConsumerLogin)}`);
+      createdRoles.splice(createdRoles.indexOf(balanceConsumerLogin), 1);
+      await runBootstrapArtifact(database, names, apiOld, workerLogin, balanceConsumerNew);
+      await expect(
+        admin.query<{ steady_state_valid: boolean }>(
+          `SELECT count(*) = 1
+             AND pg_catalog.bool_and(
+               rolname = $2
+               AND rolcanlogin AND NOT rolinherit
+               AND NOT pg_catalog.has_database_privilege(oid, $3, 'CONNECT')
+             ) AS steady_state_valid
+           FROM pg_catalog.pg_roles
+           WHERE pg_catalog.left(rolname, pg_catalog.length($1)) = $1`,
+          [names.balanceConsumerLoginPrefix, balanceConsumerNew, database],
+        ),
+      ).resolves.toMatchObject({ rows: [{ steady_state_valid: true }] });
 
       const migrationUrl = roleUrl(
         testDatabaseUrl as string,

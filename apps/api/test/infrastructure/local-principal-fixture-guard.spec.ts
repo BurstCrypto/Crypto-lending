@@ -18,6 +18,11 @@ describe('KAN-232 local principal fixture guard', () => {
     { database: 'crypto_lending', bootstrapRole: 'crypto_admin', marker: null },
     { database: 'crypto_lending', bootstrapRole: 'crypto_admin', marker: 'wrong' },
     {
+      database: 'crypto_lending',
+      bootstrapRole: 'crypto_admin',
+      marker: 'crypto-lending-compose-principals-v1',
+    },
+    {
       database: 'managed_tunnel',
       bootstrapRole: 'crypto_admin',
       marker: LOCAL_PRINCIPAL_FIXTURE_MARKER,
