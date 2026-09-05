@@ -202,15 +202,22 @@ so the guard can compare current and target state. The nested workload
 boundary grants `GetSecretValue` and decrypt on the exact
 `AuthWalletKeysSecretArn` / `AuthWalletKeysKmsKeyArn` pair only to the API
 execution role. Web, worker, task roles, and the Redis operator receive no
-access. CREATE can bind the initial exact version. Every UPDATE preserves the
-deployed ARN/VersionId/KMS tuple: `APPLICATION` cannot rotate it and
-after schema-v2 adoption each later `CREDENTIAL_TRANSITION` is limited to one
-step in the separate six-slot A/B state machine while preserving the Redis
-operator version. A dedicated auth/wallet transition record and guard do not
-yet exist. The secret,
+access. CREATE can bind the initial exact version but accepts no transition
+input. `APPLICATION` preserves the deployed ARN/VersionId/KMS tuple, and after
+schema-v2 adoption each `CREDENTIAL_TRANSITION` is limited to one step in the
+separate six-slot A/B state machine while preserving both the Redis-operator
+version and auth/wallet chain. The dedicated `AUTH_WALLET_TRANSITION` intent now
+integrates a canonical offline artifact signed by an issuer and an independent
+verifier. A no-op `adopt` binds the existing singleton version; `transition`
+appends one new outer VersionId and changes exactly one sanitized ring purpose
+while carrying forward all six other fields. The wrapper takes the signed
+predecessor from the validator report, matches the deployed chain head, and
+requires the exact API task-definition replacement/API-service modification.
+The production signing-key registry is intentionally empty. Thus the secret,
 customer-managed key, key/resource policies, distinct canonical key material,
-custody, and rotation are external gates; static wiring is not
-deployed-readability evidence.
+custody, authorized population, live captures and drills, independent approval,
+and deployment are still external gates; static wiring and the offline guard
+are not deployed-readability evidence.
 
 The production runtime contract has four database authorities: the RDS
 master/bootstrap identity, a one-off `crypto_migration` login, an API A/B login,

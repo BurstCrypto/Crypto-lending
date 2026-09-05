@@ -98,10 +98,14 @@ this contract, but it has not been staged, planned, or deployed.
 
 The auth/wallet VersionId is separate from those six A/B slots and has no
 `UNPINNED` sentinel. CREATE requires an exact initial version. On UPDATE, the
-invocation guard compares and preserves the deployed secret ARN, VersionId, and
-KMS key ARN as one tuple. Neither `APPLICATION` nor `CREDENTIAL_TRANSITION` may
-change it; a dedicated reviewed auth/wallet transition record and guard remain
-an open production gate.
+invocation guard compares the deployed secret ARN, VersionId, and KMS key ARN as
+one tuple. Neither `APPLICATION` nor `CREDENTIAL_TRANSITION` may change it. The
+separate `AUTH_WALLET_TRANSITION` intent now accepts a two-role-signed offline
+record for no-op adoption or for one exact VersionId advance with one sanitized
+inner-purpose operation, while preserving the secret/KMS ARNs and fixed-slot
+chain. Its production authority registry is intentionally empty, and external
+custody, authorized key population, live drills/captures, independent approval,
+and deployment remain open production gates.
 
 The database master is also separate from the fixed-slot and auth/wallet
 transition schemas. RDS, rather than an application change set, coordinates its

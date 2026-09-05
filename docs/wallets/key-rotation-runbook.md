@@ -161,13 +161,34 @@ backfill and must retain both keys throughout the rollback window.
   VersionId and rejects the legacy or mutable-stage selectors. Because those
   seven fields share one outer version, a wallet-only change must carry forward
   and validate every unchanged authentication field, and an authentication-only
-  change must do the same for wallet fields. The current deployment intents
-  preserve the ARN/VersionId/KMS tuple; a dedicated cross-domain reviewed
-  transition guard is still required. The template does not provision or
-  populate the external secret or define the isolated schema-owner rewrap
-  identity. Those controls must be separately reviewed with the exact secret
-  schema, session-drain procedure, and preflight checks. Do not grant 0024
-  functions to the general API or worker role.
+  change must do the same for wallet fields. The dedicated two-role-signed
+  offline validator now checks sanitized current and target manifests for all
+  seven fields, append-only outer VersionId and non-secret key history, signed
+  carry-forward evidence, and exactly one purpose-specific operation. Its
+  production authority registry is intentionally empty, so no repository-local
+  record can authorize a transition today.
+- The deployment-integrated `AUTH_WALLET_TRANSITION` intent accepts a signed
+  no-op adoption or one current-to-target transition. The wrapper takes the
+  signed predecessor only from the successful validator report, freezes the
+  fixed-slot chain and unrelated state, and requires an API task-definition
+  replacement plus API-service modification for a real transition. Wallet rings
+  support only `ADD_AND_ACTIVATE_SUCCESSOR` and `RETIRE_PREDECESSOR`; one field
+  changes per complete outer secret version. `APPLICATION` and
+  `CREDENTIAL_TRANSITION` preserve the adopted tuple and chain.
+- Fresh infrastructure remains inert: CREATE binds the exact initial
+  auth/wallet VersionId but accepts no transition record, the separate fixed-
+  slot adoption runs first at zero desired tasks, and signed auth/wallet
+  `adopt` then establishes a no-op chain head before service activation. The
+  validator's `create` mode checks the initial signed state model but is not an
+  executable CloudFormation CREATE transition.
+- The template does not provision or populate the external secret or define the
+  isolated schema-owner rewrap identity. Custody, production trust anchors,
+  authorized key population, exact field-read evidence, the schema-owner
+  workflow, live captures, deployed drills, and independent approval are still
+  required. No production deployment or live rotation has occurred. Review
+  those controls with the exact secret schema, session-drain procedure, and
+  preflight checks. Do not grant 0024 functions to the general API or worker
+  role.
 - A deployed rotation, rollback, and disaster-recovery drill with redacted
   evidence is required before any old key can be retired.
 - Migration `0023` gives only the worker role a scoped current-ciphertext

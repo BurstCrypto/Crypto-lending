@@ -30,8 +30,11 @@ step.
 The separate shared authentication/wallet secret also has an exact immutable
 VersionId, but it is not a seventh fixed slot and has no `UNPINNED` state. The
 guard preserves its ARN/VersionId/KMS tuple during ordinary releases and
-forbids changing it in a fixed-slot transition. Its future dedicated transition
-record must not be folded into this six-slot A/B state machine.
+forbids changing it in a fixed-slot transition. A separate two-role-signed
+auth/wallet transition artifact and deployment-integrated update intent now
+exist; their chain, sanitized manifest, purpose operation, and authority-
+registry bindings remain completely separate from this six-slot A/B state
+machine.
 
 The Redis operator secret is likewise not an A/B slot. Its generated version is
 unknown during the inert initial CREATE, so schema-v2 adoption records bind its
@@ -117,7 +120,7 @@ the inert checked-in example.
 
 ## Guarded CloudFormation updates
 
-`invoke-application-baseline.ps1` separates updates into two exact intents:
+`invoke-application-baseline.ps1` separates updates into three exact intents:
 
 - `CREDENTIAL_TRANSITION` requires the ignored approved record, its exact
   `adopt` or `transition` mode, a current canonical validation instant, the
@@ -129,13 +132,41 @@ the inert checked-in example.
 - `APPLICATION` rejects transition evidence and permits an ordinary release
   only after adoption. All seven pinned versions and all four controls must be
   explicitly supplied and must exactly equal the deployed values. The existing
-  credential-chain tags are carried forward unchanged while reviewed
-  application parameters or templates may change.
+  credential-chain and auth/wallet-chain tags are carried forward unchanged
+  while reviewed application parameters or templates may change.
+- `AUTH_WALLET_TRANSITION` rejects fixed-slot evidence and requires an ignored,
+  canonical, two-role-signed auth/wallet record, exact `adopt` or `transition`
+  mode, current validation instant, production authority-registry digest, and
+  independently supplied current/target VersionIds, operation, and field. It
+  preserves the complete fixed-slot chain and unrelated template, parameter,
+  and base-tag state. Adoption is a no-op tuple binding with only zero changes
+  or non-replacing tag propagation; a transition requires the exact API task-
+  definition replacement and API-service modification.
 
-Both intents additionally require the named auth/wallet secret VersionId and
-compare the complete deployed auth/wallet ARN/VersionId/KMS tuple. A mismatch
-fails closed and requires the still-unimplemented dedicated auth/wallet
-transition workflow.
+All three intents require the named auth/wallet secret VersionId and compare the
+complete deployed auth/wallet ARN/VersionId/KMS tuple. `APPLICATION` and
+`CREDENTIAL_TRANSITION` must preserve it. `AUTH_WALLET_TRANSITION` may adopt the
+unchanged tuple or advance only its VersionId after signed validation; its
+secret and KMS ARNs remain immutable. The wrapper consumes the signed
+predecessor hash from the successful validator report, matches it and the
+current state to the deployed auth/wallet chain head, and advances three
+separate auth/wallet chain tags.
+
+Initial bootstrap remains ordered and inert. CREATE supplies one exact
+auth/wallet VersionId, all seven fixed-slot/Redis-operator values as `UNPINNED`,
+zero desired task counts, and no transition inputs. The zero-count fixed-slot
+adoption runs first while the auth/wallet chain is untracked. A signed no-op
+auth/wallet `adopt` update then binds the already deployed singleton VersionId
+and sanitized seven-field manifest before any `APPLICATION` activation. The
+standalone auth/wallet validator also has a signed `create` state-model mode,
+but the CloudFormation invocation path deliberately accepts only `adopt` and
+`transition` for UPDATE.
+
+The production auth/wallet authority registry is intentionally empty. Local
+validation and wrapper integration therefore do not authorize a record,
+populate a key, or prove a deployed change. External custody and population,
+live capture and rotation/recovery drills, independently controlled signing
+keys and approval, and the first production deployment all remain outstanding.
 
 Every update addresses the immutable stack ARN rather than its mutable name.
 Deploy repeats all local and current-state checks, verifies the exact submitted

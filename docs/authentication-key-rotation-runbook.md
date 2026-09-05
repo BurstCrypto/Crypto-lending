@@ -38,15 +38,74 @@ The reviewed production task definition sets `NODE_ENV=production`, omits
 ARN. It does not provision or read that secret, and the service remains at zero
 desired tasks. Template wiring therefore proves only the fail-closed field
 boundary, not custody, usable key material, deployment, or rotation. CREATE can
-bind an initial exact outer VersionId. The current `APPLICATION` and
-`CREDENTIAL_TRANSITION` update intents both preserve it; a dedicated
-auth/wallet-secret transition record and guard must be implemented and approved
-before this runbook can rotate the deployed outer version.
+bind an initial exact outer VersionId but accepts no transition input. After the
+fixed-slot chain is adopted, a signed no-op `AUTH_WALLET_TRANSITION` adoption
+establishes the auth/wallet chain tags. `APPLICATION` and
+`CREDENTIAL_TRANSITION` preserve that chain and its ARN/VersionId/KMS tuple;
+only a signed `AUTH_WALLET_TRANSITION` update may advance the outer VersionId.
 
 Never put a real ring document, digest, cookie, token, OIDC subject, or key in a
 ticket, shell history, migration, log, screenshot, or evidence bundle. Secret
 manager version identifiers and sanitized policy/version counts are sufficient
 evidence.
+
+## Signed outer-VersionId control plane
+
+`validate-auth-wallet-secret-version-transition.mjs` is a domain-specific,
+offline validator for the shared seven-field secret. An operational record must
+be signed by exactly an `AUTH_WALLET_TRANSITION_ISSUER` and an independent
+`INDEPENDENT_AUTH_WALLET_TRANSITION_VERIFIER`. It carries sanitized current and
+target manifests, append-only outer VersionId and non-secret inner key-version
+history, exact deployment/template/secret/KMS bindings, purpose-specific
+evidence hashes, and approval references. It accepts no key material and its
+plan fixes all AWS, database, Redis, DNS, HTTP, resource, credential-byte, and
+file-write counters at zero.
+
+The validator distinguishes three operational modes:
+
+- `create` describes one initial exact binding with no deployed predecessor. It
+  is a signed state-model check only; the CloudFormation CREATE wrapper rejects
+  transition inputs and remains inert with zero desired tasks.
+- `adopt` is a no-op binding: current and target VersionIds and all seven
+  sanitized manifests must be identical, history starts with exactly that one
+  current VersionId, and the signed predecessor is `NONE`. For a fresh stack,
+  first complete the separate zero-count fixed-slot adoption, then adopt this
+  already-pinned auth/wallet binding, and only then use an `APPLICATION` update
+  to activate reviewed services.
+- `transition` appends exactly one fresh outer VersionId, preserves the secret
+  and KMS ARNs, carries every unchanged field forward, and changes exactly one
+  declared ring purpose. Authentication rings permit stage, activate, abort of
+  one staged successor, or predecessor retirement; wallet rings permit atomic
+  add-and-activate or predecessor retirement. Each purpose change therefore
+  needs its own complete target secret version and signed record.
+
+The deployment wrapper validates the operational artifact twice before AWS
+discovery, independently pins the production authority-registry digest and all
+current/target inputs, and consumes `predecessorTransitionSha256` only from the
+successful signed validator report. Adoption permits only no resource change or
+non-replacing tag propagation. A transition requires the exact API task-
+definition replacement and API-service modification, freezes the fixed-slot
+chain and unrelated state, and revalidates the same record at a fresh instant
+immediately before execution.
+
+The checked-in production authority registry is intentionally empty. Thus the
+repository has a deployment-integrated guard but cannot mint an authorized
+production report or approve a deployment by itself. The checked-in example is
+`NOT_AUTHORIZED` / `NOT_RUN`; no production deployment or live rotation has
+occurred. External custody, authorized secret population, live captures and
+drills, and independent approval remain blockers.
+
+The safe checked-in lanes exercise only the inert example and hostile local
+fixtures:
+
+```powershell
+npm run infra:validate:auth-wallet-transition
+npm run infra:test:auth-wallet-transition
+pwsh -NoProfile -File infra/aws/test-invoke-application-baseline.ps1
+```
+
+Passing them does not populate the production authority registry, sign an
+operational record, call AWS, or authorize a deployment.
 
 ## Required staged sequence
 
@@ -67,13 +126,17 @@ evidence.
    Existing version-one readers remain valid because candidate sets may be a
    policy subset, but every set must contain the database-active version.
 5. Add freshly generated version-two material to the applicable application
-   ring with `activeWriteVersion` still `1`; deploy and drain the fleet. Verify
-   all candidates are presented. At this stage, writes remain version one and
-   rate limiting charges both candidate digests.
+   ring with `activeWriteVersion` still `1`. For each authentication purpose,
+   build a complete new seven-field secret version and validate its signed
+   `STAGE_SUCCESSOR` transition before the guarded task replacement. Deploy and
+   drain the fleet, then verify all candidates are presented. At this stage,
+   writes remain version one and rate limiting charges both candidate digests.
 6. Coordinate a blue/green or bounded maintenance cutover that changes the
    database active-write version and each application ring's
-   `activeWriteVersion` to `2`. A stale instance missing version two fails
-   closed. Do not hide or retry this mismatch indefinitely.
+   `activeWriteVersion` to `2`. Use a separate complete outer secret version and
+   signed `ACTIVATE_SUCCESSOR` transition for each ring. A stale instance
+   missing version two fails closed. Do not hide or retry this mismatch
+   indefinitely.
 7. Allow verified OIDC logins to append aliases and move active identity rows to
    version two. Rotate live sessions normally; predecessor replay semantics
    remain intact. Wait for predecessor rate-limit windows and live/rotated
@@ -88,8 +151,9 @@ evidence.
    every active identity to have its exact active-version alias. Session
    readiness includes live `ACTIVE` and `ROTATED` credential rows and unexpired
    rate-limit buckets. CSRF readiness includes live credential rows.
-9. Deploy rings containing only version two after readiness is zero, then use a
-   reviewed schema-owner migration to remove version one from the accepted
+9. After readiness is zero, use one signed `RETIRE_PREDECESSOR` transition per
+   ring to deploy complete outer versions containing only version two, then use
+   a reviewed schema-owner migration to remove version one from the accepted
    policy. Re-run concurrency, replay, rate-limit, principal, rollback, and
    recovery tests before separately authorizing external predecessor
    destruction.
@@ -117,9 +181,11 @@ retaining a retired key.
 Local tests cover concurrent first login, provider substitution, candidate and
 CSRF mismatch, replay ordering, successor versions, multi-candidate rate-limit
 denial, aggregate readiness, immutable policies/aliases, least-privilege roles,
-and rollback refusal. Production still requires approved external secret/KMS
-custody, authorized population of the selected fields, a deployed blue/green
-exercise, old-function denial evidence, recovery timing, sanitized alerting,
-an approved dedicated outer-VersionId transition guard, and independent
-security review. None of those external gates is satisfied by the template,
-this runbook, or the migration.
+rollback refusal, and hostile-path validation and deployment binding for the
+signed outer-VersionId guard. Production still requires approved external
+secret/KMS custody, authorized population of the selected fields, production
+trust anchors in the intentionally empty authority registry, a deployed
+blue/green exercise, old-function denial evidence, recovery timing, sanitized
+alerting, retained live captures, and independent approval. None of those
+external gates is satisfied by the template, this runbook, the validator, or
+the migration, and no production deployment has occurred.

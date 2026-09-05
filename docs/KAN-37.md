@@ -200,14 +200,18 @@ production task now selects the three canonical authentication ring documents
 from the same exact immutable Secrets Manager VersionId as the pre-authentication
 and wallet fields, and statically forbids legacy or mutable-stage selectors.
 This is fail-closed configuration wiring, not proof that the external
-secret/version exists, can be read, or contains an approved ring. A future
-dedicated deployment transition guard and audited policy migration must stage the
-successor as a read key, prove all API instances use the candidate-aware
-functions, revoke the superseded single-digest function grants, coordinate the
-active-write cutover, and retain predecessors until aggregate readiness is
-zero. See `docs/authentication-key-rotation-runbook.md`. Managed custody,
-deployed rotation/rollback evidence, and old-key destruction remain release
-gates.
+secret/version exists, can be read, or contains an approved ring. The dedicated
+two-role-signed offline guard is deployment-integrated for no-op adoption and
+one-purpose current-to-target VersionId transitions, but its production
+authority registry is intentionally empty. Separately authorized external
+secret staging and an audited policy migration must still stage the successor
+as a read key, prove all API instances use the candidate-aware functions,
+revoke the superseded single-digest function grants, coordinate the active-write
+cutover, and retain predecessors until aggregate readiness is zero. See
+`docs/authentication-key-rotation-runbook.md`. Managed custody, key population,
+live captures, deployed rotation/rollback evidence, independent approval, and
+old-key destruction remain release gates; no production deployment has
+occurred.
 
 ## Remaining live gates
 
