@@ -169,6 +169,7 @@ const WORKSPACES = Object.freeze({
   }),
 });
 const FORBIDDEN_PACKAGE_MANAGERS = Object.freeze(['corepack', 'npm', 'pnpm', 'yarn']);
+const productionSbomExpectationSnapshots = new WeakMap();
 
 export class ProductionSbomValidationError extends Error {
   constructor(code) {
@@ -346,6 +347,37 @@ export function readSecureRegularFile(
   }
 }
 
+function readSecureFileSnapshot(filePath, maximumBytes, snapshots) {
+  const resolvedPath = path.resolve(filePath);
+  const bytes = readSecureRegularFile(resolvedPath, maximumBytes);
+  snapshots.push(
+    Object.freeze({
+      maximumBytes,
+      path: resolvedPath,
+      sha256: createHash('sha256').update(bytes).digest('hex'),
+      size: bytes.length,
+    }),
+  );
+  return bytes;
+}
+
+function revalidateSecureFileSnapshots(snapshots, code) {
+  for (const snapshot of snapshots) {
+    let bytes;
+    try {
+      bytes = readSecureRegularFile(snapshot.path, snapshot.maximumBytes);
+    } catch {
+      return fail(code);
+    }
+    if (
+      bytes.length !== snapshot.size ||
+      createHash('sha256').update(bytes).digest('hex') !== snapshot.sha256
+    ) {
+      return fail(code);
+    }
+  }
+}
+
 function validateJsonWithoutDuplicateKeys(text, code) {
   let index = 0;
 
@@ -496,9 +528,9 @@ export function parseJsonBytes(bytes, code) {
   }
 }
 
-function repositoryJson(repoRoot, relativePath, maximumBytes) {
+function repositoryJson(repoRoot, relativePath, maximumBytes, snapshots) {
   return parseJsonBytes(
-    readSecureRegularFile(path.join(repoRoot, relativePath), maximumBytes),
+    readSecureFileSnapshot(path.join(repoRoot, relativePath), maximumBytes, snapshots),
     'REPOSITORY_STATE_INVALID',
   );
 }
@@ -513,9 +545,9 @@ function dependencyVersion(lockPackages, workspacePath, name) {
   return fail('LOCK_DEPENDENCY_MISSING');
 }
 
-function workspaceExpectation(repoRoot, lockPackages, definition) {
+function workspaceExpectation(repoRoot, lockPackages, definition, snapshots) {
   const manifest = record(
-    repositoryJson(repoRoot, `${definition.relativePath}/package.json`, 1024 * 1024),
+    repositoryJson(repoRoot, `${definition.relativePath}/package.json`, 1024 * 1024, snapshots),
     'REPOSITORY_STATE_INVALID',
   );
   const lockWorkspace = record(lockPackages[definition.relativePath], 'LOCK_WORKSPACE_MISSING');
@@ -549,12 +581,13 @@ function workspaceExpectation(repoRoot, lockPackages, definition) {
 
 export function loadProductionSbomExpectations(repoRootInput) {
   const repoRoot = path.resolve(repoRootInput);
+  const snapshots = [];
   const rootManifest = record(
-    repositoryJson(repoRoot, 'package.json', 1024 * 1024),
+    repositoryJson(repoRoot, 'package.json', 1024 * 1024, snapshots),
     'REPOSITORY_STATE_INVALID',
   );
   const lock = record(
-    repositoryJson(repoRoot, 'package-lock.json', 24 * 1024 * 1024),
+    repositoryJson(repoRoot, 'package-lock.json', 24 * 1024 * 1024, snapshots),
     'REPOSITORY_STATE_INVALID',
   );
   const lockPackages = record(lock.packages, 'REPOSITORY_STATE_INVALID');
@@ -568,11 +601,14 @@ export function loadProductionSbomExpectations(repoRootInput) {
   ) {
     return fail('REPOSITORY_STATE_INVALID');
   }
-  return Object.freeze({
+  const expectations = Object.freeze({
     repoRoot,
-    api: workspaceExpectation(repoRoot, lockPackages, WORKSPACES.api),
-    web: workspaceExpectation(repoRoot, lockPackages, WORKSPACES.web),
+    api: workspaceExpectation(repoRoot, lockPackages, WORKSPACES.api, snapshots),
+    web: workspaceExpectation(repoRoot, lockPackages, WORKSPACES.web, snapshots),
   });
+  revalidateSecureFileSnapshots(snapshots, 'REPOSITORY_STATE_CHANGED');
+  productionSbomExpectationSnapshots.set(expectations, Object.freeze(snapshots));
+  return expectations;
 }
 
 function validateNamespace(value, expectation) {
@@ -1790,6 +1826,7 @@ export function validateProductionSbomFiles({
   apiImageId,
   webImageId,
   sourceRevision,
+  afterDocumentValidationForTest,
 }) {
   const pathInputs = [
     apiPath,
@@ -1812,32 +1849,33 @@ export function validateProductionSbomFiles({
   if (apiImageId === webImageId) return fail('IMAGE_IDS_DUPLICATE');
   if (!/^[0-9a-f]{40}$/u.test(sourceRevision)) return fail('SOURCE_REVISION_INVALID');
   const expectations = loadProductionSbomExpectations(repoRoot);
+  const documentSnapshots = [];
   const apiImageBinding = validateProductionImageBindingBytes(
-    readSecureRegularFile(resolvedPaths[4], 40 * 1024 * 1024),
+    readSecureFileSnapshot(resolvedPaths[4], 40 * 1024 * 1024, documentSnapshots),
     'api',
     expectations,
     apiImageId,
   );
   const webImageBinding = validateProductionImageBindingBytes(
-    readSecureRegularFile(resolvedPaths[5], 40 * 1024 * 1024),
+    readSecureFileSnapshot(resolvedPaths[5], 40 * 1024 * 1024, documentSnapshots),
     'web',
     expectations,
     webImageId,
   );
   const api = validateProductionSpdxBytes(
-    readSecureRegularFile(resolvedPaths[0]),
+    readSecureFileSnapshot(resolvedPaths[0], MAX_PRODUCTION_SBOM_BYTES, documentSnapshots),
     'api',
     expectations,
     apiImageId,
   );
   const web = validateProductionSpdxBytes(
-    readSecureRegularFile(resolvedPaths[1]),
+    readSecureFileSnapshot(resolvedPaths[1], MAX_PRODUCTION_SBOM_BYTES, documentSnapshots),
     'web',
     expectations,
     webImageId,
   );
   const apiBinding = validateProductionSyftBindingBytes(
-    readSecureRegularFile(resolvedPaths[2]),
+    readSecureFileSnapshot(resolvedPaths[2], MAX_PRODUCTION_SBOM_BYTES, documentSnapshots),
     'api',
     expectations,
     apiImageId,
@@ -1845,7 +1883,7 @@ export function validateProductionSbomFiles({
     apiImageBinding,
   );
   const webBinding = validateProductionSyftBindingBytes(
-    readSecureRegularFile(resolvedPaths[3]),
+    readSecureFileSnapshot(resolvedPaths[3], MAX_PRODUCTION_SBOM_BYTES, documentSnapshots),
     'web',
     expectations,
     webImageId,
@@ -1869,6 +1907,20 @@ export function validateProductionSbomFiles({
     return fail('SBOM_IDENTITIES_DUPLICATE');
   }
   if (apiBinding.sha256 === webBinding.sha256) return fail('SBOM_IDENTITIES_DUPLICATE');
+  if (afterDocumentValidationForTest !== undefined) {
+    if (typeof afterDocumentValidationForTest !== 'function') {
+      return fail('SBOM_FILE_SET_CHANGED');
+    }
+    try {
+      afterDocumentValidationForTest();
+    } catch {
+      return fail('SBOM_FILE_SET_CHANGED');
+    }
+  }
+  revalidateSecureFileSnapshots(documentSnapshots, 'SBOM_FILE_SET_CHANGED');
+  const repositorySnapshots = productionSbomExpectationSnapshots.get(expectations);
+  if (repositorySnapshots === undefined) return fail('REPOSITORY_STATE_CHANGED');
+  revalidateSecureFileSnapshots(repositorySnapshots, 'REPOSITORY_STATE_CHANGED');
   return Object.freeze({
     api: Object.freeze({
       ...api,

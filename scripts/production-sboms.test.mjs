@@ -1432,6 +1432,41 @@ describe('actual-image SPDX validation', () => {
     );
   });
 
+  it('rejects artifact and repository rewrites across the complete validation pass', () => {
+    const files = writeSbomPair();
+    const apiBytes = readFileSync(files.apiPath);
+    assertCode(
+      () =>
+        validateProductionSbomFiles({
+          ...files,
+          repoRoot: fixtureRoot,
+          apiImageId: API_IMAGE_ID,
+          webImageId: WEB_IMAGE_ID,
+          afterDocumentValidationForTest() {
+            writeFileSync(files.apiPath, Buffer.concat([apiBytes, Buffer.from(' ')]));
+          },
+        }),
+      'SBOM_FILE_SET_CHANGED',
+    );
+
+    writeFileSync(files.apiPath, apiBytes);
+    const rootManifestPath = path.join(fixtureRoot, 'package.json');
+    const rootManifestBytes = readFileSync(rootManifestPath);
+    assertCode(
+      () =>
+        validateProductionSbomFiles({
+          ...files,
+          repoRoot: fixtureRoot,
+          apiImageId: API_IMAGE_ID,
+          webImageId: WEB_IMAGE_ID,
+          afterDocumentValidationForTest() {
+            writeFileSync(rootManifestPath, Buffer.concat([rootManifestBytes, Buffer.from(' ')]));
+          },
+        }),
+      'REPOSITORY_STATE_CHANGED',
+    );
+  });
+
   it('sanitizes descriptor close failures to the fixed unsafe-file code', () => {
     assertCode(() => closeSecureFileDescriptorForTest(-1), 'SBOM_FILE_UNSAFE');
   });
