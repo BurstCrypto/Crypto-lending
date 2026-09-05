@@ -28,14 +28,10 @@ export interface RedisInfrastructureConfig {
 
 export type ApplicationWorkload = 'api' | 'worker' | 'balance-consumer';
 
-export interface SqsInfrastructureConfig {
+export interface SqsClientInfrastructureConfig {
   region: string;
   endpoint?: string;
   credentialRelativeUri?: string;
-  queueUrl: string;
-  deadLetterQueueUrl: string;
-  balanceQueueUrl: string;
-  balanceDeadLetterQueueUrl: string;
   requestTimeoutMs: number;
   sdkMaxAttempts: number;
   maxReceiveCount: number;
@@ -44,12 +40,33 @@ export interface SqsInfrastructureConfig {
   retryMaxDelaySeconds: number;
 }
 
+export interface SqsInfrastructureConfig extends SqsClientInfrastructureConfig {
+  queueUrl: string;
+  deadLetterQueueUrl: string;
+  balanceQueueUrl: string;
+  balanceDeadLetterQueueUrl: string;
+}
+
+export interface BalanceConsumerSqsInfrastructureConfig extends SqsClientInfrastructureConfig {
+  balanceQueueUrl: string;
+  balanceDeadLetterQueueUrl: string;
+}
+
 export interface InfrastructureConfig {
-  workload: ApplicationWorkload;
+  workload: 'api' | 'worker';
   database: DatabaseInfrastructureConfig;
   redis?: RedisInfrastructureConfig;
   sqs: SqsInfrastructureConfig;
 }
+
+export interface BalanceConsumerInfrastructureConfig {
+  workload: 'balance-consumer';
+  database: DatabaseInfrastructureConfig;
+  sqs: BalanceConsumerSqsInfrastructureConfig;
+}
+
+export type RuntimeInfrastructureConfig =
+  InfrastructureConfig | BalanceConsumerInfrastructureConfig;
 
 function required(env: NodeJS.ProcessEnv, name: string): string {
   const value = env[name]?.trim();
@@ -534,6 +551,46 @@ function productionSqsQueueUrl(value: string, name: string, region: string): str
   return parsedUrl.toString();
 }
 
+function sqsQueueAccountAndName(value: string): readonly [accountId: string, queueName: string] {
+  const match = new URL(value).pathname.match(/^\/(\d{12})\/([A-Za-z0-9_-]{1,80})$/u);
+  if (!match) {
+    throw new Error('Production balance-consumer SQS queue identity is invalid');
+  }
+  return [match[1]!, match[2]!] as const;
+}
+
+const GENERIC_JOB_QUEUE_VARIABLES = new Set(['SQS_QUEUE_URL', 'SQS_DEAD_LETTER_QUEUE_URL']);
+
+const BALANCE_CONSUMER_SQS_VARIABLES = new Set([
+  'SQS_ENDPOINT',
+  'SQS_BALANCE_QUEUE_URL',
+  'SQS_BALANCE_DEAD_LETTER_QUEUE_URL',
+  'SQS_REQUEST_TIMEOUT_MS',
+  'SQS_SDK_MAX_ATTEMPTS',
+  'SQS_MAX_RECEIVE_COUNT',
+  'SQS_VISIBILITY_TIMEOUT_SECONDS',
+  'SQS_RETRY_BASE_DELAY_SECONDS',
+  'SQS_RETRY_MAX_DELAY_SECONDS',
+]);
+
+function assertBalanceConsumerSqsEnvironment(env: NodeJS.ProcessEnv): void {
+  const configuredNames = Object.keys(env).filter((name) => env[name] !== undefined);
+  if (configuredNames.some((name) => GENERIC_JOB_QUEUE_VARIABLES.has(name))) {
+    throw new Error('Balance-consumer runtime must not receive generic job queue configuration');
+  }
+  if (
+    configuredNames.some((name) => {
+      const canonicalName = name.toUpperCase();
+      return (
+        /(?:^|_)SQS(?:_|$)/u.test(canonicalName) &&
+        (!BALANCE_CONSUMER_SQS_VARIABLES.has(name) || name !== canonicalName)
+      );
+    })
+  ) {
+    throw new Error('Balance-consumer runtime must not receive an unreviewed SQS configuration');
+  }
+}
+
 function localSqsEndpoint(value: string): string {
   const parsedUrl = parseUrl(value, 'SQS_ENDPOINT');
   const localHostnames = new Set(['127.0.0.1', '[::1]', '::1', 'localhost', 'localstack']);
@@ -807,30 +864,10 @@ export function loadMigrationDatabaseConfig(
   };
 }
 
-/**
- * Reads infrastructure settings once at provider construction time. Required
- * values intentionally have no production fallback, preventing an accidental
- * connection to a developer service.
- */
-export function loadInfrastructureConfig(
-  env: NodeJS.ProcessEnv = process.env,
-): InfrastructureConfig {
-  const production = isProduction(env);
-  const workload = applicationWorkload(env);
-  const environment = applicationEnvironment(env);
-  if (production) {
-    assertNoProductionTlsVerificationOverride(env);
-    assertNoProductionAwsCredentialOverrides(env);
-    if (workload === 'worker' && hasRedisEnvironmentVariables(env)) {
-      throw new Error('Production worker must not receive Redis configuration or credentials');
-    }
-    if (workload === 'balance-consumer' && hasRedisEnvironmentVariables(env)) {
-      throw new Error(
-        'Production balance-consumer must not receive Redis configuration or credentials',
-      );
-    }
-    if (workload === 'api') assertNoUnknownProductionRedisVariables(env);
-  }
+function loadSqsClientInfrastructureConfig(
+  env: NodeJS.ProcessEnv,
+  production: boolean,
+): SqsClientInfrastructureConfig {
   const configuredRegion = env.AWS_REGION?.trim();
   if (production && !configuredRegion) {
     throw new Error('Production runtime requires AWS_REGION');
@@ -845,24 +882,61 @@ export function loadInfrastructureConfig(
   }
   const endpoint = rawEndpoint ? localSqsEndpoint(rawEndpoint) : undefined;
   const credentialRelativeUri = production ? productionEcsCredentialRelativeUri(env) : undefined;
+  return {
+    region,
+    ...(endpoint ? { endpoint } : {}),
+    ...(credentialRelativeUri ? { credentialRelativeUri } : {}),
+    requestTimeoutMs: positiveInteger(env, 'SQS_REQUEST_TIMEOUT_MS', 15_000, 60_000),
+    sdkMaxAttempts: positiveInteger(env, 'SQS_SDK_MAX_ATTEMPTS', 3, 10),
+    maxReceiveCount: positiveInteger(env, 'SQS_MAX_RECEIVE_COUNT', 3, 100),
+    visibilityTimeoutSeconds: positiveInteger(env, 'SQS_VISIBILITY_TIMEOUT_SECONDS', 30, 43_200),
+    retryBaseDelaySeconds: positiveInteger(env, 'SQS_RETRY_BASE_DELAY_SECONDS', 1, 900),
+    retryMaxDelaySeconds: positiveInteger(env, 'SQS_RETRY_MAX_DELAY_SECONDS', 60, 900),
+  };
+}
+
+/**
+ * Reads API/outbox-worker infrastructure settings once at provider
+ * construction time. The balance consumer uses its smaller dedicated loader.
+ */
+export function loadInfrastructureConfig(
+  env: NodeJS.ProcessEnv = process.env,
+): InfrastructureConfig {
+  const production = isProduction(env);
+  const workload = applicationWorkload(env);
+  if (workload === 'balance-consumer') {
+    throw new Error(
+      'Balance-consumer runtime requires the dedicated balance-consumer infrastructure loader',
+    );
+  }
+  const environment = applicationEnvironment(env);
+  if (production) {
+    assertNoProductionTlsVerificationOverride(env);
+    assertNoProductionAwsCredentialOverrides(env);
+    if (workload === 'worker' && hasRedisEnvironmentVariables(env)) {
+      throw new Error('Production worker must not receive Redis configuration or credentials');
+    }
+    if (workload === 'api') assertNoUnknownProductionRedisVariables(env);
+  }
+  const sqsClient = loadSqsClientInfrastructureConfig(env, production);
   const rawQueueUrl = required(env, 'SQS_QUEUE_URL');
   const rawDeadLetterQueueUrl = required(env, 'SQS_DEAD_LETTER_QUEUE_URL');
   const rawBalanceQueueUrl = required(env, 'SQS_BALANCE_QUEUE_URL');
   const rawBalanceDeadLetterQueueUrl = required(env, 'SQS_BALANCE_DEAD_LETTER_QUEUE_URL');
   const queueUrl = production
-    ? productionSqsQueueUrl(rawQueueUrl, 'SQS_QUEUE_URL', region)
+    ? productionSqsQueueUrl(rawQueueUrl, 'SQS_QUEUE_URL', sqsClient.region)
     : rawQueueUrl;
   const deadLetterQueueUrl = production
-    ? productionSqsQueueUrl(rawDeadLetterQueueUrl, 'SQS_DEAD_LETTER_QUEUE_URL', region)
+    ? productionSqsQueueUrl(rawDeadLetterQueueUrl, 'SQS_DEAD_LETTER_QUEUE_URL', sqsClient.region)
     : rawDeadLetterQueueUrl;
   const balanceQueueUrl = production
-    ? productionSqsQueueUrl(rawBalanceQueueUrl, 'SQS_BALANCE_QUEUE_URL', region)
+    ? productionSqsQueueUrl(rawBalanceQueueUrl, 'SQS_BALANCE_QUEUE_URL', sqsClient.region)
     : rawBalanceQueueUrl;
   const balanceDeadLetterQueueUrl = production
     ? productionSqsQueueUrl(
         rawBalanceDeadLetterQueueUrl,
         'SQS_BALANCE_DEAD_LETTER_QUEUE_URL',
-        region,
+        sqsClient.region,
       )
     : rawBalanceDeadLetterQueueUrl;
   if (
@@ -887,19 +961,80 @@ export function loadInfrastructureConfig(
         }
       : {}),
     sqs: {
-      region,
-      ...(endpoint ? { endpoint } : {}),
-      ...(credentialRelativeUri ? { credentialRelativeUri } : {}),
+      ...sqsClient,
       queueUrl,
       deadLetterQueueUrl,
       balanceQueueUrl,
       balanceDeadLetterQueueUrl,
-      requestTimeoutMs: positiveInteger(env, 'SQS_REQUEST_TIMEOUT_MS', 15_000, 60_000),
-      sdkMaxAttempts: positiveInteger(env, 'SQS_SDK_MAX_ATTEMPTS', 3, 10),
-      maxReceiveCount: positiveInteger(env, 'SQS_MAX_RECEIVE_COUNT', 3, 100),
-      visibilityTimeoutSeconds: positiveInteger(env, 'SQS_VISIBILITY_TIMEOUT_SECONDS', 30, 43_200),
-      retryBaseDelaySeconds: positiveInteger(env, 'SQS_RETRY_BASE_DELAY_SECONDS', 1, 900),
-      retryMaxDelaySeconds: positiveInteger(env, 'SQS_RETRY_MAX_DELAY_SECONDS', 60, 900),
+    },
+  };
+}
+
+/**
+ * Loads the future balance consumer without accepting generic job-queue
+ * coordinates or publication configuration.
+ */
+export function loadBalanceConsumerInfrastructureConfig(
+  env: NodeJS.ProcessEnv = process.env,
+): BalanceConsumerInfrastructureConfig {
+  const production = isProduction(env);
+  const workload = applicationWorkload(env);
+  if (workload !== 'balance-consumer') {
+    throw new Error(
+      'Balance-consumer infrastructure requires APPLICATION_WORKLOAD=balance-consumer',
+    );
+  }
+  const environment = applicationEnvironment(env);
+  assertBalanceConsumerSqsEnvironment(env);
+  if (production) {
+    assertNoProductionTlsVerificationOverride(env);
+    assertNoProductionAwsCredentialOverrides(env);
+    if (hasRedisEnvironmentVariables(env)) {
+      throw new Error(
+        'Production balance-consumer must not receive Redis configuration or credentials',
+      );
+    }
+  }
+
+  const sqsClient = loadSqsClientInfrastructureConfig(env, production);
+  const rawBalanceQueueUrl = required(env, 'SQS_BALANCE_QUEUE_URL');
+  const rawBalanceDeadLetterQueueUrl = required(env, 'SQS_BALANCE_DEAD_LETTER_QUEUE_URL');
+  const balanceQueueUrl = production
+    ? productionSqsQueueUrl(rawBalanceQueueUrl, 'SQS_BALANCE_QUEUE_URL', sqsClient.region)
+    : rawBalanceQueueUrl;
+  const balanceDeadLetterQueueUrl = production
+    ? productionSqsQueueUrl(
+        rawBalanceDeadLetterQueueUrl,
+        'SQS_BALANCE_DEAD_LETTER_QUEUE_URL',
+        sqsClient.region,
+      )
+    : rawBalanceDeadLetterQueueUrl;
+  if (balanceQueueUrl === balanceDeadLetterQueueUrl) {
+    throw new Error('Balance-consumer SQS source and dead-letter queue URLs must be different');
+  }
+
+  if (production) {
+    const [sourceAccount, sourceName] = sqsQueueAccountAndName(balanceQueueUrl);
+    const [deadLetterAccount, deadLetterName] = sqsQueueAccountAndName(balanceDeadLetterQueueUrl);
+    if (
+      !environment ||
+      sourceAccount !== deadLetterAccount ||
+      sourceName !== `crypto-lending-${environment}-balance-sync` ||
+      deadLetterName !== `crypto-lending-${environment}-balance-sync-dlq`
+    ) {
+      throw new Error(
+        'Production balance-consumer SQS pair must match the exact APP_ENV source and dead-letter identities in one account',
+      );
+    }
+  }
+
+  return {
+    workload,
+    database: runtimeDatabaseSettings(env, workload),
+    sqs: {
+      ...sqsClient,
+      balanceQueueUrl,
+      balanceDeadLetterQueueUrl,
     },
   };
 }

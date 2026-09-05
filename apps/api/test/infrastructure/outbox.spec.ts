@@ -45,6 +45,7 @@ import type {
 import { OutboxWorker } from '../../src/infrastructure/outbox/outbox-worker.service';
 import { TransactionalJobPublisher } from '../../src/infrastructure/outbox/transactional-job-publisher.service';
 import { SqsJobWorker } from '../../src/infrastructure/sqs/sqs-job.worker';
+import { PinnedSqsQueueReceiptAdapter } from '../../src/infrastructure/sqs/sqs-queue-receipt.port';
 import { SqsService } from '../../src/infrastructure/sqs/sqs.service';
 import {
   adversarialProviderError,
@@ -688,7 +689,10 @@ describe('transactional job outbox', () => {
       if (concurrentHandlers === 2) releaseHandlers();
       await bothHandlersStarted;
     });
-    const worker = new SqsJobWorker(sqs, config);
+    const worker = new SqsJobWorker(
+      new PinnedSqsQueueReceiptAdapter(sqs, config.sqs.queueUrl),
+      config.sqs,
+    );
 
     await expect(
       Promise.all([worker.processOne(handler), worker.processOne(handler)]),

@@ -10,10 +10,17 @@ import {
   type SQSClient,
 } from '@aws-sdk/client-sqs';
 
-import type { InfrastructureConfig } from '../config/infrastructure.config';
+import type {
+  BalanceConsumerInfrastructureConfig,
+  InfrastructureConfig,
+} from '../config/infrastructure.config';
 import { createJobEnvelope, type JobEnvelope } from '../outbox/job-envelope';
 import type { OutboxTransportMessage } from '../outbox/outbox-transport.port';
-import { SqsJobWorker } from './sqs-job.worker';
+import { createSqsJobWorkerPolicy, SqsJobWorker } from './sqs-job.worker';
+import {
+  PinnedSqsQueueReceiptAdapter,
+  type SqsQueueReceiptTransport,
+} from './sqs-queue-receipt.port';
 import { SqsService } from './sqs.service';
 
 const UUIDS = Object.freeze({
@@ -58,6 +65,49 @@ function config(overrides: Partial<InfrastructureConfig['sqs']> = {}): Infrastru
       ...overrides,
     },
   };
+}
+
+function balanceConsumerConfig(): BalanceConsumerInfrastructureConfig {
+  return {
+    workload: 'balance-consumer',
+    database: {
+      connectionString: 'postgresql://unused',
+      connectionTimeoutMs: 100,
+      idleTimeoutMs: 100,
+      lockTimeoutMs: 100,
+      maxLifetimeSeconds: 100,
+      poolMax: 1,
+      statementTimeoutMs: 100,
+      ssl: false,
+    },
+    sqs: {
+      region: 'us-east-1',
+      balanceQueueUrl:
+        'https://sqs.us-east-1.amazonaws.com/000000000000/crypto-lending-test-balance-sync',
+      balanceDeadLetterQueueUrl:
+        'https://sqs.us-east-1.amazonaws.com/000000000000/crypto-lending-test-balance-sync-dlq',
+      requestTimeoutMs: 1_000,
+      sdkMaxAttempts: 1,
+      maxReceiveCount: 3,
+      visibilityTimeoutSeconds: 30,
+      retryBaseDelaySeconds: 1,
+      retryMaxDelaySeconds: 60,
+    },
+  };
+}
+
+function receiptWorker(
+  sqs: SqsQueueReceiptTransport,
+  current: InfrastructureConfig,
+  queue: 'jobs' | 'balance' = 'balance',
+): SqsJobWorker {
+  const queueUrl = queue === 'balance' ? current.sqs.balanceQueueUrl : current.sqs.queueUrl;
+  return new SqsJobWorker(
+    new PinnedSqsQueueReceiptAdapter(sqs, queueUrl),
+    current.sqs,
+    undefined,
+    queue,
+  );
 }
 
 function yieldMessage(index = 0): OutboxTransportMessage {
@@ -127,6 +177,43 @@ function ledgerMessage(): OutboxTransportMessage {
 }
 
 describe('dedicated balance-sync physical SQS boundary', () => {
+  it('copies and freezes only the bounded worker policy fields', () => {
+    const current = config();
+    const policy = createSqsJobWorkerPolicy(current.sqs);
+
+    expect(policy).toEqual({
+      maxReceiveCount: current.sqs.maxReceiveCount,
+      visibilityTimeoutSeconds: current.sqs.visibilityTimeoutSeconds,
+      retryBaseDelaySeconds: current.sqs.retryBaseDelaySeconds,
+      retryMaxDelaySeconds: current.sqs.retryMaxDelaySeconds,
+    });
+    expect(Object.isFrozen(policy)).toBe(true);
+    expect(policy).not.toHaveProperty('queueUrl');
+    expect(policy).not.toHaveProperty('deadLetterQueueUrl');
+    expect(policy).not.toHaveProperty('balanceQueueUrl');
+    expect(policy).not.toHaveProperty('balanceDeadLetterQueueUrl');
+  });
+
+  it('constructs receipt transport from balance-only config while denying every broad method', async () => {
+    const current = balanceConsumerConfig();
+    const client = { send: jest.fn().mockResolvedValue({}), destroy: jest.fn() };
+    const service = new SqsService(client as unknown as SQSClient, current);
+    const denial = 'Balance-consumer SQS receipt transport cannot publish or inspect job queues';
+
+    await expect(service.sendJob('blockchain.balance-sync', {})).rejects.toThrow(denial);
+    await expect(service.publish(balanceMessage())).rejects.toThrow(denial);
+    await expect(service.publishBatch([balanceMessage()])).rejects.toThrow(denial);
+    await expect(service.healthCheck()).rejects.toThrow(denial);
+    expect(client.send).not.toHaveBeenCalled();
+
+    const receipt = new PinnedSqsQueueReceiptAdapter(service, current.sqs.balanceQueueUrl);
+    await expect(receipt.receive()).resolves.toEqual([]);
+    expect(client.send).toHaveBeenCalledTimes(1);
+    const command = client.send.mock.calls[0]?.[0] as ReceiveMessageCommand;
+    expect(command).toBeInstanceOf(ReceiveMessageCommand);
+    expect(command.input.QueueUrl).toBe(current.sqs.balanceQueueUrl);
+  });
+
   it('routes only the exact reviewed balance contract away from the jobs queue', async () => {
     const current = config();
     const sends: string[] = [];
@@ -293,7 +380,7 @@ describe('dedicated balance-sync physical SQS boundary', () => {
     } as unknown as SqsService;
     const handler = jest.fn().mockResolvedValue(undefined);
 
-    const result = await new SqsJobWorker(sqs, current, undefined, 'balance').processOne(handler);
+    const result = await receiptWorker(sqs, current).processOne(handler);
 
     expect(result).toMatchObject({ status: 'completed', jobId: envelope.id });
     expect(sqs.receive).toHaveBeenCalledWith(current.sqs.balanceQueueUrl);
@@ -329,10 +416,7 @@ describe('dedicated balance-sync physical SQS boundary', () => {
       delete: jest.fn().mockResolvedValue(undefined),
     } as unknown as SqsService;
     const handler = jest.fn().mockResolvedValue(undefined);
-    const processing = new SqsJobWorker(sqs, current, undefined, 'balance').processOne(
-      handler,
-      controller.signal,
-    );
+    const processing = receiptWorker(sqs, current).processOne(handler, controller.signal);
 
     expect(sqs.receive).toHaveBeenCalledWith(current.sqs.balanceQueueUrl, 1, 10, controller.signal);
     controller.abort();
@@ -367,10 +451,7 @@ describe('dedicated balance-sync physical SQS boundary', () => {
       delete: jest.fn(),
     } as unknown as SqsService;
     const handler = jest.fn().mockResolvedValue(undefined);
-    const processing = new SqsJobWorker(sqs, current, undefined, 'balance').processOne(
-      handler,
-      controller.signal,
-    );
+    const processing = receiptWorker(sqs, current).processOne(handler, controller.signal);
 
     controller.abort();
 
@@ -400,7 +481,7 @@ describe('dedicated balance-sync physical SQS boundary', () => {
     const handler = jest.fn(async () => controller.abort());
 
     await expect(
-      new SqsJobWorker(sqs, current, undefined, 'balance').processOne(handler, controller.signal),
+      receiptWorker(sqs, current).processOne(handler, controller.signal),
     ).resolves.toMatchObject({ status: 'completed', jobId: envelope.id });
 
     expect(handler).toHaveBeenCalledTimes(1);
@@ -442,11 +523,9 @@ describe('dedicated balance-sync physical SQS boundary', () => {
     };
     const handler = jest.fn().mockResolvedValue(undefined);
 
-    const result = await new SqsJobWorker(
+    const result = await receiptWorker(
       new SqsService(client as unknown as SQSClient, current),
       current,
-      undefined,
-      'balance',
     ).processOne(handler);
 
     expect(result).toMatchObject({ status: 'completed', jobId: envelope.id });
@@ -454,7 +533,10 @@ describe('dedicated balance-sync physical SQS boundary', () => {
     expect(commands.some((command) => command instanceof DeleteMessageCommand)).toBe(true);
   });
 
-  it('rejects an extra raw envelope key before handler invocation or deletion', async () => {
+  it.each([
+    ['an extra raw key', { authorization: 'must-not-pass' }],
+    ['an unreviewed raw version', { version: 2 }],
+  ])('rejects %s before handler invocation or deletion', async (_scenario, overrides) => {
     const current = config();
     const envelope = balanceMessage().envelope as JobEnvelope;
     const commands: unknown[] = [];
@@ -465,9 +547,9 @@ describe('dedicated balance-sync physical SQS boundary', () => {
           return Promise.resolve({
             Messages: [
               {
-                MessageId: 'message-extra-raw-key',
-                ReceiptHandle: 'receipt-extra-raw-key',
-                Body: JSON.stringify({ ...envelope, authorization: 'must-not-pass' }),
+                MessageId: 'message-invalid-raw-envelope',
+                ReceiptHandle: 'receipt-invalid-raw-envelope',
+                Body: JSON.stringify({ ...envelope, ...overrides }),
                 Attributes: { ApproximateReceiveCount: '1' },
               },
             ],
@@ -481,11 +563,9 @@ describe('dedicated balance-sync physical SQS boundary', () => {
     };
     const handler = jest.fn().mockResolvedValue(undefined);
 
-    const result = await new SqsJobWorker(
+    const result = await receiptWorker(
       new SqsService(client as unknown as SQSClient, current),
       current,
-      undefined,
-      'balance',
     ).processOne(handler);
 
     expect(result).toMatchObject({
@@ -536,12 +616,9 @@ describe('dedicated balance-sync physical SQS boundary', () => {
       const handler = jest.fn().mockResolvedValue(undefined);
 
       await expect(
-        new SqsJobWorker(
-          new SqsService(client as unknown as SQSClient, current),
-          current,
-          undefined,
-          'balance',
-        ).processOne(handler),
+        receiptWorker(new SqsService(client as unknown as SQSClient, current), current).processOne(
+          handler,
+        ),
       ).rejects.toThrow('SQS ApproximateReceiveCount must be a positive safe integer');
 
       expect(handler).not.toHaveBeenCalled();
@@ -569,7 +646,7 @@ describe('dedicated balance-sync physical SQS boundary', () => {
     } as unknown as SqsService;
     const handler = jest.fn().mockResolvedValue(undefined);
 
-    const result = await new SqsJobWorker(sqs, current, undefined, 'balance').processOne(handler);
+    const result = await receiptWorker(sqs, current).processOne(handler);
 
     expect(result).toMatchObject({ status: 'retry-scheduled', errorCode: 'JOB_ENVELOPE_INVALID' });
     expect(handler).not.toHaveBeenCalled();
@@ -601,7 +678,7 @@ describe('dedicated balance-sync physical SQS boundary', () => {
     } as unknown as SqsService;
     const handler = jest.fn().mockResolvedValue(undefined);
 
-    await expect(new SqsJobWorker(sqs, current).processOne(handler)).resolves.toMatchObject({
+    await expect(receiptWorker(sqs, current, 'jobs').processOne(handler)).resolves.toMatchObject({
       status: 'retry-scheduled',
       errorCode: 'JOB_ENVELOPE_INVALID',
     });

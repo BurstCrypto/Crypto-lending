@@ -16,12 +16,20 @@ import {
   StructuredLogger,
   type StructuredLogRecord,
 } from '../../src/infrastructure/logging';
+import type { InfrastructureConfig } from '../../src/infrastructure/config/infrastructure.config';
 import {
   parseJobEnvelope,
   type JobCorrelationContext,
 } from '../../src/infrastructure/outbox/job-envelope';
-import { InProcessObservability } from '../../src/infrastructure/observability';
+import {
+  InProcessObservability,
+  type ObservabilityPort,
+} from '../../src/infrastructure/observability';
 import { SqsJobWorker } from '../../src/infrastructure/sqs/sqs-job.worker';
+import {
+  PinnedSqsQueueReceiptAdapter,
+  type SqsQueueReceiptTransport,
+} from '../../src/infrastructure/sqs/sqs-queue-receipt.port';
 import { SqsService } from '../../src/infrastructure/sqs/sqs.service';
 import {
   adversarialProviderError,
@@ -31,6 +39,18 @@ import { testInfrastructureConfig } from './fixtures';
 
 function testUuid(index: number): string {
   return `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`;
+}
+
+function createJobWorker(
+  sqs: SqsQueueReceiptTransport,
+  config: InfrastructureConfig,
+  observability?: ObservabilityPort,
+): SqsJobWorker {
+  return new SqsJobWorker(
+    new PinnedSqsQueueReceiptAdapter(sqs, config.sqs.queueUrl),
+    config.sqs,
+    observability,
+  );
 }
 
 interface StoredMessage {
@@ -163,7 +183,7 @@ describe('SQS retry and dead-letter flow', () => {
     );
     const sqs = new SqsService(transport as unknown as SQSClient, config);
     const observability = new InProcessObservability();
-    const worker = new SqsJobWorker(sqs, config, observability);
+    const worker = createJobWorker(sqs, config, observability);
     const correlationId = testUuid(1);
     const correlation = {
       correlationId,
@@ -418,7 +438,7 @@ describe('SQS retry and dead-letter flow', () => {
     );
     const sqs = new SqsService({ send, destroy: jest.fn() } as unknown as SQSClient, config);
     const handler = jest.fn().mockResolvedValue(undefined);
-    const processing = new SqsJobWorker(sqs, config).processOne(handler);
+    const processing = createJobWorker(sqs, config).processOne(handler);
     const boundedRejection = expect(processing).rejects.toThrow('receive aborted');
 
     await jest.advanceTimersByTimeAsync(15_000);
@@ -546,7 +566,7 @@ describe('SQS retry and dead-letter flow', () => {
       throw new Error(`Unexpected command: ${String(command)}`);
     });
     const sqs = new SqsService({ send, destroy: jest.fn() } as unknown as SQSClient, config);
-    const worker = new SqsJobWorker(sqs, config);
+    const worker = createJobWorker(sqs, config);
     let releaseHandler = (): void => undefined;
     const handlerBlocked = new Promise<void>((resolve) => {
       releaseHandler = resolve;
@@ -598,7 +618,7 @@ describe('SQS retry and dead-letter flow', () => {
       changeVisibility: jest.fn().mockResolvedValue(undefined),
       delete: jest.fn().mockResolvedValue(undefined),
     } as unknown as SqsService;
-    const worker = new SqsJobWorker(sqs, config);
+    const worker = createJobWorker(sqs, config);
     const processing = worker.processOne(async () => {
       signalHandlerStarted();
       await handlerBlocked;
@@ -657,7 +677,7 @@ describe('SQS retry and dead-letter flow', () => {
       changeVisibility,
       delete: jest.fn().mockResolvedValue(undefined),
     } as unknown as SqsService;
-    const worker = new SqsJobWorker(sqs, config);
+    const worker = createJobWorker(sqs, config);
     const processing = worker.processOne(async () => {
       signalHandlerStarted();
       await handlerBlocked;
@@ -711,7 +731,7 @@ describe('SQS retry and dead-letter flow', () => {
     } as unknown as SqsService;
     const handler = jest.fn().mockResolvedValue(undefined);
 
-    await expect(new SqsJobWorker(sqs, config).processOne(handler)).resolves.toMatchObject({
+    await expect(createJobWorker(sqs, config).processOne(handler)).resolves.toMatchObject({
       status: 'retry-scheduled',
       jobId: 'job-hostile-heartbeat-error',
       errorCode: 'SQS_VISIBILITY_HEARTBEAT_FAILED',
@@ -754,7 +774,7 @@ describe('SQS retry and dead-letter flow', () => {
       changeVisibility,
       delete: jest.fn().mockResolvedValue(undefined),
     } as unknown as SqsService;
-    const processing = new SqsJobWorker(sqs, config).processOne(async () => {
+    const processing = createJobWorker(sqs, config).processOne(async () => {
       signalHandlerStarted();
       await handlerBlocked;
     });
@@ -813,7 +833,7 @@ describe('SQS retry and dead-letter flow', () => {
       changeVisibility,
       delete: jest.fn().mockResolvedValue(undefined),
     } as unknown as SqsService;
-    const processing = new SqsJobWorker(sqs, config).processOne(async () => {
+    const processing = createJobWorker(sqs, config).processOne(async () => {
       signalHandlerStarted();
       await handlerBlocked;
     });
@@ -861,7 +881,7 @@ describe('SQS retry and dead-letter flow', () => {
       changeVisibility: jest.fn().mockResolvedValue(undefined),
       delete: jest.fn().mockResolvedValue(undefined),
     } as unknown as SqsService;
-    const worker = new SqsJobWorker(sqs, config);
+    const worker = createJobWorker(sqs, config);
     const processing = worker.processOne(async () => {
       signalHandlerStarted();
       await handlerBlocked;
@@ -902,7 +922,7 @@ describe('SQS retry and dead-letter flow', () => {
       delete: jest.fn().mockResolvedValue(undefined),
     } as unknown as SqsService;
 
-    const result = await new SqsJobWorker(sqs, config).processOne(async () => {
+    const result = await createJobWorker(sqs, config).processOne(async () => {
       const blockedUntil = performance.now() + 1_100;
       while (performance.now() < blockedUntil) {
         // Deliberately block the event loop to exercise a missed heartbeat.
@@ -948,7 +968,7 @@ describe('SQS retry and dead-letter flow', () => {
           }),
       ),
     } as unknown as SqsService;
-    const processing = new SqsJobWorker(sqs, config).processOne(async () => undefined);
+    const processing = createJobWorker(sqs, config).processOne(async () => undefined);
 
     await jest.advanceTimersByTimeAsync(5_000);
 
@@ -984,7 +1004,7 @@ describe('SQS retry and dead-letter flow', () => {
       changeVisibility: jest.fn().mockResolvedValue(undefined),
       delete: jest.fn().mockResolvedValue(undefined),
     } as unknown as SqsService;
-    const processing = new SqsJobWorker(sqs, config).processOne(handler);
+    const processing = createJobWorker(sqs, config).processOne(handler);
 
     await jest.advanceTimersByTimeAsync(1);
     await expect(processing).resolves.toMatchObject({

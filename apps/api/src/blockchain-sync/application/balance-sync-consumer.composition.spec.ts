@@ -1,6 +1,6 @@
-import type { InfrastructureConfig } from '../../infrastructure/config/infrastructure.config';
+import type { BalanceConsumerInfrastructureConfig } from '../../infrastructure/config/infrastructure.config';
 import { applicationObservability } from '../../infrastructure/observability';
-import type { SqsService } from '../../infrastructure/sqs/sqs.service';
+import type { SqsQueueReceiptTransport } from '../../infrastructure/sqs/sqs-queue-receipt.port';
 import { createDeterministicBalanceSyncJobEnvelope } from '../domain/balance-sync';
 import type { BalanceJsonRpcTransport } from '../infrastructure/rpc/balance-json-rpc';
 import { EthereumMainnetBalanceIndexerAdapter } from '../infrastructure/rpc/ethereum-mainnet-balance-indexer.adapter';
@@ -22,8 +22,8 @@ import type {
 } from './ports/balance-sync.ports';
 
 function infrastructureConfig(
-  workload: InfrastructureConfig['workload'] = 'balance-consumer',
-): InfrastructureConfig {
+  workload: BalanceConsumerInfrastructureConfig['workload'] = 'balance-consumer',
+): BalanceConsumerInfrastructureConfig {
   return {
     workload,
     database: {
@@ -38,8 +38,6 @@ function infrastructureConfig(
     },
     sqs: {
       region: 'us-east-1',
-      queueUrl: 'https://sqs.us-east-1.amazonaws.com/000000000000/jobs',
-      deadLetterQueueUrl: 'https://sqs.us-east-1.amazonaws.com/000000000000/jobs-dlq',
       balanceQueueUrl: 'https://sqs.us-east-1.amazonaws.com/000000000000/balance-sync',
       balanceDeadLetterQueueUrl:
         'https://sqs.us-east-1.amazonaws.com/000000000000/balance-sync-dlq',
@@ -81,7 +79,7 @@ function createHarness(): Readonly<{
   const clock: BalanceSyncClockPort = { now: () => new Date('2026-09-04T12:00:00.000Z') };
   const metrics: BalanceSyncMetricsPort = { record: jest.fn(), alert: jest.fn() };
   const receive = jest.fn().mockResolvedValue([]);
-  const sqs = { receive } as unknown as SqsService;
+  const sqs = { receive } as unknown as SqsQueueReceiptTransport;
   const composition = createBalanceSyncConsumerComposition({
     sqs,
     infrastructureConfig: infrastructureConfig(),
@@ -108,36 +106,36 @@ function createHarness(): Readonly<{
 }
 
 describe('createBalanceSyncConsumerComposition', () => {
-  it.each(['api', 'worker'] as const)(
-    'rejects the %s workload before constructing the dormant consumer graph',
-    (workload) => {
-      const ethereumExchange = jest.fn();
-      const solanaExchange = jest.fn();
-      const receive = jest.fn();
+  it('rejects a forged non-consumer workload before constructing the dormant consumer graph', () => {
+    const ethereumExchange = jest.fn();
+    const solanaExchange = jest.fn();
+    const receive = jest.fn();
 
-      expect(() =>
-        createBalanceSyncConsumerComposition({
-          sqs: { receive } as unknown as SqsService,
-          infrastructureConfig: infrastructureConfig(workload),
-          observability: applicationObservability,
-          ethereumTransport: { exchange: ethereumExchange },
-          solanaTransport: { exchange: solanaExchange },
-          walletAddressResolver: { resolveActiveAddress: jest.fn() },
-          checkpoints: {
-            load: jest.fn(),
-            upsertCurrent: jest.fn(),
-            replaceProvisionalAfterReorg: jest.fn(),
-            preserveLastGoodAndMarkStale: jest.fn(),
-          },
-          clock: { now: () => new Date('2026-09-04T12:00:00.000Z') },
-          metrics: { record: jest.fn(), alert: jest.fn() },
-        }),
-      ).toThrow('Balance sync consumer composition requires the balance-consumer workload');
-      expect(receive).not.toHaveBeenCalled();
-      expect(ethereumExchange).not.toHaveBeenCalled();
-      expect(solanaExchange).not.toHaveBeenCalled();
-    },
-  );
+    expect(() =>
+      createBalanceSyncConsumerComposition({
+        sqs: { receive } as unknown as SqsQueueReceiptTransport,
+        infrastructureConfig: {
+          ...infrastructureConfig(),
+          workload: 'worker',
+        } as unknown as BalanceConsumerInfrastructureConfig,
+        observability: applicationObservability,
+        ethereumTransport: { exchange: ethereumExchange },
+        solanaTransport: { exchange: solanaExchange },
+        walletAddressResolver: { resolveActiveAddress: jest.fn() },
+        checkpoints: {
+          load: jest.fn(),
+          upsertCurrent: jest.fn(),
+          replaceProvisionalAfterReorg: jest.fn(),
+          preserveLastGoodAndMarkStale: jest.fn(),
+        },
+        clock: { now: () => new Date('2026-09-04T12:00:00.000Z') },
+        metrics: { record: jest.fn(), alert: jest.fn() },
+      }),
+    ).toThrow('Balance sync consumer composition requires the balance-consumer workload');
+    expect(receive).not.toHaveBeenCalled();
+    expect(ethereumExchange).not.toHaveBeenCalled();
+    expect(solanaExchange).not.toHaveBeenCalled();
+  });
 
   it('constructs an inert, transparent, fail-closed object graph', () => {
     const test = createHarness();

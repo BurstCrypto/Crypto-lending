@@ -1,8 +1,11 @@
-import type { InfrastructureConfig } from '../../infrastructure/config/infrastructure.config';
+import type { BalanceConsumerInfrastructureConfig } from '../../infrastructure/config/infrastructure.config';
 import type { ObservabilityPort } from '../../infrastructure/observability';
 import { BalanceSyncJobDispatcher } from '../../infrastructure/sqs/reviewed-job-dispatcher';
 import { SqsJobWorker } from '../../infrastructure/sqs/sqs-job.worker';
-import type { SqsService } from '../../infrastructure/sqs/sqs.service';
+import {
+  PinnedSqsQueueReceiptAdapter,
+  type SqsQueueReceiptTransport,
+} from '../../infrastructure/sqs/sqs-queue-receipt.port';
 import { EthereumMainnetBalanceIndexerAdapter } from '../infrastructure/rpc/ethereum-mainnet-balance-indexer.adapter';
 import type { BalanceJsonRpcTransport } from '../infrastructure/rpc/balance-json-rpc';
 import { SolanaMainnetBalanceIndexerAdapter } from '../infrastructure/rpc/solana-mainnet-balance-indexer.adapter';
@@ -23,8 +26,8 @@ import type {
 } from './ports/balance-sync.ports';
 
 export interface BalanceSyncConsumerCompositionDependencies {
-  readonly sqs: SqsService;
-  readonly infrastructureConfig: InfrastructureConfig;
+  readonly sqs: SqsQueueReceiptTransport;
+  readonly infrastructureConfig: BalanceConsumerInfrastructureConfig;
   readonly observability: ObservabilityPort;
   readonly ethereumTransport: BalanceJsonRpcTransport;
   readonly solanaTransport: BalanceJsonRpcTransport;
@@ -81,9 +84,13 @@ export function createBalanceSyncConsumerComposition(
   const dispatcher = new BalanceSyncJobDispatcher(async (job) => {
     await orchestrator.process(job);
   });
-  const queueWorker = new SqsJobWorker(
+  const balanceQueueReceipt = new PinnedSqsQueueReceiptAdapter(
     dependencies.sqs,
-    dependencies.infrastructureConfig,
+    dependencies.infrastructureConfig.sqs.balanceQueueUrl,
+  );
+  const queueWorker = new SqsJobWorker(
+    balanceQueueReceipt,
+    dependencies.infrastructureConfig.sqs,
     dependencies.observability,
     'balance',
   );

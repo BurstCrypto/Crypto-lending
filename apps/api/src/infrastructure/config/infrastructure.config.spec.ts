@@ -3,7 +3,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { rootCertificates } from 'node:tls';
 
-import { loadInfrastructureConfig, loadMigrationDatabaseConfig } from './infrastructure.config';
+import {
+  loadBalanceConsumerInfrastructureConfig,
+  loadInfrastructureConfig,
+  loadMigrationDatabaseConfig,
+} from './infrastructure.config';
 
 const temporaryDirectory = mkdtempSync(join(tmpdir(), 'kan-34-rds-ca-'));
 const validCaPath = join(temporaryDirectory, 'rds-ca.pem');
@@ -52,6 +56,24 @@ function baseEnvironment(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
   };
 }
 
+function balanceConsumerEnvironment(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+  return baseEnvironment({
+    NODE_ENV: 'production',
+    APPLICATION_WORKLOAD: 'balance-consumer',
+    DATABASE_RUNTIME_URL:
+      'postgresql://crypto_balance_consumer_login_a:local@127.0.0.1:5432/crypto_lending',
+    DATABASE_RUNTIME_SSL_MODE: 'verify-full',
+    REDIS_URL: undefined,
+    SQS_QUEUE_URL: undefined,
+    SQS_DEAD_LETTER_QUEUE_URL: undefined,
+    SQS_BALANCE_QUEUE_URL:
+      'https://sqs.us-east-1.amazonaws.com/000000000000/crypto-lending-test-balance-sync',
+    SQS_BALANCE_DEAD_LETTER_QUEUE_URL:
+      'https://sqs.us-east-1.amazonaws.com/000000000000/crypto-lending-test-balance-sync-dlq',
+    ...overrides,
+  });
+}
+
 describe('loadInfrastructureConfig', () => {
   it('retains explicit local connection URLs', () => {
     const config = loadInfrastructureConfig(
@@ -77,6 +99,12 @@ describe('loadInfrastructureConfig', () => {
         baseEnvironment({ NODE_ENV: 'production', APPLICATION_WORKLOAD: 'api-worker' }),
       ),
     ).toThrow('APPLICATION_WORKLOAD must be exactly api, worker, or balance-consumer');
+  });
+
+  it('requires the dedicated loader for the balance-consumer workload', () => {
+    expect(() => loadInfrastructureConfig(balanceConsumerEnvironment())).toThrow(
+      'Balance-consumer runtime requires the dedicated balance-consumer infrastructure loader',
+    );
   });
 
   it('requires a canonical APP_ENV identity scope in production', () => {
@@ -114,7 +142,7 @@ describe('loadInfrastructureConfig', () => {
 
     expect(config.workload).toBe('worker');
     expect(config.database.sessionRole).toBe('crypto_worker_runtime');
-    expect(config.redis).toBeUndefined();
+    expect('redis' in config).toBe(false);
   });
 
   it('rejects every Redis setting injected into a production worker', () => {
@@ -148,32 +176,24 @@ describe('loadInfrastructureConfig', () => {
   });
 
   it('uses the dedicated production balance-consumer database identity without Redis', () => {
-    const config = loadInfrastructureConfig(
-      baseEnvironment({
-        NODE_ENV: 'production',
-        APPLICATION_WORKLOAD: 'balance-consumer',
+    const config = loadBalanceConsumerInfrastructureConfig(
+      balanceConsumerEnvironment({
         DATABASE_RUNTIME_URL:
           'postgresql://crypto_balance_consumer_login_blue:local@127.0.0.1:5432/crypto_lending',
-        DATABASE_RUNTIME_SSL_MODE: 'verify-full',
-        REDIS_URL: undefined,
       }),
     );
 
     expect(config.workload).toBe('balance-consumer');
     expect(config.database.sessionRole).toBe('crypto_balance_consumer_runtime');
-    expect(config.redis).toBeUndefined();
+    expect('redis' in config).toBe(false);
   });
 
   it('rejects a cross-scoped database login for the production balance consumer', () => {
     expect(() =>
-      loadInfrastructureConfig(
-        baseEnvironment({
-          NODE_ENV: 'production',
-          APPLICATION_WORKLOAD: 'balance-consumer',
+      loadBalanceConsumerInfrastructureConfig(
+        balanceConsumerEnvironment({
           DATABASE_RUNTIME_URL:
             'postgresql://crypto_worker_login_a:local@127.0.0.1:5432/crypto_lending',
-          DATABASE_RUNTIME_SSL_MODE: 'verify-full',
-          REDIS_URL: undefined,
         }),
       ),
     ).toThrow(
@@ -183,32 +203,93 @@ describe('loadInfrastructureConfig', () => {
 
   it('rejects every Redis setting injected into a production balance consumer', () => {
     expect(() =>
-      loadInfrastructureConfig(
-        baseEnvironment({
-          NODE_ENV: 'production',
-          APPLICATION_WORKLOAD: 'balance-consumer',
-          DATABASE_RUNTIME_URL:
-            'postgresql://crypto_balance_consumer_login_a:local@127.0.0.1:5432/crypto_lending',
-          DATABASE_RUNTIME_SSL_MODE: 'verify-full',
-        }),
+      loadBalanceConsumerInfrastructureConfig(
+        balanceConsumerEnvironment({ REDIS_URL: 'rediss://must-not-be-injected' }),
       ),
     ).toThrow('Production balance-consumer must not receive Redis configuration or credentials');
   });
 
   it('rejects unknown Redis aliases injected into a production balance consumer', () => {
     expect(() =>
-      loadInfrastructureConfig(
-        baseEnvironment({
-          NODE_ENV: 'production',
-          APPLICATION_WORKLOAD: 'balance-consumer',
-          DATABASE_RUNTIME_URL:
-            'postgresql://crypto_balance_consumer_login_a:local@127.0.0.1:5432/crypto_lending',
-          DATABASE_RUNTIME_SSL_MODE: 'verify-full',
-          REDIS_URL: undefined,
+      loadBalanceConsumerInfrastructureConfig(
+        balanceConsumerEnvironment({
           REDIS_OPERATOR_TOKEN: 'must-not-be-injected',
         }),
       ),
     ).toThrow('Production balance-consumer must not receive Redis configuration or credentials');
+  });
+
+  it('exposes only the exact balance pair and bounded common SQS fields to the consumer', () => {
+    const config = loadBalanceConsumerInfrastructureConfig(balanceConsumerEnvironment());
+
+    expect(Object.keys(config.sqs).sort()).toEqual([
+      'balanceDeadLetterQueueUrl',
+      'balanceQueueUrl',
+      'credentialRelativeUri',
+      'maxReceiveCount',
+      'region',
+      'requestTimeoutMs',
+      'retryBaseDelaySeconds',
+      'retryMaxDelaySeconds',
+      'sdkMaxAttempts',
+      'visibilityTimeoutSeconds',
+    ]);
+    expect(config.sqs).not.toHaveProperty('queueUrl');
+    expect(config.sqs).not.toHaveProperty('deadLetterQueueUrl');
+  });
+
+  it.each(['SQS_QUEUE_URL', 'SQS_DEAD_LETTER_QUEUE_URL'])(
+    'rejects generic job queue input %s for the balance consumer',
+    (name) => {
+      expect(() =>
+        loadBalanceConsumerInfrastructureConfig(
+          balanceConsumerEnvironment({ [name]: 'must-not-be-accepted' }),
+        ),
+      ).toThrow('Balance-consumer runtime must not receive generic job queue configuration');
+    },
+  );
+
+  it.each(['SQS_PUBLISH_QUEUE_URL', 'sqs_balance_queue_url', 'AWS_CUSTOM_SQS_TOKEN'])(
+    'rejects unreviewed or noncanonical SQS alias %s for the balance consumer',
+    (name) => {
+      expect(() =>
+        loadBalanceConsumerInfrastructureConfig(
+          balanceConsumerEnvironment({ [name]: 'must-not-be-accepted' }),
+        ),
+      ).toThrow('Balance-consumer runtime must not receive an unreviewed SQS configuration');
+    },
+  );
+
+  it('binds the production balance pair to the exact APP_ENV names and one account', () => {
+    for (const environment of [
+      balanceConsumerEnvironment({
+        SQS_BALANCE_QUEUE_URL:
+          'https://sqs.us-east-1.amazonaws.com/000000000000/crypto-lending-other-balance-sync',
+      }),
+      balanceConsumerEnvironment({
+        SQS_BALANCE_DEAD_LETTER_QUEUE_URL:
+          'https://sqs.us-east-1.amazonaws.com/111111111111/crypto-lending-test-balance-sync-dlq',
+      }),
+      balanceConsumerEnvironment({
+        SQS_BALANCE_DEAD_LETTER_QUEUE_URL:
+          'https://sqs.us-east-1.amazonaws.com/000000000000/crypto-lending-test-balance-sync',
+      }),
+    ]) {
+      expect(() => loadBalanceConsumerInfrastructureConfig(environment)).toThrow(
+        /exact APP_ENV source and dead-letter identities|must be different/u,
+      );
+    }
+  });
+
+  it('rejects a balance queue outside the configured AWS region', () => {
+    expect(() =>
+      loadBalanceConsumerInfrastructureConfig(
+        balanceConsumerEnvironment({
+          SQS_BALANCE_QUEUE_URL:
+            'https://sqs.us-west-2.amazonaws.com/000000000000/crypto-lending-test-balance-sync',
+        }),
+      ),
+    ).toThrow('SQS_BALANCE_QUEUE_URL must be a canonical HTTPS SQS queue URL for AWS_REGION');
   });
 
   it('rejects unknown Redis aliases injected into a production API', () => {

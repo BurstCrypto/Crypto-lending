@@ -1,7 +1,7 @@
 import { bindExecutableWorkload } from '../../infrastructure/config/application-workload';
 import {
-  loadInfrastructureConfig,
-  type InfrastructureConfig,
+  loadBalanceConsumerInfrastructureConfig,
+  type BalanceConsumerInfrastructureConfig,
 } from '../../infrastructure/config/infrastructure.config';
 import {
   loadBalanceConsumerConfig,
@@ -34,7 +34,7 @@ export interface BalanceConsumerCliEvaluation {
 
 interface BalanceConsumerLaunchContext {
   readonly balance: EnabledBalanceConsumerConfig;
-  readonly infrastructure: InfrastructureConfig;
+  readonly infrastructure: BalanceConsumerInfrastructureConfig;
 }
 
 interface InternalEvaluation {
@@ -192,11 +192,11 @@ function evaluateInternal(
     blockers.push('BALANCE_CONFIGURATION_INVALID');
   }
 
-  let infrastructure: InfrastructureConfig | undefined;
+  let infrastructure: BalanceConsumerInfrastructureConfig | undefined;
   if (!forbiddenEnvironment && environment.NODE_ENV === 'production') {
     try {
       bindExecutableWorkload(environment, 'balance-consumer');
-      infrastructure = loadInfrastructureConfig(environment);
+      infrastructure = loadBalanceConsumerInfrastructureConfig(environment);
     } catch {
       blockers.push('INFRASTRUCTURE_CONFIGURATION_INVALID');
     }

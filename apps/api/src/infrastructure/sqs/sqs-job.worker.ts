@@ -1,10 +1,8 @@
 import { performance } from 'node:perf_hooks';
 import { randomUUID } from 'node:crypto';
 
-import { Inject, Injectable, Optional } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 
-import { INFRASTRUCTURE_CONFIG } from '../config/infrastructure-config.module';
-import type { InfrastructureConfig } from '../config/infrastructure.config';
 import {
   createSafeLegacyCorrelationId,
   createSafeLogReference,
@@ -15,12 +13,10 @@ import {
 } from '../logging';
 import {
   applicationObservability,
-  OBSERVABILITY_PORT,
   type ObservabilityJobErrorClass,
   type ObservabilityPort,
 } from '../observability';
-import { SqsService } from './sqs.service';
-import { SQS_WORKER_QUEUE } from './sqs.tokens';
+import type { PinnedSqsQueueReceiptPort } from './sqs-queue-receipt.port';
 import type {
   JobEnvelope,
   JobProcessingErrorCode,
@@ -30,6 +26,22 @@ import type {
 
 export type JobHandler<Payload = unknown> = (job: JobEnvelope<Payload>) => Promise<void>;
 export type SqsWorkerQueue = 'jobs' | 'balance';
+
+export interface SqsJobWorkerPolicy {
+  readonly maxReceiveCount: number;
+  readonly visibilityTimeoutSeconds: number;
+  readonly retryBaseDelaySeconds: number;
+  readonly retryMaxDelaySeconds: number;
+}
+
+export function createSqsJobWorkerPolicy(policy: SqsJobWorkerPolicy): SqsJobWorkerPolicy {
+  return Object.freeze({
+    maxReceiveCount: policy.maxReceiveCount,
+    visibilityTimeoutSeconds: policy.visibilityTimeoutSeconds,
+    retryBaseDelaySeconds: policy.retryBaseDelaySeconds,
+    retryMaxDelaySeconds: policy.retryMaxDelaySeconds,
+  });
+}
 
 const MAX_RECEIPT_LIFETIME_MS = 12 * 60 * 60 * 1_000;
 const RECEIPT_LIFETIME_SAFETY_MS = 5_000;
@@ -130,41 +142,38 @@ function visibilityRequestTimeoutMs(configuredTimeoutSeconds: number): number {
 }
 
 async function changeVisibilityWithDeadline(
-  sqs: SqsService,
+  sqs: PinnedSqsQueueReceiptPort,
   message: ReceivedQueueMessage,
   visibilityTimeoutSeconds: number,
   requestTimeoutMs: number,
-  queueUrl: string,
 ): Promise<void> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), requestTimeoutMs);
   try {
-    await sqs.changeVisibility(message, visibilityTimeoutSeconds, queueUrl, controller.signal);
+    await sqs.changeVisibility(message, visibilityTimeoutSeconds, controller.signal);
   } finally {
     clearTimeout(timeout);
   }
 }
 
 async function deleteWithDeadline(
-  sqs: SqsService,
+  sqs: PinnedSqsQueueReceiptPort,
   message: ReceivedQueueMessage,
   requestTimeoutMs: number,
-  queueUrl: string,
 ): Promise<void> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), requestTimeoutMs);
   try {
-    await sqs.delete(message, queueUrl, controller.signal);
+    await sqs.delete(message, controller.signal);
   } finally {
     clearTimeout(timeout);
   }
 }
 
 function startVisibilityHeartbeat(
-  sqs: SqsService,
+  sqs: PinnedSqsQueueReceiptPort,
   message: ReceivedQueueMessage,
   configuredTimeoutSeconds: number,
-  queueUrl: string,
 ): VisibilityHeartbeat {
   const requestTimeoutMs = visibilityRequestTimeoutMs(configuredTimeoutSeconds);
   let failure: { status: 'failed'; error: unknown } | undefined;
@@ -204,13 +213,7 @@ function startVisibilityHeartbeat(
           );
         }
         const renewalSeconds = Math.min(configuredTimeoutSeconds, remainingSeconds);
-        await changeVisibilityWithDeadline(
-          sqs,
-          message,
-          renewalSeconds,
-          requestTimeoutMs,
-          queueUrl,
-        );
+        await changeVisibilityWithDeadline(sqs, message, renewalSeconds, requestTimeoutMs);
         currentVisibilityStartedAtMs = renewalStartedAtMs;
         currentVisibilityTimeoutSeconds = renewalSeconds;
         if (!stopped) {
@@ -292,25 +295,18 @@ function startVisibilityHeartbeat(
 export class SqsJobWorker {
   private inFlightJobs = 0;
   private readonly queue: SqsWorkerQueue;
-  private readonly queueUrl: string;
+  private readonly policy: Readonly<SqsJobWorkerPolicy>;
 
   constructor(
-    private readonly sqs: SqsService,
-    @Inject(INFRASTRUCTURE_CONFIG)
-    private readonly config: InfrastructureConfig,
-    @Optional()
-    @Inject(OBSERVABILITY_PORT)
+    private readonly sqs: PinnedSqsQueueReceiptPort,
+    policy: SqsJobWorkerPolicy,
     private readonly observability: ObservabilityPort = applicationObservability,
-    @Optional()
-    @Inject(SQS_WORKER_QUEUE)
     queue: SqsWorkerQueue = 'jobs',
   ) {
     if (queue !== 'jobs' && queue !== 'balance')
       throw new Error('Invalid SQS worker queue binding');
     this.queue = queue;
-    this.queueUrl = queue === 'balance' ? config.sqs.balanceQueueUrl : config.sqs.queueUrl;
-    if (typeof this.queueUrl !== 'string' || this.queueUrl.length === 0)
-      throw new Error('Selected SQS worker queue is not configured');
+    this.policy = createSqsJobWorkerPolicy(policy);
   }
 
   /**
@@ -331,8 +327,8 @@ export class SqsJobWorker {
     try {
       messages =
         abortSignal === undefined
-          ? await this.sqs.receive(this.queueUrl)
-          : await this.sqs.receive(this.queueUrl, 1, 10, abortSignal);
+          ? await this.sqs.receive()
+          : await this.sqs.receive(1, 10, abortSignal);
     } catch (error) {
       if (abortSignal?.aborted) {
         return { status: 'idle' };
@@ -412,8 +408,7 @@ export class SqsJobWorker {
             const heartbeat = startVisibilityHeartbeat(
               this.sqs,
               message,
-              this.config.sqs.visibilityTimeoutSeconds,
-              this.queueUrl,
+              this.policy.visibilityTimeoutSeconds,
             );
             const heartbeatReady = await heartbeat.ready();
             if (heartbeatReady.status === 'failed') {
@@ -445,8 +440,7 @@ export class SqsJobWorker {
               await deleteWithDeadline(
                 this.sqs,
                 message,
-                visibilityRequestTimeoutMs(this.config.sqs.visibilityTimeoutSeconds),
-                this.queueUrl,
+                visibilityRequestTimeoutMs(this.policy.visibilityTimeoutSeconds),
               );
             } catch {
               throw new JobProcessingFailure('SQS_DELETE_FAILED');
@@ -508,12 +502,12 @@ export class SqsJobWorker {
       };
     }
 
-    const exhausted = message.receiveCount >= this.config.sqs.maxReceiveCount;
+    const exhausted = message.receiveCount >= this.policy.maxReceiveCount;
     const retryDelaySeconds = exhausted
       ? 0
       : Math.min(
-          this.config.sqs.retryBaseDelaySeconds * 2 ** (message.receiveCount - 1),
-          this.config.sqs.retryMaxDelaySeconds,
+          this.policy.retryBaseDelaySeconds * 2 ** (message.receiveCount - 1),
+          this.policy.retryMaxDelaySeconds,
         );
 
     try {
@@ -521,8 +515,7 @@ export class SqsJobWorker {
         this.sqs,
         message,
         retryDelaySeconds,
-        visibilityRequestTimeoutMs(this.config.sqs.visibilityTimeoutSeconds),
-        this.queueUrl,
+        visibilityRequestTimeoutMs(this.policy.visibilityTimeoutSeconds),
       );
     } catch {
       recordDiagnostic(() =>

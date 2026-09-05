@@ -15,7 +15,10 @@ import {
 } from '@aws-sdk/client-sqs';
 
 import { INFRASTRUCTURE_CONFIG } from '../config/infrastructure-config.module';
-import type { InfrastructureConfig } from '../config/infrastructure.config';
+import type {
+  RuntimeInfrastructureConfig,
+  SqsInfrastructureConfig,
+} from '../config/infrastructure.config';
 import { createJobEnvelope, parseJobEnvelope, type JobEnvelope } from '../outbox/job-envelope';
 import { MAX_JOB_MESSAGE_BYTES, serializeJobMessage } from '../outbox/job-message-policy';
 import { assertReviewedOutboxJob } from '../outbox/reviewed-job-contract-policy';
@@ -140,7 +143,7 @@ export class SqsService implements OnApplicationShutdown, OutboxTransport {
   constructor(
     @Inject(SQS_CLIENT) private readonly client: SQSClient,
     @Inject(INFRASTRUCTURE_CONFIG)
-    private readonly config: InfrastructureConfig,
+    private readonly config: RuntimeInfrastructureConfig,
   ) {}
 
   async sendJob<Payload>(
@@ -148,6 +151,7 @@ export class SqsService implements OnApplicationShutdown, OutboxTransport {
     payload: Payload,
     options: SendJobOptions = {},
   ): Promise<JobEnvelope<Payload>> {
+    this.publisherSqsConfig();
     const envelope = createJobEnvelope(kind, payload, {
       id: options.id ?? randomUUID(),
       ...(options.version === undefined ? {} : { version: options.version }),
@@ -177,6 +181,7 @@ export class SqsService implements OnApplicationShutdown, OutboxTransport {
     message: OutboxTransportMessage,
     abortSignal?: AbortSignal,
   ): Promise<OutboxTransportReceipt> {
+    this.publisherSqsConfig();
     const queueUrl = this.queueUrlForMessage(message);
 
     const request = requestAbortScope(abortSignal, this.config.sqs.requestTimeoutMs);
@@ -202,6 +207,7 @@ export class SqsService implements OnApplicationShutdown, OutboxTransport {
     messages: readonly OutboxTransportMessage[],
     abortSignal?: AbortSignal,
   ): Promise<readonly OutboxTransportBatchResult[]> {
+    this.publisherSqsConfig();
     if (messages.length > this.maxBatchSize) {
       throw new Error(`SQS publishBatch accepts at most ${this.maxBatchSize} messages`);
     }
@@ -291,7 +297,7 @@ export class SqsService implements OnApplicationShutdown, OutboxTransport {
   }
 
   async receive(
-    queueUrl = this.config.sqs.queueUrl,
+    queueUrl = this.defaultJobQueueUrl(),
     maxMessages = 1,
     waitTimeSeconds = 10,
     abortSignal?: AbortSignal,
@@ -344,7 +350,7 @@ export class SqsService implements OnApplicationShutdown, OutboxTransport {
 
   async delete(
     message: ReceivedQueueMessage,
-    queueUrl = this.config.sqs.queueUrl,
+    queueUrl = this.defaultJobQueueUrl(),
     abortSignal?: AbortSignal,
   ): Promise<void> {
     const request = requestAbortScope(abortSignal, this.config.sqs.requestTimeoutMs);
@@ -364,7 +370,7 @@ export class SqsService implements OnApplicationShutdown, OutboxTransport {
   async changeVisibility(
     message: ReceivedQueueMessage,
     visibilityTimeoutSeconds: number,
-    queueUrl = this.config.sqs.queueUrl,
+    queueUrl = this.defaultJobQueueUrl(),
     abortSignal?: AbortSignal,
   ): Promise<void> {
     if (
@@ -395,6 +401,7 @@ export class SqsService implements OnApplicationShutdown, OutboxTransport {
 
   /** Verifies access to both physically isolated source/DLQ pairs and their redrive policies. */
   async healthCheck(abortSignal?: AbortSignal): Promise<void> {
+    const sqs = this.publisherSqsConfig();
     const request = requestAbortScope(abortSignal, this.config.sqs.requestTimeoutMs);
     let source;
     let deadLetter;
@@ -404,28 +411,28 @@ export class SqsService implements OnApplicationShutdown, OutboxTransport {
       [source, deadLetter, balanceSource, balanceDeadLetter] = await Promise.all([
         this.client.send(
           new GetQueueAttributesCommand({
-            QueueUrl: this.config.sqs.queueUrl,
+            QueueUrl: sqs.queueUrl,
             AttributeNames: ['QueueArn', 'RedrivePolicy'],
           }),
           { abortSignal: request.signal },
         ),
         this.client.send(
           new GetQueueAttributesCommand({
-            QueueUrl: this.config.sqs.deadLetterQueueUrl,
+            QueueUrl: sqs.deadLetterQueueUrl,
             AttributeNames: ['QueueArn'],
           }),
           { abortSignal: request.signal },
         ),
         this.client.send(
           new GetQueueAttributesCommand({
-            QueueUrl: this.config.sqs.balanceQueueUrl,
+            QueueUrl: sqs.balanceQueueUrl,
             AttributeNames: ['QueueArn', 'RedrivePolicy'],
           }),
           { abortSignal: request.signal },
         ),
         this.client.send(
           new GetQueueAttributesCommand({
-            QueueUrl: this.config.sqs.balanceDeadLetterQueueUrl,
+            QueueUrl: sqs.balanceDeadLetterQueueUrl,
             AttributeNames: ['QueueArn'],
           }),
           { abortSignal: request.signal },
@@ -454,26 +461,35 @@ export class SqsService implements OnApplicationShutdown, OutboxTransport {
     envelope: JobEnvelope,
     messageAttributes: Readonly<Record<string, string>>,
   ): string {
-    if (envelope.kind !== 'blockchain.balance-sync') return this.config.sqs.queueUrl;
+    const sqs = this.publisherSqsConfig();
+    if (envelope.kind !== 'blockchain.balance-sync') return sqs.queueUrl;
     assertReviewedOutboxJob({ destination: 'jobs', envelope, messageAttributes });
-    if (
-      typeof this.config.sqs.balanceQueueUrl !== 'string' ||
-      this.config.sqs.balanceQueueUrl.length === 0
-    )
+    if (typeof sqs.balanceQueueUrl !== 'string' || sqs.balanceQueueUrl.length === 0)
       throw new Error('Dedicated balance-sync queue is not configured');
-    return this.config.sqs.balanceQueueUrl;
+    return sqs.balanceQueueUrl;
   }
 
   private queueUrlForMessage(message: OutboxTransportMessage): string {
+    const sqs = this.publisherSqsConfig();
     assertReviewedOutboxJob(message);
     if (message.envelope.kind !== 'blockchain.balance-sync' || message.envelope.version !== 1)
-      return this.config.sqs.queueUrl;
-    if (
-      typeof this.config.sqs.balanceQueueUrl !== 'string' ||
-      this.config.sqs.balanceQueueUrl.length === 0
-    )
+      return sqs.queueUrl;
+    if (typeof sqs.balanceQueueUrl !== 'string' || sqs.balanceQueueUrl.length === 0)
       throw new Error('Dedicated balance-sync queue is not configured');
-    return this.config.sqs.balanceQueueUrl;
+    return sqs.balanceQueueUrl;
+  }
+
+  private publisherSqsConfig(): SqsInfrastructureConfig {
+    if (this.config.workload === 'balance-consumer') {
+      throw new Error(
+        'Balance-consumer SQS receipt transport cannot publish or inspect job queues',
+      );
+    }
+    return this.config.sqs;
+  }
+
+  private defaultJobQueueUrl(): string {
+    return this.publisherSqsConfig().queueUrl;
   }
 
   private assertRedrivePair(

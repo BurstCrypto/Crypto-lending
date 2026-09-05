@@ -21,6 +21,7 @@ import { TransactionalJobPublisher } from '../../src/infrastructure/outbox/trans
 import { createRedisClient } from '../../src/infrastructure/redis/redis.module';
 import { RedisService } from '../../src/infrastructure/redis/redis.service';
 import { SqsJobWorker } from '../../src/infrastructure/sqs/sqs-job.worker';
+import { PinnedSqsQueueReceiptAdapter } from '../../src/infrastructure/sqs/sqs-queue-receipt.port';
 import { SqsService } from '../../src/infrastructure/sqs/sqs.service';
 import { parseWalletAddress } from '../../src/wallets/domain/wallet-identity';
 import {
@@ -320,7 +321,10 @@ describeWithInfrastructure('live docker-compose infrastructure', () => {
         ),
       ).resolves.toMatchObject({ rows: [{ persisted: 0 }] });
 
-      const worker = new SqsJobWorker(isolatedSqs, jobConfig);
+      const worker = new SqsJobWorker(
+        new PinnedSqsQueueReceiptAdapter(isolatedSqs, jobConfig.sqs.queueUrl),
+        jobConfig.sqs,
+      );
       const sample = await isolatedSqs.sendJob(
         'sample.live-always-fails',
         { acceptanceTest: true },

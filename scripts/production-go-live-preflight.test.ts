@@ -138,6 +138,30 @@ const BALANCE_CONSUMER_ARTIFACTS = Object.freeze({
     ),
     'utf8',
   ),
+  infrastructureConfigSource: readFileSync(
+    resolve(__dirname, '../apps/api/src/infrastructure/config/infrastructure.config.ts'),
+    'utf8',
+  ),
+  pinnedQueueReceiptSource: readFileSync(
+    resolve(__dirname, '../apps/api/src/infrastructure/sqs/sqs-queue-receipt.port.ts'),
+    'utf8',
+  ),
+  sqsJobWorkerSource: readFileSync(
+    resolve(__dirname, '../apps/api/src/infrastructure/sqs/sqs-job.worker.ts'),
+    'utf8',
+  ),
+  sqsServiceSource: readFileSync(
+    resolve(__dirname, '../apps/api/src/infrastructure/sqs/sqs.service.ts'),
+    'utf8',
+  ),
+  sqsModuleSource: readFileSync(
+    resolve(__dirname, '../apps/api/src/infrastructure/sqs/sqs.module.ts'),
+    'utf8',
+  ),
+  sqsTokensSource: readFileSync(
+    resolve(__dirname, '../apps/api/src/infrastructure/sqs/sqs.tokens.ts'),
+    'utf8',
+  ),
   apiPackageSource: readFileSync(resolve(__dirname, '../apps/api/package.json'), 'utf8'),
   rootPackageSource: readFileSync(resolve(__dirname, '../package.json'), 'utf8'),
   applicationTemplateSource: APPLICATION_BASELINE,
@@ -726,6 +750,30 @@ test('balance-consumer inspection rejects retained-marker semantic overrides and
     },
     {
       ...BALANCE_CONSUMER_ARTIFACTS,
+      infrastructureConfigSource: `${BALANCE_CONSUMER_ARTIFACTS.infrastructureConfigSource}\nexport const genericBalanceQueueBypass = { queueUrl: 'jobs' };\n`,
+    },
+    {
+      ...BALANCE_CONSUMER_ARTIFACTS,
+      pinnedQueueReceiptSource: `${BALANCE_CONSUMER_ARTIFACTS.pinnedQueueReceiptSource}\nPinnedSqsQueueReceiptAdapter.prototype.publish = async () => ({});\n`,
+    },
+    {
+      ...BALANCE_CONSUMER_ARTIFACTS,
+      sqsJobWorkerSource: `${BALANCE_CONSUMER_ARTIFACTS.sqsJobWorkerSource}\nSqsJobWorker.prototype.queueUrl = 'jobs';\n`,
+    },
+    {
+      ...BALANCE_CONSUMER_ARTIFACTS,
+      sqsServiceSource: `${BALANCE_CONSUMER_ARTIFACTS.sqsServiceSource}\nSqsService.prototype.publisherSqsConfig = function () { return this.config.sqs; };\n`,
+    },
+    {
+      ...BALANCE_CONSUMER_ARTIFACTS,
+      sqsModuleSource: `${BALANCE_CONSUMER_ARTIFACTS.sqsModuleSource}\nconst unreviewedBalanceWorker = new SqsJobWorker(receipt, config.sqs, undefined, 'balance');\n`,
+    },
+    {
+      ...BALANCE_CONSUMER_ARTIFACTS,
+      sqsTokensSource: `${BALANCE_CONSUMER_ARTIFACTS.sqsTokensSource}\nexport const COLLIDING_QUEUE_TOKEN = SQS_PINNED_QUEUE_RECEIPT;\n`,
+    },
+    {
+      ...BALANCE_CONSUMER_ARTIFACTS,
       cliSource: `${BALANCE_CONSUMER_ARTIFACTS.cliSource}\nvoid import('./balance-sync-consumer.runtime').then(({ runBalanceSyncConsumer }) => runBalanceSyncConsumer());\n`,
     },
     {
@@ -928,6 +976,54 @@ test('balance-consumer inspection fails closed for drift in every reviewed artif
       'compositionSource',
       'const jobDisposition = new FailClosedBalanceSyncJobPort();',
       'const jobDisposition = dependencies.jobDisposition;',
+    ],
+    [
+      'dedicated infrastructure loader',
+      'cliModeSource',
+      'infrastructure = loadBalanceConsumerInfrastructureConfig(environment);',
+      'infrastructure = loadInfrastructureConfig(environment);',
+    ],
+    [
+      'balance queue composition pin',
+      'compositionSource',
+      'dependencies.infrastructureConfig.sqs.balanceQueueUrl,',
+      'dependencies.infrastructureConfig.sqs.queueUrl,',
+    ],
+    [
+      'balance-only infrastructure configuration',
+      'infrastructureConfigSource',
+      "const rawBalanceQueueUrl = required(env, 'SQS_BALANCE_QUEUE_URL');",
+      "const rawBalanceQueueUrl = required(env, 'SQS_QUEUE_URL');",
+    ],
+    [
+      'private pinned receipt queue',
+      'pinnedQueueReceiptSource',
+      'readonly #queueUrl: string;',
+      'readonly queueUrl: string;',
+    ],
+    [
+      'worker narrow receipt port',
+      'sqsJobWorkerSource',
+      "import type { PinnedSqsQueueReceiptPort } from './sqs-queue-receipt.port';",
+      "import type { SqsQueueReceiptTransport } from './sqs-queue-receipt.port';",
+    ],
+    [
+      'raw balance service publication denial',
+      'sqsServiceSource',
+      "if (this.config.workload === 'balance-consumer') {",
+      "if (this.config.workload === 'balance-consumer-disabled') {",
+    ],
+    [
+      'generic worker jobs queue pin',
+      'sqsModuleSource',
+      "{ provide: SQS_WORKER_QUEUE, useValue: 'jobs' },",
+      "{ provide: SQS_WORKER_QUEUE, useValue: 'balance' },",
+    ],
+    [
+      'distinct pinned receipt token',
+      'sqsTokensSource',
+      "export const SQS_PINNED_QUEUE_RECEIPT = Symbol('SQS_PINNED_QUEUE_RECEIPT');",
+      'export const SQS_PINNED_QUEUE_RECEIPT = SQS_CLIENT;',
     ],
     [
       'API entrypoint',

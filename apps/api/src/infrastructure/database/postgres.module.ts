@@ -5,7 +5,7 @@ import {
   INFRASTRUCTURE_CONFIG,
   InfrastructureConfigModule,
 } from '../config/infrastructure-config.module';
-import type { InfrastructureConfig } from '../config/infrastructure.config';
+import type { RuntimeInfrastructureConfig } from '../config/infrastructure.config';
 import { MigrationRunner } from './migration-runner.service';
 import { DATABASE_MIGRATION_LIST } from './migrations';
 import { postgresStartupOptions } from './postgres-startup-options';
@@ -25,7 +25,7 @@ const PRODUCTION_RUNTIME_DATABASE_ROLES: Readonly<RuntimeDatabaseCapabilityRoles
 });
 
 function expectedRuntimeDatabaseRole(
-  config: InfrastructureConfig,
+  config: RuntimeInfrastructureConfig,
   capabilityRoles: Readonly<RuntimeDatabaseCapabilityRoles>,
 ): string {
   if (config.workload === 'api') return capabilityRoles.api;
@@ -34,7 +34,7 @@ function expectedRuntimeDatabaseRole(
 }
 
 export function createPostgresPool(
-  config: InfrastructureConfig,
+  config: RuntimeInfrastructureConfig,
   capabilityRoles: Readonly<RuntimeDatabaseCapabilityRoles> = PRODUCTION_RUNTIME_DATABASE_ROLES,
 ): Pool {
   const expectedSessionRole = expectedRuntimeDatabaseRole(config, capabilityRoles);

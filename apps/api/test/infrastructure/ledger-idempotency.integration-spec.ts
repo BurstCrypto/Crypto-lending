@@ -37,6 +37,7 @@ import { JobOutboxRepository } from '../../src/infrastructure/outbox/job-outbox.
 import { OutboxDispatcher } from '../../src/infrastructure/outbox/outbox-dispatcher.service';
 import { TransactionalJobPublisher } from '../../src/infrastructure/outbox/transactional-job-publisher.service';
 import { SqsJobWorker } from '../../src/infrastructure/sqs/sqs-job.worker';
+import { PinnedSqsQueueReceiptAdapter } from '../../src/infrastructure/sqs/sqs-queue-receipt.port';
 import { SqsService } from '../../src/infrastructure/sqs/sqs.service';
 import { LedgerService } from '../../src/ledger/application/ledger.service';
 import { createLedgerCapability } from '../../src/ledger/application/ledger-capability-resolver.port';
@@ -810,7 +811,10 @@ describeWithPostgres('KAN-43 ledger command idempotency PostgreSQL integration',
 
       let handlerContext: unknown;
       let handledJob: JobEnvelope | undefined;
-      const worker = new SqsJobWorker(sqs, jobConfig);
+      const worker = new SqsJobWorker(
+        new PinnedSqsQueueReceiptAdapter(sqs, jobConfig.sqs.queueUrl),
+        jobConfig.sqs,
+      );
       await expect(
         worker.processOne(async (job) => {
           handlerContext = loggingContext.current();

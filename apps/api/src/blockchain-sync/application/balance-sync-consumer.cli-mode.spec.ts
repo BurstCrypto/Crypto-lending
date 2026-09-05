@@ -51,13 +51,10 @@ function enabledEnvironment(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEn
     NODE_EXTRA_CA_CERTS: validCaPath,
     AWS_REGION: 'us-east-1',
     AWS_CONTAINER_CREDENTIALS_RELATIVE_URI: '/v2/credentials/balance-consumer',
-    SQS_QUEUE_URL: 'https://sqs.us-east-1.amazonaws.com/000000000000/crypto-lending-jobs',
-    SQS_DEAD_LETTER_QUEUE_URL:
-      'https://sqs.us-east-1.amazonaws.com/000000000000/crypto-lending-jobs-dlq',
     SQS_BALANCE_QUEUE_URL:
-      'https://sqs.us-east-1.amazonaws.com/000000000000/crypto-lending-balance-sync',
+      'https://sqs.us-east-1.amazonaws.com/000000000000/crypto-lending-test-balance-sync',
     SQS_BALANCE_DEAD_LETTER_QUEUE_URL:
-      'https://sqs.us-east-1.amazonaws.com/000000000000/crypto-lending-balance-sync-dlq',
+      'https://sqs.us-east-1.amazonaws.com/000000000000/crypto-lending-test-balance-sync-dlq',
     ...overrides,
   };
 }
@@ -161,4 +158,20 @@ describe('balance sync consumer CLI mode', () => {
     );
     expect(output).not.toContain(secret);
   });
+
+  it.each(['SQS_QUEUE_URL', 'SQS_DEAD_LETTER_QUEUE_URL', 'SQS_PUBLISH_TOKEN'])(
+    'refuses the generic or unknown SQS input %s without reflecting it',
+    (name) => {
+      const value = 'sqs-configuration-canary';
+      const result = evaluateBalanceSyncConsumerCliMode([], enabledEnvironment({ [name]: value }));
+      const output = JSON.stringify(result);
+
+      expect(result.blockers).toEqual([
+        'SOURCE_ACTIVATION_DISABLED',
+        'INFRASTRUCTURE_CONFIGURATION_INVALID',
+      ]);
+      expect(output).not.toContain(name);
+      expect(output).not.toContain(value);
+    },
+  );
 });

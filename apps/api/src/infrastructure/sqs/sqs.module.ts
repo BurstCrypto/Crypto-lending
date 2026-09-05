@@ -6,19 +6,26 @@ import {
   INFRASTRUCTURE_CONFIG,
   InfrastructureConfigModule,
 } from '../config/infrastructure-config.module';
-import type { InfrastructureConfig } from '../config/infrastructure.config';
+import type {
+  InfrastructureConfig,
+  RuntimeInfrastructureConfig,
+} from '../config/infrastructure.config';
 import { SQS_HEALTH } from '../health/sqs-health.port';
 import { OUTBOX_TRANSPORT } from '../outbox/outbox-transport.port';
 import { SqsJobWorker } from './sqs-job.worker';
+import {
+  PinnedSqsQueueReceiptAdapter,
+  type PinnedSqsQueueReceiptPort,
+} from './sqs-queue-receipt.port';
 import { SqsService } from './sqs.service';
-import { SQS_CLIENT, SQS_WORKER_QUEUE } from './sqs.tokens';
+import { SQS_CLIENT, SQS_PINNED_QUEUE_RECEIPT, SQS_WORKER_QUEUE } from './sqs.tokens';
 
 const LOCAL_SQS_CREDENTIALS = {
   accessKeyId: 'local-emulator',
   secretAccessKey: 'local-emulator',
 };
 
-export function createSqsClient(config: InfrastructureConfig): SQSClient {
+export function createSqsClient(config: RuntimeInfrastructureConfig): SQSClient {
   const credentials = config.sqs.endpoint
     ? LOCAL_SQS_CREDENTIALS
     : config.sqs.credentialRelativeUri
@@ -70,7 +77,21 @@ export function createSqsClient(config: InfrastructureConfig): SQSClient {
       provide: SQS_HEALTH,
       useExisting: SqsService,
     },
-    SqsJobWorker,
+    {
+      provide: SQS_PINNED_QUEUE_RECEIPT,
+      inject: [SqsService, INFRASTRUCTURE_CONFIG],
+      useFactory: (sqs: SqsService, config: InfrastructureConfig): PinnedSqsQueueReceiptPort =>
+        new PinnedSqsQueueReceiptAdapter(sqs, config.sqs.queueUrl),
+    },
+    {
+      provide: SqsJobWorker,
+      inject: [SQS_PINNED_QUEUE_RECEIPT, INFRASTRUCTURE_CONFIG, SQS_WORKER_QUEUE],
+      useFactory: (
+        receipt: PinnedSqsQueueReceiptPort,
+        config: InfrastructureConfig,
+        queue: 'jobs',
+      ): SqsJobWorker => new SqsJobWorker(receipt, config.sqs, undefined, queue),
+    },
   ],
   exports: [OUTBOX_TRANSPORT, SQS_HEALTH, SqsJobWorker],
 })

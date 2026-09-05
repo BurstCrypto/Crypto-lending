@@ -159,6 +159,12 @@ export interface BalanceConsumerArtifactSources {
   readonly cliModeSource: string;
   readonly runtimeSource: string;
   readonly compositionSource: string;
+  readonly infrastructureConfigSource: string;
+  readonly pinnedQueueReceiptSource: string;
+  readonly sqsJobWorkerSource: string;
+  readonly sqsServiceSource: string;
+  readonly sqsModuleSource: string;
+  readonly sqsTokensSource: string;
   readonly apiPackageSource: string;
   readonly rootPackageSource: string;
   readonly applicationTemplateSource: string;
@@ -484,6 +490,12 @@ const BALANCE_CONSUMER_ARTIFACT_KEYS = Object.freeze([
   'cliModeSource',
   'runtimeSource',
   'compositionSource',
+  'infrastructureConfigSource',
+  'pinnedQueueReceiptSource',
+  'sqsJobWorkerSource',
+  'sqsServiceSource',
+  'sqsModuleSource',
+  'sqsTokensSource',
   'apiPackageSource',
   'rootPackageSource',
   'applicationTemplateSource',
@@ -501,9 +513,15 @@ const BALANCE_CONSUMER_ARTIFACT_KEYS = Object.freeze([
 const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
   activationSource: '75ae4b590e2ad9d70542ea9c38809f4ed24d61ec354838e7318afdccc07dd091',
   cliSource: '7fec5d0cc345b82ed4fb5f26e1fa7099f0cb38c246224ada7a9fe51a65d4c455',
-  cliModeSource: '77668ae46779954fcd3dbaae0c52048c323fcb4c0533381af290dcd99b29ea7a',
+  cliModeSource: '2b03494cb126e80f4f7af1176cb08cf13aef2d14d4bf3cb371faa6f06a7294a8',
   runtimeSource: '311d5ed733abc1bc6f3428bcba2acd2f0858dab31f8eaf3259fc99560e6e1d7d',
-  compositionSource: '818b08e7161c7a9cc2b57185d91a1799ded81f58b79300a7566a67291c4347eb',
+  compositionSource: 'fa66f972b73135effd2095757fb7b290fc401d2e3fd6c7ef69a40d57fcb13c27',
+  infrastructureConfigSource: 'e2edbaf0c998eb0e41ccc0b3b159270223c43634533a3abd8eb1ca3d8c29c783',
+  pinnedQueueReceiptSource: '76543f1e4b4c446eb98b85ad52ea934d7e84f8f7fedcd82f6e516a7eb45a8c56',
+  sqsJobWorkerSource: 'da2de20e4313bd9e1057b330d61f571ecbcee679e1a7f3ab9d67ca32a70880da',
+  sqsServiceSource: '2abb5d6592858be750263200fdd8b17a3ad15e0ee3ad5ca8fe14e36b5ac46d13',
+  sqsModuleSource: 'dc958100bd372500a9428c28cc6219a4cb00db61314a63478368d0b0cf95221b',
+  sqsTokensSource: '9727c85465fd2bec762ea6c0445b698a1011234396778a156f7f161cac29ac14',
   apiPackageSource: '28b9f69d1cf3cf1d16ee76ba6a4afd4881df9afb205c010e6512b0c3633c0c9c',
   rootPackageSource: 'ef84bc2e7171073fa581d26c2a9d88c934cdf2af9d7897c10cadf1de159fbf7c',
   applicationTemplateSource: '9ffa126c63a1758db315eae58462f3d1a47cf3542136db39a65749c47dd08fb6',
@@ -1721,6 +1739,12 @@ function hasDormantBalanceConsumerSourceContract(sources: BalanceConsumerArtifac
   );
   const cliRuntimeLoad = cliLines.indexOf('const runtime = await runtimeLoader();');
   if (
+    exactExecutableLineCount(sources.cliModeSource, 'loadBalanceConsumerInfrastructureConfig,') !==
+      1 ||
+    exactExecutableLineCount(
+      sources.cliModeSource,
+      'infrastructure = loadBalanceConsumerInfrastructureConfig(environment);',
+    ) !== 1 ||
     cliGate < 0 ||
     cliBlocker !== cliGate + 1 ||
     cliRefusal <= cliBlocker ||
@@ -1754,9 +1778,200 @@ function hasDormantBalanceConsumerSourceContract(sources: BalanceConsumerArtifac
       'const jobDisposition = new FailClosedBalanceSyncJobPort();',
     ) === 1 &&
     exactExecutableLineCount(sources.compositionSource, "'balance',") === 1 &&
+    exactExecutableLineCount(
+      sources.compositionSource,
+      'const balanceQueueReceipt = new PinnedSqsQueueReceiptAdapter(',
+    ) === 1 &&
+    exactExecutableLineCount(
+      sources.compositionSource,
+      'dependencies.infrastructureConfig.sqs.balanceQueueUrl,',
+    ) === 1 &&
+    exactExecutableLineCount(sources.compositionSource, 'balanceQueueReceipt,') === 1 &&
+    !/(?:^|\.)sqs\.queueUrl\b/u.test(sources.compositionSource) &&
     !/\bNestFactory\b|@Module\s*\(|createApplicationContext\s*\(|\.listen\s*\(/u.test(
       sources.compositionSource,
     )
+  );
+}
+
+function hasPinnedBalanceConsumerQueueBoundaryContract(
+  sources: BalanceConsumerArtifactSources,
+): boolean {
+  const infrastructure = sources.infrastructureConfigSource.replace(/\r\n/gu, '\n');
+  const balanceSqsInterfaceStart = infrastructure.indexOf(
+    'export interface BalanceConsumerSqsInfrastructureConfig',
+  );
+  const infrastructureInterfaceStart = infrastructure.indexOf(
+    'export interface InfrastructureConfig',
+    balanceSqsInterfaceStart,
+  );
+  const genericLoaderStart = infrastructure.indexOf('export function loadInfrastructureConfig(');
+  const balanceLoaderStart = infrastructure.indexOf(
+    'export function loadBalanceConsumerInfrastructureConfig(',
+    genericLoaderStart,
+  );
+  if (
+    balanceSqsInterfaceStart < 0 ||
+    infrastructureInterfaceStart <= balanceSqsInterfaceStart ||
+    genericLoaderStart < 0 ||
+    balanceLoaderStart <= genericLoaderStart
+  ) {
+    return false;
+  }
+  const balanceSqsInterface = infrastructure.slice(
+    balanceSqsInterfaceStart,
+    infrastructureInterfaceStart,
+  );
+  const genericLoader = infrastructure.slice(genericLoaderStart, balanceLoaderStart);
+  const balanceLoader = infrastructure.slice(balanceLoaderStart);
+  if (
+    exactExecutableLineCount(balanceSqsInterface, 'balanceQueueUrl: string;') !== 1 ||
+    exactExecutableLineCount(balanceSqsInterface, 'balanceDeadLetterQueueUrl: string;') !== 1 ||
+    /^\s*(?:queueUrl|deadLetterQueueUrl):/mu.test(balanceSqsInterface) ||
+    exactExecutableLineCount(genericLoader, "if (workload === 'balance-consumer') {") !== 1 ||
+    exactExecutableLineCount(balanceLoader, 'assertBalanceConsumerSqsEnvironment(env);') !== 1 ||
+    exactExecutableLineCount(
+      balanceLoader,
+      "const rawBalanceQueueUrl = required(env, 'SQS_BALANCE_QUEUE_URL');",
+    ) !== 1 ||
+    exactExecutableLineCount(
+      balanceLoader,
+      "const rawBalanceDeadLetterQueueUrl = required(env, 'SQS_BALANCE_DEAD_LETTER_QUEUE_URL');",
+    ) !== 1 ||
+    /['"]SQS_(?:QUEUE_URL|DEAD_LETTER_QUEUE_URL)['"]/u.test(balanceLoader) ||
+    exactExecutableLineCount(
+      balanceLoader,
+      'if (balanceQueueUrl === balanceDeadLetterQueueUrl) {',
+    ) !== 1 ||
+    exactExecutableLineCount(balanceLoader, 'sourceAccount !== deadLetterAccount ||') !== 1 ||
+    exactExecutableLineCount(
+      balanceLoader,
+      'sourceName !== `crypto-lending-${environment}-balance-sync` ||',
+    ) !== 1 ||
+    exactExecutableLineCount(
+      balanceLoader,
+      'deadLetterName !== `crypto-lending-${environment}-balance-sync-dlq`',
+    ) !== 1
+  ) {
+    return false;
+  }
+
+  const receipt = sources.pinnedQueueReceiptSource.replace(/\r\n/gu, '\n');
+  const pinnedInterfaceStart = receipt.indexOf('export interface PinnedSqsQueueReceiptPort');
+  const pinnedAdapterStart = receipt.indexOf(
+    'export class PinnedSqsQueueReceiptAdapter',
+    pinnedInterfaceStart,
+  );
+  if (pinnedInterfaceStart < 0 || pinnedAdapterStart <= pinnedInterfaceStart) return false;
+  const pinnedInterface = receipt.slice(pinnedInterfaceStart, pinnedAdapterStart);
+  const pinnedAdapter = receipt.slice(pinnedAdapterStart);
+  if (
+    /\b(?:queueUrl|sendJob|publish|publishBatch|healthCheck)\s*[(:]/u.test(pinnedInterface) ||
+    exactExecutableLineCount(pinnedAdapter, 'readonly #queueUrl: string;') !== 1 ||
+    exactExecutableLineCount(pinnedAdapter, 'this.#queueUrl = queueUrl;') !== 1 ||
+    exactExecutableLineCount(pinnedAdapter, 'Object.freeze(this);') !== 1 ||
+    exactExecutableLineCount(
+      pinnedAdapter,
+      'return this.#transport.delete(message, this.#queueUrl, abortSignal);',
+    ) !== 1 ||
+    exactExecutableLineCount(pinnedAdapter, 'this.#queueUrl,') !== 2 ||
+    /\b(?:sendJob|publish|publishBatch|healthCheck)\s*\(/u.test(pinnedAdapter) ||
+    /\bget\s+queueUrl\b/u.test(pinnedAdapter)
+  ) {
+    return false;
+  }
+
+  const worker = sources.sqsJobWorkerSource.replace(/\r\n/gu, '\n');
+  const policyStart = worker.indexOf('export interface SqsJobWorkerPolicy');
+  const policyFactoryStart = worker.indexOf(
+    'export function createSqsJobWorkerPolicy(',
+    policyStart,
+  );
+  const policyFactoryEnd = worker.indexOf('const MAX_RECEIPT_LIFETIME_MS', policyFactoryStart);
+  if (
+    policyStart < 0 ||
+    policyFactoryStart <= policyStart ||
+    policyFactoryEnd <= policyFactoryStart
+  ) {
+    return false;
+  }
+  const policyInterface = trimmedExecutableLines(worker.slice(policyStart, policyFactoryStart));
+  const policyFactory = trimmedExecutableLines(worker.slice(policyFactoryStart, policyFactoryEnd));
+  const exactPolicyFields = [
+    'readonly maxReceiveCount: number;',
+    'readonly visibilityTimeoutSeconds: number;',
+    'readonly retryBaseDelaySeconds: number;',
+    'readonly retryMaxDelaySeconds: number;',
+  ] as const;
+  const exactPolicyCopies = [
+    'maxReceiveCount: policy.maxReceiveCount,',
+    'visibilityTimeoutSeconds: policy.visibilityTimeoutSeconds,',
+    'retryBaseDelaySeconds: policy.retryBaseDelaySeconds,',
+    'retryMaxDelaySeconds: policy.retryMaxDelaySeconds,',
+  ] as const;
+  if (
+    policyInterface.filter((line) => line.startsWith('readonly ')).length !== 4 ||
+    !exactPolicyFields.every((field) => policyInterface.includes(field)) ||
+    !exactPolicyCopies.every((copy) => policyFactory.includes(copy)) ||
+    exactExecutableLineCount(
+      worker,
+      "import type { PinnedSqsQueueReceiptPort } from './sqs-queue-receipt.port';",
+    ) !== 1 ||
+    exactExecutableLineCount(worker, 'private readonly sqs: PinnedSqsQueueReceiptPort,') !== 1 ||
+    exactExecutableLineCount(worker, "export type SqsWorkerQueue = 'jobs' | 'balance';") !== 1 ||
+    exactExecutableLineCount(worker, "if (queue !== 'jobs' && queue !== 'balance')") !== 1 ||
+    /\b(?:queueUrl|deadLetterQueueUrl|balanceQueueUrl|sendJob|publish|publishBatch|healthCheck)\b/u.test(
+      worker,
+    )
+  ) {
+    return false;
+  }
+
+  const service = sources.sqsServiceSource;
+  if (
+    exactExecutableLineCount(service, 'this.publisherSqsConfig();') !== 3 ||
+    exactExecutableLineCount(service, 'const sqs = this.publisherSqsConfig();') !== 3 ||
+    exactExecutableLineCount(service, 'return this.publisherSqsConfig().queueUrl;') !== 1 ||
+    exactExecutableLineCount(service, "if (this.config.workload === 'balance-consumer') {") !== 1 ||
+    exactExecutableLineCount(
+      service,
+      "'Balance-consumer SQS receipt transport cannot publish or inspect job queues',",
+    ) !== 1
+  ) {
+    return false;
+  }
+
+  const moduleSource = sources.sqsModuleSource;
+  if (
+    exactExecutableLineCount(moduleSource, "{ provide: SQS_WORKER_QUEUE, useValue: 'jobs' },") !==
+      1 ||
+    exactExecutableLineCount(
+      moduleSource,
+      'new PinnedSqsQueueReceiptAdapter(sqs, config.sqs.queueUrl),',
+    ) !== 1 ||
+    exactExecutableLineCount(
+      moduleSource,
+      'inject: [SQS_PINNED_QUEUE_RECEIPT, INFRASTRUCTURE_CONFIG, SQS_WORKER_QUEUE],',
+    ) !== 1 ||
+    exactExecutableLineCount(
+      moduleSource,
+      '): SqsJobWorker => new SqsJobWorker(receipt, config.sqs, undefined, queue),',
+    ) !== 1 ||
+    exactExecutableLineCount(
+      moduleSource,
+      'exports: [OUTBOX_TRANSPORT, SQS_HEALTH, SqsJobWorker],',
+    ) !== 1
+  ) {
+    return false;
+  }
+
+  return (
+    trimmedExecutableLines(sources.sqsTokensSource).join('\n') ===
+    [
+      "export const SQS_CLIENT = Symbol('SQS_CLIENT');",
+      "export const SQS_PINNED_QUEUE_RECEIPT = Symbol('SQS_PINNED_QUEUE_RECEIPT');",
+      "export const SQS_WORKER_QUEUE = Symbol('SQS_WORKER_QUEUE');",
+    ].join('\n')
   );
 }
 
@@ -2092,6 +2307,7 @@ export function inspectBalanceConsumerDeploymentArtifacts(
     const contractValid =
       hasExactReviewedBalanceConsumerArtifactBytes(sources) &&
       hasDormantBalanceConsumerSourceContract(sources) &&
+      hasPinnedBalanceConsumerQueueBoundaryContract(sources) &&
       hasDormantBalanceConsumerPackagingContract(sources) &&
       hasNoBalanceConsumerTaskDeployment(sources) &&
       hasNoBalanceConsumerIamCapability(sources) &&
@@ -2722,6 +2938,30 @@ export function loadRepositoryProductionPreflightInput(
           repositoryRoot,
           'apps/api/src/blockchain-sync/application/balance-sync-consumer.composition.ts',
         ),
+        'utf8',
+      ),
+      infrastructureConfigSource: readFileSync(
+        resolve(repositoryRoot, 'apps/api/src/infrastructure/config/infrastructure.config.ts'),
+        'utf8',
+      ),
+      pinnedQueueReceiptSource: readFileSync(
+        resolve(repositoryRoot, 'apps/api/src/infrastructure/sqs/sqs-queue-receipt.port.ts'),
+        'utf8',
+      ),
+      sqsJobWorkerSource: readFileSync(
+        resolve(repositoryRoot, 'apps/api/src/infrastructure/sqs/sqs-job.worker.ts'),
+        'utf8',
+      ),
+      sqsServiceSource: readFileSync(
+        resolve(repositoryRoot, 'apps/api/src/infrastructure/sqs/sqs.service.ts'),
+        'utf8',
+      ),
+      sqsModuleSource: readFileSync(
+        resolve(repositoryRoot, 'apps/api/src/infrastructure/sqs/sqs.module.ts'),
+        'utf8',
+      ),
+      sqsTokensSource: readFileSync(
+        resolve(repositoryRoot, 'apps/api/src/infrastructure/sqs/sqs.tokens.ts'),
         'utf8',
       ),
       apiPackageSource: readFileSync(resolve(repositoryRoot, 'apps/api/package.json'), 'utf8'),
