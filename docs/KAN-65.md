@@ -95,6 +95,25 @@ snapshot, method-capture, brand, freeze, and reviewer constraints. This is
 local static assurance only; it does not activate the dormant runtime, contact
 a chain or provider, grant egress, deploy resources, or satisfy live evidence.
 
+The offline integrity closure now includes the exact supported-asset registry,
+wallet address parser, and Solana token-account parser used by those adapters.
+The adapters select exactly USDC, USDT, and PYUSD on Ethereum mainnet and the
+same three assets on Solana mainnet. Base, Arbitrum, and testnet definitions may
+remain in the broader reviewed catalogs as future metadata; they are not
+activated by this launch composition and cannot pass the two-network router.
+EVM addresses must be strict and canonicalized to lowercase. Solana addresses
+must decode to exactly 32 nonzero bytes and round-trip through canonical base58.
+
+Solana token accounts accept only the exact legacy or Token-2022 program ID.
+Legacy accounts are exactly 165 bytes; Token-2022 accounts are capped at 4,096
+bytes and require the account-type discriminator when extended. The parser
+copies input bytes, validates COption fields and the expected owner, and returns
+only a frozen parsed result. Adapter-side base64 and account-count bounds remain
+in force, with PYUSD fixed to Token-2022 and USDC/USDT fixed to the legacy
+program. Each account-read batch is bracketed by the same selected block header;
+null or any position, block-hash, parent-position, or parent-hash change fails
+as provider unavailable. No local test of these rules is live-chain evidence.
+
 The envelope holds the service at literal `DesiredCount: 0` while source
 activation stays false, `BALANCE_CONSUMER_MODE=disabled`, and the runtime stays
 uncomposed. Its loopback-only security group cannot reach a provider or RPC.

@@ -177,6 +177,18 @@ const BALANCE_CONSUMER_ARTIFACTS = Object.freeze({
     ),
     'utf8',
   ),
+  supportedAssetRegistrySource: readFileSync(
+    resolve(__dirname, '../apps/api/src/blockchain/domain/supported-asset-registry.ts'),
+    'utf8',
+  ),
+  walletIdentitySource: readFileSync(
+    resolve(__dirname, '../apps/api/src/wallets/domain/wallet-identity.ts'),
+    'utf8',
+  ),
+  solanaTokenAccountSource: readFileSync(
+    resolve(__dirname, '../apps/api/src/blockchain/domain/solana-token-account.ts'),
+    'utf8',
+  ),
   balanceConsumerPersistenceResourceSource: readFileSync(
     resolve(
       __dirname,
@@ -1508,6 +1520,155 @@ test('balance-consumer inspection rejects unauthenticated or mutable failure cla
   }
 });
 
+test('balance-consumer inspection pins the six launch assets and their canonical parsers', () => {
+  const registry = BALANCE_CONSUMER_ARTIFACTS.supportedAssetRegistrySource;
+  assert.match(registry, /chain: 'BASE'/u);
+  assert.match(registry, /chain: 'ARBITRUM'/u);
+  assert.deepEqual(
+    inspectBalanceConsumerDeploymentArtifacts(BALANCE_CONSUMER_ARTIFACTS),
+    EXPECTED_DORMANT_BALANCE_CONSUMER_DEPLOYMENT,
+  );
+
+  const launchIdentities = [
+    '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48',
+    '0xdac17f958d2ee523a2206206994597c13d831ec7',
+    '0x6c3ea9036406852006290770bedfcaba0e23a0e8',
+    'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+    'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB',
+    '2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo',
+  ] as const;
+  for (const identity of launchIdentities) {
+    const index = registry.lastIndexOf(identity);
+    assert.ok(index >= 0, `registry is missing launch identity ${identity}`);
+    const replacement = `${identity.slice(0, -1)}${identity.endsWith('1') ? '2' : '1'}`;
+    const candidate = `${registry.slice(0, index)}${replacement}${registry.slice(index + identity.length)}`;
+    assert.deepEqual(
+      inspectBalanceConsumerDeploymentArtifacts({
+        ...BALANCE_CONSUMER_ARTIFACTS,
+        supportedAssetRegistrySource: candidate,
+      }),
+      INVALID_BALANCE_CONSUMER_DEPLOYMENT,
+      identity,
+    );
+  }
+
+  const mutations: readonly (readonly [keyof BalanceConsumerArtifactSources, string, string])[] = [
+    [
+      'walletIdentitySource',
+      '!isAddress(value, { strict: true }) ||',
+      '!isAddress(value, { strict: false }) ||',
+    ],
+    [
+      'walletIdentitySource',
+      'return value.toLowerCase() as EvmWalletAddress;',
+      'return value as EvmWalletAddress;',
+    ],
+    [
+      'walletIdentitySource',
+      'decoded.length !== 32 || encodeBase58(decoded) !== value',
+      'decoded.length > 32',
+    ],
+    [
+      'walletIdentitySource',
+      "if (typeof value !== 'string' || value === ZERO_SOLANA_ADDRESS) {",
+      "if (typeof value !== 'string') {",
+    ],
+    [
+      'solanaTokenAccountSource',
+      'export const MAX_SOLANA_TOKEN_ACCOUNT_BYTES = 4_096;',
+      'export const MAX_SOLANA_TOKEN_ACCOUNT_BYTES = 8_192;',
+    ],
+    [
+      'solanaTokenAccountSource',
+      'if (data.length !== SPL_TOKEN_ACCOUNT_BYTES) {',
+      'if (data.length < SPL_TOKEN_ACCOUNT_BYTES) {',
+    ],
+    [
+      'solanaTokenAccountSource',
+      'const TOKEN_2022_ACCOUNT_TYPE = 2;',
+      'const TOKEN_2022_ACCOUNT_TYPE = 1;',
+    ],
+    [
+      'solanaTokenAccountSource',
+      "TOKEN_2022: 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb',",
+      "TOKEN_2022: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',",
+    ],
+    [
+      'solanaTokenAccountSource',
+      'const data = Uint8Array.from(input.data);',
+      'const data = input.data;',
+    ],
+    ['solanaTokenAccountSource', 'validateCOption(data, 109, 8);', 'void data;'],
+    [
+      'solanaTokenAccountSource',
+      'owner !== normalizeSolanaPublicKey(input.expectedOwner)',
+      'owner !== input.expectedOwner',
+    ],
+    [
+      'ethereumBalanceIndexerSource',
+      'if (ETHEREUM_ASSETS.length !== 3)',
+      'if (ETHEREUM_ASSETS.length !== 4)',
+    ],
+    [
+      'ethereumBalanceIndexerSource',
+      "asset.networkId === ETHEREUM_MAINNET_NETWORK_ID && asset.activationState === 'ACTIVE',",
+      "(asset.networkId === ETHEREUM_MAINNET_NETWORK_ID || asset.networkId === 'eip155:8453') && asset.activationState === 'ACTIVE',",
+    ],
+    [
+      'solanaBalanceIndexerSource',
+      'SOLANA_ASSETS.length !== 3 ||',
+      'SOLANA_ASSETS.length !== 4 ||',
+    ],
+    [
+      'solanaBalanceIndexerSource',
+      '[PYUSD_MINT]: SOLANA_TOKEN_PROGRAM_IDS.TOKEN_2022,',
+      '[PYUSD_MINT]: SOLANA_TOKEN_PROGRAM_IDS.LEGACY,',
+    ],
+  ];
+
+  for (const [key, approved, rejected] of mutations) {
+    assert.deepEqual(
+      inspectBalanceConsumerDeploymentArtifacts(
+        mutateBalanceConsumerArtifact(key, approved, rejected),
+      ),
+      INVALID_BALANCE_CONSUMER_DEPLOYMENT,
+      `${key}: ${approved}`,
+    );
+  }
+});
+
+test('balance-consumer inspection requires one stable Solana header around account reads', () => {
+  const mutations: readonly (readonly [string, string])[] = [
+    [
+      'const selectedHeader = await this.readBlock(BigInt(slot), commitment);',
+      'const selectedHeader = await Promise.resolve(null);',
+    ],
+    [
+      "if (selectedHeader === null) {\n      throw new BalanceSyncIndexerFailure('PROVIDER_UNAVAILABLE');",
+      "if (selectedHeader === null) {\n      throw new BalanceSyncIndexerFailure('PROVIDER_INVALID_DATA');",
+    ],
+    [
+      'if (verifiedHeader === null || !sameBlockHeader(selectedHeader, verifiedHeader)) {',
+      'if (verifiedHeader === null) {',
+    ],
+    ['left.parentHash === right.parentHash', 'true'],
+    ['header: verifiedHeader,', 'header: selectedHeader,'],
+    [
+      "if (verifiedHeader === null || !sameBlockHeader(selectedHeader, verifiedHeader)) {\n      throw new BalanceSyncIndexerFailure('PROVIDER_UNAVAILABLE');",
+      "if (verifiedHeader === null || !sameBlockHeader(selectedHeader, verifiedHeader)) {\n      throw new BalanceSyncIndexerFailure('PROVIDER_INVALID_DATA');",
+    ],
+  ];
+  for (const [approved, rejected] of mutations) {
+    assert.deepEqual(
+      inspectBalanceConsumerDeploymentArtifacts(
+        mutateBalanceConsumerArtifact('solanaBalanceIndexerSource', approved, rejected),
+      ),
+      INVALID_BALANCE_CONSUMER_DEPLOYMENT,
+      approved,
+    );
+  }
+});
+
 test('balance-consumer inspection rejects provider-neutral JSON-RPC capability and registration drift', () => {
   const capabilityMutations: readonly (readonly [
     keyof BalanceConsumerArtifactSources,
@@ -2205,6 +2366,14 @@ test('balance-consumer artifact shape, bounds, and private brand fail closed', (
   delete missingEthereumIndexer.ethereumBalanceIndexerSource;
   const missingSolanaIndexer = { ...BALANCE_CONSUMER_ARTIFACTS } as Record<string, unknown>;
   delete missingSolanaIndexer.solanaBalanceIndexerSource;
+  const missingSupportedAssetRegistry = {
+    ...BALANCE_CONSUMER_ARTIFACTS,
+  } as Record<string, unknown>;
+  delete missingSupportedAssetRegistry.supportedAssetRegistrySource;
+  const missingWalletIdentity = { ...BALANCE_CONSUMER_ARTIFACTS } as Record<string, unknown>;
+  delete missingWalletIdentity.walletIdentitySource;
+  const missingSolanaTokenAccount = { ...BALANCE_CONSUMER_ARTIFACTS } as Record<string, unknown>;
+  delete missingSolanaTokenAccount.solanaTokenAccountSource;
   const accessor = { ...BALANCE_CONSUMER_ARTIFACTS } as Record<string, unknown>;
   Object.defineProperty(accessor, 'activationSource', {
     enumerable: true,
@@ -2231,6 +2400,9 @@ test('balance-consumer artifact shape, bounds, and private brand fail closed', (
     missingBalanceJsonRpc,
     missingEthereumIndexer,
     missingSolanaIndexer,
+    missingSupportedAssetRegistry,
+    missingWalletIdentity,
+    missingSolanaTokenAccount,
     { ...BALANCE_CONSUMER_ARTIFACTS, unexpected: 'value' },
     { ...BALANCE_CONSUMER_ARTIFACTS, runtimeSource: 1 },
     accessor,

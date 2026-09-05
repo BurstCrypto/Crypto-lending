@@ -83,6 +83,27 @@ three-key account, wallet, and network scope. All of this is static source
 integrity only: it cannot select a live provider, permit egress, activate the
 consumer, or clear any deployment or live-evidence blocker.
 
+The adapter dependency closure is byte-pinned too: the supported-asset
+registry, wallet identity parser, and Solana token-account parser are now part
+of the exact balance-consumer artifact shape. The launch adapters filter the
+registry down to exactly three active Ethereum mainnet assets and three active
+Solana mainnet assets: USDC, USDT, and PYUSD on each chain. The broader registry
+and wallet catalog may retain reviewed Base, Arbitrum, and testnet metadata for
+future work; those entries are not launch routes, because neither adapter can
+select them and the closed router still rejects every network except Ethereum
+and Solana mainnet.
+
+The dependency inspection requires strict canonical EVM parsing, canonical
+32-byte round-tripped Solana addresses, the exact legacy and Token-2022 program
+IDs, a 165-byte legacy layout, and Token-2022 data bounded at 4,096 bytes with
+its account-type discriminator and COption checks. Solana account data is copied
+before parsing, canonical base64 is bounded before decoding, and PYUSD remains
+bound to Token-2022 while USDC and USDT remain bound to the legacy program. A
+Solana balance read also brackets all token-account calls with two reads of the
+selected block header; null or any position/hash/parent mismatch fails as
+`PROVIDER_UNAVAILABLE`. These are source-integrity checks, not provider or
+mainnet observations.
+
 The inspected source keeps activation false, sets
 `BALANCE_CONSUMER_MODE=disabled`, and leaves the runtime uncomposed. The task
 has no database secret/grants, metadata key, RPC/provider input, Redis, auth,

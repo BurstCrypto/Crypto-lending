@@ -165,6 +165,9 @@ export interface BalanceConsumerArtifactSources {
   readonly balanceJsonRpcSource: string;
   readonly ethereumBalanceIndexerSource: string;
   readonly solanaBalanceIndexerSource: string;
+  readonly supportedAssetRegistrySource: string;
+  readonly walletIdentitySource: string;
+  readonly solanaTokenAccountSource: string;
   readonly balanceConsumerPersistenceResourceSource: string;
   readonly balanceConsumerSqsReceiptResourceSource: string;
   readonly runtimePostgresPoolSource: string;
@@ -528,6 +531,9 @@ const BALANCE_CONSUMER_ARTIFACT_KEYS = Object.freeze([
   'balanceJsonRpcSource',
   'ethereumBalanceIndexerSource',
   'solanaBalanceIndexerSource',
+  'supportedAssetRegistrySource',
+  'walletIdentitySource',
+  'solanaTokenAccountSource',
   'balanceConsumerPersistenceResourceSource',
   'balanceConsumerSqsReceiptResourceSource',
   'runtimePostgresPoolSource',
@@ -589,7 +595,10 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
     '5238cd82822845cc61a4d8024a72bbfae523e46a92ae17458160ab7d9698538a',
   balanceJsonRpcSource: 'cbe7a9ba94879e138342cd7d7c39c301aa7fbfc284723057edf62257dbe58b97',
   ethereumBalanceIndexerSource: '36e0459d90a0fc7f4010572b6f0213b0d5cc3ba8672cf5999d7ec5d6167dc380',
-  solanaBalanceIndexerSource: '4090eb09448654dc4b1e8b5c7aa3ba12fdfa820c3e71401b20b1b47cae863780',
+  solanaBalanceIndexerSource: 'd9c20cbd5f2fbf061cc919575204ff49b11fc6f607d822abb8c8503257af1955',
+  supportedAssetRegistrySource: '025ef9ebffc0a2e676394bca110ee203274e00d0d95b5fb4fe239953d235fc54',
+  walletIdentitySource: 'a22e1c8e8ce5ddcd8c2e43007c37faf82868929afe6b2806e978611d19e788dd',
+  solanaTokenAccountSource: '3e853238987144873c3193b8bdf2f41dcf4baf1ff62e84941a7f7a335e316d5a',
   balanceConsumerPersistenceResourceSource:
     'e95c1ce138f15202e0e181ff31fe164fa22d61e2eaa642a32ea81865a28ff27d',
   balanceConsumerSqsReceiptResourceSource:
@@ -649,7 +658,7 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
     '56e219a54c8deeb08b287098915b78ec777303fa2df8bb076e046e26bbf4ce8c',
 } satisfies Readonly<Record<keyof BalanceConsumerArtifactSources, string>>);
 const MAX_BALANCE_CONSUMER_ARTIFACT_BYTES = 256 * 1024;
-const MAX_BALANCE_CONSUMER_TOTAL_BYTES = 1024 * 1024;
+const MAX_BALANCE_CONSUMER_TOTAL_BYTES = 2 * 1024 * 1024;
 const NON_PRODUCTION_ENVIRONMENT_ALLOWED_PATTERN = "'^(dev|test|qa|sandbox|staging)(-[a-z0-9]+)*$'";
 const PRODUCTION_AWARE_ENVIRONMENT_PATTERN_SOURCE =
   '/^(?:dev|test|qa|sandbox|staging|production)(?:-[a-z0-9]+)*$/u';
@@ -2241,6 +2250,271 @@ function hasAuthenticatedBalanceSyncFailureContract(
       orchestrator,
       'VERIFIED_BALANCE_SYNC_ORCHESTRATOR_ERRORS.add(error);',
     ) === 1
+  );
+}
+
+function hasExactBalanceAdapterDependencyContract(
+  sources: BalanceConsumerArtifactSources,
+): boolean {
+  const registry = sources.supportedAssetRegistrySource.replace(/\r\n/gu, '\n');
+  const wallet = sources.walletIdentitySource.replace(/\r\n/gu, '\n');
+  const tokenAccount = sources.solanaTokenAccountSource.replace(/\r\n/gu, '\n');
+  const ethereum = sources.ethereumBalanceIndexerSource.replace(/\r\n/gu, '\n');
+  const solana = sources.solanaBalanceIndexerSource.replace(/\r\n/gu, '\n');
+  const router = sources.mainnetBalanceIndexerRouterSource.replace(/\r\n/gu, '\n');
+  const composition = sources.compositionSource.replace(/\r\n/gu, '\n');
+  const registryManifestStart = registry.indexOf(
+    'const MAINNET_V1_ASSET_MANIFEST: readonly RegistryAssetManifestEntry[] = Object.freeze([',
+  );
+  const registryManifestEnd = registry.indexOf(
+    'const TESTNET_V1_ASSET_MANIFEST:',
+    registryManifestStart,
+  );
+  if (registryManifestStart < 0 || registryManifestEnd <= registryManifestStart) return false;
+  const registryManifest = registry.slice(registryManifestStart, registryManifestEnd);
+  const manifestEntryPattern =
+    /Object\.freeze\(\{\s*stablecoin: '([^']+)',\s*issuer: '([^']+)',\s*chain: '([^']+)',\s*networkId: '([^']+)',\s*identity: '([^']+)',\s*decimals: ([0-9]+),\s*activationState: '([^']+)',\s*verificationSource: ([A-Z0-9_]+),\s*\}\),/gu;
+  const launchManifestEntries: string[] = [];
+  for (const match of registryManifest.matchAll(manifestEntryPattern)) {
+    const values = match.slice(1, 9);
+    if (values.some((value) => value === undefined)) return false;
+    const networkId = values[3];
+    if (networkId === 'eip155:1' || networkId === 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp') {
+      launchManifestEntries.push(values.join('\0'));
+    }
+  }
+  const expectedLaunchManifestEntries = [
+    [
+      'USDC',
+      'CIRCLE',
+      'ETHEREUM',
+      'eip155:1',
+      '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48',
+      '6',
+      'ACTIVE',
+      'V1_CIRCLE_USDC_SOURCE',
+    ],
+    [
+      'USDT',
+      'TETHER',
+      'ETHEREUM',
+      'eip155:1',
+      '0xdac17f958d2ee523a2206206994597c13d831ec7',
+      '6',
+      'ACTIVE',
+      'V1_TETHER_SOURCE',
+    ],
+    [
+      'PYUSD',
+      'PAXOS',
+      'ETHEREUM',
+      'eip155:1',
+      '0x6c3ea9036406852006290770bedfcaba0e23a0e8',
+      '6',
+      'ACTIVE',
+      'V1_PAXOS_PYUSD_MAINNET_SOURCE',
+    ],
+    [
+      'USDC',
+      'CIRCLE',
+      'SOLANA',
+      'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp',
+      'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+      '6',
+      'ACTIVE',
+      'V1_CIRCLE_USDC_SOURCE',
+    ],
+    [
+      'USDT',
+      'TETHER',
+      'SOLANA',
+      'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp',
+      'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB',
+      '6',
+      'ACTIVE',
+      'V1_TETHER_SOURCE',
+    ],
+    [
+      'PYUSD',
+      'PAXOS',
+      'SOLANA',
+      'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp',
+      '2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo',
+      '6',
+      'ACTIVE',
+      'V1_PAXOS_PYUSD_MAINNET_SOURCE',
+    ],
+  ]
+    .map((entry) => entry.join('\0'))
+    .sort();
+  const ethereumFilter = [
+    "supportedAssetRegistryForEnvironment('MAINNET')",
+    '.latest.assets.filter(',
+    '(asset) =>',
+    "asset.networkId === ETHEREUM_MAINNET_NETWORK_ID && asset.activationState === 'ACTIVE',",
+    ')',
+    '.sort((left, right) => left.identity.localeCompare(right.identity)),',
+  ].join('\n');
+  const solanaFilter = [
+    "supportedAssetRegistryForEnvironment('MAINNET')",
+    '.latest.assets.filter(',
+    '(asset) =>',
+    "asset.networkId === SOLANA_MAINNET_NETWORK_ID && asset.activationState === 'ACTIVE',",
+    ')',
+    '.sort((left, right) => left.identity.localeCompare(right.identity)),',
+  ].join('\n');
+  const ethereumExecutable = trimmedExecutableLines(ethereum).join('\n');
+  const solanaExecutable = trimmedExecutableLines(solana).join('\n');
+  const launchSources = [ethereum, solana, router, composition] as const;
+  const futureChainLaunchBinding = /['"]eip155:(?:8453|42161)['"]|['"](?:BASE|ARBITRUM)['"]/u;
+  const forbiddenDependencyCapability =
+    /\b(?:fetch|setTimeout|setInterval|setImmediate|queueMicrotask)\s*\(|\b(?:process|Deno|Bun)\s*\.\s*env\b|\bimport\s*\.\s*meta\s*\.\s*env\b|\b(?:http|https|dns|net|tls)\s*\.\s*[A-Za-z][A-Za-z0-9_]*\s*\(|@(?:Injectable|Module)\s*\(|\b(?:NestFactory|createApplicationContext)\b|\.(?:listen|connect)\s*\(/iu;
+
+  return (
+    sortedTypeScriptImportTargets(registry).join('\0') === 'node:crypto' &&
+    sortedTypeScriptImportTargets(wallet).join('\0') === 'viem' &&
+    sortedTypeScriptImportTargets(tokenAccount).length === 0 &&
+    !forbiddenDependencyCapability.test(registry) &&
+    !forbiddenDependencyCapability.test(wallet) &&
+    !forbiddenDependencyCapability.test(tokenAccount) &&
+    launchManifestEntries.sort().join('\n') === expectedLaunchManifestEntries.join('\n') &&
+    launchManifestEntries.length === 6 &&
+    exactExecutableLineCount(
+      registry,
+      "assets: assetDefinitionsFromManifest('MAINNET', MAINNET_V1_ASSET_MANIFEST),",
+    ) === 1 &&
+    exactExecutableLineCount(registry, 'const matches = VERIFIED_STABLECOIN_IDENTITIES.filter(') ===
+      1 &&
+    exactExecutableLineCount(registry, 'if (matches.length === 0) {') === 1 &&
+    exactExecutableLineCount(registry, 'if (matches.length !== 1) {') === 1 &&
+    exactExecutableLineCount(wallet, 'const EVM_ADDRESS_PATTERN = /^0x[0-9a-fA-F]{40}$/u;') === 1 &&
+    exactExecutableLineCount(wallet, '!EVM_ADDRESS_PATTERN.test(value) ||') === 1 &&
+    exactExecutableLineCount(wallet, '!isAddress(value, { strict: true }) ||') === 1 &&
+    exactExecutableLineCount(wallet, 'value.toLowerCase() === ZERO_EVM_ADDRESS') === 1 &&
+    exactExecutableLineCount(wallet, 'return value.toLowerCase() as EvmWalletAddress;') === 1 &&
+    exactExecutableLineCount(
+      wallet,
+      'const SOLANA_ADDRESS_PATTERN = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/u;',
+    ) === 1 &&
+    exactExecutableLineCount(wallet, 'if (!SOLANA_ADDRESS_PATTERN.test(value)) return null;') ===
+      1 &&
+    exactExecutableLineCount(
+      wallet,
+      "if (typeof value !== 'string' || value === ZERO_SOLANA_ADDRESS) {",
+    ) === 1 &&
+    exactExecutableLineCount(
+      wallet,
+      'if (decoded === null || decoded.length !== 32 || encodeBase58(decoded) !== value) {',
+    ) === 1 &&
+    exactExecutableLineCount(wallet, 'return value as SolanaWalletAddress;') === 1 &&
+    exactExecutableLineCount(wallet, 'return Uint8Array.from(decoded);') === 1 &&
+    exactExecutableLineCount(tokenAccount, 'const SOLANA_PUBLIC_KEY_BYTES = 32;') === 1 &&
+    exactExecutableLineCount(tokenAccount, 'const SPL_TOKEN_ACCOUNT_BYTES = 165;') === 1 &&
+    exactExecutableLineCount(
+      tokenAccount,
+      'const TOKEN_2022_ACCOUNT_TYPE_OFFSET = SPL_TOKEN_ACCOUNT_BYTES;',
+    ) === 1 &&
+    exactExecutableLineCount(tokenAccount, 'const TOKEN_2022_ACCOUNT_TYPE = 2;') === 1 &&
+    exactExecutableLineCount(
+      tokenAccount,
+      'export const MAX_SOLANA_TOKEN_ACCOUNT_BYTES = 4_096;',
+    ) === 1 &&
+    exactExecutableLineCount(
+      tokenAccount,
+      "LEGACY: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',",
+    ) === 1 &&
+    exactExecutableLineCount(
+      tokenAccount,
+      "TOKEN_2022: 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb',",
+    ) === 1 &&
+    exactExecutableLineCount(tokenAccount, 'if (data.length !== SPL_TOKEN_ACCOUNT_BYTES) {') ===
+      1 &&
+    exactExecutableLineCount(
+      tokenAccount,
+      'if (data.length < SPL_TOKEN_ACCOUNT_BYTES || data.length > MAX_SOLANA_TOKEN_ACCOUNT_BYTES) {',
+    ) === 1 &&
+    exactExecutableLineCount(
+      tokenAccount,
+      'if (data[TOKEN_2022_ACCOUNT_TYPE_OFFSET] !== TOKEN_2022_ACCOUNT_TYPE) {',
+    ) === 1 &&
+    exactExecutableLineCount(
+      tokenAccount,
+      'if (tokenProgramId === SOLANA_TOKEN_PROGRAM_IDS.LEGACY) return tokenProgramId;',
+    ) === 1 &&
+    exactExecutableLineCount(
+      tokenAccount,
+      'if (tokenProgramId === SOLANA_TOKEN_PROGRAM_IDS.TOKEN_2022) return tokenProgramId;',
+    ) === 1 &&
+    exactExecutableLineCount(tokenAccount, 'const data = Uint8Array.from(input.data);') === 1 &&
+    exactExecutableLineCount(tokenAccount, 'validateLayout(data, tokenProgramId);') === 1 &&
+    exactExecutableLineCount(tokenAccount, 'validateCOption(data, 72, 32);') === 1 &&
+    exactExecutableLineCount(tokenAccount, 'validateCOption(data, 109, 8);') === 1 &&
+    exactExecutableLineCount(tokenAccount, 'validateCOption(data, 129, 32);') === 1 &&
+    exactExecutableLineCount(
+      tokenAccount,
+      'owner !== normalizeSolanaPublicKey(input.expectedOwner)',
+    ) === 1 &&
+    exactExecutableLineCount(tokenAccount, 'return Object.freeze({') === 1 &&
+    ethereumExecutable.includes(ethereumFilter) &&
+    solanaExecutable.includes(solanaFilter) &&
+    exactExecutableLineCount(ethereum, 'if (ETHEREUM_ASSETS.length !== 3)') === 1 &&
+    exactExecutableLineCount(solana, 'SOLANA_ASSETS.length !== 3 ||') === 1 &&
+    exactExecutableLineCount(
+      solana,
+      '(asset) => tokenProgramBinding(asset.identity) === undefined || asset.decimals !== 6,',
+    ) === 1 &&
+    exactExecutableLineCount(
+      solana,
+      "const PYUSD_MINT = '2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo';",
+    ) === 1 &&
+    exactExecutableLineCount(
+      solana,
+      "const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';",
+    ) === 1 &&
+    exactExecutableLineCount(
+      solana,
+      "const USDT_MINT = 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB';",
+    ) === 1 &&
+    exactExecutableLineCount(solana, '[PYUSD_MINT]: SOLANA_TOKEN_PROGRAM_IDS.TOKEN_2022,') === 1 &&
+    exactExecutableLineCount(solana, '[USDC_MINT]: SOLANA_TOKEN_PROGRAM_IDS.LEGACY,') === 1 &&
+    exactExecutableLineCount(solana, '[USDT_MINT]: SOLANA_TOKEN_PROGRAM_IDS.LEGACY,') === 1 &&
+    exactExecutableLineCount(
+      solana,
+      'const MAX_BASE64_TOKEN_ACCOUNT_LENGTH = Math.ceil(MAX_SOLANA_TOKEN_ACCOUNT_BYTES / 3) * 4;',
+    ) === 1 &&
+    exactExecutableLineCount(solana, 'decoded.byteLength > MAX_SOLANA_TOKEN_ACCOUNT_BYTES ||') ===
+      1 &&
+    exactExecutableLineCount(solana, "decoded.toString('base64') !== encoded") === 1 &&
+    exactExecutableLineCount(solana, 'parsed = parseSolanaTokenAccount({') === 1 &&
+    exactExecutableLineCount(
+      solana,
+      'const selectedHeader = await this.readBlock(BigInt(slot), commitment);',
+    ) === 1 &&
+    exactExecutableLineCount(solana, 'if (selectedHeader === null) {') === 1 &&
+    exactExecutableLineCount(
+      solana,
+      'const verifiedHeader = await this.readBlock(BigInt(slot), commitment);',
+    ) === 1 &&
+    exactExecutableLineCount(
+      solana,
+      'if (verifiedHeader === null || !sameBlockHeader(selectedHeader, verifiedHeader)) {',
+    ) === 1 &&
+    exactExecutableLineCount(
+      solana,
+      "throw new BalanceSyncIndexerFailure('PROVIDER_UNAVAILABLE');",
+    ) === 2 &&
+    exactExecutableLineCount(
+      solana,
+      'function sameBlockHeader(left: SolanaBlockHeader, right: SolanaBlockHeader): boolean {',
+    ) === 1 &&
+    exactExecutableLineCount(solana, 'left.position === right.position &&') === 1 &&
+    exactExecutableLineCount(solana, 'left.hash === right.hash &&') === 1 &&
+    exactExecutableLineCount(solana, 'left.parentPosition === right.parentPosition &&') === 1 &&
+    exactExecutableLineCount(solana, 'left.parentHash === right.parentHash') === 1 &&
+    exactExecutableLineCount(solana, 'header: verifiedHeader,') === 1 &&
+    exactExecutableLineCount(ethereum, 'return parseEvmWalletAddress(value);') === 1 &&
+    exactExecutableLineCount(solana, 'return parseSolanaWalletAddress(') === 1 &&
+    launchSources.every((source) => !futureChainLaunchBinding.test(source))
   );
 }
 
@@ -5126,6 +5400,7 @@ export function inspectBalanceConsumerDeploymentArtifacts(
       hasDormantBalanceConsumerSourceContract(sources) &&
       hasExactMainnetBalanceIndexerRouterContract(sources) &&
       hasAuthenticatedBalanceSyncFailureContract(sources) &&
+      hasExactBalanceAdapterDependencyContract(sources) &&
       hasDormantProviderNeutralBalanceRpcContract(sources) &&
       hasDormantBalanceConsumerAggregateResourceContract(sources) &&
       hasDormantBalanceConsumerLifecycleCoordinatorContract(sources) &&
@@ -5808,6 +6083,18 @@ export function loadRepositoryProductionPreflightInput(
           repositoryRoot,
           'apps/api/src/blockchain-sync/infrastructure/rpc/solana-mainnet-balance-indexer.adapter.ts',
         ),
+        'utf8',
+      ),
+      supportedAssetRegistrySource: readFileSync(
+        resolve(repositoryRoot, 'apps/api/src/blockchain/domain/supported-asset-registry.ts'),
+        'utf8',
+      ),
+      walletIdentitySource: readFileSync(
+        resolve(repositoryRoot, 'apps/api/src/wallets/domain/wallet-identity.ts'),
+        'utf8',
+      ),
+      solanaTokenAccountSource: readFileSync(
+        resolve(repositoryRoot, 'apps/api/src/blockchain/domain/solana-token-account.ts'),
         'utf8',
       ),
       balanceConsumerPersistenceResourceSource: readFileSync(
