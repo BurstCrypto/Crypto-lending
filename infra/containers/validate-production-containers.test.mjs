@@ -462,10 +462,10 @@ test('rejects balance-consumer source activation, import-order, and command drif
     replace(
       source,
       'balanceConsumerRuntime',
-      "from '../../infrastructure/sqs/sqs.module'",
-      "from '../../infrastructure/config/infrastructure.config'",
+      '@Module({})',
+      '@Module({ imports: [PostgresModule] })',
     ),
-    /runtime dependencies/u,
+    /dependency-empty/u,
   );
   assertRejected(
     replace(
@@ -485,6 +485,35 @@ test('rejects balance-consumer source activation, import-order, and command drif
     ),
     /Root package/u,
   );
+});
+
+test('rejects generic database, infrastructure, and SQS references in the dormant runtime', () => {
+  const source = loadSources();
+
+  for (const forbiddenReference of [
+    'PostgresModule',
+    'SqsModule',
+    'InfrastructureConfigModule',
+    'MigrationRunner',
+    'PostgresService',
+    'SqsService',
+    'SqsJobWorker',
+    'OUTBOX_TRANSPORT',
+    'SQS_HEALTH',
+    'SQS_CLIENT',
+    'SQS_PINNED_QUEUE_RECEIPT',
+    'SQS_WORKER_QUEUE',
+  ]) {
+    assertRejected(
+      replace(
+        source,
+        'balanceConsumerRuntime',
+        '@Module({})',
+        `const forbiddenRuntimeReference = ${forbiddenReference};\n\n@Module({})`,
+      ),
+      /dependency-empty/u,
+    );
+  }
 });
 
 test('binds the reviewed Redis revocation sources, package scripts, and task command', () => {

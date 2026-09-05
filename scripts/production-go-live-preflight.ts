@@ -530,7 +530,7 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
   activationSource: '75ae4b590e2ad9d70542ea9c38809f4ed24d61ec354838e7318afdccc07dd091',
   cliSource: '7fec5d0cc345b82ed4fb5f26e1fa7099f0cb38c246224ada7a9fe51a65d4c455',
   cliModeSource: '2b03494cb126e80f4f7af1176cb08cf13aef2d14d4bf3cb371faa6f06a7294a8',
-  runtimeSource: '311d5ed733abc1bc6f3428bcba2acd2f0858dab31f8eaf3259fc99560e6e1d7d',
+  runtimeSource: '9eb119d5c4ed60708931bdc25b810d0f61e064d8521c3465ae4c85046480fd5b',
   compositionSource: 'a898bcebc7ea56cae7b51e71e27107cb76330a98c4659b5bf761fa4a2e988971',
   balanceSyncDomainSource: '67b1cf8449da0e7c60a95a43cc29425ddc7e33b176933901923538e804171921',
   chainObservationPolicySource: 'ef887514b86230d1516e5a8139c94dc2b2dde06c979440bc6eb3f4df90511533',
@@ -563,7 +563,7 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
   migrationIndexSource: '2565fe9b9ed14d4b32a92cef583343de4d18832995426da8d75542701d70696d',
   releaseManifestSource: '234f2e397055af0884b45a599b7767fe9e24952b7978b769af4a46c73c1653ea',
   productionContainerValidatorSource:
-    '730b7c27949b4236d2b2c7343d60a30e04a204f753a920af085bd8009457eeb2',
+    '56e219a54c8deeb08b287098915b78ec777303fa2df8bb076e046e26bbf4ce8c',
 } satisfies Readonly<Record<keyof BalanceConsumerArtifactSources, string>>);
 const MAX_BALANCE_CONSUMER_ARTIFACT_BYTES = 256 * 1024;
 const MAX_BALANCE_CONSUMER_TOTAL_BYTES = 1024 * 1024;
@@ -1785,6 +1785,7 @@ function hasDormantBalanceConsumerSourceContract(sources: BalanceConsumerArtifac
   }
 
   if (
+    exactExecutableLineCount(sources.runtimeSource, '@Module({})') !== 1 ||
     exactExecutableLineCount(
       sources.runtimeSource,
       'export class DormantBalanceSyncConsumerRuntimeModule {}',
@@ -1793,6 +1794,9 @@ function hasDormantBalanceConsumerSourceContract(sources: BalanceConsumerArtifac
       sources.runtimeSource,
       "() => Promise.reject(new Error('BALANCE_CONSUMER_RUNTIME_NOT_COMPOSED'));",
     ) !== 1 ||
+    /\b(?:InfrastructureConfigModule|MigrationRunner|OUTBOX_TRANSPORT|PostgresModule|PostgresService|SQS(?:_[A-Z0-9]+)+|Sqs[A-Za-z0-9_]*)\b/u.test(
+      sources.runtimeSource,
+    ) ||
     /\bNestFactory\b|createApplicationContext\s*\(|\.listen\s*\(/u.test(sources.runtimeSource)
   ) {
     return false;
@@ -2193,6 +2197,15 @@ function hasDormantBalanceConsumerPackagingContract(
     ) &&
     containerValidator.includes(
       "path: 'apps/api/src/blockchain-sync/application/balance-sync-consumer.cli-mode.ts',",
+    ) &&
+    containerValidator.includes('const expectedDormantRuntime = [') &&
+    containerValidator.includes('const forbiddenRuntimeDependency =') &&
+    containerValidator.includes('runtimeWithoutComments === expectedDormantRuntime &&') &&
+    containerValidator.includes(
+      'Balance consumer dormant runtime must remain dependency-empty and reject with its fixed not-composed error',
+    ) &&
+    !containerValidator.includes(
+      'Balance consumer runtime dependencies must remain isolated in the dormant runtime module',
     ) &&
     containerValidator.includes('...validateBalanceConsumerExecutable(sources),') &&
     containerValidator.includes(

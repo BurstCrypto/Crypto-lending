@@ -403,6 +403,20 @@ function validateApiDockerfile(source) {
 
 function validateBalanceConsumerExecutable(sources) {
   const errors = [];
+  const runtimeWithoutComments = normalize(sources.balanceConsumerRuntime)
+    .replace(/\/\*[\s\S]*?\*\//gu, '')
+    .replace(/^\s*\/\/.*(?:\n|$)/gmu, '')
+    .replace(/\s+/gu, ' ')
+    .trim();
+  const expectedDormantRuntime = [
+    "import { Module } from '@nestjs/common';",
+    "import type { BalanceConsumerRuntimeModule } from './balance-sync-consumer.cli-mode';",
+    '@Module({})',
+    'export class DormantBalanceSyncConsumerRuntimeModule {}',
+    "export const startBalanceSyncConsumerRuntime: BalanceConsumerRuntimeModule['startBalanceSyncConsumerRuntime'] = () => Promise.reject(new Error('BALANCE_CONSUMER_RUNTIME_NOT_COMPOSED'));",
+  ].join(' ');
+  const forbiddenRuntimeDependency =
+    /\b(?:InfrastructureConfigModule|MigrationRunner|OUTBOX_TRANSPORT|PostgresModule|PostgresService|SQS(?:_[A-Z0-9]+)+|Sqs[A-Za-z0-9_]*)\b/u;
   addError(
     errors,
     /export const BALANCE_CONSUMER_SOURCE_ACTIVATION = Object\.freeze\(\{\s*enabled: false as boolean,\s*\}\);/u.test(
@@ -420,12 +434,9 @@ function validateBalanceConsumerExecutable(sources) {
   );
   addError(
     errors,
-    sources.balanceConsumerRuntime.includes("from '@nestjs/common'") &&
-      sources.balanceConsumerRuntime.includes(
-        "from '../../infrastructure/database/postgres.module'",
-      ) &&
-      sources.balanceConsumerRuntime.includes("from '../../infrastructure/sqs/sqs.module'"),
-    'Balance consumer runtime dependencies must remain isolated in the dormant runtime module',
+    runtimeWithoutComments === expectedDormantRuntime &&
+      !forbiddenRuntimeDependency.test(runtimeWithoutComments),
+    'Balance consumer dormant runtime must remain dependency-empty and reject with its fixed not-composed error',
   );
   addError(
     errors,

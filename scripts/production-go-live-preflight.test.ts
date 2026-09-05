@@ -1022,6 +1022,12 @@ test('balance-consumer inspection fails closed for drift in every reviewed artif
       'BALANCE_CONSUMER_RUNTIME_COMPOSED',
     ],
     [
+      'dependency-empty dormant runtime',
+      'runtimeSource',
+      '@Module({})',
+      '@Module({ imports: [PostgresModule] })',
+    ],
+    [
       'inert composition',
       'compositionSource',
       'const jobDisposition = new FailClosedBalanceSyncJobPort();',
@@ -1350,6 +1356,12 @@ test('balance-consumer inspection fails closed for drift in every reviewed artif
       'productionContainerValidatorSource',
       '...validateBalanceConsumerExecutable(sources),',
       '...validateBalanceConsumerExecutable({ ...sources, balanceConsumerCli: sources.balanceConsumerRuntime }),',
+    ],
+    [
+      'production container dependency-empty runtime validator',
+      'productionContainerValidatorSource',
+      'runtimeWithoutComments === expectedDormantRuntime &&',
+      'runtimeWithoutComments.length > 0 &&',
     ],
     [
       'metadata transition validation script',
