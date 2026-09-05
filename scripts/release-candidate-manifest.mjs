@@ -243,6 +243,19 @@ function fail(message) {
   throw new ReleaseManifestError(message);
 }
 
+function closeStableFileDescriptor(descriptor) {
+  try {
+    closeSync(descriptor);
+  } catch {
+    throw new ReleaseManifestInvalidError();
+  }
+}
+
+/** Descriptor-close test seam; it cannot read or confer release authority. */
+export function closeReleaseFileDescriptorForTest(descriptor) {
+  closeStableFileDescriptor(descriptor);
+}
+
 function compareUtf8(left, right) {
   return Buffer.compare(Buffer.from(left, 'utf8'), Buffer.from(right, 'utf8'));
 }
@@ -537,7 +550,7 @@ function hashStableFile(context, absolutePath, candidateTotals, afterChunkForTes
 
     return Object.freeze({ size: offset, sha256: hash.digest('hex') });
   } finally {
-    closeSync(descriptor);
+    closeStableFileDescriptor(descriptor);
   }
 }
 
@@ -658,7 +671,7 @@ function readBoundedStableFile(absolutePath, maximumBytes, afterFirstReadForTest
     }
     return first;
   } finally {
-    closeSync(descriptor);
+    closeStableFileDescriptor(descriptor);
   }
 }
 
@@ -1215,7 +1228,7 @@ function writeExclusiveFile(root, relativePath, contents, mode = 0o600) {
     }
     opened = afterWrite;
   } finally {
-    closeSync(descriptor);
+    closeStableFileDescriptor(descriptor);
   }
   const finalContext = workspaceContext(root);
   const finalPath = safeExistingPath(finalContext, absolutePath, 'file');
@@ -1230,7 +1243,7 @@ function writeManifest(root, manifest) {
   return writeExclusiveFile(root, RELEASE_MANIFEST_PATH, `${canonicalJson(manifest)}\n`);
 }
 
-function copyManifestFile(sourceRoot, stageRoot, component, file) {
+function copyManifestFile(sourceRoot, stageRoot, component, file, afterChunkForTest = undefined) {
   const relativeFile =
     component.kind === 'file' ? component.path : `${component.path}/${file.path}`;
   const sourceContext = workspaceContext(sourceRoot);
@@ -1282,6 +1295,7 @@ function copyManifestFile(sourceRoot, stageRoot, component, file) {
           written += writeCount;
         }
       },
+      afterChunkForTest,
     );
     fchmodSync(destinationDescriptor, 0o400);
     fsyncSync(destinationDescriptor);
@@ -1301,14 +1315,43 @@ function copyManifestFile(sourceRoot, stageRoot, component, file) {
       fail('A release component changed while it was staged.');
     }
   } finally {
-    if (destinationDescriptor !== undefined) closeSync(destinationDescriptor);
-    closeSync(sourceDescriptor);
+    try {
+      if (destinationDescriptor !== undefined) closeStableFileDescriptor(destinationDescriptor);
+    } finally {
+      closeStableFileDescriptor(sourceDescriptor);
+    }
   }
   const destinationPath = resolve(stageRoot, ...relativeFile.split('/'));
   const finalStageContext = workspaceContext(stageRoot);
   const destination = safeExistingPath(finalStageContext, destinationPath, 'file');
   if (destination.finalStat.size !== BigInt(file.size)) {
     fail('A staged release file size does not match its manifest.');
+  }
+}
+
+/** Unbranded hostile-stage test seam; it cannot confer release authority. */
+export function copyReleaseArtifactFileForTest(
+  sourceRoot,
+  stageRoot,
+  component,
+  file,
+  afterChunkForTest,
+) {
+  try {
+    const spec = RELEASE_COMPONENTS.find(
+      (candidate) =>
+        candidate.kind === component?.kind &&
+        candidate.name === component?.name &&
+        candidate.path === component?.path,
+    );
+    if (spec === undefined) fail('Manifest component shape is invalid.');
+    validateComponent(component, spec);
+    if (!component.files.some((candidate) => isDeepStrictEqual(candidate, file))) {
+      fail('Manifest file entry is invalid.');
+    }
+    copyManifestFile(resolve(sourceRoot), resolve(stageRoot), component, file, afterChunkForTest);
+  } catch {
+    throw new ReleaseManifestInvalidError();
   }
 }
 
@@ -1456,7 +1499,7 @@ function sealStageDirectories(stageRoot, layout) {
         }
       }
     } finally {
-      closeSync(descriptor);
+      closeStableFileDescriptor(descriptor);
     }
   }
 }

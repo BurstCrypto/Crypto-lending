@@ -29,6 +29,8 @@ import {
   REPOSITORY_ROOT,
   ReleaseManifestError,
   canonicalJson,
+  closeReleaseFileDescriptorForTest,
+  copyReleaseArtifactFileForTest,
   createReleaseManifest,
   fingerprintReleaseArtifactFileForTest,
   inspectCleanGitSource,
@@ -697,6 +699,47 @@ test('caps a concurrently growing artifact read at its inspected size', () => {
     },
   );
   assert.equal(consumedChunks, 1);
+});
+
+test('staging rejects concurrent source growth without exceeding the manifest size', () => {
+  const sourceRoot = createWorkspace();
+  const stageRoot = temporaryDirectory();
+  const manifest = createReleaseManifest(sourceRoot, SOURCE, BUILDER);
+  const component = manifest.components.find(({ name }) => name === 'root-package-manifest');
+  assert.ok(component);
+  const file = component.files[0];
+  assert.ok(file);
+  const sourcePath = resolve(sourceRoot, ...component.path.split('/'));
+  const stagePath = resolve(stageRoot, ...component.path.split('/'));
+  let consumedChunks = 0;
+
+  assert.throws(
+    () =>
+      copyReleaseArtifactFileForTest(sourceRoot, stageRoot, component, file, () => {
+        consumedChunks += 1;
+        if (consumedChunks < 4) appendFileSync(sourcePath, 'x');
+      }),
+    (error) => {
+      assert.equal(error.name, 'ReleaseManifestInvalidError');
+      assert.equal(error.message, 'Release candidate manifest is invalid.');
+      return true;
+    },
+  );
+  assert.equal(consumedChunks, 1);
+  assert.ok(lstatSync(sourcePath).size > file.size);
+  assert.equal(lstatSync(stagePath).size, file.size);
+  assert.equal(readFileSync(stagePath).length, file.size);
+});
+
+test('descriptor close failures retain the fixed manifest error contract', () => {
+  assert.throws(
+    () => closeReleaseFileDescriptorForTest(-1),
+    (error) => {
+      assert.equal(error.name, 'ReleaseManifestInvalidError');
+      assert.equal(error.message, 'Release candidate manifest is invalid.');
+      return true;
+    },
+  );
 });
 
 test('rejects malformed CLI arguments without inspecting Git or writing output', () => {
