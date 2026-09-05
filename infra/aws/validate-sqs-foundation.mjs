@@ -6,11 +6,54 @@
  * beyond the local filesystem.
  */
 
-import { lstatSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { TextDecoder } from 'node:util';
+
+import {
+  readSecureLocalFile,
+  readSecureLocalFileForTest,
+} from '../shared/read-secure-local-file.mjs';
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
+const defaultTemplatePath = join(scriptDirectory, 'sqs-foundation.yaml');
+
+export const MAX_SQS_FOUNDATION_TEMPLATE_BYTES = 51_200;
+export const SQS_FOUNDATION_TEMPLATE_INPUT_ERROR =
+  'Standalone SQS template must be a non-empty, stable, single-link regular file of at most 51200 bytes at a canonical local path containing UTF-8 text without a byte-order mark.';
+export const SQS_FOUNDATION_ARGUMENT_ERROR =
+  'Usage: validate-sqs-foundation.mjs [--template <local-file>] [--json].';
+
+function readLocalTemplateInternal(path, afterFirstReadForTest) {
+  try {
+    const bytes =
+      afterFirstReadForTest === undefined
+        ? readSecureLocalFile(path, MAX_SQS_FOUNDATION_TEMPLATE_BYTES)
+        : readSecureLocalFileForTest(
+            path,
+            MAX_SQS_FOUNDATION_TEMPLATE_BYTES,
+            afterFirstReadForTest,
+          );
+    if (bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) {
+      throw new Error(SQS_FOUNDATION_TEMPLATE_INPUT_ERROR);
+    }
+    return {
+      resolved: resolve(path),
+      source: new TextDecoder('utf-8', { fatal: true }).decode(bytes),
+    };
+  } catch {
+    throw new Error(SQS_FOUNDATION_TEMPLATE_INPUT_ERROR);
+  }
+}
+
+export function readLocalSqsFoundationTemplate(path) {
+  return readLocalTemplateInternal(path, undefined);
+}
+
+/** Test-only fault seam; production callers use readLocalSqsFoundationTemplate. */
+export function readLocalSqsFoundationTemplateForTest(path, afterFirstReadForTest) {
+  return readLocalTemplateInternal(path, afterFirstReadForTest);
+}
 
 function topLevelDocumentEntries(source) {
   const entries = [];
@@ -62,7 +105,7 @@ function topLevelBlocks(source, sectionName) {
   for (let index = sectionIndex + 1; index < lines.length; index += 1) {
     const line = lines[index];
     if (/^[A-Za-z][A-Za-z0-9]*:$/.test(line)) break;
-    const entry = line.match(/^  ([A-Za-z][A-Za-z0-9]*):\s*$/);
+    const entry = line.match(/^ {2}([A-Za-z][A-Za-z0-9]*):\s*$/);
     if (entry) {
       flush();
       currentName = entry[1];
@@ -395,19 +438,19 @@ export function validateSqsFoundationSource(source) {
   const policy = resources.get('JobQueueTlsPolicy') ?? '';
   requireMatch(
     policy,
-    /^    Type: AWS::SQS::QueuePolicy\s*$/m,
+    /^ {4}Type: AWS::SQS::QueuePolicy\s*$/m,
     'JobQueueTlsPolicy must be an AWS::SQS::QueuePolicy.',
     errors,
   );
   requireMatch(
     policy,
-    /      Queues:\s*\n        - !Ref JobQueue\s*\n        - !Ref JobDeadLetterQueue\s*\n      PolicyDocument:/,
+    / {6}Queues:\s*\n {8}- !Ref JobQueue\s*\n {8}- !Ref JobDeadLetterQueue\s*\n {6}PolicyDocument:/,
     'JobQueueTlsPolicy must attach to exactly the job queue and dead-letter queue.',
     errors,
   );
   requireMatch(
     policy,
-    /          - Sid: DenyInsecureTransport\s*\n            Effect: Deny\s*\n            Principal: ['"]\*['"]\s*\n            Action: sqs:\*\s*\n            Resource:\s*\n              - !GetAtt JobQueue\.Arn\s*\n              - !GetAtt JobDeadLetterQueue\.Arn\s*\n            Condition:\s*\n              Bool:\s*\n                aws:SecureTransport: ['"]false['"]\s*$/,
+    / {10}- Sid: DenyInsecureTransport\s*\n {12}Effect: Deny\s*\n {12}Principal: ['"]\*['"]\s*\n {12}Action: sqs:\*\s*\n {12}Resource:\s*\n {14}- !GetAtt JobQueue\.Arn\s*\n {14}- !GetAtt JobDeadLetterQueue\.Arn\s*\n {12}Condition:\s*\n {14}Bool:\s*\n {16}aws:SecureTransport: ['"]false['"]\s*$/,
     'JobQueueTlsPolicy must deny all SQS actions on both queues when aws:SecureTransport is false.',
     errors,
   );
@@ -490,20 +533,25 @@ export function validateSqsFoundationSource(source) {
 }
 
 function parseArguments(argv) {
-  const options = { template: join(scriptDirectory, 'sqs-foundation.yaml'), json: false };
+  const options = { template: defaultTemplatePath, json: false };
+  let templateSeen = false;
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === '--json') {
+      if (options.json) throw new Error(SQS_FOUNDATION_ARGUMENT_ERROR);
       options.json = true;
       continue;
     }
-    if (argument !== '--template') throw new Error(`Unknown argument: ${argument}`);
+    if (argument !== '--template' || templateSeen) {
+      throw new Error(SQS_FOUNDATION_ARGUMENT_ERROR);
+    }
     const value = argv[index + 1];
-    if (!value || value.startsWith('--')) throw new Error('--template requires a path.');
+    if (!value || value.startsWith('--')) throw new Error(SQS_FOUNDATION_ARGUMENT_ERROR);
     if (/^(?:\\\\[.?]\\|\\\\|\/\/)/.test(value) || /^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(value)) {
-      throw new Error('--template requires a local filesystem path, not a URI or network path.');
+      throw new Error(SQS_FOUNDATION_TEMPLATE_INPUT_ERROR);
     }
     options.template = resolve(value);
+    templateSeen = true;
     index += 1;
   }
   return options;
@@ -513,29 +561,30 @@ function main() {
   let options;
   try {
     options = parseArguments(process.argv.slice(2));
-    const info = lstatSync(options.template);
-    if (info.isSymbolicLink() || !info.isFile()) {
-      throw new Error('--template must identify a regular local file, not a symbolic link.');
+    const { resolved, source } = readLocalSqsFoundationTemplate(options.template);
+    const report = {
+      ...validateSqsFoundationSource(source),
+      template: resolved,
+    };
+    if (options.json) {
+      process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+    } else if (report.ok) {
+      process.stdout.write('Standalone SQS foundation validation passed.\nAWS API calls made: 0\n');
+    } else {
+      process.stderr.write('Standalone SQS foundation validation failed:\n');
+      for (const error of report.errors) process.stderr.write(`- ${error}\n`);
+      process.stderr.write('AWS API calls made: 0\n');
     }
+    process.exitCode = report.ok ? 0 : 1;
   } catch (error) {
-    process.stderr.write(`${error.message}\nAWS API calls made: 0\n`);
-    process.exit(2);
+    const message =
+      error instanceof Error &&
+      [SQS_FOUNDATION_ARGUMENT_ERROR, SQS_FOUNDATION_TEMPLATE_INPUT_ERROR].includes(error.message)
+        ? error.message
+        : SQS_FOUNDATION_TEMPLATE_INPUT_ERROR;
+    process.stderr.write(`${message}\nAWS API calls made: 0\n`);
+    process.exitCode = 2;
   }
-
-  const report = {
-    ...validateSqsFoundationSource(readFileSync(options.template, 'utf8')),
-    template: options.template,
-  };
-  if (options.json) {
-    process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
-  } else if (report.ok) {
-    process.stdout.write('Standalone SQS foundation validation passed.\nAWS API calls made: 0\n');
-  } else {
-    process.stderr.write('Standalone SQS foundation validation failed:\n');
-    for (const error of report.errors) process.stderr.write(`- ${error}\n`);
-    process.stderr.write('AWS API calls made: 0\n');
-  }
-  process.exit(report.ok ? 0 : 1);
 }
 
 if (resolve(process.argv[1] ?? '') === fileURLToPath(import.meta.url)) main();

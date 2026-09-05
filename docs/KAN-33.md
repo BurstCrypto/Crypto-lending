@@ -199,6 +199,11 @@ It enables SQS-managed KMS encryption, long DLQ retention, and a
 `RedriveAllowPolicy` restricted to the predictable source queue ARN. The
 LocalStack initializer mirrors the same retry topology.
 
+`npm run infra:validate:sqs` is an offline validation boundary and performs no
+AWS calls. It accepts only a canonical, single-link, stable local template of
+at most 51,200 bytes, decodes it as strict UTF-8, and rejects empty files,
+byte-order marks, links, and files that change while being read.
+
 Production images run the compiled migration entrypoint and do not require
 TypeScript tooling or source files. After `npm run build --workspace
 @crypto-lending/api`, use `db:migrate:prod`, `db:status:prod`, or

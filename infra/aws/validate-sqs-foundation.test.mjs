@@ -1,12 +1,66 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
+import {
+  linkSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
-import { validateSqsFoundationSource } from './validate-sqs-foundation.mjs';
+import {
+  MAX_SQS_FOUNDATION_TEMPLATE_BYTES,
+  readLocalSqsFoundationTemplate,
+  readLocalSqsFoundationTemplateForTest,
+  SQS_FOUNDATION_ARGUMENT_ERROR,
+  SQS_FOUNDATION_TEMPLATE_INPUT_ERROR,
+  validateSqsFoundationSource,
+} from './validate-sqs-foundation.mjs';
 
-const templatePath = join(import.meta.dirname, 'sqs-foundation.yaml');
+const scriptDirectory = dirname(fileURLToPath(import.meta.url));
+const templatePath = join(scriptDirectory, 'sqs-foundation.yaml');
+const validatorPath = join(scriptDirectory, 'validate-sqs-foundation.mjs');
 const templateSource = readFileSync(templatePath, 'utf8').replace(/\r\n/g, '\n');
+
+function withTemporaryTemplate(contents, assertion) {
+  const directory = mkdtempSync(join(tmpdir(), 'sqs-foundation-input-'));
+  const temporaryTemplatePath = join(directory, 'template.yaml');
+  writeFileSync(temporaryTemplatePath, contents);
+  try {
+    assertion(temporaryTemplatePath, directory);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+function assertInputRejected(path) {
+  assert.throws(
+    () => readLocalSqsFoundationTemplate(path),
+    (error) =>
+      error instanceof Error &&
+      error.message === SQS_FOUNDATION_TEMPLATE_INPUT_ERROR &&
+      !error.message.includes(path),
+  );
+}
+
+function skipUnsupportedLink(error, context) {
+  if (
+    error &&
+    typeof error === 'object' &&
+    'code' in error &&
+    ['EACCES', 'EINVAL', 'ENOSYS', 'ENOTSUP', 'EPERM', 'UNKNOWN'].includes(error.code)
+  ) {
+    context.skip(`symbolic links are unavailable: ${error.code}`);
+    return true;
+  }
+  return false;
+}
 
 function mutate(search, replacement) {
   const source = templateSource.replace(search, replacement);
@@ -29,6 +83,113 @@ test('accepts the exact encrypted standalone queue topology without AWS calls', 
   assert.equal(report.ok, true);
   assert.equal(report.awsCallsMade, 0);
   assert.deepEqual(report.errors, []);
+});
+
+test('securely loads the reviewed standalone SQS template', () => {
+  const loaded = readLocalSqsFoundationTemplate(templatePath);
+  assert.equal(loaded.source, templateSource);
+  assert.equal(loaded.resolved, templatePath);
+});
+
+test('rejects malformed UTF-8, a byte-order mark, empty input, and oversized input', () => {
+  const bytes = readFileSync(templatePath);
+  for (const contents of [
+    Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), bytes]),
+    Buffer.concat([bytes.subarray(0, bytes.length - 1), Buffer.from([0xff])]),
+    Buffer.alloc(0),
+    Buffer.alloc(MAX_SQS_FOUNDATION_TEMPLATE_BYTES + 1, 0x20),
+  ]) {
+    withTemporaryTemplate(contents, assertInputRejected);
+  }
+});
+
+test('rejects directory and hard-linked standalone SQS template inputs', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'sqs-foundation-files-'));
+  try {
+    const directoryPath = join(directory, 'directory.yaml');
+    mkdirSync(directoryPath);
+    assertInputRejected(directoryPath);
+
+    const sourcePath = join(directory, 'source.yaml');
+    const linkedPath = join(directory, 'hard-link.yaml');
+    writeFileSync(sourcePath, templateSource);
+    linkSync(sourcePath, linkedPath);
+    assertInputRejected(sourcePath);
+    assertInputRejected(linkedPath);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('rejects a symbolic-link standalone SQS template when supported', (context) => {
+  const directory = mkdtempSync(join(tmpdir(), 'sqs-foundation-symlink-'));
+  try {
+    const targetPath = join(directory, 'target.yaml');
+    const linkedPath = join(directory, 'linked.yaml');
+    writeFileSync(targetPath, templateSource);
+    try {
+      symlinkSync(targetPath, linkedPath, 'file');
+    } catch (error) {
+      if (skipUnsupportedLink(error, context)) return;
+      throw error;
+    }
+    assertInputRejected(linkedPath);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('rejects a same-size rewrite during the stable descriptor read', () => {
+  const original = Buffer.from(templateSource, 'utf8');
+  const replacement = Buffer.from(
+    templateSource.replace('Description: Crypto', 'Description: Broken'),
+    'utf8',
+  );
+  assert.equal(replacement.length, original.length);
+  assert.notDeepEqual(replacement, original);
+
+  withTemporaryTemplate(original, (path) => {
+    assert.throws(
+      () =>
+        readLocalSqsFoundationTemplateForTest(path, () => {
+          writeFileSync(path, replacement);
+        }),
+      (error) => error instanceof Error && error.message === SQS_FOUNDATION_TEMPLATE_INPUT_ERROR,
+    );
+  });
+});
+
+test('CLI input failures expose only fixed path-free errors and zero AWS calls', () => {
+  const hostilePath = join(tmpdir(), 'missing-template-with-sensitive-name.yaml');
+  const inputFailure = spawnSync(
+    process.execPath,
+    [validatorPath, '--template', hostilePath, '--json'],
+    {
+      encoding: 'utf8',
+      env: { ...process.env, AWS_EC2_METADATA_DISABLED: 'true' },
+      windowsHide: true,
+    },
+  );
+
+  assert.equal(inputFailure.status, 2);
+  assert.equal(inputFailure.stdout, '');
+  assert.equal(
+    inputFailure.stderr,
+    `${SQS_FOUNDATION_TEMPLATE_INPUT_ERROR}\nAWS API calls made: 0\n`,
+  );
+  assert.equal(inputFailure.stderr.includes(hostilePath), false);
+
+  const hostileArgument = '--sensitive-customer-token';
+  const argumentFailure = spawnSync(process.execPath, [validatorPath, hostileArgument], {
+    encoding: 'utf8',
+    env: { ...process.env, AWS_EC2_METADATA_DISABLED: 'true' },
+    windowsHide: true,
+  });
+
+  assert.equal(argumentFailure.status, 2);
+  assert.equal(argumentFailure.stdout, '');
+  assert.equal(argumentFailure.stderr, `${SQS_FOUNDATION_ARGUMENT_ERROR}\nAWS API calls made: 0\n`);
+  assert.equal(argumentFailure.stderr.includes(hostileArgument), false);
 });
 
 test('rejects widening or extending the exact standalone parameters', () => {
@@ -84,7 +245,7 @@ test('rejects duplicate and unapproved top-level sections', () => {
 
 test('rejects missing, additional, or retyped standalone queue resources', () => {
   assertRejected(
-    mutate(/^  JobQueue:[\s\S]*?(?=^  JobQueueTlsPolicy:)/m, ''),
+    mutate(/^ {2}JobQueue:[\s\S]*?(?=^ {2}JobQueueTlsPolicy:)/m, ''),
     /topology is missing JobQueue/,
   );
 
