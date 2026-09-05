@@ -55,6 +55,10 @@ export interface BalanceSyncConsumerComposition {
 export function createBalanceSyncConsumerComposition(
   dependencies: BalanceSyncConsumerCompositionDependencies,
 ): Readonly<BalanceSyncConsumerComposition> {
+  if (dependencies.infrastructureConfig.workload !== 'balance-consumer') {
+    throw new Error('Balance sync consumer composition requires the balance-consumer workload');
+  }
+
   const ethereumIndexer = new EthereumMainnetBalanceIndexerAdapter(
     dependencies.ethereumTransport,
     dependencies.walletAddressResolver,

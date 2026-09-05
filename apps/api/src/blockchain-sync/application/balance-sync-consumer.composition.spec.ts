@@ -21,9 +21,11 @@ import type {
   BalanceSyncWalletAddressResolverPort,
 } from './ports/balance-sync.ports';
 
-function infrastructureConfig(): InfrastructureConfig {
+function infrastructureConfig(
+  workload: InfrastructureConfig['workload'] = 'balance-consumer',
+): InfrastructureConfig {
   return {
-    workload: 'worker',
+    workload,
     database: {
       connectionString: 'postgresql://unused',
       connectionTimeoutMs: 100,
@@ -106,6 +108,37 @@ function createHarness(): Readonly<{
 }
 
 describe('createBalanceSyncConsumerComposition', () => {
+  it.each(['api', 'worker'] as const)(
+    'rejects the %s workload before constructing the dormant consumer graph',
+    (workload) => {
+      const ethereumExchange = jest.fn();
+      const solanaExchange = jest.fn();
+      const receive = jest.fn();
+
+      expect(() =>
+        createBalanceSyncConsumerComposition({
+          sqs: { receive } as unknown as SqsService,
+          infrastructureConfig: infrastructureConfig(workload),
+          observability: applicationObservability,
+          ethereumTransport: { exchange: ethereumExchange },
+          solanaTransport: { exchange: solanaExchange },
+          walletAddressResolver: { resolveActiveAddress: jest.fn() },
+          checkpoints: {
+            load: jest.fn(),
+            upsertCurrent: jest.fn(),
+            replaceProvisionalAfterReorg: jest.fn(),
+            preserveLastGoodAndMarkStale: jest.fn(),
+          },
+          clock: { now: () => new Date('2026-09-04T12:00:00.000Z') },
+          metrics: { record: jest.fn(), alert: jest.fn() },
+        }),
+      ).toThrow('Balance sync consumer composition requires the balance-consumer workload');
+      expect(receive).not.toHaveBeenCalled();
+      expect(ethereumExchange).not.toHaveBeenCalled();
+      expect(solanaExchange).not.toHaveBeenCalled();
+    },
+  );
+
   it('constructs an inert, transparent, fail-closed object graph', () => {
     const test = createHarness();
 
