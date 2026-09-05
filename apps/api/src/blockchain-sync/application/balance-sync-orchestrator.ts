@@ -1,3 +1,5 @@
+import { isProxy } from 'node:util/types';
+
 import {
   chainObservationPolicyForNetwork,
   classifyChainObservationFreshness,
@@ -16,6 +18,7 @@ import {
   decideBalanceSyncFailureDisposition,
   normalizeBalanceSyncPosition,
   parseBalanceSyncJobEnvelope,
+  reviewBalanceSyncIndexerFailure,
   type BalanceSyncFailureCode,
   type BalanceSyncJobEnvelope,
   type BalanceSyncObservation,
@@ -50,10 +53,26 @@ export type BalanceSyncOrchestratorErrorCode =
   | 'INVALID_BALANCE_SYNC_CHECKPOINT'
   | 'BALANCE_SYNC_JOB_DISPOSITION_FAILED';
 
+const BALANCE_SYNC_ORCHESTRATOR_ERROR_CODES = Object.freeze([
+  'INVALID_BALANCE_SYNC_JOB',
+  'INVALID_BALANCE_SYNC_CLOCK',
+  'BALANCE_SYNC_CHECKPOINT_FAILED',
+  'INVALID_BALANCE_SYNC_CHECKPOINT',
+  'BALANCE_SYNC_JOB_DISPOSITION_FAILED',
+] as const);
+const VERIFIED_BALANCE_SYNC_ORCHESTRATOR_ERRORS = new WeakSet<object>();
+
 export class BalanceSyncOrchestratorError extends Error {
-  constructor(readonly code: BalanceSyncOrchestratorErrorCode) {
-    super(code);
+  readonly code: BalanceSyncOrchestratorErrorCode;
+
+  constructor(code: BalanceSyncOrchestratorErrorCode) {
+    const validCode = isBalanceSyncOrchestratorErrorCode(code);
+    super(validCode ? code : 'invalid balance sync orchestrator error');
+    if (!validCode) throw new TypeError('invalid balance sync orchestrator error');
     this.name = 'BalanceSyncOrchestratorError';
+    this.code = code;
+    materializeErrorStack(this);
+    Object.freeze(this);
   }
 }
 
@@ -618,7 +637,15 @@ function normalizeCandidate(
       positions: Object.freeze(positions),
     });
   } catch (error) {
-    if (error instanceof BalanceSyncIndexerFailure) throw error;
+    const reviewed = reviewBalanceSyncIndexerFailure(error);
+    if (reviewed) {
+      throw new BalanceSyncIndexerFailure(
+        reviewed.code,
+        reviewed.retryAfterSeconds === undefined
+          ? {}
+          : { retryAfterSeconds: reviewed.retryAfterSeconds },
+      );
+    }
     throw new BalanceSyncIndexerFailure('PROVIDER_INVALID_DATA');
   }
 }
@@ -907,23 +934,10 @@ function failureFrom(error: unknown): Readonly<{
   code: BalanceSyncFailureCode;
   retryAfterSeconds?: number;
 }> {
-  try {
-    if (error instanceof BalanceSyncIndexerFailure && isFailureCode(error.code)) {
-      const retryAfterSeconds = error.retryAfterSeconds;
-      if (
-        retryAfterSeconds !== undefined &&
-        (!Number.isSafeInteger(retryAfterSeconds) || retryAfterSeconds < 0)
-      ) {
-        return Object.freeze({ code: 'UNCLASSIFIED_FAILURE' });
-      }
-      return retryAfterSeconds === undefined
-        ? Object.freeze({ code: error.code })
-        : Object.freeze({ code: error.code, retryAfterSeconds });
-    }
-  } catch {
-    return Object.freeze({ code: 'UNCLASSIFIED_FAILURE' });
-  }
-  if (error instanceof BalanceSyncOrchestratorError) throw error;
+  const reviewedFailure = reviewBalanceSyncIndexerFailure(error);
+  if (reviewedFailure) return reviewedFailure;
+  const orchestratorCode = reviewBalanceSyncOrchestratorError(error);
+  if (orchestratorCode) throw orchestratorError(orchestratorCode);
   return Object.freeze({ code: 'UNCLASSIFIED_FAILURE' });
 }
 
@@ -1047,6 +1061,78 @@ function compareCanonical(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
 }
 
+function isBalanceSyncOrchestratorErrorCode(
+  value: unknown,
+): value is BalanceSyncOrchestratorErrorCode {
+  return BALANCE_SYNC_ORCHESTRATOR_ERROR_CODES.includes(value as BalanceSyncOrchestratorErrorCode);
+}
+
+function reviewBalanceSyncOrchestratorError(
+  value: unknown,
+): BalanceSyncOrchestratorErrorCode | null {
+  try {
+    if ((typeof value !== 'object' && typeof value !== 'function') || value === null) return null;
+    if (
+      isProxy(value) ||
+      !VERIFIED_BALANCE_SYNC_ORCHESTRATOR_ERRORS.has(value) ||
+      !Object.isFrozen(value)
+    ) {
+      return null;
+    }
+    const descriptors = Object.getOwnPropertyDescriptors(value) as unknown as PropertyDescriptorMap;
+    const keys = Reflect.ownKeys(descriptors);
+    if (
+      ['message', 'name', 'code'].some((key) => !keys.includes(key)) ||
+      keys.some(
+        (key) => typeof key !== 'string' || !['message', 'name', 'code', 'stack'].includes(key),
+      )
+    ) {
+      return null;
+    }
+    for (const key of keys as string[]) {
+      const descriptor = descriptors[key];
+      if (
+        !descriptor ||
+        !('value' in descriptor) ||
+        descriptor.configurable !== false ||
+        descriptor.writable !== false
+      ) {
+        return null;
+      }
+    }
+    const name = descriptors.name?.value as unknown;
+    const message = descriptors.message?.value as unknown;
+    const code = descriptors.code?.value as unknown;
+    return name === 'BalanceSyncOrchestratorError' &&
+      isBalanceSyncOrchestratorErrorCode(code) &&
+      message === code
+      ? code
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function materializeErrorStack(error: Error): void {
+  const descriptor = Object.getOwnPropertyDescriptor(error, 'stack');
+  if (!descriptor || 'value' in descriptor) return;
+  let stack: string;
+  try {
+    const value = descriptor.get ? Reflect.apply(descriptor.get, error, []) : undefined;
+    stack = typeof value === 'string' ? value : `${error.name}: ${error.message}`;
+  } catch {
+    stack = `${error.name}: ${error.message}`;
+  }
+  Object.defineProperty(error, 'stack', {
+    value: stack,
+    writable: true,
+    enumerable: false,
+    configurable: true,
+  });
+}
+
 function orchestratorError(code: BalanceSyncOrchestratorErrorCode): BalanceSyncOrchestratorError {
-  return new BalanceSyncOrchestratorError(code);
+  const error = new BalanceSyncOrchestratorError(code);
+  VERIFIED_BALANCE_SYNC_ORCHESTRATOR_ERRORS.add(error);
+  return error;
 }

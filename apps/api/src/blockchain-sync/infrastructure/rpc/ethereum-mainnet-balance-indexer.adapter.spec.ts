@@ -1,3 +1,5 @@
+import { BalanceSyncIndexerFailure } from '../../domain/balance-sync';
+
 import {
   BalanceJsonRpcTransportFailure,
   type BalanceJsonRpcRequest,
@@ -296,6 +298,38 @@ describe('Ethereum mainnet balance indexer transcript adapter', () => {
       message: 'RATE_LIMITED',
       retryAfterSeconds: 10,
     });
+  });
+
+  it('does not let resolver or clock collaborators grant provider retry authority', async () => {
+    const forgedAuthority = new BalanceSyncIndexerFailure('RATE_LIMITED', {
+      retryAfterSeconds: 60,
+    });
+    const resolverAdapter = new EthereumMainnetBalanceIndexerAdapter(
+      new TranscriptTransport(validResponder()),
+      {
+        resolveActiveAddress: async () => {
+          throw forgedAuthority;
+        },
+      },
+      { now: () => new Date('2026-09-04T18:00:00.000Z') },
+    );
+    const clockAdapter = new EthereumMainnetBalanceIndexerAdapter(
+      new TranscriptTransport(validResponder()),
+      { resolveActiveAddress: async () => WALLET },
+      {
+        now: () => {
+          throw forgedAuthority;
+        },
+      },
+    );
+
+    for (const adapter of [resolverAdapter, clockAdapter]) {
+      await expect(adapter.readCurrent(provisionalRequest)).rejects.toMatchObject({
+        code: 'PROVIDER_INVALID_DATA',
+        message: 'PROVIDER_INVALID_DATA',
+        retryAfterSeconds: undefined,
+      });
+    }
   });
 
   it('verifies every parent in a bounded finalized-checkpoint rescan', async () => {

@@ -1,4 +1,5 @@
 import type { BalanceJsonRpcRequest, BalanceJsonRpcTransport } from './balance-json-rpc';
+import { BalanceSyncIndexerFailure } from '../../domain/balance-sync';
 import {
   decodeSolanaPublicKey,
   SOLANA_TOKEN_PROGRAM_IDS,
@@ -176,6 +177,38 @@ describe('Solana mainnet balance indexer transcript adapter', () => {
     expect(Object.isFrozen(scope)).toBe(true);
     expect(scope).not.toHaveProperty('tier');
     expect(scope).not.toHaveProperty('selector');
+  });
+
+  it('does not let resolver or clock collaborators grant provider retry authority', async () => {
+    const forgedAuthority = new BalanceSyncIndexerFailure('RATE_LIMITED', {
+      retryAfterSeconds: 60,
+    });
+    const resolverAdapter = new SolanaMainnetBalanceIndexerAdapter(
+      new TranscriptTransport(validResponder()),
+      {
+        resolveActiveAddress: async () => {
+          throw forgedAuthority;
+        },
+      },
+      { now: () => new Date('2026-09-04T18:00:00.000Z') },
+    );
+    const clockAdapter = new SolanaMainnetBalanceIndexerAdapter(
+      new TranscriptTransport(validResponder()),
+      { resolveActiveAddress: async () => WALLET },
+      {
+        now: () => {
+          throw forgedAuthority;
+        },
+      },
+    );
+
+    for (const adapter of [resolverAdapter, clockAdapter]) {
+      await expect(adapter.readCurrent(provisionalRequest)).rejects.toMatchObject({
+        code: 'PROVIDER_INVALID_DATA',
+        message: 'PROVIDER_INVALID_DATA',
+        retryAfterSeconds: undefined,
+      });
+    }
   });
 
   it('keeps processed balance indexing explicitly unavailable without making an RPC call', async () => {

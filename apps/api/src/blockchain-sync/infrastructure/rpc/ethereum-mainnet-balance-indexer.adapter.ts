@@ -2,6 +2,7 @@ import {
   BALANCE_SYNC_POLICY,
   BalanceSyncIndexerFailure,
   normalizeBalanceSyncPosition,
+  reviewBalanceSyncIndexerFailure,
   type BalanceSyncPosition,
   type BalanceSyncSourcePoint,
 } from '../../domain/balance-sync';
@@ -218,9 +219,8 @@ export class EthereumMainnetBalanceIndexerAdapter implements BalanceSyncIndexerP
   }
 
   private async resolveAddress(request: BalanceIndexerReadRequest): Promise<string> {
-    let value: unknown;
     try {
-      value = await this.addresses.resolveActiveAddress(
+      const value = await this.addresses.resolveActiveAddress(
         Object.freeze({
           accountId: request.accountId,
           walletId: request.walletId,
@@ -228,8 +228,7 @@ export class EthereumMainnetBalanceIndexerAdapter implements BalanceSyncIndexerP
         }),
       );
       return parseEvmWalletAddress(value);
-    } catch (error) {
-      if (error instanceof BalanceSyncIndexerFailure) throw error;
+    } catch {
       throw new BalanceSyncIndexerFailure('PROVIDER_INVALID_DATA');
     }
   }
@@ -273,7 +272,15 @@ export class EthereumMainnetBalanceIndexerAdapter implements BalanceSyncIndexerP
     try {
       return await operation();
     } catch (error) {
-      if (error instanceof BalanceSyncIndexerFailure) throw error;
+      const reviewed = reviewBalanceSyncIndexerFailure(error);
+      if (reviewed) {
+        throw new BalanceSyncIndexerFailure(
+          reviewed.code,
+          reviewed.retryAfterSeconds === undefined
+            ? {}
+            : { retryAfterSeconds: reviewed.retryAfterSeconds },
+        );
+      }
       throw new BalanceSyncIndexerFailure('PROVIDER_INVALID_DATA');
     }
   }
@@ -407,11 +414,16 @@ function toHexQuantity(value: bigint): string {
 }
 
 function canonicalClockTime(clock: BalanceSyncClockPort): string {
-  const value = clock.now();
-  if (!(value instanceof Date) || !Number.isFinite(value.getTime())) {
+  try {
+    const value = clock.now();
+    const milliseconds = Date.prototype.getTime.call(value) as number;
+    if (!Number.isFinite(milliseconds)) {
+      throw new Error('invalid clock');
+    }
+    return Date.prototype.toISOString.call(value) as string;
+  } catch {
     throw new BalanceSyncIndexerFailure('PROVIDER_INVALID_DATA');
   }
-  return value.toISOString();
 }
 
 function recoveryResult(

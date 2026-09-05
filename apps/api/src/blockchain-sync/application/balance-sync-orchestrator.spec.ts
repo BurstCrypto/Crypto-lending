@@ -768,6 +768,62 @@ describe('BalanceSyncOrchestrator', () => {
     });
   });
 
+  it('does not grant retry authority to counterfeit, proxied, or mutable-looking failures', async () => {
+    const counterfeit = Object.freeze(
+      Object.assign(Object.create(BalanceSyncIndexerFailure.prototype) as Record<string, unknown>, {
+        name: 'BalanceSyncIndexerFailure',
+        message: 'RATE_LIMITED',
+        code: 'RATE_LIMITED',
+        retryAfterSeconds: 60,
+      }),
+    );
+    const authentic = new BalanceSyncIndexerFailure('RATE_LIMITED', { retryAfterSeconds: 60 });
+    const traps: string[] = [];
+    const proxy = new Proxy(authentic, {
+      getPrototypeOf: () => {
+        traps.push('getPrototypeOf');
+        return BalanceSyncIndexerFailure.prototype;
+      },
+      getOwnPropertyDescriptor: () => {
+        traps.push('getOwnPropertyDescriptor');
+        return undefined;
+      },
+    });
+    const revoked = Proxy.revocable(authentic, {});
+    revoked.revoke();
+
+    for (const rejected of [counterfeit, proxy, revoked.proxy]) {
+      const test = harness({
+        read: async () => {
+          throw rejected;
+        },
+      });
+      await expect(test.orchestrator.process(job())).resolves.toMatchObject({
+        status: 'DEAD_LETTERED',
+        failureCode: 'UNCLASSIFIED_FAILURE',
+        reason: 'NON_RETRYABLE_FAILURE',
+      });
+      expect(test.jobs.retries).toHaveLength(0);
+    }
+    expect(traps).toEqual([]);
+  });
+
+  it('does not accept a collaborator-constructed orchestrator error as internal authority', async () => {
+    const injected = new BalanceSyncOrchestratorError('INVALID_BALANCE_SYNC_CLOCK');
+    const test = harness({
+      read: async () => {
+        throw injected;
+      },
+    });
+
+    await expect(test.orchestrator.process(job())).resolves.toMatchObject({
+      status: 'DEAD_LETTERED',
+      failureCode: 'UNCLASSIFIED_FAILURE',
+      reason: 'NON_RETRYABLE_FAILURE',
+    });
+    expect(Object.isFrozen(injected)).toBe(true);
+  });
+
   it('dead-letters a transient provider failure after the third bounded attempt', async () => {
     const test = harness({
       read: async () => {

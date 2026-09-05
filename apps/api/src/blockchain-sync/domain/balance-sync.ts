@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { isProxy } from 'node:util/types';
 
 import {
   CHAIN_OBSERVATION_RESILIENCE_POLICY,
@@ -68,23 +69,110 @@ export type BalanceSyncFailureCode =
   | 'REORG_RECOVERY_FAILED'
   | 'UNCLASSIFIED_FAILURE';
 
+type BalanceSyncIndexerFailureCode = Exclude<BalanceSyncFailureCode, 'UNCLASSIFIED_FAILURE'>;
+
+export type ReviewedBalanceSyncIndexerFailure = Readonly<{
+  code: BalanceSyncIndexerFailureCode;
+  retryAfterSeconds?: number;
+}>;
+
+const VERIFIED_BALANCE_SYNC_INDEXER_FAILURES = new WeakSet<object>();
+const BALANCE_SYNC_INDEXER_FAILURE_ERROR = 'invalid balance sync indexer failure';
+const BALANCE_SYNC_INDEXER_FAILURE_REQUIRED_KEYS = Object.freeze([
+  'message',
+  'name',
+  'code',
+  'retryAfterSeconds',
+] as const);
+const BALANCE_SYNC_INDEXER_FAILURE_ALLOWED_KEYS = Object.freeze([
+  ...BALANCE_SYNC_INDEXER_FAILURE_REQUIRED_KEYS,
+  'stack',
+] as const);
+
 export class BalanceSyncIndexerFailure extends Error {
+  readonly code: BalanceSyncIndexerFailureCode;
   readonly retryAfterSeconds: number | undefined;
 
   constructor(
-    readonly code: Exclude<BalanceSyncFailureCode, 'UNCLASSIFIED_FAILURE'>,
+    code: BalanceSyncIndexerFailureCode,
     options: Readonly<{ retryAfterSeconds?: number }> = {},
   ) {
-    super(code);
-    this.name = 'BalanceSyncIndexerFailure';
-    if (
-      !isBalanceSyncIndexerFailureCode(code) ||
-      (options.retryAfterSeconds !== undefined &&
-        (!Number.isSafeInteger(options.retryAfterSeconds) || options.retryAfterSeconds < 0))
-    ) {
-      throw new TypeError('invalid balance sync indexer failure');
+    let reviewed: Readonly<{
+      code: BalanceSyncIndexerFailureCode;
+      retryAfterSeconds: number | undefined;
+    }>;
+    try {
+      reviewed = snapshotBalanceSyncIndexerFailureConstruction(code, options);
+    } catch {
+      throw new TypeError(BALANCE_SYNC_INDEXER_FAILURE_ERROR);
     }
-    this.retryAfterSeconds = options.retryAfterSeconds;
+    super(reviewed.code);
+    this.name = 'BalanceSyncIndexerFailure';
+    this.code = reviewed.code;
+    this.retryAfterSeconds = reviewed.retryAfterSeconds;
+    materializeErrorStack(this);
+    VERIFIED_BALANCE_SYNC_INDEXER_FAILURES.add(this);
+    Object.freeze(this);
+  }
+}
+
+/**
+ * Returns an owned immutable classification only for an authentic, unchanged
+ * failure constructed above. It never uses `instanceof` or reads a property.
+ */
+export function reviewBalanceSyncIndexerFailure(
+  value: unknown,
+): ReviewedBalanceSyncIndexerFailure | null {
+  try {
+    if ((typeof value !== 'object' && typeof value !== 'function') || value === null) return null;
+    if (
+      isProxy(value) ||
+      !VERIFIED_BALANCE_SYNC_INDEXER_FAILURES.has(value) ||
+      !Object.isFrozen(value)
+    ) {
+      return null;
+    }
+    const descriptors = Object.getOwnPropertyDescriptors(value) as unknown as PropertyDescriptorMap;
+    const keys = Reflect.ownKeys(descriptors);
+    if (
+      BALANCE_SYNC_INDEXER_FAILURE_REQUIRED_KEYS.some((key) => !keys.includes(key)) ||
+      keys.some(
+        (key) =>
+          typeof key !== 'string' ||
+          !(BALANCE_SYNC_INDEXER_FAILURE_ALLOWED_KEYS as readonly string[]).includes(key),
+      )
+    ) {
+      return null;
+    }
+    for (const key of keys as string[]) {
+      const descriptor = descriptors[key];
+      if (
+        !descriptor ||
+        !('value' in descriptor) ||
+        descriptor.configurable !== false ||
+        descriptor.writable !== false
+      ) {
+        return null;
+      }
+    }
+    const name = descriptors.name?.value as unknown;
+    const message = descriptors.message?.value as unknown;
+    const code = descriptors.code?.value as unknown;
+    const retryAfterSeconds = descriptors.retryAfterSeconds?.value as unknown;
+    if (
+      name !== 'BalanceSyncIndexerFailure' ||
+      !isBalanceSyncIndexerFailureCode(code) ||
+      message !== code ||
+      (retryAfterSeconds !== undefined &&
+        (!Number.isSafeInteger(retryAfterSeconds) || (retryAfterSeconds as number) < 0))
+    ) {
+      return null;
+    }
+    return retryAfterSeconds === undefined
+      ? Object.freeze({ code })
+      : Object.freeze({ code, retryAfterSeconds: retryAfterSeconds as number });
+  } catch {
+    return null;
   }
 }
 
@@ -435,9 +523,7 @@ function exactRecord(value: unknown, keys: readonly string[]): Record<string, un
   }
 }
 
-function isBalanceSyncIndexerFailureCode(
-  value: unknown,
-): value is Exclude<BalanceSyncFailureCode, 'UNCLASSIFIED_FAILURE'> {
+function isBalanceSyncIndexerFailureCode(value: unknown): value is BalanceSyncIndexerFailureCode {
   return [
     'RATE_LIMITED',
     'PROVIDER_TIMEOUT',
@@ -445,7 +531,70 @@ function isBalanceSyncIndexerFailureCode(
     'PROVIDER_INVALID_DATA',
     'PERMANENT_PROVIDER_FAILURE',
     'REORG_RECOVERY_FAILED',
-  ].includes(value as Exclude<BalanceSyncFailureCode, 'UNCLASSIFIED_FAILURE'>);
+  ].includes(value as BalanceSyncIndexerFailureCode);
+}
+
+function snapshotBalanceSyncIndexerFailureConstruction(
+  code: unknown,
+  options: unknown,
+): Readonly<{
+  code: BalanceSyncIndexerFailureCode;
+  retryAfterSeconds: number | undefined;
+}> {
+  if (!isBalanceSyncIndexerFailureCode(code)) {
+    throw new Error(BALANCE_SYNC_INDEXER_FAILURE_ERROR);
+  }
+  if (
+    typeof options !== 'object' ||
+    options === null ||
+    Array.isArray(options) ||
+    isProxy(options)
+  ) {
+    throw new Error(BALANCE_SYNC_INDEXER_FAILURE_ERROR);
+  }
+  const prototype = Object.getPrototypeOf(options) as unknown;
+  if (prototype !== Object.prototype && prototype !== null) {
+    throw new Error(BALANCE_SYNC_INDEXER_FAILURE_ERROR);
+  }
+  const descriptors = Object.getOwnPropertyDescriptors(options) as unknown as PropertyDescriptorMap;
+  const keys = Reflect.ownKeys(descriptors);
+  if (
+    keys.length > 1 ||
+    keys.some((key) => typeof key !== 'string' || key !== 'retryAfterSeconds')
+  ) {
+    throw new Error(BALANCE_SYNC_INDEXER_FAILURE_ERROR);
+  }
+  if (keys.length === 0) return Object.freeze({ code, retryAfterSeconds: undefined });
+  const descriptor = descriptors.retryAfterSeconds;
+  if (!descriptor?.enumerable || !('value' in descriptor)) {
+    throw new Error(BALANCE_SYNC_INDEXER_FAILURE_ERROR);
+  }
+  const retryAfterSeconds = descriptor.value as unknown;
+  if (
+    retryAfterSeconds !== undefined &&
+    (!Number.isSafeInteger(retryAfterSeconds) || (retryAfterSeconds as number) < 0)
+  ) {
+    throw new Error(BALANCE_SYNC_INDEXER_FAILURE_ERROR);
+  }
+  return Object.freeze({ code, retryAfterSeconds: retryAfterSeconds as number | undefined });
+}
+
+function materializeErrorStack(error: Error): void {
+  const descriptor = Object.getOwnPropertyDescriptor(error, 'stack');
+  if (!descriptor || 'value' in descriptor) return;
+  let stack: string;
+  try {
+    const value = descriptor.get ? Reflect.apply(descriptor.get, error, []) : undefined;
+    stack = typeof value === 'string' ? value : `${error.name}: ${error.message}`;
+  } catch {
+    stack = `${error.name}: ${error.message}`;
+  }
+  Object.defineProperty(error, 'stack', {
+    value: stack,
+    writable: true,
+    enumerable: false,
+    configurable: true,
+  });
 }
 
 function digest(domain: string, ...parts: readonly string[]): string {

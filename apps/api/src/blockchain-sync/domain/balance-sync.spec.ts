@@ -10,6 +10,7 @@ import {
   decideBalanceSyncFailureDisposition,
   normalizeBalanceSyncPosition,
   parseBalanceSyncJobEnvelope,
+  reviewBalanceSyncIndexerFailure,
   type BalanceSyncJobPayload,
   type BalanceSyncPosition,
 } from './balance-sync';
@@ -161,6 +162,93 @@ describe('balance sync domain', () => {
       retryAfterSeconds: 10,
     });
     expect(() => new BalanceSyncIndexerFailure('NOT_A_FAILURE' as never)).toThrow(TypeError);
+  });
+
+  it('brands, snapshots, and freezes authentic indexer failures', () => {
+    const options = { retryAfterSeconds: 10 };
+    const failure = new BalanceSyncIndexerFailure('RATE_LIMITED', options);
+    options.retryAfterSeconds = 45;
+
+    const reviewed = reviewBalanceSyncIndexerFailure(failure);
+
+    expect(Object.isFrozen(failure)).toBe(true);
+    expect(Reflect.set(failure, 'code', 'PROVIDER_UNAVAILABLE')).toBe(false);
+    expect(Reflect.set(failure, 'retryAfterSeconds', 45)).toBe(false);
+    expect(reviewed).toEqual({ code: 'RATE_LIMITED', retryAfterSeconds: 10 });
+    expect(Object.isFrozen(reviewed)).toBe(true);
+    expect(
+      reviewBalanceSyncIndexerFailure(new BalanceSyncIndexerFailure('PROVIDER_TIMEOUT')),
+    ).toEqual({ code: 'PROVIDER_TIMEOUT' });
+  });
+
+  it('rejects hostile constructor options without invoking them or exposing their detail', () => {
+    let getterReads = 0;
+    const accessor = Object.create(null) as Record<string, unknown>;
+    Object.defineProperty(accessor, 'retryAfterSeconds', {
+      enumerable: true,
+      get: () => {
+        getterReads += 1;
+        throw new Error('private option detail');
+      },
+    });
+    const proxyTraps: string[] = [];
+    const proxy = new Proxy(
+      { retryAfterSeconds: 10 },
+      {
+        getPrototypeOf: () => {
+          proxyTraps.push('getPrototypeOf');
+          return Object.prototype;
+        },
+        ownKeys: () => {
+          proxyTraps.push('ownKeys');
+          return ['retryAfterSeconds'];
+        },
+      },
+    );
+    const revoked = Proxy.revocable({ retryAfterSeconds: 10 }, {});
+    revoked.revoke();
+    const invalid = [
+      accessor,
+      { retryAfterSeconds: 10, extra: true },
+      { [Symbol('hidden')]: 10 },
+      Object.create({ retryAfterSeconds: 10 }),
+      proxy,
+      revoked.proxy,
+    ];
+
+    for (const options of invalid) {
+      expect(() => new BalanceSyncIndexerFailure('RATE_LIMITED', options as never)).toThrow(
+        new TypeError('invalid balance sync indexer failure'),
+      );
+    }
+    expect(getterReads).toBe(0);
+    expect(proxyTraps).toEqual([]);
+  });
+
+  it('reviews neither prototype counterfeits nor live or revoked proxies', () => {
+    const counterfeit = Object.freeze(
+      Object.assign(Object.create(BalanceSyncIndexerFailure.prototype) as Record<string, unknown>, {
+        name: 'BalanceSyncIndexerFailure',
+        message: 'RATE_LIMITED',
+        code: 'RATE_LIMITED',
+        retryAfterSeconds: 60,
+      }),
+    );
+    const authentic = new BalanceSyncIndexerFailure('RATE_LIMITED', { retryAfterSeconds: 10 });
+    const proxyTraps: string[] = [];
+    const proxy = new Proxy(authentic, {
+      getOwnPropertyDescriptor: () => {
+        proxyTraps.push('getOwnPropertyDescriptor');
+        return undefined;
+      },
+    });
+    const revoked = Proxy.revocable(authentic, {});
+    revoked.revoke();
+
+    expect(reviewBalanceSyncIndexerFailure(counterfeit)).toBeNull();
+    expect(reviewBalanceSyncIndexerFailure(proxy)).toBeNull();
+    expect(reviewBalanceSyncIndexerFailure(revoked.proxy)).toBeNull();
+    expect(proxyTraps).toEqual([]);
   });
 
   it.each([
