@@ -1,16 +1,180 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import {
+  linkSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 
-import { validateApplicationObservabilitySource } from './validate-application-observability.mjs';
+import {
+  APPLICATION_OBSERVABILITY_ARGUMENT_ERROR,
+  APPLICATION_OBSERVABILITY_TEMPLATE_INPUT_ERROR,
+  MAX_APPLICATION_OBSERVABILITY_TEMPLATE_BYTES,
+  readLocalApplicationObservabilityTemplate,
+  readLocalApplicationObservabilityTemplateForTest,
+  validateApplicationObservabilitySource,
+} from './validate-application-observability.mjs';
 
-const source = readFileSync(join(import.meta.dirname, 'application-observability.yaml'), 'utf8');
+const templatePath = join(import.meta.dirname, 'application-observability.yaml');
+const validatorPath = join(import.meta.dirname, 'validate-application-observability.mjs');
+const source = readFileSync(templatePath, 'utf8');
+
+function withTemporaryTemplate(contents, assertion) {
+  const directory = mkdtempSync(join(tmpdir(), 'application-observability-input-'));
+  const temporaryTemplatePath = join(directory, 'template.yaml');
+  writeFileSync(temporaryTemplatePath, contents);
+  try {
+    assertion(temporaryTemplatePath, directory);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+function assertInputRejected(path) {
+  assert.throws(
+    () => readLocalApplicationObservabilityTemplate(path),
+    (error) =>
+      error instanceof Error &&
+      error.message === APPLICATION_OBSERVABILITY_TEMPLATE_INPUT_ERROR &&
+      !error.message.includes(path),
+  );
+}
+
+function skipUnsupportedLink(error, context) {
+  if (
+    error &&
+    typeof error === 'object' &&
+    'code' in error &&
+    ['EACCES', 'EINVAL', 'ENOSYS', 'ENOTSUP', 'EPERM', 'UNKNOWN'].includes(error.code)
+  ) {
+    context.skip(`symbolic links are unavailable: ${error.code}`);
+    return true;
+  }
+  return false;
+}
 
 test('accepts the exact reviewed observability child without external calls', () => {
   const report = validateApplicationObservabilitySource(source);
   assert.equal(report.ok, true, report.errors.join('\n'));
   assert.equal(report.awsCallsMade, 0);
+});
+
+test('securely loads the exact reviewed observability child', () => {
+  const loaded = readLocalApplicationObservabilityTemplate(templatePath);
+  assert.equal(loaded.source, source);
+  assert.equal(loaded.resolved, templatePath);
+});
+
+test('rejects malformed UTF-8, a byte-order mark, empty input, and oversized input', () => {
+  const bytes = readFileSync(templatePath);
+  for (const contents of [
+    Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), bytes]),
+    Buffer.concat([bytes.subarray(0, bytes.length - 1), Buffer.from([0xff])]),
+    Buffer.alloc(0),
+    Buffer.alloc(MAX_APPLICATION_OBSERVABILITY_TEMPLATE_BYTES + 1, 0x20),
+  ]) {
+    withTemporaryTemplate(contents, assertInputRejected);
+  }
+});
+
+test('rejects directory and hard-linked observability template inputs', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'application-observability-files-'));
+  try {
+    const directoryPath = join(directory, 'directory.yaml');
+    mkdirSync(directoryPath);
+    assertInputRejected(directoryPath);
+
+    const sourcePath = join(directory, 'source.yaml');
+    const linkedPath = join(directory, 'hard-link.yaml');
+    writeFileSync(sourcePath, source);
+    linkSync(sourcePath, linkedPath);
+    assertInputRejected(sourcePath);
+    assertInputRejected(linkedPath);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('rejects a symbolic-link observability template when supported', (context) => {
+  const directory = mkdtempSync(join(tmpdir(), 'application-observability-symlink-'));
+  try {
+    const targetPath = join(directory, 'target.yaml');
+    const linkedPath = join(directory, 'linked.yaml');
+    writeFileSync(targetPath, source);
+    try {
+      symlinkSync(targetPath, linkedPath, 'file');
+    } catch (error) {
+      if (skipUnsupportedLink(error, context)) return;
+      throw error;
+    }
+    assertInputRejected(linkedPath);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('rejects a same-size rewrite during the stable descriptor read', () => {
+  const original = Buffer.from(source, 'utf8');
+  const replacement = Buffer.from(
+    source.replace('Description: Production', 'Description: Unreviewed'),
+    'utf8',
+  );
+  assert.equal(replacement.length, original.length);
+  assert.notDeepEqual(replacement, original);
+
+  withTemporaryTemplate(original, (path) => {
+    assert.throws(
+      () =>
+        readLocalApplicationObservabilityTemplateForTest(path, () => {
+          writeFileSync(path, replacement);
+        }),
+      (error) =>
+        error instanceof Error && error.message === APPLICATION_OBSERVABILITY_TEMPLATE_INPUT_ERROR,
+    );
+  });
+});
+
+test('CLI input and argument failures expose only fixed path-free errors', () => {
+  const hostilePath = join(tmpdir(), 'missing-observability-template-with-sensitive-name.yaml');
+  const inputFailure = spawnSync(
+    process.execPath,
+    [validatorPath, '--template', hostilePath, '--json'],
+    {
+      encoding: 'utf8',
+      env: { ...process.env, AWS_EC2_METADATA_DISABLED: 'true' },
+      windowsHide: true,
+    },
+  );
+
+  assert.equal(inputFailure.status, 2);
+  assert.equal(inputFailure.stdout, '');
+  assert.equal(
+    inputFailure.stderr,
+    `${APPLICATION_OBSERVABILITY_TEMPLATE_INPUT_ERROR}\nAWS API calls made: 0\n`,
+  );
+  assert.equal(inputFailure.stderr.includes(hostilePath), false);
+
+  const hostileArgument = '--sensitive-customer-token';
+  const argumentFailure = spawnSync(process.execPath, [validatorPath, hostileArgument], {
+    encoding: 'utf8',
+    env: { ...process.env, AWS_EC2_METADATA_DISABLED: 'true' },
+    windowsHide: true,
+  });
+
+  assert.equal(argumentFailure.status, 2);
+  assert.equal(argumentFailure.stdout, '');
+  assert.equal(
+    argumentFailure.stderr,
+    `${APPLICATION_OBSERVABILITY_ARGUMENT_ERROR}\nAWS API calls made: 0\n`,
+  );
+  assert.equal(argumentFailure.stderr.includes(hostileArgument), false);
 });
 
 test('rejects line-ending drift even when the parsed YAML would be equivalent', () => {

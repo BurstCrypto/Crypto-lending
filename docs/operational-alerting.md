@@ -7,6 +7,13 @@ existing Amazon SNS topic. It does not create, update, discover, or validate an
 SNS topic or subscription, and the local validators make no AWS or network
 calls.
 
+`npm run infra:validate:observability` reads the default child template, or an
+explicit local `--template`, through a 51,200-byte canonical, single-link
+regular-file boundary. It compares stable descriptor snapshots and accepts only
+non-empty strict UTF-8 without a byte-order mark. Unsafe or changing input and
+invalid CLI arguments fail with fixed path-free errors; the validator never
+contacts AWS.
+
 The parent supplies only exact physical resource names/identities needed by
 the metrics and log queries. It pins the child bytes by SHA-256 and a versioned,
 SHA-named S3 URL, and binds the artifact bucket/key/version hash into nested

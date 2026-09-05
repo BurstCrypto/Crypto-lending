@@ -1,13 +1,24 @@
 #!/usr/bin/env node
 
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { TextDecoder } from 'node:util';
+
+import {
+  readSecureLocalFile,
+  readSecureLocalFileForTest,
+} from '../shared/read-secure-local-file.mjs';
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
+const defaultTemplatePath = join(scriptDirectory, 'application-observability.yaml');
 export const reviewedApplicationObservabilitySha256 =
   'ef0704fc3eea63ca60e6b44bcd8298639696f21478cc119757d968b84920c6a7';
+export const MAX_APPLICATION_OBSERVABILITY_TEMPLATE_BYTES = 51_200;
+export const APPLICATION_OBSERVABILITY_TEMPLATE_INPUT_ERROR =
+  'Application observability child template must be a non-empty, stable, single-link regular file of at most 51200 bytes at a canonical local path containing UTF-8 text without a byte-order mark.';
+export const APPLICATION_OBSERVABILITY_ARGUMENT_ERROR =
+  'Usage: validate-application-observability.mjs [--template <local-file>] [--json].';
 
 const requiredFragments = Object.freeze([
   'Default: NOT_AUTHORIZED\n    AllowedValues: [NOT_AUTHORIZED, I_ACKNOWLEDGE_THIS_CREATES_BILLABLE_AWS_RESOURCES]',
@@ -68,12 +79,43 @@ function sha256(source) {
   return createHash('sha256').update(Buffer.from(source, 'utf8')).digest('hex');
 }
 
+function readLocalTemplateInternal(path, afterFirstReadForTest) {
+  try {
+    const bytes =
+      afterFirstReadForTest === undefined
+        ? readSecureLocalFile(path, MAX_APPLICATION_OBSERVABILITY_TEMPLATE_BYTES)
+        : readSecureLocalFileForTest(
+            path,
+            MAX_APPLICATION_OBSERVABILITY_TEMPLATE_BYTES,
+            afterFirstReadForTest,
+          );
+    if (bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) {
+      throw new Error(APPLICATION_OBSERVABILITY_TEMPLATE_INPUT_ERROR);
+    }
+    return {
+      resolved: resolve(path),
+      source: new TextDecoder('utf-8', { fatal: true }).decode(bytes),
+    };
+  } catch {
+    throw new Error(APPLICATION_OBSERVABILITY_TEMPLATE_INPUT_ERROR);
+  }
+}
+
+export function readLocalApplicationObservabilityTemplate(path) {
+  return readLocalTemplateInternal(path, undefined);
+}
+
+/** Test-only fault seam; production callers use readLocalApplicationObservabilityTemplate. */
+export function readLocalApplicationObservabilityTemplateForTest(path, afterFirstReadForTest) {
+  return readLocalTemplateInternal(path, afterFirstReadForTest);
+}
+
 export function validateApplicationObservabilitySource(source) {
   const normalized = source.replace(/\r\n/g, '\n');
   const errors = [];
   const digest = sha256(source);
 
-  if (Buffer.byteLength(source, 'utf8') > 51_200) {
+  if (Buffer.byteLength(source, 'utf8') > MAX_APPLICATION_OBSERVABILITY_TEMPLATE_BYTES) {
     errors.push('Observability child template exceeds the 51,200-byte direct-upload limit.');
   }
   if (digest !== reviewedApplicationObservabilitySha256) {
@@ -118,30 +160,57 @@ export function validateApplicationObservabilitySource(source) {
   return { ok: errors.length === 0, awsCallsMade: 0, templateSha256: digest, errors };
 }
 
+function parseArguments(argv) {
+  const options = { template: defaultTemplatePath, json: false };
+  let templateSeen = false;
+  for (let index = 0; index < argv.length; index += 1) {
+    const argument = argv[index];
+    if (argument === '--json') {
+      if (options.json) throw new Error(APPLICATION_OBSERVABILITY_ARGUMENT_ERROR);
+      options.json = true;
+      continue;
+    }
+    if (argument !== '--template' || templateSeen) {
+      throw new Error(APPLICATION_OBSERVABILITY_ARGUMENT_ERROR);
+    }
+    const value = argv[index + 1];
+    if (!value || value.startsWith('--')) {
+      throw new Error(APPLICATION_OBSERVABILITY_ARGUMENT_ERROR);
+    }
+    options.template = value;
+    templateSeen = true;
+    index += 1;
+  }
+  return options;
+}
+
 function main() {
-  const argumentIndex = process.argv.indexOf('--template');
-  const template = resolve(
-    argumentIndex >= 0
-      ? process.argv[argumentIndex + 1]
-      : join(scriptDirectory, 'application-observability.yaml'),
-  );
-  const json = process.argv.includes('--json');
-  let report;
   try {
-    report = validateApplicationObservabilitySource(readFileSync(template, 'utf8'));
+    const options = parseArguments(process.argv.slice(2));
+    const { resolved, source } = readLocalApplicationObservabilityTemplate(options.template);
+    const report = { ...validateApplicationObservabilitySource(source), template: resolved };
+    if (options.json) {
+      process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+    } else if (report.ok) {
+      process.stdout.write(
+        `Application observability child validation passed.\nAWS API calls made: 0\n`,
+      );
+    } else {
+      process.stderr.write(`${report.errors.join('\n')}\nAWS API calls made: 0\n`);
+    }
+    process.exitCode = report.ok ? 0 : 1;
   } catch (error) {
-    report = { ok: false, awsCallsMade: 0, templateSha256: undefined, errors: [error.message] };
+    const message =
+      error instanceof Error &&
+      [
+        APPLICATION_OBSERVABILITY_ARGUMENT_ERROR,
+        APPLICATION_OBSERVABILITY_TEMPLATE_INPUT_ERROR,
+      ].includes(error.message)
+        ? error.message
+        : APPLICATION_OBSERVABILITY_TEMPLATE_INPUT_ERROR;
+    process.stderr.write(`${message}\nAWS API calls made: 0\n`);
+    process.exitCode = 2;
   }
-  if (json) {
-    process.stdout.write(`${JSON.stringify({ ...report, template }, null, 2)}\n`);
-  } else if (report.ok) {
-    process.stdout.write(
-      `Application observability child validation passed.\nAWS API calls made: 0\n`,
-    );
-  } else {
-    process.stderr.write(`${report.errors.join('\n')}\nAWS API calls made: 0\n`);
-  }
-  process.exitCode = report.ok ? 0 : 1;
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
