@@ -88,6 +88,10 @@ import {
   createMainnetBalanceAgreementEvidenceMigrationV0027,
   createMainnetBalanceAgreementEvidenceTestSchemaMigrationV0027,
 } from './0027-create-mainnet-balance-agreement-evidence.migration';
+import {
+  suspendGenericWorkerBalanceAuthorityMigrationV0028,
+  suspendGenericWorkerBalanceAuthorityTestSchemaMigrationV0028,
+} from './0028-suspend-generic-worker-balance-authority.migration';
 import type { DatabaseMigration } from './migration';
 
 /**
@@ -123,6 +127,7 @@ export const DATABASE_TEST_SCHEMA_MIGRATION_LIST: readonly DatabaseMigration[] =
   createAuthenticationHmacKeyRotationTestSchemaMigrationV0025,
   suspendStablecoinIngestionAuthorityTestSchemaMigrationV0026,
   createMainnetBalanceAgreementEvidenceTestSchemaMigrationV0027,
+  suspendGenericWorkerBalanceAuthorityTestSchemaMigrationV0028,
 ]);
 
 export const DATABASE_MIGRATION_LIST: readonly DatabaseMigration[] = Object.freeze([
@@ -153,6 +158,7 @@ export const DATABASE_MIGRATION_LIST: readonly DatabaseMigration[] = Object.free
   createAuthenticationHmacKeyRotationMigrationV0025,
   suspendStablecoinIngestionAuthorityMigrationV0026,
   createMainnetBalanceAgreementEvidenceMigrationV0027,
+  suspendGenericWorkerBalanceAuthorityMigrationV0028,
 ]);
 
 export type { DatabaseMigration } from './migration';
@@ -266,3 +272,10 @@ export {
   createMainnetBalanceAgreementEvidenceMigrationV0027,
   createMainnetBalanceAgreementEvidenceTestSchemaMigrationV0027,
 } from './0027-create-mainnet-balance-agreement-evidence.migration';
+export {
+  createGenericWorkerBalanceAuthoritySuspensionMigration,
+  PRODUCTION_BALANCE_CONSUMER_PRINCIPALS,
+  suspendGenericWorkerBalanceAuthorityMigrationV0028,
+  suspendGenericWorkerBalanceAuthorityTestSchemaMigrationV0028,
+} from './0028-suspend-generic-worker-balance-authority.migration';
+export type { BalanceConsumerPrincipalNames } from './0028-suspend-generic-worker-balance-authority.migration';

@@ -15,6 +15,7 @@ import {
   createBalanceConsumerWalletAddressBoundaryMigration,
   createBalanceSyncReadModelMigration,
   createDatabasePrincipalBoundaryMigration,
+  createGenericWorkerBalanceAuthoritySuspensionMigration,
   createImmutableLedgerMigration,
   createLedgerCommandIdempotencyMigration,
   createLedgerFeeAdjustmentIntegrityMigration,
@@ -175,7 +176,10 @@ function schemaMigrationsForIsolatedLegacyRole(
       id !== '0022' &&
       id !== '0023' &&
       id !== '0024' &&
-      id !== '0025',
+      id !== '0025' &&
+      id !== '0026' &&
+      id !== '0027' &&
+      id !== '0028',
   ).map((migration) =>
     migration.id === '0004'
       ? {
@@ -850,6 +854,8 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
         createStablecoinIngestionAuthoritySuspensionMigration(names);
       const mainnetBalanceAgreementEvidenceMigration =
         createMainnetBalanceAgreementEvidenceMigration(names);
+      const genericWorkerBalanceAuthoritySuspensionMigration =
+        createGenericWorkerBalanceAuthoritySuspensionMigration(names);
       if (!principalMigration.verifySql) throw new Error('Principal migration must be verifiable');
       if (!ledgerMigration.verifySql) throw new Error('Ledger migration must be verifiable');
       if (!lifecycleMigration.verifySql) {
@@ -912,6 +918,9 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
       if (!mainnetBalanceAgreementEvidenceMigration.verifySql) {
         throw new Error('Mainnet balance agreement evidence migration must be verifiable');
       }
+      if (!genericWorkerBalanceAuthoritySuspensionMigration.verifySql) {
+        throw new Error('Generic worker balance authority suspension migration must be verifiable');
+      }
       const cumulativeVerifySql = authenticationHmacRotationMigration.verifySql;
       const migrations = [
         ...schemaMigrationsBeforePrincipalBoundary,
@@ -946,6 +955,7 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
         ...migrations,
         stablecoinIngestionSuspensionMigration,
         mainnetBalanceAgreementEvidenceMigration,
+        genericWorkerBalanceAuthoritySuspensionMigration,
       ];
 
       await expect(
@@ -2689,10 +2699,12 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
       ).resolves.toBeUndefined();
 
       const forwardOnlyRunner = new MigrationRunner(migrationPool, forwardOnlyMigrations);
-      await expect(forwardOnlyRunner.up()).resolves.toEqual(['0026', '0027']);
+      await expect(forwardOnlyRunner.up()).resolves.toEqual(['0026', '0027', '0028']);
       await expect(forwardOnlyRunner.assertUpToDate()).resolves.toBeUndefined();
       await expect(
-        migrationPool.query<{ valid: boolean }>(mainnetBalanceAgreementEvidenceMigration.verifySql),
+        migrationPool.query<{ valid: boolean }>(
+          genericWorkerBalanceAuthoritySuspensionMigration.verifySql,
+        ),
       ).resolves.toMatchObject({ rows: [{ valid: true }] });
       for (const runtimePoolInstance of [apiNewPool, workerNewPool]) {
         await expect(
@@ -2716,6 +2728,20 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
            ) AS may_record_stablecoin_price`,
         ),
       ).resolves.toMatchObject({ rows: [{ may_record_stablecoin_price: false }] });
+      await expect(
+        workerNewPool.query<{ balance_authority_suspended: boolean }>(
+          `SELECT pg_catalog.bool_and(
+             NOT pg_catalog.has_function_privilege(current_user, function_identity, 'EXECUTE')
+           ) AS balance_authority_suspended
+           FROM pg_catalog.unnest(ARRAY[
+             'read_balance_sync_checkpoint(uuid,uuid,text)',
+             'record_balance_sync_current(uuid,uuid,text,bigint,text,text,numeric,text,text,text,timestamp with time zone,timestamp with time zone,jsonb,timestamp with time zone)',
+             'mark_balance_sync_checkpoint_stale(uuid,uuid,text,bigint,timestamp with time zone,text)',
+             'replace_balance_sync_after_reorg(uuid,uuid,text,bigint,numeric,text,text,text,timestamp with time zone,text,numeric,text,text,text,timestamp with time zone,timestamp with time zone,jsonb,timestamp with time zone)',
+             'resolve_active_wallet_address_ciphertext(uuid,uuid,text)'
+           ]::text[]) AS suspended(function_identity)`,
+        ),
+      ).resolves.toMatchObject({ rows: [{ balance_authority_suspended: true }] });
 
       const deniedCrossDatabase = new Pool({
         connectionString: roleUrl(
