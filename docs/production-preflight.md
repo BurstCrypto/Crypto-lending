@@ -37,8 +37,9 @@ argument error with exit code `2`.
 
 The evidence path must identify a nonempty, single-link regular file capped at
 256 KiB. Every existing intermediate path component and the final path is
-checked for a symbolic link or Windows junction before and after the read; the
-opened file's identity, link count, size, and timestamps must remain stable.
+checked for a symbolic link or Windows junction before and after the read. The
+file is read twice through one descriptor; both byte sequences must match, and
+the opened file's identity, link count, size, and timestamps must remain stable.
 The authority-decision file has the same fail-closed link, regular-file,
 identity, and double-read requirements with a 128 KiB cap.
 There is no environment variable, default path, directory scan, secret-store

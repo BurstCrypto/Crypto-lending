@@ -688,9 +688,11 @@ test('strict UTF-8, canonical JSON, exact shapes, signatures, and bounded bytes 
   }
 });
 
-test('bounded file loading rejects direct/intermediate links and hard-linked final files', (t) => {
+test('bounded file loading rejects unstable, empty, linked, and oversized inputs', (t) => {
   const temporaryDirectory = mkdtempSync(join(tmpdir(), 'production-evidence-test-'));
   const validPath = join(temporaryDirectory, 'valid.json');
+  const emptyPath = join(temporaryDirectory, 'empty.json');
+  const unstablePath = join(temporaryDirectory, 'unstable.json');
   const hardlinkPath = join(temporaryDirectory, 'hardlink.json');
   const oversizedPath = join(temporaryDirectory, 'oversized.json');
   const directoryPath = join(temporaryDirectory, 'directory.json');
@@ -704,6 +706,16 @@ test('bounded file loading rejects direct/intermediate links and hard-linked fin
 
   try {
     writeFileSync(validPath, signedBundleBytes());
+    writeFileSync(emptyPath, Buffer.alloc(0));
+    const stableBytes = signedBundleBytes();
+    const changedBytes = Buffer.from(
+      stableBytes
+        .toString('utf8')
+        .replace('"AUTHENTICATION_DEPLOYMENT_EVIDENCE"', '"AUTHENTICATION_DEPLOYMENT_EVIDENCF"'),
+      'utf8',
+    );
+    assert.equal(changedBytes.length, stableBytes.length);
+    writeFileSync(unstablePath, stableBytes);
     writeFileSync(oversizedPath, Buffer.alloc(MAX_PRODUCTION_EVIDENCE_BUNDLE_BYTES + 1, 0x61));
     mkdirSync(directoryPath);
     mkdirSync(realDirectory);
@@ -724,6 +736,14 @@ test('bounded file loading rejects direct/intermediate links and hard-linked fin
     );
     expectInvalid(() =>
       loadAndVerifyProductionEvidenceBundleWithTestRegistries(oversizedPath, testOptions()),
+    );
+    expectInvalid(() =>
+      loadAndVerifyProductionEvidenceBundleWithTestRegistries(emptyPath, testOptions()),
+    );
+    expectInvalid(() =>
+      loadAndVerifyProductionEvidenceBundleWithTestRegistries(unstablePath, testOptions(), () =>
+        writeFileSync(unstablePath, changedBytes),
+      ),
     );
 
     linkSync(validPath, hardlinkPath);
@@ -779,6 +799,8 @@ test('bounded file loading rejects direct/intermediate links and hard-linked fin
     if (directLinkCreated) unlinkSync(directLinkPath);
     if (hardlinkCreated) unlinkSync(hardlinkPath);
     unlinkSync(validPath);
+    unlinkSync(emptyPath);
+    unlinkSync(unstablePath);
     unlinkSync(oversizedPath);
     unlinkSync(realNestedPath);
     rmdirSync(realDirectory);

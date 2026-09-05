@@ -10,9 +10,11 @@ import {
   fstatSync,
   lstatSync,
   openSync,
-  readFileSync,
+  realpathSync,
+  readSync,
+  type Stats,
 } from 'node:fs';
-import { join, parse, resolve } from 'node:path';
+import { join, normalize, parse, resolve } from 'node:path';
 import { TextDecoder } from 'node:util';
 
 // @ts-expect-error The operations-owned audited manifest boundary is an ESM JavaScript module.
@@ -863,20 +865,61 @@ export function revalidateProductionEvidenceBundleForApplicationWithTestRegistri
   }
 }
 
-function assertNoPathLinks(absolutePath: string): void {
+function sameStableFile(left: Stats, right: Stats): boolean {
+  return (
+    left.isFile() &&
+    right.isFile() &&
+    left.nlink === 1 &&
+    right.nlink === 1 &&
+    left.dev === right.dev &&
+    left.ino === right.ino &&
+    left.size === right.size &&
+    left.mtimeMs === right.mtimeMs &&
+    left.ctimeMs === right.ctimeMs
+  );
+}
+
+function comparablePath(value: string): string {
+  let path = normalize(value);
+  if (path.startsWith('\\\\?\\UNC\\')) path = `\\\\${path.slice(8)}`;
+  else if (path.startsWith('\\\\?\\')) path = path.slice(4);
+  path = path.replace(/[\\/]+$/u, '');
+  return process.platform === 'win32' ? path.toLowerCase() : path;
+}
+
+function assertNoLinkedPathComponents(absolutePath: string): void {
   const root = parse(absolutePath).root;
-  const segments = absolutePath.slice(root.length).split(/[\\/]/u).filter(Boolean);
+  const segments = absolutePath
+    .slice(root.length)
+    .split(/[\\/]+/u)
+    .filter(Boolean);
+  if (segments.length === 0) return invalid();
   let current = root;
   for (let index = 0; index < segments.length; index += 1) {
-    current = join(current, segments[index] as string);
+    const segment = segments[index];
+    if (segment === undefined) return invalid();
+    current = join(current, segment);
     const stat = lstatSync(current);
-    if (stat.isSymbolicLink() || (index < segments.length - 1 && !stat.isDirectory())) {
-      return invalid();
-    }
+    const final = index === segments.length - 1;
+    if (stat.isSymbolicLink() || (!final && !stat.isDirectory())) return invalid();
+    if (comparablePath(realpathSync.native(current)) !== comparablePath(current)) return invalid();
   }
 }
 
-function readBoundedRegularFile(path: string): Buffer {
+function readDescriptorExactly(descriptor: number, size: number): Buffer {
+  const bytes = Buffer.allocUnsafe(size);
+  let offset = 0;
+  while (offset < size) {
+    const count = readSync(descriptor, bytes, offset, size - offset, offset);
+    if (count <= 0) return invalid();
+    offset += count;
+  }
+  const overflow = Buffer.allocUnsafe(1);
+  if (readSync(descriptor, overflow, 0, 1, size) !== 0) return invalid();
+  return bytes;
+}
+
+function readBoundedStableRegularFile(path: string, afterFirstReadForTest?: () => void): Buffer {
   if (
     typeof path !== 'string' ||
     path.length === 0 ||
@@ -888,7 +931,7 @@ function readBoundedRegularFile(path: string): Buffer {
   const absolutePath = resolve(path);
   let descriptor: number | undefined;
   try {
-    assertNoPathLinks(absolutePath);
+    assertNoLinkedPathComponents(absolutePath);
     const before = lstatSync(absolutePath);
     if (
       before.isSymbolicLink() ||
@@ -899,45 +942,26 @@ function readBoundedRegularFile(path: string): Buffer {
     ) {
       return invalid();
     }
-    const noFollow = process.platform === 'win32' ? 0 : (fsConstants.O_NOFOLLOW ?? 0);
-    descriptor = openSync(absolutePath, fsConstants.O_RDONLY | noFollow);
+    descriptor = openSync(absolutePath, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
     const opened = fstatSync(descriptor);
-    if (
-      !opened.isFile() ||
-      opened.nlink !== 1 ||
-      opened.size !== before.size ||
-      opened.dev !== before.dev ||
-      opened.ino !== before.ino ||
-      opened.mtimeMs !== before.mtimeMs ||
-      opened.ctimeMs !== before.ctimeMs ||
-      opened.size <= 0 ||
-      opened.size > MAX_PRODUCTION_EVIDENCE_BUNDLE_BYTES
-    ) {
-      return invalid();
-    }
-    const bytes = readFileSync(descriptor);
-    const after = fstatSync(descriptor);
-    assertNoPathLinks(absolutePath);
+    if (!sameStableFile(before, opened)) return invalid();
+    const first = readDescriptorExactly(descriptor, opened.size);
+    afterFirstReadForTest?.();
+    const afterFirst = fstatSync(descriptor);
+    if (!sameStableFile(opened, afterFirst)) return invalid();
+    const second = readDescriptorExactly(descriptor, opened.size);
+    const afterSecond = fstatSync(descriptor);
+    assertNoLinkedPathComponents(absolutePath);
     const finalPath = lstatSync(absolutePath);
     if (
-      bytes.byteLength !== opened.size ||
       finalPath.isSymbolicLink() ||
-      after.nlink !== 1 ||
-      finalPath.nlink !== 1 ||
-      after.size !== opened.size ||
-      after.dev !== opened.dev ||
-      after.ino !== opened.ino ||
-      after.mtimeMs !== opened.mtimeMs ||
-      after.ctimeMs !== opened.ctimeMs ||
-      finalPath.size !== opened.size ||
-      finalPath.dev !== opened.dev ||
-      finalPath.ino !== opened.ino ||
-      finalPath.mtimeMs !== opened.mtimeMs ||
-      finalPath.ctimeMs !== opened.ctimeMs
+      !sameStableFile(opened, afterSecond) ||
+      !sameStableFile(afterSecond, finalPath) ||
+      !first.equals(second)
     ) {
       return invalid();
     }
-    return bytes;
+    return first;
   } catch {
     return invalid();
   } finally {
@@ -956,7 +980,7 @@ export function loadAndVerifyProductionEvidenceBundle(
   options: VerifyProductionEvidenceBundleOptions,
 ): VerifiedProductionEvidenceBundle {
   try {
-    return parseAndVerifyProductionEvidenceBundleBytes(readBoundedRegularFile(path), options);
+    return parseAndVerifyProductionEvidenceBundleBytes(readBoundedStableRegularFile(path), options);
   } catch {
     return invalid();
   }
@@ -966,10 +990,11 @@ export function loadAndVerifyProductionEvidenceBundle(
 export function loadAndVerifyProductionEvidenceBundleWithTestRegistries(
   path: string,
   options: TestProductionEvidenceBundleVerificationOptions,
+  afterFirstReadForTest?: () => void,
 ): VerifiedProductionEvidenceBundle {
   try {
     return verifyProductionEvidenceBundleBytesWithTestRegistries(
-      readBoundedRegularFile(path),
+      readBoundedStableRegularFile(path, afterFirstReadForTest),
       options,
     );
   } catch {
