@@ -34,6 +34,7 @@ import {
   isVerifiedReleaseManifest,
   loadAndVerifyReleaseManifest,
   parseReleaseManifest,
+  readReleaseManifestFileForTest,
   revalidateVerifiedReleaseManifest,
   runCli,
   sealReleaseCandidateStage,
@@ -566,6 +567,61 @@ test('sanitized loader rejects a final symlink without disclosing its target', (
     (error) => {
       assert.equal(error.message, 'Release candidate manifest is invalid.');
       assert.doesNotMatch(error.message, /linked|local-validation/iu);
+      return true;
+    },
+  );
+});
+
+test('sanitized loader rejects a linked intermediate manifest path', (t) => {
+  const root = createWorkspace();
+  const source = initializeRepository(root);
+  runCli(['create', '--source-revision', source.revision], root);
+  const targetDirectory = temporaryDirectory();
+  const target = resolve(targetDirectory, 'candidate.json');
+  writeFileSync(target, readFileSync(resolve(root, ...RELEASE_MANIFEST_PATH.split('/'))));
+  const linkedParent = resolve(temporaryDirectory(), 'linked-parent');
+  try {
+    symlinkSync(targetDirectory, linkedParent, process.platform === 'win32' ? 'junction' : 'dir');
+  } catch (error) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'EPERM') {
+      t.diagnostic('directory-link creation is not permitted on this host.');
+      return;
+    }
+    throw error;
+  }
+
+  assert.throws(
+    () =>
+      loadAndVerifyReleaseManifest(root, resolve(linkedParent, 'candidate.json'), source.revision),
+    (error) => {
+      assert.equal(error.name, 'ReleaseManifestInvalidError');
+      assert.equal(error.message, 'Release candidate manifest is invalid.');
+      assert.doesNotMatch(error.message, /linked-parent|crypto-lending-release-manifest-/u);
+      return true;
+    },
+  );
+});
+
+test('unbranded file seam rejects a same-size rewrite between descriptor reads', () => {
+  const root = createWorkspace();
+  const source = initializeRepository(root);
+  runCli(['create', '--source-revision', source.revision], root);
+  const manifestPath = resolve(root, ...RELEASE_MANIFEST_PATH.split('/'));
+  const original = readFileSync(manifestPath);
+  const originalText = original.toString('utf8');
+  const digestOffset = originalText.indexOf('"payloadSha256":"') + '"payloadSha256":"'.length;
+  assert.ok(digestOffset >= '"payloadSha256":"'.length);
+  const replacement = originalText[digestOffset] === 'f' ? 'e' : 'f';
+  const changed = Buffer.from(
+    `${originalText.slice(0, digestOffset)}${replacement}${originalText.slice(digestOffset + 1)}`,
+    'utf8',
+  );
+  assert.equal(changed.length, original.length);
+  assert.throws(
+    () => readReleaseManifestFileForTest(manifestPath, () => writeFileSync(manifestPath, changed)),
+    (error) => {
+      assert.equal(error.name, 'ReleaseManifestInvalidError');
+      assert.equal(error.message, 'Release candidate manifest is invalid.');
       return true;
     },
   );

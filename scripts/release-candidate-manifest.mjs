@@ -17,7 +17,7 @@ import {
   writeSync,
 } from 'node:fs';
 import { isDeepStrictEqual } from 'node:util';
-import { delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { delimiter, dirname, isAbsolute, join, parse, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const REPOSITORY_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -500,7 +500,52 @@ function hashStableFile(context, absolutePath) {
   }
 }
 
-function readBoundedStableFile(absolutePath, maximumBytes) {
+function assertNoLinkedPathComponents(absolutePath) {
+  const root = parse(absolutePath).root;
+  const segments = absolutePath
+    .slice(root.length)
+    .split(/[\\/]+/u)
+    .filter(Boolean);
+  if (segments.length === 0) fail('Release manifest path is invalid.');
+  let current = root;
+  for (let index = 0; index < segments.length; index += 1) {
+    current = join(current, segments[index]);
+    let stat;
+    let physical;
+    try {
+      stat = lstatSync(current, { bigint: true });
+      physical = realpathSync.native(current);
+    } catch {
+      fail('Release manifest could not be read.');
+    }
+    const final = index === segments.length - 1;
+    if (
+      stat.isSymbolicLink() ||
+      (!final && !stat.isDirectory()) ||
+      !samePhysicalPath(physical, current)
+    ) {
+      fail('Release manifest path contains links or reparse points.');
+    }
+  }
+}
+
+function readDescriptorExactly(descriptor, size) {
+  const bytes = Buffer.alloc(size);
+  let offset = 0;
+  while (offset < size) {
+    const count = readSync(descriptor, bytes, offset, size - offset, offset);
+    if (count === 0) fail('Release manifest ended unexpectedly.');
+    offset += count;
+  }
+  const overflow = Buffer.allocUnsafe(1);
+  if (readSync(descriptor, overflow, 0, 1, size) !== 0) {
+    fail('Release manifest exceeded its inspected size.');
+  }
+  return bytes;
+}
+
+function readBoundedStableFile(absolutePath, maximumBytes, afterFirstReadForTest = undefined) {
+  assertNoLinkedPathComponents(absolutePath);
   let before;
   try {
     before = lstatSync(absolutePath, { bigint: true });
@@ -511,6 +556,7 @@ function readBoundedStableFile(absolutePath, maximumBytes) {
     before.isSymbolicLink() ||
     !before.isFile() ||
     before.nlink !== 1n ||
+    before.size <= 0n ||
     before.size > BigInt(maximumBytes)
   ) {
     fail('Release manifest must be a bounded regular file.');
@@ -528,16 +574,19 @@ function readBoundedStableFile(absolutePath, maximumBytes) {
     if (!opened.isFile() || statIdentity(opened) !== statIdentity(before)) {
       fail('Release manifest changed while it was opened.');
     }
-    const bytes = Buffer.alloc(Number(opened.size));
-    let offset = 0;
-    while (offset < bytes.length) {
-      const count = readSync(descriptor, bytes, offset, bytes.length - offset, offset);
-      if (count === 0) fail('Release manifest ended unexpectedly.');
-      offset += count;
+    const first = readDescriptorExactly(descriptor, Number(opened.size));
+    if (afterFirstReadForTest !== undefined) {
+      afterFirstReadForTest();
     }
-    const after = fstatSync(descriptor, { bigint: true });
+    const afterFirst = fstatSync(descriptor, { bigint: true });
+    if (statIdentity(afterFirst) !== statIdentity(opened)) {
+      fail('Release manifest changed while it was read.');
+    }
+    const second = readDescriptorExactly(descriptor, Number(opened.size));
+    const afterSecond = fstatSync(descriptor, { bigint: true });
     let finalPathStat;
     try {
+      assertNoLinkedPathComponents(absolutePath);
       finalPathStat = lstatSync(absolutePath, { bigint: true });
     } catch {
       fail('Release manifest changed while it was read.');
@@ -545,12 +594,13 @@ function readBoundedStableFile(absolutePath, maximumBytes) {
     if (
       finalPathStat.isSymbolicLink() ||
       finalPathStat.nlink !== 1n ||
-      statIdentity(after) !== statIdentity(opened) ||
-      statIdentity(finalPathStat) !== statIdentity(opened)
+      statIdentity(afterSecond) !== statIdentity(opened) ||
+      statIdentity(finalPathStat) !== statIdentity(opened) ||
+      !first.equals(second)
     ) {
       fail('Release manifest changed while it was read.');
     }
-    return bytes;
+    return first;
   } finally {
     closeSync(descriptor);
   }
@@ -936,12 +986,12 @@ export function inspectCleanGitSource(workspaceRoot, expectedRevision) {
   return Object.freeze({ revision, tree });
 }
 
-function readManifestFile(absolutePath, context = undefined) {
+function readManifestFile(absolutePath, context = undefined, afterFirstReadForTest = undefined) {
   const beforePath =
     context !== undefined && isContained(context.lexicalRoot, absolutePath)
       ? safeExistingPath(context, absolutePath, 'file')
       : undefined;
-  const bytes = readBoundedStableFile(absolutePath, MAX_MANIFEST_BYTES);
+  const bytes = readBoundedStableFile(absolutePath, MAX_MANIFEST_BYTES, afterFirstReadForTest);
   if (beforePath !== undefined) {
     const afterPath = safeExistingPath(context, absolutePath, 'file');
     if (!pathSnapshotMatches(beforePath, afterPath)) {
@@ -955,6 +1005,15 @@ function readManifestFile(absolutePath, context = undefined) {
     fail('Release manifest is not valid UTF-8.');
   }
   return parseReleaseManifest(text);
+}
+
+/** Unbranded hostile-file test seam; it can never confer release authority. */
+export function readReleaseManifestFileForTest(manifestPath, afterFirstReadForTest) {
+  try {
+    return readManifestFile(resolve(manifestPath), undefined, afterFirstReadForTest);
+  } catch {
+    throw new ReleaseManifestInvalidError();
+  }
 }
 
 export function loadAndVerifyReleaseManifest(workspaceRoot, manifestPath, expectedRevision) {

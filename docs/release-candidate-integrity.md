@@ -114,8 +114,10 @@ The verifier makes no network, DNS, cloud, provider, credential, or transaction
 call. For controlled evidence ingestion, import
 `loadAndVerifyReleaseManifest(workspaceRoot, manifestPath, expectedRevision)`.
 It accepts an explicit bounded regular file, performs strict canonical parsing,
-rechecks clean `HEAD` and its tree, and recomputes every component. Only its
-deeply frozen return value passes `isVerifiedReleaseManifest`. Consumers must
+rejects every linked or reparse-point path component, requires two identical
+reads through one stable descriptor, rechecks clean `HEAD` and its tree, and
+recomputes every component. Only its deeply frozen return value passes
+`isVerifiedReleaseManifest`. Consumers must
 match a signed evidence bundle's `releaseCandidateManifestSha256` to that
 branded value's `payloadSha256`; parsing JSON or comparing an unverified string
 is insufficient. Immediately before acting, consumers must call
