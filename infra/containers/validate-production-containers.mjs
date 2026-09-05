@@ -1,8 +1,15 @@
 import { X509Certificate, createHash } from 'node:crypto';
-import { readFileSync, realpathSync } from 'node:fs';
+import { realpathSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import process from 'node:process';
+import { TextDecoder } from 'node:util';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+
+import { parseStrictJsonBytes } from '../shared/parse-strict-json.mjs';
+import {
+  readSecureLocalFile,
+  readSecureLocalFileForTest,
+} from '../shared/read-secure-local-file.mjs';
 
 export const NODE_BASE_IMAGE =
   'node:24.20.0-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e';
@@ -10,6 +17,9 @@ export const NODE_BASE_DIGEST =
   'sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e';
 export const NPM_VERSION = '11.6.4';
 export const RDS_BUNDLE_SHA256 = 'e5bb2084ccf45087bda1c9bffdea0eb15ee67f0b91646106e466714f9de3c7e3';
+export const MAX_PRODUCTION_CONTAINER_SOURCE_BYTES = 393_216;
+export const PRODUCTION_CONTAINER_INPUT_ERROR =
+  'Production container inputs must be the 15 non-empty, canonical, stable, single-link repository files within their reviewed per-file limits and 393216-byte aggregate limit; text must be strict UTF-8 without a byte-order mark.';
 const SOURCE_URL = 'https://github.com/Trey-Gleason/Crypto-lending';
 const EXPECTED_DOCKERIGNORE = `**
 !Dockerfile.api
@@ -63,6 +73,86 @@ const EXPECTED_DOCKERIGNORE = `**
 **/*.test.tsx
 **/*.test.mjs
 `;
+
+const SOURCE_FILES = Object.freeze([
+  Object.freeze({ key: 'apiDockerfile', path: 'Dockerfile.api', maximumBytes: 16_384 }),
+  Object.freeze({
+    key: 'apiPackage',
+    path: 'apps/api/package.json',
+    maximumBytes: 32_768,
+    json: true,
+  }),
+  Object.freeze({
+    key: 'balanceConsumerActivation',
+    path: 'apps/api/src/blockchain-sync/application/balance-sync-consumer.activation.ts',
+    maximumBytes: 4_096,
+  }),
+  Object.freeze({
+    key: 'balanceConsumerCli',
+    path: 'apps/api/src/blockchain-sync/application/balance-sync-consumer.cli.ts',
+    maximumBytes: 8_192,
+  }),
+  Object.freeze({
+    key: 'balanceConsumerCliMode',
+    path: 'apps/api/src/blockchain-sync/application/balance-sync-consumer.cli-mode.ts',
+    maximumBytes: 16_384,
+  }),
+  Object.freeze({
+    key: 'balanceConsumerRuntime',
+    path: 'apps/api/src/blockchain-sync/application/balance-sync-consumer.runtime.ts',
+    maximumBytes: 8_192,
+  }),
+  Object.freeze({
+    key: 'applicationTemplate',
+    path: 'infra/aws/application-baseline.yaml',
+    maximumBytes: 65_536,
+  }),
+  Object.freeze({ key: 'dockerignore', path: '.dockerignore', maximumBytes: 8_192 }),
+  Object.freeze({
+    key: 'migrationTemplate',
+    path: 'infra/aws/database-migration-task.yaml',
+    maximumBytes: 16_384,
+  }),
+  Object.freeze({ key: 'nextConfig', path: 'apps/web/next.config.ts', maximumBytes: 8_192 }),
+  Object.freeze({
+    key: 'rdsBundle',
+    path: 'infra/containers/aws-rds-global-bundle.crt',
+    maximumBytes: 196_608,
+    binary: true,
+  }),
+  Object.freeze({
+    key: 'rdsChecksum',
+    path: 'infra/containers/aws-rds-global-bundle.crt.sha256',
+    maximumBytes: 1_024,
+  }),
+  Object.freeze({ key: 'rootPackage', path: 'package.json', maximumBytes: 32_768, json: true }),
+  Object.freeze({
+    key: 'webPackage',
+    path: 'apps/web/package.json',
+    maximumBytes: 16_384,
+    json: true,
+  }),
+  Object.freeze({ key: 'webDockerfile', path: 'Dockerfile.web', maximumBytes: 16_384 }),
+]);
+
+export const PRODUCTION_CONTAINER_SOURCE_PATHS = Object.freeze(
+  SOURCE_FILES.map(({ path }) => path),
+);
+
+function invalidProductionContainerInput() {
+  throw new Error(PRODUCTION_CONTAINER_INPUT_ERROR);
+}
+
+function decodeStrictText(bytes) {
+  if (bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) {
+    return invalidProductionContainerInput();
+  }
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch {
+    return invalidProductionContainerInput();
+  }
+}
 
 function normalize(value) {
   return value.replaceAll('\r\n', '\n');
@@ -493,11 +583,13 @@ export function validateProductionContainerSources(sources) {
   let apiPackage;
   let webPackage;
   try {
-    rootPackage = JSON.parse(sources.rootPackage);
-    apiPackage = JSON.parse(sources.apiPackage);
-    webPackage = JSON.parse(sources.webPackage);
+    rootPackage = parseStrictJsonBytes(asJsonBytes(sources.rootPackage));
+    apiPackage = parseStrictJsonBytes(asJsonBytes(sources.apiPackage));
+    webPackage = parseStrictJsonBytes(asJsonBytes(sources.webPackage));
   } catch {
-    errors.push('Container package manifests must be valid JSON');
+    errors.push(
+      'Container package manifests must be strict UTF-8 JSON without a byte-order mark or duplicate object keys',
+    );
   }
   addError(
     errors,
@@ -546,6 +638,12 @@ export function validateProductionContainerSources(sources) {
   });
 }
 
+function asJsonBytes(source) {
+  if (typeof source === 'string') return Buffer.from(source, 'utf8');
+  if (source instanceof Uint8Array) return source;
+  return invalidProductionContainerInput();
+}
+
 function assertRepositoryRoot(root) {
   const resolved = resolve(root);
   const physical = realpathSync(resolved);
@@ -559,54 +657,66 @@ function assertRepositoryRoot(root) {
 export function validateProductionContainers(
   root = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..'),
 ) {
-  const repositoryRoot = assertRepositoryRoot(root);
-  return validateProductionContainerSources({
-    apiDockerfile: readFileSync(join(repositoryRoot, 'Dockerfile.api'), 'utf8'),
-    apiPackage: readFileSync(join(repositoryRoot, 'apps/api/package.json'), 'utf8'),
-    balanceConsumerActivation: readFileSync(
-      join(
-        repositoryRoot,
-        'apps/api/src/blockchain-sync/application/balance-sync-consumer.activation.ts',
-      ),
-      'utf8',
-    ),
-    balanceConsumerCli: readFileSync(
-      join(repositoryRoot, 'apps/api/src/blockchain-sync/application/balance-sync-consumer.cli.ts'),
-      'utf8',
-    ),
-    balanceConsumerCliMode: readFileSync(
-      join(
-        repositoryRoot,
-        'apps/api/src/blockchain-sync/application/balance-sync-consumer.cli-mode.ts',
-      ),
-      'utf8',
-    ),
-    balanceConsumerRuntime: readFileSync(
-      join(
-        repositoryRoot,
-        'apps/api/src/blockchain-sync/application/balance-sync-consumer.runtime.ts',
-      ),
-      'utf8',
-    ),
-    applicationTemplate: readFileSync(
-      join(repositoryRoot, 'infra/aws/application-baseline.yaml'),
-      'utf8',
-    ),
-    dockerignore: readFileSync(join(repositoryRoot, '.dockerignore'), 'utf8'),
-    migrationTemplate: readFileSync(
-      join(repositoryRoot, 'infra/aws/database-migration-task.yaml'),
-      'utf8',
-    ),
-    nextConfig: readFileSync(join(repositoryRoot, 'apps/web/next.config.ts'), 'utf8'),
-    rdsBundle: readFileSync(join(repositoryRoot, 'infra/containers/aws-rds-global-bundle.crt')),
-    rdsChecksum: readFileSync(
-      join(repositoryRoot, 'infra/containers/aws-rds-global-bundle.crt.sha256'),
-      'utf8',
-    ),
-    rootPackage: readFileSync(join(repositoryRoot, 'package.json'), 'utf8'),
-    webPackage: readFileSync(join(repositoryRoot, 'apps/web/package.json'), 'utf8'),
-    webDockerfile: readFileSync(join(repositoryRoot, 'Dockerfile.web'), 'utf8'),
-  });
+  try {
+    const repositoryRoot = assertRepositoryRoot(root);
+    return validateProductionContainerSources(loadProductionContainerSources(repositoryRoot));
+  } catch {
+    return invalidProductionContainerInput();
+  }
+}
+
+function loadProductionContainerSourcesInternal(repositoryRoot, faultPath, afterFirstReadForTest) {
+  try {
+    if (
+      SOURCE_FILES.length !== 15 ||
+      new Set(SOURCE_FILES.map(({ key }) => key)).size !== SOURCE_FILES.length ||
+      new Set(SOURCE_FILES.map(({ path }) => path)).size !== SOURCE_FILES.length
+    ) {
+      return invalidProductionContainerInput();
+    }
+
+    const sources = {};
+    let aggregateBytes = 0;
+    for (const source of SOURCE_FILES) {
+      const filePath = join(repositoryRoot, source.path);
+      const bytes =
+        source.path === faultPath
+          ? readSecureLocalFileForTest(filePath, source.maximumBytes, afterFirstReadForTest)
+          : readSecureLocalFile(filePath, source.maximumBytes);
+      aggregateBytes += bytes.byteLength;
+      if (aggregateBytes > MAX_PRODUCTION_CONTAINER_SOURCE_BYTES) {
+        return invalidProductionContainerInput();
+      }
+      sources[source.key] = source.binary || source.json ? bytes : decodeStrictText(bytes);
+    }
+    return Object.freeze(sources);
+  } catch {
+    return invalidProductionContainerInput();
+  }
+}
+
+function loadProductionContainerSources(repositoryRoot) {
+  return loadProductionContainerSourcesInternal(repositoryRoot, undefined, undefined);
+}
+
+/** Test-only fault seam; production callers use validateProductionContainers. */
+export function loadProductionContainerSourcesForTest(
+  repositoryRoot,
+  faultPath,
+  afterFirstReadForTest,
+) {
+  if (
+    faultPath !== undefined &&
+    (!PRODUCTION_CONTAINER_SOURCE_PATHS.includes(faultPath) ||
+      typeof afterFirstReadForTest !== 'function')
+  ) {
+    return invalidProductionContainerInput();
+  }
+  return loadProductionContainerSourcesInternal(
+    resolve(repositoryRoot),
+    faultPath,
+    afterFirstReadForTest,
+  );
 }
 
 function isDirectExecution() {
@@ -625,9 +735,8 @@ if (isDirectExecution()) {
     let result;
     try {
       result = validateProductionContainers();
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'unknown validation failure';
-      result = { valid: false, errors: [message] };
+    } catch {
+      result = { valid: false, errors: [PRODUCTION_CONTAINER_INPUT_ERROR] };
     }
     if (args[0] === '--json') {
       process.stdout.write(`${JSON.stringify(result)}\n`);

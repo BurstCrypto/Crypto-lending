@@ -70,6 +70,15 @@ These checks are offline and make no Docker or cloud API calls:
     node infra/containers/validate-production-containers.mjs
     node --test infra/containers/validate-built-runtime.test.mjs infra/containers/validate-production-containers.test.mjs
 
+The source-contract validator reads exactly 15 reviewed repository files. Each
+must be a non-empty, canonical, single-link regular file that remains unchanged
+across two bounded descriptor reads. Individual ceilings range from 1 KiB for
+the RDS checksum sidecar to 192 KiB for the certificate bundle, with a 384 KiB
+aggregate ceiling. All text uses fatal UTF-8 decoding and rejects a byte-order
+mark. The root, API, and web package manifests additionally reject duplicate
+keys at any depth. Input-boundary failures use one path-free message, and the
+validator neither starts Docker nor performs network or cloud calls.
+
 The in-build runtime validator rejects symbolic, hard, and reparse links and
 requires every inspected file and directory to remain stable while the tree is
 read. Its fixed ceilings are 16 MiB per file, 64 MiB in aggregate, 4,096 files,

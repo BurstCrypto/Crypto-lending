@@ -1,17 +1,31 @@
 import assert from 'node:assert/strict';
 import { Buffer } from 'node:buffer';
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import {
+  linkSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
 import process from 'node:process';
 import test from 'node:test';
 import { fileURLToPath, URL } from 'node:url';
 
 import { validateOciBuildMetadata } from './validate-oci-build-metadata.mjs';
 import {
+  MAX_PRODUCTION_CONTAINER_SOURCE_BYTES,
   NODE_BASE_IMAGE,
+  PRODUCTION_CONTAINER_INPUT_ERROR,
+  PRODUCTION_CONTAINER_SOURCE_PATHS,
   RDS_BUNDLE_SHA256,
+  loadProductionContainerSourcesForTest,
   validateProductionContainerSources,
+  validateProductionContainers,
 } from './validate-production-containers.mjs';
 
 const repositoryRoot = resolve(fileURLToPath(new URL('../..', import.meta.url)));
@@ -20,7 +34,7 @@ const validatorPath = join(repositoryRoot, 'infra/containers/validate-production
 function loadSources() {
   return {
     apiDockerfile: readFileSync(join(repositoryRoot, 'Dockerfile.api'), 'utf8'),
-    apiPackage: readFileSync(join(repositoryRoot, 'apps/api/package.json'), 'utf8'),
+    apiPackage: readFileSync(join(repositoryRoot, 'apps/api/package.json')),
     balanceConsumerActivation: readFileSync(
       join(
         repositoryRoot,
@@ -61,21 +75,60 @@ function loadSources() {
       join(repositoryRoot, 'infra/containers/aws-rds-global-bundle.crt.sha256'),
       'utf8',
     ),
-    rootPackage: readFileSync(join(repositoryRoot, 'package.json'), 'utf8'),
-    webPackage: readFileSync(join(repositoryRoot, 'apps/web/package.json'), 'utf8'),
+    rootPackage: readFileSync(join(repositoryRoot, 'package.json')),
+    webPackage: readFileSync(join(repositoryRoot, 'apps/web/package.json')),
     webDockerfile: readFileSync(join(repositoryRoot, 'Dockerfile.web'), 'utf8'),
   };
 }
 
 function replace(source, field, before, after) {
-  assert.ok(source[field].includes(before), 'fixture must contain ' + before);
-  return { ...source, [field]: source[field].replace(before, after) };
+  const original = source[field];
+  const text = Buffer.isBuffer(original) ? original.toString('utf8') : original;
+  assert.ok(text.includes(before), 'fixture must contain ' + before);
+  const changed = text.replace(before, after);
+  return { ...source, [field]: Buffer.isBuffer(original) ? Buffer.from(changed) : changed };
 }
 
 function assertRejected(source, pattern) {
   const result = validateProductionContainerSources(source);
   assert.equal(result.valid, false);
   assert.match(result.errors.join('\n'), pattern);
+}
+
+function withTemporarySourceTree(callback) {
+  const root = mkdtempSync(join(tmpdir(), 'production-container-inputs-'));
+  try {
+    for (const relativePath of PRODUCTION_CONTAINER_SOURCE_PATHS) {
+      const destination = join(root, relativePath);
+      mkdirSync(dirname(destination), { recursive: true });
+      writeFileSync(destination, readFileSync(join(repositoryRoot, relativePath)));
+    }
+    return callback(root);
+  } finally {
+    rmSync(root, { force: true, recursive: true });
+  }
+}
+
+function assertInputRejected(operation) {
+  assert.throws(
+    operation,
+    (error) =>
+      error instanceof Error &&
+      error.message === PRODUCTION_CONTAINER_INPUT_ERROR &&
+      !error.message.includes(tmpdir()),
+  );
+}
+
+function skipUnsupportedLink(error, context) {
+  if (
+    error &&
+    typeof error === 'object' &&
+    ['EPERM', 'EACCES', 'ENOTSUP', 'EINVAL'].includes(error.code)
+  ) {
+    context.skip(`link creation is unavailable: ${error.code}`);
+    return true;
+  }
+  return false;
 }
 
 test('accepts the reviewed production container contract deterministically', () => {
@@ -87,6 +140,103 @@ test('accepts the reviewed production container contract deterministically', () 
   assert.deepEqual(first.errors, []);
   assert.equal(first.baseImage, NODE_BASE_IMAGE);
   assert.equal(first.rdsBundleSha256, RDS_BUNDLE_SHA256);
+});
+
+test('loads exactly the bounded reviewed source set through stable local reads', () => {
+  assert.equal(PRODUCTION_CONTAINER_SOURCE_PATHS.length, 15);
+  assert.equal(new Set(PRODUCTION_CONTAINER_SOURCE_PATHS).size, 15);
+  assert.equal(MAX_PRODUCTION_CONTAINER_SOURCE_BYTES, 393_216);
+
+  withTemporarySourceTree((root) => {
+    const result = validateProductionContainerSources(loadProductionContainerSourcesForTest(root));
+    assert.equal(result.valid, true, result.errors.join('\n'));
+  });
+});
+
+test('rejects empty, oversized, malformed-text, and aggregate-exhausting source inputs', () => {
+  for (const [relativePath, contents] of [
+    ['Dockerfile.api', Buffer.alloc(0)],
+    ['Dockerfile.api', Buffer.alloc(16_385, 0x20)],
+    ['apps/web/next.config.ts', Buffer.from([0xff])],
+  ]) {
+    withTemporarySourceTree((root) => {
+      writeFileSync(join(root, relativePath), contents);
+      assertInputRejected(() => loadProductionContainerSourcesForTest(root));
+    });
+  }
+
+  withTemporarySourceTree((root) => {
+    for (const [relativePath, size] of [
+      ['infra/aws/application-baseline.yaml', 65_536],
+      ['infra/containers/aws-rds-global-bundle.crt', 196_608],
+      ['package.json', 32_768],
+      ['apps/api/package.json', 32_768],
+      ['apps/web/package.json', 16_384],
+      ['Dockerfile.api', 16_384],
+      ['Dockerfile.web', 16_384],
+    ]) {
+      writeFileSync(join(root, relativePath), Buffer.alloc(size, 0x20));
+    }
+    assertInputRejected(() => loadProductionContainerSourcesForTest(root));
+  });
+});
+
+test('rejects directory and hard-linked source inputs', () => {
+  withTemporarySourceTree((root) => {
+    const sourcePath = join(root, 'Dockerfile.api');
+    rmSync(sourcePath);
+    mkdirSync(sourcePath);
+    assertInputRejected(() => loadProductionContainerSourcesForTest(root));
+  });
+
+  withTemporarySourceTree((root) => {
+    const sourcePath = join(root, 'Dockerfile.api');
+    const targetPath = join(root, 'Dockerfile.api.target');
+    writeFileSync(targetPath, readFileSync(sourcePath));
+    rmSync(sourcePath);
+    linkSync(targetPath, sourcePath);
+    assertInputRejected(() => loadProductionContainerSourcesForTest(root));
+  });
+});
+
+test('rejects a symbolic-linked source input when supported', (context) => {
+  withTemporarySourceTree((root) => {
+    const sourcePath = join(root, 'Dockerfile.api');
+    const targetPath = join(root, 'Dockerfile.api.target');
+    writeFileSync(targetPath, readFileSync(sourcePath));
+    rmSync(sourcePath);
+    try {
+      symlinkSync(targetPath, sourcePath, 'file');
+    } catch (error) {
+      if (skipUnsupportedLink(error, context)) return;
+      throw error;
+    }
+    assertInputRejected(() => loadProductionContainerSourcesForTest(root));
+  });
+});
+
+test('rejects a same-size source rewrite during its stable descriptor read', () => {
+  withTemporarySourceTree((root) => {
+    const relativePath = 'Dockerfile.api';
+    const sourcePath = join(root, relativePath);
+    const replacement = readFileSync(sourcePath);
+    replacement[0] ^= 1;
+    let faultInvoked = false;
+
+    assertInputRejected(() =>
+      loadProductionContainerSourcesForTest(root, relativePath, () => {
+        faultInvoked = true;
+        writeFileSync(sourcePath, replacement);
+      }),
+    );
+    assert.equal(faultInvoked, true);
+  });
+});
+
+test('rejects non-repository roots through one path-free input failure', () => {
+  withTemporarySourceTree((root) => {
+    assertInputRejected(() => validateProductionContainers(root));
+  });
 });
 
 test('rejects mutable, changed, or architecture-pinned base images', () => {
@@ -211,6 +361,51 @@ test('rejects npm, lock-install, and workspace command drift', () => {
       '"packageManager": "npm@11.7.0"',
     ),
     /packageManager/u,
+  );
+});
+
+test('rejects duplicate package keys, a byte-order mark, and malformed UTF-8', () => {
+  const source = loadSources();
+  const rootPackage = source.rootPackage.toString('utf8');
+  const apiPackage = source.apiPackage.toString('utf8');
+
+  assertRejected(
+    {
+      ...source,
+      rootPackage: Buffer.from(
+        rootPackage.replace(
+          '"packageManager": "npm@11.6.4",',
+          '"packageManager": "npm@latest",\n  "packageManager": "npm@11.6.4",',
+        ),
+      ),
+    },
+    /strict UTF-8 JSON without a byte-order mark or duplicate object keys/u,
+  );
+  assertRejected(
+    {
+      ...source,
+      apiPackage: Buffer.from(
+        apiPackage.replace(
+          '"start:prod": "node dist/main.js",',
+          '"start:prod": "node unsafe.js",\n    "start:prod": "node dist/main.js",',
+        ),
+      ),
+    },
+    /duplicate object keys/u,
+  );
+  assertRejected(
+    {
+      ...source,
+      webPackage: Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), source.webPackage]),
+    },
+    /byte-order mark/u,
+  );
+  assertRejected(
+    {
+      ...source,
+      apiPackage: Buffer.concat([source.apiPackage.subarray(0, -1), Buffer.from([0xff, 0x7d])]),
+    },
+    /strict UTF-8/u,
   );
 });
 
