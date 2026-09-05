@@ -58,6 +58,16 @@ runtime, CLI, activation, module, barrel, application, package, template, and
 container launch roots. Passing that local inspection does not compose the
 coordinator or change any blocker below.
 
+The same inspection now byte-pins the provider-neutral JSON-RPC helper and the
+Ethereum and Solana mainnet balance adapters. It requires injected per-chain
+transports behind the shared interface, no owned HTTP/client, URL, credential, environment,
+timer, retry-loop, or Nest/runtime capability, and no adapter/helper identity
+in runtime, module, activation, or CLI launch roots. The already reviewed
+barrel exports remain allowed because they neither construct a transport nor
+register a provider. Mutation tests cover direct capability additions and
+launch-root registration. This is static source integrity only and cannot
+select a provider, permit egress, activate the consumer, or clear live evidence.
+
 The inspected source keeps activation false, sets
 `BALANCE_CONSUMER_MODE=disabled`, and leaves the runtime uncomposed. The task
 has no database secret/grants, metadata key, RPC/provider input, Redis, auth,

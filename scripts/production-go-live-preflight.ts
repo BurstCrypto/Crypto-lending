@@ -161,6 +161,9 @@ export interface BalanceConsumerArtifactSources {
   readonly compositionSource: string;
   readonly balanceConsumerResourceSource: string;
   readonly balanceConsumerLifecycleSource: string;
+  readonly balanceJsonRpcSource: string;
+  readonly ethereumBalanceIndexerSource: string;
+  readonly solanaBalanceIndexerSource: string;
   readonly balanceConsumerPersistenceResourceSource: string;
   readonly balanceConsumerSqsReceiptResourceSource: string;
   readonly runtimePostgresPoolSource: string;
@@ -520,6 +523,9 @@ const BALANCE_CONSUMER_ARTIFACT_KEYS = Object.freeze([
   'compositionSource',
   'balanceConsumerResourceSource',
   'balanceConsumerLifecycleSource',
+  'balanceJsonRpcSource',
+  'ethereumBalanceIndexerSource',
+  'solanaBalanceIndexerSource',
   'balanceConsumerPersistenceResourceSource',
   'balanceConsumerSqsReceiptResourceSource',
   'runtimePostgresPoolSource',
@@ -577,6 +583,9 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
   balanceConsumerResourceSource: 'f210defba63ab0c2379ad499c8d84d4df79a3bc23f8ea31d51e740c8b71d0118',
   balanceConsumerLifecycleSource:
     'd4313b5a5e3f50022678beda7afb8768c9426f6b361be137e4be27e8e86f3a81',
+  balanceJsonRpcSource: 'cbe7a9ba94879e138342cd7d7c39c301aa7fbfc284723057edf62257dbe58b97',
+  ethereumBalanceIndexerSource: '9c42509bfb59687b3dc2c05ba2f521b0cdb6b3141a9c2552656a898287861e25',
+  solanaBalanceIndexerSource: 'ba27828c1e122606ada27cc6044eef5198c44ebb459cbae46f121b7a8cec32df',
   balanceConsumerPersistenceResourceSource:
     'e95c1ce138f15202e0e181ff31fe164fa22d61e2eaa642a32ea81865a28ff27d',
   balanceConsumerSqsReceiptResourceSource:
@@ -1557,6 +1566,18 @@ function exactExecutableLineCount(source: string, expected: string): number {
   return trimmedExecutableLines(source).filter((line) => line === expected).length;
 }
 
+function sortedTypeScriptImportTargets(source: string): readonly string[] {
+  const targets: string[] = [];
+  for (const match of source.matchAll(
+    /(?:\bfrom\s+|\bimport\s*(?:\(\s*)?)(['"])([^'"]+)\1\s*\)?/gu,
+  )) {
+    const target = match[2];
+    if (target === undefined) return [];
+    targets.push(target);
+  }
+  return targets.sort();
+}
+
 function snapshotProductionInfrastructureArtifactSources(
   value: unknown,
 ): ProductionInfrastructureArtifactSources | null {
@@ -1919,6 +1940,144 @@ function hasDormantBalanceConsumerSourceContract(sources: BalanceConsumerArtifac
       sources.compositionSource,
     )
   );
+}
+
+function hasDormantProviderNeutralBalanceRpcContract(
+  sources: BalanceConsumerArtifactSources,
+): boolean {
+  const helper = sources.balanceJsonRpcSource.replace(/\r\n/gu, '\n');
+  const ethereum = sources.ethereumBalanceIndexerSource.replace(/\r\n/gu, '\n');
+  const solana = sources.solanaBalanceIndexerSource.replace(/\r\n/gu, '\n');
+  const providerSources = [helper, ethereum, solana] as const;
+  const forbiddenCapability =
+    /\b(?:fetch|setTimeout|setInterval|setImmediate|queueMicrotask)\s*\(|\b(?:process|Deno|Bun)\s*\.\s*env\b|\bimport\s*\.\s*meta\s*\.\s*env\b|\bnew\s+(?:URL|URLSearchParams|WebSocket|EventSource|Connection|[A-Za-z0-9_]*Client|[A-Za-z0-9_]*Agent)\s*\(|\b(?:http|https|dns|net|tls)\s*\.\s*[A-Za-z][A-Za-z0-9_]*\s*\(|\b(?:axios|got|request|retry|backoff)\s*\(|\b(?:client|endpoint|hostname|credential|apiKey|password|secret|rpcUrl|baseUrl|retry|backoff)\s*(?::|=)|@(?:Injectable|Module)\s*\(|\b(?:NestFactory|createApplicationContext)\b|\.(?:listen|connect)\s*\(|['"]https?:\/\//iu;
+  const forbiddenImport =
+    /(?:\bfrom\s+|\bimport\s*(?:\(\s*)?)['"](?:node:)?(?:dns|http|http2|https|net|tls)(?:\/[^'"]*)?['"]|(?:\bfrom\s+|\bimport\s*(?:\(\s*)?)['"](?:axios|ethers|got|superagent|undici|web3|@solana\/web3\.js)['"]/iu;
+  const expectedHelperImports = ['../../domain/balance-sync', 'node:crypto'].sort();
+  const expectedEthereumImports = [
+    '../../../blockchain/domain/supported-asset-registry',
+    '../../../wallets/domain/wallet-identity',
+    '../../application/ports/balance-sync.ports',
+    '../../domain/balance-sync',
+    './balance-json-rpc',
+  ].sort();
+  const expectedSolanaImports = [
+    '../../../blockchain/domain/solana-token-account',
+    '../../../blockchain/domain/supported-asset-registry',
+    '../../../wallets/domain/wallet-identity',
+    '../../application/ports/balance-sync.ports',
+    '../../domain/balance-sync',
+    './balance-json-rpc',
+  ].sort();
+  const exactImports = (source: string, expected: readonly string[]): boolean =>
+    sortedTypeScriptImportTargets(source).join('\0') === expected.join('\0');
+  const helperExchangeCount = helper.split('transport.exchange(request)').length - 1;
+  const ethereumExchangeCount = ethereum.split('exchangeBalanceRpc(this.transport,').length - 1;
+  const solanaExchangeCount = solana.split('exchangeBalanceRpc(this.transport,').length - 1;
+
+  if (
+    providerSources.some(
+      (source) =>
+        forbiddenCapability.test(source) ||
+        forbiddenImport.test(source) ||
+        /implements\s+BalanceJsonRpcTransport\b/u.test(source),
+    ) ||
+    !exactImports(helper, expectedHelperImports) ||
+    !exactImports(ethereum, expectedEthereumImports) ||
+    !exactImports(solana, expectedSolanaImports) ||
+    exactExecutableLineCount(helper, 'export interface BalanceJsonRpcTransport {') !== 1 ||
+    exactExecutableLineCount(
+      helper,
+      'exchange(request: BalanceJsonRpcRequest): Promise<unknown>;',
+    ) !== 1 ||
+    exactExecutableLineCount(helper, 'export async function exchangeBalanceRpc(') !== 1 ||
+    exactExecutableLineCount(helper, 'response = await transport.exchange(request);') !== 1 ||
+    exactExecutableLineCount(helper, 'return parseBalanceRpcResult(response, request.id);') !== 1 ||
+    helperExchangeCount !== 1 ||
+    exactExecutableLineCount(
+      ethereum,
+      'export class EthereumMainnetBalanceIndexerAdapter implements BalanceSyncIndexerPort {',
+    ) !== 1 ||
+    exactExecutableLineCount(
+      solana,
+      'export class SolanaMainnetBalanceIndexerAdapter implements BalanceSyncIndexerPort {',
+    ) !== 1 ||
+    exactExecutableLineCount(ethereum, 'private readonly transport: BalanceJsonRpcTransport,') !==
+      1 ||
+    exactExecutableLineCount(solana, 'private readonly transport: BalanceJsonRpcTransport,') !==
+      1 ||
+    exactExecutableLineCount(ethereum, 'exchangeBalanceRpc,') !== 1 ||
+    exactExecutableLineCount(solana, 'exchangeBalanceRpc,') !== 1 ||
+    ethereumExchangeCount !== 4 ||
+    solanaExchangeCount !== 4 ||
+    /\.exchange\s*\(/u.test(ethereum) ||
+    /\.exchange\s*\(/u.test(solana)
+  ) {
+    return false;
+  }
+
+  const directRpcCapability =
+    /\b(?:fetch|setTimeout|setInterval|setImmediate|queueMicrotask)\s*\(|\b(?:process|Deno|Bun)\s*\.\s*env\b|\bimport\s*\.\s*meta\s*\.\s*env\b|\bnew\s+(?:URL|URLSearchParams|WebSocket|EventSource|Connection|[A-Za-z0-9_]*Client|[A-Za-z0-9_]*Agent)\s*\(|\b(?:http|https|dns|net|tls)\s*\.\s*[A-Za-z][A-Za-z0-9_]*\s*\(|\b(?:axios|got|request)\s*\(|@(?:Injectable|Module)\s*\(|\b(?:NestFactory|createApplicationContext)\b|\.(?:exchange|listen|connect)\s*\(|['"]https?:\/\//iu;
+  const composition = sources.compositionSource;
+  const resource = sources.balanceConsumerResourceSource;
+  const ethereumAdapterReferences =
+    composition.split('EthereumMainnetBalanceIndexerAdapter').length - 1;
+  const solanaAdapterReferences =
+    composition.split('SolanaMainnetBalanceIndexerAdapter').length - 1;
+  const compositionTransportReferences = composition.split('BalanceJsonRpcTransport').length - 1;
+  const resourceTransportReferences = resource.split('BalanceJsonRpcTransport').length - 1;
+  const forbiddenDirectHelperUse =
+    /\b(?:BalanceJsonRpcTransportFailure|balanceRpcRequest|parseBalanceRpcResult|exchangeBalanceRpc)\b/u;
+  const forbiddenProviderClassUse =
+    /\b(?:EthereumMainnetBalanceIndexerAdapter|SolanaMainnetBalanceIndexerAdapter)\b/u;
+  if (
+    [composition, resource].some(
+      (source) => directRpcCapability.test(source) || forbiddenImport.test(source),
+    ) ||
+    forbiddenDirectHelperUse.test(composition) ||
+    forbiddenDirectHelperUse.test(resource) ||
+    forbiddenProviderClassUse.test(resource) ||
+    ethereumAdapterReferences !== 3 ||
+    solanaAdapterReferences !== 3 ||
+    compositionTransportReferences !== 3 ||
+    resourceTransportReferences !== 7 ||
+    composition.split('../infrastructure/rpc/ethereum-mainnet-balance-indexer.adapter').length -
+      1 !==
+      1 ||
+    composition.split('../infrastructure/rpc/solana-mainnet-balance-indexer.adapter').length - 1 !==
+      1 ||
+    composition.split('../infrastructure/rpc/balance-json-rpc').length - 1 !== 1 ||
+    resource.split('../infrastructure/rpc/balance-json-rpc').length - 1 !== 1
+  ) {
+    return false;
+  }
+
+  const launchAndRegistrationSources = [
+    sources.activationSource,
+    sources.cliSource,
+    sources.cliModeSource,
+    sources.runtimeSource,
+    sources.blockchainSyncModuleSource,
+    sources.appModuleSource,
+    sources.applicationRootSource,
+    sources.localDevelopmentAppModuleSource,
+    sources.mainSource,
+    sources.outboxWorkerCliSource,
+    sources.redisSessionRevocationCliSource,
+    sources.migrationCliSource,
+    sources.apiPackageSource,
+    sources.rootPackageSource,
+    sources.applicationTemplateSource,
+    sources.workloadTemplateSource,
+    sources.balanceConsumerEnvelopeSource,
+    sources.releaseManifestSource,
+    sources.balanceConsumerLifecycleSource,
+    sources.balanceSyncOrchestratorSource,
+    sources.reviewedJobDispatcherSource,
+  ];
+  const forbiddenLaunchRegistration =
+    /\b(?:EthereumMainnetBalanceIndexerAdapter|SolanaMainnetBalanceIndexerAdapter|BalanceJsonRpc[A-Za-z0-9_]*|balanceRpcRequest|parseBalanceRpcResult|exchangeBalanceRpc)\b|(?:balance-json-rpc|ethereum-mainnet-balance-indexer\.adapter|solana-mainnet-balance-indexer\.adapter)/u;
+  return launchAndRegistrationSources.every((source) => !forbiddenLaunchRegistration.test(source));
 }
 
 function hasDormantBalanceConsumerAggregateResourceContract(
@@ -4636,6 +4795,7 @@ export function inspectBalanceConsumerDeploymentArtifacts(
     const contractValid =
       hasExactReviewedBalanceConsumerArtifactBytes(sources) &&
       hasDormantBalanceConsumerSourceContract(sources) &&
+      hasDormantProviderNeutralBalanceRpcContract(sources) &&
       hasDormantBalanceConsumerAggregateResourceContract(sources) &&
       hasDormantBalanceConsumerLifecycleCoordinatorContract(sources) &&
       hasDormantBalanceConsumerPersistenceResourceContract(sources) &&
@@ -5288,6 +5448,27 @@ export function loadRepositoryProductionPreflightInput(
         resolve(
           repositoryRoot,
           'apps/api/src/blockchain-sync/application/balance-sync-consumer.lifecycle.ts',
+        ),
+        'utf8',
+      ),
+      balanceJsonRpcSource: readFileSync(
+        resolve(
+          repositoryRoot,
+          'apps/api/src/blockchain-sync/infrastructure/rpc/balance-json-rpc.ts',
+        ),
+        'utf8',
+      ),
+      ethereumBalanceIndexerSource: readFileSync(
+        resolve(
+          repositoryRoot,
+          'apps/api/src/blockchain-sync/infrastructure/rpc/ethereum-mainnet-balance-indexer.adapter.ts',
+        ),
+        'utf8',
+      ),
+      solanaBalanceIndexerSource: readFileSync(
+        resolve(
+          repositoryRoot,
+          'apps/api/src/blockchain-sync/infrastructure/rpc/solana-mainnet-balance-indexer.adapter.ts',
         ),
         'utf8',
       ),

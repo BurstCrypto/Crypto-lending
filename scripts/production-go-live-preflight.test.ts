@@ -152,6 +152,24 @@ const BALANCE_CONSUMER_ARTIFACTS = Object.freeze({
     ),
     'utf8',
   ),
+  balanceJsonRpcSource: readFileSync(
+    resolve(__dirname, '../apps/api/src/blockchain-sync/infrastructure/rpc/balance-json-rpc.ts'),
+    'utf8',
+  ),
+  ethereumBalanceIndexerSource: readFileSync(
+    resolve(
+      __dirname,
+      '../apps/api/src/blockchain-sync/infrastructure/rpc/ethereum-mainnet-balance-indexer.adapter.ts',
+    ),
+    'utf8',
+  ),
+  solanaBalanceIndexerSource: readFileSync(
+    resolve(
+      __dirname,
+      '../apps/api/src/blockchain-sync/infrastructure/rpc/solana-mainnet-balance-indexer.adapter.ts',
+    ),
+    'utf8',
+  ),
   balanceConsumerPersistenceResourceSource: readFileSync(
     resolve(
       __dirname,
@@ -1340,6 +1358,133 @@ test('balance-consumer inspection rejects dormant lifecycle coordinator drift', 
   }
 });
 
+test('balance-consumer inspection rejects provider-neutral JSON-RPC capability and registration drift', () => {
+  const capabilityMutations: readonly (readonly [
+    keyof BalanceConsumerArtifactSources,
+    string,
+    string,
+  ])[] = [
+    [
+      'balanceJsonRpcSource',
+      "import { createHash } from 'node:crypto';",
+      "import { createHash } from 'node:crypto';\nimport { request } from 'node:https';",
+    ],
+    [
+      'balanceJsonRpcSource',
+      'response = await transport.exchange(request);',
+      "response = await fetch('https://unreviewed.invalid');",
+    ],
+    [
+      'ethereumBalanceIndexerSource',
+      'private readonly transport: BalanceJsonRpcTransport,',
+      'private readonly endpoint: URL,',
+    ],
+    [
+      'solanaBalanceIndexerSource',
+      'private readonly transport: BalanceJsonRpcTransport,',
+      'private readonly client: UnreviewedSolanaClient,',
+    ],
+    [
+      'ethereumBalanceIndexerSource',
+      'exchangeBalanceRpc(this.transport,',
+      'this.transport.exchange(',
+    ],
+    [
+      'solanaBalanceIndexerSource',
+      'exchangeBalanceRpc(this.transport,',
+      'this.transport.exchange(',
+    ],
+  ];
+  for (const [key, approved, rejected] of capabilityMutations) {
+    assert.deepEqual(
+      inspectBalanceConsumerDeploymentArtifacts(
+        mutateBalanceConsumerArtifact(key, approved, rejected),
+      ),
+      INVALID_BALANCE_CONSUMER_DEPLOYMENT,
+      `${key}: ${approved}`,
+    );
+  }
+
+  const directCapabilities: readonly BalanceConsumerArtifactSources[] = [
+    {
+      ...BALANCE_CONSUMER_ARTIFACTS,
+      balanceJsonRpcSource: `${BALANCE_CONSUMER_ARTIFACTS.balanceJsonRpcSource}\nimport 'node:https';\n`,
+    },
+    {
+      ...BALANCE_CONSUMER_ARTIFACTS,
+      balanceJsonRpcSource: `${BALANCE_CONSUMER_ARTIFACTS.balanceJsonRpcSource}\nfunction retry(): void { setTimeout(() => undefined, 1); }\nvoid retry;\n`,
+    },
+    {
+      ...BALANCE_CONSUMER_ARTIFACTS,
+      ethereumBalanceIndexerSource: `${BALANCE_CONSUMER_ARTIFACTS.ethereumBalanceIndexerSource}\nconst rpcUrl = process.env.ETHEREUM_RPC_URL;\nvoid rpcUrl;\n`,
+    },
+    {
+      ...BALANCE_CONSUMER_ARTIFACTS,
+      solanaBalanceIndexerSource: `${BALANCE_CONSUMER_ARTIFACTS.solanaBalanceIndexerSource}\n@Module({ providers: [SolanaMainnetBalanceIndexerAdapter] })\nclass UnreviewedRpcModule {}\n`,
+    },
+  ];
+  for (const candidate of directCapabilities) {
+    assert.deepEqual(
+      inspectBalanceConsumerDeploymentArtifacts(candidate),
+      INVALID_BALANCE_CONSUMER_DEPLOYMENT,
+    );
+  }
+
+  const launchRegistrations: readonly BalanceConsumerArtifactSources[] = [
+    {
+      ...BALANCE_CONSUMER_ARTIFACTS,
+      runtimeSource: `${BALANCE_CONSUMER_ARTIFACTS.runtimeSource}\nvoid EthereumMainnetBalanceIndexerAdapter;\n`,
+    },
+    {
+      ...BALANCE_CONSUMER_ARTIFACTS,
+      blockchainSyncModuleSource: `${BALANCE_CONSUMER_ARTIFACTS.blockchainSyncModuleSource}\nvoid SolanaMainnetBalanceIndexerAdapter;\n`,
+    },
+    {
+      ...BALANCE_CONSUMER_ARTIFACTS,
+      activationSource: `${BALANCE_CONSUMER_ARTIFACTS.activationSource}\nvoid exchangeBalanceRpc;\n`,
+    },
+    {
+      ...BALANCE_CONSUMER_ARTIFACTS,
+      cliSource: `${BALANCE_CONSUMER_ARTIFACTS.cliSource}\nvoid BalanceJsonRpcTransport;\n`,
+    },
+    {
+      ...BALANCE_CONSUMER_ARTIFACTS,
+      compositionSource: `${BALANCE_CONSUMER_ARTIFACTS.compositionSource}\nvoid exchangeBalanceRpc;\n`,
+    },
+    {
+      ...BALANCE_CONSUMER_ARTIFACTS,
+      balanceConsumerResourceSource: `${BALANCE_CONSUMER_ARTIFACTS.balanceConsumerResourceSource}\nvoid EthereumMainnetBalanceIndexerAdapter;\n`,
+    },
+    {
+      ...BALANCE_CONSUMER_ARTIFACTS,
+      balanceConsumerLifecycleSource: `${BALANCE_CONSUMER_ARTIFACTS.balanceConsumerLifecycleSource}\nvoid BalanceJsonRpcTransport;\n`,
+    },
+    {
+      ...BALANCE_CONSUMER_ARTIFACTS,
+      balanceSyncOrchestratorSource: `${BALANCE_CONSUMER_ARTIFACTS.balanceSyncOrchestratorSource}\nvoid SolanaMainnetBalanceIndexerAdapter;\n`,
+    },
+    {
+      ...BALANCE_CONSUMER_ARTIFACTS,
+      reviewedJobDispatcherSource: `${BALANCE_CONSUMER_ARTIFACTS.reviewedJobDispatcherSource}\nvoid balanceRpcRequest;\n`,
+    },
+  ];
+  for (const candidate of launchRegistrations) {
+    assert.deepEqual(
+      inspectBalanceConsumerDeploymentArtifacts(candidate),
+      INVALID_BALANCE_CONSUMER_DEPLOYMENT,
+    );
+  }
+
+  assert.match(
+    BALANCE_CONSUMER_ARTIFACTS.blockchainSyncIndexSource,
+    /export \{ EthereumMainnetBalanceIndexerAdapter \}/u,
+  );
+  assert.match(
+    BALANCE_CONSUMER_ARTIFACTS.blockchainSyncIndexSource,
+    /export \{ SolanaMainnetBalanceIndexerAdapter \}/u,
+  );
+});
+
 test('balance-consumer inspection brands and freezes only the exact dormant local contract', () => {
   const inspected = inspectBalanceConsumerDeploymentArtifacts(BALANCE_CONSUMER_ARTIFACTS);
   assert.deepEqual(inspected, EXPECTED_DORMANT_BALANCE_CONSUMER_DEPLOYMENT);
@@ -1892,6 +2037,12 @@ test('balance-consumer artifact shape, bounds, and private brand fail closed', (
   delete missingMetadataValidator.balanceConsumerMetadataTransitionValidatorSource;
   const missingLifecycle = { ...BALANCE_CONSUMER_ARTIFACTS } as Record<string, unknown>;
   delete missingLifecycle.balanceConsumerLifecycleSource;
+  const missingBalanceJsonRpc = { ...BALANCE_CONSUMER_ARTIFACTS } as Record<string, unknown>;
+  delete missingBalanceJsonRpc.balanceJsonRpcSource;
+  const missingEthereumIndexer = { ...BALANCE_CONSUMER_ARTIFACTS } as Record<string, unknown>;
+  delete missingEthereumIndexer.ethereumBalanceIndexerSource;
+  const missingSolanaIndexer = { ...BALANCE_CONSUMER_ARTIFACTS } as Record<string, unknown>;
+  delete missingSolanaIndexer.solanaBalanceIndexerSource;
   const accessor = { ...BALANCE_CONSUMER_ARTIFACTS } as Record<string, unknown>;
   Object.defineProperty(accessor, 'activationSource', {
     enumerable: true,
@@ -1914,6 +2065,9 @@ test('balance-consumer artifact shape, bounds, and private brand fail closed', (
     missing,
     missingMetadataValidator,
     missingLifecycle,
+    missingBalanceJsonRpc,
+    missingEthereumIndexer,
+    missingSolanaIndexer,
     { ...BALANCE_CONSUMER_ARTIFACTS, unexpected: 'value' },
     { ...BALANCE_CONSUMER_ARTIFACTS, runtimeSource: 1 },
     accessor,

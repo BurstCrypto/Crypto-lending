@@ -206,6 +206,15 @@ is supported without trusting arbitrary programs, provider-parsed extension
 objects, or unbounded account allocation. See
 `docs/rpc-indexing/ethereum-solana-balance-transcript-adapters.md`.
 
+Offline production preflight SHA-256 pins the exact shared JSON-RPC helper and
+both Ethereum/Solana adapter sources. A separate semantic contract preserves
+their injected transcript-only boundary, rejects direct HTTP/client, URL,
+credential, environment, timer, retry-loop, and Nest/runtime capabilities, and
+requires their identities to remain absent from module, activation, runtime,
+and CLI launch roots. Existing barrel exports are intentionally allowed and do
+not compose a transport. Passing this local source check leaves every RPC,
+egress, task, IAM, database, deployment, and live-evidence blocker unchanged.
+
 `CANONICAL` (`safe` or `confirmed`) and `FINANCIAL` (`finalized`) jobs fail
 closed locally. They require live capability, independent agreement, and
 downstream approval evidence that this ticket does not have. A provisional

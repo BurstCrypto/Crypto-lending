@@ -18,6 +18,16 @@ fields at the consumed object boundaries, and map provider/transport outcomes
 to fixed `BalanceSyncIndexerFailure` codes. Provider messages, URLs, addresses,
 hashes, amounts, and credentials are not copied into exceptions.
 
+Offline production preflight now SHA-256 pins the exact shared JSON-RPC helper
+and both adapter sources. Its independent semantic check requires the shared
+injected `BalanceJsonRpcTransport` interface, rejects direct HTTP/client, URL,
+credential, environment, timer, retry-loop, or Nest registration capability,
+and proves the helper and adapter identities remain absent from runtime,
+module, activation, and CLI launch roots. Their existing public barrel exports
+remain source-level API exposure only; they do not register or construct a
+transport. This local check neither chooses an endpoint nor changes any live
+RPC, egress, deployment, or provider-evidence blocker.
+
 ## Ethereum mainnet
 
 The Ethereum adapter requires `eip155:1`, brackets its read with exact
@@ -86,6 +96,9 @@ shape, mismatched response IDs, missing Ethereum contract code, malformed ABI
 words, Solana owner/mint/decimal/context mismatches, duplicate token accounts,
 uint256 overflow, transport failure mapping, bounded recovery, broken parents,
 and Solana skipped slots. They are compatibility and fail-closed evidence only.
+Preflight mutation tests separately prove that source-byte drift, a direct
+network/client/environment/timer/retry capability, or launch-root registration
+invalidates the dormant balance-consumer contract.
 
 Production remains blocked on all of the following:
 
