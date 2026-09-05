@@ -3124,6 +3124,39 @@ function validateDeploymentGuard(source, errors) {
     '$authWalletTransitionDeploymentBindingSha256',
     "'auth-wallet-transition-sha256'",
     '$freshAuthWalletValidationAt',
+    "'validate-redis-operator-secret-version-transition.mjs'",
+    "$isRedisOperatorTransition = $UpdateIntent -ceq 'REDIS_OPERATOR_TRANSITION'",
+    'RedisOperatorTransitionAuthorityRegistrySha256 = $RedisOperatorTransitionAuthorityRegistrySha256',
+    'RedisOperatorTransitionCurrentVersionId = $RedisOperatorTransitionCurrentVersionId',
+    'RedisOperatorTransitionOperation = $RedisOperatorTransitionOperation',
+    'RedisOperatorTransitionFieldName = $RedisOperatorTransitionFieldName',
+    'foreach ($requiredRedisOperatorParameter in @($redisOperatorTransitionInputValues.Keys))',
+    '$redisOperatorValidationOne = Invoke-RedisOperatorTransitionValidation',
+    'function ConvertFrom-RedisOperatorDeploymentBindings',
+    "[ValidateSet('currentDeploymentBindings', 'targetDeploymentBindings')]",
+    "'currentOperatorStateSha256'",
+    "'targetOperatorStateSha256'",
+    "'currentCredentialStateSha256'",
+    "'targetCredentialStateSha256'",
+    "'redisOperatorPredecessorTransitionSha256'",
+    "'credentialPredecessorTransitionSha256'",
+    "'preservedAuthWalletStateSha256'",
+    "'preservedAuthWalletTransitionSha256'",
+    '$signedRedisOperatorTargetBindings',
+    'function Get-RedisOperatorLiveBinding',
+    'function Assert-RedisOperatorFunctionalResourceChange',
+    "'/Properties/AuthenticationMode/Passwords'",
+    "$causingEntity -ceq 'RedisOperatorSecretVersionId'",
+    "'redis-operator-predecessor-sha256'",
+    "'redis-operator-transition-sha256'",
+    "'redis-operator-state-sha256'",
+    "$stackTags['credential-transition-sha256'] = $redisOperatorTransitionRecordSha256",
+    "$rootNextTokenProperty = $changeSet.PSObject.Properties['NextToken']",
+    '$freshRedisOperatorValidationAt',
+    '$finalRedisOperatorLiveBinding = Get-RedisOperatorLiveBinding',
+    "-Moment 'after final Redis authorization and immediately before execution'",
+    '$expectedChangeSetDescription.Length -gt 1024',
+    'transition-binding-sha256=',
     'function Assert-AuthWalletTagOnlyResourceChange',
     'function Assert-AuthWalletFunctionalResourceChange',
     'function Assert-AuthWalletNestedChangeSet',
@@ -3170,6 +3203,47 @@ function validateDeploymentGuard(source, errors) {
         }`,
       );
     }
+  }
+
+  for (const forbiddenRedisOperatorRecordRead of [
+    '$redisOperatorTransitionRecordText',
+    '$redisOperatorTransitionRecord.content',
+    '[System.IO.File]::ReadAllText($resolvedRedisOperatorTransitionRecord)',
+  ]) {
+    if (source.includes(forbiddenRedisOperatorRecordRead)) {
+      errors.push(
+        `Deployment guard must consume only the signed Redis operator validator report, not direct record JSON: ${forbiddenRedisOperatorRecordRead}`,
+      );
+    }
+  }
+
+  const redisValidationOneIndex = source.indexOf(
+    '$redisOperatorValidationOne = Invoke-RedisOperatorTransitionValidation',
+  );
+  const redisRecordHashIndex = source.indexOf(
+    'Get-FileHash -LiteralPath $resolvedRedisOperatorTransitionRecord -Algorithm SHA256',
+  );
+  const finalRedisValidationIndex = source.indexOf(
+    '$finalRedisOperatorValidation = Invoke-RedisOperatorTransitionValidation',
+  );
+  const finalRedisLiveBindingIndex = source.indexOf(
+    '$finalRedisOperatorLiveBinding = Get-RedisOperatorLiveBinding',
+  );
+  const finalRedisRootBindingIndex = source.lastIndexOf(
+    "-Moment 'after final Redis authorization and immediately before execution'",
+  );
+  const executeRedisChangeSetIndex = source.lastIndexOf("'execute-change-set'");
+  if (
+    redisValidationOneIndex < 0 ||
+    redisRecordHashIndex <= redisValidationOneIndex ||
+    finalRedisValidationIndex <= redisRecordHashIndex ||
+    finalRedisLiveBindingIndex <= finalRedisValidationIndex ||
+    finalRedisRootBindingIndex <= finalRedisLiveBindingIndex ||
+    executeRedisChangeSetIndex <= finalRedisRootBindingIndex
+  ) {
+    errors.push(
+      'Redis operator transitions must validate before reading the record and freshly revalidate live child and exact root state immediately before execution.',
+    );
   }
 
   if (

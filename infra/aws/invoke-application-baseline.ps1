@@ -466,6 +466,95 @@ function Get-OptionalPropertyValue {
     return $property.Value
 }
 
+function Assert-CurrentStackBindingUnchanged {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $ExpectedStackName,
+        [Parameter(Mandatory = $true)]
+        [string] $ExpectedStackId,
+        [Parameter(Mandatory = $true)]
+        [string] $ExpectedUpdateIntent,
+        [Parameter(Mandatory = $true)]
+        [string] $ExpectedBindingSha256,
+        [Parameter(Mandatory = $true)]
+        [string] $ProfileName,
+        [Parameter(Mandatory = $true)]
+        [string] $RegionName,
+        [Parameter(Mandatory = $true)]
+        [string] $Moment
+    )
+
+    $stackOutput = & $script:AwsExecutable @(
+        'cloudformation',
+        'describe-stacks',
+        '--stack-name', $ExpectedStackId,
+        '--profile', $ProfileName,
+        '--region', $RegionName,
+        '--output', 'json',
+        '--no-cli-pager'
+    )
+    if ($LASTEXITCODE -ne 0) {
+        throw "Unable to re-read immutable stack '$ExpectedStackId' $Moment."
+    }
+    try {
+        $stackResponse = ($stackOutput | Out-String) | ConvertFrom-Json
+    }
+    catch {
+        throw "The immutable application stack response was not valid JSON $Moment."
+    }
+    if (
+        $null -eq $stackResponse -or
+        ($null -ne $stackResponse.PSObject.Properties['NextToken'] -and $null -ne $stackResponse.NextToken) -or
+        $stackResponse.Stacks -isnot [System.Array] -or
+        @($stackResponse.Stacks).Count -ne 1
+    ) {
+        throw "The immutable application stack response was incomplete or paginated $Moment."
+    }
+    $stack = @($stackResponse.Stacks)[0]
+    if (
+        [string] (Get-OptionalPropertyValue -InputObject $stack -Name 'StackName') -cne $ExpectedStackName -or
+        [string] (Get-OptionalPropertyValue -InputObject $stack -Name 'StackId') -cne $ExpectedStackId -or
+        [string] (Get-OptionalPropertyValue -InputObject $stack -Name 'StackStatus') -notin @('CREATE_COMPLETE', 'UPDATE_COMPLETE')
+    ) {
+        throw "The current application stack identity or stable status changed $Moment. Re-plan and review a new change set."
+    }
+
+    $parameterMap = Get-StackParameterMap -Stack $stack
+    $tags = ConvertFrom-ChangeSetTags -Tags (Get-OptionalPropertyValue -InputObject $stack -Name 'Tags')
+    $templateOutput = & $script:AwsExecutable @(
+        'cloudformation',
+        'get-template',
+        '--stack-name', $ExpectedStackId,
+        '--template-stage', 'Original',
+        '--profile', $ProfileName,
+        '--region', $RegionName,
+        '--output', 'json',
+        '--no-cli-pager'
+    )
+    if ($LASTEXITCODE -ne 0) {
+        throw "Unable to re-read the Original template for immutable stack '$ExpectedStackId' $Moment."
+    }
+    try {
+        $template = ($templateOutput | Out-String) | ConvertFrom-Json
+    }
+    catch {
+        throw "The current Original application template response was not valid JSON $Moment."
+    }
+    if ($null -eq $template -or $template.TemplateBody -isnot [string]) {
+        throw "CloudFormation did not return the current Original application template $Moment."
+    }
+
+    $templateSha256 = Get-TextSha256 -Value ([string] $template.TemplateBody)
+    $parameterSha256 = Get-TextSha256 -Value (ConvertTo-CanonicalTagText -Tags $parameterMap)
+    $tagSha256 = Get-TextSha256 -Value (ConvertTo-CanonicalTagText -Tags $tags)
+    $bindingText = "current-stack-id=$ExpectedStackId`ncurrent-parent-template-sha256=$templateSha256`ncurrent-stack-parameters-sha256=$parameterSha256`ncurrent-stack-tags-sha256=$tagSha256`nupdate-intent=$ExpectedUpdateIntent"
+    $bindingSha256 = Get-TextSha256 -Value $bindingText
+    if ($bindingSha256 -cne $ExpectedBindingSha256) {
+        throw "The immutable current stack changed after review and before execution. Re-plan and review a new change set. Context: $Moment."
+    }
+    return $bindingSha256
+}
+
 function ConvertFrom-ParameterOverrides {
     param([string[]] $Overrides)
 
@@ -673,6 +762,255 @@ function Invoke-AuthWalletTransitionValidation {
         $plan.separateAuthorizationRequired -ne $true
     ) {
         throw 'Auth/wallet transition validation did not return the exact non-executable outer-VersionId plan.'
+    }
+    return $validation
+}
+
+function ConvertFrom-RedisOperatorDeploymentBindings {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object] $ValidationReport,
+        [Parameter(Mandatory = $true)]
+        [ValidateSet('currentDeploymentBindings', 'targetDeploymentBindings')]
+        [string] $PropertyName
+    )
+
+    $expectedBindingNames = @(
+        'RedisOperatorSecretVersionId',
+        'ApiDatabaseSlotAVersionId',
+        'ApiDatabaseSlotBVersionId',
+        'WorkerDatabaseSlotAVersionId',
+        'WorkerDatabaseSlotBVersionId',
+        'RedisApiSlotAVersionId',
+        'RedisApiSlotBVersionId',
+        'ApiDatabaseCredentialPhase',
+        'WorkerDatabaseCredentialPhase',
+        'RedisCredentialPhase',
+        'RedisOperatorMode'
+    )
+    $matchingReportProperties = @($ValidationReport.PSObject.Properties | Where-Object { $_.Name -ceq $PropertyName })
+    if ($matchingReportProperties.Count -ne 1) {
+        throw "Redis operator transition validation did not return exact '$PropertyName'."
+    }
+    $bindings = $matchingReportProperties[0].Value
+    if ($null -eq $bindings -or $bindings -is [string] -or $bindings -is [System.Array]) {
+        throw "Redis operator transition validation returned malformed '$PropertyName'."
+    }
+    $bindingProperties = @($bindings.PSObject.Properties)
+    if ($bindingProperties.Count -ne $expectedBindingNames.Count) {
+        throw "Redis operator transition validation returned the wrong '$PropertyName' key count."
+    }
+    $result = [System.Collections.Specialized.OrderedDictionary]::new([System.StringComparer]::Ordinal)
+    foreach ($expectedBindingName in $expectedBindingNames) {
+        $matches = @($bindingProperties | Where-Object { $_.Name -ceq $expectedBindingName })
+        if ($matches.Count -ne 1 -or $matches[0].Value -isnot [string] -or [string]::IsNullOrWhiteSpace([string] $matches[0].Value)) {
+            throw "Redis operator transition validation returned invalid '$PropertyName.$expectedBindingName'."
+        }
+        $result[$expectedBindingName] = [string] $matches[0].Value
+    }
+    foreach ($bindingProperty in $bindingProperties) {
+        if ($expectedBindingNames -cnotcontains [string] $bindingProperty.Name) {
+            throw "Redis operator transition validation returned unexpected '$PropertyName.$($bindingProperty.Name)'."
+        }
+    }
+    return ,$result
+}
+
+function Invoke-RedisOperatorTransitionValidation {
+    param(
+        [string] $RecordPath,
+        [string] $Mode,
+        [string] $ValidationAt,
+        [string] $ExpectedStackId,
+        [string] $ExpectedWorkloadStackId,
+        [string] $ExpectedSecretArn,
+        [string] $ExpectedKmsKeyArn,
+        [string] $ExpectedOperatorUserId,
+        [string] $ExpectedCurrentVersionId,
+        [string] $ExpectedTargetVersionId,
+        [string] $ExpectedRedisOperatorStateSha256,
+        [string] $ExpectedRedisOperatorTransitionSha256,
+        [string] $ExpectedCredentialStateSha256,
+        [string] $ExpectedCredentialTransitionSha256,
+        [string] $ExpectedAuthWalletStateSha256,
+        [string] $ExpectedAuthWalletTransitionSha256,
+        [string] $ExpectedOperation,
+        [string] $ExpectedFieldName,
+        [string] $ExpectedAuthorityRegistrySha256
+    )
+
+    $validationOutput = @(& $nodeCommand.Source @(
+            $redisOperatorTransitionValidatorPath,
+            '--record', $RecordPath,
+            '--mode', $Mode,
+            '--at', $ValidationAt,
+            '--expected-account', $AccountId,
+            '--expected-region', $Region,
+            '--expected-stack', $StackName,
+            '--expected-stack-id', $ExpectedStackId,
+            '--expected-workload-stack-id', $ExpectedWorkloadStackId,
+            '--expected-environment', $EnvironmentName,
+            '--expected-parent-template-sha256', $templateSha256,
+            '--expected-workload-template-sha256', $workloadBoundariesTemplateSha256,
+            '--expected-observability-template-sha256', $observabilityTemplateSha256,
+            '--expected-secret-arn', $ExpectedSecretArn,
+            '--expected-kms-key-arn', $ExpectedKmsKeyArn,
+            '--expected-operator-user-id', $ExpectedOperatorUserId,
+            '--expected-current-version-id', $ExpectedCurrentVersionId,
+            '--expected-target-version-id', $ExpectedTargetVersionId,
+            '--expected-redis-operator-state-sha256', $ExpectedRedisOperatorStateSha256,
+            '--expected-redis-operator-transition-sha256', $ExpectedRedisOperatorTransitionSha256,
+            '--expected-credential-state-sha256', $ExpectedCredentialStateSha256,
+            '--expected-credential-transition-sha256', $ExpectedCredentialTransitionSha256,
+            '--expected-auth-wallet-state-sha256', $ExpectedAuthWalletStateSha256,
+            '--expected-auth-wallet-transition-sha256', $ExpectedAuthWalletTransitionSha256,
+            '--expected-operation', $ExpectedOperation,
+            '--expected-field-name', $ExpectedFieldName,
+            '--json'
+        ) 2>&1)
+    $validationExitCode = $LASTEXITCODE
+    if ($validationExitCode -ne 0) {
+        throw 'The Redis operator transition record is malformed, stale, unauthorized, or deployment-mismatched. No AWS calls were made.'
+    }
+    try {
+        $validation = (($validationOutput | ForEach-Object { $_.ToString() }) -join "`n") | ConvertFrom-Json
+    }
+    catch {
+        throw 'Redis operator transition validation did not return a valid local report. No AWS calls were made.'
+    }
+
+    foreach ($trueProperty in @('ok', 'readyForAuthorizedPlan', 'productionAuthorityValidated', 'signatureValidated')) {
+        $property = $validation.PSObject.Properties[$trueProperty]
+        if ($null -eq $property -or $property.Value -isnot [bool] -or $property.Value -ne $true) {
+            throw "Redis operator transition validation did not return exact true '$trueProperty' authority."
+        }
+    }
+    $errorsProperty = $validation.PSObject.Properties['errors']
+    if (
+        [string] $validation.mode -cne $Mode -or
+        [string] $validation.operation -cne $ExpectedOperation -or
+        [string] $validation.fieldName -cne $ExpectedFieldName -or
+        $null -eq $errorsProperty -or
+        $errorsProperty.Value -isnot [System.Array] -or
+        @($errorsProperty.Value).Count -ne 0
+    ) {
+        throw 'Redis operator transition validation did not match the exact signed operation, field, mode, and empty error report.'
+    }
+    foreach ($counterProperty in @(
+            'externalCallsMade',
+            'awsCallsMade',
+            'databaseConnectionsMade',
+            'redisConnectionsMade',
+            'dnsQueriesMade',
+            'httpRequestsMade',
+            'resourcesCreated',
+            'credentialBytesRead',
+            'filesWritten'
+        )) {
+        $counter = $validation.PSObject.Properties[$counterProperty]
+        if (
+            $null -eq $counter -or
+            $counter.Value -is [bool] -or
+            $counter.Value -is [string] -or
+            $counter.Value -notin @([byte] 0, [sbyte] 0, [int16] 0, [uint16] 0, [int32] 0, [uint32] 0, [int64] 0, [uint64] 0, [single] 0, [double] 0, [decimal] 0)
+        ) {
+            throw "Redis operator transition validation did not return exact numeric zero '$counterProperty'."
+        }
+    }
+    foreach ($hashProperty in @(
+            'canonicalSha256',
+            'currentOperatorStateSha256',
+            'targetOperatorStateSha256',
+            'currentCredentialStateSha256',
+            'targetCredentialStateSha256',
+            'credentialPredecessorTransitionSha256',
+            'preservedAuthWalletStateSha256',
+            'preservedAuthWalletTransitionSha256',
+            'authorityRegistrySha256'
+        )) {
+        if ([string] $validation.$hashProperty -cnotmatch '^[a-f0-9]{64}$') {
+            throw "Redis operator transition validation did not return a valid $hashProperty binding."
+        }
+    }
+    [void] (ConvertFrom-RedisOperatorDeploymentBindings -ValidationReport $validation -PropertyName 'currentDeploymentBindings')
+    [void] (ConvertFrom-RedisOperatorDeploymentBindings -ValidationReport $validation -PropertyName 'targetDeploymentBindings')
+    $redisPredecessorTransitionSha256 = [string] $validation.redisOperatorPredecessorTransitionSha256
+    if (
+        ($Mode -ceq 'adopt' -and $redisPredecessorTransitionSha256 -cne 'NONE') -or
+        ($Mode -ceq 'transition' -and $redisPredecessorTransitionSha256 -cnotmatch '^[a-f0-9]{64}$')
+    ) {
+        throw 'Redis operator transition validation did not return the exact signed Redis predecessor transition binding.'
+    }
+    if (
+        [string] $validation.authorityRegistrySha256 -cne $ExpectedAuthorityRegistrySha256 -or
+        [string] $validation.currentCredentialStateSha256 -cne $ExpectedCredentialStateSha256 -or
+        [string] $validation.credentialPredecessorTransitionSha256 -cne $ExpectedCredentialTransitionSha256 -or
+        [string] $validation.preservedAuthWalletStateSha256 -cne $ExpectedAuthWalletStateSha256 -or
+        [string] $validation.preservedAuthWalletTransitionSha256 -cne $ExpectedAuthWalletTransitionSha256 -or
+        ($Mode -ceq 'transition' -and [string] $validation.currentOperatorStateSha256 -cne $ExpectedRedisOperatorStateSha256) -or
+        [string] $validation.redisOperatorPredecessorTransitionSha256 -cne $ExpectedRedisOperatorTransitionSha256
+    ) {
+        throw 'Redis operator transition validation used a different authority or predecessor-chain binding than the exact caller-pinned values.'
+    }
+
+    $planProperty = $validation.PSObject.Properties['plan']
+    $plan = if ($null -eq $planProperty) { $null } else { $planProperty.Value }
+    if (
+        $null -eq $plan -or
+        [string] $plan.kind -cne 'LOCAL_ONLY_NON_EXECUTABLE_REDIS_OPERATOR_VERSION_PLAN' -or
+        [string] $plan.operation -cne $ExpectedOperation -or
+        [string] $plan.fieldName -cne $ExpectedFieldName -or
+        [string] $plan.versionParameter -cne 'RedisOperatorSecretVersionId' -or
+        [string] $plan.currentVersionId -cne $ExpectedCurrentVersionId -or
+        [string] $plan.targetVersionId -cne $ExpectedTargetVersionId -or
+        $plan.executionAllowed -isnot [bool] -or
+        $plan.executionAllowed -ne $false -or
+        $plan.separateAuthorizationRequired -isnot [bool] -or
+        $plan.separateAuthorizationRequired -ne $true
+    ) {
+        throw 'Redis operator transition validation did not return the exact non-executable VersionId plan.'
+    }
+    $expectedSteps = if ($Mode -ceq 'adopt') {
+        @(
+            'VERIFY_SIGNED_ALREADY_PINNED_DISABLED_OPERATOR_STATE',
+            'VERIFY_COMPOSITE_CREDENTIAL_AND_AUTH_WALLET_HEADS',
+            'ADD_ONLY_THE_REDIS_OPERATOR_CHAIN_BINDING'
+        )
+    }
+    else {
+        @(
+            'VERIFY_SIGNED_CURRENT_TARGET_AND_ALL_THREE_CHAIN_BINDINGS',
+            'KEEP_OPERATOR_MODE_DISABLED_AND_OPERATOR_TASK_ABSENT',
+            'UPDATE_ONLY_REDIS_OPERATOR_USER_PASSWORDS_TO_THE_EXACT_TARGET_VERSION',
+            'VERIFY_CANDIDATE_AUTHENTICATION_AND_OLD_AUTHENTICATION_DENIAL_SEPARATELY',
+            'ADVANCE_REDIS_AND_COMPOSITE_CREDENTIAL_CHAINS_ATOMICALLY',
+            'FORWARD_RECOVER_WITH_A_FRESH_NEVER_REUSED_VERSION'
+        )
+    }
+    $expectedProhibitions = @(
+        'NO_SECRET_OR_PASSWORD_MATERIAL',
+        'NO_SECRET_VALUE_HASHES',
+        'NO_OPERATOR_ENABLEMENT',
+        'NO_AWS_CALLS',
+        'NO_DATABASE_CONNECTIONS',
+        'NO_REDIS_CONNECTIONS',
+        'NO_NETWORK_OR_DNS',
+        'NO_RESOURCE_MUTATION',
+        'NO_FILE_WRITES'
+    )
+    foreach ($exactArray in @(
+            [pscustomobject]@{ Name = 'steps'; Expected = $expectedSteps },
+            [pscustomobject]@{ Name = 'prohibitions'; Expected = $expectedProhibitions }
+        )) {
+        $arrayProperty = $plan.PSObject.Properties[$exactArray.Name]
+        if ($null -eq $arrayProperty -or $arrayProperty.Value -isnot [System.Array] -or @($arrayProperty.Value).Count -ne @($exactArray.Expected).Count) {
+            throw "Redis operator transition validation returned a malformed exact plan $($exactArray.Name) array."
+        }
+        for ($index = 0; $index -lt @($exactArray.Expected).Count; $index += 1) {
+            if (@($arrayProperty.Value)[$index] -isnot [string] -or [string] @($arrayProperty.Value)[$index] -cne [string] @($exactArray.Expected)[$index]) {
+                throw "Redis operator transition validation returned an unexpected plan $($exactArray.Name) entry."
+            }
+        }
     }
     return $validation
 }
@@ -1609,9 +1947,13 @@ function Assert-AuthWalletRootChanges {
         [Parameter(Mandatory = $true)]
         [string] $ProfileName,
         [ValidateSet('AUTH_WALLET_TRANSITION', 'REDIS_OPERATOR_TRANSITION')]
-        [string] $ReviewIntent = 'AUTH_WALLET_TRANSITION'
+        [string] $ReviewIntent = 'AUTH_WALLET_TRANSITION',
+        [string] $ExpectedWorkloadStackId
     )
 
+    if ($ReviewIntent -ceq 'REDIS_OPERATOR_TRANSITION' -and [string]::IsNullOrWhiteSpace($ExpectedWorkloadStackId)) {
+        throw 'REDIS_OPERATOR_TRANSITION root review requires the exact immutable WorkloadBoundaries child stack ID.'
+    }
     $visitedChangeSetIds = [System.Collections.Specialized.OrderedDictionary]::new([System.StringComparer]::Ordinal)
     $visitedChangeSetIds[$RootChangeSetId] = $true
     $logicalResourceIds = [System.Collections.Specialized.OrderedDictionary]::new([System.StringComparer]::Ordinal)
@@ -1641,6 +1983,13 @@ function Assert-AuthWalletRootChanges {
             continue
         }
         if ($resourceType -ceq 'AWS::CloudFormation::Stack' -or $null -ne $nestedChangeSetId) {
+            if (
+                $ReviewIntent -ceq 'REDIS_OPERATOR_TRANSITION' -and
+                $logicalResourceId -ceq 'WorkloadBoundaries' -and
+                (Get-StrictRequiredChangeSetString -InputObject $resourceChange -Name 'PhysicalResourceId' -Context "$ReviewIntent root WorkloadBoundaries") -cne $ExpectedWorkloadStackId
+            ) {
+                throw 'REDIS_OPERATOR_TRANSITION root WorkloadBoundaries pointer does not match the exact immutable live child stack ID.'
+            }
             Assert-AuthWalletNestedResourceChange `
                 -ResourceChange $resourceChange `
                 -LogicalResourceId $logicalResourceId `
@@ -1848,6 +2197,9 @@ if (-not (Test-Path -LiteralPath $fixedSlotCredentialTransitionValidatorPath -Pa
 }
 if (-not (Test-Path -LiteralPath $authWalletTransitionValidatorPath -PathType Leaf)) {
     throw "Auth/wallet transition validator was not found: $authWalletTransitionValidatorPath"
+}
+if (-not (Test-Path -LiteralPath $redisOperatorTransitionValidatorPath -PathType Leaf)) {
+    throw "Redis operator transition validator was not found: $redisOperatorTransitionValidatorPath"
 }
 
 $nodeCommand = Get-Command node -ErrorAction SilentlyContinue
@@ -2476,7 +2828,204 @@ if ($Action -in @('Plan', 'Deploy')) {
             $authWalletTransitionDeploymentBindingText = "record-sha256=$authWalletTransitionRecordSha256`ncurrent-state-sha256=$authWalletCurrentStateSha256`ntarget-state-sha256=$authWalletTargetStateSha256`npredecessor-transition-sha256=$authWalletPredecessorTransitionSha256`nauthority-registry-sha256=$AuthWalletTransitionAuthorityRegistrySha256`ncurrent-stack-id=$CurrentStackId`nparent-template-sha256=$templateSha256`nworkload-template-sha256=$workloadBoundariesTemplateSha256`nobservability-template-sha256=$observabilityTemplateSha256`nmode=$AuthWalletTransitionMode`noperation=$validatedAuthWalletTransitionOperation`nfield=$validatedAuthWalletTransitionFieldName"
         }
         else {
-            throw 'REDIS_OPERATOR_TRANSITION remains fail-closed until its signed validator report contract is locally available.'
+            if (
+                -not [string]::IsNullOrWhiteSpace($FixedSlotCredentialTransitionRecordFile) -or
+                -not [string]::IsNullOrWhiteSpace($FixedSlotCredentialTransitionMode) -or
+                -not [string]::IsNullOrWhiteSpace($FixedSlotCredentialTransitionValidationAt) -or
+                -not [string]::IsNullOrWhiteSpace($AuthWalletTransitionRecordFile) -or
+                -not [string]::IsNullOrWhiteSpace($AuthWalletTransitionMode) -or
+                -not [string]::IsNullOrWhiteSpace($AuthWalletTransitionValidationAt) -or
+                -not [string]::IsNullOrWhiteSpace($AuthWalletTransitionAuthorityRegistrySha256) -or
+                -not [string]::IsNullOrWhiteSpace($AuthWalletTransitionCurrentVersionId) -or
+                -not [string]::IsNullOrWhiteSpace($AuthWalletTransitionOperation) -or
+                -not [string]::IsNullOrWhiteSpace($AuthWalletTransitionFieldName)
+            ) {
+                throw 'REDIS_OPERATOR_TRANSITION updates must not supply fixed-slot or auth/wallet transition inputs.'
+            }
+            foreach ($requiredRedisOperatorParameter in @($redisOperatorTransitionInputValues.Keys)) {
+                Assert-RequiredValue -Name $requiredRedisOperatorParameter -Value ([string] $redisOperatorTransitionInputValues[$requiredRedisOperatorParameter])
+            }
+            if (@('adopt', 'transition') -cnotcontains $RedisOperatorTransitionMode) {
+                throw 'RedisOperatorTransitionMode must use exact lowercase adopt or transition.'
+            }
+            foreach ($redisOperatorDigestName in @(
+                    'RedisOperatorTransitionAuthorityRegistrySha256',
+                    'RedisOperatorTransitionFixedSlotStateSha256',
+                    'RedisOperatorTransitionFixedSlotTransitionSha256',
+                    'RedisOperatorTransitionAuthWalletStateSha256',
+                    'RedisOperatorTransitionAuthWalletTransitionSha256'
+                )) {
+                if ([string] $redisOperatorTransitionInputValues[$redisOperatorDigestName] -cnotmatch '^[a-f0-9]{64}$') {
+                    throw "$redisOperatorDigestName must be one exact lowercase SHA-256 digest."
+                }
+            }
+            if (
+                ($RedisOperatorTransitionMode -ceq 'adopt' -and (
+                        $RedisOperatorTransitionRedisStateSha256 -cne 'UNTRACKED' -or
+                        $RedisOperatorTransitionRedisTransitionSha256 -cne 'NONE'
+                    )) -or
+                ($RedisOperatorTransitionMode -ceq 'transition' -and (
+                        $RedisOperatorTransitionRedisStateSha256 -cnotmatch '^[a-f0-9]{64}$' -or
+                        $RedisOperatorTransitionRedisTransitionSha256 -cnotmatch '^[a-f0-9]{64}$'
+                    ))
+            ) {
+                throw 'Redis operator predecessor state and transition inputs do not match the exact adopt or transition mode.'
+            }
+            $expectedRedisWorkloadStackPattern = '^arn:' + [regex]::Escape($requestedPartition) + ':cloudformation:' + [regex]::Escape($Region) + ':' + [regex]::Escape($AccountId) + ':stack/[A-Za-z][-A-Za-z0-9]*/[A-Za-z0-9-]+$'
+            $expectedRedisSecretPattern = '^arn:' + [regex]::Escape($requestedPartition) + ':secretsmanager:' + [regex]::Escape($Region) + ':' + [regex]::Escape($AccountId) + ':secret:[A-Za-z0-9/_+=.@-]+$'
+            $expectedRedisKmsPattern = '^arn:' + [regex]::Escape($requestedPartition) + ':kms:' + [regex]::Escape($Region) + ':' + [regex]::Escape($AccountId) + ':key/[a-f0-9-]+$'
+            if (
+                $RedisOperatorTransitionWorkloadStackId -cnotmatch $expectedRedisWorkloadStackPattern -or
+                $RedisOperatorTransitionSecretArn -cnotmatch $expectedRedisSecretPattern -or
+                $RedisOperatorTransitionKmsKeyArn -cnotmatch $expectedRedisKmsPattern
+            ) {
+                throw 'REDIS_OPERATOR_TRANSITION requires exact workload-stack, selector-free secret, and customer-managed KMS identities in the approved account and Region. No AWS calls were made.'
+            }
+            if ($RedisOperatorTransitionCurrentVersionId -cnotmatch '^[A-Za-z0-9_-]{32,64}$') {
+                throw 'RedisOperatorTransitionCurrentVersionId must be an exact 32-64 character Secrets Manager VersionId.'
+            }
+            if ([string] $explicitParameterOverrides.RedisOperatorMode -cne 'DISABLED') {
+                throw 'REDIS_OPERATOR_TRANSITION requires explicit RedisOperatorMode=DISABLED.'
+            }
+
+            $redisOperatorCurrentVersionId = $RedisOperatorTransitionCurrentVersionId
+            $redisOperatorTargetVersionId = $RedisOperatorSecretVersionId
+            $validatedRedisOperatorTransitionOperation = $RedisOperatorTransitionOperation
+            $validatedRedisOperatorTransitionFieldName = $RedisOperatorTransitionFieldName
+            if (
+                $validatedRedisOperatorTransitionFieldName -cne 'REDIS_OPERATOR_SECRET_VERSION_ID' -or
+                ($RedisOperatorTransitionMode -ceq 'adopt' -and (
+                        $validatedRedisOperatorTransitionOperation -cne 'ADOPT_EXISTING_BINDING' -or
+                        $redisOperatorCurrentVersionId -cne $redisOperatorTargetVersionId
+                    )) -or
+                ($RedisOperatorTransitionMode -ceq 'transition' -and (
+                        $validatedRedisOperatorTransitionOperation -cne 'ROTATE_DISABLED_OPERATOR_CREDENTIAL' -or
+                        $redisOperatorCurrentVersionId -ceq $redisOperatorTargetVersionId
+                    ))
+            ) {
+                throw 'The Redis operator operation, field, and VersionIds do not match the explicitly requested adopt or transition mode.'
+            }
+            $expectedRedisOperatorUserId = "cl-$EnvironmentName-ro"
+
+            $parsedRedisOperatorValidationAt = [DateTimeOffset]::MinValue
+            $canonicalRedisOperatorValidationAt = $RedisOperatorTransitionValidationAt -match '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$' -and
+                [DateTimeOffset]::TryParse(
+                    $RedisOperatorTransitionValidationAt,
+                    [System.Globalization.CultureInfo]::InvariantCulture,
+                    [System.Globalization.DateTimeStyles]::AssumeUniversal -bor [System.Globalization.DateTimeStyles]::AdjustToUniversal,
+                    [ref] $parsedRedisOperatorValidationAt
+                ) -and
+                $parsedRedisOperatorValidationAt.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss'Z'", [System.Globalization.CultureInfo]::InvariantCulture) -ceq $RedisOperatorTransitionValidationAt
+            if (-not $canonicalRedisOperatorValidationAt) {
+                throw 'RedisOperatorTransitionValidationAt must be one canonical UTC instant.'
+            }
+            $redisOperatorValidationAgeSeconds = ([DateTimeOffset]::UtcNow - $parsedRedisOperatorValidationAt).TotalSeconds
+            if ($redisOperatorValidationAgeSeconds -lt -60 -or $redisOperatorValidationAgeSeconds -gt 300) {
+                throw 'RedisOperatorTransitionValidationAt must be current within the reviewed five-minute window. No AWS calls were made.'
+            }
+
+            $resolvedRedisOperatorTransitionRecord = [System.IO.Path]::GetFullPath($RedisOperatorTransitionRecordFile)
+            $redisOperatorValidationOne = Invoke-RedisOperatorTransitionValidation `
+                -RecordPath $resolvedRedisOperatorTransitionRecord `
+                -Mode $RedisOperatorTransitionMode `
+                -ValidationAt $RedisOperatorTransitionValidationAt `
+                -ExpectedStackId $CurrentStackId `
+                -ExpectedWorkloadStackId $RedisOperatorTransitionWorkloadStackId `
+                -ExpectedSecretArn $RedisOperatorTransitionSecretArn `
+                -ExpectedKmsKeyArn $RedisOperatorTransitionKmsKeyArn `
+                -ExpectedOperatorUserId $expectedRedisOperatorUserId `
+                -ExpectedCurrentVersionId $redisOperatorCurrentVersionId `
+                -ExpectedTargetVersionId $redisOperatorTargetVersionId `
+                -ExpectedRedisOperatorStateSha256 $RedisOperatorTransitionRedisStateSha256 `
+                -ExpectedRedisOperatorTransitionSha256 $RedisOperatorTransitionRedisTransitionSha256 `
+                -ExpectedCredentialStateSha256 $RedisOperatorTransitionFixedSlotStateSha256 `
+                -ExpectedCredentialTransitionSha256 $RedisOperatorTransitionFixedSlotTransitionSha256 `
+                -ExpectedAuthWalletStateSha256 $RedisOperatorTransitionAuthWalletStateSha256 `
+                -ExpectedAuthWalletTransitionSha256 $RedisOperatorTransitionAuthWalletTransitionSha256 `
+                -ExpectedOperation $validatedRedisOperatorTransitionOperation `
+                -ExpectedFieldName $validatedRedisOperatorTransitionFieldName `
+                -ExpectedAuthorityRegistrySha256 $RedisOperatorTransitionAuthorityRegistrySha256
+            try {
+                $redisOperatorTransitionRecordRawShaBefore = (Get-FileHash -LiteralPath $resolvedRedisOperatorTransitionRecord -Algorithm SHA256).Hash.ToLowerInvariant()
+            }
+            catch {
+                throw 'The validated Redis operator transition record could not be hashed stably. No AWS calls were made.'
+            }
+            $redisOperatorValidationTwo = Invoke-RedisOperatorTransitionValidation `
+                -RecordPath $resolvedRedisOperatorTransitionRecord `
+                -Mode $RedisOperatorTransitionMode `
+                -ValidationAt $RedisOperatorTransitionValidationAt `
+                -ExpectedStackId $CurrentStackId `
+                -ExpectedWorkloadStackId $RedisOperatorTransitionWorkloadStackId `
+                -ExpectedSecretArn $RedisOperatorTransitionSecretArn `
+                -ExpectedKmsKeyArn $RedisOperatorTransitionKmsKeyArn `
+                -ExpectedOperatorUserId $expectedRedisOperatorUserId `
+                -ExpectedCurrentVersionId $redisOperatorCurrentVersionId `
+                -ExpectedTargetVersionId $redisOperatorTargetVersionId `
+                -ExpectedRedisOperatorStateSha256 $RedisOperatorTransitionRedisStateSha256 `
+                -ExpectedRedisOperatorTransitionSha256 $RedisOperatorTransitionRedisTransitionSha256 `
+                -ExpectedCredentialStateSha256 $RedisOperatorTransitionFixedSlotStateSha256 `
+                -ExpectedCredentialTransitionSha256 $RedisOperatorTransitionFixedSlotTransitionSha256 `
+                -ExpectedAuthWalletStateSha256 $RedisOperatorTransitionAuthWalletStateSha256 `
+                -ExpectedAuthWalletTransitionSha256 $RedisOperatorTransitionAuthWalletTransitionSha256 `
+                -ExpectedOperation $validatedRedisOperatorTransitionOperation `
+                -ExpectedFieldName $validatedRedisOperatorTransitionFieldName `
+                -ExpectedAuthorityRegistrySha256 $RedisOperatorTransitionAuthorityRegistrySha256
+            $redisOperatorTransitionRecordRawShaAfterValidation = (Get-FileHash -LiteralPath $resolvedRedisOperatorTransitionRecord -Algorithm SHA256).Hash.ToLowerInvariant()
+            $redisOperatorReportFields = @(
+                'canonicalSha256',
+                'currentOperatorStateSha256',
+                'targetOperatorStateSha256',
+                'currentCredentialStateSha256',
+                'targetCredentialStateSha256',
+                'redisOperatorPredecessorTransitionSha256',
+                'credentialPredecessorTransitionSha256',
+                'preservedAuthWalletStateSha256',
+                'preservedAuthWalletTransitionSha256',
+                'authorityRegistrySha256'
+            )
+            $redisOperatorValidationOneCurrentBindings = ConvertFrom-RedisOperatorDeploymentBindings -ValidationReport $redisOperatorValidationOne -PropertyName 'currentDeploymentBindings'
+            $redisOperatorValidationOneTargetBindings = ConvertFrom-RedisOperatorDeploymentBindings -ValidationReport $redisOperatorValidationOne -PropertyName 'targetDeploymentBindings'
+            $redisOperatorValidationTwoCurrentBindings = ConvertFrom-RedisOperatorDeploymentBindings -ValidationReport $redisOperatorValidationTwo -PropertyName 'currentDeploymentBindings'
+            $redisOperatorValidationTwoTargetBindings = ConvertFrom-RedisOperatorDeploymentBindings -ValidationReport $redisOperatorValidationTwo -PropertyName 'targetDeploymentBindings'
+            $redisOperatorReportChanged = $false
+            foreach ($reportField in $redisOperatorReportFields) {
+                if ([string] $redisOperatorValidationOne.$reportField -cne [string] $redisOperatorValidationTwo.$reportField) {
+                    $redisOperatorReportChanged = $true
+                }
+            }
+            if (
+                $redisOperatorTransitionRecordRawShaBefore -cne $redisOperatorTransitionRecordRawShaAfterValidation -or
+                $redisOperatorReportChanged -or
+                (ConvertTo-CanonicalTagText -Tags $redisOperatorValidationOneCurrentBindings) -cne (ConvertTo-CanonicalTagText -Tags $redisOperatorValidationTwoCurrentBindings) -or
+                (ConvertTo-CanonicalTagText -Tags $redisOperatorValidationOneTargetBindings) -cne (ConvertTo-CanonicalTagText -Tags $redisOperatorValidationTwoTargetBindings)
+            ) {
+                throw 'The Redis operator transition record, authority, or chain binding changed during local validation. No AWS calls were made.'
+            }
+            $redisOperatorTransitionValidation = $redisOperatorValidationTwo
+            $redisOperatorTransitionRecordSha256 = [string] $redisOperatorTransitionValidation.canonicalSha256
+            $redisOperatorCurrentStateSha256 = [string] $redisOperatorTransitionValidation.currentOperatorStateSha256
+            $redisOperatorTargetStateSha256 = [string] $redisOperatorTransitionValidation.targetOperatorStateSha256
+            $redisOperatorPredecessorTransitionSha256 = [string] $redisOperatorTransitionValidation.redisOperatorPredecessorTransitionSha256
+            $redisOperatorCurrentFixedSlotStateSha256 = [string] $redisOperatorTransitionValidation.currentCredentialStateSha256
+            $redisOperatorTargetFixedSlotStateSha256 = [string] $redisOperatorTransitionValidation.targetCredentialStateSha256
+            $redisOperatorFixedSlotPredecessorTransitionSha256 = [string] $redisOperatorTransitionValidation.credentialPredecessorTransitionSha256
+            $fixedSlotCurrentStateSha256 = $redisOperatorCurrentFixedSlotStateSha256
+            $fixedSlotTargetStateSha256 = $redisOperatorTargetFixedSlotStateSha256
+            $fixedSlotCurrentBindings = $redisOperatorValidationTwoCurrentBindings
+            $signedRedisOperatorTargetBindings = $redisOperatorValidationTwoTargetBindings
+            if ($signedRedisOperatorTargetBindings.Count -ne $fixedSlotTargetBindings.Count) {
+                throw 'The signed Redis operator target deployment binding count does not match the exact requested target. No AWS calls were made.'
+            }
+            foreach ($requestedTargetBinding in $fixedSlotTargetBindings.GetEnumerator()) {
+                if (
+                    -not $signedRedisOperatorTargetBindings.Contains($requestedTargetBinding.Key) -or
+                    [string] $signedRedisOperatorTargetBindings[$requestedTargetBinding.Key] -cne [string] $requestedTargetBinding.Value
+                ) {
+                    throw "The signed Redis operator target deployment binding '$($requestedTargetBinding.Key)' does not match the exact requested target. No AWS calls were made."
+                }
+            }
+            $redisOperatorTransitionDeploymentBindingText = "record-sha256=$redisOperatorTransitionRecordSha256`ncurrent-operator-state-sha256=$redisOperatorCurrentStateSha256`ntarget-operator-state-sha256=$redisOperatorTargetStateSha256`nredis-predecessor-transition-sha256=$redisOperatorPredecessorTransitionSha256`ncurrent-credential-state-sha256=$redisOperatorCurrentFixedSlotStateSha256`ntarget-credential-state-sha256=$redisOperatorTargetFixedSlotStateSha256`ncredential-predecessor-transition-sha256=$redisOperatorFixedSlotPredecessorTransitionSha256`nauth-wallet-state-sha256=$RedisOperatorTransitionAuthWalletStateSha256`nauth-wallet-transition-sha256=$RedisOperatorTransitionAuthWalletTransitionSha256`nauthority-registry-sha256=$RedisOperatorTransitionAuthorityRegistrySha256`ncurrent-stack-id=$CurrentStackId`nworkload-stack-id=$RedisOperatorTransitionWorkloadStackId`nsecret-arn=$RedisOperatorTransitionSecretArn`nkms-key-arn=$RedisOperatorTransitionKmsKeyArn`noperator-user-id=$expectedRedisOperatorUserId`nparent-template-sha256=$templateSha256`nworkload-template-sha256=$workloadBoundariesTemplateSha256`nobservability-template-sha256=$observabilityTemplateSha256`nmode=$RedisOperatorTransitionMode`noperation=$validatedRedisOperatorTransitionOperation`nfield=$validatedRedisOperatorTransitionFieldName"
         }
     }
     $workloadBoundariesArtifactKey = "application-workload-boundaries-$workloadBoundariesTemplateSha256.yaml"
@@ -2989,7 +3538,7 @@ if ($Action -in @('Plan', 'Deploy')) {
                 throw "Existing auth/wallet binding '$($authWalletBinding.Key)' differs from the approved target. A dedicated reviewed auth/wallet transition is required."
             }
         }
-        $expectedCurrentFixedSlotBindings = if ($isCredentialTransition) {
+        $expectedCurrentFixedSlotBindings = if ($isCredentialTransition -or $isRedisOperatorTransition) {
             $fixedSlotCurrentBindings
         }
         else {
@@ -3051,6 +3600,15 @@ if ($Action -in @('Plan', 'Deploy')) {
             foreach ($credentialTagName in $credentialTagNames) {
                 $preservedCredentialTags[$credentialTagName] = [string] $currentStackTags[$credentialTagName]
             }
+            if (
+                $isRedisOperatorTransition -and
+                (
+                    [string] $preservedCredentialTags['credential-state-sha256'] -cne $redisOperatorCurrentFixedSlotStateSha256 -or
+                    [string] $preservedCredentialTags['credential-transition-sha256'] -cne $redisOperatorFixedSlotPredecessorTransitionSha256
+                )
+            ) {
+                throw 'The existing composite credential-chain head does not match the signed Redis operator predecessor.'
+            }
         }
 
         $authWalletTagNames = @(
@@ -3111,6 +3669,81 @@ if ($Action -in @('Plan', 'Deploy')) {
                 ) {
                     throw "$UpdateIntent update requires a completed auth/wallet adoption chain head."
                 }
+                if (
+                    $isRedisOperatorTransition -and
+                    (
+                        [string] $preservedAuthWalletTags['auth-wallet-state-sha256'] -cne $RedisOperatorTransitionAuthWalletStateSha256 -or
+                        [string] $preservedAuthWalletTags['auth-wallet-transition-sha256'] -cne $RedisOperatorTransitionAuthWalletTransitionSha256
+                    )
+                ) {
+                    throw 'The existing auth/wallet chain head does not match the signed Redis operator preservation binding.'
+                }
+            }
+        }
+        $redisOperatorTagNames = @(
+            'redis-operator-predecessor-sha256',
+            'redis-operator-transition-sha256',
+            'redis-operator-state-sha256'
+        )
+        if ($isRedisOperatorTransition) {
+            if ($RedisOperatorTransitionMode -ceq 'adopt') {
+                foreach ($redisOperatorTagName in $redisOperatorTagNames) {
+                    if ($currentStackTags.Contains($redisOperatorTagName)) {
+                        throw 'Redis operator adoption requires an explicitly untracked existing stack without Redis operator chain tags.'
+                    }
+                }
+            }
+            else {
+                foreach ($redisOperatorTagName in $redisOperatorTagNames) {
+                    if (
+                        -not $currentStackTags.Contains($redisOperatorTagName) -or
+                        [string] $currentStackTags[$redisOperatorTagName] -cnotmatch '^(?:NONE|[a-f0-9]{64})$'
+                    ) {
+                        throw "Redis operator transition requires a valid existing chain tag '$redisOperatorTagName'."
+                    }
+                }
+                if (
+                    [string] $currentStackTags['redis-operator-transition-sha256'] -cne $redisOperatorPredecessorTransitionSha256 -or
+                    [string] $currentStackTags['redis-operator-state-sha256'] -cne $redisOperatorCurrentStateSha256
+                ) {
+                    throw 'The existing Redis operator chain head does not match the signed transition predecessor and current state.'
+                }
+                if (
+                    [string] $currentStackTags['redis-operator-transition-sha256'] -ceq 'NONE' -or
+                    [string] $currentStackTags['redis-operator-state-sha256'] -ceq 'NONE'
+                ) {
+                    throw 'Redis operator transition requires a completed prior Redis operator chain head.'
+                }
+            }
+        }
+        else {
+            $preservedRedisOperatorTags = [ordered]@{}
+            $redisOperatorMayRemainUntracked =
+                ($isCredentialTransition -and $FixedSlotCredentialTransitionMode -ceq 'adopt') -or
+                ($isAuthWalletTransition -and $AuthWalletTransitionMode -ceq 'adopt')
+            if ($redisOperatorMayRemainUntracked) {
+                foreach ($redisOperatorTagName in $redisOperatorTagNames) {
+                    if ($currentStackTags.Contains($redisOperatorTagName)) {
+                        throw 'Bootstrap adoption requires the Redis operator chain to remain explicitly untracked.'
+                    }
+                }
+            }
+            else {
+                foreach ($redisOperatorTagName in $redisOperatorTagNames) {
+                    if (
+                        -not $currentStackTags.Contains($redisOperatorTagName) -or
+                        [string] $currentStackTags[$redisOperatorTagName] -cnotmatch '^(?:NONE|[a-f0-9]{64})$'
+                    ) {
+                        throw "$UpdateIntent update requires a valid existing Redis operator chain tag '$redisOperatorTagName'."
+                    }
+                    $preservedRedisOperatorTags[$redisOperatorTagName] = [string] $currentStackTags[$redisOperatorTagName]
+                }
+                if (
+                    [string] $preservedRedisOperatorTags['redis-operator-transition-sha256'] -ceq 'NONE' -or
+                    [string] $preservedRedisOperatorTags['redis-operator-state-sha256'] -ceq 'NONE'
+                ) {
+                    throw "$UpdateIntent update requires a completed Redis operator adoption chain head."
+                }
             }
         }
         $currentApplicationTemplateOutput = & $script:AwsExecutable @(
@@ -3131,8 +3764,22 @@ if ($Action -in @('Plan', 'Deploy')) {
             throw "CloudFormation did not return the current application stack's Original template body."
         }
         $currentApplicationTemplateSha256 = Get-TextSha256 -Value ([string] $currentApplicationTemplate.TemplateBody)
-        if (($isCredentialTransition -or $isAuthWalletTransition) -and $currentApplicationTemplateSha256 -cne $templateSha256) {
+        if (($isCredentialTransition -or $isAuthWalletTransition -or $isRedisOperatorTransition) -and $currentApplicationTemplateSha256 -cne $templateSha256) {
             throw 'Credential transitions cannot include a parent-template change; the current deployed and reviewed local parent hashes differ.'
+        }
+        if ($isRedisOperatorTransition) {
+            $redisOperatorLiveBinding = Get-RedisOperatorLiveBinding `
+                -RootStackId $CurrentStackId `
+                -WorkloadStackId $RedisOperatorTransitionWorkloadStackId `
+                -SecretArn $RedisOperatorTransitionSecretArn `
+                -KmsKeyArn $RedisOperatorTransitionKmsKeyArn `
+                -ExpectedOperatorUserId $expectedRedisOperatorUserId `
+                -CurrentVersionId $redisOperatorCurrentVersionId `
+                -ProfileName $Profile
+            $redisOperatorLiveBindingSha256 = [string] $redisOperatorLiveBinding.Sha256
+            if ($redisOperatorLiveBindingSha256 -cnotmatch '^[a-f0-9]{64}$') {
+                throw 'The live Redis operator binding did not produce an exact SHA-256 identity.'
+            }
         }
         $currentStackParameterSnapshotSha256 = Get-TextSha256 -Value (ConvertTo-CanonicalTagText -Tags $currentStackParameterMap)
         $currentStackTagSnapshotSha256 = Get-TextSha256 -Value (ConvertTo-CanonicalTagText -Tags $currentStackTags)
@@ -3145,6 +3792,10 @@ if ($Action -in @('Plan', 'Deploy')) {
         elseif ($isAuthWalletTransition) {
             $authWalletTransitionDeploymentBindingText += "`ncurrent-stack-binding-sha256=$currentStackBindingSha256"
             $authWalletTransitionDeploymentBindingSha256 = Get-TextSha256 -Value $authWalletTransitionDeploymentBindingText
+        }
+        elseif ($isRedisOperatorTransition) {
+            $redisOperatorTransitionDeploymentBindingText += "`ncurrent-stack-binding-sha256=$currentStackBindingSha256`nlive-binding-sha256=$redisOperatorLiveBindingSha256"
+            $redisOperatorTransitionDeploymentBindingSha256 = Get-TextSha256 -Value $redisOperatorTransitionDeploymentBindingText
         }
         foreach ($parameter in $currentStackParameterMap.GetEnumerator()) {
             if ($parameterDefaults.Contains($parameter.Key) -and -not $parameterMap.Contains($parameter.Key)) {
@@ -3291,6 +3942,22 @@ if ($Action -in @('Plan', 'Deploy')) {
             }
         }
     }
+    elseif ($isRedisOperatorTransition) {
+        if ($currentStackParameterMap.Count -ne $parameterMap.Count) {
+            throw "Redis-operator-only UPDATE requires the current and target parameter sets to match exactly (Current=$($currentStackParameterMap.Count), Target=$($parameterMap.Count))."
+        }
+        foreach ($targetParameter in $parameterMap.GetEnumerator()) {
+            if (-not $currentStackParameterMap.Contains($targetParameter.Key)) {
+                throw "Redis-operator-only UPDATE found target parameter '$($targetParameter.Key)' missing from the current stack."
+            }
+            if (
+                [string] $targetParameter.Key -cne 'RedisOperatorSecretVersionId' -and
+                [string] $currentStackParameterMap[$targetParameter.Key] -cne [string] $targetParameter.Value
+            ) {
+                throw "Redis-operator-only UPDATE cannot change unrelated parameter '$($targetParameter.Key)'."
+            }
+        }
+    }
 
     $stackTags = [ordered]@{
         application = 'crypto-lending'
@@ -3312,8 +3979,9 @@ if ($Action -in @('Plan', 'Deploy')) {
     if ($isCredentialTransition) {
         $currentCredentialTagCount = if ($FixedSlotCredentialTransitionMode -ceq 'adopt') { 0 } else { 3 }
         $currentAuthWalletTagCount = if ($FixedSlotCredentialTransitionMode -ceq 'adopt') { 0 } else { 3 }
-        if ($currentStackTags.Count -ne ($stackTags.Count + $currentCredentialTagCount + $currentAuthWalletTagCount)) {
-            throw 'Credential-only UPDATE requires the existing stack to have the exact reviewed base, credential-chain, and auth/wallet-chain tag set.'
+        $currentRedisOperatorTagCount = if ($FixedSlotCredentialTransitionMode -ceq 'adopt') { 0 } else { 3 }
+        if ($currentStackTags.Count -ne ($stackTags.Count + $currentCredentialTagCount + $currentAuthWalletTagCount + $currentRedisOperatorTagCount)) {
+            throw 'Credential-only UPDATE requires the exact reviewed base and bootstrapped credential-chain tag set.'
         }
         foreach ($baseTag in $stackTags.GetEnumerator()) {
             if (
@@ -3338,11 +4006,15 @@ if ($Action -in @('Plan', 'Deploy')) {
         foreach ($authWalletTag in $preservedAuthWalletTags.GetEnumerator()) {
             $stackTags[$authWalletTag.Key] = [string] $authWalletTag.Value
         }
+        foreach ($redisOperatorTag in $preservedRedisOperatorTags.GetEnumerator()) {
+            $stackTags[$redisOperatorTag.Key] = [string] $redisOperatorTag.Value
+        }
     }
     elseif ($isAuthWalletTransition) {
         $currentAuthWalletTagCount = if ($AuthWalletTransitionMode -ceq 'adopt') { 0 } else { 3 }
-        if ($currentStackTags.Count -ne ($stackTags.Count + 3 + $currentAuthWalletTagCount)) {
-            throw 'Auth/wallet-only UPDATE requires the existing stack to have the exact reviewed base, fixed-slot-chain, and auth/wallet-chain tag set.'
+        $currentRedisOperatorTagCount = if ($AuthWalletTransitionMode -ceq 'adopt') { 0 } else { 3 }
+        if ($currentStackTags.Count -ne ($stackTags.Count + 3 + $currentAuthWalletTagCount + $currentRedisOperatorTagCount)) {
+            throw 'Auth/wallet-only UPDATE requires the exact reviewed base, fixed-slot-chain, and bootstrapped auth/wallet-chain tag set.'
         }
         foreach ($baseTag in $stackTags.GetEnumerator()) {
             if (
@@ -3358,6 +4030,39 @@ if ($Action -in @('Plan', 'Deploy')) {
         $stackTags['auth-wallet-predecessor-sha256'] = $authWalletPredecessorTransitionSha256
         $stackTags['auth-wallet-transition-sha256'] = $authWalletTransitionRecordSha256
         $stackTags['auth-wallet-state-sha256'] = $authWalletTargetStateSha256
+        foreach ($redisOperatorTag in $preservedRedisOperatorTags.GetEnumerator()) {
+            $stackTags[$redisOperatorTag.Key] = [string] $redisOperatorTag.Value
+        }
+    }
+    elseif ($isRedisOperatorTransition) {
+        $currentRedisOperatorTagCount = if ($RedisOperatorTransitionMode -ceq 'adopt') { 0 } else { 3 }
+        if ($currentStackTags.Count -ne ($stackTags.Count + 6 + $currentRedisOperatorTagCount)) {
+            throw 'Redis-operator-only UPDATE requires the exact reviewed base, credential, auth/wallet, and mode-bound Redis operator chain tags.'
+        }
+        foreach ($baseTag in $stackTags.GetEnumerator()) {
+            if (
+                -not $currentStackTags.Contains($baseTag.Key) -or
+                [string] $currentStackTags[$baseTag.Key] -cne [string] $baseTag.Value
+            ) {
+                throw "Redis-operator-only UPDATE cannot change or repair unrelated stack tag '$($baseTag.Key)'."
+            }
+        }
+        foreach ($authWalletTag in $preservedAuthWalletTags.GetEnumerator()) {
+            $stackTags[$authWalletTag.Key] = [string] $authWalletTag.Value
+        }
+        if ($RedisOperatorTransitionMode -ceq 'adopt') {
+            foreach ($credentialTag in $preservedCredentialTags.GetEnumerator()) {
+                $stackTags[$credentialTag.Key] = [string] $credentialTag.Value
+            }
+        }
+        else {
+            $stackTags['credential-predecessor-sha256'] = $redisOperatorFixedSlotPredecessorTransitionSha256
+            $stackTags['credential-transition-sha256'] = $redisOperatorTransitionRecordSha256
+            $stackTags['credential-state-sha256'] = $redisOperatorTargetFixedSlotStateSha256
+        }
+        $stackTags['redis-operator-predecessor-sha256'] = $redisOperatorPredecessorTransitionSha256
+        $stackTags['redis-operator-transition-sha256'] = $redisOperatorTransitionRecordSha256
+        $stackTags['redis-operator-state-sha256'] = $redisOperatorTargetStateSha256
     }
     elseif ($isApplicationUpdate) {
         foreach ($credentialTag in $preservedCredentialTags.GetEnumerator()) {
@@ -3365,6 +4070,9 @@ if ($Action -in @('Plan', 'Deploy')) {
         }
         foreach ($authWalletTag in $preservedAuthWalletTags.GetEnumerator()) {
             $stackTags[$authWalletTag.Key] = [string] $authWalletTag.Value
+        }
+        foreach ($redisOperatorTag in $preservedRedisOperatorTags.GetEnumerator()) {
+            $stackTags[$redisOperatorTag.Key] = [string] $redisOperatorTag.Value
         }
     }
     $canonicalTags = ConvertTo-CanonicalTagText -Tags $stackTags
@@ -3380,19 +4088,25 @@ if ($Action -in @('Plan', 'Deploy')) {
     }
     $canonicalParameters = ($parameterMap.GetEnumerator() | Sort-Object Key | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join "`n"
     $parameterSha256 = Get-TextSha256 -Value $canonicalParameters
-    $updateDescription = if ($ChangeSetType -eq 'UPDATE') {
+    $updateDescription = if ($isApplicationUpdate) {
         " current-stack-binding-sha256=$currentStackBindingSha256"
     }
     else {
         ''
     }
     if ($isCredentialTransition) {
-        $updateDescription += " credential-transition-binding-sha256=$fixedSlotTransitionDeploymentBindingSha256"
+        $updateDescription = " transition-binding-sha256=$fixedSlotTransitionDeploymentBindingSha256"
     }
     elseif ($isAuthWalletTransition) {
-        $updateDescription += " auth-wallet-transition-binding-sha256=$authWalletTransitionDeploymentBindingSha256 auth-wallet-authority-registry-sha256=$AuthWalletTransitionAuthorityRegistrySha256"
+        $updateDescription = " transition-binding-sha256=$authWalletTransitionDeploymentBindingSha256"
+    }
+    elseif ($isRedisOperatorTransition) {
+        $updateDescription = " transition-binding-sha256=$redisOperatorTransitionDeploymentBindingSha256"
     }
     $expectedChangeSetDescription = "KAN-34 template-sha256=$templateSha256 workload-template-sha256=$workloadBoundariesTemplateSha256 workload-binding-sha256=$workloadBoundariesArtifactBindingSha256 observability-template-sha256=$observabilityTemplateSha256 observability-binding-sha256=$observabilityArtifactBindingSha256 parameters-sha256=$parameterSha256 tags-sha256=$tagSha256 control-record-sha256=$controlRecordSha256 acm-dns-record-sha256=$acmDnsRecordSha256 guardrail-policy=$expectedGuardrailPolicyVersion$updateDescription"
+    if ($expectedChangeSetDescription.Length -gt 1024) {
+        throw "The exact reviewed change-set description exceeds CloudFormation's 1,024-character limit."
+    }
 
     if ($Action -eq 'Plan') {
         Assert-RegionalS3ManagedPrefixList `
@@ -3500,10 +4214,10 @@ if (-not [string]::IsNullOrEmpty($rootChangeSetId) -and $rootChangeSetId -cne $c
     throw 'The reviewed change set returned an unexpected root change-set identity.'
 }
 if ($ChangeSetType -eq 'UPDATE') {
-    if ($isAuthWalletTransition) {
+    if ($isAuthWalletTransition -or $isRedisOperatorTransition) {
         $rootNextTokenProperty = $changeSet.PSObject.Properties['NextToken']
         if ($null -ne $rootNextTokenProperty -and $null -ne $rootNextTokenProperty.Value) {
-            throw 'AUTH_WALLET_TRANSITION root change-set review returned an uninspected pagination token.'
+            throw "$UpdateIntent root change-set review returned an uninspected pagination token."
         }
     }
     $changesProperty = $changeSet.PSObject.Properties['Changes']
@@ -3511,16 +4225,19 @@ if ($ChangeSetType -eq 'UPDATE') {
         throw 'The reviewed UPDATE change set did not expose its complete resource-change list.'
     }
     $reviewedResourceChanges = @($changesProperty.Value)
-    if ($isAuthWalletTransition) {
+    if ($isAuthWalletTransition -or $isRedisOperatorTransition) {
         if ($changesProperty.Value -isnot [System.Array]) {
-            throw 'AUTH_WALLET_TRANSITION requires Changes to be an exact JSON array before recursive review.'
+            throw "$UpdateIntent requires Changes to be an exact JSON array before recursive review."
         }
+        $transitionReviewMode = if ($isAuthWalletTransition) { $AuthWalletTransitionMode } else { $RedisOperatorTransitionMode }
         Assert-AuthWalletRootChanges `
             -Changes $reviewedResourceChanges `
-            -Mode $AuthWalletTransitionMode `
+            -Mode $transitionReviewMode `
             -RootChangeSetId $changeSetId `
             -Partition $partition `
-            -ProfileName $Profile
+            -ProfileName $Profile `
+            -ReviewIntent $UpdateIntent `
+            -ExpectedWorkloadStackId $(if ($isRedisOperatorTransition) { $RedisOperatorTransitionWorkloadStackId } else { $null })
     }
     else {
         foreach ($change in $reviewedResourceChanges) {
@@ -3672,54 +4389,14 @@ Assert-VersionedChildArtifact `
     -ProfileName $Profile
 
 if ($ChangeSetType -eq 'UPDATE') {
-    $finalStackOutput = & $script:AwsExecutable @(
-        'cloudformation',
-        'describe-stacks',
-        '--stack-name', $CurrentStackId,
-        '--profile', $Profile,
-        '--region', $Region,
-        '--output', 'json',
-        '--no-cli-pager'
-    )
-    if ($LASTEXITCODE -ne 0) {
-        throw "Unable to re-read immutable stack '$CurrentStackId' immediately before execution."
-    }
-    $finalCurrentStack = (($finalStackOutput | Out-String) | ConvertFrom-Json).Stacks | Select-Object -First 1
-    if (
-        $null -eq $finalCurrentStack -or
-        [string] (Get-OptionalPropertyValue -InputObject $finalCurrentStack -Name 'StackName') -cne $StackName -or
-        [string] (Get-OptionalPropertyValue -InputObject $finalCurrentStack -Name 'StackId') -cne $CurrentStackId -or
-        [string] (Get-OptionalPropertyValue -InputObject $finalCurrentStack -Name 'StackStatus') -notin @('CREATE_COMPLETE', 'UPDATE_COMPLETE')
-    ) {
-        throw 'The current application stack identity or stable status changed before execution. Re-plan and review a new change set.'
-    }
-    $finalCurrentParameterMap = Get-StackParameterMap -Stack $finalCurrentStack
-    $finalCurrentTags = ConvertFrom-ChangeSetTags -Tags (Get-OptionalPropertyValue -InputObject $finalCurrentStack -Name 'Tags')
-    $finalCurrentTemplateOutput = & $script:AwsExecutable @(
-        'cloudformation',
-        'get-template',
-        '--stack-name', $CurrentStackId,
-        '--template-stage', 'Original',
-        '--profile', $Profile,
-        '--region', $Region,
-        '--output', 'json',
-        '--no-cli-pager'
-    )
-    if ($LASTEXITCODE -ne 0) {
-        throw "Unable to re-read the Original template for immutable stack '$CurrentStackId' immediately before execution."
-    }
-    $finalCurrentTemplate = ($finalCurrentTemplateOutput | Out-String) | ConvertFrom-Json
-    if ($null -eq $finalCurrentTemplate -or $finalCurrentTemplate.TemplateBody -isnot [string]) {
-        throw 'CloudFormation did not return the current Original application template immediately before execution.'
-    }
-    $finalCurrentTemplateSha256 = Get-TextSha256 -Value ([string] $finalCurrentTemplate.TemplateBody)
-    $finalCurrentParameterSnapshotSha256 = Get-TextSha256 -Value (ConvertTo-CanonicalTagText -Tags $finalCurrentParameterMap)
-    $finalCurrentTagSnapshotSha256 = Get-TextSha256 -Value (ConvertTo-CanonicalTagText -Tags $finalCurrentTags)
-    $finalCurrentStackBindingText = "current-stack-id=$CurrentStackId`ncurrent-parent-template-sha256=$finalCurrentTemplateSha256`ncurrent-stack-parameters-sha256=$finalCurrentParameterSnapshotSha256`ncurrent-stack-tags-sha256=$finalCurrentTagSnapshotSha256`nupdate-intent=$UpdateIntent"
-    $finalCurrentStackBindingSha256 = Get-TextSha256 -Value $finalCurrentStackBindingText
-    if ($finalCurrentStackBindingSha256 -cne $currentStackBindingSha256) {
-        throw 'The immutable current stack changed after review and before execution. Re-plan and review a new change set.'
-    }
+    [void] (Assert-CurrentStackBindingUnchanged `
+            -ExpectedStackName $StackName `
+            -ExpectedStackId $CurrentStackId `
+            -ExpectedUpdateIntent $UpdateIntent `
+            -ExpectedBindingSha256 $currentStackBindingSha256 `
+            -ProfileName $Profile `
+            -RegionName $Region `
+            -Moment 'after review and before authorization')
 }
 
 Write-Host "Reviewed template SHA-256: $templateSha256"
@@ -3748,6 +4425,16 @@ elseif ($isAuthWalletTransition) {
     Write-Host "Reviewed auth/wallet authority registry SHA-256: $AuthWalletTransitionAuthorityRegistrySha256"
     Write-Host "Reviewed auth/wallet deployment binding SHA-256: $authWalletTransitionDeploymentBindingSha256"
 }
+elseif ($isRedisOperatorTransition) {
+    Write-Host "Reviewed Redis operator transition record SHA-256: $redisOperatorTransitionRecordSha256"
+    Write-Host "Reviewed Redis operator current projected state SHA-256: $redisOperatorCurrentStateSha256"
+    Write-Host "Reviewed Redis operator target projected state SHA-256: $redisOperatorTargetStateSha256"
+    Write-Host "Reviewed Redis operator current composite credential state SHA-256: $redisOperatorCurrentFixedSlotStateSha256"
+    Write-Host "Reviewed Redis operator target composite credential state SHA-256: $redisOperatorTargetFixedSlotStateSha256"
+    Write-Host "Reviewed Redis operator authority registry SHA-256: $RedisOperatorTransitionAuthorityRegistrySha256"
+    Write-Host "Reviewed Redis operator live binding SHA-256: $redisOperatorLiveBindingSha256"
+    Write-Host "Reviewed Redis operator deployment binding SHA-256: $redisOperatorTransitionDeploymentBindingSha256"
+}
 
 $updateAcknowledgement = if ($ChangeSetType -eq 'UPDATE') {
     " CURRENT STACK STATE $currentStackBindingSha256"
@@ -3760,6 +4447,9 @@ if ($isCredentialTransition) {
 }
 elseif ($isAuthWalletTransition) {
     $updateAcknowledgement += " AUTH-WALLET TRANSITION $authWalletTransitionRecordSha256 FROM STATE $authWalletCurrentStateSha256 TO STATE $authWalletTargetStateSha256 USING AUTHORITY REGISTRY $AuthWalletTransitionAuthorityRegistrySha256 BOUND BY $authWalletTransitionDeploymentBindingSha256 WITH TAGS $tagSha256"
+}
+elseif ($isRedisOperatorTransition) {
+    $updateAcknowledgement += " REDIS-OPERATOR TRANSITION $redisOperatorTransitionRecordSha256 FROM OPERATOR STATE $redisOperatorCurrentStateSha256 TO OPERATOR STATE $redisOperatorTargetStateSha256 AND CREDENTIAL STATE $redisOperatorCurrentFixedSlotStateSha256 TO CREDENTIAL STATE $redisOperatorTargetFixedSlotStateSha256 USING AUTHORITY REGISTRY $RedisOperatorTransitionAuthorityRegistrySha256 LIVE BINDING $redisOperatorLiveBindingSha256 BOUND BY $redisOperatorTransitionDeploymentBindingSha256 WITH TAGS $tagSha256"
 }
 $expectedAcknowledgement = "EXECUTE IMMUTABLE CHANGE SET $changeSetId FOR IMMUTABLE STACK $stackId WITH PARAMETERS $parameterSha256 WORKLOAD TEMPLATE $workloadBoundariesTemplateSha256 WORKLOAD BINDING $workloadBoundariesArtifactBindingSha256 OBSERVABILITY TEMPLATE $observabilityTemplateSha256 OBSERVABILITY BINDING $observabilityArtifactBindingSha256$updateAcknowledgement USING BILLING CONTROL $controlRecordSha256 AND ACM DNS CONTROL $acmDnsRecordSha256; I ACKNOWLEDGE BILLABLE AWS RESOURCES IN ACCOUNT $AccountId REGION $Region USING PROFILE $Profile"
 if ($BillableAcknowledgement -cne $expectedAcknowledgement) {
@@ -3799,6 +4489,69 @@ if ($isAuthWalletTransition) {
     ) {
         throw 'The signed auth/wallet transition or authority binding changed before execution. Re-run Plan and review a new change set.'
     }
+}
+elseif ($isRedisOperatorTransition) {
+    $freshRedisOperatorValidationAt = [DateTimeOffset]::UtcNow.ToString("yyyy-MM-ddTHH:mm:ss'Z'", [System.Globalization.CultureInfo]::InvariantCulture)
+    $redisOperatorTransitionRecordRawShaBeforeExecute = (Get-FileHash -LiteralPath $resolvedRedisOperatorTransitionRecord -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($redisOperatorTransitionRecordRawShaBeforeExecute -cne $redisOperatorTransitionRecordRawShaBefore) {
+        throw 'The Redis operator transition record changed before final authorization. Re-run Plan and review a new change set.'
+    }
+    $finalRedisOperatorValidation = Invoke-RedisOperatorTransitionValidation `
+        -RecordPath $resolvedRedisOperatorTransitionRecord `
+        -Mode $RedisOperatorTransitionMode `
+        -ValidationAt $freshRedisOperatorValidationAt `
+        -ExpectedStackId $CurrentStackId `
+        -ExpectedWorkloadStackId $RedisOperatorTransitionWorkloadStackId `
+        -ExpectedSecretArn $RedisOperatorTransitionSecretArn `
+        -ExpectedKmsKeyArn $RedisOperatorTransitionKmsKeyArn `
+        -ExpectedOperatorUserId $expectedRedisOperatorUserId `
+        -ExpectedCurrentVersionId $redisOperatorCurrentVersionId `
+        -ExpectedTargetVersionId $redisOperatorTargetVersionId `
+        -ExpectedRedisOperatorStateSha256 $RedisOperatorTransitionRedisStateSha256 `
+        -ExpectedRedisOperatorTransitionSha256 $RedisOperatorTransitionRedisTransitionSha256 `
+        -ExpectedCredentialStateSha256 $RedisOperatorTransitionFixedSlotStateSha256 `
+        -ExpectedCredentialTransitionSha256 $RedisOperatorTransitionFixedSlotTransitionSha256 `
+        -ExpectedAuthWalletStateSha256 $RedisOperatorTransitionAuthWalletStateSha256 `
+        -ExpectedAuthWalletTransitionSha256 $RedisOperatorTransitionAuthWalletTransitionSha256 `
+        -ExpectedOperation $validatedRedisOperatorTransitionOperation `
+        -ExpectedFieldName $validatedRedisOperatorTransitionFieldName `
+        -ExpectedAuthorityRegistrySha256 $RedisOperatorTransitionAuthorityRegistrySha256
+    $redisOperatorTransitionRecordRawShaAfterExecuteValidation = (Get-FileHash -LiteralPath $resolvedRedisOperatorTransitionRecord -Algorithm SHA256).Hash.ToLowerInvariant()
+    $finalRedisOperatorReportChanged = $false
+    foreach ($reportField in $redisOperatorReportFields) {
+        if ([string] $finalRedisOperatorValidation.$reportField -cne [string] $redisOperatorTransitionValidation.$reportField) {
+            $finalRedisOperatorReportChanged = $true
+        }
+    }
+    $finalRedisOperatorCurrentBindings = ConvertFrom-RedisOperatorDeploymentBindings -ValidationReport $finalRedisOperatorValidation -PropertyName 'currentDeploymentBindings'
+    $finalRedisOperatorTargetBindings = ConvertFrom-RedisOperatorDeploymentBindings -ValidationReport $finalRedisOperatorValidation -PropertyName 'targetDeploymentBindings'
+    if (
+        $redisOperatorTransitionRecordRawShaAfterExecuteValidation -cne $redisOperatorTransitionRecordRawShaBefore -or
+        $finalRedisOperatorReportChanged -or
+        (ConvertTo-CanonicalTagText -Tags $finalRedisOperatorCurrentBindings) -cne (ConvertTo-CanonicalTagText -Tags $fixedSlotCurrentBindings) -or
+        (ConvertTo-CanonicalTagText -Tags $finalRedisOperatorTargetBindings) -cne (ConvertTo-CanonicalTagText -Tags $signedRedisOperatorTargetBindings)
+    ) {
+        throw 'The signed Redis operator transition, authority, or chain binding changed before execution. Re-run Plan and review a new change set.'
+    }
+    $finalRedisOperatorLiveBinding = Get-RedisOperatorLiveBinding `
+        -RootStackId $CurrentStackId `
+        -WorkloadStackId $RedisOperatorTransitionWorkloadStackId `
+        -SecretArn $RedisOperatorTransitionSecretArn `
+        -KmsKeyArn $RedisOperatorTransitionKmsKeyArn `
+        -ExpectedOperatorUserId $expectedRedisOperatorUserId `
+        -CurrentVersionId $redisOperatorCurrentVersionId `
+        -ProfileName $Profile
+    if ([string] $finalRedisOperatorLiveBinding.Sha256 -cne $redisOperatorLiveBindingSha256) {
+        throw 'The live Redis operator stack, child, or resource identity changed before execution. Re-run Plan and review a new change set.'
+    }
+    [void] (Assert-CurrentStackBindingUnchanged `
+            -ExpectedStackName $StackName `
+            -ExpectedStackId $CurrentStackId `
+            -ExpectedUpdateIntent $UpdateIntent `
+            -ExpectedBindingSha256 $currentStackBindingSha256 `
+            -ProfileName $Profile `
+            -RegionName $Region `
+            -Moment 'after final Redis authorization and immediately before execution')
 }
 
 Write-Warning "Executing reviewed change set '$ChangeSetName' can create billable AWS resources in account $AccountId ($Region)."

@@ -13,6 +13,7 @@ $recordValidatorPath = Join-Path $PSScriptRoot 'validate-billing-control-record.
 $acmDnsRecordValidatorPath = Join-Path $PSScriptRoot 'validate-acm-dns-control-record.mjs'
 $fixedSlotCredentialTransitionValidatorPath = Join-Path $PSScriptRoot 'validate-fixed-slot-credential-transition.mjs'
 $authWalletTransitionValidatorPath = Join-Path $PSScriptRoot 'validate-auth-wallet-secret-version-transition.mjs'
+$redisOperatorTransitionValidatorPath = Join-Path $PSScriptRoot 'validate-redis-operator-secret-version-transition.mjs'
 $temporaryRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("kan34-application-guard-test-" + [guid]::NewGuid().ToString('N'))
 $fakeAwsDirectory = Join-Path $temporaryRoot 'fake-aws'
 $markerPath = Join-Path $temporaryRoot 'aws-calls.log'
@@ -20,7 +21,9 @@ $identityResponsePath = Join-Path $temporaryRoot 'identity.json'
 $guardrailStackResponsePath = Join-Path $temporaryRoot 'guardrail-stack.json'
 $applicationStackResponsePath = Join-Path $temporaryRoot 'application-stack.json'
 $applicationStackResponseAfterFirstPath = Join-Path $temporaryRoot 'application-stack-after-first.json'
+$applicationStackResponseAfterSecondPath = Join-Path $temporaryRoot 'application-stack-after-second.json'
 $workloadStackResponsePath = Join-Path $temporaryRoot 'workload-stack.json'
+$workloadStackResponseAfterFirstPath = Join-Path $temporaryRoot 'workload-stack-after-first.json'
 $workloadRootResourceResponsePath = Join-Path $temporaryRoot 'workload-root-resource.json'
 $redisOperatorSecretResourceResponsePath = Join-Path $temporaryRoot 'redis-operator-secret-resource.json'
 $redisOperatorUserResourceResponsePath = Join-Path $temporaryRoot 'redis-operator-user-resource.json'
@@ -49,7 +52,10 @@ $approvedTransitionRecordPath = Join-Path $localTransitionDirectory ("invoke-app
 $approvedRotationRecordPath = Join-Path $localTransitionDirectory ("invoke-application-$([guid]::NewGuid().ToString('N')).credential-transition.local.json")
 $approvedAuthWalletAdoptionRecordPath = Join-Path $localTransitionDirectory ("invoke-application-$([guid]::NewGuid().ToString('N')).auth-wallet-transition.local.json")
 $approvedAuthWalletTransitionRecordPath = Join-Path $localTransitionDirectory ("invoke-application-$([guid]::NewGuid().ToString('N')).auth-wallet-transition.local.json")
+$approvedRedisOperatorAdoptionRecordPath = Join-Path $localTransitionDirectory ("invoke-application-$([guid]::NewGuid().ToString('N')).redis-operator-transition.local.json")
+$approvedRedisOperatorTransitionRecordPath = Join-Path $localTransitionDirectory ("invoke-application-$([guid]::NewGuid().ToString('N')).redis-operator-transition.local.json")
 $authWalletValidatorMarkerPath = Join-Path $temporaryRoot 'auth-wallet-validator-calls.log'
+$redisOperatorValidatorMarkerPath = Join-Path $temporaryRoot 'redis-operator-validator-calls.log'
 $immutableChangeSetId = 'arn:aws:cloudformation:us-west-2:111122223333:changeSet/kan34-application-20260819/11111111-2222-3333-4444-555555555555'
 $immutableStackId = 'arn:aws:cloudformation:us-west-2:111122223333:stack/crypto-lending-application-test/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
 $workloadChildChangeSetId = 'arn:aws:cloudformation:us-west-2:111122223333:changeSet/workload-child-change/11111111-aaaa-bbbb-cccc-111111111111'
@@ -65,7 +71,9 @@ $originalEnvironment = @{
     FAKE_AWS_GUARDRAIL_STACK_RESPONSE = $env:FAKE_AWS_GUARDRAIL_STACK_RESPONSE
     FAKE_AWS_APPLICATION_STACK_RESPONSE = $env:FAKE_AWS_APPLICATION_STACK_RESPONSE
     FAKE_AWS_APPLICATION_STACK_RESPONSE_AFTER_FIRST = $env:FAKE_AWS_APPLICATION_STACK_RESPONSE_AFTER_FIRST
+    FAKE_AWS_APPLICATION_STACK_RESPONSE_AFTER_SECOND = $env:FAKE_AWS_APPLICATION_STACK_RESPONSE_AFTER_SECOND
     FAKE_AWS_WORKLOAD_STACK_RESPONSE = $env:FAKE_AWS_WORKLOAD_STACK_RESPONSE
+    FAKE_AWS_WORKLOAD_STACK_RESPONSE_AFTER_FIRST = $env:FAKE_AWS_WORKLOAD_STACK_RESPONSE_AFTER_FIRST
     FAKE_AWS_WORKLOAD_STACK_ID = $env:FAKE_AWS_WORKLOAD_STACK_ID
     FAKE_AWS_WORKLOAD_ROOT_RESOURCE_RESPONSE = $env:FAKE_AWS_WORKLOAD_ROOT_RESOURCE_RESPONSE
     FAKE_AWS_REDIS_OPERATOR_SECRET_RESOURCE_RESPONSE = $env:FAKE_AWS_REDIS_OPERATOR_SECRET_RESOURCE_RESPONSE
@@ -93,6 +101,20 @@ $originalEnvironment = @{
     FAKE_AUTH_WALLET_OPERATION = $env:FAKE_AUTH_WALLET_OPERATION
     FAKE_AUTH_WALLET_FIELD_NAME = $env:FAKE_AUTH_WALLET_FIELD_NAME
     FAKE_AUTH_WALLET_INITIAL_VALIDATION_AT = $env:FAKE_AUTH_WALLET_INITIAL_VALIDATION_AT
+    FAKE_REDIS_OPERATOR_VALIDATOR_MARKER = $env:FAKE_REDIS_OPERATOR_VALIDATOR_MARKER
+    FAKE_REDIS_OPERATOR_VALIDATOR_VARIANT = $env:FAKE_REDIS_OPERATOR_VALIDATOR_VARIANT
+    FAKE_REDIS_OPERATOR_CANONICAL_SHA256 = $env:FAKE_REDIS_OPERATOR_CANONICAL_SHA256
+    FAKE_REDIS_OPERATOR_CURRENT_STATE_SHA256 = $env:FAKE_REDIS_OPERATOR_CURRENT_STATE_SHA256
+    FAKE_REDIS_OPERATOR_TARGET_STATE_SHA256 = $env:FAKE_REDIS_OPERATOR_TARGET_STATE_SHA256
+    FAKE_REDIS_OPERATOR_CURRENT_CREDENTIAL_STATE_SHA256 = $env:FAKE_REDIS_OPERATOR_CURRENT_CREDENTIAL_STATE_SHA256
+    FAKE_REDIS_OPERATOR_TARGET_CREDENTIAL_STATE_SHA256 = $env:FAKE_REDIS_OPERATOR_TARGET_CREDENTIAL_STATE_SHA256
+    FAKE_REDIS_OPERATOR_PREDECESSOR_TRANSITION_SHA256 = $env:FAKE_REDIS_OPERATOR_PREDECESSOR_TRANSITION_SHA256
+    FAKE_REDIS_OPERATOR_CREDENTIAL_PREDECESSOR_TRANSITION_SHA256 = $env:FAKE_REDIS_OPERATOR_CREDENTIAL_PREDECESSOR_TRANSITION_SHA256
+    FAKE_REDIS_OPERATOR_AUTH_WALLET_STATE_SHA256 = $env:FAKE_REDIS_OPERATOR_AUTH_WALLET_STATE_SHA256
+    FAKE_REDIS_OPERATOR_AUTH_WALLET_TRANSITION_SHA256 = $env:FAKE_REDIS_OPERATOR_AUTH_WALLET_TRANSITION_SHA256
+    FAKE_REDIS_OPERATOR_AUTHORITY_REGISTRY_SHA256 = $env:FAKE_REDIS_OPERATOR_AUTHORITY_REGISTRY_SHA256
+    FAKE_REDIS_OPERATOR_CURRENT_DEPLOYMENT_BINDINGS = $env:FAKE_REDIS_OPERATOR_CURRENT_DEPLOYMENT_BINDINGS
+    FAKE_REDIS_OPERATOR_TARGET_DEPLOYMENT_BINDINGS = $env:FAKE_REDIS_OPERATOR_TARGET_DEPLOYMENT_BINDINGS
 }
 $passed = 0
 
@@ -221,6 +243,69 @@ function Set-FakeAuthWalletValidationFixture {
     $env:FAKE_AUTH_WALLET_INITIAL_VALIDATION_AT = $InitialValidationAt
     $env:FAKE_AUTH_WALLET_VALIDATOR_VARIANT = $Variant
     Clear-AuthWalletValidatorMarker
+}
+
+function Clear-RedisOperatorValidatorMarker {
+    if (Test-Path -LiteralPath $redisOperatorValidatorMarkerPath) {
+        Remove-Item -LiteralPath $redisOperatorValidatorMarkerPath -Force
+    }
+}
+
+function New-RedisOperatorDeploymentBindingMap {
+    param([Parameter(Mandatory = $true)] [System.Collections.IDictionary] $ParameterMap)
+
+    $result = [ordered]@{}
+    foreach ($bindingName in @(
+            'RedisOperatorSecretVersionId',
+            'ApiDatabaseSlotAVersionId',
+            'ApiDatabaseSlotBVersionId',
+            'WorkerDatabaseSlotAVersionId',
+            'WorkerDatabaseSlotBVersionId',
+            'RedisApiSlotAVersionId',
+            'RedisApiSlotBVersionId',
+            'ApiDatabaseCredentialPhase',
+            'WorkerDatabaseCredentialPhase',
+            'RedisCredentialPhase',
+            'RedisOperatorMode'
+        )) {
+        $result[$bindingName] = [string] $ParameterMap[$bindingName]
+    }
+    return $result
+}
+
+function Set-FakeRedisOperatorValidationFixture {
+    param(
+        [string] $CanonicalSha256,
+        [string] $CurrentStateSha256,
+        [string] $TargetStateSha256,
+        [string] $CurrentCredentialStateSha256,
+        [string] $TargetCredentialStateSha256,
+        [string] $PredecessorTransitionSha256,
+        [string] $CredentialPredecessorTransitionSha256,
+        [string] $AuthWalletStateSha256,
+        [string] $AuthWalletTransitionSha256,
+        [string] $AuthorityRegistrySha256,
+        [Parameter(Mandatory = $true)]
+        [System.Collections.IDictionary] $CurrentDeploymentBindings,
+        [Parameter(Mandatory = $true)]
+        [System.Collections.IDictionary] $TargetDeploymentBindings,
+        [string] $Variant = ''
+    )
+
+    $env:FAKE_REDIS_OPERATOR_CANONICAL_SHA256 = $CanonicalSha256
+    $env:FAKE_REDIS_OPERATOR_CURRENT_STATE_SHA256 = $CurrentStateSha256
+    $env:FAKE_REDIS_OPERATOR_TARGET_STATE_SHA256 = $TargetStateSha256
+    $env:FAKE_REDIS_OPERATOR_CURRENT_CREDENTIAL_STATE_SHA256 = $CurrentCredentialStateSha256
+    $env:FAKE_REDIS_OPERATOR_TARGET_CREDENTIAL_STATE_SHA256 = $TargetCredentialStateSha256
+    $env:FAKE_REDIS_OPERATOR_PREDECESSOR_TRANSITION_SHA256 = $PredecessorTransitionSha256
+    $env:FAKE_REDIS_OPERATOR_CREDENTIAL_PREDECESSOR_TRANSITION_SHA256 = $CredentialPredecessorTransitionSha256
+    $env:FAKE_REDIS_OPERATOR_AUTH_WALLET_STATE_SHA256 = $AuthWalletStateSha256
+    $env:FAKE_REDIS_OPERATOR_AUTH_WALLET_TRANSITION_SHA256 = $AuthWalletTransitionSha256
+    $env:FAKE_REDIS_OPERATOR_AUTHORITY_REGISTRY_SHA256 = $AuthorityRegistrySha256
+    $env:FAKE_REDIS_OPERATOR_CURRENT_DEPLOYMENT_BINDINGS = ConvertTo-Json -InputObject $CurrentDeploymentBindings -Depth 4 -Compress
+    $env:FAKE_REDIS_OPERATOR_TARGET_DEPLOYMENT_BINDINGS = ConvertTo-Json -InputObject $TargetDeploymentBindings -Depth 4 -Compress
+    $env:FAKE_REDIS_OPERATOR_VALIDATOR_VARIANT = $Variant
+    Clear-RedisOperatorValidatorMarker
 }
 
 function Get-AwsMarkerText {
@@ -743,10 +828,51 @@ function Write-StackResourceResponse {
         }) -Depth 5
 }
 
+function Write-RedisOperatorLiveFixture {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $CurrentVersionId,
+        [string] $WorkloadStackId = $workloadChildStackId,
+        [string] $SecretArn = $redisOperatorSecretArn,
+        [string] $KmsKeyArn = $redisOperatorKmsKeyArn,
+        [string] $OperatorUserId = 'cl-test-kan34-ro',
+        [string] $ParentId = $immutableStackId,
+        [string] $RootId = $immutableStackId
+    )
+
+    Write-WorkloadStackResponse `
+        -RedisOperatorVersionId $CurrentVersionId `
+        -ApplicationDataKeyArn $KmsKeyArn `
+        -ParentId $ParentId `
+        -RootId $RootId
+    Write-StackResourceResponse `
+        -Path $workloadRootResourceResponsePath `
+        -StackName 'crypto-lending-application-test' `
+        -StackId $immutableStackId `
+        -LogicalResourceId 'WorkloadBoundaries' `
+        -PhysicalResourceId $WorkloadStackId `
+        -ResourceType 'AWS::CloudFormation::Stack'
+    Write-StackResourceResponse `
+        -Path $redisOperatorSecretResourceResponsePath `
+        -StackName 'crypto-lending-workload-test' `
+        -StackId $workloadChildStackId `
+        -LogicalResourceId 'RedisOperatorSecret' `
+        -PhysicalResourceId $SecretArn `
+        -ResourceType 'AWS::SecretsManager::Secret'
+    Write-StackResourceResponse `
+        -Path $redisOperatorUserResourceResponsePath `
+        -StackName 'crypto-lending-workload-test' `
+        -StackId $workloadChildStackId `
+        -LogicalResourceId 'RedisOperatorUser' `
+        -PhysicalResourceId $OperatorUserId `
+        -ResourceType 'AWS::ElastiCache::User'
+    Write-TemplateResponse -Path $workloadCurrentTemplateResponsePath -TemplateBody $workloadBoundariesTemplateBody
+}
+
 if (-not (Test-Path -LiteralPath $guardPath -PathType Leaf)) {
     throw "Application guard under test was not found: $guardPath"
 }
-foreach ($requiredFile in @($applicationTemplatePath, $workloadBoundariesTemplatePath, $observabilityTemplatePath, $guardrailTemplatePath, $recordValidatorPath, $acmDnsRecordValidatorPath, $fixedSlotCredentialTransitionValidatorPath, $authWalletTransitionValidatorPath)) {
+foreach ($requiredFile in @($applicationTemplatePath, $workloadBoundariesTemplatePath, $observabilityTemplatePath, $guardrailTemplatePath, $recordValidatorPath, $acmDnsRecordValidatorPath, $fixedSlotCredentialTransitionValidatorPath, $authWalletTransitionValidatorPath, $redisOperatorTransitionValidatorPath)) {
     if (-not (Test-Path -LiteralPath $requiredFile -PathType Leaf)) {
         throw "Required focused-test input was not found: $requiredFile"
     }
@@ -788,6 +914,21 @@ if ($service -eq 'cloudformation' -and $operation -eq 'describe-stacks') {
     $stackNameIndex = [array]::IndexOf($AwsArguments, '--stack-name')
     $requestedStack = if ($stackNameIndex -ge 0) { $AwsArguments[$stackNameIndex + 1] } else { '' }
     if ($requestedStack -eq [Environment]::GetEnvironmentVariable('FAKE_AWS_WORKLOAD_STACK_ID')) {
+        $workloadDescribeCount = @(
+            Get-Content -LiteralPath $env:FAKE_AWS_MARKER | Where-Object {
+                $_ -match 'cloudformation describe-stacks --stack-name .*:stack/crypto-lending-workload-test/'
+            }
+        ).Count
+        $workloadAfterFirstResponse = [Environment]::GetEnvironmentVariable('FAKE_AWS_WORKLOAD_STACK_RESPONSE_AFTER_FIRST')
+        if (
+            $workloadDescribeCount -gt 1 -and
+            -not [string]::IsNullOrWhiteSpace($workloadAfterFirstResponse) -and
+            (Test-Path -LiteralPath $workloadAfterFirstResponse -PathType Leaf)
+        ) {
+            Write-ResponseFile -Path $workloadAfterFirstResponse
+            $global:LASTEXITCODE = 0
+            return
+        }
         Write-ResponseFile -Path $env:FAKE_AWS_WORKLOAD_STACK_RESPONSE
         $global:LASTEXITCODE = 0
         return
@@ -802,6 +943,16 @@ if ($service -eq 'cloudformation' -and $operation -eq 'describe-stacks') {
             }
         ).Count
         $afterFirstResponse = [Environment]::GetEnvironmentVariable('FAKE_AWS_APPLICATION_STACK_RESPONSE_AFTER_FIRST')
+        $afterSecondResponse = [Environment]::GetEnvironmentVariable('FAKE_AWS_APPLICATION_STACK_RESPONSE_AFTER_SECOND')
+        if (
+            $applicationDescribeCount -gt 2 -and
+            -not [string]::IsNullOrWhiteSpace($afterSecondResponse) -and
+            (Test-Path -LiteralPath $afterSecondResponse -PathType Leaf)
+        ) {
+            Write-ResponseFile -Path $afterSecondResponse
+            $global:LASTEXITCODE = 0
+            return
+        }
         if (
             $applicationDescribeCount -gt 1 -and
             -not [string]::IsNullOrWhiteSpace($afterFirstResponse) -and
@@ -962,7 +1113,8 @@ $ErrorActionPreference = 'Stop'
 if ($NodeArguments.Count -eq 1 -and $NodeArguments[0] -match '\s--') {
     $NodeArguments = @($NodeArguments[0] -split '\s+')
 }
-if ($NodeArguments.Count -eq 0 -or (Split-Path -Leaf $NodeArguments[0]) -cne 'validate-auth-wallet-secret-version-transition.mjs') {
+$validatorLeaf = if ($NodeArguments.Count -eq 0) { '' } else { Split-Path -Leaf $NodeArguments[0] }
+if ($validatorLeaf -cnotin @('validate-auth-wallet-secret-version-transition.mjs', 'validate-redis-operator-secret-version-transition.mjs')) {
     & $env:FAKE_REAL_NODE @NodeArguments
     return
 }
@@ -980,6 +1132,148 @@ $mode = Get-ArgumentValue -Name '--mode'
 $validationAt = Get-ArgumentValue -Name '--at'
 $currentVersionId = Get-ArgumentValue -Name '--expected-current-version-id'
 $targetVersionId = Get-ArgumentValue -Name '--expected-target-version-id'
+if ($validatorLeaf -ceq 'validate-redis-operator-secret-version-transition.mjs') {
+    Add-Content -LiteralPath $env:FAKE_REDIS_OPERATOR_VALIDATOR_MARKER -Value "mode=$mode at=$validationAt current=$currentVersionId target=$targetVersionId" -Encoding Ascii
+    $callCount = @(Get-Content -LiteralPath $env:FAKE_REDIS_OPERATOR_VALIDATOR_MARKER).Count
+    $variant = [string] $env:FAKE_REDIS_OPERATOR_VALIDATOR_VARIANT
+    if ($variant -ceq 'FAIL_ALWAYS' -or ($variant -ceq 'FAIL_FRESH' -and $callCount -gt 2)) {
+        $global:LASTEXITCODE = 1
+        return
+    }
+    if ($variant -ceq 'MUTATE_RECORD_FRESH' -and $callCount -gt 2) {
+        $recordPath = Get-ArgumentValue -Name '--record'
+        Add-Content -LiteralPath $recordPath -Value ' ' -Encoding Ascii
+    }
+    $operation = Get-ArgumentValue -Name '--expected-operation'
+    $fieldName = Get-ArgumentValue -Name '--expected-field-name'
+    $authorityRegistrySha256 = [string] $env:FAKE_REDIS_OPERATOR_AUTHORITY_REGISTRY_SHA256
+    $currentStateSha256 = [string] $env:FAKE_REDIS_OPERATOR_CURRENT_STATE_SHA256
+    $targetStateSha256 = [string] $env:FAKE_REDIS_OPERATOR_TARGET_STATE_SHA256
+    $currentCredentialStateSha256 = [string] $env:FAKE_REDIS_OPERATOR_CURRENT_CREDENTIAL_STATE_SHA256
+    $targetCredentialStateSha256 = [string] $env:FAKE_REDIS_OPERATOR_TARGET_CREDENTIAL_STATE_SHA256
+    $predecessorTransitionSha256 = [string] $env:FAKE_REDIS_OPERATOR_PREDECESSOR_TRANSITION_SHA256
+    $credentialPredecessorTransitionSha256 = [string] $env:FAKE_REDIS_OPERATOR_CREDENTIAL_PREDECESSOR_TRANSITION_SHA256
+    $authWalletStateSha256 = [string] $env:FAKE_REDIS_OPERATOR_AUTH_WALLET_STATE_SHA256
+    $authWalletTransitionSha256 = [string] $env:FAKE_REDIS_OPERATOR_AUTH_WALLET_TRANSITION_SHA256
+    $currentDeploymentBindings = ([string] $env:FAKE_REDIS_OPERATOR_CURRENT_DEPLOYMENT_BINDINGS) | ConvertFrom-Json
+    $targetDeploymentBindings = ([string] $env:FAKE_REDIS_OPERATOR_TARGET_DEPLOYMENT_BINDINGS) | ConvertFrom-Json
+    $productionAuthorityValidated = $true
+    if ($variant -ceq 'WRONG_REGISTRY') {
+        $authorityRegistrySha256 = '0' * 64
+    }
+    elseif ($variant -ceq 'UNAUTHORIZED') {
+        $productionAuthorityValidated = $false
+    }
+    elseif ($variant -ceq 'WRONG_CREDENTIAL_STATE') {
+        $currentCredentialStateSha256 = '1' * 64
+    }
+    elseif ($variant -ceq 'WRONG_AUTH_HEAD') {
+        $authWalletTransitionSha256 = '2' * 64
+    }
+    elseif ($variant -ceq 'DRIFT_FRESH' -and $callCount -gt 2) {
+        $targetStateSha256 = '3' * 64
+    }
+    elseif ($variant -ceq 'CURRENT_BINDING_DRIFT_FRESH' -and $callCount -gt 2) {
+        $currentDeploymentBindings.ApiDatabaseSlotAVersionId = 'api_database_slot_a_version_99999'
+    }
+    elseif ($variant -ceq 'TARGET_BINDING_DRIFT_FRESH' -and $callCount -gt 2) {
+        $targetDeploymentBindings.RedisCredentialPhase = 'B_ONLY'
+    }
+    elseif ($variant -ceq 'MISSING_BINDING') {
+        $currentDeploymentBindings.PSObject.Properties.Remove('RedisApiSlotBVersionId')
+    }
+    elseif ($variant -ceq 'EXTRA_BINDING') {
+        Add-Member -InputObject $targetDeploymentBindings -NotePropertyName ExtraBinding -NotePropertyValue 'unexpected'
+    }
+    elseif ($variant -ceq 'NON_STRING_BINDING') {
+        $currentDeploymentBindings.RedisOperatorMode = $false
+    }
+    elseif ($variant -ceq 'A_B_BINDING_MISMATCH') {
+        $currentDeploymentBindings.ApiDatabaseSlotAVersionId = 'api_database_slot_a_version_99999'
+    }
+    elseif ($variant -ceq 'PHASE_BINDING_MISMATCH') {
+        $targetDeploymentBindings.RedisCredentialPhase = 'B_ONLY'
+    }
+    $steps = if ($mode -ceq 'adopt') {
+        @(
+            'VERIFY_SIGNED_ALREADY_PINNED_DISABLED_OPERATOR_STATE',
+            'VERIFY_COMPOSITE_CREDENTIAL_AND_AUTH_WALLET_HEADS',
+            'ADD_ONLY_THE_REDIS_OPERATOR_CHAIN_BINDING'
+        )
+    }
+    else {
+        @(
+            'VERIFY_SIGNED_CURRENT_TARGET_AND_ALL_THREE_CHAIN_BINDINGS',
+            'KEEP_OPERATOR_MODE_DISABLED_AND_OPERATOR_TASK_ABSENT',
+            'UPDATE_ONLY_REDIS_OPERATOR_USER_PASSWORDS_TO_THE_EXACT_TARGET_VERSION',
+            'VERIFY_CANDIDATE_AUTHENTICATION_AND_OLD_AUTHENTICATION_DENIAL_SEPARATELY',
+            'ADVANCE_REDIS_AND_COMPOSITE_CREDENTIAL_CHAINS_ATOMICALLY',
+            'FORWARD_RECOVER_WITH_A_FRESH_NEVER_REUSED_VERSION'
+        )
+    }
+    $report = [ordered]@{
+        ok = $true
+        readyForAuthorizedPlan = $true
+        productionAuthorityValidated = $productionAuthorityValidated
+        signatureValidated = $true
+        mode = $mode
+        operation = $operation
+        fieldName = $fieldName
+        canonicalSha256 = [string] $env:FAKE_REDIS_OPERATOR_CANONICAL_SHA256
+        currentOperatorStateSha256 = $currentStateSha256
+        targetOperatorStateSha256 = $targetStateSha256
+        currentCredentialStateSha256 = $currentCredentialStateSha256
+        targetCredentialStateSha256 = $targetCredentialStateSha256
+        currentDeploymentBindings = $currentDeploymentBindings
+        targetDeploymentBindings = $targetDeploymentBindings
+        redisOperatorPredecessorTransitionSha256 = $predecessorTransitionSha256
+        credentialPredecessorTransitionSha256 = $credentialPredecessorTransitionSha256
+        preservedAuthWalletStateSha256 = $authWalletStateSha256
+        preservedAuthWalletTransitionSha256 = $authWalletTransitionSha256
+        authorityRegistrySha256 = $authorityRegistrySha256
+        plan = [ordered]@{
+            kind = 'LOCAL_ONLY_NON_EXECUTABLE_REDIS_OPERATOR_VERSION_PLAN'
+            operation = $operation
+            fieldName = $fieldName
+            versionParameter = 'RedisOperatorSecretVersionId'
+            currentVersionId = $currentVersionId
+            targetVersionId = $targetVersionId
+            executionAllowed = $false
+            separateAuthorizationRequired = $true
+            steps = $steps
+            prohibitions = @(
+                'NO_SECRET_OR_PASSWORD_MATERIAL',
+                'NO_SECRET_VALUE_HASHES',
+                'NO_OPERATOR_ENABLEMENT',
+                'NO_AWS_CALLS',
+                'NO_DATABASE_CONNECTIONS',
+                'NO_REDIS_CONNECTIONS',
+                'NO_NETWORK_OR_DNS',
+                'NO_RESOURCE_MUTATION',
+                'NO_FILE_WRITES'
+            )
+        }
+        errors = @()
+        externalCallsMade = 0
+        awsCallsMade = 0
+        databaseConnectionsMade = 0
+        redisConnectionsMade = 0
+        dnsQueriesMade = 0
+        httpRequestsMade = 0
+        resourcesCreated = 0
+        credentialBytesRead = 0
+        filesWritten = 0
+    }
+    if ($variant -ceq 'STRING_ZERO') {
+        $report.awsCallsMade = '0'
+    }
+    elseif ($variant -ceq 'BAD_PLAN') {
+        $report.plan.steps[0] = 'BYPASS'
+    }
+    Write-Output -NoEnumerate ($report | ConvertTo-Json -Depth 8 -Compress)
+    $global:LASTEXITCODE = 0
+    return
+}
 Add-Content -LiteralPath $env:FAKE_AUTH_WALLET_VALIDATOR_MARKER -Value "mode=$mode at=$validationAt current=$currentVersionId target=$targetVersionId" -Encoding Ascii
 $callCount = @(Get-Content -LiteralPath $env:FAKE_AUTH_WALLET_VALIDATOR_MARKER).Count
 $variant = [string] $env:FAKE_AUTH_WALLET_VALIDATOR_VARIANT
@@ -1074,12 +1368,16 @@ $env:PATH = $fakeAwsDirectory + [System.IO.Path]::PathSeparator + $originalEnvir
 $env:FAKE_REAL_NODE = $realNodeCommand.Source
 $env:FAKE_AUTH_WALLET_VALIDATOR_MARKER = $authWalletValidatorMarkerPath
 $env:FAKE_AUTH_WALLET_VALIDATOR_VARIANT = ''
+$env:FAKE_REDIS_OPERATOR_VALIDATOR_MARKER = $redisOperatorValidatorMarkerPath
+$env:FAKE_REDIS_OPERATOR_VALIDATOR_VARIANT = ''
 $env:FAKE_AWS_MARKER = $markerPath
 $env:FAKE_AWS_IDENTITY_RESPONSE = $identityResponsePath
 $env:FAKE_AWS_GUARDRAIL_STACK_RESPONSE = $guardrailStackResponsePath
 $env:FAKE_AWS_APPLICATION_STACK_RESPONSE = $applicationStackResponsePath
 $env:FAKE_AWS_APPLICATION_STACK_RESPONSE_AFTER_FIRST = ''
+$env:FAKE_AWS_APPLICATION_STACK_RESPONSE_AFTER_SECOND = ''
 $env:FAKE_AWS_WORKLOAD_STACK_RESPONSE = $workloadStackResponsePath
+$env:FAKE_AWS_WORKLOAD_STACK_RESPONSE_AFTER_FIRST = ''
 $env:FAKE_AWS_WORKLOAD_STACK_ID = $workloadChildStackId
 $env:FAKE_AWS_WORKLOAD_ROOT_RESOURCE_RESPONSE = $workloadRootResourceResponsePath
 $env:FAKE_AWS_REDIS_OPERATOR_SECRET_RESOURCE_RESPONSE = $redisOperatorSecretResourceResponsePath
@@ -1667,9 +1965,105 @@ foreach ($entry in $updateApplicationStackTags.GetEnumerator()) {
 $authWalletAdoptedStackTags['auth-wallet-predecessor-sha256'] = 'NONE'
 $authWalletAdoptedStackTags['auth-wallet-transition-sha256'] = $authWalletAdoptionRecordSha256
 $authWalletAdoptedStackTags['auth-wallet-state-sha256'] = $authWalletAdoptionStateSha256
+$redisOperatorSecretArn = 'arn:aws:secretsmanager:us-west-2:111122223333:secret:crypto-lending/test/redis-operator-AbCdEf'
+$redisOperatorKmsKeyArn = 'arn:aws:kms:us-west-2:111122223333:key/22222222-3333-4444-5555-666666666666'
+$redisOperatorUserId = 'cl-test-kan34-ro'
+$redisOperatorUserArn = 'arn:aws:elasticache:us-west-2:111122223333:user:cl-test-kan34-ro'
+$redisOperatorUsername = 'crypto_operator_test-kan34'
+$redisOperatorTransitionAuthorityRegistrySha256 = ('1' * 64)
+$redisOperatorAdoptionRecordSha256 = ('2' * 64)
+$redisOperatorAdoptionStateSha256 = ('3' * 64)
+$redisOperatorTransitionRecordSha256 = ('4' * 64)
+$redisOperatorTransitionTargetStateSha256 = ('5' * 64)
+$redisOperatorTransitionTargetCredentialStateSha256 = ('6' * 64)
+$redisOperatorTargetVersionId = 'redis_operator_secret_version_00002'
+if ($redisOperatorTargetVersionId -cnotmatch '^[A-Za-z0-9_-]{32,64}$') {
+    throw 'Focused Redis operator transition target VersionId fixture is malformed.'
+}
+$redisOperatorAdoptionRecord = [ordered]@{ fixture = 'redis-operator-adoption' }
+$redisOperatorTransitionRecord = [ordered]@{ fixture = 'redis-operator-transition' }
+Write-JsonFile -Path $approvedRedisOperatorAdoptionRecordPath -Value $redisOperatorAdoptionRecord -Depth 3
+Write-JsonFile -Path $approvedRedisOperatorTransitionRecordPath -Value $redisOperatorTransitionRecord -Depth 3
+$redisOperatorAdoptedStackTags = [ordered]@{}
+foreach ($entry in $authWalletAdoptedStackTags.GetEnumerator()) {
+    $redisOperatorAdoptedStackTags[$entry.Key] = [string] $entry.Value
+}
+$redisOperatorAdoptedStackTags['redis-operator-predecessor-sha256'] = 'NONE'
+$redisOperatorAdoptedStackTags['redis-operator-transition-sha256'] = $redisOperatorAdoptionRecordSha256
+$redisOperatorAdoptedStackTags['redis-operator-state-sha256'] = $redisOperatorAdoptionStateSha256
+$redisOperatorLiveBindingText = "root-stack-id=$immutableStackId`nworkload-stack-id=$workloadChildStackId`nworkload-template-sha256=$workloadBoundariesTemplateSha256`nsecret-arn=$redisOperatorSecretArn`nkms-key-arn=$redisOperatorKmsKeyArn`noperator-user-id=$redisOperatorUserId`noperator-user-arn=$redisOperatorUserArn`noperator-username=$redisOperatorUsername`noperator-mode=DISABLED`ncurrent-version-id=$redisOperatorSecretVersionId"
+$redisOperatorLiveBindingSha256 = Get-TextSha256 -Value $redisOperatorLiveBindingText
+$redisOperatorAdoptionCurrentTagSha256 = Get-TextSha256 -Value (Get-CanonicalMapText -Map $authWalletAdoptedStackTags)
+$redisOperatorAdoptionCurrentStackBindingText = "current-stack-id=$immutableStackId`ncurrent-parent-template-sha256=$applicationTemplateSha256`ncurrent-stack-parameters-sha256=$(Get-TextSha256 -Value (Get-CanonicalMapText -Map $updateApplicationParameterMap))`ncurrent-stack-tags-sha256=$redisOperatorAdoptionCurrentTagSha256`nupdate-intent=REDIS_OPERATOR_TRANSITION"
+$redisOperatorAdoptionCurrentStackBindingSha256 = Get-TextSha256 -Value $redisOperatorAdoptionCurrentStackBindingText
+$redisOperatorAdoptionDeploymentBindingText = "record-sha256=$redisOperatorAdoptionRecordSha256`ncurrent-operator-state-sha256=$redisOperatorAdoptionStateSha256`ntarget-operator-state-sha256=$redisOperatorAdoptionStateSha256`nredis-predecessor-transition-sha256=NONE`ncurrent-credential-state-sha256=$transitionTargetStateSha256`ntarget-credential-state-sha256=$transitionTargetStateSha256`ncredential-predecessor-transition-sha256=$transitionRecordSha256`nauth-wallet-state-sha256=$authWalletAdoptionStateSha256`nauth-wallet-transition-sha256=$authWalletAdoptionRecordSha256`nauthority-registry-sha256=$redisOperatorTransitionAuthorityRegistrySha256`ncurrent-stack-id=$immutableStackId`nworkload-stack-id=$workloadChildStackId`nsecret-arn=$redisOperatorSecretArn`nkms-key-arn=$redisOperatorKmsKeyArn`noperator-user-id=$redisOperatorUserId`nparent-template-sha256=$applicationTemplateSha256`nworkload-template-sha256=$workloadBoundariesTemplateSha256`nobservability-template-sha256=$observabilityTemplateSha256`nmode=adopt`noperation=ADOPT_EXISTING_BINDING`nfield=REDIS_OPERATOR_SECRET_VERSION_ID`ncurrent-stack-binding-sha256=$redisOperatorAdoptionCurrentStackBindingSha256`nlive-binding-sha256=$redisOperatorLiveBindingSha256"
+$redisOperatorAdoptionDeploymentBindingSha256 = Get-TextSha256 -Value $redisOperatorAdoptionDeploymentBindingText
+$redisOperatorAdoptionParameterSha256 = Get-TextSha256 -Value (Get-CanonicalMapText -Map $updateApplicationParameterMap)
+$redisOperatorAdoptionTagSha256 = Get-TextSha256 -Value (Get-CanonicalMapText -Map $redisOperatorAdoptedStackTags)
+$redisOperatorAdoptionExpectedChangeSetDescription = "KAN-34 template-sha256=$applicationTemplateSha256 workload-template-sha256=$workloadBoundariesTemplateSha256 workload-binding-sha256=$artifactBindingSha256 observability-template-sha256=$observabilityTemplateSha256 observability-binding-sha256=$observabilityArtifactBindingSha256 parameters-sha256=$redisOperatorAdoptionParameterSha256 tags-sha256=$redisOperatorAdoptionTagSha256 control-record-sha256=$controlRecordSha256 acm-dns-record-sha256=$acmDnsRecordSha256 guardrail-policy=kan-229-v1 transition-binding-sha256=$redisOperatorAdoptionDeploymentBindingSha256"
+$redisOperatorAdoptionBillableAcknowledgement = "EXECUTE IMMUTABLE CHANGE SET $immutableChangeSetId FOR IMMUTABLE STACK $immutableStackId WITH PARAMETERS $redisOperatorAdoptionParameterSha256 WORKLOAD TEMPLATE $workloadBoundariesTemplateSha256 WORKLOAD BINDING $artifactBindingSha256 OBSERVABILITY TEMPLATE $observabilityTemplateSha256 OBSERVABILITY BINDING $observabilityArtifactBindingSha256 CURRENT STACK STATE $redisOperatorAdoptionCurrentStackBindingSha256 REDIS-OPERATOR TRANSITION $redisOperatorAdoptionRecordSha256 FROM OPERATOR STATE $redisOperatorAdoptionStateSha256 TO OPERATOR STATE $redisOperatorAdoptionStateSha256 AND CREDENTIAL STATE $transitionTargetStateSha256 TO CREDENTIAL STATE $transitionTargetStateSha256 USING AUTHORITY REGISTRY $redisOperatorTransitionAuthorityRegistrySha256 LIVE BINDING $redisOperatorLiveBindingSha256 BOUND BY $redisOperatorAdoptionDeploymentBindingSha256 WITH TAGS $redisOperatorAdoptionTagSha256 USING BILLING CONTROL $controlRecordSha256 AND ACM DNS CONTROL $acmDnsRecordSha256; I ACKNOWLEDGE BILLABLE AWS RESOURCES IN ACCOUNT 111122223333 REGION us-west-2 USING PROFILE kan34-test"
+$redisOperatorAdoptionArguments = Copy-ArgumentMap -Map $baseArguments
+$redisOperatorAdoptionArguments.ChangeSetType = 'UPDATE'
+$redisOperatorAdoptionArguments.CurrentStackId = $immutableStackId
+$redisOperatorAdoptionArguments.UpdateIntent = 'REDIS_OPERATOR_TRANSITION'
+$redisOperatorAdoptionArguments.ParameterOverride = $updateParameterOverrides
+foreach ($entry in $pinnedCredentialVersions.GetEnumerator()) {
+    $redisOperatorAdoptionArguments[$entry.Key] = [string] $entry.Value
+}
+$redisOperatorAdoptionArguments.RedisOperatorTransitionRecordFile = $approvedRedisOperatorAdoptionRecordPath
+$redisOperatorAdoptionArguments.RedisOperatorTransitionMode = 'adopt'
+$redisOperatorAdoptionArguments.RedisOperatorTransitionValidationAt = $authWalletValidationAt
+$redisOperatorAdoptionArguments.RedisOperatorTransitionAuthorityRegistrySha256 = $redisOperatorTransitionAuthorityRegistrySha256
+$redisOperatorAdoptionArguments.RedisOperatorTransitionWorkloadStackId = $workloadChildStackId
+$redisOperatorAdoptionArguments.RedisOperatorTransitionSecretArn = $redisOperatorSecretArn
+$redisOperatorAdoptionArguments.RedisOperatorTransitionKmsKeyArn = $redisOperatorKmsKeyArn
+$redisOperatorAdoptionArguments.RedisOperatorTransitionCurrentVersionId = $redisOperatorSecretVersionId
+$redisOperatorAdoptionArguments.RedisOperatorTransitionOperation = 'ADOPT_EXISTING_BINDING'
+$redisOperatorAdoptionArguments.RedisOperatorTransitionFieldName = 'REDIS_OPERATOR_SECRET_VERSION_ID'
+$redisOperatorAdoptionArguments.RedisOperatorTransitionFixedSlotStateSha256 = $transitionTargetStateSha256
+$redisOperatorAdoptionArguments.RedisOperatorTransitionFixedSlotTransitionSha256 = $transitionRecordSha256
+$redisOperatorAdoptionArguments.RedisOperatorTransitionRedisStateSha256 = 'UNTRACKED'
+$redisOperatorAdoptionArguments.RedisOperatorTransitionRedisTransitionSha256 = 'NONE'
+$redisOperatorAdoptionArguments.RedisOperatorTransitionAuthWalletStateSha256 = $authWalletAdoptionStateSha256
+$redisOperatorAdoptionArguments.RedisOperatorTransitionAuthWalletTransitionSha256 = $authWalletAdoptionRecordSha256
+$redisOperatorAdoptionArguments.BillableAcknowledgement = $redisOperatorAdoptionBillableAcknowledgement
+
+$redisOperatorTransitionParameterMap = [ordered]@{}
+foreach ($entry in $updateApplicationParameterMap.GetEnumerator()) {
+    $redisOperatorTransitionParameterMap[$entry.Key] = [string] $entry.Value
+}
+$redisOperatorTransitionParameterMap.RedisOperatorSecretVersionId = $redisOperatorTargetVersionId
+$redisOperatorTransitionStackTags = [ordered]@{}
+foreach ($entry in $redisOperatorAdoptedStackTags.GetEnumerator()) {
+    $redisOperatorTransitionStackTags[$entry.Key] = [string] $entry.Value
+}
+$redisOperatorTransitionStackTags['credential-predecessor-sha256'] = $transitionRecordSha256
+$redisOperatorTransitionStackTags['credential-transition-sha256'] = $redisOperatorTransitionRecordSha256
+$redisOperatorTransitionStackTags['credential-state-sha256'] = $redisOperatorTransitionTargetCredentialStateSha256
+$redisOperatorTransitionStackTags['redis-operator-predecessor-sha256'] = $redisOperatorAdoptionRecordSha256
+$redisOperatorTransitionStackTags['redis-operator-transition-sha256'] = $redisOperatorTransitionRecordSha256
+$redisOperatorTransitionStackTags['redis-operator-state-sha256'] = $redisOperatorTransitionTargetStateSha256
+$redisOperatorTransitionCurrentParameterSha256 = Get-TextSha256 -Value (Get-CanonicalMapText -Map $updateApplicationParameterMap)
+$redisOperatorTransitionCurrentTagSha256 = Get-TextSha256 -Value (Get-CanonicalMapText -Map $redisOperatorAdoptedStackTags)
+$redisOperatorTransitionCurrentStackBindingText = "current-stack-id=$immutableStackId`ncurrent-parent-template-sha256=$applicationTemplateSha256`ncurrent-stack-parameters-sha256=$redisOperatorTransitionCurrentParameterSha256`ncurrent-stack-tags-sha256=$redisOperatorTransitionCurrentTagSha256`nupdate-intent=REDIS_OPERATOR_TRANSITION"
+$redisOperatorTransitionCurrentStackBindingSha256 = Get-TextSha256 -Value $redisOperatorTransitionCurrentStackBindingText
+$redisOperatorTransitionDeploymentBindingText = "record-sha256=$redisOperatorTransitionRecordSha256`ncurrent-operator-state-sha256=$redisOperatorAdoptionStateSha256`ntarget-operator-state-sha256=$redisOperatorTransitionTargetStateSha256`nredis-predecessor-transition-sha256=$redisOperatorAdoptionRecordSha256`ncurrent-credential-state-sha256=$transitionTargetStateSha256`ntarget-credential-state-sha256=$redisOperatorTransitionTargetCredentialStateSha256`ncredential-predecessor-transition-sha256=$transitionRecordSha256`nauth-wallet-state-sha256=$authWalletAdoptionStateSha256`nauth-wallet-transition-sha256=$authWalletAdoptionRecordSha256`nauthority-registry-sha256=$redisOperatorTransitionAuthorityRegistrySha256`ncurrent-stack-id=$immutableStackId`nworkload-stack-id=$workloadChildStackId`nsecret-arn=$redisOperatorSecretArn`nkms-key-arn=$redisOperatorKmsKeyArn`noperator-user-id=$redisOperatorUserId`nparent-template-sha256=$applicationTemplateSha256`nworkload-template-sha256=$workloadBoundariesTemplateSha256`nobservability-template-sha256=$observabilityTemplateSha256`nmode=transition`noperation=ROTATE_DISABLED_OPERATOR_CREDENTIAL`nfield=REDIS_OPERATOR_SECRET_VERSION_ID`ncurrent-stack-binding-sha256=$redisOperatorTransitionCurrentStackBindingSha256`nlive-binding-sha256=$redisOperatorLiveBindingSha256"
+$redisOperatorTransitionDeploymentBindingSha256 = Get-TextSha256 -Value $redisOperatorTransitionDeploymentBindingText
+$redisOperatorTransitionParameterSha256 = Get-TextSha256 -Value (Get-CanonicalMapText -Map $redisOperatorTransitionParameterMap)
+$redisOperatorTransitionTagSha256 = Get-TextSha256 -Value (Get-CanonicalMapText -Map $redisOperatorTransitionStackTags)
+$redisOperatorTransitionExpectedChangeSetDescription = "KAN-34 template-sha256=$applicationTemplateSha256 workload-template-sha256=$workloadBoundariesTemplateSha256 workload-binding-sha256=$artifactBindingSha256 observability-template-sha256=$observabilityTemplateSha256 observability-binding-sha256=$observabilityArtifactBindingSha256 parameters-sha256=$redisOperatorTransitionParameterSha256 tags-sha256=$redisOperatorTransitionTagSha256 control-record-sha256=$controlRecordSha256 acm-dns-record-sha256=$acmDnsRecordSha256 guardrail-policy=kan-229-v1 transition-binding-sha256=$redisOperatorTransitionDeploymentBindingSha256"
+$redisOperatorTransitionBillableAcknowledgement = "EXECUTE IMMUTABLE CHANGE SET $immutableChangeSetId FOR IMMUTABLE STACK $immutableStackId WITH PARAMETERS $redisOperatorTransitionParameterSha256 WORKLOAD TEMPLATE $workloadBoundariesTemplateSha256 WORKLOAD BINDING $artifactBindingSha256 OBSERVABILITY TEMPLATE $observabilityTemplateSha256 OBSERVABILITY BINDING $observabilityArtifactBindingSha256 CURRENT STACK STATE $redisOperatorTransitionCurrentStackBindingSha256 REDIS-OPERATOR TRANSITION $redisOperatorTransitionRecordSha256 FROM OPERATOR STATE $redisOperatorAdoptionStateSha256 TO OPERATOR STATE $redisOperatorTransitionTargetStateSha256 AND CREDENTIAL STATE $transitionTargetStateSha256 TO CREDENTIAL STATE $redisOperatorTransitionTargetCredentialStateSha256 USING AUTHORITY REGISTRY $redisOperatorTransitionAuthorityRegistrySha256 LIVE BINDING $redisOperatorLiveBindingSha256 BOUND BY $redisOperatorTransitionDeploymentBindingSha256 WITH TAGS $redisOperatorTransitionTagSha256 USING BILLING CONTROL $controlRecordSha256 AND ACM DNS CONTROL $acmDnsRecordSha256; I ACKNOWLEDGE BILLABLE AWS RESOURCES IN ACCOUNT 111122223333 REGION us-west-2 USING PROFILE kan34-test"
+$redisOperatorTransitionArguments = Copy-ArgumentMap -Map $redisOperatorAdoptionArguments
+$redisOperatorTransitionArguments.RedisOperatorSecretVersionId = $redisOperatorTargetVersionId
+$redisOperatorTransitionArguments.RedisOperatorTransitionRecordFile = $approvedRedisOperatorTransitionRecordPath
+$redisOperatorTransitionArguments.RedisOperatorTransitionMode = 'transition'
+$redisOperatorTransitionArguments.RedisOperatorTransitionOperation = 'ROTATE_DISABLED_OPERATOR_CREDENTIAL'
+$redisOperatorTransitionArguments.RedisOperatorTransitionRedisStateSha256 = $redisOperatorAdoptionStateSha256
+$redisOperatorTransitionArguments.RedisOperatorTransitionRedisTransitionSha256 = $redisOperatorAdoptionRecordSha256
+$redisOperatorTransitionArguments.BillableAcknowledgement = $redisOperatorTransitionBillableAcknowledgement
 $updateParameterSha256 = Get-TextSha256 -Value (Get-CanonicalMapText -Map $updateApplicationParameterMap)
 $updateTagSha256 = Get-TextSha256 -Value (Get-CanonicalMapText -Map $updateApplicationStackTags)
-$updateExpectedChangeSetDescription = "KAN-34 template-sha256=$applicationTemplateSha256 workload-template-sha256=$workloadBoundariesTemplateSha256 workload-binding-sha256=$artifactBindingSha256 observability-template-sha256=$observabilityTemplateSha256 observability-binding-sha256=$observabilityArtifactBindingSha256 parameters-sha256=$updateParameterSha256 tags-sha256=$updateTagSha256 control-record-sha256=$controlRecordSha256 acm-dns-record-sha256=$acmDnsRecordSha256 guardrail-policy=kan-229-v1 current-stack-binding-sha256=$currentStackBindingSha256 credential-transition-binding-sha256=$transitionDeploymentBindingSha256"
+$updateExpectedChangeSetDescription = "KAN-34 template-sha256=$applicationTemplateSha256 workload-template-sha256=$workloadBoundariesTemplateSha256 workload-binding-sha256=$artifactBindingSha256 observability-template-sha256=$observabilityTemplateSha256 observability-binding-sha256=$observabilityArtifactBindingSha256 parameters-sha256=$updateParameterSha256 tags-sha256=$updateTagSha256 control-record-sha256=$controlRecordSha256 acm-dns-record-sha256=$acmDnsRecordSha256 guardrail-policy=kan-229-v1 transition-binding-sha256=$transitionDeploymentBindingSha256"
 $updateBillableAcknowledgement = "EXECUTE IMMUTABLE CHANGE SET $immutableChangeSetId FOR IMMUTABLE STACK $immutableStackId WITH PARAMETERS $updateParameterSha256 WORKLOAD TEMPLATE $workloadBoundariesTemplateSha256 WORKLOAD BINDING $artifactBindingSha256 OBSERVABILITY TEMPLATE $observabilityTemplateSha256 OBSERVABILITY BINDING $observabilityArtifactBindingSha256 CURRENT STACK STATE $currentStackBindingSha256 FIXED-SLOT TRANSITION $transitionRecordSha256 FROM STATE $transitionCurrentStateSha256 TO STATE $transitionTargetStateSha256 BOUND BY $transitionDeploymentBindingSha256 WITH TAGS $updateTagSha256 USING BILLING CONTROL $controlRecordSha256 AND ACM DNS CONTROL $acmDnsRecordSha256; I ACKNOWLEDGE BILLABLE AWS RESOURCES IN ACCOUNT 111122223333 REGION us-west-2 USING PROFILE kan34-test"
 $updateArguments = Copy-ArgumentMap -Map $baseArguments
 $updateArguments.ChangeSetType = 'UPDATE'
@@ -1701,11 +2095,11 @@ $applicationUpdateParameterOverrides = @($updateParameterOverrides | Where-Objec
     'WorkerDesiredCount=1'
 )
 $applicationCurrentParameterSnapshotSha256 = Get-TextSha256 -Value (Get-CanonicalMapText -Map $updateApplicationParameterMap)
-$applicationCurrentTagSnapshotSha256 = Get-TextSha256 -Value (Get-CanonicalMapText -Map $authWalletAdoptedStackTags)
+$applicationCurrentTagSnapshotSha256 = Get-TextSha256 -Value (Get-CanonicalMapText -Map $redisOperatorAdoptedStackTags)
 $applicationCurrentStackBindingText = "current-stack-id=$immutableStackId`ncurrent-parent-template-sha256=$applicationTemplateSha256`ncurrent-stack-parameters-sha256=$applicationCurrentParameterSnapshotSha256`ncurrent-stack-tags-sha256=$applicationCurrentTagSnapshotSha256`nupdate-intent=APPLICATION"
 $applicationCurrentStackBindingSha256 = Get-TextSha256 -Value $applicationCurrentStackBindingText
 $applicationUpdateParameterSha256 = Get-TextSha256 -Value (Get-CanonicalMapText -Map $applicationUpdateParameterMap)
-$applicationUpdateTagSha256 = Get-TextSha256 -Value (Get-CanonicalMapText -Map $authWalletAdoptedStackTags)
+$applicationUpdateTagSha256 = Get-TextSha256 -Value (Get-CanonicalMapText -Map $redisOperatorAdoptedStackTags)
 $applicationUpdateExpectedChangeSetDescription = "KAN-34 template-sha256=$applicationTemplateSha256 workload-template-sha256=$workloadBoundariesTemplateSha256 workload-binding-sha256=$artifactBindingSha256 observability-template-sha256=$observabilityTemplateSha256 observability-binding-sha256=$observabilityArtifactBindingSha256 parameters-sha256=$applicationUpdateParameterSha256 tags-sha256=$applicationUpdateTagSha256 control-record-sha256=$controlRecordSha256 acm-dns-record-sha256=$acmDnsRecordSha256 guardrail-policy=kan-229-v1 current-stack-binding-sha256=$applicationCurrentStackBindingSha256"
 $applicationUpdateBillableAcknowledgement = "EXECUTE IMMUTABLE CHANGE SET $immutableChangeSetId FOR IMMUTABLE STACK $immutableStackId WITH PARAMETERS $applicationUpdateParameterSha256 WORKLOAD TEMPLATE $workloadBoundariesTemplateSha256 WORKLOAD BINDING $artifactBindingSha256 OBSERVABILITY TEMPLATE $observabilityTemplateSha256 OBSERVABILITY BINDING $observabilityArtifactBindingSha256 CURRENT STACK STATE $applicationCurrentStackBindingSha256 USING BILLING CONTROL $controlRecordSha256 AND ACM DNS CONTROL $acmDnsRecordSha256; I ACKNOWLEDGE BILLABLE AWS RESOURCES IN ACCOUNT 111122223333 REGION us-west-2 USING PROFILE kan34-test"
 $applicationUpdateArguments = Copy-ArgumentMap -Map $updateArguments
@@ -1768,7 +2162,7 @@ foreach ($entry in $updateApplicationParameterMap.GetEnumerator()) {
 }
 $rotationApplicationParameterMap.ApiDatabaseSlotBVersionId = [string] $rotatedFixedSlotVersions.ApiDatabaseSlotBVersionId
 $rotationApplicationStackTags = [ordered]@{}
-foreach ($entry in $authWalletAdoptedStackTags.GetEnumerator()) {
+foreach ($entry in $redisOperatorAdoptedStackTags.GetEnumerator()) {
     $rotationApplicationStackTags[$entry.Key] = [string] $entry.Value
 }
 $rotationApplicationStackTags['credential-predecessor-sha256'] = $transitionRecordSha256
@@ -1776,7 +2170,7 @@ $rotationApplicationStackTags['credential-transition-sha256'] = $rotationRecordS
 $rotationApplicationStackTags['credential-state-sha256'] = $rotationTargetStateSha256
 $rotationParameterSha256 = Get-TextSha256 -Value (Get-CanonicalMapText -Map $rotationApplicationParameterMap)
 $rotationTagSha256 = Get-TextSha256 -Value (Get-CanonicalMapText -Map $rotationApplicationStackTags)
-$rotationExpectedChangeSetDescription = "KAN-34 template-sha256=$applicationTemplateSha256 workload-template-sha256=$workloadBoundariesTemplateSha256 workload-binding-sha256=$artifactBindingSha256 observability-template-sha256=$observabilityTemplateSha256 observability-binding-sha256=$observabilityArtifactBindingSha256 parameters-sha256=$rotationParameterSha256 tags-sha256=$rotationTagSha256 control-record-sha256=$controlRecordSha256 acm-dns-record-sha256=$acmDnsRecordSha256 guardrail-policy=kan-229-v1 current-stack-binding-sha256=$rotationCurrentStackBindingSha256 credential-transition-binding-sha256=$rotationDeploymentBindingSha256"
+$rotationExpectedChangeSetDescription = "KAN-34 template-sha256=$applicationTemplateSha256 workload-template-sha256=$workloadBoundariesTemplateSha256 workload-binding-sha256=$artifactBindingSha256 observability-template-sha256=$observabilityTemplateSha256 observability-binding-sha256=$observabilityArtifactBindingSha256 parameters-sha256=$rotationParameterSha256 tags-sha256=$rotationTagSha256 control-record-sha256=$controlRecordSha256 acm-dns-record-sha256=$acmDnsRecordSha256 guardrail-policy=kan-229-v1 transition-binding-sha256=$rotationDeploymentBindingSha256"
 $rotationArguments = Copy-ArgumentMap -Map $updateArguments
 $rotationArguments.FixedSlotCredentialTransitionRecordFile = $approvedRotationRecordPath
 $rotationArguments.FixedSlotCredentialTransitionMode = 'transition'
@@ -1788,8 +2182,9 @@ $authWalletAdoptionCurrentStackBindingText = "current-stack-id=$immutableStackId
 $authWalletAdoptionCurrentStackBindingSha256 = Get-TextSha256 -Value $authWalletAdoptionCurrentStackBindingText
 $authWalletAdoptionDeploymentBindingText = "record-sha256=$authWalletAdoptionRecordSha256`ncurrent-state-sha256=$authWalletAdoptionStateSha256`ntarget-state-sha256=$authWalletAdoptionStateSha256`npredecessor-transition-sha256=NONE`nauthority-registry-sha256=$authWalletTransitionAuthorityRegistrySha256`ncurrent-stack-id=$immutableStackId`nparent-template-sha256=$applicationTemplateSha256`nworkload-template-sha256=$workloadBoundariesTemplateSha256`nobservability-template-sha256=$observabilityTemplateSha256`nmode=adopt`noperation=ADOPT_EXISTING_BINDING`nfield=ALL_SEVEN_FIELDS`ncurrent-stack-binding-sha256=$authWalletAdoptionCurrentStackBindingSha256"
 $authWalletAdoptionDeploymentBindingSha256 = Get-TextSha256 -Value $authWalletAdoptionDeploymentBindingText
-$authWalletAdoptionExpectedChangeSetDescription = "KAN-34 template-sha256=$applicationTemplateSha256 workload-template-sha256=$workloadBoundariesTemplateSha256 workload-binding-sha256=$artifactBindingSha256 observability-template-sha256=$observabilityTemplateSha256 observability-binding-sha256=$observabilityArtifactBindingSha256 parameters-sha256=$updateParameterSha256 tags-sha256=$applicationUpdateTagSha256 control-record-sha256=$controlRecordSha256 acm-dns-record-sha256=$acmDnsRecordSha256 guardrail-policy=kan-229-v1 current-stack-binding-sha256=$authWalletAdoptionCurrentStackBindingSha256 auth-wallet-transition-binding-sha256=$authWalletAdoptionDeploymentBindingSha256 auth-wallet-authority-registry-sha256=$authWalletTransitionAuthorityRegistrySha256"
-$authWalletAdoptionBillableAcknowledgement = "EXECUTE IMMUTABLE CHANGE SET $immutableChangeSetId FOR IMMUTABLE STACK $immutableStackId WITH PARAMETERS $updateParameterSha256 WORKLOAD TEMPLATE $workloadBoundariesTemplateSha256 WORKLOAD BINDING $artifactBindingSha256 OBSERVABILITY TEMPLATE $observabilityTemplateSha256 OBSERVABILITY BINDING $observabilityArtifactBindingSha256 CURRENT STACK STATE $authWalletAdoptionCurrentStackBindingSha256 AUTH-WALLET TRANSITION $authWalletAdoptionRecordSha256 FROM STATE $authWalletAdoptionStateSha256 TO STATE $authWalletAdoptionStateSha256 USING AUTHORITY REGISTRY $authWalletTransitionAuthorityRegistrySha256 BOUND BY $authWalletAdoptionDeploymentBindingSha256 WITH TAGS $applicationUpdateTagSha256 USING BILLING CONTROL $controlRecordSha256 AND ACM DNS CONTROL $acmDnsRecordSha256; I ACKNOWLEDGE BILLABLE AWS RESOURCES IN ACCOUNT 111122223333 REGION us-west-2 USING PROFILE kan34-test"
+$authWalletAdoptionTagSha256 = Get-TextSha256 -Value (Get-CanonicalMapText -Map $authWalletAdoptedStackTags)
+$authWalletAdoptionExpectedChangeSetDescription = "KAN-34 template-sha256=$applicationTemplateSha256 workload-template-sha256=$workloadBoundariesTemplateSha256 workload-binding-sha256=$artifactBindingSha256 observability-template-sha256=$observabilityTemplateSha256 observability-binding-sha256=$observabilityArtifactBindingSha256 parameters-sha256=$updateParameterSha256 tags-sha256=$authWalletAdoptionTagSha256 control-record-sha256=$controlRecordSha256 acm-dns-record-sha256=$acmDnsRecordSha256 guardrail-policy=kan-229-v1 transition-binding-sha256=$authWalletAdoptionDeploymentBindingSha256"
+$authWalletAdoptionBillableAcknowledgement = "EXECUTE IMMUTABLE CHANGE SET $immutableChangeSetId FOR IMMUTABLE STACK $immutableStackId WITH PARAMETERS $updateParameterSha256 WORKLOAD TEMPLATE $workloadBoundariesTemplateSha256 WORKLOAD BINDING $artifactBindingSha256 OBSERVABILITY TEMPLATE $observabilityTemplateSha256 OBSERVABILITY BINDING $observabilityArtifactBindingSha256 CURRENT STACK STATE $authWalletAdoptionCurrentStackBindingSha256 AUTH-WALLET TRANSITION $authWalletAdoptionRecordSha256 FROM STATE $authWalletAdoptionStateSha256 TO STATE $authWalletAdoptionStateSha256 USING AUTHORITY REGISTRY $authWalletTransitionAuthorityRegistrySha256 BOUND BY $authWalletAdoptionDeploymentBindingSha256 WITH TAGS $authWalletAdoptionTagSha256 USING BILLING CONTROL $controlRecordSha256 AND ACM DNS CONTROL $acmDnsRecordSha256; I ACKNOWLEDGE BILLABLE AWS RESOURCES IN ACCOUNT 111122223333 REGION us-west-2 USING PROFILE kan34-test"
 $authWalletAdoptionArguments = Copy-ArgumentMap -Map $updateArguments
 $authWalletAdoptionArguments.UpdateIntent = 'AUTH_WALLET_TRANSITION'
 [void] $authWalletAdoptionArguments.Remove('FixedSlotCredentialTransitionRecordFile')
@@ -1810,7 +2205,7 @@ foreach ($entry in $updateApplicationParameterMap.GetEnumerator()) {
 }
 $authWalletTransitionParameterMap.AuthWalletKeysSecretVersionId = $authWalletTargetVersionId
 $authWalletTransitionStackTags = [ordered]@{}
-foreach ($entry in $authWalletAdoptedStackTags.GetEnumerator()) {
+foreach ($entry in $redisOperatorAdoptedStackTags.GetEnumerator()) {
     $authWalletTransitionStackTags[$entry.Key] = [string] $entry.Value
 }
 $authWalletTransitionStackTags['auth-wallet-predecessor-sha256'] = $authWalletAdoptionRecordSha256
@@ -1822,7 +2217,7 @@ $authWalletTransitionDeploymentBindingText = "record-sha256=$authWalletTransitio
 $authWalletTransitionDeploymentBindingSha256 = Get-TextSha256 -Value $authWalletTransitionDeploymentBindingText
 $authWalletTransitionParameterSha256 = Get-TextSha256 -Value (Get-CanonicalMapText -Map $authWalletTransitionParameterMap)
 $authWalletTransitionTagSha256 = Get-TextSha256 -Value (Get-CanonicalMapText -Map $authWalletTransitionStackTags)
-$authWalletTransitionExpectedChangeSetDescription = "KAN-34 template-sha256=$applicationTemplateSha256 workload-template-sha256=$workloadBoundariesTemplateSha256 workload-binding-sha256=$artifactBindingSha256 observability-template-sha256=$observabilityTemplateSha256 observability-binding-sha256=$observabilityArtifactBindingSha256 parameters-sha256=$authWalletTransitionParameterSha256 tags-sha256=$authWalletTransitionTagSha256 control-record-sha256=$controlRecordSha256 acm-dns-record-sha256=$acmDnsRecordSha256 guardrail-policy=kan-229-v1 current-stack-binding-sha256=$authWalletTransitionCurrentStackBindingSha256 auth-wallet-transition-binding-sha256=$authWalletTransitionDeploymentBindingSha256 auth-wallet-authority-registry-sha256=$authWalletTransitionAuthorityRegistrySha256"
+$authWalletTransitionExpectedChangeSetDescription = "KAN-34 template-sha256=$applicationTemplateSha256 workload-template-sha256=$workloadBoundariesTemplateSha256 workload-binding-sha256=$artifactBindingSha256 observability-template-sha256=$observabilityTemplateSha256 observability-binding-sha256=$observabilityArtifactBindingSha256 parameters-sha256=$authWalletTransitionParameterSha256 tags-sha256=$authWalletTransitionTagSha256 control-record-sha256=$controlRecordSha256 acm-dns-record-sha256=$acmDnsRecordSha256 guardrail-policy=kan-229-v1 transition-binding-sha256=$authWalletTransitionDeploymentBindingSha256"
 $authWalletTransitionBillableAcknowledgement = "EXECUTE IMMUTABLE CHANGE SET $immutableChangeSetId FOR IMMUTABLE STACK $immutableStackId WITH PARAMETERS $authWalletTransitionParameterSha256 WORKLOAD TEMPLATE $workloadBoundariesTemplateSha256 WORKLOAD BINDING $artifactBindingSha256 OBSERVABILITY TEMPLATE $observabilityTemplateSha256 OBSERVABILITY BINDING $observabilityArtifactBindingSha256 CURRENT STACK STATE $authWalletTransitionCurrentStackBindingSha256 AUTH-WALLET TRANSITION $authWalletTransitionRecordSha256 FROM STATE $authWalletAdoptionStateSha256 TO STATE $authWalletTransitionTargetStateSha256 USING AUTHORITY REGISTRY $authWalletTransitionAuthorityRegistrySha256 BOUND BY $authWalletTransitionDeploymentBindingSha256 WITH TAGS $authWalletTransitionTagSha256 USING BILLING CONTROL $controlRecordSha256 AND ACM DNS CONTROL $acmDnsRecordSha256; I ACKNOWLEDGE BILLABLE AWS RESOURCES IN ACCOUNT 111122223333 REGION us-west-2 USING PROFILE kan34-test"
 $authWalletTransitionArguments = Copy-ArgumentMap -Map $authWalletAdoptionArguments
 $authWalletTransitionArguments.AuthWalletKeysSecretVersionId = $authWalletTargetVersionId
@@ -1957,8 +2352,24 @@ $expectedRedisOperatorFunctionalChange = [ordered]@{
         )
     }
 }
+$authWalletPreRedisStackTags = $authWalletAdoptedStackTags
+$authWalletAdoptedStackTags = $redisOperatorAdoptedStackTags
 Write-ApplicationStackResponse -ParameterMap $applicationParameterMap -TagMap $applicationStackTags
 Write-TemplateResponse -Path $applicationTemplateResponsePath -TemplateBody $applicationTemplateBody
+Write-RedisOperatorLiveFixture -CurrentVersionId $redisOperatorSecretVersionId
+Set-FakeRedisOperatorValidationFixture `
+    -CanonicalSha256 $redisOperatorAdoptionRecordSha256 `
+    -CurrentStateSha256 $redisOperatorAdoptionStateSha256 `
+    -TargetStateSha256 $redisOperatorAdoptionStateSha256 `
+    -CurrentCredentialStateSha256 $transitionTargetStateSha256 `
+    -TargetCredentialStateSha256 $transitionTargetStateSha256 `
+    -PredecessorTransitionSha256 'NONE' `
+    -CredentialPredecessorTransitionSha256 $transitionRecordSha256 `
+    -AuthWalletStateSha256 $authWalletAdoptionStateSha256 `
+    -AuthWalletTransitionSha256 $authWalletAdoptionRecordSha256 `
+    -AuthorityRegistrySha256 $redisOperatorTransitionAuthorityRegistrySha256 `
+    -CurrentDeploymentBindings (New-RedisOperatorDeploymentBindingMap -ParameterMap $updateApplicationParameterMap) `
+    -TargetDeploymentBindings (New-RedisOperatorDeploymentBindingMap -ParameterMap $updateApplicationParameterMap)
 
 $transitionReviewModule = New-Module -ArgumentList $guardPath -ScriptBlock {
     param([string] $GuardUnderTest)
@@ -1980,6 +2391,7 @@ function Invoke-RedisChangeReview {
         ChangesJson = ConvertTo-Json -InputObject @($Changes) -Depth 20 -Compress
         Mode = $Mode
         RootChangeSetId = $immutableChangeSetId
+        WorkloadStackId = $workloadChildStackId
         FakeAwsPath = $fakeAwsCommandPath
     }
     try {
@@ -1996,7 +2408,8 @@ function Invoke-RedisChangeReview {
                     -RootChangeSetId ([string] $Payload.RootChangeSetId) `
                     -Partition 'aws' `
                     -ProfileName 'kan34-test-profile' `
-                    -ReviewIntent 'REDIS_OPERATOR_TRANSITION'
+                    -ReviewIntent 'REDIS_OPERATOR_TRANSITION' `
+                    -ExpectedWorkloadStackId ([string] $Payload.WorkloadStackId)
             } $payload 2>&1)
         return [pscustomobject]@{ Succeeded = $true; Output = ($output -join "`n") }
     }
@@ -2041,7 +2454,68 @@ function Invoke-RedisWorkloadChildReview {
     }
 }
 
+function Set-RedisOperatorTransitionDeployFixture {
+    Set-FakeRedisOperatorValidationFixture `
+        -CanonicalSha256 $redisOperatorTransitionRecordSha256 `
+        -CurrentStateSha256 $redisOperatorAdoptionStateSha256 `
+        -TargetStateSha256 $redisOperatorTransitionTargetStateSha256 `
+        -CurrentCredentialStateSha256 $transitionTargetStateSha256 `
+        -TargetCredentialStateSha256 $redisOperatorTransitionTargetCredentialStateSha256 `
+        -PredecessorTransitionSha256 $redisOperatorAdoptionRecordSha256 `
+        -CredentialPredecessorTransitionSha256 $transitionRecordSha256 `
+        -AuthWalletStateSha256 $authWalletAdoptionStateSha256 `
+        -AuthWalletTransitionSha256 $authWalletAdoptionRecordSha256 `
+        -AuthorityRegistrySha256 $redisOperatorTransitionAuthorityRegistrySha256 `
+        -CurrentDeploymentBindings (New-RedisOperatorDeploymentBindingMap -ParameterMap $updateApplicationParameterMap) `
+        -TargetDeploymentBindings (New-RedisOperatorDeploymentBindingMap -ParameterMap $redisOperatorTransitionParameterMap)
+    Write-ApplicationStackResponse -ParameterMap $updateApplicationParameterMap -TagMap $redisOperatorAdoptedStackTags
+    Write-RedisOperatorLiveFixture -CurrentVersionId $redisOperatorSecretVersionId
+    Write-GuardrailStackResponse -ConfigurationSha256 $controlConfigurationSha256
+    Write-TemplateResponse -Path $guardrailTemplateResponsePath -TemplateBody $guardrailTemplateBody
+    Write-TemplateResponse -Path $applicationTemplateResponsePath -TemplateBody $applicationTemplateBody
+    $rootLink = New-NestedChangeSetLink `
+        -LogicalResourceId 'WorkloadBoundaries' `
+        -StackId $workloadChildStackId `
+        -ChangeSetId $workloadChildChangeSetId `
+        -DetailKind 'Automatic'
+    Write-NestedChangeSetResponse `
+        -Path $workloadChildChangeSetResponsePath `
+        -StackName 'crypto-lending-workload-test' `
+        -StackId $workloadChildStackId `
+        -ChangeSetName 'workload-child-change' `
+        -ChangeSetId $workloadChildChangeSetId `
+        -ParentChangeSetId $immutableChangeSetId `
+        -RootChangeSetId $immutableChangeSetId `
+        -Changes @((Copy-JsonValue -Value $expectedRedisOperatorFunctionalChange))
+    Set-FakeChangeSetResponseMap -ResponseMap ([ordered]@{
+            $workloadChildChangeSetId = $workloadChildChangeSetResponsePath
+        })
+    Write-ChangeSetResponse `
+        -ParameterMap $redisOperatorTransitionParameterMap `
+        -TagMap $redisOperatorTransitionStackTags `
+        -Description $redisOperatorTransitionExpectedChangeSetDescription `
+        -ChangeSetType 'UPDATE' `
+        -Changes @($rootLink)
+    $env:FAKE_AWS_APPLICATION_STACK_RESPONSE_AFTER_FIRST = ''
+    $env:FAKE_AWS_APPLICATION_STACK_RESPONSE_AFTER_SECOND = ''
+}
+
 try {
+    Invoke-FocusedTest -Name 'all exact change-set descriptions stay within the CloudFormation limit' -Body {
+        foreach ($descriptionCase in @(
+                [pscustomobject]@{ Name = 'CREATE'; Value = $expectedChangeSetDescription },
+                [pscustomobject]@{ Name = 'APPLICATION'; Value = $applicationUpdateExpectedChangeSetDescription },
+                [pscustomobject]@{ Name = 'fixed-slot adoption'; Value = $updateExpectedChangeSetDescription },
+                [pscustomobject]@{ Name = 'fixed-slot transition'; Value = $rotationExpectedChangeSetDescription },
+                [pscustomobject]@{ Name = 'auth/wallet adoption'; Value = $authWalletAdoptionExpectedChangeSetDescription },
+                [pscustomobject]@{ Name = 'auth/wallet transition'; Value = $authWalletTransitionExpectedChangeSetDescription },
+                [pscustomobject]@{ Name = 'Redis operator adoption'; Value = $redisOperatorAdoptionExpectedChangeSetDescription },
+                [pscustomobject]@{ Name = 'Redis operator transition'; Value = $redisOperatorTransitionExpectedChangeSetDescription }
+            )) {
+            Assert-Condition ($descriptionCase.Value.Length -le 1024) "$($descriptionCase.Name) description exceeds 1,024 characters."
+        }
+    }
+
     Invoke-FocusedTest -Name 'default LocalValidate makes zero AWS calls' -Body {
         Clear-AwsMarker
         $result = Invoke-Guard -Arguments @{}
@@ -2432,6 +2906,12 @@ try {
                     Arguments = $authWalletAdoptionArguments
                     Add = @{ FixedSlotCredentialTransitionRecordFile = $approvedTransitionRecordPath }
                     Error = 'must not supply fixed-slot or Redis operator transition inputs'
+                },
+                [pscustomobject]@{
+                    Name = 'REDIS_OPERATOR_TRANSITION auth/wallet evidence'
+                    Arguments = $redisOperatorAdoptionArguments
+                    Add = @{ AuthWalletTransitionRecordFile = $approvedAuthWalletAdoptionRecordPath }
+                    Error = 'must not supply fixed-slot or auth/wallet transition inputs'
                 }
             )) {
             Clear-AwsMarker
@@ -2478,8 +2958,7 @@ try {
         $authMarker = Get-AwsMarkerText
         $authCreateLine = @($authMarker -split "`r?`n" | Where-Object { $_ -match 'cloudformation create-change-set' }) | Select-Object -First 1
         Assert-Condition $authResult.Succeeded "Auth/wallet adoption after fixed-slot adoption failed: $($authResult.Output)"
-        Assert-Condition ($authCreateLine -match ('auth-wallet-transition-binding-sha256=' + $authWalletAdoptionDeploymentBindingSha256)) 'Auth/wallet adoption description omitted its exact deployment binding.'
-        Assert-Condition ($authCreateLine -match ('auth-wallet-authority-registry-sha256=' + $authWalletTransitionAuthorityRegistrySha256)) 'Auth/wallet adoption description omitted the authority registry pin.'
+        Assert-Condition ($authCreateLine -match ('transition-binding-sha256=' + $authWalletAdoptionDeploymentBindingSha256)) 'Auth/wallet adoption description omitted its exact aggregate deployment binding.'
         foreach ($fixedTag in @('credential-predecessor-sha256', 'credential-transition-sha256', 'credential-state-sha256')) {
             Assert-Condition ($authCreateLine -match ("Key=$fixedTag,Value=" + [regex]::Escape([string] $updateApplicationStackTags[$fixedTag]))) "Auth/wallet adoption did not preserve fixed-slot chain tag $fixedTag."
         }
@@ -2487,6 +2966,37 @@ try {
             Assert-Condition ($authCreateLine -match ("Key=$authTag,Value=" + [regex]::Escape([string] $authWalletAdoptedStackTags[$authTag]))) "Auth/wallet adoption omitted exact chain tag $authTag."
         }
         Assert-Condition (@(Get-Content -LiteralPath $authWalletValidatorMarkerPath).Count -eq 2) 'Auth/wallet Plan did not perform two stable offline validations.'
+
+        Set-FakeRedisOperatorValidationFixture `
+            -CanonicalSha256 $redisOperatorAdoptionRecordSha256 `
+            -CurrentStateSha256 $redisOperatorAdoptionStateSha256 `
+            -TargetStateSha256 $redisOperatorAdoptionStateSha256 `
+            -CurrentCredentialStateSha256 $transitionTargetStateSha256 `
+            -TargetCredentialStateSha256 $transitionTargetStateSha256 `
+            -PredecessorTransitionSha256 'NONE' `
+            -CredentialPredecessorTransitionSha256 $transitionRecordSha256 `
+            -AuthWalletStateSha256 $authWalletAdoptionStateSha256 `
+            -AuthWalletTransitionSha256 $authWalletAdoptionRecordSha256 `
+            -AuthorityRegistrySha256 $redisOperatorTransitionAuthorityRegistrySha256 `
+            -CurrentDeploymentBindings (New-RedisOperatorDeploymentBindingMap -ParameterMap $updateApplicationParameterMap) `
+            -TargetDeploymentBindings (New-RedisOperatorDeploymentBindingMap -ParameterMap $updateApplicationParameterMap)
+        Write-ApplicationStackResponse -ParameterMap $updateApplicationParameterMap -TagMap $authWalletPreRedisStackTags
+        Write-RedisOperatorLiveFixture -CurrentVersionId $redisOperatorSecretVersionId
+        Clear-AwsMarker
+        $redisArguments = Copy-ArgumentMap -Map $redisOperatorAdoptionArguments
+        $redisArguments.Action = 'Plan'
+        $redisResult = Invoke-Guard -Arguments $redisArguments
+        $redisMarker = Get-AwsMarkerText
+        $redisCreateLine = @($redisMarker -split "`r?`n" | Where-Object { $_ -match 'cloudformation create-change-set' }) | Select-Object -First 1
+        Assert-Condition $redisResult.Succeeded "Redis operator adoption after auth/wallet adoption failed: $($redisResult.Output)"
+        Assert-Condition ($redisCreateLine -match ('transition-binding-sha256=' + $redisOperatorAdoptionDeploymentBindingSha256)) 'Redis operator adoption description omitted its aggregate deployment binding.'
+        foreach ($credentialTag in @('credential-predecessor-sha256', 'credential-transition-sha256', 'credential-state-sha256')) {
+            Assert-Condition ($redisCreateLine -match ("Key=$credentialTag,Value=" + [regex]::Escape([string] $authWalletAdoptedStackTags[$credentialTag]))) "Redis adoption changed composite credential tag $credentialTag."
+        }
+        foreach ($redisTag in @('redis-operator-predecessor-sha256', 'redis-operator-transition-sha256', 'redis-operator-state-sha256')) {
+            Assert-Condition ($redisCreateLine -match ("Key=$redisTag,Value=" + [regex]::Escape([string] $redisOperatorAdoptedStackTags[$redisTag]))) "Redis adoption omitted exact chain tag $redisTag."
+        }
+        Assert-Condition (@(Get-Content -LiteralPath $redisOperatorValidatorMarkerPath).Count -eq 2) 'Redis operator Plan did not perform two stable offline validations.'
     }
 
     Invoke-FocusedTest -Name 'auth wallet transition Plan changes only the signed outer VersionId and chain head' -Body {
@@ -2510,7 +3020,7 @@ try {
         $createLine = @($marker -split "`r?`n" | Where-Object { $_ -match 'cloudformation create-change-set' }) | Select-Object -First 1
         Assert-Condition $result.Succeeded "Exact auth/wallet transition Plan failed: $($result.Output)"
         Assert-Condition ($createLine -match [regex]::Escape("ParameterKey=AuthWalletKeysSecretVersionId,ParameterValue=$authWalletTargetVersionId")) 'Auth/wallet transition omitted the signed target outer VersionId.'
-        Assert-Condition ($createLine -match ('auth-wallet-transition-binding-sha256=' + $authWalletTransitionDeploymentBindingSha256)) 'Auth/wallet transition description omitted its exact deployment binding.'
+        Assert-Condition ($createLine -match ('transition-binding-sha256=' + $authWalletTransitionDeploymentBindingSha256)) 'Auth/wallet transition description omitted its exact aggregate deployment binding.'
         foreach ($entry in $pinnedCredentialVersions.GetEnumerator()) {
             Assert-Condition ($createLine -match ("ParameterKey=$($entry.Key),ParameterValue=" + [regex]::Escape([string] $entry.Value))) "Auth/wallet transition did not preserve fixed-slot pin $($entry.Key)."
         }
@@ -2520,6 +3030,48 @@ try {
         Assert-Condition ($createLine -match ('Key=auth-wallet-predecessor-sha256,Value=' + $authWalletAdoptionRecordSha256)) 'Auth/wallet transition did not extend the exact prior chain head.'
         Assert-Condition ($createLine -match ('Key=auth-wallet-transition-sha256,Value=' + $authWalletTransitionRecordSha256)) 'Auth/wallet transition did not bind its signed record digest.'
         Assert-Condition ($createLine -match ('Key=auth-wallet-state-sha256,Value=' + $authWalletTransitionTargetStateSha256)) 'Auth/wallet transition did not bind its signed target-state digest.'
+    }
+
+    Invoke-FocusedTest -Name 'Redis operator transition Plan advances only its VersionId and two signed chains' -Body {
+        Set-FakeRedisOperatorValidationFixture `
+            -CanonicalSha256 $redisOperatorTransitionRecordSha256 `
+            -CurrentStateSha256 $redisOperatorAdoptionStateSha256 `
+            -TargetStateSha256 $redisOperatorTransitionTargetStateSha256 `
+            -CurrentCredentialStateSha256 $transitionTargetStateSha256 `
+            -TargetCredentialStateSha256 $redisOperatorTransitionTargetCredentialStateSha256 `
+            -PredecessorTransitionSha256 $redisOperatorAdoptionRecordSha256 `
+            -CredentialPredecessorTransitionSha256 $transitionRecordSha256 `
+            -AuthWalletStateSha256 $authWalletAdoptionStateSha256 `
+            -AuthWalletTransitionSha256 $authWalletAdoptionRecordSha256 `
+            -AuthorityRegistrySha256 $redisOperatorTransitionAuthorityRegistrySha256 `
+            -CurrentDeploymentBindings (New-RedisOperatorDeploymentBindingMap -ParameterMap $updateApplicationParameterMap) `
+            -TargetDeploymentBindings (New-RedisOperatorDeploymentBindingMap -ParameterMap $redisOperatorTransitionParameterMap)
+        Write-ApplicationStackResponse -ParameterMap $updateApplicationParameterMap -TagMap $redisOperatorAdoptedStackTags
+        Write-RedisOperatorLiveFixture -CurrentVersionId $redisOperatorSecretVersionId
+        Write-GuardrailStackResponse -ConfigurationSha256 $controlConfigurationSha256
+        Write-TemplateResponse -Path $guardrailTemplateResponsePath -TemplateBody $guardrailTemplateBody
+        Write-TemplateResponse -Path $applicationTemplateResponsePath -TemplateBody $applicationTemplateBody
+        Clear-AwsMarker
+        $arguments = Copy-ArgumentMap -Map $redisOperatorTransitionArguments
+        $arguments.Action = 'Plan'
+        $result = Invoke-Guard -Arguments $arguments
+        $marker = Get-AwsMarkerText
+        $createLine = @($marker -split "`r?`n" | Where-Object { $_ -match 'cloudformation create-change-set' }) | Select-Object -First 1
+        Assert-Condition $result.Succeeded "Exact Redis operator transition Plan failed: $($result.Output)"
+        Assert-Condition ($createLine -match [regex]::Escape("ParameterKey=RedisOperatorSecretVersionId,ParameterValue=$redisOperatorTargetVersionId")) 'Redis operator transition omitted the signed target VersionId.'
+        Assert-Condition ($createLine -match ('transition-binding-sha256=' + $redisOperatorTransitionDeploymentBindingSha256)) 'Redis operator transition description omitted its aggregate deployment binding.'
+        Assert-Condition ($createLine -match ('Key=credential-predecessor-sha256,Value=' + $transitionRecordSha256)) 'Redis operator transition did not chain from the prior composite credential head.'
+        Assert-Condition ($createLine -match ('Key=credential-transition-sha256,Value=' + $redisOperatorTransitionRecordSha256)) 'Redis operator transition did not advance the composite credential head to its record.'
+        Assert-Condition ($createLine -match ('Key=credential-state-sha256,Value=' + $redisOperatorTransitionTargetCredentialStateSha256)) 'Redis operator transition did not advance the composite credential state.'
+        Assert-Condition ($createLine -match ('Key=redis-operator-predecessor-sha256,Value=' + $redisOperatorAdoptionRecordSha256)) 'Redis operator transition did not chain from the prior Redis head.'
+        Assert-Condition ($createLine -match ('Key=redis-operator-transition-sha256,Value=' + $redisOperatorTransitionRecordSha256)) 'Redis operator transition did not bind its signed record.'
+        Assert-Condition ($createLine -match ('Key=redis-operator-state-sha256,Value=' + $redisOperatorTransitionTargetStateSha256)) 'Redis operator transition did not bind its target projected state.'
+        foreach ($authTag in @('auth-wallet-predecessor-sha256', 'auth-wallet-transition-sha256', 'auth-wallet-state-sha256')) {
+            Assert-Condition ($createLine -match ("Key=$authTag,Value=" + [regex]::Escape([string] $redisOperatorAdoptedStackTags[$authTag]))) "Redis transition did not preserve auth/wallet tag $authTag."
+        }
+        Assert-Condition (@(Get-Content -LiteralPath $redisOperatorValidatorMarkerPath).Count -eq 2) 'Redis operator Plan did not perform two stable offline validations.'
+        Assert-Condition ($marker -match 'cloudformation describe-stack-resource --stack-name .* --logical-resource-id WorkloadBoundaries') 'Redis operator Plan did not bind the root WorkloadBoundaries child.'
+        Assert-Condition ($marker -match 'cloudformation describe-stack-resource --stack-name .* --logical-resource-id RedisOperatorUser') 'Redis operator Plan did not bind the live operator user.'
     }
 
     Invoke-FocusedTest -Name 'auth wallet transition freezes unrelated parameters base tags and parent template' -Body {
@@ -2569,6 +3121,48 @@ try {
         Assert-Condition ($templateResult.Output -match 'cannot include a parent-template change') 'Auth/wallet parent-template freeze rejection was not explicit.'
         Assert-Condition ((Get-AwsMarkerText) -notmatch 's3api get-object|create-change-set') 'Auth/wallet parent-template change reached artifact reads or planning.'
         Write-TemplateResponse -Path $applicationTemplateResponsePath -TemplateBody $applicationTemplateBody
+    }
+
+    Invoke-FocusedTest -Name 'Redis operator transition freezes unrelated parameters and base tags' -Body {
+        Set-FakeRedisOperatorValidationFixture `
+            -CanonicalSha256 $redisOperatorTransitionRecordSha256 `
+            -CurrentStateSha256 $redisOperatorAdoptionStateSha256 `
+            -TargetStateSha256 $redisOperatorTransitionTargetStateSha256 `
+            -CurrentCredentialStateSha256 $transitionTargetStateSha256 `
+            -TargetCredentialStateSha256 $redisOperatorTransitionTargetCredentialStateSha256 `
+            -PredecessorTransitionSha256 $redisOperatorAdoptionRecordSha256 `
+            -CredentialPredecessorTransitionSha256 $transitionRecordSha256 `
+            -AuthWalletStateSha256 $authWalletAdoptionStateSha256 `
+            -AuthWalletTransitionSha256 $authWalletAdoptionRecordSha256 `
+            -AuthorityRegistrySha256 $redisOperatorTransitionAuthorityRegistrySha256 `
+            -CurrentDeploymentBindings (New-RedisOperatorDeploymentBindingMap -ParameterMap $updateApplicationParameterMap) `
+            -TargetDeploymentBindings (New-RedisOperatorDeploymentBindingMap -ParameterMap $redisOperatorTransitionParameterMap)
+        Write-RedisOperatorLiveFixture -CurrentVersionId $redisOperatorSecretVersionId
+        Write-TemplateResponse -Path $applicationTemplateResponsePath -TemplateBody $applicationTemplateBody
+
+        Write-ApplicationStackResponse -ParameterMap $updateApplicationParameterMap -TagMap $redisOperatorAdoptedStackTags
+        Clear-AwsMarker
+        $parameterArguments = Copy-ArgumentMap -Map $redisOperatorTransitionArguments
+        $parameterArguments.Action = 'Plan'
+        $parameterArguments.ParameterOverride = @($updateParameterOverrides) + @('LogRetentionDays=30')
+        $parameterResult = Invoke-Guard -Arguments $parameterArguments
+        Assert-Condition (-not $parameterResult.Succeeded) 'Redis-operator-only update accepted an unrelated parameter change.'
+        Assert-Condition ($parameterResult.Output -match "cannot change unrelated parameter 'LogRetentionDays'") 'Redis unrelated parameter rejection was not explicit.'
+        Assert-Condition ((Get-AwsMarkerText) -notmatch 's3api get-object|create-change-set') 'Redis unrelated parameter change reached artifact reads or planning.'
+
+        $driftedBaseTags = [ordered]@{}
+        foreach ($entry in $redisOperatorAdoptedStackTags.GetEnumerator()) {
+            $driftedBaseTags[$entry.Key] = [string] $entry.Value
+        }
+        $driftedBaseTags.owner = 'unexpected-owner'
+        Write-ApplicationStackResponse -ParameterMap $updateApplicationParameterMap -TagMap $driftedBaseTags
+        Clear-AwsMarker
+        $tagArguments = Copy-ArgumentMap -Map $redisOperatorTransitionArguments
+        $tagArguments.Action = 'Plan'
+        $tagResult = Invoke-Guard -Arguments $tagArguments
+        Assert-Condition (-not $tagResult.Succeeded) 'Redis-operator-only update accepted unrelated base-tag drift.'
+        Assert-Condition ($tagResult.Output -match "cannot change or repair unrelated stack tag 'owner'") 'Redis unrelated base-tag rejection was not explicit.'
+        Assert-Condition ((Get-AwsMarkerText) -notmatch 's3api get-object|create-change-set') 'Redis base-tag drift reached artifact reads or planning.'
     }
 
     Invoke-FocusedTest -Name 'auth wallet transition permits the signed abort-staged-successor recovery action' -Body {
@@ -2626,6 +3220,41 @@ try {
         Assert-Condition (@(Get-Content -LiteralPath $authWalletValidatorMarkerPath).Count -eq 1) 'The untrusted path was not rejected by the first secure validation pass.'
         Assert-Condition ((Get-AwsMarkerText) -eq '') 'Untrusted auth/wallet record path reached AWS discovery.'
         $env:FAKE_AUTH_WALLET_VALIDATOR_VARIANT = ''
+    }
+
+    Invoke-FocusedTest -Name 'Redis operator wrapper validates before hashing and never directly parses the signed record' -Body {
+        $guardSource = Get-Content -LiteralPath $guardPath -Raw
+        Assert-Condition ($guardSource -notmatch '\$redisOperatorTransitionRecordText') 'Redis wrapper retained a direct transition-record text read.'
+        Assert-Condition ($guardSource -notmatch '\$redisOperatorTransitionRecord\.content') 'Redis wrapper retained direct parsed-record field access.'
+        Assert-Condition ($guardSource -notmatch '\[System\.IO\.File\]::ReadAllText\(\$resolvedRedisOperatorTransitionRecord\)') 'Redis wrapper directly reads the untrusted record.'
+        $firstSecureValidationIndex = $guardSource.IndexOf('$redisOperatorValidationOne = Invoke-RedisOperatorTransitionValidation', [System.StringComparison]::Ordinal)
+        $firstRecordHashIndex = $guardSource.IndexOf('Get-FileHash -LiteralPath $resolvedRedisOperatorTransitionRecord', [System.StringComparison]::Ordinal)
+        Assert-Condition ($firstSecureValidationIndex -ge 0 -and $firstRecordHashIndex -gt $firstSecureValidationIndex) 'Redis wrapper does not run its secure validator before hashing the record.'
+
+        Set-FakeRedisOperatorValidationFixture `
+            -CanonicalSha256 $redisOperatorTransitionRecordSha256 `
+            -CurrentStateSha256 $redisOperatorAdoptionStateSha256 `
+            -TargetStateSha256 $redisOperatorTransitionTargetStateSha256 `
+            -CurrentCredentialStateSha256 $transitionTargetStateSha256 `
+            -TargetCredentialStateSha256 $redisOperatorTransitionTargetCredentialStateSha256 `
+            -PredecessorTransitionSha256 $redisOperatorAdoptionRecordSha256 `
+            -CredentialPredecessorTransitionSha256 $transitionRecordSha256 `
+            -AuthWalletStateSha256 $authWalletAdoptionStateSha256 `
+            -AuthWalletTransitionSha256 $authWalletAdoptionRecordSha256 `
+            -AuthorityRegistrySha256 $redisOperatorTransitionAuthorityRegistrySha256 `
+            -CurrentDeploymentBindings (New-RedisOperatorDeploymentBindingMap -ParameterMap $updateApplicationParameterMap) `
+            -TargetDeploymentBindings (New-RedisOperatorDeploymentBindingMap -ParameterMap $redisOperatorTransitionParameterMap) `
+            -Variant 'FAIL_ALWAYS'
+        Clear-AwsMarker
+        $arguments = Copy-ArgumentMap -Map $redisOperatorTransitionArguments
+        $arguments.Action = 'Plan'
+        $arguments.RedisOperatorTransitionRecordFile = Join-Path $localTransitionDirectory 'untrusted-does-not-exist.redis-operator-transition.local.json'
+        $result = Invoke-Guard -Arguments $arguments
+        Assert-Condition (-not $result.Succeeded) 'REDIS_OPERATOR_TRANSITION accepted an untrusted nonexistent record path.'
+        Assert-Condition ($result.Output -match 'malformed, stale, unauthorized, or deployment-mismatched') 'The Redis secure validator was not the first component to reject the untrusted path.'
+        Assert-Condition (@(Get-Content -LiteralPath $redisOperatorValidatorMarkerPath).Count -eq 1) 'The untrusted Redis path was not rejected by the first secure validation pass.'
+        Assert-Condition ((Get-AwsMarkerText) -eq '') 'Untrusted Redis record path reached AWS discovery.'
+        $env:FAKE_REDIS_OPERATOR_VALIDATOR_VARIANT = ''
     }
 
     Invoke-FocusedTest -Name 'auth wallet transition rejects unauthorized or malformed validator reports before AWS discovery' -Body {
@@ -2688,6 +3317,65 @@ try {
         Assert-Condition ($mismatchedCurrent.Output -match 'exact non-executable outer-VersionId plan') 'Independent current VersionId mismatch rejection was not explicit.'
         Assert-Condition ((Get-AwsMarkerText) -eq '') 'Independent current VersionId mismatch reached AWS discovery.'
         $env:FAKE_AUTH_WALLET_VALIDATOR_VARIANT = ''
+    }
+
+    Invoke-FocusedTest -Name 'Redis operator transition rejects unauthorized mismatched and malformed reports before AWS discovery' -Body {
+        foreach ($variant in @(
+                'WRONG_REGISTRY',
+                'UNAUTHORIZED',
+                'STRING_ZERO',
+                'WRONG_CREDENTIAL_STATE',
+                'WRONG_AUTH_HEAD',
+                'BAD_PLAN',
+                'MISSING_BINDING',
+                'EXTRA_BINDING',
+                'NON_STRING_BINDING',
+                'PHASE_BINDING_MISMATCH'
+            )) {
+            Set-FakeRedisOperatorValidationFixture `
+                -CanonicalSha256 $redisOperatorTransitionRecordSha256 `
+                -CurrentStateSha256 $redisOperatorAdoptionStateSha256 `
+                -TargetStateSha256 $redisOperatorTransitionTargetStateSha256 `
+                -CurrentCredentialStateSha256 $transitionTargetStateSha256 `
+                -TargetCredentialStateSha256 $redisOperatorTransitionTargetCredentialStateSha256 `
+                -PredecessorTransitionSha256 $redisOperatorAdoptionRecordSha256 `
+                -CredentialPredecessorTransitionSha256 $transitionRecordSha256 `
+                -AuthWalletStateSha256 $authWalletAdoptionStateSha256 `
+                -AuthWalletTransitionSha256 $authWalletAdoptionRecordSha256 `
+                -AuthorityRegistrySha256 $redisOperatorTransitionAuthorityRegistrySha256 `
+                -CurrentDeploymentBindings (New-RedisOperatorDeploymentBindingMap -ParameterMap $updateApplicationParameterMap) `
+                -TargetDeploymentBindings (New-RedisOperatorDeploymentBindingMap -ParameterMap $redisOperatorTransitionParameterMap) `
+                -Variant $variant
+            Clear-AwsMarker
+            $arguments = Copy-ArgumentMap -Map $redisOperatorTransitionArguments
+            $arguments.Action = 'Plan'
+            $result = Invoke-Guard -Arguments $arguments
+            Assert-Condition (-not $result.Succeeded) "Redis operator transition accepted hostile validator variant $variant."
+            Assert-Condition ((Get-AwsMarkerText) -eq '') "Hostile Redis validator variant $variant reached AWS discovery."
+        }
+        Set-FakeRedisOperatorValidationFixture `
+            -CanonicalSha256 $redisOperatorTransitionRecordSha256 `
+            -CurrentStateSha256 $redisOperatorAdoptionStateSha256 `
+            -TargetStateSha256 $redisOperatorTransitionTargetStateSha256 `
+            -CurrentCredentialStateSha256 $transitionTargetStateSha256 `
+            -TargetCredentialStateSha256 $redisOperatorTransitionTargetCredentialStateSha256 `
+            -PredecessorTransitionSha256 $redisOperatorAdoptionRecordSha256 `
+            -CredentialPredecessorTransitionSha256 $transitionRecordSha256 `
+            -AuthWalletStateSha256 $authWalletAdoptionStateSha256 `
+            -AuthWalletTransitionSha256 $authWalletAdoptionRecordSha256 `
+            -AuthorityRegistrySha256 $redisOperatorTransitionAuthorityRegistrySha256 `
+            -CurrentDeploymentBindings (New-RedisOperatorDeploymentBindingMap -ParameterMap $updateApplicationParameterMap) `
+            -TargetDeploymentBindings (New-RedisOperatorDeploymentBindingMap -ParameterMap $redisOperatorTransitionParameterMap) `
+            -Variant 'A_B_BINDING_MISMATCH'
+        Write-ApplicationStackResponse -ParameterMap $updateApplicationParameterMap -TagMap $redisOperatorAdoptedStackTags
+        Clear-AwsMarker
+        $currentBindingArguments = Copy-ArgumentMap -Map $redisOperatorTransitionArguments
+        $currentBindingArguments.Action = 'Plan'
+        $currentBindingResult = Invoke-Guard -Arguments $currentBindingArguments
+        Assert-Condition (-not $currentBindingResult.Succeeded) 'Redis operator transition accepted a signed current A/B binding that differed from live parameters.'
+        Assert-Condition ($currentBindingResult.Output -match "credential-state binding 'ApiDatabaseSlotAVersionId'.*drifted") "Signed current A/B drift rejection did not identify the live binding: $($currentBindingResult.Output)"
+        Assert-Condition ((Get-AwsMarkerText) -notmatch 's3api get-object|cloudformation create-change-set') 'Signed current A/B drift reached artifact reads or planning.'
+        $env:FAKE_REDIS_OPERATOR_VALIDATOR_VARIANT = ''
     }
 
     Invoke-FocusedTest -Name 'UPDATE rejects malformed, unauthorized, and target-mismatched transition records with zero AWS calls' -Body {
@@ -2927,7 +3615,7 @@ try {
         $createLine = @($marker -split "`r?`n" | Where-Object { $_ -match 'cloudformation create-change-set' }) | Select-Object -First 1
         Assert-Condition $result.Succeeded "Approved UPDATE Plan failed: $($result.Output)"
         Assert-Condition ($null -ne $createLine) 'Approved UPDATE did not create a change set.'
-        Assert-Condition ($createLine -match ('credential-transition-binding-sha256' + '=' + $transitionDeploymentBindingSha256)) 'UPDATE description did not bind the exact transition deployment digest.'
+        Assert-Condition ($createLine -match ('transition-binding-sha256' + '=' + $transitionDeploymentBindingSha256)) 'UPDATE description did not bind the exact transition deployment digest.'
         Assert-Condition ($createLine -match ('Key=credential-transition-sha256,Value=' + $transitionRecordSha256)) 'UPDATE tags did not bind the exact transition record.'
         Assert-Condition ($createLine -match ('Key=credential-state-sha256,Value=' + $transitionTargetStateSha256)) 'UPDATE tags did not bind the exact target state.'
         foreach ($entry in $pinnedCredentialVersions.GetEnumerator()) {
@@ -2935,7 +3623,7 @@ try {
         }
         Assert-Condition ($createLine -match [regex]::Escape("ParameterKey=AuthWalletKeysSecretVersionId,ParameterValue=$authWalletKeysSecretVersionId")) 'UPDATE omitted the preserved auth/wallet secret VersionId.'
         Assert-Condition ($createLine -match [regex]::Escape("--stack-name $immutableStackId")) 'UPDATE Plan did not address the immutable stack ARN.'
-        Assert-Condition ($createLine -match ('current-stack-binding-sha256=' + $currentStackBindingSha256)) 'UPDATE description did not bind the exact current stack state.'
+        Assert-Condition ($createLine -notmatch 'current-stack-binding-sha256=') 'Credential transition description duplicated the current-stack hash outside its aggregate binding.'
     }
 
     Invoke-FocusedTest -Name 'credential transition Plan advances one inactive slot without unrelated changes' -Body {
@@ -2951,7 +3639,7 @@ try {
         $createLine = @($marker -split "`r?`n" | Where-Object { $_ -match 'cloudformation create-change-set' }) | Select-Object -First 1
         Assert-Condition $result.Succeeded "Approved inactive-slot transition Plan failed: $($result.Output)"
         Assert-Condition ($null -ne $createLine) 'Approved inactive-slot transition did not create a change set.'
-        Assert-Condition ($createLine -match ('credential-transition-binding-sha256' + '=' + $rotationDeploymentBindingSha256)) 'Inactive-slot transition description did not bind the exact deployment digest.'
+        Assert-Condition ($createLine -match ('transition-binding-sha256' + '=' + $rotationDeploymentBindingSha256)) 'Inactive-slot transition description did not bind the exact deployment digest.'
         Assert-Condition ($createLine -match ('Key=credential-predecessor-sha256,Value=' + $transitionRecordSha256)) 'Inactive-slot transition did not extend the deployed credential chain.'
         Assert-Condition ($createLine -match ('Key=credential-transition-sha256,Value=' + $rotationRecordSha256)) 'Inactive-slot transition did not bind its exact record hash.'
         Assert-Condition ($createLine -match ('Key=credential-state-sha256,Value=' + $rotationTargetStateSha256)) 'Inactive-slot transition did not bind its exact target-state hash.'
@@ -3004,7 +3692,7 @@ try {
         Assert-Condition ($null -ne $createLine) 'Approved APPLICATION update did not create a change set.'
         Assert-Condition ($createLine -match [regex]::Escape("--stack-name $immutableStackId")) 'APPLICATION Plan did not address the immutable stack ARN.'
         Assert-Condition ($createLine -match ('current-stack-binding-sha256=' + $applicationCurrentStackBindingSha256)) 'APPLICATION description did not bind the exact current stack state.'
-        Assert-Condition ($createLine -notmatch 'credential-transition-binding-sha256=') 'APPLICATION update incorrectly claimed a credential transition binding.'
+        Assert-Condition ($createLine -notmatch 'transition-binding-sha256=') 'APPLICATION update incorrectly claimed a transition binding.'
         foreach ($desiredCount in @('ApiDesiredCount', 'WebDesiredCount', 'WorkerDesiredCount')) {
             Assert-Condition ($createLine -match "ParameterKey=$desiredCount,ParameterValue=1") "APPLICATION update did not preserve requested $desiredCount activation."
         }
@@ -3748,7 +4436,7 @@ try {
         Write-TemplateResponse -Path $applicationTemplateResponsePath -TemplateBody $applicationTemplateBody
         Write-ChangeSetResponse `
             -ParameterMap $updateApplicationParameterMap `
-            -TagMap $authWalletAdoptedStackTags `
+            -TagMap $authWalletPreRedisStackTags `
             -Description $authWalletAdoptionExpectedChangeSetDescription `
             -ChangeSetType 'UPDATE' `
             -Changes @($expectedAuthWalletResourceChanges[0])
@@ -3793,7 +4481,7 @@ try {
         Write-TemplateResponse -Path $applicationTemplateResponsePath -TemplateBody $applicationTemplateBody
         Write-ChangeSetResponse `
             -ParameterMap $updateApplicationParameterMap `
-            -TagMap $authWalletAdoptedStackTags `
+            -TagMap $authWalletPreRedisStackTags `
             -Description $authWalletAdoptionExpectedChangeSetDescription `
             -ChangeSetType 'UPDATE' `
             -Changes @($mislabeledTagChange)
@@ -3820,7 +4508,7 @@ try {
         Write-TemplateResponse -Path $applicationTemplateResponsePath -TemplateBody $applicationTemplateBody
         Write-ChangeSetResponse `
             -ParameterMap $updateApplicationParameterMap `
-            -TagMap $authWalletAdoptedStackTags `
+            -TagMap $authWalletPreRedisStackTags `
             -Description $authWalletAdoptionExpectedChangeSetDescription `
             -ChangeSetType 'UPDATE' `
             -Changes @($tagOnlyAuthWalletResourceChange)
@@ -3851,7 +4539,7 @@ try {
         Write-TemplateResponse -Path $applicationTemplateResponsePath -TemplateBody $applicationTemplateBody
         Write-ChangeSetResponse `
             -ParameterMap $updateApplicationParameterMap `
-            -TagMap $authWalletAdoptedStackTags `
+            -TagMap $authWalletPreRedisStackTags `
             -Description $authWalletAdoptionExpectedChangeSetDescription `
             -ChangeSetType 'UPDATE' `
             -Changes @()
@@ -4345,6 +5033,194 @@ try {
         Assert-Condition ($result.Output -match [regex]::Escape($authWalletTransitionAuthorityRegistrySha256)) 'Exact auth/wallet Deploy did not report its authority registry binding.'
     }
 
+    Invoke-FocusedTest -Name 'Redis operator Deploy requires its exact transition-bound acknowledgement' -Body {
+        Set-RedisOperatorTransitionDeployFixture
+        Clear-AwsMarker
+        $arguments = Copy-ArgumentMap -Map $redisOperatorTransitionArguments
+        $arguments.BillableAcknowledgement = 'NOT_THE_REVIEWED_REDIS_OPERATOR_ACKNOWLEDGEMENT'
+        $result = Invoke-Guard -Arguments $arguments
+        $marker = Get-AwsMarkerText
+        Assert-Condition (-not $result.Succeeded) 'REDIS_OPERATOR_TRANSITION accepted an incorrect acknowledgement.'
+        Assert-Condition ($result.Output -match [regex]::Escape($redisOperatorTransitionBillableAcknowledgement)) 'Redis acknowledgement rejection did not print the exact required text.'
+        Assert-Condition ($marker -notmatch 'cloudformation execute-change-set') 'REDIS_OPERATOR_TRANSITION executed with an incorrect acknowledgement.'
+        Assert-Condition (@(Get-Content -LiteralPath $redisOperatorValidatorMarkerPath).Count -eq 2) 'Incorrect acknowledgement unexpectedly reached final Redis revalidation.'
+    }
+
+    Invoke-FocusedTest -Name 'Redis operator Deploy rejects root pagination and wrong immutable child identity' -Body {
+        Set-RedisOperatorTransitionDeployFixture
+        $rootLink = New-NestedChangeSetLink `
+            -LogicalResourceId 'WorkloadBoundaries' `
+            -StackId $workloadChildStackId `
+            -ChangeSetId $workloadChildChangeSetId `
+            -DetailKind 'Automatic'
+        Write-ChangeSetResponse `
+            -ParameterMap $redisOperatorTransitionParameterMap `
+            -TagMap $redisOperatorTransitionStackTags `
+            -Description $redisOperatorTransitionExpectedChangeSetDescription `
+            -ChangeSetType 'UPDATE' `
+            -Changes @($rootLink) `
+            -NextToken 'hidden-root-page'
+        Clear-AwsMarker
+        $paginationResult = Invoke-Guard -Arguments $redisOperatorTransitionArguments
+        Assert-Condition (-not $paginationResult.Succeeded) 'REDIS_OPERATOR_TRANSITION accepted an uninspected root change-set page.'
+        Assert-Condition ($paginationResult.Output -match 'root change-set review returned an uninspected pagination token') 'Redis root pagination rejection was not explicit.'
+        Assert-Condition ((Get-AwsMarkerText) -notmatch 'cloudformation execute-change-set') 'REDIS_OPERATOR_TRANSITION executed with hidden root changes.'
+
+        Set-RedisOperatorTransitionDeployFixture
+        $wrongChildLink = New-NestedChangeSetLink `
+            -LogicalResourceId 'WorkloadBoundaries' `
+            -StackId $observabilityChildStackId `
+            -ChangeSetId $workloadChildChangeSetId `
+            -DetailKind 'Automatic'
+        Write-ChangeSetResponse `
+            -ParameterMap $redisOperatorTransitionParameterMap `
+            -TagMap $redisOperatorTransitionStackTags `
+            -Description $redisOperatorTransitionExpectedChangeSetDescription `
+            -ChangeSetType 'UPDATE' `
+            -Changes @($wrongChildLink)
+        Clear-AwsMarker
+        $childIdentityResult = Invoke-Guard -Arguments $redisOperatorTransitionArguments
+        Assert-Condition (-not $childIdentityResult.Succeeded) 'REDIS_OPERATOR_TRANSITION accepted the wrong WorkloadBoundaries child stack ID.'
+        Assert-Condition ($childIdentityResult.Output -match 'exact immutable live child stack ID') "Redis child identity rejection was not explicit: $($childIdentityResult.Output)"
+        Assert-Condition ((Get-AwsMarkerText) -notmatch 'cloudformation execute-change-set') 'REDIS_OPERATOR_TRANSITION executed with the wrong child identity.'
+    }
+
+    Invoke-FocusedTest -Name 'Redis operator Deploy fails closed on fresh final validation failure or report drift' -Body {
+        foreach ($variant in @('FAIL_FRESH', 'DRIFT_FRESH')) {
+            Set-RedisOperatorTransitionDeployFixture
+            $env:FAKE_REDIS_OPERATOR_VALIDATOR_VARIANT = $variant
+            Clear-AwsMarker
+            $result = Invoke-Guard -Arguments $redisOperatorTransitionArguments
+            $marker = Get-AwsMarkerText
+            $validationCalls = @(Get-Content -LiteralPath $redisOperatorValidatorMarkerPath)
+            Assert-Condition (-not $result.Succeeded) "REDIS_OPERATOR_TRANSITION accepted final validator variant $variant."
+            Assert-Condition ($marker -notmatch 'cloudformation execute-change-set') "REDIS_OPERATOR_TRANSITION executed after final validator variant $variant."
+            Assert-Condition ($validationCalls.Count -eq 3) "Redis $variant did not reach exactly one fresh third validation."
+            Assert-Condition ($validationCalls[2] -match 'at=\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z') "Redis $variant final validation did not use canonical UTC."
+            Assert-Condition ($validationCalls[2] -notmatch [regex]::Escape("at=$authWalletValidationAt")) "Redis $variant reused the caller validation instant."
+        }
+        $env:FAKE_REDIS_OPERATOR_VALIDATOR_VARIANT = ''
+    }
+
+    foreach ($bindingDriftVariant in @('CURRENT_BINDING_DRIFT_FRESH', 'TARGET_BINDING_DRIFT_FRESH')) {
+        Invoke-FocusedTest -Name "Redis operator Deploy rejects valid-shaped $bindingDriftVariant on final validation" -Body {
+            Set-RedisOperatorTransitionDeployFixture
+            $env:FAKE_REDIS_OPERATOR_VALIDATOR_VARIANT = $bindingDriftVariant
+            Clear-AwsMarker
+            $result = Invoke-Guard -Arguments $redisOperatorTransitionArguments
+            $marker = Get-AwsMarkerText
+            $validationCalls = @(Get-Content -LiteralPath $redisOperatorValidatorMarkerPath)
+            Assert-Condition (-not $result.Succeeded) "REDIS_OPERATOR_TRANSITION accepted final signed-map drift $bindingDriftVariant."
+            Assert-Condition ($result.Output -match 'signed Redis operator transition, authority, or chain binding changed') "Redis $bindingDriftVariant rejection did not identify final signed binding drift: $($result.Output)"
+            Assert-Condition ($marker -notmatch 'cloudformation execute-change-set') "REDIS_OPERATOR_TRANSITION executed after $bindingDriftVariant."
+            Assert-Condition ($validationCalls.Count -eq 3) "Redis $bindingDriftVariant did not reach exactly one fresh third validation."
+            $env:FAKE_REDIS_OPERATOR_VALIDATOR_VARIANT = ''
+        }
+    }
+
+    Invoke-FocusedTest -Name 'Redis operator Deploy detects signed-record mutation during final validation' -Body {
+        Set-RedisOperatorTransitionDeployFixture
+        $env:FAKE_REDIS_OPERATOR_VALIDATOR_VARIANT = 'MUTATE_RECORD_FRESH'
+        Clear-AwsMarker
+        try {
+            $result = Invoke-Guard -Arguments $redisOperatorTransitionArguments
+            Assert-Condition (-not $result.Succeeded) 'REDIS_OPERATOR_TRANSITION accepted a record mutated during its final validator pass.'
+            Assert-Condition ($result.Output -match 'record changed before final authorization|chain binding changed before execution') "Redis final record-mutation rejection was not explicit: $($result.Output)"
+            Assert-Condition ((Get-AwsMarkerText) -notmatch 'cloudformation execute-change-set') 'REDIS_OPERATOR_TRANSITION executed after record mutation.'
+            Assert-Condition (@(Get-Content -LiteralPath $redisOperatorValidatorMarkerPath).Count -eq 3) 'Redis record-mutation test did not reach the third validator pass.'
+        }
+        finally {
+            Write-JsonFile -Path $approvedRedisOperatorTransitionRecordPath -Value $redisOperatorTransitionRecord -Depth 3
+            $env:FAKE_REDIS_OPERATOR_VALIDATOR_VARIANT = ''
+        }
+    }
+
+    Invoke-FocusedTest -Name 'Redis operator Deploy rejects late workload live-binding drift' -Body {
+        Set-RedisOperatorTransitionDeployFixture
+        Write-WorkloadStackResponse `
+            -RedisOperatorVersionId $redisOperatorTargetVersionId `
+            -ApplicationDataKeyArn $redisOperatorKmsKeyArn `
+            -Path $workloadStackResponseAfterFirstPath
+        $env:FAKE_AWS_WORKLOAD_STACK_RESPONSE_AFTER_FIRST = $workloadStackResponseAfterFirstPath
+        Clear-AwsMarker
+        try {
+            $result = Invoke-Guard -Arguments $redisOperatorTransitionArguments
+            $marker = Get-AwsMarkerText
+            Assert-Condition (-not $result.Succeeded) 'REDIS_OPERATOR_TRANSITION accepted workload VersionId drift during its final live rebind.'
+            Assert-Condition ($result.Output -match "WorkloadBoundaries parameter 'RedisOperatorSecretVersionId'.*current identity") "Redis late workload drift rejection was not explicit: $($result.Output)"
+            Assert-Condition ($marker -notmatch 'cloudformation execute-change-set') 'REDIS_OPERATOR_TRANSITION executed after workload live-binding drift.'
+            Assert-Condition (@(Get-Content -LiteralPath $redisOperatorValidatorMarkerPath).Count -eq 3) 'Late workload drift did not occur after the third validator pass.'
+        }
+        finally {
+            $env:FAKE_AWS_WORKLOAD_STACK_RESPONSE_AFTER_FIRST = ''
+        }
+    }
+
+    Invoke-FocusedTest -Name 'Redis operator Deploy rechecks exact root tags and VersionId immediately before execute' -Body {
+        foreach ($driftCase in @('root chain tag', 'root Redis VersionId')) {
+            Set-RedisOperatorTransitionDeployFixture
+            $lateParameterMap = [ordered]@{}
+            foreach ($entry in $updateApplicationParameterMap.GetEnumerator()) {
+                $lateParameterMap[$entry.Key] = [string] $entry.Value
+            }
+            $lateTagMap = [ordered]@{}
+            foreach ($entry in $redisOperatorAdoptedStackTags.GetEnumerator()) {
+                $lateTagMap[$entry.Key] = [string] $entry.Value
+            }
+            if ($driftCase -ceq 'root chain tag') {
+                $lateTagMap['redis-operator-state-sha256'] = 'f' * 64
+            }
+            else {
+                $lateParameterMap.RedisOperatorSecretVersionId = $redisOperatorTargetVersionId
+            }
+            Write-ApplicationStackResponse `
+                -ParameterMap $lateParameterMap `
+                -TagMap $lateTagMap `
+                -Path $applicationStackResponseAfterSecondPath
+            $env:FAKE_AWS_APPLICATION_STACK_RESPONSE_AFTER_SECOND = $applicationStackResponseAfterSecondPath
+            Clear-AwsMarker
+            try {
+                $result = Invoke-Guard -Arguments $redisOperatorTransitionArguments
+                $marker = Get-AwsMarkerText
+                $rootDescribeCalls = @($marker -split "`r?`n" | Where-Object {
+                        $_ -match 'cloudformation describe-stacks --stack-name .*:stack/crypto-lending-application-test/'
+                    })
+                Assert-Condition (-not $result.Succeeded) "REDIS_OPERATOR_TRANSITION accepted $driftCase after final live authorization."
+                Assert-Condition ($result.Output -match 'changed after review and before execution') "$driftCase rejection did not identify the final root binding."
+                Assert-Condition ($marker -notmatch 'cloudformation execute-change-set') "REDIS_OPERATOR_TRANSITION executed after $driftCase."
+                Assert-Condition ($rootDescribeCalls.Count -eq 3) "$driftCase did not isolate drift to the third root snapshot."
+                Assert-Condition (@(Get-Content -LiteralPath $redisOperatorValidatorMarkerPath).Count -eq 3) "$driftCase was not detected after fresh final validation."
+            }
+            finally {
+                $env:FAKE_AWS_APPLICATION_STACK_RESPONSE_AFTER_SECOND = ''
+            }
+        }
+    }
+
+    Invoke-FocusedTest -Name 'exact Redis operator Deploy recursively reviews and executes only after final live and root rechecks' -Body {
+        Set-RedisOperatorTransitionDeployFixture
+        Clear-AwsMarker
+        $result = Invoke-Guard -Arguments $redisOperatorTransitionArguments
+        $marker = Get-AwsMarkerText
+        $validationCalls = @(Get-Content -LiteralPath $redisOperatorValidatorMarkerPath)
+        $executeLines = @($marker -split "`r?`n" | Where-Object { $_ -match 'cloudformation execute-change-set' })
+        $lastLiveUserIndex = $marker.LastIndexOf("cloudformation describe-stack-resource --stack-name $workloadChildStackId --logical-resource-id RedisOperatorUser", [System.StringComparison]::Ordinal)
+        $lastRootDescribeIndex = $marker.LastIndexOf("cloudformation describe-stacks --stack-name $immutableStackId", [System.StringComparison]::Ordinal)
+        $lastRootTemplateIndex = $marker.LastIndexOf("cloudformation get-template --stack-name $immutableStackId --template-stage Original", [System.StringComparison]::Ordinal)
+        $executeIndex = $marker.LastIndexOf('cloudformation execute-change-set', [System.StringComparison]::Ordinal)
+        Assert-Condition $result.Succeeded "Exact REDIS_OPERATOR_TRANSITION Deploy failed: $($result.Output)"
+        Assert-Condition ($validationCalls.Count -eq 3) 'Exact Redis Deploy did not perform two stable validations plus one fresh final validation.'
+        Assert-Condition ($validationCalls[2] -notmatch [regex]::Escape("at=$authWalletValidationAt")) 'Exact Redis Deploy reused its caller validation instant.'
+        Assert-Condition ($executeLines.Count -eq 1) 'Exact Redis Deploy did not execute exactly once.'
+        Assert-Condition ($executeLines[0] -match ('--change-set-name ' + [regex]::Escape($immutableChangeSetId) + '(?:\s|$)')) 'Redis execute did not target the immutable change-set ARN.'
+        Assert-Condition ($executeLines[0] -match ('--stack-name ' + [regex]::Escape($immutableStackId) + '(?:\s|$)')) 'Redis execute did not target the immutable root stack ARN.'
+        Assert-Condition ($lastLiveUserIndex -ge 0 -and $lastRootDescribeIndex -gt $lastLiveUserIndex) 'Redis final root snapshot was not read after the final live Redis resource binding.'
+        Assert-Condition ($lastRootTemplateIndex -gt $lastRootDescribeIndex -and $executeIndex -gt $lastRootTemplateIndex) 'Redis execution did not follow the final root stack and Original-template recheck.'
+        Assert-Condition ($result.Output -match [regex]::Escape($redisOperatorTransitionDeploymentBindingSha256)) 'Exact Redis Deploy did not report its deployment binding.'
+        Assert-Condition ($result.Output -match [regex]::Escape($redisOperatorTransitionAuthorityRegistrySha256)) 'Exact Redis Deploy did not report its authority registry binding.'
+        Assert-Condition ($result.Output -match [regex]::Escape($redisOperatorLiveBindingSha256)) 'Exact Redis Deploy did not report its live binding.'
+    }
+
     Invoke-FocusedTest -Name 'exact UPDATE Deploy executes only with the transition-bound acknowledgement' -Body {
         Write-ApplicationStackResponse -ParameterMap $applicationParameterMap -TagMap $applicationStackTags
         Write-GuardrailStackResponse -ConfigurationSha256 $controlConfigurationSha256
@@ -4442,11 +5318,19 @@ finally {
     $env:FAKE_AWS_GUARDRAIL_STACK_RESPONSE = $originalEnvironment.FAKE_AWS_GUARDRAIL_STACK_RESPONSE
     $env:FAKE_AWS_APPLICATION_STACK_RESPONSE = $originalEnvironment.FAKE_AWS_APPLICATION_STACK_RESPONSE
     $env:FAKE_AWS_APPLICATION_STACK_RESPONSE_AFTER_FIRST = $originalEnvironment.FAKE_AWS_APPLICATION_STACK_RESPONSE_AFTER_FIRST
+    $env:FAKE_AWS_APPLICATION_STACK_RESPONSE_AFTER_SECOND = $originalEnvironment.FAKE_AWS_APPLICATION_STACK_RESPONSE_AFTER_SECOND
+    $env:FAKE_AWS_WORKLOAD_STACK_RESPONSE = $originalEnvironment.FAKE_AWS_WORKLOAD_STACK_RESPONSE
+    $env:FAKE_AWS_WORKLOAD_STACK_RESPONSE_AFTER_FIRST = $originalEnvironment.FAKE_AWS_WORKLOAD_STACK_RESPONSE_AFTER_FIRST
+    $env:FAKE_AWS_WORKLOAD_STACK_ID = $originalEnvironment.FAKE_AWS_WORKLOAD_STACK_ID
+    $env:FAKE_AWS_WORKLOAD_ROOT_RESOURCE_RESPONSE = $originalEnvironment.FAKE_AWS_WORKLOAD_ROOT_RESOURCE_RESPONSE
+    $env:FAKE_AWS_REDIS_OPERATOR_SECRET_RESOURCE_RESPONSE = $originalEnvironment.FAKE_AWS_REDIS_OPERATOR_SECRET_RESOURCE_RESPONSE
+    $env:FAKE_AWS_REDIS_OPERATOR_USER_RESOURCE_RESPONSE = $originalEnvironment.FAKE_AWS_REDIS_OPERATOR_USER_RESOURCE_RESPONSE
     $env:FAKE_AWS_GUARDRAIL_TEMPLATE_RESPONSE = $originalEnvironment.FAKE_AWS_GUARDRAIL_TEMPLATE_RESPONSE
     $env:FAKE_AWS_CHANGE_SET_RESPONSE = $originalEnvironment.FAKE_AWS_CHANGE_SET_RESPONSE
     $env:FAKE_AWS_CHANGE_SET_RESPONSE_MAP = $originalEnvironment.FAKE_AWS_CHANGE_SET_RESPONSE_MAP
     $env:FAKE_AWS_ROOT_CHANGE_SET_ID = $originalEnvironment.FAKE_AWS_ROOT_CHANGE_SET_ID
     $env:FAKE_AWS_APPLICATION_TEMPLATE_RESPONSE = $originalEnvironment.FAKE_AWS_APPLICATION_TEMPLATE_RESPONSE
+    $env:FAKE_AWS_WORKLOAD_TEMPLATE_RESPONSE = $originalEnvironment.FAKE_AWS_WORKLOAD_TEMPLATE_RESPONSE
     $env:FAKE_AWS_BUCKET_LOCATION_RESPONSE = $originalEnvironment.FAKE_AWS_BUCKET_LOCATION_RESPONSE
     $env:FAKE_AWS_BUCKET_VERSIONING_RESPONSE = $originalEnvironment.FAKE_AWS_BUCKET_VERSIONING_RESPONSE
     $env:FAKE_AWS_ARTIFACT_OBJECT_RESPONSE = $originalEnvironment.FAKE_AWS_ARTIFACT_OBJECT_RESPONSE
@@ -4464,6 +5348,20 @@ finally {
     $env:FAKE_AUTH_WALLET_OPERATION = $originalEnvironment.FAKE_AUTH_WALLET_OPERATION
     $env:FAKE_AUTH_WALLET_FIELD_NAME = $originalEnvironment.FAKE_AUTH_WALLET_FIELD_NAME
     $env:FAKE_AUTH_WALLET_INITIAL_VALIDATION_AT = $originalEnvironment.FAKE_AUTH_WALLET_INITIAL_VALIDATION_AT
+    $env:FAKE_REDIS_OPERATOR_VALIDATOR_MARKER = $originalEnvironment.FAKE_REDIS_OPERATOR_VALIDATOR_MARKER
+    $env:FAKE_REDIS_OPERATOR_VALIDATOR_VARIANT = $originalEnvironment.FAKE_REDIS_OPERATOR_VALIDATOR_VARIANT
+    $env:FAKE_REDIS_OPERATOR_CANONICAL_SHA256 = $originalEnvironment.FAKE_REDIS_OPERATOR_CANONICAL_SHA256
+    $env:FAKE_REDIS_OPERATOR_CURRENT_STATE_SHA256 = $originalEnvironment.FAKE_REDIS_OPERATOR_CURRENT_STATE_SHA256
+    $env:FAKE_REDIS_OPERATOR_TARGET_STATE_SHA256 = $originalEnvironment.FAKE_REDIS_OPERATOR_TARGET_STATE_SHA256
+    $env:FAKE_REDIS_OPERATOR_CURRENT_CREDENTIAL_STATE_SHA256 = $originalEnvironment.FAKE_REDIS_OPERATOR_CURRENT_CREDENTIAL_STATE_SHA256
+    $env:FAKE_REDIS_OPERATOR_TARGET_CREDENTIAL_STATE_SHA256 = $originalEnvironment.FAKE_REDIS_OPERATOR_TARGET_CREDENTIAL_STATE_SHA256
+    $env:FAKE_REDIS_OPERATOR_PREDECESSOR_TRANSITION_SHA256 = $originalEnvironment.FAKE_REDIS_OPERATOR_PREDECESSOR_TRANSITION_SHA256
+    $env:FAKE_REDIS_OPERATOR_CREDENTIAL_PREDECESSOR_TRANSITION_SHA256 = $originalEnvironment.FAKE_REDIS_OPERATOR_CREDENTIAL_PREDECESSOR_TRANSITION_SHA256
+    $env:FAKE_REDIS_OPERATOR_AUTH_WALLET_STATE_SHA256 = $originalEnvironment.FAKE_REDIS_OPERATOR_AUTH_WALLET_STATE_SHA256
+    $env:FAKE_REDIS_OPERATOR_AUTH_WALLET_TRANSITION_SHA256 = $originalEnvironment.FAKE_REDIS_OPERATOR_AUTH_WALLET_TRANSITION_SHA256
+    $env:FAKE_REDIS_OPERATOR_AUTHORITY_REGISTRY_SHA256 = $originalEnvironment.FAKE_REDIS_OPERATOR_AUTHORITY_REGISTRY_SHA256
+    $env:FAKE_REDIS_OPERATOR_CURRENT_DEPLOYMENT_BINDINGS = $originalEnvironment.FAKE_REDIS_OPERATOR_CURRENT_DEPLOYMENT_BINDINGS
+    $env:FAKE_REDIS_OPERATOR_TARGET_DEPLOYMENT_BINDINGS = $originalEnvironment.FAKE_REDIS_OPERATOR_TARGET_DEPLOYMENT_BINDINGS
 
     $resolvedTransitionDirectory = [System.IO.Path]::GetFullPath($localTransitionDirectory)
     $transitionDirectoryPrefix = $resolvedTransitionDirectory.TrimEnd(
@@ -4488,6 +5386,16 @@ finally {
             (Test-Path -LiteralPath $resolvedAuthWalletRecordPath -PathType Leaf)
         ) {
             Remove-Item -LiteralPath $resolvedAuthWalletRecordPath -Force
+        }
+    }
+    foreach ($redisOperatorRecordPath in @($approvedRedisOperatorAdoptionRecordPath, $approvedRedisOperatorTransitionRecordPath)) {
+        $resolvedRedisOperatorRecordPath = [System.IO.Path]::GetFullPath($redisOperatorRecordPath)
+        if (
+            $resolvedRedisOperatorRecordPath.StartsWith($transitionDirectoryPrefix, [System.StringComparison]::OrdinalIgnoreCase) -and
+            ([System.IO.Path]::GetFileName($resolvedRedisOperatorRecordPath) -like 'invoke-application-*.redis-operator-transition.local.json') -and
+            (Test-Path -LiteralPath $resolvedRedisOperatorRecordPath -PathType Leaf)
+        ) {
+            Remove-Item -LiteralPath $resolvedRedisOperatorRecordPath -Force
         }
     }
 

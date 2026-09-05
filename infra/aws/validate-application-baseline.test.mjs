@@ -314,10 +314,77 @@ test('binds the Redis operator secret version through the guarded deployment pat
     '$credentialVersionValues = [ordered]@{',
     '$unpinnedVersionCount -notin @(0, 7)',
     'RedisOperatorSecretVersionId = $RedisOperatorSecretVersionId',
+    "'validate-redis-operator-secret-version-transition.mjs'",
+    "$isRedisOperatorTransition = $UpdateIntent -ceq 'REDIS_OPERATOR_TRANSITION'",
+    'RedisOperatorTransitionAuthorityRegistrySha256 = $RedisOperatorTransitionAuthorityRegistrySha256',
+    'RedisOperatorTransitionCurrentVersionId = $RedisOperatorTransitionCurrentVersionId',
+    'RedisOperatorTransitionOperation = $RedisOperatorTransitionOperation',
+    'RedisOperatorTransitionFieldName = $RedisOperatorTransitionFieldName',
+    'foreach ($requiredRedisOperatorParameter in @($redisOperatorTransitionInputValues.Keys))',
+    '$redisOperatorValidationOne = Invoke-RedisOperatorTransitionValidation',
+    'function ConvertFrom-RedisOperatorDeploymentBindings',
+    "[ValidateSet('currentDeploymentBindings', 'targetDeploymentBindings')]",
+    "'currentOperatorStateSha256'",
+    "'targetOperatorStateSha256'",
+    "'currentCredentialStateSha256'",
+    "'targetCredentialStateSha256'",
+    "'redisOperatorPredecessorTransitionSha256'",
+    "'credentialPredecessorTransitionSha256'",
+    "'preservedAuthWalletStateSha256'",
+    "'preservedAuthWalletTransitionSha256'",
+    '$signedRedisOperatorTargetBindings',
+    'function Get-RedisOperatorLiveBinding',
+    'function Assert-RedisOperatorFunctionalResourceChange',
+    "'/Properties/AuthenticationMode/Passwords'",
+    "$causingEntity -ceq 'RedisOperatorSecretVersionId'",
+    "'redis-operator-predecessor-sha256'",
+    "'redis-operator-transition-sha256'",
+    "'redis-operator-state-sha256'",
+    "$stackTags['credential-transition-sha256'] = $redisOperatorTransitionRecordSha256",
+    '$freshRedisOperatorValidationAt',
+    '$finalRedisOperatorLiveBinding = Get-RedisOperatorLiveBinding',
+    "-Moment 'after final Redis authorization and immediately before execution'",
+    '$expectedChangeSetDescription.Length -gt 1024',
+    'transition-binding-sha256=',
   ]) {
     assert.ok(deploymentGuardSource.includes(fragment), `Deployment guard is missing ${fragment}`);
     assert.ok(validatorSource.includes(fragment), `Static guard contract is missing ${fragment}`);
   }
+
+  for (const forbiddenRedisOperatorRecordRead of [
+    '$redisOperatorTransitionRecordText',
+    '$redisOperatorTransitionRecord.content',
+    '[System.IO.File]::ReadAllText($resolvedRedisOperatorTransitionRecord)',
+  ]) {
+    assert.ok(
+      !deploymentGuardSource.includes(forbiddenRedisOperatorRecordRead),
+      `Deployment guard directly reads Redis record JSON: ${forbiddenRedisOperatorRecordRead}`,
+    );
+    assert.ok(
+      validatorSource.includes(forbiddenRedisOperatorRecordRead),
+      `Static guard contract does not prohibit direct Redis record read: ${forbiddenRedisOperatorRecordRead}`,
+    );
+  }
+
+  const validationOneIndex = deploymentGuardSource.indexOf(
+    '$redisOperatorValidationOne = Invoke-RedisOperatorTransitionValidation',
+  );
+  const firstRecordHashIndex = deploymentGuardSource.indexOf(
+    'Get-FileHash -LiteralPath $resolvedRedisOperatorTransitionRecord -Algorithm SHA256',
+  );
+  const finalValidationIndex = deploymentGuardSource.indexOf(
+    '$finalRedisOperatorValidation = Invoke-RedisOperatorTransitionValidation',
+  );
+  const finalLiveIndex = deploymentGuardSource.indexOf(
+    '$finalRedisOperatorLiveBinding = Get-RedisOperatorLiveBinding',
+  );
+  const finalRootIndex = deploymentGuardSource.lastIndexOf(
+    "-Moment 'after final Redis authorization and immediately before execution'",
+  );
+  const executeIndex = deploymentGuardSource.lastIndexOf("'execute-change-set'");
+  assert.ok(validationOneIndex >= 0 && firstRecordHashIndex > validationOneIndex);
+  assert.ok(finalValidationIndex > firstRecordHashIndex && finalLiveIndex > finalValidationIndex);
+  assert.ok(finalRootIndex > finalLiveIndex && executeIndex > finalRootIndex);
 });
 
 test('standalone SQS foundation denies insecure transport to both queues', () => {
