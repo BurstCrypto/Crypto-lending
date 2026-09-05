@@ -1368,8 +1368,8 @@ export function loadRepositoryProductionPreflightInput(
   let egressLocalValidationPassed = false;
   try {
     egressRecord = objectRecord(
-      egressPolicy.parseEgressJsonBytes(
-        readFileSync(resolve(repositoryRoot, 'infra/egress/egress-policy.example.json')),
+      egressPolicy.loadEgressPolicyFile(
+        resolve(repositoryRoot, 'infra/egress/egress-policy.example.json'),
       ) as unknown,
     );
     const validation = egressPolicy.validateEgressPolicy(egressRecord, { mode: 'example' });

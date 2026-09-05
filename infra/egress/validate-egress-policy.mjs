@@ -1,15 +1,25 @@
 import { createHash } from 'node:crypto';
-import { lstatSync, readdirSync, readFileSync } from 'node:fs';
+import { readdirSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { TextDecoder } from 'node:util';
 
 import { validateBillingControlRecord } from '../aws/validate-billing-control-record.mjs';
 import { parseStrictJsonBytes } from '../shared/parse-strict-json.mjs';
+import {
+  readSecureLocalFile,
+  readSecureLocalFileForTest,
+} from '../shared/read-secure-local-file.mjs';
 
 const MODULE_PATH = fileURLToPath(import.meta.url);
 const REPOSITORY_ROOT = resolve(dirname(MODULE_PATH), '..', '..');
 export const EGRESS_JSON_INVALID_ERROR =
   'strict UTF-8 JSON without a byte-order mark or duplicate object keys is required';
+export const MAX_EGRESS_POLICY_BYTES = 262_144;
+export const MAX_EGRESS_CONTROL_RECORD_BYTES = 131_072;
+export const MAX_BROWSER_EGRESS_SOURCE_BYTES = 1_048_576;
+export const EGRESS_FILE_UNSAFE_ERROR =
+  'must be a non-empty, bounded, stable, single-link regular file at a canonical local path';
 const LOCAL_ARTIFACT_PATTERN = /\.(?:egress-policy|egress-evidence|egress-plan)\.local\.json$/i;
 const IGNORED_SCAN_DIRECTORIES = new Set([
   '.git',
@@ -355,20 +365,6 @@ export function validateLocalPathInput(value, label = 'Input path') {
   return { ok: errors.length === 0, errors, path };
 }
 
-function assertRegularLocalFile(filePath, label, errors) {
-  try {
-    const stat = lstatSync(filePath);
-    if (stat.isSymbolicLink() || !stat.isFile()) {
-      errors.push(`${label} must be a regular non-symlink local file.`);
-      return false;
-    }
-    return true;
-  } catch (error) {
-    errors.push(`Unable to inspect ${label}: ${error.message}`);
-    return false;
-  }
-}
-
 function findLocalArtifacts(directory, findings = []) {
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
     if (entry.isSymbolicLink()) {
@@ -442,6 +438,45 @@ export function parseEgressJsonBytes(bytes) {
     return parseStrictJsonBytes(bytes);
   } catch {
     throw new Error(EGRESS_JSON_INVALID_ERROR);
+  }
+}
+
+function readEgressInput(filePath, maximumBytes, label, afterFirstReadForTest) {
+  try {
+    return afterFirstReadForTest === undefined
+      ? readSecureLocalFile(filePath, maximumBytes)
+      : readSecureLocalFileForTest(filePath, maximumBytes, afterFirstReadForTest);
+  } catch {
+    throw new Error(`${label} ${EGRESS_FILE_UNSAFE_ERROR}.`);
+  }
+}
+
+export function loadEgressPolicyFile(filePath) {
+  return parseEgressJsonBytes(
+    readEgressInput(filePath, MAX_EGRESS_POLICY_BYTES, 'Egress policy file'),
+  );
+}
+
+/** Test-only fault seam; production callers use loadEgressPolicyFile. */
+export function loadEgressPolicyFileForTest(filePath, afterFirstReadForTest) {
+  return parseEgressJsonBytes(
+    readEgressInput(filePath, MAX_EGRESS_POLICY_BYTES, 'Egress policy file', afterFirstReadForTest),
+  );
+}
+
+export function loadBrowserEgressSourceFile(filePath) {
+  try {
+    const bytes = readEgressInput(
+      filePath,
+      MAX_BROWSER_EGRESS_SOURCE_BYTES,
+      'Browser egress source',
+    );
+    if (bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) {
+      throw new Error('byte-order mark is not allowed');
+    }
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch {
+    throw new Error(`Browser egress source ${EGRESS_FILE_UNSAFE_ERROR}.`);
   }
 }
 
@@ -554,13 +589,20 @@ export function validateBillingControlRecordFile(
     errors.push('The final KAN-229 billing control record must be stored outside the repository.');
     return { ok: false, errors, recordPath: absolutePath };
   }
-  if (!assertRegularLocalFile(absolutePath, 'billing control record', errors)) {
+  let bytes;
+  try {
+    bytes = readEgressInput(
+      absolutePath,
+      MAX_EGRESS_CONTROL_RECORD_BYTES,
+      'Billing control record',
+    );
+  } catch {
+    errors.push(`Billing control record ${EGRESS_FILE_UNSAFE_ERROR}.`);
     return { ok: false, errors, recordPath: absolutePath };
   }
-
   let record;
   try {
-    record = parseEgressJsonBytes(readFileSync(absolutePath));
+    record = parseEgressJsonBytes(bytes);
   } catch {
     errors.push(`Unable to parse billing control record: ${EGRESS_JSON_INVALID_ERROR}.`);
     return { ok: false, errors, recordPath: absolutePath };
@@ -741,7 +783,11 @@ export function validateEvidenceIndexRecordFile(
       integrityModel: EVIDENCE_INDEX_INTEGRITY_MODEL,
     };
   }
-  if (!assertRegularLocalFile(absolutePath, 'evidence-index record', errors)) {
+  let bytes;
+  try {
+    bytes = readEgressInput(absolutePath, MAX_EGRESS_CONTROL_RECORD_BYTES, 'Evidence-index record');
+  } catch {
+    errors.push(`Evidence-index record ${EGRESS_FILE_UNSAFE_ERROR}.`);
     return {
       ok: false,
       errors,
@@ -749,10 +795,9 @@ export function validateEvidenceIndexRecordFile(
       integrityModel: EVIDENCE_INDEX_INTEGRITY_MODEL,
     };
   }
-
   let record;
   try {
-    record = parseEgressJsonBytes(readFileSync(absolutePath));
+    record = parseEgressJsonBytes(bytes);
   } catch {
     errors.push(`Unable to parse evidence-index record: ${EGRESS_JSON_INVALID_ERROR}.`);
     return {
@@ -2921,10 +2966,7 @@ function main() {
 
   const policyPathErrors = [];
   const policyPath = resolveLocalPath(options.policy, 'Policy path', policyPathErrors);
-  if (
-    policyPath === undefined ||
-    !assertRegularLocalFile(policyPath, 'policy file', policyPathErrors)
-  ) {
+  if (policyPath === undefined) {
     for (const error of policyPathErrors) {
       process.stderr.write(`${error}\n`);
     }
@@ -2933,9 +2975,13 @@ function main() {
   }
   let policy;
   try {
-    policy = parseEgressJsonBytes(readFileSync(policyPath));
-  } catch {
-    process.stderr.write(`Unable to parse egress policy: ${EGRESS_JSON_INVALID_ERROR}.\n`);
+    policy = loadEgressPolicyFile(policyPath);
+  } catch (error) {
+    const message =
+      error instanceof Error && error.message === EGRESS_JSON_INVALID_ERROR
+        ? `Unable to parse egress policy: ${EGRESS_JSON_INVALID_ERROR}.`
+        : `Egress policy file ${EGRESS_FILE_UNSAFE_ERROR}.`;
+    process.stderr.write(`${message}\n`);
     writeZeroCallMarkers(process.stderr);
     process.exit(1);
   }
@@ -3016,18 +3062,17 @@ function main() {
       'Browser egress source path',
       browserPathErrors,
     );
-    if (
-      browserSourcePath !== undefined &&
-      assertRegularLocalFile(browserSourcePath, 'browser egress source', browserPathErrors)
-    ) {
+    if (browserSourcePath !== undefined) {
       try {
-        const browserResult = validateBrowserEgressSource(readFileSync(browserSourcePath, 'utf8'));
+        const browserResult = validateBrowserEgressSource(
+          loadBrowserEgressSourceFile(browserSourcePath),
+        );
         result.errors.push(
           ...browserResult.errors.map((error) => `Browser egress guard: ${error}`),
         );
         result.browserEgressSource = browserSourcePath;
-      } catch (error) {
-        browserPathErrors.push(`Unable to read browser egress guard: ${error.message}`);
+      } catch {
+        browserPathErrors.push(`Browser egress source ${EGRESS_FILE_UNSAFE_ERROR}.`);
       }
     }
     result.errors.push(...browserPathErrors);

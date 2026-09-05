@@ -1,17 +1,38 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  linkSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 import Ajv2020 from 'ajv/dist/2020.js';
 
 import {
+  SecureLocalFileValidationError,
+  readSecureLocalFile,
+  readSecureLocalFileForTest,
+} from '../shared/read-secure-local-file.mjs';
+
+import {
   EGRESS_JSON_INVALID_ERROR,
+  EGRESS_FILE_UNSAFE_ERROR,
   EVIDENCE_INDEX_INTEGRITY_MODEL,
   EVIDENCE_INDEX_RECORD_SCHEMA,
+  MAX_BROWSER_EGRESS_SOURCE_BYTES,
+  MAX_EGRESS_CONTROL_RECORD_BYTES,
+  MAX_EGRESS_POLICY_BYTES,
   canonicalizeEgressPolicy,
   canonicalizeEgressPolicyConfiguration,
+  loadBrowserEgressSourceFile,
+  loadEgressPolicyFile,
+  loadEgressPolicyFileForTest,
   parseEgressJsonBytes,
   validateBillingControlBinding,
   validateBillingControlRecordFile,
@@ -28,6 +49,26 @@ import { validateBillingControlRecord } from '../aws/validate-billing-control-re
 
 const NOW = new Date('2026-08-19T18:00:00Z');
 const SOURCE_REVISION = '0123456789abcdef0123456789abcdef01234567';
+
+function assertUnsafeFile(operation, label = 'Egress policy file') {
+  assert.throws(
+    operation,
+    (error) => error instanceof Error && error.message === `${label} ${EGRESS_FILE_UNSAFE_ERROR}.`,
+  );
+}
+
+function skipUnsupportedLink(error, context) {
+  if (
+    error &&
+    typeof error === 'object' &&
+    'code' in error &&
+    ['EACCES', 'EINVAL', 'ENOSYS', 'EPERM', 'UNKNOWN'].includes(error.code)
+  ) {
+    context.skip(`filesystem link operation is unavailable (${error.code})`);
+    return true;
+  }
+  return false;
+}
 
 function approvedBillingControlRecord() {
   return {
@@ -592,6 +633,170 @@ test('strict policy JSON rejects duplicate approval keys despite a matching inde
   );
 });
 
+test('secure policy loading rejects empty, oversized, directory, and hard-linked inputs', () => {
+  const temporaryDirectory = mkdtempSync(join(tmpdir(), 'kan-231-secure-policy-'));
+  try {
+    const validPath = join(temporaryDirectory, 'valid.json');
+    const validBytes = Buffer.from(JSON.stringify(finalPolicy()), 'utf8');
+    writeFileSync(validPath, validBytes);
+    assert.equal(loadEgressPolicyFile(validPath).status, 'ACCEPTED');
+
+    const emptyPath = join(temporaryDirectory, 'empty.json');
+    writeFileSync(emptyPath, Buffer.alloc(0));
+    assertUnsafeFile(() => loadEgressPolicyFile(emptyPath));
+
+    const oversizedPath = join(temporaryDirectory, 'oversized.json');
+    writeFileSync(oversizedPath, Buffer.alloc(MAX_EGRESS_POLICY_BYTES + 1, 0x20));
+    assertUnsafeFile(() => loadEgressPolicyFile(oversizedPath));
+
+    const directoryPath = join(temporaryDirectory, 'directory.json');
+    mkdirSync(directoryPath);
+    assertUnsafeFile(() => loadEgressPolicyFile(directoryPath));
+
+    const hardLinkPath = join(temporaryDirectory, 'hard-link.json');
+    linkSync(validPath, hardLinkPath);
+    assertUnsafeFile(() => loadEgressPolicyFile(validPath));
+    assertUnsafeFile(() => loadEgressPolicyFile(hardLinkPath));
+  } finally {
+    rmSync(temporaryDirectory, { recursive: true, force: true });
+  }
+});
+
+test('secure policy loading rejects a final symbolic link when supported', (context) => {
+  const temporaryDirectory = mkdtempSync(join(tmpdir(), 'kan-231-policy-symlink-'));
+  try {
+    const targetPath = join(temporaryDirectory, 'target.json');
+    const linkedPath = join(temporaryDirectory, 'linked.json');
+    writeFileSync(targetPath, JSON.stringify(finalPolicy()), 'utf8');
+    try {
+      symlinkSync(targetPath, linkedPath, 'file');
+    } catch (error) {
+      if (skipUnsupportedLink(error, context)) return;
+      throw error;
+    }
+    assertUnsafeFile(() => loadEgressPolicyFile(linkedPath));
+  } finally {
+    rmSync(temporaryDirectory, { recursive: true, force: true });
+  }
+});
+
+test('secure policy loading rejects a linked intermediate directory when supported', (context) => {
+  const temporaryDirectory = mkdtempSync(join(tmpdir(), 'kan-231-policy-junction-'));
+  try {
+    const targetDirectory = join(temporaryDirectory, 'target');
+    const linkedDirectory = join(temporaryDirectory, 'linked');
+    const policyName = 'policy.json';
+    mkdirSync(targetDirectory);
+    writeFileSync(join(targetDirectory, policyName), JSON.stringify(finalPolicy()), 'utf8');
+    try {
+      symlinkSync(
+        targetDirectory,
+        linkedDirectory,
+        process.platform === 'win32' ? 'junction' : 'dir',
+      );
+    } catch (error) {
+      if (skipUnsupportedLink(error, context)) return;
+      throw error;
+    }
+    assertUnsafeFile(() => loadEgressPolicyFile(join(linkedDirectory, policyName)));
+  } finally {
+    rmSync(temporaryDirectory, { recursive: true, force: true });
+  }
+});
+
+test('secure policy loading rejects a same-size concurrent rewrite', () => {
+  const temporaryDirectory = mkdtempSync(join(tmpdir(), 'kan-231-policy-rewrite-'));
+  try {
+    const policyPath = join(temporaryDirectory, 'policy.json');
+    const original = Buffer.from(JSON.stringify(finalPolicy()), 'utf8');
+    const replacement = Buffer.from(
+      original.toString('utf8').replace('"ACCEPTED"', '"REJECTED"'),
+      'utf8',
+    );
+    assert.equal(replacement.length, original.length);
+    assert.notDeepEqual(replacement, original);
+    writeFileSync(policyPath, original);
+    assertUnsafeFile(() =>
+      loadEgressPolicyFileForTest(policyPath, () => writeFileSync(policyPath, replacement)),
+    );
+  } finally {
+    rmSync(temporaryDirectory, { recursive: true, force: true });
+  }
+});
+
+test('secure local loading sanitizes a revoked proxy thrown by the fault seam', () => {
+  const temporaryDirectory = mkdtempSync(join(tmpdir(), 'kan-231-policy-hostile-throw-'));
+  try {
+    const policyPath = join(temporaryDirectory, 'policy.json');
+    writeFileSync(policyPath, JSON.stringify(finalPolicy()), 'utf8');
+    const { proxy, revoke } = Proxy.revocable({}, {});
+    revoke();
+
+    assert.throws(
+      () =>
+        readSecureLocalFileForTest(policyPath, MAX_EGRESS_POLICY_BYTES, () => {
+          throw proxy;
+        }),
+      (error) =>
+        error instanceof SecureLocalFileValidationError &&
+        error.message === 'Controlled local file is unavailable or unsafe.',
+    );
+  } finally {
+    rmSync(temporaryDirectory, { recursive: true, force: true });
+  }
+});
+
+test('secure local loading rejects NTFS alternate-data-stream path syntax', () => {
+  const temporaryDirectory = mkdtempSync(join(tmpdir(), 'kan-231-policy-ads-'));
+  try {
+    const policyPath = join(temporaryDirectory, 'policy.json');
+    const alternateStreamPath = `${policyPath}:unreviewed`;
+    writeFileSync(policyPath, JSON.stringify(finalPolicy()), 'utf8');
+    try {
+      writeFileSync(alternateStreamPath, JSON.stringify(finalPolicy()), 'utf8');
+    } catch (error) {
+      if (
+        process.platform !== 'win32' ||
+        !error ||
+        typeof error !== 'object' ||
+        !('code' in error) ||
+        !['EACCES', 'EINVAL', 'ENOENT', 'ENOSYS', 'ENOTSUP', 'EPERM', 'UNKNOWN'].includes(
+          error.code,
+        )
+      ) {
+        throw error;
+      }
+    }
+
+    assert.throws(
+      () => readSecureLocalFile(alternateStreamPath, MAX_EGRESS_POLICY_BYTES),
+      (error) =>
+        error instanceof SecureLocalFileValidationError &&
+        error.message === 'Controlled local file is unavailable or unsafe.',
+    );
+  } finally {
+    rmSync(temporaryDirectory, { recursive: true, force: true });
+  }
+});
+
+test('browser egress source loading is bounded and strict UTF-8', () => {
+  const temporaryDirectory = mkdtempSync(join(tmpdir(), 'kan-231-browser-source-'));
+  try {
+    const sourcePath = join(temporaryDirectory, 'browser-egress.js');
+    const source = readFileSync('apps/web/lib/security/browser-egress.js');
+    writeFileSync(sourcePath, source);
+    assert.equal(loadBrowserEgressSourceFile(sourcePath), source.toString('utf8'));
+
+    writeFileSync(sourcePath, Buffer.alloc(MAX_BROWSER_EGRESS_SOURCE_BYTES + 1, 0x20));
+    assertUnsafeFile(() => loadBrowserEgressSourceFile(sourcePath), 'Browser egress source');
+
+    writeFileSync(sourcePath, Buffer.from([0xff]));
+    assertUnsafeFile(() => loadBrowserEgressSourceFile(sourcePath), 'Browser egress source');
+  } finally {
+    rmSync(temporaryDirectory, { recursive: true, force: true });
+  }
+});
+
 test('binds final policy to a strict protected evidence-index artifact and independent digest', () => {
   const policy = finalPolicy();
   const record = finalEvidenceIndexRecord(policy);
@@ -888,6 +1093,26 @@ test('file-backed final controls reject last-wins duplicate approval keys', () =
     assert.equal(evidenceResult.ok, false);
     assert.deepEqual(evidenceResult.errors, [
       `Unable to parse evidence-index record: ${EGRESS_JSON_INVALID_ERROR}.`,
+    ]);
+
+    writeFileSync(billingPath, Buffer.alloc(MAX_EGRESS_CONTROL_RECORD_BYTES + 1, 0x20));
+    const oversizedBilling = validateBillingControlRecordFile(billingPath, policy, {
+      expectedEnvironment: 'dev',
+      expectedAccount: '123456789012',
+      expectedRegion: 'us-west-2',
+      now: NOW,
+    });
+    assert.deepEqual(oversizedBilling.errors, [
+      `Billing control record ${EGRESS_FILE_UNSAFE_ERROR}.`,
+    ]);
+
+    writeFileSync(evidencePath, Buffer.alloc(MAX_EGRESS_CONTROL_RECORD_BYTES + 1, 0x20));
+    const oversizedEvidence = validateEvidenceIndexRecordFile(evidencePath, policy, {
+      expectedPolicyConfigurationSha256: EXPECTED_POLICY_CONFIGURATION_SHA256,
+      now: NOW,
+    });
+    assert.deepEqual(oversizedEvidence.errors, [
+      `Evidence-index record ${EGRESS_FILE_UNSAFE_ERROR}.`,
     ]);
   } finally {
     rmSync(temporaryDirectory, { recursive: true, force: true });

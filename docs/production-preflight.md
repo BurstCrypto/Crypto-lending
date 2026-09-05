@@ -145,6 +145,8 @@ secret-reference names, the inert KAN-231 egress example, the KAN-62 provider
 decision record and digest, and the mainnet platform capability directory. It
 parses the egress record as strict UTF-8 JSON and rejects byte-order marks or
 duplicate object keys before evaluating its status, mode, or evidence fields. It
+loads that record through the same bounded, canonical-path, stable double-read
+boundary used by the standalone egress gate. It
 derives KAN-62 local validation and every provider approval/runtime field from
 one immutable parsed snapshot of the exact decision bytes bound by that digest;
 it never re-reads status fields from a second, potentially different snapshot.

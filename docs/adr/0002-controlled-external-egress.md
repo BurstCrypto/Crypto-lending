@@ -209,8 +209,14 @@ inputs. `approved` and `final` additionally require
 `--billing-control-record`; `final` alone requires `--evidence-index-record`
 and `--expected-policy-configuration-sha256`. Earlier modes reject those final
 arguments. Policy, billing-record, evidence-index, and optional
-`--browser-egress-source` inputs must be regular, non-symlink local files.
-UNC/device and URI paths are denied.
+`--browser-egress-source` inputs must be non-empty, bounded, single-link regular
+files at canonical local paths. The validator rejects symbolic links, hard
+links, linked or junction-backed path components, path replacement, and content
+or metadata changes across two descriptor-bound positional reads. Filesystem
+failures use fixed messages that do not disclose host paths or OS details.
+UNC/device, URI, and NTFS alternate-data-stream paths are denied before
+filesystem access. Policy files are limited to 256 KiB, billing/evidence
+records to 128 KiB, and browser policy source to 1 MiB.
 Policy, billing-record, and evidence-index bytes must also be strict UTF-8 JSON
 without a byte-order mark or duplicate object keys at any depth. A matching
 independent configuration digest cannot make a last-key-wins ambiguous record
