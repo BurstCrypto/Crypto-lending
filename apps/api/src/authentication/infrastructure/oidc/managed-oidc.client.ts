@@ -67,21 +67,160 @@ function formEncodeCredential(value: string): string {
   return encoded.slice('credential='.length);
 }
 
+function parseJsonWithoutDuplicateKeys(text: string): unknown {
+  let index = 0;
+  const numberPattern = /-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?/uy;
+
+  const invalid = (): never => fail('OIDC_TOKEN_RESPONSE_INVALID');
+  const whitespace = (): void => {
+    while (
+      text[index] === ' ' ||
+      text[index] === '\t' ||
+      text[index] === '\r' ||
+      text[index] === '\n'
+    ) {
+      index += 1;
+    }
+  };
+  const string = (): string => {
+    if (text[index] !== '"') return invalid();
+    const start = index;
+    index += 1;
+    while (index < text.length) {
+      const character = text.charCodeAt(index);
+      if (character === 0x22) {
+        index += 1;
+        try {
+          return JSON.parse(text.slice(start, index)) as string;
+        } catch {
+          return invalid();
+        }
+      }
+      if (character < 0x20) return invalid();
+      if (character !== 0x5c) {
+        index += 1;
+        continue;
+      }
+      index += 1;
+      const escaped = text[index];
+      if (escaped === 'u') {
+        if (!/^[0-9a-fA-F]{4}$/u.test(text.slice(index + 1, index + 5))) return invalid();
+        index += 5;
+        continue;
+      }
+      if (!['"', '\\', '/', 'b', 'f', 'n', 'r', 't'].includes(escaped ?? '')) return invalid();
+      index += 1;
+    }
+    return invalid();
+  };
+  const number = (): void => {
+    numberPattern.lastIndex = index;
+    const match = numberPattern.exec(text);
+    if (!match) return invalid();
+    index = numberPattern.lastIndex;
+  };
+  const value = (depth: number): void => {
+    if (depth > 64) return invalid();
+    whitespace();
+    if (text[index] === '"') {
+      string();
+      return;
+    }
+    if (text[index] === '{') {
+      object(depth + 1);
+      return;
+    }
+    if (text[index] === '[') {
+      list(depth + 1);
+      return;
+    }
+    for (const literal of ['true', 'false', 'null']) {
+      if (text.startsWith(literal, index)) {
+        index += literal.length;
+        return;
+      }
+    }
+    number();
+  };
+  const object = (depth: number): void => {
+    index += 1;
+    whitespace();
+    if (text[index] === '}') {
+      index += 1;
+      return;
+    }
+    const keys = new Set<string>();
+    while (index < text.length) {
+      const key = string();
+      if (keys.has(key)) return invalid();
+      keys.add(key);
+      whitespace();
+      if (text[index] !== ':') return invalid();
+      index += 1;
+      value(depth);
+      whitespace();
+      if (text[index] === '}') {
+        index += 1;
+        return;
+      }
+      if (text[index] !== ',') return invalid();
+      index += 1;
+      whitespace();
+    }
+    return invalid();
+  };
+  const list = (depth: number): void => {
+    index += 1;
+    whitespace();
+    if (text[index] === ']') {
+      index += 1;
+      return;
+    }
+    while (index < text.length) {
+      value(depth);
+      whitespace();
+      if (text[index] === ']') {
+        index += 1;
+        return;
+      }
+      if (text[index] !== ',') return invalid();
+      index += 1;
+    }
+    return invalid();
+  };
+
+  whitespace();
+  value(0);
+  whitespace();
+  if (index !== text.length) return invalid();
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return invalid();
+  }
+}
+
 async function readBoundedJson(
   response: Response,
   maximumBytes: number,
   acceptedContentTypes: readonly string[],
 ): Promise<unknown> {
-  if (!response.body) return fail('OIDC_TOKEN_RESPONSE_INVALID');
-  const contentType = response.headers.get('content-type')?.split(';', 1)[0]?.trim().toLowerCase();
-  if (!contentType || !acceptedContentTypes.includes(contentType)) {
-    await cancelResponseBody(response);
-    return fail('OIDC_TOKEN_RESPONSE_INVALID');
-  }
-  const reader = response.body.getReader();
+  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
   const chunks: Uint8Array[] = [];
   let total = 0;
   try {
+    const body = response.body;
+    if (!body) return fail('OIDC_TOKEN_RESPONSE_INVALID');
+    const contentType = response.headers
+      .get('content-type')
+      ?.split(';', 1)[0]
+      ?.trim()
+      .toLowerCase();
+    if (!contentType || !acceptedContentTypes.includes(contentType)) {
+      await cancelResponseBody(response);
+      return fail('OIDC_TOKEN_RESPONSE_INVALID');
+    }
+    reader = body.getReader();
     for (;;) {
       const result = await reader.read();
       if (result.done) break;
@@ -96,12 +235,43 @@ async function readBoundedJson(
       chunks.map((chunk) => Buffer.from(chunk)),
       total,
     );
-    return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)) as unknown;
-  } catch (error) {
-    if (error instanceof OidcClientError) throw error;
+    return parseJsonWithoutDuplicateKeys(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+  } catch {
     return fail('OIDC_TOKEN_RESPONSE_INVALID');
   } finally {
-    reader.releaseLock();
+    try {
+      reader?.releaseLock();
+    } catch {
+      // Cleanup failure never changes the sanitized response error contract.
+    }
+  }
+}
+
+function currentEpochMilliseconds(now: () => Date, code: OidcClientErrorCode): number {
+  try {
+    const value = now();
+    if (!(value instanceof Date) || Object.getPrototypeOf(value) !== Date.prototype) {
+      return fail(code);
+    }
+    const milliseconds = value.getTime();
+    if (!Number.isFinite(milliseconds)) return fail(code);
+    return milliseconds;
+  } catch {
+    return fail(code);
+  }
+}
+
+function jwksClientFailure(error: unknown): boolean {
+  try {
+    if (!(error instanceof OidcClientError)) return false;
+    const descriptor = Object.getOwnPropertyDescriptor(error, 'code');
+    return (
+      descriptor !== undefined &&
+      'value' in descriptor &&
+      (descriptor.value === 'OIDC_JWKS_INVALID' || descriptor.value === 'OIDC_JWKS_UNAVAILABLE')
+    );
+  } catch {
+    return false;
   }
 }
 
@@ -222,6 +392,7 @@ function parseJwks(value: unknown, config: OidcAuthenticationConfig): JSONWebKey
 
 export class PinnedRemoteJwksProvider {
   private cache: CachedJwks | undefined;
+  private inFlight: Promise<CachedJwks> | undefined;
 
   constructor(
     private readonly config: OidcAuthenticationConfig,
@@ -230,7 +401,7 @@ export class PinnedRemoteJwksProvider {
   ) {}
 
   async load(forceRefresh = false): Promise<JSONWebKeySet> {
-    const now = this.now().getTime();
+    const now = currentEpochMilliseconds(this.now, 'OIDC_JWKS_UNAVAILABLE');
     const cached = this.cache;
     if (
       !forceRefresh &&
@@ -240,6 +411,21 @@ export class PinnedRemoteJwksProvider {
     ) {
       return cached.value;
     }
+    const existingLoad = this.inFlight;
+    if (existingLoad) return (await existingLoad).value;
+
+    const inFlight = this.fetchJwks();
+    this.inFlight = inFlight;
+    try {
+      const loaded = await inFlight;
+      this.cache = loaded;
+      return loaded.value;
+    } finally {
+      if (this.inFlight === inFlight) this.inFlight = undefined;
+    }
+  }
+
+  private async fetchJwks(): Promise<CachedJwks> {
     let response: Response;
     try {
       response = await this.fetcher(this.config.jwksUri, {
@@ -253,7 +439,13 @@ export class PinnedRemoteJwksProvider {
     } catch {
       return fail('OIDC_JWKS_UNAVAILABLE');
     }
-    if (response.status !== 200) {
+    let status: number;
+    try {
+      status = response.status;
+    } catch {
+      return fail('OIDC_JWKS_UNAVAILABLE');
+    }
+    if (status !== 200) {
       await cancelResponseBody(response);
       return fail('OIDC_JWKS_UNAVAILABLE');
     }
@@ -263,17 +455,19 @@ export class PinnedRemoteJwksProvider {
         'application/json',
         'application/jwk-set+json',
       ]);
-    } catch (error) {
-      if (error instanceof OidcClientError) {
-        return fail(
-          error.code === 'OIDC_TOKEN_RESPONSE_INVALID' ? 'OIDC_JWKS_INVALID' : error.code,
-        );
-      }
+    } catch {
       return fail('OIDC_JWKS_INVALID');
     }
-    const parsed = parseJwks(value, this.config);
-    this.cache = Object.freeze({ loadedAtEpochMs: now, value: parsed });
-    return parsed;
+    let parsed: JSONWebKeySet;
+    try {
+      parsed = parseJwks(value, this.config);
+    } catch {
+      return fail('OIDC_JWKS_INVALID');
+    }
+    return Object.freeze({
+      loadedAtEpochMs: currentEpochMilliseconds(this.now, 'OIDC_JWKS_UNAVAILABLE'),
+      value: parsed,
+    });
   }
 }
 
@@ -313,8 +507,7 @@ export class ManagedOidcClient implements OidcClientPort {
       url.searchParams.set('code_challenge', request.codeChallenge);
       url.searchParams.set('code_challenge_method', 'S256');
       return url;
-    } catch (error) {
-      if (error instanceof OidcClientError) throw error;
+    } catch {
       return fail('OIDC_AUTHORIZATION_REQUEST_INVALID');
     }
   }
@@ -371,10 +564,16 @@ export class ManagedOidcClient implements OidcClientPort {
     } catch {
       return fail('OIDC_TOKEN_SERVICE_UNAVAILABLE');
     }
-    if (response.status !== 200) {
+    let status: number;
+    try {
+      status = response.status;
+    } catch {
+      return fail('OIDC_TOKEN_RESPONSE_INVALID');
+    }
+    if (status !== 200) {
       await cancelResponseBody(response);
       return fail(
-        response.status === 400 ? 'OIDC_TOKEN_EXCHANGE_REJECTED' : 'OIDC_TOKEN_SERVICE_UNAVAILABLE',
+        status === 400 ? 'OIDC_TOKEN_EXCHANGE_REJECTED' : 'OIDC_TOKEN_SERVICE_UNAVAILABLE',
       );
     }
     let tokenResponse: Record<string, unknown>;
@@ -383,8 +582,7 @@ export class ManagedOidcClient implements OidcClientPort {
         await readBoundedJson(response, this.config.tokenResponseMaxBytes, ['application/json']),
         'OIDC_TOKEN_RESPONSE_INVALID',
       );
-    } catch (error) {
-      if (error instanceof OidcClientError) throw error;
+    } catch {
       return fail('OIDC_TOKEN_RESPONSE_INVALID');
     }
     const idToken = tokenResponse.id_token;
@@ -424,7 +622,12 @@ export class ManagedOidcClient implements OidcClientPort {
     }
 
     const verify = async (forceRefresh: boolean): Promise<JWTVerifyResult> => {
-      const jwks = await this.jwks.load(forceRefresh);
+      let jwks: JSONWebKeySet;
+      try {
+        jwks = await this.jwks.load(forceRefresh);
+      } catch {
+        return fail('OIDC_JWKS_UNAVAILABLE');
+      }
       return jose.jwtVerify(idToken, jose.createLocalJWKSet(jwks), {
         algorithms: [this.config.signingAlgorithm],
         issuer: this.config.issuer,
@@ -439,21 +642,21 @@ export class ManagedOidcClient implements OidcClientPort {
     try {
       verified = await verify(false);
     } catch (error) {
-      if (
-        error instanceof OidcClientError &&
-        (error.code === 'OIDC_JWKS_INVALID' || error.code === 'OIDC_JWKS_UNAVAILABLE')
-      ) {
+      if (jwksClientFailure(error)) {
         return fail('OIDC_JWKS_UNAVAILABLE');
       }
-      if (error instanceof jose.errors.JWKSNoMatchingKey) {
+      const noMatchingKey = (() => {
+        try {
+          return error instanceof jose.errors.JWKSNoMatchingKey;
+        } catch {
+          return false;
+        }
+      })();
+      if (noMatchingKey) {
         try {
           verified = await verify(true);
         } catch (refreshError) {
-          if (
-            refreshError instanceof OidcClientError &&
-            (refreshError.code === 'OIDC_JWKS_INVALID' ||
-              refreshError.code === 'OIDC_JWKS_UNAVAILABLE')
-          ) {
+          if (jwksClientFailure(refreshError)) {
             return fail('OIDC_JWKS_UNAVAILABLE');
           }
           return fail('OIDC_ID_TOKEN_INVALID');
@@ -464,7 +667,9 @@ export class ManagedOidcClient implements OidcClientPort {
     }
 
     const payload = verified.payload;
-    const nowEpochSeconds = Math.floor(this.now().getTime() / 1_000);
+    const nowEpochSeconds = Math.floor(
+      currentEpochMilliseconds(this.now, 'OIDC_ID_TOKEN_INVALID') / 1_000,
+    );
     const issuedAt = payload.iat;
     const expiresAt = payload.exp;
     const notBefore = payload.nbf;

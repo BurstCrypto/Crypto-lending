@@ -120,6 +120,12 @@ function jsonResponse(value: unknown, status = 200): Response {
   });
 }
 
+function revokedProxy(): object {
+  const { proxy, revoke } = Proxy.revocable({}, {});
+  revoke();
+  return proxy;
+}
+
 function clientWithResponses(
   config: OidcAuthenticationConfig,
   token: string,
@@ -380,6 +386,135 @@ describe('managed OIDC client', () => {
     expect(Object.isFrozen(loaded.keys)).toBe(true);
     expect(Object.isFrozen(loaded.keys[0])).toBe(true);
     expect(Object.isFrozen(loaded.keys[0]?.key_ops)).toBe(true);
+  });
+
+  it('coalesces concurrent normal and forced JWKS refreshes into one request', async () => {
+    const config = oidcConfig();
+    const keys = await fixture();
+    let releaseResponse: ((response: Response) => void) | undefined;
+    const fetcher = jest.fn(
+      () =>
+        new Promise<Response>((resolve) => {
+          releaseResponse = resolve;
+        }),
+    );
+    const provider = new PinnedRemoteJwksProvider(config, fetcher, () => NOW);
+
+    const normalLoad = provider.load();
+    const forcedLoad = provider.load(true);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    if (!releaseResponse) throw new Error('JWKS response release was not captured');
+    releaseResponse(jsonResponse(keys.jwks));
+
+    const [normal, forced] = await Promise.all([normalLoad, forcedLoad]);
+    expect(normal).toBe(forced);
+    await expect(provider.load()).resolves.toBe(normal);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it('sanitizes malformed JWKS response objects before provider details can escape', async () => {
+    const config = oidcConfig();
+    const canary = 'hostile-jwks-response-canary';
+    const response = Object.create(null) as Response;
+    Object.defineProperty(response, 'status', {
+      enumerable: true,
+      get: () => {
+        throw new Error(canary);
+      },
+    });
+    const provider = new PinnedRemoteJwksProvider(
+      config,
+      () => Promise.resolve(response),
+      () => NOW,
+    );
+
+    let captured: unknown;
+    try {
+      await provider.load();
+    } catch (error) {
+      captured = error;
+    }
+    expect(captured).toMatchObject({
+      code: 'OIDC_JWKS_UNAVAILABLE',
+      message: 'OIDC operation failed',
+    });
+    expect(String(captured)).not.toContain(canary);
+  });
+
+  it('sanitizes a revoked JWKS-provider rejection during token verification', async () => {
+    const config = oidcConfig();
+    const keys = await fixture();
+    const nonce = generateOpaqueAuthenticationSecret('oidc-nonce');
+    const token = await idToken(keys.privateKey, nonce);
+    const client = new ManagedOidcClient(
+      config,
+      () => Promise.resolve(jsonResponse({ id_token: token })),
+      { load: () => Promise.reject(revokedProxy()) },
+      () => NOW,
+    );
+
+    await expect(
+      client.exchangeAuthorizationCode({
+        code: 'authorization-code',
+        codeVerifier: generatePkceVerifier(),
+        expectedNonce: nonce,
+      }),
+    ).rejects.toMatchObject({
+      code: 'OIDC_JWKS_UNAVAILABLE',
+      message: 'OIDC operation failed',
+    });
+  });
+
+  it('rejects escaped duplicate token-response keys before JWT verification', async () => {
+    const config = oidcConfig();
+    const keys = await fixture();
+    const nonce = generateOpaqueAuthenticationSecret('oidc-nonce');
+    const token = await idToken(keys.privateKey, nonce);
+    const jwksFetch = jest.fn(() => Promise.resolve(jsonResponse(keys.jwks)));
+    const client = new ManagedOidcClient(
+      config,
+      (input) => {
+        if (input.toString() === config.tokenEndpoint) {
+          return Promise.resolve(
+            new Response(
+              `{"id_token":${JSON.stringify(token)},"\\u0069d_token":${JSON.stringify(token)}}`,
+              { status: 200, headers: { 'Content-Type': 'application/json' } },
+            ),
+          );
+        }
+        return jwksFetch();
+      },
+      undefined,
+      () => NOW,
+    );
+
+    await expect(
+      client.exchangeAuthorizationCode({
+        code: 'authorization-code',
+        codeVerifier: generatePkceVerifier(),
+        expectedNonce: nonce,
+      }),
+    ).rejects.toMatchObject({ code: 'OIDC_TOKEN_RESPONSE_INVALID' });
+    expect(jwksFetch).not.toHaveBeenCalled();
+  });
+
+  it('rejects escaped duplicate JWKS keys instead of choosing one value', async () => {
+    const config = oidcConfig();
+    const keys = await fixture();
+    const responseText = `{"keys":[],"\\u006beys":${JSON.stringify(keys.jwks.keys)}}`;
+    const provider = new PinnedRemoteJwksProvider(
+      config,
+      () =>
+        Promise.resolve(
+          new Response(responseText, {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+        ),
+      () => NOW,
+    );
+
+    await expect(provider.load()).rejects.toMatchObject({ code: 'OIDC_JWKS_INVALID' });
   });
 
   it('bounds token responses and never reflects secret response data', async () => {
