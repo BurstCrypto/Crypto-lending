@@ -238,6 +238,7 @@ const EXECUTION_BOUNDARIES = {
   ECS_WEB: 'web-server',
   ECS_API: 'api',
   ECS_WORKER: 'outbox-worker',
+  ECS_BALANCE_CONSUMER: 'balance-consumer',
   ECS_MIGRATION: 'migration-task',
 };
 const FIXED_SERVICE_DEPENDENCIES = {

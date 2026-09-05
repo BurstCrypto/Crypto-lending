@@ -264,10 +264,24 @@
           ],
           "properties": {
             "callerService": {
-              "enum": ["web-browser", "web-server", "api", "outbox-worker", "migration-task"]
+              "enum": [
+                "web-browser",
+                "web-server",
+                "api",
+                "outbox-worker",
+                "balance-consumer",
+                "migration-task"
+              ]
             },
             "executionBoundary": {
-              "enum": ["BROWSER_WEB", "ECS_WEB", "ECS_API", "ECS_WORKER", "ECS_MIGRATION"]
+              "enum": [
+                "BROWSER_WEB",
+                "ECS_WEB",
+                "ECS_API",
+                "ECS_WORKER",
+                "ECS_BALANCE_CONSUMER",
+                "ECS_MIGRATION"
+              ]
             },
             "identityReference": { "$ref": "#/$defs/referenceOrNotRun" },
             "networkControlReference": { "$ref": "#/$defs/referenceOrNotRun" },

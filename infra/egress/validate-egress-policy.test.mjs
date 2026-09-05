@@ -1357,6 +1357,42 @@ test('separates browser and ECS boundaries and binds ECS controls to the selecte
   assert(mismatch.errors.some((error) => error.includes('privateAddressResponse')));
 });
 
+test('reserves the balance-consumer egress boundary for the balance consumer', () => {
+  const policy = approvedPolicy();
+  const destination = policy.destinations[0];
+  destination.serviceAccess = {
+    callerService: 'balance-consumer',
+    executionBoundary: 'ECS_BALANCE_CONSUMER',
+    identityReference: 'iam-role:crypto-lending-balance-consumer-task',
+    networkControlReference: 'egress-proxy:approved-proxy-v1',
+    serviceBorrowing: 'PROHIBITED',
+  };
+  policy.architecture.selectedControl = 'EGRESS_PROXY_WITH_NAT';
+
+  const valid = validateEgressPolicy(policy, approvedOptions);
+  assert.deepEqual(valid.errors, []);
+
+  const workerBoundary = structuredClone(policy);
+  workerBoundary.destinations[0].serviceAccess.executionBoundary = 'ECS_WORKER';
+  const workerBoundaryResult = validateEgressPolicy(workerBoundary, approvedOptions);
+  assert.equal(workerBoundaryResult.ok, false);
+  assert(
+    workerBoundaryResult.errors.some((error) =>
+      error.includes('callerService must equal outbox-worker'),
+    ),
+  );
+
+  const workerCaller = structuredClone(policy);
+  workerCaller.destinations[0].serviceAccess.callerService = 'outbox-worker';
+  const workerCallerResult = validateEgressPolicy(workerCaller, approvedOptions);
+  assert.equal(workerCallerResult.ok, false);
+  assert(
+    workerCallerResult.errors.some((error) =>
+      error.includes('callerService must equal balance-consumer'),
+    ),
+  );
+});
+
 test('requires architecture envelopes to cover destination and monitoring costs and expiries', () => {
   const underfunded = approvedPolicy();
   underfunded.architecture.estimatedMonthlyFixedCostUsd = '0.00';
