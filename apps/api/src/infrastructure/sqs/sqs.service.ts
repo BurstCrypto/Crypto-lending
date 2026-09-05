@@ -41,6 +41,7 @@ interface PreparedBatchEntry {
 }
 
 const SQS_MAX_BATCH_MESSAGES = 10;
+const SQS_APPROXIMATE_RECEIVE_COUNT = /^[1-9][0-9]{0,15}$/u;
 
 interface RequestAbortScope {
   signal: AbortSignal;
@@ -119,6 +120,17 @@ function packSqsBatchEntries(entries: readonly PreparedBatchEntry[]): PreparedBa
 function batchEntryError(code: string | undefined, message: string | undefined): Error {
   const detail = [code, message].filter(Boolean).join(': ');
   return new Error(detail ? `SQS batch entry failed: ${detail}` : 'SQS batch entry failed');
+}
+
+function parseApproximateReceiveCount(value: unknown): number {
+  if (typeof value !== 'string' || !SQS_APPROXIMATE_RECEIVE_COUNT.test(value)) {
+    throw new Error('SQS ApproximateReceiveCount must be a positive safe integer');
+  }
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed)) {
+    throw new Error('SQS ApproximateReceiveCount must be a positive safe integer');
+  }
+  return parsed;
 }
 
 @Injectable()
@@ -323,7 +335,7 @@ export class SqsService implements OnApplicationShutdown, OutboxTransport {
           messageId: message.MessageId,
           receiptHandle: message.ReceiptHandle,
           body: message.Body,
-          receiveCount: Number(message.Attributes?.ApproximateReceiveCount ?? '1'),
+          receiveCount: parseApproximateReceiveCount(message.Attributes?.ApproximateReceiveCount),
           receivedAtMonotonicMs,
         },
       ];

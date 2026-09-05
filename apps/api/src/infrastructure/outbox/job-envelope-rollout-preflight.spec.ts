@@ -196,6 +196,10 @@ describe('job envelope rollout preflight', () => {
           detail:
             'Stored envelope keys do not exactly match the correlated or correlation-less legacy contract.',
         },
+        {
+          code: 'ENVELOPE_INVALID',
+          detail: 'Stored envelope does not satisfy the durable job-envelope contract.',
+        },
       ],
     });
     expect(superseded).toHaveProperty('correlationId', ids.correlation);

@@ -1,7 +1,10 @@
 import type { JobEnvelope, JobProcessingResult } from '../../infrastructure/sqs/sqs.types';
 
 export interface BalanceSyncConsumerQueueWorkerPort {
-  processOne(handler: (job: JobEnvelope) => Promise<void>): Promise<JobProcessingResult>;
+  processOne(
+    handler: (job: JobEnvelope) => Promise<void>,
+    abortSignal: AbortSignal,
+  ): Promise<JobProcessingResult>;
 }
 
 export interface BalanceSyncConsumerDispatcherPort {
@@ -66,7 +69,7 @@ export class BalanceSyncConsumerService {
       while (!signal.aborted) {
         let result: JobProcessingResult;
         try {
-          result = await this.worker.processOne((job) => this.dispatcher.dispatch(job));
+          result = await this.worker.processOne((job) => this.dispatcher.dispatch(job), signal);
         } catch {
           consecutiveFailures += 1;
           await this.waitAfterFailure(consecutiveFailures, signal);

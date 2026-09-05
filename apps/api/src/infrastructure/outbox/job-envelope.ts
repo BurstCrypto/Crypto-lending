@@ -44,6 +44,15 @@ const CORRELATION_KEYS = new Set([
   'ledgerEventId',
 ]);
 const JOB_OPTION_KEYS = new Set(['id', 'version', 'occurredAt', 'correlation']);
+const JOB_ENVELOPE_KEYS = new Set([
+  'id',
+  'kind',
+  'version',
+  'occurredAt',
+  'correlation',
+  'payload',
+]);
+const REQUIRED_JOB_ENVELOPE_KEYS = ['id', 'kind', 'version', 'occurredAt', 'payload'] as const;
 
 function isValidOpaqueId(value: unknown): value is string {
   return (
@@ -284,6 +293,13 @@ export function parseJobEnvelope<Payload = unknown>(value: unknown): JobEnvelope
       throw new Error('Invalid job envelope');
     }
     const descriptors = Object.getOwnPropertyDescriptors(value);
+    const ownKeys = Reflect.ownKeys(descriptors);
+    if (
+      ownKeys.some((key) => typeof key !== 'string' || !JOB_ENVELOPE_KEYS.has(key)) ||
+      REQUIRED_JOB_ENVELOPE_KEYS.some((key) => !Object.hasOwn(descriptors, key))
+    ) {
+      throw new Error('Invalid job envelope');
+    }
     const idDescriptor = Object.hasOwn(descriptors, 'id') ? descriptors.id : undefined;
     const kindDescriptor = Object.hasOwn(descriptors, 'kind') ? descriptors.kind : undefined;
     const versionDescriptor = Object.hasOwn(descriptors, 'version')

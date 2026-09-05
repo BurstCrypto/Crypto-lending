@@ -316,10 +316,32 @@ export class SqsJobWorker {
   /**
    * Processes at most one message. Failed messages are never deleted: SQS's
    * redrive policy moves them to the DLQ after maxReceiveCount deliveries.
+   * Cancellation applies only while receiving; once processing starts, the
+   * existing visibility and acknowledgement lifecycle runs to completion.
    */
-  async processOne<Payload>(handler: JobHandler<Payload>): Promise<JobProcessingResult> {
-    const [message] = await this.sqs.receive(this.queueUrl);
-    if (!message) {
+  async processOne<Payload>(
+    handler: JobHandler<Payload>,
+    abortSignal?: AbortSignal,
+  ): Promise<JobProcessingResult> {
+    if (abortSignal?.aborted) {
+      return { status: 'idle' };
+    }
+
+    let messages: ReceivedQueueMessage[];
+    try {
+      messages =
+        abortSignal === undefined
+          ? await this.sqs.receive(this.queueUrl)
+          : await this.sqs.receive(this.queueUrl, 1, 10, abortSignal);
+    } catch (error) {
+      if (abortSignal?.aborted) {
+        return { status: 'idle' };
+      }
+      throw error;
+    }
+
+    const [message] = messages;
+    if (abortSignal?.aborted || !message) {
       return { status: 'idle' };
     }
 

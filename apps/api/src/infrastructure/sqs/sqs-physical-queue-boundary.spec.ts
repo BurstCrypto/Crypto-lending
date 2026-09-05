@@ -1,7 +1,10 @@
 import { performance } from 'node:perf_hooks';
 
 import {
+  ChangeMessageVisibilityCommand,
+  DeleteMessageCommand,
   GetQueueAttributesCommand,
+  ReceiveMessageCommand,
   SendMessageBatchCommand,
   SendMessageCommand,
   type SQSClient,
@@ -301,6 +304,252 @@ describe('dedicated balance-sync physical SQS boundary', () => {
     );
     expect(handler).toHaveBeenCalledTimes(1);
   });
+
+  it('passes cancellation to a balance long poll and drops a message when abort wins the race', async () => {
+    const current = config();
+    const controller = new AbortController();
+    const envelope = balanceMessage().envelope as JobEnvelope;
+    const message = {
+      messageId: 'message-cancelled-balance',
+      receiptHandle: 'receipt-cancelled-balance',
+      body: JSON.stringify(envelope),
+      receiveCount: 1,
+      receivedAtMonotonicMs: performance.now(),
+    };
+    let resolveReceive: ((messages: (typeof message)[]) => void) | undefined;
+    const sqs = {
+      receive: jest.fn(
+        () =>
+          new Promise<(typeof message)[]>((resolve) => {
+            resolveReceive = resolve;
+          }),
+      ),
+      parseEnvelope: jest.fn().mockReturnValue(envelope),
+      changeVisibility: jest.fn().mockResolvedValue(undefined),
+      delete: jest.fn().mockResolvedValue(undefined),
+    } as unknown as SqsService;
+    const handler = jest.fn().mockResolvedValue(undefined);
+    const processing = new SqsJobWorker(sqs, current, undefined, 'balance').processOne(
+      handler,
+      controller.signal,
+    );
+
+    expect(sqs.receive).toHaveBeenCalledWith(current.sqs.balanceQueueUrl, 1, 10, controller.signal);
+    controller.abort();
+    resolveReceive?.([message]);
+
+    await expect(processing).resolves.toEqual({ status: 'idle' });
+    expect(sqs.parseEnvelope).not.toHaveBeenCalled();
+    expect(handler).not.toHaveBeenCalled();
+    expect(sqs.changeVisibility).not.toHaveBeenCalled();
+    expect(sqs.delete).not.toHaveBeenCalled();
+  });
+
+  it('treats an aborted balance long-poll rejection as an idle shutdown', async () => {
+    const current = config();
+    const controller = new AbortController();
+    const sqs = {
+      receive: jest.fn(
+        (
+          _queueUrl: string,
+          _maxMessages: number,
+          _waitTimeSeconds: number,
+          abortSignal: AbortSignal,
+        ) =>
+          new Promise<never>((_resolve, reject) => {
+            abortSignal.addEventListener('abort', () => reject(new Error('receive aborted')), {
+              once: true,
+            });
+          }),
+      ),
+      parseEnvelope: jest.fn(),
+      changeVisibility: jest.fn(),
+      delete: jest.fn(),
+    } as unknown as SqsService;
+    const handler = jest.fn().mockResolvedValue(undefined);
+    const processing = new SqsJobWorker(sqs, current, undefined, 'balance').processOne(
+      handler,
+      controller.signal,
+    );
+
+    controller.abort();
+
+    await expect(processing).resolves.toEqual({ status: 'idle' });
+    expect(handler).not.toHaveBeenCalled();
+    expect(sqs.changeVisibility).not.toHaveBeenCalled();
+    expect(sqs.delete).not.toHaveBeenCalled();
+  });
+
+  it('preserves acknowledgement after a received balance job becomes in flight', async () => {
+    const current = config();
+    const controller = new AbortController();
+    const envelope = balanceMessage().envelope as JobEnvelope;
+    const message = {
+      messageId: 'message-in-flight-balance',
+      receiptHandle: 'receipt-in-flight-balance',
+      body: JSON.stringify(envelope),
+      receiveCount: 1,
+      receivedAtMonotonicMs: performance.now(),
+    };
+    const sqs = {
+      receive: jest.fn().mockResolvedValue([message]),
+      parseEnvelope: jest.fn().mockReturnValue(envelope),
+      changeVisibility: jest.fn().mockResolvedValue(undefined),
+      delete: jest.fn().mockResolvedValue(undefined),
+    } as unknown as SqsService;
+    const handler = jest.fn(async () => controller.abort());
+
+    await expect(
+      new SqsJobWorker(sqs, current, undefined, 'balance').processOne(handler, controller.signal),
+    ).resolves.toMatchObject({ status: 'completed', jobId: envelope.id });
+
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(sqs.delete).toHaveBeenCalledWith(
+      message,
+      current.sqs.balanceQueueUrl,
+      expect.any(AbortSignal),
+    );
+  });
+
+  it('accepts an exact raw balance envelope with a positive receive count before deletion', async () => {
+    const current = config();
+    const envelope = balanceMessage().envelope as JobEnvelope;
+    const commands: unknown[] = [];
+    const client = {
+      send: jest.fn((command: unknown): Promise<unknown> => {
+        commands.push(command);
+        if (command instanceof ReceiveMessageCommand) {
+          return Promise.resolve({
+            Messages: [
+              {
+                MessageId: 'message-exact-raw',
+                ReceiptHandle: 'receipt-exact-raw',
+                Body: JSON.stringify(envelope),
+                Attributes: { ApproximateReceiveCount: '2' },
+              },
+            ],
+          });
+        }
+        if (
+          command instanceof ChangeMessageVisibilityCommand ||
+          command instanceof DeleteMessageCommand
+        ) {
+          return Promise.resolve({});
+        }
+        return Promise.reject(new Error('Unexpected SQS command'));
+      }),
+      destroy: jest.fn(),
+    };
+    const handler = jest.fn().mockResolvedValue(undefined);
+
+    const result = await new SqsJobWorker(
+      new SqsService(client as unknown as SQSClient, current),
+      current,
+      undefined,
+      'balance',
+    ).processOne(handler);
+
+    expect(result).toMatchObject({ status: 'completed', jobId: envelope.id });
+    expect(handler).toHaveBeenCalledWith(envelope);
+    expect(commands.some((command) => command instanceof DeleteMessageCommand)).toBe(true);
+  });
+
+  it('rejects an extra raw envelope key before handler invocation or deletion', async () => {
+    const current = config();
+    const envelope = balanceMessage().envelope as JobEnvelope;
+    const commands: unknown[] = [];
+    const client = {
+      send: jest.fn((command: unknown): Promise<unknown> => {
+        commands.push(command);
+        if (command instanceof ReceiveMessageCommand) {
+          return Promise.resolve({
+            Messages: [
+              {
+                MessageId: 'message-extra-raw-key',
+                ReceiptHandle: 'receipt-extra-raw-key',
+                Body: JSON.stringify({ ...envelope, authorization: 'must-not-pass' }),
+                Attributes: { ApproximateReceiveCount: '1' },
+              },
+            ],
+          });
+        }
+        if (command instanceof ChangeMessageVisibilityCommand) return Promise.resolve({});
+        if (command instanceof DeleteMessageCommand) return Promise.resolve({});
+        return Promise.reject(new Error('Unexpected SQS command'));
+      }),
+      destroy: jest.fn(),
+    };
+    const handler = jest.fn().mockResolvedValue(undefined);
+
+    const result = await new SqsJobWorker(
+      new SqsService(client as unknown as SQSClient, current),
+      current,
+      undefined,
+      'balance',
+    ).processOne(handler);
+
+    expect(result).toMatchObject({
+      status: 'retry-scheduled',
+      errorCode: 'JOB_ENVELOPE_INVALID',
+    });
+    expect(handler).not.toHaveBeenCalled();
+    expect(commands.some((command) => command instanceof ChangeMessageVisibilityCommand)).toBe(
+      true,
+    );
+    expect(commands.some((command) => command instanceof DeleteMessageCommand)).toBe(false);
+  });
+
+  it.each([
+    ['missing', undefined],
+    ['zero', '0'],
+    ['negative', '-1'],
+    ['fractional', '1.5'],
+    ['non-canonical', '01'],
+    ['unsafe', '9007199254740992'],
+  ] as const)(
+    'rejects %s ApproximateReceiveCount before handler invocation or deletion',
+    async (_name, rawReceiveCount) => {
+      const current = config();
+      const envelope = balanceMessage().envelope as JobEnvelope;
+      const commands: unknown[] = [];
+      const client = {
+        send: jest.fn((command: unknown): Promise<unknown> => {
+          commands.push(command);
+          if (command instanceof ReceiveMessageCommand) {
+            return Promise.resolve({
+              Messages: [
+                {
+                  MessageId: 'message-invalid-receive-count',
+                  ReceiptHandle: 'receipt-invalid-receive-count',
+                  Body: JSON.stringify(envelope),
+                  ...(rawReceiveCount === undefined
+                    ? {}
+                    : { Attributes: { ApproximateReceiveCount: rawReceiveCount } }),
+                },
+              ],
+            });
+          }
+          return Promise.resolve({});
+        }),
+        destroy: jest.fn(),
+      };
+      const handler = jest.fn().mockResolvedValue(undefined);
+
+      await expect(
+        new SqsJobWorker(
+          new SqsService(client as unknown as SQSClient, current),
+          current,
+          undefined,
+          'balance',
+        ).processOne(handler),
+      ).rejects.toThrow('SQS ApproximateReceiveCount must be a positive safe integer');
+
+      expect(handler).not.toHaveBeenCalled();
+      expect(commands).toHaveLength(1);
+      expect(commands[0]).toBeInstanceOf(ReceiveMessageCommand);
+      expect(commands.some((command) => command instanceof DeleteMessageCommand)).toBe(false);
+    },
+  );
 
   it('prevents cross-queue handler invocation and keeps retry visibility on the selected queue', async () => {
     const current = config();

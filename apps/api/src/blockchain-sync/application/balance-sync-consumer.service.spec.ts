@@ -58,7 +58,44 @@ describe('BalanceSyncConsumerService', () => {
     await service.run(controller.signal);
 
     expect(processOne).toHaveBeenCalledTimes(1);
+    expect(processOne).toHaveBeenCalledWith(expect.any(Function), controller.signal);
     expect(configuredDispatcher.dispatch).toHaveBeenCalledWith(JOB);
+  });
+
+  it('propagates cancellation into a pending worker poll and exits without dispatch or backoff', async () => {
+    const controller = new AbortController();
+    const configuredDispatcher = dispatcher();
+    const wait = jest.fn<
+      ReturnType<BalanceSyncConsumerWait>,
+      Parameters<BalanceSyncConsumerWait>
+    >();
+    const processOne = jest.fn(
+      async (
+        _handler: (job: JobEnvelope) => Promise<void>,
+        abortSignal: AbortSignal,
+      ): Promise<JobProcessingResult> =>
+        new Promise((_resolve, reject) => {
+          abortSignal.addEventListener('abort', () => reject(new Error('poll aborted')), {
+            once: true,
+          });
+        }),
+    );
+    const service = new BalanceSyncConsumerService(
+      { processOne },
+      configuredDispatcher,
+      POLICY,
+      wait,
+    );
+
+    const running = service.run(controller.signal);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(processOne).toHaveBeenCalledWith(expect.any(Function), controller.signal);
+
+    controller.abort();
+    await expect(running).resolves.toBeUndefined();
+
+    expect(configuredDispatcher.dispatch).not.toHaveBeenCalled();
+    expect(wait).not.toHaveBeenCalled();
   });
 
   it('waits on idle and resolves promptly when aborted during the default wait', async () => {
