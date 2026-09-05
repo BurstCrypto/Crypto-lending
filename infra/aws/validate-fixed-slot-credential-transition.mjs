@@ -90,7 +90,14 @@ const EXACT_KEYS = Object.freeze({
     'workloadTemplateSha256',
   ],
   predecessor: ['stateSha256', 'transitionSha256'],
-  state: ['operatorMode', 'redisOperatorSecretVersionId', 'apiDatabase', 'workerDatabase', 'redis'],
+  state: [
+    'operatorMode',
+    'redisOperatorSecretVersionId',
+    'redisOperatorUsedVersionIds',
+    'apiDatabase',
+    'workerDatabase',
+    'redis',
+  ],
   scope: ['phase', 'slots', 'preparation', 'overlap'],
   slots: ['a', 'b'],
   slot: ['generation', 'currentVersionId', 'usedVersionIds'],
@@ -169,7 +176,7 @@ function sha256(value) {
   return createHash('sha256').update(value, 'utf8').digest('hex');
 }
 
-function stateSha256(state) {
+export function fixedSlotCredentialStateSha256(state) {
   return sha256(canonicalizeFixedSlotValue(state));
 }
 
@@ -314,13 +321,33 @@ function validateState(state, allowUnpinned, now, label, errors) {
       `${label}.redisOperatorSecretVersionId may be unpinned only in the reviewed adoption source state.`,
     );
   }
+  if (
+    !Array.isArray(state.redisOperatorUsedVersionIds) ||
+    state.redisOperatorUsedVersionIds.length > MAX_SLOT_GENERATIONS ||
+    state.redisOperatorUsedVersionIds.some(
+      (value) => typeof value !== 'string' || !VERSION_ID_PATTERN.test(value),
+    ) ||
+    new Set(state.redisOperatorUsedVersionIds).size !== state.redisOperatorUsedVersionIds.length
+  ) {
+    errors.push(
+      `${label}.redisOperatorUsedVersionIds must be a bounded unique append-only version history.`,
+    );
+  } else if (state.redisOperatorSecretVersionId === 'UNPINNED') {
+    if (!allowUnpinned || state.redisOperatorUsedVersionIds.length !== 0) {
+      errors.push(`${label} may use an empty operator history only in the adoption source state.`);
+    }
+  } else if (
+    state.redisOperatorUsedVersionIds.length < 1 ||
+    state.redisOperatorSecretVersionId !== state.redisOperatorUsedVersionIds.at(-1)
+  ) {
+    errors.push(`${label} must bind the current operator version to its append-only history.`);
+  }
   for (const scopeName of SCOPE_NAMES) {
     validateScope(state[scopeName], allowUnpinned, now, `${label}.${scopeName}`, errors);
   }
-  const versions = [];
-  if (VERSION_ID_PATTERN.test(state.redisOperatorSecretVersionId ?? '')) {
-    versions.push(state.redisOperatorSecretVersionId);
-  }
+  const versions = Array.isArray(state.redisOperatorUsedVersionIds)
+    ? [...state.redisOperatorUsedVersionIds]
+    : [];
   for (const scopeName of SCOPE_NAMES) {
     for (const slotName of ['a', 'b']) {
       const history = state?.[scopeName]?.slots?.[slotName]?.usedVersionIds;
@@ -330,6 +357,34 @@ function validateState(state, allowUnpinned, now, label, errors) {
   if (new Set(versions).size !== versions.length) {
     errors.push(`${label} must not reuse a version identity across any slot or workload.`);
   }
+}
+
+/**
+ * Shared, fail-closed structural check for consumers that must bind the exact
+ * pinned fixed-slot state and use this validator's established state hash.
+ */
+export function validatePinnedFixedSlotCredentialState(state, options = {}) {
+  const errors = [];
+  let stateSha256;
+  try {
+    const now = options?.now;
+    if (!(now instanceof Date) || !Number.isFinite(now.getTime())) {
+      errors.push('Pinned fixed-slot state validation requires an explicit valid instant.');
+    } else {
+      validateState(state, false, new Date(now.getTime()), 'state', errors);
+    }
+    if (errors.length === 0) {
+      stateSha256 = fixedSlotCredentialStateSha256(state);
+    }
+  } catch {
+    errors.length = 0;
+    errors.push('Pinned fixed-slot state is malformed.');
+  }
+  return Object.freeze({
+    ok: errors.length === 0,
+    stateSha256: errors.length === 0 ? stateSha256 : undefined,
+    errors: Object.freeze(errors),
+  });
 }
 
 function validateDeployment(deployment, options, errors) {
@@ -619,6 +674,8 @@ function isUntrackedInitialState(state) {
   return (
     state?.operatorMode === 'DISABLED' &&
     state?.redisOperatorSecretVersionId === 'UNPINNED' &&
+    Array.isArray(state?.redisOperatorUsedVersionIds) &&
+    state.redisOperatorUsedVersionIds.length === 0 &&
     SCOPE_NAMES.every((scopeName) => {
       const scope = state?.[scopeName];
       return (
@@ -643,6 +700,9 @@ function isCanonicalAdoptionTarget(state) {
   return (
     state?.operatorMode === 'DISABLED' &&
     VERSION_ID_PATTERN.test(state?.redisOperatorSecretVersionId ?? '') &&
+    Array.isArray(state?.redisOperatorUsedVersionIds) &&
+    state.redisOperatorUsedVersionIds.length === 1 &&
+    state.redisOperatorUsedVersionIds[0] === state.redisOperatorSecretVersionId &&
     SCOPE_NAMES.every((scopeName) => {
       const scope = state?.[scopeName];
       return (
@@ -836,7 +896,7 @@ export function validateFixedSlotCredentialTransition(record, options = {}) {
       ...ZERO_CALLS,
     };
   }
-  if (record.schemaVersion !== 2) errors.push('record.schemaVersion must be 2.');
+  if (record.schemaVersion !== 3) errors.push('record.schemaVersion must be 3.');
 
   if (mode === 'example') {
     validateExampleRecord(record, now, errors);
@@ -868,7 +928,7 @@ export function validateFixedSlotCredentialTransition(record, options = {}) {
     } else {
       validateState(record.currentState, false, now, 'record.currentState', errors);
       validateState(record.targetState, false, now, 'record.targetState', errors);
-      const currentHash = stateSha256(record.currentState);
+      const currentHash = fixedSlotCredentialStateSha256(record.currentState);
       if (
         record.predecessor?.stateSha256 !== currentHash ||
         !SHA256_PATTERN.test(record.predecessor?.transitionSha256 ?? '')
@@ -886,6 +946,16 @@ export function validateFixedSlotCredentialTransition(record, options = {}) {
       ) {
         errors.push(
           'Fixed-slot credential transitions cannot change the Redis operator secret version after adoption.',
+        );
+      }
+      if (
+        !isDeepStrictEqual(
+          record.currentState?.redisOperatorUsedVersionIds,
+          record.targetState?.redisOperatorUsedVersionIds,
+        )
+      ) {
+        errors.push(
+          'Fixed-slot credential transitions cannot change the Redis operator version history.',
         );
       }
       const changedScopes = SCOPE_NAMES.filter(
@@ -909,8 +979,12 @@ export function validateFixedSlotCredentialTransition(record, options = {}) {
   }
 
   const canonicalSha256 = sha256(canonicalizeFixedSlotValue(record));
-  const currentStateSha256 = record.currentState ? stateSha256(record.currentState) : undefined;
-  const targetStateSha256 = record.targetState ? stateSha256(record.targetState) : undefined;
+  const currentStateSha256 = record.currentState
+    ? fixedSlotCredentialStateSha256(record.currentState)
+    : undefined;
+  const targetStateSha256 = record.targetState
+    ? fixedSlotCredentialStateSha256(record.targetState)
+    : undefined;
   const ok = errors.length === 0;
   return {
     ok,

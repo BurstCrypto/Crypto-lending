@@ -18,6 +18,7 @@ import test from 'node:test';
 import {
   canonicalizeFixedSlotValue,
   DEFAULT_FIXED_SLOT_TRANSITION_RECORD,
+  fixedSlotCredentialStateSha256,
   FIXED_SLOT_TRANSITION_ARGUMENT_ERROR,
   FIXED_SLOT_TRANSITION_INPUT_ERROR,
   loadFixedSlotCredentialTransitionRecord,
@@ -26,6 +27,7 @@ import {
   MAX_FIXED_SLOT_TRANSITION_RECORD_BYTES,
   MAX_SLOT_GENERATIONS,
   validateFixedSlotCredentialTransition,
+  validatePinnedFixedSlotCredentialState,
 } from './validate-fixed-slot-credential-transition.mjs';
 
 const validatorPath = join(import.meta.dirname, 'validate-fixed-slot-credential-transition.mjs');
@@ -93,9 +95,11 @@ function scopeState(scope, phase = 'A_ONLY') {
 }
 
 function trackedState(phases = {}) {
+  const operatorVersionId = versionId('redisOperator', 'credential', 1);
   return {
     operatorMode: 'DISABLED',
-    redisOperatorSecretVersionId: versionId('redisOperator', 'credential', 1),
+    redisOperatorSecretVersionId: operatorVersionId,
+    redisOperatorUsedVersionIds: [operatorVersionId],
     apiDatabase: scopeState('apiDatabase', phases.apiDatabase),
     workerDatabase: scopeState('workerDatabase', phases.workerDatabase),
     redis: scopeState('redis', phases.redis),
@@ -209,7 +213,7 @@ function evidence(operation) {
 
 function envelope(currentState, targetState, operation) {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     status: 'APPROVED',
     recordId: `rotation:${operation.toLowerCase()}:one`,
     preparedAt: PREPARED_AT,
@@ -417,6 +421,10 @@ test('accepts canonical adoption and binds both state digests', () => {
   assertAccepted(record, 'adopt', 'ADOPT_AND_PIN');
   assert.equal(result.currentStateSha256, canonicalStateHash(record.currentState));
   assert.equal(result.targetStateSha256, canonicalStateHash(record.targetState));
+  assert.deepEqual(record.currentState.redisOperatorUsedVersionIds, []);
+  assert.deepEqual(record.targetState.redisOperatorUsedVersionIds, [
+    record.targetState.redisOperatorSecretVersionId,
+  ]);
   assert.match(result.canonicalSha256, /^[a-f0-9]{64}$/u);
   assert.equal(result.plan.scope, 'ALL_CREDENTIAL_VERSION_BINDINGS');
   assert.equal(result.plan.phaseParameter, 'ALL_SEVEN_VERSION_SELECTORS');
@@ -475,6 +483,8 @@ test('core operational validation rejects omitted external identity bindings or 
 test('canonical hashes use locale-independent code-unit key ordering', () => {
   assert.equal(canonicalizeFixedSlotValue({ '\u00e4': 3, z: 2, A: 1 }), '{"A":1,"z":2,"\u00e4":3}');
   assert.equal(validatorSource.includes('localeCompare'), false);
+  const state = trackedState();
+  assert.equal(fixedSlotCredentialStateSha256(state), canonicalStateHash(state));
 });
 
 test('accepts preparation and abort for either inactive slot in every scope', () => {
@@ -582,6 +592,9 @@ test('rejects replay of any prior, operator, or cross-workload version identity'
   const operatorReplay = adoptionRecord();
   operatorReplay.targetState.redisOperatorSecretVersionId =
     operatorReplay.targetState.apiDatabase.slots.a.currentVersionId;
+  operatorReplay.targetState.redisOperatorUsedVersionIds = [
+    operatorReplay.targetState.redisOperatorSecretVersionId,
+  ];
   assertRejected(operatorReplay, 'adopt', /reuse a version identity/u);
 });
 
@@ -692,8 +705,8 @@ test('rejects schema drift, credential-bearing fields, ambiguous JSON, and fake 
   assertRejected(duplicateEvidence, 'transition', /distinct SHA-256 bindings/u);
 
   const ambiguous = JSON.stringify(preparationRecord('apiDatabase')).replace(
-    '{"schemaVersion":2,',
-    '{"schemaVersion":2,"schemaVersion":2,',
+    '{"schemaVersion":3,',
+    '{"schemaVersion":3,"schemaVersion":3,',
   );
   withLocalRecord(ambiguous, (path) => assertInputRejected(path));
 });
@@ -727,10 +740,10 @@ test('rejects noncanonical adoption, unpinned operator adoption, duplicate initi
   assertRejected(exampleRecord, 'transition', /Operational record status|record approval/u);
 });
 
-test('rejects legacy schema and malformed or omitted Redis operator version state', () => {
+test('rejects schema v2 and malformed or omitted Redis operator version state', () => {
   const legacy = preparationRecord('apiDatabase');
-  legacy.schemaVersion = 1;
-  assertRejected(legacy, 'transition', /schemaVersion must be 2/u);
+  legacy.schemaVersion = 2;
+  assertRejected(legacy, 'transition', /schemaVersion must be 3/u);
 
   for (const invalid of [undefined, 'AWSCURRENT', 'short', `${'a'.repeat(31)}!`]) {
     const record = preparationRecord('apiDatabase');
@@ -741,6 +754,146 @@ test('rejects legacy schema and malformed or omitted Redis operator version stat
       record,
       'transition',
       /exact reviewed keys|redisOperatorSecretVersionId must be UNPINNED or one exact/u,
+    );
+  }
+});
+
+test('fixed-slot transitions preserve the exact Redis operator history', () => {
+  const accepted = preparationRecord('apiDatabase');
+  assertAccepted(accepted, 'transition', 'PREPARE_INACTIVE');
+  assert.deepEqual(
+    accepted.targetState.redisOperatorUsedVersionIds,
+    accepted.currentState.redisOperatorUsedVersionIds,
+  );
+
+  const appended = preparationRecord('apiDatabase');
+  const successor = versionId('redisOperator', 'credential', 2);
+  appended.targetState.redisOperatorSecretVersionId = successor;
+  appended.targetState.redisOperatorUsedVersionIds.push(successor);
+  assertRejected(
+    appended,
+    'transition',
+    /cannot change the Redis operator secret version|cannot change the Redis operator version history/u,
+  );
+
+  const truncated = preparationRecord('apiDatabase');
+  truncated.targetState.redisOperatorUsedVersionIds = [];
+  assertRejected(truncated, 'transition', /current operator version|operator version history/u);
+
+  const reordered = preparationRecord('apiDatabase');
+  reordered.currentState.redisOperatorUsedVersionIds.unshift(
+    versionId('redisOperator', 'credential', 2),
+  );
+  reordered.predecessor.stateSha256 = canonicalStateHash(reordered.currentState);
+  assertRejected(reordered, 'transition', /current operator version|operator version history/u);
+});
+
+test('rejects omitted, malformed, mixed, duplicate, and mismatched operator histories', () => {
+  const mutations = [
+    (state) => delete state.redisOperatorUsedVersionIds,
+    (state) => {
+      state.redisOperatorUsedVersionIds = 'AWSCURRENT';
+    },
+    (state) => {
+      state.redisOperatorUsedVersionIds = [state.redisOperatorSecretVersionId, 7];
+    },
+    (state) => {
+      state.redisOperatorUsedVersionIds = [
+        state.redisOperatorSecretVersionId,
+        state.redisOperatorSecretVersionId,
+      ];
+    },
+    (state) => {
+      state.redisOperatorUsedVersionIds = [versionId('redisOperator', 'credential', 2)];
+    },
+  ];
+  for (const mutate of mutations) {
+    const record = preparationRecord('redis');
+    mutate(record.currentState);
+    record.targetState.redisOperatorUsedVersionIds = structuredClone(
+      record.currentState.redisOperatorUsedVersionIds,
+    );
+    record.predecessor.stateSha256 = canonicalStateHash(record.currentState);
+    assertRejected(
+      record,
+      'transition',
+      /exact reviewed keys|redisOperatorUsedVersionIds|current operator version/u,
+    );
+  }
+});
+
+test('operator history rejects replay and participates in global version uniqueness', () => {
+  const replay = preparationRecord('apiDatabase');
+  replay.currentState.redisOperatorUsedVersionIds = [
+    replay.currentState.redisOperatorSecretVersionId,
+    replay.currentState.redisOperatorSecretVersionId,
+  ];
+  replay.targetState.redisOperatorUsedVersionIds = [
+    ...replay.currentState.redisOperatorUsedVersionIds,
+  ];
+  replay.predecessor.stateSha256 = canonicalStateHash(replay.currentState);
+  assertRejected(replay, 'transition', /version identity|state-machine step/u);
+
+  const duplicate = preparationRecord('workerDatabase');
+  const slotVersion = duplicate.currentState.apiDatabase.slots.a.currentVersionId;
+  duplicate.currentState.redisOperatorUsedVersionIds = [
+    slotVersion,
+    duplicate.currentState.redisOperatorSecretVersionId,
+  ];
+  duplicate.targetState.redisOperatorUsedVersionIds = [
+    ...duplicate.currentState.redisOperatorUsedVersionIds,
+  ];
+  duplicate.predecessor.stateSha256 = canonicalStateHash(duplicate.currentState);
+  assertRejected(duplicate, 'transition', /reuse a version identity/u);
+});
+
+test('pinned-state helper is total, fail-closed, frozen, and uses the shared hash', () => {
+  const state = trackedState();
+  const accepted = validatePinnedFixedSlotCredentialState(state, { now: NOW });
+  assert.equal(accepted.ok, true, accepted.errors.join('\n'));
+  assert.equal(accepted.stateSha256, fixedSlotCredentialStateSha256(state));
+  assert.equal(Object.isFrozen(accepted), true);
+  assert.equal(Object.isFrozen(accepted.errors), true);
+
+  const unpinned = validatePinnedFixedSlotCredentialState(untrackedState(), { now: NOW });
+  assert.equal(unpinned.ok, false);
+  assert.equal(unpinned.stateSha256, undefined);
+
+  const cyclic = trackedState();
+  cyclic.apiDatabase.loop = cyclic;
+  const throwingOptions = new Proxy(
+    {},
+    {
+      get() {
+        throw new Error('sensitive-option-value');
+      },
+    },
+  );
+  const throwingState = new Proxy(
+    {},
+    {
+      ownKeys() {
+        throw new Error('sensitive-state-value');
+      },
+    },
+  );
+  for (const [candidate, options] of [
+    [null, { now: NOW }],
+    [42, { now: NOW }],
+    [cyclic, { now: NOW }],
+    [throwingState, { now: NOW }],
+    [state, null],
+    [state, throwingOptions],
+  ]) {
+    let result;
+    assert.doesNotThrow(() => {
+      result = validatePinnedFixedSlotCredentialState(candidate, options);
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.stateSha256, undefined);
+    assert.equal(
+      result.errors.some((error) => error.includes('sensitive-')),
+      false,
     );
   }
 });
