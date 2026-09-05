@@ -529,6 +529,17 @@ export function MainnetWalletOwnership({
   const rosterHeadingReference = useRef<HTMLHeadingElement | null>(null);
   const rosterClient = useMemo(() => configured.createRosterClient(), [configured]);
 
+  const invalidateWalletOperation = useCallback((): void => {
+    walletOperationGenerationReference.current += 1;
+    walletOperationReference.current?.abort();
+    walletOperationReference.current = null;
+    try {
+      runtimeReference.current?.cancel();
+    } catch {
+      // Local state still fails closed if an injected wallet cleanup hook fails.
+    }
+  }, []);
+
   const invalidateRoster = useCallback((): void => {
     rosterRequestGenerationReference.current += 1;
     rosterRequestReference.current?.abort();
@@ -540,9 +551,16 @@ export function MainnetWalletOwnership({
   }, []);
 
   const invalidateSensitiveWalletData = useCallback((): void => {
+    invalidateWalletOperation();
     invalidateRoster();
+    walletReturnFocusReference.current = null;
+    pendingWalletFocusReference.current = null;
+    setBusy(false);
+    setConnection(null);
     setResult(null);
-  }, [invalidateRoster]);
+    setFailure(null);
+    setWalletAnnouncement('');
+  }, [invalidateRoster, invalidateWalletOperation]);
 
   useSensitiveViewRevalidation({
     invalidate: invalidateSensitiveWalletData,
@@ -705,17 +723,6 @@ export function MainnetWalletOwnership({
       walletOperationReference.current === controller &&
       walletOperationGenerationReference.current === generation
     );
-  }
-
-  function invalidateWalletOperation(): void {
-    walletOperationGenerationReference.current += 1;
-    walletOperationReference.current?.abort();
-    walletOperationReference.current = null;
-    try {
-      runtimeReference.current?.cancel();
-    } catch {
-      // The local chooser still resets if an injected wallet cleanup hook fails.
-    }
   }
 
   function resetWalletChoice(announcement: string): void {

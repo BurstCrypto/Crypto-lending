@@ -127,6 +127,7 @@ afterEach(() => {
   cleanup();
   vi.useRealTimers();
   vi.restoreAllMocks();
+  Reflect.deleteProperty(document, 'visibilityState');
 });
 
 describe('MainnetWalletOwnership', () => {
@@ -349,6 +350,151 @@ describe('MainnetWalletOwnership', () => {
       screen.getByText('Wallet choice cleared. Choose a wallet on Ethereum.'),
     ).toBeInTheDocument();
     expect(metamask).toHaveFocus();
+  });
+
+  it('cancels a hidden pending connection and requires a new explicit connection after resume', async () => {
+    const pendingConnection = Promise.withResolvers<MainnetWalletConnectionChoice>();
+    let operationSignal: AbortSignal | undefined;
+    const connect = vi
+      .fn<MainnetWalletOwnershipRuntime['connect']>()
+      .mockImplementationOnce((_chainId, _connectorId, _selectionId, signal) => {
+        operationSignal = signal;
+        return pendingConnection.promise;
+      })
+      .mockResolvedValueOnce(EVM_CONNECTION);
+    const runtime = runtimeHarness({ connect });
+    render(<MainnetWalletOwnership dependencies={dependencies(runtime)} />);
+
+    await screen.findByText('No wallets are verified for this account yet.');
+    fireEvent.click(screen.getByRole('button', { name: 'MetaMask' }));
+    expect(await screen.findByText(/Follow the wallet prompt/u)).toBeVisible();
+    expect(operationSignal).toBeDefined();
+    vi.useFakeTimers();
+
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'hidden',
+    });
+    act(() => document.dispatchEvent(new Event('visibilitychange')));
+
+    expect(operationSignal?.aborted).toBe(true);
+    expect(runtime.cancel).toHaveBeenCalledOnce();
+    expect(screen.queryByText(/Follow the wallet prompt/u)).toBeNull();
+    expect(screen.queryByText('MetaMask connected. Choose an account to verify.')).toBeNull();
+
+    await act(async () => {
+      pendingConnection.resolve(EVM_CONNECTION);
+      await Promise.resolve();
+    });
+
+    expect(connect).toHaveBeenCalledOnce();
+    expect(
+      screen.queryByRole('button', {
+        name: `Verify ${EVM_CONNECTION.accounts[0]!.addressHint}`,
+      }),
+    ).toBeNull();
+
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'visible',
+    });
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'));
+      vi.advanceTimersByTime(SENSITIVE_VIEW_REVALIDATION_THROTTLE_MS);
+      await Promise.resolve();
+    });
+
+    expect(connect).toHaveBeenCalledOnce();
+    const metamask = screen.getByRole('button', { name: 'MetaMask' });
+    expect(metamask).toBeEnabled();
+    await act(async () => {
+      fireEvent.click(metamask);
+      await Promise.resolve();
+    });
+    expect(
+      screen.getByRole('button', {
+        name: `Verify ${EVM_CONNECTION.accounts[0]!.addressHint}`,
+      }),
+    ).toBeVisible();
+    expect(connect).toHaveBeenCalledTimes(2);
+  });
+
+  it('cancels a pending proof on pagehide and never restores its late success after resume', async () => {
+    const pendingVerification = Promise.withResolvers<MainnetWalletVerificationResult>();
+    let operationSignal: AbortSignal | undefined;
+    const verify = vi
+      .fn<MainnetWalletOwnershipRuntime['verify']>()
+      .mockImplementationOnce((_connectionToken, _accountToken, signal) => {
+        operationSignal = signal;
+        return pendingVerification.promise;
+      })
+      .mockResolvedValueOnce(RESULT);
+    const runtime = runtimeHarness({ verify });
+    const onVerified = vi.fn();
+    const onWalletsChanged = vi.fn();
+    render(
+      <MainnetWalletOwnership
+        dependencies={dependencies(runtime)}
+        onVerified={onVerified}
+        onWalletsChanged={onWalletsChanged}
+      />,
+    );
+
+    await screen.findByText('No wallets are verified for this account yet.');
+    fireEvent.click(screen.getByRole('button', { name: 'MetaMask' }));
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: `Verify ${EVM_CONNECTION.accounts[0]!.addressHint}`,
+      }),
+    );
+    expect(operationSignal).toBeDefined();
+    vi.useFakeTimers();
+
+    act(() => window.dispatchEvent(new Event('pagehide')));
+
+    expect(operationSignal?.aborted).toBe(true);
+    expect(runtime.cancel).toHaveBeenCalledOnce();
+    expect(
+      screen.queryByRole('button', {
+        name: `Verify ${EVM_CONNECTION.accounts[0]!.addressHint}`,
+      }),
+    ).toBeNull();
+
+    await act(async () => {
+      pendingVerification.resolve(RESULT);
+      await Promise.resolve();
+    });
+
+    expect(screen.queryByText('Ethereum account verified')).toBeNull();
+    expect(onVerified).not.toHaveBeenCalled();
+    expect(onWalletsChanged).not.toHaveBeenCalled();
+
+    await act(async () => {
+      window.dispatchEvent(new Event('pageshow'));
+      vi.advanceTimersByTime(SENSITIVE_VIEW_REVALIDATION_THROTTLE_MS);
+      await Promise.resolve();
+    });
+
+    expect(verify).toHaveBeenCalledOnce();
+    expect(screen.queryByText('Ethereum account verified')).toBeNull();
+    const metamask = screen.getByRole('button', { name: 'MetaMask' });
+    expect(metamask).toBeEnabled();
+    await act(async () => {
+      fireEvent.click(metamask);
+      await Promise.resolve();
+    });
+    const verifyAgain = screen.getByRole('button', {
+      name: `Verify ${EVM_CONNECTION.accounts[0]!.addressHint}`,
+    });
+    await act(async () => {
+      fireEvent.click(verifyAgain);
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText('Ethereum account verified')).toBeVisible();
+    expect(verify).toHaveBeenCalledTimes(2);
+    expect(onVerified).toHaveBeenCalledOnce();
+    expect(onWalletsChanged).toHaveBeenCalledOnce();
   });
 
   it('does not switch the wallet and gives manual network guidance', async () => {
