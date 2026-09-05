@@ -73,8 +73,8 @@ record. `Deploy` recomputes and verifies each binding.
 
 `infra/aws/application-baseline.yaml` composes two content-addressed child
 stacks: workload boundaries and operational observability. The reviewed parent
-is 50,151 bytes (1,049 bytes below the AWS limit), while a local guard enforces
-a 50,500-byte ceiling and leaves a 349-byte repository guard band before that
+is 49,632 bytes (1,568 bytes below the AWS limit), while a local guard enforces
+a 50,500-byte ceiling and leaves an 868-byte repository guard band before that
 ceiling. This prevents accidental growth beyond CloudFormation's 51,200-byte
 direct-body limit.
 
@@ -102,7 +102,10 @@ direct-body limit.
 - split API/worker execution IAM permits the API to read only its database and
   selected Redis ACL/auth-wallet credentials, the worker only its database
   credential, and the one-off migration task only the migration credential;
-  and
+- six explicit, no-default Secrets Manager version parameters pin the API
+  database, worker database, and API Redis A/B slots. The only unpinned adoption
+  state keeps every service stopped, every phase at `A_ONLY`, Redis access off,
+  and fixed-slot execution-role reads closed; and
 - bounded CloudWatch log groups and eight service/queue/security alarms expose
   infrastructure health through one explicitly supplied external SNS topic;
   the template creates no recipient. The dashboard is optional and off by
@@ -280,11 +283,20 @@ contract. The former broad single-runtime procedure is intentionally removed.
 The authorized delivery sequence is: verify and retrieve the exact
 content-addressed workload-boundary and observability children from existing
 versioned same-account/Region S3
-bucket (no guard path creates or uploads it); create the stack at zero desired
-count; provision the restricted LOGIN slots from their scoped secrets; drain old
-sessions; run the exact bootstrap artifact as the bootstrap owner; register and
-run the separately reviewed migration task with only the `crypto_migration`
-secret; wait for exit code zero; run
+bucket (no guard path creates or uploads it); create the stack with all six
+version parameters explicitly set to `UNPINNED`, every credential phase at
+`A_ONLY`, the Redis operator disabled, and all workload desired counts at zero;
+capture the six generated Secrets Manager `VersionId` values without recording
+secret material; validate an `ADOPT_AND_PIN` record whose target state contains
+those exact six IDs; provision the restricted PostgreSQL LOGIN slots from those
+exact scoped secret versions while workloads remain stopped; then apply the
+all-pinned follow-up stack update at zero desired count using exactly the six
+target IDs from the validated record. That follow-up installs the pinned Redis
+passwords while retaining the `A_ONLY` access boundary. Independently verify the
+deployed pins and backend-installation evidence against the adoption record
+before continuing. Then drain old sessions; run the exact bootstrap artifact as
+the bootstrap owner; register and run the separately reviewed migration task
+with only the `crypto_migration` secret; wait for exit code zero; run
 `npm run db:status:prod --workspace @crypto-lending/api`; exercise positive and
 negative capability probes for both API and worker; then raise desired counts.
 Every future migration must preserve the exact role boundary and may not add
@@ -321,10 +333,11 @@ parameter set before a change set is executed.
   content-addressed child. Staging both exact versioned child objects and
   invoking the guarded nested-stack plan/deploy remain separately authorized
   actions with possible storage/request/resource cost.
-- The fixed database/Redis A/B secret resources support a controlled overlap
-  and cutover but do not regenerate an inactive slot. A repeat A-to-B-to-A cycle
-  would reuse the retained A value until a reviewed regeneration and verifier/
-  password installation artifact exists.
+- The fixed database/Redis A/B secret resources and exact version pins support
+  a controlled overlap and cutover but do not regenerate or install an inactive
+  slot. Repeatable rotation still requires the separately authorized
+  regeneration and verifier/password installation artifact, plus a deployment
+  guard that binds the reviewed transition record to current deployed state.
 - The conditional Redis operator now has a production-only, exact-inactive-slot
   CLI and a no-service one-off task definition. Both remain disabled by default
   and have not been deployed or run. Workload drain, post-command session and

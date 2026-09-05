@@ -17,7 +17,7 @@ const repositoryRoot = resolve(scriptDirectory, '..', '..');
 const noExternalEgressResidualLimitations = [
   'Web-task DNS security-group egress permits TCP and UDP port 53 to the VPC CIDR; this static control cannot prove that traffic reaches only the VPC Route 53 Resolver address. API and worker boundaries rely on AmazonProvidedDNS, which is not filtered by security groups.',
   'REDIS_OPERATOR_LIVE_REVOCATION_UNRESOLVED: the nested child conditionally defines the reviewed exact-target one-off revocation task, but no task is authorized or run. Workload drain, live denial evidence, immediate operator disablement, and credential installation or regeneration remain external gates.',
-  'FIXED_SLOT_CREDENTIAL_REGENERATION_UNRESOLVED: the four enum values constrain each submitted phase but do not compare deployed state or enforce transition adjacency, and retained A/B secrets do not regenerate on a phase-only update. A-to-B-to-A would reuse the original A credential, so the composition can represent reviewed overlap/cutover phases but is neither an enforced workflow nor a repeatable rotation mechanism until inactive-slot regeneration, Redis-password/database-verifier installation, and current-state transition checks are reviewed.',
+  'FIXED_SLOT_CREDENTIAL_DEPLOYMENT_GUARD_UNRESOLVED: all six fixed slots now require exact VersionId pins before activation and the unpinned creation state is inert, but the deployment command does not yet bind a reviewed transition record to deployed state. Inactive-slot regeneration, backend installation, transition adjacency, current-state comparison, and live evidence remain separately authorized gates.',
   'AUTH_WALLET_EXTERNAL_CONFIGURATION_UNRESOLVED: static Cognito identifiers and seven API-only key selectors (one pre-authentication key and six bounded key-ring documents) are wired, but the Cognito tenant, one external JSON secret, its customer-managed KMS key/policy, field contents, rotation, and deployed readability require separately authorized evidence.',
   'OPERATIONAL_ALERT_DELIVERY_EXTERNAL: the template consumes one operator-supplied SNS topic ARN but deliberately provisions no topic or subscription; same-account/Region existence, topic policy, confirmed recipients, escalation ownership, and an end-to-end ALARM-to-OK drill remain external go-live evidence.',
 ];
@@ -34,11 +34,19 @@ const operationalAlarmLogicalIds = Object.freeze([
   'BalanceDeadLetterQueueNotEmptyAlarm',
 ]);
 const reviewedApplicationBaselineSha256 =
-  'd79161b2d2851b1c286b2dfe94d1899ddbcd5fc51b4e850a7ee4d87480076b21';
+  '94d056751011aa3e457166a775ba344b559b0a2e0149690f85894781289bcf07';
 const reviewedWorkloadBoundariesSha256 =
-  'd38d0bf07704075615b4ab75041012675dcc30f824430b579623945d408d14f0';
+  'ab0afc494bf51e68ae0f3e0d267aac544b69f5480754056f95a82baefc0c9219';
 const reviewedObservabilitySha256 =
   '4e3fdde76c3805500f17e1eedc0cd213e77ea0d1704fe56f30810ffa8fd859f9';
+const fixedSlotVersionParameterNames = Object.freeze([
+  'ApiDatabaseSlotAVersionId',
+  'ApiDatabaseSlotBVersionId',
+  'WorkerDatabaseSlotAVersionId',
+  'WorkerDatabaseSlotBVersionId',
+  'RedisApiSlotAVersionId',
+  'RedisApiSlotBVersionId',
+]);
 const reviewedResourceTypesByLogicalId = new Map([
   ['ApplicationDataKey', 'AWS::KMS::Key'],
   ['ApplicationDataKeyAlias', 'AWS::KMS::Alias'],
@@ -94,11 +102,6 @@ const reviewedResourceTypesByLogicalId = new Map([
   ['WebLogGroup', 'AWS::Logs::LogGroup'],
   ['WorkerLogGroup', 'AWS::Logs::LogGroup'],
   ['WorkloadBoundaries', 'AWS::CloudFormation::Stack'],
-  ['ApplicationImagePullPolicy', 'AWS::IAM::ManagedPolicy'],
-  ['WebTaskExecutionRole', 'AWS::IAM::Role'],
-  ['ApiTaskRole', 'AWS::IAM::Role'],
-  ['WorkerTaskRole', 'AWS::IAM::Role'],
-  ['WebTaskRole', 'AWS::IAM::Role'],
   ['ApplicationLoadBalancer', 'AWS::ElasticLoadBalancingV2::LoadBalancer'],
   ['WebTargetGroup', 'AWS::ElasticLoadBalancingV2::TargetGroup'],
   ['ApiTargetGroup', 'AWS::ElasticLoadBalancingV2::TargetGroup'],
@@ -488,21 +491,25 @@ function requireExactInlineSecretReference(
   referencedLogicalId,
   secretField,
   errors,
+  versionIdReference,
 ) {
   const escapedName = environmentName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const escapedReference = referencedLogicalId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const escapedField = secretField.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const versionSelector = versionIdReference
+    ? `::\\$\\{${versionIdReference.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\}`
+    : '::';
   const nameMatches = block.match(new RegExp(`\\bName:\\s*${escapedName}\\b`, 'g')) ?? [];
   const exactMatches =
     block.match(
       new RegExp(
-        `\\bName:\\s*${escapedName},?[\\s\\S]{0,160}?\\bValueFrom:\\s*!Sub\\s+['"]\\$\\{${escapedReference}\\}:${escapedField}::['"]`,
+        `\\bName:\\s*${escapedName},?[\\s\\S]{0,220}?\\bValueFrom:\\s*!Sub\\s+['"]\\$\\{${escapedReference}\\}:${escapedField}${versionSelector}['"]`,
         'g',
       ),
     ) ?? [];
   if (nameMatches.length !== 1 || exactMatches.length !== 1) {
     errors.push(
-      `${logicalId} must bind exactly one ${environmentName} secret value to ${referencedLogicalId}:${secretField}.`,
+      `${logicalId} must bind exactly one ${environmentName} secret value to ${referencedLogicalId}:${secretField}${versionIdReference ? ` at ${versionIdReference}` : ''}.`,
     );
   }
 }
@@ -1045,6 +1052,18 @@ function validateWorkloadBoundaryComposition(source, parameters, resources, inve
       errors.push(`${name} must be a String that defaults to the safe A_ONLY phase.`);
     }
   }
+  for (const name of fixedSlotVersionParameterNames) {
+    const block = parameters.get(name) ?? '';
+    if (
+      !hasProperty(block, 'Type', 'String') ||
+      !hasProperty(block, 'AllowedPattern', '^(UNPINNED|[A-Za-z0-9_-]{32,64})$') ||
+      hasPropertyName(block, 'Default')
+    ) {
+      errors.push(
+        `${name} must be explicit and accept only the adoption sentinel or an exact Secrets Manager VersionId.`,
+      );
+    }
+  }
   const operatorMode = parameters.get('RedisOperatorMode') ?? '';
   if (
     !hasProperty(operatorMode, 'Type', 'String') ||
@@ -1084,12 +1103,24 @@ function validateWorkloadBoundaryComposition(source, parameters, resources, inve
       '    ApplicationDataKeyArn: !GetAtt ApplicationDataKey.Arn',
       '    AuthWalletKeysSecretArn: !Ref AuthWalletKeysSecretArn',
       '    AuthWalletKeysKmsKeyArn: !Ref AuthWalletKeysKmsKeyArn',
-      '    ApiLogGroupArn: !GetAtt ApiLogGroup.Arn',
-      '    WorkerLogGroupArn: !GetAtt WorkerLogGroup.Arn',
+      "    ApiLogGroupArn: !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${ApiLogGroup}'",
+      "    WebLogGroupArn: !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${WebLogGroup}'",
+      "    WorkerLogGroupArn: !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${WorkerLogGroup}'",
       '    ApiImageRepositoryArn: !Sub arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/crypto-lending-api',
+      '    WebImageRepositoryArn: !Sub arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/crypto-lending-web',
+      '    JobQueueArn: !GetAtt JobQueue.Arn',
+      '    JobDeadLetterQueueArn: !GetAtt JobDeadLetterQueue.Arn',
+      '    BalanceQueueArn: !GetAtt BalanceQueue.Arn',
+      '    BalanceDeadLetterQueueArn: !GetAtt BalanceDeadLetterQueue.Arn',
       '    ApiDatabaseCredentialPhase: !Ref ApiDatabaseCredentialPhase',
       '    WorkerDatabaseCredentialPhase: !Ref WorkerDatabaseCredentialPhase',
       '    RedisCredentialPhase: !Ref RedisCredentialPhase',
+      '    ApiDatabaseSlotAVersionId: !Ref ApiDatabaseSlotAVersionId',
+      '    ApiDatabaseSlotBVersionId: !Ref ApiDatabaseSlotBVersionId',
+      '    WorkerDatabaseSlotAVersionId: !Ref WorkerDatabaseSlotAVersionId',
+      '    WorkerDatabaseSlotBVersionId: !Ref WorkerDatabaseSlotBVersionId',
+      '    RedisApiSlotAVersionId: !Ref RedisApiSlotAVersionId',
+      '    RedisApiSlotBVersionId: !Ref RedisApiSlotBVersionId',
       '    RedisOperatorMode: !Ref RedisOperatorMode',
       '  Tags:',
       '    - Key: WorkloadBoundariesTemplateSha256',
@@ -1480,176 +1511,34 @@ function validateProductionAuthenticationWiring(parameters, resources, errors) {
 
 function validateEcsRoleSecurityBoundaries(resources, inventory, errors) {
   const roleEntries = entriesOf(inventory, 'AWS::IAM::Role');
-  const expectedRoleIds = ['WebTaskExecutionRole', 'ApiTaskRole', 'WorkerTaskRole', 'WebTaskRole'];
-  requireExactLogicalIds(roleEntries, expectedRoleIds, 'ECS IAM role allowlist', errors);
-
-  const expectedTrustPolicy = [
-    'AssumeRolePolicyDocument:',
-    "  Version: '2012-10-17'",
-    '  Statement:',
-    '    - Effect: Allow',
-    '      Principal:',
-    '        Service: ecs-tasks.amazonaws.com',
-    '      Action: sts:AssumeRole',
-    '      Condition:',
-    '        StringEquals: { aws:SourceAccount: !Ref AWS::AccountId }',
-    '        ArnLike:',
-    "          aws:SourceArn: !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:*'",
-  ].join('\n');
-  for (const logicalId of expectedRoleIds) {
-    requireExactSemanticProperty(
-      resources.get(logicalId) ?? '',
-      logicalId,
-      'AssumeRolePolicyDocument',
-      expectedTrustPolicy,
-      'the single-account, regional ECS task trust policy with no additional principal or action',
-      errors,
-    );
-  }
-
-  const imagePullPolicy = resources.get('ApplicationImagePullPolicy') ?? '';
-  requireExactSemanticProperty(
-    imagePullPolicy,
-    'ApplicationImagePullPolicy',
-    'PolicyDocument',
-    [
-      'PolicyDocument:',
-      "  Version: '2012-10-17'",
-      '  Statement:',
-      '    - Effect: Allow',
-      '      Action: ecr:GetAuthorizationToken',
-      "      Resource: '*'",
-      '    - Effect: Allow',
-      '      Action:',
-      '        - ecr:BatchCheckLayerAvailability',
-      '        - ecr:BatchGetImage',
-      '        - ecr:GetDownloadUrlForLayer',
-      '      Resource: !Sub arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/crypto-lending-web',
-    ].join('\n'),
-    'the reviewed ECR token and repository-scoped image-pull action/resource matrix',
-    errors,
-  );
-
-  const executionManagedPolicies = [
-    'ManagedPolicyArns:',
-    '  - !Ref ApplicationImagePullPolicy',
-  ].join('\n');
-  for (const logicalId of ['WebTaskExecutionRole']) {
-    requireExactSemanticProperty(
-      resources.get(logicalId) ?? '',
-      logicalId,
-      'ManagedPolicyArns',
-      executionManagedPolicies,
-      'the single reviewed application image-pull managed policy attachment',
-      errors,
-    );
-  }
-
-  requireExactSemanticProperty(
-    resources.get('WebTaskExecutionRole') ?? '',
-    'WebTaskExecutionRole',
-    'Policies',
-    [
-      'Policies:',
-      '  - PolicyName: WriteWebLogs',
-      '    PolicyDocument:',
-      "      Version: '2012-10-17'",
-      '      Statement:',
-      '        - Effect: Allow',
-      '          Action: [logs:CreateLogStream, logs:PutLogEvents]',
-      '          Resource: !Sub ${WebLogGroup.Arn}:*',
-    ].join('\n'),
-    'the web log-only execution policy with no secret or data-key access',
-    errors,
-  );
-
-  requireExactSemanticProperty(
-    resources.get('ApiTaskRole') ?? '',
-    'ApiTaskRole',
-    'Policies',
-    [
-      'Policies:',
-      '  - PolicyName: ApiJobQueueAccess',
-      '    PolicyDocument:',
-      "      Version: '2012-10-17'",
-      '      Statement:',
-      '        - Sid: InspectQueueRedriveConfiguration',
-      '          Effect: Allow',
-      '          Action: sqs:GetQueueAttributes',
-      '          Resource:',
-      '            - !GetAtt JobQueue.Arn',
-      '            - !GetAtt JobDeadLetterQueue.Arn',
-      '            - !GetAtt BalanceQueue.Arn',
-      '            - !GetAtt BalanceDeadLetterQueue.Arn',
-    ].join('\n'),
-    'the read-only queue-readiness task policy with no publish, consume, secret, or key access',
-    errors,
-  );
-
-  requireExactSemanticProperty(
-    resources.get('WorkerTaskRole') ?? '',
-    'WorkerTaskRole',
-    'Policies',
-    [
-      'Policies:',
-      '  - PolicyName: OutboxPublishAccess',
-      '    PolicyDocument:',
-      "      Version: '2012-10-17'",
-      '      Statement:',
-      '        - Sid: PublishJobs',
-      '          Effect: Allow',
-      '          Action: sqs:SendMessage',
-      '          Resource: [!GetAtt JobQueue.Arn, !GetAtt BalanceQueue.Arn]',
-      '        - Sid: InspectQueueRedriveConfiguration',
-      '          Effect: Allow',
-      '          Action: sqs:GetQueueAttributes',
-      '          Resource:',
-      '            - !GetAtt JobQueue.Arn',
-      '            - !GetAtt JobDeadLetterQueue.Arn',
-      '            - !GetAtt BalanceQueue.Arn',
-      '            - !GetAtt BalanceDeadLetterQueue.Arn',
-      '        - Sid: UseSqsEncryptionKey',
-      '          Effect: Allow',
-      '          Action:',
-      '            - kms:Decrypt',
-      '            - kms:GenerateDataKey',
-      '          Resource: !GetAtt ApplicationDataKey.Arn',
-      '          Condition:',
-      '            StringEquals:',
-      '              kms:ViaService: !Sub sqs.${AWS::Region}.${AWS::URLSuffix}',
-    ].join('\n'),
-    'the queue-publish/readiness and SQS-only data-key task policy with no consume or secret access',
-    errors,
-  );
-
-  for (const logicalId of ['ApiTaskRole', 'WorkerTaskRole', 'WebTaskRole']) {
-    requireAbsentProperty(
-      resources.get(logicalId) ?? '',
-      logicalId,
-      'ManagedPolicyArns',
-      'application task roles must not inherit managed permissions',
-      errors,
-    );
-  }
-  requireAbsentProperty(
-    resources.get('WebTaskRole') ?? '',
-    'WebTaskRole',
-    'Policies',
-    'the web application task role must remain permissionless',
+  requireExactLogicalIds(roleEntries, [], 'Parent ECS IAM role allowlist', errors);
+  requireExactLogicalIds(
+    entriesOf(inventory, 'AWS::IAM::ManagedPolicy'),
+    [],
+    'Parent managed-policy allowlist',
     errors,
   );
 
   const expectedTaskRoles = new Map([
     [
       'ApiTaskDefinition',
-      ['!GetAtt WorkloadBoundaries.Outputs.ApiTaskExecutionRoleArn', '!GetAtt ApiTaskRole.Arn'],
+      [
+        '!GetAtt WorkloadBoundaries.Outputs.ApiTaskExecutionRoleArn',
+        '!GetAtt WorkloadBoundaries.Outputs.ApiTaskRoleArn',
+      ],
     ],
-    ['WebTaskDefinition', ['!GetAtt WebTaskExecutionRole.Arn', '!GetAtt WebTaskRole.Arn']],
+    [
+      'WebTaskDefinition',
+      [
+        '!GetAtt WorkloadBoundaries.Outputs.WebTaskExecutionRoleArn',
+        '!GetAtt WorkloadBoundaries.Outputs.WebTaskRoleArn',
+      ],
+    ],
     [
       'WorkerTaskDefinition',
       [
         '!GetAtt WorkloadBoundaries.Outputs.WorkerTaskExecutionRoleArn',
-        '!GetAtt WorkerTaskRole.Arn',
+        '!GetAtt WorkloadBoundaries.Outputs.WorkerTaskRoleArn',
       ],
     ],
   ]);
@@ -1666,9 +1555,9 @@ function validateEcsRoleSecurityBoundaries(resources, inventory, errors) {
       [
         'Secrets:',
         '  - Name: DATABASE_RUNTIME_PASSWORD',
-        "    ValueFrom: !Sub '${WorkloadBoundaries.Outputs.ApiDatabaseActiveSecretArn}:password::'",
+        "    ValueFrom: !Sub '${WorkloadBoundaries.Outputs.ApiDatabaseActiveSecretArn}:password::${WorkloadBoundaries.Outputs.ApiDatabaseActiveVersionId}'",
         '  - Name: REDIS_PASSWORD',
-        "    ValueFrom: !Sub '${WorkloadBoundaries.Outputs.RedisActiveSecretArn}:password::'",
+        "    ValueFrom: !Sub '${WorkloadBoundaries.Outputs.RedisActiveSecretArn}:password::${WorkloadBoundaries.Outputs.RedisActiveVersionId}'",
         "  - {Name: AUTH_PREAUTH_SEAL_KEY,ValueFrom: !Sub '${AuthWalletKeysSecretArn}:AUTH_PREAUTH_SEAL_KEY::'}",
         "  - {Name: AUTH_IDENTITY_HMAC_KEY_RING_JSON,ValueFrom: !Sub '${AuthWalletKeysSecretArn}:AUTH_IDENTITY_HMAC_KEY_RING_JSON::'}",
         "  - {Name: AUTH_SESSION_HMAC_KEY_RING_JSON,ValueFrom: !Sub '${AuthWalletKeysSecretArn}:AUTH_SESSION_HMAC_KEY_RING_JSON::'}",
@@ -1683,7 +1572,7 @@ function validateEcsRoleSecurityBoundaries(resources, inventory, errors) {
       [
         'Secrets:',
         '  - Name: DATABASE_RUNTIME_PASSWORD',
-        "    ValueFrom: !Sub '${WorkloadBoundaries.Outputs.WorkerDatabaseActiveSecretArn}:password::'",
+        "    ValueFrom: !Sub '${WorkloadBoundaries.Outputs.WorkerDatabaseActiveSecretArn}:password::${WorkloadBoundaries.Outputs.WorkerDatabaseActiveVersionId}'",
       ].join('\n'),
     ],
   ]);
@@ -2409,6 +2298,22 @@ function validateTemplateShape(source, errors) {
     }
   }
 
+  const rules = topLevelBlocks(source, 'Rules');
+  requireExactSemanticBlock(
+    rules.get('FixedSlotVersionsRequireSafeState') ?? '',
+    'FixedSlotVersionsRequireSafeState',
+    [
+      'FixedSlotVersionsRequireSafeState:',
+      '  Assertions:',
+      '    - Assert: !Or',
+      '        - !And [!And [!Equals [!Ref ApiDatabaseSlotAVersionId, UNPINNED], !Equals [!Ref ApiDatabaseSlotBVersionId, UNPINNED], !Equals [!Ref WorkerDatabaseSlotAVersionId, UNPINNED], !Equals [!Ref WorkerDatabaseSlotBVersionId, UNPINNED], !Equals [!Ref RedisApiSlotAVersionId, UNPINNED], !Equals [!Ref RedisApiSlotBVersionId, UNPINNED]], !And [!Equals [!Ref ApiDesiredCount, 0], !Equals [!Ref WebDesiredCount, 0], !Equals [!Ref WorkerDesiredCount, 0]], !And [!Equals [!Ref ApiDatabaseCredentialPhase, A_ONLY], !Equals [!Ref WorkerDatabaseCredentialPhase, A_ONLY], !Equals [!Ref RedisCredentialPhase, A_ONLY], !Equals [!Ref RedisOperatorMode, DISABLED]]]',
+      '        - !And [!Not [!Equals [!Ref ApiDatabaseSlotAVersionId, UNPINNED]], !Not [!Equals [!Ref ApiDatabaseSlotBVersionId, UNPINNED]], !Not [!Equals [!Ref WorkerDatabaseSlotAVersionId, UNPINNED]], !Not [!Equals [!Ref WorkerDatabaseSlotBVersionId, UNPINNED]], !Not [!Equals [!Ref RedisApiSlotAVersionId, UNPINNED]], !Not [!Equals [!Ref RedisApiSlotBVersionId, UNPINNED]]]',
+      '   AssertDescription: Fixed-slot versions must be all pinned or an inert A_ONLY adoption sentinel.',
+    ].join('\n'),
+    'the exact all-pinned-or-inert adoption gate for all six fixed slots',
+    errors,
+  );
+
   const billingAcknowledgement = parameters.get('BillingAcknowledgement');
   if (!billingAcknowledgement) {
     errors.push(
@@ -2559,7 +2464,6 @@ function validateTemplateShape(source, errors) {
     ['AWS::KMS::Key', 2],
     ['AWS::SecretsManager::Secret', 1],
     ['AWS::Logs::LogGroup', 3],
-    ['AWS::IAM::Role', 4],
     ['AWS::CloudFormation::Stack', 2],
     ['AWS::SQS::Queue', 2],
     ['AWS::EC2::VPCEndpoint', 6],
@@ -2685,6 +2589,7 @@ function validateTemplateShape(source, errors) {
       'api',
       'ApiDatabaseActiveUsername',
       'ApiDatabaseActiveSecretArn',
+      'ApiDatabaseActiveVersionId',
     ],
     [
       'WorkerTaskDefinition',
@@ -2692,9 +2597,17 @@ function validateTemplateShape(source, errors) {
       'worker',
       'WorkerDatabaseActiveUsername',
       'WorkerDatabaseActiveSecretArn',
+      'WorkerDatabaseActiveVersionId',
     ],
   ];
-  for (const [logicalId, block, workload, usernameOutput, secretOutput] of workloadTaskContracts) {
+  for (const [
+    logicalId,
+    block,
+    workload,
+    usernameOutput,
+    secretOutput,
+    versionOutput,
+  ] of workloadTaskContracts) {
     if (/\bMIGRATION_DATABASE_[A-Z_]+\b/.test(block)) {
       errors.push(`${logicalId} must not receive migration/admin database variables.`);
     }
@@ -2724,6 +2637,7 @@ function validateTemplateShape(source, errors) {
       `WorkloadBoundaries.Outputs.${secretOutput}`,
       'password',
       errors,
+      `WorkloadBoundaries.Outputs.${versionOutput}`,
     );
     const environment = indentedPropertyBlock(block, 'Environment') ?? '';
     const workloadBindings =
@@ -2787,48 +2701,6 @@ function validateTemplateShape(source, errors) {
   const apiTargetGroup = resources.get('ApiTargetGroup') ?? '';
   if (!hasProperty(apiTargetGroup, 'HealthCheckPath', '/api/v1/internal/health/dependencies')) {
     errors.push('ApiTargetGroup must gate traffic on dependency and migration readiness.');
-  }
-
-  const workerTaskRole = resources.get('WorkerTaskRole') ?? '';
-  if (!/sqs:GetQueueAttributes/.test(workerTaskRole) || !/sqs:SendMessage/.test(workerTaskRole)) {
-    errors.push('WorkerTaskRole must support exact queue readiness and publishing operations.');
-  }
-  const workerResourceValues = [...workerTaskRole.matchAll(/^\s+Resource:\s*(.+?)\s*$/gm)].map(
-    (match) => match[1],
-  );
-  const expectedWorkerResourceValues = [
-    '[!GetAtt JobQueue.Arn, !GetAtt BalanceQueue.Arn]',
-    '- !GetAtt JobQueue.Arn',
-    '!GetAtt ApplicationDataKey.Arn',
-  ];
-  const workerHasReadinessResources = [
-    '!GetAtt JobQueue.Arn',
-    '!GetAtt JobDeadLetterQueue.Arn',
-    '!GetAtt BalanceQueue.Arn',
-    '!GetAtt BalanceDeadLetterQueue.Arn',
-  ].every((resource) => workerTaskRole.includes(resource));
-  if (
-    workerResourceValues.join('|') !== expectedWorkerResourceValues.join('|') ||
-    !workerHasReadinessResources
-  ) {
-    errors.push(
-      'WorkerTaskRole resources must bind exactly to both source queues, both dead-letter queues, and ApplicationDataKey.',
-    );
-  }
-  const apiTaskRole = resources.get('ApiTaskRole') ?? '';
-  const apiResourceValues = [...apiTaskRole.matchAll(/^\s+Resource:\s*(.+?)\s*$/gm)].map(
-    (match) => match[1],
-  );
-  if (
-    apiResourceValues.join('|') !== '- !GetAtt JobQueue.Arn' ||
-    ![
-      '!GetAtt JobQueue.Arn',
-      '!GetAtt JobDeadLetterQueue.Arn',
-      '!GetAtt BalanceQueue.Arn',
-      '!GetAtt BalanceDeadLetterQueue.Arn',
-    ].every((resource) => apiTaskRole.includes(resource))
-  ) {
-    errors.push('ApiTaskRole resources must bind exactly to both isolated queue/DLQ pairs.');
   }
 
   const privateSubnets = entriesOf(inventory, 'AWS::EC2::Subnet').filter(

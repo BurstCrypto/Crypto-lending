@@ -18,10 +18,10 @@ Parameters:
  WorkloadBoundariesTemplateUrl:
   Type: String
   MaxLength: 1024
-  AllowedPattern: '^https://[a-z0-9][a-z0-9-]{1,61}[a-z0-9]\.s3\.[a-z0-9-]+\.(?:amazonaws\.com|amazonaws\.com\.cn)/application-workload-boundaries-d38d0bf07704075615b4ab75041012675dcc30f824430b579623945d408d14f0\.yaml\?versionId=[A-Za-z0-9._~%+-]+$'
+  AllowedPattern: '^https://[a-z0-9][a-z0-9-]{1,61}[a-z0-9]\.s3\.[a-z0-9-]+\.(?:amazonaws\.com|amazonaws\.com\.cn)/application-workload-boundaries-ab0afc494bf51e68ae0f3e0d267aac544b69f5480754056f95a82baefc0c9219\.yaml\?versionId=[A-Za-z0-9._~%+-]+$'
  WorkloadBoundariesTemplateSha256:
   Type: String
-  AllowedValues: [d38d0bf07704075615b4ab75041012675dcc30f824430b579623945d408d14f0]
+  AllowedValues: [ab0afc494bf51e68ae0f3e0d267aac544b69f5480754056f95a82baefc0c9219]
  WorkloadBoundariesArtifactBindingSha256:
   Type: String
   AllowedPattern: '^[a-f0-9]{64}$'
@@ -162,6 +162,24 @@ Parameters:
   Type: String
   Default: A_ONLY
   AllowedValues: [A_ONLY, BOTH_USE_A, BOTH_USE_B, B_ONLY]
+ ApiDatabaseSlotAVersionId:
+  Type: String
+  AllowedPattern: '^(UNPINNED|[A-Za-z0-9_-]{32,64})$'
+ ApiDatabaseSlotBVersionId:
+  Type: String
+  AllowedPattern: '^(UNPINNED|[A-Za-z0-9_-]{32,64})$'
+ WorkerDatabaseSlotAVersionId:
+  Type: String
+  AllowedPattern: '^(UNPINNED|[A-Za-z0-9_-]{32,64})$'
+ WorkerDatabaseSlotBVersionId:
+  Type: String
+  AllowedPattern: '^(UNPINNED|[A-Za-z0-9_-]{32,64})$'
+ RedisApiSlotAVersionId:
+  Type: String
+  AllowedPattern: '^(UNPINNED|[A-Za-z0-9_-]{32,64})$'
+ RedisApiSlotBVersionId:
+  Type: String
+  AllowedPattern: '^(UNPINNED|[A-Za-z0-9_-]{32,64})$'
  RedisOperatorMode:
   Type: String
   Default: DISABLED
@@ -233,6 +251,12 @@ Rules:
   Assertions:
    - Assert: !Not [!Equals [!Ref AllowedIngressIpv4Cidr, 0.0.0.0/0]]
      AssertDescription: Public ingress must be restricted.
+ FixedSlotVersionsRequireSafeState:
+  Assertions:
+   - Assert: !Or
+      - !And [!And [!Equals [!Ref ApiDatabaseSlotAVersionId, UNPINNED], !Equals [!Ref ApiDatabaseSlotBVersionId, UNPINNED], !Equals [!Ref WorkerDatabaseSlotAVersionId, UNPINNED], !Equals [!Ref WorkerDatabaseSlotBVersionId, UNPINNED], !Equals [!Ref RedisApiSlotAVersionId, UNPINNED], !Equals [!Ref RedisApiSlotBVersionId, UNPINNED]], !And [!Equals [!Ref ApiDesiredCount, 0], !Equals [!Ref WebDesiredCount, 0], !Equals [!Ref WorkerDesiredCount, 0]], !And [!Equals [!Ref ApiDatabaseCredentialPhase, A_ONLY], !Equals [!Ref WorkerDatabaseCredentialPhase, A_ONLY], !Equals [!Ref RedisCredentialPhase, A_ONLY], !Equals [!Ref RedisOperatorMode, DISABLED]]]
+      - !And [!Not [!Equals [!Ref ApiDatabaseSlotAVersionId, UNPINNED]], !Not [!Equals [!Ref ApiDatabaseSlotBVersionId, UNPINNED]], !Not [!Equals [!Ref WorkerDatabaseSlotAVersionId, UNPINNED]], !Not [!Equals [!Ref WorkerDatabaseSlotBVersionId, UNPINNED]], !Not [!Equals [!Ref RedisApiSlotAVersionId, UNPINNED]], !Not [!Equals [!Ref RedisApiSlotBVersionId, UNPINNED]]]
+     AssertDescription: Fixed-slot versions must be all pinned or an inert A_ONLY adoption sentinel.
 Conditions:
  UseVpcEndpoints: !Equals [!Ref PrivateEgressMode, VpcEndpoints]
  ProtectDatabase: !Equals [!Ref DatabaseDeletionProtection, 'true']
@@ -847,12 +871,24 @@ Resources:
     ApplicationDataKeyArn: !GetAtt ApplicationDataKey.Arn
     AuthWalletKeysSecretArn: !Ref AuthWalletKeysSecretArn
     AuthWalletKeysKmsKeyArn: !Ref AuthWalletKeysKmsKeyArn
-    ApiLogGroupArn: !GetAtt ApiLogGroup.Arn
-    WorkerLogGroupArn: !GetAtt WorkerLogGroup.Arn
+    ApiLogGroupArn: !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${ApiLogGroup}'
+    WebLogGroupArn: !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${WebLogGroup}'
+    WorkerLogGroupArn: !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${WorkerLogGroup}'
     ApiImageRepositoryArn: !Sub arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/crypto-lending-api
+    WebImageRepositoryArn: !Sub arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/crypto-lending-web
+    JobQueueArn: !GetAtt JobQueue.Arn
+    JobDeadLetterQueueArn: !GetAtt JobDeadLetterQueue.Arn
+    BalanceQueueArn: !GetAtt BalanceQueue.Arn
+    BalanceDeadLetterQueueArn: !GetAtt BalanceDeadLetterQueue.Arn
     ApiDatabaseCredentialPhase: !Ref ApiDatabaseCredentialPhase
     WorkerDatabaseCredentialPhase: !Ref WorkerDatabaseCredentialPhase
     RedisCredentialPhase: !Ref RedisCredentialPhase
+    ApiDatabaseSlotAVersionId: !Ref ApiDatabaseSlotAVersionId
+    ApiDatabaseSlotBVersionId: !Ref ApiDatabaseSlotBVersionId
+    WorkerDatabaseSlotAVersionId: !Ref WorkerDatabaseSlotAVersionId
+    WorkerDatabaseSlotBVersionId: !Ref WorkerDatabaseSlotBVersionId
+    RedisApiSlotAVersionId: !Ref RedisApiSlotAVersionId
+    RedisApiSlotBVersionId: !Ref RedisApiSlotBVersionId
     RedisOperatorMode: !Ref RedisOperatorMode
    Tags:
     - Key: WorkloadBoundariesTemplateSha256
@@ -898,126 +934,6 @@ Resources:
       Value: !Ref ObservabilityTemplateSha256
     - Key: ObservabilityArtifactBindingSha256
       Value: !Ref ObservabilityArtifactBindingSha256
-
- ApplicationImagePullPolicy:
-  Type: AWS::IAM::ManagedPolicy
-  Properties:
-   PolicyDocument:
-    Version: '2012-10-17'
-    Statement:
-     - Effect: Allow
-       Action: ecr:GetAuthorizationToken
-       Resource: '*'
-     - Effect: Allow
-       Action:
-        - ecr:BatchCheckLayerAvailability
-        - ecr:BatchGetImage
-        - ecr:GetDownloadUrlForLayer
-       Resource: !Sub arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/crypto-lending-web
-
- WebTaskExecutionRole:
-  Type: AWS::IAM::Role
-  Properties:
-   AssumeRolePolicyDocument:
-    Version: '2012-10-17'
-    Statement:
-     - Effect: Allow
-       Principal: { Service: ecs-tasks.amazonaws.com }
-       Action: sts:AssumeRole
-       Condition:
-        StringEquals: { aws:SourceAccount: !Ref AWS::AccountId }
-        ArnLike: { aws:SourceArn: !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:*' }
-   ManagedPolicyArns:
-    - !Ref ApplicationImagePullPolicy
-   Policies:
-    - PolicyName: WriteWebLogs
-      PolicyDocument:
-       Version: '2012-10-17'
-       Statement:
-        - Effect: Allow
-          Action: [logs:CreateLogStream, logs:PutLogEvents]
-          Resource: !Sub ${WebLogGroup.Arn}:*
-
- ApiTaskRole:
-  Type: AWS::IAM::Role
-  Properties:
-   AssumeRolePolicyDocument:
-    Version: '2012-10-17'
-    Statement:
-     - Effect: Allow
-       Principal:
-        Service: ecs-tasks.amazonaws.com
-       Action: sts:AssumeRole
-       Condition:
-        StringEquals: { aws:SourceAccount: !Ref AWS::AccountId }
-        ArnLike: { aws:SourceArn: !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:*' }
-   Policies:
-    - PolicyName: ApiJobQueueAccess
-      PolicyDocument:
-       Version: '2012-10-17'
-       Statement:
-        - Sid: InspectQueueRedriveConfiguration
-          Effect: Allow
-          Action: sqs:GetQueueAttributes
-          Resource:
-           - !GetAtt JobQueue.Arn
-           - !GetAtt JobDeadLetterQueue.Arn
-           - !GetAtt BalanceQueue.Arn
-           - !GetAtt BalanceDeadLetterQueue.Arn
-
- WorkerTaskRole:
-  Type: AWS::IAM::Role
-  Properties:
-   AssumeRolePolicyDocument:
-    Version: '2012-10-17'
-    Statement:
-     - Effect: Allow
-       Principal:
-        Service: ecs-tasks.amazonaws.com
-       Action: sts:AssumeRole
-       Condition:
-        StringEquals: { aws:SourceAccount: !Ref AWS::AccountId }
-        ArnLike: { aws:SourceArn: !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:*' }
-   Policies:
-    - PolicyName: OutboxPublishAccess
-      PolicyDocument:
-       Version: '2012-10-17'
-       Statement:
-        - Sid: PublishJobs
-          Effect: Allow
-          Action: sqs:SendMessage
-          Resource: [!GetAtt JobQueue.Arn, !GetAtt BalanceQueue.Arn]
-        - Sid: InspectQueueRedriveConfiguration
-          Effect: Allow
-          Action: sqs:GetQueueAttributes
-          Resource:
-           - !GetAtt JobQueue.Arn
-           - !GetAtt JobDeadLetterQueue.Arn
-           - !GetAtt BalanceQueue.Arn
-           - !GetAtt BalanceDeadLetterQueue.Arn
-        - Sid: UseSqsEncryptionKey
-          Effect: Allow
-          Action:
-           - kms:Decrypt
-           - kms:GenerateDataKey
-          Resource: !GetAtt ApplicationDataKey.Arn
-          Condition:
-           StringEquals:
-            kms:ViaService: !Sub sqs.${AWS::Region}.${AWS::URLSuffix}
-
- WebTaskRole:
-  Type: AWS::IAM::Role
-  Properties:
-   AssumeRolePolicyDocument:
-    Version: '2012-10-17'
-    Statement:
-     - Effect: Allow
-       Principal:
-        Service: ecs-tasks.amazonaws.com
-       Action: sts:AssumeRole
-       Condition:
-        StringEquals: { aws:SourceAccount: !Ref AWS::AccountId }
-        ArnLike: { aws:SourceArn: !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:*' }
 
  ApplicationLoadBalancer:
   Type: AWS::ElasticLoadBalancingV2::LoadBalancer
@@ -1243,9 +1159,9 @@ Resources:
        - { Name: WALLET_REGISTRATION_CHALLENGE_TTL_SECONDS, Value: '180' }
       Secrets:
        - Name: DATABASE_RUNTIME_PASSWORD
-         ValueFrom: !Sub '${WorkloadBoundaries.Outputs.ApiDatabaseActiveSecretArn}:password::'
+         ValueFrom: !Sub '${WorkloadBoundaries.Outputs.ApiDatabaseActiveSecretArn}:password::${WorkloadBoundaries.Outputs.ApiDatabaseActiveVersionId}'
        - Name: REDIS_PASSWORD
-         ValueFrom: !Sub '${WorkloadBoundaries.Outputs.RedisActiveSecretArn}:password::'
+         ValueFrom: !Sub '${WorkloadBoundaries.Outputs.RedisActiveSecretArn}:password::${WorkloadBoundaries.Outputs.RedisActiveVersionId}'
        - { Name: AUTH_PREAUTH_SEAL_KEY, ValueFrom: !Sub '${AuthWalletKeysSecretArn}:AUTH_PREAUTH_SEAL_KEY::' }
        - { Name: AUTH_IDENTITY_HMAC_KEY_RING_JSON, ValueFrom: !Sub '${AuthWalletKeysSecretArn}:AUTH_IDENTITY_HMAC_KEY_RING_JSON::' }
        - { Name: AUTH_SESSION_HMAC_KEY_RING_JSON, ValueFrom: !Sub '${AuthWalletKeysSecretArn}:AUTH_SESSION_HMAC_KEY_RING_JSON::' }
@@ -1275,7 +1191,7 @@ Resources:
    RequiresCompatibilities:
     - FARGATE
    RuntimePlatform: { CpuArchitecture: X86_64, OperatingSystemFamily: LINUX }
-   TaskRoleArn: !GetAtt ApiTaskRole.Arn
+   TaskRoleArn: !GetAtt WorkloadBoundaries.Outputs.ApiTaskRoleArn
 
  WebTaskDefinition:
   Type: AWS::ECS::TaskDefinition
@@ -1306,14 +1222,14 @@ Resources:
       StopTimeout: 30
       User: '10001:10001'
    Cpu: '256'
-   ExecutionRoleArn: !GetAtt WebTaskExecutionRole.Arn
+   ExecutionRoleArn: !GetAtt WorkloadBoundaries.Outputs.WebTaskExecutionRoleArn
    Family: !Sub crypto-lending-${EnvironmentName}-web
    Memory: '512'
    NetworkMode: awsvpc
    RequiresCompatibilities:
     - FARGATE
    RuntimePlatform: { CpuArchitecture: X86_64, OperatingSystemFamily: LINUX }
-   TaskRoleArn: !GetAtt WebTaskRole.Arn
+   TaskRoleArn: !GetAtt WorkloadBoundaries.Outputs.WebTaskRoleArn
 
  WorkerTaskDefinition:
   Type: AWS::ECS::TaskDefinition
@@ -1349,7 +1265,7 @@ Resources:
        - { Name: SQS_VISIBILITY_TIMEOUT_SECONDS, Value: !Ref SqsVisibilityTimeoutSeconds }
       Secrets:
        - Name: DATABASE_RUNTIME_PASSWORD
-         ValueFrom: !Sub '${WorkloadBoundaries.Outputs.WorkerDatabaseActiveSecretArn}:password::'
+         ValueFrom: !Sub '${WorkloadBoundaries.Outputs.WorkerDatabaseActiveSecretArn}:password::${WorkloadBoundaries.Outputs.WorkerDatabaseActiveVersionId}'
       LinuxParameters:
        Capabilities: { Drop: [ALL] }
        InitProcessEnabled: true
@@ -1371,7 +1287,7 @@ Resources:
    RequiresCompatibilities:
     - FARGATE
    RuntimePlatform: { CpuArchitecture: X86_64, OperatingSystemFamily: LINUX }
-   TaskRoleArn: !GetAtt WorkerTaskRole.Arn
+   TaskRoleArn: !GetAtt WorkloadBoundaries.Outputs.WorkerTaskRoleArn
 
  ApiService:
   Type: AWS::ECS::Service

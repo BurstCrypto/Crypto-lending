@@ -55,12 +55,30 @@ Parameters:
   ApiLogGroupArn:
     Type: String
     AllowedPattern: '^arn:[a-z0-9-]+:logs:[a-z0-9-]+:[0-9]{12}:log-group:[A-Za-z0-9_./#-]+$'
+  WebLogGroupArn:
+    Type: String
+    AllowedPattern: '^arn:[a-z0-9-]+:logs:[a-z0-9-]+:[0-9]{12}:log-group:[A-Za-z0-9_./#-]+$'
   WorkerLogGroupArn:
     Type: String
     AllowedPattern: '^arn:[a-z0-9-]+:logs:[a-z0-9-]+:[0-9]{12}:log-group:[A-Za-z0-9_./#-]+$'
   ApiImageRepositoryArn:
     Type: String
     AllowedPattern: '^arn:[a-z0-9-]+:ecr:[a-z0-9-]+:[0-9]{12}:repository/crypto-lending-api$'
+  WebImageRepositoryArn:
+    Type: String
+    AllowedPattern: '^arn:[a-z0-9-]+:ecr:[a-z0-9-]+:[0-9]{12}:repository/crypto-lending-web$'
+  JobQueueArn:
+    Type: String
+    AllowedPattern: '^arn:[a-z0-9-]+:sqs:[a-z0-9-]+:[0-9]{12}:crypto-lending-[A-Za-z0-9-]+$'
+  JobDeadLetterQueueArn:
+    Type: String
+    AllowedPattern: '^arn:[a-z0-9-]+:sqs:[a-z0-9-]+:[0-9]{12}:crypto-lending-[A-Za-z0-9-]+$'
+  BalanceQueueArn:
+    Type: String
+    AllowedPattern: '^arn:[a-z0-9-]+:sqs:[a-z0-9-]+:[0-9]{12}:crypto-lending-[A-Za-z0-9-]+$'
+  BalanceDeadLetterQueueArn:
+    Type: String
+    AllowedPattern: '^arn:[a-z0-9-]+:sqs:[a-z0-9-]+:[0-9]{12}:crypto-lending-[A-Za-z0-9-]+$'
   ApiDatabaseCredentialPhase:
     Type: String
     Default: A_ONLY
@@ -73,6 +91,24 @@ Parameters:
     Type: String
     Default: A_ONLY
     AllowedValues: [A_ONLY, BOTH_USE_A, BOTH_USE_B, B_ONLY]
+  ApiDatabaseSlotAVersionId:
+    Type: String
+    AllowedPattern: '^(UNPINNED|[A-Za-z0-9_-]{32,64})$'
+  ApiDatabaseSlotBVersionId:
+    Type: String
+    AllowedPattern: '^(UNPINNED|[A-Za-z0-9_-]{32,64})$'
+  WorkerDatabaseSlotAVersionId:
+    Type: String
+    AllowedPattern: '^(UNPINNED|[A-Za-z0-9_-]{32,64})$'
+  WorkerDatabaseSlotBVersionId:
+    Type: String
+    AllowedPattern: '^(UNPINNED|[A-Za-z0-9_-]{32,64})$'
+  RedisApiSlotAVersionId:
+    Type: String
+    AllowedPattern: '^(UNPINNED|[A-Za-z0-9_-]{32,64})$'
+  RedisApiSlotBVersionId:
+    Type: String
+    AllowedPattern: '^(UNPINNED|[A-Za-z0-9_-]{32,64})$'
   RedisOperatorMode:
     Type: String
     Default: DISABLED
@@ -110,21 +146,58 @@ Rules:
           - !Equals [!Ref RedisCredentialPhase, A_ONLY]
           - !Equals [!Ref RedisCredentialPhase, B_ONLY]
         AssertDescription: Redis operator mode requires one inactive application credential slot.
+  FixedSlotVersionsRequireSafeState:
+    Assertions:
+      - Assert: !Or
+          - !And [
+              !Equals [!Ref ApiDatabaseSlotAVersionId, UNPINNED],
+              !Equals [!Ref ApiDatabaseSlotBVersionId, UNPINNED],
+              !Equals [!Ref WorkerDatabaseSlotAVersionId, UNPINNED],
+              !Equals [!Ref WorkerDatabaseSlotBVersionId, UNPINNED],
+              !Equals [!Ref RedisApiSlotAVersionId, UNPINNED],
+              !Equals [!Ref RedisApiSlotBVersionId, UNPINNED],
+              !Equals [!Ref ApiDatabaseCredentialPhase, A_ONLY],
+              !Equals [!Ref WorkerDatabaseCredentialPhase, A_ONLY],
+              !Equals [!Ref RedisCredentialPhase, A_ONLY],
+              !Equals [!Ref RedisOperatorMode, DISABLED],
+            ]
+          - !And [
+              !Not [!Equals [!Ref ApiDatabaseSlotAVersionId, UNPINNED]],
+              !Not [!Equals [!Ref ApiDatabaseSlotBVersionId, UNPINNED]],
+              !Not [!Equals [!Ref WorkerDatabaseSlotAVersionId, UNPINNED]],
+              !Not [!Equals [!Ref WorkerDatabaseSlotBVersionId, UNPINNED]],
+              !Not [!Equals [!Ref RedisApiSlotAVersionId, UNPINNED]],
+              !Not [!Equals [!Ref RedisApiSlotBVersionId, UNPINNED]],
+            ]
+        AssertDescription: Fixed-slot versions must be all pinned or an inert A_ONLY adoption sentinel.
 
 Conditions:
   CreateVpcEndpointRules: !Equals [!Ref PrivateEgressMode, VpcEndpoints]
-  ApiDatabaseAReadable: !Not [!Equals [!Ref ApiDatabaseCredentialPhase, B_ONLY]]
-  ApiDatabaseBReadable: !Not [!Equals [!Ref ApiDatabaseCredentialPhase, A_ONLY]]
+  CredentialVersionsPinned: !Not [!Equals [!Ref ApiDatabaseSlotAVersionId, UNPINNED]]
+  ApiDatabaseAReadable: !And
+    - !Condition CredentialVersionsPinned
+    - !Not [!Equals [!Ref ApiDatabaseCredentialPhase, B_ONLY]]
+  ApiDatabaseBReadable: !And
+    - !Condition CredentialVersionsPinned
+    - !Not [!Equals [!Ref ApiDatabaseCredentialPhase, A_ONLY]]
   UseApiDatabaseA: !Or
     - !Equals [!Ref ApiDatabaseCredentialPhase, A_ONLY]
     - !Equals [!Ref ApiDatabaseCredentialPhase, BOTH_USE_A]
-  WorkerDatabaseAReadable: !Not [!Equals [!Ref WorkerDatabaseCredentialPhase, B_ONLY]]
-  WorkerDatabaseBReadable: !Not [!Equals [!Ref WorkerDatabaseCredentialPhase, A_ONLY]]
+  WorkerDatabaseAReadable: !And
+    - !Condition CredentialVersionsPinned
+    - !Not [!Equals [!Ref WorkerDatabaseCredentialPhase, B_ONLY]]
+  WorkerDatabaseBReadable: !And
+    - !Condition CredentialVersionsPinned
+    - !Not [!Equals [!Ref WorkerDatabaseCredentialPhase, A_ONLY]]
   UseWorkerDatabaseA: !Or
     - !Equals [!Ref WorkerDatabaseCredentialPhase, A_ONLY]
     - !Equals [!Ref WorkerDatabaseCredentialPhase, BOTH_USE_A]
-  RedisApiAEnabled: !Not [!Equals [!Ref RedisCredentialPhase, B_ONLY]]
-  RedisApiBEnabled: !Not [!Equals [!Ref RedisCredentialPhase, A_ONLY]]
+  RedisApiAEnabled: !And
+    - !Condition CredentialVersionsPinned
+    - !Not [!Equals [!Ref RedisCredentialPhase, B_ONLY]]
+  RedisApiBEnabled: !And
+    - !Condition CredentialVersionsPinned
+    - !Not [!Equals [!Ref RedisCredentialPhase, A_ONLY]]
   RedisOperatorEnabled: !Equals [!Ref RedisOperatorMode, ENABLED]
   RedisOperatorVpcEndpointRulesEnabled: !And
     - !Equals [!Ref RedisOperatorMode, ENABLED]
@@ -472,9 +545,16 @@ Resources:
         - RedisApiAEnabled
         - 'on sanitize-payload resetkeys resetchannels -@all +ping +quit'
         - 'off sanitize-payload resetkeys resetchannels -@all +ping +quit'
-      AuthenticationMode:
-        Passwords: [!Sub '{{resolve:secretsmanager:${RedisApiASecret}:SecretString:password}}']
-        Type: password
+      AuthenticationMode: !If
+        - CredentialVersionsPinned
+        - {
+            Passwords:
+              [
+                !Sub '{{resolve:secretsmanager:${RedisApiASecret}:SecretString:password::${RedisApiSlotAVersionId}}',
+              ],
+            Type: password,
+          }
+        - { Type: no-password-required }
       Engine: redis
       UserId: !Sub cl-${EnvironmentName}-ra
       UserName: !Sub crypto_api_${EnvironmentName}_a
@@ -486,9 +566,16 @@ Resources:
         - RedisApiBEnabled
         - 'on sanitize-payload resetkeys resetchannels -@all +ping +quit'
         - 'off sanitize-payload resetkeys resetchannels -@all +ping +quit'
-      AuthenticationMode:
-        Passwords: [!Sub '{{resolve:secretsmanager:${RedisApiBSecret}:SecretString:password}}']
-        Type: password
+      AuthenticationMode: !If
+        - CredentialVersionsPinned
+        - {
+            Passwords:
+              [
+                !Sub '{{resolve:secretsmanager:${RedisApiBSecret}:SecretString:password::${RedisApiSlotBVersionId}}',
+              ],
+            Type: password,
+          }
+        - { Type: no-password-required }
       Engine: redis
       UserId: !Sub cl-${EnvironmentName}-rb
       UserName: !Sub crypto_api_${EnvironmentName}_b
@@ -589,6 +676,130 @@ Resources:
                   StringEquals:
                     kms:ViaService: !Sub secretsmanager.${AWS::Region}.${AWS::URLSuffix}
 
+  WebTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ecs-tasks.amazonaws.com }
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals: { aws:SourceAccount: !Ref AWS::AccountId }
+              ArnLike:
+                {
+                  aws:SourceArn: !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:*',
+                }
+      Policies:
+        - PolicyName: PullWebImage
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: ecr:GetAuthorizationToken
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  [ecr:BatchCheckLayerAvailability, ecr:BatchGetImage, ecr:GetDownloadUrlForLayer]
+                Resource: !Ref WebImageRepositoryArn
+        - PolicyName: WriteWebLogs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !Sub '${WebLogGroupArn}:*'
+
+  WebTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ecs-tasks.amazonaws.com }
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals: { aws:SourceAccount: !Ref AWS::AccountId }
+              ArnLike:
+                {
+                  aws:SourceArn: !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:*',
+                }
+
+  ApiTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ecs-tasks.amazonaws.com }
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals: { aws:SourceAccount: !Ref AWS::AccountId }
+              ArnLike:
+                {
+                  aws:SourceArn: !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:*',
+                }
+      Policies:
+        - PolicyName: ApiJobQueueAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: InspectQueueRedriveConfiguration
+                Effect: Allow
+                Action: sqs:GetQueueAttributes
+                Resource:
+                  [
+                    !Ref JobQueueArn,
+                    !Ref JobDeadLetterQueueArn,
+                    !Ref BalanceQueueArn,
+                    !Ref BalanceDeadLetterQueueArn,
+                  ]
+
+  WorkerTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ecs-tasks.amazonaws.com }
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals: { aws:SourceAccount: !Ref AWS::AccountId }
+              ArnLike:
+                {
+                  aws:SourceArn: !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:*',
+                }
+      Policies:
+        - PolicyName: OutboxPublishAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: PublishJobs
+                Effect: Allow
+                Action: sqs:SendMessage
+                Resource: [!Ref JobQueueArn, !Ref BalanceQueueArn]
+              - Sid: InspectQueueRedriveConfiguration
+                Effect: Allow
+                Action: sqs:GetQueueAttributes
+                Resource:
+                  [
+                    !Ref JobQueueArn,
+                    !Ref JobDeadLetterQueueArn,
+                    !Ref BalanceQueueArn,
+                    !Ref BalanceDeadLetterQueueArn,
+                  ]
+              - Sid: UseSqsEncryptionKey
+                Effect: Allow
+                Action: [kms:Decrypt, kms:GenerateDataKey]
+                Resource: !Ref ApplicationDataKeyArn
+                Condition:
+                  StringEquals:
+                    kms:ViaService: !Sub sqs.${AWS::Region}.${AWS::URLSuffix}
+
   WorkerTaskExecutionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -631,18 +842,21 @@ Resources:
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
-              - Sid: NamedSecrets
-                Effect: Allow
-                Action: secretsmanager:GetSecretValue
-                Resource:
-                  - !If
-                    - WorkerDatabaseAReadable
-                    - !Ref WorkerDatabaseCredentialASecret
-                    - !Ref AWS::NoValue
-                  - !If
-                    - WorkerDatabaseBReadable
-                    - !Ref WorkerDatabaseCredentialBSecret
-                    - !Ref AWS::NoValue
+              - !If
+                - CredentialVersionsPinned
+                - Sid: NamedSecrets
+                  Effect: Allow
+                  Action: secretsmanager:GetSecretValue
+                  Resource:
+                    - !If
+                      - WorkerDatabaseAReadable
+                      - !Ref WorkerDatabaseCredentialASecret
+                      - !Ref AWS::NoValue
+                    - !If
+                      - WorkerDatabaseBReadable
+                      - !Ref WorkerDatabaseCredentialBSecret
+                      - !Ref AWS::NoValue
+                - !Ref AWS::NoValue
               - Sid: DecryptSecrets
                 Effect: Allow
                 Action: kms:Decrypt
@@ -713,6 +927,14 @@ Outputs:
     Value: !Ref DeliveryArtifactBindingSha256
   ApiTaskExecutionRoleArn:
     Value: !GetAtt ApiTaskExecutionRole.Arn
+  WebTaskExecutionRoleArn:
+    Value: !GetAtt WebTaskExecutionRole.Arn
+  WebTaskRoleArn:
+    Value: !GetAtt WebTaskRole.Arn
+  ApiTaskRoleArn:
+    Value: !GetAtt ApiTaskRole.Arn
+  WorkerTaskRoleArn:
+    Value: !GetAtt WorkerTaskRole.Arn
   WorkerTaskExecutionRoleArn:
     Value: !GetAtt WorkerTaskExecutionRole.Arn
   ApiTaskSecurityGroupId:
@@ -726,6 +948,8 @@ Outputs:
       - !Ref ApiDatabaseCredentialBSecret
   ApiDatabaseActiveUsername:
     Value: !If [UseApiDatabaseA, crypto_api_login_a, crypto_api_login_b]
+  ApiDatabaseActiveVersionId:
+    Value: !If [UseApiDatabaseA, !Ref ApiDatabaseSlotAVersionId, !Ref ApiDatabaseSlotBVersionId]
   WorkerDatabaseActiveSecretArn:
     Value: !If
       - UseWorkerDatabaseA
@@ -733,10 +957,15 @@ Outputs:
       - !Ref WorkerDatabaseCredentialBSecret
   WorkerDatabaseActiveUsername:
     Value: !If [UseWorkerDatabaseA, crypto_worker_login_a, crypto_worker_login_b]
+  WorkerDatabaseActiveVersionId:
+    Value:
+      !If [UseWorkerDatabaseA, !Ref WorkerDatabaseSlotAVersionId, !Ref WorkerDatabaseSlotBVersionId]
   MigrationDatabaseCredentialSecretArn:
     Value: !Ref MigrationDatabaseCredentialSecret
   RedisActiveSecretArn:
     Value: !If [UseRedisApiA, !Ref RedisApiASecret, !Ref RedisApiBSecret]
+  RedisActiveVersionId:
+    Value: !If [UseRedisApiA, !Ref RedisApiSlotAVersionId, !Ref RedisApiSlotBVersionId]
   RedisActiveUsername:
     Value: !If
       - UseRedisApiA

@@ -16,12 +16,12 @@ separate approval and tooling. The validator has no AWS, database, Redis,
 network, DNS, subprocess, or file-write capability, and every report fixes the
 corresponding call and mutation counters at zero.
 
-This is the inert control-plane portion of the fixed-slot rotation gap. The
-current CloudFormation consumers still use mutable secret-stage selection and
-the deployment command does not yet compare a submitted transition with
-deployed state. Exact `VersionId` consumer pinning and a deployment-time
-current-state guard remain required before this procedure can authorize a
-production rotation.
+The production CloudFormation contract now takes six explicit `VersionId`
+parameters and binds every fixed-slot consumer to the exact selected version;
+it never selects `AWSCURRENT` or another mutable stage for these slots. The
+deployment command still does not compare a submitted transition with deployed
+state, so the deployment-time current-state and transition-record guard remains
+required before this procedure can authorize a production rotation.
 
 ## Records and local verification
 
@@ -71,11 +71,27 @@ the inert checked-in example.
 One record contains an exact deployment identity and complete current and
 target state for all six slots:
 
-| Scope           | Phase parameter                 | Slot A backend identity      | Slot B backend identity      |
-| --------------- | ------------------------------- | ---------------------------- | ---------------------------- |
-| API database    | `ApiDatabaseCredentialPhase`    | `crypto_api_login_a`         | `crypto_api_login_b`         |
-| Worker database | `WorkerDatabaseCredentialPhase` | `crypto_worker_login_a`      | `crypto_worker_login_b`      |
-| API Redis       | `RedisCredentialPhase`          | `crypto_api_<environment>_a` | `crypto_api_<environment>_b` |
+| Scope           | Phase parameter                 | Slot A version parameter       | Slot B version parameter       |
+| --------------- | ------------------------------- | ------------------------------ | ------------------------------ |
+| API database    | `ApiDatabaseCredentialPhase`    | `ApiDatabaseSlotAVersionId`    | `ApiDatabaseSlotBVersionId`    |
+| Worker database | `WorkerDatabaseCredentialPhase` | `WorkerDatabaseSlotAVersionId` | `WorkerDatabaseSlotBVersionId` |
+| API Redis       | `RedisCredentialPhase`          | `RedisApiSlotAVersionId`       | `RedisApiSlotBVersionId`       |
+
+The version parameters intentionally have no defaults. Each must be supplied
+as either the exact uppercase `UNPINNED` adoption sentinel or a 32–64 character
+Secrets Manager `VersionId` containing only ASCII letters, digits, underscore,
+or hyphen. The parent passes the same six values to the content-addressed
+workload-boundary child, and that child phase-selects the active database and
+Redis version exposed to each ECS task definition.
+
+The only accepted unpinned state has all six sentinels, every phase at
+`A_ONLY`, API, web, and worker desired counts at zero, and the Redis operator
+disabled. In that state both Redis application identities are `off` with
+`no-password-required`, and the API/worker execution roles receive no fixed-slot
+secret permissions. Mixed pinned/unpinned states fail both parent and direct
+child validation. This sentinel exists only so a zero-count initial stack can
+create retained secrets whose generated version IDs can then be captured by a
+separately authorized adoption procedure; it cannot activate a workload.
 
 Each slot stores a bounded generation number, its current exact secret
 `VersionId`, and the complete ordered history of version IDs used by that
@@ -109,7 +125,9 @@ The full operation sequence is:
 
 1. `ADOPT_AND_PIN` starts from six explicit generation-zero `UNPINNED`
    placeholders, captures six distinct generation-one version IDs, and keeps
-   every scope at `A_ONLY` while workload desired counts remain zero.
+   every scope at `A_ONLY` while all three workload desired counts remain zero.
+   The follow-up template parameters must exactly equal the target record's six
+   current version IDs before any workload can be activated.
 2. `PREPARE_INACTIVE` leaves the phase unchanged, advances only the inactive
    slot by one generation, appends one fresh version ID, and binds independent
    secret-regeneration and backend-installation evidence.

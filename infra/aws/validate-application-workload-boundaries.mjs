@@ -13,6 +13,14 @@ import { fileURLToPath } from 'node:url';
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const defaultTemplatePath = join(scriptDirectory, 'application-workload-boundaries.yaml');
 const directUploadLimitBytes = 51_200;
+const fixedSlotVersionParameterNames = Object.freeze([
+  'ApiDatabaseSlotAVersionId',
+  'ApiDatabaseSlotBVersionId',
+  'WorkerDatabaseSlotAVersionId',
+  'WorkerDatabaseSlotBVersionId',
+  'RedisApiSlotAVersionId',
+  'RedisApiSlotBVersionId',
+]);
 
 const residualLimitations = Object.freeze([
   'STANDALONE_REQUIRES_VALIDATED_PARENT_COMPOSITION: this child does not itself wire task definitions, services, or the Redis replication group. The repository parent must pass its independent composition validator and immutable delivery guard; deploying this child alone does not enforce workload boundaries.',
@@ -20,7 +28,7 @@ const residualLimitations = Object.freeze([
   'PrivateEgressMode=None intentionally provides no ECR, logs, Secrets Manager, or SQS path; the parent must independently enforce zero API and worker desired counts.',
   'No DNS security-group rule is present because AmazonProvidedDNS traffic is not filterable by security groups; a custom resolver requires a separately reviewed exact destination.',
   'REDIS_OPERATOR_LIVE_REVOCATION_UNRESOLVED: the validated parent composes a conditional one-off task and production CLI that derive only the inactive environment slot and issue CLIENT KILL USER <target> SKIPME YES, but no task is authorized or run. Workload drain, live session denial evidence, immediate operator disablement, and credential installation or regeneration remain external gates.',
-  'FIXED_SLOT_CREDENTIAL_REGENERATION_UNRESOLVED: the four enum values constrain each submitted phase but do not compare deployed state or enforce transition adjacency, and retained A/B Secrets Manager resources do not regenerate when a phase changes. A-to-B-to-A would re-enable the original A credential, so the child can represent reviewed overlap/cutover phases but is neither an enforced workflow nor repeatable rotation until a reviewed inactive-slot regeneration, Redis-password/database-verifier installation, and current-state transition artifact exists.',
+  'FIXED_SLOT_CREDENTIAL_DEPLOYMENT_GUARD_UNRESOLVED: all six fixed slots now require exact VersionId pins before activation and the unpinned creation state is inert, but the deployment command does not yet bind a reviewed transition record to deployed state. Inactive-slot regeneration, backend installation, transition adjacency, current-state comparison, and live evidence remain separately authorized gates.',
   'AUTH_WALLET_SECRET_EXTERNAL: the parent supplies one Secrets Manager ARN for seven distinct authentication and wallet key fields. This static boundary neither provisions that secret nor proves its field set, key material, rotation, resource policy, KMS policy, or deployed readability.',
   'This local template is not packaged or uploaded; a parent nested-stack TemplateURL remains a separately authorized deployment gate.',
 ]);
@@ -42,11 +50,23 @@ const parameterTypes = new Map([
   ['AuthWalletKeysSecretArn', 'String'],
   ['AuthWalletKeysKmsKeyArn', 'String'],
   ['ApiLogGroupArn', 'String'],
+  ['WebLogGroupArn', 'String'],
   ['WorkerLogGroupArn', 'String'],
   ['ApiImageRepositoryArn', 'String'],
+  ['WebImageRepositoryArn', 'String'],
+  ['JobQueueArn', 'String'],
+  ['JobDeadLetterQueueArn', 'String'],
+  ['BalanceQueueArn', 'String'],
+  ['BalanceDeadLetterQueueArn', 'String'],
   ['ApiDatabaseCredentialPhase', 'String'],
   ['WorkerDatabaseCredentialPhase', 'String'],
   ['RedisCredentialPhase', 'String'],
+  ['ApiDatabaseSlotAVersionId', 'String'],
+  ['ApiDatabaseSlotBVersionId', 'String'],
+  ['WorkerDatabaseSlotAVersionId', 'String'],
+  ['WorkerDatabaseSlotBVersionId', 'String'],
+  ['RedisApiSlotAVersionId', 'String'],
+  ['RedisApiSlotBVersionId', 'String'],
   ['RedisOperatorMode', 'String'],
 ]);
 
@@ -87,6 +107,10 @@ const resourceTypes = new Map([
   ['RedisOperatorUser', 'AWS::ElastiCache::User'],
   ['RedisApiUserGroup', 'AWS::ElastiCache::UserGroup'],
   ['ApiTaskExecutionRole', 'AWS::IAM::Role'],
+  ['WebTaskExecutionRole', 'AWS::IAM::Role'],
+  ['WebTaskRole', 'AWS::IAM::Role'],
+  ['ApiTaskRole', 'AWS::IAM::Role'],
+  ['WorkerTaskRole', 'AWS::IAM::Role'],
   ['WorkerTaskExecutionRole', 'AWS::IAM::Role'],
   ['RedisOperatorTaskExecutionRole', 'AWS::IAM::Role'],
 ]);
@@ -106,6 +130,10 @@ const outputValues = new Map([
   ['DeliveryArtifactSha256', '!Ref DeliveryArtifactSha256'],
   ['DeliveryArtifactBindingSha256', '!Ref DeliveryArtifactBindingSha256'],
   ['ApiTaskExecutionRoleArn', '!GetAtt ApiTaskExecutionRole.Arn'],
+  ['WebTaskExecutionRoleArn', '!GetAtt WebTaskExecutionRole.Arn'],
+  ['WebTaskRoleArn', '!GetAtt WebTaskRole.Arn'],
+  ['ApiTaskRoleArn', '!GetAtt ApiTaskRole.Arn'],
+  ['WorkerTaskRoleArn', '!GetAtt WorkerTaskRole.Arn'],
   ['WorkerTaskExecutionRoleArn', '!GetAtt WorkerTaskExecutionRole.Arn'],
   ['ApiTaskSecurityGroupId', '!Ref ApiTaskSecurityGroup'],
   ['WorkerTaskSecurityGroupId', '!Ref WorkerTaskSecurityGroup'],
@@ -120,6 +148,10 @@ const outputValues = new Map([
   ],
   ['ApiDatabaseActiveUsername', '!If [UseApiDatabaseA, crypto_api_login_a, crypto_api_login_b]'],
   [
+    'ApiDatabaseActiveVersionId',
+    '!If [UseApiDatabaseA, !Ref ApiDatabaseSlotAVersionId, !Ref ApiDatabaseSlotBVersionId]',
+  ],
+  [
     'WorkerDatabaseActiveSecretArn',
     [
       'Value: !If',
@@ -132,8 +164,19 @@ const outputValues = new Map([
     'WorkerDatabaseActiveUsername',
     '!If [UseWorkerDatabaseA, crypto_worker_login_a, crypto_worker_login_b]',
   ],
+  [
+    'WorkerDatabaseActiveVersionId',
+    [
+      'Value:',
+      '  !If [UseWorkerDatabaseA, !Ref WorkerDatabaseSlotAVersionId, !Ref WorkerDatabaseSlotBVersionId]',
+    ],
+  ],
   ['MigrationDatabaseCredentialSecretArn', '!Ref MigrationDatabaseCredentialSecret'],
   ['RedisActiveSecretArn', '!If [UseRedisApiA, !Ref RedisApiASecret, !Ref RedisApiBSecret]'],
+  [
+    'RedisActiveVersionId',
+    '!If [UseRedisApiA, !Ref RedisApiSlotAVersionId, !Ref RedisApiSlotBVersionId]',
+  ],
   [
     'RedisActiveUsername',
     [
@@ -499,7 +542,38 @@ function expectedExecutionRoleBlock(
   unconditionalSecrets,
   conditionalSecrets,
   decryptionKeys,
+  secretStatementCondition,
 ) {
+  const secretStatement = secretStatementCondition
+    ? [
+        '          - !If',
+        `            - ${secretStatementCondition}`,
+        '            - Sid: NamedSecrets',
+        '              Effect: Allow',
+        '              Action: secretsmanager:GetSecretValue',
+        '              Resource:',
+        ...unconditionalSecrets.map((secret) => `                - !Ref ${secret}`),
+        ...conditionalSecrets.flatMap(([condition, secret]) => [
+          '                - !If',
+          `                  - ${condition}`,
+          `                  - !Ref ${secret}`,
+          '                  - !Ref AWS::NoValue',
+        ]),
+        '            - !Ref AWS::NoValue',
+      ]
+    : [
+        '          - Sid: NamedSecrets',
+        '            Effect: Allow',
+        '            Action: secretsmanager:GetSecretValue',
+        '            Resource:',
+        ...unconditionalSecrets.map((secret) => `              - !Ref ${secret}`),
+        ...conditionalSecrets.flatMap(([condition, secret]) => [
+          '              - !If',
+          `                - ${condition}`,
+          `                - !Ref ${secret}`,
+          '                - !Ref AWS::NoValue',
+        ]),
+      ];
   return exactBlock(logicalId, [
     'Type: AWS::IAM::Role',
     'Properties:',
@@ -542,17 +616,7 @@ function expectedExecutionRoleBlock(
     '      PolicyDocument:',
     "        Version: '2012-10-17'",
     '        Statement:',
-    '          - Sid: NamedSecrets',
-    '            Effect: Allow',
-    '            Action: secretsmanager:GetSecretValue',
-    '            Resource:',
-    ...unconditionalSecrets.map((secret) => `              - !Ref ${secret}`),
-    ...conditionalSecrets.flatMap(([condition, secret]) => [
-      '              - !If',
-      `                - ${condition}`,
-      `                - !Ref ${secret}`,
-      '                - !Ref AWS::NoValue',
-    ]),
+    ...secretStatement,
     '          - Sid: DecryptSecrets',
     '            Effect: Allow',
     '            Action: kms:Decrypt',
@@ -562,6 +626,142 @@ function expectedExecutionRoleBlock(
     '            Condition:',
     '              StringEquals:',
     '                kms:ViaService: !Sub secretsmanager.${AWS::Region}.${AWS::URLSuffix}',
+  ]);
+}
+
+function expectedWebExecutionRoleBlock() {
+  return exactBlock('WebTaskExecutionRole', [
+    'Type: AWS::IAM::Role',
+    'Properties:',
+    '  AssumeRolePolicyDocument:',
+    "    Version: '2012-10-17'",
+    '    Statement:',
+    '      - Effect: Allow',
+    '        Principal: { Service: ecs-tasks.amazonaws.com }',
+    '        Action: sts:AssumeRole',
+    '        Condition:',
+    '          StringEquals: { aws:SourceAccount: !Ref AWS::AccountId }',
+    '          ArnLike:',
+    '            {',
+    "              aws:SourceArn: !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:*',",
+    '            }',
+    '  Policies:',
+    '    - PolicyName: PullWebImage',
+    '      PolicyDocument:',
+    "        Version: '2012-10-17'",
+    '        Statement:',
+    '          - Effect: Allow',
+    '            Action: ecr:GetAuthorizationToken',
+    "            Resource: '*'",
+    '          - Effect: Allow',
+    '            Action:',
+    '              [ecr:BatchCheckLayerAvailability, ecr:BatchGetImage, ecr:GetDownloadUrlForLayer]',
+    '            Resource: !Ref WebImageRepositoryArn',
+    '    - PolicyName: WriteWebLogs',
+    '      PolicyDocument:',
+    "        Version: '2012-10-17'",
+    '        Statement:',
+    '          - Effect: Allow',
+    '            Action: [logs:CreateLogStream, logs:PutLogEvents]',
+    "            Resource: !Sub '${WebLogGroupArn}:*'",
+  ]);
+}
+
+function expectedTrustOnlyRoleBlock(logicalId) {
+  return exactBlock(logicalId, [
+    'Type: AWS::IAM::Role',
+    'Properties:',
+    '  AssumeRolePolicyDocument:',
+    "    Version: '2012-10-17'",
+    '    Statement:',
+    '      - Effect: Allow',
+    '        Principal: { Service: ecs-tasks.amazonaws.com }',
+    '        Action: sts:AssumeRole',
+    '        Condition:',
+    '          StringEquals: { aws:SourceAccount: !Ref AWS::AccountId }',
+    '          ArnLike:',
+    '            {',
+    "              aws:SourceArn: !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:*',",
+    '            }',
+  ]);
+}
+
+function expectedApiTaskRoleBlock() {
+  return exactBlock('ApiTaskRole', [
+    'Type: AWS::IAM::Role',
+    'Properties:',
+    '  AssumeRolePolicyDocument:',
+    "    Version: '2012-10-17'",
+    '    Statement:',
+    '      - Effect: Allow',
+    '        Principal: { Service: ecs-tasks.amazonaws.com }',
+    '        Action: sts:AssumeRole',
+    '        Condition:',
+    '          StringEquals: { aws:SourceAccount: !Ref AWS::AccountId }',
+    '          ArnLike:',
+    '            {',
+    "              aws:SourceArn: !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:*',",
+    '            }',
+    '  Policies:',
+    '    - PolicyName: ApiJobQueueAccess',
+    '      PolicyDocument:',
+    "        Version: '2012-10-17'",
+    '        Statement:',
+    '          - Sid: InspectQueueRedriveConfiguration',
+    '            Effect: Allow',
+    '            Action: sqs:GetQueueAttributes',
+    '            Resource:',
+    '              [',
+    '                !Ref JobQueueArn,',
+    '                !Ref JobDeadLetterQueueArn,',
+    '                !Ref BalanceQueueArn,',
+    '                !Ref BalanceDeadLetterQueueArn,',
+    '              ]',
+  ]);
+}
+
+function expectedWorkerTaskRoleBlock() {
+  return exactBlock('WorkerTaskRole', [
+    'Type: AWS::IAM::Role',
+    'Properties:',
+    '  AssumeRolePolicyDocument:',
+    "    Version: '2012-10-17'",
+    '    Statement:',
+    '      - Effect: Allow',
+    '        Principal: { Service: ecs-tasks.amazonaws.com }',
+    '        Action: sts:AssumeRole',
+    '        Condition:',
+    '          StringEquals: { aws:SourceAccount: !Ref AWS::AccountId }',
+    '          ArnLike:',
+    '            {',
+    "              aws:SourceArn: !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:*',",
+    '            }',
+    '  Policies:',
+    '    - PolicyName: OutboxPublishAccess',
+    '      PolicyDocument:',
+    "        Version: '2012-10-17'",
+    '        Statement:',
+    '          - Sid: PublishJobs',
+    '            Effect: Allow',
+    '            Action: sqs:SendMessage',
+    '            Resource: [!Ref JobQueueArn, !Ref BalanceQueueArn]',
+    '          - Sid: InspectQueueRedriveConfiguration',
+    '            Effect: Allow',
+    '            Action: sqs:GetQueueAttributes',
+    '            Resource:',
+    '              [',
+    '                !Ref JobQueueArn,',
+    '                !Ref JobDeadLetterQueueArn,',
+    '                !Ref BalanceQueueArn,',
+    '                !Ref BalanceDeadLetterQueueArn,',
+    '              ]',
+    '          - Sid: UseSqsEncryptionKey',
+    '            Effect: Allow',
+    '            Action: [kms:Decrypt, kms:GenerateDataKey]',
+    '            Resource: !Ref ApplicationDataKeyArn',
+    '            Condition:',
+    '              StringEquals:',
+    '                kms:ViaService: !Sub sqs.${AWS::Region}.${AWS::URLSuffix}',
   ]);
 }
 
@@ -658,6 +858,16 @@ function validateParameters(source, errors) {
       errors.push(`${phaseParameter} must expose only the reviewed four-state rotation machine.`);
     }
   }
+  for (const parameter of fixedSlotVersionParameterNames) {
+    if (
+      (blocks.get(parameter) ?? '') !==
+      exactBlock(parameter, ['Type: String', "AllowedPattern: '^(UNPINNED|[A-Za-z0-9_-]{32,64})$'"])
+    ) {
+      errors.push(
+        `${parameter} must be explicit and accept only the adoption sentinel or an exact Secrets Manager VersionId.`,
+      );
+    }
+  }
   if (
     (blocks.get('RedisOperatorMode') ?? '') !==
     exactBlock('RedisOperatorMode', [
@@ -731,13 +941,43 @@ function validateParameters(source, errors) {
       errors.push(`${parameter} must use the exact optional identifier contract.`);
     }
   }
-  for (const [parameter, repository] of [['ApiImageRepositoryArn', 'crypto-lending-api']]) {
+  for (const [parameter, repository] of [
+    ['ApiImageRepositoryArn', 'crypto-lending-api'],
+    ['WebImageRepositoryArn', 'crypto-lending-web'],
+  ]) {
     const repositoryPattern = `^arn:[a-z0-9-]+:ecr:[a-z0-9-]+:[0-9]{12}:repository/${repository}$`;
     if (
       (blocks.get(parameter) ?? '') !==
       exactBlock(parameter, ['Type: String', `AllowedPattern: '${repositoryPattern}'`])
     ) {
       errors.push(`${parameter} must be a concrete reviewed application ECR repository ARN.`);
+    }
+  }
+  for (const parameter of ['ApiLogGroupArn', 'WebLogGroupArn', 'WorkerLogGroupArn']) {
+    if (
+      (blocks.get(parameter) ?? '') !==
+      exactBlock(parameter, [
+        'Type: String',
+        "AllowedPattern: '^arn:[a-z0-9-]+:logs:[a-z0-9-]+:[0-9]{12}:log-group:[A-Za-z0-9_./#-]+$'",
+      ])
+    ) {
+      errors.push(`${parameter} must be one explicit application log-group ARN.`);
+    }
+  }
+  for (const parameter of [
+    'JobQueueArn',
+    'JobDeadLetterQueueArn',
+    'BalanceQueueArn',
+    'BalanceDeadLetterQueueArn',
+  ]) {
+    if (
+      (blocks.get(parameter) ?? '') !==
+      exactBlock(parameter, [
+        'Type: String',
+        "AllowedPattern: '^arn:[a-z0-9-]+:sqs:[a-z0-9-]+:[0-9]{12}:crypto-lending-[A-Za-z0-9-]+$'",
+      ])
+    ) {
+      errors.push(`${parameter} must be one explicit application SQS queue ARN.`);
     }
   }
   if (
@@ -796,6 +1036,30 @@ function validateRules(source, errors) {
     '          - !Equals [!Ref RedisCredentialPhase, A_ONLY]',
     '          - !Equals [!Ref RedisCredentialPhase, B_ONLY]',
     '        AssertDescription: Redis operator mode requires one inactive application credential slot.',
+    '  FixedSlotVersionsRequireSafeState:',
+    '    Assertions:',
+    '      - Assert: !Or',
+    '          - !And [',
+    '              !Equals [!Ref ApiDatabaseSlotAVersionId, UNPINNED],',
+    '              !Equals [!Ref ApiDatabaseSlotBVersionId, UNPINNED],',
+    '              !Equals [!Ref WorkerDatabaseSlotAVersionId, UNPINNED],',
+    '              !Equals [!Ref WorkerDatabaseSlotBVersionId, UNPINNED],',
+    '              !Equals [!Ref RedisApiSlotAVersionId, UNPINNED],',
+    '              !Equals [!Ref RedisApiSlotBVersionId, UNPINNED],',
+    '              !Equals [!Ref ApiDatabaseCredentialPhase, A_ONLY],',
+    '              !Equals [!Ref WorkerDatabaseCredentialPhase, A_ONLY],',
+    '              !Equals [!Ref RedisCredentialPhase, A_ONLY],',
+    '              !Equals [!Ref RedisOperatorMode, DISABLED],',
+    '            ]',
+    '          - !And [',
+    '              !Not [!Equals [!Ref ApiDatabaseSlotAVersionId, UNPINNED]],',
+    '              !Not [!Equals [!Ref ApiDatabaseSlotBVersionId, UNPINNED]],',
+    '              !Not [!Equals [!Ref WorkerDatabaseSlotAVersionId, UNPINNED]],',
+    '              !Not [!Equals [!Ref WorkerDatabaseSlotBVersionId, UNPINNED]],',
+    '              !Not [!Equals [!Ref RedisApiSlotAVersionId, UNPINNED]],',
+    '              !Not [!Equals [!Ref RedisApiSlotBVersionId, UNPINNED]],',
+    '            ]',
+    '        AssertDescription: Fixed-slot versions must be all pinned or an inert A_ONLY adoption sentinel.',
   ].join('\n');
   if (section(source, 'Rules', 'Conditions').trimEnd() !== expected) {
     errors.push('Deployment rules must require exact explicit billing acknowledgement.');
@@ -805,18 +1069,31 @@ function validateRules(source, errors) {
 function validateConditions(source, errors) {
   const expected = [
     '  CreateVpcEndpointRules: !Equals [!Ref PrivateEgressMode, VpcEndpoints]',
-    '  ApiDatabaseAReadable: !Not [!Equals [!Ref ApiDatabaseCredentialPhase, B_ONLY]]',
-    '  ApiDatabaseBReadable: !Not [!Equals [!Ref ApiDatabaseCredentialPhase, A_ONLY]]',
+    '  CredentialVersionsPinned: !Not [!Equals [!Ref ApiDatabaseSlotAVersionId, UNPINNED]]',
+    '  ApiDatabaseAReadable: !And',
+    '    - !Condition CredentialVersionsPinned',
+    '    - !Not [!Equals [!Ref ApiDatabaseCredentialPhase, B_ONLY]]',
+    '  ApiDatabaseBReadable: !And',
+    '    - !Condition CredentialVersionsPinned',
+    '    - !Not [!Equals [!Ref ApiDatabaseCredentialPhase, A_ONLY]]',
     '  UseApiDatabaseA: !Or',
     '    - !Equals [!Ref ApiDatabaseCredentialPhase, A_ONLY]',
     '    - !Equals [!Ref ApiDatabaseCredentialPhase, BOTH_USE_A]',
-    '  WorkerDatabaseAReadable: !Not [!Equals [!Ref WorkerDatabaseCredentialPhase, B_ONLY]]',
-    '  WorkerDatabaseBReadable: !Not [!Equals [!Ref WorkerDatabaseCredentialPhase, A_ONLY]]',
+    '  WorkerDatabaseAReadable: !And',
+    '    - !Condition CredentialVersionsPinned',
+    '    - !Not [!Equals [!Ref WorkerDatabaseCredentialPhase, B_ONLY]]',
+    '  WorkerDatabaseBReadable: !And',
+    '    - !Condition CredentialVersionsPinned',
+    '    - !Not [!Equals [!Ref WorkerDatabaseCredentialPhase, A_ONLY]]',
     '  UseWorkerDatabaseA: !Or',
     '    - !Equals [!Ref WorkerDatabaseCredentialPhase, A_ONLY]',
     '    - !Equals [!Ref WorkerDatabaseCredentialPhase, BOTH_USE_A]',
-    '  RedisApiAEnabled: !Not [!Equals [!Ref RedisCredentialPhase, B_ONLY]]',
-    '  RedisApiBEnabled: !Not [!Equals [!Ref RedisCredentialPhase, A_ONLY]]',
+    '  RedisApiAEnabled: !And',
+    '    - !Condition CredentialVersionsPinned',
+    '    - !Not [!Equals [!Ref RedisCredentialPhase, B_ONLY]]',
+    '  RedisApiBEnabled: !And',
+    '    - !Condition CredentialVersionsPinned',
+    '    - !Not [!Equals [!Ref RedisCredentialPhase, A_ONLY]]',
     '  RedisOperatorEnabled: !Equals [!Ref RedisOperatorMode, ENABLED]',
     '  RedisOperatorVpcEndpointRulesEnabled: !And',
     '    - !Equals [!Ref RedisOperatorMode, ENABLED]',
@@ -924,9 +1201,16 @@ function validateRedis(resources, errors) {
     '    - RedisApiAEnabled',
     "    - 'on sanitize-payload resetkeys resetchannels -@all +ping +quit'",
     "    - 'off sanitize-payload resetkeys resetchannels -@all +ping +quit'",
-    '  AuthenticationMode:',
-    "    Passwords: [!Sub '{{resolve:secretsmanager:${RedisApiASecret}:SecretString:password}}']",
-    '    Type: password',
+    '  AuthenticationMode: !If',
+    '    - CredentialVersionsPinned',
+    '    - {',
+    '        Passwords:',
+    '          [',
+    "            !Sub '{{resolve:secretsmanager:${RedisApiASecret}:SecretString:password::${RedisApiSlotAVersionId}}',",
+    '          ],',
+    '        Type: password,',
+    '      }',
+    '    - { Type: no-password-required }',
     '  Engine: redis',
     '  UserId: !Sub cl-${EnvironmentName}-ra',
     '  UserName: !Sub crypto_api_${EnvironmentName}_a',
@@ -938,9 +1222,16 @@ function validateRedis(resources, errors) {
     '    - RedisApiBEnabled',
     "    - 'on sanitize-payload resetkeys resetchannels -@all +ping +quit'",
     "    - 'off sanitize-payload resetkeys resetchannels -@all +ping +quit'",
-    '  AuthenticationMode:',
-    "    Passwords: [!Sub '{{resolve:secretsmanager:${RedisApiBSecret}:SecretString:password}}']",
-    '    Type: password',
+    '  AuthenticationMode: !If',
+    '    - CredentialVersionsPinned',
+    '    - {',
+    '        Passwords:',
+    '          [',
+    "            !Sub '{{resolve:secretsmanager:${RedisApiBSecret}:SecretString:password::${RedisApiSlotBVersionId}}',",
+    '          ],',
+    '        Type: password,',
+    '      }',
+    '    - { Type: no-password-required }',
     '  Engine: redis',
     '  UserId: !Sub cl-${EnvironmentName}-rb',
     '  UserName: !Sub crypto_api_${EnvironmentName}_b',
@@ -1029,6 +1320,7 @@ function validateExecutionRoles(resources, errors) {
       ['WorkerDatabaseBReadable', 'WorkerDatabaseCredentialBSecret'],
     ],
     ['ApplicationDataKeyArn'],
+    'CredentialVersionsPinned',
   );
   if ((resources.get('ApiTaskExecutionRole') ?? '') !== expectedApi) {
     errors.push('ApiTaskExecutionRole must retain the exact API log and runtime-secret matrix.');
@@ -1038,6 +1330,18 @@ function validateExecutionRoles(resources, errors) {
       'WorkerTaskExecutionRole must retain the exact worker log and runtime-secret matrix.',
     );
   }
+  if ((resources.get('WebTaskExecutionRole') ?? '') !== expectedWebExecutionRoleBlock()) {
+    errors.push('WebTaskExecutionRole must retain the exact image-pull and log-only matrix.');
+  }
+  if ((resources.get('WebTaskRole') ?? '') !== expectedTrustOnlyRoleBlock('WebTaskRole')) {
+    errors.push('WebTaskRole must remain permissionless with only the reviewed ECS trust policy.');
+  }
+  if ((resources.get('ApiTaskRole') ?? '') !== expectedApiTaskRoleBlock()) {
+    errors.push('ApiTaskRole must retain only the exact queue-readiness capability matrix.');
+  }
+  if ((resources.get('WorkerTaskRole') ?? '') !== expectedWorkerTaskRoleBlock()) {
+    errors.push('WorkerTaskRole must retain only the exact queue-publish and SQS KMS matrix.');
+  }
   const operator = resources.get('RedisOperatorTaskExecutionRole') ?? '';
   if (operator !== expectedRedisOperatorExecutionRoleBlock()) {
     errors.push(
@@ -1045,8 +1349,11 @@ function validateExecutionRoles(resources, errors) {
     );
   }
 
-  const roles = `${resources.get('ApiTaskExecutionRole') ?? ''}\n${resources.get('WorkerTaskExecutionRole') ?? ''}`;
-  if (/MigrationDatabaseCredentialSecret|crypto_migration|admin/iu.test(roles)) {
+  const executionRoles = ['ApiTaskExecutionRole', 'WebTaskExecutionRole', 'WorkerTaskExecutionRole']
+    .map((logicalId) => resources.get(logicalId) ?? '')
+    .join('\n');
+  const longLivedRoles = `${executionRoles}\n${resources.get('ApiTaskRole') ?? ''}\n${resources.get('WorkerTaskRole') ?? ''}\n${resources.get('WebTaskRole') ?? ''}`;
+  if (/MigrationDatabaseCredentialSecret|crypto_migration|admin/iu.test(longLivedRoles)) {
     errors.push('Long-lived execution roles must not read migration/admin credentials.');
   }
   const worker = resources.get('WorkerTaskExecutionRole') ?? '';
@@ -1062,19 +1369,19 @@ function validateExecutionRoles(resources, errors) {
   ) {
     errors.push('Redis operator execution must not read application or migration credentials.');
   }
-  if (/ManagedPolicyArns:/u.test(roles)) {
-    errors.push('Execution roles must not attach externally mutable managed policies.');
+  if (/ManagedPolicyArns:/u.test(longLivedRoles)) {
+    errors.push('Workload roles must not attach externally mutable managed policies.');
   }
   const registryAuthorization = [
     '                Action: ecr:GetAuthorizationToken',
     "                Resource: '*'",
   ].join('\n');
-  if (roles.split(registryAuthorization).length - 1 !== 2) {
+  if (executionRoles.split(registryAuthorization).length - 1 !== 3) {
     errors.push(
       'Each execution role must contain the one AWS-required ECR authorization wildcard.',
     );
   }
-  const rolesWithoutRequiredEcrWildcard = roles.replaceAll(registryAuthorization, '');
+  const rolesWithoutRequiredEcrWildcard = executionRoles.replaceAll(registryAuthorization, '');
   if (/Resource:\s*(?:\[?['"]?\*|\n\s*- ['"]?\*)/mu.test(rolesWithoutRequiredEcrWildcard)) {
     errors.push('Execution-role IAM resources must not use a wildcard outside ECR authorization.');
   }

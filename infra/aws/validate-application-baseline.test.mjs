@@ -94,16 +94,16 @@ test('accepts the repository no-external-egress baseline and records the DNS res
   assert.match(report.residualLimitations[0], /port 53 to the VPC CIDR/);
   assert.match(report.residualLimitations[0], /cannot prove/);
   assert.match(report.residualLimitations[1], /REDIS_OPERATOR_LIVE_REVOCATION_UNRESOLVED/);
-  assert.match(report.residualLimitations[2], /FIXED_SLOT_CREDENTIAL_REGENERATION_UNRESOLVED/);
+  assert.match(report.residualLimitations[2], /FIXED_SLOT_CREDENTIAL_DEPLOYMENT_GUARD_UNRESOLVED/);
   assert.match(report.residualLimitations[3], /AUTH_WALLET_EXTERNAL_CONFIGURATION_UNRESOLVED/);
   assert.match(report.residualLimitations[4], /OPERATIONAL_ALERT_DELIVERY_EXTERNAL/);
 });
 
 test('keeps the parent below the reviewed direct-upload ceiling after child extraction', () => {
   const bytes = Buffer.byteLength(templateSource, 'utf8');
-  assert.equal(bytes, 50_395);
+  assert.equal(bytes, 49_632);
   assert.ok(bytes <= 50_500);
-  assert.equal(51_200 - bytes, 805);
+  assert.equal(51_200 - bytes, 1_568);
 });
 
 test('pins the observability child URL, digest, binding, and exact parent mapping', () => {
@@ -620,11 +620,11 @@ test('rejects same-resource application egress mutations and any unreviewed prop
   assertRejected(
     mutate((source) =>
       source.replace(
-        '          Resource: [!GetAtt JobQueue.Arn, !GetAtt BalanceQueue.Arn]',
-        '          Resource: arn:aws:sqs:us-west-2:999999999999:external-exfiltration-queue',
+        'BalanceQueueArn: !GetAtt BalanceQueue.Arn',
+        'BalanceQueueArn: !GetAtt JobQueue.Arn',
       ),
     ),
-    /WorkerTaskRole resources must bind exactly to both source queues/,
+    /WorkloadBoundaries must preserve the exact reviewed child input contract/,
   );
 
   assertRejected(
@@ -652,7 +652,7 @@ test('pins the versioned child artifact, provenance, and exact nested input cont
   assertRejected(
     mutate((source) =>
       source.replace(
-        'application-workload-boundaries-d38d0bf07704075615b4ab75041012675dcc30f824430b579623945d408d14f0',
+        'application-workload-boundaries-ab0afc494bf51e68ae0f3e0d267aac544b69f5480754056f95a82baefc0c9219',
         `application-workload-boundaries-${'0'.repeat(64)}`,
       ),
     ),
@@ -661,7 +661,7 @@ test('pins the versioned child artifact, provenance, and exact nested input cont
   assertRejected(
     mutate((source) =>
       source.replace(
-        'AllowedValues: [d38d0bf07704075615b4ab75041012675dcc30f824430b579623945d408d14f0]',
+        'AllowedValues: [ab0afc494bf51e68ae0f3e0d267aac544b69f5480754056f95a82baefc0c9219]',
         `AllowedValues: [${'0'.repeat(64)}]`,
       ),
     ),
@@ -694,6 +694,115 @@ test('pins the versioned child artifact, provenance, and exact nested input cont
     ),
     /WorkloadBoundaries must preserve the exact reviewed child input contract/,
   );
+  for (const [parameter, logGroup] of [
+    ['ApiLogGroupArn', 'ApiLogGroup'],
+    ['WebLogGroupArn', 'WebLogGroup'],
+    ['WorkerLogGroupArn', 'WorkerLogGroup'],
+  ]) {
+    const exact = `    ${parameter}: !Sub 'arn:\${AWS::Partition}:logs:\${AWS::Region}:\${AWS::AccountId}:log-group:\${${logGroup}}'`;
+    assertRejected(
+      mutate((source) => source.replace(exact, `    ${parameter}: !GetAtt ${logGroup}.Arn`)),
+      /WorkloadBoundaries must preserve the exact reviewed child input contract/,
+    );
+  }
+});
+
+const fixedSlotVersionParameters = [
+  'ApiDatabaseSlotAVersionId',
+  'ApiDatabaseSlotBVersionId',
+  'WorkerDatabaseSlotAVersionId',
+  'WorkerDatabaseSlotBVersionId',
+  'RedisApiSlotAVersionId',
+  'RedisApiSlotBVersionId',
+];
+
+test('requires six explicit exact fixed-slot VersionId parameters and child propagation', () => {
+  for (const parameter of fixedSlotVersionParameters) {
+    const block = [
+      ` ${parameter}:`,
+      '  Type: String',
+      "  AllowedPattern: '^(UNPINNED|[A-Za-z0-9_-]{32,64})$'",
+    ].join('\n');
+    assertRejected(
+      mutate((source) =>
+        source.replace(
+          block,
+          block.replace('  Type: String', '  Type: String\n  Default: UNPINNED'),
+        ),
+      ),
+      new RegExp(`${parameter}.*must be explicit.*VersionId`),
+    );
+    assertRejected(
+      mutate((source) =>
+        source.replace(`${parameter}: !Ref ${parameter}`, `${parameter}: UNPINNED`),
+      ),
+      /WorkloadBoundaries must preserve the exact reviewed child input contract/,
+    );
+  }
+});
+
+test('keeps the parent UNPINNED state all-or-none, stopped, A_ONLY, and operator-disabled', () => {
+  for (const [search, replacement] of [
+    [
+      '!Equals [!Ref ApiDatabaseSlotBVersionId, UNPINNED], !Equals [!Ref WorkerDatabaseSlotAVersionId, UNPINNED]',
+      '!Not [!Equals [!Ref ApiDatabaseSlotBVersionId, UNPINNED]], !Equals [!Ref WorkerDatabaseSlotAVersionId, UNPINNED]',
+    ],
+    ['!Equals [!Ref WebDesiredCount, 0]', '!Equals [!Ref WebDesiredCount, 1]'],
+    [
+      '!Equals [!Ref WorkerDatabaseCredentialPhase, A_ONLY]',
+      '!Equals [!Ref WorkerDatabaseCredentialPhase, BOTH_USE_A]',
+    ],
+    ['!Equals [!Ref RedisOperatorMode, DISABLED]]', '!Equals [!Ref RedisOperatorMode, ENABLED]]'],
+  ]) {
+    assertRejected(
+      mutate((source) => source.replace(search, replacement)),
+      /FixedSlotVersionsRequireSafeState.*all-pinned-or-inert adoption gate/,
+    );
+  }
+});
+
+test('pins each active ECS fixed-slot secret to the phase-selected exact VersionId', () => {
+  for (const [secretOutput, versionOutput] of [
+    ['ApiDatabaseActiveSecretArn', 'ApiDatabaseActiveVersionId'],
+    ['RedisActiveSecretArn', 'RedisActiveVersionId'],
+    ['WorkerDatabaseActiveSecretArn', 'WorkerDatabaseActiveVersionId'],
+  ]) {
+    const exact = `\${WorkloadBoundaries.Outputs.${secretOutput}}:password::\${WorkloadBoundaries.Outputs.${versionOutput}}`;
+    assertRejected(
+      mutate((source) =>
+        source.replace(exact, `\${WorkloadBoundaries.Outputs.${secretOutput}}:password::`),
+      ),
+      /exact active workload-scoped ECS secret injection|secret value.* at WorkloadBoundaries\.Outputs/,
+    );
+    assertRejected(
+      mutate((source) =>
+        source.replace(
+          exact,
+          `\${WorkloadBoundaries.Outputs.${secretOutput}}:password:AWSCURRENT:`,
+        ),
+      ),
+      /exact active workload-scoped ECS secret injection|secret value.* at WorkloadBoundaries\.Outputs/,
+    );
+  }
+});
+
+test('sources every ECS workload role from the content-addressed boundary child', () => {
+  for (const [role, wrongRole, logicalId] of [
+    ['ApiTaskRoleArn', 'WorkerTaskRoleArn', 'ApiTaskDefinition'],
+    ['WebTaskExecutionRoleArn', 'ApiTaskExecutionRoleArn', 'WebTaskDefinition'],
+    ['WebTaskRoleArn', 'ApiTaskRoleArn', 'WebTaskDefinition'],
+    ['WorkerTaskRoleArn', 'ApiTaskRoleArn', 'WorkerTaskDefinition'],
+  ]) {
+    assertRejected(
+      mutate((source) =>
+        source.replace(
+          `!GetAtt WorkloadBoundaries.Outputs.${role}`,
+          `!GetAtt WorkloadBoundaries.Outputs.${wrongRole}`,
+        ),
+      ),
+      new RegExp(`${logicalId} requires (?:ExecutionRoleArn|TaskRoleArn)`),
+    );
+  }
 });
 
 test('pins production Cognito, mainnet wallet, and API-only preauth plus six-ring wiring', () => {
@@ -736,9 +845,9 @@ test('pins production Cognito, mainnet wallet, and API-only preauth plus six-rin
   assertRejected(
     mutate((source) =>
       source.replace(
-        "ValueFrom: !Sub '${WorkloadBoundaries.Outputs.WorkerDatabaseActiveSecretArn}:password::'",
+        "ValueFrom: !Sub '${WorkloadBoundaries.Outputs.WorkerDatabaseActiveSecretArn}:password::${WorkloadBoundaries.Outputs.WorkerDatabaseActiveVersionId}'",
         [
-          "ValueFrom: !Sub '${WorkloadBoundaries.Outputs.WorkerDatabaseActiveSecretArn}:password::'",
+          "ValueFrom: !Sub '${WorkloadBoundaries.Outputs.WorkerDatabaseActiveSecretArn}:password::${WorkloadBoundaries.Outputs.WorkerDatabaseActiveVersionId}'",
           "       - { Name: AUTH_PREAUTH_SEAL_KEY, ValueFrom: !Sub '${AuthWalletKeysSecretArn}:AUTH_PREAUTH_SEAL_KEY::' }",
         ].join('\n'),
       ),
@@ -874,8 +983,8 @@ test('rejects crossing the runtime and migration database credential boundary', 
   assertRejected(
     mutate((source) =>
       source.replace(
-        "ValueFrom: !Sub '${WorkloadBoundaries.Outputs.ApiDatabaseActiveSecretArn}:password::'",
-        "ValueFrom: !Sub '${WorkloadBoundaries.Outputs.MigrationDatabaseCredentialSecretArn}:password::'",
+        "ValueFrom: !Sub '${WorkloadBoundaries.Outputs.ApiDatabaseActiveSecretArn}:password::${WorkloadBoundaries.Outputs.ApiDatabaseActiveVersionId}'",
+        "ValueFrom: !Sub '${WorkloadBoundaries.Outputs.MigrationDatabaseCredentialSecretArn}:password::${WorkloadBoundaries.Outputs.ApiDatabaseActiveVersionId}'",
       ),
     ),
     /ApiTaskDefinition must preserve its exact active workload-scoped ECS secret injection/,
@@ -922,32 +1031,31 @@ test('rejects crossing the runtime and migration database credential boundary', 
   );
 });
 
-test('rejects widening any ECS role trust policy', () => {
-  for (const [search, replacement] of [
-    ['Service: ecs-tasks.amazonaws.com', 'Service: lambda.amazonaws.com'],
-    [
-      'StringEquals: { aws:SourceAccount: !Ref AWS::AccountId }',
-      "StringEquals: { aws:SourceAccount: '999999999999' }",
-    ],
-    [
-      "aws:SourceArn: !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:*'",
-      "aws:SourceArn: '*'",
-    ],
-    ['Action: sts:AssumeRole', 'Action: sts:*'],
-  ]) {
-    assertRejected(
-      mutate((source) => source.replace(search, replacement)),
-      /single-account, regional ECS task trust policy with no additional principal or action/,
-    );
-  }
-});
-
-test('rejects widening execution-role and task-role capability matrices', () => {
+test('rejects recreating a workload IAM role outside the pinned child', () => {
   assertRejected(
     mutate((source) =>
       source.replace(
-        "ValueFrom: !Sub '${WorkloadBoundaries.Outputs.RedisActiveSecretArn}:password::'",
-        "ValueFrom: !Sub '${WorkloadBoundaries.Outputs.MigrationDatabaseCredentialSecretArn}:password::'",
+        ' ApplicationLoadBalancer:\n',
+        [
+          ' UnexpectedTaskRole:',
+          '  Type: AWS::IAM::Role',
+          '  Properties: {}',
+          '',
+          ' ApplicationLoadBalancer:',
+          '',
+        ].join('\n'),
+      ),
+    ),
+    /unapproved resource UnexpectedTaskRole|Parent ECS IAM role allowlist/,
+  );
+});
+
+test('rejects widening or remapping the parent-to-child role and secret boundaries', () => {
+  assertRejected(
+    mutate((source) =>
+      source.replace(
+        "ValueFrom: !Sub '${WorkloadBoundaries.Outputs.RedisActiveSecretArn}:password::${WorkloadBoundaries.Outputs.RedisActiveVersionId}'",
+        "ValueFrom: !Sub '${WorkloadBoundaries.Outputs.MigrationDatabaseCredentialSecretArn}:password::${WorkloadBoundaries.Outputs.RedisActiveVersionId}'",
       ),
     ),
     /ApiTaskDefinition must preserve its exact active workload-scoped ECS secret injection/,
@@ -956,45 +1064,31 @@ test('rejects widening execution-role and task-role capability matrices', () => 
   assertRejected(
     mutate((source) =>
       source.replace(
-        'Action: [logs:CreateLogStream, logs:PutLogEvents]',
-        'Action: [logs:CreateLogStream, logs:PutLogEvents, secretsmanager:GetSecretValue]',
+        'WebImageRepositoryArn: !Sub arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/crypto-lending-web',
+        'WebImageRepositoryArn: !Sub arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/crypto-lending-api',
       ),
     ),
-    /web log-only execution policy with no secret or data-key access/,
-  );
-
-  assertRejected(
-    mutate((source) => source.replace('Action: sqs:GetQueueAttributes', 'Action: sqs:SendMessage')),
-    /read-only queue-readiness task policy with no publish, consume, secret, or key access/,
-  );
-
-  assertRejected(
-    mutate((source) =>
-      source.replace('Action: sqs:SendMessage', 'Action: [sqs:SendMessage, sqs:ReceiveMessage]'),
-    ),
-    /queue-publish\/readiness and SQS-only data-key task policy with no consume or secret access/,
+    /WorkloadBoundaries must preserve the exact reviewed child input contract/,
   );
 
   assertRejected(
     mutate((source) =>
       source.replace(
-        ' ApplicationLoadBalancer:\n',
-        [
-          '   Policies:',
-          '    - PolicyName: UnexpectedWebAccess',
-          '      PolicyDocument:',
-          "       Version: '2012-10-17'",
-          '       Statement:',
-          '        - Effect: Allow',
-          '          Action: secretsmanager:GetSecretValue',
-          "          Resource: '*'",
-          '',
-          ' ApplicationLoadBalancer:',
-          '',
-        ].join('\n'),
+        'JobDeadLetterQueueArn: !GetAtt JobDeadLetterQueue.Arn',
+        'JobDeadLetterQueueArn: !GetAtt BalanceDeadLetterQueue.Arn',
       ),
     ),
-    /WebTaskRole must not declare Policies/,
+    /WorkloadBoundaries must preserve the exact reviewed child input contract/,
+  );
+
+  assertRejected(
+    mutate((source) =>
+      source.replace(
+        '   TaskRoleArn: !GetAtt WorkloadBoundaries.Outputs.WebTaskRoleArn',
+        '   TaskRoleArn: !GetAtt WorkloadBoundaries.Outputs.ApiTaskRoleArn',
+      ),
+    ),
+    /WebTaskDefinition requires TaskRoleArn/,
   );
 });
 
@@ -1002,18 +1096,18 @@ test('rejects task-role remapping and secret injection outside the exact service
   assertRejected(
     mutate((source) =>
       source.replace(
-        '   TaskRoleArn: !GetAtt ApiTaskRole.Arn',
-        '   TaskRoleArn: !GetAtt WorkerTaskRole.Arn',
+        '   TaskRoleArn: !GetAtt WorkloadBoundaries.Outputs.ApiTaskRoleArn',
+        '   TaskRoleArn: !GetAtt WorkloadBoundaries.Outputs.WorkerTaskRoleArn',
       ),
     ),
-    /ApiTaskDefinition requires TaskRoleArn to equal !GetAtt ApiTaskRole\.Arn/,
+    /ApiTaskDefinition requires TaskRoleArn to equal !GetAtt WorkloadBoundaries\.Outputs\.ApiTaskRoleArn/,
   );
 
   assertRejected(
     mutate((source) =>
       source.replace(
-        "ValueFrom: !Sub '${WorkloadBoundaries.Outputs.RedisActiveSecretArn}:password::'",
-        "ValueFrom: !Sub '${WorkloadBoundaries.Outputs.ApiDatabaseActiveSecretArn}:password::'",
+        "ValueFrom: !Sub '${WorkloadBoundaries.Outputs.RedisActiveSecretArn}:password::${WorkloadBoundaries.Outputs.RedisActiveVersionId}'",
+        "ValueFrom: !Sub '${WorkloadBoundaries.Outputs.ApiDatabaseActiveSecretArn}:password::${WorkloadBoundaries.Outputs.ApiDatabaseActiveVersionId}'",
       ),
     ),
     /ApiTaskDefinition must preserve its exact active workload-scoped ECS secret injection/,
@@ -1037,7 +1131,7 @@ test('rejects task-role remapping and secret injection outside the exact service
           '       - { Name: APP_VERSION, Value: !Ref ApplicationVersion }',
           '      Secrets:',
           '       - Name: DATABASE_RUNTIME_PASSWORD',
-          "         ValueFrom: !Sub '${WorkloadBoundaries.Outputs.ApiDatabaseActiveSecretArn}:password::'",
+          "         ValueFrom: !Sub '${WorkloadBoundaries.Outputs.ApiDatabaseActiveSecretArn}:password::${WorkloadBoundaries.Outputs.ApiDatabaseActiveVersionId}'",
         ].join('\n'),
       ),
     ),
@@ -1115,11 +1209,6 @@ test('rejects KMS principal, source, context, and ViaService policy widening', (
       'ApplicationDataKeyArn: !GetAtt ApplicationDataKey.Arn',
       'ApplicationDataKeyArn: !GetAtt ApplicationLogsKey.Arn',
       /exact reviewed child input contract/,
-    ],
-    [
-      'kms:ViaService: !Sub sqs.${AWS::Region}.${AWS::URLSuffix}',
-      'kms:ViaService: !Sub secretsmanager.${AWS::Region}.${AWS::URLSuffix}',
-      /SQS-only data-key task policy/,
     ],
   ]) {
     assertRejected(

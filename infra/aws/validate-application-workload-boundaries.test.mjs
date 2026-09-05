@@ -43,7 +43,7 @@ test('accepts the reviewed local workload-boundary child under the direct body c
   assert.match(report.residualLimitations.join('\n'), /LIVE_REVOCATION_UNRESOLVED/);
   assert.match(
     report.residualLimitations.join('\n'),
-    /FIXED_SLOT_CREDENTIAL_REGENERATION_UNRESOLVED/,
+    /FIXED_SLOT_CREDENTIAL_DEPLOYMENT_GUARD_UNRESOLVED/,
   );
   assert.match(report.residualLimitations.join('\n'), /AUTH_WALLET_SECRET_EXTERNAL/);
   assert.match(report.residualLimitations.join('\n'), /not packaged or uploaded/);
@@ -193,8 +193,8 @@ for (const [name, search, replacement] of [
   ],
   [
     'an A enablement condition that can disable the selected slot',
-    'RedisApiAEnabled: !Not [!Equals [!Ref RedisCredentialPhase, B_ONLY]]',
-    'RedisApiAEnabled: !Not [!Equals [!Ref RedisCredentialPhase, BOTH_USE_A]]',
+    '  RedisApiAEnabled: !And\n    - !Condition CredentialVersionsPinned\n    - !Not [!Equals [!Ref RedisCredentialPhase, B_ONLY]]',
+    '  RedisApiAEnabled: !And\n    - !Condition CredentialVersionsPinned\n    - !Not [!Equals [!Ref RedisCredentialPhase, BOTH_USE_A]]',
   ],
   [
     'an active-slot condition that selects B too early',
@@ -214,6 +214,150 @@ for (const [name, search, replacement] of [
     );
   });
 }
+
+const fixedSlotVersionParameters = [
+  'ApiDatabaseSlotAVersionId',
+  'ApiDatabaseSlotBVersionId',
+  'WorkerDatabaseSlotAVersionId',
+  'WorkerDatabaseSlotBVersionId',
+  'RedisApiSlotAVersionId',
+  'RedisApiSlotBVersionId',
+];
+
+test('requires all six fixed-slot version parameters without a mutable default', () => {
+  for (const parameter of fixedSlotVersionParameters) {
+    const block = [
+      `  ${parameter}:`,
+      '    Type: String',
+      "    AllowedPattern: '^(UNPINNED|[A-Za-z0-9_-]{32,64})$'",
+    ].join('\n');
+    assertRejected(
+      mutate(block, block.replace('    Type: String', '    Type: String\n    Default: UNPINNED')),
+      new RegExp(`${parameter}.*must be explicit.*VersionId`),
+    );
+    assertRejected(
+      mutate(block, block.replace('{32,64}', '+')),
+      new RegExp(`${parameter}.*must be explicit.*VersionId`),
+    );
+  }
+});
+
+test('rejects mixed pins or an active direct-child UNPINNED state', () => {
+  assertRejected(
+    mutate(
+      '!Equals [!Ref ApiDatabaseSlotBVersionId, UNPINNED],',
+      '!Not [!Equals [!Ref ApiDatabaseSlotBVersionId, UNPINNED]],',
+    ),
+    /Deployment rules.*billing acknowledgement/,
+  );
+  assertRejected(
+    mutate(
+      '!Equals [!Ref ApiDatabaseCredentialPhase, A_ONLY],',
+      '!Equals [!Ref ApiDatabaseCredentialPhase, BOTH_USE_A],',
+    ),
+    /Deployment rules.*billing acknowledgement/,
+  );
+  assertRejected(
+    mutate(
+      '!Equals [!Ref RedisOperatorMode, DISABLED],',
+      '!Equals [!Ref RedisOperatorMode, ENABLED],',
+    ),
+    /Deployment rules.*billing acknowledgement/,
+  );
+});
+
+test('keeps every fixed-slot read permission closed during UNPINNED adoption', () => {
+  for (const [, condition] of [
+    ['API database A', 'ApiDatabaseAReadable'],
+    ['API database B', 'ApiDatabaseBReadable'],
+    ['worker database A', 'WorkerDatabaseAReadable'],
+    ['worker database B', 'WorkerDatabaseBReadable'],
+    ['Redis API A', 'RedisApiAEnabled'],
+    ['Redis API B', 'RedisApiBEnabled'],
+  ]) {
+    assertRejected(
+      mutate(
+        `  ${condition}: !And\n    - !Condition CredentialVersionsPinned`,
+        `  ${condition}: !And\n    - !Not [!Equals [!Ref RedisCredentialPhase, NEVER]]`,
+      ),
+      /credential readable-slot\/active-slot mappings/,
+    );
+  }
+});
+
+test('renders no empty worker secret-resource statement during UNPINNED adoption', () => {
+  const roleStart = templateSource.indexOf('  WorkerTaskExecutionRole:\n');
+  const roleEnd = templateSource.indexOf('\n  RedisOperatorTaskExecutionRole:\n', roleStart);
+  assert.notEqual(roleStart, -1);
+  assert.notEqual(roleEnd, -1);
+  const role = templateSource.slice(roleStart, roleEnd);
+  const guard = '              - !If\n                - CredentialVersionsPinned\n';
+  const guardStart = role.indexOf(guard);
+  const nextStatement = '              - Sid: DecryptSecrets\n';
+  const guardEnd = role.indexOf(nextStatement, guardStart);
+  assert.notEqual(guardStart, -1);
+  assert.notEqual(guardEnd, -1);
+
+  const renderedUnpinned = `${role.slice(0, guardStart)}${role.slice(guardEnd)}`;
+  assert.doesNotMatch(renderedUnpinned, /secretsmanager:GetSecretValue/);
+  assert.doesNotMatch(renderedUnpinned, /WorkerDatabaseCredential[AB]Secret/);
+  assert.match(renderedUnpinned, /Action: kms:Decrypt/);
+
+  assertRejected(
+    mutate(guard, guard.replace('CredentialVersionsPinned', 'CreateVpcEndpointRules')),
+    /WorkerTaskExecutionRole must retain the exact worker log and runtime-secret matrix/,
+  );
+});
+
+test('pins both Redis application passwords to their exact slot VersionIds', () => {
+  for (const [slot, versionParameter] of [
+    ['A', 'RedisApiSlotAVersionId'],
+    ['B', 'RedisApiSlotBVersionId'],
+  ]) {
+    const exact = `\${RedisApi${slot}Secret}:SecretString:password::\${${versionParameter}}`;
+    assertRejected(
+      mutate(exact, `\${RedisApi${slot}Secret}:SecretString:password`),
+      new RegExp(`RedisApi${slot}User.*exact ordered`),
+    );
+    assertRejected(
+      mutate(exact, `\${RedisApi${slot}Secret}:SecretString:password:AWSCURRENT:`),
+      new RegExp(`RedisApi${slot}User.*exact ordered`),
+    );
+  }
+  assertRejected(
+    mutate('password::${RedisApiSlotAVersionId}', 'password::${RedisApiSlotBVersionId}'),
+    /RedisApiAUser.*exact ordered/,
+  );
+});
+
+test('phase-selects matching active VersionIds without exposing raw slot outputs', () => {
+  for (const [output, search, replacement] of [
+    [
+      'ApiDatabaseActiveVersionId',
+      '!If [UseApiDatabaseA, !Ref ApiDatabaseSlotAVersionId, !Ref ApiDatabaseSlotBVersionId]',
+      '!If [UseApiDatabaseA, !Ref ApiDatabaseSlotBVersionId, !Ref ApiDatabaseSlotAVersionId]',
+    ],
+    [
+      'WorkerDatabaseActiveVersionId',
+      '!If [UseWorkerDatabaseA, !Ref WorkerDatabaseSlotAVersionId, !Ref WorkerDatabaseSlotBVersionId]',
+      '!If [UseWorkerDatabaseA, !Ref WorkerDatabaseSlotBVersionId, !Ref WorkerDatabaseSlotAVersionId]',
+    ],
+    [
+      'RedisActiveVersionId',
+      '!If [UseRedisApiA, !Ref RedisApiSlotAVersionId, !Ref RedisApiSlotBVersionId]',
+      '!If [UseRedisApiA, !Ref RedisApiSlotBVersionId, !Ref RedisApiSlotAVersionId]',
+    ],
+  ]) {
+    assertRejected(mutate(search, replacement), new RegExp(`${output}.*reviewed identifier`));
+  }
+  assertRejected(
+    mutate(
+      'Outputs:\n',
+      'Outputs:\n  RedisApiSlotAVersionId:\n    Value: !Ref RedisApiSlotAVersionId\n',
+    ),
+    /Output allowlist contains unreviewed entry RedisApiSlotAVersionId/,
+  );
+});
 
 for (const [name, search, replacement, expected] of [
   [
@@ -236,12 +380,12 @@ for (const [name, search, replacement, expected] of [
   [
     'unconditional readability of the retired worker database A secret',
     [
-      '                  - !If',
-      '                    - WorkerDatabaseAReadable',
-      '                    - !Ref WorkerDatabaseCredentialASecret',
-      '                    - !Ref AWS::NoValue',
+      '                    - !If',
+      '                      - WorkerDatabaseAReadable',
+      '                      - !Ref WorkerDatabaseCredentialASecret',
+      '                      - !Ref AWS::NoValue',
     ].join('\n'),
-    '                  - !Ref WorkerDatabaseCredentialASecret',
+    '                    - !Ref WorkerDatabaseCredentialASecret',
     /exact worker log and runtime-secret matrix/,
   ],
   [
@@ -328,6 +472,80 @@ test('does not expose raw A/B secret ARNs that a parent could inject around the 
     mutate('Outputs:\n', 'Outputs:\n  RedisApiASecretArn:\n    Value: !Ref RedisApiASecret\n'),
     /Output allowlist contains unreviewed entry RedisApiASecretArn/,
   );
+});
+
+test('owns all workload roles with exact least-privilege policies in the child', () => {
+  assertRejected(
+    mutate('Resource: !Ref WebImageRepositoryArn', 'Resource: !Ref ApiImageRepositoryArn'),
+    /WebTaskExecutionRole must retain the exact image-pull and log-only matrix/,
+  );
+  assertRejected(
+    mutate(
+      '  WebTaskRole:\n    Type: AWS::IAM::Role\n    Properties:\n      AssumeRolePolicyDocument:',
+      '  WebTaskRole:\n    Type: AWS::IAM::Role\n    Properties:\n      Policies: [{ PolicyName: Unexpected, PolicyDocument: {} }]\n      AssumeRolePolicyDocument:',
+    ),
+    /WebTaskRole must remain permissionless/,
+  );
+  assertRejected(
+    mutate(
+      '                Action: sqs:GetQueueAttributes',
+      '                Action: sqs:SendMessage',
+    ),
+    /ApiTaskRole must retain only the exact queue-readiness capability matrix/,
+  );
+  assertRejected(
+    mutate(
+      'Resource: [!Ref JobQueueArn, !Ref BalanceQueueArn]',
+      'Resource: [!Ref JobDeadLetterQueueArn, !Ref BalanceDeadLetterQueueArn]',
+    ),
+    /WorkerTaskRole must retain only the exact queue-publish and SQS KMS matrix/,
+  );
+  assertRejected(
+    mutate(
+      '  WorkerTaskRoleArn:\n    Value: !GetAtt WorkerTaskRole.Arn',
+      '  WorkerTaskRoleArn:\n    Value: !GetAtt ApiTaskRole.Arn',
+    ),
+    /WorkerTaskRoleArn.*reviewed identifier/,
+  );
+});
+
+test('keeps extracted workload role trust scoped to ECS tasks in this account', () => {
+  const start = templateSource.indexOf('  WebTaskRole:\n');
+  const end = templateSource.indexOf('\n  ApiTaskRole:\n', start);
+  assert.notEqual(start, -1);
+  assert.notEqual(end, -1);
+  const role = templateSource.slice(start, end);
+
+  for (const [search, replacement] of [
+    ['Service: ecs-tasks.amazonaws.com', 'Service: lambda.amazonaws.com'],
+    ['Action: sts:AssumeRole', 'Action: sts:*'],
+    ['aws:SourceAccount: !Ref AWS::AccountId', "aws:SourceAccount: '*'"],
+    [
+      "aws:SourceArn: !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:*'",
+      "aws:SourceArn: '*'",
+    ],
+  ]) {
+    const mutatedRole = role.replace(search, replacement);
+    assert.notEqual(mutatedRole, role, `Trust mutation must change ${search}.`);
+    assertRejected(
+      templateSource.replace(role, mutatedRole),
+      /WebTaskRole must remain permissionless with only the reviewed ECS trust policy/,
+    );
+  }
+});
+
+test('requires explicit application log-group ARN inputs for extracted execution roles', () => {
+  for (const parameter of ['ApiLogGroupArn', 'WebLogGroupArn', 'WorkerLogGroupArn']) {
+    const block = [
+      `  ${parameter}:`,
+      '    Type: String',
+      "    AllowedPattern: '^arn:[a-z0-9-]+:logs:[a-z0-9-]+:[0-9]{12}:log-group:[A-Za-z0-9_./#-]+$'",
+    ].join('\n');
+    assertRejected(
+      mutate(block, block.replace('log-group:[A-Za-z0-9_./#-]+$', 'log-group:.*$')),
+      new RegExp(`${parameter} must be one explicit application log-group ARN`),
+    );
+  }
 });
 
 for (const [name, search, replacement, expected] of [

@@ -69,10 +69,20 @@ The required replacement launch-time injection contract is:
 
 ECS obtains runtime values through task-definition `Secrets` entries.
 Sensitive values must not be placed in ordinary task-definition `Environment`
-entries. Updating a Secrets Manager value does not update an already running
-ECS task; the approved rotation procedure must launch replacement tasks before
-revoking the old credential. The checked-in parent/child composition encodes
-this contract, but it has not been staged, planned, or deployed.
+entries. The six fixed database/Redis slots require explicit, no-default
+Secrets Manager `VersionId` parameters, and every fixed-slot consumer selects
+the exact phase-matched version rather than `AWSCURRENT`. Changing a secret or
+its pinned parameter does not update an already running ECS task; the approved
+rotation procedure must launch replacement tasks before revoking the old
+credential. The checked-in parent/child composition encodes this contract, but
+it has not been staged, planned, or deployed.
+
+For initial adoption, all six parameters may be the `UNPINNED` sentinel only
+while API, web, and worker desired counts are zero, all phases are `A_ONLY`, and
+the Redis operator is disabled. In that state Redis application users are off
+and fixed-slot database/Redis execution-role reads remain closed. Version
+parameters intentionally have no defaults, so adoption requires all six
+sentinels to be supplied explicitly and cannot activate a workload.
 
 ### Encryption and transport
 
@@ -211,13 +221,15 @@ complete:
 - KAN-49's independent KAN-235 threat-model/data-classification approval;
 - independently authorized staging and retrieval of the exact versioned nested
   template artifact;
-- database secret-to-LOGIN SCRAM installation/authentication and repeatable
-  inactive-slot regeneration;
+- database secret-to-LOGIN SCRAM installation/authentication and authorized
+  inactive-slot regeneration, with the resulting exact version bound into the
+  reviewed transition record and deployment parameters;
 - an authorized run of the locally reviewed Redis revocation task/CLI, including
   workload drain, old-slot session and reconnect denial, immediate operator
   disablement, managed alarm delivery, and sanitized drill evidence;
-- repeatable inactive-slot Redis credential regeneration rather than reuse of a
-  retained old slot;
+- authorized inactive-slot Redis credential regeneration and password
+  installation, with its exact version bound into the reviewed transition
+  record and deployment parameters;
 - a trusted binding proving the separate migration task's supplied secret/key
   ARNs are the exact application-stack migration outputs;
 - actual API, worker, web, and migration startup with injected secrets;
@@ -228,6 +240,8 @@ complete:
 - live positive and negative IAM decisions against exact deployed role/resource
   ARNs;
 - full-hop TLS from the load balancer to application targets;
+- a deployment guard that compares the reviewed transition record with current
+  deployed state before changing the six fixed-slot version/phase parameters;
 - deployed secret rotation followed by forced task replacement and old-secret
   denial; and
 - independently reviewed security logs and redaction evidence coordinated with
