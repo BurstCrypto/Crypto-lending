@@ -3,19 +3,11 @@ import { NextResponse } from 'next/server';
 
 import { decideProtectedAccountShell } from '@/lib/authentication/protected-route';
 import { readCanonicalAuthenticationPublicOrigin } from '@/lib/authentication/public-origin.server';
-import { buildRestrictedWalletLabSecurityHeaders } from '@/lib/security/browser-egress';
-import { decideWalletLabAccess, readWalletLabAccessConfiguration } from '@/lib/wallets/lab/access';
 
-const SECURITY_HEADERS = buildRestrictedWalletLabSecurityHeaders(process.env.NODE_ENV);
 const ACCOUNT_SHELL_HEADERS = Object.freeze([
   { key: 'Cache-Control', value: 'private, no-store, max-age=0' },
   { key: 'X-Robots-Tag', value: 'noindex, nofollow, noarchive' },
 ]);
-
-function applySecurityHeaders(response: NextResponse): NextResponse {
-  for (const { key, value } of SECURITY_HEADERS) response.headers.set(key, value);
-  return response;
-}
 
 function applyAccountShellHeaders(response: NextResponse): NextResponse {
   for (const { key, value } of ACCOUNT_SHELL_HEADERS) response.headers.set(key, value);
@@ -69,34 +61,9 @@ export function proxy(request: NextRequest) {
     return applyAccountShellHeaders(NextResponse.next());
   }
 
-  const decision = decideWalletLabAccess({
-    authorization: request.headers.get('authorization'),
-    configuration: readWalletLabAccessConfiguration(process.env),
-    forwardedProtocol: request.headers.get('x-forwarded-proto'),
-    requestUrl: request.nextUrl,
-  });
-
-  if (decision.allowed) return applySecurityHeaders(NextResponse.next());
-
-  const response = new NextResponse(decision.status === 401 ? 'Authentication required.' : null, {
-    status: decision.status,
-  });
-  if (decision.status === 401) {
-    response.headers.set(
-      'WWW-Authenticate',
-      'Basic realm="Restricted wallet lab", charset="UTF-8"',
-    );
-  }
-  return applySecurityHeaders(response);
+  return new NextResponse(null, { status: 404 });
 }
 
 export const config = {
-  matcher: [
-    '/internal/wallet-lab/:path*',
-    '/account/:path*',
-    '/platforms',
-    '/portfolio',
-    '/login',
-    '/register',
-  ],
+  matcher: ['/account/:path*', '/platforms', '/portfolio', '/login', '/register'],
 };

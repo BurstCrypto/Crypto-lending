@@ -18,11 +18,10 @@ transaction action. It fails closed without a valid local certificate and
 server-only access credentials and may use dedicated test wallets on Sepolia,
 Base Sepolia, and Solana devnet.
 
-The separate apps/web/internal/wallet-lab route is a mock-adapter demonstration
-with its own Basic authentication. It does not load the isolated real-wallet
-dependency lock and is not test evidence for this candidate. The real-package
-harness now has an independent HTTPS/Basic/WSS gate under tools/wallet-lab;
-neither route is approved for public deployment.
+The former `apps/web` mock-adapter route was not test evidence for this
+candidate and is retired from the current shipped Next application and proxy.
+The real-package harness retains its independent HTTPS/Basic/WSS gate under
+`tools/wallet-lab` and is not approved for public deployment.
 
 Out of scope and prohibited are public hosting, LAN/tunnel exposure, mainnet,
 production accounts, funded wallets, customer data, real assets, transaction

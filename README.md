@@ -193,15 +193,11 @@ confirmation, public-chain disclosure, recovery, and persistence details.
 
 ## Restricted wallet validation lab
 
-There are two deliberately separate wallet test surfaces:
-
-- KAN-224's disabled-by-default `/internal/wallet-lab` route in `apps/web` is a
-  mock-only boundary test. It does not load wallet packages or make wallet/RPC
-  calls.
-- `tools/wallet-lab` is the real-package compatibility harness. It is a private,
-  localhost-only Vite development application with its own package lock. It is
-  not an npm workspace, is not included by the root install/build, and cannot
-  produce a deployable build.
+The shipped `apps/web` application has no wallet-lab route. `tools/wallet-lab`
+is the separate real-package compatibility harness. It is a private,
+localhost-only Vite development application with its own package lock. It is
+not an npm workspace, is not included by the root install/build, and cannot
+produce a deployable build.
 
 The real harness is authorized only for a maximum of two project-authorized
 evaluators using dedicated test wallets on Ethereum Sepolia, Base Sepolia, and
@@ -215,7 +211,7 @@ customer data, or real assets.
 > dependency `@reown/appkit@1.8.19`. Their locked licenses state that downloading
 > or installing constitutes acceptance of their terms. Anyone unable or
 > unauthorized to accept both exact licenses must not run the command or use the
-> real-package lab; use the mock route instead. The
+> real-package lab. There is no wallet-lab fallback in the shipped application. The
 > `VITE_WALLETCONNECT_TERMS_ACCEPTED` flag gates runtime activation only and does
 > not prevent or undo install-time acceptance.
 
@@ -293,24 +289,13 @@ records are retained; removal is not a privacy erasure or data-subject-request
 workflow. A separately reviewed privacy deletion, retention, and DSAR workflow
 is still required; this endpoint does not provide one.
 
-### Mock route
+### Shipped route boundary
 
-To run the mock route on loopback for an authorized internal test, set the
-following only in the ignored `apps/web/.env.local` file, then restart the web
-application:
-
-```text
-WALLET_LAB_ENABLED=true
-WALLET_LAB_ENVIRONMENT=local
-WALLET_LAB_BASIC_AUTH_USERNAME=<internal-reviewer>
-WALLET_LAB_BASIC_AUTH_PASSWORD=<at-least-16-random-characters>
-```
-
-The route fails closed when configuration is missing, requires Basic
-authentication, and sends no-store/no-index headers. The current authorization
-does not permit enabling its preview mode or exposing it publicly. Never enter or
-expose a seed phrase, private key, production wallet, pairing URI, session topic,
-provider object, raw signature, full address, or real funds.
+The former mock wallet-lab page and its proxy branch are retired. No
+`apps/web/.env.local` setting can enable a wallet-lab route in the shipped Next
+application. The lower-level mock policy and evidence code remains available to
+offline unit tests only; authorized real-package validation uses the separate
+loopback-only `tools/wallet-lab` harness described above.
 
 The liveness route reports whether the API process can serve requests. The
 readiness route verifies PostgreSQL connectivity and migration state, Redis,

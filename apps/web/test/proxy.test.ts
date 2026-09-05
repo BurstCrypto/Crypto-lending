@@ -1,5 +1,3 @@
-import { Buffer } from 'node:buffer';
-
 import { NextRequest } from 'next/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -34,9 +32,8 @@ beforeEach(() => {
 });
 
 describe('web request proxy', () => {
-  it('matches the original restricted lab and the protected account shell only', () => {
+  it('matches only shipped authentication and protected-account routes', () => {
     expect(config.matcher).toEqual([
-      '/internal/wallet-lab/:path*',
       '/account/:path*',
       '/platforms',
       '/portfolio',
@@ -187,49 +184,26 @@ describe('web request proxy', () => {
     expect(productionResponse.headers.get('vary')).toBe('Cookie, Origin');
   });
 
-  it('preserves the existing restricted wallet-lab decision and Basic challenge', async () => {
+  it('has no legacy wallet-lab success or Basic-auth branch', async () => {
     vi.stubEnv('NODE_ENV', 'development');
     vi.stubEnv('WALLET_LAB_ENABLED', 'true');
     vi.stubEnv('WALLET_LAB_ENVIRONMENT', 'local');
     vi.stubEnv('WALLET_LAB_BASIC_AUTH_USERNAME', 'reviewer');
     vi.stubEnv('WALLET_LAB_BASIC_AUTH_PASSWORD', 'a-long-preview-only-password');
-
-    const response = proxy(
-      new NextRequest('http://127.0.0.1:3000/internal/wallet-lab', {
-        headers: { Authorization: 'Basic invalid' },
-      }),
-    );
-
-    expect(response.status).toBe(401);
-    expect(await response.text()).toBe('Authentication required.');
-    expect(response.headers.get('www-authenticate')).toBe(
-      'Basic realm="Restricted wallet lab", charset="UTF-8"',
-    );
-    expect(response.headers.get('cache-control')).toBe('private, no-store, max-age=0');
-  });
-
-  it('keeps the existing wallet-lab success branch separate from account cookies', () => {
-    vi.stubEnv('NODE_ENV', 'development');
-    vi.stubEnv('WALLET_LAB_ENABLED', 'true');
-    vi.stubEnv('WALLET_LAB_ENVIRONMENT', 'local');
-    vi.stubEnv('WALLET_LAB_BASIC_AUTH_USERNAME', 'reviewer');
-    vi.stubEnv('WALLET_LAB_BASIC_AUTH_PASSWORD', 'a-long-preview-only-password');
-    const authorization = Buffer.from('reviewer:a-long-preview-only-password', 'utf8').toString(
-      'base64',
-    );
 
     const response = proxy(
       new NextRequest('http://127.0.0.1:3000/internal/wallet-lab', {
         headers: {
-          Authorization: `Basic ${authorization}`,
+          Authorization: 'Basic any-retired-credential',
           Cookie: `${AUTHENTICATION_SESSION_COOKIE_NAME}=${VALID_SESSION}`,
         },
       }),
     );
 
-    expect(response.status).toBe(200);
-    expect(response.headers.get('x-middleware-next')).toBe('1');
+    expect(response.status).toBe(404);
+    expect(await response.text()).toBe('');
+    expect(response.headers.has('x-middleware-next')).toBe(false);
     expect(response.headers.has('www-authenticate')).toBe(false);
-    expect(response.headers.get('cache-control')).toBe('private, no-store, max-age=0');
+    expect(response.headers.has('cache-control')).toBe(false);
   });
 });

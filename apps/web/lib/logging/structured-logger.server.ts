@@ -11,7 +11,6 @@ export const WEB_LOG_ROUTES = Object.freeze([
   '/account',
   '/api/health',
   '/api/version',
-  '/internal/wallet-lab',
   '/login',
   '/register',
 ] as const);

@@ -4,8 +4,6 @@ import nextConfig from '../next.config';
 import {
   buildBrowserEgressPolicy,
   buildBrowserSecurityHeaders,
-  buildRestrictedWalletLabPolicy,
-  buildRestrictedWalletLabSecurityHeaders,
 } from '../lib/security/browser-egress';
 
 describe('browser no-external-egress policy', () => {
@@ -24,9 +22,6 @@ describe('browser no-external-egress policy', () => {
       expect(policy).toContain("object-src 'none'");
       expect(policy).not.toMatch(/(?:https?|wss?):\/\//);
     }
-    expect(buildRestrictedWalletLabPolicy('production')).toBe(
-      buildBrowserEgressPolicy('production'),
-    );
   });
 
   it('limits development network and script exceptions to local tooling', () => {
@@ -54,23 +49,6 @@ describe('browser no-external-egress policy', () => {
       'X-Frame-Options': 'DENY',
     });
     expect(developmentHeaders).not.toHaveProperty('Strict-Transport-Security');
-  });
-
-  it('preserves restricted wallet-lab cache and indexing protections', () => {
-    const headers = Object.fromEntries(
-      buildRestrictedWalletLabSecurityHeaders('development').map(({ key, value }) => [key, value]),
-    );
-
-    expect(headers).toMatchObject({
-      'Cache-Control': 'private, no-store, max-age=0',
-      'Content-Security-Policy': buildRestrictedWalletLabPolicy('development'),
-      'Permissions-Policy': 'camera=(), geolocation=(), microphone=(), payment=(), usb=()',
-      Pragma: 'no-cache',
-      'Referrer-Policy': 'no-referrer',
-      'X-Content-Type-Options': 'nosniff',
-      'X-Frame-Options': 'DENY',
-      'X-Robots-Tag': 'noindex, nofollow, noarchive',
-    });
   });
 
   it('installs the generated connect policy on every web route', async () => {

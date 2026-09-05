@@ -34,8 +34,8 @@ The lock always downloads and installs
 downloading/installing accepts their terms. Anyone who cannot or is not
 authorized to accept those exact licenses must not run `npm ci` for this package
 or use this real-package lab. The runtime environment flag does not prevent or
-undo install-time acceptance; the mock route in `apps/web` remains the
-no-wallet-package alternative.
+undo install-time acceptance, and the shipped `apps/web` application has no
+wallet-lab fallback.
 
 After an authorized terms review and acceptance, install this package explicitly:
 

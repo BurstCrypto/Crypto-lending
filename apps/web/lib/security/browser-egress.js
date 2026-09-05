@@ -15,10 +15,6 @@ export function buildBrowserEgressPolicy(runtime) {
   return `${connectPolicy}; ${scriptPolicy}; ${BASE_RESOURCE_POLICY}`;
 }
 
-export function buildRestrictedWalletLabPolicy(runtime) {
-  return buildBrowserEgressPolicy(runtime);
-}
-
 export function buildBrowserSecurityHeaders(runtime) {
   const headers = [
     {
@@ -51,13 +47,4 @@ export function buildBrowserSecurityHeaders(runtime) {
   }
 
   return headers;
-}
-
-export function buildRestrictedWalletLabSecurityHeaders(runtime) {
-  return [
-    { key: 'Cache-Control', value: 'private, no-store, max-age=0' },
-    ...buildBrowserSecurityHeaders(runtime),
-    { key: 'Pragma', value: 'no-cache' },
-    { key: 'X-Robots-Tag', value: 'noindex, nofollow, noarchive' },
-  ];
 }
