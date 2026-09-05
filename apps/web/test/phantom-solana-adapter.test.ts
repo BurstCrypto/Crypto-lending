@@ -6,13 +6,16 @@ import {
   PhantomSolanaAdapterError,
 } from '../lib/wallets/phantom-solana-adapter';
 import {
-  SOLANA_CAIP_CHAIN_IDS,
-  SOLANA_WALLET_STANDARD_CHAINS,
   toSolanaEd25519OwnershipProofWire,
   type SiwsMessageOwnershipChallenge,
   type SiwsSignInOwnershipChallenge,
   type WalletEvent,
 } from '../lib/wallets/wallet-adapter';
+import {
+  KAN61_SOLANA_COMPATIBILITY_NETWORKS,
+  SOLANA_CAIP_CHAIN_IDS,
+  SOLANA_WALLET_STANDARD_CHAINS,
+} from '../lib/wallets/solana/compatibility-network-catalog';
 
 const ADDRESS_A = '11111111111111111111111111111112';
 const ADDRESS_B = '11111111111111111111111111111113';
@@ -83,7 +86,7 @@ function fakeProvider(options: FakeProviderOptions = {}) {
 
 function adapter(provider: ReturnType<typeof fakeProvider>, id = 'phantom:test-connection') {
   return createPhantomSolanaAdapter({
-    chainId: SOLANA_CAIP_CHAIN_IDS.devnet,
+    network: KAN61_SOLANA_COMPATIBILITY_NETWORKS[1],
     getProvider: () => provider,
     createConnectionId: () => id,
   });
@@ -278,10 +281,13 @@ describe('Phantom Solana adapter', () => {
   it('rejects aliases and mismatched explicit provider cluster claims', async () => {
     expect(() =>
       createPhantomSolanaAdapter({
-        chainId: 'solana:devnet' as never,
+        network: {
+          chainId: 'solana:devnet' as never,
+          walletStandardChain: SOLANA_WALLET_STANDARD_CHAINS.devnet,
+        },
         getProvider: () => fakeProvider(),
       }),
-    ).toThrow('supported CAIP allowlist');
+    ).toThrow('canonical CAIP identifier');
 
     const provider = fakeProvider({
       connectResult: {
@@ -511,6 +517,24 @@ describe('Phantom Solana adapter', () => {
       account: { address: ADDRESS_A, publicKey: PUBLIC_KEY_A },
       signatureType: 'ed25519',
     });
+  });
+
+  it('rejects a structured sign-in cluster outside its injected network binding', async () => {
+    const provider = fakeProvider();
+    const wallet = adapter(provider);
+    const connection = await wallet.connect();
+    const challenge = signInChallenge();
+
+    await expect(
+      wallet.signOwnershipChallenge(connection.connectionId, {
+        ...challenge,
+        input: {
+          ...challenge.input,
+          chainId: SOLANA_WALLET_STANDARD_CHAINS.mainnet,
+        },
+      }),
+    ).rejects.toMatchObject({ code: 'WRONG_CLUSTER' });
+    expect(provider.signIn).not.toHaveBeenCalled();
   });
 
   it('does not advertise or invoke structured sign-in when the provider lacks it', async () => {

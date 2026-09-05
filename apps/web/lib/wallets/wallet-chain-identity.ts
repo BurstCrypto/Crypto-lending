@@ -1,12 +1,12 @@
 import {
   assertWalletAccount,
   assertWalletConnection,
-  SOLANA_CAIP_CHAIN_IDS,
   type ChainId,
   type WalletAccount,
   type WalletConnection,
   type WalletNamespace,
 } from './wallet-adapter';
+import { SOLANA_CAIP_CHAIN_IDS } from './solana/compatibility-network-catalog';
 
 export const KAN61_SOLANA_CAIP_CHAIN_IDS = Object.freeze({
   mainnet: SOLANA_CAIP_CHAIN_IDS.mainnet,

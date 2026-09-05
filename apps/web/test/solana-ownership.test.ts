@@ -14,8 +14,8 @@ import {
   type SolanaWalletOwnershipClient,
 } from '@/lib/wallets/solana/ownership';
 import { MAINNET_WALLET_REGISTRY } from '@/lib/wallets/mainnet-network-policy';
+import { SOLANA_CAIP_CHAIN_IDS } from '@/lib/wallets/solana/compatibility-network-catalog';
 import {
-  SOLANA_CAIP_CHAIN_IDS,
   solanaPublicKeyBytesForAddress,
   walletBytesToBase64Url,
   type SiwsMessageOwnershipSignature,

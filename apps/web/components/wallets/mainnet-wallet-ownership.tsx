@@ -43,11 +43,8 @@ import {
   completeSolanaWalletOwnershipRegistration,
   type SolanaWalletOwnershipClient,
 } from '@/lib/wallets/solana/ownership';
-import {
-  SOLANA_CAIP_CHAIN_IDS,
-  type WalletAdapter,
-  type WalletConnection,
-} from '@/lib/wallets/wallet-adapter';
+import { MAINNET_SOLANA_WALLET_NETWORK } from '@/lib/wallets/solana/mainnet-network';
+import { type WalletAdapter, type WalletConnection } from '@/lib/wallets/wallet-adapter';
 
 export { MAINNET_WALLET_NETWORKS } from '@/lib/wallets/mainnet-network-policy';
 
@@ -292,7 +289,7 @@ export function createMainnetWalletOwnershipRuntime(
         const provider = discoverInjectedPhantomSolanaProvider(windowValue);
         if (provider === null) throw new MainnetWalletRuntimeError('CONNECTOR_UNAVAILABLE');
         const adapter = createPhantomSolanaAdapter({
-          chainId: SOLANA_CAIP_CHAIN_IDS.mainnet,
+          network: MAINNET_SOLANA_WALLET_NETWORK,
           getProvider: () => provider,
           ...(options.createConnectionId === undefined
             ? {}
@@ -379,14 +376,17 @@ export function createMainnetWalletOwnershipRuntime(
           signal: operation.controller.signal,
         });
         assertCurrentOperation(operation);
-        if (result.chainId !== SOLANA_CAIP_CHAIN_IDS.mainnet) {
+        if (result.chainId !== MAINNET_SOLANA_WALLET_NETWORK.chainId) {
           throw new MainnetWalletRuntimeError('CONNECTION_CHANGED');
         }
         return Object.freeze({
           status: result.status,
           walletId: result.walletId,
-          chainId: SOLANA_CAIP_CHAIN_IDS.mainnet,
-          addressHint: mainnetWalletAddressHint(SOLANA_CAIP_CHAIN_IDS.mainnet, result.address),
+          chainId: MAINNET_SOLANA_WALLET_NETWORK.chainId,
+          addressHint: mainnetWalletAddressHint(
+            MAINNET_SOLANA_WALLET_NETWORK.chainId,
+            result.address,
+          ),
         });
       } finally {
         clearPending();

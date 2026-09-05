@@ -1,14 +1,16 @@
 import {
   assertOwnershipChallengeTargetsConnection,
   assertOwnershipSignatureMatchesChallenge,
+  assertSolanaWalletNetwork,
   assertWalletAccount,
   assertWalletConnection,
   solanaPublicKeyBytesForAddress,
-  solanaWalletStandardChainForCaip,
   type OwnershipChallenge,
   type OwnershipSignature,
   type SiwsSignInInput,
-  type SupportedSolanaCaipChainId,
+  type SolanaCaipChainId,
+  type SolanaWalletNetwork,
+  type SolanaWalletStandardChain,
   type WalletAdapter,
   type WalletConnection,
   type WalletEvent,
@@ -97,8 +99,8 @@ export interface PhantomSolanaProvider {
 }
 
 export interface PhantomSolanaAdapterOptions {
-  /** Exact KAN-61 CAIP-2 network ID; aliases such as `solana:devnet` are rejected. */
-  readonly chainId: SupportedSolanaCaipChainId;
+  /** Caller-owned exact CAIP-2 and Wallet Standard network binding. */
+  readonly network: SolanaWalletNetwork;
   /**
    * Provider source selected by the application. It may wrap Wallet Standard;
    * `discoverInjectedPhantomSolanaProvider` is the guarded direct fallback.
@@ -259,7 +261,7 @@ function bytesEqual(left: Uint8Array, right: Uint8Array): boolean {
   return left.byteLength === right.byteLength && left.every((byte, index) => byte === right[index]);
 }
 
-function validatedAddress(value: unknown, chainId: SupportedSolanaCaipChainId): string {
+function validatedAddress(value: unknown, chainId: SolanaCaipChainId): string {
   if (typeof value !== 'string') throw new PhantomSolanaAdapterError('ACCOUNT_INVALID');
   try {
     const account = { chainId, address: value };
@@ -270,7 +272,7 @@ function validatedAddress(value: unknown, chainId: SupportedSolanaCaipChainId): 
   }
 }
 
-function addressFromPublicKey(value: unknown, chainId: SupportedSolanaCaipChainId): string {
+function addressFromPublicKey(value: unknown, chainId: SolanaCaipChainId): string {
   if (typeof value === 'string') return validatedAddress(value, chainId);
   if (!isObject(value)) throw new PhantomSolanaAdapterError('ACCOUNT_INVALID');
   const toBase58 = readProviderValue(value, 'toBase58');
@@ -290,9 +292,12 @@ function validatePublicKeyBytes(address: string, value: unknown): void {
   if (!bytesEqual(actual, expected)) throw new PhantomSolanaAdapterError('ACCOUNT_INVALID');
 }
 
-function validateClusterClaim(value: unknown, expectedCaip: SupportedSolanaCaipChainId): void {
+function validateClusterClaim(
+  value: unknown,
+  expectedCaip: SolanaCaipChainId,
+  expectedWalletChain: SolanaWalletStandardChain,
+): void {
   if (value === undefined) return;
-  const expectedWalletChain = solanaWalletStandardChainForCaip(expectedCaip);
   const values = Array.isArray(value) ? value : [value];
   if (
     values.length === 0 ||
@@ -302,10 +307,11 @@ function validateClusterClaim(value: unknown, expectedCaip: SupportedSolanaCaipC
   }
 }
 
-function addressFromAccountCandidate(value: unknown, chainId: SupportedSolanaCaipChainId): string {
+function addressFromAccountCandidate(value: unknown, network: SolanaWalletNetwork): string {
+  const { chainId, walletStandardChain } = network;
   if (!isObject(value)) return addressFromPublicKey(value, chainId);
-  validateClusterClaim(readProviderValue(value, 'chains'), chainId);
-  validateClusterClaim(readProviderValue(value, 'chainId'), chainId);
+  validateClusterClaim(readProviderValue(value, 'chains'), chainId, walletStandardChain);
+  validateClusterClaim(readProviderValue(value, 'chainId'), chainId, walletStandardChain);
 
   const addressValue = readProviderValue(value, 'address');
   const publicKeyValue = readProviderValue(value, 'publicKey');
@@ -326,18 +332,19 @@ function addressFromAccountCandidate(value: unknown, chainId: SupportedSolanaCai
 function addressFromConnectionResult(
   result: unknown,
   provider: ProviderAccess,
-  chainId: SupportedSolanaCaipChainId,
+  network: SolanaWalletNetwork,
 ): string {
+  const { chainId, walletStandardChain } = network;
   if (!isObject(result)) throw new PhantomSolanaAdapterError('ACCOUNT_INVALID');
-  validateClusterClaim(readProviderValue(result, 'chains'), chainId);
-  validateClusterClaim(readProviderValue(result, 'chainId'), chainId);
+  validateClusterClaim(readProviderValue(result, 'chains'), chainId, walletStandardChain);
+  validateClusterClaim(readProviderValue(result, 'chainId'), chainId, walletStandardChain);
 
   const accounts = readProviderValue(result, 'accounts');
   if (accounts !== undefined) {
     if (!Array.isArray(accounts) || accounts.length !== 1) {
       throw new PhantomSolanaAdapterError('ACCOUNT_INVALID');
     }
-    return addressFromAccountCandidate(accounts[0], chainId);
+    return addressFromAccountCandidate(accounts[0], network);
   }
 
   const publicKey =
@@ -347,7 +354,7 @@ function addressFromConnectionResult(
 
 function freezeConnection(
   connectionId: string,
-  chainId: SupportedSolanaCaipChainId,
+  chainId: SolanaCaipChainId,
   address: string,
   restored: boolean,
   supportsSignIn: boolean,
@@ -399,7 +406,7 @@ class DefaultPhantomSolanaAdapter implements WalletAdapter {
   readonly connectorId = PHANTOM_SOLANA_CONNECTOR_ID;
   readonly namespace = 'solana' as const;
 
-  private readonly chainId: SupportedSolanaCaipChainId;
+  private readonly network: SolanaWalletNetwork;
   private readonly getProvider: () => unknown;
   private readonly createConnectionId: () => string;
   private readonly listeners = new Set<(event: WalletEvent) => void>();
@@ -410,7 +417,7 @@ class DefaultPhantomSolanaAdapter implements WalletAdapter {
   private openPending: Promise<WalletConnection | null> | null = null;
 
   constructor(options: PhantomSolanaAdapterOptions) {
-    solanaWalletStandardChainForCaip(options.chainId);
+    assertSolanaWalletNetwork(options.network);
     if (typeof options.getProvider !== 'function') {
       throw new PhantomSolanaAdapterError('PROVIDER_INVALID');
     }
@@ -420,7 +427,7 @@ class DefaultPhantomSolanaAdapter implements WalletAdapter {
     ) {
       throw new PhantomSolanaAdapterError('PROVIDER_INVALID');
     }
-    this.chainId = options.chainId;
+    this.network = Object.freeze({ ...options.network });
     this.getProvider = options.getProvider;
     this.createConnectionId = options.createConnectionId ?? defaultConnectionId;
   }
@@ -490,14 +497,14 @@ class DefaultPhantomSolanaAdapter implements WalletAdapter {
 
     try {
       throwIfAborted(signal);
-      const address = addressFromConnectionResult(result, access, this.chainId);
+      const address = addressFromConnectionResult(result, access, this.network);
       const connectionId = validateConnectionId(this.createConnectionId());
       if (this.issuedConnectionIds.has(connectionId)) {
         throw new PhantomSolanaAdapterError('PROVIDER_INVALID');
       }
       const connection = freezeConnection(
         connectionId,
-        this.chainId,
+        this.network.chainId,
         address,
         restored,
         access.signIn !== undefined,
@@ -573,11 +580,11 @@ class DefaultPhantomSolanaAdapter implements WalletAdapter {
     }
 
     try {
-      const address = addressFromAccountCandidate(value, this.chainId);
+      const address = addressFromAccountCandidate(value, this.network);
       if (address === current.selectedAccount.address) return;
       const next = freezeConnection(
         current.connectionId,
-        this.chainId,
+        this.network.chainId,
         address,
         current.restored,
         access.signIn !== undefined,
@@ -670,6 +677,13 @@ class DefaultPhantomSolanaAdapter implements WalletAdapter {
     }
     assertOwnershipChallengeTargetsConnection(challenge, connection);
 
+    if (
+      challenge.format === 'siws-sign-in' &&
+      challenge.input.chainId !== this.network.walletStandardChain
+    ) {
+      throw new PhantomSolanaAdapterError('WRONG_CLUSTER');
+    }
+
     if (challenge.format === 'siws-message') {
       const signedMessage = new TextEncoder().encode(challenge.message);
       let result: unknown;
@@ -682,7 +696,7 @@ class DefaultPhantomSolanaAdapter implements WalletAdapter {
       if (!isObject(result)) throw new PhantomSolanaAdapterError('SIGNATURE_INVALID');
       const signerAddress = addressFromPublicKey(
         readProviderValue(result, 'publicKey'),
-        this.chainId,
+        this.network.chainId,
       );
       if (signerAddress !== connection.selectedAccount.address) {
         throw new PhantomSolanaAdapterError('SIGNATURE_INVALID');
@@ -715,7 +729,7 @@ class DefaultPhantomSolanaAdapter implements WalletAdapter {
     if (!isObject(candidate)) throw new PhantomSolanaAdapterError('SIGNATURE_INVALID');
     const account = readProviderValue(candidate, 'account');
     if (!isObject(account)) throw new PhantomSolanaAdapterError('SIGNATURE_INVALID');
-    const address = validatedAddress(readProviderValue(account, 'address'), this.chainId);
+    const address = validatedAddress(readProviderValue(account, 'address'), this.network.chainId);
     const publicKey = copyBytes(readProviderValue(account, 'publicKey'), 32);
     validatePublicKeyBytes(address, publicKey);
     const signatureType = readProviderValue(candidate, 'signatureType');

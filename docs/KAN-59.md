@@ -36,18 +36,28 @@ deployed browser and vendor acceptance remain blocking evidence.
 
 The previous web contract accepted the friendly alias `solana:devnet` as an
 application chain ID. That alias does not match the canonical KAN-61/KAN-56
-identity. The shared boundary now accepts only these checked-in KAN-61 IDs:
+identity. Canonical CAIP parsing is now provider-neutral, while the caller must
+inject one exact CAIP-to-Wallet-Standard network binding into the adapter.
+
+The shipped production path imports one deeply frozen Solana mainnet binding:
 
 | Environment | Canonical application/KAN-56 CAIP ID      | Wallet Standard alias |
 | ----------- | ----------------------------------------- | --------------------- |
 | Mainnet     | `solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp` | `solana:mainnet`      |
+
+The historical KAN-61 compatibility catalog remains isolated for local tests
+and retired public-testnet tooling:
+
+| Environment | Canonical application/KAN-56 CAIP ID      | Wallet Standard alias |
+| ----------- | ----------------------------------------- | --------------------- |
 | Devnet      | `solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1` | `solana:devnet`       |
 
-`solanaWalletStandardChainForCaip` is the only translation. Unknown CAIP
-references, the raw aliases at the application boundary, and a provider account
-that explicitly claims only another cluster are rejected. Solana addresses are
-case-sensitive, must encode one nonzero 32-byte public key, and are never
-lowercased.
+Production modules do not import that compatibility catalog or a cluster map.
+Unknown or malformed injected bindings, raw aliases at the application
+boundary, provider accounts that explicitly claim another cluster, and
+structured sign-in challenges that disagree with the injected binding are
+rejected before signing. Solana addresses are case-sensitive, must encode one
+nonzero 32-byte public key, and are never lowercased.
 
 Injected Phantom does not expose a dependable RPC-cluster or chain-change
 contract. Absence of a provider cluster claim is therefore not represented as
@@ -102,7 +112,8 @@ changes before the provider result returns.
 
 ```powershell
 npm run test --workspace @crypto-lending/web -- --run `
-  test/phantom-solana-adapter.test.ts test/wallet-adapter.test.ts
+  test/phantom-solana-adapter.test.ts test/wallet-adapter.test.ts `
+  test/production-solana-wallet-network-boundary.test.ts
 npm run typecheck --workspace @crypto-lending/web
 npm run lint --workspace @crypto-lending/web
 npm run build --workspace @crypto-lending/web

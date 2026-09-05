@@ -6,9 +6,6 @@ import {
   assertOwnershipSignatureMatchesChallenge,
   assertWalletConnection,
   base64UrlToWalletBytes,
-  SOLANA_CAIP_CHAIN_IDS,
-  SOLANA_WALLET_STANDARD_CHAINS,
-  solanaWalletStandardChainForCaip,
   toOwnershipSignatureWire,
   toSolanaEd25519OwnershipProofWire,
   walletBytesToBase64Url,
@@ -16,6 +13,11 @@ import {
   type WalletConnection,
   type WalletEvent,
 } from '../lib/wallets/wallet-adapter';
+import {
+  SOLANA_CAIP_CHAIN_IDS,
+  SOLANA_WALLET_STANDARD_CHAINS,
+  solanaWalletStandardChainForCaip,
+} from '../lib/wallets/solana/compatibility-network-catalog';
 
 const accountA = {
   chainId: 'eip155:11155111',
@@ -428,7 +430,7 @@ describe('wallet adapter contract', () => {
     expect(() => base64UrlToWalletBytes(encoded, 5)).toThrow('1-5 bytes');
   });
 
-  it('maps only canonical KAN-61 Solana CAIP IDs to Wallet Standard clusters', () => {
+  it('keeps the isolated KAN-61 compatibility catalog exact', () => {
     expect(solanaWalletStandardChainForCaip(SOLANA_CAIP_CHAIN_IDS.mainnet)).toBe(
       SOLANA_WALLET_STANDARD_CHAINS.mainnet,
     );

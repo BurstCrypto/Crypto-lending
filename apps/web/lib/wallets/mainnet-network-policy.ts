@@ -1,5 +1,5 @@
 import { createSupportedEvmNetworks } from './eip1193/networks';
-import { SOLANA_CAIP_CHAIN_IDS } from './wallet-adapter';
+import { MAINNET_SOLANA_WALLET_NETWORK } from './solana/mainnet-network';
 
 export const MAINNET_WALLET_REGISTRY = Object.freeze({
   environment: 'MAINNET' as const,
@@ -16,7 +16,7 @@ export const MAINNET_WALLET_NETWORKS = Object.freeze([
     namespace: 'eip155' as const,
   }),
   Object.freeze({
-    chainId: SOLANA_CAIP_CHAIN_IDS.mainnet,
+    chainId: MAINNET_SOLANA_WALLET_NETWORK.chainId,
     displayName: 'Solana',
     environment: 'MAINNET' as const,
     namespace: 'solana' as const,
