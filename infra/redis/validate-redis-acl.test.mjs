@@ -1,13 +1,64 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { linkSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 
-import { validateRedisAclSource } from './validate-redis-acl.mjs';
+import {
+  MAX_REDIS_ACL_BYTES,
+  REDIS_ACL_FILE_INVALID_ERROR,
+  validateRedisAclFile,
+  validateRedisAclSource,
+} from './validate-redis-acl.mjs';
 
 const fixture = readFileSync(new URL('./users.acl', import.meta.url), 'utf8');
 
 test('accepts the reviewed least-privilege local ACL fixture', () => {
   assert.deepEqual(validateRedisAclSource(fixture), []);
+});
+
+test('accepts the reviewed fixture through the controlled file boundary', () => {
+  assert.deepEqual(
+    validateRedisAclFile(fileURLToPath(new URL('./users.acl', import.meta.url))),
+    [],
+  );
+});
+
+test('controlled ACL loading rejects malformed UTF-8, a byte-order mark, and oversized input', () => {
+  const invalidInputs = [
+    Buffer.from([0xc3, 0x28]),
+    Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(fixture)]),
+    Buffer.alloc(MAX_REDIS_ACL_BYTES + 1, 0x20),
+  ];
+  for (const bytes of invalidInputs) {
+    const directory = mkdtempSync(join(tmpdir(), 'redis-acl-file-'));
+    const path = join(directory, 'users.acl');
+    try {
+      writeFileSync(path, bytes);
+      assert.deepEqual(validateRedisAclFile(path), [REDIS_ACL_FILE_INVALID_ERROR]);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }
+});
+
+test('controlled ACL loading rejects a multiply-linked file', (context) => {
+  const directory = mkdtempSync(join(tmpdir(), 'redis-acl-link-'));
+  const source = join(directory, 'source.acl');
+  const linked = join(directory, 'linked.acl');
+  try {
+    writeFileSync(source, fixture, 'utf8');
+    try {
+      linkSync(source, linked);
+    } catch (error) {
+      context.skip(`hard links unavailable: ${error instanceof Error ? error.message : 'unknown'}`);
+      return;
+    }
+    assert.deepEqual(validateRedisAclFile(linked), [REDIS_ACL_FILE_INVALID_ERROR]);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 for (const [name, mutate, expected] of [

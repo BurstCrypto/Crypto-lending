@@ -1,8 +1,14 @@
 #!/usr/bin/env node
 
-import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { TextDecoder } from 'node:util';
+
+import { readSecureLocalFile } from '../shared/read-secure-local-file.mjs';
+
+export const MAX_REDIS_ACL_BYTES = 65_536;
+export const REDIS_ACL_FILE_INVALID_ERROR =
+  'ACL file must be a bounded, canonical, stable, single-link UTF-8 file';
 
 const EXPECTED_USERS = new Set(['default', 'crypto_api_a', 'crypto_api_b', 'local_acl_operator']);
 const REVIEWED_HASHES = Object.freeze({
@@ -103,7 +109,15 @@ export function validateRedisAclSource(source) {
 }
 
 export function validateRedisAclFile(path) {
-  return validateRedisAclSource(readFileSync(path, 'utf8'));
+  try {
+    const bytes = readSecureLocalFile(path, MAX_REDIS_ACL_BYTES);
+    if (bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) {
+      return [REDIS_ACL_FILE_INVALID_ERROR];
+    }
+    return validateRedisAclSource(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+  } catch {
+    return [REDIS_ACL_FILE_INVALID_ERROR];
+  }
 }
 
 const invokedPath = process.argv[1] ? resolve(process.argv[1]) : undefined;
