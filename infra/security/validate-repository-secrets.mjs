@@ -4,12 +4,31 @@ import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { basename, extname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parseStrictJsonBytes } from '../shared/parse-strict-json.mjs';
+import { readSecureLocalFile } from '../shared/read-secure-local-file.mjs';
 
 export const MAX_SCANNABLE_TEXT_BYTES = 2_000_000;
 
 const MAX_GIT_OUTPUT_BYTES = 96 * 1024 * 1024;
+const MAX_REVIEWED_FALSE_POSITIVE_LEDGER_BYTES = 16 * 1024;
 const BLOB_BATCH_SIZE = 32;
 const OBJECT_ID_PATTERN = /^[0-9a-f]{40,64}$/u;
+const REVIEWED_FALSE_POSITIVE_LEDGER_PATH = fileURLToPath(
+  new URL('./repository-secret-false-positive-ledger.json', import.meta.url),
+);
+// The ledger contains no matched material. Its reviewed bytes and every
+// rule/scope/path/line/blob/redacted-fingerprint tuple must match exactly.
+const REVIEWED_FALSE_POSITIVE_LEDGER_SHA256 =
+  '0132bccf3a14290e987c46ae5c792358b15e44eb1324d728674e1981167f2d03';
+const REVIEWED_FALSE_POSITIVE_CLASSIFICATIONS = new Set([
+  'LOCAL_LOOPBACK_DATABASE_TEST_FIXTURE',
+  'RESERVED_EXAMPLE_DOMAIN_REDACTION_TEST_FIXTURE',
+]);
+const REVIEWED_FALSE_POSITIVE_RULES = new Set([
+  'assignment.high-entropy-secret',
+  'url.embedded-credentials',
+]);
+const REVIEWED_FALSE_POSITIVE_SCOPES = new Set(['history', 'index']);
 const KNOWN_BINARY_EXTENSIONS = new Set([
   '.7z',
   '.avi',
@@ -214,6 +233,115 @@ const UNQUOTED_SECRET_ASSIGNMENT_PATTERN = new RegExp(
 );
 
 class ScannerOperationalError extends Error {}
+
+function exactObjectKeys(value, expected) {
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    !Array.isArray(value) &&
+    Object.keys(value).sort().join('\0') === [...expected].sort().join('\0')
+  );
+}
+
+function reviewedFindingIdentity(findingValue) {
+  return [
+    findingValue.rule,
+    findingValue.scope,
+    findingValue.path,
+    findingValue.line,
+    findingValue.blob,
+    findingValue.fingerprint,
+  ].join('\0');
+}
+
+export function parseReviewedFalsePositiveLedger(bytes) {
+  if (
+    !(bytes instanceof Uint8Array) ||
+    bytes.byteLength === 0 ||
+    bytes.byteLength > MAX_REVIEWED_FALSE_POSITIVE_LEDGER_BYTES ||
+    createHash('sha256').update(bytes).digest('hex') !== REVIEWED_FALSE_POSITIVE_LEDGER_SHA256
+  ) {
+    throw new ScannerOperationalError('Reviewed false-positive ledger is invalid.');
+  }
+
+  let ledger;
+  try {
+    ledger = parseStrictJsonBytes(bytes);
+  } catch {
+    throw new ScannerOperationalError('Reviewed false-positive ledger is invalid.');
+  }
+  if (
+    !exactObjectKeys(ledger, ['entries', 'reviewStatus', 'schemaVersion']) ||
+    ledger.schemaVersion !== 1 ||
+    ledger.reviewStatus !== 'REVIEWED_SYNTHETIC_TEST_FIXTURES' ||
+    !Array.isArray(ledger.entries) ||
+    ledger.entries.length === 0 ||
+    ledger.entries.length > 32
+  ) {
+    throw new ScannerOperationalError('Reviewed false-positive ledger is invalid.');
+  }
+
+  const identities = new Set();
+  for (const entry of ledger.entries) {
+    if (
+      !exactObjectKeys(entry, [
+        'blob',
+        'classification',
+        'fingerprint',
+        'line',
+        'path',
+        'rule',
+        'scopes',
+      ]) ||
+      !OBJECT_ID_PATTERN.test(entry.blob ?? '') ||
+      !REVIEWED_FALSE_POSITIVE_CLASSIFICATIONS.has(entry.classification) ||
+      !/^[0-9a-f]{16}$/u.test(entry.fingerprint ?? '') ||
+      !Number.isSafeInteger(entry.line) ||
+      entry.line <= 0 ||
+      typeof entry.path !== 'string' ||
+      !/^[A-Za-z0-9._/-]{1,512}$/u.test(entry.path) ||
+      entry.path.startsWith('/') ||
+      entry.path.includes('//') ||
+      entry.path.split('/').some((segment) => segment === '.' || segment === '..') ||
+      !REVIEWED_FALSE_POSITIVE_RULES.has(entry.rule) ||
+      !Array.isArray(entry.scopes) ||
+      entry.scopes.length === 0 ||
+      entry.scopes.length > REVIEWED_FALSE_POSITIVE_SCOPES.size ||
+      entry.scopes.some((scope) => !REVIEWED_FALSE_POSITIVE_SCOPES.has(scope)) ||
+      new Set(entry.scopes).size !== entry.scopes.length ||
+      entry.scopes.join('\0') !== [...entry.scopes].sort().join('\0')
+    ) {
+      throw new ScannerOperationalError('Reviewed false-positive ledger is invalid.');
+    }
+
+    for (const scope of entry.scopes) {
+      const identity = reviewedFindingIdentity({ ...entry, scope });
+      if (identities.has(identity)) {
+        throw new ScannerOperationalError('Reviewed false-positive ledger is invalid.');
+      }
+      identities.add(identity);
+    }
+  }
+  return identities;
+}
+
+export function loadReviewedFalsePositiveLedger() {
+  try {
+    return parseReviewedFalsePositiveLedger(
+      readSecureLocalFile(
+        REVIEWED_FALSE_POSITIVE_LEDGER_PATH,
+        MAX_REVIEWED_FALSE_POSITIVE_LEDGER_BYTES,
+      ),
+    );
+  } catch (error) {
+    if (error instanceof ScannerOperationalError) throw error;
+    throw new ScannerOperationalError('Reviewed false-positive ledger is unavailable.');
+  }
+}
+
+export function filterReviewedFalsePositiveFindings(findings, reviewedIdentities) {
+  return findings.filter((item) => !reviewedIdentities.has(reviewedFindingIdentity(item)));
+}
 
 function gitEnvironment() {
   return {
@@ -879,8 +1007,12 @@ export function scanRepository(cwd = process.cwd()) {
     findings.push(...scanText(text, blob, blobEntries));
   }
 
-  const operational = findings.some((item) => item.scope === 'repository');
-  return { findings, operational };
+  const actionableFindings = filterReviewedFalsePositiveFindings(
+    findings,
+    loadReviewedFalsePositiveLedger(),
+  );
+  const operational = actionableFindings.some((item) => item.scope === 'repository');
+  return { findings: actionableFindings, operational };
 }
 
 function main() {

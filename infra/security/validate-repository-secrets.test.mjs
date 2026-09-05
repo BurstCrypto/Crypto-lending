@@ -5,10 +5,19 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { test } from 'node:test';
-import { escapeOutputField, sanitizeOutputPath } from './validate-repository-secrets.mjs';
+import {
+  escapeOutputField,
+  filterReviewedFalsePositiveFindings,
+  loadReviewedFalsePositiveLedger,
+  parseReviewedFalsePositiveLedger,
+  sanitizeOutputPath,
+} from './validate-repository-secrets.mjs';
 
 const scannerPath = fileURLToPath(new URL('./validate-repository-secrets.mjs', import.meta.url));
 const scannerTestPath = fileURLToPath(import.meta.url);
+const falsePositiveLedgerPath = fileURLToPath(
+  new URL('./repository-secret-false-positive-ledger.json', import.meta.url),
+);
 const oversizedTextBytes = 2_000_001;
 
 function gitEnvironment() {
@@ -83,6 +92,43 @@ function assertFinding(result, rule, scope) {
     );
   }
 }
+
+test('binds reviewed fixture exceptions to every exact redacted finding field', () => {
+  const reviewed = loadReviewedFalsePositiveLedger();
+  const exact = {
+    blob: 'acaacb1dd3553d5a47128e530e4c53792e2eabac',
+    fingerprint: '1ccde239b7031a46',
+    line: 49,
+    path: 'apps/api/src/blockchain-sync/application/balance-sync-consumer.cli-mode.spec.ts',
+    rule: 'url.embedded-credentials',
+    scope: 'index',
+  };
+  const nearMisses = [
+    { ...exact, blob: `${exact.blob.slice(0, -1)}b` },
+    { ...exact, fingerprint: `${exact.fingerprint.slice(0, -1)}7` },
+    { ...exact, line: exact.line + 1 },
+    { ...exact, path: exact.path.replace('.spec.ts', '.copy.spec.ts') },
+    { ...exact, rule: 'assignment.high-entropy-secret' },
+    { ...exact, scope: 'history', line: exact.line + 1 },
+    { ...exact, scope: 'repository' },
+  ];
+
+  assert.equal(reviewed.size, 10);
+  assert.deepEqual(
+    filterReviewedFalsePositiveFindings([exact, ...nearMisses], reviewed),
+    nearMisses,
+  );
+});
+
+test('fails closed when the reviewed fixture ledger bytes drift', () => {
+  const reviewedBytes = readFileSync(falsePositiveLedgerPath);
+
+  assert.equal(parseReviewedFalsePositiveLedger(reviewedBytes).size, 10);
+  assert.throws(
+    () => parseReviewedFalsePositiveLedger(Buffer.concat([reviewedBytes, Buffer.from('\n')])),
+    /Reviewed false-positive ledger is invalid/u,
+  );
+});
 
 test('scans the staged index instead of an unstaged working-tree replacement', () => {
   const repository = createRepository();
@@ -725,6 +771,11 @@ test('the scanner and mutation test sources scan themselves without exclusions',
   const repository = createRepository();
   try {
     write(repository, 'infra/security/validate-repository-secrets.mjs', readFileSync(scannerPath));
+    write(
+      repository,
+      'infra/security/repository-secret-false-positive-ledger.json',
+      readFileSync(falsePositiveLedgerPath),
+    );
     write(
       repository,
       'infra/security/validate-repository-secrets.test.mjs',
