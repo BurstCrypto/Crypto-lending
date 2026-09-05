@@ -263,7 +263,7 @@ test('binds auth wallet versions to a dedicated signed transition and auditable 
     '$expectedCurrentAuthWalletBindings = [ordered]@{',
     '$currentStackParameterMap[$authWalletBinding.Key] -cne [string] $authWalletBinding.Value',
     'A dedicated reviewed auth/wallet transition is required.',
-    "[ValidateSet('APPLICATION', 'CREDENTIAL_TRANSITION', 'AUTH_WALLET_TRANSITION')]",
+    "[ValidateSet('APPLICATION', 'CREDENTIAL_TRANSITION', 'AUTH_WALLET_TRANSITION', 'REDIS_OPERATOR_TRANSITION')]",
     "$isAuthWalletTransition = $UpdateIntent -ceq 'AUTH_WALLET_TRANSITION'",
     "Assert-RequiredValue -Name 'AuthWalletTransitionAuthorityRegistrySha256'",
     "Assert-RequiredValue -Name 'AuthWalletTransitionCurrentVersionId'",

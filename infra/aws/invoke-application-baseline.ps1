@@ -56,7 +56,8 @@ preserve it; AUTH_WALLET_TRANSITION alone may adopt or advance its signed state.
 .PARAMETER RedisOperatorSecretVersionId
 Exact Secrets Manager VersionId for the disabled Redis operator credential, or
 the uppercase UNPINNED sentinel for a zero-count CREATE only. Adoption pins it
-with the six A/B slots; every later fixed-slot transition must preserve it.
+with the six A/B slots. A dedicated REDIS_OPERATOR_TRANSITION is required to
+advance it after the Redis operator chain has been adopted.
 
 .PARAMETER ApiDatabaseSlotAVersionId
 Exact Secrets Manager VersionId for API database slot A, or the uppercase
@@ -78,8 +79,9 @@ Required for UPDATE. APPLICATION permits a non-credential application change
 only while all eleven credential-state version/phase/operator bindings remain
 unchanged. CREDENTIAL_TRANSITION permits only the transition record's exact
 eleven bindings. AUTH_WALLET_TRANSITION permits a signed chain-tag adoption or
-shared outer VersionId change. Both transition intents freeze unrelated template,
-parameter, and base-tag state and preserve the other credential chain.
+shared outer VersionId change. REDIS_OPERATOR_TRANSITION permits only a signed
+disabled-operator VersionId adoption or rotation. Transition intents freeze
+unrelated templates, parameters, and base tags and preserve the other chains.
 
 .PARAMETER FixedSlotCredentialTransitionMode
 Exact lowercase adopt or transition mode for the local fixed-slot validator.
@@ -115,6 +117,59 @@ Exact reviewed signed operation independently selected by the caller.
 .PARAMETER AuthWalletTransitionFieldName
 Exact reviewed seven-field adoption marker or individual auth/wallet ring field
 independently selected by the caller.
+
+.PARAMETER RedisOperatorTransitionRecordFile
+Git-ignored local signed record for the dedicated Redis operator VersionId
+adoption or transition. It is prohibited for every other update intent.
+
+.PARAMETER RedisOperatorTransitionMode
+Exact lowercase adopt or transition mode for the Redis operator validator.
+
+.PARAMETER RedisOperatorTransitionValidationAt
+Explicit canonical UTC instant for initial offline validation. Deploy validates
+again at a fresh instant immediately before execution.
+
+.PARAMETER RedisOperatorTransitionAuthorityRegistrySha256
+Exact lowercase SHA-256 of the validator's checked-in production authority
+registry. Callers cannot supply or replace the registry itself.
+
+.PARAMETER RedisOperatorTransitionWorkloadStackId
+Exact immutable WorkloadBoundaries child stack ARN. The wrapper binds it to the
+root nested resource and rechecks it immediately before execution.
+
+.PARAMETER RedisOperatorTransitionSecretArn
+Exact selector-free ARN of the generated Redis operator secret, independently
+bound to the live child-stack resource without reading credential bytes.
+
+.PARAMETER RedisOperatorTransitionKmsKeyArn
+Exact customer-managed KMS key ARN bound to the live workload child parameter.
+
+.PARAMETER RedisOperatorTransitionCurrentVersionId
+Exact currently deployed Redis operator Secrets Manager VersionId.
+
+.PARAMETER RedisOperatorTransitionOperation
+Exact signed ADOPT_EXISTING_BINDING or ROTATE_DISABLED_OPERATOR_CREDENTIAL action.
+
+.PARAMETER RedisOperatorTransitionFieldName
+Exact REDIS_OPERATOR_SECRET_VERSION_ID field marker.
+
+.PARAMETER RedisOperatorTransitionFixedSlotStateSha256
+Exact current composite fixed-slot state hash from the deployed credential chain.
+
+.PARAMETER RedisOperatorTransitionFixedSlotTransitionSha256
+Exact current composite credential transition-chain head.
+
+.PARAMETER RedisOperatorTransitionRedisStateSha256
+Exact prior Redis operator projected-state hash, or the validator's adoption sentinel.
+
+.PARAMETER RedisOperatorTransitionRedisTransitionSha256
+Exact prior Redis operator transition-chain head, or the adoption sentinel.
+
+.PARAMETER RedisOperatorTransitionAuthWalletStateSha256
+Exact current auth/wallet state hash preserved by the Redis transition.
+
+.PARAMETER RedisOperatorTransitionAuthWalletTransitionSha256
+Exact current auth/wallet transition-chain head preserved by the Redis transition.
 
 .PARAMETER AllowAwsApiCalls
 Explicit opt-in required before this script resolves credentials or calls AWS.
@@ -203,7 +258,7 @@ param(
 
     [string] $CurrentStackId,
 
-    [ValidateSet('APPLICATION', 'CREDENTIAL_TRANSITION', 'AUTH_WALLET_TRANSITION')]
+    [ValidateSet('APPLICATION', 'CREDENTIAL_TRANSITION', 'AUTH_WALLET_TRANSITION', 'REDIS_OPERATOR_TRANSITION')]
     [string] $UpdateIntent,
 
     [string] $FixedSlotCredentialTransitionRecordFile,
@@ -227,6 +282,39 @@ param(
     [string] $AuthWalletTransitionOperation,
 
     [string] $AuthWalletTransitionFieldName,
+
+    [string] $RedisOperatorTransitionRecordFile,
+
+    [ValidateSet('adopt', 'transition')]
+    [string] $RedisOperatorTransitionMode,
+
+    [string] $RedisOperatorTransitionValidationAt,
+
+    [string] $RedisOperatorTransitionAuthorityRegistrySha256,
+
+    [string] $RedisOperatorTransitionWorkloadStackId,
+
+    [string] $RedisOperatorTransitionSecretArn,
+
+    [string] $RedisOperatorTransitionKmsKeyArn,
+
+    [string] $RedisOperatorTransitionCurrentVersionId,
+
+    [string] $RedisOperatorTransitionOperation,
+
+    [string] $RedisOperatorTransitionFieldName,
+
+    [string] $RedisOperatorTransitionFixedSlotStateSha256,
+
+    [string] $RedisOperatorTransitionFixedSlotTransitionSha256,
+
+    [string] $RedisOperatorTransitionRedisStateSha256,
+
+    [string] $RedisOperatorTransitionRedisTransitionSha256,
+
+    [string] $RedisOperatorTransitionAuthWalletStateSha256,
+
+    [string] $RedisOperatorTransitionAuthWalletTransitionSha256,
 
     [string[]] $ParameterOverride = @(),
 
@@ -255,6 +343,7 @@ $billingRecordValidatorPath = Join-Path $PSScriptRoot 'validate-billing-control-
 $acmDnsRecordValidatorPath = Join-Path $PSScriptRoot 'validate-acm-dns-control-record.mjs'
 $fixedSlotCredentialTransitionValidatorPath = Join-Path $PSScriptRoot 'validate-fixed-slot-credential-transition.mjs'
 $authWalletTransitionValidatorPath = Join-Path $PSScriptRoot 'validate-auth-wallet-secret-version-transition.mjs'
+$redisOperatorTransitionValidatorPath = Join-Path $PSScriptRoot 'validate-redis-operator-secret-version-transition.mjs'
 $accountGuardrailTemplatePath = Join-Path $PSScriptRoot 'account-guardrails.yaml'
 $resolvedTemplate = [System.IO.Path]::GetFullPath($TemplateFile)
 $resolvedWorkloadBoundariesTemplate = [System.IO.Path]::GetFullPath($WorkloadBoundariesTemplateFile)
@@ -588,6 +677,214 @@ function Invoke-AuthWalletTransitionValidation {
     return $validation
 }
 
+function Get-RedisOperatorLiveBinding {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $RootStackId,
+        [Parameter(Mandatory = $true)]
+        [string] $WorkloadStackId,
+        [Parameter(Mandatory = $true)]
+        [string] $SecretArn,
+        [Parameter(Mandatory = $true)]
+        [string] $KmsKeyArn,
+        [Parameter(Mandatory = $true)]
+        [string] $ExpectedOperatorUserId,
+        [Parameter(Mandatory = $true)]
+        [string] $CurrentVersionId,
+        [Parameter(Mandatory = $true)]
+        [string] $ProfileName
+    )
+
+    $workloadResourceOutput = & $script:AwsExecutable @(
+        'cloudformation',
+        'describe-stack-resource',
+        '--stack-name', $RootStackId,
+        '--logical-resource-id', 'WorkloadBoundaries',
+        '--profile', $ProfileName,
+        '--region', $Region,
+        '--output', 'json',
+        '--no-cli-pager'
+    )
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Unable to bind the immutable WorkloadBoundaries child stack for REDIS_OPERATOR_TRANSITION.'
+    }
+    try {
+        $workloadResourceResponse = ($workloadResourceOutput | Out-String) | ConvertFrom-Json
+    }
+    catch {
+        throw 'WorkloadBoundaries resource discovery did not return valid JSON for REDIS_OPERATOR_TRANSITION.'
+    }
+    $workloadResource = Get-OptionalPropertyValue -InputObject $workloadResourceResponse -Name 'StackResourceDetail'
+    if (
+        $null -eq $workloadResource -or
+        [string] (Get-OptionalPropertyValue -InputObject $workloadResource -Name 'StackName') -cne $StackName -or
+        [string] (Get-OptionalPropertyValue -InputObject $workloadResource -Name 'StackId') -cne $RootStackId -or
+        [string] (Get-OptionalPropertyValue -InputObject $workloadResource -Name 'LogicalResourceId') -cne 'WorkloadBoundaries' -or
+        [string] (Get-OptionalPropertyValue -InputObject $workloadResource -Name 'PhysicalResourceId') -cne $WorkloadStackId -or
+        [string] (Get-OptionalPropertyValue -InputObject $workloadResource -Name 'ResourceType') -cne 'AWS::CloudFormation::Stack' -or
+        [string] (Get-OptionalPropertyValue -InputObject $workloadResource -Name 'ResourceStatus') -notin @('CREATE_COMPLETE', 'UPDATE_COMPLETE')
+    ) {
+        throw 'The live WorkloadBoundaries resource does not match the exact immutable Redis transition child identity.'
+    }
+
+    $workloadStackOutput = & $script:AwsExecutable @(
+        'cloudformation',
+        'describe-stacks',
+        '--stack-name', $WorkloadStackId,
+        '--profile', $ProfileName,
+        '--region', $Region,
+        '--output', 'json',
+        '--no-cli-pager'
+    )
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Unable to read the immutable WorkloadBoundaries child stack for REDIS_OPERATOR_TRANSITION.'
+    }
+    try {
+        $workloadStackResponse = ($workloadStackOutput | Out-String) | ConvertFrom-Json
+    }
+    catch {
+        throw 'WorkloadBoundaries stack discovery did not return valid JSON for REDIS_OPERATOR_TRANSITION.'
+    }
+    if (
+        $null -eq $workloadStackResponse -or
+        ($null -ne $workloadStackResponse.PSObject.Properties['NextToken'] -and $null -ne $workloadStackResponse.NextToken) -or
+        $workloadStackResponse.Stacks -isnot [System.Array] -or
+        @($workloadStackResponse.Stacks).Count -ne 1
+    ) {
+        throw 'WorkloadBoundaries stack discovery did not return exactly one complete, unpaginated child stack.'
+    }
+    $workloadStack = @($workloadStackResponse.Stacks)[0]
+    $workloadStackPattern = '^arn:' + [regex]::Escape($partition) + ':cloudformation:' + [regex]::Escape($Region) + ':' + [regex]::Escape($AccountId) + ':stack/([A-Za-z][-A-Za-z0-9]*)/[A-Za-z0-9-]+$'
+    if ($WorkloadStackId -cnotmatch $workloadStackPattern) {
+        throw 'RedisOperatorTransitionWorkloadStackId is outside the approved account, Region, or immutable stack ARN shape.'
+    }
+    $workloadStackName = $Matches[1]
+    if (
+        [string] (Get-OptionalPropertyValue -InputObject $workloadStack -Name 'StackId') -cne $WorkloadStackId -or
+        [string] (Get-OptionalPropertyValue -InputObject $workloadStack -Name 'StackName') -cne $workloadStackName -or
+        [string] (Get-OptionalPropertyValue -InputObject $workloadStack -Name 'ParentId') -cne $RootStackId -or
+        [string] (Get-OptionalPropertyValue -InputObject $workloadStack -Name 'RootId') -cne $RootStackId -or
+        [string] (Get-OptionalPropertyValue -InputObject $workloadStack -Name 'StackStatus') -notin @('CREATE_COMPLETE', 'UPDATE_COMPLETE')
+    ) {
+        throw 'The live WorkloadBoundaries stack does not match its exact root hierarchy and stable identity.'
+    }
+    $workloadParameters = Get-StackParameterMap -Stack $workloadStack
+    $expectedWorkloadParameters = [ordered]@{
+        DeliveryArtifactSha256 = $workloadBoundariesTemplateSha256
+        DeliveryArtifactBindingSha256 = $workloadBoundariesArtifactBindingSha256
+        EnvironmentName = $EnvironmentName
+        ApplicationDataKeyArn = $KmsKeyArn
+        RedisOperatorSecretVersionId = $CurrentVersionId
+        RedisOperatorMode = 'DISABLED'
+    }
+    foreach ($expectedWorkloadParameter in $expectedWorkloadParameters.GetEnumerator()) {
+        if (
+            -not $workloadParameters.Contains($expectedWorkloadParameter.Key) -or
+            [string] $workloadParameters[$expectedWorkloadParameter.Key] -cne [string] $expectedWorkloadParameter.Value
+        ) {
+            throw "The live WorkloadBoundaries parameter '$($expectedWorkloadParameter.Key)' does not match the exact Redis transition current identity."
+        }
+    }
+
+    $workloadTemplateOutput = & $script:AwsExecutable @(
+        'cloudformation',
+        'get-template',
+        '--stack-name', $WorkloadStackId,
+        '--template-stage', 'Original',
+        '--profile', $ProfileName,
+        '--region', $Region,
+        '--output', 'json',
+        '--no-cli-pager'
+    )
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Unable to retrieve the deployed WorkloadBoundaries template for REDIS_OPERATOR_TRANSITION.'
+    }
+    try {
+        $workloadTemplate = ($workloadTemplateOutput | Out-String) | ConvertFrom-Json
+    }
+    catch {
+        throw 'The deployed WorkloadBoundaries template response was not valid JSON.'
+    }
+    if ($null -eq $workloadTemplate -or $workloadTemplate.TemplateBody -isnot [string]) {
+        throw 'CloudFormation did not return the deployed WorkloadBoundaries Original template body.'
+    }
+    $deployedWorkloadTemplateSha256 = Get-TextSha256 -Value ([string] $workloadTemplate.TemplateBody)
+    if ($deployedWorkloadTemplateSha256 -cne $workloadBoundariesTemplateSha256) {
+        throw 'The deployed WorkloadBoundaries child template differs from the exact reviewed Redis transition template.'
+    }
+
+    $operatorSecretOutput = & $script:AwsExecutable @(
+        'cloudformation',
+        'describe-stack-resource',
+        '--stack-name', $WorkloadStackId,
+        '--logical-resource-id', 'RedisOperatorSecret',
+        '--profile', $ProfileName,
+        '--region', $Region,
+        '--output', 'json',
+        '--no-cli-pager'
+    )
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Unable to bind the live RedisOperatorSecret child resource.'
+    }
+    $operatorUserOutput = & $script:AwsExecutable @(
+        'cloudformation',
+        'describe-stack-resource',
+        '--stack-name', $WorkloadStackId,
+        '--logical-resource-id', 'RedisOperatorUser',
+        '--profile', $ProfileName,
+        '--region', $Region,
+        '--output', 'json',
+        '--no-cli-pager'
+    )
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Unable to bind the live RedisOperatorUser child resource.'
+    }
+    try {
+        $operatorSecret = Get-OptionalPropertyValue -InputObject (($operatorSecretOutput | Out-String) | ConvertFrom-Json) -Name 'StackResourceDetail'
+        $operatorUser = Get-OptionalPropertyValue -InputObject (($operatorUserOutput | Out-String) | ConvertFrom-Json) -Name 'StackResourceDetail'
+    }
+    catch {
+        throw 'Redis operator child-resource discovery did not return valid JSON.'
+    }
+    $operatorUserId = "cl-$EnvironmentName-ro"
+    $derivedOperatorUserArn = "arn:${partition}:elasticache:${Region}:${AccountId}:user:$operatorUserId"
+    if (
+        $null -eq $operatorSecret -or
+        [string] (Get-OptionalPropertyValue -InputObject $operatorSecret -Name 'StackId') -cne $WorkloadStackId -or
+        [string] (Get-OptionalPropertyValue -InputObject $operatorSecret -Name 'LogicalResourceId') -cne 'RedisOperatorSecret' -or
+        [string] (Get-OptionalPropertyValue -InputObject $operatorSecret -Name 'PhysicalResourceId') -cne $SecretArn -or
+        [string] (Get-OptionalPropertyValue -InputObject $operatorSecret -Name 'ResourceType') -cne 'AWS::SecretsManager::Secret' -or
+        [string] (Get-OptionalPropertyValue -InputObject $operatorSecret -Name 'ResourceStatus') -notin @('CREATE_COMPLETE', 'UPDATE_COMPLETE')
+    ) {
+        throw 'The live RedisOperatorSecret does not match the exact signed selector-free secret identity.'
+    }
+    if (
+        $null -eq $operatorUser -or
+        [string] (Get-OptionalPropertyValue -InputObject $operatorUser -Name 'StackId') -cne $WorkloadStackId -or
+        [string] (Get-OptionalPropertyValue -InputObject $operatorUser -Name 'LogicalResourceId') -cne 'RedisOperatorUser' -or
+        [string] (Get-OptionalPropertyValue -InputObject $operatorUser -Name 'PhysicalResourceId') -cne $operatorUserId -or
+        [string] (Get-OptionalPropertyValue -InputObject $operatorUser -Name 'ResourceType') -cne 'AWS::ElastiCache::User' -or
+        [string] (Get-OptionalPropertyValue -InputObject $operatorUser -Name 'ResourceStatus') -notin @('CREATE_COMPLETE', 'UPDATE_COMPLETE') -or
+        $ExpectedOperatorUserId -cne $operatorUserId
+    ) {
+        throw 'The live RedisOperatorUser does not match the exact signed user identity.'
+    }
+
+    $operatorUsername = "crypto_operator_$EnvironmentName"
+    $bindingText = "root-stack-id=$RootStackId`nworkload-stack-id=$WorkloadStackId`nworkload-template-sha256=$deployedWorkloadTemplateSha256`nsecret-arn=$SecretArn`nkms-key-arn=$KmsKeyArn`noperator-user-id=$operatorUserId`noperator-user-arn=$derivedOperatorUserArn`noperator-username=$operatorUsername`noperator-mode=DISABLED`ncurrent-version-id=$CurrentVersionId"
+    return [pscustomobject]@{
+        Sha256 = Get-TextSha256 -Value $bindingText
+        Text = $bindingText
+        WorkloadStackId = $WorkloadStackId
+        SecretArn = $SecretArn
+        KmsKeyArn = $KmsKeyArn
+        OperatorUserId = $operatorUserId
+        OperatorUserArn = $derivedOperatorUserArn
+        OperatorUsername = $operatorUsername
+        CurrentVersionId = $CurrentVersionId
+    }
+}
+
 function Get-StrictChangeSetArrayProperty {
     param(
         [Parameter(Mandatory = $true)]
@@ -897,6 +1194,109 @@ function Assert-AuthWalletFunctionalResourceChange {
     }
 }
 
+function Assert-RedisOperatorFunctionalResourceChange {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object] $ResourceChange
+    )
+
+    $context = "REDIS_OPERATOR_TRANSITION functional change 'RedisOperatorUser'"
+    if (
+        (Get-StrictRequiredChangeSetString -InputObject $ResourceChange -Name 'ResourceType' -Context $context) -cne 'AWS::ElastiCache::User' -or
+        (Get-StrictRequiredChangeSetString -InputObject $ResourceChange -Name 'Action' -Context $context) -cne 'Modify' -or
+        (Get-StrictRequiredChangeSetString -InputObject $ResourceChange -Name 'Replacement' -Context $context) -cne 'False'
+    ) {
+        throw "$context must be one non-replacing ElastiCache user modification."
+    }
+    if ($null -ne (Get-StrictOptionalChangeSetString -InputObject $ResourceChange -Name 'PolicyAction' -Context $context)) {
+        throw "$context contains an unexpected PolicyAction."
+    }
+
+    $scope = Get-StrictChangeSetScope -ResourceChange $ResourceChange -Context $context
+    if (
+        -not $scope.Contains('Properties') -or
+        $scope.Count -gt 2 -or
+        @($scope.Keys | Where-Object { [string] $_ -cnotin @('Properties', 'Tags') }).Count -ne 0
+    ) {
+        throw "$context Scope must contain Properties and may contain only optional Tags."
+    }
+    $details = @(Get-StrictChangeSetArrayProperty -InputObject $ResourceChange -Name 'Details' -Context $context)
+    if ($details.Count -eq 0) {
+        throw "$context must expose its complete property Details."
+    }
+    $sawAuthenticationModeDetail = $false
+    $sawDirectDynamicDetail = $false
+    $sawExactParameterDetail = $false
+    $sawTagDetail = $false
+    foreach ($detail in $details) {
+        if ($null -eq $detail -or $detail -is [string] -or $detail -is [System.Array]) {
+            throw "$context contains a malformed Detail."
+        }
+        $target = Get-OptionalPropertyValue -InputObject $detail -Name 'Target'
+        if ($null -eq $target -or $target -is [string] -or $target -is [System.Array]) {
+            throw "$context contains a Detail without an object Target."
+        }
+        $attribute = Get-StrictRequiredChangeSetString -InputObject $target -Name 'Attribute' -Context "$context Target"
+        if ($attribute -ceq 'Tags') {
+            Assert-AuthWalletTagChangeDetail -Detail $detail -Context $context
+            $sawTagDetail = $true
+            continue
+        }
+        if ($attribute -cne 'Properties') {
+            throw "$context contains a Detail target outside AuthenticationMode and optional Tags."
+        }
+        $targetName = Get-StrictRequiredChangeSetString -InputObject $target -Name 'Name' -Context "$context property Target"
+        $requiresRecreation = Get-StrictRequiredChangeSetString -InputObject $target -Name 'RequiresRecreation' -Context "$context property Target"
+        if ($targetName -cne 'AuthenticationMode' -or $requiresRecreation -cne 'Never') {
+            throw "$context may modify only AuthenticationMode without replacement."
+        }
+        $attributeChangeType = Get-StrictOptionalChangeSetString -InputObject $target -Name 'AttributeChangeType' -Context "$context property Target"
+        if ($null -ne $attributeChangeType -and $attributeChangeType -cne 'Modify') {
+            throw "$context contains an unsupported AuthenticationMode change type."
+        }
+        $path = Get-StrictOptionalChangeSetString -InputObject $target -Name 'Path' -Context "$context property Target"
+        if (
+            $null -ne $path -and
+            $path -cne '/Properties/AuthenticationMode' -and
+            -not $path.StartsWith('/Properties/AuthenticationMode/', [System.StringComparison]::Ordinal)
+        ) {
+            throw "$context contains an unexpected AuthenticationMode Path."
+        }
+        foreach ($optionalValueName in @('BeforeValue', 'AfterValue')) {
+            $optionalValueProperty = $target.PSObject.Properties[$optionalValueName]
+            if ($null -ne $optionalValueProperty -and $null -ne $optionalValueProperty.Value -and $optionalValueProperty.Value -isnot [string]) {
+                throw "$context contains malformed optional property field '$optionalValueName'."
+            }
+        }
+        $changeSource = Get-StrictRequiredChangeSetString -InputObject $detail -Name 'ChangeSource' -Context "$context property Detail"
+        $evaluation = Get-StrictRequiredChangeSetString -InputObject $detail -Name 'Evaluation' -Context "$context property Detail"
+        if ($evaluation -cnotin @('Static', 'Dynamic')) {
+            throw "$context contains an unsupported AuthenticationMode evaluation."
+        }
+        $causingEntity = Get-StrictOptionalChangeSetString -InputObject $detail -Name 'CausingEntity' -Context "$context property Detail"
+        if ($changeSource -ceq 'DirectModification' -and $evaluation -ceq 'Dynamic' -and $null -eq $causingEntity) {
+            $sawDirectDynamicDetail = $true
+        }
+        elseif (
+            $changeSource -ceq 'ParameterReference' -and
+            $evaluation -ceq 'Static' -and
+            $causingEntity -ceq 'RedisOperatorSecretVersionId'
+        ) {
+            $sawExactParameterDetail = $true
+        }
+        else {
+            throw "$context contains property causal evidence outside the exact reviewed RedisOperatorSecretVersionId path."
+        }
+        $sawAuthenticationModeDetail = $true
+    }
+    if (-not $sawAuthenticationModeDetail -or -not $sawDirectDynamicDetail -or -not $sawExactParameterDetail) {
+        throw "$context is missing its exact direct and parameter-backed AuthenticationMode evidence."
+    }
+    if ($scope.Contains('Tags') -ne $sawTagDetail) {
+        throw "$context Scope and Detail targets disagree about optional tag propagation."
+    }
+}
+
 function Assert-AuthWalletNestedChangeSet {
     param(
         [Parameter(Mandatory = $true)]
@@ -913,27 +1313,33 @@ function Assert-AuthWalletNestedChangeSet {
         [string] $Partition,
         [Parameter(Mandatory = $true)]
         [string] $ProfileName,
+        [ValidateSet('AUTH_WALLET_TRANSITION', 'REDIS_OPERATOR_TRANSITION')]
+        [string] $ReviewIntent = 'AUTH_WALLET_TRANSITION',
+        [System.Collections.IDictionary] $FunctionalResourceIds,
+        [string] $RootWrapperLogicalResourceId,
+        [ValidateSet('adopt', 'transition')]
+        [string] $Mode = 'adopt',
         [int] $Depth
     )
 
     if ($Depth -gt 32) {
-        throw 'AUTH_WALLET_TRANSITION nested change-set review exceeded the maximum safe hierarchy depth.'
+        throw "$ReviewIntent nested change-set review exceeded the maximum safe hierarchy depth."
     }
     $changeSetIdPattern = '^arn:' + [regex]::Escape($Partition) + ':cloudformation:' + [regex]::Escape($Region) + ':' + [regex]::Escape($AccountId) + ':changeSet/([A-Za-z][-A-Za-z0-9]*)/[A-Za-z0-9-]+$'
     if ($ChildChangeSetId -cnotmatch $changeSetIdPattern) {
-        throw 'AUTH_WALLET_TRANSITION encountered a nested ChangeSetId outside the approved account, Region, or ARN shape.'
+        throw "$ReviewIntent encountered a nested ChangeSetId outside the approved account, Region, or ARN shape."
     }
     $expectedChildChangeSetName = $Matches[1]
     $stackIdPattern = '^arn:' + [regex]::Escape($Partition) + ':cloudformation:' + [regex]::Escape($Region) + ':' + [regex]::Escape($AccountId) + ':stack/([A-Za-z][-A-Za-z0-9]*)/[A-Za-z0-9-]+$'
     if ($ExpectedChildStackId -cnotmatch $stackIdPattern) {
-        throw 'AUTH_WALLET_TRANSITION encountered a nested stack outside the approved account, Region, or ARN shape.'
+        throw "$ReviewIntent encountered a nested stack outside the approved account, Region, or ARN shape."
     }
     $expectedChildStackName = $Matches[1]
     if ($VisitedChangeSetIds.Contains($ChildChangeSetId)) {
-        throw "AUTH_WALLET_TRANSITION encountered duplicate or cyclic nested ChangeSetId '$ChildChangeSetId'."
+        throw "$ReviewIntent encountered duplicate or cyclic nested ChangeSetId '$ChildChangeSetId'."
     }
     if ($VisitedChangeSetIds.Count -ge 256) {
-        throw 'AUTH_WALLET_TRANSITION nested change-set review exceeded the maximum safe hierarchy size.'
+        throw "$ReviewIntent nested change-set review exceeded the maximum safe hierarchy size."
     }
     $VisitedChangeSetIds[$ChildChangeSetId] = $true
 
@@ -948,19 +1354,19 @@ function Assert-AuthWalletNestedChangeSet {
         '--no-cli-pager'
     )
     if ($LASTEXITCODE -ne 0) {
-        throw "AUTH_WALLET_TRANSITION could not inspect nested ChangeSetId '$ChildChangeSetId'."
+        throw "$ReviewIntent could not inspect nested ChangeSetId '$ChildChangeSetId'."
     }
     try {
         $childChangeSet = ($childDescriptionOutput | Out-String) | ConvertFrom-Json
     }
     catch {
-        throw "AUTH_WALLET_TRANSITION nested ChangeSetId '$ChildChangeSetId' did not return valid JSON."
+        throw "$ReviewIntent nested ChangeSetId '$ChildChangeSetId' did not return valid JSON."
     }
     if ($null -eq $childChangeSet -or $childChangeSet -is [System.Array] -or $childChangeSet -is [string]) {
-        throw "AUTH_WALLET_TRANSITION nested ChangeSetId '$ChildChangeSetId' did not return one change-set object."
+        throw "$ReviewIntent nested ChangeSetId '$ChildChangeSetId' did not return one change-set object."
     }
 
-    $context = "AUTH_WALLET_TRANSITION nested ChangeSetId '$ChildChangeSetId'"
+    $context = "$ReviewIntent nested ChangeSetId '$ChildChangeSetId'"
     if (
         (Get-StrictRequiredChangeSetString -InputObject $childChangeSet -Name 'ChangeSetId' -Context $context) -cne $ChildChangeSetId -or
         (Get-StrictRequiredChangeSetString -InputObject $childChangeSet -Name 'ChangeSetName' -Context $context) -cne $expectedChildChangeSetName -or
@@ -993,6 +1399,10 @@ function Assert-AuthWalletNestedChangeSet {
         -VisitedChangeSetIds $VisitedChangeSetIds `
         -Partition $Partition `
         -ProfileName $ProfileName `
+        -ReviewIntent $ReviewIntent `
+        -FunctionalResourceIds $FunctionalResourceIds `
+        -RootWrapperLogicalResourceId $RootWrapperLogicalResourceId `
+        -Mode $Mode `
         -Depth $Depth
 }
 
@@ -1012,11 +1422,17 @@ function Assert-AuthWalletNestedResourceChange {
         [string] $Partition,
         [Parameter(Mandatory = $true)]
         [string] $ProfileName,
+        [ValidateSet('AUTH_WALLET_TRANSITION', 'REDIS_OPERATOR_TRANSITION')]
+        [string] $ReviewIntent = 'AUTH_WALLET_TRANSITION',
+        [System.Collections.IDictionary] $FunctionalResourceIds,
+        [string] $RootWrapperLogicalResourceId,
+        [ValidateSet('adopt', 'transition')]
+        [string] $Mode = 'adopt',
         [int] $Depth,
         [switch] $IsRoot
     )
 
-    $context = "AUTH_WALLET_TRANSITION nested-stack change '$LogicalResourceId'"
+    $context = "$ReviewIntent nested-stack change '$LogicalResourceId'"
     if ($IsRoot -and $LogicalResourceId -cnotin @('WorkloadBoundaries', 'Observability')) {
         throw "$context is not one of the two reviewed root nested stacks."
     }
@@ -1092,6 +1508,10 @@ function Assert-AuthWalletNestedResourceChange {
         -VisitedChangeSetIds $VisitedChangeSetIds `
         -Partition $Partition `
         -ProfileName $ProfileName `
+        -ReviewIntent $ReviewIntent `
+        -FunctionalResourceIds $FunctionalResourceIds `
+        -RootWrapperLogicalResourceId $(if ($IsRoot) { $LogicalResourceId } else { $RootWrapperLogicalResourceId }) `
+        -Mode $Mode `
         -Depth ($Depth + 1)
 }
 
@@ -1110,28 +1530,34 @@ function Assert-AuthWalletDescendantChanges {
         [string] $Partition,
         [Parameter(Mandatory = $true)]
         [string] $ProfileName,
+        [ValidateSet('AUTH_WALLET_TRANSITION', 'REDIS_OPERATOR_TRANSITION')]
+        [string] $ReviewIntent = 'AUTH_WALLET_TRANSITION',
+        [System.Collections.IDictionary] $FunctionalResourceIds,
+        [string] $RootWrapperLogicalResourceId,
+        [ValidateSet('adopt', 'transition')]
+        [string] $Mode = 'adopt',
         [int] $Depth
     )
 
     $logicalResourceIds = [System.Collections.Specialized.OrderedDictionary]::new([System.StringComparer]::Ordinal)
     foreach ($change in $Changes) {
         if ($null -eq $change -or $change -is [string] -or $change -is [System.Array]) {
-            throw 'AUTH_WALLET_TRANSITION nested review contains a malformed change entry.'
+            throw "$ReviewIntent nested review contains a malformed change entry."
         }
-        if ((Get-StrictRequiredChangeSetString -InputObject $change -Name 'Type' -Context 'AUTH_WALLET_TRANSITION nested change entry') -cne 'Resource') {
-            throw 'AUTH_WALLET_TRANSITION nested review contains a non-Resource change entry.'
+        if ((Get-StrictRequiredChangeSetString -InputObject $change -Name 'Type' -Context "$ReviewIntent nested change entry") -cne 'Resource') {
+            throw "$ReviewIntent nested review contains a non-Resource change entry."
         }
         $resourceChange = Get-OptionalPropertyValue -InputObject $change -Name 'ResourceChange'
         if ($null -eq $resourceChange -or $resourceChange -is [string] -or $resourceChange -is [System.Array]) {
-            throw 'AUTH_WALLET_TRANSITION nested review contains a Resource entry without an object ResourceChange.'
+            throw "$ReviewIntent nested review contains a Resource entry without an object ResourceChange."
         }
-        $logicalResourceId = Get-StrictRequiredChangeSetString -InputObject $resourceChange -Name 'LogicalResourceId' -Context 'AUTH_WALLET_TRANSITION nested ResourceChange'
+        $logicalResourceId = Get-StrictRequiredChangeSetString -InputObject $resourceChange -Name 'LogicalResourceId' -Context "$ReviewIntent nested ResourceChange"
         if ($logicalResourceIds.Contains($logicalResourceId)) {
-            throw "AUTH_WALLET_TRANSITION nested review contains duplicate logical resource '$logicalResourceId'."
+            throw "$ReviewIntent nested review contains duplicate logical resource '$logicalResourceId'."
         }
         $logicalResourceIds[$logicalResourceId] = $true
-        $resourceType = Get-StrictRequiredChangeSetString -InputObject $resourceChange -Name 'ResourceType' -Context "AUTH_WALLET_TRANSITION nested resource '$logicalResourceId'"
-        $nestedChangeSetId = Get-StrictOptionalChangeSetString -InputObject $resourceChange -Name 'ChangeSetId' -Context "AUTH_WALLET_TRANSITION nested resource '$logicalResourceId'"
+        $resourceType = Get-StrictRequiredChangeSetString -InputObject $resourceChange -Name 'ResourceType' -Context "$ReviewIntent nested resource '$logicalResourceId'"
+        $nestedChangeSetId = Get-StrictOptionalChangeSetString -InputObject $resourceChange -Name 'ChangeSetId' -Context "$ReviewIntent nested resource '$logicalResourceId'"
         if ($resourceType -ceq 'AWS::CloudFormation::Stack' -or $null -ne $nestedChangeSetId) {
             Assert-AuthWalletNestedResourceChange `
                 -ResourceChange $resourceChange `
@@ -1141,10 +1567,29 @@ function Assert-AuthWalletDescendantChanges {
                 -VisitedChangeSetIds $VisitedChangeSetIds `
                 -Partition $Partition `
                 -ProfileName $ProfileName `
+                -ReviewIntent $ReviewIntent `
+                -FunctionalResourceIds $FunctionalResourceIds `
+                -RootWrapperLogicalResourceId $RootWrapperLogicalResourceId `
+                -Mode $Mode `
                 -Depth $Depth
             continue
         }
-        Assert-AuthWalletTagOnlyResourceChange -ResourceChange $resourceChange -Context "AUTH_WALLET_TRANSITION nested leaf '$logicalResourceId'"
+        if (
+            $ReviewIntent -ceq 'REDIS_OPERATOR_TRANSITION' -and
+            $Mode -ceq 'transition' -and
+            $logicalResourceId -ceq 'RedisOperatorUser'
+        ) {
+            if ($RootWrapperLogicalResourceId -cne 'WorkloadBoundaries' -or $Depth -ne 1) {
+                throw 'REDIS_OPERATOR_TRANSITION may modify RedisOperatorUser only in the direct WorkloadBoundaries child change set.'
+            }
+            if ($FunctionalResourceIds.Contains('RedisOperatorUser')) {
+                throw 'REDIS_OPERATOR_TRANSITION contains duplicate RedisOperatorUser functional changes.'
+            }
+            Assert-RedisOperatorFunctionalResourceChange -ResourceChange $resourceChange
+            $FunctionalResourceIds['RedisOperatorUser'] = $true
+            continue
+        }
+        Assert-AuthWalletTagOnlyResourceChange -ResourceChange $resourceChange -Context "$ReviewIntent nested leaf '$logicalResourceId'"
     }
 }
 
@@ -1161,7 +1606,9 @@ function Assert-AuthWalletRootChanges {
         [Parameter(Mandatory = $true)]
         [string] $Partition,
         [Parameter(Mandatory = $true)]
-        [string] $ProfileName
+        [string] $ProfileName,
+        [ValidateSet('AUTH_WALLET_TRANSITION', 'REDIS_OPERATOR_TRANSITION')]
+        [string] $ReviewIntent = 'AUTH_WALLET_TRANSITION'
     )
 
     $visitedChangeSetIds = [System.Collections.Specialized.OrderedDictionary]::new([System.StringComparer]::Ordinal)
@@ -1170,24 +1617,24 @@ function Assert-AuthWalletRootChanges {
     $functionalResourceIds = [System.Collections.Specialized.OrderedDictionary]::new([System.StringComparer]::Ordinal)
     foreach ($change in $Changes) {
         if ($null -eq $change -or $change -is [string] -or $change -is [System.Array]) {
-            throw 'AUTH_WALLET_TRANSITION root review contains a malformed change entry.'
+            throw "$ReviewIntent root review contains a malformed change entry."
         }
-        if ((Get-StrictRequiredChangeSetString -InputObject $change -Name 'Type' -Context 'AUTH_WALLET_TRANSITION root change entry') -cne 'Resource') {
-            throw 'AUTH_WALLET_TRANSITION root review contains a non-Resource change entry.'
+        if ((Get-StrictRequiredChangeSetString -InputObject $change -Name 'Type' -Context "$ReviewIntent root change entry") -cne 'Resource') {
+            throw "$ReviewIntent root review contains a non-Resource change entry."
         }
         $resourceChange = Get-OptionalPropertyValue -InputObject $change -Name 'ResourceChange'
         if ($null -eq $resourceChange -or $resourceChange -is [string] -or $resourceChange -is [System.Array]) {
-            throw 'AUTH_WALLET_TRANSITION root review contains a Resource entry without an object ResourceChange.'
+            throw "$ReviewIntent root review contains a Resource entry without an object ResourceChange."
         }
-        $logicalResourceId = Get-StrictRequiredChangeSetString -InputObject $resourceChange -Name 'LogicalResourceId' -Context 'AUTH_WALLET_TRANSITION root ResourceChange'
+        $logicalResourceId = Get-StrictRequiredChangeSetString -InputObject $resourceChange -Name 'LogicalResourceId' -Context "$ReviewIntent root ResourceChange"
         if ($logicalResourceIds.Contains($logicalResourceId)) {
-            throw "AUTH_WALLET_TRANSITION root review contains duplicate logical resource '$logicalResourceId'."
+            throw "$ReviewIntent root review contains duplicate logical resource '$logicalResourceId'."
         }
         $logicalResourceIds[$logicalResourceId] = $true
-        $resourceType = Get-StrictRequiredChangeSetString -InputObject $resourceChange -Name 'ResourceType' -Context "AUTH_WALLET_TRANSITION root resource '$logicalResourceId'"
-        $nestedChangeSetId = Get-StrictOptionalChangeSetString -InputObject $resourceChange -Name 'ChangeSetId' -Context "AUTH_WALLET_TRANSITION root resource '$logicalResourceId'"
+        $resourceType = Get-StrictRequiredChangeSetString -InputObject $resourceChange -Name 'ResourceType' -Context "$ReviewIntent root resource '$logicalResourceId'"
+        $nestedChangeSetId = Get-StrictOptionalChangeSetString -InputObject $resourceChange -Name 'ChangeSetId' -Context "$ReviewIntent root resource '$logicalResourceId'"
 
-        if ($Mode -ceq 'transition' -and $logicalResourceId -cin @('ApiTaskDefinition', 'ApiService')) {
+        if ($ReviewIntent -ceq 'AUTH_WALLET_TRANSITION' -and $Mode -ceq 'transition' -and $logicalResourceId -cin @('ApiTaskDefinition', 'ApiService')) {
             Assert-AuthWalletFunctionalResourceChange -ResourceChange $resourceChange -LogicalResourceId $logicalResourceId
             $functionalResourceIds[$logicalResourceId] = $true
             continue
@@ -1201,18 +1648,29 @@ function Assert-AuthWalletRootChanges {
                 -VisitedChangeSetIds $visitedChangeSetIds `
                 -Partition $Partition `
                 -ProfileName $ProfileName `
+                -ReviewIntent $ReviewIntent `
+                -FunctionalResourceIds $functionalResourceIds `
+                -Mode $Mode `
                 -Depth 0 `
                 -IsRoot
             continue
         }
-        Assert-AuthWalletTagOnlyResourceChange -ResourceChange $resourceChange -Context "AUTH_WALLET_TRANSITION root resource '$logicalResourceId'"
+        Assert-AuthWalletTagOnlyResourceChange -ResourceChange $resourceChange -Context "$ReviewIntent root resource '$logicalResourceId'"
     }
 
     if (
+        $ReviewIntent -ceq 'AUTH_WALLET_TRANSITION' -and
         $Mode -ceq 'transition' -and
         (-not $functionalResourceIds.Contains('ApiTaskDefinition') -or -not $functionalResourceIds.Contains('ApiService'))
     ) {
         throw 'AUTH_WALLET_TRANSITION change set is missing one of its two exact reviewed API functional changes.'
+    }
+    if (
+        $ReviewIntent -ceq 'REDIS_OPERATOR_TRANSITION' -and
+        $Mode -ceq 'transition' -and
+        -not $functionalResourceIds.Contains('RedisOperatorUser')
+    ) {
+        throw 'REDIS_OPERATOR_TRANSITION change set is missing its exact reviewed RedisOperatorUser functional change.'
     }
 }
 
@@ -1512,6 +1970,23 @@ $validatedAuthWalletTransitionOperation = $null
 $validatedAuthWalletTransitionFieldName = $null
 $resolvedAuthWalletTransitionRecord = $null
 $authWalletTransitionRecordRawShaBefore = $null
+$redisOperatorTransitionValidation = $null
+$redisOperatorTransitionRecordSha256 = $null
+$redisOperatorCurrentStateSha256 = $null
+$redisOperatorTargetStateSha256 = $null
+$redisOperatorPredecessorTransitionSha256 = $null
+$redisOperatorCurrentFixedSlotStateSha256 = $null
+$redisOperatorTargetFixedSlotStateSha256 = $null
+$redisOperatorFixedSlotPredecessorTransitionSha256 = $null
+$redisOperatorTransitionDeploymentBindingSha256 = $null
+$redisOperatorLiveBindingSha256 = $null
+$redisOperatorCurrentVersionId = $null
+$redisOperatorTargetVersionId = $null
+$validatedRedisOperatorTransitionOperation = $null
+$validatedRedisOperatorTransitionFieldName = $null
+$resolvedRedisOperatorTransitionRecord = $null
+$redisOperatorTransitionRecordRawShaBefore = $null
+$expectedRedisOperatorUserId = $null
 $currentStackParameterSnapshotSha256 = $null
 $currentStackTagSnapshotSha256 = $null
 $currentApplicationTemplateSha256 = $null
@@ -1519,8 +1994,10 @@ $currentStackBindingSha256 = $null
 $isApplicationUpdate = $false
 $isCredentialTransition = $false
 $isAuthWalletTransition = $false
+$isRedisOperatorTransition = $false
 $preservedCredentialTags = $null
 $preservedAuthWalletTags = $null
+$preservedRedisOperatorTags = $null
 $credentialVersionValues = [ordered]@{
     RedisOperatorSecretVersionId = $RedisOperatorSecretVersionId
     ApiDatabaseSlotAVersionId = $ApiDatabaseSlotAVersionId
@@ -1530,6 +2007,27 @@ $credentialVersionValues = [ordered]@{
     RedisApiSlotAVersionId = $RedisApiSlotAVersionId
     RedisApiSlotBVersionId = $RedisApiSlotBVersionId
 }
+$redisOperatorTransitionInputValues = [ordered]@{
+    RedisOperatorTransitionRecordFile = $RedisOperatorTransitionRecordFile
+    RedisOperatorTransitionMode = $RedisOperatorTransitionMode
+    RedisOperatorTransitionValidationAt = $RedisOperatorTransitionValidationAt
+    RedisOperatorTransitionAuthorityRegistrySha256 = $RedisOperatorTransitionAuthorityRegistrySha256
+    RedisOperatorTransitionWorkloadStackId = $RedisOperatorTransitionWorkloadStackId
+    RedisOperatorTransitionSecretArn = $RedisOperatorTransitionSecretArn
+    RedisOperatorTransitionKmsKeyArn = $RedisOperatorTransitionKmsKeyArn
+    RedisOperatorTransitionCurrentVersionId = $RedisOperatorTransitionCurrentVersionId
+    RedisOperatorTransitionOperation = $RedisOperatorTransitionOperation
+    RedisOperatorTransitionFieldName = $RedisOperatorTransitionFieldName
+    RedisOperatorTransitionFixedSlotStateSha256 = $RedisOperatorTransitionFixedSlotStateSha256
+    RedisOperatorTransitionFixedSlotTransitionSha256 = $RedisOperatorTransitionFixedSlotTransitionSha256
+    RedisOperatorTransitionRedisStateSha256 = $RedisOperatorTransitionRedisStateSha256
+    RedisOperatorTransitionRedisTransitionSha256 = $RedisOperatorTransitionRedisTransitionSha256
+    RedisOperatorTransitionAuthWalletStateSha256 = $RedisOperatorTransitionAuthWalletStateSha256
+    RedisOperatorTransitionAuthWalletTransitionSha256 = $RedisOperatorTransitionAuthWalletTransitionSha256
+}
+$hasRedisOperatorTransitionInput = @(
+    $redisOperatorTransitionInputValues.Values | Where-Object { -not [string]::IsNullOrWhiteSpace([string] $_) }
+).Count -ne 0
 
 $controlRecord = $null
 $controlRecordSha256 = $null
@@ -1650,7 +2148,8 @@ if ($Action -in @('Plan', 'Deploy')) {
             -not [string]::IsNullOrWhiteSpace($AuthWalletTransitionAuthorityRegistrySha256) -or
             -not [string]::IsNullOrWhiteSpace($AuthWalletTransitionCurrentVersionId) -or
             -not [string]::IsNullOrWhiteSpace($AuthWalletTransitionOperation) -or
-            -not [string]::IsNullOrWhiteSpace($AuthWalletTransitionFieldName)
+            -not [string]::IsNullOrWhiteSpace($AuthWalletTransitionFieldName) -or
+            $hasRedisOperatorTransitionInput
         ) {
             throw 'CREATE must not supply UPDATE-only stack or transition inputs.'
         }
@@ -1680,8 +2179,9 @@ if ($Action -in @('Plan', 'Deploy')) {
         $isApplicationUpdate = $UpdateIntent -ceq 'APPLICATION'
         $isCredentialTransition = $UpdateIntent -ceq 'CREDENTIAL_TRANSITION'
         $isAuthWalletTransition = $UpdateIntent -ceq 'AUTH_WALLET_TRANSITION'
-        if (-not $isApplicationUpdate -and -not $isCredentialTransition -and -not $isAuthWalletTransition) {
-            throw 'UpdateIntent must use exact uppercase APPLICATION, CREDENTIAL_TRANSITION, or AUTH_WALLET_TRANSITION.'
+        $isRedisOperatorTransition = $UpdateIntent -ceq 'REDIS_OPERATOR_TRANSITION'
+        if (-not $isApplicationUpdate -and -not $isCredentialTransition -and -not $isAuthWalletTransition -and -not $isRedisOperatorTransition) {
+            throw 'UpdateIntent must use exact uppercase APPLICATION, CREDENTIAL_TRANSITION, AUTH_WALLET_TRANSITION, or REDIS_OPERATOR_TRANSITION.'
         }
         $expectedCurrentStackIdPattern = '^arn:' + [regex]::Escape($requestedPartition) + ':cloudformation:' + [regex]::Escape($Region) + ':' + [regex]::Escape($AccountId) + ':stack/' + [regex]::Escape($StackName) + '/[A-Za-z0-9-]{8,64}$'
         if ($CurrentStackId -cnotmatch $expectedCurrentStackIdPattern) {
@@ -1699,7 +2199,7 @@ if ($Action -in @('Plan', 'Deploy')) {
             }
         }
 
-        if ($isApplicationUpdate -or $isAuthWalletTransition) {
+        if ($isApplicationUpdate -or $isAuthWalletTransition -or $isRedisOperatorTransition) {
             $fixedSlotTargetBindings = [ordered]@{}
             foreach ($credentialVersion in $credentialVersionValues.GetEnumerator()) {
                 $fixedSlotTargetBindings[$credentialVersion.Key] = [string] $credentialVersion.Value
@@ -1725,9 +2225,10 @@ if ($Action -in @('Plan', 'Deploy')) {
                 -not [string]::IsNullOrWhiteSpace($AuthWalletTransitionAuthorityRegistrySha256) -or
                 -not [string]::IsNullOrWhiteSpace($AuthWalletTransitionCurrentVersionId) -or
                 -not [string]::IsNullOrWhiteSpace($AuthWalletTransitionOperation) -or
-                -not [string]::IsNullOrWhiteSpace($AuthWalletTransitionFieldName)
+                -not [string]::IsNullOrWhiteSpace($AuthWalletTransitionFieldName) -or
+                $hasRedisOperatorTransitionInput
             ) {
-                throw 'APPLICATION updates must not supply fixed-slot or auth/wallet transition inputs.'
+                throw 'APPLICATION updates must not supply fixed-slot, auth/wallet, or Redis operator transition inputs.'
             }
         }
         elseif ($isCredentialTransition) {
@@ -1738,9 +2239,10 @@ if ($Action -in @('Plan', 'Deploy')) {
                 -not [string]::IsNullOrWhiteSpace($AuthWalletTransitionAuthorityRegistrySha256) -or
                 -not [string]::IsNullOrWhiteSpace($AuthWalletTransitionCurrentVersionId) -or
                 -not [string]::IsNullOrWhiteSpace($AuthWalletTransitionOperation) -or
-                -not [string]::IsNullOrWhiteSpace($AuthWalletTransitionFieldName)
+                -not [string]::IsNullOrWhiteSpace($AuthWalletTransitionFieldName) -or
+                $hasRedisOperatorTransitionInput
             ) {
-                throw 'CREDENTIAL_TRANSITION updates must not supply auth/wallet transition inputs.'
+                throw 'CREDENTIAL_TRANSITION updates must not supply auth/wallet or Redis operator transition inputs.'
             }
             Assert-RequiredValue -Name 'FixedSlotCredentialTransitionRecordFile' -Value $FixedSlotCredentialTransitionRecordFile
             Assert-RequiredValue -Name 'FixedSlotCredentialTransitionMode' -Value $FixedSlotCredentialTransitionMode
@@ -1828,13 +2330,14 @@ if ($Action -in @('Plan', 'Deploy')) {
                 throw 'The fixed-slot credential transition operation does not match the explicitly requested mode.'
             }
         }
-        else {
+        elseif ($isAuthWalletTransition) {
             if (
                 -not [string]::IsNullOrWhiteSpace($FixedSlotCredentialTransitionRecordFile) -or
                 -not [string]::IsNullOrWhiteSpace($FixedSlotCredentialTransitionMode) -or
-                -not [string]::IsNullOrWhiteSpace($FixedSlotCredentialTransitionValidationAt)
+                -not [string]::IsNullOrWhiteSpace($FixedSlotCredentialTransitionValidationAt) -or
+                $hasRedisOperatorTransitionInput
             ) {
-                throw 'AUTH_WALLET_TRANSITION updates must not supply fixed-slot transition inputs.'
+                throw 'AUTH_WALLET_TRANSITION updates must not supply fixed-slot or Redis operator transition inputs.'
             }
             Assert-RequiredValue -Name 'AuthWalletTransitionRecordFile' -Value $AuthWalletTransitionRecordFile
             Assert-RequiredValue -Name 'AuthWalletTransitionMode' -Value $AuthWalletTransitionMode
@@ -1970,6 +2473,9 @@ if ($Action -in @('Plan', 'Deploy')) {
             $authWalletTargetStateSha256 = [string] $authWalletTransitionValidation.targetStateSha256
             $authWalletPredecessorTransitionSha256 = [string] $authWalletTransitionValidation.predecessorTransitionSha256
             $authWalletTransitionDeploymentBindingText = "record-sha256=$authWalletTransitionRecordSha256`ncurrent-state-sha256=$authWalletCurrentStateSha256`ntarget-state-sha256=$authWalletTargetStateSha256`npredecessor-transition-sha256=$authWalletPredecessorTransitionSha256`nauthority-registry-sha256=$AuthWalletTransitionAuthorityRegistrySha256`ncurrent-stack-id=$CurrentStackId`nparent-template-sha256=$templateSha256`nworkload-template-sha256=$workloadBoundariesTemplateSha256`nobservability-template-sha256=$observabilityTemplateSha256`nmode=$AuthWalletTransitionMode`noperation=$validatedAuthWalletTransitionOperation`nfield=$validatedAuthWalletTransitionFieldName"
+        }
+        else {
+            throw 'REDIS_OPERATOR_TRANSITION remains fail-closed until its signed validator report contract is locally available.'
         }
     }
     $workloadBoundariesArtifactKey = "application-workload-boundaries-$workloadBoundariesTemplateSha256.yaml"

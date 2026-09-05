@@ -20,6 +20,10 @@ $identityResponsePath = Join-Path $temporaryRoot 'identity.json'
 $guardrailStackResponsePath = Join-Path $temporaryRoot 'guardrail-stack.json'
 $applicationStackResponsePath = Join-Path $temporaryRoot 'application-stack.json'
 $applicationStackResponseAfterFirstPath = Join-Path $temporaryRoot 'application-stack-after-first.json'
+$workloadStackResponsePath = Join-Path $temporaryRoot 'workload-stack.json'
+$workloadRootResourceResponsePath = Join-Path $temporaryRoot 'workload-root-resource.json'
+$redisOperatorSecretResourceResponsePath = Join-Path $temporaryRoot 'redis-operator-secret-resource.json'
+$redisOperatorUserResourceResponsePath = Join-Path $temporaryRoot 'redis-operator-user-resource.json'
 $guardrailTemplateResponsePath = Join-Path $temporaryRoot 'guardrail-template.json'
 $changeSetResponsePath = Join-Path $temporaryRoot 'change-set.json'
 $changeSetResponseMapPath = Join-Path $temporaryRoot 'change-set-response-map.json'
@@ -27,6 +31,7 @@ $workloadChildChangeSetResponsePath = Join-Path $temporaryRoot 'workload-child-c
 $observabilityChildChangeSetResponsePath = Join-Path $temporaryRoot 'observability-child-change-set.json'
 $grandchildChangeSetResponsePath = Join-Path $temporaryRoot 'grandchild-change-set.json'
 $applicationTemplateResponsePath = Join-Path $temporaryRoot 'application-template.json'
+$workloadCurrentTemplateResponsePath = Join-Path $temporaryRoot 'workload-current-template.json'
 $bucketLocationResponsePath = Join-Path $temporaryRoot 'bucket-location.json'
 $bucketVersioningResponsePath = Join-Path $temporaryRoot 'bucket-versioning.json'
 $artifactObjectResponsePath = Join-Path $temporaryRoot 'artifact-object.json'
@@ -60,11 +65,17 @@ $originalEnvironment = @{
     FAKE_AWS_GUARDRAIL_STACK_RESPONSE = $env:FAKE_AWS_GUARDRAIL_STACK_RESPONSE
     FAKE_AWS_APPLICATION_STACK_RESPONSE = $env:FAKE_AWS_APPLICATION_STACK_RESPONSE
     FAKE_AWS_APPLICATION_STACK_RESPONSE_AFTER_FIRST = $env:FAKE_AWS_APPLICATION_STACK_RESPONSE_AFTER_FIRST
+    FAKE_AWS_WORKLOAD_STACK_RESPONSE = $env:FAKE_AWS_WORKLOAD_STACK_RESPONSE
+    FAKE_AWS_WORKLOAD_STACK_ID = $env:FAKE_AWS_WORKLOAD_STACK_ID
+    FAKE_AWS_WORKLOAD_ROOT_RESOURCE_RESPONSE = $env:FAKE_AWS_WORKLOAD_ROOT_RESOURCE_RESPONSE
+    FAKE_AWS_REDIS_OPERATOR_SECRET_RESOURCE_RESPONSE = $env:FAKE_AWS_REDIS_OPERATOR_SECRET_RESOURCE_RESPONSE
+    FAKE_AWS_REDIS_OPERATOR_USER_RESOURCE_RESPONSE = $env:FAKE_AWS_REDIS_OPERATOR_USER_RESOURCE_RESPONSE
     FAKE_AWS_GUARDRAIL_TEMPLATE_RESPONSE = $env:FAKE_AWS_GUARDRAIL_TEMPLATE_RESPONSE
     FAKE_AWS_CHANGE_SET_RESPONSE = $env:FAKE_AWS_CHANGE_SET_RESPONSE
     FAKE_AWS_CHANGE_SET_RESPONSE_MAP = $env:FAKE_AWS_CHANGE_SET_RESPONSE_MAP
     FAKE_AWS_ROOT_CHANGE_SET_ID = $env:FAKE_AWS_ROOT_CHANGE_SET_ID
     FAKE_AWS_APPLICATION_TEMPLATE_RESPONSE = $env:FAKE_AWS_APPLICATION_TEMPLATE_RESPONSE
+    FAKE_AWS_WORKLOAD_TEMPLATE_RESPONSE = $env:FAKE_AWS_WORKLOAD_TEMPLATE_RESPONSE
     FAKE_AWS_BUCKET_LOCATION_RESPONSE = $env:FAKE_AWS_BUCKET_LOCATION_RESPONSE
     FAKE_AWS_BUCKET_VERSIONING_RESPONSE = $env:FAKE_AWS_BUCKET_VERSIONING_RESPONSE
     FAKE_AWS_ARTIFACT_OBJECT_RESPONSE = $env:FAKE_AWS_ARTIFACT_OBJECT_RESPONSE
@@ -485,12 +496,22 @@ function New-FixedSlotScopeState {
 function New-FixedSlotState {
     param(
         [System.Collections.IDictionary] $Versions,
-        [int] $Generation
+        [int] $Generation,
+        [AllowNull()]
+        [string[]] $RedisOperatorUsedVersionIds = $null
     )
 
+    $resolvedRedisOperatorHistory = @()
+    if ($null -ne $RedisOperatorUsedVersionIds) {
+        $resolvedRedisOperatorHistory = @($RedisOperatorUsedVersionIds)
+    }
+    elseif ([string] $Versions.RedisOperatorSecretVersionId -cne 'UNPINNED') {
+        $resolvedRedisOperatorHistory = @([string] $Versions.RedisOperatorSecretVersionId)
+    }
     return [ordered]@{
         operatorMode = 'DISABLED'
         redisOperatorSecretVersionId = [string] $Versions.RedisOperatorSecretVersionId
+        redisOperatorUsedVersionIds = $resolvedRedisOperatorHistory
         apiDatabase = New-FixedSlotScopeState -SlotAVersionId ([string] $Versions.ApiDatabaseSlotAVersionId) -SlotBVersionId ([string] $Versions.ApiDatabaseSlotBVersionId) -Generation $Generation
         workerDatabase = New-FixedSlotScopeState -SlotAVersionId ([string] $Versions.WorkerDatabaseSlotAVersionId) -SlotBVersionId ([string] $Versions.WorkerDatabaseSlotBVersionId) -Generation $Generation
         redis = New-FixedSlotScopeState -SlotAVersionId ([string] $Versions.RedisApiSlotAVersionId) -SlotBVersionId ([string] $Versions.RedisApiSlotBVersionId) -Generation $Generation
@@ -515,7 +536,7 @@ function New-AdoptionTransitionRecord {
         RedisApiSlotBVersionId = 'UNPINNED'
     }
     return [ordered]@{
-        schemaVersion = 2
+        schemaVersion = 3
         status = 'APPROVED'
         recordId = 'rotation:adopt-and-pin:focused-test'
         preparedAt = $Now.AddMinutes(-2).ToString('yyyy-MM-ddTHH:mm:ssZ', [System.Globalization.CultureInfo]::InvariantCulture)
@@ -588,7 +609,7 @@ function New-PreparationTransitionRecord {
         backendInstallEvidenceSha256 = $backendInstallationSha256
     }
     return [ordered]@{
-        schemaVersion = 2
+        schemaVersion = 3
         status = 'APPROVED'
         recordId = 'rotation:prepare-inactive:api-database:focused-test'
         preparedAt = $Now.AddMinutes(-2).ToString('yyyy-MM-ddTHH:mm:ssZ', [System.Globalization.CultureInfo]::InvariantCulture)
@@ -658,6 +679,70 @@ function Write-ApplicationStackResponse {
         }) -Depth 7
 }
 
+function Write-WorkloadStackResponse {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $RedisOperatorVersionId,
+        [Parameter(Mandatory = $true)]
+        [string] $ApplicationDataKeyArn,
+        [string] $Path = $workloadStackResponsePath,
+        [string] $ParentId = $immutableStackId,
+        [string] $RootId = $immutableStackId,
+        [string] $StackStatus = 'UPDATE_COMPLETE'
+    )
+
+    $parameters = @(
+        [ordered]@{ ParameterKey = 'DeliveryArtifactSha256'; ParameterValue = $workloadBoundariesTemplateSha256 },
+        [ordered]@{ ParameterKey = 'DeliveryArtifactBindingSha256'; ParameterValue = $artifactBindingSha256 },
+        [ordered]@{ ParameterKey = 'EnvironmentName'; ParameterValue = 'test-kan34' },
+        [ordered]@{ ParameterKey = 'ApplicationDataKeyArn'; ParameterValue = $ApplicationDataKeyArn },
+        [ordered]@{ ParameterKey = 'RedisOperatorSecretVersionId'; ParameterValue = $RedisOperatorVersionId },
+        [ordered]@{ ParameterKey = 'RedisOperatorMode'; ParameterValue = 'DISABLED' }
+    )
+    Write-JsonFile -Path $Path -Value ([ordered]@{
+            Stacks = @(
+                [ordered]@{
+                    StackName = 'crypto-lending-workload-test'
+                    StackId = $workloadChildStackId
+                    ParentId = $ParentId
+                    RootId = $RootId
+                    StackStatus = $StackStatus
+                    Parameters = $parameters
+                    Tags = @()
+                }
+            )
+        }) -Depth 7
+}
+
+function Write-StackResourceResponse {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $Path,
+        [Parameter(Mandatory = $true)]
+        [string] $StackName,
+        [Parameter(Mandatory = $true)]
+        [string] $StackId,
+        [Parameter(Mandatory = $true)]
+        [string] $LogicalResourceId,
+        [Parameter(Mandatory = $true)]
+        [string] $PhysicalResourceId,
+        [Parameter(Mandatory = $true)]
+        [string] $ResourceType,
+        [string] $ResourceStatus = 'UPDATE_COMPLETE'
+    )
+
+    Write-JsonFile -Path $Path -Value ([ordered]@{
+            StackResourceDetail = [ordered]@{
+                StackName = $StackName
+                StackId = $StackId
+                LogicalResourceId = $LogicalResourceId
+                PhysicalResourceId = $PhysicalResourceId
+                ResourceType = $ResourceType
+                ResourceStatus = $ResourceStatus
+            }
+        }) -Depth 5
+}
+
 if (-not (Test-Path -LiteralPath $guardPath -PathType Leaf)) {
     throw "Application guard under test was not found: $guardPath"
 }
@@ -702,6 +787,11 @@ if ($service -eq 'sts' -and $operation -eq 'get-caller-identity') {
 if ($service -eq 'cloudformation' -and $operation -eq 'describe-stacks') {
     $stackNameIndex = [array]::IndexOf($AwsArguments, '--stack-name')
     $requestedStack = if ($stackNameIndex -ge 0) { $AwsArguments[$stackNameIndex + 1] } else { '' }
+    if ($requestedStack -eq [Environment]::GetEnvironmentVariable('FAKE_AWS_WORKLOAD_STACK_ID')) {
+        Write-ResponseFile -Path $env:FAKE_AWS_WORKLOAD_STACK_RESPONSE
+        $global:LASTEXITCODE = 0
+        return
+    }
     if (
         $requestedStack -eq 'crypto-lending-application-test' -or
         $requestedStack -like '*:stack/crypto-lending-application-test/*'
@@ -727,6 +817,33 @@ if ($service -eq 'cloudformation' -and $operation -eq 'describe-stacks') {
     }
     Write-ResponseFile -Path $env:FAKE_AWS_GUARDRAIL_STACK_RESPONSE
     $global:LASTEXITCODE = 0
+    return
+}
+if ($service -eq 'cloudformation' -and $operation -eq 'describe-stack-resource') {
+    $stackNameIndex = [array]::IndexOf($AwsArguments, '--stack-name')
+    $logicalIdIndex = [array]::IndexOf($AwsArguments, '--logical-resource-id')
+    $requestedStack = if ($stackNameIndex -ge 0) { $AwsArguments[$stackNameIndex + 1] } else { '' }
+    $requestedLogicalId = if ($logicalIdIndex -ge 0) { $AwsArguments[$logicalIdIndex + 1] } else { '' }
+    $workloadStackId = [Environment]::GetEnvironmentVariable('FAKE_AWS_WORKLOAD_STACK_ID')
+    if (
+        ($requestedStack -eq 'crypto-lending-application-test' -or $requestedStack -like '*:stack/crypto-lending-application-test/*') -and
+        $requestedLogicalId -eq 'WorkloadBoundaries'
+    ) {
+        Write-ResponseFile -Path $env:FAKE_AWS_WORKLOAD_ROOT_RESOURCE_RESPONSE
+        $global:LASTEXITCODE = 0
+        return
+    }
+    if ($requestedStack -eq $workloadStackId -and $requestedLogicalId -eq 'RedisOperatorSecret') {
+        Write-ResponseFile -Path $env:FAKE_AWS_REDIS_OPERATOR_SECRET_RESOURCE_RESPONSE
+        $global:LASTEXITCODE = 0
+        return
+    }
+    if ($requestedStack -eq $workloadStackId -and $requestedLogicalId -eq 'RedisOperatorUser') {
+        Write-ResponseFile -Path $env:FAKE_AWS_REDIS_OPERATOR_USER_RESOURCE_RESPONSE
+        $global:LASTEXITCODE = 0
+        return
+    }
+    $global:LASTEXITCODE = 96
     return
 }
 if ($service -eq 's3api' -and $operation -eq 'get-bucket-location') {
@@ -766,6 +883,11 @@ if ($service -eq 'cloudformation' -and $operation -eq 'create-change-set') {
 if ($service -eq 'cloudformation' -and $operation -eq 'get-template') {
     $stackNameIndex = [array]::IndexOf($AwsArguments, '--stack-name')
     $requestedStack = if ($stackNameIndex -ge 0) { $AwsArguments[$stackNameIndex + 1] } else { '' }
+    if ($requestedStack -eq [Environment]::GetEnvironmentVariable('FAKE_AWS_WORKLOAD_STACK_ID')) {
+        Write-ResponseFile -Path $env:FAKE_AWS_WORKLOAD_TEMPLATE_RESPONSE
+        $global:LASTEXITCODE = 0
+        return
+    }
     if (
         $AwsArguments -contains '--change-set-name' -or
         $requestedStack -eq 'crypto-lending-application-test' -or
@@ -957,11 +1079,17 @@ $env:FAKE_AWS_IDENTITY_RESPONSE = $identityResponsePath
 $env:FAKE_AWS_GUARDRAIL_STACK_RESPONSE = $guardrailStackResponsePath
 $env:FAKE_AWS_APPLICATION_STACK_RESPONSE = $applicationStackResponsePath
 $env:FAKE_AWS_APPLICATION_STACK_RESPONSE_AFTER_FIRST = ''
+$env:FAKE_AWS_WORKLOAD_STACK_RESPONSE = $workloadStackResponsePath
+$env:FAKE_AWS_WORKLOAD_STACK_ID = $workloadChildStackId
+$env:FAKE_AWS_WORKLOAD_ROOT_RESOURCE_RESPONSE = $workloadRootResourceResponsePath
+$env:FAKE_AWS_REDIS_OPERATOR_SECRET_RESOURCE_RESPONSE = $redisOperatorSecretResourceResponsePath
+$env:FAKE_AWS_REDIS_OPERATOR_USER_RESOURCE_RESPONSE = $redisOperatorUserResourceResponsePath
 $env:FAKE_AWS_GUARDRAIL_TEMPLATE_RESPONSE = $guardrailTemplateResponsePath
 $env:FAKE_AWS_CHANGE_SET_RESPONSE = $changeSetResponsePath
 $env:FAKE_AWS_CHANGE_SET_RESPONSE_MAP = ''
 $env:FAKE_AWS_ROOT_CHANGE_SET_ID = $immutableChangeSetId
 $env:FAKE_AWS_APPLICATION_TEMPLATE_RESPONSE = $applicationTemplateResponsePath
+$env:FAKE_AWS_WORKLOAD_TEMPLATE_RESPONSE = $workloadCurrentTemplateResponsePath
 $env:FAKE_AWS_BUCKET_LOCATION_RESPONSE = $bucketLocationResponsePath
 $env:FAKE_AWS_BUCKET_VERSIONING_RESPONSE = $bucketVersioningResponsePath
 $env:FAKE_AWS_ARTIFACT_OBJECT_RESPONSE = $artifactObjectResponsePath
@@ -1794,8 +1922,124 @@ $tagOnlyAuthWalletResourceChange = [ordered]@{
         )
     }
 }
+$expectedRedisOperatorFunctionalChange = [ordered]@{
+    Type = 'Resource'
+    ResourceChange = [ordered]@{
+        Action = 'Modify'
+        LogicalResourceId = 'RedisOperatorUser'
+        ResourceType = 'AWS::ElastiCache::User'
+        Replacement = 'False'
+        Scope = @('Properties')
+        Details = @(
+            [ordered]@{
+                ChangeSource = 'DirectModification'
+                Evaluation = 'Dynamic'
+                Target = [ordered]@{
+                    Attribute = 'Properties'
+                    Name = 'AuthenticationMode'
+                    RequiresRecreation = 'Never'
+                    AttributeChangeType = 'Modify'
+                    Path = '/Properties/AuthenticationMode/Passwords'
+                    BeforeValue = 'REDACTED_CURRENT'
+                    AfterValue = 'REDACTED_TARGET'
+                }
+            },
+            [ordered]@{
+                CausingEntity = 'RedisOperatorSecretVersionId'
+                ChangeSource = 'ParameterReference'
+                Evaluation = 'Static'
+                Target = [ordered]@{
+                    Attribute = 'Properties'
+                    Name = 'AuthenticationMode'
+                    RequiresRecreation = 'Never'
+                }
+            }
+        )
+    }
+}
 Write-ApplicationStackResponse -ParameterMap $applicationParameterMap -TagMap $applicationStackTags
 Write-TemplateResponse -Path $applicationTemplateResponsePath -TemplateBody $applicationTemplateBody
+
+$transitionReviewModule = New-Module -ArgumentList $guardPath -ScriptBlock {
+    param([string] $GuardUnderTest)
+    . $GuardUnderTest -Action LocalValidate *> $null
+}
+if ($null -eq $transitionReviewModule) {
+    throw 'Unable to load the transition review functions into an isolated local test module.'
+}
+
+function Invoke-RedisChangeReview {
+    param(
+        [AllowEmptyCollection()]
+        [object[]] $Changes,
+        [ValidateSet('adopt', 'transition')]
+        [string] $Mode = 'transition'
+    )
+
+    $payload = [pscustomobject]@{
+        ChangesJson = ConvertTo-Json -InputObject @($Changes) -Depth 20 -Compress
+        Mode = $Mode
+        RootChangeSetId = $immutableChangeSetId
+        FakeAwsPath = $fakeAwsCommandPath
+    }
+    try {
+        $output = @(& $transitionReviewModule {
+                param([object] $Payload)
+                $script:AccountId = '111122223333'
+                $script:Region = 'us-west-2'
+                $script:AwsExecutable = [string] $Payload.FakeAwsPath
+                $parsedReviewChanges = ([string] $Payload.ChangesJson) | ConvertFrom-Json
+                $reviewChanges = @($parsedReviewChanges)
+                Assert-AuthWalletRootChanges `
+                    -Changes $reviewChanges `
+                    -Mode ([string] $Payload.Mode) `
+                    -RootChangeSetId ([string] $Payload.RootChangeSetId) `
+                    -Partition 'aws' `
+                    -ProfileName 'kan34-test-profile' `
+                    -ReviewIntent 'REDIS_OPERATOR_TRANSITION'
+            } $payload 2>&1)
+        return [pscustomobject]@{ Succeeded = $true; Output = ($output -join "`n") }
+    }
+    catch {
+        return [pscustomobject]@{ Succeeded = $false; Output = $_.Exception.Message }
+    }
+}
+
+function Invoke-RedisWorkloadChildReview {
+    param(
+        [AllowEmptyCollection()]
+        [object[]] $ChildChanges,
+        [string] $RootLogicalResourceId = 'WorkloadBoundaries',
+        [string] $DetailKind = 'Automatic',
+        [ValidateSet('adopt', 'transition')]
+        [string] $Mode = 'transition',
+        [AllowNull()]
+        [object] $NextToken = $null
+    )
+
+    $rootLink = New-NestedChangeSetLink `
+        -LogicalResourceId $RootLogicalResourceId `
+        -StackId $workloadChildStackId `
+        -ChangeSetId $workloadChildChangeSetId `
+        -DetailKind $DetailKind
+    Write-NestedChangeSetResponse `
+        -Path $workloadChildChangeSetResponsePath `
+        -StackName 'crypto-lending-workload-test' `
+        -StackId $workloadChildStackId `
+        -ChangeSetName 'workload-child-change' `
+        -ChangeSetId $workloadChildChangeSetId `
+        -ParentChangeSetId $immutableChangeSetId `
+        -RootChangeSetId $immutableChangeSetId `
+        -Changes $ChildChanges `
+        -NextToken $NextToken
+    Set-FakeChangeSetResponseMap -ResponseMap ([ordered]@{ $workloadChildChangeSetId = $workloadChildChangeSetResponsePath })
+    try {
+        return Invoke-RedisChangeReview -Changes @($rootLink) -Mode $Mode
+    }
+    finally {
+        $env:FAKE_AWS_CHANGE_SET_RESPONSE_MAP = ''
+    }
+}
 
 try {
     Invoke-FocusedTest -Name 'default LocalValidate makes zero AWS calls' -Body {
@@ -1804,6 +2048,195 @@ try {
         Assert-Condition $result.Succeeded "LocalValidate failed: $($result.Output)"
         Assert-Condition ((Get-AwsMarkerText) -eq '') 'LocalValidate invoked the fake AWS CLI.'
         Assert-Condition ($result.Output -match 'No AWS calls were made') 'LocalValidate did not report its zero-call boundary.'
+    }
+
+    Invoke-FocusedTest -Name 'Redis recursive review accepts only exact immediate Workload functional changes' -Body {
+        Clear-AwsMarker
+        $exactFunctional = Copy-JsonValue -Value $expectedRedisOperatorFunctionalChange
+        $exact = Invoke-RedisWorkloadChildReview -ChildChanges @($exactFunctional)
+        Assert-Condition $exact.Succeeded "Exact immediate RedisOperatorUser change was rejected: $($exact.Output)"
+
+        $emptyAdoption = Invoke-RedisChangeReview -Changes @() -Mode 'adopt'
+        Assert-Condition $emptyAdoption.Succeeded "Empty Redis chain adoption review was rejected: $($emptyAdoption.Output)"
+        $tagOnlyAdoptionLeaf = Copy-JsonValue -Value $tagOnlyAuthWalletResourceChange
+        $tagOnlyAdoptionLeaf.ResourceChange.LogicalResourceId = 'RedisOperatorUser'
+        $tagOnlyAdoptionLeaf.ResourceChange.ResourceType = 'AWS::ElastiCache::User'
+        $tagOnlyAdoption = Invoke-RedisWorkloadChildReview -ChildChanges @($tagOnlyAdoptionLeaf) -Mode 'adopt' -DetailKind 'Tags'
+        Assert-Condition $tagOnlyAdoption.Succeeded "Tag-only Redis adoption propagation was rejected: $($tagOnlyAdoption.Output)"
+        $propertyAdoption = Invoke-RedisWorkloadChildReview -ChildChanges @($exactFunctional) -Mode 'adopt'
+        Assert-Condition (-not $propertyAdoption.Succeeded) 'Redis adoption accepted a functional AuthenticationMode mutation.'
+    }
+
+    Invoke-FocusedTest -Name 'Redis functional review rejects malformed scope details and causal evidence' -Body {
+        $redisFunctionalCases = @(
+            [pscustomobject]@{
+                Name = 'scope outside Properties and Tags'
+                Mutate = { param($change) $change.ResourceChange.Scope = @('Properties', 'Metadata') }
+            },
+            [pscustomobject]@{
+                Name = 'missing direct dynamic detail'
+                Mutate = { param($change) $change.ResourceChange.Details = @($change.ResourceChange.Details[1]) }
+            },
+            [pscustomobject]@{
+                Name = 'missing parameter detail'
+                Mutate = { param($change) $change.ResourceChange.Details = @($change.ResourceChange.Details[0]) }
+            },
+            [pscustomobject]@{
+                Name = 'wrong parameter cause'
+                Mutate = { param($change) $change.ResourceChange.Details[1].CausingEntity = 'RedisApiSlotAVersionId' }
+            },
+            [pscustomobject]@{
+                Name = 'wrong direct evaluation'
+                Mutate = { param($change) $change.ResourceChange.Details[0].Evaluation = 'Static' }
+            },
+            [pscustomobject]@{
+                Name = 'add change type'
+                Mutate = { param($change) $change.ResourceChange.Details[0].Target.AttributeChangeType = 'Add' }
+            },
+            [pscustomobject]@{
+                Name = 'AccessString path'
+                Mutate = { param($change) $change.ResourceChange.Details[0].Target.Path = '/Properties/AccessString' }
+            },
+            [pscustomobject]@{
+                Name = 'AuthenticationMode near-prefix path'
+                Mutate = { param($change) $change.ResourceChange.Details[0].Target.Path = '/Properties/AuthenticationModeEvil' }
+            },
+            [pscustomobject]@{
+                Name = 'replacement recreation detail'
+                Mutate = { param($change) $change.ResourceChange.Details[0].Target.RequiresRecreation = 'Always' }
+            },
+            [pscustomobject]@{
+                Name = 'non-string before value'
+                Mutate = { param($change) $change.ResourceChange.Details[0].Target.BeforeValue = @('bad') }
+            },
+            [pscustomobject]@{
+                Name = 'unexpected property'
+                Mutate = { param($change) $change.ResourceChange.Details[0].Target.Name = 'AccessString' }
+            },
+            [pscustomobject]@{
+                Name = 'wrong resource type'
+                Mutate = { param($change) $change.ResourceChange.ResourceType = 'AWS::ElastiCache::UserGroup' }
+            },
+            [pscustomobject]@{
+                Name = 'wrong action'
+                Mutate = { param($change) $change.ResourceChange.Action = 'Remove' }
+            },
+            [pscustomobject]@{
+                Name = 'replacement'
+                Mutate = { param($change) $change.ResourceChange.Replacement = 'True' }
+            },
+            [pscustomobject]@{
+                Name = 'policy action'
+                Mutate = { param($change) Add-Member -InputObject $change.ResourceChange -NotePropertyName PolicyAction -NotePropertyValue 'ReplaceAndDelete' }
+            }
+        )
+        foreach ($functionalCase in $redisFunctionalCases) {
+            $change = Copy-JsonValue -Value $expectedRedisOperatorFunctionalChange
+            & $functionalCase.Mutate $change
+            $review = Invoke-RedisWorkloadChildReview -ChildChanges @($change)
+            Assert-Condition (-not $review.Succeeded) "Redis review accepted $($functionalCase.Name)."
+            Assert-Condition ($review.Output -match 'REDIS_OPERATOR_TRANSITION') "$($functionalCase.Name) rejection was not Redis-specific: $($review.Output)"
+        }
+    }
+
+    Invoke-FocusedTest -Name 'Redis recursive review rejects misplaced missing duplicated paginated and cyclic changes' -Body {
+        $functional = Copy-JsonValue -Value $expectedRedisOperatorFunctionalChange
+        $directRoot = Invoke-RedisChangeReview -Changes @($functional)
+        Assert-Condition (-not $directRoot.Succeeded) 'Redis review accepted RedisOperatorUser directly in the root change set.'
+
+        $observability = Invoke-RedisWorkloadChildReview -ChildChanges @($functional) -RootLogicalResourceId 'Observability'
+        Assert-Condition (-not $observability.Succeeded) 'Redis review accepted RedisOperatorUser under Observability.'
+        Assert-Condition ($observability.Output -match 'direct WorkloadBoundaries') 'Observability placement rejection was not explicit.'
+
+        $missing = Invoke-RedisWorkloadChildReview -ChildChanges @()
+        Assert-Condition (-not $missing.Succeeded) 'Redis transition accepted a missing RedisOperatorUser functional change.'
+        Assert-Condition ($missing.Output -match 'missing its exact reviewed RedisOperatorUser') 'Missing Redis functional change rejection was not explicit.'
+
+        $duplicateA = Copy-JsonValue -Value $expectedRedisOperatorFunctionalChange
+        $duplicateB = Copy-JsonValue -Value $expectedRedisOperatorFunctionalChange
+        $duplicate = Invoke-RedisWorkloadChildReview -ChildChanges @($duplicateA, $duplicateB)
+        Assert-Condition (-not $duplicate.Succeeded) 'Redis review accepted duplicate child logical IDs.'
+
+        $spoofed = Copy-JsonValue -Value $expectedRedisOperatorFunctionalChange
+        Add-Member -InputObject $spoofed.ResourceChange -NotePropertyName ChangeSetId -NotePropertyValue $grandchildChangeSetId
+        $spoofedReview = Invoke-RedisWorkloadChildReview -ChildChanges @($spoofed)
+        Assert-Condition (-not $spoofedReview.Succeeded) 'Redis review accepted a non-stack leaf carrying a child ChangeSetId.'
+
+        $paginated = Invoke-RedisWorkloadChildReview -ChildChanges @($functional) -NextToken 'hidden-page'
+        Assert-Condition (-not $paginated.Succeeded) 'Redis review accepted an uninspected child page.'
+        Assert-Condition ($paginated.Output -match 'pagination token') 'Redis child pagination rejection was not explicit.'
+
+        $grandchildLink = New-NestedChangeSetLink `
+            -LogicalResourceId 'DeeperStack' `
+            -StackId $grandchildStackId `
+            -ChangeSetId $grandchildChangeSetId `
+            -DetailKind 'Automatic'
+        Write-NestedChangeSetResponse `
+            -Path $workloadChildChangeSetResponsePath `
+            -StackName 'crypto-lending-workload-test' `
+            -StackId $workloadChildStackId `
+            -ChangeSetName 'workload-child-change' `
+            -ChangeSetId $workloadChildChangeSetId `
+            -ParentChangeSetId $immutableChangeSetId `
+            -RootChangeSetId $immutableChangeSetId `
+            -Changes @($grandchildLink)
+        Write-NestedChangeSetResponse `
+            -Path $grandchildChangeSetResponsePath `
+            -StackName 'crypto-lending-grandchild-test' `
+            -StackId $grandchildStackId `
+            -ChangeSetName 'grandchild-change' `
+            -ChangeSetId $grandchildChangeSetId `
+            -ParentChangeSetId $workloadChildChangeSetId `
+            -RootChangeSetId $immutableChangeSetId `
+            -Changes @($functional)
+        $rootLink = New-NestedChangeSetLink `
+            -LogicalResourceId 'WorkloadBoundaries' `
+            -StackId $workloadChildStackId `
+            -ChangeSetId $workloadChildChangeSetId `
+            -DetailKind 'Automatic'
+        Set-FakeChangeSetResponseMap -ResponseMap ([ordered]@{
+                $workloadChildChangeSetId = $workloadChildChangeSetResponsePath
+                $grandchildChangeSetId = $grandchildChangeSetResponsePath
+            })
+        try {
+            $deep = Invoke-RedisChangeReview -Changes @($rootLink)
+            Assert-Condition (-not $deep.Succeeded) 'Redis review accepted its functional change below the direct Workload child.'
+            Assert-Condition ($deep.Output -match 'direct WorkloadBoundaries') 'Deep Redis placement rejection was not explicit.'
+        }
+        finally {
+            $env:FAKE_AWS_CHANGE_SET_RESPONSE_MAP = ''
+        }
+
+        $cycleLink = New-NestedChangeSetLink `
+            -LogicalResourceId 'CycleStack' `
+            -StackId $immutableStackId `
+            -ChangeSetId $immutableChangeSetId `
+            -DetailKind 'Automatic'
+        $cycle = Invoke-RedisWorkloadChildReview -ChildChanges @($cycleLink)
+        Assert-Condition (-not $cycle.Succeeded) 'Redis review accepted a cyclic child change-set ID.'
+        Assert-Condition ($cycle.Output -match 'duplicate or cyclic') 'Redis cycle rejection was not explicit.'
+
+        Write-NestedChangeSetResponse `
+            -Path $workloadChildChangeSetResponsePath `
+            -StackName 'crypto-lending-workload-test' `
+            -StackId $workloadChildStackId `
+            -ChangeSetName 'workload-child-change' `
+            -ChangeSetId $workloadChildChangeSetId `
+            -ParentChangeSetId $immutableChangeSetId `
+            -RootChangeSetId $immutableChangeSetId `
+            -Changes @($functional)
+        $malformedChild = [System.IO.File]::ReadAllText($workloadChildChangeSetResponsePath) | ConvertFrom-Json
+        $malformedChild.Changes = 'not-an-array'
+        Write-JsonFile -Path $workloadChildChangeSetResponsePath -Value $malformedChild -Depth 14
+        Set-FakeChangeSetResponseMap -ResponseMap ([ordered]@{ $workloadChildChangeSetId = $workloadChildChangeSetResponsePath })
+        try {
+            $malformed = Invoke-RedisChangeReview -Changes @($rootLink)
+            Assert-Condition (-not $malformed.Succeeded) 'Redis review accepted malformed child Changes.'
+            Assert-Condition ($malformed.Output -match 'exact JSON array') 'Malformed Redis child Changes rejection was not explicit.'
+        }
+        finally {
+            $env:FAKE_AWS_CHANGE_SET_RESPONSE_MAP = ''
+        }
     }
 
     Invoke-FocusedTest -Name 'Plan requires an exact named auth wallet secret VersionId before AWS discovery' -Body {
@@ -1938,7 +2371,7 @@ try {
         $mixedIntentArguments.UpdateIntent = 'APPLICATION'
         $mixedIntent = Invoke-Guard -Arguments $mixedIntentArguments
         Assert-Condition (-not $mixedIntent.Succeeded) 'APPLICATION update accepted fixed-slot transition inputs.'
-        Assert-Condition ($mixedIntent.Output -match 'must not supply fixed-slot or auth/wallet transition inputs') 'Mixed update-intent rejection was not explicit.'
+        Assert-Condition ($mixedIntent.Output -match 'must not supply fixed-slot, auth/wallet, or Redis operator transition inputs') 'Mixed update-intent rejection was not explicit.'
         Assert-Condition ((Get-AwsMarkerText) -eq '') 'Mixed update intent reached AWS discovery.'
     }
 
@@ -1978,19 +2411,19 @@ try {
                     Name = 'APPLICATION auth/wallet evidence'
                     Arguments = $applicationUpdateArguments
                     Add = @{ AuthWalletTransitionRecordFile = $approvedAuthWalletAdoptionRecordPath }
-                    Error = 'must not supply fixed-slot or auth/wallet transition inputs'
+                    Error = 'must not supply fixed-slot, auth/wallet, or Redis operator transition inputs'
                 },
                 [pscustomobject]@{
                     Name = 'CREDENTIAL_TRANSITION auth/wallet authority digest'
                     Arguments = $updateArguments
                     Add = @{ AuthWalletTransitionAuthorityRegistrySha256 = $authWalletTransitionAuthorityRegistrySha256 }
-                    Error = 'must not supply auth/wallet transition inputs'
+                    Error = 'must not supply auth/wallet or Redis operator transition inputs'
                 },
                 [pscustomobject]@{
                     Name = 'AUTH_WALLET_TRANSITION fixed-slot evidence'
                     Arguments = $authWalletAdoptionArguments
                     Add = @{ FixedSlotCredentialTransitionRecordFile = $approvedTransitionRecordPath }
-                    Error = 'must not supply fixed-slot transition inputs'
+                    Error = 'must not supply fixed-slot or Redis operator transition inputs'
                 }
             )) {
             Clear-AwsMarker
@@ -2284,6 +2717,7 @@ try {
             Clear-AwsMarker
             $operatorMismatchedRecord = ($approvedTransitionRecord | ConvertTo-Json -Depth 14) | ConvertFrom-Json
             $operatorMismatchedRecord.targetState.redisOperatorSecretVersionId = $redisOperatorSecretVersionId -replace '0001$', '0002'
+            $operatorMismatchedRecord.targetState.redisOperatorUsedVersionIds = @($operatorMismatchedRecord.targetState.redisOperatorSecretVersionId)
             Write-JsonFile -Path $approvedTransitionRecordPath -Value $operatorMismatchedRecord -Depth 14
             $operatorMismatchedArguments = Copy-ArgumentMap -Map $updateArguments
             $operatorMismatchedArguments.Action = 'Plan'
