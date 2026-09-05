@@ -83,6 +83,32 @@ three-key account, wallet, and network scope. All of this is static source
 integrity only: it cannot select a live provider, permit egress, activate the
 consumer, or clear any deployment or live-evidence blocker.
 
+The inspection now also byte-pins the consumer service, balance-sync port
+contract, dispatcher, composition, orchestrator, dormant two-source
+coordinator, router, JSON-RPC helper, both chain adapters, and their public
+export root as one RPC-cancellation boundary. Each accepted job receives a
+privately branded context, and the production path must pass that same context
+and signal explicitly without an inert default. The reviewed policy calls the
+limit `maximumRpcWindowMs`, defaults it to three hours, and accepts only two
+through six hours. That timer bounds propagated JSON-RPC work only. Deadline
+and shutdown are retained out of band and map to fixed timeout and unavailable
+classifications without reading or forwarding an abort reason. The helper
+checks cancellation before transport, after a rejected transport call, and
+after a successful response; transports must accept the signal, and neither
+the helper nor downstream path may detach work with `Promise.race`. The dormant
+two-source coordinator uses `Promise.allSettled`, drains both same-signal reads,
+then rechecks cancellation before accessing either value. Rescan preserves the
+two cancellation classifications, while the existing SQS receipt remains the
+sole retry/redrive authority.
+
+This does not establish a whole-job deadline. Checkpoint persistence and the
+wallet-address resolver still have signal-less interfaces, and no reviewed
+concrete transport has yet proved cooperative connect/body-I/O cancellation.
+Those are explicit remaining activation blockers, alongside live provider and
+deployment evidence. The preflight assertions and mutation tests are local
+static integrity checks only and make no network, chain, cloud, or billable
+call.
+
 The adapter dependency closure is byte-pinned too: the supported-asset
 registry, wallet identity parser, and Solana token-account parser are now part
 of the exact balance-consumer artifact shape. The launch adapters filter the

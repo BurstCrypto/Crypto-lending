@@ -95,6 +95,28 @@ snapshot, method-capture, brand, freeze, and reviewer constraints. This is
 local static assurance only; it does not activate the dormant runtime, contact
 a chain or provider, grant egress, deploy resources, or satisfy live evidence.
 
+The dormant RPC path now carries one privately branded execution context from
+each accepted consumer job through the dispatcher, composition, orchestrator,
+closed router, Ethereum or Solana adapter, shared JSON-RPC helper, and injected
+transport boundary. The same context is required for current reads and
+rescans; no production boundary may use the exported unit-test-only inert
+context as a default or fallback. Abort classification is retained out of band:
+a deadline becomes `PROVIDER_TIMEOUT`, shutdown becomes
+`PROVIDER_UNAVAILABLE`, and the caller's abort reason is neither read nor
+forwarded. The helper checks before transport, in its catch path, and again
+after a successful response. Its transport contract requires the same signal
+and cooperative cancellation; `Promise.race` detachment is prohibited.
+
+`maximumRpcWindowMs` is explicitly an RPC window, defaults to three hours, and
+is constrained to two through six hours. It is not a whole-job deadline. The
+checkpoint port and wallet-address resolver remain signal-less, and there is
+still no reviewed concrete transport or live evidence proving cancellation of
+connect and response-body I/O. The dormant two-source coordinator does drain
+both same-signal reads with `Promise.allSettled` and rechecks cancellation
+before inspecting fulfilled values, but it remains unapproved for financial
+use. Offline preflight byte-pins and mutation-tests these boundaries without
+activating the consumer or making any external or billable call.
+
 The offline integrity closure now includes the exact supported-asset registry,
 wallet address parser, and Solana token-account parser used by those adapters.
 The adapters select exactly USDC, USDT, and PYUSD on Ethereum mainnet and the
@@ -353,6 +375,10 @@ approved:
   consumer with a separately split metadata-only secret and a later reviewed
   exact-function database grant; the current worker task has no such secret,
   grant, or resolver binding;
+- checkpoint and wallet-address ports must gain reviewed cancellation before a
+  whole-job shutdown/deadline claim is permitted, and a concrete JSON-RPC
+  transport must prove same-signal connect and response-body cancellation with
+  no detached I/O;
 - the source-only pinned SQS boundary must receive deployed task/IAM proof,
   source/DLQ and redrive evidence, duplicate-delivery and liveness exercises,
   and bounded-delay validation; and

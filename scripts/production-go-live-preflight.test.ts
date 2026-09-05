@@ -138,6 +138,17 @@ const BALANCE_CONSUMER_ARTIFACTS = Object.freeze({
     ),
     'utf8',
   ),
+  balanceSyncConsumerServiceSource: readFileSync(
+    resolve(
+      __dirname,
+      '../apps/api/src/blockchain-sync/application/balance-sync-consumer.service.ts',
+    ),
+    'utf8',
+  ),
+  balanceSyncPortsSource: readFileSync(
+    resolve(__dirname, '../apps/api/src/blockchain-sync/application/ports/balance-sync.ports.ts'),
+    'utf8',
+  ),
   balanceConsumerResourceSource: readFileSync(
     resolve(
       __dirname,
@@ -156,6 +167,13 @@ const BALANCE_CONSUMER_ARTIFACTS = Object.freeze({
     resolve(
       __dirname,
       '../apps/api/src/blockchain-sync/application/mainnet-balance-indexer.router.ts',
+    ),
+    'utf8',
+  ),
+  mainnetBalanceTwoSourceAgreementCoordinatorSource: readFileSync(
+    resolve(
+      __dirname,
+      '../apps/api/src/blockchain-sync/application/mainnet-balance-two-source-agreement.coordinator.ts',
     ),
     'utf8',
   ),
@@ -1394,8 +1412,8 @@ test('balance-consumer inspection rejects mainnet router scope, snapshot, and ca
       'const validated = request;',
     ],
     [
-      'return this.indexerFor(validated.networkId).rescanFromCheckpoint(validated);',
-      'return this.indexerFor(validated.networkId).rescanFromCheckpoint(request);',
+      'return this.indexerFor(validated.networkId).rescanFromCheckpoint(validated, context);',
+      'return this.indexerFor(validated.networkId).rescanFromCheckpoint(request, context);',
     ],
     [
       "if (!descriptor || !('value' in descriptor) || descriptor.enumerable !== true) {",
@@ -1640,7 +1658,7 @@ test('balance-consumer inspection pins the six launch assets and their canonical
 test('balance-consumer inspection requires one stable Solana header around account reads', () => {
   const mutations: readonly (readonly [string, string])[] = [
     [
-      'const selectedHeader = await this.readBlock(BigInt(slot), commitment);',
+      'const selectedHeader = await this.readBlock(BigInt(slot), commitment, context);',
       'const selectedHeader = await Promise.resolve(null);',
     ],
     [
@@ -1682,7 +1700,7 @@ test('balance-consumer inspection rejects provider-neutral JSON-RPC capability a
     ],
     [
       'balanceJsonRpcSource',
-      'response = await transport.exchange(request);',
+      'response = await transport.exchange(request, execution.signal);',
       "response = await fetch('https://unreviewed.invalid');",
     ],
     [
@@ -1803,6 +1821,219 @@ test('balance-consumer inspection rejects provider-neutral JSON-RPC capability a
   assert.match(
     BALANCE_CONSUMER_ARTIFACTS.blockchainSyncIndexSource,
     /export \{ SolanaMainnetBalanceIndexerAdapter \}/u,
+  );
+});
+
+test('balance-consumer inspection pins the RPC-only cancellation chain and remaining gaps', () => {
+  const mutations: readonly (readonly [keyof BalanceConsumerArtifactSources, string, string])[] = [
+    [
+      'balanceSyncPortsSource',
+      'const VERIFIED_BALANCE_SYNC_EXECUTION_CONTEXTS = new WeakMap<object, AbortSignal>();',
+      'const VERIFIED_BALANCE_SYNC_EXECUTION_CONTEXTS = new Map<object, AbortSignal>();',
+    ],
+    [
+      'balanceSyncPortsSource',
+      'Reflect.apply(ABORT_CONTROLLER_ABORT, controller, []);',
+      'Reflect.apply(ABORT_CONTROLLER_ABORT, controller, [kind]);',
+    ],
+    [
+      'blockchainSyncIndexSource',
+      'reviewBalanceSyncExecutionContext,',
+      'reviewBalanceSyncExecutionContext,\n  INERT_BALANCE_SYNC_EXECUTION_CONTEXT,',
+    ],
+    [
+      'balanceSyncConsumerServiceSource',
+      '/** Bounds the propagated JSON-RPC execution window, not signal-less persistence/resolution. */',
+      '/** Bounds the whole job. */',
+    ],
+    [
+      'balanceSyncConsumerServiceSource',
+      'maximumRpcWindowMs: 10_800_000,',
+      'maximumRpcWindowMs: 3_600_000,',
+    ],
+    [
+      'balanceSyncConsumerServiceSource',
+      "const minimum = key === 'maximumRpcWindowMs' ? 7_200_000 : 10;",
+      "const minimum = key === 'maximumRpcWindowMs' ? 1 : 10;",
+    ],
+    [
+      'balanceSyncConsumerServiceSource',
+      "const maximum = key === 'maximumRpcWindowMs' ? 21_600_000 : 60_000;",
+      "const maximum = key === 'maximumRpcWindowMs' ? 86_400_000 : 60_000;",
+    ],
+    [
+      'balanceSyncConsumerServiceSource',
+      "const deadline = setTimeout(() => owner.abort('DEADLINE'), this.policy.maximumRpcWindowMs);",
+      "const deadline = setTimeout(() => owner.abort('SHUTDOWN'), this.policy.maximumRpcWindowMs);",
+    ],
+    [
+      'balanceSyncConsumerServiceSource',
+      'await this.dispatcher.dispatch(job, owner.context);',
+      'await this.dispatcher.dispatch(job, INERT_BALANCE_SYNC_EXECUTION_CONTEXT);',
+    ],
+    [
+      'balanceSyncConsumerServiceSource',
+      'if (listening) runSignal.remove(relayShutdown);',
+      'void listening;',
+    ],
+    [
+      'compositionSource',
+      'await orchestrator.process(job, context);',
+      'await orchestrator.process(job, INERT_BALANCE_SYNC_EXECUTION_CONTEXT);',
+    ],
+    [
+      'reviewedJobDispatcherSource',
+      "if (reviewBalanceSyncExecutionContext(context) === null) return fail('JOB_HANDLER_FAILED');",
+      'void context;',
+    ],
+    [
+      'reviewedJobDispatcherSource',
+      'await this.handler(job, context);',
+      'await this.handler(job, INERT_BALANCE_SYNC_EXECUTION_CONTEXT);',
+    ],
+    [
+      'reviewedJobDispatcherSource',
+      'if (balanceSyncReceiptRetryMinimumDelaySeconds(error) !== undefined) throw error;',
+      "return fail('JOB_HANDLER_FAILED');",
+    ],
+    [
+      'balanceSyncOrchestratorSource',
+      'const value = await this.indexer.readCurrent(request, context);',
+      'const value = await this.indexer.readCurrent(request, INERT_BALANCE_SYNC_EXECUTION_CONTEXT);',
+    ],
+    [
+      'balanceSyncOrchestratorSource',
+      'value = await this.indexer.rescanFromCheckpoint(request, context);',
+      'value = await this.indexer.rescanFromCheckpoint(request, INERT_BALANCE_SYNC_EXECUTION_CONTEXT);',
+    ],
+    [
+      'balanceSyncOrchestratorSource',
+      "if (failure?.code === 'PROVIDER_TIMEOUT' || failure?.code === 'PROVIDER_UNAVAILABLE') {",
+      'if (false) {',
+    ],
+    [
+      'mainnetBalanceIndexerRouterSource',
+      'return this.indexerFor(validated.networkId).readCurrent(validated, context);',
+      'return this.indexerFor(validated.networkId).readCurrent(validated, INERT_BALANCE_SYNC_EXECUTION_CONTEXT);',
+    ],
+    [
+      'mainnetBalanceIndexerRouterSource',
+      'Reflect.apply(rescanFromCheckpoint, receiver, [request, context]) as Promise<unknown>,',
+      'Reflect.apply(rescanFromCheckpoint, receiver, [request]) as Promise<unknown>,',
+    ],
+    [
+      'mainnetBalanceTwoSourceAgreementCoordinatorSource',
+      'const [primaryResult, corroboratingResult] = await Promise.allSettled([',
+      'const [primaryResult, corroboratingResult] = await Promise.all([',
+    ],
+    [
+      'mainnetBalanceTwoSourceAgreementCoordinatorSource',
+      'corroboratingBinding.readCurrent(request, context),',
+      'corroboratingBinding.readCurrent(request, INERT_BALANCE_SYNC_EXECUTION_CONTEXT),',
+    ],
+    [
+      'mainnetBalanceTwoSourceAgreementCoordinatorSource',
+      'const primaryValue = primaryResult.value;',
+      'const primaryValue = primaryResult.reason;',
+    ],
+    [
+      'balanceJsonRpcSource',
+      'exchange(request: BalanceJsonRpcRequest, signal: AbortSignal): Promise<unknown>;',
+      'exchange(request: BalanceJsonRpcRequest): Promise<unknown>;',
+    ],
+    [
+      'balanceJsonRpcSource',
+      'response = await transport.exchange(request, execution.signal);',
+      'response = await Promise.race([transport.exchange(request, execution.signal)]);',
+    ],
+    ['balanceJsonRpcSource', 'throwIfExecutionAborted(execution);', 'void execution;'],
+    [
+      'balanceJsonRpcSource',
+      'throwIfExecutionAborted(requireExecutionContext(context));',
+      'void context;',
+    ],
+    [
+      'balanceJsonRpcSource',
+      "case 'DEADLINE':\n      throw new BalanceSyncIndexerFailure('PROVIDER_TIMEOUT');",
+      "case 'DEADLINE':\n      throw new BalanceSyncIndexerFailure('PROVIDER_UNAVAILABLE');",
+    ],
+    [
+      'ethereumBalanceIndexerSource',
+      "const chainId = await exchangeBalanceRpc(this.transport, 'eth_chainId', [], context);",
+      "const chainId = await exchangeBalanceRpc(this.transport, 'eth_chainId', []);",
+    ],
+    [
+      'solanaBalanceIndexerSource',
+      "const genesisHash = await exchangeBalanceRpc(this.transport, 'getGenesisHash', [], context);",
+      "const genesisHash = await exchangeBalanceRpc(this.transport, 'getGenesisHash', []);",
+    ],
+    [
+      'ethereumBalanceIndexerSource',
+      "reviewed?.abortKind === 'DEADLINE' ? 'PROVIDER_TIMEOUT' : 'PROVIDER_UNAVAILABLE',",
+      "reviewed?.abortKind === 'DEADLINE' ? 'PROVIDER_UNAVAILABLE' : 'PROVIDER_UNAVAILABLE',",
+    ],
+    [
+      'solanaBalanceIndexerSource',
+      "reviewed?.abortKind === 'DEADLINE' ? 'PROVIDER_TIMEOUT' : 'PROVIDER_UNAVAILABLE',",
+      "reviewed?.abortKind === 'DEADLINE' ? 'PROVIDER_UNAVAILABLE' : 'PROVIDER_UNAVAILABLE',",
+    ],
+    [
+      'balanceSyncPortsSource',
+      'resolveActiveAddress(scope: BalanceSyncScope): Promise<unknown>;',
+      'resolveActiveAddress(scope: BalanceSyncScope, signal: AbortSignal): Promise<unknown>;',
+    ],
+    [
+      'balanceSyncPortsSource',
+      'load(scope: BalanceSyncScope): Promise<BalanceSyncCheckpoint | null>;',
+      'load(scope: BalanceSyncScope, signal: AbortSignal): Promise<BalanceSyncCheckpoint | null>;',
+    ],
+  ];
+
+  for (const [key, approved, rejected] of mutations) {
+    assert.deepEqual(
+      inspectBalanceConsumerDeploymentArtifacts(
+        mutateBalanceConsumerArtifact(key, approved, rejected),
+      ),
+      INVALID_BALANCE_CONSUMER_DEPLOYMENT,
+      `${key}: ${approved}`,
+    );
+  }
+
+  const postTransportAbortCheck = 'throwIfExecutionAborted(requireExecutionContext(context));';
+  const helper = BALANCE_CONSUMER_ARTIFACTS.balanceJsonRpcSource;
+  const postTransportAbortIndex = helper.lastIndexOf(postTransportAbortCheck);
+  assert.ok(postTransportAbortIndex >= 0);
+  assert.deepEqual(
+    inspectBalanceConsumerDeploymentArtifacts({
+      ...BALANCE_CONSUMER_ARTIFACTS,
+      balanceJsonRpcSource: `${helper.slice(0, postTransportAbortIndex)}void context;${helper.slice(
+        postTransportAbortIndex + postTransportAbortCheck.length,
+      )}`,
+    }),
+    INVALID_BALANCE_CONSUMER_DEPLOYMENT,
+  );
+
+  const agreementAbortCheck = 'requireActiveAgreementExecution(context);';
+  const coordinator = BALANCE_CONSUMER_ARTIFACTS.mainnetBalanceTwoSourceAgreementCoordinatorSource;
+  const postAgreementAbortIndex = coordinator.lastIndexOf(agreementAbortCheck);
+  assert.ok(postAgreementAbortIndex >= 0);
+  assert.deepEqual(
+    inspectBalanceConsumerDeploymentArtifacts({
+      ...BALANCE_CONSUMER_ARTIFACTS,
+      mainnetBalanceTwoSourceAgreementCoordinatorSource: `${coordinator.slice(
+        0,
+        postAgreementAbortIndex,
+      )}void context;${coordinator.slice(postAgreementAbortIndex + agreementAbortCheck.length)}`,
+    }),
+    INVALID_BALANCE_CONSUMER_DEPLOYMENT,
+  );
+
+  assert.deepEqual(
+    inspectBalanceConsumerDeploymentArtifacts({
+      ...BALANCE_CONSUMER_ARTIFACTS,
+      balanceJsonRpcSource: `${BALANCE_CONSUMER_ARTIFACTS.balanceJsonRpcSource}\nclass UnreviewedTransport implements BalanceJsonRpcTransport {}\n`,
+    }),
+    INVALID_BALANCE_CONSUMER_DEPLOYMENT,
   );
 });
 
@@ -2358,8 +2589,16 @@ test('balance-consumer artifact shape, bounds, and private brand fail closed', (
   delete missingMetadataValidator.balanceConsumerMetadataTransitionValidatorSource;
   const missingLifecycle = { ...BALANCE_CONSUMER_ARTIFACTS } as Record<string, unknown>;
   delete missingLifecycle.balanceConsumerLifecycleSource;
+  const missingConsumerService = { ...BALANCE_CONSUMER_ARTIFACTS } as Record<string, unknown>;
+  delete missingConsumerService.balanceSyncConsumerServiceSource;
+  const missingBalanceSyncPorts = { ...BALANCE_CONSUMER_ARTIFACTS } as Record<string, unknown>;
+  delete missingBalanceSyncPorts.balanceSyncPortsSource;
   const missingMainnetRouter = { ...BALANCE_CONSUMER_ARTIFACTS } as Record<string, unknown>;
   delete missingMainnetRouter.mainnetBalanceIndexerRouterSource;
+  const missingMainnetAgreementCoordinator = {
+    ...BALANCE_CONSUMER_ARTIFACTS,
+  } as Record<string, unknown>;
+  delete missingMainnetAgreementCoordinator.mainnetBalanceTwoSourceAgreementCoordinatorSource;
   const missingBalanceJsonRpc = { ...BALANCE_CONSUMER_ARTIFACTS } as Record<string, unknown>;
   delete missingBalanceJsonRpc.balanceJsonRpcSource;
   const missingEthereumIndexer = { ...BALANCE_CONSUMER_ARTIFACTS } as Record<string, unknown>;
@@ -2396,7 +2635,10 @@ test('balance-consumer artifact shape, bounds, and private brand fail closed', (
     missing,
     missingMetadataValidator,
     missingLifecycle,
+    missingConsumerService,
+    missingBalanceSyncPorts,
     missingMainnetRouter,
+    missingMainnetAgreementCoordinator,
     missingBalanceJsonRpc,
     missingEthereumIndexer,
     missingSolanaIndexer,

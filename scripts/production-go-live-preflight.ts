@@ -159,9 +159,12 @@ export interface BalanceConsumerArtifactSources {
   readonly cliModeSource: string;
   readonly runtimeSource: string;
   readonly compositionSource: string;
+  readonly balanceSyncConsumerServiceSource: string;
+  readonly balanceSyncPortsSource: string;
   readonly balanceConsumerResourceSource: string;
   readonly balanceConsumerLifecycleSource: string;
   readonly mainnetBalanceIndexerRouterSource: string;
+  readonly mainnetBalanceTwoSourceAgreementCoordinatorSource: string;
   readonly balanceJsonRpcSource: string;
   readonly ethereumBalanceIndexerSource: string;
   readonly solanaBalanceIndexerSource: string;
@@ -525,9 +528,12 @@ const BALANCE_CONSUMER_ARTIFACT_KEYS = Object.freeze([
   'cliModeSource',
   'runtimeSource',
   'compositionSource',
+  'balanceSyncConsumerServiceSource',
+  'balanceSyncPortsSource',
   'balanceConsumerResourceSource',
   'balanceConsumerLifecycleSource',
   'mainnetBalanceIndexerRouterSource',
+  'mainnetBalanceTwoSourceAgreementCoordinatorSource',
   'balanceJsonRpcSource',
   'ethereumBalanceIndexerSource',
   'solanaBalanceIndexerSource',
@@ -587,15 +593,20 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
   cliSource: '7fec5d0cc345b82ed4fb5f26e1fa7099f0cb38c246224ada7a9fe51a65d4c455',
   cliModeSource: '2b03494cb126e80f4f7af1176cb08cf13aef2d14d4bf3cb371faa6f06a7294a8',
   runtimeSource: '9eb119d5c4ed60708931bdc25b810d0f61e064d8521c3465ae4c85046480fd5b',
-  compositionSource: '3167bf5e65ffd8ff3b73f90cdb1af962261a090c7f7661f44d0973ea49320aa5',
+  compositionSource: 'ab1893fef3304c0bffdba77aa95fb5f0ddf14ea8475e5a0fa4dd7abd215170e8',
+  balanceSyncConsumerServiceSource:
+    'fc1a0ccf9418ce4e4968570873b0914c405a674b62e0b32bc15fddcfb470c6f3',
+  balanceSyncPortsSource: '542f50fb3dce002044ddd93a85553ea8d490f78c0ae370d3cea5cf4fbbc5c883',
   balanceConsumerResourceSource: 'f210defba63ab0c2379ad499c8d84d4df79a3bc23f8ea31d51e740c8b71d0118',
   balanceConsumerLifecycleSource:
     'd4313b5a5e3f50022678beda7afb8768c9426f6b361be137e4be27e8e86f3a81',
   mainnetBalanceIndexerRouterSource:
-    '5238cd82822845cc61a4d8024a72bbfae523e46a92ae17458160ab7d9698538a',
-  balanceJsonRpcSource: 'cbe7a9ba94879e138342cd7d7c39c301aa7fbfc284723057edf62257dbe58b97',
-  ethereumBalanceIndexerSource: '36e0459d90a0fc7f4010572b6f0213b0d5cc3ba8672cf5999d7ec5d6167dc380',
-  solanaBalanceIndexerSource: 'd9c20cbd5f2fbf061cc919575204ff49b11fc6f607d822abb8c8503257af1955',
+    'edb322685a88c4f01dc33bbbd4f5f000d30d756ffbfa461c645ec3acbba300d1',
+  mainnetBalanceTwoSourceAgreementCoordinatorSource:
+    'e077fdd52f8046d299d62faa2d73a576ffa082e6560d0c6409b2cea48efbfabc',
+  balanceJsonRpcSource: 'f8fdf7f1e292824a8041e37455022103b6e54720dde125bcf6e055285d1bec75',
+  ethereumBalanceIndexerSource: '96b90df15ad2dadd603ae26faa577f56180bfb20225efe7caeb1f3bff3f263ee',
+  solanaBalanceIndexerSource: 'e86eeb9db9fc3c9237f5722f526017ded541393715df26fe3bfa137ccd9b464e',
   supportedAssetRegistrySource: '025ef9ebffc0a2e676394bca110ee203274e00d0d95b5fb4fe239953d235fc54',
   walletIdentitySource: 'a22e1c8e8ce5ddcd8c2e43007c37faf82868929afe6b2806e978611d19e788dd',
   solanaTokenAccountSource: '3e853238987144873c3193b8bdf2f41dcf4baf1ff62e84941a7f7a335e316d5a',
@@ -610,7 +621,7 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
   balanceSyncWalletAddressResolverSource:
     '9d89ad5897a9ab5a7023a89819891b4e0ee090f3683d3fa7340b0a44251453f0',
   balanceConsumerConfigSource: 'bbcce014594c79f7ea76fee4dc211c8e5436947549fef54e848df5afaeb0ab14',
-  blockchainSyncIndexSource: 'ad708f554e81f8e623a68e34d468fa3b2bd50f83a778448f838c21d81ddd9431',
+  blockchainSyncIndexSource: '55cd192f09e5c507d94fd0d0647d487b561d2e1e5852351e390b9251188fdf65',
   jobEnvelopeSource: '40b070d9676fe4243c91cb49e2819c0e7cfb664ec9298e827e5d6e40b5944281',
   blockchainSyncModuleSource: 'e78aeb6ee670cd9930c66db37dd03a0cb1e2190eb6542d1470c99afff5f5c6f4',
   appModuleSource: 'fd7cecd6d535a8f854f30a1f82811f6a9a32e7c7f9f0a38bfbee6471eb30504f',
@@ -622,12 +633,12 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
   redisSessionRevocationCliSource:
     'fabc12502a15b2b8771c0f4e133bcec7a9ec3c92da389b8f677c9c10f6fa769b',
   migrationCliSource: '9155e1b10fce756188c8b9d8de201b2f82c36680fb76ee28c15923b5c7101b51',
-  balanceSyncOrchestratorSource: 'd47060a17923b52277c2f6577338599eaf7c3e28c7373a698f03575fd1255a02',
+  balanceSyncOrchestratorSource: '5ed1e4045881632291a6ab2b0c6523e7d2b5d8153e463d4a2cc7d34d6f1d809e',
   balanceSyncDomainSource: 'c6992ec597647013b09d2898e196825747f135d72c34bbcf61bc67a393df36b2',
   chainObservationPolicySource: 'ef887514b86230d1516e5a8139c94dc2b2dde06c979440bc6eb3f4df90511533',
   failClosedJobDispositionSource:
     'd49d752db7ca17513a67219af26261add92bf73433224dfd847a098f73baf833',
-  reviewedJobDispatcherSource: 'a3c122c2d96a25671d7ad4266dafa984880ccb90e133804ec9e3b257e1098418',
+  reviewedJobDispatcherSource: 'd5c922588ecc2c7eb930d2e2acc55b64167b033e9b5523fabd952cb9e50e43af',
   infrastructureConfigSource: 'ca472922050bb95bd1b7bd94e0810674e7998d90287edc2be0fce1017b9b8898',
   pinnedQueueReceiptSource: '76543f1e4b4c446eb98b85ad52ea934d7e84f8f7fedcd82f6e516a7eb45a8c56',
   sqsJobWorkerSource: '833ec8c536421751efd722c503144fc160432ffee71043f97d8711ca9fd70fc1',
@@ -2049,7 +2060,7 @@ function hasExactMainnetBalanceIndexerRouterContract(
     ) === 1 &&
     exactExecutableLineCount(
       router,
-      'return this.indexerFor(validated.networkId).readCurrent(validated);',
+      'return this.indexerFor(validated.networkId).readCurrent(validated, context);',
     ) === 1 &&
     exactExecutableLineCount(
       router,
@@ -2058,7 +2069,7 @@ function hasExactMainnetBalanceIndexerRouterContract(
     exactExecutableLineCount(router, 'const validated = frozenNullPrototype({') === 1 &&
     exactExecutableLineCount(
       router,
-      'return this.indexerFor(validated.networkId).rescanFromCheckpoint(validated);',
+      'return this.indexerFor(validated.networkId).rescanFromCheckpoint(validated, context);',
     ) === 1 &&
     !/\.readCurrent\s*\(\s*request\s*\)|\.rescanFromCheckpoint\s*\(\s*request\s*\)/u.test(router) &&
     exactExecutableLineCount(
@@ -2093,11 +2104,11 @@ function hasExactMainnetBalanceIndexerRouterContract(
     ) === 1 &&
     exactExecutableLineCount(
       router,
-      'Reflect.apply(readCurrent, receiver, [request]) as Promise<unknown>,',
+      'Reflect.apply(readCurrent, receiver, [request, context]) as Promise<unknown>,',
     ) === 1 &&
     exactExecutableLineCount(
       router,
-      'Reflect.apply(rescanFromCheckpoint, receiver, [request]) as Promise<unknown>,',
+      'Reflect.apply(rescanFromCheckpoint, receiver, [request, context]) as Promise<unknown>,',
     ) === 1 &&
     exactExecutableLineCount(
       router,
@@ -2488,12 +2499,12 @@ function hasExactBalanceAdapterDependencyContract(
     exactExecutableLineCount(solana, 'parsed = parseSolanaTokenAccount({') === 1 &&
     exactExecutableLineCount(
       solana,
-      'const selectedHeader = await this.readBlock(BigInt(slot), commitment);',
+      'const selectedHeader = await this.readBlock(BigInt(slot), commitment, context);',
     ) === 1 &&
     exactExecutableLineCount(solana, 'if (selectedHeader === null) {') === 1 &&
     exactExecutableLineCount(
       solana,
-      'const verifiedHeader = await this.readBlock(BigInt(slot), commitment);',
+      'const verifiedHeader = await this.readBlock(BigInt(slot), commitment, context);',
     ) === 1 &&
     exactExecutableLineCount(
       solana,
@@ -2530,7 +2541,11 @@ function hasDormantProviderNeutralBalanceRpcContract(
     /\b(?:fetch|setTimeout|setInterval|setImmediate|queueMicrotask)\s*\(|\b(?:process|Deno|Bun)\s*\.\s*env\b|\bimport\s*\.\s*meta\s*\.\s*env\b|\bnew\s+(?:URL|URLSearchParams|WebSocket|EventSource|Connection|[A-Za-z0-9_]*Client|[A-Za-z0-9_]*Agent)\s*\(|\b(?:http|https|dns|net|tls)\s*\.\s*[A-Za-z][A-Za-z0-9_]*\s*\(|\b(?:axios|got|request|retry|backoff)\s*\(|\b(?:client|endpoint|hostname|credential|apiKey|password|secret|rpcUrl|baseUrl|retry|backoff)\s*(?::|=)|@(?:Injectable|Module)\s*\(|\b(?:NestFactory|createApplicationContext)\b|\.(?:listen|connect)\s*\(|['"]https?:\/\//iu;
   const forbiddenImport =
     /(?:\bfrom\s+|\bimport\s*(?:\(\s*)?)['"](?:node:)?(?:dns|http|http2|https|net|tls)(?:\/[^'"]*)?['"]|(?:\bfrom\s+|\bimport\s*(?:\(\s*)?)['"](?:axios|ethers|got|superagent|undici|web3|@solana\/web3\.js)['"]/iu;
-  const expectedHelperImports = ['../../domain/balance-sync', 'node:crypto'].sort();
+  const expectedHelperImports = [
+    '../../application/ports/balance-sync.ports',
+    '../../domain/balance-sync',
+    'node:crypto',
+  ].sort();
   const expectedEthereumImports = [
     '../../../blockchain/domain/supported-asset-registry',
     '../../../wallets/domain/wallet-identity',
@@ -2548,9 +2563,10 @@ function hasDormantProviderNeutralBalanceRpcContract(
   ].sort();
   const exactImports = (source: string, expected: readonly string[]): boolean =>
     sortedTypeScriptImportTargets(source).join('\0') === expected.join('\0');
-  const helperExchangeCount = helper.split('transport.exchange(request)').length - 1;
-  const ethereumExchangeCount = ethereum.split('exchangeBalanceRpc(this.transport,').length - 1;
-  const solanaExchangeCount = solana.split('exchangeBalanceRpc(this.transport,').length - 1;
+  const helperExchangeCount =
+    helper.split('transport.exchange(request, execution.signal)').length - 1;
+  const ethereumExchangeCount = ethereum.split('exchangeBalanceRpc(').length - 1;
+  const solanaExchangeCount = solana.split('exchangeBalanceRpc(').length - 1;
   const ethereumResolverStart = ethereum.indexOf(
     'private async resolveAddress(request: BalanceIndexerReadRequest): Promise<string> {',
   );
@@ -2575,10 +2591,13 @@ function hasDormantProviderNeutralBalanceRpcContract(
     exactExecutableLineCount(helper, 'export interface BalanceJsonRpcTransport {') !== 1 ||
     exactExecutableLineCount(
       helper,
-      'exchange(request: BalanceJsonRpcRequest): Promise<unknown>;',
+      'exchange(request: BalanceJsonRpcRequest, signal: AbortSignal): Promise<unknown>;',
     ) !== 1 ||
     exactExecutableLineCount(helper, 'export async function exchangeBalanceRpc(') !== 1 ||
-    exactExecutableLineCount(helper, 'response = await transport.exchange(request);') !== 1 ||
+    exactExecutableLineCount(
+      helper,
+      'response = await transport.exchange(request, execution.signal);',
+    ) !== 1 ||
     exactExecutableLineCount(helper, 'return parseBalanceRpcResult(response, request.id);') !== 1 ||
     helperExchangeCount !== 1 ||
     exactExecutableLineCount(
@@ -2680,7 +2699,329 @@ function hasDormantProviderNeutralBalanceRpcContract(
   ];
   const forbiddenLaunchRegistration =
     /\b(?:EthereumMainnetBalanceIndexerAdapter|SolanaMainnetBalanceIndexerAdapter|MainnetBalanceIndexerRouter|BalanceJsonRpc[A-Za-z0-9_]*|balanceRpcRequest|parseBalanceRpcResult|exchangeBalanceRpc)\b|(?:balance-json-rpc|ethereum-mainnet-balance-indexer\.adapter|solana-mainnet-balance-indexer\.adapter|mainnet-balance-indexer\.router)/u;
-  return launchAndRegistrationSources.every((source) => !forbiddenLaunchRegistration.test(source));
+  const noLaunchRegistration = launchAndRegistrationSources.every(
+    (source) => !forbiddenLaunchRegistration.test(source),
+  );
+  return noLaunchRegistration;
+}
+
+function hasExactBalanceSyncRpcCancellationContract(
+  sources: BalanceConsumerArtifactSources,
+): boolean {
+  const service = sources.balanceSyncConsumerServiceSource.replace(/\r\n/gu, '\n');
+  const ports = sources.balanceSyncPortsSource.replace(/\r\n/gu, '\n');
+  const composition = sources.compositionSource.replace(/\r\n/gu, '\n');
+  const dispatcher = sources.reviewedJobDispatcherSource.replace(/\r\n/gu, '\n');
+  const orchestrator = sources.balanceSyncOrchestratorSource.replace(/\r\n/gu, '\n');
+  const router = sources.mainnetBalanceIndexerRouterSource.replace(/\r\n/gu, '\n');
+  const coordinator = sources.mainnetBalanceTwoSourceAgreementCoordinatorSource.replace(
+    /\r\n/gu,
+    '\n',
+  );
+  const helper = sources.balanceJsonRpcSource.replace(/\r\n/gu, '\n');
+  const ethereum = sources.ethereumBalanceIndexerSource.replace(/\r\n/gu, '\n');
+  const solana = sources.solanaBalanceIndexerSource.replace(/\r\n/gu, '\n');
+  const index = sources.blockchainSyncIndexSource.replace(/\r\n/gu, '\n');
+  const executionPathSources = [
+    service,
+    composition,
+    dispatcher,
+    orchestrator,
+    router,
+    coordinator,
+    helper,
+    ethereum,
+    solana,
+    index,
+  ] as const;
+  const checkpointPortStart = ports.indexOf('export interface BalanceSyncCheckpointPort {');
+  const checkpointPortEnd = ports.indexOf(
+    'export interface BalanceSyncJobPort {',
+    checkpointPortStart,
+  );
+  const resolverPortStart = ports.indexOf(
+    'export interface BalanceSyncWalletAddressResolverPort {',
+  );
+  const resolverPortEnd = ports.indexOf(
+    'export interface BalanceIndexerSourceCandidate {',
+    resolverPortStart,
+  );
+  if (
+    checkpointPortStart < 0 ||
+    checkpointPortEnd <= checkpointPortStart ||
+    resolverPortStart < 0 ||
+    resolverPortEnd <= resolverPortStart
+  ) {
+    return false;
+  }
+  const checkpointPort = ports.slice(checkpointPortStart, checkpointPortEnd);
+  const resolverPort = ports.slice(resolverPortStart, resolverPortEnd);
+
+  const coordinatorSettle = coordinator.indexOf(
+    'const [primaryResult, corroboratingResult] = await Promise.allSettled([',
+  );
+  const coordinatorPostAbort = coordinator.indexOf(
+    'requireActiveAgreementExecution(context);',
+    coordinatorSettle + 1,
+  );
+  const coordinatorStatus = coordinator.indexOf(
+    "if (primaryResult.status !== 'fulfilled' || corroboratingResult.status !== 'fulfilled') {",
+    coordinatorPostAbort,
+  );
+  const coordinatorValues = coordinator.indexOf(
+    'const primaryValue = primaryResult.value;',
+    coordinatorStatus,
+  );
+
+  const helperInitialReview = helper.indexOf('const execution = requireExecutionContext(context);');
+  const helperInitialAbort = helper.indexOf(
+    'throwIfExecutionAborted(execution);',
+    helperInitialReview,
+  );
+  const helperRequest = helper.indexOf('const request = balanceRpcRequest(method, params);');
+  const helperExchange = helper.indexOf(
+    'response = await transport.exchange(request, execution.signal);',
+  );
+  const helperCatchAbort = helper.indexOf(
+    'throwIfExecutionAborted(requireExecutionContext(context));',
+    helperExchange,
+  );
+  const helperMappedFailure = helper.indexOf(
+    'throwMappedTransportFailure(error);',
+    helperCatchAbort,
+  );
+  const helperPostAbort = helper.indexOf(
+    'throwIfExecutionAborted(requireExecutionContext(context));',
+    helperCatchAbort + 1,
+  );
+  const helperParse = helper.indexOf('return parseBalanceRpcResult(response, request.id);');
+
+  const everyAdapterRpcReceivesContext = (source: string, expectedCalls: number): boolean => {
+    let cursor = 0;
+    let calls = 0;
+    while (true) {
+      const start = source.indexOf('exchangeBalanceRpc(', cursor);
+      if (start < 0) break;
+      let depth = 0;
+      let end = -1;
+      for (let index = start + 'exchangeBalanceRpc'.length; index < source.length; index += 1) {
+        const character = source[index];
+        if (character === '(') depth += 1;
+        if (character === ')') {
+          depth -= 1;
+          if (depth === 0) {
+            end = index;
+            break;
+          }
+        }
+      }
+      if (end < 0 || !/,\s*context,?\s*\)$/u.test(source.slice(start, end + 1))) return false;
+      calls += 1;
+      cursor = end + 1;
+    }
+    return calls === expectedCalls;
+  };
+
+  return (
+    exactExecutableLineCount(
+      ports,
+      "export type BalanceSyncExecutionAbortKind = 'SHUTDOWN' | 'DEADLINE';",
+    ) === 1 &&
+    exactExecutableLineCount(ports, 'export interface BalanceSyncExecutionContext {') === 1 &&
+    exactExecutableLineCount(ports, 'readonly signal: AbortSignal;') === 2 &&
+    exactExecutableLineCount(
+      ports,
+      'const VERIFIED_BALANCE_SYNC_EXECUTION_CONTEXTS = new WeakMap<object, AbortSignal>();',
+    ) === 1 &&
+    exactExecutableLineCount(
+      ports,
+      'const VERIFIED_BALANCE_SYNC_ABORT_KINDS = new WeakMap<object, BalanceSyncExecutionAbortKind>();',
+    ) === 1 &&
+    exactExecutableLineCount(
+      ports,
+      'const context = frozenNullPrototype<BalanceSyncExecutionContext>({ signal });',
+    ) === 1 &&
+    exactExecutableLineCount(
+      ports,
+      'VERIFIED_BALANCE_SYNC_EXECUTION_CONTEXTS.set(context, signal);',
+    ) === 1 &&
+    exactExecutableLineCount(ports, 'Reflect.apply(ABORT_CONTROLLER_ABORT, controller, []);') ===
+      1 &&
+    exactExecutableLineCount(
+      ports,
+      'const signal = VERIFIED_BALANCE_SYNC_EXECUTION_CONTEXTS.get(value as object);',
+    ) === 1 &&
+    exactExecutableLineCount(
+      ports,
+      "abortKind: aborted ? (VERIFIED_BALANCE_SYNC_ABORT_KINDS.get(signal) ?? 'SHUTDOWN') : null,",
+    ) === 1 &&
+    exactExecutableLineCount(
+      ports,
+      'export const INERT_BALANCE_SYNC_EXECUTION_CONTEXT = INERT_BALANCE_SYNC_EXECUTION_OWNER.context;',
+    ) === 1 &&
+    exactExecutableLineCount(ports, 'context: BalanceSyncExecutionContext,') === 2 &&
+    !/context\s*:\s*BalanceSyncExecutionContext\s*=/u.test(ports) &&
+    exactExecutableLineCount(index, 'createBalanceSyncExecutionContext,') === 1 &&
+    exactExecutableLineCount(index, 'reviewBalanceSyncExecutionContext,') === 1 &&
+    exactExecutableLineCount(index, 'type BalanceSyncExecutionContext,') === 1 &&
+    executionPathSources.every((source) => {
+      const executable = trimmedExecutableLines(source).join('\n');
+      return (
+        !source.includes('INERT_BALANCE_SYNC_EXECUTION_CONTEXT') &&
+        !/\b(?:await|return)\s+Promise\s*\.\s*race\s*\(/u.test(executable) &&
+        !/\b(?:signal|parentSignal|runSignal|ownedExecution)\s*\.\s*reason\b/u.test(executable)
+      );
+    }) &&
+    exactExecutableLineCount(
+      service,
+      'dispatch(value: unknown, context: BalanceSyncExecutionContext): Promise<void>;',
+    ) === 1 &&
+    service.includes(
+      '/** Bounds the propagated JSON-RPC execution window, not signal-less persistence/resolution. */',
+    ) &&
+    service.includes(
+      '// This signal currently reaches balance JSON-RPC only. Checkpoint and address\n    // resolver ports remain signal-less and therefore are not bounded by this timer.',
+    ) &&
+    exactExecutableLineCount(service, 'maximumRpcWindowMs: 10_800_000,') === 1 &&
+    exactExecutableLineCount(
+      service,
+      "const minimum = key === 'maximumRpcWindowMs' ? 7_200_000 : 10;",
+    ) === 1 &&
+    exactExecutableLineCount(
+      service,
+      "const maximum = key === 'maximumRpcWindowMs' ? 21_600_000 : 60_000;",
+    ) === 1 &&
+    !service.includes('maximumJobDurationMs') &&
+    exactExecutableLineCount(service, 'const owner = createBalanceSyncExecutionContext();') === 1 &&
+    exactExecutableLineCount(
+      service,
+      "const relayShutdown = (): void => owner.abort('SHUTDOWN');",
+    ) === 1 &&
+    exactExecutableLineCount(
+      service,
+      "const deadline = setTimeout(() => owner.abort('DEADLINE'), this.policy.maximumRpcWindowMs);",
+    ) === 1 &&
+    exactExecutableLineCount(service, 'await this.dispatcher.dispatch(job, owner.context);') ===
+      1 &&
+    exactExecutableLineCount(service, 'clearTimeout(deadline);') === 1 &&
+    exactExecutableLineCount(service, 'if (listening) runSignal.remove(relayShutdown);') === 1 &&
+    exactExecutableLineCount(
+      composition,
+      'const dispatcher = new BalanceSyncJobDispatcher(async (job, context) => {',
+    ) === 1 &&
+    exactExecutableLineCount(composition, 'await orchestrator.process(job, context);') === 1 &&
+    exactExecutableLineCount(
+      dispatcher,
+      'async dispatch(value: unknown, context: BalanceSyncExecutionContext): Promise<void> {',
+    ) === 1 &&
+    exactExecutableLineCount(
+      dispatcher,
+      "if (reviewBalanceSyncExecutionContext(context) === null) return fail('JOB_HANDLER_FAILED');",
+    ) === 1 &&
+    exactExecutableLineCount(dispatcher, 'await this.handler(job, context);') === 1 &&
+    !/dispatch\s*\(\s*value\s*:\s*unknown\s*,\s*context[^)]*=/u.test(dispatcher) &&
+    exactExecutableLineCount(orchestrator, 'context: BalanceSyncExecutionContext,') === 2 &&
+    exactExecutableLineCount(
+      orchestrator,
+      'if (reviewBalanceSyncExecutionContext(context) === null) {',
+    ) === 1 &&
+    exactExecutableLineCount(
+      orchestrator,
+      'const value = await this.indexer.readCurrent(request, context);',
+    ) === 1 &&
+    exactExecutableLineCount(
+      orchestrator,
+      'value = await this.indexer.rescanFromCheckpoint(request, context);',
+    ) === 1 &&
+    exactExecutableLineCount(
+      orchestrator,
+      "if (failure?.code === 'PROVIDER_TIMEOUT' || failure?.code === 'PROVIDER_UNAVAILABLE') {",
+    ) === 1 &&
+    orchestrator.includes(
+      "if (failure?.code === 'PROVIDER_TIMEOUT' || failure?.code === 'PROVIDER_UNAVAILABLE') {\n        throw new BalanceSyncIndexerFailure(failure.code);\n      }\n      throw new BalanceSyncIndexerFailure('REORG_RECOVERY_FAILED');",
+    ) &&
+    exactExecutableLineCount(router, 'requireExecutionContext(context);') === 2 &&
+    exactExecutableLineCount(
+      router,
+      'return this.indexerFor(validated.networkId).readCurrent(validated, context);',
+    ) === 1 &&
+    exactExecutableLineCount(
+      router,
+      'return this.indexerFor(validated.networkId).rescanFromCheckpoint(validated, context);',
+    ) === 1 &&
+    exactExecutableLineCount(
+      router,
+      'Reflect.apply(readCurrent, receiver, [request, context]) as Promise<unknown>,',
+    ) === 1 &&
+    exactExecutableLineCount(
+      router,
+      'Reflect.apply(rescanFromCheckpoint, receiver, [request, context]) as Promise<unknown>,',
+    ) === 1 &&
+    coordinatorSettle >= 0 &&
+    coordinatorPostAbort > coordinatorSettle &&
+    coordinatorStatus > coordinatorPostAbort &&
+    coordinatorValues > coordinatorStatus &&
+    exactExecutableLineCount(coordinator, 'requireActiveAgreementExecution(context);') === 2 &&
+    exactExecutableLineCount(coordinator, 'primaryBinding.readCurrent(request, context),') === 1 &&
+    exactExecutableLineCount(coordinator, 'corroboratingBinding.readCurrent(request, context),') ===
+      1 &&
+    exactExecutableLineCount(
+      coordinator,
+      'Reflect.apply(capturedReader.method, capturedReader.receiver, [request, context]),',
+    ) === 1 &&
+    !/Promise\s*\.\s*all\s*\(/u.test(coordinator) &&
+    !/\.(?:reason)\b/u.test(coordinator) &&
+    exactExecutableLineCount(
+      helper,
+      'exchange(request: BalanceJsonRpcRequest, signal: AbortSignal): Promise<unknown>;',
+    ) === 1 &&
+    helper.includes(
+      'A transport must cooperatively stop and reject promptly when `signal` aborts;',
+    ) &&
+    helperInitialReview >= 0 &&
+    helperInitialAbort > helperInitialReview &&
+    helperRequest > helperInitialAbort &&
+    helperExchange > helperRequest &&
+    helperCatchAbort > helperExchange &&
+    helperMappedFailure > helperCatchAbort &&
+    helperPostAbort > helperMappedFailure &&
+    helperParse > helperPostAbort &&
+    exactExecutableLineCount(
+      helper,
+      'throwIfExecutionAborted(requireExecutionContext(context));',
+    ) === 2 &&
+    exactExecutableLineCount(helper, "case 'DEADLINE':") === 1 &&
+    exactExecutableLineCount(helper, "throw new BalanceSyncIndexerFailure('PROVIDER_TIMEOUT');") ===
+      2 &&
+    exactExecutableLineCount(helper, "case 'SHUTDOWN':") === 1 &&
+    !/implements\s+BalanceJsonRpcTransport\b/u.test(helper) &&
+    everyAdapterRpcReceivesContext(ethereum, 4) &&
+    everyAdapterRpcReceivesContext(solana, 4) &&
+    exactExecutableLineCount(ethereum, 'requireActiveExecution(context);') === 4 &&
+    exactExecutableLineCount(solana, 'requireActiveExecution(context);') === 4 &&
+    exactExecutableLineCount(
+      ethereum,
+      'const reviewed = reviewBalanceSyncExecutionContext(context);',
+    ) === 1 &&
+    exactExecutableLineCount(
+      solana,
+      'const reviewed = reviewBalanceSyncExecutionContext(context);',
+    ) === 1 &&
+    exactExecutableLineCount(
+      ethereum,
+      "reviewed?.abortKind === 'DEADLINE' ? 'PROVIDER_TIMEOUT' : 'PROVIDER_UNAVAILABLE',",
+    ) === 1 &&
+    exactExecutableLineCount(
+      solana,
+      "reviewed?.abortKind === 'DEADLINE' ? 'PROVIDER_TIMEOUT' : 'PROVIDER_UNAVAILABLE',",
+    ) === 1 &&
+    exactExecutableLineCount(
+      resolverPort,
+      'resolveActiveAddress(scope: BalanceSyncScope): Promise<unknown>;',
+    ) === 1 &&
+    !/AbortSignal|BalanceSyncExecutionContext/u.test(resolverPort) &&
+    !/AbortSignal|BalanceSyncExecutionContext/u.test(checkpointPort)
+  );
 }
 
 function hasDormantBalanceConsumerAggregateResourceContract(
@@ -5402,6 +5743,7 @@ export function inspectBalanceConsumerDeploymentArtifacts(
       hasAuthenticatedBalanceSyncFailureContract(sources) &&
       hasExactBalanceAdapterDependencyContract(sources) &&
       hasDormantProviderNeutralBalanceRpcContract(sources) &&
+      hasExactBalanceSyncRpcCancellationContract(sources) &&
       hasDormantBalanceConsumerAggregateResourceContract(sources) &&
       hasDormantBalanceConsumerLifecycleCoordinatorContract(sources) &&
       hasDormantBalanceConsumerPersistenceResourceContract(sources) &&
@@ -6043,6 +6385,20 @@ export function loadRepositoryProductionPreflightInput(
         ),
         'utf8',
       ),
+      balanceSyncConsumerServiceSource: readFileSync(
+        resolve(
+          repositoryRoot,
+          'apps/api/src/blockchain-sync/application/balance-sync-consumer.service.ts',
+        ),
+        'utf8',
+      ),
+      balanceSyncPortsSource: readFileSync(
+        resolve(
+          repositoryRoot,
+          'apps/api/src/blockchain-sync/application/ports/balance-sync.ports.ts',
+        ),
+        'utf8',
+      ),
       balanceConsumerResourceSource: readFileSync(
         resolve(
           repositoryRoot,
@@ -6061,6 +6417,13 @@ export function loadRepositoryProductionPreflightInput(
         resolve(
           repositoryRoot,
           'apps/api/src/blockchain-sync/application/mainnet-balance-indexer.router.ts',
+        ),
+        'utf8',
+      ),
+      mainnetBalanceTwoSourceAgreementCoordinatorSource: readFileSync(
+        resolve(
+          repositoryRoot,
+          'apps/api/src/blockchain-sync/application/mainnet-balance-two-source-agreement.coordinator.ts',
         ),
         'utf8',
       ),
