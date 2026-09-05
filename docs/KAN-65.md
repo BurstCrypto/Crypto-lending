@@ -35,7 +35,9 @@ The durable checkpoint, portfolio-balance, dormant wallet-address resolver, and
 dormant Ethereum/Solana transcript indexer adapters are concrete. Two additional
 source-only capsules remain deliberately unregistered: the balance-consumer
 persistence resource encloses its PostgreSQL pool and repositories behind
-checkpoint/address-resolution closures, while the balance-consumer receipt
+checkpoint/address-resolution closures. Those closures synchronously gate new
+work, track every accepted operation, and on close abort and drain cancellable
+PostgreSQL work before making a best-effort pool close. The balance-consumer receipt
 resource encloses a private SQS client behind receive, delete,
 change-visibility, and envelope-parsing closures. Both capsules are now
 referenced only by the source-only
@@ -43,15 +45,20 @@ referenced only by the source-only
 both child factories the same exact frozen infrastructure snapshot, wires their
 exact checkpoint, address-resolution, and pinned receipt ports into the inert
 application composition, and exposes only a one-shot `run(signal)` plus
-memoized `close()`. It is not exported from a barrel or referenced by a Nest
+memoized `close()`. Close has a fixed 25-second watchdog inside the envelope's
+30-second ECS `StopTimeout`; watchdog expiry is a fixed failure, never a false
+drain, while the already-started cleanup remains observed and continues. It is
+not exported from a barrel or referenced by a Nest
 module, runtime, CLI, activation path, or other launch root.
 
 The separate source-only `application/balance-sync-consumer.lifecycle.ts`
 shell accepts only that exact aggregate facade, a genuine external abort
 signal, and a narrow operator-event sink. Its one-shot `run()` bridges shutdown
 to a private signal without forwarding the caller's reason, distinguishes a
-clean stop from premature exit or run/close failure, drains the accepted run,
-and then closes the aggregate. Fixed one-field events and fixed errors prevent
+clean stop from premature exit or run/close failure, starts memoized aggregate
+close as soon as shutdown is handed to the run, and observes late run
+settlement. This lets the aggregate watchdog report a non-draining run within
+the ECS shutdown window. Fixed one-field events and fixed errors prevent
 provider, credential, address, or raw failure details from crossing the
 operator boundary. Construction adds no listener or other side effect, and the
 shell is not exported, registered, or referenced by a launch root.
@@ -95,11 +102,15 @@ snapshot, method-capture, brand, freeze, and reviewer constraints. This is
 local static assurance only; it does not activate the dormant runtime, contact
 a chain or provider, grant egress, deploy resources, or satisfy live evidence.
 
-The dormant RPC path now carries one privately branded execution context from
+The dormant balance-sync path now carries one privately branded execution context from
 each accepted consumer job through the dispatcher, composition, orchestrator,
 closed router, Ethereum or Solana adapter, shared JSON-RPC helper, and injected
-transport boundary. The same context is required for current reads and
-rescans; no production boundary may use the exported unit-test-only inert
+transport boundary, as well as through scoped wallet-address resolution and
+all four checkpoint operations. The PostgreSQL resolver and repository review
+the branded context before work, pass its exact signal into the database
+service, and review it again after the query. The same context is required for
+current reads, rescans, resolution, and persistence; no production boundary
+may use the exported unit-test-only inert
 context as a default or fallback. Abort classification is retained out of band:
 a deadline becomes `PROVIDER_TIMEOUT`, shutdown becomes
 `PROVIDER_UNAVAILABLE`, and the caller's abort reason is neither read nor
@@ -107,11 +118,28 @@ forwarded. The helper checks before transport, in its catch path, and again
 after a successful response. Its transport contract requires the same signal
 and cooperative cancellation; `Promise.race` detachment is prohibited.
 
-`maximumRpcWindowMs` is explicitly an RPC window, defaults to three hours, and
-is constrained to two through six hours. It is not a whole-job deadline. The
-checkpoint port and wallet-address resolver remain signal-less, and there is
-still no reviewed concrete transport or live evidence proving cancellation of
-connect and response-body I/O. The dormant two-source coordinator does drain
+`jobTimeoutMs` defaults to three hours and is constrained to two through six
+hours. It propagates one deadline across resolution, RPC, and checkpoint
+persistence. The database service requires a genuine abort signal, rejects use
+inside an active transaction, owns a dedicated client per cancellable query, and has a
+16-second local operation timer. Cancellation before SQL prevents a query from
+starting; cancellation after client acquisition discards with
+`client.release(error)`, awaits the exact matching pool removal and query
+settlement, and reports a fixed teardown failure if safe drain cannot be
+established. Admission closes synchronously and close is memoized before its
+private lifecycle abort. Neither this path nor the RPC path reads an abort
+reason or detaches work with `Promise.race`.
+
+Balance-consumer database settings are capped at 5 seconds for connection
+acquisition, 5 seconds for lock waits, and 15 seconds for statements. Active
+`pg` pool acquisition is not natively signal-cancellable, so an already-started
+acquisition may still settle at its configured 5-second bound before the
+facade can finish draining. The exact production dependency is `pg` 8.23.0,
+and the package lock resolves `pg-pool` 3.14.0; preflight pins both artifacts
+and these semantics. This remains local static/unit assurance: a live
+PostgreSQL socket teardown and physical shutdown exercise is still required.
+There is also still no reviewed concrete JSON-RPC transport or live evidence
+proving cancellation of connect and response-body I/O. The dormant two-source coordinator does drain
 both same-signal reads with `Promise.allSettled` and rechecks cancellation
 before inspecting fulfilled values, but it remains unapproved for financial
 use. Offline preflight byte-pins and mutation-tests these boundaries without
@@ -375,10 +403,11 @@ approved:
   consumer with a separately split metadata-only secret and a later reviewed
   exact-function database grant; the current worker task has no such secret,
   grant, or resolver binding;
-- checkpoint and wallet-address ports must gain reviewed cancellation before a
-  whole-job shutdown/deadline claim is permitted, and a concrete JSON-RPC
-  transport must prove same-signal connect and response-body cancellation with
-  no detached I/O;
+- a concrete JSON-RPC transport must prove same-signal connect and
+  response-body cancellation with no detached I/O, while a deployed
+  PostgreSQL exercise must prove the reviewed acquisition, discard, exact
+  removal, and shutdown behavior against the production-compatible server and
+  driver;
 - the source-only pinned SQS boundary must receive deployed task/IAM proof,
   source/DLQ and redrive evidence, duplicate-delivery and liveness exercises,
   and bounded-delay validation; and
@@ -391,13 +420,15 @@ indexed or that runtime/task activation, IAM, dedicated database grants, SQS,
 RPC, address decryption, monitoring, or any deployed behavior has been
 validated.
 
-The receipt and persistence capsule work was implemented and verified with
+The receipt, cancellable persistence, and bounded aggregate shutdown work was implemented and verified with
 local source/unit checks only. Adversarial aggregate tests use mocked child
-construction and in-memory capabilities. A separate compatibility test uses
+construction and in-memory capabilities, and repository/resolver tests prove
+that the exact execution context reaches the cancellable database boundary. A separate compatibility test uses
 the actual aggregate, child factories, application composition, and lifecycle
 shell while replacing only the low-level PostgreSQL pool and SQS client edges;
-it proves private cancellation reaches the pending receipt request and that
-shutdown drains before SQS-then-PostgreSQL close. These checks are not live
+it proves private cancellation reaches the pending receipt request and ordinary
+shutdown drains before SQS-then-PostgreSQL close. Separate adversarial tests
+cover the 25-second watchdog and late observed cleanup. These checks are not live
 provider, database, queue, credential, or deployment evidence. No AWS, SQS, ECS
 credential endpoint, RPC, or chain-provider call was made, and no task, IAM
 identity, dedicated balance-consumer database grant, or runtime activation was

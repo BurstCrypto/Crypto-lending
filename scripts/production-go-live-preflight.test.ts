@@ -337,6 +337,7 @@ const BALANCE_CONSUMER_ARTIFACTS = Object.freeze({
   ),
   apiPackageSource: readFileSync(resolve(__dirname, '../apps/api/package.json'), 'utf8'),
   rootPackageSource: readFileSync(resolve(__dirname, '../package.json'), 'utf8'),
+  rootPackageLockSource: readFileSync(resolve(__dirname, '../package-lock.json'), 'utf8'),
   applicationTemplateSource: APPLICATION_BASELINE,
   applicationValidatorSource: readFileSync(
     resolve(__dirname, '../infra/aws/validate-application-baseline.mjs'),
@@ -1257,6 +1258,22 @@ test('balance-consumer inspection rejects dormant aggregate lifecycle and capabi
       'if (closePromise !== undefined) return closePromise;',
       'if (closePromise !== undefined) closePromise = undefined;',
     ],
+    [
+      'balanceConsumerResourceSource',
+      'const BALANCE_SYNC_CONSUMER_SHUTDOWN_DRAIN_TIMEOUT_MS = 25_000;',
+      'const BALANCE_SYNC_CONSUMER_SHUTDOWN_DRAIN_TIMEOUT_MS = 30_000;',
+    ],
+    ['balanceConsumerResourceSource', 'closePromise = publicClose;', 'void publicClose;'],
+    [
+      'balanceConsumerResourceSource',
+      'rejectClose(new BalanceSyncConsumerResourceShutdownDrainTimeoutError());',
+      'resolveClose();',
+    ],
+    ['balanceConsumerResourceSource', 'shutdownTimeout.unref?.();', 'void shutdownTimeout;'],
+    ['balanceConsumerResourceSource', 'void cleanup.then(', 'void Promise.race([cleanup]).then('],
+    ['balanceConsumerResourceSource', 'clearWatchdog();', 'void shutdownTimeout;'],
+    ['balanceConsumerResourceSource', 'startCleanup();', 'void cleanup;'],
+    ['balanceConsumerEnvelopeSource', 'StopTimeout: 30', 'StopTimeout: 20'],
   ];
 
   for (const [key, approved, rejected] of mutations) {
@@ -1339,12 +1356,42 @@ test('balance-consumer inspection rejects dormant lifecycle coordinator drift', 
     ],
     [
       'balanceConsumerLifecycleSource',
-      "  try {\n    runOperation = Promise.resolve(reviewed.runResource(controller.signal));\n  } catch {\n    runFailed = true;\n  }\n  if (runOperation !== undefined) {\n    if (!stopRequested) recordEvent(reviewed.recordEvent, 'STARTED');",
-      "  if (!stopRequested) recordEvent(reviewed.recordEvent, 'STARTED');\n  try {\n    runOperation = Promise.resolve(reviewed.runResource(controller.signal));\n  } catch {\n    runFailed = true;\n  }\n  if (runOperation !== undefined) {",
+      'if (closeOperation !== undefined) return closeOperation;',
+      'if (closeOperation !== undefined) closeOperation = undefined;',
     ],
-    ['balanceConsumerLifecycleSource', 'if (runOperation !== undefined) {', 'if (true) {'],
-    ['balanceConsumerLifecycleSource', 'await runOperation;', 'void runOperation;'],
-    ['balanceConsumerLifecycleSource', 'prematureExit = !stopRequested;', 'prematureExit = false;'],
+    [
+      'balanceConsumerLifecycleSource',
+      'closeOperation = closeResource(reviewed.closeResource);',
+      'closeOperation = Promise.resolve(true);',
+    ],
+    [
+      'balanceConsumerLifecycleSource',
+      'void closeOperation.then(() => {',
+      'void 0 && closeOperation.then(() => {',
+    ],
+    ['balanceConsumerLifecycleSource', 'if (stopRequested) return;', 'if (false) return;'],
+    [
+      'balanceConsumerLifecycleSource',
+      'if (runHandoffComplete) void beginClose();',
+      'void runHandoffComplete;',
+    ],
+    [
+      'balanceConsumerLifecycleSource',
+      'observedRun = runOperation.then(',
+      'observedRun = Promise.resolve(); void runOperation.then(',
+    ],
+    ['balanceConsumerLifecycleSource', 'runHandoffComplete = true;', 'runHandoffComplete = false;'],
+    [
+      'balanceConsumerLifecycleSource',
+      'if (stopRequested) void beginClose();',
+      'void stopRequested;',
+    ],
+    ['balanceConsumerLifecycleSource', 'await progress;', 'await runOperation;'],
+    [
+      'balanceConsumerLifecycleSource',
+      'if (observedRun !== undefined && !runSettled) await observedRun;',
+      'void observedRun;',
+    ],
     ['balanceConsumerLifecycleSource', 'await Promise.resolve().then(close);', 'await close();'],
     [
       'balanceConsumerLifecycleSource',
@@ -1824,7 +1871,7 @@ test('balance-consumer inspection rejects provider-neutral JSON-RPC capability a
   );
 });
 
-test('balance-consumer inspection pins the RPC-only cancellation chain and remaining gaps', () => {
+test('balance-consumer inspection pins the end-to-end execution cancellation chain', () => {
   const mutations: readonly (readonly [keyof BalanceConsumerArtifactSources, string, string])[] = [
     [
       'balanceSyncPortsSource',
@@ -1843,29 +1890,26 @@ test('balance-consumer inspection pins the RPC-only cancellation chain and remai
     ],
     [
       'balanceSyncConsumerServiceSource',
-      '/** Bounds the propagated JSON-RPC execution window, not signal-less persistence/resolution. */',
-      '/** Bounds the whole job. */',
+      '/** Propagates one deadline through resolution, RPC, and checkpoint persistence. */',
+      '/** Propagates one deadline through RPC only. */',
+    ],
+    ['balanceSyncConsumerServiceSource', 'jobTimeoutMs: 10_800_000,', 'jobTimeoutMs: 3_600_000,'],
+    [
+      'balanceSyncConsumerServiceSource',
+      "const minimum = key === 'jobTimeoutMs' ? 7_200_000 : 10;",
+      "const minimum = key === 'jobTimeoutMs' ? 1 : 10;",
     ],
     [
       'balanceSyncConsumerServiceSource',
-      'maximumRpcWindowMs: 10_800_000,',
-      'maximumRpcWindowMs: 3_600_000,',
+      "const maximum = key === 'jobTimeoutMs' ? 21_600_000 : 60_000;",
+      "const maximum = key === 'jobTimeoutMs' ? 86_400_000 : 60_000;",
     ],
     [
       'balanceSyncConsumerServiceSource',
-      "const minimum = key === 'maximumRpcWindowMs' ? 7_200_000 : 10;",
-      "const minimum = key === 'maximumRpcWindowMs' ? 1 : 10;",
+      "const deadline = setTimeout(() => owner.abort('DEADLINE'), this.policy.jobTimeoutMs);",
+      "const deadline = setTimeout(() => owner.abort('SHUTDOWN'), this.policy.jobTimeoutMs);",
     ],
-    [
-      'balanceSyncConsumerServiceSource',
-      "const maximum = key === 'maximumRpcWindowMs' ? 21_600_000 : 60_000;",
-      "const maximum = key === 'maximumRpcWindowMs' ? 86_400_000 : 60_000;",
-    ],
-    [
-      'balanceSyncConsumerServiceSource',
-      "const deadline = setTimeout(() => owner.abort('DEADLINE'), this.policy.maximumRpcWindowMs);",
-      "const deadline = setTimeout(() => owner.abort('SHUTDOWN'), this.policy.maximumRpcWindowMs);",
-    ],
+    ['balanceSyncConsumerServiceSource', 'deadline.unref?.();', 'void deadline;'],
     [
       'balanceSyncConsumerServiceSource',
       'await this.dispatcher.dispatch(job, owner.context);',
@@ -1905,6 +1949,16 @@ test('balance-consumer inspection pins the RPC-only cancellation chain and remai
       'balanceSyncOrchestratorSource',
       'value = await this.indexer.rescanFromCheckpoint(request, context);',
       'value = await this.indexer.rescanFromCheckpoint(request, INERT_BALANCE_SYNC_EXECUTION_CONTEXT);',
+    ],
+    [
+      'balanceSyncOrchestratorSource',
+      'value = await this.checkpoints.load(scope, context);',
+      'value = await this.checkpoints.load(scope);',
+    ],
+    [
+      'balanceSyncOrchestratorSource',
+      '        context,\n      );\n      requireActiveExecution(context);',
+      '      );\n      requireActiveExecution(context);',
     ],
     [
       'balanceSyncOrchestratorSource',
@@ -1979,13 +2033,13 @@ test('balance-consumer inspection pins the RPC-only cancellation chain and remai
     ],
     [
       'balanceSyncPortsSource',
+      'resolveActiveAddress(\n    scope: BalanceSyncScope,\n    context: BalanceSyncExecutionContext,\n  ): Promise<unknown>;',
       'resolveActiveAddress(scope: BalanceSyncScope): Promise<unknown>;',
-      'resolveActiveAddress(scope: BalanceSyncScope, signal: AbortSignal): Promise<unknown>;',
     ],
     [
       'balanceSyncPortsSource',
+      'load(\n    scope: BalanceSyncScope,\n    context: BalanceSyncExecutionContext,\n  ): Promise<BalanceSyncCheckpoint | null>;',
       'load(scope: BalanceSyncScope): Promise<BalanceSyncCheckpoint | null>;',
-      'load(scope: BalanceSyncScope, signal: AbortSignal): Promise<BalanceSyncCheckpoint | null>;',
     ],
   ];
 
@@ -2035,6 +2089,112 @@ test('balance-consumer inspection pins the RPC-only cancellation chain and remai
     }),
     INVALID_BALANCE_CONSUMER_DEPLOYMENT,
   );
+});
+
+test('balance-consumer inspection pins cancellable PostgreSQL ownership and shutdown drain', () => {
+  const mutations: readonly (readonly [keyof BalanceConsumerArtifactSources, string, string])[] = [
+    [
+      'postgresServiceSource',
+      'const CANCELLABLE_QUERY_TIMEOUT_MS = 16_000;',
+      'const CANCELLABLE_QUERY_TIMEOUT_MS = 60_000;',
+    ],
+    [
+      'postgresServiceSource',
+      'if (reviewAbortSignal(signal) === null) {',
+      'if (signal === null) {',
+    ],
+    ['postgresServiceSource', 'if (!this.cancellableQueryAdmissionOpen) {', 'if (false) {'],
+    ['postgresServiceSource', 'this.cancellableQueryOperations.add(gate);', 'void gate;'],
+    [
+      'postgresServiceSource',
+      'this.cancellableQueryAdmissionOpen = false;',
+      'this.cancellableQueryAdmissionOpen = true;',
+    ],
+    [
+      'postgresServiceSource',
+      'this.cancellableQueryClosePromise = closePromise;',
+      'void closePromise;',
+    ],
+    [
+      'postgresServiceSource',
+      'Reflect.apply(ABORT_CONTROLLER_ABORT, this.cancellableQueryController, []);',
+      "Reflect.apply(ABORT_CONTROLLER_ABORT, this.cancellableQueryController, ['shutdown']);",
+    ],
+    ['postgresServiceSource', 'client.release(fixedError);', 'client.release();'],
+    ['postgresServiceSource', '.then(() => acquiredClient.end())', '.then(() => undefined)'],
+    [
+      'postgresServiceSource',
+      'if (removed !== client || !listening) return;',
+      'if (!listening) return;',
+    ],
+    [
+      'postgresServiceSource',
+      'const teardownFailure = (await Promise.allSettled([querySettlement, teardown])).find(',
+      'const teardownFailure = (await Promise.all([querySettlement, teardown])).find(',
+    ],
+    ['postgresServiceSource', 'timeout.unref?.();', 'void timeout;'],
+    ['postgresServiceSource', 'clearTimeout(timeout);', 'void timeout;'],
+    [
+      'balanceSyncCheckpointRepositorySource',
+      'this.postgres.queryWithCancellation<CheckpointRow>(',
+      'this.postgres.query<CheckpointRow>(',
+    ],
+    [
+      'balanceSyncCheckpointRepositorySource',
+      '      activeExecutionSignal(context);\n      if (result.rows.length === 0)',
+      '      if (result.rows.length === 0)',
+    ],
+    [
+      'balanceSyncWalletAddressResolverSource',
+      'this.postgres.queryWithCancellation<ResolvedAddressRow>(',
+      'this.postgres.query<ResolvedAddressRow>(',
+    ],
+    ['balanceConsumerPersistenceResourceSource', 'operationGates.add(gate);', 'void gate;'],
+    [
+      'balanceConsumerPersistenceResourceSource',
+      'postgresDrain = resourcePostgres.closeCancellableQueries();',
+      'postgresDrain = Promise.resolve();',
+    ],
+    [
+      'balanceConsumerPersistenceResourceSource',
+      'void Promise.allSettled([postgresDrain, drainOperations()])',
+      'void Promise.all([postgresDrain, drainOperations()])',
+    ],
+    ['infrastructureConfigSource', 'connectionTimeoutMs: 5_000,', 'connectionTimeoutMs: 60_000,'],
+    ['infrastructureConfigSource', 'lockTimeoutMs: 5_000,', 'lockTimeoutMs: 60_000,'],
+    ['infrastructureConfigSource', 'statementTimeoutMs: 15_000,', 'statementTimeoutMs: 300_000,'],
+    ['apiPackageSource', '"pg": "8.23.0"', '"pg": "^8.23.0"'],
+    [
+      'rootPackageLockSource',
+      '"node_modules/pg": {\n      "version": "8.23.0",',
+      '"node_modules/pg": {\n      "version": "8.22.0",',
+    ],
+    [
+      'rootPackageLockSource',
+      '"node_modules/pg-pool": {\n      "version": "3.14.0",',
+      '"node_modules/pg-pool": {\n      "version": "3.13.0",',
+    ],
+  ];
+
+  for (const [key, approved, rejected] of mutations) {
+    assert.deepEqual(
+      inspectBalanceConsumerDeploymentArtifacts(
+        mutateBalanceConsumerArtifact(key, approved, rejected),
+      ),
+      INVALID_BALANCE_CONSUMER_DEPLOYMENT,
+      `${key}: ${approved}`,
+    );
+  }
+
+  for (const injected of ['void Promise.race([]);', 'void signal.reason;']) {
+    assert.deepEqual(
+      inspectBalanceConsumerDeploymentArtifacts({
+        ...BALANCE_CONSUMER_ARTIFACTS,
+        postgresServiceSource: `${BALANCE_CONSUMER_ARTIFACTS.postgresServiceSource}\n${injected}\n`,
+      }),
+      INVALID_BALANCE_CONSUMER_DEPLOYMENT,
+    );
+  }
 });
 
 test('balance-consumer inspection brands and freezes only the exact dormant local contract', () => {
@@ -2116,14 +2276,14 @@ test('balance-consumer inspection fails closed for drift in every reviewed artif
     [
       'persistence narrow checkpoint facade',
       'balanceConsumerPersistenceResourceSource',
-      'load: (scope) => whileOpen(() => checkpointRepository.load(scope)),',
+      'load: (scope, context) => whileOpen(() => checkpointRepository.load(scope, context)),',
       'query: (text) => postgres.query(text),',
     ],
     [
       'persistence close memoization',
       'balanceConsumerPersistenceResourceSource',
-      'closePromise ??= closePool(resourcePool, () => new BalanceConsumerPersistenceCloseError());',
-      'closePromise = closePool(resourcePool, () => new BalanceConsumerPersistenceCloseError());',
+      'if (closePromise !== undefined) return closePromise;',
+      'void closePromise;',
     ],
     [
       'persistence immutable database snapshot',
@@ -2334,6 +2494,12 @@ test('balance-consumer inspection fails closed for drift in every reviewed artif
       'rootPackageSource',
       'node infra/aws/validate-database-migration-task.mjs && node infra/postgres/validate-bootstrap-principals.mjs',
       'node infra/aws/validate-database-migration-task.mjs',
+    ],
+    [
+      'PostgreSQL pool lock',
+      'rootPackageLockSource',
+      '"node_modules/pg-pool": {\n      "version": "3.14.0",',
+      '"node_modules/pg-pool": {\n      "version": "3.13.0",',
     ],
     [
       'application task graph',
@@ -2626,6 +2792,10 @@ test('balance-consumer artifact shape, bounds, and private brand fail closed', (
     ...BALANCE_CONSUMER_ARTIFACTS,
     activationSource: 'x'.repeat(256 * 1024 + 1),
   };
+  const oversizedPackageLock = {
+    ...BALANCE_CONSUMER_ARTIFACTS,
+    rootPackageLockSource: 'x'.repeat(768 * 1024 + 1),
+  };
   const oversizedTotal = Object.fromEntries(
     Object.keys(BALANCE_CONSUMER_ARTIFACTS).map((key) => [key, 'x'.repeat(80 * 1024)]),
   );
@@ -2650,6 +2820,7 @@ test('balance-consumer artifact shape, bounds, and private brand fail closed', (
     accessor,
     withSymbol,
     oversized,
+    oversizedPackageLock,
     oversizedTotal,
     new Proxy(BALANCE_CONSUMER_ARTIFACTS, {
       ownKeys() {

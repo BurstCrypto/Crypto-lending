@@ -202,6 +202,7 @@ export interface BalanceConsumerArtifactSources {
   readonly sqsTokensSource: string;
   readonly apiPackageSource: string;
   readonly rootPackageSource: string;
+  readonly rootPackageLockSource: string;
   readonly applicationTemplateSource: string;
   readonly applicationValidatorSource: string;
   readonly workloadTemplateSource: string;
@@ -571,6 +572,7 @@ const BALANCE_CONSUMER_ARTIFACT_KEYS = Object.freeze([
   'sqsTokensSource',
   'apiPackageSource',
   'rootPackageSource',
+  'rootPackageLockSource',
   'applicationTemplateSource',
   'applicationValidatorSource',
   'workloadTemplateSource',
@@ -595,31 +597,31 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
   runtimeSource: '9eb119d5c4ed60708931bdc25b810d0f61e064d8521c3465ae4c85046480fd5b',
   compositionSource: 'ab1893fef3304c0bffdba77aa95fb5f0ddf14ea8475e5a0fa4dd7abd215170e8',
   balanceSyncConsumerServiceSource:
-    'fc1a0ccf9418ce4e4968570873b0914c405a674b62e0b32bc15fddcfb470c6f3',
-  balanceSyncPortsSource: '542f50fb3dce002044ddd93a85553ea8d490f78c0ae370d3cea5cf4fbbc5c883',
-  balanceConsumerResourceSource: 'f210defba63ab0c2379ad499c8d84d4df79a3bc23f8ea31d51e740c8b71d0118',
+    'f3d43d2dc66b501c2354a6bce58f899049dac399e72bafd4ea1405bbe0eb507e',
+  balanceSyncPortsSource: '1d671d46ec39d0d8317d486924e0b9da07ae54f769f789492ad7e6d36e2f6c13',
+  balanceConsumerResourceSource: '909a6296eec09501f2147c69da02c68e8b534440b0fc14314ed82a4630d7c8c5',
   balanceConsumerLifecycleSource:
-    'd4313b5a5e3f50022678beda7afb8768c9426f6b361be137e4be27e8e86f3a81',
+    'd2d5d946456e89bf7698f874aacc2f5e79558f3a76d82aea2f74e3b2e29bcd52',
   mainnetBalanceIndexerRouterSource:
     'edb322685a88c4f01dc33bbbd4f5f000d30d756ffbfa461c645ec3acbba300d1',
   mainnetBalanceTwoSourceAgreementCoordinatorSource:
     'e077fdd52f8046d299d62faa2d73a576ffa082e6560d0c6409b2cea48efbfabc',
   balanceJsonRpcSource: 'f8fdf7f1e292824a8041e37455022103b6e54720dde125bcf6e055285d1bec75',
-  ethereumBalanceIndexerSource: '96b90df15ad2dadd603ae26faa577f56180bfb20225efe7caeb1f3bff3f263ee',
-  solanaBalanceIndexerSource: 'e86eeb9db9fc3c9237f5722f526017ded541393715df26fe3bfa137ccd9b464e',
+  ethereumBalanceIndexerSource: 'cdd60744549c6808cecc3a1bd1ab3668221ac86d4ba34177213fd15824938012',
+  solanaBalanceIndexerSource: '34543ab41660c02beb8810fecae806eb06ab5684d4df7d90ed685b83609d389b',
   supportedAssetRegistrySource: '025ef9ebffc0a2e676394bca110ee203274e00d0d95b5fb4fe239953d235fc54',
   walletIdentitySource: 'a22e1c8e8ce5ddcd8c2e43007c37faf82868929afe6b2806e978611d19e788dd',
   solanaTokenAccountSource: '3e853238987144873c3193b8bdf2f41dcf4baf1ff62e84941a7f7a335e316d5a',
   balanceConsumerPersistenceResourceSource:
-    'e95c1ce138f15202e0e181ff31fe164fa22d61e2eaa642a32ea81865a28ff27d',
+    '4b512084bae840afa187a898b914ff33923976056dda8537f411b583d72f84d3',
   balanceConsumerSqsReceiptResourceSource:
     '470dc9f137b0231d96996379a04dffa96de99176270edefd0fbf98a5250f3a60',
   runtimePostgresPoolSource: 'd15b4a0604cda0bcc9d8df7f597863e42c4ef573ba8ed4362386cd2beaa1f823',
-  postgresServiceSource: 'fd1cf4fa1ea8d2fc1d5219a474f88b8577c9fddaa4c0bfa979a1df202b9e2a11',
+  postgresServiceSource: 'c82f1c6807056eafcb88f9bf0ea9c4d1265b33f86222090e8946f06e05281d1a',
   balanceSyncCheckpointRepositorySource:
-    'ba84cf9c09ad65f4bd73fdbc0367090b34a0e3ea2f9c722ffb52cf75c29419bd',
+    '177a87c54235a007b4724e98e33700bf768091c432d4eb2ace24412bea23560c',
   balanceSyncWalletAddressResolverSource:
-    '9d89ad5897a9ab5a7023a89819891b4e0ee090f3683d3fa7340b0a44251453f0',
+    '2ddf22caa5d84a0d6d0147c68482b04f809555ca5f772e103fc9758c7083927a',
   balanceConsumerConfigSource: 'bbcce014594c79f7ea76fee4dc211c8e5436947549fef54e848df5afaeb0ab14',
   blockchainSyncIndexSource: '55cd192f09e5c507d94fd0d0647d487b561d2e1e5852351e390b9251188fdf65',
   jobEnvelopeSource: '40b070d9676fe4243c91cb49e2819c0e7cfb664ec9298e827e5d6e40b5944281',
@@ -633,21 +635,22 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
   redisSessionRevocationCliSource:
     'fabc12502a15b2b8771c0f4e133bcec7a9ec3c92da389b8f677c9c10f6fa769b',
   migrationCliSource: '9155e1b10fce756188c8b9d8de201b2f82c36680fb76ee28c15923b5c7101b51',
-  balanceSyncOrchestratorSource: '5ed1e4045881632291a6ab2b0c6523e7d2b5d8153e463d4a2cc7d34d6f1d809e',
+  balanceSyncOrchestratorSource: '9e47a337a511ba6d3306de440b1f491983559fac16addc2bbdeb270b4c229be9',
   balanceSyncDomainSource: 'c6992ec597647013b09d2898e196825747f135d72c34bbcf61bc67a393df36b2',
   chainObservationPolicySource: 'ef887514b86230d1516e5a8139c94dc2b2dde06c979440bc6eb3f4df90511533',
   failClosedJobDispositionSource:
     'd49d752db7ca17513a67219af26261add92bf73433224dfd847a098f73baf833',
   reviewedJobDispatcherSource: 'd5c922588ecc2c7eb930d2e2acc55b64167b033e9b5523fabd952cb9e50e43af',
-  infrastructureConfigSource: 'ca472922050bb95bd1b7bd94e0810674e7998d90287edc2be0fce1017b9b8898',
+  infrastructureConfigSource: 'fb1f6639a330d6a07db1d82434559356a4707a6550848d75397a1ff5e6a3fd10',
   pinnedQueueReceiptSource: '76543f1e4b4c446eb98b85ad52ea934d7e84f8f7fedcd82f6e516a7eb45a8c56',
   sqsJobWorkerSource: '833ec8c536421751efd722c503144fc160432ffee71043f97d8711ca9fd70fc1',
   observabilitySource: 'cc451c75a65c8651161ae6c2bd10b25fc290c4ca81818ceeb16bbbec64fff18b',
   sqsServiceSource: '2abb5d6592858be750263200fdd8b17a3ad15e0ee3ad5ca8fe14e36b5ac46d13',
   sqsModuleSource: 'dc958100bd372500a9428c28cc6219a4cb00db61314a63478368d0b0cf95221b',
   sqsTokensSource: REVIEWED_SQS_TOKENS_SOURCE_SHA256,
-  apiPackageSource: '28b9f69d1cf3cf1d16ee76ba6a4afd4881df9afb205c010e6512b0c3633c0c9c',
+  apiPackageSource: 'c911e7171be6ff64908d1c15fc1d240f51ace8e8b90d6bcad4c605c994439774',
   rootPackageSource: '1a2c762fe9278975a123073be69b7dc332b547e348ecbb71303233da7ebac8fd',
+  rootPackageLockSource: 'ac745baf70f2e70b3ba779612f0a3cc2b10692860a47c54c927a1e4805b2e6a6',
   applicationTemplateSource: '7fa270567d03d78a833e40cc0524c968c61f00fd43df877e5e0dfdd9ea1a07be',
   applicationValidatorSource: '0b80e3896627857740b18c78a609162e13ebbfd940b483428b654e780b62f112',
   workloadTemplateSource: '4c74c98e73635df30570dfe1e726b41cb6f62832f0bfc2e43dcd087d384b78de',
@@ -669,6 +672,7 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
     '56e219a54c8deeb08b287098915b78ec777303fa2df8bb076e046e26bbf4ce8c',
 } satisfies Readonly<Record<keyof BalanceConsumerArtifactSources, string>>);
 const MAX_BALANCE_CONSUMER_ARTIFACT_BYTES = 256 * 1024;
+const MAX_BALANCE_CONSUMER_PACKAGE_LOCK_BYTES = 768 * 1024;
 const MAX_BALANCE_CONSUMER_TOTAL_BYTES = 2 * 1024 * 1024;
 const NON_PRODUCTION_ENVIRONMENT_ALLOWED_PATTERN = "'^(dev|test|qa|sandbox|staging)(-[a-z0-9]+)*$'";
 const PRODUCTION_AWARE_ENVIRONMENT_PATTERN_SOURCE =
@@ -1817,7 +1821,11 @@ function snapshotBalanceConsumerArtifactSources(
       return null;
     }
     const bytes = Buffer.byteLength(descriptor.value, 'utf8');
-    if (bytes > MAX_BALANCE_CONSUMER_ARTIFACT_BYTES) return null;
+    const maximumBytes =
+      key === 'rootPackageLockSource'
+        ? MAX_BALANCE_CONSUMER_PACKAGE_LOCK_BYTES
+        : MAX_BALANCE_CONSUMER_ARTIFACT_BYTES;
+    if (bytes > maximumBytes) return null;
     totalBytes += bytes;
     if (totalBytes > MAX_BALANCE_CONSUMER_TOTAL_BYTES) return null;
     snapshot[key] = descriptor.value;
@@ -1832,6 +1840,53 @@ function parsedPackageScripts(source: string): Record<string, unknown> | null {
     return manifest.scripts;
   } catch {
     return null;
+  }
+}
+
+function hasExactPostgresCancellationDependencyLock(
+  apiPackageSource: string,
+  rootPackageLockSource: string,
+): boolean {
+  try {
+    const apiPackage = JSON.parse(apiPackageSource) as unknown;
+    const packageLock = JSON.parse(rootPackageLockSource) as unknown;
+    if (!isRecord(apiPackage) || !isRecord(apiPackage.dependencies) || !isRecord(packageLock)) {
+      return false;
+    }
+    if (apiPackage.dependencies.pg !== '8.23.0' || packageLock.lockfileVersion !== 3) {
+      return false;
+    }
+    const packages = packageLock.packages;
+    if (!isRecord(packages)) return false;
+    const workspace = packages['apps/api'];
+    const pg = packages['node_modules/pg'];
+    const pool = packages['node_modules/pg-pool'];
+    if (
+      !isRecord(workspace) ||
+      !isRecord(workspace.dependencies) ||
+      workspace.dependencies.pg !== '8.23.0' ||
+      !isRecord(pg) ||
+      pg.version !== '8.23.0' ||
+      pg.resolved !== 'https://registry.npmjs.org/pg/-/pg-8.23.0.tgz' ||
+      typeof pg.integrity !== 'string' ||
+      !isRecord(pg.dependencies) ||
+      pg.dependencies['pg-pool'] !== '^3.14.0' ||
+      !isRecord(pool) ||
+      pool.version !== '3.14.0' ||
+      pool.resolved !== 'https://registry.npmjs.org/pg-pool/-/pg-pool-3.14.0.tgz' ||
+      typeof pool.integrity !== 'string'
+    ) {
+      return false;
+    }
+    const packageKeys = Object.keys(packages);
+    return (
+      packageKeys.filter((key) => /(?:^|\/)node_modules\/pg$/u.test(key)).join('|') ===
+        'node_modules/pg' &&
+      packageKeys.filter((key) => /(?:^|\/)node_modules\/pg-pool$/u.test(key)).join('|') ===
+        'node_modules/pg-pool'
+    );
+  } catch {
+    return false;
   }
 }
 
@@ -2146,9 +2201,7 @@ function hasAuthenticatedBalanceSyncFailureContract(
     /instanceof\s+(?:BalanceSyncIndexerFailure|BalanceSyncOrchestratorError)\b/u;
 
   const adapterContract = (source: string): boolean => {
-    const resolverStart = source.indexOf(
-      'private async resolveAddress(request: BalanceIndexerReadRequest): Promise<string> {',
-    );
+    const resolverStart = source.indexOf('private async resolveAddress(\n');
     const resolverEnd = source.indexOf('private async readBlock(', resolverStart);
     const resolver = source.slice(resolverStart, resolverEnd);
     return (
@@ -2162,7 +2215,12 @@ function hasAuthenticatedBalanceSyncFailureContract(
       exactExecutableLineCount(source, 'reviewed.code,') === 1 &&
       exactExecutableLineCount(source, ': { retryAfterSeconds: reviewed.retryAfterSeconds },') ===
         1 &&
-      exactExecutableLineCount(resolver, '} catch {') === 1 &&
+      exactExecutableLineCount(resolver, '} catch {') === 2 &&
+      exactExecutableLineCount(resolver, 'requireActiveExecution(context);') === 3 &&
+      exactExecutableLineCount(
+        resolver,
+        "throw new BalanceSyncIndexerFailure('PROVIDER_UNAVAILABLE');",
+      ) === 1 &&
       exactExecutableLineCount(
         resolver,
         "throw new BalanceSyncIndexerFailure('PROVIDER_INVALID_DATA');",
@@ -2513,7 +2571,7 @@ function hasExactBalanceAdapterDependencyContract(
     exactExecutableLineCount(
       solana,
       "throw new BalanceSyncIndexerFailure('PROVIDER_UNAVAILABLE');",
-    ) === 2 &&
+    ) === 3 &&
     exactExecutableLineCount(
       solana,
       'function sameBlockHeader(left: SolanaBlockHeader, right: SolanaBlockHeader): boolean {',
@@ -2524,7 +2582,7 @@ function hasExactBalanceAdapterDependencyContract(
     exactExecutableLineCount(solana, 'left.parentHash === right.parentHash') === 1 &&
     exactExecutableLineCount(solana, 'header: verifiedHeader,') === 1 &&
     exactExecutableLineCount(ethereum, 'return parseEvmWalletAddress(value);') === 1 &&
-    exactExecutableLineCount(solana, 'return parseSolanaWalletAddress(') === 1 &&
+    exactExecutableLineCount(solana, 'return parseSolanaWalletAddress(value);') === 2 &&
     launchSources.every((source) => !futureChainLaunchBinding.test(source))
   );
 }
@@ -2567,13 +2625,9 @@ function hasDormantProviderNeutralBalanceRpcContract(
     helper.split('transport.exchange(request, execution.signal)').length - 1;
   const ethereumExchangeCount = ethereum.split('exchangeBalanceRpc(').length - 1;
   const solanaExchangeCount = solana.split('exchangeBalanceRpc(').length - 1;
-  const ethereumResolverStart = ethereum.indexOf(
-    'private async resolveAddress(request: BalanceIndexerReadRequest): Promise<string> {',
-  );
+  const ethereumResolverStart = ethereum.indexOf('private async resolveAddress(\n');
   const ethereumResolverEnd = ethereum.indexOf('private async readBlock(', ethereumResolverStart);
-  const solanaResolverStart = solana.indexOf(
-    'private async resolveAddress(request: BalanceIndexerReadRequest): Promise<string> {',
-  );
+  const solanaResolverStart = solana.indexOf('private async resolveAddress(\n');
   const solanaResolverEnd = solana.indexOf('private async readBlock(', solanaResolverStart);
   const ethereumResolver = ethereum.slice(ethereumResolverStart, ethereumResolverEnd);
   const solanaResolver = solana.slice(solanaResolverStart, solanaResolverEnd);
@@ -2624,10 +2678,14 @@ function hasDormantProviderNeutralBalanceRpcContract(
     exactExecutableLineCount(ethereumResolver, 'accountId: request.accountId,') !== 1 ||
     exactExecutableLineCount(ethereumResolver, 'walletId: request.walletId,') !== 1 ||
     exactExecutableLineCount(ethereumResolver, 'networkId: ETHEREUM_MAINNET_NETWORK_ID,') !== 1 ||
+    exactExecutableLineCount(ethereumResolver, 'context: BalanceSyncExecutionContext,') !== 1 ||
+    exactExecutableLineCount(ethereumResolver, 'context,') !== 1 ||
     exactExecutableLineCount(solanaResolver, 'Object.freeze({') !== 1 ||
     exactExecutableLineCount(solanaResolver, 'accountId: request.accountId,') !== 1 ||
     exactExecutableLineCount(solanaResolver, 'walletId: request.walletId,') !== 1 ||
     exactExecutableLineCount(solanaResolver, 'networkId: SOLANA_MAINNET_NETWORK_ID,') !== 1 ||
+    exactExecutableLineCount(solanaResolver, 'context: BalanceSyncExecutionContext,') !== 1 ||
+    exactExecutableLineCount(solanaResolver, 'context,') !== 1 ||
     /resolveActiveAddress\s*\(\s*request\s*\)/u.test(ethereumResolver) ||
     /resolveActiveAddress\s*\(\s*request\s*\)/u.test(solanaResolver) ||
     /\.exchange\s*\(/u.test(ethereum) ||
@@ -2705,7 +2763,7 @@ function hasDormantProviderNeutralBalanceRpcContract(
   return noLaunchRegistration;
 }
 
-function hasExactBalanceSyncRpcCancellationContract(
+function hasExactBalanceSyncExecutionCancellationContract(
   sources: BalanceConsumerArtifactSources,
 ): boolean {
   const service = sources.balanceSyncConsumerServiceSource.replace(/\r\n/gu, '\n');
@@ -2721,6 +2779,19 @@ function hasExactBalanceSyncRpcCancellationContract(
   const helper = sources.balanceJsonRpcSource.replace(/\r\n/gu, '\n');
   const ethereum = sources.ethereumBalanceIndexerSource.replace(/\r\n/gu, '\n');
   const solana = sources.solanaBalanceIndexerSource.replace(/\r\n/gu, '\n');
+  const postgresService = sources.postgresServiceSource.replace(/\r\n/gu, '\n');
+  const checkpointRepository = sources.balanceSyncCheckpointRepositorySource.replace(
+    /\r\n/gu,
+    '\n',
+  );
+  const walletAddressResolver = sources.balanceSyncWalletAddressResolverSource.replace(
+    /\r\n/gu,
+    '\n',
+  );
+  const persistenceResource = sources.balanceConsumerPersistenceResourceSource.replace(
+    /\r\n/gu,
+    '\n',
+  );
   const index = sources.blockchainSyncIndexSource.replace(/\r\n/gu, '\n');
   const executionPathSources = [
     service,
@@ -2733,6 +2804,10 @@ function hasExactBalanceSyncRpcCancellationContract(
     ethereum,
     solana,
     index,
+    postgresService,
+    checkpointRepository,
+    walletAddressResolver,
+    persistenceResource,
   ] as const;
   const checkpointPortStart = ports.indexOf('export interface BalanceSyncCheckpointPort {');
   const checkpointPortEnd = ports.indexOf(
@@ -2859,7 +2934,7 @@ function hasExactBalanceSyncRpcCancellationContract(
       ports,
       'export const INERT_BALANCE_SYNC_EXECUTION_CONTEXT = INERT_BALANCE_SYNC_EXECUTION_OWNER.context;',
     ) === 1 &&
-    exactExecutableLineCount(ports, 'context: BalanceSyncExecutionContext,') === 2 &&
+    exactExecutableLineCount(ports, 'context: BalanceSyncExecutionContext,') === 7 &&
     !/context\s*:\s*BalanceSyncExecutionContext\s*=/u.test(ports) &&
     exactExecutableLineCount(index, 'createBalanceSyncExecutionContext,') === 1 &&
     exactExecutableLineCount(index, 'reviewBalanceSyncExecutionContext,') === 1 &&
@@ -2877,21 +2952,18 @@ function hasExactBalanceSyncRpcCancellationContract(
       'dispatch(value: unknown, context: BalanceSyncExecutionContext): Promise<void>;',
     ) === 1 &&
     service.includes(
-      '/** Bounds the propagated JSON-RPC execution window, not signal-less persistence/resolution. */',
+      '/** Propagates one deadline through resolution, RPC, and checkpoint persistence. */',
     ) &&
-    service.includes(
-      '// This signal currently reaches balance JSON-RPC only. Checkpoint and address\n    // resolver ports remain signal-less and therefore are not bounded by this timer.',
-    ) &&
-    exactExecutableLineCount(service, 'maximumRpcWindowMs: 10_800_000,') === 1 &&
+    exactExecutableLineCount(service, 'jobTimeoutMs: 10_800_000,') === 1 &&
     exactExecutableLineCount(
       service,
-      "const minimum = key === 'maximumRpcWindowMs' ? 7_200_000 : 10;",
+      "const minimum = key === 'jobTimeoutMs' ? 7_200_000 : 10;",
     ) === 1 &&
     exactExecutableLineCount(
       service,
-      "const maximum = key === 'maximumRpcWindowMs' ? 21_600_000 : 60_000;",
+      "const maximum = key === 'jobTimeoutMs' ? 21_600_000 : 60_000;",
     ) === 1 &&
-    !service.includes('maximumJobDurationMs') &&
+    !service.includes('maximumRpcWindowMs') &&
     exactExecutableLineCount(service, 'const owner = createBalanceSyncExecutionContext();') === 1 &&
     exactExecutableLineCount(
       service,
@@ -2899,8 +2971,9 @@ function hasExactBalanceSyncRpcCancellationContract(
     ) === 1 &&
     exactExecutableLineCount(
       service,
-      "const deadline = setTimeout(() => owner.abort('DEADLINE'), this.policy.maximumRpcWindowMs);",
+      "const deadline = setTimeout(() => owner.abort('DEADLINE'), this.policy.jobTimeoutMs);",
     ) === 1 &&
+    exactExecutableLineCount(service, 'deadline.unref?.();') === 1 &&
     exactExecutableLineCount(service, 'await this.dispatcher.dispatch(job, owner.context);') ===
       1 &&
     exactExecutableLineCount(service, 'clearTimeout(deadline);') === 1 &&
@@ -2920,11 +2993,16 @@ function hasExactBalanceSyncRpcCancellationContract(
     ) === 1 &&
     exactExecutableLineCount(dispatcher, 'await this.handler(job, context);') === 1 &&
     !/dispatch\s*\(\s*value\s*:\s*unknown\s*,\s*context[^)]*=/u.test(dispatcher) &&
-    exactExecutableLineCount(orchestrator, 'context: BalanceSyncExecutionContext,') === 2 &&
+    exactExecutableLineCount(orchestrator, 'context: BalanceSyncExecutionContext,') === 6 &&
     exactExecutableLineCount(
       orchestrator,
-      'if (reviewBalanceSyncExecutionContext(context) === null) {',
+      'const reviewed = reviewBalanceSyncExecutionContext(context);',
     ) === 1 &&
+    exactExecutableLineCount(
+      orchestrator,
+      "if (reviewed === null) throw orchestratorError('INVALID_BALANCE_SYNC_JOB');",
+    ) === 1 &&
+    exactExecutableLineCount(orchestrator, 'requireActiveExecution(context);') === 28 &&
     exactExecutableLineCount(
       orchestrator,
       'const value = await this.indexer.readCurrent(request, context);',
@@ -2933,6 +3011,17 @@ function hasExactBalanceSyncRpcCancellationContract(
       orchestrator,
       'value = await this.indexer.rescanFromCheckpoint(request, context);',
     ) === 1 &&
+    exactExecutableLineCount(
+      orchestrator,
+      'value = await this.checkpoints.load(scope, context);',
+    ) === 1 &&
+    /this\.checkpoints\.upsertCurrent\([\s\S]{0,420}\n\s*context,\n\s*\);/u.test(orchestrator) &&
+    /this\.checkpoints\.replaceProvisionalAfterReorg\([\s\S]{0,420}\n\s*context,\n\s*\);/u.test(
+      orchestrator,
+    ) &&
+    /this\.checkpoints\.preserveLastGoodAndMarkStale\([\s\S]{0,420}\n\s*context,\n\s*\);/u.test(
+      orchestrator,
+    ) &&
     exactExecutableLineCount(
       orchestrator,
       "if (failure?.code === 'PROVIDER_TIMEOUT' || failure?.code === 'PROVIDER_UNAVAILABLE') {",
@@ -2997,8 +3086,8 @@ function hasExactBalanceSyncRpcCancellationContract(
     !/implements\s+BalanceJsonRpcTransport\b/u.test(helper) &&
     everyAdapterRpcReceivesContext(ethereum, 4) &&
     everyAdapterRpcReceivesContext(solana, 4) &&
-    exactExecutableLineCount(ethereum, 'requireActiveExecution(context);') === 4 &&
-    exactExecutableLineCount(solana, 'requireActiveExecution(context);') === 4 &&
+    exactExecutableLineCount(ethereum, 'requireActiveExecution(context);') === 8 &&
+    exactExecutableLineCount(solana, 'requireActiveExecution(context);') === 8 &&
     exactExecutableLineCount(
       ethereum,
       'const reviewed = reviewBalanceSyncExecutionContext(context);',
@@ -3015,12 +3104,16 @@ function hasExactBalanceSyncRpcCancellationContract(
       solana,
       "reviewed?.abortKind === 'DEADLINE' ? 'PROVIDER_TIMEOUT' : 'PROVIDER_UNAVAILABLE',",
     ) === 1 &&
-    exactExecutableLineCount(
-      resolverPort,
-      'resolveActiveAddress(scope: BalanceSyncScope): Promise<unknown>;',
-    ) === 1 &&
-    !/AbortSignal|BalanceSyncExecutionContext/u.test(resolverPort) &&
-    !/AbortSignal|BalanceSyncExecutionContext/u.test(checkpointPort)
+    exactExecutableLineCount(resolverPort, 'context: BalanceSyncExecutionContext,') === 1 &&
+    exactExecutableLineCount(checkpointPort, 'context: BalanceSyncExecutionContext,') === 4 &&
+    !/\bAbortSignal\b/u.test(resolverPort) &&
+    !/\bAbortSignal\b/u.test(checkpointPort) &&
+    /this\.addresses\.resolveActiveAddress\([\s\S]{0,300}ETHEREUM_MAINNET_NETWORK_ID,[\s\S]{0,80}\n\s*context,\n\s*\);/u.test(
+      ethereum,
+    ) &&
+    /this\.addresses\.resolveActiveAddress\([\s\S]{0,300}SOLANA_MAINNET_NETWORK_ID,[\s\S]{0,80}\n\s*context,\n\s*\);/u.test(
+      solana,
+    )
   );
 }
 
@@ -3179,13 +3272,21 @@ function hasDormantBalanceConsumerAggregateResourceContract(
     'const acceptedRunController = activeRunController;',
     acceptedRunSnapshot,
   );
-  const closePromisePublication = factory.indexOf(
-    'closePromise = new Promise<void>((resolve) => {',
+  const publicCloseConstruction = factory.indexOf(
+    'const publicClose = new Promise<void>((resolve, reject) => {',
     acceptedRunControllerSnapshot,
+  );
+  const closePromisePublication = factory.indexOf(
+    'closePromise = publicClose;',
+    publicCloseConstruction,
+  );
+  const cleanupConstruction = factory.indexOf(
+    'const cleanup = new Promise<void>((resolve) => {',
+    closePromisePublication,
   );
   const acceptedRunDrain = factory.indexOf(
     'if (acceptedRun !== undefined) await Promise.allSettled([acceptedRun]);',
-    closePromisePublication,
+    cleanupConstruction,
   );
   const sqsClose = factory.indexOf(
     'const sqsClosed = await attemptClose(resourceSqsClose);',
@@ -3199,12 +3300,26 @@ function hasDormantBalanceConsumerAggregateResourceContract(
     'throw new BalanceSyncConsumerResourceCloseError();',
     persistenceClose,
   );
+  const shutdownWatchdog = factory.indexOf(
+    'shutdownTimeout = scheduleShutdownTimeout(() => {',
+    closeFailureSanitization,
+  );
+  const shutdownTimeoutRejection = factory.indexOf(
+    'rejectClose(new BalanceSyncConsumerResourceShutdownDrainTimeoutError());',
+    shutdownWatchdog,
+  );
+  const shutdownWatchdogUnref = factory.indexOf(
+    'shutdownTimeout.unref?.();',
+    shutdownTimeoutRejection,
+  );
+  const observedCleanup = factory.indexOf('void cleanup.then(', shutdownWatchdogUnref);
+  const clearShutdownWatchdog = factory.indexOf('clearWatchdog();', observedCleanup);
   const privateCloseAbort = factory.indexOf(
     "acceptedRunController?.abort(new Error('Balance sync consumer resource closed'));",
-    closePromisePublication,
+    observedCleanup,
   );
-  const closeRelease = factory.indexOf('startClose();', privateCloseAbort);
-  const closePromiseReturn = factory.indexOf('return closePromise;', closeRelease);
+  const closeRelease = factory.indexOf('startCleanup();', privateCloseAbort);
+  const closePromiseReturn = factory.indexOf('return publicClose;', closeRelease);
   const facadeReturn = factory.indexOf(
     'return frozenNullPrototype<DormantBalanceSyncConsumerResource>({ run, close });',
     closePromiseReturn,
@@ -3249,12 +3364,19 @@ function hasDormantBalanceConsumerAggregateResourceContract(
     closeMemoizationGuard <= closeTransition ||
     acceptedRunSnapshot <= closeMemoizationGuard ||
     acceptedRunControllerSnapshot <= acceptedRunSnapshot ||
-    closePromisePublication <= acceptedRunControllerSnapshot ||
-    acceptedRunDrain <= closePromisePublication ||
+    publicCloseConstruction <= acceptedRunControllerSnapshot ||
+    closePromisePublication <= publicCloseConstruction ||
+    cleanupConstruction <= closePromisePublication ||
+    acceptedRunDrain <= cleanupConstruction ||
     sqsClose <= acceptedRunDrain ||
     persistenceClose <= sqsClose ||
     closeFailureSanitization <= persistenceClose ||
-    privateCloseAbort <= closePromisePublication ||
+    shutdownWatchdog <= closeFailureSanitization ||
+    shutdownTimeoutRejection <= shutdownWatchdog ||
+    shutdownWatchdogUnref <= shutdownTimeoutRejection ||
+    observedCleanup <= shutdownWatchdogUnref ||
+    clearShutdownWatchdog <= observedCleanup ||
+    privateCloseAbort <= observedCleanup ||
     closeRelease <= privateCloseAbort ||
     closePromiseReturn <= closeRelease ||
     facadeReturn <= closePromiseReturn ||
@@ -3299,6 +3421,11 @@ function hasDormantBalanceConsumerAggregateResourceContract(
       "readonly code = 'BALANCE_SYNC_CONSUMER_RESOURCE_CLOSE_FAILED' as const;",
       "super('Balance sync consumer resource close failed');",
       "this.name = 'BalanceSyncConsumerResourceCloseError';",
+    ],
+    [
+      "readonly code = 'BALANCE_SYNC_CONSUMER_RESOURCE_SHUTDOWN_DRAIN_TIMEOUT' as const;",
+      "super('Balance sync consumer resource shutdown drain timed out');",
+      "this.name = 'BalanceSyncConsumerResourceShutdownDrainTimeoutError';",
     ],
   ] as const;
   const launchAndBarrelSources = [
@@ -3467,7 +3594,30 @@ function hasDormantBalanceConsumerAggregateResourceContract(
       factory,
       'if (acceptedRun !== undefined) await Promise.allSettled([acceptedRun]);',
     ) === 1 &&
-    exactExecutableLineCount(factory, 'return closePromise;') === 1 &&
+    exactExecutableLineCount(
+      resource,
+      'const BALANCE_SYNC_CONSUMER_SHUTDOWN_DRAIN_TIMEOUT_MS = 25_000;',
+    ) === 1 &&
+    exactExecutableLineCount(
+      factory,
+      'const scheduleShutdownTimeout = globalThis.setTimeout.bind(globalThis);',
+    ) === 1 &&
+    exactExecutableLineCount(
+      factory,
+      'const clearShutdownTimeout = globalThis.clearTimeout.bind(globalThis);',
+    ) === 1 &&
+    exactExecutableLineCount(factory, 'closePromise = publicClose;') === 1 &&
+    exactExecutableLineCount(
+      factory,
+      'let shutdownTimeout: ReturnType<typeof setTimeout> | undefined;',
+    ) === 1 &&
+    exactExecutableLineCount(factory, 'const clearWatchdog = (): void => {') === 1 &&
+    exactExecutableLineCount(factory, 'clearShutdownTimeout(shutdownTimeout);') === 1 &&
+    exactExecutableLineCount(factory, 'shutdownTimeout.unref?.();') === 1 &&
+    exactExecutableLineCount(factory, 'clearWatchdog();') === 2 &&
+    exactExecutableLineCount(factory, 'if (publicCloseSettled) return;') === 3 &&
+    exactExecutableLineCount(factory, 'void cleanup.then(') === 1 &&
+    exactExecutableLineCount(factory, 'return publicClose;') === 1 &&
     exactExecutableLineCount(
       resource,
       'return Object.freeze(Object.assign(Object.create(null) as T, members));',
@@ -3489,6 +3639,7 @@ function hasDormantBalanceConsumerAggregateResourceContract(
     !factory.includes('dependencies.balanceConsumerConfig') &&
     !factory.includes('snapshotInfrastructure(') &&
     !factory.includes('Promise.all([') &&
+    !factory.includes('Promise.race(') &&
     !/\bcause\s*[:=]/u.test(resource) &&
     launchAndBarrelSources.every(
       (source) =>
@@ -3603,15 +3754,48 @@ function hasDormantBalanceConsumerLifecycleCoordinatorContract(
   const privateController = executeLifecycle.indexOf('const controller = new AbortController();');
   const stopState = executeLifecycle.indexOf('let stopRequested = false;', privateController);
   const listeningState = executeLifecycle.indexOf('let listening = false;', stopState);
-  const requestStop = executeLifecycle.indexOf('const requestStop = (): void => {', listeningState);
-  const stopTransition = executeLifecycle.indexOf('stopRequested = true;', requestStop);
+  const runHandoffState = executeLifecycle.indexOf(
+    'let runHandoffComplete = false;',
+    listeningState,
+  );
+  const closeOperationState = executeLifecycle.indexOf(
+    'let closeOperation: Promise<boolean> | undefined;',
+    runHandoffState,
+  );
+  const progressConstruction = executeLifecycle.indexOf(
+    'const progress = new Promise<void>((resolve) => {',
+    closeOperationState,
+  );
+  const beginClose = executeLifecycle.indexOf(
+    'const beginClose = (): Promise<boolean> => {',
+    progressConstruction,
+  );
+  const closeMemoization = executeLifecycle.indexOf(
+    'if (closeOperation !== undefined) return closeOperation;',
+    beginClose,
+  );
+  const closeStart = executeLifecycle.indexOf(
+    'closeOperation = closeResource(reviewed.closeResource);',
+    closeMemoization,
+  );
+  const closeObservation = executeLifecycle.indexOf('void closeOperation.then(() => {', closeStart);
+  const requestStop = executeLifecycle.indexOf(
+    'const requestStop = (): void => {',
+    closeObservation,
+  );
+  const duplicateStopGuard = executeLifecycle.indexOf('if (stopRequested) return;', requestStop);
+  const stopTransition = executeLifecycle.indexOf('stopRequested = true;', duplicateStopGuard);
   const privateAbort = executeLifecycle.indexOf(
     "controller.abort(new Error('Balance sync consumer lifecycle stop requested'));",
     stopTransition,
   );
+  const closeOnStop = executeLifecycle.indexOf(
+    'if (runHandoffComplete) void beginClose();',
+    privateAbort,
+  );
   const initialSignalRead = executeLifecycle.indexOf(
     'if (reviewed.signal.aborted()) {',
-    privateAbort,
+    closeOnStop,
   );
   const initialStopRequest = executeLifecycle.indexOf('requestStop();', initialSignalRead);
   const listenerAttach = executeLifecycle.indexOf(
@@ -3644,42 +3828,57 @@ function hasDormantBalanceConsumerLifecycleCoordinatorContract(
     setupCloseError,
   );
   const runFailureState = executeLifecycle.indexOf('let runFailed = false;', signalError);
-  const prematureExitState = executeLifecycle.indexOf(
-    'let prematureExit = false;',
-    runFailureState,
+  const runSettledState = executeLifecycle.indexOf('let runSettled = false;', runFailureState);
+  const runFailureReportedState = executeLifecycle.indexOf(
+    'let runFailureReported = false;',
+    runSettledState,
   );
   const runOperationState = executeLifecycle.indexOf(
     'let runOperation: Promise<void> | undefined;',
-    prematureExitState,
+    runFailureReportedState,
   );
   const runHandoff = executeLifecycle.indexOf(
     'runOperation = Promise.resolve(reviewed.runResource(controller.signal));',
     runOperationState,
   );
   const synchronousRunFailure = executeLifecycle.indexOf('runFailed = true;', runHandoff);
+  const synchronousRunSettlement = executeLifecycle.indexOf(
+    'runSettled = true;',
+    synchronousRunFailure,
+  );
+  const observedRunState = executeLifecycle.indexOf(
+    'let observedRun: Promise<void> | undefined;',
+    synchronousRunSettlement,
+  );
+  const observedRun = executeLifecycle.indexOf(
+    'observedRun = runOperation.then(',
+    observedRunState,
+  );
+  const runHandoffPublication = executeLifecycle.indexOf('runHandoffComplete = true;', observedRun);
   const acceptedRunGuard = executeLifecycle.indexOf(
     'if (runOperation !== undefined) {',
-    synchronousRunFailure,
+    runHandoffPublication,
   );
   const startedEvent = executeLifecycle.indexOf(
     "if (!stopRequested) recordEvent(reviewed.recordEvent, 'STARTED');",
     acceptedRunGuard,
   );
-  const runDrain = executeLifecycle.indexOf('await runOperation;', startedEvent);
-  const prematureExitCapture = executeLifecycle.indexOf(
-    'prematureExit = !stopRequested;',
-    runDrain,
+  const closeAfterHandoff = executeLifecycle.indexOf(
+    'if (stopRequested) void beginClose();',
+    startedEvent,
   );
-  const asynchronousRunFailure = executeLifecycle.indexOf(
-    'runFailed = true;',
-    prematureExitCapture,
+  const runProgress = executeLifecycle.indexOf('await progress;', closeAfterHandoff);
+  const closeWithoutRun = executeLifecycle.indexOf('} else if (stopRequested) {', runProgress);
+  const prematureExitCapture = executeLifecycle.indexOf(
+    'const prematureExit = runSettled && !runFailed && !stopRequested;',
+    closeWithoutRun,
   );
   const postRunListenerCleanup = executeLifecycle.indexOf(
     'reviewed.signal.removeAbortListener(requestStop);',
-    asynchronousRunFailure,
+    prematureExitCapture,
   );
   const runFailureEvent = executeLifecycle.indexOf(
-    "if (runFailed) recordEvent(reviewed.recordEvent, 'RUN_FAILED');",
+    "recordEvent(reviewed.recordEvent, 'RUN_FAILED');",
     postRunListenerCleanup,
   );
   const prematureExitEvent = executeLifecycle.indexOf(
@@ -3687,7 +3886,7 @@ function hasDormantBalanceConsumerLifecycleCoordinatorContract(
     runFailureEvent,
   );
   const terminalClose = executeLifecycle.indexOf(
-    'const closed = await closeResource(reviewed.closeResource);',
+    'const closed = await beginClose();',
     prematureExitEvent,
   );
   const terminalCloseEvent = executeLifecycle.indexOf(
@@ -3698,9 +3897,21 @@ function hasDormantBalanceConsumerLifecycleCoordinatorContract(
     'throw new BalanceSyncConsumerLifecycleCloseError();',
     terminalCloseEvent,
   );
+  const lateRunDrain = executeLifecycle.indexOf(
+    'if (observedRun !== undefined && !runSettled) await observedRun;',
+    terminalCloseError,
+  );
+  const terminalListenerCleanup = executeLifecycle.indexOf(
+    'reviewed.signal.removeAbortListener(requestStop);',
+    lateRunDrain,
+  );
+  const lateRunFailureEvent = executeLifecycle.indexOf(
+    "if (runFailed && !runFailureReported) recordEvent(reviewed.recordEvent, 'RUN_FAILED');",
+    terminalListenerCleanup,
+  );
   const fixedRunError = executeLifecycle.indexOf(
     'if (runFailed) throw new BalanceSyncConsumerLifecycleRunError();',
-    terminalCloseError,
+    lateRunFailureEvent,
   );
   const fixedPrematureExitError = executeLifecycle.indexOf(
     'if (prematureExit) throw new BalanceSyncConsumerLifecyclePrematureExitError();',
@@ -3715,10 +3926,19 @@ function hasDormantBalanceConsumerLifecycleCoordinatorContract(
     privateController < 0 ||
     stopState <= privateController ||
     listeningState <= stopState ||
-    requestStop <= listeningState ||
-    stopTransition <= requestStop ||
+    runHandoffState <= listeningState ||
+    closeOperationState <= runHandoffState ||
+    progressConstruction <= closeOperationState ||
+    beginClose <= progressConstruction ||
+    closeMemoization <= beginClose ||
+    closeStart <= closeMemoization ||
+    closeObservation <= closeStart ||
+    requestStop <= closeObservation ||
+    duplicateStopGuard <= requestStop ||
+    stopTransition <= duplicateStopGuard ||
     privateAbort <= stopTransition ||
-    initialSignalRead <= privateAbort ||
+    closeOnStop <= privateAbort ||
+    initialSignalRead <= closeOnStop ||
     initialStopRequest <= initialSignalRead ||
     listenerAttach <= initialStopRequest ||
     listeningTransition <= listenerAttach ||
@@ -3729,22 +3949,31 @@ function hasDormantBalanceConsumerLifecycleCoordinatorContract(
     setupCloseError <= setupCloseEvent ||
     signalError <= setupCloseError ||
     runFailureState <= signalError ||
-    prematureExitState <= runFailureState ||
-    runOperationState <= prematureExitState ||
+    runSettledState <= runFailureState ||
+    runFailureReportedState <= runSettledState ||
+    runOperationState <= runFailureReportedState ||
     runHandoff <= runOperationState ||
     synchronousRunFailure <= runHandoff ||
-    acceptedRunGuard <= synchronousRunFailure ||
+    synchronousRunSettlement <= synchronousRunFailure ||
+    observedRunState <= synchronousRunSettlement ||
+    observedRun <= observedRunState ||
+    runHandoffPublication <= observedRun ||
+    acceptedRunGuard <= runHandoffPublication ||
     startedEvent <= acceptedRunGuard ||
-    runDrain <= startedEvent ||
-    prematureExitCapture <= runDrain ||
-    asynchronousRunFailure <= prematureExitCapture ||
-    postRunListenerCleanup <= asynchronousRunFailure ||
+    closeAfterHandoff <= startedEvent ||
+    runProgress <= closeAfterHandoff ||
+    closeWithoutRun <= runProgress ||
+    prematureExitCapture <= closeWithoutRun ||
+    postRunListenerCleanup <= prematureExitCapture ||
     runFailureEvent <= postRunListenerCleanup ||
     prematureExitEvent <= runFailureEvent ||
     terminalClose <= prematureExitEvent ||
     terminalCloseEvent <= terminalClose ||
     terminalCloseError <= terminalCloseEvent ||
-    fixedRunError <= terminalCloseError ||
+    lateRunDrain <= terminalCloseError ||
+    terminalListenerCleanup <= lateRunDrain ||
+    lateRunFailureEvent <= terminalListenerCleanup ||
+    fixedRunError <= lateRunFailureEvent ||
     fixedPrematureExitError <= fixedRunError ||
     stoppedEvent <= fixedPrematureExitError
   ) {
@@ -3972,11 +4201,33 @@ function hasDormantBalanceConsumerLifecycleCoordinatorContract(
     exactExecutableLineCount(
       executeLifecycle,
       'reviewed.signal.removeAbortListener(requestStop);',
-    ) === 2 &&
+    ) === 4 &&
     exactExecutableLineCount(
       executeLifecycle,
       'const closed = await closeResource(reviewed.closeResource);',
-    ) === 2 &&
+    ) === 1 &&
+    exactExecutableLineCount(executeLifecycle, 'const closed = await beginClose();') === 1 &&
+    exactExecutableLineCount(
+      executeLifecycle,
+      'if (closeOperation !== undefined) return closeOperation;',
+    ) === 1 &&
+    exactExecutableLineCount(
+      executeLifecycle,
+      'closeOperation = closeResource(reviewed.closeResource);',
+    ) === 1 &&
+    exactExecutableLineCount(executeLifecycle, 'void closeOperation.then(() => {') === 1 &&
+    exactExecutableLineCount(executeLifecycle, 'wakeProgress();') === 3 &&
+    exactExecutableLineCount(executeLifecycle, 'if (stopRequested) return;') === 1 &&
+    exactExecutableLineCount(executeLifecycle, 'if (runHandoffComplete) void beginClose();') ===
+      1 &&
+    exactExecutableLineCount(executeLifecycle, 'runHandoffComplete = true;') === 1 &&
+    exactExecutableLineCount(executeLifecycle, 'observedRun = runOperation.then(') === 1 &&
+    exactExecutableLineCount(executeLifecycle, 'if (stopRequested) void beginClose();') === 1 &&
+    exactExecutableLineCount(executeLifecycle, 'await progress;') === 1 &&
+    exactExecutableLineCount(
+      executeLifecycle,
+      'if (observedRun !== undefined && !runSettled) await observedRun;',
+    ) === 1 &&
     exactExecutableLineCount(
       executeLifecycle,
       "recordEvent(reviewed.recordEvent, 'CLOSE_FAILED');",
@@ -4037,29 +4288,61 @@ function hasDormantBalanceConsumerPersistenceResourceContract(
   const resourceInterface = resource.slice(resourceInterfaceStart, reviewedConfigurationStart);
   const factory = resource.slice(factoryStart);
   const poolCreation = factory.indexOf('pool = createPostgresPool(reviewed.infrastructure);');
-  const serviceCreation = factory.indexOf('const postgres = new PostgresService(pool);');
+  const serviceCreation = factory.indexOf('postgres = new PostgresService(pool);');
+  const serviceOwnership = factory.indexOf('const resourcePostgres = postgres;', serviceCreation);
   const checkpointCreation = factory.indexOf(
-    'const checkpointRepository = new PostgresBalanceSyncCheckpointRepository(postgres);',
+    'const checkpointRepository = new PostgresBalanceSyncCheckpointRepository(resourcePostgres);',
+    serviceOwnership,
   );
   const resolverCreation = factory.indexOf(
     'const walletAddressResolverRepository = new PostgresBalanceSyncWalletAddressResolver(',
   );
+  const operationGateRegistration = factory.indexOf('operationGates.add(gate);', resolverCreation);
+  const operationInvocation = factory.indexOf(
+    'const result = Promise.resolve().then(operation);',
+    operationGateRegistration,
+  );
   const closedGuard = factory.indexOf(
     'if (closed) return Promise.reject(new BalanceConsumerPersistenceClosedError());',
   );
-  const closedTransition = factory.indexOf('closed = true;', closedGuard);
-  const closeMemoization = factory.indexOf(
-    'closePromise ??= closePool(resourcePool, () => new BalanceConsumerPersistenceCloseError());',
+  const closeStart = factory.indexOf('const close = (): Promise<void> => {', operationInvocation);
+  const closeMemoizationGuard = factory.indexOf(
+    'if (closePromise !== undefined) return closePromise;',
+    closeStart,
+  );
+  const closedTransition = factory.indexOf('closed = true;', closeMemoizationGuard);
+  const closePromisePublication = factory.indexOf(
+    'closePromise = new Promise<void>((resolve, reject) => {',
     closedTransition,
+  );
+  const postgresDrainStart = factory.indexOf(
+    'postgresDrain = resourcePostgres.closeCancellableQueries();',
+    closePromisePublication,
+  );
+  const facadeDrain = factory.indexOf(
+    'void Promise.allSettled([postgresDrain, drainOperations()])',
+    postgresDrainStart,
+  );
+  const bestEffortPoolClose = factory.indexOf(
+    'closePool(resourcePool, () => new BalanceConsumerPersistenceCloseError()),',
+    facadeDrain,
   );
   if (
     poolCreation < 0 ||
     serviceCreation <= poolCreation ||
-    checkpointCreation <= serviceCreation ||
+    serviceOwnership <= serviceCreation ||
+    checkpointCreation <= serviceOwnership ||
     resolverCreation <= checkpointCreation ||
     closedGuard <= resolverCreation ||
-    closedTransition <= closedGuard ||
-    closeMemoization <= closedTransition
+    operationGateRegistration <= closedGuard ||
+    operationInvocation <= operationGateRegistration ||
+    closeStart <= operationInvocation ||
+    closeMemoizationGuard <= closeStart ||
+    closedTransition <= closeMemoizationGuard ||
+    closePromisePublication <= closedTransition ||
+    postgresDrainStart <= closePromisePublication ||
+    facadeDrain <= postgresDrainStart ||
+    bestEffortPoolClose <= facadeDrain
   ) {
     return false;
   }
@@ -4075,6 +4358,7 @@ function hasDormantBalanceConsumerPersistenceResourceContract(
     '\n',
   );
   const balanceConsumerConfig = sources.balanceConsumerConfigSource.replace(/\r\n/gu, '\n');
+  const infrastructureConfig = sources.infrastructureConfigSource.replace(/\r\n/gu, '\n');
   const launchAndBarrelSources = [
     sources.runtimeSource,
     sources.cliSource,
@@ -4090,6 +4374,114 @@ function hasDormantBalanceConsumerPersistenceResourceContract(
     sources.redisSessionRevocationCliSource,
     sources.migrationCliSource,
   ];
+
+  const cancellableQueryStart = postgresService.indexOf(
+    'queryWithCancellation<Row extends QueryResultRow = QueryResultRow>(',
+  );
+  const activeTransactionGuard = postgresService.indexOf(
+    'if (this.transactionContext.getStore() !== undefined) {',
+    cancellableQueryStart,
+  );
+  const signalGuard = postgresService.indexOf(
+    'if (reviewAbortSignal(signal) === null) {',
+    activeTransactionGuard,
+  );
+  const admissionGuard = postgresService.indexOf(
+    'if (!this.cancellableQueryAdmissionOpen) {',
+    signalGuard,
+  );
+  const serviceGateRegistration = postgresService.indexOf(
+    'this.cancellableQueryOperations.add(gate);',
+    admissionGuard,
+  );
+  const serviceOperationStart = postgresService.indexOf(
+    'this.executeCancellableQuery<Row>(queryTextOrConfig, values, signal),',
+    serviceGateRegistration,
+  );
+  const closeCancellableStart = postgresService.indexOf(
+    'closeCancellableQueries(): Promise<void> {',
+    serviceOperationStart,
+  );
+  const closeAdmission = postgresService.indexOf(
+    'this.cancellableQueryAdmissionOpen = false;',
+    closeCancellableStart,
+  );
+  const serviceClosePublication = postgresService.indexOf(
+    'this.cancellableQueryClosePromise = closePromise;',
+    closeAdmission,
+  );
+  const lifecycleAbort = postgresService.indexOf(
+    'Reflect.apply(ABORT_CONTROLLER_ABORT, this.cancellableQueryController, []);',
+    serviceClosePublication,
+  );
+  const serviceDrain = postgresService.indexOf(
+    'void this.drainCancellableQueries().then(',
+    lifecycleAbort,
+  );
+  const executeStart = postgresService.indexOf(
+    'private async executeCancellableQuery<Row extends QueryResultRow>(',
+    serviceDrain,
+  );
+  const discardRelease = postgresService.indexOf('client.release(fixedError);', executeStart);
+  const removeDrain = postgresService.indexOf('void removal.completed.then(', discardRelease);
+  const operationTimer = postgresService.indexOf('const timeout = setTimeout(() => {', removeDrain);
+  const signalListener = postgresService.indexOf('supplied.add(cancelFromSignal);', operationTimer);
+  const preConnectCancellation = postgresService.indexOf(
+    'if (cancellation !== null) {',
+    signalListener,
+  );
+  const dedicatedClientAcquisition = postgresService.indexOf(
+    'client = await this.pool.connect();',
+    preConnectCancellation,
+  );
+  const clientRemovalObservation = postgresService.indexOf(
+    'removal = this.observeClientRemoval(client);',
+    dedicatedClientAcquisition,
+  );
+  const clientQuery = postgresService.indexOf(
+    '.then(() => client?.query<Row>(queryTextOrConfig, values))',
+    clientRemovalObservation,
+  );
+  const querySettlement = postgresService.indexOf(
+    'const outcome = await querySettlement;',
+    clientQuery,
+  );
+  const settlementAndTeardownDrain = postgresService.indexOf(
+    'const teardownFailure = (await Promise.allSettled([querySettlement, teardown])).find(',
+    querySettlement,
+  );
+  const exactRemoveMatch = postgresService.indexOf(
+    'if (removed !== client || !listening) return;',
+    settlementAndTeardownDrain,
+  );
+
+  if (
+    cancellableQueryStart < 0 ||
+    activeTransactionGuard <= cancellableQueryStart ||
+    signalGuard <= activeTransactionGuard ||
+    admissionGuard <= signalGuard ||
+    serviceGateRegistration <= admissionGuard ||
+    serviceOperationStart <= serviceGateRegistration ||
+    closeCancellableStart <= serviceOperationStart ||
+    closeAdmission <= closeCancellableStart ||
+    serviceClosePublication <= closeAdmission ||
+    lifecycleAbort <= serviceClosePublication ||
+    serviceDrain <= lifecycleAbort ||
+    executeStart <= serviceDrain ||
+    discardRelease <= executeStart ||
+    removeDrain <= discardRelease ||
+    operationTimer <= removeDrain ||
+    signalListener <= operationTimer ||
+    preConnectCancellation <= signalListener ||
+    dedicatedClientAcquisition <= preConnectCancellation ||
+    clientRemovalObservation <= dedicatedClientAcquisition ||
+    clientQuery <= clientRemovalObservation ||
+    querySettlement <= clientQuery ||
+    settlementAndTeardownDrain <= querySettlement ||
+    exactRemoveMatch <= settlementAndTeardownDrain
+  ) {
+    return false;
+  }
 
   return (
     trimmedExecutableLines(resourceInterface).filter((line) => line.startsWith('readonly '))
@@ -4153,27 +4545,40 @@ function hasDormantBalanceConsumerPersistenceResourceContract(
     ) === 1 &&
     exactExecutableLineCount(
       resource,
-      'load: (scope) => whileOpen(() => checkpointRepository.load(scope)),',
+      'load: (scope, context) => whileOpen(() => checkpointRepository.load(scope, context)),',
     ) === 1 &&
     exactExecutableLineCount(
       resource,
-      'upsertCurrent: (input) => whileOpen(() => checkpointRepository.upsertCurrent(input)),',
+      'whileOpen(() => checkpointRepository.upsertCurrent(input, context)),',
     ) === 1 &&
     exactExecutableLineCount(
       resource,
-      'whileOpen(() => checkpointRepository.replaceProvisionalAfterReorg(input)),',
+      'whileOpen(() => checkpointRepository.replaceProvisionalAfterReorg(input, context)),',
     ) === 1 &&
     exactExecutableLineCount(
       resource,
-      'whileOpen(() => checkpointRepository.preserveLastGoodAndMarkStale(input)),',
+      'whileOpen(() => checkpointRepository.preserveLastGoodAndMarkStale(input, context)),',
     ) === 1 &&
     exactExecutableLineCount(
       resource,
-      'whileOpen(() => walletAddressResolverRepository.resolveActiveAddress(scope)),',
+      'whileOpen(() => walletAddressResolverRepository.resolveActiveAddress(scope, context)),',
+    ) === 1 &&
+    exactExecutableLineCount(resource, 'if (closePromise !== undefined) return closePromise;') ===
+      1 &&
+    exactExecutableLineCount(resource, 'operationGates.add(gate);') === 1 &&
+    exactExecutableLineCount(resource, 'const result = Promise.resolve().then(operation);') === 1 &&
+    exactExecutableLineCount(resource, 'await Promise.allSettled([...operationGates]);') === 1 &&
+    exactExecutableLineCount(
+      resource,
+      'closePromise = new Promise<void>((resolve, reject) => {',
     ) === 1 &&
     exactExecutableLineCount(
       resource,
-      'closePromise ??= closePool(resourcePool, () => new BalanceConsumerPersistenceCloseError());',
+      'postgresDrain = resourcePostgres.closeCancellableQueries();',
+    ) === 1 &&
+    exactExecutableLineCount(
+      resource,
+      'void Promise.allSettled([postgresDrain, drainOperations()])',
     ) === 1 &&
     exactExecutableLineCount(resource, '.then(() => pool.end())') === 1 &&
     exactExecutableLineCount(
@@ -4205,10 +4610,71 @@ function hasDormantBalanceConsumerPersistenceResourceContract(
       postgresService,
       'constructor(@Inject(POSTGRES_POOL) private readonly pool: Pool) {}',
     ) === 1 &&
+    exactExecutableLineCount(postgresService, 'const CANCELLABLE_QUERY_TIMEOUT_MS = 16_000;') ===
+      1 &&
+    exactExecutableLineCount(postgresService, "| 'POSTGRES_CANCELLABLE_QUERY_TEARDOWN_FAILED';") ===
+      1 &&
+    exactExecutableLineCount(
+      postgresService,
+      "return Promise.reject(cancellableQueryError('POSTGRES_CANCELLABLE_QUERY_ACTIVE_TRANSACTION'));",
+    ) === 1 &&
+    exactExecutableLineCount(
+      postgresService,
+      "return Promise.reject(cancellableQueryError('POSTGRES_CANCELLABLE_QUERY_INVALID_SIGNAL'));",
+    ) === 1 &&
+    exactExecutableLineCount(
+      postgresService,
+      "return Promise.reject(cancellableQueryError('POSTGRES_CANCELLABLE_QUERY_CLOSED'));",
+    ) === 1 &&
+    exactExecutableLineCount(postgresService, 'this.cancellableQueryOperations.add(gate);') === 1 &&
+    exactExecutableLineCount(postgresService, 'this.cancellableQueryAdmissionOpen = false;') ===
+      1 &&
+    exactExecutableLineCount(
+      postgresService,
+      'this.cancellableQueryClosePromise = closePromise;',
+    ) === 1 &&
+    exactExecutableLineCount(
+      postgresService,
+      'Reflect.apply(ABORT_CONTROLLER_ABORT, this.cancellableQueryController, []);',
+    ) === 1 &&
+    exactExecutableLineCount(postgresService, 'client.release(fixedError);') === 1 &&
+    exactExecutableLineCount(postgresService, '.then(() => acquiredClient.end())') === 2 &&
+    exactExecutableLineCount(postgresService, 'void removal.completed.then(') === 1 &&
+    exactExecutableLineCount(postgresService, 'timeout.unref?.();') === 1 &&
+    exactExecutableLineCount(postgresService, 'clearTimeout(timeout);') === 1 &&
+    exactExecutableLineCount(
+      postgresService,
+      'const teardownFailure = (await Promise.allSettled([querySettlement, teardown])).find(',
+    ) === 1 &&
+    exactExecutableLineCount(postgresService, 'if (removed !== client || !listening) return;') ===
+      1 &&
+    exactExecutableLineCount(postgresService, "this.pool.on('remove', onRemove);") === 1 &&
+    exactExecutableLineCount(postgresService, "this.pool.removeListener('remove', onRemove);") ===
+      2 &&
+    !postgresService.includes('Promise.race(') &&
+    !/\.(?:reason)\b/u.test(postgresService) &&
     exactExecutableLineCount(
       checkpointRepository,
       'constructor(private readonly postgres: PostgresService) {}',
     ) === 1 &&
+    exactExecutableLineCount(
+      checkpointRepository,
+      'const reviewed = reviewBalanceSyncExecutionContext(context);',
+    ) === 1 &&
+    exactExecutableLineCount(
+      checkpointRepository,
+      'const signal = activeExecutionSignal(context);',
+    ) === 4 &&
+    exactExecutableLineCount(
+      checkpointRepository,
+      'const result = await this.postgres.queryWithCancellation<WriteRow>(',
+    ) === 3 &&
+    exactExecutableLineCount(
+      checkpointRepository,
+      'const result = await this.postgres.queryWithCancellation<CheckpointRow>(',
+    ) === 1 &&
+    exactExecutableLineCount(checkpointRepository, 'activeExecutionSignal(context);') === 4 &&
+    !/this\.postgres\.query(?:<|\()/u.test(checkpointRepository) &&
     exactExecutableLineCount(
       walletAddressResolver,
       'private readonly postgres: PostgresService,',
@@ -4217,6 +4683,42 @@ function hasDormantBalanceConsumerPersistenceResourceContract(
       walletAddressResolver,
       '@Inject(BALANCE_CONSUMER_CONFIG) private readonly config: BalanceConsumerConfig,',
     ) === 1 &&
+    exactExecutableLineCount(
+      walletAddressResolver,
+      'const result = await this.postgres.queryWithCancellation<ResolvedAddressRow>(',
+    ) === 1 &&
+    exactExecutableLineCount(
+      walletAddressResolver,
+      'const signal = activeExecutionSignal(context);',
+    ) === 1 &&
+    exactExecutableLineCount(walletAddressResolver, 'activeExecutionSignal(context);') === 1 &&
+    !/this\.postgres\.query(?:<|\()/u.test(walletAddressResolver) &&
+    exactExecutableLineCount(
+      infrastructureConfig,
+      'export const BALANCE_CONSUMER_DATABASE_TIMEOUT_LIMITS: Readonly<RuntimeDatabaseTimeoutLimits> =',
+    ) === 1 &&
+    exactExecutableLineCount(infrastructureConfig, 'connectionTimeoutMs: 5_000,') === 1 &&
+    exactExecutableLineCount(infrastructureConfig, 'lockTimeoutMs: 5_000,') === 1 &&
+    exactExecutableLineCount(infrastructureConfig, 'statementTimeoutMs: 15_000,') === 1 &&
+    exactExecutableLineCount(infrastructureConfig, "workload === 'balance-consumer'") === 1 &&
+    exactExecutableLineCount(infrastructureConfig, '? BALANCE_CONSUMER_DATABASE_TIMEOUT_LIMITS') ===
+      1 &&
+    exactExecutableLineCount(
+      resource,
+      'BALANCE_CONSUMER_DATABASE_TIMEOUT_LIMITS.connectionTimeoutMs,',
+    ) === 1 &&
+    exactExecutableLineCount(
+      resource,
+      'BALANCE_CONSUMER_DATABASE_TIMEOUT_LIMITS.lockTimeoutMs,',
+    ) === 1 &&
+    exactExecutableLineCount(
+      resource,
+      'BALANCE_CONSUMER_DATABASE_TIMEOUT_LIMITS.statementTimeoutMs,',
+    ) === 1 &&
+    hasExactPostgresCancellationDependencyLock(
+      sources.apiPackageSource,
+      sources.rootPackageLockSource,
+    ) &&
     exactExecutableLineCount(balanceConsumerConfig, "readonly mode: 'enabled';") === 1 &&
     exactExecutableLineCount(
       balanceConsumerConfig,
@@ -5297,6 +5799,7 @@ function hasExactStandaloneBalanceConsumerEnvelopeContract(
     !/(?:^|\n) {2}SqsMaxReceiveCount:\s*$/u.test(envelope) &&
     exactExecutableLineCount(taskDefinition, 'Capabilities: { Drop: [ALL] }') === 1 &&
     hasExactYamlScalarProperty(taskDefinition, 'ReadonlyRootFilesystem', 'true') &&
+    hasExactYamlScalarProperty(taskDefinition, 'StopTimeout', '30') &&
     hasExactYamlScalarProperty(taskDefinition, 'User', "'10001:10001'") &&
     hasExactYamlScalarProperty(taskDefinition, 'NetworkMode', 'awsvpc') &&
     exactExecutableLineCount(taskDefinition, 'RequiresCompatibilities: [FARGATE]') === 1 &&
@@ -5743,7 +6246,7 @@ export function inspectBalanceConsumerDeploymentArtifacts(
       hasAuthenticatedBalanceSyncFailureContract(sources) &&
       hasExactBalanceAdapterDependencyContract(sources) &&
       hasDormantProviderNeutralBalanceRpcContract(sources) &&
-      hasExactBalanceSyncRpcCancellationContract(sources) &&
+      hasExactBalanceSyncExecutionCancellationContract(sources) &&
       hasDormantBalanceConsumerAggregateResourceContract(sources) &&
       hasDormantBalanceConsumerLifecycleCoordinatorContract(sources) &&
       hasDormantBalanceConsumerPersistenceResourceContract(sources) &&
@@ -6596,6 +7099,7 @@ export function loadRepositoryProductionPreflightInput(
       ),
       apiPackageSource: readFileSync(resolve(repositoryRoot, 'apps/api/package.json'), 'utf8'),
       rootPackageSource: readFileSync(resolve(repositoryRoot, 'package.json'), 'utf8'),
+      rootPackageLockSource: readFileSync(resolve(repositoryRoot, 'package-lock.json'), 'utf8'),
       applicationTemplateSource,
       applicationValidatorSource: readFileSync(
         resolve(repositoryRoot, 'infra/aws/validate-application-baseline.mjs'),

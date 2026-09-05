@@ -85,12 +85,14 @@ consumer, or clear any deployment or live-evidence blocker.
 
 The inspection now also byte-pins the consumer service, balance-sync port
 contract, dispatcher, composition, orchestrator, dormant two-source
-coordinator, router, JSON-RPC helper, both chain adapters, and their public
-export root as one RPC-cancellation boundary. Each accepted job receives a
-privately branded context, and the production path must pass that same context
-and signal explicitly without an inert default. The reviewed policy calls the
-limit `maximumRpcWindowMs`, defaults it to three hours, and accepts only two
-through six hours. That timer bounds propagated JSON-RPC work only. Deadline
+coordinator, router, JSON-RPC helper, both chain adapters, their public export
+root, PostgreSQL resolver/repository/service, persistence facade,
+infrastructure timeout policy, API dependency manifest, and root lockfile as
+one execution-cancellation boundary. Each accepted job receives a privately
+branded context, and the production path must pass that same context and signal
+explicitly through wallet resolution, JSON-RPC, and every checkpoint operation
+without an inert default. The reviewed policy calls the limit `jobTimeoutMs`,
+defaults it to three hours, and accepts only two through six hours. Deadline
 and shutdown are retained out of band and map to fixed timeout and unavailable
 classifications without reading or forwarding an abort reason. The helper
 checks cancellation before transport, after a rejected transport call, and
@@ -101,12 +103,28 @@ then rechecks cancellation before accessing either value. Rescan preserves the
 two cancellation classifications, while the existing SQS receipt remains the
 sole retry/redrive authority.
 
-This does not establish a whole-job deadline. Checkpoint persistence and the
-wallet-address resolver still have signal-less interfaces, and no reviewed
-concrete transport has yet proved cooperative connect/body-I/O cancellation.
-Those are explicit remaining activation blockers, alongside live provider and
-deployment evidence. The preflight assertions and mutation tests are local
-static integrity checks only and make no network, chain, cloud, or billable
+The resolver and all checkpoint operations review the branded context, pass
+its exact signal to `PostgresService.queryWithCancellation`, and recheck after
+settlement. That service closes admission synchronously, memoizes close before
+aborting accepted work, owns a dedicated client, enforces a 16-second local
+operation timer, discards with `client.release(error)`, and awaits the exact
+pool removal plus query settlement. Teardown uncertainty is a fixed failure;
+it is not reported as a drain. The balance workload caps pool acquisition and
+lock waits at 5 seconds and statements at 15 seconds. Because active `pg`
+acquisition has no native signal cancellation, shutdown may still wait for its
+configured 5-second acquisition bound. The inspector pins direct `pg` 8.23.0
+and the lockfile's single `pg-pool` 3.14.0 resolution.
+
+Aggregate close is published before cleanup starts and has a fixed 25-second
+watchdog under the dormant task's 30-second ECS `StopTimeout`. The timer is
+unrefed and cleared on normal settlement; timeout rejects with a fixed outcome
+while late cleanup remains observed and continues. The lifecycle shell starts
+that close path when shutdown is handed to the accepted run, so a hung run
+cannot suppress the watchdog. These contracts do not prove physical socket or
+process shutdown against live PostgreSQL, and no reviewed concrete JSON-RPC
+transport has yet proved cooperative connect/body-I/O cancellation. Those
+remain explicit activation blockers alongside live provider and deployment
+evidence. All checks are local and make no network, chain, cloud, or billable
 call.
 
 The adapter dependency closure is byte-pinned too: the supported-asset
@@ -480,6 +498,12 @@ database authority or Ethereum/Solana RPC egress is active. Consequently
 `BALANCE_CONSUMER_DEPLOYED_EVIDENCE_MISSING` remain intentional blockers, along
 with every database, external-egress, RPC/provider, authentication, authority,
 and other production blocker described by the report.
+
+The database source contract is therefore locally closed but operationally
+blocked: no live PostgreSQL acquisition timeout, forced client discard, exact
+pool-removal drain, aggregate watchdog, or ECS physical-stop evidence has been
+collected. Preflight must not convert these source checks into deployment or
+live-read readiness.
 
 Run the focused checks with:
 
