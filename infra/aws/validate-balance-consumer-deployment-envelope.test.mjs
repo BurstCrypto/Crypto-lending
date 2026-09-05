@@ -37,7 +37,7 @@ test('accepts and cryptographically binds the reviewed dormant envelope', () => 
   assert.equal(Object.isFrozen(result.residualLimitations), true);
 });
 
-test('reports that the envelope is uncomposed, hard-zero, non-production, and unactivated', () => {
+test('reports that the envelope is uncomposed, hard-zero, non-production, queue-unbound, and unactivated', () => {
   const result = validateBalanceConsumerDeploymentEnvelopeSource(templateSource);
   assert.deepEqual(
     result.residualLimitations.map((entry) => entry.split(':', 1)[0]),
@@ -45,6 +45,7 @@ test('reports that the envelope is uncomposed, hard-zero, non-production, and un
       'UNCOMPOSED_SOURCE_ONLY',
       'HARD_ZERO_AND_NO_EGRESS',
       'NON_PRODUCTION_ONLY',
+      'SOURCE_QUEUE_REDRIVE_UNBOUND',
       'ACTIVATION_GATES_UNRESOLVED',
     ],
   );
@@ -208,31 +209,49 @@ for (const [name, search, replacement, expected] of [
     /reviewed binding.*BALANCE_CONSUMER_SOURCE_APPROVAL/,
   ],
   [
+    'caller-controlled max receive count',
+    "{ Name: SQS_MAX_RECEIVE_COUNT, Value: '3' }",
+    '{ Name: SQS_MAX_RECEIVE_COUNT, Value: !Ref SqsMaxReceiveCount }',
+    /reviewed binding.*SQS_MAX_RECEIVE_COUNT/,
+  ],
+  [
+    'drifted retry base delay',
+    "{ Name: SQS_RETRY_BASE_DELAY_SECONDS, Value: '5' }",
+    "{ Name: SQS_RETRY_BASE_DELAY_SECONDS, Value: '1' }",
+    /reviewed binding.*SQS_RETRY_BASE_DELAY_SECONDS/,
+  ],
+  [
+    'drifted retry maximum delay',
+    "{ Name: SQS_RETRY_MAX_DELAY_SECONDS, Value: '60' }",
+    "{ Name: SQS_RETRY_MAX_DELAY_SECONDS, Value: '59' }",
+    /reviewed binding.*SQS_RETRY_MAX_DELAY_SECONDS/,
+  ],
+  [
     'generic jobs queue injection',
-    '            - { Name: SQS_MAX_RECEIVE_COUNT, Value: !Ref SqsMaxReceiveCount }',
+    "            - { Name: SQS_MAX_RECEIVE_COUNT, Value: '3' }",
     [
       '            - { Name: SQS_QUEUE_URL, Value: https://example.invalid/jobs }',
-      '            - { Name: SQS_MAX_RECEIVE_COUNT, Value: !Ref SqsMaxReceiveCount }',
+      "            - { Name: SQS_MAX_RECEIVE_COUNT, Value: '3' }",
     ].join('\n'),
-    /eleven reviewed nonsecret settings|must not receive generic queues/,
+    /thirteen reviewed nonsecret settings|must not receive generic queues/,
   ],
   [
     'database injection',
-    '            - { Name: SQS_MAX_RECEIVE_COUNT, Value: !Ref SqsMaxReceiveCount }',
+    "            - { Name: SQS_MAX_RECEIVE_COUNT, Value: '3' }",
     [
       '            - { Name: DATABASE_RUNTIME_HOST, Value: database.internal }',
-      '            - { Name: SQS_MAX_RECEIVE_COUNT, Value: !Ref SqsMaxReceiveCount }',
+      "            - { Name: SQS_MAX_RECEIVE_COUNT, Value: '3' }",
     ].join('\n'),
-    /eleven reviewed nonsecret settings|must not receive generic queues/,
+    /thirteen reviewed nonsecret settings|must not receive generic queues/,
   ],
   [
     'RPC endpoint injection',
-    '            - { Name: SQS_MAX_RECEIVE_COUNT, Value: !Ref SqsMaxReceiveCount }',
+    "            - { Name: SQS_MAX_RECEIVE_COUNT, Value: '3' }",
     [
       '            - { Name: ETHEREUM_RPC_URL, Value: https://example.invalid }',
-      '            - { Name: SQS_MAX_RECEIVE_COUNT, Value: !Ref SqsMaxReceiveCount }',
+      "            - { Name: SQS_MAX_RECEIVE_COUNT, Value: '3' }",
     ].join('\n'),
-    /eleven reviewed nonsecret settings|must not receive generic queues/,
+    /thirteen reviewed nonsecret settings|must not receive generic queues/,
   ],
   [
     'wallet metadata key injection',

@@ -15,8 +15,11 @@ export class BalanceSyncJobDispositionNotApprovedError extends Error {
 }
 
 /**
- * Dormant default until retry/dead-letter durability and send authority are
- * explicitly approved. Both methods perform no I/O and always fail closed.
+ * Receipt-retention handoff for the dormant balance consumer. Both methods
+ * perform no I/O and always fail, causing SqsJobWorker to leave the source
+ * receipt undeleted. The worker's ChangeMessageVisibility call and the source
+ * queue's native redrive policy are the sole retry/DLQ authority; this port has
+ * no SendMessage or direct-DLQ capability.
  */
 export class FailClosedBalanceSyncJobPort implements BalanceSyncJobPort {
   async scheduleRetry(_input: Parameters<BalanceSyncJobPort['scheduleRetry']>[0]): Promise<void> {

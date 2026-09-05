@@ -1,4 +1,7 @@
-import type { BalanceConsumerInfrastructureConfig } from '../../infrastructure/config/infrastructure.config';
+import {
+  assertBalanceConsumerSqsReceiptRedrivePolicy,
+  type BalanceConsumerInfrastructureConfig,
+} from '../../infrastructure/config/infrastructure.config';
 import type { ObservabilityPort } from '../../infrastructure/observability';
 import { BalanceSyncJobDispatcher } from '../../infrastructure/sqs/reviewed-job-dispatcher';
 import { SqsJobWorker } from '../../infrastructure/sqs/sqs-job.worker';
@@ -6,6 +9,7 @@ import {
   PinnedSqsQueueReceiptAdapter,
   type SqsQueueReceiptTransport,
 } from '../../infrastructure/sqs/sqs-queue-receipt.port';
+import { BALANCE_SYNC_POLICY } from '../domain/balance-sync';
 import { EthereumMainnetBalanceIndexerAdapter } from '../infrastructure/rpc/ethereum-mainnet-balance-indexer.adapter';
 import type { BalanceJsonRpcTransport } from '../infrastructure/rpc/balance-json-rpc';
 import { SolanaMainnetBalanceIndexerAdapter } from '../infrastructure/rpc/solana-mainnet-balance-indexer.adapter';
@@ -52,8 +56,10 @@ export interface BalanceSyncConsumerComposition {
 
 /**
  * Inert object-graph factory for a future dedicated process. It deliberately
- * fixes queue selection to `balance` and disposition to the no-I/O fail-closed
- * port. Nothing here is registered with Nest or starts the consumer.
+ * fixes queue selection to `balance`. Failed application dispositions retain
+ * the source receipt, so native SQS visibility/redrive remains the only retry
+ * and DLQ authority. Nothing here is registered with Nest or starts the
+ * consumer.
  */
 export function createBalanceSyncConsumerComposition(
   dependencies: BalanceSyncConsumerCompositionDependencies,
@@ -61,6 +67,7 @@ export function createBalanceSyncConsumerComposition(
   if (dependencies.infrastructureConfig.workload !== 'balance-consumer') {
     throw new Error('Balance sync consumer composition requires the balance-consumer workload');
   }
+  assertBalanceConsumerSqsReceiptRedrivePolicy(dependencies.infrastructureConfig.sqs);
 
   const ethereumIndexer = new EthereumMainnetBalanceIndexerAdapter(
     dependencies.ethereumTransport,
@@ -90,7 +97,12 @@ export function createBalanceSyncConsumerComposition(
   );
   const queueWorker = new SqsJobWorker(
     balanceQueueReceipt,
-    dependencies.infrastructureConfig.sqs,
+    Object.freeze({
+      maxReceiveCount: BALANCE_SYNC_POLICY.maxAttempts,
+      visibilityTimeoutSeconds: dependencies.infrastructureConfig.sqs.visibilityTimeoutSeconds,
+      retryBaseDelaySeconds: BALANCE_SYNC_POLICY.retryBaseDelaySeconds,
+      retryMaxDelaySeconds: BALANCE_SYNC_POLICY.retryMaximumDelaySeconds,
+    }),
     dependencies.observability,
     'balance',
   );

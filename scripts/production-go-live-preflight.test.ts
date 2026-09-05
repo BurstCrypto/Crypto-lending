@@ -138,6 +138,25 @@ const BALANCE_CONSUMER_ARTIFACTS = Object.freeze({
     ),
     'utf8',
   ),
+  balanceSyncDomainSource: readFileSync(
+    resolve(__dirname, '../apps/api/src/blockchain-sync/domain/balance-sync.ts'),
+    'utf8',
+  ),
+  chainObservationPolicySource: readFileSync(
+    resolve(__dirname, '../apps/api/src/blockchain/domain/chain-observation-policy.ts'),
+    'utf8',
+  ),
+  failClosedJobDispositionSource: readFileSync(
+    resolve(
+      __dirname,
+      '../apps/api/src/blockchain-sync/application/fail-closed-balance-sync-job.port.ts',
+    ),
+    'utf8',
+  ),
+  reviewedJobDispatcherSource: readFileSync(
+    resolve(__dirname, '../apps/api/src/infrastructure/sqs/reviewed-job-dispatcher.ts'),
+    'utf8',
+  ),
   infrastructureConfigSource: readFileSync(
     resolve(__dirname, '../apps/api/src/infrastructure/config/infrastructure.config.ts'),
     'utf8',
@@ -1021,10 +1040,58 @@ test('balance-consumer inspection fails closed for drift in every reviewed artif
       'dependencies.infrastructureConfig.sqs.queueUrl,',
     ],
     [
+      'composition receipt policy revalidation',
+      'compositionSource',
+      'assertBalanceConsumerSqsReceiptRedrivePolicy(dependencies.infrastructureConfig.sqs);',
+      'void dependencies.infrastructureConfig.sqs;',
+    ],
+    [
+      'domain-derived composition retry policy',
+      'compositionSource',
+      'retryBaseDelaySeconds: BALANCE_SYNC_POLICY.retryBaseDelaySeconds,',
+      'retryBaseDelaySeconds: dependencies.infrastructureConfig.sqs.retryBaseDelaySeconds,',
+    ],
+    [
+      'balance retry base policy',
+      'balanceSyncDomainSource',
+      'retryBaseDelaySeconds: 5,',
+      'retryBaseDelaySeconds: 1,',
+    ],
+    [
+      'observation attempt policy',
+      'chainObservationPolicySource',
+      'maxAttempts: 3,',
+      'maxAttempts: 4,',
+    ],
+    [
+      'fail-closed receipt disposition',
+      'failClosedJobDispositionSource',
+      'throw new BalanceSyncJobDispositionNotApprovedError();',
+      'return Promise.resolve();',
+    ],
+    [
+      'first-attempt-only balance ingress',
+      'reviewedJobDispatcherSource',
+      'job.payload.attempt !== 1 ||',
+      'job.payload.attempt < 1 ||',
+    ],
+    [
       'balance-only infrastructure configuration',
       'infrastructureConfigSource',
       "const rawBalanceQueueUrl = required(env, 'SQS_BALANCE_QUEUE_URL');",
       "const rawBalanceQueueUrl = required(env, 'SQS_QUEUE_URL');",
+    ],
+    [
+      'balance receipt policy mapping',
+      'infrastructureConfigSource',
+      'retryMaxDelaySeconds: BALANCE_SYNC_POLICY.retryMaximumDelaySeconds,',
+      'retryMaxDelaySeconds: 900,',
+    ],
+    [
+      'balance loader receipt policy revalidation',
+      'infrastructureConfigSource',
+      'assertBalanceConsumerSqsReceiptRedrivePolicy(sqsClient);',
+      'void sqsClient;',
     ],
     [
       'private pinned receipt queue',
@@ -1111,6 +1178,24 @@ test('balance-consumer inspection fails closed for drift in every reviewed artif
       'DesiredCount: 1',
     ],
     [
+      'standalone envelope max receives',
+      'balanceConsumerEnvelopeSource',
+      "{ Name: SQS_MAX_RECEIVE_COUNT, Value: '3' }",
+      "{ Name: SQS_MAX_RECEIVE_COUNT, Value: '4' }",
+    ],
+    [
+      'standalone envelope retry base',
+      'balanceConsumerEnvelopeSource',
+      "{ Name: SQS_RETRY_BASE_DELAY_SECONDS, Value: '5' }",
+      "{ Name: SQS_RETRY_BASE_DELAY_SECONDS, Value: '1' }",
+    ],
+    [
+      'standalone envelope retry maximum',
+      'balanceConsumerEnvelopeSource',
+      "{ Name: SQS_RETRY_MAX_DELAY_SECONDS, Value: '60' }",
+      "{ Name: SQS_RETRY_MAX_DELAY_SECONDS, Value: '59' }",
+    ],
+    [
       'standalone envelope validator resource allowlist',
       'balanceConsumerEnvelopeValidatorSource',
       "requireExactIds(resources, expectedResources, 'Resource allowlist', errors);",
@@ -1125,8 +1210,14 @@ test('balance-consumer inspection fails closed for drift in every reviewed artif
     [
       'standalone envelope validator reviewed digest',
       'balanceConsumerEnvelopeValidatorSource',
-      "const reviewedTemplateSha256 = '91b9129ea24a8c9abd8baa66d411d231eba84e417a80d066f1bd0fc819bd7685';",
-      "const reviewedTemplateSha256 = '01b9129ea24a8c9abd8baa66d411d231eba84e417a80d066f1bd0fc819bd7685';",
+      "const reviewedTemplateSha256 = '3b621023e516cd553c34fbe09e4b0047d1395fab45e105eef7692570d6429045';",
+      "const reviewedTemplateSha256 = '0b621023e516cd553c34fbe09e4b0047d1395fab45e105eef7692570d6429045';",
+    ],
+    [
+      'standalone envelope validator receipt policy enforcement',
+      'balanceConsumerEnvelopeValidatorSource',
+      'SQS_RETRY_BASE_DELAY_SECONDS',
+      'SQS_RETRY_BASE_DELAY_DISABLED_SECONDS',
     ],
     [
       'metadata transition production-aware environment',

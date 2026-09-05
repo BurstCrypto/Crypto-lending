@@ -2,6 +2,7 @@ import { X509Certificate } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { createSecureContext } from 'node:tls';
 
+import { BALANCE_SYNC_POLICY } from '../../blockchain-sync/domain/balance-sync';
 import {
   configuredRedisEnvironmentVariableNames,
   hasRedisEnvironmentVariables,
@@ -67,6 +68,38 @@ export interface BalanceConsumerInfrastructureConfig {
 
 export type RuntimeInfrastructureConfig =
   InfrastructureConfig | BalanceConsumerInfrastructureConfig;
+
+type SqsReceiptRedrivePolicy = Pick<
+  SqsClientInfrastructureConfig,
+  'maxReceiveCount' | 'retryBaseDelaySeconds' | 'retryMaxDelaySeconds'
+>;
+
+/**
+ * Native source-receipt visibility plus the queue's redrive policy are the
+ * balance consumer's only retry/DLQ authority. These values therefore remain
+ * identical to the domain attempt policy instead of inheriting generic worker
+ * defaults.
+ */
+export const BALANCE_CONSUMER_SQS_RECEIPT_REDRIVE_POLICY = Object.freeze({
+  maxReceiveCount: BALANCE_SYNC_POLICY.maxAttempts,
+  retryBaseDelaySeconds: BALANCE_SYNC_POLICY.retryBaseDelaySeconds,
+  retryMaxDelaySeconds: BALANCE_SYNC_POLICY.retryMaximumDelaySeconds,
+} as const) satisfies SqsReceiptRedrivePolicy;
+
+export function assertBalanceConsumerSqsReceiptRedrivePolicy(
+  policy: SqsReceiptRedrivePolicy,
+): void {
+  if (
+    policy.maxReceiveCount !== BALANCE_CONSUMER_SQS_RECEIPT_REDRIVE_POLICY.maxReceiveCount ||
+    policy.retryBaseDelaySeconds !==
+      BALANCE_CONSUMER_SQS_RECEIPT_REDRIVE_POLICY.retryBaseDelaySeconds ||
+    policy.retryMaxDelaySeconds !== BALANCE_CONSUMER_SQS_RECEIPT_REDRIVE_POLICY.retryMaxDelaySeconds
+  ) {
+    throw new Error(
+      'Balance-consumer SQS receipt redrive policy must exactly match BALANCE_SYNC_POLICY',
+    );
+  }
+}
 
 function required(env: NodeJS.ProcessEnv, name: string): string {
   const value = env[name]?.trim();
@@ -864,9 +897,16 @@ export function loadMigrationDatabaseConfig(
   };
 }
 
+const GENERIC_SQS_RECEIPT_REDRIVE_DEFAULTS = Object.freeze({
+  maxReceiveCount: 3,
+  retryBaseDelaySeconds: 1,
+  retryMaxDelaySeconds: 60,
+}) satisfies SqsReceiptRedrivePolicy;
+
 function loadSqsClientInfrastructureConfig(
   env: NodeJS.ProcessEnv,
   production: boolean,
+  receiptRedriveDefaults: SqsReceiptRedrivePolicy = GENERIC_SQS_RECEIPT_REDRIVE_DEFAULTS,
 ): SqsClientInfrastructureConfig {
   const configuredRegion = env.AWS_REGION?.trim();
   if (production && !configuredRegion) {
@@ -888,10 +928,25 @@ function loadSqsClientInfrastructureConfig(
     ...(credentialRelativeUri ? { credentialRelativeUri } : {}),
     requestTimeoutMs: positiveInteger(env, 'SQS_REQUEST_TIMEOUT_MS', 15_000, 60_000),
     sdkMaxAttempts: positiveInteger(env, 'SQS_SDK_MAX_ATTEMPTS', 3, 10),
-    maxReceiveCount: positiveInteger(env, 'SQS_MAX_RECEIVE_COUNT', 3, 100),
+    maxReceiveCount: positiveInteger(
+      env,
+      'SQS_MAX_RECEIVE_COUNT',
+      receiptRedriveDefaults.maxReceiveCount,
+      100,
+    ),
     visibilityTimeoutSeconds: positiveInteger(env, 'SQS_VISIBILITY_TIMEOUT_SECONDS', 30, 43_200),
-    retryBaseDelaySeconds: positiveInteger(env, 'SQS_RETRY_BASE_DELAY_SECONDS', 1, 900),
-    retryMaxDelaySeconds: positiveInteger(env, 'SQS_RETRY_MAX_DELAY_SECONDS', 60, 900),
+    retryBaseDelaySeconds: positiveInteger(
+      env,
+      'SQS_RETRY_BASE_DELAY_SECONDS',
+      receiptRedriveDefaults.retryBaseDelaySeconds,
+      900,
+    ),
+    retryMaxDelaySeconds: positiveInteger(
+      env,
+      'SQS_RETRY_MAX_DELAY_SECONDS',
+      receiptRedriveDefaults.retryMaxDelaySeconds,
+      900,
+    ),
   };
 }
 
@@ -996,7 +1051,12 @@ export function loadBalanceConsumerInfrastructureConfig(
     }
   }
 
-  const sqsClient = loadSqsClientInfrastructureConfig(env, production);
+  const sqsClient = loadSqsClientInfrastructureConfig(
+    env,
+    production,
+    BALANCE_CONSUMER_SQS_RECEIPT_REDRIVE_POLICY,
+  );
+  assertBalanceConsumerSqsReceiptRedrivePolicy(sqsClient);
   const rawBalanceQueueUrl = required(env, 'SQS_BALANCE_QUEUE_URL');
   const rawBalanceDeadLetterQueueUrl = required(env, 'SQS_BALANCE_DEAD_LETTER_QUEUE_URL');
   const balanceQueueUrl = production

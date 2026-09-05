@@ -1,3 +1,8 @@
+import {
+  createBalanceSyncRetryEnvelope,
+  parseBalanceSyncJobEnvelope,
+  type BalanceSyncJobPayload,
+} from '../../blockchain-sync/domain/balance-sync';
 import { createJobEnvelope, type JobEnvelope } from '../outbox/job-envelope';
 import {
   BalanceSyncJobDispatcher,
@@ -56,7 +61,10 @@ function yieldJob(): JobEnvelope {
   );
 }
 
-function balanceJob(networkId = 'eip155:1'): JobEnvelope {
+function balanceJob(
+  networkId = 'eip155:1',
+  payloadOverrides: Partial<BalanceSyncJobPayload> = {},
+): JobEnvelope {
   return createJobEnvelope(
     'blockchain.balance-sync',
     {
@@ -68,6 +76,7 @@ function balanceJob(networkId = 'eip155:1'): JobEnvelope {
       cause: 'SCHEDULED',
       attempt: 1,
       rescanFromPosition: null,
+      ...payloadOverrides,
     },
     {
       id: UUIDS.job,
@@ -135,14 +144,60 @@ describe('ReviewedJobDispatcher', () => {
     const dispatcher = new BalanceSyncJobDispatcher(handler);
     await dispatcher.dispatch(balanceJob());
     await dispatcher.dispatch(balanceJob('solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp'));
-    expect(handler).toHaveBeenCalledTimes(2);
+    await dispatcher.dispatch(
+      balanceJob('eip155:1', { cause: 'MANUAL_RECOVERY', rescanFromPosition: '0' }),
+    );
+    expect(handler).toHaveBeenCalledTimes(3);
     for (const candidate of [ledgerJob(), yieldJob(), { ...balanceJob(), kind: 'unknown' }]) {
       await expect(dispatcher.dispatch(candidate)).rejects.toMatchObject({
         code: 'UNREVIEWED_JOB',
       });
     }
-    expect(handler).toHaveBeenCalledTimes(2);
+    expect(handler).toHaveBeenCalledTimes(3);
     expect(parseBalanceSyncConsumerJobEnvelope(balanceJob()).kind).toBe('blockchain.balance-sync');
+  });
+
+  it('rejects valid abstract retry envelopes before native-redrive handler invocation', async () => {
+    const initial = parseBalanceSyncJobEnvelope(balanceJob());
+    const secondAttempt = createBalanceSyncRetryEnvelope(initial, '2026-09-04T12:01:00.000Z');
+    const thirdAttempt = createBalanceSyncRetryEnvelope(secondAttempt, '2026-09-04T12:02:00.000Z');
+    const handler = jest.fn().mockResolvedValue(undefined);
+    const dispatcher = new BalanceSyncJobDispatcher(handler);
+
+    for (const candidate of [secondAttempt, thirdAttempt]) {
+      expect(parseReviewedConsumerJobEnvelope(candidate)).toMatchObject({
+        kind: 'blockchain.balance-sync',
+        payload: { cause: 'RETRY', attempt: candidate.payload.attempt },
+      });
+      expectDispatchCode(() => parseBalanceSyncConsumerJobEnvelope(candidate), 'UNREVIEWED_JOB');
+      await expect(dispatcher.dispatch(candidate)).rejects.toMatchObject({
+        code: 'UNREVIEWED_JOB',
+        message: 'Reviewed job dispatch failed',
+      });
+    }
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it('rejects a valid later-attempt manual recovery at native-redrive ingress', async () => {
+    const candidate = balanceJob('eip155:1', {
+      cause: 'MANUAL_RECOVERY',
+      attempt: 2,
+      rescanFromPosition: '100',
+    });
+    const parsed = parseReviewedConsumerJobEnvelope(candidate);
+    const handler = jest.fn().mockResolvedValue(undefined);
+    const dispatcher = new BalanceSyncJobDispatcher(handler);
+
+    expect(parsed).toMatchObject({
+      kind: 'blockchain.balance-sync',
+      payload: { cause: 'MANUAL_RECOVERY', attempt: 2, rescanFromPosition: '100' },
+    });
+    expectDispatchCode(() => parseBalanceSyncConsumerJobEnvelope(candidate), 'UNREVIEWED_JOB');
+    await expect(dispatcher.dispatch(candidate)).rejects.toMatchObject({
+      code: 'UNREVIEWED_JOB',
+      message: 'Reviewed job dispatch failed',
+    });
+    expect(handler).not.toHaveBeenCalled();
   });
 
   it('rejects unknown versions, kinds, legacy envelopes, and non-launch networks', () => {

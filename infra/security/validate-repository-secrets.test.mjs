@@ -113,7 +113,7 @@ test('binds reviewed fixture exceptions to every exact redacted finding field', 
     { ...exact, scope: 'repository' },
   ];
 
-  assert.equal(reviewed.size, 29);
+  assert.equal(reviewed.size, 37);
   assert.deepEqual(
     filterReviewedFalsePositiveFindings([exact, ...nearMisses], reviewed),
     nearMisses,
@@ -123,7 +123,7 @@ test('binds reviewed fixture exceptions to every exact redacted finding field', 
 test('fails closed when the reviewed fixture ledger bytes drift', () => {
   const reviewedBytes = readFileSync(falsePositiveLedgerPath);
 
-  assert.equal(parseReviewedFalsePositiveLedger(reviewedBytes).size, 29);
+  assert.equal(parseReviewedFalsePositiveLedger(reviewedBytes).size, 37);
   assert.throws(
     () => parseReviewedFalsePositiveLedger(Buffer.concat([reviewedBytes, Buffer.from('\n')])),
     /Reviewed false-positive ledger is invalid/u,

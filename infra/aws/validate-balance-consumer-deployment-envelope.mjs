@@ -14,12 +14,13 @@ import { fileURLToPath } from 'node:url';
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const defaultTemplatePath = join(scriptDirectory, 'balance-consumer-deployment-envelope.yaml');
 const directUploadLimitBytes = 51_200;
-const reviewedTemplateSha256 = '91b9129ea24a8c9abd8baa66d411d231eba84e417a80d066f1bd0fc819bd7685';
+const reviewedTemplateSha256 = '3b621023e516cd553c34fbe09e4b0047d1395fab45e105eef7692570d6429045';
 
 const residualLimitations = Object.freeze([
   'UNCOMPOSED_SOURCE_ONLY: release and preflight controls only bind and inspect this source; no application parent template or deployment target composes or provisions it.',
   'HARD_ZERO_AND_NO_EGRESS: the ECS service has a literal desired count of zero and its dedicated security group has no external egress path, so this source cannot run the consumer.',
   'NON_PRODUCTION_ONLY: EnvironmentName accepts only dev, test, qa, sandbox, or staging families, and deployment still requires explicit billing acknowledgement.',
+  'SOURCE_QUEUE_REDRIVE_UNBOUND: this standalone envelope pins only consumer-process settings; it neither defines nor proves the source queue RedrivePolicy, whose deployed maxReceiveCount remains separately blocked.',
   'ACTIVATION_GATES_UNRESOLVED: source activation, runtime composition, database grants and credentials, metadata-only secret custody, mainnet RPC egress, operational ownership, and deployed evidence remain absent.',
 ]);
 
@@ -32,7 +33,6 @@ const expectedParameters = new Map([
   ['ApplicationDataKeyId', 'String'],
   ['ApplicationLogsKeyId', 'String'],
   ['ApiImageDigest', 'String'],
-  ['SqsMaxReceiveCount', 'Number'],
   ['SqsVisibilityTimeoutSeconds', 'Number'],
   ['LogRetentionDays', 'Number'],
 ]);
@@ -147,15 +147,10 @@ function validateParameters(source, errors) {
     "'^[a-f0-9]{64}$'",
     errors,
   );
-  for (const [name, defaultValue, minimum, maximum] of [
-    ['SqsMaxReceiveCount', '3', '1', '100'],
-    ['SqsVisibilityTimeoutSeconds', '30', '1', '43200'],
-  ]) {
-    const block = parameters.get(name) ?? '';
-    requireProperty(block, name, 'Default', defaultValue, errors);
-    requireProperty(block, name, 'MinValue', minimum, errors);
-    requireProperty(block, name, 'MaxValue', maximum, errors);
-  }
+  const visibilityTimeout = parameters.get('SqsVisibilityTimeoutSeconds') ?? '';
+  requireProperty(visibilityTimeout, 'SqsVisibilityTimeoutSeconds', 'Default', '30', errors);
+  requireProperty(visibilityTimeout, 'SqsVisibilityTimeoutSeconds', 'MinValue', '1', errors);
+  requireProperty(visibilityTimeout, 'SqsVisibilityTimeoutSeconds', 'MaxValue', '43200', errors);
   requireProperty(
     parameters.get('LogRetentionDays') ?? '',
     'LogRetentionDays',
@@ -408,13 +403,15 @@ function validateTaskDefinition(resources, errors) {
     'SQS_BALANCE_DEAD_LETTER_QUEUE_URL',
     'SQS_MAX_RECEIVE_COUNT',
     'SQS_VISIBILITY_TIMEOUT_SECONDS',
+    'SQS_RETRY_BASE_DELAY_SECONDS',
+    'SQS_RETRY_MAX_DELAY_SECONDS',
   ];
   if (
     names.length !== expectedNames.length ||
     expectedNames.some((name) => names.filter((actual) => actual === name).length !== 1)
   ) {
     errors.push(
-      'BalanceConsumerTaskDefinition must receive only the eleven reviewed nonsecret settings.',
+      'BalanceConsumerTaskDefinition must receive only the thirteen reviewed nonsecret settings.',
     );
   }
   const taskLines = task.split('\n').map((line) => line.trim());
@@ -428,8 +425,10 @@ function validateTaskDefinition(resources, errors) {
     '- { Name: AWS_REGION, Value: !Ref AWS::Region }',
     'Value: !Sub https://sqs.${AWS::Region}.${AWS::URLSuffix}/${AWS::AccountId}/crypto-lending-${EnvironmentName}-balance-sync',
     'Value: !Sub https://sqs.${AWS::Region}.${AWS::URLSuffix}/${AWS::AccountId}/crypto-lending-${EnvironmentName}-balance-sync-dlq',
-    '- { Name: SQS_MAX_RECEIVE_COUNT, Value: !Ref SqsMaxReceiveCount }',
+    "- { Name: SQS_MAX_RECEIVE_COUNT, Value: '3' }",
     '- { Name: SQS_VISIBILITY_TIMEOUT_SECONDS, Value: !Ref SqsVisibilityTimeoutSeconds }',
+    "- { Name: SQS_RETRY_BASE_DELAY_SECONDS, Value: '5' }",
+    "- { Name: SQS_RETRY_MAX_DELAY_SECONDS, Value: '60' }",
   ]) {
     if (taskLines.filter((line) => line === token).length !== 1) {
       errors.push(

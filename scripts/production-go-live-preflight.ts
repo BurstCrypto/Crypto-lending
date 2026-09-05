@@ -159,6 +159,10 @@ export interface BalanceConsumerArtifactSources {
   readonly cliModeSource: string;
   readonly runtimeSource: string;
   readonly compositionSource: string;
+  readonly balanceSyncDomainSource: string;
+  readonly chainObservationPolicySource: string;
+  readonly failClosedJobDispositionSource: string;
+  readonly reviewedJobDispatcherSource: string;
   readonly infrastructureConfigSource: string;
   readonly pinnedQueueReceiptSource: string;
   readonly sqsJobWorkerSource: string;
@@ -493,6 +497,10 @@ const BALANCE_CONSUMER_ARTIFACT_KEYS = Object.freeze([
   'cliModeSource',
   'runtimeSource',
   'compositionSource',
+  'balanceSyncDomainSource',
+  'chainObservationPolicySource',
+  'failClosedJobDispositionSource',
+  'reviewedJobDispatcherSource',
   'infrastructureConfigSource',
   'pinnedQueueReceiptSource',
   'sqsJobWorkerSource',
@@ -521,8 +529,13 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
   cliSource: '7fec5d0cc345b82ed4fb5f26e1fa7099f0cb38c246224ada7a9fe51a65d4c455',
   cliModeSource: '2b03494cb126e80f4f7af1176cb08cf13aef2d14d4bf3cb371faa6f06a7294a8',
   runtimeSource: '311d5ed733abc1bc6f3428bcba2acd2f0858dab31f8eaf3259fc99560e6e1d7d',
-  compositionSource: 'fa66f972b73135effd2095757fb7b290fc401d2e3fd6c7ef69a40d57fcb13c27',
-  infrastructureConfigSource: 'e2edbaf0c998eb0e41ccc0b3b159270223c43634533a3abd8eb1ca3d8c29c783',
+  compositionSource: 'a898bcebc7ea56cae7b51e71e27107cb76330a98c4659b5bf761fa4a2e988971',
+  balanceSyncDomainSource: '67b1cf8449da0e7c60a95a43cc29425ddc7e33b176933901923538e804171921',
+  chainObservationPolicySource: 'ef887514b86230d1516e5a8139c94dc2b2dde06c979440bc6eb3f4df90511533',
+  failClosedJobDispositionSource:
+    '9e85fc07c1c26c9a42138e7aaf9e45f9cf660fc86660bce446e7f401d53ce9ea',
+  reviewedJobDispatcherSource: '91a9fcb2b5f8b2ec02bc19d3fbc592d80118731eedb0c0cd544de94f65c8a8e7',
+  infrastructureConfigSource: 'ca472922050bb95bd1b7bd94e0810674e7998d90287edc2be0fce1017b9b8898',
   pinnedQueueReceiptSource: '76543f1e4b4c446eb98b85ad52ea934d7e84f8f7fedcd82f6e516a7eb45a8c56',
   sqsJobWorkerSource: 'da2de20e4313bd9e1057b330d61f571ecbcee679e1a7f3ab9d67ca32a70880da',
   sqsServiceSource: '2abb5d6592858be750263200fdd8b17a3ad15e0ee3ad5ca8fe14e36b5ac46d13',
@@ -534,9 +547,9 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
   applicationValidatorSource: 'd9b21305fa911cd7290c70bda1e512b54442a8a5705663b74d0d572f03654f4d',
   workloadTemplateSource: '4c74c98e73635df30570dfe1e726b41cb6f62832f0bfc2e43dcd087d384b78de',
   workloadValidatorSource: '694f28c926fb08f6648d2d399fd31161681247eadacf43042077c4759dcbafba',
-  balanceConsumerEnvelopeSource: '91b9129ea24a8c9abd8baa66d411d231eba84e417a80d066f1bd0fc819bd7685',
+  balanceConsumerEnvelopeSource: '3b621023e516cd553c34fbe09e4b0047d1395fab45e105eef7692570d6429045',
   balanceConsumerEnvelopeValidatorSource:
-    'a4fe9b4765d488f77ad78fe46a865809dbad857021547d53aae4fd711021b397',
+    'ecceab597ba2c2930c59f443606249252c4931279ad99e9d29590c4324ab55ce',
   balanceConsumerMetadataTransitionValidatorSource:
     '79abdc329df3fe3275cf1c4d14a4256a2a334ec78efece9fefb92b9e461755e0',
   bootstrapPrincipalsSource: 'da3793b00efbfe12baa64446912376a85d2c6d7095f84dfb14c6e173dbefb9ac',
@@ -1986,6 +1999,130 @@ function hasPinnedBalanceConsumerQueueBoundaryContract(
   );
 }
 
+function hasExactBalanceConsumerNativeReceiptRedriveContract(
+  sources: BalanceConsumerArtifactSources,
+): boolean {
+  const infrastructure = sources.infrastructureConfigSource.replace(/\r\n/gu, '\n');
+  const policyStart = infrastructure.indexOf(
+    'export const BALANCE_CONSUMER_SQS_RECEIPT_REDRIVE_POLICY = Object.freeze({',
+  );
+  const policyEnd = infrastructure.indexOf('function required(', policyStart);
+  const balanceLoaderStart = infrastructure.indexOf(
+    'export function loadBalanceConsumerInfrastructureConfig(',
+  );
+  if (policyStart < 0 || policyEnd <= policyStart || balanceLoaderStart < 0) return false;
+  const policy = infrastructure.slice(policyStart, policyEnd);
+  const balanceLoader = infrastructure.slice(balanceLoaderStart);
+
+  const balanceDomain = sources.balanceSyncDomainSource.replace(/\r\n/gu, '\n');
+  const balancePolicyStart = balanceDomain.indexOf(
+    'export const BALANCE_SYNC_POLICY = Object.freeze({',
+  );
+  const balancePolicyEnd = balanceDomain.indexOf('} as const);', balancePolicyStart);
+  const observationPolicy = sources.chainObservationPolicySource.replace(/\r\n/gu, '\n');
+  const observationPolicyStart = observationPolicy.indexOf(
+    'export const CHAIN_OBSERVATION_RESILIENCE_POLICY = deepFreeze({',
+  );
+  const observationPolicyEnd = observationPolicy.indexOf(
+    'export const CHAIN_OBSERVATION_NETWORK_POLICIES',
+    observationPolicyStart,
+  );
+  if (
+    balancePolicyStart < 0 ||
+    balancePolicyEnd <= balancePolicyStart ||
+    observationPolicyStart < 0 ||
+    observationPolicyEnd <= observationPolicyStart
+  ) {
+    return false;
+  }
+  const balancePolicy = balanceDomain.slice(balancePolicyStart, balancePolicyEnd);
+  const resiliencePolicy = observationPolicy.slice(observationPolicyStart, observationPolicyEnd);
+
+  const composition = sources.compositionSource.replace(/\r\n/gu, '\n');
+  const disposition = sources.failClosedJobDispositionSource.replace(/\r\n/gu, '\n');
+  const dispatcher = sources.reviewedJobDispatcherSource.replace(/\r\n/gu, '\n');
+  const ingressStart = dispatcher.indexOf('export function parseBalanceSyncConsumerJobEnvelope(');
+  const ingressEnd = dispatcher.indexOf('function parseHandlers(', ingressStart);
+  if (ingressStart < 0 || ingressEnd <= ingressStart) return false;
+  const ingress = dispatcher.slice(ingressStart, ingressEnd);
+  const worker = sources.sqsJobWorkerSource.replace(/\r\n/gu, '\n');
+
+  return (
+    exactExecutableLineCount(resiliencePolicy, 'maxAttempts: 3,') === 1 &&
+    exactExecutableLineCount(
+      balancePolicy,
+      'maxAttempts: CHAIN_OBSERVATION_RESILIENCE_POLICY.reads.maxAttempts,',
+    ) === 1 &&
+    exactExecutableLineCount(balancePolicy, 'retryBaseDelaySeconds: 5,') === 1 &&
+    exactExecutableLineCount(balancePolicy, 'retryMaximumDelaySeconds: 60,') === 1 &&
+    exactExecutableLineCount(policy, 'maxReceiveCount: BALANCE_SYNC_POLICY.maxAttempts,') === 1 &&
+    exactExecutableLineCount(
+      policy,
+      'retryBaseDelaySeconds: BALANCE_SYNC_POLICY.retryBaseDelaySeconds,',
+    ) === 1 &&
+    exactExecutableLineCount(
+      policy,
+      'retryMaxDelaySeconds: BALANCE_SYNC_POLICY.retryMaximumDelaySeconds,',
+    ) === 1 &&
+    exactExecutableLineCount(
+      policy,
+      'export function assertBalanceConsumerSqsReceiptRedrivePolicy(',
+    ) === 1 &&
+    policy.includes(
+      'Balance-consumer SQS receipt redrive policy must exactly match BALANCE_SYNC_POLICY',
+    ) &&
+    exactExecutableLineCount(balanceLoader, 'BALANCE_CONSUMER_SQS_RECEIPT_REDRIVE_POLICY,') === 1 &&
+    exactExecutableLineCount(
+      balanceLoader,
+      'assertBalanceConsumerSqsReceiptRedrivePolicy(sqsClient);',
+    ) === 1 &&
+    exactExecutableLineCount(
+      composition,
+      'assertBalanceConsumerSqsReceiptRedrivePolicy(dependencies.infrastructureConfig.sqs);',
+    ) === 1 &&
+    exactExecutableLineCount(composition, 'maxReceiveCount: BALANCE_SYNC_POLICY.maxAttempts,') ===
+      1 &&
+    exactExecutableLineCount(
+      composition,
+      'retryBaseDelaySeconds: BALANCE_SYNC_POLICY.retryBaseDelaySeconds,',
+    ) === 1 &&
+    exactExecutableLineCount(
+      composition,
+      'retryMaxDelaySeconds: BALANCE_SYNC_POLICY.retryMaximumDelaySeconds,',
+    ) === 1 &&
+    !/infrastructureConfig\.sqs\.(?:maxReceiveCount|retryBaseDelaySeconds|retryMaxDelaySeconds)/u.test(
+      composition,
+    ) &&
+    exactExecutableLineCount(ingress, "job.kind !== 'blockchain.balance-sync' ||") === 1 &&
+    exactExecutableLineCount(ingress, 'job.payload.attempt !== 1 ||') === 1 &&
+    exactExecutableLineCount(
+      ingress,
+      "(job.payload.cause !== 'SCHEDULED' && job.payload.cause !== 'MANUAL_RECOVERY')",
+    ) === 1 &&
+    exactExecutableLineCount(
+      disposition,
+      'export class FailClosedBalanceSyncJobPort implements BalanceSyncJobPort {',
+    ) === 1 &&
+    exactExecutableLineCount(
+      disposition,
+      'throw new BalanceSyncJobDispositionNotApprovedError();',
+    ) === 2 &&
+    !/(?:node:|@aws-sdk|\bfetch\s*\(|\bsendMessage\s*\(|\bdirectDeadLetter\s*\(|\bsendJob\s*\(|\bpublish(?:Batch)?\s*\()/u.test(
+      disposition,
+    ) &&
+    exactExecutableLineCount(
+      worker,
+      'const exhausted = message.receiveCount >= this.policy.maxReceiveCount;',
+    ) === 1 &&
+    exactExecutableLineCount(
+      worker,
+      'this.policy.retryBaseDelaySeconds * 2 ** (message.receiveCount - 1),',
+    ) === 1 &&
+    exactExecutableLineCount(worker, 'await changeVisibilityWithDeadline(') === 1 &&
+    !/\.(?:scheduleRetry|deadLetter|sendMessage|directDeadLetter)\s*\(/u.test(worker)
+  );
+}
+
 function hasDormantBalanceConsumerPackagingContract(
   sources: BalanceConsumerArtifactSources,
 ): boolean {
@@ -2219,6 +2356,8 @@ function hasExactStandaloneBalanceConsumerEnvelopeContract(
     'SQS_BALANCE_DEAD_LETTER_QUEUE_URL',
     'SQS_MAX_RECEIVE_COUNT',
     'SQS_VISIBILITY_TIMEOUT_SECONDS',
+    'SQS_RETRY_BASE_DELAY_SECONDS',
+    'SQS_RETRY_MAX_DELAY_SECONDS',
   ] as const;
   const environment =
     taskDefinition.match(/\n\s+Environment:\n([\s\S]*?)\n\s+LinuxParameters:/u)?.[1] ?? '';
@@ -2316,6 +2455,21 @@ function hasExactStandaloneBalanceConsumerEnvelopeContract(
       taskDefinition,
       '- { Name: BALANCE_CONSUMER_SOURCE_APPROVAL, Value: ethereum-solana-mainnet-reviewed }',
     ) === 1 &&
+    exactExecutableLineCount(taskDefinition, "- { Name: SQS_MAX_RECEIVE_COUNT, Value: '3' }") ===
+      1 &&
+    exactExecutableLineCount(
+      taskDefinition,
+      '- { Name: SQS_VISIBILITY_TIMEOUT_SECONDS, Value: !Ref SqsVisibilityTimeoutSeconds }',
+    ) === 1 &&
+    exactExecutableLineCount(
+      taskDefinition,
+      "- { Name: SQS_RETRY_BASE_DELAY_SECONDS, Value: '5' }",
+    ) === 1 &&
+    exactExecutableLineCount(
+      taskDefinition,
+      "- { Name: SQS_RETRY_MAX_DELAY_SECONDS, Value: '60' }",
+    ) === 1 &&
+    !/(?:^|\n) {2}SqsMaxReceiveCount:\s*$/u.test(envelope) &&
     exactExecutableLineCount(taskDefinition, 'Capabilities: { Drop: [ALL] }') === 1 &&
     hasExactYamlScalarProperty(taskDefinition, 'ReadonlyRootFilesystem', 'true') &&
     hasExactYamlScalarProperty(taskDefinition, 'User', "'10001:10001'") &&
@@ -2382,16 +2536,17 @@ function hasExactBalanceConsumerEnvelopeValidatorContract(
     'validateOutputs(source, errors);',
   ] as const;
   const requiredEnforcementMarkers = [
-    "const reviewedTemplateSha256 = '91b9129ea24a8c9abd8baa66d411d231eba84e417a80d066f1bd0fc819bd7685';",
+    "const reviewedTemplateSha256 = '3b621023e516cd553c34fbe09e4b0047d1395fab45e105eef7692570d6429045';",
     "'UNCOMPOSED_SOURCE_ONLY: release and preflight controls only bind and inspect this source; no application parent template or deployment target composes or provisions it.',",
     "'HARD_ZERO_AND_NO_EGRESS: the ECS service has a literal desired count of zero and its dedicated security group has no external egress path, so this source cannot run the consumer.',",
     "'NON_PRODUCTION_ONLY: EnvironmentName accepts only dev, test, qa, sandbox, or staging families, and deployment still requires explicit billing acknowledgement.',",
+    "'SOURCE_QUEUE_REDRIVE_UNBOUND: this standalone envelope pins only consumer-process settings; it neither defines nor proves the source queue RedrivePolicy, whose deployed maxReceiveCount remains separately blocked.',",
     "'ACTIVATION_GATES_UNRESOLVED: source activation, runtime composition, database grants and credentials, metadata-only secret custody, mainnet RPC egress, operational ownership, and deployed evidence remain absent.',",
     "requireExactIds(resources, expectedResources, 'Resource allowlist', errors);",
     `"[{ CidrIp: 127.0.0.1/32, IpProtocol: '-1' }]"`,
     "'BalanceConsumerTaskExecutionRole must be image-pull/log-only with only the ECR authorization wildcard.',",
     "'BalanceConsumerTaskRole must have only exact source receive/delete/change-visibility and SQS-scoped decrypt authority.',",
-    "'BalanceConsumerTaskDefinition must receive only the eleven reviewed nonsecret settings.',",
+    "'BalanceConsumerTaskDefinition must receive only the thirteen reviewed nonsecret settings.',",
     "'BalanceConsumerTaskDefinition must not receive generic queues, databases, Redis, auth/wallet, RPC/provider endpoints or credentials, or secret configuration.',",
     "'BalanceConsumerService must remain hard-zero with no public IP activation path.'",
     'if (templateSha256 !== reviewedTemplateSha256) {',
@@ -2423,6 +2578,10 @@ function hasExactBalanceConsumerEnvelopeValidatorContract(
     validator.includes('BALANCE_CONSUMER_MODE, Value: disabled'),
     validator.includes('BALANCE_CONSUMER_NETWORK, Value: ethereum-solana-mainnet'),
     validator.includes('BALANCE_CONSUMER_SOURCE_APPROVAL, Value: ethereum-solana-mainnet-reviewed'),
+    validator.includes("SQS_MAX_RECEIVE_COUNT, Value: '3'"),
+    validator.includes("SQS_RETRY_BASE_DELAY_SECONDS, Value: '5'"),
+    validator.includes("SQS_RETRY_MAX_DELAY_SECONDS, Value: '60'"),
+    !validator.includes("['SqsMaxReceiveCount', 'Number']"),
     validator.includes("['DesiredCount', '0']"),
     validator.includes("['EnableExecuteCommand', 'false']"),
     validator.includes("['AssignPublicIp', 'DISABLED']"),
@@ -2756,6 +2915,7 @@ export function inspectBalanceConsumerDeploymentArtifacts(
       hasExactReviewedBalanceConsumerArtifactBytes(sources) &&
       hasDormantBalanceConsumerSourceContract(sources) &&
       hasPinnedBalanceConsumerQueueBoundaryContract(sources) &&
+      hasExactBalanceConsumerNativeReceiptRedriveContract(sources) &&
       hasDormantBalanceConsumerPackagingContract(sources) &&
       hasUncomposedBalanceConsumerParentContract(sources) &&
       hasIsolatedBalanceConsumerWorkloadContract(sources) &&
@@ -3389,6 +3549,25 @@ export function loadRepositoryProductionPreflightInput(
           repositoryRoot,
           'apps/api/src/blockchain-sync/application/balance-sync-consumer.composition.ts',
         ),
+        'utf8',
+      ),
+      balanceSyncDomainSource: readFileSync(
+        resolve(repositoryRoot, 'apps/api/src/blockchain-sync/domain/balance-sync.ts'),
+        'utf8',
+      ),
+      chainObservationPolicySource: readFileSync(
+        resolve(repositoryRoot, 'apps/api/src/blockchain/domain/chain-observation-policy.ts'),
+        'utf8',
+      ),
+      failClosedJobDispositionSource: readFileSync(
+        resolve(
+          repositoryRoot,
+          'apps/api/src/blockchain-sync/application/fail-closed-balance-sync-job.port.ts',
+        ),
+        'utf8',
+      ),
+      reviewedJobDispatcherSource: readFileSync(
+        resolve(repositoryRoot, 'apps/api/src/infrastructure/sqs/reviewed-job-dispatcher.ts'),
         'utf8',
       ),
       infrastructureConfigSource: readFileSync(

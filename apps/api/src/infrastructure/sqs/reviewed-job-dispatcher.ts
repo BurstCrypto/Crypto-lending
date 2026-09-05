@@ -227,7 +227,13 @@ export function parseBalanceSyncConsumerJobEnvelope(
   value: unknown,
 ): BalanceSyncConsumerJobEnvelope {
   const job = parseReviewedConsumerJobEnvelope(value);
-  if (job.kind !== 'blockchain.balance-sync') return fail('UNREVIEWED_JOB');
+  if (
+    job.kind !== 'blockchain.balance-sync' ||
+    job.payload.attempt !== 1 ||
+    (job.payload.cause !== 'SCHEDULED' && job.payload.cause !== 'MANUAL_RECOVERY')
+  ) {
+    return fail('UNREVIEWED_JOB');
+  }
   return job;
 }
 
@@ -295,7 +301,11 @@ export class ReviewedJobDispatcher {
   }
 }
 
-/** Dormant dedicated balance boundary; it is intentionally not registered in any module. */
+/**
+ * Dormant dedicated balance boundary. Native SQS receipt redrive owns every
+ * subsequent attempt, so this ingress accepts only first-attempt source jobs
+ * and is intentionally not registered in any module.
+ */
 export class BalanceSyncJobDispatcher {
   private readonly handler: ReviewedJobHandler<BalanceSyncConsumerJobEnvelope>;
 

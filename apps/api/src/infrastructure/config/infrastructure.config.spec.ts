@@ -3,7 +3,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { rootCertificates } from 'node:tls';
 
+import { BALANCE_SYNC_POLICY } from '../../blockchain-sync/domain/balance-sync';
 import {
+  BALANCE_CONSUMER_SQS_RECEIPT_REDRIVE_POLICY,
   loadBalanceConsumerInfrastructureConfig,
   loadInfrastructureConfig,
   loadMigrationDatabaseConfig,
@@ -236,6 +238,44 @@ describe('loadInfrastructureConfig', () => {
     ]);
     expect(config.sqs).not.toHaveProperty('queueUrl');
     expect(config.sqs).not.toHaveProperty('deadLetterQueueUrl');
+  });
+
+  it('pins native balance receipt redrive to the domain attempt and delay policy', () => {
+    const config = loadBalanceConsumerInfrastructureConfig(balanceConsumerEnvironment());
+
+    expect(BALANCE_CONSUMER_SQS_RECEIPT_REDRIVE_POLICY).toEqual({
+      maxReceiveCount: BALANCE_SYNC_POLICY.maxAttempts,
+      retryBaseDelaySeconds: BALANCE_SYNC_POLICY.retryBaseDelaySeconds,
+      retryMaxDelaySeconds: BALANCE_SYNC_POLICY.retryMaximumDelaySeconds,
+    });
+    expect(Object.isFrozen(BALANCE_CONSUMER_SQS_RECEIPT_REDRIVE_POLICY)).toBe(true);
+    expect(config.sqs).toMatchObject(BALANCE_CONSUMER_SQS_RECEIPT_REDRIVE_POLICY);
+  });
+
+  it.each([
+    ['SQS_MAX_RECEIVE_COUNT', '2'],
+    ['SQS_RETRY_BASE_DELAY_SECONDS', '1'],
+    ['SQS_RETRY_MAX_DELAY_SECONDS', '59'],
+  ] as const)('rejects balance receipt redrive drift through %s', (name, value) => {
+    expect(() =>
+      loadBalanceConsumerInfrastructureConfig(balanceConsumerEnvironment({ [name]: value })),
+    ).toThrow('Balance-consumer SQS receipt redrive policy must exactly match BALANCE_SYNC_POLICY');
+  });
+
+  it('leaves the generic job worker receipt policy independently configurable', () => {
+    const config = loadInfrastructureConfig(
+      baseEnvironment({
+        SQS_MAX_RECEIVE_COUNT: '7',
+        SQS_RETRY_BASE_DELAY_SECONDS: '2',
+        SQS_RETRY_MAX_DELAY_SECONDS: '17',
+      }),
+    );
+
+    expect(config.sqs).toMatchObject({
+      maxReceiveCount: 7,
+      retryBaseDelaySeconds: 2,
+      retryMaxDelaySeconds: 17,
+    });
   });
 
   it.each(['SQS_QUEUE_URL', 'SQS_DEAD_LETTER_QUEUE_URL'])(

@@ -1,7 +1,13 @@
+import { performance } from 'node:perf_hooks';
+
 import type { BalanceConsumerInfrastructureConfig } from '../../infrastructure/config/infrastructure.config';
 import { applicationObservability } from '../../infrastructure/observability';
 import type { SqsQueueReceiptTransport } from '../../infrastructure/sqs/sqs-queue-receipt.port';
-import { createDeterministicBalanceSyncJobEnvelope } from '../domain/balance-sync';
+import type { JobProcessingResult, ReceivedQueueMessage } from '../../infrastructure/sqs/sqs.types';
+import {
+  BALANCE_SYNC_POLICY,
+  createDeterministicBalanceSyncJobEnvelope,
+} from '../domain/balance-sync';
 import type { BalanceJsonRpcTransport } from '../infrastructure/rpc/balance-json-rpc';
 import { EthereumMainnetBalanceIndexerAdapter } from '../infrastructure/rpc/ethereum-mainnet-balance-indexer.adapter';
 import { SolanaMainnetBalanceIndexerAdapter } from '../infrastructure/rpc/solana-mainnet-balance-indexer.adapter';
@@ -45,13 +51,15 @@ function infrastructureConfig(
       sdkMaxAttempts: 1,
       maxReceiveCount: 3,
       visibilityTimeoutSeconds: 30,
-      retryBaseDelaySeconds: 1,
+      retryBaseDelaySeconds: 5,
       retryMaxDelaySeconds: 60,
     },
   };
 }
 
-function createHarness(): Readonly<{
+function createHarness(
+  configuredInfrastructure: BalanceConsumerInfrastructureConfig = infrastructureConfig(),
+): Readonly<{
   composition: ReturnType<typeof createBalanceSyncConsumerComposition>;
   ethereumExchange: jest.Mock;
   solanaExchange: jest.Mock;
@@ -62,6 +70,10 @@ function createHarness(): Readonly<{
   clock: BalanceSyncClockPort;
   metrics: BalanceSyncMetricsPort;
   receive: jest.Mock;
+  deleteReceipt: jest.Mock;
+  changeVisibility: jest.Mock;
+  sendMessage: jest.Mock;
+  directDeadLetter: jest.Mock;
 }> {
   const ethereumExchange = jest.fn();
   const solanaExchange = jest.fn();
@@ -79,10 +91,21 @@ function createHarness(): Readonly<{
   const clock: BalanceSyncClockPort = { now: () => new Date('2026-09-04T12:00:00.000Z') };
   const metrics: BalanceSyncMetricsPort = { record: jest.fn(), alert: jest.fn() };
   const receive = jest.fn().mockResolvedValue([]);
-  const sqs = { receive } as unknown as SqsQueueReceiptTransport;
+  const deleteReceipt = jest.fn().mockResolvedValue(undefined);
+  const changeVisibility = jest.fn().mockResolvedValue(undefined);
+  const sendMessage = jest.fn().mockResolvedValue(undefined);
+  const directDeadLetter = jest.fn().mockResolvedValue(undefined);
+  const sqs = {
+    receive,
+    delete: deleteReceipt,
+    changeVisibility,
+    parseEnvelope: (body: string) => JSON.parse(body) as unknown,
+    sendMessage,
+    directDeadLetter,
+  } as unknown as SqsQueueReceiptTransport;
   const composition = createBalanceSyncConsumerComposition({
     sqs,
-    infrastructureConfig: infrastructureConfig(),
+    infrastructureConfig: configuredInfrastructure,
     observability: applicationObservability,
     ethereumTransport,
     solanaTransport,
@@ -102,6 +125,10 @@ function createHarness(): Readonly<{
     clock,
     metrics,
     receive,
+    deleteReceipt,
+    changeVisibility,
+    sendMessage,
+    directDeadLetter,
   };
 }
 
@@ -135,6 +162,21 @@ describe('createBalanceSyncConsumerComposition', () => {
     expect(receive).not.toHaveBeenCalled();
     expect(ethereumExchange).not.toHaveBeenCalled();
     expect(solanaExchange).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['maxReceiveCount', 2],
+    ['retryBaseDelaySeconds', 1],
+    ['retryMaxDelaySeconds', 59],
+  ] as const)('rejects forged balance receipt policy field %s', (field, value) => {
+    const configuredInfrastructure = infrastructureConfig();
+
+    expect(() =>
+      createHarness({
+        ...configuredInfrastructure,
+        sqs: { ...configuredInfrastructure.sqs, [field]: value },
+      }),
+    ).toThrow('Balance-consumer SQS receipt redrive policy must exactly match BALANCE_SYNC_POLICY');
   });
 
   it('constructs an inert, transparent, fail-closed object graph', () => {
@@ -218,6 +260,86 @@ describe('createBalanceSyncConsumerComposition', () => {
     expect(test.receive).toHaveBeenCalledWith(
       'https://sqs.us-east-1.amazonaws.com/000000000000/balance-sync',
     );
+  });
+
+  it('uses only pinned receipt visibility and native redrive for three bounded failures', async () => {
+    const test = createHarness();
+    const handler = jest.fn().mockRejectedValue(new Error('private provider failure'));
+    const job = createDeterministicBalanceSyncJobEnvelope(
+      {
+        schemaVersion: 1,
+        accountId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        walletId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+        networkId: ETHEREUM_MAINNET_BALANCE_NETWORK_ID,
+        requiredTier: 'PROVISIONAL',
+        cause: 'SCHEDULED',
+        attempt: 1,
+        rescanFromPosition: null,
+      },
+      {
+        id: 'balance-receipt-job-1',
+        occurredAt: '2026-09-04T12:00:00.000Z',
+        correlation: { correlationId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc' },
+      },
+    );
+    const messages = [1, 2, 3].map((receiveCount): ReceivedQueueMessage => ({
+      messageId: `balance-message-${receiveCount}`,
+      receiptHandle: `balance-receipt-${receiveCount}`,
+      body: JSON.stringify(job),
+      receiveCount,
+      receivedAtMonotonicMs: performance.now(),
+    }));
+    test.receive
+      .mockResolvedValueOnce([messages[0]])
+      .mockResolvedValueOnce([messages[1]])
+      .mockResolvedValueOnce([messages[2]]);
+
+    const results: JobProcessingResult[] = [];
+    for (let attempt = 0; attempt < messages.length; attempt += 1) {
+      results.push(await test.composition.queueWorker.processOne(handler));
+    }
+
+    expect(results.map((result) => result.status)).toEqual([
+      'retry-scheduled',
+      'retry-scheduled',
+      'awaiting-dead-letter',
+    ]);
+    expect(
+      results.map((result) =>
+        'retryDelaySeconds' in result ? result.retryDelaySeconds : undefined,
+      ),
+    ).toEqual([
+      BALANCE_SYNC_POLICY.retryBaseDelaySeconds,
+      BALANCE_SYNC_POLICY.retryBaseDelaySeconds * 2,
+      0,
+    ]);
+    expect(
+      test.changeVisibility.mock.calls.map(([message, delaySeconds, queueUrl]) => ({
+        messageId: (message as ReceivedQueueMessage).messageId,
+        delaySeconds,
+        queueUrl,
+      })),
+    ).toEqual([
+      {
+        messageId: 'balance-message-1',
+        delaySeconds: 5,
+        queueUrl: 'https://sqs.us-east-1.amazonaws.com/000000000000/balance-sync',
+      },
+      {
+        messageId: 'balance-message-2',
+        delaySeconds: 10,
+        queueUrl: 'https://sqs.us-east-1.amazonaws.com/000000000000/balance-sync',
+      },
+      {
+        messageId: 'balance-message-3',
+        delaySeconds: 0,
+        queueUrl: 'https://sqs.us-east-1.amazonaws.com/000000000000/balance-sync',
+      },
+    ]);
+    expect(handler).toHaveBeenCalledTimes(BALANCE_SYNC_POLICY.maxAttempts);
+    expect(test.deleteReceipt).not.toHaveBeenCalled();
+    expect(test.sendMessage).not.toHaveBeenCalled();
+    expect(test.directDeadLetter).not.toHaveBeenCalled();
   });
 
   it('dispatches an exact launch-network job only through the composed orchestrator', async () => {

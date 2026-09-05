@@ -27,11 +27,6 @@ Parameters:
   ApiImageDigest:
     Type: String
     AllowedPattern: '^[a-f0-9]{64}$'
-  SqsMaxReceiveCount:
-    Type: Number
-    Default: 3
-    MinValue: 1
-    MaxValue: 100
   SqsVisibilityTimeoutSeconds:
     Type: Number
     Default: 30
@@ -169,8 +164,10 @@ Resources:
               Value: !Sub https://sqs.${AWS::Region}.${AWS::URLSuffix}/${AWS::AccountId}/crypto-lending-${EnvironmentName}-balance-sync
             - Name: SQS_BALANCE_DEAD_LETTER_QUEUE_URL
               Value: !Sub https://sqs.${AWS::Region}.${AWS::URLSuffix}/${AWS::AccountId}/crypto-lending-${EnvironmentName}-balance-sync-dlq
-            - { Name: SQS_MAX_RECEIVE_COUNT, Value: !Ref SqsMaxReceiveCount }
+            - { Name: SQS_MAX_RECEIVE_COUNT, Value: '3' }
             - { Name: SQS_VISIBILITY_TIMEOUT_SECONDS, Value: !Ref SqsVisibilityTimeoutSeconds }
+            - { Name: SQS_RETRY_BASE_DELAY_SECONDS, Value: '5' }
+            - { Name: SQS_RETRY_MAX_DELAY_SECONDS, Value: '60' }
           LinuxParameters:
             Capabilities: { Drop: [ALL] }
             InitProcessEnabled: true
