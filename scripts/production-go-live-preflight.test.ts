@@ -152,6 +152,13 @@ const BALANCE_CONSUMER_ARTIFACTS = Object.freeze({
     ),
     'utf8',
   ),
+  mainnetBalanceIndexerRouterSource: readFileSync(
+    resolve(
+      __dirname,
+      '../apps/api/src/blockchain-sync/application/mainnet-balance-indexer.router.ts',
+    ),
+    'utf8',
+  ),
   balanceJsonRpcSource: readFileSync(
     resolve(__dirname, '../apps/api/src/blockchain-sync/infrastructure/rpc/balance-json-rpc.ts'),
     'utf8',
@@ -1358,6 +1365,149 @@ test('balance-consumer inspection rejects dormant lifecycle coordinator drift', 
   }
 });
 
+test('balance-consumer inspection rejects mainnet router scope, snapshot, and capture drift', () => {
+  const mutations: readonly (readonly [string, string])[] = [
+    [
+      "export const ETHEREUM_MAINNET_BALANCE_NETWORK_ID = 'eip155:1' as const;",
+      "export const ETHEREUM_MAINNET_BALANCE_NETWORK_ID = 'eip155:8453' as const;",
+    ],
+    [
+      "export const SOLANA_MAINNET_BALANCE_NETWORK_ID = 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp' as const;",
+      "export const SOLANA_MAINNET_BALANCE_NETWORK_ID = 'eip155:137' as const;",
+    ],
+    ['!UUID_V4.test(record.accountId) ||', 'record.accountId.length === 0 ||'],
+    ['!UUID_V4.test(record.walletId) ||', 'record.walletId.length === 0 ||'],
+    [
+      'const validated = copyReadRequest(request, READ_REQUEST_KEYS);',
+      'const validated = request;',
+    ],
+    [
+      'return this.indexerFor(validated.networkId).rescanFromCheckpoint(validated);',
+      'return this.indexerFor(validated.networkId).rescanFromCheckpoint(request);',
+    ],
+    [
+      "if (!descriptor || !('value' in descriptor) || descriptor.enumerable !== true) {",
+      'if (!descriptor || descriptor.enumerable !== true) {',
+    ],
+    ['return Object.freeze(Object.assign(Object.create(null) as T, members));', 'return members;'],
+    [
+      'if (ethereum === solana) return invalidConfiguration();',
+      'if (false) return invalidConfiguration();',
+    ],
+    [
+      "const readCurrent = capturedDataMethod(receiver, 'readCurrent');",
+      'const readCurrent = (receiver as BalanceSyncIndexerPort).readCurrent;',
+    ],
+    [
+      'const descriptor = Object.getOwnPropertyDescriptor(owner, name);',
+      'const descriptor = Reflect.get(owner, name);',
+    ],
+    ['owner !== Object.prototype &&', 'owner !== null &&'],
+    [
+      '      default:\n        return unsupportedRequest();',
+      '      default:\n        return this.ethereum;',
+    ],
+    [
+      '      case ETHEREUM_MAINNET_BALANCE_NETWORK_ID:\n        return this.ethereum;',
+      "      case ETHEREUM_MAINNET_BALANCE_NETWORK_ID:\n        return this.ethereum;\n      case 'eip155:8453':\n        return this.ethereum;",
+    ],
+  ];
+
+  for (const [approved, rejected] of mutations) {
+    assert.deepEqual(
+      inspectBalanceConsumerDeploymentArtifacts(
+        mutateBalanceConsumerArtifact('mainnetBalanceIndexerRouterSource', approved, rejected),
+      ),
+      INVALID_BALANCE_CONSUMER_DEPLOYMENT,
+      approved,
+    );
+  }
+
+  assert.deepEqual(
+    inspectBalanceConsumerDeploymentArtifacts(
+      mutateBalanceConsumerArtifact(
+        'compositionSource',
+        'const indexer = new MainnetBalanceIndexerRouter(ethereumIndexer, solanaIndexer);',
+        'const indexer = new MainnetBalanceIndexerRouter(ethereumIndexer, ethereumIndexer);',
+      ),
+    ),
+    INVALID_BALANCE_CONSUMER_DEPLOYMENT,
+  );
+});
+
+test('balance-consumer inspection rejects unauthenticated or mutable failure classification', () => {
+  const mutations: readonly (readonly [keyof BalanceConsumerArtifactSources, string, string])[] = [
+    [
+      'balanceSyncDomainSource',
+      'const VERIFIED_BALANCE_SYNC_INDEXER_FAILURES = new WeakSet<object>();',
+      'const VERIFIED_BALANCE_SYNC_INDEXER_FAILURES = new Set<object>();',
+    ],
+    ['balanceSyncDomainSource', 'Object.freeze(this);', 'void this;'],
+    ['balanceSyncDomainSource', 'isProxy(value) ||', 'false ||'],
+    [
+      'balanceSyncDomainSource',
+      'descriptor.configurable !== false ||',
+      'descriptor.configurable === false ||',
+    ],
+    ['balanceSyncDomainSource', '? Object.freeze({ code })', '? ({ code })'],
+    [
+      'balanceSyncDomainSource',
+      'const descriptors = Object.getOwnPropertyDescriptors(options) as unknown as PropertyDescriptorMap;',
+      'const descriptors = { retryAfterSeconds: { value: options.retryAfterSeconds } } as PropertyDescriptorMap;',
+    ],
+    [
+      'ethereumBalanceIndexerSource',
+      'const reviewed = reviewBalanceSyncIndexerFailure(error);',
+      'const reviewed = error instanceof BalanceSyncIndexerFailure ? error : null;',
+    ],
+    [
+      'solanaBalanceIndexerSource',
+      'const reviewed = reviewBalanceSyncIndexerFailure(error);',
+      'const reviewed = error instanceof BalanceSyncIndexerFailure ? error : null;',
+    ],
+    [
+      'ethereumBalanceIndexerSource',
+      "return parseEvmWalletAddress(value);\n    } catch {\n      throw new BalanceSyncIndexerFailure('PROVIDER_INVALID_DATA');",
+      'return parseEvmWalletAddress(value);\n    } catch (error) {\n      throw error;',
+    ],
+    [
+      'solanaBalanceIndexerSource',
+      "    } catch {\n      throw new BalanceSyncIndexerFailure('PROVIDER_INVALID_DATA');\n    }\n  }\n\n  private async readBlock(",
+      '    } catch (error) {\n      throw error;\n    }\n  }\n\n  private async readBlock(',
+    ],
+    [
+      'ethereumBalanceIndexerSource',
+      'const milliseconds = Date.prototype.getTime.call(value) as number;',
+      'const milliseconds = value.getTime();',
+    ],
+    [
+      'solanaBalanceIndexerSource',
+      'return Date.prototype.toISOString.call(value) as string;',
+      'return value.toISOString();',
+    ],
+    [
+      'balanceSyncOrchestratorSource',
+      'const reviewedFailure = reviewBalanceSyncIndexerFailure(error);',
+      'const reviewedFailure = error instanceof BalanceSyncIndexerFailure ? error : null;',
+    ],
+    [
+      'balanceSyncOrchestratorSource',
+      'const VERIFIED_BALANCE_SYNC_ORCHESTRATOR_ERRORS = new WeakSet<object>();',
+      'const VERIFIED_BALANCE_SYNC_ORCHESTRATOR_ERRORS = new Set<object>();',
+    ],
+  ];
+
+  for (const [key, approved, rejected] of mutations) {
+    assert.deepEqual(
+      inspectBalanceConsumerDeploymentArtifacts(
+        mutateBalanceConsumerArtifact(key, approved, rejected),
+      ),
+      INVALID_BALANCE_CONSUMER_DEPLOYMENT,
+      `${key}: ${approved}`,
+    );
+  }
+});
+
 test('balance-consumer inspection rejects provider-neutral JSON-RPC capability and registration drift', () => {
   const capabilityMutations: readonly (readonly [
     keyof BalanceConsumerArtifactSources,
@@ -1424,6 +1574,10 @@ test('balance-consumer inspection rejects provider-neutral JSON-RPC capability a
       ...BALANCE_CONSUMER_ARTIFACTS,
       solanaBalanceIndexerSource: `${BALANCE_CONSUMER_ARTIFACTS.solanaBalanceIndexerSource}\n@Module({ providers: [SolanaMainnetBalanceIndexerAdapter] })\nclass UnreviewedRpcModule {}\n`,
     },
+    {
+      ...BALANCE_CONSUMER_ARTIFACTS,
+      mainnetBalanceIndexerRouterSource: `${BALANCE_CONSUMER_ARTIFACTS.mainnetBalanceIndexerRouterSource}\nvoid fetch('https://unreviewed.invalid');\n`,
+    },
   ];
   for (const candidate of directCapabilities) {
     assert.deepEqual(
@@ -1464,6 +1618,10 @@ test('balance-consumer inspection rejects provider-neutral JSON-RPC capability a
     {
       ...BALANCE_CONSUMER_ARTIFACTS,
       balanceSyncOrchestratorSource: `${BALANCE_CONSUMER_ARTIFACTS.balanceSyncOrchestratorSource}\nvoid SolanaMainnetBalanceIndexerAdapter;\n`,
+    },
+    {
+      ...BALANCE_CONSUMER_ARTIFACTS,
+      runtimeSource: `${BALANCE_CONSUMER_ARTIFACTS.runtimeSource}\nvoid MainnetBalanceIndexerRouter;\n`,
     },
     {
       ...BALANCE_CONSUMER_ARTIFACTS,
@@ -2039,6 +2197,8 @@ test('balance-consumer artifact shape, bounds, and private brand fail closed', (
   delete missingMetadataValidator.balanceConsumerMetadataTransitionValidatorSource;
   const missingLifecycle = { ...BALANCE_CONSUMER_ARTIFACTS } as Record<string, unknown>;
   delete missingLifecycle.balanceConsumerLifecycleSource;
+  const missingMainnetRouter = { ...BALANCE_CONSUMER_ARTIFACTS } as Record<string, unknown>;
+  delete missingMainnetRouter.mainnetBalanceIndexerRouterSource;
   const missingBalanceJsonRpc = { ...BALANCE_CONSUMER_ARTIFACTS } as Record<string, unknown>;
   delete missingBalanceJsonRpc.balanceJsonRpcSource;
   const missingEthereumIndexer = { ...BALANCE_CONSUMER_ARTIFACTS } as Record<string, unknown>;
@@ -2067,6 +2227,7 @@ test('balance-consumer artifact shape, bounds, and private brand fail closed', (
     missing,
     missingMetadataValidator,
     missingLifecycle,
+    missingMainnetRouter,
     missingBalanceJsonRpc,
     missingEthereumIndexer,
     missingSolanaIndexer,

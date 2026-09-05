@@ -161,6 +161,7 @@ export interface BalanceConsumerArtifactSources {
   readonly compositionSource: string;
   readonly balanceConsumerResourceSource: string;
   readonly balanceConsumerLifecycleSource: string;
+  readonly mainnetBalanceIndexerRouterSource: string;
   readonly balanceJsonRpcSource: string;
   readonly ethereumBalanceIndexerSource: string;
   readonly solanaBalanceIndexerSource: string;
@@ -523,6 +524,7 @@ const BALANCE_CONSUMER_ARTIFACT_KEYS = Object.freeze([
   'compositionSource',
   'balanceConsumerResourceSource',
   'balanceConsumerLifecycleSource',
+  'mainnetBalanceIndexerRouterSource',
   'balanceJsonRpcSource',
   'ethereumBalanceIndexerSource',
   'solanaBalanceIndexerSource',
@@ -583,9 +585,11 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
   balanceConsumerResourceSource: 'f210defba63ab0c2379ad499c8d84d4df79a3bc23f8ea31d51e740c8b71d0118',
   balanceConsumerLifecycleSource:
     'd4313b5a5e3f50022678beda7afb8768c9426f6b361be137e4be27e8e86f3a81',
+  mainnetBalanceIndexerRouterSource:
+    '5238cd82822845cc61a4d8024a72bbfae523e46a92ae17458160ab7d9698538a',
   balanceJsonRpcSource: 'cbe7a9ba94879e138342cd7d7c39c301aa7fbfc284723057edf62257dbe58b97',
-  ethereumBalanceIndexerSource: '5ba525689d01a4536a162ed381f9178619e7baf8471eaa1932dcece89b3ae5d2',
-  solanaBalanceIndexerSource: 'b089d2af88951c98125ee567c9a9c208836ab2982e6c6180d23d0b4df992617b',
+  ethereumBalanceIndexerSource: '36e0459d90a0fc7f4010572b6f0213b0d5cc3ba8672cf5999d7ec5d6167dc380',
+  solanaBalanceIndexerSource: '4090eb09448654dc4b1e8b5c7aa3ba12fdfa820c3e71401b20b1b47cae863780',
   balanceConsumerPersistenceResourceSource:
     'e95c1ce138f15202e0e181ff31fe164fa22d61e2eaa642a32ea81865a28ff27d',
   balanceConsumerSqsReceiptResourceSource:
@@ -609,8 +613,8 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
   redisSessionRevocationCliSource:
     'fabc12502a15b2b8771c0f4e133bcec7a9ec3c92da389b8f677c9c10f6fa769b',
   migrationCliSource: '9155e1b10fce756188c8b9d8de201b2f82c36680fb76ee28c15923b5c7101b51',
-  balanceSyncOrchestratorSource: '818f824b7fd398a7cd86038de375c3723270ba86311a9cb0e1836eff44c6d72e',
-  balanceSyncDomainSource: '67b1cf8449da0e7c60a95a43cc29425ddc7e33b176933901923538e804171921',
+  balanceSyncOrchestratorSource: 'd47060a17923b52277c2f6577338599eaf7c3e28c7373a698f03575fd1255a02',
+  balanceSyncDomainSource: 'c6992ec597647013b09d2898e196825747f135d72c34bbcf61bc67a393df36b2',
   chainObservationPolicySource: 'ef887514b86230d1516e5a8139c94dc2b2dde06c979440bc6eb3f4df90511533',
   failClosedJobDispositionSource:
     'd49d752db7ca17513a67219af26261add92bf73433224dfd847a098f73baf833',
@@ -1942,13 +1946,312 @@ function hasDormantBalanceConsumerSourceContract(sources: BalanceConsumerArtifac
   );
 }
 
+function hasExactMainnetBalanceIndexerRouterContract(
+  sources: BalanceConsumerArtifactSources,
+): boolean {
+  const router = sources.mainnetBalanceIndexerRouterSource.replace(/\r\n/gu, '\n');
+  const composition = sources.compositionSource.replace(/\r\n/gu, '\n');
+  const executable = trimmedExecutableLines(router).join('\n');
+  const expectedImports = ['../domain/balance-sync', './ports/balance-sync.ports'].sort();
+  const forbiddenCapability =
+    /\b(?:fetch|setTimeout|setInterval|setImmediate|queueMicrotask)\s*\(|\b(?:process|Deno|Bun)\s*\.\s*env\b|\bimport\s*\.\s*meta\s*\.\s*env\b|\bnew\s+(?:URL|URLSearchParams|WebSocket|EventSource|Connection|[A-Za-z0-9_]*Client|[A-Za-z0-9_]*Agent)\s*\(|\b(?:http|https|dns|net|tls)\s*\.\s*[A-Za-z][A-Za-z0-9_]*\s*\(|\b(?:axios|got|request|retry|backoff)\s*\(|@(?:Injectable|Module)\s*\(|\b(?:NestFactory|createApplicationContext)\b|\.(?:listen|connect)\s*\(|['"]https?:\/\//iu;
+  const forbiddenImport =
+    /(?:\bfrom\s+|\bimport\s*(?:\(\s*)?)['"](?:node:)?(?:dns|http|http2|https|net|tls)(?:\/[^'"]*)?['"]|(?:\bfrom\s+|\bimport\s*(?:\(\s*)?)['"](?:axios|ethers|got|superagent|undici|web3|@solana\/web3\.js)['"]/iu;
+  const readRequestKeys = [
+    'const READ_REQUEST_KEYS = Object.freeze([',
+    "'accountId',",
+    "'walletId',",
+    "'networkId',",
+    "'tier',",
+    "'selector',",
+    '] as const);',
+  ].join('\n');
+  const rescanRequestKeys = [
+    'const RESCAN_REQUEST_KEYS = Object.freeze([',
+    '...READ_REQUEST_KEYS,',
+    "'fromFinalizedSource',",
+    "'maximumReadUnits',",
+    '] as const);',
+  ].join('\n');
+  const sourcePointKeys = [
+    'const SOURCE_POINT_KEYS = Object.freeze([',
+    "'position',",
+    "'hash',",
+    "'parentHash',",
+    "'selector',",
+    "'retrievedAt',",
+    '] as const);',
+  ].join('\n');
+  const networkRouter = [
+    'switch (networkId) {',
+    'case ETHEREUM_MAINNET_BALANCE_NETWORK_ID:',
+    'return this.ethereum;',
+    'case SOLANA_MAINNET_BALANCE_NETWORK_ID:',
+    'return this.solana;',
+    'default:',
+    'return unsupportedRequest();',
+    '}',
+  ].join('\n');
+  const exactNetworkGuard = [
+    'record.networkId !== ETHEREUM_MAINNET_BALANCE_NETWORK_ID &&',
+    'record.networkId !== SOLANA_MAINNET_BALANCE_NETWORK_ID',
+  ].join('\n');
+  const routerNetworkDeclarations =
+    router.match(/\bexport const [A-Z0-9_]+_BALANCE_NETWORK_ID\s*=/gu) ?? [];
+  const routerCases = router.match(/^\s*case\s+[^:]+:\s*$/gmu) ?? [];
+  const routerReferences = composition.split('MainnetBalanceIndexerRouter').length - 1;
+  const routerConstruction = composition.indexOf(
+    'const indexer = new MainnetBalanceIndexerRouter(ethereumIndexer, solanaIndexer);',
+  );
+  const orchestratorConstruction = composition.indexOf(
+    'const orchestrator = new BalanceSyncOrchestrator(',
+    routerConstruction,
+  );
+  const orchestratorIndexerArgument = composition.indexOf('    indexer,', orchestratorConstruction);
+
+  return (
+    sortedTypeScriptImportTargets(router).join('\0') === expectedImports.join('\0') &&
+    !forbiddenCapability.test(router) &&
+    !forbiddenImport.test(router) &&
+    routerNetworkDeclarations.length === 2 &&
+    routerCases.length === 2 &&
+    exactExecutableLineCount(
+      router,
+      "export const ETHEREUM_MAINNET_BALANCE_NETWORK_ID = 'eip155:1' as const;",
+    ) === 1 &&
+    exactExecutableLineCount(
+      router,
+      "export const SOLANA_MAINNET_BALANCE_NETWORK_ID = 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp' as const;",
+    ) === 1 &&
+    executable.includes(readRequestKeys) &&
+    executable.includes(rescanRequestKeys) &&
+    executable.includes(sourcePointKeys) &&
+    executable.includes(networkRouter) &&
+    executable.includes(exactNetworkGuard) &&
+    exactExecutableLineCount(
+      router,
+      'const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;',
+    ) === 1 &&
+    exactExecutableLineCount(router, '!UUID_V4.test(record.accountId) ||') === 1 &&
+    exactExecutableLineCount(router, '!UUID_V4.test(record.walletId) ||') === 1 &&
+    exactExecutableLineCount(
+      router,
+      'const validated = copyReadRequest(request, READ_REQUEST_KEYS);',
+    ) === 1 &&
+    exactExecutableLineCount(
+      router,
+      'return this.indexerFor(validated.networkId).readCurrent(validated);',
+    ) === 1 &&
+    exactExecutableLineCount(
+      router,
+      'const record = exactDataRecord(request, RESCAN_REQUEST_KEYS);',
+    ) === 1 &&
+    exactExecutableLineCount(router, 'const validated = frozenNullPrototype({') === 1 &&
+    exactExecutableLineCount(
+      router,
+      'return this.indexerFor(validated.networkId).rescanFromCheckpoint(validated);',
+    ) === 1 &&
+    !/\.readCurrent\s*\(\s*request\s*\)|\.rescanFromCheckpoint\s*\(\s*request\s*\)/u.test(router) &&
+    exactExecutableLineCount(
+      router,
+      'const descriptors = Object.getOwnPropertyDescriptors(value);',
+    ) === 1 &&
+    exactExecutableLineCount(router, 'keys.length !== expectedKeys.length ||') === 1 &&
+    exactExecutableLineCount(
+      router,
+      "if (!descriptor || !('value' in descriptor) || descriptor.enumerable !== true) {",
+    ) === 1 &&
+    exactExecutableLineCount(
+      router,
+      'const copy = Object.create(null) as Record<string, unknown>;',
+    ) === 1 &&
+    exactExecutableLineCount(router, 'copy[key] = descriptor.value;') === 1 &&
+    exactExecutableLineCount(
+      router,
+      'return Object.freeze(Object.assign(Object.create(null) as T, members));',
+    ) === 1 &&
+    exactExecutableLineCount(router, 'if (ethereum === solana) return invalidConfiguration();') ===
+      1 &&
+    exactExecutableLineCount(router, 'ethereum: reviewedIndexer(ethereum),') === 1 &&
+    exactExecutableLineCount(router, 'solana: reviewedIndexer(solana),') === 1 &&
+    exactExecutableLineCount(
+      router,
+      "const readCurrent = capturedDataMethod(receiver, 'readCurrent');",
+    ) === 1 &&
+    exactExecutableLineCount(
+      router,
+      "const rescanFromCheckpoint = capturedDataMethod(receiver, 'rescanFromCheckpoint');",
+    ) === 1 &&
+    exactExecutableLineCount(
+      router,
+      'Reflect.apply(readCurrent, receiver, [request]) as Promise<unknown>,',
+    ) === 1 &&
+    exactExecutableLineCount(
+      router,
+      'Reflect.apply(rescanFromCheckpoint, receiver, [request]) as Promise<unknown>,',
+    ) === 1 &&
+    exactExecutableLineCount(
+      router,
+      'const descriptor = Object.getOwnPropertyDescriptor(owner, name);',
+    ) === 1 &&
+    exactExecutableLineCount(
+      router,
+      "if (!('value' in descriptor) || typeof descriptor.value !== 'function') {",
+    ) === 1 &&
+    exactExecutableLineCount(router, 'owner !== Object.prototype &&') === 1 &&
+    exactExecutableLineCount(router, 'owner !== Function.prototype &&') === 1 &&
+    !/receiver\s*\[\s*name\s*\]/u.test(router) &&
+    exactExecutableLineCount(router, 'Object.freeze(this);') === 1 &&
+    exactExecutableLineCount(
+      composition,
+      "import { MainnetBalanceIndexerRouter } from './mainnet-balance-indexer.router';",
+    ) === 1 &&
+    routerReferences === 3 &&
+    routerConstruction >= 0 &&
+    orchestratorConstruction > routerConstruction &&
+    orchestratorIndexerArgument > orchestratorConstruction
+  );
+}
+
+function hasAuthenticatedBalanceSyncFailureContract(
+  sources: BalanceConsumerArtifactSources,
+): boolean {
+  const domain = sources.balanceSyncDomainSource.replace(/\r\n/gu, '\n');
+  const orchestrator = sources.balanceSyncOrchestratorSource.replace(/\r\n/gu, '\n');
+  const ethereum = sources.ethereumBalanceIndexerSource.replace(/\r\n/gu, '\n');
+  const solana = sources.solanaBalanceIndexerSource.replace(/\r\n/gu, '\n');
+  const router = sources.mainnetBalanceIndexerRouterSource.replace(/\r\n/gu, '\n');
+  const classifiedSources = [domain, orchestrator, ethereum, solana, router] as const;
+  const unsafeFailureTrust =
+    /instanceof\s+(?:BalanceSyncIndexerFailure|BalanceSyncOrchestratorError)\b/u;
+
+  const adapterContract = (source: string): boolean => {
+    const resolverStart = source.indexOf(
+      'private async resolveAddress(request: BalanceIndexerReadRequest): Promise<string> {',
+    );
+    const resolverEnd = source.indexOf('private async readBlock(', resolverStart);
+    const resolver = source.slice(resolverStart, resolverEnd);
+    return (
+      resolverStart >= 0 &&
+      resolverEnd > resolverStart &&
+      exactExecutableLineCount(source, 'reviewBalanceSyncIndexerFailure,') === 1 &&
+      exactExecutableLineCount(
+        source,
+        'const reviewed = reviewBalanceSyncIndexerFailure(error);',
+      ) === 1 &&
+      exactExecutableLineCount(source, 'reviewed.code,') === 1 &&
+      exactExecutableLineCount(source, ': { retryAfterSeconds: reviewed.retryAfterSeconds },') ===
+        1 &&
+      exactExecutableLineCount(resolver, '} catch {') === 1 &&
+      exactExecutableLineCount(
+        resolver,
+        "throw new BalanceSyncIndexerFailure('PROVIDER_INVALID_DATA');",
+      ) === 1 &&
+      !/catch\s*\(\s*error\s*\)/u.test(resolver) &&
+      !/\bthrow\s+error\b/u.test(source) &&
+      exactExecutableLineCount(
+        source,
+        'const milliseconds = Date.prototype.getTime.call(value) as number;',
+      ) === 1 &&
+      exactExecutableLineCount(
+        source,
+        'return Date.prototype.toISOString.call(value) as string;',
+      ) === 1 &&
+      !/value\s+instanceof\s+Date|value\.getTime\s*\(|value\.toISOString\s*\(/u.test(source)
+    );
+  };
+
+  return (
+    classifiedSources.every((source) => !unsafeFailureTrust.test(source)) &&
+    exactExecutableLineCount(domain, "import { isProxy } from 'node:util/types';") === 1 &&
+    exactExecutableLineCount(
+      domain,
+      'const VERIFIED_BALANCE_SYNC_INDEXER_FAILURES = new WeakSet<object>();',
+    ) === 1 &&
+    exactExecutableLineCount(domain, 'materializeErrorStack(this);') === 1 &&
+    exactExecutableLineCount(domain, 'VERIFIED_BALANCE_SYNC_INDEXER_FAILURES.add(this);') === 1 &&
+    exactExecutableLineCount(domain, 'Object.freeze(this);') === 1 &&
+    exactExecutableLineCount(domain, 'export function reviewBalanceSyncIndexerFailure(') === 1 &&
+    exactExecutableLineCount(domain, 'isProxy(value) ||') === 1 &&
+    exactExecutableLineCount(domain, '!VERIFIED_BALANCE_SYNC_INDEXER_FAILURES.has(value) ||') ===
+      1 &&
+    exactExecutableLineCount(domain, '!Object.isFrozen(value)') === 1 &&
+    exactExecutableLineCount(
+      domain,
+      'const descriptors = Object.getOwnPropertyDescriptors(value) as unknown as PropertyDescriptorMap;',
+    ) >= 1 &&
+    exactExecutableLineCount(domain, "!('value' in descriptor) ||") >= 1 &&
+    exactExecutableLineCount(domain, 'descriptor.configurable !== false ||') === 1 &&
+    exactExecutableLineCount(domain, 'descriptor.writable !== false') === 1 &&
+    exactExecutableLineCount(domain, 'const name = descriptors.name?.value as unknown;') === 1 &&
+    exactExecutableLineCount(domain, 'const message = descriptors.message?.value as unknown;') ===
+      1 &&
+    exactExecutableLineCount(domain, 'const code = descriptors.code?.value as unknown;') === 1 &&
+    exactExecutableLineCount(
+      domain,
+      'const retryAfterSeconds = descriptors.retryAfterSeconds?.value as unknown;',
+    ) === 1 &&
+    exactExecutableLineCount(domain, '? Object.freeze({ code })') === 1 &&
+    exactExecutableLineCount(
+      domain,
+      ': Object.freeze({ code, retryAfterSeconds: retryAfterSeconds as number });',
+    ) === 1 &&
+    exactExecutableLineCount(domain, 'isProxy(options)') === 1 &&
+    exactExecutableLineCount(
+      domain,
+      'const descriptors = Object.getOwnPropertyDescriptors(options) as unknown as PropertyDescriptorMap;',
+    ) === 1 &&
+    exactExecutableLineCount(
+      domain,
+      "keys.some((key) => typeof key !== 'string' || key !== 'retryAfterSeconds')",
+    ) === 1 &&
+    exactExecutableLineCount(
+      domain,
+      "if (!descriptor?.enumerable || !('value' in descriptor)) {",
+    ) === 1 &&
+    adapterContract(ethereum) &&
+    adapterContract(solana) &&
+    exactExecutableLineCount(
+      orchestrator,
+      'const VERIFIED_BALANCE_SYNC_ORCHESTRATOR_ERRORS = new WeakSet<object>();',
+    ) === 1 &&
+    exactExecutableLineCount(
+      orchestrator,
+      'const reviewed = reviewBalanceSyncIndexerFailure(error);',
+    ) === 1 &&
+    exactExecutableLineCount(
+      orchestrator,
+      'const reviewedFailure = reviewBalanceSyncIndexerFailure(error);',
+    ) === 1 &&
+    exactExecutableLineCount(orchestrator, 'if (reviewedFailure) return reviewedFailure;') === 1 &&
+    exactExecutableLineCount(
+      orchestrator,
+      'const orchestratorCode = reviewBalanceSyncOrchestratorError(error);',
+    ) === 1 &&
+    exactExecutableLineCount(
+      orchestrator,
+      "return Object.freeze({ code: 'UNCLASSIFIED_FAILURE' });",
+    ) === 1 &&
+    exactExecutableLineCount(orchestrator, 'isProxy(value) ||') === 1 &&
+    exactExecutableLineCount(
+      orchestrator,
+      '!VERIFIED_BALANCE_SYNC_ORCHESTRATOR_ERRORS.has(value) ||',
+    ) === 1 &&
+    exactExecutableLineCount(
+      orchestrator,
+      'VERIFIED_BALANCE_SYNC_ORCHESTRATOR_ERRORS.add(error);',
+    ) === 1
+  );
+}
+
 function hasDormantProviderNeutralBalanceRpcContract(
   sources: BalanceConsumerArtifactSources,
 ): boolean {
   const helper = sources.balanceJsonRpcSource.replace(/\r\n/gu, '\n');
+  const router = sources.mainnetBalanceIndexerRouterSource.replace(/\r\n/gu, '\n');
   const ethereum = sources.ethereumBalanceIndexerSource.replace(/\r\n/gu, '\n');
   const solana = sources.solanaBalanceIndexerSource.replace(/\r\n/gu, '\n');
-  const providerSources = [helper, ethereum, solana] as const;
+  const providerSources = [helper, router, ethereum, solana] as const;
   const forbiddenCapability =
     /\b(?:fetch|setTimeout|setInterval|setImmediate|queueMicrotask)\s*\(|\b(?:process|Deno|Bun)\s*\.\s*env\b|\bimport\s*\.\s*meta\s*\.\s*env\b|\bnew\s+(?:URL|URLSearchParams|WebSocket|EventSource|Connection|[A-Za-z0-9_]*Client|[A-Za-z0-9_]*Agent)\s*\(|\b(?:http|https|dns|net|tls)\s*\.\s*[A-Za-z][A-Za-z0-9_]*\s*\(|\b(?:axios|got|request|retry|backoff)\s*\(|\b(?:client|endpoint|hostname|credential|apiKey|password|secret|rpcUrl|baseUrl|retry|backoff)\s*(?::|=)|@(?:Injectable|Module)\s*\(|\b(?:NestFactory|createApplicationContext)\b|\.(?:listen|connect)\s*\(|['"]https?:\/\//iu;
   const forbiddenImport =
@@ -2048,12 +2351,13 @@ function hasDormantProviderNeutralBalanceRpcContract(
     composition.split('EthereumMainnetBalanceIndexerAdapter').length - 1;
   const solanaAdapterReferences =
     composition.split('SolanaMainnetBalanceIndexerAdapter').length - 1;
+  const routerReferences = composition.split('MainnetBalanceIndexerRouter').length - 1;
   const compositionTransportReferences = composition.split('BalanceJsonRpcTransport').length - 1;
   const resourceTransportReferences = resource.split('BalanceJsonRpcTransport').length - 1;
   const forbiddenDirectHelperUse =
     /\b(?:BalanceJsonRpcTransportFailure|balanceRpcRequest|parseBalanceRpcResult|exchangeBalanceRpc)\b/u;
   const forbiddenProviderClassUse =
-    /\b(?:EthereumMainnetBalanceIndexerAdapter|SolanaMainnetBalanceIndexerAdapter)\b/u;
+    /\b(?:EthereumMainnetBalanceIndexerAdapter|SolanaMainnetBalanceIndexerAdapter|MainnetBalanceIndexerRouter)\b/u;
   if (
     [composition, resource].some(
       (source) => directRpcCapability.test(source) || forbiddenImport.test(source),
@@ -2063,6 +2367,7 @@ function hasDormantProviderNeutralBalanceRpcContract(
     forbiddenProviderClassUse.test(resource) ||
     ethereumAdapterReferences !== 3 ||
     solanaAdapterReferences !== 3 ||
+    routerReferences !== 3 ||
     compositionTransportReferences !== 3 ||
     resourceTransportReferences !== 7 ||
     composition.split('../infrastructure/rpc/ethereum-mainnet-balance-indexer.adapter').length -
@@ -2100,7 +2405,7 @@ function hasDormantProviderNeutralBalanceRpcContract(
     sources.reviewedJobDispatcherSource,
   ];
   const forbiddenLaunchRegistration =
-    /\b(?:EthereumMainnetBalanceIndexerAdapter|SolanaMainnetBalanceIndexerAdapter|BalanceJsonRpc[A-Za-z0-9_]*|balanceRpcRequest|parseBalanceRpcResult|exchangeBalanceRpc)\b|(?:balance-json-rpc|ethereum-mainnet-balance-indexer\.adapter|solana-mainnet-balance-indexer\.adapter)/u;
+    /\b(?:EthereumMainnetBalanceIndexerAdapter|SolanaMainnetBalanceIndexerAdapter|MainnetBalanceIndexerRouter|BalanceJsonRpc[A-Za-z0-9_]*|balanceRpcRequest|parseBalanceRpcResult|exchangeBalanceRpc)\b|(?:balance-json-rpc|ethereum-mainnet-balance-indexer\.adapter|solana-mainnet-balance-indexer\.adapter|mainnet-balance-indexer\.router)/u;
   return launchAndRegistrationSources.every((source) => !forbiddenLaunchRegistration.test(source));
 }
 
@@ -4819,6 +5124,8 @@ export function inspectBalanceConsumerDeploymentArtifacts(
     const contractValid =
       hasExactReviewedBalanceConsumerArtifactBytes(sources) &&
       hasDormantBalanceConsumerSourceContract(sources) &&
+      hasExactMainnetBalanceIndexerRouterContract(sources) &&
+      hasAuthenticatedBalanceSyncFailureContract(sources) &&
       hasDormantProviderNeutralBalanceRpcContract(sources) &&
       hasDormantBalanceConsumerAggregateResourceContract(sources) &&
       hasDormantBalanceConsumerLifecycleCoordinatorContract(sources) &&
@@ -5472,6 +5779,13 @@ export function loadRepositoryProductionPreflightInput(
         resolve(
           repositoryRoot,
           'apps/api/src/blockchain-sync/application/balance-sync-consumer.lifecycle.ts',
+        ),
+        'utf8',
+      ),
+      mainnetBalanceIndexerRouterSource: readFileSync(
+        resolve(
+          repositoryRoot,
+          'apps/api/src/blockchain-sync/application/mainnet-balance-indexer.router.ts',
         ),
         'utf8',
       ),

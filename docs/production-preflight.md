@@ -58,17 +58,30 @@ runtime, CLI, activation, module, barrel, application, package, template, and
 container launch roots. Passing that local inspection does not compose the
 coordinator or change any blocker below.
 
-The same inspection now byte-pins the provider-neutral JSON-RPC helper and the
-Ethereum and Solana mainnet balance adapters. It requires injected per-chain
-transports behind the shared interface, no owned HTTP/client, URL, credential, environment,
-timer, retry-loop, or Nest/runtime capability, and no adapter/helper identity
-in runtime, module, activation, or CLI launch roots. The already reviewed
-barrel exports remain allowed because they neither construct a transport nor
-register a provider. Mutation tests cover direct capability additions and
-launch-root registration. This is static source integrity only and cannot
-select a provider, permit egress, activate the consumer, or clear live evidence.
-The adapter contract also requires each five-field read request to be narrowed
-to the resolver's frozen three-key account, wallet, and network scope.
+The same inspection now byte-pins the provider-neutral JSON-RPC helper, the
+Ethereum and Solana mainnet balance adapters, and their closed mainnet router.
+The router recognizes exactly `eip155:1` and
+`solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp`: Base and every other third chain are
+rejected without fallback. It validates account and wallet UUIDs, snapshots
+only the exact read or rescan fields into frozen null-prototype records, rejects
+accessors, requires distinct injected chain indexers, and captures each data
+method once before dispatch. Mutation tests cover a third-chain substitution,
+fallback, raw-request forwarding, method redirection, shared indexers, and loss
+of the immutable snapshot boundary.
+
+The pinned failure boundary accepts provider/retry classifications only from a
+privately branded, unchanged, frozen `BalanceSyncIndexerFailure`. Review uses
+descriptor snapshots and never `instanceof` trust; counterfeit, proxy, accessor,
+mutable, resolver, and clock failures become fixed unclassified or invalid-data
+outcomes. The per-chain transports remain injected behind the shared interface,
+with no owned HTTP/client, URL, credential, environment, timer, retry-loop, or
+Nest/runtime capability and no adapter/helper/router identity in launch roots.
+The already reviewed barrel exports remain allowed because they neither
+construct a transport nor register a provider. The adapter contract also
+requires each five-field read request to be narrowed to the resolver's frozen
+three-key account, wallet, and network scope. All of this is static source
+integrity only: it cannot select a live provider, permit egress, activate the
+consumer, or clear any deployment or live-evidence blocker.
 
 The inspected source keeps activation false, sets
 `BALANCE_CONSUMER_MODE=disabled`, and leaves the runtime uncomposed. The task

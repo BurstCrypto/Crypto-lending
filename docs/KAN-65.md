@@ -76,6 +76,25 @@ environment selector excludes production. An actual deployment would require
 the explicit billable-resource acknowledgement; no cloud or external action
 was taken for this checkpoint.
 
+The inert composition now routes balance reads through a byte-pinned closed
+mainnet router. It accepts only Ethereum `eip155:1` and Solana
+`solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp`; Base and every other network fail
+closed, with no cross-provider fallback. The router requires distinct injected
+indexers, captures their read/rescan data methods once, validates account and
+wallet UUIDs, and forwards only exact frozen null-prototype copies of read,
+rescan, and source-point records. It owns no transport, endpoint, credentials,
+retry loop, or runtime registration.
+
+Provider and retry classification is also closed to authentic immutable
+failures. A private in-module brand plus frozen descriptor validation replaces
+`instanceof` trust, and adapters reconstruct only a reviewed classification.
+Resolver and clock failures, hostile proxies, accessors, prototype
+counterfeits, and mutable lookalikes are sanitized to fixed failure codes. The
+offline preflight pins these sources and mutation-tests the two-chain router,
+snapshot, method-capture, brand, freeze, and reviewer constraints. This is
+local static assurance only; it does not activate the dormant runtime, contact
+a chain or provider, grant egress, deploy resources, or satisfy live evidence.
+
 The envelope holds the service at literal `DesiredCount: 0` while source
 activation stays false, `BALANCE_CONSUMER_MODE=disabled`, and the runtime stays
 uncomposed. Its loopback-only security group cannot reach a provider or RPC.
