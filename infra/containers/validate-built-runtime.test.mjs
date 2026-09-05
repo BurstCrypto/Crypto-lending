@@ -1,11 +1,29 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  linkSync,
+  mkdtempSync,
+  mkdirSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import process from 'node:process';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
-import { validateBuiltApiRuntime, validateBuiltWebRuntime } from './validate-built-runtime.mjs';
+import {
+  validateBuiltApiRuntime,
+  validateBuiltWebRuntime,
+  validateBuiltWebRuntimeForTest,
+} from './validate-built-runtime.mjs';
+
+const VALIDATOR_PATH = fileURLToPath(new URL('./validate-built-runtime.mjs', import.meta.url));
+const WEB_MANIFEST_PATH = 'apps/web/package.json';
+const WEB_SERVER_PATH = 'apps/web/server.js';
 
 function temporaryRoot(t, prefix) {
   const root = mkdtempSync(join(tmpdir(), prefix));
@@ -73,6 +91,23 @@ function addPackage(root, name) {
   writeFileSync(join(packageRoot, 'index.js'), 'module.exports = {};\n', 'utf8');
 }
 
+function createSymbolicLinkOrSkip(t, target, path, type) {
+  try {
+    symlinkSync(target, path, type);
+    return true;
+  } catch (error) {
+    if (
+      error &&
+      typeof error === 'object' &&
+      ['EACCES', 'EINVAL', 'ENOSYS', 'EPERM', 'UNKNOWN'].includes(error.code)
+    ) {
+      t.skip(`symbolic links are unavailable: ${error.code}`);
+      return false;
+    }
+    throw error;
+  }
+}
+
 test('accepts an API runtime whose production root cannot resolve test-only SDKs', (t) => {
   const report = withProduction(() => validateBuiltApiRuntime(apiFixture(t)));
   assert.equal(report.valid, true);
@@ -107,7 +142,7 @@ test('rejects an enabled compiled balance-consumer activation gate', (t) => {
   );
   assert.throws(
     () => withProduction(() => validateBuiltApiRuntime(root)),
-    /Expected values to be strictly deep-equal/u,
+    /API balance-consumer activation gate is invalid/u,
   );
 });
 
@@ -159,6 +194,203 @@ test('rejects an unsanitized standalone package manifest', (t) => {
   );
   assert.throws(
     () => withProduction(() => validateBuiltWebRuntime(root)),
-    /Expected values to be strictly deep-equal/u,
+    /Web standalone manifest is invalid or non-canonical/u,
   );
+});
+
+test('accepts the legitimate empty client-only shim', (t) => {
+  const root = webFixture(t);
+  mkdirSync(join(root, 'node_modules/client-only'), { recursive: true });
+  writeFileSync(join(root, 'node_modules/client-only/index.js'), Buffer.alloc(0));
+  const report = withProduction(() => validateBuiltWebRuntime(root));
+  assert.equal(report.valid, true);
+  assert.equal(report.scannedFiles, 3);
+});
+
+test('rejects ambiguous, non-canonical, BOM-prefixed, and invalid UTF-8 manifests', (t) => {
+  const ambiguousManifests = [
+    '{"name":"@crypto-lending/web","name":"@crypto-lending/web","private":true,"version":"0.1.0"}\n',
+    '{ "name":"@crypto-lending/web","private":true,"version":"0.1.0"}\n',
+    '{"private":true,"name":"@crypto-lending/web","version":"0.1.0"}\n',
+    '{"name":"customer-controlled-name","private":true,"version":"0.1.0"}\n',
+    '{"name":"@crypto-lending/web","private":false,"version":"0.1.0"}\n',
+    '{"name":"@crypto-lending/web","private":true,"version":"01.0.0"}\n',
+    Buffer.concat([
+      Buffer.from([0xef, 0xbb, 0xbf]),
+      Buffer.from('{"name":"@crypto-lending/web","private":true,"version":"0.1.0"}\n', 'utf8'),
+    ]),
+    Buffer.from([
+      ...Buffer.from('{"name":"@crypto-lending/web","private":true,"version":"0.1.', 'utf8'),
+      0xc3,
+      0x28,
+      ...Buffer.from('"}\n', 'utf8'),
+    ]),
+  ];
+  for (const [index, manifest] of ambiguousManifests.entries()) {
+    const root = webFixture(t);
+    writeFileSync(join(root, WEB_MANIFEST_PATH), manifest);
+    assert.throws(
+      () => withProduction(() => validateBuiltWebRuntime(root)),
+      /Web standalone manifest is invalid or non-canonical/u,
+      `manifest fixture ${index} should fail closed`,
+    );
+  }
+});
+
+test('rejects symbolic links without following them', (t) => {
+  const fileRoot = webFixture(t);
+  const realServer = join(fileRoot, 'apps/web/real-server.js');
+  writeFileSync(realServer, "console.log('server');\n", 'utf8');
+  rmSync(join(fileRoot, WEB_SERVER_PATH));
+  if (
+    createSymbolicLinkOrSkip(
+      t,
+      realServer,
+      join(fileRoot, WEB_SERVER_PATH),
+      process.platform === 'win32' ? 'file' : undefined,
+    )
+  ) {
+    assert.throws(
+      () => withProduction(() => validateBuiltWebRuntime(fileRoot)),
+      /Runtime artifact tree is unsafe or changed/u,
+    );
+  }
+});
+
+test('rejects directory reparse links without following them', (t) => {
+  const reparseRoot = webFixture(t);
+  const outside = temporaryRoot(t, 'crypto-lending-outside-runtime-');
+  writeFileSync(join(outside, 'outside.js'), 'module.exports = {};\n', 'utf8');
+  mkdirSync(join(reparseRoot, 'node_modules'), { recursive: true });
+  if (
+    createSymbolicLinkOrSkip(
+      t,
+      outside,
+      join(reparseRoot, 'node_modules/linked-package'),
+      process.platform === 'win32' ? 'junction' : 'dir',
+    )
+  ) {
+    assert.throws(
+      () => withProduction(() => validateBuiltWebRuntime(reparseRoot)),
+      /Runtime artifact tree is unsafe or changed/u,
+    );
+  }
+});
+
+test('rejects multiply linked runtime files', (t) => {
+  const root = webFixture(t);
+  const source = join(root, 'apps/web/shared.js');
+  writeFileSync(source, 'module.exports = {};\n', 'utf8');
+  linkSync(source, join(root, 'apps/web/duplicate.js'));
+  assert.throws(
+    () => withProduction(() => validateBuiltWebRuntime(root)),
+    /Runtime artifact tree is unsafe or changed/u,
+  );
+});
+
+test('rejects a runtime file that changes while its bytes are inspected', (t) => {
+  const root = webFixture(t);
+  const changingPath = join(root, 'apps/web/changing.js');
+  writeFileSync(changingPath, 'module.exports = 1;\n', 'utf8');
+  let changed = false;
+  assert.throws(
+    () =>
+      withProduction(() =>
+        validateBuiltWebRuntimeForTest(root, {
+          afterFirstRead(relativePath) {
+            if (relativePath !== 'apps/web/changing.js' || changed) return;
+            changed = true;
+            appendFileSync(changingPath, 'module.exports = 2;\n', 'utf8');
+          },
+        }),
+      ),
+    /Runtime artifact tree is unsafe or changed/u,
+  );
+  assert.equal(changed, true);
+});
+
+test('enforces per-file, aggregate, file-count, entry-count, and depth bounds', (t) => {
+  const perFileRoot = webFixture(t);
+  writeFileSync(join(perFileRoot, 'apps/web/large.js'), Buffer.alloc(129, 0x61));
+  assert.throws(
+    () =>
+      withProduction(() =>
+        validateBuiltWebRuntimeForTest(perFileRoot, {
+          limits: { maximumFileBytes: 128 },
+        }),
+      ),
+    /per-file byte limit/u,
+  );
+
+  const aggregateRoot = webFixture(t);
+  const baselineBytes =
+    Buffer.byteLength("console.log('server');\n") +
+    Buffer.byteLength('{"name":"@crypto-lending/web","private":true,"version":"0.1.0"}\n');
+  writeFileSync(join(aggregateRoot, 'apps/web/chunk.js'), Buffer.alloc(10, 0x61));
+  assert.throws(
+    () =>
+      withProduction(() =>
+        validateBuiltWebRuntimeForTest(aggregateRoot, {
+          limits: { maximumAggregateBytes: baselineBytes + 9 },
+        }),
+      ),
+    /aggregate byte limit/u,
+  );
+
+  const fileCountRoot = webFixture(t);
+  writeFileSync(join(fileCountRoot, 'apps/web/extra.js'), '', 'utf8');
+  assert.throws(
+    () =>
+      withProduction(() =>
+        validateBuiltWebRuntimeForTest(fileCountRoot, {
+          limits: { maximumFiles: 2 },
+        }),
+      ),
+    /file count limit/u,
+  );
+
+  const entryCountRoot = webFixture(t);
+  mkdirSync(join(entryCountRoot, 'empty'));
+  assert.throws(
+    () =>
+      withProduction(() =>
+        validateBuiltWebRuntimeForTest(entryCountRoot, {
+          limits: { maximumEntries: 4 },
+        }),
+      ),
+    /tree entry limit/u,
+  );
+
+  const depthRoot = webFixture(t);
+  mkdirSync(join(depthRoot, 'apps/web/deep'));
+  writeFileSync(join(depthRoot, 'apps/web/deep/chunk.js'), '', 'utf8');
+  assert.throws(
+    () =>
+      withProduction(() =>
+        validateBuiltWebRuntimeForTest(depthRoot, {
+          limits: { maximumTraversalDepth: 3 },
+        }),
+      ),
+    /traversal depth limit/u,
+  );
+});
+
+test('sanitizes filesystem and CLI errors without reflecting hostile paths', (t) => {
+  const hostilePath = join(temporaryRoot(t, 'crypto-lending-private-root-'), 'tenant-secret');
+  assert.throws(
+    () => withProduction(() => validateBuiltWebRuntime(hostilePath)),
+    (error) => {
+      assert.equal(error.message, 'Built runtime validation failed safely');
+      assert.equal(error.message.includes(hostilePath), false);
+      return true;
+    },
+  );
+  const result = spawnSync(process.execPath, [VALIDATOR_PATH, 'web', hostilePath], {
+    encoding: 'utf8',
+    env: { ...process.env, NODE_ENV: 'production' },
+  });
+  assert.equal(result.status, 1);
+  assert.equal(result.stdout, '');
+  assert.equal(result.stderr, 'Built runtime validation failed safely\n');
+  assert.equal(result.stderr.includes(hostilePath), false);
 });

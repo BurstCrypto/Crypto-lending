@@ -70,6 +70,15 @@ These checks are offline and make no Docker or cloud API calls:
     node infra/containers/validate-production-containers.mjs
     node --test infra/containers/validate-built-runtime.test.mjs infra/containers/validate-production-containers.test.mjs
 
+The in-build runtime validator rejects symbolic, hard, and reparse links and
+requires every inspected file and directory to remain stable while the tree is
+read. Its fixed ceilings are 16 MiB per file, 64 MiB in aggregate, 4,096 files,
+8,192 total entries, and 64 path levels. The web standalone manifest must be
+the exact canonical `name`/`private`/`version` document written by the reviewed
+Docker step; duplicate keys, invalid UTF-8, a byte-order mark, or serialization
+drift fail closed. Empty runtime shims remain valid and count toward the file
+and entry limits.
+
 For a local single-platform build, use explicit non-production metadata:
 
     docker build --file Dockerfile.api --tag crypto-lending-api:container-validation --build-arg OCI_SOURCE=https://github.com/Trey-Gleason/Crypto-lending --build-arg OCI_REVISION=1111111111111111111111111111111111111111 --build-arg OCI_CREATED=2026-09-04T12:00:00Z .
