@@ -168,6 +168,8 @@ export interface BalanceConsumerArtifactSources {
   readonly bootstrapPrincipalsSource: string;
   readonly bootstrapPrincipalsValidatorSource: string;
   readonly walletAddressMigrationSource: string;
+  readonly workerAuthoritySuspensionMigrationSource: string;
+  readonly migrationIndexSource: string;
   readonly releaseManifestSource: string;
   readonly productionContainerValidatorSource: string;
 }
@@ -491,6 +493,8 @@ const BALANCE_CONSUMER_ARTIFACT_KEYS = Object.freeze([
   'bootstrapPrincipalsSource',
   'bootstrapPrincipalsValidatorSource',
   'walletAddressMigrationSource',
+  'workerAuthoritySuspensionMigrationSource',
+  'migrationIndexSource',
   'releaseManifestSource',
   'productionContainerValidatorSource',
 ] as const satisfies readonly (keyof BalanceConsumerArtifactSources)[]);
@@ -510,6 +514,9 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
   bootstrapPrincipalsValidatorSource:
     '6731fee433acae8f7c240995c6ffe64247c7f4ef730be2b7367c3fa10ad40681',
   walletAddressMigrationSource: '74e32999fe3ac3b5791365c5a55129296cf68cb5b3d5697f2ffe462012029a84',
+  workerAuthoritySuspensionMigrationSource:
+    'f61ff9f4ad74e6067203ee1078502955c82af0acde164ff783970e5bc27949b0',
+  migrationIndexSource: '2565fe9b9ed14d4b32a92cef583343de4d18832995426da8d75542701d70696d',
   releaseManifestSource: '9797f1c2ea55be0e60df2a1c7e19757dba4549b2a9ecb37c03c848700d9be2c3',
   productionContainerValidatorSource:
     '730b7c27949b4236d2b2c7343d60a30e04a204f753a920af085bd8009457eeb2',
@@ -1927,7 +1934,136 @@ function hasDormantBalanceConsumerDatabaseCapability(
   return (
     sources.walletAddressMigrationSource.includes(
       'GRANT EXECUTE ON FUNCTION ${RESOLVE_ACTIVE_ADDRESS} TO ${worker};',
-    ) && !/balance_consumer_(?:runtime_role|login)/iu.test(sources.walletAddressMigrationSource)
+    ) &&
+    !/balance_consumer_(?:runtime_role|login)/iu.test(sources.walletAddressMigrationSource) &&
+    hasGenericWorkerBalanceAuthoritySuspensionContract(
+      sources.workerAuthoritySuspensionMigrationSource,
+      sources.migrationIndexSource,
+    )
+  );
+}
+
+function hasGenericWorkerBalanceAuthoritySuspensionContract(
+  migrationSource: string,
+  migrationIndexSource: string,
+): boolean {
+  const migration = migrationSource.replace(/\r\n/gu, '\n');
+  const migrationIndex = migrationIndexSource.replace(/\r\n/gu, '\n');
+  const suspendedFunctionListStart = migration.indexOf(
+    'const SUSPENDED_WORKER_FUNCTIONS = Object.freeze([',
+  );
+  const suspendedFunctionListEnd = migration.indexOf('] as const);', suspendedFunctionListStart);
+  if (suspendedFunctionListStart < 0 || suspendedFunctionListEnd < suspendedFunctionListStart) {
+    return false;
+  }
+  const suspendedFunctionList = trimmedExecutableLines(
+    migration.slice(suspendedFunctionListStart, suspendedFunctionListEnd + '] as const);'.length),
+  );
+  if (
+    suspendedFunctionList.join('\n') !==
+    [
+      'const SUSPENDED_WORKER_FUNCTIONS = Object.freeze([',
+      'READ_CHECKPOINT,',
+      'RECORD_CURRENT,',
+      'MARK_STALE,',
+      'REPLACE_AFTER_REORG,',
+      'RESOLVE_ACTIVE_ADDRESS,',
+      '] as const);',
+    ].join('\n')
+  ) {
+    return false;
+  }
+  const exactSuspendedFunctionIdentities = [
+    'read_balance_sync_checkpoint(uuid,uuid,text)',
+    'record_balance_sync_current(uuid,uuid,text,bigint,text,text,numeric,text,text,text,timestamp with time zone,timestamp with time zone,jsonb,timestamp with time zone)',
+    'mark_balance_sync_checkpoint_stale(uuid,uuid,text,bigint,timestamp with time zone,text)',
+    'replace_balance_sync_after_reorg(uuid,uuid,text,bigint,numeric,text,text,text,timestamp with time zone,text,numeric,text,text,text,timestamp with time zone,timestamp with time zone,jsonb,timestamp with time zone)',
+    'resolve_active_wallet_address_ciphertext(uuid,uuid,text)',
+  ] as const;
+  if (
+    exactSuspendedFunctionIdentities.some(
+      (identity) => migration.split(`'${identity}'`).length - 1 !== 1,
+    )
+  ) {
+    return false;
+  }
+
+  const upStart = migration.indexOf('function createUpSql(');
+  const downStart = migration.indexOf('function createDownSql()', upStart);
+  const verifierStart = migration.indexOf('function createWorkerAuthorityVerifier(', downStart);
+  if (upStart < 0 || downStart <= upStart || verifierStart <= downStart) return false;
+  const upSql = migration.slice(upStart, downStart);
+  const downSql = migration.slice(downStart, verifierStart);
+  if (
+    exactExecutableLineCount(
+      upSql,
+      "const worker = identifier(names.workerRuntimeRole, 'workerRuntimeRole');",
+    ) !== 1 ||
+    exactExecutableLineCount(
+      upSql,
+      '(functionIdentity) => `REVOKE EXECUTE ON FUNCTION ${functionIdentity} FROM ${worker};`,',
+    ) !== 1 ||
+    /\bGRANT\s+(?:ALL|CONNECT|CREATE|DELETE|EXECUTE|INSERT|SELECT|TEMP|UPDATE|USAGE)\b/iu.test(
+      upSql,
+    ) ||
+    /\b(?:activate|enabled)\b/iu.test(upSql) ||
+    exactExecutableLineCount(downSql, 'RAISE EXCEPTION') !== 1 ||
+    exactExecutableLineCount(downSql, "USING ERRCODE = '55000';") !== 1 ||
+    /\bGRANT\s+(?:ALL|CONNECT|CREATE|DELETE|EXECUTE|INSERT|SELECT|TEMP|UPDATE|USAGE)\b/iu.test(
+      downSql,
+    )
+  ) {
+    return false;
+  }
+
+  if (
+    exactExecutableLineCount(migration, "id: '0028',") !== 1 ||
+    exactExecutableLineCount(migration, "supersedesVerificationOf: ['0027'],") !== 1
+  ) {
+    return false;
+  }
+
+  const importRegistration = `import {
+  suspendGenericWorkerBalanceAuthorityMigrationV0028,
+  suspendGenericWorkerBalanceAuthorityTestSchemaMigrationV0028,
+} from './0028-suspend-generic-worker-balance-authority.migration';`;
+  const exportRegistration = `export {
+  createGenericWorkerBalanceAuthoritySuspensionMigration,
+  PRODUCTION_BALANCE_CONSUMER_PRINCIPALS,
+  suspendGenericWorkerBalanceAuthorityMigrationV0028,
+  suspendGenericWorkerBalanceAuthorityTestSchemaMigrationV0028,
+} from './0028-suspend-generic-worker-balance-authority.migration';
+export type { BalanceConsumerPrincipalNames } from './0028-suspend-generic-worker-balance-authority.migration';`;
+  const testListStart = migrationIndex.indexOf('export const DATABASE_TEST_SCHEMA_MIGRATION_LIST:');
+  const productionListStart = migrationIndex.indexOf(
+    'export const DATABASE_MIGRATION_LIST:',
+    testListStart,
+  );
+  const exportStart = migrationIndex.indexOf(
+    "export type { DatabaseMigration } from './migration';",
+  );
+  if (
+    testListStart < 0 ||
+    productionListStart <= testListStart ||
+    exportStart <= productionListStart ||
+    migrationIndex.split(importRegistration).length - 1 !== 1 ||
+    migrationIndex.split(exportRegistration).length - 1 !== 1
+  ) {
+    return false;
+  }
+  const testList = migrationIndex.slice(testListStart, productionListStart);
+  const productionList = migrationIndex.slice(productionListStart, exportStart);
+  return (
+    exactExecutableLineCount(
+      testList,
+      'suspendGenericWorkerBalanceAuthorityTestSchemaMigrationV0028,',
+    ) === 1 &&
+    !testList.includes('suspendGenericWorkerBalanceAuthorityMigrationV0028,') &&
+    exactExecutableLineCount(
+      productionList,
+      'suspendGenericWorkerBalanceAuthorityMigrationV0028,',
+    ) === 1 &&
+    !productionList.includes('suspendGenericWorkerBalanceAuthorityTestSchemaMigrationV0028,')
   );
 }
 
@@ -2613,6 +2749,17 @@ export function loadRepositoryProductionPreflightInput(
           repositoryRoot,
           'apps/api/src/infrastructure/database/migrations/0023-create-balance-consumer-wallet-address-boundary.migration.ts',
         ),
+        'utf8',
+      ),
+      workerAuthoritySuspensionMigrationSource: readFileSync(
+        resolve(
+          repositoryRoot,
+          'apps/api/src/infrastructure/database/migrations/0028-suspend-generic-worker-balance-authority.migration.ts',
+        ),
+        'utf8',
+      ),
+      migrationIndexSource: readFileSync(
+        resolve(repositoryRoot, 'apps/api/src/infrastructure/database/migrations/index.ts'),
         'utf8',
       ),
       releaseManifestSource: readFileSync(

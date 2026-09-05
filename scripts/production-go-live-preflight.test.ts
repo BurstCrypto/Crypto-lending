@@ -165,6 +165,17 @@ const BALANCE_CONSUMER_ARTIFACTS = Object.freeze({
     ),
     'utf8',
   ),
+  workerAuthoritySuspensionMigrationSource: readFileSync(
+    resolve(
+      __dirname,
+      '../apps/api/src/infrastructure/database/migrations/0028-suspend-generic-worker-balance-authority.migration.ts',
+    ),
+    'utf8',
+  ),
+  migrationIndexSource: readFileSync(
+    resolve(__dirname, '../apps/api/src/infrastructure/database/migrations/index.ts'),
+    'utf8',
+  ),
   releaseManifestSource: readFileSync(
     resolve(__dirname, './release-candidate-manifest.mjs'),
     'utf8',
@@ -734,6 +745,17 @@ test('balance-consumer inspection rejects retained-marker semantic overrides and
     },
     {
       ...BALANCE_CONSUMER_ARTIFACTS,
+      workerAuthoritySuspensionMigrationSource: `${BALANCE_CONSUMER_ARTIFACTS.workerAuthoritySuspensionMigrationSource}\nexport const activateBalanceConsumer = true;\n`,
+    },
+    {
+      ...BALANCE_CONSUMER_ARTIFACTS,
+      migrationIndexSource: `${BALANCE_CONSUMER_ARTIFACTS.migrationIndexSource.replace(
+        '  suspendGenericWorkerBalanceAuthorityMigrationV0028,\n]);',
+        ']);',
+      )}\n/* suspendGenericWorkerBalanceAuthorityMigrationV0028, */\n`,
+    },
+    {
+      ...BALANCE_CONSUMER_ARTIFACTS,
       releaseManifestSource: `${BALANCE_CONSUMER_ARTIFACTS.releaseManifestSource.replace(
         "'blockchain-sync/application/balance-sync-consumer.cli.js',",
         '',
@@ -960,6 +982,60 @@ test('balance-consumer inspection fails closed for drift in every reviewed artif
       'walletAddressMigrationSource',
       'GRANT EXECUTE ON FUNCTION ${RESOLVE_ACTIVE_ADDRESS} TO ${worker};',
       'GRANT EXECUTE ON FUNCTION ${RESOLVE_ACTIVE_ADDRESS} TO ${balance_consumer_runtime_role};',
+    ],
+    [
+      'worker authority suspension migration',
+      'workerAuthoritySuspensionMigrationSource',
+      '(functionIdentity) => `REVOKE EXECUTE ON FUNCTION ${functionIdentity} FROM ${worker};`,',
+      '(functionIdentity) => `GRANT EXECUTE ON FUNCTION ${functionIdentity} TO ${worker};`,',
+    ],
+    [
+      'worker authority suspension inventory',
+      'workerAuthoritySuspensionMigrationSource',
+      'MARK_STALE,',
+      'MARK_STALE_DISABLED,',
+    ],
+    [
+      'worker-only suspension target',
+      'workerAuthoritySuspensionMigrationSource',
+      "const worker = identifier(names.workerRuntimeRole, 'workerRuntimeRole');",
+      "const worker = identifier(names.balanceConsumerRuntimeRole, 'balanceConsumerRuntimeRole');",
+    ],
+    [
+      'forward-only suspension',
+      'workerAuthoritySuspensionMigrationSource',
+      "USING ERRCODE = '55000';",
+      "USING ERRCODE = '0A000';",
+    ],
+    [
+      '0027 verification supersession',
+      'workerAuthoritySuspensionMigrationSource',
+      "supersedesVerificationOf: ['0027'],",
+      "supersedesVerificationOf: ['0026'],",
+    ],
+    [
+      'worker authority migration registration',
+      'migrationIndexSource',
+      '  suspendGenericWorkerBalanceAuthorityMigrationV0028,\n]);',
+      ']);',
+    ],
+    [
+      'worker authority test migration registration',
+      'migrationIndexSource',
+      '  suspendGenericWorkerBalanceAuthorityTestSchemaMigrationV0028,\n]);',
+      ']);',
+    ],
+    [
+      'worker authority migration import',
+      'migrationIndexSource',
+      "} from './0028-suspend-generic-worker-balance-authority.migration';",
+      "} from './0028-suspend-generic-worker-balance-authority.disabled';",
+    ],
+    [
+      'worker authority migration export',
+      'migrationIndexSource',
+      '  PRODUCTION_BALANCE_CONSUMER_PRINCIPALS,',
+      '  PRODUCTION_BALANCE_CONSUMER_PRINCIPALS_DISABLED,',
     ],
     [
       'release entrypoint',
