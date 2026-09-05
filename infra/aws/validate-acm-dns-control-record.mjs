@@ -1,7 +1,16 @@
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+import { parseStrictJsonBytes } from '../shared/parse-strict-json.mjs';
+import {
+  readSecureLocalFile,
+  readSecureLocalFileForTest,
+} from '../shared/read-secure-local-file.mjs';
+
+export const MAX_ACM_DNS_CONTROL_RECORD_BYTES = 32_768;
+export const ACM_DNS_CONTROL_RECORD_INPUT_ERROR =
+  'ACM/DNS control record must be a non-empty, stable, single-link regular file of at most 32768 bytes at a canonical local path containing strict UTF-8 JSON without a byte-order mark or duplicate object keys.';
 
 const TOP_LEVEL_KEYS = [
   'schemaVersion',
@@ -753,11 +762,43 @@ function parseArguments(argv) {
   return result;
 }
 
+function loadAcmDnsControlRecordFileInternal(recordPath, afterFirstReadForTest) {
+  try {
+    const bytes =
+      afterFirstReadForTest === undefined
+        ? readSecureLocalFile(recordPath, MAX_ACM_DNS_CONTROL_RECORD_BYTES)
+        : readSecureLocalFileForTest(
+            recordPath,
+            MAX_ACM_DNS_CONTROL_RECORD_BYTES,
+            afterFirstReadForTest,
+          );
+    return parseStrictJsonBytes(bytes);
+  } catch {
+    throw new Error(ACM_DNS_CONTROL_RECORD_INPUT_ERROR);
+  }
+}
+
+export function loadAcmDnsControlRecordFile(recordPath) {
+  return loadAcmDnsControlRecordFileInternal(recordPath, undefined);
+}
+
+/** Test-only fault seam; production callers use loadAcmDnsControlRecordFile. */
+export function loadAcmDnsControlRecordFileForTest(recordPath, afterFirstReadForTest) {
+  return loadAcmDnsControlRecordFileInternal(recordPath, afterFirstReadForTest);
+}
+
 function runCli() {
   const args = parseArguments(process.argv.slice(2));
   if (!args.record) throw new Error('--record is required.');
   const recordPath = resolve(args.record);
-  const record = JSON.parse(readFileSync(recordPath, 'utf8'));
+  let record;
+  try {
+    record = loadAcmDnsControlRecordFile(recordPath);
+  } catch {
+    process.stderr.write(`${ACM_DNS_CONTROL_RECORD_INPUT_ERROR}\nAWS API calls made: 0\n`);
+    process.exitCode = 1;
+    return;
+  }
   const requestedMode = args.mode;
   if (requestedMode === 'prerequisite') {
     args.mode =
