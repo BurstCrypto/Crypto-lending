@@ -50,7 +50,7 @@ describe('useSensitiveViewRevalidation', () => {
     expect(revalidate).toHaveBeenCalledOnce();
   });
 
-  it('responds only when a visibility change makes the document visible', () => {
+  it('invalidates while hidden and refreshes only after the document becomes visible', () => {
     vi.useFakeTimers();
     const invalidate = vi.fn();
     const revalidate = vi.fn();
@@ -61,7 +61,9 @@ describe('useSensitiveViewRevalidation', () => {
       value: 'hidden',
     });
     act(() => document.dispatchEvent(new Event('visibilitychange')));
-    expect(invalidate).not.toHaveBeenCalled();
+    expect(invalidate).toHaveBeenCalledOnce();
+    act(() => vi.advanceTimersByTime(SENSITIVE_VIEW_REVALIDATION_THROTTLE_MS));
+    expect(revalidate).not.toHaveBeenCalled();
 
     Object.defineProperty(document, 'visibilityState', {
       configurable: true,
@@ -74,6 +76,94 @@ describe('useSensitiveViewRevalidation', () => {
     expect(revalidate).toHaveBeenCalledOnce();
   });
 
+  it('cancels a queued refresh on pagehide and resumes once the page is shown', () => {
+    vi.useFakeTimers();
+    const invalidate = vi.fn();
+    const revalidate = vi.fn();
+    render(<Harness invalidate={invalidate} revalidate={revalidate} />);
+
+    act(() => window.dispatchEvent(new Event('focus')));
+    expect(invalidate).toHaveBeenCalledOnce();
+
+    act(() => window.dispatchEvent(new Event('pagehide')));
+    act(() => vi.advanceTimersByTime(SENSITIVE_VIEW_REVALIDATION_THROTTLE_MS));
+
+    expect(invalidate).toHaveBeenCalledOnce();
+    expect(revalidate).not.toHaveBeenCalled();
+
+    act(() => dispatchPageShow(true));
+    expect(invalidate).toHaveBeenCalledOnce();
+    act(() => vi.advanceTimersByTime(SENSITIVE_VIEW_REVALIDATION_THROTTLE_MS));
+    expect(revalidate).toHaveBeenCalledOnce();
+  });
+
+  it('does not refresh a hidden document after connectivity returns', () => {
+    vi.useFakeTimers();
+    const invalidate = vi.fn();
+    const revalidate = vi.fn();
+    render(<Harness invalidate={invalidate} revalidate={revalidate} />);
+
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'hidden',
+    });
+    act(() => window.dispatchEvent(new Event('online')));
+    act(() => vi.advanceTimersByTime(SENSITIVE_VIEW_REVALIDATION_THROTTLE_MS));
+
+    expect(invalidate).toHaveBeenCalledOnce();
+    expect(revalidate).not.toHaveBeenCalled();
+
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'visible',
+    });
+    act(() => document.dispatchEvent(new Event('visibilitychange')));
+    act(() => vi.advanceTimersByTime(SENSITIVE_VIEW_REVALIDATION_THROTTLE_MS));
+
+    expect(invalidate).toHaveBeenCalledOnce();
+    expect(revalidate).toHaveBeenCalledOnce();
+  });
+
+  it('stays invalid after pagehide until both pageshow and visible state are observed', () => {
+    vi.useFakeTimers();
+    const invalidate = vi.fn();
+    const revalidate = vi.fn();
+    render(<Harness invalidate={invalidate} revalidate={revalidate} />);
+
+    act(() => {
+      window.dispatchEvent(new Event('pagehide'));
+      window.dispatchEvent(new Event('focus'));
+      window.dispatchEvent(new Event('online'));
+      vi.advanceTimersByTime(SENSITIVE_VIEW_REVALIDATION_THROTTLE_MS);
+    });
+
+    expect(document.visibilityState).toBe('visible');
+    expect(invalidate).toHaveBeenCalledOnce();
+    expect(revalidate).not.toHaveBeenCalled();
+
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'hidden',
+    });
+    act(() => {
+      dispatchPageShow(true);
+      vi.advanceTimersByTime(SENSITIVE_VIEW_REVALIDATION_THROTTLE_MS);
+    });
+
+    expect(invalidate).toHaveBeenCalledOnce();
+    expect(revalidate).not.toHaveBeenCalled();
+
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'visible',
+    });
+    act(() => document.dispatchEvent(new Event('visibilitychange')));
+    act(() => vi.advanceTimersByTime(SENSITIVE_VIEW_REVALIDATION_THROTTLE_MS));
+
+    expect(invalidate).toHaveBeenCalledOnce();
+    expect(revalidate).toHaveBeenCalledOnce();
+  });
+
   it('coalesces an event burst and removes listeners and its pending timer on unmount', () => {
     vi.useFakeTimers();
     const invalidate = vi.fn();
@@ -83,6 +173,7 @@ describe('useSensitiveViewRevalidation', () => {
     act(() => {
       window.dispatchEvent(new Event('focus'));
       window.dispatchEvent(new Event('online'));
+      window.dispatchEvent(new Event('pagehide'));
       dispatchPageShow(true);
     });
 
