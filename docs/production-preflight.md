@@ -143,9 +143,13 @@ approved keys, evidence, and decisions exist,
 The audit reads only local repository, non-secret artifacts: ECS environment and
 secret-reference names, the inert KAN-231 egress example, the KAN-62 provider
 decision record and digest, and the mainnet platform capability directory. It
-does not scan implementation source for status phrases, derive application
-configuration from process-environment values, read secret material or `.env` files, contact
-provider endpoints, or accept catalog status strings as adapter evidence. An
+derives KAN-62 local validation and every provider approval/runtime field from
+one immutable parsed snapshot of the exact decision bytes bound by that digest;
+it never re-reads status fields from a second, potentially different snapshot.
+The audit does not scan implementation source for status phrases, derive
+application configuration from process-environment values, read secret material
+or `.env` files, contact provider endpoints, or accept catalog status strings as
+adapter evidence. An
 explicit evidence flow adds bounded local manifest/evidence reads and the
 release-manifest boundary's scrubbed, noninteractive local Git inspection. It
 may copy the minimum operating-system variables needed to launch trusted Git,

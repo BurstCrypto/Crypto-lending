@@ -855,6 +855,12 @@ function sha256(value) {
   return createHash('sha256').update(value).digest('hex');
 }
 
+function deepFreeze(value) {
+  if (value === null || typeof value !== 'object' || Object.isFrozen(value)) return value;
+  for (const child of Object.values(value)) deepFreeze(child);
+  return Object.freeze(value);
+}
+
 function canonicalJson(value) {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
   if (isRecord(value)) {
@@ -1100,7 +1106,7 @@ export function validateProviderDecisionSidecar(decisionBytes, sidecar) {
   }
 }
 
-export function validateProviderDecisionFiles({
+export function loadValidatedProviderDecisionSnapshot({
   repositoryRoot = REPOSITORY_ROOT,
   now = new Date(),
 } = {}) {
@@ -1111,22 +1117,37 @@ export function validateProviderDecisionFiles({
     try {
       record = JSON.parse(decisionBytes.toString('utf8'));
     } catch {
-      return { errors: ['KAN-62 provider decision is not valid JSON.'], fingerprint: null };
+      return Object.freeze({
+        errors: Object.freeze(['KAN-62 provider decision is not valid JSON.']),
+        fingerprint: null,
+        record: null,
+      });
     }
     const fingerprint = sha256(decisionBytes);
-    return {
-      errors: [
-        ...validateProviderDecisionRecord(record, { now }),
-        ...validateProviderDecisionSidecar(decisionBytes, sidecar),
-      ],
+    const errors = Object.freeze([
+      ...validateProviderDecisionRecord(record, { now }),
+      ...validateProviderDecisionSidecar(decisionBytes, sidecar),
+    ]);
+    const result = Object.freeze({
+      errors,
       fingerprint,
-    };
+      record: errors.length === 0 ? deepFreeze(record) : null,
+    });
+    return result;
   } catch {
-    return {
-      errors: ['KAN-62 provider decision or SHA-256 sidecar is missing or unreadable.'],
+    return Object.freeze({
+      errors: Object.freeze([
+        'KAN-62 provider decision or SHA-256 sidecar is missing or unreadable.',
+      ]),
       fingerprint: null,
-    };
+      record: null,
+    });
   }
+}
+
+export function validateProviderDecisionFiles(options = {}) {
+  const { errors, fingerprint } = loadValidatedProviderDecisionSnapshot(options);
+  return { errors, fingerprint };
 }
 
 function main() {

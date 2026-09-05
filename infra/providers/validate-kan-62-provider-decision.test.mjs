@@ -1,9 +1,13 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
 import test from 'node:test';
 
 import {
   DECISION_PATH,
+  loadValidatedProviderDecisionSnapshot,
   REPOSITORY_ROOT,
   SIDECAR_PATH,
   validateProviderDecisionFiles,
@@ -39,6 +43,45 @@ test('the canonical packet and exact lowercase SHA-256 sidecar are valid but not
   assert.equal(record.externalStatus, 'PENDING_EXTERNAL_APPROVAL');
   assert.equal(record.approvalBoundary.approved, false);
   assert.equal(record.selection.runtimeStatus, 'NOT_APPROVED');
+});
+
+test('preflight fields come from one immutable sidecar-validated snapshot', () => {
+  const repositoryRoot = mkdtempSync(join(tmpdir(), 'kan-62-snapshot-'));
+  try {
+    const decisionPath = resolve(repositoryRoot, DECISION_PATH);
+    const sidecarPath = resolve(repositoryRoot, SIDECAR_PATH);
+    mkdirSync(dirname(decisionPath), { recursive: true });
+    const decisionBytes = readFileSync(`${REPOSITORY_ROOT}/${DECISION_PATH}`);
+    writeFileSync(decisionPath, decisionBytes);
+    writeFileSync(
+      sidecarPath,
+      `${createHash('sha256').update(decisionBytes).digest('hex')}\n`,
+      'utf8',
+    );
+
+    const snapshot = loadValidatedProviderDecisionSnapshot({ repositoryRoot, now: NOW });
+    const replacement = JSON.parse(decisionBytes.toString('utf8'));
+    replacement.externalStatus = 'APPROVED';
+    replacement.selection.runtimeStatus = 'APPROVED';
+    replacement.approvalBoundary.approved = true;
+    writeFileSync(decisionPath, `${JSON.stringify(replacement)}\n`, 'utf8');
+
+    assert.deepEqual(snapshot.errors, []);
+    assert.ok(snapshot.record);
+    assert.equal(snapshot.record.externalStatus, 'PENDING_EXTERNAL_APPROVAL');
+    assert.equal(snapshot.record.selection.runtimeStatus, 'NOT_APPROVED');
+    assert.equal(snapshot.record.approvalBoundary.approved, false);
+    assert.equal(Object.isFrozen(snapshot), true);
+    assert.equal(Object.isFrozen(snapshot.record), true);
+    assert.equal(Object.isFrozen(snapshot.record.selection), true);
+    assert.equal(
+      JSON.parse(readFileSync(decisionPath, 'utf8')).externalStatus,
+      'APPROVED',
+      'the hostile rewrite must replace the controlled file after snapshot validation',
+    );
+  } finally {
+    rmSync(repositoryRoot, { recursive: true, force: true });
+  }
 });
 
 test('malformed JSON values never escape validation as exceptions', () => {

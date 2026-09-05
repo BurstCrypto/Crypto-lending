@@ -6,7 +6,7 @@ import { MAINNET_PLATFORM_DIRECTORY } from '../apps/api/src/mainnet-platforms/do
 // @ts-expect-error The audited local validator is an ESM JavaScript module without declarations.
 import { validateEgressPolicy } from '../infra/egress/validate-egress-policy.mjs';
 // @ts-expect-error The audited local validator is an ESM JavaScript module without declarations.
-import { validateProviderDecisionFiles } from '../infra/providers/validate-kan-62-provider-decision.mjs';
+import { loadValidatedProviderDecisionSnapshot } from '../infra/providers/validate-kan-62-provider-decision.mjs';
 // @ts-expect-error The operations-owned audited manifest boundary is an ESM JavaScript module.
 import * as releaseCandidateManifest from './release-candidate-manifest.mjs';
 import {
@@ -1383,11 +1383,9 @@ export function loadRepositoryProductionPreflightInput(
   let providerRecord: Record<string, unknown> = {};
   let providerLocalValidationPassed = false;
   try {
-    const validation = validateProviderDecisionFiles({ repositoryRoot });
+    const validation = loadValidatedProviderDecisionSnapshot({ repositoryRoot });
     providerLocalValidationPassed = validation.errors.length === 0;
-    providerRecord = parseJsonFile(
-      resolve(repositoryRoot, 'docs/rpc-indexing/kan-62-provider-decision.json'),
-    );
+    providerRecord = objectRecord(validation.record);
   } catch {
     // The evaluator emits a closed local-validation blocker.
   }
