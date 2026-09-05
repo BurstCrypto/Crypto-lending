@@ -63,9 +63,53 @@ function ChangedWalletRoster({ onWalletsChanged }: WalletOwnershipCallbacks) {
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
+  Reflect.deleteProperty(document, 'visibilityState');
 });
 
 describe('authenticated production portfolio', () => {
+  it('does not start session or balance reads when the portfolio mounts hidden', async () => {
+    const restoreSession = vi.fn(async () => PROFILE);
+    const readPortfolio = vi.fn(async () => REPORTING_PORTFOLIO_SNAPSHOT);
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'hidden',
+    });
+    vi.useFakeTimers();
+
+    render(
+      <ProductionPortfolio
+        dependencies={dependencies({ readPortfolio, restoreSession })}
+        walletOwnershipComponent={ChangedWalletRoster}
+      />,
+    );
+
+    expect(restoreSession).not.toHaveBeenCalled();
+    expect(readPortfolio).not.toHaveBeenCalled();
+    expect(screen.getByRole('heading', { name: 'Loading your portfolio' })).toBeVisible();
+    act(() => {
+      window.dispatchEvent(new Event('online'));
+      window.dispatchEvent(new Event('pageshow'));
+      vi.advanceTimersByTime(SENSITIVE_VIEW_REVALIDATION_THROTTLE_MS);
+    });
+    expect(restoreSession).not.toHaveBeenCalled();
+    expect(readPortfolio).not.toHaveBeenCalled();
+
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'visible',
+    });
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'));
+      vi.advanceTimersByTime(SENSITIVE_VIEW_REVALIDATION_THROTTLE_MS);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(restoreSession).toHaveBeenCalledOnce();
+    expect(readPortfolio).toHaveBeenCalledOnce();
+    expect(screen.getByText('Supported reporting total')).toBeVisible();
+  });
+
   it('keeps portfolio data hidden until the managed session is verified', async () => {
     const pendingSession = deferred<AccountProfile>();
     const pendingPortfolio = deferred<ReportingPortfolioSnapshot>();

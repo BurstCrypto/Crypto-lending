@@ -54,12 +54,13 @@ export function HomeSessionActions() {
     setRevision((current) => current + 1);
   }, []);
 
-  useSensitiveViewRevalidation({
+  const isSensitiveViewActive = useSensitiveViewRevalidation({
     invalidate: invalidateSessionActions,
     revalidate: revalidateSessionActions,
   });
 
   useEffect(() => {
+    if (!isSensitiveViewActive()) return;
     const controller = new AbortController();
     activeRequest.current?.abort();
     activeRequest.current = controller;
@@ -77,7 +78,7 @@ export function HomeSessionActions() {
       controller.abort();
       if (activeRequest.current === controller) activeRequest.current = null;
     };
-  }, [revision]);
+  }, [isSensitiveViewActive, revision]);
 
   return (
     <>

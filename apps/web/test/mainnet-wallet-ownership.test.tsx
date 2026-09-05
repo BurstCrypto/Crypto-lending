@@ -534,6 +534,43 @@ describe('MainnetWalletOwnership', () => {
     expect(screen.queryByRole('alert')).toBeNull();
   });
 
+  it('does not request the wallet roster when the ownership screen mounts hidden', async () => {
+    const readWallets = vi.fn(async () => ({ version: 1 as const, wallets: [] }));
+    const roster: MainnetWalletRosterClient = {
+      readWallets,
+      removeWallet: vi.fn(async () => undefined),
+    };
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'hidden',
+    });
+    vi.useFakeTimers();
+
+    render(<MainnetWalletOwnership dependencies={dependencies(runtimeHarness(), roster)} />);
+
+    expect(readWallets).not.toHaveBeenCalled();
+    expect(screen.getByText(/Loading verified wallets/u)).toBeVisible();
+    act(() => {
+      window.dispatchEvent(new Event('online'));
+      window.dispatchEvent(new Event('pageshow'));
+      vi.advanceTimersByTime(SENSITIVE_VIEW_REVALIDATION_THROTTLE_MS);
+    });
+    expect(readWallets).not.toHaveBeenCalled();
+
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'visible',
+    });
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'));
+      vi.advanceTimersByTime(SENSITIVE_VIEW_REVALIDATION_THROTTLE_MS);
+      await Promise.resolve();
+    });
+
+    expect(readWallets).toHaveBeenCalledOnce();
+    expect(screen.getByText('No wallets are verified for this account yet.')).toBeVisible();
+  });
+
   it('hides and revalidates the wallet roster while suppressing a superseded late read', async () => {
     const superseded = Promise.withResolvers<{
       readonly version: 1;

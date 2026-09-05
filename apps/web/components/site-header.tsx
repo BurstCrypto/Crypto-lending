@@ -96,12 +96,13 @@ export function SiteHeader({
     setSessionRevision((revision) => revision + 1);
   }, []);
 
-  useSensitiveViewRevalidation({
+  const isSensitiveViewActive = useSensitiveViewRevalidation({
     invalidate: invalidateSessionNavigation,
     revalidate: revalidateSessionNavigation,
   });
 
   useEffect(() => {
+    if (!isSensitiveViewActive()) return;
     const abortController = new AbortController();
     activeSessionCheck.current = abortController;
 
@@ -121,7 +122,7 @@ export function SiteHeader({
       abortController.abort();
       if (activeSessionCheck.current === abortController) activeSessionCheck.current = null;
     };
-  }, [sessionRevision]);
+  }, [isSensitiveViewActive, sessionRevision]);
 
   const primaryLinks = sessionState === 'authenticated' ? PRIMARY_LINKS : [];
   const isPublicEntryPage =

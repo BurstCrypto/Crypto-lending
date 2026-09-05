@@ -55,7 +55,7 @@ export function AccountSession() {
     setRetryRevision((revision) => revision + 1);
   }, []);
 
-  useSensitiveViewRevalidation({
+  const isSensitiveViewActive = useSensitiveViewRevalidation({
     invalidate: invalidateAccountSession,
     revalidate: revalidateAccountSession,
     enabled: session.status !== 'signed-out',
@@ -72,6 +72,7 @@ export function AccountSession() {
   );
 
   useEffect(() => {
+    if (!isSensitiveViewActive()) return;
     const abortController = new AbortController();
     restoreRequestReference.current?.abort();
     restoreRequestReference.current = abortController;
@@ -103,7 +104,7 @@ export function AccountSession() {
         restoreRequestReference.current = null;
       }
     };
-  }, [retryRevision]);
+  }, [isSensitiveViewActive, retryRevision]);
 
   useEffect(() => {
     if (session.status === 'signed-out') {

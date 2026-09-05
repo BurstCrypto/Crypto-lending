@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 
 export const SENSITIVE_VIEW_REVALIDATION_THROTTLE_MS = 200;
 
@@ -13,29 +13,38 @@ export interface SensitiveViewRevalidationOptions {
   readonly throttleMs?: number;
 }
 
+export type SensitiveViewActivityCheck = () => boolean;
+
 /**
  * Revalidates sensitive browser views after lifecycle transitions that can outlive a session.
  * Invalidation is synchronous. Backgrounded pages stay invalid, while visible refreshes are
- * trailing-throttled to one request per event burst.
+ * trailing-throttled to one request per event burst. The returned stable check must guard every
+ * effect that begins a sensitive read.
  */
 export function useSensitiveViewRevalidation({
   invalidate,
   revalidate,
   enabled = true,
   throttleMs = SENSITIVE_VIEW_REVALIDATION_THROTTLE_MS,
-}: SensitiveViewRevalidationOptions): void {
+}: SensitiveViewRevalidationOptions): SensitiveViewActivityCheck {
   const callbacksReference = useRef({ invalidate, revalidate });
+  const activeReference = useRef(false);
+  const isActive = useCallback((): boolean => activeReference.current, []);
 
   useEffect(() => {
     callbacksReference.current = { invalidate, revalidate };
   }, [invalidate, revalidate]);
 
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled) {
+      activeReference.current = false;
+      return;
+    }
 
     let pendingTimer: number | null = null;
     let invalidatedSinceLastRefresh = false;
     let pageInactive = false;
+    activeReference.current = document.visibilityState === 'visible';
 
     function cancelPendingRefresh(): void {
       if (pendingTimer === null) return;
@@ -44,6 +53,7 @@ export function useSensitiveViewRevalidation({
     }
 
     function invalidateWithoutRefresh(): void {
+      activeReference.current = false;
       cancelPendingRefresh();
       if (invalidatedSinceLastRefresh) return;
       invalidatedSinceLastRefresh = true;
@@ -57,6 +67,7 @@ export function useSensitiveViewRevalidation({
       }
       if (pendingTimer !== null) return;
 
+      activeReference.current = false;
       if (!invalidatedSinceLastRefresh) {
         invalidatedSinceLastRefresh = true;
         callbacksReference.current.invalidate();
@@ -68,6 +79,7 @@ export function useSensitiveViewRevalidation({
             invalidateWithoutRefresh();
             return;
           }
+          activeReference.current = true;
           invalidatedSinceLastRefresh = false;
           callbacksReference.current.revalidate();
         },
@@ -98,8 +110,10 @@ export function useSensitiveViewRevalidation({
     window.addEventListener('pagehide', handlePageHide);
     window.addEventListener('pageshow', handlePageShow);
     document.addEventListener('visibilitychange', handleVisibilityChange);
+    if (!activeReference.current) invalidateWithoutRefresh();
 
     return () => {
+      activeReference.current = false;
       window.removeEventListener('focus', queueVisibleRevalidation);
       window.removeEventListener('online', queueVisibleRevalidation);
       window.removeEventListener('pagehide', handlePageHide);
@@ -108,4 +122,6 @@ export function useSensitiveViewRevalidation({
       cancelPendingRefresh();
     };
   }, [enabled, throttleMs]);
+
+  return isActive;
 }

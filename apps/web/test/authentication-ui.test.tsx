@@ -437,6 +437,40 @@ describe('verified account session UI', () => {
     expect(screen.getByText('Not yet determined')).toBeInTheDocument();
   });
 
+  it('does not restore or retain a profile when the account screen mounts hidden', async () => {
+    authenticationMocks.restore.mockResolvedValueOnce(PROFILE);
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'hidden',
+    });
+    vi.useFakeTimers();
+
+    render(<AccountSession />);
+
+    expect(authenticationMocks.restore).not.toHaveBeenCalled();
+    expect(screen.getByText(/Checking your secure session/u)).toBeVisible();
+    expect(screen.queryByText(PROFILE.contactEmail)).toBeNull();
+    act(() => {
+      window.dispatchEvent(new Event('focus'));
+      dispatchPageShow(true);
+      vi.advanceTimersByTime(SENSITIVE_VIEW_REVALIDATION_THROTTLE_MS);
+    });
+    expect(authenticationMocks.restore).not.toHaveBeenCalled();
+
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'visible',
+    });
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'));
+      vi.advanceTimersByTime(SENSITIVE_VIEW_REVALIDATION_THROTTLE_MS);
+      await Promise.resolve();
+    });
+
+    expect(authenticationMocks.restore).toHaveBeenCalledOnce();
+    expect(screen.getByText(PROFILE.contactEmail)).toBeVisible();
+  });
+
   it('replace-redirects an unauthenticated restoration to the local login UI', async () => {
     const firstRosterKey = legacyLocalDemoWalletRosterKey(PROFILE.accountId);
     const secondRosterKey = legacyLocalDemoWalletRosterKey('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb');

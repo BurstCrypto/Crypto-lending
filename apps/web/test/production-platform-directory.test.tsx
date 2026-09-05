@@ -49,6 +49,48 @@ afterEach(() => {
 });
 
 describe('authenticated production platform directory', () => {
+  it('does not start session or directory reads when the screen mounts hidden', async () => {
+    const restoreSession = vi.fn(async () => PROFILE);
+    const readDirectory = vi.fn(async () => DIRECTORY);
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'hidden',
+    });
+    vi.useFakeTimers();
+
+    render(
+      <ProductionPlatformDirectory
+        dependencies={dependencies({ readDirectory, restoreSession })}
+      />,
+    );
+
+    expect(restoreSession).not.toHaveBeenCalled();
+    expect(readDirectory).not.toHaveBeenCalled();
+    expect(screen.queryByText('Aave')).toBeNull();
+    act(() => {
+      window.dispatchEvent(new Event('focus'));
+      window.dispatchEvent(new Event('pageshow'));
+      vi.advanceTimersByTime(SENSITIVE_VIEW_REVALIDATION_THROTTLE_MS);
+    });
+    expect(restoreSession).not.toHaveBeenCalled();
+    expect(readDirectory).not.toHaveBeenCalled();
+
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'visible',
+    });
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'));
+      vi.advanceTimersByTime(SENSITIVE_VIEW_REVALIDATION_THROTTLE_MS);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(restoreSession).toHaveBeenCalledOnce();
+    expect(readDirectory).toHaveBeenCalledOnce();
+    expect(screen.getByText('10 platforms under evaluation')).toBeVisible();
+  });
+
   it('keeps provider information hidden until the managed session is verified', async () => {
     const pendingSession = deferred<AccountProfile>();
     const pendingDirectory = deferred<typeof DIRECTORY>();

@@ -36,6 +36,40 @@ describe('SiteHeader', () => {
   afterEach(() => {
     cleanup();
     vi.useRealTimers();
+    Reflect.deleteProperty(document, 'visibilityState');
+  });
+
+  it('does not request session-derived navigation when the header mounts hidden', async () => {
+    authenticationMocks.restore.mockResolvedValueOnce({});
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'hidden',
+    });
+    vi.useFakeTimers();
+
+    render(<SiteHeader activePage="home" />);
+
+    expect(authenticationMocks.restore).not.toHaveBeenCalled();
+    expect(screen.queryByRole('navigation')).toBeNull();
+    act(() => {
+      window.dispatchEvent(new Event('online'));
+      window.dispatchEvent(new Event('pageshow'));
+      vi.advanceTimersByTime(SENSITIVE_VIEW_REVALIDATION_THROTTLE_MS);
+    });
+    expect(authenticationMocks.restore).not.toHaveBeenCalled();
+
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'visible',
+    });
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'));
+      vi.advanceTimersByTime(SENSITIVE_VIEW_REVALIDATION_THROTTLE_MS);
+      await Promise.resolve();
+    });
+
+    expect(authenticationMocks.restore).toHaveBeenCalledOnce();
+    expect(screen.getByRole('link', { name: 'Portfolio' })).toBeVisible();
   });
 
   it('shows only guest actions after verification confirms there is no session', async () => {

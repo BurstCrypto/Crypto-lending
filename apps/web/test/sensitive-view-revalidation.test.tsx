@@ -1,4 +1,5 @@
 import { act, cleanup, render } from '@testing-library/react';
+import { useEffect, useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -16,6 +17,19 @@ function Harness({ invalidate, revalidate }: HarnessProps) {
   return null;
 }
 
+function ActiveReadHarness({ invalidate, read }: { invalidate: () => void; read: () => void }) {
+  const [revision, setRevision] = useState(0);
+  const isActive = useSensitiveViewRevalidation({
+    invalidate,
+    revalidate: () => setRevision((current) => current + 1),
+  });
+
+  useEffect(() => {
+    if (isActive()) read();
+  }, [isActive, read, revision]);
+  return null;
+}
+
 function dispatchPageShow(persisted: boolean): void {
   const event = new Event('pageshow');
   Object.defineProperty(event, 'persisted', { value: persisted });
@@ -29,6 +43,37 @@ afterEach(() => {
 });
 
 describe('useSensitiveViewRevalidation', () => {
+  it('blocks an initial hidden read until a visible lifecycle refresh', () => {
+    vi.useFakeTimers();
+    const invalidate = vi.fn();
+    const read = vi.fn();
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'hidden',
+    });
+
+    render(<ActiveReadHarness invalidate={invalidate} read={read} />);
+
+    expect(invalidate).toHaveBeenCalledOnce();
+    expect(read).not.toHaveBeenCalled();
+    act(() => {
+      window.dispatchEvent(new Event('focus'));
+      window.dispatchEvent(new Event('online'));
+      dispatchPageShow(true);
+      vi.advanceTimersByTime(SENSITIVE_VIEW_REVALIDATION_THROTTLE_MS);
+    });
+    expect(read).not.toHaveBeenCalled();
+
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'visible',
+    });
+    act(() => document.dispatchEvent(new Event('visibilitychange')));
+    act(() => vi.advanceTimersByTime(SENSITIVE_VIEW_REVALIDATION_THROTTLE_MS));
+
+    expect(read).toHaveBeenCalledOnce();
+  });
+
   it.each([
     ['window focus', () => window.dispatchEvent(new Event('focus'))],
     ['reconnect', () => window.dispatchEvent(new Event('online'))],

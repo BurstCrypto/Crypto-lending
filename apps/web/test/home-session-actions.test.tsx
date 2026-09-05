@@ -33,6 +33,40 @@ describe('HomeSessionActions', () => {
   afterEach(() => {
     cleanup();
     vi.useRealTimers();
+    Reflect.deleteProperty(document, 'visibilityState');
+  });
+
+  it('does not request session-derived actions when the home view mounts hidden', async () => {
+    authenticationMocks.restore.mockResolvedValueOnce({});
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'hidden',
+    });
+    vi.useFakeTimers();
+
+    render(<HomeSessionActions />);
+
+    expect(authenticationMocks.restore).not.toHaveBeenCalled();
+    expect(screen.queryByRole('link', { name: 'View portfolio' })).toBeNull();
+    act(() => {
+      window.dispatchEvent(new Event('focus'));
+      window.dispatchEvent(new Event('pageshow'));
+      vi.advanceTimersByTime(SENSITIVE_VIEW_REVALIDATION_THROTTLE_MS);
+    });
+    expect(authenticationMocks.restore).not.toHaveBeenCalled();
+
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'visible',
+    });
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'));
+      vi.advanceTimersByTime(SENSITIVE_VIEW_REVALIDATION_THROTTLE_MS);
+      await Promise.resolve();
+    });
+
+    expect(authenticationMocks.restore).toHaveBeenCalledOnce();
+    expect(screen.getByRole('link', { name: 'View portfolio' })).toBeVisible();
   });
 
   it('fails closed while checking and exposes protected destinations only after verification', async () => {

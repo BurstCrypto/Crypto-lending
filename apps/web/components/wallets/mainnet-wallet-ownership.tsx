@@ -576,7 +576,7 @@ export function MainnetWalletOwnership({
     setRemovalNotice(null);
   }, [invalidateRemovalOperation, invalidateRoster, invalidateWalletOperation]);
 
-  useSensitiveViewRevalidation({
+  const isSensitiveViewActive = useSensitiveViewRevalidation({
     invalidate: invalidateSensitiveWalletData,
     revalidate: revalidateRoster,
   });
@@ -637,6 +637,7 @@ export function MainnetWalletOwnership({
   }, [busy, result]);
 
   useEffect(() => {
+    if (!isSensitiveViewActive()) return;
     const controller = new AbortController();
     const generation = rosterRequestGenerationReference.current;
     rosterRequestReference.current?.abort();
@@ -694,6 +695,7 @@ export function MainnetWalletOwnership({
     };
   }, [
     invalidateRemovalOperation,
+    isSensitiveViewActive,
     onAuthenticationRequired,
     onWalletsChanged,
     rosterClient,

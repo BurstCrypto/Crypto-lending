@@ -198,13 +198,14 @@ export function ProductionPlatformDirectory({ dependencies }: ProductionPlatform
     setRevision((current) => current + 1);
   }, []);
 
-  useSensitiveViewRevalidation({
+  const isSensitiveViewActive = useSensitiveViewRevalidation({
     enabled: phase !== 'SIGNED_OUT',
     invalidate: invalidateSensitiveView,
     revalidate: revalidateSensitiveView,
   });
 
   useEffect(() => {
+    if (!isSensitiveViewActive()) return;
     const controller = new AbortController();
     const generation = requestGenerationReference.current;
     requestReference.current?.abort();
@@ -244,7 +245,7 @@ export function ProductionPlatformDirectory({ dependencies }: ProductionPlatform
       controller.abort();
       if (requestReference.current === controller) requestReference.current = null;
     };
-  }, [configured, revision]);
+  }, [configured, isSensitiveViewActive, revision]);
 
   useEffect(() => {
     if (phase === 'SIGNED_OUT') configured.navigate(PLATFORMS_LOGIN_PATH);
