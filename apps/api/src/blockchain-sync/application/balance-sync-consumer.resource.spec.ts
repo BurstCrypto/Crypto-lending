@@ -695,7 +695,8 @@ describe('createDormantBalanceSyncConsumerResource', () => {
 
     expect(hostileReasonReads).toBe(0);
     expect(workerSignal?.aborted).toBe(true);
-    expect(workerSignal?.reason).toEqual(new Error('Balance sync consumer run aborted'));
+    expect(workerSignal?.reason).toMatchObject({ name: 'AbortError' });
+    expect(workerSignal?.reason).not.toBe(hostileReason);
     const rerunError = await capturedRejection(() => resource.run(new AbortController().signal));
     expectFixedError(rerunError, 'AlreadyStarted');
   });
