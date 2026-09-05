@@ -182,6 +182,13 @@ const BALANCE_CONSUMER_ARTIFACTS = Object.freeze({
     resolve(__dirname, '../infra/aws/validate-balance-consumer-deployment-envelope.mjs'),
     'utf8',
   ),
+  balanceConsumerMetadataTransitionValidatorSource: readFileSync(
+    resolve(
+      __dirname,
+      '../infra/aws/validate-balance-consumer-metadata-secret-version-transition.mjs',
+    ),
+    'utf8',
+  ),
   bootstrapPrincipalsSource: readFileSync(
     resolve(__dirname, '../infra/postgres/bootstrap-principals.sql'),
     'utf8',
@@ -809,6 +816,10 @@ test('balance-consumer inspection rejects retained-marker semantic overrides and
     },
     {
       ...BALANCE_CONSUMER_ARTIFACTS,
+      balanceConsumerMetadataTransitionValidatorSource: `${BALANCE_CONSUMER_ARTIFACTS.balanceConsumerMetadataTransitionValidatorSource}\nvoid fetch('https://unreviewed.invalid');\n`,
+    },
+    {
+      ...BALANCE_CONSUMER_ARTIFACTS,
       bootstrapPrincipalsSource: `${BALANCE_CONSUMER_ARTIFACTS.bootstrapPrincipalsSource}\n${dynamicCredentialMutation}\n`,
     },
     {
@@ -1118,6 +1129,42 @@ test('balance-consumer inspection fails closed for drift in every reviewed artif
       "const reviewedTemplateSha256 = '01b9129ea24a8c9abd8baa66d411d231eba84e417a80d066f1bd0fc819bd7685';",
     ],
     [
+      'metadata transition production-aware environment',
+      'balanceConsumerMetadataTransitionValidatorSource',
+      'const ENVIRONMENT_PATTERN = /^(?:dev|test|qa|sandbox|staging|production)(?:-[a-z0-9]+)*$/u;',
+      'const ENVIRONMENT_PATTERN = /^(?:dev|test|qa|sandbox|staging)(?:-[a-z0-9]+)*$/u;',
+    ],
+    [
+      'metadata transition empty production authority',
+      'balanceConsumerMetadataTransitionValidatorSource',
+      'keys: [],',
+      "keys: [{ status: 'APPROVED' }],",
+    ],
+    [
+      'metadata transition zero external calls',
+      'balanceConsumerMetadataTransitionValidatorSource',
+      'externalCallsMade: 0,',
+      'externalCallsMade: 1,',
+    ],
+    [
+      'metadata transition zero file writes',
+      'balanceConsumerMetadataTransitionValidatorSource',
+      'filesWritten: 0,',
+      'filesWritten: 1,',
+    ],
+    [
+      'metadata transition ignored local record root',
+      'balanceConsumerMetadataTransitionValidatorSource',
+      "'.local-validation',",
+      "'.production-validation',",
+    ],
+    [
+      'metadata transition secure operational read',
+      'balanceConsumerMetadataTransitionValidatorSource',
+      '? readSecureLocalFile(resolvedPath, MAX_BALANCE_CONSUMER_METADATA_TRANSITION_RECORD_BYTES)',
+      '? readFileSync(resolvedPath)',
+    ],
+    [
       'bootstrap principal input',
       'bootstrapPrincipalsSource',
       '\\if :{?balance_consumer_runtime_role}',
@@ -1201,6 +1248,18 @@ test('balance-consumer inspection fails closed for drift in every reviewed artif
       '...validateBalanceConsumerExecutable(sources),',
       '...validateBalanceConsumerExecutable({ ...sources, balanceConsumerCli: sources.balanceConsumerRuntime }),',
     ],
+    [
+      'metadata transition validation script',
+      'rootPackageSource',
+      'node infra/aws/validate-balance-consumer-metadata-secret-version-transition.mjs',
+      'node infra/aws/validate-balance-consumer-metadata-secret-version-transition.disabled.mjs',
+    ],
+    [
+      'metadata transition test script',
+      'rootPackageSource',
+      'node --test infra/aws/validate-balance-consumer-metadata-secret-version-transition.test.mjs',
+      'node --test infra/aws/validate-balance-consumer-metadata-secret-version-transition.disabled.test.mjs',
+    ],
   ];
 
   for (const [label, key, approved, rejected] of mutations) {
@@ -1215,6 +1274,10 @@ test('balance-consumer inspection fails closed for drift in every reviewed artif
 test('balance-consumer artifact shape, bounds, and private brand fail closed', () => {
   const missing = { ...BALANCE_CONSUMER_ARTIFACTS } as Record<string, unknown>;
   delete missing.activationSource;
+  const missingMetadataValidator = {
+    ...BALANCE_CONSUMER_ARTIFACTS,
+  } as Record<string, unknown>;
+  delete missingMetadataValidator.balanceConsumerMetadataTransitionValidatorSource;
   const accessor = { ...BALANCE_CONSUMER_ARTIFACTS } as Record<string, unknown>;
   Object.defineProperty(accessor, 'activationSource', {
     enumerable: true,
@@ -1235,6 +1298,7 @@ test('balance-consumer artifact shape, bounds, and private brand fail closed', (
     null,
     {},
     missing,
+    missingMetadataValidator,
     { ...BALANCE_CONSUMER_ARTIFACTS, unexpected: 'value' },
     { ...BALANCE_CONSUMER_ARTIFACTS, runtimeSource: 1 },
     accessor,

@@ -173,6 +173,7 @@ export interface BalanceConsumerArtifactSources {
   readonly workloadValidatorSource: string;
   readonly balanceConsumerEnvelopeSource: string;
   readonly balanceConsumerEnvelopeValidatorSource: string;
+  readonly balanceConsumerMetadataTransitionValidatorSource: string;
   readonly bootstrapPrincipalsSource: string;
   readonly bootstrapPrincipalsValidatorSource: string;
   readonly walletAddressMigrationSource: string;
@@ -506,6 +507,7 @@ const BALANCE_CONSUMER_ARTIFACT_KEYS = Object.freeze([
   'workloadValidatorSource',
   'balanceConsumerEnvelopeSource',
   'balanceConsumerEnvelopeValidatorSource',
+  'balanceConsumerMetadataTransitionValidatorSource',
   'bootstrapPrincipalsSource',
   'bootstrapPrincipalsValidatorSource',
   'walletAddressMigrationSource',
@@ -527,7 +529,7 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
   sqsModuleSource: 'dc958100bd372500a9428c28cc6219a4cb00db61314a63478368d0b0cf95221b',
   sqsTokensSource: '9727c85465fd2bec762ea6c0445b698a1011234396778a156f7f161cac29ac14',
   apiPackageSource: '28b9f69d1cf3cf1d16ee76ba6a4afd4881df9afb205c010e6512b0c3633c0c9c',
-  rootPackageSource: '9b5de24a61088f46403cf5d85f07dea53534a2e558e32cffde8fe4fd782fe528',
+  rootPackageSource: '1a2c762fe9278975a123073be69b7dc332b547e348ecbb71303233da7ebac8fd',
   applicationTemplateSource: '9ffa126c63a1758db315eae58462f3d1a47cf3542136db39a65749c47dd08fb6',
   applicationValidatorSource: 'd9b21305fa911cd7290c70bda1e512b54442a8a5705663b74d0d572f03654f4d',
   workloadTemplateSource: '4c74c98e73635df30570dfe1e726b41cb6f62832f0bfc2e43dcd087d384b78de',
@@ -535,6 +537,8 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
   balanceConsumerEnvelopeSource: '91b9129ea24a8c9abd8baa66d411d231eba84e417a80d066f1bd0fc819bd7685',
   balanceConsumerEnvelopeValidatorSource:
     'a4fe9b4765d488f77ad78fe46a865809dbad857021547d53aae4fd711021b397',
+  balanceConsumerMetadataTransitionValidatorSource:
+    '79abdc329df3fe3275cf1c4d14a4256a2a334ec78efece9fefb92b9e461755e0',
   bootstrapPrincipalsSource: 'da3793b00efbfe12baa64446912376a85d2c6d7095f84dfb14c6e173dbefb9ac',
   bootstrapPrincipalsValidatorSource:
     '6731fee433acae8f7c240995c6ffe64247c7f4ef730be2b7367c3fa10ad40681',
@@ -1987,13 +1991,30 @@ function hasDormantBalanceConsumerPackagingContract(
 ): boolean {
   const apiScripts = parsedPackageScripts(sources.apiPackageSource);
   const rootScripts = parsedPackageScripts(sources.rootPackageSource);
+  const metadataValidatorPath =
+    'infra/aws/validate-balance-consumer-metadata-secret-version-transition.mjs';
+  const metadataValidatorTestPath =
+    'infra/aws/validate-balance-consumer-metadata-secret-version-transition.test.mjs';
   if (
     apiScripts?.['worker:balance:prod'] !==
       'node dist/blockchain-sync/application/balance-sync-consumer.cli.js' ||
     rootScripts?.['infra:validate:migrations'] !==
       'node infra/aws/validate-database-migration-task.mjs && node infra/postgres/validate-bootstrap-principals.mjs' ||
     rootScripts?.['infra:test:migrations'] !==
-      'node --test infra/aws/validate-database-migration-task.test.mjs infra/postgres/validate-bootstrap-principals.test.mjs'
+      'node --test infra/aws/validate-database-migration-task.test.mjs infra/postgres/validate-bootstrap-principals.test.mjs' ||
+    rootScripts?.['infra:validate:balance-consumer-metadata-transition'] !==
+      `node ${metadataValidatorPath}` ||
+    rootScripts?.['infra:test:balance-consumer-metadata-transition'] !==
+      `node --test ${metadataValidatorTestPath}` ||
+    typeof rootScripts?.['infra:validate'] !== 'string' ||
+    rootScripts['infra:validate'].split(
+      'npm run infra:validate:balance-consumer-metadata-transition',
+    ).length -
+      1 !==
+      1 ||
+    typeof rootScripts?.['lint:production:artifacts'] !== 'string' ||
+    rootScripts['lint:production:artifacts'].split(metadataValidatorPath).length - 1 !== 1 ||
+    rootScripts['lint:production:artifacts'].split(metadataValidatorTestPath).length - 1 !== 1
   ) {
     return false;
   }
@@ -2411,6 +2432,113 @@ function hasExactBalanceConsumerEnvelopeValidatorContract(
   return checks.every(Boolean);
 }
 
+function hasExactBalanceConsumerMetadataTransitionValidatorContract(
+  sources: BalanceConsumerArtifactSources,
+): boolean {
+  const validator = sources.balanceConsumerMetadataTransitionValidatorSource.replace(
+    /\r\n/gu,
+    '\n',
+  );
+  const registryStart = validator.indexOf(
+    'export const BALANCE_CONSUMER_METADATA_TRANSITION_AUTHORITY_KEY_REGISTRY = deepFreeze({',
+  );
+  const registryEnd = validator.indexOf('});', registryStart);
+  const zeroCallsStart = validator.indexOf('const ZERO_CALLS = Object.freeze({');
+  const zeroCallsEnd = validator.indexOf('});', zeroCallsStart);
+  const localRootStart = validator.indexOf(
+    'export const LOCAL_BALANCE_CONSUMER_METADATA_TRANSITION_ROOT = join(',
+  );
+  const localRootEnd = validator.indexOf(');', localRootStart);
+  if (
+    registryStart < 0 ||
+    registryEnd <= registryStart ||
+    zeroCallsStart < 0 ||
+    zeroCallsEnd <= zeroCallsStart ||
+    localRootStart < 0 ||
+    localRootEnd <= localRootStart
+  ) {
+    return false;
+  }
+
+  const registry = trimmedExecutableLines(validator.slice(registryStart, registryEnd + 3));
+  const zeroCalls = trimmedExecutableLines(validator.slice(zeroCallsStart, zeroCallsEnd + 3));
+  const localRoot = trimmedExecutableLines(validator.slice(localRootStart, localRootEnd + 2));
+  const forbiddenCapability =
+    /(?:from\s+['"]node:(?:child_process|cluster|dgram|dns|fs|http|https|net|tls|worker_threads)['"]|from\s+['"](?:@aws-sdk\/|aws-sdk|axios|ioredis|pg|redis|undici)['"]|\b(?:fetch|XMLHttpRequest|WebSocket|spawn|execFile|fork|createConnection|writeFile|appendFile|mkdir|mkdtemp|rm|unlink|rename|copyFile)(?:Sync)?\s*\(|\bprocess\.env\b)/u;
+  const exactZeroCalls = [
+    'const ZERO_CALLS = Object.freeze({',
+    'externalCallsMade: 0,',
+    'awsCallsMade: 0,',
+    'databaseConnectionsMade: 0,',
+    'redisConnectionsMade: 0,',
+    'dnsQueriesMade: 0,',
+    'httpRequestsMade: 0,',
+    'secretValuesRead: 0,',
+    'resourcesCreated: 0,',
+    'credentialBytesRead: 0,',
+    'filesWritten: 0,',
+    '});',
+  ] as const;
+
+  return (
+    exactExecutableLineCount(
+      validator,
+      `const ENVIRONMENT_PATTERN = ${PRODUCTION_AWARE_ENVIRONMENT_PATTERN_SOURCE};`,
+    ) === 1 &&
+    exactExecutableLineCount(validator, "'BALANCE_CONSUMER_WALLET_METADATA_KEY_RING_JSON';") ===
+      1 &&
+    registry.join('\n') ===
+      [
+        'export const BALANCE_CONSUMER_METADATA_TRANSITION_AUTHORITY_KEY_REGISTRY = deepFreeze({',
+        'schemaVersion: 1,',
+        'artifactType: AUTHORITY_ARTIFACT_TYPE,',
+        'keys: [],',
+        '});',
+      ].join('\n') &&
+    zeroCalls.join('\n') === exactZeroCalls.join('\n') &&
+    localRoot.join('\n') ===
+      [
+        'export const LOCAL_BALANCE_CONSUMER_METADATA_TRANSITION_ROOT = join(',
+        'REPOSITORY_ROOT,',
+        "'.local-validation',",
+        ');',
+      ].join('\n') &&
+    exactExecutableLineCount(
+      validator,
+      "!resolvedPath.toLowerCase().endsWith('.balance-consumer-metadata-transition.local.json')",
+    ) === 1 &&
+    exactExecutableLineCount(
+      validator,
+      '? readSecureLocalFile(resolvedPath, MAX_BALANCE_CONSUMER_METADATA_TRANSITION_RECORD_BYTES)',
+    ) === 1 &&
+    exactExecutableLineCount(validator, 'const record = parseStrictJsonBytes(bytes);') === 1 &&
+    exactExecutableLineCount(
+      validator,
+      'if (canonicalizeBalanceConsumerMetadataTransitionValue(record) !== text) {',
+    ) === 1 &&
+    exactExecutableLineCount(validator, "if ((options.mode ?? 'example') !== 'example') {") === 1 &&
+    exactExecutableLineCount(
+      validator,
+      "'Operational records require verification through the production authority path.',",
+    ) === 1 &&
+    exactExecutableLineCount(
+      validator,
+      'BALANCE_CONSUMER_METADATA_TRANSITION_AUTHORITY_KEY_REGISTRY,',
+    ) === 1 &&
+    exactExecutableLineCount(validator, 'if (ok && signatureValidated && production) {') === 1 &&
+    exactExecutableLineCount(validator, 'executionAllowed: false,') === 1 &&
+    exactExecutableLineCount(validator, "'NO_SECRET_OR_KEY_MATERIAL',") === 1 &&
+    exactExecutableLineCount(validator, "'NO_SECRET_VALUE_HASHES',") === 1 &&
+    exactExecutableLineCount(validator, "'NO_AWS_CALLS',") === 1 &&
+    exactExecutableLineCount(validator, "'NO_DATABASE_OR_REDIS_CONNECTIONS',") === 1 &&
+    exactExecutableLineCount(validator, "'NO_NETWORK_OR_DNS',") === 1 &&
+    exactExecutableLineCount(validator, "'NO_RESOURCE_MUTATION',") === 1 &&
+    exactExecutableLineCount(validator, "'NO_FILE_WRITES',") === 1 &&
+    exactExecutableLineCount(validator, "'NO_RUNTIME_ACTIVATION',") === 1 &&
+    !forbiddenCapability.test(validator)
+  );
+}
+
 function hasDormantBalanceConsumerDatabaseCapability(
   sources: BalanceConsumerArtifactSources,
 ): boolean {
@@ -2633,6 +2761,7 @@ export function inspectBalanceConsumerDeploymentArtifacts(
       hasIsolatedBalanceConsumerWorkloadContract(sources) &&
       hasExactStandaloneBalanceConsumerEnvelopeContract(sources) &&
       hasExactBalanceConsumerEnvelopeValidatorContract(sources) &&
+      hasExactBalanceConsumerMetadataTransitionValidatorContract(sources) &&
       hasDormantBalanceConsumerDatabaseCapability(sources);
     if (!contractValid) return invalid(true);
     const result: BalanceConsumerDeploymentInput = Object.freeze({
@@ -3304,6 +3433,13 @@ export function loadRepositoryProductionPreflightInput(
       ),
       balanceConsumerEnvelopeValidatorSource: readFileSync(
         resolve(repositoryRoot, 'infra/aws/validate-balance-consumer-deployment-envelope.mjs'),
+        'utf8',
+      ),
+      balanceConsumerMetadataTransitionValidatorSource: readFileSync(
+        resolve(
+          repositoryRoot,
+          'infra/aws/validate-balance-consumer-metadata-secret-version-transition.mjs',
+        ),
         'utf8',
       ),
       bootstrapPrincipalsSource: readFileSync(
