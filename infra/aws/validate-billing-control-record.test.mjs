@@ -1,10 +1,63 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import {
+  linkSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { test } from 'node:test';
 
 import {
+  BILLING_CONTROL_RECORD_INPUT_ERROR,
+  MAX_BILLING_CONTROL_RECORD_BYTES,
   canonicalizeBillingControlRecord,
+  loadBillingControlRecordFile,
+  loadBillingControlRecordFileForTest,
   validateBillingControlRecord,
 } from './validate-billing-control-record.mjs';
+
+const validatorPath = join(import.meta.dirname, 'validate-billing-control-record.mjs');
+const exampleRecordPath = join(import.meta.dirname, 'billing-control-record.example.json');
+
+function withTemporaryRecord(contents, assertion) {
+  const directory = mkdtempSync(join(tmpdir(), 'kan-229-billing-input-'));
+  const recordPath = join(directory, 'record.json');
+  writeFileSync(recordPath, contents);
+  try {
+    assertion(recordPath, directory);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+function assertInputRejected(recordPath) {
+  assert.throws(
+    () => loadBillingControlRecordFile(recordPath),
+    (error) =>
+      error instanceof Error &&
+      error.message === BILLING_CONTROL_RECORD_INPUT_ERROR &&
+      !error.message.includes(recordPath),
+  );
+}
+
+function skipUnsupportedLink(error, context) {
+  if (
+    error &&
+    typeof error === 'object' &&
+    'code' in error &&
+    ['EACCES', 'EINVAL', 'ENOSYS', 'ENOTSUP', 'EPERM', 'UNKNOWN'].includes(error.code)
+  ) {
+    context.skip(`symbolic links are unavailable: ${error.code}`);
+    return true;
+  }
+  return false;
+}
 
 function approvedRecord() {
   return {
@@ -85,6 +138,125 @@ test('accepts a complete, current, independently verified control record', () =>
   assert.match(result.canonicalSha256, /^[a-f0-9]{64}$/);
   assert.match(result.controlConfigurationSha256, /^[a-f0-9]{64}$/);
   assert.equal(canonicalizeBillingControlRecord(record), canonicalizeBillingControlRecord(record));
+});
+
+test('securely loads the committed example record without changing its mode semantics', () => {
+  const record = loadBillingControlRecordFile(exampleRecordPath);
+  const result = validateBillingControlRecord(record, { mode: 'example' });
+
+  assert.deepEqual(result.errors, []);
+  assert.equal(result.ok, true);
+});
+
+test('rejects top-level and nested duplicate keys whose last value appears safe', () => {
+  const source = readFileSync(exampleRecordPath, 'utf8');
+  const ambiguousRecords = [
+    source.replace(
+      '"status": "NOT_APPROVED",',
+      '"status": "APPROVED",\n  "status": "NOT_APPROVED",',
+    ),
+    source.replace(
+      '"accountId": "NOT_APPROVED",',
+      '"accountId": "123456789012",\n    "accountId": "NOT_APPROVED",',
+    ),
+  ];
+
+  for (const contents of ambiguousRecords) {
+    withTemporaryRecord(contents, assertInputRejected);
+  }
+});
+
+test('rejects BOM-prefixed and malformed UTF-8 JSON', () => {
+  const bytes = readFileSync(exampleRecordPath);
+  const hostileInputs = [
+    Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), bytes]),
+    Buffer.concat([bytes.subarray(0, bytes.length - 1), Buffer.from([0xff, 0x7d])]),
+  ];
+
+  for (const contents of hostileInputs) {
+    withTemporaryRecord(contents, assertInputRejected);
+  }
+});
+
+test('rejects empty, oversized, directory, and hard-linked record inputs', () => {
+  withTemporaryRecord(Buffer.alloc(0), assertInputRejected);
+  withTemporaryRecord(
+    Buffer.alloc(MAX_BILLING_CONTROL_RECORD_BYTES + 1, 0x20),
+    assertInputRejected,
+  );
+
+  const directory = mkdtempSync(join(tmpdir(), 'kan-229-billing-files-'));
+  try {
+    const directoryPath = join(directory, 'directory.json');
+    mkdirSync(directoryPath);
+    assertInputRejected(directoryPath);
+
+    const sourcePath = join(directory, 'source.json');
+    const linkedPath = join(directory, 'hard-link.json');
+    writeFileSync(sourcePath, readFileSync(exampleRecordPath));
+    linkSync(sourcePath, linkedPath);
+    assertInputRejected(sourcePath);
+    assertInputRejected(linkedPath);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('rejects a symbolic-link record path when supported', (context) => {
+  const directory = mkdtempSync(join(tmpdir(), 'kan-229-billing-symlink-'));
+  try {
+    const targetPath = join(directory, 'target.json');
+    const linkedPath = join(directory, 'linked.json');
+    writeFileSync(targetPath, readFileSync(exampleRecordPath));
+    try {
+      symlinkSync(targetPath, linkedPath, 'file');
+    } catch (error) {
+      if (skipUnsupportedLink(error, context)) return;
+      throw error;
+    }
+    assertInputRejected(linkedPath);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('rejects a same-size rewrite during the stable descriptor read', () => {
+  const original = readFileSync(exampleRecordPath);
+  const replacement = Buffer.from(
+    original.toString('utf8').replace('"schemaVersion": 1', '"schemaVersion": 2'),
+    'utf8',
+  );
+  assert.equal(replacement.length, original.length);
+  assert.notDeepEqual(replacement, original);
+
+  withTemporaryRecord(original, (recordPath) => {
+    assert.throws(
+      () =>
+        loadBillingControlRecordFileForTest(recordPath, () => {
+          writeFileSync(recordPath, replacement);
+        }),
+      (error) => error instanceof Error && error.message === BILLING_CONTROL_RECORD_INPUT_ERROR,
+    );
+  });
+});
+
+test('CLI input failures use one fixed path-free surface and report zero AWS calls', () => {
+  const source = readFileSync(exampleRecordPath, 'utf8').replace(
+    '"status": "NOT_APPROVED",',
+    '"status": "APPROVED",\n  "status": "NOT_APPROVED",',
+  );
+
+  withTemporaryRecord(source, (recordPath) => {
+    const result = spawnSync(
+      process.execPath,
+      [validatorPath, '--record', recordPath, '--mode', 'example'],
+      { encoding: 'utf8' },
+    );
+    assert.equal(result.status, 1);
+    assert.equal(result.stdout, '');
+    assert.equal(result.stderr, `${BILLING_CONTROL_RECORD_INPUT_ERROR}\nAWS API calls made: 0\n`);
+    assert.equal(result.stderr.includes(recordPath), false);
+  });
 });
 
 test('rejects unknown fields and unapproved placeholders', () => {

@@ -1,7 +1,16 @@
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+import { parseStrictJsonBytes } from '../shared/parse-strict-json.mjs';
+import {
+  readSecureLocalFile,
+  readSecureLocalFileForTest,
+} from '../shared/read-secure-local-file.mjs';
+
+export const MAX_BILLING_CONTROL_RECORD_BYTES = 65_536;
+export const BILLING_CONTROL_RECORD_INPUT_ERROR =
+  'Billing control record must be a non-empty, stable, single-link regular file of at most 65536 bytes at a canonical local path containing strict UTF-8 JSON without a byte-order mark or duplicate object keys.';
 
 const TOP_LEVEL_KEYS = [
   'schemaVersion',
@@ -143,14 +152,6 @@ function assertReference(value, path, errors) {
   if (value.includes('@') || /NOT_(?:APPROVED|RUN)/i.test(value)) {
     errors.push(`${path} must be an approved reference, not an email address or placeholder.`);
   }
-}
-
-function assertReferenceArray(value, path, errors) {
-  if (!Array.isArray(value) || value.length === 0) {
-    errors.push(`${path} must contain at least one approved role reference.`);
-    return;
-  }
-  value.forEach((entry, index) => assertReference(entry, `${path}[${index}]`, errors));
 }
 
 function assertRoleAlias(value, path, errors) {
@@ -646,6 +647,31 @@ function parseArguments(argv) {
   return options;
 }
 
+function loadBillingControlRecordFileInternal(recordPath, afterFirstReadForTest) {
+  try {
+    const bytes =
+      afterFirstReadForTest === undefined
+        ? readSecureLocalFile(recordPath, MAX_BILLING_CONTROL_RECORD_BYTES)
+        : readSecureLocalFileForTest(
+            recordPath,
+            MAX_BILLING_CONTROL_RECORD_BYTES,
+            afterFirstReadForTest,
+          );
+    return parseStrictJsonBytes(bytes);
+  } catch {
+    throw new Error(BILLING_CONTROL_RECORD_INPUT_ERROR);
+  }
+}
+
+export function loadBillingControlRecordFile(recordPath) {
+  return loadBillingControlRecordFileInternal(recordPath, undefined);
+}
+
+/** Test-only fault seam; production callers use loadBillingControlRecordFile. */
+export function loadBillingControlRecordFileForTest(recordPath, afterFirstReadForTest) {
+  return loadBillingControlRecordFileInternal(recordPath, afterFirstReadForTest);
+}
+
 function main() {
   let options;
   try {
@@ -658,9 +684,9 @@ function main() {
   const recordPath = resolve(options.record);
   let record;
   try {
-    record = JSON.parse(readFileSync(recordPath, 'utf8'));
-  } catch (error) {
-    process.stderr.write(`Unable to parse billing control record: ${error.message}\n`);
+    record = loadBillingControlRecordFile(recordPath);
+  } catch {
+    process.stderr.write(`${BILLING_CONTROL_RECORD_INPUT_ERROR}\n`);
     process.stderr.write('AWS API calls made: 0\n');
     process.exit(1);
   }
