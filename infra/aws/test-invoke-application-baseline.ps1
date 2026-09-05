@@ -22,6 +22,10 @@ $applicationStackResponsePath = Join-Path $temporaryRoot 'application-stack.json
 $applicationStackResponseAfterFirstPath = Join-Path $temporaryRoot 'application-stack-after-first.json'
 $guardrailTemplateResponsePath = Join-Path $temporaryRoot 'guardrail-template.json'
 $changeSetResponsePath = Join-Path $temporaryRoot 'change-set.json'
+$changeSetResponseMapPath = Join-Path $temporaryRoot 'change-set-response-map.json'
+$workloadChildChangeSetResponsePath = Join-Path $temporaryRoot 'workload-child-change-set.json'
+$observabilityChildChangeSetResponsePath = Join-Path $temporaryRoot 'observability-child-change-set.json'
+$grandchildChangeSetResponsePath = Join-Path $temporaryRoot 'grandchild-change-set.json'
 $applicationTemplateResponsePath = Join-Path $temporaryRoot 'application-template.json'
 $bucketLocationResponsePath = Join-Path $temporaryRoot 'bucket-location.json'
 $bucketVersioningResponsePath = Join-Path $temporaryRoot 'bucket-versioning.json'
@@ -43,6 +47,12 @@ $approvedAuthWalletTransitionRecordPath = Join-Path $localTransitionDirectory ("
 $authWalletValidatorMarkerPath = Join-Path $temporaryRoot 'auth-wallet-validator-calls.log'
 $immutableChangeSetId = 'arn:aws:cloudformation:us-west-2:111122223333:changeSet/kan34-application-20260819/11111111-2222-3333-4444-555555555555'
 $immutableStackId = 'arn:aws:cloudformation:us-west-2:111122223333:stack/crypto-lending-application-test/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+$workloadChildChangeSetId = 'arn:aws:cloudformation:us-west-2:111122223333:changeSet/workload-child-change/11111111-aaaa-bbbb-cccc-111111111111'
+$workloadChildStackId = 'arn:aws:cloudformation:us-west-2:111122223333:stack/crypto-lending-workload-test/11111111-aaaa-bbbb-cccc-111111111111'
+$observabilityChildChangeSetId = 'arn:aws:cloudformation:us-west-2:111122223333:changeSet/observability-child-change/22222222-aaaa-bbbb-cccc-222222222222'
+$observabilityChildStackId = 'arn:aws:cloudformation:us-west-2:111122223333:stack/crypto-lending-observability-test/22222222-aaaa-bbbb-cccc-222222222222'
+$grandchildChangeSetId = 'arn:aws:cloudformation:us-west-2:111122223333:changeSet/grandchild-change/33333333-aaaa-bbbb-cccc-333333333333'
+$grandchildStackId = 'arn:aws:cloudformation:us-west-2:111122223333:stack/crypto-lending-grandchild-test/33333333-aaaa-bbbb-cccc-333333333333'
 $originalEnvironment = @{
     PATH = $env:PATH
     FAKE_AWS_MARKER = $env:FAKE_AWS_MARKER
@@ -52,6 +62,8 @@ $originalEnvironment = @{
     FAKE_AWS_APPLICATION_STACK_RESPONSE_AFTER_FIRST = $env:FAKE_AWS_APPLICATION_STACK_RESPONSE_AFTER_FIRST
     FAKE_AWS_GUARDRAIL_TEMPLATE_RESPONSE = $env:FAKE_AWS_GUARDRAIL_TEMPLATE_RESPONSE
     FAKE_AWS_CHANGE_SET_RESPONSE = $env:FAKE_AWS_CHANGE_SET_RESPONSE
+    FAKE_AWS_CHANGE_SET_RESPONSE_MAP = $env:FAKE_AWS_CHANGE_SET_RESPONSE_MAP
+    FAKE_AWS_ROOT_CHANGE_SET_ID = $env:FAKE_AWS_ROOT_CHANGE_SET_ID
     FAKE_AWS_APPLICATION_TEMPLATE_RESPONSE = $env:FAKE_AWS_APPLICATION_TEMPLATE_RESPONSE
     FAKE_AWS_BUCKET_LOCATION_RESPONSE = $env:FAKE_AWS_BUCKET_LOCATION_RESPONSE
     FAKE_AWS_BUCKET_VERSIONING_RESPONSE = $env:FAKE_AWS_BUCKET_VERSIONING_RESPONSE
@@ -102,6 +114,60 @@ function Copy-ArgumentMap {
         $copy[$entry.Key] = $entry.Value
     }
     return $copy
+}
+
+function Copy-JsonValue {
+    param([Parameter(Mandatory = $true)] [object] $Value)
+
+    return (($Value | ConvertTo-Json -Depth 20 -Compress) | ConvertFrom-Json)
+}
+
+function New-NestedChangeSetLink {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $LogicalResourceId,
+        [Parameter(Mandatory = $true)]
+        [string] $StackId,
+        [Parameter(Mandatory = $true)]
+        [string] $ChangeSetId,
+        [ValidateSet('Tags', 'Automatic')]
+        [string] $DetailKind = 'Tags'
+    )
+
+    [string[]] $scope = if ($DetailKind -ceq 'Tags') { @('Tags') } else { @('Properties') }
+    $detail = if ($DetailKind -ceq 'Tags') {
+        [ordered]@{
+            ChangeSource = 'DirectModification'
+            Evaluation = 'Static'
+            Target = [ordered]@{
+                Attribute = 'Tags'
+                RequiresRecreation = 'Never'
+            }
+        }
+    }
+    else {
+        [ordered]@{
+            ChangeSource = 'Automatic'
+            Evaluation = 'Dynamic'
+            Target = [ordered]@{
+                Attribute = 'Properties'
+                RequiresRecreation = 'Never'
+            }
+        }
+    }
+    return [ordered]@{
+        Type = 'Resource'
+        ResourceChange = [ordered]@{
+            Action = 'Modify'
+            LogicalResourceId = $LogicalResourceId
+            PhysicalResourceId = $StackId
+            ResourceType = 'AWS::CloudFormation::Stack'
+            Replacement = 'False'
+            ChangeSetId = $ChangeSetId
+            Scope = $scope
+            Details = @($detail)
+        }
+    }
 }
 
 function Clear-AwsMarker {
@@ -283,7 +349,10 @@ function Write-ChangeSetResponse {
         [string] $UsePreviousParameter,
         [bool] $IncludeNestedStacks = $true,
         [string[]] $Capabilities = @('CAPABILITY_IAM'),
-        [object[]] $Changes = @()
+        [AllowEmptyCollection()]
+        [object[]] $Changes = @(),
+        [AllowNull()]
+        [object] $NextToken = $null
     )
 
     if ($null -eq $ParameterMap) {
@@ -305,7 +374,7 @@ function Write-ChangeSetResponse {
     $tags = @($TagMap.GetEnumerator() | ForEach-Object {
             [ordered]@{ Key = [string] $_.Key; Value = [string] $_.Value }
         })
-    Write-JsonFile -Path $changeSetResponsePath -Value ([ordered]@{
+    $response = [ordered]@{
             StackName = 'crypto-lending-application-test'
             ChangeSetName = 'kan34-application-20260819'
             ChangeSetId = $immutableChangeSetId
@@ -320,7 +389,65 @@ function Write-ChangeSetResponse {
             Tags = $tags
             Capabilities = $Capabilities
             Changes = $Changes
-    })
+    }
+    if ($null -ne $NextToken) {
+        $response['NextToken'] = $NextToken
+    }
+    Write-JsonFile -Path $changeSetResponsePath -Value $response
+}
+
+function Write-NestedChangeSetResponse {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $Path,
+        [Parameter(Mandatory = $true)]
+        [string] $StackName,
+        [Parameter(Mandatory = $true)]
+        [string] $StackId,
+        [Parameter(Mandatory = $true)]
+        [string] $ChangeSetName,
+        [Parameter(Mandatory = $true)]
+        [string] $ChangeSetId,
+        [Parameter(Mandatory = $true)]
+        [string] $ParentChangeSetId,
+        [Parameter(Mandatory = $true)]
+        [string] $RootChangeSetId,
+        [AllowEmptyCollection()]
+        [object[]] $Changes = @(),
+        [string] $Status = 'CREATE_COMPLETE',
+        [string] $ExecutionStatus = 'UNAVAILABLE',
+        [bool] $IncludeNestedStacks = $true,
+        [AllowNull()]
+        [object] $NextToken = $null,
+        [switch] $OmitChangeSetType
+    )
+
+    $response = [ordered]@{
+        StackName = $StackName
+        StackId = $StackId
+        ChangeSetName = $ChangeSetName
+        ChangeSetId = $ChangeSetId
+        ParentChangeSetId = $ParentChangeSetId
+        RootChangeSetId = $RootChangeSetId
+        IncludeNestedStacks = $IncludeNestedStacks
+        Status = $Status
+        ExecutionStatus = $ExecutionStatus
+        Changes = $Changes
+    }
+    if (-not $OmitChangeSetType) {
+        $response['ChangeSetType'] = 'UPDATE'
+    }
+    if ($null -ne $NextToken) {
+        $response['NextToken'] = $NextToken
+    }
+    Write-JsonFile -Path $Path -Value $response -Depth 14
+}
+
+function Set-FakeChangeSetResponseMap {
+    param([System.Collections.IDictionary] $ResponseMap)
+
+    Write-JsonFile -Path $changeSetResponseMapPath -Value $ResponseMap -Depth 4
+    $env:FAKE_AWS_CHANGE_SET_RESPONSE_MAP = $changeSetResponseMapPath
 }
 
 function New-FixedSlotScopeState {
@@ -653,6 +780,26 @@ if ($service -eq 'cloudformation' -and $operation -eq 'get-template') {
     return
 }
 if ($service -eq 'cloudformation' -and $operation -eq 'describe-change-set') {
+    $changeSetNameIndex = [array]::IndexOf($AwsArguments, '--change-set-name')
+    $requestedChangeSet = if ($changeSetNameIndex -ge 0) { $AwsArguments[$changeSetNameIndex + 1] } else { '' }
+    $responseMapPath = [Environment]::GetEnvironmentVariable('FAKE_AWS_CHANGE_SET_RESPONSE_MAP')
+    if (-not [string]::IsNullOrWhiteSpace($responseMapPath) -and (Test-Path -LiteralPath $responseMapPath -PathType Leaf)) {
+        $responseMap = [System.IO.File]::ReadAllText($responseMapPath) | ConvertFrom-Json
+        $mappedResponse = $responseMap.PSObject.Properties[$requestedChangeSet]
+        if ($null -ne $mappedResponse -and $mappedResponse.Value -is [string] -and (Test-Path -LiteralPath $mappedResponse.Value -PathType Leaf)) {
+            Write-ResponseFile -Path $mappedResponse.Value
+            $global:LASTEXITCODE = 0
+            return
+        }
+    }
+    $rootChangeSetId = [Environment]::GetEnvironmentVariable('FAKE_AWS_ROOT_CHANGE_SET_ID')
+    if (
+        $requestedChangeSet -ne 'kan34-application-20260819' -and
+        $requestedChangeSet -ne $rootChangeSetId
+    ) {
+        $global:LASTEXITCODE = 97
+        return
+    }
     Write-ResponseFile -Path $env:FAKE_AWS_CHANGE_SET_RESPONSE
     $global:LASTEXITCODE = 0
     return
@@ -812,6 +959,8 @@ $env:FAKE_AWS_APPLICATION_STACK_RESPONSE = $applicationStackResponsePath
 $env:FAKE_AWS_APPLICATION_STACK_RESPONSE_AFTER_FIRST = ''
 $env:FAKE_AWS_GUARDRAIL_TEMPLATE_RESPONSE = $guardrailTemplateResponsePath
 $env:FAKE_AWS_CHANGE_SET_RESPONSE = $changeSetResponsePath
+$env:FAKE_AWS_CHANGE_SET_RESPONSE_MAP = ''
+$env:FAKE_AWS_ROOT_CHANGE_SET_ID = $immutableChangeSetId
 $env:FAKE_AWS_APPLICATION_TEMPLATE_RESPONSE = $applicationTemplateResponsePath
 $env:FAKE_AWS_BUCKET_LOCATION_RESPONSE = $bucketLocationResponsePath
 $env:FAKE_AWS_BUCKET_VERSIONING_RESPONSE = $bucketVersioningResponsePath
@@ -1562,6 +1711,36 @@ $expectedAuthWalletResourceChanges = @(
             LogicalResourceId = 'ApiTaskDefinition'
             ResourceType = 'AWS::ECS::TaskDefinition'
             Replacement = 'True'
+            Scope = @('Properties', 'Tags')
+            Details = @(
+                [ordered]@{
+                    ChangeSource = 'DirectModification'
+                    Evaluation = 'Dynamic'
+                    Target = [ordered]@{
+                        Attribute = 'Properties'
+                        Name = 'ContainerDefinitions'
+                        RequiresRecreation = 'Always'
+                    }
+                },
+                [ordered]@{
+                    CausingEntity = 'AuthWalletKeysSecretVersionId'
+                    ChangeSource = 'ParameterReference'
+                    Evaluation = 'Static'
+                    Target = [ordered]@{
+                        Attribute = 'Properties'
+                        Name = 'ContainerDefinitions'
+                        RequiresRecreation = 'Always'
+                    }
+                },
+                [ordered]@{
+                    ChangeSource = 'DirectModification'
+                    Evaluation = 'Static'
+                    Target = [ordered]@{
+                        Attribute = 'Tags'
+                        RequiresRecreation = 'Never'
+                    }
+                }
+            )
         }
     },
     [ordered]@{
@@ -1571,6 +1750,27 @@ $expectedAuthWalletResourceChanges = @(
             LogicalResourceId = 'ApiService'
             ResourceType = 'AWS::ECS::Service'
             Replacement = 'False'
+            Scope = @('Tags', 'Properties')
+            Details = @(
+                [ordered]@{
+                    CausingEntity = 'ApiTaskDefinition'
+                    ChangeSource = 'ResourceReference'
+                    Evaluation = 'Dynamic'
+                    Target = [ordered]@{
+                        Attribute = 'Properties'
+                        Name = 'TaskDefinition'
+                        RequiresRecreation = 'Never'
+                    }
+                },
+                [ordered]@{
+                    ChangeSource = 'DirectModification'
+                    Evaluation = 'Static'
+                    Target = [ordered]@{
+                        Attribute = 'Tags'
+                        RequiresRecreation = 'Never'
+                    }
+                }
+            )
         }
     }
 )
@@ -2977,6 +3177,120 @@ try {
         }
     }
 
+    Invoke-FocusedTest -Name 'auth wallet Deploy rejects malformed ECS scope details and causal evidence' -Body {
+        $functionalCases = @(
+            [pscustomobject]@{
+                Name = 'task definition without Properties scope'
+                Mutate = {
+                    param($changes)
+                    $changes[0].ResourceChange.Scope = @('Tags')
+                }
+            },
+            [pscustomobject]@{
+                Name = 'task definition caused by another parameter'
+                Mutate = {
+                    param($changes)
+                    $changes[0].ResourceChange.Details[1].CausingEntity = 'ApiImageUri'
+                }
+            },
+            [pscustomobject]@{
+                Name = 'task definition without its dynamic direct-modification companion'
+                Mutate = {
+                    param($changes)
+                    $details = @($changes[0].ResourceChange.Details)
+                    $changes[0].ResourceChange.Details = @($details[1], $details[2])
+                }
+            },
+            [pscustomobject]@{
+                Name = 'service change outside TaskDefinition'
+                Mutate = {
+                    param($changes)
+                    $changes[1].ResourceChange.Details[0].Target.Name = 'DesiredCount'
+                    $changes[1].ResourceChange.Details[0].ChangeSource = 'ParameterReference'
+                    $changes[1].ResourceChange.Details[0].CausingEntity = 'ApiDesiredCount'
+                    $changes[1].ResourceChange.Details[0].Evaluation = 'Static'
+                }
+            },
+            [pscustomobject]@{
+                Name = 'service TaskDefinition change caused by another resource'
+                Mutate = {
+                    param($changes)
+                    $changes[1].ResourceChange.Details[0].CausingEntity = 'WorkerTaskDefinition'
+                }
+            },
+            [pscustomobject]@{
+                Name = 'missing task definition Details'
+                Mutate = {
+                    param($changes)
+                    $changes[0].ResourceChange.Details = @()
+                }
+            },
+            [pscustomobject]@{
+                Name = 'tag Detail omitted from declared tag Scope'
+                Mutate = {
+                    param($changes)
+                    $changes[1].ResourceChange.Scope = @('Properties')
+                }
+            }
+        )
+        foreach ($functionalCase in $functionalCases) {
+            Set-FakeAuthWalletValidationFixture `
+                -CanonicalSha256 $authWalletTransitionRecordSha256 `
+                -CurrentStateSha256 $authWalletAdoptionStateSha256 `
+                -TargetStateSha256 $authWalletTransitionTargetStateSha256 `
+                -AuthorityRegistrySha256 $authWalletTransitionAuthorityRegistrySha256 `
+                -Operation 'STAGE_SUCCESSOR' `
+                -FieldName 'AUTH_IDENTITY_HMAC_KEY_RING_JSON' `
+                -InitialValidationAt $authWalletValidationAt
+            $changes = @(Copy-JsonValue -Value $expectedAuthWalletResourceChanges)
+            & $functionalCase.Mutate $changes
+            Write-ApplicationStackResponse -ParameterMap $updateApplicationParameterMap -TagMap $authWalletAdoptedStackTags
+            Write-GuardrailStackResponse -ConfigurationSha256 $controlConfigurationSha256
+            Write-TemplateResponse -Path $guardrailTemplateResponsePath -TemplateBody $guardrailTemplateBody
+            Write-TemplateResponse -Path $applicationTemplateResponsePath -TemplateBody $applicationTemplateBody
+            Write-ChangeSetResponse `
+                -ParameterMap $authWalletTransitionParameterMap `
+                -TagMap $authWalletTransitionStackTags `
+                -Description $authWalletTransitionExpectedChangeSetDescription `
+                -ChangeSetType 'UPDATE' `
+                -Changes $changes
+            Clear-AwsMarker
+            $result = Invoke-Guard -Arguments $authWalletTransitionArguments
+            $marker = Get-AwsMarkerText
+            Assert-Condition (-not $result.Succeeded) "AUTH_WALLET_TRANSITION accepted $($functionalCase.Name)."
+            Assert-Condition ($result.Output -match 'AUTH_WALLET_TRANSITION functional change') "$($functionalCase.Name) rejection did not identify the strict ECS causal allowlist."
+            Assert-Condition ($marker -notmatch 'cloudformation execute-change-set') "AUTH_WALLET_TRANSITION executed with $($functionalCase.Name)."
+        }
+    }
+
+    Invoke-FocusedTest -Name 'auth wallet Deploy rejects an uninspected root change-set page' -Body {
+        Set-FakeAuthWalletValidationFixture `
+            -CanonicalSha256 $authWalletTransitionRecordSha256 `
+            -CurrentStateSha256 $authWalletAdoptionStateSha256 `
+            -TargetStateSha256 $authWalletTransitionTargetStateSha256 `
+            -AuthorityRegistrySha256 $authWalletTransitionAuthorityRegistrySha256 `
+            -Operation 'STAGE_SUCCESSOR' `
+            -FieldName 'AUTH_IDENTITY_HMAC_KEY_RING_JSON' `
+            -InitialValidationAt $authWalletValidationAt
+        Write-ApplicationStackResponse -ParameterMap $updateApplicationParameterMap -TagMap $authWalletAdoptedStackTags
+        Write-GuardrailStackResponse -ConfigurationSha256 $controlConfigurationSha256
+        Write-TemplateResponse -Path $guardrailTemplateResponsePath -TemplateBody $guardrailTemplateBody
+        Write-TemplateResponse -Path $applicationTemplateResponsePath -TemplateBody $applicationTemplateBody
+        Write-ChangeSetResponse `
+            -ParameterMap $authWalletTransitionParameterMap `
+            -TagMap $authWalletTransitionStackTags `
+            -Description $authWalletTransitionExpectedChangeSetDescription `
+            -ChangeSetType 'UPDATE' `
+            -Changes $expectedAuthWalletResourceChanges `
+            -NextToken 'uninspected-root-page'
+        Clear-AwsMarker
+        $result = Invoke-Guard -Arguments $authWalletTransitionArguments
+        $marker = Get-AwsMarkerText
+        Assert-Condition (-not $result.Succeeded) 'AUTH_WALLET_TRANSITION accepted an uninspected root change-set page.'
+        Assert-Condition ($result.Output -match 'uninspected pagination token') 'Root pagination rejection was not explicit.'
+        Assert-Condition ($marker -notmatch 'cloudformation execute-change-set') 'AUTH_WALLET_TRANSITION executed with an uninspected root page.'
+    }
+
     Invoke-FocusedTest -Name 'auth wallet adoption Deploy rejects any root resource mutation' -Body {
         Set-FakeAuthWalletValidationFixture `
             -CanonicalSha256 $authWalletAdoptionRecordSha256 `
@@ -3000,7 +3314,7 @@ try {
         $result = Invoke-Guard -Arguments $authWalletAdoptionArguments
         $marker = Get-AwsMarkerText
         Assert-Condition (-not $result.Succeeded) 'Auth/wallet adoption accepted a root resource mutation.'
-        Assert-Condition ($result.Output -match 'adoption permits only zero changes or non-replacing changes') 'Auth/wallet adoption mutation rejection was not explicit.'
+        Assert-Condition ($result.Output -match 'is not a non-replacing Modify action') 'Auth/wallet adoption mutation rejection was not explicit.'
         Assert-Condition ($marker -notmatch 'cloudformation execute-change-set') 'Auth/wallet adoption executed with a root resource mutation.'
     }
 
@@ -3045,7 +3359,7 @@ try {
         $result = Invoke-Guard -Arguments $authWalletAdoptionArguments
         $marker = Get-AwsMarkerText
         Assert-Condition (-not $result.Succeeded) 'Auth/wallet adoption accepted a tag Scope whose Detail targeted Properties.'
-        Assert-Condition ($result.Output -match 'every Detail target are exactly Tags') 'Mislabeled adoption tag-change rejection was not explicit.'
+        Assert-Condition ($result.Output -match 'Detail target outside the Tags attribute') 'Mislabeled adoption tag-change rejection was not explicit.'
         Assert-Condition ($marker -notmatch 'cloudformation execute-change-set') 'Auth/wallet adoption executed a mislabeled tag-only resource change.'
     }
 
@@ -3078,6 +3392,381 @@ try {
         Assert-Condition ($validationCalls[2] -notmatch [regex]::Escape("at=$authWalletValidationAt")) 'Exact auth/wallet adoption Deploy reused its initial validation timestamp.'
         Assert-Condition ($result.Output -match [regex]::Escape($authWalletAdoptionDeploymentBindingSha256)) 'Exact auth/wallet adoption Deploy did not report its deployment binding.'
         Assert-Condition ($result.Output -match [regex]::Escape($authWalletTransitionAuthorityRegistrySha256)) 'Exact auth/wallet adoption Deploy did not report its authority registry binding.'
+    }
+
+    Invoke-FocusedTest -Name 'exact auth wallet adoption Deploy accepts an inspected empty resource list' -Body {
+        Set-FakeAuthWalletValidationFixture `
+            -CanonicalSha256 $authWalletAdoptionRecordSha256 `
+            -CurrentStateSha256 $authWalletAdoptionStateSha256 `
+            -TargetStateSha256 $authWalletAdoptionStateSha256 `
+            -AuthorityRegistrySha256 $authWalletTransitionAuthorityRegistrySha256 `
+            -Operation 'ADOPT_EXISTING_BINDING' `
+            -FieldName 'ALL_SEVEN_FIELDS' `
+            -InitialValidationAt $authWalletValidationAt
+        Write-ApplicationStackResponse -ParameterMap $updateApplicationParameterMap -TagMap $updateApplicationStackTags
+        Write-GuardrailStackResponse -ConfigurationSha256 $controlConfigurationSha256
+        Write-TemplateResponse -Path $guardrailTemplateResponsePath -TemplateBody $guardrailTemplateBody
+        Write-TemplateResponse -Path $applicationTemplateResponsePath -TemplateBody $applicationTemplateBody
+        Write-ChangeSetResponse `
+            -ParameterMap $updateApplicationParameterMap `
+            -TagMap $authWalletAdoptedStackTags `
+            -Description $authWalletAdoptionExpectedChangeSetDescription `
+            -ChangeSetType 'UPDATE' `
+            -Changes @()
+        Clear-AwsMarker
+        $result = Invoke-Guard -Arguments $authWalletAdoptionArguments
+        $marker = Get-AwsMarkerText
+        Assert-Condition $result.Succeeded "Exact auth/wallet adoption with no resource mutations failed: $($result.Output)"
+        Assert-Condition ($marker -match 'cloudformation execute-change-set') 'Exact auth/wallet adoption did not execute after inspecting an empty resource list.'
+    }
+
+    Invoke-FocusedTest -Name 'exact auth wallet transition recursively reviews known nested tag propagation' -Body {
+        Set-FakeAuthWalletValidationFixture `
+            -CanonicalSha256 $authWalletTransitionRecordSha256 `
+            -CurrentStateSha256 $authWalletAdoptionStateSha256 `
+            -TargetStateSha256 $authWalletTransitionTargetStateSha256 `
+            -AuthorityRegistrySha256 $authWalletTransitionAuthorityRegistrySha256 `
+            -Operation 'STAGE_SUCCESSOR' `
+            -FieldName 'AUTH_IDENTITY_HMAC_KEY_RING_JSON' `
+            -InitialValidationAt $authWalletValidationAt
+        $workloadTagChange = Copy-JsonValue -Value $tagOnlyAuthWalletResourceChange
+        $workloadTagChange.ResourceChange.LogicalResourceId = 'ApiTaskExecutionRole'
+        $workloadTagChange.ResourceChange.ResourceType = 'AWS::IAM::Role'
+        $observabilityTagChange = Copy-JsonValue -Value $tagOnlyAuthWalletResourceChange
+        $observabilityTagChange.ResourceChange.LogicalResourceId = 'OperationalAlarmTopic'
+        $observabilityTagChange.ResourceChange.ResourceType = 'AWS::SNS::Topic'
+        $workloadLink = New-NestedChangeSetLink `
+            -LogicalResourceId 'WorkloadBoundaries' `
+            -StackId $workloadChildStackId `
+            -ChangeSetId $workloadChildChangeSetId `
+            -DetailKind 'Automatic'
+        $observabilityLink = New-NestedChangeSetLink `
+            -LogicalResourceId 'Observability' `
+            -StackId $observabilityChildStackId `
+            -ChangeSetId $observabilityChildChangeSetId `
+            -DetailKind 'Tags'
+        Write-NestedChangeSetResponse `
+            -Path $workloadChildChangeSetResponsePath `
+            -StackName 'crypto-lending-workload-test' `
+            -StackId $workloadChildStackId `
+            -ChangeSetName 'workload-child-change' `
+            -ChangeSetId $workloadChildChangeSetId `
+            -ParentChangeSetId $immutableChangeSetId `
+            -RootChangeSetId $immutableChangeSetId `
+            -Changes @($workloadTagChange)
+        Write-NestedChangeSetResponse `
+            -Path $observabilityChildChangeSetResponsePath `
+            -StackName 'crypto-lending-observability-test' `
+            -StackId $observabilityChildStackId `
+            -ChangeSetName 'observability-child-change' `
+            -ChangeSetId $observabilityChildChangeSetId `
+            -ParentChangeSetId $immutableChangeSetId `
+            -RootChangeSetId $immutableChangeSetId `
+            -Changes @()
+        Write-ApplicationStackResponse -ParameterMap $updateApplicationParameterMap -TagMap $authWalletAdoptedStackTags
+        Write-GuardrailStackResponse -ConfigurationSha256 $controlConfigurationSha256
+        Write-TemplateResponse -Path $guardrailTemplateResponsePath -TemplateBody $guardrailTemplateBody
+        Write-TemplateResponse -Path $applicationTemplateResponsePath -TemplateBody $applicationTemplateBody
+        Write-ChangeSetResponse `
+            -ParameterMap $authWalletTransitionParameterMap `
+            -TagMap $authWalletTransitionStackTags `
+            -Description $authWalletTransitionExpectedChangeSetDescription `
+            -ChangeSetType 'UPDATE' `
+            -Changes (@($expectedAuthWalletResourceChanges) + @($workloadLink, $observabilityLink))
+        Set-FakeChangeSetResponseMap -ResponseMap ([ordered]@{
+                $workloadChildChangeSetId = $workloadChildChangeSetResponsePath
+                $observabilityChildChangeSetId = $observabilityChildChangeSetResponsePath
+            })
+        Clear-AwsMarker
+        try {
+            $result = Invoke-Guard -Arguments $authWalletTransitionArguments
+            $marker = Get-AwsMarkerText
+            Assert-Condition $result.Succeeded "Exact recursively reviewed auth/wallet transition failed: $($result.Output)"
+            Assert-Condition ($marker -match [regex]::Escape("--change-set-name $workloadChildChangeSetId")) 'Workload child change set was not described by immutable ARN.'
+            Assert-Condition ($marker -match [regex]::Escape("--change-set-name $observabilityChildChangeSetId")) 'Observability child change set was not described by immutable ARN.'
+            Assert-Condition ($marker -match 'cloudformation execute-change-set') 'Recursively reviewed auth/wallet transition did not execute.'
+        }
+        finally {
+            $env:FAKE_AWS_CHANGE_SET_RESPONSE_MAP = ''
+        }
+    }
+
+    Invoke-FocusedTest -Name 'auth wallet transition rejects a deeply nested non-tag mutation' -Body {
+        Set-FakeAuthWalletValidationFixture `
+            -CanonicalSha256 $authWalletTransitionRecordSha256 `
+            -CurrentStateSha256 $authWalletAdoptionStateSha256 `
+            -TargetStateSha256 $authWalletTransitionTargetStateSha256 `
+            -AuthorityRegistrySha256 $authWalletTransitionAuthorityRegistrySha256 `
+            -Operation 'STAGE_SUCCESSOR' `
+            -FieldName 'AUTH_IDENTITY_HMAC_KEY_RING_JSON' `
+            -InitialValidationAt $authWalletValidationAt
+        $rootWorkloadLink = New-NestedChangeSetLink `
+            -LogicalResourceId 'WorkloadBoundaries' `
+            -StackId $workloadChildStackId `
+            -ChangeSetId $workloadChildChangeSetId `
+            -DetailKind 'Automatic'
+        $grandchildLink = New-NestedChangeSetLink `
+            -LogicalResourceId 'DeeperStack' `
+            -StackId $grandchildStackId `
+            -ChangeSetId $grandchildChangeSetId `
+            -DetailKind 'Automatic'
+        $unsafeGrandchildChange = [ordered]@{
+            Type = 'Resource'
+            ResourceChange = [ordered]@{
+                Action = 'Modify'
+                LogicalResourceId = 'UnexpectedRole'
+                ResourceType = 'AWS::IAM::Role'
+                Replacement = 'False'
+                Scope = @('Properties')
+                Details = @(
+                    [ordered]@{
+                        ChangeSource = 'DirectModification'
+                        Evaluation = 'Static'
+                        Target = [ordered]@{
+                            Attribute = 'Properties'
+                            Name = 'Policies'
+                            RequiresRecreation = 'Never'
+                        }
+                    }
+                )
+            }
+        }
+        Write-NestedChangeSetResponse `
+            -Path $workloadChildChangeSetResponsePath `
+            -StackName 'crypto-lending-workload-test' `
+            -StackId $workloadChildStackId `
+            -ChangeSetName 'workload-child-change' `
+            -ChangeSetId $workloadChildChangeSetId `
+            -ParentChangeSetId $immutableChangeSetId `
+            -RootChangeSetId $immutableChangeSetId `
+            -Changes @($grandchildLink)
+        Write-NestedChangeSetResponse `
+            -Path $grandchildChangeSetResponsePath `
+            -StackName 'crypto-lending-grandchild-test' `
+            -StackId $grandchildStackId `
+            -ChangeSetName 'grandchild-change' `
+            -ChangeSetId $grandchildChangeSetId `
+            -ParentChangeSetId $workloadChildChangeSetId `
+            -RootChangeSetId $immutableChangeSetId `
+            -Changes @($unsafeGrandchildChange)
+        Write-ApplicationStackResponse -ParameterMap $updateApplicationParameterMap -TagMap $authWalletAdoptedStackTags
+        Write-GuardrailStackResponse -ConfigurationSha256 $controlConfigurationSha256
+        Write-TemplateResponse -Path $guardrailTemplateResponsePath -TemplateBody $guardrailTemplateBody
+        Write-TemplateResponse -Path $applicationTemplateResponsePath -TemplateBody $applicationTemplateBody
+        Write-ChangeSetResponse `
+            -ParameterMap $authWalletTransitionParameterMap `
+            -TagMap $authWalletTransitionStackTags `
+            -Description $authWalletTransitionExpectedChangeSetDescription `
+            -ChangeSetType 'UPDATE' `
+            -Changes (@($expectedAuthWalletResourceChanges) + @($rootWorkloadLink))
+        Set-FakeChangeSetResponseMap -ResponseMap ([ordered]@{
+                $workloadChildChangeSetId = $workloadChildChangeSetResponsePath
+                $grandchildChangeSetId = $grandchildChangeSetResponsePath
+            })
+        Clear-AwsMarker
+        try {
+            $result = Invoke-Guard -Arguments $authWalletTransitionArguments
+            $marker = Get-AwsMarkerText
+            Assert-Condition (-not $result.Succeeded) 'AUTH_WALLET_TRANSITION accepted a property mutation hidden in a grandchild change set.'
+            Assert-Condition ($result.Output -match 'nested leaf') 'Deep descendant mutation rejection did not identify the nested leaf allowlist.'
+            Assert-Condition ($marker -match [regex]::Escape("--change-set-name $workloadChildChangeSetId")) 'Deep review did not inspect the child change set.'
+            Assert-Condition ($marker -match [regex]::Escape("--change-set-name $grandchildChangeSetId")) 'Deep review did not inspect the grandchild change set.'
+            Assert-Condition ($marker -notmatch 'cloudformation execute-change-set') 'AUTH_WALLET_TRANSITION executed with a hidden grandchild mutation.'
+        }
+        finally {
+            $env:FAKE_AWS_CHANGE_SET_RESPONSE_MAP = ''
+        }
+    }
+
+    Invoke-FocusedTest -Name 'auth wallet transition rejects mismatched and paginated child identities' -Body {
+        $childCases = @(
+            [pscustomobject]@{ Name = 'wrong parent identity'; WrongParent = $true; NextToken = $null; OmitChangeSetType = $false },
+            [pscustomobject]@{ Name = 'uninspected child page'; WrongParent = $false; NextToken = 'uninspected-child-page'; OmitChangeSetType = $false },
+            [pscustomobject]@{ Name = 'missing child UPDATE type'; WrongParent = $false; NextToken = $null; OmitChangeSetType = $true }
+        )
+        foreach ($childCase in $childCases) {
+            Set-FakeAuthWalletValidationFixture `
+                -CanonicalSha256 $authWalletTransitionRecordSha256 `
+                -CurrentStateSha256 $authWalletAdoptionStateSha256 `
+                -TargetStateSha256 $authWalletTransitionTargetStateSha256 `
+                -AuthorityRegistrySha256 $authWalletTransitionAuthorityRegistrySha256 `
+                -Operation 'STAGE_SUCCESSOR' `
+                -FieldName 'AUTH_IDENTITY_HMAC_KEY_RING_JSON' `
+                -InitialValidationAt $authWalletValidationAt
+            $rootWorkloadLink = New-NestedChangeSetLink `
+                -LogicalResourceId 'WorkloadBoundaries' `
+                -StackId $workloadChildStackId `
+                -ChangeSetId $workloadChildChangeSetId `
+                -DetailKind 'Tags'
+            $childParent = if ($childCase.WrongParent) { $observabilityChildChangeSetId } else { $immutableChangeSetId }
+            $nestedResponseArguments = @{
+                Path = $workloadChildChangeSetResponsePath
+                StackName = 'crypto-lending-workload-test'
+                StackId = $workloadChildStackId
+                ChangeSetName = 'workload-child-change'
+                ChangeSetId = $workloadChildChangeSetId
+                ParentChangeSetId = $childParent
+                RootChangeSetId = $immutableChangeSetId
+                Changes = @()
+                NextToken = $childCase.NextToken
+            }
+            if ($childCase.OmitChangeSetType) {
+                $nestedResponseArguments['OmitChangeSetType'] = $true
+            }
+            Write-NestedChangeSetResponse @nestedResponseArguments
+            Write-ApplicationStackResponse -ParameterMap $updateApplicationParameterMap -TagMap $authWalletAdoptedStackTags
+            Write-GuardrailStackResponse -ConfigurationSha256 $controlConfigurationSha256
+            Write-TemplateResponse -Path $guardrailTemplateResponsePath -TemplateBody $guardrailTemplateBody
+            Write-TemplateResponse -Path $applicationTemplateResponsePath -TemplateBody $applicationTemplateBody
+            Write-ChangeSetResponse `
+                -ParameterMap $authWalletTransitionParameterMap `
+                -TagMap $authWalletTransitionStackTags `
+                -Description $authWalletTransitionExpectedChangeSetDescription `
+                -ChangeSetType 'UPDATE' `
+                -Changes (@($expectedAuthWalletResourceChanges) + @($rootWorkloadLink))
+            Set-FakeChangeSetResponseMap -ResponseMap ([ordered]@{ $workloadChildChangeSetId = $workloadChildChangeSetResponsePath })
+            Clear-AwsMarker
+            try {
+                $result = Invoke-Guard -Arguments $authWalletTransitionArguments
+                $marker = Get-AwsMarkerText
+                Assert-Condition (-not $result.Succeeded) "AUTH_WALLET_TRANSITION accepted $($childCase.Name)."
+                Assert-Condition ($result.Output -match 'AUTH_WALLET_TRANSITION nested ChangeSetId') "$($childCase.Name) rejection did not identify nested identity review."
+                Assert-Condition ($marker -notmatch 'cloudformation execute-change-set') "AUTH_WALLET_TRANSITION executed with $($childCase.Name)."
+            }
+            finally {
+                $env:FAKE_AWS_CHANGE_SET_RESPONSE_MAP = ''
+            }
+        }
+    }
+
+    Invoke-FocusedTest -Name 'auth wallet transition rejects duplicate and cyclic nested change-set IDs' -Body {
+        $cycleCases = @('duplicate-root-links', 'cycle-to-root')
+        foreach ($cycleCase in $cycleCases) {
+            Set-FakeAuthWalletValidationFixture `
+                -CanonicalSha256 $authWalletTransitionRecordSha256 `
+                -CurrentStateSha256 $authWalletAdoptionStateSha256 `
+                -TargetStateSha256 $authWalletTransitionTargetStateSha256 `
+                -AuthorityRegistrySha256 $authWalletTransitionAuthorityRegistrySha256 `
+                -Operation 'STAGE_SUCCESSOR' `
+                -FieldName 'AUTH_IDENTITY_HMAC_KEY_RING_JSON' `
+                -InitialValidationAt $authWalletValidationAt
+            $workloadLink = New-NestedChangeSetLink `
+                -LogicalResourceId 'WorkloadBoundaries' `
+                -StackId $workloadChildStackId `
+                -ChangeSetId $workloadChildChangeSetId `
+                -DetailKind 'Tags'
+            $observabilityLink = New-NestedChangeSetLink `
+                -LogicalResourceId 'Observability' `
+                -StackId $workloadChildStackId `
+                -ChangeSetId $workloadChildChangeSetId `
+                -DetailKind 'Tags'
+            $cycleLink = New-NestedChangeSetLink `
+                -LogicalResourceId 'CycleStack' `
+                -StackId $immutableStackId `
+                -ChangeSetId $immutableChangeSetId `
+                -DetailKind 'Automatic'
+            $childLeaf = Copy-JsonValue -Value $tagOnlyAuthWalletResourceChange
+            $childLeaf.ResourceChange.LogicalResourceId = 'CycleTestLeaf'
+            $childLeaf.ResourceChange.ResourceType = 'AWS::SNS::Topic'
+            $childChanges = @($childLeaf)
+            if ($cycleCase -ceq 'cycle-to-root') {
+                $childChanges = @($cycleLink)
+            }
+            $rootNestedLinks = if ($cycleCase -ceq 'duplicate-root-links') { @($workloadLink, $observabilityLink) } else { @($workloadLink) }
+            Write-NestedChangeSetResponse `
+                -Path $workloadChildChangeSetResponsePath `
+                -StackName 'crypto-lending-workload-test' `
+                -StackId $workloadChildStackId `
+                -ChangeSetName 'workload-child-change' `
+                -ChangeSetId $workloadChildChangeSetId `
+                -ParentChangeSetId $immutableChangeSetId `
+                -RootChangeSetId $immutableChangeSetId `
+                -Changes $childChanges
+            Write-ApplicationStackResponse -ParameterMap $updateApplicationParameterMap -TagMap $authWalletAdoptedStackTags
+            Write-GuardrailStackResponse -ConfigurationSha256 $controlConfigurationSha256
+            Write-TemplateResponse -Path $guardrailTemplateResponsePath -TemplateBody $guardrailTemplateBody
+            Write-TemplateResponse -Path $applicationTemplateResponsePath -TemplateBody $applicationTemplateBody
+            Write-ChangeSetResponse `
+                -ParameterMap $authWalletTransitionParameterMap `
+                -TagMap $authWalletTransitionStackTags `
+                -Description $authWalletTransitionExpectedChangeSetDescription `
+                -ChangeSetType 'UPDATE' `
+                -Changes (@($expectedAuthWalletResourceChanges) + @($rootNestedLinks))
+            Set-FakeChangeSetResponseMap -ResponseMap ([ordered]@{ $workloadChildChangeSetId = $workloadChildChangeSetResponsePath })
+            Clear-AwsMarker
+            try {
+                $result = Invoke-Guard -Arguments $authWalletTransitionArguments
+                $marker = Get-AwsMarkerText
+                Assert-Condition (-not $result.Succeeded) "AUTH_WALLET_TRANSITION accepted $cycleCase."
+                Assert-Condition ($result.Output -match 'duplicate or cyclic nested ChangeSetId') "$cycleCase rejection did not identify duplicate/cycle protection: $($result.Output)"
+                Assert-Condition ($marker -notmatch 'cloudformation execute-change-set') "AUTH_WALLET_TRANSITION executed with $cycleCase."
+            }
+            finally {
+                $env:FAKE_AWS_CHANGE_SET_RESPONSE_MAP = ''
+            }
+        }
+    }
+
+    Invoke-FocusedTest -Name 'auth wallet transition rejects unknown root wrappers and unmapped child IDs' -Body {
+        $rootCases = @(
+            [pscustomobject]@{ Name = 'unknown root nested stack'; LogicalId = 'UnexpectedNestedStack'; UseMap = $true; OmitId = $false },
+            [pscustomobject]@{ Name = 'unmapped known child'; LogicalId = 'WorkloadBoundaries'; UseMap = $false; OmitId = $false },
+            [pscustomobject]@{ Name = 'known nested stack without child ID'; LogicalId = 'WorkloadBoundaries'; UseMap = $false; OmitId = $true }
+        )
+        foreach ($rootCase in $rootCases) {
+            Set-FakeAuthWalletValidationFixture `
+                -CanonicalSha256 $authWalletTransitionRecordSha256 `
+                -CurrentStateSha256 $authWalletAdoptionStateSha256 `
+                -TargetStateSha256 $authWalletTransitionTargetStateSha256 `
+                -AuthorityRegistrySha256 $authWalletTransitionAuthorityRegistrySha256 `
+                -Operation 'STAGE_SUCCESSOR' `
+                -FieldName 'AUTH_IDENTITY_HMAC_KEY_RING_JSON' `
+                -InitialValidationAt $authWalletValidationAt
+            $rootLink = New-NestedChangeSetLink `
+                -LogicalResourceId $rootCase.LogicalId `
+                -StackId $workloadChildStackId `
+                -ChangeSetId $workloadChildChangeSetId `
+                -DetailKind 'Tags'
+            if ($rootCase.OmitId) {
+                $rootLink.ResourceChange.Remove('ChangeSetId')
+            }
+            Write-NestedChangeSetResponse `
+                -Path $workloadChildChangeSetResponsePath `
+                -StackName 'crypto-lending-workload-test' `
+                -StackId $workloadChildStackId `
+                -ChangeSetName 'workload-child-change' `
+                -ChangeSetId $workloadChildChangeSetId `
+                -ParentChangeSetId $immutableChangeSetId `
+                -RootChangeSetId $immutableChangeSetId `
+                -Changes @()
+            Write-ApplicationStackResponse -ParameterMap $updateApplicationParameterMap -TagMap $authWalletAdoptedStackTags
+            Write-GuardrailStackResponse -ConfigurationSha256 $controlConfigurationSha256
+            Write-TemplateResponse -Path $guardrailTemplateResponsePath -TemplateBody $guardrailTemplateBody
+            Write-TemplateResponse -Path $applicationTemplateResponsePath -TemplateBody $applicationTemplateBody
+            Write-ChangeSetResponse `
+                -ParameterMap $authWalletTransitionParameterMap `
+                -TagMap $authWalletTransitionStackTags `
+                -Description $authWalletTransitionExpectedChangeSetDescription `
+                -ChangeSetType 'UPDATE' `
+                -Changes (@($expectedAuthWalletResourceChanges) + @($rootLink))
+            if ($rootCase.UseMap) {
+                Set-FakeChangeSetResponseMap -ResponseMap ([ordered]@{ $workloadChildChangeSetId = $workloadChildChangeSetResponsePath })
+            }
+            else {
+                $env:FAKE_AWS_CHANGE_SET_RESPONSE_MAP = ''
+            }
+            Clear-AwsMarker
+            try {
+                $result = Invoke-Guard -Arguments $authWalletTransitionArguments
+                $marker = Get-AwsMarkerText
+                Assert-Condition (-not $result.Succeeded) "AUTH_WALLET_TRANSITION accepted $($rootCase.Name)."
+                Assert-Condition ($result.Output -match 'AUTH_WALLET_TRANSITION') "$($rootCase.Name) rejection did not identify the auth/wallet nested guard."
+                Assert-Condition ($marker -notmatch 'cloudformation execute-change-set') "AUTH_WALLET_TRANSITION executed with $($rootCase.Name)."
+            }
+            finally {
+                $env:FAKE_AWS_CHANGE_SET_RESPONSE_MAP = ''
+            }
+        }
     }
 
     Invoke-FocusedTest -Name 'auth wallet Deploy requires its transition-bound acknowledgement' -Body {
@@ -3313,6 +4002,8 @@ finally {
     $env:FAKE_AWS_APPLICATION_STACK_RESPONSE_AFTER_FIRST = $originalEnvironment.FAKE_AWS_APPLICATION_STACK_RESPONSE_AFTER_FIRST
     $env:FAKE_AWS_GUARDRAIL_TEMPLATE_RESPONSE = $originalEnvironment.FAKE_AWS_GUARDRAIL_TEMPLATE_RESPONSE
     $env:FAKE_AWS_CHANGE_SET_RESPONSE = $originalEnvironment.FAKE_AWS_CHANGE_SET_RESPONSE
+    $env:FAKE_AWS_CHANGE_SET_RESPONSE_MAP = $originalEnvironment.FAKE_AWS_CHANGE_SET_RESPONSE_MAP
+    $env:FAKE_AWS_ROOT_CHANGE_SET_ID = $originalEnvironment.FAKE_AWS_ROOT_CHANGE_SET_ID
     $env:FAKE_AWS_APPLICATION_TEMPLATE_RESPONSE = $originalEnvironment.FAKE_AWS_APPLICATION_TEMPLATE_RESPONSE
     $env:FAKE_AWS_BUCKET_LOCATION_RESPONSE = $originalEnvironment.FAKE_AWS_BUCKET_LOCATION_RESPONSE
     $env:FAKE_AWS_BUCKET_VERSIONING_RESPONSE = $originalEnvironment.FAKE_AWS_BUCKET_VERSIONING_RESPONSE

@@ -588,6 +588,634 @@ function Invoke-AuthWalletTransitionValidation {
     return $validation
 }
 
+function Get-StrictChangeSetArrayProperty {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object] $InputObject,
+        [Parameter(Mandatory = $true)]
+        [string] $Name,
+        [Parameter(Mandatory = $true)]
+        [string] $Context
+    )
+
+    $property = $InputObject.PSObject.Properties[$Name]
+    if ($null -eq $property -or $null -eq $property.Value -or $property.Value -isnot [System.Array]) {
+        throw "$Context must expose '$Name' as an exact JSON array."
+    }
+    return @($property.Value)
+}
+
+function Get-StrictRequiredChangeSetString {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object] $InputObject,
+        [Parameter(Mandatory = $true)]
+        [string] $Name,
+        [Parameter(Mandatory = $true)]
+        [string] $Context
+    )
+
+    $property = $InputObject.PSObject.Properties[$Name]
+    if (
+        $null -eq $property -or
+        $property.Value -isnot [string] -or
+        [string]::IsNullOrWhiteSpace([string] $property.Value)
+    ) {
+        throw "$Context must expose a nonempty string '$Name'."
+    }
+    return [string] $property.Value
+}
+
+function Get-StrictOptionalChangeSetString {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object] $InputObject,
+        [Parameter(Mandatory = $true)]
+        [string] $Name,
+        [Parameter(Mandatory = $true)]
+        [string] $Context
+    )
+
+    $property = $InputObject.PSObject.Properties[$Name]
+    if ($null -eq $property -or $null -eq $property.Value) {
+        return $null
+    }
+    if ($property.Value -isnot [string] -or [string]::IsNullOrWhiteSpace([string] $property.Value)) {
+        throw "$Context contains malformed optional string '$Name'."
+    }
+    return [string] $property.Value
+}
+
+function Get-StrictChangeSetScope {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object] $ResourceChange,
+        [Parameter(Mandatory = $true)]
+        [string] $Context
+    )
+
+    $scope = @(Get-StrictChangeSetArrayProperty -InputObject $ResourceChange -Name 'Scope' -Context $Context)
+    if ($scope.Count -eq 0) {
+        throw "$Context must expose a nonempty Scope array."
+    }
+    $scopeSet = [System.Collections.Specialized.OrderedDictionary]::new([System.StringComparer]::Ordinal)
+    foreach ($attribute in $scope) {
+        if ($attribute -isnot [string] -or [string]::IsNullOrWhiteSpace([string] $attribute)) {
+            throw "$Context contains a malformed Scope attribute."
+        }
+        if ($scopeSet.Contains([string] $attribute)) {
+            throw "$Context contains duplicate Scope attribute '$attribute'."
+        }
+        $scopeSet[[string] $attribute] = $true
+    }
+    return ,$scopeSet
+}
+
+function Assert-AuthWalletTagChangeDetail {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object] $Detail,
+        [Parameter(Mandatory = $true)]
+        [string] $Context
+    )
+
+    if ($null -eq $Detail -or $Detail -is [string] -or $Detail -is [System.Array]) {
+        throw "$Context contains a malformed tag-change Detail."
+    }
+    $target = Get-OptionalPropertyValue -InputObject $Detail -Name 'Target'
+    if ($null -eq $target -or $target -is [string] -or $target -is [System.Array]) {
+        throw "$Context contains a tag-change Detail without an object Target."
+    }
+    $attribute = Get-StrictRequiredChangeSetString -InputObject $target -Name 'Attribute' -Context "$Context Target"
+    if ($attribute -cne 'Tags') {
+        throw "$Context contains a Detail target outside the Tags attribute."
+    }
+
+    $nameProperty = $target.PSObject.Properties['Name']
+    if ($null -ne $nameProperty -and $null -ne $nameProperty.Value) {
+        throw "$Context contains a tag Target with a non-null property Name."
+    }
+    $requiresRecreationProperty = $target.PSObject.Properties['RequiresRecreation']
+    if (
+        $null -ne $requiresRecreationProperty -and
+        $null -ne $requiresRecreationProperty.Value -and
+        ($requiresRecreationProperty.Value -isnot [string] -or [string] $requiresRecreationProperty.Value -cne 'Never')
+    ) {
+        throw "$Context contains a tag Target that may recreate its resource."
+    }
+    $attributeChangeTypeProperty = $target.PSObject.Properties['AttributeChangeType']
+    if (
+        $null -ne $attributeChangeTypeProperty -and
+        $null -ne $attributeChangeTypeProperty.Value -and
+        ($attributeChangeTypeProperty.Value -isnot [string] -or [string] $attributeChangeTypeProperty.Value -cnotin @('Add', 'Remove', 'Modify'))
+    ) {
+        throw "$Context contains an unsupported tag AttributeChangeType."
+    }
+    foreach ($optionalTargetString in @('Path', 'BeforeValue', 'AfterValue')) {
+        $optionalTargetProperty = $target.PSObject.Properties[$optionalTargetString]
+        if ($null -ne $optionalTargetProperty -and $null -ne $optionalTargetProperty.Value -and $optionalTargetProperty.Value -isnot [string]) {
+            throw "$Context contains malformed optional tag Target field '$optionalTargetString'."
+        }
+    }
+
+    $evaluation = Get-StrictOptionalChangeSetString -InputObject $Detail -Name 'Evaluation' -Context $Context
+    if ($null -ne $evaluation -and $evaluation -cnotin @('Static', 'Dynamic')) {
+        throw "$Context contains an unsupported tag-change Evaluation."
+    }
+    $changeSource = Get-StrictOptionalChangeSetString -InputObject $Detail -Name 'ChangeSource' -Context $Context
+    if ($null -ne $changeSource -and $changeSource -cnotin @('ResourceReference', 'ParameterReference', 'ResourceAttribute', 'DirectModification', 'Automatic', 'NoModification')) {
+        throw "$Context contains an unsupported tag ChangeSource."
+    }
+    $causingEntity = Get-StrictOptionalChangeSetString -InputObject $Detail -Name 'CausingEntity' -Context $Context
+    if ($changeSource -ceq 'DirectModification' -and $null -ne $causingEntity) {
+        throw "$Context contains a DirectModification tag Detail with a CausingEntity."
+    }
+}
+
+function Assert-AuthWalletTagOnlyResourceChange {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object] $ResourceChange,
+        [Parameter(Mandatory = $true)]
+        [string] $Context
+    )
+
+    if (
+        (Get-StrictRequiredChangeSetString -InputObject $ResourceChange -Name 'Action' -Context $Context) -cne 'Modify' -or
+        (Get-StrictRequiredChangeSetString -InputObject $ResourceChange -Name 'Replacement' -Context $Context) -cne 'False'
+    ) {
+        throw "$Context is not a non-replacing Modify action."
+    }
+    $policyAction = Get-StrictOptionalChangeSetString -InputObject $ResourceChange -Name 'PolicyAction' -Context $Context
+    if ($null -ne $policyAction) {
+        throw "$Context contains a PolicyAction for a tag-only update."
+    }
+    $nestedChangeSetId = Get-StrictOptionalChangeSetString -InputObject $ResourceChange -Name 'ChangeSetId' -Context $Context
+    if ($null -ne $nestedChangeSetId) {
+        throw "$Context contains an uninspected nested ChangeSetId."
+    }
+
+    $scope = Get-StrictChangeSetScope -ResourceChange $ResourceChange -Context $Context
+    if ($scope.Count -ne 1 -or -not $scope.Contains('Tags')) {
+        throw "$Context Scope is not exactly the Tags attribute."
+    }
+    $details = @(Get-StrictChangeSetArrayProperty -InputObject $ResourceChange -Name 'Details' -Context $Context)
+    if ($details.Count -eq 0) {
+        throw "$Context must expose at least one tag-change Detail."
+    }
+    foreach ($detail in $details) {
+        Assert-AuthWalletTagChangeDetail -Detail $detail -Context $Context
+    }
+}
+
+function Assert-AuthWalletFunctionalResourceChange {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object] $ResourceChange,
+        [Parameter(Mandatory = $true)]
+        [ValidateSet('ApiTaskDefinition', 'ApiService')]
+        [string] $LogicalResourceId
+    )
+
+    $context = "AUTH_WALLET_TRANSITION functional change '$LogicalResourceId'"
+    $expectedType = if ($LogicalResourceId -ceq 'ApiTaskDefinition') { 'AWS::ECS::TaskDefinition' } else { 'AWS::ECS::Service' }
+    $expectedReplacement = if ($LogicalResourceId -ceq 'ApiTaskDefinition') { 'True' } else { 'False' }
+    if (
+        (Get-StrictRequiredChangeSetString -InputObject $ResourceChange -Name 'ResourceType' -Context $context) -cne $expectedType -or
+        (Get-StrictRequiredChangeSetString -InputObject $ResourceChange -Name 'Action' -Context $context) -cne 'Modify' -or
+        (Get-StrictRequiredChangeSetString -InputObject $ResourceChange -Name 'Replacement' -Context $context) -cne $expectedReplacement
+    ) {
+        throw "$context does not match its exact reviewed type, action, and replacement behavior."
+    }
+    $nestedChangeSetId = Get-StrictOptionalChangeSetString -InputObject $ResourceChange -Name 'ChangeSetId' -Context $context
+    if ($null -ne $nestedChangeSetId) {
+        throw "$context contains an unexpected nested ChangeSetId."
+    }
+    $policyAction = Get-StrictOptionalChangeSetString -InputObject $ResourceChange -Name 'PolicyAction' -Context $context
+    if (
+        ($LogicalResourceId -ceq 'ApiService' -and $null -ne $policyAction) -or
+        ($LogicalResourceId -ceq 'ApiTaskDefinition' -and $null -ne $policyAction -and $policyAction -cne 'ReplaceAndDelete')
+    ) {
+        throw "$context contains an unexpected PolicyAction."
+    }
+
+    $scope = Get-StrictChangeSetScope -ResourceChange $ResourceChange -Context $context
+    if (
+        -not $scope.Contains('Properties') -or
+        $scope.Count -gt 2 -or
+        @($scope.Keys | Where-Object { [string] $_ -cnotin @('Properties', 'Tags') }).Count -ne 0
+    ) {
+        throw "$context Scope must contain Properties and may contain only optional Tags."
+    }
+    $details = @(Get-StrictChangeSetArrayProperty -InputObject $ResourceChange -Name 'Details' -Context $context)
+    if ($details.Count -eq 0) {
+        throw "$context must expose its complete causal Details."
+    }
+
+    $expectedPropertyName = if ($LogicalResourceId -ceq 'ApiTaskDefinition') { 'ContainerDefinitions' } else { 'TaskDefinition' }
+    $expectedRecreation = if ($LogicalResourceId -ceq 'ApiTaskDefinition') { 'Always' } else { 'Never' }
+    $sawPropertyDetail = $false
+    $sawTagDetail = $false
+    $sawDirectDynamicDetail = $false
+    $sawExactCausalDetail = $false
+    foreach ($detail in $details) {
+        if ($null -eq $detail -or $detail -is [string] -or $detail -is [System.Array]) {
+            throw "$context contains a malformed Detail."
+        }
+        $target = Get-OptionalPropertyValue -InputObject $detail -Name 'Target'
+        if ($null -eq $target -or $target -is [string] -or $target -is [System.Array]) {
+            throw "$context contains a Detail without an object Target."
+        }
+        $attribute = Get-StrictRequiredChangeSetString -InputObject $target -Name 'Attribute' -Context "$context Target"
+        if ($attribute -ceq 'Tags') {
+            Assert-AuthWalletTagChangeDetail -Detail $detail -Context $context
+            $sawTagDetail = $true
+            continue
+        }
+        if ($attribute -cne 'Properties') {
+            throw "$context contains a Detail target outside Properties and optional Tags."
+        }
+
+        $sawPropertyDetail = $true
+        if (
+            (Get-StrictRequiredChangeSetString -InputObject $target -Name 'Name' -Context "$context property Target") -cne $expectedPropertyName -or
+            (Get-StrictRequiredChangeSetString -InputObject $target -Name 'RequiresRecreation' -Context "$context property Target") -cne $expectedRecreation
+        ) {
+            throw "$context contains an unexpected property target or recreation behavior."
+        }
+        $attributeChangeType = Get-StrictOptionalChangeSetString -InputObject $target -Name 'AttributeChangeType' -Context "$context property Target"
+        if ($null -ne $attributeChangeType -and $attributeChangeType -cne 'Modify') {
+            throw "$context contains an unexpected property AttributeChangeType."
+        }
+        $path = Get-StrictOptionalChangeSetString -InputObject $target -Name 'Path' -Context "$context property Target"
+        if ($null -ne $path -and -not $path.StartsWith("/Properties/$expectedPropertyName", [System.StringComparison]::Ordinal)) {
+            throw "$context contains an unexpected property Path."
+        }
+        foreach ($optionalValueName in @('BeforeValue', 'AfterValue')) {
+            $optionalValueProperty = $target.PSObject.Properties[$optionalValueName]
+            if ($null -ne $optionalValueProperty -and $null -ne $optionalValueProperty.Value -and $optionalValueProperty.Value -isnot [string]) {
+                throw "$context contains malformed optional property field '$optionalValueName'."
+            }
+        }
+
+        $evaluation = Get-StrictRequiredChangeSetString -InputObject $detail -Name 'Evaluation' -Context "$context property Detail"
+        $changeSource = Get-StrictRequiredChangeSetString -InputObject $detail -Name 'ChangeSource' -Context "$context property Detail"
+        $causingEntity = Get-StrictOptionalChangeSetString -InputObject $detail -Name 'CausingEntity' -Context "$context property Detail"
+        if ($changeSource -ceq 'DirectModification' -and $evaluation -ceq 'Dynamic' -and $null -eq $causingEntity) {
+            $sawDirectDynamicDetail = $true
+            continue
+        }
+        if (
+            $LogicalResourceId -ceq 'ApiTaskDefinition' -and
+            $changeSource -ceq 'ParameterReference' -and
+            $evaluation -ceq 'Static' -and
+            $causingEntity -ceq 'AuthWalletKeysSecretVersionId'
+        ) {
+            $sawExactCausalDetail = $true
+            continue
+        }
+        if (
+            $LogicalResourceId -ceq 'ApiService' -and
+            $changeSource -ceq 'ResourceReference' -and
+            $evaluation -ceq 'Dynamic' -and
+            $causingEntity -ceq 'ApiTaskDefinition'
+        ) {
+            $sawExactCausalDetail = $true
+            continue
+        }
+        throw "$context contains property causal evidence outside the exact reviewed dependency path."
+    }
+
+    if (-not $sawPropertyDetail -or -not $sawExactCausalDetail) {
+        throw "$context is missing its exact reviewed property and causal evidence."
+    }
+    if ($LogicalResourceId -ceq 'ApiTaskDefinition' -and -not $sawDirectDynamicDetail) {
+        throw "$context is missing the dynamic companion for its parameter-backed property change."
+    }
+    if ($scope.Contains('Tags') -ne $sawTagDetail) {
+        throw "$context Scope and Detail targets disagree about optional tag propagation."
+    }
+}
+
+function Assert-AuthWalletNestedChangeSet {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $ChildChangeSetId,
+        [Parameter(Mandatory = $true)]
+        [string] $ExpectedChildStackId,
+        [Parameter(Mandatory = $true)]
+        [string] $ExpectedParentChangeSetId,
+        [Parameter(Mandatory = $true)]
+        [string] $RootChangeSetId,
+        [Parameter(Mandatory = $true)]
+        [System.Collections.IDictionary] $VisitedChangeSetIds,
+        [Parameter(Mandatory = $true)]
+        [string] $Partition,
+        [Parameter(Mandatory = $true)]
+        [string] $ProfileName,
+        [int] $Depth
+    )
+
+    if ($Depth -gt 32) {
+        throw 'AUTH_WALLET_TRANSITION nested change-set review exceeded the maximum safe hierarchy depth.'
+    }
+    $changeSetIdPattern = '^arn:' + [regex]::Escape($Partition) + ':cloudformation:' + [regex]::Escape($Region) + ':' + [regex]::Escape($AccountId) + ':changeSet/([A-Za-z][-A-Za-z0-9]*)/[A-Za-z0-9-]+$'
+    if ($ChildChangeSetId -cnotmatch $changeSetIdPattern) {
+        throw 'AUTH_WALLET_TRANSITION encountered a nested ChangeSetId outside the approved account, Region, or ARN shape.'
+    }
+    $expectedChildChangeSetName = $Matches[1]
+    $stackIdPattern = '^arn:' + [regex]::Escape($Partition) + ':cloudformation:' + [regex]::Escape($Region) + ':' + [regex]::Escape($AccountId) + ':stack/([A-Za-z][-A-Za-z0-9]*)/[A-Za-z0-9-]+$'
+    if ($ExpectedChildStackId -cnotmatch $stackIdPattern) {
+        throw 'AUTH_WALLET_TRANSITION encountered a nested stack outside the approved account, Region, or ARN shape.'
+    }
+    $expectedChildStackName = $Matches[1]
+    if ($VisitedChangeSetIds.Contains($ChildChangeSetId)) {
+        throw "AUTH_WALLET_TRANSITION encountered duplicate or cyclic nested ChangeSetId '$ChildChangeSetId'."
+    }
+    if ($VisitedChangeSetIds.Count -ge 256) {
+        throw 'AUTH_WALLET_TRANSITION nested change-set review exceeded the maximum safe hierarchy size.'
+    }
+    $VisitedChangeSetIds[$ChildChangeSetId] = $true
+
+    $childDescriptionOutput = & $script:AwsExecutable @(
+        'cloudformation',
+        'describe-change-set',
+        '--stack-name', $ExpectedChildStackId,
+        '--change-set-name', $ChildChangeSetId,
+        '--profile', $ProfileName,
+        '--region', $Region,
+        '--output', 'json',
+        '--no-cli-pager'
+    )
+    if ($LASTEXITCODE -ne 0) {
+        throw "AUTH_WALLET_TRANSITION could not inspect nested ChangeSetId '$ChildChangeSetId'."
+    }
+    try {
+        $childChangeSet = ($childDescriptionOutput | Out-String) | ConvertFrom-Json
+    }
+    catch {
+        throw "AUTH_WALLET_TRANSITION nested ChangeSetId '$ChildChangeSetId' did not return valid JSON."
+    }
+    if ($null -eq $childChangeSet -or $childChangeSet -is [System.Array] -or $childChangeSet -is [string]) {
+        throw "AUTH_WALLET_TRANSITION nested ChangeSetId '$ChildChangeSetId' did not return one change-set object."
+    }
+
+    $context = "AUTH_WALLET_TRANSITION nested ChangeSetId '$ChildChangeSetId'"
+    if (
+        (Get-StrictRequiredChangeSetString -InputObject $childChangeSet -Name 'ChangeSetId' -Context $context) -cne $ChildChangeSetId -or
+        (Get-StrictRequiredChangeSetString -InputObject $childChangeSet -Name 'ChangeSetName' -Context $context) -cne $expectedChildChangeSetName -or
+        (Get-StrictRequiredChangeSetString -InputObject $childChangeSet -Name 'StackId' -Context $context) -cne $ExpectedChildStackId -or
+        (Get-StrictRequiredChangeSetString -InputObject $childChangeSet -Name 'StackName' -Context $context) -cne $expectedChildStackName -or
+        (Get-StrictRequiredChangeSetString -InputObject $childChangeSet -Name 'ParentChangeSetId' -Context $context) -cne $ExpectedParentChangeSetId -or
+        (Get-StrictRequiredChangeSetString -InputObject $childChangeSet -Name 'RootChangeSetId' -Context $context) -cne $RootChangeSetId -or
+        (Get-StrictRequiredChangeSetString -InputObject $childChangeSet -Name 'Status' -Context $context) -cne 'CREATE_COMPLETE' -or
+        (Get-StrictRequiredChangeSetString -InputObject $childChangeSet -Name 'ExecutionStatus' -Context $context) -cne 'UNAVAILABLE'
+    ) {
+        throw "$context does not match its exact hierarchy identity and completed, root-only-executable status."
+    }
+    $includeNestedProperty = $childChangeSet.PSObject.Properties['IncludeNestedStacks']
+    if ($null -eq $includeNestedProperty -or $includeNestedProperty.Value -isnot [bool] -or $includeNestedProperty.Value -ne $true) {
+        throw "$context was not created with nested-stack visibility enabled."
+    }
+    if ((Get-StrictRequiredChangeSetString -InputObject $childChangeSet -Name 'ChangeSetType' -Context $context) -cne 'UPDATE') {
+        throw "$context is not an UPDATE change set."
+    }
+    $nextTokenProperty = $childChangeSet.PSObject.Properties['NextToken']
+    if ($null -ne $nextTokenProperty -and $null -ne $nextTokenProperty.Value) {
+        throw "$context returned an uninspected pagination token."
+    }
+
+    $childChanges = @(Get-StrictChangeSetArrayProperty -InputObject $childChangeSet -Name 'Changes' -Context $context)
+    Assert-AuthWalletDescendantChanges `
+        -Changes $childChanges `
+        -CurrentChangeSetId $ChildChangeSetId `
+        -RootChangeSetId $RootChangeSetId `
+        -VisitedChangeSetIds $VisitedChangeSetIds `
+        -Partition $Partition `
+        -ProfileName $ProfileName `
+        -Depth $Depth
+}
+
+function Assert-AuthWalletNestedResourceChange {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object] $ResourceChange,
+        [Parameter(Mandatory = $true)]
+        [string] $LogicalResourceId,
+        [Parameter(Mandatory = $true)]
+        [string] $CurrentChangeSetId,
+        [Parameter(Mandatory = $true)]
+        [string] $RootChangeSetId,
+        [Parameter(Mandatory = $true)]
+        [System.Collections.IDictionary] $VisitedChangeSetIds,
+        [Parameter(Mandatory = $true)]
+        [string] $Partition,
+        [Parameter(Mandatory = $true)]
+        [string] $ProfileName,
+        [int] $Depth,
+        [switch] $IsRoot
+    )
+
+    $context = "AUTH_WALLET_TRANSITION nested-stack change '$LogicalResourceId'"
+    if ($IsRoot -and $LogicalResourceId -cnotin @('WorkloadBoundaries', 'Observability')) {
+        throw "$context is not one of the two reviewed root nested stacks."
+    }
+    if (
+        (Get-StrictRequiredChangeSetString -InputObject $ResourceChange -Name 'ResourceType' -Context $context) -cne 'AWS::CloudFormation::Stack' -or
+        (Get-StrictRequiredChangeSetString -InputObject $ResourceChange -Name 'Action' -Context $context) -cne 'Modify' -or
+        (Get-StrictRequiredChangeSetString -InputObject $ResourceChange -Name 'Replacement' -Context $context) -cne 'False'
+    ) {
+        throw "$context does not match a non-replacing nested-stack modification."
+    }
+    $policyAction = Get-StrictOptionalChangeSetString -InputObject $ResourceChange -Name 'PolicyAction' -Context $context
+    if ($null -ne $policyAction) {
+        throw "$context contains an unexpected PolicyAction."
+    }
+
+    $scope = Get-StrictChangeSetScope -ResourceChange $ResourceChange -Context $context
+    if (
+        $scope.Count -gt 2 -or
+        @($scope.Keys | Where-Object { [string] $_ -cnotin @('Properties', 'Tags') }).Count -ne 0
+    ) {
+        throw "$context Scope contains an attribute outside Properties and optional Tags."
+    }
+    $details = @(Get-StrictChangeSetArrayProperty -InputObject $ResourceChange -Name 'Details' -Context $context)
+    if ($details.Count -eq 0) {
+        throw "$context must expose its nested-stack Details."
+    }
+    $sawProperties = $false
+    $sawTags = $false
+    foreach ($detail in $details) {
+        if ($null -eq $detail -or $detail -is [string] -or $detail -is [System.Array]) {
+            throw "$context contains a malformed Detail."
+        }
+        $target = Get-OptionalPropertyValue -InputObject $detail -Name 'Target'
+        if ($null -eq $target -or $target -is [string] -or $target -is [System.Array]) {
+            throw "$context contains a Detail without an object Target."
+        }
+        $attribute = Get-StrictRequiredChangeSetString -InputObject $target -Name 'Attribute' -Context "$context Target"
+        if ($attribute -ceq 'Tags') {
+            Assert-AuthWalletTagChangeDetail -Detail $detail -Context $context
+            $sawTags = $true
+            continue
+        }
+        if ($attribute -cne 'Properties') {
+            throw "$context contains a Detail target outside Properties and optional Tags."
+        }
+        $sawProperties = $true
+        $targetNameProperty = $target.PSObject.Properties['Name']
+        $requiresRecreation = Get-StrictOptionalChangeSetString -InputObject $target -Name 'RequiresRecreation' -Context "$context automatic Target"
+        if (
+            ($null -ne $targetNameProperty -and $null -ne $targetNameProperty.Value) -or
+            ($null -ne $requiresRecreation -and $requiresRecreation -cne 'Never') -or
+            (Get-StrictRequiredChangeSetString -InputObject $detail -Name 'ChangeSource' -Context "$context automatic Detail") -cne 'Automatic' -or
+            (Get-StrictRequiredChangeSetString -InputObject $detail -Name 'Evaluation' -Context "$context automatic Detail") -cne 'Dynamic' -or
+            $null -ne (Get-StrictOptionalChangeSetString -InputObject $detail -Name 'CausingEntity' -Context "$context automatic Detail")
+        ) {
+            throw "$context contains property evidence outside the exact Automatic/Dynamic nested-stack pointer shape."
+        }
+    }
+    if ($scope.Contains('Properties') -ne $sawProperties -or $scope.Contains('Tags') -ne $sawTags) {
+        throw "$context Scope and Detail targets disagree."
+    }
+
+    $childChangeSetId = Get-StrictOptionalChangeSetString -InputObject $ResourceChange -Name 'ChangeSetId' -Context $context
+    if ($null -eq $childChangeSetId) {
+        throw "$context does not expose a ChangeSetId for complete descendant inspection."
+    }
+    $childStackId = Get-StrictRequiredChangeSetString -InputObject $ResourceChange -Name 'PhysicalResourceId' -Context $context
+    Assert-AuthWalletNestedChangeSet `
+        -ChildChangeSetId $childChangeSetId `
+        -ExpectedChildStackId $childStackId `
+        -ExpectedParentChangeSetId $CurrentChangeSetId `
+        -RootChangeSetId $RootChangeSetId `
+        -VisitedChangeSetIds $VisitedChangeSetIds `
+        -Partition $Partition `
+        -ProfileName $ProfileName `
+        -Depth ($Depth + 1)
+}
+
+function Assert-AuthWalletDescendantChanges {
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
+        [object[]] $Changes,
+        [Parameter(Mandatory = $true)]
+        [string] $CurrentChangeSetId,
+        [Parameter(Mandatory = $true)]
+        [string] $RootChangeSetId,
+        [Parameter(Mandatory = $true)]
+        [System.Collections.IDictionary] $VisitedChangeSetIds,
+        [Parameter(Mandatory = $true)]
+        [string] $Partition,
+        [Parameter(Mandatory = $true)]
+        [string] $ProfileName,
+        [int] $Depth
+    )
+
+    $logicalResourceIds = [System.Collections.Specialized.OrderedDictionary]::new([System.StringComparer]::Ordinal)
+    foreach ($change in $Changes) {
+        if ($null -eq $change -or $change -is [string] -or $change -is [System.Array]) {
+            throw 'AUTH_WALLET_TRANSITION nested review contains a malformed change entry.'
+        }
+        if ((Get-StrictRequiredChangeSetString -InputObject $change -Name 'Type' -Context 'AUTH_WALLET_TRANSITION nested change entry') -cne 'Resource') {
+            throw 'AUTH_WALLET_TRANSITION nested review contains a non-Resource change entry.'
+        }
+        $resourceChange = Get-OptionalPropertyValue -InputObject $change -Name 'ResourceChange'
+        if ($null -eq $resourceChange -or $resourceChange -is [string] -or $resourceChange -is [System.Array]) {
+            throw 'AUTH_WALLET_TRANSITION nested review contains a Resource entry without an object ResourceChange.'
+        }
+        $logicalResourceId = Get-StrictRequiredChangeSetString -InputObject $resourceChange -Name 'LogicalResourceId' -Context 'AUTH_WALLET_TRANSITION nested ResourceChange'
+        if ($logicalResourceIds.Contains($logicalResourceId)) {
+            throw "AUTH_WALLET_TRANSITION nested review contains duplicate logical resource '$logicalResourceId'."
+        }
+        $logicalResourceIds[$logicalResourceId] = $true
+        $resourceType = Get-StrictRequiredChangeSetString -InputObject $resourceChange -Name 'ResourceType' -Context "AUTH_WALLET_TRANSITION nested resource '$logicalResourceId'"
+        $nestedChangeSetId = Get-StrictOptionalChangeSetString -InputObject $resourceChange -Name 'ChangeSetId' -Context "AUTH_WALLET_TRANSITION nested resource '$logicalResourceId'"
+        if ($resourceType -ceq 'AWS::CloudFormation::Stack' -or $null -ne $nestedChangeSetId) {
+            Assert-AuthWalletNestedResourceChange `
+                -ResourceChange $resourceChange `
+                -LogicalResourceId $logicalResourceId `
+                -CurrentChangeSetId $CurrentChangeSetId `
+                -RootChangeSetId $RootChangeSetId `
+                -VisitedChangeSetIds $VisitedChangeSetIds `
+                -Partition $Partition `
+                -ProfileName $ProfileName `
+                -Depth $Depth
+            continue
+        }
+        Assert-AuthWalletTagOnlyResourceChange -ResourceChange $resourceChange -Context "AUTH_WALLET_TRANSITION nested leaf '$logicalResourceId'"
+    }
+}
+
+function Assert-AuthWalletRootChanges {
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
+        [object[]] $Changes,
+        [Parameter(Mandatory = $true)]
+        [ValidateSet('adopt', 'transition')]
+        [string] $Mode,
+        [Parameter(Mandatory = $true)]
+        [string] $RootChangeSetId,
+        [Parameter(Mandatory = $true)]
+        [string] $Partition,
+        [Parameter(Mandatory = $true)]
+        [string] $ProfileName
+    )
+
+    $visitedChangeSetIds = [System.Collections.Specialized.OrderedDictionary]::new([System.StringComparer]::Ordinal)
+    $visitedChangeSetIds[$RootChangeSetId] = $true
+    $logicalResourceIds = [System.Collections.Specialized.OrderedDictionary]::new([System.StringComparer]::Ordinal)
+    $functionalResourceIds = [System.Collections.Specialized.OrderedDictionary]::new([System.StringComparer]::Ordinal)
+    foreach ($change in $Changes) {
+        if ($null -eq $change -or $change -is [string] -or $change -is [System.Array]) {
+            throw 'AUTH_WALLET_TRANSITION root review contains a malformed change entry.'
+        }
+        if ((Get-StrictRequiredChangeSetString -InputObject $change -Name 'Type' -Context 'AUTH_WALLET_TRANSITION root change entry') -cne 'Resource') {
+            throw 'AUTH_WALLET_TRANSITION root review contains a non-Resource change entry.'
+        }
+        $resourceChange = Get-OptionalPropertyValue -InputObject $change -Name 'ResourceChange'
+        if ($null -eq $resourceChange -or $resourceChange -is [string] -or $resourceChange -is [System.Array]) {
+            throw 'AUTH_WALLET_TRANSITION root review contains a Resource entry without an object ResourceChange.'
+        }
+        $logicalResourceId = Get-StrictRequiredChangeSetString -InputObject $resourceChange -Name 'LogicalResourceId' -Context 'AUTH_WALLET_TRANSITION root ResourceChange'
+        if ($logicalResourceIds.Contains($logicalResourceId)) {
+            throw "AUTH_WALLET_TRANSITION root review contains duplicate logical resource '$logicalResourceId'."
+        }
+        $logicalResourceIds[$logicalResourceId] = $true
+        $resourceType = Get-StrictRequiredChangeSetString -InputObject $resourceChange -Name 'ResourceType' -Context "AUTH_WALLET_TRANSITION root resource '$logicalResourceId'"
+        $nestedChangeSetId = Get-StrictOptionalChangeSetString -InputObject $resourceChange -Name 'ChangeSetId' -Context "AUTH_WALLET_TRANSITION root resource '$logicalResourceId'"
+
+        if ($Mode -ceq 'transition' -and $logicalResourceId -cin @('ApiTaskDefinition', 'ApiService')) {
+            Assert-AuthWalletFunctionalResourceChange -ResourceChange $resourceChange -LogicalResourceId $logicalResourceId
+            $functionalResourceIds[$logicalResourceId] = $true
+            continue
+        }
+        if ($resourceType -ceq 'AWS::CloudFormation::Stack' -or $null -ne $nestedChangeSetId) {
+            Assert-AuthWalletNestedResourceChange `
+                -ResourceChange $resourceChange `
+                -LogicalResourceId $logicalResourceId `
+                -CurrentChangeSetId $RootChangeSetId `
+                -RootChangeSetId $RootChangeSetId `
+                -VisitedChangeSetIds $visitedChangeSetIds `
+                -Partition $Partition `
+                -ProfileName $ProfileName `
+                -Depth 0 `
+                -IsRoot
+            continue
+        }
+        Assert-AuthWalletTagOnlyResourceChange -ResourceChange $resourceChange -Context "AUTH_WALLET_TRANSITION root resource '$logicalResourceId'"
+    }
+
+    if (
+        $Mode -ceq 'transition' -and
+        (-not $functionalResourceIds.Contains('ApiTaskDefinition') -or -not $functionalResourceIds.Contains('ApiService'))
+    ) {
+        throw 'AUTH_WALLET_TRANSITION change set is missing one of its two exact reviewed API functional changes.'
+    }
+}
+
 function Assert-VersionedChildArtifact {
     param(
         [string] $ArtifactLabel,
@@ -2365,121 +2993,52 @@ if (-not [string]::IsNullOrEmpty($rootChangeSetId) -and $rootChangeSetId -cne $c
     throw 'The reviewed change set returned an unexpected root change-set identity.'
 }
 if ($ChangeSetType -eq 'UPDATE') {
+    if ($isAuthWalletTransition) {
+        $rootNextTokenProperty = $changeSet.PSObject.Properties['NextToken']
+        if ($null -ne $rootNextTokenProperty -and $null -ne $rootNextTokenProperty.Value) {
+            throw 'AUTH_WALLET_TRANSITION root change-set review returned an uninspected pagination token.'
+        }
+    }
     $changesProperty = $changeSet.PSObject.Properties['Changes']
     if ($null -eq $changesProperty -or $null -eq $changesProperty.Value) {
         throw 'The reviewed UPDATE change set did not expose its complete resource-change list.'
     }
     $reviewedResourceChanges = @($changesProperty.Value)
-    if (
-        $isAuthWalletTransition -and
-        $AuthWalletTransitionMode -ceq 'transition' -and
-        $reviewedResourceChanges.Count -lt 2
-    ) {
-        throw 'AUTH_WALLET_TRANSITION requires its two functional API changes; additional changes may only be non-replacing tag propagation.'
+    if ($isAuthWalletTransition) {
+        if ($changesProperty.Value -isnot [System.Array]) {
+            throw 'AUTH_WALLET_TRANSITION requires Changes to be an exact JSON array before recursive review.'
+        }
+        Assert-AuthWalletRootChanges `
+            -Changes $reviewedResourceChanges `
+            -Mode $AuthWalletTransitionMode `
+            -RootChangeSetId $changeSetId `
+            -Partition $partition `
+            -ProfileName $Profile
     }
-    $observedAuthWalletLogicalResourceChanges = [System.Collections.Specialized.OrderedDictionary]::new([System.StringComparer]::Ordinal)
-    $observedAuthWalletFunctionalResourceChanges = [System.Collections.Specialized.OrderedDictionary]::new([System.StringComparer]::Ordinal)
-    foreach ($change in $reviewedResourceChanges) {
-        if ($null -eq $change -or [string] (Get-OptionalPropertyValue -InputObject $change -Name 'Type') -cne 'Resource') {
-            throw 'The reviewed UPDATE change set contains an unrecognized change entry.'
-        }
-        $resourceChange = Get-OptionalPropertyValue -InputObject $change -Name 'ResourceChange'
-        if ($null -eq $resourceChange) {
-            throw 'The reviewed UPDATE change set contains a resource entry without resource-change details.'
-        }
-        $logicalResourceId = [string] (Get-OptionalPropertyValue -InputObject $resourceChange -Name 'LogicalResourceId')
-        $resourceType = [string] (Get-OptionalPropertyValue -InputObject $resourceChange -Name 'ResourceType')
-        $resourceAction = [string] (Get-OptionalPropertyValue -InputObject $resourceChange -Name 'Action')
-        $replacement = [string] (Get-OptionalPropertyValue -InputObject $resourceChange -Name 'Replacement')
-        $policyAction = [string] (Get-OptionalPropertyValue -InputObject $resourceChange -Name 'PolicyAction')
-        $resourceChangeScope = @((Get-OptionalPropertyValue -InputObject $resourceChange -Name 'Scope'))
-        $resourceChangeDetails = @((Get-OptionalPropertyValue -InputObject $resourceChange -Name 'Details'))
-        $isTagOnlyResourceChange = (
-            $resourceAction -ceq 'Modify' -and
-            $replacement -ceq 'False' -and
-            [string]::IsNullOrEmpty($policyAction) -and
-            $resourceChangeScope.Count -eq 1 -and
-            [string] $resourceChangeScope[0] -ceq 'Tags' -and
-            $resourceChangeDetails.Count -gt 0
-        )
-        if ($isTagOnlyResourceChange) {
-            foreach ($resourceChangeDetail in $resourceChangeDetails) {
-                $resourceChangeTarget = if ($null -eq $resourceChangeDetail) {
-                    $null
-                }
-                else {
-                    Get-OptionalPropertyValue -InputObject $resourceChangeDetail -Name 'Target'
-                }
-                $detailRequiresRecreation = if ($null -eq $resourceChangeTarget) {
-                    $null
-                }
-                else {
-                    [string] (Get-OptionalPropertyValue -InputObject $resourceChangeTarget -Name 'RequiresRecreation')
-                }
-                if (
-                    $null -eq $resourceChangeDetail -or
-                    $null -eq $resourceChangeTarget -or
-                    [string] (Get-OptionalPropertyValue -InputObject $resourceChangeTarget -Name 'Attribute') -cne 'Tags' -or
-                    -not [string]::IsNullOrEmpty([string] (Get-OptionalPropertyValue -InputObject $resourceChangeTarget -Name 'Name')) -or
-                    (-not [string]::IsNullOrEmpty($detailRequiresRecreation) -and $detailRequiresRecreation -cne 'Never')
-                ) {
-                    $isTagOnlyResourceChange = $false
-                    break
-                }
+    else {
+        foreach ($change in $reviewedResourceChanges) {
+            if ($null -eq $change -or [string] (Get-OptionalPropertyValue -InputObject $change -Name 'Type') -cne 'Resource') {
+                throw 'The reviewed UPDATE change set contains an unrecognized change entry.'
+            }
+            $resourceChange = Get-OptionalPropertyValue -InputObject $change -Name 'ResourceChange'
+            if ($null -eq $resourceChange) {
+                throw 'The reviewed UPDATE change set contains a resource entry without resource-change details.'
+            }
+            $logicalResourceId = [string] (Get-OptionalPropertyValue -InputObject $resourceChange -Name 'LogicalResourceId')
+            $resourceType = [string] (Get-OptionalPropertyValue -InputObject $resourceChange -Name 'ResourceType')
+            $resourceAction = [string] (Get-OptionalPropertyValue -InputObject $resourceChange -Name 'Action')
+            $replacement = [string] (Get-OptionalPropertyValue -InputObject $resourceChange -Name 'Replacement')
+            if ($logicalResourceId -ceq 'Database' -and (
+                    $resourceType -cne 'AWS::RDS::DBInstance' -or
+                    $resourceAction -cne 'Modify' -or
+                    $replacement -cne 'False'
+                )) {
+                throw 'UPDATE change sets must not replace, add, or remove the stateful Database resource. Use a separately reviewed database migration path.'
+            }
+            if ($logicalResourceId -ceq 'DatabaseCredentialsSecret') {
+                throw 'UPDATE change sets must not modify or remove the legacy retained database master secret through this guard. Inventory and retire it separately.'
             }
         }
-        if ($isAuthWalletTransition) {
-            if ([string]::IsNullOrWhiteSpace($logicalResourceId) -or [string]::IsNullOrWhiteSpace($resourceType)) {
-                throw 'AUTH_WALLET_TRANSITION change set contains a resource change without an exact logical ID and resource type.'
-            }
-            if ($observedAuthWalletLogicalResourceChanges.Contains($logicalResourceId)) {
-                throw "AUTH_WALLET_TRANSITION change set contains duplicate resource change '$logicalResourceId'."
-            }
-            $observedAuthWalletLogicalResourceChanges[$logicalResourceId] = $true
-            if ($AuthWalletTransitionMode -ceq 'adopt') {
-                if (-not $isTagOnlyResourceChange) {
-                    throw 'AUTH_WALLET_TRANSITION adoption permits only zero changes or non-replacing changes whose Scope and every Detail target are exactly Tags.'
-                }
-                continue
-            }
-            if ($isTagOnlyResourceChange) {
-                continue
-            }
-            if (
-                ($logicalResourceId -ceq 'ApiTaskDefinition' -and (
-                        $resourceType -cne 'AWS::ECS::TaskDefinition' -or
-                        $resourceAction -cne 'Modify' -or
-                        $replacement -cne 'True'
-                    )) -or
-                ($logicalResourceId -ceq 'ApiService' -and (
-                        $resourceType -cne 'AWS::ECS::Service' -or
-                        $resourceAction -cne 'Modify' -or
-                        $replacement -cne 'False'
-                    )) -or
-                $logicalResourceId -cnotin @('ApiTaskDefinition', 'ApiService')
-            ) {
-                throw 'AUTH_WALLET_TRANSITION change set is not the exact reviewed ApiTaskDefinition replacement, ApiService modification, and optional non-replacing tag propagation plan.'
-            }
-            $observedAuthWalletFunctionalResourceChanges[$logicalResourceId] = $true
-            continue
-        }
-        if ($logicalResourceId -ceq 'Database' -and (
-                $resourceType -cne 'AWS::RDS::DBInstance' -or
-                $resourceAction -cne 'Modify' -or
-                $replacement -cne 'False'
-            )) {
-            throw 'UPDATE change sets must not replace, add, or remove the stateful Database resource. Use a separately reviewed database migration path.'
-        }
-        if ($logicalResourceId -ceq 'DatabaseCredentialsSecret') {
-            throw 'UPDATE change sets must not modify or remove the legacy retained database master secret through this guard. Inventory and retire it separately.'
-        }
-    }
-    if (
-        $isAuthWalletTransition -and
-        $AuthWalletTransitionMode -ceq 'transition' -and
-        (-not $observedAuthWalletFunctionalResourceChanges.Contains('ApiTaskDefinition') -or -not $observedAuthWalletFunctionalResourceChanges.Contains('ApiService'))
-    ) {
-        throw 'AUTH_WALLET_TRANSITION change set is missing one of its two exact reviewed API resource changes.'
     }
 }
 
