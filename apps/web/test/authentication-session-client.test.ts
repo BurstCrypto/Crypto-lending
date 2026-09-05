@@ -33,7 +33,10 @@ function jsonResponse(body: unknown, status = 200, headers: HeadersInit = {}): R
   });
 }
 
-afterEach(() => vi.useRealTimers());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
 
 describe('account profile response boundary', () => {
   it('accepts and freezes the exact canonical API profile', () => {
@@ -68,6 +71,108 @@ describe('account profile response boundary', () => {
 });
 
 describe('authentication session client', () => {
+  it('single-flights concurrent default browser restores without caching the result', async () => {
+    const firstResponse = Promise.withResolvers<Response>();
+    const requestFetch = vi
+      .fn<AuthenticationFetch>()
+      .mockImplementationOnce(() => firstResponse.promise)
+      .mockResolvedValueOnce(jsonResponse(PROFILE));
+    vi.stubGlobal('fetch', requestFetch);
+
+    const first = restoreAuthenticationSession();
+    const concurrent = restoreAuthenticationSession();
+
+    expect(requestFetch).toHaveBeenCalledOnce();
+    firstResponse.resolve(jsonResponse(PROFILE));
+    await expect(Promise.all([first, concurrent])).resolves.toEqual([PROFILE, PROFILE]);
+
+    await expect(restoreAuthenticationSession()).resolves.toEqual(PROFILE);
+    expect(requestFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps concurrent restore cancellation independent while another consumer remains', async () => {
+    const response = Promise.withResolvers<Response>();
+    let requestSignal: AbortSignal | undefined;
+    const requestFetch = vi.fn<AuthenticationFetch>((_input, init) => {
+      requestSignal = init?.signal ?? undefined;
+      return response.promise;
+    });
+    vi.stubGlobal('fetch', requestFetch);
+    const firstController = new AbortController();
+    const secondController = new AbortController();
+    const first = restoreAuthenticationSession({ signal: firstController.signal });
+    const second = restoreAuthenticationSession({ signal: secondController.signal });
+    const cancellation = new DOMException('first view left', 'AbortError');
+    const firstFailure = expect(first).rejects.toBe(cancellation);
+
+    firstController.abort(cancellation);
+
+    await firstFailure;
+    expect(requestSignal?.aborted).toBe(false);
+    expect(requestFetch).toHaveBeenCalledOnce();
+    response.resolve(jsonResponse(PROFILE));
+    await expect(second).resolves.toEqual(PROFILE);
+  });
+
+  it('retires an all-cancelled flight before a visible caller starts a fresh restore', async () => {
+    const abandonedResponse = Promise.withResolvers<Response>();
+    const requestSignals: AbortSignal[] = [];
+    const requestFetch = vi
+      .fn<AuthenticationFetch>()
+      .mockImplementationOnce((_input, init) => {
+        if (init?.signal) requestSignals.push(init.signal);
+        return abandonedResponse.promise;
+      })
+      .mockImplementationOnce(async (_input, init) => {
+        if (init?.signal) requestSignals.push(init.signal);
+        return jsonResponse(PROFILE);
+      });
+    vi.stubGlobal('fetch', requestFetch);
+    const firstController = new AbortController();
+    const secondController = new AbortController();
+    const first = restoreAuthenticationSession({ signal: firstController.signal });
+    const second = restoreAuthenticationSession({ signal: secondController.signal });
+    const firstFailure = expect(first).rejects.toMatchObject({ name: 'AbortError' });
+    const secondFailure = expect(second).rejects.toMatchObject({ name: 'AbortError' });
+
+    firstController.abort();
+    expect(requestSignals[0]?.aborted).toBe(false);
+    secondController.abort();
+    expect(requestSignals[0]?.aborted).toBe(true);
+
+    const fresh = restoreAuthenticationSession();
+    expect(requestFetch).toHaveBeenCalledTimes(2);
+    await expect(fresh).resolves.toEqual(PROFILE);
+    await Promise.all([firstFailure, secondFailure]);
+
+    abandonedResponse.resolve(jsonResponse({ ...PROFILE, contactEmail: 'stale@example.com' }));
+    await Promise.resolve();
+    expect(requestSignals[1]?.aborted).toBe(false);
+  });
+
+  it('never coalesces explicitly injected fetch boundaries', async () => {
+    const requestFetch = vi.fn<AuthenticationFetch>(async () => jsonResponse(PROFILE));
+
+    await expect(
+      Promise.all([
+        restoreAuthenticationSession({ fetch: requestFetch }),
+        restoreAuthenticationSession({ fetch: requestFetch }),
+      ]),
+    ).resolves.toEqual([PROFILE, PROFILE]);
+    expect(requestFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('never coalesces default-fetch restores outside the browser boundary', async () => {
+    const requestFetch = vi.fn<AuthenticationFetch>(async () => jsonResponse(PROFILE));
+    vi.stubGlobal('fetch', requestFetch);
+    vi.stubGlobal('window', undefined);
+
+    await expect(
+      Promise.all([restoreAuthenticationSession(), restoreAuthenticationSession()]),
+    ).resolves.toEqual([PROFILE, PROFILE]);
+    expect(requestFetch).toHaveBeenCalledTimes(2);
+  });
+
   it('restores only a strict no-store same-origin profile response', async () => {
     const requestFetch = vi.fn<AuthenticationFetch>(async () => jsonResponse(PROFILE));
 

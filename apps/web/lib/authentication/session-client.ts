@@ -15,6 +15,14 @@ export const AUTHENTICATION_PROVIDER_LOGOUT_HEADER = 'X-Authentication-Provider-
 const CSRF_TOKEN = /^[A-Za-z0-9_-]{43}$/u;
 const MAXIMUM_PROVIDER_LOGOUT_URL_LENGTH = 4_096;
 
+interface SharedSessionRestoreFlight {
+  readonly controller: AbortController;
+  readonly consumers: Set<symbol>;
+  readonly promise: Promise<AccountProfile>;
+}
+
+let sharedSessionRestoreFlight: SharedSessionRestoreFlight | null = null;
+
 export interface RestoreAuthenticationSessionOptions {
   readonly fetch?: AuthenticationFetch;
   readonly signal?: AbortSignal;
@@ -119,11 +127,11 @@ export function readAuthenticationCsrfToken(cookieHeader: unknown): string {
   return found;
 }
 
-export async function restoreAuthenticationSession(
-  options: RestoreAuthenticationSessionOptions = {},
+async function requestAuthenticationSession(
+  requestFetch: AuthenticationFetch,
+  signal: AbortSignal | undefined,
 ): Promise<AccountProfile> {
-  const requestFetch = options.fetch ?? globalThis.fetch;
-  const request = createRequestDeadline(options.signal);
+  const request = createRequestDeadline(signal);
   try {
     let response: Response;
     try {
@@ -135,7 +143,7 @@ export async function restoreAuthenticationSession(
       );
     } catch (error) {
       if (request.didTimeout()) throw new AuthenticationUnavailableError();
-      if (isAbortFailure(error, options.signal)) throw error;
+      if (isAbortFailure(error, signal)) throw error;
       throw new AuthenticationUnavailableError();
     }
 
@@ -147,13 +155,86 @@ export async function restoreAuthenticationSession(
       return parseAccountProfile(await readBoundedJson(response, request.signal));
     } catch (error) {
       if (request.didTimeout()) throw new AuthenticationUnavailableError();
-      if (options.signal?.aborted === true) throw error;
+      if (signal?.aborted === true) throw error;
       if (error instanceof AuthenticationUnavailableError) throw error;
       throw new AuthenticationUnavailableError();
     }
   } finally {
     request.dispose();
   }
+}
+
+function abortReason(signal: AbortSignal): unknown {
+  return signal.reason ?? new DOMException('The operation was aborted.', 'AbortError');
+}
+
+function createSharedSessionRestoreFlight(): SharedSessionRestoreFlight {
+  const controller = new AbortController();
+  const promise = requestAuthenticationSession(globalThis.fetch, controller.signal).finally(() => {
+    if (sharedSessionRestoreFlight?.controller === controller) sharedSessionRestoreFlight = null;
+  });
+  return {
+    controller,
+    consumers: new Set(),
+    promise,
+  };
+}
+
+function releaseSharedSessionRestoreConsumer(
+  flight: SharedSessionRestoreFlight,
+  consumer: symbol,
+  reason?: unknown,
+): void {
+  flight.consumers.delete(consumer);
+  if (flight.consumers.size > 0 || sharedSessionRestoreFlight !== flight) return;
+  sharedSessionRestoreFlight = null;
+  if (!flight.controller.signal.aborted) {
+    flight.controller.abort(reason ?? new DOMException('The operation was aborted.', 'AbortError'));
+  }
+}
+
+function joinSharedSessionRestore(signal: AbortSignal | undefined): Promise<AccountProfile> {
+  if (signal?.aborted === true) return Promise.reject(abortReason(signal));
+
+  const flight = sharedSessionRestoreFlight ?? createSharedSessionRestoreFlight();
+  sharedSessionRestoreFlight = flight;
+  const consumer = Symbol('session-restore-consumer');
+  flight.consumers.add(consumer);
+
+  return new Promise<AccountProfile>((resolve, reject) => {
+    let finished = false;
+    const removeAbortListener = () => signal?.removeEventListener('abort', handleAbort);
+    const finish = (complete: () => void, reason?: unknown) => {
+      if (finished) return;
+      finished = true;
+      removeAbortListener();
+      releaseSharedSessionRestoreConsumer(flight, consumer, reason);
+      complete();
+    };
+    const handleAbort = () => {
+      const reason = abortReason(signal!);
+      finish(() => reject(reason), reason);
+    };
+
+    signal?.addEventListener('abort', handleAbort, { once: true });
+    void flight.promise.then(
+      (profile) => finish(() => resolve(profile)),
+      (error: unknown) => finish(() => reject(error), error),
+    );
+  });
+}
+
+/**
+ * Coalesces only concurrent browser calls using the default fetch implementation. Results are
+ * never cached, and each caller retains independent cancellation. Injected fetches stay isolated.
+ */
+export function restoreAuthenticationSession(
+  options: RestoreAuthenticationSessionOptions = {},
+): Promise<AccountProfile> {
+  if (options.fetch !== undefined || typeof window === 'undefined') {
+    return requestAuthenticationSession(options.fetch ?? globalThis.fetch, options.signal);
+  }
+  return joinSharedSessionRestore(options.signal);
 }
 
 export async function logoutAuthenticationSession(
