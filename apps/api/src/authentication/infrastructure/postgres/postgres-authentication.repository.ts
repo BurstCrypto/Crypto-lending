@@ -123,6 +123,7 @@ function finiteDate(value: unknown): Date {
 }
 
 function oneRow<Row extends QueryResultRow>(rows: readonly Row[]): Row {
+  if (!Array.isArray(rows)) throw new AuthenticationPersistenceError();
   const row = rows[0];
   if (!row || rows.length !== 1) throw new AuthenticationPersistenceError();
   return row;
@@ -165,14 +166,16 @@ export class PostgresAuthenticationRepository implements AuthenticationRepositor
     request: BeginAuthenticationTransactionRequest,
   ): Promise<BegunAuthenticationTransaction> {
     try {
+      const transactionId = uuid(request.transactionId);
       const result = await this.postgres.query<BeginRow>(
         `SELECT begun.attempt_id, begun.expires_at
          FROM begin_authentication_login_attempt(
            $1::uuid, $2::text, $3::text, $4::smallint, $5::bytea, $6::smallint,
            $7::bytea, $8::smallint, $9::bytea, $10::integer, $11::uuid
-         ) AS begun`,
+         ) AS begun
+         LIMIT 2`,
         [
-          uuid(request.transactionId),
+          transactionId,
           databaseFlow(request.flow),
           request.issuer,
           request.stateDigest.version,
@@ -186,8 +189,12 @@ export class PostgresAuthenticationRepository implements AuthenticationRepositor
         ],
       );
       const row = oneRow(result.rows);
+      const returnedTransactionId = uuid(row.attempt_id);
+      if (returnedTransactionId !== transactionId) {
+        throw new AuthenticationPersistenceError();
+      }
       return Object.freeze({
-        transactionId: uuid(row.attempt_id),
+        transactionId: returnedTransactionId,
         expiresAt: finiteDate(row.expires_at),
       });
     } catch (error) {
@@ -208,7 +215,8 @@ export class PostgresAuthenticationRepository implements AuthenticationRepositor
                 claimed.claimed_nonce_digest
          FROM claim_authentication_login_attempt(
            $1::uuid, $2::smallint, $3::bytea, $4::smallint, $5::bytea, $6::uuid
-         ) AS claimed`,
+         ) AS claimed
+         LIMIT 2`,
         [
           uuid(request.transactionId),
           request.stateDigest.version,
@@ -264,7 +272,8 @@ export class PostgresAuthenticationRepository implements AuthenticationRepositor
         `SELECT rejected.rejection_outcome
          FROM reject_claimed_authentication_login_attempt(
            $1::uuid, $2::text, $3::uuid
-         ) AS rejected`,
+         ) AS rejected
+         LIMIT 2`,
         [
           uuid(request.transactionId),
           databaseClaimedRejectionReason(request.reason),
@@ -291,6 +300,8 @@ export class PostgresAuthenticationRepository implements AuthenticationRepositor
     const registration = request.flow === 'registration' ? request.registration : undefined;
     try {
       const subjectDigests = digestCandidateParameters(request.subjectDigests);
+      const proposedSessionFamilyId = uuid(request.proposedSessionFamilyId);
+      const proposedCredentialId = uuid(request.proposedCredentialId);
       const result = await this.postgres.query<CompleteRow>(
         `SELECT completed.login_outcome,
                 completed.account_id,
@@ -303,7 +314,8 @@ export class PostgresAuthenticationRepository implements AuthenticationRepositor
            $6::smallint[], $7::text[], $8::uuid, $9::uuid, $10::uuid, $11::uuid,
            $12::smallint, $13::bytea, $14::smallint, $15::bytea,
            $16::integer, $17::integer, $18::text, $19::text, $20::text, $21::uuid
-         ) AS completed`,
+         ) AS completed
+         LIMIT 2`,
         [
           uuid(request.transactionId),
           request.identity.providerKey,
@@ -314,8 +326,8 @@ export class PostgresAuthenticationRepository implements AuthenticationRepositor
           subjectDigests.values,
           parseAccountId(request.proposedAccountId),
           uuid(request.proposedIdentityId),
-          uuid(request.proposedSessionFamilyId),
-          uuid(request.proposedCredentialId),
+          proposedSessionFamilyId,
+          proposedCredentialId,
           request.credentialDigest.version,
           digestBytes(request.credentialDigest),
           request.csrfDigest.version,
@@ -351,11 +363,16 @@ export class PostgresAuthenticationRepository implements AuthenticationRepositor
       ) {
         throw new AuthenticationPersistenceError();
       }
+      const sessionFamilyId = uuid(row.session_family_id);
+      const credentialId = uuid(row.credential_id);
+      if (sessionFamilyId !== proposedSessionFamilyId || credentialId !== proposedCredentialId) {
+        throw new AuthenticationPersistenceError();
+      }
       return Object.freeze({
         status: 'authenticated',
         accountId: parseAccountId(row.account_id),
-        sessionFamilyId: uuid(row.session_family_id),
-        credentialId: uuid(row.credential_id),
+        sessionFamilyId,
+        credentialId,
         idleExpiresAt: finiteDate(row.idle_expires_at),
         absoluteExpiresAt: finiteDate(row.absolute_expires_at),
       });
@@ -380,7 +397,8 @@ export class PostgresAuthenticationRepository implements AuthenticationRepositor
          FROM resolve_auth_session_keyring(
            $1::uuid, $2::smallint[], $3::text[], $4::boolean,
            $5::smallint[], $6::text[], $7::uuid
-         ) AS resolved`,
+         ) AS resolved
+         LIMIT 2`,
         [
           uuid(request.credentialId),
           credentials.versions,
@@ -420,17 +438,19 @@ export class PostgresAuthenticationRepository implements AuthenticationRepositor
   ): Promise<RotateAuthenticationSessionResult> {
     try {
       const credentials = digestCandidateParameters(request.credentialDigests);
+      const successorCredentialId = uuid(request.successorCredentialId);
       const result = await this.postgres.query<RotateRow>(
         `SELECT rotated.rotation_outcome, rotated.credential_id, rotated.expires_at
          FROM rotate_auth_session_keyring(
            $1::uuid, $2::smallint[], $3::text[], $4::uuid, $5::smallint,
            $6::bytea, $7::smallint, $8::bytea, $9::uuid
-         ) AS rotated`,
+         ) AS rotated
+         LIMIT 2`,
         [
           uuid(request.credentialId),
           credentials.versions,
           credentials.values,
-          uuid(request.successorCredentialId),
+          successorCredentialId,
           request.successorCredentialDigest.version,
           digestBytes(request.successorCredentialDigest),
           request.successorCsrfDigest.version,
@@ -443,9 +463,13 @@ export class PostgresAuthenticationRepository implements AuthenticationRepositor
         if (row.credential_id === null || row.expires_at === null) {
           throw new AuthenticationPersistenceError();
         }
+        const credentialId = uuid(row.credential_id);
+        if (credentialId !== successorCredentialId) {
+          throw new AuthenticationPersistenceError();
+        }
         return Object.freeze({
           status: 'rotated',
-          credentialId: uuid(row.credential_id),
+          credentialId,
           expiresAt: finiteDate(row.expires_at),
         });
       }
@@ -470,7 +494,8 @@ export class PostgresAuthenticationRepository implements AuthenticationRepositor
         `SELECT revoked.revocation_outcome
          FROM revoke_auth_session_keyring(
            $1::uuid, $2::smallint[], $3::text[], $4::uuid
-         ) AS revoked`,
+         ) AS revoked
+         LIMIT 2`,
         [
           uuid(request.credentialId),
           credentials.versions,

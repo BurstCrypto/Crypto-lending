@@ -6,6 +6,7 @@ import {
   AUTHENTICATION_OPAQUE_DIGEST_VERSION,
   type AuthenticationDigestReference,
   type ClaimedAuthenticationRejectionReason,
+  type CompleteAuthenticationLoginRequest,
 } from '../../application/ports/authentication-repository.port';
 import { parseOidcProviderKey, parseOidcSubject } from '../../domain/authentication';
 import {
@@ -44,6 +45,31 @@ function harness(rows: Record<string, unknown>[]): {
   };
 }
 
+function loginCompletionRequest(): CompleteAuthenticationLoginRequest {
+  return {
+    transactionId: ATTEMPT_ID,
+    flow: 'login',
+    identity: {
+      providerKey: parseOidcProviderKey('fixture'),
+      issuer: 'https://issuer.example',
+      subject: parseOidcSubject('subject-case-sensitive'),
+      issuedAtEpochSeconds: 1,
+      expiresAtEpochSeconds: 2,
+    },
+    nonceDigest: DIGEST,
+    subjectDigests: [DIGEST],
+    proposedAccountId: ACCOUNT_ID,
+    proposedIdentityId: IDENTITY_ID,
+    proposedSessionFamilyId: FAMILY_ID,
+    proposedCredentialId: CREDENTIAL_ID,
+    credentialDigest: DIGEST,
+    csrfDigest: DIGEST,
+    idleTtlSeconds: 3600,
+    absoluteTtlSeconds: 604800,
+    correlationId: CORRELATION_ID,
+  };
+}
+
 describe('PostgresAuthenticationRepository', () => {
   it('begins and claims a state plus browser-bound one-use transaction', async () => {
     const expiresAt = new Date('2030-01-01T00:05:00.000Z');
@@ -60,7 +86,9 @@ describe('PostgresAuthenticationRepository', () => {
         correlationId: CORRELATION_ID,
       }),
     ).resolves.toEqual({ transactionId: ATTEMPT_ID, expiresAt });
-    expect(begun.query.mock.calls[0]?.[0]).toContain('begin_authentication_login_attempt');
+    expect(begun.query.mock.calls[0]?.[0]).toMatch(
+      /begin_authentication_login_attempt[\s\S]+AS begun\s+LIMIT 2/u,
+    );
     expect(begun.query.mock.calls[0]?.[1]?.[1]).toBe('LOGIN');
     expect(begun.query.mock.calls[0]?.[1]).not.toContain(DIGEST.value);
 
@@ -86,6 +114,7 @@ describe('PostgresAuthenticationRepository', () => {
       issuer: 'https://issuer.example',
       nonceDigest: DIGEST,
     });
+    expect(claimed.query.mock.calls[0]?.[0]).toMatch(/AS claimed\s+LIMIT 2/u);
   });
 
   it.each([
@@ -125,7 +154,7 @@ describe('PostgresAuthenticationRepository', () => {
         }),
       ).resolves.toEqual({ status: 'rejected' });
       expect(query).toHaveBeenCalledWith(
-        expect.stringContaining('reject_claimed_authentication_login_attempt'),
+        expect.stringMatching(/reject_claimed_authentication_login_attempt[\s\S]+LIMIT 2/u),
         [ATTEMPT_ID, reason, CORRELATION_ID],
       );
     },
@@ -186,30 +215,7 @@ describe('PostgresAuthenticationRepository', () => {
         absolute_expires_at: absoluteExpiresAt,
       },
     ]);
-    await expect(
-      repository.completeLogin({
-        transactionId: ATTEMPT_ID,
-        flow: 'login',
-        identity: {
-          providerKey: parseOidcProviderKey('fixture'),
-          issuer: 'https://issuer.example',
-          subject: parseOidcSubject('subject-case-sensitive'),
-          issuedAtEpochSeconds: 1,
-          expiresAtEpochSeconds: 2,
-        },
-        nonceDigest: DIGEST,
-        subjectDigests: [DIGEST],
-        proposedAccountId: ACCOUNT_ID,
-        proposedIdentityId: IDENTITY_ID,
-        proposedSessionFamilyId: FAMILY_ID,
-        proposedCredentialId: CREDENTIAL_ID,
-        credentialDigest: DIGEST,
-        csrfDigest: DIGEST,
-        idleTtlSeconds: 3600,
-        absoluteTtlSeconds: 604800,
-        correlationId: CORRELATION_ID,
-      }),
-    ).resolves.toEqual({
+    await expect(repository.completeLogin(loginCompletionRequest())).resolves.toEqual({
       status: 'authenticated',
       accountId: ACCOUNT_ID,
       sessionFamilyId: FAMILY_ID,
@@ -217,8 +223,34 @@ describe('PostgresAuthenticationRepository', () => {
       idleExpiresAt,
       absoluteExpiresAt,
     });
-    expect(query.mock.calls[0]?.[0]).toContain('complete_auth_login_keyring');
+    expect(query.mock.calls[0]?.[0]).toMatch(/complete_auth_login_keyring[\s\S]+LIMIT 2/u);
     expect(query.mock.calls[0]?.[1]?.slice(17, 20)).toEqual([null, null, null]);
+  });
+
+  it.each([
+    ['session family', { session_family_id: SUCCESSOR_ID }],
+    ['credential', { credential_id: SUCCESSOR_ID }],
+  ] as const)('rejects a mismatched issued %s identifier', async (_label, override) => {
+    const idleExpiresAt = new Date('2030-01-01T01:00:00.000Z');
+    const absoluteExpiresAt = new Date('2030-01-08T00:00:00.000Z');
+    const { repository } = harness([
+      {
+        login_outcome: 'AUTHENTICATED',
+        account_id: ACCOUNT_ID,
+        session_family_id: FAMILY_ID,
+        credential_id: CREDENTIAL_ID,
+        idle_expires_at: idleExpiresAt,
+        absolute_expires_at: absoluteExpiresAt,
+        ...override,
+      },
+    ]);
+
+    await expect(repository.completeLogin(loginCompletionRequest())).rejects.toEqual(
+      expect.objectContaining({
+        name: 'AuthenticationPersistenceError',
+        message: 'Authentication persistence operation failed',
+      }),
+    );
   });
 
   it('passes required registration profile data only through atomic completion', async () => {
@@ -286,6 +318,7 @@ describe('PostgresAuthenticationRepository', () => {
       accountId: ACCOUNT_ID,
       sessionFamilyId: FAMILY_ID,
     });
+    expect(authenticated.query.mock.calls[0]?.[0]).toMatch(/AS resolved\s+LIMIT 2/u);
 
     const replayed = harness([
       { authentication_outcome: 'REPLAYED', account_id: null, session_family_id: null },
@@ -315,6 +348,21 @@ describe('PostgresAuthenticationRepository', () => {
         correlationId: CORRELATION_ID,
       }),
     ).resolves.toEqual({ status: 'rotated', credentialId: SUCCESSOR_ID, expiresAt });
+    expect(rotated.query.mock.calls[0]?.[0]).toMatch(/AS rotated\s+LIMIT 2/u);
+
+    const mismatched = harness([
+      { rotation_outcome: 'ROTATED', credential_id: ATTEMPT_ID, expires_at: expiresAt },
+    ]);
+    await expect(
+      mismatched.repository.rotateSession({
+        credentialId: CREDENTIAL_ID,
+        credentialDigests: [DIGEST],
+        successorCredentialId: SUCCESSOR_ID,
+        successorCredentialDigest: DIGEST,
+        successorCsrfDigest: DIGEST,
+        correlationId: CORRELATION_ID,
+      }),
+    ).rejects.toBeInstanceOf(AuthenticationPersistenceError);
 
     const revoked = harness([{ revocation_outcome: 'REVOKED' }]);
     await expect(
@@ -324,6 +372,7 @@ describe('PostgresAuthenticationRepository', () => {
         correlationId: CORRELATION_ID,
       }),
     ).resolves.toEqual({ status: 'revoked' });
+    expect(revoked.query.mock.calls[0]?.[0]).toMatch(/AS revoked\s+LIMIT 2/u);
   });
 
   it.each([
@@ -362,5 +411,39 @@ describe('PostgresAuthenticationRepository', () => {
         correlationId: CORRELATION_ID,
       }),
     ).rejects.toBeInstanceOf(AuthenticationPersistenceError);
+  });
+
+  it('rejects ambiguous or mismatched login-attempt creation results without leaking them', async () => {
+    const expiresAt = new Date('2030-01-01T00:05:00.000Z');
+    const request = {
+      transactionId: ATTEMPT_ID,
+      flow: 'login' as const,
+      issuer: 'https://issuer.example',
+      stateDigest: DIGEST,
+      browserBindingDigest: DIGEST,
+      nonceDigest: DIGEST,
+      ttlSeconds: 300,
+      correlationId: CORRELATION_ID,
+    };
+
+    const ambiguous = harness([
+      { attempt_id: ATTEMPT_ID, expires_at: expiresAt },
+      { attempt_id: ATTEMPT_ID, expires_at: expiresAt },
+    ]);
+    await expect(ambiguous.repository.beginTransaction(request)).rejects.toBeInstanceOf(
+      AuthenticationPersistenceError,
+    );
+
+    const otherAttemptId = 'e7df3d56-df55-4bd0-90c2-8b40821634ca';
+    const mismatched = harness([{ attempt_id: otherAttemptId, expires_at: expiresAt }]);
+    let thrown: unknown;
+    try {
+      await mismatched.repository.beginTransaction(request);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(AuthenticationPersistenceError);
+    expect(thrown).toMatchObject({ message: 'Authentication persistence operation failed' });
+    expect(String(thrown)).not.toContain(otherAttemptId);
   });
 });
