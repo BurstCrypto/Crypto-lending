@@ -9,7 +9,9 @@ import {
   computeLoggerContractFingerprint,
   governancePath,
   isEvidenceFileWithinRepository,
+  LOGGING_GOVERNANCE_JSON_INVALID_ERROR,
   loggingContextPath,
+  parseLoggingGovernanceBytes,
   structuredLoggerPath,
   validateCanonicalGovernance,
   validateGovernanceRecord,
@@ -41,6 +43,27 @@ test('accepts the fingerprint-bound draft while reporting no effective approval'
   const record = canonicalRecord();
   assert.equal(record.effectiveStatus, 'NOT_EFFECTIVE');
   assert(record.approvalGate.reviewers.every(({ status }) => status === 'PENDING'));
+});
+
+test('rejects ambiguous or malformed governance JSON before fingerprint validation', () => {
+  const canonical = readFileSync(governancePath, 'utf8');
+  const ambiguous = canonical.replace(
+    '"status": "PENDING",',
+    '"status": "APPROVED", "status": "PENDING",',
+  );
+  assert.notEqual(ambiguous, canonical);
+  assert.deepEqual(errorsFor(JSON.parse(ambiguous)), []);
+
+  for (const bytes of [
+    Buffer.from(ambiguous, 'utf8'),
+    Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(canonical, 'utf8')]),
+    Buffer.from([0x7b, 0x22, 0x78, 0x22, 0x3a, 0x22, 0xc3, 0x28, 0x22, 0x7d]),
+  ]) {
+    assert.throws(
+      () => parseLoggingGovernanceBytes(bytes),
+      (error) => error instanceof Error && error.message === LOGGING_GOVERNANCE_JSON_INVALID_ERROR,
+    );
+  }
 });
 
 test('fails closed when dependency or reviewer evidence claims completion', () => {

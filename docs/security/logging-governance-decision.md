@@ -7,7 +7,9 @@ packet. The repository author cannot convert this draft into an approval.
 
 The canonical machine record is
 [`logging-governance-decision.json`](logging-governance-decision.json). Its
-sidecar binds the exact packet bytes after local validation. A future decision
+sidecar binds the exact packet bytes after local validation. Validation requires
+strict UTF-8 JSON and rejects byte-order marks and duplicate object keys at any
+depth before evaluating approval fields or the sidecar. A future decision
 must instead bind the exact merged Git commit, tree, packet SHA-256, and logger
 contract SHA-256; a branch commit, Jira transition, local test, or sidecar alone
 cannot satisfy that gate.

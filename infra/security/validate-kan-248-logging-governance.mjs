@@ -5,6 +5,8 @@ import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { parseStrictJsonBytes } from '../shared/parse-strict-json.mjs';
+
 const moduleDirectory = dirname(fileURLToPath(import.meta.url));
 export const repositoryRoot = resolve(moduleDirectory, '..', '..');
 export const governancePath = resolve(
@@ -43,6 +45,18 @@ export const structuredLoggerPath = resolve(
   'logging',
   'structured-logger.ts',
 );
+
+export const LOGGING_GOVERNANCE_JSON_INVALID_ERROR =
+  'Canonical governance packet is not valid, unambiguous UTF-8 JSON.';
+
+export function parseLoggingGovernanceBytes(bytes) {
+  try {
+    return parseStrictJsonBytes(bytes);
+  } catch {
+    throw new Error(LOGGING_GOVERNANCE_JSON_INVALID_ERROR);
+  }
+}
+
 export const applicationBaselinePath = resolve(
   repositoryRoot,
   'infra',
@@ -1221,14 +1235,14 @@ export function validateGovernanceRecord(
 }
 
 export function validateCanonicalGovernance() {
-  let source;
+  let governanceBytes;
   let expectedFingerprint;
   let expectedLoggerFingerprint;
   let loggingContextSource;
   let structuredLoggerSource;
   let applicationBaselineSource;
   try {
-    source = readFileSync(governancePath, 'utf8');
+    governanceBytes = readFileSync(governancePath);
     expectedFingerprint = readFileSync(governanceFingerprintPath, 'utf8').trim();
     expectedLoggerFingerprint = readFileSync(loggerContractFingerprintPath, 'utf8').trim();
     loggingContextSource = readFileSync(loggingContextPath, 'utf8');
@@ -1246,15 +1260,15 @@ export function validateCanonicalGovernance() {
 
   let record;
   try {
-    record = JSON.parse(source);
+    record = parseLoggingGovernanceBytes(governanceBytes);
   } catch {
     return {
-      errors: ['Canonical governance packet is not valid JSON.'],
+      errors: [LOGGING_GOVERNANCE_JSON_INVALID_ERROR],
       fingerprint: null,
       loggerFingerprint: null,
     };
   }
-  const fingerprint = createHash('sha256').update(source, 'utf8').digest('hex');
+  const fingerprint = createHash('sha256').update(governanceBytes).digest('hex');
   const loggerFingerprint = computeLoggerContractFingerprint(
     loggingContextSource,
     structuredLoggerSource,
