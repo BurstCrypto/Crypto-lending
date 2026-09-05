@@ -96,6 +96,25 @@ function mapProfile(row: AccountProfileRow): AccountProfile {
   };
 }
 
+function mapAccountScopedProfileRead(
+  rows: readonly AccountProfileRow[],
+  expectedAccountId: AccountId,
+): AccountProfile | null {
+  if (!Array.isArray(rows)) {
+    throw new AccountProfilePersistenceError();
+  }
+  if (rows.length === 0) return null;
+  if (rows.length !== 1 || !rows[0]) {
+    throw new AccountProfilePersistenceError();
+  }
+
+  const profile = mapProfile(rows[0]);
+  if (profile.accountId !== expectedAccountId) {
+    throw new AccountProfilePersistenceError();
+  }
+  return profile;
+}
+
 function profileFromUpdateRow(row: AccountProfileUpdateRow): AccountProfile {
   if (
     row.account_id === null ||
@@ -126,6 +145,7 @@ export class PostgresAccountProfileRepository implements AccountProfileRepositor
 
   async findByAccountId(accountId: AccountId): Promise<AccountProfile | null> {
     try {
+      const expectedAccountId = parseAccountId(accountId);
       const result = await this.postgres.query<AccountProfileRow>(
         `SELECT profile.account_id,
                 profile.contact_email,
@@ -137,11 +157,11 @@ export class PostgresAccountProfileRepository implements AccountProfileRepositor
                 profile.updated_at
          FROM account_profiles AS profile
          INNER JOIN accounts AS account ON account.account_id = profile.account_id
-         WHERE profile.account_id = $1`,
-        [parseAccountId(accountId)],
+         WHERE profile.account_id = $1
+         LIMIT 2`,
+        [expectedAccountId],
       );
-      const row = result.rows[0];
-      return row ? mapProfile(row) : null;
+      return mapAccountScopedProfileRead(result.rows, expectedAccountId);
     } catch {
       throw new AccountProfilePersistenceError();
     }

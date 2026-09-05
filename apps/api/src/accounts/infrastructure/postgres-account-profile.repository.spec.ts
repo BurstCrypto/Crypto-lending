@@ -57,8 +57,52 @@ describe('PostgresAccountProfileRepository', () => {
     expect(query).toHaveBeenCalledTimes(1);
     const [sql, values] = query.mock.calls[0] as [string, unknown[]];
     expect(sql).toContain('WHERE profile.account_id = $1');
+    expect(sql).toMatch(/WHERE profile\.account_id = \$1\s+LIMIT 2/u);
     expect(sql).not.toContain(accountId);
     expect(values).toEqual([accountId]);
+  });
+
+  it('returns null only for an unambiguous empty account-scoped result', async () => {
+    const { query, repository } = setup();
+    query.mockResolvedValue(result([]));
+
+    await expect(repository.findByAccountId(accountId)).resolves.toBeNull();
+  });
+
+  it('fails closed instead of selecting from an ambiguous profile result', async () => {
+    const { query, repository } = setup();
+    query.mockResolvedValue(result([profileRow(), profileRow()]));
+
+    await expect(repository.findByAccountId(accountId)).rejects.toEqual(
+      expect.objectContaining({
+        name: 'AccountProfilePersistenceError',
+        message: 'Account profile persistence operation failed',
+      }),
+    );
+  });
+
+  it('fails closed when storage returns another account profile', async () => {
+    const { query, repository } = setup();
+    const otherAccountId = parseAccountId('78d5e055-c37e-48df-a566-07ce3e8af195');
+    query.mockResolvedValue(
+      result([
+        profileRow({
+          account_id: otherAccountId,
+          contact_email: 'other-account@example.test',
+        }),
+      ]),
+    );
+
+    let thrown: unknown;
+    try {
+      await repository.findByAccountId(accountId);
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(AccountProfilePersistenceError);
+    expect(String(thrown)).not.toContain(otherAccountId);
+    expect(String(thrown)).not.toContain('other-account@example.test');
   });
 
   it('provisions only through the fixed security-definer boundary', async () => {
