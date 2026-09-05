@@ -2,14 +2,15 @@
 
 Status: `FAIL_CLOSED_EXECUTABLE` / `CONSUMER_AND_PROVIDER_EGRESS_BLOCKED`
 
-Migration `0023` and `PostgresBalanceSyncWalletAddressResolver` close the local
+Migration `0023` and `PostgresBalanceSyncWalletAddressResolver` define the local
 wallet-address handoff needed by a future Ethereum/Solana balance consumer.
-They do not start that consumer, connect to SQS, configure an RPC endpoint, or
-perform a mainnet read or write.
+Migration `0028` removes the generic worker's historical authority to use that
+handoff. These source boundaries do not start a consumer, connect to SQS,
+configure an RPC endpoint, or perform a mainnet read or write.
 
 ## Least-privilege database contract
 
-The worker receives `EXECUTE` on exactly one new `SECURITY DEFINER` function:
+The resolver is an exact-scope `SECURITY DEFINER` function:
 
 ```text
 resolve_active_wallet_address_ciphertext(uuid, uuid, text)
@@ -34,16 +35,19 @@ Resolution returns no row unless all of these conditions hold:
 - at least one active wallet identity alias is accepted by migration `0022`'s
   database-owned key policy.
 
-The worker still has no `SELECT` privilege on `registered_wallets`,
-`registered_wallet_identity_digests`, or `wallet_identity_key_policy`. The API,
-legacy runtime, migration principal, and `PUBLIC` cannot execute the resolver.
-The migration verifier binds the exact function signature, owner, body,
-volatility, strictness, search path, result contract, ACL, and table denial.
+Migration `0023` originally granted the generic worker only `EXECUTE` on this
+resolver and no `SELECT` privilege on `registered_wallets`,
+`registered_wallet_identity_digests`, or `wallet_identity_key_policy`.
+Migration `0028` revokes that resolver grant and the worker's four balance
+checkpoint function grants. No application runtime role currently has balance
+resolver or checkpoint execution authority. The migration verifiers bind the
+exact function signatures, ownership, bodies, safe search paths, result
+contracts, ACLs, and underlying-table denial.
 
-Migration `0023` owns no durable data. Rollback first revokes worker execution
-and then drops the function with `RESTRICT`, so PostgreSQL refuses unexpected
-dependencies. Operations must quiesce the future consumer before rollback;
-active wallet registrations and balance history remain untouched.
+Migration `0023` owns no durable data. Migration `0028` is forward-only: its
+down path raises SQLSTATE `55000` and never recreates generic-worker balance
+authority. Any later dedicated grant must be delivered by a new reviewed
+migration rather than by rolling this revocation back.
 
 ## Dedicated key delivery contract
 
@@ -112,6 +116,14 @@ PostgreSQL runtime module. `APPLICATION_WORKLOAD` must be exactly
 `crypto_balance_consumer_runtime`, and production startup rejects every
 `REDIS_*` variable.
 
+The dedicated SQS loader accepts only the exact `APP_ENV` balance source/DLQ
+pair and requires both queues to be in the same AWS account. It rejects generic
+queue variables and unknown or miscased SQS aliases. The worker receives a
+pinned port limited to receive, delete, change-visibility, and envelope parsing;
+the caller cannot provide a `QueueUrl`, and the port cannot publish. Raw
+balance-consumer `SqsService` send/publish, batch-publish, and health operations
+also fail closed.
+
 Startup also requires the canonical enabled metadata-ring config, exact
 Ethereum-and-Solana-mainnet scope, and the separate reviewed source-approval
 value. RPC/provider inputs, authentication or general-wallet configuration,
@@ -124,11 +136,13 @@ which remains `enabled: false`.
 
 This slice remains intentionally dormant. Activation still requires:
 
-- a dedicated business-consumer workload and its metadata-only secret;
-- a migration that creates `crypto_balance_consumer_runtime`, grants only the
-  reviewed resolver/checkpoint capabilities, and a dedicated rotating login;
+- activation and deployment of the dedicated business-consumer runtime/task
+  with its metadata-only secret;
+- a later reviewed migration granting only the exact resolver/checkpoint
+  capabilities to the existing `crypto_balance_consumer_runtime` identity;
 - a dedicated ECS/IAM identity and release binding (none is declared yet);
-- reviewed SQS receive/delete/visibility and durable idempotency behavior;
+- deployed SQS receive/delete/visibility IAM, redrive, and durable idempotency
+  evidence for the exact source/DLQ pair;
 - approved exact-host Ethereum/Solana RPC providers and egress controls;
 - runtime monitoring, redrive, replay, and key-rotation procedures; and
 - production authority for the deployment and provider accounts.
@@ -136,9 +150,12 @@ This slice remains intentionally dormant. Activation still requires:
 Until those gates close and the source gate receives a reviewed code change,
 no module binds `BALANCE_SYNC_WALLET_ADDRESS_RESOLVER_PORT`, no client is
 constructed, and no external traffic can result from this implementation. The
-existing migration still grants its dormant resolver to the generic worker;
-the new balance-consumer role is configuration-only and intentionally has no
-database principal or grant yet.
+database bootstrap declares a dormant `NOLOGIN` balance-consumer capability
+role and one or two external rotating login slots with exact `SET`-only
+membership. It installs no credentials and grants those identities no database
+connection, schema, object, function, default-ACL, or ownership authority.
+Runtime activation, task and IAM wiring, database grants, RPC approval, and
+deployed evidence all remain blocked.
 
 ## Local verification
 

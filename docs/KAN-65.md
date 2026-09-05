@@ -32,14 +32,22 @@ The orchestration boundary has six injected ports:
   boundary for a future live indexer.
 
 The durable checkpoint, portfolio-balance, dormant wallet-address resolver, and
-dormant Ethereum/Solana transcript indexer adapters are concrete. No resolver,
-RPC transport, indexer, queue job adapter, clock, or metrics adapter is
-registered in a runtime module. Migration `0023` grants the
-worker only execution of an exact-scope definer function returning the sealed
-address binding; it grants no wallet-table access. The unregistered resolver
-can open that record only with a separate consumer-specific metadata key ring.
-The current workload supplies neither that secret nor a consumer process, so a
-job still cannot obtain a plaintext address or cause chain I/O. See
+dormant Ethereum/Solana transcript indexer adapters are concrete. A dedicated
+balance-consumer configuration and pinned queue-receipt adapter also exist in
+source, but the production entrypoint exits before importing its runtime
+module. The loader accepts only the exact `APP_ENV` balance source/DLQ pair in
+one AWS account and rejects generic queue variables and unknown SQS aliases.
+The pinned port exposes receive, delete, change-visibility, and envelope parsing
+only; it has no publish capability or caller-supplied `QueueUrl`, while raw
+balance-consumer SQS publish, batch, and health operations fail closed.
+
+Migration `0023` originally gave the generic worker execution of the exact
+wallet-address resolver without wallet-table access. Migration `0028` revokes
+that resolver and all four balance checkpoint functions from the generic
+worker. The dormant dedicated balance-consumer identities have no database
+connection or grants, and the current workload supplies neither the separate
+metadata secret nor an active consumer process. A job therefore still cannot
+obtain a plaintext address or cause chain I/O. See
 `docs/rpc-indexing/balance-consumer-wallet-address-boundary.md`.
 
 Each job is closed to one account UUID, wallet UUID, KAN-61 CAIP-2 network,
@@ -106,13 +114,16 @@ Adding/removing an asset or changing that registry version/fingerprint therefore
 requires a new schema migration and replay plan; an application-only registry
 change cannot silently reinterpret stored balances.
 
-The worker role receives only execute access to checkpoint read/current/stale/
-reorg functions. The API role receives only execute access to the roster-bound
-portfolio balance read. Neither role can read or mutate the four tables. The
-finalized-anchor writer exists for tested recovery semantics but has no runtime
-grant until independent live-finality evidence is approved. Every definer and
-invoked helper has a fixed safe `search_path`, and rollback refuses once any raw,
-event, or projected row exists.
+Migration `0020` historically gave the generic worker execute access to the
+checkpoint read/current/stale/reorg functions. The cumulative migration chain
+through `0028` revokes all four grants plus the wallet-address resolver grant;
+no application runtime currently has balance-consumer function authority. The
+API role retains only execute access to the separate roster-bound portfolio
+balance read, and neither API nor worker can read or mutate the four balance
+tables. The finalized-anchor writer exists for tested recovery semantics but
+has no runtime grant until independent live-finality evidence is approved.
+Every definer and invoked helper has a fixed safe `search_path`, and rollback
+refuses once any raw, event, or projected row exists.
 
 ## Confirmation, freshness, and finality gates
 
@@ -223,17 +234,19 @@ approved:
   limits, commercial terms, and cost controls;
 - KAN-231 must separately approve exact-host egress and its kill switch;
 - the dormant scoped address resolver must be deployed only in a dedicated
-  consumer with a separately split metadata-only secret; the current worker
-  task has no such secret or resolver binding;
-- an SQS adapter must prove envelope compatibility, visibility behavior,
-  redrive/DLQ configuration, duplicate delivery handling, and bounded delay;
-  and
+  consumer with a separately split metadata-only secret and a later reviewed
+  exact-function database grant; the current worker task has no such secret,
+  grant, or resolver binding;
+- the source-only pinned SQS boundary must receive deployed task/IAM proof,
+  source/DLQ and redrive evidence, duplicate-delivery and liveness exercises,
+  and bounded-delay validation; and
 - Operations must approve scheduling, monitoring, alert routing, replay
   ownership, and runbooks.
 
 Until those gates close, the durable model is ready to receive validated facts
 but cannot obtain them itself. It makes no claim that a live balance has been
-indexed or that SQS, RPC, address decryption, or monitoring behavior has been
+indexed or that runtime/task activation, IAM, dedicated database grants, SQS,
+RPC, address decryption, monitoring, or any deployed behavior has been
 validated.
 
 ## Local verification

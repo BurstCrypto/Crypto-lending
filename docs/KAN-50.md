@@ -233,6 +233,23 @@ queue, and no dedicated balance consumer task/service exists. The separate
 queue is an inert routing boundary; it does not enable Ethereum/Solana RPC
 egress or live balance ingestion.
 
+The dormant balance-consumer source boundary is narrower than that future IAM
+capability. Its dedicated loader accepts only the exact `APP_ENV` balance
+source/DLQ pair in the same AWS account and rejects the generic queue variables
+and unknown or miscased SQS aliases. Its pinned receipt port permits only
+receive, delete, change-visibility, and envelope parsing, exposes no publish
+operation, and gives the caller no `QueueUrl`. Raw balance-consumer `SqsService`
+publish, batch, and health operations fail closed. These local source controls
+are not evidence of a deployed task, queue policy, role decision, or production
+readiness.
+
+Migration `0028` also revokes the generic worker's execution of the exact
+wallet-address resolver and four balance checkpoint functions. The dormant
+balance-consumer capability role and bounded login slots remain without
+database connection, schema, object, function, default-ACL, or ownership
+authority. A later reviewed migration and deployed verification are required
+before a dedicated consumer may receive any database grant.
+
 Trust policies admit only `ecs-tasks.amazonaws.com` from the same account and
 the reviewed regional ECS source-ARN shape. Wildcard task actions/resources,
 cross-scope secrets, weakened KMS service conditions, and extra injected secret
@@ -367,7 +384,7 @@ complete:
   selectors and other workloads cannot read them;
 - a guarded, current-to-target auth/wallet VersionId transition and deployed
   replacement/rollback drill before rotating that shared external secret;
-- application readiness against the immutable migration chain through `0025`;
+- application readiness against the immutable migration chain through `0028`;
 - live positive and negative IAM decisions against exact deployed role/resource
   ARNs;
 - full-hop TLS from the load balancer to application targets;
