@@ -561,13 +561,17 @@
       "consumers": ["API health boundary", "disabled one-off revocation task"],
       "injection": "Exact-VersionId API A/B and operator-only managed secret references; worker and migration reject Redis configuration",
       "storage": "Designed managed secret plus Redis ACL digest; no plaintext repository value",
-      "rotation": "A/B slots use the reviewed transition chain; the separately immutable operator version requires a dedicated future transition before rotation",
+      "rotation": "A/B slots use the reviewed transition chain; schema-v3 tracks the operator version in a separate append-only history, and the dedicated two-role-signed REDIS_OPERATOR_TRANSITION path constrains no-op adoption or one fresh VersionId append while the operator remains disabled",
       "owner": "SRE and Security",
       "evidence": [
         "docs/KAN-233.md",
         "infra/redis/users.acl",
         "infra/aws/application-workload-boundaries.yaml",
-        "infra/aws/application-observability.yaml"
+        "infra/aws/application-observability.yaml",
+        "infra/aws/validate-fixed-slot-credential-transition.mjs",
+        "infra/aws/validate-redis-operator-secret-version-transition.mjs",
+        "infra/aws/invoke-application-baseline.ps1",
+        "docs/fixed-slot-credential-rotation.md"
       ]
     },
     {
@@ -1049,13 +1053,19 @@
       "mitigations": [
         "Local-first plan/validate boundaries and zero desired count for fresh plans",
         "Separate billing, deployment, retention, and deletion authorities",
-        "No cloud mutation in default validation or CI"
+        "No cloud mutation in default validation or CI",
+        "The branded offline production preflight inspects the exact selected environment-contract and guard markers for the KAN-34 application path; its current NON_PRODUCTION_ONLY result hard-blocks both readiness paths with PRODUCTION_INFRASTRUCTURE_DEPLOYMENT_PATH_NOT_ENABLED, while missing, malformed, mixed, forged, or superficially widened artifacts fail inspection"
       ],
       "owner": "Release, Finance, and SRE",
       "status": "MITIGATED_LOCAL",
-      "evidence": ["docs/KAN-229.md", "docs/KAN-34.md"],
-      "residualRisk": "Commercial approval, operator separation, retention choices, and cleanup must be enforced for any actual deployment.",
-      "followUp": "Explicit commercial and deployment authorization before any cloud action"
+      "evidence": [
+        "docs/KAN-229.md",
+        "docs/KAN-34.md",
+        "docs/production-preflight.md",
+        "scripts/production-go-live-preflight.ts"
+      ],
+      "residualRisk": "The selected environment-contract and guard-marker inspection is not full CloudFormation validation or deployed proof; no production-enabled application path, commercial approval, operator separation, retention decision, cleanup exercise, or deployment authority exists.",
+      "followUp": "Design and independently review a production-specific cost, billing, egress, credential-rotation, rollback, and deployment authority contract, bind it to dedicated validators and exact release/target evidence, and obtain explicit commercial and deployment authorization before any cloud action"
     },
     {
       "id": "THR-ADMIN-003",
@@ -1181,6 +1191,9 @@
         "The zero-desired-count production API task selects AUTH_PREAUTH_SEAL_KEY and all six purpose-distinct authentication and wallet key-ring fields from one exact immutable shared-secret VersionId with an empty stage, requires NODE_ENV=production, and forbids LOCAL_DEMO_MODE plus every legacy authentication ID/key and wallet version/key field without provisioning a secret or key",
         "A dedicated two-role-signed offline auth/wallet validator checks create, no-op adoption, and one-purpose transition state without cloud or secret access; the deployment-integrated AUTH_WALLET_TRANSITION intent consumes its verified signed predecessor, binds the production authority-registry digest and deployed chain head, freezes the fixed-slot chain, and requires the exact API task replacement and service update",
         "The production auth/wallet authority registry is intentionally empty, so checked-in examples and the deliberately unbranded test seam cannot authorize an operational deployment",
+        "Schema-v3 fixed-slot state binds the Redis operator VersionId and its append-only used-VersionId history; ordinary and A/B transitions preserve both, while global VersionId uniqueness prevents replay across all six slots and the operator history",
+        "A dedicated two-role-signed offline Redis-operator validator checks no-op chain adoption or exactly one fresh operator VersionId append while RedisOperatorMode remains DISABLED; it binds exact stack, template, secret, KMS, user, Redis-chain, composite credential-chain, and preserved auth/wallet-chain identities without cloud or secret access",
+        "The deployment-integrated REDIS_OPERATOR_TRANSITION intent revalidates the signed record and live bindings, permits only the exact non-replacing RedisOperatorUser authentication update in the direct workload child, and advances the Redis-specific and composite credential chains atomically; its production authority registry is intentionally empty",
         "Authentication overlap remains at version one until authorized external secret staging, a schema-owner policy transition, new-fleet proof, and old single-digest function denial exist",
         "Migration 0022 provides dormant wallet identity overlap and alias controls, the runtime supports exact-version challenge overlap, and migration 0024 provides a dormant schema-owner-only metadata rewrap boundary",
         "RDS owns the KMS-bound master secret and default seven-day password rotation; the compatibility output exposes only its ARN, checked-in application task definitions omit it, and deployed migration-secret origin plus IAM denial remain external gates",
@@ -1197,14 +1210,17 @@
         "apps/api/src/infrastructure/database/migrations/0025-create-authentication-hmac-key-rotation.migration.ts",
         "infra/aws/application-baseline.yaml",
         "infra/aws/validate-auth-wallet-secret-version-transition.mjs",
+        "infra/aws/validate-fixed-slot-credential-transition.mjs",
+        "infra/aws/validate-redis-operator-secret-version-transition.mjs",
         "infra/aws/invoke-application-baseline.ps1",
+        "docs/fixed-slot-credential-rotation.md",
         "apps/api/src/wallets/infrastructure/config/wallet-registration.config.ts",
         "apps/api/src/wallets/infrastructure/crypto/wallet-registration-crypto.ts",
         "scripts/production-evidence-bundle.ts",
         "scripts/production-go-live-preflight.ts"
       ],
-      "residualRisk": "The auth/wallet VersionId transition guard is locally implemented and deployment-integrated, but its production authority registry is intentionally empty; external key custody and staged secret population, independently signed operational records, deployed old-function denial and rotation evidence, wallet identity policy activation, exercised challenge overlap, wallet metadata rewrap activation, and acceptable live RDS master IAM/KMS, isolation, rotation, denial, continuity, snapshot-restore rebinding, and independently matched supporting-capture evidence remain absent.",
-      "followUp": "Obtain KAN-50/KAN-235 custody and rotation review, add reviewed production trust anchors, separately authorize secret staging, independently sign exact adoption/transition records, activate schema-owner controls, run deployed rotation and old-key retirement drills, and perform the authorized RDS-managed master rotation/recovery exercise before both technical-evidence signing roles independently match the separately retained canonical capture digest and sign the outer schema-v2 bundle that covers the nested schema-v1 lifecycle record"
+      "residualRisk": "The auth/wallet and Redis-operator VersionId transition guards are locally implemented and deployment-integrated, but both production authority registries are intentionally empty; external key custody and staged secret population, independently signed operational records, a deployed Redis candidate/old-credential denial and continuity exercise, deployed old-function denial and auth/wallet rotation evidence, wallet identity policy activation, exercised challenge overlap, wallet metadata rewrap activation, and acceptable live RDS master IAM/KMS, isolation, rotation, denial, continuity, snapshot-restore rebinding, and independently matched supporting-capture evidence remain absent.",
+      "followUp": "Obtain KAN-50/KAN-235 custody and rotation review, add separately controlled reviewed production trust anchors for the auth/wallet and Redis-operator guards, authorize external secret staging, independently sign exact adoption/transition records, activate schema-owner controls, run deployed auth/wallet and disabled-operator Redis rotation, continuity, recovery, and old-credential denial drills, and perform the authorized RDS-managed master rotation/recovery exercise before both technical-evidence signing roles independently match the separately retained canonical capture digest and sign the outer schema-v2 bundle that covers the nested schema-v1 lifecycle record"
     },
     {
       "id": "THR-SECRETS-003",
