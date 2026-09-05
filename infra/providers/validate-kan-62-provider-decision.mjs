@@ -19,6 +19,7 @@ export const MAX_PROVIDER_DECISION_BYTES = 131_072;
 export const MAX_PROVIDER_DECISION_SIDECAR_BYTES = 65;
 export const PROVIDER_DECISION_FILES_UNSAFE_ERROR =
   'KAN-62 provider decision or SHA-256 sidecar is unavailable or unsafe.';
+export const PROVIDER_DECISION_JSON_INVALID_ERROR = 'KAN-62 provider decision is not valid JSON.';
 
 const DAY_MS = 86_400_000;
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/u;
@@ -1007,6 +1008,138 @@ function readBoundedStableRepositoryFile(
   }
 }
 
+function validateJsonWithoutDuplicateKeys(text) {
+  let index = 0;
+  const numberPattern = /-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?/uy;
+
+  function invalid() {
+    throw new Error(PROVIDER_DECISION_JSON_INVALID_ERROR);
+  }
+
+  function whitespace() {
+    while (
+      text[index] === ' ' ||
+      text[index] === '\t' ||
+      text[index] === '\r' ||
+      text[index] === '\n'
+    ) {
+      index += 1;
+    }
+  }
+
+  function string() {
+    if (text[index] !== '"') invalid();
+    const start = index;
+    index += 1;
+    while (index < text.length) {
+      const character = text.charCodeAt(index);
+      if (character === 0x22) {
+        index += 1;
+        return JSON.parse(text.slice(start, index));
+      }
+      if (character < 0x20) invalid();
+      if (character !== 0x5c) {
+        index += 1;
+        continue;
+      }
+      index += 1;
+      const escaped = text[index];
+      if (escaped === 'u') {
+        if (!/^[0-9a-fA-F]{4}$/u.test(text.slice(index + 1, index + 5))) invalid();
+        index += 5;
+        continue;
+      }
+      if (!['"', '\\', '/', 'b', 'f', 'n', 'r', 't'].includes(escaped)) invalid();
+      index += 1;
+    }
+    invalid();
+  }
+
+  function number() {
+    numberPattern.lastIndex = index;
+    const match = numberPattern.exec(text);
+    if (match === null) invalid();
+    index = numberPattern.lastIndex;
+  }
+
+  function value(depth) {
+    if (depth > 128) invalid();
+    whitespace();
+    if (text[index] === '"') {
+      string();
+      return;
+    }
+    if (text[index] === '{') {
+      object(depth + 1);
+      return;
+    }
+    if (text[index] === '[') {
+      list(depth + 1);
+      return;
+    }
+    for (const literal of ['true', 'false', 'null']) {
+      if (text.startsWith(literal, index)) {
+        index += literal.length;
+        return;
+      }
+    }
+    number();
+  }
+
+  function object(depth) {
+    index += 1;
+    whitespace();
+    if (text[index] === '}') {
+      index += 1;
+      return;
+    }
+    const keys = new Set();
+    while (index < text.length) {
+      const key = string();
+      if (keys.has(key)) invalid();
+      keys.add(key);
+      whitespace();
+      if (text[index] !== ':') invalid();
+      index += 1;
+      value(depth);
+      whitespace();
+      if (text[index] === '}') {
+        index += 1;
+        return;
+      }
+      if (text[index] !== ',') invalid();
+      index += 1;
+      whitespace();
+    }
+    invalid();
+  }
+
+  function list(depth) {
+    index += 1;
+    whitespace();
+    if (text[index] === ']') {
+      index += 1;
+      return;
+    }
+    while (index < text.length) {
+      value(depth);
+      whitespace();
+      if (text[index] === ']') {
+        index += 1;
+        return;
+      }
+      if (text[index] !== ',') invalid();
+      index += 1;
+    }
+    invalid();
+  }
+
+  whitespace();
+  value(0);
+  whitespace();
+  if (index !== text.length) invalid();
+}
+
 function canonicalJson(value) {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
   if (isRecord(value)) {
@@ -1271,15 +1404,18 @@ function loadProviderDecisionSnapshot({
       MAX_PROVIDER_DECISION_SIDECAR_BYTES,
       afterSidecarFirstReadForTest,
     );
-    const decoder = new TextDecoder('utf-8', { fatal: true });
-    const decisionText = decoder.decode(decisionBytes);
-    const sidecar = decoder.decode(sidecarBytes);
+    const sidecar = new TextDecoder('utf-8', { fatal: true }).decode(sidecarBytes);
     let record;
     try {
+      if (decisionBytes[0] === 0xef && decisionBytes[1] === 0xbb && decisionBytes[2] === 0xbf) {
+        throw new Error(PROVIDER_DECISION_JSON_INVALID_ERROR);
+      }
+      const decisionText = new TextDecoder('utf-8', { fatal: true }).decode(decisionBytes);
+      validateJsonWithoutDuplicateKeys(decisionText);
       record = JSON.parse(decisionText);
     } catch {
       return Object.freeze({
-        errors: Object.freeze(['KAN-62 provider decision is not valid JSON.']),
+        errors: Object.freeze([PROVIDER_DECISION_JSON_INVALID_ERROR]),
         fingerprint: null,
         record: null,
       });

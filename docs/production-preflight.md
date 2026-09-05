@@ -150,6 +150,9 @@ Both controlled files must be non-empty, bounded, single-link regular files at
 canonical repository paths. Each file is descriptor-bound and read twice, so a
 linked path, path replacement, size change, metadata change, or same-size rewrite
 fails closed behind one sanitized validation error.
+The decision must also be strict UTF-8 JSON without a byte-order mark or
+duplicate object keys at any depth. Recomputing the SHA-256 sidecar cannot make
+an ambiguous duplicate-key document eligible for local validation.
 The audit does not scan implementation source for status phrases, derive
 application configuration from process-environment values, read secret material
 or `.env` files, contact provider endpoints, or accept catalog status strings as

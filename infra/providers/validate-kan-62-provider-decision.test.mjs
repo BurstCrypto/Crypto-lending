@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import {
   linkSync,
   mkdirSync,
@@ -19,6 +20,7 @@ import {
   MAX_PROVIDER_DECISION_BYTES,
   MAX_PROVIDER_DECISION_SIDECAR_BYTES,
   PROVIDER_DECISION_FILES_UNSAFE_ERROR,
+  PROVIDER_DECISION_JSON_INVALID_ERROR,
   REPOSITORY_ROOT,
   SIDECAR_PATH,
   validateProviderDecisionFiles,
@@ -45,9 +47,33 @@ function createControlledPair(repositoryRoot) {
   return { decisionPath, sidecarPath };
 }
 
+function writeDecisionBytesWithMatchingSidecar(repositoryRoot, decisionBytes) {
+  const decisionPath = resolve(repositoryRoot, DECISION_PATH);
+  const sidecarPath = resolve(repositoryRoot, SIDECAR_PATH);
+  mkdirSync(dirname(decisionPath), { recursive: true });
+  writeFileSync(decisionPath, decisionBytes);
+  writeFileSync(
+    sidecarPath,
+    `${createHash('sha256').update(decisionBytes).digest('hex')}\n`,
+    'utf8',
+  );
+}
+
+function writeDecisionWithMatchingSidecar(repositoryRoot, decisionText) {
+  writeDecisionBytesWithMatchingSidecar(repositoryRoot, Buffer.from(decisionText, 'utf8'));
+}
+
 function assertUnsafeSnapshot(snapshot) {
   assert.deepEqual(snapshot, {
     errors: [PROVIDER_DECISION_FILES_UNSAFE_ERROR],
+    fingerprint: null,
+    record: null,
+  });
+}
+
+function assertInvalidJsonSnapshot(snapshot) {
+  assert.deepEqual(snapshot, {
+    errors: [PROVIDER_DECISION_JSON_INVALID_ERROR],
     fingerprint: null,
     record: null,
   });
@@ -122,6 +148,60 @@ test('preflight fields come from one immutable sidecar-validated snapshot', () =
     );
   } finally {
     rmSync(repositoryRoot, { recursive: true, force: true });
+  }
+});
+
+test('a matching sidecar cannot bless a duplicate top-level approval key', () => {
+  const repositoryRoot = mkdtempSync(join(tmpdir(), 'kan-62-duplicate-top-'));
+  try {
+    const canonical = canonicalDecisionBytes().toString('utf8');
+    const ambiguous = canonical.replace(
+      '"externalStatus": "PENDING_EXTERNAL_APPROVAL",',
+      '"externalStatus": "APPROVED",\n  "externalStatus": "PENDING_EXTERNAL_APPROVAL",',
+    );
+    assert.notEqual(ambiguous, canonical);
+    assert.equal(JSON.parse(ambiguous).externalStatus, 'PENDING_EXTERNAL_APPROVAL');
+    writeDecisionWithMatchingSidecar(repositoryRoot, ambiguous);
+
+    assertInvalidJsonSnapshot(loadValidatedProviderDecisionSnapshot({ repositoryRoot, now: NOW }));
+  } finally {
+    rmSync(repositoryRoot, { recursive: true, force: true });
+  }
+});
+
+test('a matching sidecar cannot bless a duplicate nested approval key', () => {
+  const repositoryRoot = mkdtempSync(join(tmpdir(), 'kan-62-duplicate-nested-'));
+  try {
+    const canonical = canonicalDecisionBytes().toString('utf8');
+    const ambiguous = canonical.replace(
+      '"approved": false,',
+      '"approved": true,\n    "approved": false,',
+    );
+    assert.notEqual(ambiguous, canonical);
+    assert.equal(JSON.parse(ambiguous).approvalBoundary.approved, false);
+    writeDecisionWithMatchingSidecar(repositoryRoot, ambiguous);
+
+    assertInvalidJsonSnapshot(loadValidatedProviderDecisionSnapshot({ repositoryRoot, now: NOW }));
+  } finally {
+    rmSync(repositoryRoot, { recursive: true, force: true });
+  }
+});
+
+test('matching digests cannot bless byte-order marks or invalid UTF-8 JSON', () => {
+  const hostileDocuments = [
+    Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), canonicalDecisionBytes()]),
+    Buffer.concat([canonicalDecisionBytes(), Buffer.from([0xff])]),
+  ];
+  for (const decisionBytes of hostileDocuments) {
+    const repositoryRoot = mkdtempSync(join(tmpdir(), 'kan-62-invalid-utf8-'));
+    try {
+      writeDecisionBytesWithMatchingSidecar(repositoryRoot, decisionBytes);
+      assertInvalidJsonSnapshot(
+        loadValidatedProviderDecisionSnapshot({ repositoryRoot, now: NOW }),
+      );
+    } finally {
+      rmSync(repositoryRoot, { recursive: true, force: true });
+    }
   }
 });
 
