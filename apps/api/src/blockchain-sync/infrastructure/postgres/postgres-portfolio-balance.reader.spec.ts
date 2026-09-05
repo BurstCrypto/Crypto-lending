@@ -77,6 +77,12 @@ function harness(): { readonly query: jest.Mock; readonly reader: PostgresPortfo
   };
 }
 
+function revokedProxy(): object {
+  const { proxy, revoke } = Proxy.revocable({}, {});
+  revoke();
+  return proxy;
+}
+
 describe('Postgres portfolio balance reader', () => {
   it('returns deterministic complete observations for the exact validated roster', async () => {
     const test = harness();
@@ -95,11 +101,14 @@ describe('Postgres portfolio balance reader', () => {
     });
     expect(first.observations).toHaveLength(3);
     expect(new Set(first.observations.map(({ observationId }) => observationId)).size).toBe(3);
-    expect(test.query.mock.calls[0]?.[0]).toContain('read_balance_sync_portfolio');
+    expect(test.query.mock.calls[0]?.[0]).toMatch(
+      /read_balance_sync_portfolio[\s\S]+LIMIT \$4::integer/u,
+    );
     expect(test.query.mock.calls[0]?.[1]).toEqual([
       ACCOUNT_ID,
       JSON.stringify([{ walletId: WALLET_ID, networkId: ETHEREUM }]),
       EVALUATED_AT,
+      4,
     ]);
   });
 
@@ -160,6 +169,35 @@ describe('Postgres portfolio balance reader', () => {
         code: 'PORTFOLIO_BALANCE_PERSISTENCE_FAILED',
         message: 'Portfolio balance persistence failed',
       }),
+    );
+  });
+
+  it('rejects the bounded overflow sentinel before processing database rows', async () => {
+    const test = harness();
+    test.query.mockResolvedValue(
+      result([
+        row(),
+        row(),
+        row(),
+        {
+          get target_wallet_id(): never {
+            throw new Error('sensitive overflow row');
+          },
+        },
+      ]),
+    );
+
+    await expect(test.reader.readCurrentBalances(request())).rejects.toEqual(
+      new PortfolioBalancePersistenceError(),
+    );
+  });
+
+  it('sanitizes a revoked database-error proxy without reflecting on it', async () => {
+    const test = harness();
+    test.query.mockRejectedValue(revokedProxy());
+
+    await expect(test.reader.readCurrentBalances(request())).rejects.toEqual(
+      new PortfolioBalancePersistenceError(),
     );
   });
 });

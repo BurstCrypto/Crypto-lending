@@ -22,6 +22,7 @@ const CORRELATION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-
 const SHA256 = /^[0-9a-f]{64}$/u;
 const CANONICAL_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
 const UINT64_MAX = 18_446_744_073_709_551_615n;
+const MAX_BALANCE_ROWS_PER_WALLET = 3;
 const ROW_COLUMNS = Object.freeze([
   'target_wallet_id',
   'target_network_id',
@@ -86,13 +87,14 @@ function exactRow(value: unknown): PortfolioBalanceRow {
     ) {
       return fail();
     }
+    const result = Object.create(null) as PortfolioBalanceRow;
     for (const key of ROW_COLUMNS) {
       const descriptor = descriptors[key];
       if (!descriptor?.enumerable || !('value' in descriptor)) return fail();
+      result[key] = descriptor.value as never;
     }
-    return value as PortfolioBalanceRow;
-  } catch (error) {
-    if (error instanceof PortfolioBalancePersistenceError) throw error;
+    return result;
+  } catch {
     return fail();
   }
 }
@@ -172,11 +174,14 @@ export class PostgresPortfolioBalanceReader implements PortfolioBalanceReader {
         walletId,
         networkId,
       }));
+      const resultLimit = expectedWallets.length * MAX_BALANCE_ROWS_PER_WALLET + 1;
       const result = await this.postgres.query<PortfolioBalanceRow>(
         `SELECT balance.*
-         FROM read_balance_sync_portfolio($1::uuid, $2::jsonb, $3::timestamptz) AS balance`,
-        [accountId, JSON.stringify(expectedJson), evaluatedAt],
+         FROM read_balance_sync_portfolio($1::uuid, $2::jsonb, $3::timestamptz) AS balance
+         LIMIT $4::integer`,
+        [accountId, JSON.stringify(expectedJson), evaluatedAt, resultLimit],
       );
+      if (!Array.isArray(result.rows) || result.rows.length >= resultLimit) return fail();
       const grouped = new Map<string, PortfolioBalanceRow[]>();
       for (const candidate of result.rows) {
         const row = exactRow(candidate);
@@ -293,8 +298,7 @@ export class PostgresPortfolioBalanceReader implements PortfolioBalanceReader {
         }),
         observations: Object.freeze(observations),
       });
-    } catch (error) {
-      if (error instanceof PortfolioBalancePersistenceError) throw error;
+    } catch {
       return fail();
     }
   }
