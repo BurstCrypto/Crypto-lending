@@ -145,6 +145,13 @@ const BALANCE_CONSUMER_ARTIFACTS = Object.freeze({
     ),
     'utf8',
   ),
+  balanceConsumerLifecycleSource: readFileSync(
+    resolve(
+      __dirname,
+      '../apps/api/src/blockchain-sync/application/balance-sync-consumer.lifecycle.ts',
+    ),
+    'utf8',
+  ),
   balanceConsumerPersistenceResourceSource: readFileSync(
     resolve(
       __dirname,
@@ -1233,6 +1240,106 @@ test('balance-consumer inspection rejects dormant aggregate lifecycle and capabi
   }
 });
 
+test('balance-consumer inspection rejects dormant lifecycle coordinator drift', () => {
+  const mutations: readonly (readonly [keyof BalanceConsumerArtifactSources, string, string])[] = [
+    [
+      'balanceConsumerLifecycleSource',
+      'BALANCE_SYNC_CONSUMER_LIFECYCLE_CONFIGURATION_INVALID',
+      'BALANCE_SYNC_CONSUMER_LIFECYCLE_CONFIGURATION_UNREVIEWED',
+    ],
+    [
+      'balanceConsumerLifecycleSource',
+      'readonly record: (event: BalanceSyncConsumerLifecycleEvent) => void | Promise<void>;',
+      'readonly record: (event: BalanceSyncConsumerLifecycleEvent) => void;',
+    ],
+    [
+      'balanceConsumerLifecycleSource',
+      'if (Object.getPrototypeOf(value) !== null || !Object.isFrozen(value)) {',
+      'if (Object.getPrototypeOf(value) !== null) {',
+    ],
+    [
+      'balanceConsumerLifecycleSource',
+      'void Promise.resolve(recorder(lifecycleEvent(event))).catch(() => undefined);',
+      'void Promise.resolve(recorder(lifecycleEvent(event)));',
+    ],
+    [
+      'balanceConsumerLifecycleSource',
+      "controller.abort(new Error('Balance sync consumer lifecycle stop requested'));",
+      'controller.abort(reviewed.signal.reason);',
+    ],
+    [
+      'balanceConsumerLifecycleSource',
+      'const controller = new AbortController();',
+      'const controller = new AbortController();\n  void AbortSignal.any([]);',
+    ],
+    [
+      'balanceConsumerLifecycleSource',
+      'if (reviewed.signal.aborted()) requestStop();',
+      'void reviewed.signal.aborted();',
+    ],
+    [
+      'balanceConsumerLifecycleSource',
+      'runOperation = Promise.resolve(reviewed.runResource(controller.signal));',
+      'runOperation = Promise.resolve().then(() => reviewed.runResource(controller.signal));',
+    ],
+    [
+      'balanceConsumerLifecycleSource',
+      "  try {\n    runOperation = Promise.resolve(reviewed.runResource(controller.signal));\n  } catch {\n    runFailed = true;\n  }\n  if (runOperation !== undefined) {\n    if (!stopRequested) recordEvent(reviewed.recordEvent, 'STARTED');",
+      "  if (!stopRequested) recordEvent(reviewed.recordEvent, 'STARTED');\n  try {\n    runOperation = Promise.resolve(reviewed.runResource(controller.signal));\n  } catch {\n    runFailed = true;\n  }\n  if (runOperation !== undefined) {",
+    ],
+    ['balanceConsumerLifecycleSource', 'if (runOperation !== undefined) {', 'if (true) {'],
+    ['balanceConsumerLifecycleSource', 'await runOperation;', 'void runOperation;'],
+    ['balanceConsumerLifecycleSource', 'prematureExit = !stopRequested;', 'prematureExit = false;'],
+    ['balanceConsumerLifecycleSource', 'await Promise.resolve().then(close);', 'await close();'],
+    [
+      'balanceConsumerLifecycleSource',
+      'throw new BalanceSyncConsumerLifecycleCloseError();',
+      'throw new BalanceSyncConsumerLifecycleRunError();',
+    ],
+    ['balanceConsumerLifecycleSource', 'started = true;', 'started = false;'],
+    [
+      'balanceConsumerLifecycleSource',
+      'return frozenNullPrototype<DormantBalanceSyncConsumerLifecycleCoordinator>({ run });',
+      'return frozenNullPrototype({ run, reviewed });',
+    ],
+  ];
+
+  for (const [key, approved, rejected] of mutations) {
+    assert.deepEqual(
+      inspectBalanceConsumerDeploymentArtifacts(
+        mutateBalanceConsumerArtifact(key, approved, rejected),
+      ),
+      INVALID_BALANCE_CONSUMER_DEPLOYMENT,
+      `${key}: ${approved}`,
+    );
+  }
+
+  const launchRegistrations: readonly BalanceConsumerArtifactSources[] = [
+    {
+      ...BALANCE_CONSUMER_ARTIFACTS,
+      blockchainSyncIndexSource: `${BALANCE_CONSUMER_ARTIFACTS.blockchainSyncIndexSource}\nexport { createDormantBalanceSyncConsumerLifecycleCoordinator } from './application/balance-sync-consumer.lifecycle';\n`,
+    },
+    {
+      ...BALANCE_CONSUMER_ARTIFACTS,
+      runtimeSource: `${BALANCE_CONSUMER_ARTIFACTS.runtimeSource}\nimport { createDormantBalanceSyncConsumerLifecycleCoordinator } from './balance-sync-consumer.lifecycle';\nvoid createDormantBalanceSyncConsumerLifecycleCoordinator;\n`,
+    },
+    {
+      ...BALANCE_CONSUMER_ARTIFACTS,
+      blockchainSyncModuleSource: `${BALANCE_CONSUMER_ARTIFACTS.blockchainSyncModuleSource}\nimport { createDormantBalanceSyncConsumerLifecycleCoordinator } from './application/balance-sync-consumer.lifecycle';\nvoid createDormantBalanceSyncConsumerLifecycleCoordinator;\n`,
+    },
+    {
+      ...BALANCE_CONSUMER_ARTIFACTS,
+      balanceConsumerResourceSource: `${BALANCE_CONSUMER_ARTIFACTS.balanceConsumerResourceSource}\nimport { createDormantBalanceSyncConsumerLifecycleCoordinator } from './balance-sync-consumer.lifecycle';\nvoid createDormantBalanceSyncConsumerLifecycleCoordinator;\n`,
+    },
+  ];
+  for (const candidate of launchRegistrations) {
+    assert.deepEqual(
+      inspectBalanceConsumerDeploymentArtifacts(candidate),
+      INVALID_BALANCE_CONSUMER_DEPLOYMENT,
+    );
+  }
+});
+
 test('balance-consumer inspection brands and freezes only the exact dormant local contract', () => {
   const inspected = inspectBalanceConsumerDeploymentArtifacts(BALANCE_CONSUMER_ARTIFACTS);
   assert.deepEqual(inspected, EXPECTED_DORMANT_BALANCE_CONSUMER_DEPLOYMENT);
@@ -1783,6 +1890,8 @@ test('balance-consumer artifact shape, bounds, and private brand fail closed', (
     ...BALANCE_CONSUMER_ARTIFACTS,
   } as Record<string, unknown>;
   delete missingMetadataValidator.balanceConsumerMetadataTransitionValidatorSource;
+  const missingLifecycle = { ...BALANCE_CONSUMER_ARTIFACTS } as Record<string, unknown>;
+  delete missingLifecycle.balanceConsumerLifecycleSource;
   const accessor = { ...BALANCE_CONSUMER_ARTIFACTS } as Record<string, unknown>;
   Object.defineProperty(accessor, 'activationSource', {
     enumerable: true,
@@ -1804,6 +1913,7 @@ test('balance-consumer artifact shape, bounds, and private brand fail closed', (
     {},
     missing,
     missingMetadataValidator,
+    missingLifecycle,
     { ...BALANCE_CONSUMER_ARTIFACTS, unexpected: 'value' },
     { ...BALANCE_CONSUMER_ARTIFACTS, runtimeSource: 1 },
     accessor,

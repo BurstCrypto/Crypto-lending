@@ -46,17 +46,27 @@ application composition, and exposes only a one-shot `run(signal)` plus
 memoized `close()`. It is not exported from a barrel or referenced by a Nest
 module, runtime, CLI, activation path, or other launch root.
 
+The separate source-only `application/balance-sync-consumer.lifecycle.ts`
+shell accepts only that exact aggregate facade, a genuine external abort
+signal, and a narrow operator-event sink. Its one-shot `run()` bridges shutdown
+to a private signal without forwarding the caller's reason, distinguishes a
+clean stop from premature exit or run/close failure, drains the accepted run,
+and then closes the aggregate. Fixed one-field events and fixed errors prevent
+provider, credential, address, or raw failure details from crossing the
+operator boundary. Construction adds no listener or other side effect, and the
+shell is not exported, registered, or referenced by a launch root.
+
 The dedicated runtime is an exact empty Nest `@Module({})`, and its start
 function always rejects with `BALANCE_CONSUMER_RUNTIME_NOT_COMPOSED`. It imports
-and composes neither the dormant aggregate nor either child capsule. The
-aggregate does not compose or replace that refusing runtime. Source activation
-remains false, so the CLI refuses startup before dynamically importing even
-that empty runtime. The dedicated loader accepts only the exact `APP_ENV`
-balance source/DLQ pair in one AWS account and rejects generic queue variables
-and unknown SQS aliases. The receipt capsule snapshots only the source
-coordinate and required client settings; it neither reads nor retains the DLQ
-URL and exposes no publish, queue-health, queue-attribute, or caller-supplied
-`QueueUrl` capability.
+and composes neither the dormant lifecycle shell, aggregate, nor either child
+capsule. Neither source-only layer composes or replaces that refusing runtime.
+Source activation remains false, so the CLI refuses startup before dynamically
+importing even that empty runtime. The dedicated loader accepts only the exact
+`APP_ENV` balance source/DLQ pair in one AWS account and rejects generic queue
+variables and unknown SQS aliases. The receipt capsule snapshots only the
+source coordinate and required client settings; it neither reads nor retains
+the DLQ URL and exposes no publish, queue-health, queue-attribute, or
+caller-supplied `QueueUrl` capability.
 
 A release-bound standalone CloudFormation envelope now records the intended
 dormant process boundary and is inspected by local validation and offline
@@ -306,14 +316,19 @@ RPC, address decryption, monitoring, or any deployed behavior has been
 validated.
 
 The receipt and persistence capsule work was implemented and verified with
-local source/unit checks only. The aggregate lifecycle and wiring checks use
-mocked child construction and local in-memory capabilities; they are not live
+local source/unit checks only. Adversarial aggregate tests use mocked child
+construction and in-memory capabilities. A separate compatibility test uses
+the actual aggregate, child factories, application composition, and lifecycle
+shell while replacing only the low-level PostgreSQL pool and SQS client edges;
+it proves private cancellation reaches the pending receipt request and that
+shutdown drains before SQS-then-PostgreSQL close. These checks are not live
 provider, database, queue, credential, or deployment evidence. No AWS, SQS, ECS
 credential endpoint, RPC, or chain-provider call was made, and no task, IAM
 identity, dedicated balance-consumer database grant, or runtime activation was
-deployed for this checkpoint. Adding this dormant aggregate does not select or
-implement RPC providers, activate the source, grant database or IAM authority,
-deploy anything, create cloud costs, or satisfy any live-acceptance gate.
+deployed for this checkpoint. Adding these dormant source-only layers does not
+select or implement RPC providers, activate the source, grant database or IAM
+authority, deploy anything, create cloud costs, or satisfy any live-acceptance
+gate.
 
 The authored standalone envelope does not change that conclusion. Preflight
 must retain `BALANCE_CONSUMER_TASK_NOT_PROVISIONED`,

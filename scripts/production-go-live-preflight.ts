@@ -160,6 +160,7 @@ export interface BalanceConsumerArtifactSources {
   readonly runtimeSource: string;
   readonly compositionSource: string;
   readonly balanceConsumerResourceSource: string;
+  readonly balanceConsumerLifecycleSource: string;
   readonly balanceConsumerPersistenceResourceSource: string;
   readonly balanceConsumerSqsReceiptResourceSource: string;
   readonly runtimePostgresPoolSource: string;
@@ -518,6 +519,7 @@ const BALANCE_CONSUMER_ARTIFACT_KEYS = Object.freeze([
   'runtimeSource',
   'compositionSource',
   'balanceConsumerResourceSource',
+  'balanceConsumerLifecycleSource',
   'balanceConsumerPersistenceResourceSource',
   'balanceConsumerSqsReceiptResourceSource',
   'runtimePostgresPoolSource',
@@ -573,6 +575,8 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
   runtimeSource: '9eb119d5c4ed60708931bdc25b810d0f61e064d8521c3465ae4c85046480fd5b',
   compositionSource: '3167bf5e65ffd8ff3b73f90cdb1af962261a090c7f7661f44d0973ea49320aa5',
   balanceConsumerResourceSource: 'f210defba63ab0c2379ad499c8d84d4df79a3bc23f8ea31d51e740c8b71d0118',
+  balanceConsumerLifecycleSource:
+    'd4313b5a5e3f50022678beda7afb8768c9426f6b361be137e4be27e8e86f3a81',
   balanceConsumerPersistenceResourceSource:
     'e95c1ce138f15202e0e181ff31fe164fa22d61e2eaa642a32ea81865a28ff27d',
   balanceConsumerSqsReceiptResourceSource:
@@ -2392,6 +2396,518 @@ function hasDormantBalanceConsumerAggregateResourceContract(
   );
 }
 
+function hasDormantBalanceConsumerLifecycleCoordinatorContract(
+  sources: BalanceConsumerArtifactSources,
+): boolean {
+  const lifecycle = sources.balanceConsumerLifecycleSource.replace(/\r\n/gu, '\n');
+  const eventTypeStart = lifecycle.indexOf('export type BalanceSyncConsumerLifecycleEvent =');
+  const operatorInterfaceStart = lifecycle.indexOf(
+    'export interface BalanceSyncConsumerLifecycleOperatorPort {',
+    eventTypeStart,
+  );
+  const dependenciesInterfaceStart = lifecycle.indexOf(
+    'export interface DormantBalanceSyncConsumerLifecycleDependencies {',
+    operatorInterfaceStart,
+  );
+  const coordinatorInterfaceStart = lifecycle.indexOf(
+    'export interface DormantBalanceSyncConsumerLifecycleCoordinator {',
+    dependenciesInterfaceStart,
+  );
+  const configurationErrorStart = lifecycle.indexOf(
+    'class BalanceSyncConsumerLifecycleConfigurationError extends Error {',
+    coordinatorInterfaceStart,
+  );
+  const exactDataRecordStart = lifecycle.indexOf(
+    'function exactDataRecord(value: unknown, expectedKeys: readonly string[]): Record<string, unknown> {',
+    configurationErrorStart,
+  );
+  const reviewedResourceStart = lifecycle.indexOf(
+    'function reviewedResource(value: unknown): Readonly<{',
+    exactDataRecordStart,
+  );
+  const reviewedSignalStart = lifecycle.indexOf(
+    'function reviewedSignal(value: unknown): ReviewedSignal {',
+    reviewedResourceStart,
+  );
+  const reviewedOperatorStart = lifecycle.indexOf(
+    'function reviewedOperatorPort(',
+    reviewedSignalStart,
+  );
+  const reviewedDependenciesStart = lifecycle.indexOf(
+    'function reviewedDependencies(value: unknown): ReviewedDependencies {',
+    reviewedOperatorStart,
+  );
+  const frozenNullPrototypeStart = lifecycle.indexOf(
+    'function frozenNullPrototype<T extends object>(members: T): Readonly<T> {',
+    reviewedDependenciesStart,
+  );
+  const lifecycleEventStart = lifecycle.indexOf(
+    'function lifecycleEvent(',
+    frozenNullPrototypeStart,
+  );
+  const recordEventStart = lifecycle.indexOf('function recordEvent(', lifecycleEventStart);
+  const closeResourceStart = lifecycle.indexOf(
+    'async function closeResource(close: () => Promise<void>): Promise<boolean> {',
+    recordEventStart,
+  );
+  const executeLifecycleStart = lifecycle.indexOf(
+    'async function executeLifecycle(reviewed: ReviewedDependencies): Promise<void> {',
+    closeResourceStart,
+  );
+  const factoryStart = lifecycle.indexOf(
+    'export function createDormantBalanceSyncConsumerLifecycleCoordinator(',
+    executeLifecycleStart,
+  );
+  if (
+    eventTypeStart < 0 ||
+    operatorInterfaceStart <= eventTypeStart ||
+    dependenciesInterfaceStart <= operatorInterfaceStart ||
+    coordinatorInterfaceStart <= dependenciesInterfaceStart ||
+    configurationErrorStart <= coordinatorInterfaceStart ||
+    exactDataRecordStart <= configurationErrorStart ||
+    reviewedResourceStart <= exactDataRecordStart ||
+    reviewedSignalStart <= reviewedResourceStart ||
+    reviewedOperatorStart <= reviewedSignalStart ||
+    reviewedDependenciesStart <= reviewedOperatorStart ||
+    frozenNullPrototypeStart <= reviewedDependenciesStart ||
+    lifecycleEventStart <= frozenNullPrototypeStart ||
+    recordEventStart <= lifecycleEventStart ||
+    closeResourceStart <= recordEventStart ||
+    executeLifecycleStart <= closeResourceStart ||
+    factoryStart <= executeLifecycleStart
+  ) {
+    return false;
+  }
+
+  const eventType = lifecycle.slice(eventTypeStart, operatorInterfaceStart);
+  const operatorInterface = lifecycle.slice(operatorInterfaceStart, dependenciesInterfaceStart);
+  const dependenciesInterface = lifecycle.slice(
+    dependenciesInterfaceStart,
+    coordinatorInterfaceStart,
+  );
+  const coordinatorInterface = lifecycle.slice(coordinatorInterfaceStart, configurationErrorStart);
+  const exactDataRecord = lifecycle.slice(exactDataRecordStart, reviewedResourceStart);
+  const reviewedResource = lifecycle.slice(reviewedResourceStart, reviewedSignalStart);
+  const reviewedSignal = lifecycle.slice(reviewedSignalStart, reviewedOperatorStart);
+  const reviewedOperator = lifecycle.slice(reviewedOperatorStart, reviewedDependenciesStart);
+  const reviewedDependencies = lifecycle.slice(reviewedDependenciesStart, frozenNullPrototypeStart);
+  const lifecycleEventFactory = lifecycle.slice(lifecycleEventStart, recordEventStart);
+  const recordEvent = lifecycle.slice(recordEventStart, closeResourceStart);
+  const closeResource = lifecycle.slice(closeResourceStart, executeLifecycleStart);
+  const executeLifecycle = lifecycle.slice(executeLifecycleStart, factoryStart);
+  const factory = lifecycle.slice(factoryStart);
+
+  const privateController = executeLifecycle.indexOf('const controller = new AbortController();');
+  const stopState = executeLifecycle.indexOf('let stopRequested = false;', privateController);
+  const listeningState = executeLifecycle.indexOf('let listening = false;', stopState);
+  const requestStop = executeLifecycle.indexOf('const requestStop = (): void => {', listeningState);
+  const stopTransition = executeLifecycle.indexOf('stopRequested = true;', requestStop);
+  const privateAbort = executeLifecycle.indexOf(
+    "controller.abort(new Error('Balance sync consumer lifecycle stop requested'));",
+    stopTransition,
+  );
+  const initialSignalRead = executeLifecycle.indexOf(
+    'if (reviewed.signal.aborted()) {',
+    privateAbort,
+  );
+  const initialStopRequest = executeLifecycle.indexOf('requestStop();', initialSignalRead);
+  const listenerAttach = executeLifecycle.indexOf(
+    'reviewed.signal.addAbortListener(requestStop);',
+    initialStopRequest,
+  );
+  const listeningTransition = executeLifecycle.indexOf('listening = true;', listenerAttach);
+  const signalRecheck = executeLifecycle.indexOf(
+    'if (reviewed.signal.aborted()) requestStop();',
+    listeningTransition,
+  );
+  const setupFailureCleanup = executeLifecycle.indexOf(
+    'reviewed.signal.removeAbortListener(requestStop);',
+    signalRecheck,
+  );
+  const setupFailureClose = executeLifecycle.indexOf(
+    'const closed = await closeResource(reviewed.closeResource);',
+    setupFailureCleanup,
+  );
+  const setupCloseEvent = executeLifecycle.indexOf(
+    "recordEvent(reviewed.recordEvent, 'CLOSE_FAILED');",
+    setupFailureClose,
+  );
+  const setupCloseError = executeLifecycle.indexOf(
+    'throw new BalanceSyncConsumerLifecycleCloseError();',
+    setupCloseEvent,
+  );
+  const signalError = executeLifecycle.indexOf(
+    'throw new BalanceSyncConsumerLifecycleSignalError();',
+    setupCloseError,
+  );
+  const runFailureState = executeLifecycle.indexOf('let runFailed = false;', signalError);
+  const prematureExitState = executeLifecycle.indexOf(
+    'let prematureExit = false;',
+    runFailureState,
+  );
+  const runOperationState = executeLifecycle.indexOf(
+    'let runOperation: Promise<void> | undefined;',
+    prematureExitState,
+  );
+  const runHandoff = executeLifecycle.indexOf(
+    'runOperation = Promise.resolve(reviewed.runResource(controller.signal));',
+    runOperationState,
+  );
+  const synchronousRunFailure = executeLifecycle.indexOf('runFailed = true;', runHandoff);
+  const acceptedRunGuard = executeLifecycle.indexOf(
+    'if (runOperation !== undefined) {',
+    synchronousRunFailure,
+  );
+  const startedEvent = executeLifecycle.indexOf(
+    "if (!stopRequested) recordEvent(reviewed.recordEvent, 'STARTED');",
+    acceptedRunGuard,
+  );
+  const runDrain = executeLifecycle.indexOf('await runOperation;', startedEvent);
+  const prematureExitCapture = executeLifecycle.indexOf(
+    'prematureExit = !stopRequested;',
+    runDrain,
+  );
+  const asynchronousRunFailure = executeLifecycle.indexOf(
+    'runFailed = true;',
+    prematureExitCapture,
+  );
+  const postRunListenerCleanup = executeLifecycle.indexOf(
+    'reviewed.signal.removeAbortListener(requestStop);',
+    asynchronousRunFailure,
+  );
+  const runFailureEvent = executeLifecycle.indexOf(
+    "if (runFailed) recordEvent(reviewed.recordEvent, 'RUN_FAILED');",
+    postRunListenerCleanup,
+  );
+  const prematureExitEvent = executeLifecycle.indexOf(
+    "else if (prematureExit) recordEvent(reviewed.recordEvent, 'PREMATURE_RUN_EXIT');",
+    runFailureEvent,
+  );
+  const terminalClose = executeLifecycle.indexOf(
+    'const closed = await closeResource(reviewed.closeResource);',
+    prematureExitEvent,
+  );
+  const terminalCloseEvent = executeLifecycle.indexOf(
+    "recordEvent(reviewed.recordEvent, 'CLOSE_FAILED');",
+    terminalClose,
+  );
+  const terminalCloseError = executeLifecycle.indexOf(
+    'throw new BalanceSyncConsumerLifecycleCloseError();',
+    terminalCloseEvent,
+  );
+  const fixedRunError = executeLifecycle.indexOf(
+    'if (runFailed) throw new BalanceSyncConsumerLifecycleRunError();',
+    terminalCloseError,
+  );
+  const fixedPrematureExitError = executeLifecycle.indexOf(
+    'if (prematureExit) throw new BalanceSyncConsumerLifecyclePrematureExitError();',
+    fixedRunError,
+  );
+  const stoppedEvent = executeLifecycle.indexOf(
+    "recordEvent(reviewed.recordEvent, 'STOPPED');",
+    fixedPrematureExitError,
+  );
+
+  if (
+    privateController < 0 ||
+    stopState <= privateController ||
+    listeningState <= stopState ||
+    requestStop <= listeningState ||
+    stopTransition <= requestStop ||
+    privateAbort <= stopTransition ||
+    initialSignalRead <= privateAbort ||
+    initialStopRequest <= initialSignalRead ||
+    listenerAttach <= initialStopRequest ||
+    listeningTransition <= listenerAttach ||
+    signalRecheck <= listeningTransition ||
+    setupFailureCleanup <= signalRecheck ||
+    setupFailureClose <= setupFailureCleanup ||
+    setupCloseEvent <= setupFailureClose ||
+    setupCloseError <= setupCloseEvent ||
+    signalError <= setupCloseError ||
+    runFailureState <= signalError ||
+    prematureExitState <= runFailureState ||
+    runOperationState <= prematureExitState ||
+    runHandoff <= runOperationState ||
+    synchronousRunFailure <= runHandoff ||
+    acceptedRunGuard <= synchronousRunFailure ||
+    startedEvent <= acceptedRunGuard ||
+    runDrain <= startedEvent ||
+    prematureExitCapture <= runDrain ||
+    asynchronousRunFailure <= prematureExitCapture ||
+    postRunListenerCleanup <= asynchronousRunFailure ||
+    runFailureEvent <= postRunListenerCleanup ||
+    prematureExitEvent <= runFailureEvent ||
+    terminalClose <= prematureExitEvent ||
+    terminalCloseEvent <= terminalClose ||
+    terminalCloseError <= terminalCloseEvent ||
+    fixedRunError <= terminalCloseError ||
+    fixedPrematureExitError <= fixedRunError ||
+    stoppedEvent <= fixedPrematureExitError
+  ) {
+    return false;
+  }
+
+  const reviewedSnapshot = factory.indexOf('const reviewed = reviewedDependencies(dependencies);');
+  const startedState = factory.indexOf('let started = false;', reviewedSnapshot);
+  const operationState = factory.indexOf('let operation: Promise<void> | undefined;', startedState);
+  const runStart = factory.indexOf('const run = (): Promise<void> => {', operationState);
+  const oneShotGuard = factory.indexOf('if (started) {', runStart);
+  const alreadyStartedError = factory.indexOf(
+    'return Promise.reject(new BalanceSyncConsumerLifecycleAlreadyStartedError());',
+    oneShotGuard,
+  );
+  const startedPublication = factory.indexOf('started = true;', alreadyStartedError);
+  const operationPublication = factory.indexOf(
+    'operation = Promise.resolve().then(() => executeLifecycle(reviewed));',
+    startedPublication,
+  );
+  const operationReturn = factory.indexOf('return operation;', operationPublication);
+  const facadeReturn = factory.indexOf(
+    'return frozenNullPrototype<DormantBalanceSyncConsumerLifecycleCoordinator>({ run });',
+    operationReturn,
+  );
+  if (
+    reviewedSnapshot < 0 ||
+    startedState <= reviewedSnapshot ||
+    operationState <= startedState ||
+    runStart <= operationState ||
+    oneShotGuard <= runStart ||
+    alreadyStartedError <= oneShotGuard ||
+    startedPublication <= alreadyStartedError ||
+    operationPublication <= startedPublication ||
+    operationReturn <= operationPublication ||
+    facadeReturn <= operationReturn
+  ) {
+    return false;
+  }
+
+  const fixedErrors = [
+    [
+      "readonly code = 'BALANCE_SYNC_CONSUMER_LIFECYCLE_CONFIGURATION_INVALID' as const;",
+      "super('Balance sync consumer lifecycle configuration is invalid');",
+      "this.name = 'BalanceSyncConsumerLifecycleConfigurationError';",
+    ],
+    [
+      "readonly code = 'BALANCE_SYNC_CONSUMER_LIFECYCLE_ALREADY_STARTED' as const;",
+      "super('Balance sync consumer lifecycle is already started');",
+      "this.name = 'BalanceSyncConsumerLifecycleAlreadyStartedError';",
+    ],
+    [
+      "readonly code = 'BALANCE_SYNC_CONSUMER_LIFECYCLE_SIGNAL_INVALID' as const;",
+      "super('Balance sync consumer lifecycle signal is invalid');",
+      "this.name = 'BalanceSyncConsumerLifecycleSignalError';",
+    ],
+    [
+      "readonly code = 'BALANCE_SYNC_CONSUMER_LIFECYCLE_PREMATURE_RUN_EXIT' as const;",
+      "super('Balance sync consumer lifecycle run exited before shutdown');",
+      "this.name = 'BalanceSyncConsumerLifecyclePrematureExitError';",
+    ],
+    [
+      "readonly code = 'BALANCE_SYNC_CONSUMER_LIFECYCLE_RUN_FAILED' as const;",
+      "super('Balance sync consumer lifecycle run failed');",
+      "this.name = 'BalanceSyncConsumerLifecycleRunError';",
+    ],
+    [
+      "readonly code = 'BALANCE_SYNC_CONSUMER_LIFECYCLE_CLOSE_FAILED' as const;",
+      "super('Balance sync consumer lifecycle close failed');",
+      "this.name = 'BalanceSyncConsumerLifecycleCloseError';",
+    ],
+  ] as const;
+  const launchAndCompositionSources = [
+    sources.runtimeSource,
+    sources.cliSource,
+    sources.cliModeSource,
+    sources.activationSource,
+    sources.compositionSource,
+    sources.balanceConsumerResourceSource,
+    sources.blockchainSyncIndexSource,
+    sources.blockchainSyncModuleSource,
+    sources.sqsModuleSource,
+    sources.appModuleSource,
+    sources.applicationRootSource,
+    sources.localDevelopmentAppModuleSource,
+    sources.mainSource,
+    sources.outboxWorkerCliSource,
+    sources.redisSessionRevocationCliSource,
+    sources.migrationCliSource,
+    sources.apiPackageSource,
+    sources.rootPackageSource,
+    sources.applicationTemplateSource,
+    sources.workloadTemplateSource,
+    sources.balanceConsumerEnvelopeSource,
+    sources.releaseManifestSource,
+    sources.productionContainerValidatorSource,
+  ];
+  const importLines = trimmedExecutableLines(lifecycle).filter((line) =>
+    line.startsWith('import '),
+  );
+
+  return (
+    importLines.length === 1 &&
+    importLines[0] ===
+      "import type { DormantBalanceSyncConsumerResource } from './balance-sync-consumer.resource';" &&
+    trimmedExecutableLines(lifecycle).filter((line) => line.startsWith('export ')).length === 5 &&
+    exactExecutableLineCount(
+      lifecycle,
+      "const DEPENDENCY_KEYS = Object.freeze(['resource', 'signal', 'operatorEvents'] as const);",
+    ) === 1 &&
+    exactExecutableLineCount(
+      lifecycle,
+      "const RESOURCE_KEYS = Object.freeze(['run', 'close'] as const);",
+    ) === 1 &&
+    exactExecutableLineCount(
+      lifecycle,
+      "const OPERATOR_PORT_KEYS = Object.freeze(['record'] as const);",
+    ) === 1 &&
+    trimmedExecutableLines(eventType).filter((line) => line.startsWith('event:')).length === 1 &&
+    exactExecutableLineCount(
+      eventType,
+      "event: 'STARTED' | 'STOPPED' | 'PREMATURE_RUN_EXIT' | 'RUN_FAILED' | 'CLOSE_FAILED';",
+    ) === 1 &&
+    trimmedExecutableLines(operatorInterface).filter((line) => line.startsWith('readonly '))
+      .length === 1 &&
+    exactExecutableLineCount(
+      operatorInterface,
+      'readonly record: (event: BalanceSyncConsumerLifecycleEvent) => void | Promise<void>;',
+    ) === 1 &&
+    trimmedExecutableLines(dependenciesInterface).filter((line) => line.startsWith('readonly '))
+      .length === 3 &&
+    exactExecutableLineCount(
+      dependenciesInterface,
+      'readonly resource: Readonly<DormantBalanceSyncConsumerResource>;',
+    ) === 1 &&
+    exactExecutableLineCount(dependenciesInterface, 'readonly signal: AbortSignal;') === 1 &&
+    exactExecutableLineCount(
+      dependenciesInterface,
+      'readonly operatorEvents: BalanceSyncConsumerLifecycleOperatorPort;',
+    ) === 1 &&
+    trimmedExecutableLines(coordinatorInterface).filter((line) => line.startsWith('readonly '))
+      .length === 1 &&
+    exactExecutableLineCount(coordinatorInterface, 'readonly run: () => Promise<void>;') === 1 &&
+    exactExecutableLineCount(
+      exactDataRecord,
+      'const descriptors = Object.getOwnPropertyDescriptors(value) as unknown as PropertyDescriptorMap;',
+    ) === 1 &&
+    exactExecutableLineCount(exactDataRecord, 'const keys = Reflect.ownKeys(descriptors);') === 1 &&
+    exactExecutableLineCount(
+      exactDataRecord,
+      "if (!descriptor?.enumerable || !('value' in descriptor)) return invalidConfiguration();",
+    ) === 1 &&
+    exactExecutableLineCount(
+      reviewedResource,
+      'if (Object.getPrototypeOf(value) !== null || !Object.isFrozen(value)) {',
+    ) === 1 &&
+    exactExecutableLineCount(
+      reviewedResource,
+      'const descriptors = Object.getOwnPropertyDescriptors(value) as unknown as PropertyDescriptorMap;',
+    ) === 1 &&
+    exactExecutableLineCount(reviewedResource, 'descriptor.configurable !== false ||') === 1 &&
+    exactExecutableLineCount(reviewedResource, 'descriptor.writable !== false ||') === 1 &&
+    exactExecutableLineCount(reviewedResource, "typeof descriptor.value !== 'function'") === 1 &&
+    exactExecutableLineCount(
+      reviewedResource,
+      'runResource: descriptors.run?.value as (signal: AbortSignal) => Promise<void>,',
+    ) === 1 &&
+    exactExecutableLineCount(
+      reviewedResource,
+      'closeResource: descriptors.close?.value as () => Promise<void>,',
+    ) === 1 &&
+    exactExecutableLineCount(
+      reviewedSignal,
+      "const abortedGetter = Object.getOwnPropertyDescriptor(AbortSignal.prototype, 'aborted')?.get;",
+    ) === 1 &&
+    exactExecutableLineCount(
+      reviewedSignal,
+      'const aborted = (): boolean => abortedGetter.call(value) as boolean;',
+    ) === 1 &&
+    exactExecutableLineCount(reviewedSignal, 'aborted();') === 1 &&
+    exactExecutableLineCount(
+      reviewedSignal,
+      "EventTarget.prototype.addEventListener.call(value, 'abort', listener, { once: true });",
+    ) === 1 &&
+    exactExecutableLineCount(
+      reviewedSignal,
+      "EventTarget.prototype.removeEventListener.call(value, 'abort', listener);",
+    ) === 1 &&
+    exactExecutableLineCount(
+      reviewedOperator,
+      'const record = exactDataRecord(value, OPERATOR_PORT_KEYS).record;',
+    ) === 1 &&
+    exactExecutableLineCount(
+      reviewedOperator,
+      "if (typeof record !== 'function') return invalidConfiguration();",
+    ) === 1 &&
+    exactExecutableLineCount(
+      reviewedDependencies,
+      'const dependencies = exactDataRecord(value, DEPENDENCY_KEYS);',
+    ) === 1 &&
+    exactExecutableLineCount(
+      reviewedDependencies,
+      'const resource = reviewedResource(dependencies.resource);',
+    ) === 1 &&
+    exactExecutableLineCount(
+      reviewedDependencies,
+      'signal: reviewedSignal(dependencies.signal),',
+    ) === 1 &&
+    exactExecutableLineCount(
+      reviewedDependencies,
+      'recordEvent: reviewedOperatorPort(dependencies.operatorEvents),',
+    ) === 1 &&
+    exactExecutableLineCount(
+      lifecycle,
+      'return Object.freeze(Object.assign(Object.create(null) as T, members));',
+    ) === 1 &&
+    exactExecutableLineCount(lifecycleEventFactory, 'return frozenNullPrototype({ event });') ===
+      1 &&
+    exactExecutableLineCount(
+      recordEvent,
+      'void Promise.resolve(recorder(lifecycleEvent(event))).catch(() => undefined);',
+    ) === 1 &&
+    exactExecutableLineCount(closeResource, 'await Promise.resolve().then(close);') === 1 &&
+    exactExecutableLineCount(executeLifecycle, 'runFailed = true;') === 2 &&
+    exactExecutableLineCount(
+      executeLifecycle,
+      'reviewed.signal.removeAbortListener(requestStop);',
+    ) === 2 &&
+    exactExecutableLineCount(
+      executeLifecycle,
+      'const closed = await closeResource(reviewed.closeResource);',
+    ) === 2 &&
+    exactExecutableLineCount(
+      executeLifecycle,
+      "recordEvent(reviewed.recordEvent, 'CLOSE_FAILED');",
+    ) === 2 &&
+    exactExecutableLineCount(
+      executeLifecycle,
+      'throw new BalanceSyncConsumerLifecycleCloseError();',
+    ) === 2 &&
+    exactExecutableLineCount(factory, 'let started = false;') === 1 &&
+    exactExecutableLineCount(factory, 'started = true;') === 1 &&
+    !/^\s*started\s*=\s*false;/mu.test(factory) &&
+    exactExecutableLineCount(factory, 'return operation;') === 1 &&
+    fixedErrors.every((binding) =>
+      binding.every((line) => exactExecutableLineCount(lifecycle, line) === 1),
+    ) &&
+    !/\b(?:AbortSignal\.any|loadBalanceConsumerConfig|loadBalanceConsumerInfrastructureConfig|loadInfrastructureConfig|InfrastructureConfigModule|NestFactory|PostgresService|SQSClient|SqsModule|SqsService|SqsQueueReceiptTransport|PinnedSqsQueueReceiptAdapter|createPostgresPool|createRawSqsClient|ReceiveMessageCommand|DeleteMessageCommand|ChangeMessageVisibilityCommand|XMLHttpRequest|WebSocket|axios|undici)\b/u.test(
+      lifecycle,
+    ) &&
+    !/(?:@aws-sdk\/|from ['"]pg['"]|node:(?:http|https|net|tls)|process\.env|\bfetch\s*\(|\bset(?:Interval|Timeout)\s*\(|\bcreateApplicationContext\s*\(|@Module\s*\(|\.listen\s*\(|\.reason\b)/u.test(
+      lifecycle,
+    ) &&
+    !lifecycle.includes('createDormantBalanceSyncConsumerResource') &&
+    !lifecycle.includes('Promise.race(') &&
+    !lifecycle.includes('Promise.resolve().then(() => reviewed.runResource') &&
+    !/\bcause\s*[:=]/u.test(lifecycle) &&
+    launchAndCompositionSources.every(
+      (source) =>
+        !source.includes('createDormantBalanceSyncConsumerLifecycleCoordinator') &&
+        !source.includes('DormantBalanceSyncConsumerLifecycleCoordinator') &&
+        !source.includes('balance-sync-consumer.lifecycle'),
+    )
+  );
+}
+
 function hasDormantBalanceConsumerPersistenceResourceContract(
   sources: BalanceConsumerArtifactSources,
 ): boolean {
@@ -4121,6 +4637,7 @@ export function inspectBalanceConsumerDeploymentArtifacts(
       hasExactReviewedBalanceConsumerArtifactBytes(sources) &&
       hasDormantBalanceConsumerSourceContract(sources) &&
       hasDormantBalanceConsumerAggregateResourceContract(sources) &&
+      hasDormantBalanceConsumerLifecycleCoordinatorContract(sources) &&
       hasDormantBalanceConsumerPersistenceResourceContract(sources) &&
       hasDormantBalanceConsumerSqsReceiptResourceContract(sources) &&
       hasPinnedBalanceConsumerQueueBoundaryContract(sources) &&
@@ -4764,6 +5281,13 @@ export function loadRepositoryProductionPreflightInput(
         resolve(
           repositoryRoot,
           'apps/api/src/blockchain-sync/application/balance-sync-consumer.resource.ts',
+        ),
+        'utf8',
+      ),
+      balanceConsumerLifecycleSource: readFileSync(
+        resolve(
+          repositoryRoot,
+          'apps/api/src/blockchain-sync/application/balance-sync-consumer.lifecycle.ts',
         ),
         'utf8',
       ),

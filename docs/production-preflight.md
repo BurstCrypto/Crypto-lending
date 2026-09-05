@@ -51,6 +51,13 @@ deployment, and fixes its ECS service at literal `DesiredCount: 0`. The
 inspector performs local filesystem/source checks only; it makes no cloud,
 provider, or other external request and cannot incur cloud cost.
 
+The `BALANCE_CONSUMER` inspection also byte-pins and semantically validates the
+source-only lifecycle coordinator. It requires exact one-shot cancellation,
+run-drain-before-close behavior, fixed operator outcomes, and absence from the
+runtime, CLI, activation, module, barrel, application, package, template, and
+container launch roots. Passing that local inspection does not compose the
+coordinator or change any blocker below.
+
 The inspected source keeps activation false, sets
 `BALANCE_CONSUMER_MODE=disabled`, and leaves the runtime uncomposed. The task
 has no database secret/grants, metadata key, RPC/provider input, Redis, auth,

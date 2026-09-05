@@ -31,6 +31,13 @@ composition. It exposes only a one-shot `run(signal)` and memoized `close()`.
 When the raw `SqsService` is loaded for the balance-consumer workload,
 send/publish, batch-publish, and queue health inspection fail closed.
 
+The additional source-only lifecycle shell accepts only the exact aggregate
+facade, a genuine external abort signal, and a one-field operator-event sink.
+It bridges cancellation to a private signal without forwarding the external
+reason, distinguishes clean stop from premature exit and run/close failures,
+drains the run, and closes the aggregate. Construction installs no listener;
+the shell is unbarreled, unregistered, and absent from every launch root.
+
 The source-only balance-consumer receipt capsule is not registered or exported
 through a barrel. It snapshots hostile configuration before allocating its
 private client, pins the reviewed branded balance source URL, and exposes only
@@ -84,7 +91,8 @@ it exits sanitized and nonzero before dynamically importing the dedicated
 runtime or constructing either capsule. Even if that import boundary were
 reached, the runtime is an exact empty Nest `@Module({})`; its start function
 always rejects `BALANCE_CONSUMER_RUNTIME_NOT_COMPOSED` and composes no resource.
-The source-only aggregate does not compose or replace that refusing runtime.
+The source-only lifecycle shell and aggregate do not compose or replace that
+refusing runtime.
 The database bootstrap declares the dormant `crypto_balance_consumer_runtime`
 capability identity and bounded rotating login slots, but gives them no database
 connection, schema, object, function, default-ACL, or ownership authority.
@@ -115,15 +123,19 @@ semantics, not evidence of an executing consumer or deployed queue behavior.
 
 LocalStack creates both pairs and Docker health verifies all four queue names. CI and the local demo use four explicit, distinct loopback URLs.
 
-This checkpoint used local source and unit validation only. Aggregate wiring,
-one-shot lifecycle, close/drain ordering, and failure cleanup were exercised
-with mocked child construction and local in-memory capabilities; they are not
-live queue, provider, database, IAM, or deployment evidence. No AWS, SQS, ECS
-credential endpoint, RPC, or chain-provider call was made; no task, IAM
-identity, dedicated balance-consumer database grant, service, or runtime
-activation was deployed. The aggregate does not select or implement RPC
-providers, activate source processing, grant database or IAM authority, deploy
-resources, create cloud costs, or satisfy any remaining live-evidence gate.
+This checkpoint used local source and unit validation only. Adversarial
+aggregate checks use mocked child construction and in-memory capabilities. A
+separate compatibility test uses the actual aggregate, both child factories,
+the application composition, and the lifecycle shell while mocking only the
+low-level PostgreSQL pool and SQS client. It proves private cancellation reaches
+a pending receipt request, then drains and closes SQS before PostgreSQL. These
+checks are not live queue, provider, database, IAM, or deployment evidence. No
+AWS, SQS, ECS credential endpoint, RPC, or chain-provider call was made; no
+task, IAM identity, dedicated balance-consumer database grant, service, or
+runtime activation was deployed. The dormant layers do not select or implement
+RPC providers, activate source processing, grant database or IAM authority,
+deploy resources, create cloud costs, or satisfy any remaining live-evidence
+gate.
 
 ## Remaining activation gates
 
