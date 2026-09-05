@@ -128,6 +128,7 @@ export {
   type VerifiedStablecoinPriceSourceUnavailableCode,
 } from './application/fail-closed-stablecoin-price-source';
 export {
+  assertCanonicalVerifiedStablecoinPriceProjectionBatch,
   assertCanonicalStablecoinPriceIngestionPlan,
   createStablecoinPriceIngestionPlan,
   createVerifiedStablecoinPriceProjectionBatch,
@@ -144,6 +145,16 @@ export {
   type VerifiedStablecoinPriceProjectionV1,
 } from './application/stablecoin-price-ingestion-plan';
 export {
+  createStablecoinPricePersistenceAdmission,
+  STABLECOIN_PRICE_PERSISTENCE_ADMISSION_SCHEMA_VERSION,
+  StablecoinPricePersistenceAdmissionError,
+  type StablecoinPricePersistenceAdmissionErrorCode,
+  type StablecoinPricePersistenceAdmissionV1,
+  type StablecoinPricePersistenceRunIdentityV1,
+} from './application/stablecoin-price-persistence-plan';
+export type { VerifiedStablecoinPriceProjectionBatchWriterPort } from './application/ports/verified-stablecoin-price-projection-batch-writer.port';
+export {
+  assertCanonicalStablecoinPriceIngestionBatch,
   DormantStablecoinPriceIngestionOrchestrator,
   STABLECOIN_PRICE_INGESTION_EXECUTION_POLICY,
   StablecoinPriceIngestionOrchestratorError,

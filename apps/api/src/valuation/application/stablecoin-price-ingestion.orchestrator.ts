@@ -2,6 +2,7 @@ import { isProxy } from 'node:util/types';
 
 import type { StablecoinValuationSourceId } from '../domain/stablecoin-valuation-policy';
 import {
+  assertCanonicalVerifiedStablecoinPriceProjectionBatch,
   assertCanonicalStablecoinPriceIngestionPlan,
   createVerifiedStablecoinPriceProjectionBatch,
   normalizeVerifiedStablecoinPriceEvidence,
@@ -21,6 +22,7 @@ const SOURCE_IDS = Object.freeze([
 const THROW_IF_ABORTED = AbortSignal.prototype.throwIfAborted;
 const ADD_EVENT_LISTENER = EventTarget.prototype.addEventListener;
 const REMOVE_EVENT_LISTENER = EventTarget.prototype.removeEventListener;
+const COMPLETED_INGESTION_BATCHES = new WeakSet<object>();
 
 export const STABLECOIN_PRICE_INGESTION_EXECUTION_POLICY = Object.freeze({
   order: 'CANONICAL_PLAN_SEQUENTIAL' as const,
@@ -39,7 +41,8 @@ export type StablecoinPriceIngestionOrchestratorErrorCode =
   | 'INVALID_ORCHESTRATOR_CONFIGURATION'
   | 'INVALID_ABORT_SIGNAL'
   | 'VERIFIED_PRICE_SOURCE_UNAVAILABLE'
-  | 'VERIFIED_PRICE_EVIDENCE_REJECTED';
+  | 'VERIFIED_PRICE_EVIDENCE_REJECTED'
+  | 'NON_CANONICAL_PROJECTION_BATCH';
 
 export class StablecoinPriceIngestionOrchestratorError extends Error {
   constructor(readonly code: StablecoinPriceIngestionOrchestratorErrorCode) {
@@ -106,11 +109,27 @@ export class DormantStablecoinPriceIngestionOrchestrator {
 
     throwIfCallerAborted(signal);
     try {
-      return createVerifiedStablecoinPriceProjectionBatch(this.plan, evidence);
+      const batch = createVerifiedStablecoinPriceProjectionBatch(this.plan, evidence);
+      COMPLETED_INGESTION_BATCHES.add(batch);
+      return batch;
     } catch {
       throwIfCallerAborted(signal);
       throw unavailable('VERIFIED_PRICE_EVIDENCE_REJECTED');
     }
+  }
+}
+
+/** Accepts only a complete in-process batch emitted by the Slice C orchestrator. */
+export function assertCanonicalStablecoinPriceIngestionBatch(
+  value: unknown,
+): asserts value is VerifiedStablecoinPriceProjectionBatchV1 {
+  try {
+    assertCanonicalVerifiedStablecoinPriceProjectionBatch(value);
+  } catch {
+    throw unavailable('NON_CANONICAL_PROJECTION_BATCH');
+  }
+  if (!COMPLETED_INGESTION_BATCHES.has(value)) {
+    throw unavailable('NON_CANONICAL_PROJECTION_BATCH');
   }
 }
 

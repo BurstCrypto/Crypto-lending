@@ -36,6 +36,8 @@ describe('verified stablecoin price ingestion runtime absence', () => {
         'FailClosedPythStablecoinPriceSource',
         'FailClosedChainlinkStablecoinPriceSource',
         'DormantStablecoinPriceIngestionOrchestrator',
+        'StablecoinPricePersistenceModule',
+        'VerifiedStablecoinPriceProjectionBatchWriter',
       ]),
     );
   });

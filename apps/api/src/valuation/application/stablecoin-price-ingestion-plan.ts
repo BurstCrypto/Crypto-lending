@@ -79,6 +79,7 @@ const VERIFICATION_METHODS = Object.freeze({
 >);
 
 const CREATED_PLANS = new WeakSet<object>();
+const CREATED_PROJECTION_BATCHES = new WeakSet<object>();
 
 export interface StablecoinPricePolicyIdentityV1 {
   readonly policyId: typeof POLICY_ID;
@@ -144,6 +145,7 @@ export interface VerifiedStablecoinPriceProjectionBatchV1 {
 export type StablecoinPriceIngestionPlanValidationCode =
   | 'INVALID_POLICY_IDENTITY'
   | 'INVALID_INGESTION_PLAN'
+  | 'INVALID_VERIFIED_PRICE_PROJECTION_BATCH'
   | 'INVALID_VERIFIED_PRICE_EVIDENCE'
   | 'VERIFIED_PRICE_EVIDENCE_MISMATCH'
   | 'DUPLICATE_VERIFIED_PRICE_EVIDENCE'
@@ -212,6 +214,15 @@ export function assertCanonicalStablecoinPriceIngestionPlan(
 ): asserts value is StablecoinPriceIngestionPlanV1 {
   if (typeof value !== 'object' || value === null || !CREATED_PLANS.has(value)) {
     return invalid('INVALID_INGESTION_PLAN');
+  }
+}
+
+/** Accepts only an immutable projection batch created by this in-process boundary. */
+export function assertCanonicalVerifiedStablecoinPriceProjectionBatch(
+  value: unknown,
+): asserts value is VerifiedStablecoinPriceProjectionBatchV1 {
+  if (typeof value !== 'object' || value === null || !CREATED_PROJECTION_BATCHES.has(value)) {
+    return invalid('INVALID_VERIFIED_PRICE_PROJECTION_BATCH');
   }
 }
 
@@ -314,7 +325,7 @@ export function createVerifiedStablecoinPriceProjectionBatch(
   if (projections.length !== PROJECTION_COUNT) {
     return invalid('INCOMPLETE_VERIFIED_PRICE_EVIDENCE_SET');
   }
-  return Object.freeze({
+  const batch = Object.freeze({
     schemaVersion: INGESTION_PLAN_SCHEMA_VERSION,
     policyIdentity: plan.policyIdentity,
     registryEnvironment: plan.registryEnvironment,
@@ -325,6 +336,8 @@ export function createVerifiedStablecoinPriceProjectionBatch(
     projections,
     mayAuthorizeFinancialAction: false as const,
   });
+  CREATED_PROJECTION_BATCHES.add(batch);
+  return batch;
 }
 
 function normalizePolicyIdentity(value: unknown): StablecoinPricePolicyIdentityV1 {
