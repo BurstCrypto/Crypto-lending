@@ -1,11 +1,13 @@
 #!/usr/bin/env node
 
 import { createHash } from 'node:crypto';
-import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs';
+import { existsSync, lstatSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { TextDecoder } from 'node:util';
 
 import { parseStrictJsonBytes } from '../shared/parse-strict-json.mjs';
+import { readSecureLocalFile } from '../shared/read-secure-local-file.mjs';
 
 const moduleDirectory = dirname(fileURLToPath(import.meta.url));
 export const repositoryRoot = resolve(moduleDirectory, '..', '..');
@@ -48,6 +50,10 @@ export const structuredLoggerPath = resolve(
 
 export const LOGGING_GOVERNANCE_JSON_INVALID_ERROR =
   'Canonical governance packet is not valid, unambiguous UTF-8 JSON.';
+export const MAX_LOGGING_GOVERNANCE_PACKET_BYTES = 65_536;
+export const MAX_LOGGING_GOVERNANCE_FINGERPRINT_BYTES = 65;
+export const MAX_LOGGING_GOVERNANCE_SOURCE_BYTES = 131_072;
+export const MAX_LOGGING_GOVERNANCE_TEMPLATE_BYTES = 262_144;
 
 export function parseLoggingGovernanceBytes(bytes) {
   try {
@@ -55,6 +61,14 @@ export function parseLoggingGovernanceBytes(bytes) {
   } catch {
     throw new Error(LOGGING_GOVERNANCE_JSON_INVALID_ERROR);
   }
+}
+
+function readControlledText(path, maximumBytes) {
+  const bytes = readSecureLocalFile(path, maximumBytes);
+  if (bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) {
+    throw new Error('Controlled text must not contain a byte-order mark.');
+  }
+  return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
 }
 
 export const applicationBaselinePath = resolve(
@@ -1242,12 +1256,27 @@ export function validateCanonicalGovernance() {
   let structuredLoggerSource;
   let applicationBaselineSource;
   try {
-    governanceBytes = readFileSync(governancePath);
-    expectedFingerprint = readFileSync(governanceFingerprintPath, 'utf8').trim();
-    expectedLoggerFingerprint = readFileSync(loggerContractFingerprintPath, 'utf8').trim();
-    loggingContextSource = readFileSync(loggingContextPath, 'utf8');
-    structuredLoggerSource = readFileSync(structuredLoggerPath, 'utf8');
-    applicationBaselineSource = readFileSync(applicationBaselinePath, 'utf8');
+    governanceBytes = readSecureLocalFile(governancePath, MAX_LOGGING_GOVERNANCE_PACKET_BYTES);
+    expectedFingerprint = readControlledText(
+      governanceFingerprintPath,
+      MAX_LOGGING_GOVERNANCE_FINGERPRINT_BYTES,
+    ).trim();
+    expectedLoggerFingerprint = readControlledText(
+      loggerContractFingerprintPath,
+      MAX_LOGGING_GOVERNANCE_FINGERPRINT_BYTES,
+    ).trim();
+    loggingContextSource = readControlledText(
+      loggingContextPath,
+      MAX_LOGGING_GOVERNANCE_SOURCE_BYTES,
+    );
+    structuredLoggerSource = readControlledText(
+      structuredLoggerPath,
+      MAX_LOGGING_GOVERNANCE_SOURCE_BYTES,
+    );
+    applicationBaselineSource = readControlledText(
+      applicationBaselinePath,
+      MAX_LOGGING_GOVERNANCE_TEMPLATE_BYTES,
+    );
   } catch {
     return {
       errors: [

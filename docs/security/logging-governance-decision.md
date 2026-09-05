@@ -9,7 +9,11 @@ The canonical machine record is
 [`logging-governance-decision.json`](logging-governance-decision.json). Its
 sidecar binds the exact packet bytes after local validation. Validation requires
 strict UTF-8 JSON and rejects byte-order marks and duplicate object keys at any
-depth before evaluating approval fields or the sidecar. A future decision
+depth before evaluating approval fields or the sidecar. The packet, both
+fingerprint sidecars, logger sources, and retention template are read through a
+non-empty, bounded, canonical-path, single-link, stable double-read boundary;
+the packet is limited to 64 KiB, each sidecar to 65 bytes, each logger source to
+128 KiB, and the template to 256 KiB. A future decision
 must instead bind the exact merged Git commit, tree, packet SHA-256, and logger
 contract SHA-256; a branch commit, Jira transition, local test, or sidecar alone
 cannot satisfy that gate.
