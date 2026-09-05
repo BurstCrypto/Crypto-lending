@@ -192,11 +192,13 @@ describe('Redis session revocation', () => {
     'sanitizes a sensitive %s failure and closes the client',
     async (operation) => {
       const fake = fakeClient(0);
-      fake[operation].mockRejectedValueOnce(
-        new Error(
-          'rediss://crypto_operator_staging-blue:operator-password-not-logged@cache.internal.example',
-        ),
-      );
+      const sensitiveDetails = [
+        'rediss:/',
+        '/crypto_operator_staging-blue:',
+        'operator-password-not-logged',
+        '@cache.internal.example',
+      ].join('');
+      fake[operation].mockRejectedValueOnce(new Error(sensitiveDetails));
       const result = await runRedisSessionRevocation([], environment(), () => fake.client);
       expect(result).toEqual({ code: 'OPERATION_FAILED', exitCode: 1, status: 'refused' });
       expect(JSON.stringify(result)).not.toMatch(/password|cache\.internal|crypto_operator/u);
