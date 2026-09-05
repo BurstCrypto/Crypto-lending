@@ -26,6 +26,17 @@ wrong-version jobs before handler invocation. When the raw `SqsService` is
 loaded for the balance-consumer workload, send/publish, batch-publish, and queue
 health inspection fail closed.
 
+The source-only balance-consumer receipt capsule is not registered or exported
+through a barrel. It snapshots hostile configuration before allocating its
+private client, pins the reviewed branded balance source URL, and exposes only
+frozen receipt and close closures. Its client can issue only receive, delete,
+and change-visibility commands; it does not read or retain the balance DLQ URL,
+fetch arbitrary message attributes, or expose send, queue-attribute, health, or
+direct-DLQ capabilities. A separate source-only persistence capsule similarly
+encloses its PostgreSQL pool and balance repositories. Neither capsule is
+referenced by the runtime, CLI, Nest module, application composition, or another
+launch root.
+
 The application infrastructure templates define separate KMS-encrypted
 source/DLQ pairs with TLS-only policies and exact redrive relationships. The
 outbox worker may publish to both source queues and inspect all four queues, but
@@ -63,16 +74,44 @@ network, runtime, or production-read evidence.
 
 The shared API image contains a `worker:balance:prod` entrypoint for local and
 compiled-runtime validation. Its immutable source activation remains false, so
-it exits sanitized and nonzero before importing its dormant SQS/PostgreSQL
-runtime module or constructing a client. The database bootstrap declares the
-dormant `crypto_balance_consumer_runtime` capability identity and bounded
-rotating login slots, but gives them no database connection, schema, object,
-function, default-ACL, or ownership authority. Migration `0028` revokes the
-generic worker's execution of the wallet-address resolver and all four balance
-checkpoint functions. The standalone source does not change those
-application-path or database facts.
+it exits sanitized and nonzero before dynamically importing the dedicated
+runtime or constructing either capsule. Even if that import boundary were
+reached, the runtime is an exact empty Nest `@Module({})`; its start function
+always rejects `BALANCE_CONSUMER_RUNTIME_NOT_COMPOSED` and composes no resource.
+The database bootstrap declares the dormant `crypto_balance_consumer_runtime`
+capability identity and bounded rotating login slots, but gives them no database
+connection, schema, object, function, default-ACL, or ownership authority.
+Migration `0028` revokes the generic worker's execution of the wallet-address
+resolver and all four balance checkpoint functions. The standalone source does
+not change those application-path or database facts.
+
+## Dormant receipt retry boundary
+
+Balance ingress accepts only the original source envelope with payload
+`attempt=1`; native SQS receipt delivery, not publication of a replacement job,
+owns subsequent tries. The queue policy and worker are pinned to
+`maxReceiveCount=3`. At receive counts 1 and 2, a failure retains the source
+receipt and changes its visibility using the 5-second exponential base and
+60-second cap. A validated provider retry decision may supply a trusted floor
+between 5 and 60 seconds, raising that receipt's delay within the same cap. At
+receive count 3, the floor is ignored, visibility is set to zero, the worker
+reports `awaiting-dead-letter`, and the receipt remains undeleted for native SQS
+redrive.
+
+Permanent, exhausted, invalid, and other non-retryable dispositions use the
+same retention path: there is no application-side direct-DLQ send. The
+balance-only `balance_receipt_dispositions_total` telemetry records the bounded
+`receive_count`, `retry_delay_seconds`, and
+`trusted_provider_delay_floor_applied` labels without provider errors, payloads,
+account/wallet identifiers, queue URLs, or credentials. These are tested dormant
+semantics, not evidence of an executing consumer or deployed queue behavior.
 
 LocalStack creates both pairs and Docker health verifies all four queue names. CI and the local demo use four explicit, distinct loopback URLs.
+
+This checkpoint used local source and unit validation only. No AWS, SQS, ECS
+credential endpoint, RPC, or chain-provider call was made; no task, IAM identity,
+dedicated balance-consumer database grant, service, or runtime activation was
+deployed.
 
 ## Remaining activation gates
 

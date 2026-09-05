@@ -32,14 +32,24 @@ The orchestration boundary has six injected ports:
   boundary for a future live indexer.
 
 The durable checkpoint, portfolio-balance, dormant wallet-address resolver, and
-dormant Ethereum/Solana transcript indexer adapters are concrete. A dedicated
-balance-consumer configuration and pinned queue-receipt adapter also exist in
-source, but the production entrypoint exits before importing its runtime
-module. The loader accepts only the exact `APP_ENV` balance source/DLQ pair in
-one AWS account and rejects generic queue variables and unknown SQS aliases.
-The pinned port exposes receive, delete, change-visibility, and envelope parsing
-only; it has no publish capability or caller-supplied `QueueUrl`, while raw
-balance-consumer SQS publish, batch, and health operations fail closed.
+dormant Ethereum/Solana transcript indexer adapters are concrete. Two additional
+source-only capsules remain deliberately unregistered: the balance-consumer
+persistence resource encloses its PostgreSQL pool and repositories behind
+checkpoint/address-resolution closures, while the balance-consumer receipt
+resource encloses a private SQS client behind receive, delete,
+change-visibility, and envelope-parsing closures. Neither capsule is exported
+from the blockchain-sync barrel or referenced by a launch root, module,
+runtime, CLI, or composition path.
+
+The dedicated runtime is an exact empty Nest `@Module({})`, and its start
+function always rejects with `BALANCE_CONSUMER_RUNTIME_NOT_COMPOSED`. It imports
+and composes neither dormant capsule. Source activation remains false, so the
+CLI refuses startup before dynamically importing even that empty runtime. The
+dedicated loader accepts only the exact `APP_ENV` balance source/DLQ pair in one
+AWS account and rejects generic queue variables and unknown SQS aliases. The
+receipt capsule snapshots only the source coordinate and required client
+settings; it neither reads nor retains the DLQ URL and exposes no publish,
+queue-health, queue-attribute, or caller-supplied `QueueUrl` capability.
 
 A release-bound standalone CloudFormation envelope now records the intended
 dormant process boundary and is inspected by local validation and offline
@@ -216,17 +226,32 @@ stale, emits a recovery alert, and receives the bounded retry/DLQ decision.
 
 ## Retry, dead-letter, and stale-data policy
 
-Retries are limited to three total attempts. The deterministic delays begin at
-5 seconds and are capped at 60 seconds. A valid provider `Retry-After` hint may
-raise the delay within that cap; a larger hint dead-letters instead of creating
-an unbounded delayed job.
+The dormant physical boundary uses the original source message for every
+delivery. Balance ingress accepts only a source envelope whose payload has
+`attempt=1`; it does not publish a derived retry envelope or mutate that payload
+between deliveries. The source queue's native redrive policy is the sole retry
+and DLQ authority, with `maxReceiveCount=3`. The worker instead uses the
+transport-supplied `ApproximateReceiveCount`: failures at receive counts 1 and 2
+retain the receipt and set visibility to the bounded retry delay, while a
+failure at receive count 3 sets visibility to zero, reports
+`awaiting-dead-letter`, and still does not delete the receipt. SQS can then move
+the message through its configured native redrive relationship.
 
-| Failure class                                               | Decision                                    |
-| ----------------------------------------------------------- | ------------------------------------------- |
-| Rate limit, timeout, unavailable provider, recovery failure | Retry while an attempt remains              |
-| Same transient failure on attempt three                     | Dead-letter: attempts exhausted             |
-| Invalid data, permanent provider failure, unknown failure   | Dead-letter: non-retryable                  |
-| Retry hint greater than 60 seconds                          | Dead-letter: delay exceeds the policy bound |
+Native receipt delays begin at 5 seconds and remain capped at 60 seconds. A
+validated provider retry decision can carry a trusted in-memory minimum from 5
+through 60 seconds; the worker may raise the current receipt delay to that floor
+but never above the cap. The marker cannot be forged by an arbitrary error, and
+it is ignored once the receipt is exhausted. Permanent, non-retryable, invalid,
+or over-bound provider dispositions also fail through the no-I/O disposition
+port: they retain the same source receipt for native redelivery/DLQ rather than
+sending directly to a DLQ.
+
+| Receipt condition                        | Physical result                                                        |
+| ---------------------------------------- | ---------------------------------------------------------------------- |
+| Transient failure, receive count 1 or 2  | Retain receipt; apply native delay, raised by a trusted provider floor |
+| Trusted provider floor from 5–60 seconds | Raise only that receipt's visibility delay, capped at 60 seconds       |
+| Permanent or non-retryable disposition   | Retain receipt; no direct DLQ send or deletion                         |
+| Any failure at receive count 3           | Visibility zero; retain receipt for native SQS redrive                 |
 
 Every provider/indexer failure first asks the checkpoint port to preserve the
 exact last good observation and mark freshness `STALE` (or `UNAVAILABLE` when
@@ -237,7 +262,11 @@ observability adapter itself fails.
 Metrics contain only event, network, tier, attempt, and position-count labels.
 They exclude account IDs, wallet IDs, wallet addresses, asset balances, source
 hashes, provider URLs, credentials, and raw adapter errors. Adapter exception
-text is mapped to fixed local error or failure codes.
+text is mapped to fixed local error or failure codes. The balance receipt path
+additionally defines `balance_receipt_dispositions_total` with only
+`receive_count`, `retry_delay_seconds`, and
+`trusted_provider_delay_floor_applied`; telemetry remains observational and is
+not emitted by an active process while the runtime is uncomposed.
 
 ## External gates
 
@@ -268,6 +297,12 @@ but cannot obtain them itself. It makes no claim that a live balance has been
 indexed or that runtime/task activation, IAM, dedicated database grants, SQS,
 RPC, address decryption, monitoring, or any deployed behavior has been
 validated.
+
+The receipt and persistence capsule work was implemented and verified with
+local source/unit checks only. No AWS, SQS, ECS credential endpoint, RPC, or
+chain-provider call was made, and no task, IAM identity, dedicated
+balance-consumer database grant, or runtime activation was deployed for this
+checkpoint.
 
 The authored standalone envelope does not change that conclusion. Preflight
 must retain `BALANCE_CONSUMER_TASK_NOT_PROVISIONED`,
