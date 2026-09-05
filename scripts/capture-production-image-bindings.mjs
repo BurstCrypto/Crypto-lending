@@ -33,6 +33,7 @@ export const MAX_DOCKER_SAVE_ENTRIES = 8192;
 const MAX_RETAINED_BYTES = 64 * 1024 * 1024;
 const MAX_RETAINED_ENTRIES = 512;
 const MAX_JSON_BLOB_BYTES = 16 * 1024 * 1024;
+const ARCHIVE_READ_BUFFER_BYTES = 64 * 1024;
 const IMAGE_BINDING_SCHEMA = 'crypto-lending.production-image-archive-binding.v1';
 const SHA256 = /^sha256:[0-9a-f]{64}$/u;
 const OCI_INDEX_MEDIA_TYPE = 'application/vnd.oci.image.index.v1+json';
@@ -44,6 +45,7 @@ const CONFIG_MEDIA_TYPES = new Set([
   'application/vnd.docker.container.image.v1+json',
   'application/vnd.oci.image.config.v1+json',
 ]);
+const dockerSaveArchiveMetadata = new WeakMap();
 
 export class ProductionImageBindingCaptureError extends Error {
   constructor(code) {
@@ -165,6 +167,20 @@ function readExactly(descriptor, length, position, code) {
   return bytes;
 }
 
+function hashExactly(descriptor, length, position, code) {
+  const hash = createHash('sha256');
+  const buffer = Buffer.allocUnsafe(Math.min(ARCHIVE_READ_BUFFER_BYTES, Math.max(length, 1)));
+  let offset = 0;
+  while (offset < length) {
+    const requested = Math.min(buffer.length, length - offset);
+    const count = readSync(descriptor, buffer, 0, requested, position + offset);
+    if (count === 0) return fail(code);
+    hash.update(buffer.subarray(0, count));
+    offset += count;
+  }
+  return `sha256:${hash.digest('hex')}`;
+}
+
 function shouldRetain(pathname, size) {
   if (['index.json', 'manifest.json', 'oci-layout'].includes(pathname)) return true;
   if (/^[0-9a-f]{64}\.json$/u.test(pathname)) return size <= MAX_JSON_BLOB_BYTES;
@@ -200,6 +216,7 @@ export function readDockerSaveArchive(archivePath) {
     if (statIdentity(opened) !== statIdentity(initial)) return fail('ARCHIVE_UNSAFE');
     const archiveSize = Number(opened.size);
     const entries = new Map();
+    const entryMetadata = new Map();
     const seenPaths = new Set();
     let entryCount = 0;
     let retainedBytes = 0;
@@ -254,21 +271,31 @@ export function readDockerSaveArchive(archivePath) {
       if (type === '5' && size !== 0) return fail('ARCHIVE_HEADER_INVALID');
       if (size > archiveSize - position) return fail('ARCHIVE_TRUNCATED');
 
-      if (type === '0' && shouldRetain(pathname, size)) {
-        if (
-          size > MAX_JSON_BLOB_BYTES ||
-          entries.size >= MAX_RETAINED_ENTRIES ||
-          retainedBytes + size > MAX_RETAINED_BYTES
-        ) {
-          return fail('ARCHIVE_RETAINED_LIMIT');
+      if (type === '0') {
+        const retain = shouldRetain(pathname, size);
+        let contentDigest;
+        if (retain) {
+          if (
+            size > MAX_JSON_BLOB_BYTES ||
+            entries.size >= MAX_RETAINED_ENTRIES ||
+            retainedBytes + size > MAX_RETAINED_BYTES
+          ) {
+            return fail('ARCHIVE_RETAINED_LIMIT');
+          }
+          const bytes = readExactly(descriptor, size, position, 'ARCHIVE_TRUNCATED');
+          entries.set(pathname, bytes);
+          retainedBytes += size;
+          contentDigest = sha256(bytes);
+        } else {
+          contentDigest = hashExactly(descriptor, size, position, 'ARCHIVE_TRUNCATED');
         }
-        const bytes = readExactly(descriptor, size, position, 'ARCHIVE_TRUNCATED');
-        entries.set(pathname, bytes);
-        retainedBytes += size;
+        entryMetadata.set(pathname, Object.freeze({ digest: contentDigest, size, type }));
         const blobMatch = /^blobs\/sha256\/([0-9a-f]{64})$/u.exec(pathname);
-        if (blobMatch !== null && sha256(bytes) !== `sha256:${blobMatch[1]}`) {
+        if (blobMatch !== null && contentDigest !== `sha256:${blobMatch[1]}`) {
           return fail('ARCHIVE_BLOB_DIGEST_INVALID');
         }
+      } else {
+        entryMetadata.set(pathname, Object.freeze({ size, type }));
       }
       const padded = Math.ceil(size / 512) * 512;
       if (padded > archiveSize - position) return fail('ARCHIVE_TRUNCATED');
@@ -283,6 +310,7 @@ export function readDockerSaveArchive(archivePath) {
     ) {
       return fail('ARCHIVE_UNSAFE');
     }
+    dockerSaveArchiveMetadata.set(entries, entryMetadata);
     return entries;
   } catch (error) {
     if (error instanceof ProductionImageBindingCaptureError) throw error;
@@ -369,7 +397,7 @@ function configDetails(configBytes, code) {
   return { diffIds };
 }
 
-function manifestDetails(entries, manifestBlob, code) {
+function manifestDetails(entries, metadata, manifestBlob, code) {
   const manifest = record(parseJsonBytes(Buffer.from(manifestBlob.bytes, 'base64'), code), code);
   if (
     manifest.schemaVersion !== 2 ||
@@ -404,7 +432,16 @@ function manifestDetails(entries, manifestBlob, code) {
     );
     if (seenLayers.has(layer.digest)) return fail('ARCHIVE_DESCRIPTOR_DUPLICATE');
     seenLayers.add(layer.digest);
-    return layer.digest;
+    const layerPath = `blobs/sha256/${layer.digest.slice('sha256:'.length)}`;
+    const archiveEntry = metadata.get(layerPath);
+    if (
+      archiveEntry?.type !== '0' ||
+      archiveEntry.size !== layer.size ||
+      archiveEntry.digest !== layer.digest
+    ) {
+      return fail('ARCHIVE_LAYER_BLOB_INVALID');
+    }
+    return Object.freeze({ digest: layer.digest, path: layerPath, size: layer.size });
   });
   const config = configDetails(Buffer.from(configBlob.bytes, 'base64'), 'ARCHIVE_CONFIG_INVALID');
   if (layers.length !== config.diffIds.length) return fail('ARCHIVE_LAYER_CARDINALITY_INVALID');
@@ -426,7 +463,7 @@ function validateOciLayout(entries) {
   parseEntry(entries, 'index.json', 'ARCHIVE_OCI_INDEX_INVALID');
 }
 
-function validateClassicManifest(entries, imageReference, configBlob, layers) {
+function validateClassicManifest(entries, metadata, imageReference, configBlob, layers) {
   const document = parseEntry(entries, 'manifest.json', 'ARCHIVE_DOCKER_MANIFEST_INVALID');
   const manifests = array(document, 64, 'ARCHIVE_DOCKER_MANIFEST_INVALID');
   const matching = [];
@@ -468,10 +505,19 @@ function validateClassicManifest(entries, imageReference, configBlob, layers) {
       return fail('ARCHIVE_DOCKER_LAYER_BINDING_INVALID');
     }
   }
-  if (layers.length > 0 && layers.every((digest) => SHA256.test(digest))) {
-    for (let index = 0; index < layers.length; index += 1) {
-      const expectedPath = `blobs/sha256/${layers[index].slice('sha256:'.length)}`;
-      if (layerPaths[index] !== expectedPath) return fail('ARCHIVE_DOCKER_LAYER_BINDING_INVALID');
+  for (let index = 0; index < layers.length; index += 1) {
+    const layer = layers[index];
+    const archiveEntry = metadata.get(layerPaths[index]);
+    if (archiveEntry?.type !== '0') {
+      return fail('ARCHIVE_DOCKER_LAYER_BINDING_INVALID');
+    }
+    if (
+      layer.path !== undefined &&
+      (layerPaths[index] !== layer.path ||
+        archiveEntry.size !== layer.size ||
+        archiveEntry.digest !== layer.digest)
+    ) {
+      return fail('ARCHIVE_DOCKER_LAYER_BINDING_INVALID');
     }
   }
 }
@@ -487,6 +533,8 @@ export function deriveProductionImageBinding({
   if (!(entries instanceof Map) || (workspaceKind !== 'api' && workspaceKind !== 'web')) {
     return fail('CAPTURE_ARGUMENT_INVALID');
   }
+  const archiveMetadata = dockerSaveArchiveMetadata.get(entries);
+  if (!(archiveMetadata instanceof Map)) return fail('CAPTURE_ARGUMENT_INVALID');
   if (
     !SHA256.test(expectedImageId) ||
     inspectBeforeImageId !== expectedImageId ||
@@ -507,7 +555,7 @@ export function deriveProductionImageBinding({
   let indexBlob = null;
   let manifestBlob = null;
   let configBlob;
-  let layers = [];
+  let layers;
 
   if (Buffer.isBuffer(rootBytes)) {
     const root = record(parseJsonBytes(rootBytes, 'ARCHIVE_ROOT_INVALID'), 'ARCHIVE_ROOT_INVALID');
@@ -540,12 +588,22 @@ export function deriveProductionImageBinding({
       );
       if (manifestBlob.digest !== selectedDescriptor.digest)
         return fail('ARCHIVE_MANIFEST_INVALID');
-      ({ configBlob, layers } = manifestDetails(entries, manifestBlob, 'ARCHIVE_MANIFEST_INVALID'));
+      ({ configBlob, layers } = manifestDetails(
+        entries,
+        archiveMetadata,
+        manifestBlob,
+        'ARCHIVE_MANIFEST_INVALID',
+      ));
     } else if (MANIFEST_MEDIA_TYPES.has(root.mediaType) && root.schemaVersion === 2) {
       chainType = 'manifest-config';
       archiveFormat = 'oci';
       manifestBlob = blob(entries, rootPath, root.mediaType, undefined, 'ARCHIVE_MANIFEST_INVALID');
-      ({ configBlob, layers } = manifestDetails(entries, manifestBlob, 'ARCHIVE_MANIFEST_INVALID'));
+      ({ configBlob, layers } = manifestDetails(
+        entries,
+        archiveMetadata,
+        manifestBlob,
+        'ARCHIVE_MANIFEST_INVALID',
+      ));
     } else if (root.architecture === 'amd64' && root.os === 'linux') {
       chainType = 'config';
       archiveFormat = 'docker';
@@ -556,7 +614,8 @@ export function deriveProductionImageBinding({
         undefined,
         'ARCHIVE_CONFIG_INVALID',
       );
-      configDetails(rootBytes, 'ARCHIVE_CONFIG_INVALID');
+      const config = configDetails(rootBytes, 'ARCHIVE_CONFIG_INVALID');
+      layers = config.diffIds.map(() => Object.freeze({}));
     } else {
       return fail('ARCHIVE_ROOT_INVALID');
     }
@@ -588,13 +647,13 @@ export function deriveProductionImageBinding({
       'ARCHIVE_CONFIG_INVALID',
     );
     const config = configDetails(classicConfigBytes, 'ARCHIVE_CONFIG_INVALID');
-    layers = Array(config.diffIds.length).fill('');
+    layers = config.diffIds.map(() => Object.freeze({}));
   } else {
     return fail('ARCHIVE_ROOT_UNAVAILABLE');
   }
 
   if (archiveFormat === 'oci') validateOciLayout(entries);
-  validateClassicManifest(entries, imageReference, configBlob, layers);
+  validateClassicManifest(entries, archiveMetadata, imageReference, configBlob, layers);
   const evidence = {
     schemaVersion: IMAGE_BINDING_SCHEMA,
     workspace: workspaceKind,

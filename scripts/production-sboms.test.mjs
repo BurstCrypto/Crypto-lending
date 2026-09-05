@@ -21,6 +21,7 @@ import { afterEach, beforeEach, describe, it } from 'node:test';
 import {
   ProductionImageBindingCaptureError,
   captureProductionImageBinding,
+  readDockerSaveArchive,
   writeProductionImageBindingEvidence,
 } from './capture-production-image-bindings.mjs';
 import {
@@ -63,6 +64,66 @@ function write(relativePath, contents) {
 
 function json(relativePath, value) {
   return write(relativePath, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+function tarEntry(pathname, contents) {
+  const bytes = Buffer.from(contents);
+  const header = Buffer.alloc(512);
+  header.write(pathname, 0, 100, 'ascii');
+  header.write('0000644\0', 100, 8, 'ascii');
+  header.write('0000000\0', 108, 8, 'ascii');
+  header.write('0000000\0', 116, 8, 'ascii');
+  header.write(`${bytes.length.toString(8).padStart(11, '0')}\0`, 124, 12, 'ascii');
+  header.write('00000000000\0', 136, 12, 'ascii');
+  header.fill(0x20, 148, 156);
+  header[156] = '0'.charCodeAt(0);
+  header.write('ustar\0', 257, 6, 'ascii');
+  header.write('00', 263, 2, 'ascii');
+  const checksum = header.reduce((sum, byte) => sum + byte, 0);
+  header.write(checksum.toString(8).padStart(6, '0'), 148, 6, 'ascii');
+  header[154] = 0;
+  header[155] = 0x20;
+  const padding = Buffer.alloc((512 - (bytes.length % 512)) % 512);
+  return Buffer.concat([header, bytes, padding]);
+}
+
+function tarArchive(entries) {
+  return Buffer.concat([
+    ...entries.map(({ contents, pathname }) => tarEntry(pathname, contents)),
+    Buffer.alloc(1024),
+  ]);
+}
+
+function classicDockerArchive(kind, includeLayers = true) {
+  const base = imageMaterial(kind);
+  const layerEntries = [
+    { contents: Buffer.from(`${kind}-first-layer\n`), pathname: 'first/layer.tar' },
+    { contents: Buffer.from(`${kind}-second-layer\n`), pathname: 'second/layer.tar' },
+  ];
+  const config = JSON.parse(base.configBytes.toString('utf8'));
+  config.rootfs.diff_ids = layerEntries.map(
+    ({ contents }) => `sha256:${createHash('sha256').update(contents).digest('hex')}`,
+  );
+  const configBytes = Buffer.from(JSON.stringify(config));
+  const imageId = `sha256:${createHash('sha256').update(configBytes).digest('hex')}`;
+  const configPath = `${imageId.slice('sha256:'.length)}.json`;
+  const manifestBytes = Buffer.from(
+    JSON.stringify([
+      {
+        Config: configPath,
+        Layers: layerEntries.map(({ pathname }) => pathname),
+        RepoTags: [`crypto-lending-${kind}:ci`],
+      },
+    ]),
+  );
+  return Object.freeze({
+    bytes: tarArchive([
+      { contents: configBytes, pathname: configPath },
+      { contents: manifestBytes, pathname: 'manifest.json' },
+      ...(includeLayers ? layerEntries : []),
+    ]),
+    imageId,
+  });
 }
 
 function makeRepositoryFixture() {
@@ -706,6 +767,68 @@ describe('local Docker image archive binding validation', () => {
 });
 
 describe('local Docker image archive capture boundaries', () => {
+  it('captures a complete classic archive with every ordered layer present', () => {
+    const outputDirectory = path.join(fixtureRoot, '.local-validation', 'production-sbom');
+    mkdirSync(outputDirectory, { recursive: true });
+    const archive = classicDockerArchive('api');
+    const outputPath = path.join(outputDirectory, 'api-image.binding.json');
+
+    const evidence = captureProductionImageBinding({
+      workspaceKind: 'api',
+      imageReference: 'crypto-lending-api:ci',
+      expectedImageId: archive.imageId,
+      outputPath,
+      repoRoot: fixtureRoot,
+      inspect() {
+        return archive.imageId;
+      },
+      save(_docker, _image, archivePath) {
+        writeFileSync(archivePath, archive.bytes);
+      },
+    });
+
+    assert.equal(evidence.archiveFormat, 'docker');
+    assert.equal(evidence.chainType, 'config');
+    assert.equal(existsSync(outputPath), true);
+  });
+
+  it('rejects omitted classic layer payloads before writing binding evidence', () => {
+    const outputDirectory = path.join(fixtureRoot, '.local-validation', 'production-sbom');
+    mkdirSync(outputDirectory, { recursive: true });
+    const archive = classicDockerArchive('api', false);
+    const outputPath = path.join(outputDirectory, 'api-image.binding.json');
+
+    assertCaptureCode(
+      () =>
+        captureProductionImageBinding({
+          workspaceKind: 'api',
+          imageReference: 'crypto-lending-api:ci',
+          expectedImageId: archive.imageId,
+          outputPath,
+          repoRoot: fixtureRoot,
+          inspect() {
+            return archive.imageId;
+          },
+          save(_docker, _image, archivePath) {
+            writeFileSync(archivePath, archive.bytes);
+          },
+        }),
+      'ARCHIVE_DOCKER_LAYER_BINDING_INVALID',
+    );
+    assert.equal(existsSync(outputPath), false);
+  });
+
+  it('streams and rejects a forged content-addressed blob above the retention ceiling', () => {
+    const payload = Buffer.alloc(16 * 1024 * 1024 + 1, 0x61);
+    const archivePath = path.join(fixtureRoot, 'forged-large-blob.tar');
+    writeFileSync(
+      archivePath,
+      tarArchive([{ contents: payload, pathname: `blobs/sha256/${'0'.repeat(64)}` }]),
+    );
+
+    assertCaptureCode(() => readDockerSaveArchive(archivePath), 'ARCHIVE_BLOB_DIGEST_INVALID');
+  });
+
   it('fails before parsing when the image tag changes across docker save', () => {
     const outputDirectory = path.join(fixtureRoot, '.local-validation', 'production-sbom');
     mkdirSync(outputDirectory, { recursive: true });
