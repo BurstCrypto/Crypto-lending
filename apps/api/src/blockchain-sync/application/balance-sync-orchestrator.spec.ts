@@ -182,11 +182,18 @@ function recoveryCandidate(
 
 class MemoryCheckpointPort implements BalanceSyncCheckpointPort {
   state: BalanceSyncCheckpoint | null;
-  readonly upserts: Array<Readonly<{ mode: BalanceSyncSuccessMode; observationId: string }>> = [];
-  readonly replacements: Array<
-    Readonly<{ removedObservationId: string | null; replacementObservationId: string }>
+  readonly upserts: Array<
+    Readonly<{ mode: BalanceSyncSuccessMode; observationId: string; succeededAt: string }>
   > = [];
-  readonly staleWrites: Array<Readonly<{ failureCode: BalanceSyncFailureCode }>> = [];
+  readonly replacements: Array<
+    Readonly<{
+      removedObservationId: string | null;
+      replacementObservationId: string;
+      recoveredAt: string;
+    }>
+  > = [];
+  readonly staleWrites: Array<Readonly<{ failureCode: BalanceSyncFailureCode; failedAt: string }>> =
+    [];
 
   constructor(initial: BalanceSyncCheckpoint | null) {
     this.state = initial;
@@ -208,7 +215,11 @@ class MemoryCheckpointPort implements BalanceSyncCheckpointPort {
     ) {
       throw new Error('unchanged observation mismatch');
     }
-    this.upserts.push({ mode: input.mode, observationId: input.observation.observationId });
+    this.upserts.push({
+      mode: input.mode,
+      observationId: input.observation.observationId,
+      succeededAt: input.succeededAt,
+    });
     this.state = Object.freeze({
       revision: (this.state?.revision ?? -1) + 1,
       scope: input.scope,
@@ -230,6 +241,7 @@ class MemoryCheckpointPort implements BalanceSyncCheckpointPort {
     this.replacements.push({
       removedObservationId: this.state.currentObservation?.observationId ?? null,
       replacementObservationId: input.replacement.observationId,
+      recoveredAt: input.recoveredAt,
     });
     this.state = Object.freeze({
       revision: this.state.revision + 1,
@@ -246,7 +258,7 @@ class MemoryCheckpointPort implements BalanceSyncCheckpointPort {
     input: Parameters<BalanceSyncCheckpointPort['preserveLastGoodAndMarkStale']>[0],
   ): Promise<void> {
     this.assertRevision(input.expectedRevision);
-    this.staleWrites.push({ failureCode: input.failureCode });
+    this.staleWrites.push({ failureCode: input.failureCode, failedAt: input.failedAt });
     this.state = Object.freeze({
       revision: (this.state?.revision ?? -1) + 1,
       scope: input.scope,
@@ -287,6 +299,17 @@ class MemoryMetricsPort {
   alert(alert: BalanceSyncAlert): void {
     this.alerts.push(alert);
   }
+}
+
+function sequencedClock(...values: readonly (string | number)[]): BalanceSyncClockPort {
+  let index = 0;
+  return {
+    now: () => {
+      const value = values[Math.min(index, values.length - 1)];
+      index += 1;
+      return typeof value === 'string' ? new Date(value) : new Date(value ?? Number.NaN);
+    },
+  };
 }
 
 function harness(
@@ -341,12 +364,70 @@ describe('BalanceSyncOrchestrator', () => {
       observationId: first.observationId,
     });
     expect(test.checkpoints.upserts).toEqual([
-      { mode: 'CREATED', observationId: first.observationId },
-      { mode: 'UNCHANGED', observationId: first.observationId },
+      { mode: 'CREATED', observationId: first.observationId, succeededAt: NOW },
+      { mode: 'UNCHANGED', observationId: first.observationId, succeededAt: NOW },
     ]);
     expect(test.checkpoints.state?.currentObservation?.observationId).toBe(first.observationId);
     expect(test.jobs.retries).toHaveLength(0);
     expect(test.jobs.deadLetters).toHaveLength(0);
+  });
+
+  it('accepts a source retrieved after processing began and stamps success at read completion', async () => {
+    const readCompletedAt = '2026-08-24T12:00:32.000Z';
+    const test = harness({
+      initial: null,
+      read: async () =>
+        candidate({
+          source: source('100', BLOCK_100_A, BLOCK_99, '2026-08-24T12:00:31.000Z'),
+        }),
+      clock: sequencedClock(NOW, '2026-08-24T12:00:30.500Z', readCompletedAt),
+    });
+
+    await expect(test.orchestrator.process(job())).resolves.toMatchObject({
+      status: 'COMPLETED',
+      outcome: 'CREATED',
+    });
+    expect(test.checkpoints.upserts).toHaveLength(1);
+    expect(test.checkpoints.upserts[0]?.succeededAt).toBe(readCompletedAt);
+  });
+
+  it.each([
+    ['regressing', '2026-08-24T12:00:29.999Z'],
+    ['invalid', Number.NaN],
+  ])('fails closed when the post-read clock is %s', async (_name, postReadTime) => {
+    const test = harness({
+      clock: sequencedClock(NOW, '2026-08-24T12:00:30.500Z', postReadTime),
+    });
+
+    await expect(test.orchestrator.process(job())).rejects.toEqual(
+      new BalanceSyncOrchestratorError('INVALID_BALANCE_SYNC_CLOCK'),
+    );
+    expect(test.checkpoints.upserts).toHaveLength(0);
+    expect(test.checkpoints.replacements).toHaveLength(0);
+    expect(test.checkpoints.staleWrites).toHaveLength(0);
+    expect(test.jobs.retries).toHaveLength(0);
+    expect(test.jobs.deadLetters).toHaveLength(0);
+  });
+
+  it('rejects a candidate timestamp later than the advancing post-read clock', async () => {
+    const test = harness({
+      read: async () =>
+        candidate({
+          source: source('100', BLOCK_100_A, BLOCK_99, '2026-08-24T12:00:33.000Z'),
+        }),
+      clock: sequencedClock(
+        NOW,
+        '2026-08-24T12:00:30.500Z',
+        '2026-08-24T12:00:32.000Z',
+        '2026-08-24T12:00:34.000Z',
+      ),
+    });
+
+    await expect(test.orchestrator.process(job())).resolves.toMatchObject({
+      status: 'DEAD_LETTERED',
+      failureCode: 'PROVIDER_INVALID_DATA',
+    });
+    expect(test.checkpoints.upserts).toHaveLength(0);
   });
 
   it('updates the current observation when the validated chain head appends', async () => {
@@ -408,6 +489,7 @@ describe('BalanceSyncOrchestrator', () => {
       {
         removedObservationId: original.currentObservation?.observationId,
         replacementObservationId: result.observationId,
+        recoveredAt: NOW,
       },
     ]);
     expect(test.checkpoints.state?.currentObservation).toMatchObject({
@@ -422,6 +504,56 @@ describe('BalanceSyncOrchestrator', () => {
       tier: 'PROVISIONAL',
       attempt: 1,
     });
+  });
+
+  it('stamps reorg recovery at rescan completion with an advancing clock', async () => {
+    const readCompletedAt = '2026-08-24T12:00:32.000Z';
+    const rescanCompletedAt = '2026-08-24T12:00:34.000Z';
+    const test = harness({
+      read: async () =>
+        candidate({
+          source: source('100', BLOCK_100_B, BLOCK_99, '2026-08-24T12:00:31.000Z'),
+        }),
+      rescan: async () =>
+        recoveryCandidate({
+          source: source('101', BLOCK_101_B, BLOCK_100_B, '2026-08-24T12:00:33.000Z'),
+        }),
+      clock: sequencedClock(NOW, '2026-08-24T12:00:30.500Z', readCompletedAt, rescanCompletedAt),
+    });
+
+    await expect(test.orchestrator.process(job())).resolves.toMatchObject({
+      status: 'COMPLETED',
+      outcome: 'REORG_RECOVERED',
+    });
+    expect(test.checkpoints.replacements).toHaveLength(1);
+    expect(test.checkpoints.replacements[0]?.recoveredAt).toBe(rescanCompletedAt);
+  });
+
+  it.each([
+    ['regressing', '2026-08-24T12:00:31.999Z'],
+    ['invalid', Number.NaN],
+  ])('fails closed when the post-rescan clock is %s', async (_name, postRescanTime) => {
+    const test = harness({
+      read: async () =>
+        candidate({
+          source: source('100', BLOCK_100_B, BLOCK_99, '2026-08-24T12:00:31.000Z'),
+        }),
+      clock: sequencedClock(
+        NOW,
+        '2026-08-24T12:00:30.500Z',
+        '2026-08-24T12:00:32.000Z',
+        postRescanTime,
+      ),
+    });
+
+    await expect(test.orchestrator.process(job())).rejects.toEqual(
+      new BalanceSyncOrchestratorError('INVALID_BALANCE_SYNC_CLOCK'),
+    );
+    expect(test.checkpoints.upserts).toHaveLength(0);
+    expect(test.checkpoints.replacements).toHaveLength(0);
+    expect(test.checkpoints.staleWrites).toHaveLength(0);
+    expect(test.jobs.retries).toHaveLength(0);
+    expect(test.jobs.deadLetters).toHaveLength(0);
   });
 
   it.each([
@@ -594,6 +726,22 @@ describe('BalanceSyncOrchestrator', () => {
     expect(test.metrics.alerts.map(({ code }) => code)).toEqual(['PROVIDER_FAILURE', 'DATA_STALE']);
   });
 
+  it('stamps stale state and its retry envelope at provider-failure completion', async () => {
+    const failedAt = '2026-08-24T12:00:35.000Z';
+    const test = harness({
+      read: async () => {
+        throw new BalanceSyncIndexerFailure('PROVIDER_TIMEOUT');
+      },
+      clock: sequencedClock(NOW, '2026-08-24T12:00:30.500Z', failedAt),
+    });
+
+    const result = await test.orchestrator.process(job());
+
+    expect(result).toMatchObject({ status: 'RETRY_SCHEDULED' });
+    expect(test.checkpoints.staleWrites).toEqual([{ failureCode: 'PROVIDER_TIMEOUT', failedAt }]);
+    expect(test.jobs.retries[0]?.envelope.occurredAt).toBe(failedAt);
+  });
+
   it('honors an in-bound rate-limit hint without allowing unbounded queue delay', async () => {
     const inBound = harness({
       read: async () => {
@@ -638,7 +786,12 @@ describe('BalanceSyncOrchestrator', () => {
 
   it('fails closed before indexer access when canonical live capability proof is absent', async () => {
     const read = jest.fn(async () => candidate());
-    const test = harness({ initial: null, read });
+    const checkpointLoadedAt = '2026-08-24T12:00:31.000Z';
+    const test = harness({
+      initial: null,
+      read,
+      clock: sequencedClock(NOW, checkpointLoadedAt),
+    });
 
     const result = await test.orchestrator.process(job({ requiredTier: 'CANONICAL' }));
 
@@ -651,6 +804,9 @@ describe('BalanceSyncOrchestrator', () => {
       currentObservation: null,
       freshness: 'UNAVAILABLE',
     });
+    expect(test.checkpoints.staleWrites).toEqual([
+      { failureCode: 'PERMANENT_PROVIDER_FAILURE', failedAt: checkpointLoadedAt },
+    ]);
   });
 
   it.each([

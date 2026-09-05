@@ -88,7 +88,10 @@ interface NormalizedCandidate {
 interface RecoveryResult {
   readonly observation: BalanceSyncObservation;
   readonly lastFinalizedSource: BalanceSyncSourcePoint;
+  readonly completedAt: ClockTime;
 }
+
+type ClockTime = Readonly<{ canonical: string; milliseconds: number }>;
 
 /**
  * Provider-neutral KAN-65 orchestration. All queue, checkpoint, indexer, clock,
@@ -111,8 +114,12 @@ export class BalanceSyncOrchestrator {
     } catch {
       throw orchestratorError('INVALID_BALANCE_SYNC_JOB');
     }
-    const now = clockTime(this.clock);
-    if (Date.parse(job.occurredAt) > now.milliseconds) {
+    let observedAt = clockTime(this.clock);
+    const advanceClock = (): ClockTime => {
+      observedAt = advancingClockTime(this.clock, observedAt);
+      return observedAt;
+    };
+    if (Date.parse(job.occurredAt) > observedAt.milliseconds) {
       throw orchestratorError('INVALID_BALANCE_SYNC_JOB');
     }
     const scope = Object.freeze({
@@ -120,22 +127,22 @@ export class BalanceSyncOrchestrator {
       walletId: job.payload.walletId,
       networkId: job.payload.networkId,
     });
-    const checkpoint = await this.loadCheckpoint(scope, now.milliseconds);
+    const checkpoint = await this.loadCheckpoint(scope, advanceClock);
     const threshold = balanceSyncTierThreshold(job.payload.networkId, job.payload.requiredTier);
     if (!threshold?.locallyExecutable) {
       return this.handleFailure(
         job,
         scope,
         checkpoint,
-        now.canonical,
+        observedAt.canonical,
         'PERMANENT_PROVIDER_FAILURE',
       );
     }
 
     try {
       if (job.payload.cause === 'MANUAL_RECOVERY' || job.payload.rescanFromPosition !== null) {
-        const recovery = await this.recoverFromReorg(job, scope, checkpoint, now);
-        await this.commitRecovery(scope, checkpoint, recovery, now.canonical);
+        const recovery = await this.recoverFromReorg(job, scope, checkpoint, advanceClock);
+        await this.commitRecovery(scope, checkpoint, recovery, recovery.completedAt.canonical);
         this.recordMetric({
           event: 'REORG_RECOVERED',
           networkId: scope.networkId,
@@ -156,11 +163,9 @@ export class BalanceSyncOrchestrator {
         tier: job.payload.requiredTier,
         selector: threshold.selector,
       });
-      const candidate = normalizeCandidate(
-        await this.indexer.readCurrent(request),
-        request,
-        now.milliseconds,
-      );
+      const value = await this.indexer.readCurrent(request);
+      const readCompletedAt = advanceClock();
+      const candidate = normalizeCandidate(value, request, readCompletedAt.milliseconds);
       const continuity = continuityAction(checkpoint?.currentObservation ?? null, candidate);
       if (
         continuity === 'RECOVER_PROVISIONAL_FROM_LAST_FINALIZED_COMMON_ANCESTOR' ||
@@ -172,8 +177,8 @@ export class BalanceSyncOrchestrator {
           tier: job.payload.requiredTier,
           attempt: job.payload.attempt,
         });
-        const recovery = await this.recoverFromReorg(job, scope, checkpoint, now);
-        await this.commitRecovery(scope, checkpoint, recovery, now.canonical);
+        const recovery = await this.recoverFromReorg(job, scope, checkpoint, advanceClock);
+        await this.commitRecovery(scope, checkpoint, recovery, recovery.completedAt.canonical);
         this.recordMetric({
           event: 'REORG_RECOVERED',
           networkId: scope.networkId,
@@ -199,7 +204,7 @@ export class BalanceSyncOrchestrator {
         scope,
         checkpoint?.currentObservation ?? null,
         candidate,
-        now.milliseconds,
+        readCompletedAt.milliseconds,
       );
       if (freshness.freshness !== 'CURRENT' || freshness.effectiveHeadAdvancedAtMs === null) {
         throw new BalanceSyncIndexerFailure('PROVIDER_UNAVAILABLE');
@@ -220,7 +225,7 @@ export class BalanceSyncOrchestrator {
       } else {
         mode = 'UPDATED';
       }
-      await this.commitCurrent(scope, checkpoint, observation, mode, now.canonical);
+      await this.commitCurrent(scope, checkpoint, observation, mode, readCompletedAt.canonical);
       this.recordMetric({
         event: `SYNC_${mode}`,
         networkId: scope.networkId,
@@ -244,11 +249,12 @@ export class BalanceSyncOrchestrator {
           attempt: job.payload.attempt,
         });
       }
+      const failedAt = advanceClock();
       return this.handleFailure(
         job,
         scope,
         checkpoint,
-        now.canonical,
+        failedAt.canonical,
         failure.code,
         failure.retryAfterSeconds,
       );
@@ -257,7 +263,7 @@ export class BalanceSyncOrchestrator {
 
   private async loadCheckpoint(
     scope: BalanceSyncScope,
-    nowMs: number,
+    advanceClock: () => ClockTime,
   ): Promise<BalanceSyncCheckpoint | null> {
     let value: unknown;
     try {
@@ -265,8 +271,9 @@ export class BalanceSyncOrchestrator {
     } catch {
       throw orchestratorError('BALANCE_SYNC_CHECKPOINT_FAILED');
     }
+    const loadedAt = advanceClock();
     try {
-      return validateCheckpoint(value, scope, nowMs);
+      return validateCheckpoint(value, scope, loadedAt.milliseconds);
     } catch {
       throw orchestratorError('INVALID_BALANCE_SYNC_CHECKPOINT');
     }
@@ -276,7 +283,7 @@ export class BalanceSyncOrchestrator {
     job: BalanceSyncJobEnvelope,
     scope: BalanceSyncScope,
     checkpoint: BalanceSyncCheckpoint | null,
-    now: Readonly<{ canonical: string; milliseconds: number }>,
+    advanceClock: () => ClockTime,
   ): Promise<RecoveryResult> {
     const anchor = checkpoint?.lastFinalizedSource;
     if (
@@ -304,6 +311,7 @@ export class BalanceSyncOrchestrator {
     } catch {
       throw new BalanceSyncIndexerFailure('REORG_RECOVERY_FAILED');
     }
+    const completedAt = advanceClock();
     const record = exactRecoveryRecord(value, [
       'walletId',
       'networkId',
@@ -321,7 +329,7 @@ export class BalanceSyncOrchestrator {
         positions: record.positions,
       },
       request,
-      now.milliseconds,
+      completedAt.milliseconds,
     );
     const replay = exactRecoveryRecord(record.replay, [
       'fromPosition',
@@ -354,7 +362,7 @@ export class BalanceSyncOrchestrator {
     ) {
       throw new BalanceSyncIndexerFailure('REORG_RECOVERY_FAILED');
     }
-    const freshness = freshnessForCandidate(scope, null, candidate, now.milliseconds);
+    const freshness = freshnessForCandidate(scope, null, candidate, completedAt.milliseconds);
     if (freshness.freshness !== 'CURRENT' || freshness.effectiveHeadAdvancedAtMs === null) {
       throw new BalanceSyncIndexerFailure('REORG_RECOVERY_FAILED');
     }
@@ -365,6 +373,7 @@ export class BalanceSyncOrchestrator {
         new Date(freshness.effectiveHeadAdvancedAtMs).toISOString(),
       ),
       lastFinalizedSource: anchor,
+      completedAt,
     });
   }
 
@@ -916,10 +925,7 @@ function failureFrom(error: unknown): Readonly<{
   return Object.freeze({ code: 'UNCLASSIFIED_FAILURE' });
 }
 
-function clockTime(clock: BalanceSyncClockPort): Readonly<{
-  canonical: string;
-  milliseconds: number;
-}> {
+function clockTime(clock: BalanceSyncClockPort): ClockTime {
   let value: Date;
   try {
     value = clock.now();
@@ -930,6 +936,14 @@ function clockTime(clock: BalanceSyncClockPort): Readonly<{
     throw orchestratorError('INVALID_BALANCE_SYNC_CLOCK');
   }
   return Object.freeze({ canonical: value.toISOString(), milliseconds: value.getTime() });
+}
+
+function advancingClockTime(clock: BalanceSyncClockPort, previous: ClockTime): ClockTime {
+  const current = clockTime(clock);
+  if (current.milliseconds < previous.milliseconds) {
+    throw orchestratorError('INVALID_BALANCE_SYNC_CLOCK');
+  }
+  return current;
 }
 
 function parseTimestamp(value: unknown): Readonly<{ canonical: string; milliseconds: number }> {
