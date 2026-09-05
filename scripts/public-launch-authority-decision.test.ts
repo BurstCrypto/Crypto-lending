@@ -20,6 +20,7 @@ import { test, type TestContext } from 'node:test';
 
 import {
   canonicalPublicLaunchAuthorityJson,
+  closePublicLaunchAuthorityFileDescriptorForTest,
   isVerifiedPublicLaunchAuthorityDecisionSet,
   loadAndVerifyPublicLaunchAuthorityDecisionWithTestRegistry,
   MAX_PUBLIC_LAUNCH_AUTHORITY_DECISION_BYTES,
@@ -552,6 +553,10 @@ test('loads a stable regular file through the unbranded test seam', () => {
     assert.equal(verified.signatureValidated, true);
     assert.equal(isVerifiedPublicLaunchAuthorityDecisionSet(verified), false);
   });
+});
+
+test('descriptor close failures retain the fixed launch-authority error contract', () => {
+  assertInvalid(() => closePublicLaunchAuthorityFileDescriptorForTest(-1));
 });
 
 test('rejects empty, oversized, directory, and unstable file inputs', () => {

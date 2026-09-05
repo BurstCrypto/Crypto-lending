@@ -12,7 +12,7 @@ import {
   openSync,
   realpathSync,
   readSync,
-  type Stats,
+  type BigIntStats,
 } from 'node:fs';
 import { join, normalize, parse, resolve } from 'node:path';
 import { TextDecoder } from 'node:util';
@@ -744,18 +744,33 @@ export function revalidatePublicLaunchAuthorityDecisionForApplication(
   }
 }
 
-function sameStableFile(left: Stats, right: Stats): boolean {
+function sameStableFile(left: BigIntStats, right: BigIntStats): boolean {
   return (
     left.isFile() &&
     right.isFile() &&
-    left.nlink === 1 &&
-    right.nlink === 1 &&
+    left.nlink === 1n &&
+    right.nlink === 1n &&
     left.dev === right.dev &&
     left.ino === right.ino &&
+    left.mode === right.mode &&
     left.size === right.size &&
-    left.mtimeMs === right.mtimeMs &&
-    left.ctimeMs === right.ctimeMs
+    left.mtimeNs === right.mtimeNs &&
+    left.ctimeNs === right.ctimeNs &&
+    left.birthtimeNs === right.birthtimeNs
   );
+}
+
+function closeStableFileDescriptor(descriptor: number): void {
+  try {
+    closeSync(descriptor);
+  } catch {
+    return invalid();
+  }
+}
+
+/** Descriptor-close test seam; it cannot read or confer launch authority. */
+export function closePublicLaunchAuthorityFileDescriptorForTest(descriptor: number): void {
+  closeStableFileDescriptor(descriptor);
 }
 
 function comparablePath(value: string): string {
@@ -810,27 +825,28 @@ function readBoundedStableRegularFile(path: string, afterFirstReadForTest?: () =
   let descriptor: number | undefined;
   try {
     assertNoLinkedPathComponents(absolutePath);
-    const before = lstatSync(absolutePath);
+    const before = lstatSync(absolutePath, { bigint: true });
     if (
       before.isSymbolicLink() ||
       !before.isFile() ||
-      before.nlink !== 1 ||
-      before.size <= 0 ||
-      before.size > MAX_PUBLIC_LAUNCH_AUTHORITY_DECISION_BYTES
+      before.nlink !== 1n ||
+      before.size <= 0n ||
+      before.size > BigInt(MAX_PUBLIC_LAUNCH_AUTHORITY_DECISION_BYTES)
     ) {
       return invalid();
     }
     descriptor = openSync(absolutePath, fileConstants.O_RDONLY | (fileConstants.O_NOFOLLOW ?? 0));
-    const opened = fstatSync(descriptor);
+    const opened = fstatSync(descriptor, { bigint: true });
     if (!sameStableFile(before, opened)) return invalid();
-    const first = readDescriptorExactly(descriptor, opened.size);
+    const size = Number(opened.size);
+    const first = readDescriptorExactly(descriptor, size);
     afterFirstReadForTest?.();
-    const afterFirst = fstatSync(descriptor);
+    const afterFirst = fstatSync(descriptor, { bigint: true });
     if (!sameStableFile(opened, afterFirst)) return invalid();
-    const second = readDescriptorExactly(descriptor, opened.size);
-    const afterSecond = fstatSync(descriptor);
+    const second = readDescriptorExactly(descriptor, size);
+    const afterSecond = fstatSync(descriptor, { bigint: true });
     assertNoLinkedPathComponents(absolutePath);
-    const finalPath = lstatSync(absolutePath);
+    const finalPath = lstatSync(absolutePath, { bigint: true });
     if (
       finalPath.isSymbolicLink() ||
       !sameStableFile(opened, afterSecond) ||
@@ -843,13 +859,7 @@ function readBoundedStableRegularFile(path: string, afterFirstReadForTest?: () =
   } catch {
     return invalid();
   } finally {
-    if (descriptor !== undefined) {
-      try {
-        closeSync(descriptor);
-      } catch {
-        // Closing failure never changes the fixed public error contract.
-      }
-    }
+    if (descriptor !== undefined) closeStableFileDescriptor(descriptor);
   }
 }
 
