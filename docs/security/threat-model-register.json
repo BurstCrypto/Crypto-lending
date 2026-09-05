@@ -553,12 +553,17 @@
       "id": "KEY-005",
       "name": "Redis ACL credentials",
       "classification": "RESTRICTED",
-      "consumers": ["API health boundary", "future reviewed operator"],
-      "injection": "API-only managed secret reference; worker and migration reject Redis configuration",
+      "consumers": ["API health boundary", "disabled one-off revocation task"],
+      "injection": "Exact-VersionId API A/B and operator-only managed secret references; worker and migration reject Redis configuration",
       "storage": "Designed managed secret plus Redis ACL digest; no plaintext repository value",
-      "rotation": "Inactive-slot regeneration and old-slot revocation procedure remains a deployment gate",
+      "rotation": "A/B slots use the reviewed transition chain; the separately immutable operator version requires a dedicated future transition before rotation",
       "owner": "SRE and Security",
-      "evidence": ["docs/KAN-233.md", "infra/redis/users.acl"]
+      "evidence": [
+        "docs/KAN-233.md",
+        "infra/redis/users.acl",
+        "infra/aws/application-workload-boundaries.yaml",
+        "infra/aws/application-observability.yaml"
+      ]
     },
     {
       "id": "KEY-006",

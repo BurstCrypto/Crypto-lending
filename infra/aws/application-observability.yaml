@@ -91,9 +91,11 @@ Parameters:
     AllowedPattern: '^(?:NONE|arn:[a-z0-9-]+:iam::[0-9]{12}:role/[A-Za-z0-9_+=,.@/-]{1,512})$'
   RedisOperatorSecretArn:
     Type: String
-    NoEcho: true
     Default: NONE
     AllowedPattern: '^(?:NONE|arn:[a-z0-9-]+:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:[A-Za-z0-9/_+=.@-]+)$'
+  RedisOperatorSecretVersionId:
+    Type: String
+    AllowedPattern: '^(UNPINNED|[A-Za-z0-9_-]{32,64})$'
 
 Rules:
   ExplicitBillingAcknowledgementRequired:
@@ -122,7 +124,8 @@ Rules:
           - !And
             - !Not [!Equals [!Ref RedisOperatorTaskExecutionRoleArn, NONE]]
             - !Not [!Equals [!Ref RedisOperatorSecretArn, NONE]]
-        AssertDescription: Redis operator mode requires its exact execution role and secret.
+            - !Not [!Equals [!Ref RedisOperatorSecretVersionId, UNPINNED]]
+        AssertDescription: Redis operator mode requires its exact execution role, secret, and secret version.
 
 Conditions:
   CreateAlarms: !Equals [!Ref EnableOperationalAlarms, 'true']
@@ -401,6 +404,7 @@ Resources:
   RedisSessionRevocationTaskDefinition:
     Type: AWS::ECS::TaskDefinition
     Condition: RedisOperatorEnabled
+    Metadata: { cfn-lint: { config: { ignore_checks: [W1030] } } }
     Properties:
       ContainerDefinitions:
         - Name: redis-session-revocation
@@ -419,7 +423,7 @@ Resources:
             - { Name: REDIS_OPERATOR_USERNAME, Value: !Sub 'crypto_operator_${EnvironmentName}' }
           Secrets:
             - Name: REDIS_OPERATOR_PASSWORD
-              ValueFrom: !Sub '${RedisOperatorSecretArn}:password::'
+              ValueFrom: !Sub '${RedisOperatorSecretArn}:password::${RedisOperatorSecretVersionId}'
           LinuxParameters:
             Capabilities: { Drop: [ALL] }
             InitProcessEnabled: true

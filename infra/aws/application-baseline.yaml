@@ -18,20 +18,20 @@ Parameters:
  WorkloadBoundariesTemplateUrl:
   Type: String
   MaxLength: 1024
-  AllowedPattern: '^https://[a-z0-9][a-z0-9-]{1,61}[a-z0-9]\.s3\.[a-z0-9-]+\.(?:amazonaws\.com|amazonaws\.com\.cn)/application-workload-boundaries-3a6da9fed6e5e632c7d2fcf0804809de9f50997adb467407c20f95096813228e\.yaml\?versionId=[A-Za-z0-9._~%+-]+$'
+  AllowedPattern: '^https://[a-z0-9][a-z0-9-]{1,61}[a-z0-9]\.s3\.[a-z0-9-]+\.(?:amazonaws\.com|amazonaws\.com\.cn)/application-workload-boundaries-4c74c98e73635df30570dfe1e726b41cb6f62832f0bfc2e43dcd087d384b78de\.yaml\?versionId=[A-Za-z0-9._~%+-]+$'
  WorkloadBoundariesTemplateSha256:
   Type: String
-  AllowedValues: [3a6da9fed6e5e632c7d2fcf0804809de9f50997adb467407c20f95096813228e]
+  AllowedValues: [4c74c98e73635df30570dfe1e726b41cb6f62832f0bfc2e43dcd087d384b78de]
  WorkloadBoundariesArtifactBindingSha256:
   Type: String
   AllowedPattern: '^[a-f0-9]{64}$'
  ObservabilityTemplateUrl:
   Type: String
   MaxLength: 1024
-  AllowedPattern: '^https://[a-z0-9][a-z0-9-]{1,61}[a-z0-9]\.s3\.[a-z0-9-]+\.(?:amazonaws\.com|amazonaws\.com\.cn)/application-observability-4e3fdde76c3805500f17e1eedc0cd213e77ea0d1704fe56f30810ffa8fd859f9\.yaml\?versionId=[A-Za-z0-9._~%+-]+$'
+  AllowedPattern: '^https://[a-z0-9][a-z0-9-]{1,61}[a-z0-9]\.s3\.[a-z0-9-]+\.(?:amazonaws\.com|amazonaws\.com\.cn)/application-observability-5066ad58b64d73717bd3a9b2fc1ab290435c88ef731c0cf4eb9985c7aa4192cc\.yaml\?versionId=[A-Za-z0-9._~%+-]+$'
  ObservabilityTemplateSha256:
   Type: String
-  AllowedValues: [4e3fdde76c3805500f17e1eedc0cd213e77ea0d1704fe56f30810ffa8fd859f9]
+  AllowedValues: [5066ad58b64d73717bd3a9b2fc1ab290435c88ef731c0cf4eb9985c7aa4192cc]
  ObservabilityArtifactBindingSha256:
   Type: String
   AllowedPattern: '^[a-f0-9]{64}$'
@@ -184,6 +184,9 @@ Parameters:
  RedisApiSlotBVersionId:
   Type: String
   AllowedPattern: '^(UNPINNED|[A-Za-z0-9_-]{32,64})$'
+ RedisOperatorSecretVersionId:
+  Type: String
+  AllowedPattern: '^(UNPINNED|[A-Za-z0-9_-]{32,64})$'
  RedisOperatorMode:
   Type: String
   Default: DISABLED
@@ -258,9 +261,9 @@ Rules:
  FixedSlotVersionsRequireSafeState:
   Assertions:
    - Assert: !Or
-      - !And [!And [!Equals [!Ref ApiDatabaseSlotAVersionId, UNPINNED], !Equals [!Ref ApiDatabaseSlotBVersionId, UNPINNED], !Equals [!Ref WorkerDatabaseSlotAVersionId, UNPINNED], !Equals [!Ref WorkerDatabaseSlotBVersionId, UNPINNED], !Equals [!Ref RedisApiSlotAVersionId, UNPINNED], !Equals [!Ref RedisApiSlotBVersionId, UNPINNED]], !And [!Equals [!Ref ApiDesiredCount, 0], !Equals [!Ref WebDesiredCount, 0], !Equals [!Ref WorkerDesiredCount, 0]], !And [!Equals [!Ref ApiDatabaseCredentialPhase, A_ONLY], !Equals [!Ref WorkerDatabaseCredentialPhase, A_ONLY], !Equals [!Ref RedisCredentialPhase, A_ONLY], !Equals [!Ref RedisOperatorMode, DISABLED]]]
-      - !And [!Not [!Equals [!Ref ApiDatabaseSlotAVersionId, UNPINNED]], !Not [!Equals [!Ref ApiDatabaseSlotBVersionId, UNPINNED]], !Not [!Equals [!Ref WorkerDatabaseSlotAVersionId, UNPINNED]], !Not [!Equals [!Ref WorkerDatabaseSlotBVersionId, UNPINNED]], !Not [!Equals [!Ref RedisApiSlotAVersionId, UNPINNED]], !Not [!Equals [!Ref RedisApiSlotBVersionId, UNPINNED]]]
-     AssertDescription: Fixed-slot versions must be all pinned or an inert A_ONLY adoption sentinel.
+      - !And [!And [!Equals [!Ref ApiDatabaseSlotAVersionId, UNPINNED], !Equals [!Ref ApiDatabaseSlotBVersionId, UNPINNED], !Equals [!Ref WorkerDatabaseSlotAVersionId, UNPINNED], !Equals [!Ref WorkerDatabaseSlotBVersionId, UNPINNED], !Equals [!Ref RedisApiSlotAVersionId, UNPINNED], !Equals [!Ref RedisApiSlotBVersionId, UNPINNED], !Equals [!Ref RedisOperatorSecretVersionId, UNPINNED]], !And [!Equals [!Ref ApiDesiredCount, 0], !Equals [!Ref WebDesiredCount, 0], !Equals [!Ref WorkerDesiredCount, 0]], !And [!Equals [!Ref ApiDatabaseCredentialPhase, A_ONLY], !Equals [!Ref WorkerDatabaseCredentialPhase, A_ONLY], !Equals [!Ref RedisCredentialPhase, A_ONLY], !Equals [!Ref RedisOperatorMode, DISABLED]]]
+      - !And [!Not [!Equals [!Ref ApiDatabaseSlotAVersionId, UNPINNED]], !Not [!Equals [!Ref ApiDatabaseSlotBVersionId, UNPINNED]], !Not [!Equals [!Ref WorkerDatabaseSlotAVersionId, UNPINNED]], !Not [!Equals [!Ref WorkerDatabaseSlotBVersionId, UNPINNED]], !Not [!Equals [!Ref RedisApiSlotAVersionId, UNPINNED]], !Not [!Equals [!Ref RedisApiSlotBVersionId, UNPINNED]], !Not [!Equals [!Ref RedisOperatorSecretVersionId, UNPINNED]]]
+     AssertDescription: Credential versions must be all pinned or an inert A_ONLY adoption sentinel.
 Conditions:
  UseVpcEndpoints: !Equals [!Ref PrivateEgressMode, VpcEndpoints]
  ProtectDatabase: !Equals [!Ref DatabaseDeletionProtection, 'true']
@@ -893,6 +896,7 @@ Resources:
     WorkerDatabaseSlotBVersionId: !Ref WorkerDatabaseSlotBVersionId
     RedisApiSlotAVersionId: !Ref RedisApiSlotAVersionId
     RedisApiSlotBVersionId: !Ref RedisApiSlotBVersionId
+    RedisOperatorSecretVersionId: !Ref RedisOperatorSecretVersionId
     RedisOperatorMode: !Ref RedisOperatorMode
    Tags:
     - Key: WorkloadBoundariesTemplateSha256
@@ -928,6 +932,7 @@ Resources:
     ApiLogGroupName: !Ref ApiLogGroup
     WorkerLogGroupName: !Ref WorkerLogGroup
     RedisOperatorMode: !Ref RedisOperatorMode
+    RedisOperatorSecretVersionId: !Ref RedisOperatorSecretVersionId
     RedisCredentialPhase: !Ref RedisCredentialPhase
     ApiImageUri: !Ref ApiImageUri
     RedisEndpointAddress: !GetAtt RedisReplicationGroup.PrimaryEndPoint.Address

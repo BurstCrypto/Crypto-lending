@@ -90,7 +90,7 @@ const EXACT_KEYS = Object.freeze({
     'workloadTemplateSha256',
   ],
   predecessor: ['stateSha256', 'transitionSha256'],
-  state: ['operatorMode', 'apiDatabase', 'workerDatabase', 'redis'],
+  state: ['operatorMode', 'redisOperatorSecretVersionId', 'apiDatabase', 'workerDatabase', 'redis'],
   scope: ['phase', 'slots', 'preparation', 'overlap'],
   slots: ['a', 'b'],
   slot: ['generation', 'currentVersionId', 'usedVersionIds'],
@@ -302,10 +302,25 @@ function validateState(state, allowUnpinned, now, label, errors) {
   if (state.operatorMode !== 'DISABLED') {
     errors.push(`${label}.operatorMode must remain DISABLED for every credential-state change.`);
   }
+  if (
+    state.redisOperatorSecretVersionId !== 'UNPINNED' &&
+    !VERSION_ID_PATTERN.test(state.redisOperatorSecretVersionId ?? '')
+  ) {
+    errors.push(
+      `${label}.redisOperatorSecretVersionId must be UNPINNED or one exact Secrets Manager VersionId.`,
+    );
+  } else if (!allowUnpinned && state.redisOperatorSecretVersionId === 'UNPINNED') {
+    errors.push(
+      `${label}.redisOperatorSecretVersionId may be unpinned only in the reviewed adoption source state.`,
+    );
+  }
   for (const scopeName of SCOPE_NAMES) {
     validateScope(state[scopeName], allowUnpinned, now, `${label}.${scopeName}`, errors);
   }
   const versions = [];
+  if (VERSION_ID_PATTERN.test(state.redisOperatorSecretVersionId ?? '')) {
+    versions.push(state.redisOperatorSecretVersionId);
+  }
   for (const scopeName of SCOPE_NAMES) {
     for (const slotName of ['a', 'b']) {
       const history = state?.[scopeName]?.slots?.[slotName]?.usedVersionIds;
@@ -603,6 +618,7 @@ function classifyTransition(currentScope, targetScope, evidence, errors) {
 function isUntrackedInitialState(state) {
   return (
     state?.operatorMode === 'DISABLED' &&
+    state?.redisOperatorSecretVersionId === 'UNPINNED' &&
     SCOPE_NAMES.every((scopeName) => {
       const scope = state?.[scopeName];
       return (
@@ -626,6 +642,7 @@ function isUntrackedInitialState(state) {
 function isCanonicalAdoptionTarget(state) {
   return (
     state?.operatorMode === 'DISABLED' &&
+    VERSION_ID_PATTERN.test(state?.redisOperatorSecretVersionId ?? '') &&
     SCOPE_NAMES.every((scopeName) => {
       const scope = state?.[scopeName];
       return (
@@ -729,9 +746,9 @@ function planFor(operation, scope, slot) {
   const slotUpper = slot?.toUpperCase();
   const stepsByOperation = {
     ADOPT_AND_PIN: [
-      'CAPTURE_ALL_SIX_EXACT_SECRET_VERSION_IDENTITIES_UNDER_SEPARATE_AUTHORITY',
+      'CAPTURE_ALL_SEVEN_EXACT_SECRET_VERSION_IDENTITIES_UNDER_SEPARATE_AUTHORITY',
       'VERIFY_ALL_DATABASE_VERIFIERS_AND_REDIS_PASSWORD_BINDINGS_WITHOUT_RECORDING_CREDENTIALS',
-      'PIN_ALL_SIX_VERSION_SELECTORS_WHILE_ALL_WORKLOAD_DESIRED_COUNTS_REMAIN_ZERO',
+      'PIN_ALL_SEVEN_VERSION_SELECTORS_WHILE_ALL_WORKLOAD_DESIRED_COUNTS_REMAIN_ZERO',
       'VERIFY_THE_PERSISTED_CREDENTIAL_STATE_HASH_BEFORE_ANY_WORKLOAD_ACTIVATION',
     ],
     PREPARE_INACTIVE: [
@@ -765,9 +782,9 @@ function planFor(operation, scope, slot) {
   return {
     kind: 'LOCAL_ONLY_NON_EXECUTABLE_CREDENTIAL_PLAN',
     operation,
-    scope: scope ?? 'ALL_FIXED_SLOTS',
-    slot: slotUpper ?? 'ALL_FIXED_SLOTS',
-    phaseParameter: planScope?.phaseParameter ?? 'ALL_FIXED_SLOT_VERSION_SELECTORS',
+    scope: scope ?? 'ALL_CREDENTIAL_VERSION_BINDINGS',
+    slot: slotUpper ?? 'ALL_CREDENTIAL_VERSION_BINDINGS',
+    phaseParameter: planScope?.phaseParameter ?? 'ALL_SEVEN_VERSION_SELECTORS',
     backend: planScope?.backend ?? 'POSTGRESQL_AND_ELASTICACHE',
     secretLogicalId:
       planScope && slotUpper ? `${planScope.secretPrefix}${slotUpper}Secret` : 'DERIVED_BY_SCOPE',
@@ -819,7 +836,7 @@ export function validateFixedSlotCredentialTransition(record, options = {}) {
       ...ZERO_CALLS,
     };
   }
-  if (record.schemaVersion !== 1) errors.push('record.schemaVersion must be 1.');
+  if (record.schemaVersion !== 2) errors.push('record.schemaVersion must be 2.');
 
   if (mode === 'example') {
     validateExampleRecord(record, now, errors);
@@ -845,9 +862,7 @@ export function validateFixedSlotCredentialTransition(record, options = {}) {
         !isUntrackedInitialState(record.currentState) ||
         !isCanonicalAdoptionTarget(record.targetState)
       ) {
-        errors.push(
-          'Adoption must pin six generation-one versions from the zero-count A_ONLY state.',
-        );
+        errors.push('Adoption must pin seven exact versions from the zero-count A_ONLY state.');
       }
       derived = { operation: 'ADOPT_AND_PIN' };
     } else {
@@ -864,6 +879,14 @@ export function validateFixedSlotCredentialTransition(record, options = {}) {
       }
       if (record.currentState?.operatorMode !== record.targetState?.operatorMode) {
         errors.push('Credential transitions cannot change Redis operator mode.');
+      }
+      if (
+        record.currentState?.redisOperatorSecretVersionId !==
+        record.targetState?.redisOperatorSecretVersionId
+      ) {
+        errors.push(
+          'Fixed-slot credential transitions cannot change the Redis operator secret version after adoption.',
+        );
       }
       const changedScopes = SCOPE_NAMES.filter(
         (scopeName) =>

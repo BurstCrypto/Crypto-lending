@@ -16,9 +16,10 @@ separate approval and tooling. The validator has no AWS, database, Redis,
 network, DNS, subprocess, or file-write capability, and every report fixes the
 corresponding call and mutation counters at zero.
 
-The production CloudFormation contract now takes six explicit `VersionId`
-parameters and binds every fixed-slot consumer to the exact selected version;
-it never selects `AWSCURRENT` or another mutable stage for these slots. The
+The production CloudFormation contract now takes six explicit A/B-slot
+`VersionId` parameters plus one explicit Redis-operator `VersionId`. It binds
+every database, Redis-user, and ECS secret consumer to the exact selected
+version and never selects `AWSCURRENT` or another mutable stage. The
 application invocation guard now compares a submitted transition with the exact
 immutable deployed stack and binds the current template, complete parameter and
 tag snapshots, transition record, current and target states, reviewed change
@@ -31,6 +32,13 @@ VersionId, but it is not a seventh fixed slot and has no `UNPINNED` state. The
 guard preserves its ARN/VersionId/KMS tuple during ordinary releases and
 forbids changing it in a fixed-slot transition. Its future dedicated transition
 record must not be folded into this six-slot A/B state machine.
+
+The Redis operator secret is likewise not an A/B slot. Its generated version is
+unknown during the inert initial CREATE, so schema-v2 adoption records bind its
+one `UNPINNED` source marker to an exact target VersionId alongside the six
+slots. Every later record must preserve that exact operator version. Rotating it
+requires a future dedicated Redis-operator transition; the A/B state machine
+cannot authorize that change.
 
 ## Records and local verification
 
@@ -81,13 +89,13 @@ the inert checked-in example.
 
 - `CREDENTIAL_TRANSITION` requires the ignored approved record, its exact
   `adopt` or `transition` mode, a current canonical validation instant, the
-  immutable stack ARN, all six target `VersionId` values, and all four
+  immutable stack ARN, all seven target `VersionId` values, and all four
   phase/operator controls. The guard validates the record twice before AWS
   discovery, verifies the deployed current state, prohibits parent-template and
   unrelated parameter/tag changes, advances the three credential-chain tags,
   and binds those facts into the change-set description and acknowledgement.
 - `APPLICATION` rejects transition evidence and permits an ordinary release
-  only after adoption. All six pinned versions and all four controls must be
+  only after adoption. All seven pinned versions and all four controls must be
   explicitly supplied and must exactly equal the deployed values. The existing
   credential-chain tags are carried forward unchanged while reviewed
   application parameters or templates may change.
@@ -106,8 +114,9 @@ requires the exact hash-bound billable-resource acknowledgement it prints.
 
 ## State and history contract
 
-One record contains an exact deployment identity and complete current and
-target state for all six slots:
+One schema-v2 record contains an exact deployment identity and complete current
+and target state for all six A/B slots plus the immutable Redis-operator secret
+version:
 
 | Scope           | Phase parameter                 | Slot A version parameter       | Slot B version parameter       |
 | --------------- | ------------------------------- | ------------------------------ | ------------------------------ |
@@ -115,21 +124,26 @@ target state for all six slots:
 | Worker database | `WorkerDatabaseCredentialPhase` | `WorkerDatabaseSlotAVersionId` | `WorkerDatabaseSlotBVersionId` |
 | API Redis       | `RedisCredentialPhase`          | `RedisApiSlotAVersionId`       | `RedisApiSlotBVersionId`       |
 
+The separate `RedisOperatorSecretVersionId` state field and template parameter
+identify the one operator credential; they do not add a phase or another slot.
+
 The version parameters intentionally have no defaults. Each must be supplied
 as either the exact uppercase `UNPINNED` adoption sentinel or a 32–64 character
 Secrets Manager `VersionId` containing only ASCII letters, digits, underscore,
-or hyphen. The parent passes the same six values to the content-addressed
-workload-boundary child, and that child phase-selects the active database and
-Redis version exposed to each ECS task definition.
+or hyphen. The parent passes all seven values to the content-addressed workload
+boundary and passes the operator value to the observability child. The workload
+child phase-selects the active database and API Redis versions, while both
+operator consumers use the same exact operator version.
 
-The only accepted unpinned state has all six sentinels, every phase at
+The only accepted unpinned state has all seven sentinels, every phase at
 `A_ONLY`, API, web, and worker desired counts at zero, and the Redis operator
-disabled. In that state both Redis application identities are `off` with
-`no-password-required`, and the API/worker execution roles receive no fixed-slot
-secret permissions. Mixed pinned/unpinned states fail both parent and direct
-child validation. This sentinel exists only so a zero-count initial stack can
-create retained secrets whose generated version IDs can then be captured by a
-separately authorized adoption procedure; it cannot activate a workload.
+disabled. In that state both Redis application identities and the operator
+identity are `off` with `no-password-required`; the operator task is absent;
+and the API/worker execution roles receive no fixed-slot secret permissions.
+Mixed pinned/unpinned states fail parent and child validation. This sentinel
+exists only so a zero-count initial stack can create retained secrets whose
+generated version IDs can then be captured by a separately authorized adoption
+procedure; it cannot activate a workload or the operator.
 
 Each slot stores a bounded generation number, its current exact secret
 `VersionId`, and the complete ordered history of version IDs used by that
@@ -146,6 +160,11 @@ also returns hashes of the current state, target state, and complete canonical
 record so the next reviewed record can extend the chain. These hashes are
 metadata integrity bindings, not proof that an external action occurred.
 
+The Redis operator field has no generation/history semantics because this
+validator cannot rotate it. Adoption captures it once, post-adoption records
+require it to remain byte-for-byte unchanged, and a dedicated future lifecycle
+must carry its own append-only rotation evidence.
+
 `operatorMode` must remain `DISABLED` through every transition. The Redis
 revocation operator is outside this validator and cannot be activated by a
 record or plan.
@@ -161,11 +180,12 @@ A_ONLY <-> BOTH_USE_A <-> BOTH_USE_B <-> B_ONLY
 
 The full operation sequence is:
 
-1. `ADOPT_AND_PIN` starts from six explicit generation-zero `UNPINNED`
-   placeholders, captures six distinct generation-one version IDs, and keeps
-   every scope at `A_ONLY` while all three workload desired counts remain zero.
-   The follow-up template parameters must exactly equal the target record's six
-   current version IDs before any workload can be activated.
+1. `ADOPT_AND_PIN` starts from six explicit generation-zero A/B-slot
+   placeholders plus the operator's `UNPINNED` marker, captures seven distinct
+   exact version IDs (six generation-one slots and the operator binding), and
+   keeps every scope at `A_ONLY` while all three workload desired counts remain
+   zero. The follow-up template parameters must exactly equal all seven target
+   bindings before any workload can be activated.
 2. `PREPARE_INACTIVE` leaves the phase unchanged, advances only the inactive
    slot by one generation, appends one fresh version ID, and binds independent
    secret-regeneration and backend-installation evidence.

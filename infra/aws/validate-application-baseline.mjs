@@ -16,7 +16,7 @@ const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = resolve(scriptDirectory, '..', '..');
 const noExternalEgressResidualLimitations = [
   'Web-task DNS security-group egress permits TCP and UDP port 53 to the VPC CIDR; this static control cannot prove that traffic reaches only the VPC Route 53 Resolver address. API and worker boundaries rely on AmazonProvidedDNS, which is not filtered by security groups.',
-  'REDIS_OPERATOR_LIVE_REVOCATION_UNRESOLVED: the nested child conditionally defines the reviewed exact-target one-off revocation task, but no task is authorized or run. Workload drain, live denial evidence, immediate operator disablement, and credential installation or regeneration remain external gates.',
+  'REDIS_OPERATOR_LIVE_REVOCATION_UNRESOLVED: the nested children pin the disabled Redis user and reviewed exact-target one-off revocation task to one adopted immutable secret VersionId, but no task is authorized or run. Workload drain, live denial evidence, immediate operator disablement, dedicated operator-secret rotation, and credential installation or regeneration remain external gates.',
   'FIXED_SLOT_CREDENTIAL_EXTERNAL_EXECUTION_UNRESOLVED: the deployment command now binds an approved transition record to the exact immutable current stack, template, parameter, tag, target-state, change-set, and acknowledgement hashes, while ordinary application updates must preserve all fixed-slot bindings and credential-chain tags. Inactive-slot regeneration, backend installation, live candidate/continuity/revocation evidence, task replacement, and external approval remain separately authorized gates.',
   'AUTH_WALLET_EXTERNAL_CONFIGURATION_UNRESOLVED: static Cognito identifiers and seven API-only key selectors (one pre-authentication key and six bounded key-ring documents) are wired to one immutable external secret VersionId, but the Cognito tenant, external JSON secret, customer-managed KMS key/policy, field contents, dedicated rotation transition, and deployed readability require separately authorized evidence.',
   'OPERATIONAL_ALERT_DELIVERY_EXTERNAL: the template consumes one operator-supplied SNS topic ARN but deliberately provisions no topic or subscription; same-account/Region existence, topic policy, confirmed recipients, escalation ownership, and an end-to-end ALARM-to-OK drill remain external go-live evidence.',
@@ -34,22 +34,24 @@ const operationalAlarmLogicalIds = Object.freeze([
   'BalanceDeadLetterQueueNotEmptyAlarm',
 ]);
 const reviewedApplicationBaselineSha256 =
-  '83c4f275c40a62f47e84d574a9837d6effc996daada276675b59efbb113c2750';
+  'abb0c99176ec6c262a348132feb7e7ee8a33de3a0aa1858f3260c78dd27dbae9';
 const reviewedWorkloadBoundariesSha256 =
-  '3a6da9fed6e5e632c7d2fcf0804809de9f50997adb467407c20f95096813228e';
+  '4c74c98e73635df30570dfe1e726b41cb6f62832f0bfc2e43dcd087d384b78de';
 const reviewedObservabilitySha256 =
-  '4e3fdde76c3805500f17e1eedc0cd213e77ea0d1704fe56f30810ffa8fd859f9';
-const fixedSlotVersionParameterNames = Object.freeze([
+  '5066ad58b64d73717bd3a9b2fc1ab290435c88ef731c0cf4eb9985c7aa4192cc';
+const credentialVersionParameterNames = Object.freeze([
   'ApiDatabaseSlotAVersionId',
   'ApiDatabaseSlotBVersionId',
   'WorkerDatabaseSlotAVersionId',
   'WorkerDatabaseSlotBVersionId',
   'RedisApiSlotAVersionId',
   'RedisApiSlotBVersionId',
+  'RedisOperatorSecretVersionId',
 ]);
 const auditableSecretSelectorParameterNames = new Set([
   'AuthWalletKeysSecretArn',
   'AuthWalletKeysSecretVersionId',
+  'RedisOperatorSecretVersionId',
 ]);
 const reviewedResourceTypesByLogicalId = new Map([
   ['ApplicationDataKey', 'AWS::KMS::Key'],
@@ -1056,7 +1058,7 @@ function validateWorkloadBoundaryComposition(source, parameters, resources, inve
       errors.push(`${name} must be a String that defaults to the safe A_ONLY phase.`);
     }
   }
-  for (const name of fixedSlotVersionParameterNames) {
+  for (const name of credentialVersionParameterNames) {
     const block = parameters.get(name) ?? '';
     if (
       !hasProperty(block, 'Type', 'String') ||
@@ -1125,6 +1127,7 @@ function validateWorkloadBoundaryComposition(source, parameters, resources, inve
       '    WorkerDatabaseSlotBVersionId: !Ref WorkerDatabaseSlotBVersionId',
       '    RedisApiSlotAVersionId: !Ref RedisApiSlotAVersionId',
       '    RedisApiSlotBVersionId: !Ref RedisApiSlotBVersionId',
+      '    RedisOperatorSecretVersionId: !Ref RedisOperatorSecretVersionId',
       '    RedisOperatorMode: !Ref RedisOperatorMode',
       '  Tags:',
       '    - Key: WorkloadBoundariesTemplateSha256',
@@ -1247,6 +1250,7 @@ function validateObservabilityComposition(source, parameters, resources, errors)
       '    ApiLogGroupName: !Ref ApiLogGroup',
       '    WorkerLogGroupName: !Ref WorkerLogGroup',
       '    RedisOperatorMode: !Ref RedisOperatorMode',
+      '    RedisOperatorSecretVersionId: !Ref RedisOperatorSecretVersionId',
       '    RedisCredentialPhase: !Ref RedisCredentialPhase',
       '    ApiImageUri: !Ref ApiImageUri',
       '    RedisEndpointAddress: !GetAtt RedisReplicationGroup.PrimaryEndPoint.Address',
@@ -2326,11 +2330,11 @@ function validateTemplateShape(source, errors) {
       'FixedSlotVersionsRequireSafeState:',
       '  Assertions:',
       '    - Assert: !Or',
-      '        - !And [!And [!Equals [!Ref ApiDatabaseSlotAVersionId, UNPINNED], !Equals [!Ref ApiDatabaseSlotBVersionId, UNPINNED], !Equals [!Ref WorkerDatabaseSlotAVersionId, UNPINNED], !Equals [!Ref WorkerDatabaseSlotBVersionId, UNPINNED], !Equals [!Ref RedisApiSlotAVersionId, UNPINNED], !Equals [!Ref RedisApiSlotBVersionId, UNPINNED]], !And [!Equals [!Ref ApiDesiredCount, 0], !Equals [!Ref WebDesiredCount, 0], !Equals [!Ref WorkerDesiredCount, 0]], !And [!Equals [!Ref ApiDatabaseCredentialPhase, A_ONLY], !Equals [!Ref WorkerDatabaseCredentialPhase, A_ONLY], !Equals [!Ref RedisCredentialPhase, A_ONLY], !Equals [!Ref RedisOperatorMode, DISABLED]]]',
-      '        - !And [!Not [!Equals [!Ref ApiDatabaseSlotAVersionId, UNPINNED]], !Not [!Equals [!Ref ApiDatabaseSlotBVersionId, UNPINNED]], !Not [!Equals [!Ref WorkerDatabaseSlotAVersionId, UNPINNED]], !Not [!Equals [!Ref WorkerDatabaseSlotBVersionId, UNPINNED]], !Not [!Equals [!Ref RedisApiSlotAVersionId, UNPINNED]], !Not [!Equals [!Ref RedisApiSlotBVersionId, UNPINNED]]]',
-      '   AssertDescription: Fixed-slot versions must be all pinned or an inert A_ONLY adoption sentinel.',
+      '        - !And [!And [!Equals [!Ref ApiDatabaseSlotAVersionId, UNPINNED], !Equals [!Ref ApiDatabaseSlotBVersionId, UNPINNED], !Equals [!Ref WorkerDatabaseSlotAVersionId, UNPINNED], !Equals [!Ref WorkerDatabaseSlotBVersionId, UNPINNED], !Equals [!Ref RedisApiSlotAVersionId, UNPINNED], !Equals [!Ref RedisApiSlotBVersionId, UNPINNED], !Equals [!Ref RedisOperatorSecretVersionId, UNPINNED]], !And [!Equals [!Ref ApiDesiredCount, 0], !Equals [!Ref WebDesiredCount, 0], !Equals [!Ref WorkerDesiredCount, 0]], !And [!Equals [!Ref ApiDatabaseCredentialPhase, A_ONLY], !Equals [!Ref WorkerDatabaseCredentialPhase, A_ONLY], !Equals [!Ref RedisCredentialPhase, A_ONLY], !Equals [!Ref RedisOperatorMode, DISABLED]]]',
+      '        - !And [!Not [!Equals [!Ref ApiDatabaseSlotAVersionId, UNPINNED]], !Not [!Equals [!Ref ApiDatabaseSlotBVersionId, UNPINNED]], !Not [!Equals [!Ref WorkerDatabaseSlotAVersionId, UNPINNED]], !Not [!Equals [!Ref WorkerDatabaseSlotBVersionId, UNPINNED]], !Not [!Equals [!Ref RedisApiSlotAVersionId, UNPINNED]], !Not [!Equals [!Ref RedisApiSlotBVersionId, UNPINNED]], !Not [!Equals [!Ref RedisOperatorSecretVersionId, UNPINNED]]]',
+      '   AssertDescription: Credential versions must be all pinned or an inert A_ONLY adoption sentinel.',
     ].join('\n'),
-    'the exact all-pinned-or-inert adoption gate for all six fixed slots',
+    'the exact all-pinned-or-inert adoption gate for all seven immutable credential selectors',
     errors,
   );
 
@@ -3103,6 +3107,9 @@ function validateDeploymentGuard(source, errors) {
     "Assert-RequiredValue -Name 'AuthWalletKeysSecretVersionId'",
     "$AuthWalletKeysSecretVersionId -cnotmatch '^[A-Za-z0-9_-]{32,64}$'",
     'AuthWalletKeysSecretVersionId = $AuthWalletKeysSecretVersionId',
+    '$credentialVersionValues = [ordered]@{',
+    '$unpinnedVersionCount -notin @(0, 7)',
+    'RedisOperatorSecretVersionId = $RedisOperatorSecretVersionId',
     '$immutableAuthWalletBindings = [ordered]@{',
     '$currentStackParameterMap[$authWalletBinding.Key] -cne [string] $authWalletBinding.Value',
     'A dedicated reviewed auth/wallet transition is required.',

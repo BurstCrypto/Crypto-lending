@@ -22,9 +22,9 @@ Non-secret CloudFormation parameters in Key=Value form. Secret values are
 rejected; AuthWalletKeysSecretArn is the sole reviewed external secret reference.
 When operational alarms are enabled, AlarmTopicArn must name one
 existing SNS topic in the approved partition, account, and Region.
-The child-template delivery parameters, auth/wallet secret VersionId, and six
-fixed-slot VersionIds are derived from named inputs by this guard and must not
-be supplied as overrides.
+The child-template delivery parameters, auth/wallet secret VersionId, and seven
+credential-state VersionIds are derived from named inputs by this guard and
+must not be supplied as overrides.
 
 .PARAMETER WorkloadBoundariesTemplateFile
 Reviewed local workload-boundary child template. Its exact byte SHA-256 is bound
@@ -53,10 +53,16 @@ Exact 32-64 character Secrets Manager VersionId shared by all seven API
 authentication and wallet key selectors. CREATE requires an exact version;
 UPDATE preserves it until a dedicated reviewed auth/wallet transition exists.
 
+.PARAMETER RedisOperatorSecretVersionId
+Exact Secrets Manager VersionId for the disabled Redis operator credential, or
+the uppercase UNPINNED sentinel for a zero-count CREATE only. Adoption pins it
+with the six A/B slots; every later fixed-slot transition must preserve it.
+
 .PARAMETER ApiDatabaseSlotAVersionId
 Exact Secrets Manager VersionId for API database slot A, or the uppercase
 UNPINNED sentinel for a zero-count CREATE only. The other five fixed-slot
-VersionId parameters have the same contract and must be supplied together.
+VersionId parameters and Redis operator VersionId have the same contract and
+must be supplied together.
 
 .PARAMETER FixedSlotCredentialTransitionRecordFile
 Git-ignored local JSON record validated for every UPDATE against the exact
@@ -69,9 +75,9 @@ credential transitions also require the local record to name the same ARN.
 
 .PARAMETER UpdateIntent
 Required for UPDATE. APPLICATION permits a non-credential application change
-only while all ten fixed-slot version/phase/operator bindings remain unchanged.
-CREDENTIAL_TRANSITION permits only the transition record's exact ten bindings
-and prohibits unrelated template, parameter, or tag changes.
+only while all eleven credential-state version/phase/operator bindings remain
+unchanged. CREDENTIAL_TRANSITION permits only the transition record's exact
+eleven bindings and prohibits unrelated template, parameter, or tag changes.
 
 .PARAMETER FixedSlotCredentialTransitionMode
 Exact lowercase adopt or transition mode for the local fixed-slot validator.
@@ -151,6 +157,8 @@ param(
     [string] $ObservabilityArtifactVersionId,
 
     [string] $AuthWalletKeysSecretVersionId,
+
+    [string] $RedisOperatorSecretVersionId,
 
     [string] $ApiDatabaseSlotAVersionId,
 
@@ -347,6 +355,7 @@ function ConvertFrom-FixedSlotRecordState {
     )
 
     return [ordered]@{
+        RedisOperatorSecretVersionId = [string] $State.redisOperatorSecretVersionId
         ApiDatabaseSlotAVersionId = [string] $State.apiDatabase.slots.a.currentVersionId
         ApiDatabaseSlotBVersionId = [string] $State.apiDatabase.slots.b.currentVersionId
         WorkerDatabaseSlotAVersionId = [string] $State.workerDatabase.slots.a.currentVersionId
@@ -705,7 +714,8 @@ $currentStackBindingSha256 = $null
 $isApplicationUpdate = $false
 $isCredentialTransition = $false
 $preservedCredentialTags = $null
-$fixedSlotVersionValues = [ordered]@{
+$credentialVersionValues = [ordered]@{
+    RedisOperatorSecretVersionId = $RedisOperatorSecretVersionId
     ApiDatabaseSlotAVersionId = $ApiDatabaseSlotAVersionId
     ApiDatabaseSlotBVersionId = $ApiDatabaseSlotBVersionId
     WorkerDatabaseSlotAVersionId = $WorkerDatabaseSlotAVersionId
@@ -791,18 +801,18 @@ if ($Action -in @('Plan', 'Deploy')) {
     if ($explicitParameterOverrides.Contains('AuthWalletKeysSecretVersionId')) {
         throw 'AuthWalletKeysSecretVersionId is a named immutable binding and must not be supplied in ParameterOverride.'
     }
-    foreach ($fixedSlotVersion in $fixedSlotVersionValues.GetEnumerator()) {
-        Assert-RequiredValue -Name $fixedSlotVersion.Key -Value ([string] $fixedSlotVersion.Value)
-        if ([string] $fixedSlotVersion.Value -cnotmatch '^(UNPINNED|[A-Za-z0-9_-]{32,64})$') {
-            throw "$($fixedSlotVersion.Key) must be exactly UNPINNED or a 32-64 character Secrets Manager VersionId."
+    foreach ($credentialVersion in $credentialVersionValues.GetEnumerator()) {
+        Assert-RequiredValue -Name $credentialVersion.Key -Value ([string] $credentialVersion.Value)
+        if ([string] $credentialVersion.Value -cnotmatch '^(UNPINNED|[A-Za-z0-9_-]{32,64})$') {
+            throw "$($credentialVersion.Key) must be exactly UNPINNED or a 32-64 character Secrets Manager VersionId."
         }
-        if ($explicitParameterOverrides.Contains($fixedSlotVersion.Key)) {
-            throw "$($fixedSlotVersion.Key) is a named immutable binding and must not be supplied in ParameterOverride."
+        if ($explicitParameterOverrides.Contains($credentialVersion.Key)) {
+            throw "$($credentialVersion.Key) is a named immutable binding and must not be supplied in ParameterOverride."
         }
     }
-    $unpinnedVersionCount = @($fixedSlotVersionValues.Values | Where-Object { [string] $_ -ceq 'UNPINNED' }).Count
-    if ($unpinnedVersionCount -notin @(0, 6)) {
-        throw 'The six fixed-slot VersionId values must be either all exact pins or all UNPINNED; mixed state is prohibited.'
+    $unpinnedVersionCount = @($credentialVersionValues.Values | Where-Object { [string] $_ -ceq 'UNPINNED' }).Count
+    if ($unpinnedVersionCount -notin @(0, 7)) {
+        throw 'The seven credential-state VersionId values must be either all exact pins or all UNPINNED; mixed state is prohibited.'
     }
 
     $earlyControlValues = [ordered]@{
@@ -830,8 +840,8 @@ if ($Action -in @('Plan', 'Deploy')) {
         ) {
             throw 'CREATE must not supply UPDATE-only stack or credential-transition inputs.'
         }
-        if ($unpinnedVersionCount -ne 6) {
-            throw 'CREATE requires all six fixed-slot VersionId values to be UNPINNED.'
+        if ($unpinnedVersionCount -ne 7) {
+            throw 'CREATE requires all seven credential-state VersionId values to be UNPINNED.'
         }
         foreach ($desiredCount in @('ApiDesiredCount', 'WebDesiredCount', 'WorkerDesiredCount')) {
             if ($earlyControlValues[$desiredCount] -cne '0') {
@@ -849,7 +859,7 @@ if ($Action -in @('Plan', 'Deploy')) {
     }
     else {
         if ($unpinnedVersionCount -ne 0) {
-            throw 'UPDATE requires all six fixed-slot VersionId values to be exact immutable pins.'
+            throw 'UPDATE requires all seven credential-state VersionId values to be exact immutable pins.'
         }
         Assert-RequiredValue -Name 'CurrentStackId' -Value $CurrentStackId
         Assert-RequiredValue -Name 'UpdateIntent' -Value $UpdateIntent
@@ -883,8 +893,8 @@ if ($Action -in @('Plan', 'Deploy')) {
                 throw 'APPLICATION updates must not supply fixed-slot transition evidence or mode inputs.'
             }
             $fixedSlotTargetBindings = [ordered]@{}
-            foreach ($fixedSlotVersion in $fixedSlotVersionValues.GetEnumerator()) {
-                $fixedSlotTargetBindings[$fixedSlotVersion.Key] = [string] $fixedSlotVersion.Value
+            foreach ($credentialVersion in $credentialVersionValues.GetEnumerator()) {
+                $fixedSlotTargetBindings[$credentialVersion.Key] = [string] $credentialVersion.Value
             }
             foreach ($fixedSlotControl in @(
                     'ApiDatabaseCredentialPhase',
@@ -965,9 +975,9 @@ if ($Action -in @('Plan', 'Deploy')) {
             $fixedSlotTransitionDeploymentBindingText = "record-sha256=$fixedSlotTransitionRecordSha256`ncurrent-state-sha256=$fixedSlotCurrentStateSha256`ntarget-state-sha256=$fixedSlotTargetStateSha256`ncurrent-stack-id=$CurrentStackId`nparent-template-sha256=$templateSha256`nworkload-template-sha256=$workloadBoundariesTemplateSha256`nobservability-template-sha256=$observabilityTemplateSha256`nmode=$FixedSlotCredentialTransitionMode`noperation=$($fixedSlotTransitionValidation.operation)"
             $fixedSlotCurrentBindings = ConvertFrom-FixedSlotRecordState -State $fixedSlotTransitionRecord.currentState
             $fixedSlotTargetBindings = ConvertFrom-FixedSlotRecordState -State $fixedSlotTransitionRecord.targetState
-            foreach ($targetVersion in $fixedSlotVersionValues.GetEnumerator()) {
+            foreach ($targetVersion in $credentialVersionValues.GetEnumerator()) {
                 if ([string] $fixedSlotTargetBindings[$targetVersion.Key] -cne [string] $targetVersion.Value) {
-                    throw "Target fixed-slot binding '$($targetVersion.Key)' does not match the approved transition record. No AWS calls were made."
+                    throw "Target credential-state binding '$($targetVersion.Key)' does not match the approved transition record. No AWS calls were made."
                 }
             }
             foreach ($targetControl in @('ApiDatabaseCredentialPhase', 'WorkerDatabaseCredentialPhase', 'RedisCredentialPhase', 'RedisOperatorMode')) {
@@ -1320,6 +1330,7 @@ if ($Action -in @('Plan', 'Deploy')) {
         ObservabilityTemplateSha256 = $observabilityTemplateSha256
         ObservabilityArtifactBindingSha256 = $observabilityArtifactBindingSha256
         AuthWalletKeysSecretVersionId = $AuthWalletKeysSecretVersionId
+        RedisOperatorSecretVersionId = $RedisOperatorSecretVersionId
         ApiDatabaseSlotAVersionId = $ApiDatabaseSlotAVersionId
         ApiDatabaseSlotBVersionId = $ApiDatabaseSlotBVersionId
         WorkerDatabaseSlotAVersionId = $WorkerDatabaseSlotAVersionId
@@ -1346,6 +1357,7 @@ if ($Action -in @('Plan', 'Deploy')) {
                 'ObservabilityTemplateSha256',
                 'ObservabilityArtifactBindingSha256',
                 'AuthWalletKeysSecretVersionId',
+                'RedisOperatorSecretVersionId',
                 'ApiDatabaseSlotAVersionId',
                 'ApiDatabaseSlotBVersionId',
                 'WorkerDatabaseSlotAVersionId',
@@ -1429,9 +1441,9 @@ if ($Action -in @('Plan', 'Deploy')) {
         'ObservabilityTemplateSha256',
         'ObservabilityArtifactBindingSha256'
     )
-    $fixedSlotVersionParameterNames = @($fixedSlotVersionValues.Keys)
+    $credentialVersionParameterNames = @($credentialVersionValues.Keys)
     $immutableAuthWalletParameterNames = @('AuthWalletKeysSecretVersionId')
-    $allowedParameterNames = @('EnvironmentName') + $deliveryParameterNames + $immutableAuthWalletParameterNames + $fixedSlotVersionParameterNames + $requiredParameters + @($parameterDefaults.Keys)
+    $allowedParameterNames = @('EnvironmentName') + $deliveryParameterNames + $immutableAuthWalletParameterNames + $credentialVersionParameterNames + $requiredParameters + @($parameterDefaults.Keys)
     foreach ($parameterName in $parameterMap.Keys) {
         if ($allowedParameterNames -cnotcontains $parameterName) {
             throw "ParameterOverride contains unknown template parameter '$parameterName'."
@@ -1493,10 +1505,10 @@ if ($Action -in @('Plan', 'Deploy')) {
         }
         foreach ($currentBinding in $expectedCurrentFixedSlotBindings.GetEnumerator()) {
             if (-not $currentStackParameterMap.Contains($currentBinding.Key)) {
-                throw "The existing application stack is missing current fixed-slot binding '$($currentBinding.Key)'."
+                throw "The existing application stack is missing current credential-state binding '$($currentBinding.Key)'."
             }
             if ([string] $currentStackParameterMap[$currentBinding.Key] -cne [string] $currentBinding.Value) {
-                throw "Existing fixed-slot binding '$($currentBinding.Key)' drifted from the approved update current state."
+                throw "Existing credential-state binding '$($currentBinding.Key)' drifted from the approved update current state."
             }
         }
         $currentStackTags = ConvertFrom-ChangeSetTags -Tags (Get-OptionalPropertyValue -InputObject $currentStack -Name 'Tags')
@@ -1601,7 +1613,7 @@ if ($Action -in @('Plan', 'Deploy')) {
     if ($ChangeSetType -eq 'UPDATE') {
         foreach ($targetBinding in $fixedSlotTargetBindings.GetEnumerator()) {
             if (-not $parameterMap.Contains($targetBinding.Key) -or [string] $parameterMap[$targetBinding.Key] -cne [string] $targetBinding.Value) {
-            throw "Planned fixed-slot binding '$($targetBinding.Key)' does not match the approved update target state."
+            throw "Planned credential-state binding '$($targetBinding.Key)' does not match the approved update target state."
             }
         }
     }
@@ -1693,13 +1705,13 @@ if ($Action -in @('Plan', 'Deploy')) {
         if ($currentStackParameterMap.Count -ne $parameterMap.Count) {
             throw "Credential-only UPDATE requires the current and target parameter sets to match exactly (Current=$($currentStackParameterMap.Count), Target=$($parameterMap.Count))."
         }
-        $fixedSlotBindingNames = @($fixedSlotTargetBindings.Keys)
+        $credentialStateBindingNames = @($fixedSlotTargetBindings.Keys)
         foreach ($targetParameter in $parameterMap.GetEnumerator()) {
             if (-not $currentStackParameterMap.Contains($targetParameter.Key)) {
                 throw "Credential-only UPDATE found target parameter '$($targetParameter.Key)' missing from the current stack."
             }
             if (
-                $fixedSlotBindingNames -cnotcontains [string] $targetParameter.Key -and
+                $credentialStateBindingNames -cnotcontains [string] $targetParameter.Key -and
                 [string] $currentStackParameterMap[$targetParameter.Key] -cne [string] $targetParameter.Value
             ) {
                 throw "Credential-only UPDATE cannot change unrelated parameter '$($targetParameter.Key)'."

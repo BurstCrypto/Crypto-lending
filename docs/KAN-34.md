@@ -73,8 +73,8 @@ record. `Deploy` recomputes and verifies each binding.
 
 `infra/aws/application-baseline.yaml` composes two content-addressed child
 stacks: workload boundaries and operational observability. The reviewed parent
-is 49,632 bytes (1,568 bytes below the AWS limit), while a local guard enforces
-a 50,500-byte ceiling and leaves an 868-byte repository guard band before that
+is 50,316 bytes (884 bytes below the AWS limit), while a local guard enforces a
+50,500-byte ceiling and leaves a 184-byte repository guard band before that
 ceiling. This prevents accidental growth beyond CloudFormation's 51,200-byte
 direct-body limit.
 
@@ -103,11 +103,14 @@ direct-body limit.
   selected Redis ACL/auth-wallet credentials, the worker only its database
   credential, and the one-off migration task only the migration credential;
 - six explicit, no-default Secrets Manager version parameters pin the API
-  database, worker database, and API Redis A/B slots. The only unpinned adoption
-  state keeps every service stopped, every phase at `A_ONLY`, Redis access off,
-  and fixed-slot execution-role reads closed. Guarded updates bind credential
-  transitions to the immutable deployed stack and allow ordinary releases only
-  when every fixed-slot binding and credential-chain tag is preserved; and
+  database, worker database, and API Redis A/B slots. A separate no-default
+  `RedisOperatorSecretVersionId` immutably pins the disabled-by-default operator
+  credential. The only unpinned adoption state requires all seven selectors to
+  be `UNPINNED`, keeps every service stopped and phase at `A_ONLY`, leaves every
+  Redis identity off, and closes fixed-slot execution-role reads. The schema-v2
+  adoption record and guarded update bind all seven versions to the immutable
+  deployed stack; later fixed-slot transitions preserve the operator version,
+  and ordinary releases preserve every credential binding and chain tag; and
 - bounded CloudWatch log groups and eight service/queue/security alarms expose
   infrastructure health through one explicitly supplied external SNS topic;
   the template creates no recipient. The dashboard is optional and off by
@@ -199,8 +202,10 @@ boundary grants `GetSecretValue` and decrypt on the exact
 execution role. Web, worker, task roles, and the Redis operator receive no
 access. CREATE can bind the initial exact version. Every UPDATE preserves the
 deployed ARN/VersionId/KMS tuple: `APPLICATION` cannot rotate it and
-`CREDENTIAL_TRANSITION` is limited to the separate six fixed slots. A dedicated
-auth/wallet transition record and guard do not yet exist. The secret,
+after schema-v2 adoption each later `CREDENTIAL_TRANSITION` is limited to one
+step in the separate six-slot A/B state machine while preserving the Redis
+operator version. A dedicated auth/wallet transition record and guard do not
+yet exist. The secret,
 customer-managed key, key/resource policies, distinct canonical key material,
 custody, and rotation are external gates; static wiring is not
 deployed-readability evidence.
@@ -226,6 +231,21 @@ It authenticates as an environment-bound `crypto_api_<APP_ENV>_a` or
 task reject every `REDIS_*` variable.
 The legacy `REDIS_AUTH_TOKEN`, anonymous/default access, key commands, and a
 worker Redis network path are not part of the replacement contract.
+
+The separately scoped Redis operator identity is also inert during initial
+creation: while `RedisOperatorSecretVersionId=UNPINNED`, its ACL access is off
+and its authentication mode is `no-password-required`. Schema-v2 adoption pins
+the generated operator secret version together with the six A/B versions. The
+follow-up stack then selects that exact version, with an empty version stage, in
+both the ElastiCache operator user's dynamic reference and the conditional
+one-off ECS task's `REDIS_OPERATOR_PASSWORD` selector. An omitted version,
+`AWSCURRENT`, `AWSPREVIOUS`, or a different version parameter fails local
+validation. Every later fixed-slot transition and ordinary application update
+must preserve the adopted operator VersionId; changing it requires a future
+dedicated operator transition. Any future authorized `ecs run-task` path must
+select Fargate Linux platform `1.4.0` or newer for JSON-key plus VersionId
+selection. None of these static controls authorizes or runs the task, rotates a
+live password, or proves deployed session revocation.
 
 The local `.env.example` and Compose service use distinct, deliberate local
 fixtures for the bootstrap owner, migration, API, worker, and Redis identities.
@@ -296,16 +316,18 @@ contract. The former broad single-runtime procedure is intentionally removed.
 The authorized delivery sequence is: verify and retrieve the exact
 content-addressed workload-boundary and observability children from existing
 versioned same-account/Region S3
-bucket (no guard path creates or uploads it); create the stack with all six
-version parameters explicitly set to `UNPINNED`, every credential phase at
-`A_ONLY`, the Redis operator disabled, and all workload desired counts at zero;
-capture the six generated Secrets Manager `VersionId` values without recording
-secret material; validate an `ADOPT_AND_PIN` record whose target state contains
-those exact six IDs; provision the restricted PostgreSQL LOGIN slots from those
-exact scoped secret versions while workloads remain stopped; then apply the
-all-pinned follow-up stack update at zero desired count using exactly the six
-target IDs from the validated record. That follow-up installs the pinned Redis
-passwords while retaining the `A_ONLY` access boundary. Independently verify the
+bucket (no guard path creates or uploads it); create the stack with the six A/B
+version parameters and separate operator version explicitly set to `UNPINNED`,
+every credential phase at `A_ONLY`, the Redis operator disabled, and all
+workload desired counts at zero; capture the seven generated Secrets Manager
+`VersionId` values without recording secret material; validate a schema-v2
+`ADOPT_AND_PIN` record whose target state contains those exact seven IDs;
+provision the restricted PostgreSQL LOGIN slots from their exact scoped secret
+versions while workloads remain stopped; then apply the all-pinned follow-up
+stack update at zero desired count using exactly the seven target IDs from the
+validated record. That follow-up installs the pinned API Redis and operator
+passwords while retaining the `A_ONLY` and operator-disabled access boundaries.
+Independently verify the
 deployed pins and backend-installation evidence against the adoption record
 before continuing. Then drain old sessions; run the exact bootstrap artifact as
 the bootstrap owner; register and run the separately reviewed migration task
@@ -357,13 +379,17 @@ template deliberately does not launch the task.
 - The fixed database/Redis A/B secret resources and exact version pins support
   a controlled overlap and cutover but do not regenerate or install an inactive
   slot. Repeatable rotation still requires the separately authorized
-  regeneration and verifier/password installation artifact, plus a deployment
-  guard that binds the reviewed transition record to current deployed state.
+  regeneration and verifier/password installation artifact. The checked-in
+  deployment guard already compares the record with the immutable current stack
+  and binds current template, parameter, tag, target-state, change-set, and
+  acknowledgement hashes; no live transition has been authorized or executed.
 - The conditional Redis operator now has a production-only, exact-inactive-slot
-  CLI and a no-service one-off task definition. Both remain disabled by default
-  and have not been deployed or run. Workload drain, post-command session and
-  reconnect denial, immediate operator disablement, managed alarm delivery, and
-  sanitized live evidence remain separately authorized gates.
+  CLI and a no-service one-off task definition whose password selector uses the
+  separately adopted exact operator VersionId. Both remain disabled by default
+  and have not been deployed or run. A dedicated operator-version transition,
+  workload drain, post-command session and reconnect denial, immediate operator
+  disablement, managed alarm delivery, and sanitized live evidence remain
+  separately authorized gates.
 - PostgreSQL minor and Redis 7.1 availability, VPC endpoint availability,
   service quotas, the S3 prefix-list ID, image startup behavior, and the ACM/DNS
   relationship require target-account preflight and runtime evidence.

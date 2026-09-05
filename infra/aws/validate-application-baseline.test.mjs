@@ -104,9 +104,9 @@ test('accepts the repository no-external-egress baseline and records the DNS res
 
 test('keeps the parent below the reviewed direct-upload ceiling after child extraction', () => {
   const bytes = Buffer.byteLength(templateSource, 'utf8');
-  assert.equal(bytes, 49_963);
+  assert.equal(bytes, 50_316);
   assert.ok(bytes <= 50_500);
-  assert.equal(51_200 - bytes, 1_237);
+  assert.equal(51_200 - bytes, 884);
 });
 
 test('pins the observability child URL, digest, binding, and exact parent mapping', () => {
@@ -165,6 +165,16 @@ test('pins the observability child URL, digest, binding, and exact parent mappin
       'RedisOperatorSecretArn: !If [RedisOperatorEnabled, !GetAtt WorkloadBoundaries.Outputs.RedisOperatorSecretArn, NONE]',
       'RedisOperatorSecretArn: !GetAtt WorkloadBoundaries.Outputs.RedisActiveSecretArn',
       /Observability.*exact reviewed minimum-name input/,
+    ],
+    [
+      'RedisOperatorMode: !Ref RedisOperatorMode\n    RedisOperatorSecretVersionId: !Ref RedisOperatorSecretVersionId\n    RedisCredentialPhase: !Ref RedisCredentialPhase',
+      'RedisOperatorMode: !Ref RedisOperatorMode\n    RedisOperatorSecretVersionId: !Ref RedisApiSlotAVersionId\n    RedisCredentialPhase: !Ref RedisCredentialPhase',
+      /Observability.*exact reviewed minimum-name input/,
+    ],
+    [
+      'RedisOperatorSecretVersionId: !Ref RedisOperatorSecretVersionId',
+      'RedisOperatorSecretVersionId: !Ref RedisApiSlotAVersionId',
+      /WorkloadBoundaries.*exact reviewed child input contract/,
     ],
   ]) {
     assertRejected(
@@ -253,6 +263,17 @@ test('binds one exact auth wallet secret version and preserves its auditable upd
     '$immutableAuthWalletBindings = [ordered]@{',
     '$currentStackParameterMap[$authWalletBinding.Key] -cne [string] $authWalletBinding.Value',
     'A dedicated reviewed auth/wallet transition is required.',
+  ]) {
+    assert.ok(deploymentGuardSource.includes(fragment), `Deployment guard is missing ${fragment}`);
+    assert.ok(validatorSource.includes(fragment), `Static guard contract is missing ${fragment}`);
+  }
+});
+
+test('binds the Redis operator secret version through the guarded deployment path', () => {
+  for (const fragment of [
+    '$credentialVersionValues = [ordered]@{',
+    '$unpinnedVersionCount -notin @(0, 7)',
+    'RedisOperatorSecretVersionId = $RedisOperatorSecretVersionId',
   ]) {
     assert.ok(deploymentGuardSource.includes(fragment), `Deployment guard is missing ${fragment}`);
     assert.ok(validatorSource.includes(fragment), `Static guard contract is missing ${fragment}`);
@@ -669,7 +690,7 @@ test('pins the versioned child artifact, provenance, and exact nested input cont
   assertRejected(
     mutate((source) =>
       source.replace(
-        'application-workload-boundaries-3a6da9fed6e5e632c7d2fcf0804809de9f50997adb467407c20f95096813228e',
+        'application-workload-boundaries-4c74c98e73635df30570dfe1e726b41cb6f62832f0bfc2e43dcd087d384b78de',
         `application-workload-boundaries-${'0'.repeat(64)}`,
       ),
     ),
@@ -678,7 +699,7 @@ test('pins the versioned child artifact, provenance, and exact nested input cont
   assertRejected(
     mutate((source) =>
       source.replace(
-        'AllowedValues: [3a6da9fed6e5e632c7d2fcf0804809de9f50997adb467407c20f95096813228e]',
+        'AllowedValues: [4c74c98e73635df30570dfe1e726b41cb6f62832f0bfc2e43dcd087d384b78de]',
         `AllowedValues: [${'0'.repeat(64)}]`,
       ),
     ),
@@ -724,17 +745,18 @@ test('pins the versioned child artifact, provenance, and exact nested input cont
   }
 });
 
-const fixedSlotVersionParameters = [
+const credentialVersionParameters = [
   'ApiDatabaseSlotAVersionId',
   'ApiDatabaseSlotBVersionId',
   'WorkerDatabaseSlotAVersionId',
   'WorkerDatabaseSlotBVersionId',
   'RedisApiSlotAVersionId',
   'RedisApiSlotBVersionId',
+  'RedisOperatorSecretVersionId',
 ];
 
-test('requires six explicit exact fixed-slot VersionId parameters and child propagation', () => {
-  for (const parameter of fixedSlotVersionParameters) {
+test('requires seven explicit exact credential VersionId parameters and child propagation', () => {
+  for (const parameter of credentialVersionParameters) {
     const block = [
       ` ${parameter}:`,
       '  Type: String',
@@ -768,6 +790,10 @@ test('keeps the parent UNPINNED state all-or-none, stopped, A_ONLY, and operator
     [
       '!Equals [!Ref WorkerDatabaseCredentialPhase, A_ONLY]',
       '!Equals [!Ref WorkerDatabaseCredentialPhase, BOTH_USE_A]',
+    ],
+    [
+      '!Equals [!Ref RedisOperatorSecretVersionId, UNPINNED]], !And',
+      '!Not [!Equals [!Ref RedisOperatorSecretVersionId, UNPINNED]]], !And',
     ],
     ['!Equals [!Ref RedisOperatorMode, DISABLED]]', '!Equals [!Ref RedisOperatorMode, ENABLED]]'],
   ]) {

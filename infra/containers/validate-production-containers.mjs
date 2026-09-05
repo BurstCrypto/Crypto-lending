@@ -546,7 +546,9 @@ function validateCloudFormation(applicationTemplate, migrationTemplate, observab
       redisRevocation.includes('Image: !Ref ApiImageUri') &&
       redisRevocation.includes('Name: PRODUCT_NETWORK_SCOPE, Value: ethereum-solana-mainnet') &&
       redisRevocation.includes('Name: REDIS_CREDENTIAL_PHASE, Value: !Ref RedisCredentialPhase') &&
-      redisRevocation.includes("ValueFrom: !Sub '${RedisOperatorSecretArn}:password::'") &&
+      redisRevocation.includes(
+        "ValueFrom: !Sub '${RedisOperatorSecretArn}:password::${RedisOperatorSecretVersionId}'",
+      ) &&
       redisRevocation.includes('Capabilities: { Drop: [ALL] }') &&
       redisRevocation.includes('ReadonlyRootFilesystem: true') &&
       redisRevocation.includes("User: '10001:10001'") &&

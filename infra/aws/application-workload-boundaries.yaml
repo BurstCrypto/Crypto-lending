@@ -108,6 +108,9 @@ Parameters:
   RedisApiSlotBVersionId:
     Type: String
     AllowedPattern: '^(UNPINNED|[A-Za-z0-9_-]{32,64})$'
+  RedisOperatorSecretVersionId:
+    Type: String
+    AllowedPattern: '^(UNPINNED|[A-Za-z0-9_-]{32,64})$'
   RedisOperatorMode:
     Type: String
     Default: DISABLED
@@ -149,16 +152,21 @@ Rules:
     Assertions:
       - Assert: !Or
           - !And [
-              !Equals [!Ref ApiDatabaseSlotAVersionId, UNPINNED],
-              !Equals [!Ref ApiDatabaseSlotBVersionId, UNPINNED],
-              !Equals [!Ref WorkerDatabaseSlotAVersionId, UNPINNED],
-              !Equals [!Ref WorkerDatabaseSlotBVersionId, UNPINNED],
-              !Equals [!Ref RedisApiSlotAVersionId, UNPINNED],
-              !Equals [!Ref RedisApiSlotBVersionId, UNPINNED],
-              !Equals [!Ref ApiDatabaseCredentialPhase, A_ONLY],
-              !Equals [!Ref WorkerDatabaseCredentialPhase, A_ONLY],
-              !Equals [!Ref RedisCredentialPhase, A_ONLY],
-              !Equals [!Ref RedisOperatorMode, DISABLED],
+              !And [
+                !Equals [!Ref ApiDatabaseSlotAVersionId, UNPINNED],
+                !Equals [!Ref ApiDatabaseSlotBVersionId, UNPINNED],
+                !Equals [!Ref WorkerDatabaseSlotAVersionId, UNPINNED],
+                !Equals [!Ref WorkerDatabaseSlotBVersionId, UNPINNED],
+                !Equals [!Ref RedisApiSlotAVersionId, UNPINNED],
+                !Equals [!Ref RedisApiSlotBVersionId, UNPINNED],
+                !Equals [!Ref RedisOperatorSecretVersionId, UNPINNED],
+              ],
+              !And [
+                !Equals [!Ref ApiDatabaseCredentialPhase, A_ONLY],
+                !Equals [!Ref WorkerDatabaseCredentialPhase, A_ONLY],
+                !Equals [!Ref RedisCredentialPhase, A_ONLY],
+                !Equals [!Ref RedisOperatorMode, DISABLED],
+              ],
             ]
           - !And [
               !Not [!Equals [!Ref ApiDatabaseSlotAVersionId, UNPINNED]],
@@ -167,8 +175,9 @@ Rules:
               !Not [!Equals [!Ref WorkerDatabaseSlotBVersionId, UNPINNED]],
               !Not [!Equals [!Ref RedisApiSlotAVersionId, UNPINNED]],
               !Not [!Equals [!Ref RedisApiSlotBVersionId, UNPINNED]],
+              !Not [!Equals [!Ref RedisOperatorSecretVersionId, UNPINNED]],
             ]
-        AssertDescription: Fixed-slot versions must be all pinned or an inert A_ONLY adoption sentinel.
+        AssertDescription: Fixed-slot and operator versions must be all pinned or an inert A_ONLY adoption sentinel.
 
 Conditions:
   CreateVpcEndpointRules: !Equals [!Ref PrivateEgressMode, VpcEndpoints]
@@ -586,9 +595,16 @@ Resources:
         - RedisOperatorEnabled
         - 'on sanitize-payload resetkeys resetchannels -@all +client|kill'
         - 'off sanitize-payload resetkeys resetchannels -@all +client|kill'
-      AuthenticationMode:
-        Passwords: [!Sub '{{resolve:secretsmanager:${RedisOperatorSecret}:SecretString:password}}']
-        Type: password
+      AuthenticationMode: !If
+        - CredentialVersionsPinned
+        - {
+            Passwords:
+              [
+                !Sub '{{resolve:secretsmanager:${RedisOperatorSecret}:SecretString:password::${RedisOperatorSecretVersionId}}',
+              ],
+            Type: password,
+          }
+        - { Type: no-password-required }
       Engine: redis
       UserId: !Sub cl-${EnvironmentName}-ro
       UserName: !Sub crypto_operator_${EnvironmentName}

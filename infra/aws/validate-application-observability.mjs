@@ -13,7 +13,7 @@ import {
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const defaultTemplatePath = join(scriptDirectory, 'application-observability.yaml');
 export const reviewedApplicationObservabilitySha256 =
-  '4e3fdde76c3805500f17e1eedc0cd213e77ea0d1704fe56f30810ffa8fd859f9';
+  '5066ad58b64d73717bd3a9b2fc1ab290435c88ef731c0cf4eb9985c7aa4192cc';
 export const MAX_APPLICATION_OBSERVABILITY_TEMPLATE_BYTES = 51_200;
 export const APPLICATION_OBSERVABILITY_TEMPLATE_INPUT_ERROR =
   'Application observability child template must be a non-empty, stable, single-link regular file of at most 51200 bytes at a canonical local path containing UTF-8 text without a byte-order mark.';
@@ -63,14 +63,18 @@ const requiredFragments = Object.freeze([
   'RedisCredentialPhase:\n    Type: String\n    Default: A_ONLY\n    AllowedValues: [A_ONLY, BOTH_USE_A, BOTH_USE_B, B_ONLY]',
   'RedisOperatorRequiresInactiveSlot:',
   'RedisOperatorRequiresBoundIdentity:',
+  "RedisOperatorSecretArn:\n    Type: String\n    Default: NONE\n    AllowedPattern: '^(?:NONE|arn:[a-z0-9-]+:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:[A-Za-z0-9/_+=.@-]+)$'",
+  "RedisOperatorSecretVersionId:\n    Type: String\n    AllowedPattern: '^(UNPINNED|[A-Za-z0-9_-]{32,64})$'",
+  '- !Not [!Equals [!Ref RedisOperatorSecretVersionId, UNPINNED]]',
   'RedisOperatorEnabled: !Equals [!Ref RedisOperatorMode, ENABLED]',
   'RedisSessionRevocationTaskDefinition:\n    Type: AWS::ECS::TaskDefinition\n    Condition: RedisOperatorEnabled',
+  'Metadata: { cfn-lint: { config: { ignore_checks: [W1030] } } }',
   'Command: [node, dist/infrastructure/redis/redis-session-revocation.cli.js]',
   'Name: PRODUCT_NETWORK_SCOPE, Value: ethereum-solana-mainnet',
   'Name: REDIS_CREDENTIAL_PHASE, Value: !Ref RedisCredentialPhase',
   "Name: REDIS_TLS, Value: 'true'",
   "Name: REDIS_OPERATOR_USERNAME, Value: !Sub 'crypto_operator_${EnvironmentName}'",
-  "ValueFrom: !Sub '${RedisOperatorSecretArn}:password::'",
+  "ValueFrom: !Sub '${RedisOperatorSecretArn}:password::${RedisOperatorSecretVersionId}'",
   'Capabilities: { Drop: [ALL] }',
   'ReadonlyRootFilesystem: true',
   "User: '10001:10001'",
@@ -185,6 +189,25 @@ export function validateApplicationObservabilitySource(source) {
   ) {
     errors.push(
       'Redis revocation must remain a conditional no-service task with no task role, desired count, or exec path.',
+    );
+  }
+  const operatorPasswordBindings =
+    revocationTask.match(/^\s+ValueFrom: !Sub '\$\{RedisOperatorSecretArn\}:password:[^']*'$/gm) ??
+    [];
+  if (
+    operatorPasswordBindings.length !== 1 ||
+    operatorPasswordBindings[0].trim() !==
+      "ValueFrom: !Sub '${RedisOperatorSecretArn}:password::${RedisOperatorSecretVersionId}'"
+  ) {
+    errors.push('Redis revocation must consume exactly one immutable operator secret VersionId.');
+  }
+  const operatorSecretArnParameter =
+    normalized.match(
+      /^ {2}RedisOperatorSecretArn:\n[\s\S]*?(?=^ {2}RedisOperatorSecretVersionId:\s*$)/m,
+    )?.[0] ?? '';
+  if (/^ {4}NoEcho:/m.test(operatorSecretArnParameter)) {
+    errors.push(
+      'Redis operator secret ARN metadata must remain auditable and must not set NoEcho.',
     );
   }
 

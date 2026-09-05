@@ -74,13 +74,18 @@ The required replacement launch-time injection contract is:
 
 ECS obtains runtime values through task-definition `Secrets` entries.
 Sensitive values must not be placed in ordinary task-definition `Environment`
-entries. The six fixed database/Redis slots require explicit, no-default
+entries. The six fixed database/Redis A/B slots require explicit, no-default
 Secrets Manager `VersionId` parameters, and every fixed-slot consumer selects
-the exact phase-matched version rather than `AWSCURRENT`. Changing a secret or
-its pinned parameter does not update an already running ECS task; the approved
-rotation procedure must launch replacement tasks before revoking the old
-credential. The checked-in parent/child composition encodes this contract, but
-it has not been staged, planned, or deployed.
+the exact phase-matched version rather than `AWSCURRENT`. The separately
+immutable, no-default `RedisOperatorSecretVersionId` pins the generated operator
+credential without making it a seventh A/B slot. Its exact stage-free selector
+is used by both the ElastiCache operator user and conditional one-off ECS task;
+any future authorized `ecs run-task` path must select Fargate Linux platform
+`1.4.0` or newer. The checked-in template only registers that task definition.
+Changing a secret or its pinned parameter does not update an already running
+ECS task; the approved rotation procedure must launch replacement tasks before
+revoking the old credential. The checked-in parent/child composition encodes
+this contract, but it has not been staged, planned, or deployed.
 
 The auth/wallet VersionId is separate from those six A/B slots and has no
 `UNPINNED` sentinel. CREATE requires an exact initial version. On UPDATE, the
@@ -89,19 +94,26 @@ KMS key ARN as one tuple. Neither `APPLICATION` nor `CREDENTIAL_TRANSITION` may
 change it; a dedicated reviewed auth/wallet transition record and guard remain
 an open production gate.
 
-For initial adoption, all six parameters may be the `UNPINNED` sentinel only
-while API, web, and worker desired counts are zero, all phases are `A_ONLY`, and
-the Redis operator is disabled. In that state Redis application users are off
-and fixed-slot database/Redis execution-role reads remain closed. Version
-parameters intentionally have no defaults, so adoption requires all six
-sentinels to be supplied explicitly and cannot activate a workload.
+For initial adoption, the six A/B parameters and separate operator parameter
+must all be the `UNPINNED` sentinel while API, web, and worker desired counts are
+zero, all phases are `A_ONLY`, and the Redis operator is disabled. In that state
+all Redis identities are off, the operator uses `no-password-required`, and
+fixed-slot database/Redis execution-role reads remain closed. Version parameters
+intentionally have no defaults, so creation requires all seven sentinels to be
+supplied explicitly and cannot activate a workload. The schema-v2
+`ADOPT_AND_PIN` record changes all seven to exact generated VersionIds in one
+zero-count follow-up update. The operator user then receives its exact password
+reference while its ACL remains off.
 
 The application invocation guard now has separate `CREDENTIAL_TRANSITION` and
 `APPLICATION` update intents. Credential transitions require a locally approved
-record whose exact current/target state is compared with the immutable deployed
-stack and bound into the reviewed change set and acknowledgement; unrelated
-template, parameter, and tag changes are rejected. Ordinary application updates
-reject transition evidence, require every fixed-slot value to equal deployed
+schema-v2 record whose exact current/target state, including the operator
+VersionId, is compared with the immutable deployed stack and bound into the
+reviewed change set and acknowledgement; unrelated template, parameter, and tag
+changes are rejected. After adoption, each fixed-slot transition and ordinary
+application update preserves the operator VersionId. Changing it requires a
+future dedicated operator transition. Ordinary application updates reject
+transition evidence, require every credential-state binding to equal deployed
 state, and preserve the credential-chain tags. Deploy rechecks the current stack
 immediately before execution. This is an offline-tested control path, not
 evidence that a transition was authorized or run in AWS.
@@ -128,16 +140,16 @@ encryption until a reviewed backend TLS design is implemented and exercised.
 
 Static validation treats each role as a capability allowlist:
 
-| Role                       | Reviewed capability                                                                                                                                                 |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| API task execution         | pull only the API image, write API logs, and read only phase-authorized API database, Redis, and auth/wallet secrets                                                |
-| worker task execution      | pull only the worker image, write worker logs, and read only phase-authorized worker database secrets through Secrets Manager                                       |
-| web task execution         | pull only the web image and write web logs; no secret read                                                                                                          |
-| conditional Redis operator | pull the digest-pinned API image, write API-scoped logs, and read only its operator secret for the reviewed one-off revocation task; no application data capability |
-| API task                   | inspect only the jobs and balance-sync source/DLQ attributes                                                                                                        |
-| worker task                | publish only to the jobs and balance-sync source queues, inspect all four queues, and use the data key only through SQS                                             |
-| web task                   | no application AWS API permission                                                                                                                                   |
-| migration task execution   | pull only the supplied API image, write migration logs, and read/decrypt only the supplied migration secret at its exact required VersionId                         |
+| Role                       | Reviewed capability                                                                                                                                                               |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| API task execution         | pull only the API image, write API logs, and read only phase-authorized API database, Redis, and auth/wallet secrets                                                              |
+| worker task execution      | pull only the worker image, write worker logs, and read only phase-authorized worker database secrets through Secrets Manager                                                     |
+| web task execution         | pull only the web image and write web logs; no secret read                                                                                                                        |
+| conditional Redis operator | pull the digest-pinned API image, write API-scoped logs, and read only its exact-version operator secret for the reviewed one-off revocation task; no application data capability |
+| API task                   | inspect only the jobs and balance-sync source/DLQ attributes                                                                                                                      |
+| worker task                | publish only to the jobs and balance-sync source queues, inspect all four queues, and use the data key only through SQS                                                           |
+| web task                   | no application AWS API permission                                                                                                                                                 |
+| migration task execution   | pull only the supplied API image, write migration logs, and read/decrypt only the supplied migration secret at its exact required VersionId                                       |
 
 The migration task's two JSON-key selectors share one required immutable
 VersionId. IAM can scope `GetSecretValue` to the migration secret ARN but not to
@@ -254,12 +266,17 @@ complete:
 - database secret-to-LOGIN SCRAM installation/authentication and authorized
   inactive-slot regeneration, with the resulting exact version bound into the
   reviewed transition record and deployment parameters;
-- an authorized run of the locally reviewed Redis revocation task/CLI, including
-  workload drain, old-slot session and reconnect denial, immediate operator
-  disablement, managed alarm delivery, and sanitized drill evidence;
+- deployed verification that schema-v2 adoption bound the six A/B versions and
+  separate operator version to the exact generated Secrets Manager versions;
+- an authorized run of the locally reviewed Redis revocation task/CLI using the
+  exact adopted operator VersionId, including workload drain, old-slot session
+  and reconnect denial, immediate operator disablement, managed alarm delivery,
+  and sanitized drill evidence;
 - authorized inactive-slot Redis credential regeneration and password
   installation, with its exact version bound into the reviewed transition
   record and deployment parameters;
+- a dedicated current-to-target operator-version transition and replacement
+  task drill before the adopted operator password is ever rotated;
 - a trusted binding proving the separate migration task's supplied secret/key
   ARNs are the exact application-stack migration outputs;
 - actual API, worker, web, and migration startup with injected secrets;
@@ -273,8 +290,9 @@ complete:
 - live positive and negative IAM decisions against exact deployed role/resource
   ARNs;
 - full-hop TLS from the load balancer to application targets;
-- an authorized guarded transition whose recorded current state matches the
-  live immutable stack at execution time;
+- an authorized run through the checked-in transition guard proving that its
+  recorded current state still matches the live immutable stack at execution
+  time;
 - deployed secret rotation followed by forced task replacement and old-secret
   denial; and
 - independently reviewed security logs and redaction evidence coordinated with

@@ -51,6 +51,7 @@ export type ProductionPreflightBlockerId =
   | 'AUTH_PRODUCTION_SECRET_REFERENCES_NOT_WIRED'
   | 'AUTH_TEMPLATE_INSPECTION_FAILED'
   | 'AUTH_WEB_PUBLIC_ORIGIN_NOT_WIRED'
+  | 'REDIS_OPERATOR_SECRET_VERSION_NOT_WIRED'
   | 'WALLET_REGISTRATION_MAINNET_CONFIGURATION_NOT_WIRED'
   | 'EGRESS_LIVE_EVIDENCE_INCOMPLETE'
   | 'EGRESS_POLICY_LOCAL_VALIDATION_FAILED'
@@ -100,6 +101,11 @@ interface AuthenticationDeploymentInput {
   readonly deployedEvidenceAccepted: boolean;
 }
 
+export interface RedisOperatorDeploymentInput {
+  readonly inspected: boolean;
+  readonly syntaxValid: boolean;
+}
+
 interface EgressInput {
   readonly localValidationPassed: boolean;
   readonly status: unknown;
@@ -129,6 +135,8 @@ interface PublicLaunchAuthoritiesInput {
 
 export interface ProductionPreflightInput {
   readonly authentication: AuthenticationDeploymentInput;
+  /** Optional for legacy programmatic callers; absence fails closed during evaluation. */
+  readonly redisOperatorDeployment?: RedisOperatorDeploymentInput;
   readonly egress: EgressInput;
   readonly rpcProviders: RpcProviderInput;
   readonly platforms: PlatformInput;
@@ -816,6 +824,12 @@ export function evaluateProductionPreflight(
   selectedTarget: ProductionPreflightTarget = 'read-only',
 ): ProductionPreflightReport {
   const authenticationBlockers: ProductionPreflightBlockerId[] = [];
+  const redisOperatorDeploymentValid =
+    input.redisOperatorDeployment?.inspected === true &&
+    input.redisOperatorDeployment.syntaxValid === true;
+  if (!redisOperatorDeploymentValid) {
+    authenticationBlockers.push('REDIS_OPERATOR_SECRET_VERSION_NOT_WIRED');
+  }
   if (!input.authentication.inspected || !input.authentication.syntaxValid) {
     authenticationBlockers.push('AUTH_TEMPLATE_INSPECTION_FAILED');
   }
@@ -986,7 +1000,11 @@ export function evaluateProductionPreflight(
   const checks = Object.freeze([
     check(
       'AUTHENTICATION',
-      input.authentication.inspected && input.authentication.syntaxValid ? 'PASS' : 'FAIL',
+      input.authentication.inspected &&
+        input.authentication.syntaxValid &&
+        redisOperatorDeploymentValid
+        ? 'PASS'
+        : 'FAIL',
       authenticationBlockers,
     ),
     check('EXTERNAL_EGRESS', input.egress.localValidationPassed ? 'PASS' : 'FAIL', egressBlockers),
@@ -1124,17 +1142,21 @@ function hasExactImmutableImageParameter(
   );
 }
 
-function hasExactAuthWalletSecretVersionParameter(source: string): boolean {
+function hasExactTopLevelParameter(
+  source: string,
+  name: string,
+  expectedProperties: readonly string[],
+): boolean {
   const normalizedSource = source.replace(/\r\n/gu, '\n');
   const parameters = yamlBlock(normalizedSource, 'Parameters', 0);
   if (parameters === null) return false;
-  const declarations = normalizedSource
-    .split('\n')
-    .filter((line) => /^\s+AuthWalletKeysSecretVersionId:\s*$/u.test(line));
+  const escapedName = name.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+  const declarationPattern = new RegExp(`^\\s+${escapedName}:\\s*$`, 'u');
+  const declarations = normalizedSource.split('\n').filter((line) => declarationPattern.test(line));
   const parameterDeclarations = parameters
     .replace(/\r\n/gu, '\n')
     .split('\n')
-    .filter((line) => /^\s+AuthWalletKeysSecretVersionId:\s*$/u.test(line));
+    .filter((line) => declarationPattern.test(line));
   if (declarations.length !== 1 || parameterDeclarations.length !== 1) return false;
   const indent = leadingSpaces(parameterDeclarations[0] ?? '');
   const directChildIndent = Math.min(
@@ -1144,22 +1166,205 @@ function hasExactAuthWalletSecretVersionParameter(source: string): boolean {
       .map(leadingSpaces),
   );
   if (!Number.isFinite(directChildIndent) || indent !== directChildIndent) return false;
-  const parameter = yamlBlock(parameters, 'AuthWalletKeysSecretVersionId', indent);
+  const parameter = yamlBlock(parameters, name, indent);
   if (parameter === null) return false;
   const semanticLines = parameter
     .split('\n')
     .map((line) => line.trim())
     .filter((line) => line.length > 0 && !line.startsWith('#'));
-  return (
-    semanticLines.join('\n') ===
-    [
-      'AuthWalletKeysSecretVersionId:',
-      'Type: String',
-      'MinLength: 32',
-      'MaxLength: 64',
-      "AllowedPattern: '^[A-Za-z0-9_-]{32,64}$'",
-    ].join('\n')
+  return semanticLines.join('\n') === [`${name}:`, ...expectedProperties].join('\n');
+}
+
+function hasExactAuthWalletSecretVersionParameter(source: string): boolean {
+  return hasExactTopLevelParameter(source, 'AuthWalletKeysSecretVersionId', [
+    'Type: String',
+    'MinLength: 32',
+    'MaxLength: 64',
+    "AllowedPattern: '^[A-Za-z0-9_-]{32,64}$'",
+  ]);
+}
+
+function hasExactRedisOperatorSecretVersionParameter(source: string): boolean {
+  return hasExactTopLevelParameter(source, 'RedisOperatorSecretVersionId', [
+    'Type: String',
+    "AllowedPattern: '^(UNPINNED|[A-Za-z0-9_-]{32,64})$'",
+  ]);
+}
+
+function semanticYamlLines(source: string | null): readonly string[] {
+  if (source === null) return [];
+  return source
+    .replace(/\r\n/gu, '\n')
+    .split('\n')
+    .filter((line) => line.trim().length > 0 && !line.trimStart().startsWith('#'));
+}
+
+function hasExactlyOneSemanticLineContaining(source: string, fragment: string): boolean {
+  return semanticYamlLines(source).filter((line) => line.includes(fragment)).length === 1;
+}
+
+function hasExactNestedParameterPropagation(
+  source: string,
+  stackName: 'WorkloadBoundaries' | 'Observability',
+): boolean {
+  const stack = yamlBlock(source, stackName, 1);
+  const parameters = stack === null ? null : yamlBlock(stack, 'Parameters', 3);
+  return hasExactYamlScalarProperty(
+    parameters,
+    'RedisOperatorSecretVersionId',
+    '!Ref RedisOperatorSecretVersionId',
   );
+}
+
+export function inspectRedisOperatorDeploymentTemplates(
+  parentSource: string,
+  workloadSource: string,
+  observabilitySource: string,
+): RedisOperatorDeploymentInput {
+  const versionParameters = [
+    'ApiDatabaseSlotAVersionId',
+    'ApiDatabaseSlotBVersionId',
+    'WorkerDatabaseSlotAVersionId',
+    'WorkerDatabaseSlotBVersionId',
+    'RedisApiSlotAVersionId',
+    'RedisApiSlotBVersionId',
+    'RedisOperatorSecretVersionId',
+  ] as const;
+  const parentRule = yamlBlock(parentSource, 'FixedSlotVersionsRequireSafeState', 1);
+  const parentRuleLines = semanticYamlLines(parentRule);
+  const parentUnpinnedVersions = `!And [${versionParameters
+    .map((name) => `!Equals [!Ref ${name}, UNPINNED]`)
+    .join(', ')}]`;
+  const parentPinnedVersions = `!And [${versionParameters
+    .map((name) => `!Not [!Equals [!Ref ${name}, UNPINNED]]`)
+    .join(', ')}]`;
+  const exactParentRule = [
+    ' FixedSlotVersionsRequireSafeState:',
+    '  Assertions:',
+    '   - Assert: !Or',
+    `      - !And [${parentUnpinnedVersions}, !And [!Equals [!Ref ApiDesiredCount, 0], !Equals [!Ref WebDesiredCount, 0], !Equals [!Ref WorkerDesiredCount, 0]], !And [!Equals [!Ref ApiDatabaseCredentialPhase, A_ONLY], !Equals [!Ref WorkerDatabaseCredentialPhase, A_ONLY], !Equals [!Ref RedisCredentialPhase, A_ONLY], !Equals [!Ref RedisOperatorMode, DISABLED]]]`,
+    `      - ${parentPinnedVersions}`,
+    '     AssertDescription: Credential versions must be all pinned or an inert A_ONLY adoption sentinel.',
+  ];
+  const parentUnpinnedGate = parentRuleLines.join('\n') === exactParentRule.join('\n');
+
+  const workloadRule = yamlBlock(workloadSource, 'FixedSlotVersionsRequireSafeState', 2);
+  const exactWorkloadRule = [
+    '  FixedSlotVersionsRequireSafeState:',
+    '    Assertions:',
+    '      - Assert: !Or',
+    '          - !And [',
+    '              !And [',
+    ...versionParameters.map((name) => `                !Equals [!Ref ${name}, UNPINNED],`),
+    '              ],',
+    '              !And [',
+    '                !Equals [!Ref ApiDatabaseCredentialPhase, A_ONLY],',
+    '                !Equals [!Ref WorkerDatabaseCredentialPhase, A_ONLY],',
+    '                !Equals [!Ref RedisCredentialPhase, A_ONLY],',
+    '                !Equals [!Ref RedisOperatorMode, DISABLED],',
+    '              ],',
+    '            ]',
+    '          - !And [',
+    ...versionParameters.map((name) => `              !Not [!Equals [!Ref ${name}, UNPINNED]],`),
+    '            ]',
+    '        AssertDescription: Fixed-slot and operator versions must be all pinned or an inert A_ONLY adoption sentinel.',
+  ];
+  const workloadUnpinnedGate =
+    semanticYamlLines(workloadRule).join('\n') === exactWorkloadRule.join('\n');
+  const workloadUser = yamlBlock(workloadSource, 'RedisOperatorUser', 2);
+  const exactWorkloadAccess = [
+    '      AccessString: !If',
+    '        - RedisOperatorEnabled',
+    "        - 'on sanitize-payload resetkeys resetchannels -@all +client|kill'",
+    "        - 'off sanitize-payload resetkeys resetchannels -@all +client|kill'",
+  ];
+  const exactWorkloadAuthentication = [
+    '      AuthenticationMode: !If',
+    '        - CredentialVersionsPinned',
+    '        - {',
+    '            Passwords:',
+    '              [',
+    "                !Sub '{{resolve:secretsmanager:${RedisOperatorSecret}:SecretString:password::${RedisOperatorSecretVersionId}}',",
+    '              ],',
+    '            Type: password,',
+    '          }',
+    '        - { Type: no-password-required }',
+  ];
+  const workloadSelectorValid =
+    semanticYamlLines(workloadUser).join('\n').includes(exactWorkloadAccess.join('\n')) &&
+    semanticYamlLines(workloadUser).join('\n').includes(exactWorkloadAuthentication.join('\n')) &&
+    hasExactlyOneSemanticLineContaining(
+      workloadSource,
+      '${RedisOperatorSecret}:SecretString:password',
+    ) &&
+    hasExactYamlScalarProperty(
+      workloadSource,
+      'CredentialVersionsPinned',
+      '!Not [!Equals [!Ref ApiDatabaseSlotAVersionId, UNPINNED]]',
+    ) &&
+    hasExactYamlScalarProperty(
+      workloadSource,
+      'RedisOperatorEnabled',
+      '!Equals [!Ref RedisOperatorMode, ENABLED]',
+    ) &&
+    !workloadSource.includes('${RedisOperatorSecret}:SecretString:password:AWSCURRENT:') &&
+    !workloadSource.includes('${RedisOperatorSecret}:SecretString:password:AWSPREVIOUS:');
+
+  const observabilityRule = yamlBlock(observabilitySource, 'RedisOperatorRequiresBoundIdentity', 2);
+  const observabilityRuleLines = semanticYamlLines(observabilityRule);
+  const exactObservabilityEnabledRule = [
+    '  RedisOperatorRequiresBoundIdentity:',
+    '    Assertions:',
+    '      - Assert: !Or',
+    '          - !Equals [!Ref RedisOperatorMode, DISABLED]',
+    '          - !And',
+    '            - !Not [!Equals [!Ref RedisOperatorTaskExecutionRoleArn, NONE]]',
+    '            - !Not [!Equals [!Ref RedisOperatorSecretArn, NONE]]',
+    '            - !Not [!Equals [!Ref RedisOperatorSecretVersionId, UNPINNED]]',
+    '        AssertDescription: Redis operator mode requires its exact execution role, secret, and secret version.',
+  ];
+  const observabilityEnabledGate =
+    observabilityRuleLines.join('\n') === exactObservabilityEnabledRule.join('\n');
+  const observabilityTask = yamlBlock(
+    observabilitySource,
+    'RedisSessionRevocationTaskDefinition',
+    2,
+  );
+  const observabilitySelectorValid =
+    observabilityTask !== null &&
+    hasExactYamlScalarProperty(observabilityTask, 'Condition', 'RedisOperatorEnabled') &&
+    hasExactYamlScalarProperty(
+      observabilityTask,
+      'ValueFrom',
+      "!Sub '${RedisOperatorSecretArn}:password::${RedisOperatorSecretVersionId}'",
+    ) &&
+    hasExactlyOneSemanticLineContaining(
+      observabilitySource,
+      '${RedisOperatorSecretArn}:password',
+    ) &&
+    !observabilitySource.includes('${RedisOperatorSecretArn}:password:AWSCURRENT:') &&
+    !observabilitySource.includes('${RedisOperatorSecretArn}:password:AWSPREVIOUS:');
+
+  const inspected =
+    yamlBlock(parentSource, 'Parameters', 0) !== null &&
+    yamlBlock(workloadSource, 'Parameters', 0) !== null &&
+    yamlBlock(observabilitySource, 'Parameters', 0) !== null &&
+    workloadUser !== null &&
+    observabilityTask !== null;
+  const syntaxValid =
+    inspected &&
+    hasExactRedisOperatorSecretVersionParameter(parentSource) &&
+    hasExactRedisOperatorSecretVersionParameter(workloadSource) &&
+    hasExactRedisOperatorSecretVersionParameter(observabilitySource) &&
+    hasExactNestedParameterPropagation(parentSource, 'WorkloadBoundaries') &&
+    hasExactNestedParameterPropagation(parentSource, 'Observability') &&
+    parentUnpinnedGate &&
+    workloadUnpinnedGate &&
+    workloadSelectorValid &&
+    observabilityEnabledGate &&
+    observabilitySelectorValid;
+
+  return Object.freeze({ inspected, syntaxValid });
 }
 
 interface YamlBindingInspection {
@@ -1398,12 +1603,29 @@ export function loadRepositoryProductionPreflightInput(
   repositoryRoot: string,
 ): ProductionPreflightInput {
   let authentication = inspectAuthenticationDeploymentTemplate('');
+  let applicationTemplateSource = '';
   try {
-    authentication = inspectAuthenticationDeploymentTemplate(
-      readFileSync(resolve(repositoryRoot, 'infra/aws/application-baseline.yaml'), 'utf8'),
+    applicationTemplateSource = readFileSync(
+      resolve(repositoryRoot, 'infra/aws/application-baseline.yaml'),
+      'utf8',
     );
+    authentication = inspectAuthenticationDeploymentTemplate(applicationTemplateSource);
   } catch {
     // The evaluator reports the failed local inspection with non-secret blocker IDs.
+  }
+
+  let redisOperatorDeployment = inspectRedisOperatorDeploymentTemplates('', '', '');
+  try {
+    redisOperatorDeployment = inspectRedisOperatorDeploymentTemplates(
+      applicationTemplateSource,
+      readFileSync(
+        resolve(repositoryRoot, 'infra/aws/application-workload-boundaries.yaml'),
+        'utf8',
+      ),
+      readFileSync(resolve(repositoryRoot, 'infra/aws/application-observability.yaml'), 'utf8'),
+    );
+  } catch {
+    // The evaluator reports the failed local inspection without exposing paths or values.
   }
 
   let egressRecord: Record<string, unknown> = {};
@@ -1435,6 +1657,7 @@ export function loadRepositoryProductionPreflightInput(
 
   return Object.freeze({
     authentication,
+    redisOperatorDeployment,
     egress: Object.freeze({
       localValidationPassed: egressLocalValidationPassed,
       status: egressRecord.status,

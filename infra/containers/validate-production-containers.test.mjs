@@ -524,6 +524,15 @@ test('binds the reviewed Redis revocation sources, package scripts, and task com
     replace(source, 'observabilityTemplate', "User: '10001:10001'", "User: '0:0'"),
     /Redis revocation task/u,
   );
+  assertRejected(
+    replace(
+      source,
+      'observabilityTemplate',
+      '${RedisOperatorSecretArn}:password::${RedisOperatorSecretVersionId}',
+      '${RedisOperatorSecretArn}:password::',
+    ),
+    /Redis revocation task/u,
+  );
 });
 
 test('rejects build-context allowlist weakening or accidental source omission', () => {

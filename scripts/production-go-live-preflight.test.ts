@@ -9,6 +9,7 @@ import {
   evaluateProductionPreflight,
   formatProductionPreflightReport,
   inspectAuthenticationDeploymentTemplate,
+  inspectRedisOperatorDeploymentTemplates,
   loadRepositoryProductionPreflightInput,
   parseProductionPreflightArguments,
   productionDirectoryConfigurationSha256,
@@ -41,6 +42,14 @@ const AUTHORITY_BINDING = Object.freeze({
 } satisfies PublicLaunchTargetBinding);
 const APPLICATION_BASELINE = readFileSync(
   resolve(__dirname, '../infra/aws/application-baseline.yaml'),
+  'utf8',
+);
+const APPLICATION_WORKLOAD_BOUNDARIES = readFileSync(
+  resolve(__dirname, '../infra/aws/application-workload-boundaries.yaml'),
+  'utf8',
+);
+const APPLICATION_OBSERVABILITY = readFileSync(
+  resolve(__dirname, '../infra/aws/application-observability.yaml'),
   'utf8',
 );
 
@@ -189,6 +198,10 @@ function completeInput(directory: unknown): ProductionPreflightInput {
       ]),
       webEnvironmentNames: new Set(['NODE_ENV', 'AUTH_PUBLIC_ORIGIN']),
       deployedEvidenceAccepted: true,
+    },
+    redisOperatorDeployment: {
+      inspected: true,
+      syntaxValid: true,
     },
     egress: {
       localValidationPassed: true,
@@ -1322,6 +1335,351 @@ test('auth inspection rejects mutable, omitted, or alternate auth/wallet secret 
         .find(({ id }) => id === 'AUTHENTICATION')
         ?.blockerIds.includes('AUTH_PRODUCTION_SECRET_REFERENCES_NOT_WIRED'),
       replacement,
+    );
+  }
+});
+
+test('production inspection accepts only the exact pinned Redis operator deployment contract', () => {
+  const inspected = inspectRedisOperatorDeploymentTemplates(
+    APPLICATION_BASELINE,
+    APPLICATION_WORKLOAD_BOUNDARIES,
+    APPLICATION_OBSERVABILITY,
+  );
+  assert.deepEqual(inspected, { inspected: true, syntaxValid: true });
+
+  const report = evaluateProductionPreflight({
+    ...completeInput(platformDirectory('PLANNED')),
+    redisOperatorDeployment: inspected,
+  });
+  assert.equal(
+    report.checks
+      .find(({ id }) => id === 'AUTHENTICATION')
+      ?.blockerIds.includes('REDIS_OPERATOR_SECRET_VERSION_NOT_WIRED'),
+    false,
+  );
+
+  const complete = completeInput(platformDirectory('PLANNED'));
+  const { redisOperatorDeployment: intentionallyOmitted, ...missingRedisInput } = complete;
+  assert.notEqual(intentionallyOmitted, undefined);
+  const missingReport = evaluateProductionPreflight(missingRedisInput);
+  const missingCheck = missingReport.checks.find(({ id }) => id === 'AUTHENTICATION');
+  assert.equal(missingCheck?.localValidation, 'FAIL');
+  assert.ok(missingCheck?.blockerIds.includes('REDIS_OPERATOR_SECRET_VERSION_NOT_WIRED'));
+});
+
+test('Redis operator inspection rejects mutable selectors, unsafe adoption, and counterfeit parameters', () => {
+  type Mutation = readonly [label: string, parent: string, workload: string, observability: string];
+  const unchanged = [
+    APPLICATION_BASELINE,
+    APPLICATION_WORKLOAD_BOUNDARIES,
+    APPLICATION_OBSERVABILITY,
+  ] as const;
+  const mutate = (source: string, approved: string, rejected: string, label: string): string => {
+    const result = source.replace(approved, rejected);
+    assert.notEqual(result, source, label);
+    return result;
+  };
+  const mutateOccurrence = (
+    source: string,
+    approved: string,
+    rejected: string,
+    occurrence: number,
+    label: string,
+  ): string => {
+    let offset = -1;
+    for (let index = 0; index <= occurrence; index += 1) {
+      offset = source.indexOf(approved, offset + 1);
+      assert.notEqual(offset, -1, label);
+    }
+    return `${source.slice(0, offset)}${rejected}${source.slice(offset + approved.length)}`;
+  };
+  const parentParameter = [
+    ' RedisOperatorSecretVersionId:',
+    '  Type: String',
+    "  AllowedPattern: '^(UNPINNED|[A-Za-z0-9_-]{32,64})$'",
+  ].join('\n');
+  const childParameter = [
+    '  RedisOperatorSecretVersionId:',
+    '    Type: String',
+    "    AllowedPattern: '^(UNPINNED|[A-Za-z0-9_-]{32,64})$'",
+  ].join('\n');
+  const workloadSelector =
+    '${RedisOperatorSecret}:SecretString:password::${RedisOperatorSecretVersionId}';
+  const observabilitySelector =
+    '${RedisOperatorSecretArn}:password::${RedisOperatorSecretVersionId}';
+  const mutations: Mutation[] = [
+    [
+      'parent parameter default',
+      mutate(
+        unchanged[0],
+        parentParameter,
+        parentParameter.replace('  Type: String', '  Type: String\n  Default: UNPINNED'),
+        'parent parameter default',
+      ),
+      unchanged[1],
+      unchanged[2],
+    ],
+    [
+      'parent counterfeit nested parameter',
+      mutate(
+        unchanged[0],
+        parentParameter,
+        parentParameter
+          .split('\n')
+          .map((line) => ` ${line}`)
+          .join('\n'),
+        'parent counterfeit nested parameter',
+      ),
+      unchanged[1],
+      unchanged[2],
+    ],
+    [
+      'workload propagation omitted',
+      mutate(
+        unchanged[0],
+        '    RedisOperatorSecretVersionId: !Ref RedisOperatorSecretVersionId',
+        '    RedisOperatorSecretVersionId: UNPINNED',
+        'workload propagation omitted',
+      ),
+      unchanged[1],
+      unchanged[2],
+    ],
+    [
+      'observability propagation uses alternate parameter',
+      mutateOccurrence(
+        unchanged[0],
+        '    RedisOperatorSecretVersionId: !Ref RedisOperatorSecretVersionId',
+        '    RedisOperatorSecretVersionId: !Ref RedisApiSlotAVersionId',
+        1,
+        'observability propagation uses alternate parameter',
+      ),
+      unchanged[1],
+      unchanged[2],
+    ],
+    [
+      'parent unpinned state can enable operator',
+      mutate(
+        unchanged[0],
+        '!Equals [!Ref RedisOperatorMode, DISABLED]',
+        '!Equals [!Ref RedisOperatorMode, ENABLED]',
+        'parent unpinned state can enable operator',
+      ),
+      unchanged[1],
+      unchanged[2],
+    ],
+    [
+      'parent rule permits an extra always-true OR branch',
+      mutate(
+        unchanged[0],
+        '     AssertDescription: Credential versions must be all pinned or an inert A_ONLY adoption sentinel.',
+        '      - !Equals [1, 1]\n     AssertDescription: Credential versions must be all pinned or an inert A_ONLY adoption sentinel.',
+        'parent rule permits an extra always-true OR branch',
+      ),
+      unchanged[1],
+      unchanged[2],
+    ],
+    [
+      'parent rule duplicates the operator UNPINNED condition',
+      mutateOccurrence(
+        unchanged[0],
+        '!Equals [!Ref RedisOperatorSecretVersionId, UNPINNED]',
+        '!Equals [!Ref RedisOperatorSecretVersionId, UNPINNED], !Equals [!Ref RedisOperatorSecretVersionId, UNPINNED]',
+        0,
+        'parent rule duplicates the operator UNPINNED condition',
+      ),
+      unchanged[1],
+      unchanged[2],
+    ],
+    [
+      'workload parameter default',
+      unchanged[0],
+      mutate(
+        unchanged[1],
+        childParameter,
+        childParameter.replace('    Type: String', '    Type: String\n    Default: UNPINNED'),
+        'workload parameter default',
+      ),
+      unchanged[2],
+    ],
+    [
+      'workload rule permits an extra always-true OR branch',
+      unchanged[0],
+      mutate(
+        unchanged[1],
+        '        AssertDescription: Fixed-slot and operator versions must be all pinned or an inert A_ONLY adoption sentinel.',
+        '          - !Equals [1, 1]\n        AssertDescription: Fixed-slot and operator versions must be all pinned or an inert A_ONLY adoption sentinel.',
+        'workload rule permits an extra always-true OR branch',
+      ),
+      unchanged[2],
+    ],
+    [
+      'workload rule duplicates the operator UNPINNED condition',
+      unchanged[0],
+      mutate(
+        unchanged[1],
+        '                !Equals [!Ref RedisOperatorSecretVersionId, UNPINNED],',
+        '                !Equals [!Ref RedisOperatorSecretVersionId, UNPINNED],\n                !Equals [!Ref RedisOperatorSecretVersionId, UNPINNED],',
+        'workload rule duplicates the operator UNPINNED condition',
+      ),
+      unchanged[2],
+    ],
+    [
+      'workload counterfeit nested parameter',
+      unchanged[0],
+      mutate(
+        unchanged[1],
+        childParameter,
+        childParameter
+          .split('\n')
+          .map((line) => `  ${line}`)
+          .join('\n'),
+        'workload counterfeit nested parameter',
+      ),
+      unchanged[2],
+    ],
+    [
+      'workload duplicates the exact operator selector',
+      unchanged[0],
+      mutate(
+        unchanged[1],
+        "                !Sub '{{resolve:secretsmanager:${RedisOperatorSecret}:SecretString:password::${RedisOperatorSecretVersionId}}',",
+        "                !Sub '{{resolve:secretsmanager:${RedisOperatorSecret}:SecretString:password::${RedisOperatorSecretVersionId}}',\n                !Sub '{{resolve:secretsmanager:${RedisOperatorSecret}:SecretString:password::${RedisOperatorSecretVersionId}}',",
+        'workload duplicates the exact operator selector',
+      ),
+      unchanged[2],
+    ],
+    [
+      'workload unpinned fallback still uses password',
+      unchanged[0],
+      mutateOccurrence(
+        unchanged[1],
+        '- { Type: no-password-required }',
+        '- { Passwords: [mutable], Type: password }',
+        2,
+        'workload unpinned fallback still uses password',
+      ),
+      unchanged[2],
+    ],
+    [
+      'workload alternate version',
+      unchanged[0],
+      mutate(
+        unchanged[1],
+        workloadSelector,
+        '${RedisOperatorSecret}:SecretString:password::${RedisApiSlotAVersionId}',
+        'workload alternate version',
+      ),
+      unchanged[2],
+    ],
+    [
+      'observability parameter default',
+      unchanged[0],
+      unchanged[1],
+      mutate(
+        unchanged[2],
+        childParameter,
+        childParameter.replace('    Type: String', '    Type: String\n    Default: UNPINNED'),
+        'observability parameter default',
+      ),
+    ],
+    [
+      'observability rule duplicates the operator version condition',
+      unchanged[0],
+      unchanged[1],
+      mutate(
+        unchanged[2],
+        '            - !Not [!Equals [!Ref RedisOperatorSecretVersionId, UNPINNED]]',
+        '            - !Not [!Equals [!Ref RedisOperatorSecretVersionId, UNPINNED]]\n            - !Not [!Equals [!Ref RedisOperatorSecretVersionId, UNPINNED]]',
+        'observability rule duplicates the operator version condition',
+      ),
+    ],
+    [
+      'observability counterfeit nested parameter',
+      unchanged[0],
+      unchanged[1],
+      mutate(
+        unchanged[2],
+        childParameter,
+        childParameter
+          .split('\n')
+          .map((line) => `  ${line}`)
+          .join('\n'),
+        'observability counterfeit nested parameter',
+      ),
+    ],
+    [
+      'observability duplicates the exact operator selector',
+      unchanged[0],
+      unchanged[1],
+      mutate(
+        unchanged[2],
+        "              ValueFrom: !Sub '${RedisOperatorSecretArn}:password::${RedisOperatorSecretVersionId}'",
+        "              ValueFrom: !Sub '${RedisOperatorSecretArn}:password::${RedisOperatorSecretVersionId}'\n              ValueFrom: !Sub '${RedisOperatorSecretArn}:password::${RedisOperatorSecretVersionId}'",
+        'observability duplicates the exact operator selector',
+      ),
+    ],
+    [
+      'observability enabled rule omits version',
+      unchanged[0],
+      unchanged[1],
+      mutate(
+        unchanged[2],
+        '            - !Not [!Equals [!Ref RedisOperatorSecretVersionId, UNPINNED]]\n',
+        '',
+        'observability enabled rule omits version',
+      ),
+    ],
+    [
+      'observability alternate version',
+      unchanged[0],
+      unchanged[1],
+      mutate(
+        unchanged[2],
+        observabilitySelector,
+        '${RedisOperatorSecretArn}:password::${RedisApiSlotAVersionId}',
+        'observability alternate version',
+      ),
+    ],
+  ];
+
+  for (const [selectorName, exact, mutableCurrent, mutablePrevious] of [
+    [
+      'workload',
+      workloadSelector,
+      '${RedisOperatorSecret}:SecretString:password:AWSCURRENT:',
+      '${RedisOperatorSecret}:SecretString:password:AWSPREVIOUS:',
+    ],
+    [
+      'observability',
+      observabilitySelector,
+      '${RedisOperatorSecretArn}:password:AWSCURRENT:',
+      '${RedisOperatorSecretArn}:password:AWSPREVIOUS:',
+    ],
+  ] as const) {
+    const target = selectorName === 'workload' ? 1 : 2;
+    for (const [kind, replacement] of [
+      ['omitted', exact.replace(/::\$\{RedisOperatorSecretVersionId\}$/u, '::')],
+      ['AWSCURRENT', mutableCurrent],
+      ['AWSPREVIOUS', mutablePrevious],
+    ] as const) {
+      const sources: [string, string, string] = [...unchanged];
+      sources[target] = mutate(sources[target], exact, replacement, `${selectorName} ${kind}`);
+      mutations.push([`${selectorName} ${kind}`, sources[0], sources[1], sources[2]]);
+    }
+  }
+
+  for (const [label, parent, workload, observability] of mutations) {
+    const inspected = inspectRedisOperatorDeploymentTemplates(parent, workload, observability);
+    assert.equal(inspected.syntaxValid, false, label);
+    const report = evaluateProductionPreflight({
+      ...completeInput(platformDirectory('PLANNED')),
+      redisOperatorDeployment: inspected,
+    });
+    assert.ok(
+      report.checks
+        .find(({ id }) => id === 'AUTHENTICATION')
+        ?.blockerIds.includes('REDIS_OPERATOR_SECRET_VERSION_NOT_WIRED'),
+      label,
     );
   }
 });

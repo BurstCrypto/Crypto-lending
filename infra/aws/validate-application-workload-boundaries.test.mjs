@@ -222,17 +222,18 @@ for (const [name, search, replacement] of [
   });
 }
 
-const fixedSlotVersionParameters = [
+const credentialVersionParameters = [
   'ApiDatabaseSlotAVersionId',
   'ApiDatabaseSlotBVersionId',
   'WorkerDatabaseSlotAVersionId',
   'WorkerDatabaseSlotBVersionId',
   'RedisApiSlotAVersionId',
   'RedisApiSlotBVersionId',
+  'RedisOperatorSecretVersionId',
 ];
 
-test('requires all six fixed-slot version parameters without a mutable default', () => {
-  for (const parameter of fixedSlotVersionParameters) {
+test('requires all seven credential version parameters without a mutable default', () => {
+  for (const parameter of credentialVersionParameters) {
     const block = [
       `  ${parameter}:`,
       '    Type: String',
@@ -268,6 +269,13 @@ test('rejects mixed pins or an active direct-child UNPINNED state', () => {
     mutate(
       '!Equals [!Ref RedisOperatorMode, DISABLED],',
       '!Equals [!Ref RedisOperatorMode, ENABLED],',
+    ),
+    /Deployment rules.*billing acknowledgement/,
+  );
+  assertRejected(
+    mutate(
+      '!Equals [!Ref RedisOperatorSecretVersionId, UNPINNED],',
+      '!Not [!Equals [!Ref RedisOperatorSecretVersionId, UNPINNED]],',
     ),
     /Deployment rules.*billing acknowledgement/,
   );
@@ -334,6 +342,24 @@ test('pins both Redis application passwords to their exact slot VersionIds', () 
   assertRejected(
     mutate('password::${RedisApiSlotAVersionId}', 'password::${RedisApiSlotBVersionId}'),
     /RedisApiAUser.*exact ordered/,
+  );
+});
+
+test('pins the Redis operator password to its exact VersionId and disables authentication while unpinned', () => {
+  const exact = '${RedisOperatorSecret}:SecretString:password::${RedisOperatorSecretVersionId}';
+  for (const replacement of [
+    '${RedisOperatorSecret}:SecretString:password',
+    '${RedisOperatorSecret}:SecretString:password:AWSCURRENT:',
+    '${RedisOperatorSecret}:SecretString:password::${RedisApiSlotAVersionId}',
+  ]) {
+    assertRejected(mutate(exact, replacement), /RedisOperatorUser.*exact ordered/);
+  }
+  assertRejected(
+    mutate(
+      "      AuthenticationMode: !If\n        - CredentialVersionsPinned\n        - {\n            Passwords:\n              [\n                !Sub '{{resolve:secretsmanager:${RedisOperatorSecret}:SecretString:password::${RedisOperatorSecretVersionId}}'",
+      "      AuthenticationMode: !If\n        - RedisOperatorEnabled\n        - {\n            Passwords:\n              [\n                !Sub '{{resolve:secretsmanager:${RedisOperatorSecret}:SecretString:password::${RedisOperatorSecretVersionId}}'",
+    ),
+    /RedisOperatorUser.*exact ordered/,
   );
 });
 

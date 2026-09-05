@@ -95,6 +95,7 @@ function scopeState(scope, phase = 'A_ONLY') {
 function trackedState(phases = {}) {
   return {
     operatorMode: 'DISABLED',
+    redisOperatorSecretVersionId: versionId('redisOperator', 'credential', 1),
     apiDatabase: scopeState('apiDatabase', phases.apiDatabase),
     workerDatabase: scopeState('workerDatabase', phases.workerDatabase),
     redis: scopeState('redis', phases.redis),
@@ -208,7 +209,7 @@ function evidence(operation) {
 
 function envelope(currentState, targetState, operation) {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     status: 'APPROVED',
     recordId: `rotation:${operation.toLowerCase()}:one`,
     preparedAt: PREPARED_AT,
@@ -417,7 +418,13 @@ test('accepts canonical adoption and binds both state digests', () => {
   assert.equal(result.currentStateSha256, canonicalStateHash(record.currentState));
   assert.equal(result.targetStateSha256, canonicalStateHash(record.targetState));
   assert.match(result.canonicalSha256, /^[a-f0-9]{64}$/u);
-  assert.equal(result.plan.scope, 'ALL_FIXED_SLOTS');
+  assert.equal(result.plan.scope, 'ALL_CREDENTIAL_VERSION_BINDINGS');
+  assert.equal(result.plan.phaseParameter, 'ALL_SEVEN_VERSION_SELECTORS');
+  assert.deepEqual(result.plan.steps.slice(0, 3), [
+    'CAPTURE_ALL_SEVEN_EXACT_SECRET_VERSION_IDENTITIES_UNDER_SEPARATE_AUTHORITY',
+    'VERIFY_ALL_DATABASE_VERIFIERS_AND_REDIS_PASSWORD_BINDINGS_WITHOUT_RECORDING_CREDENTIALS',
+    'PIN_ALL_SEVEN_VERSION_SELECTORS_WHILE_ALL_WORKLOAD_DESIRED_COUNTS_REMAIN_ZERO',
+  ]);
 });
 
 test('core operational validation rejects omitted external identity bindings or instant', () => {
@@ -559,7 +566,7 @@ test('rejects active-slot changes, generation jumps, overflow, and history trunc
   assertRejected(truncated, 'transition', /append-only history|state-machine step/u);
 });
 
-test('rejects replay of any prior or cross-workload version identity', () => {
+test('rejects replay of any prior, operator, or cross-workload version identity', () => {
   const priorReplay = preparationRecord('apiDatabase');
   const target = priorReplay.targetState.apiDatabase.slots.b;
   target.currentVersionId = target.usedVersionIds[0];
@@ -571,6 +578,11 @@ test('rejects replay of any prior or cross-workload version identity', () => {
   crossWorkload.targetState.apiDatabase.slots.b.currentVersionId = workerVersion;
   crossWorkload.targetState.apiDatabase.slots.b.usedVersionIds[1] = workerVersion;
   assertRejected(crossWorkload, 'transition', /reuse a version identity/u);
+
+  const operatorReplay = adoptionRecord();
+  operatorReplay.targetState.redisOperatorSecretVersionId =
+    operatorReplay.targetState.apiDatabase.slots.a.currentVersionId;
+  assertRejected(operatorReplay, 'adopt', /reuse a version identity/u);
 });
 
 test('rejects multiple scopes, stale evidence, operator mode, and predecessor drift', () => {
@@ -587,6 +599,14 @@ test('rejects multiple scopes, stale evidence, operator mode, and predecessor dr
   operator.targetState.operatorMode = 'ENABLED';
   operator.predecessor.stateSha256 = canonicalStateHash(operator.currentState);
   assertRejected(operator, 'transition', /operatorMode must remain DISABLED/u);
+
+  const operatorVersion = preparationRecord('workerDatabase');
+  operatorVersion.targetState.redisOperatorSecretVersionId = versionId(
+    'redisOperator',
+    'credential',
+    2,
+  );
+  assertRejected(operatorVersion, 'transition', /cannot change the Redis operator secret version/u);
 
   const predecessor = preparationRecord('workerDatabase');
   predecessor.predecessor.stateSha256 = digest('stale-current-state');
@@ -672,18 +692,26 @@ test('rejects schema drift, credential-bearing fields, ambiguous JSON, and fake 
   assertRejected(duplicateEvidence, 'transition', /distinct SHA-256 bindings/u);
 
   const ambiguous = JSON.stringify(preparationRecord('apiDatabase')).replace(
-    '{"schemaVersion":1,',
-    '{"schemaVersion":1,"schemaVersion":1,',
+    '{"schemaVersion":2,',
+    '{"schemaVersion":2,"schemaVersion":2,',
   );
   withLocalRecord(ambiguous, (path) => assertInputRejected(path));
 });
 
-test('rejects noncanonical adoption, duplicate initial versions, and example escalation', () => {
+test('rejects noncanonical adoption, unpinned operator adoption, duplicate initial versions, and example escalation', () => {
   const partial = adoptionRecord();
   partial.targetState.redis.slots.b.generation = 0;
   partial.targetState.redis.slots.b.currentVersionId = 'UNPINNED';
   partial.targetState.redis.slots.b.usedVersionIds = [];
-  assertRejected(partial, 'adopt', /pin six generation-one versions/u);
+  assertRejected(partial, 'adopt', /pin seven exact versions/u);
+
+  const unpinnedOperator = adoptionRecord();
+  unpinnedOperator.targetState.redisOperatorSecretVersionId = 'UNPINNED';
+  assertRejected(
+    unpinnedOperator,
+    'adopt',
+    /redisOperatorSecretVersionId may be unpinned only|pin seven exact versions/u,
+  );
 
   const duplicate = adoptionRecord();
   duplicate.targetState.redis.slots.b.currentVersionId =
@@ -697,6 +725,24 @@ test('rejects noncanonical adoption, duplicate initial versions, and example esc
   escalated.status = 'APPROVED';
   assertRejected(escalated, 'example', /remain inert/u);
   assertRejected(exampleRecord, 'transition', /Operational record status|record approval/u);
+});
+
+test('rejects legacy schema and malformed or omitted Redis operator version state', () => {
+  const legacy = preparationRecord('apiDatabase');
+  legacy.schemaVersion = 1;
+  assertRejected(legacy, 'transition', /schemaVersion must be 2/u);
+
+  for (const invalid of [undefined, 'AWSCURRENT', 'short', `${'a'.repeat(31)}!`]) {
+    const record = preparationRecord('apiDatabase');
+    if (invalid === undefined) delete record.currentState.redisOperatorSecretVersionId;
+    else record.currentState.redisOperatorSecretVersionId = invalid;
+    record.predecessor.stateSha256 = canonicalStateHash(record.currentState);
+    assertRejected(
+      record,
+      'transition',
+      /exact reviewed keys|redisOperatorSecretVersionId must be UNPINNED or one exact/u,
+    );
+  }
 });
 
 test('secure loader rejects empty, oversized, malformed UTF-8, and BOM-prefixed records', () => {

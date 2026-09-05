@@ -199,6 +199,7 @@ blocker status.
 The current machine-readable launch blockers include:
 
 - `AUTH_DEPLOYED_EVIDENCE_MISSING`
+- `REDIS_OPERATOR_SECRET_VERSION_NOT_WIRED`
 - `EGRESS_POLICY_NOT_ACCEPTED`
 - `EXTERNAL_EGRESS_DISABLED`
 - `RPC_PROVIDER_EXTERNAL_APPROVAL_PENDING`
@@ -229,6 +230,15 @@ wiring blocker IDs and remains at zero desired tasks. This proves only that the
 authored template matches the migration-`0025` fail-closed configuration
 contract; it does not prove that the secret/version exists, its rings are valid,
 or a task can read it.
+
+The same offline inspection loads the exact parent, workload-boundary child,
+and observability child for the Redis break-glass credential. It requires one
+explicit no-default `RedisOperatorSecretVersionId` propagated to both children,
+an all-seven inert `UNPINNED` adoption gate, an off/passwordless operator user
+before adoption, and the same exact stage-free version in the ElastiCache user
+and conditional ECS revocation task. Omitted versions, `AWSCURRENT`,
+`AWSPREVIOUS`, alternate parameters, mismatched child propagation, or an enabled
+unpinned task emit `REDIS_OPERATOR_SECRET_VERSION_NOT_WIRED`.
 
 `AUTH_DEPLOYED_EVIDENCE_MISSING` remains by design: the repository neither
 provisions nor contacts Cognito, Secrets Manager, or KMS, and the inspector never

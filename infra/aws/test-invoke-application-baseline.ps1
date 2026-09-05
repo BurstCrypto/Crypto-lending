@@ -311,6 +311,7 @@ function New-FixedSlotState {
 
     return [ordered]@{
         operatorMode = 'DISABLED'
+        redisOperatorSecretVersionId = [string] $Versions.RedisOperatorSecretVersionId
         apiDatabase = New-FixedSlotScopeState -SlotAVersionId ([string] $Versions.ApiDatabaseSlotAVersionId) -SlotBVersionId ([string] $Versions.ApiDatabaseSlotBVersionId) -Generation $Generation
         workerDatabase = New-FixedSlotScopeState -SlotAVersionId ([string] $Versions.WorkerDatabaseSlotAVersionId) -SlotBVersionId ([string] $Versions.WorkerDatabaseSlotBVersionId) -Generation $Generation
         redis = New-FixedSlotScopeState -SlotAVersionId ([string] $Versions.RedisApiSlotAVersionId) -SlotBVersionId ([string] $Versions.RedisApiSlotBVersionId) -Generation $Generation
@@ -326,6 +327,7 @@ function New-AdoptionTransitionRecord {
     )
 
     $unpinnedVersions = [ordered]@{
+        RedisOperatorSecretVersionId = 'UNPINNED'
         ApiDatabaseSlotAVersionId = 'UNPINNED'
         ApiDatabaseSlotBVersionId = 'UNPINNED'
         WorkerDatabaseSlotAVersionId = 'UNPINNED'
@@ -334,7 +336,7 @@ function New-AdoptionTransitionRecord {
         RedisApiSlotBVersionId = 'UNPINNED'
     }
     return [ordered]@{
-        schemaVersion = 1
+        schemaVersion = 2
         status = 'APPROVED'
         recordId = 'rotation:adopt-and-pin:focused-test'
         preparedAt = $Now.AddMinutes(-2).ToString('yyyy-MM-ddTHH:mm:ssZ', [System.Globalization.CultureInfo]::InvariantCulture)
@@ -407,7 +409,7 @@ function New-PreparationTransitionRecord {
         backendInstallEvidenceSha256 = $backendInstallationSha256
     }
     return [ordered]@{
-        schemaVersion = 1
+        schemaVersion = 2
         status = 'APPROVED'
         recordId = 'rotation:prepare-inactive:api-database:focused-test'
         preparedAt = $Now.AddMinutes(-2).ToString('yyyy-MM-ddTHH:mm:ssZ', [System.Globalization.CultureInfo]::InvariantCulture)
@@ -922,6 +924,10 @@ $authWalletKeysSecretVersionId = @('auth', 'wallet', 'keys', 'secret', 'version'
 if ($authWalletKeysSecretVersionId -cnotmatch '^[A-Za-z0-9_-]{32,64}$') {
     throw 'Focused auth/wallet secret VersionId fixture is malformed.'
 }
+$redisOperatorSecretVersionId = @('redis', 'operator', 'secret', 'version', '0001') -join '_'
+if ($redisOperatorSecretVersionId -cnotmatch '^[A-Za-z0-9_-]{32,64}$') {
+    throw 'Focused Redis operator secret VersionId fixture is malformed.'
+}
 $applicationParameterMap = [ordered]@{
     EnvironmentName = 'test-kan34'
     WorkloadBoundariesTemplateUrl = $artifactTemplateUrl
@@ -930,6 +936,7 @@ $applicationParameterMap = [ordered]@{
     ObservabilityTemplateUrl = $observabilityTemplateUrl
     ObservabilityTemplateSha256 = $observabilityTemplateSha256
     ObservabilityArtifactBindingSha256 = $observabilityArtifactBindingSha256
+    RedisOperatorSecretVersionId = 'UNPINNED'
     ApiDatabaseSlotAVersionId = 'UNPINNED'
     ApiDatabaseSlotBVersionId = 'UNPINNED'
     WorkerDatabaseSlotAVersionId = 'UNPINNED'
@@ -1041,6 +1048,7 @@ $baseArguments = @{
     ObservabilityArtifactBucket = $artifactBucket
     ObservabilityArtifactVersionId = $artifactVersionId
     AuthWalletKeysSecretVersionId = $authWalletKeysSecretVersionId
+    RedisOperatorSecretVersionId = 'UNPINNED'
     ApiDatabaseSlotAVersionId = 'UNPINNED'
     ApiDatabaseSlotBVersionId = 'UNPINNED'
     WorkerDatabaseSlotAVersionId = 'UNPINNED'
@@ -1052,7 +1060,8 @@ $baseArguments = @{
     BillableAcknowledgement = $billableAcknowledgement
 }
 
-$pinnedFixedSlotVersions = [ordered]@{
+$pinnedCredentialVersions = [ordered]@{
+    RedisOperatorSecretVersionId = $redisOperatorSecretVersionId
     ApiDatabaseSlotAVersionId = 'api_database_slot_a_version_00001'
     ApiDatabaseSlotBVersionId = 'api_database_slot_b_version_00001'
     WorkerDatabaseSlotAVersionId = 'worker_database_slot_a_version_01'
@@ -1060,7 +1069,7 @@ $pinnedFixedSlotVersions = [ordered]@{
     RedisApiSlotAVersionId = 'redis_api_slot_a_version_00000001'
     RedisApiSlotBVersionId = 'redis_api_slot_b_version_00000001'
 }
-foreach ($fixtureVersion in $pinnedFixedSlotVersions.Values) {
+foreach ($fixtureVersion in $pinnedCredentialVersions.Values) {
     if ([string] $fixtureVersion -cnotmatch '^[A-Za-z0-9_-]{32,64}$') {
         throw "Focused fixed-slot fixture VersionId has invalid length or characters: $fixtureVersion"
     }
@@ -1068,7 +1077,7 @@ foreach ($fixtureVersion in $pinnedFixedSlotVersions.Values) {
 $transitionFixtureNow = [DateTime]::UtcNow
 $transitionValidationAt = $transitionFixtureNow.ToString('yyyy-MM-ddTHH:mm:ssZ', [System.Globalization.CultureInfo]::InvariantCulture)
 $approvedTransitionRecord = New-AdoptionTransitionRecord `
-    -PinnedVersions $pinnedFixedSlotVersions `
+    -PinnedVersions $pinnedCredentialVersions `
     -ParentTemplateSha256 $applicationTemplateSha256 `
     -WorkloadTemplateSha256 $workloadBoundariesTemplateSha256 `
     -Now $transitionFixtureNow
@@ -1104,7 +1113,7 @@ $updateApplicationParameterMap = [ordered]@{}
 foreach ($entry in $applicationParameterMap.GetEnumerator()) {
     $updateApplicationParameterMap[$entry.Key] = [string] $entry.Value
 }
-foreach ($entry in $pinnedFixedSlotVersions.GetEnumerator()) {
+foreach ($entry in $pinnedCredentialVersions.GetEnumerator()) {
     $updateApplicationParameterMap[$entry.Key] = [string] $entry.Value
 }
 $updateParameterOverrides = @($parameterOverrides) + @(
@@ -1145,7 +1154,7 @@ $updateArguments.FixedSlotCredentialTransitionMode = 'adopt'
 $updateArguments.FixedSlotCredentialTransitionValidationAt = $transitionValidationAt
 $updateArguments.ParameterOverride = $updateParameterOverrides
 $updateArguments.BillableAcknowledgement = $updateBillableAcknowledgement
-foreach ($entry in $pinnedFixedSlotVersions.GetEnumerator()) {
+foreach ($entry in $pinnedCredentialVersions.GetEnumerator()) {
     $updateArguments[$entry.Key] = [string] $entry.Value
 }
 
@@ -1181,12 +1190,12 @@ $applicationUpdateArguments.ParameterOverride = $applicationUpdateParameterOverr
 $applicationUpdateArguments.BillableAcknowledgement = $applicationUpdateBillableAcknowledgement
 
 $rotatedFixedSlotVersions = [ordered]@{}
-foreach ($entry in $pinnedFixedSlotVersions.GetEnumerator()) {
+foreach ($entry in $pinnedCredentialVersions.GetEnumerator()) {
     $rotatedFixedSlotVersions[$entry.Key] = [string] $entry.Value
 }
 $rotatedFixedSlotVersions.ApiDatabaseSlotBVersionId = 'api_database_slot_b_version_00002'
 $approvedRotationRecord = New-PreparationTransitionRecord `
-    -PinnedVersions $pinnedFixedSlotVersions `
+    -PinnedVersions $pinnedCredentialVersions `
     -TargetApiDatabaseSlotBVersionId ([string] $rotatedFixedSlotVersions.ApiDatabaseSlotBVersionId) `
     -ParentTemplateSha256 $applicationTemplateSha256 `
     -WorkloadTemplateSha256 $workloadBoundariesTemplateSha256 `
@@ -1298,38 +1307,40 @@ try {
         Assert-Condition ((Get-AwsMarkerText) -eq '') 'Auth/wallet VersionId override reached AWS discovery.'
     }
 
-    Invoke-FocusedTest -Name 'Plan requires all six explicit fixed-slot VersionIds before AWS discovery' -Body {
+    Invoke-FocusedTest -Name 'Plan requires all seven explicit credential VersionIds before AWS discovery' -Body {
         Clear-AwsMarker
         $arguments = Copy-ArgumentMap -Map $baseArguments
         $arguments.Action = 'Plan'
-        [void] $arguments.Remove('RedisApiSlotBVersionId')
+        [void] $arguments.Remove('RedisOperatorSecretVersionId')
         $result = Invoke-Guard -Arguments $arguments
-        Assert-Condition (-not $result.Succeeded) 'Plan accepted a missing fixed-slot VersionId.'
-        Assert-Condition ($result.Output -match 'RedisApiSlotBVersionId must be supplied explicitly') 'Missing fixed-slot VersionId rejection was not explicit.'
-        Assert-Condition ((Get-AwsMarkerText) -eq '') 'Missing fixed-slot VersionId reached AWS discovery.'
+        Assert-Condition (-not $result.Succeeded) 'Plan accepted a missing Redis operator VersionId.'
+        Assert-Condition ($result.Output -match 'RedisOperatorSecretVersionId must be supplied explicitly') 'Missing Redis operator VersionId rejection was not explicit.'
+        Assert-Condition ((Get-AwsMarkerText) -eq '') 'Missing Redis operator VersionId reached AWS discovery.'
     }
 
-    Invoke-FocusedTest -Name 'Plan rejects malformed and mixed fixed-slot VersionIds before AWS discovery' -Body {
-        Clear-AwsMarker
-        $malformedArguments = Copy-ArgumentMap -Map $baseArguments
-        $malformedArguments.Action = 'Plan'
-        $malformedArguments.RedisApiSlotBVersionId = 'short'
-        $malformed = Invoke-Guard -Arguments $malformedArguments
-        Assert-Condition (-not $malformed.Succeeded) 'Plan accepted a malformed fixed-slot VersionId.'
-        Assert-Condition ($malformed.Output -match '32-64 character') 'Malformed fixed-slot VersionId rejection was not explicit.'
-        Assert-Condition ((Get-AwsMarkerText) -eq '') 'Malformed fixed-slot VersionId reached AWS discovery.'
+    Invoke-FocusedTest -Name 'Plan rejects malformed and mixed credential VersionIds before AWS discovery' -Body {
+        foreach ($invalidVersion in @('AWSCURRENT', 'unpinned', 'short', ('a' * 65), (('a' * 31) + '!'))) {
+            Clear-AwsMarker
+            $malformedArguments = Copy-ArgumentMap -Map $baseArguments
+            $malformedArguments.Action = 'Plan'
+            $malformedArguments.RedisOperatorSecretVersionId = $invalidVersion
+            $malformed = Invoke-Guard -Arguments $malformedArguments
+            Assert-Condition (-not $malformed.Succeeded) "Plan accepted malformed Redis operator VersionId '$invalidVersion'."
+            Assert-Condition ($malformed.Output -match '32-64 character') 'Malformed Redis operator VersionId rejection was not explicit.'
+            Assert-Condition ((Get-AwsMarkerText) -eq '') 'Malformed Redis operator VersionId reached AWS discovery.'
+        }
 
         Clear-AwsMarker
         $mixedArguments = Copy-ArgumentMap -Map $baseArguments
         $mixedArguments.Action = 'Plan'
-        $mixedArguments.RedisApiSlotBVersionId = [string] $pinnedFixedSlotVersions.RedisApiSlotBVersionId
+        $mixedArguments.RedisOperatorSecretVersionId = [string] $pinnedCredentialVersions.RedisOperatorSecretVersionId
         $mixed = Invoke-Guard -Arguments $mixedArguments
-        Assert-Condition (-not $mixed.Succeeded) 'Plan accepted mixed pinned and UNPINNED VersionIds.'
+        Assert-Condition (-not $mixed.Succeeded) 'Plan accepted an exact Redis operator version alongside six UNPINNED fixed slots.'
         Assert-Condition ($mixed.Output -match 'mixed state is prohibited') 'Mixed VersionId rejection was not explicit.'
         Assert-Condition ((Get-AwsMarkerText) -eq '') 'Mixed VersionId state reached AWS discovery.'
     }
 
-    Invoke-FocusedTest -Name 'CREATE enforces zero counts, A_ONLY phases, and disabled Redis operator before AWS' -Body {
+    Invoke-FocusedTest -Name 'CREATE enforces seven UNPINNED versions, zero counts, A_ONLY phases, and disabled Redis operator before AWS' -Body {
         foreach ($invalidOverride in @(
                 'ApiDesiredCount=1',
                 'ApiDatabaseCredentialPhase=BOTH_USE_A',
@@ -1424,6 +1435,17 @@ try {
             Assert-Condition (-not $mismatched.Succeeded) 'UPDATE accepted a record whose target VersionId differs from the named target.'
             Assert-Condition ($mismatched.Output -match 'does not match the approved transition record') 'Target VersionId mismatch was not explicit.'
             Assert-Condition ((Get-AwsMarkerText) -eq '') 'Target VersionId mismatch reached AWS discovery.'
+
+            Clear-AwsMarker
+            $operatorMismatchedRecord = ($approvedTransitionRecord | ConvertTo-Json -Depth 14) | ConvertFrom-Json
+            $operatorMismatchedRecord.targetState.redisOperatorSecretVersionId = $redisOperatorSecretVersionId -replace '0001$', '0002'
+            Write-JsonFile -Path $approvedTransitionRecordPath -Value $operatorMismatchedRecord -Depth 14
+            $operatorMismatchedArguments = Copy-ArgumentMap -Map $updateArguments
+            $operatorMismatchedArguments.Action = 'Plan'
+            $operatorMismatched = Invoke-Guard -Arguments $operatorMismatchedArguments
+            Assert-Condition (-not $operatorMismatched.Succeeded) 'UPDATE accepted a record whose Redis operator VersionId differs from the named target.'
+            Assert-Condition ($operatorMismatched.Output -match "RedisOperatorSecretVersionId.*does not match the approved transition record") 'Redis operator target VersionId mismatch was not explicit.'
+            Assert-Condition ((Get-AwsMarkerText) -eq '') 'Redis operator target VersionId mismatch reached AWS discovery.'
         }
         finally {
             Write-JsonFile -Path $approvedTransitionRecordPath -Value $approvedTransitionRecord -Depth 14
@@ -1441,23 +1463,34 @@ try {
         Assert-Condition ((Get-AwsMarkerText) -eq '') 'Stale transition validation instant reached AWS discovery.'
     }
 
-    Invoke-FocusedTest -Name 'UPDATE rejects deployed fixed-slot version drift before artifact reads or change-set creation' -Body {
-        $driftedCurrentParameters = [ordered]@{}
-        foreach ($entry in $applicationParameterMap.GetEnumerator()) {
-            $driftedCurrentParameters[$entry.Key] = [string] $entry.Value
+    Invoke-FocusedTest -Name 'UPDATE rejects deployed credential-version drift before artifact reads or change-set creation' -Body {
+        foreach ($driftCase in @(
+                [pscustomobject]@{
+                    Parameter = 'ApiDatabaseSlotAVersionId'
+                    Value = [string] $pinnedCredentialVersions.ApiDatabaseSlotAVersionId
+                },
+                [pscustomobject]@{
+                    Parameter = 'RedisOperatorSecretVersionId'
+                    Value = $redisOperatorSecretVersionId
+                }
+            )) {
+            $driftedCurrentParameters = [ordered]@{}
+            foreach ($entry in $applicationParameterMap.GetEnumerator()) {
+                $driftedCurrentParameters[$entry.Key] = [string] $entry.Value
+            }
+            $driftedCurrentParameters[$driftCase.Parameter] = $driftCase.Value
+            Write-ApplicationStackResponse -ParameterMap $driftedCurrentParameters -TagMap $applicationStackTags
+            Write-GuardrailStackResponse -ConfigurationSha256 $controlConfigurationSha256
+            Write-TemplateResponse -Path $guardrailTemplateResponsePath -TemplateBody $guardrailTemplateBody
+            Clear-AwsMarker
+            $arguments = Copy-ArgumentMap -Map $updateArguments
+            $arguments.Action = 'Plan'
+            $result = Invoke-Guard -Arguments $arguments
+            $marker = Get-AwsMarkerText
+            Assert-Condition (-not $result.Succeeded) "UPDATE accepted deployed credential-version drift for $($driftCase.Parameter)."
+            Assert-Condition ($result.Output -match 'drifted from the approved update current state') "Deployed $($driftCase.Parameter) drift rejection was not explicit."
+            Assert-Condition ($marker -notmatch 's3api get-object|create-change-set') "Deployed $($driftCase.Parameter) drift reached artifact reads or change-set creation."
         }
-        $driftedCurrentParameters.ApiDatabaseSlotAVersionId = [string] $pinnedFixedSlotVersions.ApiDatabaseSlotAVersionId
-        Write-ApplicationStackResponse -ParameterMap $driftedCurrentParameters -TagMap $applicationStackTags
-        Write-GuardrailStackResponse -ConfigurationSha256 $controlConfigurationSha256
-        Write-TemplateResponse -Path $guardrailTemplateResponsePath -TemplateBody $guardrailTemplateBody
-        Clear-AwsMarker
-        $arguments = Copy-ArgumentMap -Map $updateArguments
-        $arguments.Action = 'Plan'
-        $result = Invoke-Guard -Arguments $arguments
-        $marker = Get-AwsMarkerText
-        Assert-Condition (-not $result.Succeeded) 'UPDATE accepted fixed-slot drift in the deployed stack.'
-        Assert-Condition ($result.Output -match 'drifted from the approved update current state') 'Deployed fixed-slot drift rejection was not explicit.'
-        Assert-Condition ($marker -notmatch 's3api get-object|create-change-set') 'Deployed fixed-slot drift reached artifact reads or change-set creation.'
         Write-ApplicationStackResponse -ParameterMap $applicationParameterMap -TagMap $applicationStackTags
     }
 
@@ -1529,6 +1562,39 @@ try {
         Write-ApplicationStackResponse -ParameterMap $applicationParameterMap -TagMap $applicationStackTags
     }
 
+    Invoke-FocusedTest -Name 'post-adoption updates cannot change the Redis operator secret version' -Body {
+        $alternateOperatorVersionId = $redisOperatorSecretVersionId -replace '0001$', '0002'
+        foreach ($intentCase in @(
+                [pscustomobject]@{
+                    Name = 'APPLICATION'
+                    Arguments = $applicationUpdateArguments
+                    CurrentParameters = $updateApplicationParameterMap
+                    CurrentTags = $updateApplicationStackTags
+                    ExpectedError = 'drifted from the approved update current state'
+                },
+                [pscustomobject]@{
+                    Name = 'CREDENTIAL_TRANSITION'
+                    Arguments = $rotationArguments
+                    CurrentParameters = $updateApplicationParameterMap
+                    CurrentTags = $updateApplicationStackTags
+                    ExpectedError = 'does not match the approved transition record'
+                }
+            )) {
+            Write-ApplicationStackResponse -ParameterMap $intentCase.CurrentParameters -TagMap $intentCase.CurrentTags
+            Clear-AwsMarker
+            $arguments = Copy-ArgumentMap -Map $intentCase.Arguments
+            $arguments.Action = 'Plan'
+            $arguments.RedisOperatorSecretVersionId = $alternateOperatorVersionId
+            $result = Invoke-Guard -Arguments $arguments
+            $marker = Get-AwsMarkerText
+            Assert-Condition (-not $result.Succeeded) "$($intentCase.Name) accepted a post-adoption Redis operator VersionId change."
+            Assert-Condition ($result.Output -match $intentCase.ExpectedError) "$($intentCase.Name) Redis operator VersionId rejection was not explicit."
+            Assert-Condition ($marker -notmatch 's3api get-object|create-change-set') "$($intentCase.Name) Redis operator VersionId change reached artifact reads or change-set creation."
+        }
+
+        Write-ApplicationStackResponse -ParameterMap $applicationParameterMap -TagMap $applicationStackTags
+    }
+
     Invoke-FocusedTest -Name 'credential-only UPDATE rejects unrelated parameter and stack-tag changes' -Body {
         Write-GuardrailStackResponse -ConfigurationSha256 $controlConfigurationSha256
         Write-TemplateResponse -Path $guardrailTemplateResponsePath -TemplateBody $guardrailTemplateBody
@@ -1562,7 +1628,7 @@ try {
         Write-ApplicationStackResponse -ParameterMap $applicationParameterMap -TagMap $applicationStackTags
     }
 
-    Invoke-FocusedTest -Name 'UPDATE Plan binds the approved transition, exact stack, six targets, templates, parameters, and tags' -Body {
+    Invoke-FocusedTest -Name 'UPDATE Plan binds the approved transition, exact stack, seven targets, templates, parameters, and tags' -Body {
         Write-ApplicationStackResponse -ParameterMap $applicationParameterMap -TagMap $applicationStackTags
         Write-GuardrailStackResponse -ConfigurationSha256 $controlConfigurationSha256
         Write-TemplateResponse -Path $guardrailTemplateResponsePath -TemplateBody $guardrailTemplateBody
@@ -1574,10 +1640,10 @@ try {
         $createLine = @($marker -split "`r?`n" | Where-Object { $_ -match 'cloudformation create-change-set' }) | Select-Object -First 1
         Assert-Condition $result.Succeeded "Approved UPDATE Plan failed: $($result.Output)"
         Assert-Condition ($null -ne $createLine) 'Approved UPDATE did not create a change set.'
-        Assert-Condition ($createLine -match ('credential-transition-binding-sha256=' + $transitionDeploymentBindingSha256)) 'UPDATE description did not bind the exact transition deployment digest.'
+        Assert-Condition ($createLine -match ('credential-transition-binding-sha256' + '=' + $transitionDeploymentBindingSha256)) 'UPDATE description did not bind the exact transition deployment digest.'
         Assert-Condition ($createLine -match ('Key=credential-transition-sha256,Value=' + $transitionRecordSha256)) 'UPDATE tags did not bind the exact transition record.'
         Assert-Condition ($createLine -match ('Key=credential-state-sha256,Value=' + $transitionTargetStateSha256)) 'UPDATE tags did not bind the exact target state.'
-        foreach ($entry in $pinnedFixedSlotVersions.GetEnumerator()) {
+        foreach ($entry in $pinnedCredentialVersions.GetEnumerator()) {
             Assert-Condition ($createLine -match ("ParameterKey=$($entry.Key),ParameterValue=" + [regex]::Escape([string] $entry.Value))) "UPDATE omitted exact target $($entry.Key)."
         }
         Assert-Condition ($createLine -match [regex]::Escape("ParameterKey=AuthWalletKeysSecretVersionId,ParameterValue=$authWalletKeysSecretVersionId")) 'UPDATE omitted the preserved auth/wallet secret VersionId.'
@@ -1598,7 +1664,7 @@ try {
         $createLine = @($marker -split "`r?`n" | Where-Object { $_ -match 'cloudformation create-change-set' }) | Select-Object -First 1
         Assert-Condition $result.Succeeded "Approved inactive-slot transition Plan failed: $($result.Output)"
         Assert-Condition ($null -ne $createLine) 'Approved inactive-slot transition did not create a change set.'
-        Assert-Condition ($createLine -match ('credential-transition-binding-sha256=' + $rotationDeploymentBindingSha256)) 'Inactive-slot transition description did not bind the exact deployment digest.'
+        Assert-Condition ($createLine -match ('credential-transition-binding-sha256' + '=' + $rotationDeploymentBindingSha256)) 'Inactive-slot transition description did not bind the exact deployment digest.'
         Assert-Condition ($createLine -match ('Key=credential-predecessor-sha256,Value=' + $transitionRecordSha256)) 'Inactive-slot transition did not extend the deployed credential chain.'
         Assert-Condition ($createLine -match ('Key=credential-transition-sha256,Value=' + $rotationRecordSha256)) 'Inactive-slot transition did not bind its exact record hash.'
         Assert-Condition ($createLine -match ('Key=credential-state-sha256,Value=' + $rotationTargetStateSha256)) 'Inactive-slot transition did not bind its exact target-state hash.'
@@ -1652,7 +1718,7 @@ try {
         foreach ($desiredCount in @('ApiDesiredCount', 'WebDesiredCount', 'WorkerDesiredCount')) {
             Assert-Condition ($createLine -match "ParameterKey=$desiredCount,ParameterValue=1") "APPLICATION update did not preserve requested $desiredCount activation."
         }
-        foreach ($entry in $pinnedFixedSlotVersions.GetEnumerator()) {
+        foreach ($entry in $pinnedCredentialVersions.GetEnumerator()) {
             Assert-Condition ($createLine -match ("ParameterKey=$($entry.Key),ParameterValue=" + [regex]::Escape([string] $entry.Value))) "APPLICATION update changed or omitted fixed-slot pin $($entry.Key)."
         }
         Assert-Condition ($createLine -match [regex]::Escape("ParameterKey=AuthWalletKeysSecretVersionId,ParameterValue=$authWalletKeysSecretVersionId")) 'APPLICATION update changed or omitted the auth/wallet secret VersionId.'
@@ -2003,6 +2069,21 @@ try {
         Assert-Condition ($marker -notmatch 's3api get-object|execute-change-set') 'Deploy reached artifact billing or execution after remote auth/wallet VersionId mismatch.'
     }
 
+    Invoke-FocusedTest -Name 'Deploy rejects a remote Redis operator secret version mutation' -Body {
+        Clear-AwsMarker
+        Write-GuardrailStackResponse -ConfigurationSha256 $controlConfigurationSha256
+        Write-TemplateResponse -Path $guardrailTemplateResponsePath -TemplateBody $guardrailTemplateBody
+        Write-TemplateResponse -Path $applicationTemplateResponsePath -TemplateBody $applicationTemplateBody
+        $mutatedParameters = Copy-ArgumentMap -Map $applicationParameterMap
+        $mutatedParameters.RedisOperatorSecretVersionId = $redisOperatorSecretVersionId
+        Write-ChangeSetResponse -ParameterMap $mutatedParameters
+        $result = Invoke-Guard -Arguments $baseArguments
+        $marker = Get-AwsMarkerText
+        Assert-Condition (-not $result.Succeeded) 'Deploy accepted a remote Redis operator VersionId mutation.'
+        Assert-Condition ($result.Output -match 'RedisOperatorSecretVersionId.*does not match') 'Remote Redis operator VersionId rejection was not explicit.'
+        Assert-Condition ($marker -notmatch 's3api get-object|execute-change-set') 'Deploy reached artifact billing or execution after remote Redis operator VersionId mismatch.'
+    }
+
     Invoke-FocusedTest -Name 'Deploy requires nested-stack review context' -Body {
         Clear-AwsMarker
         Write-GuardrailStackResponse -ConfigurationSha256 $controlConfigurationSha256
@@ -2084,6 +2165,25 @@ try {
         Assert-Condition (-not $result.Succeeded) 'UPDATE Deploy accepted UsePreviousValue for the auth/wallet VersionId.'
         Assert-Condition ($result.Output -match 'non-explicit parameter') 'Auth/wallet UsePreviousValue rejection was not explicit.'
         Assert-Condition ($marker -notmatch 'execute-change-set') 'UPDATE executed after accepting an implicit auth/wallet VersionId.'
+    }
+
+    Invoke-FocusedTest -Name 'UPDATE Deploy rejects UsePreviousValue for the Redis operator secret version' -Body {
+        Write-ApplicationStackResponse -ParameterMap $applicationParameterMap -TagMap $applicationStackTags
+        Write-GuardrailStackResponse -ConfigurationSha256 $controlConfigurationSha256
+        Write-TemplateResponse -Path $guardrailTemplateResponsePath -TemplateBody $guardrailTemplateBody
+        Write-TemplateResponse -Path $applicationTemplateResponsePath -TemplateBody $applicationTemplateBody
+        Write-ChangeSetResponse `
+            -ParameterMap $updateApplicationParameterMap `
+            -TagMap $updateApplicationStackTags `
+            -Description $updateExpectedChangeSetDescription `
+            -ChangeSetType 'UPDATE' `
+            -UsePreviousParameter 'RedisOperatorSecretVersionId'
+        Clear-AwsMarker
+        $result = Invoke-Guard -Arguments $updateArguments
+        $marker = Get-AwsMarkerText
+        Assert-Condition (-not $result.Succeeded) 'UPDATE Deploy accepted UsePreviousValue for the Redis operator VersionId.'
+        Assert-Condition ($result.Output -match 'non-explicit parameter') 'Redis operator UsePreviousValue rejection was not explicit.'
+        Assert-Condition ($marker -notmatch 'execute-change-set') 'UPDATE executed after accepting an implicit Redis operator VersionId.'
     }
 
     Invoke-FocusedTest -Name 'exact UPDATE Deploy executes only with the transition-bound acknowledgement' -Body {

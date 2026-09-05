@@ -185,6 +185,51 @@ test('rejects line-ending drift even when the parsed YAML would be equivalent', 
   assert.match(report.errors.join('\n'), /does not match reviewed bytes/);
 });
 
+test('requires an explicit operator VersionId and an auditable selector-free secret ARN', () => {
+  const versionBlock = [
+    '  RedisOperatorSecretVersionId:',
+    '    Type: String',
+    "    AllowedPattern: '^(UNPINNED|[A-Za-z0-9_-]{32,64})$'",
+  ].join('\n');
+  for (const mutated of [
+    source.replace(versionBlock, ''),
+    source.replace('{32,64}', '+'),
+    source.replace(
+      "    Type: String\n    AllowedPattern: '^(UNPINNED|[A-Za-z0-9_-]{32,64})$'",
+      `    Type: String\n    Default: UNPINNED\n    AllowedPattern: '^(UNPINNED|[A-Za-z0-9_-]{32,64})$'`,
+    ),
+    source.replace(
+      '  RedisOperatorSecretArn:\n    Type: String',
+      '  RedisOperatorSecretArn:\n    Type: String\n    NoEcho: true',
+    ),
+  ]) {
+    assert.notEqual(mutated, source);
+    const report = validateApplicationObservabilitySource(mutated);
+    assert.equal(report.ok, false);
+    assert.equal(report.awsCallsMade, 0);
+  }
+});
+
+test('rejects omitted, mutable-stage, and alternate operator password selectors', () => {
+  const exact = '${RedisOperatorSecretArn}:password::${RedisOperatorSecretVersionId}';
+  for (const replacement of [
+    '${RedisOperatorSecretArn}:password::',
+    '${RedisOperatorSecretArn}:password:AWSCURRENT:',
+    '${RedisOperatorSecretArn}:password:AWSPREVIOUS:',
+    '${RedisOperatorSecretArn}:password::${RedisApiSlotAVersionId}',
+  ]) {
+    const mutated = source.replace(exact, replacement);
+    assert.notEqual(mutated, source);
+    const report = validateApplicationObservabilitySource(mutated);
+    assert.equal(report.ok, false);
+    assert.equal(report.awsCallsMade, 0);
+    assert.match(
+      report.errors.join('\n'),
+      /immutable operator secret VersionId|reviewed invariant/,
+    );
+  }
+});
+
 for (const [name, search, replacement] of [
   ['alarm action', 'AlarmActions: [!Ref AlarmTopicArn]', 'AlarmActions: []'],
   ['OK action', 'OKActions: [!Ref AlarmTopicArn]', 'OKActions: []'],
@@ -249,6 +294,11 @@ for (const [name, search, replacement] of [
     '- !Equals [!Ref RedisCredentialPhase, BOTH_USE_B]',
   ],
   [
+    'unpinned enabled operator credential',
+    '- !Not [!Equals [!Ref RedisOperatorSecretVersionId, UNPINNED]]',
+    '- !Equals [!Ref RedisOperatorSecretVersionId, UNPINNED]',
+  ],
+  [
     'operator task condition',
     'RedisSessionRevocationTaskDefinition:\n    Type: AWS::ECS::TaskDefinition\n    Condition: RedisOperatorEnabled',
     'RedisSessionRevocationTaskDefinition:\n    Type: AWS::ECS::TaskDefinition',
@@ -270,8 +320,8 @@ for (const [name, search, replacement] of [
   ],
   [
     'operator task application credential',
-    "ValueFrom: !Sub '${RedisOperatorSecretArn}:password::'",
-    "ValueFrom: !Sub '${RedisOperatorTaskExecutionRoleArn}:password::'",
+    "ValueFrom: !Sub '${RedisOperatorSecretArn}:password::${RedisOperatorSecretVersionId}'",
+    "ValueFrom: !Sub '${RedisOperatorTaskExecutionRoleArn}:password::${RedisOperatorSecretVersionId}'",
   ],
   ['operator task TLS', "Name: REDIS_TLS, Value: 'true'", "Name: REDIS_TLS, Value: 'false'"],
   ['operator task filesystem', 'ReadonlyRootFilesystem: true', 'ReadonlyRootFilesystem: false'],

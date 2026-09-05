@@ -13,13 +13,14 @@ import { fileURLToPath } from 'node:url';
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const defaultTemplatePath = join(scriptDirectory, 'application-workload-boundaries.yaml');
 const directUploadLimitBytes = 51_200;
-const fixedSlotVersionParameterNames = Object.freeze([
+const credentialVersionParameterNames = Object.freeze([
   'ApiDatabaseSlotAVersionId',
   'ApiDatabaseSlotBVersionId',
   'WorkerDatabaseSlotAVersionId',
   'WorkerDatabaseSlotBVersionId',
   'RedisApiSlotAVersionId',
   'RedisApiSlotBVersionId',
+  'RedisOperatorSecretVersionId',
 ]);
 
 const residualLimitations = Object.freeze([
@@ -27,7 +28,7 @@ const residualLimitations = Object.freeze([
   'Generated database secrets and phase-scoped injection do not create, enable, disable, or install SCRAM verifiers for PostgreSQL LOGIN principals; those remain separately authorized privileged provisioning gates.',
   'PrivateEgressMode=None intentionally provides no ECR, logs, Secrets Manager, or SQS path; the parent must independently enforce zero API and worker desired counts.',
   'No DNS security-group rule is present because AmazonProvidedDNS traffic is not filterable by security groups; a custom resolver requires a separately reviewed exact destination.',
-  'REDIS_OPERATOR_LIVE_REVOCATION_UNRESOLVED: the validated parent composes a conditional one-off task and production CLI that derive only the inactive environment slot and issue CLIENT KILL USER <target> SKIPME YES, but no task is authorized or run. Workload drain, live session denial evidence, immediate operator disablement, and credential installation or regeneration remain external gates.',
+  'REDIS_OPERATOR_LIVE_REVOCATION_UNRESOLVED: the operator identity and conditional one-off task bind one exact secret VersionId after inert adoption, and the production CLI derives only the inactive environment slot and issues CLIENT KILL USER <target> SKIPME YES, but no task is authorized or run. Workload drain, live session denial evidence, immediate operator disablement, and credential installation or regeneration remain external gates.',
   'FIXED_SLOT_CREDENTIAL_EXTERNAL_EXECUTION_UNRESOLVED: the deployment command now binds an approved transition record to the exact immutable current stack, template, parameter, tag, target-state, change-set, and acknowledgement hashes, while ordinary application updates must preserve all fixed-slot bindings and credential-chain tags. Inactive-slot regeneration, backend installation, live candidate/continuity/revocation evidence, task replacement, and external approval remain separately authorized gates.',
   'AUTH_WALLET_SECRET_EXTERNAL: the parent supplies one selector-free Secrets Manager ARN and pins all seven authentication and wallet key fields to one immutable VersionId. This static boundary neither provisions that secret nor proves its field set, key material, dedicated rotation transition, resource policy, KMS policy, or deployed readability.',
   'This local template is not packaged or uploaded; a parent nested-stack TemplateURL remains a separately authorized deployment gate.',
@@ -67,6 +68,7 @@ const parameterTypes = new Map([
   ['WorkerDatabaseSlotBVersionId', 'String'],
   ['RedisApiSlotAVersionId', 'String'],
   ['RedisApiSlotBVersionId', 'String'],
+  ['RedisOperatorSecretVersionId', 'String'],
   ['RedisOperatorMode', 'String'],
 ]);
 
@@ -858,7 +860,7 @@ function validateParameters(source, errors) {
       errors.push(`${phaseParameter} must expose only the reviewed four-state rotation machine.`);
     }
   }
-  for (const parameter of fixedSlotVersionParameterNames) {
+  for (const parameter of credentialVersionParameterNames) {
     if (
       (blocks.get(parameter) ?? '') !==
       exactBlock(parameter, ['Type: String', "AllowedPattern: '^(UNPINNED|[A-Za-z0-9_-]{32,64})$'"])
@@ -995,7 +997,8 @@ function validateParameters(source, errors) {
   if (
     [...blocks.keys()].some(
       (name) =>
-        name !== 'AuthWalletKeysSecretArn' && /(?:password|token|secret|migration)/iu.test(name),
+        !['AuthWalletKeysSecretArn', 'RedisOperatorSecretVersionId'].includes(name) &&
+        /(?:password|token|secret|migration)/iu.test(name),
     )
   ) {
     errors.push('The child template must own credentials and must not accept secret/admin inputs.');
@@ -1039,16 +1042,21 @@ function validateRules(source, errors) {
     '    Assertions:',
     '      - Assert: !Or',
     '          - !And [',
-    '              !Equals [!Ref ApiDatabaseSlotAVersionId, UNPINNED],',
-    '              !Equals [!Ref ApiDatabaseSlotBVersionId, UNPINNED],',
-    '              !Equals [!Ref WorkerDatabaseSlotAVersionId, UNPINNED],',
-    '              !Equals [!Ref WorkerDatabaseSlotBVersionId, UNPINNED],',
-    '              !Equals [!Ref RedisApiSlotAVersionId, UNPINNED],',
-    '              !Equals [!Ref RedisApiSlotBVersionId, UNPINNED],',
-    '              !Equals [!Ref ApiDatabaseCredentialPhase, A_ONLY],',
-    '              !Equals [!Ref WorkerDatabaseCredentialPhase, A_ONLY],',
-    '              !Equals [!Ref RedisCredentialPhase, A_ONLY],',
-    '              !Equals [!Ref RedisOperatorMode, DISABLED],',
+    '              !And [',
+    '                !Equals [!Ref ApiDatabaseSlotAVersionId, UNPINNED],',
+    '                !Equals [!Ref ApiDatabaseSlotBVersionId, UNPINNED],',
+    '                !Equals [!Ref WorkerDatabaseSlotAVersionId, UNPINNED],',
+    '                !Equals [!Ref WorkerDatabaseSlotBVersionId, UNPINNED],',
+    '                !Equals [!Ref RedisApiSlotAVersionId, UNPINNED],',
+    '                !Equals [!Ref RedisApiSlotBVersionId, UNPINNED],',
+    '                !Equals [!Ref RedisOperatorSecretVersionId, UNPINNED],',
+    '              ],',
+    '              !And [',
+    '                !Equals [!Ref ApiDatabaseCredentialPhase, A_ONLY],',
+    '                !Equals [!Ref WorkerDatabaseCredentialPhase, A_ONLY],',
+    '                !Equals [!Ref RedisCredentialPhase, A_ONLY],',
+    '                !Equals [!Ref RedisOperatorMode, DISABLED],',
+    '              ],',
     '            ]',
     '          - !And [',
     '              !Not [!Equals [!Ref ApiDatabaseSlotAVersionId, UNPINNED]],',
@@ -1057,8 +1065,9 @@ function validateRules(source, errors) {
     '              !Not [!Equals [!Ref WorkerDatabaseSlotBVersionId, UNPINNED]],',
     '              !Not [!Equals [!Ref RedisApiSlotAVersionId, UNPINNED]],',
     '              !Not [!Equals [!Ref RedisApiSlotBVersionId, UNPINNED]],',
+    '              !Not [!Equals [!Ref RedisOperatorSecretVersionId, UNPINNED]],',
     '            ]',
-    '        AssertDescription: Fixed-slot versions must be all pinned or an inert A_ONLY adoption sentinel.',
+    '        AssertDescription: Fixed-slot and operator versions must be all pinned or an inert A_ONLY adoption sentinel.',
   ].join('\n');
   if (section(source, 'Rules', 'Conditions').trimEnd() !== expected) {
     errors.push('Deployment rules must require exact explicit billing acknowledgement.');
@@ -1242,9 +1251,16 @@ function validateRedis(resources, errors) {
     '    - RedisOperatorEnabled',
     "    - 'on sanitize-payload resetkeys resetchannels -@all +client|kill'",
     "    - 'off sanitize-payload resetkeys resetchannels -@all +client|kill'",
-    '  AuthenticationMode:',
-    "    Passwords: [!Sub '{{resolve:secretsmanager:${RedisOperatorSecret}:SecretString:password}}']",
-    '    Type: password',
+    '  AuthenticationMode: !If',
+    '    - CredentialVersionsPinned',
+    '    - {',
+    '        Passwords:',
+    '          [',
+    "            !Sub '{{resolve:secretsmanager:${RedisOperatorSecret}:SecretString:password::${RedisOperatorSecretVersionId}}',",
+    '          ],',
+    '        Type: password,',
+    '      }',
+    '    - { Type: no-password-required }',
     '  Engine: redis',
     '  UserId: !Sub cl-${EnvironmentName}-ro',
     '  UserName: !Sub crypto_operator_${EnvironmentName}',
