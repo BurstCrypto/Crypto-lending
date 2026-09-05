@@ -1,6 +1,13 @@
 import type { SchemaObject } from '@nestjs/swagger';
 
+import { MAINNET_LAUNCH_NETWORK_IDS } from '../../blockchain/domain/mainnet-launch-network-policy';
 import { MAX_ACTIVE_WALLET_REGISTRATIONS_PER_ACCOUNT } from '../../wallets/application/ports/wallet-registration-repository.port';
+
+const MAINNET_LAUNCH_NETWORK_ID_SCHEMA: SchemaObject = {
+  type: 'string',
+  enum: [...MAINNET_LAUNCH_NETWORK_IDS],
+  maxLength: 96,
+};
 
 const EXACT_USD_AMOUNT_SCHEMA: SchemaObject = {
   type: 'object',
@@ -63,7 +70,7 @@ const BALANCE_COVERAGE_SCHEMA: SchemaObject = {
         required: ['walletId', 'networkId', 'status'],
         properties: {
           walletId: { type: 'string', format: 'uuid' },
-          networkId: { type: 'string', maxLength: 96 },
+          networkId: MAINNET_LAUNCH_NETWORK_ID_SCHEMA,
           status: BALANCE_COVERAGE_STATUS_SCHEMA,
         },
       },
@@ -88,7 +95,7 @@ const ASSET_REFERENCE_SCHEMA: SchemaObject = {
     registryVersion: { type: 'integer', enum: [1] },
     registryFingerprintSha256: { type: 'string', pattern: '^[0-9a-f]{64}$' },
     stablecoin: { type: 'string', enum: ['USDC', 'USDT', 'PYUSD'] },
-    networkId: { type: 'string', maxLength: 96 },
+    networkId: MAINNET_LAUNCH_NETWORK_ID_SCHEMA,
     identity: { type: 'string', maxLength: 64 },
     decimals: { type: 'integer', minimum: 0, maximum: 36 },
   },
@@ -188,7 +195,7 @@ const SOURCE_SCHEMA: SchemaObject = {
   properties: {
     observationId: { type: 'string', format: 'uuid' },
     walletId: { type: 'string', format: 'uuid' },
-    networkId: { type: 'string', maxLength: 96 },
+    networkId: MAINNET_LAUNCH_NETWORK_ID_SCHEMA,
     asset: ASSET_REFERENCE_SCHEMA,
     balance: EXACT_ASSET_AMOUNT_SCHEMA,
     balanceObservedAt: { type: 'string', format: 'date-time' },
@@ -217,7 +224,7 @@ const EXCLUDED_SOURCE_SCHEMA: SchemaObject = {
   properties: {
     observationId: { type: 'string', format: 'uuid' },
     walletId: { type: 'string', format: 'uuid' },
-    networkId: { type: 'string', maxLength: 96 },
+    networkId: MAINNET_LAUNCH_NETWORK_ID_SCHEMA,
     assetIdentity: { type: 'string', maxLength: 64 },
     amountAtomic: { type: 'string', pattern: '^(0|[1-9][0-9]{0,77})$' },
     balanceObservedAt: { type: 'string', format: 'date-time' },
@@ -282,7 +289,7 @@ export const UNIFIED_PORTFOLIO_RESPONSE_SCHEMA: SchemaObject = {
     chainTotals: {
       type: 'array',
       maxItems: 512,
-      items: keyedAggregateSchema('networkId', { type: 'string', maxLength: 96 }),
+      items: keyedAggregateSchema('networkId', MAINNET_LAUNCH_NETWORK_ID_SCHEMA),
     },
     assetTotals: {
       type: 'array',

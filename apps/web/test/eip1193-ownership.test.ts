@@ -17,19 +17,22 @@ import {
   type RegisteredEvmWalletResult,
 } from '@/lib/wallets/eip1193/ownership';
 import type { Eip1193Provider, Eip1193RequestArguments } from '@/lib/wallets/eip1193/provider';
-import { MAINNET_WALLET_REGISTRY } from '@/lib/wallets/mainnet-network-policy';
+import {
+  MAINNET_EVM_WALLET_NETWORKS,
+  MAINNET_WALLET_REGISTRY,
+} from '@/lib/wallets/mainnet-network-policy';
 
-import { KAN61_EVM_TESTNET_CATALOG } from './eip1193-network-catalog.fixture';
+import { KAN61_EVM_NETWORK_CATALOG } from './eip1193-network-catalog.fixture';
 
 const ORIGIN = 'https://app.example.test';
 const ADDRESS = '0x1111111111111111111111111111111111111111';
 const CHALLENGE_ID = '11111111-1111-4111-8111-111111111111';
-const ACCOUNT_ID = `eip155:11155111:${ADDRESS}`;
+const ACCOUNT_ID = `eip155:1:${ADDRESS}`;
 const WRONG_REQUEST_ID = '22222222-2222-4222-8222-222222222222';
 const WALLET_ID = '33333333-3333-4333-8333-333333333333';
 const NONCE = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
 const EXPIRES_AT = '2026-08-24T12:05:00.000Z';
-const FINGERPRINT = 'ab'.repeat(32);
+const FINGERPRINT = MAINNET_WALLET_REGISTRY.fingerprintSha256;
 const CSRF_TOKEN = 'c'.repeat(43);
 const SIGNATURE = `0x${'ab'.repeat(65)}`;
 
@@ -40,7 +43,7 @@ function message(overrides: { requestId?: string; nonce?: string } = {}): string
     `Verify this wallet for Crypto Lending. This proof does not authorize login, transactions, transfers, or loans.\n\n` +
     `URI: ${ORIGIN}/\n` +
     `Version: 1\n` +
-    `Chain ID: 11155111\n` +
+    `Chain ID: 1\n` +
     `Nonce: ${overrides.nonce ?? NONCE}\n` +
     `Issued At: 2026-08-24T12:00:00.000Z\n` +
     `Expiration Time: ${EXPIRES_AT}\n` +
@@ -58,12 +61,12 @@ function challengeResponse(overrides: Record<string, unknown> = {}): Record<stri
     version: 1,
     challengeId: CHALLENGE_ID,
     messageFormat: 'SIWE',
-    chainId: 'eip155:11155111',
+    chainId: 'eip155:1',
     address: ADDRESS,
     accountId: ACCOUNT_ID,
     message: message(),
     expiresAt: EXPIRES_AT,
-    registryEnvironment: 'TESTNET',
+    registryEnvironment: 'MAINNET',
     registryVersion: 1,
     registryFingerprintSha256: FINGERPRINT,
     ...overrides,
@@ -74,12 +77,12 @@ function issuedChallenge(): IssuedEvmOwnershipChallenge {
   return {
     id: CHALLENGE_ID,
     format: 'siwe',
-    chainId: 'eip155:11155111',
+    chainId: 'eip155:1',
     address: ADDRESS,
     nonce: NONCE,
     expiresAt: EXPIRES_AT,
     message: message(),
-    registryEnvironment: 'TESTNET',
+    registryEnvironment: 'MAINNET',
     registryVersion: 1,
     registryFingerprintSha256: FINGERPRINT,
   };
@@ -91,10 +94,10 @@ function registrationResponse(
   return {
     status,
     walletId: WALLET_ID,
-    chainId: 'eip155:11155111',
+    chainId: 'eip155:1',
     address: ADDRESS,
     registeredAt: '2026-08-24T12:01:00.000Z',
-    registryEnvironment: 'TESTNET',
+    registryEnvironment: 'MAINNET',
     registryVersion: 1,
     registryFingerprintSha256: FINGERPRINT,
   };
@@ -130,9 +133,9 @@ describe('HttpEvmWalletOwnershipClient', () => {
     const client = httpClient(requestFetch);
 
     const challenge = await client.issueChallenge({
-      chainId: 'eip155:11155111',
+      chainId: 'eip155:1',
       address: ADDRESS.toUpperCase().replace('0X', '0x'),
-      registryEnvironment: 'TESTNET',
+      registryEnvironment: 'MAINNET',
     });
     const result = await client.submitProof({
       challenge,
@@ -149,7 +152,7 @@ describe('HttpEvmWalletOwnershipClient', () => {
       id: CHALLENGE_ID,
       format: 'siwe',
       nonce: NONCE,
-      registryEnvironment: 'TESTNET',
+      registryEnvironment: 'MAINNET',
     });
     expect(result).toEqual(registrationResponse());
     expect(requestFetch).toHaveBeenNthCalledWith(
@@ -165,7 +168,7 @@ describe('HttpEvmWalletOwnershipClient', () => {
           'Content-Type': 'application/json',
           'X-CSRF-Token': CSRF_TOKEN,
         },
-        body: JSON.stringify({ chainId: 'eip155:11155111', address: ADDRESS }),
+        body: JSON.stringify({ chainId: 'eip155:1', address: ADDRESS }),
       }),
     );
     expect(requestFetch).toHaveBeenNthCalledWith(
@@ -188,7 +191,8 @@ describe('HttpEvmWalletOwnershipClient', () => {
       'unexpected signing statement',
       { message: message().replace('does not authorize login', 'authorizes login') },
     ],
-    ['wrong environment', { registryEnvironment: 'MAINNET' }],
+    ['unsupported Base chain response', { chainId: 'eip155:8453' }],
+    ['wrong environment', { registryEnvironment: 'TESTNET' }],
     ['wrong account', { address: '0x2222222222222222222222222222222222222222' }],
     ['noncanonical signature context', { registryFingerprintSha256: FINGERPRINT.toUpperCase() }],
     ['extra response field', { unexpected: true }],
@@ -197,14 +201,35 @@ describe('HttpEvmWalletOwnershipClient', () => {
 
     await expect(
       httpClient(requestFetch).issueChallenge({
-        chainId: 'eip155:11155111',
+        chainId: 'eip155:1',
         address: ADDRESS,
-        registryEnvironment: 'TESTNET',
+        registryEnvironment: 'MAINNET',
       }),
     ).rejects.toMatchObject({
       code: WALLET_OWNERSHIP_HANDOFF_ERROR_CODES.unavailable,
       message: 'Wallet ownership service is unavailable',
     });
+  });
+
+  it('rejects Base and testnet ownership inputs before calling the API', async () => {
+    const requestFetch = vi.fn();
+    const client = httpClient(requestFetch);
+
+    await expect(
+      client.issueChallenge({
+        chainId: 'eip155:8453',
+        address: ADDRESS,
+        registryEnvironment: 'MAINNET',
+      } as never),
+    ).rejects.toMatchObject({ code: WALLET_OWNERSHIP_HANDOFF_ERROR_CODES.rejected });
+    await expect(
+      client.issueChallenge({
+        chainId: 'eip155:1',
+        address: ADDRESS,
+        registryEnvironment: 'TESTNET',
+      } as never),
+    ).rejects.toMatchObject({ code: WALLET_OWNERSHIP_HANDOFF_ERROR_CODES.rejected });
+    expect(requestFetch).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -225,7 +250,7 @@ describe('HttpEvmWalletOwnershipClient', () => {
 
     await expect(
       httpClient(requestFetch).issueChallenge({
-        chainId: 'eip155:11155111',
+        chainId: 'eip155:1',
         address: ADDRESS,
         registryEnvironment: 'MAINNET',
       }),
@@ -273,9 +298,9 @@ describe('HttpEvmWalletOwnershipClient', () => {
     );
     const rateLimit = await httpClient(rateLimitedFetch)
       .issueChallenge({
-        chainId: 'eip155:11155111',
+        chainId: 'eip155:1',
         address: ADDRESS,
-        registryEnvironment: 'TESTNET',
+        registryEnvironment: 'MAINNET',
       })
       .catch((error: unknown) => error);
     expect(rateLimit).toMatchObject({
@@ -287,9 +312,9 @@ describe('HttpEvmWalletOwnershipClient', () => {
     const rejectedFetch = vi.fn(async () => jsonResponse(400, { message: secret }));
     await expect(
       httpClient(rejectedFetch).issueChallenge({
-        chainId: 'eip155:11155111',
+        chainId: 'eip155:1',
         address: ADDRESS,
-        registryEnvironment: 'TESTNET',
+        registryEnvironment: 'MAINNET',
       }),
     ).rejects.toMatchObject({ code: WALLET_OWNERSHIP_HANDOFF_ERROR_CODES.rejected });
   });
@@ -309,9 +334,9 @@ describe('HttpEvmWalletOwnershipClient', () => {
 
     await expect(
       httpClient(async () => response).issueChallenge({
-        chainId: 'eip155:11155111',
+        chainId: 'eip155:1',
         address: ADDRESS,
-        registryEnvironment: 'TESTNET',
+        registryEnvironment: 'MAINNET',
       }),
     ).rejects.toMatchObject({ code: WALLET_OWNERSHIP_HANDOFF_ERROR_CODES.unavailable });
     expect(response.headers.has('content-length')).toBe(false);
@@ -332,9 +357,9 @@ describe('HttpEvmWalletOwnershipClient', () => {
       { status: 201, headers: { 'Content-Type': 'application/json' } },
     );
     const issue = httpClient(async () => response).issueChallenge({
-      chainId: 'eip155:11155111',
+      chainId: 'eip155:1',
       address: ADDRESS,
-      registryEnvironment: 'TESTNET',
+      registryEnvironment: 'MAINNET',
     });
     const failure = expect(issue).rejects.toMatchObject({
       code: WALLET_OWNERSHIP_HANDOFF_ERROR_CODES.unavailable,
@@ -353,9 +378,9 @@ describe('HttpEvmWalletOwnershipClient', () => {
     const reason = new DOMException('wallet screen closed', 'AbortError');
     const issue = httpClient(async () => lateResponse.promise).issueChallenge(
       {
-        chainId: 'eip155:11155111',
+        chainId: 'eip155:1',
         address: ADDRESS,
-        registryEnvironment: 'TESTNET',
+        registryEnvironment: 'MAINNET',
       },
       controller.signal,
     );
@@ -377,9 +402,9 @@ describe('HttpEvmWalletOwnershipClient', () => {
 
     await expect(
       client.issueChallenge({
-        chainId: 'eip155:11155111',
+        chainId: 'eip155:1',
         address: ADDRESS,
-        registryEnvironment: 'TESTNET',
+        registryEnvironment: 'MAINNET',
       }),
     ).rejects.toMatchObject({
       code: WALLET_OWNERSHIP_HANDOFF_ERROR_CODES.unauthenticated,
@@ -395,7 +420,7 @@ describe('HttpEvmWalletOwnershipClient', () => {
         signature: {
           format: 'siwe',
           challengeId: CHALLENGE_ID,
-          chainId: 'eip155:11155111',
+          chainId: 'eip155:1',
           address: ADDRESS,
           signature: SIGNATURE,
         },
@@ -411,7 +436,7 @@ describe('HttpEvmWalletOwnershipClient', () => {
         signature: {
           format: 'siwe',
           challengeId: CHALLENGE_ID,
-          chainId: 'eip155:11155111',
+          chainId: 'eip155:1',
           address: ADDRESS,
           signature: SIGNATURE,
         },
@@ -432,7 +457,7 @@ describe('HttpEvmWalletOwnershipClient', () => {
           signature: {
             format: 'siwe',
             challengeId: CHALLENGE_ID,
-            chainId: 'eip155:11155111',
+            chainId: 'eip155:1',
             address: ADDRESS,
             signature: SIGNATURE,
           },
@@ -443,13 +468,15 @@ describe('HttpEvmWalletOwnershipClient', () => {
 });
 
 class SigningProvider implements Eip1193Provider {
+  constructor(private readonly providerChainId = '0x1') {}
+
   readonly request = vi.fn(async ({ method, params }: Eip1193RequestArguments) => {
     switch (method) {
       case 'eth_requestAccounts':
       case 'eth_accounts':
         return [ADDRESS];
       case 'eth_chainId':
-        return '0xaa36a7';
+        return this.providerChainId;
       case 'personal_sign':
         expect(params).toEqual([message(), ADDRESS]);
         return SIGNATURE;
@@ -461,13 +488,16 @@ class SigningProvider implements Eip1193Provider {
   readonly removeListener = vi.fn<Eip1193Provider['removeListener']>();
 }
 
-function signingAdapter(provider: SigningProvider): InjectedEip1193WalletAdapter {
+function signingAdapter(
+  provider: SigningProvider,
+  supportedNetworks = MAINNET_EVM_WALLET_NETWORKS,
+): InjectedEip1193WalletAdapter {
   const selection: InjectedEip1193WalletAdapterOptions['selection'] = {
     descriptor: {
       selectionId: 'explicit-metamask-selection',
       connectorId: 'metamask',
       displayName: 'MetaMask',
-      supportedNetworks: KAN61_EVM_TESTNET_CATALOG,
+      supportedNetworks,
     },
     provider,
   };
@@ -494,9 +524,9 @@ describe('completeEvmWalletOwnershipRegistration', () => {
     ).resolves.toEqual(result);
     expect(client.issueChallenge).toHaveBeenCalledWith(
       {
-        chainId: 'eip155:11155111',
+        chainId: 'eip155:1',
         address: ADDRESS,
-        registryEnvironment: 'TESTNET',
+        registryEnvironment: 'MAINNET',
       },
       undefined,
     );
@@ -506,7 +536,7 @@ describe('completeEvmWalletOwnershipRegistration', () => {
         signature: {
           format: 'siwe',
           challengeId: CHALLENGE_ID,
-          chainId: 'eip155:11155111',
+          chainId: 'eip155:1',
           address: ADDRESS,
           signature: SIGNATURE,
         },
@@ -537,6 +567,22 @@ describe('completeEvmWalletOwnershipRegistration', () => {
     await expect(
       completeEvmWalletOwnershipRegistration({ adapter, connection, client }),
     ).rejects.toMatchObject({ code: WALLET_OWNERSHIP_HANDOFF_ERROR_CODES.rejected });
+    expect(client.issueChallenge).not.toHaveBeenCalled();
+  });
+
+  it('rejects a Base connection even when a compatibility adapter labels it MAINNET', async () => {
+    const provider = new SigningProvider('0x2105');
+    const adapter = signingAdapter(provider, KAN61_EVM_NETWORK_CATALOG);
+    const connection = await adapter.connect();
+    const client: EvmWalletOwnershipClient = {
+      issueChallenge: vi.fn(async () => issuedChallenge()),
+      submitProof: vi.fn(async () => registrationResponse()),
+    };
+
+    await expect(
+      completeEvmWalletOwnershipRegistration({ adapter, connection, client }),
+    ).rejects.toMatchObject({ code: WALLET_OWNERSHIP_HANDOFF_ERROR_CODES.rejected });
+    expect(connection.selectedAccount.chainId).toBe('eip155:8453');
     expect(client.issueChallenge).not.toHaveBeenCalled();
   });
 });

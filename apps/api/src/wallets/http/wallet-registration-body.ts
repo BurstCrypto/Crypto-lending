@@ -2,6 +2,7 @@ import {
   parseWalletChallengeId,
   type WalletOwnershipProof,
 } from '../domain/wallet-ownership-proof';
+import { MAINNET_LAUNCH_NETWORK_IDS } from '../../blockchain/domain/mainnet-launch-network-policy';
 import { parseSolanaWalletAddress } from '../domain/wallet-identity';
 
 const ISSUE_KEYS = new Set(['chainId', 'address']);
@@ -145,7 +146,11 @@ export const ISSUE_WALLET_OWNERSHIP_CHALLENGE_SCHEMA = Object.freeze({
   additionalProperties: false,
   required: ['chainId', 'address'],
   properties: {
-    chainId: { type: 'string', maxLength: 96 },
+    chainId: {
+      type: 'string',
+      enum: [...MAINNET_LAUNCH_NETWORK_IDS],
+      maxLength: 96,
+    },
     address: { type: 'string', maxLength: 128 },
   },
 });

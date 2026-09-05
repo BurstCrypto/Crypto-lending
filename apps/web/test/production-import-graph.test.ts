@@ -8,6 +8,14 @@ import { describe, expect, it } from 'vitest';
 
 const WEB_ROOT = process.cwd();
 const APP_ROOT = resolve(WEB_ROOT, 'app');
+const LEGACY_WALLET_CLEANUP_MODULE = resolve(
+  WEB_ROOT,
+  'lib',
+  'browser',
+  'clear-legacy-wallet-session-state.ts',
+);
+const LEGACY_BASE_SEPOLIA_CLEANUP_KEY =
+  'crypto-lending.evm-public-testnet.base-sepolia-position-account.v1';
 const SOURCE_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx'] as const;
 const NEXT_ENTRY_NAMES = new Set([
   'default',
@@ -319,5 +327,28 @@ describe('production import graph', () => {
     });
 
     expect(violations).toEqual([]);
+  });
+
+  it('retains the Base Sepolia identifier only as a cleanup-only storage deletion key', () => {
+    const reachedModules = new Set(
+      productionEntries().flatMap((entry) => [...buildImportGraph(entry).modules]),
+    );
+    const legacyIdentifierModules = [...reachedModules].filter((modulePath) =>
+      readFileSync(modulePath, 'utf8').includes(LEGACY_BASE_SEPOLIA_CLEANUP_KEY),
+    );
+
+    expect(legacyIdentifierModules.map(relativeWebPath)).toEqual([
+      'lib/browser/clear-legacy-wallet-session-state.ts',
+    ]);
+    expect(legacyIdentifierModules).toContain(LEGACY_WALLET_CLEANUP_MODULE);
+
+    const cleanupSource = readFileSync(LEGACY_WALLET_CLEANUP_MODULE, 'utf8');
+    expect(cleanupSource.split(LEGACY_BASE_SEPOLIA_CLEANUP_KEY)).toHaveLength(2);
+    expect(moduleSpecifiers(LEGACY_WALLET_CLEANUP_MODULE)).toEqual([]);
+    expect(cleanupSource).toContain(
+      'removeAndVerifyBestEffort(storage, LEGACY_EVM_PUBLIC_TESTNET_POSITION_ACCOUNT_STORAGE_KEY)',
+    );
+    expect(cleanupSource).not.toContain('setItem(');
+    expect(cleanupSource).not.toMatch(/wallet_(?:add|switch)EthereumChain|sendTransaction/u);
   });
 });

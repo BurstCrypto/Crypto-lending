@@ -6,7 +6,7 @@ import {
 } from '../../authentication/http';
 import { readAuthenticationCsrfToken } from '../../authentication/session-client';
 import { createRequestDeadline, type RequestDeadline } from '../../http/bounded-response';
-import { MAINNET_WALLET_REGISTRY } from '../mainnet-network-policy';
+import { MAINNET_WALLET_REGISTRY, type MainnetWalletNetworkId } from '../mainnet-network-policy';
 import {
   assertOwnershipChallenge,
   assertOwnershipSignatureMatchesChallenge,
@@ -17,7 +17,10 @@ import {
   type WalletConnection,
 } from '../wallet-adapter';
 import type { InjectedEip1193WalletAdapter } from './adapter';
-import type { EvmNetworkEnvironment } from './networks';
+
+type MainnetRegistryEnvironment = typeof MAINNET_WALLET_REGISTRY.environment;
+type MainnetEvmChainId = Extract<MainnetWalletNetworkId, `eip155:${string}`>;
+const MAINNET_EVM_CHAIN_ID: MainnetEvmChainId = 'eip155:1';
 
 export const WALLET_OWNERSHIP_CHALLENGE_PATH = '/api/v1/wallets/ownership-challenges';
 export const WALLET_OWNERSHIP_PROOF_PATH = '/api/v1/wallets/ownership-proofs';
@@ -53,7 +56,8 @@ export class WalletOwnershipHandoffError extends Error {
 }
 
 export interface IssuedEvmOwnershipChallenge extends SiweOwnershipChallenge {
-  readonly registryEnvironment: EvmNetworkEnvironment;
+  readonly chainId: MainnetEvmChainId;
+  readonly registryEnvironment: MainnetRegistryEnvironment;
   readonly registryVersion: number;
   readonly registryFingerprintSha256: string;
 }
@@ -61,18 +65,18 @@ export interface IssuedEvmOwnershipChallenge extends SiweOwnershipChallenge {
 export interface RegisteredEvmWalletResult {
   readonly status: 'registered' | 'already_registered';
   readonly walletId: string;
-  readonly chainId: `eip155:${string}`;
+  readonly chainId: MainnetEvmChainId;
   readonly address: string;
   readonly registeredAt: string;
-  readonly registryEnvironment: EvmNetworkEnvironment;
+  readonly registryEnvironment: MainnetRegistryEnvironment;
   readonly registryVersion: number;
   readonly registryFingerprintSha256: string;
 }
 
 export interface IssueEvmOwnershipChallengeInput {
-  readonly chainId: `eip155:${string}`;
+  readonly chainId: MainnetEvmChainId;
   readonly address: string;
-  readonly registryEnvironment: EvmNetworkEnvironment;
+  readonly registryEnvironment: MainnetRegistryEnvironment;
 }
 
 export interface SubmitEvmOwnershipProofInput {
@@ -227,14 +231,13 @@ function parseChallenge(
     record.message.length > 4_096 ||
     /[\0\r]/u.test(record.message) ||
     !canonicalDateTime(record.expiresAt) ||
-    (registryEnvironment !== 'MAINNET' && registryEnvironment !== 'TESTNET') ||
+    registryEnvironment !== MAINNET_WALLET_REGISTRY.environment ||
     registryEnvironment !== expected.registryEnvironment ||
     !positiveVersion(record.registryVersion) ||
     typeof record.registryFingerprintSha256 !== 'string' ||
     !REGISTRY_FINGERPRINT.test(record.registryFingerprintSha256) ||
-    (registryEnvironment === MAINNET_WALLET_REGISTRY.environment &&
-      (record.registryVersion !== MAINNET_WALLET_REGISTRY.version ||
-        record.registryFingerprintSha256 !== MAINNET_WALLET_REGISTRY.fingerprintSha256))
+    record.registryVersion !== MAINNET_WALLET_REGISTRY.version ||
+    record.registryFingerprintSha256 !== MAINNET_WALLET_REGISTRY.fingerprintSha256
   ) {
     fail();
   }
@@ -319,20 +322,19 @@ function parseRegistrationResult(
     !EVM_ADDRESS.test(record.address) ||
     record.address !== expected.challenge.address.toLowerCase() ||
     !canonicalDateTime(record.registeredAt) ||
-    (registryEnvironment !== 'MAINNET' && registryEnvironment !== 'TESTNET') ||
+    registryEnvironment !== MAINNET_WALLET_REGISTRY.environment ||
     registryEnvironment !== expected.challenge.registryEnvironment ||
     record.registryVersion !== expected.challenge.registryVersion ||
     record.registryFingerprintSha256 !== expected.challenge.registryFingerprintSha256 ||
-    (registryEnvironment === MAINNET_WALLET_REGISTRY.environment &&
-      (record.registryVersion !== MAINNET_WALLET_REGISTRY.version ||
-        record.registryFingerprintSha256 !== MAINNET_WALLET_REGISTRY.fingerprintSha256))
+    record.registryVersion !== MAINNET_WALLET_REGISTRY.version ||
+    record.registryFingerprintSha256 !== MAINNET_WALLET_REGISTRY.fingerprintSha256
   ) {
     fail();
   }
   return Object.freeze({
     status,
     walletId: record.walletId,
-    chainId: chainId as `eip155:${string}`,
+    chainId: MAINNET_EVM_CHAIN_ID,
     address: record.address,
     registeredAt: record.registeredAt,
     registryEnvironment,
@@ -393,7 +395,10 @@ export class HttpEvmWalletOwnershipClient implements EvmWalletOwnershipClient {
     } catch {
       fail(WALLET_OWNERSHIP_HANDOFF_ERROR_CODES.rejected);
     }
-    if (input.registryEnvironment !== 'MAINNET' && input.registryEnvironment !== 'TESTNET') {
+    if (
+      input.chainId !== MAINNET_EVM_CHAIN_ID ||
+      input.registryEnvironment !== MAINNET_WALLET_REGISTRY.environment
+    ) {
       fail(WALLET_OWNERSHIP_HANDOFF_ERROR_CODES.rejected);
     }
     const request = createRequestDeadline(signal);
@@ -513,10 +518,10 @@ export async function completeEvmWalletOwnershipRegistration(
   throwIfAborted(input.signal);
 
   const selected = input.connection.selectedAccount;
-  if (!selected.chainId.startsWith('eip155:')) {
+  if (selected.chainId !== MAINNET_EVM_CHAIN_ID) {
     fail(WALLET_OWNERSHIP_HANDOFF_ERROR_CODES.rejected);
   }
-  const chainId = selected.chainId as `eip155:${string}`;
+  const chainId = MAINNET_EVM_CHAIN_ID;
   const current = input.adapter.currentConnection();
   if (
     current === null ||
@@ -530,12 +535,14 @@ export async function completeEvmWalletOwnershipRegistration(
   const network = input.adapter.descriptor.supportedNetworks.find(
     (candidate) => candidate.chainId === chainId,
   );
-  if (network === undefined) fail(WALLET_OWNERSHIP_HANDOFF_ERROR_CODES.rejected);
+  if (network === undefined || network.environment !== MAINNET_WALLET_REGISTRY.environment) {
+    fail(WALLET_OWNERSHIP_HANDOFF_ERROR_CODES.rejected);
+  }
   const challenge = await input.client.issueChallenge(
     {
       chainId,
       address: selected.address,
-      registryEnvironment: network.environment,
+      registryEnvironment: MAINNET_WALLET_REGISTRY.environment,
     },
     input.signal,
   );

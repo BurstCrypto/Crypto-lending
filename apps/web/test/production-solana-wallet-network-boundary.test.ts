@@ -20,6 +20,7 @@ const PRODUCTION_SOLANA_ENTRY = resolve(
 );
 const MAINNET_NETWORK_POLICY = resolve(WEB_ROOT, 'lib', 'wallets', 'mainnet-network-policy.ts');
 const MAINNET_SOLANA_NETWORK = resolve(WEB_ROOT, 'lib', 'wallets', 'solana', 'mainnet-network.ts');
+const MAINNET_OWNERSHIP_CLIENT = resolve(WEB_ROOT, 'lib', 'wallets', 'solana', 'ownership.ts');
 const COMPATIBILITY_CATALOG = resolve(
   WEB_ROOT,
   'lib',
@@ -81,6 +82,7 @@ describe('production Solana wallet network boundary', () => {
 
     expect(graph.has(MAINNET_NETWORK_POLICY)).toBe(true);
     expect(graph.has(MAINNET_SOLANA_NETWORK)).toBe(true);
+    expect(graph.has(MAINNET_OWNERSHIP_CLIENT)).toBe(true);
     expect(graph.has(COMPATIBILITY_CATALOG)).toBe(false);
 
     const productionSource = [...graph.values()].join('\n');
@@ -89,5 +91,10 @@ describe('production Solana wallet network boundary', () => {
     expect(productionSource).not.toContain('solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1');
     expect(productionSource).not.toContain('solana:devnet');
     expect(productionSource).not.toContain('solana:testnet');
+
+    const ownershipSource = graph.get(MAINNET_OWNERSHIP_CLIENT);
+    expect(ownershipSource).toBeDefined();
+    expect(ownershipSource).not.toMatch(/['"]TESTNET['"]/u);
+    expect(ownershipSource).toContain('selected.chainId !== MAINNET_SOLANA_WALLET_NETWORK.chainId');
   });
 });

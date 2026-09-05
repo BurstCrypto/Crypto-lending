@@ -2,6 +2,7 @@ import { AccountsModule } from './accounts/accounts.module';
 import { AppModule } from './app.module';
 import { isLocalHarnessEnvironment, loadApplicationRootModule } from './application-root';
 import { BlockchainModule } from './blockchain/blockchain.module';
+import { MAINNET_LAUNCH_NETWORK_IDS } from './blockchain/domain/mainnet-launch-network-policy';
 import { InfrastructureModule } from './infrastructure/infrastructure.module';
 import { MainnetPlatformsModule } from './mainnet-platforms/mainnet-platforms.module';
 import { PortfolioModule } from './portfolio/portfolio.module';
@@ -20,6 +21,48 @@ const PRODUCTION_MODULES = [
   SmartLendingModule,
   SystemModule,
 ];
+
+const FORBIDDEN_PRODUCTION_NETWORK_IDS = Object.freeze([
+  'eip155:56',
+  'eip155:8453',
+  'eip155:42161',
+  'eip155:11155111',
+  'eip155:84532',
+  'eip155:421614',
+  'solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1',
+  'solana:devnet',
+  'solana:testnet',
+]);
+
+function collectContractStrings(value: unknown): readonly string[] {
+  if (typeof value === 'string') return [value];
+  if (Array.isArray(value)) return value.flatMap(collectContractStrings);
+  if (value === null || typeof value !== 'object') return [];
+  return Object.entries(value).flatMap(([key, nested]) => [key, ...collectContractStrings(nested)]);
+}
+
+function collectNamedPropertySchemas(
+  value: unknown,
+  propertyName: string,
+): readonly Record<string, unknown>[] {
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => collectNamedPropertySchemas(item, propertyName));
+  }
+  if (value === null || typeof value !== 'object') return [];
+
+  const record = value as Record<string, unknown>;
+  const properties = record.properties;
+  const ownSchema =
+    properties !== null && typeof properties === 'object' && !Array.isArray(properties)
+      ? (properties as Record<string, unknown>)[propertyName]
+      : undefined;
+  return [
+    ...(ownSchema !== null && typeof ownSchema === 'object' && !Array.isArray(ownSchema)
+      ? [ownSchema as Record<string, unknown>]
+      : []),
+    ...Object.values(record).flatMap((nested) => collectNamedPropertySchemas(nested, propertyName)),
+  ];
+}
 
 describe('application module runtime surface', () => {
   it.each([
@@ -65,5 +108,36 @@ describe('application module runtime surface', () => {
     expect(paths).not.toContainEqual(expect.stringMatching(/^\/api\/v1\/local-demo(?:\/|$)/u));
     expect(solanaPublicTestnetPaths).toEqual([]);
     expect(evmPublicTestnetPaths).toEqual([]);
+  });
+
+  it('recursively limits the checked-in production contract to Ethereum and Solana mainnet', () => {
+    const contractStrings = collectContractStrings(productionOpenApi);
+    const forbiddenLabels = contractStrings.filter((value) =>
+      /\b(?:TESTNET|Base|Arbitrum|BNB)\b/u.test(value),
+    );
+    const forbiddenNetworkIds = contractStrings.filter((value) =>
+      FORBIDDEN_PRODUCTION_NETWORK_IDS.includes(value),
+    );
+
+    expect(forbiddenLabels).toEqual([]);
+    expect(forbiddenNetworkIds).toEqual([]);
+
+    const expectedNetworkIds = [...MAINNET_LAUNCH_NETWORK_IDS];
+    const chainIdSchemas = collectNamedPropertySchemas(productionOpenApi, 'chainId');
+    const networkIdSchemas = collectNamedPropertySchemas(productionOpenApi, 'networkId');
+    const registryEnvironmentSchemas = collectNamedPropertySchemas(
+      productionOpenApi,
+      'registryEnvironment',
+    );
+
+    expect(chainIdSchemas).toHaveLength(2);
+    expect(networkIdSchemas).toHaveLength(5);
+    expect(registryEnvironmentSchemas).toHaveLength(2);
+    for (const schema of [...chainIdSchemas, ...networkIdSchemas]) {
+      expect(schema.enum).toEqual(expectedNetworkIds);
+    }
+    for (const schema of registryEnvironmentSchemas) {
+      expect(schema.enum).toEqual(['MAINNET']);
+    }
   });
 });

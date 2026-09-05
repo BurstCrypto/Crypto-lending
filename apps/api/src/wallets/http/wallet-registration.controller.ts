@@ -32,6 +32,7 @@ import {
 import { AccountAuthGuard } from '../../accounts/auth/account-auth.guard';
 import type { CurrentPrincipal as AuthenticatedPrincipal } from '../../accounts/auth/current-principal';
 import { CurrentPrincipal } from '../../accounts/auth/current-principal.decorator';
+import { MAINNET_LAUNCH_NETWORK_IDS } from '../../blockchain/domain/mainnet-launch-network-policy';
 import { loggingContext } from '../../infrastructure/logging';
 import {
   WalletOwnershipConflictError,
@@ -78,10 +79,14 @@ const ACTIVE_WALLET_ROSTER_SCHEMA: SchemaObject = {
         ],
         properties: {
           walletId: { type: 'string', format: 'uuid' },
-          chainId: { type: 'string', maxLength: 96 },
+          chainId: {
+            type: 'string',
+            enum: [...MAINNET_LAUNCH_NETWORK_IDS],
+            maxLength: 96,
+          },
           address: { type: 'string', maxLength: 128 },
           registeredAt: { type: 'string', format: 'date-time' },
-          registryEnvironment: { type: 'string', enum: ['MAINNET', 'TESTNET'] },
+          registryEnvironment: { type: 'string', enum: ['MAINNET'] },
           registryVersion: { type: 'integer', minimum: 1 },
           registryFingerprintSha256: { type: 'string', pattern: '^[0-9a-f]{64}$' },
         },

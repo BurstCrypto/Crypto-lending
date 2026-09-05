@@ -16,6 +16,7 @@ const PRODUCTION_EVM_ENTRY = resolve(
   'mainnet-wallet-ownership.tsx',
 );
 const MAINNET_NETWORK_POLICY = resolve(WEB_ROOT, 'lib', 'wallets', 'mainnet-network-policy.ts');
+const MAINNET_OWNERSHIP_CLIENT = resolve(WEB_ROOT, 'lib', 'wallets', 'eip1193', 'ownership.ts');
 const COMPATIBILITY_CATALOG = resolve(WEB_ROOT, 'test', 'eip1193-network-catalog.fixture.ts');
 const SOURCE_EXTENSIONS = Object.freeze(['.ts', '.tsx', '.js', '.jsx']);
 
@@ -72,6 +73,7 @@ describe('production EVM wallet network boundary', () => {
     const graph = applicationDependencyGraph(PRODUCTION_EVM_ENTRY);
 
     expect(graph.has(MAINNET_NETWORK_POLICY)).toBe(true);
+    expect(graph.has(MAINNET_OWNERSHIP_CLIENT)).toBe(true);
     expect(graph.has(COMPATIBILITY_CATALOG)).toBe(false);
 
     const productionSource = [...graph.values()].join('\n');
@@ -80,5 +82,11 @@ describe('production EVM wallet network boundary', () => {
       /(?:Base Mainnet|Arbitrum One|Ethereum Sepolia|Base Sepolia|Arbitrum Sepolia)/u,
     );
     expect(productionSource).not.toMatch(/['"]eip155:(?:8453|42161|11155111|84532|421614)['"]/u);
+
+    const ownershipSource = graph.get(MAINNET_OWNERSHIP_CLIENT);
+    expect(ownershipSource).toBeDefined();
+    expect(ownershipSource).not.toMatch(/['"]TESTNET['"]/u);
+    expect(ownershipSource).toContain("const MAINNET_EVM_CHAIN_ID: MainnetEvmChainId = 'eip155:1'");
+    expect(ownershipSource).toContain('selected.chainId !== MAINNET_EVM_CHAIN_ID');
   });
 });

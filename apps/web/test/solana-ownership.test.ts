@@ -188,6 +188,50 @@ describe('HttpSolanaWalletOwnershipClient', () => {
     ).rejects.toMatchObject({ code: 'WALLET_OWNERSHIP_UNAVAILABLE' });
   });
 
+  it('rejects devnet and testnet ownership inputs before calling the API', async () => {
+    const requestFetch = vi.fn();
+    const client = new HttpSolanaWalletOwnershipClient({
+      fetch: requestFetch as AuthenticationFetch,
+      cookieHeader: `__Host-cl_csrf=${CSRF_TOKEN}`,
+      publicOrigin: ORIGIN,
+    });
+
+    await expect(
+      client.issueChallenge({
+        chainId: SOLANA_CAIP_CHAIN_IDS.devnet,
+        address: ADDRESS,
+        registryEnvironment: 'MAINNET',
+      } as never),
+    ).rejects.toMatchObject({ code: 'WALLET_OWNERSHIP_REJECTED' });
+    await expect(
+      client.issueChallenge({
+        chainId: SOLANA_CAIP_CHAIN_IDS.mainnet,
+        address: ADDRESS,
+        registryEnvironment: 'TESTNET',
+      } as never),
+    ).rejects.toMatchObject({ code: 'WALLET_OWNERSHIP_REJECTED' });
+    expect(requestFetch).not.toHaveBeenCalled();
+  });
+
+  it('rejects a devnet challenge response', async () => {
+    const requestFetch = vi.fn(async () =>
+      jsonResponse(201, challengeResponse({ chainId: SOLANA_CAIP_CHAIN_IDS.devnet })),
+    );
+    const client = new HttpSolanaWalletOwnershipClient({
+      fetch: requestFetch as AuthenticationFetch,
+      cookieHeader: `__Host-cl_csrf=${CSRF_TOKEN}`,
+      publicOrigin: ORIGIN,
+    });
+
+    await expect(
+      client.issueChallenge({
+        chainId: SOLANA_CAIP_CHAIN_IDS.mainnet,
+        address: ADDRESS,
+        registryEnvironment: 'MAINNET',
+      }),
+    ).rejects.toMatchObject({ code: 'WALLET_OWNERSHIP_UNAVAILABLE' });
+  });
+
   it.each([
     ['version', { registryVersion: MAINNET_WALLET_REGISTRY.version + 1 }],
     ['fingerprint', { registryFingerprintSha256: 'cd'.repeat(32) }],
@@ -320,5 +364,40 @@ describe('completeSolanaWalletOwnershipRegistration', () => {
     );
     expect(adapter.signOwnershipChallenge).toHaveBeenCalledWith(connection.connectionId, challenge);
     expect(client.submitProof).toHaveBeenCalledWith({ challenge, signature: signed }, undefined);
+  });
+
+  it('rejects a devnet connection before issuing a challenge', async () => {
+    const connection: WalletConnection = {
+      connectionId: 'phantom-devnet-connection',
+      connectorId: 'phantom',
+      accounts: [{ chainId: SOLANA_CAIP_CHAIN_IDS.devnet, address: ADDRESS }],
+      approvedScopes: [
+        {
+          chainId: SOLANA_CAIP_CHAIN_IDS.devnet,
+          methods: ['solana:signMessage'],
+          events: ['accountChanged', 'disconnect'],
+        },
+      ],
+      selectedAccount: { chainId: SOLANA_CAIP_CHAIN_IDS.devnet, address: ADDRESS },
+      restored: false,
+    };
+    const adapter: WalletAdapter = {
+      connectorId: 'phantom',
+      namespace: 'solana',
+      connect: vi.fn(async () => connection),
+      restore: vi.fn(async () => null),
+      disconnect: vi.fn(async () => undefined),
+      signOwnershipChallenge: vi.fn(async () => signature()),
+      subscribe: vi.fn(() => vi.fn()),
+    };
+    const client: SolanaWalletOwnershipClient = {
+      issueChallenge: vi.fn(async () => issuedChallenge()),
+      submitProof: vi.fn(async () => registrationResponse()),
+    };
+
+    await expect(
+      completeSolanaWalletOwnershipRegistration({ adapter, connection, client }),
+    ).rejects.toMatchObject({ code: 'WALLET_OWNERSHIP_REJECTED' });
+    expect(client.issueChallenge).not.toHaveBeenCalled();
   });
 });

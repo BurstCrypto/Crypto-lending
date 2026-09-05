@@ -14,6 +14,7 @@ import {
   WalletOwnershipHandoffError,
   type WalletOwnershipHandoffErrorCode,
 } from '../eip1193/ownership';
+import { MAINNET_SOLANA_WALLET_NETWORK, type MainnetSolanaCaipChainId } from './mainnet-network';
 import {
   assertOwnershipChallenge,
   assertOwnershipSignatureMatchesChallenge,
@@ -21,7 +22,6 @@ import {
   toSolanaEd25519OwnershipProofWire,
   type OwnershipSignature,
   type SiwsMessageOwnershipChallenge,
-  type SupportedSolanaCaipChainId,
   type WalletAdapter,
   type WalletConnection,
 } from '../wallet-adapter';
@@ -61,8 +61,8 @@ const SUBJECT_RESOURCE = /^- urn:crypto-lending:wallet-subject-binding:hmac-sha-
 const OPERATION_RESOURCE = '- urn:crypto-lending:wallet-operation:register-wallet';
 
 export interface IssuedSolanaOwnershipChallenge extends SiwsMessageOwnershipChallenge {
-  readonly chainId: SupportedSolanaCaipChainId;
-  readonly registryEnvironment: 'MAINNET' | 'TESTNET';
+  readonly chainId: MainnetSolanaCaipChainId;
+  readonly registryEnvironment: typeof MAINNET_WALLET_REGISTRY.environment;
   readonly registryVersion: number;
   readonly registryFingerprintSha256: string;
 }
@@ -70,18 +70,18 @@ export interface IssuedSolanaOwnershipChallenge extends SiwsMessageOwnershipChal
 export interface RegisteredSolanaWalletResult {
   readonly status: 'registered' | 'already_registered';
   readonly walletId: string;
-  readonly chainId: SupportedSolanaCaipChainId;
+  readonly chainId: MainnetSolanaCaipChainId;
   readonly address: string;
   readonly registeredAt: string;
-  readonly registryEnvironment: 'MAINNET' | 'TESTNET';
+  readonly registryEnvironment: typeof MAINNET_WALLET_REGISTRY.environment;
   readonly registryVersion: number;
   readonly registryFingerprintSha256: string;
 }
 
 export interface IssueSolanaOwnershipChallengeInput {
-  readonly chainId: SupportedSolanaCaipChainId;
+  readonly chainId: MainnetSolanaCaipChainId;
   readonly address: string;
-  readonly registryEnvironment: 'MAINNET' | 'TESTNET';
+  readonly registryEnvironment: typeof MAINNET_WALLET_REGISTRY.environment;
 }
 
 export interface SubmitSolanaOwnershipProofInput {
@@ -202,14 +202,13 @@ function parseChallenge(
     record.message.length > 4_096 ||
     /[\0\r]/u.test(record.message) ||
     !canonicalDateTime(record.expiresAt) ||
-    (registryEnvironment !== 'MAINNET' && registryEnvironment !== 'TESTNET') ||
+    registryEnvironment !== MAINNET_WALLET_REGISTRY.environment ||
     registryEnvironment !== expected.registryEnvironment ||
     !positiveVersion(record.registryVersion) ||
     typeof record.registryFingerprintSha256 !== 'string' ||
     !REGISTRY_FINGERPRINT.test(record.registryFingerprintSha256) ||
-    (registryEnvironment === MAINNET_WALLET_REGISTRY.environment &&
-      (record.registryVersion !== MAINNET_WALLET_REGISTRY.version ||
-        record.registryFingerprintSha256 !== MAINNET_WALLET_REGISTRY.fingerprintSha256))
+    record.registryVersion !== MAINNET_WALLET_REGISTRY.version ||
+    record.registryFingerprintSha256 !== MAINNET_WALLET_REGISTRY.fingerprintSha256
   ) {
     fail();
   }
@@ -290,13 +289,12 @@ function parseRegistrationResult(
     record.chainId !== expected.challenge.chainId ||
     record.address !== expected.challenge.address ||
     !canonicalDateTime(record.registeredAt) ||
-    (registryEnvironment !== 'MAINNET' && registryEnvironment !== 'TESTNET') ||
+    registryEnvironment !== MAINNET_WALLET_REGISTRY.environment ||
     registryEnvironment !== expected.challenge.registryEnvironment ||
     record.registryVersion !== expected.challenge.registryVersion ||
     record.registryFingerprintSha256 !== expected.challenge.registryFingerprintSha256 ||
-    (registryEnvironment === MAINNET_WALLET_REGISTRY.environment &&
-      (record.registryVersion !== MAINNET_WALLET_REGISTRY.version ||
-        record.registryFingerprintSha256 !== MAINNET_WALLET_REGISTRY.fingerprintSha256))
+    record.registryVersion !== MAINNET_WALLET_REGISTRY.version ||
+    record.registryFingerprintSha256 !== MAINNET_WALLET_REGISTRY.fingerprintSha256
   ) {
     fail();
   }
@@ -360,6 +358,12 @@ export class HttpSolanaWalletOwnershipClient implements SolanaWalletOwnershipCli
     signal?: AbortSignal,
   ): Promise<IssuedSolanaOwnershipChallenge> {
     throwIfAborted(signal);
+    if (
+      input.chainId !== MAINNET_SOLANA_WALLET_NETWORK.chainId ||
+      input.registryEnvironment !== MAINNET_WALLET_REGISTRY.environment
+    ) {
+      fail(WALLET_OWNERSHIP_HANDOFF_ERROR_CODES.rejected);
+    }
     const request = createRequestDeadline(signal);
     try {
       const response = await this.#post(
@@ -467,14 +471,14 @@ export async function completeSolanaWalletOwnershipRegistration(
   }
   throwIfAborted(input.signal);
   const selected = input.connection.selectedAccount;
-  if (!selected.chainId.startsWith('solana:')) {
+  if (selected.chainId !== MAINNET_SOLANA_WALLET_NETWORK.chainId) {
     fail(WALLET_OWNERSHIP_HANDOFF_ERROR_CODES.rejected);
   }
   const challenge = await input.client.issueChallenge(
     {
-      chainId: selected.chainId as SupportedSolanaCaipChainId,
+      chainId: MAINNET_SOLANA_WALLET_NETWORK.chainId,
       address: selected.address,
-      registryEnvironment: 'MAINNET',
+      registryEnvironment: MAINNET_WALLET_REGISTRY.environment,
     },
     input.signal,
   );

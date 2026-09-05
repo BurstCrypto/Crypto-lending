@@ -1375,6 +1375,10 @@
                             "additionalProperties": false,
                             "properties": {
                               "networkId": {
+                                "enum": [
+                                  "eip155:1",
+                                  "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"
+                                ],
                                 "maxLength": 96,
                                 "type": "string"
                               },
@@ -1461,6 +1465,10 @@
                             "type": "integer"
                           },
                           "networkId": {
+                            "enum": [
+                              "eip155:1",
+                              "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"
+                            ],
                             "maxLength": 96,
                             "type": "string"
                           },
@@ -1546,6 +1554,10 @@
                             "type": "boolean"
                           },
                           "networkId": {
+                            "enum": [
+                              "eip155:1",
+                              "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"
+                            ],
                             "maxLength": 96,
                             "type": "string"
                           },
@@ -1698,6 +1710,10 @@
                                 "type": "string"
                               },
                               "networkId": {
+                                "enum": [
+                                  "eip155:1",
+                                  "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"
+                                ],
                                 "maxLength": 96,
                                 "type": "string"
                               },
@@ -1784,6 +1800,10 @@
                             "type": "boolean"
                           },
                           "networkId": {
+                            "enum": [
+                              "eip155:1",
+                              "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"
+                            ],
                             "maxLength": 96,
                             "type": "string"
                           },
@@ -2187,6 +2207,10 @@
                             "type": "string"
                           },
                           "chainId": {
+                            "enum": [
+                              "eip155:1",
+                              "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"
+                            ],
                             "maxLength": 96,
                             "type": "string"
                           },
@@ -2196,8 +2220,7 @@
                           },
                           "registryEnvironment": {
                             "enum": [
-                              "MAINNET",
-                              "TESTNET"
+                              "MAINNET"
                             ],
                             "type": "string"
                           },
@@ -2272,6 +2295,10 @@
                     "type": "string"
                   },
                   "chainId": {
+                    "enum": [
+                      "eip155:1",
+                      "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"
+                    ],
                     "maxLength": 96,
                     "type": "string"
                   }

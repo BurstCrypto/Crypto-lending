@@ -2,6 +2,10 @@ const ACCOUNT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9
 
 export const LEGACY_LOCAL_DEMO_WALLET_ROSTER_STORAGE_KEY =
   'crypto-lending.local-demo-wallet-roster.v1' as const;
+/**
+ * Cleanup-only identifier for data written by the retired Base Sepolia flow.
+ * It is retained solely as a removeItem target and cannot enable a chain or transaction capability.
+ */
 export const LEGACY_EVM_PUBLIC_TESTNET_POSITION_ACCOUNT_STORAGE_KEY =
   'crypto-lending.evm-public-testnet.base-sepolia-position-account.v1' as const;
 export const LEGACY_SOLANA_PUBLIC_TESTNET_POSITION_ACCOUNT_STORAGE_KEY =

@@ -33,7 +33,7 @@ const ACCOUNT_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const OTHER_ACCOUNT_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 
 describe('legacy wallet session state cleanup', () => {
-  it('clears only the known account roster and retired position-account keys', () => {
+  it('uses the retired Base Sepolia identifier only to delete old browser state', () => {
     const storage = new MemoryStorage();
     const rosterKey = legacyLocalDemoWalletRosterKey(ACCOUNT_ID);
     const otherRosterKey = legacyLocalDemoWalletRosterKey(OTHER_ACCOUNT_ID);
