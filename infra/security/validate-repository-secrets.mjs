@@ -106,6 +106,10 @@ const REVIEWED_PUBLIC_IDENTIFIER_ASSIGNMENTS = new Map([
     new Set(['AuthWalletKeysSecretArn']),
   ],
   [
+    'arn:aws:secretsmanager:us-west-2:111122223333:secret:crypto-lending/test/redis-operator-AbCdEf',
+    new Set(['redisOperatorSecretArn']),
+  ],
+  [
     '0x98c23e9d8f34fefb1b7bd6a91b7ff122f4e16f5c',
     new Set(['AAVE_V3_ETHEREUM_USDC_A_TOKEN', 'aToken']),
   ],

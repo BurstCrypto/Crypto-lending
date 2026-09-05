@@ -308,6 +308,8 @@ test('binds production public identifiers to their exact reviewed assignment nam
   const sparkImplementationIdentifier = '0x6175ddec3b9b38c88157c10a01ed4a3fa8639cc6';
   const secretArnIdentifier =
     'arn:aws:secretsmanager:us-west-2:111122223333:secret:crypto-lending/test/auth-wallet-keys-AbCdEf';
+  const redisSecretArnIdentifier =
+    'arn:aws:secretsmanager:us-west-2:111122223333:secret:crypto-lending/test/redis-operator-AbCdEf';
   try {
     write(
       repository,
@@ -322,6 +324,7 @@ test('binds production public identifiers to their exact reviewed assignment nam
         `  spToken: '${sparkReceiptIdentifier}',`,
         `  spTokenImplementation: '${sparkImplementationIdentifier}',`,
         `  AuthWalletKeysSecretArn: '${secretArnIdentifier}',`,
+        `  redisOperatorSecretArn: '${redisSecretArnIdentifier}',`,
         `  API_TOKEN: '${solanaProgramIdentifier}',`,
         `  tokenAccountCopy: '${solanaAccountIdentifier}',`,
         `  reserveTokenAddress: '${reserveIdentifier}',`,
@@ -329,6 +332,7 @@ test('binds production public identifiers to their exact reviewed assignment nam
         `  spTokenCopy: '${sparkReceiptIdentifier}',`,
         `  spTokenImplementationCopy: '${sparkImplementationIdentifier}',`,
         `  OtherSecretArn: '${secretArnIdentifier}',`,
+        `  OtherRedisSecretArn: '${redisSecretArnIdentifier}',`,
         '};',
         '',
       ].join('\n'),
@@ -343,7 +347,7 @@ test('binds production public identifiers to their exact reviewed assignment nam
         .trim()
         .split('\n')
         .filter((line) => line.startsWith('rule=assignment.high-entropy-secret\t')).length,
-      7,
+      8,
     );
     assertRedacted(
       result,
@@ -354,6 +358,7 @@ test('binds production public identifiers to their exact reviewed assignment nam
       sparkReceiptIdentifier,
       sparkImplementationIdentifier,
       secretArnIdentifier,
+      redisSecretArnIdentifier,
     );
   } finally {
     rmSync(repository, { force: true, recursive: true });
