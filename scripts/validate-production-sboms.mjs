@@ -8,7 +8,7 @@ import {
   fstatSync,
   lstatSync,
   openSync,
-  readFileSync,
+  readSync,
   realpathSync,
 } from 'node:fs';
 import path from 'node:path';
@@ -249,7 +249,24 @@ function statIdentity(stat) {
     .join(':');
 }
 
-export function readSecureRegularFile(filePath, maximumBytes = MAX_PRODUCTION_SBOM_BYTES) {
+function closeSecureFileDescriptor(descriptor) {
+  try {
+    closeSync(descriptor);
+  } catch {
+    fail('SBOM_FILE_UNSAFE');
+  }
+}
+
+/** Test-only fault seam for the same descriptor-close sanitizer used below. */
+export function closeSecureFileDescriptorForTest(descriptor) {
+  closeSecureFileDescriptor(descriptor);
+}
+
+export function readSecureRegularFile(
+  filePath,
+  maximumBytes = MAX_PRODUCTION_SBOM_BYTES,
+  afterFirstReadForTest = undefined,
+) {
   const resolved = path.resolve(filePath);
   let initial;
   let real;
@@ -278,13 +295,43 @@ export function readSecureRegularFile(filePath, maximumBytes = MAX_PRODUCTION_SB
     if (!opened.isFile() || opened.nlink !== 1n || statIdentity(opened) !== statIdentity(initial)) {
       return fail('SBOM_FILE_UNSAFE');
     }
-    const bytes = readFileSync(descriptor);
-    const after = fstatSync(descriptor, { bigint: true });
+    const bytes = Buffer.alloc(Number(opened.size));
+    let offset = 0;
+    while (offset < bytes.length) {
+      const count = readSync(descriptor, bytes, offset, bytes.length - offset, offset);
+      if (count <= 0) return fail('SBOM_FILE_UNSAFE');
+      offset += count;
+    }
+    const overflow = Buffer.allocUnsafe(1);
+    if (readSync(descriptor, overflow, 0, 1, bytes.length) !== 0) {
+      return fail('SBOM_FILE_UNSAFE');
+    }
+    if (afterFirstReadForTest !== undefined) afterFirstReadForTest();
+    const afterFirst = fstatSync(descriptor, { bigint: true });
+    if (statIdentity(afterFirst) !== statIdentity(opened)) return fail('SBOM_FILE_UNSAFE');
+
+    const comparison = Buffer.allocUnsafe(64 * 1024);
+    offset = 0;
+    while (offset < bytes.length) {
+      const expectedCount = Math.min(comparison.length, bytes.length - offset);
+      const count = readSync(descriptor, comparison, 0, expectedCount, offset);
+      if (
+        count !== expectedCount ||
+        !comparison.subarray(0, count).equals(bytes.subarray(offset, offset + count))
+      ) {
+        return fail('SBOM_FILE_UNSAFE');
+      }
+      offset += count;
+    }
+    if (readSync(descriptor, overflow, 0, 1, bytes.length) !== 0) {
+      return fail('SBOM_FILE_UNSAFE');
+    }
+    const afterSecond = fstatSync(descriptor, { bigint: true });
     const final = lstatSync(resolved, { bigint: true });
     const finalReal = realpathSync.native(resolved);
     if (
       bytes.length !== Number(opened.size) ||
-      statIdentity(after) !== statIdentity(opened) ||
+      statIdentity(afterSecond) !== statIdentity(opened) ||
       statIdentity(final) !== statIdentity(opened) ||
       !samePath(resolved, finalReal)
     ) {
@@ -295,7 +342,7 @@ export function readSecureRegularFile(filePath, maximumBytes = MAX_PRODUCTION_SB
     if (error instanceof ProductionSbomValidationError) throw error;
     return fail('SBOM_FILE_UNSAFE');
   } finally {
-    if (descriptor !== undefined) closeSync(descriptor);
+    if (descriptor !== undefined) closeSecureFileDescriptor(descriptor);
   }
 }
 

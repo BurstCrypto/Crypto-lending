@@ -125,8 +125,14 @@ It rejects the explicitly forbidden development toolchain packages (including
 changed tag mapping, forged content digests, cross-format divergence,
 missing/extra malformed identity fields, duplicate image IDs, reused document
 identity, malformed JSON, symbolic links, hard links,
-non-regular/empty/changed/oversized files, and aliased paths. The four input
+non-regular/empty/changed/oversized files, and aliased paths. The six input
 paths are fixed by the CLI rather than caller-selectable.
+
+Every checked-in package manifest and lockfile input and every generated SPDX,
+native Syft, and archive-binding input is read twice through one stable file
+descriptor. The second pass is compared byte-for-byte with the retained first
+pass while identity, link count, size, and nanosecond timestamps remain fixed;
+a same-size concurrent rewrite therefore fails the release gate.
 
 Docker may expose a local OCI index digest, manifest digest, or classic config
 digest as `.Id`, while Syft's Docker-daemon source records a synthesized

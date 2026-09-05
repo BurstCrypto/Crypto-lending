@@ -29,6 +29,8 @@ import {
   PRODUCTION_SBOM_BINDING_FILES,
   PRODUCTION_SBOM_FILES,
   ProductionSbomValidationError,
+  closeSecureFileDescriptorForTest,
+  readSecureRegularFile,
   SBOM_ACTION_COMMIT,
   SYFT_VERSION,
   loadProductionSbomExpectations,
@@ -1290,6 +1292,25 @@ describe('actual-image SPDX validation', () => {
         }),
       'SBOM_FILE_UNSAFE',
     );
+  });
+
+  it('rejects a same-size rewrite between the two descriptor reads', () => {
+    const original = Buffer.from('{"releaseGate":"original"}\n', 'utf8');
+    const changed = Buffer.from('{"releaseGate":"modified"}\n', 'utf8');
+    assert.equal(changed.length, original.length);
+    const unstable = write('unstable.spdx.json', original);
+
+    assertCode(
+      () =>
+        readSecureRegularFile(unstable, MAX_PRODUCTION_SBOM_BYTES, () =>
+          writeFileSync(unstable, changed),
+        ),
+      'SBOM_FILE_UNSAFE',
+    );
+  });
+
+  it('sanitizes descriptor close failures to the fixed unsafe-file code', () => {
+    assertCode(() => closeSecureFileDescriptorForTest(-1), 'SBOM_FILE_UNSAFE');
   });
 
   it('rejects reused namespaces and image IDs across the two exact documents', () => {
