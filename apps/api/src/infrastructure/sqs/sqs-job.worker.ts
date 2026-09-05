@@ -522,6 +522,11 @@ export class SqsJobWorker {
           this.policy.retryMaxDelaySeconds,
           Math.max(nativeRetryDelaySeconds, trustedMinimumDelaySeconds ?? 0),
         );
+    const trustedProviderDelayFloorApplied =
+      !exhausted &&
+      this.queue === 'balance' &&
+      trustedMinimumDelaySeconds !== undefined &&
+      retryDelaySeconds > nativeRetryDelaySeconds;
 
     try {
       await changeVisibilityWithDeadline(
@@ -554,6 +559,16 @@ export class SqsJobWorker {
       };
     }
 
+    if (this.queue === 'balance') {
+      recordDiagnostic(() =>
+        this.observability.recordBalanceReceiptDisposition({
+          queue: 'balance',
+          receiveCount: message.receiveCount,
+          retryDelaySeconds,
+          trustedProviderDelayFloorApplied,
+        }),
+      );
+    }
     recordDiagnostic(() =>
       this.observability.recordJobFailure({
         queue: this.queue,

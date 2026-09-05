@@ -19,6 +19,7 @@ import type {
   BalanceConsumerInfrastructureConfig,
   InfrastructureConfig,
 } from '../config/infrastructure.config';
+import { InProcessObservability, type ObservabilityPort } from '../observability';
 import { createJobEnvelope, type JobEnvelope } from '../outbox/job-envelope';
 import type { OutboxTransportMessage } from '../outbox/outbox-transport.port';
 import { createSqsJobWorkerPolicy, SqsJobWorker } from './sqs-job.worker';
@@ -105,12 +106,13 @@ function receiptWorker(
   sqs: SqsQueueReceiptTransport,
   current: InfrastructureConfig,
   queue: 'jobs' | 'balance' = 'balance',
+  observability?: ObservabilityPort,
 ): SqsJobWorker {
   const queueUrl = queue === 'balance' ? current.sqs.balanceQueueUrl : current.sqs.queueUrl;
   return new SqsJobWorker(
     new PinnedSqsQueueReceiptAdapter(sqs, queueUrl),
     current.sqs,
-    undefined,
+    observability,
     queue,
   );
 }
@@ -732,6 +734,56 @@ describe('dedicated balance-sync physical SQS boundary', () => {
     },
   );
 
+  it.each([
+    ['trusted floor', 2, 30, 30, true],
+    ['native exponential', 2, 5, 10, false],
+    ['exhausted receipt', 3, 60, 0, false],
+  ] as const)(
+    'records actual balance receipt timing when %s determines the disposition',
+    async (_scenario, receiveCount, trustedMinimum, expectedDelay, floorApplied) => {
+      const current = config({ retryBaseDelaySeconds: 5, retryMaxDelaySeconds: 60 });
+      const envelope = balanceMessage().envelope as JobEnvelope;
+      const message = {
+        messageId: `message-observed-delay-${receiveCount}-${trustedMinimum}`,
+        receiptHandle: `receipt-observed-delay-${receiveCount}-${trustedMinimum}`,
+        body: JSON.stringify(envelope),
+        receiveCount,
+        receivedAtMonotonicMs: performance.now(),
+      };
+      const sqs = {
+        receive: jest.fn().mockResolvedValue([message]),
+        parseEnvelope: jest.fn().mockReturnValue(envelope),
+        changeVisibility: jest.fn().mockResolvedValue(undefined),
+        delete: jest.fn().mockResolvedValue(undefined),
+      } as unknown as SqsService;
+      const observability = new InProcessObservability();
+      const marker = await trustedReceiptRetryError(trustedMinimum);
+
+      const result = await receiptWorker(sqs, current, 'balance', observability).processOne(
+        async () => Promise.reject(marker),
+      );
+
+      expect(result).toMatchObject({
+        status: receiveCount >= 3 ? 'awaiting-dead-letter' : 'retry-scheduled',
+        errorCode: 'JOB_HANDLER_FAILED',
+        receiveCount,
+        retryDelaySeconds: expectedDelay,
+      });
+      expect(observability.dashboardSnapshot().counters).toContainEqual({
+        name: 'balance_receipt_dispositions_total',
+        labels: {
+          receive_count: String(receiveCount),
+          retry_delay_seconds: String(expectedDelay),
+          trusted_provider_delay_floor_applied: String(floorApplied),
+        },
+        value: 1,
+      });
+      expect(JSON.stringify(observability.dashboardSnapshot())).not.toMatch(
+        /RATE_LIMITED|provider-private|errorCode|errorDetail/u,
+      );
+    },
+  );
+
   it('ignores trusted receipt timing on the generic queue', async () => {
     const current = config();
     const envelope = yieldMessage().envelope;
@@ -749,8 +801,9 @@ describe('dedicated balance-sync physical SQS boundary', () => {
       delete: jest.fn().mockResolvedValue(undefined),
     } as unknown as SqsService;
     const marker = await trustedReceiptRetryError(30);
+    const observability = new InProcessObservability();
 
-    const result = await receiptWorker(sqs, current, 'jobs').processOne(async () =>
+    const result = await receiptWorker(sqs, current, 'jobs', observability).processOne(async () =>
       Promise.reject(marker),
     );
 
@@ -767,6 +820,11 @@ describe('dedicated balance-sync physical SQS boundary', () => {
       expect.any(AbortSignal),
     );
     expect(sqs.delete).not.toHaveBeenCalled();
+    expect(
+      observability
+        .dashboardSnapshot()
+        .counters.some(({ name }) => name === 'balance_receipt_dispositions_total'),
+    ).toBe(false);
   });
 
   it.each(['lookalike', 'proxied marker', 'undefined rejection'] as const)(

@@ -167,6 +167,7 @@ export interface BalanceConsumerArtifactSources {
   readonly infrastructureConfigSource: string;
   readonly pinnedQueueReceiptSource: string;
   readonly sqsJobWorkerSource: string;
+  readonly observabilitySource: string;
   readonly sqsServiceSource: string;
   readonly sqsModuleSource: string;
   readonly sqsTokensSource: string;
@@ -506,6 +507,7 @@ const BALANCE_CONSUMER_ARTIFACT_KEYS = Object.freeze([
   'infrastructureConfigSource',
   'pinnedQueueReceiptSource',
   'sqsJobWorkerSource',
+  'observabilitySource',
   'sqsServiceSource',
   'sqsModuleSource',
   'sqsTokensSource',
@@ -542,7 +544,8 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
   reviewedJobDispatcherSource: 'a3c122c2d96a25671d7ad4266dafa984880ccb90e133804ec9e3b257e1098418',
   infrastructureConfigSource: 'ca472922050bb95bd1b7bd94e0810674e7998d90287edc2be0fce1017b9b8898',
   pinnedQueueReceiptSource: '76543f1e4b4c446eb98b85ad52ea934d7e84f8f7fedcd82f6e516a7eb45a8c56',
-  sqsJobWorkerSource: '6000c7706c8e7d0bd31c89c1a87f5c97cd84ee453cc9570eeb8660c332fbb277',
+  sqsJobWorkerSource: '833ec8c536421751efd722c503144fc160432ffee71043f97d8711ca9fd70fc1',
+  observabilitySource: 'cc451c75a65c8651161ae6c2bd10b25fc290c4ca81818ceeb16bbbec64fff18b',
   sqsServiceSource: '2abb5d6592858be750263200fdd8b17a3ad15e0ee3ad5ca8fe14e36b5ac46d13',
   sqsModuleSource: 'dc958100bd372500a9428c28cc6219a4cb00db61314a63478368d0b0cf95221b',
   sqsTokensSource: REVIEWED_SQS_TOKENS_SOURCE_SHA256,
@@ -2068,6 +2071,29 @@ function hasExactBalanceConsumerNativeReceiptRedriveContract(
   const genericDispatcher = dispatcher.slice(genericDispatcherStart, balanceDispatcherStart);
   const balanceDispatcher = dispatcher.slice(balanceDispatcherStart);
   const worker = sources.sqsJobWorkerSource.replace(/\r\n/gu, '\n');
+  const observability = sources.observabilitySource.replace(/\r\n/gu, '\n');
+  const receiptVisibilityDispositionStart = worker.lastIndexOf(
+    'await changeVisibilityWithDeadline(',
+  );
+  const balanceReceiptObservationStart = worker.indexOf(
+    'this.observability.recordBalanceReceiptDisposition({',
+    receiptVisibilityDispositionStart,
+  );
+  const balanceReceiptObservationEnd = worker.indexOf(
+    'this.observability.recordJobFailure({',
+    balanceReceiptObservationStart,
+  );
+  if (
+    receiptVisibilityDispositionStart < 0 ||
+    balanceReceiptObservationStart <= receiptVisibilityDispositionStart ||
+    balanceReceiptObservationEnd <= balanceReceiptObservationStart
+  ) {
+    return false;
+  }
+  const balanceReceiptObservation = worker.slice(
+    balanceReceiptObservationStart,
+    balanceReceiptObservationEnd,
+  );
 
   return (
     exactExecutableLineCount(applicationBalanceQueue, 'maxReceiveCount: 3') === 1 &&
@@ -2193,6 +2219,55 @@ function hasExactBalanceConsumerNativeReceiptRedriveContract(
     exactExecutableLineCount(
       worker,
       'Math.max(nativeRetryDelaySeconds, trustedMinimumDelaySeconds ?? 0),',
+    ) === 1 &&
+    exactExecutableLineCount(worker, "if (this.queue === 'balance') {") === 1 &&
+    exactExecutableLineCount(worker, 'this.observability.recordBalanceReceiptDisposition({') ===
+      1 &&
+    exactExecutableLineCount(balanceReceiptObservation, 'receiveCount: message.receiveCount,') ===
+      1 &&
+    exactExecutableLineCount(balanceReceiptObservation, 'retryDelaySeconds,') === 1 &&
+    exactExecutableLineCount(balanceReceiptObservation, 'trustedProviderDelayFloorApplied,') ===
+      1 &&
+    exactExecutableLineCount(
+      observability,
+      'const BALANCE_RECEIPT_RETRY_BASE_DELAY_SECONDS = 5;',
+    ) === 1 &&
+    exactExecutableLineCount(observability, 'const MAX_BALANCE_RECEIPT_RECEIVE_COUNT = 3;') === 1 &&
+    exactExecutableLineCount(
+      observability,
+      'const MAX_BALANCE_RECEIPT_RETRY_DELAY_SECONDS = 60;',
+    ) === 1 &&
+    exactExecutableLineCount(
+      observability,
+      'recordBalanceReceiptDisposition(input: BalanceReceiptDispositionObservation): boolean {',
+    ) === 1 &&
+    exactExecutableLineCount(observability, "record.queue !== 'balance' ||") === 1 &&
+    exactExecutableLineCount(
+      observability,
+      'const exhausted = record.receiveCount === MAX_BALANCE_RECEIPT_RECEIVE_COUNT;',
+    ) === 1 &&
+    exactExecutableLineCount(
+      observability,
+      '? record.retryDelaySeconds !== 0 || record.trustedProviderDelayFloorApplied',
+    ) === 1 &&
+    exactExecutableLineCount(
+      observability,
+      '? record.retryDelaySeconds <= nativeRetryDelaySeconds',
+    ) === 1 &&
+    exactExecutableLineCount(
+      observability,
+      ': record.retryDelaySeconds !== nativeRetryDelaySeconds',
+    ) === 1 &&
+    exactExecutableLineCount(observability, "'balance_receipt_dispositions_total',") === 1 &&
+    exactExecutableLineCount(observability, "['receive_count', String(record.receiveCount)],") ===
+      1 &&
+    exactExecutableLineCount(
+      observability,
+      "['retry_delay_seconds', String(record.retryDelaySeconds)],",
+    ) === 1 &&
+    exactExecutableLineCount(
+      observability,
+      "['trusted_provider_delay_floor_applied', String(record.trustedProviderDelayFloorApplied)],",
     ) === 1 &&
     exactExecutableLineCount(worker, 'await changeVisibilityWithDeadline(') === 1 &&
     !/\.(?:scheduleRetry|deadLetter|sendMessage|directDeadLetter)\s*\(/u.test(worker)
@@ -3672,6 +3747,10 @@ export function loadRepositoryProductionPreflightInput(
       ),
       sqsJobWorkerSource: readFileSync(
         resolve(repositoryRoot, 'apps/api/src/infrastructure/sqs/sqs-job.worker.ts'),
+        'utf8',
+      ),
+      observabilitySource: readFileSync(
+        resolve(repositoryRoot, 'apps/api/src/infrastructure/observability/observability.ts'),
         'utf8',
       ),
       sqsServiceSource: readFileSync(

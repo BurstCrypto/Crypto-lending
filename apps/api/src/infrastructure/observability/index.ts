@@ -13,6 +13,7 @@ export {
   OBSERVABILITY_WORKERS,
   REQUEST_LATENCY_BUCKETS_MS,
   TRACE_SPAN_COMPLETED_EVENT,
+  type BalanceReceiptDispositionObservation,
   type CompletedSpanSnapshot,
   type CounterSeriesSnapshot,
   type CurrentTraceContext,

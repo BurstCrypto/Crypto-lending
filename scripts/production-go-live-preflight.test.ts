@@ -173,6 +173,10 @@ const BALANCE_CONSUMER_ARTIFACTS = Object.freeze({
     resolve(__dirname, '../apps/api/src/infrastructure/sqs/sqs-job.worker.ts'),
     'utf8',
   ),
+  observabilitySource: readFileSync(
+    resolve(__dirname, '../apps/api/src/infrastructure/observability/observability.ts'),
+    'utf8',
+  ),
   sqsServiceSource: readFileSync(
     resolve(__dirname, '../apps/api/src/infrastructure/sqs/sqs.service.ts'),
     'utf8',
@@ -1120,6 +1124,18 @@ test('balance-consumer inspection fails closed for drift in every reviewed artif
       'sqsJobWorkerSource',
       "import type { PinnedSqsQueueReceiptPort } from './sqs-queue-receipt.port';",
       "import type { SqsQueueReceiptTransport } from './sqs-queue-receipt.port';",
+    ],
+    [
+      'balance-only receipt disposition telemetry',
+      'sqsJobWorkerSource',
+      "if (this.queue === 'balance') {",
+      "if (this.queue === 'jobs') {",
+    ],
+    [
+      'bounded receipt telemetry validation',
+      'observabilitySource',
+      'const MAX_BALANCE_RECEIPT_RECEIVE_COUNT = 3;',
+      'const MAX_BALANCE_RECEIPT_RECEIVE_COUNT = 30;',
     ],
     [
       'raw balance service publication denial',

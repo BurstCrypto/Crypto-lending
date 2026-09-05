@@ -245,6 +245,117 @@ describe('InProcessObservability', () => {
     ).toBe(1);
   });
 
+  it('records only bounded balance receipt disposition facts as closed metric labels', () => {
+    const observability = deterministicObservability();
+
+    expect(
+      observability.recordBalanceReceiptDisposition({
+        queue: 'balance',
+        receiveCount: 1,
+        retryDelaySeconds: 30,
+        trustedProviderDelayFloorApplied: true,
+      }),
+    ).toBe(true);
+    expect(
+      observability.recordBalanceReceiptDisposition({
+        queue: 'balance',
+        receiveCount: 2,
+        retryDelaySeconds: 10,
+        trustedProviderDelayFloorApplied: false,
+      }),
+    ).toBe(true);
+    expect(
+      observability.recordBalanceReceiptDisposition({
+        queue: 'balance',
+        receiveCount: 3,
+        retryDelaySeconds: 0,
+        trustedProviderDelayFloorApplied: false,
+      }),
+    ).toBe(true);
+
+    const snapshot = observability.dashboardSnapshot();
+    expect(
+      counter(snapshot, 'balance_receipt_dispositions_total', {
+        receive_count: '1',
+        retry_delay_seconds: '30',
+        trusted_provider_delay_floor_applied: 'true',
+      })?.value,
+    ).toBe(1);
+    expect(
+      counter(snapshot, 'balance_receipt_dispositions_total', {
+        receive_count: '2',
+        retry_delay_seconds: '10',
+        trusted_provider_delay_floor_applied: 'false',
+      })?.value,
+    ).toBe(1);
+    expect(
+      counter(snapshot, 'balance_receipt_dispositions_total', {
+        receive_count: '3',
+        retry_delay_seconds: '0',
+        trusted_provider_delay_floor_applied: 'false',
+      })?.value,
+    ).toBe(1);
+    expect(JSON.stringify(snapshot)).not.toMatch(
+      /providerCode|errorCode|errorDetail|RATE_LIMITED/u,
+    );
+  });
+
+  it('fails closed for generic, unbounded, extra, accessor, and proxied receipt telemetry', () => {
+    const observability = deterministicObservability();
+    const valid = {
+      queue: 'balance',
+      receiveCount: 1,
+      retryDelaySeconds: 30,
+      trustedProviderDelayFloorApplied: true,
+    } as const;
+    let accessorCalls = 0;
+    const accessor = Object.defineProperty(
+      {
+        queue: 'balance',
+        retryDelaySeconds: 30,
+        trustedProviderDelayFloorApplied: true,
+      },
+      'receiveCount',
+      {
+        enumerable: true,
+        get: () => {
+          accessorCalls += 1;
+          return 1;
+        },
+      },
+    );
+    const hostileProxy = new Proxy(valid, {
+      getPrototypeOf: () => {
+        throw new Error('provider-private-detail');
+      },
+    });
+
+    for (const invalid of [
+      { ...valid, queue: 'jobs' },
+      { ...valid, receiveCount: 0 },
+      { ...valid, receiveCount: 4 },
+      { ...valid, receiveCount: 1.5 },
+      { ...valid, retryDelaySeconds: -1 },
+      { ...valid, retryDelaySeconds: 61 },
+      { ...valid, retryDelaySeconds: 1.5 },
+      { ...valid, trustedProviderDelayFloorApplied: 'true' },
+      { ...valid, retryDelaySeconds: 5, trustedProviderDelayFloorApplied: true },
+      { ...valid, retryDelaySeconds: 30, trustedProviderDelayFloorApplied: false },
+      { ...valid, receiveCount: 2, retryDelaySeconds: 5, trustedProviderDelayFloorApplied: false },
+      { ...valid, receiveCount: 2, retryDelaySeconds: 10, trustedProviderDelayFloorApplied: true },
+      { ...valid, receiveCount: 3, retryDelaySeconds: 60, trustedProviderDelayFloorApplied: true },
+      { ...valid, receiveCount: 3, retryDelaySeconds: 5, trustedProviderDelayFloorApplied: false },
+      { ...valid, providerCode: 'RATE_LIMITED' },
+      accessor,
+      hostileProxy,
+    ]) {
+      expect(observability.recordBalanceReceiptDisposition(invalid as never)).toBe(false);
+    }
+
+    expect(accessorCalls).toBe(0);
+    expect(observability.dashboardSnapshot().counters).toEqual([]);
+  });
+
   it('uses closed quote and execution states', () => {
     const observability = deterministicObservability();
 

@@ -145,6 +145,19 @@ export interface JobFailureObservation {
   readonly errorClass: ObservabilityJobErrorClass;
 }
 
+/**
+ * Low-cardinality receipt facts for the dedicated balance queue. Counts and
+ * applied timing come from the SQS receipt lifecycle and worker policy. The
+ * boolean only reports whether a previously validated, bounded provider delay
+ * raised native timing; the closed shape admits no raw provider code or detail.
+ */
+export interface BalanceReceiptDispositionObservation {
+  readonly queue: 'balance';
+  readonly receiveCount: number;
+  readonly retryDelaySeconds: number;
+  readonly trustedProviderDelayFloorApplied: boolean;
+}
+
 export interface QuoteStateObservation {
   readonly state: ObservabilityQuoteState;
 }
@@ -161,6 +174,7 @@ export interface SpanObservation {
 
 export interface CounterSeriesSnapshot {
   readonly name:
+    | 'balance_receipt_dispositions_total'
     | 'http_requests_total'
     | 'http_request_errors_total'
     | 'queue_events_total'
@@ -241,6 +255,7 @@ export interface ObservabilityPort {
   recordQueueSnapshot(input: QueueSnapshotObservation): boolean;
   recordQueueEvent(input: QueueEventObservation): boolean;
   recordJobFailure(input: JobFailureObservation): boolean;
+  recordBalanceReceiptDisposition(input: BalanceReceiptDispositionObservation): boolean;
   recordQuoteState(input: QuoteStateObservation): boolean;
   recordExecutionState(input: ExecutionStateObservation): boolean;
   startSpan(input: SpanObservation): ObservabilitySpanHandle | undefined;
@@ -296,6 +311,9 @@ interface ActiveSpan {
 }
 
 const MAX_DURATION_MS = 24 * 60 * 60 * 1_000;
+const BALANCE_RECEIPT_RETRY_BASE_DELAY_SECONDS = 5;
+const MAX_BALANCE_RECEIPT_RECEIVE_COUNT = 3;
+const MAX_BALANCE_RECEIPT_RETRY_DELAY_SECONDS = 60;
 const MAX_SATURATION_CAPACITY = 1_000_000;
 const MAX_QUEUE_DEPTH = 1_000_000_000;
 const MAX_QUEUE_AGE_MS = 30 * 24 * 60 * 60 * 1_000;
@@ -680,6 +698,54 @@ export class InProcessObservability implements ObservabilityPort {
         immutableLabels([
           ['queue', record.disposition === 'dead_lettered' ? 'dead_letter' : record.queue],
           ['event', record.disposition],
+        ]),
+      );
+      this.counters = next;
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  recordBalanceReceiptDisposition(input: BalanceReceiptDispositionObservation): boolean {
+    try {
+      const record = closedRecord(input, [
+        'queue',
+        'receiveCount',
+        'retryDelaySeconds',
+        'trustedProviderDelayFloorApplied',
+      ]);
+      if (
+        !record ||
+        record.queue !== 'balance' ||
+        !boundedInteger(record.receiveCount, MAX_BALANCE_RECEIPT_RECEIVE_COUNT) ||
+        record.receiveCount < 1 ||
+        !boundedInteger(record.retryDelaySeconds, MAX_BALANCE_RECEIPT_RETRY_DELAY_SECONDS) ||
+        typeof record.trustedProviderDelayFloorApplied !== 'boolean'
+      )
+        return false;
+      const exhausted = record.receiveCount === MAX_BALANCE_RECEIPT_RECEIVE_COUNT;
+      const nativeRetryDelaySeconds = Math.min(
+        BALANCE_RECEIPT_RETRY_BASE_DELAY_SECONDS * 2 ** (record.receiveCount - 1),
+        MAX_BALANCE_RECEIPT_RETRY_DELAY_SECONDS,
+      );
+      if (
+        exhausted
+          ? record.retryDelaySeconds !== 0 || record.trustedProviderDelayFloorApplied
+          : record.trustedProviderDelayFloorApplied
+            ? record.retryDelaySeconds <= nativeRetryDelaySeconds
+            : record.retryDelaySeconds !== nativeRetryDelaySeconds
+      ) {
+        return false;
+      }
+      const next = new Map(this.counters);
+      incrementCounter(
+        next,
+        'balance_receipt_dispositions_total',
+        immutableLabels([
+          ['receive_count', String(record.receiveCount)],
+          ['retry_delay_seconds', String(record.retryDelaySeconds)],
+          ['trusted_provider_delay_floor_applied', String(record.trustedProviderDelayFloorApplied)],
         ]),
       );
       this.counters = next;
