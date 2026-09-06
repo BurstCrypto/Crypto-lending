@@ -1,7 +1,8 @@
 # Provider-position coverage and portfolio composition
 
-Status: repository-owned domain contract only. No provider-position reader,
-adapter, HTTP route, RPC/API access, or runtime registration is enabled.
+Status: repository-owned domain and reader contracts only. The dormant
+coverage-aware reader v2 boundary has no implementation, adapter, HTTP route,
+RPC/API access, or runtime registration.
 
 ## Exact coverage (version 1)
 
@@ -22,6 +23,14 @@ partial, unavailable, stale, divergent, policy-drifted, or cross-account /
 wallet / network / asset input fails as unavailable. A non-empty snapshot still
 passes the existing observation-policy and opaque chain-assessment verifier
 before its observations are matched back to the manifest counts.
+
+`MainnetProviderPositionReaderV2` can return only a
+`CoveredMainnetProviderPositionSnapshotV1`. Its response therefore retains the
+account identity plus the snapshot, observation-policy, asset-registry, and
+coverage bindings needed to distinguish proven zero positions from missing
+work. A bare observation snapshot is rejected at the type boundary. Raw chain
+assessments, verifier capabilities, persistence authority, and financial-action
+authority do not cross the reader port.
 
 ## Conservative composition (version 1)
 

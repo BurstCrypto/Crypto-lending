@@ -5,8 +5,8 @@ export {
 } from './application/ports/mainnet-provider-position-reader.port';
 export type {
   MainnetProviderPositionReader,
-  MainnetProviderPositionReaderV1,
-  ReadMainnetProviderPositionsRequestV1,
+  MainnetProviderPositionReaderV2,
+  ReadMainnetProviderPositionsRequestV2,
 } from './application/ports/mainnet-provider-position-reader.port';
 export {
   MAINNET_PLATFORM_DIRECTORY,
