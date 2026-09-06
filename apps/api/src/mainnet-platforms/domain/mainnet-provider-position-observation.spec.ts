@@ -4,7 +4,9 @@ import {
   MAINNET_PROVIDER_POSITION_SCHEMA_VERSION,
   MainnetProviderPositionValidationError,
   mainnetProviderPositionDecimalFromAtomic,
+  mainnetProviderPositionObservationFingerprintV1,
   parseMainnetProviderPositionSnapshotV1,
+  type MainnetProviderPositionObservationFingerprintInputV1,
   type MainnetProviderPositionValidationCode,
 } from './mainnet-provider-position-observation';
 import {
@@ -17,6 +19,7 @@ import {
   MAINNET_PROVIDER_POSITION_CHAIN_ASSESSMENT_USE,
   MAINNET_PROVIDER_POSITION_CHAIN_ASSESSMENT_VERSION,
   parseMainnetProviderPositionChainAssessmentV1,
+  type MainnetProviderPositionChainAssessmentVerificationContextV1,
   type MainnetProviderPositionChainAssessmentVerifierPort,
 } from './mainnet-provider-position-chain-assessment';
 
@@ -756,6 +759,70 @@ describe('mainnet provider position observation contract', () => {
         STRICT_TEST_CHAIN_ASSESSMENT_VERIFIER,
       );
     }
+  });
+
+  it('exports the exact parser observation fingerprint and binds anchor and content drift', () => {
+    const policy = strictTestPolicy();
+    const capability = strictTestAssessment([ethereumAssessmentEntry()], policy);
+    const contexts: MainnetProviderPositionChainAssessmentVerificationContextV1[] = [];
+    const verifier: MainnetProviderPositionChainAssessmentVerifierPort = {
+      verify: (candidate, context) => {
+        contexts.push(context);
+        return candidate === capability;
+      },
+    };
+    const parsed = parseMainnetProviderPositionSnapshotV1(
+      snapshot(),
+      EVALUATED_AT,
+      policy,
+      capability,
+      verifier,
+    );
+    const parsedObservation = parsed.observations[0]!;
+    const fingerprintInput = {
+      snapshotId: parsed.snapshotId,
+      observationPolicyFingerprintSha256: parsed.observationPolicyFingerprintSha256,
+      assetRegistryVersion: parsed.assetRegistryVersion,
+      assetRegistryFingerprintSha256: parsed.assetRegistryFingerprintSha256,
+      observationId: parsedObservation.observationId,
+      walletId: parsedObservation.walletId,
+      providerId: parsedObservation.providerId,
+      protocolId: parsedObservation.protocolId,
+      marketId: parsedObservation.marketId,
+      positionId: parsedObservation.positionId,
+      positionKind: parsedObservation.positionKind,
+      asset: parsedObservation.asset,
+      balance: parsedObservation.balance,
+      source: parsedObservation.source,
+      observedAt: parsedObservation.observedAt,
+      staleAfter: parsedObservation.staleAfter,
+      freshnessClass: parsedObservation.freshnessClass,
+      capturedAt: parsed.capturedAt,
+    } satisfies MainnetProviderPositionObservationFingerprintInputV1;
+    const fingerprint = mainnetProviderPositionObservationFingerprintV1(fingerprintInput);
+
+    expect(contexts).toHaveLength(1);
+    expect(fingerprint).toBe(contexts[0]!.observationFingerprintSha256);
+    expect(fingerprint).toMatch(/^[0-9a-f]{64}$/u);
+    expect(
+      mainnetProviderPositionObservationFingerprintV1({
+        ...fingerprintInput,
+        source: Object.freeze({
+          ...fingerprintInput.source,
+          chainAnchor: Object.freeze({
+            kind: 'EVM_BLOCK',
+            blockNumber: '50000002',
+            blockHash: `0x${'cd'.repeat(32)}`,
+          }),
+        }),
+      }),
+    ).not.toBe(fingerprint);
+    expect(
+      mainnetProviderPositionObservationFingerprintV1({
+        ...fingerprintInput,
+        balance: Object.freeze({ atomic: '6000000', decimal: '6.000000' }),
+      }),
+    ).not.toBe(fingerprint);
   });
 
   it('requires an immutable versioned policy and rejects unapproved attribution', () => {

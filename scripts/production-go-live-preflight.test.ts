@@ -422,6 +422,20 @@ const PROVIDER_POSITION_READ_ARTIFACTS = Object.freeze({
     ),
     'utf8',
   ),
+  providerPositionDurableChainAnchorReaderPortSource: readFileSync(
+    resolve(
+      __dirname,
+      '../apps/api/src/mainnet-platforms/application/ports/provider-position-durable-chain-anchor-reader.port.ts',
+    ),
+    'utf8',
+  ),
+  providerPositionTrustedChainAssessmentAssemblerSource: readFileSync(
+    resolve(
+      __dirname,
+      '../apps/api/src/mainnet-platforms/infrastructure/dormant-provider-position-trusted-chain-assessment.assembler.ts',
+    ),
+    'utf8',
+  ),
   providerPositionAdmissionCoordinatorSource: readFileSync(
     resolve(
       __dirname,
@@ -520,6 +534,10 @@ const PROVIDER_POSITION_READ_ARTIFACTS = Object.freeze({
       __dirname,
       '../apps/api/src/mainnet-platforms/domain/mainnet-provider-position-observation-policy.ts',
     ),
+    'utf8',
+  ),
+  mainnetLaunchNetworkPolicySource: readFileSync(
+    resolve(__dirname, '../apps/api/src/blockchain/domain/mainnet-launch-network-policy.ts'),
     'utf8',
   ),
   mainnetPlatformsModuleSource: readFileSync(
@@ -1076,7 +1094,7 @@ function mutateProviderPositionReadArtifact(
 }
 
 test('provider-position read inspection pins the exact dormant critical source slice', () => {
-  assert.equal(Object.keys(PROVIDER_POSITION_READ_ARTIFACTS).length, 21);
+  assert.equal(Object.keys(PROVIDER_POSITION_READ_ARTIFACTS).length, 24);
   const inspected = inspectProviderPositionReadBoundaryArtifacts(PROVIDER_POSITION_READ_ARTIFACTS);
   assert.deepEqual(inspected, EXPECTED_DORMANT_PROVIDER_POSITION_READ_BOUNDARY);
   assert.equal(Object.isFrozen(inspected), true);
@@ -1153,6 +1171,113 @@ test('provider-position read inspection rejects trust, runtime bounds, coverage,
       'providerPositionTrustedAssemblyPortSource',
       'readonly mayAuthorizeFinancialAction: false;',
       'readonly mayAuthorizeFinancialAction: true;',
+    ],
+    [
+      'providerPositionDurableChainAnchorReaderPortSource',
+      'export const PROVIDER_POSITION_DURABLE_CHAIN_ANCHOR_READER_VERSION = 1 as const;',
+      'export const PROVIDER_POSITION_DURABLE_CHAIN_ANCHOR_READER_VERSION = 2 as const;',
+    ],
+    [
+      'providerPositionDurableChainAnchorReaderPortSource',
+      'readonly capturedAt: string;',
+      'readonly callerCapturedAt: string;',
+    ],
+    [
+      'providerPositionDurableChainAnchorReaderPortSource',
+      'readonly mayPersist: false;',
+      'readonly mayPersist: true;',
+    ],
+    [
+      'providerPositionDurableChainAnchorReaderPortSource',
+      'readAnchor(request: ReadProviderPositionDurableChainAnchorRequestV1): Promise<unknown>;',
+      'readAnchor(request: ReadProviderPositionDurableChainAnchorRequestV1): Promise<ProviderPositionDurableChainAnchorAssessmentV1>;',
+    ],
+    ['mainnetLaunchNetworkPolicySource', "'eip155:1',", "'eip155:8453',"],
+    [
+      'mainnetLaunchNetworkPolicySource',
+      "'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp',",
+      "'eip155:56',",
+    ],
+    [
+      'providerPositionTrustedChainAssessmentAssemblerSource',
+      "const readAnchor = stableDataMember(value, 'readAnchor');",
+      'const readAnchor = value.readAnchor;',
+    ],
+    [
+      'providerPositionTrustedChainAssessmentAssemblerSource',
+      'private readonly issued = new WeakMap<object, IssuedAssessmentSeal>();',
+      'private readonly issued = new Map<object, IssuedAssessmentSeal>();',
+    ],
+    [
+      'providerPositionTrustedChainAssessmentAssemblerSource',
+      'UNISSUED_ANCHOR_CAPABILITY,',
+      'Object.freeze({ learned: true }),',
+    ],
+    [
+      'providerPositionTrustedChainAssessmentAssemblerSource',
+      'const capability = await Reflect.apply(this.reader.readAnchor, this.reader.receiver, [',
+      'const capability = await Promise.all([Reflect.apply(this.reader.readAnchor, this.reader.receiver, [',
+    ],
+    [
+      'providerPositionTrustedChainAssessmentAssemblerSource',
+      'const assessment = reviewAnchorAssessment(capability, request, reviewed);',
+      'const assessment = capability as ProviderPositionDurableChainAnchorAssessmentV1;',
+    ],
+    ['providerPositionTrustedChainAssessmentAssemblerSource', 'requestClone,', 'request,'],
+    [
+      'providerPositionTrustedChainAssessmentAssemblerSource',
+      'Reflect.apply(this.reader.verifyAnchor, this.reader.receiver, [assessment, request]) !==',
+      'false &&',
+    ],
+    [
+      'providerPositionTrustedChainAssessmentAssemblerSource',
+      'capturedAt: reviewed.capturedAt,',
+      'capturedAt: reviewed.evaluatedAt,',
+    ],
+    [
+      'providerPositionTrustedChainAssessmentAssemblerSource',
+      'assessedAt.milliseconds > reviewed.capturedAtMilliseconds ||',
+      'assessedAt.milliseconds < reviewed.capturedAtMilliseconds ||',
+    ],
+    [
+      'providerPositionTrustedChainAssessmentAssemblerSource',
+      'acceptedSource !== selection.source ||',
+      'false ||',
+    ],
+    [
+      'providerPositionTrustedChainAssessmentAssemblerSource',
+      '!sameAnchor(observationAnchor, matchingSelection.source.chainAnchor) ||',
+      'false ||',
+    ],
+    [
+      'providerPositionTrustedChainAssessmentAssemblerSource',
+      'position.asset === observation.asset &&',
+      'true &&',
+    ],
+    [
+      'providerPositionTrustedChainAssessmentAssemblerSource',
+      'const fingerprint = mainnetProviderPositionObservationFingerprintV1({',
+      'const fingerprint = String({',
+    ],
+    [
+      'providerPositionTrustedChainAssessmentAssemblerSource',
+      'return this.issued.get(capability)?.request === request;',
+      'return this.issued.has(capability);',
+    ],
+    [
+      'providerPositionTrustedChainAssessmentAssemblerSource',
+      'return seal.contexts.some((expected) => sameVerificationContext(context, expected));',
+      'return true;',
+    ],
+    [
+      'providerPositionTrustedChainAssessmentAssemblerSource',
+      'const TIMESTAMP = /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$/u;',
+      'void process.env.DATABASE_URL;\nconst TIMESTAMP = /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$/u;',
+    ],
+    [
+      'providerPositionObservationSource',
+      'const observationFingerprint = mainnetProviderPositionObservationFingerprintV1({',
+      'const observationFingerprint = String({',
     ],
     [
       'providerPositionAdmissionCoordinatorSource',
@@ -1584,6 +1709,11 @@ test('provider-position read inspection rejects trust, runtime bounds, coverage,
       'providers: [MainnetPlatformDirectoryService, MainnetPlatformsPrivacyInterceptor, createDormantProviderPositionAdmissionRuntimeComposition],',
     ],
     [
+      'mainnetPlatformsModuleSource',
+      'providers: [MainnetPlatformDirectoryService, MainnetPlatformsPrivacyInterceptor],',
+      'providers: [MainnetPlatformDirectoryService, MainnetPlatformsPrivacyInterceptor, DormantProviderPositionTrustedChainAssessmentAssembler],',
+    ],
+    [
       'mainnetPlatformsIndexSource',
       "export { MainnetPlatformDirectoryService } from './application/mainnet-platform-directory.service';",
       "export { DormantProviderPositionAdmissionCoordinator } from './application/provider-position-admission.coordinator';",
@@ -1609,6 +1739,21 @@ test('provider-position read inspection rejects trust, runtime bounds, coverage,
       "export { isIssuedProviderPositionAdmissionReadOnlyAssemblyV1 } from './application/provider-position-admission.coordinator';",
     ],
     [
+      'mainnetPlatformsIndexSource',
+      "export { MainnetPlatformDirectoryService } from './application/mainnet-platform-directory.service';",
+      "export type { ProviderPositionDurableChainAnchorReaderPort } from './application/ports/provider-position-durable-chain-anchor-reader.port';",
+    ],
+    [
+      'mainnetPlatformsIndexSource',
+      "export { MainnetPlatformDirectoryService } from './application/mainnet-platform-directory.service';",
+      "export { DormantProviderPositionTrustedChainAssessmentAssembler } from './infrastructure/dormant-provider-position-trusted-chain-assessment.assembler';",
+    ],
+    [
+      'providerPositionRuntimeCompositionSource',
+      'const DEPENDENCY_KEYS = Object.freeze([',
+      'type DormantProviderPositionTrustedChainAssessmentAssembler = unknown;\nconst DEPENDENCY_KEYS = Object.freeze([',
+    ],
+    [
       'mainnetPlatformsControllerSource',
       'constructor(private readonly directory: MainnetPlatformDirectoryService) {}',
       'constructor(private readonly reader: MainnetProviderPositionReader) {}',
@@ -1622,6 +1767,11 @@ test('provider-position read inspection rejects trust, runtime bounds, coverage,
       'mainnetPlatformsControllerSource',
       'constructor(private readonly directory: MainnetPlatformDirectoryService) {}',
       'constructor(private readonly runtime: DormantProviderPositionAdmissionRuntimeResource) {}',
+    ],
+    [
+      'mainnetPlatformsControllerSource',
+      'constructor(private readonly directory: MainnetPlatformDirectoryService) {}',
+      'constructor(private readonly assembler: DormantProviderPositionTrustedChainAssessmentAssembler) {}',
     ],
   ];
 

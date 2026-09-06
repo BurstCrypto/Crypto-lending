@@ -284,7 +284,7 @@ function freshness(
   return expected;
 }
 
-function observationFingerprintSha256(input: {
+export interface MainnetProviderPositionObservationFingerprintInputV1 {
   readonly snapshotId: string;
   readonly observationPolicyFingerprintSha256: string;
   readonly assetRegistryVersion: number;
@@ -303,7 +303,12 @@ function observationFingerprintSha256(input: {
   readonly staleAfter: string;
   readonly freshnessClass: MainnetProviderPositionFreshness;
   readonly capturedAt: string;
-}): string {
+}
+
+/** Canonical domain-separated digest used by chain-assessment verification. */
+export function mainnetProviderPositionObservationFingerprintV1(
+  input: MainnetProviderPositionObservationFingerprintInputV1,
+): string {
   const anchor =
     input.source.chainAnchor.kind === 'EVM_BLOCK'
       ? [
@@ -632,7 +637,7 @@ function parseObservation(
   }
   const effectiveStaleAfter = new Date(effectiveDeadlineMs).toISOString();
   const freshnessClass = freshness(record.freshnessClass, effectiveStaleAfter, evaluatedAt);
-  const observationFingerprint = observationFingerprintSha256({
+  const observationFingerprint = mainnetProviderPositionObservationFingerprintV1({
     snapshotId,
     observationPolicyFingerprintSha256: observationPolicy.fingerprintSha256,
     assetRegistryVersion: registry.version,

@@ -249,6 +249,8 @@ const VERIFIED_BALANCE_CONSUMER_DEPLOYMENTS = new WeakSet<BalanceConsumerDeploym
 export interface ProviderPositionReadBoundaryArtifactSources {
   readonly providerPositionReaderPortSource: string;
   readonly providerPositionTrustedAssemblyPortSource: string;
+  readonly providerPositionDurableChainAnchorReaderPortSource: string;
+  readonly providerPositionTrustedChainAssessmentAssemblerSource: string;
   readonly providerPositionAdmissionCoordinatorSource: string;
   readonly providerPositionDeadlineRunnerSource: string;
   readonly providerPositionRuntimeBoundsSource: string;
@@ -265,6 +267,7 @@ export interface ProviderPositionReadBoundaryArtifactSources {
   readonly providerPositionObservationSource: string;
   readonly providerPositionChainAssessmentSource: string;
   readonly providerPositionObservationPolicySource: string;
+  readonly mainnetLaunchNetworkPolicySource: string;
   readonly mainnetPlatformsModuleSource: string;
   readonly mainnetPlatformsIndexSource: string;
   readonly mainnetPlatformsControllerSource: string;
@@ -578,6 +581,8 @@ const MAX_PRODUCTION_INFRASTRUCTURE_TOTAL_BYTES = 2 * 1024 * 1024;
 const PROVIDER_POSITION_READ_ARTIFACT_KEYS = Object.freeze([
   'providerPositionReaderPortSource',
   'providerPositionTrustedAssemblyPortSource',
+  'providerPositionDurableChainAnchorReaderPortSource',
+  'providerPositionTrustedChainAssessmentAssemblerSource',
   'providerPositionAdmissionCoordinatorSource',
   'providerPositionDeadlineRunnerSource',
   'providerPositionRuntimeBoundsSource',
@@ -594,6 +599,7 @@ const PROVIDER_POSITION_READ_ARTIFACT_KEYS = Object.freeze([
   'providerPositionObservationSource',
   'providerPositionChainAssessmentSource',
   'providerPositionObservationPolicySource',
+  'mainnetLaunchNetworkPolicySource',
   'mainnetPlatformsModuleSource',
   'mainnetPlatformsIndexSource',
   'mainnetPlatformsControllerSource',
@@ -603,6 +609,10 @@ const REVIEWED_PROVIDER_POSITION_READ_ARTIFACT_SHA256 = Object.freeze({
     'a958ee6ed878f82b5b483f369d6927584c9aeee80440641809a943a553843fb4',
   providerPositionTrustedAssemblyPortSource:
     '9120c664640be1f855b1ea77cc9ca403506cae306b3f14679172f634c4e8a37b',
+  providerPositionDurableChainAnchorReaderPortSource:
+    '161ce8245acd11ff43bd9e399c6f0ce058e89df8180749397f8890fcae1fd948',
+  providerPositionTrustedChainAssessmentAssemblerSource:
+    'dbd8f71194f9036107b106cbbdb3920a53ebf9413132fba778008cee64a06f52',
   providerPositionAdmissionCoordinatorSource:
     'a10e0f2d90afb714d1e4ae55a18acac6cbb9249dd285a04ebf65dcbdb2dd1590',
   providerPositionDeadlineRunnerSource:
@@ -630,11 +640,13 @@ const REVIEWED_PROVIDER_POSITION_READ_ARTIFACT_SHA256 = Object.freeze({
   providerPositionCoverageSource:
     'a26d468abb2c46bd28267c6d36d1a7d3e62c30a700159e3c4cf263d15a8a9611',
   providerPositionObservationSource:
-    '1e110974ee2c3dc17ae5aad00c419899291ad369106efe9aac171a160b2a483a',
+    '469db16b0c5e6741723d925b517fbc9a81605cd32c2121c6f332b6cec392f967',
   providerPositionChainAssessmentSource:
     '860582975318e5f10cbdd3082eaf3121df01aeb68279b2b56abeb9d945c27045',
   providerPositionObservationPolicySource:
     '10896fb907d937aa88ee0da570331faccce77f46642732e6676385676c6a7ea3',
+  mainnetLaunchNetworkPolicySource:
+    '922305d75e17b9519ffae415c139514bc0fce2e162f0d764c6c24b895911f15b',
   mainnetPlatformsModuleSource: '52a2817a03db43b6842fa42e0c8264f760250f8364511607d0329677f535e045',
   mainnetPlatformsIndexSource: '9bb69ec94f17d4336bfbb60da946e84af89812a07431b3870656f02d2a542365',
   mainnetPlatformsControllerSource:
@@ -2015,6 +2027,10 @@ function hasDormantProviderPositionReadBoundaryContract(
 ): boolean {
   const reader = sources.providerPositionReaderPortSource.replace(/\r\n/gu, '\n');
   const assemblyPort = sources.providerPositionTrustedAssemblyPortSource.replace(/\r\n/gu, '\n');
+  const durableAnchorReaderPort =
+    sources.providerPositionDurableChainAnchorReaderPortSource.replace(/\r\n/gu, '\n');
+  const trustedAssessmentAssembler =
+    sources.providerPositionTrustedChainAssessmentAssemblerSource.replace(/\r\n/gu, '\n');
   const coordinator = sources.providerPositionAdmissionCoordinatorSource.replace(/\r\n/gu, '\n');
   const deadlineRunner = sources.providerPositionDeadlineRunnerSource.replace(/\r\n/gu, '\n');
   const runtimeBounds = sources.providerPositionRuntimeBoundsSource.replace(/\r\n/gu, '\n');
@@ -2053,17 +2069,24 @@ function hasDormantProviderPositionReadBoundaryContract(
   const observation = sources.providerPositionObservationSource.replace(/\r\n/gu, '\n');
   const chainAssessment = sources.providerPositionChainAssessmentSource.replace(/\r\n/gu, '\n');
   const policy = sources.providerPositionObservationPolicySource.replace(/\r\n/gu, '\n');
+  const mainnetLaunchNetworkPolicy = sources.mainnetLaunchNetworkPolicySource.replace(
+    /\r\n/gu,
+    '\n',
+  );
   const moduleSource = sources.mainnetPlatformsModuleSource.replace(/\r\n/gu, '\n');
   const indexSource = sources.mainnetPlatformsIndexSource.replace(/\r\n/gu, '\n');
   const controller = sources.mainnetPlatformsControllerSource.replace(/\r\n/gu, '\n');
   const capabilityFreeSources = [
     reader,
     assemblyPort,
+    durableAnchorReaderPort,
+    trustedAssessmentAssembler,
     coordinator,
     coverage,
     observation,
     chainAssessment,
     policy,
+    mainnetLaunchNetworkPolicy,
   ] as const;
   const walletRosterCancellationBridgeSources = [
     portfolioWalletReaderPort,
@@ -2102,6 +2125,20 @@ function hasDormantProviderPositionReadBoundaryContract(
     runtimeComposition.match(/^[\t ]*import\b/gmu)?.length ?? 0;
   const forbiddenRuntimeCompositionCapability =
     /(?:\bimport\s*\(|\brequire\s*\(|(?:\bfrom\s+|\bimport\s*(?:\(\s*)?)['"](?:node:)?(?:child_process|cluster|dgram|dns|fs|http|http2|https|net|tls|worker_threads)(?:\/[^'"]*)?['"]|(?:\bfrom\s+|\bimport\s*(?:\(\s*)?)['"](?:axios|ethers|got|superagent|undici|web3|@solana\/web3\.js)['"]|\b(?:fetch|setTimeout|setInterval|setImmediate|queueMicrotask|WebSocket|EventSource|XMLHttpRequest|readFileSync|writeFileSync)\s*\(|\.\s*(?:query|connect|healthCheck)\s*\(|\b(?:process|Deno|Bun)\s*\.\s*env\b|\bimport\s*\.\s*meta\s*\.\s*env\b|['"]https?:\/\/|(?:^|\n)[\t ]*@[A-Za-z_$]|\b(?:NestFactory|loadInfrastructureConfig|createPostgresPool|POSTGRES_POOL)\b)/iu;
+  const durableAnchorReaderPortImportSources = Array.from(
+    durableAnchorReaderPort.matchAll(/\bfrom\s+['"]([^'"]+)['"]/gu),
+    (match) => match[1],
+  );
+  const durableAnchorReaderPortImportDeclarationCount =
+    durableAnchorReaderPort.match(/^[\t ]*import\b/gmu)?.length ?? 0;
+  const trustedAssessmentAssemblerImportSources = Array.from(
+    trustedAssessmentAssembler.matchAll(/\bfrom\s+['"]([^'"]+)['"]/gu),
+    (match) => match[1],
+  );
+  const trustedAssessmentAssemblerImportDeclarationCount =
+    trustedAssessmentAssembler.match(/^[\t ]*import\b/gmu)?.length ?? 0;
+  const forbiddenTrustedAssessmentAssemblerCapability =
+    /(?:\bimport\s*\(|\brequire\s*\(|(?:\bfrom\s+|\bimport\s*(?:\(\s*)?)['"](?:node:)?(?:child_process|cluster|dgram|dns|fs|http|http2|https|net|tls|worker_threads)(?:\/[^'"]*)?['"]|(?:\bfrom\s+|\bimport\s*(?:\(\s*)?)['"](?:axios|ethers|got|superagent|undici|web3|@solana\/web3\.js)['"]|\b(?:fetch|setTimeout|setInterval|setImmediate|queueMicrotask|WebSocket|EventSource|XMLHttpRequest|readFileSync|writeFileSync)\s*\(|\.\s*(?:query|connect|end|healthCheck)\s*\(|\b(?:process|Deno|Bun)\s*\.\s*env\b|\bimport\s*\.\s*meta\s*\.\s*env\b|['"]https?:\/\/|(?:^|\n)[\t ]*@[A-Za-z_$]|\b(?:NestFactory|loadInfrastructureConfig|createPostgresPool|POSTGRES_POOL)\b|\bPromise\s*\.\s*(?:all|race)\s*\()/iu;
   const readerRequestStart = reader.indexOf(
     'export interface ReadMainnetProviderPositionsRequestV3 {',
   );
@@ -2118,6 +2155,53 @@ function hasDormantProviderPositionReadBoundaryContract(
     readerResultStart >= 0 && readerResultEnd > readerResultStart
       ? reader.slice(readerResultStart, readerResultEnd + 2)
       : '';
+  const assemblerSelectionLoop = trustedAssessmentAssembler.indexOf(
+    'for (const selection of reviewed.selections) {',
+  );
+  const assemblerUnissuedCapabilityReview = trustedAssessmentAssembler.indexOf(
+    'UNISSUED_ANCHOR_CAPABILITY,',
+    assemblerSelectionLoop,
+  );
+  const assemblerAnchorRead = trustedAssessmentAssembler.indexOf(
+    'const capability = await Reflect.apply(this.reader.readAnchor, this.reader.receiver, [',
+    assemblerUnissuedCapabilityReview,
+  );
+  const assemblerRequestClone = trustedAssessmentAssembler.indexOf(
+    'const requestClone = Object.freeze({ ...request });',
+    assemblerAnchorRead,
+  );
+  const assemblerCapabilityAuthentication = trustedAssessmentAssembler.indexOf(
+    'Reflect.apply(this.reader.verifyAnchor, this.reader.receiver, [capability, request]) !==',
+    assemblerRequestClone,
+  );
+  const assemblerRequestCloneRejection = trustedAssessmentAssembler.indexOf(
+    'requestClone,',
+    assemblerCapabilityAuthentication,
+  );
+  const assemblerAssessmentReview = trustedAssessmentAssembler.indexOf(
+    'const assessment = reviewAnchorAssessment(capability, request, reviewed);',
+    assemblerRequestCloneRejection,
+  );
+  const assemblerAssessmentCloneRejection = trustedAssessmentAssembler.indexOf(
+    'Reflect.apply(this.reader.verifyAnchor, this.reader.receiver, [assessment, request]) !==',
+    assemblerAssessmentReview,
+  );
+  const assemblerTargetAssessmentPush = trustedAssessmentAssembler.indexOf(
+    'targetAssessments.push(Object.freeze({ selection, anchorRequest: request, assessment }));',
+    assemblerAssessmentCloneRejection,
+  );
+  const assemblerContextConstruction = trustedAssessmentAssembler.indexOf(
+    'const contexts = reviewed.observations.map((observation) => {',
+    assemblerTargetAssessmentPush,
+  );
+  const assemblerIssuance = trustedAssessmentAssembler.indexOf(
+    'this.issued.set(',
+    assemblerContextConstruction,
+  );
+  const assemblerReturn = trustedAssessmentAssembler.indexOf(
+    'return assessment;',
+    assemblerIssuance,
+  );
   const coordinatorIssuanceSet = coordinator.indexOf(
     'const ISSUED_PROVIDER_POSITION_ADMISSION_READ_ONLY_ASSEMBLIES = new WeakSet<object>();',
   );
@@ -2633,14 +2717,242 @@ function hasDormantProviderPositionReadBoundaryContract(
     selectedTargetPush,
   );
   const forbiddenRuntimeIdentity =
-    /\b(?:MAINNET_PROVIDER_POSITION_READER|DormantProviderPositionAdmissionCoordinator|ProviderPositionTrustedChainAssessmentAssemblyPort|NodeProviderPositionAdmissionDeadlineRunner|createDormantProviderPositionAdmissionRuntimeResource|DormantProviderPositionAdmissionRuntimeResource|ProviderPositionAdmissionRuntimeBoundsError|createDormantProviderPositionAdmissionRuntimeComposition|DormantProviderPositionAdmissionRuntimeComposition|ProviderPositionAdmissionRuntimeCompositionError|PROVIDER_POSITION_TRUSTED_CHAIN_ASSESSMENT_ASSEMBLY_USE)\b/u;
+    /\b(?:MAINNET_PROVIDER_POSITION_READER|DormantProviderPositionAdmissionCoordinator|ProviderPositionTrustedChainAssessmentAssemblyPort|ProviderPositionDurableChainAnchorReaderPort|DormantProviderPositionTrustedChainAssessmentAssembler|NodeProviderPositionAdmissionDeadlineRunner|createDormantProviderPositionAdmissionRuntimeResource|DormantProviderPositionAdmissionRuntimeResource|ProviderPositionAdmissionRuntimeBoundsError|createDormantProviderPositionAdmissionRuntimeComposition|DormantProviderPositionAdmissionRuntimeComposition|ProviderPositionAdmissionRuntimeCompositionError|PROVIDER_POSITION_TRUSTED_CHAIN_ASSESSMENT_ASSEMBLY_USE|PROVIDER_POSITION_DURABLE_CHAIN_ANCHOR_READER_VERSION)\b/u;
   const forbiddenBarrelImplementation =
-    /(?:DormantProviderPositionAdmissionCoordinator|ProviderPositionTrustedChainAssessmentAssemblyPort|NodeProviderPositionAdmissionDeadlineRunner|createDormantProviderPositionAdmissionRuntimeResource|createDormantProviderPositionAdmissionRuntimeComposition|provider-position-admission\.coordinator|provider-position-trusted-chain-assessment-assembly\.port|node-provider-position-admission-deadline\.runner|provider-position-admission-runtime-bounds|provider-position-admission-runtime\.composition)/u;
+    /(?:DormantProviderPositionAdmissionCoordinator|ProviderPositionTrustedChainAssessmentAssemblyPort|ProviderPositionDurableChainAnchorReaderPort|DormantProviderPositionTrustedChainAssessmentAssembler|NodeProviderPositionAdmissionDeadlineRunner|createDormantProviderPositionAdmissionRuntimeResource|createDormantProviderPositionAdmissionRuntimeComposition|provider-position-admission\.coordinator|provider-position-trusted-chain-assessment-assembly\.port|provider-position-durable-chain-anchor-reader\.port|dormant-provider-position-trusted-chain-assessment\.assembler|node-provider-position-admission-deadline\.runner|provider-position-admission-runtime-bounds|provider-position-admission-runtime\.composition)/u;
   const forbiddenCoordinatorRuntimeBoundsConsumption =
     /(?:createDormantProviderPositionAdmissionRuntimeResource|provider-position-admission-runtime-bounds)/u;
 
   return (
     capabilityFreeSources.every((source) => !forbiddenCapability.test(source)) &&
+    durableAnchorReaderPortImportDeclarationCount === 4 &&
+    durableAnchorReaderPortImportSources.length === 4 &&
+    durableAnchorReaderPortImportSources[0] === '../../../accounts/domain/account-profile' &&
+    durableAnchorReaderPortImportSources[1] ===
+      '../../../blockchain/domain/mainnet-launch-network-policy' &&
+    durableAnchorReaderPortImportSources[2] ===
+      '../../domain/mainnet-provider-position-chain-assessment' &&
+    durableAnchorReaderPortImportSources[3] ===
+      '../../domain/mainnet-provider-position-observation-policy' &&
+    exactExecutableLineCount(
+      durableAnchorReaderPort,
+      'export const PROVIDER_POSITION_DURABLE_CHAIN_ANCHOR_READER_VERSION = 1 as const;',
+    ) === 1 &&
+    exactExecutableLineCount(
+      durableAnchorReaderPort,
+      "'DORMANT_PROVIDER_POSITION_DURABLE_CHAIN_ANCHOR_READ_ONLY' as const;",
+    ) === 1 &&
+    exactExecutableLineCount(
+      durableAnchorReaderPort,
+      "'DORMANT_PROVIDER_POSITION_DURABLE_CHAIN_ANCHOR_ASSESSMENT_ONLY' as const;",
+    ) === 1 &&
+    exactExecutableLineCount(
+      durableAnchorReaderPort,
+      'export type ProviderPositionDurableChainAnchorNetworkId = MainnetLaunchNetworkId;',
+    ) === 1 &&
+    exactExecutableLineCount(
+      durableAnchorReaderPort,
+      'export interface ReadProviderPositionDurableChainAnchorRequestV1 {',
+    ) === 1 &&
+    exactExecutableLineCount(durableAnchorReaderPort, 'readonly capturedAt: string;') === 1 &&
+    exactExecutableLineCount(durableAnchorReaderPort, 'readonly signal: AbortSignal;') === 1 &&
+    exactExecutableLineCount(
+      durableAnchorReaderPort,
+      'readonly mayAuthorizeFinancialAction: false;',
+    ) === 2 &&
+    exactExecutableLineCount(durableAnchorReaderPort, 'readonly mayPersist: false;') === 2 &&
+    exactExecutableLineCount(
+      durableAnchorReaderPort,
+      'readAnchor(request: ReadProviderPositionDurableChainAnchorRequestV1): Promise<unknown>;',
+    ) === 1 &&
+    exactExecutableLineCount(durableAnchorReaderPort, 'verifyAnchor(') === 1 &&
+    !/(?:@Injectable|@Module|@Controller)\s*\(|\bclass\s+/u.test(durableAnchorReaderPort) &&
+    exactExecutableLineCount(
+      mainnetLaunchNetworkPolicy,
+      'export const MAINNET_LAUNCH_NETWORK_IDS = Object.freeze([',
+    ) === 1 &&
+    exactExecutableLineCount(mainnetLaunchNetworkPolicy, "'eip155:1',") === 1 &&
+    exactExecutableLineCount(
+      mainnetLaunchNetworkPolicy,
+      "'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp',",
+    ) === 1 &&
+    exactExecutableLineCount(
+      mainnetLaunchNetworkPolicy,
+      'const MAINNET_LAUNCH_NETWORK_ID_SET: ReadonlySet<string> = new Set(MAINNET_LAUNCH_NETWORK_IDS);',
+    ) === 1 &&
+    exactExecutableLineCount(
+      mainnetLaunchNetworkPolicy,
+      'return MAINNET_LAUNCH_NETWORK_ID_SET.has(networkId);',
+    ) === 1 &&
+    !mainnetLaunchNetworkPolicy.includes('eip155:8453') &&
+    !mainnetLaunchNetworkPolicy.includes('eip155:56') &&
+    trustedAssessmentAssemblerImportDeclarationCount === 9 &&
+    trustedAssessmentAssemblerImportSources.length === 9 &&
+    trustedAssessmentAssemblerImportSources[0] === 'node:crypto' &&
+    trustedAssessmentAssemblerImportSources[1] === 'node:util/types' &&
+    trustedAssessmentAssemblerImportSources[2] === '../../accounts/domain/account-profile' &&
+    trustedAssessmentAssemblerImportSources[3] ===
+      '../../blockchain/domain/chain-observation-policy' &&
+    trustedAssessmentAssemblerImportSources[4] ===
+      '../../blockchain/domain/mainnet-launch-network-policy' &&
+    trustedAssessmentAssemblerImportSources[5] ===
+      '../domain/mainnet-provider-position-chain-assessment' &&
+    trustedAssessmentAssemblerImportSources[6] ===
+      '../domain/mainnet-provider-position-observation' &&
+    trustedAssessmentAssemblerImportSources[7] ===
+      '../application/ports/provider-position-durable-chain-anchor-reader.port' &&
+    trustedAssessmentAssemblerImportSources[8] ===
+      '../application/ports/provider-position-trusted-chain-assessment-assembly.port' &&
+    !forbiddenTrustedAssessmentAssemblerCapability.test(trustedAssessmentAssembler) &&
+    !trustedAssessmentAssembler.includes('Promise.race') &&
+    !trustedAssessmentAssembler.includes('new AbortController') &&
+    exactExecutableLineCount(
+      trustedAssessmentAssembler,
+      'export const DORMANT_PROVIDER_POSITION_TRUSTED_CHAIN_ASSESSMENT_ASSEMBLER_VERSION = 1 as const;',
+    ) === 1 &&
+    exactExecutableLineCount(
+      trustedAssessmentAssembler,
+      "readonly code = 'DORMANT_PROVIDER_POSITION_TRUSTED_CHAIN_ASSESSMENT_UNAVAILABLE' as const;",
+    ) === 1 &&
+    exactExecutableLineCount(
+      trustedAssessmentAssembler,
+      "super('Provider-position trusted chain assessment is unavailable.');",
+    ) === 1 &&
+    exactExecutableLineCount(
+      trustedAssessmentAssembler,
+      "const readerVersion = stableDataMember(value, 'readerVersion');",
+    ) === 1 &&
+    exactExecutableLineCount(
+      trustedAssessmentAssembler,
+      "const readAnchor = stableDataMember(value, 'readAnchor');",
+    ) === 1 &&
+    exactExecutableLineCount(
+      trustedAssessmentAssembler,
+      "const verifyAnchor = stableDataMember(value, 'verifyAnchor');",
+    ) === 1 &&
+    exactExecutableLineCount(trustedAssessmentAssembler, 'isProxy(readAnchor) ||') === 1 &&
+    exactExecutableLineCount(trustedAssessmentAssembler, 'isProxy(verifyAnchor)') === 1 &&
+    exactExecutableLineCount(
+      trustedAssessmentAssembler,
+      "if (kind === 'EVM_BLOCK' && networkId === 'eip155:1') {",
+    ) === 1 &&
+    exactExecutableLineCount(
+      trustedAssessmentAssembler,
+      "if (kind === 'SOLANA_SLOT' && networkId === 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp') {",
+    ) === 1 &&
+    exactExecutableLineCount(
+      trustedAssessmentAssembler,
+      'const record = exactFrozenRecord(requestInput, ASSEMBLY_REQUEST_KEYS);',
+    ) === 1 &&
+    exactExecutableLineCount(
+      trustedAssessmentAssembler,
+      'const selectionsInput = exactFrozenArray(record.selectedTargetSources, MAX_TARGETS);',
+    ) === 1 &&
+    exactExecutableLineCount(
+      trustedAssessmentAssembler,
+      'selection.walletId !== target.walletId ||',
+    ) === 1 &&
+    exactExecutableLineCount(
+      trustedAssessmentAssembler,
+      'selection.providerId !== target.providerId ||',
+    ) === 1 &&
+    exactExecutableLineCount(
+      trustedAssessmentAssembler,
+      'selection.protocolId !== target.protocolId ||',
+    ) === 1 &&
+    exactExecutableLineCount(
+      trustedAssessmentAssembler,
+      'selection.marketId !== target.marketId ||',
+    ) === 1 &&
+    exactExecutableLineCount(
+      trustedAssessmentAssembler,
+      'selection.networkId !== target.networkId',
+    ) === 1 &&
+    exactExecutableLineCount(
+      trustedAssessmentAssembler,
+      'acceptedSource !== selection.source ||',
+    ) === 1 &&
+    exactExecutableLineCount(
+      trustedAssessmentAssembler,
+      '!sameAnchor(observationAnchor, matchingSelection.source.chainAnchor) ||',
+    ) === 1 &&
+    exactExecutableLineCount(
+      trustedAssessmentAssembler,
+      'position.asset === observation.asset &&',
+    ) === 1 &&
+    exactExecutableLineCount(
+      trustedAssessmentAssembler,
+      'position.balance === observation.balance',
+    ) === 1 &&
+    exactExecutableLineCount(
+      trustedAssessmentAssembler,
+      'candidateFingerprintSha256: reviewed.request.candidateFingerprintSha256,',
+    ) === 1 &&
+    exactExecutableLineCount(trustedAssessmentAssembler, 'capturedAt: reviewed.capturedAt,') ===
+      3 &&
+    exactExecutableLineCount(trustedAssessmentAssembler, 'signal: reviewed.request.signal,') ===
+      1 &&
+    exactExecutableLineCount(
+      trustedAssessmentAssembler,
+      'assessedAt.milliseconds < Date.parse(request.observedAt) ||',
+    ) === 1 &&
+    exactExecutableLineCount(
+      trustedAssessmentAssembler,
+      'assessedAt.milliseconds > reviewed.capturedAtMilliseconds ||',
+    ) === 1 &&
+    exactExecutableLineCount(
+      trustedAssessmentAssembler,
+      'assessedAt.milliseconds >= reviewed.deadlineAtMilliseconds',
+    ) === 1 &&
+    exactExecutableLineCount(
+      trustedAssessmentAssembler,
+      'const fingerprint = mainnetProviderPositionObservationFingerprintV1({',
+    ) === 1 &&
+    exactExecutableLineCount(
+      trustedAssessmentAssembler,
+      'private readonly issued = new WeakMap<object, IssuedAssessmentSeal>();',
+    ) === 1 &&
+    assemblerSelectionLoop >= 0 &&
+    assemblerUnissuedCapabilityReview > assemblerSelectionLoop &&
+    assemblerAnchorRead > assemblerUnissuedCapabilityReview &&
+    assemblerRequestClone > assemblerAnchorRead &&
+    assemblerCapabilityAuthentication > assemblerRequestClone &&
+    assemblerRequestCloneRejection > assemblerCapabilityAuthentication &&
+    assemblerAssessmentReview > assemblerRequestCloneRejection &&
+    assemblerAssessmentCloneRejection > assemblerAssessmentReview &&
+    assemblerTargetAssessmentPush > assemblerAssessmentCloneRejection &&
+    assemblerContextConstruction > assemblerTargetAssessmentPush &&
+    assemblerIssuance > assemblerContextConstruction &&
+    assemblerReturn > assemblerIssuance &&
+    exactExecutableLineCount(
+      trustedAssessmentAssembler,
+      'return this.issued.get(capability)?.request === request;',
+    ) === 1 &&
+    exactExecutableLineCount(
+      trustedAssessmentAssembler,
+      'return seal.contexts.some((expected) => sameVerificationContext(context, expected));',
+    ) === 1 &&
+    exactExecutableLineCount(
+      trustedAssessmentAssembler,
+      'Object.freeze({ request: reviewed.request, contexts: Object.freeze(contexts) }),',
+    ) === 1 &&
+    exactExecutableLineCount(
+      observation,
+      'export interface MainnetProviderPositionObservationFingerprintInputV1 {',
+    ) === 1 &&
+    exactExecutableLineCount(
+      observation,
+      'export function mainnetProviderPositionObservationFingerprintV1(',
+    ) === 1 &&
+    exactExecutableLineCount(
+      observation,
+      "'crypto-lending:mainnet-provider-position-observation:v1',",
+    ) === 1 &&
+    exactExecutableLineCount(
+      observation,
+      'const observationFingerprint = mainnetProviderPositionObservationFingerprintV1({',
+    ) === 1 &&
+    !runtimeComposition.includes('DormantProviderPositionTrustedChainAssessmentAssembler') &&
     runtimeCompositionImportDeclarationCount === 17 &&
     runtimeCompositionImportSources.length === 17 &&
     runtimeCompositionImportSources[0] === 'node:util/types' &&
@@ -8886,6 +9198,20 @@ export function loadRepositoryProductionPreflightInput(
         ),
         'utf8',
       ),
+      providerPositionDurableChainAnchorReaderPortSource: readFileSync(
+        resolve(
+          repositoryRoot,
+          'apps/api/src/mainnet-platforms/application/ports/provider-position-durable-chain-anchor-reader.port.ts',
+        ),
+        'utf8',
+      ),
+      providerPositionTrustedChainAssessmentAssemblerSource: readFileSync(
+        resolve(
+          repositoryRoot,
+          'apps/api/src/mainnet-platforms/infrastructure/dormant-provider-position-trusted-chain-assessment.assembler.ts',
+        ),
+        'utf8',
+      ),
       providerPositionAdmissionCoordinatorSource: readFileSync(
         resolve(
           repositoryRoot,
@@ -8984,6 +9310,10 @@ export function loadRepositoryProductionPreflightInput(
           repositoryRoot,
           'apps/api/src/mainnet-platforms/domain/mainnet-provider-position-observation-policy.ts',
         ),
+        'utf8',
+      ),
+      mainnetLaunchNetworkPolicySource: readFileSync(
+        resolve(repositoryRoot, 'apps/api/src/blockchain/domain/mainnet-launch-network-policy.ts'),
         'utf8',
       ),
       mainnetPlatformsModuleSource: readFileSync(

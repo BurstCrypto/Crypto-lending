@@ -181,15 +181,16 @@ inspection proves these dormant source constraints only; it never turns them
 into deployed or production-ready evidence.
 
 `PROVIDER_POSITION_READ_BOUNDARY` independently snapshots and byte-pins the
-coverage-aware reader v3 port, trusted assessment assembly port, admission
-coordinator, concrete Node deadline runner, wallet-roster reader port and
-adapter, wallet service and repository port, PostgreSQL wallet repository,
-shared PostgreSQL cancellation service, dormant runtime-budget resource,
-private dormant runtime composition, infrastructure configuration loader,
-runtime PostgreSQL pool factory,
-coverage/observation/assessment/policy domains, feature module, feature barrel,
-and HTTP controller as one selected twenty-one-file critical-source slice. Within
-that slice, the local semantic inspection requires an exact account/correlation
+coverage-aware reader v3 port, trusted-assessment assembly port, durable-chain-anchor
+reader port, dormant trusted-chain-assessment assembler, admission coordinator,
+concrete Node deadline runner, wallet-roster reader port and adapter, wallet
+service and repository port, PostgreSQL wallet repository, shared PostgreSQL
+cancellation service, dormant runtime-budget resource, private dormant runtime
+composition, infrastructure configuration loader, runtime PostgreSQL pool
+factory, coverage/observation/assessment/policy domains, exact Ethereum/Solana
+mainnet launch-network policy, feature module, feature barrel, and HTTP
+controller as one selected twenty-four-file critical-source slice. Within that
+slice, the local semantic inspection requires an exact account/correlation
 reader request with no caller-supplied evaluation time and an exact frozen
 result envelope containing the server-authored parser time and covered-snapshot
 identity. It binds result account, correlation, time, manifest fingerprints and
@@ -211,6 +212,27 @@ the exported direct-source identity reviewer before extracting any candidate or
 snapshot property; structurally identical clones therefore fail without
 running hostile accessors. That reviewer is deliberately absent from the
 feature barrel, module, controller, and reader surface.
+
+The durable-anchor reader port is an exact Ethereum-mainnet/Solana-mainnet-only,
+authority-free boundary. Each frozen null-prototype request binds account and
+correlation IDs, candidate fingerprint, target/wallet/provider/protocol/market/network
+identity, selected source family/id/kind/observation identity, continuity floor
+and chain anchor, observed/captured/evaluated/deadline times, and the
+admission-owned signal. `readAnchor` returns only an opaque value; the same
+reader must authenticate that exact value against that exact request before any
+returned property is inspected, and capability or request clones must fail.
+
+The concrete dormant trusted-chain-assessment assembler descriptor-captures its
+injected reader methods, rejects accessors, proxies, and first-call-learning
+readers, and performs sequential fail-stop reads for every selected target,
+including zero-position targets. After authentication, it accepts only exact
+`VERIFIED`/`CURRENT`/`HEALTHY` claims with matching non-regressing anchors and an
+`assessedAt` between observation and capture, current at evaluation, and before
+the exclusive deadline. It recomputes each observation fingerprint including
+`capturedAt`, then seals the final assessment identity, original assembly-request
+identity, and exact verification contexts in a private `WeakMap`; assessment,
+request, and context drift fail closed. The assembler has no ambient provider,
+network, storage, persistence, or financial-action capability.
 
 The coordinator binds the account, evaluation time, correlation ID, and exact
 shared signal into the roster request. The adapter and PostgreSQL repository
@@ -255,7 +277,10 @@ Launch readiness remains blocked by
 `PROVIDER_POSITION_READER_FEATURE_REGISTRATION_MISSING` and
 `PROVIDER_POSITION_TRUSTED_ASSESSMENT_FEATURE_REGISTRATION_MISSING`, plus
 `PROVIDER_POSITION_DEADLINE_RUNNER_FEATURE_REGISTRATION_MISSING`. The concrete
-runner remains dormant and unregistered. Provider sources must cooperate with
+assembler does not clear any registration blocker: no concrete durable-anchor
+reader exists, the assembler is not injected into the dormant runtime
+composition or registered in the Nest/module/HTTP graph, and no deployed or live
+evidence exists. The concrete runner remains dormant and unregistered. Provider sources must cooperate with
 abort and settle before the runner can return. Wallet-roster cancellation now
 reaches the PostgreSQL query boundary, but active `pg` pool acquisition has no
 native signal cancellation. Acquisition and its subsequent teardown may
