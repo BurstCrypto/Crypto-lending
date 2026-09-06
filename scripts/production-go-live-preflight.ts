@@ -228,6 +228,7 @@ export interface BalanceConsumerArtifactSources {
   readonly bootstrapPrincipalsValidatorSource: string;
   readonly walletAddressMigrationSource: string;
   readonly workerAuthoritySuspensionMigrationSource: string;
+  readonly providerPositionChainAnchorEvidenceMigrationSource: string;
   readonly migrationIndexSource: string;
   readonly releaseManifestSource: string;
   readonly productionContainerValidatorSource: string;
@@ -251,6 +252,8 @@ export interface ProviderPositionReadBoundaryArtifactSources {
   readonly providerPositionTrustedAssemblyPortSource: string;
   readonly providerPositionDurableChainAnchorReaderPortSource: string;
   readonly providerPositionTrustedChainAssessmentAssemblerSource: string;
+  readonly providerPositionChainAnchorEvidenceMigrationSource: string;
+  readonly providerPositionMigrationIndexSource: string;
   readonly providerPositionAdmissionCoordinatorSource: string;
   readonly providerPositionDeadlineRunnerSource: string;
   readonly providerPositionRuntimeBoundsSource: string;
@@ -583,6 +586,8 @@ const PROVIDER_POSITION_READ_ARTIFACT_KEYS = Object.freeze([
   'providerPositionTrustedAssemblyPortSource',
   'providerPositionDurableChainAnchorReaderPortSource',
   'providerPositionTrustedChainAssessmentAssemblerSource',
+  'providerPositionChainAnchorEvidenceMigrationSource',
+  'providerPositionMigrationIndexSource',
   'providerPositionAdmissionCoordinatorSource',
   'providerPositionDeadlineRunnerSource',
   'providerPositionRuntimeBoundsSource',
@@ -613,6 +618,10 @@ const REVIEWED_PROVIDER_POSITION_READ_ARTIFACT_SHA256 = Object.freeze({
     '161ce8245acd11ff43bd9e399c6f0ce058e89df8180749397f8890fcae1fd948',
   providerPositionTrustedChainAssessmentAssemblerSource:
     'dbd8f71194f9036107b106cbbdb3920a53ebf9413132fba778008cee64a06f52',
+  providerPositionChainAnchorEvidenceMigrationSource:
+    '9ef52244aa0e52e2a6da7350b43a6a4438e47a721bdd5dc34637a0d2c0fec614',
+  providerPositionMigrationIndexSource:
+    '4b204ef7d52c14913e29754cb74ecbaf3d35c773105071e216c4c8435ec5070c',
   providerPositionAdmissionCoordinatorSource:
     'a10e0f2d90afb714d1e4ae55a18acac6cbb9249dd285a04ebf65dcbdb2dd1590',
   providerPositionDeadlineRunnerSource:
@@ -653,7 +662,7 @@ const REVIEWED_PROVIDER_POSITION_READ_ARTIFACT_SHA256 = Object.freeze({
     'a713200b67f0cf67c50b56c94f707f94f7383c52e3d59f4368868710b099b55d',
 } satisfies Readonly<Record<keyof ProviderPositionReadBoundaryArtifactSources, string>>);
 const MAX_PROVIDER_POSITION_READ_ARTIFACT_BYTES = 128 * 1024;
-const MAX_PROVIDER_POSITION_READ_TOTAL_BYTES = 384 * 1024;
+const MAX_PROVIDER_POSITION_READ_TOTAL_BYTES = 512 * 1024;
 const BALANCE_CONSUMER_ARTIFACT_KEYS = Object.freeze([
   'activationSource',
   'cliSource',
@@ -716,6 +725,7 @@ const BALANCE_CONSUMER_ARTIFACT_KEYS = Object.freeze([
   'bootstrapPrincipalsValidatorSource',
   'walletAddressMigrationSource',
   'workerAuthoritySuspensionMigrationSource',
+  'providerPositionChainAnchorEvidenceMigrationSource',
   'migrationIndexSource',
   'releaseManifestSource',
   'productionContainerValidatorSource',
@@ -800,7 +810,9 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
   walletAddressMigrationSource: '74e32999fe3ac3b5791365c5a55129296cf68cb5b3d5697f2ffe462012029a84',
   workerAuthoritySuspensionMigrationSource:
     'f61ff9f4ad74e6067203ee1078502955c82af0acde164ff783970e5bc27949b0',
-  migrationIndexSource: '2565fe9b9ed14d4b32a92cef583343de4d18832995426da8d75542701d70696d',
+  providerPositionChainAnchorEvidenceMigrationSource:
+    '9ef52244aa0e52e2a6da7350b43a6a4438e47a721bdd5dc34637a0d2c0fec614',
+  migrationIndexSource: '4b204ef7d52c14913e29754cb74ecbaf3d35c773105071e216c4c8435ec5070c',
   releaseManifestSource: '234f2e397055af0884b45a599b7767fe9e24952b7978b769af4a46c73c1653ea',
   productionContainerValidatorSource:
     '56e219a54c8deeb08b287098915b78ec777303fa2df8bb076e046e26bbf4ce8c',
@@ -2022,6 +2034,325 @@ function hasExactReviewedProviderPositionReadArtifactBytes(
   );
 }
 
+function hasDormantProviderPositionChainAnchorEvidenceMigrationContract(
+  migrationSource: string,
+  migrationIndexSource: string,
+): boolean {
+  const migration = migrationSource.replace(/\r\n/gu, '\n');
+  const migrationIndex = migrationIndexSource.replace(/\r\n/gu, '\n');
+  const importSources = Array.from(
+    migration.matchAll(/\bfrom\s+['"]([^'"]+)['"]/gu),
+    (match) => match[1],
+  );
+  const importDeclarationCount = migration.match(/^[\t ]*import\b/gmu)?.length ?? 0;
+  const forbiddenCapability =
+    /(?:\bimport\s*\(|\brequire\s*\(|(?:\bfrom\s+|\bimport\s*(?:\(\s*)?)['"](?:node:)?(?:child_process|cluster|dgram|dns|fs|http|http2|https|net|tls|worker_threads)(?:\/[^'"]*)?['"]|(?:\bfrom\s+|\bimport\s*(?:\(\s*)?)['"](?:axios|ethers|got|superagent|undici|web3|@solana\/web3\.js)['"]|\b(?:fetch|setTimeout|setInterval|setImmediate|queueMicrotask|WebSocket|EventSource|XMLHttpRequest|readFileSync|writeFileSync)\s*\(|\b(?:process|Deno|Bun)\s*\.\s*env\b|\bimport\s*\.\s*meta\s*\.\s*env\b|['"]https?:\/\/|(?:^|\n)[\t ]*@[A-Za-z_$])/iu;
+  const evidenceTableStart = migration.indexOf('CREATE TABLE ${EVIDENCE_TABLE} (');
+  const evidenceTableEnd = migration.indexOf(
+    'COMMENT ON TABLE ${EVIDENCE_TABLE}',
+    evidenceTableStart,
+  );
+  const evidenceTable =
+    evidenceTableStart >= 0 && evidenceTableEnd > evidenceTableStart
+      ? migration.slice(evidenceTableStart, evidenceTableEnd)
+      : '';
+  const controlTableStart = migration.indexOf('CREATE TABLE ${CONTROL_TABLE} (');
+  const controlTableEnd = migration.indexOf('COMMENT ON TABLE ${CONTROL_TABLE}', controlTableStart);
+  const controlTable =
+    controlTableStart >= 0 && controlTableEnd > controlTableStart
+      ? migration.slice(controlTableStart, controlTableEnd)
+      : '';
+  const evidenceRowValidBodyStart = migration.indexOf('const EVIDENCE_ROW_VALID_BODY = `');
+  const controlRowValidBodyStart = migration.indexOf(
+    'const CONTROL_ROW_VALID_BODY = `',
+    evidenceRowValidBodyStart,
+  );
+  const historyGuardBodyStart = migration.indexOf(
+    'const HISTORY_GUARD_BODY = `',
+    controlRowValidBodyStart,
+  );
+  const evidenceRowValidBody =
+    evidenceRowValidBodyStart >= 0 && controlRowValidBodyStart > evidenceRowValidBodyStart
+      ? migration.slice(evidenceRowValidBodyStart, controlRowValidBodyStart)
+      : '';
+  const controlRowValidBody =
+    controlRowValidBodyStart >= 0 && historyGuardBodyStart > controlRowValidBodyStart
+      ? migration.slice(controlRowValidBodyStart, historyGuardBodyStart)
+      : '';
+  const readBodyStart = migration.indexOf('const READ_EVIDENCE_BODY = `');
+  const upStart = migration.indexOf(
+    'function createUpSql(names: BalanceConsumerPrincipalNames): string {',
+    readBodyStart,
+  );
+  const readBody =
+    readBodyStart >= 0 && upStart > readBodyStart ? migration.slice(readBodyStart, upStart) : '';
+  const downStart = migration.indexOf(
+    'function createDownSql(names: BalanceConsumerPrincipalNames): string {',
+    upStart,
+  );
+  const verifierStart = migration.indexOf(
+    'function createVerifierSql(names: BalanceConsumerPrincipalNames, cumulative: boolean): string {',
+    downStart,
+  );
+  const migrationFactoryStart = migration.indexOf(
+    'export function createProviderPositionChainAnchorEvidenceMigration(',
+    verifierStart,
+  );
+  const upSource = upStart >= 0 && downStart > upStart ? migration.slice(upStart, downStart) : '';
+  const downSource =
+    downStart >= 0 && verifierStart > downStart ? migration.slice(downStart, verifierStart) : '';
+  const verifierSource =
+    verifierStart >= 0 && migrationFactoryStart > verifierStart
+      ? migration.slice(verifierStart, migrationFactoryStart)
+      : '';
+  const walletLock = readBody.indexOf(
+    'pg_catalog.hashtextextended(requested_account_id::text, 56001)',
+  );
+  const initialClockRead = readBody.indexOf(
+    "database_read_at := pg_catalog.date_trunc('milliseconds', pg_catalog.clock_timestamp())",
+  );
+  const readCommittedIsolationGuard = readBody.indexOf(
+    "IF pg_catalog.current_setting('transaction_isolation') <> 'read committed'",
+    initialClockRead,
+  );
+  const walletRead = readBody.indexOf('FROM registered_wallets AS wallet', walletLock);
+  const walletRowLock = readBody.indexOf('FOR UPDATE OF wallet;', walletRead);
+  const evidenceRead = readBody.indexOf(
+    'SELECT evidence.* INTO STRICT selected_evidence',
+    walletRowLock,
+  );
+  const evidenceLock = readBody.indexOf('FOR SHARE OF evidence;', evidenceRead);
+  const controlRead = readBody.indexOf(
+    'FROM provider_position_chain_anchor_control_events AS control',
+    evidenceLock,
+  );
+  const finalClockRead = readBody.lastIndexOf(
+    "database_read_at := pg_catalog.date_trunc('milliseconds', pg_catalog.clock_timestamp())",
+  );
+  const resultReturn = readBody.indexOf('RETURN QUERY SELECT', finalClockRead);
+  const testListStart = migrationIndex.indexOf('export const DATABASE_TEST_SCHEMA_MIGRATION_LIST:');
+  const productionListStart = migrationIndex.indexOf(
+    'export const DATABASE_MIGRATION_LIST:',
+    testListStart,
+  );
+  const exportStart = migrationIndex.indexOf(
+    "export type { DatabaseMigration } from './migration';",
+    productionListStart,
+  );
+  const testList =
+    testListStart >= 0 && productionListStart > testListStart
+      ? migrationIndex.slice(testListStart, productionListStart)
+      : '';
+  const productionList =
+    productionListStart >= 0 && exportStart > productionListStart
+      ? migrationIndex.slice(productionListStart, exportStart)
+      : '';
+  const importRegistration = `import {
+  createProviderPositionChainAnchorEvidenceMigrationV0029,
+  createProviderPositionChainAnchorEvidenceTestSchemaMigrationV0029,
+} from './0029-create-provider-position-chain-anchor-evidence.migration';`;
+  const exportRegistration = `export {
+  createProviderPositionChainAnchorEvidenceMigration,
+  createProviderPositionChainAnchorEvidenceMigrationV0029,
+  createProviderPositionChainAnchorEvidenceTestSchemaMigrationV0029,
+} from './0029-create-provider-position-chain-anchor-evidence.migration';`;
+  const forbiddenTableIdentity =
+    /\b(?:account_id|wallet_id|address_(?:digest|ciphertext|iv|auth_tag))\b/u;
+
+  return (
+    importDeclarationCount === 3 &&
+    importSources.length === 3 &&
+    importSources[0] === 'node:crypto' &&
+    importSources[1] === './0028-suspend-generic-worker-balance-authority.migration' &&
+    importSources[2] === './migration' &&
+    !forbiddenCapability.test(migration) &&
+    exactExecutableLineCount(migration, "const ETHEREUM = 'eip155:1';") === 1 &&
+    exactExecutableLineCount(
+      migration,
+      "const SOLANA = 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp';",
+    ) === 1 &&
+    !migration.includes('eip155:8453') &&
+    !migration.includes('eip155:42161') &&
+    !migration.includes('eip155:11155111') &&
+    exactExecutableLineCount(
+      migration,
+      "const EVIDENCE_USE = 'DORMANT_PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_ONLY';",
+    ) === 1 &&
+    exactExecutableLineCount(
+      migration,
+      "const ASSESSMENT_USE = 'DORMANT_PROVIDER_POSITION_DURABLE_CHAIN_ANCHOR_ASSESSMENT_ONLY';",
+    ) === 1 &&
+    exactExecutableLineCount(
+      migration,
+      "const CONTROL_USE = 'DORMANT_PROVIDER_POSITION_CHAIN_ANCHOR_CONTROL_ONLY';",
+    ) === 1 &&
+    evidenceTable.length > 0 &&
+    controlTable.length > 0 &&
+    evidenceRowValidBody.length > 0 &&
+    controlRowValidBody.length > 0 &&
+    !forbiddenTableIdentity.test(evidenceTable) &&
+    !forbiddenTableIdentity.test(controlTable) &&
+    !forbiddenTableIdentity.test(evidenceRowValidBody) &&
+    !forbiddenTableIdentity.test(controlRowValidBody) &&
+    evidenceTable.includes('read_binding_fingerprint_sha256 text NOT NULL') &&
+    evidenceTable.includes('provider_position_chain_anchor_read_binding_unique UNIQUE') &&
+    evidenceTable.includes('provider_position_chain_anchor_evidence_valid_check CHECK (') &&
+    evidenceTable.includes('${EVIDENCE_ROW_VALID_CALL}') &&
+    controlTable.includes('provider_position_chain_anchor_control_valid_check CHECK (') &&
+    controlTable.includes('${CONTROL_ROW_VALID_CALL}') &&
+    readBodyStart >= 0 &&
+    upStart > readBodyStart &&
+    initialClockRead >= 0 &&
+    readCommittedIsolationGuard > initialClockRead &&
+    walletLock > readCommittedIsolationGuard &&
+    walletLock >= 0 &&
+    walletRead > walletLock &&
+    walletRowLock > walletRead &&
+    evidenceRead > walletRowLock &&
+    evidenceLock > evidenceRead &&
+    controlRead > evidenceLock &&
+    finalClockRead > controlRead &&
+    resultReturn > finalClockRead &&
+    exactExecutableLineCount(readBody, "AND wallet.status = 'ACTIVE'") === 1 &&
+    exactExecutableLineCount(readBody, 'AND wallet.revoked_at IS NULL') === 1 &&
+    exactExecutableLineCount(readBody, "AND wallet.registry_environment = 'MAINNET'") === 1 &&
+    exactExecutableLineCount(readBody, 'AND wallet.chain_namespace = requested_chain_namespace') ===
+      1 &&
+    exactExecutableLineCount(readBody, 'AND wallet.chain_reference = requested_chain_reference') ===
+      1 &&
+    exactExecutableLineCount(
+      readBody,
+      "IF pg_catalog.current_setting('transaction_isolation') <> 'read committed'",
+    ) === 1 &&
+    exactExecutableLineCount(
+      readBody,
+      "AND requested_source_observation_id = 'ethereum-block-'",
+    ) === 1 &&
+    exactExecutableLineCount(readBody, "AND requested_source_observation_id = 'solana-slot-'") ===
+      1 &&
+    exactExecutableLineCount(
+      evidenceRowValidBody,
+      "AND requested_source_observation_id = 'ethereum-block-'",
+    ) === 1 &&
+    exactExecutableLineCount(
+      evidenceRowValidBody,
+      "AND requested_source_observation_id = 'solana-slot-'",
+    ) === 1 &&
+    exactExecutableLineCount(readBody, 'OR requested_observed_at > requested_captured_at') === 1 &&
+    exactExecutableLineCount(readBody, 'OR requested_captured_at > requested_evaluated_at') === 1 &&
+    exactExecutableLineCount(readBody, 'OR requested_evaluated_at >= requested_deadline_at') ===
+      1 &&
+    exactExecutableLineCount(
+      readBody,
+      "OR requested_deadline_at > requested_evaluated_at + interval '30 seconds'",
+    ) === 1 &&
+    readBody.split('database_read_at >= requested_deadline_at').length - 1 === 4 &&
+    exactExecutableLineCount(readBody, 'AND evidence.recorded_at <= requested_evaluated_at') ===
+      1 &&
+    exactExecutableLineCount(
+      readBody,
+      'AND requested_evaluated_at < evidence.source_pair_approval_expires_at',
+    ) === 1 &&
+    readBody.split('database_read_at < evidence.source_pair_approval_expires_at').length - 1 ===
+      1 &&
+    readBody.split('database_read_at >= selected_evidence.source_pair_approval_expires_at').length -
+      1 ===
+      2 &&
+    readBody.split('database_read_at < evidence.current_head_advanced_at + CASE').length - 1 ===
+      1 &&
+    readBody.split('database_read_at >= selected_evidence.current_head_advanced_at + CASE').length -
+      1 ===
+      2 &&
+    readBody.split('database_read_at < evidence.finalized_head_advanced_at + CASE').length - 1 ===
+      1 &&
+    readBody.split('database_read_at >= selected_evidence.finalized_head_advanced_at + CASE')
+      .length -
+      1 ===
+      2 &&
+    exactExecutableLineCount(readBody, 'AND evidence.assessed_at <= requested_captured_at') === 1 &&
+    exactExecutableLineCount(readBody, "AND evidence.identity_status = 'VERIFIED'") === 1 &&
+    exactExecutableLineCount(readBody, "AND evidence.progression_status = 'CURRENT'") === 1 &&
+    exactExecutableLineCount(readBody, "AND evidence.finality_status = 'HEALTHY'") === 1 &&
+    exactExecutableLineCount(readBody, 'WHEN NO_DATA_FOUND THEN') === 1 &&
+    exactExecutableLineCount(readBody, 'WHEN TOO_MANY_ROWS THEN') === 1 &&
+    exactExecutableLineCount(readBody, "USING ERRCODE = '21000';") === 1 &&
+    readBody.split('database_read_at := pg_catalog.date_trunc').length - 1 === 4 &&
+    readBody.includes("'${ASSESSMENT_USE}'::text,") &&
+    readBody.includes("'${ASSESSMENT_USE}'::text,\n        false,\n        false,") &&
+    upSource.length > 0 &&
+    downSource.length > 0 &&
+    verifierSource.length > 0 &&
+    upSource.split('ENABLE ALWAYS TRIGGER').length - 1 === 4 &&
+    exactExecutableLineCount(upSource, 'BEFORE UPDATE OR DELETE ON ${EVIDENCE_TABLE}') === 1 &&
+    exactExecutableLineCount(upSource, 'BEFORE UPDATE OR DELETE ON ${CONTROL_TABLE}') === 1 &&
+    exactExecutableLineCount(upSource, 'BEFORE TRUNCATE ON ${EVIDENCE_TABLE}') === 1 &&
+    exactExecutableLineCount(upSource, 'BEFORE TRUNCATE ON ${CONTROL_TABLE}') === 1 &&
+    upSource.split('LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE').length - 1 === 5 &&
+    upSource.split('LANGUAGE plpgsql SECURITY DEFINER VOLATILE STRICT PARALLEL UNSAFE').length -
+      1 ===
+      3 &&
+    exactExecutableLineCount(
+      upSource,
+      'REVOKE ALL PRIVILEGES ON TABLE ${EVIDENCE_TABLE}, ${CONTROL_TABLE}',
+    ) === 1 &&
+    exactExecutableLineCount(
+      upSource,
+      'REVOKE ALL PRIVILEGES ON TYPE ${EVIDENCE_TABLE}, ${CONTROL_TABLE}',
+    ) === 1 &&
+    upSource.split('GRANT EXECUTE ON FUNCTION').length - 1 === 1 &&
+    exactExecutableLineCount(
+      upSource,
+      'GRANT EXECUTE ON FUNCTION ${READ_EVIDENCE} TO ${api};`;',
+    ) === 1 &&
+    !/\bGRANT\s+(?:ALL|CONNECT|CREATE|DELETE|INSERT|SELECT|TEMP|TRIGGER|TRUNCATE|UPDATE|USAGE)\b/iu.test(
+      upSource,
+    ) &&
+    exactExecutableLineCount(
+      downSource,
+      "RAISE EXCEPTION 'cannot roll back provider position chain anchor evidence after use'",
+    ) === 1 &&
+    exactExecutableLineCount(downSource, "USING ERRCODE = '55000';") === 1 &&
+    !/\bGRANT\b/iu.test(downSource) &&
+    exactExecutableLineCount(
+      verifierSource,
+      'const previous = createGenericWorkerBalanceAuthoritySuspensionMigration(names, {',
+    ) === 1 &&
+    exactExecutableLineCount(
+      verifierSource,
+      "if (!previous.verifySql) throw new Error('Migration 0028 must expose verification SQL');",
+    ) === 1 &&
+    verifierSource.includes('functionAllowance(api, [...PRIOR_API_FUNCTIONS, READ_EVIDENCE])') &&
+    verifierSource.includes('[worker, legacy, balance, migration, "\'public\'"]') &&
+    verifierSource.includes(
+      'ALL_FUNCTIONS.filter((identityValue) => identityValue !== READ_EVIDENCE)',
+    ) &&
+    exactExecutableLineCount(
+      verifierSource,
+      '[EVIDENCE_ROW_VALID, sourceSha256(EVIDENCE_ROW_VALID_BODY)],',
+    ) === 1 &&
+    exactExecutableLineCount(
+      verifierSource,
+      '[CONTROL_ROW_VALID, sourceSha256(CONTROL_ROW_VALID_BODY)],',
+    ) === 1 &&
+    exactExecutableLineCount(verifierSource, "AND trigger.tgattr = ''::pg_catalog.int2vector") ===
+      1 &&
+    exactExecutableLineCount(migration, "id: '0029',") === 1 &&
+    exactExecutableLineCount(migration, "supersedesVerificationOf: ['0028'],") === 1 &&
+    migrationIndex.split(importRegistration).length - 1 === 1 &&
+    migrationIndex.split(exportRegistration).length - 1 === 1 &&
+    exactExecutableLineCount(
+      testList,
+      'createProviderPositionChainAnchorEvidenceTestSchemaMigrationV0029,',
+    ) === 1 &&
+    !testList.includes('createProviderPositionChainAnchorEvidenceMigrationV0029,') &&
+    exactExecutableLineCount(
+      productionList,
+      'createProviderPositionChainAnchorEvidenceMigrationV0029,',
+    ) === 1 &&
+    !productionList.includes('createProviderPositionChainAnchorEvidenceTestSchemaMigrationV0029,')
+  );
+}
+
 function hasDormantProviderPositionReadBoundaryContract(
   sources: ProviderPositionReadBoundaryArtifactSources,
 ): boolean {
@@ -2031,6 +2362,9 @@ function hasDormantProviderPositionReadBoundaryContract(
     sources.providerPositionDurableChainAnchorReaderPortSource.replace(/\r\n/gu, '\n');
   const trustedAssessmentAssembler =
     sources.providerPositionTrustedChainAssessmentAssemblerSource.replace(/\r\n/gu, '\n');
+  const chainAnchorEvidenceMigration =
+    sources.providerPositionChainAnchorEvidenceMigrationSource.replace(/\r\n/gu, '\n');
+  const migrationIndex = sources.providerPositionMigrationIndexSource.replace(/\r\n/gu, '\n');
   const coordinator = sources.providerPositionAdmissionCoordinatorSource.replace(/\r\n/gu, '\n');
   const deadlineRunner = sources.providerPositionDeadlineRunnerSource.replace(/\r\n/gu, '\n');
   const runtimeBounds = sources.providerPositionRuntimeBoundsSource.replace(/\r\n/gu, '\n');
@@ -2775,6 +3109,10 @@ function hasDormantProviderPositionReadBoundaryContract(
     /(?:createDormantProviderPositionAdmissionRuntimeResource|provider-position-admission-runtime-bounds)/u;
 
   return (
+    hasDormantProviderPositionChainAnchorEvidenceMigrationContract(
+      chainAnchorEvidenceMigration,
+      migrationIndex,
+    ) &&
     capabilityFreeSources.every((source) => !forbiddenCapability.test(source)) &&
     durableAnchorReaderPortImportDeclarationCount === 4 &&
     durableAnchorReaderPortImportSources.length === 4 &&
@@ -8194,6 +8532,10 @@ function hasDormantBalanceConsumerDatabaseCapability(
     hasGenericWorkerBalanceAuthoritySuspensionContract(
       sources.workerAuthoritySuspensionMigrationSource,
       sources.migrationIndexSource,
+    ) &&
+    hasDormantProviderPositionChainAnchorEvidenceMigrationContract(
+      sources.providerPositionChainAnchorEvidenceMigrationSource,
+      sources.migrationIndexSource,
     )
   );
 }
@@ -9298,6 +9640,13 @@ export function loadRepositoryProductionPreflightInput(
         ),
         'utf8',
       ),
+      providerPositionChainAnchorEvidenceMigrationSource: readFileSync(
+        resolve(
+          repositoryRoot,
+          'apps/api/src/infrastructure/database/migrations/0029-create-provider-position-chain-anchor-evidence.migration.ts',
+        ),
+        'utf8',
+      ),
       migrationIndexSource: readFileSync(
         resolve(repositoryRoot, 'apps/api/src/infrastructure/database/migrations/index.ts'),
         'utf8',
@@ -9344,6 +9693,17 @@ export function loadRepositoryProductionPreflightInput(
           repositoryRoot,
           'apps/api/src/mainnet-platforms/infrastructure/dormant-provider-position-trusted-chain-assessment.assembler.ts',
         ),
+        'utf8',
+      ),
+      providerPositionChainAnchorEvidenceMigrationSource: readFileSync(
+        resolve(
+          repositoryRoot,
+          'apps/api/src/infrastructure/database/migrations/0029-create-provider-position-chain-anchor-evidence.migration.ts',
+        ),
+        'utf8',
+      ),
+      providerPositionMigrationIndexSource: readFileSync(
+        resolve(repositoryRoot, 'apps/api/src/infrastructure/database/migrations/index.ts'),
         'utf8',
       ),
       providerPositionAdmissionCoordinatorSource: readFileSync(

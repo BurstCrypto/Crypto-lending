@@ -6,7 +6,9 @@ composition accepts only an optional durable-chain-anchor reader and constructs
 the assembler internally; it does not accept a raw trusted-assembly bypass.
 None of this graph is registered in Nest or reachable through HTTP/RPC/API
 runtime wiring. The assembler has no ambient I/O capability, and no concrete
-durable-chain-anchor reader implementation exists.
+application durable-chain-anchor reader or adapter exists. Migration `0029`
+adds a dormant database evidence boundary, but it does not supply that missing
+application implementation.
 
 ## Exact coverage (version 1)
 
@@ -54,7 +56,8 @@ The offline production preflight now pins this reader together with the
 durable-anchor reader port, dormant trusted-chain-assessment assembler, exact
 mainnet launch-network policy, coverage, observation, assessment,
 observation-policy, trusted-assembly, admission, module, barrel, and controller
-sources as one selected twenty-four-file dormant critical-source slice. A
+sources together with migration `0029` and the migration index as one selected
+twenty-six-file dormant critical-source slice. A
 passing local source inspection does not prove recursive dependency closure,
 whole-application registration absence, a concrete durable-anchor reader,
 or deployed/live evidence. It does pin the private construction path that
@@ -62,6 +65,23 @@ passes the optional reader only to a newly constructed assembler and passes
 that local assembler only to the coordinator; neither the outer facade nor its
 reader sub-capability exposes either object. The reader, trusted-assessment, and
 deadline-runner feature-registration blockers all remain open.
+
+The migration's two append-only tables hold global Ethereum/Solana chain-anchor
+evidence and `INVALIDATED`/`QUARANTINED` control events without account or wallet
+PII columns. A source observation ID must be exactly
+`ethereum-block-<exact anchor blockNumber>` or
+`solana-slot-<exact anchor slot>`; it cannot carry an arbitrary wallet or request
+identifier. The exact API runtime role alone receives an `EXECUTE` grant on its
+`SECURITY DEFINER` reader, and that reader permits a lookup only after validating
+the request's active chain-bound wallet. It caps evaluation-to-deadline at 30
+seconds and rechecks deadline, approval, current-head, and finality freshness
+against database time after wallet and evidence locks. Its evidence-recording
+and control functions have no runtime grants and remain owner-controlled. The
+cumulative verifier retains migration `0028`'s generic-worker suspension. There
+is still no application reader/adapter, evidence writer/producer, populated
+evidence claim, runtime registration or activation, deployment, or live evidence.
+Consequently all three provider-position registration blockers remain
+`MISSING`, and the live-provider count remains zero.
 
 ## Conservative composition (version 1)
 

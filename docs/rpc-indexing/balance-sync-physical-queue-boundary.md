@@ -97,8 +97,12 @@ The database bootstrap declares the dormant `crypto_balance_consumer_runtime`
 capability identity and bounded rotating login slots, but gives them no database
 connection, schema, object, function, default-ACL, or ownership authority.
 Migration `0028` revokes the generic worker's execution of the wallet-address
-resolver and all four balance checkpoint functions. The standalone source does
-not change those application-path or database facts.
+resolver and all four balance checkpoint functions. The cumulative migration
+chain through `0029` preserves that suspension. Migration `0029` adds only an
+API-role read over global provider-position anchor evidence after validating an
+active chain-bound wallet; it gives the generic worker and dormant balance
+consumer no read, record, control, table, or other database grant. The
+standalone source does not change those application-path or database facts.
 
 ## Dormant receipt retry boundary
 
@@ -146,7 +150,8 @@ gate.
 - Perform an authorized deployed IAM simulation proving the outbox worker can send only to the two source queues and cannot receive/delete, and proving the API is read-only.
 - Capture live queue attributes for both redrive pairs, KMS use, retention, TLS denial, alarms, DLQ redrive, and cross-queue receipt-handle failure behavior.
 - Add independent-source/finality evidence for the dormant Ethereum and Solana indexers before any balance result can become a financial input.
-- Apply and verify migration `0028` in the target database, then introduce any
+- Apply and verify the cumulative migration chain through `0029` in the target
+  database, then introduce any
   dedicated balance-consumer execution grants only through a later reviewed
   migration. Runtime activation, task and IAM wiring, database grants, RPC
   approval, and deployed evidence all remain blocked. Offline preflight must

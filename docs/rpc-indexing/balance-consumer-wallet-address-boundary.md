@@ -5,7 +5,8 @@ Status: `FAIL_CLOSED_EXECUTABLE` / `CONSUMER_AND_PROVIDER_EGRESS_BLOCKED`
 Migration `0023` and `PostgresBalanceSyncWalletAddressResolver` define the local
 wallet-address handoff needed by a future Ethereum/Solana balance consumer.
 Migration `0028` removes the generic worker's historical authority to use that
-handoff. These source boundaries do not start a consumer, connect to SQS,
+handoff, and the cumulative migration chain through `0029` preserves that
+suspension. These source boundaries do not start a consumer, connect to SQS,
 configure an RPC endpoint, or perform a mainnet read or write.
 
 ## Least-privilege database contract
@@ -39,15 +40,24 @@ Migration `0023` originally granted the generic worker only `EXECUTE` on this
 resolver and no `SELECT` privilege on `registered_wallets`,
 `registered_wallet_identity_digests`, or `wallet_identity_key_policy`.
 Migration `0028` revokes that resolver grant and the worker's four balance
-checkpoint function grants. No application runtime role currently has balance
-resolver or checkpoint execution authority. The migration verifiers bind the
+checkpoint function grants. Migration `0029` preserves those revocations while
+granting only the exact API role a separate `SECURITY DEFINER` read over global
+Ethereum/Solana provider-position anchor evidence after validating an active
+chain-bound wallet. Its evidence and control tables have no account or wallet
+PII columns, and its record and invalidation/quarantine functions have no
+runtime grants. No application runtime role currently has balance resolver or
+checkpoint execution authority. The migration verifiers bind the
 exact function signatures, ownership, bodies, safe search paths, result
 contracts, ACLs, and underlying-table denial.
 
 Migration `0023` owns no durable data. Migration `0028` is forward-only: its
 down path raises SQLSTATE `55000` and never recreates generic-worker balance
-authority. Any later dedicated grant must be delivered by a new reviewed
-migration rather than by rolling this revocation back.
+authority. Migration `0029` also refuses rollback after any anchor evidence or
+control row exists. It does not compose an application anchor reader/adapter or
+writer/producer, populate evidence, register a runtime, deploy anything, or
+supply live evidence. Any later dedicated balance-consumer grant must be
+delivered by a new reviewed migration rather than by rolling the revocation
+back.
 
 ## Dedicated key delivery contract
 

@@ -181,15 +181,16 @@ inspection proves these dormant source constraints only; it never turns them
 into deployed or production-ready evidence.
 
 `PROVIDER_POSITION_READ_BOUNDARY` independently snapshots and byte-pins the
-coverage-aware reader v3 port, trusted-assessment assembly port, durable-chain-anchor
-reader port, dormant trusted-chain-assessment assembler, admission coordinator,
-concrete Node deadline runner, wallet-roster reader port and adapter, wallet
-service and repository port, PostgreSQL wallet repository, shared PostgreSQL
-cancellation service, dormant runtime-budget resource, private dormant runtime
-composition, infrastructure configuration loader, runtime PostgreSQL pool
-factory, coverage/observation/assessment/policy domains, exact Ethereum/Solana
-mainnet launch-network policy, feature module, feature barrel, and HTTP
-controller as one selected twenty-four-file critical-source slice. Within that
+coverage-aware reader v3 port, trusted-assessment assembly port,
+durable-chain-anchor reader port, dormant trusted-chain-assessment assembler,
+admission coordinator, concrete Node deadline runner, wallet-roster reader port
+and adapter, wallet service and repository port, PostgreSQL wallet repository,
+shared PostgreSQL cancellation service, dormant runtime-budget resource,
+private dormant runtime composition, infrastructure configuration loader,
+runtime PostgreSQL pool factory, coverage/observation/assessment/policy domains,
+exact Ethereum/Solana mainnet launch-network policy, migration `0029`, the
+migration index, feature module, feature barrel, and HTTP controller as one
+selected twenty-six-file critical-source slice. Within that
 slice, the local semantic inspection requires an exact account/correlation
 reader request with no caller-supplied evaluation time and an exact frozen
 result envelope containing the server-authored parser time and covered-snapshot
@@ -233,6 +234,21 @@ the exclusive deadline. It recomputes each observation fingerprint including
 identity, and exact verification contexts in a private `WeakMap`; assessment,
 request, and context drift fail closed. The assembler has no ambient provider,
 network, storage, persistence, or financial-action capability.
+
+Migration `0029` adds a dormant, append-only PostgreSQL boundary for global
+Ethereum and Solana chain-anchor evidence plus append-only `INVALIDATED` and
+`QUARANTINED` control events. Its evidence and control tables contain no account
+or wallet PII columns. Every source observation ID is chain-global and canonical:
+`ethereum-block-<exact anchor blockNumber>` or
+`solana-slot-<exact anchor slot>`; arbitrary wallet or request identifiers are
+rejected. Only the exact API role receives `EXECUTE` on the `SECURITY DEFINER`
+read function, which authorizes each request against an active chain-bound wallet
+before returning global evidence. The evaluation-to-deadline span is capped at
+30 seconds, and deadline, approval, current-head, and finality freshness are
+rechecked against database time after wallet and evidence locks.
+Evidence-recording and control functions have no runtime grants and remain
+schema-owner-controlled. The cumulative verifier preserves migration `0028`'s
+generic-worker resolver and checkpoint suspension.
 
 The private dormant composition accepts exactly one optional trust dependency:
 `durableChainAnchorReader`. It imports the durable-reader port and concrete
@@ -286,9 +302,12 @@ Launch readiness remains blocked by
 `PROVIDER_POSITION_READER_FEATURE_REGISTRATION_MISSING` and
 `PROVIDER_POSITION_TRUSTED_ASSESSMENT_FEATURE_REGISTRATION_MISSING`, plus
 `PROVIDER_POSITION_DEADLINE_RUNNER_FEATURE_REGISTRATION_MISSING`. The concrete
-assembler does not clear any registration blocker: no concrete durable-anchor
-reader exists, its private composition wiring is not registered in the
-Nest/module/HTTP graph, and no deployed or live evidence exists. The concrete
+assembler and migration do not clear any registration blocker: no concrete
+application durable-anchor reader or adapter exists, no evidence writer or
+producer is composed, no populated evidence rows are claimed, the private
+composition wiring is not registered in the Nest/module/HTTP graph, no runtime
+is activated, and no deployment or live evidence exists. The live-provider
+count therefore remains zero. The concrete
 runner remains dormant and unregistered. Provider sources must cooperate with
 abort and settle before the runner can return. Wallet-roster cancellation now
 reaches the PostgreSQL query boundary, but active `pg` pool acquisition has no

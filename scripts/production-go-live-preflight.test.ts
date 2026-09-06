@@ -394,6 +394,13 @@ const BALANCE_CONSUMER_ARTIFACTS = Object.freeze({
     ),
     'utf8',
   ),
+  providerPositionChainAnchorEvidenceMigrationSource: readFileSync(
+    resolve(
+      __dirname,
+      '../apps/api/src/infrastructure/database/migrations/0029-create-provider-position-chain-anchor-evidence.migration.ts',
+    ),
+    'utf8',
+  ),
   migrationIndexSource: readFileSync(
     resolve(__dirname, '../apps/api/src/infrastructure/database/migrations/index.ts'),
     'utf8',
@@ -434,6 +441,17 @@ const PROVIDER_POSITION_READ_ARTIFACTS = Object.freeze({
       __dirname,
       '../apps/api/src/mainnet-platforms/infrastructure/dormant-provider-position-trusted-chain-assessment.assembler.ts',
     ),
+    'utf8',
+  ),
+  providerPositionChainAnchorEvidenceMigrationSource: readFileSync(
+    resolve(
+      __dirname,
+      '../apps/api/src/infrastructure/database/migrations/0029-create-provider-position-chain-anchor-evidence.migration.ts',
+    ),
+    'utf8',
+  ),
+  providerPositionMigrationIndexSource: readFileSync(
+    resolve(__dirname, '../apps/api/src/infrastructure/database/migrations/index.ts'),
     'utf8',
   ),
   providerPositionAdmissionCoordinatorSource: readFileSync(
@@ -1094,7 +1112,7 @@ function mutateProviderPositionReadArtifact(
 }
 
 test('provider-position read inspection pins the exact dormant critical source slice', () => {
-  assert.equal(Object.keys(PROVIDER_POSITION_READ_ARTIFACTS).length, 24);
+  assert.equal(Object.keys(PROVIDER_POSITION_READ_ARTIFACTS).length, 26);
   const inspected = inspectProviderPositionReadBoundaryArtifacts(PROVIDER_POSITION_READ_ARTIFACTS);
   assert.deepEqual(inspected, EXPECTED_DORMANT_PROVIDER_POSITION_READ_BOUNDARY);
   assert.equal(Object.isFrozen(inspected), true);
@@ -1113,6 +1131,113 @@ test('provider-position read inspection pins the exact dormant critical source s
       `${key} byte drift`,
     );
   }
+});
+
+test('provider-position read inspection rejects dormant durable evidence and migration drift', () => {
+  const mutations: readonly (readonly [
+    keyof ProviderPositionReadBoundaryArtifactSources,
+    string,
+    string,
+  ])[] = [
+    [
+      'providerPositionChainAnchorEvidenceMigrationSource',
+      "AND requested_source_observation_id = 'ethereum-block-'",
+      'AND requested_source_observation_id = requested_source_id',
+    ],
+    [
+      'providerPositionChainAnchorEvidenceMigrationSource',
+      "AND requested_source_observation_id = 'solana-slot-'",
+      'AND requested_source_observation_id = requested_source_id',
+    ],
+    [
+      'providerPositionChainAnchorEvidenceMigrationSource',
+      "OR requested_deadline_at > requested_evaluated_at + interval '30 seconds'",
+      "OR requested_deadline_at > requested_evaluated_at + interval '300 seconds'",
+    ],
+    [
+      'providerPositionChainAnchorEvidenceMigrationSource',
+      'AND database_read_at < evidence.source_pair_approval_expires_at',
+      'AND requested_evaluated_at < evidence.source_pair_approval_expires_at',
+    ],
+    [
+      'providerPositionChainAnchorEvidenceMigrationSource',
+      'OR database_read_at >= selected_evidence.finalized_head_advanced_at + CASE',
+      'OR requested_evaluated_at >= selected_evidence.finalized_head_advanced_at + CASE',
+    ],
+    [
+      'providerPositionChainAnchorEvidenceMigrationSource',
+      "AND wallet.status = 'ACTIVE'",
+      "AND wallet.status = 'PENDING'",
+    ],
+    [
+      'providerPositionChainAnchorEvidenceMigrationSource',
+      'GRANT EXECUTE ON FUNCTION ${READ_EVIDENCE} TO ${api};',
+      'GRANT EXECUTE ON FUNCTION ${READ_EVIDENCE} TO ${worker};',
+    ],
+    [
+      'providerPositionChainAnchorEvidenceMigrationSource',
+      'GRANT EXECUTE ON FUNCTION ${READ_EVIDENCE} TO ${api};',
+      'GRANT EXECUTE ON FUNCTION ${READ_EVIDENCE} TO ${api};\n    GRANT EXECUTE ON FUNCTION ${RECORD_EVIDENCE} TO ${api};',
+    ],
+    [
+      'providerPositionChainAnchorEvidenceMigrationSource',
+      '        ${EVIDENCE_ROW_VALID_CALL} IS TRUE\n',
+      '        true\n',
+    ],
+    [
+      'providerPositionChainAnchorEvidenceMigrationSource',
+      "AND trigger.tgattr = ''::pg_catalog.int2vector",
+      'AND true',
+    ],
+    [
+      'providerPositionChainAnchorEvidenceMigrationSource',
+      "IF pg_catalog.current_setting('transaction_isolation') <> 'read committed'",
+      'IF false',
+    ],
+    [
+      'providerPositionChainAnchorEvidenceMigrationSource',
+      'evidence_use text NOT NULL,',
+      'evidence_use text NOT NULL,\n      account_id uuid NOT NULL,',
+    ],
+    [
+      'providerPositionChainAnchorEvidenceMigrationSource',
+      "supersedesVerificationOf: ['0028'],",
+      "supersedesVerificationOf: ['0027'],",
+    ],
+    [
+      'providerPositionChainAnchorEvidenceMigrationSource',
+      "if (!previous.verifySql) throw new Error('Migration 0028 must expose verification SQL');",
+      'void previous.verifySql;',
+    ],
+    [
+      'providerPositionMigrationIndexSource',
+      '  suspendGenericWorkerBalanceAuthorityMigrationV0028,\n  createProviderPositionChainAnchorEvidenceMigrationV0029,\n]);',
+      '  suspendGenericWorkerBalanceAuthorityMigrationV0028,\n  createProviderPositionChainAnchorEvidenceTestSchemaMigrationV0029,\n]);',
+    ],
+    [
+      'providerPositionMigrationIndexSource',
+      "} from './0029-create-provider-position-chain-anchor-evidence.migration';",
+      "} from './0029-create-provider-position-chain-anchor-evidence.disabled';",
+    ],
+  ];
+
+  for (const [key, approved, rejected] of mutations) {
+    assert.deepEqual(
+      inspectProviderPositionReadBoundaryArtifacts(
+        mutateProviderPositionReadArtifact(key, approved, rejected),
+      ),
+      INVALID_PROVIDER_POSITION_READ_BOUNDARY,
+      `${key}: ${approved}`,
+    );
+  }
+
+  assert.deepEqual(
+    inspectProviderPositionReadBoundaryArtifacts({
+      ...PROVIDER_POSITION_READ_ARTIFACTS,
+      providerPositionChainAnchorEvidenceMigrationSource: `${PROVIDER_POSITION_READ_ARTIFACTS.providerPositionChainAnchorEvidenceMigrationSource}\nvoid fetch('https://unreviewed.invalid');\n`,
+    }),
+    INVALID_PROVIDER_POSITION_READ_BOUNDARY,
+  );
 });
 
 test('provider-position read blockers participate in both readiness calculations', () => {
@@ -2123,8 +2248,8 @@ test('balance-consumer inspection rejects retained-marker semantic overrides and
     {
       ...BALANCE_CONSUMER_ARTIFACTS,
       migrationIndexSource: `${BALANCE_CONSUMER_ARTIFACTS.migrationIndexSource.replace(
-        '  suspendGenericWorkerBalanceAuthorityMigrationV0028,\n]);',
-        ']);',
+        '  suspendGenericWorkerBalanceAuthorityMigrationV0028,\n  createProviderPositionChainAnchorEvidenceMigrationV0029,',
+        '  createProviderPositionChainAnchorEvidenceMigrationV0029,',
       )}\n/* suspendGenericWorkerBalanceAuthorityMigrationV0028, */\n`,
     },
     {
@@ -3442,6 +3567,7 @@ test('balance-consumer inspection pins cancellable PostgreSQL ownership and shut
 });
 
 test('balance-consumer inspection brands and freezes only the exact dormant local contract', () => {
+  assert.equal(Object.keys(BALANCE_CONSUMER_ARTIFACTS).length, 65);
   const inspected = inspectBalanceConsumerDeploymentArtifacts(BALANCE_CONSUMER_ARTIFACTS);
   assert.deepEqual(inspected, EXPECTED_DORMANT_BALANCE_CONSUMER_DEPLOYMENT);
   assert.equal(Object.isFrozen(inspected), true);
@@ -3928,14 +4054,14 @@ test('balance-consumer inspection fails closed for drift in every reviewed artif
     [
       'worker authority migration registration',
       'migrationIndexSource',
-      '  suspendGenericWorkerBalanceAuthorityMigrationV0028,\n]);',
-      ']);',
+      '  suspendGenericWorkerBalanceAuthorityMigrationV0028,\n  createProviderPositionChainAnchorEvidenceMigrationV0029,',
+      '  createProviderPositionChainAnchorEvidenceMigrationV0029,',
     ],
     [
       'worker authority test migration registration',
       'migrationIndexSource',
-      '  suspendGenericWorkerBalanceAuthorityTestSchemaMigrationV0028,\n]);',
-      ']);',
+      '  suspendGenericWorkerBalanceAuthorityTestSchemaMigrationV0028,\n  createProviderPositionChainAnchorEvidenceTestSchemaMigrationV0029,',
+      '  createProviderPositionChainAnchorEvidenceTestSchemaMigrationV0029,',
     ],
     [
       'worker authority migration import',
@@ -3948,6 +4074,60 @@ test('balance-consumer inspection fails closed for drift in every reviewed artif
       'migrationIndexSource',
       '  PRODUCTION_BALANCE_CONSUMER_PRINCIPALS,',
       '  PRODUCTION_BALANCE_CONSUMER_PRINCIPALS_DISABLED,',
+    ],
+    [
+      'provider-position anchor evidence canonical Ethereum observation identity',
+      'providerPositionChainAnchorEvidenceMigrationSource',
+      "AND requested_source_observation_id = 'ethereum-block-'",
+      'AND requested_source_observation_id = requested_source_id',
+    ],
+    [
+      'provider-position anchor evidence bounded read deadline',
+      'providerPositionChainAnchorEvidenceMigrationSource',
+      "OR requested_deadline_at > requested_evaluated_at + interval '30 seconds'",
+      "OR requested_deadline_at > requested_evaluated_at + interval '300 seconds'",
+    ],
+    [
+      'provider-position anchor evidence post-lock approval freshness',
+      'providerPositionChainAnchorEvidenceMigrationSource',
+      'AND database_read_at < evidence.source_pair_approval_expires_at',
+      'AND requested_evaluated_at < evidence.source_pair_approval_expires_at',
+    ],
+    [
+      'provider-position anchor evidence API-only read grant',
+      'providerPositionChainAnchorEvidenceMigrationSource',
+      'GRANT EXECUTE ON FUNCTION ${READ_EVIDENCE} TO ${api};',
+      'GRANT EXECUTE ON FUNCTION ${READ_EVIDENCE} TO ${balance};',
+    ],
+    [
+      'provider-position anchor evidence owner-only writer',
+      'providerPositionChainAnchorEvidenceMigrationSource',
+      'GRANT EXECUTE ON FUNCTION ${READ_EVIDENCE} TO ${api};',
+      'GRANT EXECUTE ON FUNCTION ${READ_EVIDENCE} TO ${api};\n    GRANT EXECUTE ON FUNCTION ${RECORD_EVIDENCE} TO ${api};',
+    ],
+    [
+      'provider-position anchor evidence trigger column inventory',
+      'providerPositionChainAnchorEvidenceMigrationSource',
+      "AND trigger.tgattr = ''::pg_catalog.int2vector",
+      'AND true',
+    ],
+    [
+      'provider-position anchor evidence preserves 0028 verifier',
+      'providerPositionChainAnchorEvidenceMigrationSource',
+      "supersedesVerificationOf: ['0028'],",
+      "supersedesVerificationOf: ['0027'],",
+    ],
+    [
+      'provider-position anchor production migration registration',
+      'migrationIndexSource',
+      '  suspendGenericWorkerBalanceAuthorityMigrationV0028,\n  createProviderPositionChainAnchorEvidenceMigrationV0029,\n]);',
+      '  suspendGenericWorkerBalanceAuthorityMigrationV0028,\n  createProviderPositionChainAnchorEvidenceTestSchemaMigrationV0029,\n]);',
+    ],
+    [
+      'provider-position anchor test migration registration',
+      'migrationIndexSource',
+      '  suspendGenericWorkerBalanceAuthorityTestSchemaMigrationV0028,\n  createProviderPositionChainAnchorEvidenceTestSchemaMigrationV0029,\n]);',
+      '  suspendGenericWorkerBalanceAuthorityTestSchemaMigrationV0028,\n  createProviderPositionChainAnchorEvidenceMigrationV0029,\n]);',
     ],
     [
       'release entrypoint',

@@ -1,6 +1,8 @@
 # Dormant provider-position admission and assembly boundary
 
-Status: dormant, unregistered, read-only, and non-persistable.
+Status: dormant, unregistered, read-only, and non-persistable from the
+application graph. Migration `0029` defines dormant evidence persistence, but no
+application writer or reader adapter is composed.
 
 ## What the coordinator establishes
 
@@ -114,9 +116,24 @@ Assembly shares the admission deadline, captures the port's methods once without
 
 ## Required production binding
 
-Production still needs a reviewed concrete durable-chain-anchor reader,
-production registration, and deployed evidence. The local private wiring now
-constructs the trusted assembler only when that optional reader is present,
+Migration `0029` adds append-only global Ethereum/Solana chain-anchor evidence
+and append-only `INVALIDATED`/`QUARANTINED` controls. Neither table has account
+or wallet PII columns. Its one runtime grant is exact API-role `EXECUTE` on a
+`SECURITY DEFINER` read function that first requires an active chain-bound
+wallet; its record and control functions have no runtime grants and remain
+owner-controlled. The cumulative verifier preserves migration `0028`'s
+generic-worker balance-authority suspension. A source observation ID must be
+one of the canonical chain-global evidence identities
+`ethereum-block-<exact anchor blockNumber>` or
+`solana-slot-<exact anchor slot>`, rather than an arbitrary wallet or request
+identifier. The read boundary also caps the
+evaluation-to-deadline span at 30 seconds and rechecks the deadline, approval,
+current-head, and finality freshness against database time after wallet and
+evidence locks.
+
+Production still needs a reviewed concrete application durable-chain-anchor
+reader/adapter, production registration, and deployed evidence. The local private
+wiring now constructs the trusted assembler only when that optional reader is present,
 after the deadline runner and before the coordinator, and never exposes either
 object through the facade or reader sub-capability. The local assembler already binds each exact
 Ethereum or Solana target and selected source to its continuity floor, anchor,
@@ -128,17 +145,22 @@ capability bound to the original whole-assembly request and exact
 observation-verification contexts.
 
 The private dormant runtime composition continues to expose only its frozen
-null-prototype reader v3 sub-capability. No concrete durable-anchor reader,
-registered production composition, deployed binding, or live chain evidence
-exists, so neither that reader nor `admitAndAssemble` is a live application
-path.
+null-prototype reader v3 sub-capability. No concrete application durable-anchor
+reader/adapter, evidence writer/producer, populated evidence rows, registered
+production composition, runtime activation, deployed binding, or live chain
+evidence exists, so neither that reader nor `admitAndAssemble` is a live
+application path. All three
+provider-position registration blockers remain `MISSING`, and the live-provider
+count remains zero.
 
 The offline production preflight now byte-pins this coordinator, assembly port,
 durable-anchor reader port, dormant trusted-chain-assessment assembler, exact
 mainnet launch-network policy, concrete deadline runner, complete wallet-roster
 cancellation chain, shared PostgreSQL cancellation service, runtime-budget
-resource, and private dormant composition with a selected twenty-four-file
-reader/domain/infrastructure/module/barrel/controller critical-source slice.
+resource, private dormant composition, migration `0029`, and migration index
+with a selected twenty-six-file
+reader/domain/infrastructure/database/module/barrel/controller critical-source
+slice.
 Its local check rejects trust, timing, source-method substitution, active-controller
 lifecycle, signal substitution, cancellation/drain/cleanup, query fallback,
 budget/configuration substitution, raw trusted-assembly injection, private

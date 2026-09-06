@@ -200,9 +200,14 @@ the inert task definition.
 Migration `0023` originally gave the generic worker execution of the exact
 wallet-address resolver without wallet-table access. Migration `0028` revokes
 that resolver and all four balance checkpoint functions from the generic
-worker. The dormant dedicated balance-consumer identities have no database
-connection or grants, and the current workload supplies neither the separate
-metadata secret nor an active consumer process. A job therefore still cannot
+worker, and the cumulative migration chain through `0029` preserves the
+suspension. Migration `0029` separately gives only the exact API role a
+chain-bound-wallet-gated read over global Ethereum/Solana provider-position
+chain-anchor evidence; it grants no runtime evidence-record or control function
+and no balance-consumer capability. The dormant dedicated balance-consumer
+identities have no database connection or grants, and the current workload
+supplies neither the separate metadata secret nor an active consumer process. A
+job therefore still cannot
 obtain a plaintext address or cause chain I/O. See
 `docs/rpc-indexing/balance-consumer-wallet-address-boundary.md`.
 
@@ -272,12 +277,19 @@ change cannot silently reinterpret stored balances.
 
 Migration `0020` historically gave the generic worker execute access to the
 checkpoint read/current/stale/reorg functions. The cumulative migration chain
-through `0028` revokes all four grants plus the wallet-address resolver grant;
+through `0029` revokes all four grants plus the wallet-address resolver grant;
 no application runtime currently has balance-consumer function authority. The
 API role retains only execute access to the separate roster-bound portfolio
-balance read, and neither API nor worker can read or mutate the four balance
-tables. The finalized-anchor writer exists for tested recovery semantics but
-has no runtime grant until independent live-finality evidence is approved.
+balance read and migration `0029`'s active-chain-bound-wallet-gated
+provider-position anchor-evidence read. That new global evidence/control schema
+has no account or wallet PII columns; its record and invalidation/quarantine
+functions remain owner-controlled with no runtime grant. No application
+anchor-evidence reader/adapter or writer/producer exists, no populated rows or
+runtime activation, deployment, or live evidence are claimed, and neither API
+nor worker can read or mutate the
+four balance tables. The finalized-anchor writer exists for tested recovery
+semantics but has no runtime grant until independent live-finality evidence is
+approved.
 Every definer and invoked helper has a fixed safe `search_path`, and rollback
 refuses once any raw, event, or projected row exists.
 

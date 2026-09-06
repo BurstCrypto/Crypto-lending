@@ -271,12 +271,19 @@ preflight retains `BALANCE_CONSUMER_TASK_NOT_PROVISIONED`,
 `BALANCE_CONSUMER_DEPLOYED_EVIDENCE_MISSING`, along with the database,
 external-egress, RPC/provider, and other production blockers.
 
-Migration `0028` also revokes the generic worker's execution of the exact
-wallet-address resolver and four balance checkpoint functions. The dormant
-balance-consumer capability role and bounded login slots remain without
-database connection, schema, object, function, default-ACL, or ownership
-authority. A later reviewed migration and deployed verification are required
-before a dedicated consumer may receive any database grant.
+Migration `0028` revokes the generic worker's execution of the exact
+wallet-address resolver and four balance checkpoint functions. The cumulative
+chain through migration `0029` preserves that suspension. Migration `0029`
+adds append-only global Ethereum/Solana provider-position chain-anchor evidence
+and invalidation/quarantine controls without account or wallet PII columns. Its
+only runtime grant is the exact API role's chain-bound-wallet-gated read. That
+read is `SECURITY DEFINER`; evidence-record and control functions remain
+owner-controlled with no runtime grants. The dormant balance-consumer capability role and bounded
+login slots still have no database connection, schema, object, function,
+default-ACL, or ownership authority. No application anchor reader/adapter,
+evidence writer/producer, populated rows, registration, deployment, or live
+evidence exists, and no runtime is activated. A later reviewed migration and deployed verification are
+required before a dedicated consumer may receive any database grant.
 
 Trust policies admit only `ecs-tasks.amazonaws.com` from the same account and
 the reviewed regional ECS source-ARN shape. Wildcard task actions/resources,
@@ -414,7 +421,7 @@ complete:
   selectors and other workloads cannot read them;
 - a guarded, current-to-target auth/wallet VersionId transition and deployed
   replacement/rollback drill before rotating that shared external secret;
-- application readiness against the immutable migration chain through `0028`;
+- application readiness against the immutable migration chain through `0029`;
 - live positive and negative IAM decisions against exact deployed role/resource
   ARNs;
 - full-hop TLS from the load balancer to application targets;
