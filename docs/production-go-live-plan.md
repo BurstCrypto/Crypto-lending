@@ -196,7 +196,11 @@ fallback milestone in this release plan.
    the same asset. The local position evidence and composition contracts retain
    provider, protocol, market, position, wallet, network, asset, source, and
    observation identity, but no trusted live reader, persistence admission,
-   approved policy binding, or production registration exists.
+   approved policy binding, concrete deadline runner, cancellable wallet-roster
+   database propagation, or production registration exists. The dormant
+   coordinator now propagates one abort signal to every provider read, stops
+   queued work on first failure, drains started cooperative reads, and closes
+   the signal on every terminal path.
 3. Run two independently reviewed read-adapter lanes in parallel: six Ethereum
    candidates (Aave, Morpho, Compound, Spark, Euler, and Gearbox) and four
    Solana candidates (Kamino, Save, Project 0, and Jupiter). Do not start or

@@ -580,7 +580,7 @@ const REVIEWED_PROVIDER_POSITION_READ_ARTIFACT_SHA256 = Object.freeze({
   providerPositionTrustedAssemblyPortSource:
     '9120c664640be1f855b1ea77cc9ca403506cae306b3f14679172f634c4e8a37b',
   providerPositionAdmissionCoordinatorSource:
-    '9cef023d61b4509f465ea3d6f1d95c93bd9f23990d2ab1137e2c8c5cb72d6c20',
+    '7bd8f0597c3ff93cb5a99bcb20b89664232b27565ebe06ee16f629792c98dd53',
   providerPositionCoverageSource:
     'a26d468abb2c46bd28267c6d36d1a7d3e62c30a700159e3c4cf263d15a8a9611',
   providerPositionObservationSource:
@@ -2046,6 +2046,21 @@ function hasDormantProviderPositionReadBoundaryContract(
       coordinator,
       "if (assembly === undefined) return fail('ASSEMBLY_UNAVAILABLE');",
     ) === 1 &&
+    exactExecutableLineCount(coordinator, 'readonly signal: AbortSignal;') === 2 &&
+    exactExecutableLineCount(coordinator, 'signal: activeController.signal,') === 3 &&
+    exactExecutableLineCount(
+      coordinator,
+      'if (prepared.controller.signal.aborted === false) prepared.controller.abort();',
+    ) === 1 &&
+    exactExecutableLineCount(
+      coordinator,
+      'if (controller?.signal.aborted === false) controller.abort();',
+    ) === 1 &&
+    exactExecutableLineCount(
+      coordinator,
+      'while (!failed && !controller.signal.aborted && next < inputs.length) {',
+    ) === 1 &&
+    exactExecutableLineCount(coordinator, 'if (failed) throw firstFailure;') === 1 &&
     exactExecutableLineCount(
       coordinator,
       'assembly.verifyAssembly(chainAssessment, assemblyRequest) !== true',

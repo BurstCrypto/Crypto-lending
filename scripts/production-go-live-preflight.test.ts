@@ -1083,6 +1083,26 @@ test('provider-position read inspection rejects trust, coverage, and dormancy dr
       'const verified = canonicalClock(this.clock.now());',
       'const verified = completed;',
     ],
+    [
+      'providerPositionAdmissionCoordinatorSource',
+      'readonly signal: AbortSignal;',
+      'readonly signal?: AbortSignal;',
+    ],
+    [
+      'providerPositionAdmissionCoordinatorSource',
+      'signal: activeController.signal,',
+      'signal: new AbortController().signal,',
+    ],
+    [
+      'providerPositionAdmissionCoordinatorSource',
+      'if (prepared.controller.signal.aborted === false) prepared.controller.abort();',
+      'void prepared.controller;',
+    ],
+    [
+      'providerPositionAdmissionCoordinatorSource',
+      'while (!failed && !controller.signal.aborted && next < inputs.length) {',
+      'while (next < inputs.length) {',
+    ],
     ['providerPositionAdmissionCoordinatorSource', 'selectedTargetSources.push(', 'void ('],
     ['providerPositionAdmissionCoordinatorSource', 'mayPersist: false,', 'mayPersist: true,'],
     ['providerPositionCoverageSource', 'if (observationsInput.length === 0) {', 'if (true) {'],

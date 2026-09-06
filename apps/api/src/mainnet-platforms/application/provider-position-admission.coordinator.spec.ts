@@ -77,8 +77,12 @@ class FakeWalletReader implements PortfolioWalletRegistrationReader {
 
 class FakeSource implements ProviderPositionAdmissionSourcePort {
   readonly calls: ReadProviderPositionAdmissionTargetRequestV1[] = [];
+  readonly signalAbortedWhenCalled: boolean[] = [];
   error: Error | undefined;
   mutate: ((value: MutableRecord) => void) | undefined;
+  readOverride:
+    | ((request: ReadProviderPositionAdmissionTargetRequestV1) => Promise<unknown>)
+    | undefined;
   positions: MutableRecord[] = [position()];
 
   constructor(
@@ -90,7 +94,9 @@ class FakeSource implements ProviderPositionAdmissionSourcePort {
 
   async readTarget(request: ReadProviderPositionAdmissionTargetRequestV1): Promise<unknown> {
     this.calls.push(request);
+    this.signalAbortedWhenCalled.push(request.signal.aborted);
     if (this.error) throw this.error;
+    if (this.readOverride) return this.readOverride(request);
     const value = sourceEvidence(this, request, this.positions);
     this.mutate?.(value);
     return value;
@@ -671,6 +677,8 @@ describe('DormantProviderPositionAdmissionCoordinator', () => {
     );
     expect(assembly.calls[0]?.admissionCandidate).toBe(result.admissionCandidate);
     expect(assembly.calls[0]?.signal.aborted).toBe(true);
+    expect(new Set(value.runner.calls.map(({ signal }) => signal)).size).toBe(1);
+    expect(assembly.calls[0]?.signal).toBe(value.runner.calls[0]?.signal);
     expect(value.runner.calls.at(-1)).toEqual(
       expect.objectContaining({
         sourceFamilyId: 'trusted-chain-assessment-assembly',
@@ -917,8 +925,16 @@ describe('DormantProviderPositionAdmissionCoordinator', () => {
         }),
       ]);
     }
-    expect(value.runner.calls).toHaveLength(2);
-    expect(new Set(value.runner.calls.map(({ signal }) => signal)).size).toBe(1);
+    expect(value.runner.calls).toHaveLength(3);
+    const sharedSignal = value.runner.calls[0]?.signal;
+    expect(new Set(value.runner.calls.map(({ signal }) => signal))).toEqual(
+      new Set([sharedSignal]),
+    );
+    for (const source of value.sources) {
+      expect(source.calls[0]?.signal).toBe(sharedSignal);
+      expect(source.signalAbortedWhenCalled).toEqual([false]);
+      expect(source.calls[0]?.signal.aborted).toBe(true);
+    }
     expect(value.runner.maximumActive).toBeLessThanOrEqual(2);
   });
 
@@ -1251,10 +1267,56 @@ describe('DormantProviderPositionAdmissionCoordinator', () => {
     source.sources[0]!.error = new Error('provider credential');
     await expectUnavailable(source, 'SOURCE_UNAVAILABLE');
 
-    const runner = fixture();
-    runner.runner.errorAtCall = 1;
-    await expectUnavailable(runner, 'SOURCE_UNAVAILABLE');
-    expect(runner.runner.calls[0]?.signal.aborted).toBe(true);
+    const rosterRunner = fixture();
+    rosterRunner.runner.errorAtCall = 1;
+    await expectUnavailable(rosterRunner, 'WALLET_ROSTER_UNAVAILABLE');
+    expect(rosterRunner.runner.calls[0]?.signal.aborted).toBe(true);
+
+    const sourceRunner = fixture();
+    sourceRunner.runner.errorAtCall = 2;
+    await expectUnavailable(sourceRunner, 'SOURCE_UNAVAILABLE');
+    expect(sourceRunner.runner.calls[0]?.signal.aborted).toBe(true);
+  });
+
+  it('aborts and drains started siblings without starting queued source jobs', async () => {
+    const value = mixedPositionTargetFixture();
+    value.sources[0]!.error = new Error('private provider failure');
+    let siblingObservedAbort = false;
+    value.sources[1]!.readOverride = (request) =>
+      new Promise<never>((_resolve, reject) => {
+        const onAbort = (): void => {
+          siblingObservedAbort = true;
+          reject(new Error('private sibling cancellation'));
+        };
+        if (request.signal.aborted) {
+          onAbort();
+          return;
+        }
+        request.signal.addEventListener('abort', onAbort, { once: true });
+      });
+
+    await expectUnavailable(value, 'SOURCE_UNAVAILABLE');
+
+    expect(siblingObservedAbort).toBe(true);
+    expect(value.sources.flatMap(({ calls }) => calls)).toHaveLength(2);
+    expect(value.runner.calls).toHaveLength(3);
+    expect(new Set(value.runner.calls.map(({ signal }) => signal))).toHaveProperty('size', 1);
+    expect(value.runner.calls[0]?.signal.aborted).toBe(true);
+  });
+
+  it('closes the shared signal after an empty authoritative roster candidate', async () => {
+    const value = fixture();
+    value.walletReader.response = [];
+
+    const result = await coordinator(value).admit({
+      accountId: ACCOUNT_ID,
+      correlationId: CORRELATION_ID,
+    });
+
+    expect(result.targets).toEqual([]);
+    expect(value.sources.every(({ calls }) => calls.length === 0)).toBe(true);
+    expect(value.runner.calls).toHaveLength(1);
+    expect(value.runner.calls[0]?.signal.aborted).toBe(true);
   });
 
   it('enforces the configured concurrency bound through the injected deadline runner', async () => {

@@ -60,6 +60,8 @@ const MAX_RESPONSE_BYTES = 1024 * 1024;
 const MAX_RESPONSE_NODES = 4_096;
 const MAX_DEADLINE_MILLISECONDS = 30_000;
 const MAX_CONCURRENCY = 8;
+const WALLET_ROSTER_SOURCE_FAMILY_ID = 'authoritative-wallet-roster';
+const WALLET_ROSTER_TARGET_ID = 'active-wallet-roster';
 
 export const PROVIDER_POSITION_ADMISSION_VERSION = 1 as const;
 export const PROVIDER_POSITION_ADMISSION_SOURCE_USE =
@@ -129,6 +131,7 @@ export interface ReadProviderPositionAdmissionTargetRequestV1 {
   readonly accountId: AccountId;
   readonly correlationId: string;
   readonly deadlineAt: string;
+  readonly signal: AbortSignal;
   readonly sourceFamilyId: string;
   readonly sourceId: string;
   readonly sourceKind: MainnetProviderPositionSourceKind;
@@ -143,8 +146,9 @@ export interface ReadProviderPositionAdmissionTargetRequestV1 {
 export interface ProviderPositionAdmissionSourcePort {
   /**
    * Returns a complete account-scoped target observation. Implementations own
-   * transport enforcement and must derive continuityFloor from durable state,
-   * not from the same stateless response that supplies chainAnchor.
+   * transport enforcement, must cooperatively stop and drain before rejecting
+   * when request.signal aborts, and must derive continuityFloor from durable
+   * state rather than the same stateless response that supplies chainAnchor.
    */
   readTarget(request: ReadProviderPositionAdmissionTargetRequestV1): Promise<unknown>;
 }
@@ -403,7 +407,12 @@ export class DormantProviderPositionAdmissionCoordinator {
   async admit(
     requestInput: ReadProviderPositionAdmissionRequestV1,
   ): Promise<ProviderPositionAdmissionAssemblyCandidateV1> {
-    return (await this.prepareAdmission(requestInput)).candidate;
+    const prepared = await this.prepareAdmission(requestInput);
+    try {
+      return prepared.candidate;
+    } finally {
+      if (prepared.controller.signal.aborted === false) prepared.controller.abort();
+    }
   }
 
   async admitAndAssemble(
@@ -507,8 +516,11 @@ export class DormantProviderPositionAdmissionCoordinator {
   private async prepareAdmission(
     requestInput: ReadProviderPositionAdmissionRequestV1,
   ): Promise<PreparedProviderPositionAdmission> {
+    let controller: AbortController | undefined;
     try {
       const request = parseRequest(requestInput);
+      controller = new AbortController();
+      const activeController = controller;
       const started = canonicalClock(this.clock.now());
       const deadlineMilliseconds = started.milliseconds + this.options.deadlineMilliseconds;
       if (!Number.isSafeInteger(deadlineMilliseconds)) return fail('INVALID_CONFIGURATION');
@@ -516,42 +528,63 @@ export class DormantProviderPositionAdmissionCoordinator {
       let wallets: readonly ActivePortfolioWalletRegistration[];
       try {
         wallets = parseActivePortfolioWalletRegistrations(
-          await this.walletReader.readActiveWalletRegistrations({
-            accountId: request.accountId,
-            evaluatedAt: started.timestamp,
-            correlationId: request.correlationId,
-          }),
+          await this.deadlineRunner.run(
+            {
+              deadlineAt,
+              correlationId: request.correlationId,
+              sourceFamilyId: WALLET_ROSTER_SOURCE_FAMILY_ID,
+              targetId: WALLET_ROSTER_TARGET_ID,
+              signal: activeController.signal,
+            },
+            async () => {
+              if (activeController.signal.aborted) return fail('WALLET_ROSTER_UNAVAILABLE');
+              const roster = await this.walletReader.readActiveWalletRegistrations({
+                accountId: request.accountId,
+                evaluatedAt: started.timestamp,
+                correlationId: request.correlationId,
+              });
+              if (activeController.signal.aborted) return fail('WALLET_ROSTER_UNAVAILABLE');
+              return roster;
+            },
+          ),
         );
       } catch {
         return fail('WALLET_ROSTER_UNAVAILABLE');
       }
-      if (canonicalClock(this.clock.now()).milliseconds >= deadlineMilliseconds) {
+      if (
+        activeController.signal.aborted ||
+        canonicalClock(this.clock.now()).milliseconds >= deadlineMilliseconds
+      ) {
         return fail('SOURCE_UNAVAILABLE');
       }
 
       const targets = expectedTargets(wallets, this.policy);
       const jobs = createJobs(targets, this.bindings);
       if (jobs.length > MAX_SOURCE_READS) return fail('LIMIT_EXCEEDED');
-      const controller = new AbortController();
       let evidence: readonly ProviderPositionAdmissionSourceEvidenceV1[];
       try {
-        evidence = await runBounded(jobs, this.options.maximumConcurrency, async (job) =>
-          this.deadlineRunner.run(
-            {
-              deadlineAt,
-              correlationId: request.correlationId,
-              sourceFamilyId: job.binding.sourceFamilyId,
-              targetId: job.target.targetId,
-              signal: controller.signal,
-            },
-            async () =>
-              parseSourceEvidence(
-                await job.binding.source.readTarget(
+        evidence = await runBounded(
+          jobs,
+          this.options.maximumConcurrency,
+          activeController,
+          async (job) =>
+            this.deadlineRunner.run(
+              {
+                deadlineAt,
+                correlationId: request.correlationId,
+                sourceFamilyId: job.binding.sourceFamilyId,
+                targetId: job.target.targetId,
+                signal: activeController.signal,
+              },
+              async () => {
+                if (activeController.signal.aborted) return fail('SOURCE_UNAVAILABLE');
+                const sourceEvidence = await job.binding.source.readTarget(
                   Object.freeze({
                     admissionVersion: PROVIDER_POSITION_ADMISSION_VERSION,
                     accountId: request.accountId,
                     correlationId: request.correlationId,
                     deadlineAt,
+                    signal: activeController.signal,
                     sourceFamilyId: job.binding.sourceFamilyId,
                     sourceId: job.binding.sourceId,
                     sourceKind: job.binding.sourceKind,
@@ -562,20 +595,22 @@ export class DormantProviderPositionAdmissionCoordinator {
                     networkId: job.target.networkId,
                     assets: job.target.assets,
                   }),
-                ),
-                request,
-                job,
-              ),
-          ),
+                );
+                if (activeController.signal.aborted) return fail('SOURCE_UNAVAILABLE');
+                return parseSourceEvidence(sourceEvidence, request, job);
+              },
+            ),
         );
       } catch (error) {
-        controller.abort();
+        if (activeController.signal.aborted === false) activeController.abort();
         if (error instanceof ProviderPositionAdmissionUnavailableError) throw error;
         return fail('SOURCE_UNAVAILABLE');
       }
 
       const captured = canonicalClock(this.clock.now());
-      if (captured.milliseconds >= deadlineMilliseconds) return fail('SOURCE_UNAVAILABLE');
+      if (activeController.signal.aborted || captured.milliseconds >= deadlineMilliseconds) {
+        return fail('SOURCE_UNAVAILABLE');
+      }
       const admittedTargets = assembleTargets(targets, evidence, captured.milliseconds);
       const staleAfter = admittedTargets.length
         ? admittedTargets.reduce(
@@ -683,9 +718,10 @@ export class DormantProviderPositionAdmissionCoordinator {
         wallets,
         deadlineAt,
         deadlineMilliseconds,
-        controller,
+        controller: activeController,
       });
     } catch (error) {
+      if (controller?.signal.aborted === false) controller.abort();
       if (error instanceof ProviderPositionAdmissionUnavailableError) throw error;
       return fail('ASSEMBLY_UNAVAILABLE');
     }
@@ -959,22 +995,35 @@ function createJobs(
 async function runBounded<TInput, TOutput>(
   inputs: readonly TInput[],
   concurrency: number,
+  controller: AbortController,
   read: (input: TInput) => Promise<TOutput>,
 ): Promise<readonly TOutput[]> {
   const results = new Array<TOutput>(inputs.length);
   let next = 0;
+  let failed = false;
+  let firstFailure: unknown;
   const worker = async (): Promise<void> => {
-    while (next < inputs.length) {
+    while (!failed && !controller.signal.aborted && next < inputs.length) {
       const index = next;
       next += 1;
       const input = inputs[index];
-      if (input === undefined) return fail('ASSEMBLY_UNAVAILABLE');
-      results[index] = await read(input);
+      try {
+        if (input === undefined) return fail('ASSEMBLY_UNAVAILABLE');
+        results[index] = await read(input);
+      } catch (error) {
+        if (!failed) {
+          failed = true;
+          firstFailure = error;
+          if (controller.signal.aborted === false) controller.abort();
+        }
+      }
     }
   };
   await Promise.all(
     Array.from({ length: Math.min(concurrency, inputs.length) }, async () => worker()),
   );
+  if (failed) throw firstFailure;
+  if (controller.signal.aborted) return fail('SOURCE_UNAVAILABLE');
   return Object.freeze(results);
 }
 

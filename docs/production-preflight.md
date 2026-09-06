@@ -187,9 +187,11 @@ feature barrel, and HTTP controller as one selected ten-file critical-source
 slice. Within that slice, the local semantic inspection requires covered rather than bare reader results,
 complete and agreeing coverage (including explicit zero counts), whole-assembly
 and per-observation verification, stable method capture, final clock checks,
-false persistence/financial authority, and one selected source and anchor for
-every target. It also confirms that the pinned feature module, barrel, and
-controller do not register or expose the coordinator or trusted assembly.
+false persistence/financial authority, one shared source abort signal, terminal
+cleanup, first-failure queue stop/drain behavior, and one selected source and
+anchor for every target. It also confirms that the pinned feature module,
+barrel, and controller do not register or expose the coordinator or trusted
+assembly.
 
 The current exact source passes local inspection, but launch readiness remains
 blocked by `PROVIDER_POSITION_READER_FEATURE_REGISTRATION_MISSING` and

@@ -7,15 +7,30 @@ Status: dormant, unregistered, read-only, and non-persistable.
 `DormantProviderPositionAdmissionCoordinator` is an application boundary between independently implemented provider/account readers and the existing mainnet provider-position coverage domain. For every authoritative active wallet × approved provider market, it:
 
 1. Parses the caller-supplied approved observation policy with the existing policy parser and requires its separately supplied exact fingerprint.
-2. Reads the authoritative active-wallet roster through the existing portfolio wallet port and parses it with `parseActivePortfolioWalletRegistrations`.
+2. Reads the authoritative active-wallet roster through the existing portfolio wallet port inside the same absolute-deadline runner used by later work, then parses it with `parseActivePortfolioWalletRegistrations`.
 3. Derives the same wallet × market target product used by the coverage domain, using only active registry assets and policy-approved market attribution.
 4. Requires one configured binding for every policy source and at least two distinct `sourceFamilyId` values for every active target's network.
-5. Sends every source an account-, correlation-, deadline-, wallet-, network-, provider-, protocol-, market-, and asset-bound request.
+5. Sends every source an account-, correlation-, deadline-, abort-signal-, wallet-, network-, provider-, protocol-, market-, and asset-bound request.
 6. Accepts only exact, bounded, descriptor-safe plain-data responses marked `COMPLETE`; it rejects missing/extra fields, unknown assets, duplicate positions, malformed integers, stale evidence, and continuity-floor regressions.
 7. Requires every independent source to report the exact same canonical position set and atomic balances. It never substitutes a missing response with zero. An empty set is admitted only when every required independent source explicitly and currently reports that complete empty set.
 8. Canonically orders targets, positions, and source evidence, then produces deterministic SHA-256 fingerprints and a valid `MainnetProviderPositionCoverageManifestV1` with `COMPLETE` / `AGREED` targets.
 
-Concurrency is bounded by a validated maximum of eight. All reads share one `AbortSignal` and an exclusive server-authored deadline. Deadline enforcement is delegated to an injected runner, so this dormant boundary owns no ambient timer; production implementations must enforce the deadline and abort signal around the underlying transport.
+Concurrency is bounded by a validated maximum of eight. The wallet-roster,
+provider-source, and trusted-assembly runner invocations share one `AbortSignal`
+and one exclusive server-authored deadline; every provider request receives that
+exact signal. The first parallel source failure aborts it immediately, prevents
+queued work from starting, and drains already-started cooperative reads before
+the coordinator settles. The signal is also aborted on every failed preparation
+and after either successful terminal path; it remains live through final trusted
+assembly verification. The returned candidate and covered snapshot expose no
+controller or signal.
+
+Deadline enforcement is still delegated to an injected runner, so this dormant
+boundary owns no ambient timer and does not yet provide a production runner.
+Production source transports must cooperatively stop on the supplied signal.
+The existing portfolio wallet-reader port does not itself accept that signal;
+the roster operation is bounded at the runner boundary, while cancellable
+database propagation remains required before production registration.
 
 The coordinator owns no endpoint, environment lookup, network client, credentials, database, persistence port, writer, or financial-action capability.
 
