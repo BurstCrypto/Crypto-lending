@@ -13,10 +13,21 @@ import {
   MAINNET_PROVIDER_POSITION_COVERAGE_ONLY,
   MAINNET_PROVIDER_POSITION_COVERAGE_VERSION,
   mainnetProviderPositionCoverageManifestFingerprintV1,
+  parseCoveredMainnetProviderPositionSnapshotV1,
   parseMainnetProviderPositionCoverageManifestV1,
+  type CoveredMainnetProviderPositionSnapshotV1,
   type MainnetProviderPositionCoverageManifestV1,
 } from '../domain/mainnet-provider-position-coverage';
-import { mainnetProviderPositionDecimalFromAtomic } from '../domain/mainnet-provider-position-observation';
+import {
+  parseMainnetProviderPositionChainAssessmentV1,
+  type MainnetProviderPositionChainAssessmentVerificationContextV1,
+} from '../domain/mainnet-provider-position-chain-assessment';
+import {
+  MAINNET_PROVIDER_POSITION_OBSERVATION_USE,
+  MAINNET_PROVIDER_POSITION_SCHEMA_VERSION,
+  mainnetProviderPositionDecimalFromAtomic,
+  type MainnetProviderPositionObservationV1,
+} from '../domain/mainnet-provider-position-observation';
 import {
   mainnetProviderPositionPolicyAllowsMarket,
   mainnetProviderPositionPolicyAllowsSource,
@@ -24,6 +35,14 @@ import {
   type MainnetProviderPositionObservationPolicyV1,
   type MainnetProviderPositionSourceKind,
 } from '../domain/mainnet-provider-position-observation-policy';
+import {
+  PROVIDER_POSITION_TRUSTED_CHAIN_ASSESSMENT_ASSEMBLY_USE,
+  PROVIDER_POSITION_TRUSTED_CHAIN_ASSESSMENT_ASSEMBLY_VERSION,
+  type AssembleProviderPositionTrustedChainAssessmentRequestV1,
+  type ProviderPositionTrustedChainAssessmentAssemblyPort,
+  type ProviderPositionTrustedChainAssessmentSnapshotCandidateV1,
+  type ProviderPositionTrustedChainAssessmentTargetSourceV1,
+} from './ports/provider-position-trusted-chain-assessment-assembly.port';
 
 const CORRELATION_ID = /^[A-Za-z0-9](?:[A-Za-z0-9._:-]{0,126}[A-Za-z0-9])?$/u;
 const SAFE_FAMILY_ID = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/u;
@@ -47,6 +66,9 @@ export const PROVIDER_POSITION_ADMISSION_SOURCE_USE =
   'DORMANT_PROVIDER_POSITION_TARGET_EVIDENCE_ONLY' as const;
 export const PROVIDER_POSITION_ADMISSION_CANDIDATE_USE =
   'DORMANT_PROVIDER_POSITION_ASSEMBLY_CANDIDATE_ONLY' as const;
+export const PROVIDER_POSITION_ADMISSION_READ_ONLY_ASSEMBLY_USE =
+  'DORMANT_PROVIDER_POSITION_READ_ONLY_ASSEMBLY_ONLY' as const;
+const TRUSTED_ASSEMBLY_SOURCE_FAMILY_ID = 'trusted-chain-assessment-assembly';
 
 export interface ProviderPositionAdmissionClock {
   now(): Date;
@@ -210,6 +232,15 @@ export interface ProviderPositionAdmissionAssemblyCandidateV1 {
   readonly candidateFingerprintSha256: string;
 }
 
+export interface ProviderPositionAdmissionReadOnlyAssemblyV1 {
+  readonly assemblyVersion: typeof PROVIDER_POSITION_ADMISSION_VERSION;
+  readonly use: typeof PROVIDER_POSITION_ADMISSION_READ_ONLY_ASSEMBLY_USE;
+  readonly mayAuthorizeFinancialAction: false;
+  readonly mayPersist: false;
+  readonly admissionCandidate: ProviderPositionAdmissionAssemblyCandidateV1;
+  readonly coveredSnapshot: CoveredMainnetProviderPositionSnapshotV1;
+}
+
 export interface ReadProviderPositionAdmissionRequestV1 {
   readonly accountId: AccountId;
   readonly correlationId: string;
@@ -257,14 +288,77 @@ interface ReadJob {
   readonly binding: ProviderPositionAdmissionSourceBinding;
 }
 
+interface PreparedProviderPositionAdmission {
+  readonly candidate: ProviderPositionAdmissionAssemblyCandidateV1;
+  readonly wallets: readonly ActivePortfolioWalletRegistration[];
+  readonly deadlineAt: string;
+  readonly deadlineMilliseconds: number;
+  readonly controller: AbortController;
+}
+
+interface ProviderPositionSnapshotAssemblyInput {
+  readonly positionSnapshot: ProviderPositionTrustedChainAssessmentSnapshotCandidateV1;
+  readonly selectedTargetSources: readonly ProviderPositionTrustedChainAssessmentTargetSourceV1[];
+}
+
 function fail(code: ProviderPositionAdmissionFailureCode): never {
   throw new ProviderPositionAdmissionUnavailableError(code);
+}
+
+function stableDataMember(value: object, key: PropertyKey): unknown {
+  let current: object | null = value;
+  for (let depth = 0; current !== null && depth < 8; depth += 1) {
+    const descriptor = Object.getOwnPropertyDescriptor(current, key);
+    if (descriptor !== undefined) {
+      if (!('value' in descriptor)) return fail('INVALID_CONFIGURATION');
+      return descriptor.value;
+    }
+    current = Object.getPrototypeOf(current) as object | null;
+  }
+  return fail('INVALID_CONFIGURATION');
+}
+
+function captureTrustedChainAssessmentAssembly(
+  value: ProviderPositionTrustedChainAssessmentAssemblyPort | undefined,
+): ProviderPositionTrustedChainAssessmentAssemblyPort | undefined {
+  if (value === undefined) return undefined;
+  if ((typeof value !== 'object' && typeof value !== 'function') || value === null) {
+    return fail('INVALID_CONFIGURATION');
+  }
+  const assemblyVersion = stableDataMember(value, 'assemblyVersion');
+  const assemble = stableDataMember(value, 'assemble');
+  const verifyAssembly = stableDataMember(value, 'verifyAssembly');
+  const verify = stableDataMember(value, 'verify');
+  if (
+    assemblyVersion !== PROVIDER_POSITION_TRUSTED_CHAIN_ASSESSMENT_ASSEMBLY_VERSION ||
+    typeof assemble !== 'function' ||
+    typeof verifyAssembly !== 'function' ||
+    typeof verify !== 'function'
+  ) {
+    return fail('INVALID_CONFIGURATION');
+  }
+
+  return Object.freeze({
+    assemblyVersion: PROVIDER_POSITION_TRUSTED_CHAIN_ASSESSMENT_ASSEMBLY_VERSION,
+    assemble: (request: AssembleProviderPositionTrustedChainAssessmentRequestV1) =>
+      Reflect.apply(assemble, value, [request]) as Promise<unknown>,
+    verifyAssembly: (
+      capability: unknown,
+      request: AssembleProviderPositionTrustedChainAssessmentRequestV1,
+    ) => Reflect.apply(verifyAssembly, value, [capability, request]) as boolean,
+    verify: (
+      capability: unknown,
+      context: MainnetProviderPositionChainAssessmentVerificationContextV1,
+    ) => Reflect.apply(verify, value, [capability, context]) as boolean,
+  });
 }
 
 export class DormantProviderPositionAdmissionCoordinator {
   private readonly policy!: MainnetProviderPositionObservationPolicyV1;
   private readonly bindings!: readonly ProviderPositionAdmissionSourceBinding[];
   private readonly options!: Readonly<ProviderPositionAdmissionOptions>;
+  private readonly trustedChainAssessmentAssembly!:
+    ProviderPositionTrustedChainAssessmentAssemblyPort | undefined;
 
   constructor(
     policyInput: unknown,
@@ -274,9 +368,13 @@ export class DormantProviderPositionAdmissionCoordinator {
     private readonly clock: ProviderPositionAdmissionClock,
     private readonly deadlineRunner: ProviderPositionAdmissionDeadlineRunner,
     options: ProviderPositionAdmissionOptions,
+    trustedChainAssessmentAssembly?: ProviderPositionTrustedChainAssessmentAssemblyPort,
   ) {
     try {
       this.policy = parseMainnetProviderPositionObservationPolicyV1(policyInput);
+      const capturedAssembly = captureTrustedChainAssessmentAssembly(
+        trustedChainAssessmentAssembly,
+      );
       if (
         requiredPolicyFingerprintSha256 !== this.policy.fingerprintSha256 ||
         !Array.isArray(sourceBindings) ||
@@ -295,6 +393,7 @@ export class DormantProviderPositionAdmissionCoordinator {
       }
       this.bindings = normalizeBindings(sourceBindings, this.policy);
       this.options = Object.freeze({ ...options });
+      this.trustedChainAssessmentAssembly = capturedAssembly;
     } catch (error) {
       if (error instanceof ProviderPositionAdmissionUnavailableError) throw error;
       return fail('INVALID_CONFIGURATION');
@@ -304,6 +403,110 @@ export class DormantProviderPositionAdmissionCoordinator {
   async admit(
     requestInput: ReadProviderPositionAdmissionRequestV1,
   ): Promise<ProviderPositionAdmissionAssemblyCandidateV1> {
+    return (await this.prepareAdmission(requestInput)).candidate;
+  }
+
+  async admitAndAssemble(
+    requestInput: ReadProviderPositionAdmissionRequestV1,
+  ): Promise<ProviderPositionAdmissionReadOnlyAssemblyV1> {
+    const assembly = this.trustedChainAssessmentAssembly;
+    if (assembly === undefined) return fail('ASSEMBLY_UNAVAILABLE');
+
+    const prepared = await this.prepareAdmission(requestInput);
+    const { candidate, controller } = prepared;
+    try {
+      const evaluated = canonicalClock(this.clock.now());
+      assertAssemblyWindow(evaluated.milliseconds, candidate, prepared, candidate.capturedAt);
+      const { positionSnapshot, selectedTargetSources } = positionSnapshotAssemblyInput(candidate);
+      const assemblyRequest = Object.freeze({
+        assemblyVersion: PROVIDER_POSITION_TRUSTED_CHAIN_ASSESSMENT_ASSEMBLY_VERSION,
+        use: PROVIDER_POSITION_TRUSTED_CHAIN_ASSESSMENT_ASSEMBLY_USE,
+        mayAuthorizeFinancialAction: false as const,
+        mayPersist: false as const,
+        accountId: candidate.accountId,
+        correlationId: candidate.correlationId,
+        candidateFingerprintSha256: candidate.candidateFingerprintSha256,
+        coverageManifestFingerprintSha256: candidate.coverageManifest.fingerprintSha256,
+        evaluatedAt: evaluated.timestamp,
+        deadlineAt: prepared.deadlineAt,
+        signal: controller.signal,
+        admissionCandidate: candidate,
+        positionSnapshot,
+        selectedTargetSources,
+      });
+      let chainAssessment: unknown;
+      try {
+        chainAssessment = await this.deadlineRunner.run(
+          {
+            deadlineAt: prepared.deadlineAt,
+            correlationId: candidate.correlationId,
+            sourceFamilyId: TRUSTED_ASSEMBLY_SOURCE_FAMILY_ID,
+            targetId: candidate.positionSnapshotId,
+            signal: controller.signal,
+          },
+          () => assembly.assemble(assemblyRequest),
+        );
+        const normalizedAssessment = parseMainnetProviderPositionChainAssessmentV1(chainAssessment);
+        const observationIds = new Set(
+          positionSnapshot.observations.map(({ observationId }) => observationId),
+        );
+        if (
+          normalizedAssessment.observationPolicyFingerprintSha256 !==
+            candidate.observationPolicyFingerprintSha256 ||
+          normalizedAssessment.assetRegistryVersion !== candidate.assetRegistryVersion ||
+          normalizedAssessment.assetRegistryFingerprintSha256 !==
+            candidate.assetRegistryFingerprintSha256 ||
+          normalizedAssessment.entries.length !== observationIds.size ||
+          normalizedAssessment.entries.some(
+            ({ observationId }) => observationIds.has(observationId) === false,
+          ) ||
+          assembly.verifyAssembly(chainAssessment, assemblyRequest) !== true
+        ) {
+          return fail('ASSEMBLY_UNAVAILABLE');
+        }
+      } catch {
+        return fail('ASSEMBLY_UNAVAILABLE');
+      }
+
+      const completed = canonicalClock(this.clock.now());
+      assertAssemblyWindow(completed.milliseconds, candidate, prepared, evaluated.timestamp);
+      let coveredSnapshot: CoveredMainnetProviderPositionSnapshotV1;
+      try {
+        coveredSnapshot = parseCoveredMainnetProviderPositionSnapshotV1({
+          accountId: candidate.accountId,
+          evaluatedAt: evaluated.timestamp,
+          expectedWallets: prepared.wallets,
+          observationPolicy: this.policy,
+          coverageManifest: candidate.coverageManifest,
+          positionSnapshot,
+          chainAssessment,
+          chainAssessmentVerifier: assembly,
+        });
+      } catch {
+        return fail('ASSEMBLY_UNAVAILABLE');
+      }
+      const verified = canonicalClock(this.clock.now());
+      assertAssemblyWindow(verified.milliseconds, candidate, prepared, completed.timestamp);
+
+      return Object.freeze({
+        assemblyVersion: PROVIDER_POSITION_ADMISSION_VERSION,
+        use: PROVIDER_POSITION_ADMISSION_READ_ONLY_ASSEMBLY_USE,
+        mayAuthorizeFinancialAction: false,
+        mayPersist: false,
+        admissionCandidate: candidate,
+        coveredSnapshot,
+      });
+    } catch (error) {
+      if (error instanceof ProviderPositionAdmissionUnavailableError) throw error;
+      return fail('ASSEMBLY_UNAVAILABLE');
+    } finally {
+      if (controller.signal.aborted === false) controller.abort();
+    }
+  }
+
+  private async prepareAdmission(
+    requestInput: ReadProviderPositionAdmissionRequestV1,
+  ): Promise<PreparedProviderPositionAdmission> {
     try {
       const request = parseRequest(requestInput);
       const started = canonicalClock(this.clock.now());
@@ -468,18 +671,117 @@ export class DormantProviderPositionAdmissionCoordinator {
         targets: admittedTargets,
         coverageManifest,
       });
-      return Object.freeze({
+      const candidate = Object.freeze({
         ...candidateWithoutFingerprint,
         candidateFingerprintSha256: fingerprint([
           'crypto-lending:provider-position-admission-candidate:v1',
           candidateWithoutFingerprint,
         ]),
       });
+      return Object.freeze({
+        candidate,
+        wallets,
+        deadlineAt,
+        deadlineMilliseconds,
+        controller,
+      });
     } catch (error) {
       if (error instanceof ProviderPositionAdmissionUnavailableError) throw error;
       return fail('ASSEMBLY_UNAVAILABLE');
     }
   }
+}
+
+function assertAssemblyWindow(
+  milliseconds: number,
+  candidate: ProviderPositionAdmissionAssemblyCandidateV1,
+  prepared: PreparedProviderPositionAdmission,
+  notBefore: string,
+): void {
+  if (
+    milliseconds < Date.parse(notBefore) ||
+    milliseconds >= prepared.deadlineMilliseconds ||
+    milliseconds >= Date.parse(candidate.staleAfter)
+  ) {
+    return fail('ASSEMBLY_UNAVAILABLE');
+  }
+}
+
+function positionSnapshotAssemblyInput(
+  candidate: ProviderPositionAdmissionAssemblyCandidateV1,
+): ProviderPositionSnapshotAssemblyInput {
+  const observations: MainnetProviderPositionObservationV1[] = [];
+  const selectedTargetSources: ProviderPositionTrustedChainAssessmentTargetSourceV1[] = [];
+  const observationIds = new Set<string>();
+  for (const target of candidate.targets) {
+    const selectedSource = target.acceptedSources[0];
+    if (selectedSource === undefined) return fail('ASSEMBLY_UNAVAILABLE');
+    selectedTargetSources.push(
+      Object.freeze({
+        targetId: target.targetId,
+        walletId: target.walletId,
+        providerId: target.providerId,
+        protocolId: target.protocolId,
+        marketId: target.marketId,
+        networkId: target.networkId,
+        source: selectedSource,
+      }),
+    );
+    for (const position of target.positions) {
+      const observationId = deterministicUuidV4(
+        fingerprint([
+          'crypto-lending:provider-position-final-observation-id:v1',
+          candidate.candidateFingerprintSha256,
+          target.targetId,
+          position,
+          selectedSource,
+        ]),
+      );
+      if (observationIds.has(observationId)) return fail('ASSEMBLY_UNAVAILABLE');
+      observationIds.add(observationId);
+      observations.push(
+        Object.freeze({
+          observationId,
+          walletId: target.walletId,
+          providerId: target.providerId,
+          protocolId: target.protocolId,
+          marketId: target.marketId,
+          positionId: position.positionId,
+          positionKind: position.positionKind,
+          asset: position.asset,
+          balance: position.balance,
+          source: Object.freeze({
+            sourceId: selectedSource.sourceId,
+            sourceKind: selectedSource.sourceKind,
+            sourceObservationId: selectedSource.sourceObservationId,
+            chainAnchor: selectedSource.chainAnchor,
+          }),
+          observedAt: selectedSource.observedAt,
+          staleAfter: target.staleAfter,
+          freshnessClass: 'CURRENT' as const,
+        }),
+      );
+    }
+  }
+
+  return Object.freeze({
+    positionSnapshot: Object.freeze({
+      schemaVersion: MAINNET_PROVIDER_POSITION_SCHEMA_VERSION,
+      use: MAINNET_PROVIDER_POSITION_OBSERVATION_USE,
+      mayAuthorizeFinancialAction: false,
+      snapshotId: candidate.positionSnapshotId,
+      observationPolicyVersion: candidate.observationPolicyVersion,
+      observationPolicyId: candidate.observationPolicyId,
+      observationPolicyFingerprintSha256: candidate.observationPolicyFingerprintSha256,
+      assetRegistryVersion: candidate.assetRegistryVersion,
+      assetRegistryFingerprintSha256: candidate.assetRegistryFingerprintSha256,
+      capturedAt: candidate.capturedAt,
+      staleAfter: candidate.staleAfter,
+      freshnessClass: 'CURRENT',
+      observations: Object.freeze(observations),
+    }),
+    selectedTargetSources: Object.freeze(selectedTargetSources),
+  });
 }
 
 function parseRequest(value: unknown): ReadProviderPositionAdmissionRequestV1 {

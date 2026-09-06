@@ -19,7 +19,7 @@ Concurrency is bounded by a validated maximum of eight. All reads share one `Abo
 
 The coordinator owns no endpoint, environment lookup, network client, credentials, database, persistence port, writer, or financial-action capability.
 
-## Why it does not yet emit `MainnetProviderPositionSnapshotV1`
+## Why `admit` does not emit `MainnetProviderPositionSnapshotV1`
 
 The existing snapshot parser correctly requires a `MainnetProviderPositionChainAssessmentV1` and an opaque trusted verifier capability. Verification is bound to all normalized observation fields, including:
 
@@ -42,9 +42,28 @@ The output therefore has:
 
 It contains a deterministic proposed snapshot ID, agreed normalized positions, accepted source evidence, and a parsed coverage manifest, but it is not itself a provider-position snapshot.
 
-## Required next binding
+## Dormant trusted assembly boundary
 
-A future shared-domain change must introduce a trusted chain-assessment assembly port that receives the final canonical observation selection and snapshot context, independently verifies every selected anchor against durable chain progression/finality state, and returns one opaque capability covering the complete assembled assessment. Only then may the existing `parseMainnetProviderPositionSnapshotV1` and `parseCoveredMainnetProviderPositionSnapshotV1` functions produce the final covered snapshot.
+The optional `ProviderPositionTrustedChainAssessmentAssemblyPort` closes the in-process assembly contract without supplying a production implementation. It is constructor-injected and is not exported by the feature barrel, registered in the Nest module, or reachable from an HTTP endpoint. `admitAndAssemble` fails with the sanitized `ASSEMBLY_UNAVAILABLE` code before reading wallets or providers when that port is absent.
+
+When the port is present, the coordinator retains the same-cycle authoritative wallet roster and parsed policy rather than rereading or reconstructing either one. It deterministically selects the first canonically ordered accepted independent source for every agreed target position and builds immutable observation input. The assembly request binds:
+
+- the complete admission candidate and its fingerprint;
+- the coverage-manifest fingerprint;
+- account, correlation, snapshot, policy, and asset-registry identities;
+- every selected position, balance, source observation, chain anchor, and evidence timestamp;
+- a server-authored evaluation time and exclusive deadline; and
+- the same abort signal used by the bounded admission operation.
+
+One server-side port instance must issue the assessment, verify the whole assembly request, and verify every normalized nonempty observation. Its exact returned object is passed unchanged as the opaque verifier capability; a structurally identical clone or deserialized object is not sufficient. The port cannot return a verifier, approval boolean, writer, persistence handle, or final snapshot. The existing coverage and snapshot parsers remain the only path to the returned covered snapshot.
+
+The returned read-only envelope retains the original blocked admission candidate and exposes neither the raw assessment nor its capability. It explicitly has `mayAuthorizeFinancialAction: false` and `mayPersist: false`. For every target, including a zero-position target, the request separately carries the canonical selected source and anchor. An independently agreed empty position set invokes whole-assembly verification before using the coverage parser's explicit empty-snapshot path; it does not fabricate an observation or anchor.
+
+Assembly shares the admission deadline, captures the port's methods once without invoking accessors, is rejected if the server clock regresses or reaches the exclusive deadline or evidence-expiry boundary before or after verification, and aborts the shared signal when the operation finishes. A failed port, counterfeit capability, missing or extra assessment entry, changed source/anchor, or parser rejection returns no partial snapshot and is sanitized to `ASSEMBLY_UNAVAILABLE`.
+
+## Required production binding
+
+Production still needs a reviewed implementation of the dormant port. It must independently verify every selected anchor against durable chain identity, progression, and finality state and issue one object-identity capability covering the complete assembled assessment. No such implementation or production composition exists in this repository, so `admitAndAssemble` is not a live application path.
 
 That production change must also provide:
 

@@ -6,10 +6,20 @@ import type {
   ReadActivePortfolioWalletRegistrationsRequest,
 } from '../../portfolio/application/ports/portfolio-wallet-registration-reader.port';
 import {
+  MAINNET_PROVIDER_POSITION_CHAIN_ASSESSMENT_USE,
+  MAINNET_PROVIDER_POSITION_CHAIN_ASSESSMENT_VERSION,
+  type MainnetProviderPositionChainAssessmentVerificationContextV1,
+} from '../domain/mainnet-provider-position-chain-assessment';
+import {
   MAINNET_PROVIDER_POSITION_OBSERVATION_POLICY_USE,
   MAINNET_PROVIDER_POSITION_OBSERVATION_POLICY_VERSION,
   mainnetProviderPositionObservationPolicyFingerprintV1,
 } from '../domain/mainnet-provider-position-observation-policy';
+import {
+  PROVIDER_POSITION_TRUSTED_CHAIN_ASSESSMENT_ASSEMBLY_VERSION,
+  type AssembleProviderPositionTrustedChainAssessmentRequestV1,
+  type ProviderPositionTrustedChainAssessmentAssemblyPort,
+} from './ports/provider-position-trusted-chain-assessment-assembly.port';
 import {
   DormantProviderPositionAdmissionCoordinator,
   PROVIDER_POSITION_ADMISSION_SOURCE_USE,
@@ -106,6 +116,164 @@ class FakeDeadlineRunner implements ProviderPositionAdmissionDeadlineRunner {
     } finally {
       this.active -= 1;
     }
+  }
+}
+
+class FakeTrustedChainAssessmentAssembly implements ProviderPositionTrustedChainAssessmentAssemblyPort {
+  readonly assemblyVersion = PROVIDER_POSITION_TRUSTED_CHAIN_ASSESSMENT_ASSEMBLY_VERSION;
+  readonly calls: AssembleProviderPositionTrustedChainAssessmentRequestV1[] = [];
+  readonly assemblyVerificationCalls: AssembleProviderPositionTrustedChainAssessmentRequestV1[] =
+    [];
+  readonly verificationCalls: MainnetProviderPositionChainAssessmentVerificationContextV1[] = [];
+  readonly issued = new WeakMap<
+    object,
+    Readonly<{
+      request: AssembleProviderPositionTrustedChainAssessmentRequestV1;
+      assessmentId: string;
+    }>
+  >();
+  error: Error | undefined;
+  returnClone = false;
+  verifyAssemblyResult = true;
+  verifyResult = true;
+  verifyAssemblyError: Error | undefined;
+  verifyError: Error | undefined;
+  mutate: ((assessment: MutableRecord) => void) | undefined;
+  onRequest:
+    ((request: AssembleProviderPositionTrustedChainAssessmentRequestV1) => void) | undefined;
+
+  async assemble(
+    request: AssembleProviderPositionTrustedChainAssessmentRequestV1,
+  ): Promise<unknown> {
+    this.calls.push(request);
+    this.onRequest?.(request);
+    if (this.error) throw this.error;
+    if (
+      request.selectedTargetSources.length !== request.admissionCandidate.targets.length ||
+      request.selectedTargetSources.some((selection) => {
+        const target = request.admissionCandidate.targets.find(
+          ({ targetId }) => targetId === selection.targetId,
+        );
+        return (
+          target === undefined ||
+          selection.source !== target.acceptedSources[0] ||
+          selection.walletId !== target.walletId ||
+          selection.providerId !== target.providerId ||
+          selection.protocolId !== target.protocolId ||
+          selection.marketId !== target.marketId ||
+          selection.networkId !== target.networkId
+        );
+      })
+    ) {
+      throw new Error('invalid target source selection');
+    }
+    const assessmentId = `trusted-assessment-${this.calls.length}`;
+    const assessment: MutableRecord = {
+      assessmentVersion: MAINNET_PROVIDER_POSITION_CHAIN_ASSESSMENT_VERSION,
+      use: MAINNET_PROVIDER_POSITION_CHAIN_ASSESSMENT_USE,
+      mayAuthorizeFinancialAction: false,
+      assessmentId,
+      observationPolicyFingerprintSha256:
+        request.positionSnapshot.observationPolicyFingerprintSha256,
+      assetRegistryVersion: request.positionSnapshot.assetRegistryVersion,
+      assetRegistryFingerprintSha256: request.positionSnapshot.assetRegistryFingerprintSha256,
+      entries: request.positionSnapshot.observations.map((observation) => ({
+        observationId: observation.observationId,
+        sourceId: observation.source.sourceId,
+        sourceKind: observation.source.sourceKind,
+        sourceObservationId: observation.source.sourceObservationId,
+        networkId: observation.asset.networkId,
+        chainAnchor: observation.source.chainAnchor,
+        assessedAt: request.positionSnapshot.capturedAt,
+        identityStatus: 'VERIFIED',
+        progressionStatus: 'CURRENT',
+        finalityStatus: 'HEALTHY',
+      })),
+    };
+    this.mutate?.(assessment);
+    const entries = assessment.entries;
+    if (Array.isArray(entries)) {
+      assessment.entries = Object.freeze(
+        entries.map((entry) =>
+          typeof entry === 'object' && entry !== null ? Object.freeze(entry) : entry,
+        ),
+      );
+    }
+    const capability = Object.freeze(assessment);
+    this.issued.set(capability, Object.freeze({ request, assessmentId }));
+    return this.returnClone ? structuredClone(capability) : capability;
+  }
+
+  verifyAssembly(
+    capability: unknown,
+    request: AssembleProviderPositionTrustedChainAssessmentRequestV1,
+  ): boolean {
+    this.assemblyVerificationCalls.push(request);
+    if (this.verifyAssemblyError) throw this.verifyAssemblyError;
+    return (
+      this.verifyAssemblyResult &&
+      typeof capability === 'object' &&
+      capability !== null &&
+      this.issued.get(capability)?.request === request
+    );
+  }
+
+  verify(
+    capability: unknown,
+    context: MainnetProviderPositionChainAssessmentVerificationContextV1,
+  ): boolean {
+    this.verificationCalls.push(context);
+    if (this.verifyError) throw this.verifyError;
+    if (!this.verifyResult || typeof capability !== 'object' || capability === null) return false;
+    const issued = this.issued.get(capability);
+    if (issued === undefined) return false;
+    const snapshot = issued.request.positionSnapshot;
+    const observation = snapshot.observations.find(
+      (candidate) => candidate.observationId === context.observationId,
+    );
+    if (observation === undefined) return false;
+    const expectedSelector = observation.asset.networkId.startsWith('solana:')
+      ? 'confirmed'
+      : 'latest';
+    return (
+      context.positionSchemaVersion === snapshot.schemaVersion &&
+      context.snapshotId === snapshot.snapshotId &&
+      context.assessmentVersion === MAINNET_PROVIDER_POSITION_CHAIN_ASSESSMENT_VERSION &&
+      context.assessmentId === issued.assessmentId &&
+      context.observationPolicyFingerprintSha256 === snapshot.observationPolicyFingerprintSha256 &&
+      context.assetRegistryVersion === snapshot.assetRegistryVersion &&
+      context.assetRegistryFingerprintSha256 === snapshot.assetRegistryFingerprintSha256 &&
+      /^[0-9a-f]{64}$/u.test(context.observationFingerprintSha256) &&
+      context.walletId === observation.walletId &&
+      context.providerId === observation.providerId &&
+      context.protocolId === observation.protocolId &&
+      context.marketId === observation.marketId &&
+      context.positionId === observation.positionId &&
+      context.positionKind === observation.positionKind &&
+      context.stablecoin === observation.asset.stablecoin &&
+      context.assetIdentity === observation.asset.identity &&
+      context.assetDecimals === observation.asset.decimals &&
+      context.balanceAtomic === observation.balance.atomic &&
+      context.balanceDecimal === observation.balance.decimal &&
+      context.sourceId === observation.source.sourceId &&
+      context.sourceKind === observation.source.sourceKind &&
+      context.sourceObservationId === observation.source.sourceObservationId &&
+      context.networkId === observation.asset.networkId &&
+      context.observationTier === 'PROVISIONAL' &&
+      context.selector === expectedSelector &&
+      context.authority === 'DISPLAY_ONLY' &&
+      JSON.stringify(context.chainAnchor) === JSON.stringify(observation.source.chainAnchor) &&
+      context.observedAt === observation.observedAt &&
+      context.staleAfter === observation.staleAfter &&
+      context.freshnessClass === observation.freshnessClass &&
+      context.assessedAt === snapshot.capturedAt &&
+      context.capturedAt === snapshot.capturedAt &&
+      context.evaluatedAt === issued.request.evaluatedAt &&
+      context.identityStatus === 'VERIFIED' &&
+      context.progressionStatus === 'CURRENT' &&
+      context.finalityStatus === 'HEALTHY' &&
+      context.mayAuthorizeFinancialAction === false
+    );
   }
 }
 
@@ -286,9 +454,41 @@ function solanaFixture(): Fixture {
   };
 }
 
+function mixedPositionTargetFixture(): Fixture {
+  const value = fixture();
+  const content = policyContent();
+  const providers = content.providers as MutableRecord[];
+  providers.push({
+    providerId: 'compound',
+    protocols: [
+      {
+        protocolId: 'compound-iii',
+        markets: [
+          {
+            networkId: NETWORK_ID,
+            marketId: 'compound-iii-ethereum-usdc',
+            assets: [{ stablecoin: 'USDC', identity: USDC }],
+          },
+        ],
+      },
+    ],
+  });
+  value.policy = {
+    ...content,
+    fingerprintSha256: mainnetProviderPositionObservationPolicyFingerprintV1(content),
+  };
+  value.sources.forEach((source) => {
+    source.mutate = (response) => {
+      if (response.providerId === 'compound') response.positions = [];
+    };
+  });
+  return value;
+}
+
 function coordinator(
   value: Fixture,
   overrides: Partial<{ deadlineMilliseconds: number; maximumConcurrency: number }> = {},
+  assembly?: ProviderPositionTrustedChainAssessmentAssemblyPort,
 ): DormantProviderPositionAdmissionCoordinator {
   return new DormantProviderPositionAdmissionCoordinator(
     value.policy,
@@ -298,6 +498,7 @@ function coordinator(
     value.clock,
     value.runner,
     { deadlineMilliseconds: 5_000, maximumConcurrency: 2, ...overrides },
+    assembly,
   );
 }
 
@@ -312,6 +513,24 @@ async function expectUnavailable(
       name: 'ProviderPositionAdmissionUnavailableError',
       message: 'Provider-position admission is unavailable.',
       code,
+    }),
+  );
+}
+
+async function expectAssemblyUnavailable(
+  value: Fixture,
+  assembly?: ProviderPositionTrustedChainAssessmentAssemblyPort,
+): Promise<void> {
+  await expect(
+    coordinator(value, {}, assembly).admitAndAssemble({
+      accountId: ACCOUNT_ID,
+      correlationId: CORRELATION_ID,
+    }),
+  ).rejects.toEqual(
+    expect.objectContaining({
+      name: 'ProviderPositionAdmissionUnavailableError',
+      message: 'Provider-position admission is unavailable.',
+      code: 'ASSEMBLY_UNAVAILABLE',
     }),
   );
 }
@@ -384,6 +603,293 @@ describe('DormantProviderPositionAdmissionCoordinator', () => {
     expect(Object.isFrozen(result)).toBe(true);
     expect(Object.isFrozen(result.targets)).toBe(true);
     expect(Object.isFrozen(result.coverageManifest)).toBe(true);
+  });
+
+  it('assembles a read-only covered snapshot through one opaque issuer/verifier boundary', async () => {
+    const value = fixture();
+    const assembly = new FakeTrustedChainAssessmentAssembly();
+    const result = await coordinator(value, {}, assembly).admitAndAssemble({
+      accountId: ACCOUNT_ID,
+      correlationId: CORRELATION_ID,
+    });
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        assemblyVersion: 1,
+        use: 'DORMANT_PROVIDER_POSITION_READ_ONLY_ASSEMBLY_ONLY',
+        mayAuthorizeFinancialAction: false,
+        mayPersist: false,
+      }),
+    );
+    expect(result.admissionCandidate).toEqual(
+      expect.objectContaining({
+        mayAuthorizeFinancialAction: false,
+        mayPersist: false,
+        mayCreatePositionSnapshot: false,
+        assemblyStatus: 'BLOCKED_PENDING_TRUSTED_CHAIN_ASSESSMENT_ASSEMBLY',
+      }),
+    );
+    expect(result.coveredSnapshot).toEqual(
+      expect.objectContaining({
+        mayAuthorizeFinancialAction: false,
+        snapshotId: result.admissionCandidate.positionSnapshotId,
+        coverageManifest: result.admissionCandidate.coverageManifest,
+      }),
+    );
+    expect(result.coveredSnapshot.observations).toEqual([
+      expect.objectContaining({
+        walletId: WALLET_ID,
+        providerId: 'aave',
+        protocolId: 'aave-v3',
+        positionId: 'aave-usdc-supply',
+        balance: { atomic: '1234567', decimal: '1.234567' },
+        source: expect.objectContaining({
+          sourceId: 'rpc-alpha',
+          sourceKind: 'RPC',
+          sourceObservationId: 'rpc-alpha-observation-100',
+          chainAnchor: { kind: 'EVM_BLOCK', blockNumber: '100', blockHash: BLOCK_HASH },
+        }),
+      }),
+    ]);
+    expect(assembly.calls).toHaveLength(1);
+    expect(assembly.assemblyVerificationCalls).toHaveLength(1);
+    expect(assembly.verificationCalls).toHaveLength(1);
+    expect(assembly.calls[0]).toEqual(
+      expect.objectContaining({
+        assemblyVersion: 1,
+        use: 'DORMANT_PROVIDER_POSITION_CHAIN_ASSESSMENT_ASSEMBLY_ONLY',
+        mayAuthorizeFinancialAction: false,
+        mayPersist: false,
+        accountId: ACCOUNT_ID,
+        correlationId: CORRELATION_ID,
+        evaluatedAt: NOW.toISOString(),
+        deadlineAt: '2026-09-04T17:00:05.000Z',
+        candidateFingerprintSha256: result.admissionCandidate.candidateFingerprintSha256,
+        coverageManifestFingerprintSha256:
+          result.admissionCandidate.coverageManifest.fingerprintSha256,
+      }),
+    );
+    expect(assembly.calls[0]?.admissionCandidate).toBe(result.admissionCandidate);
+    expect(assembly.calls[0]?.signal.aborted).toBe(true);
+    expect(value.runner.calls.at(-1)).toEqual(
+      expect.objectContaining({
+        sourceFamilyId: 'trusted-chain-assessment-assembly',
+        targetId: result.admissionCandidate.positionSnapshotId,
+      }),
+    );
+    expect(Object.keys(result)).not.toEqual(
+      expect.arrayContaining(['chainAssessment', 'chainAssessmentVerifier', 'capability']),
+    );
+    expect(Object.isFrozen(result)).toBe(true);
+    expect(Object.isFrozen(result.coveredSnapshot)).toBe(true);
+  });
+
+  it('requires an injected trusted assembler before performing any admission reads', async () => {
+    const value = fixture();
+    await expectAssemblyUnavailable(value);
+    expect(value.walletReader.calls).toEqual([]);
+    expect(value.sources.every((source) => source.calls.length === 0)).toBe(true);
+  });
+
+  it('assembles Solana positions with the exact selected slot/root anchor', async () => {
+    const value = solanaFixture();
+    const assembly = new FakeTrustedChainAssessmentAssembly();
+    const result = await coordinator(value, {}, assembly).admitAndAssemble({
+      accountId: ACCOUNT_ID,
+      correlationId: CORRELATION_ID,
+    });
+
+    expect(result.coveredSnapshot.observations).toEqual([
+      expect.objectContaining({
+        providerId: 'jupiter',
+        source: expect.objectContaining({
+          sourceId: 'solana-rpc',
+          sourceObservationId: 'solana-rpc-observation-100',
+          chainAnchor: { kind: 'SOLANA_SLOT', slot: '100', root: '99' },
+        }),
+      }),
+    ]);
+    expect(assembly.verificationCalls[0]?.selector).toBe('confirmed');
+  });
+
+  it('requires whole-assembly anchor attestation for independently agreed empty coverage', async () => {
+    const value = fixture();
+    value.sources.forEach((source) => (source.positions = []));
+    const assembly = new FakeTrustedChainAssessmentAssembly();
+    const result = await coordinator(value, {}, assembly).admitAndAssemble({
+      accountId: ACCOUNT_ID,
+      correlationId: CORRELATION_ID,
+    });
+
+    expect(result.coveredSnapshot.observations).toEqual([]);
+    expect(result.coveredSnapshot.coverageManifest.targets[0]?.positionCount).toBe(0);
+    expect(assembly.calls).toHaveLength(1);
+    expect(assembly.calls[0]?.selectedTargetSources).toEqual([
+      expect.objectContaining({
+        targetId: result.admissionCandidate.targets[0]?.targetId,
+        source: expect.objectContaining({
+          sourceId: 'rpc-alpha',
+          chainAnchor: { kind: 'EVM_BLOCK', blockNumber: '100', blockHash: BLOCK_HASH },
+        }),
+      }),
+    ]);
+    expect(assembly.assemblyVerificationCalls).toHaveLength(1);
+    expect(assembly.verificationCalls).toEqual([]);
+  });
+
+  it('attests selected anchors for mixed zero- and nonzero-position targets', async () => {
+    const value = mixedPositionTargetFixture();
+    const assembly = new FakeTrustedChainAssessmentAssembly();
+    const result = await coordinator(value, {}, assembly).admitAndAssemble({
+      accountId: ACCOUNT_ID,
+      correlationId: CORRELATION_ID,
+    });
+
+    expect(
+      result.admissionCandidate.coverageManifest.targets.map(({ positionCount }) => positionCount),
+    ).toEqual([1, 0]);
+    expect(result.coveredSnapshot.observations).toHaveLength(1);
+    expect(assembly.calls[0]?.selectedTargetSources).toHaveLength(2);
+    expect(assembly.assemblyVerificationCalls).toHaveLength(1);
+    expect(assembly.verificationCalls).toHaveLength(1);
+  });
+
+  it('keeps final source selection and observation identity stable across binding order', async () => {
+    const left = fixture();
+    left.bindings.reverse();
+    const right = fixture();
+    const leftAssembly = new FakeTrustedChainAssessmentAssembly();
+    const rightAssembly = new FakeTrustedChainAssessmentAssembly();
+
+    const first = await coordinator(left, {}, leftAssembly).admitAndAssemble({
+      accountId: ACCOUNT_ID,
+      correlationId: CORRELATION_ID,
+    });
+    const second = await coordinator(right, {}, rightAssembly).admitAndAssemble({
+      accountId: ACCOUNT_ID,
+      correlationId: CORRELATION_ID,
+    });
+
+    expect(first.coveredSnapshot.observations[0]?.observationId).toBe(
+      second.coveredSnapshot.observations[0]?.observationId,
+    );
+    expect(first.coveredSnapshot.observations[0]?.source).toEqual(
+      second.coveredSnapshot.observations[0]?.source,
+    );
+    expect(leftAssembly.calls[0]?.selectedTargetSources[0]?.source.sourceFamilyId).toBe(
+      'family-alpha',
+    );
+  });
+
+  it('rejects cloned capabilities and missing, extra, or cross-snapshot assessment entries', async () => {
+    const cloned = new FakeTrustedChainAssessmentAssembly();
+    cloned.returnClone = true;
+    await expectAssemblyUnavailable(fixture(), cloned);
+
+    const missing = new FakeTrustedChainAssessmentAssembly();
+    missing.mutate = (assessment) => (assessment.entries = []);
+    await expectAssemblyUnavailable(fixture(), missing);
+
+    const extra = new FakeTrustedChainAssessmentAssembly();
+    extra.mutate = (assessment) => {
+      const entries = assessment.entries as MutableRecord[];
+      assessment.entries = [
+        ...entries,
+        {
+          ...entries[0],
+          observationId: '77777777-7777-4777-8777-777777777777',
+        },
+      ];
+    };
+    await expectAssemblyUnavailable(fixture(), extra);
+
+    const crossSnapshot = new FakeTrustedChainAssessmentAssembly();
+    crossSnapshot.mutate = (assessment) => {
+      const entries = assessment.entries as MutableRecord[];
+      entries[0]!.observationId = '77777777-7777-4777-8777-777777777777';
+    };
+    await expectAssemblyUnavailable(fixture(), crossSnapshot);
+  });
+
+  it('sanitizes trusted assembly and verification failures and aborts the shared operation', async () => {
+    const failed = new FakeTrustedChainAssessmentAssembly();
+    failed.error = new Error('durable chain store credential');
+    await expectAssemblyUnavailable(fixture(), failed);
+    expect(failed.calls[0]?.signal.aborted).toBe(true);
+
+    const rejected = new FakeTrustedChainAssessmentAssembly();
+    rejected.verifyResult = false;
+    await expectAssemblyUnavailable(fixture(), rejected);
+    expect(rejected.verificationCalls).toHaveLength(1);
+
+    const wholeVerificationError = new FakeTrustedChainAssessmentAssembly();
+    wholeVerificationError.verifyAssemblyError = new Error('private whole-verifier detail');
+    await expectAssemblyUnavailable(fixture(), wholeVerificationError);
+    expect(wholeVerificationError.assemblyVerificationCalls).toHaveLength(1);
+
+    const observationVerificationError = new FakeTrustedChainAssessmentAssembly();
+    observationVerificationError.verifyError = new Error('private observation-verifier detail');
+    await expectAssemblyUnavailable(fixture(), observationVerificationError);
+    expect(observationVerificationError.verificationCalls).toHaveLength(1);
+
+    const mutation = new FakeTrustedChainAssessmentAssembly();
+    mutation.onRequest = (request) => {
+      const balance = request.positionSnapshot.observations[0]?.balance as {
+        atomic: string;
+      };
+      balance.atomic = '999';
+    };
+    await expectAssemblyUnavailable(fixture(), mutation);
+    expect(mutation.calls[0]?.signal.aborted).toBe(true);
+  });
+
+  it('captures issuer and verifier methods once so assembly-time replacement cannot grant trust', async () => {
+    const observationDrift = new FakeTrustedChainAssessmentAssembly();
+    observationDrift.verifyResult = false;
+    observationDrift.onRequest = () => {
+      Object.defineProperty(observationDrift, 'verify', {
+        configurable: true,
+        value: () => true,
+      });
+    };
+    await expectAssemblyUnavailable(fixture(), observationDrift);
+    expect(observationDrift.verificationCalls).toHaveLength(1);
+
+    const wholeDrift = new FakeTrustedChainAssessmentAssembly();
+    wholeDrift.verifyAssemblyResult = false;
+    wholeDrift.onRequest = () => {
+      Object.defineProperty(wholeDrift, 'verifyAssembly', {
+        configurable: true,
+        value: () => true,
+      });
+    };
+    await expectAssemblyUnavailable(fixture(), wholeDrift);
+    expect(wholeDrift.assemblyVerificationCalls).toHaveLength(1);
+  });
+
+  it('rejects assembly that completes at the exclusive deadline', async () => {
+    const value = fixture();
+    const times = [NOW, NOW, NOW, NOW, new Date(NOW.getTime() + 5_000)].map(
+      (time) => new Date(time),
+    );
+    value.clock = { now: () => times.shift() ?? new Date(NOW.getTime() + 5_000) };
+    const assembly = new FakeTrustedChainAssessmentAssembly();
+
+    await expectAssemblyUnavailable(value, assembly);
+    expect(assembly.calls[0]?.signal.aborted).toBe(true);
+  });
+
+  it('rejects assembly that reaches the exclusive deadline during observation verification', async () => {
+    const value = fixture();
+    const times = [NOW, NOW, NOW, NOW, NOW, new Date(NOW.getTime() + 5_000)].map(
+      (time) => new Date(time),
+    );
+    value.clock = { now: () => times.shift() ?? new Date(NOW.getTime() + 5_000) };
+    const assembly = new FakeTrustedChainAssessmentAssembly();
+
+    await expectAssemblyUnavailable(value, assembly);
+    expect(assembly.verificationCalls).toHaveLength(1);
+    expect(assembly.calls[0]?.signal.aborted).toBe(true);
   });
 
   it('binds roster and source reads to the exact account, correlation, target, and deadline', async () => {
@@ -685,6 +1191,42 @@ describe('DormantProviderPositionAdmissionCoordinator', () => {
     expect(() => coordinator(value, { maximumConcurrency: 9 })).toThrow(
       ProviderPositionAdmissionUnavailableError,
     );
+
+    const wrongAssemblyVersion = new FakeTrustedChainAssessmentAssembly();
+    Object.defineProperty(wrongAssemblyVersion, 'assemblyVersion', { value: 2 });
+    expect(() =>
+      coordinator(
+        value,
+        {},
+        wrongAssemblyVersion as unknown as ProviderPositionTrustedChainAssessmentAssemblyPort,
+      ),
+    ).toThrow(ProviderPositionAdmissionUnavailableError);
+
+    let accessorInvoked = false;
+    const accessorAssembly = Object.create(null) as MutableRecord;
+    Object.defineProperties(accessorAssembly, {
+      assemblyVersion: {
+        enumerable: true,
+        value: PROVIDER_POSITION_TRUSTED_CHAIN_ASSESSMENT_ASSEMBLY_VERSION,
+      },
+      assemble: {
+        enumerable: true,
+        get: () => {
+          accessorInvoked = true;
+          return async () => undefined;
+        },
+      },
+      verifyAssembly: { enumerable: true, value: () => true },
+      verify: { enumerable: true, value: () => true },
+    });
+    expect(() =>
+      coordinator(
+        value,
+        {},
+        accessorAssembly as unknown as ProviderPositionTrustedChainAssessmentAssemblyPort,
+      ),
+    ).toThrow(ProviderPositionAdmissionUnavailableError);
+    expect(accessorInvoked).toBe(false);
   });
 
   it('rejects invalid and duplicate authoritative wallet rosters', async () => {
