@@ -251,6 +251,9 @@ export interface ProviderPositionReadBoundaryArtifactSources {
   readonly providerPositionTrustedAssemblyPortSource: string;
   readonly providerPositionAdmissionCoordinatorSource: string;
   readonly providerPositionDeadlineRunnerSource: string;
+  readonly providerPositionRuntimeBoundsSource: string;
+  readonly providerPositionInfrastructureConfigSource: string;
+  readonly providerPositionRuntimePostgresPoolSource: string;
   readonly portfolioWalletRegistrationReaderPortSource: string;
   readonly registeredPortfolioWalletReaderSource: string;
   readonly walletRegistrationServiceSource: string;
@@ -576,6 +579,9 @@ const PROVIDER_POSITION_READ_ARTIFACT_KEYS = Object.freeze([
   'providerPositionTrustedAssemblyPortSource',
   'providerPositionAdmissionCoordinatorSource',
   'providerPositionDeadlineRunnerSource',
+  'providerPositionRuntimeBoundsSource',
+  'providerPositionInfrastructureConfigSource',
+  'providerPositionRuntimePostgresPoolSource',
   'portfolioWalletRegistrationReaderPortSource',
   'registeredPortfolioWalletReaderSource',
   'walletRegistrationServiceSource',
@@ -599,6 +605,12 @@ const REVIEWED_PROVIDER_POSITION_READ_ARTIFACT_SHA256 = Object.freeze({
     '36c8470916227dd25d6984f4b0fbe412b0bd25a4dd0bcdc6a845c6ddc778ab45',
   providerPositionDeadlineRunnerSource:
     '6910ff27ce6b29d06d7f3fc20743779196259bda5518b1b4ada7f82b9c2c3f97',
+  providerPositionRuntimeBoundsSource:
+    '342895e5e4bafca127c67db519e8ca252b0b75377a1e9311e00639e74a32d812',
+  providerPositionInfrastructureConfigSource:
+    'fb1f6639a330d6a07db1d82434559356a4707a6550848d75397a1ff5e6a3fd10',
+  providerPositionRuntimePostgresPoolSource:
+    'd15b4a0604cda0bcc9d8df7f597863e42c4ef573ba8ed4362386cd2beaa1f823',
   portfolioWalletRegistrationReaderPortSource:
     '51261b1f960a7a3918dbeb72a789cf0ff75d299727f93c844e525477bf51806c',
   registeredPortfolioWalletReaderSource:
@@ -2001,6 +2013,15 @@ function hasDormantProviderPositionReadBoundaryContract(
   const assemblyPort = sources.providerPositionTrustedAssemblyPortSource.replace(/\r\n/gu, '\n');
   const coordinator = sources.providerPositionAdmissionCoordinatorSource.replace(/\r\n/gu, '\n');
   const deadlineRunner = sources.providerPositionDeadlineRunnerSource.replace(/\r\n/gu, '\n');
+  const runtimeBounds = sources.providerPositionRuntimeBoundsSource.replace(/\r\n/gu, '\n');
+  const infrastructureConfig = sources.providerPositionInfrastructureConfigSource.replace(
+    /\r\n/gu,
+    '\n',
+  );
+  const runtimePostgresPool = sources.providerPositionRuntimePostgresPoolSource.replace(
+    /\r\n/gu,
+    '\n',
+  );
   const portfolioWalletReaderPort =
     sources.portfolioWalletRegistrationReaderPortSource.replace(/\r\n/gu, '\n');
   const registeredWalletReader = sources.registeredPortfolioWalletReaderSource.replace(
@@ -2056,6 +2077,38 @@ function hasDormantProviderPositionReadBoundaryContract(
   );
   const forbiddenDeadlineRunnerCapability =
     /(?:\bimport\s*\(|\brequire\s*\(|\b(?:fetch|setInterval|setImmediate|queueMicrotask|WebSocket|EventSource|XMLHttpRequest)\s*\(|\b(?:process|Deno|Bun)\b|\bimport\s*\.\s*meta\s*\.\s*env\b|['"]https?:\/\/|(?:^|\n)[\t ]*@[A-Za-z_$])/iu;
+  const runtimeBoundsImportSources = Array.from(
+    runtimeBounds.matchAll(/\bfrom\s+['"]([^'"]+)['"]/gu),
+    (match) => match[1],
+  );
+  const runtimeBoundsImportDeclarationCount =
+    runtimeBounds.match(/^[\t ]*import\b/gmu)?.length ?? 0;
+  const forbiddenRuntimeBoundsCapability =
+    /(?:\bimport\s*\(|\brequire\s*\(|\b(?:fetch|setTimeout|setInterval|setImmediate|queueMicrotask|WebSocket|EventSource|XMLHttpRequest|readFileSync|writeFileSync)\s*\(|\.\s*(?:query|connect|end)\s*\(|\bconsole\s*\.|\b(?:process|Deno|Bun)\s*\.\s*env\b|\bimport\s*\.\s*meta\s*\.\s*env\b|['"]https?:\/\/|(?:^|\n)[\t ]*@[A-Za-z_$]|\b(?:callback|factory)\s*\(|\bReflect\s*\.\s*apply\s*\()/iu;
+  const runtimeBoundsPostgresSnapshot = runtimeBounds.indexOf(
+    'const postgresPoolConfig = postgresConfigSnapshot(postgresConfigInput);',
+  );
+  const runtimeBoundsAdmissionSnapshot = runtimeBounds.indexOf(
+    'const admissionOptions = admissionOptionsSnapshot(admissionOptionsInput);',
+    runtimeBoundsPostgresSnapshot,
+  );
+  const runtimeBoundsRelation = runtimeBounds.indexOf(
+    'if (postgresPoolConfig.database.connectionTimeoutMs > admissionOptions.deadlineMilliseconds) {',
+    runtimeBoundsAdmissionSnapshot,
+  );
+  const runtimeBoundsPoolDeclaration = runtimeBounds.indexOf('let pool: Pool;', runtimeBoundsRelation);
+  const runtimeBoundsPoolConstruction = runtimeBounds.indexOf(
+    'pool = createPostgresPool(postgresPoolConfig);',
+    runtimeBoundsPoolDeclaration,
+  );
+  const runtimeBoundsConstructionFailure = runtimeBounds.indexOf(
+    "return fail('PROVIDER_POSITION_ADMISSION_RUNTIME_CONSTRUCTION_FAILED');",
+    runtimeBoundsPoolConstruction,
+  );
+  const runtimeBoundsResourceReturn = runtimeBounds.indexOf(
+    'Object.assign(Object.create(null) as DormantProviderPositionAdmissionRuntimeResource, {',
+    runtimeBoundsConstructionFailure,
+  );
   const runnerOperationAwait = deadlineRunner.indexOf(
     'const outcome: OperationOutcome<T> = await Promise.resolve()',
   );
@@ -2221,12 +2274,156 @@ function hasDormantProviderPositionReadBoundaryContract(
     selectedTargetPush,
   );
   const forbiddenRuntimeIdentity =
-    /\b(?:MAINNET_PROVIDER_POSITION_READER|DormantProviderPositionAdmissionCoordinator|ProviderPositionTrustedChainAssessmentAssemblyPort|NodeProviderPositionAdmissionDeadlineRunner|PROVIDER_POSITION_TRUSTED_CHAIN_ASSESSMENT_ASSEMBLY_USE)\b/u;
+    /\b(?:MAINNET_PROVIDER_POSITION_READER|DormantProviderPositionAdmissionCoordinator|ProviderPositionTrustedChainAssessmentAssemblyPort|NodeProviderPositionAdmissionDeadlineRunner|createDormantProviderPositionAdmissionRuntimeResource|DormantProviderPositionAdmissionRuntimeResource|ProviderPositionAdmissionRuntimeBoundsError|PROVIDER_POSITION_TRUSTED_CHAIN_ASSESSMENT_ASSEMBLY_USE)\b/u;
   const forbiddenBarrelImplementation =
-    /(?:DormantProviderPositionAdmissionCoordinator|ProviderPositionTrustedChainAssessmentAssemblyPort|NodeProviderPositionAdmissionDeadlineRunner|provider-position-admission\.coordinator|provider-position-trusted-chain-assessment-assembly\.port|node-provider-position-admission-deadline\.runner)/u;
+    /(?:DormantProviderPositionAdmissionCoordinator|ProviderPositionTrustedChainAssessmentAssemblyPort|NodeProviderPositionAdmissionDeadlineRunner|createDormantProviderPositionAdmissionRuntimeResource|provider-position-admission\.coordinator|provider-position-trusted-chain-assessment-assembly\.port|node-provider-position-admission-deadline\.runner|provider-position-admission-runtime-bounds)/u;
+  const forbiddenCoordinatorRuntimeBoundsConsumption =
+    /(?:createDormantProviderPositionAdmissionRuntimeResource|provider-position-admission-runtime-bounds)/u;
 
   return (
     capabilityFreeSources.every((source) => !forbiddenCapability.test(source)) &&
+    runtimeBoundsImportDeclarationCount === 5 &&
+    runtimeBoundsImportSources.length === 5 &&
+    runtimeBoundsImportSources[0] === 'pg' &&
+    runtimeBoundsImportSources[1] === 'node:util/types' &&
+    runtimeBoundsImportSources[2] === '../../infrastructure/config/infrastructure.config' &&
+    runtimeBoundsImportSources[3] === '../../infrastructure/database/runtime-postgres-pool' &&
+    runtimeBoundsImportSources[4] ===
+      '../application/provider-position-admission.coordinator' &&
+    !forbiddenRuntimeBoundsCapability.test(runtimeBounds) &&
+    exactExecutableLineCount(
+      runtimeBounds,
+      'export const PROVIDER_POSITION_ADMISSION_MAX_DEADLINE_MILLISECONDS = 30_000 as const;',
+    ) === 1 &&
+    exactExecutableLineCount(
+      runtimeBounds,
+      'export const PROVIDER_POSITION_ADMISSION_MAX_CONCURRENCY = 8 as const;',
+    ) === 1 &&
+    exactExecutableLineCount(
+      runtimeBounds,
+      'PROVIDER_POSITION_ADMISSION_MAX_DEADLINE_MILLISECONDS,',
+    ) === 1 &&
+    exactExecutableLineCount(
+      runtimeBounds,
+      'PROVIDER_POSITION_ADMISSION_MAX_CONCURRENCY,',
+    ) === 1 &&
+    exactExecutableLineCount(
+      runtimeBounds,
+      "const API_DATABASE_SESSION_ROLE = 'crypto_api_runtime' as const;",
+    ) === 1 &&
+    exactExecutableLineCount(runtimeBounds, "if (record.workload !== 'api') {") === 1 &&
+    exactExecutableLineCount(runtimeBounds, 'connectionTimeoutMs: 60_000,') === 1 &&
+    exactExecutableLineCount(runtimeBounds, 'idleTimeoutMs: 600_000,') === 1 &&
+    exactExecutableLineCount(runtimeBounds, 'lockTimeoutMs: 60_000,') === 1 &&
+    exactExecutableLineCount(runtimeBounds, 'maxLifetimeSeconds: 86_400,') === 1 &&
+    exactExecutableLineCount(runtimeBounds, 'poolMax: 100,') === 1 &&
+    exactExecutableLineCount(runtimeBounds, 'statementTimeoutMs: 300_000,') === 1 &&
+    exactExecutableLineCount(runtimeBounds, "value.includes('?') ||") === 1 &&
+    exactExecutableLineCount(runtimeBounds, "value.includes('#')") === 1 &&
+    exactExecutableLineCount(
+      runtimeBounds,
+      'if (!loopback && (snapshot.rejectUnauthorized !== true || snapshot.ca === undefined)) {',
+    ) === 1 &&
+    exactExecutableLineCount(
+      runtimeBounds,
+      'if (typeof value !== \'object\' || value === null || Array.isArray(value) || isProxy(value)) {',
+    ) === 1 &&
+    exactExecutableLineCount(
+      runtimeBounds,
+      'const descriptors = Object.getOwnPropertyDescriptors(value) as unknown as PropertyDescriptorMap;',
+    ) === 1 &&
+    exactExecutableLineCount(
+      runtimeBounds,
+      'if (record.sessionRole !== API_DATABASE_SESSION_ROLE) {',
+    ) === 1 &&
+    exactExecutableLineCount(
+      runtimeBounds,
+      'Object.assign(Object.create(null) as { rejectUnauthorized: boolean; ca?: string }, {',
+    ) === 1 &&
+    exactExecutableLineCount(
+      runtimeBounds,
+      'Object.assign(Object.create(null) as DatabaseInfrastructureConfig, {',
+    ) === 1 &&
+    exactExecutableLineCount(
+      runtimeBounds,
+      'Object.assign(Object.create(null) as RuntimePostgresPoolConfig, {',
+    ) === 1 &&
+    exactExecutableLineCount(
+      runtimeBounds,
+      'Object.assign(Object.create(null) as ProviderPositionAdmissionOptions, {',
+    ) === 1 &&
+    exactExecutableLineCount(
+      runtimeBounds,
+      'Object.assign(Object.create(null) as DormantProviderPositionAdmissionRuntimeResource, {',
+    ) === 1 &&
+    exactExecutableLineCount(runtimeBounds, 'return Object.freeze(') === 4 &&
+    exactExecutableLineCount(runtimeBounds, 'const snapshot = Object.freeze(') === 1 &&
+    exactExecutableLineCount(runtimeBounds, 'database: databaseSnapshot(record.database),') === 1 &&
+    exactExecutableLineCount(
+      runtimeBounds,
+      'if (postgresPoolConfig.database.connectionTimeoutMs > admissionOptions.deadlineMilliseconds) {',
+    ) === 1 &&
+    exactExecutableLineCount(
+      runtimeBounds,
+      'pool = createPostgresPool(postgresPoolConfig);',
+    ) === 1 &&
+    exactExecutableLineCount(
+      runtimeBounds,
+      "return fail('PROVIDER_POSITION_ADMISSION_RUNTIME_CONSTRUCTION_FAILED');",
+    ) === 1 &&
+    exactExecutableLineCount(runtimeBounds, 'pool,') === 1 &&
+    exactExecutableLineCount(runtimeBounds, 'admissionOptions,') === 1 &&
+    !runtimeBounds.includes('createPostgresPool(postgresConfigInput)') &&
+    !runtimeBounds.includes('database: record.database') &&
+    !runtimeBounds.includes('admissionOptions: admissionOptionsInput') &&
+    runtimeBoundsPostgresSnapshot >= 0 &&
+    runtimeBoundsAdmissionSnapshot > runtimeBoundsPostgresSnapshot &&
+    runtimeBoundsRelation > runtimeBoundsAdmissionSnapshot &&
+    runtimeBoundsPoolDeclaration > runtimeBoundsRelation &&
+    runtimeBoundsPoolConstruction > runtimeBoundsPoolDeclaration &&
+    runtimeBoundsConstructionFailure > runtimeBoundsPoolConstruction &&
+    runtimeBoundsResourceReturn > runtimeBoundsConstructionFailure &&
+    exactExecutableLineCount(
+      infrastructureConfig,
+      "if (workload === 'api') return 'crypto_api_runtime';",
+    ) === 1 &&
+    exactExecutableLineCount(infrastructureConfig, 'connectionTimeoutMs: 60_000,') === 1 &&
+    exactExecutableLineCount(infrastructureConfig, 'lockTimeoutMs: 60_000,') === 1 &&
+    exactExecutableLineCount(infrastructureConfig, 'statementTimeoutMs: 300_000,') === 1 &&
+    exactExecutableLineCount(
+      infrastructureConfig,
+      'migration ? 60_000 : runtimeTimeoutLimits.connectionTimeoutMs,',
+    ) === 1 &&
+    exactExecutableLineCount(
+      infrastructureConfig,
+      'migration ? 300_000 : runtimeTimeoutLimits.lockTimeoutMs,',
+    ) === 1 &&
+    exactExecutableLineCount(
+      infrastructureConfig,
+      'migration ? 43_200_000 : runtimeTimeoutLimits.statementTimeoutMs,',
+    ) === 1 &&
+    exactExecutableLineCount(
+      infrastructureConfig,
+      'idleTimeoutMs: positiveInteger(env, `${tuningPrefix}_IDLE_TIMEOUT_MS`, 30_000, 600_000),',
+    ) === 1 &&
+    exactExecutableLineCount(
+      infrastructureConfig,
+      'maxLifetimeSeconds: positiveInteger(env, `${tuningPrefix}_MAX_LIFETIME_SECONDS`, 1_800, 86_400),',
+    ) === 1 &&
+    exactExecutableLineCount(
+      infrastructureConfig,
+      "poolMax: migration ? 1 : positiveInteger(env, 'DATABASE_POOL_MAX', 10, 100),",
+    ) === 1 &&
+    exactExecutableLineCount(
+      runtimePostgresPool,
+      "api: 'crypto_api_runtime',",
+    ) === 1 &&
+    exactExecutableLineCount(runtimePostgresPool, 'return new Pool({') === 1 &&
+    exactExecutableLineCount(
+      runtimePostgresPool,
+      'connectionTimeoutMillis: config.database.connectionTimeoutMs,',
+    ) === 1 &&
+    !forbiddenCoordinatorRuntimeBoundsConsumption.test(coordinator) &&
     exactExecutableLineCount(
       reader,
       'export const MAINNET_PROVIDER_POSITION_READER_VERSION = 2 as const;',
@@ -8087,6 +8284,21 @@ export function loadRepositoryProductionPreflightInput(
           repositoryRoot,
           'apps/api/src/mainnet-platforms/infrastructure/node-provider-position-admission-deadline.runner.ts',
         ),
+        'utf8',
+      ),
+      providerPositionRuntimeBoundsSource: readFileSync(
+        resolve(
+          repositoryRoot,
+          'apps/api/src/mainnet-platforms/infrastructure/provider-position-admission-runtime-bounds.ts',
+        ),
+        'utf8',
+      ),
+      providerPositionInfrastructureConfigSource: readFileSync(
+        resolve(repositoryRoot, 'apps/api/src/infrastructure/config/infrastructure.config.ts'),
+        'utf8',
+      ),
+      providerPositionRuntimePostgresPoolSource: readFileSync(
+        resolve(repositoryRoot, 'apps/api/src/infrastructure/database/runtime-postgres-pool.ts'),
         'utf8',
       ),
       portfolioWalletRegistrationReaderPortSource: readFileSync(

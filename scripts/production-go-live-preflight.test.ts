@@ -436,6 +436,21 @@ const PROVIDER_POSITION_READ_ARTIFACTS = Object.freeze({
     ),
     'utf8',
   ),
+  providerPositionRuntimeBoundsSource: readFileSync(
+    resolve(
+      __dirname,
+      '../apps/api/src/mainnet-platforms/infrastructure/provider-position-admission-runtime-bounds.ts',
+    ),
+    'utf8',
+  ),
+  providerPositionInfrastructureConfigSource: readFileSync(
+    resolve(__dirname, '../apps/api/src/infrastructure/config/infrastructure.config.ts'),
+    'utf8',
+  ),
+  providerPositionRuntimePostgresPoolSource: readFileSync(
+    resolve(__dirname, '../apps/api/src/infrastructure/database/runtime-postgres-pool.ts'),
+    'utf8',
+  ),
   portfolioWalletRegistrationReaderPortSource: readFileSync(
     resolve(
       __dirname,
@@ -1047,6 +1062,7 @@ function mutateProviderPositionReadArtifact(
 }
 
 test('provider-position read inspection pins the exact dormant critical source slice', () => {
+  assert.equal(Object.keys(PROVIDER_POSITION_READ_ARTIFACTS).length, 20);
   const inspected = inspectProviderPositionReadBoundaryArtifacts(PROVIDER_POSITION_READ_ARTIFACTS);
   assert.deepEqual(inspected, EXPECTED_DORMANT_PROVIDER_POSITION_READ_BOUNDARY);
   assert.equal(Object.isFrozen(inspected), true);
@@ -1083,7 +1099,7 @@ test('provider-position read blockers participate in both readiness calculations
   );
 });
 
-test('provider-position read inspection rejects trust, roster cancellation, coverage, and dormancy drift', () => {
+test('provider-position read inspection rejects trust, runtime bounds, coverage, and dormancy drift', () => {
   const mutations: readonly (readonly [
     keyof ProviderPositionReadBoundaryArtifactSources,
     string,
@@ -1279,6 +1295,106 @@ test('provider-position read inspection rejects trust, roster cancellation, cove
       "if (!request.signal.aborted()) return fail('INVALID_ABORT_CAPABILITY');",
       'void request.signal;',
     ],
+    [
+      'providerPositionRuntimeBoundsSource',
+      'export const PROVIDER_POSITION_ADMISSION_MAX_DEADLINE_MILLISECONDS = 30_000 as const;',
+      'export const PROVIDER_POSITION_ADMISSION_MAX_DEADLINE_MILLISECONDS = 300_000 as const;',
+    ],
+    [
+      'providerPositionRuntimeBoundsSource',
+      'export const PROVIDER_POSITION_ADMISSION_MAX_CONCURRENCY = 8 as const;',
+      'export const PROVIDER_POSITION_ADMISSION_MAX_CONCURRENCY = 16 as const;',
+    ],
+    [
+      'providerPositionRuntimeBoundsSource',
+      "const API_DATABASE_SESSION_ROLE = 'crypto_api_runtime' as const;",
+      "const API_DATABASE_SESSION_ROLE = 'crypto_worker_runtime' as const;",
+    ],
+    [
+      'providerPositionRuntimeBoundsSource',
+      "if (record.workload !== 'api') {",
+      'if (false) {',
+    ],
+    [
+      'providerPositionRuntimeBoundsSource',
+      "value.includes('?') ||",
+      'false ||',
+    ],
+    [
+      'providerPositionRuntimeBoundsSource',
+      "value.includes('#')",
+      'false',
+    ],
+    [
+      'providerPositionRuntimeBoundsSource',
+      'if (!loopback && (snapshot.rejectUnauthorized !== true || snapshot.ca === undefined)) {',
+      'if (false) {',
+    ],
+    [
+      'providerPositionRuntimeBoundsSource',
+      'database: databaseSnapshot(record.database),',
+      'database: record.database as Readonly<DatabaseInfrastructureConfig>,',
+    ],
+    [
+      'providerPositionRuntimeBoundsSource',
+      'const admissionOptions = admissionOptionsSnapshot(admissionOptionsInput);',
+      'const admissionOptions = admissionOptionsInput;',
+    ],
+    [
+      'providerPositionRuntimeBoundsSource',
+      'if (postgresPoolConfig.database.connectionTimeoutMs > admissionOptions.deadlineMilliseconds) {',
+      'if (postgresPoolConfig.database.connectionTimeoutMs < admissionOptions.deadlineMilliseconds) {',
+    ],
+    [
+      'providerPositionRuntimeBoundsSource',
+      'pool = createPostgresPool(postgresPoolConfig);',
+      'pool = createPostgresPool(postgresConfigInput);',
+    ],
+    [
+      'providerPositionRuntimeBoundsSource',
+      'pool = createPostgresPool(postgresPoolConfig);',
+      'pool = factory(postgresPoolConfig);',
+    ],
+    [
+      'providerPositionRuntimeBoundsSource',
+      'pool = createPostgresPool(postgresPoolConfig);',
+      "pool = createPostgresPool(postgresPoolConfig);\n    void pool.query('SELECT 1');",
+    ],
+    [
+      'providerPositionRuntimeBoundsSource',
+      "return fail('PROVIDER_POSITION_ADMISSION_RUNTIME_CONSTRUCTION_FAILED');",
+      'throw error;',
+    ],
+    [
+      'providerPositionRuntimeBoundsSource',
+      'Object.assign(Object.create(null) as ProviderPositionAdmissionOptions, {',
+      'Object.assign({} as ProviderPositionAdmissionOptions, {',
+    ],
+    [
+      'providerPositionRuntimeBoundsSource',
+      'const POSTGRES_CONFIG_KEYS = Object.freeze([\'workload\', \'database\'] as const);',
+      "const POSTGRES_CONFIG_KEYS = Object.freeze(['workload', 'database'] as const);\nvoid process.env.DATABASE_URL;",
+    ],
+    [
+      'providerPositionRuntimeBoundsSource',
+      'export function createDormantProviderPositionAdmissionRuntimeResource(',
+      '@Injectable()\nexport function createDormantProviderPositionAdmissionRuntimeResource(',
+    ],
+    [
+      'providerPositionInfrastructureConfigSource',
+      'connectionTimeoutMs: 60_000,',
+      'connectionTimeoutMs: 600_000,',
+    ],
+    [
+      'providerPositionRuntimePostgresPoolSource',
+      'connectionTimeoutMillis: config.database.connectionTimeoutMs,',
+      'connectionTimeoutMillis: 60_000,',
+    ],
+    [
+      'providerPositionRuntimePostgresPoolSource',
+      "api: 'crypto_api_runtime',",
+      "api: 'crypto_worker_runtime',",
+    ],
     ['providerPositionAdmissionCoordinatorSource', 'selectedTargetSources.push(', 'void ('],
     ['providerPositionAdmissionCoordinatorSource', 'mayPersist: false,', 'mayPersist: true,'],
     ['providerPositionCoverageSource', 'if (observationsInput.length === 0) {', 'if (true) {'],
@@ -1300,6 +1416,11 @@ test('provider-position read inspection rejects trust, roster cancellation, cove
       'providers: [MainnetPlatformDirectoryService, MainnetPlatformsPrivacyInterceptor, NodeProviderPositionAdmissionDeadlineRunner],',
     ],
     [
+      'mainnetPlatformsModuleSource',
+      'providers: [MainnetPlatformDirectoryService, MainnetPlatformsPrivacyInterceptor],',
+      'providers: [MainnetPlatformDirectoryService, MainnetPlatformsPrivacyInterceptor, createDormantProviderPositionAdmissionRuntimeResource],',
+    ],
+    [
       'mainnetPlatformsIndexSource',
       "export { MainnetPlatformDirectoryService } from './application/mainnet-platform-directory.service';",
       "export { DormantProviderPositionAdmissionCoordinator } from './application/provider-position-admission.coordinator';",
@@ -1310,6 +1431,11 @@ test('provider-position read inspection rejects trust, roster cancellation, cove
       "export { NodeProviderPositionAdmissionDeadlineRunner } from './infrastructure/node-provider-position-admission-deadline.runner';",
     ],
     [
+      'mainnetPlatformsIndexSource',
+      "export { MainnetPlatformDirectoryService } from './application/mainnet-platform-directory.service';",
+      "export { createDormantProviderPositionAdmissionRuntimeResource } from './infrastructure/provider-position-admission-runtime-bounds';",
+    ],
+    [
       'mainnetPlatformsControllerSource',
       'constructor(private readonly directory: MainnetPlatformDirectoryService) {}',
       'constructor(private readonly reader: MainnetProviderPositionReader) {}',
@@ -1318,6 +1444,11 @@ test('provider-position read inspection rejects trust, roster cancellation, cove
       'mainnetPlatformsControllerSource',
       'constructor(private readonly directory: MainnetPlatformDirectoryService) {}',
       'constructor(private readonly deadlineRunner: NodeProviderPositionAdmissionDeadlineRunner) {}',
+    ],
+    [
+      'mainnetPlatformsControllerSource',
+      'constructor(private readonly directory: MainnetPlatformDirectoryService) {}',
+      'constructor(private readonly runtime: DormantProviderPositionAdmissionRuntimeResource) {}',
     ],
   ];
 

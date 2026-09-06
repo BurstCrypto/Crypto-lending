@@ -184,15 +184,21 @@ into deployed or production-ready evidence.
 coverage-aware reader v2 port, trusted assessment assembly port, admission
 coordinator, concrete Node deadline runner, wallet-roster reader port and
 adapter, wallet service and repository port, PostgreSQL wallet repository,
-shared PostgreSQL cancellation service, coverage/observation/assessment/policy
-domains, feature module, feature barrel, and HTTP controller as one selected
-seventeen-file critical-source slice. Within that slice, the local semantic
-inspection requires covered rather than bare reader results, complete and
-agreeing coverage (including explicit zero counts), whole-assembly and
+shared PostgreSQL cancellation service, dormant runtime-budget resource,
+infrastructure configuration loader, runtime PostgreSQL pool factory,
+coverage/observation/assessment/policy domains, feature module, feature barrel,
+and HTTP controller as one selected twenty-file critical-source slice. Within
+that slice, the local semantic inspection requires covered rather than bare
+reader results, complete and agreeing coverage (including explicit zero
+counts), whole-assembly and
 per-observation verification, stable method capture, final clock checks, false
 persistence/financial authority, one shared source abort signal, terminal
 cleanup, first-failure queue stop/drain behavior, and one selected source and
-anchor for every target.
+anchor for every target. It also requires an exact API database role, loader
+maxima, query/fragment-free connection strings, owned immutable database/TLS
+and admission-options snapshots, a connection timeout no greater than an
+admission deadline capped at 30,000 milliseconds, concurrency from 1 through 8,
+and direct pool construction from the reviewed snapshot only.
 
 The coordinator binds the account, evaluation time, correlation ID, and exact
 shared signal into the roster request. The adapter and PostgreSQL repository
@@ -212,17 +218,25 @@ capabilities. It also confirms that the pinned feature module, barrel, and HTTP
 controller do not register or expose the coordinator, trusted assembly, or
 deadline runner.
 
-The current exact source passes local inspection, but launch readiness remains
-blocked by `PROVIDER_POSITION_READER_FEATURE_REGISTRATION_MISSING` and
+The current exact source passes local inspection. The dormant runtime-budget
+resource establishes configuration ordering only: it constructs a lazy pool
+from its owned reviewed API configuration and returns that pool with the exact
+frozen admission-options snapshot. Those returned options are not yet consumed
+by a gated coordinator composition, and the resource remains absent from the
+feature module, barrel, and controller.
+
+Launch readiness remains blocked by
+`PROVIDER_POSITION_READER_FEATURE_REGISTRATION_MISSING` and
 `PROVIDER_POSITION_TRUSTED_ASSESSMENT_FEATURE_REGISTRATION_MISSING`, plus
 `PROVIDER_POSITION_DEADLINE_RUNNER_FEATURE_REGISTRATION_MISSING`. The concrete
 runner remains dormant and unregistered. Provider sources must cooperate with
 abort and settle before the runner can return. Wallet-roster cancellation now
 reaches the PostgreSQL query boundary, but active `pg` pool acquisition has no
 native signal cancellation. Acquisition and its subsequent teardown may
-therefore extend beyond the logical admission deadline. Production
-`connectionTimeoutMs` must be no greater than the configured admission bound;
-this local inspection supplies no hard latency or deployed configuration claim.
+therefore extend beyond the logical admission deadline. The local resource
+rejects a `connectionTimeoutMs` greater than its admission bound, but until its
+returned options are used by production coordinator construction this supplies
+neither a deployed binding nor hard end-to-end latency evidence.
 The inspection has a private in-process brand and rejects missing, extra,
 accessor, symbol, proxy, oversized, non-string, or byte-drifted inputs. It reads
 local source only; it neither invokes these components nor performs network,
