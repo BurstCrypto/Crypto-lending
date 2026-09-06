@@ -5,6 +5,7 @@
 - Network: Solana mainnet-beta
 - Asset: native USDC (6 decimals)
 - Selection: Marginfi production group, documented native-USDC bank
+- Identity: canonical provider `project-0`; protocol/source `marginfi-v2`
 
 ## Decision
 
@@ -84,13 +85,14 @@ A caller must provide all of the following without defaults:
 - exact operational/risk/asset states, external oracle setup and primary key, deposit limit, borrow limit, and oracle maximum age; and
 - the current mainnet supported-asset-registry fingerprint.
 
-Three domain-separated SHA-256 fingerprints are canonicalized:
+Four domain-separated SHA-256 fingerprints are canonicalized:
 
 1. `sourceFingerprintSha256` binds official source commits/layout tokens, registry identity, network, program/group/bank/mint identities, loader/token-program identities, and all vault PDAs.
 2. `deploymentFingerprintSha256` binds the caller's complete deployment and account/configuration manifest.
 3. `manifestFingerprintSha256` binds the complete canonical manifest plus the two preceding fingerprints.
+4. `transcriptFingerprintSha256` v2 binds the canonical `project-0` provider, `marginfi-v2` protocol, Solana network, market, all three manifest fingerprints, the complete parsed observation, and its observation time.
 
-The adapter constructor requires exact independent caller pins for all three. Supplying only some embedded fingerprints, changing any field, using noncanonical integer text, or substituting a zero digest fails before transport use. Hash equality detects substitution relative to a caller-approved manifest; it does not prove that the manifest capture itself was authentic.
+The adapter constructor requires exact independent caller pins for the three manifest fingerprints. Supplying only some embedded fingerprints, changing any field, using noncanonical integer text, or substituting a zero digest fails before transport use. Hash equality detects substitution relative to a caller-approved manifest; it does not prove that the manifest capture itself was authentic.
 
 ## Finalized transcript binding
 
