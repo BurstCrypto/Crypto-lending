@@ -7,6 +7,8 @@ import { MAINNET_PLATFORM_DIRECTORY } from '../apps/api/src/mainnet-platforms/do
 import * as egressPolicy from '../infra/egress/validate-egress-policy.mjs';
 // @ts-expect-error The audited local validator is an ESM JavaScript module without declarations.
 import { loadValidatedProviderDecisionSnapshot } from '../infra/providers/validate-kan-62-provider-decision.mjs';
+// @ts-expect-error The audited local validator is an ESM JavaScript module without declarations.
+import { validateDormantProviderInventoryFiles } from '../infra/providers/validate-dormant-provider-inventory.mjs';
 // @ts-expect-error The operations-owned audited manifest boundary is an ESM JavaScript module.
 import * as releaseCandidateManifest from './release-candidate-manifest.mjs';
 import {
@@ -77,6 +79,7 @@ export type ProductionPreflightBlockerId =
   | 'EGRESS_POLICY_NOT_ACCEPTED'
   | 'EXTERNAL_EGRESS_DISABLED'
   | 'RPC_PROVIDER_DECISION_LOCAL_VALIDATION_FAILED'
+  | 'RPC_PROVIDER_DORMANT_INVENTORY_LOCAL_VALIDATION_FAILED'
   | 'RPC_PROVIDER_EXTERNAL_APPROVAL_PENDING'
   | 'RPC_PROVIDER_LIVE_EVIDENCE_INCOMPLETE'
   | 'RPC_PROVIDER_RUNTIME_NOT_APPROVED'
@@ -268,6 +271,7 @@ interface EgressInput {
 
 interface RpcProviderInput {
   readonly localValidationPassed: boolean;
+  readonly dormantInventoryValidationPassed: boolean;
   readonly externalStatus: unknown;
   readonly runtimeStatus: unknown;
   readonly approvalBoundaryApproved: boolean;
@@ -1386,8 +1390,15 @@ export function evaluateProductionPreflight(
   }
 
   const rpcProviderBlockers: ProductionPreflightBlockerId[] = [];
-  if (!input.rpcProviders.localValidationPassed) {
+  const rpcProviderDecisionLocalValidationPassed =
+    input.rpcProviders.localValidationPassed === true;
+  const dormantProviderInventoryLocalValidationPassed =
+    input.rpcProviders.dormantInventoryValidationPassed === true;
+  if (!rpcProviderDecisionLocalValidationPassed) {
     rpcProviderBlockers.push('RPC_PROVIDER_DECISION_LOCAL_VALIDATION_FAILED');
+  }
+  if (!dormantProviderInventoryLocalValidationPassed) {
+    rpcProviderBlockers.push('RPC_PROVIDER_DORMANT_INVENTORY_LOCAL_VALIDATION_FAILED');
   }
   if (
     !exactString(input.rpcProviders.externalStatus, 'APPROVED') ||
@@ -1507,7 +1518,9 @@ export function evaluateProductionPreflight(
     check('EXTERNAL_EGRESS', input.egress.localValidationPassed ? 'PASS' : 'FAIL', egressBlockers),
     check(
       'RPC_INDEXING',
-      input.rpcProviders.localValidationPassed ? 'PASS' : 'FAIL',
+      rpcProviderDecisionLocalValidationPassed && dormantProviderInventoryLocalValidationPassed
+        ? 'PASS'
+        : 'FAIL',
       rpcProviderBlockers,
     ),
     check('PLATFORM_DIRECTORY', directory.valid ? 'PASS' : 'FAIL', directoryBlockers),
@@ -7729,6 +7742,13 @@ export function loadRepositoryProductionPreflightInput(
   } catch {
     // The evaluator emits a closed local-validation blocker.
   }
+  let dormantProviderInventoryValidationPassed = false;
+  try {
+    const errors = validateDormantProviderInventoryFiles(repositoryRoot) as unknown;
+    dormantProviderInventoryValidationPassed = Array.isArray(errors) && errors.length === 0;
+  } catch {
+    // The evaluator emits a distinct closed inventory-validation blocker.
+  }
   const providerSelection = objectRecord(providerRecord.selection);
   const providerApproval = objectRecord(providerRecord.approvalBoundary);
   const zeroCostEvidence = objectRecord(providerRecord.zeroCostEvidence);
@@ -7749,6 +7769,7 @@ export function loadRepositoryProductionPreflightInput(
     }),
     rpcProviders: Object.freeze({
       localValidationPassed: providerLocalValidationPassed,
+      dormantInventoryValidationPassed: dormantProviderInventoryValidationPassed,
       externalStatus: providerRecord.externalStatus,
       runtimeStatus: providerSelection.runtimeStatus,
       approvalBoundaryApproved: providerApproval.approved === true,

@@ -1642,6 +1642,7 @@ test('unbranded bundles cannot alter repository approvals or supply write eviden
     },
     rpcProviders: {
       localValidationPassed: true,
+      dormantInventoryValidationPassed: true,
       externalStatus: 'PENDING_EXTERNAL_REGISTRATION',
       runtimeStatus: 'NOT_APPROVED',
       approvalBoundaryApproved: false,

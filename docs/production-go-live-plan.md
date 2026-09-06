@@ -551,14 +551,21 @@ weaken a verifier to make an old task appear ready.
 ### Active-scope provider inventory (offline only)
 
 These validators prove the exact ten Ethereum/Solana planning identities,
-matching dated research inputs, ten dormant adapter registrations, and zero
-enabled registrations. They do not prove current rates, live connectivity,
-risk acceptance, deposits, or withdrawals.
+matching dated research inputs, ten dormant adapter artifacts, and zero runtime
+registrations. They do not prove current rates, live connectivity, risk
+acceptance, deposits, or withdrawals.
 
 ```powershell
 npm run infra:validate:providers
 npm run infra:test:providers
 ```
+
+The offline production preflight also runs the dormant-inventory validator as
+an independent part of `RPC_INDEXING`. Inventory drift emits
+`RPC_PROVIDER_DORMANT_INVENTORY_LOCAL_VALIDATION_FAILED`, separately from a
+KAN-62 decision-record failure, and blocks both launch targets. A pass preserves
+the current zero-live-provider count and does not clear provider approval,
+runtime, egress, deployment, or live-evidence blockers.
 
 The authenticated planning-directory safety contract has its own focused
 check:

@@ -342,7 +342,8 @@ exist,
 The audit reads only local repository, non-secret artifacts: selected KAN-34
 environment-contract and guard markers, ECS environment and secret-reference
 names, the inert KAN-231 egress example, the KAN-62 provider decision record and
-digest, and the mainnet platform capability directory. It
+digest, the exact dormant ten-provider adapter/spec/research inventory, the
+bounded API runtime-source tree, and the mainnet platform capability directory. It
 parses the egress record as strict UTF-8 JSON and rejects byte-order marks or
 duplicate object keys before evaluating its status, mode, or evidence fields. It
 loads that record through the same bounded, canonical-path, stable double-read
@@ -357,10 +358,21 @@ fails closed behind one sanitized validation error.
 The decision must also be strict UTF-8 JSON without a byte-order mark or
 duplicate object keys at any depth. Recomputing the SHA-256 sidecar cannot make
 an ambiguous duplicate-key document eligible for local validation.
-The audit does not scan implementation source for status phrases, derive
-application configuration from process-environment values, read secret material
-or `.env` files, contact provider endpoints, or accept catalog status strings as
-adapter evidence. An
+The provider-decision parser does not scan implementation source for status
+phrases or accept catalog status strings as adapter evidence. A separate
+dormant-inventory check requires the exact six Ethereum and four Solana adapter,
+hostile-path spec, and research artifacts; false persistence, recommendation,
+and financial-authority markers; no Nest registration decorator; and no exact
+adapter class or import-stem reference elsewhere in the bounded API runtime
+source scan. Artifact reads are capped at 2 MiB each, and the runtime scan is
+capped at 4,096 files and 24 MiB total. Decision validation and dormant-inventory
+validation have distinct blockers, and both must pass for `RPC_INDEXING` local
+validation to pass. This does not prove an adapter is live, approved, current,
+or safe to activate.
+
+The audit does not derive application configuration from process-environment
+values, read secret material or `.env` files, contact provider endpoints, or
+execute adapter code. An
 explicit evidence flow adds bounded local manifest/evidence reads and the
 release-manifest boundary's scrubbed, noninteractive local Git inspection. It
 may copy the minimum operating-system variables needed to launch trusted Git,
@@ -412,6 +424,8 @@ Relevant machine-readable launch blocker IDs include:
 - `REDIS_OPERATOR_SECRET_VERSION_NOT_WIRED`
 - `EGRESS_POLICY_NOT_ACCEPTED`
 - `EXTERNAL_EGRESS_DISABLED`
+- `RPC_PROVIDER_DECISION_LOCAL_VALIDATION_FAILED`
+- `RPC_PROVIDER_DORMANT_INVENTORY_LOCAL_VALIDATION_FAILED`
 - `RPC_PROVIDER_EXTERNAL_APPROVAL_PENDING`
 - `RPC_PROVIDER_RUNTIME_NOT_APPROVED`
 - `LIVE_READ_EVIDENCE_INDEX_MISSING`

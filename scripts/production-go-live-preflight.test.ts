@@ -679,6 +679,7 @@ function completeInput(directory: unknown): ProductionPreflightInput {
     },
     rpcProviders: {
       localValidationPassed: true,
+      dormantInventoryValidationPassed: true,
       externalStatus: 'APPROVED',
       runtimeStatus: 'APPROVED',
       approvalBoundaryApproved: true,
@@ -795,6 +796,7 @@ test('current repository is a bootstrap blocker audit and exits nonzero for both
   });
   assert.equal(readOnly.checks.find(({ id }) => id === 'EXTERNAL_EGRESS')?.localValidation, 'PASS');
   assert.equal(readOnly.checks.find(({ id }) => id === 'RPC_INDEXING')?.localValidation, 'PASS');
+  assert.equal(input.rpcProviders.dormantInventoryValidationPassed, true);
   assert.deepEqual(
     readOnly.checks.find(({ id }) => id === 'PRODUCTION_INFRASTRUCTURE'),
     {
@@ -889,6 +891,60 @@ test('current repository is a bootstrap blocker audit and exits nonzero for both
     cliReport.checks.find(({ id }) => id === 'PROVIDER_POSITION_READ_BOUNDARY')?.blockerIds,
     EXPECTED_DORMANT_PROVIDER_POSITION_READ_BOUNDARY_BLOCKERS,
   );
+});
+
+test('RPC provider decision and dormant inventory validation fail independently', () => {
+  const baseline = completeInput(platformDirectory('LIVE_READ_ONLY'));
+  const inventoryFailed = {
+    ...baseline,
+    rpcProviders: {
+      ...baseline.rpcProviders,
+      dormantInventoryValidationPassed: false,
+    },
+  };
+
+  for (const target of ['read-only', 'mainnet-write'] as const) {
+    const report = evaluateProductionPreflight(inventoryFailed, target);
+    assert.deepEqual(report.checks.find(({ id }) => id === 'RPC_INDEXING'), {
+      id: 'RPC_INDEXING',
+      localValidation: 'FAIL',
+      launchReadiness: 'BLOCKED',
+      blockerIds: ['RPC_PROVIDER_DORMANT_INVENTORY_LOCAL_VALIDATION_FAILED'],
+    });
+    assert.equal(report.selectedTargetReadiness, 'BLOCKED');
+  }
+
+  const decisionFailed = evaluateProductionPreflight({
+    ...baseline,
+    rpcProviders: {
+      ...baseline.rpcProviders,
+      localValidationPassed: false,
+    },
+  });
+  assert.deepEqual(decisionFailed.checks.find(({ id }) => id === 'RPC_INDEXING'), {
+    id: 'RPC_INDEXING',
+    localValidation: 'FAIL',
+    launchReadiness: 'BLOCKED',
+    blockerIds: ['RPC_PROVIDER_DECISION_LOCAL_VALIDATION_FAILED'],
+  });
+
+  const { dormantInventoryValidationPassed: omitted, ...withoutInventoryResult } =
+    baseline.rpcProviders;
+  assert.equal(omitted, true);
+  for (const dormantInventoryValidationPassed of [undefined, 'true', 1, null]) {
+    const report = evaluateProductionPreflight({
+      ...baseline,
+      rpcProviders: {
+        ...withoutInventoryResult,
+        dormantInventoryValidationPassed,
+      } as unknown as ProductionPreflightInput['rpcProviders'],
+    });
+    assert.ok(
+      report.checks
+        .find(({ id }) => id === 'RPC_INDEXING')
+        ?.blockerIds.includes('RPC_PROVIDER_DORMANT_INVENTORY_LOCAL_VALIDATION_FAILED'),
+    );
+  }
 });
 
 function mutateProviderPositionReadArtifact(

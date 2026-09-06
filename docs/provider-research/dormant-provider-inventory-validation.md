@@ -9,3 +9,9 @@ Each artifact and runtime source file is capped at 2 MiB. The runtime scan is ad
 Runtime source files are scanned for every exact adapter class and import stem. A reference outside the adapter itself fails validation, as does a Nest registration decorator in an adapter. This intentionally prevents the static inventory from becoming runtime wiring through a module, barrel, CLI, controller, or other production source.
 
 Passing this validator proves only local artifact completeness and dormancy. It does not approve a provider, market, asset, endpoint, source pair, risk decision, recommendation, transaction, or production activation. All ten remain unavailable and the production live-provider count remains zero.
+
+The offline production preflight invokes this same bounded validator and keeps
+its result separate from KAN-62 decision-record validation. Either failure makes
+`RPC_INDEXING` local validation fail; an inventory failure is reported as
+`RPC_PROVIDER_DORMANT_INVENTORY_LOCAL_VALIDATION_FAILED`. This integration adds
+no network, provider, cloud, secret, transaction, or filesystem-write action.
