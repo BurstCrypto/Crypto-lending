@@ -53,6 +53,8 @@ const BANK_ADDRESS = IDS.usdcBankAddress;
 const USDC_MINT_ADDRESS = IDS.usdcMintAddress;
 const LOADER_ADDRESS = IDS.upgradeableLoaderAddress;
 const TOKEN_PROGRAM_ADDRESS = IDS.legacyTokenProgramAddress;
+const PROVIDER_ID = 'project-0' as const;
+const PROTOCOL_ID = 'marginfi-v2' as const;
 const MARKET_ID = 'marginfi-v2-solana-mainnet-main-usdc' as const;
 
 const BASE58_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
@@ -249,8 +251,8 @@ export interface DormantMarginfiV2SolanaTranscriptCandidate {
   readonly schemaVersion: 1;
   readonly sourceId: 'MARGINFI_V2_SOLANA_FINALIZED_JSON_RPC_TRANSCRIPT';
   readonly use: 'DORMANT_MARGINFI_V2_USDC_CORROBORATION_ONLY';
-  readonly providerId: 'marginfi';
-  readonly protocolId: 'marginfi-v2';
+  readonly providerId: typeof PROVIDER_ID;
+  readonly protocolId: typeof PROTOCOL_ID;
   readonly networkId: typeof NETWORK_ID;
   readonly marketId: typeof MARKET_ID;
   readonly sourceFingerprintSha256: string;
@@ -819,16 +821,20 @@ export class MarginfiV2SolanaFinalizedTranscriptAdapter {
         schemaVersion: 1,
         sourceId: 'MARGINFI_V2_SOLANA_FINALIZED_JSON_RPC_TRANSCRIPT',
         use: 'DORMANT_MARGINFI_V2_USDC_CORROBORATION_ONLY',
-        providerId: 'marginfi',
-        protocolId: 'marginfi-v2',
+        providerId: PROVIDER_ID,
+        protocolId: PROTOCOL_ID,
         networkId: NETWORK_ID,
         marketId: MARKET_ID,
         sourceFingerprintSha256: this.manifest.sourceFingerprintSha256,
         deploymentFingerprintSha256: this.manifest.deploymentFingerprintSha256,
         manifestFingerprintSha256: this.manifest.manifestFingerprintSha256,
         transcriptFingerprintSha256: fingerprint(
-          'crypto-lending:marginfi-v2-solana-finalized-transcript:v1',
+          'crypto-lending:marginfi-v2-solana-finalized-transcript:v2',
           [
+            PROVIDER_ID,
+            PROTOCOL_ID,
+            NETWORK_ID,
+            MARKET_ID,
             this.manifest.sourceFingerprintSha256,
             this.manifest.deploymentFingerprintSha256,
             this.manifest.manifestFingerprintSha256,

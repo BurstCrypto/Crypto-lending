@@ -3,6 +3,8 @@ import { createHash } from 'node:crypto';
 import { PublicKey } from '@solana/web3.js';
 
 import { MAINNET_SUPPORTED_ASSET_REGISTRY } from '../../../blockchain/domain/supported-asset-registry';
+import { MAINNET_PLATFORM_DIRECTORY } from '../../../mainnet-platforms/domain/mainnet-platform-directory';
+import { SMART_LENDING_PROVIDER_IDS } from '../../application/ports/live-lending-market-feed.port';
 import {
   createMarginfiV2SolanaManifest,
   type MarginfiV2Manifest,
@@ -436,7 +438,7 @@ describe('MarginfiV2SolanaFinalizedTranscriptAdapter', () => {
 
     expect(candidate).toMatchObject({
       schemaVersion: 1,
-      providerId: 'marginfi',
+      providerId: 'project-0',
       protocolId: 'marginfi-v2',
       networkId: ID.networkId,
       marketId: 'marginfi-v2-solana-mainnet-main-usdc',
@@ -521,6 +523,40 @@ describe('MarginfiV2SolanaFinalizedTranscriptAdapter', () => {
     expect(candidate.deploymentFingerprintSha256).toBe(f.manifest.deploymentFingerprintSha256);
     expect(candidate.manifestFingerprintSha256).toBe(f.manifest.manifestFingerprintSha256);
     expect(candidate.transcriptFingerprintSha256).toMatch(/^[0-9a-f]{64}$/u);
+    expect(SMART_LENDING_PROVIDER_IDS).toContain(candidate.providerId);
+    expect(
+      MAINNET_PLATFORM_DIRECTORY.providers.find(({ id }) => id === candidate.providerId),
+    ).toMatchObject({
+      id: 'project-0',
+      name: 'Project 0',
+      protocol: 'marginfi v2',
+      ecosystem: 'SOLANA',
+      networks: [{ id: candidate.networkId, name: 'Solana' }],
+    });
+    expect(candidate.transcriptFingerprintSha256).toBe(
+      createHash('sha256')
+        .update(
+          JSON.stringify([
+            'crypto-lending:marginfi-v2-solana-finalized-transcript:v2',
+            candidate.providerId,
+            candidate.protocolId,
+            candidate.networkId,
+            candidate.marketId,
+            candidate.sourceFingerprintSha256,
+            candidate.deploymentFingerprintSha256,
+            candidate.manifestFingerprintSha256,
+            candidate.snapshot,
+            candidate.deployment,
+            candidate.group,
+            candidate.bank,
+            candidate.asset,
+            candidate.vaults,
+            candidate.observedAt,
+          ]),
+          'utf8',
+        )
+        .digest('hex'),
+    );
     expect(candidate.bank).not.toHaveProperty('apr');
     expect(candidate.bank).not.toHaveProperty('apy');
     expect(candidate.bank).not.toHaveProperty('capacity');
