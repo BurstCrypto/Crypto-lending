@@ -17,7 +17,9 @@ import type { EnabledWalletRegistrationConfig } from '../../wallets/infrastructu
 import { PostgresWalletRegistrationRepository } from '../../wallets/infrastructure/postgres/postgres-wallet-registration.repository';
 import {
   DormantProviderPositionAdmissionCoordinator,
+  isIssuedProviderPositionAdmissionReadOnlyAssemblyV1,
   type ProviderPositionAdmissionOptions,
+  type ProviderPositionAdmissionReadOnlyAssemblyV1,
   type ProviderPositionAdmissionSourceBinding,
 } from '../application/provider-position-admission.coordinator';
 import type { ProviderPositionTrustedChainAssessmentAssemblyPort } from '../application/ports/provider-position-trusted-chain-assessment-assembly.port';
@@ -62,6 +64,7 @@ jest.mock('./node-provider-position-admission-deadline.runner', () => ({
 }));
 jest.mock('../application/provider-position-admission.coordinator', () => ({
   DormantProviderPositionAdmissionCoordinator: jest.fn(),
+  isIssuedProviderPositionAdmissionReadOnlyAssemblyV1: jest.fn(),
 }));
 
 const mockedRuntimeResource = jest.mocked(createDormantProviderPositionAdmissionRuntimeResource);
@@ -71,10 +74,18 @@ const MockedWalletService = jest.mocked(WalletRegistrationService);
 const MockedWalletReader = jest.mocked(RegisteredPortfolioWalletReader);
 const MockedDeadlineRunner = jest.mocked(NodeProviderPositionAdmissionDeadlineRunner);
 const MockedCoordinator = jest.mocked(DormantProviderPositionAdmissionCoordinator);
+const mockedAssemblyReviewer = jest.mocked(isIssuedProviderPositionAdmissionReadOnlyAssemblyV1);
 
 const POLICY_FINGERPRINT = 'a'.repeat(64);
+const REGISTRY_FINGERPRINT = 'b'.repeat(64);
+const COVERAGE_FINGERPRINT = 'c'.repeat(64);
+const CANDIDATE_FINGERPRINT = 'd'.repeat(64);
 const ACCOUNT_ID = '99999999-9999-4999-8999-999999999999';
 const CORRELATION_ID = 'provider-position-composition-test';
+const CAPTURED_AT = '2026-09-05T20:59:59.000Z';
+const EVALUATED_AT = '2026-09-05T21:00:00.000Z';
+const STALE_AFTER = '2026-09-05T21:00:05.000Z';
+const issuedReaderAssemblies = new WeakSet<object>();
 
 interface Deferred<T> {
   readonly promise: Promise<T>;
@@ -189,6 +200,93 @@ function dependencies(
   };
 }
 
+function coveredAssembly(
+  overrides: Readonly<Record<string, unknown>> = {},
+): Readonly<Record<string, unknown>> {
+  const candidateManifest = Object.freeze({
+    coverageVersion: 1,
+    use: 'MAINNET_PROVIDER_POSITION_COVERAGE_ONLY',
+    mayAuthorizeFinancialAction: false,
+    manifestId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+    accountId: ACCOUNT_ID,
+    positionSnapshotId: 'provider-position-test',
+    observationPolicyVersion: 1,
+    observationPolicyId: 'composition-test-policy-v1',
+    observationPolicyFingerprintSha256: POLICY_FINGERPRINT,
+    assetRegistryVersion: 1,
+    assetRegistryFingerprintSha256: REGISTRY_FINGERPRINT,
+    capturedAt: CAPTURED_AT,
+    staleAfter: STALE_AFTER,
+    freshnessClass: 'CURRENT',
+    targets: Object.freeze([]),
+    fingerprintSha256: COVERAGE_FINGERPRINT,
+  });
+  const coveredManifest = Object.freeze({
+    ...candidateManifest,
+    targets: Object.freeze([]),
+  });
+  const admissionCandidate = Object.freeze({
+    admissionVersion: 1,
+    use: 'DORMANT_PROVIDER_POSITION_ASSEMBLY_CANDIDATE_ONLY',
+    mayAuthorizeFinancialAction: false,
+    mayPersist: false,
+    mayCreatePositionSnapshot: false,
+    assemblyStatus: 'BLOCKED_PENDING_TRUSTED_CHAIN_ASSESSMENT_ASSEMBLY',
+    accountId: ACCOUNT_ID,
+    correlationId: CORRELATION_ID,
+    positionSnapshotId: 'provider-position-test',
+    observationPolicyVersion: 1,
+    observationPolicyId: 'composition-test-policy-v1',
+    observationPolicyFingerprintSha256: POLICY_FINGERPRINT,
+    assetRegistryVersion: 1,
+    assetRegistryFingerprintSha256: REGISTRY_FINGERPRINT,
+    capturedAt: CAPTURED_AT,
+    staleAfter: STALE_AFTER,
+    freshnessClass: 'CURRENT',
+    targets: Object.freeze([]),
+    coverageManifest: candidateManifest,
+    candidateFingerprintSha256: CANDIDATE_FINGERPRINT,
+  });
+  const coveredSnapshot = Object.freeze({
+    schemaVersion: 1,
+    use: 'MAINNET_PROVIDER_POSITION_OBSERVATION_ONLY',
+    mayAuthorizeFinancialAction: false,
+    snapshotId: 'provider-position-test',
+    observationPolicyVersion: 1,
+    observationPolicyId: 'composition-test-policy-v1',
+    observationPolicyFingerprintSha256: POLICY_FINGERPRINT,
+    assetRegistryVersion: 1,
+    assetRegistryFingerprintSha256: REGISTRY_FINGERPRINT,
+    capturedAt: CAPTURED_AT,
+    staleAfter: STALE_AFTER,
+    freshnessClass: 'CURRENT',
+    observations: Object.freeze([]),
+    coverageManifest: coveredManifest,
+  });
+  return Object.freeze({
+    assemblyVersion: 1,
+    use: 'DORMANT_PROVIDER_POSITION_READ_ONLY_ASSEMBLY_ONLY',
+    mayAuthorizeFinancialAction: false,
+    mayPersist: false,
+    evaluatedAt: EVALUATED_AT,
+    admissionCandidate,
+    coveredSnapshot,
+    ...overrides,
+  });
+}
+
+function issuedCoveredAssembly(): Readonly<Record<string, unknown>> {
+  const assembly = coveredAssembly();
+  issuedReaderAssemblies.add(assembly);
+  return assembly;
+}
+
+function isTestIssuedAssembly(
+  value: unknown,
+): value is ProviderPositionAdmissionReadOnlyAssemblyV1 {
+  return typeof value === 'object' && value !== null && issuedReaderAssemblies.has(value);
+}
+
 describe('createDormantProviderPositionAdmissionRuntimeComposition', () => {
   const poolEnd = jest.fn();
   const pool = { end: poolEnd } as unknown as Pool;
@@ -224,6 +322,7 @@ describe('createDormantProviderPositionAdmissionRuntimeComposition', () => {
     closePostgres.mockResolvedValue(undefined);
     coordinatorAdmit.mockResolvedValue(Object.freeze({ candidate: true }));
     coordinatorAssemble.mockResolvedValue(Object.freeze({ assembly: true }));
+    mockedAssemblyReviewer.mockImplementation(isTestIssuedAssembly);
     MockedPostgresService.mockImplementation(() => postgres);
     MockedWalletRepository.mockImplementation(() => walletRepository);
     MockedWalletService.mockImplementation(() => walletService);
@@ -267,9 +366,25 @@ describe('createDormantProviderPositionAdmissionRuntimeComposition', () => {
     );
     expect(MockedCoordinator.mock.calls[0]?.[6]).toBe(reviewedOptions);
 
-    expect(Reflect.ownKeys(composition)).toEqual(['admit', 'admitAndAssemble', 'close']);
+    expect(Reflect.ownKeys(composition)).toEqual(['admit', 'admitAndAssemble', 'reader', 'close']);
     expect(Object.getPrototypeOf(composition)).toBeNull();
     expect(Object.isFrozen(composition)).toBe(true);
+    expect(Reflect.ownKeys(composition.reader)).toEqual([
+      'readerVersion',
+      'positionSchemaVersion',
+      'coverageVersion',
+      'readCurrentPositions',
+    ]);
+    expect(composition.reader).toMatchObject({
+      readerVersion: 3,
+      positionSchemaVersion: 1,
+      coverageVersion: 1,
+    });
+    expect(Object.getPrototypeOf(composition.reader)).toBeNull();
+    expect(Object.isFrozen(composition.reader)).toBe(true);
+    expect(composition.reader).not.toHaveProperty('admit');
+    expect(composition.reader).not.toHaveProperty('admitAndAssemble');
+    expect(composition.reader).not.toHaveProperty('close');
     expect(poolEnd).not.toHaveBeenCalled();
     expect(closePostgres).not.toHaveBeenCalled();
     expect(coordinatorClose).not.toHaveBeenCalled();
@@ -301,6 +416,200 @@ describe('createDormantProviderPositionAdmissionRuntimeComposition', () => {
     });
     expect(coordinatorAdmit).toHaveBeenCalledWith(request);
     expect(coordinatorAssemble).toHaveBeenCalledWith(request);
+
+    await composition.close();
+  });
+
+  it('maps the captured covered assembly to an exact server-timed reader result', async () => {
+    const assembly = issuedCoveredAssembly();
+    coordinatorAssemble.mockResolvedValueOnce(assembly as never);
+    const composition =
+      await createDormantProviderPositionAdmissionRuntimeComposition(dependencies());
+    const request = Object.freeze({ accountId: ACCOUNT_ID, correlationId: CORRELATION_ID });
+
+    const result = await composition.reader.readCurrentPositions(request as never);
+
+    expect(coordinatorAssemble).toHaveBeenCalledTimes(1);
+    expect(coordinatorAssemble.mock.calls[0]?.[0]).toEqual(request);
+    expect(coordinatorAssemble.mock.calls[0]?.[0]).not.toBe(request);
+    expect(Object.getPrototypeOf(coordinatorAssemble.mock.calls[0]?.[0] as object)).toBeNull();
+    expect(result).toEqual({
+      evaluatedAt: EVALUATED_AT,
+      coveredSnapshot: assembly.coveredSnapshot,
+    });
+    expect(result.coveredSnapshot).toBe(assembly.coveredSnapshot);
+    expect(Reflect.ownKeys(result)).toEqual(['evaluatedAt', 'coveredSnapshot']);
+    expect(Object.getPrototypeOf(result)).toBeNull();
+    expect(Object.isFrozen(result)).toBe(true);
+    expect(result).not.toHaveProperty('admissionCandidate');
+    expect(result).not.toHaveProperty('mayPersist');
+
+    await composition.close();
+  });
+
+  it('keeps using the admission assembly method captured during construction', async () => {
+    coordinatorAssemble.mockResolvedValueOnce(issuedCoveredAssembly() as never);
+    const composition =
+      await createDormantProviderPositionAdmissionRuntimeComposition(dependencies());
+    const replacement = jest.fn().mockRejectedValue(new Error('replacement invoked'));
+    Object.defineProperty(coordinator, 'admitAndAssemble', {
+      configurable: true,
+      enumerable: true,
+      value: replacement,
+      writable: true,
+    });
+
+    try {
+      await expect(
+        composition.reader.readCurrentPositions({
+          accountId: ACCOUNT_ID as never,
+          correlationId: CORRELATION_ID,
+        }),
+      ).resolves.toMatchObject({ evaluatedAt: EVALUATED_AT });
+      expect(coordinatorAssemble).toHaveBeenCalledTimes(1);
+      expect(replacement).not.toHaveBeenCalled();
+    } finally {
+      Object.defineProperty(coordinator, 'admitAndAssemble', {
+        configurable: true,
+        enumerable: true,
+        value: coordinatorAssemble,
+        writable: true,
+      });
+      await composition.close();
+    }
+  });
+
+  it('drains an admitted reader call and rejects later reads after close', async () => {
+    const pending = deferred<Readonly<Record<string, unknown>>>();
+    coordinatorAssemble.mockReturnValueOnce(pending.promise as never);
+    const composition =
+      await createDormantProviderPositionAdmissionRuntimeComposition(dependencies());
+    const request = { accountId: ACCOUNT_ID as never, correlationId: CORRELATION_ID };
+    const read = composition.reader.readCurrentPositions(request);
+    await Promise.resolve();
+    expect(coordinatorAssemble).toHaveBeenCalledTimes(1);
+
+    const closing = composition.close();
+    expect(poolEnd).not.toHaveBeenCalled();
+    await expect(composition.reader.readCurrentPositions(request)).rejects.toMatchObject({
+      code: 'PROVIDER_POSITION_ADMISSION_COMPOSITION_CLOSED',
+    });
+
+    const assembly = issuedCoveredAssembly();
+    pending.resolve(assembly);
+    await expect(read).resolves.toMatchObject({ evaluatedAt: EVALUATED_AT });
+    await expect(closing).resolves.toBeUndefined();
+    expect(poolEnd).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects hostile reader requests without reaching coordinator admission', async () => {
+    const composition =
+      await createDormantProviderPositionAdmissionRuntimeComposition(dependencies());
+    let accessorCalls = 0;
+    const accessor = { accountId: ACCOUNT_ID, correlationId: CORRELATION_ID };
+    Object.defineProperty(accessor, 'accountId', {
+      enumerable: true,
+      get: () => {
+        accessorCalls += 1;
+        return ACCOUNT_ID;
+      },
+    });
+    const proxy = new Proxy(
+      { accountId: ACCOUNT_ID, correlationId: CORRELATION_ID },
+      {
+        ownKeys: () => {
+          throw new Error('request trap');
+        },
+      },
+    );
+    const requests: unknown[] = [
+      { accountId: ACCOUNT_ID },
+      { accountId: ACCOUNT_ID, correlationId: CORRELATION_ID, evaluatedAt: EVALUATED_AT },
+      Object.assign(Object.create({ inherited: true }), {
+        accountId: ACCOUNT_ID,
+        correlationId: CORRELATION_ID,
+      }),
+      accessor,
+      proxy,
+    ];
+
+    for (const request of requests) {
+      await expect(composition.reader.readCurrentPositions(request as never)).rejects.toMatchObject(
+        {
+          name: 'ProviderPositionAdmissionRuntimeCompositionError',
+          code: 'PROVIDER_POSITION_ADMISSION_COMPOSITION_READ_FAILED',
+          message: 'Provider-position admission composition is unavailable.',
+        },
+      );
+    }
+    expect(accessorCalls).toBe(0);
+    expect(coordinatorAssemble).not.toHaveBeenCalled();
+
+    await composition.close();
+  });
+
+  it('rejects hostile or misbound assembly results with one fixed reader error', async () => {
+    const valid = issuedCoveredAssembly();
+    const candidate = valid.admissionCandidate as Readonly<Record<string, unknown>>;
+    const coveredSnapshot = valid.coveredSnapshot as Readonly<Record<string, unknown>>;
+    let resultTraps = 0;
+    const resultProxy = new Proxy(valid, {
+      getOwnPropertyDescriptor: () => {
+        resultTraps += 1;
+        throw new Error('result descriptor trap');
+      },
+      getPrototypeOf: () => {
+        resultTraps += 1;
+        throw new Error('result prototype trap');
+      },
+      ownKeys: () => {
+        resultTraps += 1;
+        throw new Error('result own-keys trap');
+      },
+    });
+    const malformed: unknown[] = [
+      { ...valid },
+      JSON.parse(JSON.stringify(valid)) as unknown,
+      Object.freeze({ ...valid, extra: true }),
+      Object.freeze({ ...valid, evaluatedAt: STALE_AFTER }),
+      Object.freeze({
+        ...valid,
+        admissionCandidate: Object.freeze({ ...candidate, accountId: 'other-account' }),
+      }),
+      Object.freeze({
+        ...valid,
+        coveredSnapshot: Object.freeze({ ...coveredSnapshot, snapshotId: 'substituted' }),
+      }),
+      resultProxy,
+    ];
+    const composition =
+      await createDormantProviderPositionAdmissionRuntimeComposition(dependencies());
+
+    for (const result of malformed) {
+      coordinatorAssemble.mockResolvedValueOnce(result as never);
+      await expect(
+        composition.reader.readCurrentPositions({
+          accountId: ACCOUNT_ID as never,
+          correlationId: CORRELATION_ID,
+        }),
+      ).rejects.toMatchObject({
+        name: 'ProviderPositionAdmissionRuntimeCompositionError',
+        code: 'PROVIDER_POSITION_ADMISSION_COMPOSITION_READ_FAILED',
+        message: 'Provider-position admission composition is unavailable.',
+      });
+    }
+    coordinatorAssemble.mockRejectedValueOnce(new Error('private assembler credential'));
+    await expect(
+      composition.reader.readCurrentPositions({
+        accountId: ACCOUNT_ID as never,
+        correlationId: CORRELATION_ID,
+      }),
+    ).rejects.toMatchObject({
+      name: 'ProviderPositionAdmissionRuntimeCompositionError',
+      code: 'PROVIDER_POSITION_ADMISSION_COMPOSITION_READ_FAILED',
+      message: 'Provider-position admission composition is unavailable.',
+    });
+    expect(resultTraps).toBe(0);
 
     await composition.close();
   });
@@ -736,6 +1045,27 @@ describe('createDormantProviderPositionAdmissionRuntimeComposition', () => {
           ),
       });
       const readers = sourceBindings();
+      let issuedAssessment: unknown;
+      const isolatedTrustedAssembly = Object.freeze({
+        assemblyVersion: 1 as const,
+        assemble: jest.fn(async (request: unknown) => {
+          const positionSnapshot = (request as Readonly<Record<string, unknown>>)
+            .positionSnapshot as Readonly<Record<string, unknown>>;
+          issuedAssessment = Object.freeze({
+            assessmentVersion: 1,
+            use: 'MAINNET_PROVIDER_POSITION_TRUSTED_CHAIN_ASSESSMENT',
+            mayAuthorizeFinancialAction: false,
+            assessmentId: 'empty-roster-assessment',
+            observationPolicyFingerprintSha256: positionSnapshot.observationPolicyFingerprintSha256,
+            assetRegistryVersion: positionSnapshot.assetRegistryVersion,
+            assetRegistryFingerprintSha256: positionSnapshot.assetRegistryFingerprintSha256,
+            entries: Object.freeze([]),
+          });
+          return issuedAssessment;
+        }),
+        verifyAssembly: jest.fn((capability: unknown) => capability === issuedAssessment),
+        verify: jest.fn(() => false),
+      });
       const composition =
         await actualCompositionModule.createDormantProviderPositionAdmissionRuntimeComposition({
           postgresConfig: postgresConfig(),
@@ -745,17 +1075,22 @@ describe('createDormantProviderPositionAdmissionRuntimeComposition', () => {
           requiredPolicyFingerprintSha256: policy.fingerprintSha256,
           sourceBindings: readers,
           clock: { now: () => new Date('2026-09-05T21:00:00.000Z') },
+          trustedChainAssessmentAssembly: isolatedTrustedAssembly,
         });
 
       expect(poolConnect).not.toHaveBeenCalled();
       expect(clientQuery).not.toHaveBeenCalled();
 
-      const result = await composition.admit({
+      const result = await composition.reader.readCurrentPositions({
         accountId: accountProfileModule.parseAccountId(ACCOUNT_ID),
         correlationId: CORRELATION_ID,
       });
-      expect(result.targets).toEqual([]);
-      expect(result.coverageManifest.targets).toEqual([]);
+      expect(result.evaluatedAt).toBe(EVALUATED_AT);
+      expect(result.coveredSnapshot.observations).toEqual([]);
+      expect(result.coveredSnapshot.coverageManifest.targets).toEqual([]);
+      expect(isolatedTrustedAssembly.assemble).toHaveBeenCalledTimes(1);
+      expect(isolatedTrustedAssembly.verifyAssembly).toHaveBeenCalledTimes(1);
+      expect(isolatedTrustedAssembly.verify).not.toHaveBeenCalled();
       expect(isolatedCreatePool).toHaveBeenCalledTimes(1);
       expect(poolConnect).toHaveBeenCalledTimes(1);
       expect(clientQuery).toHaveBeenCalledTimes(1);

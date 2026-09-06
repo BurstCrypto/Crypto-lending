@@ -2,6 +2,7 @@ import { isProxy } from 'node:util/types';
 
 import type { Pool } from 'pg';
 
+import { parseAccountId } from '../../accounts/domain/account-profile';
 import { RegisteredPortfolioWalletReader } from '../../portfolio/infrastructure/registered-portfolio-wallet-reader';
 import {
   WalletRegistrationService,
@@ -17,11 +18,21 @@ import { PostgresService } from '../../infrastructure/database/postgres.service'
 import type { RuntimePostgresPoolConfig } from '../../infrastructure/database/runtime-postgres-pool';
 import {
   DormantProviderPositionAdmissionCoordinator,
+  isIssuedProviderPositionAdmissionReadOnlyAssemblyV1,
+  type ProviderPositionAdmissionReadOnlyAssemblyV1,
   type ProviderPositionAdmissionClock,
   type ProviderPositionAdmissionOptions,
   type ProviderPositionAdmissionSourceBinding,
 } from '../application/provider-position-admission.coordinator';
+import {
+  MAINNET_PROVIDER_POSITION_READER_VERSION,
+  type MainnetProviderPositionReadResultV3,
+  type MainnetProviderPositionReaderV3,
+  type ReadMainnetProviderPositionsRequestV3,
+} from '../application/ports/mainnet-provider-position-reader.port';
 import type { ProviderPositionTrustedChainAssessmentAssemblyPort } from '../application/ports/provider-position-trusted-chain-assessment-assembly.port';
+import { MAINNET_PROVIDER_POSITION_COVERAGE_VERSION } from '../domain/mainnet-provider-position-coverage';
+import { MAINNET_PROVIDER_POSITION_SCHEMA_VERSION } from '../domain/mainnet-provider-position-observation';
 import { NodeProviderPositionAdmissionDeadlineRunner } from './node-provider-position-admission-deadline.runner';
 import {
   createDormantProviderPositionAdmissionRuntimeResource,
@@ -48,7 +59,10 @@ const WALLET_CONFIG_KEYS = Object.freeze([
   'metadataSealKeys',
 ] as const);
 const SHA256 = /^[0-9a-f]{64}$/u;
+const CORRELATION_ID = /^[A-Za-z0-9](?:[A-Za-z0-9._:-]{0,126}[A-Za-z0-9])?$/u;
+const TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
 const MAX_SOURCE_BINDINGS = 512;
+const READER_REQUEST_KEYS = Object.freeze(['accountId', 'correlationId'] as const);
 
 export interface DormantProviderPositionAdmissionRuntimeCompositionDependencies {
   readonly postgresConfig: RuntimePostgresPoolConfig;
@@ -64,6 +78,7 @@ export interface DormantProviderPositionAdmissionRuntimeCompositionDependencies 
 export interface DormantProviderPositionAdmissionRuntimeComposition {
   readonly admit: DormantProviderPositionAdmissionCoordinator['admit'];
   readonly admitAndAssemble: DormantProviderPositionAdmissionCoordinator['admitAndAssemble'];
+  readonly reader: Readonly<MainnetProviderPositionReaderV3>;
   readonly close: () => Promise<void>;
 }
 
@@ -71,6 +86,7 @@ export type ProviderPositionAdmissionRuntimeCompositionErrorCode =
   | 'PROVIDER_POSITION_ADMISSION_COMPOSITION_INVALID'
   | 'PROVIDER_POSITION_ADMISSION_COMPOSITION_CONSTRUCTION_FAILED'
   | 'PROVIDER_POSITION_ADMISSION_COMPOSITION_CLOSED'
+  | 'PROVIDER_POSITION_ADMISSION_COMPOSITION_READ_FAILED'
   | 'PROVIDER_POSITION_ADMISSION_COMPOSITION_CLOSE_FAILED';
 
 export class ProviderPositionAdmissionRuntimeCompositionError extends Error {
@@ -111,14 +127,15 @@ function exactDataRecord(
   value: unknown,
   requiredKeys: readonly string[],
   optionalKeys: readonly string[] = [],
+  code: ProviderPositionAdmissionRuntimeCompositionErrorCode = 'PROVIDER_POSITION_ADMISSION_COMPOSITION_INVALID',
 ): Record<string, unknown> {
   try {
     if (typeof value !== 'object' || value === null || Array.isArray(value) || isProxy(value)) {
-      return fail('PROVIDER_POSITION_ADMISSION_COMPOSITION_INVALID');
+      return fail(code);
     }
     const prototype = Object.getPrototypeOf(value) as unknown;
     if (prototype !== Object.prototype && prototype !== null) {
-      return fail('PROVIDER_POSITION_ADMISSION_COMPOSITION_INVALID');
+      return fail(code);
     }
     const descriptors = Object.getOwnPropertyDescriptors(value) as unknown as PropertyDescriptorMap;
     const keys = Reflect.ownKeys(descriptors);
@@ -129,21 +146,119 @@ function exactDataRecord(
       requiredKeys.some((key) => !keys.includes(key)) ||
       keys.some((key) => typeof key !== 'string' || !allowed.has(key))
     ) {
-      return fail('PROVIDER_POSITION_ADMISSION_COMPOSITION_INVALID');
+      return fail(code);
     }
     const record = Object.create(null) as Record<string, unknown>;
     for (const key of keys as string[]) {
       const descriptor = descriptors[key];
       if (!descriptor?.enumerable || !('value' in descriptor)) {
-        return fail('PROVIDER_POSITION_ADMISSION_COMPOSITION_INVALID');
+        return fail(code);
       }
       record[key] = descriptor.value;
     }
     return record;
   } catch (error) {
     if (error instanceof ProviderPositionAdmissionRuntimeCompositionError) throw error;
-    return fail('PROVIDER_POSITION_ADMISSION_COMPOSITION_INVALID');
+    return fail(code);
   }
+}
+
+function canonicalTimestamp(value: unknown): string {
+  if (typeof value !== 'string' || !TIMESTAMP.test(value)) {
+    return fail('PROVIDER_POSITION_ADMISSION_COMPOSITION_READ_FAILED');
+  }
+  const milliseconds = Date.parse(value);
+  if (
+    !Number.isFinite(milliseconds) ||
+    Date.prototype.toISOString.call(new Date(milliseconds)) !== value
+  ) {
+    return fail('PROVIDER_POSITION_ADMISSION_COMPOSITION_READ_FAILED');
+  }
+  return value;
+}
+
+function readerRequest(value: unknown): Readonly<ReadMainnetProviderPositionsRequestV3> {
+  const record = exactDataRecord(
+    value,
+    READER_REQUEST_KEYS,
+    [],
+    'PROVIDER_POSITION_ADMISSION_COMPOSITION_READ_FAILED',
+  );
+  let accountId: ReturnType<typeof parseAccountId>;
+  try {
+    accountId = parseAccountId(record.accountId);
+  } catch {
+    return fail('PROVIDER_POSITION_ADMISSION_COMPOSITION_READ_FAILED');
+  }
+  if (typeof record.correlationId !== 'string' || !CORRELATION_ID.test(record.correlationId)) {
+    return fail('PROVIDER_POSITION_ADMISSION_COMPOSITION_READ_FAILED');
+  }
+  return frozenNullPrototype({ accountId, correlationId: record.correlationId });
+}
+
+function readerResult(
+  value: unknown,
+  request: Readonly<ReadMainnetProviderPositionsRequestV3>,
+): Readonly<MainnetProviderPositionReadResultV3> {
+  if (!isIssuedProviderPositionAdmissionReadOnlyAssemblyV1(value)) {
+    return fail('PROVIDER_POSITION_ADMISSION_COMPOSITION_READ_FAILED');
+  }
+
+  const candidate = value.admissionCandidate;
+  const coveredSnapshot = value.coveredSnapshot;
+  const candidateCoverageManifest = candidate.coverageManifest;
+  const coverageManifest = coveredSnapshot.coverageManifest;
+  const evaluatedAt = canonicalTimestamp(value.evaluatedAt);
+  const capturedAt = canonicalTimestamp(coveredSnapshot.capturedAt);
+  const staleAfter = canonicalTimestamp(coveredSnapshot.staleAfter);
+  if (
+    candidate.accountId !== request.accountId ||
+    candidate.correlationId !== request.correlationId ||
+    candidate.freshnessClass !== 'CURRENT' ||
+    coveredSnapshot.freshnessClass !== 'CURRENT' ||
+    coverageManifest.freshnessClass !== 'CURRENT' ||
+    coverageManifest.accountId !== request.accountId ||
+    candidateCoverageManifest.accountId !== request.accountId ||
+    coveredSnapshot.snapshotId !== candidate.positionSnapshotId ||
+    coverageManifest.positionSnapshotId !== candidate.positionSnapshotId ||
+    candidateCoverageManifest.positionSnapshotId !== candidate.positionSnapshotId ||
+    coveredSnapshot.observationPolicyVersion !== candidate.observationPolicyVersion ||
+    coveredSnapshot.observationPolicyId !== candidate.observationPolicyId ||
+    coveredSnapshot.observationPolicyFingerprintSha256 !==
+      candidate.observationPolicyFingerprintSha256 ||
+    coveredSnapshot.assetRegistryVersion !== candidate.assetRegistryVersion ||
+    coveredSnapshot.assetRegistryFingerprintSha256 !== candidate.assetRegistryFingerprintSha256 ||
+    coverageManifest.observationPolicyVersion !== candidate.observationPolicyVersion ||
+    coverageManifest.observationPolicyId !== candidate.observationPolicyId ||
+    coverageManifest.observationPolicyFingerprintSha256 !==
+      candidate.observationPolicyFingerprintSha256 ||
+    coverageManifest.assetRegistryVersion !== candidate.assetRegistryVersion ||
+    coverageManifest.assetRegistryFingerprintSha256 !== candidate.assetRegistryFingerprintSha256 ||
+    candidateCoverageManifest.observationPolicyVersion !== candidate.observationPolicyVersion ||
+    candidateCoverageManifest.observationPolicyId !== candidate.observationPolicyId ||
+    candidateCoverageManifest.observationPolicyFingerprintSha256 !==
+      candidate.observationPolicyFingerprintSha256 ||
+    candidateCoverageManifest.assetRegistryVersion !== candidate.assetRegistryVersion ||
+    candidateCoverageManifest.assetRegistryFingerprintSha256 !==
+      candidate.assetRegistryFingerprintSha256 ||
+    candidateCoverageManifest.manifestId !== coverageManifest.manifestId ||
+    candidateCoverageManifest.fingerprintSha256 !== coverageManifest.fingerprintSha256 ||
+    coveredSnapshot.capturedAt !== candidate.capturedAt ||
+    coveredSnapshot.staleAfter !== candidate.staleAfter ||
+    coverageManifest.capturedAt !== candidate.capturedAt ||
+    coverageManifest.staleAfter !== candidate.staleAfter ||
+    candidateCoverageManifest.capturedAt !== candidate.capturedAt ||
+    candidateCoverageManifest.staleAfter !== candidate.staleAfter ||
+    candidateCoverageManifest.freshnessClass !== 'CURRENT' ||
+    Date.parse(capturedAt) > Date.parse(evaluatedAt) ||
+    Date.parse(evaluatedAt) >= Date.parse(staleAfter)
+  ) {
+    return fail('PROVIDER_POSITION_ADMISSION_COMPOSITION_READ_FAILED');
+  }
+  return frozenNullPrototype({
+    evaluatedAt,
+    coveredSnapshot,
+  });
 }
 
 function dataArray(value: unknown, maximum: number): readonly unknown[] {
@@ -427,6 +542,26 @@ function admissionFacade(
     return closePromise;
   };
 
+  const reader = frozenNullPrototype({
+    readerVersion: MAINNET_PROVIDER_POSITION_READER_VERSION,
+    positionSchemaVersion: MAINNET_PROVIDER_POSITION_SCHEMA_VERSION,
+    coverageVersion: MAINNET_PROVIDER_POSITION_COVERAGE_VERSION,
+    readCurrentPositions: (
+      requestInput: ReadMainnetProviderPositionsRequestV3,
+    ): Promise<Readonly<MainnetProviderPositionReadResultV3>> =>
+      run(async () => {
+        try {
+          const request = readerRequest(requestInput);
+          const assembly = await (Reflect.apply(admitAndAssemble, coordinator, [
+            request,
+          ]) as Promise<ProviderPositionAdmissionReadOnlyAssemblyV1>);
+          return readerResult(assembly, request);
+        } catch {
+          return fail('PROVIDER_POSITION_ADMISSION_COMPOSITION_READ_FAILED');
+        }
+      }),
+  });
+
   return frozenNullPrototype({
     admit: ((request) =>
       run(
@@ -442,6 +577,7 @@ function admissionFacade(
             DormantProviderPositionAdmissionCoordinator['admitAndAssemble']
           >,
       )) as DormantProviderPositionAdmissionCoordinator['admitAndAssemble'],
+    reader,
     close,
   });
 }
@@ -451,7 +587,9 @@ function admissionFacade(
  * runtime-budget resource. Construction is allocation-only: it performs no
  * database query, provider request, environment lookup, or feature
  * registration. The exact resource pool and options are consumed in-process
- * and never escape the returned closure facade.
+ * and never escape the returned closure facade. Its nested reader capability
+ * returns only server-timed covered snapshots; it exposes no candidate,
+ * verifier, persistence, lifecycle, or financial-action authority.
  *
  * `close` stops new facade admissions, aborts all active coordinator work,
  * cancels/drains PostgreSQL roster work, waits for every already-admitted

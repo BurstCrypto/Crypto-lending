@@ -248,8 +248,26 @@ export interface ProviderPositionAdmissionReadOnlyAssemblyV1 {
   readonly use: typeof PROVIDER_POSITION_ADMISSION_READ_ONLY_ASSEMBLY_USE;
   readonly mayAuthorizeFinancialAction: false;
   readonly mayPersist: false;
+  /** Exact server-authored time used to parse the covered snapshot. */
+  readonly evaluatedAt: string;
   readonly admissionCandidate: ProviderPositionAdmissionAssemblyCandidateV1;
   readonly coveredSnapshot: CoveredMainnetProviderPositionSnapshotV1;
+}
+
+const ISSUED_PROVIDER_POSITION_ADMISSION_READ_ONLY_ASSEMBLIES = new WeakSet<object>();
+
+/**
+ * Reviews only module-private issuance identity. It does not inspect the
+ * candidate and therefore cannot invoke properties on an untrusted value.
+ */
+export function isIssuedProviderPositionAdmissionReadOnlyAssemblyV1(
+  value: unknown,
+): value is ProviderPositionAdmissionReadOnlyAssemblyV1 {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    ISSUED_PROVIDER_POSITION_ADMISSION_READ_ONLY_ASSEMBLIES.has(value)
+  );
 }
 
 export interface ReadProviderPositionAdmissionRequestV1 {
@@ -512,14 +530,17 @@ export class DormantProviderPositionAdmissionCoordinator {
       const verified = canonicalClock(this.clock.now());
       assertAssemblyWindow(verified.milliseconds, candidate, prepared, completed.timestamp);
 
-      return Object.freeze({
+      const readOnlyAssembly = Object.freeze({
         assemblyVersion: PROVIDER_POSITION_ADMISSION_VERSION,
         use: PROVIDER_POSITION_ADMISSION_READ_ONLY_ASSEMBLY_USE,
         mayAuthorizeFinancialAction: false,
         mayPersist: false,
+        evaluatedAt: evaluated.timestamp,
         admissionCandidate: candidate,
         coveredSnapshot,
       });
+      ISSUED_PROVIDER_POSITION_ADMISSION_READ_ONLY_ASSEMBLIES.add(readOnlyAssembly);
+      return readOnlyAssembly;
     } catch (error) {
       if (error instanceof ProviderPositionAdmissionUnavailableError) throw error;
       return fail('ASSEMBLY_UNAVAILABLE');

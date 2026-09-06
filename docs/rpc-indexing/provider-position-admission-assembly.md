@@ -95,13 +95,39 @@ When the port is present, the coordinator retains the same-cycle authoritative w
 
 One server-side port instance must issue the assessment, verify the whole assembly request, and verify every normalized nonempty observation. Its exact returned object is passed unchanged as the opaque verifier capability; a structurally identical clone or deserialized object is not sufficient. The port cannot return a verifier, approval boolean, writer, persistence handle, or final snapshot. The existing coverage and snapshot parsers remain the only path to the returned covered snapshot.
 
-The returned read-only envelope retains the original blocked admission candidate and exposes neither the raw assessment nor its capability. It explicitly has `mayAuthorizeFinancialAction: false` and `mayPersist: false`. For every target, including a zero-position target, the request separately carries the canonical selected source and anchor. An independently agreed empty position set invokes whole-assembly verification before using the coverage parser's explicit empty-snapshot path; it does not fabricate an observation or anchor.
+The returned read-only envelope retains the original blocked admission
+candidate, the exact server-authored evaluation time used by the coverage
+parser, and the covered snapshot, while exposing neither the raw assessment nor
+its capability. A final clock read must still pass the exclusive admission and
+evidence-expiry bounds before that earlier parser time can be returned. The
+coordinator records that exact envelope in a module-private `WeakSet` only
+after the final gate. The composition's direct-source identity reviewer checks
+issuance before extracting any result property and is not exported through the
+feature barrel. The envelope explicitly has `mayAuthorizeFinancialAction: false` and
+`mayPersist: false`. For every target, including a zero-position target, the
+request separately carries the canonical selected source and anchor. An
+independently agreed empty position set invokes whole-assembly verification
+before using the coverage parser's explicit empty-snapshot path; it does not
+fabricate an observation or anchor.
 
 Assembly shares the admission deadline, captures the port's methods once without invoking accessors, is rejected if the server clock regresses or reaches the exclusive deadline or evidence-expiry boundary before or after verification, and aborts the shared signal when the operation finishes. A failed port, counterfeit capability, missing or extra assessment entry, changed source/anchor, or parser rejection returns no partial snapshot and is sanitized to `ASSEMBLY_UNAVAILABLE`.
 
 ## Required production binding
 
-Production still needs a reviewed implementation of the dormant port. It must independently verify every selected anchor against durable chain identity, progression, and finality state and issue one object-identity capability covering the complete assembled assessment. A private dormant runtime composition now consumes one reviewed lazy PostgreSQL pool and its exact admission options through the wallet-roster, deadline-runner, and coordinator graph, but no trusted assessment implementation or registered production composition exists. Therefore, `admitAndAssemble` is not a live application path.
+Production still needs a reviewed implementation of the dormant trusted
+assessment port. It must independently verify every selected anchor against
+durable chain identity, progression, and finality state and issue one
+object-identity capability covering the complete assembled assessment. A
+private dormant runtime composition consumes one reviewed lazy PostgreSQL pool
+and its exact admission options through the wallet-roster, deadline-runner, and
+coordinator graph. It now also exposes a separate frozen null-prototype reader
+v3 sub-capability. That reader accepts no caller-authored evaluation time,
+invokes only the composition's descriptor-captured `admitAndAssemble`, and
+returns only the exact covered-snapshot identity with the coordinator's parser
+time. It exposes no candidate, verifier, pool, close, persistence, or
+financial-action capability. No trusted assessment implementation or
+registered production composition exists, so neither the reader nor
+`admitAndAssemble` is a live application path.
 
 The offline production preflight now byte-pins this coordinator, assembly port,
 concrete deadline runner, complete wallet-roster cancellation chain, shared

@@ -15,6 +15,7 @@ import {
 import {
   MAINNET_PROVIDER_POSITION_READER,
   MAINNET_PROVIDER_POSITION_READER_VERSION,
+  type MainnetProviderPositionReadResultV3,
   type MainnetProviderPositionReader,
 } from './mainnet-provider-position-reader.port';
 
@@ -30,10 +31,16 @@ const MARKET = '0x87870bca3f3fd6335c3f4ce8392d69350b4fa4e2';
 const USDC = '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48';
 
 type ReaderResponse = Awaited<ReturnType<MainnetProviderPositionReader['readCurrentPositions']>>;
+type ReaderRequest = Parameters<MainnetProviderPositionReader['readCurrentPositions']>[0];
 type BareSnapshotIsReaderResponse = MainnetProviderPositionSnapshotV1 extends ReaderResponse
   ? true
   : false;
+type CoveredSnapshotIsReaderResponse =
+  CoveredMainnetProviderPositionSnapshotV1 extends ReaderResponse ? true : false;
+type CallerEvaluationTimeIsRequestField = 'evaluatedAt' extends keyof ReaderRequest ? true : false;
 const BARE_SNAPSHOT_IS_READER_RESPONSE: BareSnapshotIsReaderResponse = false;
+const COVERED_SNAPSHOT_IS_READER_RESPONSE: CoveredSnapshotIsReaderResponse = false;
+const CALLER_EVALUATION_TIME_IS_REQUEST_FIELD: CallerEvaluationTimeIsRequestField = false;
 
 function coverageManifest(positionCount: number): MainnetProviderPositionCoverageManifestV1 {
   return Object.freeze({
@@ -125,8 +132,12 @@ function ethereumObservation(): MainnetProviderPositionObservationV1 {
 }
 
 function readerReturning(
-  response: CoveredMainnetProviderPositionSnapshotV1,
+  coveredSnapshot: CoveredMainnetProviderPositionSnapshotV1,
 ): MainnetProviderPositionReader {
+  const response: Readonly<MainnetProviderPositionReadResultV3> = Object.freeze({
+    evaluatedAt: '2026-09-02T17:00:10.000Z',
+    coveredSnapshot,
+  });
   return Object.freeze({
     readerVersion: MAINNET_PROVIDER_POSITION_READER_VERSION,
     positionSchemaVersion: MAINNET_PROVIDER_POSITION_SCHEMA_VERSION,
@@ -136,54 +147,58 @@ function readerReturning(
 }
 
 describe('MainnetProviderPositionReader port', () => {
-  it('is a distinct coverage-aware versioned boundary', () => {
-    expect(MAINNET_PROVIDER_POSITION_READER_VERSION).toBe(2);
+  it('is a distinct server-timed coverage-aware versioned boundary', () => {
+    expect(MAINNET_PROVIDER_POSITION_READER_VERSION).toBe(3);
     expect(MAINNET_PROVIDER_POSITION_SCHEMA_VERSION).toBe(1);
     expect(MAINNET_PROVIDER_POSITION_COVERAGE_VERSION).toBe(1);
     expect(MAINNET_PROVIDER_POSITION_READER).not.toBe(PORTFOLIO_BALANCE_READER);
     expect(BARE_SNAPSHOT_IS_READER_RESPONSE).toBe(false);
+    expect(COVERED_SNAPSHOT_IS_READER_RESPONSE).toBe(false);
+    expect(CALLER_EVALUATION_TIME_IS_REQUEST_FIELD).toBe(false);
   });
 
   it('requires nonempty observations to retain exact coverage and evidence identity', async () => {
-    const response = coveredSnapshot([ethereumObservation()]);
-    const reader = readerReturning(response);
+    const snapshot = coveredSnapshot([ethereumObservation()]);
+    const reader = readerReturning(snapshot);
 
-    await expect(
-      reader.readCurrentPositions({
-        accountId: ACCOUNT_ID,
-        evaluatedAt: '2026-09-02T17:00:10.000Z',
-        correlationId: 'position-read-1',
-      }),
-    ).resolves.toBe(response);
-    expect(response.coverageManifest).toEqual(
+    const response = await reader.readCurrentPositions({
+      accountId: ACCOUNT_ID,
+      correlationId: 'position-read-1',
+    });
+    expect(response).toEqual({
+      evaluatedAt: '2026-09-02T17:00:10.000Z',
+      coveredSnapshot: snapshot,
+    });
+    expect(response.coveredSnapshot).toBe(snapshot);
+    expect(Object.isFrozen(response)).toBe(true);
+    expect(snapshot.coverageManifest).toEqual(
       expect.objectContaining({
         accountId: ACCOUNT_ID,
-        positionSnapshotId: response.snapshotId,
-        observationPolicyFingerprintSha256: response.observationPolicyFingerprintSha256,
-        assetRegistryFingerprintSha256: response.assetRegistryFingerprintSha256,
+        positionSnapshotId: snapshot.snapshotId,
+        observationPolicyFingerprintSha256: snapshot.observationPolicyFingerprintSha256,
+        assetRegistryFingerprintSha256: snapshot.assetRegistryFingerprintSha256,
         fingerprintSha256: COVERAGE_FINGERPRINT,
         targets: [expect.objectContaining({ positionCount: 1 })],
       }),
     );
-    expect(Object.keys(response)).not.toEqual(
+    expect(Object.keys(response)).toEqual(['evaluatedAt', 'coveredSnapshot']);
+    expect(Object.keys(snapshot)).not.toEqual(
       expect.arrayContaining(['chainAssessment', 'chainAssessmentVerifier', 'capability']),
     );
-    expect(response.mayAuthorizeFinancialAction).toBe(false);
+    expect(snapshot.mayAuthorizeFinancialAction).toBe(false);
   });
 
   it('represents zero only through an explicit complete zero-position target', async () => {
-    const response = coveredSnapshot([]);
-    const reader = readerReturning(response);
+    const snapshot = coveredSnapshot([]);
+    const reader = readerReturning(snapshot);
 
-    await expect(
-      reader.readCurrentPositions({
-        accountId: ACCOUNT_ID,
-        evaluatedAt: '2026-09-02T17:00:10.000Z',
-        correlationId: 'position-read-zero',
-      }),
-    ).resolves.toBe(response);
-    expect(response.observations).toEqual([]);
-    expect(response.coverageManifest.targets).toEqual([
+    const response = await reader.readCurrentPositions({
+      accountId: ACCOUNT_ID,
+      correlationId: 'position-read-zero',
+    });
+    expect(response.coveredSnapshot).toBe(snapshot);
+    expect(snapshot.observations).toEqual([]);
+    expect(snapshot.coverageManifest.targets).toEqual([
       expect.objectContaining({
         status: 'COMPLETE',
         divergenceStatus: 'AGREED',

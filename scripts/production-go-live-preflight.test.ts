@@ -975,12 +975,15 @@ test('RPC provider decision, dormant inventory, and research capture fail indepe
 
   for (const target of ['read-only', 'mainnet-write'] as const) {
     const report = evaluateProductionPreflight(inventoryFailed, target);
-    assert.deepEqual(report.checks.find(({ id }) => id === 'RPC_INDEXING'), {
-      id: 'RPC_INDEXING',
-      localValidation: 'FAIL',
-      launchReadiness: 'BLOCKED',
-      blockerIds: ['RPC_PROVIDER_DORMANT_INVENTORY_LOCAL_VALIDATION_FAILED'],
-    });
+    assert.deepEqual(
+      report.checks.find(({ id }) => id === 'RPC_INDEXING'),
+      {
+        id: 'RPC_INDEXING',
+        localValidation: 'FAIL',
+        launchReadiness: 'BLOCKED',
+        blockerIds: ['RPC_PROVIDER_DORMANT_INVENTORY_LOCAL_VALIDATION_FAILED'],
+      },
+    );
     assert.equal(report.selectedTargetReadiness, 'BLOCKED');
   }
 
@@ -991,12 +994,15 @@ test('RPC provider decision, dormant inventory, and research capture fail indepe
       localValidationPassed: false,
     },
   });
-  assert.deepEqual(decisionFailed.checks.find(({ id }) => id === 'RPC_INDEXING'), {
-    id: 'RPC_INDEXING',
-    localValidation: 'FAIL',
-    launchReadiness: 'BLOCKED',
-    blockerIds: ['RPC_PROVIDER_DECISION_LOCAL_VALIDATION_FAILED'],
-  });
+  assert.deepEqual(
+    decisionFailed.checks.find(({ id }) => id === 'RPC_INDEXING'),
+    {
+      id: 'RPC_INDEXING',
+      localValidation: 'FAIL',
+      launchReadiness: 'BLOCKED',
+      blockerIds: ['RPC_PROVIDER_DECISION_LOCAL_VALIDATION_FAILED'],
+    },
+  );
 
   const researchCaptureFailed = {
     ...baseline,
@@ -1007,12 +1013,15 @@ test('RPC provider decision, dormant inventory, and research capture fail indepe
   };
   for (const target of ['read-only', 'mainnet-write'] as const) {
     const report = evaluateProductionPreflight(researchCaptureFailed, target);
-    assert.deepEqual(report.checks.find(({ id }) => id === 'RPC_INDEXING'), {
-      id: 'RPC_INDEXING',
-      localValidation: 'FAIL',
-      launchReadiness: 'BLOCKED',
-      blockerIds: ['RPC_PROVIDER_ACTIVE_SCOPE_RESEARCH_CAPTURE_LOCAL_VALIDATION_FAILED'],
-    });
+    assert.deepEqual(
+      report.checks.find(({ id }) => id === 'RPC_INDEXING'),
+      {
+        id: 'RPC_INDEXING',
+        localValidation: 'FAIL',
+        launchReadiness: 'BLOCKED',
+        blockerIds: ['RPC_PROVIDER_ACTIVE_SCOPE_RESEARCH_CAPTURE_LOCAL_VALIDATION_FAILED'],
+      },
+    );
     assert.equal(report.selectedTargetReadiness, 'BLOCKED');
   }
 
@@ -1048,9 +1057,7 @@ test('RPC provider decision, dormant inventory, and research capture fail indepe
     assert.ok(
       report.checks
         .find(({ id }) => id === 'RPC_INDEXING')
-        ?.blockerIds.includes(
-          'RPC_PROVIDER_ACTIVE_SCOPE_RESEARCH_CAPTURE_LOCAL_VALIDATION_FAILED',
-        ),
+        ?.blockerIds.includes('RPC_PROVIDER_ACTIVE_SCOPE_RESEARCH_CAPTURE_LOCAL_VALIDATION_FAILED'),
     );
   }
 });
@@ -1114,13 +1121,23 @@ test('provider-position read inspection rejects trust, runtime bounds, coverage,
   ])[] = [
     [
       'providerPositionReaderPortSource',
+      'export const MAINNET_PROVIDER_POSITION_READER_VERSION = 3 as const;',
       'export const MAINNET_PROVIDER_POSITION_READER_VERSION = 2 as const;',
-      'export const MAINNET_PROVIDER_POSITION_READER_VERSION = 1 as const;',
     ],
     [
       'providerPositionReaderPortSource',
-      'Promise<CoveredMainnetProviderPositionSnapshotV1>',
-      'Promise<MainnetProviderPositionSnapshotV1>',
+      'readonly correlationId: string;',
+      'readonly correlationId: string;\n  readonly evaluatedAt: string;',
+    ],
+    [
+      'providerPositionReaderPortSource',
+      'readonly coveredSnapshot: CoveredMainnetProviderPositionSnapshotV1;',
+      'readonly coveredSnapshot?: CoveredMainnetProviderPositionSnapshotV1;',
+    ],
+    [
+      'providerPositionReaderPortSource',
+      '): Promise<MainnetProviderPositionReadResultV3>;',
+      '): Promise<CoveredMainnetProviderPositionSnapshotV1>;',
     ],
     [
       'providerPositionReaderPortSource',
@@ -1154,6 +1171,31 @@ test('provider-position read inspection rejects trust, runtime bounds, coverage,
     ],
     [
       'providerPositionAdmissionCoordinatorSource',
+      'const ISSUED_PROVIDER_POSITION_ADMISSION_READ_ONLY_ASSEMBLIES = new WeakSet<object>();',
+      'const ISSUED_PROVIDER_POSITION_ADMISSION_READ_ONLY_ASSEMBLIES = new Set<object>();',
+    ],
+    [
+      'providerPositionAdmissionCoordinatorSource',
+      'ISSUED_PROVIDER_POSITION_ADMISSION_READ_ONLY_ASSEMBLIES.has(value)',
+      'Boolean(value)',
+    ],
+    [
+      'providerPositionAdmissionCoordinatorSource',
+      'ISSUED_PROVIDER_POSITION_ADMISSION_READ_ONLY_ASSEMBLIES.add(readOnlyAssembly);',
+      'void readOnlyAssembly;',
+    ],
+    [
+      'providerPositionAdmissionCoordinatorSource',
+      'accountId: candidate.accountId,\n          evaluatedAt: evaluated.timestamp,\n          expectedWallets: prepared.wallets,',
+      'accountId: candidate.accountId,\n          evaluatedAt: completed.timestamp,\n          expectedWallets: prepared.wallets,',
+    ],
+    [
+      'providerPositionAdmissionCoordinatorSource',
+      'mayPersist: false,\n        evaluatedAt: evaluated.timestamp,\n        admissionCandidate: candidate,',
+      'mayPersist: false,\n        evaluatedAt: completed.timestamp,\n        admissionCandidate: candidate,',
+    ],
+    [
+      'providerPositionAdmissionCoordinatorSource',
       'readonly signal: AbortSignal;',
       'readonly signal?: AbortSignal;',
     ],
@@ -1167,11 +1209,7 @@ test('provider-position read inspection rejects trust, runtime bounds, coverage,
       'evaluatedAt: started.timestamp,\n                correlationId: request.correlationId,\n                signal: activeController.signal,',
       'evaluatedAt: started.timestamp,\n                correlationId: request.correlationId,',
     ],
-    [
-      'providerPositionAdmissionCoordinatorSource',
-      'isProxy(sourceIdentity)',
-      'false',
-    ],
+    ['providerPositionAdmissionCoordinatorSource', 'isProxy(sourceIdentity)', 'false'],
     [
       'providerPositionAdmissionCoordinatorSource',
       "const readTarget = stableDataMember(sourceReceiver, 'readTarget');",
@@ -1202,11 +1240,7 @@ test('provider-position read inspection rejects trust, runtime bounds, coverage,
       'for (const controller of [...this.activeAdmissionControllers]) {',
       'for (const controller of [...this.activeAdmissionControllers].slice(0, 1)) {',
     ],
-    [
-      'providerPositionAdmissionCoordinatorSource',
-      'failed = true;',
-      'void controller;',
-    ],
+    ['providerPositionAdmissionCoordinatorSource', 'failed = true;', 'void controller;'],
     [
       'providerPositionAdmissionCoordinatorSource',
       'this.activeAdmissionControllers.add(activeController);',
@@ -1227,11 +1261,7 @@ test('provider-position read inspection rejects trust, runtime bounds, coverage,
       'const signal = request.signal;',
       'const signal = new AbortController().signal;',
     ],
-    [
-      'registeredPortfolioWalletReaderSource',
-      'Object.freeze({ signal }),',
-      'Object.freeze({}),',
-    ],
+    ['registeredPortfolioWalletReaderSource', 'Object.freeze({ signal }),', 'Object.freeze({}),'],
     [
       'registeredPortfolioWalletReaderSource',
       '? await this.wallets.listActiveWallets(request.accountId)',
@@ -1337,16 +1367,8 @@ test('provider-position read inspection rejects trust, runtime bounds, coverage,
       'Reflect.apply(request.abortAdmission, undefined, []);',
       'void request.abortAdmission;',
     ],
-    [
-      'providerPositionDeadlineRunnerSource',
-      'this.cancelTimer(timer);',
-      'void timer;',
-    ],
-    [
-      'providerPositionDeadlineRunnerSource',
-      'request.signal.remove(onAbort);',
-      'void onAbort;',
-    ],
+    ['providerPositionDeadlineRunnerSource', 'this.cancelTimer(timer);', 'void timer;'],
+    ['providerPositionDeadlineRunnerSource', 'request.signal.remove(onAbort);', 'void onAbort;'],
     [
       'providerPositionDeadlineRunnerSource',
       "if (!request.signal.aborted()) return fail('INVALID_ABORT_CAPABILITY');",
@@ -1367,21 +1389,9 @@ test('provider-position read inspection rejects trust, runtime bounds, coverage,
       "const API_DATABASE_SESSION_ROLE = 'crypto_api_runtime' as const;",
       "const API_DATABASE_SESSION_ROLE = 'crypto_worker_runtime' as const;",
     ],
-    [
-      'providerPositionRuntimeBoundsSource',
-      "if (record.workload !== 'api') {",
-      'if (false) {',
-    ],
-    [
-      'providerPositionRuntimeBoundsSource',
-      "value.includes('?') ||",
-      'false ||',
-    ],
-    [
-      'providerPositionRuntimeBoundsSource',
-      "value.includes('#')",
-      'false',
-    ],
+    ['providerPositionRuntimeBoundsSource', "if (record.workload !== 'api') {", 'if (false) {'],
+    ['providerPositionRuntimeBoundsSource', "value.includes('?') ||", 'false ||'],
+    ['providerPositionRuntimeBoundsSource', "value.includes('#')", 'false'],
     [
       'providerPositionRuntimeBoundsSource',
       'if (!loopback && (snapshot.rejectUnauthorized !== true || snapshot.ca === undefined)) {',
@@ -1429,7 +1439,7 @@ test('provider-position read inspection rejects trust, runtime bounds, coverage,
     ],
     [
       'providerPositionRuntimeBoundsSource',
-      'const POSTGRES_CONFIG_KEYS = Object.freeze([\'workload\', \'database\'] as const);',
+      "const POSTGRES_CONFIG_KEYS = Object.freeze(['workload', 'database'] as const);",
       "const POSTGRES_CONFIG_KEYS = Object.freeze(['workload', 'database'] as const);\nvoid process.env.DATABASE_URL;",
     ],
     [
@@ -1457,10 +1467,46 @@ test('provider-position read inspection rejects trust, runtime bounds, coverage,
       "if (typeof method !== 'function' || isProxy(method)) {",
       "if (typeof method !== 'function') {",
     ],
+    ['providerPositionRuntimeCompositionSource', 'isProxy(closeAdmission)', 'false'],
     [
       'providerPositionRuntimeCompositionSource',
-      'isProxy(closeAdmission)',
-      'false',
+      'if (!isIssuedProviderPositionAdmissionReadOnlyAssemblyV1(value)) {',
+      'if (false) {',
+    ],
+    [
+      'providerPositionRuntimeCompositionSource',
+      'candidate.accountId !== request.accountId ||',
+      'false ||',
+    ],
+    [
+      'providerPositionRuntimeCompositionSource',
+      'candidate.correlationId !== request.correlationId ||',
+      'false ||',
+    ],
+    [
+      'providerPositionRuntimeCompositionSource',
+      'candidateCoverageManifest.fingerprintSha256 !== coverageManifest.fingerprintSha256 ||',
+      'false ||',
+    ],
+    [
+      'providerPositionRuntimeCompositionSource',
+      'Date.parse(evaluatedAt) >= Date.parse(staleAfter)',
+      'Date.parse(evaluatedAt) > Date.parse(staleAfter)',
+    ],
+    [
+      'providerPositionRuntimeCompositionSource',
+      'const assembly = await (Reflect.apply(admitAndAssemble, coordinator, [',
+      'const assembly = await (coordinator.admitAndAssemble(',
+    ],
+    [
+      'providerPositionRuntimeCompositionSource',
+      'coverageVersion: MAINNET_PROVIDER_POSITION_COVERAGE_VERSION,',
+      'coverageVersion: MAINNET_PROVIDER_POSITION_COVERAGE_VERSION,\n    close,',
+    ],
+    [
+      'providerPositionRuntimeCompositionSource',
+      'coveredSnapshot,',
+      'coveredSnapshot: { ...coveredSnapshot },',
     ],
     [
       'providerPositionRuntimeCompositionSource',
@@ -1489,8 +1535,8 @@ test('provider-position read inspection rejects trust, runtime bounds, coverage,
     ],
     [
       'providerPositionRuntimeCompositionSource',
-      "const DEPENDENCY_KEYS = Object.freeze([",
-      "void process.env.DATABASE_URL;\nconst DEPENDENCY_KEYS = Object.freeze([",
+      'const DEPENDENCY_KEYS = Object.freeze([',
+      'void process.env.DATABASE_URL;\nconst DEPENDENCY_KEYS = Object.freeze([',
     ],
     [
       'providerPositionInfrastructureConfigSource',
@@ -1556,6 +1602,11 @@ test('provider-position read inspection rejects trust, runtime bounds, coverage,
       'mainnetPlatformsIndexSource',
       "export { MainnetPlatformDirectoryService } from './application/mainnet-platform-directory.service';",
       "export { createDormantProviderPositionAdmissionRuntimeComposition } from './infrastructure/provider-position-admission-runtime.composition';",
+    ],
+    [
+      'mainnetPlatformsIndexSource',
+      "export { MainnetPlatformDirectoryService } from './application/mainnet-platform-directory.service';",
+      "export { isIssuedProviderPositionAdmissionReadOnlyAssemblyV1 } from './application/provider-position-admission.coordinator';",
     ],
     [
       'mainnetPlatformsControllerSource',

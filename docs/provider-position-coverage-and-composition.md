@@ -1,8 +1,8 @@
 # Provider-position coverage and portfolio composition
 
-Status: repository-owned domain and reader contracts only. The dormant
-coverage-aware reader v2 boundary has no implementation, adapter, HTTP route,
-RPC/API access, or runtime registration.
+Status: repository-owned domain plus a private dormant reader implementation.
+The coverage-aware reader v3 has no HTTP route, RPC/API access, Nest provider,
+or runtime registration.
 
 ## Exact coverage (version 1)
 
@@ -24,20 +24,35 @@ wallet / network / asset input fails as unavailable. A non-empty snapshot still
 passes the existing observation-policy and opaque chain-assessment verifier
 before its observations are matched back to the manifest counts.
 
-`MainnetProviderPositionReaderV2` can return only a
-`CoveredMainnetProviderPositionSnapshotV1`. Its response therefore retains the
-account identity plus the snapshot, observation-policy, asset-registry, and
-coverage bindings needed to distinguish proven zero positions from missing
-work. A bare observation snapshot is rejected at the type boundary. Raw chain
-assessments, verifier capabilities, persistence authority, and financial-action
-authority do not cross the reader port.
+`MainnetProviderPositionReaderV3` accepts exactly an account ID and correlation
+ID; callers cannot supply the evaluation time. It returns an exact frozen
+read-only envelope containing the server-authored canonical time used by the
+coverage parser and the `CoveredMainnetProviderPositionSnapshotV1`. Its
+response therefore retains the account identity plus the snapshot,
+observation-policy, asset-registry, and coverage bindings needed to distinguish
+proven zero positions from missing work. A bare or unenveloped covered snapshot
+is rejected at the type boundary. Raw admission candidates, chain assessments,
+verifier capabilities, lifecycle handles, persistence authority, and
+financial-action authority do not cross the reader capability.
+
+The private dormant runtime composition creates that reader as a frozen
+null-prototype sub-capability over its descriptor-captured coordinator method.
+It calls only `admitAndAssemble`. Before reading any result property, it requires
+the exact assembly object issued into the coordinator module's private
+`WeakSet`; a clone fails through a direct-source reviewer that is not exposed by
+the feature barrel. It then returns the exact parsed covered-snapshot identity,
+rejects result/account/time/binding drift with one fixed error, and participates
+in the composition's admission drain. The surrounding dormant facade retains
+its diagnostic candidate operations and memoized close, but none of those
+operations is reachable through the reader object.
 
 The offline production preflight now pins this reader together with the
 coverage, observation, assessment, policy, trusted-assembly, admission, module,
 barrel, and controller sources as one selected dormant critical-source slice. A
 passing local source inspection does not prove recursive dependency closure,
-whole-application registration absence, an implementation, or live evidence;
-the reader and trusted-assessment feature-registration blockers remain open.
+whole-application registration absence, a trusted assessment implementation,
+or live evidence. The reader and trusted-assessment feature-registration
+blockers remain open.
 
 ## Conservative composition (version 1)
 

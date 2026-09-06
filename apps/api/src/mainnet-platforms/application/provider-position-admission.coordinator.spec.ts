@@ -22,6 +22,7 @@ import {
 } from './ports/provider-position-trusted-chain-assessment-assembly.port';
 import {
   DormantProviderPositionAdmissionCoordinator,
+  isIssuedProviderPositionAdmissionReadOnlyAssemblyV1,
   PROVIDER_POSITION_ADMISSION_SOURCE_USE,
   PROVIDER_POSITION_ADMISSION_VERSION,
   type ProviderPositionAdmissionClock,
@@ -630,6 +631,7 @@ describe('DormantProviderPositionAdmissionCoordinator', () => {
         use: 'DORMANT_PROVIDER_POSITION_READ_ONLY_ASSEMBLY_ONLY',
         mayAuthorizeFinancialAction: false,
         mayPersist: false,
+        evaluatedAt: NOW.toISOString(),
       }),
     );
     expect(result.admissionCandidate).toEqual(
@@ -681,6 +683,7 @@ describe('DormantProviderPositionAdmissionCoordinator', () => {
       }),
     );
     expect(assembly.calls[0]?.admissionCandidate).toBe(result.admissionCandidate);
+    expect(result.evaluatedAt).toBe(assembly.calls[0]?.evaluatedAt);
     expect(assembly.calls[0]?.signal.aborted).toBe(true);
     expect(new Set(value.runner.calls.map(({ signal }) => signal)).size).toBe(1);
     expect(new Set(value.runner.calls.map(({ abortAdmission }) => abortAdmission)).size).toBe(1);
@@ -696,6 +699,65 @@ describe('DormantProviderPositionAdmissionCoordinator', () => {
     );
     expect(Object.isFrozen(result)).toBe(true);
     expect(Object.isFrozen(result.coveredSnapshot)).toBe(true);
+  });
+
+  it('returns the exact server time used for coverage parsing after the final clock gate', async () => {
+    const value = fixture();
+    const times = [0, 0, 0, 100, 200, 300].map((offset) => new Date(NOW.getTime() + offset));
+    const now = jest.fn(() => times.shift() ?? new Date(NOW.getTime() + 300));
+    value.clock = { now };
+    const assembly = new FakeTrustedChainAssessmentAssembly();
+
+    const result = await coordinator(value, {}, assembly).admitAndAssemble({
+      accountId: ACCOUNT_ID,
+      correlationId: CORRELATION_ID,
+    });
+
+    expect(result.evaluatedAt).toBe(new Date(NOW.getTime() + 100).toISOString());
+    expect(result.evaluatedAt).toBe(assembly.calls[0]?.evaluatedAt);
+    expect(assembly.verificationCalls[0]?.evaluatedAt).toBe(result.evaluatedAt);
+    expect(result.coveredSnapshot.capturedAt).toBe(NOW.toISOString());
+    expect(now).toHaveBeenCalledTimes(6);
+  });
+
+  it('recognizes only the exact final read-only assembly by identity without inspecting impostors', async () => {
+    const value = fixture();
+    const result = await coordinator(
+      value,
+      {},
+      new FakeTrustedChainAssessmentAssembly(),
+    ).admitAndAssemble({
+      accountId: ACCOUNT_ID,
+      correlationId: CORRELATION_ID,
+    });
+    const clone = Object.freeze({ ...result });
+    const deserialized: unknown = JSON.parse(JSON.stringify(result));
+    let traps = 0;
+    const proxy = new Proxy(result, {
+      get: () => {
+        traps += 1;
+        throw new Error('identity reviewer property trap');
+      },
+      getOwnPropertyDescriptor: () => {
+        traps += 1;
+        throw new Error('identity reviewer descriptor trap');
+      },
+      getPrototypeOf: () => {
+        traps += 1;
+        throw new Error('identity reviewer prototype trap');
+      },
+      ownKeys: () => {
+        traps += 1;
+        throw new Error('identity reviewer own-keys trap');
+      },
+    });
+
+    expect(isIssuedProviderPositionAdmissionReadOnlyAssemblyV1(result)).toBe(true);
+    expect(isIssuedProviderPositionAdmissionReadOnlyAssemblyV1(clone)).toBe(false);
+    expect(isIssuedProviderPositionAdmissionReadOnlyAssemblyV1(deserialized)).toBe(false);
+    expect(isIssuedProviderPositionAdmissionReadOnlyAssemblyV1(proxy)).toBe(false);
+    expect(isIssuedProviderPositionAdmissionReadOnlyAssemblyV1(null)).toBe(false);
+    expect(traps).toBe(0);
   });
 
   it('requires an injected trusted assembler before performing any admission reads', async () => {
@@ -1301,27 +1363,20 @@ describe('DormantProviderPositionAdmissionCoordinator', () => {
       ...inheritedProxy.bindings[0]!,
       source: Object.create(sourcePrototypeProxy) as ProviderPositionAdmissionSourcePort,
     };
-    expect(() => coordinator(inheritedProxy)).toThrow(
-      ProviderPositionAdmissionUnavailableError,
-    );
+    expect(() => coordinator(inheritedProxy)).toThrow(ProviderPositionAdmissionUnavailableError);
 
     const callableProxy = fixture();
-    const proxiedReadTarget = new Proxy(
-      async (): Promise<unknown> => undefined,
-      {
-        apply: () => {
-          reads += 1;
-          throw new Error('private callable proxy detail');
-        },
+    const proxiedReadTarget = new Proxy(async (): Promise<unknown> => undefined, {
+      apply: () => {
+        reads += 1;
+        throw new Error('private callable proxy detail');
       },
-    );
+    });
     callableProxy.bindings[0] = {
       ...callableProxy.bindings[0]!,
       source: { readTarget: proxiedReadTarget },
     };
-    expect(() => coordinator(callableProxy)).toThrow(
-      ProviderPositionAdmissionUnavailableError,
-    );
+    expect(() => coordinator(callableProxy)).toThrow(ProviderPositionAdmissionUnavailableError);
     expect(reads).toBe(0);
   });
 

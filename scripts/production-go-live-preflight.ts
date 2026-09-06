@@ -600,17 +600,17 @@ const PROVIDER_POSITION_READ_ARTIFACT_KEYS = Object.freeze([
 ] as const satisfies readonly (keyof ProviderPositionReadBoundaryArtifactSources)[]);
 const REVIEWED_PROVIDER_POSITION_READ_ARTIFACT_SHA256 = Object.freeze({
   providerPositionReaderPortSource:
-    '9b71cc320e063b83e98526e598316b74c3a943e8c16f21da0f5635c6fceb468d',
+    'a958ee6ed878f82b5b483f369d6927584c9aeee80440641809a943a553843fb4',
   providerPositionTrustedAssemblyPortSource:
     '9120c664640be1f855b1ea77cc9ca403506cae306b3f14679172f634c4e8a37b',
   providerPositionAdmissionCoordinatorSource:
-    '313b424bdc91621858642faac8592b716fb4a9dafb30966cc8c3f624cf9c5916',
+    'a10e0f2d90afb714d1e4ae55a18acac6cbb9249dd285a04ebf65dcbdb2dd1590',
   providerPositionDeadlineRunnerSource:
     '6910ff27ce6b29d06d7f3fc20743779196259bda5518b1b4ada7f82b9c2c3f97',
   providerPositionRuntimeBoundsSource:
     '342895e5e4bafca127c67db519e8ca252b0b75377a1e9311e00639e74a32d812',
   providerPositionRuntimeCompositionSource:
-    '9dfb3d0b03955918cafdc769df8f20fe75a6b0836b2419c3b14a52c66a419bf8',
+    'b9c6152a27ba15d0dc1025b853b92a5d06ebfecabfb3d13edd5d35695a5b92a4',
   providerPositionInfrastructureConfigSource:
     'fb1f6639a330d6a07db1d82434559356a4707a6550848d75397a1ff5e6a3fd10',
   providerPositionRuntimePostgresPoolSource:
@@ -636,7 +636,7 @@ const REVIEWED_PROVIDER_POSITION_READ_ARTIFACT_SHA256 = Object.freeze({
   providerPositionObservationPolicySource:
     '10896fb907d937aa88ee0da570331faccce77f46642732e6676385676c6a7ea3',
   mainnetPlatformsModuleSource: '52a2817a03db43b6842fa42e0c8264f760250f8364511607d0329677f535e045',
-  mainnetPlatformsIndexSource: 'b14bf3218ee63ce480b2ecd755f29e115c699ba00465802e2e4cc90210ef7a44',
+  mainnetPlatformsIndexSource: '9bb69ec94f17d4336bfbb60da946e84af89812a07431b3870656f02d2a542365',
   mainnetPlatformsControllerSource:
     'a713200b67f0cf67c50b56c94f707f94f7383c52e3d59f4368868710b099b55d',
 } satisfies Readonly<Record<keyof ProviderPositionReadBoundaryArtifactSources, string>>);
@@ -2030,18 +2030,19 @@ function hasDormantProviderPositionReadBoundaryContract(
     /\r\n/gu,
     '\n',
   );
-  const portfolioWalletReaderPort =
-    sources.portfolioWalletRegistrationReaderPortSource.replace(/\r\n/gu, '\n');
+  const portfolioWalletReaderPort = sources.portfolioWalletRegistrationReaderPortSource.replace(
+    /\r\n/gu,
+    '\n',
+  );
   const registeredWalletReader = sources.registeredPortfolioWalletReaderSource.replace(
     /\r\n/gu,
     '\n',
   );
-  const walletRegistrationService = sources.walletRegistrationServiceSource.replace(
+  const walletRegistrationService = sources.walletRegistrationServiceSource.replace(/\r\n/gu, '\n');
+  const walletRegistrationRepositoryPort = sources.walletRegistrationRepositoryPortSource.replace(
     /\r\n/gu,
     '\n',
   );
-  const walletRegistrationRepositoryPort =
-    sources.walletRegistrationRepositoryPortSource.replace(/\r\n/gu, '\n');
   const postgresWalletRegistrationRepository =
     sources.postgresWalletRegistrationRepositorySource.replace(/\r\n/gu, '\n');
   const providerPositionPostgresService = sources.providerPositionPostgresServiceSource.replace(
@@ -2101,6 +2102,112 @@ function hasDormantProviderPositionReadBoundaryContract(
     runtimeComposition.match(/^[\t ]*import\b/gmu)?.length ?? 0;
   const forbiddenRuntimeCompositionCapability =
     /(?:\bimport\s*\(|\brequire\s*\(|(?:\bfrom\s+|\bimport\s*(?:\(\s*)?)['"](?:node:)?(?:child_process|cluster|dgram|dns|fs|http|http2|https|net|tls|worker_threads)(?:\/[^'"]*)?['"]|(?:\bfrom\s+|\bimport\s*(?:\(\s*)?)['"](?:axios|ethers|got|superagent|undici|web3|@solana\/web3\.js)['"]|\b(?:fetch|setTimeout|setInterval|setImmediate|queueMicrotask|WebSocket|EventSource|XMLHttpRequest|readFileSync|writeFileSync)\s*\(|\.\s*(?:query|connect|healthCheck)\s*\(|\b(?:process|Deno|Bun)\s*\.\s*env\b|\bimport\s*\.\s*meta\s*\.\s*env\b|['"]https?:\/\/|(?:^|\n)[\t ]*@[A-Za-z_$]|\b(?:NestFactory|loadInfrastructureConfig|createPostgresPool|POSTGRES_POOL)\b)/iu;
+  const readerRequestStart = reader.indexOf(
+    'export interface ReadMainnetProviderPositionsRequestV3 {',
+  );
+  const readerRequestEnd = reader.indexOf('\n}', readerRequestStart);
+  const readerRequestContract =
+    readerRequestStart >= 0 && readerRequestEnd > readerRequestStart
+      ? reader.slice(readerRequestStart, readerRequestEnd + 2)
+      : '';
+  const readerResultStart = reader.indexOf(
+    'export interface MainnetProviderPositionReadResultV3 {',
+  );
+  const readerResultEnd = reader.indexOf('\n}', readerResultStart);
+  const readerResultContract =
+    readerResultStart >= 0 && readerResultEnd > readerResultStart
+      ? reader.slice(readerResultStart, readerResultEnd + 2)
+      : '';
+  const coordinatorIssuanceSet = coordinator.indexOf(
+    'const ISSUED_PROVIDER_POSITION_ADMISSION_READ_ONLY_ASSEMBLIES = new WeakSet<object>();',
+  );
+  const coordinatorIdentityReviewer = coordinator.indexOf(
+    'export function isIssuedProviderPositionAdmissionReadOnlyAssemblyV1(',
+    coordinatorIssuanceSet,
+  );
+  const coordinatorIdentityReviewerEnd = coordinator.indexOf('\n}', coordinatorIdentityReviewer);
+  const coordinatorIdentityReviewerContract =
+    coordinatorIdentityReviewer >= 0 && coordinatorIdentityReviewerEnd > coordinatorIdentityReviewer
+      ? coordinator.slice(coordinatorIdentityReviewer, coordinatorIdentityReviewerEnd + 2)
+      : '';
+  const coordinatorAssemblyEvaluation = coordinator.indexOf(
+    'evaluatedAt: evaluated.timestamp,',
+    coordinatorIdentityReviewerEnd,
+  );
+  const coordinatorCoveredSnapshotParser = coordinator.indexOf(
+    'coveredSnapshot = parseCoveredMainnetProviderPositionSnapshotV1({',
+    coordinatorAssemblyEvaluation,
+  );
+  const coordinatorCoverageEvaluation = coordinator.indexOf(
+    'evaluatedAt: evaluated.timestamp,',
+    coordinatorCoveredSnapshotParser,
+  );
+  const coordinatorFinalClock = coordinator.indexOf(
+    'const verified = canonicalClock(this.clock.now());',
+    coordinatorCoverageEvaluation,
+  );
+  const coordinatorFinalGate = coordinator.indexOf(
+    'assertAssemblyWindow(verified.milliseconds, candidate, prepared, completed.timestamp);',
+    coordinatorFinalClock,
+  );
+  const coordinatorReadOnlyAssembly = coordinator.indexOf(
+    'const readOnlyAssembly = Object.freeze({',
+    coordinatorFinalGate,
+  );
+  const coordinatorReturnedEvaluation = coordinator.indexOf(
+    'evaluatedAt: evaluated.timestamp,',
+    coordinatorReadOnlyAssembly,
+  );
+  const coordinatorIssuanceAdd = coordinator.indexOf(
+    'ISSUED_PROVIDER_POSITION_ADMISSION_READ_ONLY_ASSEMBLIES.add(readOnlyAssembly);',
+    coordinatorReturnedEvaluation,
+  );
+  const coordinatorIssuanceReturn = coordinator.indexOf(
+    'return readOnlyAssembly;',
+    coordinatorIssuanceAdd,
+  );
+  const compositionReaderResultStart = runtimeComposition.indexOf('function readerResult(');
+  const compositionIssuanceReview = runtimeComposition.indexOf(
+    'if (!isIssuedProviderPositionAdmissionReadOnlyAssemblyV1(value)) {',
+    compositionReaderResultStart,
+  );
+  const compositionCandidateExtraction = runtimeComposition.indexOf(
+    'const candidate = value.admissionCandidate;',
+    compositionIssuanceReview,
+  );
+  const compositionSnapshotExtraction = runtimeComposition.indexOf(
+    'const coveredSnapshot = value.coveredSnapshot;',
+    compositionCandidateExtraction,
+  );
+  const compositionReaderResultReturn = runtimeComposition.indexOf(
+    'return frozenNullPrototype({',
+    compositionSnapshotExtraction,
+  );
+  const compositionReturnedSnapshot = runtimeComposition.indexOf(
+    'coveredSnapshot,',
+    compositionReaderResultReturn,
+  );
+  const compositionReaderStart = runtimeComposition.indexOf('const reader = frozenNullPrototype({');
+  const compositionReaderRequestReview = runtimeComposition.indexOf(
+    'const request = readerRequest(requestInput);',
+    compositionReaderStart,
+  );
+  const compositionReaderAssemblyCall = runtimeComposition.indexOf(
+    'const assembly = await (Reflect.apply(admitAndAssemble, coordinator, [',
+    compositionReaderRequestReview,
+  );
+  const compositionReaderResultBinding = runtimeComposition.indexOf(
+    'return readerResult(assembly, request);',
+    compositionReaderAssemblyCall,
+  );
+  const compositionReaderEnd = runtimeComposition.indexOf(
+    '\n  });',
+    compositionReaderResultBinding,
+  );
+  const compositionReaderContract =
+    compositionReaderStart >= 0 && compositionReaderEnd > compositionReaderStart
+      ? runtimeComposition.slice(compositionReaderStart, compositionReaderEnd + 6)
+      : '';
   const runtimeBoundsPostgresSnapshot = runtimeBounds.indexOf(
     'const postgresPoolConfig = postgresConfigSnapshot(postgresConfigInput);',
   );
@@ -2112,7 +2219,10 @@ function hasDormantProviderPositionReadBoundaryContract(
     'if (postgresPoolConfig.database.connectionTimeoutMs > admissionOptions.deadlineMilliseconds) {',
     runtimeBoundsAdmissionSnapshot,
   );
-  const runtimeBoundsPoolDeclaration = runtimeBounds.indexOf('let pool: Pool;', runtimeBoundsRelation);
+  const runtimeBoundsPoolDeclaration = runtimeBounds.indexOf(
+    'let pool: Pool;',
+    runtimeBoundsRelation,
+  );
   const runtimeBoundsPoolConstruction = runtimeBounds.indexOf(
     'pool = createPostgresPool(postgresPoolConfig);',
     runtimeBoundsPoolDeclaration,
@@ -2220,9 +2330,7 @@ function hasDormantProviderPositionReadBoundaryContract(
     'return admissionFacade(coordinator, { closePostgres, endPool });',
     compositionCoordinatorAssembly,
   );
-  const compositionRollbackHelper = runtimeComposition.indexOf(
-    'async function closeOwnedRuntime(',
-  );
+  const compositionRollbackHelper = runtimeComposition.indexOf('async function closeOwnedRuntime(');
   const compositionRollbackPostgres = runtimeComposition.indexOf(
     'await Promise.allSettled([handles.closePostgres()]);',
     compositionRollbackHelper,
@@ -2299,7 +2407,10 @@ function hasDormantProviderPositionReadBoundaryContract(
     'if (!controller.signal.aborted) controller.abort();',
     coordinatorCloseControllerSnapshot,
   );
-  const coordinatorCloseAbortCatch = coordinator.indexOf('} catch {', coordinatorCloseControllerAbort);
+  const coordinatorCloseAbortCatch = coordinator.indexOf(
+    '} catch {',
+    coordinatorCloseControllerAbort,
+  );
   const coordinatorCloseAbortFailure = coordinator.indexOf(
     'failed = true;',
     coordinatorCloseAbortCatch,
@@ -2403,9 +2514,7 @@ function hasDormantProviderPositionReadBoundaryContract(
     'signal: activeController.signal,',
     coordinatorRosterCorrelation,
   );
-  const registeredSignalCapture = registeredWalletReader.indexOf(
-    'const signal = request.signal;',
-  );
+  const registeredSignalCapture = registeredWalletReader.indexOf('const signal = request.signal;');
   const registeredLegacyBranch = registeredWalletReader.indexOf(
     'signal === undefined',
     registeredSignalCapture,
@@ -2532,30 +2641,33 @@ function hasDormantProviderPositionReadBoundaryContract(
 
   return (
     capabilityFreeSources.every((source) => !forbiddenCapability.test(source)) &&
-    runtimeCompositionImportDeclarationCount === 13 &&
-    runtimeCompositionImportSources.length === 13 &&
+    runtimeCompositionImportDeclarationCount === 17 &&
+    runtimeCompositionImportSources.length === 17 &&
     runtimeCompositionImportSources[0] === 'node:util/types' &&
     runtimeCompositionImportSources[1] === 'pg' &&
-    runtimeCompositionImportSources[2] ===
-      '../../portfolio/infrastructure/registered-portfolio-wallet-reader' &&
+    runtimeCompositionImportSources[2] === '../../accounts/domain/account-profile' &&
     runtimeCompositionImportSources[3] ===
-      '../../wallets/application/wallet-registration.service' &&
+      '../../portfolio/infrastructure/registered-portfolio-wallet-reader' &&
     runtimeCompositionImportSources[4] ===
-      '../../wallets/infrastructure/crypto/wallet-registration-crypto' &&
+      '../../wallets/application/wallet-registration.service' &&
     runtimeCompositionImportSources[5] ===
-      '../../wallets/infrastructure/config/wallet-registration.config' &&
+      '../../wallets/infrastructure/crypto/wallet-registration-crypto' &&
     runtimeCompositionImportSources[6] ===
+      '../../wallets/infrastructure/config/wallet-registration.config' &&
+    runtimeCompositionImportSources[7] ===
       '../../wallets/infrastructure/postgres/postgres-wallet-registration.repository' &&
-    runtimeCompositionImportSources[7] === '../../infrastructure/database/postgres.service' &&
-    runtimeCompositionImportSources[8] ===
-      '../../infrastructure/database/runtime-postgres-pool' &&
-    runtimeCompositionImportSources[9] ===
-      '../application/provider-position-admission.coordinator' &&
+    runtimeCompositionImportSources[8] === '../../infrastructure/database/postgres.service' &&
+    runtimeCompositionImportSources[9] === '../../infrastructure/database/runtime-postgres-pool' &&
     runtimeCompositionImportSources[10] ===
-      '../application/ports/provider-position-trusted-chain-assessment-assembly.port' &&
+      '../application/provider-position-admission.coordinator' &&
     runtimeCompositionImportSources[11] ===
-      './node-provider-position-admission-deadline.runner' &&
-    runtimeCompositionImportSources[12] === './provider-position-admission-runtime-bounds' &&
+      '../application/ports/mainnet-provider-position-reader.port' &&
+    runtimeCompositionImportSources[12] ===
+      '../application/ports/provider-position-trusted-chain-assessment-assembly.port' &&
+    runtimeCompositionImportSources[13] === '../domain/mainnet-provider-position-coverage' &&
+    runtimeCompositionImportSources[14] === '../domain/mainnet-provider-position-observation' &&
+    runtimeCompositionImportSources[15] === './node-provider-position-admission-deadline.runner' &&
+    runtimeCompositionImportSources[16] === './provider-position-admission-runtime-bounds' &&
     !forbiddenRuntimeCompositionCapability.test(runtimeComposition) &&
     !runtimeComposition.includes('Promise.race') &&
     runtimeBoundsImportDeclarationCount === 5 &&
@@ -2564,8 +2676,7 @@ function hasDormantProviderPositionReadBoundaryContract(
     runtimeBoundsImportSources[1] === 'node:util/types' &&
     runtimeBoundsImportSources[2] === '../../infrastructure/config/infrastructure.config' &&
     runtimeBoundsImportSources[3] === '../../infrastructure/database/runtime-postgres-pool' &&
-    runtimeBoundsImportSources[4] ===
-      '../application/provider-position-admission.coordinator' &&
+    runtimeBoundsImportSources[4] === '../application/provider-position-admission.coordinator' &&
     !forbiddenRuntimeBoundsCapability.test(runtimeBounds) &&
     exactExecutableLineCount(
       runtimeBounds,
@@ -2579,10 +2690,7 @@ function hasDormantProviderPositionReadBoundaryContract(
       runtimeBounds,
       'PROVIDER_POSITION_ADMISSION_MAX_DEADLINE_MILLISECONDS,',
     ) === 1 &&
-    exactExecutableLineCount(
-      runtimeBounds,
-      'PROVIDER_POSITION_ADMISSION_MAX_CONCURRENCY,',
-    ) === 1 &&
+    exactExecutableLineCount(runtimeBounds, 'PROVIDER_POSITION_ADMISSION_MAX_CONCURRENCY,') === 1 &&
     exactExecutableLineCount(
       runtimeBounds,
       "const API_DATABASE_SESSION_ROLE = 'crypto_api_runtime' as const;",
@@ -2602,7 +2710,7 @@ function hasDormantProviderPositionReadBoundaryContract(
     ) === 1 &&
     exactExecutableLineCount(
       runtimeBounds,
-      'if (typeof value !== \'object\' || value === null || Array.isArray(value) || isProxy(value)) {',
+      "if (typeof value !== 'object' || value === null || Array.isArray(value) || isProxy(value)) {",
     ) === 1 &&
     exactExecutableLineCount(
       runtimeBounds,
@@ -2639,10 +2747,8 @@ function hasDormantProviderPositionReadBoundaryContract(
       runtimeBounds,
       'if (postgresPoolConfig.database.connectionTimeoutMs > admissionOptions.deadlineMilliseconds) {',
     ) === 1 &&
-    exactExecutableLineCount(
-      runtimeBounds,
-      'pool = createPostgresPool(postgresPoolConfig);',
-    ) === 1 &&
+    exactExecutableLineCount(runtimeBounds, 'pool = createPostgresPool(postgresPoolConfig);') ===
+      1 &&
     exactExecutableLineCount(
       runtimeBounds,
       "return fail('PROVIDER_POSITION_ADMISSION_RUNTIME_CONSTRUCTION_FAILED');",
@@ -2683,10 +2789,8 @@ function hasDormantProviderPositionReadBoundaryContract(
     compositionCoordinatorReviewedOptions > compositionCoordinatorDeadlineRunner &&
     compositionCoordinatorAssembly > compositionCoordinatorReviewedOptions &&
     compositionFacadeReturn > compositionCoordinatorAssembly &&
-    exactExecutableLineCount(
-      runtimeComposition,
-      'const pool: Pool = runtimeResource.pool;',
-    ) === 1 &&
+    exactExecutableLineCount(runtimeComposition, 'const pool: Pool = runtimeResource.pool;') ===
+      1 &&
     exactExecutableLineCount(runtimeComposition, 'const postgres = new PostgresService(pool);') ===
       1 &&
     exactExecutableLineCount(
@@ -2714,6 +2818,79 @@ function hasDormantProviderPositionReadBoundaryContract(
     exactExecutableLineCount(runtimeComposition, 'isProxy(admit) ||') === 1 &&
     exactExecutableLineCount(runtimeComposition, 'isProxy(admitAndAssemble) ||') === 1 &&
     exactExecutableLineCount(runtimeComposition, 'isProxy(closeAdmission)') === 1 &&
+    exactExecutableLineCount(
+      runtimeComposition,
+      "const READER_REQUEST_KEYS = Object.freeze(['accountId', 'correlationId'] as const);",
+    ) === 1 &&
+    compositionReaderResultStart >= 0 &&
+    compositionIssuanceReview > compositionReaderResultStart &&
+    compositionCandidateExtraction > compositionIssuanceReview &&
+    compositionSnapshotExtraction > compositionCandidateExtraction &&
+    compositionReaderResultReturn > compositionSnapshotExtraction &&
+    compositionReturnedSnapshot > compositionReaderResultReturn &&
+    exactExecutableLineCount(
+      runtimeComposition,
+      'if (!isIssuedProviderPositionAdmissionReadOnlyAssemblyV1(value)) {',
+    ) === 1 &&
+    exactExecutableLineCount(runtimeComposition, 'candidate.accountId !== request.accountId ||') ===
+      1 &&
+    exactExecutableLineCount(
+      runtimeComposition,
+      'candidate.correlationId !== request.correlationId ||',
+    ) === 1 &&
+    exactExecutableLineCount(
+      runtimeComposition,
+      'coverageManifest.accountId !== request.accountId ||',
+    ) === 1 &&
+    exactExecutableLineCount(
+      runtimeComposition,
+      'candidateCoverageManifest.accountId !== request.accountId ||',
+    ) === 1 &&
+    exactExecutableLineCount(
+      runtimeComposition,
+      'coveredSnapshot.snapshotId !== candidate.positionSnapshotId ||',
+    ) === 1 &&
+    exactExecutableLineCount(
+      runtimeComposition,
+      'candidateCoverageManifest.manifestId !== coverageManifest.manifestId ||',
+    ) === 1 &&
+    exactExecutableLineCount(
+      runtimeComposition,
+      'candidateCoverageManifest.fingerprintSha256 !== coverageManifest.fingerprintSha256 ||',
+    ) === 1 &&
+    exactExecutableLineCount(
+      runtimeComposition,
+      'Date.parse(capturedAt) > Date.parse(evaluatedAt) ||',
+    ) === 1 &&
+    exactExecutableLineCount(
+      runtimeComposition,
+      'Date.parse(evaluatedAt) >= Date.parse(staleAfter)',
+    ) === 1 &&
+    exactExecutableLineCount(runtimeComposition, 'coveredSnapshot,') === 1 &&
+    compositionReaderStart >= 0 &&
+    compositionReaderRequestReview > compositionReaderStart &&
+    compositionReaderAssemblyCall > compositionReaderRequestReview &&
+    compositionReaderResultBinding > compositionReaderAssemblyCall &&
+    compositionReaderEnd > compositionReaderResultBinding &&
+    exactExecutableLineCount(
+      compositionReaderContract,
+      'readerVersion: MAINNET_PROVIDER_POSITION_READER_VERSION,',
+    ) === 1 &&
+    exactExecutableLineCount(
+      compositionReaderContract,
+      'positionSchemaVersion: MAINNET_PROVIDER_POSITION_SCHEMA_VERSION,',
+    ) === 1 &&
+    exactExecutableLineCount(
+      compositionReaderContract,
+      'coverageVersion: MAINNET_PROVIDER_POSITION_COVERAGE_VERSION,',
+    ) === 1 &&
+    exactExecutableLineCount(compositionReaderContract, 'readCurrentPositions: (') === 1 &&
+    compositionReaderContract.split('Reflect.apply(admitAndAssemble, coordinator, [').length - 1 ===
+      1 &&
+    !compositionReaderContract.includes('Reflect.apply(admit, coordinator') &&
+    !compositionReaderContract.includes('admissionCandidate:') &&
+    !compositionReaderContract.includes('trustedChainAssessmentAssembly') &&
+    !compositionReaderContract.includes('close,') &&
     !runtimeComposition.includes('return runtimeResource') &&
     !runtimeComposition.includes('return pool') &&
     compositionRollbackHelper >= 0 &&
@@ -2826,10 +3003,7 @@ function hasDormantProviderPositionReadBoundaryContract(
       infrastructureConfig,
       "poolMax: migration ? 1 : positiveInteger(env, 'DATABASE_POOL_MAX', 10, 100),",
     ) === 1 &&
-    exactExecutableLineCount(
-      runtimePostgresPool,
-      "api: 'crypto_api_runtime',",
-    ) === 1 &&
+    exactExecutableLineCount(runtimePostgresPool, "api: 'crypto_api_runtime',") === 1 &&
     exactExecutableLineCount(runtimePostgresPool, 'return new Pool({') === 1 &&
     exactExecutableLineCount(
       runtimePostgresPool,
@@ -2838,16 +3012,33 @@ function hasDormantProviderPositionReadBoundaryContract(
     !forbiddenCoordinatorRuntimeBoundsConsumption.test(coordinator) &&
     exactExecutableLineCount(
       reader,
-      'export const MAINNET_PROVIDER_POSITION_READER_VERSION = 2 as const;',
+      'export const MAINNET_PROVIDER_POSITION_READER_VERSION = 3 as const;',
     ) === 1 &&
-    exactExecutableLineCount(reader, 'export interface MainnetProviderPositionReaderV2 {') === 1 &&
+    exactExecutableLineCount(reader, 'export interface ReadMainnetProviderPositionsRequestV3 {') ===
+      1 &&
+    exactExecutableLineCount(reader, 'export interface MainnetProviderPositionReadResultV3 {') ===
+      1 &&
+    exactExecutableLineCount(reader, 'export interface MainnetProviderPositionReaderV3 {') === 1 &&
+    readerRequestStart >= 0 &&
+    readerRequestEnd > readerRequestStart &&
+    exactExecutableLineCount(readerRequestContract, 'readonly accountId: AccountId;') === 1 &&
+    exactExecutableLineCount(readerRequestContract, 'readonly correlationId: string;') === 1 &&
+    !readerRequestContract.includes('evaluatedAt') &&
+    readerResultStart >= 0 &&
+    readerResultEnd > readerResultStart &&
+    exactExecutableLineCount(readerResultContract, 'readonly evaluatedAt: string;') === 1 &&
+    exactExecutableLineCount(
+      readerResultContract,
+      'readonly coveredSnapshot: CoveredMainnetProviderPositionSnapshotV1;',
+    ) === 1 &&
     exactExecutableLineCount(
       reader,
       'readonly coverageVersion: typeof MAINNET_PROVIDER_POSITION_COVERAGE_VERSION;',
     ) === 1 &&
-    exactExecutableLineCount(reader, '): Promise<CoveredMainnetProviderPositionSnapshotV1>;') ===
-      1 &&
+    exactExecutableLineCount(reader, '): Promise<MainnetProviderPositionReadResultV3>;') === 1 &&
     !reader.includes('Promise<MainnetProviderPositionSnapshotV1>') &&
+    !reader.includes('ReadMainnetProviderPositionsRequestV2') &&
+    !reader.includes('MainnetProviderPositionReaderV2') &&
     !/(?:@Injectable|@Module|@Controller)\s*\(|\bclass\s+/u.test(reader) &&
     exactExecutableLineCount(assemblyPort, 'readonly mayAuthorizeFinancialAction: false;') === 2 &&
     exactExecutableLineCount(assemblyPort, 'readonly mayPersist: false;') === 1 &&
@@ -2881,14 +3072,8 @@ function hasDormantProviderPositionReadBoundaryContract(
     ) === 1 &&
     exactExecutableLineCount(coordinator, 'readonly signal: AbortSignal;') === 2 &&
     exactExecutableLineCount(coordinator, 'signal: activeController.signal,') === 4 &&
-    exactExecutableLineCount(
-      coordinator,
-      'prepared.abortAdmission();',
-    ) === 1 &&
-    exactExecutableLineCount(
-      coordinator,
-      'abortAdmission?.();',
-    ) === 1 &&
+    exactExecutableLineCount(coordinator, 'prepared.abortAdmission();') === 1 &&
+    exactExecutableLineCount(coordinator, 'abortAdmission?.();') === 1 &&
     exactExecutableLineCount(coordinator, 'readonly abortAdmission: () => void;') === 2 &&
     exactExecutableLineCount(coordinator, 'abortAdmission: activeAbortAdmission,') === 3 &&
     exactExecutableLineCount(
@@ -2922,22 +3107,15 @@ function hasDormantProviderPositionReadBoundaryContract(
     walletServiceAccountParse > walletServiceList &&
     walletServiceRepositoryRead > walletServiceAccountParse &&
     walletServiceForwarding > walletServiceRepositoryRead &&
-    exactExecutableLineCount(
-      walletRegistrationService,
-      'readonly signal: AbortSignal;',
-    ) === 1 &&
-    exactExecutableLineCount(
-      walletRegistrationService,
-      'options?: ListActiveWalletsOptions,',
-    ) === 1 &&
+    exactExecutableLineCount(walletRegistrationService, 'readonly signal: AbortSignal;') === 1 &&
+    exactExecutableLineCount(walletRegistrationService, 'options?: ListActiveWalletsOptions,') ===
+      1 &&
     exactExecutableLineCount(
       walletRegistrationService,
       'options === undefined ? { accountId } : { accountId, signal: options.signal },',
     ) === 1 &&
-    exactExecutableLineCount(
-      walletRegistrationRepositoryPort,
-      'readonly signal?: AbortSignal;',
-    ) === 1 &&
+    exactExecutableLineCount(walletRegistrationRepositoryPort, 'readonly signal?: AbortSignal;') ===
+      1 &&
     exactExecutableLineCount(
       walletRegistrationRepositoryPort,
       'request: ListActiveWalletRegistrationsRequest,',
@@ -3006,10 +3184,7 @@ function hasDormantProviderPositionReadBoundaryContract(
     deadlineRunnerGlobalMembers.includes('clearTimeout') &&
     !forbiddenDeadlineRunnerCapability.test(deadlineRunner) &&
     !deadlineRunner.includes('Promise.race') &&
-    exactExecutableLineCount(
-      deadlineRunner,
-      'const MAX_DEADLINE_MILLISECONDS = 30_000;',
-    ) === 1 &&
+    exactExecutableLineCount(deadlineRunner, 'const MAX_DEADLINE_MILLISECONDS = 30_000;') === 1 &&
     exactExecutableLineCount(
       deadlineRunner,
       'const SYSTEM_SET_TIMEOUT = globalThis.setTimeout;',
@@ -3025,16 +3200,14 @@ function hasDormantProviderPositionReadBoundaryContract(
     ) === 1 &&
     exactExecutableLineCount(
       deadlineRunner,
-      'if (request.signal.aborted()) return fail(\'ADMISSION_ABORTED\');',
+      "if (request.signal.aborted()) return fail('ADMISSION_ABORTED');",
     ) === 1 &&
     exactExecutableLineCount(deadlineRunner, 'if (remaining <= 0) {') === 1 &&
-    exactExecutableLineCount(deadlineRunner, 'if (remaining > MAX_DEADLINE_MILLISECONDS) {') === 1 &&
+    exactExecutableLineCount(deadlineRunner, 'if (remaining > MAX_DEADLINE_MILLISECONDS) {') ===
+      1 &&
     exactExecutableLineCount(deadlineRunner, 'request.signal.add(onAbort);') === 1 &&
     exactExecutableLineCount(deadlineRunner, 'timer = this.scheduleTimer(() => {') === 1 &&
-    exactExecutableLineCount(
-      deadlineRunner,
-      'completedAt >= request.deadlineMilliseconds',
-    ) === 1 &&
+    exactExecutableLineCount(deadlineRunner, 'completedAt >= request.deadlineMilliseconds') === 1 &&
     exactExecutableLineCount(
       deadlineRunner,
       'Reflect.apply(request.abortAdmission, undefined, []);',
@@ -3068,6 +3241,30 @@ function hasDormantProviderPositionReadBoundaryContract(
       coordinator,
       'assertAssemblyWindow(verified.milliseconds, candidate, prepared, completed.timestamp);',
     ) === 1 &&
+    coordinatorIssuanceSet >= 0 &&
+    coordinatorIdentityReviewer > coordinatorIssuanceSet &&
+    coordinatorIdentityReviewerEnd > coordinatorIdentityReviewer &&
+    exactExecutableLineCount(
+      coordinator,
+      'const ISSUED_PROVIDER_POSITION_ADMISSION_READ_ONLY_ASSEMBLIES = new WeakSet<object>();',
+    ) === 1 &&
+    exactExecutableLineCount(
+      coordinatorIdentityReviewerContract,
+      'ISSUED_PROVIDER_POSITION_ADMISSION_READ_ONLY_ASSEMBLIES.has(value)',
+    ) === 1 &&
+    !coordinatorIdentityReviewerContract.includes('admissionCandidate') &&
+    !coordinatorIdentityReviewerContract.includes('coveredSnapshot') &&
+    exactExecutableLineCount(coordinator, 'readonly evaluatedAt: string;') === 1 &&
+    exactExecutableLineCount(coordinator, 'evaluatedAt: evaluated.timestamp,') === 3 &&
+    coordinatorAssemblyEvaluation >= 0 &&
+    coordinatorCoveredSnapshotParser > coordinatorAssemblyEvaluation &&
+    coordinatorCoverageEvaluation > coordinatorCoveredSnapshotParser &&
+    coordinatorFinalClock > coordinatorCoverageEvaluation &&
+    coordinatorFinalGate > coordinatorFinalClock &&
+    coordinatorReadOnlyAssembly > coordinatorFinalGate &&
+    coordinatorReturnedEvaluation > coordinatorReadOnlyAssembly &&
+    coordinatorIssuanceAdd > coordinatorReturnedEvaluation &&
+    coordinatorIssuanceReturn > coordinatorIssuanceAdd &&
     exactExecutableLineCount(coordinator, 'mayAuthorizeFinancialAction: false,') >= 2 &&
     exactExecutableLineCount(coordinator, 'mayPersist: false,') >= 1 &&
     selectedTargetLoop >= 0 &&
@@ -3111,6 +3308,10 @@ function hasDormantProviderPositionReadBoundaryContract(
     !forbiddenRuntimeIdentity.test(moduleSource) &&
     !forbiddenRuntimeIdentity.test(controller) &&
     !forbiddenBarrelImplementation.test(indexSource) &&
+    !indexSource.includes('isIssuedProviderPositionAdmissionReadOnlyAssemblyV1') &&
+    exactExecutableLineCount(indexSource, 'MainnetProviderPositionReadResultV3,') === 1 &&
+    exactExecutableLineCount(indexSource, 'MainnetProviderPositionReaderV3,') === 1 &&
+    exactExecutableLineCount(indexSource, 'ReadMainnetProviderPositionsRequestV3,') === 1 &&
     exactExecutableLineCount(
       controller,
       'constructor(private readonly directory: MainnetPlatformDirectoryService) {}',
@@ -8736,10 +8937,7 @@ export function loadRepositoryProductionPreflightInput(
         'utf8',
       ),
       walletRegistrationServiceSource: readFileSync(
-        resolve(
-          repositoryRoot,
-          'apps/api/src/wallets/application/wallet-registration.service.ts',
-        ),
+        resolve(repositoryRoot, 'apps/api/src/wallets/application/wallet-registration.service.ts'),
         'utf8',
       ),
       walletRegistrationRepositoryPortSource: readFileSync(

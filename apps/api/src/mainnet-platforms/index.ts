@@ -4,9 +4,10 @@ export {
   MAINNET_PROVIDER_POSITION_READER_VERSION,
 } from './application/ports/mainnet-provider-position-reader.port';
 export type {
+  MainnetProviderPositionReadResultV3,
   MainnetProviderPositionReader,
-  MainnetProviderPositionReaderV2,
-  ReadMainnetProviderPositionsRequestV2,
+  MainnetProviderPositionReaderV3,
+  ReadMainnetProviderPositionsRequestV3,
 } from './application/ports/mainnet-provider-position-reader.port';
 export {
   MAINNET_PLATFORM_DIRECTORY,

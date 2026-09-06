@@ -181,7 +181,7 @@ inspection proves these dormant source constraints only; it never turns them
 into deployed or production-ready evidence.
 
 `PROVIDER_POSITION_READ_BOUNDARY` independently snapshots and byte-pins the
-coverage-aware reader v2 port, trusted assessment assembly port, admission
+coverage-aware reader v3 port, trusted assessment assembly port, admission
 coordinator, concrete Node deadline runner, wallet-roster reader port and
 adapter, wallet service and repository port, PostgreSQL wallet repository,
 shared PostgreSQL cancellation service, dormant runtime-budget resource,
@@ -189,17 +189,28 @@ private dormant runtime composition, infrastructure configuration loader,
 runtime PostgreSQL pool factory,
 coverage/observation/assessment/policy domains, feature module, feature barrel,
 and HTTP controller as one selected twenty-one-file critical-source slice. Within
-that slice, the local semantic inspection requires covered rather than bare
-reader results, complete and agreeing coverage (including explicit zero
-counts), whole-assembly and per-observation verification, descriptor-stable
-source-method capture with proxy/accessor rejection, final clock checks, false
-persistence/financial authority, one shared source abort signal, terminal
-controller removal, first-failure queue stop/drain behavior, and one selected
-source and anchor for every target. It also requires an exact API database role,
+that slice, the local semantic inspection requires an exact account/correlation
+reader request with no caller-supplied evaluation time and an exact frozen
+result envelope containing the server-authored parser time and covered-snapshot
+identity. It binds result account, correlation, time, manifest fingerprints and
+targets through a private coordinator-issued assembly identity, while retaining
+complete and agreeing coverage (including explicit zero counts), whole-assembly
+and per-observation verification, descriptor-stable source-method capture with
+proxy/accessor rejection, final clock checks, false persistence/financial
+authority, one shared source abort signal, terminal controller removal,
+first-failure queue stop/drain behavior, and one selected source and anchor for
+every target. It also requires an exact API database role,
 loader maxima, query/fragment-free connection strings, owned immutable
 database/TLS and admission-options snapshots, a connection timeout no greater
 than an admission deadline capped at 30,000 milliseconds, concurrency from 1
 through 8, and direct pool construction from the reviewed snapshot only.
+
+The coordinator records each returned read-only assembly in a module-private
+`WeakSet` only after the final post-parser clock gate. The composition invokes
+the exported direct-source identity reviewer before extracting any candidate or
+snapshot property; structurally identical clones therefore fail without
+running hostile accessors. That reviewer is deliberately absent from the
+feature barrel, module, controller, and reader surface.
 
 The coordinator binds the account, evaluation time, correlation ID, and exact
 shared signal into the roster request. The adapter and PostgreSQL repository
@@ -224,10 +235,14 @@ resource constructs a lazy pool from its owned reviewed API configuration and
 returns that pool with the exact frozen admission-options snapshot. A private
 dormant composition now consumes that exact pool and options object into the
 concrete PostgreSQL -> wallet repository -> wallet service -> portfolio wallet
-reader -> deadline runner -> coordinator graph. It exposes only admission,
-admission-and-assembly, and memoized close operations. Construction performs no
-query or provider call; downstream construction failure drains the owned
-PostgreSQL service when present and ends the same pool.
+reader -> deadline runner -> coordinator graph. Its outer facade retains
+diagnostic admission, admission-and-assembly, and memoized close operations. A
+separate frozen null-prototype reader sub-capability exposes only its three
+version fields and `readCurrentPositions`; it invokes only the
+descriptor-captured `admitAndAssemble` method and exposes no raw candidate,
+trusted verifier, pool, close, persistence, or financial-action authority.
+Construction performs no query or provider call; downstream construction
+failure drains the owned PostgreSQL service when present and ends the same pool.
 
 Composition close first seals and aborts coordinator admission, attempts every
 captured active controller even if one abort throws, closes/drains PostgreSQL
