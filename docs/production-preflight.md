@@ -183,8 +183,8 @@ into deployed or production-ready evidence.
 `PROVIDER_POSITION_READ_BOUNDARY` independently snapshots and byte-pins the
 coverage-aware reader v3 port, trusted-assessment assembly port,
 durable-chain-anchor reader port, concrete PostgreSQL durable-anchor reader,
-dormant chain-anchor evidence source port and two-source producer, dormant
-trusted-chain-assessment assembler,
+dormant chain-anchor evidence source port and two-source producer, exact recorder
+port and concrete PostgreSQL recorder, dormant trusted-chain-assessment assembler,
 admission coordinator, concrete Node deadline runner, wallet-roster reader port
 and adapter, wallet service and repository port, PostgreSQL wallet repository,
 shared PostgreSQL cancellation service, dormant runtime-budget resource,
@@ -192,7 +192,7 @@ private dormant runtime composition, infrastructure configuration loader,
 runtime PostgreSQL pool factory, coverage/observation/assessment/policy domains,
 exact Ethereum/Solana mainnet launch-network policy, migration `0029`, the
 migration index, feature module, feature barrel, and HTTP controller as one
-selected twenty-nine-file critical-source slice. Within that
+selected thirty-one-file critical-source slice. Within that
 slice, the local semantic inspection requires an exact account/correlation
 reader request with no caller-supplied evaluation time and an exact frozen
 result envelope containing the server-authored parser time and covered-snapshot
@@ -268,6 +268,30 @@ candidate containing migration `0029`'s exact 23 record arguments. A private
 `WeakMap` binds that candidate to the exact producer request; copies and request
 clones fail review.
 
+The recorder port exposes only opaque record and receipt-review capabilities.
+The concrete dormant PostgreSQL recorder accepts exact frozen plain- or
+null-prototype outer and nested producer requests with one genuine, unchanged
+abort signal. At construction it descriptor-captures migration `0029`'s exact
+`queryWithCancellation` method and the canonical `reviewCandidate` method from a
+genuine producer instance; it performs no I/O. Before the database call it
+authenticates the producer capability against the exact producer request, checks
+the signal, strictly reconstructs the opaque candidate, and sends exactly one
+native promise-returning query with the migration function's exact SQL, casts,
+23-value order, and same signal. After the query settles it rechecks abort and
+authenticates the producer capability again before accepting exactly one native
+array row with the exact three enumerable data columns. Outcome, fingerprint,
+record time, producer deadline, pair approval, and Ethereum/Solana current-head
+and finalized-head freshness all fail closed. The issued receipt is frozen,
+null-prototype, non-authorizing, and privately bound to the exact recorder request
+in a `WeakMap`; all failures use one frozen, cause-free error. There is no generic
+query fallback, retry loop, network/provider capability, registration, feature
+export, runtime composition, credential, or database grant.
+
+The recorder deliberately does not claim that `deadlineAt - observedAt` is at
+most 30 seconds. That bound belongs to the producer's private `evaluatedAt`, which
+is not present in the recorder request, and is preserved by authentic pre- and
+post-query producer review.
+
 The agreed finalized heads do not establish that the selected candidate anchor
 itself is finalized. Migration `0029` and the producer deliberately leave the
 artifact `PROVISIONAL`, `DISPLAY_ONLY`, and
@@ -278,8 +302,9 @@ The checked-in mainnet source-pair registry is exactly empty and
 `NOT_APPROVED`, and no concrete source binding is checked in. The producer has
 no database writer, transport, endpoint, credential, environment lookup,
 provider SDK, Nest decorator, module registration, barrel export, or runtime
-composition. Its existence therefore cannot populate migration `0029`, contact
-a chain, or change any production blocker.
+composition. The separate recorder is likewise unregistered and ungranted, so
+these dormant artifacts cannot populate migration `0029`, contact a chain, or
+change any production blocker.
 
 Migration `0029` adds a dormant, append-only PostgreSQL boundary for global
 Ethereum and Solana chain-anchor evidence plus append-only `INVALIDATED` and
@@ -295,6 +320,15 @@ rechecked against database time after wallet and evidence locks.
 Evidence-recording and control functions have no runtime grants and remain
 schema-owner-controlled. The cumulative verifier preserves migration `0028`'s
 generic-worker resolver and checkpoint suspension.
+
+Migration `0029`'s record function does not receive or atomically enforce the
+producer deadline. If its database timestamp is late, the recorder rejects the
+receipt but cannot roll back an already committed write. A query rejection or
+connection interruption can also leave an unknown commit outcome. Idempotent
+replay at the function boundary is useful, but this adapter performs no automatic
+retry and provides no durable reconciliation. Production activation therefore
+still requires database-atomic producer-deadline enforcement and an explicit,
+reviewed unknown-outcome reconciliation workflow.
 
 The private dormant composition accepts no raw trust dependency. It constructs
 the concrete PostgreSQL reader from its owned `PostgresService`, constructs the
@@ -319,8 +353,8 @@ validation, started-operation settlement, and timer and abort-listener cleanup
 while rejecting network, environment, dynamic-import, and decorator
 capabilities. It also confirms that the pinned feature module, barrel, and HTTP
 controller do not register or expose the coordinator, PostgreSQL durable reader,
-trusted assembly, deadline runner, runtime-budget resource, or runtime
-composition.
+PostgreSQL recorder, trusted assembly, deadline runner, runtime-budget resource,
+or runtime composition.
 
 The current exact source passes local inspection. The dormant runtime-budget
 resource constructs a lazy pool from its owned reviewed API configuration and
@@ -351,9 +385,10 @@ Launch readiness remains blocked by
 `PROVIDER_POSITION_DEADLINE_RUNNER_FEATURE_REGISTRATION_MISSING`. The concrete
 assembler, PostgreSQL reader, and migration do not clear any registration
 blocker: the dormant producer is not composed, its checked-in production
-registry approves no pair, no live evidence-source implementation or
-owner-authorized database writer adapter exists, and no populated evidence rows
-are claimed. The private composition wiring is not registered in the
+registry approves no pair, no live evidence-source implementation exists, and
+the concrete recorder has no owner-authorized workload, principal, credential,
+grant, composition, deployment, or populated evidence claim. The private
+composition wiring is not registered in the
 Nest/module/HTTP graph, no runtime is activated, and no deployment or live
 evidence exists. The live-provider count therefore remains zero. The concrete
 runner remains dormant and unregistered. Provider sources must cooperate with

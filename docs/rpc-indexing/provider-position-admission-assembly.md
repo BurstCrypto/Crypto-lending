@@ -2,7 +2,8 @@
 
 Status: dormant, unregistered, read-only, and non-persistable from the
 application graph. Migration `0029` defines dormant evidence persistence, but no
-application writer or reader adapter is composed.
+application writer or reader adapter is composed. An exact recorder port and
+concrete PostgreSQL recorder exist only as unregistered, ungranted components.
 
 ## What the coordinator establishes
 
@@ -132,8 +133,9 @@ current-head, and finality freshness against database time after wallet and
 evidence locks.
 
 Production still needs reviewed live implementations for both members of each
-approved source pair, an owner-authorized evidence writer, populated evidence,
-production registration, and deployed proof. The local private wiring constructs
+approved source pair, an owner-authorized recorder workload, principal,
+credential, and grant, populated evidence, production registration, and deployed
+proof. The local private wiring constructs
 the PostgreSQL durable reader unconditionally from the same owned
 `PostgresService`, after the deadline runner and before the assembler and
 coordinator, and never exposes the reader or assembler through the facade or
@@ -164,17 +166,18 @@ count remains zero.
 
 The offline production preflight now byte-pins this coordinator, assembly port,
 durable-anchor reader port, concrete PostgreSQL durable reader, chain-anchor
-evidence source port, dormant two-source evidence producer, dormant
-trusted-chain-assessment assembler, exact
+evidence source port, dormant two-source evidence producer, exact recorder port,
+concrete PostgreSQL recorder, dormant trusted-chain-assessment assembler, exact
 mainnet launch-network policy, concrete deadline runner, complete wallet-roster
 cancellation chain, shared PostgreSQL cancellation service, runtime-budget
 resource, private dormant composition, migration `0029`, and migration index
-with a selected twenty-nine-file
+with a selected thirty-one-file
 reader/domain/infrastructure/database/module/barrel/controller critical-source
 slice.
 Its local check rejects trust, timing, source-method substitution, active-controller
 lifecycle, signal substitution, cancellation/drain/cleanup, query fallback,
-result-cardinality/row-validation weakening, raw reader or trusted-assembly
+result-cardinality/row-validation weakening, recorder SQL/value order,
+pre/post-producer authentication, raw reader or trusted-assembly
 injection, private reader/assembler construction/argument bypass, facade
 exposure, zero-target anchor,
 authority, or feature-surface drift inside that slice, but deliberately reports the reader,
@@ -196,6 +199,28 @@ stored proof hashes, and the producer issues only an opaque, exact 23-argument
 migration-record candidate bound to its original request in a private
 `WeakMap`.
 
+The concrete recorder captures the canonical producer reviewer and
+`queryWithCancellation` without construction-time I/O. It accepts exact frozen
+plain- or null-prototype recorder and producer requests carrying the same genuine
+signal. It authenticates the opaque producer capability before candidate
+inspection, checks abort, sends exactly one native promise-returning call with
+migration `0029`'s exact SQL, casts, and 23-value order, then rechecks abort and
+authenticates the same capability again. Only one exact three-column data row
+with a valid outcome, fingerprint, database record time, producer deadline, pair
+approval, and network-specific current/finalized freshness can issue a frozen
+null-prototype receipt bound to the original request in a private `WeakMap`.
+There is no ordinary-query fallback, automatic retry, provider transport,
+registration, feature export, runtime composition, database credential, or
+grant. The producer's 30-second limit remains tied to its private `evaluatedAt`;
+the recorder does not substitute an incorrect `deadlineAt - observedAt` bound.
+
+The database record function does not receive that producer deadline. Rejecting
+a late returned database timestamp cannot undo a committed record, and a rejected
+query or interrupted connection can leave an unknown commit outcome. Its
+idempotent replay behavior is not an automatic retry or reconciliation system.
+Production activation still requires database-atomic producer-deadline
+enforcement and an explicit durable unknown-outcome reconciliation workflow.
+
 Agreement on the two sources' finalized heads does not prove that the selected
 candidate anchor itself is finalized. Migration `0029` and this producer keep
 the artifact `PROVISIONAL`, `DISPLAY_ONLY`, and
@@ -204,10 +229,10 @@ candidate-finalization gate is required before any ledger mutation or financial
 authority may consume it.
 
 The checked-in mainnet source-pair registry remains empty and `NOT_APPROVED`.
-No concrete source, endpoint, credential, database writer, module provider,
-barrel export, composition dependency, or runtime activation is added, so all
-three registration blockers remain `MISSING` and the live-provider count
-remains zero.
+No concrete source, endpoint, owner-authorized recorder
+workload/principal/credential/grant, module provider, barrel export, composition
+dependency, deployment, or runtime activation is added, so all three
+registration blockers remain `MISSING` and the live-provider count remains zero.
 
 That production change must also provide:
 
@@ -217,7 +242,9 @@ That production change must also provide:
 - transport-level timeouts, cancellation, authentication, and observability;
 - durable continuity floors rather than accepting an upstream service's unsupported history claim;
 - disagreement quarantine and operator alerting;
-- retention/replay rules for source observation IDs; and
+- retention/replay rules for source observation IDs;
+- database-atomic producer-deadline enforcement plus durable reconciliation for
+  an unknown record outcome; and
 - explicit persistence and display approval after live conformance tests.
 
 Until those gates are satisfied, the coordinator and its candidate must remain unregistered and must not be used to imply an available balance, recommendation, or permission to move funds.

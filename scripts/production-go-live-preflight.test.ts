@@ -450,6 +450,20 @@ const PROVIDER_POSITION_READ_ARTIFACTS = Object.freeze({
     ),
     'utf8',
   ),
+  providerPositionChainAnchorEvidenceRecorderPortSource: readFileSync(
+    resolve(
+      __dirname,
+      '../apps/api/src/mainnet-platforms/application/ports/provider-position-chain-anchor-evidence-recorder.port.ts',
+    ),
+    'utf8',
+  ),
+  providerPositionPostgresChainAnchorEvidenceRecorderSource: readFileSync(
+    resolve(
+      __dirname,
+      '../apps/api/src/mainnet-platforms/infrastructure/postgres-provider-position-chain-anchor-evidence.recorder.ts',
+    ),
+    'utf8',
+  ),
   providerPositionPostgresDurableChainAnchorReaderSource: readFileSync(
     resolve(
       __dirname,
@@ -1133,7 +1147,7 @@ function mutateProviderPositionReadArtifact(
 }
 
 test('provider-position read inspection pins the exact dormant critical source slice', () => {
-  assert.equal(Object.keys(PROVIDER_POSITION_READ_ARTIFACTS).length, 29);
+  assert.equal(Object.keys(PROVIDER_POSITION_READ_ARTIFACTS).length, 31);
   const inspected = inspectProviderPositionReadBoundaryArtifacts(PROVIDER_POSITION_READ_ARTIFACTS);
   assert.deepEqual(inspected, EXPECTED_DORMANT_PROVIDER_POSITION_READ_BOUNDARY);
   assert.equal(Object.isFrozen(inspected), true);
@@ -1159,9 +1173,15 @@ test('provider-position read semantic gate contains no disabled-check bypass', (
   const producerStart = source.indexOf(
     'function hasDormantProviderPositionChainAnchorEvidenceProducerContract(',
   );
+  const recorderStart = source.indexOf(
+    'function hasDormantProviderPositionChainAnchorEvidenceRecorderContract(',
+    producerStart,
+  );
   const start = source.indexOf('function hasDormantProviderPositionReadBoundaryContract(');
   const end = source.indexOf('\nfunction ', start + 1);
-  assert.ok(producerStart >= 0 && start > producerStart && end > start);
+  assert.ok(
+    producerStart >= 0 && recorderStart > producerStart && start > recorderStart && end > start,
+  );
   const semanticGateSource = source
     .slice(producerStart, end)
     .replaceAll('!== true ||', '!== true OR');
@@ -1416,6 +1436,420 @@ test('provider-position read inspection rejects dormant two-source evidence prod
       'mainnetPlatformsIndexSource',
       "export { MainnetPlatformDirectoryService } from './application/mainnet-platform-directory.service';",
       "export { DormantProviderPositionChainAnchorEvidenceProducer } from './application/dormant-provider-position-chain-anchor-evidence.producer';",
+    ],
+  ];
+
+  for (const [key, approved, rejected] of mutations) {
+    assert.deepEqual(
+      inspectProviderPositionReadBoundaryArtifacts(
+        mutateProviderPositionReadArtifact(key, approved, rejected),
+      ),
+      INVALID_PROVIDER_POSITION_READ_BOUNDARY,
+      `${key}: ${approved}`,
+    );
+  }
+});
+
+test('provider-position read inspection rejects dormant chain-anchor recorder drift', () => {
+  const recordRequestRuntimeGuard = [
+    '    record.recorderVersion !== PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORDER_VERSION ||',
+    '    record.use !== PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORD_USE ||',
+    '    record.mayAuthorizeFinancialAction !== false',
+  ].join('\n');
+  const producerRequestRuntimeGuard = [
+    '    record.producerVersion !== PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_PRODUCER_VERSION ||',
+    '    record.use !== PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_PRODUCE_USE ||',
+    '    record.mayAuthorizeFinancialAction !== false ||',
+    '    record.mayPersist !== false ||',
+    "    typeof sourceObservationId !== 'string' ||",
+    '    !SOURCE_OBSERVATION_ID.test(sourceObservationId)',
+  ].join('\n');
+  const candidateRuntimeGuard = [
+    '    record.producerVersion !== PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_PRODUCER_VERSION ||',
+    '    record.use !== PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORD_CANDIDATE_USE ||',
+    '    record.mayAuthorizeFinancialAction !== false ||',
+    '    record.mayPersist !== false',
+  ].join('\n');
+  const mutations: readonly (readonly [
+    keyof ProviderPositionReadBoundaryArtifactSources,
+    string,
+    string,
+  ])[] = [
+    [
+      'providerPositionChainAnchorEvidenceRecorderPortSource',
+      'export const PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORDER_VERSION = 1 as const;',
+      'export const PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORDER_VERSION = 2 as const;',
+    ],
+    [
+      'providerPositionChainAnchorEvidenceRecorderPortSource',
+      'readonly mayAuthorizeFinancialAction: false;',
+      'readonly mayAuthorizeFinancialAction: true;',
+    ],
+    [
+      'providerPositionChainAnchorEvidenceRecorderPortSource',
+      'readonly producerCapability: unknown;',
+      'readonly producerCapability: ProviderPositionChainAnchorEvidenceRecordCandidateV1;',
+    ],
+    [
+      'providerPositionChainAnchorEvidenceRecorderPortSource',
+      'readonly producerRequest: ProduceProviderPositionChainAnchorEvidenceRequestV1;',
+      'readonly recordArguments: readonly unknown[];',
+    ],
+    [
+      'providerPositionChainAnchorEvidenceRecorderPortSource',
+      'recordEvidence(request: RecordProviderPositionChainAnchorEvidenceRequestV1): Promise<unknown>;',
+      'recordEvidence(request: RecordProviderPositionChainAnchorEvidenceRequestV1): Promise<ProviderPositionChainAnchorEvidenceRecordReceiptV1>;',
+    ],
+    [
+      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
+      recordRequestRuntimeGuard,
+      recordRequestRuntimeGuard.replace(
+        'record.recorderVersion !== PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORDER_VERSION',
+        'record.recorderVersion !== 2',
+      ),
+    ],
+    [
+      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
+      recordRequestRuntimeGuard,
+      recordRequestRuntimeGuard.replace(
+        'record.use !== PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORD_USE',
+        'record.use !== PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORD_RECEIPT_USE',
+      ),
+    ],
+    [
+      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
+      recordRequestRuntimeGuard,
+      recordRequestRuntimeGuard.replace(
+        'record.mayAuthorizeFinancialAction !== false',
+        'record.mayAuthorizeFinancialAction !== true',
+      ),
+    ],
+    [
+      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
+      producerRequestRuntimeGuard,
+      producerRequestRuntimeGuard.replace(
+        'record.producerVersion !== PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_PRODUCER_VERSION',
+        'record.producerVersion !== 2',
+      ),
+    ],
+    [
+      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
+      producerRequestRuntimeGuard,
+      producerRequestRuntimeGuard.replace(
+        'record.use !== PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_PRODUCE_USE',
+        'record.use !== PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORD_CANDIDATE_USE',
+      ),
+    ],
+    [
+      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
+      producerRequestRuntimeGuard,
+      producerRequestRuntimeGuard.replace(
+        'record.mayAuthorizeFinancialAction !== false',
+        'record.mayAuthorizeFinancialAction !== true',
+      ),
+    ],
+    [
+      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
+      producerRequestRuntimeGuard,
+      producerRequestRuntimeGuard.replace(
+        'record.mayPersist !== false',
+        'record.mayPersist !== true',
+      ),
+    ],
+    [
+      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
+      candidateRuntimeGuard,
+      candidateRuntimeGuard.replace(
+        'record.producerVersion !== PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_PRODUCER_VERSION',
+        'record.producerVersion !== 2',
+      ),
+    ],
+    [
+      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
+      candidateRuntimeGuard,
+      candidateRuntimeGuard.replace(
+        'record.use !== PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORD_CANDIDATE_USE',
+        'record.use !== PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_PRODUCE_USE',
+      ),
+    ],
+    [
+      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
+      candidateRuntimeGuard,
+      candidateRuntimeGuard.replace(
+        'record.mayAuthorizeFinancialAction !== false',
+        'record.mayAuthorizeFinancialAction !== true',
+      ),
+    ],
+    [
+      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
+      candidateRuntimeGuard,
+      candidateRuntimeGuard.replace('record.mayPersist !== false', 'record.mayPersist !== true'),
+    ],
+    [
+      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
+      "Object.getOwnPropertyDescriptor(value, 'reviewCandidate') !== undefined",
+      'false',
+    ],
+    [
+      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
+      'this.#producerReview = captureProducerReview(producer);',
+      "this.#producerReview = captureMethod<ReviewCandidate>(producer, 'reviewCandidate');",
+    ],
+    [
+      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
+      "this.#databaseQuery = captureMethod<QueryWithCancellation>(postgres, 'queryWithCancellation');",
+      "this.#databaseQuery = captureMethod<QueryWithCancellation>(postgres, 'query');",
+    ],
+    [
+      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
+      "(typeof value !== 'object' && typeof value !== 'function') ||\n      value === null ||\n      isProxy(value)",
+      "(typeof value !== 'object' && typeof value !== 'function') ||\n      value === null ||\n      false",
+    ],
+    [
+      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
+      'if (isProxy(current)) return fail();',
+      'void current;',
+    ],
+    [
+      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
+      'if (isProxy(descriptor.value)) return fail();',
+      'void descriptor.value;',
+    ],
+    [
+      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
+      'return Object.freeze({ receiver: value, method: descriptor.value as Method });',
+      'return Object.freeze({ receiver: current, method: descriptor.value as Method });',
+    ],
+    [
+      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
+      'current !== Object.prototype &&',
+      'current !== null &&',
+    ],
+    [
+      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
+      'return Object.freeze(Object.assign(Object.create(null) as object, fields)) as Readonly<T>;',
+      'return Object.freeze(Object.assign({}, fields)) as Readonly<T>;',
+    ],
+    [
+      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
+      "typeof value !== 'object' ||\n      value === null ||\n      Array.isArray(value) ||\n      isProxy(value) ||\n      (requireFrozen && !Object.isFrozen(value))",
+      "typeof value !== 'object' ||\n      value === null ||\n      false ||\n      false ||\n      false",
+    ],
+    [
+      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
+      '(requireNullPrototype && prototype !== null) ||\n      (!requireNullPrototype && prototype !== null && prototype !== Object.prototype)',
+      'false',
+    ],
+    [
+      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
+      "if (!descriptor?.enumerable || !('value' in descriptor)) return fail();",
+      "if (!('value' in descriptor)) return fail();",
+    ],
+    [
+      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
+      'const record = exactDataRecord(value, PRODUCER_REQUEST_KEYS, true, false);',
+      'const record = exactDataRecord(value, PRODUCER_REQUEST_KEYS, true, true);',
+    ],
+    [
+      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
+      'const record = exactDataRecord(value, RECORD_REQUEST_KEYS, true, false);',
+      'const record = exactDataRecord(value, RECORD_REQUEST_KEYS, true, true);',
+    ],
+    [
+      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
+      'observedAt.milliseconds >= deadlineAt.milliseconds ||',
+      'observedAt.milliseconds >= deadlineAt.milliseconds ||\n    deadlineAt.milliseconds - observedAt.milliseconds > 30_000 ||',
+    ],
+    [
+      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
+      'FROM record_provider_position_chain_anchor_evidence(',
+      'FROM read_provider_position_chain_anchor_evidence(',
+    ],
+    [
+      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
+      '$6::jsonb, $7::jsonb, $8::timestamptz, $9::timestamptz,',
+      '$6::jsonb, $7::jsonb, $9::timestamptz, $8::timestamptz,',
+    ],
+    [
+      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
+      'JSON.stringify(currentHead),',
+      'JSON.stringify(chainAnchor),',
+    ],
+    [
+      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
+      'if (firstReview !== request.producerCapability) return fail();',
+      'void firstReview;',
+    ],
+    [
+      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
+      'if (isAborted(request.signal)) return fail();',
+      'void request.signal;',
+    ],
+    [
+      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
+      'const candidate = reviewedCandidate(firstReview, request.producerRequest);',
+      'const candidate = reviewedCandidate(request.producerCapability, request.producerRequest);',
+    ],
+    [
+      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
+      '        candidate.values,\n        request.signal,',
+      '        candidate.values,\n        new AbortController().signal,',
+    ],
+    [
+      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
+      'const operation = Reflect.apply(this.#databaseQuery.method, this.#databaseQuery.receiver, [',
+      'const operation = Reflect.apply(this.#databaseQuery.method, this.#databaseQuery.receiver, [\n      const operation = Reflect.apply(this.#databaseQuery.method, this.#databaseQuery.receiver, [',
+    ],
+    [
+      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
+      'if (!genuinePromise(operation)) return fail();',
+      'void operation;',
+    ],
+    [
+      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
+      'Object.getPrototypeOf(value) === Promise.prototype',
+      "typeof (value as Promise<unknown>).then === 'function'",
+    ],
+    ['providerPositionPostgresChainAnchorEvidenceRecorderSource', '!isProxy(value) &&', 'true &&'],
+    [
+      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
+      'const result = await operation;',
+      'const result = await retry(operation);',
+    ],
+    [
+      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
+      'const result = await operation;',
+      'const result = await operation;\n      const result = await operation;',
+    ],
+    [
+      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
+      'if (secondReview !== firstReview || secondReview !== candidate.candidate) return fail();',
+      'if (secondReview !== firstReview && secondReview !== candidate.candidate) return fail();',
+    ],
+    [
+      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
+      "descriptors['length']?.value !== 1 ||",
+      "descriptors['length']?.value > 1 ||",
+    ],
+    [
+      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
+      "const rowsDescriptor = Object.getOwnPropertyDescriptor(value, 'rows');",
+      'const rowsDescriptor = { enumerable: true, value: (value as { rows: unknown }).rows };',
+    ],
+    [
+      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
+      "if (typeof value !== 'object' || value === null || isProxy(value)) return fail();",
+      "if (typeof value !== 'object' || value === null) return fail();",
+    ],
+    [
+      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
+      "if (!rowsDescriptor?.enumerable || !('value' in rowsDescriptor)) return fail();",
+      "if (!('value' in rowsDescriptor)) return fail();",
+    ],
+    [
+      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
+      'if (!Array.isArray(rows) || isProxy(rows) || Object.getPrototypeOf(rows) !== Array.prototype) {',
+      'if (!Array.isArray(rows)) {',
+    ],
+    [
+      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
+      'keys.length !== 2 ||',
+      'keys.length > 2 ||',
+    ],
+    [
+      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
+      "!descriptors['0']?.enumerable ||\n      !('value' in descriptors['0'])",
+      "!('value' in descriptors['0'])",
+    ],
+    [
+      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
+      "return exactDataRecord(descriptors['0'].value, ROW_COLUMNS, false, false) as RecordRow;",
+      "return descriptors['0'].value as RecordRow;",
+    ],
+    [
+      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
+      "  'evidence_recorded_at',\n] as const);",
+      "  'evidence_recorded_at',\n  'unreviewed',\n] as const);",
+    ],
+    [
+      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
+      "if (row.record_outcome !== 'RECORDED' && row.record_outcome !== 'IDEMPOTENT_REPLAY') {",
+      'if (false) {',
+    ],
+    [
+      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
+      'recordedAt.milliseconds >= producerRequest.deadlineAt.milliseconds ||',
+      'false ||',
+    ],
+    [
+      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
+      'const currentLifetime = candidate.networkId === ETHEREUM ? 60_000 : 15_000;',
+      'const currentLifetime = candidate.networkId === ETHEREUM ? 600_000 : 150_000;',
+    ],
+    [
+      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
+      'readonly #issued = new WeakMap<object, RecordProviderPositionChainAnchorEvidenceRequestV1>();',
+      'readonly #issued = new Map<object, RecordProviderPositionChainAnchorEvidenceRequestV1>();',
+    ],
+    [
+      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
+      'this.#issued.set(receipt, request.request);',
+      'this.#issued.set(receipt, request.producerRequest.request);',
+    ],
+    [
+      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
+      'export const PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORD_ERROR = Object.freeze(',
+      'export const PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORD_ERROR = (',
+    ],
+    [
+      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
+      "readonly code = 'PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORD_FAILED' as const;",
+      "readonly code = 'DATABASE_ERROR' as const;",
+    ],
+    [
+      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
+      "this.name = 'ProviderPositionChainAnchorEvidenceRecordError';",
+      "this.name = 'Error';",
+    ],
+    [
+      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
+      "super('Provider position chain-anchor evidence record failed');",
+      "super('Database request failed');",
+    ],
+    [
+      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
+      "super('Provider position chain-anchor evidence record failed');",
+      "super('Provider position chain-anchor evidence record failed', { cause: new Error('leak') });",
+    ],
+    [
+      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
+      'return frozenNullPrototype({\n    recorderVersion: PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORDER_VERSION,',
+      'return Object.freeze({\n    recorderVersion: PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORDER_VERSION,',
+    ],
+    [
+      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
+      'cannot roll back a write: atomic producer-deadline enforcement requires a',
+      'late writes require no database enforcement because cancellation is sufficient;',
+    ],
+    [
+      'providerPositionRuntimeCompositionSource',
+      'const DEPENDENCY_KEYS = Object.freeze([',
+      'type PostgresProviderPositionChainAnchorEvidenceRecorder = unknown;\nconst DEPENDENCY_KEYS = Object.freeze([',
+    ],
+    [
+      'mainnetPlatformsModuleSource',
+      'providers: [MainnetPlatformDirectoryService, MainnetPlatformsPrivacyInterceptor],',
+      'providers: [MainnetPlatformDirectoryService, PostgresProviderPositionChainAnchorEvidenceRecorder],',
+    ],
+    [
+      'mainnetPlatformsIndexSource',
+      "export { MainnetPlatformDirectoryService } from './application/mainnet-platform-directory.service';",
+      "export { PostgresProviderPositionChainAnchorEvidenceRecorder } from './infrastructure/postgres-provider-position-chain-anchor-evidence.recorder';",
+    ],
+    [
+      'mainnetPlatformsControllerSource',
+      'constructor(private readonly directory: MainnetPlatformDirectoryService) {}',
+      'constructor(private readonly recorder: PostgresProviderPositionChainAnchorEvidenceRecorder) {}',
     ],
   ];
 

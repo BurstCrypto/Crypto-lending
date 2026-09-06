@@ -253,6 +253,8 @@ export interface ProviderPositionReadBoundaryArtifactSources {
   readonly providerPositionDurableChainAnchorReaderPortSource: string;
   readonly providerPositionChainAnchorEvidenceSourcePortSource: string;
   readonly providerPositionChainAnchorEvidenceProducerSource: string;
+  readonly providerPositionChainAnchorEvidenceRecorderPortSource: string;
+  readonly providerPositionPostgresChainAnchorEvidenceRecorderSource: string;
   readonly providerPositionPostgresDurableChainAnchorReaderSource: string;
   readonly providerPositionTrustedChainAssessmentAssemblerSource: string;
   readonly providerPositionChainAnchorEvidenceMigrationSource: string;
@@ -590,6 +592,8 @@ const PROVIDER_POSITION_READ_ARTIFACT_KEYS = Object.freeze([
   'providerPositionDurableChainAnchorReaderPortSource',
   'providerPositionChainAnchorEvidenceSourcePortSource',
   'providerPositionChainAnchorEvidenceProducerSource',
+  'providerPositionChainAnchorEvidenceRecorderPortSource',
+  'providerPositionPostgresChainAnchorEvidenceRecorderSource',
   'providerPositionPostgresDurableChainAnchorReaderSource',
   'providerPositionTrustedChainAssessmentAssemblerSource',
   'providerPositionChainAnchorEvidenceMigrationSource',
@@ -626,6 +630,10 @@ const REVIEWED_PROVIDER_POSITION_READ_ARTIFACT_SHA256 = Object.freeze({
     '4a40a82ab84f6b6f2123e3871835ef89009914ec188753d6ae0f190774822851',
   providerPositionChainAnchorEvidenceProducerSource:
     '34e097328ba3c77894bc055ca5e703eaa0f8d0ae95c66f0b93358774197d2dad',
+  providerPositionChainAnchorEvidenceRecorderPortSource:
+    'ce32fbba09e571192af485f5e7c1380acc5890fdc0528fa43f68755eff971fd5',
+  providerPositionPostgresChainAnchorEvidenceRecorderSource:
+    '998c0dd215401e2390c3a50c709b66d3e392cee43a4d54496b15c34442b468d8',
   providerPositionPostgresDurableChainAnchorReaderSource:
     'e18a4f17553506244b9570afb113c53ec08f34a75d089bd88deb4ae799b2efbd',
   providerPositionTrustedChainAssessmentAssemblerSource:
@@ -2936,6 +2944,723 @@ function hasDormantProviderPositionChainAnchorEvidenceProducerContract(
   );
 }
 
+function hasDormantProviderPositionChainAnchorEvidenceRecorderContract(
+  recorderPortSource: string,
+  recorderSource: string,
+  runtimeCompositionSource: string,
+  moduleSource: string,
+  indexSource: string,
+  controllerSource: string,
+): boolean {
+  const recorderPort = recorderPortSource.replace(/\r\n/gu, '\n');
+  const recorder = recorderSource.replace(/\r\n/gu, '\n');
+  const recorderPortImports = Array.from(
+    recorderPort.matchAll(/\bfrom\s+['"]([^'"]+)['"]/gu),
+    (match) => match[1],
+  );
+  const recorderImports = Array.from(
+    recorder.matchAll(/\bfrom\s+['"]([^'"]+)['"]/gu),
+    (match) => match[1],
+  );
+  const forbiddenRecorderCapability =
+    /(?:\bimport\s*\(|\brequire\s*\(|(?:\bfrom\s+|\bimport\s*(?:\(\s*)?)['"](?:node:)?(?:child_process|cluster|dgram|dns|fs|http|http2|https|net|tls|worker_threads)(?:\/[^'"]*)?['"]|(?:\bfrom\s+|\bimport\s*(?:\(\s*)?)['"](?:axios|ethers|got|superagent|undici|web3|@solana\/web3\.js)['"]|\b(?:fetch|setTimeout|setInterval|setImmediate|queueMicrotask|WebSocket|EventSource|XMLHttpRequest|readFileSync|writeFileSync)\s*\(|\.\s*(?:query|connect|end|execute|transaction|persist|save|write)\s*\(|\b(?:process|Deno|Bun)\s*\.\s*env\b|\bimport\s*\.\s*meta\s*\.\s*env\b|['"]https?:\/\/|(?:^|\n)[\t ]*@[A-Za-z_$]|\b(?:NestFactory|DataSource|EntityManager|Repository|loadInfrastructureConfig|createPostgresPool|POSTGRES_POOL)\b|\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM|TRUNCATE)\b|\b(?:read|invalidate)_provider_position_chain_anchor_evidence\b)/iu;
+  const forbiddenRecorderPortField =
+    /\breadonly\s+(?:accountId|walletId|credentials|database|endpoint|grant|password|recordArguments|repository|secret|token|url|writer)\s*[?:]/u;
+  const forbiddenFeatureSurface =
+    /(?:PostgresProviderPositionChainAnchorEvidenceRecorder|ProviderPositionChainAnchorEvidenceRecorderPort|PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORDER_VERSION|PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORD_USE|postgres-provider-position-chain-anchor-evidence\.recorder|provider-position-chain-anchor-evidence-recorder\.port)/u;
+
+  const requestStart = recorderPort.indexOf(
+    'export interface RecordProviderPositionChainAnchorEvidenceRequestV1 {',
+  );
+  const requestEnd = recorderPort.indexOf('\n}', requestStart);
+  const requestContract =
+    requestStart >= 0 && requestEnd > requestStart
+      ? recorderPort.slice(requestStart, requestEnd + 2)
+      : '';
+  const expectedRequestContract = [
+    'export interface RecordProviderPositionChainAnchorEvidenceRequestV1 {',
+    'readonly recorderVersion: typeof PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORDER_VERSION;',
+    'readonly use: typeof PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORD_USE;',
+    'readonly mayAuthorizeFinancialAction: false;',
+    'readonly producerCapability: unknown;',
+    'readonly producerRequest: ProduceProviderPositionChainAnchorEvidenceRequestV1;',
+    'readonly signal: AbortSignal;',
+    '}',
+  ].join('\n');
+  const receiptStart = recorderPort.indexOf(
+    'export interface ProviderPositionChainAnchorEvidenceRecordReceiptV1 {',
+  );
+  const receiptEnd = recorderPort.indexOf('\n}', receiptStart);
+  const receiptContract =
+    receiptStart >= 0 && receiptEnd > receiptStart
+      ? recorderPort.slice(receiptStart, receiptEnd + 2)
+      : '';
+  const expectedReceiptContract = [
+    'export interface ProviderPositionChainAnchorEvidenceRecordReceiptV1 {',
+    'readonly recorderVersion: typeof PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORDER_VERSION;',
+    'readonly use: typeof PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORD_RECEIPT_USE;',
+    'readonly mayAuthorizeFinancialAction: false;',
+    'readonly recordOutcome: ProviderPositionChainAnchorEvidenceRecordOutcome;',
+    'readonly recordedEvidenceFingerprintSha256: string;',
+    'readonly evidenceRecordedAt: string;',
+    '}',
+  ].join('\n');
+  const portStart = recorderPort.indexOf(
+    'export interface ProviderPositionChainAnchorEvidenceRecorderPort {',
+  );
+  const portEnd = recorderPort.indexOf('\n}', portStart);
+  const portContract =
+    portStart >= 0 && portEnd > portStart ? recorderPort.slice(portStart, portEnd + 2) : '';
+  const expectedPortContract = [
+    'export interface ProviderPositionChainAnchorEvidenceRecorderPort {',
+    'readonly recorderVersion: typeof PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORDER_VERSION;',
+    'recordEvidence(request: RecordProviderPositionChainAnchorEvidenceRequestV1): Promise<unknown>;',
+    'verifyReceipt(',
+    'capability: unknown,',
+    'request: RecordProviderPositionChainAnchorEvidenceRequestV1,',
+    '): boolean;',
+    '}',
+  ].join('\n');
+
+  const recordRequestKeysStart = recorder.indexOf('const RECORD_REQUEST_KEYS = Object.freeze([');
+  const recordRequestKeysEnd = recorder.indexOf('] as const);', recordRequestKeysStart);
+  const recordRequestKeys =
+    recordRequestKeysStart >= 0 && recordRequestKeysEnd > recordRequestKeysStart
+      ? recorder.slice(recordRequestKeysStart, recordRequestKeysEnd + '] as const);'.length)
+      : '';
+  const expectedRecordRequestKeys = [
+    'const RECORD_REQUEST_KEYS = Object.freeze([',
+    "'recorderVersion',",
+    "'use',",
+    "'mayAuthorizeFinancialAction',",
+    "'producerCapability',",
+    "'producerRequest',",
+    "'signal',",
+    '] as const);',
+  ].join('\n');
+  const producerRequestKeysStart = recorder.indexOf(
+    'const PRODUCER_REQUEST_KEYS = Object.freeze([',
+  );
+  const producerRequestKeysEnd = recorder.indexOf('] as const);', producerRequestKeysStart);
+  const producerRequestKeys =
+    producerRequestKeysStart >= 0 && producerRequestKeysEnd > producerRequestKeysStart
+      ? recorder.slice(producerRequestKeysStart, producerRequestKeysEnd + '] as const);'.length)
+      : '';
+  const expectedProducerRequestKeys = [
+    'const PRODUCER_REQUEST_KEYS = Object.freeze([',
+    "'producerVersion',",
+    "'use',",
+    "'mayAuthorizeFinancialAction',",
+    "'mayPersist',",
+    "'networkId',",
+    "'sourceFamilyId',",
+    "'sourceId',",
+    "'sourceKind',",
+    "'sourceObservationId',",
+    "'continuityFloor',",
+    "'chainAnchor',",
+    "'observedAt',",
+    "'deadlineAt',",
+    "'signal',",
+    '] as const);',
+  ].join('\n');
+  const candidateKeysStart = recorder.indexOf('const CANDIDATE_KEYS = Object.freeze([');
+  const candidateKeysEnd = recorder.indexOf('] as const);', candidateKeysStart);
+  const candidateKeys =
+    candidateKeysStart >= 0 && candidateKeysEnd > candidateKeysStart
+      ? recorder.slice(candidateKeysStart, candidateKeysEnd + '] as const);'.length)
+      : '';
+  const expectedCandidateKeys = [
+    'const CANDIDATE_KEYS = Object.freeze([',
+    "'producerVersion',",
+    "'use',",
+    "'mayAuthorizeFinancialAction',",
+    "'mayPersist',",
+    "'recordArguments',",
+    '] as const);',
+  ].join('\n');
+  const rowColumnsStart = recorder.indexOf('const ROW_COLUMNS = Object.freeze([');
+  const rowColumnsEnd = recorder.indexOf('] as const);', rowColumnsStart);
+  const rowColumns =
+    rowColumnsStart >= 0 && rowColumnsEnd > rowColumnsStart
+      ? recorder.slice(rowColumnsStart, rowColumnsEnd + '] as const);'.length)
+      : '';
+  const expectedRowColumns = [
+    'const ROW_COLUMNS = Object.freeze([',
+    "'record_outcome',",
+    "'recorded_evidence_fingerprint_sha256',",
+    "'evidence_recorded_at',",
+    '] as const);',
+  ].join('\n');
+
+  const sqlStart = recorder.indexOf('const RECORD_SQL = `SELECT');
+  const sqlEnd = recorder.indexOf(') AS evidence`;', sqlStart);
+  const sql =
+    sqlStart >= 0 && sqlEnd > sqlStart
+      ? recorder.slice(sqlStart, sqlEnd + ') AS evidence`;'.length)
+      : '';
+  const expectedSql = [
+    'const RECORD_SQL = `SELECT',
+    'evidence.record_outcome,',
+    'evidence.recorded_evidence_fingerprint_sha256,',
+    'pg_catalog.to_char(',
+    "evidence.evidence_recorded_at AT TIME ZONE 'UTC',",
+    '\'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"\'',
+    ') AS evidence_recorded_at',
+    'FROM record_provider_position_chain_anchor_evidence(',
+    '$1::text, $2::text, $3::text, $4::text, $5::text,',
+    '$6::jsonb, $7::jsonb, $8::timestamptz, $9::timestamptz,',
+    '$10::jsonb, $11::timestamptz, $12::jsonb, $13::timestamptz,',
+    '$14::text, $15::text, $16::text, $17::text, $18::text,',
+    '$19::text, $20::text, $21::text, $22::text, $23::timestamptz',
+    ') AS evidence`;',
+  ].join('\n');
+  const valuesStart = recorder.indexOf('values: Object.freeze([');
+  const valuesEnd = recorder.indexOf('\n    ]),', valuesStart);
+  const values =
+    valuesStart >= 0 && valuesEnd > valuesStart
+      ? recorder.slice(valuesStart, valuesEnd + '\n    ]),'.length)
+      : '';
+  const expectedValues = [
+    'values: Object.freeze([',
+    'networkId,',
+    'candidateSourceFamilyId,',
+    'candidateSourceId,',
+    'candidateSourceKind,',
+    'sourceObservationId,',
+    'JSON.stringify(continuityFloor),',
+    'JSON.stringify(chainAnchor),',
+    'observedAt.value,',
+    'assessedAt.value,',
+    'JSON.stringify(currentHead),',
+    'currentHeadAdvancedAt.value,',
+    'JSON.stringify(finalizedHead),',
+    'finalizedHeadAdvancedAt.value,',
+    'identityProofSha256,',
+    'liveCapabilityProofSha256,',
+    'lineageProofSha256,',
+    'primarySourceFamilyId,',
+    'primarySourceId,',
+    'corroboratingSourceFamilyId,',
+    'corroboratingSourceId,',
+    'sourcePairApprovalId,',
+    'registryFingerprintSha256,',
+    'approvalExpiresAt.value,',
+    ']),',
+  ].join('\n');
+
+  const recordErrorStart = recorder.indexOf(
+    'class ProviderPositionChainAnchorEvidenceRecordError extends Error {',
+  );
+  const recordErrorEnd = recorder.indexOf(
+    '\nexport const PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORD_ERROR',
+    recordErrorStart,
+  );
+  const recordErrorSource =
+    recordErrorStart >= 0 && recordErrorEnd > recordErrorStart
+      ? recorder.slice(recordErrorStart, recordErrorEnd)
+      : '';
+  const frozenNullPrototypeStart = recorder.indexOf('function frozenNullPrototype<');
+  const exactDataRecordStart = recorder.indexOf(
+    '\nfunction exactDataRecord(',
+    frozenNullPrototypeStart,
+  );
+  const frozenNullPrototypeSource =
+    frozenNullPrototypeStart >= 0 && exactDataRecordStart > frozenNullPrototypeStart
+      ? recorder.slice(frozenNullPrototypeStart, exactDataRecordStart)
+      : '';
+  const exactDataArrayStart = recorder.indexOf('\nfunction exactDataArray(', exactDataRecordStart);
+  const exactDataRecordSource =
+    exactDataRecordStart >= 0 && exactDataArrayStart > exactDataRecordStart
+      ? recorder.slice(exactDataRecordStart, exactDataArrayStart)
+      : '';
+  const reviewedProducerRequestStart = recorder.indexOf('function reviewedProducerRequest(');
+  const reviewedRecordRequestStart = recorder.indexOf(
+    '\nfunction reviewedRecordRequest(',
+    reviewedProducerRequestStart,
+  );
+  const producerRequestGuardStart = recorder.indexOf('  if (\n', reviewedProducerRequestStart);
+  const producerRequestGuardEnd = recorder.indexOf('\n  }\n', producerRequestGuardStart);
+  const producerRequestGuard =
+    producerRequestGuardStart >= 0 &&
+    producerRequestGuardEnd > producerRequestGuardStart &&
+    producerRequestGuardEnd < reviewedRecordRequestStart
+      ? recorder.slice(producerRequestGuardStart, producerRequestGuardEnd + '\n  }'.length)
+      : '';
+  const expectedProducerRequestGuard = [
+    'if (',
+    'record.producerVersion !== PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_PRODUCER_VERSION ||',
+    'record.use !== PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_PRODUCE_USE ||',
+    'record.mayAuthorizeFinancialAction !== false ||',
+    'record.mayPersist !== false ||',
+    "typeof sourceObservationId !== 'string' ||",
+    '!SOURCE_OBSERVATION_ID.test(sourceObservationId)',
+    ') {',
+    'return fail();',
+    '}',
+  ].join('\n');
+  const captureMethodStart = recorder.indexOf('function captureMethod<');
+  const recordRequestGuardStart = recorder.indexOf('  if (\n', reviewedRecordRequestStart);
+  const recordRequestGuardEnd = recorder.indexOf('\n  }\n', recordRequestGuardStart);
+  const recordRequestGuard =
+    recordRequestGuardStart >= 0 &&
+    recordRequestGuardEnd > recordRequestGuardStart &&
+    recordRequestGuardEnd < captureMethodStart
+      ? recorder.slice(recordRequestGuardStart, recordRequestGuardEnd + '\n  }'.length)
+      : '';
+  const expectedRecordRequestGuard = [
+    'if (',
+    'record.recorderVersion !== PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORDER_VERSION ||',
+    'record.use !== PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORD_USE ||',
+    'record.mayAuthorizeFinancialAction !== false',
+    ') {',
+    'return fail();',
+    '}',
+  ].join('\n');
+  const captureProducerReviewStart = recorder.indexOf('function captureProducerReview(');
+  const captureMethodSource =
+    captureMethodStart >= 0 && captureProducerReviewStart > captureMethodStart
+      ? recorder.slice(captureMethodStart, captureProducerReviewStart)
+      : '';
+  const reviewCandidateHelperStart = recorder.indexOf(
+    '\nfunction reviewCandidate(',
+    captureProducerReviewStart,
+  );
+  const captureProducerReview =
+    captureProducerReviewStart >= 0 && reviewCandidateHelperStart > captureProducerReviewStart
+      ? recorder.slice(captureProducerReviewStart, reviewCandidateHelperStart)
+      : '';
+  const reviewedCandidateStart = recorder.indexOf('function reviewedCandidate(');
+  const genuinePromiseStart = recorder.indexOf(
+    '\nfunction genuinePromise(',
+    reviewedCandidateStart,
+  );
+  const reviewedCandidateSource =
+    reviewedCandidateStart >= 0 && genuinePromiseStart > reviewedCandidateStart
+      ? recorder.slice(reviewedCandidateStart, genuinePromiseStart)
+      : '';
+  const candidateGuardStart = recorder.indexOf('  if (\n', reviewedCandidateStart);
+  const candidateGuardEnd = recorder.indexOf('\n  }\n', candidateGuardStart);
+  const candidateGuard =
+    candidateGuardStart >= 0 &&
+    candidateGuardEnd > candidateGuardStart &&
+    candidateGuardEnd < genuinePromiseStart
+      ? recorder.slice(candidateGuardStart, candidateGuardEnd + '\n  }'.length)
+      : '';
+  const expectedCandidateGuard = [
+    'if (',
+    'record.producerVersion !== PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_PRODUCER_VERSION ||',
+    'record.use !== PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORD_CANDIDATE_USE ||',
+    'record.mayAuthorizeFinancialAction !== false ||',
+    'record.mayPersist !== false',
+    ') {',
+    'return fail();',
+    '}',
+  ].join('\n');
+  const singleRowStart = recorder.indexOf('\nfunction singleRow(', genuinePromiseStart);
+  const genuinePromiseSource =
+    genuinePromiseStart >= 0 && singleRowStart > genuinePromiseStart
+      ? recorder.slice(genuinePromiseStart, singleRowStart)
+      : '';
+  const receiptReviewStart = recorder.indexOf('\nfunction receiptFromRow(', singleRowStart);
+  const singleRowSource =
+    singleRowStart >= 0 && receiptReviewStart > singleRowStart
+      ? recorder.slice(singleRowStart, receiptReviewStart)
+      : '';
+
+  const recordStart = recorder.indexOf('async recordEvidence(');
+  const verifyStart = recorder.indexOf('\n  verifyReceipt(', recordStart);
+  const record =
+    recordStart >= 0 && verifyStart > recordStart ? recorder.slice(recordStart, verifyStart) : '';
+  const requestReviewAt = record.indexOf('const request = reviewedRecordRequest(requestInput);');
+  const firstReviewAt = record.indexOf('const firstReview = reviewCandidate(', requestReviewAt);
+  const firstIdentityAt = record.indexOf(
+    'if (firstReview !== request.producerCapability) return fail();',
+    firstReviewAt,
+  );
+  const firstAbortAt = record.indexOf(
+    'if (isAborted(request.signal)) return fail();',
+    firstIdentityAt,
+  );
+  const candidateReviewAt = record.indexOf(
+    'const candidate = reviewedCandidate(firstReview, request.producerRequest);',
+    firstAbortAt,
+  );
+  const queryAt = record.indexOf(
+    'const operation = Reflect.apply(this.#databaseQuery.method, this.#databaseQuery.receiver, [',
+    candidateReviewAt,
+  );
+  const genuinePromiseAt = record.indexOf(
+    'if (!genuinePromise(operation)) return fail();',
+    queryAt,
+  );
+  const awaitAt = record.indexOf('const result = await operation;', genuinePromiseAt);
+  const postQueryAbortAt = record.indexOf('if (isAborted(request.signal)) return fail();', awaitAt);
+  const secondReviewAt = record.indexOf('const secondReview = reviewCandidate(', postQueryAbortAt);
+  const secondIdentityAt = record.indexOf(
+    'if (secondReview !== firstReview || secondReview !== candidate.candidate) return fail();',
+    secondReviewAt,
+  );
+  const rowReviewAt = record.indexOf(
+    'const receipt = receiptFromRow(singleRow(result), candidate, request.producerRequest);',
+    secondIdentityAt,
+  );
+  const issueAt = record.indexOf('this.#issued.set(receipt, request.request);', rowReviewAt);
+  const returnAt = record.indexOf('return receipt;', issueAt);
+  const recorderCommentStart = recorder.indexOf('/**', receiptReviewStart);
+  const receiptReview =
+    receiptReviewStart >= 0 && recorderCommentStart > receiptReviewStart
+      ? recorder.slice(receiptReviewStart, recorderCommentStart)
+      : '';
+
+  return (
+    (recorderPort.match(/^[\t ]*import\b/gmu)?.length ?? 0) === 1 &&
+    recorderPortImports.length === 1 &&
+    recorderPortImports[0] === '../dormant-provider-position-chain-anchor-evidence.producer' &&
+    exactExecutableLineCount(
+      recorderPort,
+      "import type { ProduceProviderPositionChainAnchorEvidenceRequestV1 } from '../dormant-provider-position-chain-anchor-evidence.producer';",
+    ) === 1 &&
+    exactExecutableLineCount(
+      recorderPort,
+      'export const PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORDER_VERSION = 1 as const;',
+    ) === 1 &&
+    exactExecutableLineCount(
+      recorderPort,
+      "'DORMANT_PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORD_ONLY' as const;",
+    ) === 1 &&
+    exactExecutableLineCount(
+      recorderPort,
+      "'DORMANT_PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORD_RECEIPT_ONLY' as const;",
+    ) === 1 &&
+    exactExecutableLineCount(
+      recorderPort,
+      "export type ProviderPositionChainAnchorEvidenceRecordOutcome = 'RECORDED' | 'IDEMPOTENT_REPLAY';",
+    ) === 1 &&
+    trimmedExecutableLines(requestContract).join('\n') === expectedRequestContract &&
+    trimmedExecutableLines(receiptContract).join('\n') === expectedReceiptContract &&
+    trimmedExecutableLines(portContract).join('\n') === expectedPortContract &&
+    !forbiddenRecorderPortField.test(requestContract) &&
+    !/(?:@Injectable|@Module|@Controller)\s*\(|\bclass\s+/u.test(recorderPort) &&
+    (recorder.match(/^[\t ]*import\b/gmu)?.length ?? 0) === 6 &&
+    recorderImports.length === 6 &&
+    recorderImports[0] === 'node:util/types' &&
+    recorderImports[1] === 'pg' &&
+    recorderImports[2] === '../../infrastructure/database/postgres.service' &&
+    recorderImports[3] === '../domain/mainnet-provider-position-chain-assessment' &&
+    recorderImports[4] ===
+      '../application/dormant-provider-position-chain-anchor-evidence.producer' &&
+    recorderImports[5] ===
+      '../application/ports/provider-position-chain-anchor-evidence-recorder.port' &&
+    !forbiddenRecorderCapability.test(recorder) &&
+    recorder.split('record_provider_position_chain_anchor_evidence(').length - 1 === 1 &&
+    trimmedExecutableLines(recordRequestKeys).join('\n') === expectedRecordRequestKeys &&
+    trimmedExecutableLines(producerRequestKeys).join('\n') === expectedProducerRequestKeys &&
+    trimmedExecutableLines(candidateKeys).join('\n') === expectedCandidateKeys &&
+    trimmedExecutableLines(rowColumns).join('\n') === expectedRowColumns &&
+    trimmedExecutableLines(sql).join('\n') === expectedSql &&
+    trimmedExecutableLines(values).join('\n') === expectedValues &&
+    trimmedExecutableLines(recordRequestGuard).join('\n') === expectedRecordRequestGuard &&
+    trimmedExecutableLines(producerRequestGuard).join('\n') === expectedProducerRequestGuard &&
+    trimmedExecutableLines(candidateGuard).join('\n') === expectedCandidateGuard &&
+    exactExecutableLineCount(
+      frozenNullPrototypeSource,
+      'return Object.freeze(Object.assign(Object.create(null) as object, fields)) as Readonly<T>;',
+    ) === 1 &&
+    exactExecutableLineCount(exactDataRecordSource, "typeof value !== 'object' ||") === 1 &&
+    exactExecutableLineCount(exactDataRecordSource, 'value === null ||') === 1 &&
+    exactExecutableLineCount(exactDataRecordSource, 'Array.isArray(value) ||') === 1 &&
+    exactExecutableLineCount(exactDataRecordSource, 'isProxy(value) ||') === 1 &&
+    exactExecutableLineCount(
+      exactDataRecordSource,
+      '(requireFrozen && !Object.isFrozen(value))',
+    ) === 1 &&
+    exactExecutableLineCount(
+      exactDataRecordSource,
+      'const prototype = Object.getPrototypeOf(value) as unknown;',
+    ) === 1 &&
+    exactExecutableLineCount(
+      exactDataRecordSource,
+      '(requireNullPrototype && prototype !== null) ||',
+    ) === 1 &&
+    exactExecutableLineCount(
+      exactDataRecordSource,
+      '(!requireNullPrototype && prototype !== null && prototype !== Object.prototype)',
+    ) === 1 &&
+    exactExecutableLineCount(
+      exactDataRecordSource,
+      'const descriptors = Object.getOwnPropertyDescriptors(value) as unknown as PropertyDescriptorMap;',
+    ) === 1 &&
+    exactExecutableLineCount(
+      exactDataRecordSource,
+      'const actual = Reflect.ownKeys(descriptors);',
+    ) === 1 &&
+    exactExecutableLineCount(exactDataRecordSource, 'actual.length !== keys.length ||') === 1 &&
+    exactExecutableLineCount(
+      exactDataRecordSource,
+      "actual.some((key) => typeof key !== 'string' || !keys.includes(key))",
+    ) === 1 &&
+    exactExecutableLineCount(exactDataRecordSource, 'for (const key of keys) {') === 1 &&
+    exactExecutableLineCount(
+      exactDataRecordSource,
+      "if (!descriptor?.enumerable || !('value' in descriptor)) return fail();",
+    ) === 1 &&
+    exactExecutableLineCount(
+      recorder,
+      'const CANONICAL_PRODUCER_REVIEW = Object.getOwnPropertyDescriptor(',
+    ) === 1 &&
+    exactExecutableLineCount(
+      recorder,
+      'DormantProviderPositionChainAnchorEvidenceProducer.prototype,',
+    ) === 1 &&
+    exactExecutableLineCount(
+      recorder,
+      'DormantProviderPositionChainAnchorEvidenceProducer.prototype ||',
+    ) === 1 &&
+    exactExecutableLineCount(recorder, "'reviewCandidate',") === 1 &&
+    exactExecutableLineCount(captureProducerReview, 'Object.getPrototypeOf(value) !==') === 1 &&
+    exactExecutableLineCount(
+      captureProducerReview,
+      "Object.getOwnPropertyDescriptor(value, 'reviewCandidate') !== undefined",
+    ) === 1 &&
+    exactExecutableLineCount(
+      recorder,
+      'return Object.freeze({ receiver: value, method: CANONICAL_PRODUCER_REVIEW });',
+    ) === 1 &&
+    exactExecutableLineCount(
+      recorder,
+      "this.#databaseQuery = captureMethod<QueryWithCancellation>(postgres, 'queryWithCancellation');",
+    ) === 1 &&
+    exactExecutableLineCount(
+      captureMethodSource,
+      "(typeof value !== 'object' && typeof value !== 'function') ||",
+    ) === 1 &&
+    exactExecutableLineCount(captureMethodSource, 'value === null ||') === 1 &&
+    exactExecutableLineCount(captureMethodSource, 'isProxy(value)') === 1 &&
+    exactExecutableLineCount(captureMethodSource, 'let current: object | null = value;') === 1 &&
+    exactExecutableLineCount(captureMethodSource, 'if (isProxy(current)) return fail();') === 1 &&
+    exactExecutableLineCount(
+      captureMethodSource,
+      'const descriptor = Object.getOwnPropertyDescriptor(current, name);',
+    ) === 1 &&
+    exactExecutableLineCount(
+      captureMethodSource,
+      "if (!('value' in descriptor) || typeof descriptor.value !== 'function') return fail();",
+    ) === 1 &&
+    exactExecutableLineCount(
+      captureMethodSource,
+      'if (isProxy(descriptor.value)) return fail();',
+    ) === 1 &&
+    exactExecutableLineCount(
+      captureMethodSource,
+      'return Object.freeze({ receiver: value, method: descriptor.value as Method });',
+    ) === 1 &&
+    exactExecutableLineCount(captureMethodSource, 'current !== Object.prototype &&') === 1 &&
+    exactExecutableLineCount(captureMethodSource, 'current !== Function.prototype &&') === 1 &&
+    exactExecutableLineCount(
+      captureMethodSource,
+      'current = Object.getPrototypeOf(current) as object | null;',
+    ) === 1 &&
+    requestReviewAt >= 0 &&
+    firstReviewAt > requestReviewAt &&
+    firstIdentityAt > firstReviewAt &&
+    firstAbortAt > firstIdentityAt &&
+    candidateReviewAt > firstAbortAt &&
+    queryAt > candidateReviewAt &&
+    genuinePromiseAt > queryAt &&
+    awaitAt > genuinePromiseAt &&
+    postQueryAbortAt > awaitAt &&
+    secondReviewAt > postQueryAbortAt &&
+    secondIdentityAt > secondReviewAt &&
+    rowReviewAt > secondIdentityAt &&
+    issueAt > rowReviewAt &&
+    returnAt > issueAt &&
+    exactExecutableLineCount(record, 'request.producerCapability,') === 2 &&
+    exactExecutableLineCount(record, 'request.producerRequest.request,') === 2 &&
+    exactExecutableLineCount(record, 'candidate.values,') === 1 &&
+    exactExecutableLineCount(record, 'request.signal,') === 1 &&
+    exactExecutableLineCount(
+      record,
+      'const operation = Reflect.apply(this.#databaseQuery.method, this.#databaseQuery.receiver, [',
+    ) === 1 &&
+    exactExecutableLineCount(record, 'const result = await operation;') === 1 &&
+    !/\b(?:for|while)\s*\(|\bPromise\s*\.\s*(?:all|race)\s*\(|\bretry\b/iu.test(record) &&
+    exactExecutableLineCount(
+      recorder,
+      'const record = exactDataRecord(value, PRODUCER_REQUEST_KEYS, true, false);',
+    ) === 1 &&
+    exactExecutableLineCount(
+      recorder,
+      'const record = exactDataRecord(value, RECORD_REQUEST_KEYS, true, false);',
+    ) === 1 &&
+    !recorder.includes('MAX_DEADLINE_MILLISECONDS') &&
+    !/deadlineAt\.milliseconds\s*-\s*observedAt\.milliseconds/u.test(recorder) &&
+    exactExecutableLineCount(
+      recorder,
+      'if (signal !== producerRequest.signal || isAborted(signal)) return fail();',
+    ) === 1 &&
+    exactExecutableLineCount(
+      recorder,
+      'const arguments_ = exactDataArray(record.recordArguments, 23);',
+    ) === 1 &&
+    exactExecutableLineCount(
+      reviewedCandidateSource,
+      'sourceObservationId !== expectedObservationId ||',
+    ) === 1 &&
+    exactExecutableLineCount(
+      recorder,
+      '!sameAnchor(continuityFloor, request.continuityFloor) ||',
+    ) === 1 &&
+    exactExecutableLineCount(recorder, '!sameAnchor(chainAnchor, request.chainAnchor) ||') === 1 &&
+    exactExecutableLineCount(recorder, '!nonRegressing(chainAnchor, currentHead) ||') === 1 &&
+    exactExecutableLineCount(recorder, '!finalizedNotAhead(finalizedHead, currentHead) ||') === 1 &&
+    exactExecutableLineCount(
+      recorder,
+      'assessedAt.milliseconds >= request.deadlineAt.milliseconds ||',
+    ) === 1 &&
+    exactExecutableLineCount(
+      recorder,
+      'assessedAt.milliseconds >= approvalExpiresAt.milliseconds ||',
+    ) === 1 &&
+    exactExecutableLineCount(
+      recorder,
+      'primarySourceFamilyId === corroboratingSourceFamilyId ||',
+    ) === 1 &&
+    exactExecutableLineCount(recorder, 'primarySourceId === corroboratingSourceId ||') === 1 &&
+    exactExecutableLineCount(recorder, 'primaryKey >= corroboratingKey ||') === 1 &&
+    exactExecutableLineCount(recorder, '!selectedIsPairMember ||') === 1 &&
+    exactExecutableLineCount(
+      recorder,
+      'new Set([identityProofSha256, liveCapabilityProofSha256, lineageProofSha256]).size !== 3',
+    ) === 1 &&
+    exactExecutableLineCount(
+      recorder,
+      "if (row.record_outcome !== 'RECORDED' && row.record_outcome !== 'IDEMPOTENT_REPLAY') {",
+    ) === 1 &&
+    exactExecutableLineCount(genuinePromiseSource, "typeof value === 'object' &&") === 1 &&
+    exactExecutableLineCount(genuinePromiseSource, 'value !== null &&') === 1 &&
+    exactExecutableLineCount(genuinePromiseSource, '!isProxy(value) &&') === 1 &&
+    exactExecutableLineCount(
+      genuinePromiseSource,
+      'Object.getPrototypeOf(value) === Promise.prototype',
+    ) === 1 &&
+    exactExecutableLineCount(
+      singleRowSource,
+      "if (typeof value !== 'object' || value === null || isProxy(value)) return fail();",
+    ) === 1 &&
+    exactExecutableLineCount(
+      singleRowSource,
+      "const rowsDescriptor = Object.getOwnPropertyDescriptor(value, 'rows');",
+    ) === 1 &&
+    exactExecutableLineCount(
+      singleRowSource,
+      "if (!rowsDescriptor?.enumerable || !('value' in rowsDescriptor)) return fail();",
+    ) === 1 &&
+    exactExecutableLineCount(singleRowSource, 'const rows = rowsDescriptor.value as unknown;') ===
+      1 &&
+    exactExecutableLineCount(
+      singleRowSource,
+      'if (!Array.isArray(rows) || isProxy(rows) || Object.getPrototypeOf(rows) !== Array.prototype) {',
+    ) === 1 &&
+    exactExecutableLineCount(
+      singleRowSource,
+      'const descriptors = Object.getOwnPropertyDescriptors(rows) as unknown as PropertyDescriptorMap;',
+    ) === 1 &&
+    exactExecutableLineCount(singleRowSource, 'const keys = Reflect.ownKeys(descriptors);') === 1 &&
+    exactExecutableLineCount(singleRowSource, "descriptors['length']?.value !== 1 ||") === 1 &&
+    exactExecutableLineCount(singleRowSource, 'keys.length !== 2 ||') === 1 &&
+    exactExecutableLineCount(
+      singleRowSource,
+      "keys.some((key) => key !== '0' && key !== 'length') ||",
+    ) === 1 &&
+    exactExecutableLineCount(singleRowSource, "!descriptors['0']?.enumerable ||") === 1 &&
+    exactExecutableLineCount(singleRowSource, "!('value' in descriptors['0'])") === 1 &&
+    exactExecutableLineCount(
+      singleRowSource,
+      "return exactDataRecord(descriptors['0'].value, ROW_COLUMNS, false, false) as RecordRow;",
+    ) === 1 &&
+    exactExecutableLineCount(
+      recorder,
+      'const fingerprint = nonzeroSha256(row.recorded_evidence_fingerprint_sha256);',
+    ) === 1 &&
+    exactExecutableLineCount(
+      receiptReview,
+      'recordedAt.milliseconds < candidate.assessedAtMilliseconds ||',
+    ) === 1 &&
+    exactExecutableLineCount(
+      receiptReview,
+      'recordedAt.milliseconds >= producerRequest.deadlineAt.milliseconds ||',
+    ) === 1 &&
+    exactExecutableLineCount(
+      receiptReview,
+      'recordedAt.milliseconds >= candidate.sourcePairApprovalExpiresAtMilliseconds ||',
+    ) === 1 &&
+    exactExecutableLineCount(receiptReview, 'recordedAt.milliseconds >= currentExpiresAt ||') ===
+      1 &&
+    exactExecutableLineCount(receiptReview, 'recordedAt.milliseconds >= finalizedExpiresAt') ===
+      1 &&
+    exactExecutableLineCount(
+      recorder,
+      'const currentLifetime = candidate.networkId === ETHEREUM ? 60_000 : 15_000;',
+    ) === 1 &&
+    exactExecutableLineCount(
+      recorder,
+      'const finalizedLifetime = candidate.networkId === ETHEREUM ? 1_800_000 : 90_000;',
+    ) === 1 &&
+    exactExecutableLineCount(
+      recorder,
+      'export const PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORD_ERROR = Object.freeze(',
+    ) === 1 &&
+    exactExecutableLineCount(
+      recordErrorSource,
+      'class ProviderPositionChainAnchorEvidenceRecordError extends Error {',
+    ) === 1 &&
+    exactExecutableLineCount(
+      recordErrorSource,
+      "readonly code = 'PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORD_FAILED' as const;",
+    ) === 1 &&
+    exactExecutableLineCount(recordErrorSource, 'constructor() {') === 1 &&
+    exactExecutableLineCount(
+      recordErrorSource,
+      "super('Provider position chain-anchor evidence record failed');",
+    ) === 1 &&
+    exactExecutableLineCount(
+      recordErrorSource,
+      "this.name = 'ProviderPositionChainAnchorEvidenceRecordError';",
+    ) === 1 &&
+    exactExecutableLineCount(
+      recorder,
+      'throw PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORD_ERROR;',
+    ) === 1 &&
+    !/\bcause\b/u.test(recorder) &&
+    exactExecutableLineCount(receiptReview, 'return frozenNullPrototype({') === 1 &&
+    exactExecutableLineCount(
+      receiptReview,
+      'recorderVersion: PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORDER_VERSION,',
+    ) === 1 &&
+    exactExecutableLineCount(
+      receiptReview,
+      'use: PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORD_RECEIPT_USE,',
+    ) === 1 &&
+    exactExecutableLineCount(receiptReview, 'mayAuthorizeFinancialAction: false as const,') === 1 &&
+    exactExecutableLineCount(
+      recorder,
+      'readonly #issued = new WeakMap<object, RecordProviderPositionChainAnchorEvidenceRequestV1>();',
+    ) === 1 &&
+    !/readonly\s+#issued\s*=\s*new\s+Map\b/u.test(recorder) &&
+    exactExecutableLineCount(recorder, 'this.#issued.get(capability) === request') === 1 &&
+    recorder.includes(
+      'cannot roll back a write: atomic producer-deadline enforcement requires a',
+    ) &&
+    recorder.includes(
+      'future database-contract change before this dormant adapter may be activated.',
+    ) &&
+    [runtimeCompositionSource, moduleSource, indexSource, controllerSource].every(
+      (source) => !forbiddenFeatureSurface.test(source),
+    )
+  );
+}
+
 function hasDormantProviderPositionReadBoundaryContract(
   sources: ProviderPositionReadBoundaryArtifactSources,
 ): boolean {
@@ -2947,6 +3672,10 @@ function hasDormantProviderPositionReadBoundaryContract(
     sources.providerPositionChainAnchorEvidenceSourcePortSource.replace(/\r\n/gu, '\n');
   const chainAnchorEvidenceProducer =
     sources.providerPositionChainAnchorEvidenceProducerSource.replace(/\r\n/gu, '\n');
+  const chainAnchorEvidenceRecorderPort =
+    sources.providerPositionChainAnchorEvidenceRecorderPortSource.replace(/\r\n/gu, '\n');
+  const postgresChainAnchorEvidenceRecorder =
+    sources.providerPositionPostgresChainAnchorEvidenceRecorderSource.replace(/\r\n/gu, '\n');
   const postgresDurableAnchorReader =
     sources.providerPositionPostgresDurableChainAnchorReaderSource.replace(/\r\n/gu, '\n');
   const trustedAssessmentAssembler =
@@ -3005,6 +3734,7 @@ function hasDormantProviderPositionReadBoundaryContract(
     durableAnchorReaderPort,
     chainAnchorEvidenceSourcePort,
     chainAnchorEvidenceProducer,
+    chainAnchorEvidenceRecorderPort,
     postgresDurableAnchorReader,
     trustedAssessmentAssembler,
     coordinator,
@@ -3838,9 +4568,9 @@ function hasDormantProviderPositionReadBoundaryContract(
     coordinatorCanonicalSourceIdentity,
   );
   const forbiddenRuntimeIdentity =
-    /\b(?:MAINNET_PROVIDER_POSITION_READER|DormantProviderPositionAdmissionCoordinator|ProviderPositionTrustedChainAssessmentAssemblyPort|ProviderPositionDurableChainAnchorReaderPort|ProviderPositionChainAnchorEvidenceSourcePort|DormantProviderPositionChainAnchorEvidenceProducer|DormantProviderPositionTrustedChainAssessmentAssembler|PostgresProviderPositionDurableChainAnchorReader|NodeProviderPositionAdmissionDeadlineRunner|createDormantProviderPositionAdmissionRuntimeResource|DormantProviderPositionAdmissionRuntimeResource|ProviderPositionAdmissionRuntimeBoundsError|createDormantProviderPositionAdmissionRuntimeComposition|DormantProviderPositionAdmissionRuntimeComposition|ProviderPositionAdmissionRuntimeCompositionError|PROVIDER_POSITION_TRUSTED_CHAIN_ASSESSMENT_ASSEMBLY_USE|PROVIDER_POSITION_DURABLE_CHAIN_ANCHOR_READER_VERSION|PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_SOURCE_PAIR_REGISTRY_V1|PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_PRODUCER_VERSION)\b/u;
+    /\b(?:MAINNET_PROVIDER_POSITION_READER|DormantProviderPositionAdmissionCoordinator|ProviderPositionTrustedChainAssessmentAssemblyPort|ProviderPositionDurableChainAnchorReaderPort|ProviderPositionChainAnchorEvidenceSourcePort|DormantProviderPositionChainAnchorEvidenceProducer|ProviderPositionChainAnchorEvidenceRecorderPort|PostgresProviderPositionChainAnchorEvidenceRecorder|DormantProviderPositionTrustedChainAssessmentAssembler|PostgresProviderPositionDurableChainAnchorReader|NodeProviderPositionAdmissionDeadlineRunner|createDormantProviderPositionAdmissionRuntimeResource|DormantProviderPositionAdmissionRuntimeResource|ProviderPositionAdmissionRuntimeBoundsError|createDormantProviderPositionAdmissionRuntimeComposition|DormantProviderPositionAdmissionRuntimeComposition|ProviderPositionAdmissionRuntimeCompositionError|PROVIDER_POSITION_TRUSTED_CHAIN_ASSESSMENT_ASSEMBLY_USE|PROVIDER_POSITION_DURABLE_CHAIN_ANCHOR_READER_VERSION|PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_SOURCE_PAIR_REGISTRY_V1|PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_PRODUCER_VERSION|PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORDER_VERSION)\b/u;
   const forbiddenBarrelImplementation =
-    /(?:DormantProviderPositionAdmissionCoordinator|ProviderPositionTrustedChainAssessmentAssemblyPort|ProviderPositionDurableChainAnchorReaderPort|ProviderPositionChainAnchorEvidenceSourcePort|DormantProviderPositionChainAnchorEvidenceProducer|DormantProviderPositionTrustedChainAssessmentAssembler|PostgresProviderPositionDurableChainAnchorReader|NodeProviderPositionAdmissionDeadlineRunner|createDormantProviderPositionAdmissionRuntimeResource|createDormantProviderPositionAdmissionRuntimeComposition|provider-position-admission\.coordinator|provider-position-trusted-chain-assessment-assembly\.port|provider-position-durable-chain-anchor-reader\.port|provider-position-chain-anchor-evidence-source\.port|dormant-provider-position-chain-anchor-evidence\.producer|dormant-provider-position-trusted-chain-assessment\.assembler|postgres-provider-position-durable-chain-anchor\.reader|node-provider-position-admission-deadline\.runner|provider-position-admission-runtime-bounds|provider-position-admission-runtime\.composition)/u;
+    /(?:DormantProviderPositionAdmissionCoordinator|ProviderPositionTrustedChainAssessmentAssemblyPort|ProviderPositionDurableChainAnchorReaderPort|ProviderPositionChainAnchorEvidenceSourcePort|DormantProviderPositionChainAnchorEvidenceProducer|ProviderPositionChainAnchorEvidenceRecorderPort|PostgresProviderPositionChainAnchorEvidenceRecorder|DormantProviderPositionTrustedChainAssessmentAssembler|PostgresProviderPositionDurableChainAnchorReader|NodeProviderPositionAdmissionDeadlineRunner|createDormantProviderPositionAdmissionRuntimeResource|createDormantProviderPositionAdmissionRuntimeComposition|provider-position-admission\.coordinator|provider-position-trusted-chain-assessment-assembly\.port|provider-position-durable-chain-anchor-reader\.port|provider-position-chain-anchor-evidence-source\.port|provider-position-chain-anchor-evidence-recorder\.port|dormant-provider-position-chain-anchor-evidence\.producer|postgres-provider-position-chain-anchor-evidence\.recorder|dormant-provider-position-trusted-chain-assessment\.assembler|postgres-provider-position-durable-chain-anchor\.reader|node-provider-position-admission-deadline\.runner|provider-position-admission-runtime-bounds|provider-position-admission-runtime\.composition)/u;
   const forbiddenCoordinatorRuntimeBoundsConsumption =
     /(?:createDormantProviderPositionAdmissionRuntimeResource|provider-position-admission-runtime-bounds)/u;
 
@@ -3852,6 +4582,14 @@ function hasDormantProviderPositionReadBoundaryContract(
     hasDormantProviderPositionChainAnchorEvidenceProducerContract(
       chainAnchorEvidenceSourcePort,
       chainAnchorEvidenceProducer,
+      runtimeComposition,
+      moduleSource,
+      indexSource,
+      controller,
+    ) &&
+    hasDormantProviderPositionChainAnchorEvidenceRecorderContract(
+      chainAnchorEvidenceRecorderPort,
+      postgresChainAnchorEvidenceRecorder,
       runtimeComposition,
       moduleSource,
       indexSource,
@@ -10617,6 +11355,20 @@ export function loadRepositoryProductionPreflightInput(
         resolve(
           repositoryRoot,
           'apps/api/src/mainnet-platforms/application/dormant-provider-position-chain-anchor-evidence.producer.ts',
+        ),
+        'utf8',
+      ),
+      providerPositionChainAnchorEvidenceRecorderPortSource: readFileSync(
+        resolve(
+          repositoryRoot,
+          'apps/api/src/mainnet-platforms/application/ports/provider-position-chain-anchor-evidence-recorder.port.ts',
+        ),
+        'utf8',
+      ),
+      providerPositionPostgresChainAnchorEvidenceRecorderSource: readFileSync(
+        resolve(
+          repositoryRoot,
+          'apps/api/src/mainnet-platforms/infrastructure/postgres-provider-position-chain-anchor-evidence.recorder.ts',
         ),
         'utf8',
       ),

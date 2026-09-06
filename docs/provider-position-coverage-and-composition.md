@@ -9,8 +9,10 @@ bypass. None of this graph is registered in Nest or reachable through
 HTTP/RPC/API runtime wiring. Migration `0029` supplies the reader's dormant
 database evidence boundary. An authority-free two-source candidate producer now
 exists behind an exact source port, but its checked-in mainnet registry is empty
-and `NOT_APPROVED`; no concrete source, owner-authorized writer, populated
-evidence, runtime activation, deployment, or live proof exists.
+and `NOT_APPROVED`. An exact recorder port and concrete PostgreSQL recorder also
+exist, but they are unregistered and ungranted; no concrete source,
+owner-authorized workload/principal/credential, populated evidence, runtime
+activation, deployment, or live proof exists.
 
 ## Exact coverage (version 1)
 
@@ -58,9 +60,9 @@ The offline production preflight now pins this reader together with the
 durable-anchor reader port, concrete PostgreSQL reader, dormant
 trusted-chain-assessment assembler, exact mainnet launch-network policy,
 coverage, observation, assessment, observation-policy, trusted-assembly,
-admission, source port, two-source producer, module, barrel, and controller
-sources together with migration `0029` and the migration index as one selected
-twenty-nine-file dormant
+admission, source port, two-source producer, recorder port, concrete PostgreSQL
+recorder, module, barrel, and controller sources together with migration `0029`
+and the migration index as one selected thirty-one-file dormant
 critical-source slice. A passing local source inspection does not prove
 recursive dependency closure, whole-application registration absence, populated
 or deployed evidence, or live behavior. It does pin the private construction
@@ -95,10 +97,30 @@ runtime capability. Pair agreement on finalized heads does not prove the
 selected candidate anchor itself is finalized: the artifact remains
 `PROVISIONAL`, `DISPLAY_ONLY`, and `mayAuthorizeFinancialAction: false` until a
 separate candidate-finalization gate passes. There is still no live source implementation,
-owner-authorized evidence writer, populated evidence claim, runtime registration
-or activation, deployment, or live evidence. Consequently all three
+owner-authorized recorder workload/principal/credential/grant, populated
+evidence claim, runtime registration or activation, deployment, or live
+evidence. Consequently all three
 provider-position registration blockers remain
 `MISSING`, and the live-provider count remains zero.
+
+The concrete recorder authenticates the exact producer capability both before
+and after one cancellable PostgreSQL call, uses the unchanged abort signal, and
+maps the candidate to migration `0029`'s exact 23 SQL arguments. It rejects
+non-native promises, extra or malformed rows, noncanonical record times, expired
+pair approval, and stale Ethereum/Solana current or finalized heads. Its frozen
+null-prototype receipt is bound to the exact request in a private `WeakMap`; it
+has no generic-query fallback, retry loop, registration, runtime grant, or
+financial authority. The producer's 30-second bound is measured from its private
+`evaluatedAt`, not from the recorder-visible `observedAt`, so the recorder relies
+on authentic producer review rather than inventing a deadline-minus-observation
+check.
+
+The current database function cannot atomically enforce that private producer
+deadline. A late returned database timestamp is rejected after the write may have
+committed, and a rejected query or interrupted connection can leave an unknown
+commit outcome. Function-level idempotent replay does not supply automatic retry
+or reconciliation. Database-atomic deadline enforcement plus an explicit durable
+unknown-outcome reconciliation design remain activation prerequisites.
 
 ## Conservative composition (version 1)
 
