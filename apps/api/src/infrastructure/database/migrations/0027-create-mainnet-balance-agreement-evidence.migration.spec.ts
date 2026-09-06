@@ -103,6 +103,10 @@ describe('migration 0027 mainnet balance agreement evidence', () => {
     );
     expect(up).toContain("source_point ->> 'retrievedAt' <> later_retrieved_at");
     expect(up).toContain('GREATEST(primary_retrieved_at, corroborating_retrieved_at)');
+    expect(up).toContain('requested_recorded_at - primary_retrieved_at > (CASE');
+    expect(up).toContain('requested_recorded_at - corroborating_retrieved_at > (CASE');
+    expect(up.match(/ELSE interval '15 seconds'\s+END\)/gu)).toHaveLength(2);
+    expect(up).not.toMatch(/retrieved_at > CASE/u);
   });
 
   it('round-trips every timestamp and rejects zero identities and fingerprints', () => {
@@ -136,7 +140,7 @@ describe('migration 0027 mainnet balance agreement evidence', () => {
       'constraint_record.confkey = ARRAY[1,2,4,5]::smallint[]',
     );
     expect(createMainnetBalanceAgreementEvidenceMigrationV0027.verifySql).toContain(
-      "constraint_record.conmatchtype = 's'",
+      "constraint_record.confmatchtype = 's'",
     );
     expect(createMainnetBalanceAgreementEvidenceMigrationV0027.verifySql).toContain(
       'NOT constraint_record.condeferrable',
@@ -144,8 +148,19 @@ describe('migration 0027 mainnet balance agreement evidence', () => {
     expect(createMainnetBalanceAgreementEvidenceMigrationV0027.verifySql).toContain(
       'NOT constraint_record.condeferred',
     );
-    expect(createMainnetBalanceAgreementEvidenceMigrationV0027.verifySql).toContain(
-      'NOT constraint_record.connoinherit',
+    expect(createMainnetBalanceAgreementEvidenceMigrationV0027.verifySql).toMatch(
+      /WHEN 'balance_sync_financial_agreement_evidence_pkey' THEN constraint_record\.contype = 'p'\s+AND constraint_record\.connoinherit/u,
+    );
+    expect(createMainnetBalanceAgreementEvidenceMigrationV0027.verifySql).toMatch(
+      /WHEN 'balance_sync_financial_agreement_wallet_scope_fk'\s+THEN constraint_record\.contype = 'f'\s+AND constraint_record\.connoinherit/u,
+    );
+    expect(
+      (createMainnetBalanceAgreementEvidenceMigrationV0027.verifySql ?? '').match(
+        /THEN constraint_record\.contype = 'c'\s+AND NOT constraint_record\.connoinherit/gu,
+      ),
+    ).toHaveLength(4);
+    expect(createMainnetBalanceAgreementEvidenceMigrationV0027.verifySql).not.toContain(
+      'AND NOT constraint_record.condeferred\n          AND NOT constraint_record.connoinherit',
     );
     expect(up).toContain('approval_expires_at <= requested_recorded_at');
     expect(up).toContain("pg_catalog.date_trunc('milliseconds', pg_catalog.clock_timestamp())");

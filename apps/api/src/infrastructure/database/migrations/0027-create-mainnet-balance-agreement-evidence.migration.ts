@@ -416,14 +416,14 @@ const VALIDATE_ENVELOPE_BODY = `
         OR approval_expires_at <= requested_recorded_at
         OR primary_retrieved_at >= approval_expires_at
         OR corroborating_retrieved_at >= approval_expires_at
-        OR requested_recorded_at - primary_retrieved_at > CASE
+        OR requested_recorded_at - primary_retrieved_at > (CASE
           WHEN network_id = '${ETHEREUM}' THEN interval '60 seconds'
           ELSE interval '15 seconds'
-        END
-        OR requested_recorded_at - corroborating_retrieved_at > CASE
+        END)
+        OR requested_recorded_at - corroborating_retrieved_at > (CASE
           WHEN network_id = '${ETHEREUM}' THEN interval '60 seconds'
           ELSE interval '15 seconds'
-        END
+        END)
       THEN
         RETURN false;
       END IF;
@@ -1081,20 +1081,22 @@ function createVerifierSql(names: DatabasePrincipalNames, cumulative: boolean): 
         AND pg_catalog.bool_and(
           NOT constraint_record.condeferrable
           AND NOT constraint_record.condeferred
-          AND NOT constraint_record.connoinherit
         )
         AND pg_catalog.bool_and(CASE constraint_record.conname
           WHEN '${TABLE}_pkey' THEN constraint_record.contype = 'p'
+            AND constraint_record.connoinherit
             AND constraint_record.conkey = ARRAY[1]::smallint[]
           WHEN 'balance_sync_financial_agreement_wallet_scope_fk'
             THEN constraint_record.contype = 'f'
+              AND constraint_record.connoinherit
               AND constraint_record.confrelid = pg_catalog.to_regclass('registered_wallets')
               AND constraint_record.conkey = ARRAY[7,6,8,9]::smallint[]
               AND constraint_record.confkey = ARRAY[1,2,4,5]::smallint[]
-              AND constraint_record.conmatchtype = 's'
+              AND constraint_record.confmatchtype = 's'
               AND constraint_record.confupdtype = 'r' AND constraint_record.confdeltype = 'r'
           WHEN 'balance_sync_financial_agreement_static_state_check'
             THEN constraint_record.contype = 'c'
+              AND NOT constraint_record.connoinherit
               AND pg_catalog.strpos(
                 pg_catalog.pg_get_constraintdef(constraint_record.oid),
                 'may_authorize_financial_action = false'
@@ -1105,6 +1107,7 @@ function createVerifierSql(names: DatabasePrincipalNames, cumulative: boolean): 
               ) > 0
           WHEN 'balance_sync_financial_agreement_network_check'
             THEN constraint_record.contype = 'c'
+              AND NOT constraint_record.connoinherit
               AND pg_catalog.strpos(
                 pg_catalog.pg_get_constraintdef(constraint_record.oid), '${ETHEREUM}'
               ) > 0
@@ -1113,12 +1116,14 @@ function createVerifierSql(names: DatabasePrincipalNames, cumulative: boolean): 
               ) > 0
           WHEN 'balance_sync_financial_agreement_envelope_check'
             THEN constraint_record.contype = 'c'
+              AND NOT constraint_record.connoinherit
               AND pg_catalog.strpos(
                 pg_catalog.pg_get_constraintdef(constraint_record.oid),
                 'mainnet_balance_financial_agreement_envelope_valid'
               ) > 0
           WHEN 'balance_sync_financial_agreement_column_binding_check'
             THEN constraint_record.contype = 'c'
+              AND NOT constraint_record.connoinherit
               AND pg_catalog.strpos(
                 pg_catalog.pg_get_constraintdef(constraint_record.oid),
                 'agreement_fingerprint_sha256'
