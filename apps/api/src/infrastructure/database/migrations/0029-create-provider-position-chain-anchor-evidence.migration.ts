@@ -738,14 +738,14 @@ const RECORD_EVIDENCE_BODY = `
       );
       IF requested_assessed_at > database_recorded_at
         OR database_recorded_at >= requested_source_pair_approval_expires_at
-        OR database_recorded_at >= requested_current_head_advanced_at + CASE
+        OR database_recorded_at >= requested_current_head_advanced_at + (CASE
           WHEN requested_network_id = '${ETHEREUM}' THEN interval '60 seconds'
           ELSE interval '15 seconds'
-        END
-        OR database_recorded_at >= requested_finalized_head_advanced_at + CASE
+        END)
+        OR database_recorded_at >= requested_finalized_head_advanced_at + (CASE
           WHEN requested_network_id = '${ETHEREUM}' THEN interval '1800 seconds'
           ELSE interval '90 seconds'
-        END
+        END)
       THEN
         RAISE EXCEPTION 'provider position chain anchor evidence is not current'
           USING ERRCODE = '22023';
@@ -1135,14 +1135,14 @@ const READ_EVIDENCE_BODY = `
       database_read_at := pg_catalog.date_trunc('milliseconds', pg_catalog.clock_timestamp());
       IF database_read_at >= requested_deadline_at
         OR database_read_at >= selected_evidence.source_pair_approval_expires_at
-        OR database_read_at >= selected_evidence.current_head_advanced_at + CASE
+        OR database_read_at >= selected_evidence.current_head_advanced_at + (CASE
           WHEN requested_network_id = '${ETHEREUM}' THEN interval '60 seconds'
           ELSE interval '15 seconds'
-        END
-        OR database_read_at >= selected_evidence.finalized_head_advanced_at + CASE
+        END)
+        OR database_read_at >= selected_evidence.finalized_head_advanced_at + (CASE
           WHEN requested_network_id = '${ETHEREUM}' THEN interval '1800 seconds'
           ELSE interval '90 seconds'
-        END
+        END)
       THEN
         RETURN;
       END IF;
@@ -1162,14 +1162,14 @@ const READ_EVIDENCE_BODY = `
       database_read_at := pg_catalog.date_trunc('milliseconds', pg_catalog.clock_timestamp());
       IF database_read_at >= requested_deadline_at
         OR database_read_at >= selected_evidence.source_pair_approval_expires_at
-        OR database_read_at >= selected_evidence.current_head_advanced_at + CASE
+        OR database_read_at >= selected_evidence.current_head_advanced_at + (CASE
           WHEN requested_network_id = '${ETHEREUM}' THEN interval '60 seconds'
           ELSE interval '15 seconds'
-        END
-        OR database_read_at >= selected_evidence.finalized_head_advanced_at + CASE
+        END)
+        OR database_read_at >= selected_evidence.finalized_head_advanced_at + (CASE
           WHEN requested_network_id = '${ETHEREUM}' THEN interval '1800 seconds'
           ELSE interval '90 seconds'
-        END
+        END)
       THEN
         RETURN;
       END IF;
@@ -1782,13 +1782,13 @@ function createVerifierSql(names: BalanceConsumerPrincipalNames, cumulative: boo
         AND pg_catalog.bool_and(
           NOT constraint_state.condeferrable
           AND NOT constraint_state.condeferred
-          AND NOT constraint_state.connoinherit
           AND constraint_state.conislocal
           AND constraint_state.coninhcount = 0
         )
         AND pg_catalog.bool_and(CASE constraint_state.conname
           WHEN '${EVIDENCE_TABLE}_pkey' THEN
             constraint_state.contype = 'p'
+              AND constraint_state.connoinherit
               AND constraint_state.conrelid = pg_catalog.to_regclass('${EVIDENCE_TABLE}')
               AND constraint_state.conkey = ARRAY[1]::smallint[]
               AND EXISTS (
@@ -1803,6 +1803,7 @@ function createVerifierSql(names: BalanceConsumerPrincipalNames, cumulative: boo
               )
           WHEN 'provider_position_chain_anchor_read_binding_unique' THEN
             constraint_state.contype = 'u'
+              AND constraint_state.connoinherit
               AND constraint_state.conrelid = pg_catalog.to_regclass('${EVIDENCE_TABLE}')
               AND constraint_state.conkey = ARRAY[2]::smallint[]
               AND EXISTS (
@@ -1817,6 +1818,7 @@ function createVerifierSql(names: BalanceConsumerPrincipalNames, cumulative: boo
               )
           WHEN 'provider_position_chain_anchor_evidence_valid_check' THEN
             constraint_state.contype = 'c'
+              AND NOT constraint_state.connoinherit
               AND constraint_state.conrelid = pg_catalog.to_regclass('${EVIDENCE_TABLE}')
               AND constraint_state.conkey = ARRAY[
                 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,
@@ -1841,6 +1843,7 @@ function createVerifierSql(names: BalanceConsumerPrincipalNames, cumulative: boo
               )
           WHEN '${CONTROL_TABLE}_pkey' THEN
             constraint_state.contype = 'p'
+              AND constraint_state.connoinherit
               AND constraint_state.conrelid = pg_catalog.to_regclass('${CONTROL_TABLE}')
               AND constraint_state.conkey = ARRAY[1]::smallint[]
               AND EXISTS (
@@ -1855,6 +1858,7 @@ function createVerifierSql(names: BalanceConsumerPrincipalNames, cumulative: boo
               )
           WHEN 'provider_position_chain_anchor_control_evidence_fk' THEN
             constraint_state.contype = 'f'
+              AND constraint_state.connoinherit
               AND constraint_state.conrelid = pg_catalog.to_regclass('${CONTROL_TABLE}')
               AND constraint_state.confrelid = pg_catalog.to_regclass('${EVIDENCE_TABLE}')
               AND constraint_state.conkey = ARRAY[4]::smallint[]
@@ -1864,6 +1868,7 @@ function createVerifierSql(names: BalanceConsumerPrincipalNames, cumulative: boo
               AND constraint_state.confdeltype = 'r'
           WHEN 'provider_position_chain_anchor_control_valid_check' THEN
             constraint_state.contype = 'c'
+              AND NOT constraint_state.connoinherit
               AND constraint_state.conrelid = pg_catalog.to_regclass('${CONTROL_TABLE}')
               AND constraint_state.conkey = ARRAY[1,2,3,4,5,6,7,8]::smallint[]
               AND pg_catalog.regexp_replace(

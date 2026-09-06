@@ -301,6 +301,54 @@ describe('migration 0029 provider position chain anchor evidence', () => {
     expect(verifier).toContain(`pg_catalog.to_regprocedure('${readIdentity}')`);
   });
 
+  it('pins PostgreSQL 16 inheritance flags to each constraint kind', () => {
+    const verifier = createProviderPositionChainAnchorEvidenceMigrationV0029.verifySql ?? '';
+    const cases = [
+      ['provider_position_chain_anchor_evidence_pkey', 'p', true],
+      ['provider_position_chain_anchor_read_binding_unique', 'u', true],
+      ['provider_position_chain_anchor_evidence_valid_check', 'c', false],
+      ['provider_position_chain_anchor_control_events_pkey', 'p', true],
+      ['provider_position_chain_anchor_control_evidence_fk', 'f', true],
+      ['provider_position_chain_anchor_control_valid_check', 'c', false],
+    ] as const;
+
+    expect(verifier).toContain(
+      'NOT constraint_state.condeferred\n          AND constraint_state.conislocal',
+    );
+    expect(verifier).not.toContain(
+      'NOT constraint_state.condeferred\n          AND NOT constraint_state.connoinherit\n          AND constraint_state.conislocal',
+    );
+    for (const [index, [name, type, noInherit]] of cases.entries()) {
+      const branch = between(
+        verifier,
+        `WHEN '${name}' THEN`,
+        index + 1 < cases.length ? `WHEN '${cases[index + 1]?.[0]}' THEN` : 'ELSE false',
+      );
+      expect(branch).toContain(`constraint_state.contype = '${type}'`);
+      expect(branch).toContain(`${noInherit ? 'AND' : 'AND NOT'} constraint_state.connoinherit`);
+      expect(branch).not.toContain(
+        `${noInherit ? 'AND NOT' : 'AND'} constraint_state.connoinherit`,
+      );
+    }
+    expect(count(verifier, 'AND constraint_state.connoinherit')).toBe(4);
+    expect(count(verifier, 'AND NOT constraint_state.connoinherit')).toBe(2);
+  });
+
+  it('parenthesizes every CASE interval operand in PL/pgSQL freshness guards', () => {
+    const up = sql(createProviderPositionChainAnchorEvidenceMigrationV0029.upSql);
+
+    expect(up).toContain('database_recorded_at >= requested_current_head_advanced_at + (CASE');
+    expect(up).toContain('database_recorded_at >= requested_finalized_head_advanced_at + (CASE');
+    expect(
+      count(up, 'database_read_at >= selected_evidence.current_head_advanced_at + (CASE'),
+    ).toBe(2);
+    expect(
+      count(up, 'database_read_at >= selected_evidence.finalized_head_advanced_at + (CASE'),
+    ).toBe(2);
+    expect(up.match(/\+ \(CASE[\s\S]*?END\)/gu)).toHaveLength(6);
+    expect(up).not.toMatch(/(?:database_recorded_at|database_read_at) >= [^\n]+ \+ CASE/u);
+  });
+
   it('shares DDL with isolated schemas but keeps cluster verification isolated', () => {
     expect(createProviderPositionChainAnchorEvidenceMigrationV0029.upSql).toEqual(
       createProviderPositionChainAnchorEvidenceTestSchemaMigrationV0029.upSql,
