@@ -13,6 +13,7 @@ import {
   inspectBalanceConsumerDeploymentArtifacts,
   inspectDatabaseMasterDeploymentTemplate,
   inspectProductionInfrastructureDeploymentArtifacts,
+  inspectProviderPositionReadBoundaryArtifacts,
   inspectRedisOperatorDeploymentTemplates,
   loadRepositoryProductionPreflightInput,
   parseProductionPreflightArguments,
@@ -20,6 +21,7 @@ import {
   productionPreflightCliErrorCode,
   productionPreflightExitCode,
   type BalanceConsumerArtifactSources,
+  type ProviderPositionReadBoundaryArtifactSources,
   type ProductionPreflightBlockerId,
   type ProductionInfrastructureArtifactSources,
   type ProductionPreflightInput,
@@ -405,8 +407,74 @@ const BALANCE_CONSUMER_ARTIFACTS = Object.freeze({
     'utf8',
   ),
 } satisfies BalanceConsumerArtifactSources);
+const PROVIDER_POSITION_READ_ARTIFACTS = Object.freeze({
+  providerPositionReaderPortSource: readFileSync(
+    resolve(
+      __dirname,
+      '../apps/api/src/mainnet-platforms/application/ports/mainnet-provider-position-reader.port.ts',
+    ),
+    'utf8',
+  ),
+  providerPositionTrustedAssemblyPortSource: readFileSync(
+    resolve(
+      __dirname,
+      '../apps/api/src/mainnet-platforms/application/ports/provider-position-trusted-chain-assessment-assembly.port.ts',
+    ),
+    'utf8',
+  ),
+  providerPositionAdmissionCoordinatorSource: readFileSync(
+    resolve(
+      __dirname,
+      '../apps/api/src/mainnet-platforms/application/provider-position-admission.coordinator.ts',
+    ),
+    'utf8',
+  ),
+  providerPositionCoverageSource: readFileSync(
+    resolve(
+      __dirname,
+      '../apps/api/src/mainnet-platforms/domain/mainnet-provider-position-coverage.ts',
+    ),
+    'utf8',
+  ),
+  providerPositionObservationSource: readFileSync(
+    resolve(
+      __dirname,
+      '../apps/api/src/mainnet-platforms/domain/mainnet-provider-position-observation.ts',
+    ),
+    'utf8',
+  ),
+  providerPositionChainAssessmentSource: readFileSync(
+    resolve(
+      __dirname,
+      '../apps/api/src/mainnet-platforms/domain/mainnet-provider-position-chain-assessment.ts',
+    ),
+    'utf8',
+  ),
+  providerPositionObservationPolicySource: readFileSync(
+    resolve(
+      __dirname,
+      '../apps/api/src/mainnet-platforms/domain/mainnet-provider-position-observation-policy.ts',
+    ),
+    'utf8',
+  ),
+  mainnetPlatformsModuleSource: readFileSync(
+    resolve(__dirname, '../apps/api/src/mainnet-platforms/mainnet-platforms.module.ts'),
+    'utf8',
+  ),
+  mainnetPlatformsIndexSource: readFileSync(
+    resolve(__dirname, '../apps/api/src/mainnet-platforms/index.ts'),
+    'utf8',
+  ),
+  mainnetPlatformsControllerSource: readFileSync(
+    resolve(__dirname, '../apps/api/src/mainnet-platforms/http/mainnet-platforms.controller.ts'),
+    'utf8',
+  ),
+} satisfies ProviderPositionReadBoundaryArtifactSources);
 const VERIFIED_BALANCE_CONSUMER_DEPLOYMENT = inspectBalanceConsumerDeploymentArtifacts(
   BALANCE_CONSUMER_ARTIFACTS,
+);
+const VERIFIED_PROVIDER_POSITION_READ_BOUNDARY = inspectProviderPositionReadBoundaryArtifacts(
+  PROVIDER_POSITION_READ_ARTIFACTS,
 );
 const EXPECTED_DORMANT_BALANCE_CONSUMER_DEPLOYMENT = Object.freeze({
   inspected: true,
@@ -426,6 +494,22 @@ const EXPECTED_DORMANT_BALANCE_CONSUMER_BLOCKERS = Object.freeze([
   'BALANCE_CONSUMER_DATABASE_CAPABILITY_NOT_ENABLED',
   'BALANCE_CONSUMER_DEPLOYED_EVIDENCE_MISSING',
 ] satisfies readonly ProductionPreflightBlockerId[]);
+const EXPECTED_DORMANT_PROVIDER_POSITION_READ_BOUNDARY = Object.freeze({
+  inspected: true,
+  contractValid: true,
+  readerFeatureRegistration: 'MISSING',
+  trustedAssessmentFeatureRegistration: 'MISSING',
+} as const);
+const EXPECTED_DORMANT_PROVIDER_POSITION_READ_BOUNDARY_BLOCKERS = Object.freeze([
+  'PROVIDER_POSITION_READER_FEATURE_REGISTRATION_MISSING',
+  'PROVIDER_POSITION_TRUSTED_ASSESSMENT_FEATURE_REGISTRATION_MISSING',
+] satisfies readonly ProductionPreflightBlockerId[]);
+const INVALID_PROVIDER_POSITION_READ_BOUNDARY = Object.freeze({
+  inspected: true,
+  contractValid: false,
+  readerFeatureRegistration: 'INVALID',
+  trustedAssessmentFeatureRegistration: 'INVALID',
+} as const);
 const PREFLIGHT_SCRIPT_PATH = resolve(__dirname, 'production-go-live-preflight.ts');
 const RDS_MANAGED_DATABASE_TEMPLATE = APPLICATION_BASELINE;
 const VERIFIED_DATABASE_MASTER_DEPLOYMENT = inspectDatabaseMasterDeploymentTemplate(
@@ -564,6 +648,7 @@ function completeInput(directory: unknown): ProductionPreflightInput {
   return {
     productionInfrastructureDeployment: VERIFIED_PRODUCTION_INFRASTRUCTURE_DEPLOYMENT,
     balanceConsumerDeployment: VERIFIED_BALANCE_CONSUMER_DEPLOYMENT,
+    providerPositionReadBoundary: VERIFIED_PROVIDER_POSITION_READ_BOUNDARY,
     authentication: {
       inspected: true,
       syntaxValid: true,
@@ -693,6 +778,10 @@ test('current repository is a bootstrap blocker audit and exits nonzero for both
     environmentContract: 'NON_PRODUCTION_ONLY',
   });
   assert.deepEqual(input.balanceConsumerDeployment, EXPECTED_DORMANT_BALANCE_CONSUMER_DEPLOYMENT);
+  assert.deepEqual(
+    input.providerPositionReadBoundary,
+    EXPECTED_DORMANT_PROVIDER_POSITION_READ_BOUNDARY,
+  );
   assert.deepEqual(input.databaseMasterDeployment, { inspected: true, syntaxValid: true });
   assert.equal(input.rdsMasterLifecycleEvidenceAccepted, false);
   assert.equal(readOnly.selectedTargetReadiness, 'BLOCKED');
@@ -722,6 +811,15 @@ test('current repository is a bootstrap blocker audit and exits nonzero for both
       localValidation: 'PASS',
       launchReadiness: 'BLOCKED',
       blockerIds: EXPECTED_DORMANT_BALANCE_CONSUMER_BLOCKERS,
+    },
+  );
+  assert.deepEqual(
+    readOnly.checks.find(({ id }) => id === 'PROVIDER_POSITION_READ_BOUNDARY'),
+    {
+      id: 'PROVIDER_POSITION_READ_BOUNDARY',
+      localValidation: 'PASS',
+      launchReadiness: 'BLOCKED',
+      blockerIds: EXPECTED_DORMANT_PROVIDER_POSITION_READ_BOUNDARY_BLOCKERS,
     },
   );
   assert.ok(
@@ -787,6 +885,226 @@ test('current repository is a bootstrap blocker audit and exits nonzero for both
     cliReport.checks.find(({ id }) => id === 'BALANCE_CONSUMER')?.blockerIds,
     EXPECTED_DORMANT_BALANCE_CONSUMER_BLOCKERS,
   );
+  assert.deepEqual(
+    cliReport.checks.find(({ id }) => id === 'PROVIDER_POSITION_READ_BOUNDARY')?.blockerIds,
+    EXPECTED_DORMANT_PROVIDER_POSITION_READ_BOUNDARY_BLOCKERS,
+  );
+});
+
+function mutateProviderPositionReadArtifact(
+  key: keyof ProviderPositionReadBoundaryArtifactSources,
+  approved: string,
+  rejected: string,
+): ProviderPositionReadBoundaryArtifactSources {
+  const source = PROVIDER_POSITION_READ_ARTIFACTS[key];
+  assert.ok(source.includes(approved), `fixture is missing ${key} mutation target`);
+  return {
+    ...PROVIDER_POSITION_READ_ARTIFACTS,
+    [key]: source.replace(approved, rejected),
+  };
+}
+
+test('provider-position read inspection pins the exact dormant critical source slice', () => {
+  const inspected = inspectProviderPositionReadBoundaryArtifacts(PROVIDER_POSITION_READ_ARTIFACTS);
+  assert.deepEqual(inspected, EXPECTED_DORMANT_PROVIDER_POSITION_READ_BOUNDARY);
+  assert.equal(Object.isFrozen(inspected), true);
+
+  for (const key of Object.keys(
+    PROVIDER_POSITION_READ_ARTIFACTS,
+  ) as readonly (keyof ProviderPositionReadBoundaryArtifactSources)[]) {
+    const source = PROVIDER_POSITION_READ_ARTIFACTS[key];
+    const replacement = source.endsWith('x') ? 'y' : 'x';
+    assert.deepEqual(
+      inspectProviderPositionReadBoundaryArtifacts({
+        ...PROVIDER_POSITION_READ_ARTIFACTS,
+        [key]: `${source.slice(0, -1)}${replacement}`,
+      }),
+      INVALID_PROVIDER_POSITION_READ_BOUNDARY,
+      `${key} byte drift`,
+    );
+  }
+});
+
+test('provider-position read blockers participate in both readiness calculations', () => {
+  const source = readFileSync(PREFLIGHT_SCRIPT_PATH, 'utf8');
+  const readOnlyStart = source.indexOf('const publicReadOnly = readinessFor([');
+  const mainnetStart = source.indexOf('const mainnetWrites = readinessFor([', readOnlyStart);
+  const readinessEnd = source.indexOf('return Object.freeze({', mainnetStart);
+  assert.ok(readOnlyStart >= 0 && mainnetStart > readOnlyStart && readinessEnd > mainnetStart);
+  assert.equal(
+    source.slice(readOnlyStart, mainnetStart).split("'PROVIDER_POSITION_READ_BOUNDARY'").length - 1,
+    1,
+  );
+  assert.equal(
+    source.slice(mainnetStart, readinessEnd).split("'PROVIDER_POSITION_READ_BOUNDARY'").length - 1,
+    1,
+  );
+});
+
+test('provider-position read inspection rejects trust, coverage, and dormancy drift', () => {
+  const mutations: readonly (readonly [
+    keyof ProviderPositionReadBoundaryArtifactSources,
+    string,
+    string,
+  ])[] = [
+    [
+      'providerPositionReaderPortSource',
+      'export const MAINNET_PROVIDER_POSITION_READER_VERSION = 2 as const;',
+      'export const MAINNET_PROVIDER_POSITION_READER_VERSION = 1 as const;',
+    ],
+    [
+      'providerPositionReaderPortSource',
+      'Promise<CoveredMainnetProviderPositionSnapshotV1>',
+      'Promise<MainnetProviderPositionSnapshotV1>',
+    ],
+    [
+      'providerPositionReaderPortSource',
+      'readonly coverageVersion: typeof MAINNET_PROVIDER_POSITION_COVERAGE_VERSION;',
+      'readonly coverageVersion?: typeof MAINNET_PROVIDER_POSITION_COVERAGE_VERSION;',
+    ],
+    [
+      'providerPositionTrustedAssemblyPortSource',
+      'readonly mayPersist: false;',
+      'readonly mayPersist: true;',
+    ],
+    [
+      'providerPositionTrustedAssemblyPortSource',
+      'readonly mayAuthorizeFinancialAction: false;',
+      'readonly mayAuthorizeFinancialAction: true;',
+    ],
+    [
+      'providerPositionAdmissionCoordinatorSource',
+      'assembly.verifyAssembly(chainAssessment, assemblyRequest) !== true',
+      'false',
+    ],
+    [
+      'providerPositionAdmissionCoordinatorSource',
+      "const assemble = stableDataMember(value, 'assemble');",
+      'const assemble = value.assemble;',
+    ],
+    [
+      'providerPositionAdmissionCoordinatorSource',
+      'const verified = canonicalClock(this.clock.now());',
+      'const verified = completed;',
+    ],
+    ['providerPositionAdmissionCoordinatorSource', 'selectedTargetSources.push(', 'void ('],
+    ['providerPositionAdmissionCoordinatorSource', 'mayPersist: false,', 'mayPersist: true,'],
+    ['providerPositionCoverageSource', 'if (observationsInput.length === 0) {', 'if (true) {'],
+    [
+      'providerPositionCoverageSource',
+      'if (request.chainAssessment === undefined || request.chainAssessmentVerifier === undefined) {',
+      'if (false) {',
+    ],
+    ['providerPositionCoverageSource', "if (target.status !== 'COMPLETE') {", 'if (false) {'],
+    ['providerPositionObservationSource', 'chainAssessmentVerifier.verify(', 'Boolean('],
+    [
+      'mainnetPlatformsModuleSource',
+      'providers: [MainnetPlatformDirectoryService, MainnetPlatformsPrivacyInterceptor],',
+      'providers: [MainnetPlatformDirectoryService, MainnetPlatformsPrivacyInterceptor, MAINNET_PROVIDER_POSITION_READER],',
+    ],
+    [
+      'mainnetPlatformsIndexSource',
+      "export { MainnetPlatformDirectoryService } from './application/mainnet-platform-directory.service';",
+      "export { DormantProviderPositionAdmissionCoordinator } from './application/provider-position-admission.coordinator';",
+    ],
+    [
+      'mainnetPlatformsControllerSource',
+      'constructor(private readonly directory: MainnetPlatformDirectoryService) {}',
+      'constructor(private readonly reader: MainnetProviderPositionReader) {}',
+    ],
+  ];
+
+  for (const [key, approved, rejected] of mutations) {
+    assert.deepEqual(
+      inspectProviderPositionReadBoundaryArtifacts(
+        mutateProviderPositionReadArtifact(key, approved, rejected),
+      ),
+      INVALID_PROVIDER_POSITION_READ_BOUNDARY,
+      `${key}: ${approved}`,
+    );
+  }
+});
+
+test('provider-position read artifact shape and private brand fail closed', () => {
+  const malformed: unknown[] = [null, {}, { ...PROVIDER_POSITION_READ_ARTIFACTS, extra: '' }];
+  for (const key of Object.keys(
+    PROVIDER_POSITION_READ_ARTIFACTS,
+  ) as readonly (keyof ProviderPositionReadBoundaryArtifactSources)[]) {
+    const missing = { ...PROVIDER_POSITION_READ_ARTIFACTS } as Record<string, unknown>;
+    delete missing[key];
+    malformed.push(missing);
+  }
+
+  const accessor = { ...PROVIDER_POSITION_READ_ARTIFACTS } as Record<string, unknown>;
+  Object.defineProperty(accessor, 'providerPositionReaderPortSource', {
+    enumerable: true,
+    get() {
+      throw new Error('must not read accessor');
+    },
+  });
+  const withSymbol = {
+    ...PROVIDER_POSITION_READ_ARTIFACTS,
+  } as Record<PropertyKey, unknown>;
+  withSymbol[Symbol('unexpected')] = 'value';
+  malformed.push(
+    { ...PROVIDER_POSITION_READ_ARTIFACTS, providerPositionReaderPortSource: 1 },
+    {
+      ...PROVIDER_POSITION_READ_ARTIFACTS,
+      providerPositionReaderPortSource: 'x'.repeat(128 * 1024 + 1),
+    },
+    Object.fromEntries(
+      Object.keys(PROVIDER_POSITION_READ_ARTIFACTS).map((key) => [key, 'x'.repeat(32 * 1024)]),
+    ),
+    accessor,
+    withSymbol,
+    new Proxy(PROVIDER_POSITION_READ_ARTIFACTS, {
+      ownKeys() {
+        throw new Error('untrusted proxy');
+      },
+    }),
+  );
+
+  for (const candidate of malformed) {
+    assert.doesNotThrow(() => inspectProviderPositionReadBoundaryArtifacts(candidate));
+    assert.deepEqual(inspectProviderPositionReadBoundaryArtifacts(candidate), {
+      ...INVALID_PROVIDER_POSITION_READ_BOUNDARY,
+      inspected: false,
+    });
+  }
+
+  const complete = completeInput(platformDirectory('LIVE_READ_ONLY'));
+  const omitted = { ...complete } as Record<string, unknown>;
+  delete omitted.providerPositionReadBoundary;
+  const hostile = { ...complete } as ProductionPreflightInput;
+  Object.defineProperty(hostile, 'providerPositionReadBoundary', {
+    enumerable: true,
+    get() {
+      throw new Error('untrusted input getter');
+    },
+  });
+  const forgedInputs = [
+    omitted as unknown as ProductionPreflightInput,
+    hostile,
+    {
+      ...complete,
+      providerPositionReadBoundary: Object.freeze({
+        ...EXPECTED_DORMANT_PROVIDER_POSITION_READ_BOUNDARY,
+      }),
+    },
+  ];
+  for (const input of forgedInputs) {
+    assert.deepEqual(
+      evaluateProductionPreflight(input).checks.find(
+        ({ id }) => id === 'PROVIDER_POSITION_READ_BOUNDARY',
+      ),
+      {
+        id: 'PROVIDER_POSITION_READ_BOUNDARY',
+        localValidation: 'FAIL',
+        launchReadiness: 'BLOCKED',
+        blockerIds: ['PROVIDER_POSITION_READ_BOUNDARY_INSPECTION_FAILED'],
+      },
+    );
+  }
 });
 
 function mutateProductionInfrastructureArtifact(
@@ -3103,6 +3421,7 @@ test('all synthetic technical inputs remain blocked without seven signed launch 
         ({ id }) =>
           id !== 'PRODUCTION_INFRASTRUCTURE' &&
           id !== 'BALANCE_CONSUMER' &&
+          id !== 'PROVIDER_POSITION_READ_BOUNDARY' &&
           id !== 'AUTHENTICATION' &&
           id !== 'PUBLIC_LAUNCH_AUTHORITIES' &&
           id !== 'MAINNET_WRITES',

@@ -180,6 +180,31 @@ non-root, read-only-root, and drops all Linux capabilities. A valid local
 inspection proves these dormant source constraints only; it never turns them
 into deployed or production-ready evidence.
 
+`PROVIDER_POSITION_READ_BOUNDARY` independently snapshots and byte-pins the
+coverage-aware reader v2 port, trusted assessment assembly port, admission
+coordinator, coverage/observation/assessment/policy domains, feature module,
+feature barrel, and HTTP controller as one selected ten-file critical-source
+slice. Within that slice, the local semantic inspection requires covered rather than bare reader results,
+complete and agreeing coverage (including explicit zero counts), whole-assembly
+and per-observation verification, stable method capture, final clock checks,
+false persistence/financial authority, and one selected source and anchor for
+every target. It also confirms that the pinned feature module, barrel, and
+controller do not register or expose the coordinator or trusted assembly.
+
+The current exact source passes local inspection, but launch readiness remains
+blocked by `PROVIDER_POSITION_READER_FEATURE_REGISTRATION_MISSING` and
+`PROVIDER_POSITION_TRUSTED_ASSESSMENT_FEATURE_REGISTRATION_MISSING`. The
+inspection has a private in-process brand and rejects missing, extra, accessor,
+symbol, proxy, oversized, non-string, or byte-drifted inputs. It reads local
+source only; it neither invokes these components nor performs network, chain,
+provider, cloud, secret, transaction, or billable operations.
+
+This check does not claim a recursive dependency closure or scan every
+application module for alternate registration. Shared launch roots and some
+dependencies have separate preflight pins, but a future implementation still
+requires candidate-wide dependency, module-graph, and deployment review before
+either feature-registration blocker can be replaced with live evidence.
+
 The offline ingestion boundary is opt-in only:
 
 ```powershell

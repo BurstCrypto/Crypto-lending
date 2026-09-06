@@ -32,6 +32,13 @@ work. A bare observation snapshot is rejected at the type boundary. Raw chain
 assessments, verifier capabilities, persistence authority, and financial-action
 authority do not cross the reader port.
 
+The offline production preflight now pins this reader together with the
+coverage, observation, assessment, policy, trusted-assembly, admission, module,
+barrel, and controller sources as one selected dormant critical-source slice. A
+passing local source inspection does not prove recursive dependency closure,
+whole-application registration absence, an implementation, or live evidence;
+the reader and trusted-assessment feature-registration blockers remain open.
+
 ## Conservative composition (version 1)
 
 Composition requires both exact provider coverage and complete, current wallet

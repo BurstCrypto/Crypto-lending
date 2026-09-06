@@ -65,6 +65,14 @@ Assembly shares the admission deadline, captures the port's methods once without
 
 Production still needs a reviewed implementation of the dormant port. It must independently verify every selected anchor against durable chain identity, progression, and finality state and issue one object-identity capability covering the complete assembled assessment. No such implementation or production composition exists in this repository, so `admitAndAssemble` is not a live application path.
 
+The offline production preflight now byte-pins this coordinator and assembly
+port with a selected reader/domain/module/barrel/controller critical-source
+slice. Its local check rejects trust, timing, zero-target anchor, authority, or
+feature-surface drift inside that slice, but deliberately reports both expected
+feature registrations as missing. It does not prove recursive dependency
+closure or scan every application module, and it performs no provider, chain,
+network, cloud, secret, transaction, or billable operation.
+
 That production change must also provide:
 
 - reviewed policy bindings with two genuinely independent operators/source families per active Ethereum and Solana target;

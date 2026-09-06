@@ -40,6 +40,7 @@ export type ProductionPreflightReadiness = 'BLOCKED' | 'LOCAL_GATES_CLEAR';
 export type ProductionPreflightCheckId =
   | 'PRODUCTION_INFRASTRUCTURE'
   | 'BALANCE_CONSUMER'
+  | 'PROVIDER_POSITION_READ_BOUNDARY'
   | 'AUTHENTICATION'
   | 'EXTERNAL_EGRESS'
   | 'RPC_INDEXING'
@@ -59,6 +60,9 @@ export type ProductionPreflightBlockerId =
   | 'BALANCE_CONSUMER_IAM_NOT_PROVISIONED'
   | 'BALANCE_CONSUMER_DATABASE_CAPABILITY_NOT_ENABLED'
   | 'BALANCE_CONSUMER_DEPLOYED_EVIDENCE_MISSING'
+  | 'PROVIDER_POSITION_READ_BOUNDARY_INSPECTION_FAILED'
+  | 'PROVIDER_POSITION_READER_FEATURE_REGISTRATION_MISSING'
+  | 'PROVIDER_POSITION_TRUSTED_ASSESSMENT_FEATURE_REGISTRATION_MISSING'
   | 'AUTH_DEPLOYED_EVIDENCE_MISSING'
   | 'AUTH_PRODUCTION_CONFIGURATION_NOT_WIRED'
   | 'AUTH_PRODUCTION_SECRET_REFERENCES_NOT_WIRED'
@@ -233,6 +237,28 @@ export interface BalanceConsumerDeploymentInput {
 
 const VERIFIED_BALANCE_CONSUMER_DEPLOYMENTS = new WeakSet<BalanceConsumerDeploymentInput>();
 
+export interface ProviderPositionReadBoundaryArtifactSources {
+  readonly providerPositionReaderPortSource: string;
+  readonly providerPositionTrustedAssemblyPortSource: string;
+  readonly providerPositionAdmissionCoordinatorSource: string;
+  readonly providerPositionCoverageSource: string;
+  readonly providerPositionObservationSource: string;
+  readonly providerPositionChainAssessmentSource: string;
+  readonly providerPositionObservationPolicySource: string;
+  readonly mainnetPlatformsModuleSource: string;
+  readonly mainnetPlatformsIndexSource: string;
+  readonly mainnetPlatformsControllerSource: string;
+}
+
+export interface ProviderPositionReadBoundaryInput {
+  readonly inspected: boolean;
+  readonly contractValid: boolean;
+  readonly readerFeatureRegistration: 'INVALID' | 'MISSING';
+  readonly trustedAssessmentFeatureRegistration: 'INVALID' | 'MISSING';
+}
+
+const VERIFIED_PROVIDER_POSITION_READ_BOUNDARIES = new WeakSet<ProviderPositionReadBoundaryInput>();
+
 interface EgressInput {
   readonly localValidationPassed: boolean;
   readonly status: unknown;
@@ -266,6 +292,8 @@ export interface ProductionPreflightInput {
   readonly productionInfrastructureDeployment?: ProductionInfrastructureDeploymentInput;
   /** Optional for legacy callers; only the private local-artifact inspector can brand it. */
   readonly balanceConsumerDeployment?: BalanceConsumerDeploymentInput;
+  /** Optional for legacy callers; only the private local-artifact inspector can brand it. */
+  readonly providerPositionReadBoundary?: ProviderPositionReadBoundaryInput;
   /** Optional for legacy programmatic callers; absence fails closed during evaluation. */
   readonly databaseMasterDeployment?: DatabaseMasterDeploymentInput;
   /** Optional for legacy programmatic callers; only a verified evidence bundle sets it in CLI use. */
@@ -524,6 +552,40 @@ const PRODUCTION_INFRASTRUCTURE_ARTIFACT_KEYS = Object.freeze([
 ] as const satisfies readonly (keyof ProductionInfrastructureArtifactSources)[]);
 const MAX_PRODUCTION_INFRASTRUCTURE_ARTIFACT_BYTES = 512 * 1024;
 const MAX_PRODUCTION_INFRASTRUCTURE_TOTAL_BYTES = 2 * 1024 * 1024;
+const PROVIDER_POSITION_READ_ARTIFACT_KEYS = Object.freeze([
+  'providerPositionReaderPortSource',
+  'providerPositionTrustedAssemblyPortSource',
+  'providerPositionAdmissionCoordinatorSource',
+  'providerPositionCoverageSource',
+  'providerPositionObservationSource',
+  'providerPositionChainAssessmentSource',
+  'providerPositionObservationPolicySource',
+  'mainnetPlatformsModuleSource',
+  'mainnetPlatformsIndexSource',
+  'mainnetPlatformsControllerSource',
+] as const satisfies readonly (keyof ProviderPositionReadBoundaryArtifactSources)[]);
+const REVIEWED_PROVIDER_POSITION_READ_ARTIFACT_SHA256 = Object.freeze({
+  providerPositionReaderPortSource:
+    '9b71cc320e063b83e98526e598316b74c3a943e8c16f21da0f5635c6fceb468d',
+  providerPositionTrustedAssemblyPortSource:
+    '9120c664640be1f855b1ea77cc9ca403506cae306b3f14679172f634c4e8a37b',
+  providerPositionAdmissionCoordinatorSource:
+    '9cef023d61b4509f465ea3d6f1d95c93bd9f23990d2ab1137e2c8c5cb72d6c20',
+  providerPositionCoverageSource:
+    'a26d468abb2c46bd28267c6d36d1a7d3e62c30a700159e3c4cf263d15a8a9611',
+  providerPositionObservationSource:
+    '1e110974ee2c3dc17ae5aad00c419899291ad369106efe9aac171a160b2a483a',
+  providerPositionChainAssessmentSource:
+    '860582975318e5f10cbdd3082eaf3121df01aeb68279b2b56abeb9d945c27045',
+  providerPositionObservationPolicySource:
+    '10896fb907d937aa88ee0da570331faccce77f46642732e6676385676c6a7ea3',
+  mainnetPlatformsModuleSource: '52a2817a03db43b6842fa42e0c8264f760250f8364511607d0329677f535e045',
+  mainnetPlatformsIndexSource: 'b14bf3218ee63ce480b2ecd755f29e115c699ba00465802e2e4cc90210ef7a44',
+  mainnetPlatformsControllerSource:
+    'a713200b67f0cf67c50b56c94f707f94f7383c52e3d59f4368868710b099b55d',
+} satisfies Readonly<Record<keyof ProviderPositionReadBoundaryArtifactSources, string>>);
+const MAX_PROVIDER_POSITION_READ_ARTIFACT_BYTES = 128 * 1024;
+const MAX_PROVIDER_POSITION_READ_TOTAL_BYTES = 256 * 1024;
 const BALANCE_CONSUMER_ARTIFACT_KEYS = Object.freeze([
   'activationSource',
   'cliSource',
@@ -1195,6 +1257,29 @@ export function evaluateProductionPreflight(
     );
   }
 
+  const providerPositionReadBoundaryBlockers: ProductionPreflightBlockerId[] = [];
+  let providerPositionReadBoundaryInspected = false;
+  let providerPositionReadBoundary: ProviderPositionReadBoundaryInput | undefined;
+  try {
+    providerPositionReadBoundary = input.providerPositionReadBoundary;
+    providerPositionReadBoundaryInspected =
+      providerPositionReadBoundary?.inspected === true &&
+      providerPositionReadBoundary.contractValid === true &&
+      providerPositionReadBoundary.readerFeatureRegistration === 'MISSING' &&
+      providerPositionReadBoundary.trustedAssessmentFeatureRegistration === 'MISSING' &&
+      VERIFIED_PROVIDER_POSITION_READ_BOUNDARIES.has(providerPositionReadBoundary);
+  } catch {
+    // Initialized fail-closed values are preserved for malformed or hostile inputs.
+  }
+  if (!providerPositionReadBoundaryInspected || providerPositionReadBoundary === undefined) {
+    providerPositionReadBoundaryBlockers.push('PROVIDER_POSITION_READ_BOUNDARY_INSPECTION_FAILED');
+  } else {
+    providerPositionReadBoundaryBlockers.push(
+      'PROVIDER_POSITION_READER_FEATURE_REGISTRATION_MISSING',
+      'PROVIDER_POSITION_TRUSTED_ASSESSMENT_FEATURE_REGISTRATION_MISSING',
+    );
+  }
+
   const authenticationBlockers: ProductionPreflightBlockerId[] = [];
   const databaseMasterDeployment = input.databaseMasterDeployment;
   const databaseMasterDeploymentValid =
@@ -1405,6 +1490,11 @@ export function evaluateProductionPreflight(
     ),
     check('BALANCE_CONSUMER', balanceConsumerInspected ? 'PASS' : 'FAIL', balanceConsumerBlockers),
     check(
+      'PROVIDER_POSITION_READ_BOUNDARY',
+      providerPositionReadBoundaryInspected ? 'PASS' : 'FAIL',
+      providerPositionReadBoundaryBlockers,
+    ),
+    check(
       'AUTHENTICATION',
       input.authentication.inspected &&
         input.authentication.syntaxValid &&
@@ -1442,6 +1532,7 @@ export function evaluateProductionPreflight(
   const publicReadOnly = readinessFor([
     'PRODUCTION_INFRASTRUCTURE',
     'BALANCE_CONSUMER',
+    'PROVIDER_POSITION_READ_BOUNDARY',
     'AUTHENTICATION',
     'EXTERNAL_EGRESS',
     'RPC_INDEXING',
@@ -1453,6 +1544,7 @@ export function evaluateProductionPreflight(
   const mainnetWrites = readinessFor([
     'PRODUCTION_INFRASTRUCTURE',
     'BALANCE_CONSUMER',
+    'PROVIDER_POSITION_READ_BOUNDARY',
     'AUTHENTICATION',
     'EXTERNAL_EGRESS',
     'RPC_INDEXING',
@@ -1796,6 +1888,203 @@ export function inspectProductionInfrastructureDeploymentArtifacts(
   } catch {
     return invalid(false);
   }
+}
+
+function snapshotProviderPositionReadBoundaryArtifactSources(
+  value: unknown,
+): ProviderPositionReadBoundaryArtifactSources | null {
+  if (!isRecord(value) || Object.getOwnPropertySymbols(value).length !== 0) return null;
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) return null;
+  const ownKeys = Reflect.ownKeys(value);
+  if (
+    ownKeys.length !== PROVIDER_POSITION_READ_ARTIFACT_KEYS.length ||
+    !PROVIDER_POSITION_READ_ARTIFACT_KEYS.every((key) => ownKeys.includes(key))
+  ) {
+    return null;
+  }
+
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  let totalBytes = 0;
+  const snapshot: Partial<Record<keyof ProviderPositionReadBoundaryArtifactSources, string>> = {};
+  for (const key of PROVIDER_POSITION_READ_ARTIFACT_KEYS) {
+    const descriptor = descriptors[key];
+    if (
+      descriptor === undefined ||
+      !('value' in descriptor) ||
+      typeof descriptor.value !== 'string' ||
+      descriptor.value.length === 0
+    ) {
+      return null;
+    }
+    const bytes = Buffer.byteLength(descriptor.value, 'utf8');
+    if (bytes > MAX_PROVIDER_POSITION_READ_ARTIFACT_BYTES) return null;
+    totalBytes += bytes;
+    if (totalBytes > MAX_PROVIDER_POSITION_READ_TOTAL_BYTES) return null;
+    snapshot[key] = descriptor.value;
+  }
+  return snapshot as ProviderPositionReadBoundaryArtifactSources;
+}
+
+function hasExactReviewedProviderPositionReadArtifactBytes(
+  sources: ProviderPositionReadBoundaryArtifactSources,
+): boolean {
+  return PROVIDER_POSITION_READ_ARTIFACT_KEYS.every(
+    (key) =>
+      createHash('sha256').update(sources[key], 'utf8').digest('hex') ===
+      REVIEWED_PROVIDER_POSITION_READ_ARTIFACT_SHA256[key],
+  );
+}
+
+function hasDormantProviderPositionReadBoundaryContract(
+  sources: ProviderPositionReadBoundaryArtifactSources,
+): boolean {
+  const reader = sources.providerPositionReaderPortSource.replace(/\r\n/gu, '\n');
+  const assemblyPort = sources.providerPositionTrustedAssemblyPortSource.replace(/\r\n/gu, '\n');
+  const coordinator = sources.providerPositionAdmissionCoordinatorSource.replace(/\r\n/gu, '\n');
+  const coverage = sources.providerPositionCoverageSource.replace(/\r\n/gu, '\n');
+  const observation = sources.providerPositionObservationSource.replace(/\r\n/gu, '\n');
+  const chainAssessment = sources.providerPositionChainAssessmentSource.replace(/\r\n/gu, '\n');
+  const policy = sources.providerPositionObservationPolicySource.replace(/\r\n/gu, '\n');
+  const moduleSource = sources.mainnetPlatformsModuleSource.replace(/\r\n/gu, '\n');
+  const indexSource = sources.mainnetPlatformsIndexSource.replace(/\r\n/gu, '\n');
+  const controller = sources.mainnetPlatformsControllerSource.replace(/\r\n/gu, '\n');
+  const capabilityFreeSources = [
+    reader,
+    assemblyPort,
+    coordinator,
+    coverage,
+    observation,
+    chainAssessment,
+    policy,
+  ] as const;
+  const forbiddenCapability =
+    /(?:\bfrom\s+|\bimport\s*(?:\(\s*)?)['"](?:node:)?(?:dns|http|http2|https|net|tls)(?:\/[^'"]*)?['"]|(?:\bfrom\s+|\bimport\s*(?:\(\s*)?)['"](?:axios|ethers|got|superagent|undici|web3|@solana\/web3\.js)['"]|\b(?:fetch|setTimeout|setInterval|setImmediate|queueMicrotask)\s*\(|\b(?:process|Deno|Bun)\s*\.\s*env\b|\bimport\s*\.\s*meta\s*\.\s*env\b|\bnew\s+(?:URL|URLSearchParams|WebSocket|EventSource|Connection|[A-Za-z0-9_]*Client|[A-Za-z0-9_]*Agent)\s*\(|['"]https?:\/\//iu;
+  const selectedTargetLoop = coordinator.indexOf('for (const target of candidate.targets) {');
+  const selectedSource = coordinator.indexOf(
+    'const selectedSource = target.acceptedSources[0];',
+    selectedTargetLoop,
+  );
+  const selectedTargetPush = coordinator.indexOf('selectedTargetSources.push(', selectedSource);
+  const positionLoop = coordinator.indexOf(
+    'for (const position of target.positions) {',
+    selectedTargetPush,
+  );
+  const forbiddenRuntimeIdentity =
+    /\b(?:MAINNET_PROVIDER_POSITION_READER|DormantProviderPositionAdmissionCoordinator|ProviderPositionTrustedChainAssessmentAssemblyPort|PROVIDER_POSITION_TRUSTED_CHAIN_ASSESSMENT_ASSEMBLY_USE)\b/u;
+  const forbiddenBarrelImplementation =
+    /(?:DormantProviderPositionAdmissionCoordinator|ProviderPositionTrustedChainAssessmentAssemblyPort|provider-position-admission\.coordinator|provider-position-trusted-chain-assessment-assembly\.port)/u;
+
+  return (
+    capabilityFreeSources.every((source) => !forbiddenCapability.test(source)) &&
+    exactExecutableLineCount(
+      reader,
+      'export const MAINNET_PROVIDER_POSITION_READER_VERSION = 2 as const;',
+    ) === 1 &&
+    exactExecutableLineCount(reader, 'export interface MainnetProviderPositionReaderV2 {') === 1 &&
+    exactExecutableLineCount(
+      reader,
+      'readonly coverageVersion: typeof MAINNET_PROVIDER_POSITION_COVERAGE_VERSION;',
+    ) === 1 &&
+    exactExecutableLineCount(reader, '): Promise<CoveredMainnetProviderPositionSnapshotV1>;') ===
+      1 &&
+    !reader.includes('Promise<MainnetProviderPositionSnapshotV1>') &&
+    !/(?:@Injectable|@Module|@Controller)\s*\(|\bclass\s+/u.test(reader) &&
+    exactExecutableLineCount(assemblyPort, 'readonly mayAuthorizeFinancialAction: false;') === 2 &&
+    exactExecutableLineCount(assemblyPort, 'readonly mayPersist: false;') === 1 &&
+    exactExecutableLineCount(
+      assemblyPort,
+      'export interface ProviderPositionTrustedChainAssessmentAssemblyPort extends MainnetProviderPositionChainAssessmentVerifierPort {',
+    ) === 1 &&
+    exactExecutableLineCount(
+      assemblyPort,
+      'assemble(request: AssembleProviderPositionTrustedChainAssessmentRequestV1): Promise<unknown>;',
+    ) === 1 &&
+    exactExecutableLineCount(assemblyPort, '): boolean;') === 1 &&
+    !/(?:@Injectable|@Module|@Controller)\s*\(|\bclass\s+/u.test(assemblyPort) &&
+    exactExecutableLineCount(
+      coordinator,
+      "const assemble = stableDataMember(value, 'assemble');",
+    ) === 1 &&
+    exactExecutableLineCount(
+      coordinator,
+      "const verifyAssembly = stableDataMember(value, 'verifyAssembly');",
+    ) === 1 &&
+    exactExecutableLineCount(coordinator, "const verify = stableDataMember(value, 'verify');") ===
+      1 &&
+    exactExecutableLineCount(
+      coordinator,
+      'trustedChainAssessmentAssembly?: ProviderPositionTrustedChainAssessmentAssemblyPort,',
+    ) === 1 &&
+    exactExecutableLineCount(
+      coordinator,
+      "if (assembly === undefined) return fail('ASSEMBLY_UNAVAILABLE');",
+    ) === 1 &&
+    exactExecutableLineCount(
+      coordinator,
+      'assembly.verifyAssembly(chainAssessment, assemblyRequest) !== true',
+    ) === 1 &&
+    exactExecutableLineCount(
+      coordinator,
+      'coveredSnapshot = parseCoveredMainnetProviderPositionSnapshotV1({',
+    ) === 1 &&
+    exactExecutableLineCount(coordinator, 'chainAssessmentVerifier: assembly,') === 1 &&
+    exactExecutableLineCount(coordinator, 'const completed = canonicalClock(this.clock.now());') ===
+      1 &&
+    exactExecutableLineCount(coordinator, 'const verified = canonicalClock(this.clock.now());') ===
+      1 &&
+    exactExecutableLineCount(
+      coordinator,
+      'assertAssemblyWindow(verified.milliseconds, candidate, prepared, completed.timestamp);',
+    ) === 1 &&
+    exactExecutableLineCount(coordinator, 'mayAuthorizeFinancialAction: false,') >= 2 &&
+    exactExecutableLineCount(coordinator, 'mayPersist: false,') >= 1 &&
+    selectedTargetLoop >= 0 &&
+    selectedSource > selectedTargetLoop &&
+    selectedTargetPush > selectedSource &&
+    positionLoop > selectedTargetPush &&
+    exactExecutableLineCount(coverage, "if (target.status !== 'COMPLETE') {") === 1 &&
+    exactExecutableLineCount(coverage, "if (target.divergenceStatus !== 'AGREED') {") === 1 &&
+    exactExecutableLineCount(coverage, 'if (parsedTargets.length < expected.length) {') === 1 &&
+    exactExecutableLineCount(coverage, 'if (observationsInput.length === 0) {') === 1 &&
+    exactExecutableLineCount(
+      coverage,
+      'if (request.chainAssessment === undefined || request.chainAssessmentVerifier === undefined) {',
+    ) === 1 &&
+    exactExecutableLineCount(
+      coverage,
+      'if (totalDeclaredPositions !== snapshot.observations.length) {',
+    ) === 1 &&
+    exactExecutableLineCount(
+      coverage,
+      'if ((actualCountByTarget.get(targetKey(target)) ?? 0) !== target.positionCount) {',
+    ) === 1 &&
+    exactExecutableLineCount(coverage, 'coverageManifest: manifest,') === 1 &&
+    exactExecutableLineCount(observation, 'chainAssessmentVerifier.verify(') === 1 &&
+    exactExecutableLineCount(observation, 'mayAuthorizeFinancialAction: false,') >= 2 &&
+    exactExecutableLineCount(
+      chainAssessment,
+      'export interface MainnetProviderPositionChainAssessmentVerifierPort {',
+    ) === 1 &&
+    exactExecutableLineCount(chainAssessment, 'readonly mayAuthorizeFinancialAction: false;') ===
+      2 &&
+    exactExecutableLineCount(
+      policy,
+      'export const MAINNET_PROVIDER_POSITION_OBSERVATION_POLICY_VERSION = 1 as const;',
+    ) === 1 &&
+    exactExecutableLineCount(
+      moduleSource,
+      'providers: [MainnetPlatformDirectoryService, MainnetPlatformsPrivacyInterceptor],',
+    ) === 1 &&
+    exactExecutableLineCount(moduleSource, 'exports: [MainnetPlatformDirectoryService],') === 1 &&
+    !forbiddenRuntimeIdentity.test(moduleSource) &&
+    !forbiddenRuntimeIdentity.test(controller) &&
+    !forbiddenBarrelImplementation.test(indexSource) &&
+    exactExecutableLineCount(
+      controller,
+      'constructor(private readonly directory: MainnetPlatformDirectoryService) {}',
+    ) === 1
+  );
 }
 
 function snapshotBalanceConsumerArtifactSources(
@@ -6417,6 +6706,41 @@ export function inspectBalanceConsumerDeploymentArtifacts(
   }
 }
 
+/**
+ * Recognizes only the exact source-authored, dormant provider-position read
+ * boundary. Passing this inspection neither composes an implementation nor
+ * authorizes provider, network, persistence, or financial capabilities.
+ */
+export function inspectProviderPositionReadBoundaryArtifacts(
+  value: unknown,
+): ProviderPositionReadBoundaryInput {
+  const invalid = (inspected: boolean): ProviderPositionReadBoundaryInput =>
+    Object.freeze({
+      inspected,
+      contractValid: false,
+      readerFeatureRegistration: 'INVALID',
+      trustedAssessmentFeatureRegistration: 'INVALID',
+    });
+  try {
+    const sources = snapshotProviderPositionReadBoundaryArtifactSources(value);
+    if (sources === null) return invalid(false);
+    const contractValid =
+      hasExactReviewedProviderPositionReadArtifactBytes(sources) &&
+      hasDormantProviderPositionReadBoundaryContract(sources);
+    if (!contractValid) return invalid(true);
+    const result: ProviderPositionReadBoundaryInput = Object.freeze({
+      inspected: true,
+      contractValid: true,
+      readerFeatureRegistration: 'MISSING',
+      trustedAssessmentFeatureRegistration: 'MISSING',
+    });
+    VERIFIED_PROVIDER_POSITION_READ_BOUNDARIES.add(result);
+    return result;
+  } catch {
+    return invalid(false);
+  }
+}
+
 function hasExactAuthWalletSecretVersionParameter(source: string): boolean {
   return hasExactTopLevelParameter(source, 'AuthWalletKeysSecretVersionId', [
     'Type: String',
@@ -7310,6 +7634,78 @@ export function loadRepositoryProductionPreflightInput(
     // The evaluator reports an inspection failure without exposing local paths or source bytes.
   }
 
+  let providerPositionReadBoundary = inspectProviderPositionReadBoundaryArtifacts(null);
+  try {
+    providerPositionReadBoundary = inspectProviderPositionReadBoundaryArtifacts({
+      providerPositionReaderPortSource: readFileSync(
+        resolve(
+          repositoryRoot,
+          'apps/api/src/mainnet-platforms/application/ports/mainnet-provider-position-reader.port.ts',
+        ),
+        'utf8',
+      ),
+      providerPositionTrustedAssemblyPortSource: readFileSync(
+        resolve(
+          repositoryRoot,
+          'apps/api/src/mainnet-platforms/application/ports/provider-position-trusted-chain-assessment-assembly.port.ts',
+        ),
+        'utf8',
+      ),
+      providerPositionAdmissionCoordinatorSource: readFileSync(
+        resolve(
+          repositoryRoot,
+          'apps/api/src/mainnet-platforms/application/provider-position-admission.coordinator.ts',
+        ),
+        'utf8',
+      ),
+      providerPositionCoverageSource: readFileSync(
+        resolve(
+          repositoryRoot,
+          'apps/api/src/mainnet-platforms/domain/mainnet-provider-position-coverage.ts',
+        ),
+        'utf8',
+      ),
+      providerPositionObservationSource: readFileSync(
+        resolve(
+          repositoryRoot,
+          'apps/api/src/mainnet-platforms/domain/mainnet-provider-position-observation.ts',
+        ),
+        'utf8',
+      ),
+      providerPositionChainAssessmentSource: readFileSync(
+        resolve(
+          repositoryRoot,
+          'apps/api/src/mainnet-platforms/domain/mainnet-provider-position-chain-assessment.ts',
+        ),
+        'utf8',
+      ),
+      providerPositionObservationPolicySource: readFileSync(
+        resolve(
+          repositoryRoot,
+          'apps/api/src/mainnet-platforms/domain/mainnet-provider-position-observation-policy.ts',
+        ),
+        'utf8',
+      ),
+      mainnetPlatformsModuleSource: readFileSync(
+        resolve(repositoryRoot, 'apps/api/src/mainnet-platforms/mainnet-platforms.module.ts'),
+        'utf8',
+      ),
+      mainnetPlatformsIndexSource: readFileSync(
+        resolve(repositoryRoot, 'apps/api/src/mainnet-platforms/index.ts'),
+        'utf8',
+      ),
+      mainnetPlatformsControllerSource: readFileSync(
+        resolve(
+          repositoryRoot,
+          'apps/api/src/mainnet-platforms/http/mainnet-platforms.controller.ts',
+        ),
+        'utf8',
+      ),
+    });
+  } catch {
+    // The evaluator reports an inspection failure without exposing local paths or source bytes.
+  }
+
   let egressRecord: Record<string, unknown> = {};
   let egressLocalValidationPassed = false;
   try {
@@ -7341,6 +7737,7 @@ export function loadRepositoryProductionPreflightInput(
     authentication,
     productionInfrastructureDeployment,
     balanceConsumerDeployment,
+    providerPositionReadBoundary,
     databaseMasterDeployment,
     rdsMasterLifecycleEvidenceAccepted: false,
     redisOperatorDeployment,
