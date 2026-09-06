@@ -1902,9 +1902,37 @@ test('balance-consumer inspection pins the dormant Node HTTPS transport without 
       'normalizeRemoteFamily(candidate.remoteFamily) !== null &&',
     ],
     [
-      "if (headers.has('content-encoding') || headers.has('transfer-encoding')) return null;",
+      "if (headers.has('content-encoding') || headers.has('trailer')) return null;",
       "if (headers.has('content-encoding')) return null;",
     ],
+    ['(contentLengths === undefined) === (transferEncodings === undefined)', 'false'],
+    ['httpVersionMajor !== 1 ||', 'false ||'],
+    ['httpVersionMinor !== 1 ||', 'false ||'],
+    ['transferEncodings.length !== 1 ||', 'false ||'],
+    [
+      "!/^chunked$/iu.test(transferEncodings[0] ?? '')",
+      "!/chunked/iu.test(transferEncodings[0] ?? '')",
+    ],
+    [
+      "if (contentLengths?.length !== 1 || !/^(?:[1-9][0-9]{0,6})$/u.test(rawContentLength ?? '')) {",
+      'if (contentLengths?.length !== 1) {',
+    ],
+    [
+      'if (!Number.isSafeInteger(contentLength) || contentLength > MAX_JSON_BYTES) return null;',
+      'if (!Number.isSafeInteger(contentLength)) return null;',
+    ],
+    [
+      "metadata.framing === 'CONTENT_LENGTH' ? metadata.contentLength : MAX_JSON_BYTES;",
+      "metadata.framing === 'CONTENT_LENGTH' ? metadata.contentLength : Number.MAX_SAFE_INTEGER;",
+    ],
+    ['chunks.length >= MAX_RESPONSE_CHUNKS ||', 'false ||'],
+    [
+      "(metadata.framing === 'CONTENT_LENGTH' && receivedBytes !== metadata.contentLength)",
+      'false',
+    ],
+    ['!response.complete ||', 'false ||'],
+    ['if (!hasNoResponseTrailers(response.rawTrailers)) {', 'if (false) {'],
+    ['return Array.isArray(rawTrailers) && rawTrailers.length === 0;', 'return true;'],
     [
       'const awaitResponseClose = state.response !== undefined && !state.responseClosed;',
       'const awaitResponseClose = false;',

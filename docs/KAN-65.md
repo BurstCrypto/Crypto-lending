@@ -152,8 +152,13 @@ The source-only HTTPS capsule now provides a reviewed implementation of
 cooperative DNS, connect, and response-body cancellation, but it is not live
 evidence. No provider, hostname/path endpoint, credential source, runtime wiring,
 or egress approval has been selected. Its deliberately strict response policy
-requires one canonical `Content-Length` and rejects transfer encoding and
-compression, so compatibility with each intended provider remains unproved.
+requires exactly one bounded framing: either one canonical `Content-Length` or
+one standalone case-insensitive `Transfer-Encoding: chunked` on HTTP/1.1, never both. It
+rejects compression, declared or received trailers, duplicate or compound
+transfer encodings, incomplete bodies, excess decoded bytes, and excess decoded
+body `data` events. Node validates and removes wire chunk framing before these
+application counters run, so chunk extensions and wire-framing overhead are not
+observable here. Compatibility with each intended provider remains unproved.
 Deployed Node resolver, TLS, socket-teardown, and provider behavior must still be
 observed. The dormant two-source coordinator drains both same-signal reads with
 `Promise.allSettled` and rechecks cancellation before inspecting fulfilled
@@ -427,7 +432,7 @@ approved:
 - the reviewed source-only JSON-RPC transport still needs an approved provider,
   exact hostname/path endpoint and credential source, runtime composition,
   exact-host egress, deployed Node DNS/TLS/socket evidence, and live proof that
-  each provider returns the required strict `Content-Length` response shape;
+  each provider returns one of the required strict bounded response shapes;
   separately, a deployed PostgreSQL exercise must prove the reviewed
   acquisition, discard, exact removal, and shutdown behavior against the
   production-compatible server and driver;

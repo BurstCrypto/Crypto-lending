@@ -53,6 +53,9 @@ interface ReviewedAddress {
   readonly family: 4 | 6;
 }
 
+type ReviewedResponseMetadata =
+  Readonly<{ framing: 'CONTENT_LENGTH'; contentLength: number }> | Readonly<{ framing: 'CHUNKED' }>;
+
 interface ExchangeState {
   settled: boolean;
   request: ClientRequest | undefined;
@@ -377,7 +380,11 @@ function consumeResponse(
     return;
   }
 
-  const metadata = reviewResponseMetadata(response.rawHeaders);
+  const metadata = reviewResponseMetadata(
+    response.rawHeaders,
+    response.httpVersionMajor,
+    response.httpVersionMinor,
+  );
   if (metadata === null) {
     settleFailure(permanentFailure());
     return;
@@ -386,6 +393,8 @@ function consumeResponse(
   const chunks: Buffer[] = [];
   let receivedBytes = 0;
   let ended = false;
+  const maximumResponseBytes =
+    metadata.framing === 'CONTENT_LENGTH' ? metadata.contentLength : MAX_JSON_BYTES;
 
   response.on('data', (chunk: unknown) => {
     if (ended) return;
@@ -398,8 +407,7 @@ function consumeResponse(
     if (
       buffer.length === 0 ||
       chunks.length >= MAX_RESPONSE_CHUNKS ||
-      receivedBytes > metadata.contentLength - buffer.length ||
-      receivedBytes > MAX_JSON_BYTES - buffer.length
+      receivedBytes > maximumResponseBytes - buffer.length
     ) {
       ended = true;
       settleFailure(permanentFailure());
@@ -421,8 +429,15 @@ function consumeResponse(
   response.once('end', () => {
     if (ended) return;
     ended = true;
-    if (!response.complete || receivedBytes !== metadata.contentLength) {
+    if (
+      !response.complete ||
+      (metadata.framing === 'CONTENT_LENGTH' && receivedBytes !== metadata.contentLength)
+    ) {
       settleFailure(unavailableFailure());
+      return;
+    }
+    if (!hasNoResponseTrailers(response.rawTrailers)) {
+      settleFailure(permanentFailure());
       return;
     }
     try {
@@ -611,23 +626,44 @@ function reviewSecureSocket(socket: unknown, expected: ReviewedAddress): boolean
 
 function reviewResponseMetadata(
   rawHeaders: readonly string[] | undefined,
-): Readonly<{ contentLength: number }> | null {
+  httpVersionMajor: number | undefined,
+  httpVersionMinor: number | undefined,
+): ReviewedResponseMetadata | null {
   const headers = parseRawHeaders(rawHeaders);
   if (headers === null) return null;
-  if (headers.has('content-encoding') || headers.has('transfer-encoding')) return null;
+  if (headers.has('content-encoding') || headers.has('trailer')) return null;
   const contentTypes = headers.get('content-type');
   const contentLengths = headers.get('content-length');
+  const transferEncodings = headers.get('transfer-encoding');
   if (
     contentTypes?.length !== 1 ||
     !/^application\/json(?:;\s*charset=utf-8)?$/iu.test(contentTypes[0] ?? '') ||
-    contentLengths?.length !== 1 ||
-    !/^(?:[1-9][0-9]{0,6})$/u.test(contentLengths[0] ?? '')
+    (contentLengths === undefined) === (transferEncodings === undefined)
   ) {
     return null;
   }
-  const contentLength = Number(contentLengths[0]);
+  if (transferEncodings !== undefined) {
+    if (
+      httpVersionMajor !== 1 ||
+      httpVersionMinor !== 1 ||
+      transferEncodings.length !== 1 ||
+      !/^chunked$/iu.test(transferEncodings[0] ?? '')
+    ) {
+      return null;
+    }
+    return Object.freeze({ framing: 'CHUNKED' as const });
+  }
+  const rawContentLength = contentLengths?.[0];
+  if (contentLengths?.length !== 1 || !/^(?:[1-9][0-9]{0,6})$/u.test(rawContentLength ?? '')) {
+    return null;
+  }
+  const contentLength = Number(rawContentLength);
   if (!Number.isSafeInteger(contentLength) || contentLength > MAX_JSON_BYTES) return null;
-  return Object.freeze({ contentLength });
+  return Object.freeze({ framing: 'CONTENT_LENGTH' as const, contentLength });
+}
+
+function hasNoResponseTrailers(rawTrailers: readonly string[] | undefined): boolean {
+  return Array.isArray(rawTrailers) && rawTrailers.length === 0;
 }
 
 function reviewRetryAfter(rawHeaders: readonly string[] | undefined): number | undefined | null {

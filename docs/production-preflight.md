@@ -135,11 +135,16 @@ cannot suppress the watchdog. These contracts do not prove physical socket or
 process shutdown against live PostgreSQL. The reviewed HTTPS transport is still
 dormant: no provider, hostname/path endpoint, credential source, runtime wiring,
 or exact-host egress has been approved or supplied. Its strict response policy
-requires one canonical `Content-Length` and rejects transfer encoding and
-compression, so provider compatibility remains unproved. Deployed Node resolver,
-TLS, socket-teardown, and live provider evidence remain explicit activation
-blockers. All checks are local and make no network, chain, cloud, or billable
-call.
+accepts exactly one bounded framing: either one canonical `Content-Length` or
+one standalone case-insensitive `Transfer-Encoding: chunked` on HTTP/1.1, never both. It
+rejects compression, declared or received trailers, duplicate or compound
+transfer encodings, incomplete bodies, excess decoded bytes, and excess decoded
+body `data` events. Node validates and removes wire chunk framing before these
+application counters run, so chunk extensions and wire-framing overhead are not
+observable here. Provider compatibility remains unproved. Deployed Node
+resolver, TLS, socket-teardown, and live provider evidence remain explicit
+activation blockers. All checks are local and make no network, chain, cloud, or
+billable call.
 
 The adapter dependency closure is byte-pinned too: the supported-asset
 registry, wallet identity parser, and Solana token-account parser are now part

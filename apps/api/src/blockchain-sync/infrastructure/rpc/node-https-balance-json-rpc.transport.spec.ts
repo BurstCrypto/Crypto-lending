@@ -63,6 +63,10 @@ class FakeResponse extends EventEmitter {
   complete = true;
   destroyed = false;
   closeOnDestroy = true;
+  httpVersion = '1.1';
+  httpVersionMajor = 1;
+  httpVersionMinor = 1;
+  rawTrailers: string[] = [];
   readonly destroy = jest.fn(() => {
     this.destroyed = true;
     if (this.closeOnDestroy) queueMicrotask(() => this.emit('close'));
@@ -176,6 +180,16 @@ function jsonResponse(
     'application/json; charset=utf-8',
     'Content-Length',
     String(body.length),
+    ...extraHeaders,
+  ]);
+}
+
+function chunkedJsonResponse(extraHeaders: readonly string[] = []): FakeResponse {
+  return new FakeResponse(200, [
+    'Content-Type',
+    'application/json; charset=utf-8',
+    'Transfer-Encoding',
+    'chunked',
     ...extraHeaders,
   ]);
 }
@@ -810,6 +824,31 @@ describe('Node HTTPS balance JSON-RPC transport', () => {
     expect(requestMock).toHaveBeenCalledTimes(1);
   });
 
+  it('returns a strict JSON response from one complete case-insensitive chunked body', async () => {
+    installLookup();
+    const request = rpc();
+    const pending = new NodeHttpsBalanceJsonRpcTransport(config()).exchange(
+      request,
+      new AbortController().signal,
+    );
+    const call = httpsCalls[0];
+    secure(call!);
+    const expected = { jsonrpc: '2.0', id: request.id, result: '0x1' };
+    const body = responseBody(expected);
+    const response = new FakeResponse(200, [
+      'cOnTeNt-TyPe',
+      'application/json',
+      'tRaNsFeR-EnCoDiNg',
+      'ChUnKeD',
+    ]);
+
+    deliver(call!, response, [body.subarray(0, 1), body.subarray(1, 7), body.subarray(7)]);
+    call?.request.emit('close');
+
+    await expect(pending).resolves.toEqual(expected);
+    expect(response.destroy).not.toHaveBeenCalled();
+  });
+
   it('keeps a successful exchange pending until the Connection-close request closes', async () => {
     installLookup();
     const request = rpc();
@@ -844,6 +883,36 @@ describe('Node HTTPS balance JSON-RPC transport', () => {
       Buffer.from('{}'),
     ],
     [
+      [
+        'Content-Type',
+        'application/json',
+        'Transfer-Encoding',
+        'chunked',
+        'Content-Encoding',
+        'gzip',
+      ],
+      Buffer.from('{}'),
+    ],
+    [
+      ['Content-Type', 'application/json', 'Transfer-Encoding', 'chunked', 'Trailer', 'X-Checksum'],
+      Buffer.from('{}'),
+    ],
+    [
+      [
+        'Content-Type',
+        'application/json',
+        'Transfer-Encoding',
+        'chunked',
+        'Transfer-Encoding',
+        'chunked',
+      ],
+      Buffer.from('{}'),
+    ],
+    [['Content-Type', 'application/json', 'Transfer-Encoding', 'gzip'], Buffer.from('{}')],
+    [['Content-Type', 'application/json', 'Transfer-Encoding', 'gzip, chunked'], Buffer.from('{}')],
+    [['Content-Type', 'application/json', 'Transfer-Encoding', 'chunked; q=1'], Buffer.from('{}')],
+    [['Content-Type', 'application/json', 'Transfer-Encoding', ''], Buffer.from('{}')],
+    [
       ['Content-Type', 'application/json', 'Content-Length', '2', 'Content-Length', '2'],
       Buffer.from('{}'),
     ],
@@ -868,6 +937,78 @@ describe('Node HTTPS balance JSON-RPC transport', () => {
 
     await expectFailure(pending, 'PERMANENT');
     expect(response.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects received chunked trailers even when none were declared', async () => {
+    installLookup();
+    const pending = new NodeHttpsBalanceJsonRpcTransport(config()).exchange(
+      rpc(),
+      new AbortController().signal,
+    );
+    const call = httpsCalls[0];
+    secure(call!);
+    const response = chunkedJsonResponse();
+    response.rawTrailers.push('X-Checksum', 'private-trailer-value');
+
+    deliver(call!, response, [Buffer.from('{}')]);
+
+    await expectFailure(pending, 'PERMANENT');
+    expect(response.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    [1, 0, '1.0'],
+    [2, 0, '2.0'],
+  ] as const)(
+    'rejects chunked framing on HTTP %s.%s',
+    async (httpVersionMajor, httpVersionMinor, httpVersion) => {
+      installLookup();
+      const pending = new NodeHttpsBalanceJsonRpcTransport(config()).exchange(
+        rpc(),
+        new AbortController().signal,
+      );
+      const call = httpsCalls[0];
+      secure(call!);
+      const response = chunkedJsonResponse();
+      response.httpVersion = httpVersion;
+      response.httpVersionMajor = httpVersionMajor;
+      response.httpVersionMinor = httpVersionMinor;
+
+      deliver(call!, response, [Buffer.from('{}')]);
+
+      await expectFailure(pending, 'PERMANENT');
+    },
+  );
+
+  it('maps an incomplete chunked message that emits end to unavailable', async () => {
+    installLookup();
+    const pending = new NodeHttpsBalanceJsonRpcTransport(config()).exchange(
+      rpc(),
+      new AbortController().signal,
+    );
+    const call = httpsCalls[0];
+    secure(call!);
+    const response = chunkedJsonResponse();
+    response.complete = false;
+
+    deliver(call!, response, [Buffer.from('{}')]);
+
+    await expectFailure(pending, 'UNAVAILABLE');
+  });
+
+  it('rejects a chunked decoded body above the four MiB limit', async () => {
+    installLookup();
+    const pending = new NodeHttpsBalanceJsonRpcTransport(config()).exchange(
+      rpc(),
+      new AbortController().signal,
+    );
+    const call = httpsCalls[0];
+    secure(call!);
+    const response = chunkedJsonResponse();
+
+    deliver(call!, response, [Buffer.alloc(4 * 1024 * 1024 + 1, 0x20)]);
+
+    await expectFailure(pending, 'PERMANENT');
   });
 
   it.each([
@@ -902,25 +1043,28 @@ describe('Node HTTPS balance JSON-RPC transport', () => {
     await expectFailure(pending, 'PERMANENT');
   });
 
-  it('rejects excessive response chunk fragmentation within the byte limit', async () => {
-    installLookup();
-    const chunkCount = 4_097;
-    const body = Buffer.from(`"${'a'.repeat(chunkCount - 2)}"`);
-    const pending = new NodeHttpsBalanceJsonRpcTransport(config()).exchange(
-      rpc(),
-      new AbortController().signal,
-    );
-    const call = httpsCalls[0];
-    secure(call!);
-    const response = jsonResponse(200, body);
-    deliver(
-      call!,
-      response,
-      Array.from(body, (byte) => Uint8Array.of(byte)),
-    );
+  it.each(['content-length', 'chunked'] as const)(
+    'rejects excessive %s response fragmentation within the byte limit',
+    async (framing) => {
+      installLookup();
+      const chunkCount = 4_097;
+      const body = Buffer.from(`"${'a'.repeat(chunkCount - 2)}"`);
+      const pending = new NodeHttpsBalanceJsonRpcTransport(config()).exchange(
+        rpc(),
+        new AbortController().signal,
+      );
+      const call = httpsCalls[0];
+      secure(call!);
+      const response = framing === 'chunked' ? chunkedJsonResponse() : jsonResponse(200, body);
+      deliver(
+        call!,
+        response,
+        Array.from(body, (byte) => Uint8Array.of(byte)),
+      );
 
-    await expectFailure(pending, 'PERMANENT');
-  });
+      await expectFailure(pending, 'PERMANENT');
+    },
+  );
 
   it.each([
     ['declared length mismatch', true, [Buffer.from('{}')], 3],
@@ -945,58 +1089,61 @@ describe('Node HTTPS balance JSON-RPC transport', () => {
     await expectFailure(pending, 'UNAVAILABLE');
   });
 
-  it.each(['aborted', 'error', 'close'] as const)(
-    'maps a premature response %s to unavailable',
-    async (event) => {
-      installLookup();
-      const pending = new NodeHttpsBalanceJsonRpcTransport(config()).exchange(
-        rpc(),
-        new AbortController().signal,
-      );
-      const call = httpsCalls[0];
-      secure(call!);
-      const response = new FakeResponse(200, [
-        'Content-Type',
-        'application/json',
-        'Content-Length',
-        '2',
-      ]);
-      call?.respond(response as unknown as IncomingMessage);
-      response.emit(event, new Error('private response detail'));
-
-      await expectFailure(pending, 'UNAVAILABLE');
-    },
-  );
-
-  it('aborts while a response body is streaming and ignores all late body events', async () => {
+  it.each([
+    ['content-length', 'aborted'],
+    ['content-length', 'error'],
+    ['content-length', 'close'],
+    ['chunked', 'aborted'],
+    ['chunked', 'error'],
+    ['chunked', 'close'],
+  ] as const)('maps a premature %s response %s to unavailable', async (framing, event) => {
     installLookup();
-    const controller = new AbortController();
     const pending = new NodeHttpsBalanceJsonRpcTransport(config()).exchange(
       rpc(),
-      controller.signal,
+      new AbortController().signal,
     );
     const call = httpsCalls[0];
     secure(call!);
-    const response = new FakeResponse(200, [
-      'Content-Type',
-      'application/json',
-      'Content-Length',
-      '20',
-    ]);
+    const response =
+      framing === 'chunked'
+        ? chunkedJsonResponse()
+        : new FakeResponse(200, ['Content-Type', 'application/json', 'Content-Length', '2']);
     call?.respond(response as unknown as IncomingMessage);
-    response.emit('data', Buffer.from('{"private":'));
-    const assertion = expectFailure(pending, 'UNAVAILABLE');
+    response.emit(event, new Error('private response detail'));
 
-    controller.abort(new Error('private abort reason'));
-
-    await assertion;
-    expect(response.destroy).toHaveBeenCalledTimes(1);
-    expect(call?.request.destroy).toHaveBeenCalledTimes(1);
-    response.emit('data', Buffer.from('"late"}'));
-    response.emit('end');
-    response.emit('close');
-    call?.request.emit('close');
+    await expectFailure(pending, 'UNAVAILABLE');
   });
+
+  it.each(['content-length', 'chunked'] as const)(
+    'aborts while a %s response body is streaming and ignores all late body events',
+    async (framing) => {
+      installLookup();
+      const controller = new AbortController();
+      const pending = new NodeHttpsBalanceJsonRpcTransport(config()).exchange(
+        rpc(),
+        controller.signal,
+      );
+      const call = httpsCalls[0];
+      secure(call!);
+      const response =
+        framing === 'chunked'
+          ? chunkedJsonResponse()
+          : new FakeResponse(200, ['Content-Type', 'application/json', 'Content-Length', '20']);
+      call?.respond(response as unknown as IncomingMessage);
+      response.emit('data', Buffer.from('{"private":'));
+      const assertion = expectFailure(pending, 'UNAVAILABLE');
+
+      controller.abort(new Error('private abort reason'));
+
+      await assertion;
+      expect(response.destroy).toHaveBeenCalledTimes(1);
+      expect(call?.request.destroy).toHaveBeenCalledTimes(1);
+      response.emit('data', Buffer.from('"late"}'));
+      response.emit('end');
+      response.emit('close');
+      call?.request.emit('close');
+    },
+  );
 
   it('sanitizes synchronous DNS, HTTPS, request, and cleanup failures', async () => {
     const secret = 'secret-provider-host-detail';
