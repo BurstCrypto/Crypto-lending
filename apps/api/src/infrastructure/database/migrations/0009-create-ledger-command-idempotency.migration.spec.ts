@@ -63,6 +63,7 @@ describe('createLedgerCommandIdempotencyMigration', () => {
       '0027',
       '0028',
       '0029',
+      '0030',
     ]);
     expect(DATABASE_TEST_SCHEMA_MIGRATION_LIST.map(({ id }) => id)).toEqual([
       '0001',
@@ -93,9 +94,10 @@ describe('createLedgerCommandIdempotencyMigration', () => {
       '0027',
       '0028',
       '0029',
+      '0030',
     ]);
-    expect(DATABASE_MIGRATION_LIST.at(-21)).toBe(createLedgerCommandIdempotencyMigrationV0009);
-    expect(DATABASE_TEST_SCHEMA_MIGRATION_LIST.at(-21)).toBe(
+    expect(DATABASE_MIGRATION_LIST.at(-22)).toBe(createLedgerCommandIdempotencyMigrationV0009);
+    expect(DATABASE_TEST_SCHEMA_MIGRATION_LIST.at(-22)).toBe(
       createLedgerCommandIdempotencyTestSchemaMigrationV0009,
     );
   });

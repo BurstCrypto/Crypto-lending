@@ -641,7 +641,7 @@ const REVIEWED_PROVIDER_POSITION_READ_ARTIFACT_SHA256 = Object.freeze({
   providerPositionChainAnchorEvidenceMigrationSource:
     '9ef52244aa0e52e2a6da7350b43a6a4438e47a721bdd5dc34637a0d2c0fec614',
   providerPositionMigrationIndexSource:
-    '4b204ef7d52c14913e29754cb74ecbaf3d35c773105071e216c4c8435ec5070c',
+    'ae1cd1c7d06dad8dd70775837df9656cf49c3a4897068cb492d78248a24b45b0',
   providerPositionAdmissionCoordinatorSource:
     'bcd6324695359cd3ef43ac6620da2b756c379c75fe5c0e99897791996b3312eb',
   providerPositionDeadlineRunnerSource:
@@ -832,7 +832,7 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
     'f61ff9f4ad74e6067203ee1078502955c82af0acde164ff783970e5bc27949b0',
   providerPositionChainAnchorEvidenceMigrationSource:
     '9ef52244aa0e52e2a6da7350b43a6a4438e47a721bdd5dc34637a0d2c0fec614',
-  migrationIndexSource: '4b204ef7d52c14913e29754cb74ecbaf3d35c773105071e216c4c8435ec5070c',
+  migrationIndexSource: 'ae1cd1c7d06dad8dd70775837df9656cf49c3a4897068cb492d78248a24b45b0',
   releaseManifestSource: '234f2e397055af0884b45a599b7767fe9e24952b7978b769af4a46c73c1653ea',
   productionContainerValidatorSource:
     '56e219a54c8deeb08b287098915b78ec777303fa2df8bb076e046e26bbf4ce8c',
