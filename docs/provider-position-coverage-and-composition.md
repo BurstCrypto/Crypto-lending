@@ -7,8 +7,10 @@ reader from its owned `PostgresService` and passes it only to a newly constructe
 assembler; it accepts neither a raw durable reader nor a raw trusted-assembly
 bypass. None of this graph is registered in Nest or reachable through
 HTTP/RPC/API runtime wiring. Migration `0029` supplies the reader's dormant
-database evidence boundary, but no evidence writer, populated evidence, runtime
-activation, deployment, or live proof exists.
+database evidence boundary. An authority-free two-source candidate producer now
+exists behind an exact source port, but its checked-in mainnet registry is empty
+and `NOT_APPROVED`; no concrete source, owner-authorized writer, populated
+evidence, runtime activation, deployment, or live proof exists.
 
 ## Exact coverage (version 1)
 
@@ -56,8 +58,9 @@ The offline production preflight now pins this reader together with the
 durable-anchor reader port, concrete PostgreSQL reader, dormant
 trusted-chain-assessment assembler, exact mainnet launch-network policy,
 coverage, observation, assessment, observation-policy, trusted-assembly,
-admission, module, barrel, and controller sources together with migration `0029`
-and the migration index as one selected twenty-seven-file dormant
+admission, source port, two-source producer, module, barrel, and controller
+sources together with migration `0029` and the migration index as one selected
+twenty-nine-file dormant
 critical-source slice. A passing local source inspection does not prove
 recursive dependency closure, whole-application registration absence, populated
 or deployed evidence, or live behavior. It does pin the private construction
@@ -83,9 +86,17 @@ concrete application reader uses only the exact cancellable migration read,
 strictly reviews a zero-or-one-row result, and seals each accepted assessment to
 the exact request identity; it exposes no write function. Admission, observation,
 reader, and database validation all derive the same chain-global observation ID
-from the exact anchor. There is still no
-evidence writer/producer, populated evidence claim, runtime registration or
-activation, deployment, or live evidence. Consequently all three
+from the exact anchor. The dormant two-source producer drains two
+descriptor-captured, same-signal source reads, requires authenticated pair
+agreement, derives pair-bound proof hashes, and seals the exact 23-argument
+record candidate to the original request in a private `WeakMap`. Its checked-in
+mainnet pair registry is empty and `NOT_APPROVED`, and it has no persistence or
+runtime capability. Pair agreement on finalized heads does not prove the
+selected candidate anchor itself is finalized: the artifact remains
+`PROVISIONAL`, `DISPLAY_ONLY`, and `mayAuthorizeFinancialAction: false` until a
+separate candidate-finalization gate passes. There is still no live source implementation,
+owner-authorized evidence writer, populated evidence claim, runtime registration
+or activation, deployment, or live evidence. Consequently all three
 provider-position registration blockers remain
 `MISSING`, and the live-provider count remains zero.
 

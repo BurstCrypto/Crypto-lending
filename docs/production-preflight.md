@@ -183,7 +183,8 @@ into deployed or production-ready evidence.
 `PROVIDER_POSITION_READ_BOUNDARY` independently snapshots and byte-pins the
 coverage-aware reader v3 port, trusted-assessment assembly port,
 durable-chain-anchor reader port, concrete PostgreSQL durable-anchor reader,
-dormant trusted-chain-assessment assembler,
+dormant chain-anchor evidence source port and two-source producer, dormant
+trusted-chain-assessment assembler,
 admission coordinator, concrete Node deadline runner, wallet-roster reader port
 and adapter, wallet service and repository port, PostgreSQL wallet repository,
 shared PostgreSQL cancellation service, dormant runtime-budget resource,
@@ -191,7 +192,7 @@ private dormant runtime composition, infrastructure configuration loader,
 runtime PostgreSQL pool factory, coverage/observation/assessment/policy domains,
 exact Ethereum/Solana mainnet launch-network policy, migration `0029`, the
 migration index, feature module, feature barrel, and HTTP controller as one
-selected twenty-seven-file critical-source slice. Within that
+selected twenty-nine-file critical-source slice. Within that
 slice, the local semantic inspection requires an exact account/correlation
 reader request with no caller-supplied evaluation time and an exact frozen
 result envelope containing the server-authored parser time and covered-snapshot
@@ -250,6 +251,35 @@ and migration all derive the same chain-global identity from the exact anchor:
 `ethereum-block-<blockNumber>` or `solana-slot-<slot>`. A request-scoped or
 otherwise arbitrary observation ID therefore cannot cross any stage of this
 boundary.
+
+The dormant evidence producer accepts one already-observed, canonical selected
+source identity and anchor, then requires the exact approved pair's primary and
+corroborating source implementations to attest to that same chain fact. It
+descriptor-captures both source methods, gives both reads the same
+producer-authored evaluation time, caller deadline, and abort signal, and uses
+`Promise.allSettled` so both started reads settle before failure is returned.
+Both opaque capabilities must authenticate against their exact request objects
+before either attestation is inspected. The producer rejects reused source
+receivers or capabilities, source-pair, current-head, or finalized-head
+disagreement, noncanonical anchors/times, stale head or finality facts, and
+invalid proof digests. It derives the three stored proof hashes from the
+ordered two-source witness pair and emits only an authority-free opaque
+candidate containing migration `0029`'s exact 23 record arguments. A private
+`WeakMap` binds that candidate to the exact producer request; copies and request
+clones fail review.
+
+The agreed finalized heads do not establish that the selected candidate anchor
+itself is finalized. Migration `0029` and the producer deliberately leave the
+artifact `PROVISIONAL`, `DISPLAY_ONLY`, and
+`mayAuthorizeFinancialAction: false`; a separate candidate-finalization gate is
+required before any ledger or financial authority could consume it.
+
+The checked-in mainnet source-pair registry is exactly empty and
+`NOT_APPROVED`, and no concrete source binding is checked in. The producer has
+no database writer, transport, endpoint, credential, environment lookup,
+provider SDK, Nest decorator, module registration, barrel export, or runtime
+composition. Its existence therefore cannot populate migration `0029`, contact
+a chain, or change any production blocker.
 
 Migration `0029` adds a dormant, append-only PostgreSQL boundary for global
 Ethereum and Solana chain-anchor evidence plus append-only `INVALIDATED` and
@@ -320,8 +350,10 @@ Launch readiness remains blocked by
 `PROVIDER_POSITION_TRUSTED_ASSESSMENT_FEATURE_REGISTRATION_MISSING`, plus
 `PROVIDER_POSITION_DEADLINE_RUNNER_FEATURE_REGISTRATION_MISSING`. The concrete
 assembler, PostgreSQL reader, and migration do not clear any registration
-blocker: no evidence writer or producer is composed, no populated evidence rows
-are claimed, the private composition wiring is not registered in the
+blocker: the dormant producer is not composed, its checked-in production
+registry approves no pair, no live evidence-source implementation or
+owner-authorized database writer adapter exists, and no populated evidence rows
+are claimed. The private composition wiring is not registered in the
 Nest/module/HTTP graph, no runtime is activated, and no deployment or live
 evidence exists. The live-provider count therefore remains zero. The concrete
 runner remains dormant and unregistered. Provider sources must cooperate with

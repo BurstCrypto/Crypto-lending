@@ -131,7 +131,8 @@ evaluation-to-deadline span at 30 seconds and rechecks the deadline, approval,
 current-head, and finality freshness against database time after wallet and
 evidence locks.
 
-Production still needs an evidence writer/producer, populated evidence,
+Production still needs reviewed live implementations for both members of each
+approved source pair, an owner-authorized evidence writer, populated evidence,
 production registration, and deployed proof. The local private wiring constructs
 the PostgreSQL durable reader unconditionally from the same owned
 `PostgresService`, after the deadline runner and before the assembler and
@@ -154,19 +155,21 @@ ordinary-query fallback. Admission source review, observation parsing, this
 reader, and migration `0029` all derive the same chain-global observation ID
 from the exact anchor. The private dormant runtime composition continues to
 expose only its frozen null-prototype reader v3 sub-capability. No evidence
-writer/producer, populated evidence rows, registered production composition,
-runtime activation, deployed binding, or live chain evidence exists, so neither
+source or writer is composed, no source pair is approved, and no populated
+evidence rows, registered production composition, runtime activation, deployed
+binding, or live chain evidence exists, so neither
 the PostgreSQL reader nor `admitAndAssemble` is a live application path. All three
 provider-position registration blockers remain `MISSING`, and the live-provider
 count remains zero.
 
 The offline production preflight now byte-pins this coordinator, assembly port,
-durable-anchor reader port, concrete PostgreSQL durable reader, dormant
+durable-anchor reader port, concrete PostgreSQL durable reader, chain-anchor
+evidence source port, dormant two-source evidence producer, dormant
 trusted-chain-assessment assembler, exact
 mainnet launch-network policy, concrete deadline runner, complete wallet-roster
 cancellation chain, shared PostgreSQL cancellation service, runtime-budget
 resource, private dormant composition, migration `0029`, and migration index
-with a selected twenty-seven-file
+with a selected twenty-nine-file
 reader/domain/infrastructure/database/module/barrel/controller critical-source
 slice.
 Its local check rejects trust, timing, source-method substitution, active-controller
@@ -180,10 +183,37 @@ does not prove recursive dependency closure or scan every application module,
 and it performs no provider, chain, network, cloud, secret, transaction, or
 billable operation.
 
+The selected slice's authority-free producer accepts one canonical
+selected-source observation and uses the configured corroborating member only
+as an independent witness to the same chain fact. Both descriptor-captured
+reads receive the same producer-authored evaluation time, exclusive deadline,
+and abort signal and are drained with `Promise.allSettled`. Both opaque results
+must authenticate against their exact request objects before inspection;
+distinct receiver and capability identities, exact current/finalized head
+agreement, strict timing and freshness, and nonzero SHA-256 identity,
+live-capability, and lineage proofs are required. The ordered pair derives the
+stored proof hashes, and the producer issues only an opaque, exact 23-argument
+migration-record candidate bound to its original request in a private
+`WeakMap`.
+
+Agreement on the two sources' finalized heads does not prove that the selected
+candidate anchor itself is finalized. Migration `0029` and this producer keep
+the artifact `PROVISIONAL`, `DISPLAY_ONLY`, and
+`mayAuthorizeFinancialAction: false`. A separately reviewed
+candidate-finalization gate is required before any ledger mutation or financial
+authority may consume it.
+
+The checked-in mainnet source-pair registry remains empty and `NOT_APPROVED`.
+No concrete source, endpoint, credential, database writer, module provider,
+barrel export, composition dependency, or runtime activation is added, so all
+three registration blockers remain `MISSING` and the live-provider count
+remains zero.
+
 That production change must also provide:
 
 - reviewed policy bindings with two genuinely independent operators/source families per active Ethereum and Solana target;
-- live source implementations that enforce account and wallet ownership boundaries;
+- upstream live provider-position readers that enforce account and wallet ownership boundaries;
+- wallet-free chain-witness implementations for both independently operated members of every approved pair;
 - transport-level timeouts, cancellation, authentication, and observability;
 - durable continuity floors rather than accepting an upstream service's unsupported history claim;
 - disagreement quarantine and operator alerting;

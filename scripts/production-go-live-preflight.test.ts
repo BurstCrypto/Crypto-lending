@@ -436,6 +436,20 @@ const PROVIDER_POSITION_READ_ARTIFACTS = Object.freeze({
     ),
     'utf8',
   ),
+  providerPositionChainAnchorEvidenceSourcePortSource: readFileSync(
+    resolve(
+      __dirname,
+      '../apps/api/src/mainnet-platforms/application/ports/provider-position-chain-anchor-evidence-source.port.ts',
+    ),
+    'utf8',
+  ),
+  providerPositionChainAnchorEvidenceProducerSource: readFileSync(
+    resolve(
+      __dirname,
+      '../apps/api/src/mainnet-platforms/application/dormant-provider-position-chain-anchor-evidence.producer.ts',
+    ),
+    'utf8',
+  ),
   providerPositionPostgresDurableChainAnchorReaderSource: readFileSync(
     resolve(
       __dirname,
@@ -1119,7 +1133,7 @@ function mutateProviderPositionReadArtifact(
 }
 
 test('provider-position read inspection pins the exact dormant critical source slice', () => {
-  assert.equal(Object.keys(PROVIDER_POSITION_READ_ARTIFACTS).length, 27);
+  assert.equal(Object.keys(PROVIDER_POSITION_READ_ARTIFACTS).length, 29);
   const inspected = inspectProviderPositionReadBoundaryArtifacts(PROVIDER_POSITION_READ_ARTIFACTS);
   assert.deepEqual(inspected, EXPECTED_DORMANT_PROVIDER_POSITION_READ_BOUNDARY);
   assert.equal(Object.isFrozen(inspected), true);
@@ -1142,14 +1156,278 @@ test('provider-position read inspection pins the exact dormant critical source s
 
 test('provider-position read semantic gate contains no disabled-check bypass', () => {
   const source = readFileSync(PREFLIGHT_SCRIPT_PATH, 'utf8');
+  const producerStart = source.indexOf(
+    'function hasDormantProviderPositionChainAnchorEvidenceProducerContract(',
+  );
   const start = source.indexOf('function hasDormantProviderPositionReadBoundaryContract(');
   const end = source.indexOf('\nfunction ', start + 1);
-  assert.ok(start >= 0 && end > start);
-  const semanticGateSource = source.slice(start, end).replaceAll('!== true ||', '!== true OR');
+  assert.ok(producerStart >= 0 && start > producerStart && end > start);
+  const semanticGateSource = source
+    .slice(producerStart, end)
+    .replaceAll('!== true ||', '!== true OR');
   assert.doesNotMatch(
     semanticGateSource,
     /(?:\btrue\s*\|\||\|\|\s*true\b|\bfalse\s*&&|&&\s*false\b|\.(?:skip|todo)\s*\()/u,
   );
+});
+
+test('provider-position read inspection rejects dormant two-source evidence producer drift', () => {
+  const mutations: readonly (readonly [
+    keyof ProviderPositionReadBoundaryArtifactSources,
+    string,
+    string,
+  ])[] = [
+    [
+      'providerPositionChainAnchorEvidenceSourcePortSource',
+      'export const PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_SOURCE_VERSION = 1 as const;',
+      'export const PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_SOURCE_VERSION = 2 as const;',
+    ],
+    [
+      'providerPositionChainAnchorEvidenceSourcePortSource',
+      'readonly mayPersist: false;',
+      'readonly mayPersist: true;',
+    ],
+    [
+      'providerPositionChainAnchorEvidenceSourcePortSource',
+      '): Promise<unknown>;',
+      '): Promise<ProviderPositionChainAnchorEvidenceSourceAttestationV1>;',
+    ],
+    [
+      'providerPositionChainAnchorEvidenceProducerSource',
+      "approvalStatus: 'NOT_APPROVED' as const,",
+      "approvalStatus: 'APPROVED' as const,",
+    ],
+    [
+      'providerPositionChainAnchorEvidenceProducerSource',
+      'pairs: Object.freeze([]) as readonly ProviderPositionChainAnchorEvidenceSourcePairV1[],',
+      'pairs: Object.freeze([{}]) as readonly ProviderPositionChainAnchorEvidenceSourcePairV1[],',
+    ],
+    [
+      'providerPositionChainAnchorEvidenceProducerSource',
+      'primary.sourceFamilyId === corroborating.sourceFamilyId ||',
+      'false ||',
+    ],
+    [
+      'providerPositionChainAnchorEvidenceProducerSource',
+      'compare(identityKey(primary), identityKey(corroborating)) >= 0',
+      'compare(identityKey(primary), identityKey(corroborating)) < 0',
+    ],
+    [
+      'providerPositionChainAnchorEvidenceProducerSource',
+      'candidate.approvedAt,',
+      'void candidate.approvedAt,',
+    ],
+    [
+      'providerPositionChainAnchorEvidenceProducerSource',
+      '[candidate.primary.sourceFamilyId, candidate.primary.sourceId, candidate.primary.sourceKind],',
+      '[candidate.primary.sourceFamilyId, candidate.primary.sourceId],',
+    ],
+    [
+      'providerPositionChainAnchorEvidenceProducerSource',
+      'current !== Object.prototype &&',
+      'current !== null &&',
+    ],
+    [
+      'providerPositionChainAnchorEvidenceProducerSource',
+      "const readAttestation = stableDataMember(receiver, 'readAttestation', 'INVALID_CONFIGURATION');",
+      'const readAttestation = receiver.readAttestation;',
+    ],
+    [
+      'providerPositionChainAnchorEvidenceProducerSource',
+      'new Set(normalized.map(({ receiver }) => receiver)).size !== normalized.length ||',
+      'false ||',
+    ],
+    [
+      'providerPositionChainAnchorEvidenceProducerSource',
+      'identity.sourceKind === request.sourceKind,',
+      'true,',
+    ],
+    [
+      'providerPositionChainAnchorEvidenceProducerSource',
+      'signal: request.signal,',
+      'signal: new AbortController().signal,',
+    ],
+    [
+      'providerPositionChainAnchorEvidenceProducerSource',
+      'chainAnchor: request.chainAnchor,',
+      'chainAnchor: request.continuityFloor,',
+    ],
+    [
+      'providerPositionChainAnchorEvidenceProducerSource',
+      'request.deadlineAt.milliseconds - evaluatedAt.milliseconds > MAX_DEADLINE_MILLISECONDS',
+      'request.deadlineAt.milliseconds - evaluatedAt.milliseconds > 300_000',
+    ],
+    [
+      'providerPositionChainAnchorEvidenceProducerSource',
+      'const [primaryResult, corroboratingResult] = await Promise.allSettled([',
+      'const [primaryResult, corroboratingResult] = await Promise.all([',
+    ],
+    [
+      'providerPositionChainAnchorEvidenceProducerSource',
+      'settledAt.milliseconds >= request.deadlineAt.milliseconds ||',
+      'settledAt.milliseconds > request.deadlineAt.milliseconds ||',
+    ],
+    [
+      'providerPositionChainAnchorEvidenceProducerSource',
+      'currentPair(this.#registry, request.networkId, settledAt.milliseconds);',
+      'void settledAt;',
+    ],
+    [
+      'providerPositionChainAnchorEvidenceProducerSource',
+      'if (!primaryAuthentic || !corroboratingAuthentic) {',
+      'if (!primaryAuthentic && !corroboratingAuthentic) {',
+    ],
+    [
+      'providerPositionChainAnchorEvidenceProducerSource',
+      'verifiedAt.milliseconds >= request.deadlineAt.milliseconds ||',
+      'verifiedAt.milliseconds > request.deadlineAt.milliseconds ||',
+    ],
+    [
+      'providerPositionChainAnchorEvidenceProducerSource',
+      'verifiedAt.milliseconds >= request.deadlineAt.milliseconds ||\n      aborted(request.signal)',
+      'verifiedAt.milliseconds >= request.deadlineAt.milliseconds ||\n      false',
+    ],
+    [
+      'providerPositionChainAnchorEvidenceProducerSource',
+      'currentPair(this.#registry, request.networkId, verifiedAt.milliseconds);',
+      'void verifiedAt;',
+    ],
+    [
+      'providerPositionChainAnchorEvidenceProducerSource',
+      'primaryResult.value === corroboratingResult.value',
+      'false',
+    ],
+    [
+      'providerPositionChainAnchorEvidenceProducerSource',
+      'request,\n      evaluatedAt,\n      verifiedAt,',
+      'request,\n      evaluatedAt,\n      settledAt,',
+    ],
+    [
+      'providerPositionChainAnchorEvidenceProducerSource',
+      'evaluatedAt.milliseconds > assessedAt.milliseconds ||',
+      'request.observedAt.milliseconds > assessedAt.milliseconds ||',
+    ],
+    [
+      'providerPositionChainAnchorEvidenceProducerSource',
+      'assessedAt.milliseconds > completed.milliseconds ||',
+      'assessedAt.milliseconds < completed.milliseconds ||',
+    ],
+    [
+      'providerPositionChainAnchorEvidenceProducerSource',
+      '!sameAnchor(primary.currentHead, corroborating.currentHead) ||',
+      'false ||',
+    ],
+    [
+      'providerPositionChainAnchorEvidenceProducerSource',
+      '!sameAnchor(primary.finalizedHead, corroborating.finalizedHead)',
+      'false',
+    ],
+    [
+      'providerPositionChainAnchorEvidenceProducerSource',
+      'assessedAt.milliseconds >= request.deadlineAt.milliseconds ||',
+      'assessedAt.milliseconds > request.deadlineAt.milliseconds ||',
+    ],
+    [
+      'providerPositionChainAnchorEvidenceProducerSource',
+      'currentPair(this.#registry, request.networkId, assessedAt.milliseconds);',
+      'void assessedAt;',
+    ],
+    [
+      'providerPositionChainAnchorEvidenceProducerSource',
+      'completedMilliseconds >= currentHeadAdvancedAtMilliseconds + currentLifetime ||',
+      'completedMilliseconds > currentHeadAdvancedAtMilliseconds + currentLifetime ||',
+    ],
+    [
+      'providerPositionChainAnchorEvidenceProducerSource',
+      'reviewedRegistry.fingerprintSha256,',
+      'void reviewedRegistry.fingerprintSha256,',
+    ],
+    [
+      'providerPositionChainAnchorEvidenceProducerSource',
+      'corroborating.lineageProofSha256,',
+      'primary.lineageProofSha256,',
+    ],
+    [
+      'providerPositionChainAnchorEvidenceProducerSource',
+      'primary.currentHeadAdvancedAt.value,',
+      'void primary.currentHeadAdvancedAt.value,',
+    ],
+    [
+      'providerPositionChainAnchorEvidenceProducerSource',
+      'const identityProofSha256 = aggregateProof(',
+      'const identityProofSha256 = primary.identityProofSha256 || aggregateProof(',
+    ],
+    [
+      'providerPositionChainAnchorEvidenceProducerSource',
+      'if (new Set([identityProofSha256, liveCapabilityProofSha256, lineageProofSha256]).size !== 3) {',
+      'if (false) {',
+    ],
+    [
+      'providerPositionChainAnchorEvidenceProducerSource',
+      'request.sourceObservationId,\n      request.continuityFloor,',
+      'selectedPair.corroborating.sourceId,\n      request.continuityFloor,',
+    ],
+    [
+      'providerPositionChainAnchorEvidenceProducerSource',
+      'readonly #issued = new WeakMap<object, IssuedCandidate>();',
+      'readonly #issued = new Map<object, IssuedCandidate>();',
+    ],
+    [
+      'providerPositionChainAnchorEvidenceProducerSource',
+      'issuedAt.milliseconds >= request.deadlineAt.milliseconds ||',
+      'issuedAt.milliseconds > request.deadlineAt.milliseconds ||',
+    ],
+    [
+      'providerPositionChainAnchorEvidenceProducerSource',
+      'currentPair(this.#registry, request.networkId, issuedAt.milliseconds);',
+      'void issuedAt;',
+    ],
+    [
+      'providerPositionChainAnchorEvidenceProducerSource',
+      'if (issued === undefined || issued.request !== request || issued.candidate !== capability) {',
+      'if (issued === undefined) {',
+    ],
+    [
+      'providerPositionChainAnchorEvidenceProducerSource',
+      'currentPair(this.#registry, issued.networkId, reviewedAt.milliseconds);',
+      'void reviewedAt;',
+    ],
+    [
+      'providerPositionChainAnchorEvidenceProducerSource',
+      "import { createHash } from 'node:crypto';",
+      "import { request } from 'node:https';",
+    ],
+    [
+      'providerPositionChainAnchorEvidenceProducerSource',
+      'const PRODUCE_REQUEST_KEYS = Object.freeze([',
+      'void process.env.PROVIDER_ENDPOINT;\nconst PRODUCE_REQUEST_KEYS = Object.freeze([',
+    ],
+    [
+      'providerPositionChainAnchorEvidenceProducerSource',
+      'const PRODUCE_REQUEST_KEYS = Object.freeze([',
+      "void database.query('SELECT record_provider_position_chain_anchor_evidence()');\nconst PRODUCE_REQUEST_KEYS = Object.freeze([",
+    ],
+    [
+      'mainnetPlatformsModuleSource',
+      'providers: [MainnetPlatformDirectoryService, MainnetPlatformsPrivacyInterceptor],',
+      'providers: [MainnetPlatformDirectoryService, MainnetPlatformsPrivacyInterceptor, DormantProviderPositionChainAnchorEvidenceProducer],',
+    ],
+    [
+      'mainnetPlatformsIndexSource',
+      "export { MainnetPlatformDirectoryService } from './application/mainnet-platform-directory.service';",
+      "export { DormantProviderPositionChainAnchorEvidenceProducer } from './application/dormant-provider-position-chain-anchor-evidence.producer';",
+    ],
+  ];
+
+  for (const [key, approved, rejected] of mutations) {
+    assert.deepEqual(
+      inspectProviderPositionReadBoundaryArtifacts(
+        mutateProviderPositionReadArtifact(key, approved, rejected),
+      ),
+      INVALID_PROVIDER_POSITION_READ_BOUNDARY,
+      `${key}: ${approved}`,
+    );
+  }
 });
 
 test('provider-position read inspection rejects dormant durable evidence and migration drift', () => {
