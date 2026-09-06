@@ -1177,6 +1177,13 @@ function parseSourceEvidence(
   }
   const continuityFloor = parseAnchor(record.continuityFloor, job.target.networkId);
   const chainAnchor = parseAnchor(record.chainAnchor, job.target.networkId);
+  const expectedSourceObservationId =
+    chainAnchor.kind === 'EVM_BLOCK'
+      ? `ethereum-block-${chainAnchor.blockNumber}`
+      : `solana-slot-${chainAnchor.slot}`;
+  if (record.sourceObservationId !== expectedSourceObservationId) {
+    return fail('SOURCE_MISMATCH');
+  }
   assertNotRegressing(continuityFloor, chainAnchor);
   const positions = dataArray(
     record.positions,

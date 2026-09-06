@@ -30,11 +30,11 @@ import {
   type MainnetProviderPositionReaderV3,
   type ReadMainnetProviderPositionsRequestV3,
 } from '../application/ports/mainnet-provider-position-reader.port';
-import type { ProviderPositionDurableChainAnchorReaderPort } from '../application/ports/provider-position-durable-chain-anchor-reader.port';
 import { MAINNET_PROVIDER_POSITION_COVERAGE_VERSION } from '../domain/mainnet-provider-position-coverage';
 import { MAINNET_PROVIDER_POSITION_SCHEMA_VERSION } from '../domain/mainnet-provider-position-observation';
 import { DormantProviderPositionTrustedChainAssessmentAssembler } from './dormant-provider-position-trusted-chain-assessment.assembler';
 import { NodeProviderPositionAdmissionDeadlineRunner } from './node-provider-position-admission-deadline.runner';
+import { PostgresProviderPositionDurableChainAnchorReader } from './postgres-provider-position-durable-chain-anchor.reader';
 import {
   createDormantProviderPositionAdmissionRuntimeResource,
   ProviderPositionAdmissionRuntimeBoundsError,
@@ -49,7 +49,6 @@ const DEPENDENCY_KEYS = Object.freeze([
   'sourceBindings',
   'clock',
 ] as const);
-const OPTIONAL_DEPENDENCY_KEYS = Object.freeze(['durableChainAnchorReader'] as const);
 const WALLET_CONFIG_KEYS = Object.freeze([
   'mode',
   'publicOrigin',
@@ -73,7 +72,6 @@ export interface DormantProviderPositionAdmissionRuntimeCompositionDependencies 
   readonly requiredPolicyFingerprintSha256: string;
   readonly sourceBindings: readonly ProviderPositionAdmissionSourceBinding[];
   readonly clock: ProviderPositionAdmissionClock;
-  readonly durableChainAnchorReader?: ProviderPositionDurableChainAnchorReaderPort;
 }
 
 export interface DormantProviderPositionAdmissionRuntimeComposition {
@@ -107,7 +105,6 @@ interface ReviewedDependencies {
   readonly requiredPolicyFingerprintSha256: string;
   readonly sourceBindings: readonly ProviderPositionAdmissionSourceBinding[];
   readonly clock: ProviderPositionAdmissionClock & WalletRegistrationClock;
-  readonly durableChainAnchorReader: ProviderPositionDurableChainAnchorReaderPort | undefined;
 }
 
 interface CloseHandles {
@@ -386,7 +383,7 @@ function walletRegistrationConfigSnapshot(value: unknown): EnabledWalletRegistra
 }
 
 function reviewedDependencies(value: unknown): ReviewedDependencies {
-  const record = exactDataRecord(value, DEPENDENCY_KEYS, OPTIONAL_DEPENDENCY_KEYS);
+  const record = exactDataRecord(value, DEPENDENCY_KEYS);
   if (
     typeof record.requiredPolicyFingerprintSha256 !== 'string' ||
     !SHA256.test(record.requiredPolicyFingerprintSha256)
@@ -397,11 +394,6 @@ function reviewedDependencies(value: unknown): ReviewedDependencies {
     record.sourceBindings,
     MAX_SOURCE_BINDINGS,
   ) as readonly ProviderPositionAdmissionSourceBinding[];
-  const durableChainAnchorReader =
-    'durableChainAnchorReader' in record
-      ? (record.durableChainAnchorReader as
-          ProviderPositionDurableChainAnchorReaderPort | undefined)
-      : undefined;
   return Object.freeze({
     postgresConfig: record.postgresConfig as RuntimePostgresPoolConfig,
     admissionOptions: record.admissionOptions as ProviderPositionAdmissionOptions,
@@ -410,7 +402,6 @@ function reviewedDependencies(value: unknown): ReviewedDependencies {
     requiredPolicyFingerprintSha256: record.requiredPolicyFingerprintSha256,
     sourceBindings,
     clock: capturedClock(record.clock),
-    durableChainAnchorReader,
   });
 }
 
@@ -632,12 +623,9 @@ export async function createDormantProviderPositionAdmissionRuntimeComposition(
     );
     const walletReader = new RegisteredPortfolioWalletReader(walletService);
     const deadlineRunner = new NodeProviderPositionAdmissionDeadlineRunner(dependencies.clock);
+    const durableChainAnchorReader = new PostgresProviderPositionDurableChainAnchorReader(postgres);
     const trustedChainAssessmentAssembly =
-      dependencies.durableChainAnchorReader === undefined
-        ? undefined
-        : new DormantProviderPositionTrustedChainAssessmentAssembler(
-            dependencies.durableChainAnchorReader,
-          );
+      new DormantProviderPositionTrustedChainAssessmentAssembler(durableChainAnchorReader);
     const coordinator = new DormantProviderPositionAdmissionCoordinator(
       dependencies.policyInput,
       dependencies.requiredPolicyFingerprintSha256,

@@ -22,9 +22,9 @@ import {
   type ProviderPositionAdmissionReadOnlyAssemblyV1,
   type ProviderPositionAdmissionSourceBinding,
 } from '../application/provider-position-admission.coordinator';
-import type { ProviderPositionDurableChainAnchorReaderPort } from '../application/ports/provider-position-durable-chain-anchor-reader.port';
 import { DormantProviderPositionTrustedChainAssessmentAssembler } from './dormant-provider-position-trusted-chain-assessment.assembler';
 import { NodeProviderPositionAdmissionDeadlineRunner } from './node-provider-position-admission-deadline.runner';
+import { PostgresProviderPositionDurableChainAnchorReader } from './postgres-provider-position-durable-chain-anchor.reader';
 import {
   createDormantProviderPositionAdmissionRuntimeResource,
   ProviderPositionAdmissionRuntimeBoundsError,
@@ -63,6 +63,9 @@ jest.mock('../../portfolio/infrastructure/registered-portfolio-wallet-reader', (
 jest.mock('./node-provider-position-admission-deadline.runner', () => ({
   NodeProviderPositionAdmissionDeadlineRunner: jest.fn(),
 }));
+jest.mock('./postgres-provider-position-durable-chain-anchor.reader', () => ({
+  PostgresProviderPositionDurableChainAnchorReader: jest.fn(),
+}));
 jest.mock('../application/provider-position-admission.coordinator', () => ({
   DormantProviderPositionAdmissionCoordinator: jest.fn(),
   isIssuedProviderPositionAdmissionReadOnlyAssemblyV1: jest.fn(),
@@ -74,6 +77,7 @@ const MockedWalletRepository = jest.mocked(PostgresWalletRegistrationRepository)
 const MockedWalletService = jest.mocked(WalletRegistrationService);
 const MockedWalletReader = jest.mocked(RegisteredPortfolioWalletReader);
 const MockedDeadlineRunner = jest.mocked(NodeProviderPositionAdmissionDeadlineRunner);
+const MockedDurableAnchorReader = jest.mocked(PostgresProviderPositionDurableChainAnchorReader);
 const MockedCoordinator = jest.mocked(DormantProviderPositionAdmissionCoordinator);
 const mockedAssemblyReviewer = jest.mocked(isIssuedProviderPositionAdmissionReadOnlyAssemblyV1);
 
@@ -180,11 +184,11 @@ function sourceBindings(): readonly ProviderPositionAdmissionSourceBinding[] {
 
 const durableAnchorRead = jest.fn(async (): Promise<unknown> => undefined);
 const durableAnchorVerify = jest.fn((): boolean => false);
-const durableAnchorReader: ProviderPositionDurableChainAnchorReaderPort = Object.freeze({
+const durableAnchorReader = Object.freeze({
   readerVersion: 1,
   readAnchor: durableAnchorRead,
   verifyAnchor: durableAnchorVerify,
-});
+}) as unknown as PostgresProviderPositionDurableChainAnchorReader;
 
 function dependencies(
   overrides: Partial<DormantProviderPositionAdmissionRuntimeCompositionDependencies> = {},
@@ -197,7 +201,6 @@ function dependencies(
     requiredPolicyFingerprintSha256: POLICY_FINGERPRINT,
     sourceBindings: sourceBindings(),
     clock: { now: jest.fn(() => new Date('2026-09-05T21:00:00.000Z')) },
-    durableChainAnchorReader: durableAnchorReader,
     ...overrides,
   };
 }
@@ -330,6 +333,7 @@ describe('createDormantProviderPositionAdmissionRuntimeComposition', () => {
     MockedWalletService.mockImplementation(() => walletService);
     MockedWalletReader.mockImplementation(() => walletReader);
     MockedDeadlineRunner.mockImplementation(() => deadlineRunner);
+    MockedDurableAnchorReader.mockImplementation(() => durableAnchorReader);
     MockedCoordinator.mockImplementation(() => coordinator);
   });
 
@@ -349,6 +353,7 @@ describe('createDormantProviderPositionAdmissionRuntimeComposition', () => {
     expect(walletServiceArguments?.[1]).not.toBe(input.walletRegistrationConfig);
     expect(Object.isFrozen(walletServiceArguments?.[1])).toBe(true);
     expect(MockedWalletReader).toHaveBeenCalledWith(walletService);
+    expect(MockedDurableAnchorReader).toHaveBeenCalledWith(postgres);
 
     const capturedClock = MockedDeadlineRunner.mock.calls[0]?.[0];
     expect(capturedClock).toBeDefined();
@@ -372,7 +377,7 @@ describe('createDormantProviderPositionAdmissionRuntimeComposition', () => {
       DormantProviderPositionTrustedChainAssessmentAssembler,
     );
     expect(trustedChainAssessmentAssembly).toMatchObject({ assemblyVersion: 1 });
-    expect(trustedChainAssessmentAssembly).not.toBe(input.durableChainAnchorReader);
+    expect(trustedChainAssessmentAssembly).not.toBe(durableAnchorReader);
     expect(durableAnchorRead).not.toHaveBeenCalled();
     expect(durableAnchorVerify).not.toHaveBeenCalled();
 
@@ -408,24 +413,10 @@ describe('createDormantProviderPositionAdmissionRuntimeComposition', () => {
       MockedWalletService,
       MockedWalletReader,
       MockedDeadlineRunner,
+      MockedDurableAnchorReader,
       MockedCoordinator,
     ].map((mock) => mock.mock.invocationCallOrder[0] as number);
     expect(constructionOrder).toEqual([...constructionOrder].sort((left, right) => left - right));
-
-    await composition.close();
-  });
-
-  it('preserves the coordinator unavailable path when the durable reader is omitted', async () => {
-    const input = dependencies() as unknown as Record<string, unknown>;
-    delete input.durableChainAnchorReader;
-
-    const composition = await createDormantProviderPositionAdmissionRuntimeComposition(
-      input as unknown as DormantProviderPositionAdmissionRuntimeCompositionDependencies,
-    );
-
-    expect(MockedCoordinator.mock.calls[0]?.[7]).toBeUndefined();
-    expect(durableAnchorRead).not.toHaveBeenCalled();
-    expect(durableAnchorVerify).not.toHaveBeenCalled();
 
     await composition.close();
   });
@@ -758,45 +749,52 @@ describe('createDormantProviderPositionAdmissionRuntimeComposition', () => {
     expect(poolEnd).not.toHaveBeenCalled();
   });
 
-  it('rejects the legacy raw trusted-assembly bypass before runtime allocation', async () => {
-    const input = Object.assign(dependencies(), {
-      trustedChainAssessmentAssembly: Object.freeze({
-        assemblyVersion: 1,
-        assemble: jest.fn(),
-        verifyAssembly: jest.fn(),
-        verify: jest.fn(),
-      }),
-    });
+  it('rejects raw durable-reader and trusted-assembly injection keys before allocation', async () => {
+    const rawInjectionMembers = [
+      {
+        durableChainAnchorReader: durableAnchorReader,
+      },
+      {
+        trustedChainAssessmentAssembly: Object.freeze({
+          assemblyVersion: 1,
+          assemble: jest.fn(),
+          verifyAssembly: jest.fn(),
+          verify: jest.fn(),
+        }),
+      },
+    ];
 
-    await expect(
-      createDormantProviderPositionAdmissionRuntimeComposition(input),
-    ).rejects.toMatchObject({
-      name: 'ProviderPositionAdmissionRuntimeCompositionError',
-      code: 'PROVIDER_POSITION_ADMISSION_COMPOSITION_INVALID',
-      message: 'Provider-position admission composition is unavailable.',
-    });
+    for (const injection of rawInjectionMembers) {
+      await expect(
+        createDormantProviderPositionAdmissionRuntimeComposition(
+          Object.assign(dependencies(), injection),
+        ),
+      ).rejects.toMatchObject({
+        name: 'ProviderPositionAdmissionRuntimeCompositionError',
+        code: 'PROVIDER_POSITION_ADMISSION_COMPOSITION_INVALID',
+        message: 'Provider-position admission composition is unavailable.',
+      });
+    }
     expect(mockedRuntimeResource).not.toHaveBeenCalled();
     expect(MockedPostgresService).not.toHaveBeenCalled();
+    expect(MockedDurableAnchorReader).not.toHaveBeenCalled();
     expect(MockedCoordinator).not.toHaveBeenCalled();
   });
 
-  it('rolls back owned resources when the durable reader cannot be captured', async () => {
-    const invalidReader = Object.freeze({
-      readerVersion: 1 as const,
-      readAnchor: jest.fn(async (): Promise<unknown> => undefined),
-      verifyAnchor: undefined,
-    }) as unknown as ProviderPositionDurableChainAnchorReaderPort;
+  it('rolls back owned resources when the durable reader cannot capture PostgreSQL', async () => {
+    MockedDurableAnchorReader.mockImplementationOnce(() => {
+      throw new Error('private PostgreSQL query capture detail');
+    });
 
     await expect(
-      createDormantProviderPositionAdmissionRuntimeComposition(
-        dependencies({ durableChainAnchorReader: invalidReader }),
-      ),
+      createDormantProviderPositionAdmissionRuntimeComposition(dependencies()),
     ).rejects.toMatchObject({
       name: 'ProviderPositionAdmissionRuntimeCompositionError',
       code: 'PROVIDER_POSITION_ADMISSION_COMPOSITION_CONSTRUCTION_FAILED',
       message: 'Provider-position admission composition is unavailable.',
     });
     expect(MockedDeadlineRunner).toHaveBeenCalledTimes(1);
+    expect(MockedDurableAnchorReader).toHaveBeenCalledWith(postgres);
     expect(MockedCoordinator).not.toHaveBeenCalled();
     expect(closePostgres).toHaveBeenCalledTimes(1);
     expect(poolEnd).toHaveBeenCalledTimes(1);
@@ -999,6 +997,7 @@ describe('createDormantProviderPositionAdmissionRuntimeComposition', () => {
     jest.dontMock('../../wallets/application/wallet-registration.service');
     jest.dontMock('../../portfolio/infrastructure/registered-portfolio-wallet-reader');
     jest.dontMock('./node-provider-position-admission-deadline.runner');
+    jest.dontMock('./postgres-provider-position-durable-chain-anchor.reader');
     jest.dontMock('../application/provider-position-admission.coordinator');
 
     const clientQuery = jest.fn().mockResolvedValue({ rows: [] });
@@ -1117,15 +1116,6 @@ describe('createDormantProviderPositionAdmissionRuntimeComposition', () => {
           ),
       });
       const readers = sourceBindings();
-      const isolatedAnchorRead = jest.fn(async (): Promise<unknown> => {
-        throw new Error('empty roster must not read an anchor');
-      });
-      const isolatedAnchorVerify = jest.fn((): boolean => false);
-      const isolatedDurableAnchorReader = Object.freeze({
-        readerVersion: 1 as const,
-        readAnchor: isolatedAnchorRead,
-        verifyAnchor: isolatedAnchorVerify,
-      });
       const composition =
         await actualCompositionModule.createDormantProviderPositionAdmissionRuntimeComposition({
           postgresConfig: postgresConfig(),
@@ -1135,7 +1125,6 @@ describe('createDormantProviderPositionAdmissionRuntimeComposition', () => {
           requiredPolicyFingerprintSha256: policy.fingerprintSha256,
           sourceBindings: readers,
           clock: { now: () => new Date('2026-09-05T21:00:00.000Z') },
-          durableChainAnchorReader: isolatedDurableAnchorReader,
         });
 
       expect(poolConnect).not.toHaveBeenCalled();
@@ -1148,8 +1137,6 @@ describe('createDormantProviderPositionAdmissionRuntimeComposition', () => {
       expect(result.evaluatedAt).toBe(EVALUATED_AT);
       expect(result.coveredSnapshot.observations).toEqual([]);
       expect(result.coveredSnapshot.coverageManifest.targets).toEqual([]);
-      expect(isolatedAnchorRead).not.toHaveBeenCalled();
-      expect(isolatedAnchorVerify).not.toHaveBeenCalled();
       expect(isolatedCreatePool).toHaveBeenCalledTimes(1);
       expect(poolConnect).toHaveBeenCalledTimes(1);
       expect(clientQuery).toHaveBeenCalledTimes(1);

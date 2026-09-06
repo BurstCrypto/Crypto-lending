@@ -312,7 +312,7 @@ describe('mainnet provider position observation contract', () => {
       marketId: `0x${'CD'.repeat(32)}`,
       positionId: 'morpho-ethereum-usdc-supply',
       balance: { atomic: '7250000', decimal: '7.250000' },
-      source: evmSource({ sourceObservationId: 'ethereum-block-50000001-morpho' }),
+      source: evmSource(),
     });
 
     const result = parseMainnetProviderPositionSnapshotV1(
@@ -323,7 +323,7 @@ describe('mainnet provider position observation contract', () => {
         ethereumAssessmentEntry(),
         ethereumAssessmentEntry({
           observationId: '22222222-2222-4222-8222-222222222222',
-          sourceObservationId: 'ethereum-block-50000001-morpho',
+          sourceObservationId: 'ethereum-block-50000001',
         }),
       ]),
       STRICT_TEST_CHAIN_ASSESSMENT_VERIFIER,
@@ -350,6 +350,9 @@ describe('mainnet provider position observation contract', () => {
       { atomic: '5000000', decimal: '5.000000' },
       { atomic: '7250000', decimal: '7.250000' },
     ]);
+    expect(new Set(result.observations.map(({ source }) => source.sourceObservationId))).toEqual(
+      new Set(['ethereum-block-50000001']),
+    );
     expect(new Set(result.observations.map(({ positionId }) => positionId)).size).toBe(2);
   });
 
@@ -390,7 +393,7 @@ describe('mainnet provider position observation contract', () => {
     const duplicate = observation({
       observationId: '22222222-2222-4222-8222-222222222222',
       balance: { atomic: '6000000', decimal: '6.000000' },
-      source: evmSource({ sourceObservationId: 'ethereum-block-50000002' }),
+      source: evmSource(),
     });
 
     expectValidationCode(
@@ -402,7 +405,7 @@ describe('mainnet provider position observation contract', () => {
         ethereumAssessmentEntry(),
         ethereumAssessmentEntry({
           observationId: '22222222-2222-4222-8222-222222222222',
-          sourceObservationId: 'ethereum-block-50000002',
+          sourceObservationId: 'ethereum-block-50000001',
         }),
       ]),
     );
@@ -413,7 +416,7 @@ describe('mainnet provider position observation contract', () => {
       observationId: '22222222-2222-4222-8222-222222222222',
       positionKind: 'BORROW',
       balance: { atomic: '1250000', decimal: '1.250000' },
-      source: evmSource({ sourceObservationId: 'ethereum-block-50000002-borrow' }),
+      source: evmSource(),
     });
     const result = parseMainnetProviderPositionSnapshotV1(
       snapshot([observation(), borrow]),
@@ -423,7 +426,7 @@ describe('mainnet provider position observation contract', () => {
         ethereumAssessmentEntry(),
         ethereumAssessmentEntry({
           observationId: '22222222-2222-4222-8222-222222222222',
-          sourceObservationId: 'ethereum-block-50000002-borrow',
+          sourceObservationId: 'ethereum-block-50000001',
         }),
       ]),
       STRICT_TEST_CHAIN_ASSESSMENT_VERIFIER,
@@ -611,6 +614,45 @@ describe('mainnet provider position observation contract', () => {
       expectValidationCode(snapshot([observation({ source })]), 'INVALID_SOURCE');
     }
   });
+
+  it.each([
+    [
+      'Ethereum',
+      observation({
+        source: evmSource({ sourceObservationId: 'ethereum-block-50000002' }),
+      }),
+      EVALUATED_AT,
+      strictTestAssessment(),
+    ],
+    [
+      'Solana',
+      solanaObservation({
+        source: {
+          sourceId: 'solana-rpc-primary',
+          sourceKind: 'RPC',
+          sourceObservationId: 'solana-slot-441990797',
+          chainAnchor: {
+            kind: 'SOLANA_SLOT',
+            slot: '441990796',
+            root: '441990700',
+          },
+        },
+      }),
+      SOLANA_EVALUATED_AT,
+      strictTestAssessment([solanaAssessmentEntry()]),
+    ],
+  ] as const)(
+    'rejects a %s source observation ID that does not exactly bind its chain anchor',
+    (_chain, input, evaluatedAt, assessment) => {
+      expectValidationCode(
+        evaluatedAt === SOLANA_EVALUATED_AT ? solanaSnapshot([input]) : snapshot([input]),
+        'INVALID_SOURCE',
+        evaluatedAt,
+        strictTestPolicy(),
+        assessment,
+      );
+    },
+  );
 
   it('requires an opaque independent assessment bound to the exact normalized observation', () => {
     const currentCapability = strictTestAssessment();

@@ -502,11 +502,20 @@ function parseSource(
   ) {
     return fail('UNAPPROVED_ATTRIBUTION');
   }
+  const chainAnchor = parseChainAnchor(record.chainAnchor, networkId);
+  const sourceObservationId = opaqueId(record.sourceObservationId, 'INVALID_SOURCE');
+  const expectedSourceObservationId =
+    chainAnchor.kind === 'EVM_BLOCK'
+      ? `ethereum-block-${chainAnchor.blockNumber}`
+      : `solana-slot-${chainAnchor.slot}`;
+  if (sourceObservationId !== expectedSourceObservationId) {
+    return fail('INVALID_SOURCE');
+  }
   return Object.freeze({
     sourceId,
     sourceKind: record.sourceKind,
-    sourceObservationId: opaqueId(record.sourceObservationId, 'INVALID_SOURCE'),
-    chainAnchor: parseChainAnchor(record.chainAnchor, networkId),
+    sourceObservationId,
+    chainAnchor,
   });
 }
 

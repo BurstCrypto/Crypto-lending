@@ -117,7 +117,7 @@ function providerObservation(
     source: {
       sourceId: 'ethereum-rpc-primary',
       sourceKind: 'RPC',
-      sourceObservationId: `ethereum-block-50000001-${positionKind.toLowerCase()}`,
+      sourceObservationId: 'ethereum-block-50000001',
       chainAnchor: {
         kind: 'EVM_BLOCK',
         blockNumber: '50000001',

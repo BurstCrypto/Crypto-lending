@@ -362,7 +362,7 @@ function sourceEvidence(
     sourceFamilyId: source.sourceFamilyId,
     sourceId: source.sourceId,
     sourceKind: source.sourceKind,
-    sourceObservationId: `${source.sourceId}-observation-100`,
+    sourceObservationId: solana ? 'solana-slot-100' : 'ethereum-block-100',
     walletId: request.walletId,
     providerId: request.providerId,
     protocolId: request.protocolId,
@@ -659,7 +659,7 @@ describe('DormantProviderPositionAdmissionCoordinator', () => {
         source: expect.objectContaining({
           sourceId: 'rpc-alpha',
           sourceKind: 'RPC',
-          sourceObservationId: 'rpc-alpha-observation-100',
+          sourceObservationId: 'ethereum-block-100',
           chainAnchor: { kind: 'EVM_BLOCK', blockNumber: '100', blockHash: BLOCK_HASH },
         }),
       }),
@@ -780,7 +780,7 @@ describe('DormantProviderPositionAdmissionCoordinator', () => {
         providerId: 'jupiter',
         source: expect.objectContaining({
           sourceId: 'solana-rpc',
-          sourceObservationId: 'solana-rpc-observation-100',
+          sourceObservationId: 'solana-slot-100',
           chainAnchor: { kind: 'SOLANA_SLOT', slot: '100', root: '99' },
         }),
       }),
@@ -1159,9 +1159,24 @@ describe('DormantProviderPositionAdmissionCoordinator', () => {
       nested(response, 'continuityFloor').root = '100';
       nested(response, 'chainAnchor').slot = '101';
       nested(response, 'chainAnchor').root = '99';
+      response.sourceObservationId = 'solana-slot-101';
     };
     await expectUnavailable(regressed, 'REGRESSING_EVIDENCE');
   });
+
+  it.each([
+    ['Ethereum', fixture, 'ethereum-block-101'],
+    ['Solana', solanaFixture, 'solana-slot-101'],
+  ] as const)(
+    'rejects a %s source observation ID that does not exactly bind its chain anchor',
+    async (_chain, createFixture, sourceObservationId) => {
+      const value = createFixture();
+      value.sources[0]!.mutate = (response) => {
+        response.sourceObservationId = sourceObservationId;
+      };
+      await expectUnavailable(value, 'SOURCE_MISMATCH');
+    },
+  );
 
   it.each([
     ['accountId', OTHER_ACCOUNT_ID],
