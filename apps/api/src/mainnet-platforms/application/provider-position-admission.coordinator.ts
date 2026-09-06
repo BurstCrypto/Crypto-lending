@@ -556,6 +556,7 @@ export class DormantProviderPositionAdmissionCoordinator {
                 accountId: request.accountId,
                 evaluatedAt: started.timestamp,
                 correlationId: request.correlationId,
+                signal: activeController.signal,
               });
               if (activeController.signal.aborted) return fail('WALLET_ROSTER_UNAVAILABLE');
               return roster;

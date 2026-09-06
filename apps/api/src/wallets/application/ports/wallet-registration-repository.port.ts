@@ -102,6 +102,8 @@ export interface CompleteWalletRegistrationRequest {
 
 export interface ListActiveWalletRegistrationsRequest {
   readonly accountId: AccountId;
+  /** When present, the repository must cancel and drain the physical read. */
+  readonly signal?: AbortSignal;
 }
 
 export interface RevokeWalletRegistrationRequest {

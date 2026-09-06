@@ -37,10 +37,23 @@ financial capability.
 The runner deliberately awaits an already-started operation after signaling
 abort; it cannot make a non-cooperative promise settle. Production provider
 transports must stop and settle on the supplied signal and retain their own
-lower-level transport bounds. The existing portfolio wallet-reader port does
-not itself accept that signal, so a stalled roster database operation can still
-prevent settlement. Cancellable database propagation remains required before
-production registration.
+lower-level transport bounds. The coordinator now also passes the exact shared
+signal through the optional portfolio wallet-reader request, the registered
+reader, wallet service and repository port, and the PostgreSQL wallet
+repository. The adapter and repository each capture it once to prevent
+repeated-read/TOCTOU substitution. The signaled branch calls
+`PostgresService.queryWithCancellation`; the legacy unsigned portfolio branch
+still calls the ordinary query path. Neither
+branch uses `Promise.race`, creates a replacement signal, or falls back from a
+failed cancellable query.
+
+`PostgresService` rechecks cancellation after acquiring its dedicated client,
+then drains query settlement and discarded-client teardown before returning.
+Active `pg` pool acquisition has no native signal cancellation, however, so
+acquisition and the required drain can extend past the logical admission
+deadline. A production `connectionTimeoutMs` must be no greater than the
+configured admission bound. These local contracts establish propagation and
+drain behavior, not a hard latency or deployed-configuration guarantee.
 
 The coordinator owns no endpoint, environment lookup, network client, credentials, database, persistence port, writer, or financial-action capability.
 
@@ -91,14 +104,15 @@ Assembly shares the admission deadline, captures the port's methods once without
 Production still needs a reviewed implementation of the dormant port. It must independently verify every selected anchor against durable chain identity, progression, and finality state and issue one object-identity capability covering the complete assembled assessment. No such implementation or production composition exists in this repository, so `admitAndAssemble` is not a live application path.
 
 The offline production preflight now byte-pins this coordinator, assembly port,
-and concrete deadline runner with a selected eleven-file
+concrete deadline runner, complete wallet-roster cancellation chain, and shared
+PostgreSQL cancellation service with a selected seventeen-file
 reader/domain/module/barrel/controller critical-source slice. Its local check
-rejects trust, timing, cancellation/drain/cleanup, zero-target anchor, authority,
-or feature-surface drift inside that slice, but deliberately reports the reader,
-trusted-assessment, and deadline-runner feature registrations as missing. It
-does not prove recursive dependency closure or scan every application module,
-and it performs no provider, chain, network, cloud, secret, transaction, or
-billable operation.
+rejects trust, timing, signal substitution, cancellation/drain/cleanup, query
+fallback, zero-target anchor, authority, or feature-surface drift inside that
+slice, but deliberately reports the reader, trusted-assessment, and
+deadline-runner feature registrations as missing. It does not prove recursive
+dependency closure or scan every application module, and it performs no
+provider, chain, network, cloud, secret, transaction, or billable operation.
 
 That production change must also provide:
 

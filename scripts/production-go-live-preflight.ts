@@ -251,6 +251,12 @@ export interface ProviderPositionReadBoundaryArtifactSources {
   readonly providerPositionTrustedAssemblyPortSource: string;
   readonly providerPositionAdmissionCoordinatorSource: string;
   readonly providerPositionDeadlineRunnerSource: string;
+  readonly portfolioWalletRegistrationReaderPortSource: string;
+  readonly registeredPortfolioWalletReaderSource: string;
+  readonly walletRegistrationServiceSource: string;
+  readonly walletRegistrationRepositoryPortSource: string;
+  readonly postgresWalletRegistrationRepositorySource: string;
+  readonly providerPositionPostgresServiceSource: string;
   readonly providerPositionCoverageSource: string;
   readonly providerPositionObservationSource: string;
   readonly providerPositionChainAssessmentSource: string;
@@ -570,6 +576,12 @@ const PROVIDER_POSITION_READ_ARTIFACT_KEYS = Object.freeze([
   'providerPositionTrustedAssemblyPortSource',
   'providerPositionAdmissionCoordinatorSource',
   'providerPositionDeadlineRunnerSource',
+  'portfolioWalletRegistrationReaderPortSource',
+  'registeredPortfolioWalletReaderSource',
+  'walletRegistrationServiceSource',
+  'walletRegistrationRepositoryPortSource',
+  'postgresWalletRegistrationRepositorySource',
+  'providerPositionPostgresServiceSource',
   'providerPositionCoverageSource',
   'providerPositionObservationSource',
   'providerPositionChainAssessmentSource',
@@ -584,9 +596,21 @@ const REVIEWED_PROVIDER_POSITION_READ_ARTIFACT_SHA256 = Object.freeze({
   providerPositionTrustedAssemblyPortSource:
     '9120c664640be1f855b1ea77cc9ca403506cae306b3f14679172f634c4e8a37b',
   providerPositionAdmissionCoordinatorSource:
-    'c0e5f9c5c9a3860cd2c7250868910520865925c48225be2f8c1bb96f1e499e13',
+    '36c8470916227dd25d6984f4b0fbe412b0bd25a4dd0bcdc6a845c6ddc778ab45',
   providerPositionDeadlineRunnerSource:
     '6910ff27ce6b29d06d7f3fc20743779196259bda5518b1b4ada7f82b9c2c3f97',
+  portfolioWalletRegistrationReaderPortSource:
+    '51261b1f960a7a3918dbeb72a789cf0ff75d299727f93c844e525477bf51806c',
+  registeredPortfolioWalletReaderSource:
+    'da78b8e539a83e94c13ad2ce718559bceb0efbacdb5cb3931d284591f5c06af2',
+  walletRegistrationServiceSource:
+    '1961a2bf8b3bbfd56d849f831753bc5944a4f2f32f636acc4aed28fe28899c3f',
+  walletRegistrationRepositoryPortSource:
+    'e137f3df48f13c95ef8f01c3290c1a11247cc69c022b04f8ceb368a91d978d8a',
+  postgresWalletRegistrationRepositorySource:
+    '00b46e4ab87be7e65559ca7ddc925d3226a1302ca742a5ddfb797034fd795707',
+  providerPositionPostgresServiceSource:
+    '2e7e6fba4651e80f865a52ba5484f1c0ceb5c35268ad53a95eba89b216e85d94',
   providerPositionCoverageSource:
     'a26d468abb2c46bd28267c6d36d1a7d3e62c30a700159e3c4cf263d15a8a9611',
   providerPositionObservationSource:
@@ -601,7 +625,7 @@ const REVIEWED_PROVIDER_POSITION_READ_ARTIFACT_SHA256 = Object.freeze({
     'a713200b67f0cf67c50b56c94f707f94f7383c52e3d59f4368868710b099b55d',
 } satisfies Readonly<Record<keyof ProviderPositionReadBoundaryArtifactSources, string>>);
 const MAX_PROVIDER_POSITION_READ_ARTIFACT_BYTES = 128 * 1024;
-const MAX_PROVIDER_POSITION_READ_TOTAL_BYTES = 256 * 1024;
+const MAX_PROVIDER_POSITION_READ_TOTAL_BYTES = 384 * 1024;
 const BALANCE_CONSUMER_ARTIFACT_KEYS = Object.freeze([
   'activationSource',
   'cliSource',
@@ -699,7 +723,7 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
   balanceConsumerSqsReceiptResourceSource:
     '470dc9f137b0231d96996379a04dffa96de99176270edefd0fbf98a5250f3a60',
   runtimePostgresPoolSource: 'd15b4a0604cda0bcc9d8df7f597863e42c4ef573ba8ed4362386cd2beaa1f823',
-  postgresServiceSource: 'c82f1c6807056eafcb88f9bf0ea9c4d1265b33f86222090e8946f06e05281d1a',
+  postgresServiceSource: '2e7e6fba4651e80f865a52ba5484f1c0ceb5c35268ad53a95eba89b216e85d94',
   balanceSyncCheckpointRepositorySource:
     '177a87c54235a007b4724e98e33700bf768091c432d4eb2ace24412bea23560c',
   balanceSyncWalletAddressResolverSource:
@@ -1977,6 +2001,24 @@ function hasDormantProviderPositionReadBoundaryContract(
   const assemblyPort = sources.providerPositionTrustedAssemblyPortSource.replace(/\r\n/gu, '\n');
   const coordinator = sources.providerPositionAdmissionCoordinatorSource.replace(/\r\n/gu, '\n');
   const deadlineRunner = sources.providerPositionDeadlineRunnerSource.replace(/\r\n/gu, '\n');
+  const portfolioWalletReaderPort =
+    sources.portfolioWalletRegistrationReaderPortSource.replace(/\r\n/gu, '\n');
+  const registeredWalletReader = sources.registeredPortfolioWalletReaderSource.replace(
+    /\r\n/gu,
+    '\n',
+  );
+  const walletRegistrationService = sources.walletRegistrationServiceSource.replace(
+    /\r\n/gu,
+    '\n',
+  );
+  const walletRegistrationRepositoryPort =
+    sources.walletRegistrationRepositoryPortSource.replace(/\r\n/gu, '\n');
+  const postgresWalletRegistrationRepository =
+    sources.postgresWalletRegistrationRepositorySource.replace(/\r\n/gu, '\n');
+  const providerPositionPostgresService = sources.providerPositionPostgresServiceSource.replace(
+    /\r\n/gu,
+    '\n',
+  );
   const coverage = sources.providerPositionCoverageSource.replace(/\r\n/gu, '\n');
   const observation = sources.providerPositionObservationSource.replace(/\r\n/gu, '\n');
   const chainAssessment = sources.providerPositionChainAssessmentSource.replace(/\r\n/gu, '\n');
@@ -1992,6 +2034,13 @@ function hasDormantProviderPositionReadBoundaryContract(
     observation,
     chainAssessment,
     policy,
+  ] as const;
+  const walletRosterCancellationBridgeSources = [
+    portfolioWalletReaderPort,
+    registeredWalletReader,
+    walletRegistrationService,
+    walletRegistrationRepositoryPort,
+    postgresWalletRegistrationRepository,
   ] as const;
   const forbiddenCapability =
     /(?:\bfrom\s+|\bimport\s*(?:\(\s*)?)['"](?:node:)?(?:dns|http|http2|https|net|tls)(?:\/[^'"]*)?['"]|(?:\bfrom\s+|\bimport\s*(?:\(\s*)?)['"](?:axios|ethers|got|superagent|undici|web3|@solana\/web3\.js)['"]|\b(?:fetch|setTimeout|setInterval|setImmediate|queueMicrotask)\s*\(|\b(?:process|Deno|Bun)\s*\.\s*env\b|\bimport\s*\.\s*meta\s*\.\s*env\b|\bnew\s+(?:URL|URLSearchParams|WebSocket|EventSource|Connection|[A-Za-z0-9_]*Client|[A-Za-z0-9_]*Agent)\s*\(|['"]https?:\/\//iu;
@@ -2031,6 +2080,135 @@ function hasDormantProviderPositionReadBoundaryContract(
   const runnerCleanupFailureResult = deadlineRunner.indexOf(
     "fail('RUNTIME_UNAVAILABLE');",
     runnerCleanupFailure,
+  );
+  const coordinatorRosterRead = coordinator.indexOf(
+    'const roster = await this.walletReader.readActiveWalletRegistrations({',
+  );
+  const coordinatorRosterAccount = coordinator.indexOf(
+    'accountId: request.accountId,',
+    coordinatorRosterRead,
+  );
+  const coordinatorRosterEvaluation = coordinator.indexOf(
+    'evaluatedAt: started.timestamp,',
+    coordinatorRosterAccount,
+  );
+  const coordinatorRosterCorrelation = coordinator.indexOf(
+    'correlationId: request.correlationId,',
+    coordinatorRosterEvaluation,
+  );
+  const coordinatorRosterSignal = coordinator.indexOf(
+    'signal: activeController.signal,',
+    coordinatorRosterCorrelation,
+  );
+  const registeredSignalCapture = registeredWalletReader.indexOf(
+    'const signal = request.signal;',
+  );
+  const registeredLegacyBranch = registeredWalletReader.indexOf(
+    'signal === undefined',
+    registeredSignalCapture,
+  );
+  const registeredLegacyRead = registeredWalletReader.indexOf(
+    '? await this.wallets.listActiveWallets(request.accountId)',
+    registeredLegacyBranch,
+  );
+  const registeredSignaledRead = registeredWalletReader.indexOf(
+    ': await this.wallets.listActiveWallets(',
+    registeredLegacyRead,
+  );
+  const registeredSignaledAccount = registeredWalletReader.indexOf(
+    'request.accountId,',
+    registeredSignaledRead,
+  );
+  const registeredSignaledSignal = registeredWalletReader.indexOf(
+    'Object.freeze({ signal }),',
+    registeredSignaledAccount,
+  );
+  const walletServiceList = walletRegistrationService.indexOf('async listActiveWallets(');
+  const walletServiceAccountParse = walletRegistrationService.indexOf(
+    'accountId = parseAccountId(accountIdInput);',
+    walletServiceList,
+  );
+  const walletServiceRepositoryRead = walletRegistrationService.indexOf(
+    'records = await this.repository.listActiveWallets(',
+    walletServiceAccountParse,
+  );
+  const walletServiceForwarding = walletRegistrationService.indexOf(
+    'options === undefined ? { accountId } : { accountId, signal: options.signal },',
+    walletServiceRepositoryRead,
+  );
+  const postgresWalletRead = postgresWalletRegistrationRepository.indexOf(
+    'async listActiveWallets(',
+  );
+  const postgresWalletAccountParse = postgresWalletRegistrationRepository.indexOf(
+    'const accountId = parseAccountId(request.accountId);',
+    postgresWalletRead,
+  );
+  const postgresWalletSignalCapture = postgresWalletRegistrationRepository.indexOf(
+    'const signal = request.signal;',
+    postgresWalletAccountParse,
+  );
+  const postgresWalletValues = postgresWalletRegistrationRepository.indexOf(
+    'const values = [accountId];',
+    postgresWalletSignalCapture,
+  );
+  const postgresWalletLegacyQuery = postgresWalletRegistrationRepository.indexOf(
+    '? await this.postgres.query<ActiveWalletRow>(query, values)',
+    postgresWalletValues,
+  );
+  const postgresWalletCancellableQuery = postgresWalletRegistrationRepository.indexOf(
+    ': await this.postgres.queryWithCancellation<ActiveWalletRow>(',
+    postgresWalletLegacyQuery,
+  );
+  const postgresWalletCancellableSignal = postgresWalletRegistrationRepository.indexOf(
+    'signal,',
+    postgresWalletCancellableQuery,
+  );
+  const postgresWalletReturnedIdentity = postgresWalletRegistrationRepository.indexOf(
+    'if (returnedAccountId !== accountId) throw new WalletRegistrationPersistenceError();',
+    postgresWalletCancellableSignal,
+  );
+  const postgresCancellationEntry = providerPositionPostgresService.indexOf(
+    'queryWithCancellation<Row extends QueryResultRow = QueryResultRow>(',
+  );
+  const postgresSignalReview = providerPositionPostgresService.indexOf(
+    'if (reviewAbortSignal(signal) === null) {',
+    postgresCancellationEntry,
+  );
+  const postgresCancellationExecution = providerPositionPostgresService.indexOf(
+    'this.executeCancellableQuery<Row>(queryTextOrConfig, values, signal),',
+    postgresSignalReview,
+  );
+  const postgresClientAcquisition = providerPositionPostgresService.indexOf(
+    'client = await this.pool.connect();',
+    postgresCancellationExecution,
+  );
+  const postgresPostAcquisitionCancellation = providerPositionPostgresService.indexOf(
+    'if (cancellation !== null || supplied.aborted() || lifecycle.aborted()) {',
+    postgresClientAcquisition,
+  );
+  const postgresQuerySettlement = providerPositionPostgresService.indexOf(
+    'const querySettlement = Promise.resolve()',
+    postgresPostAcquisitionCancellation,
+  );
+  const postgresQueryDrain = providerPositionPostgresService.indexOf(
+    'const outcome = await querySettlement;',
+    postgresQuerySettlement,
+  );
+  const postgresTeardownDrain = providerPositionPostgresService.indexOf(
+    'const teardownFailure = (await Promise.allSettled([querySettlement, teardown])).find(',
+    postgresQueryDrain,
+  );
+  const postgresCancellationFinally = providerPositionPostgresService.indexOf(
+    '} finally {',
+    postgresTeardownDrain,
+  );
+  const postgresCancellationTimerCleanup = providerPositionPostgresService.indexOf(
+    'clearTimeout(timeout);',
+    postgresCancellationFinally,
+  );
+  const postgresCancellationListenerCleanup = providerPositionPostgresService.indexOf(
+    'supplied.remove(cancelFromSignal);',
+    postgresCancellationTimerCleanup,
   );
   const selectedTargetLoop = coordinator.indexOf('for (const target of candidate.targets) {');
   const selectedSource = coordinator.indexOf(
@@ -2093,7 +2271,7 @@ function hasDormantProviderPositionReadBoundaryContract(
       "if (assembly === undefined) return fail('ASSEMBLY_UNAVAILABLE');",
     ) === 1 &&
     exactExecutableLineCount(coordinator, 'readonly signal: AbortSignal;') === 2 &&
-    exactExecutableLineCount(coordinator, 'signal: activeController.signal,') === 3 &&
+    exactExecutableLineCount(coordinator, 'signal: activeController.signal,') === 4 &&
     exactExecutableLineCount(
       coordinator,
       'prepared.abortAdmission();',
@@ -2109,6 +2287,107 @@ function hasDormantProviderPositionReadBoundaryContract(
       'while (!failed && !controller.signal.aborted && next < inputs.length) {',
     ) === 1 &&
     exactExecutableLineCount(coordinator, 'if (failed) throw firstFailure;') === 1 &&
+    coordinatorRosterRead >= 0 &&
+    coordinatorRosterAccount > coordinatorRosterRead &&
+    coordinatorRosterEvaluation > coordinatorRosterAccount &&
+    coordinatorRosterCorrelation > coordinatorRosterEvaluation &&
+    coordinatorRosterSignal > coordinatorRosterCorrelation &&
+    exactExecutableLineCount(portfolioWalletReaderPort, 'readonly signal?: AbortSignal;') === 1 &&
+    exactExecutableLineCount(
+      portfolioWalletReaderPort,
+      'request: ReadActivePortfolioWalletRegistrationsRequest,',
+    ) === 1 &&
+    registeredSignalCapture >= 0 &&
+    registeredLegacyBranch > registeredSignalCapture &&
+    registeredLegacyRead > registeredLegacyBranch &&
+    registeredSignaledRead > registeredLegacyRead &&
+    registeredSignaledAccount > registeredSignaledRead &&
+    registeredSignaledSignal > registeredSignaledAccount &&
+    exactExecutableLineCount(registeredWalletReader, 'const signal = request.signal;') === 1 &&
+    exactExecutableLineCount(
+      registeredWalletReader,
+      '? await this.wallets.listActiveWallets(request.accountId)',
+    ) === 1 &&
+    exactExecutableLineCount(registeredWalletReader, 'Object.freeze({ signal }),') === 1 &&
+    walletServiceList >= 0 &&
+    walletServiceAccountParse > walletServiceList &&
+    walletServiceRepositoryRead > walletServiceAccountParse &&
+    walletServiceForwarding > walletServiceRepositoryRead &&
+    exactExecutableLineCount(
+      walletRegistrationService,
+      'readonly signal: AbortSignal;',
+    ) === 1 &&
+    exactExecutableLineCount(
+      walletRegistrationService,
+      'options?: ListActiveWalletsOptions,',
+    ) === 1 &&
+    exactExecutableLineCount(
+      walletRegistrationService,
+      'options === undefined ? { accountId } : { accountId, signal: options.signal },',
+    ) === 1 &&
+    exactExecutableLineCount(
+      walletRegistrationRepositoryPort,
+      'readonly signal?: AbortSignal;',
+    ) === 1 &&
+    exactExecutableLineCount(
+      walletRegistrationRepositoryPort,
+      'request: ListActiveWalletRegistrationsRequest,',
+    ) === 1 &&
+    postgresWalletRead >= 0 &&
+    postgresWalletAccountParse > postgresWalletRead &&
+    postgresWalletSignalCapture > postgresWalletAccountParse &&
+    postgresWalletValues > postgresWalletSignalCapture &&
+    postgresWalletLegacyQuery > postgresWalletValues &&
+    postgresWalletCancellableQuery > postgresWalletLegacyQuery &&
+    postgresWalletCancellableSignal > postgresWalletCancellableQuery &&
+    postgresWalletReturnedIdentity > postgresWalletCancellableSignal &&
+    exactExecutableLineCount(
+      postgresWalletRegistrationRepository,
+      'const signal = request.signal;',
+    ) === 1 &&
+    exactExecutableLineCount(
+      postgresWalletRegistrationRepository,
+      '? await this.postgres.query<ActiveWalletRow>(query, values)',
+    ) === 1 &&
+    exactExecutableLineCount(
+      postgresWalletRegistrationRepository,
+      ': await this.postgres.queryWithCancellation<ActiveWalletRow>(',
+    ) === 1 &&
+    walletRosterCancellationBridgeSources.every(
+      (source) =>
+        !source.includes('Promise.race(') &&
+        !/\bnew\s+AbortController\s*\(|\bAbortSignal\s*\.\s*(?:abort|any|timeout)\s*\(/u.test(
+          source,
+        ),
+    ) &&
+    postgresCancellationEntry >= 0 &&
+    postgresSignalReview > postgresCancellationEntry &&
+    postgresCancellationExecution > postgresSignalReview &&
+    postgresClientAcquisition > postgresCancellationExecution &&
+    postgresPostAcquisitionCancellation > postgresClientAcquisition &&
+    postgresQuerySettlement > postgresPostAcquisitionCancellation &&
+    postgresQueryDrain > postgresQuerySettlement &&
+    postgresTeardownDrain > postgresQueryDrain &&
+    postgresCancellationFinally > postgresTeardownDrain &&
+    postgresCancellationTimerCleanup > postgresCancellationFinally &&
+    postgresCancellationListenerCleanup > postgresCancellationTimerCleanup &&
+    exactExecutableLineCount(
+      providerPositionPostgresService,
+      'this.executeCancellableQuery<Row>(queryTextOrConfig, values, signal),',
+    ) === 1 &&
+    exactExecutableLineCount(
+      providerPositionPostgresService,
+      'if (cancellation !== null || supplied.aborted() || lifecycle.aborted()) {',
+    ) === 2 &&
+    exactExecutableLineCount(
+      providerPositionPostgresService,
+      'const teardownFailure = (await Promise.allSettled([querySettlement, teardown])).find(',
+    ) === 1 &&
+    exactExecutableLineCount(
+      providerPositionPostgresService,
+      'supplied.remove(cancelFromSignal);',
+    ) === 1 &&
+    !providerPositionPostgresService.includes('Promise.race(') &&
     deadlineRunnerImportDeclarationCount === 2 &&
     deadlineRunnerImportSources.length === 2 &&
     deadlineRunnerImportSources[0] === 'node:util/types' &&
@@ -7808,6 +8087,45 @@ export function loadRepositoryProductionPreflightInput(
           repositoryRoot,
           'apps/api/src/mainnet-platforms/infrastructure/node-provider-position-admission-deadline.runner.ts',
         ),
+        'utf8',
+      ),
+      portfolioWalletRegistrationReaderPortSource: readFileSync(
+        resolve(
+          repositoryRoot,
+          'apps/api/src/portfolio/application/ports/portfolio-wallet-registration-reader.port.ts',
+        ),
+        'utf8',
+      ),
+      registeredPortfolioWalletReaderSource: readFileSync(
+        resolve(
+          repositoryRoot,
+          'apps/api/src/portfolio/infrastructure/registered-portfolio-wallet-reader.ts',
+        ),
+        'utf8',
+      ),
+      walletRegistrationServiceSource: readFileSync(
+        resolve(
+          repositoryRoot,
+          'apps/api/src/wallets/application/wallet-registration.service.ts',
+        ),
+        'utf8',
+      ),
+      walletRegistrationRepositoryPortSource: readFileSync(
+        resolve(
+          repositoryRoot,
+          'apps/api/src/wallets/application/ports/wallet-registration-repository.port.ts',
+        ),
+        'utf8',
+      ),
+      postgresWalletRegistrationRepositorySource: readFileSync(
+        resolve(
+          repositoryRoot,
+          'apps/api/src/wallets/infrastructure/postgres/postgres-wallet-registration.repository.ts',
+        ),
+        'utf8',
+      ),
+      providerPositionPostgresServiceSource: readFileSync(
+        resolve(repositoryRoot, 'apps/api/src/infrastructure/database/postgres.service.ts'),
         'utf8',
       ),
       providerPositionCoverageSource: readFileSync(

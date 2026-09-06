@@ -313,12 +313,19 @@ export class PostgresWalletRegistrationRepository implements WalletRegistrationR
   ): Promise<readonly ActiveWalletRegistrationRecord[]> {
     try {
       const accountId = parseAccountId(request.accountId);
-      const result = await this.postgres.query<ActiveWalletRow>(
-        `SELECT active_wallet.*
+      const signal = request.signal;
+      const query = `SELECT active_wallet.*
          FROM list_active_wallet_registrations_rotatable($1::uuid) AS active_wallet
-         LIMIT ${ACTIVE_WALLET_RESULT_LIMIT}`,
-        [accountId],
-      );
+         LIMIT ${ACTIVE_WALLET_RESULT_LIMIT}`;
+      const values = [accountId];
+      const result =
+        signal === undefined
+          ? await this.postgres.query<ActiveWalletRow>(query, values)
+          : await this.postgres.queryWithCancellation<ActiveWalletRow>(
+              query,
+              values,
+              signal,
+            );
       if (
         !Array.isArray(result.rows) ||
         result.rows.length > MAX_ACTIVE_WALLET_REGISTRATIONS_PER_ACCOUNT

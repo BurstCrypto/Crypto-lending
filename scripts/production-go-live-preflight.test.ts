@@ -436,6 +436,42 @@ const PROVIDER_POSITION_READ_ARTIFACTS = Object.freeze({
     ),
     'utf8',
   ),
+  portfolioWalletRegistrationReaderPortSource: readFileSync(
+    resolve(
+      __dirname,
+      '../apps/api/src/portfolio/application/ports/portfolio-wallet-registration-reader.port.ts',
+    ),
+    'utf8',
+  ),
+  registeredPortfolioWalletReaderSource: readFileSync(
+    resolve(
+      __dirname,
+      '../apps/api/src/portfolio/infrastructure/registered-portfolio-wallet-reader.ts',
+    ),
+    'utf8',
+  ),
+  walletRegistrationServiceSource: readFileSync(
+    resolve(__dirname, '../apps/api/src/wallets/application/wallet-registration.service.ts'),
+    'utf8',
+  ),
+  walletRegistrationRepositoryPortSource: readFileSync(
+    resolve(
+      __dirname,
+      '../apps/api/src/wallets/application/ports/wallet-registration-repository.port.ts',
+    ),
+    'utf8',
+  ),
+  postgresWalletRegistrationRepositorySource: readFileSync(
+    resolve(
+      __dirname,
+      '../apps/api/src/wallets/infrastructure/postgres/postgres-wallet-registration.repository.ts',
+    ),
+    'utf8',
+  ),
+  providerPositionPostgresServiceSource: readFileSync(
+    resolve(__dirname, '../apps/api/src/infrastructure/database/postgres.service.ts'),
+    'utf8',
+  ),
   providerPositionCoverageSource: readFileSync(
     resolve(
       __dirname,
@@ -1047,7 +1083,7 @@ test('provider-position read blockers participate in both readiness calculations
   );
 });
 
-test('provider-position read inspection rejects trust, coverage, and dormancy drift', () => {
+test('provider-position read inspection rejects trust, roster cancellation, coverage, and dormancy drift', () => {
   const mutations: readonly (readonly [
     keyof ProviderPositionReadBoundaryArtifactSources,
     string,
@@ -1102,6 +1138,71 @@ test('provider-position read inspection rejects trust, coverage, and dormancy dr
       'providerPositionAdmissionCoordinatorSource',
       'signal: activeController.signal,',
       'signal: new AbortController().signal,',
+    ],
+    [
+      'providerPositionAdmissionCoordinatorSource',
+      'evaluatedAt: started.timestamp,\n                correlationId: request.correlationId,\n                signal: activeController.signal,',
+      'evaluatedAt: started.timestamp,\n                correlationId: request.correlationId,',
+    ],
+    [
+      'portfolioWalletRegistrationReaderPortSource',
+      'readonly signal?: AbortSignal;',
+      'readonly signalWasDropped?: never;',
+    ],
+    [
+      'registeredPortfolioWalletReaderSource',
+      'const signal = request.signal;',
+      'const signal = new AbortController().signal;',
+    ],
+    [
+      'registeredPortfolioWalletReaderSource',
+      'Object.freeze({ signal }),',
+      'Object.freeze({}),',
+    ],
+    [
+      'registeredPortfolioWalletReaderSource',
+      '? await this.wallets.listActiveWallets(request.accountId)',
+      '? await this.wallets.listActiveWallets(request.accountId, Object.freeze({ signal }))',
+    ],
+    [
+      'walletRegistrationServiceSource',
+      'options === undefined ? { accountId } : { accountId, signal: options.signal },',
+      'options === undefined ? { accountId } : { accountId },',
+    ],
+    [
+      'walletRegistrationRepositoryPortSource',
+      'readonly signal?: AbortSignal;',
+      'readonly signalWasDropped?: never;',
+    ],
+    [
+      'postgresWalletRegistrationRepositorySource',
+      'const signal = request.signal;',
+      'const signal = new AbortController().signal;',
+    ],
+    [
+      'postgresWalletRegistrationRepositorySource',
+      ': await this.postgres.queryWithCancellation<ActiveWalletRow>(',
+      ': await this.postgres.query<ActiveWalletRow>(',
+    ],
+    [
+      'postgresWalletRegistrationRepositorySource',
+      '? await this.postgres.query<ActiveWalletRow>(query, values)',
+      '? await this.postgres.queryWithCancellation<ActiveWalletRow>(query, values, signal)',
+    ],
+    [
+      'postgresWalletRegistrationRepositorySource',
+      'const values = [accountId];',
+      'const values = [request.accountId];',
+    ],
+    [
+      'providerPositionPostgresServiceSource',
+      'this.executeCancellableQuery<Row>(queryTextOrConfig, values, signal),',
+      'this.executeCancellableQuery<Row>(queryTextOrConfig, values, new AbortController().signal),',
+    ],
+    [
+      'providerPositionPostgresServiceSource',
+      'const outcome = await querySettlement;',
+      'const outcome = await Promise.race([querySettlement]);',
     ],
     [
       'providerPositionAdmissionCoordinatorSource',

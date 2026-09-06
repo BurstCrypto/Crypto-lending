@@ -65,12 +65,18 @@ class FakeWalletReader implements PortfolioWalletRegistrationReader {
   readonly calls: ReadActivePortfolioWalletRegistrationsRequest[] = [];
   response: unknown = [{ walletId: WALLET_ID, networkId: NETWORK_ID }];
   error: Error | undefined;
+  readOverride:
+    | ((
+        request: ReadActivePortfolioWalletRegistrationsRequest,
+      ) => Promise<readonly ActivePortfolioWalletRegistration[]>)
+    | undefined;
 
   async readActiveWalletRegistrations(
     request: ReadActivePortfolioWalletRegistrationsRequest,
   ): Promise<readonly ActivePortfolioWalletRegistration[]> {
     this.calls.push(request);
     if (this.error) throw this.error;
+    if (this.readOverride) return this.readOverride(request);
     return this.response as readonly ActivePortfolioWalletRegistration[];
   }
 }
@@ -905,8 +911,14 @@ describe('DormantProviderPositionAdmissionCoordinator', () => {
     const value = fixture();
     await coordinator(value).admit({ accountId: ACCOUNT_ID, correlationId: CORRELATION_ID });
 
+    const sharedSignal = value.runner.calls[0]?.signal;
     expect(value.walletReader.calls).toEqual([
-      { accountId: ACCOUNT_ID, evaluatedAt: NOW.toISOString(), correlationId: CORRELATION_ID },
+      {
+        accountId: ACCOUNT_ID,
+        evaluatedAt: NOW.toISOString(),
+        correlationId: CORRELATION_ID,
+        signal: sharedSignal,
+      },
     ]);
     for (const source of value.sources) {
       expect(source.calls).toEqual([
@@ -927,7 +939,6 @@ describe('DormantProviderPositionAdmissionCoordinator', () => {
       ]);
     }
     expect(value.runner.calls).toHaveLength(3);
-    const sharedSignal = value.runner.calls[0]?.signal;
     const sharedAbortAdmission = value.runner.calls[0]?.abortAdmission;
     expect(new Set(value.runner.calls.map(({ signal }) => signal))).toEqual(
       new Set([sharedSignal]),
@@ -941,6 +952,63 @@ describe('DormantProviderPositionAdmissionCoordinator', () => {
       expect(source.calls[0]?.signal.aborted).toBe(true);
     }
     expect(value.runner.maximumActive).toBeLessThanOrEqual(2);
+  });
+
+  it('does not start provider reads or settle until an aborted wallet roster read drains', async () => {
+    const value = fixture();
+    let markStarted: (() => void) | undefined;
+    let finishCleanup: (() => void) | undefined;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    const cleanup = new Promise<void>((resolve) => {
+      finishCleanup = resolve;
+    });
+    value.walletReader.readOverride = async (request) => {
+      markStarted?.();
+      return new Promise<readonly ActivePortfolioWalletRegistration[]>((_resolve, reject) => {
+        const onAbort = (): void => {
+          void cleanup.then(() => reject(new Error('private roster cancellation detail')));
+        };
+        if (request.signal?.aborted) onAbort();
+        else request.signal?.addEventListener('abort', onAbort, { once: true });
+      });
+    };
+
+    const running = coordinator(value).admit({
+      accountId: ACCOUNT_ID,
+      correlationId: CORRELATION_ID,
+    });
+    let settled = false;
+    void running.then(
+      () => {
+        settled = true;
+      },
+      () => {
+        settled = true;
+      },
+    );
+    await started;
+
+    const rosterRun = value.runner.calls[0];
+    expect(rosterRun).toBeDefined();
+    expect(value.walletReader.calls[0]?.signal).toBe(rosterRun?.signal);
+    rosterRun?.abortAdmission();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(settled).toBe(false);
+    expect(value.sources.every(({ calls }) => calls.length === 0)).toBe(true);
+
+    finishCleanup?.();
+    await expect(running).rejects.toEqual(
+      expect.objectContaining({
+        name: 'ProviderPositionAdmissionUnavailableError',
+        message: 'Provider-position admission is unavailable.',
+        code: 'WALLET_ROSTER_UNAVAILABLE',
+      }),
+    );
+    expect(settled).toBe(true);
   });
 
   it('uses deterministic canonical ordering and fingerprints', async () => {

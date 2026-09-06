@@ -17,6 +17,12 @@ export interface ReadActivePortfolioWalletRegistrationsRequest {
   readonly accountId: AccountId;
   readonly evaluatedAt: string;
   readonly correlationId: string;
+  /**
+   * Optional for legacy portfolio callers. When supplied, implementations must
+   * propagate this exact signal to the durable read and cooperatively stop and
+   * drain that read before rejecting after cancellation.
+   */
+  readonly signal?: AbortSignal;
 }
 
 export interface PortfolioWalletRegistrationReader {

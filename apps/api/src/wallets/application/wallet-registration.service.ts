@@ -115,6 +115,11 @@ export interface ActiveWalletRoster {
   readonly wallets: readonly ActiveRegisteredWallet[];
 }
 
+export interface ListActiveWalletsOptions {
+  /** Exact caller cancellation propagated to the durable roster read. */
+  readonly signal: AbortSignal;
+}
+
 export const WALLET_REGISTRATION_CLOCK = Symbol('WALLET_REGISTRATION_CLOCK');
 
 export interface WalletRegistrationClock {
@@ -170,7 +175,10 @@ export class WalletRegistrationService {
     private readonly clock: WalletRegistrationClock,
   ) {}
 
-  async listActiveWallets(accountIdInput: AccountId): Promise<ActiveWalletRoster> {
+  async listActiveWallets(
+    accountIdInput: AccountId,
+    options?: ListActiveWalletsOptions,
+  ): Promise<ActiveWalletRoster> {
     const config = this.enabledConfig();
     let accountId: AccountId;
     try {
@@ -181,7 +189,9 @@ export class WalletRegistrationService {
 
     let records;
     try {
-      records = await this.repository.listActiveWallets({ accountId });
+      records = await this.repository.listActiveWallets(
+        options === undefined ? { accountId } : { accountId, signal: options.signal },
+      );
     } catch {
       throw new WalletRegistrationUnavailableError();
     }

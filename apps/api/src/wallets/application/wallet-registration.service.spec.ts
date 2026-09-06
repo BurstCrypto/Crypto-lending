@@ -244,6 +244,7 @@ describe('WalletRegistrationService', () => {
       ],
     });
     expect(list).toHaveBeenCalledWith({ accountId: ACCOUNT_ID });
+    expect(Object.prototype.hasOwnProperty.call(list.mock.calls[0]?.[0], 'signal')).toBe(false);
 
     list.mockResolvedValueOnce([{ ...record, accountId: parseAccountId(randomUUID()) }]);
     await expect(service.listActiveWallets(ACCOUNT_ID)).rejects.toBeInstanceOf(
@@ -291,6 +292,34 @@ describe('WalletRegistrationService', () => {
     await expect(service.listActiveWallets(ACCOUNT_ID)).rejects.toBeInstanceOf(
       WalletRegistrationUnavailableError,
     );
+  });
+
+  it('forwards an exact optional cancellation signal and sanitizes repository failures', async () => {
+    const successful = serviceFixture();
+    const controller = new AbortController();
+
+    await expect(
+      successful.service.listActiveWallets(
+        ACCOUNT_ID,
+        Object.freeze({ signal: controller.signal }),
+      ),
+    ).resolves.toEqual({ version: 1, wallets: [] });
+    expect(successful.list).toHaveBeenCalledWith({
+      accountId: ACCOUNT_ID,
+      signal: controller.signal,
+    });
+    expect(successful.list.mock.calls[0]?.[0].signal).toBe(controller.signal);
+
+    const unavailable = serviceFixture();
+    unavailable.list.mockRejectedValueOnce(new Error('private cancellation detail'));
+    let thrown: unknown;
+    try {
+      await unavailable.service.listActiveWallets(ACCOUNT_ID, { signal: controller.signal });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toEqual(new WalletRegistrationUnavailableError());
+    expect(String(thrown)).not.toContain('private cancellation detail');
   });
 
   it('reads previous key versions while issuing only active-version writes and all identity aliases', async () => {

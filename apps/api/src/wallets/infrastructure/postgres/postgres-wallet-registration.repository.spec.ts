@@ -109,8 +109,14 @@ function revokedProxy(): object {
   return proxy;
 }
 
-function repositoryWith(query: jest.Mock): WalletRegistrationRepositoryPort {
-  return new PostgresWalletRegistrationRepository({ query } as unknown as PostgresService);
+function repositoryWith(
+  query: jest.Mock,
+  queryWithCancellation: jest.Mock = jest.fn(),
+): WalletRegistrationRepositoryPort {
+  return new PostgresWalletRegistrationRepository({
+    query,
+    queryWithCancellation,
+  } as unknown as PostgresService);
 }
 
 describe('PostgresWalletRegistrationRepository', () => {
@@ -148,9 +154,10 @@ describe('PostgresWalletRegistrationRepository', () => {
       active_registered_at: NOW,
     };
     const query = jest.fn().mockResolvedValue(result([row]));
+    const queryWithCancellation = jest.fn();
 
     await expect(
-      repositoryWith(query).listActiveWallets({ accountId: ACCOUNT_ID }),
+      repositoryWith(query, queryWithCancellation).listActiveWallets({ accountId: ACCOUNT_ID }),
     ).resolves.toEqual([
       expect.objectContaining({
         walletId: WALLET_ID,
@@ -168,6 +175,7 @@ describe('PostgresWalletRegistrationRepository', () => {
       expect.stringMatching(/list_active_wallet_registrations_rotatable[\s\S]+LIMIT 33/u),
       [ACCOUNT_ID],
     );
+    expect(queryWithCancellation).not.toHaveBeenCalled();
 
     query.mockResolvedValueOnce(
       result(Array.from({ length: MAX_ACTIVE_WALLET_REGISTRATIONS_PER_ACCOUNT + 1 }, () => row)),
@@ -183,6 +191,57 @@ describe('PostgresWalletRegistrationRepository', () => {
       repositoryWith(query).listActiveWallets({ accountId: ACCOUNT_ID }),
     ).rejects.toBeInstanceOf(WalletRegistrationPersistenceError);
   });
+
+  it('uses the cancellation-aware query with the exact active-wallet SQL, values, and signal', async () => {
+    const query = jest.fn();
+    const queryWithCancellation = jest.fn().mockResolvedValue(result([]));
+    const signal = new AbortController().signal;
+
+    await expect(
+      repositoryWith(query, queryWithCancellation).listActiveWallets({
+        accountId: ACCOUNT_ID,
+        signal,
+      }),
+    ).resolves.toEqual([]);
+
+    expect(query).not.toHaveBeenCalled();
+    expect(queryWithCancellation).toHaveBeenCalledWith(
+      expect.stringMatching(/list_active_wallet_registrations_rotatable[\s\S]+LIMIT 33/u),
+      [ACCOUNT_ID],
+      signal,
+    );
+    expect(queryWithCancellation.mock.calls[0]?.[2]).toBe(signal);
+  });
+
+  it.each([
+    ['null', null],
+    ['counterfeit', Object.freeze({ aborted: false })],
+    ['revoked proxy', revokedProxy()],
+  ])(
+    'routes a supplied %s signal through cancellation validation and sanitizes its failure',
+    async (_label, suppliedSignal) => {
+      const query = jest.fn();
+      const queryWithCancellation = jest
+        .fn()
+        .mockRejectedValue(new Error('private cancellation validation detail'));
+      let thrown: unknown;
+
+      try {
+        await repositoryWith(query, queryWithCancellation).listActiveWallets({
+          accountId: ACCOUNT_ID,
+          signal: suppliedSignal as unknown as AbortSignal,
+        });
+      } catch (error) {
+        thrown = error;
+      }
+
+      expect(query).not.toHaveBeenCalled();
+      expect(queryWithCancellation).toHaveBeenCalledTimes(1);
+      expect(queryWithCancellation.mock.calls[0]?.[2]).toBe(suppliedSignal);
+      expect(thrown).toEqual(new WalletRegistrationPersistenceError());
+      expect(String(thrown)).not.toContain('private cancellation validation detail');
+    },
+  );
 
   it('maps wallet revocation without exposing whether the account-scoped row existed', async () => {
     const query = jest

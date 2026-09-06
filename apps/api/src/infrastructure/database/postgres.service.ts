@@ -159,9 +159,9 @@ export class PostgresService implements OnApplicationShutdown {
   }
 
   /**
-   * Runs one balance-consumer query on an exclusively acquired client. The
-   * caller's signal and this service's lifecycle both discard the connection,
-   * then the method drains the wire query and client teardown before settling.
+   * Runs one cancellable query on an exclusively acquired client. The caller's
+   * signal and this service's lifecycle both discard the connection, then the
+   * method drains the wire query and client teardown before settling.
    */
   queryWithCancellation<Row extends QueryResultRow = QueryResultRow>(
     queryTextOrConfig: string | QueryConfig,
