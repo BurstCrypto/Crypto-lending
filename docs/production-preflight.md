@@ -182,30 +182,40 @@ into deployed or production-ready evidence.
 
 `PROVIDER_POSITION_READ_BOUNDARY` independently snapshots and byte-pins the
 coverage-aware reader v2 port, trusted assessment assembly port, admission
-coordinator, coverage/observation/assessment/policy domains, feature module,
-feature barrel, and HTTP controller as one selected ten-file critical-source
-slice. Within that slice, the local semantic inspection requires covered rather than bare reader results,
-complete and agreeing coverage (including explicit zero counts), whole-assembly
-and per-observation verification, stable method capture, final clock checks,
-false persistence/financial authority, one shared source abort signal, terminal
+coordinator, concrete Node deadline runner, coverage/observation/assessment/policy
+domains, feature module, feature barrel, and HTTP controller as one selected
+eleven-file critical-source slice. Within that slice, the local semantic
+inspection requires covered rather than bare reader results, complete and
+agreeing coverage (including explicit zero counts), whole-assembly and
+per-observation verification, stable method capture, final clock checks, false
+persistence/financial authority, one shared source abort signal, terminal
 cleanup, first-failure queue stop/drain behavior, and one selected source and
-anchor for every target. It also confirms that the pinned feature module,
-barrel, and controller do not register or expose the coordinator or trusted
-assembly.
+anchor for every target. The runner inspection permits only its reviewed,
+30-second-bounded timer capability; it requires cancellation authority,
+post-operation deadline validation, started-operation settlement, and timer and
+abort-listener cleanup while rejecting network, environment, dynamic-import,
+and Nest decorator capabilities. It also confirms that the pinned feature
+module, barrel, and controller do not register or expose the coordinator,
+trusted assembly, or deadline runner.
 
 The current exact source passes local inspection, but launch readiness remains
 blocked by `PROVIDER_POSITION_READER_FEATURE_REGISTRATION_MISSING` and
-`PROVIDER_POSITION_TRUSTED_ASSESSMENT_FEATURE_REGISTRATION_MISSING`. The
-inspection has a private in-process brand and rejects missing, extra, accessor,
-symbol, proxy, oversized, non-string, or byte-drifted inputs. It reads local
-source only; it neither invokes these components nor performs network, chain,
-provider, cloud, secret, transaction, or billable operations.
+`PROVIDER_POSITION_TRUSTED_ASSESSMENT_FEATURE_REGISTRATION_MISSING`, plus
+`PROVIDER_POSITION_DEADLINE_RUNNER_FEATURE_REGISTRATION_MISSING`. The concrete
+runner remains dormant and unregistered. Provider sources must cooperate with
+abort and settle before the runner can return; the existing wallet-roster
+database port still cannot receive that signal, so cancellable database
+propagation remains a production prerequisite. The inspection has a private
+in-process brand and rejects missing, extra, accessor, symbol, proxy, oversized,
+non-string, or byte-drifted inputs. It reads local source only; it neither
+invokes these components nor performs network, chain, provider, cloud, secret,
+transaction, or billable operations.
 
 This check does not claim a recursive dependency closure or scan every
 application module for alternate registration. Shared launch roots and some
 dependencies have separate preflight pins, but a future implementation still
 requires candidate-wide dependency, module-graph, and deployment review before
-either feature-registration blocker can be replaced with live evidence.
+any feature-registration blocker can be replaced with live evidence.
 
 The offline ingestion boundary is opt-in only:
 

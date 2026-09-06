@@ -429,6 +429,13 @@ const PROVIDER_POSITION_READ_ARTIFACTS = Object.freeze({
     ),
     'utf8',
   ),
+  providerPositionDeadlineRunnerSource: readFileSync(
+    resolve(
+      __dirname,
+      '../apps/api/src/mainnet-platforms/infrastructure/node-provider-position-admission-deadline.runner.ts',
+    ),
+    'utf8',
+  ),
   providerPositionCoverageSource: readFileSync(
     resolve(
       __dirname,
@@ -499,16 +506,19 @@ const EXPECTED_DORMANT_PROVIDER_POSITION_READ_BOUNDARY = Object.freeze({
   contractValid: true,
   readerFeatureRegistration: 'MISSING',
   trustedAssessmentFeatureRegistration: 'MISSING',
+  deadlineRunnerFeatureRegistration: 'MISSING',
 } as const);
 const EXPECTED_DORMANT_PROVIDER_POSITION_READ_BOUNDARY_BLOCKERS = Object.freeze([
   'PROVIDER_POSITION_READER_FEATURE_REGISTRATION_MISSING',
   'PROVIDER_POSITION_TRUSTED_ASSESSMENT_FEATURE_REGISTRATION_MISSING',
+  'PROVIDER_POSITION_DEADLINE_RUNNER_FEATURE_REGISTRATION_MISSING',
 ] satisfies readonly ProductionPreflightBlockerId[]);
 const INVALID_PROVIDER_POSITION_READ_BOUNDARY = Object.freeze({
   inspected: true,
   contractValid: false,
   readerFeatureRegistration: 'INVALID',
   trustedAssessmentFeatureRegistration: 'INVALID',
+  deadlineRunnerFeatureRegistration: 'INVALID',
 } as const);
 const PREFLIGHT_SCRIPT_PATH = resolve(__dirname, 'production-go-live-preflight.ts');
 const RDS_MANAGED_DATABASE_TEMPLATE = APPLICATION_BASELINE;
@@ -1095,13 +1105,78 @@ test('provider-position read inspection rejects trust, coverage, and dormancy dr
     ],
     [
       'providerPositionAdmissionCoordinatorSource',
-      'if (prepared.controller.signal.aborted === false) prepared.controller.abort();',
-      'void prepared.controller;',
+      'prepared.abortAdmission();',
+      'void prepared.abortAdmission;',
+    ],
+    [
+      'providerPositionAdmissionCoordinatorSource',
+      'abortAdmission: activeAbortAdmission,',
+      'abortAdmission: () => undefined,',
     ],
     [
       'providerPositionAdmissionCoordinatorSource',
       'while (!failed && !controller.signal.aborted && next < inputs.length) {',
       'while (next < inputs.length) {',
+    ],
+    [
+      'providerPositionDeadlineRunnerSource',
+      'const MAX_DEADLINE_MILLISECONDS = 30_000;',
+      'const MAX_DEADLINE_MILLISECONDS = 300_000;',
+    ],
+    [
+      'providerPositionDeadlineRunnerSource',
+      "from '../application/provider-position-admission.coordinator';",
+      "from 'node:https';",
+    ],
+    [
+      'providerPositionDeadlineRunnerSource',
+      'const DATE_PARSE = Date.parse;',
+      'const DATE_PARSE = process.env.PROVIDER_POSITION_DATE_PARSE;',
+    ],
+    [
+      'providerPositionDeadlineRunnerSource',
+      'export class NodeProviderPositionAdmissionDeadlineRunner',
+      '@Injectable()\nexport class NodeProviderPositionAdmissionDeadlineRunner',
+    ],
+    [
+      'providerPositionDeadlineRunnerSource',
+      'const SYSTEM_SET_TIMEOUT = globalThis.setTimeout;',
+      'const SYSTEM_SET_TIMEOUT = globalThis.setInterval;',
+    ],
+    [
+      'providerPositionDeadlineRunnerSource',
+      'const outcome: OperationOutcome<T> = await Promise.resolve()',
+      'const outcome: OperationOutcome<T> = await Promise.race([Promise.resolve()])',
+    ],
+    [
+      'providerPositionDeadlineRunnerSource',
+      "if (!outcome.ok && cause === null) abortWith('OPERATION_FAILED');",
+      'void outcome;',
+    ],
+    [
+      'providerPositionDeadlineRunnerSource',
+      'completedAt >= request.deadlineMilliseconds',
+      'completedAt > request.deadlineMilliseconds',
+    ],
+    [
+      'providerPositionDeadlineRunnerSource',
+      'Reflect.apply(request.abortAdmission, undefined, []);',
+      'void request.abortAdmission;',
+    ],
+    [
+      'providerPositionDeadlineRunnerSource',
+      'this.cancelTimer(timer);',
+      'void timer;',
+    ],
+    [
+      'providerPositionDeadlineRunnerSource',
+      'request.signal.remove(onAbort);',
+      'void onAbort;',
+    ],
+    [
+      'providerPositionDeadlineRunnerSource',
+      "if (!request.signal.aborted()) return fail('INVALID_ABORT_CAPABILITY');",
+      'void request.signal;',
     ],
     ['providerPositionAdmissionCoordinatorSource', 'selectedTargetSources.push(', 'void ('],
     ['providerPositionAdmissionCoordinatorSource', 'mayPersist: false,', 'mayPersist: true,'],
@@ -1119,14 +1194,29 @@ test('provider-position read inspection rejects trust, coverage, and dormancy dr
       'providers: [MainnetPlatformDirectoryService, MainnetPlatformsPrivacyInterceptor, MAINNET_PROVIDER_POSITION_READER],',
     ],
     [
+      'mainnetPlatformsModuleSource',
+      'providers: [MainnetPlatformDirectoryService, MainnetPlatformsPrivacyInterceptor],',
+      'providers: [MainnetPlatformDirectoryService, MainnetPlatformsPrivacyInterceptor, NodeProviderPositionAdmissionDeadlineRunner],',
+    ],
+    [
       'mainnetPlatformsIndexSource',
       "export { MainnetPlatformDirectoryService } from './application/mainnet-platform-directory.service';",
       "export { DormantProviderPositionAdmissionCoordinator } from './application/provider-position-admission.coordinator';",
     ],
     [
+      'mainnetPlatformsIndexSource',
+      "export { MainnetPlatformDirectoryService } from './application/mainnet-platform-directory.service';",
+      "export { NodeProviderPositionAdmissionDeadlineRunner } from './infrastructure/node-provider-position-admission-deadline.runner';",
+    ],
+    [
       'mainnetPlatformsControllerSource',
       'constructor(private readonly directory: MainnetPlatformDirectoryService) {}',
       'constructor(private readonly reader: MainnetProviderPositionReader) {}',
+    ],
+    [
+      'mainnetPlatformsControllerSource',
+      'constructor(private readonly directory: MainnetPlatformDirectoryService) {}',
+      'constructor(private readonly deadlineRunner: NodeProviderPositionAdmissionDeadlineRunner) {}',
     ],
   ];
 

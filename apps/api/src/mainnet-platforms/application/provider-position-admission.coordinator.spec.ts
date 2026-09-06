@@ -678,6 +678,7 @@ describe('DormantProviderPositionAdmissionCoordinator', () => {
     expect(assembly.calls[0]?.admissionCandidate).toBe(result.admissionCandidate);
     expect(assembly.calls[0]?.signal.aborted).toBe(true);
     expect(new Set(value.runner.calls.map(({ signal }) => signal)).size).toBe(1);
+    expect(new Set(value.runner.calls.map(({ abortAdmission }) => abortAdmission)).size).toBe(1);
     expect(assembly.calls[0]?.signal).toBe(value.runner.calls[0]?.signal);
     expect(value.runner.calls.at(-1)).toEqual(
       expect.objectContaining({
@@ -927,8 +928,12 @@ describe('DormantProviderPositionAdmissionCoordinator', () => {
     }
     expect(value.runner.calls).toHaveLength(3);
     const sharedSignal = value.runner.calls[0]?.signal;
+    const sharedAbortAdmission = value.runner.calls[0]?.abortAdmission;
     expect(new Set(value.runner.calls.map(({ signal }) => signal))).toEqual(
       new Set([sharedSignal]),
+    );
+    expect(new Set(value.runner.calls.map(({ abortAdmission }) => abortAdmission))).toEqual(
+      new Set([sharedAbortAdmission]),
     );
     for (const source of value.sources) {
       expect(source.calls[0]?.signal).toBe(sharedSignal);

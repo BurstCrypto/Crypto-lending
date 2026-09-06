@@ -69,6 +69,7 @@ export type ProductionPreflightBlockerId =
   | 'PROVIDER_POSITION_READ_BOUNDARY_INSPECTION_FAILED'
   | 'PROVIDER_POSITION_READER_FEATURE_REGISTRATION_MISSING'
   | 'PROVIDER_POSITION_TRUSTED_ASSESSMENT_FEATURE_REGISTRATION_MISSING'
+  | 'PROVIDER_POSITION_DEADLINE_RUNNER_FEATURE_REGISTRATION_MISSING'
   | 'AUTH_DEPLOYED_EVIDENCE_MISSING'
   | 'AUTH_PRODUCTION_CONFIGURATION_NOT_WIRED'
   | 'AUTH_PRODUCTION_SECRET_REFERENCES_NOT_WIRED'
@@ -249,6 +250,7 @@ export interface ProviderPositionReadBoundaryArtifactSources {
   readonly providerPositionReaderPortSource: string;
   readonly providerPositionTrustedAssemblyPortSource: string;
   readonly providerPositionAdmissionCoordinatorSource: string;
+  readonly providerPositionDeadlineRunnerSource: string;
   readonly providerPositionCoverageSource: string;
   readonly providerPositionObservationSource: string;
   readonly providerPositionChainAssessmentSource: string;
@@ -263,6 +265,7 @@ export interface ProviderPositionReadBoundaryInput {
   readonly contractValid: boolean;
   readonly readerFeatureRegistration: 'INVALID' | 'MISSING';
   readonly trustedAssessmentFeatureRegistration: 'INVALID' | 'MISSING';
+  readonly deadlineRunnerFeatureRegistration: 'INVALID' | 'MISSING';
 }
 
 const VERIFIED_PROVIDER_POSITION_READ_BOUNDARIES = new WeakSet<ProviderPositionReadBoundaryInput>();
@@ -566,6 +569,7 @@ const PROVIDER_POSITION_READ_ARTIFACT_KEYS = Object.freeze([
   'providerPositionReaderPortSource',
   'providerPositionTrustedAssemblyPortSource',
   'providerPositionAdmissionCoordinatorSource',
+  'providerPositionDeadlineRunnerSource',
   'providerPositionCoverageSource',
   'providerPositionObservationSource',
   'providerPositionChainAssessmentSource',
@@ -580,7 +584,9 @@ const REVIEWED_PROVIDER_POSITION_READ_ARTIFACT_SHA256 = Object.freeze({
   providerPositionTrustedAssemblyPortSource:
     '9120c664640be1f855b1ea77cc9ca403506cae306b3f14679172f634c4e8a37b',
   providerPositionAdmissionCoordinatorSource:
-    '7bd8f0597c3ff93cb5a99bcb20b89664232b27565ebe06ee16f629792c98dd53',
+    'c0e5f9c5c9a3860cd2c7250868910520865925c48225be2f8c1bb96f1e499e13',
+  providerPositionDeadlineRunnerSource:
+    '6910ff27ce6b29d06d7f3fc20743779196259bda5518b1b4ada7f82b9c2c3f97',
   providerPositionCoverageSource:
     'a26d468abb2c46bd28267c6d36d1a7d3e62c30a700159e3c4cf263d15a8a9611',
   providerPositionObservationSource:
@@ -1277,6 +1283,7 @@ export function evaluateProductionPreflight(
       providerPositionReadBoundary.contractValid === true &&
       providerPositionReadBoundary.readerFeatureRegistration === 'MISSING' &&
       providerPositionReadBoundary.trustedAssessmentFeatureRegistration === 'MISSING' &&
+      providerPositionReadBoundary.deadlineRunnerFeatureRegistration === 'MISSING' &&
       VERIFIED_PROVIDER_POSITION_READ_BOUNDARIES.has(providerPositionReadBoundary);
   } catch {
     // Initialized fail-closed values are preserved for malformed or hostile inputs.
@@ -1287,6 +1294,7 @@ export function evaluateProductionPreflight(
     providerPositionReadBoundaryBlockers.push(
       'PROVIDER_POSITION_READER_FEATURE_REGISTRATION_MISSING',
       'PROVIDER_POSITION_TRUSTED_ASSESSMENT_FEATURE_REGISTRATION_MISSING',
+      'PROVIDER_POSITION_DEADLINE_RUNNER_FEATURE_REGISTRATION_MISSING',
     );
   }
 
@@ -1968,6 +1976,7 @@ function hasDormantProviderPositionReadBoundaryContract(
   const reader = sources.providerPositionReaderPortSource.replace(/\r\n/gu, '\n');
   const assemblyPort = sources.providerPositionTrustedAssemblyPortSource.replace(/\r\n/gu, '\n');
   const coordinator = sources.providerPositionAdmissionCoordinatorSource.replace(/\r\n/gu, '\n');
+  const deadlineRunner = sources.providerPositionDeadlineRunnerSource.replace(/\r\n/gu, '\n');
   const coverage = sources.providerPositionCoverageSource.replace(/\r\n/gu, '\n');
   const observation = sources.providerPositionObservationSource.replace(/\r\n/gu, '\n');
   const chainAssessment = sources.providerPositionChainAssessmentSource.replace(/\r\n/gu, '\n');
@@ -1986,6 +1995,43 @@ function hasDormantProviderPositionReadBoundaryContract(
   ] as const;
   const forbiddenCapability =
     /(?:\bfrom\s+|\bimport\s*(?:\(\s*)?)['"](?:node:)?(?:dns|http|http2|https|net|tls)(?:\/[^'"]*)?['"]|(?:\bfrom\s+|\bimport\s*(?:\(\s*)?)['"](?:axios|ethers|got|superagent|undici|web3|@solana\/web3\.js)['"]|\b(?:fetch|setTimeout|setInterval|setImmediate|queueMicrotask)\s*\(|\b(?:process|Deno|Bun)\s*\.\s*env\b|\bimport\s*\.\s*meta\s*\.\s*env\b|\bnew\s+(?:URL|URLSearchParams|WebSocket|EventSource|Connection|[A-Za-z0-9_]*Client|[A-Za-z0-9_]*Agent)\s*\(|['"]https?:\/\//iu;
+  const deadlineRunnerImportSources = Array.from(
+    deadlineRunner.matchAll(/\bfrom\s+['"]([^'"]+)['"]/gu),
+    (match) => match[1],
+  );
+  const deadlineRunnerImportDeclarationCount =
+    deadlineRunner.match(/^[\t ]*import\b/gmu)?.length ?? 0;
+  const deadlineRunnerGlobalMembers = Array.from(
+    deadlineRunner.matchAll(/\bglobalThis\s*\.\s*([A-Za-z_$][A-Za-z0-9_$]*)/gu),
+    (match) => match[1],
+  );
+  const forbiddenDeadlineRunnerCapability =
+    /(?:\bimport\s*\(|\brequire\s*\(|\b(?:fetch|setInterval|setImmediate|queueMicrotask|WebSocket|EventSource|XMLHttpRequest)\s*\(|\b(?:process|Deno|Bun)\b|\bimport\s*\.\s*meta\s*\.\s*env\b|['"]https?:\/\/|(?:^|\n)[\t ]*@[A-Za-z_$])/iu;
+  const runnerOperationAwait = deadlineRunner.indexOf(
+    'const outcome: OperationOutcome<T> = await Promise.resolve()',
+  );
+  const runnerFailureAbort = deadlineRunner.indexOf(
+    "if (!outcome.ok && cause === null) abortWith('OPERATION_FAILED');",
+    runnerOperationAwait,
+  );
+  const runnerCompletionClock = deadlineRunner.indexOf(
+    'const completedAt = this.tryClockMilliseconds();',
+    runnerFailureAbort,
+  );
+  const runnerFinally = deadlineRunner.indexOf('} finally {', runnerCompletionClock);
+  const runnerTimerCleanup = deadlineRunner.indexOf('this.cancelTimer(timer);', runnerFinally);
+  const runnerListenerCleanup = deadlineRunner.indexOf(
+    'request.signal.remove(onAbort);',
+    runnerTimerCleanup,
+  );
+  const runnerCleanupFailure = deadlineRunner.indexOf(
+    'if (cleanupFailed) {',
+    runnerListenerCleanup,
+  );
+  const runnerCleanupFailureResult = deadlineRunner.indexOf(
+    "fail('RUNTIME_UNAVAILABLE');",
+    runnerCleanupFailure,
+  );
   const selectedTargetLoop = coordinator.indexOf('for (const target of candidate.targets) {');
   const selectedSource = coordinator.indexOf(
     'const selectedSource = target.acceptedSources[0];',
@@ -1997,9 +2043,9 @@ function hasDormantProviderPositionReadBoundaryContract(
     selectedTargetPush,
   );
   const forbiddenRuntimeIdentity =
-    /\b(?:MAINNET_PROVIDER_POSITION_READER|DormantProviderPositionAdmissionCoordinator|ProviderPositionTrustedChainAssessmentAssemblyPort|PROVIDER_POSITION_TRUSTED_CHAIN_ASSESSMENT_ASSEMBLY_USE)\b/u;
+    /\b(?:MAINNET_PROVIDER_POSITION_READER|DormantProviderPositionAdmissionCoordinator|ProviderPositionTrustedChainAssessmentAssemblyPort|NodeProviderPositionAdmissionDeadlineRunner|PROVIDER_POSITION_TRUSTED_CHAIN_ASSESSMENT_ASSEMBLY_USE)\b/u;
   const forbiddenBarrelImplementation =
-    /(?:DormantProviderPositionAdmissionCoordinator|ProviderPositionTrustedChainAssessmentAssemblyPort|provider-position-admission\.coordinator|provider-position-trusted-chain-assessment-assembly\.port)/u;
+    /(?:DormantProviderPositionAdmissionCoordinator|ProviderPositionTrustedChainAssessmentAssemblyPort|NodeProviderPositionAdmissionDeadlineRunner|provider-position-admission\.coordinator|provider-position-trusted-chain-assessment-assembly\.port|node-provider-position-admission-deadline\.runner)/u;
 
   return (
     capabilityFreeSources.every((source) => !forbiddenCapability.test(source)) &&
@@ -2050,17 +2096,73 @@ function hasDormantProviderPositionReadBoundaryContract(
     exactExecutableLineCount(coordinator, 'signal: activeController.signal,') === 3 &&
     exactExecutableLineCount(
       coordinator,
-      'if (prepared.controller.signal.aborted === false) prepared.controller.abort();',
+      'prepared.abortAdmission();',
     ) === 1 &&
     exactExecutableLineCount(
       coordinator,
-      'if (controller?.signal.aborted === false) controller.abort();',
+      'abortAdmission?.();',
     ) === 1 &&
+    exactExecutableLineCount(coordinator, 'readonly abortAdmission: () => void;') === 2 &&
+    exactExecutableLineCount(coordinator, 'abortAdmission: activeAbortAdmission,') === 3 &&
     exactExecutableLineCount(
       coordinator,
       'while (!failed && !controller.signal.aborted && next < inputs.length) {',
     ) === 1 &&
     exactExecutableLineCount(coordinator, 'if (failed) throw firstFailure;') === 1 &&
+    deadlineRunnerImportDeclarationCount === 2 &&
+    deadlineRunnerImportSources.length === 2 &&
+    deadlineRunnerImportSources[0] === 'node:util/types' &&
+    deadlineRunnerImportSources[1] === '../application/provider-position-admission.coordinator' &&
+    deadlineRunnerGlobalMembers.length === 2 &&
+    deadlineRunnerGlobalMembers.includes('setTimeout') &&
+    deadlineRunnerGlobalMembers.includes('clearTimeout') &&
+    !forbiddenDeadlineRunnerCapability.test(deadlineRunner) &&
+    !deadlineRunner.includes('Promise.race') &&
+    exactExecutableLineCount(
+      deadlineRunner,
+      'const MAX_DEADLINE_MILLISECONDS = 30_000;',
+    ) === 1 &&
+    exactExecutableLineCount(
+      deadlineRunner,
+      'const SYSTEM_SET_TIMEOUT = globalThis.setTimeout;',
+    ) === 1 &&
+    exactExecutableLineCount(
+      deadlineRunner,
+      'const SYSTEM_CLEAR_TIMEOUT = globalThis.clearTimeout;',
+    ) === 1 &&
+    exactExecutableLineCount(deadlineRunner, 'handle.unref?.();') === 1 &&
+    exactExecutableLineCount(
+      deadlineRunner,
+      "super('Provider-position admission deadline execution is unavailable.');",
+    ) === 1 &&
+    exactExecutableLineCount(
+      deadlineRunner,
+      'if (request.signal.aborted()) return fail(\'ADMISSION_ABORTED\');',
+    ) === 1 &&
+    exactExecutableLineCount(deadlineRunner, 'if (remaining <= 0) {') === 1 &&
+    exactExecutableLineCount(deadlineRunner, 'if (remaining > MAX_DEADLINE_MILLISECONDS) {') === 1 &&
+    exactExecutableLineCount(deadlineRunner, 'request.signal.add(onAbort);') === 1 &&
+    exactExecutableLineCount(deadlineRunner, 'timer = this.scheduleTimer(() => {') === 1 &&
+    exactExecutableLineCount(
+      deadlineRunner,
+      'completedAt >= request.deadlineMilliseconds',
+    ) === 1 &&
+    exactExecutableLineCount(
+      deadlineRunner,
+      'Reflect.apply(request.abortAdmission, undefined, []);',
+    ) === 1 &&
+    exactExecutableLineCount(
+      deadlineRunner,
+      "if (!request.signal.aborted()) return fail('INVALID_ABORT_CAPABILITY');",
+    ) === 1 &&
+    runnerOperationAwait >= 0 &&
+    runnerFailureAbort > runnerOperationAwait &&
+    runnerCompletionClock > runnerFailureAbort &&
+    runnerFinally > runnerCompletionClock &&
+    runnerTimerCleanup > runnerFinally &&
+    runnerListenerCleanup > runnerTimerCleanup &&
+    runnerCleanupFailure > runnerListenerCleanup &&
+    runnerCleanupFailureResult > runnerCleanupFailure &&
     exactExecutableLineCount(
       coordinator,
       'assembly.verifyAssembly(chainAssessment, assemblyRequest) !== true',
@@ -6761,6 +6863,7 @@ export function inspectProviderPositionReadBoundaryArtifacts(
       contractValid: false,
       readerFeatureRegistration: 'INVALID',
       trustedAssessmentFeatureRegistration: 'INVALID',
+      deadlineRunnerFeatureRegistration: 'INVALID',
     });
   try {
     const sources = snapshotProviderPositionReadBoundaryArtifactSources(value);
@@ -6774,6 +6877,7 @@ export function inspectProviderPositionReadBoundaryArtifacts(
       contractValid: true,
       readerFeatureRegistration: 'MISSING',
       trustedAssessmentFeatureRegistration: 'MISSING',
+      deadlineRunnerFeatureRegistration: 'MISSING',
     });
     VERIFIED_PROVIDER_POSITION_READ_BOUNDARIES.add(result);
     return result;
@@ -7696,6 +7800,13 @@ export function loadRepositoryProductionPreflightInput(
         resolve(
           repositoryRoot,
           'apps/api/src/mainnet-platforms/application/provider-position-admission.coordinator.ts',
+        ),
+        'utf8',
+      ),
+      providerPositionDeadlineRunnerSource: readFileSync(
+        resolve(
+          repositoryRoot,
+          'apps/api/src/mainnet-platforms/infrastructure/node-provider-position-admission-deadline.runner.ts',
         ),
         'utf8',
       ),

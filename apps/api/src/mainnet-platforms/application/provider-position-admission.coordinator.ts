@@ -82,9 +82,15 @@ export interface ProviderPositionAdmissionDeadlineRunRequestV1 {
   readonly sourceFamilyId: string;
   readonly targetId: string;
   readonly signal: AbortSignal;
+  /** Narrow authority used by the trusted runner to cancel this whole admission. */
+  readonly abortAdmission: () => void;
 }
 
-/** Injected deadline enforcement; the coordinator owns no ambient timer. */
+/**
+ * Trusted deadline enforcement; the coordinator owns no ambient timer. A
+ * runner must cancel through abortAdmission and drain every started operation
+ * before settling after a deadline, sibling abort, or operation failure.
+ */
 export interface ProviderPositionAdmissionDeadlineRunner {
   run<T>(
     request: ProviderPositionAdmissionDeadlineRunRequestV1,
@@ -298,6 +304,7 @@ interface PreparedProviderPositionAdmission {
   readonly deadlineAt: string;
   readonly deadlineMilliseconds: number;
   readonly controller: AbortController;
+  readonly abortAdmission: () => void;
 }
 
 interface ProviderPositionSnapshotAssemblyInput {
@@ -411,7 +418,7 @@ export class DormantProviderPositionAdmissionCoordinator {
     try {
       return prepared.candidate;
     } finally {
-      if (prepared.controller.signal.aborted === false) prepared.controller.abort();
+      prepared.abortAdmission();
     }
   }
 
@@ -422,7 +429,7 @@ export class DormantProviderPositionAdmissionCoordinator {
     if (assembly === undefined) return fail('ASSEMBLY_UNAVAILABLE');
 
     const prepared = await this.prepareAdmission(requestInput);
-    const { candidate, controller } = prepared;
+    const { abortAdmission, candidate, controller } = prepared;
     try {
       const evaluated = canonicalClock(this.clock.now());
       assertAssemblyWindow(evaluated.milliseconds, candidate, prepared, candidate.capturedAt);
@@ -446,13 +453,14 @@ export class DormantProviderPositionAdmissionCoordinator {
       let chainAssessment: unknown;
       try {
         chainAssessment = await this.deadlineRunner.run(
-          {
+          Object.freeze({
             deadlineAt: prepared.deadlineAt,
             correlationId: candidate.correlationId,
             sourceFamilyId: TRUSTED_ASSEMBLY_SOURCE_FAMILY_ID,
             targetId: candidate.positionSnapshotId,
             signal: controller.signal,
-          },
+            abortAdmission,
+          }),
           () => assembly.assemble(assemblyRequest),
         );
         const normalizedAssessment = parseMainnetProviderPositionChainAssessmentV1(chainAssessment);
@@ -509,7 +517,7 @@ export class DormantProviderPositionAdmissionCoordinator {
       if (error instanceof ProviderPositionAdmissionUnavailableError) throw error;
       return fail('ASSEMBLY_UNAVAILABLE');
     } finally {
-      if (controller.signal.aborted === false) controller.abort();
+      abortAdmission();
     }
   }
 
@@ -517,10 +525,15 @@ export class DormantProviderPositionAdmissionCoordinator {
     requestInput: ReadProviderPositionAdmissionRequestV1,
   ): Promise<PreparedProviderPositionAdmission> {
     let controller: AbortController | undefined;
+    let abortAdmission: (() => void) | undefined;
     try {
       const request = parseRequest(requestInput);
       controller = new AbortController();
       const activeController = controller;
+      abortAdmission = (): void => {
+        if (activeController.signal.aborted === false) activeController.abort();
+      };
+      const activeAbortAdmission = abortAdmission;
       const started = canonicalClock(this.clock.now());
       const deadlineMilliseconds = started.milliseconds + this.options.deadlineMilliseconds;
       if (!Number.isSafeInteger(deadlineMilliseconds)) return fail('INVALID_CONFIGURATION');
@@ -529,13 +542,14 @@ export class DormantProviderPositionAdmissionCoordinator {
       try {
         wallets = parseActivePortfolioWalletRegistrations(
           await this.deadlineRunner.run(
-            {
+            Object.freeze({
               deadlineAt,
               correlationId: request.correlationId,
               sourceFamilyId: WALLET_ROSTER_SOURCE_FAMILY_ID,
               targetId: WALLET_ROSTER_TARGET_ID,
               signal: activeController.signal,
-            },
+              abortAdmission: activeAbortAdmission,
+            }),
             async () => {
               if (activeController.signal.aborted) return fail('WALLET_ROSTER_UNAVAILABLE');
               const roster = await this.walletReader.readActiveWalletRegistrations({
@@ -567,15 +581,17 @@ export class DormantProviderPositionAdmissionCoordinator {
           jobs,
           this.options.maximumConcurrency,
           activeController,
+          activeAbortAdmission,
           async (job) =>
             this.deadlineRunner.run(
-              {
+              Object.freeze({
                 deadlineAt,
                 correlationId: request.correlationId,
                 sourceFamilyId: job.binding.sourceFamilyId,
                 targetId: job.target.targetId,
                 signal: activeController.signal,
-              },
+                abortAdmission: activeAbortAdmission,
+              }),
               async () => {
                 if (activeController.signal.aborted) return fail('SOURCE_UNAVAILABLE');
                 const sourceEvidence = await job.binding.source.readTarget(
@@ -602,7 +618,7 @@ export class DormantProviderPositionAdmissionCoordinator {
             ),
         );
       } catch (error) {
-        if (activeController.signal.aborted === false) activeController.abort();
+        activeAbortAdmission();
         if (error instanceof ProviderPositionAdmissionUnavailableError) throw error;
         return fail('SOURCE_UNAVAILABLE');
       }
@@ -719,9 +735,10 @@ export class DormantProviderPositionAdmissionCoordinator {
         deadlineAt,
         deadlineMilliseconds,
         controller: activeController,
+        abortAdmission: activeAbortAdmission,
       });
     } catch (error) {
-      if (controller?.signal.aborted === false) controller.abort();
+      abortAdmission?.();
       if (error instanceof ProviderPositionAdmissionUnavailableError) throw error;
       return fail('ASSEMBLY_UNAVAILABLE');
     }
@@ -996,6 +1013,7 @@ async function runBounded<TInput, TOutput>(
   inputs: readonly TInput[],
   concurrency: number,
   controller: AbortController,
+  abortAdmission: () => void,
   read: (input: TInput) => Promise<TOutput>,
 ): Promise<readonly TOutput[]> {
   const results = new Array<TOutput>(inputs.length);
@@ -1014,7 +1032,7 @@ async function runBounded<TInput, TOutput>(
         if (!failed) {
           failed = true;
           firstFailure = error;
-          if (controller.signal.aborted === false) controller.abort();
+          abortAdmission();
         }
       }
     }

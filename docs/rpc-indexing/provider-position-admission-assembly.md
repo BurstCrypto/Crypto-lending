@@ -25,12 +25,22 @@ and after either successful terminal path; it remains live through final trusted
 assembly verification. The returned candidate and covered snapshot expose no
 controller or signal.
 
-Deadline enforcement is still delegated to an injected runner, so this dormant
-boundary owns no ambient timer and does not yet provide a production runner.
-Production source transports must cooperatively stop on the supplied signal.
-The existing portfolio wallet-reader port does not itself accept that signal;
-the roster operation is bounded at the runner boundary, while cancellable
-database propagation remains required before production registration.
+Deadline enforcement remains delegated to an injected runner. A concrete Node
+implementation now exists as dormant infrastructure source only. It accepts an
+exclusive deadline no more than 30 seconds ahead, schedules one unreferenced
+timer, invokes the coordinator's narrow admission-abort authority on deadline or
+operation failure, rechecks the clock after physical settlement, and removes its
+timer and abort listener on every exit. It returns only fixed, sanitized failure
+codes and has no network, environment, decorator, provider, persistence, or
+financial capability.
+
+The runner deliberately awaits an already-started operation after signaling
+abort; it cannot make a non-cooperative promise settle. Production provider
+transports must stop and settle on the supplied signal and retain their own
+lower-level transport bounds. The existing portfolio wallet-reader port does
+not itself accept that signal, so a stalled roster database operation can still
+prevent settlement. Cancellable database propagation remains required before
+production registration.
 
 The coordinator owns no endpoint, environment lookup, network client, credentials, database, persistence port, writer, or financial-action capability.
 
@@ -80,13 +90,15 @@ Assembly shares the admission deadline, captures the port's methods once without
 
 Production still needs a reviewed implementation of the dormant port. It must independently verify every selected anchor against durable chain identity, progression, and finality state and issue one object-identity capability covering the complete assembled assessment. No such implementation or production composition exists in this repository, so `admitAndAssemble` is not a live application path.
 
-The offline production preflight now byte-pins this coordinator and assembly
-port with a selected reader/domain/module/barrel/controller critical-source
-slice. Its local check rejects trust, timing, zero-target anchor, authority, or
-feature-surface drift inside that slice, but deliberately reports both expected
-feature registrations as missing. It does not prove recursive dependency
-closure or scan every application module, and it performs no provider, chain,
-network, cloud, secret, transaction, or billable operation.
+The offline production preflight now byte-pins this coordinator, assembly port,
+and concrete deadline runner with a selected eleven-file
+reader/domain/module/barrel/controller critical-source slice. Its local check
+rejects trust, timing, cancellation/drain/cleanup, zero-target anchor, authority,
+or feature-surface drift inside that slice, but deliberately reports the reader,
+trusted-assessment, and deadline-runner feature registrations as missing. It
+does not prove recursive dependency closure or scan every application module,
+and it performs no provider, chain, network, cloud, secret, transaction, or
+billable operation.
 
 That production change must also provide:
 
