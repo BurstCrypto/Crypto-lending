@@ -563,9 +563,13 @@ npm run infra:test:providers
 The offline production preflight also runs the dormant-inventory validator as
 an independent part of `RPC_INDEXING`. Inventory drift emits
 `RPC_PROVIDER_DORMANT_INVENTORY_LOCAL_VALIDATION_FAILED`, separately from a
-KAN-62 decision-record failure, and blocks both launch targets. A pass preserves
-the current zero-live-provider count and does not clear provider approval,
-runtime, egress, deployment, or live-evidence blockers.
+KAN-62 decision-record failure. It also validates the exact reviewed
+four-provider Compound/Euler/Gearbox/Jupiter capture packet and compiled digest;
+that separate failure is
+`RPC_PROVIDER_ACTIVE_SCOPE_RESEARCH_CAPTURE_LOCAL_VALIDATION_FAILED`. Any of
+these local failures blocks both launch targets. Passing all three preserves the
+current zero-live-provider count and does not clear provider approval, runtime,
+egress, deployment, or live-evidence blockers.
 
 The authenticated planning-directory safety contract has its own focused
 check:

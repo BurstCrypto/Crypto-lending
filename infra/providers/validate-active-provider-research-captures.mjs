@@ -711,11 +711,11 @@ function validateProviderResearchCaptureFilesInternal(repositoryRoot, afterFirst
   return { errors: [...new Set(errors)], fingerprint };
 }
 
-export function validateProviderResearchCaptureFiles() {
-  return validateProviderResearchCaptureFilesInternal(REPOSITORY_ROOT, undefined);
+export function validateProviderResearchCaptureFiles(repositoryRoot = REPOSITORY_ROOT) {
+  return validateProviderResearchCaptureFilesInternal(repositoryRoot, undefined);
 }
 
-/** Test-only fault seam; production validation always reads from REPOSITORY_ROOT. */
+/** Test-only fault seam for mutations between the two stable descriptor reads. */
 export function validateProviderResearchCaptureFilesForTest(repositoryRoot, afterFirstReadForTest) {
   return validateProviderResearchCaptureFilesInternal(repositoryRoot, afterFirstReadForTest);
 }

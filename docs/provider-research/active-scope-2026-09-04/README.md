@@ -79,3 +79,11 @@ node infra/providers/validate-active-provider-research-captures.mjs
 
 The validator reads only the checked-in artifact and sidecar. It has no network,
 RPC, provider API, cloud, credential, subprocess, or transaction path.
+
+The offline production preflight invokes this validator with the same explicit
+repository root used for its other local inspections and requires both an empty
+error list and the reviewed compiled fingerprint. Failure is reported as
+`RPC_PROVIDER_ACTIVE_SCOPE_RESEARCH_CAPTURE_LOCAL_VALIDATION_FAILED`, separately
+from provider-decision and dormant-adapter-inventory validation. A pass confirms
+only this four-provider static research packet; it neither covers the other six
+research records nor changes any provider's unavailable, unapproved status.

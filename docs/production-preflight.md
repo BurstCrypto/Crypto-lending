@@ -367,8 +367,15 @@ adapter class or import-stem reference elsewhere in the bounded API runtime
 source scan. Artifact reads are capped at 2 MiB each, and the runtime scan is
 capped at 4,096 files and 24 MiB total. Decision validation and dormant-inventory
 validation have distinct blockers, and both must pass for `RPC_INDEXING` local
-validation to pass. This does not prove an adapter is live, approved, current,
-or safe to activate.
+validation to pass. A third independent local result validates the closed,
+reviewed four-provider capture packet for Compound, Euler, Gearbox, and Jupiter,
+including its exact compiled SHA-256 and sidecar. This packet covers the four
+dated captures that completed the research set; it is not a substitute for the
+other six providers' artifacts or evidence that any of the ten are live. Any
+capture parse, shape, status, identity, hash, sidecar, path, or stable-read
+failure emits
+`RPC_PROVIDER_ACTIVE_SCOPE_RESEARCH_CAPTURE_LOCAL_VALIDATION_FAILED`. This does
+not prove an adapter is live, approved, current, or safe to activate.
 
 The audit does not derive application configuration from process-environment
 values, read secret material or `.env` files, contact provider endpoints, or
@@ -426,6 +433,7 @@ Relevant machine-readable launch blocker IDs include:
 - `EXTERNAL_EGRESS_DISABLED`
 - `RPC_PROVIDER_DECISION_LOCAL_VALIDATION_FAILED`
 - `RPC_PROVIDER_DORMANT_INVENTORY_LOCAL_VALIDATION_FAILED`
+- `RPC_PROVIDER_ACTIVE_SCOPE_RESEARCH_CAPTURE_LOCAL_VALIDATION_FAILED`
 - `RPC_PROVIDER_EXTERNAL_APPROVAL_PENDING`
 - `RPC_PROVIDER_RUNTIME_NOT_APPROVED`
 - `LIVE_READ_EVIDENCE_INDEX_MISSING`

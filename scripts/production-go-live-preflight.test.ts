@@ -680,6 +680,7 @@ function completeInput(directory: unknown): ProductionPreflightInput {
     rpcProviders: {
       localValidationPassed: true,
       dormantInventoryValidationPassed: true,
+      activeScopeResearchCaptureValidationPassed: true,
       externalStatus: 'APPROVED',
       runtimeStatus: 'APPROVED',
       approvalBoundaryApproved: true,
@@ -797,6 +798,7 @@ test('current repository is a bootstrap blocker audit and exits nonzero for both
   assert.equal(readOnly.checks.find(({ id }) => id === 'EXTERNAL_EGRESS')?.localValidation, 'PASS');
   assert.equal(readOnly.checks.find(({ id }) => id === 'RPC_INDEXING')?.localValidation, 'PASS');
   assert.equal(input.rpcProviders.dormantInventoryValidationPassed, true);
+  assert.equal(input.rpcProviders.activeScopeResearchCaptureValidationPassed, true);
   assert.deepEqual(
     readOnly.checks.find(({ id }) => id === 'PRODUCTION_INFRASTRUCTURE'),
     {
@@ -893,7 +895,7 @@ test('current repository is a bootstrap blocker audit and exits nonzero for both
   );
 });
 
-test('RPC provider decision and dormant inventory validation fail independently', () => {
+test('RPC provider decision, dormant inventory, and research capture fail independently', () => {
   const baseline = completeInput(platformDirectory('LIVE_READ_ONLY'));
   const inventoryFailed = {
     ...baseline,
@@ -928,6 +930,24 @@ test('RPC provider decision and dormant inventory validation fail independently'
     blockerIds: ['RPC_PROVIDER_DECISION_LOCAL_VALIDATION_FAILED'],
   });
 
+  const researchCaptureFailed = {
+    ...baseline,
+    rpcProviders: {
+      ...baseline.rpcProviders,
+      activeScopeResearchCaptureValidationPassed: false,
+    },
+  };
+  for (const target of ['read-only', 'mainnet-write'] as const) {
+    const report = evaluateProductionPreflight(researchCaptureFailed, target);
+    assert.deepEqual(report.checks.find(({ id }) => id === 'RPC_INDEXING'), {
+      id: 'RPC_INDEXING',
+      localValidation: 'FAIL',
+      launchReadiness: 'BLOCKED',
+      blockerIds: ['RPC_PROVIDER_ACTIVE_SCOPE_RESEARCH_CAPTURE_LOCAL_VALIDATION_FAILED'],
+    });
+    assert.equal(report.selectedTargetReadiness, 'BLOCKED');
+  }
+
   const { dormantInventoryValidationPassed: omitted, ...withoutInventoryResult } =
     baseline.rpcProviders;
   assert.equal(omitted, true);
@@ -943,6 +963,26 @@ test('RPC provider decision and dormant inventory validation fail independently'
       report.checks
         .find(({ id }) => id === 'RPC_INDEXING')
         ?.blockerIds.includes('RPC_PROVIDER_DORMANT_INVENTORY_LOCAL_VALIDATION_FAILED'),
+    );
+  }
+
+  const { activeScopeResearchCaptureValidationPassed: captureOmitted, ...withoutCaptureResult } =
+    baseline.rpcProviders;
+  assert.equal(captureOmitted, true);
+  for (const activeScopeResearchCaptureValidationPassed of [undefined, 'true', 1, null]) {
+    const report = evaluateProductionPreflight({
+      ...baseline,
+      rpcProviders: {
+        ...withoutCaptureResult,
+        activeScopeResearchCaptureValidationPassed,
+      } as unknown as ProductionPreflightInput['rpcProviders'],
+    });
+    assert.ok(
+      report.checks
+        .find(({ id }) => id === 'RPC_INDEXING')
+        ?.blockerIds.includes(
+          'RPC_PROVIDER_ACTIVE_SCOPE_RESEARCH_CAPTURE_LOCAL_VALIDATION_FAILED',
+        ),
     );
   }
 });

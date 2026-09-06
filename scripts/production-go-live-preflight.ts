@@ -6,6 +6,8 @@ import { MAINNET_PLATFORM_DIRECTORY } from '../apps/api/src/mainnet-platforms/do
 // @ts-expect-error The audited local validator is an ESM JavaScript module without declarations.
 import * as egressPolicy from '../infra/egress/validate-egress-policy.mjs';
 // @ts-expect-error The audited local validator is an ESM JavaScript module without declarations.
+import * as activeScopeProviderResearchCapture from '../infra/providers/validate-active-provider-research-captures.mjs';
+// @ts-expect-error The audited local validator is an ESM JavaScript module without declarations.
 import { loadValidatedProviderDecisionSnapshot } from '../infra/providers/validate-kan-62-provider-decision.mjs';
 // @ts-expect-error The audited local validator is an ESM JavaScript module without declarations.
 import { validateDormantProviderInventoryFiles } from '../infra/providers/validate-dormant-provider-inventory.mjs';
@@ -36,6 +38,8 @@ export const PRODUCTION_PREFLIGHT_SCHEMA_VERSION = 1 as const;
 export const PRODUCTION_PROVIDER_TARGET = 10 as const;
 const REVIEWED_DATABASE_MASTER_TEMPLATE_SHA256 =
   '7fa270567d03d78a833e40cc0524c968c61f00fd43df877e5e0dfdd9ea1a07be';
+const REVIEWED_ACTIVE_SCOPE_PROVIDER_RESEARCH_CAPTURE_SHA256 =
+  'db13db3ff78d6dd0641f8f61067e48d8eb45d0eab309491e2bff9a60112a97d2';
 
 export type ProductionPreflightTarget = 'read-only' | 'mainnet-write';
 export type ProductionPreflightReadiness = 'BLOCKED' | 'LOCAL_GATES_CLEAR';
@@ -80,6 +84,7 @@ export type ProductionPreflightBlockerId =
   | 'EXTERNAL_EGRESS_DISABLED'
   | 'RPC_PROVIDER_DECISION_LOCAL_VALIDATION_FAILED'
   | 'RPC_PROVIDER_DORMANT_INVENTORY_LOCAL_VALIDATION_FAILED'
+  | 'RPC_PROVIDER_ACTIVE_SCOPE_RESEARCH_CAPTURE_LOCAL_VALIDATION_FAILED'
   | 'RPC_PROVIDER_EXTERNAL_APPROVAL_PENDING'
   | 'RPC_PROVIDER_LIVE_EVIDENCE_INCOMPLETE'
   | 'RPC_PROVIDER_RUNTIME_NOT_APPROVED'
@@ -272,6 +277,7 @@ interface EgressInput {
 interface RpcProviderInput {
   readonly localValidationPassed: boolean;
   readonly dormantInventoryValidationPassed: boolean;
+  readonly activeScopeResearchCaptureValidationPassed: boolean;
   readonly externalStatus: unknown;
   readonly runtimeStatus: unknown;
   readonly approvalBoundaryApproved: boolean;
@@ -1394,11 +1400,16 @@ export function evaluateProductionPreflight(
     input.rpcProviders.localValidationPassed === true;
   const dormantProviderInventoryLocalValidationPassed =
     input.rpcProviders.dormantInventoryValidationPassed === true;
+  const providerResearchCaptureLocalValidationPassed =
+    input.rpcProviders.activeScopeResearchCaptureValidationPassed === true;
   if (!rpcProviderDecisionLocalValidationPassed) {
     rpcProviderBlockers.push('RPC_PROVIDER_DECISION_LOCAL_VALIDATION_FAILED');
   }
   if (!dormantProviderInventoryLocalValidationPassed) {
     rpcProviderBlockers.push('RPC_PROVIDER_DORMANT_INVENTORY_LOCAL_VALIDATION_FAILED');
+  }
+  if (!providerResearchCaptureLocalValidationPassed) {
+    rpcProviderBlockers.push('RPC_PROVIDER_ACTIVE_SCOPE_RESEARCH_CAPTURE_LOCAL_VALIDATION_FAILED');
   }
   if (
     !exactString(input.rpcProviders.externalStatus, 'APPROVED') ||
@@ -1518,7 +1529,9 @@ export function evaluateProductionPreflight(
     check('EXTERNAL_EGRESS', input.egress.localValidationPassed ? 'PASS' : 'FAIL', egressBlockers),
     check(
       'RPC_INDEXING',
-      rpcProviderDecisionLocalValidationPassed && dormantProviderInventoryLocalValidationPassed
+      rpcProviderDecisionLocalValidationPassed &&
+        dormantProviderInventoryLocalValidationPassed &&
+        providerResearchCaptureLocalValidationPassed
         ? 'PASS'
         : 'FAIL',
       rpcProviderBlockers,
@@ -7749,6 +7762,20 @@ export function loadRepositoryProductionPreflightInput(
   } catch {
     // The evaluator emits a distinct closed inventory-validation blocker.
   }
+  let activeScopeProviderResearchCaptureValidationPassed = false;
+  try {
+    const validation = activeScopeProviderResearchCapture.validateProviderResearchCaptureFiles(
+      repositoryRoot,
+    ) as unknown;
+    const validationRecord = objectRecord(validation);
+    const errors = validationRecord.errors;
+    activeScopeProviderResearchCaptureValidationPassed =
+      Array.isArray(errors) &&
+      errors.length === 0 &&
+      validationRecord.fingerprint === REVIEWED_ACTIVE_SCOPE_PROVIDER_RESEARCH_CAPTURE_SHA256;
+  } catch {
+    // The evaluator emits a distinct closed research-capture-validation blocker.
+  }
   const providerSelection = objectRecord(providerRecord.selection);
   const providerApproval = objectRecord(providerRecord.approvalBoundary);
   const zeroCostEvidence = objectRecord(providerRecord.zeroCostEvidence);
@@ -7770,6 +7797,8 @@ export function loadRepositoryProductionPreflightInput(
     rpcProviders: Object.freeze({
       localValidationPassed: providerLocalValidationPassed,
       dormantInventoryValidationPassed: dormantProviderInventoryValidationPassed,
+      activeScopeResearchCaptureValidationPassed:
+        activeScopeProviderResearchCaptureValidationPassed,
       externalStatus: providerRecord.externalStatus,
       runtimeStatus: providerSelection.runtimeStatus,
       approvalBoundaryApproved: providerApproval.approved === true,

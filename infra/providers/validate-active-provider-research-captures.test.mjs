@@ -119,6 +119,15 @@ test('the canonical four-provider research packet is valid and remains non-opera
   }
 });
 
+test('production validation accepts an explicit coherent repository root', () => {
+  withTemporaryRepository((repositoryRoot) => {
+    assert.deepEqual(validateProviderResearchCaptureFiles(repositoryRoot), {
+      errors: [],
+      fingerprint: EXPECTED_FINGERPRINT,
+    });
+  });
+});
+
 test('malformed, accessor-bearing, and non-JSON values fail closed without escaping', () => {
   const accessor = {};
   Object.defineProperty(accessor, 'schemaVersion', {
