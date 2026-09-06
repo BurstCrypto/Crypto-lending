@@ -171,7 +171,7 @@ const GUARDED_RECORD_EVIDENCE_BODY = `
       IF provider_position_chain_anchor_evidence_row_valid(
         requested_fingerprint,
         requested_read_binding_fingerprint,
-        1,
+        1::smallint,
         '${EVIDENCE_USE}',
         false,
         false,

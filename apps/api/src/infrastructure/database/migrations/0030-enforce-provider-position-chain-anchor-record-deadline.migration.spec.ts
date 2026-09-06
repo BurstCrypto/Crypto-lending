@@ -176,6 +176,12 @@ describe('migration 0030 provider position record deadline', () => {
 
     expect(isolation).toBeGreaterThanOrEqual(0);
     expect(guarded).toContain('provider_position_chain_anchor_evidence_row_valid(');
+    expect(guarded).toContain(
+      "requested_read_binding_fingerprint,\n        1::smallint,\n        'DORMANT_PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_ONLY'",
+    );
+    expect(guarded).not.toContain(
+      "requested_read_binding_fingerprint,\n        1,\n        'DORMANT_PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_ONLY'",
+    );
     expect(guarded).toContain(') IS DISTINCT FROM true');
     expect(advisoryLock).toBeGreaterThan(isolation);
     expect(startClock).toBeGreaterThan(advisoryLock);
