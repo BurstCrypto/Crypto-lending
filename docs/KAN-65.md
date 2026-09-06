@@ -283,9 +283,10 @@ API role retains only execute access to the separate roster-bound portfolio
 balance read and migration `0029`'s active-chain-bound-wallet-gated
 provider-position anchor-evidence read. That new global evidence/control schema
 has no account or wallet PII columns; its record and invalidation/quarantine
-functions remain owner-controlled with no runtime grant. No application
-anchor-evidence reader/adapter or writer/producer exists, no populated rows or
-runtime activation, deployment, or live evidence are claimed, and neither API
+functions remain owner-controlled with no runtime grant. A private dormant
+PostgreSQL anchor-evidence reader now uses only the exact cancellable API read
+and exposes no writer, but no writer/producer, populated rows, runtime
+activation, deployment, or live evidence are claimed, and neither API
 nor worker can read or mutate the
 four balance tables. The finalized-anchor writer exists for tested recovery
 semantics but has no runtime grant until independent live-finality evidence is

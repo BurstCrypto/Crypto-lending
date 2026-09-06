@@ -251,6 +251,7 @@ export interface ProviderPositionReadBoundaryArtifactSources {
   readonly providerPositionReaderPortSource: string;
   readonly providerPositionTrustedAssemblyPortSource: string;
   readonly providerPositionDurableChainAnchorReaderPortSource: string;
+  readonly providerPositionPostgresDurableChainAnchorReaderSource: string;
   readonly providerPositionTrustedChainAssessmentAssemblerSource: string;
   readonly providerPositionChainAnchorEvidenceMigrationSource: string;
   readonly providerPositionMigrationIndexSource: string;
@@ -585,6 +586,7 @@ const PROVIDER_POSITION_READ_ARTIFACT_KEYS = Object.freeze([
   'providerPositionReaderPortSource',
   'providerPositionTrustedAssemblyPortSource',
   'providerPositionDurableChainAnchorReaderPortSource',
+  'providerPositionPostgresDurableChainAnchorReaderSource',
   'providerPositionTrustedChainAssessmentAssemblerSource',
   'providerPositionChainAnchorEvidenceMigrationSource',
   'providerPositionMigrationIndexSource',
@@ -616,6 +618,8 @@ const REVIEWED_PROVIDER_POSITION_READ_ARTIFACT_SHA256 = Object.freeze({
     '9120c664640be1f855b1ea77cc9ca403506cae306b3f14679172f634c4e8a37b',
   providerPositionDurableChainAnchorReaderPortSource:
     '161ce8245acd11ff43bd9e399c6f0ce058e89df8180749397f8890fcae1fd948',
+  providerPositionPostgresDurableChainAnchorReaderSource:
+    'e18a4f17553506244b9570afb113c53ec08f34a75d089bd88deb4ae799b2efbd',
   providerPositionTrustedChainAssessmentAssemblerSource:
     'dbd8f71194f9036107b106cbbdb3920a53ebf9413132fba778008cee64a06f52',
   providerPositionChainAnchorEvidenceMigrationSource:
@@ -623,13 +627,13 @@ const REVIEWED_PROVIDER_POSITION_READ_ARTIFACT_SHA256 = Object.freeze({
   providerPositionMigrationIndexSource:
     '4b204ef7d52c14913e29754cb74ecbaf3d35c773105071e216c4c8435ec5070c',
   providerPositionAdmissionCoordinatorSource:
-    'a10e0f2d90afb714d1e4ae55a18acac6cbb9249dd285a04ebf65dcbdb2dd1590',
+    'bcd6324695359cd3ef43ac6620da2b756c379c75fe5c0e99897791996b3312eb',
   providerPositionDeadlineRunnerSource:
     '6910ff27ce6b29d06d7f3fc20743779196259bda5518b1b4ada7f82b9c2c3f97',
   providerPositionRuntimeBoundsSource:
     '342895e5e4bafca127c67db519e8ca252b0b75377a1e9311e00639e74a32d812',
   providerPositionRuntimeCompositionSource:
-    'a7f3aeb108c01c2864abe85ba42e557a8e121abc77011c4bb2e4a825a2e7194d',
+    'e8053eb8c64fbc6985d9a35b11130be1ac2b083c5774fbdd24c53822bc2ca0fc',
   providerPositionInfrastructureConfigSource:
     'fb1f6639a330d6a07db1d82434559356a4707a6550848d75397a1ff5e6a3fd10',
   providerPositionRuntimePostgresPoolSource:
@@ -649,7 +653,7 @@ const REVIEWED_PROVIDER_POSITION_READ_ARTIFACT_SHA256 = Object.freeze({
   providerPositionCoverageSource:
     'a26d468abb2c46bd28267c6d36d1a7d3e62c30a700159e3c4cf263d15a8a9611',
   providerPositionObservationSource:
-    '469db16b0c5e6741723d925b517fbc9a81605cd32c2121c6f332b6cec392f967',
+    '03dda618ceac3c1639210d17355f4c587cb7c49128ff716d6efcfb5ce1c86092',
   providerPositionChainAssessmentSource:
     '860582975318e5f10cbdd3082eaf3121df01aeb68279b2b56abeb9d945c27045',
   providerPositionObservationPolicySource:
@@ -662,7 +666,7 @@ const REVIEWED_PROVIDER_POSITION_READ_ARTIFACT_SHA256 = Object.freeze({
     'a713200b67f0cf67c50b56c94f707f94f7383c52e3d59f4368868710b099b55d',
 } satisfies Readonly<Record<keyof ProviderPositionReadBoundaryArtifactSources, string>>);
 const MAX_PROVIDER_POSITION_READ_ARTIFACT_BYTES = 128 * 1024;
-const MAX_PROVIDER_POSITION_READ_TOTAL_BYTES = 512 * 1024;
+const MAX_PROVIDER_POSITION_READ_TOTAL_BYTES = 576 * 1024;
 const BALANCE_CONSUMER_ARTIFACT_KEYS = Object.freeze([
   'activationSource',
   'cliSource',
@@ -2360,6 +2364,8 @@ function hasDormantProviderPositionReadBoundaryContract(
   const assemblyPort = sources.providerPositionTrustedAssemblyPortSource.replace(/\r\n/gu, '\n');
   const durableAnchorReaderPort =
     sources.providerPositionDurableChainAnchorReaderPortSource.replace(/\r\n/gu, '\n');
+  const postgresDurableAnchorReader =
+    sources.providerPositionPostgresDurableChainAnchorReaderSource.replace(/\r\n/gu, '\n');
   const trustedAssessmentAssembler =
     sources.providerPositionTrustedChainAssessmentAssemblerSource.replace(/\r\n/gu, '\n');
   const chainAnchorEvidenceMigration =
@@ -2414,6 +2420,7 @@ function hasDormantProviderPositionReadBoundaryContract(
     reader,
     assemblyPort,
     durableAnchorReaderPort,
+    postgresDurableAnchorReader,
     trustedAssessmentAssembler,
     coordinator,
     coverage,
@@ -2473,6 +2480,87 @@ function hasDormantProviderPositionReadBoundaryContract(
     trustedAssessmentAssembler.match(/^[\t ]*import\b/gmu)?.length ?? 0;
   const forbiddenTrustedAssessmentAssemblerCapability =
     /(?:\bimport\s*\(|\brequire\s*\(|(?:\bfrom\s+|\bimport\s*(?:\(\s*)?)['"](?:node:)?(?:child_process|cluster|dgram|dns|fs|http|http2|https|net|tls|worker_threads)(?:\/[^'"]*)?['"]|(?:\bfrom\s+|\bimport\s*(?:\(\s*)?)['"](?:axios|ethers|got|superagent|undici|web3|@solana\/web3\.js)['"]|\b(?:fetch|setTimeout|setInterval|setImmediate|queueMicrotask|WebSocket|EventSource|XMLHttpRequest|readFileSync|writeFileSync)\s*\(|\.\s*(?:query|connect|end|healthCheck)\s*\(|\b(?:process|Deno|Bun)\s*\.\s*env\b|\bimport\s*\.\s*meta\s*\.\s*env\b|['"]https?:\/\/|(?:^|\n)[\t ]*@[A-Za-z_$]|\b(?:NestFactory|loadInfrastructureConfig|createPostgresPool|POSTGRES_POOL)\b|\bPromise\s*\.\s*(?:all|race)\s*\()/iu;
+  const postgresDurableAnchorReaderImportSources = Array.from(
+    postgresDurableAnchorReader.matchAll(/\bfrom\s+['"]([^'"]+)['"]/gu),
+    (match) => match[1],
+  );
+  const postgresDurableAnchorReaderImportDeclarationCount =
+    postgresDurableAnchorReader.match(/^[\t ]*import\b/gmu)?.length ?? 0;
+  const forbiddenPostgresDurableAnchorReaderCapability =
+    /(?:\bimport\s*\(|\brequire\s*\(|(?:\bfrom\s+|\bimport\s*(?:\(\s*)?)['"](?:node:)?(?:child_process|cluster|dgram|dns|fs|http|http2|https|net|tls|worker_threads)(?:\/[^'"]*)?['"]|(?:\bfrom\s+|\bimport\s*(?:\(\s*)?)['"](?:axios|ethers|got|superagent|undici|web3|@solana\/web3\.js)['"]|\b(?:fetch|setTimeout|setInterval|setImmediate|queueMicrotask|WebSocket|EventSource|XMLHttpRequest|readFileSync|writeFileSync)\s*\(|\.\s*(?:query|connect|end|healthCheck)\s*\(|\b(?:process|Deno|Bun)\s*\.\s*env\b|\bimport\s*\.\s*meta\s*\.\s*env\b|['"]https?:\/\/|(?:^|\n)[\t ]*@[A-Za-z_$]|\b(?:NestFactory|loadInfrastructureConfig|createPostgresPool|POSTGRES_POOL)\b|\bPromise\s*\.\s*(?:all|race)\s*\()/iu;
+  const postgresAnchorRequestKeysStart = postgresDurableAnchorReader.indexOf(
+    'const REQUEST_KEYS = Object.freeze([',
+  );
+  const postgresAnchorRequestKeysEnd = postgresDurableAnchorReader.indexOf(
+    '] as const);',
+    postgresAnchorRequestKeysStart,
+  );
+  const postgresAnchorRequestKeysContract =
+    postgresAnchorRequestKeysStart >= 0 &&
+    postgresAnchorRequestKeysEnd > postgresAnchorRequestKeysStart
+      ? postgresDurableAnchorReader.slice(
+          postgresAnchorRequestKeysStart,
+          postgresAnchorRequestKeysEnd + '] as const);'.length,
+        )
+      : '';
+  const expectedPostgresAnchorRequestKeys = [
+    'const REQUEST_KEYS = Object.freeze([',
+    "'readerVersion',",
+    "'use',",
+    "'mayAuthorizeFinancialAction',",
+    "'mayPersist',",
+    "'accountId',",
+    "'correlationId',",
+    "'candidateFingerprintSha256',",
+    "'targetId',",
+    "'walletId',",
+    "'providerId',",
+    "'protocolId',",
+    "'marketId',",
+    "'networkId',",
+    "'sourceFamilyId',",
+    "'sourceId',",
+    "'sourceKind',",
+    "'sourceObservationId',",
+    "'continuityFloor',",
+    "'chainAnchor',",
+    "'observedAt',",
+    "'capturedAt',",
+    "'evaluatedAt',",
+    "'deadlineAt',",
+    "'signal',",
+    '] as const);',
+  ].join('\n');
+  const postgresAnchorRowColumnsStart = postgresDurableAnchorReader.indexOf(
+    'const ROW_COLUMNS = Object.freeze([',
+  );
+  const postgresAnchorRowColumnsEnd = postgresDurableAnchorReader.indexOf(
+    '] as const);',
+    postgresAnchorRowColumnsStart,
+  );
+  const postgresAnchorRowColumnsContract =
+    postgresAnchorRowColumnsStart >= 0 &&
+    postgresAnchorRowColumnsEnd > postgresAnchorRowColumnsStart
+      ? postgresDurableAnchorReader.slice(
+          postgresAnchorRowColumnsStart,
+          postgresAnchorRowColumnsEnd + '] as const);'.length,
+        )
+      : '';
+  const expectedPostgresAnchorRowColumns = [
+    'const ROW_COLUMNS = Object.freeze([',
+    "'reader_version',",
+    "'assessment_use',",
+    "'may_authorize_financial_action',",
+    "'may_persist',",
+    "'network_id',",
+    "'continuity_floor_json',",
+    "'chain_anchor_json',",
+    "'assessed_at',",
+    "'identity_status',",
+    "'progression_status',",
+    "'finality_status',",
+    '] as const);',
+  ].join('\n');
   const readerRequestStart = reader.indexOf(
     'export interface ReadMainnetProviderPositionsRequestV3 {',
   );
@@ -2735,29 +2823,21 @@ function hasDormantProviderPositionReadBoundaryContract(
     'const deadlineRunner = new NodeProviderPositionAdmissionDeadlineRunner(dependencies.clock);',
     compositionWalletReaderConstruction,
   );
-  const compositionTrustedAssessmentAssemblerDeclaration = runtimeComposition.indexOf(
-    'const trustedChainAssessmentAssembly =',
+  const compositionDurableReaderConstruction = runtimeComposition.indexOf(
+    'const durableChainAnchorReader = new PostgresProviderPositionDurableChainAnchorReader(postgres);',
     compositionDeadlineRunnerConstruction,
   );
-  const compositionMissingDurableReaderGate = runtimeComposition.indexOf(
-    'dependencies.durableChainAnchorReader === undefined',
-    compositionTrustedAssessmentAssemblerDeclaration,
-  );
-  const compositionMissingAssemblerResult = runtimeComposition.indexOf(
-    '? undefined',
-    compositionMissingDurableReaderGate,
+  const compositionTrustedAssessmentAssemblerDeclaration = runtimeComposition.indexOf(
+    'const trustedChainAssessmentAssembly =',
+    compositionDurableReaderConstruction,
   );
   const compositionTrustedAssessmentAssemblerConstruction = runtimeComposition.indexOf(
-    ': new DormantProviderPositionTrustedChainAssessmentAssembler(',
-    compositionMissingAssemblerResult,
-  );
-  const compositionTrustedAssessmentAssemblerReader = runtimeComposition.indexOf(
-    'dependencies.durableChainAnchorReader,',
-    compositionTrustedAssessmentAssemblerConstruction,
+    'new DormantProviderPositionTrustedChainAssessmentAssembler(durableChainAnchorReader);',
+    compositionTrustedAssessmentAssemblerDeclaration,
   );
   const compositionCoordinatorConstruction = runtimeComposition.indexOf(
     'const coordinator = new DormantProviderPositionAdmissionCoordinator(',
-    compositionTrustedAssessmentAssemblerReader,
+    compositionTrustedAssessmentAssemblerConstruction,
   );
   const compositionCoordinatorPolicy = runtimeComposition.indexOf(
     'dependencies.policyInput,',
@@ -3091,6 +3171,55 @@ function hasDormantProviderPositionReadBoundaryContract(
     'supplied.remove(cancelFromSignal);',
     postgresCancellationTimerCleanup,
   );
+  const postgresAnchorQueryInvocation = postgresDurableAnchorReader.indexOf(
+    'const result = (await Reflect.apply(this.#queryWithCancellation, this.#receiver, [',
+  );
+  const postgresAnchorQuerySql = postgresDurableAnchorReader.indexOf(
+    'READ_SQL,',
+    postgresAnchorQueryInvocation,
+  );
+  const postgresAnchorQueryValuesStart = postgresDurableAnchorReader.indexOf(
+    '[\n          request.accountId,',
+    postgresAnchorQuerySql,
+  );
+  const postgresAnchorQuerySignal = postgresDurableAnchorReader.indexOf(
+    'request.signal,',
+    postgresAnchorQueryValuesStart,
+  );
+  const postgresAnchorQueryInvocationEnd = postgresDurableAnchorReader.indexOf(
+    '])) as unknown;',
+    postgresAnchorQuerySignal,
+  );
+  const postgresAnchorPostQuerySignalCheck = postgresDurableAnchorReader.indexOf(
+    'if (isAborted(request.signal)) return fail();',
+    postgresAnchorQueryInvocationEnd,
+  );
+  const postgresAnchorRowReview = postgresDurableAnchorReader.indexOf(
+    'const capability = assessmentFromRow(singleRow(result), request);',
+    postgresAnchorPostQuerySignalCheck,
+  );
+  const postgresAnchorQueryValuesContract =
+    postgresAnchorQueryValuesStart >= 0 &&
+    postgresAnchorQuerySignal > postgresAnchorQueryValuesStart
+      ? postgresDurableAnchorReader.slice(postgresAnchorQueryValuesStart, postgresAnchorQuerySignal)
+      : '';
+  const expectedPostgresAnchorQueryValues = [
+    '[',
+    'request.accountId,',
+    'request.walletId,',
+    'request.networkId,',
+    'request.sourceFamilyId,',
+    'request.sourceId,',
+    'request.sourceKind,',
+    'request.sourceObservationId,',
+    'JSON.stringify(request.continuityFloor),',
+    'JSON.stringify(request.chainAnchor),',
+    'request.observedAt,',
+    'request.capturedAt,',
+    'request.evaluatedAt,',
+    'request.deadlineAt,',
+    '],',
+  ].join('\n');
   const selectedTargetLoop = coordinator.indexOf('for (const target of candidate.targets) {');
   const selectedSource = coordinator.indexOf(
     'const selectedSource = target.acceptedSources[0];',
@@ -3101,10 +3230,32 @@ function hasDormantProviderPositionReadBoundaryContract(
     'for (const position of target.positions) {',
     selectedTargetPush,
   );
+  const observationSourceAnchorParse = observation.indexOf(
+    'const chainAnchor = parseChainAnchor(record.chainAnchor, networkId);',
+  );
+  const observationCanonicalSourceIdentity = observation.indexOf(
+    'const expectedSourceObservationId =',
+    observationSourceAnchorParse,
+  );
+  const observationCanonicalSourceGate = observation.indexOf(
+    'if (sourceObservationId !== expectedSourceObservationId) {',
+    observationCanonicalSourceIdentity,
+  );
+  const coordinatorSourceAnchorParse = coordinator.indexOf(
+    'const chainAnchor = parseAnchor(record.chainAnchor, job.target.networkId);',
+  );
+  const coordinatorCanonicalSourceIdentity = coordinator.indexOf(
+    'const expectedSourceObservationId =',
+    coordinatorSourceAnchorParse,
+  );
+  const coordinatorCanonicalSourceGate = coordinator.indexOf(
+    'if (record.sourceObservationId !== expectedSourceObservationId) {',
+    coordinatorCanonicalSourceIdentity,
+  );
   const forbiddenRuntimeIdentity =
-    /\b(?:MAINNET_PROVIDER_POSITION_READER|DormantProviderPositionAdmissionCoordinator|ProviderPositionTrustedChainAssessmentAssemblyPort|ProviderPositionDurableChainAnchorReaderPort|DormantProviderPositionTrustedChainAssessmentAssembler|NodeProviderPositionAdmissionDeadlineRunner|createDormantProviderPositionAdmissionRuntimeResource|DormantProviderPositionAdmissionRuntimeResource|ProviderPositionAdmissionRuntimeBoundsError|createDormantProviderPositionAdmissionRuntimeComposition|DormantProviderPositionAdmissionRuntimeComposition|ProviderPositionAdmissionRuntimeCompositionError|PROVIDER_POSITION_TRUSTED_CHAIN_ASSESSMENT_ASSEMBLY_USE|PROVIDER_POSITION_DURABLE_CHAIN_ANCHOR_READER_VERSION)\b/u;
+    /\b(?:MAINNET_PROVIDER_POSITION_READER|DormantProviderPositionAdmissionCoordinator|ProviderPositionTrustedChainAssessmentAssemblyPort|ProviderPositionDurableChainAnchorReaderPort|DormantProviderPositionTrustedChainAssessmentAssembler|PostgresProviderPositionDurableChainAnchorReader|NodeProviderPositionAdmissionDeadlineRunner|createDormantProviderPositionAdmissionRuntimeResource|DormantProviderPositionAdmissionRuntimeResource|ProviderPositionAdmissionRuntimeBoundsError|createDormantProviderPositionAdmissionRuntimeComposition|DormantProviderPositionAdmissionRuntimeComposition|ProviderPositionAdmissionRuntimeCompositionError|PROVIDER_POSITION_TRUSTED_CHAIN_ASSESSMENT_ASSEMBLY_USE|PROVIDER_POSITION_DURABLE_CHAIN_ANCHOR_READER_VERSION)\b/u;
   const forbiddenBarrelImplementation =
-    /(?:DormantProviderPositionAdmissionCoordinator|ProviderPositionTrustedChainAssessmentAssemblyPort|ProviderPositionDurableChainAnchorReaderPort|DormantProviderPositionTrustedChainAssessmentAssembler|NodeProviderPositionAdmissionDeadlineRunner|createDormantProviderPositionAdmissionRuntimeResource|createDormantProviderPositionAdmissionRuntimeComposition|provider-position-admission\.coordinator|provider-position-trusted-chain-assessment-assembly\.port|provider-position-durable-chain-anchor-reader\.port|dormant-provider-position-trusted-chain-assessment\.assembler|node-provider-position-admission-deadline\.runner|provider-position-admission-runtime-bounds|provider-position-admission-runtime\.composition)/u;
+    /(?:DormantProviderPositionAdmissionCoordinator|ProviderPositionTrustedChainAssessmentAssemblyPort|ProviderPositionDurableChainAnchorReaderPort|DormantProviderPositionTrustedChainAssessmentAssembler|PostgresProviderPositionDurableChainAnchorReader|NodeProviderPositionAdmissionDeadlineRunner|createDormantProviderPositionAdmissionRuntimeResource|createDormantProviderPositionAdmissionRuntimeComposition|provider-position-admission\.coordinator|provider-position-trusted-chain-assessment-assembly\.port|provider-position-durable-chain-anchor-reader\.port|dormant-provider-position-trusted-chain-assessment\.assembler|postgres-provider-position-durable-chain-anchor\.reader|node-provider-position-admission-deadline\.runner|provider-position-admission-runtime-bounds|provider-position-admission-runtime\.composition)/u;
   const forbiddenCoordinatorRuntimeBoundsConsumption =
     /(?:createDormantProviderPositionAdmissionRuntimeResource|provider-position-admission-runtime-bounds)/u;
 
@@ -3156,6 +3307,173 @@ function hasDormantProviderPositionReadBoundaryContract(
     ) === 1 &&
     exactExecutableLineCount(durableAnchorReaderPort, 'verifyAnchor(') === 1 &&
     !/(?:@Injectable|@Module|@Controller)\s*\(|\bclass\s+/u.test(durableAnchorReaderPort) &&
+    postgresDurableAnchorReaderImportDeclarationCount === 5 &&
+    postgresDurableAnchorReaderImportSources.length === 5 &&
+    postgresDurableAnchorReaderImportSources[0] === 'node:util/types' &&
+    postgresDurableAnchorReaderImportSources[1] === 'pg' &&
+    postgresDurableAnchorReaderImportSources[2] ===
+      '../../infrastructure/database/postgres.service' &&
+    postgresDurableAnchorReaderImportSources[3] ===
+      '../domain/mainnet-provider-position-chain-assessment' &&
+    postgresDurableAnchorReaderImportSources[4] ===
+      '../application/ports/provider-position-durable-chain-anchor-reader.port' &&
+    !forbiddenPostgresDurableAnchorReaderCapability.test(postgresDurableAnchorReader) &&
+    !/(?:record_provider_position_chain_anchor_evidence|invalidate_provider_position_chain_anchor_evidence)/u.test(
+      postgresDurableAnchorReader,
+    ) &&
+    !/(?:@Injectable|@Module|@Controller)\s*\(/u.test(postgresDurableAnchorReader) &&
+    exactExecutableLineCount(
+      postgresDurableAnchorReader,
+      "import type { PostgresService } from '../../infrastructure/database/postgres.service';",
+    ) === 1 &&
+    postgresAnchorRequestKeysStart >= 0 &&
+    postgresAnchorRequestKeysEnd > postgresAnchorRequestKeysStart &&
+    trimmedExecutableLines(postgresAnchorRequestKeysContract).join('\n') ===
+      expectedPostgresAnchorRequestKeys &&
+    postgresAnchorRowColumnsStart > postgresAnchorRequestKeysEnd &&
+    postgresAnchorRowColumnsEnd > postgresAnchorRowColumnsStart &&
+    trimmedExecutableLines(postgresAnchorRowColumnsContract).join('\n') ===
+      expectedPostgresAnchorRowColumns &&
+    exactExecutableLineCount(
+      postgresDurableAnchorReader,
+      "const ETHEREUM = 'eip155:1' as const;",
+    ) === 1 &&
+    exactExecutableLineCount(
+      postgresDurableAnchorReader,
+      "const SOLANA = 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp' as const;",
+    ) === 1 &&
+    exactExecutableLineCount(
+      postgresDurableAnchorReader,
+      'const MAX_DEADLINE_MILLISECONDS = 30_000;',
+    ) === 1 &&
+    exactExecutableLineCount(
+      postgresDurableAnchorReader,
+      "const descriptor = Object.getOwnPropertyDescriptor(current, 'queryWithCancellation');",
+    ) === 1 &&
+    exactExecutableLineCount(
+      postgresDurableAnchorReader,
+      "if (!('value' in descriptor) || typeof descriptor.value !== 'function') return fail();",
+    ) === 1 &&
+    exactExecutableLineCount(
+      postgresDurableAnchorReader,
+      'if (isProxy(descriptor.value)) return fail();',
+    ) === 1 &&
+    exactExecutableLineCount(postgresDurableAnchorReader, 'receiver: value,') === 1 &&
+    exactExecutableLineCount(
+      postgresDurableAnchorReader,
+      'method: descriptor.value as QueryWithCancellation,',
+    ) === 1 &&
+    exactExecutableLineCount(
+      postgresDurableAnchorReader,
+      'FROM read_provider_position_chain_anchor_evidence(',
+    ) === 1 &&
+    exactExecutableLineCount(
+      postgresDurableAnchorReader,
+      'assessment.continuity_floor::text AS continuity_floor_json,',
+    ) === 1 &&
+    exactExecutableLineCount(
+      postgresDurableAnchorReader,
+      'assessment.chain_anchor::text AS chain_anchor_json,',
+    ) === 1 &&
+    exactExecutableLineCount(postgresDurableAnchorReader, 'pg_catalog.to_char(') === 1 &&
+    exactExecutableLineCount(
+      postgresDurableAnchorReader,
+      "assessment.assessed_at AT TIME ZONE 'UTC',",
+    ) === 1 &&
+    exactExecutableLineCount(postgresDurableAnchorReader, '\'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"\'') ===
+      1 &&
+    exactExecutableLineCount(postgresDurableAnchorReader, ') AS assessed_at,') === 1 &&
+    exactExecutableLineCount(
+      postgresDurableAnchorReader,
+      '$1::uuid, $2::uuid, $3::text, $4::text, $5::text, $6::text, $7::text,',
+    ) === 1 &&
+    exactExecutableLineCount(
+      postgresDurableAnchorReader,
+      '$8::jsonb, $9::jsonb, $10::timestamptz, $11::timestamptz,',
+    ) === 1 &&
+    exactExecutableLineCount(postgresDurableAnchorReader, '$12::timestamptz, $13::timestamptz') ===
+      1 &&
+    postgresAnchorQueryInvocation >= 0 &&
+    postgresAnchorQuerySql > postgresAnchorQueryInvocation &&
+    postgresAnchorQueryValuesStart > postgresAnchorQuerySql &&
+    postgresAnchorQuerySignal > postgresAnchorQueryValuesStart &&
+    postgresAnchorQueryInvocationEnd > postgresAnchorQuerySignal &&
+    postgresAnchorPostQuerySignalCheck > postgresAnchorQueryInvocationEnd &&
+    postgresAnchorRowReview > postgresAnchorPostQuerySignalCheck &&
+    trimmedExecutableLines(postgresAnchorQueryValuesContract).join('\n') ===
+      expectedPostgresAnchorQueryValues &&
+    exactExecutableLineCount(postgresDurableAnchorReader, 'request.signal,') === 1 &&
+    exactExecutableLineCount(
+      postgresDurableAnchorReader,
+      'if (isAborted(request.signal)) return fail();',
+    ) === 1 &&
+    exactExecutableLineCount(postgresDurableAnchorReader, 'rowKeys.length !== 2 ||') === 1 &&
+    exactExecutableLineCount(
+      postgresDurableAnchorReader,
+      "rowDescriptors['length']?.value !== 1 ||",
+    ) === 1 &&
+    exactExecutableLineCount(
+      postgresDurableAnchorReader,
+      'const capability = assessmentFromRow(singleRow(result), request);',
+    ) === 1 &&
+    exactExecutableLineCount(
+      postgresDurableAnchorReader,
+      'row.reader_version !== PROVIDER_POSITION_DURABLE_CHAIN_ANCHOR_READER_VERSION ||',
+    ) === 1 &&
+    exactExecutableLineCount(
+      postgresDurableAnchorReader,
+      "row.identity_status !== 'VERIFIED' ||",
+    ) === 1 &&
+    exactExecutableLineCount(
+      postgresDurableAnchorReader,
+      "row.progression_status !== 'CURRENT' ||",
+    ) === 1 &&
+    exactExecutableLineCount(postgresDurableAnchorReader, "row.finality_status !== 'HEALTHY'") ===
+      1 &&
+    exactExecutableLineCount(
+      postgresDurableAnchorReader,
+      '!sameAnchor(continuityFloor, request.continuityFloor) ||',
+    ) === 1 &&
+    exactExecutableLineCount(
+      postgresDurableAnchorReader,
+      '!sameAnchor(chainAnchor, request.chainAnchor) ||',
+    ) === 1 &&
+    exactExecutableLineCount(
+      postgresDurableAnchorReader,
+      "if (typeof value !== 'string' || value.length < 2 || value.length > 512) return fail();",
+    ) === 1 &&
+    exactExecutableLineCount(
+      postgresDurableAnchorReader,
+      'return parseAnchor(JSON.parse(value) as unknown, networkId, false);',
+    ) === 1 &&
+    exactExecutableLineCount(
+      postgresDurableAnchorReader,
+      'assessedAt.milliseconds < request.observedAtMilliseconds ||',
+    ) === 1 &&
+    exactExecutableLineCount(
+      postgresDurableAnchorReader,
+      'assessedAt.milliseconds > request.capturedAtMilliseconds',
+    ) === 1 &&
+    exactExecutableLineCount(
+      postgresDurableAnchorReader,
+      'readonly #issued = new WeakMap<object, ReadProviderPositionDurableChainAnchorRequestV1>();',
+    ) === 1 &&
+    exactExecutableLineCount(
+      postgresDurableAnchorReader,
+      'export const PROVIDER_POSITION_DURABLE_CHAIN_ANCHOR_READ_ERROR = Object.freeze(',
+    ) === 1 &&
+    exactExecutableLineCount(
+      postgresDurableAnchorReader,
+      'throw PROVIDER_POSITION_DURABLE_CHAIN_ANCHOR_READ_ERROR;',
+    ) === 1 &&
+    exactExecutableLineCount(
+      postgresDurableAnchorReader,
+      'this.#issued.set(capability, request.request);',
+    ) === 1 &&
+    exactExecutableLineCount(
+      postgresDurableAnchorReader,
+      'this.#issued.get(capability) === request',
+    ) === 1 &&
     exactExecutableLineCount(
       mainnetLaunchNetworkPolicy,
       'export const MAINNET_LAUNCH_NETWORK_IDS = Object.freeze([',
@@ -3341,19 +3659,30 @@ function hasDormantProviderPositionReadBoundaryContract(
       observation,
       'const observationFingerprint = mainnetProviderPositionObservationFingerprintV1({',
     ) === 1 &&
+    observationSourceAnchorParse >= 0 &&
+    observationCanonicalSourceIdentity > observationSourceAnchorParse &&
+    observationCanonicalSourceGate > observationCanonicalSourceIdentity &&
+    exactExecutableLineCount(observation, 'const expectedSourceObservationId =') === 1 &&
+    exactExecutableLineCount(observation, '? `ethereum-block-${chainAnchor.blockNumber}`') === 1 &&
+    exactExecutableLineCount(observation, ': `solana-slot-${chainAnchor.slot}`;') === 1 &&
     exactExecutableLineCount(
-      runtimeComposition,
-      "const OPTIONAL_DEPENDENCY_KEYS = Object.freeze(['durableChainAnchorReader'] as const);",
+      observation,
+      'if (sourceObservationId !== expectedSourceObservationId) {',
     ) === 1 &&
+    coordinatorSourceAnchorParse >= 0 &&
+    coordinatorCanonicalSourceIdentity > coordinatorSourceAnchorParse &&
+    coordinatorCanonicalSourceGate > coordinatorCanonicalSourceIdentity &&
+    exactExecutableLineCount(coordinator, 'const expectedSourceObservationId =') === 1 &&
+    exactExecutableLineCount(coordinator, '? `ethereum-block-${chainAnchor.blockNumber}`') === 1 &&
+    exactExecutableLineCount(coordinator, ': `solana-slot-${chainAnchor.slot}`;') === 1 &&
     exactExecutableLineCount(
-      runtimeComposition,
-      'readonly durableChainAnchorReader?: ProviderPositionDurableChainAnchorReaderPort;',
+      coordinator,
+      'if (record.sourceObservationId !== expectedSourceObservationId) {',
     ) === 1 &&
-    exactExecutableLineCount(
-      runtimeComposition,
-      'readonly durableChainAnchorReader: ProviderPositionDurableChainAnchorReaderPort | undefined;',
-    ) === 1 &&
-    exactExecutableLineCount(runtimeComposition, "'durableChainAnchorReader' in record") === 1 &&
+    !runtimeComposition.includes('OPTIONAL_DEPENDENCY_KEYS') &&
+    !runtimeComposition.includes('dependencies.durableChainAnchorReader') &&
+    !runtimeComposition.includes('readonly durableChainAnchorReader') &&
+    !runtimeComposition.includes('ProviderPositionDurableChainAnchorReaderPort') &&
     !runtimeComposition.includes("'trustedChainAssessmentAssembly'") &&
     !runtimeComposition.includes('"trustedChainAssessmentAssembly"') &&
     !runtimeComposition.includes('dependencies.trustedChainAssessmentAssembly') &&
@@ -3378,24 +3707,24 @@ function hasDormantProviderPositionReadBoundaryContract(
       '../application/provider-position-admission.coordinator' &&
     runtimeCompositionImportSources[11] ===
       '../application/ports/mainnet-provider-position-reader.port' &&
-    runtimeCompositionImportSources[12] ===
-      '../application/ports/provider-position-durable-chain-anchor-reader.port' &&
-    runtimeCompositionImportSources[13] === '../domain/mainnet-provider-position-coverage' &&
-    runtimeCompositionImportSources[14] === '../domain/mainnet-provider-position-observation' &&
-    runtimeCompositionImportSources[15] ===
+    runtimeCompositionImportSources[12] === '../domain/mainnet-provider-position-coverage' &&
+    runtimeCompositionImportSources[13] === '../domain/mainnet-provider-position-observation' &&
+    runtimeCompositionImportSources[14] ===
       './dormant-provider-position-trusted-chain-assessment.assembler' &&
-    runtimeCompositionImportSources[16] === './node-provider-position-admission-deadline.runner' &&
+    runtimeCompositionImportSources[15] === './node-provider-position-admission-deadline.runner' &&
+    runtimeCompositionImportSources[16] ===
+      './postgres-provider-position-durable-chain-anchor.reader' &&
     runtimeCompositionImportSources[17] === './provider-position-admission-runtime-bounds' &&
     !runtimeCompositionImportSources.includes(
       '../application/ports/provider-position-trusted-chain-assessment-assembly.port',
     ) &&
     exactExecutableLineCount(
       runtimeComposition,
-      "import type { ProviderPositionDurableChainAnchorReaderPort } from '../application/ports/provider-position-durable-chain-anchor-reader.port';",
+      "import { DormantProviderPositionTrustedChainAssessmentAssembler } from './dormant-provider-position-trusted-chain-assessment.assembler';",
     ) === 1 &&
     exactExecutableLineCount(
       runtimeComposition,
-      "import { DormantProviderPositionTrustedChainAssessmentAssembler } from './dormant-provider-position-trusted-chain-assessment.assembler';",
+      "import { PostgresProviderPositionDurableChainAnchorReader } from './postgres-provider-position-durable-chain-anchor.reader';",
     ) === 1 &&
     !forbiddenRuntimeCompositionCapability.test(runtimeComposition) &&
     !runtimeComposition.includes('Promise.race') &&
@@ -3508,13 +3837,11 @@ function hasDormantProviderPositionReadBoundaryContract(
     compositionWalletServiceClock > compositionWalletServiceConfig &&
     compositionWalletReaderConstruction > compositionWalletServiceClock &&
     compositionDeadlineRunnerConstruction > compositionWalletReaderConstruction &&
-    compositionTrustedAssessmentAssemblerDeclaration > compositionDeadlineRunnerConstruction &&
-    compositionMissingDurableReaderGate > compositionTrustedAssessmentAssemblerDeclaration &&
-    compositionMissingAssemblerResult > compositionMissingDurableReaderGate &&
-    compositionTrustedAssessmentAssemblerConstruction > compositionMissingAssemblerResult &&
-    compositionTrustedAssessmentAssemblerReader >
-      compositionTrustedAssessmentAssemblerConstruction &&
-    compositionCoordinatorConstruction > compositionTrustedAssessmentAssemblerReader &&
+    compositionDurableReaderConstruction > compositionDeadlineRunnerConstruction &&
+    compositionTrustedAssessmentAssemblerDeclaration > compositionDurableReaderConstruction &&
+    compositionTrustedAssessmentAssemblerConstruction >
+      compositionTrustedAssessmentAssemblerDeclaration &&
+    compositionCoordinatorConstruction > compositionTrustedAssessmentAssemblerConstruction &&
     compositionCoordinatorPolicy > compositionCoordinatorConstruction &&
     compositionCoordinatorFingerprint > compositionCoordinatorPolicy &&
     compositionCoordinatorSources > compositionCoordinatorFingerprint &&
@@ -3541,17 +3868,15 @@ function hasDormantProviderPositionReadBoundaryContract(
       runtimeComposition,
       'const deadlineRunner = new NodeProviderPositionAdmissionDeadlineRunner(dependencies.clock);',
     ) === 1 &&
+    exactExecutableLineCount(
+      runtimeComposition,
+      'const durableChainAnchorReader = new PostgresProviderPositionDurableChainAnchorReader(postgres);',
+    ) === 1 &&
     exactExecutableLineCount(runtimeComposition, 'const trustedChainAssessmentAssembly =') === 1 &&
     exactExecutableLineCount(
       runtimeComposition,
-      'dependencies.durableChainAnchorReader === undefined',
+      'new DormantProviderPositionTrustedChainAssessmentAssembler(durableChainAnchorReader);',
     ) === 1 &&
-    exactExecutableLineCount(runtimeComposition, '? undefined') === 1 &&
-    exactExecutableLineCount(
-      runtimeComposition,
-      ': new DormantProviderPositionTrustedChainAssessmentAssembler(',
-    ) === 1 &&
-    exactExecutableLineCount(runtimeComposition, 'dependencies.durableChainAnchorReader,') === 1 &&
     exactExecutableLineCount(runtimeComposition, 'trustedChainAssessmentAssembly,') === 1 &&
     exactExecutableLineCount(runtimeComposition, 'runtimeResource.admissionOptions,') === 1 &&
     exactExecutableLineCount(runtimeComposition, 'if (isProxy(current)) return undefined;') === 1 &&
@@ -3635,7 +3960,7 @@ function hasDormantProviderPositionReadBoundaryContract(
     exactExecutableLineCount(compositionReaderContract, 'readCurrentPositions: (') === 1 &&
     compositionReaderContract.split('Reflect.apply(admitAndAssemble, coordinator, [').length - 1 ===
       1 &&
-    !/(?:durableChainAnchorReader|trustedChainAssessmentAssembly|DormantProviderPositionTrustedChainAssessmentAssembler|ProviderPositionDurableChainAnchorReaderPort)/u.test(
+    !/(?:durableChainAnchorReader|trustedChainAssessmentAssembly|DormantProviderPositionTrustedChainAssessmentAssembler|PostgresProviderPositionDurableChainAnchorReader|ProviderPositionDurableChainAnchorReaderPort)/u.test(
       compositionReaderContract,
     ) &&
     !compositionReaderContract.includes('Reflect.apply(admit, coordinator') &&
@@ -3659,7 +3984,7 @@ function hasDormantProviderPositionReadBoundaryContract(
       runtimeCompositionInterfaceContract,
       'readonly close: () => Promise<void>;',
     ) === 1 &&
-    !/(?:durableChainAnchorReader|trustedChainAssessmentAssembly|DormantProviderPositionTrustedChainAssessmentAssembler|ProviderPositionDurableChainAnchorReaderPort)/u.test(
+    !/(?:durableChainAnchorReader|trustedChainAssessmentAssembly|DormantProviderPositionTrustedChainAssessmentAssembler|PostgresProviderPositionDurableChainAnchorReader|ProviderPositionDurableChainAnchorReaderPort)/u.test(
       runtimeCompositionInterfaceContract,
     ) &&
     compositionPublicFacadeContract.length > 0 &&
@@ -3668,7 +3993,7 @@ function hasDormantProviderPositionReadBoundaryContract(
       1 &&
     exactExecutableLineCount(compositionPublicFacadeContract, 'reader,') === 1 &&
     exactExecutableLineCount(compositionPublicFacadeContract, 'close,') === 1 &&
-    !/(?:durableChainAnchorReader|trustedChainAssessmentAssembly|DormantProviderPositionTrustedChainAssessmentAssembler|ProviderPositionDurableChainAnchorReaderPort)/u.test(
+    !/(?:durableChainAnchorReader|trustedChainAssessmentAssembly|DormantProviderPositionTrustedChainAssessmentAssembler|PostgresProviderPositionDurableChainAnchorReader|ProviderPositionDurableChainAnchorReaderPort)/u.test(
       compositionPublicFacadeContract,
     ) &&
     exactExecutableLineCount(
@@ -9685,6 +10010,13 @@ export function loadRepositoryProductionPreflightInput(
         resolve(
           repositoryRoot,
           'apps/api/src/mainnet-platforms/application/ports/provider-position-durable-chain-anchor-reader.port.ts',
+        ),
+        'utf8',
+      ),
+      providerPositionPostgresDurableChainAnchorReaderSource: readFileSync(
+        resolve(
+          repositoryRoot,
+          'apps/api/src/mainnet-platforms/infrastructure/postgres-provider-position-durable-chain-anchor.reader.ts',
         ),
         'utf8',
       ),

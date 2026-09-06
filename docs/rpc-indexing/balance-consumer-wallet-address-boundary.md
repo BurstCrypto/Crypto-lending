@@ -53,7 +53,8 @@ contracts, ACLs, and underlying-table denial.
 Migration `0023` owns no durable data. Migration `0028` is forward-only: its
 down path raises SQLSTATE `55000` and never recreates generic-worker balance
 authority. Migration `0029` also refuses rollback after any anchor evidence or
-control row exists. It does not compose an application anchor reader/adapter or
+control row exists. A separate private dormant mainnet-platforms composition now
+constructs a PostgreSQL reader for its exact API read, but it does not supply a
 writer/producer, populate evidence, register a runtime, deploy anything, or
 supply live evidence. Any later dedicated balance-consumer grant must be
 delivered by a new reviewed migration rather than by rolling the revocation

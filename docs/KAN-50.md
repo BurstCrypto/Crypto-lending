@@ -280,7 +280,8 @@ only runtime grant is the exact API role's chain-bound-wallet-gated read. That
 read is `SECURITY DEFINER`; evidence-record and control functions remain
 owner-controlled with no runtime grants. The dormant balance-consumer capability role and bounded
 login slots still have no database connection, schema, object, function,
-default-ACL, or ownership authority. No application anchor reader/adapter,
+default-ACL, or ownership authority. A private dormant PostgreSQL anchor reader
+now uses only the exact cancellable API read and exposes no writer, but no
 evidence writer/producer, populated rows, registration, deployment, or live
 evidence exists, and no runtime is activated. A later reviewed migration and deployed verification are
 required before a dedicated consumer may receive any database grant.

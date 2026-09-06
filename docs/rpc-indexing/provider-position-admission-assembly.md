@@ -84,9 +84,9 @@ It contains a deterministic proposed snapshot ID, agreed normalized positions, a
 
 ## Dormant trusted assembly boundary
 
-The optional `ProviderPositionTrustedChainAssessmentAssemblyPort` closes the in-process assembly contract. A concrete `DormantProviderPositionTrustedChainAssessmentAssembler` now implements it over an injected `ProviderPositionDurableChainAnchorReaderPort`, but supplies neither a concrete durable reader nor a production registration. The private dormant composition accepts only that optional durable reader, constructs the assembler internally inside its owned-resource rollback boundary, and passes the local assembler to the coordinator; callers cannot inject a raw trusted-assembly port. Neither port nor implementation is exported by the feature barrel, registered in the Nest module, or reachable from an HTTP endpoint. `admitAndAssemble` still fails with the sanitized `ASSEMBLY_UNAVAILABLE` code before reading wallets or providers when the composition receives no durable reader and therefore supplies no trusted assembly to the coordinator.
+`ProviderPositionTrustedChainAssessmentAssemblyPort` closes the in-process assembly contract. Although the coordinator retains an optional port for fail-closed construction, this private composition supplies it unconditionally. A concrete `DormantProviderPositionTrustedChainAssessmentAssembler` implements it over `ProviderPositionDurableChainAnchorReaderPort`, and a concrete `PostgresProviderPositionDurableChainAnchorReader` implements that port against migration `0029`'s exact read function. The composition constructs the PostgreSQL reader from its owned `PostgresService`, then constructs the assembler inside the same owned-resource rollback boundary and passes only that assembler to the coordinator. Callers can inject neither a raw durable reader nor a raw trusted-assembly port. None of the reader, port, or assembler is exported by the feature barrel, registered in the Nest module, or reachable from an HTTP endpoint.
 
-When the port is present, the coordinator retains the same-cycle authoritative wallet roster and parsed policy rather than rereading or reconstructing either one. It deterministically selects the first canonically ordered accepted independent source for every agreed target position and builds immutable observation input. The assembly request binds:
+The coordinator retains the same-cycle authoritative wallet roster and parsed policy rather than rereading or reconstructing either one. It deterministically selects the first canonically ordered accepted independent source for every agreed target position and builds immutable observation input. The assembly request binds:
 
 - the complete admission candidate and its fingerprint;
 - the coverage-manifest fingerprint;
@@ -131,11 +131,12 @@ evaluation-to-deadline span at 30 seconds and rechecks the deadline, approval,
 current-head, and finality freshness against database time after wallet and
 evidence locks.
 
-Production still needs a reviewed concrete application durable-chain-anchor
-reader/adapter, production registration, and deployed evidence. The local private
-wiring now constructs the trusted assembler only when that optional reader is present,
-after the deadline runner and before the coordinator, and never exposes either
-object through the facade or reader sub-capability. The local assembler already binds each exact
+Production still needs an evidence writer/producer, populated evidence,
+production registration, and deployed proof. The local private wiring constructs
+the PostgreSQL durable reader unconditionally from the same owned
+`PostgresService`, after the deadline runner and before the assembler and
+coordinator, and never exposes the reader or assembler through the facade or
+reader sub-capability. The local assembler already binds each exact
 Ethereum or Solana target and selected source to its continuity floor, anchor,
 evidence times, candidate fingerprint, account, correlation ID, deadline, and
 shared abort signal. It authenticates the opaque reader result against the exact
@@ -144,27 +145,35 @@ progression/finality/freshness, and issues an object-identity assessment
 capability bound to the original whole-assembly request and exact
 observation-verification contexts.
 
-The private dormant runtime composition continues to expose only its frozen
-null-prototype reader v3 sub-capability. No concrete application durable-anchor
-reader/adapter, evidence writer/producer, populated evidence rows, registered
-production composition, runtime activation, deployed binding, or live chain
-evidence exists, so neither that reader nor `admitAndAssemble` is a live
-application path. All three
+The concrete PostgreSQL reader descriptor-captures only
+`queryWithCancellation`, sends the exact 13 migration arguments and admission
+signal, rejects nonzero unexpected cardinality, strictly reviews the returned
+row and canonical anchors/timestamps/statuses, and seals its opaque result to the
+exact request identity in a private `WeakMap`. It has no writer function or
+ordinary-query fallback. Admission source review, observation parsing, this
+reader, and migration `0029` all derive the same chain-global observation ID
+from the exact anchor. The private dormant runtime composition continues to
+expose only its frozen null-prototype reader v3 sub-capability. No evidence
+writer/producer, populated evidence rows, registered production composition,
+runtime activation, deployed binding, or live chain evidence exists, so neither
+the PostgreSQL reader nor `admitAndAssemble` is a live application path. All three
 provider-position registration blockers remain `MISSING`, and the live-provider
 count remains zero.
 
 The offline production preflight now byte-pins this coordinator, assembly port,
-durable-anchor reader port, dormant trusted-chain-assessment assembler, exact
+durable-anchor reader port, concrete PostgreSQL durable reader, dormant
+trusted-chain-assessment assembler, exact
 mainnet launch-network policy, concrete deadline runner, complete wallet-roster
 cancellation chain, shared PostgreSQL cancellation service, runtime-budget
 resource, private dormant composition, migration `0029`, and migration index
-with a selected twenty-six-file
+with a selected twenty-seven-file
 reader/domain/infrastructure/database/module/barrel/controller critical-source
 slice.
 Its local check rejects trust, timing, source-method substitution, active-controller
 lifecycle, signal substitution, cancellation/drain/cleanup, query fallback,
-budget/configuration substitution, raw trusted-assembly injection, private
-assembler construction/argument bypass, facade exposure, zero-target anchor,
+result-cardinality/row-validation weakening, raw reader or trusted-assembly
+injection, private reader/assembler construction/argument bypass, facade
+exposure, zero-target anchor,
 authority, or feature-surface drift inside that slice, but deliberately reports the reader,
 trusted-assessment, and deadline-runner feature registrations as missing. It
 does not prove recursive dependency closure or scan every application module,

@@ -436,6 +436,13 @@ const PROVIDER_POSITION_READ_ARTIFACTS = Object.freeze({
     ),
     'utf8',
   ),
+  providerPositionPostgresDurableChainAnchorReaderSource: readFileSync(
+    resolve(
+      __dirname,
+      '../apps/api/src/mainnet-platforms/infrastructure/postgres-provider-position-durable-chain-anchor.reader.ts',
+    ),
+    'utf8',
+  ),
   providerPositionTrustedChainAssessmentAssemblerSource: readFileSync(
     resolve(
       __dirname,
@@ -1112,7 +1119,7 @@ function mutateProviderPositionReadArtifact(
 }
 
 test('provider-position read inspection pins the exact dormant critical source slice', () => {
-  assert.equal(Object.keys(PROVIDER_POSITION_READ_ARTIFACTS).length, 26);
+  assert.equal(Object.keys(PROVIDER_POSITION_READ_ARTIFACTS).length, 27);
   const inspected = inspectProviderPositionReadBoundaryArtifacts(PROVIDER_POSITION_READ_ARTIFACTS);
   assert.deepEqual(inspected, EXPECTED_DORMANT_PROVIDER_POSITION_READ_BOUNDARY);
   assert.equal(Object.isFrozen(inspected), true);
@@ -1131,6 +1138,18 @@ test('provider-position read inspection pins the exact dormant critical source s
       `${key} byte drift`,
     );
   }
+});
+
+test('provider-position read semantic gate contains no disabled-check bypass', () => {
+  const source = readFileSync(PREFLIGHT_SCRIPT_PATH, 'utf8');
+  const start = source.indexOf('function hasDormantProviderPositionReadBoundaryContract(');
+  const end = source.indexOf('\nfunction ', start + 1);
+  assert.ok(start >= 0 && end > start);
+  const semanticGateSource = source.slice(start, end).replaceAll('!== true ||', '!== true OR');
+  assert.doesNotMatch(
+    semanticGateSource,
+    /(?:\btrue\s*\|\||\|\|\s*true\b|\bfalse\s*&&|&&\s*false\b|\.(?:skip|todo)\s*\()/u,
+  );
 });
 
 test('provider-position read inspection rejects dormant durable evidence and migration drift', () => {
@@ -1317,6 +1336,86 @@ test('provider-position read inspection rejects trust, runtime bounds, coverage,
       'readAnchor(request: ReadProviderPositionDurableChainAnchorRequestV1): Promise<unknown>;',
       'readAnchor(request: ReadProviderPositionDurableChainAnchorRequestV1): Promise<ProviderPositionDurableChainAnchorAssessmentV1>;',
     ],
+    [
+      'providerPositionPostgresDurableChainAnchorReaderSource',
+      "Object.getOwnPropertyDescriptor(current, 'queryWithCancellation')",
+      "Object.getOwnPropertyDescriptor(current, 'query')",
+    ],
+    [
+      'providerPositionPostgresDurableChainAnchorReaderSource',
+      'const result = (await Reflect.apply(this.#queryWithCancellation, this.#receiver, [',
+      'const result = (await (this.#receiver as PostgresService).query(',
+    ],
+    [
+      'providerPositionPostgresDurableChainAnchorReaderSource',
+      '        request.signal,\n      ])) as unknown;',
+      '        new AbortController().signal,\n      ])) as unknown;',
+    ],
+    [
+      'providerPositionPostgresDurableChainAnchorReaderSource',
+      "rowDescriptors['length']?.value !== 1 ||",
+      "rowDescriptors['length']?.value > 1 ||",
+    ],
+    [
+      'providerPositionPostgresDurableChainAnchorReaderSource',
+      'readonly #issued = new WeakMap<object, ReadProviderPositionDurableChainAnchorRequestV1>();',
+      'readonly #issued = new Map<object, ReadProviderPositionDurableChainAnchorRequestV1>();',
+    ],
+    [
+      'providerPositionPostgresDurableChainAnchorReaderSource',
+      'export class PostgresProviderPositionDurableChainAnchorReader implements ProviderPositionDurableChainAnchorReaderPort {',
+      "export class PostgresProviderPositionDurableChainAnchorReader implements ProviderPositionDurableChainAnchorReaderPort {\n  readonly writerFunction = 'record_provider_position_chain_anchor_evidence';",
+    ],
+    [
+      'providerPositionPostgresDurableChainAnchorReaderSource',
+      'FROM read_provider_position_chain_anchor_evidence(',
+      'FROM record_provider_position_chain_anchor_evidence(',
+    ],
+    [
+      'providerPositionPostgresDurableChainAnchorReaderSource',
+      'assessment.continuity_floor::text AS continuity_floor_json,',
+      'assessment.continuity_floor AS continuity_floor_json,',
+    ],
+    [
+      'providerPositionPostgresDurableChainAnchorReaderSource',
+      "assessment.assessed_at AT TIME ZONE 'UTC',",
+      'assessment.assessed_at,',
+    ],
+    [
+      'providerPositionPostgresDurableChainAnchorReaderSource',
+      'if (isAborted(request.signal)) return fail();',
+      'void request.signal;',
+    ],
+    [
+      'providerPositionPostgresDurableChainAnchorReaderSource',
+      "  'signal',\n] as const);",
+      "  'substitutedSignal',\n] as const);",
+    ],
+    [
+      'providerPositionPostgresDurableChainAnchorReaderSource',
+      'export const PROVIDER_POSITION_DURABLE_CHAIN_ANCHOR_READ_ERROR = Object.freeze(',
+      'export const PROVIDER_POSITION_DURABLE_CHAIN_ANCHOR_READ_ERROR = (',
+    ],
+    [
+      'providerPositionPostgresDurableChainAnchorReaderSource',
+      "row.identity_status !== 'VERIFIED' ||",
+      'false ||',
+    ],
+    [
+      'providerPositionPostgresDurableChainAnchorReaderSource',
+      '!sameAnchor(chainAnchor, request.chainAnchor) ||',
+      'false ||',
+    ],
+    [
+      'providerPositionPostgresDurableChainAnchorReaderSource',
+      'assessedAt.milliseconds > request.capturedAtMilliseconds',
+      'assessedAt.milliseconds > Date.parse(request.deadlineAt)',
+    ],
+    [
+      'providerPositionPostgresDurableChainAnchorReaderSource',
+      'this.#issued.get(capability) === request',
+      'this.#issued.has(capability)',
+    ],
     ['mainnetLaunchNetworkPolicySource', "'eip155:1',", "'eip155:8453',"],
     [
       'mainnetLaunchNetworkPolicySource',
@@ -1405,9 +1504,19 @@ test('provider-position read inspection rejects trust, runtime bounds, coverage,
       'const observationFingerprint = String({',
     ],
     [
+      'providerPositionObservationSource',
+      'if (sourceObservationId !== expectedSourceObservationId) {',
+      'if (false) {',
+    ],
+    [
       'providerPositionAdmissionCoordinatorSource',
       'assembly.verifyAssembly(chainAssessment, assemblyRequest) !== true',
       'false',
+    ],
+    [
+      'providerPositionAdmissionCoordinatorSource',
+      'if (record.sourceObservationId !== expectedSourceObservationId) {',
+      'if (false) {',
     ],
     [
       'providerPositionAdmissionCoordinatorSource',
@@ -1704,13 +1813,18 @@ test('provider-position read inspection rejects trust, runtime bounds, coverage,
     ],
     [
       'providerPositionRuntimeCompositionSource',
-      "const OPTIONAL_DEPENDENCY_KEYS = Object.freeze(['durableChainAnchorReader'] as const);",
-      "const OPTIONAL_DEPENDENCY_KEYS = Object.freeze(['durableChainAnchorReader', 'trustedChainAssessmentAssembly'] as const);",
+      "  'clock',\n] as const);",
+      "  'clock',\n  'durableChainAnchorReader',\n] as const);",
     ],
     [
       'providerPositionRuntimeCompositionSource',
-      ': new DormantProviderPositionTrustedChainAssessmentAssembler(\n            dependencies.durableChainAnchorReader,\n          );',
-      ': dependencies.durableChainAnchorReader;',
+      'const durableChainAnchorReader = new PostgresProviderPositionDurableChainAnchorReader(postgres);',
+      'const durableChainAnchorReader = dependencies.durableChainAnchorReader;',
+    ],
+    [
+      'providerPositionRuntimeCompositionSource',
+      'new DormantProviderPositionTrustedChainAssessmentAssembler(durableChainAnchorReader);',
+      'new DormantProviderPositionTrustedChainAssessmentAssembler(dependencies.durableChainAnchorReader);',
     ],
     [
       'providerPositionRuntimeCompositionSource',
@@ -1865,6 +1979,11 @@ test('provider-position read inspection rejects trust, runtime bounds, coverage,
       'providers: [MainnetPlatformDirectoryService, MainnetPlatformsPrivacyInterceptor, DormantProviderPositionTrustedChainAssessmentAssembler],',
     ],
     [
+      'mainnetPlatformsModuleSource',
+      'providers: [MainnetPlatformDirectoryService, MainnetPlatformsPrivacyInterceptor],',
+      'providers: [MainnetPlatformDirectoryService, MainnetPlatformsPrivacyInterceptor, PostgresProviderPositionDurableChainAnchorReader],',
+    ],
+    [
       'mainnetPlatformsIndexSource',
       "export { MainnetPlatformDirectoryService } from './application/mainnet-platform-directory.service';",
       "export { DormantProviderPositionAdmissionCoordinator } from './application/provider-position-admission.coordinator';",
@@ -1898,6 +2017,11 @@ test('provider-position read inspection rejects trust, runtime bounds, coverage,
       'mainnetPlatformsIndexSource',
       "export { MainnetPlatformDirectoryService } from './application/mainnet-platform-directory.service';",
       "export { DormantProviderPositionTrustedChainAssessmentAssembler } from './infrastructure/dormant-provider-position-trusted-chain-assessment.assembler';",
+    ],
+    [
+      'mainnetPlatformsIndexSource',
+      "export { MainnetPlatformDirectoryService } from './application/mainnet-platform-directory.service';",
+      "export { PostgresProviderPositionDurableChainAnchorReader } from './infrastructure/postgres-provider-position-durable-chain-anchor.reader';",
     ],
     [
       'providerPositionRuntimeCompositionSource',

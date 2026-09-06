@@ -182,7 +182,8 @@ into deployed or production-ready evidence.
 
 `PROVIDER_POSITION_READ_BOUNDARY` independently snapshots and byte-pins the
 coverage-aware reader v3 port, trusted-assessment assembly port,
-durable-chain-anchor reader port, dormant trusted-chain-assessment assembler,
+durable-chain-anchor reader port, concrete PostgreSQL durable-anchor reader,
+dormant trusted-chain-assessment assembler,
 admission coordinator, concrete Node deadline runner, wallet-roster reader port
 and adapter, wallet service and repository port, PostgreSQL wallet repository,
 shared PostgreSQL cancellation service, dormant runtime-budget resource,
@@ -190,7 +191,7 @@ private dormant runtime composition, infrastructure configuration loader,
 runtime PostgreSQL pool factory, coverage/observation/assessment/policy domains,
 exact Ethereum/Solana mainnet launch-network policy, migration `0029`, the
 migration index, feature module, feature barrel, and HTTP controller as one
-selected twenty-six-file critical-source slice. Within that
+selected twenty-seven-file critical-source slice. Within that
 slice, the local semantic inspection requires an exact account/correlation
 reader request with no caller-supplied evaluation time and an exact frozen
 result envelope containing the server-authored parser time and covered-snapshot
@@ -235,6 +236,21 @@ identity, and exact verification contexts in a private `WeakMap`; assessment,
 request, and context drift fail closed. The assembler has no ambient provider,
 network, storage, persistence, or financial-action capability.
 
+The concrete PostgreSQL durable-anchor reader captures only the shared
+service's cancellable-query method at construction. Every read sends the exact
+13 arguments required by migration `0029`, with the unchanged admission signal,
+to its exact `read_provider_position_chain_anchor_evidence` function. It accepts
+only zero rows (unavailable) or one strictly reviewed row; extra rows, shape,
+network, anchor, status, or canonical-timing drift fail closed. An accepted
+frozen assessment is sealed with its exact frozen request identity in a private
+`WeakMap`, so result or request clones do not verify. It has no evidence-record,
+control, ordinary-query, provider, network, persistence, or financial-action
+capability. The admission source reviewer, observation parser, PostgreSQL reader,
+and migration all derive the same chain-global identity from the exact anchor:
+`ethereum-block-<blockNumber>` or `solana-slot-<slot>`. A request-scoped or
+otherwise arbitrary observation ID therefore cannot cross any stage of this
+boundary.
+
 Migration `0029` adds a dormant, append-only PostgreSQL boundary for global
 Ethereum and Solana chain-anchor evidence plus append-only `INVALIDATED` and
 `QUARANTINED` control events. Its evidence and control tables contain no account
@@ -250,13 +266,12 @@ Evidence-recording and control functions have no runtime grants and remain
 schema-owner-controlled. The cumulative verifier preserves migration `0028`'s
 generic-worker resolver and checkpoint suspension.
 
-The private dormant composition accepts exactly one optional trust dependency:
-`durableChainAnchorReader`. It imports the durable-reader port and concrete
-assembler directly, constructs the assembler inside the owned-resource rollback
-boundary after the deadline runner and before the coordinator, and passes that
-local assembler—not the raw reader—to the coordinator. A raw trusted-assembly
-dependency is rejected. Neither the outer facade nor its reader sub-capability
-exposes the durable reader or assembler.
+The private dormant composition accepts no raw trust dependency. It constructs
+the concrete PostgreSQL reader from its owned `PostgresService`, constructs the
+assembler inside the owned-resource rollback boundary, and passes that local
+assembler—not the raw reader—to the coordinator. Raw durable-reader and
+trusted-assembly dependencies are rejected. Neither the outer facade nor its
+reader sub-capability exposes the durable reader or assembler.
 
 The coordinator binds the account, evaluation time, correlation ID, and exact
 shared signal into the roster request. The adapter and PostgreSQL repository
@@ -273,15 +288,17 @@ timer capability; it requires cancellation authority, post-operation deadline
 validation, started-operation settlement, and timer and abort-listener cleanup
 while rejecting network, environment, dynamic-import, and decorator
 capabilities. It also confirms that the pinned feature module, barrel, and HTTP
-controller do not register or expose the coordinator, trusted assembly,
-deadline runner, runtime-budget resource, or runtime composition.
+controller do not register or expose the coordinator, PostgreSQL durable reader,
+trusted assembly, deadline runner, runtime-budget resource, or runtime
+composition.
 
 The current exact source passes local inspection. The dormant runtime-budget
 resource constructs a lazy pool from its owned reviewed API configuration and
 returns that pool with the exact frozen admission-options snapshot. A private
 dormant composition now consumes that exact pool and options object into the
 concrete PostgreSQL -> wallet repository -> wallet service -> portfolio wallet
-reader -> deadline runner -> optional private trusted assembler -> coordinator
+reader -> deadline runner -> private PostgreSQL durable reader -> private trusted
+assembler -> coordinator
 graph. Its outer facade retains
 diagnostic admission, admission-and-assembly, and memoized close operations. A
 separate frozen null-prototype reader sub-capability exposes only its three
@@ -302,12 +319,11 @@ Launch readiness remains blocked by
 `PROVIDER_POSITION_READER_FEATURE_REGISTRATION_MISSING` and
 `PROVIDER_POSITION_TRUSTED_ASSESSMENT_FEATURE_REGISTRATION_MISSING`, plus
 `PROVIDER_POSITION_DEADLINE_RUNNER_FEATURE_REGISTRATION_MISSING`. The concrete
-assembler and migration do not clear any registration blocker: no concrete
-application durable-anchor reader or adapter exists, no evidence writer or
-producer is composed, no populated evidence rows are claimed, the private
-composition wiring is not registered in the Nest/module/HTTP graph, no runtime
-is activated, and no deployment or live evidence exists. The live-provider
-count therefore remains zero. The concrete
+assembler, PostgreSQL reader, and migration do not clear any registration
+blocker: no evidence writer or producer is composed, no populated evidence rows
+are claimed, the private composition wiring is not registered in the
+Nest/module/HTTP graph, no runtime is activated, and no deployment or live
+evidence exists. The live-provider count therefore remains zero. The concrete
 runner remains dormant and unregistered. Provider sources must cooperate with
 abort and settle before the runner can return. Wallet-roster cancellation now
 reaches the PostgreSQL query boundary, but active `pg` pool acquisition has no
