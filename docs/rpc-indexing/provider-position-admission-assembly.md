@@ -101,18 +101,21 @@ Assembly shares the admission deadline, captures the port's methods once without
 
 ## Required production binding
 
-Production still needs a reviewed implementation of the dormant port. It must independently verify every selected anchor against durable chain identity, progression, and finality state and issue one object-identity capability covering the complete assembled assessment. No such implementation or production composition exists in this repository, so `admitAndAssemble` is not a live application path.
+Production still needs a reviewed implementation of the dormant port. It must independently verify every selected anchor against durable chain identity, progression, and finality state and issue one object-identity capability covering the complete assembled assessment. A private dormant runtime composition now consumes one reviewed lazy PostgreSQL pool and its exact admission options through the wallet-roster, deadline-runner, and coordinator graph, but no trusted assessment implementation or registered production composition exists. Therefore, `admitAndAssemble` is not a live application path.
 
 The offline production preflight now byte-pins this coordinator, assembly port,
-concrete deadline runner, complete wallet-roster cancellation chain, and shared
-PostgreSQL cancellation service with a selected seventeen-file
-reader/domain/module/barrel/controller critical-source slice. Its local check
-rejects trust, timing, signal substitution, cancellation/drain/cleanup, query
-fallback, zero-target anchor, authority, or feature-surface drift inside that
-slice, but deliberately reports the reader, trusted-assessment, and
-deadline-runner feature registrations as missing. It does not prove recursive
-dependency closure or scan every application module, and it performs no
-provider, chain, network, cloud, secret, transaction, or billable operation.
+concrete deadline runner, complete wallet-roster cancellation chain, shared
+PostgreSQL cancellation service, runtime-budget resource, and private dormant
+composition with a selected twenty-one-file
+reader/domain/infrastructure/module/barrel/controller critical-source slice.
+Its local check rejects trust, timing, source-method substitution, active-controller
+lifecycle, signal substitution, cancellation/drain/cleanup, query fallback,
+budget/configuration substitution, zero-target anchor, authority, or
+feature-surface drift inside that slice, but deliberately reports the reader,
+trusted-assessment, and deadline-runner feature registrations as missing. It
+does not prove recursive dependency closure or scan every application module,
+and it performs no provider, chain, network, cloud, secret, transaction, or
+billable operation.
 
 That production change must also provide:
 
