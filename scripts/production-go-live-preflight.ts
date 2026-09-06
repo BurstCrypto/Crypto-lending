@@ -258,6 +258,7 @@ export interface ProviderPositionReadBoundaryArtifactSources {
   readonly providerPositionPostgresDurableChainAnchorReaderSource: string;
   readonly providerPositionTrustedChainAssessmentAssemblerSource: string;
   readonly providerPositionChainAnchorEvidenceMigrationSource: string;
+  readonly providerPositionChainAnchorRecordDeadlineMigrationSource: string;
   readonly providerPositionMigrationIndexSource: string;
   readonly providerPositionAdmissionCoordinatorSource: string;
   readonly providerPositionDeadlineRunnerSource: string;
@@ -597,6 +598,7 @@ const PROVIDER_POSITION_READ_ARTIFACT_KEYS = Object.freeze([
   'providerPositionPostgresDurableChainAnchorReaderSource',
   'providerPositionTrustedChainAssessmentAssemblerSource',
   'providerPositionChainAnchorEvidenceMigrationSource',
+  'providerPositionChainAnchorRecordDeadlineMigrationSource',
   'providerPositionMigrationIndexSource',
   'providerPositionAdmissionCoordinatorSource',
   'providerPositionDeadlineRunnerSource',
@@ -640,6 +642,8 @@ const REVIEWED_PROVIDER_POSITION_READ_ARTIFACT_SHA256 = Object.freeze({
     'dbd8f71194f9036107b106cbbdb3920a53ebf9413132fba778008cee64a06f52',
   providerPositionChainAnchorEvidenceMigrationSource:
     '9ef52244aa0e52e2a6da7350b43a6a4438e47a721bdd5dc34637a0d2c0fec614',
+  providerPositionChainAnchorRecordDeadlineMigrationSource:
+    '106bc63235d307fd33d288d014b81a4942f7bd282ef43902b75a60efb868dc4b',
   providerPositionMigrationIndexSource:
     'ae1cd1c7d06dad8dd70775837df9656cf49c3a4897068cb492d78248a24b45b0',
   providerPositionAdmissionCoordinatorSource:
@@ -682,7 +686,7 @@ const REVIEWED_PROVIDER_POSITION_READ_ARTIFACT_SHA256 = Object.freeze({
     'a713200b67f0cf67c50b56c94f707f94f7383c52e3d59f4368868710b099b55d',
 } satisfies Readonly<Record<keyof ProviderPositionReadBoundaryArtifactSources, string>>);
 const MAX_PROVIDER_POSITION_READ_ARTIFACT_BYTES = 128 * 1024;
-const MAX_PROVIDER_POSITION_READ_TOTAL_BYTES = 640 * 1024;
+const MAX_PROVIDER_POSITION_READ_TOTAL_BYTES = 704 * 1024;
 const BALANCE_CONSUMER_ARTIFACT_KEYS = Object.freeze([
   'activationSource',
   'cliSource',
@@ -2373,6 +2377,656 @@ function hasDormantProviderPositionChainAnchorEvidenceMigrationContract(
   );
 }
 
+function hasDormantProviderPositionChainAnchorRecordDeadlineMigrationContract(
+  migrationSource: string,
+  migrationIndexSource: string,
+  runtimeCompositionSource: string,
+  moduleSource: string,
+  indexSource: string,
+  controllerSource: string,
+): boolean {
+  const migration = migrationSource.replace(/\r\n/gu, '\n');
+  const migrationIndex = migrationIndexSource.replace(/\r\n/gu, '\n');
+  const importSources = Array.from(
+    migration.matchAll(/\bfrom\s+['"]([^'"]+)['"]/gu),
+    (match) => match[1],
+  );
+  const importDeclarationCount = migration.match(/^[\t ]*import\b/gmu)?.length ?? 0;
+  const forbiddenCapability =
+    /(?:\bimport\s*\(|\brequire\s*\(|(?:\bfrom\s+|\bimport\s*(?:\(\s*)?)['"](?:node:)?(?:child_process|cluster|dgram|dns|fs|http|http2|https|net|tls|worker_threads)(?:\/[^'"]*)?['"]|(?:\bfrom\s+|\bimport\s*(?:\(\s*)?)['"](?:axios|ethers|got|superagent|undici|web3|@solana\/web3\.js)['"]|\b(?:fetch|setTimeout|setInterval|setImmediate|queueMicrotask|WebSocket|EventSource|XMLHttpRequest|readFileSync|writeFileSync)\s*\(|\b(?:process|Deno|Bun)\s*\.\s*env\b|\bimport\s*\.\s*meta\s*\.\s*env\b|['"]https?:\/\/|(?:^|\n)[\t ]*@[A-Za-z_$])/iu;
+
+  const fingerprintBodyStart = migration.indexOf('const DEADLINE_FINGERPRINT_BODY = `');
+  const rowValidBodyStart = migration.indexOf(
+    'const DEADLINE_ROW_VALID_BODY = `',
+    fingerprintBodyStart,
+  );
+  const rowValidCallStart = migration.indexOf(
+    'const DEADLINE_ROW_VALID_CALL = `',
+    rowValidBodyStart,
+  );
+  const guardedBodyStart = migration.indexOf(
+    'const GUARDED_RECORD_EVIDENCE_BODY = `',
+    rowValidCallStart,
+  );
+  const upStart = migration.indexOf(
+    'function createUpSql(names: BalanceConsumerPrincipalNames): string {',
+    guardedBodyStart,
+  );
+  const downStart = migration.indexOf(
+    'function createDownSql(names: BalanceConsumerPrincipalNames): string {',
+    upStart,
+  );
+  const verifierStart = migration.indexOf(
+    'function createVerifierSql(names: BalanceConsumerPrincipalNames, cumulative: boolean): string {',
+    downStart,
+  );
+  const factoryStart = migration.indexOf(
+    'export function createProviderPositionChainAnchorRecordDeadlineMigration(',
+    verifierStart,
+  );
+  if (
+    fingerprintBodyStart < 0 ||
+    rowValidBodyStart <= fingerprintBodyStart ||
+    rowValidCallStart <= rowValidBodyStart ||
+    guardedBodyStart <= rowValidCallStart ||
+    upStart <= guardedBodyStart ||
+    downStart <= upStart ||
+    verifierStart <= downStart ||
+    factoryStart <= verifierStart
+  ) {
+    return false;
+  }
+
+  const fingerprintBody = migration.slice(fingerprintBodyStart, rowValidBodyStart);
+  const rowValidBody = migration.slice(rowValidBodyStart, rowValidCallStart);
+  const guardedBody = migration.slice(guardedBodyStart, upStart);
+  const upSource = migration.slice(upStart, downStart);
+  const downSource = migration.slice(downStart, verifierStart);
+  const verifierSource = migration.slice(verifierStart, factoryStart);
+  const compactGuardedBody = guardedBody.replace(/\s+/gu, ' ');
+  const occursExactlyOnce = (source: string, fragment: string): boolean =>
+    source.split(fragment).length - 1 === 1;
+
+  const exclusiveLock = upSource.indexOf('LOCK TABLE ${EVIDENCE_TABLE} IN ACCESS EXCLUSIVE MODE;');
+  const existingEvidenceRefusal = upSource.indexOf(
+    'IF EXISTS (SELECT 1 FROM ${EVIDENCE_TABLE}) THEN',
+    exclusiveLock,
+  );
+  const deadlineTableStart = upSource.indexOf('CREATE TABLE ${DEADLINE_TABLE} (');
+  const deadlineTableEnd = upSource.indexOf(
+    'COMMENT ON TABLE ${DEADLINE_TABLE}',
+    deadlineTableStart,
+  );
+  const deadlineTable =
+    deadlineTableStart >= 0 && deadlineTableEnd > deadlineTableStart
+      ? upSource.slice(deadlineTableStart, deadlineTableEnd)
+      : '';
+  const deadlineTableLines = trimmedExecutableLines(deadlineTable);
+  const expectedDeadlineTablePrefix = [
+    'CREATE TABLE ${DEADLINE_TABLE} (',
+    'deadline_binding_sha256 text NOT NULL,',
+    'evidence_fingerprint_sha256 text NOT NULL,',
+    'deadline_binding_version smallint NOT NULL,',
+    'deadline_binding_use text NOT NULL,',
+    'may_authorize_financial_action boolean NOT NULL,',
+    'may_persist boolean NOT NULL,',
+    'producer_deadline_at timestamptz NOT NULL,',
+    'evidence_recorded_at timestamptz NOT NULL,',
+  ] as const;
+  const deadlineEvidenceForeignKeyStart = deadlineTable.indexOf(
+    'CONSTRAINT provider_position_chain_anchor_deadline_evidence_fk',
+  );
+  const deadlineEvidenceForeignKeyEnd = deadlineTable.indexOf(
+    'CONSTRAINT provider_position_chain_anchor_deadline_valid_check',
+    deadlineEvidenceForeignKeyStart,
+  );
+  const deadlineEvidenceForeignKey =
+    deadlineEvidenceForeignKeyStart >= 0 &&
+    deadlineEvidenceForeignKeyEnd > deadlineEvidenceForeignKeyStart
+      ? deadlineTable.slice(deadlineEvidenceForeignKeyStart, deadlineEvidenceForeignKeyEnd)
+      : '';
+  const reverseForeignKeyStart = upSource.indexOf(
+    'ALTER TABLE ${EVIDENCE_TABLE}',
+    deadlineTableEnd,
+  );
+  const rowTriggerStart = upSource.indexOf(
+    'CREATE TRIGGER provider_position_chain_anchor_deadline_append_only_row',
+    reverseForeignKeyStart,
+  );
+  const reverseForeignKey =
+    reverseForeignKeyStart >= 0 && rowTriggerStart > reverseForeignKeyStart
+      ? upSource.slice(reverseForeignKeyStart, rowTriggerStart)
+      : '';
+  const guardedFunctionStart = upSource.indexOf(
+    'CREATE FUNCTION record_provider_position_chain_anchor_evidence_guarded(',
+  );
+  const guardedFunctionBody = upSource.indexOf(
+    'AS $function$${GUARDED_RECORD_EVIDENCE_BODY}$function$;',
+    guardedFunctionStart,
+  );
+  const guardedFunction =
+    guardedFunctionStart >= 0 && guardedFunctionBody > guardedFunctionStart
+      ? upSource.slice(
+          guardedFunctionStart,
+          guardedFunctionBody + 'AS $function$${GUARDED_RECORD_EVIDENCE_BODY}$function$;'.length,
+        )
+      : '';
+  const expectedGuardedFunction = [
+    'CREATE FUNCTION record_provider_position_chain_anchor_evidence_guarded(',
+    'requested_network_id text,',
+    'requested_source_family_id text,',
+    'requested_source_id text,',
+    'requested_source_kind text,',
+    'requested_source_observation_id text,',
+    'requested_continuity_floor jsonb,',
+    'requested_chain_anchor jsonb,',
+    'requested_observed_at timestamptz,',
+    'requested_assessed_at timestamptz,',
+    'requested_agreed_current_head jsonb,',
+    'requested_current_head_advanced_at timestamptz,',
+    'requested_agreed_finalized_head jsonb,',
+    'requested_finalized_head_advanced_at timestamptz,',
+    'requested_identity_proof_sha256 text,',
+    'requested_live_capability_proof_sha256 text,',
+    'requested_lineage_proof_sha256 text,',
+    'requested_primary_source_family_id text,',
+    'requested_primary_source_id text,',
+    'requested_corroborating_source_family_id text,',
+    'requested_corroborating_source_id text,',
+    'requested_source_pair_approval_id text,',
+    'requested_source_pair_registry_fingerprint_sha256 text,',
+    'requested_source_pair_approval_expires_at timestamptz,',
+    'requested_producer_deadline_at timestamptz,',
+    'requested_operation text',
+    ') RETURNS TABLE (',
+    'record_outcome text,',
+    'recorded_evidence_fingerprint_sha256 text,',
+    'evidence_recorded_at timestamptz',
+    ') LANGUAGE plpgsql SECURITY DEFINER VOLATILE STRICT PARALLEL UNSAFE',
+    'AS $function$${GUARDED_RECORD_EVIDENCE_BODY}$function$;',
+  ] as const;
+
+  const evidenceValidationStart = guardedBody.indexOf(
+    'IF provider_position_chain_anchor_evidence_row_valid(',
+  );
+  const evidenceValidationEnd = guardedBody.indexOf(
+    ') IS DISTINCT FROM true',
+    evidenceValidationStart,
+  );
+  const advisoryLockStart = guardedBody.indexOf(
+    'PERFORM pg_catalog.pg_advisory_xact_lock(',
+    evidenceValidationEnd,
+  );
+  const databaseStartedAt = guardedBody.indexOf(
+    'database_started_at := pg_catalog.date_trunc(',
+    advisoryLockStart,
+  );
+  const priorReadStart = guardedBody.indexOf('SELECT evidence.* INTO prior', databaseStartedAt);
+  const priorFound = guardedBody.indexOf('IF FOUND THEN', priorReadStart);
+  const bindingReadStart = guardedBody.indexOf(
+    'SELECT deadline.* INTO deadline_binding',
+    priorFound,
+  );
+  const bindingReviewStart = guardedBody.indexOf('IF NOT FOUND', bindingReadStart);
+  const reconcileOnlyReturn = guardedBody.indexOf(
+    "IF requested_operation = 'RECONCILE_ONLY'",
+    bindingReviewStart,
+  );
+  const innerSubtransaction = guardedBody.indexOf(
+    'BEGIN\n        SELECT evidence.record_outcome,',
+    reconcileOnlyReturn,
+  );
+  const oldWriter = guardedBody.indexOf(
+    'FROM record_provider_position_chain_anchor_evidence(',
+    innerSubtransaction,
+  );
+  const storedResultReview = guardedBody.indexOf("IF stored_outcome <> 'RECORDED'", oldWriter);
+  const storedDeadlineReview = guardedBody.indexOf(
+    'IF stored_recorded_at < requested_assessed_at',
+    storedResultReview,
+  );
+  const deadlineInsert = guardedBody.indexOf(
+    'INSERT INTO provider_position_chain_anchor_record_deadlines (',
+    storedDeadlineReview,
+  );
+  const deadlineInsertEnd = guardedBody.indexOf(');', deadlineInsert);
+  const deadlineInsertSource =
+    deadlineInsert >= 0 && deadlineInsertEnd > deadlineInsert
+      ? guardedBody.slice(deadlineInsert, deadlineInsertEnd + 2)
+      : '';
+  const expectedDeadlineInsert = [
+    'INSERT INTO provider_position_chain_anchor_record_deadlines (',
+    'deadline_binding_sha256,',
+    'evidence_fingerprint_sha256,',
+    'deadline_binding_version,',
+    'deadline_binding_use,',
+    'may_authorize_financial_action,',
+    'may_persist,',
+    'producer_deadline_at,',
+    'evidence_recorded_at',
+    ') VALUES (',
+    'provider_position_chain_anchor_record_deadline_fingerprint(',
+    'stored_fingerprint,',
+    'requested_producer_deadline_at,',
+    'stored_recorded_at',
+    '),',
+    'stored_fingerprint,',
+    '1,',
+    "'${DEADLINE_USE}',",
+    'false,',
+    'false,',
+    'requested_producer_deadline_at,',
+    'stored_recorded_at',
+    ');',
+  ] as const;
+  const databaseCompletedAt = guardedBody.indexOf(
+    'database_completed_at := pg_catalog.date_trunc(',
+    deadlineInsertEnd,
+  );
+  const completionDeadlineReview = guardedBody.indexOf(
+    'IF database_completed_at < database_started_at',
+    databaseCompletedAt,
+  );
+  const sentinelCatch = guardedBody.indexOf(
+    "EXCEPTION\n        WHEN SQLSTATE 'P0030' THEN",
+    completionDeadlineReview,
+  );
+  const sentinelReturn = guardedBody.indexOf('IF deadline_rejected THEN', sentinelCatch);
+  const priorRead =
+    priorReadStart >= 0 && priorFound > priorReadStart
+      ? guardedBody.slice(priorReadStart, priorFound)
+      : '';
+  const bindingRead =
+    bindingReadStart >= 0 && bindingReviewStart > bindingReadStart
+      ? guardedBody.slice(bindingReadStart, bindingReviewStart)
+      : '';
+  const exactPriorChecks = [
+    'prior.evidence_fingerprint_sha256 IS DISTINCT FROM requested_fingerprint',
+    'prior.network_id IS DISTINCT FROM requested_network_id',
+    'prior.source_family_id IS DISTINCT FROM requested_source_family_id',
+    'prior.source_id IS DISTINCT FROM requested_source_id',
+    'prior.source_kind IS DISTINCT FROM requested_source_kind',
+    'prior.source_observation_id IS DISTINCT FROM requested_source_observation_id',
+    'prior.continuity_floor IS DISTINCT FROM requested_continuity_floor',
+    'prior.chain_anchor IS DISTINCT FROM requested_chain_anchor',
+    'prior.observed_at IS DISTINCT FROM requested_observed_at',
+    'prior.assessed_at IS DISTINCT FROM requested_assessed_at',
+    'prior.agreed_current_head IS DISTINCT FROM requested_agreed_current_head',
+    'prior.current_head_advanced_at IS DISTINCT FROM requested_current_head_advanced_at',
+    'prior.agreed_finalized_head IS DISTINCT FROM requested_agreed_finalized_head',
+    'prior.finalized_head_advanced_at IS DISTINCT FROM requested_finalized_head_advanced_at',
+    'prior.identity_proof_sha256 IS DISTINCT FROM requested_identity_proof_sha256',
+    'prior.live_capability_proof_sha256 IS DISTINCT FROM requested_live_capability_proof_sha256',
+    'prior.lineage_proof_sha256 IS DISTINCT FROM requested_lineage_proof_sha256',
+    'prior.primary_source_family_id IS DISTINCT FROM requested_primary_source_family_id',
+    'prior.primary_source_id IS DISTINCT FROM requested_primary_source_id',
+    'prior.corroborating_source_family_id IS DISTINCT FROM requested_corroborating_source_family_id',
+    'prior.corroborating_source_id IS DISTINCT FROM requested_corroborating_source_id',
+    'prior.source_pair_approval_id IS DISTINCT FROM requested_source_pair_approval_id',
+    'prior.source_pair_registry_fingerprint_sha256 IS DISTINCT FROM requested_source_pair_registry_fingerprint_sha256',
+    'prior.source_pair_approval_expires_at IS DISTINCT FROM requested_source_pair_approval_expires_at',
+  ] as const;
+  const exactBindingChecks = [
+    'deadline_binding.deadline_binding_version IS DISTINCT FROM 1',
+    "deadline_binding.deadline_binding_use IS DISTINCT FROM '${DEADLINE_USE}'",
+    'deadline_binding.may_authorize_financial_action IS DISTINCT FROM false',
+    'deadline_binding.may_persist IS DISTINCT FROM false',
+    'deadline_binding.evidence_recorded_at IS DISTINCT FROM prior.recorded_at',
+    'deadline_binding.producer_deadline_at IS DISTINCT FROM requested_producer_deadline_at',
+    'deadline_binding.deadline_binding_sha256 IS DISTINCT FROM provider_position_chain_anchor_record_deadline_fingerprint(',
+    'prior.recorded_at >= requested_producer_deadline_at',
+  ] as const;
+  const downLock = downSource.indexOf('LOCK TABLE ${EVIDENCE_TABLE},');
+  const downEvidenceUseCheck = downSource.indexOf(
+    'IF EXISTS (SELECT 1 FROM ${EVIDENCE_TABLE})',
+    downLock,
+  );
+  const downControlUseCheck = downSource.indexOf(
+    'OR EXISTS (SELECT 1 FROM provider_position_chain_anchor_control_events)',
+    downEvidenceUseCheck,
+  );
+  const downDeadlineUseCheck = downSource.indexOf(
+    'OR EXISTS (SELECT 1 FROM ${DEADLINE_TABLE})',
+    downControlUseCheck,
+  );
+  const downRefusal = downSource.indexOf(
+    "'cannot roll back provider position chain anchor deadlines after use'",
+    downDeadlineUseCheck,
+  );
+  const downDropGuardedFunction = downSource.indexOf(
+    'DROP FUNCTION ${GUARDED_RECORD_EVIDENCE};',
+    downRefusal,
+  );
+  const downDropReverseForeignKey = downSource.indexOf(
+    'DROP CONSTRAINT provider_position_chain_anchor_evidence_deadline_fk;',
+    downDropGuardedFunction,
+  );
+  const downDropTruncateTrigger = downSource.indexOf(
+    'DROP TRIGGER provider_position_chain_anchor_deadline_append_only_truncate',
+    downDropReverseForeignKey,
+  );
+  const downDropRowTrigger = downSource.indexOf(
+    'DROP TRIGGER provider_position_chain_anchor_deadline_append_only_row',
+    downDropTruncateTrigger,
+  );
+  const downDropTable = downSource.indexOf('DROP TABLE ${DEADLINE_TABLE};', downDropRowTrigger);
+  const downDropRowValid = downSource.indexOf(
+    'DROP FUNCTION ${DEADLINE_ROW_VALID};',
+    downDropTable,
+  );
+  const downDropFingerprint = downSource.indexOf(
+    'DROP FUNCTION ${DEADLINE_FINGERPRINT};',
+    downDropRowValid,
+  );
+
+  const testListStart = migrationIndex.indexOf('export const DATABASE_TEST_SCHEMA_MIGRATION_LIST:');
+  const productionListStart = migrationIndex.indexOf(
+    'export const DATABASE_MIGRATION_LIST:',
+    testListStart,
+  );
+  const exportStart = migrationIndex.indexOf(
+    "export type { DatabaseMigration } from './migration';",
+    productionListStart,
+  );
+  const testList =
+    testListStart >= 0 && productionListStart > testListStart
+      ? migrationIndex.slice(testListStart, productionListStart)
+      : '';
+  const productionList =
+    productionListStart >= 0 && exportStart > productionListStart
+      ? migrationIndex.slice(productionListStart, exportStart)
+      : '';
+  const importRegistration = `import {
+  enforceProviderPositionChainAnchorRecordDeadlineMigrationV0030,
+  enforceProviderPositionChainAnchorRecordDeadlineTestSchemaMigrationV0030,
+} from './0030-enforce-provider-position-chain-anchor-record-deadline.migration';`;
+  const exportRegistration = `export {
+  createProviderPositionChainAnchorRecordDeadlineMigration,
+  enforceProviderPositionChainAnchorRecordDeadlineMigrationV0030,
+  enforceProviderPositionChainAnchorRecordDeadlineTestSchemaMigrationV0030,
+} from './0030-enforce-provider-position-chain-anchor-record-deadline.migration';`;
+  const forbiddenRuntimeExposure =
+    /(?:provider_position_chain_anchor_record_deadlines|record_provider_position_chain_anchor_evidence_guarded|ProviderPositionChainAnchorRecordDeadline|0030-enforce-provider-position-chain-anchor-record-deadline)/u;
+
+  return (
+    importDeclarationCount === 4 &&
+    importSources.length === 4 &&
+    importSources[0] === 'node:crypto' &&
+    importSources[1] === './0028-suspend-generic-worker-balance-authority.migration' &&
+    importSources[2] === './0029-create-provider-position-chain-anchor-evidence.migration' &&
+    importSources[3] === './migration' &&
+    !forbiddenCapability.test(migration) &&
+    exactExecutableLineCount(
+      migration,
+      "const DEADLINE_TABLE = 'provider_position_chain_anchor_record_deadlines';",
+    ) === 1 &&
+    exactExecutableLineCount(
+      migration,
+      "'crypto-lending:provider-position-chain-anchor-record-deadline:v1;no-wallet-pii;append-only';",
+    ) === 1 &&
+    exactExecutableLineCount(
+      migration,
+      "'crypto-lending:provider-position-chain-anchor-record-deadline-binding:v1';",
+    ) === 1 &&
+    exactExecutableLineCount(
+      migration,
+      "const DEADLINE_USE = 'DORMANT_PROVIDER_POSITION_CHAIN_ANCHOR_RECORD_DEADLINE_ONLY';",
+    ) === 1 &&
+    fingerprintBody.includes('pg_catalog.sha256(pg_catalog.convert_to(') &&
+    fingerprintBody.includes("'${DEADLINE_FINGERPRINT_DOMAIN}',") &&
+    exactExecutableLineCount(fingerprintBody, 'requested_evidence_fingerprint_sha256,') === 1 &&
+    exactExecutableLineCount(
+      fingerprintBody,
+      "requested_producer_deadline_at AT TIME ZONE 'UTC',",
+    ) === 1 &&
+    exactExecutableLineCount(
+      fingerprintBody,
+      "requested_evidence_recorded_at AT TIME ZONE 'UTC',",
+    ) === 1 &&
+    rowValidBody.includes('AND requested_deadline_binding_version = 1') &&
+    rowValidBody.includes("AND requested_deadline_binding_use = '${DEADLINE_USE}'") &&
+    rowValidBody.includes('AND requested_may_authorize_financial_action = false') &&
+    rowValidBody.includes('AND requested_may_persist = false') &&
+    rowValidBody.includes('AND requested_evidence_recorded_at < requested_producer_deadline_at') &&
+    rowValidBody.includes('provider_position_chain_anchor_record_deadline_fingerprint(') &&
+    deadlineTable.length > 0 &&
+    expectedDeadlineTablePrefix.every((line, index) => deadlineTableLines[index] === line) &&
+    deadlineTableLines.filter((line) =>
+      /^[a-z0-9_]+ (?:text|smallint|boolean|timestamptz) NOT NULL,/u.test(line),
+    ).length === 8 &&
+    !/\b(?:account_id|wallet_id|address_(?:digest|ciphertext|iv|auth_tag))\b/u.test(
+      deadlineTable,
+    ) &&
+    deadlineTable.includes('provider_position_chain_anchor_deadline_valid_check CHECK (') &&
+    deadlineTable.includes('${DEADLINE_ROW_VALID_CALL} IS TRUE') &&
+    deadlineEvidenceForeignKey.includes(
+      'FOREIGN KEY (evidence_fingerprint_sha256)\n        REFERENCES ${EVIDENCE_TABLE} (evidence_fingerprint_sha256)\n        ON UPDATE NO ACTION ON DELETE NO ACTION,',
+    ) &&
+    !/\bDEFERRABLE\b/u.test(deadlineEvidenceForeignKey) &&
+    exclusiveLock >= 0 &&
+    existingEvidenceRefusal > exclusiveLock &&
+    deadlineTableStart > existingEvidenceRefusal &&
+    upSource.includes(
+      "'cannot install provider position chain anchor deadlines after evidence exists'",
+    ) &&
+    upSource.includes("USING ERRCODE = '55000';") &&
+    reverseForeignKey.includes(
+      'ADD CONSTRAINT provider_position_chain_anchor_evidence_deadline_fk\n      FOREIGN KEY (evidence_fingerprint_sha256)\n      REFERENCES ${DEADLINE_TABLE} (evidence_fingerprint_sha256)\n      ON UPDATE NO ACTION ON DELETE NO ACTION\n      DEFERRABLE INITIALLY DEFERRED;',
+    ) &&
+    occursExactlyOnce(
+      upSource,
+      'CREATE TRIGGER provider_position_chain_anchor_deadline_append_only_row\n      BEFORE UPDATE OR DELETE ON ${DEADLINE_TABLE}\n      FOR EACH ROW EXECUTE FUNCTION reject_provider_position_chain_anchor_history_mutation();',
+    ) &&
+    occursExactlyOnce(
+      upSource,
+      'CREATE TRIGGER provider_position_chain_anchor_deadline_append_only_truncate\n      BEFORE TRUNCATE ON ${DEADLINE_TABLE}\n      FOR EACH STATEMENT EXECUTE FUNCTION reject_provider_position_chain_anchor_history_mutation();',
+    ) &&
+    occursExactlyOnce(
+      upSource,
+      'ALTER TABLE ${DEADLINE_TABLE} ENABLE ALWAYS TRIGGER\n      provider_position_chain_anchor_deadline_append_only_row;',
+    ) &&
+    occursExactlyOnce(
+      upSource,
+      'ALTER TABLE ${DEADLINE_TABLE} ENABLE ALWAYS TRIGGER\n      provider_position_chain_anchor_deadline_append_only_truncate;',
+    ) &&
+    trimmedExecutableLines(guardedFunction).join('\n') === expectedGuardedFunction.join('\n') &&
+    exactExecutableLineCount(
+      guardedBody,
+      "IF pg_catalog.current_setting('transaction_isolation') <> 'read committed'",
+    ) === 1 &&
+    exactExecutableLineCount(
+      guardedBody,
+      "OR requested_operation NOT IN ('RECORD', 'RECONCILE_ONLY')",
+    ) === 1 &&
+    exactExecutableLineCount(
+      guardedBody,
+      "OR requested_producer_deadline_at > requested_assessed_at + interval '30 seconds'",
+    ) === 1 &&
+    exactExecutableLineCount(guardedBody, 'PERFORM pg_catalog.pg_advisory_xact_lock(') === 1 &&
+    exactExecutableLineCount(
+      guardedBody,
+      'pg_catalog.hashtextextended(requested_read_binding_fingerprint, 56029)',
+    ) === 1 &&
+    evidenceValidationStart >= 0 &&
+    evidenceValidationEnd > evidenceValidationStart &&
+    advisoryLockStart > evidenceValidationEnd &&
+    exactExecutableLineCount(guardedBody, 'database_started_at := pg_catalog.date_trunc(') === 1 &&
+    databaseStartedAt > advisoryLockStart &&
+    priorReadStart > databaseStartedAt &&
+    priorFound > priorReadStart &&
+    bindingReadStart > priorFound &&
+    bindingReviewStart > bindingReadStart &&
+    !/\bFOR\s+(?:NO\s+KEY\s+UPDATE|KEY\s+SHARE|SHARE|UPDATE)\b/iu.test(priorRead) &&
+    !/\bFOR\s+(?:NO\s+KEY\s+UPDATE|KEY\s+SHARE|SHARE|UPDATE)\b/iu.test(bindingRead) &&
+    exactPriorChecks.every((fragment) => occursExactlyOnce(compactGuardedBody, fragment)) &&
+    exactBindingChecks.every((fragment) => occursExactlyOnce(compactGuardedBody, fragment)) &&
+    reconcileOnlyReturn > bindingReviewStart &&
+    innerSubtransaction > reconcileOnlyReturn &&
+    oldWriter > innerSubtransaction &&
+    storedResultReview > oldWriter &&
+    storedDeadlineReview > storedResultReview &&
+    deadlineInsert > storedDeadlineReview &&
+    deadlineInsertEnd > deadlineInsert &&
+    databaseCompletedAt > deadlineInsertEnd &&
+    completionDeadlineReview > databaseCompletedAt &&
+    sentinelCatch > completionDeadlineReview &&
+    sentinelReturn > sentinelCatch &&
+    exactExecutableLineCount(
+      guardedBody,
+      'FROM record_provider_position_chain_anchor_evidence(',
+    ) === 1 &&
+    !/\b(?:LOOP|WHILE|FOREACH|EXECUTE)\b/u.test(guardedBody) &&
+    guardedBody.includes(
+      "IF requested_operation = 'RECONCILE_ONLY'\n        OR database_started_at >= requested_producer_deadline_at",
+    ) &&
+    exactExecutableLineCount(guardedBody, "IF stored_outcome <> 'RECORDED'") === 1 &&
+    exactExecutableLineCount(
+      guardedBody,
+      'OR stored_fingerprint IS DISTINCT FROM requested_fingerprint',
+    ) === 1 &&
+    exactExecutableLineCount(guardedBody, 'OR stored_recorded_at IS NULL') === 1 &&
+    exactExecutableLineCount(guardedBody, 'IF stored_recorded_at < requested_assessed_at') === 1 &&
+    exactExecutableLineCount(
+      guardedBody,
+      'OR stored_recorded_at >= requested_producer_deadline_at',
+    ) === 1 &&
+    trimmedExecutableLines(deadlineInsertSource).join('\n') === expectedDeadlineInsert.join('\n') &&
+    exactExecutableLineCount(guardedBody, 'database_completed_at := pg_catalog.date_trunc(') ===
+      1 &&
+    exactExecutableLineCount(guardedBody, 'IF database_completed_at < database_started_at') === 1 &&
+    exactExecutableLineCount(guardedBody, 'OR database_completed_at < stored_recorded_at') === 1 &&
+    exactExecutableLineCount(
+      guardedBody,
+      'OR database_completed_at >= requested_producer_deadline_at',
+    ) === 1 &&
+    exactExecutableLineCount(guardedBody, "USING ERRCODE = 'P0030';") === 2 &&
+    exactExecutableLineCount(guardedBody, "WHEN SQLSTATE 'P0030' THEN") === 1 &&
+    !/\bWHEN\s+OTHERS\b/iu.test(guardedBody) &&
+    exactExecutableLineCount(guardedBody, 'deadline_rejected := true;') === 1 &&
+    exactExecutableLineCount(
+      guardedBody,
+      "RETURN QUERY SELECT 'NOT_RECORDED'::text, NULL::text, NULL::timestamptz;",
+    ) === 2 &&
+    guardedBody.includes(
+      "RETURN QUERY SELECT 'DEADLINE_VIOLATION'::text,\n            prior.evidence_fingerprint_sha256, prior.recorded_at;",
+    ) &&
+    guardedBody.includes(
+      "RETURN QUERY SELECT 'IDEMPOTENT_REPLAY'::text,\n          prior.evidence_fingerprint_sha256, prior.recorded_at;",
+    ) &&
+    !/\bGRANT\b/iu.test(upSource) &&
+    exactExecutableLineCount(
+      upSource,
+      'const guardedRoles = `PUBLIC, ${api}, ${worker}, ${legacy}, ${balance}, ${migration}`;',
+    ) === 1 &&
+    exactExecutableLineCount(
+      upSource,
+      'REVOKE ALL PRIVILEGES ON TABLE ${DEADLINE_TABLE} FROM ${guardedRoles};',
+    ) === 1 &&
+    exactExecutableLineCount(
+      upSource,
+      'REVOKE ALL PRIVILEGES ON TYPE ${DEADLINE_TABLE} FROM ${guardedRoles};',
+    ) === 1 &&
+    exactExecutableLineCount(
+      upSource,
+      'REVOKE ALL ON FUNCTION ${DEADLINE_FINGERPRINT} FROM ${guardedRoles};',
+    ) === 1 &&
+    exactExecutableLineCount(
+      upSource,
+      'REVOKE ALL ON FUNCTION ${DEADLINE_ROW_VALID} FROM ${guardedRoles};',
+    ) === 1 &&
+    exactExecutableLineCount(
+      upSource,
+      'REVOKE ALL ON FUNCTION ${GUARDED_RECORD_EVIDENCE} FROM ${guardedRoles};`;',
+    ) === 1 &&
+    downLock >= 0 &&
+    downSource.includes(
+      'LOCK TABLE ${EVIDENCE_TABLE},\n      provider_position_chain_anchor_control_events,\n      ${DEADLINE_TABLE}\n      IN ACCESS EXCLUSIVE MODE;',
+    ) &&
+    downEvidenceUseCheck > downLock &&
+    downControlUseCheck > downEvidenceUseCheck &&
+    downDeadlineUseCheck > downControlUseCheck &&
+    downRefusal > downDeadlineUseCheck &&
+    exactExecutableLineCount(downSource, "USING ERRCODE = '55000';") === 1 &&
+    downDropGuardedFunction > downRefusal &&
+    downDropReverseForeignKey > downDropGuardedFunction &&
+    downDropTruncateTrigger > downDropReverseForeignKey &&
+    downDropRowTrigger > downDropTruncateTrigger &&
+    downDropTable > downDropRowTrigger &&
+    downDropRowValid > downDropTable &&
+    downDropFingerprint > downDropRowValid &&
+    !/\bGRANT\b/iu.test(downSource) &&
+    exactExecutableLineCount(
+      verifierSource,
+      'const previous = createProviderPositionChainAnchorEvidenceMigration(names, {',
+    ) === 1 &&
+    exactExecutableLineCount(
+      verifierSource,
+      "if (!previous.verifySql) throw new Error('Migration 0029 must expose verification SQL');",
+    ) === 1 &&
+    exactExecutableLineCount(verifierSource, 'const prior = replaceExactlyOnce(') === 1 &&
+    exactExecutableLineCount(verifierSource, 'previous.verifySql,') === 1 &&
+    verifierSource.includes("priorConstraintCount.replace('count(*) = 6', 'count(*) = 7')") &&
+    exactExecutableLineCount(
+      verifierSource,
+      'const deadlineFingerprintSha256 = sourceSha256(DEADLINE_FINGERPRINT_BODY);',
+    ) === 1 &&
+    exactExecutableLineCount(
+      verifierSource,
+      'const deadlineRowValidSha256 = sourceSha256(DEADLINE_ROW_VALID_BODY);',
+    ) === 1 &&
+    exactExecutableLineCount(
+      verifierSource,
+      'const guardedRecordSha256 = sourceSha256(GUARDED_RECORD_EVIDENCE_BODY);',
+    ) === 1 &&
+    verifierSource.includes('SELECT pg_catalog.count(*) = 8') &&
+    verifierSource.includes(
+      "AND guarded_attribute.attname ~ '(account|wallet|address|cipher|digest)'",
+    ) &&
+    verifierSource.includes('SELECT pg_catalog.count(*) = 5') &&
+    verifierSource.includes("constraint_state.confupdtype = 'a'") &&
+    verifierSource.includes("constraint_state.confdeltype = 'a'") &&
+    verifierSource.includes('constraint_state.condeferrable') &&
+    verifierSource.includes('constraint_state.condeferred') &&
+    verifierSource.includes('AND procedure.pronargs = 25') &&
+    verifierSource.includes(
+      "function_owner.rolname = ${cumulative ? owner : 'function_owner.rolname'}",
+    ) &&
+    verifierSource.includes("trigger.tgenabled = 'A'") &&
+    verifierSource.includes("trigger.tgfoid = pg_catalog.to_regprocedure('${HISTORY_GUARD}')") &&
+    verifierSource.includes(
+      "`NOT pg_catalog.has_table_privilege(${role}, '${DEADLINE_TABLE}', 'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')`",
+    ) &&
+    verifierSource.includes(
+      "`NOT pg_catalog.has_type_privilege(${role}, '${DEADLINE_TABLE}', 'USAGE')`",
+    ) &&
+    verifierSource.includes(
+      '[DEADLINE_FINGERPRINT, DEADLINE_ROW_VALID, GUARDED_RECORD_EVIDENCE]',
+    ) &&
+    verifierSource.includes(
+      "`NOT pg_catalog.has_function_privilege(${role}, '${functionIdentity}', 'EXECUTE')`",
+    ) &&
+    exactExecutableLineCount(migration, "id: '0030',") === 1 &&
+    exactExecutableLineCount(migration, "supersedesVerificationOf: ['0029'],") === 1 &&
+    migrationIndex.split(importRegistration).length - 1 === 1 &&
+    migrationIndex.split(exportRegistration).length - 1 === 1 &&
+    exactExecutableLineCount(
+      testList,
+      'enforceProviderPositionChainAnchorRecordDeadlineTestSchemaMigrationV0030,',
+    ) === 1 &&
+    !testList.includes('enforceProviderPositionChainAnchorRecordDeadlineMigrationV0030,') &&
+    exactExecutableLineCount(
+      productionList,
+      'enforceProviderPositionChainAnchorRecordDeadlineMigrationV0030,',
+    ) === 1 &&
+    !productionList.includes(
+      'enforceProviderPositionChainAnchorRecordDeadlineTestSchemaMigrationV0030,',
+    ) &&
+    [runtimeCompositionSource, moduleSource, indexSource, controllerSource].every(
+      (source) => !forbiddenRuntimeExposure.test(source),
+    )
+  );
+}
+
 function hasDormantProviderPositionChainAnchorEvidenceProducerContract(
   sourcePortSource: string,
   producerSource: string,
@@ -3682,6 +4336,8 @@ function hasDormantProviderPositionReadBoundaryContract(
     sources.providerPositionTrustedChainAssessmentAssemblerSource.replace(/\r\n/gu, '\n');
   const chainAnchorEvidenceMigration =
     sources.providerPositionChainAnchorEvidenceMigrationSource.replace(/\r\n/gu, '\n');
+  const chainAnchorRecordDeadlineMigration =
+    sources.providerPositionChainAnchorRecordDeadlineMigrationSource.replace(/\r\n/gu, '\n');
   const migrationIndex = sources.providerPositionMigrationIndexSource.replace(/\r\n/gu, '\n');
   const coordinator = sources.providerPositionAdmissionCoordinatorSource.replace(/\r\n/gu, '\n');
   const deadlineRunner = sources.providerPositionDeadlineRunnerSource.replace(/\r\n/gu, '\n');
@@ -4578,6 +5234,14 @@ function hasDormantProviderPositionReadBoundaryContract(
     hasDormantProviderPositionChainAnchorEvidenceMigrationContract(
       chainAnchorEvidenceMigration,
       migrationIndex,
+    ) &&
+    hasDormantProviderPositionChainAnchorRecordDeadlineMigrationContract(
+      chainAnchorRecordDeadlineMigration,
+      migrationIndex,
+      runtimeComposition,
+      moduleSource,
+      indexSource,
+      controller,
     ) &&
     hasDormantProviderPositionChainAnchorEvidenceProducerContract(
       chainAnchorEvidenceSourcePort,
@@ -11390,6 +12054,13 @@ export function loadRepositoryProductionPreflightInput(
         resolve(
           repositoryRoot,
           'apps/api/src/infrastructure/database/migrations/0029-create-provider-position-chain-anchor-evidence.migration.ts',
+        ),
+        'utf8',
+      ),
+      providerPositionChainAnchorRecordDeadlineMigrationSource: readFileSync(
+        resolve(
+          repositoryRoot,
+          'apps/api/src/infrastructure/database/migrations/0030-enforce-provider-position-chain-anchor-record-deadline.migration.ts',
         ),
         'utf8',
       ),

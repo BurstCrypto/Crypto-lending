@@ -1,9 +1,12 @@
 # Dormant provider-position admission and assembly boundary
 
 Status: dormant, unregistered, read-only, and non-persistable from the
-application graph. Migration `0029` defines dormant evidence persistence, but no
-application writer or reader adapter is composed. An exact recorder port and
-concrete PostgreSQL recorder exist only as unregistered, ungranted components.
+application graph. Migration `0029` defines dormant evidence persistence, and
+migration `0030` adds a dormant deadline-bound record/reconcile boundary, but no
+evidence writer is composed and neither the private reader nor dormant recorder
+is registered or runtime-reachable. The exact unregistered, ungranted recorder
+still calls `0029` directly and cannot commit once `0030`'s reverse foreign key
+is installed.
 
 ## What the coordinator establishes
 
@@ -132,6 +135,29 @@ evaluation-to-deadline span at 30 seconds and rechecks the deadline, approval,
 current-head, and finality freshness against database time after wallet and
 evidence locks.
 
+Migration `0030` refuses installation if any `0029` evidence already exists,
+holding an access-exclusive lock so the legacy owner writer cannot race that
+check. Its append-only, wallet-free sidecar binds each evidence fingerprint to
+the original canonical producer deadline, exact database `recorded_at`, fixed
+version/use and false persistence/financial-authority fields, and a
+domain-separated SHA-256 digest. The sidecar references the evidence row, and a
+reverse `DEFERRABLE INITIALLY DEFERRED` foreign key requires every new evidence
+row to reference the sidecar before commit. A direct legacy `0029` record call
+therefore cannot commit an unbound row.
+
+The new owner-only guarded function requires `READ COMMITTED` and serializes
+both modes on the same read-binding advisory transaction lock. `RECORD` resolves
+an exact existing evidence/deadline pair before considering a write, samples
+canonical database time immediately after acquiring the lock, and does not call
+the old writer when already late. Its single old-writer call and sidecar insert
+share a subtransaction; a late or regressing post-call database clock rolls both
+back. `RECONCILE_ONLY` acquires the same lock but performs reads only and never
+calls a writer. It returns `IDEMPOTENT_REPLAY` only for exact evidence with its
+matching original deadline binding, `NOT_RECORDED` for absence, and
+`DEADLINE_VIOLATION` for a missing, invalid, mismatched, or late deadline
+binding; conflicting evidence raises and fails closed. No runtime principal
+receives a grant on the new table or functions.
+
 Production still needs reviewed live implementations for both members of each
 approved source pair, an owner-authorized recorder workload, principal,
 credential, and grant, populated evidence, production registration, and deployed
@@ -161,8 +187,11 @@ source or writer is composed, no source pair is approved, and no populated
 evidence rows, registered production composition, runtime activation, deployed
 binding, or live chain evidence exists, so neither
 the PostgreSQL reader nor `admitAndAssemble` is a live application path. All three
-provider-position registration blockers remain `MISSING`, and the live-provider
-count remains zero.
+provider-position registration blockers remain
+`PROVIDER_POSITION_READER_FEATURE_REGISTRATION_MISSING`,
+`PROVIDER_POSITION_TRUSTED_ASSESSMENT_FEATURE_REGISTRATION_MISSING`, and
+`PROVIDER_POSITION_DEADLINE_RUNNER_FEATURE_REGISTRATION_MISSING`, and the
+live-provider count remains zero.
 
 The offline production preflight now byte-pins this coordinator, assembly port,
 durable-anchor reader port, concrete PostgreSQL durable reader, chain-anchor
@@ -170,8 +199,8 @@ evidence source port, dormant two-source evidence producer, exact recorder port,
 concrete PostgreSQL recorder, dormant trusted-chain-assessment assembler, exact
 mainnet launch-network policy, concrete deadline runner, complete wallet-roster
 cancellation chain, shared PostgreSQL cancellation service, runtime-budget
-resource, private dormant composition, migration `0029`, and migration index
-with a selected thirty-one-file
+resource, private dormant composition, migrations `0029` and `0030`, and the
+migration index with a selected thirty-two-file
 reader/domain/infrastructure/database/module/barrel/controller critical-source
 slice.
 Its local check rejects trust, timing, source-method substitution, active-controller
@@ -214,12 +243,17 @@ registration, feature export, runtime composition, database credential, or
 grant. The producer's 30-second limit remains tied to its private `evaluatedAt`;
 the recorder does not substitute an incorrect `deadlineAt - observedAt` bound.
 
-The database record function does not receive that producer deadline. Rejecting
-a late returned database timestamp cannot undo a committed record, and a rejected
-query or interrupted connection can leave an unknown commit outcome. Its
-idempotent replay behavior is not an automatic retry or reconciliation system.
-Production activation still requires database-atomic producer-deadline
-enforcement and an explicit durable unknown-outcome reconciliation workflow.
+The current recorder still invokes migration `0029`'s 23-argument record
+function. It does not call `0030`'s deadline-bound `RECORD`/`RECONCILE_ONLY`
+function and, because the reverse foreign key rejects an unbound insert, cannot
+commit after `0030` is applied. It also has no durable one-shot pre-dispatch
+intent or restart recovery. Migration `0030` atomically rolls back its evidence
+and sidecar when its database deadline checks fail, but it cannot guarantee that
+the caller receives physical commit acknowledgement. A rejected query or broken
+connection can therefore still leave an unknown outcome that must be resolved
+without dispatching `RECORD` again. A versioned `0031` recorder adaptation,
+durable intent state, reconciliation-only recovery, and restart processor remain
+production blockers.
 
 Agreement on the two sources' finalized heads does not prove that the selected
 candidate anchor itself is finalized. Migration `0029` and this producer keep
@@ -231,8 +265,11 @@ authority may consume it.
 The checked-in mainnet source-pair registry remains empty and `NOT_APPROVED`.
 No concrete source, endpoint, owner-authorized recorder
 workload/principal/credential/grant, module provider, barrel export, composition
-dependency, deployment, or runtime activation is added, so all three
-registration blockers remain `MISSING` and the live-provider count remains zero.
+dependency, deployment, or runtime activation is added, so all three registration
+blockers remain `PROVIDER_POSITION_READER_FEATURE_REGISTRATION_MISSING`,
+`PROVIDER_POSITION_TRUSTED_ASSESSMENT_FEATURE_REGISTRATION_MISSING`, and
+`PROVIDER_POSITION_DEADLINE_RUNNER_FEATURE_REGISTRATION_MISSING`, and the
+live-provider count remains zero.
 
 That production change must also provide:
 
@@ -243,8 +280,9 @@ That production change must also provide:
 - durable continuity floors rather than accepting an upstream service's unsupported history claim;
 - disagreement quarantine and operator alerting;
 - retention/replay rules for source observation IDs;
-- database-atomic producer-deadline enforcement plus durable reconciliation for
-  an unknown record outcome; and
+- a `0031`-compatible recorder with durable one-shot intent, reconciliation-only
+  unknown-outcome and restart recovery, and reviewed physical
+  commit-acknowledgement handling; and
 - explicit persistence and display approval after live conformance tests.
 
 Until those gates are satisfied, the coordinator and its candidate must remain unregistered and must not be used to imply an available balance, recommendation, or permission to move funds.

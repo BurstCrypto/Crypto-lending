@@ -485,6 +485,13 @@ const PROVIDER_POSITION_READ_ARTIFACTS = Object.freeze({
     ),
     'utf8',
   ),
+  providerPositionChainAnchorRecordDeadlineMigrationSource: readFileSync(
+    resolve(
+      __dirname,
+      '../apps/api/src/infrastructure/database/migrations/0030-enforce-provider-position-chain-anchor-record-deadline.migration.ts',
+    ),
+    'utf8',
+  ),
   providerPositionMigrationIndexSource: readFileSync(
     resolve(__dirname, '../apps/api/src/infrastructure/database/migrations/index.ts'),
     'utf8',
@@ -1147,7 +1154,7 @@ function mutateProviderPositionReadArtifact(
 }
 
 test('provider-position read inspection pins the exact dormant critical source slice', () => {
-  assert.equal(Object.keys(PROVIDER_POSITION_READ_ARTIFACTS).length, 31);
+  assert.equal(Object.keys(PROVIDER_POSITION_READ_ARTIFACTS).length, 32);
   const inspected = inspectProviderPositionReadBoundaryArtifacts(PROVIDER_POSITION_READ_ARTIFACTS);
   assert.deepEqual(inspected, EXPECTED_DORMANT_PROVIDER_POSITION_READ_BOUNDARY);
   assert.equal(Object.isFrozen(inspected), true);
@@ -1170,8 +1177,12 @@ test('provider-position read inspection pins the exact dormant critical source s
 
 test('provider-position read semantic gate contains no disabled-check bypass', () => {
   const source = readFileSync(PREFLIGHT_SCRIPT_PATH, 'utf8');
+  const recordDeadlineMigrationStart = source.indexOf(
+    'function hasDormantProviderPositionChainAnchorRecordDeadlineMigrationContract(',
+  );
   const producerStart = source.indexOf(
     'function hasDormantProviderPositionChainAnchorEvidenceProducerContract(',
+    recordDeadlineMigrationStart,
   );
   const recorderStart = source.indexOf(
     'function hasDormantProviderPositionChainAnchorEvidenceRecorderContract(',
@@ -1180,10 +1191,14 @@ test('provider-position read semantic gate contains no disabled-check bypass', (
   const start = source.indexOf('function hasDormantProviderPositionReadBoundaryContract(');
   const end = source.indexOf('\nfunction ', start + 1);
   assert.ok(
-    producerStart >= 0 && recorderStart > producerStart && start > recorderStart && end > start,
+    recordDeadlineMigrationStart >= 0 &&
+      producerStart > recordDeadlineMigrationStart &&
+      recorderStart > producerStart &&
+      start > recorderStart &&
+      end > start,
   );
   const semanticGateSource = source
-    .slice(producerStart, end)
+    .slice(recordDeadlineMigrationStart, end)
     .replaceAll('!== true ||', '!== true OR');
   assert.doesNotMatch(
     semanticGateSource,
@@ -1969,6 +1984,221 @@ test('provider-position read inspection rejects dormant durable evidence and mig
     }),
     INVALID_PROVIDER_POSITION_READ_BOUNDARY,
   );
+});
+
+test('provider-position read inspection rejects deadline-bound evidence migration drift', () => {
+  const mutations: readonly (readonly [
+    keyof ProviderPositionReadBoundaryArtifactSources,
+    string,
+    string,
+  ])[] = [
+    ['providerPositionChainAnchorRecordDeadlineMigrationSource', "id: '0030',", "id: '0031',"],
+    [
+      'providerPositionChainAnchorRecordDeadlineMigrationSource',
+      "supersedesVerificationOf: ['0029'],",
+      "supersedesVerificationOf: ['0028'],",
+    ],
+    [
+      'providerPositionChainAnchorRecordDeadlineMigrationSource',
+      "'crypto-lending:provider-position-chain-anchor-record-deadline-binding:v1';",
+      "'crypto-lending:provider-position-chain-anchor-record-deadline-binding:v2';",
+    ],
+    [
+      'providerPositionChainAnchorRecordDeadlineMigrationSource',
+      'AND requested_evidence_recorded_at < requested_producer_deadline_at',
+      'AND requested_evidence_recorded_at <= requested_producer_deadline_at',
+    ],
+    [
+      'providerPositionChainAnchorRecordDeadlineMigrationSource',
+      'evidence_recorded_at timestamptz NOT NULL,',
+      'evidence_recorded_at timestamptz NOT NULL,\n      account_id uuid NOT NULL,',
+    ],
+    [
+      'providerPositionChainAnchorRecordDeadlineMigrationSource',
+      '        ${DEADLINE_ROW_VALID_CALL} IS TRUE\n',
+      '        true\n',
+    ],
+    [
+      'providerPositionChainAnchorRecordDeadlineMigrationSource',
+      'LOCK TABLE ${EVIDENCE_TABLE} IN ACCESS EXCLUSIVE MODE;',
+      'LOCK TABLE ${EVIDENCE_TABLE} IN SHARE MODE;',
+    ],
+    [
+      'providerPositionChainAnchorRecordDeadlineMigrationSource',
+      'IF EXISTS (SELECT 1 FROM ${EVIDENCE_TABLE}) THEN',
+      'IF false THEN',
+    ],
+    [
+      'providerPositionChainAnchorRecordDeadlineMigrationSource',
+      'REFERENCES ${EVIDENCE_TABLE} (evidence_fingerprint_sha256)\n        ON UPDATE NO ACTION ON DELETE NO ACTION,',
+      'REFERENCES ${EVIDENCE_TABLE} (evidence_fingerprint_sha256)\n        ON UPDATE NO ACTION ON DELETE CASCADE,',
+    ],
+    [
+      'providerPositionChainAnchorRecordDeadlineMigrationSource',
+      'REFERENCES ${DEADLINE_TABLE} (evidence_fingerprint_sha256)\n      ON UPDATE NO ACTION ON DELETE NO ACTION\n      DEFERRABLE INITIALLY DEFERRED;',
+      'REFERENCES ${DEADLINE_TABLE} (evidence_fingerprint_sha256)\n      ON UPDATE CASCADE ON DELETE NO ACTION\n      NOT DEFERRABLE;',
+    ],
+    [
+      'providerPositionChainAnchorRecordDeadlineMigrationSource',
+      'BEFORE UPDATE OR DELETE ON ${DEADLINE_TABLE}',
+      'BEFORE UPDATE ON ${DEADLINE_TABLE}',
+    ],
+    [
+      'providerPositionChainAnchorRecordDeadlineMigrationSource',
+      'ALTER TABLE ${DEADLINE_TABLE} ENABLE ALWAYS TRIGGER\n      provider_position_chain_anchor_deadline_append_only_truncate;',
+      'ALTER TABLE ${DEADLINE_TABLE} ENABLE TRIGGER\n      provider_position_chain_anchor_deadline_append_only_truncate;',
+    ],
+    [
+      'providerPositionChainAnchorRecordDeadlineMigrationSource',
+      'requested_operation text',
+      'requested_operation boolean',
+    ],
+    [
+      'providerPositionChainAnchorRecordDeadlineMigrationSource',
+      ') LANGUAGE plpgsql SECURITY DEFINER VOLATILE STRICT PARALLEL UNSAFE',
+      ') LANGUAGE plpgsql SECURITY INVOKER VOLATILE STRICT PARALLEL UNSAFE',
+    ],
+    [
+      'providerPositionChainAnchorRecordDeadlineMigrationSource',
+      "IF pg_catalog.current_setting('transaction_isolation') <> 'read committed'",
+      'IF false',
+    ],
+    [
+      'providerPositionChainAnchorRecordDeadlineMigrationSource',
+      "OR requested_operation NOT IN ('RECORD', 'RECONCILE_ONLY')",
+      "OR requested_operation NOT IN ('RECORD')",
+    ],
+    [
+      'providerPositionChainAnchorRecordDeadlineMigrationSource',
+      "OR requested_producer_deadline_at > requested_assessed_at + interval '30 seconds'",
+      "OR requested_producer_deadline_at > requested_assessed_at + interval '300 seconds'",
+    ],
+    [
+      'providerPositionChainAnchorRecordDeadlineMigrationSource',
+      'pg_catalog.hashtextextended(requested_read_binding_fingerprint, 56029)',
+      'pg_catalog.hashtextextended(requested_fingerprint, 56029)',
+    ],
+    [
+      'providerPositionChainAnchorRecordDeadlineMigrationSource',
+      'prior.lineage_proof_sha256 IS DISTINCT FROM requested_lineage_proof_sha256',
+      'prior.lineage_proof_sha256 IS DISTINCT FROM requested_identity_proof_sha256',
+    ],
+    [
+      'providerPositionChainAnchorRecordDeadlineMigrationSource',
+      'deadline_binding.producer_deadline_at\n            IS DISTINCT FROM requested_producer_deadline_at',
+      'deadline_binding.producer_deadline_at\n            IS DISTINCT FROM prior.recorded_at',
+    ],
+    [
+      'providerPositionChainAnchorRecordDeadlineMigrationSource',
+      "IF requested_operation = 'RECONCILE_ONLY'",
+      'IF false',
+    ],
+    [
+      'providerPositionChainAnchorRecordDeadlineMigrationSource',
+      'FROM record_provider_position_chain_anchor_evidence(',
+      'FROM record_provider_position_chain_anchor_evidence_guarded(',
+    ],
+    [
+      'providerPositionChainAnchorRecordDeadlineMigrationSource',
+      'OR stored_recorded_at >= requested_producer_deadline_at',
+      'OR stored_recorded_at > requested_producer_deadline_at',
+    ],
+    [
+      'providerPositionChainAnchorRecordDeadlineMigrationSource',
+      '          false,\n          false,\n          requested_producer_deadline_at,',
+      '          true,\n          false,\n          requested_producer_deadline_at,',
+    ],
+    [
+      'providerPositionChainAnchorRecordDeadlineMigrationSource',
+      'IF database_completed_at < database_started_at',
+      'IF false',
+    ],
+    [
+      'providerPositionChainAnchorRecordDeadlineMigrationSource',
+      'OR database_completed_at < stored_recorded_at',
+      'OR false',
+    ],
+    [
+      'providerPositionChainAnchorRecordDeadlineMigrationSource',
+      'OR database_completed_at >= requested_producer_deadline_at',
+      'OR database_completed_at > requested_producer_deadline_at',
+    ],
+    [
+      'providerPositionChainAnchorRecordDeadlineMigrationSource',
+      "WHEN SQLSTATE 'P0030' THEN",
+      'WHEN OTHERS THEN',
+    ],
+    [
+      'providerPositionChainAnchorRecordDeadlineMigrationSource',
+      'REVOKE ALL ON FUNCTION ${GUARDED_RECORD_EVIDENCE} FROM ${guardedRoles};`;',
+      'GRANT EXECUTE ON FUNCTION ${GUARDED_RECORD_EVIDENCE} TO ${api};`;',
+    ],
+    [
+      'providerPositionChainAnchorRecordDeadlineMigrationSource',
+      "priorConstraintCount.replace('count(*) = 6', 'count(*) = 7')",
+      "priorConstraintCount.replace('count(*) = 6', 'count(*) = 6')",
+    ],
+    [
+      'providerPositionChainAnchorRecordDeadlineMigrationSource',
+      'AND procedure.pronargs = 25',
+      'AND procedure.pronargs = 24',
+    ],
+    [
+      'providerPositionChainAnchorRecordDeadlineMigrationSource',
+      "trigger.tgenabled = 'A'",
+      "trigger.tgenabled = 'O'",
+    ],
+    [
+      'providerPositionMigrationIndexSource',
+      '  enforceProviderPositionChainAnchorRecordDeadlineTestSchemaMigrationV0030,\n]);',
+      '  enforceProviderPositionChainAnchorRecordDeadlineMigrationV0030,\n]);',
+    ],
+    [
+      'providerPositionMigrationIndexSource',
+      '  createProviderPositionChainAnchorEvidenceMigrationV0029,\n  enforceProviderPositionChainAnchorRecordDeadlineMigrationV0030,\n]);',
+      '  createProviderPositionChainAnchorEvidenceMigrationV0029,\n  enforceProviderPositionChainAnchorRecordDeadlineTestSchemaMigrationV0030,\n]);',
+    ],
+    [
+      'providerPositionMigrationIndexSource',
+      "import {\n  enforceProviderPositionChainAnchorRecordDeadlineMigrationV0030,\n  enforceProviderPositionChainAnchorRecordDeadlineTestSchemaMigrationV0030,\n} from './0030-enforce-provider-position-chain-anchor-record-deadline.migration';",
+      "import {\n  enforceProviderPositionChainAnchorRecordDeadlineMigrationV0030,\n  enforceProviderPositionChainAnchorRecordDeadlineTestSchemaMigrationV0030,\n} from './0030-enforce-provider-position-chain-anchor-record-deadline.disabled';",
+    ],
+    [
+      'providerPositionMigrationIndexSource',
+      "export {\n  createProviderPositionChainAnchorRecordDeadlineMigration,\n  enforceProviderPositionChainAnchorRecordDeadlineMigrationV0030,\n  enforceProviderPositionChainAnchorRecordDeadlineTestSchemaMigrationV0030,\n} from './0030-enforce-provider-position-chain-anchor-record-deadline.migration';",
+      "export {\n  createProviderPositionChainAnchorRecordDeadlineMigration,\n  enforceProviderPositionChainAnchorRecordDeadlineMigrationV0030,\n  enforceProviderPositionChainAnchorRecordDeadlineTestSchemaMigrationV0030,\n} from './0030-enforce-provider-position-chain-anchor-record-deadline.disabled';",
+    ],
+    [
+      'providerPositionRuntimeCompositionSource',
+      'const DEPENDENCY_KEYS = Object.freeze([',
+      'type ProviderPositionChainAnchorRecordDeadline = unknown;\nconst DEPENDENCY_KEYS = Object.freeze([',
+    ],
+    [
+      'mainnetPlatformsModuleSource',
+      'providers: [MainnetPlatformDirectoryService, MainnetPlatformsPrivacyInterceptor],',
+      'providers: [MainnetPlatformDirectoryService, ProviderPositionChainAnchorRecordDeadline],',
+    ],
+    [
+      'mainnetPlatformsIndexSource',
+      "export { MainnetPlatformDirectoryService } from './application/mainnet-platform-directory.service';",
+      "export { ProviderPositionChainAnchorRecordDeadline } from './infrastructure/database/migrations/0030-enforce-provider-position-chain-anchor-record-deadline.migration';",
+    ],
+    [
+      'mainnetPlatformsControllerSource',
+      'constructor(private readonly directory: MainnetPlatformDirectoryService) {}',
+      'constructor(private readonly deadline: ProviderPositionChainAnchorRecordDeadline) {}',
+    ],
+  ];
+
+  for (const [key, approved, rejected] of mutations) {
+    assert.deepEqual(
+      inspectProviderPositionReadBoundaryArtifacts(
+        mutateProviderPositionReadArtifact(key, approved, rejected),
+      ),
+      INVALID_PROVIDER_POSITION_READ_BOUNDARY,
+      `${key}: ${approved}`,
+    );
+  }
 });
 
 test('provider-position read blockers participate in both readiness calculations', () => {
@@ -2801,7 +3031,10 @@ test('provider-position read artifact shape and private brand fail closed', () =
       providerPositionReaderPortSource: 'x'.repeat(128 * 1024 + 1),
     },
     Object.fromEntries(
-      Object.keys(PROVIDER_POSITION_READ_ARTIFACTS).map((key) => [key, 'x'.repeat(32 * 1024)]),
+      Object.keys(PROVIDER_POSITION_READ_ARTIFACTS).map((key) => [
+        key,
+        'x'.repeat(Math.floor((704 * 1024) / 32) + 1),
+      ]),
     ),
     accessor,
     withSymbol,

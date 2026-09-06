@@ -191,8 +191,9 @@ shared PostgreSQL cancellation service, dormant runtime-budget resource,
 private dormant runtime composition, infrastructure configuration loader,
 runtime PostgreSQL pool factory, coverage/observation/assessment/policy domains,
 exact Ethereum/Solana mainnet launch-network policy, migration `0029`, the
-migration index, feature module, feature barrel, and HTTP controller as one
-selected thirty-one-file critical-source slice. Within that
+deadline-bound migration `0030`, the migration index, feature module, feature
+barrel, and HTTP controller as one selected thirty-two-file critical-source
+slice. Within that
 slice, the local semantic inspection requires an exact account/correlation
 reader request with no caller-supplied evaluation time and an exact frozen
 result envelope containing the server-authored parser time and covered-snapshot
@@ -287,6 +288,11 @@ in a `WeakMap`; all failures use one frozen, cause-free error. There is no gener
 query fallback, retry loop, network/provider capability, registration, feature
 export, runtime composition, credential, or database grant.
 
+This recorder still sends migration `0029`'s 23-argument call. It does not use
+migration `0030`'s deadline-bound `RECORD`/`RECONCILE_ONLY` function and cannot
+commit after `0030` installs the reverse evidence-to-deadline foreign key. That
+is an intentional fail-closed incompatibility, not a production recorder path.
+
 The recorder deliberately does not claim that `deadlineAt - observedAt` is at
 most 30 seconds. That bound belongs to the producer's private `evaluatedAt`, which
 is not present in the recorder request, and is preserved by authentic pre- and
@@ -321,14 +327,36 @@ Evidence-recording and control functions have no runtime grants and remain
 schema-owner-controlled. The cumulative verifier preserves migration `0028`'s
 generic-worker resolver and checkpoint suspension.
 
-Migration `0029`'s record function does not receive or atomically enforce the
-producer deadline. If its database timestamp is late, the recorder rejects the
-receipt but cannot roll back an already committed write. A query rejection or
-connection interruption can also leave an unknown commit outcome. Idempotent
-replay at the function boundary is useful, but this adapter performs no automatic
-retry and provides no durable reconciliation. Production activation therefore
-still requires database-atomic producer-deadline enforcement and an explicit,
-reviewed unknown-outcome reconciliation workflow.
+Migration `0030` refuses installation over existing `0029` evidence while an
+access-exclusive evidence-table lock prevents the legacy owner writer from
+racing the empty-history check. It adds an append-only, wallet-free sidecar with
+fixed version/use and false persistence/financial-authority fields. Each row
+durably binds the evidence fingerprint to its original canonical producer
+deadline and exact database `recorded_at` through a domain-separated SHA-256
+digest. The sidecar references the evidence row, and a reverse `DEFERRABLE
+INITIALLY DEFERRED` foreign key makes a direct legacy `0029` writer call fail at
+commit unless the matching sidecar exists.
+
+The owner-only guarded function requires `READ COMMITTED` and uses the same
+read-binding advisory transaction lock for `RECORD` and `RECONCILE_ONLY`.
+`RECORD` checks for an exact existing evidence/deadline binding first, samples
+canonical database time immediately after the lock, and never calls the old
+writer if already late. Its one writer call and sidecar insert run in a
+subtransaction; a late or regressing post-call database clock rolls both back.
+`RECONCILE_ONLY` takes the same lock but performs reads only and never invokes
+the old writer. It returns `IDEMPOTENT_REPLAY` only for exact evidence with its
+matching original deadline binding, `NOT_RECORDED` for absence, and
+`DEADLINE_VIOLATION` for a missing, invalid, mismatched, or late deadline
+binding; conflicting evidence raises and fails closed. Migration `0030` adds no
+runtime grants, registration, deployment, or live evidence.
+
+Physical commit acknowledgement is still not guaranteed: a rejected query or
+interrupted connection can leave the caller uncertain whether the transaction
+committed. The current recorder neither calls the `0030` function nor stores a
+durable one-shot intent before its first dispatch, and it cannot recover a
+dispatched operation after restart. A versioned migration `0031` recorder
+adaptation with durable intent, reconciliation-only recovery, and restart
+processing remains an activation blocker.
 
 The private dormant composition accepts no raw trust dependency. It constructs
 the concrete PostgreSQL reader from its owned `PostgresService`, constructs the
