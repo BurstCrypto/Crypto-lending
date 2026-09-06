@@ -443,6 +443,13 @@ const PROVIDER_POSITION_READ_ARTIFACTS = Object.freeze({
     ),
     'utf8',
   ),
+  providerPositionRuntimeCompositionSource: readFileSync(
+    resolve(
+      __dirname,
+      '../apps/api/src/mainnet-platforms/infrastructure/provider-position-admission-runtime.composition.ts',
+    ),
+    'utf8',
+  ),
   providerPositionInfrastructureConfigSource: readFileSync(
     resolve(__dirname, '../apps/api/src/infrastructure/config/infrastructure.config.ts'),
     'utf8',
@@ -1062,7 +1069,7 @@ function mutateProviderPositionReadArtifact(
 }
 
 test('provider-position read inspection pins the exact dormant critical source slice', () => {
-  assert.equal(Object.keys(PROVIDER_POSITION_READ_ARTIFACTS).length, 20);
+  assert.equal(Object.keys(PROVIDER_POSITION_READ_ARTIFACTS).length, 21);
   const inspected = inspectProviderPositionReadBoundaryArtifacts(PROVIDER_POSITION_READ_ARTIFACTS);
   assert.deepEqual(inspected, EXPECTED_DORMANT_PROVIDER_POSITION_READ_BOUNDARY);
   assert.equal(Object.isFrozen(inspected), true);
@@ -1159,6 +1166,56 @@ test('provider-position read inspection rejects trust, runtime bounds, coverage,
       'providerPositionAdmissionCoordinatorSource',
       'evaluatedAt: started.timestamp,\n                correlationId: request.correlationId,\n                signal: activeController.signal,',
       'evaluatedAt: started.timestamp,\n                correlationId: request.correlationId,',
+    ],
+    [
+      'providerPositionAdmissionCoordinatorSource',
+      'isProxy(sourceIdentity)',
+      'false',
+    ],
+    [
+      'providerPositionAdmissionCoordinatorSource',
+      "const readTarget = stableDataMember(sourceReceiver, 'readTarget');",
+      'const readTarget = (sourceReceiver as ProviderPositionAdmissionSourcePort).readTarget;',
+    ],
+    [
+      'providerPositionAdmissionCoordinatorSource',
+      "if (typeof readTarget !== 'function' || isProxy(readTarget)) {",
+      "if (typeof readTarget !== 'function') {",
+    ],
+    [
+      'providerPositionAdmissionCoordinatorSource',
+      "if (isProxy(current)) return fail('INVALID_CONFIGURATION');",
+      'void current;',
+    ],
+    [
+      'providerPositionAdmissionCoordinatorSource',
+      'Reflect.apply(readTarget, sourceReceiver, [request]) as Promise<unknown>',
+      '(sourceReceiver as ProviderPositionAdmissionSourcePort).readTarget(request)',
+    ],
+    [
+      'providerPositionAdmissionCoordinatorSource',
+      'this.admissionOpen = false;',
+      'this.admissionOpen = true;',
+    ],
+    [
+      'providerPositionAdmissionCoordinatorSource',
+      'for (const controller of [...this.activeAdmissionControllers]) {',
+      'for (const controller of [...this.activeAdmissionControllers].slice(0, 1)) {',
+    ],
+    [
+      'providerPositionAdmissionCoordinatorSource',
+      'failed = true;',
+      'void controller;',
+    ],
+    [
+      'providerPositionAdmissionCoordinatorSource',
+      'this.activeAdmissionControllers.add(activeController);',
+      'void activeController;',
+    ],
+    [
+      'providerPositionAdmissionCoordinatorSource',
+      'this.activeAdmissionControllers.delete(activeController);',
+      'void activeController;',
     ],
     [
       'portfolioWalletRegistrationReaderPortSource',
@@ -1381,6 +1438,61 @@ test('provider-position read inspection rejects trust, runtime bounds, coverage,
       '@Injectable()\nexport function createDormantProviderPositionAdmissionRuntimeResource(',
     ],
     [
+      'providerPositionRuntimeCompositionSource',
+      'const pool: Pool = runtimeResource.pool;',
+      'const pool: Pool = dependencies.pool;',
+    ],
+    [
+      'providerPositionRuntimeCompositionSource',
+      'runtimeResource.admissionOptions,',
+      'dependencies.admissionOptions,',
+    ],
+    [
+      'providerPositionRuntimeCompositionSource',
+      'if (isProxy(current)) return undefined;',
+      'void current;',
+    ],
+    [
+      'providerPositionRuntimeCompositionSource',
+      "if (typeof method !== 'function' || isProxy(method)) {",
+      "if (typeof method !== 'function') {",
+    ],
+    [
+      'providerPositionRuntimeCompositionSource',
+      'isProxy(closeAdmission)',
+      'false',
+    ],
+    [
+      'providerPositionRuntimeCompositionSource',
+      'const walletRepository = new PostgresWalletRegistrationRepository(postgres);',
+      'const walletRepository = dependencies.walletRepository;',
+    ],
+    [
+      'providerPositionRuntimeCompositionSource',
+      'Reflect.apply(closeAdmission, coordinator, []);',
+      'void closeAdmission;',
+    ],
+    [
+      'providerPositionRuntimeCompositionSource',
+      'Promise.allSettled([postgresDrain, ...operationGates])',
+      'Promise.allSettled([postgresDrain])',
+    ],
+    [
+      'providerPositionRuntimeCompositionSource',
+      'let postgresDrain: Promise<void>;',
+      'void handles.endPool();\n    let postgresDrain: Promise<void>;',
+    ],
+    [
+      'providerPositionRuntimeCompositionSource',
+      'await closeOwnedRuntime({ closePostgres, endPool });',
+      'void closeOwnedRuntime;',
+    ],
+    [
+      'providerPositionRuntimeCompositionSource',
+      "const DEPENDENCY_KEYS = Object.freeze([",
+      "void process.env.DATABASE_URL;\nconst DEPENDENCY_KEYS = Object.freeze([",
+    ],
+    [
       'providerPositionInfrastructureConfigSource',
       'connectionTimeoutMs: 60_000,',
       'connectionTimeoutMs: 600_000,',
@@ -1421,6 +1533,11 @@ test('provider-position read inspection rejects trust, runtime bounds, coverage,
       'providers: [MainnetPlatformDirectoryService, MainnetPlatformsPrivacyInterceptor, createDormantProviderPositionAdmissionRuntimeResource],',
     ],
     [
+      'mainnetPlatformsModuleSource',
+      'providers: [MainnetPlatformDirectoryService, MainnetPlatformsPrivacyInterceptor],',
+      'providers: [MainnetPlatformDirectoryService, MainnetPlatformsPrivacyInterceptor, createDormantProviderPositionAdmissionRuntimeComposition],',
+    ],
+    [
       'mainnetPlatformsIndexSource',
       "export { MainnetPlatformDirectoryService } from './application/mainnet-platform-directory.service';",
       "export { DormantProviderPositionAdmissionCoordinator } from './application/provider-position-admission.coordinator';",
@@ -1434,6 +1551,11 @@ test('provider-position read inspection rejects trust, runtime bounds, coverage,
       'mainnetPlatformsIndexSource',
       "export { MainnetPlatformDirectoryService } from './application/mainnet-platform-directory.service';",
       "export { createDormantProviderPositionAdmissionRuntimeResource } from './infrastructure/provider-position-admission-runtime-bounds';",
+    ],
+    [
+      'mainnetPlatformsIndexSource',
+      "export { MainnetPlatformDirectoryService } from './application/mainnet-platform-directory.service';",
+      "export { createDormantProviderPositionAdmissionRuntimeComposition } from './infrastructure/provider-position-admission-runtime.composition';",
     ],
     [
       'mainnetPlatformsControllerSource',

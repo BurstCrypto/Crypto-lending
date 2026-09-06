@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { isProxy } from 'node:util/types';
 
 import { parseAccountId, type AccountId } from '../../accounts/domain/account-profile';
 import { chainObservationPolicyForNetwork } from '../../blockchain/domain/chain-observation-policy';
@@ -319,6 +320,7 @@ function fail(code: ProviderPositionAdmissionFailureCode): never {
 function stableDataMember(value: object, key: PropertyKey): unknown {
   let current: object | null = value;
   for (let depth = 0; current !== null && depth < 8; depth += 1) {
+    if (isProxy(current)) return fail('INVALID_CONFIGURATION');
     const descriptor = Object.getOwnPropertyDescriptor(current, key);
     if (descriptor !== undefined) {
       if (!('value' in descriptor)) return fail('INVALID_CONFIGURATION');
@@ -343,8 +345,11 @@ function captureTrustedChainAssessmentAssembly(
   if (
     assemblyVersion !== PROVIDER_POSITION_TRUSTED_CHAIN_ASSESSMENT_ASSEMBLY_VERSION ||
     typeof assemble !== 'function' ||
+    isProxy(assemble) ||
     typeof verifyAssembly !== 'function' ||
-    typeof verify !== 'function'
+    isProxy(verifyAssembly) ||
+    typeof verify !== 'function' ||
+    isProxy(verify)
   ) {
     return fail('INVALID_CONFIGURATION');
   }
@@ -370,6 +375,8 @@ export class DormantProviderPositionAdmissionCoordinator {
   private readonly options!: Readonly<ProviderPositionAdmissionOptions>;
   private readonly trustedChainAssessmentAssembly!:
     ProviderPositionTrustedChainAssessmentAssemblyPort | undefined;
+  private readonly activeAdmissionControllers = new Set<AbortController>();
+  private admissionOpen = true;
 
   constructor(
     policyInput: unknown,
@@ -521,17 +528,34 @@ export class DormantProviderPositionAdmissionCoordinator {
     }
   }
 
+  /** Stops new admissions and synchronously aborts every admitted operation. */
+  closeAdmission(): void {
+    this.admissionOpen = false;
+    let failed = false;
+    for (const controller of [...this.activeAdmissionControllers]) {
+      try {
+        if (!controller.signal.aborted) controller.abort();
+      } catch {
+        failed = true;
+      }
+    }
+    if (failed) return fail('SOURCE_UNAVAILABLE');
+  }
+
   private async prepareAdmission(
     requestInput: ReadProviderPositionAdmissionRequestV1,
   ): Promise<PreparedProviderPositionAdmission> {
     let controller: AbortController | undefined;
     let abortAdmission: (() => void) | undefined;
     try {
+      if (!this.admissionOpen) return fail('SOURCE_UNAVAILABLE');
       const request = parseRequest(requestInput);
       controller = new AbortController();
       const activeController = controller;
+      this.activeAdmissionControllers.add(activeController);
       abortAdmission = (): void => {
         if (activeController.signal.aborted === false) activeController.abort();
+        this.activeAdmissionControllers.delete(activeController);
       };
       const activeAbortAdmission = abortAdmission;
       const started = canonicalClock(this.clock.now());
@@ -856,6 +880,7 @@ function normalizeBindings(
   values: readonly ProviderPositionAdmissionSourceBinding[],
   policy: MainnetProviderPositionObservationPolicyV1,
 ): readonly ProviderPositionAdmissionSourceBinding[] {
+  const capturedSources = new Map<object, ProviderPositionAdmissionSourcePort>();
   const normalized = values.map((value) => {
     const record = exactRecord(
       value,
@@ -863,6 +888,7 @@ function normalizeBindings(
       'INVALID_CONFIGURATION',
       false,
     );
+    const sourceIdentity = record.source;
     if (
       typeof record.sourceFamilyId !== 'string' ||
       !SAFE_FAMILY_ID.test(record.sourceFamilyId) ||
@@ -878,17 +904,31 @@ function normalizeBindings(
         record.sourceKind,
         record.networkId,
       ) ||
-      typeof (record.source as ProviderPositionAdmissionSourcePort | undefined)?.readTarget !==
-        'function'
+      (typeof sourceIdentity !== 'object' && typeof sourceIdentity !== 'function') ||
+      sourceIdentity === null ||
+      isProxy(sourceIdentity)
     ) {
       return fail('INVALID_CONFIGURATION');
+    }
+    const sourceReceiver = sourceIdentity as object;
+    let source = capturedSources.get(sourceReceiver);
+    if (source === undefined) {
+      const readTarget = stableDataMember(sourceReceiver, 'readTarget');
+      if (typeof readTarget !== 'function' || isProxy(readTarget)) {
+        return fail('INVALID_CONFIGURATION');
+      }
+      source = Object.freeze({
+        readTarget: (request: ReadProviderPositionAdmissionTargetRequestV1) =>
+          Reflect.apply(readTarget, sourceReceiver, [request]) as Promise<unknown>,
+      });
+      capturedSources.set(sourceReceiver, source);
     }
     return Object.freeze({
       sourceFamilyId: record.sourceFamilyId,
       sourceId: record.sourceId,
       sourceKind: record.sourceKind,
       networkId: record.networkId,
-      source: record.source as ProviderPositionAdmissionSourcePort,
+      source,
     });
   });
   const keys = normalized.map(({ sourceId, sourceKind, networkId }) =>

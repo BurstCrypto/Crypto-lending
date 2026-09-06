@@ -87,8 +87,7 @@ class FakeSource implements ProviderPositionAdmissionSourcePort {
   error: Error | undefined;
   mutate: ((value: MutableRecord) => void) | undefined;
   readOverride:
-    | ((request: ReadProviderPositionAdmissionTargetRequestV1) => Promise<unknown>)
-    | undefined;
+    ((request: ReadProviderPositionAdmissionTargetRequestV1) => Promise<unknown>) | undefined;
   positions: MutableRecord[] = [position()];
 
   constructor(
@@ -1258,6 +1257,151 @@ describe('DormantProviderPositionAdmissionCoordinator', () => {
     const unapproved = fixture();
     unapproved.bindings[0] = { ...unapproved.bindings[0]!, sourceId: 'unknown-source' };
     expect(() => coordinator(unapproved)).toThrow(ProviderPositionAdmissionUnavailableError);
+  });
+
+  it('captures each source method without invoking accessors or accepting proxies', () => {
+    let reads = 0;
+    const accessor = fixture();
+    const accessorSource = Object.create(null) as Record<PropertyKey, unknown>;
+    Object.defineProperty(accessorSource, 'readTarget', {
+      enumerable: true,
+      get: () => {
+        reads += 1;
+        return async () => undefined;
+      },
+    });
+    accessor.bindings[0] = {
+      ...accessor.bindings[0]!,
+      source: accessorSource as unknown as ProviderPositionAdmissionSourcePort,
+    };
+    expect(() => coordinator(accessor)).toThrow(ProviderPositionAdmissionUnavailableError);
+
+    const proxied = fixture();
+    const sourceProxy = new Proxy(proxied.sources[0]!, {
+      get: () => {
+        reads += 1;
+        throw new Error('private proxy detail');
+      },
+    });
+    proxied.bindings[0] = { ...proxied.bindings[0]!, source: sourceProxy };
+    expect(() => coordinator(proxied)).toThrow(ProviderPositionAdmissionUnavailableError);
+
+    const inheritedProxy = fixture();
+    const sourcePrototypeProxy = new Proxy(Object.create(null) as object, {
+      getOwnPropertyDescriptor: () => {
+        reads += 1;
+        throw new Error('private prototype proxy detail');
+      },
+      getPrototypeOf: () => {
+        reads += 1;
+        throw new Error('private prototype proxy detail');
+      },
+    });
+    inheritedProxy.bindings[0] = {
+      ...inheritedProxy.bindings[0]!,
+      source: Object.create(sourcePrototypeProxy) as ProviderPositionAdmissionSourcePort,
+    };
+    expect(() => coordinator(inheritedProxy)).toThrow(
+      ProviderPositionAdmissionUnavailableError,
+    );
+
+    const callableProxy = fixture();
+    const proxiedReadTarget = new Proxy(
+      async (): Promise<unknown> => undefined,
+      {
+        apply: () => {
+          reads += 1;
+          throw new Error('private callable proxy detail');
+        },
+      },
+    );
+    callableProxy.bindings[0] = {
+      ...callableProxy.bindings[0]!,
+      source: { readTarget: proxiedReadTarget },
+    };
+    expect(() => coordinator(callableProxy)).toThrow(
+      ProviderPositionAdmissionUnavailableError,
+    );
+    expect(reads).toBe(0);
+  });
+
+  it('rejects trusted assembly proxies without invoking prototype or callable traps', () => {
+    let traps = 0;
+    const assemblyPrototypeProxy = new Proxy(Object.create(null) as object, {
+      getOwnPropertyDescriptor: () => {
+        traps += 1;
+        throw new Error('private assembly prototype detail');
+      },
+      getPrototypeOf: () => {
+        traps += 1;
+        throw new Error('private assembly prototype detail');
+      },
+    });
+    const inheritedProxyAssembly = Object.create(
+      assemblyPrototypeProxy,
+    ) as ProviderPositionTrustedChainAssessmentAssemblyPort;
+    expect(() => coordinator(fixture(), {}, inheritedProxyAssembly)).toThrow(
+      ProviderPositionAdmissionUnavailableError,
+    );
+
+    const callableProxyAssembly = new FakeTrustedChainAssessmentAssembly();
+    const proxiedAssemble = new Proxy(callableProxyAssembly.assemble, {
+      apply: () => {
+        traps += 1;
+        throw new Error('private assembly callable detail');
+      },
+    });
+    Object.defineProperty(callableProxyAssembly, 'assemble', {
+      configurable: true,
+      value: proxiedAssemble,
+    });
+    expect(() => coordinator(fixture(), {}, callableProxyAssembly)).toThrow(
+      ProviderPositionAdmissionUnavailableError,
+    );
+    expect(traps).toBe(0);
+  });
+
+  it('retains the reviewed source method and receiver after caller mutation', async () => {
+    const value = fixture();
+    const source = value.sources[0]!;
+    const admitted = coordinator(value);
+    const substituted = jest.fn(async () => undefined);
+    Object.defineProperty(source, 'readTarget', {
+      configurable: true,
+      enumerable: true,
+      value: substituted,
+      writable: true,
+    });
+
+    await expect(
+      admitted.admit({ accountId: ACCOUNT_ID, correlationId: CORRELATION_ID }),
+    ).resolves.toMatchObject({ accountId: ACCOUNT_ID });
+    expect(source.calls).toHaveLength(1);
+    expect(substituted).not.toHaveBeenCalled();
+  });
+
+  it('aborts active work and rejects future admissions when closed', async () => {
+    const value = fixture();
+    let observedSignal: AbortSignal | undefined;
+    let settle!: () => void;
+    value.walletReader.readOverride = (request) => {
+      observedSignal = request.signal;
+      return new Promise<readonly ActivePortfolioWalletRegistration[]>((resolvePromise) => {
+        settle = () => resolvePromise([]);
+      });
+    };
+    const admitted = coordinator(value);
+    const operation = admitted.admit({ accountId: ACCOUNT_ID, correlationId: CORRELATION_ID });
+    await Promise.resolve();
+    expect(observedSignal?.aborted).toBe(false);
+
+    admitted.closeAdmission();
+    expect(observedSignal?.aborted).toBe(true);
+    settle();
+    await expect(operation).rejects.toMatchObject({ code: 'WALLET_ROSTER_UNAVAILABLE' });
+    await expect(
+      admitted.admit({ accountId: ACCOUNT_ID, correlationId: CORRELATION_ID }),
+    ).rejects.toMatchObject({ code: 'SOURCE_UNAVAILABLE' });
   });
 
   it('requires the exact approved policy fingerprint and bounded options', () => {
