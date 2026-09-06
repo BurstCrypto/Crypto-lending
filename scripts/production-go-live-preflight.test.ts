@@ -181,6 +181,13 @@ const BALANCE_CONSUMER_ARTIFACTS = Object.freeze({
     resolve(__dirname, '../apps/api/src/blockchain-sync/infrastructure/rpc/balance-json-rpc.ts'),
     'utf8',
   ),
+  nodeHttpsBalanceJsonRpcTransportSource: readFileSync(
+    resolve(
+      __dirname,
+      '../apps/api/src/blockchain-sync/infrastructure/rpc/node-https-balance-json-rpc.transport.ts',
+    ),
+    'utf8',
+  ),
   ethereumBalanceIndexerSource: readFileSync(
     resolve(
       __dirname,
@@ -1871,6 +1878,110 @@ test('balance-consumer inspection rejects provider-neutral JSON-RPC capability a
   );
 });
 
+test('balance-consumer inspection pins the dormant Node HTTPS transport without wiring it', () => {
+  assert.deepEqual(
+    inspectBalanceConsumerDeploymentArtifacts(BALANCE_CONSUMER_ARTIFACTS),
+    EXPECTED_DORMANT_BALANCE_CONSUMER_DEPLOYMENT,
+  );
+
+  const semanticMutations: readonly (readonly [string, string])[] = [
+    ["import * as https from 'node:https';", "import * as https from 'node:http';"],
+    [
+      'export class NodeHttpsBalanceJsonRpcTransport implements BalanceJsonRpcTransport {',
+      'export class NodeHttpsBalanceJsonRpcTransport {',
+    ],
+    ['const CONNECT_TIMEOUT_MS = 2_000;', 'const CONNECT_TIMEOUT_MS = 20_000;'],
+    ['const IO_CLOSE_TIMEOUT_MS = 250;', 'const IO_CLOSE_TIMEOUT_MS = 2_500;'],
+    ['resolver.resolve6(hostname,', '// resolver.resolve6(hostname,'],
+    ['resolver.cancel();', 'void resolver;'],
+    ['checkServerIdentity,', 'checkServerIdentity: () => undefined,'],
+    ["minVersion: 'TLSv1.2',", "minVersion: 'TLSv1.1',"],
+    ['rejectUnauthorized: true,', 'rejectUnauthorized: false,'],
+    [
+      'normalizeRemoteFamily(candidate.remoteFamily) === expected.family &&',
+      'normalizeRemoteFamily(candidate.remoteFamily) !== null &&',
+    ],
+    [
+      "if (headers.has('content-encoding') || headers.has('transfer-encoding')) return null;",
+      "if (headers.has('content-encoding')) return null;",
+    ],
+    [
+      'const awaitResponseClose = state.response !== undefined && !state.responseClosed;',
+      'const awaitResponseClose = false;',
+    ],
+  ];
+  for (const [approved, rejected] of semanticMutations) {
+    assert.deepEqual(
+      inspectBalanceConsumerDeploymentArtifacts(
+        mutateBalanceConsumerArtifact('nodeHttpsBalanceJsonRpcTransportSource', approved, rejected),
+      ),
+      INVALID_BALANCE_CONSUMER_DEPLOYMENT,
+      approved,
+    );
+  }
+
+  const forbiddenTransportCapabilities = [
+    "const endpoint = 'https://rpc.vendor.invalid';",
+    "const apiKey = 'embedded-provider-secret';",
+    "const providerOptions = { credential: 'embedded-provider-secret' };",
+    'const rpcHost = process.env.ETHEREUM_RPC_HOST;',
+    '@Injectable() class BoundTransportProvider {}',
+    'void Promise.race([]);',
+  ] as const;
+  for (const capability of forbiddenTransportCapabilities) {
+    assert.deepEqual(
+      inspectBalanceConsumerDeploymentArtifacts({
+        ...BALANCE_CONSUMER_ARTIFACTS,
+        nodeHttpsBalanceJsonRpcTransportSource: `${BALANCE_CONSUMER_ARTIFACTS.nodeHttpsBalanceJsonRpcTransportSource}\n${capability}\n`,
+      }),
+      INVALID_BALANCE_CONSUMER_DEPLOYMENT,
+      capability,
+    );
+  }
+
+  const dormantTransportIdentityRoots = [
+    'blockchainSyncIndexSource',
+    'compositionSource',
+    'balanceConsumerResourceSource',
+    'balanceConsumerLifecycleSource',
+    'runtimeSource',
+    'activationSource',
+    'cliSource',
+    'cliModeSource',
+    'balanceConsumerConfigSource',
+    'infrastructureConfigSource',
+    'blockchainSyncModuleSource',
+    'appModuleSource',
+    'applicationRootSource',
+    'localDevelopmentAppModuleSource',
+    'mainSource',
+    'outboxWorkerCliSource',
+    'redisSessionRevocationCliSource',
+    'migrationCliSource',
+    'applicationTemplateSource',
+    'applicationValidatorSource',
+    'workloadTemplateSource',
+    'workloadValidatorSource',
+    'balanceConsumerEnvelopeSource',
+    'releaseManifestSource',
+    'apiPackageSource',
+    'rootPackageSource',
+    'productionContainerValidatorSource',
+  ] as const satisfies readonly (keyof BalanceConsumerArtifactSources)[];
+  assert.equal(dormantTransportIdentityRoots.length, 27);
+  const forbiddenBinding = 'void NodeHttpsBalanceJsonRpcTransport;';
+  for (const key of dormantTransportIdentityRoots) {
+    assert.deepEqual(
+      inspectBalanceConsumerDeploymentArtifacts({
+        ...BALANCE_CONSUMER_ARTIFACTS,
+        [key]: `${BALANCE_CONSUMER_ARTIFACTS[key]}\n${forbiddenBinding}\n`,
+      }),
+      INVALID_BALANCE_CONSUMER_DEPLOYMENT,
+      key,
+    );
+  }
+});
+
 test('balance-consumer inspection pins the end-to-end execution cancellation chain', () => {
   const mutations: readonly (readonly [keyof BalanceConsumerArtifactSources, string, string])[] = [
     [
@@ -2767,6 +2878,10 @@ test('balance-consumer artifact shape, bounds, and private brand fail closed', (
   delete missingMainnetAgreementCoordinator.mainnetBalanceTwoSourceAgreementCoordinatorSource;
   const missingBalanceJsonRpc = { ...BALANCE_CONSUMER_ARTIFACTS } as Record<string, unknown>;
   delete missingBalanceJsonRpc.balanceJsonRpcSource;
+  const missingNodeHttpsBalanceJsonRpcTransport = {
+    ...BALANCE_CONSUMER_ARTIFACTS,
+  } as Record<string, unknown>;
+  delete missingNodeHttpsBalanceJsonRpcTransport.nodeHttpsBalanceJsonRpcTransportSource;
   const missingEthereumIndexer = { ...BALANCE_CONSUMER_ARTIFACTS } as Record<string, unknown>;
   delete missingEthereumIndexer.ethereumBalanceIndexerSource;
   const missingSolanaIndexer = { ...BALANCE_CONSUMER_ARTIFACTS } as Record<string, unknown>;
@@ -2810,6 +2925,7 @@ test('balance-consumer artifact shape, bounds, and private brand fail closed', (
     missingMainnetRouter,
     missingMainnetAgreementCoordinator,
     missingBalanceJsonRpc,
+    missingNodeHttpsBalanceJsonRpcTransport,
     missingEthereumIndexer,
     missingSolanaIndexer,
     missingSupportedAssetRegistry,

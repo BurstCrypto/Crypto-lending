@@ -83,6 +83,17 @@ three-key account, wallet, and network scope. All of this is static source
 integrity only: it cannot select a live provider, permit egress, activate the
 consumer, or clear any deployment or live-evidence blocker.
 
+The same closed artifact set now includes one provider-neutral, source-only
+Node HTTPS transport capsule. Preflight pins its exact SHA-256 and requires its
+reviewed class/import surface, per-exchange cancellable A+AAAA resolver, public
+address and family pinning, hostname-verifying TLS, bounded request/response
+teardown, abort handling, strict JSON limits, and sanitized fixed failures. It
+also rejects an embedded endpoint, assigned credential, environment lookup, or
+Nest/provider binding and requires the transport identity to remain absent from
+barrels, composition, runtime, configuration loaders, templates, packages, and
+the release manifest. These checks do not construct the class or perform DNS or
+HTTPS I/O.
+
 The inspection now also byte-pins the consumer service, balance-sync port
 contract, dispatcher, composition, orchestrator, dormant two-source
 coordinator, router, JSON-RPC helper, both chain adapters, their public export
@@ -121,10 +132,13 @@ unrefed and cleared on normal settlement; timeout rejects with a fixed outcome
 while late cleanup remains observed and continues. The lifecycle shell starts
 that close path when shutdown is handed to the accepted run, so a hung run
 cannot suppress the watchdog. These contracts do not prove physical socket or
-process shutdown against live PostgreSQL, and no reviewed concrete JSON-RPC
-transport has yet proved cooperative connect/body-I/O cancellation. Those
-remain explicit activation blockers alongside live provider and deployment
-evidence. All checks are local and make no network, chain, cloud, or billable
+process shutdown against live PostgreSQL. The reviewed HTTPS transport is still
+dormant: no provider, hostname/path endpoint, credential source, runtime wiring,
+or exact-host egress has been approved or supplied. Its strict response policy
+requires one canonical `Content-Length` and rejects transfer encoding and
+compression, so provider compatibility remains unproved. Deployed Node resolver,
+TLS, socket-teardown, and live provider evidence remain explicit activation
+blockers. All checks are local and make no network, chain, cloud, or billable
 call.
 
 The adapter dependency closure is byte-pinned too: the supported-asset

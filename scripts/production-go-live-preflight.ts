@@ -166,6 +166,7 @@ export interface BalanceConsumerArtifactSources {
   readonly mainnetBalanceIndexerRouterSource: string;
   readonly mainnetBalanceTwoSourceAgreementCoordinatorSource: string;
   readonly balanceJsonRpcSource: string;
+  readonly nodeHttpsBalanceJsonRpcTransportSource: string;
   readonly ethereumBalanceIndexerSource: string;
   readonly solanaBalanceIndexerSource: string;
   readonly supportedAssetRegistrySource: string;
@@ -536,6 +537,7 @@ const BALANCE_CONSUMER_ARTIFACT_KEYS = Object.freeze([
   'mainnetBalanceIndexerRouterSource',
   'mainnetBalanceTwoSourceAgreementCoordinatorSource',
   'balanceJsonRpcSource',
+  'nodeHttpsBalanceJsonRpcTransportSource',
   'ethereumBalanceIndexerSource',
   'solanaBalanceIndexerSource',
   'supportedAssetRegistrySource',
@@ -607,6 +609,8 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
   mainnetBalanceTwoSourceAgreementCoordinatorSource:
     'e077fdd52f8046d299d62faa2d73a576ffa082e6560d0c6409b2cea48efbfabc',
   balanceJsonRpcSource: 'f8fdf7f1e292824a8041e37455022103b6e54720dde125bcf6e055285d1bec75',
+  nodeHttpsBalanceJsonRpcTransportSource:
+    '9a516b93d40eadcf4191b542782389514aea7810a5efc23ef0d73e5d5d16abae',
   ethereumBalanceIndexerSource: 'cdd60744549c6808cecc3a1bd1ab3668221ac86d4ba34177213fd15824938012',
   solanaBalanceIndexerSource: '34543ab41660c02beb8810fecae806eb06ab5684d4df7d90ed685b83609d389b',
   supportedAssetRegistrySource: '025ef9ebffc0a2e676394bca110ee203274e00d0d95b5fb4fe239953d235fc54',
@@ -2761,6 +2765,121 @@ function hasDormantProviderNeutralBalanceRpcContract(
     (source) => !forbiddenLaunchRegistration.test(source),
   );
   return noLaunchRegistration;
+}
+
+function hasDormantNodeHttpsBalanceRpcTransportContract(
+  sources: BalanceConsumerArtifactSources,
+): boolean {
+  const transport = sources.nodeHttpsBalanceJsonRpcTransportSource.replace(/\r\n/gu, '\n');
+  const expectedImports = [
+    './balance-json-rpc',
+    'node:dns',
+    'node:http',
+    'node:https',
+    'node:net',
+    'node:tls',
+    'node:util',
+  ].sort();
+  const requiredSecurityLines = [
+    "const ETHEREUM_MAINNET = 'eip155:1';",
+    "const SOLANA_MAINNET = 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp';",
+    'const CONNECT_TIMEOUT_MS = 2_000;',
+    'const TOTAL_TIMEOUT_MS = 5_000;',
+    'const IO_CLOSE_TIMEOUT_MS = 250;',
+    'const MAX_JSON_BYTES = 4 * 1024 * 1024;',
+    'const MAX_JSON_DEPTH = 32;',
+    'const MAX_JSON_NODES = 200_000;',
+    'const MAX_RESPONSE_CHUNKS = 4_096;',
+    "[ETHEREUM_MAINNET]: new Set(['eth_chainId', 'eth_getBlockByNumber', 'eth_getCode', 'eth_call']),",
+    "[SOLANA_MAINNET]: new Set(['getGenesisHash', 'getSlot', 'getBlock', 'getTokenAccountsByOwner']),",
+    'export type NodeHttpsBalanceRpcNetworkId = typeof ETHEREUM_MAINNET | typeof SOLANA_MAINNET;',
+    'export type NodeHttpsBalanceRpcCredential =',
+    'export interface NodeHttpsBalanceJsonRpcTransportConfig {',
+    'export class NodeHttpsBalanceJsonRpcTransport implements BalanceJsonRpcTransport {',
+    'exchange(request: BalanceJsonRpcRequest, signal: AbortSignal): Promise<unknown> {',
+    "AbortSignal.prototype.addEventListener.call(signal, 'abort', onAbort, { once: true });",
+    "AbortSignal.prototype.removeEventListener.call(signal, 'abort', state.abortListener);",
+    'resolver = new dns.Resolver({',
+    'maxTimeout: CONNECT_TIMEOUT_MS,',
+    'timeout: CONNECT_TIMEOUT_MS,',
+    'tries: 1,',
+    'resolver.resolve4(hostname, (error, addresses) => finishFamily(4, error, addresses));',
+    'resolver.resolve6(hostname, (error, addresses) => finishFamily(6, error, addresses));',
+    'resolver.cancel();',
+    'const clientRequest = https.request(',
+    'agent: false,',
+    'checkServerIdentity,',
+    'family: address.family,',
+    'lookup: (_hostname, options, callback) => {',
+    'callback(null, [address]);',
+    'callback(null, address.address, address.family);',
+    "method: 'POST',",
+    "minVersion: 'TLSv1.2',",
+    'port: 443,',
+    'rejectUnauthorized: true,',
+    'servername: config.hostname,',
+    'candidate.remoteAddress === expected.address &&',
+    'normalizeRemoteFamily(candidate.remoteFamily) === expected.family &&',
+    "if (headers.has('content-encoding') || headers.has('transfer-encoding')) return null;",
+    'const awaitRequestClose = state.request !== undefined && !state.requestClosed;',
+    'const awaitResponseClose = state.response !== undefined && !state.responseClosed;',
+    'state.closeTimer = scheduleTimer(finishFailure, IO_CLOSE_TIMEOUT_MS);',
+    'timer.unref();',
+  ] as const;
+  const forbiddenEmbeddedEndpoint =
+    /['"](?:https?|wss?):\/\/|\b(?:endpoint|rpcUrl|baseUrl|providerUrl|hostname|path)\b\s*(?:=|:)\s*['"]/iu;
+  const forbiddenAssignedSecret =
+    /\b(?:apiKey|token|password|secret|authorization|credential)\b\s*(?:=|:)\s*['"][^'"]+['"]/iu;
+  const forbiddenEnvironment =
+    /\b(?:process|Deno|Bun)\s*\.\s*env\b|\bimport\s*\.\s*meta\s*\.\s*env\b|\bConfigService\b/u;
+  const forbiddenProviderBinding =
+    /@(?:Injectable|Module)\s*\(|\bproviders\s*:|\bprovide\s*:|\bnew\s+NodeHttpsBalanceJsonRpcTransport\s*\(/u;
+  if (
+    sortedTypeScriptImportTargets(transport).join('\0') !== expectedImports.join('\0') ||
+    requiredSecurityLines.some((line) => exactExecutableLineCount(transport, line) !== 1) ||
+    forbiddenEmbeddedEndpoint.test(transport) ||
+    forbiddenAssignedSecret.test(transport) ||
+    forbiddenEnvironment.test(transport) ||
+    forbiddenProviderBinding.test(transport) ||
+    /\bPromise\s*\.\s*race\s*\(|\b(?:retry|backoff)\s*\(/iu.test(transport)
+  ) {
+    return false;
+  }
+
+  const dormantIdentity =
+    /\b(?:NodeHttpsBalanceJsonRpcTransport|NodeHttpsBalanceJsonRpcTransportConfig|NodeHttpsBalanceRpcNetworkId|NodeHttpsBalanceRpcCredential)\b|node-https-balance-json-rpc\.transport/u;
+  const barrelCompositionRuntimeConfigTemplateAndReleaseSources = [
+    sources.blockchainSyncIndexSource,
+    sources.compositionSource,
+    sources.balanceConsumerResourceSource,
+    sources.balanceConsumerLifecycleSource,
+    sources.runtimeSource,
+    sources.activationSource,
+    sources.cliSource,
+    sources.cliModeSource,
+    sources.balanceConsumerConfigSource,
+    sources.infrastructureConfigSource,
+    sources.blockchainSyncModuleSource,
+    sources.appModuleSource,
+    sources.applicationRootSource,
+    sources.localDevelopmentAppModuleSource,
+    sources.mainSource,
+    sources.outboxWorkerCliSource,
+    sources.redisSessionRevocationCliSource,
+    sources.migrationCliSource,
+    sources.applicationTemplateSource,
+    sources.applicationValidatorSource,
+    sources.workloadTemplateSource,
+    sources.workloadValidatorSource,
+    sources.balanceConsumerEnvelopeSource,
+    sources.releaseManifestSource,
+    sources.apiPackageSource,
+    sources.rootPackageSource,
+    sources.productionContainerValidatorSource,
+  ] as const;
+  return barrelCompositionRuntimeConfigTemplateAndReleaseSources.every(
+    (source) => !dormantIdentity.test(source),
+  );
 }
 
 function hasExactBalanceSyncExecutionCancellationContract(
@@ -6246,6 +6365,7 @@ export function inspectBalanceConsumerDeploymentArtifacts(
       hasAuthenticatedBalanceSyncFailureContract(sources) &&
       hasExactBalanceAdapterDependencyContract(sources) &&
       hasDormantProviderNeutralBalanceRpcContract(sources) &&
+      hasDormantNodeHttpsBalanceRpcTransportContract(sources) &&
       hasExactBalanceSyncExecutionCancellationContract(sources) &&
       hasDormantBalanceConsumerAggregateResourceContract(sources) &&
       hasDormantBalanceConsumerLifecycleCoordinatorContract(sources) &&
@@ -6934,6 +7054,13 @@ export function loadRepositoryProductionPreflightInput(
         resolve(
           repositoryRoot,
           'apps/api/src/blockchain-sync/infrastructure/rpc/balance-json-rpc.ts',
+        ),
+        'utf8',
+      ),
+      nodeHttpsBalanceJsonRpcTransportSource: readFileSync(
+        resolve(
+          repositoryRoot,
+          'apps/api/src/blockchain-sync/infrastructure/rpc/node-https-balance-json-rpc.transport.ts',
         ),
         'utf8',
       ),

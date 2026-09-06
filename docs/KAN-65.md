@@ -32,8 +32,8 @@ The orchestration boundary has six injected ports:
   boundary for a future live indexer.
 
 The durable checkpoint, portfolio-balance, dormant wallet-address resolver, and
-dormant Ethereum/Solana transcript indexer adapters are concrete. Two additional
-source-only capsules remain deliberately unregistered: the balance-consumer
+dormant Ethereum/Solana transcript indexer adapters are concrete. Three additional
+source-only capsules remain deliberately unregistered. The balance-consumer
 persistence resource encloses its PostgreSQL pool and repositories behind
 checkpoint/address-resolution closures. Those closures synchronously gate new
 work, track every accepted operation, and on close abort and drain cancellable
@@ -50,6 +50,16 @@ memoized `close()`. Close has a fixed 25-second watchdog inside the envelope's
 drain, while the already-started cleanup remains observed and continues. It is
 not exported from a barrel or referenced by a Nest
 module, runtime, CLI, activation path, or other launch root.
+
+The third capsule is a reviewed provider-neutral Node HTTPS JSON-RPC transport.
+It owns cancellable per-exchange A and AAAA resolution, pins the selected public
+address and family through TLS, retains hostname verification, propagates the
+caller's abort signal through bounded connect/body work, joins accepted request
+and response teardown, and parses only bounded strict JSON. It embeds no provider
+hostname, path, endpoint, or credential and is absent from barrels, composition,
+runtime, configuration loaders, templates, and the release manifest. Therefore
+it cannot perform I/O unless a future reviewed composition explicitly constructs
+it.
 
 The separate source-only `application/balance-sync-consumer.lifecycle.ts`
 shell accepts only that exact aggregate facade, a genuine external abort
@@ -138,12 +148,18 @@ facade can finish draining. The exact production dependency is `pg` 8.23.0,
 and the package lock resolves `pg-pool` 3.14.0; preflight pins both artifacts
 and these semantics. This remains local static/unit assurance: a live
 PostgreSQL socket teardown and physical shutdown exercise is still required.
-There is also still no reviewed concrete JSON-RPC transport or live evidence
-proving cancellation of connect and response-body I/O. The dormant two-source coordinator does drain
-both same-signal reads with `Promise.allSettled` and rechecks cancellation
-before inspecting fulfilled values, but it remains unapproved for financial
-use. Offline preflight byte-pins and mutation-tests these boundaries without
-activating the consumer or making any external or billable call.
+The source-only HTTPS capsule now provides a reviewed implementation of
+cooperative DNS, connect, and response-body cancellation, but it is not live
+evidence. No provider, hostname/path endpoint, credential source, runtime wiring,
+or egress approval has been selected. Its deliberately strict response policy
+requires one canonical `Content-Length` and rejects transfer encoding and
+compression, so compatibility with each intended provider remains unproved.
+Deployed Node resolver, TLS, socket-teardown, and provider behavior must still be
+observed. The dormant two-source coordinator drains both same-signal reads with
+`Promise.allSettled` and rechecks cancellation before inspecting fulfilled
+values, but it remains unapproved for financial use. Offline preflight byte-pins
+and mutation-tests these boundaries without activating the consumer or making
+any external or billable call.
 
 The offline integrity closure now includes the exact supported-asset registry,
 wallet address parser, and Solana token-account parser used by those adapters.
@@ -294,14 +310,19 @@ is supported without trusting arbitrary programs, provider-parsed extension
 objects, or unbounded account allocation. See
 `docs/rpc-indexing/ethereum-solana-balance-transcript-adapters.md`.
 
-Offline production preflight SHA-256 pins the exact shared JSON-RPC helper and
-both Ethereum/Solana adapter sources. A separate semantic contract preserves
+Offline production preflight SHA-256 pins the exact shared JSON-RPC helper,
+provider-neutral Node HTTPS transport, and both Ethereum/Solana adapter sources.
+A separate semantic contract preserves
 their injected transcript-only boundary, rejects direct HTTP/client, URL,
 credential, environment, timer, retry-loop, and Nest/runtime capabilities, and
 requires their identities to remain absent from module, activation, runtime,
-and CLI launch roots. Existing barrel exports are intentionally allowed and do
-not compose a transport. Passing this local source check leaves every RPC,
-egress, task, IAM, database, deployment, and live-evidence blocker unchanged.
+and CLI launch roots. The HTTPS capsule is separately constrained to its exact
+DNS, TLS, cancellation, bounded-response, and sanitized-failure markers, and its
+identity must remain absent from barrels, composition, runtime, configuration,
+templates, and release inputs. Existing adapter barrel exports are intentionally
+allowed and do not compose a transport. Passing this local source check leaves
+every RPC, egress, task, IAM, database, deployment, and live-evidence blocker
+unchanged.
 Each adapter narrows its five-field read request to the resolver's exact frozen
 `accountId`/`walletId`/`networkId` scope, matching the real PostgreSQL resolver
 instead of forwarding surplus tier and selector fields.
@@ -403,11 +424,13 @@ approved:
   consumer with a separately split metadata-only secret and a later reviewed
   exact-function database grant; the current worker task has no such secret,
   grant, or resolver binding;
-- a concrete JSON-RPC transport must prove same-signal connect and
-  response-body cancellation with no detached I/O, while a deployed
-  PostgreSQL exercise must prove the reviewed acquisition, discard, exact
-  removal, and shutdown behavior against the production-compatible server and
-  driver;
+- the reviewed source-only JSON-RPC transport still needs an approved provider,
+  exact hostname/path endpoint and credential source, runtime composition,
+  exact-host egress, deployed Node DNS/TLS/socket evidence, and live proof that
+  each provider returns the required strict `Content-Length` response shape;
+  separately, a deployed PostgreSQL exercise must prove the reviewed
+  acquisition, discard, exact removal, and shutdown behavior against the
+  production-compatible server and driver;
 - the source-only pinned SQS boundary must receive deployed task/IAM proof,
   source/DLQ and redrive evidence, duplicate-delivery and liveness exercises,
   and bounded-delay validation; and
@@ -420,16 +443,18 @@ indexed or that runtime/task activation, IAM, dedicated database grants, SQS,
 RPC, address decryption, monitoring, or any deployed behavior has been
 validated.
 
-The receipt, cancellable persistence, and bounded aggregate shutdown work was implemented and verified with
-local source/unit checks only. Adversarial aggregate tests use mocked child
+The receipt, cancellable persistence, bounded aggregate shutdown, and dormant
+HTTPS transport work was implemented and verified with local source/unit checks
+only. Adversarial aggregate tests use mocked child
 construction and in-memory capabilities, and repository/resolver tests prove
 that the exact execution context reaches the cancellable database boundary. A separate compatibility test uses
 the actual aggregate, child factories, application composition, and lifecycle
 shell while replacing only the low-level PostgreSQL pool and SQS client edges;
 it proves private cancellation reaches the pending receipt request and ordinary
 shutdown drains before SQS-then-PostgreSQL close. Separate adversarial tests
-cover the 25-second watchdog and late observed cleanup. These checks are not live
-provider, database, queue, credential, or deployment evidence. No AWS, SQS, ECS
+cover the 25-second watchdog and late observed cleanup. Transport tests use
+mocked DNS and HTTPS edges; they are not deployed Node, DNS, TLS, provider,
+database, queue, credential, or deployment evidence. No AWS, SQS, ECS
 credential endpoint, RPC, or chain-provider call was made, and no task, IAM
 identity, dedicated balance-consumer database grant, or runtime activation was
 deployed for this checkpoint. Adding these dormant source-only layers does not
