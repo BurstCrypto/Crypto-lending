@@ -620,7 +620,7 @@ const REVIEWED_PROVIDER_POSITION_READ_ARTIFACT_SHA256 = Object.freeze({
   providerPositionRuntimeBoundsSource:
     '342895e5e4bafca127c67db519e8ca252b0b75377a1e9311e00639e74a32d812',
   providerPositionRuntimeCompositionSource:
-    'b9c6152a27ba15d0dc1025b853b92a5d06ebfecabfb3d13edd5d35695a5b92a4',
+    'a7f3aeb108c01c2864abe85ba42e557a8e121abc77011c4bb2e4a825a2e7194d',
   providerPositionInfrastructureConfigSource:
     'fb1f6639a330d6a07db1d82434559356a4707a6550848d75397a1ff5e6a3fd10',
   providerPositionRuntimePostgresPoolSource:
@@ -2155,6 +2155,21 @@ function hasDormantProviderPositionReadBoundaryContract(
     readerResultStart >= 0 && readerResultEnd > readerResultStart
       ? reader.slice(readerResultStart, readerResultEnd + 2)
       : '';
+  const runtimeCompositionInterfaceStart = runtimeComposition.indexOf(
+    'export interface DormantProviderPositionAdmissionRuntimeComposition {',
+  );
+  const runtimeCompositionInterfaceEnd = runtimeComposition.indexOf(
+    '\n}',
+    runtimeCompositionInterfaceStart,
+  );
+  const runtimeCompositionInterfaceContract =
+    runtimeCompositionInterfaceStart >= 0 &&
+    runtimeCompositionInterfaceEnd > runtimeCompositionInterfaceStart
+      ? runtimeComposition.slice(
+          runtimeCompositionInterfaceStart,
+          runtimeCompositionInterfaceEnd + 2,
+        )
+      : '';
   const assemblerSelectionLoop = trustedAssessmentAssembler.indexOf(
     'for (const selection of reviewed.selections) {',
   );
@@ -2292,6 +2307,18 @@ function hasDormantProviderPositionReadBoundaryContract(
     compositionReaderStart >= 0 && compositionReaderEnd > compositionReaderStart
       ? runtimeComposition.slice(compositionReaderStart, compositionReaderEnd + 6)
       : '';
+  const compositionPublicFacadeStart = runtimeComposition.indexOf(
+    'return frozenNullPrototype({',
+    compositionReaderEnd,
+  );
+  const compositionPublicFacadeEnd = runtimeComposition.indexOf(
+    '\n  });',
+    compositionPublicFacadeStart,
+  );
+  const compositionPublicFacadeContract =
+    compositionPublicFacadeStart >= 0 && compositionPublicFacadeEnd > compositionPublicFacadeStart
+      ? runtimeComposition.slice(compositionPublicFacadeStart, compositionPublicFacadeEnd + 6)
+      : '';
   const runtimeBoundsPostgresSnapshot = runtimeBounds.indexOf(
     'const postgresPoolConfig = postgresConfigSnapshot(postgresConfigInput);',
   );
@@ -2374,9 +2401,29 @@ function hasDormantProviderPositionReadBoundaryContract(
     'const deadlineRunner = new NodeProviderPositionAdmissionDeadlineRunner(dependencies.clock);',
     compositionWalletReaderConstruction,
   );
+  const compositionTrustedAssessmentAssemblerDeclaration = runtimeComposition.indexOf(
+    'const trustedChainAssessmentAssembly =',
+    compositionDeadlineRunnerConstruction,
+  );
+  const compositionMissingDurableReaderGate = runtimeComposition.indexOf(
+    'dependencies.durableChainAnchorReader === undefined',
+    compositionTrustedAssessmentAssemblerDeclaration,
+  );
+  const compositionMissingAssemblerResult = runtimeComposition.indexOf(
+    '? undefined',
+    compositionMissingDurableReaderGate,
+  );
+  const compositionTrustedAssessmentAssemblerConstruction = runtimeComposition.indexOf(
+    ': new DormantProviderPositionTrustedChainAssessmentAssembler(',
+    compositionMissingAssemblerResult,
+  );
+  const compositionTrustedAssessmentAssemblerReader = runtimeComposition.indexOf(
+    'dependencies.durableChainAnchorReader,',
+    compositionTrustedAssessmentAssemblerConstruction,
+  );
   const compositionCoordinatorConstruction = runtimeComposition.indexOf(
     'const coordinator = new DormantProviderPositionAdmissionCoordinator(',
-    compositionDeadlineRunnerConstruction,
+    compositionTrustedAssessmentAssemblerReader,
   );
   const compositionCoordinatorPolicy = runtimeComposition.indexOf(
     'dependencies.policyInput,',
@@ -2407,12 +2454,16 @@ function hasDormantProviderPositionReadBoundaryContract(
     compositionCoordinatorDeadlineRunner,
   );
   const compositionCoordinatorAssembly = runtimeComposition.indexOf(
-    'dependencies.trustedChainAssessmentAssembly,',
+    'trustedChainAssessmentAssembly,',
     compositionCoordinatorReviewedOptions,
   );
   const compositionFacadeReturn = runtimeComposition.indexOf(
     'return admissionFacade(coordinator, { closePostgres, endPool });',
     compositionCoordinatorAssembly,
+  );
+  const compositionConstructionCatch = runtimeComposition.indexOf(
+    '\n  } catch {',
+    compositionFacadeReturn,
   );
   const compositionRollbackHelper = runtimeComposition.indexOf('async function closeOwnedRuntime(');
   const compositionRollbackPostgres = runtimeComposition.indexOf(
@@ -2425,7 +2476,7 @@ function hasDormantProviderPositionReadBoundaryContract(
   );
   const compositionConstructionRollback = runtimeComposition.indexOf(
     'await closeOwnedRuntime({ closePostgres, endPool });',
-    compositionFacadeReturn,
+    compositionConstructionCatch,
   );
   const compositionConstructionFailure = runtimeComposition.indexOf(
     "return fail('PROVIDER_POSITION_ADMISSION_COMPOSITION_CONSTRUCTION_FAILED');",
@@ -2952,9 +3003,24 @@ function hasDormantProviderPositionReadBoundaryContract(
       observation,
       'const observationFingerprint = mainnetProviderPositionObservationFingerprintV1({',
     ) === 1 &&
-    !runtimeComposition.includes('DormantProviderPositionTrustedChainAssessmentAssembler') &&
-    runtimeCompositionImportDeclarationCount === 17 &&
-    runtimeCompositionImportSources.length === 17 &&
+    exactExecutableLineCount(
+      runtimeComposition,
+      "const OPTIONAL_DEPENDENCY_KEYS = Object.freeze(['durableChainAnchorReader'] as const);",
+    ) === 1 &&
+    exactExecutableLineCount(
+      runtimeComposition,
+      'readonly durableChainAnchorReader?: ProviderPositionDurableChainAnchorReaderPort;',
+    ) === 1 &&
+    exactExecutableLineCount(
+      runtimeComposition,
+      'readonly durableChainAnchorReader: ProviderPositionDurableChainAnchorReaderPort | undefined;',
+    ) === 1 &&
+    exactExecutableLineCount(runtimeComposition, "'durableChainAnchorReader' in record") === 1 &&
+    !runtimeComposition.includes("'trustedChainAssessmentAssembly'") &&
+    !runtimeComposition.includes('"trustedChainAssessmentAssembly"') &&
+    !runtimeComposition.includes('dependencies.trustedChainAssessmentAssembly') &&
+    runtimeCompositionImportDeclarationCount === 18 &&
+    runtimeCompositionImportSources.length === 18 &&
     runtimeCompositionImportSources[0] === 'node:util/types' &&
     runtimeCompositionImportSources[1] === 'pg' &&
     runtimeCompositionImportSources[2] === '../../accounts/domain/account-profile' &&
@@ -2975,11 +3041,24 @@ function hasDormantProviderPositionReadBoundaryContract(
     runtimeCompositionImportSources[11] ===
       '../application/ports/mainnet-provider-position-reader.port' &&
     runtimeCompositionImportSources[12] ===
-      '../application/ports/provider-position-trusted-chain-assessment-assembly.port' &&
+      '../application/ports/provider-position-durable-chain-anchor-reader.port' &&
     runtimeCompositionImportSources[13] === '../domain/mainnet-provider-position-coverage' &&
     runtimeCompositionImportSources[14] === '../domain/mainnet-provider-position-observation' &&
-    runtimeCompositionImportSources[15] === './node-provider-position-admission-deadline.runner' &&
-    runtimeCompositionImportSources[16] === './provider-position-admission-runtime-bounds' &&
+    runtimeCompositionImportSources[15] ===
+      './dormant-provider-position-trusted-chain-assessment.assembler' &&
+    runtimeCompositionImportSources[16] === './node-provider-position-admission-deadline.runner' &&
+    runtimeCompositionImportSources[17] === './provider-position-admission-runtime-bounds' &&
+    !runtimeCompositionImportSources.includes(
+      '../application/ports/provider-position-trusted-chain-assessment-assembly.port',
+    ) &&
+    exactExecutableLineCount(
+      runtimeComposition,
+      "import type { ProviderPositionDurableChainAnchorReaderPort } from '../application/ports/provider-position-durable-chain-anchor-reader.port';",
+    ) === 1 &&
+    exactExecutableLineCount(
+      runtimeComposition,
+      "import { DormantProviderPositionTrustedChainAssessmentAssembler } from './dormant-provider-position-trusted-chain-assessment.assembler';",
+    ) === 1 &&
     !forbiddenRuntimeCompositionCapability.test(runtimeComposition) &&
     !runtimeComposition.includes('Promise.race') &&
     runtimeBoundsImportDeclarationCount === 5 &&
@@ -3091,7 +3170,13 @@ function hasDormantProviderPositionReadBoundaryContract(
     compositionWalletServiceClock > compositionWalletServiceConfig &&
     compositionWalletReaderConstruction > compositionWalletServiceClock &&
     compositionDeadlineRunnerConstruction > compositionWalletReaderConstruction &&
-    compositionCoordinatorConstruction > compositionDeadlineRunnerConstruction &&
+    compositionTrustedAssessmentAssemblerDeclaration > compositionDeadlineRunnerConstruction &&
+    compositionMissingDurableReaderGate > compositionTrustedAssessmentAssemblerDeclaration &&
+    compositionMissingAssemblerResult > compositionMissingDurableReaderGate &&
+    compositionTrustedAssessmentAssemblerConstruction > compositionMissingAssemblerResult &&
+    compositionTrustedAssessmentAssemblerReader >
+      compositionTrustedAssessmentAssemblerConstruction &&
+    compositionCoordinatorConstruction > compositionTrustedAssessmentAssemblerReader &&
     compositionCoordinatorPolicy > compositionCoordinatorConstruction &&
     compositionCoordinatorFingerprint > compositionCoordinatorPolicy &&
     compositionCoordinatorSources > compositionCoordinatorFingerprint &&
@@ -3101,6 +3186,7 @@ function hasDormantProviderPositionReadBoundaryContract(
     compositionCoordinatorReviewedOptions > compositionCoordinatorDeadlineRunner &&
     compositionCoordinatorAssembly > compositionCoordinatorReviewedOptions &&
     compositionFacadeReturn > compositionCoordinatorAssembly &&
+    compositionConstructionCatch > compositionFacadeReturn &&
     exactExecutableLineCount(runtimeComposition, 'const pool: Pool = runtimeResource.pool;') ===
       1 &&
     exactExecutableLineCount(runtimeComposition, 'const postgres = new PostgresService(pool);') ===
@@ -3117,6 +3203,18 @@ function hasDormantProviderPositionReadBoundaryContract(
       runtimeComposition,
       'const deadlineRunner = new NodeProviderPositionAdmissionDeadlineRunner(dependencies.clock);',
     ) === 1 &&
+    exactExecutableLineCount(runtimeComposition, 'const trustedChainAssessmentAssembly =') === 1 &&
+    exactExecutableLineCount(
+      runtimeComposition,
+      'dependencies.durableChainAnchorReader === undefined',
+    ) === 1 &&
+    exactExecutableLineCount(runtimeComposition, '? undefined') === 1 &&
+    exactExecutableLineCount(
+      runtimeComposition,
+      ': new DormantProviderPositionTrustedChainAssessmentAssembler(',
+    ) === 1 &&
+    exactExecutableLineCount(runtimeComposition, 'dependencies.durableChainAnchorReader,') === 1 &&
+    exactExecutableLineCount(runtimeComposition, 'trustedChainAssessmentAssembly,') === 1 &&
     exactExecutableLineCount(runtimeComposition, 'runtimeResource.admissionOptions,') === 1 &&
     exactExecutableLineCount(runtimeComposition, 'if (isProxy(current)) return undefined;') === 1 &&
     exactExecutableLineCount(
@@ -3199,16 +3297,52 @@ function hasDormantProviderPositionReadBoundaryContract(
     exactExecutableLineCount(compositionReaderContract, 'readCurrentPositions: (') === 1 &&
     compositionReaderContract.split('Reflect.apply(admitAndAssemble, coordinator, [').length - 1 ===
       1 &&
+    !/(?:durableChainAnchorReader|trustedChainAssessmentAssembly|DormantProviderPositionTrustedChainAssessmentAssembler|ProviderPositionDurableChainAnchorReaderPort)/u.test(
+      compositionReaderContract,
+    ) &&
     !compositionReaderContract.includes('Reflect.apply(admit, coordinator') &&
     !compositionReaderContract.includes('admissionCandidate:') &&
     !compositionReaderContract.includes('trustedChainAssessmentAssembly') &&
     !compositionReaderContract.includes('close,') &&
+    runtimeCompositionInterfaceContract.length > 0 &&
+    exactExecutableLineCount(
+      runtimeCompositionInterfaceContract,
+      "readonly admit: DormantProviderPositionAdmissionCoordinator['admit'];",
+    ) === 1 &&
+    exactExecutableLineCount(
+      runtimeCompositionInterfaceContract,
+      "readonly admitAndAssemble: DormantProviderPositionAdmissionCoordinator['admitAndAssemble'];",
+    ) === 1 &&
+    exactExecutableLineCount(
+      runtimeCompositionInterfaceContract,
+      'readonly reader: Readonly<MainnetProviderPositionReaderV3>;',
+    ) === 1 &&
+    exactExecutableLineCount(
+      runtimeCompositionInterfaceContract,
+      'readonly close: () => Promise<void>;',
+    ) === 1 &&
+    !/(?:durableChainAnchorReader|trustedChainAssessmentAssembly|DormantProviderPositionTrustedChainAssessmentAssembler|ProviderPositionDurableChainAnchorReaderPort)/u.test(
+      runtimeCompositionInterfaceContract,
+    ) &&
+    compositionPublicFacadeContract.length > 0 &&
+    exactExecutableLineCount(compositionPublicFacadeContract, 'admit: ((request) =>') === 1 &&
+    exactExecutableLineCount(compositionPublicFacadeContract, 'admitAndAssemble: ((request) =>') ===
+      1 &&
+    exactExecutableLineCount(compositionPublicFacadeContract, 'reader,') === 1 &&
+    exactExecutableLineCount(compositionPublicFacadeContract, 'close,') === 1 &&
+    !/(?:durableChainAnchorReader|trustedChainAssessmentAssembly|DormantProviderPositionTrustedChainAssessmentAssembler|ProviderPositionDurableChainAnchorReaderPort)/u.test(
+      compositionPublicFacadeContract,
+    ) &&
+    exactExecutableLineCount(
+      runtimeComposition,
+      'return admissionFacade(coordinator, { closePostgres, endPool });',
+    ) === 1 &&
     !runtimeComposition.includes('return runtimeResource') &&
     !runtimeComposition.includes('return pool') &&
     compositionRollbackHelper >= 0 &&
     compositionRollbackPostgres > compositionRollbackHelper &&
     compositionRollbackPool > compositionRollbackPostgres &&
-    compositionConstructionRollback > compositionFacadeReturn &&
+    compositionConstructionRollback > compositionConstructionCatch &&
     compositionConstructionFailure > compositionConstructionRollback &&
     compositionFacadeClose >= 0 &&
     compositionCloseMemo > compositionFacadeClose &&

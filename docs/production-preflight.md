@@ -234,6 +234,14 @@ identity, and exact verification contexts in a private `WeakMap`; assessment,
 request, and context drift fail closed. The assembler has no ambient provider,
 network, storage, persistence, or financial-action capability.
 
+The private dormant composition accepts exactly one optional trust dependency:
+`durableChainAnchorReader`. It imports the durable-reader port and concrete
+assembler directly, constructs the assembler inside the owned-resource rollback
+boundary after the deadline runner and before the coordinator, and passes that
+local assembler—not the raw reader—to the coordinator. A raw trusted-assembly
+dependency is rejected. Neither the outer facade nor its reader sub-capability
+exposes the durable reader or assembler.
+
 The coordinator binds the account, evaluation time, correlation ID, and exact
 shared signal into the roster request. The adapter and PostgreSQL repository
 each capture that signal once; the service preserves the parsed account ID and
@@ -257,7 +265,8 @@ resource constructs a lazy pool from its owned reviewed API configuration and
 returns that pool with the exact frozen admission-options snapshot. A private
 dormant composition now consumes that exact pool and options object into the
 concrete PostgreSQL -> wallet repository -> wallet service -> portfolio wallet
-reader -> deadline runner -> coordinator graph. Its outer facade retains
+reader -> deadline runner -> optional private trusted assembler -> coordinator
+graph. Its outer facade retains
 diagnostic admission, admission-and-assembly, and memoized close operations. A
 separate frozen null-prototype reader sub-capability exposes only its three
 version fields and `readCurrentPositions`; it invokes only the
@@ -278,9 +287,9 @@ Launch readiness remains blocked by
 `PROVIDER_POSITION_TRUSTED_ASSESSMENT_FEATURE_REGISTRATION_MISSING`, plus
 `PROVIDER_POSITION_DEADLINE_RUNNER_FEATURE_REGISTRATION_MISSING`. The concrete
 assembler does not clear any registration blocker: no concrete durable-anchor
-reader exists, the assembler is not injected into the dormant runtime
-composition or registered in the Nest/module/HTTP graph, and no deployed or live
-evidence exists. The concrete runner remains dormant and unregistered. Provider sources must cooperate with
+reader exists, its private composition wiring is not registered in the
+Nest/module/HTTP graph, and no deployed or live evidence exists. The concrete
+runner remains dormant and unregistered. Provider sources must cooperate with
 abort and settle before the runner can return. Wallet-roster cancellation now
 reaches the PostgreSQL query boundary, but active `pg` pool acquisition has no
 native signal cancellation. Acquisition and its subsequent teardown may

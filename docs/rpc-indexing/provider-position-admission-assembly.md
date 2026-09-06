@@ -82,7 +82,7 @@ It contains a deterministic proposed snapshot ID, agreed normalized positions, a
 
 ## Dormant trusted assembly boundary
 
-The optional `ProviderPositionTrustedChainAssessmentAssemblyPort` closes the in-process assembly contract. A concrete `DormantProviderPositionTrustedChainAssessmentAssembler` now implements it over an injected `ProviderPositionDurableChainAnchorReaderPort`, but supplies neither a concrete durable reader nor a production binding. Neither port nor implementation is exported by the feature barrel, registered in the Nest module, wired into the dormant runtime composition, or reachable from an HTTP endpoint. `admitAndAssemble` still fails with the sanitized `ASSEMBLY_UNAVAILABLE` code before reading wallets or providers when no trusted assembly port is injected.
+The optional `ProviderPositionTrustedChainAssessmentAssemblyPort` closes the in-process assembly contract. A concrete `DormantProviderPositionTrustedChainAssessmentAssembler` now implements it over an injected `ProviderPositionDurableChainAnchorReaderPort`, but supplies neither a concrete durable reader nor a production registration. The private dormant composition accepts only that optional durable reader, constructs the assembler internally inside its owned-resource rollback boundary, and passes the local assembler to the coordinator; callers cannot inject a raw trusted-assembly port. Neither port nor implementation is exported by the feature barrel, registered in the Nest module, or reachable from an HTTP endpoint. `admitAndAssemble` still fails with the sanitized `ASSEMBLY_UNAVAILABLE` code before reading wallets or providers when the composition receives no durable reader and therefore supplies no trusted assembly to the coordinator.
 
 When the port is present, the coordinator retains the same-cycle authoritative wallet roster and parsed policy rather than rereading or reconstructing either one. It deterministically selects the first canonically ordered accepted independent source for every agreed target position and builds immutable observation input. The assembly request binds:
 
@@ -114,9 +114,11 @@ Assembly shares the admission deadline, captures the port's methods once without
 
 ## Required production binding
 
-Production still needs a reviewed concrete durable-chain-anchor reader and
-explicit reviewed wiring of that reader and the trusted assembler into the
-bounded runtime composition. The local assembler already binds each exact
+Production still needs a reviewed concrete durable-chain-anchor reader,
+production registration, and deployed evidence. The local private wiring now
+constructs the trusted assembler only when that optional reader is present,
+after the deadline runner and before the coordinator, and never exposes either
+object through the facade or reader sub-capability. The local assembler already binds each exact
 Ethereum or Solana target and selected source to its continuity floor, anchor,
 evidence times, candidate fingerprint, account, correlation ID, deadline, and
 shared abort signal. It authenticates the opaque reader result against the exact
@@ -127,9 +129,9 @@ observation-verification contexts.
 
 The private dormant runtime composition continues to expose only its frozen
 null-prototype reader v3 sub-capability. No concrete durable-anchor reader,
-assembler-to-composition binding, registered production composition, or live
-chain evidence exists, so neither that reader nor `admitAndAssemble` is a live
-application path.
+registered production composition, deployed binding, or live chain evidence
+exists, so neither that reader nor `admitAndAssemble` is a live application
+path.
 
 The offline production preflight now byte-pins this coordinator, assembly port,
 durable-anchor reader port, dormant trusted-chain-assessment assembler, exact
@@ -139,8 +141,9 @@ resource, and private dormant composition with a selected twenty-four-file
 reader/domain/infrastructure/module/barrel/controller critical-source slice.
 Its local check rejects trust, timing, source-method substitution, active-controller
 lifecycle, signal substitution, cancellation/drain/cleanup, query fallback,
-budget/configuration substitution, zero-target anchor, authority, or
-feature-surface drift inside that slice, but deliberately reports the reader,
+budget/configuration substitution, raw trusted-assembly injection, private
+assembler construction/argument bypass, facade exposure, zero-target anchor,
+authority, or feature-surface drift inside that slice, but deliberately reports the reader,
 trusted-assessment, and deadline-runner feature registrations as missing. It
 does not prove recursive dependency closure or scan every application module,
 and it performs no provider, chain, network, cloud, secret, transaction, or

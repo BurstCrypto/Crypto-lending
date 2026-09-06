@@ -1,10 +1,12 @@
 # Provider-position coverage and portfolio composition
 
 Status: repository-owned domain plus private dormant reader and
-trusted-chain-assessment assembler implementations. Neither is registered in
-Nest or reachable through HTTP/RPC/API runtime wiring. The assembler has no
-ambient I/O capability, and no concrete durable-chain-anchor reader
-implementation exists.
+trusted-chain-assessment assembler implementations. The private dormant
+composition accepts only an optional durable-chain-anchor reader and constructs
+the assembler internally; it does not accept a raw trusted-assembly bypass.
+None of this graph is registered in Nest or reachable through HTTP/RPC/API
+runtime wiring. The assembler has no ambient I/O capability, and no concrete
+durable-chain-anchor reader implementation exists.
 
 ## Exact coverage (version 1)
 
@@ -55,9 +57,11 @@ observation-policy, trusted-assembly, admission, module, barrel, and controller
 sources as one selected twenty-four-file dormant critical-source slice. A
 passing local source inspection does not prove recursive dependency closure,
 whole-application registration absence, a concrete durable-anchor reader,
-assembler-to-composition wiring, or live evidence. The reader,
-trusted-assessment, and deadline-runner feature-registration blockers all
-remain open.
+or deployed/live evidence. It does pin the private construction path that
+passes the optional reader only to a newly constructed assembler and passes
+that local assembler only to the coordinator; neither the outer facade nor its
+reader sub-capability exposes either object. The reader, trusted-assessment, and
+deadline-runner feature-registration blockers all remain open.
 
 ## Conservative composition (version 1)
 

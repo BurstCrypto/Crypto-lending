@@ -1579,6 +1579,32 @@ test('provider-position read inspection rejects trust, runtime bounds, coverage,
     ],
     [
       'providerPositionRuntimeCompositionSource',
+      "const OPTIONAL_DEPENDENCY_KEYS = Object.freeze(['durableChainAnchorReader'] as const);",
+      "const OPTIONAL_DEPENDENCY_KEYS = Object.freeze(['durableChainAnchorReader', 'trustedChainAssessmentAssembly'] as const);",
+    ],
+    [
+      'providerPositionRuntimeCompositionSource',
+      ': new DormantProviderPositionTrustedChainAssessmentAssembler(\n            dependencies.durableChainAnchorReader,\n          );',
+      ': dependencies.durableChainAnchorReader;',
+    ],
+    [
+      'providerPositionRuntimeCompositionSource',
+      'trustedChainAssessmentAssembly,',
+      'dependencies.durableChainAnchorReader,',
+    ],
+    ['providerPositionRuntimeCompositionSource', 'trustedChainAssessmentAssembly,', 'undefined,'],
+    [
+      'providerPositionRuntimeCompositionSource',
+      'coverageVersion: MAINNET_PROVIDER_POSITION_COVERAGE_VERSION,\n    readCurrentPositions: (',
+      'coverageVersion: MAINNET_PROVIDER_POSITION_COVERAGE_VERSION,\n    trustedChainAssessmentAssembly: true,\n    readCurrentPositions: (',
+    ],
+    [
+      'providerPositionRuntimeCompositionSource',
+      'reader,\n    close,',
+      'reader,\n    durableChainAnchorReader: true,\n    close,',
+    ],
+    [
+      'providerPositionRuntimeCompositionSource',
       'runtimeResource.admissionOptions,',
       'dependencies.admissionOptions,',
     ],
