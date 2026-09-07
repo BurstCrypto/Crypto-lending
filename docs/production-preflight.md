@@ -162,9 +162,11 @@ exact extension inventory, and reviewed mutable-field window policy exist.
 Separately from that 73-artifact byte-pinned contract, the repository loader
 derives a private runtime-absence attestation from every lowercase `.ts` and
 `.tsx` file under `apps/api/src` that is not excluded by the exact pinned build
-exclusions (`*.spec.ts` and `*.e2e-spec.ts`): currently 395 files and 6,265,963
-bytes. Preflight rebaseline `667b112` pins the aggregate SHA-256 as
-`e3c282da6404df5d631b6b110dc52f48111beb1e087b0c56648661b70db737ad`.
+exclusions (`*.spec.ts` and `*.e2e-spec.ts`): currently 397 files and 6,363,882
+bytes. After the migration-`0033` binding correction in `5976d32` and the
+direct-import-only durable port and PostgreSQL adapter in `b7289ac`, the current
+aggregate SHA-256 is
+`799cca6719776545c28e8e0febc9b6e3cf237ab4883abe3fdd9d4e8b51ec9855`.
 The aggregate also binds the exact `nest-cli.json`, `tsconfig.json`, and
 `tsconfig.build.json` build inputs and the resolved
 `src/blockchain/domain/local-evm-development-manifest.json` runtime data input.
@@ -874,12 +876,33 @@ evaluator as source seven. The separately validated dormant mainnet action bound
 must pass `READ_ONLY_ISOLATION` and `MAINNET_WRITES`; its failure emits
 `MAINNET_ACTION_BOUNDARY_LOCAL_VALIDATION_FAILED`, never an RPC inventory blocker.
 Since `ee9204d` and `a387124`, that validator independently pins migration
-`0033`, its focused specification, and exact migration-index registration. It
-requires owner-only append-only lifecycle state, digest-only private evidence,
-post-bind crash recovery, and no application grant, repository/runtime
-reference, signer, broadcaster, or financial-action authority. Commit
-`a61bb57` adds three isolated test-schema/verifier-control cases against
-disposable PostgreSQL 16 without activating it or seeding lifecycle rows.
+`0033`, its focused specification, and exact migration-index registration.
+Commit `5976d32` corrects initial signed-submission binding and adds a guarded
+transition case. The validator now also pins the direct-import-only durable port,
+PostgreSQL adapter, focused unit specification, and guarded loopback integration
+specification added in `b7289ac` and `b0b39d9`. It requires owner-only
+append-only lifecycle state, digest-only private evidence, post-bind crash
+recovery, and no runtime registration, database grant, route, worker, signer,
+broadcaster, retry, settlement, or other financial-action authority. Commit
+`a61bb57` separately supplies three isolated test-schema/verifier-control cases
+against disposable PostgreSQL 16.
+
+The adapter accepts only the registry's active USDC, USDT, and PYUSD identities
+on Ethereum and Solana mainnet and an exact static allowlist of six Ethereum and
+four Solana provider/protocol bindings. These are input restrictions, not live
+providers: the live-provider count remains 0/10. Each database method validates
+before I/O and can issue at most one fixed migration-`0033` function call,
+without a loop or automatic retry. A thrown, aborted, or malformed post-dispatch
+result is `DATABASE_OUTCOME_UNKNOWN`; post-wallet ambiguity is
+`READ_THEN_RECONCILE_ONLY` and cannot authorize resend.
+
+This boundary remains unregistered and ungranted. It has no plaintext wallet-
+address-to-identity-digest proof, cryptographic signature verification,
+authenticated live reconciliation source, provider credential or approved
+write manifest, provider/legal/security/finance approval, release-bound deployed
+evidence, signing or broadcast authority, ledger-settlement authority, or
+deep-reorg reversal workflow.
+
 A third independent local result validates the closed,
 reviewed four-provider capture packet for Compound, Euler, Gearbox, and Jupiter,
 including its exact compiled SHA-256 and sidecar. This packet covers the four
@@ -1111,9 +1134,9 @@ commit `5550fbf` bring the current provider-position boundary to 45 artifacts an
 commits `5fcc7ca` and `040e93a`, while the dormant-action validator covers
 `ee9204d` and `a387124`; `a61bb57` supplies separate disposable PostgreSQL
 integration coverage. None enlarges that slice. Preflight rebaseline `667b112`
-pins
-the reviewed whole-API runtime snapshot at 395 files and 6,265,963 bytes with
-SHA-256 `e3c282da6404df5d631b6b110dc52f48111beb1e087b0c56648661b70db737ad`.
+was the prior runtime pin. After `5976d32` and `b7289ac`, the reviewed whole-API
+runtime snapshot is 397 files and 6,363,882 bytes with SHA-256
+`799cca6719776545c28e8e0febc9b6e3cf237ab4883abe3fdd9d4e8b51ec9855`.
 The record-intent migration was also exercised
 in a disposable local PostgreSQL 16 instance: all six focused integration cases
 passed, covering clean up/down/up migration verification, Ethereum and Solana
@@ -1122,13 +1145,20 @@ invalid dispatch-token rejection, and deferred-constraint rollback of a direct
 late record. This is local database evidence only; it is not production
 PostgreSQL, provider, mainnet, deployment, or external-service evidence.
 
-Migration `0033` separately passed three focused disposable PostgreSQL 16 cases:
-the test-schema migration chain through `0033` plus its isolated-schema verifier,
-rejection of a rolled-back reconciliation index or normalized-check tamper, and
-SQLSTATE `22023` rejection of a null expected revision with zero retained
-history. It does not run the production-principal verifier or seed lifecycle
-rows. This verifies dormant schema controls only; no repository, runtime grant,
-provider binding, or write authority exists.
+Migration `0033` separately passed the three focused disposable PostgreSQL 16
+schema/verifier-control cases from `a61bb57`: the test-schema migration chain
+through `0033` plus its isolated-schema verifier, rejection of a rolled-back
+reconciliation index or normalized-check tamper, and SQLSTATE `22023` rejection
+of a null expected revision with zero retained history. The `5976d32` correction
+adds a guarded lifecycle transition case that prepares and binds, then revokes
+the wallet, fails the linked yield operation, and directly reconciles an
+`UNKNOWN` result without a broadcast event, resend, or ledger authority. The
+`b0b39d9` guarded adapter integration case additionally exercises prepare, bind,
+direct reconciliation, authenticated result review, and read through the
+shipped adapter. These use unique disposable schemas on loopback PostgreSQL 16
+and digest-only private evidence. They do not run the production-principal
+verifier or prove a provider, signature, mainnet transaction, deployment, or
+write authorization.
 
 These checks are also part of the root `lint`, `typecheck`, and `test` scripts
 used by CI.
