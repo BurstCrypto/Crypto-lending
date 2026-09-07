@@ -17,6 +17,8 @@ import {
 import { join, normalize, parse, resolve } from 'node:path';
 import { TextDecoder } from 'node:util';
 
+import { validateEd25519PublicKeyBytes } from '../infra/shared/validate-ed25519-public-key.mjs';
+
 export const PUBLIC_LAUNCH_AUTHORITY_DECISION_SCHEMA_VERSION = 2 as const;
 export const MAX_PUBLIC_LAUNCH_AUTHORITY_DECISION_BYTES = 131_072 as const;
 export const MAX_PUBLIC_LAUNCH_DECISION_VALIDITY_MILLISECONDS = 7 * 24 * 60 * 60 * 1_000;
@@ -42,6 +44,7 @@ const KEY_ID_PATTERN = /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/u;
 const TARGET_ID_PATTERN = /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/u;
 const SAFE_REFERENCE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/-]{2,191}$/u;
 const BASE64_PATTERN = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u;
+const ED25519_SPKI_PREFIX = Buffer.from('302a300506032b6570032100', 'hex');
 const MAX_AUTHORITY_KEYS = 64;
 
 const ROOT_KEYS = Object.freeze([
@@ -358,7 +361,17 @@ function canonicalBase64(value: unknown, expectedBytes?: number): Buffer {
 }
 
 function publicKey(value: unknown): Readonly<{ key: KeyObject; canonicalDerBase64: string }> {
-  const der = canonicalBase64(value);
+  const der = canonicalBase64(value, 44);
+  if (!der.subarray(0, ED25519_SPKI_PREFIX.length).equals(ED25519_SPKI_PREFIX)) {
+    return invalid();
+  }
+  try {
+    // DER/algorithm acceptance alone does not make an Ed25519 point a safe
+    // authority key; reject identity, torsion, and mixed-subgroup points first.
+    validateEd25519PublicKeyBytes(der.subarray(ED25519_SPKI_PREFIX.length));
+  } catch {
+    return invalid();
+  }
   let key: KeyObject;
   try {
     key = createPublicKey({ key: der, format: 'der', type: 'spki' });

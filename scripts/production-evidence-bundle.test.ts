@@ -1532,6 +1532,38 @@ test('one signer, one physical key in two roles, or a missing technical role can
   );
 });
 
+test('rejects an identity Ed25519 authority key and forged identity signature', () => {
+  const identityPoint = Buffer.alloc(32);
+  identityPoint[0] = 1;
+  const identitySpki = Buffer.concat([
+    Buffer.from('302a300506032b6570032100', 'hex'),
+    identityPoint,
+  ]);
+  const forgedBundle = jsonRecord(signedBundleBytes());
+  const forgedSignatures = forgedBundle.signatures as unknown[];
+  const forgedIssuerSignature = mutableRecord(forgedSignatures[0]);
+  forgedIssuerSignature.valueBase64 = Buffer.concat([identityPoint, Buffer.alloc(32)]).toString(
+    'base64',
+  );
+  const forgedRegistry = authorityRegistry([
+    authorityKey('DEPLOYMENT_EVIDENCE_ISSUER', 'deployment-evidence-issuer', ISSUER_KEY.publicKey, {
+      publicKeySpkiDerBase64: identitySpki.toString('base64'),
+    }),
+    authorityKey(
+      'INDEPENDENT_RELEASE_VERIFIER',
+      'independent-release-verifier',
+      VERIFIER_KEY.publicKey,
+    ),
+  ]);
+
+  expectInvalid(() =>
+    verifyProductionEvidenceBundleBytesWithTestRegistries(
+      canonicalBytes(forgedBundle),
+      testOptions({ authorityKeyRegistry: forgedRegistry }),
+    ),
+  );
+});
+
 test('additional scoped signatures are verified but do not replace the technical quorum', () => {
   const optionalSigner: TestSigner = {
     role: 'LEGAL_RELEASE_APPROVER',

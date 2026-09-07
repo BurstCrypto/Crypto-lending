@@ -17,6 +17,7 @@ import {
 import { join, normalize, parse, resolve } from 'node:path';
 import { TextDecoder } from 'node:util';
 
+import { validateEd25519PublicKeyBytes } from '../infra/shared/validate-ed25519-public-key.mjs';
 // @ts-expect-error The operations-owned audited manifest boundary is an ESM JavaScript module.
 import * as releaseCandidateManifest from './release-candidate-manifest.mjs';
 import {
@@ -41,6 +42,7 @@ const TARGET_ID_PATTERN = /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/u;
 const PROVIDER_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
 const SAFE_REFERENCE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/-]{2,191}$/u;
 const BASE64_PATTERN = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u;
+const ED25519_SPKI_PREFIX = Buffer.from('302a300506032b6570032100', 'hex');
 const AWS_REGION_PATTERN = /^[a-z]{2}-[a-z]+-[1-9][0-9]?$/u;
 const RDS_DATABASE_ARN_RESOURCE_PATTERN = /^db:[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$/u;
 const RDS_MANAGED_SECRET_ARN_RESOURCE_PATTERN = /^secret:rds!db-[A-Za-z0-9/_+=.@-]{1,512}$/u;
@@ -902,7 +904,17 @@ function publicKey(value: unknown): Readonly<{
   spkiDerBase64: string;
   sha256: string;
 }> {
-  const der = canonicalBase64(value);
+  const der = canonicalBase64(value, 44);
+  if (!der.subarray(0, ED25519_SPKI_PREFIX.length).equals(ED25519_SPKI_PREFIX)) {
+    return invalid();
+  }
+  try {
+    // DER/algorithm acceptance alone does not make an Ed25519 point a safe
+    // authority key; reject identity, torsion, and mixed-subgroup points first.
+    validateEd25519PublicKeyBytes(der.subarray(ED25519_SPKI_PREFIX.length));
+  } catch {
+    return invalid();
+  }
   let key: KeyObject;
   try {
     key = createPublicKey({ key: der, format: 'der', type: 'spki' });

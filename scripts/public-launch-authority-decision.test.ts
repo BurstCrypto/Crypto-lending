@@ -358,6 +358,24 @@ test('rejects reuse of an authority ID or identical authority key material acros
   assertInvalid(() => verify(bytes(), optionsWithRegistry(duplicateRegistryId)));
 });
 
+test('rejects an identity Ed25519 authority key and forged identity signature', () => {
+  const identityPoint = Buffer.alloc(32);
+  identityPoint[0] = 1;
+  const identitySpki = Buffer.concat([
+    Buffer.from('302a300506032b6570032100', 'hex'),
+    identityPoint,
+  ]);
+  const forgedDecisionSet = mutableRoot();
+  objectValue(rootDecision(forgedDecisionSet, 0).signature).valueBase64 = Buffer.concat([
+    identityPoint,
+    Buffer.alloc(32),
+  ]).toString('base64');
+  const forgedRegistry = mutableRegistry();
+  registryKey(forgedRegistry, 0).publicKeySpkiDerBase64 = identitySpki.toString('base64');
+
+  assertInvalid(() => verify(bytes(forgedDecisionSet), optionsWithRegistry(forgedRegistry)));
+});
+
 test('rejects wrong registry role, status, validity, ordering, and missing authority', () => {
   const wrongRole = mutableRegistry();
   registryKey(wrongRole, 0).role = PUBLIC_LAUNCH_AUTHORITY_ROLES[1];
