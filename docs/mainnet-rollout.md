@@ -163,6 +163,30 @@ rejects resolvable or loaded PostgreSQL auto-instrumentation packages, including
 `elastic-apm-node`. These local protections add no instrumentation, database or
 provider call, image build, deployment, or live evidence.
 
+## Dormant financial-action intent boundary
+
+The `apps/api/src/mainnet-actions/domain` subtree is an isolated, direct-import-
+only description and validation boundary for a possible future action intent.
+It binds one intent to one Ethereum or Solana wallet, provider/protocol pair,
+market/program, current registry asset, action, exact allowance, fee caps,
+post-action reserve, value estimate, UUIDv4 replay identifier, idempotency-key
+digest, issuance time, and exclusive expiry no more than five minutes after
+issuance. Cross-chain execution, API signing, API broadcast, automatic resend,
+and automatic fee escalation are all explicitly false; the user wallet is the
+only named signer and broadcaster.
+
+The subtree has no route, module, dependency-injection registration, runtime or
+environment configuration, transport, RPC call, transaction construction,
+signing, submission, credential, or persistence adapter. Its only exported
+policy is immutable and `DISABLED`: both chain kill switches are `HALT`, every
+provider/market/asset/action/wallet approval list is empty, and the per-
+transaction, per-wallet daily, global daily, total-outstanding, network-fee,
+allowance, unresolved-intent, and wallet-allowlist limits are all zero. Durable
+replay protection and limit counters are unavailable. Consequently every
+well-formed candidate is still returned as `DENY` with financial-action
+authority false; syntactic validation is not provider, market, or write
+approval and does not change the zero transaction-enabled-provider count.
+
 ## Additional gates before any real-value write
 
 - Select and approve an exact Ethereum or Solana provider, market/program,
