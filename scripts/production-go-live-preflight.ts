@@ -981,7 +981,7 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
   mainnetBalanceAgreementEvidenceV2MigrationSource:
     'c9afef59a9101d568597eb37845d6d2a997edf63f1496d3d04296075fcc61fff',
   migrationIndexSource: '58a83e45c98c5e2d99b5fe982aef0770c11e55cc037341c45d1b60cd4d8edd78',
-  releaseManifestSource: 'be48e1413bd8dab9378436e4fd381fed3029c126f09fec675b5bebaf2ef53246',
+  releaseManifestSource: '366fcfcdc28a0046284f79e5cfc59b2db3835e70ea57d61d634667f65d6baf94',
   productionContainerValidatorSource:
     'a9fbc9e638f4a33266e823ff8c07a9b53703e1bc8f1f4f46eab30c7b50a9b0b0',
 } satisfies Readonly<Record<keyof BalanceConsumerArtifactSources, string>>);

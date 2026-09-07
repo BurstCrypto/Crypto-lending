@@ -53,6 +53,13 @@ resource and image identities do not exist until after provisioning. A future
 independently signed post-deploy enrollment protocol is still required; this
 runtime performs no I/O, provisioning, enrollment, or deployment.
 
+The deployment-intent validator is staged with its exact recursive local module
+closure. CI parses that closure, permits only its reviewed Node built-ins and
+named imports, rejects direct dynamic-loading, network, cloud, subprocess,
+filesystem-write, and environment access, and proves that native Node can import
+the validator from the sealed stage. This is a static capability boundary, not
+deployment authorization; the validator remains offline and non-executing.
+
 Generation additionally requires `HEAD` to equal the requested revision and
 rejects any staged, unstaged, non-ignored untracked, sparse, skip-worktree, or
 assume-unchanged source state. Git runs through a fixed platform-owned

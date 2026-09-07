@@ -204,6 +204,18 @@ export const RELEASE_COMPONENTS = Object.freeze([
     requiredFiles: Object.freeze(['.']),
   }),
   Object.freeze({
+    name: 'production-deployment-intent-strict-json-runtime',
+    path: 'infra/shared/parse-strict-json.mjs',
+    kind: 'file',
+    requiredFiles: Object.freeze(['.']),
+  }),
+  Object.freeze({
+    name: 'production-deployment-intent-secure-file-runtime',
+    path: 'infra/shared/read-secure-local-file.mjs',
+    kind: 'file',
+    requiredFiles: Object.freeze(['.']),
+  }),
+  Object.freeze({
     name: 'production-deployment-intent-inert-example',
     path: 'infra/aws/production-deployment-intent.example.json',
     kind: 'file',

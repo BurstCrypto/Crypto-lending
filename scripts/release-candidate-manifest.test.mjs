@@ -18,8 +18,11 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import { afterEach, test } from 'node:test';
+import { pathToFileURL } from 'node:url';
+
+import ts from 'typescript';
 
 import {
   RELEASE_COMPONENTS,
@@ -51,6 +54,43 @@ const BUILDER = Object.freeze({
   nodeVersion: 'v22.22.0',
   platform: 'linux',
 });
+const DEPLOYMENT_INTENT_ENTRY = 'infra/aws/validate-production-deployment-intent.mjs';
+const DEPLOYMENT_INTENT_MODULE_POLICY = Object.freeze({
+  [DEPLOYMENT_INTENT_ENTRY]: Object.freeze({
+    imports: Object.freeze([
+      '../shared/parse-strict-json.mjs|parseStrictJsonBytes',
+      '../shared/read-secure-local-file.mjs|readSecureLocalFile',
+      'node:crypto|createHash,createPublicKey,verify as verifySignature',
+      'node:path|dirname,isAbsolute,join,relative,resolve',
+      'node:perf_hooks|performance',
+      'node:url|fileURLToPath',
+      'node:util|TextDecoder,types as utilTypes',
+    ]),
+    processMembers: Object.freeze(['argv', 'exitCode', 'platform', 'stderr', 'stdout']),
+  }),
+  'infra/shared/parse-strict-json.mjs': Object.freeze({
+    imports: Object.freeze(['node:util|TextDecoder']),
+    processMembers: Object.freeze([]),
+  }),
+  'infra/shared/read-secure-local-file.mjs': Object.freeze({
+    imports: Object.freeze([
+      'node:fs|closeSync,constants as fsConstants,fstatSync,lstatSync,openSync,readSync,realpathSync',
+      'node:path|isAbsolute,join,normalize,parse,relative,resolve',
+    ]),
+    processMembers: Object.freeze(['platform']),
+  }),
+});
+const FORBIDDEN_DIRECT_CAPABILITIES = new Set([
+  'EventSource',
+  'Function',
+  'WebSocket',
+  'XMLHttpRequest',
+  'eval',
+  'fetch',
+  'module',
+  'navigator',
+  'require',
+]);
 const temporaryDirectories = [];
 
 function makeRemovable(path) {
@@ -128,6 +168,233 @@ function initializeRepository(root) {
     revision: git(root, ['rev-parse', 'HEAD']),
     tree: git(root, ['rev-parse', 'HEAD^{tree}']),
   };
+}
+
+function importDescriptor(node) {
+  assert.ok(ts.isStringLiteral(node.moduleSpecifier));
+  assert.equal(node.attributes, undefined);
+  const bindings = [];
+  const clause = node.importClause;
+  assert.ok(clause, 'Side-effect-only imports are not permitted in the offline intent closure.');
+  if (clause.name) bindings.push(`default as ${clause.name.text}`);
+  if (clause.namedBindings) {
+    if (ts.isNamespaceImport(clause.namedBindings)) {
+      bindings.push(`* as ${clause.namedBindings.name.text}`);
+    } else {
+      for (const element of clause.namedBindings.elements) {
+        const imported = element.propertyName?.text ?? element.name.text;
+        bindings.push(
+          imported === element.name.text ? imported : `${imported} as ${element.name.text}`,
+        );
+      }
+    }
+  }
+  return `${node.moduleSpecifier.text}|${bindings.sort().join(',')}`;
+}
+
+function processMember(node) {
+  const parent = node.parent;
+  if (ts.isPropertyAccessExpression(parent) && parent.expression === node) return parent.name.text;
+  if (
+    ts.isElementAccessExpression(parent) &&
+    parent.expression === node &&
+    ts.isStringLiteral(parent.argumentExpression)
+  ) {
+    return parent.argumentExpression.text;
+  }
+  return undefined;
+}
+
+function identifierIsValueReference(node) {
+  const parent = node.parent;
+  if (ts.isDeclarationName(node)) return false;
+  if (ts.isPropertyAccessExpression(parent) && parent.name === node) return false;
+  if (ts.isPropertyAssignment(parent) && parent.name === node) return false;
+  if (ts.isImportSpecifier(parent) || ts.isExportSpecifier(parent)) return false;
+  return true;
+}
+
+function unwrapExpression(node) {
+  return ts.isParenthesizedExpression(node) ? unwrapExpression(node.expression) : node;
+}
+
+function isFsConstant(node, name) {
+  const expression = unwrapExpression(node);
+  return (
+    ts.isPropertyAccessExpression(expression) &&
+    ts.isIdentifier(expression.expression) &&
+    expression.expression.text === 'fsConstants' &&
+    expression.name.text === name
+  );
+}
+
+function isSafeNoFollowInitializer(node) {
+  const expression = unwrapExpression(node);
+  if (ts.isNumericLiteral(expression)) return expression.text === '0';
+  if (isFsConstant(expression, 'O_NOFOLLOW')) return true;
+  if (
+    ts.isBinaryExpression(expression) &&
+    expression.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken
+  ) {
+    return (
+      isSafeNoFollowInitializer(expression.left) && isSafeNoFollowInitializer(expression.right)
+    );
+  }
+  if (ts.isConditionalExpression(expression)) {
+    return (
+      isSafeNoFollowInitializer(expression.whenTrue) &&
+      isSafeNoFollowInitializer(expression.whenFalse)
+    );
+  }
+  return false;
+}
+
+function isReadOnlyOpenFlags(node, safeNoFollowBinding) {
+  const expression = unwrapExpression(node);
+  if (isFsConstant(expression, 'O_RDONLY') || isFsConstant(expression, 'O_NOFOLLOW')) return true;
+  if (ts.isNumericLiteral(expression)) return expression.text === '0';
+  if (ts.isIdentifier(expression)) return expression.text === 'noFollow' && safeNoFollowBinding;
+  return (
+    ts.isBinaryExpression(expression) &&
+    expression.operatorToken.kind === ts.SyntaxKind.BarToken &&
+    isReadOnlyOpenFlags(expression.left, safeNoFollowBinding) &&
+    isReadOnlyOpenFlags(expression.right, safeNoFollowBinding)
+  );
+}
+
+function inspectDeploymentIntentModule(modulePath, source) {
+  const policy = DEPLOYMENT_INTENT_MODULE_POLICY[modulePath];
+  assert.ok(policy, `Unreviewed local module in deployment-intent closure: ${modulePath}`);
+  const parsed = ts.createSourceFile(
+    modulePath,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.JS,
+  );
+  assert.equal(parsed.parseDiagnostics.length, 0, `Invalid JavaScript in ${modulePath}`);
+  const imports = [];
+  const localImports = [];
+  let safeNoFollowDeclaration;
+
+  function inspectBinding(node) {
+    if (
+      ts.isVariableDeclaration(node) &&
+      ts.isIdentifier(node.name) &&
+      node.name.text === 'noFollow'
+    ) {
+      assert.equal(
+        safeNoFollowDeclaration,
+        undefined,
+        `Duplicate noFollow binding in ${modulePath}`,
+      );
+      assert.ok(
+        node.initializer &&
+          ts.isVariableDeclarationList(node.parent) &&
+          (node.parent.flags & ts.NodeFlags.Const) !== 0 &&
+          isSafeNoFollowInitializer(node.initializer),
+        `Unsafe noFollow binding in ${modulePath}`,
+      );
+      safeNoFollowDeclaration = node.name;
+    }
+    ts.forEachChild(node, inspectBinding);
+  }
+  inspectBinding(parsed);
+
+  function visit(node) {
+    if (ts.isImportDeclaration(node)) {
+      const descriptor = importDescriptor(node);
+      imports.push(descriptor);
+      const specifier = node.moduleSpecifier.text;
+      if (specifier.startsWith('./') || specifier.startsWith('../')) localImports.push(specifier);
+    }
+    if (ts.isExportDeclaration(node) && node.moduleSpecifier) {
+      assert.fail(`Runtime re-exports are not permitted in ${modulePath}`);
+    }
+    if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
+      assert.fail(`Dynamic import is not permitted in ${modulePath}`);
+    }
+    if (
+      ts.isIdentifier(node) &&
+      identifierIsValueReference(node) &&
+      FORBIDDEN_DIRECT_CAPABILITIES.has(node.text)
+    ) {
+      assert.fail(`Direct ${node.text} capability is not permitted in ${modulePath}`);
+    }
+    if (
+      ts.isIdentifier(node) &&
+      identifierIsValueReference(node) &&
+      (node.text === 'global' ||
+        node.text === 'globalThis' ||
+        node.text === 'Bun' ||
+        node.text === 'Deno')
+    ) {
+      assert.fail(`Ambient ${node.text} capability is not permitted in ${modulePath}`);
+    }
+    if (ts.isIdentifier(node) && node.text === 'openSync' && identifierIsValueReference(node)) {
+      const call = node.parent;
+      assert.ok(
+        ts.isCallExpression(call) &&
+          call.expression === node &&
+          call.arguments.length === 2 &&
+          isReadOnlyOpenFlags(call.arguments[1], safeNoFollowDeclaration !== undefined),
+        `openSync must remain a direct read-only call in ${modulePath}`,
+      );
+    }
+    if (
+      ts.isIdentifier(node) &&
+      node.text === 'noFollow' &&
+      ts.isDeclarationName(node) &&
+      node !== safeNoFollowDeclaration
+    ) {
+      assert.fail(`Shadowed noFollow binding is not permitted in ${modulePath}`);
+    }
+    if (ts.isIdentifier(node) && node.text === 'process') {
+      assert.ok(
+        policy.processMembers.includes(processMember(node)),
+        `Unreviewed process capability in ${modulePath}`,
+      );
+    }
+    if (ts.isIdentifier(node) && node.text === 'fsConstants' && identifierIsValueReference(node)) {
+      const access = node.parent;
+      assert.ok(
+        ts.isPropertyAccessExpression(access) &&
+          access.expression === node &&
+          (access.name.text === 'O_RDONLY' || access.name.text === 'O_NOFOLLOW'),
+        `Only read-only filesystem flags are permitted in ${modulePath}`,
+      );
+    }
+    ts.forEachChild(node, visit);
+  }
+  visit(parsed);
+  assert.deepEqual(
+    imports.sort(),
+    [...policy.imports].sort(),
+    `Import capability drift in ${modulePath}`,
+  );
+  return localImports;
+}
+
+function deploymentIntentLocalClosure(root = REPOSITORY_ROOT) {
+  const pending = [DEPLOYMENT_INTENT_ENTRY];
+  const inspected = new Set();
+  while (pending.length > 0) {
+    const modulePath = pending.pop();
+    if (inspected.has(modulePath)) continue;
+    inspected.add(modulePath);
+    const absolutePath = resolve(root, ...modulePath.split('/'));
+    const source = readFileSync(absolutePath, 'utf8');
+    for (const specifier of inspectDeploymentIntentModule(modulePath, source)) {
+      assert.match(specifier, /^\.\.?\/.+\.mjs$/u);
+      const dependencyPath = relative(root, resolve(dirname(absolutePath), specifier)).replaceAll(
+        '\\',
+        '/',
+      );
+      assert.doesNotMatch(dependencyPath, /^\.\.\//u);
+      pending.push(dependencyPath);
+    }
+  }
+  return [...inspected].sort();
 }
 
 function resignComponent(component) {
@@ -370,7 +637,7 @@ test('binds the inert production infrastructure contract as an exact release com
   assert.throws(() => verifyReleaseManifest(root, manifest), ReleaseManifestError);
 });
 
-test('binds the production deployment-target runtime, intent validator, and inert example exactly', () => {
+test('binds the production deployment-target and deployment-intent runtimes exactly', () => {
   const specifications = [
     {
       name: 'production-deployment-target-validator',
@@ -381,6 +648,18 @@ test('binds the production deployment-target runtime, intent validator, and iner
     {
       name: 'production-deployment-intent-validator',
       path: 'infra/aws/validate-production-deployment-intent.mjs',
+      kind: 'file',
+      requiredFiles: ['.'],
+    },
+    {
+      name: 'production-deployment-intent-strict-json-runtime',
+      path: 'infra/shared/parse-strict-json.mjs',
+      kind: 'file',
+      requiredFiles: ['.'],
+    },
+    {
+      name: 'production-deployment-intent-secure-file-runtime',
+      path: 'infra/shared/read-secure-local-file.mjs',
       kind: 'file',
       requiredFiles: ['.'],
     },
@@ -414,6 +693,89 @@ test('binds the production deployment-target runtime, intent validator, and iner
     appendFileSync(componentPath, 'drift', 'utf8');
     assert.throws(() => verifyReleaseManifest(root, manifest), ReleaseManifestError);
   }
+});
+
+test('stages the exact offline deployment-intent module closure with no unreviewed capabilities', () => {
+  const expectedClosure = Object.keys(DEPLOYMENT_INTENT_MODULE_POLICY).sort();
+  assert.deepEqual(deploymentIntentLocalClosure(), expectedClosure);
+  for (const modulePath of expectedClosure) {
+    const components = RELEASE_COMPONENTS.filter(({ path }) => path === modulePath);
+    assert.equal(components.length, 1, modulePath);
+    const [component] = components;
+    assert.equal(component.kind, 'file');
+    assert.deepEqual(component.requiredFiles, ['.']);
+  }
+
+  const validatorSource = readFileSync(resolve(REPOSITORY_ROOT, DEPLOYMENT_INTENT_ENTRY), 'utf8');
+  for (const forbiddenSource of [
+    "import('node:https');",
+    "require('node:child_process');",
+    'const loadBuiltin = require; void loadBuiltin;',
+    "fetch('https://example.invalid');",
+    'const sendNetworkRequest = fetch; void sendNetworkRequest;',
+    'const DynamicFunction = Function; void DynamicFunction;',
+    "process.getBuiltinModule('node:child_process');",
+    'process.env.AWS_PROFILE;',
+    "import { writeFileSync } from 'node:fs';",
+    "import { spawnSync } from 'node:child_process';",
+    "import { CloudFormationClient } from '@aws-sdk/client-cloudformation';",
+    "export * from '../shared/read-secure-local-file.mjs';",
+  ]) {
+    assert.throws(
+      () =>
+        inspectDeploymentIntentModule(
+          DEPLOYMENT_INTENT_ENTRY,
+          `${validatorSource}\n${forbiddenSource}\n`,
+        ),
+      undefined,
+      forbiddenSource,
+    );
+  }
+  const secureFileModule = 'infra/shared/read-secure-local-file.mjs';
+  const secureFileSource = readFileSync(resolve(REPOSITORY_ROOT, secureFileModule), 'utf8');
+  assert.throws(() =>
+    inspectDeploymentIntentModule(
+      secureFileModule,
+      secureFileSource.replace('fsConstants.O_RDONLY | noFollow', "'w'"),
+    ),
+  );
+  assert.throws(() =>
+    inspectDeploymentIntentModule(
+      secureFileModule,
+      `${secureFileSource}\nfunction shadowed(noFollow) { openSync('unsafe', noFollow); }\n`,
+    ),
+  );
+
+  const root = createWorkspace();
+  for (const modulePath of expectedClosure) {
+    writeFileSync(
+      resolve(root, ...modulePath.split('/')),
+      readFileSync(resolve(REPOSITORY_ROOT, ...modulePath.split('/'))),
+    );
+  }
+  const source = initializeRepository(root);
+  runCli(['create', '--source-revision', source.revision], root);
+  runCli(['stage', '--source-revision', source.revision], root);
+  const stageRoot = resolve(root, ...RELEASE_STAGE_PATH.split('/'));
+  const stagedValidatorUrl = pathToFileURL(
+    resolve(stageRoot, ...DEPLOYMENT_INTENT_ENTRY.split('/')),
+  ).href;
+  const nativeImport = spawnSync(
+    process.execPath,
+    ['--input-type=module', '--eval', 'await import(process.argv[1]);', stagedValidatorUrl],
+    {
+      cwd: stageRoot,
+      encoding: 'utf8',
+      env: Object.fromEntries(
+        ['SystemRoot', 'TEMP', 'TMP', 'WINDIR'].flatMap((name) =>
+          typeof process.env[name] === 'string' ? [[name, process.env[name]]] : [],
+        ),
+      ),
+      windowsHide: true,
+    },
+  );
+  assert.equal(nativeImport.status, 0, nativeImport.stderr);
+  assert.equal(nativeImport.stdout, '');
 });
 
 test('detects drift in build output and every preflight decision binding', () => {
