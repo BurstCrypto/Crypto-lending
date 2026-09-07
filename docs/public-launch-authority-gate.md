@@ -33,15 +33,17 @@ The registry is the trust anchor. A decision artifact cannot embed, replace, or 
 
 ## Exact release and deployment scope
 
-All seven signatures cover the same three-part target binding:
+All seven signatures cover the same four-part target binding:
 
 - the exact lowercase SHA-256 of the release-candidate manifest;
-- the exact deployment target ID; and
-- the exact lowercase SHA-256 of the deployment-target configuration.
+- the exact deployment target ID;
+- the exact lowercase SHA-256 of the deployment-target configuration; and
+- the exact lowercase SHA-256 of the verified production technical-evidence bundle.
 
 Changing any binding value invalidates every signature. This prevents an approval for one source
 candidate, AWS target, region, account configuration, or infrastructure configuration from being
-replayed for another.
+replayed for another, and prevents an approval from being reused with replacement technical
+evidence for the same candidate and target.
 
 Each signed decision also covers its role, exact `PUBLIC_MAINNET_LAUNCH` scope, authority key ID,
 explicit `APPROVED` decision, canonical approval and expiry timestamps, and approval reference. A
@@ -57,7 +59,7 @@ bytes directly rather than reproduce serialization separately.
 
 ## Artifact and file boundary
 
-The verifier accepts only the version-1 `PUBLIC_LAUNCH_AUTHORITY_DECISION_SET` shape. Objects have
+The verifier accepts only the version-2 `PUBLIC_LAUNCH_AUTHORITY_DECISION_SET` shape. Objects have
 exact fields, arrays are dense and ordinary, all seven decisions are present in the required order,
 and unknown fields are rejected. The input must be byte-for-byte canonical JSON encoded as UTF-8.
 Whitespace variants, duplicate JSON keys, byte-order marks, NUL bytes, invalid UTF-8, malformed or
@@ -96,8 +98,8 @@ reviews themselves.
    organization's approved key-management process.
 2. A reviewed source change adds only canonical public-key records to the production registry,
    with one role per distinct key and bounded validity.
-3. Release tooling supplies the final release-candidate manifest hash and the final deployment
-   target ID/configuration hash.
+3. Release tooling supplies the final release-candidate manifest hash, final deployment target
+   ID/configuration hash, and the verified technical-evidence bundle hash.
 4. Each authority signs its own short-lived `APPROVED` decision for that exact binding.
 5. The seven decisions are assembled as canonical JSON without adding trust material.
 6. Production preflight must load the stable file, verify it, and require the privately branded
@@ -105,9 +107,10 @@ reviews themselves.
 
 The independent verifier is implemented in `scripts/public-launch-authority-decision.ts` and is a
 hard `PUBLIC_LAUNCH_AUTHORITIES` check in both production-preflight readiness paths. The CLI accepts
-its file only with the complete technical-evidence trio. It maps the verified bundle's
-`releaseCandidateManifestSha256`, `deploymentTargetId`, and `deploymentTargetSha256` to the launch
-decision binding; no separate binding assertion is accepted from the caller. Final readiness
+its file only with the complete technical-evidence inputs. It maps the verified bundle's
+`releaseCandidateManifestSha256`, `deploymentTargetId`, `deploymentTargetSha256`, and
+`bundleSha256` to the launch decision binding; no separate binding assertion is accepted from the
+caller. Final readiness
 revalidates both the branded technical evidence and clean release state before revalidating the
 authority decision, closing drift or expiry during authority-file loading.
 

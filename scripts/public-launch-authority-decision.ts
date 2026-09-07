@@ -17,7 +17,7 @@ import {
 import { join, normalize, parse, resolve } from 'node:path';
 import { TextDecoder } from 'node:util';
 
-export const PUBLIC_LAUNCH_AUTHORITY_DECISION_SCHEMA_VERSION = 1 as const;
+export const PUBLIC_LAUNCH_AUTHORITY_DECISION_SCHEMA_VERSION = 2 as const;
 export const MAX_PUBLIC_LAUNCH_AUTHORITY_DECISION_BYTES = 131_072 as const;
 export const MAX_PUBLIC_LAUNCH_DECISION_VALIDITY_MILLISECONDS = 7 * 24 * 60 * 60 * 1_000;
 export const MAX_PUBLIC_LAUNCH_AUTHORITY_KEY_VALIDITY_MILLISECONDS = 400 * 24 * 60 * 60 * 1_000;
@@ -36,7 +36,7 @@ export const PUBLIC_LAUNCH_AUTHORITY_ROLES = Object.freeze([
 export type PublicLaunchAuthorityRole = (typeof PUBLIC_LAUNCH_AUTHORITY_ROLES)[number];
 export type PublicLaunchAuthorityScope = typeof PUBLIC_LAUNCH_AUTHORITY_SCOPE;
 
-const SIGNING_DOMAIN = 'crypto-lending:public-launch-authority-decision:v1' as const;
+const SIGNING_DOMAIN = 'crypto-lending:public-launch-authority-decision:v2' as const;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
 const KEY_ID_PATTERN = /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/u;
 const TARGET_ID_PATTERN = /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/u;
@@ -50,12 +50,14 @@ const ROOT_KEYS = Object.freeze([
   'releaseCandidateManifestSha256',
   'deploymentTargetId',
   'deploymentTargetConfigurationSha256',
+  'productionEvidenceBundleSha256',
   'decisions',
 ]);
 const BINDING_KEYS = Object.freeze([
   'releaseCandidateManifestSha256',
   'deploymentTargetId',
   'deploymentTargetConfigurationSha256',
+  'productionEvidenceBundleSha256',
 ]);
 const DECISION_KEYS = Object.freeze([
   'role',
@@ -94,6 +96,7 @@ const VERIFY_OPTION_KEYS = Object.freeze([
   'releaseCandidateManifestSha256',
   'deploymentTargetId',
   'deploymentTargetConfigurationSha256',
+  'productionEvidenceBundleSha256',
 ]);
 const VERIFIED_DECISION_SETS = new WeakMap<object, Readonly<{ verifiedAtMilliseconds: number }>>();
 
@@ -130,6 +133,7 @@ export interface PublicLaunchTargetBinding {
   readonly releaseCandidateManifestSha256: string;
   readonly deploymentTargetId: string;
   readonly deploymentTargetConfigurationSha256: string;
+  readonly productionEvidenceBundleSha256: string;
 }
 
 export interface UnsignedPublicLaunchAuthorityDecision {
@@ -150,7 +154,7 @@ export interface PublicLaunchAuthorityDecision extends UnsignedPublicLaunchAutho
 }
 
 export interface PublicLaunchAuthorityDecisionSet extends PublicLaunchTargetBinding {
-  readonly schemaVersion: 1;
+  readonly schemaVersion: 2;
   readonly artifactType: 'PUBLIC_LAUNCH_AUTHORITY_DECISION_SET';
   readonly decisions: readonly PublicLaunchAuthorityDecision[];
 }
@@ -373,6 +377,7 @@ function binding(value: unknown): PublicLaunchTargetBinding {
     releaseCandidateManifestSha256: sha256(parsed.releaseCandidateManifestSha256),
     deploymentTargetId: targetId(parsed.deploymentTargetId),
     deploymentTargetConfigurationSha256: sha256(parsed.deploymentTargetConfigurationSha256),
+    productionEvidenceBundleSha256: sha256(parsed.productionEvidenceBundleSha256),
   });
 }
 
@@ -522,6 +527,7 @@ function verificationOptions(value: unknown): Readonly<{
       releaseCandidateManifestSha256: parsed.releaseCandidateManifestSha256,
       deploymentTargetId: parsed.deploymentTargetId,
       deploymentTargetConfigurationSha256: parsed.deploymentTargetConfigurationSha256,
+      productionEvidenceBundleSha256: parsed.productionEvidenceBundleSha256,
     }),
   });
 }
@@ -618,13 +624,16 @@ function verifyBytesAgainstRegistry(
       releaseCandidateManifestSha256: parsed.releaseCandidateManifestSha256,
       deploymentTargetId: parsed.deploymentTargetId,
       deploymentTargetConfigurationSha256: parsed.deploymentTargetConfigurationSha256,
+      productionEvidenceBundleSha256: parsed.productionEvidenceBundleSha256,
     });
     if (
       parsedBinding.releaseCandidateManifestSha256 !==
         options.binding.releaseCandidateManifestSha256 ||
       parsedBinding.deploymentTargetId !== options.binding.deploymentTargetId ||
       parsedBinding.deploymentTargetConfigurationSha256 !==
-        options.binding.deploymentTargetConfigurationSha256
+        options.binding.deploymentTargetConfigurationSha256 ||
+      parsedBinding.productionEvidenceBundleSha256 !==
+        options.binding.productionEvidenceBundleSha256
     ) {
       return invalid();
     }
@@ -676,6 +685,7 @@ export function verifyPublicLaunchAuthorityDecisionBytesWithTestRegistry(
         releaseCandidateManifestSha256: parsed.releaseCandidateManifestSha256 as string,
         deploymentTargetId: parsed.deploymentTargetId as string,
         deploymentTargetConfigurationSha256: parsed.deploymentTargetConfigurationSha256 as string,
+        productionEvidenceBundleSha256: parsed.productionEvidenceBundleSha256 as string,
       },
       parsed.authorityKeyRegistry as PublicLaunchAuthorityKeyRegistry,
     );
@@ -731,6 +741,7 @@ export function revalidatePublicLaunchAuthorityDecisionForApplication(
           releaseCandidateManifestSha256: decisionSet.releaseCandidateManifestSha256,
           deploymentTargetId: decisionSet.deploymentTargetId,
           deploymentTargetConfigurationSha256: decisionSet.deploymentTargetConfigurationSha256,
+          productionEvidenceBundleSha256: decisionSet.productionEvidenceBundleSha256,
           decisions: decisionSet.decisions,
         }),
         'utf8',

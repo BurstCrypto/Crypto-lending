@@ -95,9 +95,10 @@ fail-closed distinctions are:
   privacy/processor decision rather than generic cross-chain opt-in.
 - release evidence is a separate trust boundary: a signed statement is useful
   only when it is current, role-scoped, independently corroborated where
-  required, and bound to the exact verified candidate manifest and production
-  deployment target. The checked-in target and authority registries are empty,
-  so no local artifact can currently manufacture a production approval.
+  required, and bound to the exact verified candidate manifest, production
+  deployment target, and technical-evidence bundle digest. The checked-in target
+  and authority registries are empty, so no local artifact can currently
+  manufacture a production approval.
 
 ## Data classification
 

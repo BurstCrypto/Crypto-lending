@@ -63,6 +63,7 @@ const AUTHORITY_BINDING = Object.freeze({
   releaseCandidateManifestSha256: 'd'.repeat(64),
   deploymentTargetId: 'aws-production-us-east-1-crypto-lending',
   deploymentTargetConfigurationSha256: 'e'.repeat(64),
+  productionEvidenceBundleSha256: 'f'.repeat(64),
 } satisfies PublicLaunchTargetBinding);
 const APPLICATION_BASELINE = readFileSync(
   resolve(__dirname, '../infra/aws/application-baseline.yaml'),
@@ -1075,7 +1076,7 @@ function unbrandedLaunchDecision(expired = false): VerifiedPublicLaunchAuthority
     };
   });
   const artifact: PublicLaunchAuthorityDecisionSet = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     artifactType: 'PUBLIC_LAUNCH_AUTHORITY_DECISION_SET',
     ...AUTHORITY_BINDING,
     decisions,
@@ -7895,7 +7896,14 @@ test('test-registry decisions, structural copies, booleans, wrong bindings, and 
       decisionSet: unbranded,
       evidenceBinding: {
         ...AUTHORITY_BINDING,
-        deploymentTargetConfigurationSha256: 'f'.repeat(64),
+        deploymentTargetConfigurationSha256: '0'.repeat(64),
+      },
+    },
+    {
+      decisionSet: unbranded,
+      evidenceBinding: {
+        ...AUTHORITY_BINDING,
+        productionEvidenceBundleSha256: '1'.repeat(64),
       },
     },
   ];

@@ -45,6 +45,7 @@ const BINDING = Object.freeze({
   releaseCandidateManifestSha256: 'a'.repeat(64),
   deploymentTargetId: 'aws-production-us-east-1-crypto-lending',
   deploymentTargetConfigurationSha256: 'b'.repeat(64),
+  productionEvidenceBundleSha256: 'c'.repeat(64),
 } satisfies PublicLaunchTargetBinding);
 const EVALUATED_AT = '2026-09-04T12:00:00.000Z';
 const APPROVED_AT = '2026-09-04T11:00:00.000Z';
@@ -124,7 +125,7 @@ function decisionSet(
   binding: PublicLaunchTargetBinding = BINDING,
 ): PublicLaunchAuthorityDecisionSet {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     artifactType: 'PUBLIC_LAUNCH_AUTHORITY_DECISION_SET',
     ...binding,
     decisions: TEST_AUTHORITIES.map((authority) => signedDecision(authority, binding)),
@@ -187,13 +188,16 @@ function bindingFromRoot(root: Record<string, unknown>): PublicLaunchTargetBindi
   const releaseCandidateManifestSha256 = root.releaseCandidateManifestSha256;
   const deploymentTargetId = root.deploymentTargetId;
   const deploymentTargetConfigurationSha256 = root.deploymentTargetConfigurationSha256;
+  const productionEvidenceBundleSha256 = root.productionEvidenceBundleSha256;
   assert.ok(typeof releaseCandidateManifestSha256 === 'string');
   assert.ok(typeof deploymentTargetId === 'string');
   assert.ok(typeof deploymentTargetConfigurationSha256 === 'string');
+  assert.ok(typeof productionEvidenceBundleSha256 === 'string');
   return {
     releaseCandidateManifestSha256,
     deploymentTargetId,
     deploymentTargetConfigurationSha256,
+    productionEvidenceBundleSha256,
   };
 }
 
@@ -283,6 +287,7 @@ test('accepts exactly seven independently signed, bound and current approvals wi
     verified.deploymentTargetConfigurationSha256,
     BINDING.deploymentTargetConfigurationSha256,
   );
+  assert.equal(verified.productionEvidenceBundleSha256, BINDING.productionEvidenceBundleSha256);
   assert.deepEqual(
     verified.decisions.map(({ role }) => role),
     PUBLIC_LAUNCH_AUTHORITY_ROLES,
@@ -389,9 +394,10 @@ test('rejects wrong registry role, status, validity, ordering, and missing autho
 
 test('binds every signature to the exact release candidate and deployment target scope', () => {
   const expectedMutations: ReadonlyArray<readonly [keyof PublicLaunchTargetBinding, string]> = [
-    ['releaseCandidateManifestSha256', 'c'.repeat(64)],
+    ['releaseCandidateManifestSha256', 'd'.repeat(64)],
     ['deploymentTargetId', 'aws-production-us-west-2-crypto-lending'],
-    ['deploymentTargetConfigurationSha256', 'd'.repeat(64)],
+    ['deploymentTargetConfigurationSha256', 'e'.repeat(64)],
+    ['productionEvidenceBundleSha256', 'f'.repeat(64)],
   ];
   for (const [field, replacement] of expectedMutations) {
     assertInvalid(() => verify(bytes(), verificationOptions({ [field]: replacement })));
@@ -406,6 +412,33 @@ test('binds every signature to the exact release candidate and deployment target
     const rebound = verify(bytes(unsignedMutation), verificationOptions({ [field]: replacement }));
     assert.equal(rebound[field], replacement);
   }
+});
+
+test('rejects legacy, omitted, mutated, and replayed technical-evidence bundle bindings', () => {
+  const legacy = mutableRoot();
+  legacy.schemaVersion = 1;
+  assertInvalid(() => verify(bytes(legacy)));
+
+  const omitted = mutableRoot();
+  delete omitted.productionEvidenceBundleSha256;
+  assertInvalid(() => verify(bytes(omitted)));
+
+  const replacementBundleSha256 = 'f'.repeat(64);
+  const mutated = mutableRoot();
+  mutated.productionEvidenceBundleSha256 = replacementBundleSha256;
+  assertInvalid(() =>
+    verify(
+      bytes(mutated),
+      verificationOptions({ productionEvidenceBundleSha256: replacementBundleSha256 }),
+    ),
+  );
+
+  assertInvalid(() =>
+    verify(
+      bytes(),
+      verificationOptions({ productionEvidenceBundleSha256: replacementBundleSha256 }),
+    ),
+  );
 });
 
 test('rejects altered decision fields and invalid Ed25519 signatures', () => {

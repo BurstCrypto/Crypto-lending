@@ -1425,7 +1425,8 @@ function publicLaunchAuthorityValidation(value: unknown): Readonly<{
         evidenceContext.bundle.content.releaseCandidateManifestSha256 ||
       evidenceBinding.deploymentTargetId !== evidenceContext.bundle.content.deploymentTargetId ||
       evidenceBinding.deploymentTargetConfigurationSha256 !==
-        evidenceContext.bundle.content.deploymentTargetSha256
+        evidenceContext.bundle.content.deploymentTargetSha256 ||
+      evidenceBinding.productionEvidenceBundleSha256 !== evidenceContext.bundle.bundleSha256
     ) {
       throw new PublicLaunchAuthorityDecisionInvalidError();
     }
@@ -16901,6 +16902,7 @@ export function applyVerifiedProductionEvidenceBundle(
       releaseCandidateManifestSha256: bundle.content.releaseCandidateManifestSha256,
       deploymentTargetId: bundle.content.deploymentTargetId,
       deploymentTargetConfigurationSha256: bundle.content.deploymentTargetSha256,
+      productionEvidenceBundleSha256: bundle.bundleSha256,
     });
     const evidenceContext = Object.freeze({ bundle, applicationOptions });
     EVIDENCE_DERIVED_PUBLIC_LAUNCH_BINDINGS.set(evidenceBinding, evidenceContext);
