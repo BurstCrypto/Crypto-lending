@@ -121,7 +121,7 @@ exact extension inventory, and reviewed mutable-field window policy exist.
 Separately from that 72-artifact byte-pinned contract, the repository loader
 derives a private runtime-absence attestation from every lowercase `.ts` and
 `.tsx` file under `apps/api/src` that is not excluded by the exact pinned build
-exclusions (`*.spec.ts` and `*.e2e-spec.ts`): currently 388 files and 5,864,384
+exclusions (`*.spec.ts` and `*.e2e-spec.ts`): currently 388 files and 5,864,621
 bytes. The aggregate also binds the exact `nest-cli.json`, `tsconfig.json`, and
 `tsconfig.build.json` build inputs and the resolved
 `src/blockchain/domain/local-evm-development-manifest.json` runtime data input.
@@ -273,12 +273,14 @@ and Solana V2 envelopes record successfully. Migration `0032` also pins
 SHA-256 hashes of PostgreSQL 16's non-pretty
 `pg_get_expr(conbin, conrelid, false)` output for exactly four V2 CHECK
 expressions while retaining its structural, ACL, and function checks. Its
-catalog verifier therefore fails closed on CHECK-expression drift. The local
-database proof changed and restored each CHECK while preserving every earlier
-marker substring. These hashes
-require a reviewed rebaseline when the PostgreSQL engine or deparser is
-upgraded. This remains local-only integration evidence, not live-provider,
-deployed, production-catalog, or recursive historical-verifier closure.
+catalog verifier therefore fails closed on CHECK-expression drift and unless
+`server_version_num` is at least `160000` and below `170000`. The local database
+proof changed and restored each CHECK while preserving every earlier marker
+substring. Moving off PostgreSQL 16 requires a reviewed verifier change and
+live-catalog revalidation; any deparser-output change, including within 16.x,
+additionally requires a reviewed hash rebaseline. This remains local-only
+integration evidence, not live-provider, deployed, production-catalog, or
+recursive historical-verifier closure.
 Verification against the eventual live catalog remains a pre-grant blocker and
 does not activate the dormant capability.
 

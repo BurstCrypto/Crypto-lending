@@ -199,6 +199,14 @@ describe('migration 0032 deployment-aware mainnet balance agreement evidence', (
   });
 
   it('pins all four V2 CHECK expressions to reviewed PostgreSQL 16 deparser hashes', () => {
+    expect(
+      verifier.match(/pg_catalog\.current_setting\('server_version_num'\)::integer >= 160000/gu),
+    ).toHaveLength(1);
+    expect(
+      verifier.match(/pg_catalog\.current_setting\('server_version_num'\)::integer < 170000/gu),
+    ).toHaveLength(1);
+    expect(verifier.match(/server_state\.valid AND prior\.valid/gu)).toHaveLength(1);
+
     const checkExpressionHashes = Array.from(
       verifier.matchAll(
         /WHEN '(balance_sync_financial_agreement_v2_[a-z_]+_check)' THEN '([0-9a-f]{64})'/gu,

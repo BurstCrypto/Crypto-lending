@@ -926,7 +926,7 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
   mainnetBalanceAgreementEvidenceV1MigrationSource:
     '9ff329c1ce601cc2b830036239b2f16f34ebe6163aca57e033714d2e8718010f',
   mainnetBalanceAgreementEvidenceV2MigrationSource:
-    '3cb514026c1d9a1144d501700c0fa8ec8da919111919c7f697b02e33c4eeeb44',
+    'c9afef59a9101d568597eb37845d6d2a997edf63f1496d3d04296075fcc61fff',
   migrationIndexSource: '58a83e45c98c5e2d99b5fe982aef0770c11e55cc037341c45d1b60cd4d8edd78',
   releaseManifestSource: '234f2e397055af0884b45a599b7767fe9e24952b7978b769af4a46c73c1653ea',
   productionContainerValidatorSource:
@@ -8512,7 +8512,7 @@ const API_RUNTIME_PINNED_INPUT_PATHS = Object.freeze([
   'tsconfig.json',
 ]);
 const REVIEWED_API_RUNTIME_REPOSITORY_SNAPSHOT_SHA256 =
-  'c8194c555e19f8e00d964d26d32ea6837cabf00a30fa158c4c68627a3dd3a6ce';
+  '941a7469b770f21cc37f1b39425061694b56e6198c9afb79e099313ecf5f1769';
 const API_RUNTIME_OWNED_DEPLOYMENT_IDENTITY_PATHS = new Set([
   'blockchain-sync/infrastructure/rpc/ethereum-mainnet-balance-deployment-identity.verifier.ts',
   'blockchain-sync/infrastructure/rpc/ethereum-mainnet-balance-deployment.manifest.ts',
@@ -14646,7 +14646,16 @@ function hasDormantMainnetBalanceAgreementEvidenceV2MigrationContract(
     !/\bGRANT\b/iu.test(downSource) &&
     verifierSource.includes('createProviderPositionChainAnchorRecordIntentMigration(names, {') &&
     verifierSource.includes('Migration 0031 must expose verification SQL') &&
-    verifierSource.includes('FROM (${previous.verifySql}) AS prior') &&
+    exactExecutableLineCount(
+      verifierSource,
+      "SELECT pg_catalog.current_setting('server_version_num')::integer >= 160000",
+    ) === 1 &&
+    exactExecutableLineCount(
+      verifierSource,
+      "AND pg_catalog.current_setting('server_version_num')::integer < 170000 AS valid",
+    ) === 1 &&
+    exactExecutableLineCount(verifierSource, 'server_state.valid AND prior.valid') === 1 &&
+    exactExecutableLineCount(verifierSource, 'CROSS JOIN (${previous.verifySql}) AS prior') === 1 &&
     exactExecutableLineCount(
       verifierSource,
       "AND pg_catalog.bool_and(relation.relpersistence = 'p')",

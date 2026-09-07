@@ -5454,8 +5454,23 @@ test('balance-consumer inspection pins immutable V1 input and one-way owner-only
     ],
     [
       'mainnetBalanceAgreementEvidenceV2MigrationSource',
-      'FROM (${previous.verifySql}) AS prior',
-      'FROM (SELECT true AS valid) AS prior',
+      'CROSS JOIN (${previous.verifySql}) AS prior',
+      'CROSS JOIN (SELECT true AS valid) AS prior',
+    ],
+    [
+      'mainnetBalanceAgreementEvidenceV2MigrationSource',
+      "SELECT pg_catalog.current_setting('server_version_num')::integer >= 160000",
+      "SELECT pg_catalog.current_setting('server_version_num')::integer >= 150000",
+    ],
+    [
+      'mainnetBalanceAgreementEvidenceV2MigrationSource',
+      "AND pg_catalog.current_setting('server_version_num')::integer < 170000 AS valid",
+      "AND pg_catalog.current_setting('server_version_num')::integer < 180000 AS valid",
+    ],
+    [
+      'mainnetBalanceAgreementEvidenceV2MigrationSource',
+      'server_state.valid AND prior.valid',
+      'prior.valid',
     ],
     [
       'mainnetBalanceAgreementEvidenceV2MigrationSource',
@@ -6345,13 +6360,13 @@ test('repository loader brands the bounded full API runtime absence attestation'
   assert.deepEqual(attestation, {
     inspected: true,
     sourceFileCount: 388,
-    sourceBytes: 5_864_384,
+    sourceBytes: 5_864_621,
     repositorySnapshotSha256: attestation?.repositorySnapshotSha256,
     concreteDeploymentIdentityRegistration: 'ABSENT',
   });
   assert.equal(
     attestation?.repositorySnapshotSha256,
-    'c8194c555e19f8e00d964d26d32ea6837cabf00a30fa158c4c68627a3dd3a6ce',
+    '941a7469b770f21cc37f1b39425061694b56e6198c9afb79e099313ecf5f1769',
   );
 });
 

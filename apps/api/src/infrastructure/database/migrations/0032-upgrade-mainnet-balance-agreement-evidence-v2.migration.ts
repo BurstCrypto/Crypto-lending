@@ -678,11 +678,16 @@ function createVerifierSql(
   ).join('\n              ');
 
   return `SELECT (
-      prior.valid AND relation_state.valid AND column_state.valid AND type_state.valid
+      server_state.valid AND prior.valid
+      AND relation_state.valid AND column_state.valid AND type_state.valid
       AND function_state.valid AND trigger_state.valid
       AND constraint_state.valid AND privilege_state.valid
     ) AS valid
-    FROM (${previous.verifySql}) AS prior
+    FROM (
+      SELECT pg_catalog.current_setting('server_version_num')::integer >= 160000
+        AND pg_catalog.current_setting('server_version_num')::integer < 170000 AS valid
+    ) AS server_state
+    CROSS JOIN (${previous.verifySql}) AS prior
     CROSS JOIN (
       SELECT pg_catalog.count(*) = 1
         AND pg_catalog.bool_and(relation.relkind = 'r')

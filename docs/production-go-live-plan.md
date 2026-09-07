@@ -805,12 +805,14 @@ local-only integration evidence, not deployed or production-catalog evidence.
 Migration `0032` now pins SHA-256 hashes of PostgreSQL 16's non-pretty
 `pg_get_expr(conbin, conrelid, false)` output for exactly four V2 CHECK
 expressions, retains its structural, ACL, and function checks, and fails closed
-on CHECK-expression catalog drift. The local database proof changed and
-restored each CHECK while preserving every earlier marker substring. A
-PostgreSQL engine or deparser upgrade
-requires a reviewed hash rebaseline. Verification against the eventual live
-catalog remains a pre-grant blocker; this slice does not activate the dormant
-capability or claim recursive historical-verifier closure.
+on CHECK-expression catalog drift or when `server_version_num` is outside the
+PostgreSQL 16 range from `160000` through `169999`. The local database proof
+changed and restored each CHECK while preserving every earlier marker
+substring. Moving off PostgreSQL 16 requires a reviewed verifier change and
+live-catalog revalidation; any deparser-output change, including within 16.x,
+additionally requires a reviewed hash rebaseline. Verification against the
+eventual live catalog remains a pre-grant blocker; this slice does not activate
+the dormant capability or claim recursive historical-verifier closure.
 
 This cutover does **not** activate an oracle writer, chain indexer, Aave
 checkpoint writer, balance consumer, provider endpoint, or financial action.

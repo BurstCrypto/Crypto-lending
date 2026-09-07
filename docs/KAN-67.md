@@ -225,12 +225,15 @@ empty V1 relation and its objects, and genuine Ethereum and Solana V2
 acceptance. Migration `0032` now pins SHA-256 hashes of PostgreSQL 16's
 non-pretty `pg_get_expr(conbin, conrelid, false)` output for exactly four V2
 CHECK expressions. It retains the structural, ACL, and function checks and
-fails closed when those catalog expressions drift; the database proof changed
-and restored each CHECK while preserving its earlier marker substrings. This is local-only database
-evidence, not a live provider, blockchain, deployment, or production-catalog
-result. A PostgreSQL engine or deparser upgrade requires a reviewed hash
-rebaseline. Verification against the eventual live catalog remains a pre-grant
-blocker and no activation is implied.
+fails closed when those catalog expressions drift or when
+`server_version_num` is outside the PostgreSQL 16 range from `160000` through
+`169999`; the database proof changed and restored each CHECK while preserving
+its earlier marker substrings. This is local-only database evidence, not a live
+provider, blockchain, deployment, or production-catalog result. Moving off
+PostgreSQL 16 requires a reviewed verifier change and live-catalog revalidation;
+any deparser-output change, including within 16.x, additionally requires a
+reviewed hash rebaseline. Verification against the eventual live catalog
+remains a pre-grant blocker and no activation is implied.
 
 ## Local verification
 
