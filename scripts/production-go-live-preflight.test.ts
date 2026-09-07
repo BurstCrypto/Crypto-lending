@@ -25,6 +25,7 @@ import {
   inspectBalanceConsumerRuntimeReviewedRepositoryForTest,
   inspectBalanceConsumerRuntimeAbsenceSnapshotForTest,
   inspectDatabaseMasterDeploymentTemplate,
+  inspectDormantProviderPositionSourceRepositoryForTest,
   inspectProductionInfrastructureContractRepositoryForTest,
   inspectProductionInfrastructureContractSnapshotForTest,
   inspectProductionInfrastructureDeploymentArtifacts,
@@ -582,6 +583,20 @@ const PROVIDER_POSITION_READ_ARTIFACTS = Object.freeze({
     resolve(
       __dirname,
       '../apps/api/src/mainnet-platforms/infrastructure/dormant-sparklend-ethereum-provider-position.source.ts',
+    ),
+    'utf8',
+  ),
+  providerPositionMorphoBlueEthereumSource: readFileSync(
+    resolve(
+      __dirname,
+      '../apps/api/src/mainnet-platforms/infrastructure/dormant-morpho-blue-ethereum-provider-position.source.ts',
+    ),
+    'utf8',
+  ),
+  providerPositionEulerV2EthereumSource: readFileSync(
+    resolve(
+      __dirname,
+      '../apps/api/src/mainnet-platforms/infrastructure/dormant-euler-v2-ethereum-provider-position.source.ts',
     ),
     'utf8',
   ),
@@ -1396,7 +1411,7 @@ function mutateProviderPositionReadArtifact(
 }
 
 test('provider-position read inspection pins the exact inert critical source slice', () => {
-  assert.equal(Object.keys(PROVIDER_POSITION_READ_ARTIFACTS).length, 43);
+  assert.equal(Object.keys(PROVIDER_POSITION_READ_ARTIFACTS).length, 45);
   const inspected = inspectProviderPositionReadBoundaryArtifacts(PROVIDER_POSITION_READ_ARTIFACTS);
   assert.deepEqual(inspected, EXPECTED_DORMANT_PROVIDER_POSITION_READ_BOUNDARY);
   assert.equal(Object.isFrozen(inspected), true);
@@ -1414,6 +1429,69 @@ test('provider-position read inspection pins the exact inert critical source sli
       INVALID_PROVIDER_POSITION_READ_BOUNDARY,
       `${key} byte drift`,
     );
+  }
+});
+
+test('provider-position dormant-source repository seam uses exact secure files without authority', (t) => {
+  const temporaryRoot = mkdtempSync(resolve(tmpdir(), 'crypto-lending-provider-sources-'));
+  t.after(() => rmSync(temporaryRoot, { recursive: true, force: true }));
+  const artifacts = [
+    {
+      relativePath:
+        'apps/api/src/mainnet-platforms/infrastructure/dormant-morpho-blue-ethereum-provider-position.source.ts',
+      source: PROVIDER_POSITION_READ_ARTIFACTS.providerPositionMorphoBlueEthereumSource,
+    },
+    {
+      relativePath:
+        'apps/api/src/mainnet-platforms/infrastructure/dormant-euler-v2-ethereum-provider-position.source.ts',
+      source: PROVIDER_POSITION_READ_ARTIFACTS.providerPositionEulerV2EthereumSource,
+    },
+  ] as const;
+  for (const artifact of artifacts) {
+    const absolutePath = resolve(temporaryRoot, artifact.relativePath);
+    mkdirSync(dirname(absolutePath), { recursive: true });
+    writeFileSync(absolutePath, artifact.source, 'utf8');
+  }
+
+  assert.equal(inspectDormantProviderPositionSourceRepositoryForTest(temporaryRoot), true);
+  const morphoPath = resolve(temporaryRoot, artifacts[0].relativePath);
+  writeFileSync(morphoPath, `${artifacts[0].source}x`, 'utf8');
+  assert.equal(inspectDormantProviderPositionSourceRepositoryForTest(temporaryRoot), false);
+  writeFileSync(morphoPath, artifacts[0].source, 'utf8');
+
+  const eulerPath = resolve(temporaryRoot, artifacts[1].relativePath);
+  rmSync(eulerPath);
+  assert.equal(inspectDormantProviderPositionSourceRepositoryForTest(temporaryRoot), false);
+  const hardlinkSource = resolve(temporaryRoot, 'euler-reviewed-source.ts');
+  writeFileSync(hardlinkSource, artifacts[1].source, 'utf8');
+  linkSync(hardlinkSource, eulerPath);
+  assert.equal(inspectDormantProviderPositionSourceRepositoryForTest(temporaryRoot), false);
+  rmSync(eulerPath);
+  rmSync(hardlinkSource);
+  writeFileSync(eulerPath, `\uFEFF${artifacts[1].source}`, 'utf8');
+  assert.equal(inspectDormantProviderPositionSourceRepositoryForTest(temporaryRoot), false);
+  rmSync(eulerPath);
+  writeFileSync(eulerPath, Buffer.from([0xc3, 0x28]));
+  assert.equal(inspectDormantProviderPositionSourceRepositoryForTest(temporaryRoot), false);
+  rmSync(eulerPath);
+  writeFileSync(eulerPath, Buffer.alloc(128 * 1024 + 1, 0x78));
+  assert.equal(inspectDormantProviderPositionSourceRepositoryForTest(temporaryRoot), false);
+  rmSync(eulerPath);
+  const symlinkTarget = resolve(temporaryRoot, 'euler-symlink-target.ts');
+  writeFileSync(symlinkTarget, artifacts[1].source, 'utf8');
+  let symlinkCreated = false;
+  try {
+    symlinkSync(symlinkTarget, eulerPath, 'file');
+    symlinkCreated = true;
+  } catch (error) {
+    assert.ok(
+      error instanceof Error &&
+        'code' in error &&
+        ['EPERM', 'EACCES', 'ENOSYS'].includes(String(error.code)),
+    );
+  }
+  if (symlinkCreated) {
+    assert.equal(inspectDormantProviderPositionSourceRepositoryForTest(temporaryRoot), false);
   }
 });
 
@@ -1462,9 +1540,17 @@ test('provider-position read semantic gate contains no disabled-check bypass', (
     'function hasDormantSparkLendEthereumProviderPositionSourceContract(',
     compoundIIIEthereumStart,
   );
+  const morphoBlueEthereumStart = source.indexOf(
+    'function hasDormantMorphoBlueEthereumProviderPositionSourceContract(',
+    sparkLendEthereumStart,
+  );
+  const eulerV2EthereumStart = source.indexOf(
+    'function hasDormantEulerV2EthereumProviderPositionSourceContract(',
+    morphoBlueEthereumStart,
+  );
   const inertRegistrationStart = source.indexOf(
     'function hasInertProviderPositionReadRuntimeRegistrationContract(',
-    sparkLendEthereumStart,
+    eulerV2EthereumStart,
   );
   const start = source.indexOf(
     'function hasDormantProviderPositionReadBoundaryContract(',
@@ -1483,7 +1569,9 @@ test('provider-position read semantic gate contains no disabled-check bypass', (
       kaminoStart > aaveV3EthereumStart &&
       compoundIIIEthereumStart > kaminoStart &&
       sparkLendEthereumStart > compoundIIIEthereumStart &&
-      inertRegistrationStart > sparkLendEthereumStart &&
+      morphoBlueEthereumStart > sparkLendEthereumStart &&
+      eulerV2EthereumStart > morphoBlueEthereumStart &&
+      inertRegistrationStart > eulerV2EthereumStart &&
       start > inertRegistrationStart &&
       end > start,
   );
@@ -2798,6 +2886,144 @@ test('provider-position read inspection rejects dormant SparkLend Ethereum sourc
       'mainnetPlatformsControllerSource',
       'constructor(private readonly directory: MainnetPlatformDirectoryService) {}',
       'constructor(private readonly source: DormantSparkLendEthereumProviderPositionSource) {}',
+    ],
+  ];
+
+  for (const [key, approved, rejected] of mutations) {
+    assert.deepEqual(
+      inspectProviderPositionReadBoundaryArtifacts(
+        mutateProviderPositionReadArtifact(key, approved, rejected),
+      ),
+      INVALID_PROVIDER_POSITION_READ_BOUNDARY,
+      `${key}: ${approved}`,
+    );
+  }
+});
+
+test('provider-position read inspection rejects dormant Morpho Blue source drift or activation', () => {
+  const mutations: readonly (readonly [
+    keyof ProviderPositionReadBoundaryArtifactSources,
+    string,
+    string,
+  ])[] = [
+    [
+      'providerPositionMorphoBlueEthereumSource',
+      "import { Buffer } from 'node:buffer';",
+      "import { request } from 'node:https';",
+    ],
+    [
+      'providerPositionMorphoBlueEthereumSource',
+      'this.#manifest = createMorphoBlueEthereumMarketManifest(manifestValue);',
+      'this.#manifest = manifestValue as MorphoBlueEthereumMarketManifest;',
+    ],
+    [
+      'providerPositionMorphoBlueEthereumSource',
+      "const BLOCK_SELECTOR = 'finalized' as const;",
+      "const BLOCK_SELECTOR = 'latest' as const;",
+    ],
+    [
+      'providerPositionMorphoBlueEthereumSource',
+      'record.blockHash !== selectedBlockHash || record.requireCanonical !== true',
+      'record.blockHash !== selectedBlockHash || record.requireCanonical !== false',
+    ],
+    [
+      'providerPositionMorphoBlueEthereumSource',
+      "record.coverageScope !== 'EXACT_APPROVED_MARKET_DIRECT_LOAN_ASSET_POSITION_ONLY' ||",
+      "record.coverageScope !== 'ALL_MORPHO_POSITIONS' ||",
+    ],
+    [
+      'providerPositionMorphoBlueEthereumSource',
+      'readonly mayAuthorizeFinancialAction: false;',
+      'readonly mayAuthorizeFinancialAction: true;',
+    ],
+    [
+      'providerPositionRuntimeCompositionSource',
+      'const DEPENDENCY_KEYS = Object.freeze([',
+      'type DormantMorphoBlueEthereumProviderPositionSource = unknown;\nconst DEPENDENCY_KEYS = Object.freeze([',
+    ],
+    [
+      'mainnetPlatformsIndexSource',
+      "export { MainnetPlatformDirectoryService } from './application/mainnet-platform-directory.service';",
+      "export { DormantMorphoBlueEthereumProviderPositionSource } from './infrastructure/dormant-morpho-blue-ethereum-provider-position.source';",
+    ],
+    [
+      'mainnetPlatformsControllerSource',
+      'constructor(private readonly directory: MainnetPlatformDirectoryService) {}',
+      'constructor(private readonly source: DormantMorphoBlueEthereumProviderPositionSource) {}',
+    ],
+  ];
+
+  for (const [key, approved, rejected] of mutations) {
+    assert.deepEqual(
+      inspectProviderPositionReadBoundaryArtifacts(
+        mutateProviderPositionReadArtifact(key, approved, rejected),
+      ),
+      INVALID_PROVIDER_POSITION_READ_BOUNDARY,
+      `${key}: ${approved}`,
+    );
+  }
+});
+
+test('provider-position read inspection rejects dormant Euler V2 source drift or activation', () => {
+  const mutations: readonly (readonly [
+    keyof ProviderPositionReadBoundaryArtifactSources,
+    string,
+    string,
+  ])[] = [
+    [
+      'providerPositionEulerV2EthereumSource',
+      "import { Buffer } from 'node:buffer';",
+      "import { request } from 'node:https';",
+    ],
+    [
+      'providerPositionEulerV2EthereumSource',
+      'this.#manifest = createEulerV2EthereumVaultManifest(manifestValue);',
+      'this.#manifest = manifestValue as EulerV2EthereumVaultManifest;',
+    ],
+    [
+      'providerPositionEulerV2EthereumSource',
+      'const EXPECTED_EVC_ACCOUNTS = 256;',
+      'const EXPECTED_EVC_ACCOUNTS = 1;',
+    ],
+    [
+      'providerPositionEulerV2EthereumSource',
+      'accounts.map((account) => accountReadPlan(account, manifest.vault.vaultAddress))',
+      'accounts.map((account) => accountReadPlan(account, manifest.vault.oracleAddress))',
+    ],
+    [
+      'providerPositionEulerV2EthereumSource',
+      'record.blockHash !== selectedBlockHash || record.requireCanonical !== true',
+      'record.blockHash !== selectedBlockHash || record.requireCanonical !== false',
+    ],
+    [
+      'providerPositionEulerV2EthereumSource',
+      'supplyCap !== resolveFinitePositiveAmountCap(supplyCapRaw) ||',
+      'supplyCap === resolveFinitePositiveAmountCap(supplyCapRaw) ||',
+    ],
+    [
+      'providerPositionEulerV2EthereumSource',
+      "record.coverageScope !== 'EXACT_MANIFEST_VAULT_LOAN_ASSET_ALL_256_EVC_ACCOUNTS' ||",
+      "record.coverageScope !== 'DISCOVERED_EULER_ACCOUNTS' ||",
+    ],
+    [
+      'providerPositionEulerV2EthereumSource',
+      'readonly mayAuthorizeFinancialAction: false;',
+      'readonly mayAuthorizeFinancialAction: true;',
+    ],
+    [
+      'providerPositionInfrastructureConfigSource',
+      'export interface InfrastructureConfig {',
+      'type EulerV2EthereumFinalizedPositionTranscriptPort = unknown;\nexport interface InfrastructureConfig {',
+    ],
+    [
+      'mainnetPlatformsModuleSource',
+      '    ProviderPositionReadRuntimeRegistration,\n',
+      '    ProviderPositionReadRuntimeRegistration,\n    DormantEulerV2EthereumProviderPositionSource,\n',
+    ],
+    [
+      'mainnetPlatformsIndexSource',
+      "export { MainnetPlatformDirectoryService } from './application/mainnet-platform-directory.service';",
+      "export { DormantEulerV2EthereumProviderPositionSource } from './infrastructure/dormant-euler-v2-ethereum-provider-position.source';",
     ],
   ];
 
@@ -4433,7 +4659,7 @@ test('provider-position read artifact shape and private brand fail closed', () =
     Object.fromEntries(
       Object.keys(PROVIDER_POSITION_READ_ARTIFACTS).map((key) => [
         key,
-        'x'.repeat(Math.floor((1088 * 1024) / 43) + 1),
+        'x'.repeat(Math.floor((1280 * 1024) / 45) + 1),
       ]),
     ),
     accessor,
@@ -6618,14 +6844,14 @@ test('repository loader brands the bounded full API runtime absence attestation'
   assert.equal(Object.isFrozen(attestation), true);
   assert.deepEqual(attestation, {
     inspected: true,
-    sourceFileCount: 390,
-    sourceBytes: 5_875_048,
+    sourceFileCount: 393,
+    sourceBytes: 6_048_616,
     repositorySnapshotSha256: attestation?.repositorySnapshotSha256,
     concreteDeploymentIdentityRegistration: 'ABSENT',
   });
   assert.equal(
     attestation?.repositorySnapshotSha256,
-    'fb14a434a4feb6d71ff4853b7038556059768ab2d8a93f2f85428e885ec1cbc7',
+    '0d11c90d870eeac4f0c1565f82be3025053a9b510b0516482d51b0d8b5155c20',
   );
 });
 

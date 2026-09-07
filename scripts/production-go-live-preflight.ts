@@ -304,6 +304,8 @@ export interface ProviderPositionReadBoundaryArtifactSources {
   readonly providerPositionKaminoSource: string;
   readonly providerPositionCompoundIIIEthereumSource: string;
   readonly providerPositionSparkLendEthereumSource: string;
+  readonly providerPositionMorphoBlueEthereumSource: string;
+  readonly providerPositionEulerV2EthereumSource: string;
   readonly providerPositionChainAnchorEvidenceRecorderPortSource: string;
   readonly providerPositionPostgresChainAnchorEvidenceRecorderSource: string;
   readonly providerPositionPostgresDurableChainAnchorReaderSource: string;
@@ -689,6 +691,8 @@ const PROVIDER_POSITION_READ_ARTIFACT_KEYS = Object.freeze([
   'providerPositionKaminoSource',
   'providerPositionCompoundIIIEthereumSource',
   'providerPositionSparkLendEthereumSource',
+  'providerPositionMorphoBlueEthereumSource',
+  'providerPositionEulerV2EthereumSource',
   'providerPositionChainAnchorEvidenceRecorderPortSource',
   'providerPositionPostgresChainAnchorEvidenceRecorderSource',
   'providerPositionPostgresDurableChainAnchorReaderSource',
@@ -744,6 +748,10 @@ const REVIEWED_PROVIDER_POSITION_READ_ARTIFACT_SHA256 = Object.freeze({
     'f70dee0b5af6a5a0d137d5b580e1fcca95565c40141f96f0de79a9316e40569a',
   providerPositionSparkLendEthereumSource:
     '314960f84c9436018536dac1ba443b4e06c78b3e57f0fe35afd44c86b316e404',
+  providerPositionMorphoBlueEthereumSource:
+    '54f62b9eb29b806109431c62e5a489c2c3bb5df01c0afc5fe1586377e4afecec',
+  providerPositionEulerV2EthereumSource:
+    '538d3d33eff4d9cabc6af2f1da9d768fcff80f4301f801eaadc3e565f7924506',
   providerPositionChainAnchorEvidenceRecorderPortSource:
     'bd4e1a22eb2fe02540f11a2f5b28ba5eed6e71a726fe5a0027291a062f95951c',
   providerPositionPostgresChainAnchorEvidenceRecorderSource:
@@ -808,7 +816,18 @@ const REVIEWED_PROVIDER_POSITION_READ_ARTIFACT_SHA256 = Object.freeze({
     'a713200b67f0cf67c50b56c94f707f94f7383c52e3d59f4368868710b099b55d',
 } satisfies Readonly<Record<keyof ProviderPositionReadBoundaryArtifactSources, string>>);
 const MAX_PROVIDER_POSITION_READ_ARTIFACT_BYTES = 128 * 1024;
-const MAX_PROVIDER_POSITION_READ_TOTAL_BYTES = 1088 * 1024;
+const MAX_PROVIDER_POSITION_READ_TOTAL_BYTES = 1280 * 1024;
+const REVIEWED_DORMANT_PROVIDER_POSITION_SOURCE_PATHS = Object.freeze({
+  providerPositionMorphoBlueEthereumSource:
+    'apps/api/src/mainnet-platforms/infrastructure/dormant-morpho-blue-ethereum-provider-position.source.ts',
+  providerPositionEulerV2EthereumSource:
+    'apps/api/src/mainnet-platforms/infrastructure/dormant-euler-v2-ethereum-provider-position.source.ts',
+} as const satisfies Readonly<
+  Record<
+    'providerPositionMorphoBlueEthereumSource' | 'providerPositionEulerV2EthereumSource',
+    string
+  >
+>);
 const BALANCE_CONSUMER_ARTIFACT_KEYS = Object.freeze([
   'activationSource',
   'cliSource',
@@ -983,7 +1002,7 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
   mainnetBalanceAgreementEvidenceV2MigrationSource:
     'c9afef59a9101d568597eb37845d6d2a997edf63f1496d3d04296075fcc61fff',
   migrationIndexSource: '58a83e45c98c5e2d99b5fe982aef0770c11e55cc037341c45d1b60cd4d8edd78',
-  releaseManifestSource: '58360de320d25008034d273e9bdafadd9722e1b39991ce31b6d548a52946a620',
+  releaseManifestSource: 'a06a41af34ec8f52a8001572aef68a2e3ea38520318152a4953b575f877745d6',
   productionContainerValidatorSource:
     'a9fbc9e638f4a33266e823ff8c07a9b53703e1bc8f1f4f46eab30c7b50a9b0b0',
 } satisfies Readonly<Record<keyof BalanceConsumerArtifactSources, string>>);
@@ -2553,6 +2572,59 @@ function hasExactReviewedProviderPositionReadArtifactBytes(
       createHash('sha256').update(sources[key], 'utf8').digest('hex') ===
       REVIEWED_PROVIDER_POSITION_READ_ARTIFACT_SHA256[key],
   );
+}
+
+function decodeReviewedProviderPositionSource(bytes: Uint8Array): string {
+  if (bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) {
+    throw new Error('Reviewed provider-position source must be BOM-free');
+  }
+  return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+}
+
+function readReviewedDormantProviderPositionSources(
+  repositoryRoot: string,
+): Readonly<
+  Pick<
+    ProviderPositionReadBoundaryArtifactSources,
+    'providerPositionMorphoBlueEthereumSource' | 'providerPositionEulerV2EthereumSource'
+  >
+> {
+  const result: Partial<
+    Record<keyof typeof REVIEWED_DORMANT_PROVIDER_POSITION_SOURCE_PATHS, string>
+  > = {};
+  for (const [key, relativePath] of Object.entries(
+    REVIEWED_DORMANT_PROVIDER_POSITION_SOURCE_PATHS,
+  ) as [keyof typeof REVIEWED_DORMANT_PROVIDER_POSITION_SOURCE_PATHS, string][]) {
+    const bytes = readSecureLocalFile(
+      resolve(repositoryRoot, relativePath),
+      MAX_PROVIDER_POSITION_READ_ARTIFACT_BYTES,
+    );
+    if (
+      createHash('sha256').update(bytes).digest('hex') !==
+      REVIEWED_PROVIDER_POSITION_READ_ARTIFACT_SHA256[key]
+    ) {
+      throw new Error('Reviewed provider-position source drifted');
+    }
+    result[key] = decodeReviewedProviderPositionSource(bytes);
+  }
+  return Object.freeze(result) as Readonly<
+    Pick<
+      ProviderPositionReadBoundaryArtifactSources,
+      'providerPositionMorphoBlueEthereumSource' | 'providerPositionEulerV2EthereumSource'
+    >
+  >;
+}
+
+/** Unbranded filesystem seam: verifies stable secure reads but cannot mint launch authority. */
+export function inspectDormantProviderPositionSourceRepositoryForTest(
+  repositoryRoot: string,
+): boolean {
+  try {
+    readReviewedDormantProviderPositionSources(repositoryRoot);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function hasDormantProviderPositionChainAnchorEvidenceMigrationContract(
@@ -6666,6 +6738,525 @@ function hasDormantSparkLendEthereumProviderPositionSourceContract(
   );
 }
 
+function hasDormantMorphoBlueEthereumProviderPositionSourceContract(
+  sourceInput: string,
+  runtimeCompositionSource: string,
+  infrastructureConfigSource: string,
+  networkPolicySource: string,
+  moduleSource: string,
+  indexSource: string,
+  controllerSource: string,
+): boolean {
+  const source = sourceInput.replace(/\r\n/gu, '\n');
+  const importSources = Array.from(
+    source.matchAll(/\bfrom\s+['"]([^'"]+)['"]/gu),
+    (match) => match[1],
+  );
+  const importDeclarationCount = source.match(/^[\t ]*import\b/gmu)?.length ?? 0;
+  const forbiddenCapability =
+    /(?:\bimport\s*\(|\brequire\s*\(|(?:\bfrom\s+|\bimport\s*(?:\(\s*)?)['"](?:node:)?(?:child_process|cluster|dgram|dns|fs|http|http2|https|net|tls|worker_threads)(?:\/[^'"]*)?['"]|(?:\bfrom\s+|\bimport\s*(?:\(\s*)?)['"](?:axios|ethers|got|pg|superagent|undici|web3|@solana\/web3\.js)['"]|\b(?:fetch|setTimeout|setInterval|setImmediate|queueMicrotask|WebSocket|EventSource|XMLHttpRequest|readFileSync|writeFileSync)\s*\(|\.\s*(?:query|connect|end|execute|transaction|persist|save|write)\s*\(|\b(?:process|Deno|Bun)\s*\.\s*env\b|\bimport\s*\.\s*meta\s*\.\s*env\b|['"]https?:\/\/|(?:^|\n)[\t ]*@[A-Za-z_$]|\b(?:NestFactory|PostgresService|DataSource|EntityManager|Repository|loadInfrastructureConfig|createPostgresPool)\b|\bPromise\s*\.\s*(?:all|allSettled|any|race)\s*\()/iu;
+  const forbiddenFeatureSurface =
+    /(?:DormantMorphoBlueEthereumProviderPositionSource|MorphoBlueEthereumDurableTargetContextReaderPort|MorphoBlueEthereumFinalizedPositionTranscriptPort|MORPHO_BLUE_ETHEREUM_(?:DURABLE_TARGET_CONTEXT|FINALIZED_POSITION_TRANSCRIPT)|dormant-morpho-blue-ethereum-provider-position\.source)/u;
+  const runtimeSurfaces = [
+    runtimeCompositionSource,
+    infrastructureConfigSource,
+    networkPolicySource,
+    moduleSource,
+    indexSource,
+    controllerSource,
+  ] as const;
+  const classStart = source.indexOf(
+    'export class DormantMorphoBlueEthereumProviderPositionSource implements ProviderPositionAdmissionSourcePort {',
+  );
+  const readTargetStart = source.indexOf('  async readTarget(', classStart);
+  const readTarget = readTargetStart >= 0 ? source.slice(readTargetStart) : '';
+  const reviewedRequestStart = source.indexOf('function reviewedRequest(');
+  const contextRequestStart = source.indexOf('function contextRequest(', reviewedRequestStart);
+  const reviewedRequest =
+    reviewedRequestStart >= 0 && contextRequestStart > reviewedRequestStart
+      ? source.slice(reviewedRequestStart, contextRequestStart)
+      : '';
+  const transcriptRequestStart = source.indexOf('function transcriptRequest(');
+  const transcriptRequestEnd = source.indexOf('\nfunction hexQuantity(', transcriptRequestStart);
+  const transcriptRequest =
+    transcriptRequestStart >= 0 && transcriptRequestEnd > transcriptRequestStart
+      ? source.slice(transcriptRequestStart, transcriptRequestEnd)
+      : '';
+  const parseTranscriptStart = source.indexOf('function parseTranscript(');
+  const parseTranscriptEnd = source.indexOf(
+    '\nfunction validateSelectedBlockAge(',
+    parseTranscriptStart,
+  );
+  const parseTranscript =
+    parseTranscriptStart >= 0 && parseTranscriptEnd > parseTranscriptStart
+      ? source.slice(parseTranscriptStart, parseTranscriptEnd)
+      : '';
+  const evidenceStart = source.indexOf('function evidence(');
+  const evidenceEnd = source.indexOf('\n/**', evidenceStart);
+  const evidence =
+    evidenceStart >= 0 && evidenceEnd > evidenceStart
+      ? source.slice(evidenceStart, evidenceEnd)
+      : '';
+  const issuedContextAt = readTarget.indexOf(
+    'const issuedContextRequest = contextRequest(request);',
+  );
+  const contextReadAt = readTarget.indexOf(
+    'const contextCapability = await invoke(this.#contextReader.read, [issuedContextRequest]);',
+    issuedContextAt,
+  );
+  const contextSettledAt = readTarget.indexOf(
+    'const contextSettledAt = clockTime(this.#now);',
+    contextReadAt,
+  );
+  const transcriptIssuedAt = readTarget.indexOf(
+    'const issuedTranscriptRequest = transcriptRequest(',
+    contextSettledAt,
+  );
+  const transcriptReadAt = readTarget.indexOf(
+    'const transcriptCapability = await invoke(this.#transcriptReader.read, [',
+    transcriptIssuedAt,
+  );
+  const transcriptSettledAt = readTarget.indexOf(
+    'const transcriptSettledAt = clockTime(this.#now);',
+    transcriptReadAt,
+  );
+  const parsedAt = readTarget.indexOf('const transcript = parseTranscript(', transcriptSettledAt);
+  const completedAt = readTarget.indexOf('const completedAt = clockTime(this.#now);', parsedAt);
+  const evidenceAt = readTarget.indexOf(
+    'return evidence(transcript, request, context, completedAt);',
+    completedAt,
+  );
+
+  return (
+    importDeclarationCount === 10 &&
+    importSources.length === 10 &&
+    importSources[0] === 'node:buffer' &&
+    importSources[1] === 'node:util/types' &&
+    importSources[2] === 'viem' &&
+    importSources[3] === '../../accounts/domain/account-profile' &&
+    importSources[4] === '../../blockchain/domain/chain-observation-policy' &&
+    importSources[5] ===
+      '../../smart-lending/infrastructure/morpho/morpho-blue-ethereum-finalized-transcript.adapter' &&
+    importSources[6] ===
+      '../../smart-lending/infrastructure/morpho/morpho-blue-account-position.semantics' &&
+    importSources[7] === '../../wallets/domain/wallet-identity' &&
+    importSources[8] === '../application/provider-position-admission.coordinator' &&
+    importSources[9] === '../domain/mainnet-provider-position-observation' &&
+    !forbiddenCapability.test(source) &&
+    !/(?:@Injectable|@Module|@Controller)\s*\(/u.test(source) &&
+    exactExecutableLineCount(
+      source,
+      'export const MORPHO_BLUE_ETHEREUM_DURABLE_TARGET_CONTEXT_VERSION = 1 as const;',
+    ) === 1 &&
+    source.includes("'DORMANT_MORPHO_BLUE_ETHEREUM_DURABLE_TARGET_CONTEXT_ONLY' as const;") &&
+    exactExecutableLineCount(
+      source,
+      'export const MORPHO_BLUE_ETHEREUM_FINALIZED_POSITION_TRANSCRIPT_VERSION = 1 as const;',
+    ) === 1 &&
+    source.includes(
+      "'DORMANT_MORPHO_BLUE_ETHEREUM_FINALIZED_POSITION_TRANSCRIPT_ONLY' as const;",
+    ) &&
+    exactExecutableLineCount(source, "const NETWORK_ID = 'eip155:1' as const;") === 1 &&
+    exactExecutableLineCount(source, "const PROVIDER_ID = 'morpho' as const;") === 1 &&
+    exactExecutableLineCount(source, "const PROTOCOL_ID = 'morpho-blue' as const;") === 1 &&
+    exactExecutableLineCount(source, "const EXPECTED_CHAIN_ID = '0x1' as const;") === 1 &&
+    exactExecutableLineCount(source, "const BLOCK_SELECTOR = 'finalized' as const;") === 1 &&
+    exactExecutableLineCount(
+      source,
+      "const BLOCK_BINDING = 'EIP1898_BLOCK_HASH_REQUIRE_CANONICAL' as const;",
+    ) === 1 &&
+    source.includes('this.#manifest = createMorphoBlueEthereumMarketManifest(manifestValue);') &&
+    source.includes(
+      'requiredManifestFingerprintSha256 !== this.#manifest.manifestFingerprintSha256 ||',
+    ) &&
+    source.includes(
+      'requiredSemanticsFingerprintSha256 !==\n          MORPHO_BLUE_ACCOUNT_POSITION_SEMANTICS_FINGERPRINT_SHA256',
+    ) &&
+    source.includes(
+      'this.#contextReader.receiver === this.#transcriptReader.receiver ||\n        this.#contextReader.sourceFamilyId === this.#transcriptReader.sourceFamilyId ||\n        this.#contextReader.sourceId === this.#transcriptReader.sourceId',
+    ) &&
+    reviewedRequest.includes("record.sourceKind !== 'RPC' ||") &&
+    reviewedRequest.includes('record.providerId !== PROVIDER_ID ||') &&
+    reviewedRequest.includes('record.protocolId !== PROTOCOL_ID ||') &&
+    reviewedRequest.includes('record.marketId !== marketId ||') &&
+    reviewedRequest.includes('record.networkId !== NETWORK_ID ||') &&
+    reviewedRequest.includes('assets.length !== 1 ||') &&
+    reviewedRequest.includes('parseAsset(assets[0], manifest)') &&
+    transcriptRequest.includes('manifestFingerprintSha256: manifest.manifestFingerprintSha256,') &&
+    transcriptRequest.includes(
+      'semanticsFingerprintSha256: MORPHO_BLUE_ACCOUNT_POSITION_SEMANTICS_FINGERPRINT_SHA256,',
+    ) &&
+    transcriptRequest.includes("'chain-id-before',") &&
+    transcriptRequest.includes("'selected-block-before',") &&
+    transcriptRequest.includes("'floor-block-before',") &&
+    transcriptRequest.includes("'floor-block-after',") &&
+    transcriptRequest.includes("'selected-block-after',") &&
+    transcriptRequest.includes("'chain-id-after',") &&
+    parseTranscript.includes("record.status !== 'COMPLETE' ||") &&
+    parseTranscript.includes(
+      "record.coverageScope !== 'EXACT_APPROVED_MARKET_DIRECT_LOAN_ASSET_POSITION_ONLY' ||",
+    ) &&
+    parseTranscript.includes('record.authorizationTraversal !== false ||') &&
+    parseTranscript.includes('record.indirectExposureIncluded !== false ||') &&
+    parseTranscript.includes('record.chainIdBefore !== EXPECTED_CHAIN_ID ||') &&
+    parseTranscript.includes('record.chainIdAfter !== EXPECTED_CHAIN_ID ||') &&
+    parseTranscript.includes('!sameHeader(selectedBefore, selectedAfter) ||') &&
+    parseTranscript.includes('!sameHeader(floorBefore, floorAfter) ||') &&
+    parseTranscript.includes(
+      'matchCodeReads(record.codeReads, issuedRequest, selectedBefore.hash);',
+    ) &&
+    parseTranscript.includes(
+      'const state = matchStateReads(record.stateReads, issuedRequest, selectedBefore.hash);',
+    ) &&
+    parseTranscript.includes('evaluateMorphoBlueAccountPositionSnapshot(') &&
+    exactExecutableLineCount(source, 'readonly mayAuthorizeFinancialAction: false;') === 3 &&
+    !/(?:mayAuthorizeFinancialAction|mayPersist|mayCreatePositionSnapshot|maySign|mayAccessWalletPrivateKey)\s*:\s*true/u.test(
+      source,
+    ) &&
+    source.includes('assertBoundedImmutableData(capability, MAX_CONTEXT_BYTES);') &&
+    source.includes('assertBoundedImmutableData(capability, MAX_TRANSCRIPT_BYTES);') &&
+    reviewedRequest.includes('aborted(signal) ||') &&
+    reviewedRequest.includes('deadlineAt.milliseconds <= startedAt.milliseconds ||') &&
+    reviewedRequest.includes(
+      'deadlineAt.milliseconds - startedAt.milliseconds > MAX_DEADLINE_MILLISECONDS',
+    ) &&
+    source.includes(
+      'if (record.blockHash !== selectedBlockHash || record.requireCanonical !== true) {',
+    ) &&
+    source.includes('runtimeCode(record.result, expected.expectedRuntimeCodeKeccak256);') &&
+    source.includes('abiAddress(words[0], false) !== manifest.market.loanToken ||') &&
+    source.includes('abiAddress(words[3], false) !== manifest.market.irm ||') &&
+    source.includes('abiWords(words[4], 1)[0] !== BigInt(manifest.market.lltv)') &&
+    source.includes(
+      "if (!abiBoolean(results.get('irm-enabled')) || !abiBoolean(results.get('lltv-enabled'))) {",
+    ) &&
+    evidence.includes('mayAuthorizeFinancialAction: false as const,') &&
+    evidence.includes("status: 'COMPLETE' as const,") &&
+    evidence.includes('assets: Object.freeze([request.asset]),') &&
+    issuedContextAt >= 0 &&
+    contextReadAt > issuedContextAt &&
+    contextSettledAt > contextReadAt &&
+    transcriptIssuedAt > contextSettledAt &&
+    transcriptReadAt > transcriptIssuedAt &&
+    transcriptSettledAt > transcriptReadAt &&
+    parsedAt > transcriptSettledAt &&
+    completedAt > parsedAt &&
+    evidenceAt > completedAt &&
+    parseTranscript.includes(
+      'floorBefore.numberDecimal !== context.continuityFloor.blockNumber ||',
+    ) &&
+    parseTranscript.includes('floorBefore.hash !== context.continuityFloor.blockHash ||') &&
+    parseTranscript.includes(
+      'BigInt(selectedBefore.numberDecimal) < BigInt(floorBefore.numberDecimal) ||',
+    ) &&
+    parseTranscript.includes(
+      "record.zeroPositionSemantics !==\n      'EXACT_ZERO_PROJECTED_LOAN_ASSET_SUPPLY_AND_BORROW_FOR_BOUND_WALLET_AND_MARKET'",
+    ) &&
+    source.includes(
+      'validateSelectedBlockAge(transcript.selectedBlock, completedAt, this.#manifest);',
+    ) &&
+    exactExecutableLineCount(readTarget, 'assertActive(request, contextSettledAt, startedAt);') ===
+      1 &&
+    exactExecutableLineCount(
+      readTarget,
+      'assertActive(request, transcriptSettledAt, contextSettledAt);',
+    ) === 1 &&
+    exactExecutableLineCount(
+      readTarget,
+      'assertActive(request, completedAt, transcriptSettledAt);',
+    ) === 1 &&
+    exactExecutableLineCount(
+      readTarget,
+      'invoke(this.#transcriptReader.review, [transcriptCapability, issuedTranscriptRequest]) !==',
+    ) === 2 &&
+    exactExecutableLineCount(
+      readTarget,
+      'invoke(this.#contextReader.review, [contextCapability, issuedContextRequest]) !==',
+    ) === 3 &&
+    exactExecutableLineCount(
+      source,
+      "super('Morpho Blue Ethereum provider-position source is unavailable.');",
+    ) === 1 &&
+    !/\b(?:console|logger)\s*\.|\berror\s*\./u.test(source) &&
+    runtimeSurfaces.every((runtimeSource) => !forbiddenFeatureSurface.test(runtimeSource))
+  );
+}
+
+function hasDormantEulerV2EthereumProviderPositionSourceContract(
+  sourceInput: string,
+  runtimeCompositionSource: string,
+  infrastructureConfigSource: string,
+  networkPolicySource: string,
+  moduleSource: string,
+  indexSource: string,
+  controllerSource: string,
+): boolean {
+  const source = sourceInput.replace(/\r\n/gu, '\n');
+  const importSources = Array.from(
+    source.matchAll(/\bfrom\s+['"]([^'"]+)['"]/gu),
+    (match) => match[1],
+  );
+  const importDeclarationCount = source.match(/^[\t ]*import\b/gmu)?.length ?? 0;
+  const forbiddenCapability =
+    /(?:\bimport\s*\(|\brequire\s*\(|(?:\bfrom\s+|\bimport\s*(?:\(\s*)?)['"](?:node:)?(?:child_process|cluster|dgram|dns|fs|http|http2|https|net|tls|worker_threads)(?:\/[^'"]*)?['"]|(?:\bfrom\s+|\bimport\s*(?:\(\s*)?)['"](?:axios|ethers|got|pg|superagent|undici|web3|@solana\/web3\.js)['"]|\b(?:fetch|setTimeout|setInterval|setImmediate|queueMicrotask|WebSocket|EventSource|XMLHttpRequest|readFileSync|writeFileSync)\s*\(|\.\s*(?:query|connect|end|execute|transaction|persist|save|write)\s*\(|\b(?:process|Deno|Bun)\s*\.\s*env\b|\bimport\s*\.\s*meta\s*\.\s*env\b|['"]https?:\/\/|(?:^|\n)[\t ]*@[A-Za-z_$]|\b(?:NestFactory|PostgresService|DataSource|EntityManager|Repository|loadInfrastructureConfig|createPostgresPool)\b|\bPromise\s*\.\s*(?:all|allSettled|any|race)\s*\()/iu;
+  const forbiddenFeatureSurface =
+    /(?:DormantEulerV2EthereumProviderPositionSource|EulerV2EthereumDurableTargetContextReaderPort|EulerV2EthereumFinalizedPositionTranscriptPort|EULER_V2_ETHEREUM_(?:DURABLE_TARGET_CONTEXT|FINALIZED_POSITION_TRANSCRIPT)|dormant-euler-v2-ethereum-provider-position\.source)/u;
+  const runtimeSurfaces = [
+    runtimeCompositionSource,
+    infrastructureConfigSource,
+    networkPolicySource,
+    moduleSource,
+    indexSource,
+    controllerSource,
+  ] as const;
+  const classStart = source.indexOf(
+    'export class DormantEulerV2EthereumProviderPositionSource implements ProviderPositionAdmissionSourcePort {',
+  );
+  const readTargetStart = source.indexOf('  async readTarget(', classStart);
+  const readTarget = readTargetStart >= 0 ? source.slice(readTargetStart) : '';
+  const reviewedRequestStart = source.indexOf('function reviewedRequest(');
+  const contextRequestStart = source.indexOf('function contextRequest(', reviewedRequestStart);
+  const reviewedRequest =
+    reviewedRequestStart >= 0 && contextRequestStart > reviewedRequestStart
+      ? source.slice(reviewedRequestStart, contextRequestStart)
+      : '';
+  const transcriptRequestStart = source.indexOf('function transcriptRequest(');
+  const transcriptRequestEnd = source.indexOf(
+    '\nfunction parseVaultCandidate(',
+    transcriptRequestStart,
+  );
+  const transcriptRequest =
+    transcriptRequestStart >= 0 && transcriptRequestEnd > transcriptRequestStart
+      ? source.slice(transcriptRequestStart, transcriptRequestEnd)
+      : '';
+  const parseVaultStart = source.indexOf('function parseVaultCandidate(');
+  const parseVaultEnd = source.indexOf('\nfunction uint256Calldata(', parseVaultStart);
+  const parseVault =
+    parseVaultStart >= 0 && parseVaultEnd > parseVaultStart
+      ? source.slice(parseVaultStart, parseVaultEnd)
+      : '';
+  const parseAccountRowsStart = source.indexOf('function parseAccountRows(');
+  const parseAccountRowsEnd = source.indexOf('\nfunction parseTranscript(', parseAccountRowsStart);
+  const parseAccountRows =
+    parseAccountRowsStart >= 0 && parseAccountRowsEnd > parseAccountRowsStart
+      ? source.slice(parseAccountRowsStart, parseAccountRowsEnd)
+      : '';
+  const parseTranscriptStart = source.indexOf('function parseTranscript(');
+  const parseTranscriptEnd = source.indexOf('\nfunction validateFreshness(', parseTranscriptStart);
+  const parseTranscript =
+    parseTranscriptStart >= 0 && parseTranscriptEnd > parseTranscriptStart
+      ? source.slice(parseTranscriptStart, parseTranscriptEnd)
+      : '';
+  const evidenceStart = source.indexOf('function evidence(');
+  const evidenceEnd = source.indexOf('\n/**', evidenceStart);
+  const evidence =
+    evidenceStart >= 0 && evidenceEnd > evidenceStart
+      ? source.slice(evidenceStart, evidenceEnd)
+      : '';
+  const issuedContextAt = readTarget.indexOf(
+    'const issuedContextRequest = contextRequest(request);',
+  );
+  const contextReadAt = readTarget.indexOf(
+    'const contextCapability = await invoke(this.#contextReader.read, [issuedContextRequest]);',
+    issuedContextAt,
+  );
+  const contextSettledAt = readTarget.indexOf(
+    'const contextSettledAt = clockTime(this.#clock);',
+    contextReadAt,
+  );
+  const transcriptIssuedAt = readTarget.indexOf(
+    'const issuedTranscriptRequest = transcriptRequest(',
+    contextSettledAt,
+  );
+  const transcriptReadAt = readTarget.indexOf(
+    'const transcriptCapability = await invoke(this.#transcriptReader.read, [',
+    transcriptIssuedAt,
+  );
+  const transcriptSettledAt = readTarget.indexOf(
+    'const transcriptSettledAt = clockTime(this.#clock);',
+    transcriptReadAt,
+  );
+  const parsedAt = readTarget.indexOf('const transcript = parseTranscript(', transcriptSettledAt);
+  const completedAt = readTarget.indexOf('const completedAt = clockTime(this.#clock);', parsedAt);
+  const evidenceAt = readTarget.indexOf(
+    'return evidence(transcript, request, context, completedAt);',
+    completedAt,
+  );
+
+  return (
+    importDeclarationCount === 9 &&
+    importSources.length === 9 &&
+    importSources[0] === 'node:buffer' &&
+    importSources[1] === 'node:util/types' &&
+    importSources[2] === '../../accounts/domain/account-profile' &&
+    importSources[3] === '../../blockchain/domain/chain-observation-policy' &&
+    importSources[4] ===
+      '../../smart-lending/infrastructure/euler/euler-v2-account-position.semantics' &&
+    importSources[5] ===
+      '../../smart-lending/infrastructure/euler/euler-v2-ethereum-finalized-transcript.adapter' &&
+    importSources[6] === '../../wallets/domain/wallet-identity' &&
+    importSources[7] === '../application/provider-position-admission.coordinator' &&
+    importSources[8] === '../domain/mainnet-provider-position-observation' &&
+    !forbiddenCapability.test(source) &&
+    !/(?:@Injectable|@Module|@Controller)\s*\(/u.test(source) &&
+    exactExecutableLineCount(
+      source,
+      'export const EULER_V2_ETHEREUM_DURABLE_TARGET_CONTEXT_VERSION = 1 as const;',
+    ) === 1 &&
+    source.includes("'DORMANT_EULER_V2_ETHEREUM_DURABLE_TARGET_CONTEXT_ONLY' as const;") &&
+    exactExecutableLineCount(
+      source,
+      'export const EULER_V2_ETHEREUM_FINALIZED_POSITION_TRANSCRIPT_VERSION = 1 as const;',
+    ) === 1 &&
+    source.includes("'DORMANT_EULER_V2_ETHEREUM_FINALIZED_POSITION_TRANSCRIPT_ONLY' as const;") &&
+    exactExecutableLineCount(source, "const NETWORK_ID = 'eip155:1' as const;") === 1 &&
+    exactExecutableLineCount(source, "const PROVIDER_ID = 'euler' as const;") === 1 &&
+    exactExecutableLineCount(source, "const PROTOCOL_ID = 'euler-v2' as const;") === 1 &&
+    exactExecutableLineCount(source, "const EXPECTED_CHAIN_ID = '0x1' as const;") === 1 &&
+    exactExecutableLineCount(
+      source,
+      "const BLOCK_BINDING = 'EIP1898_BLOCK_HASH_REQUIRE_CANONICAL' as const;",
+    ) === 1 &&
+    exactExecutableLineCount(source, 'const EXPECTED_EVC_ACCOUNTS = 256;') === 1 &&
+    exactExecutableLineCount(source, 'const MAX_TRANSCRIPT_BYTES = 2 * 1024 * 1024;') === 1 &&
+    source.includes('this.#manifest = createEulerV2EthereumVaultManifest(manifestValue);') &&
+    source.includes(
+      'requiredManifestFingerprintSha256 !== this.#manifest.manifestFingerprintSha256 ||',
+    ) &&
+    source.includes(
+      'requiredSemanticsFingerprintSha256 !==\n          EULER_V2_ACCOUNT_POSITION_SEMANTICS_FINGERPRINT_SHA256',
+    ) &&
+    source.includes(
+      'this.#contextReader.receiver === this.#transcriptReader.receiver ||\n        this.#contextReader.sourceFamilyId === this.#transcriptReader.sourceFamilyId ||\n        this.#contextReader.sourceId === this.#transcriptReader.sourceId',
+    ) &&
+    reviewedRequest.includes("record.sourceKind !== 'RPC' ||") &&
+    reviewedRequest.includes('record.providerId !== PROVIDER_ID ||') &&
+    reviewedRequest.includes('record.protocolId !== PROTOCOL_ID ||') &&
+    reviewedRequest.includes('record.marketId !== manifest.vault.marketId ||') &&
+    reviewedRequest.includes('record.networkId !== NETWORK_ID ||') &&
+    reviewedRequest.includes('parseAsset(assets[0], manifest)') &&
+    transcriptRequest.includes(
+      'const accounts = deriveEulerV2EvcAccountCandidates(context.walletAddress);',
+    ) &&
+    transcriptRequest.includes('if (accounts.length !== EXPECTED_EVC_ACCOUNTS) {') &&
+    transcriptRequest.includes('manifest.deployment.evc.address,') &&
+    transcriptRequest.includes(
+      'accounts.map((account) => accountReadPlan(account, manifest.vault.vaultAddress))',
+    ) &&
+    transcriptRequest.includes('boundaryReadPlan.chainIdBefore.operationId,') &&
+    transcriptRequest.includes('boundaryReadPlan.vaultTranscript.operationId,') &&
+    transcriptRequest.includes('boundaryReadPlan.floorBlockBefore.operationId,') &&
+    transcriptRequest.includes('boundaryReadPlan.floorBlockAfter.operationId,') &&
+    transcriptRequest.includes('boundaryReadPlan.selectedBlockAfter.operationId,') &&
+    transcriptRequest.includes('boundaryReadPlan.chainIdAfter.operationId,') &&
+    transcriptRequest.includes('manifestFingerprintSha256: manifest.manifestFingerprintSha256,') &&
+    transcriptRequest.includes(
+      'semanticsFingerprintSha256: EULER_V2_ACCOUNT_POSITION_SEMANTICS_FINGERPRINT_SHA256,',
+    ) &&
+    parseVault.includes('supplyCap !== resolveFinitePositiveAmountCap(supplyCapRaw) ||') &&
+    parseVault.includes('borrowCap !== resolveFinitePositiveAmountCap(borrowCapRaw) ||') &&
+    parseVault.includes(
+      'maxDeposit !== calculatePinnedMaxDeposit(supplyCap, totalAssets, totalSupplyShares, cash) ||',
+    ) &&
+    parseVault.includes('sharesToAssets === 0n ||') &&
+    parseVault.includes('assetsToShares === 0n ||') &&
+    parseAccountRows.includes('request.accountReadPlans[index]') &&
+    parseAccountRows.includes('record.accountId !== expected.accountId ||') &&
+    parseAccountRows.includes('record.accountAddress !== expected.accountAddress') &&
+    source.includes('eip1898BlockParameter(record.blockParameter, selectedBlockHash);') &&
+    parseAccountRows.includes('projectEulerV2DebtExactToAssetsUp(debtExact.toString(10))') &&
+    parseTranscript.includes(
+      'assertExecutionOrder(record.executionOrder, issuedRequest.executionOrder);',
+    ) &&
+    parseTranscript.includes(
+      'parseWalletOwnerGate(record.walletOwnerGate, issuedRequest, vault.block.hash);',
+    ) &&
+    parseTranscript.includes("record.status !== 'COMPLETE' ||") &&
+    parseTranscript.includes(
+      "record.coverageScope !== 'EXACT_MANIFEST_VAULT_LOAN_ASSET_ALL_256_EVC_ACCOUNTS' ||",
+    ) &&
+    parseTranscript.includes('record.operatorTraversal !== false ||') &&
+    parseTranscript.includes('record.indirectExposureIncluded !== false ||') &&
+    parseTranscript.includes('record.chainIdBefore !== EXPECTED_CHAIN_ID ||') &&
+    parseTranscript.includes('record.chainIdAfter !== EXPECTED_CHAIN_ID ||') &&
+    parseTranscript.includes('!sameHeader(vault.block, selectedAfter) ||') &&
+    parseTranscript.includes('!sameHeader(floorBefore, floorAfter) ||') &&
+    parseTranscript.includes(
+      'floorBefore.numberDecimal !== context.continuityFloor.blockNumber ||',
+    ) &&
+    parseTranscript.includes('floorBefore.hash !== context.continuityFloor.blockHash ||') &&
+    parseTranscript.includes(
+      'BigInt(vault.block.numberDecimal) < BigInt(floorBefore.numberDecimal) ||',
+    ) &&
+    parseTranscript.includes(
+      "record.zeroPositionSemantics !== 'EXACT_ZERO_AGGREGATE_AFTER_ALL_256_EVC_ACCOUNT_ROWS'",
+    ) &&
+    exactExecutableLineCount(source, 'readonly mayAuthorizeFinancialAction: false;') === 3 &&
+    !/(?:mayAuthorizeFinancialAction|mayPersist|mayCreatePositionSnapshot|maySign|mayAccessWalletPrivateKey)\s*:\s*true/u.test(
+      source,
+    ) &&
+    source.includes('assertBoundedImmutableData(capability, MAX_CONTEXT_BYTES);') &&
+    source.includes('assertBoundedImmutableData(capability, MAX_TRANSCRIPT_BYTES);') &&
+    reviewedRequest.includes('aborted(signal) ||') &&
+    reviewedRequest.includes('deadlineAt.milliseconds <= startedAt.milliseconds ||') &&
+    reviewedRequest.includes(
+      'deadlineAt.milliseconds - startedAt.milliseconds > MAX_DEADLINE_MILLISECONDS',
+    ) &&
+    source.includes(
+      'if (record.blockHash !== selectedBlockHash || record.requireCanonical !== true) {',
+    ) &&
+    source.includes('record.to !== request.manifest.deployment.evc.address ||') &&
+    source.includes("record.result !== `0x${'0'.repeat(24)}${request.walletAddress.slice(2)}`") &&
+    parseVault.includes(
+      "record.sourceAuthenticity !== 'UNVERIFIED_SINGLE_INJECTED_RPC_TRANSCRIPT' ||",
+    ) &&
+    parseVault.includes(
+      "record.persistenceEligibility !== 'BLOCKED_PENDING_INDEPENDENT_SOURCE_AND_RISK_VERIFICATION' ||",
+    ) &&
+    parseVault.includes('record.mayPersist !== false ||') &&
+    parseVault.includes('record.mayAuthorizeFinancialAction !== false') &&
+    evidence.includes('mayAuthorizeFinancialAction: false as const,') &&
+    evidence.includes("status: 'COMPLETE' as const,") &&
+    evidence.includes('assets: Object.freeze([request.asset]),') &&
+    issuedContextAt >= 0 &&
+    contextReadAt > issuedContextAt &&
+    contextSettledAt > contextReadAt &&
+    transcriptIssuedAt > contextSettledAt &&
+    transcriptReadAt > transcriptIssuedAt &&
+    transcriptSettledAt > transcriptReadAt &&
+    parsedAt > transcriptSettledAt &&
+    completedAt > parsedAt &&
+    evidenceAt > completedAt &&
+    source.includes(
+      'validateFreshness(transcript, completedAt, contextSettledAt, this.#manifest);',
+    ) &&
+    exactExecutableLineCount(readTarget, 'assertActive(request, contextSettledAt, startedAt);') ===
+      1 &&
+    exactExecutableLineCount(
+      readTarget,
+      'assertActive(request, transcriptSettledAt, contextSettledAt);',
+    ) === 1 &&
+    exactExecutableLineCount(
+      readTarget,
+      'assertActive(request, completedAt, transcriptSettledAt);',
+    ) === 1 &&
+    exactExecutableLineCount(
+      readTarget,
+      'invoke(this.#transcriptReader.review, [transcriptCapability, issuedTranscriptRequest]) !==',
+    ) === 2 &&
+    exactExecutableLineCount(
+      readTarget,
+      'invoke(this.#contextReader.review, [contextCapability, issuedContextRequest]) !==',
+    ) === 3 &&
+    exactExecutableLineCount(
+      source,
+      "super('Euler V2 Ethereum provider-position source is unavailable.');",
+    ) === 1 &&
+    !/\b(?:console|logger)\s*\.|\berror\s*\./u.test(source) &&
+    runtimeSurfaces.every((runtimeSource) => !forbiddenFeatureSurface.test(runtimeSource))
+  );
+}
+
 function hasInertProviderPositionReadRuntimeRegistrationContract(
   registrationSourceInput: string,
   moduleSourceInput: string,
@@ -6820,6 +7411,14 @@ function hasDormantProviderPositionReadBoundaryContract(
     /\r\n/gu,
     '\n',
   );
+  const morphoBlueEthereumSource = sources.providerPositionMorphoBlueEthereumSource.replace(
+    /\r\n/gu,
+    '\n',
+  );
+  const eulerV2EthereumSource = sources.providerPositionEulerV2EthereumSource.replace(
+    /\r\n/gu,
+    '\n',
+  );
   const chainAnchorEvidenceRecorderPort =
     sources.providerPositionChainAnchorEvidenceRecorderPortSource.replace(/\r\n/gu, '\n');
   const postgresChainAnchorEvidenceRecorder =
@@ -6906,6 +7505,10 @@ function hasDormantProviderPositionReadBoundaryContract(
     chainAnchorCandidateFinalityFinalizer,
     aaveV3EthereumSource,
     kaminoSource,
+    compoundIIIEthereumSource,
+    sparkLendEthereumSource,
+    morphoBlueEthereumSource,
+    eulerV2EthereumSource,
     chainAnchorEvidenceRecorderPort,
     chainAnchorRecordIntentReconciliationPort,
     postgresChainAnchorRecordIntentReconciliationProcessor,
@@ -7805,6 +8408,24 @@ function hasDormantProviderPositionReadBoundaryContract(
     ) &&
     hasDormantSparkLendEthereumProviderPositionSourceContract(
       sparkLendEthereumSource,
+      runtimeComposition,
+      infrastructureConfig,
+      mainnetLaunchNetworkPolicy,
+      moduleSource,
+      indexSource,
+      controller,
+    ) &&
+    hasDormantMorphoBlueEthereumProviderPositionSourceContract(
+      morphoBlueEthereumSource,
+      runtimeComposition,
+      infrastructureConfig,
+      mainnetLaunchNetworkPolicy,
+      moduleSource,
+      indexSource,
+      controller,
+    ) &&
+    hasDormantEulerV2EthereumProviderPositionSourceContract(
+      eulerV2EthereumSource,
       runtimeComposition,
       infrastructureConfig,
       mainnetLaunchNetworkPolicy,
@@ -9026,7 +9647,7 @@ const API_RUNTIME_PINNED_INPUT_PATHS = Object.freeze([
   'tsconfig.json',
 ]);
 const REVIEWED_API_RUNTIME_REPOSITORY_SNAPSHOT_SHA256 =
-  'fb14a434a4feb6d71ff4853b7038556059768ab2d8a93f2f85428e885ec1cbc7';
+  '0d11c90d870eeac4f0c1565f82be3025053a9b510b0516482d51b0d8b5155c20';
 const API_RUNTIME_OWNED_DEPLOYMENT_IDENTITY_PATHS = new Set([
   'blockchain-sync/infrastructure/rpc/ethereum-mainnet-balance-deployment-identity.verifier.ts',
   'blockchain-sync/infrastructure/rpc/ethereum-mainnet-balance-deployment.manifest.ts',
@@ -16578,6 +17199,8 @@ export function loadRepositoryProductionPreflightInput(
 
   let providerPositionReadBoundary = inspectProviderPositionReadBoundaryArtifacts(null);
   try {
+    const reviewedDormantProviderPositionSources =
+      readReviewedDormantProviderPositionSources(repositoryRoot);
     providerPositionReadBoundary = inspectProviderPositionReadBoundaryArtifacts({
       providerPositionReaderPortSource: readFileSync(
         resolve(
@@ -16656,6 +17279,10 @@ export function loadRepositoryProductionPreflightInput(
         ),
         'utf8',
       ),
+      providerPositionMorphoBlueEthereumSource:
+        reviewedDormantProviderPositionSources.providerPositionMorphoBlueEthereumSource,
+      providerPositionEulerV2EthereumSource:
+        reviewedDormantProviderPositionSources.providerPositionEulerV2EthereumSource,
       providerPositionChainAnchorEvidenceRecorderPortSource: readFileSync(
         resolve(
           repositoryRoot,
