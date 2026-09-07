@@ -1,9 +1,9 @@
 # Morpho Blue Ethereum finalized transcript boundary
 
-Status: **dormant and non-persistable**. This note records a parser/evidence
-boundary, not an approved market, RPC provider, production feed, or activation
-decision. Nothing in this slice is registered with Nest, a database writer, or
-the provider registry.
+Status: **dormant and non-persistable**. This note records parser/evidence and
+exact-market account-position source boundaries, not an approved market, RPC
+provider, production feed, or activation decision. Nothing in this slice is
+registered with Nest, a database writer, or the provider registry.
 
 ## Narrow supported claim
 
@@ -53,21 +53,41 @@ or expose:
 The existing provider-native market port requires a defensible base supply APY
 and provider-native status. Filling those fields from this transcript would
 invent data, so this candidate intentionally does not implement that port.
-Likewise, it reads no wallet-specific `position(id, user)` state and therefore
-cannot create a mainnet provider-position observation.
+Likewise, this market adapter reads no wallet-specific `position(id, user)`
+state and cannot create a mainnet provider-position observation. The separate
+direct-import-only account source described below does not reuse or promote
+this unauthenticated candidate.
 
 ## Dormant account-position semantics
 
 A separate content-fingerprinted artifact records the exact offline arithmetic
-needed to interpret caller-supplied Morpho Blue account state. It remains
-deliberately disconnected from the finalized-transcript adapter: it creates no
-endpoint or client, performs no RPC or transaction, reads no environment
-variable, registers no DI binding or route, and cannot persist or authorize a
-financial action. Its output explicitly says both that completeness is not
-established and that the calculation used only unauthenticated, caller-supplied
-state. A versioned SHA-256 fingerprint covers its immutable source pins, ABI,
-storage, accrual, conversion, discovery, and block-context rules so a semantic
-change cannot be mistaken for the reviewed artifact. Version 1 is pinned as
+needed to interpret caller-supplied Morpho Blue account state. The raw evaluator
+still establishes no completeness or authenticity by itself. A dormant
+account-position source now supplies it only with values from an opaque
+transcript capability authenticated against the exact issued request. That
+source first obtains authenticated durable wallet/continuity context, binds the
+exact manifest-derived market target, wallet, deadline, signal, five runtime
+code reads, six core state reads, conditional IRM read, finalized header,
+durable floor, and height/chain closeout, and then emits only the direct loan
+asset supply/borrow result for that one target. It explicitly excludes delegated
+authorizer traversal, collateral-as-a-target-asset, protocol-wide market
+discovery, and MetaMorpho exposure.
+
+Here, source evidence `COMPLETE` means complete only for the coordinator's exact
+pre-enumerated target: the market target ID embeds the full onchain `bytes32`
+market ID and the target asset is exactly the manifest loan token. It does not
+override the raw arithmetic evaluator's `NOT_ESTABLISHED` protocol/account-wide
+completeness statement. The coordinator's trusted deadline runner owns the
+timer and aborts the shared signal; both injected ports must cooperate with that
+abort and drain started work. Directly importing the source without that runner
+does not create a deadline timer.
+
+Both artifacts remain direct-import-only: they create no endpoint or client,
+perform no transaction, read no environment variable, register no DI binding or
+route, and cannot persist or authorize a financial action. A versioned SHA-256
+fingerprint covers the immutable source pins, ABI, storage, accrual, conversion,
+discovery, and block-context rules so a semantic change cannot be mistaken for
+the reviewed artifact. Version 1 is pinned as
 `06825a41d6d93686df57e6c4e8e14b1026e8f0bcc8e4473b5517c3021eb73d4b`.
 
 The storage meanings pinned from the official source are:
@@ -316,10 +336,12 @@ financial action, at least the following remain required:
    and EIP-1898 capability, durable finalized checkpoints/lineage, divergence
    quarantine, and recovery rules. Repeating a request against one RPC is not
    independence or authenticity.
-5. A reviewed runtime reader that binds all code, raw state, fee-recipient,
-   wallet-position, IRM, and discovery evidence to one finalized context and
-   evaluates every in-scope market without silently dropping failures. The
-   current semantics accept only offline caller-supplied values.
+5. Approved implementations of the new durable-context and finalized-transcript
+   ports for both independent source families, plus a complete approved target
+   policy that invokes the exact-market source for every in-scope market without
+   silently dropping failures. The repository now contains the fail-closed
+   account reader boundary, but no port implementation, endpoint, source pair,
+   registration, or live evidence.
 6. Oracle implementation/source/freshness/deviation review and collateral-risk,
    market-liquidity, bad-debt, concentration, legal, and operational policy.
 7. Approved egress/retry/deadline/circuit-breaker transports and explicit runtime

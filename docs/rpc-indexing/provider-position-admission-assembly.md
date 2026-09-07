@@ -10,15 +10,18 @@ No evidence writer or reconciliation schedule is composed, and none of the
 private reader, recorder, processor, or lifecycle is registered, granted runtime
 authority, or runtime-reachable.
 
-Four concrete provider-target source artifacts now implement the coordinator's
+Five concrete provider-target source artifacts now implement the coordinator's
 source port: Aave V3 Ethereum (`1538ec7`), Kamino Solana (`1e70d80`), Compound
-III Ethereum (`7e10077`), and SparkLend Ethereum (`d684428`). They accept
-authenticated durable wallet/continuity context before a bounded finalized
-transcript, preserve explicit `COMPLETE` zero semantics, and expose no financial
-authority. All four are endpoint-free, direct-import-only, dormant, and absent
-from module, barrel, controller, configuration, and runtime composition. They
-are not an approved independent source pair and have performed no live provider
-read.
+III Ethereum (`7e10077`), SparkLend Ethereum (`d684428`), and Morpho Blue
+Ethereum (this slice). They accept authenticated durable wallet/continuity
+context before a bounded finalized transcript, preserve explicit `COMPLETE`
+zero semantics, and expose no financial authority. Morpho's claim is explicitly
+limited to the direct loan asset in one exact manifest-derived market; it does
+not claim protocol-wide market discovery, collateral coverage, delegated-owner
+positions, or MetaMorpho exposure. All five are endpoint-free,
+direct-import-only, dormant, and absent from module, barrel, controller,
+configuration, and runtime composition. They are not an approved independent
+source pair and have performed no live provider read.
 
 ## What the coordinator establishes
 
@@ -353,7 +356,7 @@ separately reviewed and activated authority boundary permits any ledger mutation
 or financial use.
 
 The checked-in mainnet source-pair registry remains empty and `NOT_APPROVED`.
-The four provider-target source artifacts do not change that registry and do
+The five provider-target source artifacts do not change that registry and do
 not provide an approved independent witness pair. The registered module token
 resolves only to the inert facade; no live source, endpoint, owner-authorized
 recorder or reconciliation workload/principal/credential/grant, approved source
