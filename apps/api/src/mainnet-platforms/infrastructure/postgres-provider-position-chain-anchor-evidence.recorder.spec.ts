@@ -24,9 +24,10 @@ import {
 } from '../application/ports/provider-position-chain-anchor-evidence-source.port';
 import {
   PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORDER_VERSION,
-  PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORD_RECEIPT_USE,
+  PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORD_RESULT_USE,
   PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORD_USE,
-  type RecordProviderPositionChainAnchorEvidenceRequestV1,
+  type ProviderPositionChainAnchorEvidenceRecordResultV2,
+  type RecordProviderPositionChainAnchorEvidenceRequestV2,
 } from '../application/ports/provider-position-chain-anchor-evidence-recorder.port';
 import {
   PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORD_ERROR,
@@ -39,28 +40,27 @@ const HASH_A = `0x${'1'.repeat(64)}`;
 const HASH_B = `0x${'2'.repeat(64)}`;
 const HASH_C = `0x${'3'.repeat(64)}`;
 const HASH_D = `0x${'4'.repeat(64)}`;
-const RECORDED_FINGERPRINT = 'f'.repeat(64);
+const INTENT_FINGERPRINT = '9'.repeat(64);
+const EVIDENCE_FINGERPRINT = '8'.repeat(64);
+const READ_BINDING_FINGERPRINT = '7'.repeat(64);
+const DEADLINE_BINDING_FINGERPRINT = '6'.repeat(64);
 const OBSERVED_AT = '2026-09-05T16:59:50.000Z';
 const DEADLINE_AT = '2026-09-05T17:00:10.000Z';
 const ASSESSED_AT = '2026-09-05T17:00:02.000Z';
 const RECORDED_AT = '2026-09-05T17:00:03.000Z';
+const RESOLVED_AT = '2026-09-05T17:00:04.000Z';
+const AFTER_DEADLINE_AT = '2026-09-05T17:00:11.000Z';
 
 type NetworkId = typeof ETHEREUM | typeof SOLANA;
 
-const RECORD_SQL = `SELECT
-  evidence.record_outcome,
-  evidence.recorded_evidence_fingerprint_sha256,
-  pg_catalog.to_char(
-    evidence.evidence_recorded_at AT TIME ZONE 'UTC',
-    'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'
-  ) AS evidence_recorded_at
-FROM record_provider_position_chain_anchor_evidence(
-  $1::text, $2::text, $3::text, $4::text, $5::text,
-  $6::jsonb, $7::jsonb, $8::timestamptz, $9::timestamptz,
-  $10::jsonb, $11::timestamptz, $12::jsonb, $13::timestamptz,
-  $14::text, $15::text, $16::text, $17::text, $18::text,
-  $19::text, $20::text, $21::text, $22::text, $23::timestamptz
-) AS evidence`;
+type IntentState =
+  | 'NEW'
+  | 'RECORD_DISPATCHED'
+  | 'UNKNOWN'
+  | 'RECORDED'
+  | 'IDEMPOTENT_REPLAY'
+  | 'NOT_RECORDED'
+  | 'DEADLINE_VIOLATION';
 
 function frozen<T extends object>(value: T): Readonly<T> {
   return Object.freeze(value);
@@ -235,8 +235,6 @@ interface FixtureOptions {
   readonly signal?: AbortSignal;
   readonly nullProducerRequest?: boolean;
   readonly nullRecordRequest?: boolean;
-  readonly outcome?: 'RECORDED' | 'IDEMPOTENT_REPLAY';
-  readonly recordedAt?: string;
 }
 
 interface RecorderFixture {
@@ -244,7 +242,7 @@ interface RecorderFixture {
   readonly producerRequest: ProduceProviderPositionChainAnchorEvidenceRequestV1;
   readonly producerCapability: unknown;
   readonly candidate: ProviderPositionChainAnchorEvidenceRecordCandidateV1;
-  readonly recordRequest: RecordProviderPositionChainAnchorEvidenceRequestV1;
+  readonly recordRequest: RecordProviderPositionChainAnchorEvidenceRequestV2;
   readonly recorder: PostgresProviderPositionChainAnchorEvidenceRecorder;
   readonly clock: ScriptedClock;
   readonly query: jest.Mock;
@@ -311,14 +309,23 @@ function bindings(
   );
 }
 
-function row(
-  outcome: 'RECORDED' | 'IDEMPOTENT_REPLAY' = 'RECORDED',
-  recordedAt = RECORDED_AT,
-): Record<string, unknown> {
+function row(state: IntentState, overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  const terminalRecorded = state === 'RECORDED' || state === 'IDEMPOTENT_REPLAY';
+  const resolved = terminalRecorded
+    ? RESOLVED_AT
+    : state === 'NOT_RECORDED' || state === 'DEADLINE_VIOLATION'
+      ? AFTER_DEADLINE_AT
+      : null;
   return {
-    record_outcome: outcome,
-    recorded_evidence_fingerprint_sha256: RECORDED_FINGERPRINT,
-    evidence_recorded_at: recordedAt,
+    intent_state: state,
+    record_intent_fingerprint_sha256: INTENT_FINGERPRINT,
+    evidence_fingerprint_sha256: EVIDENCE_FINGERPRINT,
+    read_binding_fingerprint_sha256: READ_BINDING_FINGERPRINT,
+    deadline_binding_sha256: terminalRecorded ? DEADLINE_BINDING_FINGERPRINT : null,
+    evidence_recorded_at: terminalRecorded || state === 'DEADLINE_VIOLATION' ? RECORDED_AT : null,
+    resolved_at: resolved,
+    producer_deadline_at: DEADLINE_AT,
+    ...overrides,
   };
 }
 
@@ -351,9 +358,11 @@ async function fixture(
   const exactProducerRequest = producerRequest(networkId, signal, options);
   const producerCapability = await producer.produceCandidate(exactProducerRequest);
   const candidate = producerCapability as ProviderPositionChainAnchorEvidenceRecordCandidateV1;
-  const query = jest.fn().mockResolvedValue({
-    rows: [row(options.outcome, options.recordedAt)],
-  });
+  const query = jest
+    .fn()
+    .mockResolvedValueOnce({ rows: [row('NEW')] })
+    .mockResolvedValueOnce({ rows: [row('RECORD_DISPATCHED')] })
+    .mockResolvedValueOnce({ rows: [row('RECORDED')] });
   const forbidden = frozen([jest.fn(), jest.fn(), jest.fn(), jest.fn()]);
   const postgres = {
     queryWithCancellation: query,
@@ -376,7 +385,7 @@ async function fixture(
   };
   const recordRequest = (
     options.nullRecordRequest ? frozenNull(members) : frozen(members)
-  ) as RecordProviderPositionChainAnchorEvidenceRequestV1;
+  ) as RecordProviderPositionChainAnchorEvidenceRequestV2;
   return {
     producer,
     producerRequest: exactProducerRequest,
@@ -425,134 +434,573 @@ function expectSanitizedThrow(operation: () => unknown): void {
   expect(captured).not.toHaveProperty('cause');
 }
 
+function scriptRows(test: RecorderFixture, ...rows: Array<Record<string, unknown> | Error>): void {
+  test.query.mockReset();
+  for (const value of rows) {
+    if (value instanceof Error) test.query.mockRejectedValueOnce(value);
+    else test.query.mockResolvedValueOnce({ rows: [value] });
+  }
+}
+
+function reviewedResult(
+  test: RecorderFixture,
+  capability: unknown,
+): ProviderPositionChainAnchorEvidenceRecordResultV2 {
+  const reviewed = test.recorder.reviewResult(capability, test.recordRequest);
+  if (reviewed === null) throw new Error('expected an authenticated recorder result');
+  return reviewed;
+}
+
+function expectReconciliation(
+  test: RecorderFixture,
+  capability: unknown,
+  phase: 'PREPARE' | 'CLAIM_DISPATCH' | 'EXECUTE_RECORD' | 'MARK_UNKNOWN',
+  state: 'NEW' | 'RECORD_DISPATCHED' | 'UNKNOWN' | null,
+): void {
+  expect(reviewedResult(test, capability)).toEqual(
+    expect.objectContaining({
+      recorderVersion: 2,
+      use: PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORD_RESULT_USE,
+      mayAuthorizeFinancialAction: false,
+      producerDeadlineAt: DEADLINE_AT,
+      outcome: 'RECONCILIATION_REQUIRED',
+      uncertainPhase: phase,
+      knownIntentState: state,
+    }),
+  );
+}
+
 describe('PostgresProviderPositionChainAnchorEvidenceRecorder', () => {
   it.each([ETHEREUM, SOLANA] as const)(
-    'records one exact authenticated %s candidate and issues only an exact-request-bound receipt',
+    'prepares 24 reviewed %s values, claims and executes in separate autocommit calls, then zeroizes one shared token',
     async (networkId) => {
       const test = await fixture(networkId, {
         nullProducerRequest: networkId === SOLANA,
         nullRecordRequest: networkId === SOLANA,
       });
-      expect(test.query).not.toHaveBeenCalled();
+      const tokenReferences: Buffer[] = [];
+      const tokenSnapshots: Buffer[] = [];
+      let queryNumber = 0;
+      test.query
+        .mockReset()
+        .mockImplementation(
+          async (_sql: string, values: readonly unknown[], signal: AbortSignal) => {
+            queryNumber += 1;
+            expect(signal).toBe(test.recordRequest.signal);
+            if (queryNumber === 1) return { rows: [row('NEW')] };
+            const token = values[1];
+            expect(Buffer.isBuffer(token)).toBe(true);
+            tokenReferences.push(token as Buffer);
+            tokenSnapshots.push(Buffer.from(token as Buffer));
+            return queryNumber === 2
+              ? { rows: [row('RECORD_DISPATCHED')] }
+              : { rows: [row('RECORDED')] };
+          },
+        );
 
-      const receipt = await test.recorder.recordEvidence(test.recordRequest);
+      const result = await test.recorder.recordEvidence(test.recordRequest);
 
-      expect(test.query).toHaveBeenCalledTimes(1);
-      const [sql, values, signal] = test.query.mock.calls[0] as [
+      expect(test.query).toHaveBeenCalledTimes(3);
+      const [prepareSql, prepareValues, prepareSignal] = test.query.mock.calls[0] as [
         string,
         readonly unknown[],
         AbortSignal,
       ];
-      expect(sql).toBe(RECORD_SQL);
-      expect(values).toEqual(expectedValues(test.candidate));
-      expect(values).toHaveLength(23);
-      expect(Object.isFrozen(values)).toBe(true);
-      expect(signal).toBe(test.producerRequest.signal);
-      expect(signal).toBe(test.recordRequest.signal);
+      expect(prepareSql).toContain('FROM prepare_provider_position_chain_anchor_record_intent(');
+      expect(prepareSql).toContain('$24::timestamptz');
+      expect(prepareValues).toEqual([...expectedValues(test.candidate), DEADLINE_AT]);
+      expect(prepareValues).toHaveLength(24);
+      expect(Object.isFrozen(prepareValues)).toBe(true);
+      expect(prepareSignal).toBe(test.producerRequest.signal);
+      expect(test.query.mock.calls[1]?.[0]).toContain(
+        'FROM claim_provider_position_chain_anchor_record_dispatch($1::text, $2::bytea)',
+      );
+      expect(test.query.mock.calls[2]?.[0]).toContain(
+        'FROM execute_provider_position_chain_anchor_record_intent($1::text, $2::bytea)',
+      );
+      expect(test.query.mock.calls[1]?.[1]).toEqual([INTENT_FINGERPRINT, expect.any(Buffer)]);
+      expect(tokenReferences).toHaveLength(2);
+      expect(tokenReferences[0]).toBe(tokenReferences[1]);
+      expect(tokenSnapshots[0]).toHaveLength(32);
+      expect(tokenSnapshots[0]?.equals(Buffer.alloc(32))).toBe(false);
+      expect(tokenSnapshots[1]?.equals(tokenSnapshots[0] as Buffer)).toBe(true);
+      expect(tokenReferences[0]?.equals(Buffer.alloc(32))).toBe(true);
       for (const forbidden of test.forbidden) expect(forbidden).not.toHaveBeenCalled();
-      expect(test.clock.calls).toBe(7);
-      expect(receipt).toEqual({
-        recorderVersion: 1,
-        use: PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORD_RECEIPT_USE,
+      expect(result).toEqual({
+        recorderVersion: 2,
+        use: PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORD_RESULT_USE,
         mayAuthorizeFinancialAction: false,
+        producerDeadlineAt: DEADLINE_AT,
+        outcome: 'RECORDED',
         recordOutcome: 'RECORDED',
-        recordedEvidenceFingerprintSha256: RECORDED_FINGERPRINT,
+        recordIntentFingerprintSha256: INTENT_FINGERPRINT,
+        evidenceFingerprintSha256: EVIDENCE_FINGERPRINT,
+        deadlineBindingSha256: DEADLINE_BINDING_FINGERPRINT,
         evidenceRecordedAt: RECORDED_AT,
+        resolvedAt: RESOLVED_AT,
       });
-      expect(Object.getPrototypeOf(receipt as object)).toBeNull();
-      expect(Object.isFrozen(receipt)).toBe(true);
-      expect(test.recorder.verifyReceipt(receipt, test.recordRequest)).toBe(true);
-      expect(test.recorder.verifyReceipt(structuredClone(receipt), test.recordRequest)).toBe(false);
-      expect(test.recorder.verifyReceipt(receipt, frozen({ ...test.recordRequest }))).toBe(false);
+      expect(Object.getPrototypeOf(result as object)).toBeNull();
+      expect(Object.isFrozen(result)).toBe(true);
+      expect(JSON.stringify(result)).not.toContain(tokenSnapshots[0]?.toString('hex'));
+      expect(test.recorder.reviewResult(result, test.recordRequest)).toBe(result);
+      expect(test.recorder.reviewResult(structuredClone(result), test.recordRequest)).toBeNull();
+      expect(test.recorder.reviewResult(result, frozen({ ...test.recordRequest }))).toBeNull();
       const foreign = new PostgresProviderPositionChainAnchorEvidenceRecorder(
         test.producer,
         test.postgres as unknown as PostgresService,
       );
-      expect(foreign.verifyReceipt(receipt, test.recordRequest)).toBe(false);
+      expect(foreign.reviewResult(result, test.recordRequest)).toBeNull();
     },
   );
 
-  it('accepts migration-0029 idempotent replay as a completed, non-authorizing record', async () => {
-    const test = await fixture(ETHEREUM, { outcome: 'IDEMPOTENT_REPLAY' });
+  it('rejects and zeroizes an all-zero 32-byte CSPRNG result before CLAIM', async () => {
+    const test = await fixture();
+    test.query.mockReset().mockResolvedValueOnce({ rows: [row('NEW')] });
+    const zeroToken = Buffer.alloc(32);
+    const fill = jest.spyOn(zeroToken, 'fill');
+    const cryptoModule = jest.requireActual('node:crypto') as {
+      randomBytes(size: number): Buffer;
+    };
+    const random = jest.spyOn(cryptoModule, 'randomBytes').mockReturnValueOnce(zeroToken);
+    try {
+      const result = await test.recorder.recordEvidence(test.recordRequest);
 
-    await expect(test.recorder.recordEvidence(test.recordRequest)).resolves.toEqual(
-      expect.objectContaining({
-        mayAuthorizeFinancialAction: false,
+      expectReconciliation(test, result, 'CLAIM_DISPATCH', 'NEW');
+      expect(test.query).toHaveBeenCalledTimes(1);
+      expect(random).toHaveBeenCalledTimes(1);
+      expect(random).toHaveBeenCalledWith(32);
+      expect(fill).toHaveBeenCalledTimes(1);
+      expect(fill).toHaveBeenCalledWith(0);
+    } finally {
+      random.mockRestore();
+      fill.mockRestore();
+    }
+  });
+
+  it.each([
+    [
+      'RECORDED',
+      {
+        outcome: 'RECORDED',
+        recordOutcome: 'RECORDED',
+        deadlineBindingSha256: DEADLINE_BINDING_FINGERPRINT,
+        evidenceRecordedAt: RECORDED_AT,
+      },
+    ],
+    [
+      'IDEMPOTENT_REPLAY',
+      {
+        outcome: 'RECORDED',
         recordOutcome: 'IDEMPOTENT_REPLAY',
+        deadlineBindingSha256: DEADLINE_BINDING_FINGERPRINT,
+        evidenceRecordedAt: RECORDED_AT,
+      },
+    ],
+    ['NOT_RECORDED', { outcome: 'NOT_RECORDED', resolvedAt: AFTER_DEADLINE_AT }],
+    [
+      'DEADLINE_VIOLATION',
+      {
+        outcome: 'DEADLINE_VIOLATION',
+        evidenceRecordedAt: RECORDED_AT,
+        resolvedAt: AFTER_DEADLINE_AT,
+      },
+    ],
+  ] as const)('maps a PREPARE terminal %s without claiming', async (state, expected) => {
+    const test = await fixture();
+    scriptRows(test, row(state));
+
+    const result = await test.recorder.recordEvidence(test.recordRequest);
+
+    expect(test.query).toHaveBeenCalledTimes(1);
+    expect(reviewedResult(test, result)).toEqual(
+      expect.objectContaining({
+        ...expected,
+        recordIntentFingerprintSha256: INTENT_FINGERPRINT,
+        evidenceFingerprintSha256: EVIDENCE_FINGERPRINT,
+        producerDeadlineAt: DEADLINE_AT,
       }),
     );
   });
 
-  it('accepts an older observation freshly corroborated inside the producer-owned deadline', async () => {
-    const test = await fixture(ETHEREUM, { observedAt: '2026-09-05T16:00:00.000Z' });
+  it('accepts deadline-violation evidence after the producer deadline when source freshness remains valid', async () => {
+    const test = await fixture();
+    scriptRows(
+      test,
+      row('DEADLINE_VIOLATION', {
+        evidence_recorded_at: '2026-09-05T17:00:10.500Z',
+      }),
+    );
 
-    await expect(test.recorder.recordEvidence(test.recordRequest)).resolves.toBeDefined();
+    const result = await test.recorder.recordEvidence(test.recordRequest);
+
+    expect(reviewedResult(test, result)).toEqual(
+      expect.objectContaining({
+        outcome: 'DEADLINE_VIOLATION',
+        evidenceRecordedAt: '2026-09-05T17:00:10.500Z',
+      }),
+    );
     expect(test.query).toHaveBeenCalledTimes(1);
   });
 
-  it('captures the query method without I/O and ignores later member replacement', async () => {
+  it.each(['RECORD_DISPATCHED', 'UNKNOWN'] as const)(
+    'returns authenticated reconciliation for PREPARE %s without dispatching again',
+    async (state) => {
+      const test = await fixture();
+      scriptRows(test, row(state));
+
+      const result = await test.recorder.recordEvidence(test.recordRequest);
+
+      expect(test.query).toHaveBeenCalledTimes(1);
+      expectReconciliation(test, result, 'PREPARE', state);
+      expect(reviewedResult(test, result)).toEqual(
+        expect.objectContaining({
+          recordIntentFingerprintSha256: INTENT_FINGERPRINT,
+          evidenceFingerprintSha256: EVIDENCE_FINGERPRINT,
+        }),
+      );
+    },
+  );
+
+  it.each([
+    ['throw', new Error('secret synchronous failure')],
+    ['reject', new Error('secret asynchronous failure')],
+    ['no rows', []],
+    ['multiple rows', [row('NEW'), row('NEW')]],
+    ['extra column', [{ ...row('NEW'), authority: true }]],
+    ['wrong state', [{ ...row('NEW'), intent_state: 'PARTIAL' }]],
+    ['zero fingerprint', [{ ...row('NEW'), evidence_fingerprint_sha256: '0'.repeat(64) }]],
+    ['bad deadline', [{ ...row('NEW'), producer_deadline_at: '2026-09-05T17:00:10Z' }]],
+    ['bad nullability', [{ ...row('NEW'), resolved_at: RESOLVED_AT }]],
+  ])(
+    'turns a valid request with malformed PREPARE %s into an issued uncertain result',
+    async (kind, value) => {
+      const test = await fixture();
+      test.query.mockReset();
+      if (kind === 'throw') {
+        test.query.mockImplementationOnce(() => {
+          throw value;
+        });
+      } else if (kind === 'reject') {
+        test.query.mockRejectedValueOnce(value);
+      } else {
+        test.query.mockResolvedValueOnce({ rows: value });
+      }
+
+      const result = await test.recorder.recordEvidence(test.recordRequest);
+
+      expect(test.query).toHaveBeenCalledTimes(1);
+      expectReconciliation(test, result, 'PREPARE', null);
+      expect(reviewedResult(test, result)).toEqual(
+        expect.objectContaining({
+          recordIntentFingerprintSha256: null,
+          evidenceFingerprintSha256: null,
+        }),
+      );
+    },
+  );
+
+  it('does not invoke accessor or proxy PREPARE rows and reports uncertainty', async () => {
+    const accessorTest = await fixture();
+    const getter = jest.fn(() => 'NEW');
+    const accessorRow = row('NEW');
+    Object.defineProperty(accessorRow, 'intent_state', { enumerable: true, get: getter });
+    accessorTest.query.mockReset().mockResolvedValueOnce({ rows: [accessorRow] });
+    const accessorResult = await accessorTest.recorder.recordEvidence(accessorTest.recordRequest);
+    expect(getter).not.toHaveBeenCalled();
+    expectReconciliation(accessorTest, accessorResult, 'PREPARE', null);
+
+    const proxyTest = await fixture();
+    proxyTest.query.mockReset().mockResolvedValueOnce({ rows: [new Proxy(row('NEW'), {})] });
+    const proxyResult = await proxyTest.recorder.recordEvidence(proxyTest.recordRequest);
+    expectReconciliation(proxyTest, proxyResult, 'PREPARE', null);
+  });
+
+  it.each(['reject', 'malformed', 'cross-phase mismatch'] as const)(
+    'attempts EXECUTE exactly once after ambiguous CLAIM %s and never reclaims',
+    async (behavior) => {
+      const test = await fixture();
+      test.query.mockReset().mockResolvedValueOnce({ rows: [row('NEW')] });
+      if (behavior === 'reject') test.query.mockRejectedValueOnce(new Error('secret claim'));
+      if (behavior === 'malformed') test.query.mockResolvedValueOnce({ rows: [] });
+      if (behavior === 'cross-phase mismatch') {
+        test.query.mockResolvedValueOnce({
+          rows: [row('RECORD_DISPATCHED', { record_intent_fingerprint_sha256: '5'.repeat(64) })],
+        });
+      }
+      test.query.mockResolvedValueOnce({ rows: [row('RECORDED')] });
+
+      const result = await test.recorder.recordEvidence(test.recordRequest);
+
+      expect(reviewedResult(test, result).outcome).toBe('RECORDED');
+      expect(test.query).toHaveBeenCalledTimes(3);
+      expect(
+        test.query.mock.calls.filter((call) =>
+          String(call[0]).includes('claim_provider_position_chain_anchor_record_dispatch'),
+        ),
+      ).toHaveLength(1);
+      expect(
+        test.query.mock.calls.filter((call) =>
+          String(call[0]).includes('execute_provider_position_chain_anchor_record_intent'),
+        ),
+      ).toHaveLength(1);
+    },
+  );
+
+  it('maps a valid CLAIM terminal or UNKNOWN without calling EXECUTE', async () => {
+    const terminal = await fixture();
+    scriptRows(terminal, row('NEW'), row('NOT_RECORDED'));
+    const terminalResult = await terminal.recorder.recordEvidence(terminal.recordRequest);
+    expect(reviewedResult(terminal, terminalResult).outcome).toBe('NOT_RECORDED');
+    expect(terminal.query).toHaveBeenCalledTimes(2);
+
+    const uncertain = await fixture();
+    scriptRows(uncertain, row('NEW'), row('UNKNOWN'));
+    const uncertainResult = await uncertain.recorder.recordEvidence(uncertain.recordRequest);
+    expectReconciliation(uncertain, uncertainResult, 'CLAIM_DISPATCH', 'UNKNOWN');
+    expect(uncertain.query).toHaveBeenCalledTimes(2);
+  });
+
+  it('stops at a structurally impossible terminal instead of making another token-bearing call', async () => {
+    const claimTest = await fixture();
+    scriptRows(
+      claimTest,
+      row('NEW'),
+      row('RECORDED', { deadline_binding_sha256: null }),
+      row('RECORDED'),
+    );
+    const claimResult = await claimTest.recorder.recordEvidence(claimTest.recordRequest);
+    expectReconciliation(claimTest, claimResult, 'CLAIM_DISPATCH', null);
+    expect(claimTest.query).toHaveBeenCalledTimes(2);
+
+    const executeTest = await fixture();
+    scriptRows(
+      executeTest,
+      row('NEW'),
+      row('RECORD_DISPATCHED'),
+      row('DEADLINE_VIOLATION', { evidence_recorded_at: null }),
+      row('UNKNOWN'),
+    );
+    const executeResult = await executeTest.recorder.recordEvidence(executeTest.recordRequest);
+    expectReconciliation(executeTest, executeResult, 'EXECUTE_RECORD', null);
+    expect(executeTest.query).toHaveBeenCalledTimes(3);
+  });
+
+  it.each([
+    [
+      'rejected execute and UNKNOWN mark',
+      new Error('secret execute'),
+      row('UNKNOWN'),
+      'RECONCILIATION_REQUIRED',
+    ],
+    ['malformed execute and terminal mark', { rows: [] }, row('IDEMPOTENT_REPLAY'), 'RECORDED'],
+    [
+      'nonterminal execute and terminal mark',
+      { rows: [row('RECORD_DISPATCHED')] },
+      row('NOT_RECORDED'),
+      'NOT_RECORDED',
+    ],
+    [
+      'rejected execute and rejected mark',
+      new Error('secret execute'),
+      new Error('secret mark'),
+      'RECONCILIATION_REQUIRED',
+    ],
+  ] as const)(
+    'performs one best-effort MARK_UNKNOWN for %s',
+    async (_name, executeBehavior, markBehavior, expectedOutcome) => {
+      const test = await fixture();
+      test.query.mockReset();
+      test.query.mockResolvedValueOnce({ rows: [row('NEW')] });
+      test.query.mockResolvedValueOnce({ rows: [row('RECORD_DISPATCHED')] });
+      if (executeBehavior instanceof Error) test.query.mockRejectedValueOnce(executeBehavior);
+      else test.query.mockResolvedValueOnce(executeBehavior);
+      if (markBehavior instanceof Error) test.query.mockRejectedValueOnce(markBehavior);
+      else test.query.mockResolvedValueOnce({ rows: [markBehavior] });
+
+      const result = await test.recorder.recordEvidence(test.recordRequest);
+
+      expect(reviewedResult(test, result).outcome).toBe(expectedOutcome);
+      expect(test.query).toHaveBeenCalledTimes(4);
+      expect(test.query.mock.calls[3]?.[0]).toContain(
+        'FROM mark_provider_position_chain_anchor_record_intent_unknown($1::text, $2::bytea)',
+      );
+      if (expectedOutcome === 'RECONCILIATION_REQUIRED') {
+        expectReconciliation(
+          test,
+          result,
+          'MARK_UNKNOWN',
+          markBehavior instanceof Error ? null : 'UNKNOWN',
+        );
+      }
+    },
+  );
+
+  it('accepts a strictly reviewed EXECUTE terminal even when the signal aborts before its response', async () => {
+    const controller = new AbortController();
+    const test = await fixture(ETHEREUM, { signal: controller.signal });
+    test.query.mockReset();
+    test.query.mockResolvedValueOnce({ rows: [row('NEW')] });
+    test.query.mockResolvedValueOnce({ rows: [row('RECORD_DISPATCHED')] });
+    test.query.mockImplementationOnce(async () => {
+      controller.abort();
+      return { rows: [row('RECORDED')] };
+    });
+
+    const result = await test.recorder.recordEvidence(test.recordRequest);
+
+    expect(reviewedResult(test, result).outcome).toBe('RECORDED');
+    expect(test.query).toHaveBeenCalledTimes(3);
+  });
+
+  it('does not EXECUTE after an aborted ambiguous CLAIM and does not MARK after an aborted ambiguous EXECUTE', async () => {
+    const claimController = new AbortController();
+    const claimTest = await fixture(ETHEREUM, { signal: claimController.signal });
+    claimTest.query.mockReset();
+    claimTest.query.mockResolvedValueOnce({ rows: [row('NEW')] });
+    claimTest.query.mockImplementationOnce(async () => {
+      claimController.abort();
+      throw new Error('secret claim ambiguity');
+    });
+    const claimResult = await claimTest.recorder.recordEvidence(claimTest.recordRequest);
+    expectReconciliation(claimTest, claimResult, 'CLAIM_DISPATCH', null);
+    expect(claimTest.query).toHaveBeenCalledTimes(2);
+
+    const executeController = new AbortController();
+    const executeTest = await fixture(ETHEREUM, { signal: executeController.signal });
+    executeTest.query.mockReset();
+    executeTest.query.mockResolvedValueOnce({ rows: [row('NEW')] });
+    executeTest.query.mockResolvedValueOnce({ rows: [row('RECORD_DISPATCHED')] });
+    executeTest.query.mockImplementationOnce(async () => {
+      executeController.abort();
+      throw new Error('secret execute ambiguity');
+    });
+    const executeResult = await executeTest.recorder.recordEvidence(executeTest.recordRequest);
+    expectReconciliation(executeTest, executeResult, 'EXECUTE_RECORD', null);
+    expect(executeTest.query).toHaveBeenCalledTimes(3);
+  });
+
+  it('stops after PREPARE when abort or capability expiry prevents the one producer re-review', async () => {
+    const controller = new AbortController();
+    const aborted = await fixture(ETHEREUM, { signal: controller.signal });
+    aborted.query.mockReset().mockImplementationOnce(async () => {
+      controller.abort();
+      return { rows: [row('NEW')] };
+    });
+    const abortedResult = await aborted.recorder.recordEvidence(aborted.recordRequest);
+    expectReconciliation(aborted, abortedResult, 'PREPARE', 'NEW');
+    expect(aborted.query).toHaveBeenCalledTimes(1);
+
+    const expired = await fixture(ETHEREUM, {
+      clockTimes: frozen([
+        '2026-09-05T17:00:00.000Z',
+        '2026-09-05T17:00:01.000Z',
+        '2026-09-05T17:00:01.000Z',
+        ASSESSED_AT,
+        ASSESSED_AT,
+        '2026-09-05T17:00:03.000Z',
+        DEADLINE_AT,
+      ]),
+    });
+    expired.query.mockReset().mockResolvedValueOnce({ rows: [row('NEW')] });
+    const expiredResult = await expired.recorder.recordEvidence(expired.recordRequest);
+    expectReconciliation(expired, expiredResult, 'PREPARE', 'NEW');
+    expect(expired.query).toHaveBeenCalledTimes(1);
+    expect(expired.clock.calls).toBe(7);
+  });
+
+  it.each([
+    ['a mutable outer request', (test: RecorderFixture) => ({ ...test.recordRequest })],
+    [
+      'an unexpected field',
+      (test: RecorderFixture) => frozen({ ...test.recordRequest, grant: true }),
+    ],
+    ['version 1', (test: RecorderFixture) => frozen({ ...test.recordRequest, recorderVersion: 1 })],
+    [
+      'financial authority',
+      (test: RecorderFixture) =>
+        frozen({ ...test.recordRequest, mayAuthorizeFinancialAction: true }),
+    ],
+    [
+      'a substituted signal',
+      (test: RecorderFixture) =>
+        frozen({ ...test.recordRequest, signal: new AbortController().signal }),
+    ],
+    [
+      'a cloned producer request',
+      (test: RecorderFixture) =>
+        frozen({ ...test.recordRequest, producerRequest: frozen({ ...test.producerRequest }) }),
+    ],
+  ])('rejects %s with the one sanitized error before PREPARE', async (_name, mutate) => {
+    const test = await fixture();
+    await expectSanitized(
+      test.recorder.recordEvidence(
+        mutate(test) as unknown as RecordProviderPositionChainAnchorEvidenceRequestV2,
+      ),
+    );
+    expect(test.query).not.toHaveBeenCalled();
+  });
+
+  it('rejects pre-abort, fake signals, hostile capabilities, and request accessors before SQL', async () => {
+    const controller = new AbortController();
+    const aborted = await fixture(ETHEREUM, { signal: controller.signal });
+    controller.abort();
+    await expectSanitized(aborted.recorder.recordEvidence(aborted.recordRequest));
+    expect(aborted.query).not.toHaveBeenCalled();
+
+    const fake = await fixture();
+    await expectSanitized(
+      fake.recorder.recordEvidence(
+        frozen({
+          ...fake.recordRequest,
+          signal: frozen({ aborted: false }),
+        }) as unknown as RecordProviderPositionChainAnchorEvidenceRequestV2,
+      ),
+    );
+    expect(fake.query).not.toHaveBeenCalled();
+
+    const hostile = await fixture();
+    let inspected = 0;
+    const capability = new Proxy(frozen({ opaque: true }), {
+      get: () => {
+        inspected += 1;
+        throw new Error('secret');
+      },
+      ownKeys: () => {
+        inspected += 1;
+        throw new Error('secret');
+      },
+    });
+    await expectSanitized(
+      hostile.recorder.recordEvidence(
+        frozen({ ...hostile.recordRequest, producerCapability: capability }),
+      ),
+    );
+    expect(inspected).toBe(0);
+    expect(hostile.query).not.toHaveBeenCalled();
+
+    const accessor = await fixture();
+    const mutable = { ...accessor.recordRequest } as Record<string, unknown>;
+    const getter = jest.fn(() => accessor.producerCapability);
+    Object.defineProperty(mutable, 'producerCapability', { enumerable: true, get: getter });
+    Object.freeze(mutable);
+    await expectSanitized(
+      accessor.recorder.recordEvidence(
+        mutable as unknown as RecordProviderPositionChainAnchorEvidenceRequestV2,
+      ),
+    );
+    expect(getter).not.toHaveBeenCalled();
+    expect(accessor.query).not.toHaveBeenCalled();
+  });
+
+  it('captures genuine methods without construction I/O and rejects accessor/proxy methods or producer shadows', async () => {
     const test = await fixture();
     const replacement = jest.fn().mockRejectedValue(new Error('secret replacement'));
     expect(test.query).not.toHaveBeenCalled();
     test.postgres.queryWithCancellation = replacement;
-
     await expect(test.recorder.recordEvidence(test.recordRequest)).resolves.toBeDefined();
-    expect(test.query).toHaveBeenCalledTimes(1);
+    expect(test.query).toHaveBeenCalledTimes(3);
     expect(replacement).not.toHaveBeenCalled();
-  });
 
-  it('uses the module-captured canonical producer reviewer after hostile prototype replacement', async () => {
-    const test = await fixture();
-    const prototype = DormantProviderPositionChainAnchorEvidenceProducer.prototype;
-    const original = Object.getOwnPropertyDescriptor(prototype, 'reviewCandidate');
-    const hostile = jest.fn(() => {
-      throw new Error('secret prototype replacement');
-    });
-    if (original === undefined) throw new Error('missing reviewCandidate descriptor');
-    Object.defineProperty(prototype, 'reviewCandidate', { ...original, value: hostile });
-    try {
-      const recorder = new PostgresProviderPositionChainAnchorEvidenceRecorder(
-        test.producer,
-        test.postgres as unknown as PostgresService,
-      );
-      await expect(recorder.recordEvidence(test.recordRequest)).resolves.toBeDefined();
-      expect(hostile).not.toHaveBeenCalled();
-    } finally {
-      Object.defineProperty(prototype, 'reviewCandidate', original);
-    }
-  });
-
-  it('rejects producer method shadows and forged receivers without issuing SQL', async () => {
-    const shadowed = await fixture();
-    const shadow = jest.fn();
-    Object.defineProperty(shadowed.producer, 'reviewCandidate', {
-      configurable: true,
-      value: shadow,
-    });
-    expectSanitizedThrow(
-      () =>
-        new PostgresProviderPositionChainAnchorEvidenceRecorder(
-          shadowed.producer,
-          shadowed.postgres as unknown as PostgresService,
-        ),
-    );
-    expect(shadow).not.toHaveBeenCalled();
-    expect(shadowed.query).not.toHaveBeenCalled();
-
-    const genuine = await fixture();
-    const forged = Object.create(
-      DormantProviderPositionChainAnchorEvidenceProducer.prototype,
-    ) as DormantProviderPositionChainAnchorEvidenceProducer;
-    const recorder = new PostgresProviderPositionChainAnchorEvidenceRecorder(
-      forged,
-      genuine.postgres as unknown as PostgresService,
-    );
-    await expectSanitized(recorder.recordEvidence(genuine.recordRequest));
-    expect(genuine.query).not.toHaveBeenCalled();
-  });
-
-  it('rejects accessor, proxy, missing, and base-prototype database methods at construction', async () => {
-    const test = await fixture();
     const getter = jest.fn(() => jest.fn());
     const accessor = {};
     Object.defineProperty(accessor, 'queryWithCancellation', { enumerable: true, get: getter });
@@ -571,260 +1019,88 @@ describe('PostgresProviderPositionChainAnchorEvidenceRecorder', () => {
           new Proxy({ queryWithCancellation: jest.fn() }, {}) as unknown as PostgresService,
         ),
     );
+
+    const shadow = jest.fn();
+    Object.defineProperty(test.producer, 'reviewCandidate', { configurable: true, value: shadow });
     expectSanitizedThrow(
       () =>
-        new PostgresProviderPositionChainAnchorEvidenceRecorder(test.producer, {
-          queryWithCancellation: new Proxy(jest.fn(), {}),
-        } as unknown as PostgresService),
+        new PostgresProviderPositionChainAnchorEvidenceRecorder(
+          test.producer,
+          test.postgres as unknown as PostgresService,
+        ),
     );
-    const polluted = jest.fn();
-    Object.defineProperty(Object.prototype, 'queryWithCancellation', {
-      configurable: true,
-      value: polluted,
-    });
-    try {
-      expectSanitizedThrow(
-        () =>
-          new PostgresProviderPositionChainAnchorEvidenceRecorder(
-            test.producer,
-            {} as PostgresService,
-          ),
-      );
-      expect(polluted).not.toHaveBeenCalled();
-    } finally {
-      delete (Object.prototype as { queryWithCancellation?: unknown }).queryWithCancellation;
+    expect(shadow).not.toHaveBeenCalled();
+  });
+
+  it('fails malformed terminal time/hash/null contracts closed as phase uncertainty', async () => {
+    for (const malformed of [
+      row('RECORDED', { deadline_binding_sha256: null }),
+      row('RECORDED', { evidence_recorded_at: DEADLINE_AT }),
+      row('RECORDED', { evidence_recorded_at: '2026-09-05T17:00:01.999Z' }),
+      row('RECORDED', { resolved_at: '2026-09-05T17:00:02.999Z' }),
+      row('NOT_RECORDED', { resolved_at: RESOLVED_AT }),
+      row('DEADLINE_VIOLATION', { evidence_recorded_at: null }),
+      row('DEADLINE_VIOLATION', {
+        evidence_recorded_at: '2026-09-05T17:00:01.999Z',
+      }),
+      row('DEADLINE_VIOLATION', { deadline_binding_sha256: DEADLINE_BINDING_FINGERPRINT }),
+      row('DEADLINE_VIOLATION', {
+        evidence_recorded_at: AFTER_DEADLINE_AT,
+        resolved_at: RESOLVED_AT,
+      }),
+    ]) {
+      const test = await fixture();
+      scriptRows(test, malformed);
+      const result = await test.recorder.recordEvidence(test.recordRequest);
+      expectReconciliation(test, result, 'PREPARE', null);
     }
   });
 
   it.each([
-    ['a mutable outer request', (test: RecorderFixture) => ({ ...test.recordRequest })],
     [
-      'an unexpected outer field',
-      (test: RecorderFixture) => frozen({ ...test.recordRequest, persistenceAuthority: true }),
+      'source-pair approval',
+      ETHEREUM,
+      { approvalExpiresAt: '2026-09-05T17:00:08.000Z' },
+      '2026-09-05T17:00:08.000Z',
     ],
     [
-      'an unsupported recorder version',
-      (test: RecorderFixture) => frozen({ ...test.recordRequest, recorderVersion: 2 }),
+      'Ethereum current-head',
+      ETHEREUM,
+      { currentHeadAdvancedAt: '2026-09-05T16:59:06.000Z' },
+      '2026-09-05T17:00:06.000Z',
     ],
     [
-      'financial authority',
-      (test: RecorderFixture) =>
-        frozen({ ...test.recordRequest, mayAuthorizeFinancialAction: true }),
+      'Ethereum finalized-head',
+      ETHEREUM,
+      { finalizedHeadAdvancedAt: '2026-09-05T16:30:06.000Z' },
+      '2026-09-05T17:00:06.000Z',
     ],
     [
-      'a substituted outer signal',
-      (test: RecorderFixture) =>
-        frozen({ ...test.recordRequest, signal: new AbortController().signal }),
+      'Solana current-head',
+      SOLANA,
+      { currentHeadAdvancedAt: '2026-09-05T16:59:48.000Z' },
+      '2026-09-05T17:00:03.000Z',
     ],
     [
-      'a cloned producer request',
-      (test: RecorderFixture) =>
-        frozen({ ...test.recordRequest, producerRequest: frozen({ ...test.producerRequest }) }),
+      'Solana finalized-head',
+      SOLANA,
+      { finalizedHeadAdvancedAt: '2026-09-05T16:58:33.000Z' },
+      '2026-09-05T17:00:03.000Z',
     ],
-  ])('rejects %s before SQL', async (_name, mutate) => {
-    const test = await fixture();
-    await expectSanitized(
-      test.recorder.recordEvidence(
-        mutate(test) as unknown as RecordProviderPositionChainAnchorEvidenceRequestV1,
-      ),
-    );
-    expect(test.query).not.toHaveBeenCalled();
-  });
-
-  it('rejects an accessor outer field without invoking it', async () => {
-    const test = await fixture();
-    const mutable = { ...test.recordRequest } as Record<string, unknown>;
-    const getter = jest.fn(() => test.producerCapability);
-    Object.defineProperty(mutable, 'producerCapability', { enumerable: true, get: getter });
-    Object.freeze(mutable);
-
-    await expectSanitized(
-      test.recorder.recordEvidence(
-        mutable as unknown as RecordProviderPositionChainAnchorEvidenceRequestV1,
-      ),
-    );
-    expect(getter).not.toHaveBeenCalled();
-    expect(test.query).not.toHaveBeenCalled();
-  });
-
-  it('checks the exact genuine signal before producer review and rejects pre-abort', async () => {
-    const controller = new AbortController();
-    const test = await fixture(ETHEREUM, { signal: controller.signal });
-    controller.abort();
-
-    await expectSanitized(test.recorder.recordEvidence(test.recordRequest));
-    expect(test.clock.calls).toBe(5);
-    expect(test.query).not.toHaveBeenCalled();
-
-    const fakeSignal = frozen({ aborted: false });
-    const fakeRequest = frozen({
-      ...test.recordRequest,
-      signal: fakeSignal,
-    }) as unknown as RecordProviderPositionChainAnchorEvidenceRequestV1;
-    await expectSanitized(test.recorder.recordEvidence(fakeRequest));
-    expect(test.query).not.toHaveBeenCalled();
-  });
-
-  it('authenticates a foreign opaque capability before inspecting it', async () => {
-    const test = await fixture();
-    let inspected = 0;
-    const hostile = new Proxy(frozen({ opaque: true }), {
-      get: () => {
-        inspected += 1;
-        throw new Error('secret capability field');
-      },
-      ownKeys: () => {
-        inspected += 1;
-        throw new Error('secret capability keys');
-      },
-    });
-    const request = frozen({ ...test.recordRequest, producerCapability: hostile });
-
-    await expectSanitized(test.recorder.recordEvidence(request));
-    expect(inspected).toBe(0);
-    expect(test.query).not.toHaveBeenCalled();
-  });
-
-  it('rejects abort while the exact cancellable SQL operation settles', async () => {
-    const controller = new AbortController();
-    const test = await fixture(ETHEREUM, { signal: controller.signal });
-    test.query.mockImplementation(async () => {
-      controller.abort();
-      return { rows: [row()] };
-    });
-
-    await expectSanitized(test.recorder.recordEvidence(test.recordRequest));
-    expect(test.query).toHaveBeenCalledTimes(1);
-    expect(test.query.mock.calls[0]?.[2]).toBe(controller.signal);
-    expect(test.clock.calls).toBe(6);
-  });
-
-  it('re-reviews the exact producer capability after SQL and rejects newly stale authority', async () => {
-    const test = await fixture(ETHEREUM, {
-      clockTimes: frozen([
-        '2026-09-05T17:00:00.000Z',
-        '2026-09-05T17:00:01.000Z',
-        '2026-09-05T17:00:01.000Z',
-        ASSESSED_AT,
-        ASSESSED_AT,
-        '2026-09-05T17:00:03.000Z',
-        DEADLINE_AT,
-      ]),
-    });
-
-    await expectSanitized(test.recorder.recordEvidence(test.recordRequest));
-    expect(test.query).toHaveBeenCalledTimes(1);
-    expect(test.clock.calls).toBe(7);
-  });
-
-  it.each([
-    ['no rows', []],
-    ['multiple rows', [row(), row()]],
-    ['an extra column', [{ ...row(), unexpected_authority: true }]],
-    ['an unsupported outcome', [{ ...row(), record_outcome: 'PARTIALLY_RECORDED' }]],
-    [
-      'an uppercase fingerprint',
-      [{ ...row(), recorded_evidence_fingerprint_sha256: 'A'.repeat(64) }],
-    ],
-    ['a zero fingerprint', [{ ...row(), recorded_evidence_fingerprint_sha256: '0'.repeat(64) }]],
-    ['a noncanonical timestamp', [{ ...row(), evidence_recorded_at: '2026-09-05T17:00:03Z' }]],
-    ['a timestamp before assessment', [row('RECORDED', '2026-09-05T17:00:01.999Z')]],
-    ['a timestamp at the producer deadline', [row('RECORDED', DEADLINE_AT)]],
-  ])('fails closed on %s returned by SQL', async (_name, rows) => {
-    const test = await fixture();
-    test.query.mockResolvedValue({ rows });
-
-    await expectSanitized(test.recorder.recordEvidence(test.recordRequest));
-    expect(test.query).toHaveBeenCalledTimes(1);
-  });
-
-  it('rejects accessor and custom-prototype result rows without reading hostile data', async () => {
-    const accessorTest = await fixture();
-    const getter = jest.fn(() => 'RECORDED');
-    const accessorRow = row();
-    Object.defineProperty(accessorRow, 'record_outcome', { enumerable: true, get: getter });
-    accessorTest.query.mockResolvedValue({ rows: [accessorRow] });
-    await expectSanitized(accessorTest.recorder.recordEvidence(accessorTest.recordRequest));
-    expect(getter).not.toHaveBeenCalled();
-
-    const prototypeTest = await fixture();
-    prototypeTest.query.mockResolvedValue({
-      rows: [Object.assign(Object.create({ poisoned: true }) as object, row())],
-    });
-    await expectSanitized(prototypeTest.recorder.recordEvidence(prototypeTest.recordRequest));
-  });
-
-  it.each([
-    [ETHEREUM, '2026-09-05T16:59:06.000Z', '2026-09-05T16:59:50.000Z', '2026-09-05T17:00:06.000Z'],
-    [ETHEREUM, '2026-09-05T16:59:59.000Z', '2026-09-05T16:30:06.000Z', '2026-09-05T17:00:06.000Z'],
-    [SOLANA, '2026-09-05T16:59:48.000Z', '2026-09-05T16:59:50.000Z', '2026-09-05T17:00:03.000Z'],
-    [SOLANA, '2026-09-05T16:59:59.000Z', '2026-09-05T16:58:33.000Z', '2026-09-05T17:00:03.000Z'],
   ] as const)(
-    'rejects %s record time at the strict current/finality freshness boundary',
-    async (networkId, currentHeadAdvancedAt, finalizedHeadAdvancedAt, recordedAt) => {
-      const test = await fixture(networkId, {
-        currentHeadAdvancedAt,
-        finalizedHeadAdvancedAt,
-        recordedAt,
-      });
+    'rejects deadline-violation evidence at the strict %s freshness boundary',
+    async (_name, networkId, options, evidenceRecordedAt) => {
+      const test = await fixture(networkId, options);
+      scriptRows(test, row('DEADLINE_VIOLATION', { evidence_recorded_at: evidenceRecordedAt }));
 
-      await expectSanitized(test.recorder.recordEvidence(test.recordRequest));
+      const result = await test.recorder.recordEvidence(test.recordRequest);
+
+      expectReconciliation(test, result, 'PREPARE', null);
       expect(test.query).toHaveBeenCalledTimes(1);
     },
   );
 
-  it('rejects a database timestamp at the approved-pair expiry boundary', async () => {
-    const expiresAt = '2026-09-05T17:00:08.000Z';
-    const test = await fixture(ETHEREUM, {
-      approvalExpiresAt: expiresAt,
-      recordedAt: expiresAt,
-    });
-
-    await expectSanitized(test.recorder.recordEvidence(test.recordRequest));
-    expect(test.query).toHaveBeenCalledTimes(1);
-  });
-
-  it('maps synchronous, asynchronous, and non-Promise database failures to one fixed error', async () => {
-    for (const behavior of ['throw', 'reject', 'thenable'] as const) {
-      const test = await fixture();
-      const secret = Object.assign(new Error('secret database address and SQL details'), {
-        cause: new Error('secret cause'),
-      });
-      const then = jest.fn();
-      if (behavior === 'throw')
-        test.query.mockImplementation(() => {
-          throw secret;
-        });
-      if (behavior === 'reject') test.query.mockRejectedValue(secret);
-      if (behavior === 'thenable') test.query.mockReturnValue(frozen({ then }));
-
-      await expectSanitized(test.recorder.recordEvidence(test.recordRequest));
-      expect(test.query).toHaveBeenCalledTimes(1);
-      expect(then).not.toHaveBeenCalled();
-    }
-  });
-
-  it('pins migration fingerprint binding without requiring a second function grant', () => {
-    const migration = readFileSync(
-      join(
-        __dirname,
-        '../../infrastructure/database/migrations/0029-create-provider-position-chain-anchor-evidence.migration.ts',
-      ),
-      'utf8',
-    );
-    expect(migration).toContain(
-      "RETURN QUERY SELECT 'RECORDED'::text, requested_fingerprint, database_recorded_at;",
-    );
-    expect(migration).toContain(
-      "RETURN QUERY SELECT 'IDEMPOTENT_REPLAY'::text,\n          prior.evidence_fingerprint_sha256, prior.recorded_at;",
-    );
-    expect(migration).toContain(
-      'prior.evidence_fingerprint_sha256 IS DISTINCT FROM requested_fingerprint',
-    );
-    expect(RECORD_SQL).not.toContain('provider_position_chain_anchor_evidence_fingerprint(');
-  });
-
-  it('remains dormant, unregistered, authority-free, and explicit about the late-write blocker', () => {
+  it('remains dormant and uses only the 0031 guarded record-intent surface', () => {
     const source = readFileSync(
       join(__dirname, 'postgres-provider-position-chain-anchor-evidence.recorder.ts'),
       'utf8',
@@ -833,10 +1109,12 @@ describe('PostgresProviderPositionChainAnchorEvidenceRecorder', () => {
     expect(source).not.toMatch(/process\.env|fetch\(|https?:|from ['"]viem|@solana\/web3/u);
     expect(source).not.toContain('withTransaction');
     expect(source).not.toMatch(/\.query\s*\(/u);
-    expect(source).not.toMatch(/\bretry\b/iu);
-    expect(source).toContain('cannot roll back a write');
-    expect(source).toContain(
-      'future database-contract change before this dormant adapter may be activated',
-    );
+    expect(source).not.toContain('FROM record_provider_position_chain_anchor_evidence(');
+    expect(source).not.toContain('record_provider_position_chain_anchor_evidence_guarded(');
+    expect(source.match(/execute_provider_position_chain_anchor_record_intent/g)).toHaveLength(1);
+    expect(source).toContain('prepare_provider_position_chain_anchor_record_intent');
+    expect(source).toContain('claim_provider_position_chain_anchor_record_dispatch');
+    expect(source).toContain('mark_provider_position_chain_anchor_record_intent_unknown');
+    expect(source).toContain('dispatchToken?.fill(0)');
   });
 });

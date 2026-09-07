@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { isProxy } from 'node:util/types';
 
 import type { QueryResultRow } from 'pg';
@@ -14,11 +15,13 @@ import {
 } from '../application/dormant-provider-position-chain-anchor-evidence.producer';
 import {
   PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORDER_VERSION,
-  PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORD_RECEIPT_USE,
+  PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORD_RESULT_USE,
   PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORD_USE,
-  type ProviderPositionChainAnchorEvidenceRecordReceiptV1,
+  type ProviderPositionChainAnchorEvidenceRecordKnownIntentState,
+  type ProviderPositionChainAnchorEvidenceRecordResultV2,
+  type ProviderPositionChainAnchorEvidenceRecordUncertainPhase,
   type ProviderPositionChainAnchorEvidenceRecorderPort,
-  type RecordProviderPositionChainAnchorEvidenceRequestV1,
+  type RecordProviderPositionChainAnchorEvidenceRequestV2,
 } from '../application/ports/provider-position-chain-anchor-evidence-recorder.port';
 
 const ETHEREUM = 'eip155:1' as const;
@@ -67,25 +70,80 @@ const CANDIDATE_KEYS = Object.freeze([
   'recordArguments',
 ] as const);
 const ROW_COLUMNS = Object.freeze([
-  'record_outcome',
-  'recorded_evidence_fingerprint_sha256',
+  'intent_state',
+  'record_intent_fingerprint_sha256',
+  'evidence_fingerprint_sha256',
+  'read_binding_fingerprint_sha256',
+  'deadline_binding_sha256',
   'evidence_recorded_at',
+  'resolved_at',
+  'producer_deadline_at',
 ] as const);
 
-const RECORD_SQL = `SELECT
-  evidence.record_outcome,
-  evidence.recorded_evidence_fingerprint_sha256,
+const PREPARE_SQL = `SELECT
+  intent.intent_state,
+  intent.prepared_record_intent_fingerprint_sha256 AS record_intent_fingerprint_sha256,
+  intent.prepared_evidence_fingerprint_sha256 AS evidence_fingerprint_sha256,
+  intent.prepared_read_binding_fingerprint_sha256 AS read_binding_fingerprint_sha256,
+  intent.prepared_deadline_binding_sha256 AS deadline_binding_sha256,
   pg_catalog.to_char(
-    evidence.evidence_recorded_at AT TIME ZONE 'UTC',
+    intent.prepared_evidence_recorded_at AT TIME ZONE 'UTC',
     'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'
-  ) AS evidence_recorded_at
-FROM record_provider_position_chain_anchor_evidence(
+  ) AS evidence_recorded_at,
+  pg_catalog.to_char(
+    intent.prepared_resolved_at AT TIME ZONE 'UTC',
+    'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'
+  ) AS resolved_at,
+  pg_catalog.to_char(
+    intent.prepared_producer_deadline_at AT TIME ZONE 'UTC',
+    'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'
+  ) AS producer_deadline_at
+FROM prepare_provider_position_chain_anchor_record_intent(
   $1::text, $2::text, $3::text, $4::text, $5::text,
   $6::jsonb, $7::jsonb, $8::timestamptz, $9::timestamptz,
   $10::jsonb, $11::timestamptz, $12::jsonb, $13::timestamptz,
   $14::text, $15::text, $16::text, $17::text, $18::text,
-  $19::text, $20::text, $21::text, $22::text, $23::timestamptz
-) AS evidence`;
+  $19::text, $20::text, $21::text, $22::text, $23::timestamptz,
+  $24::timestamptz
+) AS intent`;
+
+function twoArgumentIntentSql(
+  functionName: string,
+  prefix: 'claimed' | 'executed' | 'marked',
+): string {
+  return `SELECT
+  intent.intent_state,
+  intent.${prefix}_record_intent_fingerprint_sha256 AS record_intent_fingerprint_sha256,
+  intent.${prefix}_evidence_fingerprint_sha256 AS evidence_fingerprint_sha256,
+  intent.${prefix}_read_binding_fingerprint_sha256 AS read_binding_fingerprint_sha256,
+  intent.${prefix}_deadline_binding_sha256 AS deadline_binding_sha256,
+  pg_catalog.to_char(
+    intent.${prefix}_evidence_recorded_at AT TIME ZONE 'UTC',
+    'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'
+  ) AS evidence_recorded_at,
+  pg_catalog.to_char(
+    intent.${prefix}_resolved_at AT TIME ZONE 'UTC',
+    'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'
+  ) AS resolved_at,
+  pg_catalog.to_char(
+    intent.${prefix}_producer_deadline_at AT TIME ZONE 'UTC',
+    'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'
+  ) AS producer_deadline_at
+FROM ${functionName}($1::text, $2::bytea) AS intent`;
+}
+
+const CLAIM_DISPATCH_SQL = twoArgumentIntentSql(
+  'claim_provider_position_chain_anchor_record_dispatch',
+  'claimed',
+);
+const EXECUTE_RECORD_SQL = twoArgumentIntentSql(
+  'execute_provider_position_chain_anchor_record_intent',
+  'executed',
+);
+const MARK_UNKNOWN_SQL = twoArgumentIntentSql(
+  'mark_provider_position_chain_anchor_record_intent_unknown',
+  'marked',
+);
 
 type NetworkId = typeof ETHEREUM | typeof SOLANA;
 type SourceKind = 'RPC' | 'INDEXER' | 'PROVIDER_API';
@@ -122,7 +180,7 @@ interface ReviewedProducerRequest {
 }
 
 interface ReviewedRecordRequest {
-  readonly request: RecordProviderPositionChainAnchorEvidenceRequestV1;
+  readonly request: RecordProviderPositionChainAnchorEvidenceRequestV2;
   readonly producerCapability: unknown;
   readonly producerRequest: ReviewedProducerRequest;
   readonly signal: AbortSignal;
@@ -138,11 +196,43 @@ interface ReviewedCandidate {
   readonly networkId: NetworkId;
 }
 
-interface RecordRow extends QueryResultRow {
-  record_outcome: string;
-  recorded_evidence_fingerprint_sha256: string;
-  evidence_recorded_at: string;
+interface IntentDatabaseRow extends QueryResultRow {
+  intent_state: unknown;
+  record_intent_fingerprint_sha256: unknown;
+  evidence_fingerprint_sha256: unknown;
+  read_binding_fingerprint_sha256: unknown;
+  deadline_binding_sha256: unknown;
+  evidence_recorded_at: unknown;
+  resolved_at: unknown;
+  producer_deadline_at: unknown;
 }
+
+type IntentState =
+  | ProviderPositionChainAnchorEvidenceRecordKnownIntentState
+  | 'RECORDED'
+  | 'IDEMPOTENT_REPLAY'
+  | 'NOT_RECORDED'
+  | 'DEADLINE_VIOLATION';
+
+interface ReviewedIntentRow {
+  readonly state: IntentState;
+  readonly recordIntentFingerprintSha256: string;
+  readonly evidenceFingerprintSha256: string;
+  readonly readBindingFingerprintSha256: string;
+  readonly deadlineBindingSha256: string | null;
+  readonly evidenceRecordedAt: CanonicalTime | null;
+  readonly resolvedAt: CanonicalTime | null;
+  readonly producerDeadlineAt: CanonicalTime;
+}
+
+interface IntentIdentity {
+  readonly recordIntentFingerprintSha256: string;
+  readonly evidenceFingerprintSha256: string;
+  readonly readBindingFingerprintSha256: string;
+  readonly producerDeadlineAt: string;
+}
+
+type QueryAttempt = Readonly<{ ok: true; value: unknown }> | Readonly<{ ok: false }>;
 
 class ProviderPositionChainAnchorEvidenceRecordError extends Error {
   readonly code = 'PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORD_FAILED' as const;
@@ -445,7 +535,7 @@ function reviewedRecordRequest(value: unknown): ReviewedRecordRequest {
   const signal = authenticSignal(record.signal);
   if (signal !== producerRequest.signal || isAborted(signal)) return fail();
   return frozenNullPrototype({
-    request: value as RecordProviderPositionChainAnchorEvidenceRequestV1,
+    request: value as RecordProviderPositionChainAnchorEvidenceRequestV2,
     producerCapability: record.producerCapability,
     producerRequest,
     signal,
@@ -648,7 +738,32 @@ function genuinePromise(value: unknown): value is Promise<unknown> {
   }
 }
 
-function singleRow(value: unknown): RecordRow {
+const QUERY_FAILED: QueryAttempt = Object.freeze({ ok: false });
+
+async function queryAttempt(
+  captured: CapturedMethod<QueryWithCancellation>,
+  sql: string,
+  values: readonly unknown[],
+  signal: AbortSignal,
+): Promise<QueryAttempt> {
+  try {
+    const operation = Reflect.apply(captured.method, captured.receiver, [
+      sql,
+      values,
+      signal,
+    ]) as unknown;
+    if (!genuinePromise(operation)) return QUERY_FAILED;
+    try {
+      return Object.freeze({ ok: true, value: await operation });
+    } catch {
+      return QUERY_FAILED;
+    }
+  } catch {
+    return QUERY_FAILED;
+  }
+}
+
+function singleRow(value: unknown): IntentDatabaseRow {
   try {
     if (typeof value !== 'object' || value === null || isProxy(value)) return fail();
     const rowsDescriptor = Object.getOwnPropertyDescriptor(value, 'rows');
@@ -668,22 +783,174 @@ function singleRow(value: unknown): RecordRow {
     ) {
       return fail();
     }
-    return exactDataRecord(descriptors['0'].value, ROW_COLUMNS, false, false) as RecordRow;
+    return exactDataRecord(
+      descriptors['0'].value,
+      ROW_COLUMNS,
+      false,
+      false,
+    ) as unknown as IntentDatabaseRow;
   } catch {
     return fail();
   }
 }
 
-function receiptFromRow(
-  row: RecordRow,
-  candidate: ReviewedCandidate,
-  producerRequest: ReviewedProducerRequest,
-): ProviderPositionChainAnchorEvidenceRecordReceiptV1 {
-  if (row.record_outcome !== 'RECORDED' && row.record_outcome !== 'IDEMPOTENT_REPLAY') {
+function nullableSha256(value: unknown): string | null {
+  return value === null ? null : nonzeroSha256(value);
+}
+
+function nullableTimestamp(value: unknown): CanonicalTime | null {
+  return value === null ? null : canonicalTimestamp(value);
+}
+
+function intentState(value: unknown): IntentState {
+  if (
+    value !== 'NEW' &&
+    value !== 'RECORD_DISPATCHED' &&
+    value !== 'UNKNOWN' &&
+    value !== 'RECORDED' &&
+    value !== 'IDEMPOTENT_REPLAY' &&
+    value !== 'NOT_RECORDED' &&
+    value !== 'DEADLINE_VIOLATION'
+  ) {
     return fail();
   }
-  const fingerprint = nonzeroSha256(row.recorded_evidence_fingerprint_sha256);
-  const recordedAt = canonicalTimestamp(row.evidence_recorded_at);
+  return value;
+}
+
+function reviewedIntentRow(
+  value: unknown,
+  expectedProducerDeadlineAt: string,
+  expectedIdentity: IntentIdentity | null,
+): ReviewedIntentRow {
+  const row = singleRow(value);
+  const state = intentState(row.intent_state);
+  const recordIntentFingerprintSha256 = nonzeroSha256(row.record_intent_fingerprint_sha256);
+  const evidenceFingerprintSha256 = nonzeroSha256(row.evidence_fingerprint_sha256);
+  const readBindingFingerprintSha256 = nonzeroSha256(row.read_binding_fingerprint_sha256);
+  const deadlineBindingSha256 = nullableSha256(row.deadline_binding_sha256);
+  const evidenceRecordedAt = nullableTimestamp(row.evidence_recorded_at);
+  const resolvedAt = nullableTimestamp(row.resolved_at);
+  const producerDeadlineAt = canonicalTimestamp(row.producer_deadline_at);
+
+  if (
+    producerDeadlineAt.value !== expectedProducerDeadlineAt ||
+    (expectedIdentity !== null &&
+      (recordIntentFingerprintSha256 !== expectedIdentity.recordIntentFingerprintSha256 ||
+        evidenceFingerprintSha256 !== expectedIdentity.evidenceFingerprintSha256 ||
+        readBindingFingerprintSha256 !== expectedIdentity.readBindingFingerprintSha256 ||
+        producerDeadlineAt.value !== expectedIdentity.producerDeadlineAt))
+  ) {
+    return fail();
+  }
+
+  if (state === 'NEW' || state === 'RECORD_DISPATCHED' || state === 'UNKNOWN') {
+    if (deadlineBindingSha256 !== null || evidenceRecordedAt !== null || resolvedAt !== null) {
+      return fail();
+    }
+  } else if (state === 'RECORDED' || state === 'IDEMPOTENT_REPLAY') {
+    if (
+      deadlineBindingSha256 === null ||
+      evidenceRecordedAt === null ||
+      resolvedAt === null ||
+      evidenceRecordedAt.milliseconds >= producerDeadlineAt.milliseconds ||
+      resolvedAt.milliseconds < evidenceRecordedAt.milliseconds
+    ) {
+      return fail();
+    }
+  } else if (state === 'NOT_RECORDED') {
+    if (
+      deadlineBindingSha256 !== null ||
+      evidenceRecordedAt !== null ||
+      resolvedAt === null ||
+      resolvedAt.milliseconds < producerDeadlineAt.milliseconds
+    ) {
+      return fail();
+    }
+  } else if (
+    deadlineBindingSha256 !== null ||
+    evidenceRecordedAt === null ||
+    resolvedAt === null ||
+    resolvedAt.milliseconds < producerDeadlineAt.milliseconds ||
+    resolvedAt.milliseconds < evidenceRecordedAt.milliseconds
+  ) {
+    return fail();
+  }
+
+  return frozenNullPrototype({
+    state,
+    recordIntentFingerprintSha256,
+    evidenceFingerprintSha256,
+    readBindingFingerprintSha256,
+    deadlineBindingSha256,
+    evidenceRecordedAt,
+    resolvedAt,
+    producerDeadlineAt,
+  });
+}
+
+function tryReviewedIntentRow(
+  attempt: QueryAttempt,
+  expectedProducerDeadlineAt: string,
+  expectedIdentity: IntentIdentity | null,
+): ReviewedIntentRow | null {
+  if (!attempt.ok) return null;
+  try {
+    return reviewedIntentRow(attempt.value, expectedProducerDeadlineAt, expectedIdentity);
+  } catch {
+    return null;
+  }
+}
+
+function attemptClaimsTerminalState(attempt: QueryAttempt): boolean {
+  if (!attempt.ok) return false;
+  try {
+    if (typeof attempt.value !== 'object' || attempt.value === null || isProxy(attempt.value)) {
+      return false;
+    }
+    const rowsDescriptor = Object.getOwnPropertyDescriptor(attempt.value, 'rows');
+    if (!rowsDescriptor || !('value' in rowsDescriptor)) return false;
+    const rows = rowsDescriptor.value as unknown;
+    if (
+      !Array.isArray(rows) ||
+      isProxy(rows) ||
+      Object.getPrototypeOf(rows) !== Array.prototype ||
+      rows.length !== 1
+    ) {
+      return false;
+    }
+    const rowDescriptor = Object.getOwnPropertyDescriptor(rows, '0');
+    if (!rowDescriptor || !('value' in rowDescriptor)) return false;
+    const row = rowDescriptor.value as unknown;
+    if (typeof row !== 'object' || row === null || isProxy(row)) return false;
+    const stateDescriptor = Object.getOwnPropertyDescriptor(row, 'intent_state');
+    if (!stateDescriptor || !('value' in stateDescriptor)) return false;
+    const state = stateDescriptor.value as unknown;
+    return (
+      state === 'RECORDED' ||
+      state === 'IDEMPOTENT_REPLAY' ||
+      state === 'NOT_RECORDED' ||
+      state === 'DEADLINE_VIOLATION'
+    );
+  } catch {
+    return false;
+  }
+}
+
+function identityFrom(row: ReviewedIntentRow): IntentIdentity {
+  return frozenNullPrototype({
+    recordIntentFingerprintSha256: row.recordIntentFingerprintSha256,
+    evidenceFingerprintSha256: row.evidenceFingerprintSha256,
+    readBindingFingerprintSha256: row.readBindingFingerprintSha256,
+    producerDeadlineAt: row.producerDeadlineAt.value,
+  });
+}
+
+function reviewEvidenceFreshness(
+  candidate: ReviewedCandidate,
+  producerRequest: ReviewedProducerRequest,
+  recordedAt: CanonicalTime,
+  requireBeforeProducerDeadline: boolean,
+): void {
   const currentLifetime = candidate.networkId === ETHEREUM ? 60_000 : 15_000;
   const finalizedLifetime = candidate.networkId === ETHEREUM ? 1_800_000 : 90_000;
   const currentExpiresAt = candidate.currentHeadAdvancedAtMilliseconds + currentLifetime;
@@ -692,39 +959,120 @@ function receiptFromRow(
     !Number.isSafeInteger(currentExpiresAt) ||
     !Number.isSafeInteger(finalizedExpiresAt) ||
     recordedAt.milliseconds < candidate.assessedAtMilliseconds ||
-    recordedAt.milliseconds >= producerRequest.deadlineAt.milliseconds ||
+    (requireBeforeProducerDeadline &&
+      recordedAt.milliseconds >= producerRequest.deadlineAt.milliseconds) ||
     recordedAt.milliseconds >= candidate.sourcePairApprovalExpiresAtMilliseconds ||
     recordedAt.milliseconds >= currentExpiresAt ||
     recordedAt.milliseconds >= finalizedExpiresAt
   ) {
     return fail();
   }
+}
+
+function terminalResultFromRow(
+  row: ReviewedIntentRow,
+  candidate: ReviewedCandidate,
+  producerRequest: ReviewedProducerRequest,
+): ProviderPositionChainAnchorEvidenceRecordResultV2 | null {
+  const common = {
+    recorderVersion: PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORDER_VERSION,
+    use: PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORD_RESULT_USE,
+    mayAuthorizeFinancialAction: false as const,
+    producerDeadlineAt: producerRequest.deadlineAt.value,
+  };
+
+  if (row.state === 'RECORDED' || row.state === 'IDEMPOTENT_REPLAY') {
+    const recordedAt = row.evidenceRecordedAt ?? fail();
+    const resolvedAt = row.resolvedAt ?? fail();
+    const deadlineBindingSha256 = row.deadlineBindingSha256 ?? fail();
+    reviewEvidenceFreshness(candidate, producerRequest, recordedAt, true);
+    return frozenNullPrototype({
+      ...common,
+      outcome: 'RECORDED' as const,
+      recordOutcome: row.state,
+      recordIntentFingerprintSha256: row.recordIntentFingerprintSha256,
+      evidenceFingerprintSha256: row.evidenceFingerprintSha256,
+      deadlineBindingSha256,
+      evidenceRecordedAt: recordedAt.value,
+      resolvedAt: resolvedAt.value,
+    });
+  }
+
+  if (row.state === 'NOT_RECORDED') {
+    return frozenNullPrototype({
+      ...common,
+      outcome: 'NOT_RECORDED' as const,
+      recordIntentFingerprintSha256: row.recordIntentFingerprintSha256,
+      evidenceFingerprintSha256: row.evidenceFingerprintSha256,
+      resolvedAt: (row.resolvedAt ?? fail()).value,
+    });
+  }
+
+  if (row.state === 'DEADLINE_VIOLATION') {
+    const evidenceRecordedAt = row.evidenceRecordedAt ?? fail();
+    reviewEvidenceFreshness(candidate, producerRequest, evidenceRecordedAt, false);
+    return frozenNullPrototype({
+      ...common,
+      outcome: 'DEADLINE_VIOLATION' as const,
+      recordIntentFingerprintSha256: row.recordIntentFingerprintSha256,
+      evidenceFingerprintSha256: row.evidenceFingerprintSha256,
+      evidenceRecordedAt: evidenceRecordedAt.value,
+      resolvedAt: (row.resolvedAt ?? fail()).value,
+    });
+  }
+
+  return null;
+}
+
+function tryTerminalResultFromRow(
+  row: ReviewedIntentRow,
+  candidate: ReviewedCandidate,
+  producerRequest: ReviewedProducerRequest,
+): ProviderPositionChainAnchorEvidenceRecordResultV2 | null | undefined {
+  try {
+    return terminalResultFromRow(row, candidate, producerRequest);
+  } catch {
+    return undefined;
+  }
+}
+
+function reconciliationRequiredResult(
+  producerDeadlineAt: string,
+  identity: IntentIdentity | null,
+  uncertainPhase: ProviderPositionChainAnchorEvidenceRecordUncertainPhase,
+  knownIntentState: ProviderPositionChainAnchorEvidenceRecordKnownIntentState | null,
+): ProviderPositionChainAnchorEvidenceRecordResultV2 {
   return frozenNullPrototype({
     recorderVersion: PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORDER_VERSION,
-    use: PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORD_RECEIPT_USE,
+    use: PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORD_RESULT_USE,
     mayAuthorizeFinancialAction: false as const,
-    recordOutcome: row.record_outcome,
-    recordedEvidenceFingerprintSha256: fingerprint,
-    evidenceRecordedAt: recordedAt.value,
+    producerDeadlineAt,
+    outcome: 'RECONCILIATION_REQUIRED' as const,
+    recordIntentFingerprintSha256: identity?.recordIntentFingerprintSha256 ?? null,
+    evidenceFingerprintSha256: identity?.evidenceFingerprintSha256 ?? null,
+    uncertainPhase,
+    knownIntentState,
   });
 }
 
 /**
- * Dormant migration-0029 adapter. It is intentionally unregistered and owns
- * no provider transport, customer context, financial authority, or database
- * grant. Construction captures two capabilities but performs no I/O.
- *
- * The database function's own clock is the atomic record-time freshness and
- * pair-expiry boundary. A late database timestamp is rejected here, but that
- * cannot roll back a write: atomic producer-deadline enforcement requires a
- * future database-contract change before this dormant adapter may be activated.
+ * Dormant migration-0031 record-intent adapter. It is intentionally
+ * unregistered and owns no provider transport, customer context, financial
+ * authority, database grant, repeat loop, or reconciliation worker.
+ * Construction captures two capabilities but performs no I/O.
  */
 export class PostgresProviderPositionChainAnchorEvidenceRecorder implements ProviderPositionChainAnchorEvidenceRecorderPort {
   readonly recorderVersion = PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORDER_VERSION;
 
   readonly #producerReview: CapturedMethod<ReviewCandidate>;
   readonly #databaseQuery: CapturedMethod<QueryWithCancellation>;
-  readonly #issued = new WeakMap<object, RecordProviderPositionChainAnchorEvidenceRequestV1>();
+  readonly #issued = new WeakMap<
+    object,
+    Readonly<{
+      request: RecordProviderPositionChainAnchorEvidenceRequestV2;
+      result: ProviderPositionChainAnchorEvidenceRecordResultV2;
+    }>
+  >();
 
   constructor(
     producer: DormantProviderPositionChainAnchorEvidenceProducer,
@@ -735,52 +1083,200 @@ export class PostgresProviderPositionChainAnchorEvidenceRecorder implements Prov
   }
 
   async recordEvidence(
-    requestInput: RecordProviderPositionChainAnchorEvidenceRequestV1,
+    requestInput: RecordProviderPositionChainAnchorEvidenceRequestV2,
   ): Promise<unknown> {
+    let request: ReviewedRecordRequest;
+    let firstReview: unknown;
+    let candidate: ReviewedCandidate;
     try {
-      const request = reviewedRecordRequest(requestInput);
-      const firstReview = reviewCandidate(
+      request = reviewedRecordRequest(requestInput);
+      firstReview = reviewCandidate(
         this.#producerReview,
         request.producerCapability,
         request.producerRequest.request,
       );
       if (firstReview !== request.producerCapability) return fail();
       if (isAborted(request.signal)) return fail();
-      const candidate = reviewedCandidate(firstReview, request.producerRequest);
-      const operation = Reflect.apply(this.#databaseQuery.method, this.#databaseQuery.receiver, [
-        RECORD_SQL,
-        candidate.values,
-        request.signal,
-      ]) as unknown;
-      if (!genuinePromise(operation)) return fail();
-      const result = await operation;
-      if (isAborted(request.signal)) return fail();
-      const secondReview = reviewCandidate(
-        this.#producerReview,
-        request.producerCapability,
-        request.producerRequest.request,
-      );
-      if (secondReview !== firstReview || secondReview !== candidate.candidate) return fail();
-      const receipt = receiptFromRow(singleRow(result), candidate, request.producerRequest);
-      this.#issued.set(receipt, request.request);
-      return receipt;
+      candidate = reviewedCandidate(firstReview, request.producerRequest);
     } catch {
       return fail();
     }
+
+    let phase: ProviderPositionChainAnchorEvidenceRecordUncertainPhase = 'PREPARE';
+    let identity: IntentIdentity | null = null;
+    let knownIntentState: ProviderPositionChainAnchorEvidenceRecordKnownIntentState | null = null;
+    let dispatchToken: Buffer | null = null;
+
+    const issue = (result: ProviderPositionChainAnchorEvidenceRecordResultV2): unknown => {
+      this.#issued.set(result, Object.freeze({ request: request.request, result }));
+      return result;
+    };
+    const uncertain = (): unknown =>
+      issue(
+        reconciliationRequiredResult(
+          request.producerRequest.deadlineAt.value,
+          identity,
+          phase,
+          knownIntentState,
+        ),
+      );
+
+    try {
+      const prepare = tryReviewedIntentRow(
+        await queryAttempt(
+          this.#databaseQuery,
+          PREPARE_SQL,
+          Object.freeze([...candidate.values, request.producerRequest.deadlineAt.value]),
+          request.signal,
+        ),
+        request.producerRequest.deadlineAt.value,
+        null,
+      );
+      if (prepare === null) return uncertain();
+      identity = identityFrom(prepare);
+
+      const preparedTerminal = tryTerminalResultFromRow(
+        prepare,
+        candidate,
+        request.producerRequest,
+      );
+      if (preparedTerminal === undefined) return uncertain();
+      if (preparedTerminal !== null) return issue(preparedTerminal);
+      if (prepare.state === 'RECORD_DISPATCHED' || prepare.state === 'UNKNOWN') {
+        knownIntentState = prepare.state;
+        return uncertain();
+      }
+      if (prepare.state !== 'NEW') return uncertain();
+      knownIntentState = 'NEW';
+
+      if (isAborted(request.signal)) return uncertain();
+      let secondReview: unknown;
+      try {
+        secondReview = reviewCandidate(
+          this.#producerReview,
+          request.producerCapability,
+          request.producerRequest.request,
+        );
+      } catch {
+        return uncertain();
+      }
+      if (
+        secondReview !== firstReview ||
+        secondReview !== candidate.candidate ||
+        isAborted(request.signal)
+      ) {
+        return uncertain();
+      }
+
+      phase = 'CLAIM_DISPATCH';
+      try {
+        dispatchToken = randomBytes(32);
+      } catch {
+        return uncertain();
+      }
+      if (
+        !Buffer.isBuffer(dispatchToken) ||
+        dispatchToken.length !== 32 ||
+        dispatchToken.every((value) => value === 0)
+      ) {
+        return uncertain();
+      }
+
+      const tokenValues = Object.freeze([identity.recordIntentFingerprintSha256, dispatchToken]);
+      const claimAttempt = await queryAttempt(
+        this.#databaseQuery,
+        CLAIM_DISPATCH_SQL,
+        tokenValues,
+        request.signal,
+      );
+      const claim = tryReviewedIntentRow(
+        claimAttempt,
+        request.producerRequest.deadlineAt.value,
+        identity,
+      );
+      knownIntentState = null;
+      if (claim === null && attemptClaimsTerminalState(claimAttempt)) return uncertain();
+      if (claim !== null) {
+        const claimedTerminal = tryTerminalResultFromRow(claim, candidate, request.producerRequest);
+        if (claimedTerminal === undefined) return uncertain();
+        if (claimedTerminal !== undefined && claimedTerminal !== null) {
+          return issue(claimedTerminal);
+        }
+        if (claimedTerminal !== undefined && claim.state === 'UNKNOWN') {
+          knownIntentState = 'UNKNOWN';
+          return uncertain();
+        }
+        if (claimedTerminal !== undefined && claim.state === 'RECORD_DISPATCHED') {
+          knownIntentState = 'RECORD_DISPATCHED';
+        }
+      }
+      if (isAborted(request.signal)) return uncertain();
+
+      phase = 'EXECUTE_RECORD';
+      const executeAttempt = await queryAttempt(
+        this.#databaseQuery,
+        EXECUTE_RECORD_SQL,
+        tokenValues,
+        request.signal,
+      );
+      const executed = tryReviewedIntentRow(
+        executeAttempt,
+        request.producerRequest.deadlineAt.value,
+        identity,
+      );
+      knownIntentState = null;
+      if (executed === null && attemptClaimsTerminalState(executeAttempt)) return uncertain();
+      if (executed !== null) {
+        const executedTerminal = tryTerminalResultFromRow(
+          executed,
+          candidate,
+          request.producerRequest,
+        );
+        if (executedTerminal === undefined) return uncertain();
+        if (executedTerminal !== undefined && executedTerminal !== null) {
+          return issue(executedTerminal);
+        }
+        if (
+          executedTerminal !== undefined &&
+          (executed.state === 'NEW' ||
+            executed.state === 'RECORD_DISPATCHED' ||
+            executed.state === 'UNKNOWN')
+        ) {
+          knownIntentState = executed.state;
+        }
+      }
+      if (isAborted(request.signal)) return uncertain();
+
+      phase = 'MARK_UNKNOWN';
+      knownIntentState = null;
+      const marked = tryReviewedIntentRow(
+        await queryAttempt(this.#databaseQuery, MARK_UNKNOWN_SQL, tokenValues, request.signal),
+        request.producerRequest.deadlineAt.value,
+        identity,
+      );
+      if (marked === null) return uncertain();
+      const markedTerminal = tryTerminalResultFromRow(marked, candidate, request.producerRequest);
+      if (markedTerminal === undefined) return uncertain();
+      if (markedTerminal !== null) return issue(markedTerminal);
+      if (marked.state === 'UNKNOWN') knownIntentState = 'UNKNOWN';
+      return uncertain();
+    } catch {
+      return uncertain();
+    } finally {
+      dispatchToken?.fill(0);
+    }
   }
 
-  verifyReceipt(
+  reviewResult(
     capability: unknown,
-    request: RecordProviderPositionChainAnchorEvidenceRequestV1,
-  ): boolean {
+    request: RecordProviderPositionChainAnchorEvidenceRequestV2,
+  ): ProviderPositionChainAnchorEvidenceRecordResultV2 | null {
     try {
-      return (
-        typeof capability === 'object' &&
-        capability !== null &&
-        this.#issued.get(capability) === request
-      );
+      if (typeof capability !== 'object' || capability === null || isProxy(capability)) return null;
+      const issued = this.#issued.get(capability);
+      return issued?.request === request && issued.result === capability ? issued.result : null;
     } catch {
-      return false;
+      return null;
     }
   }
 }

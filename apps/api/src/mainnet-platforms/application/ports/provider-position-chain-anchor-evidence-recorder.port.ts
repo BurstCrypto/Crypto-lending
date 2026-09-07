@@ -1,27 +1,23 @@
 import type { ProduceProviderPositionChainAnchorEvidenceRequestV1 } from '../dormant-provider-position-chain-anchor-evidence.producer';
 
-export const PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORDER_VERSION = 1 as const;
+export const PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORDER_VERSION = 2 as const;
 export const PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORD_USE =
   'DORMANT_PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORD_ONLY' as const;
-export const PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORD_RECEIPT_USE =
-  'DORMANT_PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORD_RECEIPT_ONLY' as const;
+export const PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORD_RESULT_USE =
+  'DORMANT_PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORD_RESULT_ONLY' as const;
 
 /**
- * Exact authority-free handoff from the two-source producer to a future
- * owner-authorized persistence adapter.
+ * Exact authority-free handoff from the two-source producer to the dormant
+ * durable record-intent workflow.
  *
- * The producer capability stays opaque. A concrete recorder must privately
- * own the producer instance that issued it and review the capability against
- * the exact producerRequest object before inspecting the candidate. Supplying
- * a verifier, record arguments, database handle, or persistence-authority flag
- * here would let callers replace or duplicate a trust boundary, so none is
- * part of this request.
- *
- * `signal` must be the exact object held by `producerRequest.signal`. It is
- * repeated only as the recorder operation's explicit cancellation boundary;
- * implementations must reject substitution rather than create a new signal.
+ * The recorder must privately own the producer that issued
+ * `producerCapability` and authenticate it against the exact
+ * `producerRequest` object. `signal` must be the same object held by that
+ * request. Callers cannot provide an intent identifier, dispatch token,
+ * database handle, persistence grant, or record arguments through this
+ * boundary.
  */
-export interface RecordProviderPositionChainAnchorEvidenceRequestV1 {
+export interface RecordProviderPositionChainAnchorEvidenceRequestV2 {
   readonly recorderVersion: typeof PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORDER_VERSION;
   readonly use: typeof PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORD_USE;
   readonly mayAuthorizeFinancialAction: false;
@@ -31,36 +27,73 @@ export interface RecordProviderPositionChainAnchorEvidenceRequestV1 {
 }
 
 export type ProviderPositionChainAnchorEvidenceRecordOutcome = 'RECORDED' | 'IDEMPOTENT_REPLAY';
+export type ProviderPositionChainAnchorEvidenceRecordUncertainPhase =
+  'PREPARE' | 'CLAIM_DISPATCH' | 'EXECUTE_RECORD' | 'MARK_UNKNOWN';
+export type ProviderPositionChainAnchorEvidenceRecordKnownIntentState =
+  'NEW' | 'RECORD_DISPATCHED' | 'UNKNOWN';
 
-/**
- * Structurally reviewed migration-0029 result. Authenticity still requires
- * verifyReceipt against the exact record request. A receipt reports completed
- * storage only; it grants neither financial-action nor persistence authority.
- */
-export interface ProviderPositionChainAnchorEvidenceRecordReceiptV1 {
+interface ProviderPositionChainAnchorEvidenceRecordResultCommonV2 {
   readonly recorderVersion: typeof PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORDER_VERSION;
-  readonly use: typeof PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORD_RECEIPT_USE;
+  readonly use: typeof PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORD_RESULT_USE;
   readonly mayAuthorizeFinancialAction: false;
+  readonly producerDeadlineAt: string;
+}
+
+export interface ProviderPositionChainAnchorEvidenceRecordedResultV2 extends ProviderPositionChainAnchorEvidenceRecordResultCommonV2 {
+  readonly outcome: 'RECORDED';
   readonly recordOutcome: ProviderPositionChainAnchorEvidenceRecordOutcome;
-  readonly recordedEvidenceFingerprintSha256: string;
+  readonly recordIntentFingerprintSha256: string;
+  readonly evidenceFingerprintSha256: string;
+  readonly deadlineBindingSha256: string;
   readonly evidenceRecordedAt: string;
+  readonly resolvedAt: string;
+}
+
+export interface ProviderPositionChainAnchorEvidenceNotRecordedResultV2 extends ProviderPositionChainAnchorEvidenceRecordResultCommonV2 {
+  readonly outcome: 'NOT_RECORDED';
+  readonly recordIntentFingerprintSha256: string;
+  readonly evidenceFingerprintSha256: string;
+  readonly resolvedAt: string;
+}
+
+export interface ProviderPositionChainAnchorEvidenceReconciliationRequiredResultV2 extends ProviderPositionChainAnchorEvidenceRecordResultCommonV2 {
+  readonly outcome: 'RECONCILIATION_REQUIRED';
+  readonly recordIntentFingerprintSha256: string | null;
+  readonly evidenceFingerprintSha256: string | null;
+  readonly uncertainPhase: ProviderPositionChainAnchorEvidenceRecordUncertainPhase;
+  readonly knownIntentState: ProviderPositionChainAnchorEvidenceRecordKnownIntentState | null;
+}
+
+export interface ProviderPositionChainAnchorEvidenceDeadlineViolationResultV2 extends ProviderPositionChainAnchorEvidenceRecordResultCommonV2 {
+  readonly outcome: 'DEADLINE_VIOLATION';
+  readonly recordIntentFingerprintSha256: string;
+  readonly evidenceFingerprintSha256: string;
+  readonly evidenceRecordedAt: string;
+  readonly resolvedAt: string;
 }
 
 /**
- * Dormant application boundary only. This contract registers no adapter and
- * conveys no database permission. Any future implementation must receive its
- * narrowly scoped migration-0029 record permission from separately reviewed
- * deployment configuration, not from a caller or from this request.
- *
- * Returned values remain opaque until the same recorder authenticates them.
- * Unissued receipts, receipt clones, request clones, producer-request clones,
- * and signal substitutions must verify false.
+ * A structurally reviewed result is useful only after `reviewResult`
+ * authenticates the opaque capability against the exact request identity.
+ * No result member grants financial-action or persistence authority.
+ */
+export type ProviderPositionChainAnchorEvidenceRecordResultV2 =
+  | ProviderPositionChainAnchorEvidenceRecordedResultV2
+  | ProviderPositionChainAnchorEvidenceNotRecordedResultV2
+  | ProviderPositionChainAnchorEvidenceReconciliationRequiredResultV2
+  | ProviderPositionChainAnchorEvidenceDeadlineViolationResultV2;
+
+/**
+ * Dormant application boundary only. It registers no adapter, grants no
+ * database permission, and exposes no dispatch or reconciliation token.
+ * Returned values stay opaque until this same recorder authenticates the
+ * capability and exact request and returns its reviewed result.
  */
 export interface ProviderPositionChainAnchorEvidenceRecorderPort {
   readonly recorderVersion: typeof PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORDER_VERSION;
-  recordEvidence(request: RecordProviderPositionChainAnchorEvidenceRequestV1): Promise<unknown>;
-  verifyReceipt(
+  recordEvidence(request: RecordProviderPositionChainAnchorEvidenceRequestV2): Promise<unknown>;
+  reviewResult(
     capability: unknown,
-    request: RecordProviderPositionChainAnchorEvidenceRequestV1,
-  ): boolean;
+    request: RecordProviderPositionChainAnchorEvidenceRequestV2,
+  ): ProviderPositionChainAnchorEvidenceRecordResultV2 | null;
 }
