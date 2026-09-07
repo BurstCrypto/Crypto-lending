@@ -114,13 +114,13 @@ const FORBIDDEN_MATERIAL_KEYS = new Set([
   'tokenvalue',
 ]);
 const REQUIRED_BOUNDARY_IDS = new Set(
-  Array.from({ length: 11 }, (_, index) => `TB-${String(index + 1).padStart(2, '0')}`),
+  Array.from({ length: 13 }, (_, index) => `TB-${String(index + 1).padStart(2, '0')}`),
 );
 const REQUIRED_DATA_IDS = new Set(
-  Array.from({ length: 17 }, (_, index) => `DATA-${String(index + 1).padStart(3, '0')}`),
+  Array.from({ length: 19 }, (_, index) => `DATA-${String(index + 1).padStart(3, '0')}`),
 );
 const REQUIRED_SECRET_IDS = new Set(
-  Array.from({ length: 15 }, (_, index) => `KEY-${String(index + 1).padStart(3, '0')}`),
+  Array.from({ length: 17 }, (_, index) => `KEY-${String(index + 1).padStart(3, '0')}`),
 );
 const REQUIRED_THREAT_IDS = new Set([
   'THR-ACCOUNT-001',
@@ -147,6 +147,12 @@ const REQUIRED_THREAT_IDS = new Set([
   'THR-SUPPLY-002',
   'THR-AVAILABILITY-001',
   'THR-AVAILABILITY-002',
+  'THR-LEDGER-005',
+  'THR-WALLET-004',
+  'THR-AVAILABILITY-003',
+  'THR-SUPPLY-003',
+  'THR-SUPPLY-004',
+  'THR-SECRETS-004',
 ]);
 const ACCOUNTABLE_ROLES = new Set([
   'Accounts',

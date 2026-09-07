@@ -341,6 +341,37 @@ test('retains every reviewed baseline identifier', () => {
   }
 });
 
+test('retains the newest reviewed baseline identifiers', () => {
+  const cases = [
+    ['trustBoundaries', ['TB-12', 'TB-13']],
+    ['dataAssets', ['DATA-018', 'DATA-019']],
+    ['secretInventory', ['KEY-016', 'KEY-017']],
+    [
+      'threats',
+      [
+        'THR-LEDGER-005',
+        'THR-WALLET-004',
+        'THR-AVAILABILITY-003',
+        'THR-SUPPLY-003',
+        'THR-SUPPLY-004',
+        'THR-SECRETS-004',
+      ],
+    ],
+  ];
+
+  for (const [field, ids] of cases) {
+    for (const id of ids) {
+      const record = canonicalRecord();
+      record[field] = record[field].filter(({ id: candidate }) => candidate !== id);
+
+      assert(
+        errorsFor(record).includes(`${field} must retain baseline id ${id}.`),
+        `missing newest baseline ${id} error`,
+      );
+    }
+  }
+});
+
 test('keeps wallet proof data separate from durable registration identity and keys', () => {
   const record = canonicalRecord();
   const ephemeralProof = record.dataAssets.find(({ id }) => id === 'DATA-005');
