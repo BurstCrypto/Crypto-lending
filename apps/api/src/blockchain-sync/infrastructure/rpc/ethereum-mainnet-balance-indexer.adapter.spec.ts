@@ -1,10 +1,13 @@
 import { BalanceSyncIndexerFailure } from '../../domain/balance-sync';
 import {
   createBalanceSyncExecutionContext,
+  createEthereumMainnetBalanceDeploymentIdentityVerifier,
   reviewBalanceSyncExecutionContext,
   type BalanceIndexerReadRequest,
   type BalanceIndexerRescanRequest,
   type BalanceSyncExecutionContext,
+  type EthereumMainnetBalanceDeploymentIdentityVerificationRequest,
+  type EthereumMainnetBalanceDeploymentIdentityVerifierPort,
 } from '../../application/ports/balance-sync.ports';
 
 import {
@@ -20,6 +23,13 @@ const WALLET = '0x1111111111111111111111111111111111111111';
 const USDC = '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48';
 const USDT = '0xdac17f958d2ee523a2206206994597c13d831ec7';
 const PYUSD = '0x6c3ea9036406852006290770bedfcaba0e23a0e8';
+const MANIFEST_FINGERPRINT = 'a'.repeat(64);
+const OBSERVED_FINGERPRINT = 'b'.repeat(64);
+const DEPLOYMENT_IDENTITY_CLAIMS = Object.freeze({
+  deploymentIdentityValidated: true as const,
+  approvedManifestFingerprintSha256: MANIFEST_FINGERPRINT,
+  observedIdentityFingerprintSha256: OBSERVED_FINGERPRINT,
+});
 const TEST_EXECUTION = createBalanceSyncExecutionContext();
 const TEST_SIGNAL = reviewBalanceSyncExecutionContext(TEST_EXECUTION.context)?.signal;
 
@@ -97,6 +107,9 @@ class TranscriptTransport implements BalanceJsonRpcTransport {
 function adapterWith(
   respond: (request: BalanceJsonRpcRequest, index: number) => unknown = validResponder(),
   address: unknown = WALLET,
+  deploymentIdentityVerifier: EthereumMainnetBalanceDeploymentIdentityVerifierPort | null = createEthereumMainnetBalanceDeploymentIdentityVerifier(
+    async () => DEPLOYMENT_IDENTITY_CLAIMS,
+  ),
 ): Readonly<{
   adapter: TestEthereumAdapter;
   transport: TranscriptTransport;
@@ -110,6 +123,7 @@ function adapterWith(
         transport,
         { resolveActiveAddress },
         { now: () => new Date('2026-09-04T18:00:00.000Z') },
+        deploymentIdentityVerifier ?? undefined,
       ),
     ),
     transport,
@@ -240,6 +254,9 @@ describe('Ethereum mainnet balance indexer transcript adapter', () => {
         selector: 'latest',
         retrievedAt: '2026-09-04T18:00:00.000Z',
         identityValidated: true,
+        deploymentIdentityValidated: true,
+        approvedManifestFingerprintSha256: MANIFEST_FINGERPRINT,
+        observedIdentityFingerprintSha256: OBSERVED_FINGERPRINT,
       },
       positions: expect.arrayContaining([
         expect.objectContaining({ stablecoin: 'USDC', assetIdentity: USDC, amountAtomic: '11' }),
@@ -271,6 +288,67 @@ describe('Ethereum mainnet balance indexer transcript adapter', () => {
         data: `0x70a08231${'0'.repeat(24)}${WALLET.slice(2)}`,
       });
     }
+  });
+
+  it('binds the selected block and exact active assets into the deployment verifier request', async () => {
+    const verify = jest.fn(
+      async (
+        request: EthereumMainnetBalanceDeploymentIdentityVerificationRequest,
+        execution: BalanceSyncExecutionContext,
+      ) => {
+        void request;
+        void execution;
+        return DEPLOYMENT_IDENTITY_CLAIMS;
+      },
+    );
+    const verifier = createEthereumMainnetBalanceDeploymentIdentityVerifier(verify);
+    const { adapter } = adapterWith(validResponder(), WALLET, verifier);
+
+    await adapter.readCurrent(provisionalRequest);
+
+    expect(verify).toHaveBeenCalledTimes(1);
+    expect(verify).toHaveBeenCalledWith(
+      {
+        networkId: 'eip155:1',
+        sourcePosition: '100',
+        sourceHash: hash('b'),
+        assetIdentities: [PYUSD, USDC, USDT],
+      },
+      TEST_EXECUTION.context,
+    );
+    const request = verify.mock.calls[0]?.[0];
+    expect(Object.getPrototypeOf(request as object)).toBeNull();
+    expect(Object.isFrozen(request)).toBe(true);
+    expect(Object.isFrozen(request?.assetIdentities)).toBe(true);
+  });
+
+  it('fails closed before token state reads when no branded deployment verifier is composed', async () => {
+    const { adapter, transport } = adapterWith(validResponder(), WALLET, null);
+
+    await expect(adapter.readCurrent(provisionalRequest)).rejects.toMatchObject({
+      code: 'PROVIDER_INVALID_DATA',
+      message: 'PROVIDER_INVALID_DATA',
+    });
+    expect(transport.requests.map(({ method }) => method)).toEqual([
+      'eth_chainId',
+      'eth_getBlockByNumber',
+    ]);
+  });
+
+  it('sanitizes malformed deployment verifier claims and emits no candidate or token reads', async () => {
+    const verifier = createEthereumMainnetBalanceDeploymentIdentityVerifier(async () => ({
+      ...DEPLOYMENT_IDENTITY_CLAIMS,
+      observedIdentityFingerprintSha256: 'not-a-sha256',
+    }));
+    const { adapter, transport } = adapterWith(validResponder(), WALLET, verifier);
+
+    await expect(adapter.readCurrent(provisionalRequest)).rejects.toMatchObject({
+      code: 'PROVIDER_INVALID_DATA',
+      message: 'PROVIDER_INVALID_DATA',
+      retryAfterSeconds: undefined,
+    });
+    expect(transport.requests.some(({ method }) => method === 'eth_getCode')).toBe(false);
+    expect(transport.requests.some(({ method }) => method === 'eth_call')).toBe(false);
   });
 
   it('fails closed instead of mixing state when the selected hash is reorged mid-read', async () => {
@@ -421,6 +499,9 @@ describe('Ethereum mainnet balance indexer transcript adapter', () => {
             throw forgedAuthority;
           },
         },
+        createEthereumMainnetBalanceDeploymentIdentityVerifier(
+          async () => DEPLOYMENT_IDENTITY_CLAIMS,
+        ),
       ),
     );
 
@@ -457,7 +538,14 @@ describe('Ethereum mainnet balance indexer transcript adapter', () => {
     });
 
     expect(result).toMatchObject({
-      source: { position: '103', hash: hash('e'), parentHash: hash('d') },
+      source: {
+        position: '103',
+        hash: hash('e'),
+        parentHash: hash('d'),
+        deploymentIdentityValidated: true,
+        approvedManifestFingerprintSha256: MANIFEST_FINGERPRINT,
+        observedIdentityFingerprintSha256: OBSERVED_FINGERPRINT,
+      },
       replay: { fromPosition: '100', throughPosition: '103', readUnits: 3, complete: true },
     });
     expect(

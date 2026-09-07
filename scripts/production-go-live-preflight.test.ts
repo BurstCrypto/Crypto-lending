@@ -5251,6 +5251,51 @@ test('balance-consumer inspection pins the six launch assets and their canonical
   }
 });
 
+test('balance-consumer inspection pins dormant deployment identity binding', () => {
+  assert.deepEqual(
+    inspectBalanceConsumerDeploymentArtifacts(BALANCE_CONSUMER_ARTIFACTS),
+    EXPECTED_DORMANT_BALANCE_CONSUMER_DEPLOYMENT,
+  );
+
+  const mutations: readonly (readonly [keyof BalanceConsumerArtifactSources, string, string])[] = [
+    [
+      'mainnetBalanceTwoSourceAgreementCoordinatorSource',
+      'export const MAINNET_BALANCE_TWO_SOURCE_AGREEMENT_VERSION = 2 as const;',
+      'export const MAINNET_BALANCE_TWO_SOURCE_AGREEMENT_VERSION = 1 as const;',
+    ],
+    [
+      'mainnetBalanceTwoSourceAgreementCoordinatorSource',
+      'primaryCandidate.source.approvedManifestFingerprintSha256 !==',
+      'primaryCandidate.source.approvedManifestFingerprintSha256 ===',
+    ],
+    [
+      'ethereumBalanceIndexerSource',
+      'const deploymentIdentityValue = await attestEthereumMainnetBalanceDeploymentIdentity(',
+      'const deploymentIdentityValue = await Promise.resolve(',
+    ],
+    [
+      'balanceSyncOrchestratorSource',
+      "'identityValidated',",
+      "'identityValidated',\n    'deploymentIdentityValidated',",
+    ],
+    [
+      'blockchainSyncIndexSource',
+      "export { EthereumMainnetBalanceIndexerAdapter } from './infrastructure/rpc/ethereum-mainnet-balance-indexer.adapter';",
+      "export { EthereumMainnetBalanceIndexerAdapter } from './infrastructure/rpc/ethereum-mainnet-balance-indexer.adapter';\nexport { createEthereumMainnetBalanceDeploymentIdentityVerifier } from './application/ports/balance-sync.ports';",
+    ],
+  ];
+
+  for (const [key, approved, rejected] of mutations) {
+    assert.deepEqual(
+      inspectBalanceConsumerDeploymentArtifacts(
+        mutateBalanceConsumerArtifact(key, approved, rejected),
+      ),
+      INVALID_BALANCE_CONSUMER_DEPLOYMENT,
+      `${key}: ${approved}`,
+    );
+  }
+});
+
 test('balance-consumer inspection requires one stable Solana header around account reads', () => {
   const mutations: readonly (readonly [string, string])[] = [
     [
@@ -5658,8 +5703,8 @@ test('balance-consumer inspection pins the end-to-end execution cancellation cha
     ],
     [
       'mainnetBalanceTwoSourceAgreementCoordinatorSource',
-      'const [primaryResult, corroboratingResult] = await Promise.allSettled([',
-      'const [primaryResult, corroboratingResult] = await Promise.all([',
+      'const results = await abortableAllSettled(',
+      'const results = await Promise.allSettled(',
     ],
     [
       'mainnetBalanceTwoSourceAgreementCoordinatorSource',

@@ -2,10 +2,13 @@ import type { BalanceJsonRpcRequest, BalanceJsonRpcTransport } from './balance-j
 import { BalanceSyncIndexerFailure } from '../../domain/balance-sync';
 import {
   createBalanceSyncExecutionContext,
+  createSolanaMainnetBalanceDeploymentIdentityVerifier,
   reviewBalanceSyncExecutionContext,
   type BalanceIndexerReadRequest,
   type BalanceIndexerRescanRequest,
   type BalanceSyncExecutionContext,
+  type SolanaMainnetBalanceDeploymentIdentityVerificationRequest,
+  type SolanaMainnetBalanceDeploymentIdentityVerifierPort,
 } from '../../application/ports/balance-sync.ports';
 import {
   decodeSolanaPublicKey,
@@ -23,6 +26,13 @@ const USDT = 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB';
 const PYUSD = '2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo';
 const TOKEN_PROGRAM = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
 const TOKEN_ACCOUNT = 'BGocb4GEpbTFm8UFV2VsDSaBXHELPfAXrvd4vtt8QWrA';
+const MANIFEST_FINGERPRINT = 'a'.repeat(64);
+const OBSERVED_FINGERPRINT = 'b'.repeat(64);
+const DEPLOYMENT_IDENTITY_CLAIMS = Object.freeze({
+  deploymentIdentityValidated: true as const,
+  approvedManifestFingerprintSha256: MANIFEST_FINGERPRINT,
+  observedIdentityFingerprintSha256: OBSERVED_FINGERPRINT,
+});
 const TEST_EXECUTION = createBalanceSyncExecutionContext();
 const TEST_SIGNAL = reviewBalanceSyncExecutionContext(TEST_EXECUTION.context)?.signal;
 
@@ -164,6 +174,9 @@ function validResponder(
 function adapterWith(
   respond: (request: BalanceJsonRpcRequest) => unknown = validResponder(),
   address: unknown = WALLET,
+  deploymentIdentityVerifier: SolanaMainnetBalanceDeploymentIdentityVerifierPort | null = createSolanaMainnetBalanceDeploymentIdentityVerifier(
+    async () => DEPLOYMENT_IDENTITY_CLAIMS,
+  ),
 ): Readonly<{
   adapter: TestSolanaAdapter;
   transport: TranscriptTransport;
@@ -177,6 +190,7 @@ function adapterWith(
         transport,
         { resolveActiveAddress },
         { now: () => new Date('2026-09-04T18:00:00.000Z') },
+        deploymentIdentityVerifier ?? undefined,
       ),
     ),
     transport,
@@ -298,6 +312,9 @@ describe('Solana mainnet balance indexer transcript adapter', () => {
             throw forgedAuthority;
           },
         },
+        createSolanaMainnetBalanceDeploymentIdentityVerifier(
+          async () => DEPLOYMENT_IDENTITY_CLAIMS,
+        ),
       ),
     );
 
@@ -350,6 +367,9 @@ describe('Solana mainnet balance indexer transcript adapter', () => {
         selector: 'confirmed',
         retrievedAt: '2026-09-04T18:00:00.000Z',
         identityValidated: true,
+        deploymentIdentityValidated: true,
+        approvedManifestFingerprintSha256: MANIFEST_FINGERPRINT,
+        observedIdentityFingerprintSha256: OBSERVED_FINGERPRINT,
       },
       positions: expect.arrayContaining([
         expect.objectContaining({ stablecoin: 'USDC', assetIdentity: USDC, amountAtomic: '11' }),
@@ -387,6 +407,69 @@ describe('Solana mainnet balance indexer transcript adapter', () => {
         { commitment: 'confirmed', transactionDetails: 'none', rewards: false },
       ]);
     }
+  });
+
+  it('binds the selected slot and exact active mints into the deployment verifier request', async () => {
+    const verify = jest.fn(
+      async (
+        request: SolanaMainnetBalanceDeploymentIdentityVerificationRequest,
+        execution: BalanceSyncExecutionContext,
+      ) => {
+        void request;
+        void execution;
+        return DEPLOYMENT_IDENTITY_CLAIMS;
+      },
+    );
+    const verifier = createSolanaMainnetBalanceDeploymentIdentityVerifier(verify);
+    const { adapter } = adapterWith(validResponder(), WALLET, verifier);
+
+    await adapter.readCurrent(provisionalRequest);
+
+    expect(verify).toHaveBeenCalledTimes(1);
+    expect(verify).toHaveBeenCalledWith(
+      {
+        networkId: canonicalRequest.networkId,
+        sourcePosition: '100',
+        sourceHash: USDC,
+        assetIdentities: [PYUSD, USDC, USDT],
+      },
+      TEST_EXECUTION.context,
+    );
+    const request = verify.mock.calls[0]?.[0];
+    expect(Object.getPrototypeOf(request as object)).toBeNull();
+    expect(Object.isFrozen(request)).toBe(true);
+    expect(Object.isFrozen(request?.assetIdentities)).toBe(true);
+  });
+
+  it('fails closed before token-account reads when no branded deployment verifier is composed', async () => {
+    const { adapter, transport } = adapterWith(validResponder(), WALLET, null);
+
+    await expect(adapter.readCurrent(provisionalRequest)).rejects.toMatchObject({
+      code: 'PROVIDER_INVALID_DATA',
+      message: 'PROVIDER_INVALID_DATA',
+    });
+    expect(transport.requests.map(({ method }) => method)).toEqual([
+      'getGenesisHash',
+      'getSlot',
+      'getBlock',
+    ]);
+  });
+
+  it('sanitizes malformed deployment verifier claims and emits no candidate or token reads', async () => {
+    const verifier = createSolanaMainnetBalanceDeploymentIdentityVerifier(async () => ({
+      ...DEPLOYMENT_IDENTITY_CLAIMS,
+      deploymentIdentityValidated: false,
+    }));
+    const { adapter, transport } = adapterWith(validResponder(), WALLET, verifier);
+
+    await expect(adapter.readCurrent(provisionalRequest)).rejects.toMatchObject({
+      code: 'PROVIDER_INVALID_DATA',
+      message: 'PROVIDER_INVALID_DATA',
+      retryAfterSeconds: undefined,
+    });
+    expect(transport.requests.some(({ method }) => method === 'getTokenAccountsByOwner')).toBe(
+      false,
+    );
   });
 
   it.each(['before', 'after'] as const)(
@@ -632,7 +715,14 @@ describe('Solana mainnet balance indexer transcript adapter', () => {
       maximumReadUnits: 3,
     });
     expect(result).toMatchObject({
-      source: { position: '103', hash: USDT, parentHash: USDC },
+      source: {
+        position: '103',
+        hash: USDT,
+        parentHash: USDC,
+        deploymentIdentityValidated: true,
+        approvedManifestFingerprintSha256: MANIFEST_FINGERPRINT,
+        observedIdentityFingerprintSha256: OBSERVED_FINGERPRINT,
+      },
       replay: { fromPosition: '100', throughPosition: '103', readUnits: 3, complete: true },
     });
     expect(

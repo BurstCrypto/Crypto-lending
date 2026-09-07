@@ -807,19 +807,19 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
   compositionSource: 'ab1893fef3304c0bffdba77aa95fb5f0ddf14ea8475e5a0fa4dd7abd215170e8',
   balanceSyncConsumerServiceSource:
     'f3d43d2dc66b501c2354a6bce58f899049dac399e72bafd4ea1405bbe0eb507e',
-  balanceSyncPortsSource: '1d671d46ec39d0d8317d486924e0b9da07ae54f769f789492ad7e6d36e2f6c13',
+  balanceSyncPortsSource: '79acecb6c5913e17eaa9c20fef0fdf0ae3d465eceb410b246d0804c37db3eb89',
   balanceConsumerResourceSource: '909a6296eec09501f2147c69da02c68e8b534440b0fc14314ed82a4630d7c8c5',
   balanceConsumerLifecycleSource:
     'd2d5d946456e89bf7698f874aacc2f5e79558f3a76d82aea2f74e3b2e29bcd52',
   mainnetBalanceIndexerRouterSource:
     'edb322685a88c4f01dc33bbbd4f5f000d30d756ffbfa461c645ec3acbba300d1',
   mainnetBalanceTwoSourceAgreementCoordinatorSource:
-    'e077fdd52f8046d299d62faa2d73a576ffa082e6560d0c6409b2cea48efbfabc',
+    '1565ac2215fd495359ad128c0945ea0b170a1c546ce27469a1c828da24c3d4d2',
   balanceJsonRpcSource: 'f8fdf7f1e292824a8041e37455022103b6e54720dde125bcf6e055285d1bec75',
   nodeHttpsBalanceJsonRpcTransportSource:
     '78973ab23f864efb045ae5d8b43cc93e0e43a336dedac8e463bd62666e3e6cb0',
-  ethereumBalanceIndexerSource: 'cdd60744549c6808cecc3a1bd1ab3668221ac86d4ba34177213fd15824938012',
-  solanaBalanceIndexerSource: '34543ab41660c02beb8810fecae806eb06ab5684d4df7d90ed685b83609d389b',
+  ethereumBalanceIndexerSource: 'd5fb11f282817206bbdb7e054962f1830f4a0f6122ffa3786094a65e7c4cb353',
+  solanaBalanceIndexerSource: '1958e16a9878b0df9328d912a7bc855b102cda643818cb97d52d5ee521387d9e',
   supportedAssetRegistrySource: '025ef9ebffc0a2e676394bca110ee203274e00d0d95b5fb4fe239953d235fc54',
   walletIdentitySource: 'a22e1c8e8ce5ddcd8c2e43007c37faf82868929afe6b2806e978611d19e788dd',
   solanaTokenAccountSource: '3e853238987144873c3193b8bdf2f41dcf4baf1ff62e84941a7f7a335e316d5a',
@@ -834,7 +834,7 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
   balanceSyncWalletAddressResolverSource:
     '2ddf22caa5d84a0d6d0147c68482b04f809555ca5f772e103fc9758c7083927a',
   balanceConsumerConfigSource: 'bbcce014594c79f7ea76fee4dc211c8e5436947549fef54e848df5afaeb0ab14',
-  blockchainSyncIndexSource: '55cd192f09e5c507d94fd0d0647d487b561d2e1e5852351e390b9251188fdf65',
+  blockchainSyncIndexSource: '9e7ea629bb2c3bf5769b5aa23d05e4a80c602b8c7da92b54b81e47469873534a',
   jobEnvelopeSource: '40b070d9676fe4243c91cb49e2819c0e7cfb664ec9298e827e5d6e40b5944281',
   blockchainSyncModuleSource: 'e78aeb6ee670cd9930c66db37dd03a0cb1e2190eb6542d1470c99afff5f5c6f4',
   appModuleSource: 'fd7cecd6d535a8f854f30a1f82811f6a9a32e7c7f9f0a38bfbee6471eb30504f',
@@ -9062,7 +9062,9 @@ function hasExactBalanceAdapterDependencyContract(
     '(asset) =>',
     "asset.networkId === ETHEREUM_MAINNET_NETWORK_ID && asset.activationState === 'ACTIVE',",
     ')',
-    '.sort((left, right) => left.identity.localeCompare(right.identity)),',
+    '.sort((left, right) =>',
+    'left.identity < right.identity ? -1 : left.identity > right.identity ? 1 : 0,',
+    '),',
   ].join('\n');
   const solanaFilter = [
     "supportedAssetRegistryForEnvironment('MAINNET')",
@@ -9070,7 +9072,9 @@ function hasExactBalanceAdapterDependencyContract(
     '(asset) =>',
     "asset.networkId === SOLANA_MAINNET_NETWORK_ID && asset.activationState === 'ACTIVE',",
     ')',
-    '.sort((left, right) => left.identity.localeCompare(right.identity)),',
+    '.sort((left, right) =>',
+    'left.identity < right.identity ? -1 : left.identity > right.identity ? 1 : 0,',
+    '),',
   ].join('\n');
   const ethereumExecutable = trimmedExecutableLines(ethereum).join('\n');
   const solanaExecutable = trimmedExecutableLines(solana).join('\n');
@@ -9224,6 +9228,210 @@ function hasExactBalanceAdapterDependencyContract(
     exactExecutableLineCount(ethereum, 'return parseEvmWalletAddress(value);') === 1 &&
     exactExecutableLineCount(solana, 'return parseSolanaWalletAddress(value);') === 2 &&
     launchSources.every((source) => !futureChainLaunchBinding.test(source))
+  );
+}
+
+function hasExactBalanceDeploymentIdentityBindingContract(
+  sources: BalanceConsumerArtifactSources,
+): boolean {
+  const ports = sources.balanceSyncPortsSource.replace(/\r\n/gu, '\n');
+  const orchestrator = sources.balanceSyncOrchestratorSource.replace(/\r\n/gu, '\n');
+  const coordinator = sources.mainnetBalanceTwoSourceAgreementCoordinatorSource.replace(
+    /\r\n/gu,
+    '\n',
+  );
+  const ethereum = sources.ethereumBalanceIndexerSource.replace(/\r\n/gu, '\n');
+  const solana = sources.solanaBalanceIndexerSource.replace(/\r\n/gu, '\n');
+  const index = sources.blockchainSyncIndexSource.replace(/\r\n/gu, '\n');
+  const orchestratorExecutableLines = trimmedExecutableLines(orchestrator).join('\n');
+  const launchSources = [
+    index,
+    sources.activationSource,
+    sources.cliSource,
+    sources.cliModeSource,
+    sources.compositionSource,
+    sources.runtimeSource,
+    sources.balanceConsumerResourceSource,
+    sources.balanceConsumerLifecycleSource,
+    sources.balanceConsumerConfigSource,
+    sources.infrastructureConfigSource,
+    sources.blockchainSyncModuleSource,
+    sources.appModuleSource,
+    sources.applicationRootSource,
+    sources.localDevelopmentAppModuleSource,
+    sources.mainSource,
+    sources.outboxWorkerCliSource,
+    sources.redisSessionRevocationCliSource,
+    sources.migrationCliSource,
+    sources.applicationTemplateSource,
+    sources.applicationValidatorSource,
+    sources.workloadTemplateSource,
+    sources.workloadValidatorSource,
+    sources.balanceConsumerEnvelopeSource,
+    sources.balanceConsumerEnvelopeValidatorSource,
+    sources.balanceConsumerMetadataTransitionValidatorSource,
+    sources.releaseManifestSource,
+    sources.apiPackageSource,
+    sources.rootPackageSource,
+    sources.rootPackageLockSource,
+    sources.productionContainerValidatorSource,
+  ] as const;
+  const runtimeVerifierCapability =
+    /\b(?:createEthereumMainnetBalanceDeploymentIdentityVerifier|createSolanaMainnetBalanceDeploymentIdentityVerifier|EthereumMainnetBalanceDeploymentIdentityVerifierPort|SolanaMainnetBalanceDeploymentIdentityVerifierPort)\b/u;
+  const deterministicAssetSort =
+    /\.sort\(\(left, right\) =>\s*left\.identity < right\.identity \? -1 : left\.identity > right\.identity \? 1 : 0,?\s*\)/u;
+  const legacySourceKeys = [
+    "'position',",
+    "'hash',",
+    "'parentHash',",
+    "'selector',",
+    "'retrievedAt',",
+    "'identityValidated',",
+  ].join('\n');
+
+  return (
+    exactExecutableLineCount(
+      ports,
+      'export interface MainnetBalanceDeploymentIdentityVerificationClaims {',
+    ) === 1 &&
+    exactExecutableLineCount(ports, 'readonly deploymentIdentityValidated: true;') === 1 &&
+    exactExecutableLineCount(ports, 'readonly approvedManifestFingerprintSha256: string;') === 1 &&
+    exactExecutableLineCount(ports, 'readonly observedIdentityFingerprintSha256: string;') === 1 &&
+    exactExecutableLineCount(
+      ports,
+      'const VERIFIED_MAINNET_BALANCE_DEPLOYMENT_IDENTITY_VERIFIERS = new WeakMap<',
+    ) === 1 &&
+    exactExecutableLineCount(
+      ports,
+      'const VERIFIED_MAINNET_BALANCE_DEPLOYMENT_IDENTITY_ATTESTATIONS = new WeakMap<',
+    ) === 1 &&
+    exactExecutableLineCount(
+      ports,
+      'export function createEthereumMainnetBalanceDeploymentIdentityVerifier(',
+    ) === 1 &&
+    exactExecutableLineCount(
+      ports,
+      'export function createSolanaMainnetBalanceDeploymentIdentityVerifier(',
+    ) === 1 &&
+    exactExecutableLineCount(
+      ports,
+      "if (typeof implementation !== 'function' || isProxy(implementation)) {",
+    ) === 1 &&
+    exactExecutableLineCount(ports, 'decodeSolanaPublicKey(value);') === 1 &&
+    exactExecutableLineCount(
+      ports,
+      "(evm ? sourceHash === `0x${'0'.repeat(64)}` : sourceHash === '1'.repeat(32)) ||",
+    ) === 1 &&
+    exactExecutableLineCount(
+      ports,
+      "const lengthDescriptor = Object.getOwnPropertyDescriptor(value, 'length');",
+    ) === 1 &&
+    exactExecutableLineCount(ports, 'lengthDescriptor?.value !== length ||') === 1 &&
+    exactExecutableLineCount(ports, 'const PROMISE_THEN = Promise.prototype.then;') === 1 &&
+    exactExecutableLineCount(ports, 'Reflect.apply(PROMISE_THEN, operation, [') === 1 &&
+    exactExecutableLineCount(
+      ports,
+      'const settled = await abortableDeploymentIdentityVerification(',
+    ) === 1 &&
+    exactExecutableLineCount(
+      ports,
+      "if (outcome === 'RESOLVE') resolve(frozenNullPrototype({ value }));",
+    ) === 1 &&
+    exactExecutableLineCount(
+      ports,
+      'const claims = parseDeploymentIdentityClaims(settled.value);',
+    ) === 1 &&
+    exactExecutableLineCount(
+      ethereum,
+      'const deploymentIdentityValue = await attestEthereumMainnetBalanceDeploymentIdentity(',
+    ) === 1 &&
+    exactExecutableLineCount(
+      solana,
+      'const deploymentIdentityValue = await attestSolanaMainnetBalanceDeploymentIdentity(',
+    ) === 1 &&
+    exactExecutableLineCount(ethereum, 'deploymentIdentityValidated: true,') === 1 &&
+    exactExecutableLineCount(solana, 'deploymentIdentityValidated: true,') === 1 &&
+    exactExecutableLineCount(
+      ethereum,
+      'approvedManifestFingerprintSha256: deploymentIdentity.approvedManifestFingerprintSha256,',
+    ) === 1 &&
+    exactExecutableLineCount(
+      solana,
+      'approvedManifestFingerprintSha256: deploymentIdentity.approvedManifestFingerprintSha256,',
+    ) === 1 &&
+    exactExecutableLineCount(
+      ethereum,
+      'observedIdentityFingerprintSha256: deploymentIdentity.observedIdentityFingerprintSha256,',
+    ) === 1 &&
+    exactExecutableLineCount(
+      solana,
+      'observedIdentityFingerprintSha256: deploymentIdentity.observedIdentityFingerprintSha256,',
+    ) === 1 &&
+    deterministicAssetSort.test(ethereum) &&
+    deterministicAssetSort.test(solana) &&
+    exactExecutableLineCount(
+      coordinator,
+      'export const MAINNET_BALANCE_TWO_SOURCE_AGREEMENT_VERSION = 2 as const;',
+    ) === 1 &&
+    exactExecutableLineCount(
+      coordinator,
+      "readonly status: 'EXACT_CHECKPOINT_BALANCE_AND_DEPLOYMENT_IDENTITY_MATCH';",
+    ) === 1 &&
+    exactExecutableLineCount(
+      coordinator,
+      "'crypto-lending:mainnet-balance-source-pair-registry:v2',",
+    ) === 1 &&
+    exactExecutableLineCount(
+      coordinator,
+      "'crypto-lending:mainnet-balance-source-attestation:v2',",
+    ) === 1 &&
+    exactExecutableLineCount(
+      coordinator,
+      "'crypto-lending:mainnet-balance-two-source-agreement:v2',",
+    ) === 1 &&
+    exactExecutableLineCount(coordinator, "approvalStatus: 'NOT_APPROVED' as const,") === 1 &&
+    exactExecutableLineCount(coordinator, 'pairs: Object.freeze([]),') === 1 &&
+    exactExecutableLineCount(
+      coordinator,
+      'primaryCandidate.source.approvedManifestFingerprintSha256 !==',
+    ) === 1 &&
+    exactExecutableLineCount(
+      coordinator,
+      'corroboratingCandidate.source.approvedManifestFingerprintSha256 !==',
+    ) === 1 &&
+    exactExecutableLineCount(
+      coordinator,
+      'primaryCandidate.source.observedIdentityFingerprintSha256 !==',
+    ) === 1 &&
+    exactExecutableLineCount(coordinator, "return fail('DEPLOYMENT_IDENTITY_MISMATCH');") === 1 &&
+    exactExecutableLineCount(coordinator, 'approvedManifestFingerprintSha256:') === 1 &&
+    exactExecutableLineCount(coordinator, 'observedIdentityFingerprintSha256:') === 1 &&
+    exactExecutableLineCount(
+      coordinator,
+      'approvedManifestFingerprintSha256: pair.approvedManifestFingerprintSha256,',
+    ) === 1 &&
+    exactExecutableLineCount(
+      coordinator,
+      'observedIdentityFingerprintSha256: primaryCandidate.source.observedIdentityFingerprintSha256,',
+    ) === 1 &&
+    exactExecutableLineCount(
+      coordinator,
+      'primaryCandidate.source.approvedManifestFingerprintSha256,',
+    ) === 2 &&
+    exactExecutableLineCount(
+      coordinator,
+      'primaryCandidate.source.observedIdentityFingerprintSha256,',
+    ) === 2 &&
+    exactExecutableLineCount(coordinator, 'candidate.source.approvedManifestFingerprintSha256,') ===
+      1 &&
+    exactExecutableLineCount(coordinator, 'candidate.source.observedIdentityFingerprintSha256,') ===
+      1 &&
+    exactExecutableLineCount(coordinator, 'decodeSolanaPublicKey(value);') === 1 &&
+    orchestratorExecutableLines.includes(legacySourceKeys) &&
+    !orchestrator.includes('deploymentIdentityValidated') &&
+    !orchestrator.includes('approvedManifestFingerprintSha256') &&
+    !orchestrator.includes('observedIdentityFingerprintSha256') &&
+    launchSources.every((source) => !runtimeVerifierCapability.test(source))
   );
 }
 
@@ -9606,12 +9814,18 @@ function hasExactBalanceSyncExecutionCancellationContract(
   const checkpointPort = ports.slice(checkpointPortStart, checkpointPortEnd);
   const resolverPort = ports.slice(resolverPortStart, resolverPortEnd);
 
-  const coordinatorSettle = coordinator.indexOf(
-    'const [primaryResult, corroboratingResult] = await Promise.allSettled([',
+  const coordinatorSettle = coordinator.indexOf('const results = await abortableAllSettled(');
+  const coordinatorAbortResult = coordinator.indexOf(
+    "if (results === null) return fail('SOURCE_UNAVAILABLE');",
+    coordinatorSettle,
+  );
+  const coordinatorResultTuple = coordinator.indexOf(
+    'const [primaryResult, corroboratingResult] = results;',
+    coordinatorAbortResult,
   );
   const coordinatorPostAbort = coordinator.indexOf(
     'requireActiveAgreementExecution(context);',
-    coordinatorSettle + 1,
+    coordinatorResultTuple,
   );
   const coordinatorStatus = coordinator.indexOf(
     "if (primaryResult.status !== 'fulfilled' || corroboratingResult.status !== 'fulfilled') {",
@@ -9821,10 +10035,16 @@ function hasExactBalanceSyncExecutionCancellationContract(
       'Reflect.apply(rescanFromCheckpoint, receiver, [request, context]) as Promise<unknown>,',
     ) === 1 &&
     coordinatorSettle >= 0 &&
-    coordinatorPostAbort > coordinatorSettle &&
+    coordinatorAbortResult > coordinatorSettle &&
+    coordinatorResultTuple > coordinatorAbortResult &&
+    coordinatorPostAbort > coordinatorResultTuple &&
     coordinatorStatus > coordinatorPostAbort &&
     coordinatorValues > coordinatorStatus &&
-    exactExecutableLineCount(coordinator, 'requireActiveAgreementExecution(context);') === 2 &&
+    exactExecutableLineCount(
+      coordinator,
+      'const agreementExecution = requireActiveAgreementExecution(context);',
+    ) === 1 &&
+    exactExecutableLineCount(coordinator, 'requireActiveAgreementExecution(context);') === 1 &&
     exactExecutableLineCount(coordinator, 'primaryBinding.readCurrent(request, context),') === 1 &&
     exactExecutableLineCount(coordinator, 'corroboratingBinding.readCurrent(request, context),') ===
       1 &&
@@ -9832,6 +10052,13 @@ function hasExactBalanceSyncExecutionCancellationContract(
       coordinator,
       'Reflect.apply(capturedReader.method, capturedReader.receiver, [request, context]),',
     ) === 1 &&
+    exactExecutableLineCount(coordinator, 'function abortableAllSettled(') === 1 &&
+    exactExecutableLineCount(
+      coordinator,
+      "Reflect.apply(EVENT_TARGET_ADD_EVENT_LISTENER, signal, ['abort', onAbort, { once: true }]);",
+    ) === 1 &&
+    exactExecutableLineCount(coordinator, 'const PROMISE_THEN = Promise.prototype.then;') === 1 &&
+    exactExecutableLineCount(coordinator, 'Reflect.apply(PROMISE_THEN, allSettled, [') === 1 &&
     !/Promise\s*\.\s*all\s*\(/u.test(coordinator) &&
     !/\.(?:reason)\b/u.test(coordinator) &&
     exactExecutableLineCount(
@@ -13023,6 +13250,7 @@ export function inspectBalanceConsumerDeploymentArtifacts(
       hasExactMainnetBalanceIndexerRouterContract(sources) &&
       hasAuthenticatedBalanceSyncFailureContract(sources) &&
       hasExactBalanceAdapterDependencyContract(sources) &&
+      hasExactBalanceDeploymentIdentityBindingContract(sources) &&
       hasDormantProviderNeutralBalanceRpcContract(sources) &&
       hasDormantNodeHttpsBalanceRpcTransportContract(sources) &&
       hasExactBalanceSyncExecutionCancellationContract(sources) &&

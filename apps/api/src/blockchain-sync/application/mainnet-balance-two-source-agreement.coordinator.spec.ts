@@ -10,15 +10,15 @@ import {
 import {
   DormantMainnetBalanceTwoSourceAgreementCoordinator,
   ETHEREUM_MAINNET_BALANCE_AGREEMENT_NETWORK_ID,
-  MAINNET_BALANCE_SOURCE_PAIR_REGISTRY_V1,
+  MAINNET_BALANCE_SOURCE_PAIR_REGISTRY_V2,
   MainnetBalanceTwoSourceAgreementUnavailableError,
   SOLANA_MAINNET_BALANCE_AGREEMENT_NETWORK_ID,
-  fingerprintMainnetBalanceSourcePairRegistryV1,
+  fingerprintMainnetBalanceSourcePairRegistryV2,
   type MainnetBalanceAgreementClock,
   type MainnetBalanceAgreementNetworkId,
   type MainnetBalanceAgreementSourceBinding,
-  type MainnetBalanceSourcePairRegistryContentV1,
-  type MainnetBalanceSourcePairRegistryV1,
+  type MainnetBalanceSourcePairRegistryContentV2,
+  type MainnetBalanceSourcePairRegistryV2,
 } from './mainnet-balance-two-source-agreement.coordinator';
 
 const ACCOUNT_ID = '11111111-1111-4111-8111-111111111111';
@@ -29,8 +29,11 @@ const EXPIRES_AT = '2026-09-04T18:00:00.000Z';
 const RETRIEVED_AT = '2026-09-04T16:59:55.000Z';
 const ETHEREUM_BLOCK_HASH = `0x${'1'.repeat(64)}`;
 const ETHEREUM_PARENT_HASH = `0x${'2'.repeat(64)}`;
-const SOLANA_BLOCK_IDENTITY = '5'.repeat(44);
-const SOLANA_PARENT_BLOCK_IDENTITY = '6'.repeat(44);
+const SOLANA_BLOCK_IDENTITY = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+const SOLANA_PARENT_BLOCK_IDENTITY = '2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo';
+const SOLANA_ALTERNATE_BLOCK_IDENTITY = 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB';
+const APPROVED_MANIFEST_FINGERPRINT = 'a'.repeat(64);
+const OBSERVED_IDENTITY_FINGERPRINT = 'b'.repeat(64);
 
 type MutableRecord = Record<string, unknown>;
 
@@ -73,7 +76,7 @@ class SyntheticClock implements MainnetBalanceAgreementClock {
 }
 
 interface Harness {
-  readonly registry: MainnetBalanceSourcePairRegistryV1;
+  readonly registry: MainnetBalanceSourcePairRegistryV2;
   readonly bindings: MainnetBalanceAgreementSourceBinding[];
   readonly readers: Readonly<{
     ethereumPrimary: SyntheticBalanceReader;
@@ -84,9 +87,9 @@ interface Harness {
   clock: MainnetBalanceAgreementClock;
 }
 
-function registryContent(): MainnetBalanceSourcePairRegistryContentV1 {
+function registryContent(): MainnetBalanceSourcePairRegistryContentV2 {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     environment: 'MAINNET',
     approvalStatus: 'APPROVED',
     pairs: [
@@ -94,6 +97,7 @@ function registryContent(): MainnetBalanceSourcePairRegistryContentV1 {
         networkId: ETHEREUM_MAINNET_BALANCE_AGREEMENT_NETWORK_ID,
         approvedAt: APPROVED_AT,
         expiresAt: EXPIRES_AT,
+        approvedManifestFingerprintSha256: APPROVED_MANIFEST_FINGERPRINT,
         primary: { sourceFamilyId: 'synthetic-eth-family-a', sourceId: 'synthetic-eth-a' },
         corroborating: {
           sourceFamilyId: 'synthetic-eth-family-b',
@@ -104,6 +108,7 @@ function registryContent(): MainnetBalanceSourcePairRegistryContentV1 {
         networkId: SOLANA_MAINNET_BALANCE_AGREEMENT_NETWORK_ID,
         approvedAt: APPROVED_AT,
         expiresAt: EXPIRES_AT,
+        approvedManifestFingerprintSha256: APPROVED_MANIFEST_FINGERPRINT,
         primary: { sourceFamilyId: 'synthetic-sol-family-a', sourceId: 'synthetic-sol-a' },
         corroborating: {
           sourceFamilyId: 'synthetic-sol-family-b',
@@ -114,12 +119,12 @@ function registryContent(): MainnetBalanceSourcePairRegistryContentV1 {
   };
 }
 
-function registry(mutate?: (content: MutableRecord) => void): MainnetBalanceSourcePairRegistryV1 {
+function registry(mutate?: (content: MutableRecord) => void): MainnetBalanceSourcePairRegistryV2 {
   const content = clone(registryContent()) as unknown as MutableRecord;
   mutate?.(content);
   return {
-    ...(content as unknown as MainnetBalanceSourcePairRegistryContentV1),
-    fingerprintSha256: fingerprintMainnetBalanceSourcePairRegistryV1(content),
+    ...(content as unknown as MainnetBalanceSourcePairRegistryContentV2),
+    fingerprintSha256: fingerprintMainnetBalanceSourcePairRegistryV2(content),
   };
 }
 
@@ -164,6 +169,9 @@ function candidate(
           selector: 'finalized' as const,
           retrievedAt: RETRIEVED_AT,
           identityValidated: true,
+          deploymentIdentityValidated: true as const,
+          approvedManifestFingerprintSha256: APPROVED_MANIFEST_FINGERPRINT,
+          observedIdentityFingerprintSha256: OBSERVED_IDENTITY_FINGERPRINT,
         }
       : {
           position: '300000000',
@@ -172,6 +180,9 @@ function candidate(
           selector: 'finalized' as const,
           retrievedAt: RETRIEVED_AT,
           identityValidated: true,
+          deploymentIdentityValidated: true as const,
+          approvedManifestFingerprintSha256: APPROVED_MANIFEST_FINGERPRINT,
+          observedIdentityFingerprintSha256: OBSERVED_IDENTITY_FINGERPRINT,
         };
   return {
     walletId: WALLET_ID,
@@ -316,17 +327,17 @@ function totalReaderCalls(value: Harness): number {
 
 describe('DormantMainnetBalanceTwoSourceAgreementCoordinator', () => {
   it('keeps the checked-in production source registry empty, unapproved, immutable, and inert', async () => {
-    expect(MAINNET_BALANCE_SOURCE_PAIR_REGISTRY_V1).toMatchObject({
-      schemaVersion: 1,
+    expect(MAINNET_BALANCE_SOURCE_PAIR_REGISTRY_V2).toMatchObject({
+      schemaVersion: 2,
       environment: 'MAINNET',
       approvalStatus: 'NOT_APPROVED',
       pairs: [],
       fingerprintSha256: expect.stringMatching(/^[0-9a-f]{64}$/u),
     });
-    expect(Object.isFrozen(MAINNET_BALANCE_SOURCE_PAIR_REGISTRY_V1)).toBe(true);
-    expect(Object.isFrozen(MAINNET_BALANCE_SOURCE_PAIR_REGISTRY_V1.pairs)).toBe(true);
+    expect(Object.isFrozen(MAINNET_BALANCE_SOURCE_PAIR_REGISTRY_V2)).toBe(true);
+    expect(Object.isFrozen(MAINNET_BALANCE_SOURCE_PAIR_REGISTRY_V2.pairs)).toBe(true);
     const dormant = new DormantMainnetBalanceTwoSourceAgreementCoordinator(
-      MAINNET_BALANCE_SOURCE_PAIR_REGISTRY_V1,
+      MAINNET_BALANCE_SOURCE_PAIR_REGISTRY_V2,
       [],
       new SyntheticClock(),
     );
@@ -351,6 +362,22 @@ describe('DormantMainnetBalanceTwoSourceAgreementCoordinator', () => {
       expect(totalReaderCalls(value)).toBe(0);
     },
   );
+
+  it('rejects promptly on abort when both source readers ignore the signal and never settle', async () => {
+    const value = harness();
+    const owner = createBalanceSyncExecutionContext();
+    const neverSettles = async (): Promise<never> => new Promise(() => undefined);
+    value.readers.ethereumPrimary.operation = neverSettles;
+    value.readers.ethereumCorroborating.operation = neverSettles;
+
+    const pending = coordinator(value).readCurrentAgreement(request(), owner.context);
+    const rejection = expectUnavailable(pending, 'SOURCE_UNAVAILABLE');
+    owner.abort('SHUTDOWN');
+
+    await rejection;
+    expect(value.readers.ethereumPrimary.calls).toHaveLength(1);
+    expect(value.readers.ethereumCorroborating.calls).toHaveLength(1);
+  }, 1_000);
 
   it('waits for a fast-failure sibling to abort and settle before returning a sanitized error', async () => {
     const value = harness();
@@ -410,7 +437,7 @@ describe('DormantMainnetBalanceTwoSourceAgreementCoordinator', () => {
     ]);
 
     expect(result).toMatchObject({
-      agreementVersion: 1,
+      agreementVersion: 2,
       use: 'DORMANT_MAINNET_BALANCE_OBSERVATION_CANDIDATE_ONLY',
       mayPersist: false,
       mayAuthorizeFinancialAction: false,
@@ -425,10 +452,13 @@ describe('DormantMainnetBalanceTwoSourceAgreementCoordinator', () => {
           parentHash: ETHEREUM_PARENT_HASH,
           selector: 'finalized',
           identityValidated: true,
+          deploymentIdentityValidated: true,
+          approvedManifestFingerprintSha256: APPROVED_MANIFEST_FINGERPRINT,
+          observedIdentityFingerprintSha256: OBSERVED_IDENTITY_FINGERPRINT,
         },
       },
       agreement: {
-        status: 'EXACT_CHECKPOINT_AND_BALANCE_MATCH',
+        status: 'EXACT_CHECKPOINT_BALANCE_AND_DEPLOYMENT_IDENTITY_MATCH',
         checkpoint: {
           kind: 'ETHEREUM_BLOCK',
           blockNumber: '22000000',
@@ -437,6 +467,8 @@ describe('DormantMainnetBalanceTwoSourceAgreementCoordinator', () => {
         },
         sourcePairRegistryFingerprintSha256: value.registry.fingerprintSha256,
         sourcePairApprovalExpiresAt: EXPIRES_AT,
+        approvedManifestFingerprintSha256: APPROVED_MANIFEST_FINGERPRINT,
+        observedIdentityFingerprintSha256: OBSERVED_IDENTITY_FINGERPRINT,
         positionSetFingerprintSha256: expect.stringMatching(/^[0-9a-f]{64}$/u),
         agreementFingerprintSha256: expect.stringMatching(/^[0-9a-f]{64}$/u),
       },
@@ -448,6 +480,9 @@ describe('DormantMainnetBalanceTwoSourceAgreementCoordinator', () => {
         sourceFamilyId: 'synthetic-eth-family-a',
         sourceId: 'synthetic-eth-a',
         chainIdentityValidated: true,
+        deploymentIdentityValidated: true,
+        approvedManifestFingerprintSha256: APPROVED_MANIFEST_FINGERPRINT,
+        observedIdentityFingerprintSha256: OBSERVED_IDENTITY_FINGERPRINT,
         candidateFingerprintSha256: expect.stringMatching(/^[0-9a-f]{64}$/u),
       }),
       expect.objectContaining({
@@ -455,6 +490,9 @@ describe('DormantMainnetBalanceTwoSourceAgreementCoordinator', () => {
         sourceFamilyId: 'synthetic-eth-family-b',
         sourceId: 'synthetic-eth-b',
         chainIdentityValidated: true,
+        deploymentIdentityValidated: true,
+        approvedManifestFingerprintSha256: APPROVED_MANIFEST_FINGERPRINT,
+        observedIdentityFingerprintSha256: OBSERVED_IDENTITY_FINGERPRINT,
         candidateFingerprintSha256: expect.stringMatching(/^[0-9a-f]{64}$/u),
       }),
     ]);
@@ -519,7 +557,14 @@ describe('DormantMainnetBalanceTwoSourceAgreementCoordinator', () => {
     expect(secondResult.agreement.sourceAttestations).toEqual(
       firstResult.agreement.sourceAttestations,
     );
-    expect(fingerprintMainnetBalanceSourcePairRegistryV1(reversedContent)).toBe(
+    expect(fingerprintMainnetBalanceSourcePairRegistryV2(reversedContent)).toBe(
+      first.registry.fingerprintSha256,
+    );
+    const alternateManifest = clone(registryContent()) as unknown as MutableRecord;
+    ((alternateManifest.pairs as MutableRecord[])[0] as MutableRecord)[
+      'approvedManifestFingerprintSha256'
+    ] = 'c'.repeat(64);
+    expect(fingerprintMainnetBalanceSourcePairRegistryV2(alternateManifest)).not.toBe(
       first.registry.fingerprintSha256,
     );
   });
@@ -557,14 +602,14 @@ describe('DormantMainnetBalanceTwoSourceAgreementCoordinator', () => {
       'Solana block identity',
       SOLANA_MAINNET_BALANCE_AGREEMENT_NETWORK_ID,
       (source: MutableRecord): void => {
-        source.hash = '7'.repeat(44);
+        source.hash = SOLANA_ALTERNATE_BLOCK_IDENTITY;
       },
     ],
     [
       'Solana parent block identity',
       SOLANA_MAINNET_BALANCE_AGREEMENT_NETWORK_ID,
       (source: MutableRecord): void => {
-        source.parentHash = '8'.repeat(44);
+        source.parentHash = SOLANA_ALTERNATE_BLOCK_IDENTITY;
       },
     ],
   ] as const)('fails closed on %s disagreement', async (_name, networkId, mutate) => {
@@ -573,6 +618,71 @@ describe('DormantMainnetBalanceTwoSourceAgreementCoordinator', () => {
     await expectUnavailable(
       coordinator(value).readCurrentAgreement(request(networkId)),
       'CHECKPOINT_MISMATCH',
+    );
+  });
+
+  it.each([
+    [
+      'approved manifest fingerprint',
+      (source: MutableRecord): void => {
+        source.approvedManifestFingerprintSha256 = 'c'.repeat(64);
+      },
+    ],
+    [
+      'observed deployment identity fingerprint',
+      (source: MutableRecord): void => {
+        source.observedIdentityFingerprintSha256 = 'c'.repeat(64);
+      },
+    ],
+  ] as const)('fails closed when approved sources disagree on %s', async (_name, mutate) => {
+    const value = harness();
+    mutate(sourceRecord(value.readers.ethereumCorroborating));
+    await expectUnavailable(
+      coordinator(value).readCurrentAgreement(request()),
+      'DEPLOYMENT_IDENTITY_MISMATCH',
+    );
+  });
+
+  it('rejects a matching but unapproved alternate manifest from both sources', async () => {
+    const value = harness();
+    for (const reader of [value.readers.ethereumPrimary, value.readers.ethereumCorroborating]) {
+      sourceRecord(reader).approvedManifestFingerprintSha256 = 'c'.repeat(64);
+    }
+    await expectUnavailable(
+      coordinator(value).readCurrentAgreement(request()),
+      'DEPLOYMENT_IDENTITY_MISMATCH',
+    );
+  });
+
+  it('rejects matching regex-shaped but non-key Solana checkpoint identities from both sources', async () => {
+    const value = harness();
+    for (const reader of [value.readers.solanaPrimary, value.readers.solanaCorroborating]) {
+      const source = sourceRecord(reader);
+      source.hash = '2'.repeat(32);
+      source.parentHash = '3'.repeat(32);
+    }
+    await expectUnavailable(
+      coordinator(value).readCurrentAgreement(request(SOLANA_MAINNET_BALANCE_AGREEMENT_NETWORK_ID)),
+      'SOURCE_DATA_INVALID',
+    );
+  });
+
+  it('binds observed deployment identity into candidate and agreement fingerprints', async () => {
+    const baseline = await coordinator(harness()).readCurrentAgreement(request());
+    const changed = harness();
+    for (const reader of [changed.readers.ethereumPrimary, changed.readers.ethereumCorroborating]) {
+      sourceRecord(reader).observedIdentityFingerprintSha256 = 'c'.repeat(64);
+    }
+    const changedResult = await coordinator(changed).readCurrentAgreement(request());
+
+    expect(changedResult.agreement.positionSetFingerprintSha256).toBe(
+      baseline.agreement.positionSetFingerprintSha256,
+    );
+    expect(changedResult.agreement.sourceAttestations[0].candidateFingerprintSha256).not.toBe(
+      baseline.agreement.sourceAttestations[0].candidateFingerprintSha256,
+    );
+    expect(changedResult.agreement.agreementFingerprintSha256).not.toBe(
+      baseline.agreement.agreementFingerprintSha256,
     );
   });
 
@@ -595,7 +705,7 @@ describe('DormantMainnetBalanceTwoSourceAgreementCoordinator', () => {
     if (!Array.isArray(records.positions)) throw new Error('synthetic position fixture');
     records.positions.reverse();
     await expect(coordinator(ordered).readCurrentAgreement(request())).resolves.toMatchObject({
-      agreement: { status: 'EXACT_CHECKPOINT_AND_BALANCE_MATCH' },
+      agreement: { status: 'EXACT_CHECKPOINT_BALANCE_AND_DEPLOYMENT_IDENTITY_MATCH' },
     });
 
     const missing = harness();
@@ -613,6 +723,24 @@ describe('DormantMainnetBalanceTwoSourceAgreementCoordinator', () => {
       'unvalidated chain identity',
       (source: MutableRecord): void => {
         source.identityValidated = false;
+      },
+    ],
+    [
+      'unvalidated deployment identity',
+      (source: MutableRecord): void => {
+        source.deploymentIdentityValidated = false;
+      },
+    ],
+    [
+      'missing approved manifest fingerprint',
+      (source: MutableRecord): void => {
+        delete source.approvedManifestFingerprintSha256;
+      },
+    ],
+    [
+      'malformed observed identity fingerprint',
+      (source: MutableRecord): void => {
+        source.observedIdentityFingerprintSha256 = 'not-a-sha256';
       },
     ],
     [
@@ -771,7 +899,7 @@ describe('DormantMainnetBalanceTwoSourceAgreementCoordinator', () => {
     const primary = ethereum.primary as MutableRecord;
     const corroborating = ethereum.corroborating as MutableRecord;
     corroborating.sourceFamilyId = primary.sourceFamilyId;
-    expect(() => fingerprintMainnetBalanceSourcePairRegistryV1(duplicateFamilyContent)).toThrow(
+    expect(() => fingerprintMainnetBalanceSourcePairRegistryV2(duplicateFamilyContent)).toThrow(
       new MainnetBalanceTwoSourceAgreementUnavailableError('INVALID_CONFIGURATION'),
     );
 
@@ -781,7 +909,7 @@ describe('DormantMainnetBalanceTwoSourceAgreementCoordinator', () => {
     const duplicateIdPrimary = duplicateIdEthereum.primary as MutableRecord;
     const duplicateIdCorroborating = duplicateIdEthereum.corroborating as MutableRecord;
     duplicateIdCorroborating.sourceId = duplicateIdPrimary.sourceId;
-    expect(() => fingerprintMainnetBalanceSourcePairRegistryV1(duplicateIdContent)).toThrow(
+    expect(() => fingerprintMainnetBalanceSourcePairRegistryV2(duplicateIdContent)).toThrow(
       new MainnetBalanceTwoSourceAgreementUnavailableError('INVALID_CONFIGURATION'),
     );
   });

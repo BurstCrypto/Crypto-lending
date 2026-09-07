@@ -1022,6 +1022,18 @@ describe('BalanceSyncOrchestrator', () => {
       mutate: () => candidate({ source: { ...candidate().source, identityValidated: false } }),
     },
     {
+      name: 'deployment-aware candidate presented to the legacy persistence parser',
+      mutate: () =>
+        candidate({
+          source: {
+            ...candidate().source,
+            deploymentIdentityValidated: true,
+            approvedManifestFingerprintSha256: 'a'.repeat(64),
+            observedIdentityFingerprintSha256: 'b'.repeat(64),
+          } as never,
+        }),
+    },
+    {
       name: 'future retrieval timestamp',
       mutate: () =>
         candidate({

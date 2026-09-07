@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { isProxy } from 'node:util/types';
 
 import { chainObservationPolicyForNetwork } from '../../blockchain/domain/chain-observation-policy';
+import { decodeSolanaPublicKey } from '../../blockchain/domain/solana-token-account';
 import { MAINNET_SUPPORTED_ASSET_REGISTRY } from '../../blockchain/domain/supported-asset-registry';
 import {
   BALANCE_SYNC_POLICY,
@@ -10,11 +11,12 @@ import {
 } from '../domain/balance-sync';
 import {
   reviewBalanceSyncExecutionContext,
-  type BalanceIndexerCandidate,
   type BalanceIndexerReadRequest,
   type BalanceIndexerSourceCandidate,
   type BalanceSyncExecutionContext,
   type BalanceSyncIndexerPort,
+  type MainnetBalanceIndexerCandidate,
+  type MainnetBalanceIndexerSourceCandidate,
 } from './ports/balance-sync.ports';
 import { canonicalPositionId } from '../infrastructure/rpc/balance-json-rpc';
 
@@ -24,12 +26,24 @@ const SHA256 = /^[0-9a-f]{64}$/u;
 const CANONICAL_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
 const CANONICAL_UINT = /^(?:0|[1-9][0-9]{0,19})$/u;
 const EVM_BLOCK_HASH = /^0x[0-9a-f]{64}$/u;
-const SOLANA_BLOCK_IDENTITY = /^[1-9A-HJ-NP-Za-km-z]{32,88}$/u;
 const ZERO_EVM_BLOCK_HASH = `0x${'0'.repeat(64)}`;
-const ZERO_SOLANA_IDENTITY = '11111111111111111111111111111111';
 const MAX_UINT64 = (1n << 64n) - 1n;
+const EVENT_TARGET_ADD_EVENT_LISTENER = Object.getOwnPropertyDescriptor(
+  EventTarget.prototype,
+  'addEventListener',
+)?.value as EventTarget['addEventListener'] | undefined;
+const EVENT_TARGET_REMOVE_EVENT_LISTENER = Object.getOwnPropertyDescriptor(
+  EventTarget.prototype,
+  'removeEventListener',
+)?.value as EventTarget['removeEventListener'] | undefined;
+const ABORT_SIGNAL_ABORTED_GETTER = Object.getOwnPropertyDescriptor(
+  AbortSignal.prototype,
+  'aborted',
+)?.get;
+const PROMISE_ALL_SETTLED = Promise.allSettled;
+const PROMISE_THEN = Promise.prototype.then;
 
-export const MAINNET_BALANCE_TWO_SOURCE_AGREEMENT_VERSION = 1 as const;
+export const MAINNET_BALANCE_TWO_SOURCE_AGREEMENT_VERSION = 2 as const;
 export const MAINNET_BALANCE_TWO_SOURCE_AGREEMENT_USE =
   'DORMANT_MAINNET_BALANCE_OBSERVATION_CANDIDATE_ONLY' as const;
 
@@ -43,27 +57,28 @@ export type MainnetBalanceAgreementNetworkId =
 
 export type MainnetBalanceAgreementSourceRole = 'PRIMARY' | 'CORROBORATING';
 
-export interface MainnetBalanceAgreementSourceIdentityV1 {
+export interface MainnetBalanceAgreementSourceIdentityV2 {
   readonly sourceFamilyId: string;
   readonly sourceId: string;
 }
 
-export interface MainnetBalanceSourcePairV1 {
+export interface MainnetBalanceSourcePairV2 {
   readonly networkId: MainnetBalanceAgreementNetworkId;
   readonly approvedAt: string;
   readonly expiresAt: string;
-  readonly primary: MainnetBalanceAgreementSourceIdentityV1;
-  readonly corroborating: MainnetBalanceAgreementSourceIdentityV1;
+  readonly approvedManifestFingerprintSha256: string;
+  readonly primary: MainnetBalanceAgreementSourceIdentityV2;
+  readonly corroborating: MainnetBalanceAgreementSourceIdentityV2;
 }
 
-export interface MainnetBalanceSourcePairRegistryContentV1 {
+export interface MainnetBalanceSourcePairRegistryContentV2 {
   readonly schemaVersion: typeof MAINNET_BALANCE_TWO_SOURCE_AGREEMENT_VERSION;
   readonly environment: 'MAINNET';
   readonly approvalStatus: 'NOT_APPROVED' | 'APPROVED';
-  readonly pairs: readonly MainnetBalanceSourcePairV1[];
+  readonly pairs: readonly MainnetBalanceSourcePairV2[];
 }
 
-export interface MainnetBalanceSourcePairRegistryV1 extends MainnetBalanceSourcePairRegistryContentV1 {
+export interface MainnetBalanceSourcePairRegistryV2 extends MainnetBalanceSourcePairRegistryContentV2 {
   readonly fingerprintSha256: string;
 }
 
@@ -79,14 +94,14 @@ export interface MainnetBalanceAgreementClock {
   now(): Date;
 }
 
-export interface EthereumMainnetBalanceAgreementCheckpointV1 {
+export interface EthereumMainnetBalanceAgreementCheckpointV2 {
   readonly kind: 'ETHEREUM_BLOCK';
   readonly blockNumber: string;
   readonly blockHash: string;
   readonly parentBlockHash: string;
 }
 
-export interface SolanaMainnetBalanceAgreementCheckpointV1 {
+export interface SolanaMainnetBalanceAgreementCheckpointV2 {
   readonly kind: 'SOLANA_ROOTED_BLOCK';
   readonly finalizedSlot: string;
   readonly blockIdentity: string;
@@ -95,30 +110,35 @@ export interface SolanaMainnetBalanceAgreementCheckpointV1 {
   readonly rootDerivation: 'FINALIZED_SLOT_IS_ROOTED';
 }
 
-export type MainnetBalanceAgreementCheckpointV1 =
-  EthereumMainnetBalanceAgreementCheckpointV1 | SolanaMainnetBalanceAgreementCheckpointV1;
+export type MainnetBalanceAgreementCheckpointV2 =
+  EthereumMainnetBalanceAgreementCheckpointV2 | SolanaMainnetBalanceAgreementCheckpointV2;
 
-export interface MainnetBalanceSourceAttestationV1 {
+export interface MainnetBalanceSourceAttestationV2 {
   readonly role: MainnetBalanceAgreementSourceRole;
   readonly sourceFamilyId: string;
   readonly sourceId: string;
   readonly networkId: MainnetBalanceAgreementNetworkId;
   readonly retrievedAt: string;
   readonly chainIdentityValidated: true;
-  readonly checkpoint: MainnetBalanceAgreementCheckpointV1;
+  readonly deploymentIdentityValidated: true;
+  readonly approvedManifestFingerprintSha256: string;
+  readonly observedIdentityFingerprintSha256: string;
+  readonly checkpoint: MainnetBalanceAgreementCheckpointV2;
   readonly positionSetFingerprintSha256: string;
   readonly candidateFingerprintSha256: string;
 }
 
-export interface MainnetBalanceAgreementEvidenceV1 {
-  readonly status: 'EXACT_CHECKPOINT_AND_BALANCE_MATCH';
-  readonly checkpoint: MainnetBalanceAgreementCheckpointV1;
+export interface MainnetBalanceAgreementEvidenceV2 {
+  readonly status: 'EXACT_CHECKPOINT_BALANCE_AND_DEPLOYMENT_IDENTITY_MATCH';
+  readonly checkpoint: MainnetBalanceAgreementCheckpointV2;
   readonly sourcePairRegistryFingerprintSha256: string;
   readonly sourcePairApprovalExpiresAt: string;
+  readonly approvedManifestFingerprintSha256: string;
+  readonly observedIdentityFingerprintSha256: string;
   readonly positionSetFingerprintSha256: string;
   readonly sourceAttestations: readonly [
-    MainnetBalanceSourceAttestationV1,
-    MainnetBalanceSourceAttestationV1,
+    MainnetBalanceSourceAttestationV2,
+    MainnetBalanceSourceAttestationV2,
   ];
   readonly agreementFingerprintSha256: string;
 }
@@ -128,14 +148,14 @@ export interface MainnetBalanceAgreementEvidenceV1 {
  * Passing only observationCandidate to the existing checkpoint repository would
  * discard the source-pair evidence and is therefore deliberately not wired.
  */
-export interface MainnetBalanceTwoSourceAgreementCandidateV1 {
+export interface MainnetBalanceTwoSourceAgreementCandidateV2 {
   readonly agreementVersion: typeof MAINNET_BALANCE_TWO_SOURCE_AGREEMENT_VERSION;
   readonly use: typeof MAINNET_BALANCE_TWO_SOURCE_AGREEMENT_USE;
   readonly mayPersist: false;
   readonly mayAuthorizeFinancialAction: false;
   readonly accountId: string;
-  readonly observationCandidate: BalanceIndexerCandidate;
-  readonly agreement: MainnetBalanceAgreementEvidenceV1;
+  readonly observationCandidate: MainnetBalanceIndexerCandidate;
+  readonly agreement: MainnetBalanceAgreementEvidenceV2;
 }
 
 export type MainnetBalanceTwoSourceAgreementFailureCode =
@@ -147,6 +167,7 @@ export type MainnetBalanceTwoSourceAgreementFailureCode =
   | 'SOURCE_DATA_INVALID'
   | 'SOURCE_STALE'
   | 'CHECKPOINT_MISMATCH'
+  | 'DEPLOYMENT_IDENTITY_MISMATCH'
   | 'BALANCE_MISMATCH';
 
 export class MainnetBalanceTwoSourceAgreementUnavailableError extends Error {
@@ -162,8 +183,8 @@ interface CanonicalTime {
 }
 
 interface ParsedSourceCandidate {
-  readonly source: BalanceIndexerSourceCandidate;
-  readonly checkpoint: MainnetBalanceAgreementCheckpointV1;
+  readonly source: MainnetBalanceIndexerSourceCandidate;
+  readonly checkpoint: MainnetBalanceAgreementCheckpointV2;
   readonly positions: readonly BalanceSyncPosition[];
   readonly positionSetFingerprintSha256: string;
 }
@@ -185,9 +206,9 @@ function fail(code: MainnetBalanceTwoSourceAgreementFailureCode): never {
   throw new MainnetBalanceTwoSourceAgreementUnavailableError(code);
 }
 
-function registryFingerprint(content: MainnetBalanceSourcePairRegistryContentV1): string {
+function registryFingerprint(content: MainnetBalanceSourcePairRegistryContentV2): string {
   return fingerprint([
-    'crypto-lending:mainnet-balance-source-pair-registry:v1',
+    'crypto-lending:mainnet-balance-source-pair-registry:v2',
     content.schemaVersion,
     content.environment,
     content.approvalStatus,
@@ -195,13 +216,14 @@ function registryFingerprint(content: MainnetBalanceSourcePairRegistryContentV1)
       pair.networkId,
       pair.approvedAt,
       pair.expiresAt,
+      pair.approvedManifestFingerprintSha256,
       [pair.primary.sourceFamilyId, pair.primary.sourceId],
       [pair.corroborating.sourceFamilyId, pair.corroborating.sourceId],
     ]),
   ]);
 }
 
-export function fingerprintMainnetBalanceSourcePairRegistryV1(input: unknown): string {
+export function fingerprintMainnetBalanceSourcePairRegistryV2(input: unknown): string {
   return registryFingerprint(parseRegistryContent(input));
 }
 
@@ -216,7 +238,7 @@ const UNAPPROVED_REGISTRY_CONTENT = deepFreeze({
  * Checked-in production posture. No source name, provider, endpoint, or pair is
  * approved by this repository change.
  */
-export const MAINNET_BALANCE_SOURCE_PAIR_REGISTRY_V1: MainnetBalanceSourcePairRegistryV1 =
+export const MAINNET_BALANCE_SOURCE_PAIR_REGISTRY_V2: MainnetBalanceSourcePairRegistryV2 =
   deepFreeze({
     ...UNAPPROVED_REGISTRY_CONTENT,
     fingerprintSha256: registryFingerprint(UNAPPROVED_REGISTRY_CONTENT),
@@ -228,7 +250,7 @@ export const MAINNET_BALANCE_SOURCE_PAIR_REGISTRY_V1: MainnetBalanceSourcePairRe
  * timer, persistence adapter, or activation side effect.
  */
 export class DormantMainnetBalanceTwoSourceAgreementCoordinator {
-  private readonly registry!: MainnetBalanceSourcePairRegistryV1;
+  private readonly registry!: MainnetBalanceSourcePairRegistryV2;
   private readonly bindings!: readonly NormalizedSourceBinding[];
   private readonly clockNow!: () => Date;
 
@@ -251,17 +273,22 @@ export class DormantMainnetBalanceTwoSourceAgreementCoordinator {
   async readCurrentAgreement(
     requestInput: BalanceIndexerReadRequest,
     context: BalanceSyncExecutionContext,
-  ): Promise<MainnetBalanceTwoSourceAgreementCandidateV1> {
-    requireActiveAgreementExecution(context);
+  ): Promise<MainnetBalanceTwoSourceAgreementCandidateV2> {
+    const agreementExecution = requireActiveAgreementExecution(context);
     const request = parseRequest(requestInput);
     const started = clockTime(this.clockNow);
     const pair = trustedCurrentPair(this.registry, request.networkId, started.milliseconds);
     const primaryBinding = bindingFor(this.bindings, pair, 'PRIMARY');
     const corroboratingBinding = bindingFor(this.bindings, pair, 'CORROBORATING');
-    const [primaryResult, corroboratingResult] = await Promise.allSettled([
-      primaryBinding.readCurrent(request, context),
-      corroboratingBinding.readCurrent(request, context),
-    ]);
+    const results = await abortableAllSettled(
+      [
+        primaryBinding.readCurrent(request, context),
+        corroboratingBinding.readCurrent(request, context),
+      ],
+      agreementExecution.signal,
+    );
+    if (results === null) return fail('SOURCE_UNAVAILABLE');
+    const [primaryResult, corroboratingResult] = results;
     requireActiveAgreementExecution(context);
     if (primaryResult.status !== 'fulfilled' || corroboratingResult.status !== 'fulfilled') {
       return fail('SOURCE_UNAVAILABLE');
@@ -290,6 +317,16 @@ export class DormantMainnetBalanceTwoSourceAgreementCoordinator {
       canonicalJson(corroboratingCandidate.checkpoint)
     ) {
       return fail('CHECKPOINT_MISMATCH');
+    }
+    if (
+      primaryCandidate.source.approvedManifestFingerprintSha256 !==
+        pair.approvedManifestFingerprintSha256 ||
+      corroboratingCandidate.source.approvedManifestFingerprintSha256 !==
+        pair.approvedManifestFingerprintSha256 ||
+      primaryCandidate.source.observedIdentityFingerprintSha256 !==
+        corroboratingCandidate.source.observedIdentityFingerprintSha256
+    ) {
+      return fail('DEPLOYMENT_IDENTITY_MISMATCH');
     }
     if (
       primaryCandidate.positionSetFingerprintSha256 !==
@@ -326,27 +363,36 @@ export class DormantMainnetBalanceTwoSourceAgreementCoordinator {
         selector: request.selector,
         retrievedAt,
         identityValidated: true as const,
+        deploymentIdentityValidated: true as const,
+        approvedManifestFingerprintSha256:
+          primaryCandidate.source.approvedManifestFingerprintSha256,
+        observedIdentityFingerprintSha256:
+          primaryCandidate.source.observedIdentityFingerprintSha256,
       },
       positions: primaryCandidate.positions,
-    }) satisfies BalanceIndexerCandidate;
+    }) satisfies MainnetBalanceIndexerCandidate;
     const agreementWithoutFingerprint = deepFreeze({
-      status: 'EXACT_CHECKPOINT_AND_BALANCE_MATCH' as const,
+      status: 'EXACT_CHECKPOINT_BALANCE_AND_DEPLOYMENT_IDENTITY_MATCH' as const,
       checkpoint: primaryCandidate.checkpoint,
       sourcePairRegistryFingerprintSha256: this.registry.fingerprintSha256,
       sourcePairApprovalExpiresAt: pair.expiresAt,
+      approvedManifestFingerprintSha256: pair.approvedManifestFingerprintSha256,
+      observedIdentityFingerprintSha256: primaryCandidate.source.observedIdentityFingerprintSha256,
       positionSetFingerprintSha256: primaryCandidate.positionSetFingerprintSha256,
       sourceAttestations: Object.freeze([
         primaryAttestation,
         corroboratingAttestation,
-      ]) as readonly [MainnetBalanceSourceAttestationV1, MainnetBalanceSourceAttestationV1],
+      ]) as readonly [MainnetBalanceSourceAttestationV2, MainnetBalanceSourceAttestationV2],
     });
     const agreement = deepFreeze({
       ...agreementWithoutFingerprint,
       agreementFingerprintSha256: fingerprint([
-        'crypto-lending:mainnet-balance-two-source-agreement:v1',
+        'crypto-lending:mainnet-balance-two-source-agreement:v2',
         MAINNET_BALANCE_TWO_SOURCE_AGREEMENT_VERSION,
         MAINNET_BALANCE_TWO_SOURCE_AGREEMENT_USE,
         request.accountId,
+        primaryCandidate.source.approvedManifestFingerprintSha256,
+        primaryCandidate.source.observedIdentityFingerprintSha256,
         observationCandidate,
         agreementWithoutFingerprint,
       ]),
@@ -363,12 +409,51 @@ export class DormantMainnetBalanceTwoSourceAgreementCoordinator {
   }
 }
 
-function requireActiveAgreementExecution(context: unknown): void {
+function requireActiveAgreementExecution(
+  context: unknown,
+): Readonly<{ readonly signal: AbortSignal }> {
   const reviewed = reviewBalanceSyncExecutionContext(context);
   if (reviewed === null || reviewed.abortKind !== null) return fail('SOURCE_UNAVAILABLE');
+  return reviewed;
 }
 
-function parseRegistry(input: unknown): MainnetBalanceSourcePairRegistryV1 {
+function abortableAllSettled(
+  operations: readonly [Promise<unknown>, Promise<unknown>],
+  signal: AbortSignal,
+): Promise<readonly [PromiseSettledResult<unknown>, PromiseSettledResult<unknown>] | null> {
+  if (
+    EVENT_TARGET_ADD_EVENT_LISTENER === undefined ||
+    EVENT_TARGET_REMOVE_EVENT_LISTENER === undefined ||
+    ABORT_SIGNAL_ABORTED_GETTER === undefined
+  ) {
+    return Promise.resolve(null);
+  }
+  return new Promise((resolve) => {
+    let completed = false;
+    const finish = (
+      result: readonly [PromiseSettledResult<unknown>, PromiseSettledResult<unknown>] | null,
+    ): void => {
+      if (completed) return;
+      completed = true;
+      Reflect.apply(EVENT_TARGET_REMOVE_EVENT_LISTENER, signal, ['abort', onAbort]);
+      resolve(result);
+    };
+    const onAbort = (): void => finish(null);
+    Reflect.apply(EVENT_TARGET_ADD_EVENT_LISTENER, signal, ['abort', onAbort, { once: true }]);
+    const allSettled = Reflect.apply(PROMISE_ALL_SETTLED, Promise, [operations]) as Promise<
+      readonly PromiseSettledResult<unknown>[]
+    >;
+    Reflect.apply(PROMISE_THEN, allSettled, [
+      (results: readonly PromiseSettledResult<unknown>[]) =>
+        results.length === 2 && results[0] !== undefined && results[1] !== undefined
+          ? finish([results[0], results[1]])
+          : finish(null),
+    ]);
+    if (Reflect.apply(ABORT_SIGNAL_ABORTED_GETTER, signal, []) as boolean) onAbort();
+  });
+}
+
+function parseRegistry(input: unknown): MainnetBalanceSourcePairRegistryV2 {
   const record = exactRecord(
     input,
     ['schemaVersion', 'environment', 'approvalStatus', 'pairs', 'fingerprintSha256'],
@@ -390,7 +475,7 @@ function parseRegistry(input: unknown): MainnetBalanceSourcePairRegistryV1 {
   return deepFreeze({ ...content, fingerprintSha256: record.fingerprintSha256 });
 }
 
-function parseRegistryContent(input: unknown): MainnetBalanceSourcePairRegistryContentV1 {
+function parseRegistryContent(input: unknown): MainnetBalanceSourcePairRegistryContentV2 {
   const record = exactRecord(
     input,
     ['schemaVersion', 'environment', 'approvalStatus', 'pairs'],
@@ -425,19 +510,30 @@ function parseRegistryContent(input: unknown): MainnetBalanceSourcePairRegistryC
   });
 }
 
-function parsePair(value: unknown): MainnetBalanceSourcePairV1 {
+function parsePair(value: unknown): MainnetBalanceSourcePairV2 {
   const record = exactRecord(
     value,
-    ['networkId', 'approvedAt', 'expiresAt', 'primary', 'corroborating'],
+    [
+      'networkId',
+      'approvedAt',
+      'expiresAt',
+      'approvedManifestFingerprintSha256',
+      'primary',
+      'corroborating',
+    ],
     'INVALID_CONFIGURATION',
   );
   const networkId = mainnetNetwork(record.networkId, 'INVALID_CONFIGURATION');
   const approvedAt = timestamp(record.approvedAt, 'INVALID_CONFIGURATION');
   const expiresAt = timestamp(record.expiresAt, 'INVALID_CONFIGURATION');
+  const approvedManifestFingerprintSha256 = record.approvedManifestFingerprintSha256;
   const primary = sourceIdentity(record.primary);
   const corroborating = sourceIdentity(record.corroborating);
   if (
     approvedAt.milliseconds >= expiresAt.milliseconds ||
+    typeof approvedManifestFingerprintSha256 !== 'string' ||
+    !SHA256.test(approvedManifestFingerprintSha256) ||
+    approvedManifestFingerprintSha256 === '0'.repeat(64) ||
     primary.sourceFamilyId === corroborating.sourceFamilyId ||
     primary.sourceId === corroborating.sourceId
   ) {
@@ -447,12 +543,13 @@ function parsePair(value: unknown): MainnetBalanceSourcePairV1 {
     networkId,
     approvedAt: approvedAt.timestamp,
     expiresAt: expiresAt.timestamp,
+    approvedManifestFingerprintSha256,
     primary,
     corroborating,
   });
 }
 
-function sourceIdentity(value: unknown): MainnetBalanceAgreementSourceIdentityV1 {
+function sourceIdentity(value: unknown): MainnetBalanceAgreementSourceIdentityV2 {
   const record = exactRecord(value, ['sourceFamilyId', 'sourceId'], 'INVALID_CONFIGURATION');
   if (
     typeof record.sourceFamilyId !== 'string' ||
@@ -470,7 +567,7 @@ function sourceIdentity(value: unknown): MainnetBalanceAgreementSourceIdentityV1
 
 function normalizeBindings(
   input: readonly MainnetBalanceAgreementSourceBinding[],
-  registry: MainnetBalanceSourcePairRegistryV1,
+  registry: MainnetBalanceSourcePairRegistryV2,
 ): readonly NormalizedSourceBinding[] {
   const bindings = dataArray(input, 4, 'INVALID_CONFIGURATION').map((value) => {
     const record = exactRecord(
@@ -521,7 +618,7 @@ function normalizeBindings(
 }
 
 function bindingIdentity(
-  pair: MainnetBalanceSourcePairV1,
+  pair: MainnetBalanceSourcePairV2,
   role: MainnetBalanceAgreementSourceRole,
 ): Omit<MainnetBalanceAgreementSourceBinding, 'reader'> {
   const identity = role === 'PRIMARY' ? pair.primary : pair.corroborating;
@@ -574,10 +671,10 @@ function parseRequest(value: unknown): BalanceIndexerReadRequest & {
 }
 
 function trustedCurrentPair(
-  registry: MainnetBalanceSourcePairRegistryV1,
+  registry: MainnetBalanceSourcePairRegistryV2,
   networkId: MainnetBalanceAgreementNetworkId,
   nowMilliseconds: number,
-): MainnetBalanceSourcePairV1 {
+): MainnetBalanceSourcePairV2 {
   const pair = registry.pairs.find((candidate) => candidate.networkId === networkId);
   if (
     registry.approvalStatus !== 'APPROVED' ||
@@ -592,7 +689,7 @@ function trustedCurrentPair(
 
 function bindingFor(
   bindings: readonly NormalizedSourceBinding[],
-  pair: MainnetBalanceSourcePairV1,
+  pair: MainnetBalanceSourcePairV2,
   role: MainnetBalanceAgreementSourceRole,
 ): NormalizedSourceBinding {
   const expected = bindingKey(bindingIdentity(pair, role));
@@ -638,13 +735,33 @@ function parseSource(
   value: unknown,
   request: BalanceIndexerReadRequest & { readonly networkId: MainnetBalanceAgreementNetworkId },
   evaluatedAtMilliseconds: number,
-): BalanceIndexerSourceCandidate {
+): MainnetBalanceIndexerSourceCandidate {
   const record = exactRecord(
     value,
-    ['position', 'hash', 'parentHash', 'selector', 'retrievedAt', 'identityValidated'],
+    [
+      'position',
+      'hash',
+      'parentHash',
+      'selector',
+      'retrievedAt',
+      'identityValidated',
+      'deploymentIdentityValidated',
+      'approvedManifestFingerprintSha256',
+      'observedIdentityFingerprintSha256',
+    ],
     'SOURCE_DATA_INVALID',
   );
-  if (record.selector !== request.selector || record.identityValidated !== true) {
+  if (
+    record.selector !== request.selector ||
+    record.identityValidated !== true ||
+    record.deploymentIdentityValidated !== true ||
+    typeof record.approvedManifestFingerprintSha256 !== 'string' ||
+    !SHA256.test(record.approvedManifestFingerprintSha256) ||
+    record.approvedManifestFingerprintSha256 === '0'.repeat(64) ||
+    typeof record.observedIdentityFingerprintSha256 !== 'string' ||
+    !SHA256.test(record.observedIdentityFingerprintSha256) ||
+    record.observedIdentityFingerprintSha256 === '0'.repeat(64)
+  ) {
     return fail('SOURCE_DATA_INVALID');
   }
   const position = canonicalUint64(record.position, 'SOURCE_DATA_INVALID');
@@ -678,11 +795,9 @@ function parseSource(
   } else {
     if (
       typeof record.hash !== 'string' ||
-      !SOLANA_BLOCK_IDENTITY.test(record.hash) ||
-      record.hash === ZERO_SOLANA_IDENTITY ||
+      !isCanonicalSolanaIdentity(record.hash) ||
       typeof record.parentHash !== 'string' ||
-      !SOLANA_BLOCK_IDENTITY.test(record.parentHash) ||
-      record.parentHash === ZERO_SOLANA_IDENTITY ||
+      !isCanonicalSolanaIdentity(record.parentHash) ||
       record.hash === record.parentHash
     ) {
       return fail('SOURCE_DATA_INVALID');
@@ -697,13 +812,25 @@ function parseSource(
     selector: 'finalized',
     retrievedAt: retrievedAt.timestamp,
     identityValidated: true,
+    deploymentIdentityValidated: true,
+    approvedManifestFingerprintSha256: record.approvedManifestFingerprintSha256,
+    observedIdentityFingerprintSha256: record.observedIdentityFingerprintSha256,
   });
+}
+
+function isCanonicalSolanaIdentity(value: string): boolean {
+  try {
+    decodeSolanaPublicKey(value);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function checkpointFor(
   networkId: MainnetBalanceAgreementNetworkId,
   source: BalanceIndexerSourceCandidate,
-): MainnetBalanceAgreementCheckpointV1 {
+): MainnetBalanceAgreementCheckpointV2 {
   if (networkId === ETHEREUM_MAINNET_BALANCE_AGREEMENT_NETWORK_ID) {
     return Object.freeze({
       kind: 'ETHEREUM_BLOCK',
@@ -808,9 +935,9 @@ function sourceAttestation(
   request: BalanceIndexerReadRequest & { readonly networkId: MainnetBalanceAgreementNetworkId },
   candidate: ParsedSourceCandidate,
   registryFingerprintSha256: string,
-): MainnetBalanceSourceAttestationV1 {
+): MainnetBalanceSourceAttestationV2 {
   const material = [
-    'crypto-lending:mainnet-balance-source-attestation:v1',
+    'crypto-lending:mainnet-balance-source-attestation:v2',
     registryFingerprintSha256,
     request.accountId,
     request.walletId,
@@ -820,6 +947,8 @@ function sourceAttestation(
     binding.role,
     binding.sourceFamilyId,
     binding.sourceId,
+    candidate.source.approvedManifestFingerprintSha256,
+    candidate.source.observedIdentityFingerprintSha256,
     candidate.source,
     candidate.checkpoint,
     candidate.positionSetFingerprintSha256,
@@ -831,6 +960,9 @@ function sourceAttestation(
     networkId: request.networkId,
     retrievedAt: candidate.source.retrievedAt,
     chainIdentityValidated: true,
+    deploymentIdentityValidated: true,
+    approvedManifestFingerprintSha256: candidate.source.approvedManifestFingerprintSha256,
+    observedIdentityFingerprintSha256: candidate.source.observedIdentityFingerprintSha256,
     checkpoint: candidate.checkpoint,
     positionSetFingerprintSha256: candidate.positionSetFingerprintSha256,
     candidateFingerprintSha256: fingerprint(material),

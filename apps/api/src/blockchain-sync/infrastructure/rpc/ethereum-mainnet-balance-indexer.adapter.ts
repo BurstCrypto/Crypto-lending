@@ -7,8 +7,9 @@ import {
   type BalanceSyncSourcePoint,
 } from '../../domain/balance-sync';
 import {
+  attestEthereumMainnetBalanceDeploymentIdentity,
+  reviewMainnetBalanceDeploymentIdentityAttestation,
   reviewBalanceSyncExecutionContext,
-  type BalanceIndexerCandidate,
   type BalanceIndexerReadRequest,
   type BalanceIndexerRescanRequest,
   type BalanceIndexerRescanResult,
@@ -16,6 +17,9 @@ import {
   type BalanceSyncExecutionContext,
   type BalanceSyncIndexerPort,
   type BalanceSyncWalletAddressResolverPort,
+  type EthereumMainnetBalanceDeploymentIdentityVerificationRequest,
+  type EthereumMainnetBalanceDeploymentIdentityVerifierPort,
+  type MainnetBalanceIndexerCandidate,
 } from '../../application/ports/balance-sync.ports';
 import { supportedAssetRegistryForEnvironment } from '../../../blockchain/domain/supported-asset-registry';
 import { parseEvmWalletAddress } from '../../../wallets/domain/wallet-identity';
@@ -71,8 +75,11 @@ const ETHEREUM_ASSETS = Object.freeze(
       (asset) =>
         asset.networkId === ETHEREUM_MAINNET_NETWORK_ID && asset.activationState === 'ACTIVE',
     )
-    .sort((left, right) => left.identity.localeCompare(right.identity)),
+    .sort((left, right) =>
+      left.identity < right.identity ? -1 : left.identity > right.identity ? 1 : 0,
+    ),
 );
+const ETHEREUM_ASSET_IDENTITIES = Object.freeze(ETHEREUM_ASSETS.map(({ identity }) => identity));
 
 interface EthereumBlockHeader {
   readonly position: bigint;
@@ -81,7 +88,7 @@ interface EthereumBlockHeader {
 }
 
 interface EthereumReadBundle {
-  readonly candidate: BalanceIndexerCandidate;
+  readonly candidate: MainnetBalanceIndexerCandidate;
   readonly header: EthereumBlockHeader;
 }
 
@@ -95,6 +102,7 @@ export class EthereumMainnetBalanceIndexerAdapter implements BalanceSyncIndexerP
     private readonly transport: BalanceJsonRpcTransport,
     private readonly addresses: BalanceSyncWalletAddressResolverPort,
     private readonly clock: BalanceSyncClockPort,
+    private readonly deploymentIdentityVerifier?: EthereumMainnetBalanceDeploymentIdentityVerifierPort,
   ) {
     if (ETHEREUM_ASSETS.length !== 3)
       throw new TypeError('invalid Ethereum asset registry binding');
@@ -172,6 +180,24 @@ export class EthereumMainnetBalanceIndexerAdapter implements BalanceSyncIndexerP
       blockHash: header.hash,
       requireCanonical: true as const,
     });
+    const deploymentIdentityRequest = Object.freeze({
+      networkId: ETHEREUM_MAINNET_NETWORK_ID,
+      sourcePosition: header.position.toString(10),
+      sourceHash: header.hash,
+      assetIdentities: ETHEREUM_ASSET_IDENTITIES,
+    }) satisfies EthereumMainnetBalanceDeploymentIdentityVerificationRequest;
+    const deploymentIdentityValue = await attestEthereumMainnetBalanceDeploymentIdentity(
+      this.deploymentIdentityVerifier,
+      deploymentIdentityRequest,
+      context,
+    );
+    const deploymentIdentity = reviewMainnetBalanceDeploymentIdentityAttestation(
+      deploymentIdentityValue,
+      deploymentIdentityRequest,
+    );
+    if (deploymentIdentity === null) {
+      throw new BalanceSyncIndexerFailure('PROVIDER_INVALID_DATA');
+    }
     const positions: BalanceSyncPosition[] = [];
 
     for (const asset of ETHEREUM_ASSETS) {
@@ -229,6 +255,9 @@ export class EthereumMainnetBalanceIndexerAdapter implements BalanceSyncIndexerP
           selector: request.selector,
           retrievedAt,
           identityValidated: true,
+          deploymentIdentityValidated: true,
+          approvedManifestFingerprintSha256: deploymentIdentity.approvedManifestFingerprintSha256,
+          observedIdentityFingerprintSha256: deploymentIdentity.observedIdentityFingerprintSha256,
         }),
         positions: Object.freeze(positions),
       }),
@@ -470,7 +499,7 @@ function canonicalClockTime(clock: BalanceSyncClockPort): string {
 }
 
 function recoveryResult(
-  candidate: BalanceIndexerCandidate,
+  candidate: MainnetBalanceIndexerCandidate,
   fromPosition: bigint,
   readUnits: number,
 ): BalanceIndexerRescanResult {

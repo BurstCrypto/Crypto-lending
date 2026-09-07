@@ -7,8 +7,9 @@ import {
   type BalanceSyncSourcePoint,
 } from '../../domain/balance-sync';
 import {
+  attestSolanaMainnetBalanceDeploymentIdentity,
+  reviewMainnetBalanceDeploymentIdentityAttestation,
   reviewBalanceSyncExecutionContext,
-  type BalanceIndexerCandidate,
   type BalanceIndexerReadRequest,
   type BalanceIndexerRescanRequest,
   type BalanceIndexerRescanResult,
@@ -16,6 +17,9 @@ import {
   type BalanceSyncExecutionContext,
   type BalanceSyncIndexerPort,
   type BalanceSyncWalletAddressResolverPort,
+  type MainnetBalanceIndexerCandidate,
+  type SolanaMainnetBalanceDeploymentIdentityVerificationRequest,
+  type SolanaMainnetBalanceDeploymentIdentityVerifierPort,
 } from '../../application/ports/balance-sync.ports';
 import { supportedAssetRegistryForEnvironment } from '../../../blockchain/domain/supported-asset-registry';
 import {
@@ -55,8 +59,11 @@ const SOLANA_ASSETS = Object.freeze(
       (asset) =>
         asset.networkId === SOLANA_MAINNET_NETWORK_ID && asset.activationState === 'ACTIVE',
     )
-    .sort((left, right) => left.identity.localeCompare(right.identity)),
+    .sort((left, right) =>
+      left.identity < right.identity ? -1 : left.identity > right.identity ? 1 : 0,
+    ),
 );
+const SOLANA_ASSET_IDENTITIES = Object.freeze(SOLANA_ASSETS.map(({ identity }) => identity));
 
 interface SolanaBlockHeader {
   readonly position: bigint;
@@ -66,7 +73,7 @@ interface SolanaBlockHeader {
 }
 
 interface SolanaReadBundle {
-  readonly candidate: BalanceIndexerCandidate;
+  readonly candidate: MainnetBalanceIndexerCandidate;
   readonly header: SolanaBlockHeader;
 }
 
@@ -80,6 +87,7 @@ export class SolanaMainnetBalanceIndexerAdapter implements BalanceSyncIndexerPor
     private readonly transport: BalanceJsonRpcTransport,
     private readonly addresses: BalanceSyncWalletAddressResolverPort,
     private readonly clock: BalanceSyncClockPort,
+    private readonly deploymentIdentityVerifier?: SolanaMainnetBalanceDeploymentIdentityVerifierPort,
   ) {
     if (
       SOLANA_ASSETS.length !== 3 ||
@@ -174,6 +182,24 @@ export class SolanaMainnetBalanceIndexerAdapter implements BalanceSyncIndexerPor
     if (selectedHeader === null) {
       throw new BalanceSyncIndexerFailure('PROVIDER_UNAVAILABLE');
     }
+    const deploymentIdentityRequest = Object.freeze({
+      networkId: SOLANA_MAINNET_NETWORK_ID,
+      sourcePosition: selectedHeader.position.toString(10),
+      sourceHash: selectedHeader.hash,
+      assetIdentities: SOLANA_ASSET_IDENTITIES,
+    }) satisfies SolanaMainnetBalanceDeploymentIdentityVerificationRequest;
+    const deploymentIdentityValue = await attestSolanaMainnetBalanceDeploymentIdentity(
+      this.deploymentIdentityVerifier,
+      deploymentIdentityRequest,
+      context,
+    );
+    const deploymentIdentity = reviewMainnetBalanceDeploymentIdentityAttestation(
+      deploymentIdentityValue,
+      deploymentIdentityRequest,
+    );
+    if (deploymentIdentity === null) {
+      throw new BalanceSyncIndexerFailure('PROVIDER_INVALID_DATA');
+    }
     const positions: BalanceSyncPosition[] = [];
 
     for (const asset of SOLANA_ASSETS) {
@@ -224,6 +250,9 @@ export class SolanaMainnetBalanceIndexerAdapter implements BalanceSyncIndexerPor
           selector: commitment,
           retrievedAt,
           identityValidated: true,
+          deploymentIdentityValidated: true,
+          approvedManifestFingerprintSha256: deploymentIdentity.approvedManifestFingerprintSha256,
+          observedIdentityFingerprintSha256: deploymentIdentity.observedIdentityFingerprintSha256,
         }),
         positions: Object.freeze(positions),
       }),
@@ -510,7 +539,7 @@ function canonicalClockTime(clock: BalanceSyncClockPort): string {
 }
 
 function recoveryResult(
-  candidate: BalanceIndexerCandidate,
+  candidate: MainnetBalanceIndexerCandidate,
   fromPosition: bigint,
   readUnits: number,
 ): BalanceIndexerRescanResult {

@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 
 import type { QueryResult, QueryResultRow } from 'pg';
 import { Pool } from 'pg';
@@ -10,17 +10,20 @@ import {
 import {
   DormantMainnetBalanceTwoSourceAgreementCoordinator,
   ETHEREUM_MAINNET_BALANCE_AGREEMENT_NETWORK_ID,
-  fingerprintMainnetBalanceSourcePairRegistryV1,
+  fingerprintMainnetBalanceSourcePairRegistryV2,
   SOLANA_MAINNET_BALANCE_AGREEMENT_NETWORK_ID,
   type MainnetBalanceAgreementNetworkId,
   type MainnetBalanceAgreementSourceBinding,
-  type MainnetBalanceSourcePairRegistryContentV1,
-  type MainnetBalanceTwoSourceAgreementCandidateV1,
+  type MainnetBalanceSourcePairRegistryContentV2,
+  type MainnetBalanceTwoSourceAgreementCandidateV2,
 } from '../../src/blockchain-sync/application/mainnet-balance-two-source-agreement.coordinator';
 import {
   INERT_BALANCE_SYNC_EXECUTION_CONTEXT,
+  type BalanceIndexerCandidate,
   type BalanceIndexerReadRequest,
   type BalanceIndexerSourceCandidate,
+  type MainnetBalanceIndexerCandidate,
+  type MainnetBalanceIndexerSourceCandidate,
 } from '../../src/blockchain-sync/application/ports/balance-sync.ports';
 import { canonicalPositionId } from '../../src/blockchain-sync/infrastructure/rpc/balance-json-rpc';
 import { MigrationRunner } from '../../src/infrastructure/database/migration-runner.service';
@@ -37,6 +40,10 @@ const IDENTIFIER = /^[a-z][a-z0-9_]{0,62}$/u;
 const REGISTRY_FINGERPRINT = '5058b141479f114c1e5f87ed8798fbb7a7ffcce7b502aa7e0794dc53ca1f767d';
 const ETHEREUM = ETHEREUM_MAINNET_BALANCE_AGREEMENT_NETWORK_ID;
 const SOLANA = SOLANA_MAINNET_BALANCE_AGREEMENT_NETWORK_ID;
+const SOLANA_BLOCK_IDENTITY = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+const SOLANA_PARENT_BLOCK_IDENTITY = '2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo';
+const APPROVED_MANIFEST_FINGERPRINT = 'a'.repeat(64);
+const OBSERVED_IDENTITY_FINGERPRINT = 'b'.repeat(64);
 
 function quoteIdentifier(value: string): string {
   if (!IDENTIFIER.test(value)) throw new Error(`Unsafe test identifier: ${value}`);
@@ -57,7 +64,7 @@ function at(base: string, offsetMilliseconds: number): string {
 function sourceFor(
   networkId: MainnetBalanceAgreementNetworkId,
   retrievedAt: string,
-): BalanceIndexerSourceCandidate {
+): MainnetBalanceIndexerSourceCandidate {
   return networkId === ETHEREUM
     ? {
         position: '21000000',
@@ -66,18 +73,27 @@ function sourceFor(
         selector: 'finalized',
         retrievedAt,
         identityValidated: true,
+        deploymentIdentityValidated: true,
+        approvedManifestFingerprintSha256: APPROVED_MANIFEST_FINGERPRINT,
+        observedIdentityFingerprintSha256: OBSERVED_IDENTITY_FINGERPRINT,
       }
     : {
         position: '280000000',
-        hash: '2'.repeat(44),
-        parentHash: '3'.repeat(44),
+        hash: SOLANA_BLOCK_IDENTITY,
+        parentHash: SOLANA_PARENT_BLOCK_IDENTITY,
         selector: 'finalized',
         retrievedAt,
         identityValidated: true,
+        deploymentIdentityValidated: true,
+        approvedManifestFingerprintSha256: APPROVED_MANIFEST_FINGERPRINT,
+        observedIdentityFingerprintSha256: OBSERVED_IDENTITY_FINGERPRINT,
       };
 }
 
-function candidate(request: BalanceIndexerReadRequest, retrievedAt: string): unknown {
+function candidate(
+  request: BalanceIndexerReadRequest,
+  retrievedAt: string,
+): MainnetBalanceIndexerCandidate {
   const positions = MAINNET_SUPPORTED_ASSET_REGISTRY.latest.assets
     .filter(
       (asset): asset is SupportedStablecoinAsset =>
@@ -104,8 +120,8 @@ function candidate(request: BalanceIndexerReadRequest, retrievedAt: string): unk
 }
 
 function agreementCoordinator(now: string): DormantMainnetBalanceTwoSourceAgreementCoordinator {
-  const registryContent: MainnetBalanceSourcePairRegistryContentV1 = {
-    schemaVersion: 1,
+  const registryContent: MainnetBalanceSourcePairRegistryContentV2 = {
+    schemaVersion: 2,
     environment: 'MAINNET',
     approvalStatus: 'APPROVED',
     pairs: [
@@ -113,6 +129,7 @@ function agreementCoordinator(now: string): DormantMainnetBalanceTwoSourceAgreem
         networkId: ETHEREUM,
         approvedAt: at(now, -60_000),
         expiresAt: at(now, 600_000),
+        approvedManifestFingerprintSha256: APPROVED_MANIFEST_FINGERPRINT,
         primary: { sourceFamilyId: 'ethereum-family-primary', sourceId: 'ethereum-primary' },
         corroborating: {
           sourceFamilyId: 'ethereum-family-corroborating',
@@ -123,6 +140,7 @@ function agreementCoordinator(now: string): DormantMainnetBalanceTwoSourceAgreem
         networkId: SOLANA,
         approvedAt: at(now, -60_000),
         expiresAt: at(now, 600_000),
+        approvedManifestFingerprintSha256: APPROVED_MANIFEST_FINGERPRINT,
         primary: { sourceFamilyId: 'solana-family-primary', sourceId: 'solana-primary' },
         corroborating: {
           sourceFamilyId: 'solana-family-corroborating',
@@ -154,12 +172,186 @@ function agreementCoordinator(now: string): DormantMainnetBalanceTwoSourceAgreem
   return new DormantMainnetBalanceTwoSourceAgreementCoordinator(
     {
       ...registryContent,
-      fingerprintSha256: fingerprintMainnetBalanceSourcePairRegistryV1(registryContent),
+      fingerprintSha256: fingerprintMainnetBalanceSourcePairRegistryV2(registryContent),
     },
     bindings,
     { now: () => new Date(now) },
   );
 }
+
+function canonicalJson(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  const record = value as Readonly<Record<string, unknown>>;
+  return `{${Object.keys(record)
+    .sort((left, right) => (left < right ? -1 : left > right ? 1 : 0))
+    .map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`)
+    .join(',')}}`;
+}
+
+function fingerprint(value: unknown): string {
+  return createHash('sha256').update(canonicalJson(value), 'utf8').digest('hex');
+}
+
+function legacySource(source: MainnetBalanceIndexerSourceCandidate): BalanceIndexerSourceCandidate {
+  return {
+    position: source.position,
+    hash: source.hash,
+    parentHash: source.parentHash,
+    selector: source.selector,
+    retrievedAt: source.retrievedAt,
+    identityValidated: true,
+  };
+}
+
+function legacyCheckpoint(
+  networkId: MainnetBalanceAgreementNetworkId,
+  source: BalanceIndexerSourceCandidate,
+): Readonly<Record<string, string>> {
+  return networkId === ETHEREUM
+    ? {
+        kind: 'ETHEREUM_BLOCK',
+        blockNumber: source.position,
+        blockHash: source.hash,
+        parentBlockHash: source.parentHash,
+      }
+    : {
+        kind: 'SOLANA_ROOTED_BLOCK',
+        finalizedSlot: source.position,
+        blockIdentity: source.hash,
+        parentBlockIdentity: source.parentHash,
+        rootSlot: source.position,
+        rootDerivation: 'FINALIZED_SLOT_IS_ROOTED',
+      };
+}
+
+function legacySourceIdentity(
+  networkId: MainnetBalanceAgreementNetworkId,
+  role: 'PRIMARY' | 'CORROBORATING',
+): Readonly<{ sourceFamilyId: string; sourceId: string }> {
+  const chain = networkId === ETHEREUM ? 'ethereum' : 'solana';
+  const suffix = role === 'PRIMARY' ? 'primary' : 'corroborating';
+  return { sourceFamilyId: `${chain}-family-${suffix}`, sourceId: `${chain}-${suffix}` };
+}
+
+function legacyRegistryFingerprint(now: string): string {
+  const pairs = [ETHEREUM, SOLANA].map((networkId) => {
+    const primary = legacySourceIdentity(networkId, 'PRIMARY');
+    const corroborating = legacySourceIdentity(networkId, 'CORROBORATING');
+    return [
+      networkId,
+      at(now, -60_000),
+      at(now, 600_000),
+      [primary.sourceFamilyId, primary.sourceId],
+      [corroborating.sourceFamilyId, corroborating.sourceId],
+    ];
+  });
+  return fingerprint([
+    'crypto-lending:mainnet-balance-source-pair-registry:v1',
+    1,
+    'MAINNET',
+    'APPROVED',
+    pairs,
+  ]);
+}
+
+function legacyAgreementEnvelopeV1(
+  request: BalanceIndexerReadRequest & { networkId: MainnetBalanceAgreementNetworkId },
+  now: string,
+) {
+  const primaryCandidate = candidate(request, at(now, -2_000));
+  const corroboratingCandidate = candidate(request, at(now, -1_000));
+  const positions = [...primaryCandidate.positions].sort((left, right) => {
+    return left.assetIdentity < right.assetIdentity
+      ? -1
+      : left.assetIdentity > right.assetIdentity
+        ? 1
+        : 0;
+  });
+  const primarySource = legacySource(primaryCandidate.source);
+  const corroboratingSource = legacySource(corroboratingCandidate.source);
+  const checkpoint = legacyCheckpoint(request.networkId, primarySource);
+  const positionSetFingerprintSha256 = fingerprint([
+    'crypto-lending:mainnet-balance-position-set:v1',
+    request.networkId,
+    positions.map(({ positionId, stablecoin, assetIdentity, amountAtomic }) => [
+      positionId,
+      stablecoin,
+      assetIdentity,
+      amountAtomic,
+    ]),
+  ]);
+  const sourcePairRegistryFingerprintSha256 = legacyRegistryFingerprint(now);
+  const sourceAttestation = (
+    role: 'PRIMARY' | 'CORROBORATING',
+    source: BalanceIndexerSourceCandidate,
+  ) => {
+    const identity = legacySourceIdentity(request.networkId, role);
+    return {
+      role,
+      ...identity,
+      networkId: request.networkId,
+      retrievedAt: source.retrievedAt,
+      chainIdentityValidated: true as const,
+      checkpoint,
+      positionSetFingerprintSha256,
+      candidateFingerprintSha256: fingerprint([
+        'crypto-lending:mainnet-balance-source-attestation:v1',
+        sourcePairRegistryFingerprintSha256,
+        request.accountId,
+        request.walletId,
+        request.networkId,
+        'FINANCIAL',
+        'finalized',
+        role,
+        identity.sourceFamilyId,
+        identity.sourceId,
+        source,
+        checkpoint,
+        positionSetFingerprintSha256,
+      ]),
+    };
+  };
+  const observationCandidate: BalanceIndexerCandidate = {
+    walletId: request.walletId,
+    networkId: request.networkId,
+    tier: 'FINANCIAL',
+    source: { ...primarySource, retrievedAt: corroboratingSource.retrievedAt },
+    positions,
+  };
+  const agreementWithoutFingerprint = {
+    status: 'EXACT_CHECKPOINT_AND_BALANCE_MATCH' as const,
+    checkpoint,
+    sourcePairRegistryFingerprintSha256,
+    sourcePairApprovalExpiresAt: at(now, 600_000),
+    positionSetFingerprintSha256,
+    sourceAttestations: [
+      sourceAttestation('PRIMARY', primarySource),
+      sourceAttestation('CORROBORATING', corroboratingSource),
+    ] as const,
+  };
+  return {
+    agreementVersion: 1 as const,
+    use: 'DORMANT_MAINNET_BALANCE_OBSERVATION_CANDIDATE_ONLY' as const,
+    mayPersist: false as const,
+    mayAuthorizeFinancialAction: false as const,
+    accountId: request.accountId,
+    observationCandidate,
+    agreement: {
+      ...agreementWithoutFingerprint,
+      agreementFingerprintSha256: fingerprint([
+        'crypto-lending:mainnet-balance-two-source-agreement:v1',
+        1,
+        'DORMANT_MAINNET_BALANCE_OBSERVATION_CANDIDATE_ONLY',
+        request.accountId,
+        observationCandidate,
+        agreementWithoutFingerprint,
+      ]),
+    },
+  };
+}
+
+type LegacyMainnetBalanceAgreementEnvelopeV1 = ReturnType<typeof legacyAgreementEnvelopeV1>;
 
 async function queryAsRole<Row extends QueryResultRow>(
   pool: Pool,
@@ -193,7 +385,8 @@ describeWithPostgres('mainnet balance two-source agreement evidence boundary', (
   let accountId: string;
   let ethereumWalletId: string;
   let solanaWalletId: string;
-  let evidence: readonly MainnetBalanceTwoSourceAgreementCandidateV1[];
+  let evidence: readonly LegacyMainnetBalanceAgreementEnvelopeV1[];
+  let deploymentAwareEvidence: readonly MainnetBalanceTwoSourceAgreementCandidateV2[];
 
   async function registerWallet(
     ownerAccountId: string,
@@ -308,27 +501,27 @@ describeWithPostgres('mainnet balance two-source agreement evidence boundary', (
     ethereumWalletId = await registerWallet(accountId, ETHEREUM);
     solanaWalletId = await registerWallet(accountId, SOLANA);
     const coordinator = agreementCoordinator(now);
+    const ethereumRequest = {
+      accountId,
+      walletId: ethereumWalletId,
+      networkId: ETHEREUM,
+      tier: 'FINANCIAL' as const,
+      selector: 'finalized' as const,
+    };
+    const solanaRequest = {
+      accountId,
+      walletId: solanaWalletId,
+      networkId: SOLANA,
+      tier: 'FINANCIAL' as const,
+      selector: 'finalized' as const,
+    };
+    deploymentAwareEvidence = Object.freeze([
+      await coordinator.readCurrentAgreement(ethereumRequest, INERT_BALANCE_SYNC_EXECUTION_CONTEXT),
+      await coordinator.readCurrentAgreement(solanaRequest, INERT_BALANCE_SYNC_EXECUTION_CONTEXT),
+    ]);
     evidence = Object.freeze([
-      await coordinator.readCurrentAgreement(
-        {
-          accountId,
-          walletId: ethereumWalletId,
-          networkId: ETHEREUM,
-          tier: 'FINANCIAL',
-          selector: 'finalized',
-        },
-        INERT_BALANCE_SYNC_EXECUTION_CONTEXT,
-      ),
-      await coordinator.readCurrentAgreement(
-        {
-          accountId,
-          walletId: solanaWalletId,
-          networkId: SOLANA,
-          tier: 'FINANCIAL',
-          selector: 'finalized',
-        },
-        INERT_BALANCE_SYNC_EXECUTION_CONTEXT,
-      ),
+      legacyAgreementEnvelopeV1(ethereumRequest, now),
+      legacyAgreementEnvelopeV1(solanaRequest, now),
     ]);
   });
 
@@ -340,7 +533,7 @@ describeWithPostgres('mainnet balance two-source agreement evidence boundary', (
     }
   });
 
-  it('accepts coordinator-produced Ethereum and Solana envelopes and preserves them intact', async () => {
+  it('accepts genuine V1 Ethereum and Solana migration fixtures and preserves them intact', async () => {
     for (const envelope of evidence) {
       await expect(
         operationPool.query(
@@ -363,7 +556,7 @@ describeWithPostgres('mainnet balance two-source agreement evidence boundary', (
       selector: string;
       may_persist: boolean;
       may_authorize_financial_action: boolean;
-      agreement_envelope: MainnetBalanceTwoSourceAgreementCandidateV1;
+      agreement_envelope: LegacyMainnetBalanceAgreementEnvelopeV1;
     }>(
       `SELECT agreement_fingerprint_sha256, network_id, tier, selector,
               may_persist, may_authorize_financial_action, agreement_envelope
@@ -385,6 +578,26 @@ describeWithPostgres('mainnet balance two-source agreement evidence boundary', (
         may_authorize_financial_action: false,
         agreement_envelope: expected,
       });
+    }
+  });
+
+  it('rejects coordinator-produced deployment-aware V2 envelopes at the untouched V1 boundary', async () => {
+    for (const envelope of deploymentAwareEvidence) {
+      await expect(
+        operationPool.query<{ valid: boolean }>(
+          `SELECT mainnet_balance_financial_agreement_envelope_valid(
+             $1::jsonb,
+             pg_catalog.date_trunc('milliseconds', pg_catalog.clock_timestamp())
+           ) AS valid`,
+          [envelope],
+        ),
+      ).resolves.toMatchObject({ rows: [{ valid: false }] });
+      await expect(
+        operationPool.query(
+          'SELECT * FROM record_balance_sync_financial_agreement_evidence($1::jsonb)',
+          [envelope],
+        ),
+      ).rejects.toMatchObject({ code: '22023' });
     }
   });
 
